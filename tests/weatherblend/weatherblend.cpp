@@ -220,6 +220,51 @@ int main()
 		near1( "force-weather during a change snaps", wwWeatherPickRule( true, false, false, true ), WwPickSnap, 0.0 );
 	}
 
+	// 11. lane WEATHERBLEND3: the Sky flags. Fast travel (0x10) applies a waiting pick at once, snapped; a wait or a
+	// teleport (0x1000000) snaps a pick that would start a change
+	{
+		near1( "fast travel applies the waiting pick", wwWeatherSnapRule( WwPickDefer, WwSnapFastTravel ), WwPickSnap, 0.0 );
+		near1( "a wait snaps a new change", wwWeatherSnapRule( WwPickStart, WwSnapPassTime ), WwPickSnap, 0.0 );
+		near1( "a wait leaves a waiting pick", wwWeatherSnapRule( WwPickDefer, WwSnapPassTime ), WwPickDefer, 0.0 );
+		near1( "fast travel keeps the same weather", wwWeatherSnapRule( WwPickKeep, WwSnapFastTravel ), WwPickKeep, 0.0 );
+		near1( "a wait 22h -> 2h is 4 game hours", wwWeatherWaitHours( 22.0, 2.0 ), 4.0, 1e-9 );
+		near1( "a wait 10h -> 13.5h", wwWeatherWaitHours( 10.0, 13.5 ), 3.5, 1e-9 );
+	}
+
+	// 12. the pct integral (expected.py integrates the pct numerically): delta 255, 1..3 h -> 540 real seconds
+	{
+		WwSkyGmst g;
+		g.transMin = 1.0f;
+		g.transMax = 3.0f;
+		g.transAccel = 16.0f;
+		near1( "pct integral 270 s", wwWeatherTransPctSeconds( 270.0, 0.0, 255, g, -1.0f ), 67.5, 1e-3 );
+		near1( "pct integral past the end", wwWeatherTransPctSeconds( 600.0, 0.0, 255, g, -1.0f ), 330.0, 1e-3 );
+		near1( "pct integral after a 1 h wait", wwWeatherTransPctSeconds( 180.0, 1.0, 255, g, -1.0f ), 90.0, 1e-3 );
+		near1( "pct integral accelerated at 0.5", wwWeatherTransPctSeconds( 280.0, 0.0, 255, g, 0.5f ), 74.074074, 1e-3 );
+	}
+
+	// 13. the layer's one scroll: base + old speed x secs + (new - old) x the pct integral, wrapped
+	{
+		near1( "one scroll mid change", wwCloudScroll( 0.25, 0.5f, 1.5f, 10.0, 4.0 ), 0.15, 1e-5 );
+		near1( "one scroll, no change, base 0 = the closed form", wwCloudScroll( 0.0, 0.7f, 0.7f, 3.0, 0.0 ), 0.21, 1e-5 );
+	}
+
+	// 14. the wind: speed / turbulence unrounded; the range offset seeded, the nearest to 0 of 4 draws in +- range / 2
+	{
+		near1( "wind speed at 30% unrounded", wwWeatherWindBlend( 200, 51, 0.3f ), 95.7, 1e-4 );
+		near1( "no range, no offset", wwWindRangeOffset( 64, 0, 7u ), 0.0, 0.0 );
+		const float o1 = wwWindRangeOffset( 64, 255, 0x1234u ), o2 = wwWindRangeOffset( 64, 255, 0x1234u );
+		near1( "the offset repeats for a weather", double( o1 - o2 ), 0.0, 0.0 );
+		double sum = 0.0, mx = 0.0;
+		for ( quint32 k = 1; k <= 4000; k++ ) {
+			const double x = std::fabs( double( wwWindRangeOffset( 64, 255, k ) ) );
+			sum += x;
+			mx = std::max( mx, x );
+		}
+		near1( "mean |offset| = range / 2 / 5 (nearest of 4)", sum / 4000.0, 18.0, 1.0 );
+		near1( "|offset| within range / 2", mx <= 90.0 ? 1.0 : 0.0, 1.0, 0.0 );
+	}
+
 	std::printf( "WEATHERBLEND %s %d of %d failed\n", fails ? "FAIL" : "PASS", fails, checks );
 	return fails ? 1 : 0;
 }

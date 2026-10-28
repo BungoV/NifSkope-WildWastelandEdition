@@ -689,18 +689,18 @@ void wwCellGrassRemap( const void * nif, const WwBlockMap & m )
 
 bool wwCellGrassWind( float wind[4], float wind2[4] )
 {
-	quint8 w[4] = { 0, 0, 0, 0 };
+	float w[5] = { 0, 0, 0, 0, 0 };
 	if ( !wwLookdevWind( w ) )
 		return false;
-	// the engine's wind update, float32 in its order (one weather: no transition blend)
+	// the engine's wind update, float32 in its order (speed and turbulence unrounded during a change, WEATHERBLEND3)
 	const float k255 = 1.0f / 255.0f;	// 0x3b808081
-	const float M = float( w[0] ) * k255;
-	const float T = float( w[3] ) * k255;
+	const float M = w[0] * k255;
+	const float T = w[3] * k255;
 	const float freq = ( 1.0f - T ) * 0.5f + T * 4.0f;	// fWindLowestFrequency, fWindHighestFrequency
 	const float minSpeed = ( ( 1.0f - T ) + T * 0.0f ) * M;	// fWindSpeedLowestLowMultiplier
 	const float maxSpeed = ( ( 1.0f - T ) + T * 1.5f ) * M;	// fWindSpeedHighestHighMultiplier
-	// the game adds the nearest of 4 BSRandom draws within +- range / 2 (not reproducible): offset 0 here
-	wind[0] = wwGameWindAngle( w[1] );
+	// the game adds the nearest of 4 BSRandom draws within +- range / 2: seeded per weather here (WEATHERBLEND3)
+	wind[0] = wwGameWindAngle( quint8( w[1] ), w[4] );
 	wind[1] = 0.0f;
 	wind[2] = 0.0f;	// the phases are per shape (wwCellGrassUniforms)
 	wind[3] = 0.0f;

@@ -275,7 +275,7 @@ void vaNoiseBuild( VaDrift & d )
  * FOGWIND1: the game's wind, a steady bearing (the grass's angle, 0 = +X counter-clockwise) at speed x magnitude; the
  * game's turbulence only sways plants. Red wobble: the old law (range/turbulence wobble and gust, 0 = +Y clockwise).
  * The velocity eases toward its target (2 s), so a weather change never jumps. The detail octave moves 1.35x faster. */
-void vaDriftAdvance( VaDrift & d, double t, const quint8 w[4] )
+void vaDriftAdvance( VaDrift & d, double t, const float w[5] )
 {
 	if ( t < d.tDone ) {
 		d.tDone = 0.0;
@@ -286,7 +286,7 @@ void vaDriftAdvance( VaDrift & d, double t, const quint8 w[4] )
 		d.tDone = t - 1.0;	// an idle window: carry on from a second ago, no catch-up loop
 	const double twoPi = 6.283185307179586;
 	const double M = w[0] / 255.0, dir = w[1] / 255.0 * twoPi, range = w[2] / 255.0 * 0.5 * twoPi, T = w[3] / 255.0;
-	const float gameA = wwGameWindAngle( w[1] );
+	const float gameA = wwGameWindAngle( quint8( w[1] ), w[4] );	// WEATHERBLEND3: + the range offset
 	const int steps = int( std::ceil( ( t - d.tDone ) * 30.0 ) );
 	const double dt = steps > 0 ? ( t - d.tDone ) / steps : 0.0;
 	for ( int s = 0; s < steps; s++ ) {
@@ -1469,7 +1469,7 @@ static void vaPassInner( Scene * scene, bool run )
 	 * bit 7), a sealed one stays smooth (amplitude 0: the same froxels as the row off). No wind: lumps, standing still. */
 	VaDrift & dr = vd();
 	float driftAmp = 0.0f;
-	quint8 wind[4] = { 0, 0, 0, 0 };
+	float wind[5] = { 0, 0, 0, 0, 0 };
 	const bool hasWind = wwLookdevWind( wind );
 	{
 		static GLint combined = -1;
@@ -1513,12 +1513,13 @@ static void vaPassInner( Scene * scene, bool run )
 			}
 			dr.moving = blows;
 			driftAmp = kDriftAmp / std::max( dr.span, 1e-3f );
-			dr.note = QStringLiteral( "on(law=%8 wind=%1 dir=%2 range=%3 turb=%4 speed=%5 t=%6%7)" )
+			dr.note = QStringLiteral( "on(law=%8 wind=%1 dir=%2 range=%3%9 turb=%4 speed=%5 t=%6%7)" )
 				.arg( hasWind ? wind[0] / 255.0 : 0.0, 0, 'f', 3 ).arg( wind[1] / 255.0 * 360.0, 0, 'f', 1 )
 				.arg( wind[2] / 255.0 * 180.0, 0, 'f', 1 ).arg( wind[3] / 255.0, 0, 'f', 3 )
 				.arg( double( std::hypot( dr.vel[0], dr.vel[1] ) ), 0, 'f', 1 ).arg( dr.tDone, 0, 'f', 3 )
 				.arg( !blows ? ( dr.red == 1 ? QStringLiteral( " still(red)" ) : QStringLiteral( " still(no wind)" ) ) : QString() )
-				.arg( dr.red == 3 ? QStringLiteral( "wobble(red)" ) : QStringLiteral( "game" ) );
+				.arg( dr.red == 3 ? QStringLiteral( "wobble(red)" ) : QStringLiteral( "game" ) )
+				.arg( QStringLiteral( " offset=%1" ).arg( double( wind[4] ), 0, 'f', 2 ) );
 		}
 	}
 	fn->glActiveTexture( GLenum( GL_TEXTURE0 + kNoiseUnit ) );

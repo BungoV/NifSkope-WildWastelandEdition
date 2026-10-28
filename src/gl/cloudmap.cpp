@@ -184,6 +184,37 @@ Draw drawOf( const WwCloudLayerIn & L )
 	return d;
 }
 
+/* lane WEATHERBLEND3: a layer's draws. During a change ONE (tex cross-faded to tex2 by texBlend, the cover blended),
+ * the game's one layer; two at their shares when the two textures' census bands differ */
+void addDraws( QVector<Draw> & ds, const WwCloudLayerIn & L )
+{
+	if ( !( L.texBlend > 0.0f ) || L.tex2.isEmpty() ) {
+		ds << drawOf( L );
+		return;
+	}
+	WwCloudLayerIn a = L, b = L;
+	a.tex2.clear();
+	a.texBlend = 0.0f;
+	b.tex = L.tex2;
+	b.tex2.clear();
+	b.texBlend = 0.0f;
+	const Draw da = drawOf( a ), db = drawOf( b );
+	const RoleInfo & ra = roleInfo( da.role );
+	const RoleInfo & rb = roleInfo( db.role );
+	if ( ra.band != rb.band || ra.sheet != rb.sheet ) {
+		a.alpha *= 1.0f - L.texBlend;
+		b.alpha *= L.texBlend;
+		ds << drawOf( a ) << drawOf( b );
+		return;
+	}
+	Draw d = db;
+	d.in = L;
+	d.meanA = da.meanA + ( db.meanA - da.meanA ) * L.texBlend;
+	d.censused = da.censused && db.censused;
+	d.cover = da.cover + ( db.cover - da.cover ) * L.texBlend;
+	ds << d;
+}
+
 void paramsOf( const QVector<Draw> & ds, BandParams out[3], bool redMax,
 	const std::vector<std::array<float, 2>> * heights = nullptr, const WwWeatherRecx * wx = nullptr, float eyeZ = 0.0f )
 {
@@ -367,10 +398,22 @@ bool buildMap( Scene * scene, CmState & s, const QVector<Draw> & ds, const QVect
 			continue;
 		fn->glTexParameteri( GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_REPEAT );
 		fn->glTexParameteri( GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_REPEAT );
+		float tb = 0.0f;	// lane WEATHERBLEND3: the change's new texture on unit 1 (one draw per layer)
+		if ( d.in.texBlend > 0.0f && !d.in.tex2.isEmpty() ) {
+			fn->glActiveTexture( GL_TEXTURE1 );
+			if ( scene->bindTexture( QStringView( d.in.tex2 ), true ) > 0 ) {
+				fn->glTexParameteri( GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_REPEAT );
+				fn->glTexParameteri( GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_REPEAT );
+				tb = d.in.texBlend;
+			}
+			fn->glActiveTexture( GL_TEXTURE0 );
+		}
 		const int b = ri.band;
 		// R = Low, G = Mid, A = High; a sheet layer also writes B (the Low band's sheet coverage)
 		fn->glColorMask( b == 0, b == 1, b == 0 && ri.sheet, b == 2 );
 		prog->uni1i( "Tex", 0 );
+		prog->uni1i( "Tex2", 1 );
+		prog->uni1f( "texBlend", tb );
 		prog->uni1b( "cmShow", false );
 		prog->uni1f( "cmHeight", std::max( 1.0f, bp[b].baseM ) * kUnitsPerM );
 		prog->uni1f( "cmHalfExtent", kHalfExtentM * kUnitsPerM );
@@ -428,6 +471,7 @@ void show( Scene * scene, CmState & s )
 		fn->glBindTexture( GL_TEXTURE_2D, s.map.tex );
 		prog->uni1i( "Tex", 0 );
 		prog->uni1b( "cmShow", true );
+		prog->uni1f( "texBlend", 0.0f );	// lane WEATHERBLEND3: the map alone
 		prog->uni1f( "alpha", 1.0f );
 		static const float q[12] = { -1, -1, 0, 1, -1, 0, -1, 1, 0, 1, 1, 0 };
 		static const std::uint16_t idx[6] = { 0, 1, 2, 2, 1, 3 };
@@ -500,7 +544,7 @@ const WwCloudMap & wwCloudMapUpdate( Scene * scene )
 	const bool redMax = red( "max" ), redColor = red( "colorblend" );
 	QVector<Draw> cur;
 	for ( const WwCloudLayerIn & L : layers )
-		cur << drawOf( L );
+		addDraws( cur, L );
 	BandParams now[3];
 	const WwWeatherRecx & wx = wwWeatherRecx();	// lane WX1: the weather .recx clouds block (Weather .recx row)
 	/* lane CLOUD4: with Fly-through Clouds on, the bands sit at metres above sea level (the layer types' heights, the
@@ -558,8 +602,9 @@ const WwCloudMap & wwCloudMapUpdate( Scene * scene )
 			WwCloudLayerIn L = P;
 			if ( !wwLookdevCloudMesh( scene, L ) )
 				continue;
-			ds << drawOf( L );
-			w << 1.0f - t;
+			addDraws( ds, L );
+			while ( w.size() < ds.size() )
+				w << 1.0f - t;
 		}
 	if ( !s.havePrev || t >= 1.0f )
 		w.fill( 1.0f );
@@ -572,7 +617,8 @@ const WwCloudMap & wwCloudMapUpdate( Scene * scene )
 		key += QStringLiteral( "|wx:" ) + wx.key;	// lane WX1: a file's value moves the map
 	for ( const Draw & d : ds )
 		key += QStringLiteral( "|%1:%2,%3,%4" ).arg( d.in.layer ).arg( double( d.in.alpha ), 0, 'f', 5 )
-			.arg( double( d.in.uvOffset[0] ), 0, 'f', 5 ).arg( double( d.in.uvOffset[1] ), 0, 'f', 5 );
+			.arg( double( d.in.uvOffset[0] ), 0, 'f', 5 ).arg( double( d.in.uvOffset[1] ), 0, 'f', 5 )
+			+ ( d.in.texBlend > 0.0f ? QStringLiteral( "~%1" ).arg( double( d.in.texBlend ), 0, 'f', 4 ) : QString() );
 
 	if ( world )	// lane CLOUD4: the projection follows the heights
 		for ( int b = 0; b < 3; b++ )

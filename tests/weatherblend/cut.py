@@ -16,7 +16,19 @@ LAWS = [('void wwImageSpaceSlots(',
         ('float wwWeatherTransAccelPct(',
          'float wwWeatherTransAccelPct(float raw,float,const WwSkyGmst&)\n{\n\treturn raw;\n}\n'),
         ('int wwWeatherPickRule(',
-         'int wwWeatherPickRule(bool,bool same,bool,bool)\n{\n\treturn same?WwPickKeep:WwPickStart;\n}\n')]
+         'int wwWeatherPickRule(bool,bool same,bool,bool)\n{\n\treturn same?WwPickKeep:WwPickStart;\n}\n'),
+        # lane WEATHERBLEND3: the base's behaviour: no snap events, no wait, a scroll per weather, rounded wind, no offset
+        ('int wwWeatherSnapRule(', 'int wwWeatherSnapRule(int rule,unsigned)\n{\n\treturn rule;\n}\n'),
+        ('double wwWeatherWaitHours(', 'double wwWeatherWaitHours(double,double)\n{\n\treturn 0.0;\n}\n'),
+        ('double wwWeatherTransPctSeconds(',
+         'double wwWeatherTransPctSeconds(double,double,quint8,const WwSkyGmst&,float)\n{\n\treturn 0.0;\n}\n'),
+        ('float wwCloudScroll(',
+         'float wwCloudScroll(double,float,float v,double s,double)\n{\n'
+         '\tconst double o=double(v)*0.1*s;\n\treturn float(o-std::floor(o));\n}\n'),
+        ('float wwWeatherWindBlend(',
+         'float wwWeatherWindBlend(quint8 c,quint8 l,float p)\n{\n'
+         '\treturn float(std::lround(float(c)*p+float(l)*(1.0f-p)));\n}\n'),
+        ('float wwWindRangeOffset(', 'float wwWindRangeOffset(quint8,quint8,quint32)\n{\n\treturn 0.0f;\n}\n')]
 
 
 def cut(path, sig):

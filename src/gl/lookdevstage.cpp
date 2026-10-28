@@ -134,6 +134,13 @@ struct LdState
 	std::shared_ptr<WwWeatherData> pending;	// lane WEATHERBLEND2: a pick made during a change waits for its end
 	float accelFrom = -1.0f;	// the pct the change was accelerated at (fWeatherTransAccel), -1 = not
 	bool interior = false;	// the open cell is an interior: a pick snaps
+	// lane WEATHERBLEND3: the Sky flags the next pick meets (fast travel, wait, teleport), the waited hours inside the
+	// change, its seconds at the last step, the last cell document, and each layer's scroll base (u, v)
+	unsigned snapFlags = 0;
+	QString snapLast;
+	double waitHours = 0.0, changeSecs = 0.0;
+	const void * lastDoc = nullptr;
+	double cloudBase[32][2] = {};
 	QString skyLast = QStringLiteral( "pending" );	// what the last sky pass drew, for the echo
 
 	// the weather fog (lane FOG1)
@@ -353,6 +360,52 @@ bool weatherPickAccel()
 	return accel;
 }
 
+//! lane WEATHERBLEND3: WW_WEATHER_PICK=fasttravel = every pick carries the fast-travel flag (applied at once, snapped)
+bool weatherPickFastTravel()
+{
+	WW_SWITCH_STATIC( bool, ft, wwEnvStr( "WW_WEATHER_PICK" ).split( ',' ).contains( QStringLiteral( "fasttravel" ) ) );
+	return ft;
+}
+
+//! lane WEATHERBLEND3: WW_WEATHER_BLEND_RED=<v>, the old paths: nosnapevents, cloudtwo, windbytes, nowindoffset
+bool weatherBlendRed( const char * v )
+{
+	WW_SWITCH_STATIC( QStringList, red, wwEnvStr( "WW_WEATHER_BLEND_RED" ).split( ',' ) );
+	return red.contains( QLatin1String( v ) );
+}
+
+//! lane WEATHERBLEND3: layer i's speed on axis 0 (u) / 1 (v) in weather W (a layer past its count reads layer 0's)
+float layerSpeed( const LdState & s, const WwWeatherData & W, int i, int axis )
+{
+	const int li = ( quint32( i ) >= W.cloudLayers ) ? 0 : i;
+	return EsmWeather::cloudSpeed( axis ? W.cloudSpeedY[li] : W.cloudSpeedX[li], s.gmst );
+}
+
+//! layer i's ONE scroll (the game's): base + old speed + (new - old) x the pct integral; red cloudtwo = W's own
+float cloudScroll( const LdState & s, const WwWeatherData & W, int i, int axis, double secs )
+{
+	if ( weatherBlendRed( "cloudtwo" ) )
+		return wwCloudOffset( layerSpeed( s, W, i, axis ), secs );
+	const float vNew = layerSpeed( s, s.w, i, axis );
+	const float vOld = s.w.blending() ? layerSpeed( s, *s.w.last, i, axis ) : vNew;
+	const double ps = s.w.blending()
+		? wwWeatherTransPctSeconds( s.changeSecs, s.waitHours, s.w.transDelta, s.gmst, s.accelFrom ) : 0.0;
+	return wwCloudScroll( ( i >= 0 && i < 32 ) ? s.cloudBase[i][axis] : 0.0, vOld, vNew, secs, ps );
+}
+
+//! the change ends: each base takes the scroll shown, so the new speed carries on from it (no clock: base 0)
+void cloudBaseEnd( LdState & s, bool clock )
+{
+	const double secs = wwLookdevCloudSeconds();
+	for ( int i = 0; i < 32; i++ )
+		for ( int a = 0; a < 2; a++ ) {
+			const float vNew = layerSpeed( s, s.w, i, a );
+			const double b = ( clock && s.w.blending() )
+				? double( cloudScroll( s, s.w, i, a, secs ) ) - double( wwCloudScroll( 0.0, vNew, vNew, secs, 0.0 ) ) : 0.0;
+			s.cloudBase[i][a] = b - std::floor( b );
+		}
+}
+
 //! seconds into the change; -1 = no clock (snap), -2 = still inside the last 15 ms step (no new pct)
 double transSeconds( LdState & s )
 {
@@ -377,9 +430,15 @@ void transTick( LdState & s )
 	const double secs = weatherBlendSnap() ? -1.0 : transSeconds( s );
 	if ( secs == -2.0 )
 		return;
-	const float raw = secs < 0.0 ? 1.0f : wwWeatherTransPct( wwWeatherTransGameHours( secs ), s.w.transDelta, s.gmst );
+	// lane WEATHERBLEND3: a wait inside the change (PassTime) adds its game hours
+	const float raw = secs < 0.0 ? 1.0f
+		: wwWeatherTransPct( wwWeatherTransGameHours( secs ) + s.waitHours, s.w.transDelta, s.gmst );
+	if ( secs >= 0.0 )
+		s.changeSecs = secs;
 	const float p = wwWeatherTransAccelPct( raw, s.accelFrom, s.gmst );
 	if ( p >= 1.0f ) {
+		if ( !weatherBlendRed( "cloudtwo" ) )
+			cloudBaseEnd( s, secs >= 0.0 );
 		s.w.last.reset();
 		s.w.transPct = 1.0f;
 		s.accelFrom = -1.0f;
@@ -392,6 +451,7 @@ void transTick( LdState & s )
 			s.w.transPct = 0.0f;
 			s.transClock.start();
 			s.transMs = -1;
+			s.waitHours = s.changeSecs = 0.0;
 		}
 	} else if ( p != s.w.transPct ) {
 		s.w.transPct = p;
@@ -466,8 +526,18 @@ void resolve()
 				s.haveWeather = true;
 		}
 		// lane WEATHERBLEND2: the game's pick rule: force-weather and interiors snap, a change keeps a new pick waiting
-		const int rule = ( prev && s.haveWeather )
+		int rule = ( prev && s.haveWeather )
 			? wwWeatherPickRule( prev->blending(), prev->formID == s.w.formID, s.interior, weatherPickForce() ) : WwPickSnap;
+		// lane WEATHERBLEND3: fast travel applies a waiting pick at once; it, a wait or a teleport snap a new change
+		const unsigned flags = s.snapFlags | ( weatherPickFastTravel() ? unsigned( WwSnapFastTravel ) : 0u );
+		if ( prev && s.haveWeather && flags && !weatherBlendRed( "nosnapevents" ) ) {
+			const int was = rule;
+			rule = wwWeatherSnapRule( rule, flags );
+			if ( rule != was )
+				s.snapLast = QStringLiteral( "%1:%2" )
+					.arg( ( flags & WwSnapFastTravel ) ? QStringLiteral( "fasttravel" ) : QStringLiteral( "passtime" ),
+						was == WwPickDefer ? QStringLiteral( "defer" ) : QStringLiteral( "start" ) );
+		}
 		if ( rule == WwPickKeep ) {	// the same weather read again: a running change goes on
 			s.w.last = prev->last;
 			s.w.transPct = prev->transPct;
@@ -482,6 +552,10 @@ void resolve()
 			s.w.transPct = 0.0f;
 			s.transClock.start();
 			s.transMs = -1;
+			s.waitHours = s.changeSecs = 0.0;
+		} else if ( rule == WwPickSnap ) {	// lane WEATHERBLEND3: a snap drops the change's clock and the scroll bases
+			s.waitHours = s.changeSecs = 0.0;
+			std::fill( &s.cloudBase[0][0], &s.cloudBase[0][0] + 64, 0.0 );
 		}
 		if ( ( rule == WwPickKeep || rule == WwPickDefer ) && s.w.blending() ) {
 			if ( s.accelFrom < 0.0f && weatherPickAccel() )	// the pick hurries the running change (SetWeatherExternal)
@@ -491,6 +565,7 @@ void resolve()
 			s.accelFrom = -1.0f;
 		}
 	}
+	s.snapFlags = 0;	// lane WEATHERBLEND3: the game clears the flags at the end of each weather update
 	transTick( s );
 }
 
@@ -975,7 +1050,14 @@ void wwLookdevClimateTnam( unsigned char out[4] )
 void wwLookdevSetHour( double h )
 {
 	LdState & s = st();
+	const double was = s.hour;
 	s.hour = std::clamp( h, 0.0, 23.99 );
+	// lane WEATHERBLEND3: a new hour inside a change is a wait (PassTime): its hours move the change on, a pick snaps
+	if ( s.w.blending() && s.hour != was && !s.pinHour && !weatherBlendRed( "nosnapevents" ) ) {
+		s.waitHours += wwWeatherWaitHours( was, s.hour );
+		s.snapFlags |= WwSnapPassTime;
+		s.transMs = -1;
+	}
 	if ( !s.pinHour && !wwR2aRed( "nosave" ) )
 		QSettings().setValue( QLatin1StringView( kHourKey ), s.hour );
 }
@@ -1224,6 +1306,10 @@ QString wwLookdevSummary()
 			head += QString( " pending=%1" ).arg( s.pending->edid );
 		if ( s.accelFrom >= 0.0f )
 			head += QString( " accel=%1" ).arg( double( s.accelFrom ), 0, 'f', 4 );
+		if ( s.waitHours > 0.0 )	// lane WEATHERBLEND3
+			head += QString( " wait=%1h" ).arg( s.waitHours, 0, 'f', 3 );
+		if ( !s.snapLast.isEmpty() )
+			head += QString( " event=%1" ).arg( s.snapLast );
 	} else {
 		head = QString( "refused=\"%1\" neutral-sun" ).arg( s.weatherRefusal );
 	}
@@ -2067,9 +2153,6 @@ void drawClouds( Scene * scene, const SkyFrame & f, float mul, QStringList & dre
 	auto layerUniforms = [&]( NifSkopeOpenGLContext::Program * prog, const WwWeatherData & W, int i, float alpha ) {
 		float rgb[3], a = 0.0f;
 		EsmWeather::blendCloud( s.w, i, f.c.keys, rgb, &a );
-		const int li = ( quint32( i ) >= W.cloudLayers ) ? 0 : i;
-		const float sx = EsmWeather::cloudSpeed( W.cloudSpeedX[li], s.gmst );
-		const float sy = EsmWeather::cloudSpeed( W.cloudSpeedY[li], s.gmst );
 		float lc[3];	// lane CLOUD2: Volume Clouds Low lights the layers by the model (sky units / skyScale)
 		if ( wwCloudVolLowColour( lc ) )
 			prog->uni3f( "colLin", lc[0] / std::max( f.skyScale, 1e-6f ), lc[1] / std::max( f.skyScale, 1e-6f ),
@@ -2077,7 +2160,7 @@ void drawClouds( Scene * scene, const SkyFrame & f, float mul, QStringList & dre
 		else
 			prog->uni3f( "colLin", lin( rgb[0] ), lin( rgb[1] ), lin( rgb[2] ) );
 		prog->uni1f( "alpha", alpha < 0.0f ? a : alpha );
-		prog->uni2f( "uvOffset", wwCloudOffset( sx, secs ), wwCloudOffset( sy, secs ) );
+		prog->uni2f( "uvOffset", cloudScroll( s, W, i, 0, secs ), cloudScroll( s, W, i, 1, secs ) );	// WEATHERBLEND3: one scroll
 		prog->uni1f( "skyScale", f.skyScale );
 		prog->uni1f( "sceneExposure", skyExposure() );
 		prog->uni1i( "viewTransform", skyViewTransform() );
@@ -2175,11 +2258,8 @@ void drawClouds( Scene * scene, const SkyFrame & f, float mul, QStringList & dre
 		prog->uni1b( "probe", false );
 		layerUniforms( prog, *W, i, full ? a : mul * share );
 		prog->uni1f( "texBlend", fade ? pct : 0.0f );
-		if ( fade ) {
-			const int li = ( quint32( i ) >= s.w.cloudLayers ) ? 0 : i;
-			prog->uni2f( "uvOffset2", wwCloudOffset( EsmWeather::cloudSpeed( s.w.cloudSpeedX[li], s.gmst ), secs ),
-				wwCloudOffset( EsmWeather::cloudSpeed( s.w.cloudSpeedY[li], s.gmst ), secs ) );
-		}
+		if ( fade )	// lane WEATHERBLEND3: the same one scroll (red cloudtwo: the new weather's own)
+			prog->uni2f( "uvOffset2", cloudScroll( s, s.w, i, 0, secs ), cloudScroll( s, s.w, i, 1, secs ) );
 		const float * attrs[8] = { m.pos.constData(), m.col.constData(), nullptr, nullptr, nullptr, nullptr, nullptr,
 			m.uv.constData() };
 		r->drawShape( m.nv, 0x20000043ULL, unsigned( m.idx.size() ), GL_TRIANGLES, GL_UNSIGNED_SHORT, attrs,
@@ -2218,22 +2298,35 @@ bool wwLookdevCloudLayers( Scene * scene, QVector<WwCloudLayerIn> & out, QString
 				eye[i] -= vt.rotation( j, i ) * vt.translation[j] / sc;
 	}
 	const int n = ms ? std::min( int( ms->size() ), 32 ) : 32;
-	const int nSrc = s.w.blending() ? 2 : 1;	// lane WEATHERBLEND1: the left weather's layer x (1 - pct) first
+	/* lane WEATHERBLEND3: during a change ONE entry per layer, the left weather's texture cross-faded to the new one's by
+	 * pct at the layer's one scroll (the game's layer); red cloudtwo: one entry per weather at its share (WEATHERBLEND1) */
+	const bool two = s.w.blending() && weatherBlendRed( "cloudtwo" );
+	const int nSrc = two ? 2 : 1;
+	const float pct = s.w.transPct;
+	const WwWeatherData * O = ( s.w.blending() && !two ) ? s.w.last.get() : nullptr;
 	for ( int i = 0; i < n; i++ ) {
 		for ( int src = nSrc - 1; src >= 0; src-- ) {
 			const WwWeatherData & W = src ? *s.w.last : s.w;
-			if ( W.cloudDisabled & ( 1u << i ) )
+			const bool hasW = !( W.cloudDisabled & ( 1u << i ) ) && !W.cloudTex[i].isEmpty();
+			const bool hasO = O && !( O->cloudDisabled & ( 1u << i ) ) && !O->cloudTex[i].isEmpty();
+			if ( !hasW && !hasO )
 				continue;
 			WwCloudLayerIn L;
 			L.layer = i;
 			EsmWeather::blendCloud( s.w, i, f.c.keys, L.rgb, &L.alpha );
-			L.alpha *= nSrc == 1 ? 1.0f : ( src ? 1.0f - s.w.transPct : s.w.transPct );
-			if ( L.alpha <= 0.0f || W.cloudTex[i].isEmpty() )
+			if ( two )
+				L.alpha *= src ? 1.0f - pct : pct;
+			else if ( O && !( hasW && hasO ) )
+				L.alpha *= hasW ? pct : 1.0f - pct;
+			if ( L.alpha <= 0.0f )
 				continue;
-			L.tex = skyTexPath( W.cloudTex[i] );
-			const int li = ( quint32( i ) >= W.cloudLayers ) ? 0 : i;
-			L.uvOffset[0] = wwCloudOffset( EsmWeather::cloudSpeed( W.cloudSpeedX[li], s.gmst ), secs );
-			L.uvOffset[1] = wwCloudOffset( EsmWeather::cloudSpeed( W.cloudSpeedY[li], s.gmst ), secs );
+			L.tex = skyTexPath( hasO ? O->cloudTex[i] : W.cloudTex[i] );
+			if ( hasW && hasO ) {
+				L.tex2 = skyTexPath( W.cloudTex[i] );
+				L.texBlend = pct;
+			}
+			L.uvOffset[0] = cloudScroll( s, W, i, 0, secs );
+			L.uvOffset[1] = cloudScroll( s, W, i, 1, secs );
 			if ( ms && !ms->at( i ).idx.isEmpty() ) {
 				const SkyMesh & m = ms->at( i );
 				L.pos = m.pos.constData();
@@ -2476,6 +2569,11 @@ bool wwLookdevDrawBackground( Scene * scene )
 	LdState & sx = st();
 	const WwCellLighting * icl = scene->nifModel ? wwCellLightsFor( scene->nifModel ) : nullptr;
 	sx.interior = icl && icl->interior;	// lane WEATHERBLEND2: the next pick snaps in an interior (the game's sky mode)
+	if ( scene->nifModel != sx.lastDoc ) {	// lane WEATHERBLEND3: another cell is a teleport (PositionPlayer: PassTime)
+		if ( sx.lastDoc )
+			sx.snapFlags |= WwSnapPassTime;
+		sx.lastDoc = scene->nifModel;
+	}
 	const bool anyPart = sx.sky || sx.sun || sx.clouds || sx.moon
 		|| wwLookdevRed( "skyleak" ) || wwLookdevRed( "sunleak" ) || wwLookdevRed( "cloudleak" ) || wwLookdevRed( "moonleak" );
 	const bool perspective = r->globalUniforms->projectionMatrix[3][3] != 1.0f;
@@ -2792,19 +2890,25 @@ bool wwLookdevImageSpaceDof( float a[4], float b[4], float & t, bool & haveA, bo
 	return true;
 }
 
-bool wwLookdevWind( quint8 out[4] )
+bool wwLookdevWind( float out[5] )
 {
 	const LdState & s = st();
 	if ( !s.haveWeather || !s.w.hasWind )
 		return false;
-	out[0] = s.w.windSpeed;
-	out[1] = s.w.windDir;
-	out[2] = s.w.windDirRange;
-	out[3] = s.w.windTurb;
+	out[0] = float( s.w.windSpeed );
+	out[1] = float( s.w.windDir );
+	out[2] = float( s.w.windDirRange );
+	out[3] = float( s.w.windTurb );
+	// lane WEATHERBLEND3: the game's random range offset, seeded per weather (red nowindoffset: 0)
+	out[4] = weatherBlendRed( "nowindoffset" ) ? 0.0f : wwWindRangeOffset( s.w.windDir, s.w.windDirRange, s.w.formID );
 	if ( s.w.blending() && s.w.last->hasWind ) {	// lane WEATHERBLEND1: speed and turbulence blend on pct (the game's)
 		const float p = s.w.transPct;
-		out[0] = quint8( std::lround( float( s.w.windSpeed ) * p + float( s.w.last->windSpeed ) * ( 1.0f - p ) ) );
-		out[3] = quint8( std::lround( float( s.w.windTurb ) * p + float( s.w.last->windTurb ) * ( 1.0f - p ) ) );
+		out[0] = wwWeatherWindBlend( s.w.windSpeed, s.w.last->windSpeed, p );	// WEATHERBLEND3: unrounded
+		out[3] = wwWeatherWindBlend( s.w.windTurb, s.w.last->windTurb, p );
+		if ( weatherBlendRed( "windbytes" ) ) {	// red: rounded to bytes (the old path)
+			out[0] = float( std::lround( out[0] ) );
+			out[3] = float( std::lround( out[3] ) );
+		}
 	}
 	return true;
 }

@@ -108,13 +108,13 @@ bool wwCellGrassIsShape( const void * nif, int block );
 //! max * 300, frequency, 1); false without a weather.
 bool wwCellGrassWind( float wind[4], float wind2[4] );
 //! lane FOGWIND1: the game's wind bearing from the weather's DATA direction byte, float32 in the engine's order (radians,
-//! 0 = +X, counter-clockwise; the random range offset is 0). Shared by the grass and the fog drift.
-inline float wwGameWindAngle( quint8 dirByte )
+//! 0 = +X, counter-clockwise; offsetDeg = the random range offset, WEATHERBLEND3). Shared by the grass and the fog drift.
+inline float wwGameWindAngle( quint8 dirByte, float offsetDeg = 0.0f )
 {
 	const float k255 = 1.0f / 255.0f;	// 0x3b808081
 	const float dir = float( dirByte ) * k255 * 360.0f;
 	const float twoPi = 6.28318548f;
-	float angle = ( 0.0f + dir ) * 0.0174532924f;
+	float angle = ( offsetDeg + dir ) * 0.0174532924f;
 	if ( !( angle < twoPi ) )
 		angle -= twoPi;
 	else if ( angle < 0.0f )

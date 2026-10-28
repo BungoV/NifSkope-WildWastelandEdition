@@ -290,6 +290,7 @@ struct WwWeatherData
 	/* lane SUNCELL1: the whole IMGS per ToD, for the cell view's exterior imagespace (celllights.h's isHdr
 	 * layout: HNAM 9 floats, CNAM saturation/brightness/contrast, TNAM amount/r/g/b, TX00 the LUT strip) */
 	bool isFound[8] = {};
+	bool isDefault[8] = {};	// lane WEATHERBLEND3: no IMGS in this slot, the game's default (form 0x167) read instead
 	float isHdr[8][9] = {};
 	float isCine[8][3] = {};
 	float isTint[8][4] = {};
@@ -346,6 +347,20 @@ float wwWeatherTransAccelPct( float raw, float from, const WwSkyGmst & g );
 //! what a weather pick does: the game's Sky::UpdateWeather / ForceWeather order
 enum WwWeatherPick { WwPickSnap, WwPickStart, WwPickDefer, WwPickKeep };
 int wwWeatherPickRule( bool changing, bool sameAsCurrent, bool interior, bool force );
+/*! lane WEATHERBLEND3: the Sky flags a pick meets (UpdateWeather): fast travel applies a waiting pick at once and snaps;
+ *  wait / teleport (PassTime, PositionPlayer) snap a pick that would start a change */
+enum WwWeatherSnapFlag : unsigned { WwSnapFastTravel = 0x10u, WwSnapPassTime = 0x1000000u };
+int wwWeatherSnapRule( int rule, unsigned flags );
+//! the game hours a wait from hour `from` to hour `to` passes (time only runs forward)
+double wwWeatherWaitHours( double from, double to );
+//! the integral of the change's pct over its first `secs` real seconds (a wait's hours ahead), with the accel
+double wwWeatherTransPctSeconds( double secs, double waitHours, quint8 transDelta, const WwSkyGmst & g, float accelFrom );
+//! a layer's ONE scroll offset (the game's): base + old speed x secs + (new - old) x the pct integral, wrapped
+float wwCloudScroll( double base, float vOld, float vNew, double seconds, double pctSeconds );
+//! the wind speed / turbulence during a change: floats on pct, unrounded (the game's)
+float wwWeatherWindBlend( quint8 cur, quint8 last, float pct );
+//! the game's random range offset (degrees): the nearest to 0 of 4 draws in +- range / 2; seeded, so a view repeats
+float wwWindRangeOffset( quint8 dirByte, quint8 rangeByte, quint32 seed );
 
 /*! The engine fog at one hour (lane FOG1, spec_fog.md 2.1-2.3): the FNAM floats
  *  blended day <-> night on the engine's fog day weight, the four NAM0 fog colours

@@ -138,6 +138,8 @@ struct WwCloudLayerIn
 	float alpha = 0.0f;	//!< JNAM at the colour keys (blendCloud)
 	float rgb[3] = {};	//!< PNAM at the keys, 0..255 (CIELab blend)
 	float uvOffset[2] = {};	//!< the scroll at the cloud clock
+	QString tex2;	//!< lane WEATHERBLEND3: during a change the new weather's texture (tex = the left one's), else empty
+	float texBlend = 0.0f;	//!< pct: tex2's share of the layer (0 = tex alone)
 	const float * pos = nullptr;	//!< the Clouds.nif shape, world (dome) space; null without a scene or the mesh
 	const float * col = nullptr;	//!< rgba 0..1 (alpha = the edge fade)
 	const float * uv = nullptr;
@@ -203,9 +205,10 @@ bool wwLookdevWaterMult( float rgb[3] );
  *  has one; false (the outputs untouched) when no weather is loaded */
 bool wwLookdevImageSpaceDof( float a[4], float b[4], float & t, bool & haveA, bool & haveB );
 
-/*! Lane GRASSMB1: the loaded weather's wind bytes (DATA 0 speed, 17 direction, 18 direction range, 19 turbulence);
- *  false (out untouched) when no weather is loaded or its DATA is short */
-bool wwLookdevWind( quint8 out[4] );
+/*! Lane GRASSMB1: the loaded weather's wind on the byte scale (DATA 0 speed, 17 direction, 18 direction range,
+ *  19 turbulence) and [4] the game's random range offset in degrees (lane WEATHERBLEND3: floats, speed and turbulence
+ *  unrounded during a change); false (out untouched) when no weather is loaded or its DATA is short */
+bool wwLookdevWind( float out[5] );
 
 /*! lane WEATHERBLEND1: true while a weather change blends the weather left behind into the new one (the views ask
  *  for frames until it ends) */

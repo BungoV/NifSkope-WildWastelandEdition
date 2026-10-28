@@ -1,5 +1,24 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## Lane WEATHERBLEND3 (2026-10-28, branch weatherblend3-20261028): the weather change's leftovers
+
+- **Missing imagespace:** a weather time slot with no imagespace (10 vanilla weathers, e.g. CommonwealthDusty's late
+  sunset) now uses the game's default imagespace (DefaultImageSpace) instead of none. Its Sky Scale and depth of field
+  are not taken. `weather --weather <w> --imagespace` prints one `imgs` line per slot; red `WW_LOOKDEV_RED=imgsnodefault`.
+- **Fast travel, wait, teleport:** `WW_WEATHER_PICK=fasttravel` makes a pick apply at once, without a change, even
+  while a change runs. Moving the hour during a change counts as a wait: the change moves on by those game hours, and
+  a pick in the same frame snaps. Opening another cell counts as a teleport: a pick in that frame snaps. The lookdev
+  line shows `wait=` and `event=`. Red `WW_WEATHER_BLEND_RED=nosnapevents`.
+- **One cloud scroll per layer:** during a change a cloud layer scrolls once, at the speed blended by the change (the
+  game's), and carries on from where it was when the change ends. It no longer jumps at the start or end of a change.
+  The cloud map now draws a changing layer once (both textures, one scroll), or twice only when the two textures sit
+  in different cloud bands. Red `WW_WEATHER_BLEND_RED=cloudtwo` (each weather's own scroll, two entries).
+- **Wind:** the wind's random direction offset is now applied (the nearest of 4 draws within half the weather's
+  direction range, fixed per weather so a view repeats). It turns the grass, cables and the fog drift. During a change
+  the wind speed and turbulence are no longer rounded to whole bytes. Reds `nowindoffset` and `windbytes`.
+- Cost: no GPU time outside a change; during a change the cloud map reads one more texture per texel (under 0.01 ms
+  at 1080p) and draws fewer layers. Memory under 1 KB.
+
 ## Lane HALLINDOOR1 (2026-10-28, branch hallindoor1-20261027): air under a glazed roof reads indoor
 
 - **The indoor rule's openings:** a point's sky ray (or a hit past the 1536-unit reach) that leaves through a room's
