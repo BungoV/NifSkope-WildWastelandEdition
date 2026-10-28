@@ -15,6 +15,7 @@ BSD License - see nifskope.h
 #include "cellground.h"		// lane CELLVIEW2
 #include "cellsplat.h"		// lane CELLVIEW4
 #include "landlodspec.h"	// lane LANDSPEC6: fixedWorld
+#include "cellmodsource.h"	// lane LANDSPEC8: uGridsToLoad
 #include "cellidentity.h"	// lane CELLVIEW2
 #include "cellactor.h"		// lane PLACED1
 #include "gl/celllooks.h"	// lane GAPLOOK2: Actors outdoors, Weapon mod parts
@@ -2762,7 +2763,7 @@ static bool cellBuild( NifModel * nif, const CellSceneSpec & specAsked, CellChun
 		&& ( spec.probesBake || !wwEnvIsEmpty( "WW_CELL_PROBE_BAKE" )
 			|| !wwEnvIsEmpty( "WW_CELL_GI_FROM" ) );
 	if ( bakeExterior && blockRed != "n1" )
-		spec.n = qMax( spec.n, 5 );
+		spec.n = qMax( spec.n, 2 * cellGameGridHalf() + 1 );	// lane LANDSPEC8: uGridsToLoad from the inis (was 5)
 	auto fail = [error]( const QString & m ) {
 		if ( error )
 			*error = m;
@@ -2908,13 +2909,13 @@ static bool cellBuild( NifModel * nif, const CellSceneSpec & specAsked, CellChun
 	}
 	/* lane LANDSPEC7: the game loads a fixed world's cell only within uGridsToLoad / 2 of WCTR, so the open's block is
 	 * fitted inside WCTR +- 2 (src/landlodspec.h fixedBlock) before the camera, the far rings, the land-LOD block and
-	 * the streamer read it. Red WW_LANDSPEC_RED=fixedopen: the asked block. */
+	 * the streamer read it. Red WW_LANDSPEC_RED=fixedopen: the asked block. LANDSPEC8: +- uGridsToLoad / 2 of the inis */
 	QString fixedOpenNote;
 	if ( !chunk && !spec.interior && LandLodSpec::fixedWorld( world.worldFlags() ) ) {
 		const int ax = spec.cx, ay = spec.cy, an = spec.n;
 		int fx = ax, fy = ay, fn = an;
-		const bool moved = LandLodSpec::fixedBlock( world.fixedCentreX(), world.fixedCentreY(),
-			LandLodSpec::kFixedGridHalf, fx, fy, fn );
+		const int gh = cellGameGridHalf();
+		const bool moved = LandLodSpec::fixedBlock( world.fixedCentreX(), world.fixedCentreY(), gh, fx, fy, fn );
 		const bool red = wwEnv( "WW_LANDSPEC_RED" ) == "fixedopen";
 		if ( moved && !red ) {
 			spec.cx = fx;
@@ -2922,7 +2923,7 @@ static bool cellBuild( NifModel * nif, const CellSceneSpec & specAsked, CellChun
 			spec.n = fn;
 		}
 		fixedOpenNote = QStringLiteral( "  landspec: fixed world, WCTR %1,%2 +-%3: asked %4,%5 n%6 -> %7\n" )
-			.arg( world.fixedCentreX() ).arg( world.fixedCentreY() ).arg( LandLodSpec::kFixedGridHalf )
+			.arg( world.fixedCentreX() ).arg( world.fixedCentreY() ).arg( gh )
 			.arg( ax ).arg( ay ).arg( an )
 			.arg( !moved ? QStringLiteral( "inside, kept" )
 				: red ? QStringLiteral( "RED fixedopen: kept, %1,%2 n%3 is what the game loads" ).arg( fx ).arg( fy ).arg( fn )

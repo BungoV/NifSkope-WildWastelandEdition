@@ -9,6 +9,7 @@ BSD License - see nifskope.h
 
 #include "gamemanager.h"
 #include "lodgenloadorder.h"
+#include "landlodspec.h"	// lane LANDSPEC8: gridsLine
 
 #include <QDir>
 #include <QFile>
@@ -324,6 +325,42 @@ QStringList iniArchives( const QString & game )
 }
 
 } // namespace
+
+int cellGameGrids( QString * from )
+{
+	QString gameFrom;
+	const QString game = gameFolder( &gameFrom );
+	QStringList inis{ myGames() + QStringLiteral( "/Fallout4.ini" ), myGames() + QStringLiteral( "/Fallout4Prefs.ini" ),
+		myGames() + QStringLiteral( "/Fallout4Custom.ini" ) };
+	if ( !game.isEmpty() && wwEnv( "WW_MODPICK_MYGAMES" ).isEmpty() )	// a fixture stands alone
+		inis.prepend( game + QStringLiteral( "/Fallout4_Default.ini" ) );
+	int g = 0;
+	for ( const QString & ini : inis ) {
+		bool general = false;
+		for ( const QString & l : readLines( ini ) ) {
+			const int v = LandLodSpec::gridsLine( l.toStdString(), general );
+			if ( v < 0 )
+				continue;
+			g = v;
+			if ( from )
+				*from = QDir::toNativeSeparators( clean( ini ) );
+		}
+	}
+	return g;
+}
+
+int cellGameGridHalf( QString * note )
+{
+	QString from;
+	const int g = cellGameGrids( &from );
+	const bool red = wwEnv( "WW_LANDSPEC_RED" ) == "grids5";
+	const int h = LandLodSpec::gridHalf( red ? LandLodSpec::kGridsDefault : g );
+	if ( note )
+		*note = red ? QStringLiteral( "RED grids5: 5 (the ini says %1)" ).arg( g )
+			: g > 0 ? QStringLiteral( "%1 (%2)" ).arg( g ).arg( from )
+			: QStringLiteral( "unset, the game's %1" ).arg( LandLodSpec::kGridsDefault );
+	return h;
+}
 
 QStringList cellModPluginArchives( const QString & pluginPath )
 {

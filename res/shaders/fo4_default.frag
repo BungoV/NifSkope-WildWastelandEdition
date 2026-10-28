@@ -322,8 +322,9 @@ uniform sampler2DArray LandLodDiff;	// lane LANDSPEC3: the 4 x 4 level-4 LOD dif
 // lane LANDSPEC6: past the page (a block wider than 61 cells), the outer window: xy its corner (world), z its chunks a
 // side (0 none), its bound layers 64 a vec4 (32 x 32), each a chunk's mip 1
 // lane LANDSPEC7: up to 45 x 45 (2025 layers, 32 vec4) at mip 2 past 32 chunks a side
+// lane LANDSPEC8: w 2 = packed, 2 x 2 chunks a layer (up to 50 x 50 chunks, 40 vec4 of bits, one a chunk)
 uniform vec4 landLodOuter;
-uniform vec4 landLodOuterBits[32];
+uniform vec4 landLodOuterBits[40];
 uniform sampler2DArray LandLodOuter;
 uniform sampler2D LandLodNoise;
 uniform sampler2D LandLodDetail;
@@ -486,8 +487,14 @@ void main()
 			if ( co.x >= 0 && co.y >= 0 && co.x < nO && co.y < nO
 				&& ( ( int( landLodOuterBits[ko >> 6][( ko >> 4 ) & 3] ) >> ( ko & 15 ) ) & 1 ) != 0 ) {
 				vec2 f = go - vec2( co );
-				const vec2 flipV = vec2( 1.0, -1.0 ) / 16384.0;
-				vec3 lod = textureGrad( LandLodOuter, vec3( f.x, 1.0 - f.y, float( ko ) ), landWdx * flipV, landWdy * flipV ).rgb;
+				vec2 flipV = vec2( 1.0, -1.0 ) / 16384.0;
+				vec3 uvl = vec3( f.x, 1.0 - f.y, float( ko ) );
+				if ( landLodOuter.w > 1.5 ) {	// lane LANDSPEC8: the chunk's quarter of its packed layer (odd y on top)
+					uvl = vec3( ( vec2( co.x & 1, 1 - ( co.y & 1 ) ) + uvl.xy ) * 0.5,
+						float( ( co.x >> 1 ) + ( ( nO + 1 ) >> 1 ) * ( co.y >> 1 ) ) );
+					flipV *= 0.5;
+				}
+				vec3 lod = textureGrad( LandLodOuter, uvl, landWdx * flipV, landWdy * flipV ).rgb;
 				baseMap.rgb = mix( baseMap.rgb, lod * noiseK, landBandV );
 			}
 		}
