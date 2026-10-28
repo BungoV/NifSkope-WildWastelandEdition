@@ -462,6 +462,8 @@ void wwGameTaaArmJitter( bool armed )
 		ts().jittered = false;	// a frame that never reached its resolve leaves nothing behind (disarming keeps it)
 }
 
+quint64 wwGlPaintCount();	// glview.cpp
+
 void wwGameTaaJitterProjection( Scene * scene, Matrix4 & proj )
 {
 	TaaState & s = ts();
@@ -470,6 +472,8 @@ void wwGameTaaJitterProjection( Scene * scene, Matrix4 & proj )
 	s.armed = false;	// one projection a frame: a tool's own glProjection later in the frame is not jittered again
 	GLint vp[4] = { 0, 0, 1, 1 };
 	scene->renderer->fn->glGetIntegerv( GL_VIEWPORT, vp );
+	if ( !wwCellUni6Red( "jitter" ) )	// lane CELLUNI6: the global uniforms' upload next takes it (celluniform.h VpNote)
+		WwCellUni::jitterVp().put( wwGlPaintCount(), vp );
 	s.W = std::max( int( vp[2] ), 1 );
 	s.H = std::max( int( vp[3] ), 1 );
 	if ( s.fixedFrame >= 0 ) {

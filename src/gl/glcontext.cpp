@@ -1348,6 +1348,8 @@ void NifSkopeOpenGLContext::setViewTransform( const Transform & t, int upAxis, f
 	globalUniforms->envMapRotation[2] = m[2];
 }
 
+quint64 wwGlPaintCount();	// glview.cpp
+
 void NifSkopeOpenGLContext::setGlobalUniforms()
 {
 	/* Never upload a zero viewport — it makes the line geometry shader emit NaN.
@@ -1409,7 +1411,9 @@ void NifSkopeOpenGLContext::setGlobalUniforms()
 	 */
 	{
 		GLint	viewportDims[4] = { 0, 0, 0, 0 };
-		fn->glGetIntegerv( GL_VIEWPORT, viewportDims );
+		// lane CELLUNI6: glview's upload after the jittered projection takes the viewport the jitter asked (this paint,
+		// no viewport write between); any other upload asks. WW_CELL_UNI6_RED=jitter: asked (the jitter keeps none).
+		WwCellUni::viewportFrom( fn, WwCellUni::jitterVp(), wwGlPaintCount(), viewportDims, wwSetupMemoChecking() );
 		if ( viewportDims[2] > 0 && viewportDims[3] > 0 ) {
 			globalUniforms->viewportDimensions[0] = viewportDims[0];
 			globalUniforms->viewportDimensions[1] = viewportDims[1];

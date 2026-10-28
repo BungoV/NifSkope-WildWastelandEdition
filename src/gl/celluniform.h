@@ -6,7 +6,8 @@
  * bind through EXT_direct_state_access, so the active unit is never asked for. WW_CELL_UNI_RED=1: the old path.
  * Lane CELLUNI2: the per-draw setters (AO, SSR, SSGI, reflection probes) and the scene globals (fog, sun) use it too.
  * Lane CELLUNI3: the CE1 tail scalars, the draw's blend (a note from its setup) and the sky / air / far units.
- * Lane CELLUNI4: the frame end's passes (TAA, bloom, fog bloom) take the state cellhdr's End read once (KnownGl). */
+ * Lane CELLUNI4: the frame end's passes (TAA, bloom, fog bloom) take the state cellhdr's End read once (KnownGl).
+ * Lane CELLUNI6: the CELLUNI5 leftovers, each behind its own red (WW_CELL_UNI6_RED=<name>, redHas below). */
 
 #include <cstdint>
 #include <cstring>
@@ -417,6 +418,70 @@ struct CtxWatch
 		return false;
 	}
 };
+
+//! lane CELLUNI6: whether a red list ("jitter", "jitter,bsshape", "all") names an item (exact words, ',' or ' ' apart)
+inline bool redHas( const char * list, const char * name )
+{
+	if ( !list || !name || !*name )
+		return false;
+	const size_t n = std::strlen( name );
+	for ( const char * p = list; *p; ) {
+		while ( *p == ',' || *p == ' ' )
+			p++;
+		const char * e = p;
+		while ( *e && *e != ',' && *e != ' ' )
+			e++;
+		const size_t len = size_t( e - p );
+		if ( ( len == n && std::strncmp( p, name, n ) == 0 ) || ( len == 3 && std::strncmp( p, "all", 3 ) == 0 ) )
+			return true;
+		p = e;
+	}
+	return false;
+}
+
+/* lane CELLUNI6 (jitter): the viewport the temporal AA's jitter asked for this paint's one projection. glview uploads
+ * the global uniforms next, with no viewport write between, so that upload takes it instead of asking again. Taken
+ * once: a second take, or a take in another paint, asks. */
+struct VpNote
+{
+	std::uint64_t frame = 0;	// the paint that asked (0: none)
+	int vp[4] = {};
+	void put( std::uint64_t f, const int v[4] )
+	{
+		frame = f;
+		std::memcpy( vp, v, sizeof vp );
+	}
+	bool take( std::uint64_t f, int v[4] )
+	{
+		const bool ok = frame != 0 && frame == f;
+		if ( ok )
+			std::memcpy( v, vp, sizeof vp );
+		frame = 0;
+		return ok;
+	}
+};
+inline VpNote & jitterVp()
+{
+	static VpNote n;
+	return n;
+}
+//! the note's viewport, else asked. WW_SETUP_MEMO_CHECK=1 asks anyway, counts a wrong note (vpStale), returns the driver's
+template <class F> bool viewportFrom( F * fn, VpNote & n, std::uint64_t frame, int vp[4], bool check )
+{
+	if ( !n.take( frame, vp ) ) {
+		fn->glGetIntegerv( 0x0BA2, vp );	// GL_VIEWPORT
+		return false;
+	}
+	if ( check ) {
+		int real[4] = {};
+		fn->glGetIntegerv( 0x0BA2, real );
+		if ( std::memcmp( real, vp, sizeof real ) != 0 ) {
+			state().vpStale++;
+			std::memcpy( vp, real, sizeof real );
+		}
+	}
+	return true;
+}
 }
 
 //! the DSA entry points of the current context (null members: the extension is missing)
@@ -425,5 +490,10 @@ const WwCellUni::Dsa * wwCellUniDsa();
 bool wwCellUniRed();
 //! lane CELLUNI2: the per-frame tick and the `cell uni:` line (any scope's first call in a frame)
 void wwCellUniFrame();
+/*! lane CELLUNI6: WW_CELL_UNI6_RED=<name>[,<name>...] (live): that item asks as before. Names: jitter, nonlinear,
+ *  hdrdepth, hdrbegin, bsshape, depthcfg, glerror (all: every one). WW_CELL_UNI_RED=1 holds them all too. */
+bool wwCellUni6Red( const char * name );
+//! lane CELLUNI6: WW_SETUP_MEMO_CHECK=1 (live), for a check outside an armed setup-memo pass
+bool wwSetupMemoChecking();
 
 #endif

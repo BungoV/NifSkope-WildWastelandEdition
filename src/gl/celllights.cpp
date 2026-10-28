@@ -1429,6 +1429,13 @@ bool wwCellUniRed()
 	return red;
 }
 
+// lane CELLUNI6: one name per leftover (celluniform.h)
+bool wwCellUni6Red( const char * name )
+{
+	WW_SWITCH_STATIC( QByteArray, list, wwEnv( "WW_CELL_UNI6_RED" ).trimmed() );
+	return wwCellUniRed() || WwCellUni::redHas( list.constData(), name );
+}
+
 // lane CELLUNI2: totals, then per site (lights = this file's scope, draw = the per-draw setters, globals = fog + sun)
 void wwCellUniFrame()
 {

@@ -276,6 +276,11 @@ void wwOpaqueCutCheckNote( bool predictedSkip, const QString & name )
 	}
 }
 
+bool wwSetupMemoChecking()
+{
+	return setupMemo().check;
+}
+
 void wwSetupMemoArm( bool on )
 {
 	SetupMemo & m = setupMemo();
