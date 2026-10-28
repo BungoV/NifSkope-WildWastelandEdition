@@ -489,7 +489,10 @@ bool wwCellBloomRun( Scene * scene, unsigned hdrColor, unsigned ds, int W, int H
 	const bool remake = !g.srcFbo || g.w != W || g.h != H || g.samples != S || g.mipCount != mipCount
 		|| ( mipCount && ( g.dims[0][0] != dims[0][0] || g.dims[0][1] != dims[0][1] ) );
 	// lane CELLUNI5: the drain and the error reads until a clean frame on these targets (WW_CELL_UNI_RED=1: every frame)
-	const bool check = g.err.check( wwCellUniRed(), remake );
+	// lane CELLUNI6: WW_SETUP_MEMO_CHECK=1 reads on a trusted frame too, and names an error found there
+	const bool trustedSkip = !g.err.check( wwCellUniRed(), remake );
+	const bool trustErrCheck = WwCellUni::checkTrusted( trustedSkip, wwSetupMemoChecking(), wwCellUni6Red( "glerror" ) );
+	const bool check = !trustedSkip || trustErrCheck;
 	if ( check )
 		WwCellUni::drainErrors( fn );
 	bool made = false;
@@ -611,6 +614,8 @@ bool wwCellBloomRun( Scene * scene, unsigned hdrColor, unsigned ds, int W, int H
 		fn->glBindFramebuffer( GL_DRAW_FRAMEBUFFER, g.resFbo );
 		fn->glBlitFramebuffer( 0, 0, W, H, 0, 0, W, H, GL_COLOR_BUFFER_BIT, GL_NEAREST );
 		const GLenum err = check ? fn->glGetError() : GLenum( GL_NO_ERROR );
+		if ( trustErrCheck && err != GL_NO_ERROR )
+			WwCellUni::trustedError( "FO4CS bloom", "the source pass or its resolve", unsigned( err ) );
 		if ( ok && err != GL_NO_ERROR ) {
 			ok = false;
 			why = QStringLiteral( "the source pass or its resolve failed, GL error %1" ).arg( err );
@@ -673,6 +678,8 @@ bool wwCellBloomRun( Scene * scene, unsigned hdrColor, unsigned ds, int W, int H
 	}
 	if ( ok && check ) {
 		const GLenum err = fn->glGetError();
+		if ( trustErrCheck && err != GL_NO_ERROR )
+			WwCellUni::trustedError( "FO4CS bloom", "the chain", unsigned( err ) );
 		if ( err != GL_NO_ERROR ) {
 			ok = false;
 			why = QStringLiteral( "the chain failed, GL error %1" ).arg( err );

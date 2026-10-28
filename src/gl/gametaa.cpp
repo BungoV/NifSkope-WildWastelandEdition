@@ -640,7 +640,9 @@ bool taaResolveImpl( Scene * scene, GLuint linearFbo, GLenum linearFormat, float
 	// lane CELLUNI6: after the tone map (HDR off) too, on the window's own framebuffer (WW_CELL_UNI6_RED=nonlinear: asked)
 	const bool useCfg = WwCellUni::depthCfgServes( kn != nullptr, linear, prevDraw, wwCellUni6Red( "nonlinear" ) );
 	const bool cfgHit = useCfg && cfgHitAt( prevDraw, W, H );
-	const bool checkErr = !cfgHit || !depthCfg.trusted;	// errors read until a frame on this framebuffer raised none
+	// errors read until a frame on this framebuffer raised none; lane CELLUNI6: and under WW_SETUP_MEMO_CHECK=1
+	const bool trustErrCheck = WwCellUni::checkTrusted( cfgHit && depthCfg.trusted, wwSetupMemoChecking(), wwCellUni6Red( "glerror" ) );
+	const bool checkErr = !cfgHit || !depthCfg.trusted || trustErrCheck;
 	if ( checkErr ) {
 		while ( fn->glGetError() != GL_NO_ERROR ) {
 		}
@@ -827,6 +829,8 @@ bool taaResolveImpl( Scene * scene, GLuint linearFbo, GLenum linearFormat, float
 		fn->glBindFramebuffer( GL_READ_FRAMEBUFFER, GLuint( prevDraw ) );	// the depth went back to the frame (cellhdr)
 	fn->glBlitFramebuffer( 0, 0, W, H, 0, 0, W, H, g.depthBits, GL_NEAREST );
 	const GLenum blitErr = checkErr ? fn->glGetError() : GLenum( GL_NO_ERROR );
+	if ( trustErrCheck && blitErr != GL_NO_ERROR )
+		WwCellUni::trustedError( "temporal aa", "the frame's blit", unsigned( blitErr ) );
 	if ( useCfg && blitErr != GL_NO_ERROR )
 		depthCfg.forget();	// lane CELLUNI4: asked again, and errors read, next frame
 	else if ( useCfg && checkErr && cfgHitAt( prevDraw, W, H ) )

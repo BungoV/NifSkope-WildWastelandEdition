@@ -160,7 +160,7 @@
 { "WW_CELL_BLOOM_KNEE", 1, "- | name passed through a variable: conservative" },
 { "WW_CELL_BLOOM_MIPS", 1, "- | name passed through a variable: conservative" },
 { "WW_CELL_BLOOM_PERPIX", 0, "src/gl/celllooks.cpp:127 pinOf | re-read per frame or per call (a)" },
-{ "WW_CELL_BLOOM_PERPIX_RED", 0, "src/gl/cellbloom.cpp:796 wwCellBloomFinal | re-read per frame or per call (a)" },
+{ "WW_CELL_BLOOM_PERPIX_RED", 0, "src/gl/cellbloom.cpp:803 wwCellBloomFinal | re-read per frame or per call (a)" },
 { "WW_CELL_BLOOM_RADIUS", 1, "- | name passed through a variable: conservative" },
 { "WW_CELL_BLOOM_RED", 0, "src/gl/cellbloom.cpp:183 bs | init-once state, re-read when a live set moves its prefix (b)" },
 { "WW_CELL_BLOOM_THRESHOLD", 1, "- | name passed through a variable: conservative" },

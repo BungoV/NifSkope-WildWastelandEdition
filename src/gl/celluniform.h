@@ -10,6 +10,7 @@
  * Lane CELLUNI6: the CELLUNI5 leftovers, each behind its own red (WW_CELL_UNI6_RED=<name>, redHas below). */
 
 #include <cstdint>
+#include <cstdio>
 #include <cstring>
 #include <type_traits>
 #include <vector>
@@ -372,6 +373,37 @@ template <class F> void drainErrors( F * fn )
 {
 	while ( fn->glGetError() != 0 ) {
 	}
+}
+
+/* lane CELLUNI6 (glerror): a GL error raised on a frame the memo trusts (ErrTrust, DepthCfg::trusted) goes unread.
+ * WW_SETUP_MEMO_CHECK=1 reads at those trust points anyway, as an untrusted frame does (the error then refuses the frame
+ * and drops the trust, as it would have before the trust), and prints one line the first time each site sees one. */
+inline bool checkTrusted( bool trustedSkip, bool check, bool red )
+{
+	return trustedSkip && check && !red;
+}
+struct ErrSites
+{
+	std::vector<std::pair<const char *, const char *>> said;	// (pass, read point): string literals
+	std::uint64_t seen = 0;	// errors read at a trusted point, every site
+};
+inline ErrSites & errSites()
+{
+	static ErrSites e;
+	return e;
+}
+//! an error read at a trust point on a frame the memo trusted: counted; true (and one line) the first time at that site
+inline bool trustedError( const char * pass, const char * at, unsigned err )
+{
+	ErrSites & e = errSites();
+	e.seen++;
+	for ( const auto & s : e.said )
+		if ( std::strcmp( s.first, pass ) == 0 && std::strcmp( s.second, at ) == 0 )
+			return false;
+	e.said.emplace_back( pass, at );
+	std::fprintf( stderr, "setup memo check: GL error 0x%04X at the %s (%s) on a frame the memo trusted (unread without "
+		"WW_SETUP_MEMO_CHECK=1)\n", err, pass, at );
+	return true;
 }
 
 //! lane CELLUNI4: a framebuffer's depth format, asked once per (context, framebuffer, size); another key asks again

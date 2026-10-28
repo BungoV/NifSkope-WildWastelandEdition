@@ -559,6 +559,86 @@ static void depthcfg()
 	check( cfgRun( CfgMode::LifeWatchOnly ).landed == t.landed, "depthcfg: the life serial through the watch alone also lands (the key is the second guard)" );
 }
 
+// ---------------------------------------------------------------- 7. glerror
+/* The memo's trust points (cellbloom.cpp / cellfogbloom.cpp ErrTrust, gametaa.cpp DepthCfg::trusted) as they run: a
+ * drain and the error reads only until one clean frame on the same targets. A real GL error raised inside the bloom pass
+ * at frames 15 and 22 and inside the TAA's blit at frame 25, all on trusted frames. "prev" reads every frame (before the
+ * trust). Green without the check never sees them (CELLUNI5's regime); with WW_SETUP_MEMO_CHECK=1 it reads at the trust
+ * points, refuses those frames as prev does, and prints one line per new site (two sites here). */
+struct ErrOut
+{
+	std::vector<int> ok;	// per frame: bloom ok, TAA ok
+	std::uint64_t seen = 0;
+	size_t sites = 0;
+};
+static ErrOut errRun( bool prev, bool memoCheck )
+{
+	resetKit();
+	WwCellUni::errSites() = WwCellUni::ErrSites();
+	FakeGl gl;
+	WwCellUni::ErrTrust bloom;
+	bool taaTrusted = false;
+	bool red = false;
+#ifdef CELLUNI6_RED_GLERROR
+	red = true;
+#endif
+	ErrOut out;
+	for ( int f = 1; f <= 30; f++ ) {
+		{	// the bloom
+			const bool remake = f == 1;
+			const bool trustedSkip = !prev && !bloom.check( false, remake );
+			const bool trustErrCheck = WwCellUni::checkTrusted( trustedSkip, memoCheck, red );
+			const bool check = !trustedSkip || trustErrCheck;
+			if ( check )
+				while ( gl.glGetError() != kNoError ) {
+				}
+			if ( remake )
+				bloom.forget();
+			if ( f == 15 || f == 22 )
+				gl.errors.push_back( kInvalidOp );
+			bool ok = true;
+			const unsigned e = check ? gl.glGetError() : kNoError;
+			if ( trustErrCheck && e != kNoError )
+				WwCellUni::trustedError( "FO4CS bloom", "the chain", e );
+			if ( e != kNoError )
+				ok = false;
+			if ( !prev )
+				bloom.after( check, ok );
+			out.ok.push_back( ok );
+		}
+		{	// the TAA's blit
+			const bool trustedSkip = !prev && taaTrusted;
+			const bool trustErrCheck = WwCellUni::checkTrusted( trustedSkip, memoCheck, red );
+			const bool checkErr = !trustedSkip || trustErrCheck;
+			if ( checkErr )
+				while ( gl.glGetError() != kNoError ) {
+				}
+			if ( f == 25 )
+				gl.errors.push_back( kInvalidOp );
+			const unsigned e = checkErr ? gl.glGetError() : kNoError;
+			if ( trustErrCheck && e != kNoError )
+				WwCellUni::trustedError( "temporal aa", "the frame's blit", e );
+			if ( e != kNoError )
+				taaTrusted = false;
+			else if ( checkErr )
+				taaTrusted = true;
+			out.ok.push_back( e == kNoError );
+		}
+	}
+	out.seen = WwCellUni::errSites().seen;
+	out.sites = WwCellUni::errSites().said.size();
+	return out;
+}
+static void glerror()
+{
+	const ErrOut p = errRun( true, false ), g = errRun( false, false ), c = errRun( false, true );
+	check( std::count( p.ok.begin(), p.ok.end(), 0 ) == 3, "glerror: reading every frame (before the trust), the three errors refuse three passes" );
+	check( g.ok != p.ok && g.seen == 0, "glerror: the trust without the check: the errors go unseen (the leftover)" );
+	check( c.ok == p.ok, "glerror: WW_SETUP_MEMO_CHECK=1: every pass refused or drawn as when read every frame" );
+	check( c.seen == 3 && c.sites == 2, "glerror: WW_SETUP_MEMO_CHECK=1: three errors at trusted points, one line per site (2)" );
+	std::fflush( stderr );
+}
+
 int main()
 {
 	std::setvbuf( stdout, nullptr, _IONBF, 0 );
@@ -569,6 +649,7 @@ int main()
 	hdrbegin();
 	bsshape();
 	depthcfg();
+	glerror();
 	std::printf( "%s (%d failed)\n", fails ? "CELLUNI6 FAIL" : "CELLUNI6 OK", fails );
 	return fails ? 1 : 0;
 }

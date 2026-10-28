@@ -7,14 +7,14 @@ OUT=${TMPDIR:-/tmp}/celluni6.$$
 mkdir -p "$OUT" || exit 2
 SRC=tests/celluni6/celluni6.cpp
 FLAGS="-std=c++17 -Wall -Wextra -Werror -O1 -Isrc"
-ITEMS="jitter nonlinear hdrdepth hdrbegin bsshape depthcfg"
+ITEMS="jitter nonlinear hdrdepth hdrbegin bsshape depthcfg glerror"
 bad=0
 $CXX $FLAGS "$SRC" -o "$OUT/green" || exit 2
-if "$OUT/green" > "$OUT/green.txt"; then echo "green: ok"; else echo "green: FAIL"; cat "$OUT/green.txt"; bad=1; fi
+if "$OUT/green" > "$OUT/green.txt" 2>&1; then echo "green: ok"; else echo "green: FAIL"; cat "$OUT/green.txt"; bad=1; fi
 for item in $ITEMS; do
 	macro=CELLUNI6_RED_$(echo "$item" | tr a-z A-Z)
 	$CXX $FLAGS -D"$macro" "$SRC" -o "$OUT/red_$item" || exit 2
-	"$OUT/red_$item" > "$OUT/red_$item.txt"
+	"$OUT/red_$item" > "$OUT/red_$item.txt" 2>&1
 	code=$?
 	others=$(grep '^FAIL' "$OUT/red_$item.txt" | grep -v "^FAIL $item:")
 	if [ $code -ne 0 ] && [ -z "$others" ]; then
