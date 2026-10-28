@@ -142,12 +142,37 @@ inline int windowFirst( int camCell )
 	return int( std::floor( float( camCell - kReach ) / float( kLodLevel ) ) ) * kLodLevel;
 }
 
-//! the window layer holding cell (cx, cy), -1 outside
-inline int windowLayer( int cx, int cy, int fx, int fy )
+//! the window layer holding cell (cx, cy), -1 outside (w chunks a side)
+inline int windowLayer( int cx, int cy, int fx, int fy, int w = kWindow )
 {
 	const int x = int( std::floor( float( cx - fx ) / float( kLodLevel ) ) );
 	const int y = int( std::floor( float( cy - fy ) / float( kLodLevel ) ) );
-	return x >= 0 && y >= 0 && x < kWindow && y < kWindow ? x + kWindow * y : -1;
+	return x >= 0 && y >= 0 && x < w && y < w ? x + w * y : -1;
+}
+
+/* lane LANDSPEC4: the window also covers the whole near block (cells bx0..bx1, by0..by1), up to kWindowMax chunks a
+ * side (64 layers, 21.8 MB of vanilla BC3); a wider union falls back to the camera's 4 x 4 */
+constexpr int kWindowMax = 8;
+
+struct Window
+{
+	int fx = 0, fy = 0, w = kWindow;
+};
+
+inline int chunkFloor( int c )
+{
+	return int( std::floor( float( c ) / float( kLodLevel ) ) ) * kLodLevel;
+}
+
+inline Window windowFor( int camX, int camY, bool block, int bx0, int by0, int bx1, int by1 )
+{
+	const Window cam{ windowFirst( camX ), windowFirst( camY ), kWindow };
+	if ( !block )
+		return cam;
+	const int x0 = chunkFloor( std::min( camX - kReach, bx0 ) ), x1 = chunkFloor( std::max( camX + kReach, bx1 ) );
+	const int y0 = chunkFloor( std::min( camY - kReach, by0 ) ), y1 = chunkFloor( std::max( camY + kReach, by1 ) );
+	const int w = std::max( x1 - x0, y1 - y0 ) / kLodLevel + 1;
+	return w <= kWindowMax ? Window{ x0, y0, std::max( w, kWindow ) } : cam;
 }
 
 /* lane LANDSPEC3: a .pbrm ground's roughness at the LOD gloss g: the GGX lobe matching the legacy draw's Blinn-Phong
@@ -201,6 +226,20 @@ inline V3 bandNormal( V3 n, V3 d, float v )
 	const V3 nn = norm3( n );
 	const V3 tg{ dot3( t1, d ), dot3( t2, d ), dot3( nn, d ) };
 	return norm3( V3{ mixf( n.x, tg.x, v ), mixf( n.y, tg.y, v ), mixf( n.z, tg.z, v ) } );
+}
+
+/* lane LANDSPEC4: a splat layer pass (cellsplat draws one additive pass a layer) moves toward ONE target, d in the
+ * vertex frame (tangent z), so the passes' share-weighted sum is the blended normal moved once: sum w_i mix(n_i, T, v)
+ * = mix(sum w_i n_i, T, v). Per-layer frames (bandNormal) gave each layer its own target. */
+inline V3 splatTarget( V3 d )
+{
+	return { -d.x, -d.y, d.z };	// bandNormal's frame at n = (0, 0, 1): t1 = -X, t2 = -Y
+}
+
+inline V3 splatNormalRaw( V3 n, V3 d, float v )
+{
+	const V3 tg = splatTarget( d );
+	return { mixf( n.x, tg.x, v ), mixf( n.y, tg.y, v ), mixf( n.z, tg.z, v ) };
 }
 } // namespace LandLodSpec
 

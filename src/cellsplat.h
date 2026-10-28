@@ -210,6 +210,9 @@ bool wwCellLandIs( const void * nif, int block );
 //! lane LANDSPEC2: the cell document's worldspace (EDID; empty = interior) and scene origin, for the land-LOD band
 void wwCellLandOrigin( const void * nif, const QString & ws, float ox, float oy );
 bool wwCellLandOriginOf( const void * nif, QString * ws, float * ox, float * oy );
+//! lane LANDSPEC4: the open's near block (centre cell, half width in cells), so the band window covers all of it
+void wwCellLandBlock( const void * nif, int cx, int cy, int half );
+bool wwCellLandBlockOf( const void * nif, int * cx, int * cy, int * half );
 
 //! lane DUNESAND1: WW_TERRBLEND_RED=nospec drops the ground's TX07 map (the old smoothness 1, mask 1 ground)
 bool cellSplatSpecRed();

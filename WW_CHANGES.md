@@ -1,5 +1,26 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## Lane LANDSPEC4 (2026-10-28, branch landspec4-20261028): the LANDSPEC3 leftovers
+
+- **Detail normal blended once:** the blended ground draws one additive pass a layer, and each pass moved its own
+  layer normal toward the detail normal in that layer's frame. Each pass now moves toward ONE target (the detail
+  normal in the vertex frame), so the passes sum to the blended normal moved once, as the game's single-pass land
+  shader does. Red (a new value of `WW_LANDSPEC_RED`): `perlayer`, the old per-layer frames.
+- **Child worldspaces' far LOD rings:** a worldspace with "Use LOD Data" (Goodneighbor) draws its parent's far LOD
+  rings (FO4CSLOD and the game's LOD files of Commonwealth), on open and on a live far rebuild. Telemetry: "far lod:
+  <child> draws the far LOD of <parent>". Red `ownlod` keeps the child's own name, for the rings and the band.
+- **Far-ring live ground:** the far ring 0's live ground variants take the terrain noise too, like the far LOD ground.
+- **Band window sized to the near block:** the LOD diffuse window covers the whole near block as well as every cell
+  within 6 of the camera, up to 8 x 8 chunks (blocks to 21 x 21 with the camera anywhere in them); a wider block
+  falls back to the camera's 4 x 4. Telemetry: "landspec: band window <ws> X,Y: N of M chunks". Red `camwin`: the
+  camera's 4 x 4 only.
+- Cost (1080p): the splat passes' detail normal drops two cross products a pixel (no extra fetch); the far-ring live
+  ground +1 noise fetch and a multiply a pixel (estimated under 0.02 ms). GPU memory: unchanged for a 5 x 5 or 7 x 7
+  block (the 16-layer 5.3 MB array); 341 KB a chunk beyond that, 12.3 MB for 6 x 6 chunks, 21.8 MB at most (8 x 8).
+  A child worldspace's far rings cost what the parent's do at that spot. Live GPU-ms owed.
+- Not done: the rain wetness (waits on WEATHERLOOK1 phase B); the far LOD bake paths and the open's pre-world
+  stack note still name the child.
+
 ## Lane LANDSPEC3 (2026-10-28, branch landspec3-20261028): the far ground's noise and detail, a wider band window
 
 - **Far LOD ground** now takes the terrain noise (albedo x (noise x 3.777778 - 2.006)) and the detail normal, whole,

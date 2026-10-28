@@ -380,7 +380,8 @@ static int wwLandLodMode( Scene * scene, const Shape * mesh )
 	return mode;
 }
 
-//! lane LANDSPEC2: WW_LANDSPEC_RED = off (no law) | ssr (land keeps a material's SSR flag) | snap (no glide) | notex
+/*! lane LANDSPEC2: WW_LANDSPEC_RED = off (no law) | ssr (land keeps a material's SSR flag) | snap (no glide) | notex;
+ *  LANDSPEC4: camwin (the camera's 4 x 4 window only) | perlayer (each splat layer its own detail frame) */
 static const QByteArray & wwLandSpecRed()
 {
 	WW_SWITCH_STATIC( QByteArray, v, qgetenv( "WW_LANDSPEC_RED" ).trimmed() );
@@ -437,20 +438,21 @@ bool wwLandLodWantsRepaint()
 }
 
 /* lane LANDSPEC3: the 4 x 4 window of level-4 LOD diffuse chunks as one clamped texture array (layer = x + 4 y),
- * copied from the chunks' own textures and rebuilt only when the window moves. Returns the layers filled (bits). */
-static int wwLandLodWindow( Scene * scene, const QString & ws, int fx, int fy )
+ * copied from the chunks' own textures and rebuilt only when the window moves. Returns the layers filled (bits).
+ * LANDSPEC4: n x n chunks (n up to 8, layer = x + n y) */
+static quint64 wwLandLodWindow( Scene * scene, const QString & ws, int fx, int fy, int n )
 {
 	using PfnStorage3D = void ( APIENTRY * )( GLenum, GLsizei, GLenum, GLsizei, GLsizei, GLsizei );
 	using PfnCopyImage = void ( APIENTRY * )( GLuint, GLenum, GLint, GLint, GLint, GLint, GLuint, GLenum, GLint, GLint,
 		GLint, GLint, GLsizei, GLsizei, GLsizei );
-	struct Win { GLuint tex = 0; QString key; int bits = 0; };
+	struct Win { GLuint tex = 0; QString key; quint64 bits = 0; };
 	static QHash<const void *, Win> wins;	// per GL context
 	QOpenGLContext * q = QOpenGLContext::currentContext();
 	auto fn = scene->renderer->fn;
 	Win & win = wins[q];
 	const QString w = ws.toLower();
-	const QString key = QStringLiteral( "%1|%2|%3|%4" ).arg( w ).arg( fx ).arg( fy )
-		.arg( quintptr( scene->nifModel ) );
+	const QString key = QStringLiteral( "%1|%2|%3|%4|%5" ).arg( w ).arg( fx ).arg( fy )
+		.arg( quintptr( scene->nifModel ) ).arg( n );
 	fn->glActiveTexture( GLenum( GL_TEXTURE0 + WwCellUnit::LandLodDiff ) );
 	if ( win.key != key ) {
 		win.key = key;
@@ -461,10 +463,10 @@ static int wwLandLodWindow( Scene * scene, const QString & ws, int fx, int fy )
 		const auto storage = q ? reinterpret_cast<PfnStorage3D>( q->getProcAddress( "glTexStorage3D" ) ) : nullptr;
 		const auto copy = q ? reinterpret_cast<PfnCopyImage>( q->getProcAddress( "glCopyImageSubData" ) ) : nullptr;	// GL 4.3
 		GLint w0 = 0, h0 = 0, f0 = 0, levels = 0;
-		for ( int k = 0; k < LandLodSpec::kWindow * LandLodSpec::kWindow && storage && copy; k++ ) {
+		for ( int k = 0; k < n * n && storage && copy; k++ ) {
 			const QString path = QStringLiteral( "textures\\terrain\\%1\\%1.4.%2.%3.dds" ).arg( w )
-				.arg( fx + LandLodSpec::kLodLevel * ( k % LandLodSpec::kWindow ) )
-				.arg( fy + LandLodSpec::kLodLevel * ( k / LandLodSpec::kWindow ) );
+				.arg( fx + LandLodSpec::kLodLevel * ( k % n ) )
+				.arg( fy + LandLodSpec::kLodLevel * ( k / n ) );
 			if ( scene->textures->bind( QStringView( path ), scene->nifModel ) <= 0 || !scene->textures->wwBound )
 				continue;
 			const GLuint src = scene->textures->wwBound;
@@ -482,7 +484,7 @@ static int wwLandLodWindow( Scene * scene, const QString & ws, int fx, int fy )
 				w0 = cw, h0 = ch, f0 = cf, levels = cl;
 				fn->glGenTextures( 1, &win.tex );
 				fn->glBindTexture( GL_TEXTURE_2D_ARRAY, win.tex );
-				storage( GL_TEXTURE_2D_ARRAY, levels, GLenum( f0 ), w0, h0, LandLodSpec::kWindow * LandLodSpec::kWindow );
+				storage( GL_TEXTURE_2D_ARRAY, levels, GLenum( f0 ), w0, h0, n * n );
 				fn->glTexParameteri( GL_TEXTURE_2D_ARRAY, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE );
 				fn->glTexParameteri( GL_TEXTURE_2D_ARRAY, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE );
 				fn->glTexParameteri( GL_TEXTURE_2D_ARRAY, GL_TEXTURE_MIN_FILTER, GL_LINEAR_MIPMAP_LINEAR );
@@ -493,11 +495,11 @@ static int wwLandLodWindow( Scene * scene, const QString & ws, int fx, int fy )
 			for ( GLint l = 0; l < levels; l++ )
 				copy( src, GL_TEXTURE_2D, l, 0, 0, 0, win.tex, GL_TEXTURE_2D_ARRAY, l, 0, 0, k,
 					std::max( w0 >> l, 1 ), std::max( h0 >> l, 1 ), 1 );
-			win.bits |= 1 << k;
+			win.bits |= quint64( 1 ) << k;
 		}
 		fn->glBindTexture( GL_TEXTURE_2D, 0 );
-		std::fprintf( stderr, "landspec: band window %s %d,%d: %d of 16 chunks, %dx%d, %d levels\n", qPrintable( w ), fx, fy,
-			int( __builtin_popcount( unsigned( win.bits ) ) ), w0, h0, levels );
+		std::fprintf( stderr, "landspec: band window %s %d,%d: %d of %d chunks, %dx%d, %d levels\n", qPrintable( w ), fx, fy,
+			int( __builtin_popcountll( win.bits ) ), n * n, w0, h0, levels );
 	}
 	fn->glBindTexture( GL_TEXTURE_2D_ARRAY, win.bits ? win.tex : 0 );
 	return win.bits;
@@ -518,13 +520,16 @@ static void wwLandLodTextures( Scene * scene, NifSkopeOpenGLContext::Program * p
 	auto fn = scene->renderer->fn;
 	static const char * const names[3] = { "LandLodDiff", "LandLodNoise", "LandLodDetail" };
 	const int units[3] = { WwCellUnit::LandLodDiff, WwCellUnit::LandLodNoise, WwCellUnit::LandLodDetail };
-	int bits = 0, fx = 0, fy = 0;
+	quint64 bits = 0;
+	LandLodSpec::Window win;
 	bool noise = false, detail = false;
 	if ( on ) {
 		if ( mode == LandLodSpec::Near ) {
-			fx = LandLodSpec::windowFirst( int( std::floor( ( camScene[0] + ox ) / LandLodSpec::kCell ) ) );
-			fy = LandLodSpec::windowFirst( int( std::floor( ( camScene[1] + oy ) / LandLodSpec::kCell ) ) );
-			bits = wwLandLodWindow( scene, ws, fx, fy );
+			int bx = 0, by = 0, half = 0;	// lane LANDSPEC4: the near block too (red camwin: the camera's 4 x 4 only)
+			const bool block = wwLandSpecRed() != "camwin" && wwCellLandBlockOf( scene->nifModel, &bx, &by, &half );
+			win = LandLodSpec::windowFor( int( std::floor( ( camScene[0] + ox ) / LandLodSpec::kCell ) ),
+				int( std::floor( ( camScene[1] + oy ) / LandLodSpec::kCell ) ), block, bx - half, by - half, bx + half, by + half );
+			bits = wwLandLodWindow( scene, ws, win.fx, win.fy, win.w );
 		}
 		for ( int k = 1; k < 3; k++ ) {
 			const QString path = k == 1 ? QStringLiteral( "textures\\terrain\\noise.dds" )
@@ -541,8 +546,11 @@ static void wwLandLodTextures( Scene * scene, NifSkopeOpenGLContext::Program * p
 		prog->uni1i_l( prog->uniLocation( names[k] ), units[k] );
 	const bool albedo = noise && ( mode == LandLodSpec::Far || bits );
 	prog->uni4f( "landLodTex", FloatVector4( ox, oy, albedo ? 1.0f : 0.0f, detail ? 1.0f : 0.0f ) );
-	prog->uni4f( "landLodWin", FloatVector4( float( fx ) * LandLodSpec::kCell, float( fy ) * LandLodSpec::kCell,
-		float( bits ), 0.0f ) );
+	// LANDSPEC4: z the window's chunks a side, w 1 = red perlayer; landLodBits the bound layers, 16 bits a component
+	prog->uni4f( "landLodWin", FloatVector4( float( win.fx ) * LandLodSpec::kCell, float( win.fy ) * LandLodSpec::kCell,
+		float( win.w ), wwLandSpecRed() == "perlayer" ? 1.0f : 0.0f ) );
+	prog->uni4f( "landLodBits", FloatVector4( float( bits & 0xFFFF ), float( ( bits >> 16 ) & 0xFFFF ),
+		float( ( bits >> 32 ) & 0xFFFF ), float( ( bits >> 48 ) & 0xFFFF ) ) );
 }
 
 static void wwLandLodUniforms( Scene * scene, NifSkopeOpenGLContext::Program * prog, const Shape * mesh )

@@ -618,6 +618,7 @@ struct LandOrigin
 {
 	QString ws;
 	float x = 0.0f, y = 0.0f;
+	int bx = 0, by = 0, half = -1;	// lane LANDSPEC4: the near block (-1 none)
 };
 QHash<const void *, LandOrigin> & landOrigins()
 {
@@ -630,6 +631,27 @@ void wwCellLandOrigin( const void * nif, const QString & ws, float ox, float oy 
 {
 	QMutexLocker lock( &landMutex() );
 	landOrigins().insert( nif, { ws, ox, oy } );
+}
+
+void wwCellLandBlock( const void * nif, int cx, int cy, int half )
+{
+	QMutexLocker lock( &landMutex() );
+	LandOrigin & o = landOrigins()[nif];
+	o.bx = cx;
+	o.by = cy;
+	o.half = half;
+}
+
+bool wwCellLandBlockOf( const void * nif, int * cx, int * cy, int * half )
+{
+	QMutexLocker lock( &landMutex() );
+	const auto it = landOrigins().constFind( nif );
+	if ( it == landOrigins().constEnd() || it->half < 0 )
+		return false;
+	*cx = it->bx;
+	*cy = it->by;
+	*half = it->half;
+	return true;
 }
 
 bool wwCellLandOriginOf( const void * nif, QString * ws, float * ox, float * oy )

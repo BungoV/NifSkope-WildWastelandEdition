@@ -316,7 +316,8 @@ uniform vec4 landLodK;	// fLODLandSpecPower, fLODLandSpecScale (0: specular off)
 // lane LANDSPEC2: xy the scene origin (world), z 1 = the terrain noise is bound, w 1 = the detail normals are;
 // landLodWin xy the chunk window's corner (world), z its bound chunks (bits, layer = x + 4 y)
 uniform vec4 landLodTex;
-uniform vec4 landLodWin;
+uniform vec4 landLodWin;	// lane LANDSPEC4: z the window's chunks a side (layer = x + z y), w 1 = red perlayer
+uniform vec4 landLodBits;	// lane LANDSPEC4: the bound layers, 16 a component
 uniform sampler2DArray LandLodDiff;	// lane LANDSPEC3: the 4 x 4 level-4 LOD diffuse chunks round the camera (clamped)
 uniform sampler2D LandLodNoise;
 uniform sampler2D LandLodDetail;
@@ -329,6 +330,15 @@ vec3 landDetailN( vec3 n, vec2 w, vec2 wdx, vec2 wdy, float v )
 	vec3 t1 = normalize( cross( n, cross( n, vec3( 1.0, 0.0, 0.0 ) ) ) );
 	vec3 t2 = normalize( cross( n, t1 ) );
 	return normalize( mix( n, vec3( dot( t1, d ), dot( t2, d ), dot( normalize( n ), d ) ), v ) );
+}
+/* lane LANDSPEC4: a splat layer pass moves toward ONE target (d in the vertex frame, as landDetailN at n = z), so the
+ * additive passes sum to the blended normal moved once, not each layer toward its own (red perlayer) */
+vec3 landDetailSplatN( vec3 n, vec2 w, vec2 wdx, vec2 wdy, float v )
+{
+	if ( landLodWin.w > 0.5 )
+		return landDetailN( n, w, wdx, wdy, v );
+	vec2 dd = textureGrad( LandLodDetail, w * 0.00035, wdx * 0.00035, wdy * 0.00035 ).rg * 2.0 - 1.0;
+	return normalize( mix( n, vec3( -dd, sqrt( 1.0 - min( dot( dd, dd ), 1.0 ) ) ), v ) );
 }
 #endif
 #endif
@@ -452,12 +462,12 @@ void main()
 			* 3.777778 - 2.006;
 		vec2 g = ( landBandW - landLodWin.xy ) * ( 1.0 / 16384.0 );
 		ivec2 ci = ivec2( floor( g ) );
-		int k = ci.x + 4 * ci.y;
+		int nW = int( landLodWin.z );	// lane LANDSPEC4: the window spans the near block (up to 8 x 8)
+		int k = ci.x + nW * ci.y;
 		if ( landLod.x > 1.5 ) {
-#ifndef WW_FARGROUND
-			baseMap.rgb *= noiseK;
-#endif
-		} else if ( ci.x >= 0 && ci.y >= 0 && ci.x < 4 && ci.y < 4 && ( ( int( landLodWin.z ) >> k ) & 1 ) != 0 ) {
+			baseMap.rgb *= noiseK;	// lane LANDSPEC4: the far ring 0's live ground too
+		} else if ( ci.x >= 0 && ci.y >= 0 && ci.x < nW && ci.y < nW
+			&& ( ( int( landLodBits[k >> 4] ) >> ( k & 15 ) ) & 1 ) != 0 ) {
 			vec2 f = g - vec2( ci );
 			const vec2 flipV = vec2( 1.0, -1.0 ) / 16384.0;
 			vec3 lod = textureGrad( LandLodDiff, vec3( f.x, 1.0 - f.y, float( k ) ), landWdx * flipV, landWdy * flipV ).rgb;
@@ -627,7 +637,8 @@ void main()
 		normal.b = sqrt(max(1.0 - dot(normal.rg, normal.rg), 0.0));
 #if defined( WW_CELLLIGHTS ) && !defined( WW_LANDSPEC_NONE )
 		if ( landLodTex.w > 0.5 && landDetailV > 0.0 )	// lane LANDSPEC2: toward the detail normal in its own frame
-			normal = landDetailN( normal, landBandW, landWdx, landWdy, landDetailV );
+			normal = landSplat ? landDetailSplatN( normal, landBandW, landWdx, landWdy, landDetailV )
+				: landDetailN( normal, landBandW, landWdx, landWdy, landDetailV );
 #endif
 		normal = normalize( btnMatrix_norm * normal );
 	}
