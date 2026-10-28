@@ -630,7 +630,9 @@ bool taaResolveImpl( Scene * scene, GLuint linearFbo, GLenum linearFormat, float
 		fn->glGetIntegerv( GL_VIEWPORT, vp );
 	}
 	const int W = vp[2], H = vp[3];
-	const bool cfgHit = kn && depthCfg.hit( r, prevDraw, W, H );
+	// lane CELLUNI6: after the tone map (HDR off) too, on the window's own framebuffer (WW_CELL_UNI6_RED=nonlinear: asked)
+	const bool useCfg = WwCellUni::depthCfgServes( kn != nullptr, linear, prevDraw, wwCellUni6Red( "nonlinear" ) );
+	const bool cfgHit = useCfg && depthCfg.hit( r, prevDraw, W, H );
 	const bool checkErr = !cfgHit || !depthCfg.trusted;	// errors read until a frame on this framebuffer raised none
 	if ( checkErr ) {
 		while ( fn->glGetError() != GL_NO_ERROR ) {
@@ -653,7 +655,7 @@ bool taaResolveImpl( Scene * scene, GLuint linearFbo, GLenum linearFormat, float
 		fn->glGetFramebufferAttachmentParameteriv( GL_DRAW_FRAMEBUFFER, prevDraw ? GL_STENCIL_ATTACHMENT : GL_STENCIL,
 			GL_FRAMEBUFFER_ATTACHMENT_STENCIL_SIZE, &stencilBits );
 		fn->glGetFramebufferAttachmentParameteriv( GL_DRAW_FRAMEBUFFER, att, GL_FRAMEBUFFER_ATTACHMENT_COMPONENT_TYPE, &compType );
-		if ( kn )
+		if ( useCfg )
 			depthCfg.keep( r, prevDraw, W, H, depthBits, stencilBits, compType );
 	}
 	GLenum dsFormat = 0, dsFmt = 0, dsType = 0;
@@ -818,9 +820,9 @@ bool taaResolveImpl( Scene * scene, GLuint linearFbo, GLenum linearFormat, float
 		fn->glBindFramebuffer( GL_READ_FRAMEBUFFER, GLuint( prevDraw ) );	// the depth went back to the frame (cellhdr)
 	fn->glBlitFramebuffer( 0, 0, W, H, 0, 0, W, H, g.depthBits, GL_NEAREST );
 	const GLenum blitErr = checkErr ? fn->glGetError() : GLenum( GL_NO_ERROR );
-	if ( kn && blitErr != GL_NO_ERROR )
+	if ( useCfg && blitErr != GL_NO_ERROR )
 		depthCfg.forget();	// lane CELLUNI4: asked again, and errors read, next frame
-	else if ( kn && checkErr && depthCfg.hit( r, prevDraw, W, H ) )
+	else if ( useCfg && checkErr && depthCfg.hit( r, prevDraw, W, H ) )
 		depthCfg.trusted = true;
 
 	fn->glDisable( GL_DEPTH_TEST );

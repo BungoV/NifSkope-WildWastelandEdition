@@ -10,6 +10,7 @@
 #include "gl/celluniform.h"
 
 #include <cstdio>
+#include <algorithm>
 #include <cstring>
 #include <map>
 #include <string>
@@ -23,7 +24,8 @@ static void check( bool ok, const char * what )
 }
 
 enum : unsigned {
-	kViewport = 0x0BA2, kDrawFb = 0x8CA6, kReadFb = 0x8CAA, kBlend = 0x0BE2, kNoError = 0, kInvalidOp = 0x0502
+	kViewport = 0x0BA2, kDrawFb = 0x8CA6, kReadFb = 0x8CAA, kBlend = 0x0BE2, kNoError = 0, kInvalidOp = 0x0502,
+	kAttach = 0x8212	// the three attachment asks of a depth format (counted under one name)
 };
 
 // the GL state the modelled code reads and writes; every ask counted by its name
@@ -33,6 +35,7 @@ struct FakeGl
 	int draw = 0, read = 0;
 	bool blend = false;
 	std::vector<unsigned> errors;	// the driver's error queue
+	std::map<int, int> fbFormat;	// framebuffer -> its depth format (1 = D24S8, 2 = D32FS8, ...)
 	std::map<unsigned, long long> asks;
 	long long total = 0;
 	void glGetIntegerv( unsigned p, int * v )
@@ -63,6 +66,13 @@ struct FakeGl
 		const unsigned e = errors.front();
 		errors.erase( errors.begin() );
 		return e;
+	}
+	//! the depth format of a framebuffer: the three glGetFramebufferAttachmentParameteriv asks
+	int attachFormat( int fb )
+	{
+		asks[kAttach] += 3;
+		total += 3;
+		return fbFormat[fb];
 	}
 	void glViewport( int x, int y, int w, int h )
 	{
@@ -154,11 +164,80 @@ static void jitter()
 	check( w.got == r.got && w.stale == 11, "jitter: WW_SETUP_MEMO_CHECK=1, a wrong note: the driver's viewport, vpstale 11" );
 }
 
+// ---------------------------------------------------------------- 2. nonlinear
+/* gametaa.cpp taaResolveImpl's depth part: the depth format (cache or the three asks), the error drain before and the
+ * blit's error read after (until a trusted frame), the blit itself (an error when the format the TAA made its depth
+ * target for is not the frame's). Frames 1-5 HDR on (linear, the tone map's known state), 6-15 HDR off on the window's
+ * framebuffer, 16-20 a harness framebuffer (id 7) that is made again with another format at frame 18 (same id and
+ * size), 21-30 the window again, resized at frame 25. */
+struct TaaOut
+{
+	std::vector<int> fmt, landed;
+	long long asks = 0;
+};
+static TaaOut taaRun( bool redNl, bool docAnyFb )
+{
+	FakeGl gl;
+	gl.fbFormat[0] = 1;
+	gl.fbFormat[7] = 1;
+	WwCellUni::DepthCfg cfg;
+	const int owner = 0;
+	TaaOut out;
+	for ( int f = 1; f <= 30; f++ ) {
+		const bool linear = f <= 5, known = linear;
+		const int fb = ( f >= 16 && f <= 20 ) ? 7 : 0, W = f < 25 ? 64 : 80, H = 32;
+		if ( f == 18 )
+			gl.fbFormat[7] = 2;
+		if ( f == 9 )
+			gl.errors.push_back( kInvalidOp );	// an earlier pass's error, left in the queue
+		const bool useCfg = docAnyFb ? ( known || !linear ) : WwCellUni::depthCfgServes( known, linear, fb, redNl );
+		const bool cfgHit = useCfg && cfg.hit( &owner, fb, W, H );
+		const bool checkErr = !cfgHit || !cfg.trusted;
+		if ( checkErr )
+			while ( gl.glGetError() != kNoError ) {
+			}
+		int fmt = 0;
+		if ( cfgHit ) {
+			fmt = cfg.depthBits;
+		} else {
+			fmt = gl.attachFormat( fb );
+			if ( useCfg )
+				cfg.keep( &owner, fb, W, H, fmt, 8, 0 );
+		}
+		if ( fmt != gl.fbFormat[fb] )
+			gl.errors.push_back( kInvalidOp );	// the depth blit between two formats
+		const unsigned blitErr = checkErr ? gl.glGetError() : kNoError;
+		if ( useCfg && blitErr != kNoError )
+			cfg.forget();
+		else if ( useCfg && checkErr && cfg.hit( &owner, fb, W, H ) )
+			cfg.trusted = true;
+		out.fmt.push_back( fmt );
+		out.landed.push_back( fmt == gl.fbFormat[fb] ? 1 : 0 );
+	}
+	out.asks = gl.total;
+	return out;
+}
+static void nonlinear()
+{
+	bool redGreen = false;
+#ifdef CELLUNI6_RED_NONLINEAR
+	redGreen = true;
+#endif
+	const TaaOut g = taaRun( redGreen, false ), r = taaRun( true, false );
+	check( g.fmt == r.fmt && g.landed == r.landed, "nonlinear: every frame's depth format and blit as the red's (30 frames)" );
+	check( std::count( r.landed.begin(), r.landed.end(), 0 ) == 0, "nonlinear: the red's blits all land (the model is sound)" );
+	std::printf( "     nonlinear: asks green %lld red %lld\n", g.asks, r.asks );
+	check( g.asks < r.asks - 40, "nonlinear: green asks less on the HDR-off frames (the format and the error reads, once trusted)" );
+	const TaaOut d = taaRun( false, true );
+	check( d.landed != r.landed, "nonlinear: doctored, the cache on a harness framebuffer misses its new format (frame 18)" );
+}
+
 int main()
 {
 	std::setvbuf( stdout, nullptr, _IONBF, 0 );
 	redNames();
 	jitter();
+	nonlinear();
 	std::printf( "%s (%d failed)\n", fails ? "CELLUNI6 FAIL" : "CELLUNI6 OK", fails );
 	return fails ? 1 : 0;
 }

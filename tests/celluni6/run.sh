@@ -7,7 +7,7 @@ OUT=${TMPDIR:-/tmp}/celluni6.$$
 mkdir -p "$OUT" || exit 2
 SRC=tests/celluni6/celluni6.cpp
 FLAGS="-std=c++17 -Wall -Wextra -Werror -O1 -Isrc"
-ITEMS="jitter"
+ITEMS="jitter nonlinear"
 bad=0
 $CXX $FLAGS "$SRC" -o "$OUT/green" || exit 2
 if "$OUT/green" > "$OUT/green.txt"; then echo "green: ok"; else echo "green: FAIL"; cat "$OUT/green.txt"; bad=1; fi

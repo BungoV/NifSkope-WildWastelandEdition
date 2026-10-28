@@ -400,6 +400,14 @@ struct DepthCfg
 	}
 };
 
+/* lane CELLUNI6 (nonlinear): whether the temporal AA's depth-format cache answers a frame. Before the tone map (a known
+ * state, CELLUNI4) on any framebuffer; after it (HDR off) on the window's own framebuffer (0) only, whose format is fixed
+ * for its context's life (lane SYNC1's rule): another framebuffer's name can come back holding another format. */
+inline bool depthCfgServes( bool known, bool linear, int drawFb, bool red )
+{
+	return known || ( !linear && drawFb == 0 && !red );
+}
+
 /*! lane FRAMESPEED1: an owner (a Renderer) whose GL context was made again (a context loss) shows a new serial: what was
  *  cached for the old context (DepthCfg: the same fbo id and size may now hold another format) must be forgotten */
 struct CtxWatch
