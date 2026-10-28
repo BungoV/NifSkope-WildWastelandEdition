@@ -925,6 +925,20 @@ bool wwVolAirOn()
 	return vs().on;
 }
 
+// lane FOGGI1: the sun gate (cell_volair.frag airSunGate) unless WW_CELL_FOGGI_RED carries "sun"
+static bool foggiSunRed()
+{
+	for ( const QString & t : wwEnvStr( "WW_CELL_FOGGI_RED" ).split( QLatin1Char( ',' ) ) )
+		if ( t.trimmed() == QLatin1String( "sun" ) )
+			return true;
+	return false;
+}
+
+bool wwVolAirSunGateWanted()
+{
+	return vs().on && !foggiSunRed();
+}
+
 void wwVolAirSetOn( bool on )
 {
 	VaState & s = vs();
@@ -1164,6 +1178,7 @@ static void vaPassInner( Scene * scene, bool run )
 		if ( l >= 0 )
 			fn->glGetUniformfv( prog->id, l, o );
 	};
+	QString sunGateNote = QStringLiteral( "off" );	// lane FOGGI1: the sun gate's echo
 	if ( !uniI( "fogOn" ) ) {
 		r->stopProgram();
 		s.last = QStringLiteral( "refused(no fog records: the Fog row, Lookdev's weather or the interior's fog)" );
@@ -1556,6 +1571,16 @@ static void vaPassInner( Scene * scene, bool run )
 	// lane GAPLOOK1 (FOGEXTRAS): the sun's scattering octaves a = b = c = 1/2 (Oz 2013's); red hard: shadows not lifted
 	prog->uni4f( "volMs", wwLookOn( WwLook::AirMultiScatter ) ? FloatVector4( 0.5f, 0.5f, 0.5f,
 		wwEnvStr( "WW_CELL_AIR_MS_RED" ) == QLatin1String( "hard" ) ? 0.0f : 1.0f ) : FloatVector4( 0.0f, 0.0f, 0.0f, 0.0f ) );
+	// lane FOGGI1: the sun gate (the far pass keeps it: one program); its evidence, as the shader will read it
+	const bool sunGate = !foggiSunRed();
+	prog->uni1b( "volSunRoom", sunGate );
+	{
+		float skyBase = 0.0f;
+		uniF( "cellSpecSkyBase", -1, &skyBase, 1 );
+		sunGateNote = !sunGate ? QStringLiteral( "off(red sun)" ) : uniI( "cellInterior" ) ? QStringLiteral( "off(interior)" )
+			: QStringLiteral( "on(rooms=%1 sky=%2)" ).arg( uniI( "cellGiOn" ) && uniI( "cellGiRooms" ) ? 1 : 0 )
+				.arg( uniI( "cellGiOn" ) && uniI( "cellGiSky" ) && skyBase >= 1.0f ? 1 : 0 );
+	}
 	if ( !surfCl && ( s.opt & 1 ) && g.optUnitsOk && ( s.terms & 2 ) && !( s.red & 16 ) && uniI( "cellOn" ) ) {
 		const std::vector<float> * sp = wwCellLightSpheres( scene );
 		const int nL = uniI( "cellLightCount" );
@@ -1937,7 +1962,7 @@ static void vaPassInner( Scene * scene, bool run )
 			.arg( volMb, 0, 'f', 1 ).arg( [] { WwTerrainShadowMap t; return wwTerrainShadowMap( t ) ? 1 : 0; }() );
 	s.last.chop( 1 );
 	s.last += QStringLiteral( " " ) + optNote + QStringLiteral( " " ) + groundNote + ( s.farTier > 0 ? QStringLiteral( " " ) + farNote : QString() )
-		+ ( dr.on ? QStringLiteral( " drift=" ) + dr.note : QString() ) + QStringLiteral( ")" );
+		+ ( dr.on ? QStringLiteral( " drift=" ) + dr.note : QString() ) + QStringLiteral( " sungate=" ) + sunGateNote + QStringLiteral( ")" );
 
 	/* WW_CELL_AIR_DUMP=<file>: int32 cols rows slices; the injected and the integrated volumes (cols x rows RGBA float
 	 * per layer, layer 0 first, bottom row first); <file>.txt the numbers an independent rebuild needs */

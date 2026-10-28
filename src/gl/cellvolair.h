@@ -87,6 +87,11 @@ void wwVolAirUniforms( Scene * scene );
 void wwVolAirSkyDraw( Scene * scene, bool probes );
 //! the row (ships off); the pin WW_CELL_AIR wins
 bool wwVolAirOn();
+/*! lane FOGGI1: the air's sun gate -- indoors (the GI's room labels) with no open sky toward the sun (the probe sky grid,
+ *  SPECOCC1's slot), a sample's sun in-scatter is what the shadow map says is lit, never the 1 of its fade, of no
+ *  cascades or of the multiple-scattering lift. On with the air; red WW_CELL_FOGGI_RED=sun: the sun as before. True also
+ *  asks celllights.cpp to pack the sky slot. */
+bool wwVolAirSunGateWanted();
 //! lane PERF2: true while the temporal air owes a still window paints (never in a harness)
 bool wwVolAirWantsSettle();
 void wwVolAirSetOn( bool on );

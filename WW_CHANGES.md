@@ -1,5 +1,33 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## Lane FOGGI1, sun gate (2026-10-28, branch foggi1-20261028): no sun in the air indoors unless the shadow map says lit — BUILD PENDING
+
+- **Why:** a measurement in the Concord hardware store found the indoor air lit mostly by sun in-scatter (sun 35.7,
+  GI 23.8, lamps 2.5), even where the room test calls the sample indoors.
+- **What the air's sun did with shadows before this** (`res/shaders/cell_volair.frag` airSun, exterior cells):
+  visibility = `wwSunShadow` when the cascades are drawn. That is min(cascades faded to 1 by distance, terrain
+  height map, screen-space contact) x clouds. Without cascades it was the clouds alone, so no geometry shadow at all.
+  With the far grid on it was `airFarVis` (cascades faded to 1, terrain, clouds). The shadow map was read wherever
+  the cascades reach. Three paths answered 1 regardless of the geometry: (a) past the cascades' reach, through their
+  distance fade, (b) no cascades, (c) the multiple-scattering octaves (the "Fog multiple scattering" row) lifting a
+  shadowed sample toward 1 (octave 1 by 1/2, octave 2 by 3/4). In interior cells the directional light (the template's,
+  not a sun) is never shadowed (vis = 1). This lane leaves interior cells alone.
+- **The gate:** per sample, gate = indoor share x (1 - open-sky share toward the sun). The indoor share comes from
+  the 8 room cells around P, with the same labels and trilinear weights the air's GI read uses; indoors means both
+  labels are non-zero. The open-sky share is the probe sky grid read along the sun, the slot SPECOCC1 packs. With no
+  slot packed, or no evidence, it counts as 0. Under the gate, vis = mix(vis, min(vis, map), gate). Here map is the
+  shadow map's own verdict times its coverage (the cascades' fade weight), min the terrain map, times the clouds.
+  It is 0 without cascades. The octaves lose their lift by the same gate. Inside the cascades' reach the shadow-map
+  term is unchanged. Only the parts that ignore shadowing go.
+- **Sky slot:** `celllights.cpp` now packs the sky grid's slot when the air is on with the gate (it was packed only
+  for the SpecOcc or Water sky visibility rows). The surfaces read it only through those rows, so they are unchanged.
+- **Census:** the air's line ends `sungate=on(rooms=0|1 sky=0|1)`, `off(interior)` or `off(red sun)`.
+- **Red:** `WW_CELL_FOGGI_RED=sun` gives the sun as before and the GI texture packed as before.
+- **Checked here (Linux, no game data):** the old and new `cell_volair.frag`, with includes inlined, both compile
+  under glslangValidator (GLSL 4.10). The `cast` identifier in `ww_sunshadow.glsl` is renamed for that check only.
+  `src/wwswitchstages.inc` was regenerated with `tools/wwswitch_survey.py`, which first reproduced HEAD's table
+  byte for byte. The C++ is not compiled (no Qt here), and nothing is rendered.
+
 ## Lane ROOMFIT10 (2026-10-28, branch roomfit10-20261028): the volume fit's rays, mostly on the GPU, still exact
 
 - **Fewer rays sent back to the CPU:** the GPU ray tracer (src/bakert/rqx.comp) now calls a ray "unsure" only within
