@@ -1,5 +1,22 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## Lane ROOMFIT8 (2026-10-28, branch roomfit8-20261028): room loop share, window glass census
+
+- **Room loop:** the rooms still run side by side (VOLFIT6), but a room's own fan-outs now take the threads the
+  rooms still running leave free, so the last big room no longer runs alone on one core. Goodneighbor's room loop
+  2.8 -> 0.86 s (fit 10.0 -> 8.0 s), museum 1.04 -> 0.46 s; Concord and Sanctuary unchanged. `.space` bytes equal
+  the old path and HALLINDOOR1's run on all 4 cells. `WW_VOLFIT_SPEC=roomshare=0` gives VOLFIT6's path.
+- The same share for the fine fit's small rooms measured as noise (Concord 6.6-7.0 s either way: the small rooms
+  are throughput-bound, not tail-bound), so it was taken out again.
+- **Window glass census:** `volcheck` casts 12 x 12 rays across each outside "window" threshold along its thin axis
+  and prints the glass / solid / air first hits (`volcheck: windows ...`). `--glassmin F` counts a window as an
+  opening only if glass covers F of its open face (default 0: every window, as before); `--glassreach` (128).
+  Concord's 3 windows are 97-100% glass. The museum's hall "window" gets 1 glass hit and 26-31 sky rays of 144:
+  most of it is open roof, not glazing (for a ruling; the default keeps HALLINDOOR1's behaviour).
+- The fine fit's census adds the classification rays and their CPU recasts: Concord 63.5 M rays, 12.1 M recast
+  (19%), museum 3%. That recast share is the 51 s thread-summed post pass.
+- Cost: offline only, 0 GPU-ms and 0 memory at runtime.
+
 ## Lane HALLINDOOR1 (2026-10-28, branch hallindoor1-20261027): air under a glazed roof reads indoor
 
 - **The indoor rule's openings:** a point's sky ray (or a hit past the 1536-unit reach) that leaves through a room's
