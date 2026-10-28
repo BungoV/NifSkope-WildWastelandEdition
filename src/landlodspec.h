@@ -164,6 +164,7 @@ constexpr int kPageReach = ( kWindowMax / 2 - 1 ) * kLodLevel;	// 28 cells
 struct Window
 {
 	int fx = 0, fy = 0, w = kWindow;
+	int mip = 0;	// lane LANDSPEC7: the chunks' mip each layer holds (the outer window's 1 or 2)
 };
 
 inline int chunkFloor( int c )
@@ -206,18 +207,52 @@ inline Window windowFor( int camX, int camY, bool block, int bx0, int by0, int b
  * w 0 = no outer window (the page holds the whole block). Red WW_LANDSPEC_RED=page28: none (LANDSPEC5). */
 constexpr int kOuterMax = 32;
 constexpr int kOuterMip = 1;
-constexpr int kOuterBitWords = kOuterMax * kOuterMax / 64;
 constexpr int kOuterReach = ( kOuterMax / 2 - 1 ) * kLodLevel;	// 60 cells
 
-inline Window outerFor( int camX, int camY, int bx0, int by0, int bx1, int by1 )
+/* lane LANDSPEC7: a block wider than kOuterMax chunks (125 cells) reads its outer window from the chunks' mip
+ * kOuterMip2 instead (128 x 128 BC3, 8 levels, 21,872 B a layer, a quarter of mip 1's), so up to kOuterMax2 chunks a
+ * side are whole: 129 x 129 = 33 x 33 = 22.7 MiB, 177 x 177 = 45 x 45 = 42.2 MiB (LANDSPEC6 paged them at 32 x 32 mip 1
+ * = 85.4 MiB and left the land past 60 cells bare). 45 x 45 = 2025 layers, under the 2048 a GL 4.5 driver must give
+ * (GL_MAX_ARRAY_TEXTURE_LAYERS, read at draw: `layers`; a smaller limit narrows the window). Wider (the whole
+ * Commonwealth, 49 x 49 = 2401 layers) pages the 45 x 45 round the camera: every cell within kOuterReach2 = 84 of it.
+ * Red WW_LANDSPEC_RED=outer32: LANDSPEC6's 32 x 32 at mip 1, paged past 125 cells. */
+constexpr int kOuterMax2 = 45;
+constexpr int kOuterMip2 = 2;
+constexpr int kOuterReach2 = ( kOuterMax2 / 2 - 1 ) * kLodLevel;	// 84 cells
+constexpr int kOuterBitWords = ( kOuterMax2 * kOuterMax2 + 63 ) / 64;	// 32 (LANDSPEC6: 16)
+
+//! a BC3 array's bytes (16 B a 4 x 4 block, every level at least one block): w x h, `levels` levels, `layers` layers
+inline long long arrayBytes( int w, int h, int levels, int layers )
+{
+	long long b = 0;
+	for ( int l = 0; l < levels; l++ )
+		b += 16LL * std::max( 1, ( std::max( w >> l, 1 ) + 3 ) / 4 ) * std::max( 1, ( std::max( h >> l, 1 ) + 3 ) / 4 );
+	return b * layers;
+}
+
+//! the outer window's chunks a side at mip kOuterMip2 for a driver giving `layers` array layers (0: LANDSPEC6's)
+inline int outerCap2( int layers )
+{
+	int c = 0;
+	while ( c < kOuterMax2 && ( c + 1 ) * ( c + 1 ) <= layers )
+		c++;
+	return c > kOuterMax ? c : 0;
+}
+
+inline Window outerFor( int camX, int camY, int bx0, int by0, int bx1, int by1, int layers = 2048, bool red32 = false )
 {
 	const int c0 = chunkFloor( bx0 ), c1 = chunkFloor( bx1 ), r0 = chunkFloor( by0 ), r1 = chunkFloor( by1 );
 	const int wb = std::max( c1 - c0, r1 - r0 ) / kLodLevel + 1;
 	if ( wb <= kWindowMax )
 		return Window{ 0, 0, 0 };
 	if ( wb <= kOuterMax )
-		return Window{ c0, r0, wb };
-	return Window{ pageFirst( camX, c0, c1, kOuterMax ), pageFirst( camY, r0, r1, kOuterMax ), kOuterMax };
+		return Window{ c0, r0, wb, kOuterMip };
+	const int cap = red32 ? 0 : outerCap2( layers );
+	if ( !cap )
+		return Window{ pageFirst( camX, c0, c1, kOuterMax ), pageFirst( camY, r0, r1, kOuterMax ), kOuterMax, kOuterMip };
+	if ( wb <= cap )
+		return Window{ c0, r0, wb, kOuterMip2 };
+	return Window{ pageFirst( camX, c0, c1, cap ), pageFirst( camY, r0, r1, cap ), cap, kOuterMip2 };
 }
 
 /* lane LANDSPEC6: a "Fixed Dimensions" world (WRLD DATA bit 0x40: DiamondCity, DiamondCityFX, NukaWorldAmphitheater,
@@ -243,6 +278,27 @@ inline void streamCentre( bool fixed, int wx, int wy, int openX, int openY, int 
 {
 	x = fixed ? wx : openX;
 	y = fixed ? wy : openY;
+}
+
+/* lane LANDSPEC7: the game loads a fixed world's cell only within uGridsToLoad / 2 of WCTR (notes/landspec6/re,
+ * notes/landspec7/re), so an open's block (n cells a side round cx, cy) is fitted to the cells it would load: at most
+ * uGridsToLoad a side, moved (not cut: a spec block is square round its centre) until it lies inside WCTR +- g. The
+ * camera stands on the fitted block's centre. Returns whether the block changed. Red WW_LANDSPEC_RED=fixedopen: the
+ * asked block, cells the game never loads included (LANDSPEC6). */
+constexpr int kFixedGridHalf = 2;	// uGridsToLoad 5 / 2
+
+inline bool fixedBlock( int wx, int wy, int g, int & cx, int & cy, int & n )
+{
+	const int h0 = ( std::max( 1, n ) - 1 ) / 2;
+	const int h = std::min( h0, std::max( 0, g ) );
+	const int x = std::max( wx - ( g - h ), std::min( cx, wx + ( g - h ) ) );
+	const int y = std::max( wy - ( g - h ), std::min( cy, wy + ( g - h ) ) );
+	const bool changed = h != h0 || x != cx || y != cy;
+	if ( h != h0 )
+		n = 2 * h + 1;
+	cx = x;
+	cy = y;
+	return changed;
 }
 
 /* lane LANDSPEC3: a .pbrm ground's roughness at the LOD gloss g: the GGX lobe matching the legacy draw's Blinn-Phong

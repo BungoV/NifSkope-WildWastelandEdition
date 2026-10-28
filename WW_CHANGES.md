@@ -14,6 +14,32 @@
 - **GI census:** the Space-rooms-into-GI line adds "unmapped thinner than a grid cell N". These are rooms thinner than
   one GI room-grid cell, so no cell centre can fall in them.
 - Cost: none at draw time (0 GPU ms at 1080p, no GPU memory). One small text file is written next to a soup dump.
+## Lane LANDSPEC7 (2026-10-28, branch landspec7-20261028): the LANDSPEC6 leftovers
+
+- **A fixed world shows only what the game loads:** the game loads a "Fixed Dimensions" world's cells only within
+  uGridsToLoad / 2 (2) of WCTR, wherever the player arrives. An open of DiamondCity, DiamondCityFX,
+  NukaWorldAmphitheater or NukaWorldMarket now has its block fitted inside WCTR +- 2 right after the world loads.
+  The block is at most 5 x 5, moved in rather than cut. The camera, the far rings, the band window and the streamer
+  all use the fitted block. Example: DiamondCity asked at 10,10 n5 opens 0,0 n5. A streamed fixed world also stops
+  building the prefetch row round the camera past WCTR +- 2. Telemetry: "landspec: fixed world, WCTR x,y +-2: asked
+  ... -> ..." (also in the open's notes), and "cell stream: fixed world ..., no prefetch past it". Red (a new value of
+  `WW_LANDSPEC_RED`): `fixedopen`, the asked block and the prefetch row as before.
+- **Band texture on the widest blocks:** a near block wider than 32 chunks (about 125 cells) now reads its outer
+  window from the chunks' mip 2 (128 x 128) instead of mip 1. That makes the whole block covered up to 45 x 45 chunks
+  (177 x 177 cells), where it used to be paged at 32 x 32. A wider block (the whole Commonwealth, 49 x 49 chunks)
+  pages 45 x 45 round the camera, so every cell within 84 of it is covered (it was 60). 45 x 45 = 2025 layers fits
+  the driver's array-layer limit (2048, read at draw); a smaller limit narrows the window, and under 33 x 33 it keeps
+  LANDSPEC6's page. Blocks up to 32 chunks keep mip 1, unchanged. Telemetry: the "landspec: band outer window ..."
+  line now gives the mip and the MiB. Red `outer32`: LANDSPEC6's 32 x 32 at mip 1.
+- Cost (1080p): shader work is unchanged (the outer bit table grows from 16 to 32 vec4 uniforms; one fetch as
+  before; estimated under 0.01 ms). GPU memory is lower: 21,872 B a chunk at mip 2. 129 x 129 = 33 x 33 = 22.7 MiB,
+  177 x 177 and wider = 45 x 45 = 42.2 MiB, against LANDSPEC6's 85.4 MiB for any block past 125 cells. Detail is
+  softer on those blocks only: 32 texels a cell instead of 64, from 28 cells out. The fit of a fixed world costs
+  nothing. Live GPU-ms owed.
+- Not done: the rain wetness (waits on WEATHERLOOK1 phase B). uGridsToLoad is taken as the default 5; the cell view
+  reads no Fallout4.ini grid. The whole Commonwealth at once (2401 layers) is over the 2048-layer limit, so past 84
+  cells from the camera it keeps no band texture.
+
 ## Lane LANDSPEC6 (2026-10-28, branch landspec6-20261028): the LANDSPEC5 leftovers
 
 - **"Fixed Dimensions" worlds stay put:** a worldspace with WRLD DATA bit 0x40 (DiamondCity, DiamondCityFX,

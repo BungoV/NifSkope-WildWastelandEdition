@@ -189,6 +189,9 @@ public:
 	int sliceNodes = 0;           //!< node blocks taken in this slice, still to be wired
 	float shift = 2048.0f;
 	bool fixedCentre = false;     //!< lane LANDSPEC6: a fixed world's block never shifts (red WW_LANDSPEC_RED=fixedfollow)
+	//! lane LANDSPEC7: a fixed world builds no cell round the eye past WCTR +- 2: the block never moves there, and the
+	//! game never loads those cells (red WW_LANDSPEC_RED=fixedopen: the prefetch row is built)
+	bool noPrefetch = false;
 
 	~Stream() override
 	{
@@ -1019,7 +1022,7 @@ bool Stream::tick( Scene * sc, const Vector3 & eye )
 	const int ex = cellOf( eye[0] ), ey = cellOf( eye[1] );
 	for ( int dy = -2; dy <= 2; dy++ )
 		for ( int dx = -2; dx <= 2; dx++ )
-			if ( !wanted.count( Key( ex + dx, ey + dy ) ) )
+			if ( !noPrefetch && !wanted.count( Key( ex + dx, ey + dy ) ) )
 				prefetch.insert( Key( ex + dx, ey + dy ) );
 
 	unloadWaiting = false;
@@ -1196,9 +1199,11 @@ void cellStreamStart( NifModel * nif, std::shared_ptr<CellStreamSeed> seed )
 	s->seed = seed;
 	s->fixedCentre = seed->fixedWorld && wwEnvStr( "WW_LANDSPEC_RED" ) != QLatin1String( "fixedfollow" );
 	LandLodSpec::streamCentre( s->fixedCentre, seed->fixedX, seed->fixedY, seed->cx, seed->cy, s->ccx, s->ccy );	// LANDSPEC6
+	s->noPrefetch = s->fixedCentre && wwEnvStr( "WW_LANDSPEC_RED" ) != QLatin1String( "fixedopen" );	// LANDSPEC7
 	if ( seed->fixedWorld )
-		std::fprintf( stderr, "cell stream: fixed world, block centre %d,%d (%s)\n", s->ccx, s->ccy,
-			s->fixedCentre ? "WCTR, no shifts" : "RED fixedfollow: the open's, shifting" );
+		std::fprintf( stderr, "cell stream: fixed world, block centre %d,%d (%s)%s\n", s->ccx, s->ccy,
+			s->fixedCentre ? "WCTR, no shifts" : "RED fixedfollow: the open's, shifting",
+			s->noPrefetch ? ", no prefetch past it" : s->fixedCentre ? ", RED fixedopen: prefetch round the eye" : "" );
 	if ( wwEnvIsSet( "WW_CELL_STREAM_BUDGET" ) )
 		s->budgetMs = std::clamp( wwEnvStr( "WW_CELL_STREAM_BUDGET" ).toDouble(), 0.5, 100.0 );
 	if ( wwEnvIsSet( "WW_CELL_STREAM_SHIFT" ) )

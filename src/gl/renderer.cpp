@@ -443,7 +443,7 @@ bool wwLandLodWantsRepaint()
  * LANDSPEC4: n x n chunks (n up to 8, layer = x + n y). LANDSPEC5: n up to 16, the bits in kBitWords words */
 struct WwLandLodBits
 {
-	quint64 w[LandLodSpec::kOuterBitWords] = {};	// LANDSPEC6: the outer window's 16 words (the page uses 4)
+	quint64 w[LandLodSpec::kOuterBitWords] = {};	// LANDSPEC6: the outer window's words (LANDSPEC7: 32; the page uses 4)
 	bool any() const
 	{
 		for ( quint64 b : w )
@@ -460,8 +460,10 @@ struct WwLandLodBits
 	}
 };
 
-/* LANDSPEC6: outer = the outer window (its own array on LandLodOuter, each chunk from its mip kOuterMip) */
-static WwLandLodBits wwLandLodWindow( Scene * scene, const QString & ws, int fx, int fy, int n, bool outer = false )
+/* LANDSPEC6: outer = the outer window (its own array on LandLodOuter, each chunk from its mip kOuterMip)
+ * LANDSPEC7: outerMip the outer window's mip (kOuterMip, or kOuterMip2 past 32 chunks a side) */
+static WwLandLodBits wwLandLodWindow( Scene * scene, const QString & ws, int fx, int fy, int n, bool outer = false,
+	int outerMip = LandLodSpec::kOuterMip )
 {
 	using PfnStorage3D = void ( APIENTRY * )( GLenum, GLsizei, GLenum, GLsizei, GLsizei, GLsizei );
 	using PfnCopyImage = void ( APIENTRY * )( GLuint, GLenum, GLint, GLint, GLint, GLint, GLuint, GLenum, GLint, GLint,
@@ -471,10 +473,10 @@ static WwLandLodBits wwLandLodWindow( Scene * scene, const QString & ws, int fx,
 	QOpenGLContext * q = QOpenGLContext::currentContext();
 	auto fn = scene->renderer->fn;
 	Win & win = wins[outer ? 1 : 0][q];
-	const int mip = outer ? LandLodSpec::kOuterMip : 0;
+	const int mip = outer ? outerMip : 0;
 	const QString w = ws.toLower();
-	const QString key = QStringLiteral( "%1|%2|%3|%4|%5" ).arg( w ).arg( fx ).arg( fy )
-		.arg( quintptr( scene->nifModel ) ).arg( n );
+	const QString key = QStringLiteral( "%1|%2|%3|%4|%5|%6" ).arg( w ).arg( fx ).arg( fy )
+		.arg( quintptr( scene->nifModel ) ).arg( n ).arg( mip );
 	fn->glActiveTexture( GLenum( GL_TEXTURE0 + ( outer ? WwCellUnit::LandLodOuter : WwCellUnit::LandLodDiff ) ) );
 	if ( n <= 0 ) {	// no window: nothing bound
 		fn->glBindTexture( GL_TEXTURE_2D_ARRAY, 0 );
@@ -525,8 +527,9 @@ static WwLandLodBits wwLandLodWindow( Scene * scene, const QString & ws, int fx,
 			win.bits.w[k >> 6] |= quint64( 1 ) << ( k & 63 );
 		}
 		fn->glBindTexture( GL_TEXTURE_2D, 0 );
-		std::fprintf( stderr, "landspec: band %s %s %d,%d: %d of %d chunks, %dx%d, %d levels\n", outer ? "outer window" : "window",
-			qPrintable( w ), fx, fy, win.bits.count(), n * n, w0, h0, levels );
+		std::fprintf( stderr, "landspec: band %s %s %d,%d: %d of %d chunks, %dx%d, %d levels, mip %d, %.1f MiB\n",
+			outer ? "outer window" : "window", qPrintable( w ), fx, fy, win.bits.count(), n * n, w0, h0, levels, mip,
+			double( LandLodSpec::arrayBytes( w0, h0, levels, n * n ) ) / 1048576.0 );
 	}
 	fn->glBindTexture( GL_TEXTURE_2D_ARRAY, win.bits.any() ? win.tex : 0 );
 	return win.bits;
@@ -559,10 +562,17 @@ static void wwLandLodTextures( Scene * scene, NifSkopeOpenGLContext::Program * p
 				int( std::floor( ( camScene[1] + oy ) / LandLodSpec::kCell ) ), block, bx - half, by - half, bx + half, by + half,
 				win8 ? LandLodSpec::kWindowMax4 : LandLodSpec::kWindowMax, !win8 );	// LANDSPEC5: to 16 a side, then paged
 			bits = wwLandLodWindow( scene, ws, win.fx, win.fy, win.w );
-			if ( block && !win8 && wwLandSpecRed() != "page28" )	// lane LANDSPEC6: past the page, the outer window
+			if ( block && !win8 && wwLandSpecRed() != "page28" ) {	// lane LANDSPEC6: past the page, the outer window
+				static GLint layers = 0;	// lane LANDSPEC7: the driver's array layers (GL_MAX_ARRAY_TEXTURE_LAYERS)
+				if ( !layers ) {
+					fn->glGetIntegerv( GLenum( 0x88FF ), &layers );
+					layers = std::max( layers, GLint( 1 ) );
+				}
 				outer = LandLodSpec::outerFor( int( std::floor( ( camScene[0] + ox ) / LandLodSpec::kCell ) ),
-					int( std::floor( ( camScene[1] + oy ) / LandLodSpec::kCell ) ), bx - half, by - half, bx + half, by + half );
-			outerBits = wwLandLodWindow( scene, ws, outer.fx, outer.fy, outer.w, true );
+					int( std::floor( ( camScene[1] + oy ) / LandLodSpec::kCell ) ), bx - half, by - half, bx + half, by + half,
+					int( layers ), wwLandSpecRed() == "outer32" );
+			}
+			outerBits = wwLandLodWindow( scene, ws, outer.fx, outer.fy, outer.w, true, outer.mip );
 		}
 		for ( int k = 1; k < 3; k++ ) {
 			const QString path = k == 1 ? QStringLiteral( "textures\\terrain\\noise.dds" )
