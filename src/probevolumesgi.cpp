@@ -268,10 +268,22 @@ QString probeRoomsFromSpace( const ProbeVolumes & v, ProbeRooms * r, const QStri
 			bCells++;
 		}
 	}
-	int inGrid = 0, interiorNow = 0;
+	int inGrid = 0, interiorNow = 0, thin = 0;
 	for ( int k = 1; k <= nRooms; k++ ) {
 		if ( cellsOf[size_t( k )] > 0 )
 			inGrid++;
+		else {   // lane ROOMFIT9: an unmapped room no grid cell centre fits in (its box thinner than a cell on some axis)
+			float lo[3] = { 3.4e38f, 3.4e38f, 3.4e38f }, hi[3] = { -3.4e38f, -3.4e38f, -3.4e38f };
+			for ( const ProbeVolumeShape & s : v.rooms[size_t( k - 1 )].shapes ) {
+				const float h = 0.5f * std::sqrt( s.size[0] * s.size[0] + s.size[1] * s.size[1] + s.size[2] * s.size[2] );
+				for ( int c = 0; c < 3; c++ ) {
+					lo[c] = std::min( lo[c], s.center[c] - ( s.rotation[0] == 0 && s.rotation[1] == 0 && s.rotation[2] == 0 ? 0.5f * s.size[c] : h ) );
+					hi[c] = std::max( hi[c], s.center[c] + ( s.rotation[0] == 0 && s.rotation[1] == 0 && s.rotation[2] == 0 ? 0.5f * s.size[c] : h ) );
+				}
+			}
+			if ( std::min( { hi[0] - lo[0], hi[1] - lo[1], hi[2] - lo[2] } ) < r->cell )
+				thin++;
+		}
 		if ( cellsOf[size_t( k )] > 0 && 2 * wasOutdoors[size_t( k )] > cellsOf[size_t( k )] )
 			interiorNow++;
 	}
@@ -280,8 +292,8 @@ QString probeRoomsFromSpace( const ProbeVolumes & v, ProbeRooms * r, const QStri
 	r->rooms = nRooms + leftId.size();
 	return QStringLiteral( "space rooms into GI: rooms %1, mapped %2, unmapped %3, interior where the room grid had outdoors %4; "
 		"room-grid rooms taken over %5, room-grid rooms kept as their own %6 (cells %7), gap cells %8, second-name cells %9 "
-		"(grid %10x%11x%12 cell %13, %14 ms)" )
+		"(grid %10x%11x%12 cell %13, %14 ms); unmapped thinner than a grid cell %15" )
 		.arg( nRooms ).arg( inGrid ).arg( nRooms - inGrid ).arg( interiorNow ).arg( rcTo.size() ).arg( leftId.size() ).arg( leftCells )
 		.arg( gapCells ).arg( bCells ).arg( r->dims[0] ).arg( r->dims[1] ).arg( r->dims[2] ).arg( double( r->cell ), 0, 'f', 1 )
-		.arg( timer.elapsed() );
+		.arg( timer.elapsed() ).arg( thin );
 }

@@ -6304,6 +6304,9 @@ static bool cellBuild( NifModel * nif, const CellSceneSpec & specAsked, CellChun
 				vs.recxFile = rx;
 				vs.recxName = recxName;
 			}
+			// lane ROOMFIT9: the stage's other inputs beside the soup dump (`volumes --like-cell` rebuilds these files exactly)
+			if ( !soupDump.isEmpty() && !probeVolumesStageInWrite( QString::fromLocal8Bit( soupDump ) + QStringLiteral( ".spacein" ), volAps, vs ) )
+				qWarning() << "WW_CELL_PROBE_SOUP: cannot write the Space stage inputs";
 			ProbeVolumes vol;
 			bool vok = false;
 			const QString vlog = probeVolumesStage( probeSoup, volMarkers, volAps, vs, &vol, &vok );

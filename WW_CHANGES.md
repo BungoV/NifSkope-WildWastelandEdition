@@ -1,5 +1,20 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## Lane ROOMFIT9 (2026-10-28, branch roomfit9-20261028): Space files rebuilt offline exactly as the cell view made them
+
+- **`volumes --like-cell <file>.spacein`:** a cell view that dumps its soup (`WW_CELL_PROBE_SOUP`) now also writes
+  `<soup>.spacein`, the Space stage's own inputs (world, interior, keys, clip box, red, recx, the placer's apertures).
+  The CLI `volumes --like-cell` reads it and fits with those inputs instead of guessing them from a rect, so the
+  light's Space files can be rebuilt offline byte for byte. The markers file next to the soup is read by default in
+  this mode. On Goodneighbor a sidecar rebuilt from the bake's probes.tsv gave the in-cell files exactly (9 of 9);
+  the rect-guess CLI fit differs in 1 of 9.
+- **Exact inputs:** the markers file and the sidecar write floats with 9 digits, so they read back unchanged. The
+  manifest's soup hash takes two-sided and alpha-masked triangles by number, so a soup read from a file hashes like
+  the one in memory.
+- **GI census:** the Space-rooms-into-GI line adds "unmapped thinner than a grid cell N". These are rooms thinner than
+  one GI room-grid cell, so no cell centre can fall in them.
+- Cost: none at draw time (0 GPU ms at 1080p, no GPU memory). One small text file is written next to a soup dump.
+
 ## Lane LANDSPEC5 (2026-10-28, branch landspec5-20261028): the LANDSPEC4 leftovers
 
 - **Bakes and the open's far stack use the parent:** a worldspace with "Use LOD Data" bakes its probes against its

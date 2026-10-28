@@ -214,11 +214,17 @@ struct ProbeVolumesStageSpec
 QString probeVolumesStage( const ProbeSoup & soup, const std::vector<ProbeVolumeMarker> & markers,
 	const std::vector<ProbeVolumeAperture> & apertures, const ProbeVolumesStageSpec & st, ProbeVolumes * out, bool * ok );
 
+/*! lane ROOMFIT9: the in-cell stage's other inputs (apertures, clip, keys, world, red, recx) as `<soup>.spacein` beside
+ *  the soup dump; `volumes --like-cell <file>` reads them back, so the CLI rebuilds the in-cell files exactly. */
+bool probeVolumesStageInWrite( const QString & path, const std::vector<ProbeVolumeAperture> & aps, const ProbeVolumesStageSpec & st );
+bool probeVolumesStageInRead( const QString & path, std::vector<ProbeVolumeAperture> * aps, ProbeVolumesStageSpec * st );
+
 /*! `nifskope -no-gui volumes --soup <psp> --out <dir> [--key K] [--world W] [--interior] [--markers f] [--recx f]
  *  [--rect x0,y0,x1,y1 (clip, and the placer's apertures as evidence)] [--skymax s] [--red r] [--grid] [--view-dump f]`:
  *  builds, writes `<dir>/<key>.space` + `.space.manifest` (+ `<key>.spacegrid` with --grid: float origin[3], cell;
  *  int dims[3]; int32 label per cell), or prints "space: skipped (clean)" when the record matches.
- *  `--gi-map f`: the rooms mapped onto a GI room grid of the same soup (probevolumesgi.h), written as a TSV. */
+ *  `--gi-map f`: the rooms mapped onto a GI room grid of the same soup (probevolumesgi.h), written as a TSV.
+ *  `--like-cell <soup>.spacein`: the in-cell stage's own clip, keys, apertures and red (markers default `<soup>.markers`). */
 int probeVolumesCli( const QStringList & args );
 
 #endif // PROBEVOLUMES_H
