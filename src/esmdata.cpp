@@ -112,6 +112,9 @@ bool EsmWorld::load( const QString & esmPath, quint32 worldspaceFormID, QString 
 			return false;
 		}
 		quint32 wnam = 0, pnam = 0;	// lane ALLON2: the parent worldspace and its use flags
+		wsFlags = 0;
+		wsHasCentre = false;
+		wsCentreX = wsCentreY = 0;
 		{
 			ESMFile::ESMField f( *esm, w );
 			while ( f.next() ) {
@@ -121,6 +124,12 @@ bool EsmWorld::load( const QString & esmPath, quint32 worldspaceFormID, QString 
 					pnam = f.readUInt16();
 				} else if ( f == "EDID" ) {
 					wsEdid = fieldString( f );
+				} else if ( f == "DATA" && f.size() >= 1 ) {	// lane LANDSPEC6: the world's flags
+					wsFlags = f.readUInt8();
+				} else if ( f == "WCTR" && f.size() >= 4 ) {	// lane LANDSPEC6: the fixed centre cell
+					wsCentreX = f.readInt16();
+					wsCentreY = f.readInt16();
+					wsHasCentre = true;
 				} else if ( f == "DNAM" && f.size() >= 8 ) {
 					defLandH = f.readFloat();
 					defWaterH = f.readFloat();
@@ -131,6 +140,9 @@ bool EsmWorld::load( const QString & esmPath, quint32 worldspaceFormID, QString 
 				}
 			}
 		}
+		if ( LandLodSpec::fixedWorld( wsFlags ) )	// lane LANDSPEC6
+			std::fprintf( stderr, "esm world: %s has Fixed Dimensions (DATA 0x%02X), centre cell %d,%d%s\n",
+				qPrintable( wsEdid ), wsFlags, wsCentreX, wsCentreY, wsHasCentre ? "" : " (no WCTR: 0,0)" );
 		tr( "load: header fields read, indexing cells" );
 		indexWorldspace();
 		tr( "load: cells indexed" );

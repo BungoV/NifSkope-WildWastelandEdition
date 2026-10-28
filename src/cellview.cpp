@@ -14,6 +14,7 @@ BSD License - see nifskope.h
 #include "cellclick.h"		// lane CELLVIEW2
 #include "cellground.h"		// lane CELLVIEW2
 #include "cellsplat.h"		// lane CELLVIEW4
+#include "landlodspec.h"	// lane LANDSPEC6: fixedWorld
 #include "cellidentity.h"	// lane CELLVIEW2
 #include "cellactor.h"		// lane PLACED1
 #include "gl/celllooks.h"	// lane GAPLOOK2: Actors outdoors, Weapon mod parts
@@ -3717,6 +3718,14 @@ static bool cellBuild( NifModel * nif, const CellSceneSpec & specAsked, CellChun
 			: wwEnv( "WW_LANDSPEC_RED" ) == "ownlod" ? spec.world : world.lodWorldEdid(), origin[0], origin[1] );
 		if ( !spec.interior )	// lane LANDSPEC4: the band window covers the whole near block
 			wwCellLandBlock( nif, spec.cx, spec.cy, spec.n / 2 );
+		{	// lane LANDSPEC6: a "Fixed Dimensions" world keeps its blend centre on WCTR (red fixedfollow: the camera's)
+			const bool fixedWs = !spec.interior && LandLodSpec::fixedWorld( world.worldFlags() );
+			wwCellLandFixed( nif, fixedWs, world.fixedCentreX(), world.fixedCentreY() );
+			if ( fixedWs )
+				std::fprintf( stderr, "landspec: %s is a fixed world: blend centre and streamed block stay on cell %d,%d%s\n",
+					qPrintable( spec.world ), world.fixedCentreX(), world.fixedCentreY(),
+					wwEnv( "WW_LANDSPEC_RED" ) == "fixedfollow" ? " (RED fixedfollow: they follow the camera)" : "" );
+		}
 		wwCellGrassBegin( nif );   // lane GRASSMB1: and its grass shapes
 	}
 	wwCellWaterSetDefault( nif, world.defaultWaterType() );	// lane WATERUNDER5: its placed water reads as sea under it
@@ -7089,6 +7098,9 @@ static bool cellBuild( NifModel * nif, const CellSceneSpec & specAsked, CellChun
 		seed.cx = spec.cx;
 		seed.cy = spec.cy;
 		seed.roam = farStream.roam;
+		seed.fixedWorld = LandLodSpec::fixedWorld( world.worldFlags() );	// lane LANDSPEC6: the block stays on WCTR
+		seed.fixedX = world.fixedCentreX();
+		seed.fixedY = world.fixedCentreY();
 		if ( const WwCellLighting * L = wwCellLightsFor( nif ) )
 			seed.base = *L;
 		seed.farHand = farStream.handBlocks;

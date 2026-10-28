@@ -199,6 +199,52 @@ inline Window windowFor( int camX, int camY, bool block, int bx0, int by0, int b
 	return Window{ pageFirst( camX, c0, c1, cap ), pageFirst( camY, r0, r1, cap ), cap };
 }
 
+/* lane LANDSPEC6: a block wider than the page (61 cells) also gets an outer window, one layer a chunk read from the
+ * chunk's mip kOuterMip (256 x 256 BC3, 9 levels, 85.4 KiB a layer), up to kOuterMax chunks a side: 81 x 81 = 21 x 21
+ * = 36.8 MiB, 125 x 125 and wider = 32 x 32 = 85.4 MiB. The page wins where it holds the cell; the outer window covers
+ * the rest. A block wider than kOuterMax chunks pages it round the camera (every cell within kOuterReach of it).
+ * w 0 = no outer window (the page holds the whole block). Red WW_LANDSPEC_RED=page28: none (LANDSPEC5). */
+constexpr int kOuterMax = 32;
+constexpr int kOuterMip = 1;
+constexpr int kOuterBitWords = kOuterMax * kOuterMax / 64;
+constexpr int kOuterReach = ( kOuterMax / 2 - 1 ) * kLodLevel;	// 60 cells
+
+inline Window outerFor( int camX, int camY, int bx0, int by0, int bx1, int by1 )
+{
+	const int c0 = chunkFloor( bx0 ), c1 = chunkFloor( bx1 ), r0 = chunkFloor( by0 ), r1 = chunkFloor( by1 );
+	const int wb = std::max( c1 - c0, r1 - r0 ) / kLodLevel + 1;
+	if ( wb <= kWindowMax )
+		return Window{ 0, 0, 0 };
+	if ( wb <= kOuterMax )
+		return Window{ c0, r0, wb };
+	return Window{ pageFirst( camX, c0, c1, kOuterMax ), pageFirst( camY, r0, r1, kOuterMax ), kOuterMax };
+}
+
+/* lane LANDSPEC6: a "Fixed Dimensions" world (WRLD DATA bit 0x40: DiamondCity, DiamondCityFX, NukaWorldAmphitheater,
+ * NukaWorldMarket) never moves its grid. The game puts the grid and the land-LOD blend centre on the middle of the
+ * WCTR cell when the world loads, skips every grid shift after, and places the terrain LOD once at the arrival point
+ * (notes/landspec6/re). Red WW_LANDSPEC_RED=fixedfollow: the centre and the streamed block follow the camera. */
+constexpr unsigned kFixedDimensions = 0x40u;
+
+inline bool fixedWorld( unsigned dataFlags )
+{
+	return ( dataFlags & kFixedDimensions ) != 0;
+}
+
+//! a fixed world's blend centre in scene units (the scene's origin at world ox, oy): the WCTR cell's middle
+inline void fixedCentre( int wx, int wy, float ox, float oy, float & x, float & y )
+{
+	x = ( float( wx ) + 0.5f ) * kCell - ox;
+	y = ( float( wy ) + 0.5f ) * kCell - oy;
+}
+
+//! the streamed near block's centre cell at the open: a fixed world's WCTR, else the open's centre (which then shifts)
+inline void streamCentre( bool fixed, int wx, int wy, int openX, int openY, int & x, int & y )
+{
+	x = fixed ? wx : openX;
+	y = fixed ? wy : openY;
+}
+
 /* lane LANDSPEC3: a .pbrm ground's roughness at the LOD gloss g: the GGX lobe matching the legacy draw's Blinn-Phong
  * power n = 2^(10 g + 1) (alpha^2 = 2 / (n + 2), rough = sqrt(alpha)); pbrm_default.frag has the same line */
 inline float pbrRough( float g )

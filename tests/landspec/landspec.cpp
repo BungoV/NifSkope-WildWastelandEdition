@@ -78,6 +78,18 @@ inline GlossSpec landRed( GlossSpec own, Mode, float, float, float = kScale ) { 
 #else
 #define WINDOWWIDE( cx, cy, x0, y0, x1, y1 ) LandLodSpec::windowFor( cx, cy, true, x0, y0, x1, y1 )
 #endif
+// lane LANDSPEC6 reds: -DLANDSPEC_RED_FIXED (a fixed world's centre and block follow the camera: fixedfollow),
+// -DLANDSPEC_RED_OUTER (no outer window past the page: page28)
+#ifdef LANDSPEC_RED_FIXED
+#define FIXEDWORLD( f ) ( (void)( f ), false )
+#else
+#define FIXEDWORLD( f ) LandLodSpec::fixedWorld( f )
+#endif
+#ifdef LANDSPEC_RED_OUTER
+#define OUTERFOR( cx, cy, x0, y0, x1, y1 ) LandLodSpec::Window{ 0, 0, 0 }
+#else
+#define OUTERFOR( cx, cy, x0, y0, x1, y1 ) LandLodSpec::outerFor( cx, cy, x0, y0, x1, y1 )
+#endif
 //! the per-layer pass before LANDSPEC4: bandNormal's target in the layer normal's own frame, unnormalized
 static LandLodSpec::V3 perLayerRaw( LandLodSpec::V3 n, LandLodSpec::V3 d, float v )
 {
@@ -258,6 +270,65 @@ int main( int argc, char ** argv )
 		near( "window paged edge fx", float( we.fx ), -12.0f );
 		near( "window bit words", float( kBitWords ), 4.0f );
 	}
+	// LANDSPEC6: blocks 63 x 63 .. 201 x 201: every block cell holds a band layer in the page or the outer window,
+	// within kOuterReach (60) of the camera once the block is wider than 32 chunks; 61 x 61 needs no outer window
+	{
+		long cells = 0, holes = 0, outerCells = 0;
+		int widest = 0;
+		for ( int half = 31; half <= 100; half += 7 )
+			for ( int camX = -half; camX <= half; camX += 9 )
+				for ( int camY = -half; camY <= half; camY += 9 ) {
+					const Window w = WINDOWWIDE( camX, camY, -half, -half, half, half );
+					const Window o = OUTERFOR( camX, camY, -half, -half, half, half );
+					widest = std::max( widest, o.w );
+					for ( int x = std::max( -half, camX - kOuterReach ); x <= std::min( half, camX + kOuterReach ); x++ )
+						for ( int y = std::max( -half, camY - kOuterReach ); y <= std::min( half, camY + kOuterReach ); y++ ) {
+							cells++;
+							if ( windowLayer( x, y, w.fx, w.fy, w.w ) >= 0 )
+								continue;
+							outerCells++;
+							holes += o.w > 0 && windowLayer( x, y, o.fx, o.fy, o.w ) >= 0 ? 0 : 1;
+						}
+				}
+		std::printf( "outer cells checked %ld, past the page %ld\n", cells, outerCells );
+		near( "outer holes within 60 cells (blocks 63 .. 201)", float( holes ), 0.0f );
+		near( "outer widest", float( widest ), float( kOuterMax ) );
+		const Window o61 = OUTERFOR( 0, 0, -30, -30, 30, 30 );
+		near( "outer none for 61 x 61", float( o61.w ), 0.0f );
+		const Window o81 = OUTERFOR( 0, 0, -40, -40, 40, 40 );	// cells -40..40: chunks -40..40 = 21 a side
+		near( "outer 81 x 81 w", float( o81.w ), 21.0f );
+		near( "outer 81 x 81 fx", float( o81.fx ), -40.0f );
+		near( "outer bit words", float( kOuterBitWords ), 16.0f );
+		// memory: 256 x 256 BC3 and its 8 mips = 87,408 bytes a layer; 21^2 = 36.76 MiB, 32^2 = 85.36 MiB
+		near( "outer 81 x 81 MiB", float( 21 * 21 ) * 87408.0f / 1048576.0f, 36.76141f, 1e-3f );
+		near( "outer cap MiB", float( kOuterMax * kOuterMax ) * 87408.0f / 1048576.0f, 85.35938f, 1e-3f );
+	}
+	// LANDSPEC6: "Fixed Dimensions" (WRLD DATA 0x40): DiamondCity 0xD9, DiamondCityFX 0x51, NukaWorld 0x41; the
+	// Commonwealth 0x00. The blend centre is the WCTR cell's middle in scene units and the streamed block stays on WCTR.
+	{
+		near( "fixed DiamondCity", float( FIXEDWORLD( 0xD9u ) ), 1.0f );
+		near( "fixed DiamondCityFX", float( FIXEDWORLD( 0x51u ) ), 1.0f );
+		near( "fixed NukaWorldMarket", float( FIXEDWORLD( 0x41u ) ), 1.0f );
+		near( "fixed Commonwealth", float( FIXEDWORLD( 0x00u ) ), 0.0f );
+		// NukaWorldMarket WCTR (0, -5) seen from an open whose origin is cell (2, -3)'s middle (10240, -10240)
+		float x = 0.0f, y = 0.0f;
+		fixedCentre( 0, -5, 10240.0f, -10240.0f, x, y );
+		near( "fixed centre x", x, -8192.0f );
+		near( "fixed centre y", y, -8192.0f );
+		// the blend centre a camera at scene (5000, 9000) reads: fixed = the WCTR cell's, red = the camera cell's
+		const bool fx = FIXEDWORLD( 0xD9u );
+		float bx = 0.0f, by = 0.0f;
+		if ( fx )
+			fixedCentre( 0, 0, 2048.0f, 2048.0f, bx, by );
+		else
+			bx = cellCentre( 5000.0f ), by = cellCentre( 9000.0f );
+		near( "fixed blend centre x (camera away)", bx, 0.0f );
+		near( "fixed blend centre y (camera away)", by, 0.0f );
+		int sx = 0, sy = 0;
+		streamCentre( fx, -1, -5, 3, 2, sx, sy );	// NukaWorldAmphitheater WCTR (-1, -5), opened at 3, 2
+		near( "fixed stream centre x", float( sx ), -1.0f );
+		near( "fixed stream centre y", float( sy ), -5.0f );
+	}
 	near( "window layer x + 8 y", float( windowLayer( 5, 9, 0, 0, 8 ) ), 17.0f );
 	float u = 0.0f, v = 0.0f;
 	lodUv( 6144.0f, 0.0f, 0, -4, u, v );
@@ -344,7 +415,11 @@ int main( int argc, char ** argv )
 			"int k = ci.x + nW * ci.y;", "( ( int( landLodBits[k >> 6][( k >> 4 ) & 3] ) >> ( k & 15 ) ) & 1 ) != 0",
 			"uniform vec4 landLodBits[4];",
 			"baseMap.rgb *= noiseK;	// lane LANDSPEC4", "vec3( -dd, sqrt( 1.0 - min( dot( dd, dd ), 1.0 ) ) )",
-			"normal = landSplat ? landDetailSplatN(" } );
+			"normal = landSplat ? landDetailSplatN(",
+			// LANDSPEC6: the outer window past the page, its 16 bit words
+			"uniform sampler2DArray LandLodOuter;", "uniform vec4 landLodOuterBits[16];",
+			"} else if ( landLodOuter.z > 0.5 ) {", "int ko = co.x + nO * co.y;",
+			"( ( int( landLodOuterBits[ko >> 6][( ko >> 4 ) & 3] ) >> ( ko & 15 ) ) & 1 ) != 0" } );
 		must( t, "pbrm_default.frag", { "1.0 - clamp( ( landLodK.z - distance( cellWorldPos( -ViewDir ).xy, landLod.yz ) ) * landLodK.w, 0.0, 1.0 )",
 			"s.rough = mix( s.rough, sqrt( sqrt( 2.0 / ( exp2( landLodK.x * 10.0 + 1.0 ) + 2.0 ) ) ), landLodV );",
 			"s.weight = mix( s.weight, landLodK.y, landLodV );" } );

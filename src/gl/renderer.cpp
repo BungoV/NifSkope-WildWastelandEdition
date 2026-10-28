@@ -381,7 +381,8 @@ static int wwLandLodMode( Scene * scene, const Shape * mesh )
 }
 
 /*! lane LANDSPEC2: WW_LANDSPEC_RED = off (no law) | ssr (land keeps a material's SSR flag) | snap (no glide) | notex;
- *  LANDSPEC4: camwin (the camera's 4 x 4 window only) | perlayer (each splat layer its own detail frame) */
+ *  LANDSPEC4: camwin (the camera's 4 x 4 window only) | perlayer (each splat layer its own detail frame);
+ *  LANDSPEC6: fixedfollow (a fixed world's centre follows the camera) | page28 (no outer window past the page) */
 static const QByteArray & wwLandSpecRed()
 {
 	WW_SWITCH_STATIC( QByteArray, v, qgetenv( "WW_LANDSPEC_RED" ).trimmed() );
@@ -442,7 +443,7 @@ bool wwLandLodWantsRepaint()
  * LANDSPEC4: n x n chunks (n up to 8, layer = x + n y). LANDSPEC5: n up to 16, the bits in kBitWords words */
 struct WwLandLodBits
 {
-	quint64 w[LandLodSpec::kBitWords] = {};
+	quint64 w[LandLodSpec::kOuterBitWords] = {};	// LANDSPEC6: the outer window's 16 words (the page uses 4)
 	bool any() const
 	{
 		for ( quint64 b : w )
@@ -459,20 +460,26 @@ struct WwLandLodBits
 	}
 };
 
-static WwLandLodBits wwLandLodWindow( Scene * scene, const QString & ws, int fx, int fy, int n )
+/* LANDSPEC6: outer = the outer window (its own array on LandLodOuter, each chunk from its mip kOuterMip) */
+static WwLandLodBits wwLandLodWindow( Scene * scene, const QString & ws, int fx, int fy, int n, bool outer = false )
 {
 	using PfnStorage3D = void ( APIENTRY * )( GLenum, GLsizei, GLenum, GLsizei, GLsizei, GLsizei );
 	using PfnCopyImage = void ( APIENTRY * )( GLuint, GLenum, GLint, GLint, GLint, GLint, GLuint, GLenum, GLint, GLint,
 		GLint, GLint, GLsizei, GLsizei, GLsizei );
 	struct Win { GLuint tex = 0; QString key; WwLandLodBits bits; };
-	static QHash<const void *, Win> wins;	// per GL context
+	static QHash<const void *, Win> wins[2];	// per GL context; [1] the outer window
 	QOpenGLContext * q = QOpenGLContext::currentContext();
 	auto fn = scene->renderer->fn;
-	Win & win = wins[q];
+	Win & win = wins[outer ? 1 : 0][q];
+	const int mip = outer ? LandLodSpec::kOuterMip : 0;
 	const QString w = ws.toLower();
 	const QString key = QStringLiteral( "%1|%2|%3|%4|%5" ).arg( w ).arg( fx ).arg( fy )
 		.arg( quintptr( scene->nifModel ) ).arg( n );
-	fn->glActiveTexture( GLenum( GL_TEXTURE0 + WwCellUnit::LandLodDiff ) );
+	fn->glActiveTexture( GLenum( GL_TEXTURE0 + ( outer ? WwCellUnit::LandLodOuter : WwCellUnit::LandLodDiff ) ) );
+	if ( n <= 0 ) {	// no window: nothing bound
+		fn->glBindTexture( GL_TEXTURE_2D_ARRAY, 0 );
+		return WwLandLodBits();
+	}
 	if ( win.key != key ) {
 		win.key = key;
 		win.bits = WwLandLodBits();
@@ -497,8 +504,9 @@ static WwLandLodBits wwLandLodWindow( Scene * scene, const QString & ws, int fx,
 				fn->glGetTexLevelParameteriv( GL_TEXTURE_2D, cl, GL_TEXTURE_WIDTH, &lw );
 				cl += lw > 0 ? 1 : 0;
 			}
-			if ( cw <= 0 || ch <= 0 || cl <= 0 )
+			if ( cw <= 0 || ch <= 0 || cl <= mip )
 				continue;
+			cw = std::max( cw >> mip, 1 ), ch = std::max( ch >> mip, 1 ), cl -= mip;	// LANDSPEC6: the outer's mip 1 up
 			if ( !win.tex ) {	// the first chunk read sets the array's size, format and levels
 				w0 = cw, h0 = ch, f0 = cf, levels = cl;
 				fn->glGenTextures( 1, &win.tex );
@@ -512,13 +520,13 @@ static WwLandLodBits wwLandLodWindow( Scene * scene, const QString & ws, int fx,
 			if ( cw != w0 || ch != h0 || cf != f0 || cl < levels )
 				continue;	// a chunk unlike the first stays out (its bit clear)
 			for ( GLint l = 0; l < levels; l++ )
-				copy( src, GL_TEXTURE_2D, l, 0, 0, 0, win.tex, GL_TEXTURE_2D_ARRAY, l, 0, 0, k,
+				copy( src, GL_TEXTURE_2D, l + mip, 0, 0, 0, win.tex, GL_TEXTURE_2D_ARRAY, l, 0, 0, k,
 					std::max( w0 >> l, 1 ), std::max( h0 >> l, 1 ), 1 );
 			win.bits.w[k >> 6] |= quint64( 1 ) << ( k & 63 );
 		}
 		fn->glBindTexture( GL_TEXTURE_2D, 0 );
-		std::fprintf( stderr, "landspec: band window %s %d,%d: %d of %d chunks, %dx%d, %d levels\n", qPrintable( w ), fx, fy,
-			win.bits.count(), n * n, w0, h0, levels );
+		std::fprintf( stderr, "landspec: band %s %s %d,%d: %d of %d chunks, %dx%d, %d levels\n", outer ? "outer window" : "window",
+			qPrintable( w ), fx, fy, win.bits.count(), n * n, w0, h0, levels );
 	}
 	fn->glBindTexture( GL_TEXTURE_2D_ARRAY, win.bits.any() ? win.tex : 0 );
 	return win.bits;
@@ -539,8 +547,8 @@ static void wwLandLodTextures( Scene * scene, NifSkopeOpenGLContext::Program * p
 	auto fn = scene->renderer->fn;
 	static const char * const names[3] = { "LandLodDiff", "LandLodNoise", "LandLodDetail" };
 	const int units[3] = { WwCellUnit::LandLodDiff, WwCellUnit::LandLodNoise, WwCellUnit::LandLodDetail };
-	WwLandLodBits bits;
-	LandLodSpec::Window win;
+	WwLandLodBits bits, outerBits;
+	LandLodSpec::Window win, outer{ 0, 0, 0 };
 	bool noise = false, detail = false;
 	if ( on ) {
 		if ( mode == LandLodSpec::Near ) {
@@ -551,6 +559,10 @@ static void wwLandLodTextures( Scene * scene, NifSkopeOpenGLContext::Program * p
 				int( std::floor( ( camScene[1] + oy ) / LandLodSpec::kCell ) ), block, bx - half, by - half, bx + half, by + half,
 				win8 ? LandLodSpec::kWindowMax4 : LandLodSpec::kWindowMax, !win8 );	// LANDSPEC5: to 16 a side, then paged
 			bits = wwLandLodWindow( scene, ws, win.fx, win.fy, win.w );
+			if ( block && !win8 && wwLandSpecRed() != "page28" )	// lane LANDSPEC6: past the page, the outer window
+				outer = LandLodSpec::outerFor( int( std::floor( ( camScene[0] + ox ) / LandLodSpec::kCell ) ),
+					int( std::floor( ( camScene[1] + oy ) / LandLodSpec::kCell ) ), bx - half, by - half, bx + half, by + half );
+			outerBits = wwLandLodWindow( scene, ws, outer.fx, outer.fy, outer.w, true );
 		}
 		for ( int k = 1; k < 3; k++ ) {
 			const QString path = k == 1 ? QStringLiteral( "textures\\terrain\\noise.dds" )
@@ -565,7 +577,8 @@ static void wwLandLodTextures( Scene * scene, NifSkopeOpenGLContext::Program * p
 	}
 	for ( int k = 0; k < 3; k++ )
 		prog->uni1i_l( prog->uniLocation( names[k] ), units[k] );
-	const bool albedo = noise && ( mode == LandLodSpec::Far || bits.any() );
+	prog->uni1i_l( prog->uniLocation( "LandLodOuter" ), WwCellUnit::LandLodOuter );	// lane LANDSPEC6
+	const bool albedo = noise && ( mode == LandLodSpec::Far || bits.any() || outerBits.any() );
 	prog->uni4f( "landLodTex", FloatVector4( ox, oy, albedo ? 1.0f : 0.0f, detail ? 1.0f : 0.0f ) );
 	// LANDSPEC4: z the window's chunks a side, w 1 = red perlayer; landLodBits the bound layers, 16 bits a component
 	// LANDSPEC5: landLodBits[4], one 64-bit word a vec4
@@ -578,6 +591,16 @@ static void wwLandLodTextures( Scene * scene, NifSkopeOpenGLContext::Program * p
 			float( ( b >> 48 ) & 0xFFFF ) );
 	}
 	prog->uni4fv( "landLodBits", bitv, size_t( LandLodSpec::kBitWords ) );
+	// lane LANDSPEC6: the outer window (z 0: none, or no chunk of it bound)
+	prog->uni4f( "landLodOuter", FloatVector4( float( outer.fx ) * LandLodSpec::kCell, float( outer.fy ) * LandLodSpec::kCell,
+		outerBits.any() ? float( outer.w ) : 0.0f, 0.0f ) );
+	FloatVector4 obitv[LandLodSpec::kOuterBitWords];
+	for ( int i = 0; i < LandLodSpec::kOuterBitWords; i++ ) {
+		const quint64 b = outerBits.w[i];
+		obitv[i] = FloatVector4( float( b & 0xFFFF ), float( ( b >> 16 ) & 0xFFFF ), float( ( b >> 32 ) & 0xFFFF ),
+			float( ( b >> 48 ) & 0xFFFF ) );
+	}
+	prog->uni4fv( "landLodOuterBits", obitv, size_t( LandLodSpec::kOuterBitWords ) );
 }
 
 static void wwLandLodUniforms( Scene * scene, NifSkopeOpenGLContext::Program * prog, const Shape * mesh )
@@ -595,8 +618,16 @@ static void wwLandLodUniforms( Scene * scene, NifSkopeOpenGLContext::Program * p
 		cam[k] = w / sc;
 	}
 	float gx = 0.0f, gy = 0.0f;
-	if ( mode != LandLodSpec::Off )
+	int wcx = 0, wcy = 0;
+	QString ows;
+	float ox = 0.0f, oy = 0.0f;
+	if ( mode == LandLodSpec::Off ) {
+	} else if ( wwLandSpecRed() != "fixedfollow" && wwCellLandFixedOf( scene->nifModel, &wcx, &wcy )
+		&& wwCellLandOriginOf( scene->nifModel, &ows, &ox, &oy ) ) {
+		LandLodSpec::fixedCentre( wcx, wcy, ox, oy, gx, gy );	// lane LANDSPEC6: a fixed world's WCTR cell, no glide
+	} else {
 		wwLandGlideCentre( LandLodSpec::cellCentre( cam[0] ), LandLodSpec::cellCentre( cam[1] ), gx, gy );
+	}
 	wwLandLodTextures( scene, prog, mode, cam );
 	const bool specView = scene->hasOption( Scene::DoSpecular ) && scene->hasOption( Scene::DoLighting );
 	prog->uni4f( "landLod", FloatVector4( float( mode ), gx, gy, 0.0f ) );

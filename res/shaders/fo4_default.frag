@@ -319,6 +319,11 @@ uniform vec4 landLodTex;
 uniform vec4 landLodWin;	// lane LANDSPEC4: z the window's chunks a side (layer = x + z y), w 1 = red perlayer
 uniform vec4 landLodBits[4];	// lane LANDSPEC4: the bound layers, 16 a component; LANDSPEC5: 64 a vec4 (16 x 16)
 uniform sampler2DArray LandLodDiff;	// lane LANDSPEC3: the 4 x 4 level-4 LOD diffuse chunks round the camera (clamped)
+// lane LANDSPEC6: past the page (a block wider than 61 cells), the outer window: xy its corner (world), z its chunks a
+// side (0 none), its bound layers 64 a vec4 (32 x 32), each a chunk's mip 1
+uniform vec4 landLodOuter;
+uniform vec4 landLodOuterBits[16];
+uniform sampler2DArray LandLodOuter;
 uniform sampler2D LandLodNoise;
 uniform sampler2D LandLodDetail;
 /* lane LANDSPEC3: n moved toward the detail normal d in n's own frame, as the game's land PSs (02858 by v, the LOD
@@ -472,6 +477,18 @@ void main()
 			const vec2 flipV = vec2( 1.0, -1.0 ) / 16384.0;
 			vec3 lod = textureGrad( LandLodDiff, vec3( f.x, 1.0 - f.y, float( k ) ), landWdx * flipV, landWdy * flipV ).rgb;
 			baseMap.rgb = mix( baseMap.rgb, lod * noiseK, landBandV );
+		} else if ( landLodOuter.z > 0.5 ) {	// lane LANDSPEC6: a cell the page does not hold
+			vec2 go = ( landBandW - landLodOuter.xy ) * ( 1.0 / 16384.0 );
+			ivec2 co = ivec2( floor( go ) );
+			int nO = int( landLodOuter.z );
+			int ko = co.x + nO * co.y;
+			if ( co.x >= 0 && co.y >= 0 && co.x < nO && co.y < nO
+				&& ( ( int( landLodOuterBits[ko >> 6][( ko >> 4 ) & 3] ) >> ( ko & 15 ) ) & 1 ) != 0 ) {
+				vec2 f = go - vec2( co );
+				const vec2 flipV = vec2( 1.0, -1.0 ) / 16384.0;
+				vec3 lod = textureGrad( LandLodOuter, vec3( f.x, 1.0 - f.y, float( ko ) ), landWdx * flipV, landWdy * flipV ).rgb;
+				baseMap.rgb = mix( baseMap.rgb, lod * noiseK, landBandV );
+			}
 		}
 	}
 #endif
