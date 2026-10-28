@@ -21,6 +21,7 @@
 
 #include <algorithm>
 #include <climits>
+#include <limits>
 #include <cmath>
 #include <cstdio>
 
@@ -74,7 +75,9 @@ public:
 	bool terrain = true;
 	QString dataRoot;
 	QSet<QString> textures;        // relative "textures/..." paths the materials name
-	QHash<QString, QVector<int>> meshesOf;   // model key -> its glTF meshes (one per drawn shape)
+	QHash<QString, QVector<int>> meshesOf;   // model key + paint -> its glTF meshes (one per drawn shape)
+	const EsmWorld * world = nullptr;
+	int meshesPainted = 0;
 	int placementsSeen = 0, placementsKept = 0, placementsEmpty = 0, shapesSkipped = 0, landQuads = 0;
 	int meshesColored = 0, meshesDecal = 0, landLayers = 0, ltexFromMaterial = 0, ltexUnresolved = 0;
 	qint64 trisPlaced = 0;
@@ -149,6 +152,7 @@ public:
 	void begin( const EsmWorld & world, const QString & root ) override
 	{
 		dataRoot = root;
+		this->world = &world;
 		if ( !terrain )
 			return;
 		const int landNode = node( QStringLiteral( "terrain" ), -1 );
@@ -229,9 +233,41 @@ public:
 		}
 	}
 
+	/* The paint row (cellview.cpp "THE PAINT"): an MSWP row's CNAM replaces the palette row of its material, else the
+	 * base's MODC; the game takes either only on a Greyscale_To_PaletteColor material. Keyed by the row's original and
+	 * its replacement, since the shapes here are the swapped ones. */
+	QHash<QString, float> paintOf( const CellExportPlaced & p, float & modc, bool & hasModc ) const
+	{
+		QHash<QString, float> out;
+		const EsmLodBase & lb = world->lodBase( p.base );
+		hasModc = lb.hasColorRemap && lb.colorRemap < std::numeric_limits<float>::max();
+		modc = lb.colorRemap;
+		if ( !p.paintSwap )
+			return out;
+		const EsmMaterialSwap & mw = world->materialSwap( p.paintSwap );
+		for ( const EsmMaterialSubst & row : mw.rows ) {
+			if ( !row.hasColorRemap || row.colorRemap >= std::numeric_limits<float>::max() )
+				continue;
+			for ( const QString & m : { row.original, row.replacement } ) {
+				const QString k = lodgenMaterialSwapKey( m );
+				if ( !k.isEmpty() && !out.contains( k ) )
+					out.insert( k, row.colorRemap );
+			}
+		}
+		return out;
+	}
+
 	QVector<int> meshes( const CellExportPlaced & p, const QString & label )
 	{
-		auto it = meshesOf.find( p.key );
+		float modc = 0.0f;
+		bool hasModc = false;
+		const QHash<QString, float> cnam = world ? paintOf( p, modc, hasModc ) : QHash<QString, float>();
+		QString key = p.key;
+		if ( hasModc )
+			key += QStringLiteral( "|modc%1" ).arg( modc );
+		for ( auto c = cnam.cbegin(); c != cnam.cend(); ++c )
+			key += QStringLiteral( "|%1=%2" ).arg( c.key() ).arg( c.value() );
+		auto it = meshesOf.find( key );
 		if ( it != meshesOf.end() )
 			return it.value();
 		QVector<int> out;
@@ -298,6 +334,14 @@ public:
 			extra( "greyscaleTexture", s.g2p ? texRel( s.g2pTex ) : QString() );
 			// the game's palette lookup: albedo = palette( diffuse G, paletteScale x vertex R ) (fo4_default.frag)
 			extra( "paletteScale", s.g2p && !s.g2pTex.isEmpty() ? QString::number( s.g2pScale ) : QString() );
+			// a painted part reads its palette row straight from the CNAM/MODC (the game writes it to fLookupScale)
+			if ( s.g2p && !s.g2pTex.isEmpty() && s.g2pScale > 1.0e-6f ) {
+				auto c = cnam.constFind( lodgenMaterialSwapKey( s.matName ) );
+				if ( c != cnam.constEnd() || hasModc ) {
+					extra( "paletteRow", QString::number( c != cnam.constEnd() ? c.value() : modc ) );
+					meshesPainted++;
+				}
+			}
 			extra( "smoothness", f.effectShader ? QString() : QString::number( s.smoothness ) );
 			extra( "specularMult", f.effectShader ? QString() : QString::number( s.specMult ) );
 			if ( s.ownEmit || s.glowFlag )
@@ -316,7 +360,7 @@ public:
 			out.append( scene.meshes.size() );
 			scene.meshes.append( m );   // its owner node is the first placement's child (placed())
 		}
-		meshesOf.insert( p.key, out );
+		meshesOf.insert( key, out );
 		return out;
 	}
 
@@ -498,10 +542,11 @@ int gltfCellCli( const QStringList & args )
 		std::printf( "gltf-cell: texture missing %s\n", qPrintable( m ) );
 	std::printf( "MEASURED placements_seen=%d placements=%d placements_empty=%d models=%d meshes=%d nodes=%d "
 		"land_quads=%d land_layers=%d ltex_bgsm=%d ltex_unresolved=%d meshes_coloured=%d meshes_decal=%d "
-		"decal_offset=%g shapes_skipped=%d tris_placed=%lld textures=%d copied=%d missing=%d origin=%g,%g,%g\n",
+		"meshes_painted=%d decal_offset=%g shapes_skipped=%d tris_placed=%lld textures=%d copied=%d missing=%d origin=%g,%g,%g\n",
 		sink.placementsSeen, sink.placementsKept, sink.placementsEmpty, int( sink.meshesOf.size() ),
 		int( sink.scene.meshes.size() ), int( sink.scene.nodes.size() ), sink.landQuads, sink.landLayers,
-		sink.ltexFromMaterial, sink.ltexUnresolved, sink.meshesColored, sink.meshesDecal, double( sink.decalOffset ),
+		sink.ltexFromMaterial, sink.ltexUnresolved, sink.meshesColored, sink.meshesDecal, sink.meshesPainted,
+		double( sink.decalOffset ),
 		sink.shapesSkipped,
 		sink.trisPlaced, int( sink.textures.size() ), copied, missing, sink.origin[0], sink.origin[1], sink.origin[2] );
 	return 0;

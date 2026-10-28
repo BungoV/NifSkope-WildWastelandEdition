@@ -230,6 +230,7 @@ struct CellExportPlaced
 	QString model;                  //!< the model path; with a swap the key is "model|swap"
 	QString key;                    //!< the load cache key: one per distinct model + swap
 	quint32 swap = 0;
+	quint32 paintSwap = 0;          //!< the placement's MSWP even when it substitutes nothing: its CNAMs pick palette rows
 	float pos[3] = { 0, 0, 0 };     //!< world units
 	float rot[9] = { 1, 0, 0, 0, 1, 0, 0, 0, 1 };   //!< row-major, world = R * (local * scale) + pos
 	float scale = 1.0f;

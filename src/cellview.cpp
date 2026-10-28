@@ -4344,6 +4344,7 @@ static bool cellBuild( NifModel * nif, const CellSceneSpec & specAsked, CellChun
 			e.model = model;
 			e.key = mkey;
 			e.swap = subst ? p.swap : 0;
+			e.paintSwap = p.swap;
 			for ( int r = 0; r < 3; r++ ) {
 				e.pos[r] = p.pos[r];
 				for ( int c = 0; c < 3; c++ )
