@@ -2,6 +2,7 @@
 #include "wwswitch.h"	// lane TESTDRIVER1: the WW_* switch store
 
 #include "gl/celluniform.h"	// lane CELLUNI4: the tone map's known state
+#include "gl/glctxserial.h"	// lane FRAMESPEED1
 #include "gl/glscene.h"
 #include "gl/renderer.h"
 #include "gl/taainputs.h"	// lane TAA3: Ultra's velocity and mask
@@ -609,6 +610,9 @@ bool taaResolveImpl( Scene * scene, GLuint linearFbo, GLenum linearFormat, float
 	// lane CELLUNI4: before the tone map the state is the one cellhdr's End read (null: asked, as before)
 	const WwCellUni::KnownGl * kn = linear ? WwCellUni::known( fn ) : nullptr;
 	static WwCellUni::DepthCfg depthCfg;	// the frame's depth format, asked once per framebuffer and size
+	static WwCellUni::CtxWatch ctxWatch;	// lane FRAMESPEED1: a context made again may reuse the fbo id and size
+	if ( ctxWatch.changed( r, wwGlContextSerial() ) && depthCfg.ctx == r )
+		depthCfg.forget();
 
 	GLint prevDraw = 0, prevRead = 0, vp[4] = { 0, 0, 1, 1 };
 	if ( kn ) {

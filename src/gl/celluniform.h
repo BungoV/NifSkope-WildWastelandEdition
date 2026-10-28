@@ -367,6 +367,25 @@ struct DepthCfg
 		trusted = false;
 	}
 };
+
+/*! lane FRAMESPEED1: an owner (a Renderer) whose GL context was made again (a context loss) shows a new serial: what was
+ *  cached for the old context (DepthCfg: the same fbo id and size may now hold another format) must be forgotten */
+struct CtxWatch
+{
+	std::vector<std::pair<const void *, std::uint64_t>> seen;
+	bool changed( const void * owner, std::uint64_t serial )
+	{
+		for ( auto & p : seen ) {
+			if ( p.first == owner ) {
+				const bool c = p.second != serial;
+				p.second = serial;
+				return c;
+			}
+		}
+		seen.emplace_back( owner, serial );
+		return false;
+	}
+};
 }
 
 //! the DSA entry points of the current context (null members: the extension is missing)
