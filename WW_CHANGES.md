@@ -1,5 +1,21 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## Lane CELLUNI5 (2026-10-28, branch celluni5-20261028): fewer GL state asks in the bloom, fog bloom and TAA inputs
+
+- **Bloom and fog bloom error reads are trusted:** each pass drains and reads GL errors only on a frame with new
+  targets, after a failed frame, or under `WW_CELL_UNI_RED=1`. One clean frame on the same targets trusts them (the
+  regime SYNC1 gave the cell passes). Unit test: 18 error reads in 30 frames instead of 180, none from frame 13 on.
+- **Known active texture unit:** the bloom and fog bloom Final/Done steps take the tone quads' unit from the cell HDR
+  pass (the VRS build ends on it whether it ran or not) instead of asking GL_ACTIVE_TEXTURE: 4 asks a frame fewer.
+  `WW_SETUP_MEMO_CHECK=1` still asks and counts a mismatch.
+- **TAA inputs take the tone map's known state** (draw and read targets, viewport, active unit, masks, enables) when
+  run from the linear resolve; after the tone map they ask as before.
+- **`WW_CELL_FARLOD_NEARONLY=1` keeps the near cells' plugin stack:** the near gate shows the far planes alone, so
+  it no longer adopts the far LOD bake's stack. New line: "far lod: stack MISMATCH -- ...; NOT adopted (NEARONLY ...)".
+  Red: `WW_CELL_FARLOD_RED=nearadopt` (adopts as before).
+- Cost: fewer GL queries a frame on the CPU side; no GPU or picture change. Tests: tests/celluni5 (red
+  `-DCELLUNI5_RED`), tests/farstackrule (red `-DFARSTACKRULE_RED`).
+
 ## Lane LANDSPEC5 (2026-10-28, branch landspec5-20261028): the LANDSPEC4 leftovers
 
 - **Bakes and the open's far stack use the parent:** a worldspace with "Use LOD Data" bakes its probes against its
