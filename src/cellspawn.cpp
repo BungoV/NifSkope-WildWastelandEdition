@@ -268,6 +268,16 @@ CellSpawn cellSpawnCompute( const EsmWorld & world, const CellSceneSpec & spec )
 		s.eye[2] = 0.0f;
 		s.rule += QStringLiteral( " RED eye z 0" );
 	}
+	// lane SPAWNEYE1: WW_CELL_SPAWN_EYE=x,y,z,yaw starts the free camera at that eye (world units, yaw as above)
+	const QStringList e = wwEnvStr( "WW_CELL_SPAWN_EYE" ).split( QLatin1Char( ',' ), Qt::SkipEmptyParts );
+	if ( e.size() == 4 ) {
+		for ( int i = 0; i < 3; ++i )
+			s.eye[i] = e[i].toFloat();
+		s.yawDeg = e[3].toFloat();
+		s.ground = s.eye[2] - 120.4828f;
+		s.valid = true;
+		s.rule = QStringLiteral( "WW_CELL_SPAWN_EYE" );
+	}
 	return s;
 }
 
