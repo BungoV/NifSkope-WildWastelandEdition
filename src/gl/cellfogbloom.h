@@ -14,7 +14,7 @@ class Scene;
  *  set by renderer.cpp only while this is on). The tone map multiplies both blooms (Vanilla and FO4CS) by the gain.
  *  Clear air writes exactly 0, so the frame is the same bits as without the lane. Research: notes/fogbloom1/RESEARCH.md.
  *
- *  Row: Cell workspace, Show > Bloom > Fog bloom (WW/CellFogBloom, off).
+ *  Row: Cell workspace, Show > Bloom > Fog Bloom Boost (WW/CellFogBloom, off; renamed WEATHERBLEND5).
  *  Pins: WW_CELL_FOGBLOOM=0|1 (a harness without it runs off); red WW_CELL_FOGBLOOM_RED=flat: the uniform bloom
  *  (no pass, no marks); WW_CELL_FOGBLOOM_TIME=1 prints the pass's GPU time (timestamp pairs, read a frame late). */
 

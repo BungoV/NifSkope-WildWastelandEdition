@@ -817,7 +817,7 @@ void CellWorkspacePanel::buildUi()
 			cellBloomGroup->addAction( a );
 		}
 		// lane FOGBLOOM1: the bloom each pixel takes rises with the fog along its view ray (gl/cellfogbloom.h; ships off)
-		QAction * fogBloom = cellBloom->addAction( tr( "Fog bloom" ) );
+		QAction * fogBloom = cellBloom->addAction( tr( "Fog Bloom Boost" ) );	// WEATHERBLEND5: renamed (bungo 10-28)
 		fogBloom->setObjectName( QStringLiteral( "CellWorkspaceBloomFog" ) );
 		fogBloom->setCheckable( true );
 		fogBloom->setChecked( wwCellFogBloomOn() );
