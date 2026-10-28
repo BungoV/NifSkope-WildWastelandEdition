@@ -44,16 +44,18 @@ constexpr int kStageVersion = 2;   // 2: lane VOLRAY1 (ray refine, z clip)
 
 //! lane VOLFIT6: a worker of the room fan-out runs its inner fan-outs on itself
 thread_local bool tlVolSerial = false;
+//! lane ROOMFIT8: ... or shares the machine with the rooms still running (the last rooms get the freed threads)
+thread_local const std::atomic<int> * tlVolActive = nullptr;
 
 void volParallel( size_t n, const std::function<void( size_t )> & fn )
 {
-	if ( tlVolSerial ) {
+	using std::thread;
+	const int nThreads = std::max( 1, int( thread::hardware_concurrency() ) / ( tlVolActive ? std::max( 1, tlVolActive->load() ) : 1 ) );
+	if ( tlVolSerial || ( tlVolActive && nThreads < 2 ) ) {
 		for ( size_t k = 0; k < n; k++ )
 			fn( k );
 		return;
 	}
-	using std::thread;
-	const int nThreads = std::max( 1, int( thread::hardware_concurrency() ) );
 	std::atomic<size_t> next( 0 );
 	std::vector<std::thread> pool;
 	for ( int i = 0; i < nThreads; i++ )
@@ -1978,21 +1980,30 @@ bool probeVolumesBuild( const ProbeSoup & soup, const std::vector<ProbeVolumeMar
 	};
 	// lane VOLFIT6: rooms side by side, the biggest first, each on one worker. A room reads only the shared grid and tree
 	// and writes only its own slots, so the order changes no byte (WW_VOLFIT_SPEC=roompar=0: one at a time, inner fan-outs)
-	bool roomPar = true;
-	for ( const QString & kv : qEnvironmentVariable( "WW_VOLFIT_SPEC" ).split( QLatin1Char( ',' ), Qt::SkipEmptyParts ) )
-		if ( kv.section( QLatin1Char( '=' ), 0, 0 ).trimmed() == QLatin1String( "roompar" ) )
+	bool roomPar = true, roomShare = true;   // ROOMFIT8 roomshare=0: VOLFIT6's serial inner fan-outs
+	for ( const QString & kv : qEnvironmentVariable( "WW_VOLFIT_SPEC" ).split( QLatin1Char( ',' ), Qt::SkipEmptyParts ) ) {
+		const QString key = kv.section( QLatin1Char( '=' ), 0, 0 ).trimmed();
+		if ( key == QLatin1String( "roompar" ) )
 			roomPar = kv.section( QLatin1Char( '=' ), 1 ).toDouble() != 0;
+		else if ( key == QLatin1String( "roomshare" ) )
+			roomShare = kv.section( QLatin1Char( '=' ), 1 ).toDouble() != 0;
+	}
 	if ( roomPar ) {
 		std::vector<size_t> order( V.rooms.size() );
 		for ( size_t r = 0; r < order.size(); r++ )
 			order[r] = r;
 		std::stable_sort( order.begin(), order.end(), [&]( size_t a, size_t b ) { return cellsOf[a].size() > cellsOf[b].size(); } );
+		std::atomic<int> active( 0 );
 		volParallel( order.size(), [&]( size_t k ) {
 			QElapsedTimer tr;
 			tr.start();
-			tlVolSerial = true;
+			active++;
+			tlVolSerial = !roomShare;
+			tlVolActive = roomShare ? &active : nullptr;
 			fitRoom( order[k] );
 			tlVolSerial = false;
+			tlVolActive = nullptr;
+			active--;
 			const qint64 ns = tr.nsecsElapsed();
 			for ( qint64 m = nsRoomMax.load(); ns > m && !nsRoomMax.compare_exchange_weak( m, ns ); )
 				;

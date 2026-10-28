@@ -318,7 +318,7 @@ std::vector<std::vector<ProbeVolumeShape>> probeVolumesFineFit( const probebvh::
 	std::atomic<qint64> nsRays( 0 ), nsCover( 0 ), nsClass( 0 ), nsGreedy( 0 ), nsMoves( 0 );
 	// VOLFIT6: the edge stage's profile (thread-summed over rooms; each part is the room's own wall)
 	std::atomic<qint64> nsEFl( 0 ), nsESeg( 0 ), nsEBuild( 0 ), nsECast( 0 ), nsEScat( 0 ), nsELock( 0 ), nsEGpu( 0 ), nsEPost( 0 );
-	std::atomic<qint64> nECalls( 0 ), nERecast( 0 ), nsSmallMax( 0 ), nsCLock( 0 ), nsCGpu( 0 ), nsCPost( 0 );
+	std::atomic<qint64> nECalls( 0 ), nERecast( 0 ), nsSmallMax( 0 ), nsCLock( 0 ), nsCGpu( 0 ), nsCPost( 0 ), nCRays( 0 ), nCRecast( 0 );
 	// VOLFIT3: per room the grid fit's score and the moved set's (u3 of uncovered room air + badW x foreign air held),
 	// and its extra lattice boxes with what each cuts
 	struct V3Room
@@ -581,6 +581,7 @@ std::vector<std::vector<ProbeVolumeShape>> probeVolumesFineFit( const probebvh::
 				} );
 				if ( g.scene )
 					g.scene->cast( rays.data(), rays.size(), hits.data(), false );
+				nCRays += qint64( rays.size() );
 				fineFor( nChunks, par, [&]( size_t ci ) {
 					const size_t x1 = std::min( e, b + ( ci + 1 ) * chunk );
 					for ( size_t x = b + ci * chunk; x < x1; x++ ) {
@@ -619,6 +620,7 @@ std::vector<std::vector<ProbeVolumeShape>> probeVolumesFineFit( const probebvh::
 			nsCLock += cc1.lockNs - cc0.lockNs;
 			nsCGpu += cc1.gpuNs - cc0.gpuNs;
 			nsCPost += cc1.postNs - cc0.postNs;
+			nCRecast += cc1.recast - cc0.recast;
 		};
 		{
 			std::vector<size_t> ids;
@@ -1605,12 +1607,13 @@ std::vector<std::vector<ProbeVolumeShape>> probeVolumesFineFit( const probebvh::
 	S.msMoves = double( nsMoves ) / 1e6;
 	S.msWall = clock.nsecsElapsed() / 1e6;
 	S.prof = QStringLiteral( " small %1 (n %2 longest %3) big n %4; edge ms fl %5 seg %6 build %7 cast %8 (lock %9 gpu %10 post %11, calls %12 recast %13)"
-		" scatter %14; class lock %15 gpu %16 post %17" )
+		" scatter %14; class lock %15 gpu %16 post %17 (rays %18 recast %19)" )
 		.arg( qRound( S.msSmall ) ).arg( small.size() ).arg( qRound( double( nsSmallMax ) / 1e6 ) ).arg( big.size() )
 		.arg( qRound( double( nsEFl ) / 1e6 ) ).arg( qRound( double( nsESeg ) / 1e6 ) ).arg( qRound( double( nsEBuild ) / 1e6 ) )
 		.arg( qRound( double( nsECast ) / 1e6 ) ).arg( qRound( double( nsELock ) / 1e6 ) ).arg( qRound( double( nsEGpu ) / 1e6 ) )
 		.arg( qRound( double( nsEPost ) / 1e6 ) ).arg( nECalls.load() ).arg( nERecast.load() ).arg( qRound( double( nsEScat ) / 1e6 ) )
-		.arg( qRound( double( nsCLock ) / 1e6 ) ).arg( qRound( double( nsCGpu ) / 1e6 ) ).arg( qRound( double( nsCPost ) / 1e6 ) );
+		.arg( qRound( double( nsCLock ) / 1e6 ) ).arg( qRound( double( nsCGpu ) / 1e6 ) ).arg( qRound( double( nsCPost ) / 1e6 ) )
+		.arg( nCRays.load() ).arg( nCRecast.load() );
 	if ( stats )
 		*stats = S;
 	return out;

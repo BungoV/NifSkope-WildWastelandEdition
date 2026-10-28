@@ -447,6 +447,7 @@ int probeVolCheckCli( const QStringList & args )
 {
 	QString soupPath, spacePath, outDir, raysWay = QStringLiteral( "auto" ), mutate, cellsOnly, pngPath, pointsPath;
 	QString indoorRule = QStringLiteral( "openings" );   // lane HALLINDOOR1; "old" = VOLRAY1's rule (the red)
+	double glassMin = 0, glassReach = 128;   // lane ROOMFIT8: a window counts as an opening only if glass covers this much of its open face
 	double h = 16, margin = 128, tolPoke = 4, tolSkin = 8, tolGap = 4096, skyMax = 0.25, openMax = 0.25, reach = 1536;
 	int K = 32;
 	for ( int i = 0; i < args.size(); i++ ) {
@@ -470,12 +471,14 @@ int probeVolCheckCli( const QStringList & args )
 		else if ( a == QLatin1String( "--openmax" ) ) { openMax = nx.toDouble(); i++; }
 		else if ( a == QLatin1String( "--reach" ) ) { reach = nx.toDouble(); i++; }
 		else if ( a == QLatin1String( "--indoor" ) ) { indoorRule = nx; i++; }
+		else if ( a == QLatin1String( "--glassmin" ) ) { glassMin = nx.toDouble(); i++; }
+		else if ( a == QLatin1String( "--glassreach" ) ) { glassReach = nx.toDouble(); i++; }
 	}
 	QTextStream o( stdout );
 	if ( soupPath.isEmpty() || spacePath.isEmpty() || h <= 0 || K < 8 ) {
 		o << "usage: volcheck --soup S --space <dir|file.space> [--out D] [--rays auto|cpu|gpu|both] [--h 16] [--margin 128] "
 			"[--k 32] [--tol-poke 4] [--tol-skin 8] [--tol-gap 4096] [--cells k1,k2] [--mutate grow:N|shrink:N|shift:N|drop] "
-			"[--png f] [--points f] [--reach 1536] [--indoor openings|old]\n";
+			"[--png f] [--points f] [--reach 1536] [--indoor openings|old] [--glassmin 0..1] [--glassreach 128]\n";
 		return 2;
 	}
 	QElapsedTimer total;
@@ -688,12 +691,52 @@ int probeVolCheckCli( const QStringList & args )
 	}
 	// the indoor rule's openings: every window (glass: light passes, air does not) between a room and the outside;
 	// doors and plain openings stay outdoor air
+	// ROOMFIT8: the fit calls a threshold a window when any of its cells touches glass; here rays cross each window's box
+	// along its thin axis (12 x 12) and count the first hit: glass, solid (frame, wall), or nothing (air passes)
 	ProbeVolOpenings openings;
+	QString glassLine;
 	if ( indoorRule != QLatin1String( "old" ) ) {
+		std::vector<const VThr *> wins;
 		for ( const VThr & t : thrs )
 			if ( ( t.a == -1 || t.b == -1 ) && t.opening == QLatin1String( "window" ) )
-				openings.add( t.box.c, t.box.h, t.box.r );
+				wins.push_back( &t );
+		constexpr int kG = 12;
+		std::vector<bakert::XRay> wr;
+		for ( const VThr * t : wins ) {
+			const VShape & b = t->box;
+			const int th = b.h[0] <= b.h[1] && b.h[0] <= b.h[2] ? 0 : ( b.h[1] <= b.h[2] ? 1 : 2 ), u = ( th + 1 ) % 3, v = ( th + 2 ) % 3;
+			const double len = b.h[th] + glassReach;
+			const double d[3] = { b.r[0][th], b.r[1][th], b.r[2][th] };
+			for ( int i = 0; i < kG; i++ )
+				for ( int j = 0; j < kG; j++ ) {
+					const double lu = b.h[u] * ( ( i + 0.5 ) * 2.0 / kG - 1 ), lv = b.h[v] * ( ( j + 0.5 ) * 2.0 / kG - 1 );
+					double a[3];
+					for ( int k = 0; k < 3; k++ )
+						a[k] = b.c[k] + b.r[k][u] * lu + b.r[k][v] * lv - d[k] * len;
+					wr.push_back( T.ray( a, d, 2 * len ) );
+				}
+		}
+		std::vector<bakert::XHit> wh;
+		if ( !wr.empty() )
+			T.cast( wr, wh, false );
+		int trusted = 0;
+		QStringList each;
+		for ( size_t w = 0; w < wins.size(); w++ ) {
+			int g = 0, s = 0, n = 0;
+			for ( size_t q = w * kG * kG; q < ( w + 1 ) * kG * kG; q++ )
+				( wh[q].tri < 0 ? n : size_t( wh[q].tri ) >= T.nSoup ? g : s )++;
+			const double cover = g + n > 0 ? double( g ) / double( g + n ) : 0.0;
+			const bool ok = glassMin <= 0 || ( g > 0 && cover >= glassMin );
+			if ( ok ) {
+				openings.add( wins[w]->box.c, wins[w]->box.h, wins[w]->box.r );
+				trusted++;
+			}
+			each << QStringLiteral( "%1 %2/%3/%4 %5%6" ).arg( wins[w]->cell ).arg( g ).arg( s ).arg( n ).arg( cover, 0, 'f', 2 )
+				.arg( ok ? QString() : QStringLiteral( " no" ) );
+		}
 		openings.build( reach );
+		glassLine = QStringLiteral( "volcheck: windows %1, trusted %2 at glass cover >= %3 (glass/solid/air of %4 rays, reach %6, cover = glass/(glass+air)): %5" )
+			.arg( wins.size() ).arg( trusted ).arg( glassMin ).arg( kG * kG ).arg( each.join( QStringLiteral( "; " ) ) ).arg( glassReach );
 	}
 	PointRays R;
 	double msE = 0, msS = 0;
@@ -1282,6 +1325,8 @@ int probeVolCheckCli( const QStringList & args )
 		o << "volcheck: " << QString::fromStdString( bakert::census( "volcheck", *T.scene ) ) << "\n";
 	if ( !compareLine.isEmpty() )
 		o << compareLine << "\n";
+	if ( !glassLine.isEmpty() )
+		o << glassLine << "\n";
 	for ( const auto & c : cells ) {
 		const Sum & s = c.second;
 		const double air = double( s.air + s.gapOnce );
