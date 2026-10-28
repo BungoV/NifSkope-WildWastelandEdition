@@ -7,6 +7,7 @@ BSD License - see nifskope.h
 #include "cellssr.h"
 #include "wwswitch.h"	// lane TESTDRIVER1: the WW_* switch store
 #include "cellssgi.h"
+#include "gl/cellbindless.h"	// lane FRAMESPEED2: WwBl::renew
 #include "gl/cellpasstime.h"	// lane PERF2: the draws' CPU setup time
 #include "gl/celldrawstate.h"	// lane PERF3
 #include "cellunits.h"
@@ -121,10 +122,9 @@ void ssrAlloc( NifSkopeOpenGLContext::GLFunctions * fn, SsrTarget & t, int w, in
 {
 	if ( t.tex && t.w == w && t.h == h )
 		return;
-	if ( !t.tex ) {
-		fn->glGenTextures( 1, &t.tex );
+	WwBl::renew( fn, t.tex );	// lane FRAMESPEED2 (D1): a fresh name, never a re-specified bindless-handled one
+	if ( !t.fbo )
 		fn->glGenFramebuffers( 1, &t.fbo );
-	}
 	fn->glBindTexture( GL_TEXTURE_2D, t.tex );
 	fn->glTexImage2D( GL_TEXTURE_2D, 0, GL_RGBA32F, w, h, 0, GL_RGBA, GL_FLOAT, nullptr );
 	fn->glTexParameteri( GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, linear ? GL_LINEAR : GL_NEAREST );

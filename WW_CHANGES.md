@@ -18,8 +18,32 @@
   write `cellProbe` (20 / 60) after every setup, so the snapshot before a skipped setter held the hook's value and
   every check read MISMATCH (409,173 of 443,401 in SHOTPASS1). The pass now names that uniform when it arms the memo
   and the check skips it there; any other uniform still counts.
+- **A live reopen with everything on no longer ends the process (D1):** re-measured on the girebake3 Concord bake with
+  the volume keys and `WW_CELL_GLARE=1` pinned (the coordinator's ask; SHOTPASS1's rows had loaded the stale 10-02
+  SKY1 bake). It still crashed 3 of 3 with bindless on, and 0 of 1 with `WW_BINDLESS=0`. The stack (gdb attached to a
+  symbol twin): 0xC0000409 inside the NVIDIA driver's glTexImage2D, called by ssrAlloc in the SSR pass after the
+  reopen. The reopen changes the viewport (1185x1026 -> 1185x1110), so the screen-sized targets take a new size. A
+  texture that once had a bindless handle keeps immutable storage for good (ARB_bindless_texture), even after its
+  handle is made non-resident: the offline unit (notes/framespeed2/unit/bltexrespec) gets GL error 0x0502 for that
+  re-specify and 0 when the name is deleted and made anew. Not memory: at the crash the GPU had 5 GB free and the
+  system 8 GB of commit; the 29 GB private figure is the crash dump's own copy. Render targets had handles because
+  the bindless resolve fell back to the unit's 2D binding when a material bind left no 2D texture of the cache's (a
+  cube map, a first load): that binding was whatever a pass had left there. Renewing the SSR target alone only moved
+  the crash to the volumetric air pass. Now the texture cache reports the 2D texture it bound (first loads included)
+  and the resolve takes only that; nothing means the black fallback, which is what the non-bindless path samples. As a
+  belt, the SSR, AO, GI key, SSGI and Hi-Z targets also get a fresh name (`WwBl::renew`) when they change size. Reds
+  (launch key `WW_CELL_TARGET_RED`): `stale` (the unit fallback back), `respec` (no renew), `old` (both).
+- **The re-measure on girebake3:** D1 stays (above). D2 (crossing spike) and D3 (stream memory growth) never depended on
+  the bake: the stream walk loads none, and a loaded bake turns streaming off (a GI-loaded walk read "stream off" on all
+  22 steps). They stand as measured. No defect went away.
+- Note: the volume keys rewrite the bake's .space files. Two runs here rewrote notes/girebake3/bakes/concord/vol/*/*.space
+  before the runner was moved to a copy (notes/framespeed2/vol).
 - Cost: 0 GPU ms and no new memory at draw time (one less colour path; the depth-format ask is cached, so a few
-  glGet calls fewer a frame on the toned path).
+  glGet calls fewer a frame on the toned path). D1: a few texture deletes and creates on a resize only.
+- LEFTOVER: D3, the stream's texture churn. A budgeted LRU or recycle pool for file textures, after a
+  `WW_CELL_STREAM_TEXKEEP=0` A/B walk.
+- LEFTOVER: CELLUNI6 items not done here: the jitter viewport ask, cellhdr's Begin, the bsshape blend asks,
+  wwCellHdrDepthMax, and a GL error check on the trusted frame.
 
 ## Lane ROOMFIT10 (2026-10-28, branch roomfit10-20261028): the volume fit's rays, mostly on the GPU, still exact
 

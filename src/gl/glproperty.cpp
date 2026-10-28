@@ -1687,7 +1687,8 @@ bool BSShaderLightingProperty::bind( const QStringView & fname, bool forceTextur
 			glGetIntegerv( GL_TEXTURE_BINDING_2D, &blTex );
 		if ( WwBl::resolving ) {
 			WwBl::noteKey( wrapS, wrapT, minFilter, TexCache::get_max_anisotropy() );
-			WwBl::resolvedTex = GLuint( blTex );	// lane BINDLESSPERF1: handleOfBound takes it without a query
+			// lane FRAMESPEED2 (D1): the cache's own 2D bind; 0 (a cube, nothing bound) never falls back to the unit
+			WwBl::resolvedTex = WwBl::targetRed() & 2 ? GLuint( blTex ) : scene->textures->wwBl2D;
 		}
 		wwBlSkip = WwBl::anyFrozen && WwBl::frozenSkip( GLuint( blTex ), wrapS, wrapT, minFilter, TexCache::get_max_anisotropy() );
 	}

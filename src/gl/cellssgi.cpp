@@ -10,6 +10,7 @@ BSD License - see nifskope.h
 #include "cellunits.h"
 #include "celluniform.h"	// lane CELLUNI2
 #include "gl/celldrawstate.h"	// lane PERF3
+#include "gl/cellbindless.h"	// lane FRAMESPEED2: WwBl::renew
 
 #include "gl/celllights.h"
 #include "gl/glnode.h"
@@ -126,8 +127,7 @@ void alloc( NifSkopeOpenGLContext::GLFunctions * fn, Target & t, int w, int h, i
 	if ( t.tex && t.w == w && t.h == h && ( meta < 2 || t.tex3 ) )
 		return;
 	auto mk = [&]( GLuint & tex ) {
-		if ( !tex )
-			fn->glGenTextures( 1, &tex );
+		WwBl::renew( fn, tex );	// lane FRAMESPEED2 (D1): a fresh name, never a re-specified bindless-handled one
 		fn->glBindTexture( GL_TEXTURE_2D, tex );
 		fn->glTexImage2D( GL_TEXTURE_2D, 0, GL_RGBA16F, w, h, 0, GL_RGBA, GL_FLOAT, nullptr );
 		fn->glTexParameteri( GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, linear ? GL_LINEAR : GL_NEAREST );
@@ -314,8 +314,7 @@ void wwCellSsgiPass( Scene * scene, bool run )
 		while ( hizN < 4 && ( W >> ( hizN + 1 ) ) >= 1 && ( H >> ( hizN + 1 ) ) >= 1 )
 			hizN++;
 		if ( !g.hizTex || g.hizW != W || g.hizH != H || g.hizN != hizN ) {
-			if ( !g.hizTex )
-				fn->glGenTextures( 1, &g.hizTex );
+			WwBl::renew( fn, g.hizTex );	// lane FRAMESPEED2 (D1)
 			fn->glBindTexture( GL_TEXTURE_2D, g.hizTex );
 			for ( int i = 0; i < hizN; i++ )
 				fn->glTexImage2D( GL_TEXTURE_2D, i, GL_RG32F, std::max( W >> ( i + 1 ), 1 ), std::max( H >> ( i + 1 ), 1 ), 0,

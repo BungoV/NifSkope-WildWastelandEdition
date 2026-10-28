@@ -8,6 +8,7 @@ BSD License - see nifskope.h
 #include "wwswitch.h"	// lane TESTDRIVER1: the WW_* switch store
 
 #include "gl/cellclustergl.h"
+#include "gl/cellbindless.h"	// lane FRAMESPEED2: WwBl::renew
 #include "gl/cellssr.h"
 #include "gl/cellvolair.h"	// lane VOLAIR1
 #include "gl/shadowset.h"	// lane TERRSHADOW1
@@ -3863,10 +3864,9 @@ void aoAlloc( NifSkopeOpenGLContext::GLFunctions * fn, AoTarget & t, int w, int 
 {
 	if ( t.tex && t.w == w && t.h == h )
 		return;
-	if ( !t.tex ) {
-		fn->glGenTextures( 1, &t.tex );
+	WwBl::renew( fn, t.tex );	// lane FRAMESPEED2 (D1): a fresh name, never a re-specified bindless-handled one
+	if ( !t.fbo )
 		fn->glGenFramebuffers( 1, &t.fbo );
-	}
 	fn->glBindTexture( GL_TEXTURE_2D, t.tex );
 	fn->glTexImage2D( GL_TEXTURE_2D, 0, GLint( ifmt ), w, h, 0, fmt, GL_FLOAT, nullptr );
 	fn->glTexParameteri( GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, linear ? GL_LINEAR : GL_NEAREST );
@@ -4034,9 +4034,8 @@ void giHalfPass( Scene * scene, AoGpu & g, int W, int H, float p00, float p11 )
 	g.giStep = wwCellGiRate() == 1 ? 1 : 2;
 	const int hw = ( W + g.giStep - 1 ) / g.giStep, hh = ( H + g.giStep - 1 ) / g.giStep;
 	aoAlloc( fn, g.giHalf, hw, hh, GL_RGBA32F, GL_RGBA, false );
-	if ( !g.giKey )
-		fn->glGenTextures( 1, &g.giKey );
-	if ( g.giKeyW != hw || g.giKeyH != hh ) {
+	if ( !g.giKey || g.giKeyW != hw || g.giKeyH != hh ) {
+		WwBl::renew( fn, g.giKey );	// lane FRAMESPEED2 (D1)
 		fn->glBindTexture( GL_TEXTURE_2D, g.giKey );
 		fn->glTexImage2D( GL_TEXTURE_2D, 0, GL_RGBA32F, hw, hh, 0, GL_RGBA, GL_FLOAT, nullptr );
 		fn->glTexParameteri( GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST );

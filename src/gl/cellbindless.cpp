@@ -237,11 +237,22 @@ void noteKey( int wrapS, int wrapT, int minFilter, float aniso )
 	lastKeyValid = true;
 }
 
+int targetRed()
+{
+	WW_SWITCH_STATIC( int, r, [] {	// lane FRAMESPEED2 (D1)
+		const QByteArray v = wwEnv( "WW_CELL_TARGET_RED" ).trimmed();
+		return v == "respec" ? 1 : v == "stale" ? 2 : v == "old" ? 3 : 0;
+	}() );
+	return r;
+}
+
 std::uint64_t handleOfBound( NifSkopeOpenGLContext::GLFunctions * f )
 {
 	Ctx & c = cx();
 	GLint tex = GLint( resolvedTex );	// lane BINDLESSPERF1: the bind just made, no query (the slow red asks)
-	if ( !tex || red() == 5 )
+	/* lane FRAMESPEED2 (D1): no texture from the cache's bind (a cube map) means the black fallback, never the unit's
+	 * binding: that was a pass's render target, which a handle then made immutable. Red stale: ask the unit again. */
+	if ( red() == 5 || ( !tex && ( targetRed() & 2 ) ) )
 		f->glGetIntegerv( GL_TEXTURE_BINDING_2D, &tex );
 	const bool r = red() == 1;
 	auto & map = r ? c.redHandles : c.handles;
@@ -498,6 +509,18 @@ void forgetAll()
 		m->clear();
 	}
 	c.frozen.clear();
+}
+
+void renew( NifSkopeOpenGLContext::GLFunctions * f, GLuint & tex )
+{
+	if ( tex ) {
+		if ( targetRed() & 1 )
+			return;
+		forget( tex );
+		f->glDeleteTextures( 1, &tex );
+		tex = 0;
+	}
+	f->glGenTextures( 1, &tex );
 }
 
 // ---- the geometry pool (step 3) ----
