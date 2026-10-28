@@ -459,6 +459,8 @@ public:
 
 	quint32 worldspace() const { return wsForm; }
 	QString worldspaceEdid() const { return wsEdid; }
+	//! lane LANDSPEC3: whose terrain LOD files the worldspace draws (the parent's under PNAM "Use LOD Data")
+	QString lodWorldEdid() const { return lodEdid.isEmpty() ? wsEdid : lodEdid; }
 
 	//! Exactly the string load() was given: one plugin path, or a comma-separated list in load order.
 	QString pluginList() const { return srcPath; }
@@ -645,6 +647,7 @@ private:
 	std::unique_ptr<ESMFile> esm;
 	quint32 wsForm = 0;
 	QString wsEdid;
+	QString lodEdid;            //!< lane LANDSPEC3: the parent's EDID when it lends its LOD, else empty
 	QString srcPath;            //!< what load() was given, verbatim
 	float defLandH = 0.0f;
 	float defWaterH = 0.0f;

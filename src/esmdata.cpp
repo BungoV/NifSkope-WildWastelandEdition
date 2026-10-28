@@ -7,6 +7,7 @@ BSD License - see nifskope.h
 #include "esmdata.h"
 #include "wwswitch.h"	// lane TESTDRIVER1: the WW_* switch store
 #include "esmwater.h"
+#include "landlodspec.h"	// lane LANDSPEC3: usesParentLod
 
 #include <cstdio>
 
@@ -99,6 +100,21 @@ bool EsmWorld::load( const QString & esmPath, quint32 worldspaceFormID, QString 
 		tr( "load: header fields read, indexing cells" );
 		indexWorldspace();
 		tr( "load: cells indexed" );
+		lodEdid.clear();
+		if ( LandLodSpec::usesParentLod( wnam, pnam ) ) {	// lane LANDSPEC3: the parent lends its terrain LOD
+			const ESMFile::ESMRecord * pr = esm->findRecord( esm->mapFormID( w, wnam ) );
+			if ( pr && *pr == "WRLD" ) {
+				ESMFile::ESMField f( *esm, *pr );
+				while ( f.next() ) {
+					if ( f == "EDID" ) {
+						lodEdid = fieldString( f );
+						break;
+					}
+				}
+			}
+			std::fprintf( stderr, "esm world: %s takes its terrain LOD from %s\n", qPrintable( wsEdid ),
+				lodEdid.isEmpty() ? "(unreadable parent)" : qPrintable( lodEdid ) );
+		}
 		if ( wnam && ( pnam & 1 ) && !wwEnvIsSet( "WW_CELL_PARENTLAND_RED" ) ) {	// lane ALLON2 (esmdata.h)
 			landParent = esm->mapFormID( w, wnam );
 			indexParentLand();

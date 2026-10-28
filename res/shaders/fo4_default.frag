@@ -313,25 +313,22 @@ vec3 tonemap(vec3 x)
 uniform vec4 landLod;
 uniform vec4 landLodK;	// fLODLandSpecPower, fLODLandSpecScale (0: specular off), blend end, 1 / blend width
 #ifndef WW_LANDSPEC_NONE
-// lane LANDSPEC2: xy the scene origin (world), z 1 = albedo toward the LOD diffuse x noise, w 1 = normal toward the
-// detail normals; landLodWin xy the 2 x 2 chunk window's corner (world), z its bound chunks (bits)
+// lane LANDSPEC2: xy the scene origin (world), z 1 = the terrain noise is bound, w 1 = the detail normals are;
+// landLodWin xy the chunk window's corner (world), z its bound chunks (bits, layer = x + 4 y)
 uniform vec4 landLodTex;
 uniform vec4 landLodWin;
-uniform sampler2D LandLodDiff0;
-uniform sampler2D LandLodDiff1;
-uniform sampler2D LandLodDiff2;
-uniform sampler2D LandLodDiff3;
+uniform sampler2DArray LandLodDiff;	// lane LANDSPEC3: the 4 x 4 level-4 LOD diffuse chunks round the camera (clamped)
 uniform sampler2D LandLodNoise;
 uniform sampler2D LandLodDetail;
-vec3 landLodChunk( int k, vec2 uv, vec2 dx, vec2 dy )
+/* lane LANDSPEC3: n moved toward the detail normal d in n's own frame, as the game's land PSs (02858 by v, the LOD
+ * land 02861 whole): t1 = n x (n x X), t2 = n x t1, target (t1.d, t2.d, n.d) */
+vec3 landDetailN( vec3 n, vec2 w, vec2 wdx, vec2 wdy, float v )
 {
-	if ( k == 0 )
-		return textureGrad( LandLodDiff0, uv, dx, dy ).rgb;
-	if ( k == 1 )
-		return textureGrad( LandLodDiff1, uv, dx, dy ).rgb;
-	if ( k == 2 )
-		return textureGrad( LandLodDiff2, uv, dx, dy ).rgb;
-	return textureGrad( LandLodDiff3, uv, dx, dy ).rgb;
+	vec2 dd = textureGrad( LandLodDetail, w * 0.00035, wdx * 0.00035, wdy * 0.00035 ).rg * 2.0 - 1.0;
+	vec3 d = vec3( dd, sqrt( 1.0 - min( dot( dd, dd ), 1.0 ) ) );
+	vec3 t1 = normalize( cross( n, cross( n, vec3( 1.0, 0.0, 0.0 ) ) ) );
+	vec3 t2 = normalize( cross( n, t1 ) );
+	return normalize( mix( n, vec3( dot( t1, d ), dot( t2, d ), dot( normalize( n ), d ) ), v ) );
 }
 #endif
 #endif
@@ -448,16 +445,23 @@ void main()
 	landBandW += landLodTex.xy;
 	vec2 landWdx = dFdx( landBandW );
 	vec2 landWdy = dFdy( landBandW );
-	if ( landLodTex.z > 0.5 && landBandV > 0.0 ) {
+	// lane LANDSPEC3: the far LOD ground (02861) takes the noise and the detail normal whole
+	float landDetailV = landLod.x > 1.5 ? 1.0 : landBandV;
+	if ( landLodTex.z > 0.5 && landDetailV > 0.0 ) {
+		vec3 noiseK = textureGrad( LandLodNoise, landBandW * 0.00025, landWdx * 0.00025, landWdy * 0.00025 ).rgb
+			* 3.777778 - 2.006;
 		vec2 g = ( landBandW - landLodWin.xy ) * ( 1.0 / 16384.0 );
 		ivec2 ci = ivec2( floor( g ) );
-		int k = ci.x + 2 * ci.y;
-		if ( ci.x >= 0 && ci.y >= 0 && ci.x < 2 && ci.y < 2 && ( ( int( landLodWin.z ) >> k ) & 1 ) != 0 ) {
+		int k = ci.x + 4 * ci.y;
+		if ( landLod.x > 1.5 ) {
+#ifndef WW_FARGROUND
+			baseMap.rgb *= noiseK;
+#endif
+		} else if ( ci.x >= 0 && ci.y >= 0 && ci.x < 4 && ci.y < 4 && ( ( int( landLodWin.z ) >> k ) & 1 ) != 0 ) {
 			vec2 f = g - vec2( ci );
 			const vec2 flipV = vec2( 1.0, -1.0 ) / 16384.0;
-			vec3 lod = landLodChunk( k, vec2( f.x, 1.0 - f.y ), landWdx * flipV, landWdy * flipV );
-			vec3 noise = textureGrad( LandLodNoise, landBandW * 0.00025, landWdx * 0.00025, landWdy * 0.00025 ).rgb;
-			baseMap.rgb = mix( baseMap.rgb, lod * ( noise * 3.777778 - 2.006 ), landBandV );
+			vec3 lod = textureGrad( LandLodDiff, vec3( f.x, 1.0 - f.y, float( k ) ), landWdx * flipV, landWdy * flipV ).rgb;
+			baseMap.rgb = mix( baseMap.rgb, lod * noiseK, landBandV );
 		}
 	}
 #endif
@@ -611,19 +615,19 @@ void main()
 		 *
 		 * The blue channel is NOT recomputed here: it is real data. */
 		vec3 msn = normalMap.rgb * 2.0 - 1.0;
-		normal = normalize( vec3( msn.r, msn.b, msn.g ) * normalMatrix );
+		vec3 msnN = vec3( msn.r, msn.b, msn.g );
+#if defined( WW_CELLLIGHTS ) && !defined( WW_LANDSPEC_NONE )
+		if ( landLodTex.w > 0.5 && landDetailV > 0.0 )	// lane LANDSPEC3: the far LOD ground's model-space map
+			msnN = landDetailN( msnN, landBandW, landWdx, landWdy, landDetailV );
+#endif
+		normal = normalize( msnN * normalMatrix );
 	} else {
 		normal = normalMap.rgb * 2.0 - 1.0;
 		// Calculate missing blue channel
 		normal.b = sqrt(max(1.0 - dot(normal.rg, normal.rg), 0.0));
 #if defined( WW_CELLLIGHTS ) && !defined( WW_LANDSPEC_NONE )
-		if ( landLodTex.w > 0.5 && landBandV > 0.0 ) {	// lane LANDSPEC2: toward the detail normal in its own frame
-			vec2 dd = textureGrad( LandLodDetail, landBandW * 0.00035, landWdx * 0.00035, landWdy * 0.00035 ).rg * 2.0 - 1.0;
-			vec3 d = vec3( dd, sqrt( 1.0 - min( dot( dd, dd ), 1.0 ) ) );
-			vec3 t1 = normalize( cross( normal, cross( normal, vec3( 1.0, 0.0, 0.0 ) ) ) );
-			vec3 t2 = normalize( cross( normal, t1 ) );
-			normal = normalize( mix( normal, vec3( dot( t1, d ), dot( t2, d ), dot( normalize( normal ), d ) ), landBandV ) );
-		}
+		if ( landLodTex.w > 0.5 && landDetailV > 0.0 )	// lane LANDSPEC2: toward the detail normal in its own frame
+			normal = landDetailN( normal, landBandW, landWdx, landWdy, landDetailV );
 #endif
 		normal = normalize( btnMatrix_norm * normal );
 	}

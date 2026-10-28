@@ -3688,7 +3688,9 @@ static bool cellBuild( NifModel * nif, const CellSceneSpec & specAsked, CellChun
 	if ( !chunk ) {
 		wwCellWaterBegin( nif );   // lane WATER1: forget the last cell's water shapes
 		wwCellLandBegin( nif );    // lane TERRBLEND1: forget the last cell's blended-ground shapes
-		wwCellLandOrigin( nif, spec.interior ? QString() : spec.world, origin[0], origin[1] );	// lane LANDSPEC2
+		// lane LANDSPEC2; LANDSPEC3: the band reads the worldspace whose LOD it draws (red ownlod: the child's own)
+		wwCellLandOrigin( nif, spec.interior ? QString()
+			: wwEnv( "WW_LANDSPEC_RED" ) == "ownlod" ? spec.world : world.lodWorldEdid(), origin[0], origin[1] );
 		wwCellGrassBegin( nif );   // lane GRASSMB1: and its grass shapes
 	}
 	wwCellWaterSetDefault( nif, world.defaultWaterType() );	// lane WATERUNDER5: its placed water reads as sea under it

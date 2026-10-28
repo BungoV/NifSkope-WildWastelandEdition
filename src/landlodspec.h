@@ -131,10 +131,37 @@ inline float noiseK( float n )
 	return n * 3.777778f - 2.006f;
 }
 
-//! the first chunk (cells) of the 2 x 2 window round the camera's cell: it holds every cell within 2 of it
+/* lane LANDSPEC3: a 4 x 4 window of chunks (one texture array, layer = x + 4 y), so a near block wider than the game's
+ * 5 x 5 still finds its band texture: it holds every cell within kReach of the camera's */
+constexpr int kWindow = 4;
+constexpr int kReach = ( kWindow - 1 ) * kLodLevel / 2;
+
+//! the first chunk (cells) of the window round the camera's cell
 inline int windowFirst( int camCell )
 {
-	return int( std::floor( float( camCell - 2 ) / float( kLodLevel ) ) ) * kLodLevel;
+	return int( std::floor( float( camCell - kReach ) / float( kLodLevel ) ) ) * kLodLevel;
+}
+
+//! the window layer holding cell (cx, cy), -1 outside
+inline int windowLayer( int cx, int cy, int fx, int fy )
+{
+	const int x = int( std::floor( float( cx - fx ) / float( kLodLevel ) ) );
+	const int y = int( std::floor( float( cy - fy ) / float( kLodLevel ) ) );
+	return x >= 0 && y >= 0 && x < kWindow && y < kWindow ? x + kWindow * y : -1;
+}
+
+/* lane LANDSPEC3: a .pbrm ground's roughness at the LOD gloss g: the GGX lobe matching the legacy draw's Blinn-Phong
+ * power n = 2^(10 g + 1) (alpha^2 = 2 / (n + 2), rough = sqrt(alpha)); pbrm_default.frag has the same line */
+inline float pbrRough( float g )
+{
+	return std::sqrt( std::sqrt( 2.0f / ( std::exp2( g * 10.0f + 1.0f ) + 2.0f ) ) );
+}
+
+/* lane LANDSPEC3: whose terrain LOD a worldspace draws: its parent's when WRLD PNAM bit 1 "Use LOD Data" is set
+ * (Goodneighbor -> Commonwealth), else its own */
+inline bool usesParentLod( unsigned parentForm, unsigned pnam )
+{
+	return parentForm != 0 && ( pnam & 2u ) != 0;
 }
 
 //! a world xy's uv in the level-4 chunk whose corner cell is (cx, cy), as the near land VS writes it

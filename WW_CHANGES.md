@@ -1,5 +1,27 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## Lane LANDSPEC3 (2026-10-28, branch landspec3-20261028): the far ground's noise and detail, a wider band window
+
+- **Far LOD ground** now takes the terrain noise (albedo x (noise x 3.777778 - 2.006)) and the detail normal, whole,
+  as the game's LOD land shader does. Its model-space normal moves toward the detail normal in its own frame. Not in
+  the far-ring live-ground variants (LEFTOVER).
+- **Band window 4 x 4:** the near ground's LOD diffuse chunks are one texture array (16 level-4 chunks, layer
+  x + 4 y, clamped to edge, rebuilt only when the camera's window moves). Every cell within 6 of the camera's cell
+  finds its band texture (was 2), and no chunk edge wraps. Telemetry: "landspec: band window <ws> X,Y: N of 16
+  chunks, WxH, L levels".
+- **Child worldspaces:** a worldspace with WRLD PNAM bit 1 "Use LOD Data" (Goodneighbor) reads its parent's
+  terrain LOD chunks for the band. Telemetry: "esm world: <edid> takes its terrain LOD from <parent>". Red (a new
+  value of `WW_LANDSPEC_RED`): `ownlod` reads the child's own name, as before.
+- **.pbrm ground roughness** at the LOD gloss: the GGX lobe that matches the legacy draw's Blinn-Phong power
+  2^(10 g + 1), 0.650 at g 0.22 (was 1 - g = 0.78). Vanilla ground (legacy program) unchanged.
+- Verified, no code: the game's noise / detail uv offset (LOD land constant zw) is the render origin, so the uv runs
+  on absolute world xy, as the viewer does.
+- Cost: the far ground +2 texture fetches and one frame build per pixel; the near band unchanged (one array fetch).
+  GPU memory +5.3 MB (the 16-layer array, 512 x 512 BC3 + mips) plus 12 more chunks in the texture cache (+4 MB).
+  fo4_cell program -76 bytes, pbrm_cell +198 bytes; 81/81 programs link in 3 modes. Live GPU-ms owed.
+- Not done: the detail normal blended once (the ground draws one additive pass per layer); far rings of a child
+  worldspace still use its own name; the rain wetness waits on WEATHERLOOK1 phase B.
+
 ## Lane HALLINDOOR1 (2026-10-28, branch hallindoor1-20261027): air under a glazed roof reads indoor
 
 - **The indoor rule's openings:** a point's sky ray (or a hit past the 1536-unit reach) that leaves through a room's

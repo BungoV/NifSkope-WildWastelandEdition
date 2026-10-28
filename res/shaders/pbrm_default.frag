@@ -541,7 +541,9 @@ void main()
 	// lane LANDSPEC2: the LOD land spec law; gloss 0.22 taken as roughness 0.78
 	float landLodV = landLod.x > 1.5 ? 1.0 : ( landLod.x > 0.5
 		? 1.0 - clamp( ( landLodK.z - distance( cellWorldPos( -ViewDir ).xy, landLod.yz ) ) * landLodK.w, 0.0, 1.0 ) : 0.0 );
-	s.rough = mix( s.rough, 1.0 - landLodK.x, landLodV );
+	/* lane LANDSPEC3: the roughness whose GGX lobe matches the legacy draw's Blinn-Phong power 2^(10 g + 1) at the
+	 * LOD gloss g (alpha^2 = 2 / (n + 2), rough = sqrt(alpha)): 0.650 at 0.22, not 1 - g = 0.78 */
+	s.rough = mix( s.rough, sqrt( sqrt( 2.0 / ( exp2( landLodK.x * 10.0 + 1.0 ) + 2.0 ) ) ), landLodV );
 	s.weight = mix( s.weight, landLodK.y, landLodV );
 #elif defined( WW_CELLLIGHTS )
 	const float landLodV = 0.0;

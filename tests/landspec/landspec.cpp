@@ -40,6 +40,26 @@ inline GlossSpec landRed( GlossSpec own, Mode, float, float, float = kScale ) { 
 #define LANDSSR( w ) LandLodSpec::landSsr( w )
 #endif
 
+// lane LANDSPEC3 reds: -DLANDSPEC_RED_WIN (LANDSPEC2's 2 x 2 window), _PBR (rough = 1 - gloss), _LOD (bit 0 read)
+#ifdef LANDSPEC_RED_WIN
+#define WINFIRST( c ) ( int( std::floor( float( ( c ) - 2 ) / 4.0f ) ) * 4 )
+#define WINLAYER( cx, cy, fx, fy ) ( ( ( cx ) - ( fx ) ) >= 0 && ( ( cx ) - ( fx ) ) < 8 && ( ( cy ) - ( fy ) ) >= 0 \
+	&& ( ( cy ) - ( fy ) ) < 8 ? 0 : -1 )
+#else
+#define WINFIRST( c ) LandLodSpec::windowFirst( c )
+#define WINLAYER( cx, cy, fx, fy ) LandLodSpec::windowLayer( cx, cy, fx, fy )
+#endif
+#ifdef LANDSPEC_RED_PBR
+#define PBRROUGH( g ) ( 1.0f - ( g ) )
+#else
+#define PBRROUGH( g ) LandLodSpec::pbrRough( g )
+#endif
+#ifdef LANDSPEC_RED_LOD
+#define PARENTLOD( w, p ) ( ( w ) != 0 && ( ( p ) & 1u ) != 0 )
+#else
+#define PARENTLOD( w, p ) LandLodSpec::usesParentLod( w, p )
+#endif
+
 bool wwLandLodWantsRepaint()
 {
 	return false;
@@ -130,9 +150,18 @@ int main( int argc, char ** argv )
 	near( "glide jump snaps", x, 40000.0f );
 
 	// goal 2, the band: window, uv, noise, detail normal
-	near( "window cam 0", float( windowFirst( 0 ) ), -4.0f );
-	near( "window cam 5", float( windowFirst( 5 ) ), 0.0f );
-	near( "window cam -3", float( windowFirst( -3 ) ), -8.0f );
+	// LANDSPEC3: the 4 x 4 window holds every cell within 6 of the camera's (a 13 x 13 near block)
+	near( "window cam 0", float( WINFIRST( 0 ) ), -8.0f );
+	near( "window cam 5", float( WINFIRST( 5 ) ), -4.0f );
+	near( "window cam -3", float( WINFIRST( -3 ) ), -12.0f );
+	int holes = 0;
+	for ( int c = -9; c <= 9; c++ )
+		for ( int dx = -kReach; dx <= kReach; dx++ )
+			for ( int dy = -kReach; dy <= kReach; dy++ )
+				holes += WINLAYER( c + dx, c + dy, WINFIRST( c ), WINFIRST( c ) ) < 0 ? 1 : 0;
+	near( "window holes within 6 cells", float( holes ), 0.0f );
+	near( "window layer x + 4 y", float( WINLAYER( 5, 9, 0, 0 ) ), 9.0f );
+	near( "window layer outside", float( WINLAYER( 16, 0, 0, 0 ) ), -1.0f );
 	float u = 0.0f, v = 0.0f;
 	lodUv( 6144.0f, 0.0f, 0, -4, u, v );
 	near( "lod uv u", u, 0.375f );
@@ -150,16 +179,29 @@ int main( int argc, char ** argv )
 	near( "ssr dry", float( LANDSSR( 0.0f ) ), 0.0f );
 	near( "ssr wet", float( LandLodSpec::landSsr( 0.5f ) ), 1.0f );
 
+	// LANDSPEC3: the .pbrm ground's roughness = the GGX lobe of Blinn-Phong n = 2^(10 g + 1): g 0.22 -> n 9.1896,
+	// alpha^2 = 2 / 11.1896 = 0.178738, rough = 0.178738^0.25 = 0.650212; g 1 -> n 2048 -> 0.176733
+	near( "pbr rough 0.22", PBRROUGH( 0.22f ), 0.650212f, 1e-4f );
+	near( "pbr rough 1", PBRROUGH( 1.0f ), 0.176733f, 1e-4f );
+	// a child worldspace draws its parent's LOD under PNAM bit 1 (Goodneighbor 0x1F); DiamondCity 0x22 too, bit 0 not
+	near( "lod Goodneighbor", float( PARENTLOD( 0x3Cu, 0x1Fu ) ), 1.0f );
+	near( "lod land data only", float( PARENTLOD( 0x3Cu, 0x01u ) ), 0.0f );
+	near( "lod no parent", float( PARENTLOD( 0u, 0x02u ) ), 0.0f );
+
 	// the shaders run the same laws (goal 1: pbrm_default.frag; goal 2: fo4_default.frag)
 	if ( argc > 1 ) {
 		const std::string t = argv[1];
 		must( t, "fo4_default.frag", { "1.0 - clamp( ( landLodK.z - distance( landBandW, landLod.yz ) ) * landLodK.w, 0.0, 1.0 )",
 			"smoothness = mix( smoothness, landLodK.x, landLodV );", "specMask = mix( specMask, landLodK.y, landLodV );",
-			"lod * ( noise * 3.777778 - 2.006 )", "landBandW * 0.00025", "landBandW * 0.00035", "( 1.0 / 16384.0 )",
+			"* 3.777778 - 2.006;", "lod * noiseK", "landBandW * 0.00025", "w * 0.00035", "( 1.0 / 16384.0 )",
 			"vec3( dd, sqrt( 1.0 - min( dot( dd, dd ), 1.0 ) ) )",
-			"normalize( cross( normal, cross( normal, vec3( 1.0, 0.0, 0.0 ) ) ) )" } );
+			"normalize( cross( n, cross( n, vec3( 1.0, 0.0, 0.0 ) ) ) )",
+			// LANDSPEC3: the window array, the far ground's noise and detail normal
+			"uniform sampler2DArray LandLodDiff;", "int k = ci.x + 4 * ci.y;", "baseMap.rgb *= noiseK;",
+			"float landDetailV = landLod.x > 1.5 ? 1.0 : landBandV;", "msnN = landDetailN( msnN," } );
 		must( t, "pbrm_default.frag", { "1.0 - clamp( ( landLodK.z - distance( cellWorldPos( -ViewDir ).xy, landLod.yz ) ) * landLodK.w, 0.0, 1.0 )",
-			"s.rough = mix( s.rough, 1.0 - landLodK.x, landLodV );", "s.weight = mix( s.weight, landLodK.y, landLodV );" } );
+			"s.rough = mix( s.rough, sqrt( sqrt( 2.0 / ( exp2( landLodK.x * 10.0 + 1.0 ) + 2.0 ) ) ), landLodV );",
+			"s.weight = mix( s.weight, landLodK.y, landLodV );" } );
 	}
 	std::printf( "LANDSPEC %s %d failed\n", fails ? "FAIL" : "PASS", fails );
 	return fails ? 1 : 0;
