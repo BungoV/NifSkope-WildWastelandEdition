@@ -1697,6 +1697,16 @@ static void cellPublishLighting( const NifModel * nif, const EsmWorld & world, c
 	wwCellLightsPublish( nif, L );
 }
 
+/* lane LANDSPEC4: the worldspace whose far LOD rings a worldspace draws: its parent's with WRLD "Use LOD Data"
+ * (Goodneighbor -> Commonwealth), else its own; red WW_LANDSPEC_RED=ownlod keeps the child's own */
+static QString cellLodWs( const QString & ws, const EsmWorld * w )
+{
+	if ( !w || ws.isEmpty() || wwEnv( "WW_LANDSPEC_RED" ) == "ownlod" )
+		return ws;
+	const QString p = w->lodWorldEdid();
+	return p.isEmpty() || p.compare( w->worldspaceEdid(), Qt::CaseInsensitive ) == 0 ? ws : p;
+}
+
 /* lane BAKEBLOCK1: the worldspace's far LOD (`FO4CSLOD/<ws>/<ws>.lodl`, its `.lodi` beside it), looked for in
  * WW_CELL_FAR_LOD (a folder or the .lodl), the data root, the LOD panel's resources and output folder, then
  * every mod of the Mod Organizer mods folder the panel uses. `searched` names where it looked. */
@@ -2306,7 +2316,8 @@ void liveMoveTo( NifModel * nif, LiveDoc & d, int first, int count, int dst )
 QString liveAppendFar( NifModel * nif, LiveDoc & d, CellFarStream * stream )
 {
 	d.farFirst = nif->getBlockCount();
-	return cellFarLodAppend( nif, nif->getBlockIndex( d.rootBlock ), *d.world, d.ws, d.cx, d.cy, d.n, d.lodl, d.origin, stream );
+	return cellFarLodAppend( nif, nif->getBlockIndex( d.rootBlock ), *d.world, cellLodWs( d.ws, d.world.get() ), d.cx, d.cy,
+		d.n, d.lodl, d.origin, stream );
 }
 
 void liveAppendMarkers( NifModel * nif, LiveDoc & d )
@@ -2373,7 +2384,8 @@ QByteArray liveStackNow( const LiveDoc & d, bool farOn, QString * viewNote, QStr
 	const QStringList stack = lodgenResources();
 	if ( farOn ) {
 		QStringList searched;
-		const CellFarStack fs = cellFarLodStackFor( d.ws, cellFarLodl( d.ws, liveRootNow( d ), searched ), plugins );
+		const QString lodWs = cellLodWs( d.ws, d.world.get() );	// lane LANDSPEC4
+		const CellFarStack fs = cellFarLodStackFor( lodWs, cellFarLodl( lodWs, liveRootNow( d ), searched ), plugins );
 		lodb = fs.lodb;
 		present = fs.bakePresent;
 		*lines += QStringLiteral( "  " ) + fs.line + QLatin1Char( '\n' );
@@ -2445,7 +2457,7 @@ int liveFar( NifModel * nif, LiveDoc & d, QString * why )
 	QString notes;
 	if ( wanted ) {
 		QStringList searched;
-		d.lodl = cellFarLodl( d.ws, liveRootNow( d ), searched );
+		d.lodl = cellFarLodl( cellLodWs( d.ws, d.world.get() ), liveRootNow( d ), searched );
 		notes = liveAppendFar( nif, d, seed ? &fs : nullptr );
 	}
 	nif->holdUpdates( false );
@@ -3691,6 +3703,8 @@ static bool cellBuild( NifModel * nif, const CellSceneSpec & specAsked, CellChun
 		// lane LANDSPEC2; LANDSPEC3: the band reads the worldspace whose LOD it draws (red ownlod: the child's own)
 		wwCellLandOrigin( nif, spec.interior ? QString()
 			: wwEnv( "WW_LANDSPEC_RED" ) == "ownlod" ? spec.world : world.lodWorldEdid(), origin[0], origin[1] );
+		if ( !spec.interior )	// lane LANDSPEC4: the band window covers the whole near block
+			wwCellLandBlock( nif, spec.cx, spec.cy, spec.n / 2 );
 		wwCellGrassBegin( nif );   // lane GRASSMB1: and its grass shapes
 	}
 	wwCellWaterSetDefault( nif, world.defaultWaterType() );	// lane WATERUNDER5: its placed water reads as sea under it
@@ -7015,16 +7029,19 @@ static bool cellBuild( NifModel * nif, const CellSceneSpec & specAsked, CellChun
 	QString liveFarLodl;
 	if ( !spec.interior && cellFarLodWanted() ) {
 		QStringList farSearched;
-		const QString farLodl = cellFarLodl( spec.world, dataRoot, farSearched );
+		const QString lodWs = cellLodWs( spec.world, &world );	// lane LANDSPEC4: a child draws its parent's rings
+		if ( lodWs != spec.world )
+			std::fprintf( stderr, "far lod: %s draws the far LOD of %s\n", qPrintable( spec.world ), qPrintable( lodWs ) );
+		const QString farLodl = cellFarLodl( lodWs, dataRoot, farSearched );
 		liveFarLodl = farLodl;
-		farLodNotes = farStackNote + cellFarLodAppend( nif, iRoot, world, spec.world, spec.cx, spec.cy, spec.n, farLodl, origin,
+		farLodNotes = farStackNote + cellFarLodAppend( nif, iRoot, world, lodWs, spec.cx, spec.cy, spec.n, farLodl, origin,
 			streamInit ? &farStream : nullptr );
 		CellSpeed::mark( "far LOD appended" );
 	}
 	if ( !chunk ) {	// lane WATERDATA1: the worldspace's baked water planes, far LOD on or off ("" = interior)
 		QStringList infoSearched;
 		wwCellWaterInfoSet( nif, spec.interior ? QString() : !liveFarLodl.isEmpty() ? liveFarLodl
-			: cellFarLodl( spec.world, dataRoot, infoSearched ) );
+			: cellFarLodl( cellLodWs( spec.world, &world ), dataRoot, infoSearched ) );
 	}
 
 	nif->holdUpdates( false );

@@ -60,6 +60,27 @@ inline GlossSpec landRed( GlossSpec own, Mode, float, float, float = kScale ) { 
 #define PARENTLOD( w, p ) LandLodSpec::usesParentLod( w, p )
 #endif
 
+// lane LANDSPEC4 reds: -DLANDSPEC_RED_BLOCK (the camera's 4 x 4 only), _SPLAT (each layer pass its own detail frame)
+#ifdef LANDSPEC_RED_BLOCK
+#define WINDOWFOR( cx, cy, b, x0, y0, x1, y1 ) LandLodSpec::windowFor( cx, cy, false, x0, y0, x1, y1 )
+#else
+#define WINDOWFOR( cx, cy, b, x0, y0, x1, y1 ) LandLodSpec::windowFor( cx, cy, b, x0, y0, x1, y1 )
+#endif
+//! the per-layer pass before LANDSPEC4: bandNormal's target in the layer normal's own frame, unnormalized
+static LandLodSpec::V3 perLayerRaw( LandLodSpec::V3 n, LandLodSpec::V3 d, float v )
+{
+	using namespace LandLodSpec;
+	const V3 t1 = norm3( cross3( n, cross3( n, V3{ 1.0f, 0.0f, 0.0f } ) ) );
+	const V3 t2 = norm3( cross3( n, t1 ) );
+	const V3 tg{ dot3( t1, d ), dot3( t2, d ), dot3( norm3( n ), d ) };
+	return { mixf( n.x, tg.x, v ), mixf( n.y, tg.y, v ), mixf( n.z, tg.z, v ) };
+}
+#ifdef LANDSPEC_RED_SPLAT
+#define SPLATRAW( n, d, v ) perLayerRaw( n, d, v )
+#else
+#define SPLATRAW( n, d, v ) LandLodSpec::splatNormalRaw( n, d, v )
+#endif
+
 bool wwLandLodWantsRepaint()
 {
 	return false;
@@ -162,6 +183,29 @@ int main( int argc, char ** argv )
 	near( "window holes within 6 cells", float( holes ), 0.0f );
 	near( "window layer x + 4 y", float( WINLAYER( 5, 9, 0, 0 ) ), 9.0f );
 	near( "window layer outside", float( WINLAYER( 16, 0, 0, 0 ) ), -1.0f );
+	// LANDSPEC4: the window also holds the whole near block, the camera anywhere in it (blocks 7 x 7 .. 21 x 21)
+	int blockHoles = 0, blockCells = 0;
+	for ( int half = 3; half <= 10; half++ )
+		for ( int camX = -half; camX <= half; camX++ )
+			for ( int camY = -half; camY <= half; camY++ ) {
+				const Window w = WINDOWFOR( camX + 3, camY - 2, true, 3 - half, -2 - half, 3 + half, -2 + half );
+				for ( int x = -half; x <= half; x++ )
+					for ( int y = -half; y <= half; y++ ) {
+						blockCells++;
+						blockHoles += windowLayer( x + 3, y - 2, w.fx, w.fy, w.w ) < 0 ? 1 : 0;
+					}
+			}
+	std::printf( "window block cells checked %d\n", blockCells );
+	near( "window holes in blocks to 21 x 21", float( blockHoles ), 0.0f );
+	const Window w5 = WINDOWFOR( 0, 0, true, -2, -2, 2, 2 );	// a 5 x 5 round the camera: the LANDSPEC3 window
+	near( "window 5 x 5 fx", float( w5.fx ), float( windowFirst( 0 ) ) );
+	near( "window 5 x 5 w", float( w5.w ), 4.0f );
+	const Window w21 = WINDOWFOR( 10, 10, true, -10, -10, 10, 10 );	// cam at a corner: chunks -12..16 = 8 a side
+	near( "window 21 x 21 corner w", float( w21.w ), 8.0f );
+	near( "window 21 x 21 corner fx", float( w21.fx ), -12.0f );
+	const Window wBig = windowFor( 0, 0, true, -20, -20, 20, 20 );	// past kWindowMax: the camera's 4 x 4
+	near( "window too wide w", float( wBig.w ), 4.0f );
+	near( "window layer x + 8 y", float( windowLayer( 5, 9, 0, 0, 8 ) ), 17.0f );
 	float u = 0.0f, v = 0.0f;
 	lodUv( 6144.0f, 0.0f, 0, -4, u, v );
 	near( "lod uv u", u, 0.375f );
@@ -174,6 +218,25 @@ int main( int argc, char ** argv )
 	n = BANDNORMAL( ( V3{ 0.0f, 0.0f, 1.0f } ), ( V3{ 0.6f, 0.0f, 0.8f } ), 0.5f );	// (-0.3, 0, 0.9) / 0.948683
 	near( "band normal v0.5 x", n.x, -0.3162278f );
 	near( "band normal v0.5 z", n.z, 0.9486833f );
+	// LANDSPEC4: the splat passes (shares 0.5 / 0.3 / 0.2 of three tilted layer normals) sum to the blended normal moved
+	// toward ONE target; the single-pass value is mix(sum w_i n_i, T, v) with T the flat frame's (-d.x, -d.y, d.z)
+	{
+		const V3 ln[3] = { norm3( V3{ 0.4f, 0.0f, 0.9f } ), norm3( V3{ -0.3f, 0.35f, 0.9f } ), norm3( V3{ 0.1f, -0.5f, 0.8f } ) };
+		const float sw[3] = { 0.5f, 0.3f, 0.2f };
+		const V3 d{ 0.6f, 0.0f, 0.8f };
+		V3 sum, nb;
+		for ( int i = 0; i < 3; i++ ) {
+			const V3 p = SPLATRAW( ln[i], d, 0.5f );
+			sum = { sum.x + sw[i] * p.x, sum.y + sw[i] * p.y, sum.z + sw[i] * p.z };
+			nb = { nb.x + sw[i] * ln[i].x, nb.y + sw[i] * ln[i].y, nb.z + sw[i] * ln[i].z };
+		}
+		const V3 once = splatNormalRaw( nb, d, 0.5f );
+		const float err = std::fabs( sum.x - once.x ) + std::fabs( sum.y - once.y ) + std::fabs( sum.z - once.z );
+		near( "splat passes = one blend (sum |error|)", err, 0.0f, 1e-5f );
+		const V3 t = splatTarget( d ), b = BANDNORMAL( ( V3{ 0.0f, 0.0f, 1.0f } ), d, 1.0f );
+		near( "splat target = band frame at flat x", t.x, b.x );
+		near( "splat target = band frame at flat z", t.z, b.z );
+	}
 
 	// goal 4: dry land writes no SSR flag
 	near( "ssr dry", float( LANDSSR( 0.0f ) ), 0.0f );
@@ -197,8 +260,12 @@ int main( int argc, char ** argv )
 			"vec3( dd, sqrt( 1.0 - min( dot( dd, dd ), 1.0 ) ) )",
 			"normalize( cross( n, cross( n, vec3( 1.0, 0.0, 0.0 ) ) ) )",
 			// LANDSPEC3: the window array, the far ground's noise and detail normal
-			"uniform sampler2DArray LandLodDiff;", "int k = ci.x + 4 * ci.y;", "baseMap.rgb *= noiseK;",
-			"float landDetailV = landLod.x > 1.5 ? 1.0 : landBandV;", "msnN = landDetailN( msnN," } );
+			"uniform sampler2DArray LandLodDiff;", "baseMap.rgb *= noiseK;",
+			"float landDetailV = landLod.x > 1.5 ? 1.0 : landBandV;", "msnN = landDetailN( msnN,",
+			// LANDSPEC4: the n x n window and its bits, the far ring 0's noise, one detail target for the splat passes
+			"int k = ci.x + nW * ci.y;", "( ( int( landLodBits[k >> 4] ) >> ( k & 15 ) ) & 1 ) != 0",
+			"baseMap.rgb *= noiseK;	// lane LANDSPEC4", "vec3( -dd, sqrt( 1.0 - min( dot( dd, dd ), 1.0 ) ) )",
+			"normal = landSplat ? landDetailSplatN(" } );
 		must( t, "pbrm_default.frag", { "1.0 - clamp( ( landLodK.z - distance( cellWorldPos( -ViewDir ).xy, landLod.yz ) ) * landLodK.w, 0.0, 1.0 )",
 			"s.rough = mix( s.rough, sqrt( sqrt( 2.0 / ( exp2( landLodK.x * 10.0 + 1.0 ) + 2.0 ) ) ), landLodV );",
 			"s.weight = mix( s.weight, landLodK.y, landLodV );" } );
