@@ -174,7 +174,8 @@ struct VaDrift
 {
 	bool loaded = false, on = false, pinned = false;
 	quint64 liveGen = 0;		// fix TDFIX2: a live set of WW_CELL_FOGDRIFT* re-reads them
-	int red = 0;				// 1 still (no motion), 2 smooth (no noise), 3 wobble (the pre-FOGWIND1 wind law)
+	int red = 0;				// 1 still (no motion), 2 smooth (no noise), 3 wobble (the pre-FOGWIND1 wind law), 4 nosun
+	float amp = 0.0f;			// lane WEATHERBLEND4: the last air pass's amplitude (0: smooth), for the surfaces and the puffs
 	bool timePinned = false;
 	double tPin = 0.0;
 	QElapsedTimer clock;
@@ -204,7 +205,7 @@ VaDrift & vd()
 			d.on = QSettings().value( QStringLiteral( "WW/VolAirDrift" ), false ).toBool();
 		}
 		const QByteArray red = qgetenv( "WW_CELL_FOGDRIFT_RED" ).trimmed();
-		d.red = red == "still" ? 1 : red == "smooth" ? 2 : red == "wobble" ? 3 : 0;
+		d.red = red == "still" ? 1 : red == "smooth" ? 2 : red == "wobble" ? 3 : red == "nosun" ? 4 : 0;	// 4: WEATHERBLEND4
 		bool ok = false;
 		const double t = qEnvironmentVariable( "WW_CELL_FOGDRIFT_T" ).toDouble( &ok );
 		if ( ok ) {	// a fixed clock (the shots' frames): the drift integrated from 0 to t in fixed steps
@@ -1526,6 +1527,8 @@ static void vaPassInner( Scene * scene, bool run )
 	fn->glBindTexture( GL_TEXTURE_3D, driftAmp > 0.0f ? g.noise : 0 );
 	prog->uni1i( "volNoise", kNoiseUnit );
 	prog->uni4f( "volDrift", FloatVector4( driftAmp, kDriftFade0, 1.0f / ( kDriftFade1 - kDriftFade0 ), dr.mean ) );
+	prog->uni1b( "volDriftSun", dr.red != 4 );	// lane WEATHERBLEND4: the sun's column drifts too (red nosun: not)
+	dr.amp = driftAmp;
 	for ( int o = 0; o < 2; o++ )
 		prog->uni4f_l( prog->uniLocation( "volDriftOfs[%d]", o ), FloatVector4( dr.ofs[o][0], dr.ofs[o][1], dr.ofs[o][2],
 			1.0f / ( kDriftTile * ( o ? kDriftDetail : 1.0f ) ) ) );
@@ -2039,10 +2042,33 @@ void wwVolAirUniforms( Scene * scene )
 		u.bind( WwCellUnit::AirTerrain, GL_TEXTURE_2D_ARRAY, terr ? g.terr : 0 );
 		prog->uni1i_l( terrLoc, WwCellUnit::AirTerrain );
 	}
+	// lane WEATHERBLEND4: the air's drift noise, for the sun's column and the puffs (lookdev_fog.glsl wwAirDriftAt)
+	const int noiseLoc = prog->uniLocation( "volAirNoise" );
+	const VaDrift & dr = vd();
+	const bool drift = on && dr.amp > 0.0f && dr.red != 4 && g.noise;
+	if ( noiseLoc >= 0 ) {
+		u.bind( kNoiseUnit, GL_TEXTURE_3D, drift ? g.noise : 0 );
+		prog->uni1i_l( noiseLoc, kNoiseUnit );
+	}
 	u.done();
 	prog->uni1i( "volTex", kVolTexUnit );
 	prog->uni1i( "volTile", kTileUnit );
 	prog->uni1i( "volFarClamp", clamp ? 1 : 0 );
+	if ( noiseLoc >= 0 ) {	// lane WEATHERBLEND4: the noise's uvw at a view point, per octave, as the air pass's airDrift
+		prog->uni4f( "volAirDrift", FloatVector4( drift ? dr.amp : 0.0f, kDriftFade0, 1.0f / ( kDriftFade1 - kDriftFade0 ), dr.mean ) );
+		const Transform & vt = scene->view;
+		const float sc = vt.scale != 0.0f ? vt.scale : 1.0f;
+		for ( int o = 0; o < 2; o++ ) {
+			const float w = 1.0f / ( kDriftTile * ( o ? kDriftDetail : 1.0f ) );
+			for ( int k = 0; k < 3; k++ ) {	// world = dot(row.xyz, posView) + row.w (celllights.cpp cellRow); uvw = (world - ofs) w
+				float t = 0.0f;
+				for ( int j = 0; j < 3; j++ )
+					t -= vt.rotation( j, k ) * vt.translation[j];
+				prog->uni4f_l( prog->uniLocation( "volAirDriftUv[%d]", o * 3 + k ), FloatVector4( vt.rotation( 0, k ) / sc * w,
+					vt.rotation( 1, k ) / sc * w, vt.rotation( 2, k ) / sc * w, ( t / sc - dr.ofs[o][k] ) * w ) );
+			}
+		}
+	}
 	if ( !on )
 		return;
 	if ( terr ) {

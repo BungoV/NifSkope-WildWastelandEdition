@@ -430,6 +430,33 @@ vec4 wwVolAirSky( vec3 dirView )
 	return vec4( v.rgb + v.a * J * ( 1.0 - Tt ), v.a * Tt );
 }
 
+/* lane WEATHERBLEND4: the drifting air (cell_volair.frag airDrift) where the surfaces and the puffs read it: the density
+ * factor at view point p, around 1; amp 0 (drift off, red WW_CELL_FOGDRIFT_RED=nosun) = 1 */
+uniform vec4 volAirDrift;		// the air pass's volDrift: x amp, y the fade's start, z 1 / its length, w the noise's mean
+uniform vec4 volAirDriftUv[6];	// per octave three rows: the noise's uvw at view point p = dot( row, vec4( p, 1 ) )
+uniform sampler3D volAirNoise;
+float wwAirDriftAt( vec3 p )
+{
+	float f = 1.0 - clamp( ( length( p ) * fogDistScale - volAirDrift.y ) * volAirDrift.z, 0.0, 1.0 );
+	if ( volAirDrift.x <= 0.0 || f <= 0.0 )
+		return 1.0;
+	vec4 q = vec4( p, 1.0 );
+	float a = texture( volAirNoise, vec3( dot( volAirDriftUv[0], q ), dot( volAirDriftUv[1], q ), dot( volAirDriftUv[2], q ) ) ).r;
+	float b = texture( volAirNoise, vec3( dot( volAirDriftUv[3], q ), dot( volAirDriftUv[4], q ), dot( volAirDriftUv[5], q ) )
+		+ vec3( 0.37, 0.61, 0.13 ) ).r;
+	return 1.0 + volAirDrift.x * f * ( a - volAirDrift.w + 0.5 * f * ( b - volAirDrift.w ) ) * ( 1.0 / 1.5 );
+}
+
+// the factor on the sun column's optical depth from p (height lo, the sun's rise mu, the air's top): the drift half way
+// up the column, at most half the noise's tile (2048 units) along the sun
+float wwAirDriftSunK( vec3 p, float lo, float mu, float top )
+{
+	if ( volAirDrift.x <= 0.0 )
+		return 1.0;
+	float h = 0.5 * min( max( top - lo, 0.0 ) / max( mu, 0.02 ), 4096.0 );
+	return wwAirDriftAt( p + fogSun.xyz * ( h / max( fogDistScale, 1e-12 ) ) );
+}
+
 /* FOGSUN1 (bungo 10-14): the sun reaching a surface through the air -- the air's transmittance from the surface's
  * height to its top along the sun, closed form (the air's own sun term, cell_volair.frag airTup): in heavy fog the
  * direct sun is dimmed by the medium; the sky's share the air scatters is its in-scattering. 1 where the air is off.
@@ -443,7 +470,7 @@ float wwVolAirSunT( vec3 posView )
 	if ( lo >= volAirMed.w )
 		return 1.0;
 	float mu = max( dot( fogView.xyz, fogSun.xyz ) / max( length( fogView.xyz ), 1e-12 ), 0.02 );
-	return exp( -volAirMed.x * wwAirCol( lo, volAirMed.w, wwAirGroundAt( posView ) ) / mu );
+	return exp( -volAirMed.x * wwAirCol( lo, volAirMed.w, wwAirGroundAt( posView ) ) * wwAirDriftSunK( posView, lo, mu, volAirMed.w ) / mu );
 }
 
 vec3 wwFogBase( vec3 preFog, vec3 posView, float tAp, bool apOn );

@@ -361,6 +361,37 @@ float wwCloudScroll( double base, float vOld, float vNew, double seconds, double
 float wwWeatherWindBlend( quint8 cur, quint8 last, float pct );
 //! the game's random range offset (degrees): the nearest to 0 of 4 draws in +- range / 2; seeded, so a view repeats
 float wwWindRangeOffset( quint8 dirByte, quint8 rangeByte, quint32 seed );
+/*! lane WEATHERBLEND4: an hour box move as a step round the clock, the shortest way, in (-12, 12]: a forward step is a
+ *  wait of that many hours, a backward drag (or none) waits nothing */
+double wwWeatherHourStep( double from, double to );
+//! lane WEATHERBLEND4: one RDWT entry {weather, chance}; the chance is its global's value when the entry names one
+struct WwRegionWeatherEntry
+{
+	quint32 weather = 0;
+	qint32 chance = 0;
+};
+/*! the game's region list pick (GetRandomWeather): r % the chances' sum, walked over the entries' bins in order; a
+ *  chance <= 0 holds no bin. 0 = nothing to pick */
+quint32 wwRegionWeatherPick( const WwRegionWeatherEntry * e, int n, quint32 r );
+//! a region with weather data the point is inside: its RDAT override flag and priority
+struct WwRegionRank
+{
+	bool overrides = false;
+	int priority = 0;
+};
+/*! the game's weather region (PlayerRegionState): the first wins, unless a later one overrides and it does not, or
+ *  both override alike and the later has the higher priority. -1 = none */
+int wwRegionChoose( const WwRegionRank * c, int n );
+//! a seed's draw for wwRegionWeatherPick (xorshift32 stands in for the game's BSRandom)
+quint32 wwRegionDraw( quint32 seed );
+//! lane WEATHERBLEND4: a REGN's weather data (RDAT type 3, RDWT) and whether a point is inside its areas (RPLD)
+struct WwRegionWeather
+{
+	bool hasWeather = false, inside = false;
+	WwRegionRank rank;
+	QVector<WwRegionWeatherEntry> list;
+	QString edid;
+};
 
 /*! The engine fog at one hour (lane FOG1, spec_fog.md 2.1-2.3): the FNAM floats
  *  blended day <-> night on the engine's fog day weight, the four NAM0 fog colours
@@ -428,6 +459,8 @@ public:
 	/*! lane LIGHTS3 (XEMI-REGN): the weather a REGN's emittance follows: its RDAT type 3 (RDWT) list, the highest
 	 *  chance (the game picks by chance at random); none listed = DefaultWeather 0000015E. 0 = not a REGN. */
 	quint32 regionWeather( quint32 regn, int * listed = nullptr );
+	//! lane WEATHERBLEND4: the region's weather list, rank and whether world (x, y) is inside it; false = not a REGN
+	bool regionWeatherAt( quint32 regn, float x, float y, WwRegionWeather & out );
 	//! the sky GMSTs of the loaded plugins, exe defaults where none sets one
 	WwSkyGmst gmst();
 

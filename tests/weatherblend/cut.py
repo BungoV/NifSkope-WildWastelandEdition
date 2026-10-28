@@ -5,7 +5,8 @@ import sys
 
 HELPERS = ['void wwRgbToLab(', 'void wwLabToRgb(', 'void wwLabBlend(', 'void wwLabBlend4(',
            'double wwWeatherTransHours(', 'float wwWeatherTransPct(', 'double wwWeatherTransGameHours(',
-           'void wwWeatherTransWeights(', 'void transSum(', 'float wwFogDayWeight(', 'void wwLutBlendN(']
+           'void wwWeatherTransWeights(', 'void transSum(', 'float wwFogDayWeight(', 'void wwLutBlendN(',
+           'quint32 wwRegionDraw(']
 BLENDS = ['void EsmWeather::blendRow(', 'void EsmWeather::blendDalc(', 'void EsmWeather::blendRowLab(',
           'void EsmWeather::blendCloud(', 'float EsmWeather::blendSkyScale(', 'WwFog wwFogAt(']
 # lane WEATHERBLEND2: the laws, cut with the blends; a base without one gets the viewer's old behaviour (the red)
@@ -28,7 +29,14 @@ LAWS = [('void wwImageSpaceSlots(',
         ('float wwWeatherWindBlend(',
          'float wwWeatherWindBlend(quint8 c,quint8 l,float p)\n{\n'
          '\treturn float(std::lround(float(c)*p+float(l)*(1.0f-p)));\n}\n'),
-        ('float wwWindRangeOffset(', 'float wwWindRangeOffset(quint8,quint8,quint32)\n{\n\treturn 0.0f;\n}\n')]
+        ('float wwWindRangeOffset(', 'float wwWindRangeOffset(quint8,quint8,quint32)\n{\n\treturn 0.0f;\n}\n'),
+        # lane WEATHERBLEND4: the base's behaviour: the hour box forward only, the list's most likely weather, the first region
+        ('double wwWeatherHourStep(',
+         'double wwWeatherHourStep(double f,double t)\n{\n\tdouble d=std::fmod(t-f,24.0);\n\treturn d<0.0?d+24.0:d;\n}\n'),
+        ('quint32 wwRegionWeatherPick(',
+         'quint32 wwRegionWeatherPick(const WwRegionWeatherEntry*e,int n,quint32)\n{\n\tquint32 b=0;qint32 c=0;\n'
+         '\tfor(int i=0;i<n;i++)if(e[i].chance>c){c=e[i].chance;b=e[i].weather;}\n\treturn b;\n}\n'),
+        ('int wwRegionChoose(', 'int wwRegionChoose(const WwRegionRank*,int n)\n{\n\treturn n>0?0:-1;\n}\n')]
 
 
 def cut(path, sig):

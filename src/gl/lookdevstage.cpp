@@ -141,6 +141,8 @@ struct LdState
 	double waitHours = 0.0, changeSecs = 0.0;
 	const void * lastDoc = nullptr;
 	double cloudBase[32][2] = {};
+	const void * regionDoc = nullptr;	// lane WEATHERBLEND4: a teleport's cell, its region weather picked at the next resolve
+	QString regionLast;
 	QString skyLast = QStringLiteral( "pending" );	// what the last sky pass drew, for the echo
 
 	// the weather fog (lane FOG1)
@@ -459,6 +461,51 @@ void transTick( LdState & s )
 	}
 }
 
+/* lane WEATHERBLEND4: a teleport to an exterior picks the region weather (Sky::UpdateWeather on a new region): of the
+ * cell's regions (XCLR) with weather data whose areas hold the cell's centre, the override / priority winner; then its
+ * list's chance draw, seeded by the cell (a reopen repeats). A region listing the current weather keeps it (the game
+ * keeps it with chance elapsed / duration; a teleport has none elapsed). Red WW_WEATHER_BLEND_RED=noregionpick */
+void regionPick( LdState & s )
+{
+	const void * doc = s.regionDoc;
+	s.regionDoc = nullptr;
+	const WwCellLighting * cl = doc ? wwCellLightsFor( doc ) : nullptr;
+	if ( !cl || cl->interior || s.pinWeather || weatherBlendRed( "noregionpick" ) )
+		return;
+	QVector<WwRegionWeather> in;
+	QVector<WwRegionRank> rank;
+	for ( quint32 regn : cl->regions ) {
+		WwRegionWeather g;
+		if ( s.esm.regionWeatherAt( regn, cl->regionAt[0], cl->regionAt[1], g ) && g.hasWeather && g.inside ) {
+			in.append( g );
+			rank.append( g.rank );
+		}
+	}
+	const int k = wwRegionChoose( rank.constData(), int( rank.size() ) );
+	if ( k < 0 ) {
+		s.regionLast = QStringLiteral( "none(%1 regions)" ).arg( cl->regions.size() );
+		return;
+	}
+	const WwRegionWeather & g = in.at( k );
+	const bool usesCur = s.haveWeather && std::any_of( g.list.cbegin(), g.list.cend(),
+		[&]( const WwRegionWeatherEntry & e ) { return e.weather == s.w.formID; } );
+	const quint32 pick = usesCur ? 0u
+		: wwRegionWeatherPick( g.list.constData(), int( g.list.size() ), wwRegionDraw( cl->regionSeed ) );
+	if ( !pick ) {
+		s.regionLast = QStringLiteral( "%1:%2" ).arg( g.edid, usesCur ? QStringLiteral( "keep" ) : QStringLiteral( "empty" ) );
+		return;
+	}
+	QString key = hex8( pick );
+	for ( const WwWeatherEntry & e : s.list )
+		if ( e.formID == pick && !e.edid.isEmpty() )
+			key = e.edid;
+	s.regionLast = QStringLiteral( "%1:%2" ).arg( g.edid, key );
+	if ( key != s.weatherKey ) {	// the region's, not the user's pick: not saved
+		s.weatherKey = key;
+		s.dirtyWeather = true;
+	}
+}
+
 void resolve()
 {
 	LdState & s = st();
@@ -505,6 +552,8 @@ void resolve()
 			}
 		}
 	}
+	if ( s.regionDoc && s.loadRefusal.isEmpty() )
+		regionPick( s );
 	if ( s.dirtyWeather ) {
 		s.dirtyWeather = false;
 		// lane WEATHERBLEND1: a change of weather keeps the one it leaves; a new load, a refusal or the snap red snaps
@@ -1054,9 +1103,13 @@ void wwLookdevSetHour( double h )
 	s.hour = std::clamp( h, 0.0, 23.99 );
 	// lane WEATHERBLEND3: a new hour inside a change is a wait (PassTime): its hours move the change on, a pick snaps
 	if ( s.w.blending() && s.hour != was && !s.pinHour && !weatherBlendRed( "nosnapevents" ) ) {
-		s.waitHours += wwWeatherWaitHours( was, s.hour );
-		s.snapFlags |= WwSnapPassTime;
-		s.transMs = -1;
+		// lane WEATHERBLEND4: the shortest way round; a backward drag waits nothing (red backwait: forward only, ~24 h)
+		const double d = weatherBlendRed( "backwait" ) ? wwWeatherWaitHours( was, s.hour ) : wwWeatherHourStep( was, s.hour );
+		if ( d > 0.0 ) {
+			s.waitHours += d;
+			s.snapFlags |= WwSnapPassTime;
+			s.transMs = -1;
+		}
 	}
 	if ( !s.pinHour && !wwR2aRed( "nosave" ) )
 		QSettings().setValue( QLatin1StringView( kHourKey ), s.hour );
@@ -1310,6 +1363,8 @@ QString wwLookdevSummary()
 			head += QString( " wait=%1h" ).arg( s.waitHours, 0, 'f', 3 );
 		if ( !s.snapLast.isEmpty() )
 			head += QString( " event=%1" ).arg( s.snapLast );
+		if ( !s.regionLast.isEmpty() )	// lane WEATHERBLEND4
+			head += QString( " region=%1" ).arg( s.regionLast );
 	} else {
 		head = QString( "refused=\"%1\" neutral-sun" ).arg( s.weatherRefusal );
 	}
@@ -2570,8 +2625,10 @@ bool wwLookdevDrawBackground( Scene * scene )
 	const WwCellLighting * icl = scene->nifModel ? wwCellLightsFor( scene->nifModel ) : nullptr;
 	sx.interior = icl && icl->interior;	// lane WEATHERBLEND2: the next pick snaps in an interior (the game's sky mode)
 	if ( scene->nifModel != sx.lastDoc ) {	// lane WEATHERBLEND3: another cell is a teleport (PositionPlayer: PassTime)
-		if ( sx.lastDoc )
+		if ( sx.lastDoc ) {
 			sx.snapFlags |= WwSnapPassTime;
+			sx.regionDoc = scene->nifModel;	// lane WEATHERBLEND4: and its region's weather
+		}
 		sx.lastDoc = scene->nifModel;
 	}
 	const bool anyPart = sx.sky || sx.sun || sx.clouds || sx.moon

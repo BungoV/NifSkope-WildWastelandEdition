@@ -333,6 +333,29 @@ bool EsmWorld::cellWater( int cx, int cy, float & height,
 	return hasWater;
 }
 
+QVector<quint32> EsmWorld::cellRegions( int cx, int cy, quint32 * cellForm ) const
+{
+	QVector<quint32> out;
+	if ( cellForm )
+		*cellForm = 0;
+	auto it = cellIndex.constFind( qMakePair( cx, cy ) );
+	const ESMFile::ESMRecord * cr = it != cellIndex.constEnd() ? esm->findRecord( it->cellForm ) : nullptr;
+	if ( !cr )
+		return out;
+	if ( cellForm )
+		*cellForm = it->cellForm;
+	ESMFile::ESMField f( *esm, *cr );
+	while ( f.next() )
+		if ( f == "XCLR" )
+			for ( size_t k = 0; k + 4 <= f.size(); k += 4 ) {
+				quint32 raw = 0;
+				std::memcpy( &raw, f.data() + k, 4 );
+				if ( raw )
+					out.append( esm->mapFormID( *cr, raw ) );
+			}
+	return out;
+}
+
 /* lane WATER1: the WATR record, field for field (xEdit wbRecord(WATR): DNAM fog / physical / specular /
  * noise / silt / SSR, then NAM2-4 the noise textures). A short DNAM keeps the defaults past its end. */
 bool EsmWorld::waterRecord( quint32 form, WwWaterRecord & r ) const

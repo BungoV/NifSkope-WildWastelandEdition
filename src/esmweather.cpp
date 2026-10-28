@@ -566,7 +566,7 @@ namespace {
 // lane SKYTOP1: one plugin as its TES4 record plus only the wanted top groups (each skipped by its size)
 bool groupImage( const QString & path, QByteArray & out, qint64 & fileSize, bool dropOverrides, QString * why )
 {
-	static const char * const kWanted[] = { "WTHR", "CLMT", "IMGS", "GMST", "GDRY", "LENS", "REGN" };
+	static const char * const kWanted[] = { "WTHR", "CLMT", "IMGS", "GMST", "GDRY", "LENS", "REGN", "GLOB" };	// GLOB: WEATHERBLEND4's RDWT chances
 	out.clear();
 	QFile f( path );
 	if ( !f.open( QIODevice::ReadOnly ) ) {
@@ -945,7 +945,9 @@ bool EsmWeather::read( quint32 formID, WwWeatherData & out, QString * why )
 			}
 			if ( !ig )
 				continue;
-			if ( !out.isDefault[tod] ) try {	// the Sky Scale and DoF stay the weather's own (1 / none)
+			// lane WEATHERBLEND4: the default slot adds its own Sky Scale and DoF too, as every slot (WeightedAdd);
+			// red WW_LOOKDEV_RED=imgsdefaultown: they stay the weather's own (1 / none)
+			if ( !out.isDefault[tod] || !wwLookdevRed( "imgsdefaultown" ) ) try {
 				ESMFile::ESMField g( *esm, *ig );
 				while ( g.next() ) {
 					if ( g == "HNAM" && g.size() >= 32 ) {
@@ -1151,6 +1153,74 @@ quint32 EsmWeather::regionWeather( quint32 regn, int * listed )
 		return 0;
 	}
 	return best ? best : 0x0000015EU;
+}
+
+bool EsmWeather::regionWeatherAt( quint32 regn, float x, float y, WwRegionWeather & out )
+{
+	out = WwRegionWeather();
+	if ( !esm )
+		return false;
+	const ESMFile::ESMRecord * r = esm->findRecord( regn );
+	if ( !r || !( *r == "REGN" ) )
+		return false;
+	auto u32 = []( const ESMFile::ESMField & f, size_t o ) {
+		quint32 v = 0;
+		std::memcpy( &v, f.data() + o, 4 );
+		return v;
+	};
+	auto f32 = []( const ESMFile::ESMField & f, size_t o ) {
+		float v = 0.0f;
+		std::memcpy( &v, f.data() + o, 4 );
+		return v;
+	};
+	bool areas = false;
+	quint32 type = 0;
+	try {
+		ESMFile::ESMField f( *esm, *r );
+		while ( f.next() ) {
+			if ( f == "EDID" ) {
+				out.edid = fieldString( f );
+			} else if ( f == "RPLD" ) {	// one area's points (x, y): inside by the even-odd rule
+				areas = true;
+				const int m = int( f.size() / 8 );
+				bool in = false;
+				for ( int i = 0, j = m - 1; i < m; j = i++ ) {
+					const float xi = f32( f, size_t( i ) * 8 ), yi = f32( f, size_t( i ) * 8 + 4 );
+					const float xj = f32( f, size_t( j ) * 8 ), yj = f32( f, size_t( j ) * 8 + 4 );
+					if ( ( yi > y ) != ( yj > y ) && x < ( xj - xi ) * ( y - yi ) / ( yj - yi ) + xi )
+						in = !in;
+				}
+				out.inside = out.inside || in;
+			} else if ( f == "RDAT" && f.size() >= 4 ) {
+				type = u32( f, 0 );
+				if ( type == 3 ) {
+					out.hasWeather = true;
+					out.rank.overrides = f.size() >= 5 && f.data()[4] != 0;
+					out.rank.priority = f.size() >= 6 ? int( f.data()[5] ) : 0;
+				}
+			} else if ( f == "RDWT" && type == 3 ) {
+				for ( size_t k = 0; k + 12 <= f.size(); k += 12 ) {
+					WwRegionWeatherEntry e;
+					const quint32 raw = u32( f, k ), glob = u32( f, k + 8 );
+					e.weather = raw ? esm->mapFormID( *r, raw ) : 0;
+					e.chance = qint32( u32( f, k + 4 ) );
+					const ESMFile::ESMRecord * g = glob ? esm->findRecord( esm->mapFormID( *r, glob ) ) : nullptr;
+					if ( g && *g == "GLOB" ) {	// the chance is the global's value (FLTV), as the game reads it
+						ESMFile::ESMField gf( *esm, *g );
+						while ( gf.next() )
+							if ( gf == "FLTV" && gf.size() >= 4 )
+								e.chance = qint32( f32( gf, 0 ) );
+					}
+					out.list.append( e );
+				}
+			}
+		}
+	} catch ( std::exception & ) {
+		return false;
+	}
+	if ( !areas )
+		out.inside = true;	// no area of its own: the cell's region list (XCLR) stands for it
+	return true;
 }
 
 bool EsmWeather::climateData( quint32 formID, WwClimateData & out, QString * why )
@@ -1442,6 +1512,57 @@ float wwWindRangeOffset( quint8 dirByte, quint8 rangeByte, quint32 seed )
 	return best;
 }
 
+double wwWeatherHourStep( double from, double to )
+{
+	double d = std::fmod( to - from, 24.0 );
+	if ( d <= -12.0 )
+		d += 24.0;
+	else if ( d > 12.0 )
+		d -= 24.0;
+	return d;
+}
+
+quint32 wwRegionWeatherPick( const WwRegionWeatherEntry * e, int n, quint32 r )
+{
+	quint64 sum = 0;
+	for ( int i = 0; i < n; i++ )
+		sum += quint64( std::max( e[i].chance, 0 ) );
+	if ( !sum )
+		return 0;
+	const quint64 x = quint64( r ) % sum;
+	quint64 lo = 0;
+	for ( int i = 0; i < n; i++ ) {
+		const quint64 c = quint64( std::max( e[i].chance, 0 ) );
+		if ( c && x < lo + c )
+			return e[i].weather;
+		lo += c;
+	}
+	return 0;
+}
+
+int wwRegionChoose( const WwRegionRank * c, int n )
+{
+	int best = -1;
+	for ( int i = 0; i < n; i++ )
+		if ( best < 0 || ( c[i].overrides && !c[best].overrides )
+			|| ( c[i].overrides == c[best].overrides && c[i].priority > c[best].priority ) )
+			best = i;
+	return best;
+}
+
+quint32 wwRegionDraw( quint32 seed )
+{
+	quint32 h = seed * 2654435761u;
+	if ( !h )
+		h = 1u;
+	for ( int i = 0; i < 3; i++ ) {
+		h ^= h << 13;
+		h ^= h >> 17;
+		h ^= h << 5;
+	}
+	return h;
+}
+
 namespace
 {
 //! the four-weight linear sum of a byte colour (rows, DALC): this weather's keys, then the leaving one's
@@ -1712,6 +1833,7 @@ QString WwFog::describe() const
  *   --census          every WTHR: parse verdict + the NAM0/DALC histograms
  *   --list            every WTHR, one line each
  *   --imagespace      (with --weather) an `imgs` line per ToD: the IMGS read, default=1 where the game's 0x167 stands in
+ *   --region r[;r..]  lane WEATHERBLEND4: with --at x,y and --seed s, a `region` line per REGN and the `regionpick`
  *   --sky             (with --weather + --hour) the engine clock (lane PBRWX1): `gmst`, `climate2`, and per
  *                     hour `skyclock`, `skycolor`, `cloud` (layers 0..15) and `moon` (per --day)
  *   --day d[,d..]     game days for the `moon` lines (default 0)
@@ -1734,6 +1856,8 @@ int cmdWeather( const QStringList & args )
 	bool census = false, doList = false, sky = false, fog = false;
 	bool groups = false, loadOrder = false;	// lane SKYTOP1
 	bool imgs = false;	// lane WEATHERBLEND3
+	QString regionArg, atArg;	// lane WEATHERBLEND4
+	quint32 regionSeed = 0;
 	double cloudTime = 0.0;
 	for ( int i = 0; i < args.size(); i++ ) {
 		const QString & a = args.at( i );
@@ -1762,6 +1886,12 @@ int cmdWeather( const QStringList & args )
 			doList = true;
 		else if ( a == "--imagespace" )	// lane WEATHERBLEND3: an `imgs` line per ToD
 			imgs = true;
+		else if ( a == "--region" )	// lane WEATHERBLEND4: the teleport's region pick
+			regionArg = next();
+		else if ( a == "--at" )
+			atArg = next();
+		else if ( a == "--seed" )
+			regionSeed = next().toUInt( nullptr, 0 );
 		else if ( a == "--sky" )
 			sky = true;
 		else if ( a == "--day" )
@@ -1856,6 +1986,33 @@ int cmdWeather( const QStringList & args )
 	say( QString( "load ok files=%1 wthr=%2" ).arg( ew.loadSummary() ).arg( all.size() ) );
 	say( QString( "load cost mode=%1 ms=%2 held=%3MB of %4MB" ).arg( groups ? "groups" : "whole" ).arg( lt.elapsed() )
 		.arg( double( ew.groupBytes() ) / 1048576.0, 0, 'f', 1 ).arg( double( ew.fileBytes() ) / 1048576.0, 0, 'f', 1 ) );
+
+	if ( !regionArg.isEmpty() ) {	// lane WEATHERBLEND4: the regions' weather data, then the viewer's teleport pick
+		const QStringList at = atArg.split( QChar( ',' ) );
+		const float x = at.value( 0 ).toFloat(), y = at.value( 1 ).toFloat();
+		QVector<WwRegionWeather> in;
+		QVector<WwRegionRank> rank;
+		for ( const QString & s : regionArg.split( QChar( ';' ), Qt::SkipEmptyParts ) ) {
+			WwRegionWeather g;
+			const quint32 regn = s.trimmed().toUInt( nullptr, 16 );
+			const bool ok = ew.regionWeatherAt( regn, x, y, g );
+			QStringList l;
+			for ( const WwRegionWeatherEntry & e : g.list )
+				l << QString( "%1:%2" ).arg( hex8( e.weather ) ).arg( e.chance );
+			say( QString( "region id=%1 ok=%2 edid=%3 weather=%4 inside=%5 override=%6 priority=%7 list=%8" ).arg( hex8( regn ) )
+				.arg( ok ? 1 : 0 ).arg( g.edid ).arg( g.hasWeather ? 1 : 0 ).arg( g.inside ? 1 : 0 ).arg( g.rank.overrides ? 1 : 0 )
+				.arg( g.rank.priority ).arg( l.isEmpty() ? QStringLiteral( "-" ) : l.join( ',' ) ) );
+			if ( ok && g.hasWeather && g.inside ) {
+				in.append( g );
+				rank.append( g.rank );
+			}
+		}
+		const int k = wwRegionChoose( rank.constData(), int( rank.size() ) );
+		const quint32 pick = k < 0 ? 0u
+			: wwRegionWeatherPick( in.at( k ).list.constData(), int( in.at( k ).list.size() ), wwRegionDraw( regionSeed ) );
+		say( QString( "regionpick chosen=%1 seed=%2 draw=%3 pick=%4" ).arg( k < 0 ? QStringLiteral( "none" ) : in.at( k ).edid )
+			.arg( hex8( regionSeed ) ).arg( wwRegionDraw( regionSeed ) ).arg( hex8( pick ) ) );
+	}
 
 	if ( doList )
 		for ( const WwWeatherEntry & e : all )

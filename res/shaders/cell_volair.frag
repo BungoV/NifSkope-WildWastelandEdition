@@ -59,6 +59,7 @@ uniform vec4 volMs;				// lane GAPLOOK1 (FOGEXTRAS): the sun's scattering octave
 uniform vec4 volDrift;
 uniform vec4 volDriftOfs[2];	// per octave: xyz the wind's offset (world units), w 1 / its tile
 uniform sampler3D volNoise;
+uniform bool volDriftSun;		// lane WEATHERBLEND4: the sun's column drifts too (red WW_CELL_FOGDRIFT_RED=nosun: false)
 // lane LIGHTS5 (FOGSCALE1): a light's fog.scale (.recx), 4 a texel from cellFogScaleBase; off = 1 for every light
 uniform bool cellFogScaleOn;
 uniform int cellFogScaleBase;
@@ -80,15 +81,27 @@ layout ( location = 1 ) out vec4 volMrt[7];	// stage 3: layers volLayer + 1 .. +
 
 /* lane FOGDRIFT1: the density factor at distance t along dirView, around 1 (the texture's exact mean subtracted, so
  * the mean density holds); fades to 1 with distance, the detail octave sooner (it would alias in the deep slices) */
-float airDrift( vec3 dirView, float t )
+float airDriftW( vec3 P, float t )
 {
 	float f = 1.0 - clamp( ( t - volDrift.y ) * volDrift.z, 0.0, 1.0 );
 	if ( f <= 0.0 || !cellOn )
 		return 1.0;
-	vec3 P = cellWorldPos( dirView * ( t / fogDistScale ) );
 	float a = texture( volNoise, ( P - volDriftOfs[0].xyz ) * volDriftOfs[0].w ).r - volDrift.w;
 	float b = texture( volNoise, ( P - volDriftOfs[1].xyz ) * volDriftOfs[1].w + vec3( 0.37, 0.61, 0.13 ) ).r - volDrift.w;
 	return 1.0 + volDrift.x * f * ( a + 0.5 * f * b ) * ( 1.0 / 1.5 );
+}
+
+float airDrift( vec3 dirView, float t )
+{
+	return airDriftW( cellWorldPos( dirView * ( t / fogDistScale ) ), t );
+}
+
+// lane WEATHERBLEND4: the factor on the sun column's optical depth from posView (height z, the sun's rise mu): the drift
+// half way up the column, at most half the noise's tile (2048 units) along the sun (lookdev_fog.glsl wwAirDriftSunK)
+float airDriftSunK( vec3 posView, float z, float mu )
+{
+	float h = 0.5 * min( max( airMed.w - z, 0.0 ) / max( mu, 0.02 ), 4096.0 );
+	return airDriftW( cellWorldPos( posView ) + normalize( cellDirTo ) * h, length( posView ) * fogDistScale );
 }
 
 // lane FARGRID1: the cloud shadow's input, 1 = no clouds; lane CLOUD3 feeds it (ww_sunshadow.glsl ussCloudT: 1 when the
@@ -145,9 +158,12 @@ vec3 airSun( vec3 posView, vec3 dirView, float z )
 		vec3 to = normalize( cellDirTo );
 		float vis = ( volFarMode != 0 && !cellInterior ) ? airFarVis( posView )
 			: ( cellInterior || ( volRed & 8 ) != 0 ) ? 1.0 : volCsm ? wwSunShadow( posView ) : airCloudShadow( posView );
+		float Ts = airTup( z, to.z );
+		if ( volDriftSun && volDrift.x > 0.0 )	// lane WEATHERBLEND4: the sun's light through the drifting air
+			Ts = pow( Ts, airDriftSunK( posView, z, to.z ) );
 		if ( volMs.x > 0.0 )
-			return cellDirColor * airMsSum( vis, airTup( z, to.z ), dot( to, cellWorldDir( dirView ) ) );
-		return cellDirColor * vis * airTup( z, to.z ) * volPhasePi( dot( to, cellWorldDir( dirView ) ) );
+			return cellDirColor * airMsSum( vis, Ts, dot( to, cellWorldDir( dirView ) ) );
+		return cellDirColor * vis * Ts * volPhasePi( dot( to, cellWorldDir( dirView ) ) );
 	}
 	if ( fogSun.w > 0.0 ) {
 		// Lookdev without the cell's lights: its sun (view space)

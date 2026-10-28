@@ -493,6 +493,8 @@ public:
 	//! tell them from the harbour has nothing to go on.
 	bool cellWater( int cx, int cy, float & height,
 		quint32 * typeForm = nullptr ) const;
+	//! lane WEATHERBLEND4: cell (cx, cy)'s regions (XCLR, load-order forms) and its form in *cellForm; empty = none
+	QVector<quint32> cellRegions( int cx, int cy, quint32 * cellForm = nullptr ) const;
 
 	//! The worldspace's default water type (WRLD NAM2), 0 when absent.
 	quint32 defaultWaterType() const { return defWaterType; }
