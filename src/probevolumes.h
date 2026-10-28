@@ -103,6 +103,7 @@ struct ProbeVolumeRoom
 	bool borderline = false;
 	float coverage = 0, overshootAir = 0, overshootSolid = 0;
 	QStringList evidence;
+	QString group;              //!< lane VOLVIEW2: the building: rooms joined by thresholds share it (its largest room's name)
 };
 
 struct ProbeVolumeThreshold
@@ -164,6 +165,11 @@ QStringList probeVolumesApplyRecx( ProbeVolumes * v, const QString & recxPath, c
 //! Keeps room ids: each room of a previous file (same cell) gives its id to the room now holding its anchor.
 QStringList probeVolumesKeepIds( ProbeVolumes * v, const QString & cellKey, const ProbeVolumes & prev );
 QString probeVolumesCensusText( const ProbeVolumes & v );
+//! lane VOLVIEW2: a room's name across cells, "<cell>:0x<id>" (the .space file's room key with its cell)
+QString probeVolumesRoomName( const ProbeVolumeRoom & r );
+/*! lane VOLVIEW2: every room's group: the rooms joined through thresholds between two rooms (any opening; the outdoors
+ *  joins nothing) are one building, named by its largest room (most cells; then the smaller name). Returns the groups. */
+int probeVolumesGroups( ProbeVolumes * v );
 
 //! One cell's file `<key>.space` (JSON): the rooms whose cellKey is `key` and the thresholds touching them.
 QByteArray probeVolumesJson( const ProbeVolumes & v, const QString & key, const QString & world, bool interior );

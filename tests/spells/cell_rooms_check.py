@@ -25,6 +25,14 @@ the plugin is read here, every ray is traced here through the run's own soup.psp
         reads no more than the dark room's own brightest probe face, and every sample has weight.
         Lane GIBLACK2: scene "recess" (a 130-unit recess open to the sky, a far triangle that makes the soup's box
         huge): the recess air is outdoors (0). Red --red soupbox (the rooms grid over the soup's box) FAILS.
+  links <dump> <viewdump> [--red nosee|firstslot] [--expect fail]
+        Lane VOLVIEW2: the PRTP Debug View's probe links (WW_CELL_VOLUMES_VIEW_DUMP's probe lines) redone here from the
+        run's GI dump (gi_probes, gi_grid, gi_slots, gi_rooms): per probe an up-facing surface at it reads its room
+        (P + 0.75 cell, else 1.75; both solid: no links), sees the 8 voxels of its blend from the first air read
+        (gi_seen), takes the slots of its room (both across a threshold) that hold light; two probes are linked when
+        they share a voxel slot, "t" when their rooms differ. Every probe's room and link list must equal the view's.
+        --red: the mirror takes the shader's red (a view dump made with WW_CELL_PV_RED=nosee must equal --red nosee);
+        --expect fail: the lists must differ (the default mirror against a red view dump).
   recess <dump> <fixture> [--lo 0.5] [--hi 2.0] [--expect fail]
         Lane GIBLACK2: a run's GI dump (WW_CELL_GI_DUMP) at a recess against the tracer (tests/fixtures/giblack2_memden.tsv:
         world points, normals, bounce_reference cosine sky share). C the rooms grid spans the GI grid's box, not the
@@ -1340,9 +1348,121 @@ def points_cmd(dump, fixture, box, max_x, dark_share, expect, up_share=-1.0, min
     return 0 if good else 1
 
 
+def links_mirror(dump, red):
+    # lane VOLVIEW2: src/gl/cellvolumeview.cpp wwCellProbeLinksBuild, in plain floats (doubles, as there)
+    b = open(dump + '/gi_probes.bin', 'rb').read()
+    n = struct.unpack_from('<i', b, 0)[0]
+    P = np.frombuffer(b, '<f4', n * 21, 4).reshape(n, 21)[:, :3].astype(float)
+    G = read_grid(dump + '/gi_grid.bin', dump + '/gi_slots.bin')
+    R = read_rooms(dump + '/gi_rooms.bin')
+    go, vox, gd = [float(v) for v in G['origin']], float(G['voxel']), G['dims']
+    ro, rc, rd = [float(v) for v in R['origin']], float(R['cell']), R['dims']
+    ab = R['ab'].tolist()
+    S = G['slots'].tolist()
+    A = [G['g'][4, :, :, :, 3].tolist(), G['g2'][4, :, :, :, 3].tolist()]
+
+    def cell(q):
+        c = [int(math.floor((q[i] - ro[i]) / rc)) for i in range(3)]
+        if any(c[i] < 0 or c[i] >= rd[i] for i in range(3)):
+            return None
+        return c
+
+    def room(q):
+        c = cell(q)
+        return (-1, -1) if c is None else tuple(ab[c[2]][c[1]][c[0]])
+
+    def solid(q):
+        c = cell(q)
+        return c is not None and ab[c[2]][c[1]][c[0]][0] < 0
+
+    rooms, keys, dropped = [], [], []
+    for p in range(n):
+        x, y, z = P[p]
+        q1, q2 = (x, y, z + 0.75 * rc), (x, y, z + 1.75 * rc)
+        L = room(q1)
+        if L[0] < 0:
+            L = room(q2)
+        rooms.append(L)
+        ks, dr = set(), 0
+        if L[0] >= 0:
+            frm = q1 if not solid(q1) else q2
+            g = [(x - go[0]) / vox - 0.5, (y - go[1]) / vox - 0.5, (z + 0.5 * vox - go[2]) / vox - 0.5]
+            i0 = [int(math.floor(v)) for v in g]
+            f = [g[i] - i0[i] for i in range(3)]
+            for k in range(8):
+                o = (k & 1, (k >> 1) & 1, (k >> 2) & 1)
+                c = [min(max(i0[i] + o[i], 0), gd[i] - 1) for i in range(3)]
+                w = 1.0
+                for i in range(3):
+                    w *= f[i] if o[i] else 1.0 - f[i]
+                s0, s1 = S[c[2]][c[1]][c[0]]
+                base = 0 if s0 >= 0 and s0 in L else (1 if s1 >= 0 and s1 in L else -1)
+                if base < 0 or w <= 0.0:
+                    continue
+                if red != 'nosee':
+                    d = [go[i] + (c[i] + 0.5) * vox - frm[i] for i in range(3)]
+                    nt = min(max(int(math.ceil(math.sqrt(d[0] * d[0] + d[1] * d[1] + d[2] * d[2]) / (0.5 * rc))), 1), 12)
+                    if any(solid([frm[i] + d[i] * (j / float(nt + 1)) for i in range(3)]) for j in range(1, nt + 1)):
+                        dr += 1
+                        continue
+                two = red != 'firstslot' and L[0] >= 0 and L[1] >= 0 and L[0] != L[1] and base == 0 and s1 >= 0 and s1 in L
+                vi = c[0] + gd[0] * (c[1] + gd[1] * c[2])
+                for slot in ((0, 1) if two else (base,)):
+                    if A[slot][c[2]][c[1]][c[0]] > 0.0:
+                        ks.add(vi * 2 + slot)
+        keys.append(ks)
+        dropped.append(dr)
+    readers = {}
+    for p, ks in enumerate(keys):
+        for k in ks:
+            readers.setdefault(k, []).append(p)
+    out = []
+    for p, ks in enumerate(keys):
+        nb = set()
+        for k in ks:
+            nb.update(readers[k])
+        nb.discard(p)
+        out.append((rooms[p], dropped[p], sorted((q, 't' if rooms[q][0] != rooms[p][0] else 'r') for q in nb)))
+    return out
+
+
+def read_view_links(path):
+    out = {}
+    for l in open(path):
+        if not l.startswith('probe '):
+            continue
+        w = l.split()
+        a, b = w[w.index('room') + 1].split(',')
+        lk = w[w.index('links') + 1:]
+        out[int(w[1])] = ((int(a), int(b)), int(w[w.index('dropped') + 1]),
+                          sorted((int(e.split(':')[0]), e.split(':')[1]) for e in lk))
+    return out
+
+
+def links_cmd(dump, view, red, expect):
+    M = links_mirror(dump, red)
+    V = read_view_links(view)
+    bad = [p for p in range(len(M)) if V.get(p) != M[p]]
+    nl = sum(len(m[2]) for m in M)
+    nt = sum(1 for m in M for e in m[2] if e[1] == 't')
+    print('L  %d probes in the dump, %d in the view; mirror (red %s): %d link ends (%d through thresholds), %d probes with a '
+          'room, %d voxels dropped by the seen filter; %d probes differ'
+          % (len(M), len(V), red or 'none', nl, nt, sum(1 for m in M if m[0][0] >= 0), sum(m[1] for m in M), len(bad)))
+    for p in bad[:5]:
+        print('   probe %d view %s mirror %s' % (p, str(V.get(p))[:160], str(M[p])[:160]))
+    same = not bad and len(V) == len(M) and len(M) > 0
+    if expect == 'fail':
+        print('%s  links (red): %s' % ('PASS' if not same else 'FAIL', 'the lists differ' if not same else 'the red view equals the mirror'))
+        return 0 if not same else 1
+    print('%s  links: the view draws the probes each probe works with' % ('PASS' if same and nl > 0 else 'FAIL'))
+    return 0 if same and nl > 0 else 1
+
+
 if __name__ == '__main__':
     a = sys.argv[1:]
     opt = (lambda k, d='': a[a.index(k) + 1] if k in a else d)
+    if a and a[0] == 'links':
+        sys.exit(links_cmd(a[1], a[2], opt('--red'), opt('--expect', 'pass')))
     if a and a[0] == 'doors':
         sys.exit(door_cmd(a[1], a[2], opt('--cell'), opt('--eye')))
     if a and a[0] == 'synth':

@@ -231,9 +231,9 @@ bool runPrtpStage( NifSkope * skope, int stage )
 	if ( stage == 2 ) {
 		// stage 2: Show probes off -- counted, not drawn
 		const QStringList rows = panel->probeKindRows();
-		add( "PRTP: Show probes off keeps the counts", !rows.isEmpty() && rows.join( QLatin1Char( '|' ) ) == keptRows,
+		add( "PRTP: Debug View off keeps the counts", !rows.isEmpty() && rows.join( QLatin1Char( '|' ) ) == keptRows,
 			rows.join( QLatin1Char( '|' ) ) );
-		add( "PRTP: Show probes off draws no markers", probeShapes( skope ) == 0, QString::number( probeShapes( skope ) ) );
+		add( "PRTP: Debug View off draws no markers", probeShapes( skope ) == 0, QString::number( probeShapes( skope ) ) );
 		// lane PRTPBAKE: Bake re-opens once more; stage 3 reads what it wrote
 		panel->bakeProbes();
 		return false;

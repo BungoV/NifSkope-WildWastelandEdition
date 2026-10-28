@@ -151,7 +151,7 @@ list, the two selection doors, the Show popover and the layout bytes)" \
 		"PRTP: Place fills the kind rows (8 kinds + All)" \
 		"PRTP: the kinds add up to All" \
 		"PRTP: the markers are drawn" \
-		"PRTP: Show probes off draws no markers" \
+		"PRTP: Debug View off draws no markers" \
 		"PRTP: Bake is on" \
 		"PRTP: Place alone does not bake" \
 		"PRTP: Bake says what it wrote" \

@@ -1227,7 +1227,8 @@ void CellWorkspacePanel::buildUi()
 	QHBoxLayout * pl = new QHBoxLayout( prtpRow );
 	pl->setContentsMargins( 0, 0, 0, 0 );
 	pl->setSpacing( 4 );
-	probesShow = new QCheckBox( tr( "Show probes" ), prtpRow );
+	// lane VOLVIEW2: the probes, their links, the rooms, groups and thresholds (src/gl/cellvolumeview.h) under one tick
+	probesShow = new QCheckBox( tr( "PRTP Debug View" ), prtpRow );
 	probesShow->setObjectName( QStringLiteral( "CellWorkspaceProbesShow" ) );
 	probesShow->setChecked( QSettings().value(
 		QString( "%1/probes" ).arg( QLatin1String( CELL_SHOW_GROUP ) ), true ).toBool() );

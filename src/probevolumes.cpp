@@ -2419,6 +2419,48 @@ QString probeVolumesCensusText( const ProbeVolumes & v )
 
 // ---------------------------------------------------------------- files
 
+QString probeVolumesRoomName( const ProbeVolumeRoom & r )
+{
+	return r.cellKey + QLatin1Char( ':' ) + hexId( r.id );
+}
+
+int probeVolumesGroups( ProbeVolumes * v )
+{
+	const int n = int( v->rooms.size() );
+	std::vector<int> up( static_cast<size_t>( n ) );
+	for ( int i = 0; i < n; i++ )
+		up[size_t( i )] = i;
+	auto top = [&]( int i ) {
+		while ( up[size_t( i )] != i )
+			i = up[size_t( i )] = up[size_t( up[size_t( i )] )];
+		return i;
+	};
+	for ( const ProbeVolumeThreshold & t : v->thresholds )
+		if ( t.a > 0 && t.b > 0 && t.a <= n && t.b <= n && t.a != t.b ) {
+			const int x = top( t.a - 1 ), y = top( t.b - 1 );
+			if ( x != y )
+				up[size_t( std::max( x, y ) )] = std::min( x, y );
+		}
+	std::vector<int> best( size_t( n ), -1 );
+	for ( int i = 0; i < n; i++ ) {
+		int & b = best[size_t( top( i ) )];
+		if ( b < 0 )
+			b = i;
+		else {
+			const ProbeVolumeRoom & r = v->rooms[size_t( i )], & q = v->rooms[size_t( b )];
+			if ( r.cells > q.cells || ( r.cells == q.cells && probeVolumesRoomName( r ) < probeVolumesRoomName( q ) ) )
+				b = i;
+		}
+	}
+	int groups = 0;
+	for ( int i = 0; i < n; i++ ) {
+		if ( top( i ) == i )
+			groups++;
+		v->rooms[size_t( i )].group = probeVolumesRoomName( v->rooms[size_t( best[size_t( top( i ) )] )] );
+	}
+	return groups;
+}
+
 QByteArray probeVolumesJson( const ProbeVolumes & v, const QString & key, const QString & world, bool interior )
 {
 	QJsonObject root;
@@ -2469,6 +2511,8 @@ QByteArray probeVolumesJson( const ProbeVolumes & v, const QString & key, const 
 		o.insert( QStringLiteral( "classify" ), cls );
 		o.insert( QStringLiteral( "bounds" ), QJsonArray { vec3( r.lo ), vec3( r.hi ) } );
 		o.insert( QStringLiteral( "evidence" ), QJsonArray::fromStringList( r.evidence ) );
+		if ( !r.group.isEmpty() )	// lane VOLVIEW2
+			o.insert( QStringLiteral( "group" ), r.group );
 		rooms.append( o );
 	}
 	root.insert( QStringLiteral( "rooms" ), rooms );
@@ -2525,6 +2569,7 @@ bool probeVolumesRead( const QString & path, ProbeVolumes * out, QString * error
 		r.cells = qint64( fit.value( QStringLiteral( "cells" ) ).toDouble() );
 		r.coverage = float( fit.value( QStringLiteral( "coverage" ) ).toDouble() );
 		r.handShapes = fit.value( QStringLiteral( "hand" ) ).toBool();
+		r.group = o.value( QStringLiteral( "group" ) ).toString();	// lane VOLVIEW2 (empty in a file before it)
 		byName[o.value( QStringLiteral( "room" ) ).toString()] = int( out->rooms.size() ) + 1;
 		out->rooms.push_back( r );
 	}
@@ -3057,6 +3102,10 @@ QString probeVolumesStage( const ProbeSoup & soup, const std::vector<ProbeVolume
 				for ( const QString & l : probeVolumesKeepIds( &v, k, prev ) )
 					o << "  ids " << k << ": " << l << "\n";
 		}
+	/* lane VOLVIEW2: the building each room belongs to, across cells (after the ids: a group is named by a kept id).
+	 * Red WW_CELL_VOLUMES_RED=nogroup: no group field (the files as before the lane, byte for byte) */
+	if ( spec.red != QLatin1String( "nogroup" ) )
+		o << "  groups " << probeVolumesGroups( &v ) << " of " << v.rooms.size() << " rooms\n";
 	for ( const QString & k : st.keys ) {
 		const QString d = dirOf( k );
 		QString err;

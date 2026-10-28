@@ -1,5 +1,28 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## Lane VOLVIEW2 (2026-10-28, branch volview2-20261028): rooms, groups, thresholds and probe links in the PRTP Debug View
+
+- **"Show probes" is now "PRTP Debug View"** (same settings key CELL_SHOW_GROUP/probes, same objectName
+  CellWorkspaceProbesShow). The one tick draws the probes AND the Space rooms, thresholds and labels; no new menu row.
+  WW_CELL_VOLUMES_VIEW=1/0 stays as the harness pin (read every frame, live).
+- **Cross-cell groups:** the Space stage now writes a "group" per room (rooms joined by thresholds, across cells; named
+  by the group's largest room). This is the only change to the .space bytes (the files equal the old ones once the
+  group lines are taken out). Red: WW_CELL_VOLUMES_RED=nogroup writes the old bytes.
+- **Colours and labels:** every room and its shapes take the group's colour (the same in every cell). Each room gets a
+  label "<cell:id>" (plus "(group)" when it differs). Each threshold is outlined twice, once in each room's colour
+  (outdoors white), and labelled "<room A> <-> <room B> <type>".
+- **Probes and links:** each probe is a ring in its GI room's colour. Lines join each probe to the probes it actually
+  shares light with by the runtime GI rule: same room, the seen filter (cellGiSeen), and the two-slot case through
+  thresholds. Links through a threshold are dashed, half in each room's colour.
+- **Dump:** WW_CELL_VOLUMES_VIEW_DUMP lists every room with its group, every threshold with its two rooms, and every
+  probe with its room, the voxels the seen filter dropped and its links (j:r same room, j:t through a threshold).
+  `tests/spells/cell_rooms_check.py links <gidump> <viewdump>` recomputes the links on its own from the GI dump. On
+  Concord (GIREBAKE3 bake), 12178 probes and 97124 link ends (1368 through thresholds) match exactly. Red:
+  WW_CELL_PV_RED=nosee changes 8161 probes' lists, and it matches the mirror run with --red nosee.
+- **Cost:** CPU only, while the tick is on. About 28 MB (cached line arrays: 241k segments) and about 22 (CPU, Concord 5x5) ms of draw
+  time per frame. GPU 1080p: not separable here (the lines are a few hundred thousand vertices; whole-frame medians on 87-108 ms vs off 114-124 ms came from separate launches sharing the GPU with other lanes). When the tick is off it costs nothing.
+- The self-test check names "PRTP: Show probes off ..." are now "PRTP: Debug View off ..." (tests/spells/cell_workspace.sh).
+
 ## Lane ROOMFIT10 (2026-10-28, branch roomfit10-20261028): the volume fit's rays, mostly on the GPU, still exact
 
 - **Fewer rays sent back to the CPU:** the GPU ray tracer (src/bakert/rqx.comp) now calls a ray "unsure" only within

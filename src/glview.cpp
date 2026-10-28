@@ -4365,7 +4365,7 @@ void GLView::paintGL()
 	PassTime::begin( PassTime::Overlays );	// lane PERF1: everything after the frame (closed by frameEnd)
 	// lane PROBEVIEW1: the PRTP band's Pass overlays (surfel tiles, lit probes, the picked probe's links)
 	wwCellProbeViewDraw( scene, viewTrans );
-	wwCellVolumeViewDraw( scene, viewTrans );   // lane VOLFIT1: rooms, shapes, thresholds (WW_CELL_VOLUMES_VIEW=1)
+	wwCellVolumeViewDraw( scene, viewTrans );   // lane VOLFIT1: rooms, shapes, thresholds; VOLVIEW2: in the PRTP Debug View
 
 	if ( !cleanView ) {	// lane VIEWFULL1: Clean View hides the paint helpers (block kept at its old indent)
 	// Selected-bone weight heatmap. Per-corner colours are supplied by the
@@ -5702,7 +5702,10 @@ void GLView::paintGL()
 	// lane PERF1: the Frame Timers overlay (never in a harness grab: WW_RENDER_CLEAN keeps the frame clean)
 	WW_SWITCH_STATIC( bool, passTimeClean, wwEnvInt( "WW_RENDER_CLEAN" ) == 1 );
 	const QStringList passTimeLines = ( passTimeClean || scene->selecting ) ? QStringList() : PassTime::overlay();
-	if ( !cleanView && ( scene->hasOption( Scene::ShowAxes ) || ( model && showCursor ) || freeCamera || drawSnapMarker || boxSelectDrag || circleSelecting || knifeActive || loopCutActive || riggingWeightPaintMode || vertexPaintMode || segmentPaintMode || !modPickNote.isEmpty() || !passTimeLines.isEmpty() ) ) {
+	// lane VOLVIEW2: the PRTP Debug View's room and threshold labels (empty when the view is off)
+	const std::vector<WwCellVolumeLabel> volLabels = scene->selecting ? std::vector<WwCellVolumeLabel>()
+		: wwCellVolumeViewLabels( scene->nifModel );
+	if ( !cleanView && ( scene->hasOption( Scene::ShowAxes ) || ( model && showCursor ) || freeCamera || drawSnapMarker || boxSelectDrag || circleSelecting || knifeActive || loopCutActive || riggingWeightPaintMode || vertexPaintMode || segmentPaintMode || !modPickNote.isEmpty() || !passTimeLines.isEmpty() || !volLabels.empty() ) ) {
 		// The scene passes (esp. collision wireframe) leave GL state that
 		// QPainter inherits: depth test on (so filled overlay shapes get
 		// depth-rejected against the geometry, while text glyphs survive - the
@@ -5725,6 +5728,28 @@ void GLView::paintGL()
 		}
 		glPolygonMode( GL_FRONT_AND_BACK, GL_FILL );
 		QPainter painter( this );
+		if ( !volLabels.empty() ) {	// lane VOLVIEW2: each room's name (and its group) and each threshold's two rooms
+			painter.setRenderHint( QPainter::TextAntialiasing, true );
+			QFont f = painter.font();
+			const qreal base = f.pointSizeF() > 0 ? f.pointSizeF() : 9.0;
+			for ( const WwCellVolumeLabel & l : volLabels ) {
+				QPointF sp;
+				if ( !worldToScreen( l.at, sp ) )
+					continue;
+				f.setPointSizeF( l.isThreshold ? base * 0.85 : base * 1.1 );
+				f.setBold( !l.isThreshold );
+				painter.setFont( f );
+				const QFontMetrics fm( f );
+				const QPointF at( sp.x() - fm.horizontalAdvance( l.text ) * 0.5, sp.y() + fm.ascent() * 0.5 );
+				painter.setPen( QColor( 0, 0, 0, 220 ) );
+				painter.drawText( at + QPointF( 1, 1 ), l.text );
+				painter.setPen( QColor::fromRgbF( l.rgb[0], l.rgb[1], l.rgb[2] ) );
+				painter.drawText( at, l.text );
+			}
+			f.setBold( false );
+			f.setPointSizeF( base );
+			painter.setFont( f );
+		}
 		if ( !passTimeLines.isEmpty() ) {	// lane PERF1: top right, one pass a line (CPU / GPU ms)
 			QFont f = painter.font();
 			f.setPointSizeF( 8.5 );
