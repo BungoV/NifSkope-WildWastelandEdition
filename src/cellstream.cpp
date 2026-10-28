@@ -77,6 +77,18 @@ double threadCpuMs()
 	return 0.0;
 #endif
 }
+
+// lane FRAMESPEED1: the process's page faults so far (a frame's off-processor ms with many faults = paging, few = pre-emption)
+qint64 processFaults()
+{
+#ifdef Q_OS_WIN
+	PROCESS_MEMORY_COUNTERS pmc = {};
+	pmc.cb = sizeof pmc;
+	return GetProcessMemoryInfo( GetCurrentProcess(), &pmc, sizeof pmc ) ? qint64( pmc.PageFaultCount ) : 0;
+#else
+	return 0;
+#endif
+}
 using Key = std::pair<int, int>;
 
 enum class CellState { Queued, Building, Ready, Writing, Attached };
@@ -980,6 +992,7 @@ bool Stream::tick( Scene * sc, const Vector3 & eye )
 	QElapsedTimer t;
 	t.start();
 	const double cpu0 = threadCpuMs();
+	const qint64 faults0 = processFaults();
 	if ( sc != scene || !root ) {
 		if ( !resolve( sc ) )
 			return false;
@@ -1134,12 +1147,20 @@ bool Stream::tick( Scene * sc, const Vector3 & eye )
 		trace( QStringLiteral( "slow tick: %1 ms (pump %2, bury %5, drain %6, write %7, rebuild %8, model state %3)%4" ).arg( msOf( t ), 0, 'f', 1 ).arg( msPump, 0, 'f', 1 )
 			.arg( msOf( t ) - msIdle0, 0, 'f', 1 ).arg( building() ? QStringLiteral( " worker busy" ) : QStringLiteral( " worker idle" ) )
 			.arg( msDrain0 - msBury0, 0, 'f', 1 ).arg( msWrite0 - msDrain0, 0, 'f', 1 ).arg( msWrite, 0, 'f', 1 ).arg( msRebuild, 0, 'f', 1 ) );
-	if ( msOf( t ) > st.tickMaxMs )   // lane CELLSPIKE2: the stages of the step's dearest frame (dump field worstTick)
-		st.worstTick = QStringLiteral( "wtMs %1 wtPre %2 wtUnload %3 wtPump %4 wtBury %5 wtDrain %6 wtWrite %7 wtRebuild %8 wtIdle %9" )
+	const double cpuMs = threadCpuMs() - cpu0;	// lane CELLSPIKE3: on-processor ms
+	auto stages = [&]() {
+		return QStringLiteral( "wtMs %1 wtPre %2 wtUnload %3 wtPump %4 wtBury %5 wtDrain %6 wtWrite %7 wtRebuild %8 wtIdle %9" )
 			.arg( msOf( t ), 0, 'f', 2 ).arg( msUnload0, 0, 'f', 2 ).arg( msUnload, 0, 'f', 2 ).arg( msPump, 0, 'f', 2 )
 			.arg( msDrain0 - msBury0, 0, 'f', 2 ).arg( msWrite0 - msDrain0, 0, 'f', 2 ).arg( msWrite, 0, 'f', 2 )
 			.arg( msRebuild, 0, 'f', 2 ).arg( msOf( t ) - msIdle0, 0, 'f', 2 )
-			+ QStringLiteral( " wtCpu %1" ).arg( threadCpuMs() - cpu0, 0, 'f', 2 );   // lane CELLSPIKE3: on-processor ms
+			+ QStringLiteral( " wtCpu %1 wtFaults %2" ).arg( cpuMs, 0, 'f', 2 ).arg( processFaults() - faults0 );
+	};
+	if ( msOf( t ) > st.tickMaxMs )   // lane CELLSPIKE2: the stages of the step's dearest frame (dump field worstTick)
+		st.worstTick = stages();
+	if ( cpuMs > st.cpuMaxMs ) {   // lane FRAMESPEED1: the step's dearest frame ON the processor (the CPU-only bar)
+		st.cpuMaxMs = cpuMs;
+		st.worstCpuTick = stages();
+	}
 	st.tickMaxMs = std::max( st.tickMaxMs, msOf( t ) );
 	return changed;
 }
@@ -1327,8 +1348,9 @@ CellStreamStats cellStreamStats( const NifModel * nif, bool resetMaxima )
 		r.pooled += int( p.second.size() );
 	if ( resetMaxima ) {
 		s->st.tickMaxMs = s->st.sliceMaxMs = s->st.unloadMaxMs = s->st.drainMaxMs = s->st.rebuildMaxMs = s->st.buryMaxMs = 0;
-		s->st.buildMaxMs = 0;
+		s->st.buildMaxMs = s->st.cpuMaxMs = 0;
 		s->st.worstTick.clear();
+		s->st.worstCpuTick.clear();
 		s->st.worstUnload.clear();
 		s->st.scannedNodes = 0;
 	}
