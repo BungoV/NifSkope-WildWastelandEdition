@@ -501,6 +501,8 @@
 { "WW_CELL_SSR_ZREUSE", 0, "src/gl/cellssr.cpp:449 wwCellSsrPass | re-read per frame or per call (a)" },
 { "WW_CELL_SSR_ZREUSE_RED", 0, "src/gl/cellssr.cpp:450 wwCellSsrPass | re-read per frame or per call (a)" },
 { "WW_CELL_STREAM", 1, "src/cellstream.cpp:1187 cellStreamWanted | read while the cell document is built" },
+{ "WW_CELL_STREAMTEX_MB", 1, "src/cellstream.cpp:1362 cellStreamTexBudgetBytes | read while the cell document is built" },
+{ "WW_CELL_STREAMTEX_RED", 1, "src/cellstream.cpp:1352 cellStreamTexRed | read while the cell document is built" },
 { "WW_CELL_STREAM_BUDGET", 1, "src/cellstream.cpp:1212 cellStreamStart | read while the cell document is built" },
 { "WW_CELL_STREAM_DUMP", 0, "src/nifskope_ui.cpp:2159 wwCellStreamPathRun | re-read per frame or per call (a)" },
 { "WW_CELL_STREAM_FLUSH", 0, "src/nifskope_ui.cpp:2234 wwCellStreamPathRun | re-read per frame or per call (a)" },

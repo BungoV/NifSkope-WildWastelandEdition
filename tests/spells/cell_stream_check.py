@@ -109,6 +109,32 @@ def main():
     else:
         gate('(d) memory flat', False, 'the walk dump has no step 0 or step 20')
 
+    # (e) lane STREAMTEX1: the texture pool's census, one per crossing (deduped by texCrossing). A loaded cell's
+    # texture is never freed (texKeepFreed 0), and a crossing reloads (freed and loaded again within 2 crossings) no
+    # more than the 2 crossings before it released past the budget: the same bar as tests/streamtex (row c)
+    cen = {}
+    for r in walk:
+        if 'texCrossing' in r:
+            cen[int(num(r, 'texCrossing'))] = r
+    if cen:
+        red = any(num(r, 'texRed') > 0 for r in cen.values())
+        keys = sorted(cen)
+        over = []
+        for k in keys:
+            rel = sum(num(cen[j], 'texReleasedMb') for j in (k - 1, k - 2) if j in cen)
+            room = max(0.0, rel - num(cen[k], 'texBudgetMb'))
+            if num(cen[k], 'texReloadedMb') > room + 0.05:
+                over.append('%d: %.1f MB > %.1f' % (k, num(cen[k], 'texReloadedMb'), room))
+        kf = sum(int(num(r, 'texKeepFreed')) for r in cen.values())
+        rl = sum(num(r, 'texReloadedMb') for r in cen.values())
+        kept = max(num(r, 'texKeptMb') for r in cen.values())
+        gate('(e) texture pool: no loaded cell\'s texture freed, no reload past the budget%s' % (' (RED off)' if red else ''),
+             red or (kf == 0 and not over),
+             '%d crossings, keep-freed %d, reloaded %.1f MB, pool peak %.1f MB of %.0f, crossings past the bar %s'
+             % (len(keys), kf, rl, kept, num(cen[keys[0]], 'texBudgetMb'), over or 'none'))
+    else:
+        print('  SKIP  (e) texture pool: the dump has no texCrossing (an exe before STREAMTEX1)')
+
     # reds
     nu = steps(os.path.join(out, 'red_nounload.stream.txt'))
     if len(nu) >= 2:
