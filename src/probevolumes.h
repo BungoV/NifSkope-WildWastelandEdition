@@ -85,6 +85,10 @@ struct ProbeVolumeShape
 	float center[3] = { 0, 0, 0 };
 	float size[3] = { 0, 0, 0 };
 	float rotation[3] = { 0, 0, 0 };   //!< degrees: R = Rz Ry Rx (world axes, x first)
+	/* lane VOLPLACE2: a threshold snapped to its opening's frame holds 8 corners (bit 0 the +x jamb, bit 1 the back
+	 * face, bit 2 the head); contains() is then inside their 12 triangles; center/size/rotation stay its box */
+	bool hull = false;
+	float corners[8][3] = {};
 	bool contains( const float p[3] ) const;
 	double volume() const;
 };

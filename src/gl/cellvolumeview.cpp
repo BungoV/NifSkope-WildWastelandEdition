@@ -37,6 +37,7 @@ struct VvDoc
 	size_t linkProbes = 0;
 	int linkRed = -1;
 	int linkVer = -1;
+	int dashRed = -1;	// lane VOLPLACE2: WW_CELL_VOLUMES_DASHRED the fixed lines were built with
 	QString dumpKey;
 	std::vector<Vector3> lp, tp;	// the GL arrays: the fixed lines first (fixedPoints), then the frame's
 	std::vector<FloatVector4> lc, tc;
@@ -244,6 +245,7 @@ void buildFixed( VvDoc & d )
 	const ProbeVolumes & v = d.v;
 	WwCellVolumeGeometry & g = d.g;
 	g = wwCellVolumeGeometry( v );
+	d.dashRed = wwEnv( "WW_CELL_VOLUMES_DASHRED" ).trimmed() == "1" ? 1 : 0;
 	d.lp.clear();
 	d.lc.clear();
 	d.tp.clear();
@@ -307,8 +309,11 @@ void wwCellVolumeColor( const QString & key, float rgb[3] )
 WwCellVolumeGeometry wwCellVolumeGeometry( const ProbeVolumes & v )
 {
 	WwCellVolumeGeometry g;
+	/* lane VOLPLACE2 (bungo 10-28): rooms solid, thresholds dashed, so the two read apart at a glance.
+	 * Red WW_CELL_VOLUMES_DASHRED=1: VOLVIEW2's style (a dash per room, thresholds solid) */
+	const bool dashRed = wwEnv( "WW_CELL_VOLUMES_DASHRED" ).trimmed() == "1";
 	for ( const ProbeVolumeRoom & r : v.rooms ) {
-		Pen pen { g, {}, {}, {}, int( r.id % 3 ) };
+		Pen pen { g, {}, {}, {}, dashRed ? int( r.id % 3 ) : 0 };
 		// lane VOLVIEW2: the group's color (one building, one color, across cells); the dash still tells its rooms apart
 		wwCellVolumeColor( r.group.isEmpty() ? probeVolumesRoomName( r ) : r.group, pen.rgba );
 		pen.rgba[3] = 1.0f;
@@ -331,6 +336,26 @@ WwCellVolumeGeometry wwCellVolumeGeometry( const ProbeVolumes & v )
 		for ( int k = 0; k < 4; k++ )
 			for ( int i = 0; i < 3; i++ )
 				q[k][i] = float( t.shape.center[i] + m[i][0] * lc[k][0] + m[i][2] * lc[k][1] );
+		if ( t.shape.hull ) {   // lane VOLPLACE2: a threshold snapped to its frame: its mid-depth face and the frame's 12 edges
+			static const int mid[4][2] = { { 0, 2 }, { 1, 3 }, { 5, 7 }, { 4, 6 } };
+			for ( int k = 0; k < 4; k++ )
+				for ( int i = 0; i < 3; i++ )
+					q[k][i] = 0.5f * ( t.shape.corners[mid[k][0]][i] + t.shape.corners[mid[k][1]][i] );
+			Pen pen { g, {}, {}, { col[0], col[1], col[2], 1.0f }, 0 };
+			for ( int a = 0; a < 3; a++ )
+				for ( int b = 0; b < 3; b++ )
+					pen.m[a][b] = a == b ? 1.0 : 0.0;
+			for ( int a = 0; a < 8; a++ )
+				for ( int bit : { 1, 2, 4 } )
+					if ( !( a & bit ) ) {
+						double p0[3], p1[3];
+						for ( int i = 0; i < 3; i++ ) {
+							p0[i] = t.shape.corners[a][i];
+							p1[i] = t.shape.corners[a | bit][i];
+						}
+						pen.seg( p0, p1 );
+					}
+		}
 		for ( int k : { 0, 1, 2, 0, 2, 3 } ) {
 			g.tris.insert( g.tris.end(), q[k], q[k] + 3 );
 			g.triColor.insert( g.triColor.end(), col, col + 4 );
@@ -340,7 +365,7 @@ WwCellVolumeGeometry wwCellVolumeGeometry( const ProbeVolumes & v )
 		for ( int side = 0; side < 2; side++ ) {
 			float rgb[3];
 			spaceColor( v, side == 0 ? t.a : t.b, rgb );
-			Pen pen { g, {}, {}, { rgb[0], rgb[1], rgb[2], 1.0f }, 0 };
+			Pen pen { g, {}, {}, { rgb[0], rgb[1], rgb[2], 1.0f }, dashRed ? 0 : 1 };
 			for ( int a = 0; a < 3; a++ )
 				for ( int b = 0; b < 3; b++ )
 					pen.m[a][b] = a == b ? 1.0 : 0.0;
@@ -553,6 +578,8 @@ void wwCellVolumeViewDraw( Scene * scene, const Transform & viewTrans )
 		d.labels.clear();
 		return;
 	}
+	if ( d.dashRed != ( wwEnv( "WW_CELL_VOLUMES_DASHRED" ).trimmed() == "1" ? 1 : 0 ) )
+		buildFixed( d );   // the dash red set live: the rooms and thresholds again
 	QElapsedTimer timer;
 	timer.start();
 	const WwCellVolumeGeometry & g = d.g;

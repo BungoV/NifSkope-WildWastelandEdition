@@ -164,6 +164,39 @@
   `WW_CELL_STREAM_TEXKEEP=0` A/B walk.
 - LEFTOVER: CELLUNI6 items not done here: the jitter viewport ask, cellhdr's Begin, the bsshape blend asks,
   wwCellHdrDepthMax, and a GL error check on the trusted frame.
+## Lane VOLPLACE2 (2026-10-28, branch volplace2-20261028): rooms part only at walls, the fewest boxes fill them, thresholds sit in the hole
+
+- **Why:** in the Concord hardware store the Space stage cut one open floor into five rooms at pinches where no wall
+  stands, so flat boxes and free-standing thresholds sat in the middle of the floor. Default now; any red keeps the
+  stages as they were (`--red volplace1` / `WW_CELL_VOLUMES_RED=volplace1` = VOLPLACE1's bytes, checked on 25 cells).
+- **Rooms join unless a wall parts them (src/probevolumes.cpp, after the room labels):** for each side face two rooms
+  share, the four next face positions in the plane (left, right, above, below) are read. A position is a parting wall
+  when it is solid with one room's air on one side and the other's on the other within 3 cells. Two rooms (neither
+  roofed) are one when the parting wall is under half of that rim, or under half of the rim above (no lintel).
+  At least 4 shared faces are needed (two small pockets need one face per 8 cells of the smaller). A real door keeps
+  its rooms apart. Knobs `WW_VOLFIT_SPEC=join=0,joinwall=0.5,joinmin=4,jointop=0,joinlog=1`.
+- **Boxes square to the room's own walls:** the area of the vertical triangles beside a room's air, by yaw mod 90,
+  sets the room's frame when 3 degrees of it hold 35 % (the store stands at 50.5 degrees). Knobs `wallyaw=0`, `yawshare`.
+- **The fewest boxes:** the greedy cover lets a slab hold clutter while a quarter of it is the room's own air (roofed
+  rooms keep the old test), stops at a 3 % gain, and the fine fit adds no lattice boxes (`place2fine=0` skips it; knob
+  `greedy2` bits 1/2/4). A placement face with an opening takes no pad (the synth church and turned rooms poked there).
+- **Thresholds cover the open hole only:** 16 x 16 rays across each wall threshold; the open samples get up to 4
+  all-open rectangles until 90 % are held. Shut (< 3 open) or 95 % open ones stay. Knob `openfit=0`.
+- **A roofed room must fit a person:** clear height 180 u and a floor of 14884 u2 (the store's fire escape landing,
+  244 x 244 x 122 u, read as a room). Knobs `minheight`, `minfloor`.
+- **A leftover strip gets its own box:** under the 3 % stop, a strip of the room's air wider than one cell on both floor
+  axes still gets a box. Knob `strip=0`.
+- **Thresholds snap to the door frame:** each jamb is scanned across the wall 1 u at a time; where the jamb starts and
+  ends are the wall's two faces at that jamb, the sill and the head are read over each jamb end, and the threshold
+  holds those 8 corners (`"corners"` in the .space shape; `contains()` is inside its 12 triangles; its box becomes the
+  corners' box in the wall's frame, so the GI mask gets the wall's turn and depth). A hole whose floor runs on through
+  the wall is a door. The store's front door: 7 degrees turned, as bungo's hand-made reference. Knob `rim=0`.
+- **PRTP Debug View:** rooms are drawn solid and thresholds dashed (still in their two rooms' colours);
+  `WW_CELL_VOLUMES_DASHRED=1` (live) draws VOLVIEW2's style.
+- **Gate:** `tests/spells/cell_volplace.sh gate|red` rebuilds the store window's soup and checks it against the soup's
+  own walls (tests/spells/cell_volplace_check.py): no room-to-room threshold away from a real opening, at most 3
+  boxes per room. The `red` phase (`--red volplace1`) must fail.
+
 ## Lane VOLPLACE1 (2026-10-28, branch volview2-20261028): room boxes hug their walls; volume labels stop overlapping
 
 - **Placement pass (src/probevolumes.cpp, after the fine fit):** every Box shape of every room casts rays from its middle
