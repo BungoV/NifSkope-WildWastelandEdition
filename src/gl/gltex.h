@@ -42,6 +42,7 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include <QString>
 #include <QStringView>
 
+#include <functional>
 #include <vector>
 
 
@@ -209,6 +210,8 @@ protected:
 
 	template< typename T > inline Tex * insertTex( const T & file );
 	Tex * rehashTextures( Tex * p = nullptr );
+	//! lane STREAMTEX1: deletes a loaded file texture's GL names (evictUnused's and evictPool's free)
+	void freeLoaded( Tex & tx );
 	//! Load the texture
 	std::uint16_t loadTex( Tex & tx, const NifModel * nif );
 	bool draining = false;	// lane PERF1: loadTex is uploading the read-ahead's ready files
@@ -250,8 +253,10 @@ public:
 	//! lane CELLSTREAM1: frees the GL textures of files last bound before tick (they load again when next bound)
 	int evictUnused( std::uint32_t tick, QStringList * names = nullptr );
 	/*! lane PERFFIX4: the streaming pool (src/gl/texpool.h): while the resident file textures pass `budgetBytes`, frees
-	 *  the least recently bound ones last bound before `protectTick`, down to 90 % of the budget */
-	int evictPool( std::int64_t budgetBytes, std::uint32_t protectTick, QStringList * names = nullptr );
+	 *  the least recently bound ones last bound before `protectTick`, down to 90 % of the budget.
+	 *  lane STREAMTEX3: `tierOf` (set) orders them first (0 before 1) and keeps WwTexPool::kTierKeep */
+	int evictPool( std::int64_t budgetBytes, std::uint32_t protectTick, QStringList * names = nullptr,
+		const std::function<int( QStringView )> & tierOf = nullptr );
 	/*! lane PERF5: BSShaderLightingProperty::bind sets the same wrap, filter and anisotropy on a texture every draw;
 	 *  false = this frame already set them on the texture its bind just bound (WW_DRAW_TEXSHADOW_RED=1: always true) */
 	bool wwParamsNeeded( int wrapS, int wrapT, int minFilter, float aniso );

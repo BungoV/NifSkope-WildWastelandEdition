@@ -37,6 +37,7 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include "cellcambounds.h"	// lane CAMGATE1: the camera never shows an out-of-bounds or under-terrain view
 #include "cellstream.h"		// lane CELLSTREAM1: the cells round the camera
 #include "celltexahead.h"
+#include "cellstreamtex.h"	// lane STREAMTEX1: the stream texture pool
 
 #include "rdccapture.h"
 
@@ -7325,18 +7326,25 @@ void GLView::wwCellStreamEvict()
 	/* lane PERFFIX4: THE POOL (src/gl/texpool.h). Textures stay until the resident bytes pass the preset's budget, then
 	 * the least recently bound go first; never what the last 3 paints bound. The 5 s timer below freed everything
 	 * unbound for 5 s and read 1456 of them again on a walk (driver pools x1.275). Red WW_STREAM1_RED=texpool: the
-	 * timer. WW_CELL_STREAM_TEXKEEP=0 still keeps everything. */
+	 * timer. WW_CELL_STREAM_TEXKEEP=0 still keeps everything.
+	 * lane STREAMTEX3: over the budget, the textures whose cells all left go first, then those no streamed cell named,
+	 * and never one a loaded cell names (cellstreamtex.h); red WW_CELL_STREAMTEX_RED=off: by last bind alone */
 	static const bool poolRed = PassTime::stream1Red( "texpool" );
+	// lane GAPFIX1: a freed file is read ahead again when its cell comes back (stream1 FINAL: it was read on this
+	// thread, a hitch). Red WW_STREAM1_RED=texredo
+	static const bool redoRed = PassTime::stream1Red( "texredo" );
 	if ( !poolRed ) {
 		if ( !keep || paints < 4 || sec < nextEvict )
 			return;
 		nextEvict = sec + 2U;
-		static const bool redoRedP = PassTime::stream1Red( "texredo" );
-		QStringList freedP;
-		cellStreamCountEvicted( model, textures->evictPool( cellStreamTexPoolBytes(), paintSec[paints & 3U],
-			redoRedP ? nullptr : &freedP ) );
-		for ( const QString & n : freedP )
-			CellTexAhead::forget( model, n );
+		QStringList freedP;	// lane STREAMTEX1: the names go to the stream's census whatever the reds
+		cellStreamCountEvicted( model, textures->evictPool( cellStreamTexPoolBytes(), paintSec[paints & 3U], &freedP,
+			cellStreamTexTiers( model ) ) );
+		for ( const QString & n : freedP ) {
+			cellStreamTexFreed( model, n );
+			if ( !redoRed )
+				CellTexAhead::forget( model, n );
+		}
 		return;
 	}
 	if ( !keep || paints < 4 || sec < nextEvict || sec <= keep )
@@ -7346,13 +7354,13 @@ void GLView::wwCellStreamEvict()
 	const std::uint32_t before = std::min( sec - keep, threePaintsAgo );
 	if ( !before )
 		return;
-	// lane GAPFIX1: a freed file is read ahead again when its cell comes back (stream1 FINAL: it was read on this
-	// thread, a hitch). Red WW_STREAM1_RED=texredo
-	static const bool redoRed = PassTime::stream1Red( "texredo" );
 	QStringList freed;
-	cellStreamCountEvicted( model, textures->evictUnused( before, redoRed ? nullptr : &freed ) );
-	for ( const QString & n : freed )
-		CellTexAhead::forget( model, n );
+	cellStreamCountEvicted( model, textures->evictUnused( before, &freed ) );
+	for ( const QString & n : freed ) {
+		cellStreamTexFreed( model, n );
+		if ( !redoRed )
+			CellTexAhead::forget( model, n );
+	}
 }
 
 void GLView::wwCellStreamFlush()
