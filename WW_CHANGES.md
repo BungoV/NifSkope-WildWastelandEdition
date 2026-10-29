@@ -72,6 +72,17 @@
   Telemetry: `cell ssr water rays: sorted list reused, no opaque walk` / `opaque scene walked again (RED=1)`.
 - **Gates:** offline mask-machine model (notes/refldraws1/model/maskmodel.py, 200000 sequences): green 0 differ, reds
   `naive` (water alone) and `waterpart` (water + particles) FAIL. Live hold owed: notes/refldraws1/hold.sh + judge.py.
+## Lane LANDSPEC9 (2026-10-28, branch landspec9-20261028): uGridsToLoad from an MO2 profile's own inis
+
+- **uGridsToLoad follows the MO2 profile's local inis:** when the Mods list's source (cellModSource: the LOD panel's
+  MO2 profile, else an MO2 instance on this machine) is an MO2 profile with local inis (a Fallout4.ini or
+  Fallout4Custom.ini in the profile folder, the same test sTestFile already used), [General] uGridsToLoad is read from
+  that profile's Fallout4.ini, Fallout4Prefs.ini and Fallout4Custom.ini in place of My Games'. Fallout4_Default.ini
+  from the game folder is still read first. No MO2, or a profile without local inis: LANDSPEC8's My Games order.
+  The lookup is the one sTestFile uses (src/cellmodsource.cpp iniFolder, gameInis now calls it); no second one.
+- The stream line now names the folder read: `cell stream: uGridsToLoad <n> (<ini>); read the MO2 profile's own
+  inis in <dir>: n x n cells` (or `read My Games <dir>`). Red `WW_LANDSPEC_RED=mygames` (My Games always: LANDSPEC8).
+- Not built here (Linux cloud session, no Qt, no game data): compile and the Windows gates are owed.
 
 ## Lane LANDSPEC8 (2026-10-28, branch landspec8-20261028): land LOD chunks on first load, the whole Commonwealth, uGridsToLoad
 
