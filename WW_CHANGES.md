@@ -61,6 +61,30 @@
   src/cellfavoritespanel.{h,cpp} (the tab), GLView::wwCameraNow / wwCameraGoTo.
 - **Gate:** tests/cellfavorites (notes/favcam1/unit/unit.sh): 22 checks PASS; reds `WW_CELL_FAVORITES_RED=range` (the
   pick ignores the opened cells, 5 FAIL) and `=angles` (the writer drops yaw and pitch, 1 FAIL).
+## Lane GLAREBLOW1 (2026-10-29, branch GLAREBLOW1-20261029, cloud): the air's multiple scattering near the sun
+
+- **Measured offline first (no exe):** notes_cloud/GLAREBLOW1/RESULTS.md. The cell air's sky term (cell_volsky.frag ->
+  wwVolAirSky -> airSun) was ported to a Python model and checked against a Monte Carlo of the same medium and phase (all
+  orders), Preetham 1999, CIE type 12 and the repo's Hillaire model. The single scattering matches the Monte Carlo's first
+  order within 1.7%. The multiple-scattering octaves (GAPLOOK1, Oz 2013, a = 1/2) were too bright: 1.31-1.40x the true
+  total near the sun when the forward lobe's g is ~0.3 (WEATHERBLEND5's "MS ~40%" at D7), 1.05-1.07x at g 0.75, and
+  1.3-1.6x at 35-90 deg. Oz's a = 1/2 is a thick cloud's value; street air lets most scattered light leave.
+- **Fix:** the octaves' a = min(1/2, f), f = the chance that light scattered at the point meets the air again (escape up to
+  the air's top and down to the ground, each by E2 from a 4-point Gauss-Legendre rule; the ground returns 0.2).
+  cell_volair.frag airMsEsc / airMsA; CPU twin src/gl/airmsweight.h. Within about 11% of the Monte Carlo on every row
+  with sun >= 10 deg (worst 0.107, the old law's 0.601). Never brighter than before: dense fog keeps a = 1/2.
+- **Expected at D7 (estimate):** the near-sun air drops to 0.76-0.81 of its old value (g ~0.3). The blown share before
+  and after is owed live. Even after the fix, the references put the sky within 5 deg of the sun at 5-15x the sunlit
+  ground: part of the blow-out is the scene's real range (exposure and bloom numbers in RESULTS.md).
+- **Red** `WW_CELL_GLAREBLOW_RED=off`: a = 1/2, the same float operations as before (live). Census: the `cell air:` line
+  gains `octaves=medium|half(red)|off`. The switch table is regenerated.
+- **Gate:** `g++ -O2 -std=c++17 -I src tests/glareblow1_test.cpp && ./a.out` passes 7 of 7 against the fixture
+  tests/fixtures/glareblow1_mc.tsv (225 Monte Carlo rows). The red build `-DGLAREBLOW_RED` fails (c) and (d). The shader
+  compiles under glslang 15.1.
+- **Cost:** 8 exp and 2 column evaluations per sun sample of the air pass (est. < 0.05 ms at 1080p; live ms owed).
+- **Owed live:** the build and the `octaves=medium` line; D7's air values fed back to the model; D7 before/after blown
+  share for the whole frame and the left third, plus the sky-off and bloom-off arms; a red pixel diff against the rung;
+  the GPU ms (rows in RESULTS.md, Step 3).
 
 ## Lane REFLDRAWS1 (2026-10-27, branch refldraws1-20261027): the reflections pass stops re-walking the opaque scene
 
