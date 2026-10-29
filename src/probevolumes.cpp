@@ -462,6 +462,7 @@ bool probeVolumesBuild( const ProbeSoup & soup, const std::vector<ProbeVolumeMar
 	double minHeight = 180.0, minFloor = 14884.0;
 	int rejHeight = 0, rejFloor = 0;
 	bool stripOn = true, rimOn = true;
+	bool personAll = true;   // VOLPLACE2 (bungo 10-29 "the same issues"): the person rule for EVERY room, not only roofed ones
 	for ( const QString & kv : qEnvironmentVariable( "WW_VOLFIT_SPEC" ).split( QLatin1Char( ',' ), Qt::SkipEmptyParts ) ) {
 		const QString k = kv.section( QLatin1Char( '=' ), 0, 0 ).trimmed();
 		const double x = kv.section( QLatin1Char( '=' ), 1 ).toDouble();
@@ -491,6 +492,8 @@ bool probeVolumesBuild( const ProbeSoup & soup, const std::vector<ProbeVolumeMar
 			stripOn = x != 0;
 		else if ( k == QLatin1String( "rim" ) )
 			rimOn = x != 0;
+		else if ( k == QLatin1String( "personall" ) )
+			personAll = x != 0;
 	}
 	QString place2Note;
 	QStringList joinLines;
@@ -1112,6 +1115,55 @@ bool probeVolumesBuild( const ProbeSoup & soup, const std::vector<ProbeVolumeMar
 				lab[i] = root( lab[i] );
 		for ( const auto & f : into )
 			info.erase( f.first );
+	}
+	/* VOLPLACE2 (bungo 10-29): air pockets sealed inside props (a sign box, a car, the space under a roof's skin) passed as
+	 * enclosed/sealed rooms and drew boxes in the street. After the joins and folds, a room nobody can stand in is no
+	 * room: under minHeight of clear air in its tallest column, or a floor under minFloor. Touching the outside: outdoor
+	 * air (0); else no air (-1, as inside a rock) */
+	int rejAllHeight = 0, rejAllFloor = 0;
+	if ( place2 && personAll ) {
+		/* the floor counts only the columns a person stands in: an unbroken run of air at least minHeight tall (a pocket
+		 * of 14 cells strung up a wall cavity has columns, but no place to stand) */
+		std::map<qint32, std::map<qint64, std::vector<int>>> cols;
+		for ( size_t i = 0; i < N; i++ ) {
+			const qint32 l = lab[i];
+			if ( l <= 0 || st[i] || !info.count( l ) || info[l].source == QLatin1String( "roofed" ) )
+				continue;
+			int x, y, z;
+			G.xyz( i, x, y, z );
+			cols[l][qint64( y ) * G.X + x].push_back( z );
+		}
+		/* the grid marks a cell solid when any triangle touches it, so a column's air run is short of the clear height by
+		 * about half a cell at the floor and half at the ceiling: one cell of grace (Goodneighbor C 48.8: a 2.2 m room
+		 * measures 3 cells) */
+		const int needRun = std::max( 2, int( std::ceil( ( minHeight - C ) / C - 1e-6 ) ) );
+		std::map<qint32, qint32> to;
+		for ( auto & c : cols ) {
+			int tall = 0;
+			qint64 stand = 0;
+			for ( auto & k : c.second ) {
+				std::sort( k.second.begin(), k.second.end() );
+				int run = 1, best = 1;
+				for ( size_t q = 1; q < k.second.size(); q++ ) {
+					run = k.second[q] == k.second[q - 1] + 1 ? run + 1 : 1;
+					best = std::max( best, run );
+				}
+				tall = std::max( tall, best );
+				stand += best >= needRun ? 1 : 0;
+			}
+			const bool low = double( tall + 1 ) * C < minHeight, small = double( stand ) * C * C < minFloor;
+			if ( !low && !small )
+				continue;
+			( low ? rejAllHeight : rejAllFloor )++;
+			to[c.first] = nbFaces[c.first].count( 0 ) ? 0 : -1;
+		}
+		for ( size_t i = 0; i < N; i++ )
+			if ( lab[i] > 0 && to.count( lab[i] ) )
+				lab[i] = to[lab[i]];
+		for ( const auto & t : to )
+			info.erase( t.first );
+		place2Note += QStringLiteral( "; volplace2 person rule all rooms: under %1 u tall %2, floor under %3 u2 %4" ).arg( minHeight )
+			.arg( rejAllHeight ).arg( minFloor ).arg( rejAllFloor );
 	}
 	// compact: rooms 1 .. n in label order
 	std::map<qint32, int> roomOf;
