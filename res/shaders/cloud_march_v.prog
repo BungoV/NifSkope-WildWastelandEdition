@@ -1,0 +1,3 @@
+# lane CLOUD5: the volume clouds ray march with Cloud Variety (src/gl/cloudvol.cpp), selected by name.
+
+shaders cell_ao.vert cloud_march_v.frag

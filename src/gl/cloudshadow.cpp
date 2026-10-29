@@ -104,6 +104,7 @@ struct CsGpu
 	bool valid = false;	// every row built under the fit below
 	int mode = 0;	// 1 volume, 2 map
 	bool redVertical = false;
+	bool variety = false;	// lane CLOUD5: built over the Cloud Variety density
 	M::Basis basis{};
 	M::Fit fit{};
 	double lightFromWorld[16] = {};
@@ -424,10 +425,13 @@ void wwCloudShadowPass( Scene * scene )
 	timeRead( fn, g, 1 );
 	giRead( fn, g, s );
 
-	NifSkopeOpenGLContext::Program * p = r->useProgram( "cloud_shadowmap.prog" );
+	// lane CLOUD5: Cloud Variety on, the twin over the variety density (wwCloudVolBindDensity sets its uniforms)
+	const bool variety = wwCloudVolVarietyOn() && m.variety;
+	NifSkopeOpenGLContext::Program * p = r->useProgram( variety ? "cloud_shadowmap_v.prog" : "cloud_shadowmap.prog" );
 	if ( !p ) {
 		restore();
-		return off( QStringLiteral( "refused(cloud_shadowmap.prog did not link)" ) );
+		return off( variety ? QStringLiteral( "refused(cloud_shadowmap_v.prog did not link)" )
+							: QStringLiteral( "refused(cloud_shadowmap.prog did not link)" ) );
 	}
 	// the volume's density at Medium and up (it needs the Volume Clouds row at Medium or up), else the map's coverage
 	int mode = 2;
@@ -436,12 +440,13 @@ void wwCloudShadowPass( Scene * scene )
 	else
 		mapUniforms( r, p, m );
 	const bool full = every || !g.valid || g.mode != mode || g.redVertical != redV || f.a0 != g.fit.a0 || f.b0 != g.fit.b0
-		|| f.extentKm != g.fit.extentKm || M::angleDeg( b.s, g.basis.s ) > 0.25;
+		|| f.extentKm != g.fit.extentKm || M::angleDeg( b.s, g.basis.s ) > 0.25 || g.variety != variety;
 	if ( full ) {
 		g.basis = b;
 		g.fit = f;
 		g.mode = mode;
 		g.redVertical = redV;
+		g.variety = variety;
 		g.cursor = 0;
 		M::lightFromWorld( b, f, unitKm, g.lightFromWorld );
 	}

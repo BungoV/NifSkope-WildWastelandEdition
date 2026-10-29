@@ -125,7 +125,42 @@ struct Key
 const Key kAtmo[] = { { "visibility", kVisMin, kVisMax, &WwWeatherRecx::visibilityM },
 	{ "hazeHeight", kHazeHMin, kHazeHMax, &WwWeatherRecx::hazeHeightM }, { "ozone", 0.0f, kOzoneMax, &WwWeatherRecx::ozone } };
 const Key kClouds[] = { { "coverage", 0.0f, 1.0f, &WwWeatherRecx::coverage },
-	{ "density", 0.0f, kDensityMax, &WwWeatherRecx::density } };
+	{ "density", 0.0f, kDensityMax, &WwWeatherRecx::density }, { "type", 0.0f, 1.0f, &WwWeatherRecx::type } };
+
+/* lane CLOUD5: clouds.type may be a word (the draft's modder words, notes/atmores1/RESEARCH.md sec. 7.2): the block and
+ * each hours/<h> object get the word replaced by its number before the keys are read; an unknown word is dropped */
+QJsonObject typeWords( QJsonObject o, const QString & where )
+{
+	static const struct { const char * word; double v; } kWords[] = { { "stratus", 0.0 }, { "stratocumulus", 1.0 / 3.0 },
+		{ "cumulus", 2.0 / 3.0 }, { "cumulonimbus", 1.0 } };
+	for ( auto it = o.begin(); it != o.end(); ++it ) {
+		if ( it.key().compare( QLatin1String( "type" ), Qt::CaseInsensitive ) != 0 || !it.value().isString() )
+			continue;
+		const QString w = it.value().toString().trimmed();
+		bool found = false;
+		for ( const auto & k : kWords )
+			if ( w.compare( QLatin1String( k.word ), Qt::CaseInsensitive ) == 0 ) {
+				it.value() = k.v;
+				found = true;
+			}
+		if ( !found ) {
+			sayOnce( QStringLiteral( "weather recx: %1: type \"%2\" dropped (not-type: stratus, stratocumulus, cumulus, "
+									 "cumulonimbus or 0..1)" ).arg( where, w ) );
+			o.erase( it );
+			break;
+		}
+	}
+	const QString hk = QStringLiteral( "hours" );
+	for ( auto it = o.begin(); it != o.end(); ++it )
+		if ( it.key().compare( hk, Qt::CaseInsensitive ) == 0 && it.value().isObject() ) {
+			QJsonObject h = it.value().toObject();
+			for ( auto jt = h.begin(); jt != h.end(); ++jt )
+				if ( jt.value().isObject() )
+					jt.value() = typeWords( jt.value().toObject(), where + QStringLiteral( "/hours/" ) + jt.key() );
+			it.value() = h;
+		}
+	return o;
+}
 const Key kNight[] = { { "stars", 0.0f, kNightMax, &WwWeatherRecx::stars },
 	{ "moonlight", 0.0f, kNightMax, &WwWeatherRecx::moonlight } };
 
@@ -224,6 +259,8 @@ QString keyOf( const WwWeatherRecx & r )
 	QString k = QStringLiteral( "vis=%1 hazeHeight=%2 ozone=%3 coverage=%4 density=%5 stars=%6 moonlight=%7" )
 		.arg( f4( r.visibilityM ), f4( r.hazeHeightM ), f4( r.ozone ), f4( r.coverage ), f4( r.density ), f4( r.stars ),
 			f4( r.moonlight ) );
+	if ( r.type >= 0.0f )
+		k += QStringLiteral( " type=%1" ).arg( f4( r.type ) );	// lane CLOUD5 (absent: the key text is as before)
 	k += QStringLiteral( " layers=%1" ).arg( r.layers );
 	for ( int i = 0; i < 32; i++ )
 		if ( r.layerBase[i] >= 0.0f )
@@ -294,8 +331,9 @@ const WwWeatherRecx & wwWeatherRecx()
 				readKeys( b, kAtmo, hour, next );
 			} else if ( bn == QLatin1String( "clouds" ) ) {
 				b.unknownKeys( { QStringLiteral( "coverage" ), QStringLiteral( "density" ), QStringLiteral( "layers" ),
-					QStringLiteral( "hours" ) } );
-				readKeys( b, kClouds, hour, next );
+					QStringLiteral( "type" ), QStringLiteral( "hours" ) } );
+				const Obj bc{ typeWords( b.o, b.where ), b.where };	// lane CLOUD5: clouds.type words -> numbers
+				readKeys( bc, kClouds, hour, next );
 				readLayers( b, next );
 			} else {
 				b.unknownKeys( { QStringLiteral( "stars" ), QStringLiteral( "moonlight" ), QStringLiteral( "hours" ) } );
@@ -306,7 +344,7 @@ const WwWeatherRecx & wwWeatherRecx()
 		src = QStringLiteral( "none(no weather)" );
 	}
 	next.on = next.visibilityM >= 0.0f || next.hazeHeightM >= 0.0f || next.ozone >= 0.0f || next.coverage >= 0.0f
-		|| next.density >= 0.0f || next.layers > 0 || next.stars >= 0.0f || next.moonlight >= 0.0f;
+		|| next.density >= 0.0f || next.layers > 0 || next.stars >= 0.0f || next.moonlight >= 0.0f || next.type >= 0.0f;
 	next.key = next.on ? keyOf( next ) : QString();
 	next.stamp = cur.stamp;
 	if ( next.key != cur.key ) {

@@ -1213,6 +1213,18 @@ bool wwLookdevWeatherId( quint32 & formID, QString & edid, QString & owner, QStr
 	return true;
 }
 
+bool wwLookdevWeatherClass( unsigned & flags, unsigned & thunder )
+{
+	resolve();
+	const LdState & s = st();
+	flags = thunder = 0;
+	if ( !s.haveWeather || !s.w.hasClass )
+		return false;
+	flags = s.w.classFlags;	// lane CLOUD5: WTHR DATA bytes 11 and 10 (esmweather.cpp)
+	thunder = s.w.thunderFreq;
+	return true;
+}
+
 void wwLookdevSetWeather( const QString & key )
 {
 	LdState & s = st();

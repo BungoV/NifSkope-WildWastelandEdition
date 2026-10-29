@@ -185,7 +185,10 @@ bool runPass( Scene * scene, FlGpu & g, const F::Preset & p, int pass, int from,
 	Renderer * r = scene->renderer;
 	auto fn = r->fn;
 	const int back = g.pub == 2 ? 3 : 2;
-	NifSkopeOpenGLContext::Program * prog = r->useProgram( pass == 0 ? "cloud_flybake.prog" : "cloud_flysdf.prog" );
+	// lane CLOUD5: Cloud Variety on, the occupancy bound of the variety density (cloud_flybake.frag WW_CLOUD_VARIETY)
+	const bool variety = wwCloudVolVarietyOn() && wwCloudMap().variety;
+	NifSkopeOpenGLContext::Program * prog = r->useProgram( pass == 0 ? ( variety ? "cloud_flybake_v.prog" : "cloud_flybake.prog" )
+																	: "cloud_flysdf.prog" );
 	if ( !prog )
 		return false;
 	GLuint dst = 0;
@@ -375,6 +378,8 @@ void wwCloudFlyPrepare( Scene * scene, const float camKm[3], double secs )
 		key += QStringLiteral( "|%1,%2,%3,%4,%5,%6" ).arg( std::lround( m.band[b].baseZ * kUnitKm * 100.0f ) )
 				   .arg( std::lround( m.band[b].topZ * kUnitKm * 100.0f ) ).arg( std::lround( m.band[b].density * 100.0f ) )
 				   .arg( std::lround( m.band[b].coverage * 256.0f ) ).arg( std::lround( m.band[b].sheet * 32.0f ) ).arg( m.band[b].layers );
+	if ( wwCloudVolVarietyOn() && m.variety )	// lane CLOUD5: another density, another grid (absent when Off: the key is as before)
+		key += QStringLiteral( "|var%1,%2" ).arg( std::lround( m.band[0].type * 1000.0f ) ).arg( std::lround( m.band[0].typeSpread * 1000.0f ) );
 	const bool stale = red( "stale" ), harness = wwHarnessRun();
 	float org[3];
 	F::place( p, camKm, lo, hi, org );

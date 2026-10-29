@@ -17,6 +17,7 @@ struct WwWeatherRecx
 	// set values; < 0 = not set (the record and the default decide)
 	float visibilityM = -1.0f, hazeHeightM = -1.0f, ozone = -1.0f;
 	float coverage = -1.0f, density = -1.0f;
+	float type = -1.0f;	//!< lane CLOUD5: clouds.type 0..1 (or a word: stratus, stratocumulus, cumulus, cumulonimbus)
 	float layerBase[32], layerTop[32];	//!< metres above sea level; < 0 = not set
 	int layers = 0;	//!< how many layers have heights
 	float stars = -1.0f, moonlight = -1.0f;

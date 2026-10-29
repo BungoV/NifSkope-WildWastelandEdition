@@ -804,6 +804,11 @@ bool EsmWeather::read( quint32 formID, WwWeatherData & out, QString * why )
 					out.windTurb = quint8( f.data()[19] );
 					out.hasWind = true;
 				}
+				if ( f.size() >= 12 ) {	// lane CLOUD5: the class flags and the thunder frequency (gl/cloudmath.h lowTypeOf)
+					out.thunderFreq = quint8( f.data()[10] );
+					out.classFlags = quint8( f.data()[11] );
+					out.hasClass = true;
+				}
 			}
 			else if ( f == "IMSP" )
 				imsp = bytes();

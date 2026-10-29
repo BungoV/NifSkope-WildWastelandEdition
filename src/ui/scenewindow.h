@@ -83,6 +83,7 @@ public:
 	QComboBox * giSkyFromPhysicalBox = nullptr;	// lane SKYA (SKYGI1)
 	QComboBox * cloudMapBox = nullptr;	// lane CLOUD1
 	QComboBox * volumeCloudsBox = nullptr;	// lane CLOUD2
+	QComboBox * cloudVarietyBox = nullptr;	// lane CLOUD5
 	QComboBox * cloudShadowsBox = nullptr;	// lane CLOUD3
 	QComboBox * flyThroughCloudsBox = nullptr;	// lane CLOUD4
 	QComboBox * cascadeQualityBox = nullptr;

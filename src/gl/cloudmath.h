@@ -82,7 +82,35 @@ struct BandParams
 {
 	float coverage = 0.0f, baseM = 0.0f, topM = 0.0f, density = 0.0f, sheet = 0.0f;
 	float tint[3] = { 1.0f, 1.0f, 1.0f };
+	float type = 0.0f, typeSpread = 0.0f;	// lane CLOUD5: the Low band's cloud type 0..1 and its swing (lowTypeOf)
 };
+
+/* lane CLOUD5: the WTHR DATA flags byte (offset 11; xEdit wbDefinitionsFO4 WTHR DATA: Pleasant, Cloudy, Rainy, Snow, ...)
+ * and the Thunder/Lightning Frequency byte (offset 10). Read from xEdit's definitions, not yet censused over the vanilla
+ * weathers: drop/census_type.py (lane CLOUD5) prints every weather's two bytes and the type below. */
+constexpr unsigned kWxPleasant = 1, kWxCloudy = 2, kWxRainy = 4, kWxSnow = 8;
+
+/* lane CLOUD5: the Low band's cloud type (0 stratus, 1/3 stratocumulus, 2/3 cumulus, 1 cumulonimbus) and its swing over
+ * the sky (the weather noise moves it by +- spread), from the record's class. Ours (no shipped source gives this map):
+ * fair or unflagged -> cumulus-ish 0.6 +- 0.2 (stratocumulus to congestus); cloudy 0.45; rainy 0.75 (congestus, deep
+ * rain clouds); rainy with thunder 0.9 +- 0.25 (cumulonimbus towers); snow 0.3 (stratiform). The sheet (Fill) layers
+ * still pull a texel toward stratus through the map's B channel. recxType >= 0 (a weather .recx clouds.type) wins. */
+inline void lowTypeOf( unsigned flags, unsigned thunder, float recxType, float & type, float & spread )
+{
+	type = 0.6f;
+	spread = 0.2f;
+	if ( flags & kWxSnow ) {
+		type = 0.3f;
+		spread = 0.15f;
+	} else if ( flags & kWxRainy ) {
+		type = thunder > 0 ? 0.9f : 0.75f;
+		spread = thunder > 0 ? 0.25f : 0.2f;
+	} else if ( flags & kWxCloudy ) {
+		type = 0.45f;
+	}
+	if ( recxType >= 0.0f )
+		type = std::clamp( recxType, 0.0f, 1.0f );
+}
 
 /* the band parameters of one weather from its layers (role, cover); heights, density and tint are coverage-weighted
  * means, sheet = the share of the band's coverage that sheet layers give */
@@ -140,6 +168,8 @@ inline BandParams lerpParams( const BandParams & a, const BandParams & b, float 
 	o.topM = ea ? b.topM : eb ? a.topM : L( a.topM, b.topM );
 	o.density = L( a.density, b.density );
 	o.sheet = L( a.sheet, b.sheet );
+	o.type = ea ? b.type : eb ? a.type : L( a.type, b.type );	// lane CLOUD5: as the heights (an empty band has none)
+	o.typeSpread = ea ? b.typeSpread : eb ? a.typeSpread : L( a.typeSpread, b.typeSpread );
 	for ( int c = 0; c < 3; c++ )
 		o.tint[c] = L( a.tint[c], b.tint[c] );
 	return o;

@@ -16,7 +16,13 @@
 		pl.z = p.z + dot( up, cvKeyW ) * tk;
 		tauL += cvDens( pl ) * kCvSigma * dk;
 	}
+#ifdef WW_CLOUD_VARIETY
+	// lane CLOUD5: the ambient's height ramp over the bands' span without the towers (cvAmbKm), so a storm tower in the
+	// sky does not dim the small cumulus beside it
+	float hf = clamp( ( p.z - lo ) / max( cvAmbKm, 1e-3 ), 0.0, 1.0 );
+#else
 	float hf = clamp( ( p.z - lo ) / max( hi - lo, 1e-3 ), 0.0, 1.0 );
+#endif
 	float mu0 = dot( up, cvKeyW );
 	vec3 key = cvKeyK * atTrans( cvTrans, kRb + p.z, mu0 );
 	float ph = cvOctaveSum( cosT, tauL );

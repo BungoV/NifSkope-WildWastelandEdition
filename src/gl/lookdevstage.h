@@ -98,6 +98,8 @@ QString wwLookdevRegion();
  *  the plugin that defines it (file name), the loaded plugins (full paths, load order) and the game's Data; false
  *  when no weather is loaded */
 bool wwLookdevWeatherId( quint32 & formID, QString & edid, QString & owner, QStringList & files, QString & dataDir );
+//! lane CLOUD5: the loaded weather's class (WTHR DATA flags byte, thunder frequency byte); false (both 0) when none
+bool wwLookdevWeatherClass( unsigned & flags, unsigned & thunder );
 void wwLookdevSetWeather( const QString & key );
 double wwLookdevHour();
 void wwLookdevClimateTnam( unsigned char out[4] );	// lane GAPLOOK1: the climate's TNAM sunrise/sunset bytes (10 min units)

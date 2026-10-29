@@ -1,5 +1,19 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## CLOUD5 (2026-10-29): Cloud Variety -- cloud types, many sizes in one sky, storm towers
+
+New row Render > Scene > Cloud Variety (Off / On, ships Off; needs Volume Clouds Medium or up; pin WW_CLOUDVOL_VARIETY).
+- Each weather gets a Low cloud type from its record (WTHR DATA class flags and thunder byte): fair-weather cumulus,
+  cloudy stratocumulus, rain congestus, thunderstorm cumulonimbus towers up to 7 km deep with an anvil, snow stratiform.
+  A weather .recx can set it: `clouds.type` = 0..1 or stratus / stratocumulus / cumulus / cumulonimbus (with `hours`).
+- A weather noise over tens of km makes big masses beside small puffs and varies the tops; the coverage per area still
+  equals the cloud map's.
+- Wispy edges: the detail noise is displaced by a curl field and erodes more, less at the base (flat bases).
+- Storm bases are dark because the light samples now reach through the tower (the reach follows the weather's tallest
+  cloud), not by painting.
+- Off draws exactly what it drew before (the old shader programs, unchanged).
+Reds: WW_CLOUDVOL_RED = onetype | nocurl | shortlight. Offline gate: tests/spells/cloudvar_check.py.
+
 ## RTXGI1 M2: the ray-traced GI volume lights the cell view (switch, live; ships Off)
 
 - **Show > Lighting > Ray-traced GI** (`WW_CELL_RTDDGI=1`, default Off): with the probe GI's relit cell open, a DDGI
