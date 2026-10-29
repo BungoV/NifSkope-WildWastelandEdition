@@ -213,6 +213,10 @@ struct WwCellLighting
 	float regionEye[2] = { 0, 0 };
 	bool regionEyeOk = false;
 	bool showSky = false;	//!< lane SKYFULL1: an interior whose CELL DATA has bit 7 (Show Sky); the Lookdev sky draws there
+	/*! lane SKYINT1 (10-29): Show Sky AND Use Sky Lighting (DATA bits 7 + 8). The game runs such an interior's sky in its
+	 *  full (exterior) mode: the weather and the hour move every frame, and the sky's ambient (DALC), fog colours and
+	 *  directional colour stay the CURRENT weather's (the cell's XCLL ones are not taken). wwCellSkyLitNow() */
+	bool skyLighting = false;
 	QVector<WwCellLight> lights;
 	QVector<WwCellAmbientLight> ambientLights;  //!< lane AMBO2, in plugin order (the first that holds a point wins)
 	/*! lane GPURELIGHT1: the lights that start off (initially disabled, or the base's Off By Default), kept only
@@ -360,6 +364,13 @@ void wwCellGiGpuSetOn( bool on );
  *  (probesky.cpp, live), the AO decals per pixel. Red WW_CELL_SKYSTR_RED=ignore: the row is ignored (100 %). */
 int wwCellSkyVisPercent();
 float wwCellSkyVis();
+/*! Lane SKYINT1 (10-29): a Use Sky Lighting interior lit by the current Lookdev weather and hour (WwCellLighting
+ *  skyLighting): its DALC and fog colours in place of XCLL's (celllights.cpp), and the ray-traced GI volume's sky
+ *  (rtddgicell.cpp). WW_CELL_SKYLIT_RED (live): fixed = both as before (XCLL ambient and fog, the volume's sky held at
+ *  the one its first build took), xcll = the ambient and fog only, sky = the volume's sky only. Bits: 1 xcll, 2 sky. */
+int wwCellSkyLitRed();
+//! true: L is a Use Sky Lighting interior that takes the weather's ambient and fog colours now (Lookdev on, no red)
+bool wwCellSkyLitNow( const WwCellLighting * L );
 bool wwCellSkyVisPinned();
 void wwCellSkyVisSetPercent( int pct );
 

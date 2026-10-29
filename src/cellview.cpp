@@ -1206,6 +1206,7 @@ static void cellPublishLighting( const NifModel * nif, const EsmWorld & world, c
 	L.interior = spec.interior;
 	L.dataRoot = spec.dataRoot;	// lane SUNCELL1: an exterior's weather LUT is looked up there too
 	L.showSky = spec.interior && ( cellInteriorFlags( world.interior() ) & 0x0080u );	// lane SKYFULL1
+	L.skyLighting = spec.interior && ( cellInteriorFlags( world.interior() ) & 0x0180u ) == 0x0180u;	// lane SKYINT1 (10-29)
 	if ( !spec.interior ) {	// lane WEATHERBLEND4: the centre cell's regions, for a teleport's region weather
 		L.regions = world.cellRegions( spec.cx, spec.cy, &L.regionSeed );
 		L.regionAt[0] = ( float( spec.cx ) + 0.5f ) * 4096.0f;

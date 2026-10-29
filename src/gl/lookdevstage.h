@@ -170,6 +170,10 @@ QString wwLookdevEcho();
 void wwLookdevLight( float lightDirWorld[3], float diffuse[4], float ambient[4] );
 //! the DALC ambient (linear) the PBR program's Lookdev branch reads: [X+,X-,Y+,Y-,Z+,Z-]
 bool wwLookdevDalc( float rgb[6][3] );
+/*! Lane SKYINT1 (10-29): the weather fog at the current hour (esmweather.h WwFog, packed K, linear colours), the one
+ *  the exterior fog draws. False without a weather (out untouched). A Use Sky Lighting interior takes its colours. */
+struct WwFog;
+bool wwLookdevFogNow( WwFog & out );
 /*! Lane EFFECTPARITY1: the weather's Effect Lighting colour (NAM0 row 9) at the hour, linear, blended as the
  *  Sunlight row. The game's sun carries it beside its diffuse and lit effects take it instead of the sunlight.
  *  False (rgb = the sunlight) without a weather. */
