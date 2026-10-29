@@ -261,6 +261,18 @@ float Shape::wwAlphaThreshold() const
 	return alphaProperty ? float( alphaProperty->alphaThreshold ) : 0.0f;
 }
 
+int Shape::wwDrawAlphaGen()
+{
+	WW_SWITCH_STATIC( QByteArray, v, wwEnv( "WW_ALPHABGSM_RED" ) );
+	static QByteArray last;
+	static int gen = 0;
+	if ( v != last ) {
+		last = v;
+		gen++;
+	}
+	return gen;
+}
+
 Shape::WwDrawAlpha Shape::wwDrawAlpha( const char * pass ) const
 {
 	/* lane ALPHABGSM1: setupProgramCE1 (renderer.cpp) tests with the material's bAlphaTest and iAlphaTestRef whenever

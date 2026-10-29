@@ -170,6 +170,8 @@ public:
 		bool fromMaterial = false;	// the material file decided (it may say "no test" where the NIF tests)
 	};
 	WwDrawAlpha wwDrawAlpha( const char * pass ) const;
+	//! lane ALPHABGSM1: moves when WW_ALPHABGSM_RED does, so the passes that keep their maps draw them again
+	static int wwDrawAlphaGen();
 	//! the GPU applies the bone transforms to this shape (the caster pass skins it on the CPU)
 	bool wwGpuSkinned() const { return isSkinned && !transformRigid && !boneTransforms.empty(); }
 	//! lane FARDRAW1: the instanced far ring this shape draws, or null

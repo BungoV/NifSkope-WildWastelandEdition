@@ -2984,7 +2984,8 @@ static void lampShadowPass( Scene * scene, Gpu & g, const WwCellLighting & L, st
 	auto fn = r->fn;
 	const int S = wwCellLampShadowFace();
 	const int red = wwCellLampShadowRed();
-	const int ver = s.version.value( scene->nifModel );
+	// lane ALPHABGSM1: a moved alpha-rule red (Shape::wwDrawAlphaGen) stores every lamp map again
+	const int ver = s.version.value( scene->nifModel ) + ( Shape::wwDrawAlphaGen() << 24 );
 	const std::uint64_t blockBytes = std::uint64_t( 3 ) * std::uint64_t( S ) * std::uint64_t( S ) * 2u;
 	QElapsedTimer timer;
 	timer.start();
@@ -3565,6 +3566,11 @@ void wwCellShadowPass( Scene * scene )
 		}
 	}
 	{
+		static int atGen = 0;	// lane ALPHABGSM1: a moved alpha-rule red draws every held cube again
+		if ( atGen != Shape::wwDrawAlphaGen() ) {
+			atGen = Shape::wwDrawAlphaGen();
+			wwCellShadowKick( scene->nifModel );
+		}
 		const int kick = shadowKicks().value( scene->nifModel );
 		if ( g.shKick != kick ) {
 			g.shKick = kick;
