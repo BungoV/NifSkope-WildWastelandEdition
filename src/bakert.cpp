@@ -1208,3 +1208,6 @@ std::string census( const char * who, const Scene & s )
 }
 
 } // namespace bakert
+
+// lane RTXGI1: the DDGI volume's GPU run reuses this file's device, buffers and scene build (src/rtddgi/rtddgi_gpu.h)
+#include "rtddgi/rtddgi_vk.inc"

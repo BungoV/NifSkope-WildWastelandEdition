@@ -1,0 +1,73 @@
+#version 460
+// Lane RTXGI1: the probe blend. One workgroup a probe: its rays into shared memory, then threads 0..35 update the
+// 6x6 irradiance interior and threads 36..231 the 14x14 distance interior (src/rtddgimath.h blendIrradianceTexel /
+// blendDistanceTexel, the CPU twin's arithmetic in float). The fixed rays (< 32) are not blended [SDK].
+#extension GL_EXT_ray_query : require
+#extension GL_GOOGLE_include_directive : require
+layout( local_size_x = 256 ) in;
+#include "ddgi_common.glsl"
+
+shared vec4 sRay[256];
+shared vec3 sDir[256];
+
+void main()
+{
+	const uint p = ddgiGroupId();
+	if ( p >= uint( P.dims.w ) )
+		return;
+	const int st = ddgiProbeState( p );
+	if ( st == DDGI_OFF || ( st == DDGI_ASLEEP && P.flags.y != 0 ) )
+		return;   // the whole group leaves together: no barrier is skipped by part of it
+	const int N = P.counts.x;
+	const int nb = N - DDGI_FIXED;
+	const uint t = gl_LocalInvocationID.x;
+	if ( int( t ) < nb ) {
+		sRay[t] = rays[p * uint( N ) + uint( DDGI_FIXED ) + t];
+		sDir[t] = ddgiRayDir( DDGI_FIXED + int( t ), N );
+	}
+	barrier();
+	const float hBase = ddgiAgeHysteresis( age[p], P.blendp.x );
+	if ( t < 36u ) {
+		// MIRROR rtddgimath.h blendIrradianceTexel
+		const int tx = int( t ) % DDGI_IRR_N, ty = int( t ) / DDGI_IRR_N;
+		const vec3 td = ddgiTexelDir( tx, ty, DDGI_IRR_N );
+		vec3 s = vec3( 0.0 );
+		float w = 0.0;
+		for ( int r = 0; r < nb; r++ ) {
+			const float c = max( 0.0, dot( td, sDir[r] ) );
+			if ( c <= 0.0 )
+				continue;
+			s += c * sRay[r].rgb;
+			w += c;
+		}
+		const uint at = p * uint( DDGI_IRR_S * DDGI_IRR_S ) + uint( ( ty + 1 ) * DDGI_IRR_S + tx + 1 );
+		if ( w > 0.0 ) {
+			const vec3 old = irr[at].rgb;
+			const vec3 m = 0.5 * s / w;
+			const vec3 enc = vec3( ddgiGammaEncode( m.x ), ddgiGammaEncode( m.y ), ddgiGammaEncode( m.z ) );
+			const float h = ddgiTexelHysteresis( hBase, old, enc );
+			irr[at] = vec4( enc * ( 1.0 - h ) + old * h, 1.0 );
+		}
+	} else if ( t < 36u + 196u ) {
+		// MIRROR rtddgimath.h blendDistanceTexel
+		const int k = int( t ) - 36;
+		const int tx = k % DDGI_DIST_N, ty = k / DDGI_DIST_N;
+		const vec3 td = ddgiTexelDir( tx, ty, DDGI_DIST_N );
+		float s = 0.0, s2 = 0.0, w = 0.0;
+		for ( int r = 0; r < nb; r++ ) {
+			const float c = max( 0.0, dot( td, sDir[r] ) );
+			const float wr = pow( c, P.blendp.y );
+			if ( wr < 0.001 )
+				continue;
+			const float d = min( abs( sRay[r].w ), P.origin.w );
+			s += wr * d;
+			s2 += wr * d * d;
+			w += wr;
+		}
+		const uint at = p * uint( DDGI_DIST_S * DDGI_DIST_S ) + uint( ( ty + 1 ) * DDGI_DIST_S + tx + 1 );
+		if ( w > 0.0 ) {
+			const vec2 old = dist[at];
+			dist[at] = vec2( s / w, s2 / w ) * ( 1.0 - hBase ) + old * hBase;
+		}
+	}
+}

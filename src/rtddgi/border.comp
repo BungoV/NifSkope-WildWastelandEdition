@@ -1,0 +1,34 @@
+#version 460
+// Lane RTXGI1: the border copy. One invocation a (probe, border texel): 28 irradiance texels (8x8 tile) then 60
+// distance texels (16x16 tile), each a copy of the interior texel the octahedral fold puts beside it
+// (src/rtddgimath.h borderSource). Texel 0 of an updated probe also counts the update (age).
+#extension GL_EXT_ray_query : require
+#extension GL_GOOGLE_include_directive : require
+layout( local_size_x = 64 ) in;
+#include "ddgi_common.glsl"
+
+void main()
+{
+	const uint per = uint( 4 * DDGI_IRR_S - 4 + 4 * DDGI_DIST_S - 4 );   // 28 + 60
+	const uint id = ddgiLinearId();
+	if ( id >= uint( P.dims.w ) * per )
+		return;
+	const uint p = id / per;
+	const int k = int( id % per );
+	const int st = ddgiProbeState( p );
+	if ( st == DDGI_OFF || ( st == DDGI_ASLEEP && P.flags.y != 0 ) )
+		return;
+	if ( k < 4 * DDGI_IRR_S - 4 ) {
+		const ivec2 xy = ddgiBorderXY( k, DDGI_IRR_S );
+		const ivec2 s = ddgiBorderSource( xy.x, xy.y, DDGI_IRR_S );
+		const uint b = p * uint( DDGI_IRR_S * DDGI_IRR_S );
+		irr[b + uint( xy.y * DDGI_IRR_S + xy.x )] = irr[b + uint( s.y * DDGI_IRR_S + s.x )];
+		if ( k == 0 )
+			age[p] = age[p] + 1u;
+	} else {
+		const ivec2 xy = ddgiBorderXY( k - ( 4 * DDGI_IRR_S - 4 ), DDGI_DIST_S );
+		const ivec2 s = ddgiBorderSource( xy.x, xy.y, DDGI_DIST_S );
+		const uint b = p * uint( DDGI_DIST_S * DDGI_DIST_S );
+		dist[b + uint( xy.y * DDGI_DIST_S + xy.x )] = dist[b + uint( s.y * DDGI_DIST_S + s.x )];
+	}
+}

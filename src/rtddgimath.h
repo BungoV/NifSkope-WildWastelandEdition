@@ -1,0 +1,493 @@
+#ifndef RTDDGIMATH_H
+#define RTDDGIMATH_H
+
+/* Lane RTXGI1 (2026-10-29): the DDGI probe math, header-only, no Qt. One copy of every rule the volume uses, read
+ * by src/rtddgi.cpp (the CPU twin), by tests/rtddgi_math (the unit test with its reds) and mirrored line for line in
+ * src/rtddgi/ddgi_common.glsl (each GLSL function carries "MIRROR rtddgimath.h <name>").
+ *
+ * Written from the published math only (notes/rtxgi1/GUIDE.md is the spec; tags):
+ *   [J19] Majercik et al., JCGT 8(2) 2019 (octahedral probes, cosine blend, Chebyshev visibility, weights)
+ *   [J21] Majercik et al., JCGT 10(2) 2021 (self-shadow bias eq 2, backface rays, gamma 5, per-texel hysteresis,
+ *         relocation fig 8, probe states)
+ *   [C14] Cigolle et al. 2014 (octahedral unit vectors); [K15] Keinert et al. 2015 (spherical Fibonacci);
+ *   [A92] Arvo, Graphics Gems III (fast random rotation matrices)
+ *   ours  our own choice (named in the handoff, notes/rtxgi1/M1_HANDOFF.md)
+ * No NVIDIA SDK code is in here or anywhere in the lane (its licence is not open source). */
+
+#include <algorithm>
+#include <cmath>
+#include <cstdint>
+
+namespace rtddgi {
+
+// ------------------------------------------------------------------ constants (GUIDE.md sections 1-3)
+constexpr int kIrrInterior = 6;            // [J21 7.1] 6x6 + a one-texel border
+constexpr int kIrrTile = kIrrInterior + 2; // 8
+constexpr int kDistInterior = 14;          // [J21 7.1] 14x14 + border
+constexpr int kDistTile = kDistInterior + 2;   // 16
+constexpr int kFixedRays = 32;             // [SDK] the first 32 rays, never rotated, never blended
+constexpr int kMaxRays = 256;              // ours: the blend's shared memory holds one probe's rays
+constexpr float kPi = 3.14159265358979323846f;
+constexpr float kGamma = 5.0f;             // [J21 4.2]
+constexpr float kHysteresis = 0.97f;       // ours, inside [J19]'s 0.85-0.98
+constexpr float kChangeSmall = 0.25f;      // [J21 4.3 fig 5] significantChangeThreshold
+constexpr float kChangeSmallDrop = 0.15f;  // [J21 4.3] h -= 0.15
+constexpr float kChangeLarge = 0.8f;       // [J21 4.3] newDistributionChangeThreshold: h = 0
+constexpr float kSharpness = 50.0f;        // ours / GUIDE: the distance blend's cosine power
+constexpr float kDistWeightMin = 0.001f;   // [J19] distance weights under this are skipped
+constexpr float kBackfaceDist = 0.2f;      // [J21 4.1] a backface hit's distance shortened by 80 %
+constexpr float kBackfaceShare = 0.25f;    // [J21 fig 8, 6.1] inside geometry above this share
+constexpr float kBiasN = 0.2f, kBiasV = 0.8f, kBiasD = 0.75f;   // [J21 eq 2]
+constexpr float kSelfShadowBias = 0.3f;    // [J21 eq 2] B default
+constexpr float kBackWeightFloor = 0.2f;   // [J19 5.2] smooth backface ((cos + 1) / 2)^2 + 0.2
+constexpr float kChebFloor = 0.05f;        // [J19 5.2] w *= max(0.05, cheb^3)
+constexpr float kCrush = 0.2f;             // [J19 5.2] low-weight crush below 0.2
+constexpr float kRelocLimit = 0.45f;       // [SDK doc] a probe moves at most 45 % of its cell per axis
+constexpr int kRelocIterations = 5;        // [J21 5]
+constexpr float kRelocStep = 0.2f;         // GUIDE 2.5: step <= 0.2 x spacing toward the farthest face
+constexpr float kRelocMinFront = 0.25f;    // ours: only a probe whose closest front face is nearer than this x spacing steps
+constexpr float kMiss = 1e27f;             // a miss's stored distance (the blend clamps it to the volume's distClamp)
+enum State : int { kOff = 0, kAsleep = 1, kVigilant = 2 };
+
+// ------------------------------------------------------------------ vectors
+struct V3
+{
+	float x = 0, y = 0, z = 0;
+	V3() = default;
+	V3( float a, float b, float c ) : x( a ), y( b ), z( c ) {}
+	float operator[]( int k ) const { return k == 0 ? x : k == 1 ? y : z; }
+	float & operator[]( int k ) { return k == 0 ? x : k == 1 ? y : z; }
+};
+inline V3 operator+( V3 a, V3 b ) { return V3( a.x + b.x, a.y + b.y, a.z + b.z ); }
+inline V3 operator-( V3 a, V3 b ) { return V3( a.x - b.x, a.y - b.y, a.z - b.z ); }
+inline V3 operator-( V3 a ) { return V3( -a.x, -a.y, -a.z ); }
+inline V3 operator*( V3 a, float s ) { return V3( a.x * s, a.y * s, a.z * s ); }
+inline V3 operator*( V3 a, V3 b ) { return V3( a.x * b.x, a.y * b.y, a.z * b.z ); }
+inline float dot( V3 a, V3 b ) { return a.x * b.x + a.y * b.y + a.z * b.z; }
+inline V3 cross( V3 a, V3 b ) { return V3( a.y * b.z - a.z * b.y, a.z * b.x - a.x * b.z, a.x * b.y - a.y * b.x ); }
+inline float length( V3 a ) { return std::sqrt( dot( a, a ) ); }
+inline V3 normalize( V3 a ) { const float l = length( a ); return l > 0.0f ? a * ( 1.0f / l ) : V3( 0, 0, 1 ); }
+inline float signNotZero( float v ) { return v >= 0.0f ? 1.0f : -1.0f; }
+inline float clampf( float v, float a, float b ) { return std::min( std::max( v, a ), b ); }
+inline float fractf( float v ) { return v - std::floor( v ); }
+
+// ------------------------------------------------------------------ octahedral map [C14] (Z up: +Z at the centre)
+//! unit dir -> (u, v) in [-1, 1]^2.  GLSL: ddgiOctEncode
+inline void octEncode( V3 d, float & u, float & v )
+{
+	const float l1 = std::fabs( d.x ) + std::fabs( d.y ) + std::fabs( d.z );
+	u = d.x / l1;
+	v = d.y / l1;
+	if ( d.z < 0.0f ) {
+		const float ou = u;
+#ifdef RTDDGI_RED_OCT
+		(void)ou;   // red: the lower hemisphere is not folded (a wrong map, the round trip fails)
+#else
+		u = ( 1.0f - std::fabs( v ) ) * signNotZero( ou );
+		v = ( 1.0f - std::fabs( ou ) ) * signNotZero( v );
+#endif
+	}
+}
+//! (u, v) in [-1, 1]^2 -> unit dir.  GLSL: ddgiOctDecode
+inline V3 octDecode( float u, float v )
+{
+	V3 d( u, v, 1.0f - std::fabs( u ) - std::fabs( v ) );
+	if ( d.z < 0.0f ) {
+		const float ox = d.x;
+		d.x = ( 1.0f - std::fabs( d.y ) ) * signNotZero( ox );
+		d.y = ( 1.0f - std::fabs( ox ) ) * signNotZero( d.y );
+	}
+	return normalize( d );
+}
+//! the direction at the centre of interior texel (tx, ty) of an n x n map (0-based, border excluded).  GLSL: ddgiTexelDir
+inline V3 texelDir( int tx, int ty, int n )
+{
+	return octDecode( ( float( tx ) + 0.5f ) / float( n ) * 2.0f - 1.0f, ( float( ty ) + 0.5f ) / float( n ) * 2.0f - 1.0f );
+}
+/*! the source texel of tile texel (x, y) of an S x S tile (border 1): an interior texel is its own; a border texel
+ *  copies the interior texel the octahedral fold puts next to it ([J19] fig 12, [J21] fig 13): edges mirror along
+ *  the edge, corners take the opposite corner.  GLSL: ddgiBorderSource */
+inline void borderSource( int x, int y, int S, int & sx, int & sy )
+{
+	const int n = S - 2;
+	sx = x;
+	sy = y;
+	const bool l = x == 0, r = x == S - 1, t = y == 0, b = y == S - 1;
+	if ( ( l || r ) && ( t || b ) ) {   // corner: the diagonally opposite interior corner
+		sx = l ? n : 1;
+		sy = t ? n : 1;
+		return;
+	}
+#ifdef RTDDGI_RED_BORDER
+	if ( t ) sy = 1;   // red: a clamp copy, no mirror
+	if ( b ) sy = n;
+	if ( l ) sx = 1;
+	if ( r ) sx = n;
+#else
+	if ( t ) { sx = S - 1 - x; sy = 1; }
+	if ( b ) { sx = S - 1 - x; sy = n; }
+	if ( l ) { sx = 1; sy = S - 1 - y; }
+	if ( r ) { sx = n; sy = S - 1 - y; }
+#endif
+}
+//! border texel k (0 .. 4S-5) of an S x S tile: the top row, the bottom row, the left column, the right column.  GLSL: ddgiBorderXY
+inline void borderXY( int k, int S, int & x, int & y )
+{
+	if ( k < S ) { x = k; y = 0; return; }
+	k -= S;
+	if ( k < S ) { x = k; y = S - 1; return; }
+	k -= S;
+	if ( k < S - 2 ) { x = 0; y = 1 + k; return; }
+	k -= S - 2;
+	x = S - 1;
+	y = 1 + k;
+}
+/*! bilinear read of a tile (S x S texels of `ch` floats, the border filled) at unit direction d: out[0..ch).
+ *  GLSL: ddgiSampleIrr / ddgiSampleDist (one per buffer) */
+inline void sampleTile( const float * tile, int S, int ch, V3 d, float * out )
+{
+	float u, v;
+	octEncode( d, u, v );
+	const int n = S - 2;
+	const float fx = 1.0f + ( u * 0.5f + 0.5f ) * float( n ) - 0.5f;   // texel space, centres on integers
+	const float fy = 1.0f + ( v * 0.5f + 0.5f ) * float( n ) - 0.5f;
+	const int x0 = std::min( std::max( int( std::floor( fx ) ), 0 ), S - 2 ), y0 = std::min( std::max( int( std::floor( fy ) ), 0 ), S - 2 );
+	const float ax = clampf( fx - float( x0 ), 0.0f, 1.0f ), ay = clampf( fy - float( y0 ), 0.0f, 1.0f );
+	for ( int c = 0; c < ch; c++ ) {
+		const float a = tile[( y0 * S + x0 ) * ch + c], b = tile[( y0 * S + x0 + 1 ) * ch + c];
+		const float e = tile[( ( y0 + 1 ) * S + x0 ) * ch + c], f = tile[( ( y0 + 1 ) * S + x0 + 1 ) * ch + c];
+		out[c] = ( a * ( 1.0f - ax ) + b * ax ) * ( 1.0f - ay ) + ( e * ( 1.0f - ax ) + f * ax ) * ay;
+	}
+}
+
+// ------------------------------------------------------------------ rays: spherical Fibonacci [K15], rotation [A92]
+//! direction i of n.  GLSL: ddgiFibonacci
+inline V3 sphericalFibonacci( int i, int n )
+{
+	const float kPhiMinus1 = 0.61803398874989484820f;   // (sqrt 5 + 1) / 2 - 1
+	const float phi = 2.0f * kPi * fractf( float( i ) * kPhiMinus1 );
+#ifdef RTDDGI_RED_FIB
+	const float cosT = 1.0f - float( i ) / float( n );   // red: the strata start at the pole and never reach the other
+#else
+	const float cosT = 1.0f - ( 2.0f * float( i ) + 1.0f ) / float( n );
+#endif
+	const float sinT = std::sqrt( clampf( 1.0f - cosT * cosT, 0.0f, 1.0f ) );
+	return V3( std::cos( phi ) * sinT, std::sin( phi ) * sinT, cosT );
+}
+//! a 3x3 rotation, rows m[0..2], m[3..5], m[6..8]
+struct M3 { float m[9] = { 1, 0, 0, 0, 1, 0, 0, 0, 1 }; };
+inline V3 mul( const M3 & r, V3 v )
+{
+	return V3( r.m[0] * v.x + r.m[1] * v.y + r.m[2] * v.z, r.m[3] * v.x + r.m[4] * v.y + r.m[5] * v.z,
+		r.m[6] * v.x + r.m[7] * v.y + r.m[8] * v.z );
+}
+/*! [A92]: three uniform numbers in [0, 1) -> a uniformly distributed rotation: a turn 2 pi x1 about z, then the
+ *  Householder reflection by v = (cos(2 pi x2) sqrt x3, sin(2 pi x2) sqrt x3, sqrt(1 - x3)), negated (det +1). */
+inline M3 arvoRotation( float x1, float x2, float x3 )
+{
+	const float th = 2.0f * kPi * x1, ph = 2.0f * kPi * x2, r = std::sqrt( x3 );
+	const float vx = std::cos( ph ) * r, vy = std::sin( ph ) * r, vz = std::sqrt( std::max( 0.0f, 1.0f - x3 ) );
+	const float ct = std::cos( th ), st = std::sin( th );
+	const float R[9] = { ct, st, 0, -st, ct, 0, 0, 0, 1 };
+	const float v[3] = { vx, vy, vz };
+	M3 out;
+	for ( int i = 0; i < 3; i++ )
+		for ( int j = 0; j < 3; j++ ) {
+			float s = 0.0f;
+			for ( int k = 0; k < 3; k++ )
+				s += ( 2.0f * v[i] * v[k] - ( i == k ? 1.0f : 0.0f ) ) * R[k * 3 + j];   // -(I - 2 v v^T) R
+			out.m[i * 3 + j] = s;
+		}
+	return out;
+}
+//! splitmix64: the per-update rotation's numbers (CPU only; the GPU gets the matrix)
+inline uint64_t splitmix( uint64_t & s )
+{
+	uint64_t z = ( s += 0x9E3779B97F4A7C15ULL );
+	z = ( z ^ ( z >> 30 ) ) * 0xBF58476D1CE4E5B9ULL;
+	z = ( z ^ ( z >> 27 ) ) * 0x94D049BB133111EBULL;
+	return z ^ ( z >> 31 );
+}
+inline float unit01( uint64_t & s ) { return float( splitmix( s ) >> 40 ) / float( 1ULL << 24 ); }
+//! the rotation of update `frame` of a volume seeded `seed` (CPU and GPU take the same matrix)
+inline M3 updateRotation( uint32_t seed, uint32_t frame )
+{
+	uint64_t s = ( uint64_t( seed ) << 32 ) ^ uint64_t( frame ) * 0x2545F4914F6CDD1DULL;
+	const float a = unit01( s ), b = unit01( s ), c = unit01( s );
+	return arvoRotation( a, b, c );
+}
+/*! ray i of a probe's n: the first kFixedRays are the fixed set (Fibonacci of kFixedRays, never rotated), the rest
+ *  the Fibonacci set of n - kFixedRays turned by this update's rotation [SDK fixed rays].  GLSL: ddgiRayDir */
+inline V3 rayDir( int i, int n, const M3 & rot )
+{
+	if ( i < kFixedRays )
+		return sphericalFibonacci( i, kFixedRays );
+	return normalize( mul( rot, sphericalFibonacci( i - kFixedRays, n - kFixedRays ) ) );
+}
+
+// ------------------------------------------------------------------ encoding and hysteresis [J21 4.2, 4.3]
+inline float gammaEncode( float x )   //! GLSL: ddgiGammaEncode
+{
+#ifdef RTDDGI_RED_GAMMA
+	return std::pow( std::max( x, 0.0f ), 1.0f / 2.0f );   // red: gamma 2
+#else
+	return std::pow( std::max( x, 0.0f ), 1.0f / kGamma );
+#endif
+}
+inline float gammaDecode( float e ) { return std::pow( std::max( e, 0.0f ), kGamma ); }   //! GLSL: ddgiGammaDecode
+/*! the hysteresis of one irradiance texel this update: the base h lowered by 0.15 when any channel of the
+ *  encoded value moved more than 0.25, to 0 when more than 0.8 ([J21] fig 5; the change is the largest |new - old|
+ *  over the channels, ours: the figure's maxComponent of a signed difference then abs).  GLSL: ddgiTexelHysteresis */
+inline float texelHysteresis( float h, const float oldEnc[3], const float newEnc[3] )
+{
+	float ch = 0.0f;
+	for ( int c = 0; c < 3; c++ )
+		ch = std::max( ch, std::fabs( newEnc[c] - oldEnc[c] ) );
+#ifdef RTDDGI_RED_HYST
+	if ( ch > kChangeLarge ) h = std::max( 0.0f, h - kChangeSmallDrop );   // red: the thresholds swapped
+	if ( ch > kChangeSmall ) h = 0.0f;
+#else
+	if ( ch > kChangeSmall )
+		h = std::max( 0.0f, h - kChangeSmallDrop );
+	if ( ch > kChangeLarge )
+		h = 0.0f;
+#endif
+	return h;
+}
+/*! the base hysteresis of a probe's update number `age` (0 = its first): 0 first ([J21 6.3] a newly vigilant probe
+ *  converges at once), then the running mean age / (age + 1) until it reaches h (ours: an offline volume
+ *  converges in ~1 / (1 - h) updates without a warm-up bias).  GLSL: ddgiAgeHysteresis */
+inline float ageHysteresis( uint32_t age, float h )
+{
+	return age == 0 ? 0.0f : std::min( h, float( age ) / float( age + 1 ) );
+}
+
+/*! one irradiance texel's update from a probe's blended rays (dirs, radiance rgb): the cosine-weighted mean x 0.5
+ *  ([J19] eq. in 5.1, GUIDE 2.3; decoded x 2 pi it is the irradiance), encoded, blended with old by the texel
+ *  hysteresis. old/out encoded rgb. Returns false when no ray faces the texel (out = old).  GLSL: blend.comp */
+inline bool blendIrradianceTexel( V3 t, const V3 * dirs, const float * rad, int nRays, float hBase, const float old[3], float out[3] )
+{
+	double s[3] = { 0, 0, 0 }, w = 0;
+	for ( int r = 0; r < nRays; r++ ) {
+		const float c = std::max( 0.0f, dot( t, dirs[r] ) );
+		if ( c <= 0.0f )
+			continue;
+		for ( int k = 0; k < 3; k++ )
+			s[k] += double( c ) * rad[r * 3 + k];
+		w += c;
+	}
+	if ( w <= 0.0 ) {
+		for ( int k = 0; k < 3; k++ )
+			out[k] = old[k];
+		return false;
+	}
+	float enc[3];
+	for ( int k = 0; k < 3; k++ ) {
+#ifdef RTDDGI_RED_NORM
+		enc[k] = gammaEncode( float( s[k] / w ) );   // red: no 0.5 (decoded x 2 pi gives 2 pi L, not pi L)
+#else
+		enc[k] = gammaEncode( float( 0.5 * s[k] / w ) );
+#endif
+	}
+	const float h = texelHysteresis( hBase, old, enc );
+	for ( int k = 0; k < 3; k++ )
+		out[k] = enc[k] * ( 1.0f - h ) + old[k] * h;
+	return true;
+}
+/*! one distance texel: weights max(0, cos)^sharpness (under kDistWeightMin skipped), the mean and mean square of
+ *  min(|d|, clamp), blended by the base hysteresis only (never the irradiance thresholds [J21 4.3]).  GLSL: blend.comp */
+inline bool blendDistanceTexel( V3 t, const V3 * dirs, const float * dist, int nRays, float sharpness, float clampD, float hBase,
+	const float old[2], float out[2] )
+{
+	double s = 0, s2 = 0, w = 0;
+	for ( int r = 0; r < nRays; r++ ) {
+		const float c = std::max( 0.0f, dot( t, dirs[r] ) );
+		const float wr = std::pow( c, sharpness );
+		if ( wr < kDistWeightMin )
+			continue;
+		const float d = std::min( std::fabs( dist[r] ), clampD );
+		s += double( wr ) * d;
+		s2 += double( wr ) * d * d;
+		w += wr;
+	}
+	if ( w <= 0.0 ) {
+		out[0] = old[0];
+		out[1] = old[1];
+		return false;
+	}
+	out[0] = float( s / w ) * ( 1.0f - hBase ) + old[0] * hBase;
+	out[1] = float( s2 / w ) * ( 1.0f - hBase ) + old[1] * hBase;
+	return true;
+}
+
+// ------------------------------------------------------------------ sampling a surface [J19 5.2, J21 4.1 eq 2]
+//! the self-shadow bias vector: (0.2 n + 0.8 o) x 0.75 D x B.  GLSL: ddgiBiasVector
+inline V3 biasVector( V3 n, V3 o, float D, float B )
+{
+#ifdef RTDDGI_RED_BIAS
+	return ( n * kBiasV + o * kBiasN ) * ( kBiasD * D * B );   // red: the two weights swapped
+#else
+	return ( n * kBiasN + o * kBiasV ) * ( kBiasD * D * B );
+#endif
+}
+//! the smooth backface weight ((dot(dirToProbe, n) + 1) / 2)^2 + 0.2.  GLSL: ddgiBackfaceWeight
+inline float backfaceWeight( V3 dirToProbe, V3 n )
+{
+	const float c = ( dot( dirToProbe, n ) + 1.0f ) * 0.5f;
+	return c * c + kBackWeightFloor;
+}
+/*! the Chebyshev visibility factor of a point r from the probe given the texel's (mean, mean^2): 1 at or before the
+ *  mean, else max(0.05, (var / (var + (r - mean)^2))^3).  GLSL: ddgiChebyshev */
+inline float chebyshevWeight( float r, float mean, float mean2 )
+{
+	if ( r <= mean )
+		return 1.0f;
+	const float var = std::fabs( mean * mean - mean2 );
+	const float d = r - mean;
+	float c = var / std::max( var + d * d, 1e-12f );
+#ifndef RTDDGI_RED_CHEB
+	c = c * c * c;   // red: the cube dropped
+#endif
+	return std::max( kChebFloor, std::max( c, 0.0f ) );
+}
+//! [J19 5.2] the low-weight crush: under 0.2, w x w^2 / 0.04.  GLSL: ddgiCrush
+inline float crushWeight( float w )
+{
+	return w < kCrush ? w * w * w / ( kCrush * kCrush ) : w;
+}
+
+// ------------------------------------------------------------------ relocation and classification [J21 5, 6; SDK doc]
+/*! one relocation iteration of a probe from its fixed rays (dirs, signed stored distances: a backface hit stores
+ *  -0.2 t, a miss kMiss), its current offset and its cell (step per axis). [J21 fig 8]: backface share > 0.25 ->
+ *  move along the closest backface's vector (its true distance, |d| / 0.2) as far as the offset limit (0.45 of the
+ *  cell per axis) allows, only if that passes the face; else, when the closest front face is nearer than
+ *  kRelocMinFront x the smallest step (ours) and the farthest direction is not the closest's (dot <= 0.5), step
+ *  min(0.2 x step, farthest distance) toward the farthest, clamped to the limit (ours: clamp, not refuse).
+ *  GLSL: reloc.comp mode 0 */
+inline V3 relocateStep( const V3 * dirs, const float * dist, int n, V3 offset, V3 step )
+{
+	int back = 0, iBack = -1, iNear = -1, iFar = -1;
+	float dBack = 1e30f, dNear = 1e30f, dFar = -1.0f;
+	for ( int i = 0; i < n; i++ ) {
+		const float d = dist[i];
+		if ( d < 0.0f ) {
+			back++;
+			const float tr = -d / kBackfaceDist;
+			if ( tr < dBack ) { dBack = tr; iBack = i; }
+			continue;
+		}
+		if ( d < dNear ) { dNear = d; iNear = i; }
+		if ( d > dFar ) { dFar = d; iFar = i; }
+	}
+	const V3 lim = step * kRelocLimit;
+	const float mn = std::min( step.x, std::min( step.y, step.z ) );
+	if ( float( back ) / float( n ) > kBackfaceShare && iBack >= 0 ) {
+#ifdef RTDDGI_RED_RELOC
+		return offset;   // red: a probe inside a wall never moves through it
+#endif
+		const V3 v = dirs[iBack] * dBack;
+		float s = 1e30f;
+		for ( int k = 0; k < 3; k++ ) {
+			if ( std::fabs( v[k] ) < 1e-9f )
+				continue;
+			const float a = ( lim[k] - offset[k] ) / v[k], b = ( -lim[k] - offset[k] ) / v[k];
+			s = std::min( s, std::max( a, b ) );
+		}
+		s -= 1e-3f;
+		if ( s > 1.0f && s < 1e29f )
+			return offset + v * s;
+		return offset;
+	}
+	if ( iNear < 0 || iFar < 0 || dNear >= kRelocMinFront * mn || dot( dirs[iFar], dirs[iNear] ) > 0.5f )
+		return offset;
+	V3 o = offset + dirs[iFar] * std::min( kRelocStep * mn, dFar );
+	for ( int k = 0; k < 3; k++ )
+		o[k] = clampf( o[k], -lim[k], lim[k] );
+	return o;
+}
+/*! a probe's state from its fixed rays ([SDK doc] two phases, [J21 6]): backface share > 0.25 -> Off; else any hit
+ *  nearer than where its ray leaves the probe's voxel (the box of +-step about the probe) -> Vigilant; else Asleep.
+ *  GLSL: reloc.comp mode 1 */
+inline int classify( const V3 * dirs, const float * dist, int n, V3 step )
+{
+	int back = 0;
+	for ( int i = 0; i < n; i++ )
+		back += dist[i] < 0.0f ? 1 : 0;
+#ifdef RTDDGI_RED_CLASS
+	if ( float( back ) / float( n ) > 0.75f )   // red: a probe with half its rays on backfaces stays on
+#else
+	if ( float( back ) / float( n ) > kBackfaceShare )
+#endif
+		return kOff;
+	for ( int i = 0; i < n; i++ ) {
+		const float d = std::fabs( dist[i] );
+		if ( d >= kMiss * 0.5f )
+			continue;
+		float leave = 1e30f;
+		for ( int k = 0; k < 3; k++ )
+			if ( std::fabs( dirs[i][k] ) > 1e-6f )
+				leave = std::min( leave, step[k] / std::fabs( dirs[i][k] ) );
+		if ( d < leave )
+			return kVigilant;
+	}
+	return kAsleep;
+}
+
+// ------------------------------------------------------------------ the light at a hit (probegi's rules)
+/*! PRTP2 section 1, the game's curve (probegi.cpp radial(), bit for bit in double there; float here): x = d / r,
+ *  k = 1 - clamp(scale x^exp + bias, 0, 1), a = k^2.2.  GLSL: ddgiRadial */
+inline float lightRadial( float d, float r, float bias, float scale, float expo )
+{
+	const float x = clampf( d / std::max( r, 0.001f ), 0.0f, 1.0f );
+	const float xe = expo > 0.0f ? std::pow( x, expo ) : 1.0f;
+	const float k = 1.0f - clampf( scale * xe + bias, 0.0f, 1.0f );
+	return std::pow( k, 2.2f );
+}
+//! probegi's spot cone: base = clamp(1 - (1 - dl) / (1 - cosOuter)), a *= min(base^cone, 1).  GLSL: ddgiSpot
+inline float spotCone( float dl, float cosOuter, float cone )
+{
+	const float base = clampf( 1.0f - ( 1.0f - dl ) / std::max( 1.0f - cosOuter, 1e-4f ), 0.0f, 1.0f );
+	return std::min( std::pow( base, std::max( cone, 1e-3f ) ), 1.0f );
+}
+
+/*! The sky as a radiance cube R (six axis colours, L(d) = sum_k d_k^2 R[axis k, side of d]) solved so a probe open
+ *  to the whole sky takes exactly the weather's per-axis irradiance amb on each axis (ours). Over the hemisphere of
+ *  +X: E = pi/2 R+X + pi/8 (R+Y + R-Y + R+Z + R-Z), so per axis pair a = R+ + R-, b = R+ - R-:
+ *  b = 2 (E+ - E-) / pi, S = sum a = sum E / pi, a = 4 (E+ + E-) / pi - S. Negative parts (a very one-sided
+ *  weather) clamp to 0 and are counted in the return.  GLSL: the C++ solves it, the shader reads R */
+inline int skyRadianceCube( const float amb[6][3], float R[6][3] )
+{
+	int clamped = 0;
+	for ( int c = 0; c < 3; c++ ) {
+		float sumE = 0.0f;
+		for ( int f = 0; f < 6; f++ )
+			sumE += amb[f][c];
+		const float S = sumE / kPi;
+		for ( int k = 0; k < 3; k++ ) {
+			const float Ep = amb[k * 2][c], Em = amb[k * 2 + 1][c];
+#ifdef RTDDGI_RED_SKY
+			const float a = 2.0f * ( Ep + Em ) / kPi, b = 0.0f;   // red: the naive amb / pi per axis
+			(void)S;
+#else
+			const float a = 4.0f * ( Ep + Em ) / kPi - S, b = 2.0f * ( Ep - Em ) / kPi;
+#endif
+			float rp = 0.5f * ( a + b ), rm = 0.5f * ( a - b );
+			if ( rp < 0.0f ) { rp = 0.0f; clamped++; }
+			if ( rm < 0.0f ) { rm = 0.0f; clamped++; }
+			R[k * 2][c] = rp;
+			R[k * 2 + 1][c] = rm;
+		}
+	}
+	return clamped;
+}
+//! the sky radiance of direction d from the cube.  GLSL: ddgiSky
+inline void skyRadiance( const float R[6][3], V3 d, float out[3] )
+{
+	const int fx = d.x >= 0.0f ? 0 : 1, fy = d.y >= 0.0f ? 2 : 3, fz = d.z >= 0.0f ? 4 : 5;
+	for ( int c = 0; c < 3; c++ )
+		out[c] = d.x * d.x * R[fx][c] + d.y * d.y * R[fy][c] + d.z * d.z * R[fz][c];
+}
+
+} // namespace rtddgi
+
+#endif // RTDDGIMATH_H

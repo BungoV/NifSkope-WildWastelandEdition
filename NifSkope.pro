@@ -420,6 +420,9 @@ HEADERS += \
 	src/probeincr.h \
 	src/probebvh.h \
 	src/bakert.h \
+	src/rtddgi.h \
+	src/rtddgimath.h \
+	src/rtddgi/rtddgi_gpu.h \
 	src/probemask.h \
 	src/probeemit.h \
 	src/probegi.h \
@@ -754,6 +757,7 @@ SOURCES += \
 	src/probebake.cpp \
 	src/pgiwrite.cpp \
 	src/bakert.cpp \
+	src/rtddgi.cpp \
 	src/probegi.cpp \
 	src/probegifine.cpp \
 	src/proberelight.cpp \

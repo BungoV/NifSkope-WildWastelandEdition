@@ -18,6 +18,7 @@ See the LICENSE.md file for the full license text.
 #include "pgiwrite.h"
 #include "probefar.h"		// lane PRTPFAR
 #include "probegi.h"		// lane ROOMCLAMP1: probegi
+#include "rtddgi.h"		// lane RTXGI1: rtddgi
 #include "farlightmap.h"	// lane FARLIGHTMAP1: farlightmap
 #include "proberelight.h"	// lane GPURELIGHT1: gpurelight
 #include "probevolumes.h"	// lane VOLFIT1: volumes
@@ -8194,6 +8195,13 @@ int nifskopeCliMain( const QStringList & args )
 	// `probegi` places, bakes and relights a soup by the lights given, then dumps (lane ROOMCLAMP1; src/probegi.cpp)
 	if ( cmd == QLatin1String( "probegi" ) ) {
 		const int rc = probeGiCli( a );
+		out().flush();
+		err().flush();
+		return rc;
+	}
+	// `rtddgi` builds a ray-traced DDGI volume over a soup and dumps it (lane RTXGI1 M1; src/rtddgi.cpp)
+	if ( cmd == QLatin1String( "rtddgi" ) ) {
+		const int rc = rtddgiCli( a );
 		out().flush();
 		err().flush();
 		return rc;

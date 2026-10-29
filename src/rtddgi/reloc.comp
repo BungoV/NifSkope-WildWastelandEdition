@@ -1,0 +1,76 @@
+#version 460
+// Lane RTXGI1: relocation (mode 4) and classification (mode 5), one invocation a probe, from its 32 fixed rays
+// (src/rtddgimath.h relocateStep / classify; [J21] 5 and 6, the SDK doc's two classification phases).
+#extension GL_EXT_ray_query : require
+#extension GL_GOOGLE_include_directive : require
+layout( local_size_x = 64 ) in;
+#include "ddgi_common.glsl"
+
+void main()
+{
+	const uint p = ddgiLinearId();
+	if ( p >= uint( P.dims.w ) )
+		return;
+	const int N = P.counts.x;
+	const vec3 stepv = P.stepv.xyz;
+	if ( pc.job.x == 4u ) {
+		// MIRROR rtddgimath.h relocateStep
+		int back = 0, iBack = -1, iNear = -1, iFar = -1;
+		float dBack = 1e30, dNear = 1e30, dFar = -1.0;
+		for ( int i = 0; i < DDGI_FIXED; i++ ) {
+			const float d = rays[p * uint( N ) + uint( i )].w;
+			if ( d < 0.0 ) {
+				back++;
+				const float tr = -d / 0.2;
+				if ( tr < dBack ) { dBack = tr; iBack = i; }
+				continue;
+			}
+			if ( d < dNear ) { dNear = d; iNear = i; }
+			if ( d > dFar ) { dFar = d; iFar = i; }
+		}
+		const vec3 offset = probes[p].xyz;
+		const vec3 lim = stepv * 0.45;
+		const float mn = min( stepv.x, min( stepv.y, stepv.z ) );
+		vec3 o = offset;
+		if ( float( back ) / float( DDGI_FIXED ) > 0.25 && iBack >= 0 ) {
+			const vec3 v = ddgiFibonacci( iBack, DDGI_FIXED ) * dBack;
+			float s = 1e30;
+			for ( int k = 0; k < 3; k++ ) {
+				if ( abs( v[k] ) < 1e-9 )
+					continue;
+				const float a = ( lim[k] - offset[k] ) / v[k], b = ( -lim[k] - offset[k] ) / v[k];
+				s = min( s, max( a, b ) );
+			}
+			s -= 1e-3;
+			if ( s > 1.0 && s < 1e29 )
+				o = offset + v * s;
+		} else if ( iNear >= 0 && iFar >= 0 && dNear < 0.25 * mn
+			&& dot( ddgiFibonacci( iFar, DDGI_FIXED ), ddgiFibonacci( iNear, DDGI_FIXED ) ) <= 0.5 ) {
+			o = clamp( offset + ddgiFibonacci( iFar, DDGI_FIXED ) * min( 0.2 * mn, dFar ), -lim, lim );
+		}
+		probes[p].xyz = o;
+		return;
+	}
+	// MIRROR rtddgimath.h classify
+	int back = 0;
+	for ( int i = 0; i < DDGI_FIXED; i++ )
+		back += rays[p * uint( N ) + uint( i )].w < 0.0 ? 1 : 0;
+	int state = DDGI_ASLEEP;
+	if ( float( back ) / float( DDGI_FIXED ) > 0.25 ) {
+		state = DDGI_OFF;
+	} else {
+		for ( int i = 0; i < DDGI_FIXED && state == DDGI_ASLEEP; i++ ) {
+			const float d = abs( rays[p * uint( N ) + uint( i )].w );
+			if ( d >= DDGI_MISS * 0.5 )
+				continue;
+			const vec3 dir = ddgiFibonacci( i, DDGI_FIXED );
+			float leave = 1e30;
+			for ( int k = 0; k < 3; k++ )
+				if ( abs( dir[k] ) > 1e-6 )
+					leave = min( leave, stepv[k] / abs( dir[k] ) );
+			if ( d < leave )
+				state = DDGI_VIGILANT;
+		}
+	}
+	probes[p].w = float( state );
+}
