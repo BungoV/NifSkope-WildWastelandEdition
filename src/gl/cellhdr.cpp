@@ -1187,6 +1187,11 @@ void wwCellHdrEnd( Scene * scene )
 	}
 	prog->uni1i( "hdrStencil", kStencilUnit );
 	prog->uni1i( "hdrStencilTest", 0 );
+	{	// lane FOGGLOW1: the 8-bit view's write dithered (cell_hdr.frag modes 0 and 2; WW_CELL_DITHER=0: as before)
+		const int dither = wwCellDitherSeed();
+		prog->uni1i( "wwDitherOn", dither >= 0 ? 1 : 0 );
+		prog->uni1i( "wwDitherSeed", std::max( dither, 0 ) );
+	}
 	/* lane CELLUNI5: from here to the fog bloom's Done the active unit is kSrcUnit (the quads draw on it, the VRS build
 	 * ends on its own source unit, the same one), so the bloom passes take it instead of asking (red: they ask) */
 	static_assert( WwPassUnit::VrsSrc == kSrcUnit, "the VRS build must end on the tone map's source unit" );

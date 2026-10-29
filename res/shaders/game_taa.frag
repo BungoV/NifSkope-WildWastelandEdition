@@ -27,6 +27,8 @@ uniform int taaTap;	// 1 (the gate's dump only): o0 = the history exactly as the
 layout ( location = 0 ) out vec4 o0;
 layout ( location = 1 ) out vec4 o1;
 
+#include "ww_dither.glsl"
+
 // the luma the history holds: .5 G + .25 R + .25 B
 float luma( vec3 c )
 {
@@ -158,5 +160,6 @@ void main()
 	vec3 cur = k * ( cZ - Rr ) + Rr;
 	vec3 col = clamp( w * ( hist - cur ) + cur, 0.0, 1.0 );
 	col = clamp( ( col - Rr ) * c4.z + col, 0.0, 1.0 );
-	o1 = vec4( clamp( c4.w * ( Rr - col ) + col, 0.0, 1.0 ), 1.0 );
+	// lane FOGGLOW1: the picture goes into an 8-bit target: dithered (the tent above averages the tone map's dither away)
+	o1 = vec4( wwDither8( clamp( c4.w * ( Rr - col ) + col, 0.0, 1.0 ), gl_FragCoord.xy ), 1.0 );
 }

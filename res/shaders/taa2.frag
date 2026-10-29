@@ -34,6 +34,8 @@ layout ( location = 0 ) out vec4 o0;
 layout ( location = 1 ) out vec4 o1;
 layout ( location = 2 ) out vec4 o2;
 
+#include "ww_dither.glsl"
+
 vec3 toYCoCg( vec3 c )
 {
 	return vec3( dot( c, vec3( 0.25, 0.5, 0.25 ) ), dot( c, vec3( 0.5, 0.0, -0.5 ) ), dot( c, vec3( -0.25, 0.5, -0.25 ) ) );
@@ -176,6 +178,6 @@ void main()
 	}
 	vec3 rgb = max( toRgb( res ), vec3( 0.0 ) );
 	o0 = vec4( rgb, 1.0 - min( dMin, 1.0 ) );
-	o1 = vec4( clamp( rgb, 0.0, 1.0 ), 1.0 );
+	o1 = vec4( wwDither8( clamp( rgb, 0.0, 1.0 ), gl_FragCoord.xy ), 1.0 );	// lane FOGGLOW1: into the 8-bit picture, dithered
 	o2 = vec4( lockOut, 0.0, 1.0 );
 }
