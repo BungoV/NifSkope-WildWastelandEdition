@@ -44,6 +44,32 @@
   `--red notie` (no tie rule: 49 differ).
 - **Sky visibility** is the irradiance texel's alpha (cosine-weighted share of missing rays, linear); dump columns
   V+X..V-Z. `--dump-fixed` writes the 32 fixed distances a probe. Unit gate: tests/rtddgi_math (13 checks + 13 reds).
+## Lane SIGNDROP1 (2026-10-29, branch signdrop1-20261029): the GPU cull no longer hides what is seen through a cut-out
+
+- **What broke:** at Concord c3 (camera c3_fin_c, all features on) the SALE sign, the shelves, the door and the pipes
+  behind a broken wall's hole were missing (WW_GPUDRIVEN_B_OCC=0 brought them back: 21855 px). Step B's depth prepass
+  drew that wall as an occluder with its hole filled in. The prepass draws depth only (no texture, no discard), and the
+  wall's hole is cut by its BGSM's alpha test. The queue and the occluder gate read only the NIF's NiAlphaProperty, but
+  for an FO4 lighting shape the material's test wins in setupProgram. So the wall queued Opaque, the Hi-Z under the
+  hole read the wall's depth, and every cluster seen through the hole was culled.
+- **Fix:** a draw that runs with `alphaFlags != 0` (fo4_default.frag may discard) is never an occluder. `learn()` reads
+  the alphaFlags the draw ran with, together with the GL state it already reads (once per 16 frames a shape). Such a
+  shape can still be culled itself. The rule lives in `src/gl/cellgpucullgate.h` (plain C++, shared with the unit test).
+- **Ruled out by reading the chain:** the y orientation (NDC to window and the Hi-Z rows are both bottom-up, with one
+  `proj` for prepass and cull); the MS level 0 (the farthest sample); odd sizes (ceil halving, clamped 2x2); the level
+  pick (the 2x2 texels at L cover the whole box); polygon offset and depthEps (both push toward "not culled"); the
+  projection (TAA jitter is inside `proj`; no glClipControl or glDepthRange anywhere); vpSize vs level 0 (both the
+  viewport).
+- **Red:** `WW_GPUDRIVEN_B_RED=atocc` (beside hard / nocull, live) puts the old gate back.
+- **Census:** the `gpudriven b:` line ends with `alphatest-refused N` (occluders refused for their alpha test), and the
+  arena line says `RED atocc`.
+- **Unit:** `bash tests/signdrop1/run.sh` (g++ only) is a CPU twin of the prepass gate, kHiz0 (MS), kHizN, the level
+  table and kCull's box, level pick and compare. It uses a 333x187 4-sample jittered frame with a near wall with a
+  hole, a sign behind it, a plank and its y mirror. Green passes; the red (`-DSIGNDROP1_RED`) fails on the sign.
+  Controls (floor-halved sizes, nearest-sample level 0, a y-flipped box) must each be caught.
+- **Cost:** an alpha-tested wall no longer hides what stands behind its solid parts (the twin's `behindwall`). The live
+  GPUMS rows measure it.
+
 ## Lane MARCHLINK1 (2026-10-29, branch marchlink1-20261029): march-mode shaders link again
 
 - GIWALL2's wall-tested fills took fo4_effectdecalcsm and pbrm_cellcsm past the driver's instruction limit in the
