@@ -1,5 +1,27 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## ACTORPOSE1: placed actors stand in their idle and corpses lie in their ragdoll (no more T pose)
+
+- **Cause:** PLACED1 skinned every placed actor on the skeleton's bind pose, and a Fallout 4 skeleton's bind pose is
+  arms out. Every drawn person stood in a T pose, the dead included: a corpse placed dead on start stood upright on the
+  street (Concord 5x5: 7 of its 8 drawn actors are corpses).
+- **Fix (`src/cellactor.cpp`, header THE POSE):** the skeleton is posed before the parts are skinned.
+  - A dead-on-start actor lies in its reference's own ragdoll data (XRGD): one entry per body of skeleton.hkx's ragdoll
+    skeleton in a depth-first walk, each body the animation bone at its bind position, the rotation the bone's local
+    one in the reference rotation's convention. A self-check refuses data whose offsets do not fit the skeleton's
+    bones at one scale, and data the Creation Kit never settled (4+ bodies at their bind rotation).
+  - Such a corpse without usable data lies in its race's `deathpose1.hkx`, flat on the reference's heading.
+  - Everyone else stands in frame 0 of the race's idle clip (`mt\neutral\posea_idle1.hkx` for people, `idle.hkx`
+    for most creatures), its tracks named through `skeleton.hkx`.
+  - A bone only a part has (hair cloth bones) rides its nearest ancestor the skeleton names, or the nearest such node
+    of its part; the bind pose keeps the part's own node as before.
+  - `.hkx` assets resolve under `meshes\` through the resource stack (`src/lodgen.cpp`).
+- Census line `placed actors:` now splits drawn into idle clip / ragdoll data / death pose / bind pose (with reasons)
+  and counts refused ragdoll data; the actor dump (`WW_CELL_ACTOR_DUMP`) gains a `pose` column. Red:
+  `WW_CELL_ACTOR_RED=bind` (read at the cell build) draws every actor in the bind pose again.
+- `tests/spells/cell_actor_pose.py` is the checker's own reading of the rule; `cell_actor_check.py` poses its walk
+  with it and checks the census split and the dump's pose per actor.
+
 ## RTXGI1 M2: the ray-traced GI volume lights the cell view (switch, live; ships Off)
 
 - **Show > Lighting > Ray-traced GI** (`WW_CELL_RTDDGI=1`, default Off): with the probe GI's relit cell open, a DDGI

@@ -5,6 +5,7 @@
 #include "wwswitch.h"	// lane TESTDRIVER1: the WW_* switch store
 
 #include "esmfile.hpp"
+#include "hkxanim.h"	// lane ACTORPOSE1: skeleton.hkx and the idle clip
 #include "lodgen.h"
 #include "data/niftypes.h"
 #include "model/nifmodel.h"
@@ -12,6 +13,7 @@
 #include <QBuffer>
 #include <QFile>
 #include <QFileInfo>
+#include <QMap>
 #include <QSet>
 #include <QTextStream>
 
@@ -19,6 +21,7 @@
 #include <cmath>
 #include <cstring>
 #include <functional>
+#include <iterator>
 
 namespace
 {
@@ -138,6 +141,76 @@ bool loadNif( const QString & dataRoot, const QString & model, NifModel & nif )
 	return true;
 }
 
+/* lane ACTORPOSE1: the idle clips tried, in order, under an actor folder; %1 = the folder's own name.
+ * notes/actorpose1/tools/posecommon.py CANDIDATES is the same list. */
+const char * const IDLE_CANDIDATES[] = {
+	"animations\\mt\\neutral\\posea_idle1.hkx",   // the human unarmed standing idle
+	"animations\\idle.hkx",                       // most creatures
+	"animations\\idle_mt.hkx",
+	"animations\\mt\\idle.hkx",
+	"animations\\%1_idle.hkx",                    // deathclaw
+};
+//! a corpse without usable ragdoll data: a static two-frame pose lying on the ground (COM 9 units up)
+const char * const DEATH_CANDIDATES[] = { "animations\\deathpose1.hkx" };
+constexpr int XRGD_ENTRY = 28;   // u8 body, 3 unused, position (3 floats), rotation (3 floats)
+/* a ragdoll the Creation Kit never simulated stores the bodies' rest: over Fallout4.esm's 986 human corpses 943 have
+ * 0 or 1 entries within a quarter degree of the bone's bind rotation, 43 have 7 or more (36 all 17) */
+constexpr int XRGD_UNSETTLED = 4;
+
+//! `actors\<x>` of a skeleton `[meshes\]actors\<x>\characterassets\skeleton.nif`; empty when it sits elsewhere
+QString actorFolder( const QString & skeleton )
+{
+	QString s = skeleton.toLower();
+	s.replace( QChar( '/' ), QChar( '\\' ) );
+	if ( s.startsWith( QLatin1String( "meshes\\" ) ) )
+		s.remove( 0, 7 );
+	const int k = s.indexOf( QLatin1String( "\\characterassets\\" ) );
+	return k > 0 ? s.left( k ) : QString();
+}
+
+Transform fromHkx( const HkxTransform & x )
+{
+	Transform t;
+	t.translation = x.translation;
+	t.rotation.fromQuat( x.rotation );   // the hkx quaternion is the NiNode rotation as it stands (skill ww-hkx-animation)
+	t.scale = x.scale[0];                // one scale where Havok carries three
+	return t;
+}
+
+/*! lane ACTORPOSE1: a bone only the part has (hair cloth bones) rides its nearest ancestor the skeleton names, by that
+ *  ancestor's move from the part's own node; with no such ancestor (a face mesh hangs every bone off its root), the
+ *  node of the part the skeleton names that sits nearest to it (the first of a tie). Unmoved (the bind pose) it keeps
+ *  the part's own node, as before. */
+Transform partOnlyBone( const NifModel & nif, int block, const QHash<QString, Transform> & rest, bool moved )
+{
+	const Transform own = worldOf( nif, block );
+	if ( !moved )
+		return own;
+	for ( int up = nif.getParent( block ), hop = 0; up >= 0 && hop < 256; up = nif.getParent( up ), hop++ ) {
+		auto it = rest.constFind( nif.get<QString>( nif.getBlockIndex( up ), "Name" ) );
+		if ( it != rest.constEnd() )
+			return *it * worldOf( nif, up ).inverted() * own;
+	}
+	int best = -1;
+	float bd = 0.0f;
+	Transform bw;
+	for ( int b = 0; b < nif.getBlockCount(); b++ ) {
+		const QModelIndex ib = nif.getBlockIndex( b );
+		if ( b == block || !nif.blockInherits( ib, "NiNode" ) || !rest.contains( nif.get<QString>( ib, "Name" ) ) )
+			continue;
+		const Transform w = worldOf( nif, b );
+		const float dd = ( w.translation - own.translation ).length();
+		if ( best < 0 || dd < bd ) {
+			best = b;
+			bd = dd;
+			bw = w;
+		}
+	}
+	if ( best >= 0 )
+		return rest.value( nif.get<QString>( nif.getBlockIndex( best ), "Name" ) ) * bw.inverted() * own;
+	return own;
+}
+
 } // namespace
 
 struct CellActors::Impl
@@ -158,7 +231,24 @@ struct CellActors::Impl
 	QHash<QString, Built> built;
 	QSet<QString> builtEmpty;
 	QHash<QString, QHash<QString, Transform>> restCache;     // skeleton -> bone name -> rest transform
-	QHash<QString, std::vector<NativeSrcShape>> partCache;   // skeleton|model -> skinned shapes
+	QHash<QString, std::vector<NativeSrcShape>> partCache;   // skeleton|pose|model -> skinned shapes
+
+	// lane ACTORPOSE1: the pose
+	struct SkelNode
+	{
+		QString name;
+		int parent = -1;   // index in the same list; -1 at the top
+		Transform local;
+	};
+	QHash<QString, QVector<SkelNode>> skelNodes;   // skeleton -> its nodes (restOf fills it)
+	QHash<QString, HkxAnimFile> hkxCache;          // actor-folder path -> skeleton.hkx or a clip, read once
+	struct Pose
+	{
+		QHash<QString, Transform> world;   // bone name -> posed transform, actor space
+		QString clip;                      // what posed it
+		QString why;                       // empty when posed; else why not (no ';' and no parentheses: the census)
+	};
+	QHash<QString, Pose> idleCache;                // skeleton -> its idle pose
 	QHash<QString, int> headPartType;                        // head part editor id (lower) -> its type
 	bool headPartsRead = false;
 
@@ -414,8 +504,10 @@ struct CellActors::Impl
 		if ( it != restCache.constEnd() )
 			return *it;
 		QHash<QString, Transform> rest;
+		QVector<SkelNode> nodes;
 		NifModel nif;
 		if ( loadNif( dataRoot, skeleton, nif ) ) {
+			QHash<int, int> at;   // block -> index in nodes
 			for ( int b = 0; b < nif.getBlockCount(); b++ ) {
 				const QModelIndex ib = nif.getBlockIndex( b );
 				if ( !nif.blockInherits( ib, "NiNode" ) )
@@ -423,22 +515,261 @@ struct CellActors::Impl
 				const QString name = nif.get<QString>( ib, "Name" );
 				if ( !name.isEmpty() && !rest.contains( name ) )
 					rest.insert( name, worldOf( nif, b ) );
+				at.insert( b, int( nodes.size() ) );
+				nodes.append( SkelNode{ name, -1, Transform( &nif, ib ) } );
 			}
+			for ( auto a = at.constBegin(); a != at.constEnd(); ++a )
+				nodes[a.value()].parent = at.value( nif.getParent( a.key() ), -1 );
 		}
+		skelNodes.insert( key, nodes );
 		return *restCache.insert( key, rest );
 	}
 
-	/*! One part, posed on the skeleton's rest pose. The loader's shapes carry the materials
-	 *  and the triangles; the positions, normals and tangents are replaced here. */
-	const std::vector<NativeSrcShape> & part( const QString & skeleton, const QString & model )
+	/*! lane ACTORPOSE1: the skeleton's node transforms with some locals replaced (lower-case bone name -> local) and,
+	 *  optionally, one node's transform set outright (the ragdoll's root). First name wins, as in restOf(). */
+	QHash<QString, Transform> posed( const QString & skeleton, const QHash<QString, Transform> & local,
+		const QString & rootName = QString(), const Transform & rootWorld = Transform() )
 	{
-		const QString key = skeleton.toLower() + QChar( '|' ) + model.toLower();
+		restOf( skeleton );
+		const QVector<SkelNode> nodes = skelNodes.value( skeleton.toLower() );
+		std::vector<Transform> w( size_t( nodes.size() ) );
+		std::vector<char> done( size_t( nodes.size() ), 0 );
+		std::vector<int> chain;
+		for ( int i = 0; i < nodes.size(); i++ ) {
+			chain.clear();
+			for ( int j = i, hop = 0; j >= 0 && !done[size_t( j )] && hop < 256; j = nodes[j].parent, hop++ )
+				chain.push_back( j );
+			for ( auto c = chain.rbegin(); c != chain.rend(); ++c ) {
+				const SkelNode & n = nodes[*c];
+				const QString low = n.name.toLower();
+				if ( !rootName.isEmpty() && low == rootName ) {
+					w[size_t( *c )] = rootWorld;
+				} else {
+					const Transform l = local.value( low, n.local );
+					w[size_t( *c )] = n.parent >= 0 ? w[size_t( n.parent )] * l : l;
+				}
+				done[size_t( *c )] = 1;
+			}
+		}
+		QHash<QString, Transform> out;
+		for ( int i = 0; i < nodes.size(); i++ )
+			if ( !nodes[i].name.isEmpty() && !out.contains( nodes[i].name ) )
+				out.insert( nodes[i].name, w[size_t( i )] );
+		return out;
+	}
+
+	//! lane ACTORPOSE1: a .hkx under meshes\ from the resource stack, read once; error "not found" when absent
+	HkxAnimFile hkx( const QString & rel )
+	{
+		auto it = hkxCache.constFind( rel );
+		if ( it != hkxCache.constEnd() )
+			return *it;
+		HkxAnimFile f;
+		QByteArray bytes;
+		if ( !lodgenProbeAsset( dataRoot, meshPath( rel ), nullptr, nullptr, nullptr, &bytes ) || bytes.isEmpty() )
+			f.error = QStringLiteral( "not found" );
+		else
+			f = hkxAnimLoadPackfile( bytes, rel.section( QChar( '\\' ), -1 ) );
+		hkxCache.insert( rel, f );
+		return f;
+	}
+
+	//! lane ACTORPOSE1: frame 0 of the race's idle clip on the skeleton (header: THE POSE)
+	Pose idlePose( const QString & skeleton )
+	{
+		return clipPose( skeleton, IDLE_CANDIDATES, int( std::size( IDLE_CANDIDATES ) ), QStringLiteral( "idle|" ),
+			QStringLiteral( "no idle clip" ) );
+	}
+
+	//! lane ACTORPOSE1: a corpse without usable ragdoll data lies in the race's death pose (header: THE POSE)
+	Pose deathPose( const QString & skeleton )
+	{
+		return clipPose( skeleton, DEATH_CANDIDATES, int( std::size( DEATH_CANDIDATES ) ), QStringLiteral( "death|" ),
+			QStringLiteral( "no death pose" ) );
+	}
+
+	//! frame 0 of the first clip that exists of `candidates` under the skeleton's actor folder
+	Pose clipPose( const QString & skeleton, const char * const * candidates, int count, const QString & kind,
+		const QString & none )
+	{
+		const QString key = kind + skeleton.toLower();
+		auto it = idleCache.constFind( key );
+		if ( it != idleCache.constEnd() )
+			return *it;
+		Pose p;
+		const QString folder = actorFolder( skeleton );
+		const HkxAnimFile bones = folder.isEmpty() ? HkxAnimFile()
+			: hkx( folder + QStringLiteral( "\\characterassets\\skeleton.hkx" ) );
+		if ( folder.isEmpty() ) {
+			p.why = QStringLiteral( "skeleton outside a CharacterAssets folder" );
+		} else if ( !bones.ok() || bones.skeletons.isEmpty() ) {
+			p.why = QStringLiteral( "no skeleton.hkx" );
+		} else {
+			const QString leaf = folder.section( QChar( '\\' ), -1 );
+			for ( int ci = 0; ci < count; ci++ ) {
+				const QString rel = folder + QChar( '\\' )
+					+ QString::fromLatin1( candidates[ci] ).replace( QLatin1String( "%1" ), leaf );
+				const HkxAnimFile f = hkx( rel );
+				if ( f.error == QLatin1String( "not found" ) )
+					continue;
+				if ( !f.ok() || f.clips.isEmpty() || f.clips.first().frames.isEmpty() ) {
+					p.why = QStringLiteral( "clip does not load" );
+					break;
+				}
+				const HkxAnimClip & clip = f.clips.first();
+				const HkxSkeleton & sk = bones.skeletons.first();
+				const QVector<HkxTransform> & f0 = clip.frames.first();
+				QHash<QString, Transform> local;
+				for ( int tr = 0; tr < f0.size(); tr++ ) {
+					const int bone = tr < clip.trackToBone.size() ? clip.trackToBone[tr] : tr;
+					if ( bone >= 0 && bone < sk.boneNames.size() )
+						local.insert( sk.boneNames[bone].toLower(), fromHkx( f0[tr] ) );
+				}
+				p.world = posed( skeleton, local );
+				p.clip = rel;
+				break;
+			}
+			if ( p.clip.isEmpty() && p.why.isEmpty() )
+				p.why = none;
+		}
+		idleCache.insert( key, p );
+		return p;
+	}
+
+	/*! lane ACTORPOSE1: a dead-on-start actor's own ragdoll data (header: THE POSE). Measured on Fallout4.esm's human
+	 *  corpses (notes/actorpose1): 18 entries in a depth-first walk of skeleton.hkx's ragdoll skeleton; each entry's
+	 *  offset is its bone's own times the actor's height; knees and elbows bend about one local axis in the
+	 *  reference rotation's convention. */
+	Pose ragdollPose( const QString & skeleton, const QByteArray & xrgd )
+	{
+		Pose p;
+		const QString folder = actorFolder( skeleton );
+		const HkxAnimFile bones = folder.isEmpty() ? HkxAnimFile()
+			: hkx( folder + QStringLiteral( "\\characterassets\\skeleton.hkx" ) );
+		if ( folder.isEmpty() || !bones.ok() || bones.skeletons.size() < 2 ) {
+			p.why = QStringLiteral( "no ragdoll skeleton" );
+			return p;
+		}
+		const HkxSkeleton & anim = bones.skeletons[0];
+		const HkxSkeleton & rag = bones.skeletons[1];
+		// bind positions of both skeletons (a Havok skeleton lists parents first)
+		auto bindAt = []( const HkxSkeleton & s ) {
+			QVector<Transform> w( s.boneNames.size() );
+			QVector<Vector3> at( s.boneNames.size() );
+			for ( int i = 0; i < s.boneNames.size() && i < s.referencePose.size(); i++ ) {
+				const Transform l = fromHkx( s.referencePose[i] );
+				const int up = i < s.parents.size() ? s.parents[i] : -1;
+				w[i] = up >= 0 && up < i ? w[up] * l : l;
+				at[i] = w[i].translation;
+			}
+			return at;
+		};
+		const QVector<Vector3> animAt = bindAt( anim ), ragAt = bindAt( rag );
+		QVector<int> order;   // the ragdoll's bodies, depth first, children in index order
+		std::function<void( int, int )> walk = [&]( int i, int depth ) {
+			order.append( i );
+			for ( int c = 0; c < rag.parents.size() && depth < 64; c++ )
+				if ( c != i && rag.parents[c] == i )
+					walk( c, depth + 1 );
+		};
+		for ( int i = 0; i < rag.parents.size(); i++ )
+			if ( rag.parents[i] < 0 )
+				walk( i, 0 );
+		const int n = int( order.size() );
+		if ( n < 2 || xrgd.size() < XRGD_ENTRY * n ) {
+			p.why = QStringLiteral( "ragdoll data has %1 entries for %2 bodies" ).arg( xrgd.size() / XRGD_ENTRY ).arg( n );
+			return p;
+		}
+		restOf( skeleton );
+		const QVector<SkelNode> nodes = skelNodes.value( skeleton.toLower() );
+		QHash<QString, int> nodeOf;
+		for ( int i = 0; i < nodes.size(); i++ ) {
+			const QString l = nodes[i].name.toLower();
+			if ( !l.isEmpty() && !nodeOf.contains( l ) )
+				nodeOf.insert( l, i );
+		}
+		// each body -> the animation bone at its bind position (the nearest within half a unit; a tie keeps the first)
+		QVector<int> node( n, -1 );
+		for ( int k = 0; k < n; k++ ) {
+			int best = -1;
+			float bd = 0.5f;
+			for ( int j = 0; j < animAt.size(); j++ ) {
+				const float dd = ( animAt[j] - ragAt[order[k]] ).length();
+				if ( dd < bd - 1.0e-4f ) {
+					best = j;
+					bd = dd;
+				}
+			}
+			node[k] = best >= 0 ? nodeOf.value( anim.boneNames[best].toLower(), -1 ) : -1;
+			if ( node[k] < 0 ) {
+				p.why = QStringLiteral( "a ragdoll body has no bone" );
+				return p;
+			}
+		}
+		auto f32 = [&]( int k, int at ) {
+			float v;
+			std::memcpy( &v, xrgd.constData() + XRGD_ENTRY * k + at, 4 );
+			return v;
+		};
+		auto offset = [&]( int k ) { return Vector3( f32( k, 4 ), f32( k, 8 ), f32( k, 12 ) ); };
+		// the self-check: every entry's offset is its bone's own times one scale (the actor's height is baked in)
+		std::vector<float> ratio;
+		for ( int k = 1; k < n; k++ ) {
+			const float own = nodes[node[k]].local.translation.length();
+			if ( own > 1.0f )
+				ratio.push_back( offset( k ).length() / own );
+		}
+		if ( ratio.empty() ) {
+			p.why = QStringLiteral( "ragdoll data does not fit the skeleton" );
+			return p;
+		}
+		std::nth_element( ratio.begin(), ratio.begin() + ratio.size() / 2, ratio.end() );
+		const float s = ratio[ratio.size() / 2];
+		int fit = 0;
+		for ( int k = 1; k < n; k++ ) {
+			const float want = s * nodes[node[k]].local.translation.length();
+			fit += std::fabs( offset( k ).length() - want ) < 0.05f * want + 0.5f ? 1 : 0;
+		}
+		if ( fit * 5 < ( n - 1 ) * 4 || s < 0.25f || s > 4.0f ) {
+			p.why = QStringLiteral( "ragdoll data does not fit the skeleton: %1 of %2 bone lengths" ).arg( fit ).arg( n - 1 );
+			return p;
+		}
+		QHash<QString, Transform> local;
+		int atRest = 0;
+		for ( int k = 1; k < n; k++ ) {
+			Transform l = nodes[node[k]].local;   // the skeleton's own offset; the ragdoll's rotation
+			l.rotation = Matrix::euler( -f32( k, 16 ), -f32( k, 20 ), -f32( k, 24 ) );
+			double tr = 0.0;   // trace of bind^T * R: the angle between them
+			for ( int i = 0; i < 3; i++ )
+				for ( int j = 0; j < 3; j++ )
+					tr += double( nodes[node[k]].local.rotation( j, i ) ) * double( l.rotation( j, i ) );
+			atRest += tr > 1.0 + 2.0 * std::cos( 0.25 * M_PI / 180.0 ) ? 1 : 0;
+			local.insert( nodes[node[k]].name.toLower(), l );
+		}
+		if ( atRest >= XRGD_UNSETTLED ) {
+			p.why = QStringLiteral( "ragdoll data never settled: %1 of %2 bodies at rest" ).arg( atRest ).arg( n - 1 );
+			return p;
+		}
+		Transform root;
+		root.rotation = Matrix::euler( -f32( 0, 16 ), -f32( 0, 20 ), -f32( 0, 24 ) );
+		root.translation = offset( 0 ) / s;
+		p.world = posed( skeleton, local, nodes[node[0]].name.toLower(), root );
+		p.clip = QStringLiteral( "ragdoll %1 bodies, %2 fit" ).arg( n ).arg( fit );
+		return p;
+	}
+
+	/*! One part, posed on `rest` (the skeleton's nodes, posed). The loader's shapes carry the materials
+	 *  and the triangles; the positions, normals and tangents are replaced here. */
+	const std::vector<NativeSrcShape> & part( const QString & skeleton, const QString & poseKey,
+		const QHash<QString, Transform> & rest, const QString & model )
+	{
+		const QString key = skeleton.toLower() + QChar( '|' ) + poseKey + QChar( '|' ) + model.toLower();
 		auto it = partCache.constFind( key );
 		if ( it != partCache.constEnd() )
 			return *it;
 		std::vector<NativeSrcShape> shapes;
 		NifModel nif;
-		const QHash<QString, Transform> & rest = restOf( skeleton );
+		const bool moved = poseKey != QLatin1String( "bind" );
 		if ( !lodgenNativeLoadModelOnce( &dataRoot, model, nullptr, &shapes ) || !loadNif( dataRoot, model, nif ) )
 			shapes.clear();
 		for ( NativeSrcShape & s : shapes ) {
@@ -463,8 +794,9 @@ struct CellActors::Impl
 					const QString name = nif.get<QString>( nif.getBlockIndex( bones[k] ), "Name" );
 					auto rit = rest.constFind( name );
 					// a bone the skeleton names takes the skeleton's rest; one only the part has keeps its own
+					// (lane ACTORPOSE1: posed, it rides its nearest ancestor the skeleton names)
 					const Transform w = rit != rest.constEnd() ? *rit
-						: ( bones[k] >= 0 ? worldOf( nif, bones[k] ) : Transform() );
+						: ( bones[k] >= 0 ? partOnlyBone( nif, bones[k], rest, moved ) : Transform() );
 					mats[size_t( k )] = w * Transform( &nif, nif.index( k, 0, iList ) );
 				}
 				const bool fullPrec = ( vf & 0x400 ) != 0;
@@ -562,6 +894,7 @@ QVector<EsmRefr> CellActors::referencesIn( const QVector<quint32> & groups, cons
 				ref.formID = r->formID;
 				ref.initiallyDisabled = ( r->flags & 0x00000800 ) != 0;
 				ref.deleted = ( r->flags & 0x00000020 ) != 0;
+				QByteArray ragdoll;   // lane ACTORPOSE1: XRGD, the ragdoll a dead-on-start actor lies in
 				ESMFile::ESMField f( *esm, *r );
 				while ( f.next() ) {
 					const unsigned char * p = f.data();
@@ -579,6 +912,8 @@ QVector<EsmRefr> CellActors::referencesIn( const QVector<quint32> & groups, cons
 						ref.enableParentOpposite = ( u32At( p + 4 ) & 1U ) != 0;
 					} else if ( f == "XLYR" && f.size() >= 4 ) {
 						ref.layer = esm->mapFormID( *r, u32At( p ) );
+					} else if ( f == "XRGD" ) {
+						ragdoll = QByteArray( reinterpret_cast<const char *>( p ), qsizetype( f.size() ) );
 					}
 				}
 				// lane GAPLOOK2: a worldspace's persistent cell spans the map; keep the block's actors only
@@ -593,6 +928,7 @@ QVector<EsmRefr> CellActors::referencesIn( const QVector<quint32> & groups, cons
 					row.form = ref.formID;
 					row.base = ref.base;
 					row.dead = ( r->flags & 0x00000200 ) != 0;
+					row.ragdoll = ragdoll;
 					for ( int k = 0; k < 3; k++ ) {
 						row.pos[k] = ref.pos[k];
 						row.rot[k] = ref.rot[k];
@@ -651,6 +987,65 @@ bool CellActors::place( const EsmRefr & r, bool hidden, QString & key, float & s
 	if ( skeleton.isEmpty() || d->restOf( skeleton ).isEmpty() )
 		return refuse( CellActorFate::NoSkeleton );
 	row.skeleton = skeleton;
+
+	/* lane ACTORPOSE1: the pose. A dead-on-start actor lies in its own ragdoll data; any other in frame 0 of its race's
+	 * idle clip; the bind pose (arms out) only when neither is there, or under the red WW_CELL_ACTOR_RED=bind. */
+	QHash<QString, Transform> world = d->restOf( skeleton );
+	QString poseKey = QStringLiteral( "bind" );
+	row.pose = CellActorPose::Bind;
+	row.poseWhy.clear();
+	if ( d->red == QLatin1String( "bind" ) ) {
+		row.poseWhy = QStringLiteral( "red control" );
+	} else {
+		QString ragWhy;
+		if ( row.dead && !row.ragdoll.isEmpty() ) {
+			const Impl::Pose rp = d->ragdollPose( skeleton, row.ragdoll );
+			if ( rp.why.isEmpty() ) {
+				world = rp.world;
+				poseKey = QStringLiteral( "rag%1" ).arg( row.form, 8, 16, QChar( '0' ) );
+				row.pose = CellActorPose::Ragdoll;
+				row.poseWhy = rp.clip;
+			} else {
+				ragWhy = rp.why;
+			}
+		}
+		if ( row.dead && row.pose == CellActorPose::Bind ) {
+			// the game drops it as a ragdoll: lie it in the race's death pose, flat on the reference's heading
+			const Impl::Pose dp = d->deathPose( skeleton );
+			if ( dp.why.isEmpty() ) {
+				world = dp.world;
+				poseKey = QStringLiteral( "death" );
+				if ( r.rot[0] != 0.0f || r.rot[1] != 0.0f ) {
+					// the cell view turns the actor by the whole reference rotation; take its tilt back out
+					Transform up;
+					up.rotation = Matrix::euler( -r.rot[0], -r.rot[1], -r.rot[2] ).inverted()
+						* Matrix::euler( 0.0f, 0.0f, -r.rot[2] );
+					for ( auto w = world.begin(); w != world.end(); ++w )
+						*w = up * *w;
+					poseKey = QStringLiteral( "death%1" ).arg( row.form, 8, 16, QChar( '0' ) );
+				}
+				row.pose = CellActorPose::Death;
+				row.poseWhy = dp.clip;
+			} else {
+				ragWhy = ragWhy.isEmpty() ? dp.why : ragWhy + QStringLiteral( ", then " ) + dp.why;
+			}
+			if ( row.pose == CellActorPose::Death && !ragWhy.isEmpty() )
+				row.poseWhy = ragWhy + QStringLiteral( ", then " ) + row.poseWhy;
+		}
+		if ( row.pose == CellActorPose::Bind ) {
+			const Impl::Pose ip = d->idlePose( skeleton );
+			if ( ip.why.isEmpty() ) {
+				world = ip.world;
+				poseKey = QStringLiteral( "idle" );
+				row.pose = CellActorPose::Idle;
+				row.poseWhy = ip.clip;
+			} else {
+				row.poseWhy = ip.why;
+			}
+			if ( !ragWhy.isEmpty() )
+				row.poseWhy = ragWhy + QStringLiteral( ", then " ) + row.poseWhy;
+		}
+	}
 
 	QSet<quint32> races;
 	races.insert( n.race );
@@ -739,8 +1134,8 @@ bool CellActors::place( const EsmRefr & r, bool hidden, QString & key, float & s
 	// height: the race's for the sex, times the actor's own (the middle of its range when it has one)
 	row.scale = r.scale * race.height[sex] * 0.5f * ( n.heightMin + n.heightMax );
 
-	key = QStringLiteral( "actor|%1|%2|%3|%4" ).arg( looks, 8, 16, QChar( '0' ) ).arg( skeleton.toLower() )
-		.arg( row.parts.join( QChar( ';' ) ).toLower() ).arg( worn, 8, 16, QChar( '0' ) );
+	key = QStringLiteral( "actor|%1|%2|%3|%4|%5" ).arg( looks, 8, 16, QChar( '0' ) ).arg( skeleton.toLower() )
+		.arg( row.parts.join( QChar( ';' ) ).toLower() ).arg( worn, 8, 16, QChar( '0' ) ).arg( poseKey );
 	if ( d->builtEmpty.contains( key ) )
 		return refuse( CellActorFate::NoGeometry );
 	if ( !d->built.contains( key ) ) {
@@ -761,9 +1156,9 @@ bool CellActors::place( const EsmRefr & r, bool hidden, QString & key, float & s
 			}
 		};
 		for ( const QString & model : row.parts )
-			take( d->part( skeleton, model ), false );
+			take( d->part( skeleton, poseKey, world, model ), false );
 		if ( !row.faceMesh.isEmpty() )
-			take( d->part( skeleton, row.faceMesh ), true );
+			take( d->part( skeleton, poseKey, world, row.faceMesh ), true );
 		bool first = true;
 		for ( NativeSrcShape & s : b.shapes ) {
 			b.triangles += qint64( s.geom.tris.size() / 3 );
@@ -822,11 +1217,18 @@ QString CellActors::censusLine() const
 		return QString();
 	int count[int( CellActorFate::Count )] = { 0 };
 	int dead = 0, noHead = 0, noOutfit = 0, outfitDice = 0;
+	int poses[int( CellActorPose::Count )] = { 0 }, ragRefused = 0;   // lane ACTORPOSE1
+	QMap<QString, int> bindWhy;
 	qint64 tris = 0;
 	for ( const CellActorRow & row : d->rows ) {
 		count[int( row.fate )]++;
 		if ( row.fate != CellActorFate::Drawn )
 			continue;
+		poses[int( row.pose )]++;
+		if ( row.pose == CellActorPose::Bind )
+			bindWhy[row.poseWhy.section( QStringLiteral( ", then " ), -1 )]++;
+		ragRefused += row.dead && !row.ragdoll.isEmpty() && row.pose != CellActorPose::Ragdoll
+			&& d->red != QLatin1String( "bind" ) ? 1 : 0;
 		dead += row.dead ? 1 : 0;
 		noHead += row.headMissing ? 1 : 0;
 		noOutfit += row.outfitUnknown ? 1 : 0;
@@ -837,9 +1239,19 @@ QString CellActors::censusLine() const
 	}
 	QString s;
 	QTextStream t( &s );
+	QStringList why;
+	for ( auto w = bindWhy.constBegin(); w != bindWhy.constEnd(); ++w )
+		why.append( QStringLiteral( "%1 %2" ).arg( w.key() ).arg( w.value() ) );
 	t << "  placed actors: " << d->rows.size() << " read, drawn " << count[int( CellActorFate::Drawn )]
-	  << " in the skeleton's bind pose (" << tris << " triangles; " << dead
-	  << " dead on start, drawn standing: no ragdoll; " << noHead << " without a head: no pre-built face mesh; "
+	  << " (" << poses[int( CellActorPose::Idle )] << " in their race's idle clip, "
+	  << poses[int( CellActorPose::Ragdoll )] << " lying in their ragdoll data, "
+	  << poses[int( CellActorPose::Death )] << " lying in their race's death pose, "
+	  << poses[int( CellActorPose::Bind )] << " in the skeleton's bind pose"
+	  << ( why.isEmpty() ? QString() : QStringLiteral( ": " ) + why.join( QLatin1String( ", " ) ) )
+	  << ", ragdoll data refused " << ragRefused << "; " << tris << " triangles; " << dead
+	  << " dead on start, " << poses[int( CellActorPose::Ragdoll )] + poses[int( CellActorPose::Death )]
+	  << " of them lying; "
+	  << noHead << " without a head: no pre-built face mesh; "
 	  << noOutfit << " in their skin and " << outfitDice << " short of outfit pieces: a dice roll), not shown "
 	  << count[int( CellActorFate::Hidden )] << " (deleted, no base or initially disabled)";
 	QStringList refused;
@@ -870,7 +1282,8 @@ void CellActors::dump( const QString & path ) const
 		"drawn", "hidden", "leveled", "notactor", "norace", "noskeleton", "nobody", "nogeometry", "redoff"
 	};
 	QTextStream t( &file );
-	t << "# form\tbase\tfate\tdead\tlooks\trace\tsex\tscale\tpos\trot\ttriangles\tlo\thi\tskeleton\tparts\thidden\tface\toutfit\n";
+	t << "# form\tbase\tfate\tdead\tlooks\trace\tsex\tscale\tpos\trot\ttriangles\tlo\thi\tskeleton\tparts\thidden\tface\toutfit"
+	  << "\tpose\n";   // lane ACTORPOSE1
 	for ( const CellActorRow & row : d->rows ) {
 		qint64 tris = 0;
 		float lo[3] = { 0, 0, 0 }, hi[3] = { 0, 0, 0 };
@@ -900,6 +1313,10 @@ void CellActors::dump( const QString & path ) const
 				.arg( double( hi[2] ), 0, 'f', 3 ) << '\t'
 		  << dash( row.skeleton ) << '\t' << dash( row.parts.join( QChar( ';' ) ) ) << '\t'
 		  << dash( row.hidden.join( QChar( ';' ) ) ) << '\t' << dash( row.faceMesh ) << '\t'
-		  << ( row.outfitUnknown ? "unknown" : ( row.outfitDice ? "short" : "whole" ) ) << '\n';
+		  << ( row.outfitUnknown ? "unknown" : ( row.outfitDice ? "short" : "whole" ) ) << '\t'
+		  << ( row.fate != CellActorFate::Drawn ? QStringLiteral( "-" )
+			  : QString::fromLatin1( row.pose == CellActorPose::Idle ? "idle "
+				  : row.pose == CellActorPose::Ragdoll ? "ragdoll "
+				  : row.pose == CellActorPose::Death ? "death " : "bind " ) + row.poseWhy ) << '\n';
 	}
 }

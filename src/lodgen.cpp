@@ -2017,6 +2017,8 @@ void lodgenAssetKind( const QString & relPath, const char *& folder, const char 
 		folder = "materials"; ext = ".pbrm";   // lane FIXPACK1 (PBRALBEDO1): the bake resolves .pbrm materials
 	} else if ( p.endsWith( QLatin1String( ".lodm" ) ) ) {
 		folder = "materials"; ext = ".lodm";
+	} else if ( p.endsWith( QLatin1String( ".hkx" ) ) ) {
+		folder = "meshes"; ext = ".hkx";   // lane ACTORPOSE1: skeleton.hkx and the idle clips sit under meshes
 	} else {
 		folder = "textures"; ext = ".dds";
 	}
