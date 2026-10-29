@@ -278,6 +278,12 @@ void skyLitSky( const void * nif, ProbeSkyLight & sky )
 		s.waiting = false;
 	}
 	sky = s.used;
+	/* the void under an interior cell is ground in the game, never sky: a ray leaving downward (a broken floor, a
+	 * probe under the slab) took the weather's ground-facing colour and lit the floor from below (the 10-29 dump: floor
+	 * probes 0.2-0.44 sky). The face a surface facing down takes is 0; red WW_CELL_SKYLIT_RED=ground keeps it */
+	if ( !( wwCellSkyLitRed() & 4 ) )
+		for ( int c = 0; c < 3; c++ )
+			sky.amb[5][c] = 0.0f;
 }
 
 //! the GUI's settings file (bakert.cpp's; a harness WW_SETTINGS_SCOPE starts empty, so the rows read off there)
