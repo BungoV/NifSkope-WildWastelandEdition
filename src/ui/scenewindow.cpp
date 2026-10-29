@@ -514,11 +514,16 @@ SceneWindow::SceneWindow( QWidget * mainWindow, std::function<void()> repaint, s
 			m_repaint();
 	} );
 	// lane WEATHERBLEND5: the Weather box follows a pick it did not make (a teleport's region weather)
+	// lane WEATHERBLEND6: and a border the streamed camera crossed; its tooltip names the current region
 	QTimer * weatherSync = new QTimer( this );
 	weatherSync->setInterval( 250 );
 	connect( weatherSync, &QTimer::timeout, this, [this]() {
 		if ( !weatherBox || !isVisible() || !wwLookdevActive() || weatherBox->count() == 0 )
 			return;
+		const QString region = wwLookdevRegion();
+		const QString tip = region.isEmpty() ? QString() : tr( "Region: %1" ).arg( region );
+		if ( weatherBox->toolTip() != tip )
+			weatherBox->setToolTip( tip );
 		const QString key = wwLookdevWeatherKey();
 		if ( weatherBox->currentData().toString().compare( key, Qt::CaseInsensitive ) == 0 )
 			return;

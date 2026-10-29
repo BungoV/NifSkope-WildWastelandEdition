@@ -130,6 +130,19 @@ std::shared_ptr<CellStreamSeed> cellStreamSuspend( NifModel * nif );
 bool cellStreamTick( NifModel * nif, Scene * scene, const Vector3 & eye );
 //! lane SHORE2: every stream's block centres on the eye's own cell now (the harness path's WW_CELL_STREAM_SNAP=1)
 void cellStreamSnapCentre( const Vector3 & eye );
+//! lane WEATHERBLEND6: the camera's cell as the last tick saw it, for the Lookdev region walk (src/gl/lookdevstage.cpp)
+struct CellStreamCamera
+{
+	bool valid = false;
+	int cx = 0, cy = 0;                 //!< the cell under the eye
+	quint32 cellForm = 0;               //!< its CELL form (0 = none there): the re-pick's seed
+	QVector<quint32> regions;           //!< its regions (XCLR), read once each time the eye enters the cell
+	quint32 world = 0;                  //!< the worldspace (a region naming another is skipped)
+	float eye[2] = { 0, 0 };            //!< world x, y, every tick
+	quint64 gen = 0;                    //!< bumped when cx / cy change
+};
+//! lane WEATHERBLEND6: nif's stream's camera cell; null when nif streams no cells (a fixed block, an interior)
+const CellStreamCamera * cellStreamCamera( const NifModel * nif );
 //! Cells queued, building or being written (a shot waits for false). Null = any document.
 bool cellStreamBusy( const NifModel * nif );
 //! lane CELLSTREAM1: this document streams its cells

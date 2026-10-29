@@ -5,7 +5,7 @@ set -u
 HERE="$(cd "$(dirname "$0")" && pwd)"
 ROOT="$(cd "$HERE/../.." && pwd)"
 OUT="${1:?out dir}"
-BASE="${2:-940baf4a}"	# WEATHERBLEND5's base (4: 5dd180a5, 3: ddf6483e, 2: 50023dfa, 1: 0db18b4b)
+BASE="${2:-a638e35a}"	# WEATHERBLEND6's base (5: 940baf4a, 4: 5dd180a5, 3: ddf6483e, 2: 50023dfa, 1: 0db18b4b)
 mkdir -p "$OUT/green" "$OUT/red"
 git -C "$ROOT" show "$BASE:src/esmweather.cpp" > "$OUT/red/esmweather_base.cpp" || exit 2
 python -I "$HERE/cut.py" "$ROOT/src/esmweather.cpp" "$ROOT/src/esmweather.cpp" "$OUT/green/cut.inc" < /dev/null || exit 2
@@ -15,3 +15,6 @@ for side in green red; do
 	( export PATH="/c/msys64/ucrt64/bin:$PATH"; "$OUT/$side/weatherblend.exe" > "$OUT/$side/run.log" 2>&1; echo "$side RUN-RC=$?" )
 	tail -1 "$OUT/$side/run.log"
 done
+# lane WEATHERBLEND6: the switch red on the green build: the region walk's crossing must fail (Linux: run_linux.sh)
+( export PATH="/c/msys64/ucrt64/bin:$PATH" WW_CELL_REGION_RED=spawnonly; "$OUT/green/weatherblend.exe" > "$OUT/green/red_switch.log" 2>&1; echo "red switch RUN-RC=$?" )
+tail -1 "$OUT/green/red_switch.log"

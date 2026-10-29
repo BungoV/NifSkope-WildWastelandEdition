@@ -1261,6 +1261,62 @@ quint32 wwRegionWeatherFollow( const WwRegionWeatherEntry * e, int n, quint32 cu
 	return pick;
 }
 
+bool wwRegionWalkDue( const WwRegionWalk & w, qint64 nowMs, int cx, int cy, const float eye[2] )
+{
+	if ( !w.started )
+		return true;
+	if ( nowMs - w.lastMs < kWwRegionWalkMs )
+		return false;
+	return cx != w.cx || cy != w.cy || std::fabs( eye[0] - w.eye[0] ) >= 1.0f || std::fabs( eye[1] - w.eye[1] ) >= 1.0f;
+}
+
+bool wwRegionWalkSample( WwRegionWalk & w, qint64 nowMs, int cx, int cy, const float eye[2], QVector<quint32> under,
+	quint32 chosen, int red )
+{
+	std::sort( under.begin(), under.end() );
+	const bool first = !w.started, moved = cx != w.cx || cy != w.cy || under != w.under;
+	w.started = true;
+	w.cx = cx;
+	w.cy = cy;
+	w.eye[0] = eye[0];
+	w.eye[1] = eye[1];
+	w.lastMs = nowMs;
+	w.under = under;
+	w.samples++;
+	if ( first )	// the baseline: the region the camera starts in is the current one (an open picks no weather here)
+		w.region = chosen;
+	if ( first || ( red & WwRegionWalkRedSpawnOnly ) || !moved || chosen == w.region )
+		return false;
+	w.region = chosen;
+	w.repicks++;
+	return true;
+}
+
+quint32 wwRegionWalkFollow( const WwRegionWeatherEntry * e, int n, quint32 cur, double elapsed, double duration,
+	quint32 draw, double u01, QString * why )
+{
+	const quint32 pick = wwRegionWeatherFollow( e, n, cur, false, elapsed, duration, draw, u01 );
+	if ( why ) {
+		const bool usesCur = cur && std::any_of( e, e + n, [cur]( const WwRegionWeatherEntry & x ) { return x.weather == cur; } );
+		const double r = elapsed / std::max( duration, 1e-6 );
+		const QString law = QStringLiteral( "u01=%1 elapsed/duration=%2/%3" ).arg( u01, 0, 'f', 3 ).arg( elapsed, 0, 'f', 2 )
+			.arg( duration, 0, 'f', 2 );
+		if ( !pick )
+			*why = QStringLiteral( "the region lists no weather" );
+		else if ( !usesCur )
+			*why = cur ? QStringLiteral( "the region does not list the current weather" ) : QStringLiteral( "no current weather" );
+		else if ( wwRegionWeatherPick( e, n, draw ) == cur )
+			*why = QStringLiteral( "the region's draw is the current weather" );
+		else if ( pick == cur )
+			*why = QStringLiteral( "u01 > elapsed/duration (%1)" ).arg( law );
+		else if ( elapsed > duration )
+			*why = QStringLiteral( "duration rule: the current weather's duration ran out (%1)" ).arg( law );
+		else
+			*why = QStringLiteral( "u01 <= elapsed/duration %1 (%2)" ).arg( r, 0, 'f', 3 ).arg( law );
+	}
+	return pick;
+}
+
 bool EsmWeather::climateData( quint32 formID, WwClimateData & out, QString * why )
 {
 	out = WwClimateData();

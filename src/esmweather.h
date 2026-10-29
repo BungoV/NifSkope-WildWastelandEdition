@@ -412,6 +412,33 @@ double wwWeatherElapsedHours( double hourNow, double startHour );
  *  0 = nothing to apply */
 quint32 wwRegionWeatherFollow( const WwRegionWeatherEntry * e, int n, quint32 cur, bool sameRegion, double elapsed,
 	double duration, quint32 draw, double u01 );
+/*! lane WEATHERBLEND6: the region walk. A streamed cell view's camera moves like the player; the region choice runs
+ *  again when the camera's cell or the set of regions counting under it changes, sampled at most once per
+ *  kWwRegionWalkMs and only after the camera moved (never per frame, never per region polygon each frame) */
+const qint64 kWwRegionWalkMs = 250;
+//! lane WEATHERBLEND6: WW_CELL_REGION_RED=spawnonly: the spawn pick only, no re-pick on a border (the old view)
+enum WwRegionWalkRed : int { WwRegionWalkRedSpawnOnly = 1 };
+struct WwRegionWalk
+{
+	bool started = false;	//!< a sample set the baseline below
+	int cx = 0, cy = 0;	//!< the camera's cell at the last sample
+	float eye[2] = { 0, 0 };	//!< the eye (world x, y) at the last sample
+	qint64 lastMs = 0;
+	QVector<quint32> under;	//!< the regions counting at the eye (wwRegionCounts), sorted
+	quint32 region = 0;	//!< the region whose weather is current: the spawn pick's or the last re-pick's (0 none)
+	int samples = 0, repicks = 0;
+};
+//! whether the walk samples now: the first time, or kWwRegionWalkMs after the last and the cell changed or the eye moved
+bool wwRegionWalkDue( const WwRegionWalk & w, qint64 nowMs, int cx, int cy, const float eye[2] );
+/*! one sample: the regions counting at the eye and their winner (wwRegionChoose; 0 none). It becomes the baseline
+ *  (the first sample's winner the current region, never a re-pick); true = a re-pick: the cell or the set changed and
+ *  the winner is not the current region (it becomes current). Red spawnonly: never */
+bool wwRegionWalkSample( WwRegionWalk & w, qint64 nowMs, int cx, int cy, const float eye[2], QVector<quint32> under,
+	quint32 chosen, int red = 0 );
+/*! a re-pick's weather: the follow law on entering a new region (sameRegion false; 0 = nothing to apply), and why it
+ *  kept the current weather or changed it (the list, the duration rule, u01 against elapsed / duration) */
+quint32 wwRegionWalkFollow( const WwRegionWeatherEntry * e, int n, quint32 cur, double elapsed, double duration,
+	quint32 draw, double u01, QString * why = nullptr );
 
 /*! The engine fog at one hour (lane FOG1, spec_fog.md 2.1-2.3): the FNAM floats
  *  blended day <-> night on the engine's fog day weight, the four NAM0 fog colours
