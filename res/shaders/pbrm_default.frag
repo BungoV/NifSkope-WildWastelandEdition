@@ -678,7 +678,7 @@ void main()
 			if ( !noSpec )
 				cSpec += dS * E * M_PI;
 		}
-		vec3 giE = cellSsgiE( cellGiOn ? cellGiE( Pw, sw.N ) : vec3( 0.0 ) ) / M_PI;
+		vec3 giE = cellSsgiE( CELL_GI_UP ? cellGiE( Pw, sw.N ) : vec3( 0.0 ) ) / M_PI;	// lane PRTOFF1: the PRT's grid or the ray-traced volume
 		if ( farW > 0.0 ) {
 			cDiff = cDiff * ( 1.0 - farW ) + farW * rho * farF;
 			cSpec *= 1.0 - farW;

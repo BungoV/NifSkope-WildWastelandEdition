@@ -502,8 +502,11 @@ const ProbeSoup * probeSkyKeptSoup( const void * nif, ProbeSkyLight * sky, WwCel
 	const WwCellLighting * L = wwCellLightsFor( nif );
 	if ( !L )
 		return nullptr;
-	if ( sky )
-		*sky = k.skyKept && !( L->interior && !k.spec.interiorSky ) ? k.spec.sky : ProbeSkyLight();
+	if ( sky ) {
+		const bool skyLit = k.skyKept && !( L->interior && !k.spec.interiorSky );
+		// lane PRTOFF1: without the PRT no relight follows the weather, so the volume takes the sky as it is now
+		*sky = !skyLit ? ProbeSkyLight() : wwCellPrtOn() ? k.spec.sky : probeSkyLightNow();
+	}
 	if ( lights ) {
 		WwCellLighting withBulbs;
 		*lights = wwNifxGiLights( *L, wwNifxLightsRed(), withBulbs ) ? withBulbs : *L;

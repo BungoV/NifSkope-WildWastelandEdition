@@ -2762,6 +2762,20 @@ void cellExportSetSink( CellExportSink * sink )
 	g_cellExportSink = sink;
 }
 
+/* lane PRTOFF1 (bungo 10-29: "just don't ever render it since it gets removed"): without its red (WW_CELL_PRT_RED=1) the old
+ * baked probe GI loads no bake: WW_CELL_GI_FROM neither loads the bake's block nor relights the bake */
+static bool cellGiFromWanted()
+{
+	return wwCellPrtOn() && !wwEnvIsEmpty( "WW_CELL_GI_FROM" );
+}
+bool rtddgiCellShaderDefine();	// src/rtddgicell.h
+/* lane PRTOFF1: the ray-traced GI (src/rtddgicell.cpp) traces the probe soup the PRT's relight used to keep. Without the PRT
+ * an open with the Ray-traced GI row on gathers that soup itself (a welded block, as the bake load opened) and keeps it. */
+static bool cellRtSoupWanted()
+{
+	return !wwCellPrtOn() && rtddgiCellShaderDefine();
+}
+
 // lane CELLSTREAM1: the builder; `chunk` set = one streamed cell (n = 1), no document touched, stops before emit
 static bool cellBuild( NifModel * nif, const CellSceneSpec & specAsked, CellChunk * chunk,
 	QString * error, QString * notes )
@@ -2775,7 +2789,7 @@ static bool cellBuild( NifModel * nif, const CellSceneSpec & specAsked, CellChun
 	const QByteArray blockRed = wwEnv( "WW_CELL_BAKEBLOCK_RED" );
 	const bool bakeExterior = !spec.interior && ( !wwEnvIsEmpty( "WW_CELL_PROBES" ) || spec.probes )
 		&& ( spec.probesBake || !wwEnvIsEmpty( "WW_CELL_PROBE_BAKE" )
-			|| !wwEnvIsEmpty( "WW_CELL_GI_FROM" ) );
+			|| cellGiFromWanted() );
 	if ( bakeExterior && blockRed != "n1" )
 		spec.n = qMax( spec.n, 2 * cellGameGridHalf() + 1 );	// lane LANDSPEC8: uGridsToLoad from the inis (was 5)
 	auto fail = [error]( const QString & m ) {
@@ -2791,9 +2805,10 @@ static bool cellBuild( NifModel * nif, const CellSceneSpec & specAsked, CellChun
 		liveForget( nif );	// lane LIVESET1: the old document's live context (and the world it holds) goes first
 	// lane CELLSTREAM1: an exterior view streams its cells round the camera (src/cellstream.h); this open builds
 	// the document, the far field and the lighting, and hands the world to the streamer instead of welding a block
+	const bool rtSoup = !chunk && cellRtSoupWanted();	// lane PRTOFF1: the ray-traced GI's soup (a welded block, no stream)
 	const bool streamInit = !chunk && !spec.interior && spec.overlay == CellOverlay::None && !bakeExterior
 		&& !spec.probes && wwEnvIsEmpty( "WW_CELL_PROBES" )
-		&& wwEnvIsEmpty( "WW_CELL_GI_FROM" ) && cellStreamWanted();
+		&& !cellGiFromWanted() && !rtSoup && cellStreamWanted();
 
 	QElapsedTimer clock;
 	clock.start();
@@ -2863,7 +2878,7 @@ static bool cellBuild( NifModel * nif, const CellSceneSpec & specAsked, CellChun
 	if ( !chunk )	// lane SKYTOP1: the lookdev weather reads this cell's load order (the last plugin's record wins)
 		wwLookdevSetCellPlugins( spec.plugins.split( QLatin1Char( ',' ), Qt::SkipEmptyParts ) );
 	// lane BAKEINCR1: an exterior bake records every asset it reads, for its bakeincr.txt
-	const bool incrRecord = !chunk && bakeExterior && !spec.interior && wwEnvIsEmpty( "WW_CELL_GI_FROM" );
+	const bool incrRecord = !chunk && bakeExterior && !spec.interior && !cellGiFromWanted();
 	if ( incrRecord )
 		ProbeIncr::startRecording();
 
@@ -3888,7 +3903,8 @@ static bool cellBuild( NifModel * nif, const CellSceneSpec & specAsked, CellChun
 	 * stand in. Per shape, effect shaders, alpha-blended glass and decals are
 	 * dropped: light passes through all three. */
 	const QString probeOut = QString::fromLocal8Bit( wwEnv( "WW_CELL_PROBES" ) );
-	const bool probing = !probeOut.isEmpty() || spec.probes;   // the env, or the PRTP band's Place
+	const bool probeAsked = !probeOut.isEmpty() || spec.probes;   // the env, or the PRTP band's Place
+	const bool probing = probeAsked || rtSoup;   // lane PRTOFF1: or the ray-traced GI's soup (no bake, no probes written)
 	ProbeSoup probeSoup;
 	int soupRefs = 0, soupShapesDropped = 0;
 	/* lane PRTPBAKE: the bake's albedo, one per soup triangle -- the band's Bake, or
@@ -3896,7 +3912,7 @@ static bool cellBuild( NifModel * nif, const CellSceneSpec & specAsked, CellChun
 	 * WW_CELL_PROBE_BAKE_DIR=<folder> only moves the Bake button's folder. */
 	const QString bakeEnv = QString::fromLocal8Bit( wwEnv( "WW_CELL_PROBE_BAKE" ) );
 	const QString bakeDirEnv = QString::fromLocal8Bit( wwEnv( "WW_CELL_PROBE_BAKE_DIR" ) );
-	const bool baking = probing && ( spec.probesBake || !bakeEnv.isEmpty() );
+	const bool baking = probeAsked && ( spec.probesBake || !bakeEnv.isEmpty() );
 	ProbeAlbedo probeAlb( dataRoot );
 	/* lane CAPTURE1: WW_CELL_BAKE_ALBEDO = tri (default, today) | hit | cube picks where the surfels'
 	 * albedo and normal come from (ProbeBakeSpec::albedoWay); hit and cube need every object
@@ -6527,7 +6543,7 @@ static bool cellBuild( NifModel * nif, const CellSceneSpec & specAsked, CellChun
 			 * game's own (Documents/My Games/Fallout4/F4SE/TransportBake): copying there is a
 			 * choice the user makes. */
 			// lane PRTPGI: WW_CELL_GI_FROM=<bake folder> relights a bake already on disk (no new bake)
-			if ( !baking && placed && !wwEnv( "WW_CELL_GI_FROM" ).isEmpty() )
+			if ( !baking && placed && cellGiFromWanted() )	// lane PRTOFF1: only under the PRT's red
 				giBakeDir = QDir::cleanPath( QString::fromLocal8Bit( wwEnv( "WW_CELL_GI_FROM" ) ) );
 			if ( baking && placed ) {
 				QString dir =!bakeEnv.isEmpty() ? bakeEnv : !bakeDirEnv.isEmpty() ? bakeDirEnv : spec.bakeDir;
@@ -7190,8 +7206,9 @@ static bool cellBuild( NifModel * nif, const CellSceneSpec & specAsked, CellChun
 	}
 
 	/* lane PRTPGI: the bake just written, relit by those lights (src/probegi.h), for the GI row.
-	 * WW_CELL_GI_DUMP=<folder> writes the gate's copies; WW_CELL_GI_RED=<red> its refuters. */
-	if ( !giBakeDir.isEmpty() ) {
+	 * WW_CELL_GI_DUMP=<folder> writes the gate's copies; WW_CELL_GI_RED=<red> its refuters.
+	 * lane PRTOFF1: only under the PRT's red; a bake written here (the tool) is not relit without it. */
+	if ( !giBakeDir.isEmpty() && wwCellPrtOn() ) {
 		if ( const WwCellLighting * L = wwCellLightsFor( nif ) ) {
 			ProbeGiSpec gs;
 			gs.red = QString::fromLatin1( wwEnv( "WW_CELL_GI_RED" ) ).trimmed();
@@ -7466,6 +7483,15 @@ static bool cellBuild( NifModel * nif, const CellSceneSpec & specAsked, CellChun
 				wwCellProbeViewPublish( nif, pv );
 			}
 		}
+	}
+	/* lane PRTOFF1: no PRT relight keeps the soup now, so the ray-traced GI's is kept here, with the sky flags that relight
+	 * kept (probesky.cpp hands the volume the weather's sky as it is now while the PRT is off) */
+	if ( rtSoup && !probeSoup.tris.empty() ) {
+		ProbeGiSpec ks;
+		ks.interiorSky = spec.interior && ( cellInteriorFlags( world.interior() ) & 0x0080u ) != 0;
+		probeSkyKeep( nif, probeSoup, QString(), ks, !spec.interior || ks.interiorSky );
+		probeNotes += QStringLiteral( "  ray-traced GI soup kept: %1 triangles (the PRT is off: no bake loaded, none relit)\n" )
+			.arg( probeSoup.triCount() );
 	}
 
 	// ---- the census

@@ -1,5 +1,34 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## PRTOFF1: the old baked probe GI (PRT) never draws; the ray-traced GI stands on its own
+
+- bungo 10-29: "stop testing the old GI prtp" / "just don't ever render it since it gets removed". The old baked
+  probe GI (the Precomputed Radiance Transfer grid) no longer draws. The `WW/CellGi` row and `WW_CELL_GI` do nothing,
+  `WW_CELL_GI_FROM` loads no bake (no 5x5 bake block, no relight), `WW_CELL_GI_VIS=march` selects nothing, and a bake
+  written by the tool is not relit. Its code is kept (removal is a later lane once the ray-traced GI is solid).
+- **Shaders:** the grid's reads compile only under the loader's `#define WW_CELL_PRT`. Without it `cellGiOn` is false at
+  compile time, so the shipping programs hold no grid read, and the surfaces' GI is the ray-traced volume's read alone
+  (`CELL_GI_UP` in `cell_lights.glsl`). 26 of the 126 programs shrink, all of them 25.8 -> 20.0 MB (UBO mode): fo4_cellcsm
+  1,091,577 -> 671,007 bytes, fo4_cell 904,831 -> 521,462, pbrm_cellcsm 922,204 -> 662,899, fo4_effectdecalcsm
+  1,360,096 -> 1,051,848 (the full table: notes/prtoff1/sweep/sizes.md).
+- **The ray-traced GI no longer needs the old GI.** Before, it traced the soup that the PRT's relight kept, and its read
+  sat inside the grid's (`cellGiOn`). So with the old GI off it drew nothing. Now an open with the Ray-traced GI row on
+  gathers the probe soup itself (a welded block, as the bake load did; no probes written, no bake) and keeps it. The
+  volume takes the weather's sky as it is now. Its box is the soup's within reach of the camera (there is no grid).
+  Inside the box it replaces the flat ambient; across the box's last cell it fades to the flat ambient.
+- **What changes with the old GI gone** (it shipped Off, so a default view sees none of this): Sky specular occlusion
+  now reads the ray-traced volume's sky visibility (none past its box). The air's and the particles' GI in-scatter, the
+  water's sky visibility, the reflection probes' relight bounce, the Ambient occlusion decals, the Emissive GI grid, Far
+  light and the door-live GI all read the PRT grid or its relight: they are off. Water shapes drawn by a cell program
+  still read no GI (the guard now zeroes the volume's flag too).
+- **Menu:** the Precomputed Radiance Transfer row, Far light, its Debug view, GPU relight, Emissive GI grid, Ambient
+  occlusion decals and the probe looks (sharing, wide sharing, depth visibility, smoothing, out of walls) leave the Show
+  menu and the Display panel. The Fusion Shaders GI group's row is now Ray-traced GI, with Sky visibility (which greys
+  with it), Emittance in bounce light and Sky specular occlusion under it.
+- **Red:** `WW_CELL_PRT_RED=1` (launch) brings everything back: the define, the bake load, the relight, the rows. Its
+  programs are the old ones: 378 of 378 binaries (126 programs x 3 modes) are the old machine code, differing only in
+  the stamp, the source hash and, in fo4_effectcellfx, one line number in the driver's warning text (notes/prtoff1/sweep).
+
 ## RTXGI1 M2: the ray-traced GI volume lights the cell view (switch, live; ships Off)
 
 - **Show > Lighting > Ray-traced GI** (`WW_CELL_RTDDGI=1`, default Off): with the probe GI's relit cell open, a DDGI
