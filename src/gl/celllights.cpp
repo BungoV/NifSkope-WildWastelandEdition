@@ -1809,7 +1809,9 @@ void wwCellLightsUniforms( Scene * scene )
 	}
 	// lane SPECOCC1: with the sky specular occlusion on, the GI texture carries the sky grid's slot 0 after its own slabs
 	// lane WATERLOOK1 step 10: the Water sky visibility row reads the same slot
-	const bool specSky = G && ( wwCellSpecOccMode() > 0 || wwLookOn( WwLook::WaterSkyVis ) ) && G->skyLit && G->sky.size() == G->rgba.size();
+	// lane FOGGI1: so does the air's sun gate (cellSpecOcc stays the row's: the surfaces read the slot only with it on)
+	const bool specSky = G && ( wwCellSpecOccMode() > 0 || wwLookOn( WwLook::WaterSkyVis ) || wwVolAirSunGateWanted() )
+		&& G->skyLit && G->sky.size() == G->rgba.size();
 	if ( G && pass != 2 && !G->rgba.empty()
 		&& ( g.giDoc != scene->nifModel || g.giVersion != s.giVersion.value( scene->nifModel ) || g.giSpecSky != specSky ) ) {
 		if ( !g.giTex )

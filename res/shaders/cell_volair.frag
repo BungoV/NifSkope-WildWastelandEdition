@@ -132,10 +132,101 @@ float airFarVis( vec3 posView )
 	return min( c, t ) * airCloudShadow( posView );
 }
 
+/* lane FOGGI1 (the sun gate): the Concord hardware store's air took most of its light from the sun's in-scatter (sun 35.7,
+ * GI 23.8, lamps 2.5) where the room test calls it indoors, because every road to the sun's visibility that is not the
+ * shadow map answers 1: past the cascades' reach (their fade), without cascades (the clouds alone), and the multiple-
+ * scattering octaves' lift. Per sample, the GI's own evidence says how far that 1 may stand: the 8 room cells round P
+ * (volCubeAll's labels and weights; indoors = both labels non-zero, room 0 the outdoors) and the probes' open-sky share
+ * toward the sun (SPECOCC1's sky slot, cellSpecSky's read on the sun's direction; none packed or no evidence = 0).
+ * gate = indoor share x (1 - sky share); exteriors only (indoors the directional light is the template's, not a sun).
+ * Red WW_CELL_FOGGI_RED=sun: volSunRoom false, the sun as before. */
+uniform bool volSunRoom;
+
+float airIndoorK( vec3 P )
+{
+	if ( !cellGiOn || !cellGiRooms )
+		return 0.0;
+	vec3 gr = ( P - cellRoomsOrigin ) / cellRoomsCell - 0.5;
+	ivec3 r0 = ivec3( floor( gr ) );
+	vec3 fr = gr - vec3( r0 );
+	float wAir = 0.0, wIn = 0.0;
+	for ( int k = 0; k < 8; k++ ) {
+		ivec3 o = ivec3( k & 1, ( k >> 1 ) & 1, ( k >> 2 ) & 1 );
+		ivec3 c = r0 + o;
+		vec3 t = mix( 1.0 - fr, fr, vec3( o ) );
+		float w = t.x * t.y * t.z;
+		if ( any( lessThan( c, ivec3( 0 ) ) ) || any( greaterThanEqual( c, ivec3( cellRoomsDims ) ) ) ) {
+			wAir += w;	// outside the room grid: no evidence of a room, counted as outdoors
+			continue;
+		}
+		ivec2 L = cellRoomUnpack( texelFetch( cellRooms, c, 0 ).r );
+		if ( L.x == -1 )
+			continue;	// solid
+		wAir += w;
+		if ( L.x != 0 && L.y != 0 )
+			wIn += w;
+	}
+	return wAir > 0.0 ? wIn / wAir : 0.0;
+}
+
+float airSkyToward( vec3 P, vec3 D )
+{
+	if ( !cellGiOn || !cellGiSky || cellSpecSkyBase < 1.0 )
+		return 0.0;
+	vec3 t = ( P - cellGiOrigin ) / cellGiVoxel;
+	float z = clamp( t.z, 0.5, cellGiDims.z - 0.5 );	// the slabs stack on z: never filter across one
+	vec3 sl = vec3( D.x >= 0.0 ? 0.0 : 1.0, D.y >= 0.0 ? 2.0 : 3.0, D.z >= 0.0 ? 4.0 : 5.0 );
+	vec3 w = D * D;
+	float depth = float( textureSize( cellGi, 0 ).z );
+	vec2 a = vec2( 0.0 );
+	for ( int k = 0; k < 3; k++ ) {
+		vec4 s = texture( cellGi, vec3( t.xy / cellGiDims.xy, ( ( cellSpecSkyBase + sl[k] ) * cellGiDims.z + z ) / depth ) );
+		a += w[k] * s.ra;
+	}
+	return a.y < 0.01 ? 0.0 : cellGiEdgeFade( t.xy ) * clamp( a.x / a.y, 0.0, 1.0 );
+}
+
+// 0 the sun as before .. 1 the sun only where its shadow map says lit (P world, to the way to the sun)
+float airSunGate( vec3 P, vec3 to )
+{
+	if ( !volSunRoom || cellInterior )
+		return 0.0;
+	float k = airIndoorK( P );
+	return k > 0.0 ? k * ( 1.0 - airSkyToward( P, to ) ) : 0.0;
+}
+
+/* the shadow map's own verdict at posView, weighted by how far its cascades cover it (their fade), min the terrain's
+ * shadow-height map, x the clouds: never more than the vis it replaces, and equal to it inside the cascades' reach. No
+ * screen-space contact term (a froxel is not a pixel). Without cascades: 0 (no map says the sample is lit). */
+float airSunMapVis( vec3 posView )
+{
+	if ( ( volRed & 8 ) != 0 )
+		return 1.0;
+	float c = 0.0;
+	if ( csmForce >= 0.0 ) {
+		c = csmForce;
+	} else if ( ussOn != 0 ) {
+		float w, inMap;
+		float casc = ussCascades( posView, vec3( 0.0 ), vec3( 0.0 ), w );
+		c = w * casc;
+		if ( ( volFarMode & 6 ) != 6 )
+			c = min( c, ussTerrain( posView, inMap, 0.0, false ) );
+	} else if ( volCsm ) {
+		float dv = -posView.z * csmParams.x;
+		if ( dv <= csmParams.y + csmParams.w ) {
+			float s = clamp( dot( posView, posView ) * csmParams.x * csmParams.x / ( csmParams.y * csmParams.y ), 0.0, 1.0 );
+			float s2 = s * s;
+			c = csmBlended( posView ) * ( 1.0 - s2 * s2 );
+		}
+	}
+	return c * airCloudShadow( posView );
+}
+
 /* lane GAPLOOK1 (FOGEXTRAS): the multiple-scattering octaves (Wrenninge, Kulla, Lundqvist, "Oz: The Great and
  * Volumetric", SIGGRAPH 2013): octave i scatters a^i, sees the optical depth to the sun x b^i and the phase's g x c^i;
- * vis the sun's shadow, lifted toward 1 as b^i shrinks (w 1). Octave 0 is the single scattering. */
-vec3 airMsSum( float vis, float T, float c )
+ * vis the sun's shadow, lifted toward 1 as b^i shrinks (w 1). Octave 0 is the single scattering. lane FOGGI1: hard (the
+ * sun gate) takes the lift away, the octaves then see vis as the single scattering does. */
+vec3 airMsSum( float vis, float T, float c, float hard )
 {
 	vec3 r = vis * T * volPhasePi( c );
 	float a = 1.0, b = 1.0, g = 1.0;
@@ -143,7 +234,7 @@ vec3 airMsSum( float vis, float T, float c )
 		a *= volMs.x;
 		b *= volMs.y;
 		g *= volMs.z;
-		float v = volMs.w > 0.5 ? mix( 1.0, vis, b ) : vis;
+		float v = volMs.w > 0.5 ? mix( mix( 1.0, vis, b ), vis, hard ) : vis;
 		vec3 ph = PI * ( volPhase[0].rgb * ( 3.0 / ( 16.0 * PI ) ) * ( 1.0 + c * c )
 			+ volPhase[1].rgb * volHg( c, volPhase[1].w * g ) + volPhase[2].rgb * volHg( c, volPhase[2].w * g ) );
 		r += a * v * pow( T, b ) * ph;
@@ -161,11 +252,15 @@ vec3 airSun( vec3 posView, vec3 dirView, float z )
 		vec3 to = normalize( cellDirTo );
 		float vis = ( volFarMode != 0 && !cellInterior ) ? airFarVis( posView )
 			: ( cellInterior || ( volRed & 8 ) != 0 ) ? 1.0 : volCsm ? wwSunShadow( posView ) : airCloudShadow( posView );
+		// lane FOGGI1: indoors with no sky toward the sun, only what the shadow map says is lit
+		float hard = airSunGate( cellWorldPos( posView ), to );
+		if ( hard > 0.0 )
+			vis = mix( vis, min( vis, airSunMapVis( posView ) ), hard );
 		float Ts = airTup( z, to.z );
 		if ( volDriftSun && volDrift.x > 0.0 )	// lane WEATHERBLEND4: the sun's light through the drifting air
 			Ts = pow( Ts, airDriftSunK( posView, z, to.z ) );
 		if ( volMs.x > 0.0 )
-			return cellDirColor * airMsSum( vis, Ts, dot( to, cellWorldDir( dirView ) ) );
+			return cellDirColor * airMsSum( vis, Ts, dot( to, cellWorldDir( dirView ) ), hard );
 		return cellDirColor * vis * Ts * volPhasePi( dot( to, cellWorldDir( dirView ) ) );
 	}
 	if ( fogSun.w > 0.0 ) {
@@ -174,7 +269,7 @@ vec3 airSun( vec3 posView, vec3 dirView, float z )
 			: volCsm ? wwSunShadow( posView ) : airCloudShadow( posView );
 		float mu = dot( fogView.xyz, fogSun.xyz ) / length( fogView.xyz );
 		if ( volMs.x > 0.0 )
-			return fogSunColour.rgb * fogSun.w * airMsSum( vis, airTup( z, mu ), dot( dirView, fogSun.xyz ) );
+			return fogSunColour.rgb * fogSun.w * airMsSum( vis, airTup( z, mu ), dot( dirView, fogSun.xyz ), 0.0 );
 		return fogSunColour.rgb * fogSun.w * vis * airTup( z, mu ) * volPhasePi( dot( dirView, fogSun.xyz ) );
 	}
 	return vec3( 0.0 );
