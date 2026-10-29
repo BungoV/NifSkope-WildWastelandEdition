@@ -41,6 +41,7 @@ struct DdgiGpuJob
 	std::vector<float> rotations;          // 9 a frame (row major): the updates' ray rotations
 	int frames = 0;
 	bool relocate = true, classify = true;
+	bool dumpFixed = false;                // read back each probe's 32 fixed distances (out.fixedDist)
 };
 
 struct DdgiGpuOut
@@ -49,10 +50,14 @@ struct DdgiGpuOut
 	std::string why;                       // empty when ok; else why the GPU did not run (the caller then runs the CPU twin)
 	std::vector<float> probes;             // 4 a probe: offset xyz, state
 	std::vector<uint32_t> age;             // updates blended a probe
-	std::vector<float> irr;                // 8 x 8 x 4 a probe (encoded rgb, 1)
+	std::vector<float> irr;                // 8 x 8 x 4 a probe (encoded rgb, sky visibility)
 	std::vector<float> dist;               // 16 x 16 x 2 a probe
+	std::vector<float> fixedDist;          // 32 a probe, the stored distances of its fixed rays (job.dumpFixed only)
 	double msBuild = 0, msReloc = 0, msFrames = 0;
-	long long rays = 0;                    // probe rays dispatched (fixed + update)
+	long long rays = 0;                    // probe rays traced: every probe's fixed rays per relocation / classification
+	                                       // pass, then the ACTIVE probes' (not Off, not skipped Asleep) N per update
+	double blasGrow = 0.0;                 // how far bakert grew each BLAS edge (0 = the true triangles; the trace re-tests)
+	long long blasGrowTris = 0;
 	std::string device;
 };
 

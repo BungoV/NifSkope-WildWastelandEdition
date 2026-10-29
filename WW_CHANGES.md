@@ -1,5 +1,19 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## RTXGI1 M1 + M1FIX: ray-traced DDGI volume (CLI only, nothing drawn yet)
+
+- **`NifSkope -no-gui rtddgi`**: a DDGI probe volume (our own code, from the 2019/2021 papers) traced on the GPU with
+  Vulkan ray queries, beside a double-precision CPU twin that runs the same rules. It dumps probes, irradiance,
+  distance and sky visibility for offline checks. No viewer switch reads it yet (M2).
+- **M1FIX, GPU = twin:** the GPU kernel trusted the hardware's hit on bakert's grown BLAS (triangles widened ~2 u at
+  Concord), so thin parts got fatter and alpha cards bigger. Every candidate is now re-tested on its true triangle
+  (t > 1e-4, holes at the true barycentrics), and faces at the same distance pick one winner on both sides (front
+  beats back, then the lower triangle number). Concord run: 0 of 1210 probe states and 0 of 38,720 fixed rays differ,
+  irradiance p99 4e-4 (was 119 states, median 14 %). Reds `--red hwhit` (the old GPU trace: 145 states differ) and
+  `--red notie` (no tie rule: 49 differ).
+- **Sky visibility** is the irradiance texel's alpha (cosine-weighted share of missing rays, linear); dump columns
+  V+X..V-Z. `--dump-fixed` writes the 32 fixed distances a probe. Unit gate: tests/rtddgi_math (13 checks + 13 reds).
+
 ## Lane GLTFCELL1 (2026-10-28, branch gltfcell1-20261028): glTF export of whole exterior cells
 
 - **Command:** `NifSkope -no-gui gltf-cell "<plugins|world|x,y|n>"|<file.wwcell> --out <abs .gltf> [--cells x,y ...]

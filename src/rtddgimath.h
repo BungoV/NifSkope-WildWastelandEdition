@@ -47,6 +47,8 @@ constexpr int kRelocIterations = 5;        // [J21 5]
 constexpr float kRelocStep = 0.2f;         // GUIDE 2.5: step <= 0.2 x spacing toward the farthest face
 constexpr float kRelocMinFront = 0.25f;    // ours: only a probe whose closest front face is nearer than this x spacing steps
 constexpr float kMiss = 1e27f;             // a miss's stored distance (the blend clamps it to the volume's distClamp)
+constexpr float kTraceTmin = 1e-4f;        // probebvh's ray / anyHitIn: a hit counts only at t > 1e-4 (the GPU's too, M1FIX)
+constexpr float kTieAbs = 1e-4f, kTieRel = 2e-6f;   // ours (M1FIX): the nearest hit's tie window, tieWindow
 enum State : int { kOff = 0, kAsleep = 1, kVigilant = 2 };
 
 // ------------------------------------------------------------------ vectors
@@ -225,6 +227,31 @@ inline V3 rayDir( int i, int n, const M3 & rot )
 	return normalize( mul( rot, sphericalFibonacci( i - kFixedRays, n - kFixedRays ) ) );
 }
 
+// ------------------------------------------------------------------ the nearest hit's tie rule (ours, M1FIX)
+/*! Faces a ray meets within this window of the nearest hit's t count as one surface (a flipped duplicate made for two
+ *  sides, a shell's back and a room's face on one plane, the GPU's float t against the CPU's double): 1e-4 +
+ *  2e-6 x (|o|_1 + t), above the float rounding of t at that origin, below a decal's offset.  GLSL: ddgiTieWindow */
+inline float tieWindow( V3 o, float t )
+{
+	return kTieAbs + kTieRel * ( std::fabs( o.x ) + std::fabs( o.y ) + std::fabs( o.z ) + t );
+}
+/*! Inside the window, face A (back = a one-sided face seen from behind, tri = its soup number) replaces the kept face
+ *  B when A is a front face and B a back face, or both are alike and A's number is lower. Both tracers then keep the
+ *  same face whatever order their trees visit them in (probebvh keeps the last visited, the hardware any).
+ *  GLSL: ddgiTieWins */
+inline bool tieWins( bool backA, int triA, bool backB, int triB )
+{
+#ifdef RTDDGI_RED_TIE
+	(void)backA;
+	(void)backB;
+	return triA < triB;   // red: the number alone, so a flipped duplicate's back face can win
+#else
+	if ( backA != backB )
+		return !backA;
+	return triA < triB;
+#endif
+}
+
 // ------------------------------------------------------------------ encoding and hysteresis [J21 4.2, 4.3]
 inline float gammaEncode( float x )   //! GLSL: ddgiGammaEncode
 {
@@ -264,9 +291,13 @@ inline float ageHysteresis( uint32_t age, float h )
 
 /*! one irradiance texel's update from a probe's blended rays (dirs, radiance rgb): the cosine-weighted mean x 0.5
  *  ([J19] eq. in 5.1, GUIDE 2.3; decoded x 2 pi it is the irradiance), encoded, blended with old by the texel
- *  hysteresis. old/out encoded rgb. Returns false when no ray faces the texel (out = old).  GLSL: blend.comp */
-inline bool blendIrradianceTexel( V3 t, const V3 * dirs, const float * rad, int nRays, float hBase, const float old[3], float out[3] )
+ *  hysteresis. old/out encoded rgb. Returns false when no ray faces the texel (out = old). hOut (when given) gets the
+ *  texel hysteresis used, for the sky-visibility texel beside it (blendSkyVisTexel).  GLSL: blend.comp */
+inline bool blendIrradianceTexel( V3 t, const V3 * dirs, const float * rad, int nRays, float hBase, const float old[3], float out[3],
+	float * hOut = nullptr )
 {
+	if ( hOut )
+		*hOut = hBase;
 	double s[3] = { 0, 0, 0 }, w = 0;
 	for ( int r = 0; r < nRays; r++ ) {
 		const float c = std::max( 0.0f, dot( t, dirs[r] ) );
@@ -292,6 +323,36 @@ inline bool blendIrradianceTexel( V3 t, const V3 * dirs, const float * rad, int 
 	const float h = texelHysteresis( hBase, old, enc );
 	for ( int k = 0; k < 3; k++ )
 		out[k] = enc[k] * ( 1.0f - h ) + old[k] * h;
+	if ( hOut )
+		*hOut = h;
+	return true;
+}
+/*! one sky-visibility texel (ours, bungo 10-29; GUIDE section 1, stored in the irradiance texel's alpha): the
+ *  cosine-weighted share of the blended rays that MISS (stored distance kMiss: nothing within the trace reach),
+ *  NOT gamma encoded, blended with old by h = the same texel's irradiance hysteresis this update (hOut above).
+ *  Geometry only: a --no-sky volume still has it. Returns false when no ray faces the texel (out = old).
+ *  GLSL: blend.comp */
+inline bool blendSkyVisTexel( V3 t, const V3 * dirs, const float * dist, int nRays, float h, float old, float * out )
+{
+	double s = 0, w = 0;
+	for ( int r = 0; r < nRays; r++ ) {
+		const float c = std::max( 0.0f, dot( t, dirs[r] ) );
+		if ( c <= 0.0f )
+			continue;
+		const double miss = dist[r] >= kMiss * 0.5f ? 1.0 : 0.0;
+#ifdef RTDDGI_RED_SKYVIS
+		s += miss;   // red: the plain share of the facing rays, not cosine weighted
+		w += 1.0;
+#else
+		s += double( c ) * miss;
+		w += c;
+#endif
+	}
+	if ( w <= 0.0 ) {
+		*out = old;
+		return false;
+	}
+	*out = float( s / w ) * ( 1.0f - h ) + old * h;
 	return true;
 }
 /*! one distance texel: weights max(0, cos)^sharpness (under kDistWeightMin skipped), the mean and mean square of

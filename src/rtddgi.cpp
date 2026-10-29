@@ -32,6 +32,7 @@ namespace {
 constexpr int kAttr = 8;     // floats a soup triangle in triAttr
 constexpr int kLight = 32;   // floats a light in the packed list (8 vec4, ddgi_common.glsl binding 13)
 constexpr unsigned kRedNoBack = 1u, kRedNoCheb = 2u, kRedNoBias = 4u;   // ddgi_common.glsl DDGI_RED_*
+constexpr unsigned kRedHwHit = 8u, kRedNoTie = 16u;   // M1FIX: hwhit is GPU only (the twin has no hardware hit to trust)
 
 void parallelFor( size_t n, const std::function<void( size_t )> & fn )
 {
@@ -82,6 +83,8 @@ unsigned redBits( const QString & red )
 		if ( t == QLatin1String( "noback" ) ) b |= kRedNoBack;
 		if ( t == QLatin1String( "nocheb" ) ) b |= kRedNoCheb;
 		if ( t == QLatin1String( "nobias" ) ) b |= kRedNoBias;
+		if ( t == QLatin1String( "hwhit" ) ) b |= kRedHwHit;
+		if ( t == QLatin1String( "notie" ) ) b |= kRedNoTie;
 	}
 	return b;
 }
@@ -244,17 +247,57 @@ struct Twin
 		}
 		return E;
 	}
+	// MIRROR trace.comp ddgiBackFace: a one-sided face seen from behind
+	bool backFace( int k, V3 d ) const
+	{
+		const float * v = &S.bvh.t[size_t( k ) * 9];
+		const V3 v0( v[0], v[1], v[2] );
+		const V3 nf = normalize( cross( V3( v[3], v[4], v[5] ) - v0, V3( v[6], v[7], v[8] ) - v0 ) );
+		return S.triAttr[size_t( k ) * kAttr + 3] < 0.5f && dot( nf, d ) > 0.0f;
+	}
+	// MIRROR trace.comp ddgiNearest: probebvh's nearest hit (t in (1e-4, tmax], holes pass), then the tie pass: of
+	// every face hit within tieWindow of that t, the one tieWins keeps (probebvh alone keeps the LAST one its tree
+	// visits at the smallest t, the hardware any one: a flipped duplicate's back or front by chance)
+	bool nearest( V3 o, V3 d, float tmax, double * tOut, int * triOut ) const
+	{
+		const double od[3] = { o.x, o.y, o.z }, dd[3] = { d.x, d.y, d.z };
+		double t = 0.0;
+		int tri = -1;
+		if ( !S.bvh.ray( od, dd, double( tmax ), &t, &tri ) || tri < 0 )
+			return false;
+		if ( !( red & kRedNoTie ) ) {
+			const double w = double( tieWindow( o, float( t ) ) );
+			int keep = tri;
+			bool keepBack = backFace( tri, d );
+			S.bvh.anyHitIn( od, dd, std::max( double( kTraceTmin ), t - w ), t + w, [&]( int k ) {
+				const bool b = backFace( k, d );
+				if ( tieWins( b, k, keepBack, keep ) ) {
+					keep = k;
+					keepBack = b;
+				}
+				return false;   // see every face in the window
+			} );
+			if ( keep != tri ) {
+				double tk = t;
+				if ( probebvh::Bvh::tri( &S.bvh.t[size_t( keep ) * 9], od, dd, tk ) )
+					t = tk;
+				tri = keep;
+			}
+		}
+		*tOut = t;
+		*triOut = tri;
+		return true;
+	}
 	// MIRROR trace.comp main
 	void traceRay( int p, int i, const M3 & rot )
 	{
 		const auto & P = S.prm;
 		const V3 o = probePos( p );
 		const V3 d = rayDir( i, N, rot );
-		const double od[3] = { o.x, o.y, o.z }, dd[3] = { d.x, d.y, d.z };
 		double t = 0.0;
 		int tri = -1;
 		float * rec = &rays[( size_t( p ) * size_t( N ) + size_t( i ) ) * 4];
-		if ( !S.bvh.ray( od, dd, double( P.sun[3] ), &t, &tri ) || tri < 0 ) {
+		if ( !nearest( o, d, P.sun[3], &t, &tri ) ) {
 			float sky[3] = { 0, 0, 0 };
 			if ( P.sky[0][3] > 0.5f && i >= kFixedRays ) {
 				const float R[6][3] = { { P.sky[0][0], P.sky[0][1], P.sky[0][2] }, { P.sky[1][0], P.sky[1][1], P.sky[1][2] },
@@ -311,12 +354,14 @@ struct Twin
 		for ( int ty = 0; ty < kIrrInterior; ty++ )
 			for ( int tx = 0; tx < kIrrInterior; tx++ ) {
 				float * at = &it[( ( ty + 1 ) * kIrrTile + tx + 1 ) * 4];
-				float out[3];
-				if ( blendIrradianceTexel( texelDir( tx, ty, kIrrInterior ), dirs.data(), rad.data(), nb, hBase, at, out ) ) {
+				const V3 td = texelDir( tx, ty, kIrrInterior );
+				float out[3], h = hBase, vis = at[3];
+				if ( blendIrradianceTexel( td, dirs.data(), rad.data(), nb, hBase, at, out, &h ) ) {
+					blendSkyVisTexel( td, dirs.data(), dd.data(), nb, h, at[3], &vis );   // M1FIX: the alpha
 					at[0] = out[0];
 					at[1] = out[1];
 					at[2] = out[2];
-					at[3] = 1.0f;
+					at[3] = vis;
 				}
 			}
 		float * dt = &dist[size_t( p ) * 512];
@@ -434,6 +479,12 @@ void runTwin( const Packed & S, const RtDdgiSpec & spec, RtDdgiVolume * out )
 		for ( int k = 0; k < 3; k++ )
 			out->offset[size_t( p ) * 3 + size_t( k )] = T.probes[size_t( p ) * 4 + size_t( k )];
 		out->state[size_t( p )] = T.state( p );
+	}
+	if ( spec.dumpFixed ) {   // the last trace of each probe's fixed rays (trace.comp writes the same rows)
+		out->fixedDist.resize( size_t( T.nP ) * kFixedRays );
+		for ( int p = 0; p < T.nP; p++ )
+			for ( int i = 0; i < kFixedRays; i++ )
+				out->fixedDist[size_t( p ) * kFixedRays + size_t( i )] = T.rays[( size_t( p ) * size_t( T.N ) + size_t( i ) ) * 4 + 3];
 	}
 	out->age = std::move( T.age );
 	out->irr = std::move( T.irr );
@@ -626,6 +677,7 @@ bool rtddgiRun( const ProbeSoup & soup, const WwCellLighting & lighting, const P
 		job.frames = spec.frames;
 		job.relocate = spec.relocate;
 		job.classify = spec.classify;
+		job.dumpFixed = spec.dumpFixed;
 		bakert::DdgiGpuOut g;
 		if ( bakert::ddgiGpuRun( job, &g ) ) {
 			done = true;
@@ -640,6 +692,8 @@ bool rtddgiRun( const ProbeSoup & soup, const WwCellLighting & lighting, const P
 			out->age.assign( g.age.begin(), g.age.end() );
 			out->irr = std::move( g.irr );
 			out->dist = std::move( g.dist );
+			out->fixedDist = std::move( g.fixedDist );
+			out->blasGrow = g.blasGrow;
 			out->rays = g.rays;
 			out->msBuild += g.msBuild;
 			out->msReloc = g.msReloc;
@@ -678,6 +732,13 @@ void rtddgiProbeIrradiance( const RtDdgiVolume & vol, int p, const float dir[3],
 		out[c] = e[c] * e[c] * 2.0f * kPi;
 }
 
+float rtddgiProbeSkyVis( const RtDdgiVolume & vol, int p, const float dir[3] )
+{
+	float e[4];   // the tile's alpha, linear (no gamma)
+	sampleTile( &vol.irr[size_t( p ) * 256], kIrrTile, 4, normalize( V3( dir[0], dir[1], dir[2] ) ), e );
+	return e[3];
+}
+
 bool rtddgiDump( const RtDdgiVolume & vol, const RtDdgiSpec & spec, const QString & dir, QString * err )
 {
 	if ( !QDir().mkpath( dir ) ) {
@@ -702,10 +763,11 @@ bool rtddgiDump( const RtDdgiVolume & vol, const RtDdgiSpec & spec, const QStrin
 		"relocate %d classify %d red '%s'\n", spec.rays, spec.frames, double( spec.hysteresis ), double( spec.sharpness ),
 		double( spec.bias ), unsigned( spec.seed ), spec.oneBounce ? 1 : 0, spec.noSky ? 1 : 0, spec.skipAsleep ? 1 : 0,
 		spec.relocate ? 1 : 0, spec.classify ? 1 : 0, qPrintable( spec.red ) );
-	std::fprintf( f, "# probes %d off %d asleep %d vigilant %d moved %d rays %lld ms build %.1f reloc %.1f frames %.1f skyClamped %d\n",
-		vol.probes, vol.off, vol.asleep, vol.vigilant, vol.moved, (long long)vol.rays, vol.msBuild, vol.msReloc, vol.msFrames,
-		vol.skyClamped );
-	std::fprintf( f, "# index\tix\tiy\tiz\tx\ty\tz\tstate\tage\tE+X r g b\tE-X\tE+Y\tE-Y\tE+Z\tE-Z (decoded x 2 pi)\n" );
+	std::fprintf( f, "# probes %d off %d asleep %d vigilant %d moved %d rays %lld ms build %.1f reloc %.1f frames %.1f skyClamped %d "
+		"blasGrow %.4f\n", vol.probes, vol.off, vol.asleep, vol.vigilant, vol.moved, (long long)vol.rays, vol.msBuild, vol.msReloc,
+		vol.msFrames, vol.skyClamped, vol.blasGrow );
+	std::fprintf( f, "# index\tix\tiy\tiz\tx\ty\tz\tstate\tage\tE+X r g b\tE-X\tE+Y\tE-Y\tE+Z\tE-Z (decoded x 2 pi)"
+		"\tV+X\tV-X\tV+Y\tV-Y\tV+Z\tV-Z (sky visibility)\n" );
 	static const float kAx[6][3] = { { 1, 0, 0 }, { -1, 0, 0 }, { 0, 1, 0 }, { 0, -1, 0 }, { 0, 0, 1 }, { 0, 0, -1 } };
 	for ( int p = 0; p < nP; p++ ) {
 		float pos[3];
@@ -719,6 +781,8 @@ bool rtddgiDump( const RtDdgiVolume & vol, const RtDdgiSpec & spec, const QStrin
 			rtddgiProbeIrradiance( vol, p, kAx[a], e );
 			std::fprintf( f, "\t%.6f\t%.6f\t%.6f", double( e[0] ), double( e[1] ), double( e[2] ) );
 		}
+		for ( int a = 0; a < 6; a++ )
+			std::fprintf( f, "\t%.6f", double( rtddgiProbeSkyVis( vol, p, kAx[a] ) ) );
 		std::fprintf( f, "\n" );
 		if ( vol.state[size_t( p )] != kOff && ag > 0 )
 			for ( int a = 0; a < 6; a++ )
@@ -740,6 +804,22 @@ bool rtddgiDump( const RtDdgiVolume & vol, const RtDdgiSpec & spec, const QStrin
 	if ( !bin( "rtddgi_irr.bin", kIrrTile, vol.irr ) || !bin( "rtddgi_dist.bin", kDistTile, vol.dist ) ) {
 		*err = QStringLiteral( "cannot write the tiles in %1" ).arg( dir );
 		return false;
+	}
+	if ( spec.dumpFixed && vol.fixedDist.size() >= size_t( nP ) * kFixedRays ) {   // M1FIX: the twin-vs-GPU ray check
+		std::FILE * x = std::fopen( QFile::encodeName( d.filePath( QStringLiteral( "rtddgi_fixed.tsv" ) ) ).constData(), "wb" );
+		if ( !x ) {
+			*err = QStringLiteral( "cannot write rtddgi_fixed.tsv in %1" ).arg( dir );
+			return false;
+		}
+		std::fprintf( x, "# rtddgi M1FIX fixed rays: path %s; index, state, then the 32 stored distances (1e27 miss, < 0 backface "
+			"= -0.2 t)\n", qPrintable( vol.path ) );
+		for ( int p = 0; p < nP; p++ ) {
+			std::fprintf( x, "%d\t%d", p, vol.state[size_t( p )] );
+			for ( int i = 0; i < kFixedRays; i++ )
+				std::fprintf( x, "\t%.9g", double( vol.fixedDist[size_t( p ) * kFixedRays + size_t( i )] ) );
+			std::fprintf( x, "\n" );
+		}
+		std::fclose( x );
 	}
 	return true;
 }
@@ -775,6 +855,7 @@ int rtddgiCli( const QStringList & args )
 		else if ( a == QLatin1String( "--no-reloc" ) ) spec.relocate = false;
 		else if ( a == QLatin1String( "--no-classify" ) ) spec.classify = false;
 		else if ( a == QLatin1String( "--trace-asleep" ) ) spec.skipAsleep = false;
+		else if ( a == QLatin1String( "--dump-fixed" ) ) spec.dumpFixed = true;
 		else if ( a == QLatin1String( "--sun" ) || a == QLatin1String( "--sky" ) ) {   // probegi's arguments
 			const QStringList v = nx.split( ',' );
 			const bool sun = a == QLatin1String( "--sun" );
@@ -833,7 +914,7 @@ int rtddgiCli( const QStringList & args )
 		std::fprintf( stderr, "usage: rtddgi --soup <file> --rect minX,minY,maxX,maxY --out <dir> [--light x,y,z,radius,r,g,b ...] "
 			"[--lights <file>] [--sun tx,ty,tz,r,g,b] [--sky r,g,b | 18 values] [--spacing s] [--zscale k] [--rays n] [--frames n] "
 			"[--hyst h] [--bias b] [--seed n] [--max-probes n] [--one-bounce] [--no-sky] [--gpu 0|1] [--no-place] [--no-reloc] "
-			"[--no-classify] [--trace-asleep] [--red noback,nocheb,nobias,norot]\n" );
+			"[--no-classify] [--trace-asleep] [--dump-fixed] [--red noback,nocheb,nobias,norot,hwhit,notie]\n" );
 		return 2;
 	}
 	for ( int k = 0; k < 4; k++ )
@@ -854,8 +935,8 @@ int rtddgiCli( const QStringList & args )
 		return 1;
 	}
 	std::printf( "rtddgi: %s; grid %d x %d x %d (%d probes: off %d, asleep %d, vigilant %d, moved %d); rays %lld; "
-		"ms build %.1f, relocate+classify %.1f, %d updates %.1f\n", qPrintable( vol.path ), vol.dims[0], vol.dims[1], vol.dims[2],
-		vol.probes, vol.off, vol.asleep, vol.vigilant, vol.moved, (long long)vol.rays, vol.msBuild, vol.msReloc, spec.frames,
-		vol.msFrames );
+		"ms build %.1f, relocate+classify %.1f, %d updates %.1f; BLAS grown %.4f u (re-tested on the true triangles)\n",
+		qPrintable( vol.path ), vol.dims[0], vol.dims[1], vol.dims[2], vol.probes, vol.off, vol.asleep, vol.vigilant, vol.moved,
+		(long long)vol.rays, vol.msBuild, vol.msReloc, spec.frames, vol.msFrames, vol.blasGrow );
 	return 0;
 }

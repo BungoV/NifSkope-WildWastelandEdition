@@ -1,33 +1,160 @@
 #version 460
 // Lane RTXGI1: the probe trace. One invocation a (probe, ray): ray query against bakert's BLAS (geometry 0 opaque,
-// geometry 1 alpha-tested, holes tested here), nearest hit. The CPU twin is src/rtddgi.cpp traceRay(); the rules:
+// geometry 1 alpha-tested), nearest hit. The CPU twin is src/rtddgi.cpp traceRay(); the rules:
 //   miss          sky radiance (0 without sky), distance DDGI_MISS
 //   backface      radiance 0, distance -0.2 t (a one-sided face seen from behind) [J21 4.1]
 //   fixed ray     distance only (rays < 32 are never blended [SDK])
 //   front face    albedo / pi x (sun behind a shadow ray + interior directional + the placed lights behind shadow
 //                 rays + the volume's own irradiance at the hit, the infinite bounce [J19 5.3]) + Le
 // mode 0 = an update (active probes, every ray), mode 1 = the fixed rays of every probe (relocation, classification).
+//
+// M1FIX (10-29): bakert builds the BLAS from GROWN triangles (src/bakert.cpp buildRt, lane GIBAKE2: each edge moved
+// out by 4e-6 x (|coord| + diagonal + 1) so the float hardware never misses a true edge hit). The hardware's answer is
+// therefore a superset: every candidate of both geometries (gl_RayFlagsNoOpaqueEXT) is re-tested here on its TRUE
+// triangle (binding 8) with probebvh's test and rules (t > 1e-4, t <= the nearest so far, the alpha hole at the TRUE
+// barycentrics), then a tie pass picks the same face the twin picks (rtddgimath.h tieWins). M1 trusted the hardware:
+// opaque rim hits committed unseen, holes read at the grown triangle's barycentrics, tmin 0. Red DDGI_RED_HWHIT keeps
+// that rule (GPU only), DDGI_RED_NOTIE drops the tie pass (both tracers).
 #extension GL_EXT_ray_query : require
 #extension GL_GOOGLE_include_directive : require
 layout( local_size_x = 64 ) in;
 #include "ddgi_common.glsl"
 
+// BLAS (geometry g, primitive i) -> its row in remap[] / verts[] (geometry 1 follows the P.counts.w opaque rows)
+uint ddgiPrim( uint g, uint i ) { return i + ( g == 1u ? uint( P.counts.w ) : 0u ); }
+
+// MIRROR probebvh.h Bvh::tri (in float): the ray against BLAS row pr's TRUE triangle (binding 8, not the grown copy
+// the BLAS was built from); u weighs vertex 1, v vertex 2 (the barycentrics ddgiHole and AlphaMask::hole take)
+bool ddgiTriTest( uint pr, vec3 o, vec3 d, out float t, out float u, out float v )
+{
+	t = 0.0;
+	u = 0.0;
+	v = 0.0;
+	const uint vb = pr * 9u;
+	const vec3 p0 = vec3( verts[vb], verts[vb + 1u], verts[vb + 2u] );
+	const vec3 e1 = vec3( verts[vb + 3u], verts[vb + 4u], verts[vb + 5u] ) - p0;
+	const vec3 e2 = vec3( verts[vb + 6u], verts[vb + 7u], verts[vb + 8u] ) - p0;
+	const vec3 pv = cross( d, e2 );
+	const float det = dot( e1, pv );
+	if ( abs( det ) < 1e-12 )
+		return false;
+	const float id = 1.0 / det;
+	const vec3 tv = o - p0;
+	u = dot( tv, pv ) * id;
+	if ( u < 0.0 || u > 1.0 )
+		return false;
+	const vec3 qv = cross( tv, e1 );
+	v = dot( d, qv ) * id;
+	if ( v < 0.0 || u + v > 1.0 )
+		return false;
+	t = dot( e2, qv ) * id;
+	return true;
+}
+
+// MIRROR src/rtddgi.cpp Twin::backFace: a one-sided face seen from behind
+bool ddgiBackFace( uint pr, vec3 d )
+{
+	const uint vb = pr * 9u;
+	const vec3 v0 = vec3( verts[vb], verts[vb + 1u], verts[vb + 2u] );
+	const vec3 e1 = vec3( verts[vb + 3u], verts[vb + 4u], verts[vb + 5u] ) - v0;
+	const vec3 e2 = vec3( verts[vb + 6u], verts[vb + 7u], verts[vb + 8u] ) - v0;
+	const vec3 nf = normalize( cross( e1, e2 ) );
+	return triAttr[uint( remap[pr] ) * 2u].w < 0.5 && dot( nf, d ) > 0.0;
+}
+
+// MIRROR probebvh.h Bvh::anyHitIn (tLo 1e-4, every face picked): is anything hit in (1e-4, tmax]?
 bool ddgiShadow( vec3 o, vec3 d, float tmax )
 {
 	if ( tmax <= 1e-3 )
 		return false;
+	const bool hw = ( uint( P.flags.w ) & DDGI_RED_HWHIT ) != 0u;
 	rayQueryEXT q;
-	rayQueryInitializeEXT( q, tlas, gl_RayFlagsTerminateOnFirstHitEXT, 0xFF, o, 0.0, d, tmax );
+	rayQueryInitializeEXT( q, tlas, gl_RayFlagsTerminateOnFirstHitEXT | ( hw ? gl_RayFlagsNoneEXT : gl_RayFlagsNoOpaqueEXT ), 0xFF, o,
+		0.0, d, tmax );
 	while ( rayQueryProceedEXT( q ) ) {
 		if ( rayQueryGetIntersectionTypeEXT( q, false ) != gl_RayQueryCandidateIntersectionTriangleEXT )
 			continue;
-		const uint g = rayQueryGetIntersectionGeometryIndexEXT( q, false );
-		const uint pr = rayQueryGetIntersectionPrimitiveIndexEXT( q, false ) + ( g == 1u ? uint( P.counts.w ) : 0u );
-		const vec2 bc = rayQueryGetIntersectionBarycentricsEXT( q, false );
-		if ( !ddgiHole( remap[pr], bc.x, bc.y ) )
+		const uint pr = ddgiPrim( rayQueryGetIntersectionGeometryIndexEXT( q, false ), rayQueryGetIntersectionPrimitiveIndexEXT( q, false ) );
+		if ( hw ) {
+			const vec2 bc = rayQueryGetIntersectionBarycentricsEXT( q, false );
+			if ( !ddgiHole( remap[pr], bc.x, bc.y ) )
+				rayQueryConfirmIntersectionEXT( q );
+			continue;
+		}
+		float t, u, v;
+		if ( ddgiTriTest( pr, o, d, t, u, v ) && t > DDGI_TMIN && t <= tmax && !ddgiHole( remap[pr], u, v ) )
 			rayQueryConfirmIntersectionEXT( q );
 	}
 	return rayQueryGetIntersectionTypeEXT( q, true ) == gl_RayQueryCommittedIntersectionTriangleEXT;
+}
+
+// MIRROR src/rtddgi.cpp Twin::nearest: the nearest hit on the true triangles (probebvh::Bvh::ray's rule), then the
+// tie pass: of every face hit within ddgiTieWindow of that t, the one ddgiTieWins keeps. bestPr = the BLAS row.
+bool ddgiNearest( vec3 o, vec3 d, float tmax, out uint bestPr, out float bestT )
+{
+	bestPr = 0u;
+	bestT = tmax;
+	const uint red = uint( P.flags.w );
+	if ( ( red & DDGI_RED_HWHIT ) != 0u ) {   // the refuter: M1's rule
+		rayQueryEXT q;
+		rayQueryInitializeEXT( q, tlas, gl_RayFlagsNoneEXT, 0xFF, o, 0.0, d, tmax );
+		while ( rayQueryProceedEXT( q ) ) {
+			if ( rayQueryGetIntersectionTypeEXT( q, false ) != gl_RayQueryCandidateIntersectionTriangleEXT )
+				continue;
+			const uint pr = ddgiPrim( rayQueryGetIntersectionGeometryIndexEXT( q, false ), rayQueryGetIntersectionPrimitiveIndexEXT( q, false ) );
+			const vec2 bc = rayQueryGetIntersectionBarycentricsEXT( q, false );
+			if ( !ddgiHole( remap[pr], bc.x, bc.y ) )
+				rayQueryConfirmIntersectionEXT( q );
+		}
+		if ( rayQueryGetIntersectionTypeEXT( q, true ) != gl_RayQueryCommittedIntersectionTriangleEXT )
+			return false;
+		bestT = rayQueryGetIntersectionTEXT( q, true );
+		bestPr = ddgiPrim( rayQueryGetIntersectionGeometryIndexEXT( q, true ), rayQueryGetIntersectionPrimitiveIndexEXT( q, true ) );
+		return true;
+	}
+	bool hit = false;
+	{
+		rayQueryEXT q;
+		rayQueryInitializeEXT( q, tlas, gl_RayFlagsNoOpaqueEXT, 0xFF, o, 0.0, d, tmax );
+		while ( rayQueryProceedEXT( q ) ) {
+			if ( rayQueryGetIntersectionTypeEXT( q, false ) != gl_RayQueryCandidateIntersectionTriangleEXT )
+				continue;
+			const uint pr = ddgiPrim( rayQueryGetIntersectionGeometryIndexEXT( q, false ), rayQueryGetIntersectionPrimitiveIndexEXT( q, false ) );
+			float t, u, v;
+			if ( ddgiTriTest( pr, o, d, t, u, v ) && t > DDGI_TMIN && t <= bestT && !ddgiHole( remap[pr], u, v ) ) {
+				bestT = t;
+				bestPr = pr;
+				hit = true;
+				rayQueryConfirmIntersectionEXT( q );   // the hardware culls past it; our own bestT decides
+			}
+		}
+	}
+	if ( !hit || ( red & DDGI_RED_NOTIE ) != 0u )
+		return hit;
+	// the tie pass: a short query over [t0 - w, t0 + w], nothing confirmed, every face in it seen
+	const float t0 = bestT;
+	const float w = ddgiTieWindow( o, t0 );
+	int keepTri = remap[bestPr];
+	bool keepBack = ddgiBackFace( bestPr, d );
+	rayQueryEXT q2;
+	rayQueryInitializeEXT( q2, tlas, gl_RayFlagsNoOpaqueEXT, 0xFF, o, max( t0 - w, 0.0 ), d, t0 + w );
+	while ( rayQueryProceedEXT( q2 ) ) {
+		if ( rayQueryGetIntersectionTypeEXT( q2, false ) != gl_RayQueryCandidateIntersectionTriangleEXT )
+			continue;
+		const uint pr = ddgiPrim( rayQueryGetIntersectionGeometryIndexEXT( q2, false ), rayQueryGetIntersectionPrimitiveIndexEXT( q2, false ) );
+		float t, u, v;
+		if ( ddgiTriTest( pr, o, d, t, u, v ) && t > DDGI_TMIN && t >= t0 - w && t <= t0 + w && !ddgiHole( remap[pr], u, v ) ) {
+			const bool back = ddgiBackFace( pr, d );
+			const int tri = remap[pr];
+			if ( ddgiTieWins( back, tri, keepBack, keepTri ) ) {
+				keepTri = tri;
+				keepBack = back;
+				bestPr = pr;
+				bestT = t;
+			}
+		}
+	}
+	return true;
 }
 
 // MIRROR src/rtddgi.cpp sampleVolume: the 8-probe irradiance at P (normal n, viewer direction o), x 2 pi
@@ -139,24 +266,12 @@ void main()
 		return;
 	const vec3 o = ddgiProbePos( p );
 	const vec3 d = ddgiRayDir( i, N );
-	rayQueryEXT q;
-	rayQueryInitializeEXT( q, tlas, gl_RayFlagsNoneEXT, 0xFF, o, 0.0, d, P.sun.w );
-	while ( rayQueryProceedEXT( q ) ) {
-		if ( rayQueryGetIntersectionTypeEXT( q, false ) != gl_RayQueryCandidateIntersectionTriangleEXT )
-			continue;
-		const uint g = rayQueryGetIntersectionGeometryIndexEXT( q, false );
-		const uint pr = rayQueryGetIntersectionPrimitiveIndexEXT( q, false ) + ( g == 1u ? uint( P.counts.w ) : 0u );
-		const vec2 bc = rayQueryGetIntersectionBarycentricsEXT( q, false );
-		if ( !ddgiHole( remap[pr], bc.x, bc.y ) )
-			rayQueryConfirmIntersectionEXT( q );
-	}
+	uint pr;
+	float t;
 	vec4 rec;
-	if ( rayQueryGetIntersectionTypeEXT( q, true ) != gl_RayQueryCommittedIntersectionTriangleEXT ) {
+	if ( !ddgiNearest( o, d, P.sun.w, pr, t ) ) {
 		rec = vec4( P.sky[0].w > 0.5 && i >= DDGI_FIXED ? ddgiSky( d ) : vec3( 0.0 ), DDGI_MISS );
 	} else {
-		const float t = rayQueryGetIntersectionTEXT( q, true );
-		const uint g = rayQueryGetIntersectionGeometryIndexEXT( q, true );
-		const uint pr = rayQueryGetIntersectionPrimitiveIndexEXT( q, true ) + ( g == 1u ? uint( P.counts.w ) : 0u );
 		const int tri = remap[pr];
 		const uint vb = pr * 9u;
 		const vec3 v0 = vec3( verts[vb], verts[vb + 1u], verts[vb + 2u] );

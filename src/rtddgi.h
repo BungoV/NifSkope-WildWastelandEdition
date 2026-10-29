@@ -50,8 +50,10 @@ struct RtDdgiSpec
 	bool noSky = false;         //!< misses are black (bounce_reference adds no sky)
 	int gpu = 0;                //!< 0 the CPU twin, 1 the GPU when it can (else the twin, and the path says why)
 	/*! refuters for the gates (comma list): "noback" backface hits shaded as front faces, "nocheb" the bounce sampler
-	 *  without Chebyshev, "nobias" without the self-shadow bias, "norot" no per-update rotation */
+	 *  without Chebyshev, "nobias" without the self-shadow bias, "norot" no per-update rotation; M1FIX: "hwhit" (GPU
+	 *  only) M1's trace that trusts the hardware's hit on bakert's grown BLAS, "notie" no tie pass (both runs) */
 	QString red;
+	bool dumpFixed = false;     //!< keep each probe's 32 fixed-ray distances for rtddgi_fixed.tsv (the CLI's --dump-fixed)
 	float rect[4] = { 0, 0, 0, 0 };   //!< minX minY maxX maxY (world), the placement's and the grid's xy box
 };
 
@@ -66,8 +68,10 @@ struct RtDdgiVolume
 	std::vector<float> offset;      //!< 3 a probe (relocation)
 	std::vector<int> state;         //!< rtddgi::State a probe
 	std::vector<quint32> age;       //!< updates blended a probe
-	std::vector<float> irr;         //!< 8 x 8 x 4 a probe: encoded rgb (gamma 5), 1
+	std::vector<float> irr;         //!< 8 x 8 x 4 a probe: encoded rgb (gamma 5), sky visibility (linear, M1FIX)
 	std::vector<float> dist;        //!< 16 x 16 x 2 a probe: mean, mean^2
+	std::vector<float> fixedDist;   //!< 32 a probe: its fixed rays' stored distances (spec.dumpFixed only)
+	double blasGrow = 0.0;          //!< GPU: how far bakert grew the BLAS's edges (the trace re-tests the true triangles)
 	// census
 	QString path;                   //!< "gpu (<device>)" or "cpu" + why
 	int probes = 0, off = 0, asleep = 0, vigilant = 0, moved = 0;
@@ -85,7 +89,10 @@ bool rtddgiRun( const ProbeSoup & soup, const WwCellLighting & lighting, const P
 
 /*! The gate's dump in folder `dir`:
  *    rtddgi_probes.tsv  per probe: index, ix iy iz, x y z (world, offset in), state, age, then E (decoded x 2 pi) on
- *                       +X -X +Y -Y +Z -Z, rgb each (18 columns); `#` lines: the spec and the census
+ *                       +X -X +Y -Y +Z -Z, rgb each (18 columns), then the sky visibility on the same six axes
+ *                       (6 columns, M1FIX); `#` lines: the spec and the census
+ *    rtddgi_fixed.tsv   (spec.dumpFixed) per probe: index, state, its 32 fixed rays' stored distances (1e27 a miss,
+ *                       negative a backface), the last trace of them (classification's when nothing moved after it)
  *    rtddgi_points.txt  per non-Off probe six lines "x y z nx ny nz" (the axes): tests/bounce_reference's points
  *    rtddgi_irr.bin / rtddgi_dist.bin  the tiles as stored (int32 probes, int32 S, then floats) */
 bool rtddgiDump( const RtDdgiVolume & vol, const RtDdgiSpec & spec, const QString & dir, QString * err );
@@ -93,10 +100,13 @@ bool rtddgiDump( const RtDdgiVolume & vol, const RtDdgiSpec & spec, const QStrin
 //! The irradiance (decoded x 2 pi) of probe p for unit direction (x, y, z), the bilinear tile read
 void rtddgiProbeIrradiance( const RtDdgiVolume & vol, int p, const float dir[3], float out[3] );
 
+//! The sky visibility (0..1, the cosine-weighted miss share, M1FIX) of probe p for unit direction (x, y, z), bilinear
+float rtddgiProbeSkyVis( const RtDdgiVolume & vol, int p, const float dir[3] );
+
 /*! `nifskope -no-gui rtddgi --soup <f> --rect minX,minY,maxX,maxY --out <dir> [--light x,y,z,radius,r,g,b ...]
  *  [--sun tx,ty,tz,r,g,b] [--sky r,g,b | 18 values] [--spacing s] [--zscale k] [--rays n] [--frames n] [--hyst h]
  *  [--seed n] [--one-bounce] [--no-sky] [--gpu 0|1] [--no-place] [--no-reloc] [--no-classify] [--trace-asleep]
- *  [--red noback,nocheb,nobias,norot]` (probegi's light/sun/sky arguments) */
+ *  [--dump-fixed] [--red noback,nocheb,nobias,norot,hwhit,notie]` (probegi's light/sun/sky arguments) */
 int rtddgiCli( const QStringList & args );
 
 #endif // RTDDGI_H

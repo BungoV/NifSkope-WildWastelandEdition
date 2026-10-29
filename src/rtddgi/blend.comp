@@ -1,7 +1,8 @@
 #version 460
 // Lane RTXGI1: the probe blend. One workgroup a probe: its rays into shared memory, then threads 0..35 update the
 // 6x6 irradiance interior and threads 36..231 the 14x14 distance interior (src/rtddgimath.h blendIrradianceTexel /
-// blendDistanceTexel, the CPU twin's arithmetic in float). The fixed rays (< 32) are not blended [SDK].
+// blendDistanceTexel, the CPU twin's arithmetic in float). The fixed rays (< 32) are not blended [SDK]. M1FIX: the
+// irradiance texel's alpha holds its sky visibility (blendSkyVisTexel).
 #extension GL_EXT_ray_query : require
 #extension GL_GOOGLE_include_directive : require
 layout( local_size_x = 256 ) in;
@@ -30,23 +31,25 @@ void main()
 	if ( t < 36u ) {
 		// MIRROR rtddgimath.h blendIrradianceTexel
 		const int tx = int( t ) % DDGI_IRR_N, ty = int( t ) / DDGI_IRR_N;
+		// + MIRROR rtddgimath.h blendSkyVisTexel (the alpha): the cosine-weighted miss share, no gamma, this texel's h
 		const vec3 td = ddgiTexelDir( tx, ty, DDGI_IRR_N );
 		vec3 s = vec3( 0.0 );
-		float w = 0.0;
+		float w = 0.0, sv = 0.0;
 		for ( int r = 0; r < nb; r++ ) {
 			const float c = max( 0.0, dot( td, sDir[r] ) );
 			if ( c <= 0.0 )
 				continue;
 			s += c * sRay[r].rgb;
+			sv += sRay[r].w >= DDGI_MISS * 0.5 ? c : 0.0;
 			w += c;
 		}
 		const uint at = p * uint( DDGI_IRR_S * DDGI_IRR_S ) + uint( ( ty + 1 ) * DDGI_IRR_S + tx + 1 );
 		if ( w > 0.0 ) {
-			const vec3 old = irr[at].rgb;
+			const vec4 old = irr[at];
 			const vec3 m = 0.5 * s / w;
 			const vec3 enc = vec3( ddgiGammaEncode( m.x ), ddgiGammaEncode( m.y ), ddgiGammaEncode( m.z ) );
-			const float h = ddgiTexelHysteresis( hBase, old, enc );
-			irr[at] = vec4( enc * ( 1.0 - h ) + old * h, 1.0 );
+			const float h = ddgiTexelHysteresis( hBase, old.rgb, enc );
+			irr[at] = vec4( enc * ( 1.0 - h ) + old.rgb * h, ( sv / w ) * ( 1.0 - h ) + old.a * h );
 		}
 	} else if ( t < 36u + 196u ) {
 		// MIRROR rtddgimath.h blendDistanceTexel

@@ -9,6 +9,7 @@
 #define DDGI_DIST_N 14
 #define DDGI_DIST_S 16
 #define DDGI_MISS 1e27
+#define DDGI_TMIN 1e-4   // rtddgimath.h kTraceTmin: probebvh's t > 1e-4
 #define DDGI_OFF 0
 #define DDGI_ASLEEP 1
 #define DDGI_VIGILANT 2
@@ -16,6 +17,8 @@
 #define DDGI_RED_NOBACK 1u   // backface hits shaded as front faces, distance kept
 #define DDGI_RED_NOCHEB 2u   // the bounce sampler without the Chebyshev factor
 #define DDGI_RED_NOBIAS 4u   // the bounce sampler without the self-shadow bias
+#define DDGI_RED_HWHIT 8u    // GPU only: M1's trace, the hardware's hit on the grown BLAS (no true-triangle test, tmin 0, no tie pass)
+#define DDGI_RED_NOTIE 16u   // no tie pass: the nearest face whichever the tree keeps (CPU and GPU)
 
 struct Params {
 	ivec4 dims;       // probes x y z, total
@@ -32,7 +35,7 @@ struct Params {
 };
 
 layout( std430, set = 0, binding = 0 ) buffer Rays { vec4 rays[]; };            // per probe x ray: radiance rgb, signed distance
-layout( std430, set = 0, binding = 1 ) buffer Irr { vec4 irr[]; };              // per probe: 8x8 encoded rgb
+layout( std430, set = 0, binding = 1 ) buffer Irr { vec4 irr[]; };              // per probe: 8x8 encoded rgb, a = sky visibility (M1FIX)
 layout( std430, set = 0, binding = 2 ) buffer Dist { vec2 dist[]; };            // per probe: 16x16 mean, mean^2
 layout( std430, set = 0, binding = 3 ) buffer Probes { vec4 probes[]; };        // offset xyz, state
 layout( std430, set = 0, binding = 4 ) buffer Age { uint age[]; };              // per probe: updates blended
@@ -153,6 +156,15 @@ vec3 ddgiRayDir( int i, int n )
 		return ddgiFibonacci( i, DDGI_FIXED );
 	const vec3 f = ddgiFibonacci( i - DDGI_FIXED, n - DDGI_FIXED );
 	return normalize( vec3( dot( pc.rot0.xyz, f ), dot( pc.rot1.xyz, f ), dot( pc.rot2.xyz, f ) ) );
+}
+// MIRROR rtddgimath.h tieWindow
+float ddgiTieWindow( vec3 o, float t ) { return 1e-4 + 2e-6 * ( abs( o.x ) + abs( o.y ) + abs( o.z ) + t ); }
+// MIRROR rtddgimath.h tieWins
+bool ddgiTieWins( bool backA, int triA, bool backB, int triB )
+{
+	if ( backA != backB )
+		return !backA;
+	return triA < triB;
 }
 // MIRROR rtddgimath.h gammaEncode / gammaDecode
 float ddgiGammaEncode( float x ) { return pow( max( x, 0.0 ), 1.0 / 5.0 ); }

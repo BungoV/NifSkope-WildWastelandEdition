@@ -97,6 +97,16 @@ void ddgiBarrier( Dev & D )
 	vk.vkCmdPipelineBarrier( D.cb, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, 0, 1, &mb, 0, nullptr, 0, nullptr );
 }
 
+// the shaders' writes made visible to the host's mapped reads (after the submit's fence) and to the next dispatch
+void ddgiHostBarrier( Dev & D )
+{
+	VkMemoryBarrier mb { VK_STRUCTURE_TYPE_MEMORY_BARRIER };
+	mb.srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
+	mb.dstAccessMask = VK_ACCESS_HOST_READ_BIT | VK_ACCESS_SHADER_READ_BIT;
+	vk.vkCmdPipelineBarrier( D.cb, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_HOST_BIT | VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+		0, 1, &mb, 0, nullptr, 0, nullptr );
+}
+
 // one dispatch of `groups` workgroups, split over y past 65535 (the shaders read a linear id)
 void ddgiDispatch( Dev & D, DdgiPipes & S, VkDescriptorSet set, int which, const DdgiPc & pc, uint64_t groups )
 {
@@ -161,6 +171,8 @@ bool ddgiGpuRun( const DdgiGpuJob & job, DdgiGpuOut * out )
 		out->why = "the soup's BLAS did not build (out of GPU memory?)";
 		return false;
 	}
+	out->blasGrow = I.inflate;   // M1FIX: the BLAS holds grown triangles when > 0; trace.comp re-tests the true ones
+	out->blasGrowTris = I.inflateTris;
 	DdgiGpuParams prm = job.params;
 	prm.counts[2] = int32_t( I.nTri );
 	prm.counts[3] = int32_t( I.nOpaque );
@@ -174,7 +186,9 @@ bool ddgiGpuRun( const DdgiGpuJob & job, DdgiGpuOut * out )
 			p0[size_t( p ) * 4 + size_t( k )] = job.offsets[size_t( p ) * 3 + size_t( k )];
 		p0[size_t( p ) * 4 + 3] = 2.0f;   // Vigilant until classified
 	}
-	bool ok = makeBuf( D, nProbes * N * 16, u, { kDevLocal, kHost }, rays )
+	// the rays stay on the device unless the fixed distances are read back (--dump-fixed)
+	bool ok = ( job.dumpFixed ? makeBuf( D, nProbes * N * 16, u, { kHost | kDevLocal, kHost }, rays )
+			: makeBuf( D, nProbes * N * 16, u, { kDevLocal, kHost }, rays ) )
 		&& makeBuf( D, nProbes * 64 * 16, u, { kHost | kDevLocal, kHost }, irr )
 		&& makeBuf( D, nProbes * 256 * 8, u, { kHost | kDevLocal, kHost }, dist )
 		&& makeBuf( D, nProbes * 16, u, { kHost | kDevLocal, kHost }, probes )
@@ -182,7 +196,7 @@ bool ddgiGpuRun( const DdgiGpuJob & job, DdgiGpuOut * out )
 		&& upload( D, job.triAttr.data(), job.triAttr.size() * 4, u, attr )
 		&& upload( D, job.lights.data(), job.lights.size() * 4, u, lights )
 		&& upload( D, &prm, sizeof prm, u, params );
-	ok = ok && irr.map && dist.map && probes.map && age.map;
+	ok = ok && irr.map && dist.map && probes.map && age.map && ( !job.dumpFixed || rays.map );
 	if ( ok ) {
 		std::memset( irr.map, 0, size_t( nProbes * 64 * 16 ) );
 		std::memset( dist.map, 0, size_t( nProbes * 256 * 8 ) );
@@ -235,11 +249,20 @@ bool ddgiGpuRun( const DdgiGpuJob & job, DdgiGpuOut * out )
 		ddgiDispatch( D, S, set, 0, ddgiPc( nullptr, 1, 0, 0, 32 ), fixedGroups );
 		ddgiBarrier( D );
 		ddgiDispatch( D, S, set, 3, ddgiPc( nullptr, it < iters ? 4u : 5u, 0, 0, 0 ), probeGroups );
+		ddgiHostBarrier( D );   // M1FIX: the host reads the states below
 		ok = submitWait( D );
 		out->rays += (long long)( nProbes * 32 );
 	}
 	const auto t2 = std::chrono::steady_clock::now();
 	out->msReloc = std::chrono::duration<double, std::milli>( t2 - t1 ).count();
+	// M1FIX: the updates trace only the active probes (trace.comp mode 0 returns for Off and skipped Asleep), and the
+	// states do not change during them, so count those (the twin's count), not every probe
+	long long nActive = 0;
+	if ( ok )
+		for ( uint64_t p = 0; p < nProbes; p++ ) {
+			const int st = int( static_cast<const float *>( probes.map )[p * 4 + 3] + 0.5f );
+			nActive += ( st == 0 || ( st == 1 && prm.flags[1] ) ) ? 0 : 1;   // rtddgimath.h kOff / kAsleep
+		}
 
 	// the updates: trace every ray of the active probes, blend, border
 	const uint64_t traceGroups = ( nProbes * N + 63 ) / 64;
@@ -254,13 +277,9 @@ bool ddgiGpuRun( const DdgiGpuJob & job, DdgiGpuOut * out )
 		ddgiDispatch( D, S, set, 1, ddgiPc( rot, 2, uint32_t( f ), 0, N ), nProbes );
 		ddgiBarrier( D );
 		ddgiDispatch( D, S, set, 2, ddgiPc( rot, 3, uint32_t( f ), 0, 0 ), borderGroups );
-		VkMemoryBarrier mb { VK_STRUCTURE_TYPE_MEMORY_BARRIER };
-		mb.srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
-		mb.dstAccessMask = VK_ACCESS_HOST_READ_BIT | VK_ACCESS_SHADER_READ_BIT;
-		vk.vkCmdPipelineBarrier( D.cb, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_HOST_BIT | VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
-			0, 1, &mb, 0, nullptr, 0, nullptr );
+		ddgiHostBarrier( D );
 		ok = submitWait( D );
-		out->rays += (long long)( nProbes * N );
+		out->rays += nActive * (long long)N;
 	}
 	out->msFrames = std::chrono::duration<double, std::milli>( std::chrono::steady_clock::now() - t2 ).count();
 	if ( ok ) {
@@ -272,6 +291,13 @@ bool ddgiGpuRun( const DdgiGpuJob & job, DdgiGpuOut * out )
 		std::memcpy( out->age.data(), age.map, out->age.size() * 4 );
 		std::memcpy( out->irr.data(), irr.map, out->irr.size() * 4 );
 		std::memcpy( out->dist.data(), dist.map, out->dist.size() * 4 );
+		if ( job.dumpFixed ) {   // rays[p * N + i].w, i < 32: the last trace of each probe's fixed rays
+			out->fixedDist.resize( size_t( nProbes ) * 32 );
+			const float * r = static_cast<const float *>( rays.map );
+			for ( uint64_t p = 0; p < nProbes; p++ )
+				for ( int i = 0; i < 32; i++ )
+					out->fixedDist[size_t( p ) * 32 + size_t( i )] = r[( p * N + uint64_t( i ) ) * 4 + 3];
+		}
 	} else {
 		out->why = "a DDGI submit failed (lost device or out of memory)";
 	}

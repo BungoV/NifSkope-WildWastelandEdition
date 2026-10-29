@@ -1,10 +1,10 @@
 // rtddgi_math_test -- lane RTXGI1 M1 (2026-10-29): the DDGI probe math of src/rtddgimath.h, no Qt, no GPU.
 //
 //   g++ -O2 -std=c++17 -I src tests/rtddgi_math/rtddgi_math_test.cpp -o rtddgi_math_test -static
-//   ./rtddgi_math_test            -> every check PASS, last line "RTDDGI_MATH PASS 11", exit 0
+//   ./rtddgi_math_test            -> every check PASS, last line "RTDDGI_MATH PASS 13", exit 0
 //   -DRTDDGI_RED_<NAME>           -> swaps a wrong rule into the header; check <name> must FAIL (exit 1)
 //
-// Checks and their reds (tests/rtddgi_math/run.sh builds all twelve and asserts each):
+// Checks and their reds (tests/rtddgi_math/run.sh builds all fourteen and asserts each):
 //   oct     octahedral encode/decode round trip + texel centres            RED_OCT     no lower-hemisphere fold
 //   fib     spherical Fibonacci covers the sphere; rotation; fixed rays     RED_FIB     strata from the pole only
 //   hyst    [J21] per-texel thresholds 0.25 / 0.8, age ramp                 RED_HYST    thresholds swapped
@@ -16,7 +16,10 @@
 //   norm    blend of uniform radiance L decodes (x 2 pi) to pi L            RED_NORM    no 0.5
 //   class   classification Off / Asleep / Vigilant                          RED_CLASS   threshold 0.75
 //   reloc   relocation through a backface, and away from a near face        RED_RELOC   never moves through
-// Every check is independent of the others' reds (a red build may pass the other ten).
+//   tie     M1FIX nearest-hit tie: front beats back, then the lower number    RED_TIE     the number alone
+//   skyvis  M1FIX sky visibility: cosine-weighted miss share, no gamma, the   RED_SKYVIS  plain share of facing rays
+//           irradiance texel's own h
+// Every check is independent of the others' reds (a red build may pass the other twelve).
 
 #include "rtddgimath.h"
 
@@ -275,6 +278,53 @@ void checkReloc()
 	report( "reloc", through && away, "through the backface |offset| %.2f (z %.2f), off the floor z %.2f", length( o1 ), o1.z, o2.z );
 }
 
+void checkTie()
+{
+	// M1FIX: inside the tie window a front face beats a back face whatever their numbers; alike faces, the lower number
+	const bool frontOverBack = tieWins( false, 9, true, 3 ) && !tieWins( true, 3, false, 9 );
+	const bool lowerAmongLike = tieWins( false, 3, false, 9 ) && !tieWins( false, 9, false, 3 ) && tieWins( true, 3, true, 9 );
+	const bool notItself = !tieWins( false, 5, false, 5 ) && !tieWins( true, 5, true, 5 );
+	const float w = tieWindow( V3( 10000, -5000, 7000 ), 1000 );   // 1e-4 + 2e-6 x (22000 + 1000)
+	report( "tie", frontOverBack && lowerAmongLike && notItself && std::fabs( w - 0.0461f ) < 1e-5f,
+		"front beats back %g, lower number among alike %g, window at |o|_1 22000 t 1000: %.5f (0.0461)", frontOverBack, lowerAmongLike, w );
+}
+
+void checkSkyVis()
+{
+	// M1FIX: an open cone of sky above (cos > 0.5, a courtyard), solid elsewhere. For the +Z texel the cosine-weighted
+	// miss share is sin^2(60 deg) = 0.75; the plain share of the facing rays (the red) is 0.5. No gamma: h 0.5 over an
+	// old 0.2 gives 0.475 (a gamma-5 encode would give 0.944 for the first).
+	const int M = 20000;
+	std::vector<V3> dirs;
+	std::vector<float> dist;
+	for ( int i = 0; i < M; i++ ) {
+		dirs.push_back( sphericalFibonacci( i, M ) );
+		dist.push_back( dirs.back().z > 0.5f ? kMiss : 300.0f );
+	}
+	float v0 = -1.0f, v1 = -1.0f;
+	blendSkyVisTexel( V3( 0, 0, 1 ), dirs.data(), dist.data(), M, 0.0f, 0.0f, &v0 );
+	blendSkyVisTexel( V3( 0, 0, 1 ), dirs.data(), dist.data(), M, 0.5f, 0.2f, &v1 );
+	// the h it is given is the irradiance texel's own (blendIrradianceTexel's hOut): uniform L 0.3 over an old 0, the
+	// texel's h recomputed here from the same encode and thresholds (so the other checks' reds leave this one alone)
+	std::vector<float> rad( size_t( M ) * 3, 0.3f );
+	const float old3[3] = { 0, 0, 0 };
+	float out[3], h = -1.0f, encNew[3];
+	blendIrradianceTexel( V3( 0, 0, 1 ), dirs.data(), rad.data(), M, 0.97f, old3, out, &h );
+	double s = 0, wsum = 0;
+	for ( int r = 0; r < M; r++ ) {
+		const float c = std::max( 0.0f, dot( V3( 0, 0, 1 ), dirs[size_t( r )] ) );
+		if ( c <= 0.0f )
+			continue;
+		s += double( c ) * 0.3;
+		wsum += c;
+	}
+	for ( int k = 0; k < 3; k++ )
+		encNew[k] = gammaEncode( float( 0.5 * s / wsum ) );
+	const float hWant = texelHysteresis( 0.97f, old3, encNew );
+	report( "skyvis", std::fabs( v0 - 0.75f ) < 0.005f && std::fabs( v1 - 0.475f ) < 0.005f && std::fabs( h - hWant ) < 1e-6f && hWant < 0.9f,
+		"open cone cos > 0.5: %.4f (0.75), h 0.5 over 0.2: %.4f (0.475), hOut - the texel's h %.2g (0)", v0, v1, h - hWant );
+}
+
 } // namespace
 
 int main()
@@ -290,6 +340,8 @@ int main()
 	checkNorm();
 	checkClass();
 	checkReloc();
+	checkTie();
+	checkSkyVis();
 	std::printf( "RTDDGI_MATH %s %d%s\n", g_fail ? "FAIL" : "PASS", g_fail ? g_fail : g_pass, g_fail ? " failed" : "" );
 	return g_fail ? 1 : 0;
 }
