@@ -1,5 +1,14 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## Batch merge 10-29 (merge1029): FAVCAM1, SPAWNEYE1, VOLPLACE2, GLTFCELL1, CELLUNI6, LANDSPEC9, WEATHERBLEND6, GIWALL2, FOGGI1
+
+- **CELLUNI6 on FRAMESPEED2's one TAA path:** FRAMESPEED2 (already in main) runs the temporal AA after the tone map
+  only, so CELLUNI6's `nonlinear` item (the depth-format cache on HDR-off frames) is what main does now: the merge keeps
+  main's path, with CELLUNI6's context-life cache key (`depthcfg`) and the trust-point GL error reads (`glerror`).
+  `WW_CELL_UNI6_RED=nonlinear` no longer changes the product (its unit check in tests/celluni6 stays).
+- **WEATHERBLEND6 x LANDSPEC8:** the region walk's camera block loops over LANDSPEC8's grid (uGridsToLoad / 2).
+- src/wwswitchstages.inc regenerated with tools/wwswitch_survey.py after the merges.
+
 ## Lane GLTFCELL1 (2026-10-28, branch gltfcell1-20261028): glTF export of whole exterior cells
 
 - **Command:** `NifSkope -no-gui gltf-cell "<plugins|world|x,y|n>"|<file.wwcell> --out <abs .gltf> [--cells x,y ...]
