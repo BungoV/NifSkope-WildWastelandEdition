@@ -6,6 +6,7 @@ BSD License - see nifskope.h
 
 #include "gl/cellgpucull.h"
 #include "gl/cellbindless.h"	// lane BINDLESS2
+#include "gl/cellgpucullgate.h"	// lane SIGNDROP1: the occluder gate (tests/signdrop1 compiles it too)
 
 #include "gl/cellcull.h"
 #include "gl/cellgrass.h"
@@ -43,7 +44,8 @@ namespace
 
 struct Switches
 {
-	bool on = true, cone = true, occ = true, frustum = true, hard = false, nocull = false;
+	// lane SIGNDROP1: atocc = an alpha-testing draw may stand in the prepass again (the old gate)
+	bool on = true, cone = true, occ = true, frustum = true, hard = false, nocull = false, atocc = false;
 	Switches()
 	{
 		on = qEnvironmentVariable( "WW_GPUDRIVEN_B", QStringLiteral( "1" ) ).trimmed() != QLatin1String( "0" );
@@ -54,6 +56,7 @@ struct Switches
 		for ( const QString & r : reds ) {
 			hard = hard || r.trimmed() == QLatin1String( "hard" );
 			nocull = nocull || r.trimmed() == QLatin1String( "nocull" );
+			atocc = atocc || r.trimmed() == QLatin1String( "atocc" );
 		}
 	}
 };
@@ -106,6 +109,8 @@ struct Learned
 	bool vertexOk = false, occluderProgram = false, opaque = false, cullOn = false, cullBack = false, ccw = true;
 	// a culled fragment would have failed the depth test: it may leave neither colour, depth nor stencil behind
 	bool candidate = false;
+	// lane SIGNDROP1: the draw ran with alphaFlags != 0 (fo4_default.frag may discard): never an occluder
+	bool discards = false;
 };
 
 struct Rec
@@ -128,6 +133,7 @@ struct Frame
 	// census
 	qint64 shapes = 0, candidates = 0, occluders = 0, items = 0, fallback = 0, mdi = 0, mdiCmds = 0, rangeDraws = 0;
 	qint64 trisKept = 0;
+	qint64 atRefused = 0;	// lane SIGNDROP1: occluders refused for their alpha test
 	std::uint32_t counts[8] = {};
 	double cpuMs = 0.0, gpuMs[3] = { -1.0, -1.0, -1.0 };
 	QString why;
@@ -824,7 +830,7 @@ void prepare( Scene * scene )
 	std::vector<std::uint32_t> items;	// (job, cluster) pairs
 	std::vector<Occluder> occluders;
 	f.shapes = qint64( f.notes.size() );
-	f.candidates = f.occluders = f.fallback = f.trisKept = 0;
+	f.candidates = f.occluders = f.fallback = f.trisKept = f.atRefused = 0;
 	f.mdi = f.mdiCmds = f.rangeDraws = 0;
 	static std::vector<std::uint32_t> ranges;
 	for ( const auto & nn : f.notes ) {
@@ -898,9 +904,22 @@ void prepare( Scene * scene )
 			f.fallback++;
 		for ( std::size_t k = 0; k + 1 < rec.ranges.size(); k += 2 )
 			f.trisKept += rec.ranges[k + 1];
-		// an occluder: drawn solid and opaque last frame, through a program whose depth the prepass reproduces
-		if ( occ && n.queue != GpuDriven::AlphaTest && L.occluderProgram && L.opaque && ( !L.cullOn || ( L.cullBack && L.ccw ) ) )
+		/* an occluder: drawn solid and opaque last frame, through a program whose depth the prepass reproduces.
+		 * lane SIGNDROP1: and with no alpha test. The queue reads the NiAlphaProperty, but a BGSM's test wins in
+		 * setupProgram, and the depth-only prepass writes the cut-outs solid: a broken wall's hole culled everything
+		 * seen through it (Concord c3: the SALE sign, the shelves, the door). gl/cellgpucullgate.h; red atocc */
+		GpuDrivenBGate::Seen seen;
+		seen.alphaTestQueue = n.queue == GpuDriven::AlphaTest;
+		seen.occluderProgram = L.occluderProgram;
+		seen.opaque = L.opaque;
+		seen.cullOn = L.cullOn;
+		seen.cullBack = L.cullBack;
+		seen.ccw = L.ccw;
+		seen.discards = L.discards;
+		if ( occ && GpuDrivenBGate::occluder( seen, sw().atocc ) )
 			occluders.push_back( { sh, nullptr, L.cullOn } );
+		else if ( occ && GpuDrivenBGate::occluder( seen, true ) )
+			f.atRefused++;
 	}
 	// lane LIVESET2: each Rec's address only now, after the last insert; an insert that grows f.recs moves its values,
 	// and the kept &rec dangled (the segfault a frame after the HDR depth turned renderbuffer, STEX/TONEMAP1 red)
@@ -1153,6 +1172,16 @@ void learn( Shape * sh, const void * program )
 	L.cullOn = g->glIsEnabled( GL_CULL_FACE );
 	L.cullBack = cullMode == GL_BACK;
 	L.ccw = frontFace == GL_CCW;
+	/* lane SIGNDROP1: the alpha test this draw runs with, read with the state above (once per 16 frames a shape). An
+	 * MDI follower is learned under its leader's setup, which BSShape::wwMdiDraw joins only with the same packet */
+	{
+		auto * P = const_cast<NifSkopeOpenGLContext::Program *>( static_cast<const NifSkopeOpenGLContext::Program *>( program ) );
+		const int la = P->uniLocation( "alphaFlags" );
+		GLint af = 0;
+		if ( la >= 0 )
+			g->glGetUniformiv( GLuint( P->id ), la, &af );
+		L.discards = GpuDrivenBGate::alphaDiscards( int( af ) );
+	}
 	L.opaque = L.candidate && depthMask && depthFunc == GL_LEQUAL && offFill && of == 1.0f && ou == 2.0f && g->glIsEnabled( GL_MULTISAMPLE )
 		&& ( !stencil || ( sf == GL_ALWAYS && sbf == GL_ALWAYS ) ) && !g->glIsEnabled( GL_SAMPLE_ALPHA_TO_COVERAGE )
 		&& !g->glIsEnabled( GL_SAMPLE_COVERAGE ) && !g->glIsEnabled( GL_SAMPLE_MASK ) && !g->glIsEnabled( GL_RASTERIZER_DISCARD );
@@ -1216,14 +1245,15 @@ void finish()
 	if ( f.flushing && GpuDriven::census() ) {
 		const Gpu * gp = gpus().contains( QOpenGLContext::currentContext() ) ? &gpus()[QOpenGLContext::currentContext()] : nullptr;
 		GpuDriven::censusLine( "b", QStringLiteral( "%1 shapes %2 candidates %3 occluders %4 fallback %5 clusters %6 visible %7 "
-			"frustum %8 cone %9 occluded %10 tris %11/%12 multidraws %13 commands %14 rangedraws %15" )
+			"frustum %8 cone %9 occluded %10 tris %11/%12 multidraws %13 commands %14 rangedraws %15 alphatest-refused %16" )
 			.arg( f.why ).arg( f.shapes ).arg( f.candidates ).arg( f.occluders ).arg( f.fallback ).arg( f.items )
 			.arg( f.counts[0] ).arg( f.counts[1] ).arg( f.counts[2] ).arg( f.counts[3] ).arg( f.counts[4] ).arg( f.trisKept )
-			.arg( f.mdi ).arg( f.mdiCmds ).arg( f.rangeDraws ) );
+			.arg( f.mdi ).arg( f.mdiCmds ).arg( f.rangeDraws ).arg( f.atRefused ) );
 		if ( gp )
 			GpuDriven::censusLine( "b arena", QStringLiteral( "shapes %1 clusters %2/%3 garbage %4 builds %5 rebuilds %6%7" )
 				.arg( gp->clusters.size() ).arg( gp->mUsed ).arg( gp->mCap ).arg( gp->mGarbage ).arg( gp->builds )
-				.arg( gp->compactions ).arg( sw().hard ? QStringLiteral( " RED hard" ) : sw().nocull ? QStringLiteral( " RED nocull" ) : QString() ) );
+				.arg( gp->compactions ).arg( sw().hard ? QStringLiteral( " RED hard" ) : sw().nocull ? QStringLiteral( " RED nocull" )
+				: sw().atocc ? QStringLiteral( " RED atocc" ) : QString() ) );
 		std::fprintf( stderr, "gpudriven b time: cpu %.3f ms gpu prepass %.3f hiz %.3f cull %.3f ms\n", f.cpuMs, f.gpuMs[0],
 			f.gpuMs[1], f.gpuMs[2] );
 	}
