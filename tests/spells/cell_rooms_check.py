@@ -53,6 +53,22 @@ the plugin is read here, every ray is traced here through the run's own soup.psp
         recess2 (Goodneighbor, 22h): --darkshare 0.1; reds GI_CHECK_TIE=0 (tiepick) and GI_CHECK_BOTH=0 (firstslot)
         FAIL. hinside corner (Concord Hardware, noon) --box 945,200,1055,410 --maxx 5; red GI_CHECK_LONE=0 (lonesky) FAILS.
         hinside floor by the open front: --upshare 0.01 --minmed 0.5; the red dump (WW_CELL_GI_RED=noskyfloor) FAILS.
+  giwall [--expect fail]
+        Lane GIWALL2: synthetic, no exe, no game data. A store open to the street (one room with it, as Concord's
+        hardware store is), 267-unit GI voxels, 16-unit room cells, every wall one cell thick; voxels whose centre is in
+        the store's air hold the dark indoor light, every other voxel the sunlit street's. Both GI paths (the march,
+        gi_sample; the volumes, gi_volume), each with the fix and with the red (GI_CHECK_GIWALL=0, the shader's
+        WW_CELL_GIWALL_RED=off) in the same run:
+          wall   the street wall and the ceiling hold a voxel column and layer (their centres in solid): a ceiling
+                 point by the wall reads the indoor value (within 1%) with the fix, 90%+ of the street's with the red
+          thin   the column and layer stand in open air just past a thin wall and ceiling: the fix reads the indoor
+                 value; the red leaks (the march 5%+: its taps stepped over the wall; the volumes 25%+: no test)
+          recess an outdoor recess 300 deep, 40 wide, cut into a solid block that holds a sealed dark pocket: no voxel
+                 centre is seen from the back wall; the fix takes the buried voxels (centres in the block's wall it
+                 faces), the street's light within 1%, never the pocket's black (GIBLACK1)
+          pocket the recess read as an interior grid (the gap fill on): the room fill's buried voxels, within 1%
+          taps   the red's taps are GISHADE1's exactly: 20000 random segments, gi_wall under the red == the old rule
+        Run with GI_CHECK_GIWALL=0 (the fix rows take the red) and --expect fail: it FAILS.
 One verdict line per subcommand last; exit 0 on PASS, 1 on FAIL.
 """
 import math
@@ -584,14 +600,14 @@ def gi_sample(G, R, P, N, fill=None, sky=False):
         if out is not None and (out[3] > 0.01 or not fill):
             return out
         if fill:
-            fo = gi_fill(G, Ls, P, N, True)
+            fo = gi_fill(G, Ls, P, N, True, R, frm)
             if fo[3] > 0.01:
                 GI_FILLED[0] += 1
                 return fo
             if out is not None:
                 return out
         if not SEE_RED[0] and (not lend or 0 in room_at(R, frm)):
-            so = gi_seen_fill(G, R, P, N, frm)
+            so = gi_seen_fill(G, R, P, N, frm, sky)
             if so[3] > 0.01:
                 return so
         if lend:
@@ -612,15 +628,18 @@ def gi_sample(G, R, P, N, fill=None, sky=False):
     return s
 
 
-def gi_fill(G, L, P, N, rooms):
+def gi_fill(G, L, P, N, rooms, R=None, frm=None):
     """cellGiFillAt (lane GICAL1): the weighted mean of the valid voxels of the 4x4x4 block round the sample (within
-    2.5 voxels, weight (1 - d / 2.5)^2), of room L's slots when the grid has rooms (L None there: nothing)."""
+    2.5 voxels, weight (1 - d / 2.5)^2), of room L's slots when the grid has rooms (L None there: nothing).
+    R, frm (lane GIWALL2): a room's fill keeps only the voxels seen from frm (gi_wall), none seen the buried ones, never
+    one behind a wall; GI_CHECK_GIWALL=0: every one."""
     dm = np.array(G['dims'])
     g = (P + N * 0.5 * G['voxel'] - G['origin']) / G['voxel'] - 0.5
     i0 = np.floor(g).astype(int)
     sl = (0 if N[0] >= 0 else 1, 2 if N[1] >= 0 else 3, 4 if N[2] >= 0 else 5)
     n2 = N * N
-    s, ws = np.zeros(4), 0.0
+    s, ws, sb, wb = np.zeros(4), 0.0, np.zeros(4), 0.0
+    see = rooms and R is not None and frm is not None and not GIWALL_RED[0] and not SEE_RED[0]
     if rooms and L is None:
         return s
     for k in range(64):
@@ -642,10 +661,16 @@ def gi_fill(G, L, P, N, rooms):
         v = sum(n2[a] * src[sl[a], c[2], c[1], c[0]] for a in range(3))
         if v[3] <= 0:
             continue
+        sn = gi_wall(R, frm, G['origin'] + (c + 0.5) * G['voxel'], True) if see else 2
+        if sn == 0:
+            continue   # lane GIWALL2: a wall between the surface and the voxel's centre
         w *= w
+        if sn == 1:
+            sb, wb = sb + w * v, wb + w   # its centre in the wall the surface faces: the last answer
+            continue
         s += w * v
         ws += w
-    return s / ws if ws > 0 else np.zeros(4)
+    return s / ws if ws > 0 else sb / wb if wb > 0 else np.zeros(4)
 
 
 TIE_RED = [os.environ.get('GI_CHECK_TIE', '1') == '0']   # lane GIDARK1: red tiepick (WW_CELL_PV_RED=tiepick): a tie takes the answer nearer the plain trilinear (GIBLACK2)
@@ -654,6 +679,7 @@ BOTH_RED = [os.environ.get('GI_CHECK_BOTH', '1') == '0']   # lane GIDARK1: red f
 RED_EMPTY = [False]   # red emptyslot: the twin weighs a room's empty slots (the old shader: black, the no-probe marker)
 SEE_RED = [os.environ.get('GI_CHECK_SEE', '1') == '0']   # lane GISHADE1: red nosee (the shader's WW_CELL_PV_RED=nosee)
 LASTFILL_RED = [os.environ.get('GI_CHECK_LASTFILL', '1') == '0']   # lane WALLSTACK1: red nolastfill (the shader's WW_CELL_PV_RED=nolastfill)
+GIWALL_RED = [os.environ.get('GI_CHECK_GIWALL', '1') == '0']   # lane GIWALL2: red WW_CELL_GIWALL_RED=off (GISHADE1's taps, no wall test in the fill or the volumes)
 GI_PLAIN = [0]     # samples that found rooms but no room with weight: the shader's plain (unclamped) trilinear
 GI_FILL = [os.environ.get('GI_CHECK_FILL', '1') != '0']   # lane GICAL1: the gap fill (GI_CHECK_FILL=0: the shader pin WW_CELL_GI_FILL=0)
 GI_FILLED = [0]    # samples the fill answered
@@ -708,11 +734,11 @@ def strand_answer(G, R, P, N, i0, f, sl, n2, L, Ce):
     if ws > 0:
         return s / ws, 6
     if indoor:
-        fo = gi_fill(G, L, P, N, True)
+        fo = gi_fill(G, L, P, N, True, R, Ce)
         if fo[3] > 0.01:
             return fo, 7
     if not SEE_RED[0]:
-        so = gi_seen_fill(G, R, P, N, Ce)
+        so = gi_seen_fill(G, R, P, N, Ce, True)   # a stranded surface: a sky-lit grid
         if so[3] > 0.01:
             return so, 8
     if indoor:
@@ -803,38 +829,169 @@ def see_from(R, P, N):
     return bq if bq is not None else P + N * 0.75 * R['cell']
 
 
+def gi_wall(R, frm, C, loose=False):
+    """cellGiWall (lane GIWALL2): 2 seen (no solid fine cell on the segment from the view point to the voxel's centre,
+    the centre air), 1 buried (loose only: the centre in the wall the surface faces, air up to the first solid tap and
+    solid from there on), 0 not seen (a solid centre, or air past a wall). The taps run to the centre, never more than
+    half a cell apart on any axis. GI_CHECK_GIWALL=0: GISHADE1's taps (every half cell along the segment, at most 12,
+    the centre left out), 2 or 0."""
+    d = np.asarray(C, float) - frm
+    red = GIWALL_RED[0]
+    if red:
+        nt = min(max(int(math.ceil(float(np.linalg.norm(d)) / (0.5 * R['cell']))), 1), 12)
+    else:
+        nt = min(max(int(math.ceil(float(np.abs(d).max()) / (0.5 * R['cell']))), 1), 255)
+    hit = False
+    for j in range(1, (nt if red else nt + 1) + 1):
+        s = room_solid(R, frm + d * (j / (nt + 1.0)))
+        if s and (red or not loose):
+            return 0
+        if hit and not s:
+            return 0
+        hit = hit or s
+    return 1 if hit else 2
+
+
 def gi_seen(R, frm, C):
-    """cellGiSeen (lane GISHADE1): no solid fine cell on the segment from the surface's view point to a voxel's centre,
-    tapped every half cell, the centre itself left out (a voxel's centre may sit in the wall it straddles)."""
+    """cellGiSeen (lane GISHADE1): no solid fine cell on the segment from the surface's view point to a voxel's centre;
+    lane GIWALL2 (gi_wall): its centre in air too, the taps never more than half a cell apart."""
     if SEE_RED[0] or R is None or frm is None:
         return True
-    d = np.asarray(C, float) - frm
-    nt = min(max(int(math.ceil(float(np.linalg.norm(d)) / (0.5 * R['cell']))), 1), 12)
-    return not any(room_solid(R, frm + d * (j / (nt + 1.0))) for j in range(1, nt + 1))
+    return gi_wall(R, frm, C) == 2
 
 
-def gi_seen_fill(G, R, P, N, frm):
+def gi_seen_fill(G, R, P, N, frm, sky=False):
     """cellGiSeenFill (lane GISHADE1): no room's blend has weight: the voxels of the 4x4x4 block the surface sees
-    (any room), weight (1 - d / 2.5)^2 in voxels, before the plain trilinear (which sees through walls)."""
+    (any room), weight (1 - d / 2.5)^2 in voxels, before the plain trilinear (which sees through walls).
+    Lane GIWALL2: none seen, the buried voxels (gi_wall 1: an outdoor recess, a pocket), never one behind a wall;
+    GI_CHECK_GIWALL=0: none. sky: kept for the callers (the rule is the same in every grid)."""
     dm = np.array(G['dims'])
     g = (P + N * 0.5 * G['voxel'] - G['origin']) / G['voxel'] - 0.5
     i0 = np.floor(g).astype(int)
     sl = (0 if N[0] >= 0 else 1, 2 if N[1] >= 0 else 3, 4 if N[2] >= 0 else 5)
     n2 = N * N
-    s, ws = np.zeros(4), 0.0
+    s, ws, sb, wb = np.zeros(4), 0.0, np.zeros(4), 0.0
+    loose = not SEE_RED[0] and not GIWALL_RED[0]
     for k in range(64):
         c = i0 + np.array([k & 3, (k >> 2) & 3, (k >> 4) & 3]) - 1
         if (c < 0).any() or (c >= dm).any():
             continue
         w = 1.0 - float(np.linalg.norm(c - g)) / 2.5
-        if w <= 0 or not gi_seen(R, frm, G['origin'] + (c + 0.5) * G['voxel']):
+        if w <= 0:
+            continue
+        see = 2 if (SEE_RED[0] or R is None or frm is None) else gi_wall(R, frm, G['origin'] + (c + 0.5) * G['voxel'], loose)
+        if see == 0:
             continue
         v = sum(n2[a] * G['g'][sl[a], c[2], c[1], c[0]] for a in range(3))
         if v[3] <= 0:
             continue
+        if see == 1:
+            sb += w * w * v
+            wb += w * w
+            continue
         s += w * w * v
         ws += w * w
-    return s / ws if ws > 0 else np.zeros(4)
+    return s / ws if ws > 0 else sb / wb if wb > 0 else np.zeros(4)
+
+
+def vol_at(R, P, N):
+    """cellGiVolAt (lane PERF1): the fine room grid's two names at P + N x 0.75 cell, else 1.75; (-2, -2): unknown."""
+    for k in (0.75, 1.75):
+        L = room_at(R, P + N * k * R['cell'])
+        if L[0] >= 0:
+            return L
+    return (-2, -2)
+
+
+def gi_volume(G, R, P, N, L=None, sky=False):
+    """cellGiVolume (lane PERF1, the default GI visibility: WW_CELL_GI_VIS unset): the 8 corners' slots of the pixel's
+    volume L (None: vol_at, the read a pixel without the shapes' mask takes), none with weight: the 27 round the nearest
+    corner; a threshold's other side (G['thr'], per voxel (t0, t1, other0, other1); absent: none) blended in by t / 2;
+    nothing: the plain trilinear. Outdoors (sky) a surface in no volume stands in the outdoors' (room 0), and buried a
+    third cell deep takes the darker of that and the trilinear. Lane GIWALL2: every pass keeps only the voxels seen
+    from see_from (gi_wall); pass 1 keeps the buried apart as the last answer before the trilinear. The edge
+    fade (cellGiEdgeFade) is left out: a fixture keeps clear of the grid's pad. Returns (rgba, probe 95 path)."""
+    P, N = np.asarray(P, float), np.asarray(N, float)
+    dm = np.array(G['dims'])
+    g = (P + N * 0.5 * G['voxel'] - G['origin']) / G['voxel'] - 0.5
+    i0 = np.floor(g).astype(int)
+    f = g - i0
+    r0 = np.floor(g + 0.5).astype(int)
+    sl = (0 if N[0] >= 0 else 1, 2 if N[1] >= 0 else 3, 4 if N[2] >= 0 else 5)
+    n2 = N * N
+    rooms = R is not None and 'slots' in G
+    if L is None:
+        L = vol_at(R, P, N) if rooms else (-2, -2)
+    strand = rooms and sky and L[0] == -2
+    if strand:
+        L = (0, -1)
+    any_room = not rooms or L[0] == -2
+    wall = rooms and not GIWALL_RED[0] and not SEE_RED[0]
+    frm = see_from(R, P, N) if wall else P
+    own, oth, bur = np.zeros(4), np.zeros(4), np.zeros(4)
+    w_own = w_oth = t_acc = t_best = w_bur = 0.0
+    other, near = -1, False
+    thr = G.get('thr')
+    for ps in range(3):
+        if ps == 1 and w_own > 0:
+            continue
+        if ps == 2 and (other < 0 or t_acc <= 0 or w_own <= 0):
+            break
+        Rm = (other, other) if ps == 2 else L
+        for k in range(27 if ps == 1 else 8):
+            if ps == 1:
+                c = r0 + np.array([k % 3, (k // 3) % 3, k // 9]) - 1
+                dd = c - g
+                w = 1.0 / (1.0 + float(dd @ dd))
+            else:
+                o = np.array([k & 1, (k >> 1) & 1, (k >> 2) & 1])
+                c = i0 + o
+                w = float(np.prod(np.where(o == 1, f, 1.0 - f)))
+            if w <= 0 or (c < 0).any() or (c >= dm).any():
+                continue
+            S = G['slots'][c[2], c[1], c[0]] if rooms else (-1, -1)
+            if any_room and ps < 2:
+                q = 0
+            elif S[0] >= 0 and S[0] in Rm:
+                q = 0
+            elif S[1] >= 0 and S[1] in Rm:
+                q = 1
+            else:
+                continue
+            src = G['g'] if q == 0 else G['g2']
+            u = sum(n2[a] * src[sl[a], c[2], c[1], c[0]] for a in range(3))
+            if u[3] <= 0:
+                continue
+            see = gi_wall(R, frm, G['origin'] + (c + 0.5) * G['voxel'], ps == 1) if wall else 2
+            if see == 0:
+                continue
+            if see == 1:
+                bur, w_bur = bur + w * u, w_bur + w
+                continue
+            if ps == 2:
+                oth, w_oth = oth + w * u, w_oth + w
+                continue
+            own, w_own = own + w * u, w_own + w
+            near = near or ps == 1
+            if ps == 0 and not any_room and thr is not None:
+                tv = thr[c[2], c[1], c[0]]
+                t, oq = float(tv[q]), int(tv[2 + q])
+                t_acc += w * t
+                if oq >= 0 and t > t_best:
+                    t_best, other = t, oq
+    if w_own <= 0 and w_bur > 0:
+        own, w_own, near = bur, w_bur, True
+    s = own / w_own if w_own > 0 else np.zeros(4)
+    if w_oth > 0:
+        s = s + (oth / w_oth - s) * 0.5 * min(max(t_acc / w_own, 0.0), 1.0)
+    path = 4 if any_room else (2 if near else 1) + (5 if strand else 0)
+    lone = strand and w_own > 0 and room_solid(R, P + N * 2.75 * R['cell'])
+    if w_own <= 0 or lone:
+        tr, _ = gi_blend(G, None, i0, f, sl, n2)
+        lum = lambda v: float(v[:3] @ (0.2126, 0.7152, 0.0722))
+        if w_own <= 0 or (tr[3] > 0 and lum(tr) / tr[3] < lum(s) / max(float(s[3]), 1e-6)):
+            return tr, (5 if strand and w_own <= 0 else 4)
+    return s, path
 
 
 def gi_blend(G, L, i0, f, sl, n2, R=None, frm=None):
@@ -1456,6 +1613,128 @@ def links_cmd(dump, view, red, expect):
         return 0 if not same else 1
     print('%s  links: the view draws the probes each probe works with' % ('PASS' if same and nl > 0 else 'FAIL'))
     return 0 if same and nl > 0 else 1
+GW_V, GW_C = 267.0, 16.0          # lane GIWALL2's fixture: Concord's voxel, the room grid's default cell
+GW_IN, GW_OUT = 0.05, 2.0          # the store's own light, the sunlit street's
+
+
+def giwall_scene(kind):
+    """Lane GIWALL2's fixture grids (G, R) and its point (P, N). kind 'wall': the street wall (x 1200..1216) and the
+    ceiling (z 656..672) hold the voxel column x 1201.5 and layer z 667.5; 'thin': both a cell short of them (x 1184,
+    z 640), the column and layer in open air past the wall; 'recess': a solid block (x 800..1400) with a recess cut in
+    from the street (x 800..1100, y 700..740, z 100..500) and a sealed pocket (x 1150..1350, z 200..600). Every air
+    cell is room 0 (the store open to the street through its door: one room), every voxel slot room 0."""
+    gd = (8, 8, 6)
+    rd = tuple(int(math.ceil(gd[a] * GW_V / GW_C)) + 1 for a in range(3))
+    ab = np.zeros((rd[2], rd[1], rd[0], 2), np.int16)
+    ab[..., 1] = -1
+    R = {'origin': np.zeros(3), 'cell': GW_C, 'dims': rd, 'rooms': 1, 'ab': ab}
+
+    def put(x0, x1, y0, y1, z0, z1, v):
+        i = lambda q: int(q // GW_C)
+        ab[i(z0):i(z1), i(y0):i(y1), i(x0):i(x1), 0] = v
+    lo = 384.0
+    if kind == 'recess':
+        put(800, 1400, lo, 1216, 0, 800, -1)
+        put(800, 1100, 700, 740, 100, 500, 0)
+        put(1150, 1350, 600, 900, 200, 600, 5)   # the pocket: a room of its own, sealed
+        inside = lambda c: 1150 <= c[0] < 1350 and 600 <= c[1] < 900 and 200 <= c[2] < 600
+        P, N = (1100.0, 720.0, 300.0), (-1.0, 0.0, 0.0)
+    else:
+        wx, cz = (1200.0, 656.0) if kind == 'wall' else (1184.0, 640.0)
+        put(lo, wx + GW_C, lo, 1216, 0, 16, -1)
+        put(lo, wx + GW_C, lo, 1216, cz, cz + GW_C, -1)
+        for x0, x1, y0, y1 in ((wx, wx + GW_C, lo, 1216), (lo, lo + GW_C, lo, 1216), (lo, wx + GW_C, 1200, 1216), (lo, wx + GW_C, lo, lo + GW_C)):
+            put(x0, x1, y0, y1, 0, cz + GW_C, -1)
+        put(600, 800, lo, lo + GW_C, 16, 300, 0)   # the open front door, on the far side
+        inside = lambda c: lo + GW_C <= c[0] < wx and lo + GW_C <= c[1] < 1200 and 16 <= c[2] < cz
+        P, N = ((1180.0, 700.0, cz - 0.1) if kind == 'wall' else (964.0, 700.0, cz - 0.1)), (0.0, 0.0, -1.0)
+    nv = (gd[2], gd[1], gd[0])
+    g = np.zeros((6,) + nv + (4,), np.float32)
+    for z in range(gd[2]):
+        for y in range(gd[1]):
+            for x in range(gd[0]):
+                c = (np.array([x, y, z]) + 0.5) * GW_V
+                e = (0.0 if kind == 'recess' else GW_IN) if inside(c) and not room_solid(R, c) else GW_OUT
+                g[:, z, y, x] = (e, e, e, 1.0)
+    G = {'origin': np.zeros(3), 'voxel': GW_V, 'dims': gd, 'nv': gd[0] * gd[1] * gd[2], 'g': g,
+         'slots': np.tile(np.array([0, -1], np.int32), nv + (1,)), 'g2': np.zeros_like(g)}
+    return G, R, np.array(P), np.array(N)
+
+
+def giwall_old_seen(R, frm, C):
+    """GISHADE1's cellGiSeen as it was before lane GIWALL2 (the red's reference)."""
+    d = np.asarray(C, float) - frm
+    nt = min(max(int(math.ceil(float(np.linalg.norm(d)) / (0.5 * R['cell']))), 1), 12)
+    return not any(room_solid(R, frm + d * (j / (nt + 1.0))) for j in range(1, nt + 1))
+
+
+def giwall_cmd(expect):
+    fix_red = GIWALL_RED[0]   # GI_CHECK_GIWALL=0: the fix rows run the red (the refuter)
+    fails, rows = [], []
+
+    def read(G, R, P, N, red, sky=True):
+        GIWALL_RED[0] = red
+        try:
+            m = gi_sample(G, R, P, N, fill=not sky, sky=sky)   # an exterior grid (Concord): sky lit, no gap fill
+            v, path = gi_volume(G, R, P, N, sky=sky)
+        finally:
+            GIWALL_RED[0] = fix_red
+        e = lambda s: float(s[0]) if s[3] > COVER_MIN else -1.0   # a sky grid: rgb is E x share (cellGiE0)
+        return (e(m), float(m[3])), (e(v), float(v[3]), path)
+    span = GW_OUT - GW_IN
+    for kind in ('wall', 'thin', 'recess', 'pocket'):
+        G, R, P, N = giwall_scene('recess' if kind == 'pocket' else kind)
+        sky = kind != 'pocket'   # pocket: the recess read as an interior grid (the gap fill on): its fill's buried voxels
+        (mf, vf), (mr, vr) = read(G, R, P, N, fix_red, sky), read(G, R, P, N, True, sky)
+        rows.append('  %-6s P (%.1f, %.1f, %.1f) N (%g, %g, %g)  fix: march E %.4f (a %.2f), volumes E %.4f (a %.2f, path %d) | red: march E %.4f, volumes E %.4f'
+                    % ((kind,) + tuple(P) + tuple(N) + (mf[0], mf[1], vf[0], vf[1], vf[2], mr[0], vr[0])))
+        if kind == 'recess':
+            g = (P + N * 0.5 * GW_V - G['origin']) / GW_V - 0.5
+            i0 = np.floor(g).astype(int)
+            t, _ = gi_blend(G, None, i0, g - i0, (0 if N[0] >= 0 else 1, 2 if N[1] >= 0 else 3, 4 if N[2] >= 0 else 5), N * N)
+            rows.append('         no voxel seen: without the buried fallback the plain trilinear, E %.4f (the pocket\'s black in it)' % t[0])
+        for name, f, r in (('march', mf, mr), ('volumes', vf, vr)):
+            if kind in ('recess', 'pocket'):
+                if f[1] <= 0.01 or abs(f[0] - GW_OUT) > 0.01 * GW_OUT:
+                    fails.append('%s %s: the fix reads %.4f (a %.2f), not the street\'s %.2f (black, or the pocket took weight)' % (kind, name, f[0], f[1], GW_OUT))
+                continue
+            if abs(f[0] - GW_IN) > 0.01 * span:
+                fails.append('%s %s: the fix reads %.4f, not the indoor %.2f' % (kind, name, f[0], GW_IN))
+            floor = 0.9 if kind == 'wall' else 0.05 if name == 'march' else 0.25
+            if (r[0] - GW_IN) / span < floor:
+                fails.append('%s %s: the red reads %.4f, under %.0f%% of the way to the street\'s %.2f (the fixture shows no leak)'
+                             % (kind, name, r[0], 100 * floor, GW_OUT))
+    # taps: the red's segments are GISHADE1's exactly
+    G, R, _, _ = giwall_scene('wall')
+    rng = np.random.default_rng(20261028)
+    lo, hi = np.array([300.0, 300.0, 0.0]), np.array([1300.0, 1300.0, 800.0])   # round the store: both kinds of segment
+    n_seg, n_diff, n_solid = 0, 0, 0
+    GIWALL_RED[0] = True
+    try:
+        while n_seg < 20000:
+            frm = rng.uniform(lo, hi)
+            if room_solid(R, frm):
+                continue
+            C = frm + rng.uniform(-2.5, 2.5, 3) * GW_V
+            n_seg += 1
+            old = giwall_old_seen(R, frm, C)
+            n_solid += not old
+            n_diff += old != (gi_wall(R, frm, C) == 2)
+    finally:
+        GIWALL_RED[0] = fix_red
+    rows.append('  taps   %d random segments, %d blocked under the old rule, %d where the red differs from it' % (n_seg, n_solid, n_diff))
+    if n_diff or n_solid < 1000 or n_solid > n_seg - 1000:
+        fails.append('taps: %d of %d segments differ from GISHADE1 (%d blocked: both kinds must be in the sample)' % (n_diff, n_seg, n_solid))
+    print('giwall (lane GIWALL2): voxel %.0f, room cell %.0f, indoor %.2f, street %.2f%s' % (GW_V, GW_C, GW_IN, GW_OUT, ' [fix rows run the red: GI_CHECK_GIWALL=0]' if fix_red else ''))
+    print('\n'.join(rows))
+    for f in fails:
+        print('  FAIL ' + f)
+    good = not fails
+    if expect == 'fail':
+        print('giwall: %s (expected to fail: %s)' % ('PASS' if not good else 'FAIL', 'it failed' if not good else 'it passed'))
+        return 0 if not good else 1
+    print('giwall: %s' % ('PASS' if good else 'FAIL'))
+    return 0 if good else 1
 
 
 if __name__ == '__main__':
@@ -1478,6 +1757,8 @@ if __name__ == '__main__':
         sys.exit(points_cmd(a[1], a[2], [float(v) for v in bx.split(',')] if bx else None, float(opt('--maxx', '0')),
                             float(opt('--darkshare', '-1')), opt('--expect', 'pass'), float(opt('--upshare', '-1')),
                             float(opt('--minmed', '0'))))
+    if a and a[0] == 'giwall':
+        sys.exit(giwall_cmd(opt('--expect', 'pass')))
     if a and a[0] == 'recess':
         sys.exit(recess_cmd(a[1], a[2], float(opt('--lo', '0.5')), float(opt('--hi', '2.0')), opt('--expect', 'pass')))
     print(__doc__)
