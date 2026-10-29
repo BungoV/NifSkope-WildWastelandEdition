@@ -1,5 +1,6 @@
 // lane CELLSTREAM1: the exterior cell view's block of full cells, streamed round the camera (cellstream.h)
 #include "cellstream.h"
+#include "cellstreamtex.h"	// lane STREAMTEX1: the stream's file textures, counted by cell
 #include "wwswitch.h"	// lane TESTDRIVER1: the WW_* switch store
 
 #include "cellfarhide.h"	// lane FARHOLE2: the far field leaves room for every loaded cell
@@ -16,6 +17,7 @@
 #include "gl/glproperty.h"
 #include "gl/glscene.h"
 #include "gl/glshape.h"
+#include "gl/streamtexpool.h"	// lane STREAMTEX1
 #include "data/nifitemcache.h"
 #include "model/nifmodel.h"
 #include "spells/blocks.h"
@@ -24,6 +26,7 @@
 #include <QHash>
 #include <QPointer>
 #include <QSet>
+#include <QThread>
 
 #include <algorithm>
 #include <atomic>
@@ -146,6 +149,11 @@ struct FarTile
 
 static bool threadGone( const std::thread & th );
 
+struct QStringStdHash	// lane STREAMTEX1: the pool's key hash
+{
+	size_t operator()( const QString & s ) const { return size_t( qHash( s ) ); }
+};
+
 class Stream final : public CellBlockSource
 {
 public:
@@ -194,6 +202,12 @@ public:
 	//! game never loads those cells (red WW_LANDSPEC_RED=fixedopen: the prefetch row is built)
 	bool noPrefetch = false;
 	int gridHalf = LandLodSpec::kFixedGridHalf;	//!< lane LANDSPEC8: uGridsToLoad / 2 from the game's inis (was 2)
+	//! lane STREAMTEX1: the file textures each written cell's properties name (cellstreamtex.h)
+	StreamTexPool<QString, QStringStdHash> texPool { std::uint64_t( cellStreamTexBudgetBytes() ), 2, cellStreamTexRed() };
+	QHash<int, Key> blockCell;	//!< every block a cell was written into -> that cell (no entry: the open's own)
+	Key texCentre { INT_MIN, INT_MIN };	//!< the centre the last census was taken at
+
+	void texCensus();
 
 	~Stream() override
 	{
@@ -227,8 +241,10 @@ public:
 			idx = m->insertNiBlock( type );
 			st.inserted++;
 		}
-		if ( writing && idx.isValid() )
+		if ( writing && idx.isValid() ) {
 			writing->takes.emplace_back( m->getBlockNumber( idx ), type );
+			blockCell.insert( writing->takes.back().first, Key( writing->x, writing->y ) );	// lane STREAMTEX1
+		}
 		if ( idx.isValid() && isNodeType( type ) )
 			sliceNodes++;
 		return idx;
@@ -241,8 +257,10 @@ public:
 
 	void adopt( NifModel * m, int block ) override
 	{
-		if ( writing )
+		if ( writing ) {
 			writing->takes.emplace_back( block, m->itemName( m->getBlockIndex( block ) ) );
+			blockCell.insert( block, Key( writing->x, writing->y ) );	// lane STREAMTEX1
+		}
 	}
 
 	QHash<QString, std::shared_ptr<NifModel>> * pfxModels() override { return &pfxSrc; }
@@ -758,8 +776,10 @@ void Stream::unload( StreamCell & c )
 		wwCellGrassForget( nif, b );
 		wwCellFxLitForget( nif, b );
 		wwCellXemiForget( nif, b );   // lane LIGHTS2 (XEMI1)
+		blockCell.remove( b );   // lane STREAMTEX1
 		( isNodeType( tk.second ) ? nodeBlocks : propBlocks ).insert( b );
 	}
+	texPool.dropCell( texPool.cellId( c.x, c.y ) );   // lane STREAMTEX1: its textures lose this cell's count
 	const double msTakes = msOf( t );
 	std::vector<Node *> ns;
 	for ( auto it = c.nodes.cbegin(); it != c.nodes.cend(); ++it )
@@ -1014,6 +1034,8 @@ bool Stream::tick( Scene * sc, const Vector3 & eye )
 
 	if ( !fixedCentre )	// lane LANDSPEC6: the game skips every grid shift in a fixed world
 		shiftCentre( eye );
+	if ( texCentre != Key( ccx, ccy ) )	// lane STREAMTEX1: a crossing (the first tick: the open's census)
+		texCensus();
 	wanted.clear();
 	for ( int dy = -gridHalf; dy <= gridHalf; dy++ )
 		for ( int dx = -gridHalf; dx <= gridHalf; dx++ )
@@ -1172,6 +1194,30 @@ bool Stream::tick( Scene * sc, const Vector3 & eye )
 	return changed;
 }
 
+void Stream::texCensus()
+{
+	const auto c = texPool.cross();
+	const auto mb = []( std::uint64_t b ) { return QString::number( double( b ) / 1048576.0, 'f', 1 ); };
+	st.texLine = QStringLiteral( "crossing %1 centre %2,%3 kept %4 (%5 MB) refd %6 (%7 MB) evicted %8 (%9 MB)" )
+		.arg( c.crossing ).arg( ccx ).arg( ccy ).arg( c.kept ).arg( mb( c.keptBytes ) ).arg( c.refd ).arg( mb( c.refdBytes ) )
+		.arg( c.evicted ).arg( mb( c.evictedBytes ) )
+		+ QStringLiteral( " reloaded %1 (%2 MB) released %3 (%4 MB) loads %5 (%6 MB) keepEvicted %7 budget %8 MB%9" )
+		.arg( c.reloaded ).arg( mb( c.reloadedBytes ) ).arg( c.released ).arg( mb( c.releasedBytes ) ).arg( c.loads )
+		.arg( mb( c.loadBytes ) ).arg( c.keepEvicted ).arg( mb( texPool.budgetBytes() ) )
+		.arg( texPool.red() ? QStringLiteral( " RED off" ) : QString() );
+	// the walk dump's form: key value pairs only (cell_stream_check.py row (e))
+	st.texPairs = QStringLiteral( "texCrossing %1 texKept %2 texKeptMb %3 texRefd %4 texRefdMb %5 texFreed %6 texFreedMb %7 " )
+		.arg( c.crossing ).arg( c.kept ).arg( mb( c.keptBytes ) ).arg( c.refd ).arg( mb( c.refdBytes ) ).arg( c.evicted )
+		.arg( mb( c.evictedBytes ) )
+		+ QStringLiteral( "texReloadedN %1 texReloadedMb %2 texReleasedMb %3 texLoadsMb %4 texKeepFreed %5 texBudgetMb %6 texRed %7" )
+		.arg( c.reloaded ).arg( mb( c.reloadedBytes ) ).arg( mb( c.releasedBytes ) ).arg( mb( c.loadBytes ) ).arg( c.keepEvicted )
+		.arg( mb( texPool.budgetBytes() ) ).arg( texPool.red() ? 1 : 0 );
+	st.texReloaded += c.reloaded;
+	st.texKeepEvicted += c.keepEvicted;
+	texCentre = Key( ccx, ccy );
+	std::fprintf( stderr, "stream tex: %s\n", qPrintable( st.texLine ) );
+}
+
 QString keyList( const std::vector<Key> & keys )
 {
 	QStringList l;
@@ -1299,6 +1345,70 @@ void cellStreamCountEvicted( const NifModel * nif, int n )
 {
 	if ( Stream * s = streamFor( nif ) )
 		s->st.texEvicted += n;
+}
+
+bool cellStreamTexRed()
+{
+	WW_SWITCH_STATIC( bool, red, wwEnvStr( "WW_CELL_STREAMTEX_RED" ) == QLatin1String( "off" ) );
+	return red;
+}
+
+/* lane STREAMTEX1: 256 MB. The walk's bar is 1.05 x the fresh open's private memory; STREAMMEM1's walk opened at
+ * 11788 MB, so the bar leaves 589 MB for everything the walk adds. Half of that is the geometry cache's own floor
+ * (STREAM1: VRAM/8, never under 256 MB), the other half this pool: a walk back finds the row it left loaded when
+ * the row's own textures fit, and textures plus meshes stay inside the bar. */
+qint64 cellStreamTexBudgetBytes()
+{
+	WW_SWITCH_STATIC( int, mb, wwEnvIsSet( "WW_CELL_STREAMTEX_MB" ) ? wwEnvInt( "WW_CELL_STREAMTEX_MB" ) : 256 );
+	return qint64( std::clamp( mb, 0, 65536 ) ) << 20;
+}
+
+bool cellStreamTexCounting( const NifModel * nif )
+{
+	return nif && streamFor( nif ) != nullptr;
+}
+
+void cellStreamTexNote( const NifModel * nif, int block, const QStringList & names )
+{
+	Stream * s = streamFor( nif );
+	if ( !s || QThread::currentThread() != nif->thread() )
+		return;
+	auto it = s->blockCell.constFind( block );
+	const auto cell = it == s->blockCell.cend() ? s->texPool.kBase : s->texPool.cellId( it->first, it->second );
+	for ( const QString & n : names )
+		if ( !n.isEmpty() )
+			s->texPool.note( cell, n );
+}
+
+void cellStreamTexLoaded( const NifModel * nif, const QString & name, qint64 bytes )
+{
+	if ( Stream * s = streamFor( nif ) )
+		s->texPool.loaded( name, std::uint64_t( std::max<qint64>( bytes, 0 ) ) );
+}
+
+void cellStreamTexFreed( const NifModel * nif, const QString & name, bool counted )
+{
+	if ( Stream * s = streamFor( nif ) ) {
+		if ( counted )
+			s->texPool.freed( name );
+		else
+			s->texPool.gone( name );
+	}
+}
+
+bool cellStreamTexTimerMayFree( const NifModel * nif, QStringView name )
+{
+	const Stream * s = streamFor( nif );
+	return !s || s->texPool.rule( name.toString() ) == StreamTexPool<QString, QStringStdHash>::Rule::Timer;
+}
+
+QStringList cellStreamTexPlan( const NifModel * nif, const std::function<bool( const QString & )> & busy )
+{
+	QStringList out;
+	if ( const Stream * s = streamFor( nif ) )
+		for ( QString & n : s->texPool.plan( busy ) )
+			out.append( std::move( n ) );
+	return out;
 }
 
 bool cellStreamBusy( const NifModel * nif )

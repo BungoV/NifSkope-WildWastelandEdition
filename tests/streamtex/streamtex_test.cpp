@@ -238,7 +238,28 @@ int main( int argc, char ** argv )
 	std::printf( "mode %s\n", names[int( mode )] );
 	const bool okL = judge( light, walk( light, mode, verbose ), false );
 	const bool okH = judge( heavy, walk( heavy, mode, verbose ), true );
-	const bool ok = okL && okH;
+	// (u) the rule table, case by case (the reds change it: the red answers Timer for all)
+	bool okU = true;
+	{
+		using P = StreamTexPool<std::string>;
+		P p( 1ull << 20, 2, mode == Mode::Red || mode == Mode::RedKeep0 );
+		const P::Cell c = P::cellId( 3, -4 );
+		p.note( c, "a" );
+		p.loaded( "a", 4ull << 20 );
+		p.note( c, "b" );	// named, but loaded before the stream began: the pool never saw it go up
+		p.note( P::kBase, "f" );
+		p.loaded( "f", 1ull << 20 );
+		const bool keep = p.rule( "a" ) == P::Rule::Keep;
+		p.dropCell( c );
+		const bool pool = p.rule( "a" ) == P::Rule::Pool, unseen = p.rule( "b" ) == P::Rule::Timer;
+		const bool base = p.rule( "f" ) == P::Rule::Timer, never = p.rule( "z" ) == P::Rule::Timer;
+		const auto plan = p.plan();
+		const bool planned = plan.size() == 1 && plan[0] == "a";	// 4 MB past a 1 MB budget; never the base's
+		okU = keep && pool && unseen && base && never && planned;
+		std::printf( "(u) rule table: named+loaded Keep %d, released Pool %d, unseen load Timer %d, base Timer %d, "
+			"unknown Timer %d, plan {a} %d: %s\n", keep, pool, unseen, base, never, planned, okU ? "pass" : "FAIL" );
+	}
+	const bool ok = okL && okH && okU;
 	std::printf( "STREAMTEX %s\n", ok ? "PASS" : "FAIL" );
 	return ok ? 0 : 1;
 }

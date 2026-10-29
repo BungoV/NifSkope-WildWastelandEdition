@@ -277,6 +277,7 @@ HEADERS += \
 	src/gl/fogterrain.h \
 	src/gl/cellpasstime.h \
 	src/gl/geokeepclock.h \
+	src/gl/streamtexpool.h \
 	src/gl/cellqueue.h \
 	src/gl/celldrawpacket.h \
 	src/gl/cellbindless.h \
@@ -408,6 +409,7 @@ HEADERS += \
 	src/cellmesh.h \
 	src/cellspeed.h \
 	src/cellstream.h \
+	src/cellstreamtex.h \
 	src/cellspawn.h \
 	src/celltexahead.h \
 	src/cellmodelahead.h \

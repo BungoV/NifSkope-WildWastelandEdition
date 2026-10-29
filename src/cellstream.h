@@ -164,6 +164,9 @@ struct CellStreamStats
 	qint64 scannedNodes = 0;            //!< lane CELLSPIKE2: scene nodes unloads walked to find their own (since reset)
 	double cpuMaxMs = 0;                //!< lane FRAMESPEED1: the dearest frame's on-processor ms (not the dearest wall frame's)
 	QString worstCpuTick;               //!< lane FRAMESPEED1: that frame's stages
+	QString texLine;                    //!< lane STREAMTEX1: the last crossing's texture census (cellstreamtex.h)
+	QString texPairs;                   //!< lane STREAMTEX1: the same as key value pairs (the walk dump)
+	qint64 texReloaded = 0, texKeepEvicted = 0;   //!< lane STREAMTEX1: summed over the crossings
 	QString lastError;
 };
 CellStreamStats cellStreamStats( const NifModel * nif, bool resetMaxima );

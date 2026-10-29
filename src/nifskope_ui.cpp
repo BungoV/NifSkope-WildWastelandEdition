@@ -46,6 +46,7 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include "cellpicktest.h"	// lane CELLVIEW2
 #include "cellrefs.h"		// lane CELLWORK1
 #include "cellstream.h"		// lane CELLSTREAM1
+#include "cellstreamtex.h"	// lane STREAMTEX1: the stream texture pool
 #include "cellworkspace.h"	// lane CELLWORK1
 #include "cellview.h"		// lane LIVESET1: the far LOD and the probe markers in place
 #include "cellspawn.h"		// lane CELLSPAWN1: where a cell's camera starts
@@ -2206,10 +2207,12 @@ static void wwCellStreamPathRun( GLView * ogl, const QString & pathFile, const Q
 		wwCellStreamSettle( ogl, 4, waitMs );   // transforms and the far tiles' data, drawn once
 		// lane CELLSTREAM1: and long enough for the textures of the cells that left to be freed (the view's rule)
 		const int lingerSec = std::max( cellStreamTexKeepSec(), cellStreamGeoKeepSec() );   // lane STREAMMEM1: meshes too
-		if ( lingerSec > 0 ) {
+		// lane STREAMTEX1: and one 2 s turn of the texture pool past the step (none with WW_CELL_STREAMTEX_RED=off)
+		const int lingerAll = std::max( lingerSec, cellStreamTexRed() ? 0 : 2 );
+		if ( lingerAll > 0 ) {
 			QElapsedTimer linger;
 			linger.start();
-			while ( linger.elapsed() < ( lingerSec + 3 ) * 1000 ) {
+			while ( linger.elapsed() < ( lingerAll + 3 ) * 1000 ) {
 				ogl->wwCellStreamFrame();
 				ogl->update();
 				qApp->processEvents();
@@ -2255,6 +2258,7 @@ static void wwCellStreamPathRun( GLView * ogl, const QString & pathFile, const Q
 				<< " regions " << regions[0] << "/" << regions[1] << "/" << regions[2] << " texEvicted " << s.texEvicted << " geoEvicted " << s.geoEvicted
 				<< " quietResets " << s.quietResets << " loudResets " << s.loudResets
 				<< " texAheadAgain " << texAgain << " texDrawRead " << texDrawRead	// lane GAPFIX1
+				<< " texReloaded " << s.texReloaded << " texKeepEvicted " << s.texKeepEvicted	// lane STREAMTEX1
 				<< " | persistent " << s.persistent << " nodes " << s.sceneNodes << " props " << s.sceneProps
 				<< " shapes " << s.sceneShapes << " top " << s.persistentTop
 				<< " | holes " << holes << " doubles " << doubles << " samples " << samples
@@ -2263,7 +2267,8 @@ static void wwCellStreamPathRun( GLView * ogl, const QString & pathFile, const Q
 				<< " | hitchMaxMs " << QString::asprintf( "%.1f", hitchMs ) << " over33 " << hitchOver
 				<< " hitchFrames " << hitchFrames << " | " << s1mem
 				<< " | " << s.worstTick << " | " << s.worstUnload << " scannedNodes " << s.scannedNodes	// lane CELLSPIKE2: key-value pairs only
-				<< " | cpuMaxMs " << QString::asprintf( "%.3f", s.cpuMaxMs );	// lane FRAMESPEED2 (D2): the step's dearest on-processor frame
+				<< " | cpuMaxMs " << QString::asprintf( "%.3f", s.cpuMaxMs )	// lane FRAMESPEED2 (D2): the step's dearest on-processor frame
+				<< " | " << s.texPairs;	// lane STREAMTEX1: the last crossing's texture census
 			if ( !s.lastError.isEmpty() )
 				log << " | error " << s.lastError;
 			if ( snap )
