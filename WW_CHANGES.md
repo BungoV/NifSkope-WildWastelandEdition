@@ -1,5 +1,37 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## AIRZONE1: hand-placed volumes for GI rooms, fog and air particles (row, ships Off; built and gated by the main session)
+
+- **One kind of volume, placed by hand per cell**, stored as `.recx` (the shared standard):
+  `Data/Plugins/<Provider>/Cells/<EditorID or 8-digit id>.recx`, entry key `"cell": "Plugin.ext|0x00XXXXXX"` (an
+  exterior also writes `worldspace` + `grid`, checked), block `volumes: [...]`. A volume is a shape (box, cylinder,
+  wedge, capsule, sphere: the GI volumes' five), a centre, size and rotation, a soft `edge`, a `priority`, and up to
+  three blocks: `gi` (a GI room or a threshold), `fog` (density scale and add, colour, height falloff, noise with
+  drift), `particles` (density, light, tint; type/size/drift are read and written, not drawn yet). Spec text:
+  RECX_SPEC_volumes. Reader and writer: `src/airzone.{h,cpp}` (through recx.cpp, which now also takes a list block);
+  the law: `src/airzonemath.h`; the GLSL: `res/shaders/cell_airzone.glsl`.
+- **Display > Groups > Air zones** (`WW_CELL_AIRZONE=1`, default Off): the air pass reads the volumes' fog once per
+  froxel sub-step (density x scale + add, the scattered light x colour), and lit particles inside a volume take its
+  light, tint and (sprites) density. Off: the shaders differ from main by preprocessor lines only. No file: nothing
+  changes. The fog and particle blocks are live: files re-read within half a second, panel edits at once. The gi blocks
+  apply when the GI grid is built (a reopen).
+- **GI from hand-placed volumes:** a cell's gi volumes replace today's GI shapes there: `giMode: rooms` (default) by the
+  rooms and openings the file names, `all` everything centred in the cell. Cells without a file keep today's shapes.
+  The converter (**Export GI shapes** in the band, or `WW_CELL_AIRZONE_EXPORT=<Data root>` at the open) writes today's
+  shapes into each cell's file with their places (`seq`), so the switch loses nothing: read back, the GI's list is
+  today's, number for number (census `air zones gi: ... volumes <hash> -> <hash>`; `WW_CELL_AIRZONE_GIHASH=1` prints
+  today's).
+- **Display tab > Air zones band:** pick a cell, its volumes in a list (Add at the 3D cursor, Duplicate, Delete), the
+  selected one's rows (shape, location, size, rotation, edge, priority, the gi / fog / particles blocks), live in the
+  view before Save; Save writes the cell's file (its own, or Save to/Plugins/<Provider>/Cells); Revert; To 3D cursor.
+  Show volumes draws them as wireframes (fog blue, particles amber, gi green, the selected white through walls).
+- Reds: `WW_CELL_AIRZONE_RED=novol` (the files ignored), `hardedge` (no soft edge). Census: `air zones: <cell> <key> ->
+  <rung>:<file> (<n> volume(s))`, `air zones frame: N of M ... read`.
+- Gates: `tests/airzone/run.sh` (the law and the shader's own text: 7 checks, 7 reds) and `tests/airzone/gate.sh`
+  (files through the real reader: round trip, keep, GI conversion identity, rooms mode, novol, refusals).
+- Not yet: a drag gizmo for volumes (the band's fields and To 3D cursor place them), an ambient particle emitter, a
+  room-aware ray-traced GI read, live gi blocks.
+
 ## RTXGI1 M2: the ray-traced GI volume lights the cell view (switch, live; ships Off)
 
 - **Show > Lighting > Ray-traced GI** (`WW_CELL_RTDDGI=1`, default Off): with the probe GI's relit cell open, a DDGI

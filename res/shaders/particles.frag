@@ -308,6 +308,9 @@ void main()
 			}
 			if ( fxLitMode != 0 )
 				lin *= fxAdditive ? cellFxLit( cellWorldPos( -ViewDir ) ) : vpLit( pPos, vpNormal( uv ), color.a );
+#if defined( WW_CELL_AIRZONE ) && !defined( WW_FX_DECALLIT )
+			color.a = azPartAlpha( color.a );	// lane AIRZONE1: the volume's particles density (no zone read: untouched)
+#endif
 			color.a *= vpSoft();
 			// the landed air at the pixel's own point (wwFogFx: c T + L, additive c T); red nofog: the game's fog alone
 			if ( ( volPartRed & 32 ) == 0 ) {

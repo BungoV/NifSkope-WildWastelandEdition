@@ -45,6 +45,7 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 // lane CELLUNI1: inside the cell-uniform scope an unchanged value is not uploaded again (celluniform.h)
 #define WWCU( k, l, v, n ) WwCellUni::want( wwUni, l, WwCellUni::k, v, n, WwDp::rec != nullptr )
 bool rtddgiCellShaderDefine();	// lane RTXGI1 M2: src/rtddgicell.cpp (the Ray-traced GI row / WW_CELL_RTDDGI)
+bool wwAirZoneShaderDefine();	// lane AIRZONE1: src/gl/cellairzone.cpp (the Air zones row / WW_CELL_AIRZONE)
 int wwCellGiVis();	// lane PERF1: src/gl/celllights.cpp (1: the march, WW_CELL_GI_MARCH)
 
 #include <QElapsedTimer>
@@ -423,6 +424,10 @@ bool NifSkopeOpenGLContext::Shader::load( const QString & filepath )
 		// lane RTXGI1 M2: the ray-traced GI volume's read (cell_lights.glsl + cell_ddgi.glsl); not static: a set reloads the shaders
 		if ( !giMarch && rtddgiCellShaderDefine() && data.startsWith( "#version" ) && data.contains( "_CELL_RTDDGI" ) )
 			data.insert( data.indexOf( '\n' ) + 1, "#define WW_CELL_RTDDGI 1\n" );
+		// lane AIRZONE1: the hand-placed volumes' read (cell_airzone.glsl, via cell_volair.frag and cell_volpart.glsl); not static:
+		// the row's tick reloads the shaders
+		if ( wwAirZoneShaderDefine() && data.startsWith( "#version" ) && data.contains( "_CELL_AIRZONE" ) )
+			data.insert( data.indexOf( '\n' ) + 1, "#define WW_CELL_AIRZONE 1\n" );
 		// lane PERF3: the cascades from one per-frame block, in the sources that ask for it (WW_FRAME_UBO_RED=1: plain uniforms)
 		static const bool frameUbo = qgetenv( "WW_FRAME_UBO" ).trimmed() != "0" && qgetenv( "WW_FRAME_UBO_RED" ).trimmed() != "1"
 			&& qgetenv( "WW_PERF3_RED" ).trimmed() != "1";

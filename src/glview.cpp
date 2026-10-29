@@ -66,6 +66,7 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include "data/nifitem.h"
 #include "nifsnapshot.h"
 #include "probesky.h"	// lane SKY1: one call a frame
+#include "gl/cellairzone.h"	// lane AIRZONE1: the hand-placed volumes' overlay
 #include "rtddgicell.h"	// lane RTXGI1 M2: the ray-traced GI volume, one call a frame
 #include "celldoorlive.h"	// lane DOORLIVE1: one call a frame
 #include "cellworldanim.h"	// lane FXPARITY2: the cell's world clock
@@ -4367,6 +4368,7 @@ void GLView::paintGL()
 	// lane PROBEVIEW1: the PRTP band's Pass overlays (surfel tiles, lit probes, the picked probe's links)
 	wwCellProbeViewDraw( scene, viewTrans );
 	wwCellVolumeViewDraw( scene, viewTrans );   // lane VOLFIT1: rooms, shapes, thresholds; VOLVIEW2: in the PRTP Debug View
+	wwAirZoneViewDraw( scene, viewTrans );	// lane AIRZONE1: the hand-placed volumes while the panel shows them
 	rtddgiCellViewDraw( scene, viewTrans );	// lane RTXGI1 M2: the Ray-traced GI probes row (states / irradiance)
 
 	if ( !cleanView ) {	// lane VIEWFULL1: Clean View hides the paint helpers (block kept at its old indent)
