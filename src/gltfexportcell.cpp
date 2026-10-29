@@ -374,6 +374,8 @@ public:
 			}
 			extra( "smoothness", f.effectShader ? QString() : QString::number( s.smoothness ) );
 			extra( "specularMult", f.effectShader ? QString() : QString::number( s.specMult ) );
+			// the game reflects its surroundings only on environment-mapped materials; the rest get light highlights only
+			extra( "envMap", !f.effectShader && f.envMap ? QStringLiteral( "1" ) : QString() );
 			if ( s.ownEmit || s.glowFlag )
 				extra( "emitColor", QStringLiteral( "%1 %2 %3 x%4" ).arg( s.emitColor[0] ).arg( s.emitColor[1] )
 					.arg( s.emitColor[2] ).arg( s.emitMult ) );
