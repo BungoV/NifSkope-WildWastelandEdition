@@ -8,6 +8,7 @@ BSD License - see nifskope.h
 #include "wwswitch.h"	// lane TESTDRIVER1: the WW_* switch store
 
 #include "gl/cellclustergl.h"
+#include "gl/alphabgsm.h"	// lane ALPHABGSM1: the side passes' alpha-test census
 #include "gl/cellssr.h"
 #include "gl/cellvolair.h"	// lane VOLAIR1
 #include "gl/shadowset.h"	// lane TERRSHADOW1
@@ -2936,23 +2937,26 @@ LsRect lsPacked( const LsRect & room, int member, int S )
 /* lane GAPFIX1: an alpha-tested shape casts what its alpha test keeps into the light cubes, as the sun's map
  * does (VOLAIR1); the cube passes skipped it, and a barrel's own lamp drew an empty cube (lightbooth1).
  * Red WW_CELL_SHADOW_RED=atskip skips them again. */
+/* lane ALPHABGSM1: the test is the colour draw's (Shape::wwDrawAlpha: a BGSM's wins over the NIF's); a BGSM-only
+ * test cast solid into the cubes before. Red WW_ALPHABGSM_RED=cube. */
 static bool cubeCasterAt( const Shape * sh )
 {
-	return sh->wwAlphaTested() && sh->wwShaderLighting() && !sh->coords.isEmpty()
+	return sh->wwDrawAlpha( "cube" ).test && sh->wwShaderLighting() && !sh->coords.isEmpty()
 		&& sh->coords.constFirst().size() == sh->verts.size();
 }
 
 static bool cubeSkipsCaster( const Shape * sh )
 {
 	WW_SWITCH_STATIC( bool, atRed, wwEnv( "WW_CELL_SHADOW_RED" ).trimmed() == "atskip" );	// lane LIVESET3: live
-	return sh->wwAlphaTested() && ( atRed || !cubeCasterAt( sh ) );
+	return sh->wwDrawAlpha( "cube" ).test && ( atRed || !cubeCasterAt( sh ) );
 }
 
 static qint64 g_cubeAtCasters = 0, g_cubeAtDraws = 0;
 
 static void cubeDrawCaster( Renderer * r, NifSkopeOpenGLContext::Program * prog, const Shape * sh )
 {
-	const bool at = sh->wwAlphaTested();
+	const Shape::WwDrawAlpha da = sh->wwDrawAlpha( "cube" );	// lane ALPHABGSM1
+	const bool at = da.test;
 	const float * attrv[8] = { &( sh->verts.constFirst()[0] ), nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr };
 	std::uint64_t mask = 3;
 	prog->uni1i( "shAlphaTest", at ? 1 : 0 );
@@ -2964,7 +2968,7 @@ static void cubeDrawCaster( Renderer * r, NifSkopeOpenGLContext::Program * prog,
 		prog->uni2f( "uvScale", bsp->uvScale.x, bsp->uvScale.y );
 		prog->uni2f( "uvOffset", bsp->uvOffset.x, bsp->uvOffset.y );
 		prog->uni1f( "alpha", lsp ? lsp->alpha : 1.0f );
-		prog->uni1f( "alphaThreshold", sh->wwAlphaThreshold() );
+		prog->uni1f( "alphaThreshold", da.threshold );
 		attrv[7] = &( sh->coords.constFirst().constFirst()[0] );
 		mask = 0x20000003ULL;
 		g_cubeAtDraws++;
@@ -3013,9 +3017,15 @@ static void lampShadowPass( Scene * scene, Gpu & g, const WwCellLighting & L, st
 	// the casters, as the cube pass takes them (the water too: SUNCELL1's red keeps it)
 	WW_SWITCH_STATIC( bool, waterCastsRed, qgetenv( "WW_CELL_SHADOW_RED" ).trimmed() == "watercasts" );	// fix TDFIX2: follows a live set
 	std::vector<LsCaster> casters;
+	AlphaBgsmTally atTally;	// lane ALPHABGSM1: the census (gl/alphabgsm.h)
+	qint64 atShapes = 0;
 	for ( Node * node : scene->nodes.list() ) {
 		const Shape * sh = dynamic_cast<const Shape *>( node );
-		if ( !sh || !sh->isVisible() || !sh->wwCastsSunShadow() || cubeSkipsCaster( sh ) )
+		if ( !sh || !sh->isVisible() || !sh->wwCastsSunShadow() )
+			continue;
+		atShapes++;
+		AlphaBgsmTally::note( atTally, sh->wwAlphaTested(), sh->wwDrawAlpha( "cube" ).test );
+		if ( cubeSkipsCaster( sh ) )
 			continue;
 		if ( sh->verts.isEmpty() || sh->triangles.isEmpty() )
 			continue;
@@ -3024,6 +3034,7 @@ static void lampShadowPass( Scene * scene, Gpu & g, const WwCellLighting & L, st
 		const BoundSphere b = sh->bounds();
 		casters.push_back( { sh, sh->id(), b.center, b.radius } );
 	}
+	AlphaBgsmTally::report( atTally, "lamp maps", atShapes );
 	// what moved since the last frame; a first move makes a caster a mover and drops the stored maps it was in
 	auto slotOfLight = [&g]( int li ) {
 		for ( int k = 0; k < kShadowSlots; k++ )
@@ -3603,9 +3614,15 @@ void wwCellShadowPass( Scene * scene )
 	// plane under a lamp shadowed its own bed). Red WW_CELL_SHADOW_RED=watercasts keeps it.
 	WW_SWITCH_STATIC( bool, waterCastsRed, wwEnv( "WW_CELL_SHADOW_RED" ).trimmed() == "watercasts" );
 	int waterSkipped = 0;
+	AlphaBgsmTally atTally;	// lane ALPHABGSM1: the census (gl/alphabgsm.h)
+	qint64 atShapes = 0;
 	for ( Node * node : scene->nodes.list() ) {
 		const Shape * sh = dynamic_cast<const Shape *>( node );
-		if ( !sh || !sh->isVisible() || !sh->wwCastsSunShadow() || cubeSkipsCaster( sh ) )
+		if ( !sh || !sh->isVisible() || !sh->wwCastsSunShadow() )
+			continue;
+		atShapes++;
+		AlphaBgsmTally::note( atTally, sh->wwAlphaTested(), sh->wwDrawAlpha( "cube" ).test );
+		if ( cubeSkipsCaster( sh ) )
 			continue;
 		if ( sh->verts.isEmpty() || sh->triangles.isEmpty() )
 			continue;
@@ -3613,10 +3630,11 @@ void wwCellShadowPass( Scene * scene )
 			waterSkipped++;
 			continue;
 		}
-		g_cubeAtCasters += sh->wwAlphaTested() ? 1 : 0;
+		g_cubeAtCasters += sh->wwDrawAlpha( "cube" ).test ? 1 : 0;	// lane ALPHABGSM1
 		const BoundSphere b = sh->bounds();
 		casters.push_back( { sh, b.center, b.radius, sh->viewTrans().toMatrix4() } );
 	}
+	AlphaBgsmTally::report( atTally, "light cubes", atShapes );
 
 	NifSkopeOpenGLContext::Program * prog = r->useProgram( "cell_shadowdepth.prog" );
 	if ( !prog ) {
