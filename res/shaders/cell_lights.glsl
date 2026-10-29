@@ -987,6 +987,22 @@ vec3 cellGiKeyNormal( float k )
  * blend; also with a threshold's), 2 the nearest own-volume voxel (a room's fill), 4 no volume known or none of its
  * voxels in reach (the trilinear); outdoors, a surface the room grid cannot place (lane GIBLACK2's stranded): 6 and 7
  * the outdoors' volume, 5 none in reach. A probe picture reads the mask at its own pixel (the screen pass's read). */
+/* lane GISUNBLOTCH1: the face's normal (the plane of the pixel's triangle, the normal map left out), on the side the
+ * shading normal faces. The program's main sets it (fo4_default, pbrm_default: the view position's derivatives), and so
+ * does the screen pass (cell_gihalf.frag: from the depth), before any GI read; 0: none set, the shading normal stands
+ * in (the effect programs, the march). The volumes' DISCRETE reads step along it: the room the surface faces
+ * (cellGiVolAt), its view point (cellGiSeeFrom) and the third-cell guard. Along the shading normal a brick's bevel or a
+ * chipped plaster texel turned 45 degrees moved the 0.75-cell read (57 units at Concord's 76-unit room cells) 40 units
+ * sideways and shortened it to 40, across a room-grid cell boundary or a reveal's edge, so neighbouring texels of one
+ * flat wall read different rooms and view points: black blotches shaped like the normal map's tilts in the GI pass
+ * (Concord's brick, lane GISUNBLOTCH1). The blend's sample point (half a voxel out) and the slab weights keep the
+ * shading normal: they vary smoothly with it. Red WW_CELL_PV_RED=bumpn (cellPassRed 16384): the shading normal for
+ * every read, as before. */
+vec3 cellGiGeoN = vec3( 0.0 );
+vec3 cellGiReadN( vec3 N )
+{
+	return ( cellPassRed & 16384 ) == 0 && dot( cellGiGeoN, N ) > 0.0 ? cellGiGeoN : N;
+}
 uniform int cellGiLoop8;		// 8: the corner loop's bound, a uniform so the loop stays one body; MARCHTOOLS: declared for both modes (EMISSIVEGRID1 reads it in the march mode too)
 #ifdef WW_CELL_GI_MARCH
 #ifdef WW_CELL_GI_MARCH_ONCE
@@ -1020,7 +1036,7 @@ ivec2 cellGiVolAt( vec3 P, vec3 N )
 	if ( !cellGiRooms )
 		return ivec2( -2 );
 	for ( int k = 0; k < 2; k++ ) {
-		ivec2 L = cellRoomAt( P + N * ( ( k == 0 ? 0.75 : 1.75 ) * cellRoomsCell ) );
+		ivec2 L = cellRoomAt( P + cellGiReadN( N ) * ( ( k == 0 ? 0.75 : 1.75 ) * cellRoomsCell ) );	// lane GISUNBLOTCH1: along the face
 		if ( L.x >= 0 )
 			return L;
 	}
@@ -1049,7 +1065,7 @@ vec4 cellGiVolume( vec3 P, vec3 N, ivec2 L )
 	 * apart as the last answer before the trilinear, which reads through walls (an outdoor recess, GIBLACK1). Red
 	 * WW_CELL_GIWALL_RED=off: no test, the old weights. */
 	bool wall = cellGiRooms && ( cellPassRed & ( 16 | 8192 ) ) == 0;
-	vec3 from = wall ? cellGiSeeFrom( P, N ) : P;
+	vec3 from = wall ? cellGiSeeFrom( P, cellGiReadN( N ) ) : P;	// lane GISUNBLOTCH1: along the face (red bumpn: N)
 	vec4 own = vec4( 0.0 ), oth = vec4( 0.0 ), bur = vec4( 0.0 );
 	float wOwn = 0.0, wOth = 0.0, tAcc = 0.0, tBest = 0.0, wBur = 0.0;
 	int other = -1;
@@ -1127,7 +1143,7 @@ vec4 cellGiVolume( vec3 P, vec3 N, ivec2 L )
 	if ( wOth > 0.0 )
 		s = mix( s, oth / wOth, 0.5 * clamp( tAcc / wOwn, 0.0, 1.0 ) );
 	cellGiPath = anyRoom ? 4 : ( nearPick ? 2 : 1 ) + ( strand ? 5 : 0 );
-	bool lone = strand && wOwn > 0.0 && cellRoomSolid( P + N * ( 2.75 * cellRoomsCell ) );
+	bool lone = strand && wOwn > 0.0 && cellRoomSolid( P + cellGiReadN( N ) * ( 2.75 * cellRoomsCell ) );
 	if ( wOwn <= 0.0 || lone ) {	// one trilinear site: each cellGiSample inlines it
 		const vec3 Y = vec3( 0.2126, 0.7152, 0.0722 );
 		vec4 tr = cellGiTrilinear( P, N );

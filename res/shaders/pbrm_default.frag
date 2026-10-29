@@ -495,6 +495,13 @@ void main()
 	s.base = base;
 	s.N = normalize( tbn * normal );
 #ifdef WW_CELLLIGHTS
+	// lane GISUNBLOTCH1: the face's normal for the GI's discrete reads (cell_lights.glsl cellGiGeoN), fo4_default.frag's rule
+	if ( cellOn && cellGiOn ) {
+		vec3 ng = cross( dFdx( -ViewDir ), dFdy( -ViewDir ) );
+		cellGiGeoN = dot( ng, ng ) > 1.0e-20 ? cellWorldDir( ng ) : vec3( 0.0 );
+		if ( dot( cellGiGeoN, cellWorldDir( s.N ) ) < 0.0 )
+			cellGiGeoN = -cellGiGeoN;
+	}
 	if ( cellOn && cellProbe == 20 && cellAoEarly == 1 ) {	// lane PERF1: the obscurance pass reads the normal and depth only
 		fragColor = cellAoPassOut( s.N, -ViewDir );
 		return;

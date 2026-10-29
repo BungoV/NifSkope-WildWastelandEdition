@@ -152,7 +152,7 @@ struct ClState
 	int fogProbe = 0;       // lane FOG2: WW_CELL_FOG_PROBE=6 (alpha, height blend) | 7 (fog colour ^ 1/2.2) | 8 (its d, z), per fragment
 	int pass = 0;           // lane PROBEVIEW1: the PRTP band's Pass (WwCellPass); WW_CELL_PASS pins it
 	bool passPinned = false;
-	int passRed = 0;        // WW_CELL_PV_RED: 1 direct, 2 nonormal (the shader), 4 open (every sky direction open), 8 noclamp, 16 nosee, 32 borrow, 64 lendamb, 128 strand, 256 firstslot, 512 tiepick, 1024 lonesky, 2048 nofilter, 4096 nolastfill; 8192 WW_CELL_GIWALL_RED=off
+	int passRed = 0;        // WW_CELL_PV_RED: 1 direct, 2 nonormal (the shader), 4 open (every sky direction open), 8 noclamp, 16 nosee, 32 borrow, 64 lendamb, 128 strand, 256 firstslot, 512 tiepick, 1024 lonesky, 2048 nofilter, 4096 nolastfill; 8192 WW_CELL_GIWALL_RED=off; 16384 bumpn (lane GISUNBLOTCH1: the volumes' discrete GI reads along the shading normal, as before)
 	int giAmb = 1;          // lane GICAL1: WW_CELL_GI_AMB = keep (0) | replace | off | max | asgi (the measure's red); lane GIAMB1: replace by default (his ruling), keep = the gate's red
 	bool giFill = true;     // lane GICAL1: WW_CELL_GI_FILL=0 leaves the GI's gaps black (as before the lane)
 	// lane LIGHTFLICKER1: the Light flicker row (WW/CellFlicker, pin WW_CELL_FLICKER), its red and gate pins
@@ -273,7 +273,7 @@ ClState & st()
 			s.pass = 0;
 		for ( const QByteArray & r : wwEnv( "WW_CELL_PV_RED" ).split( ',' ) ) {
 			const QByteArray t = r.trimmed();
-			s.passRed |= t == "direct" ? 1 : t == "nonormal" ? 2 : t == "open" ? 4 : t == "noclamp" ? 8 : t == "nosee" ? 16 : t == "borrow" ? 32 : t == "lendamb" ? 64 : t == "strand" ? 128 : t == "firstslot" ? 256 : t == "tiepick" ? 512 : t == "lonesky" ? 1024 : t == "nofilter" ? 2048 : t == "nolastfill" ? 4096 : 0;	// lane GIDARK1: firstslot, tiepick, lonesky; lane WALLSTACK1: nofilter, nolastfill   // lane ROOMCLAMP1: noclamp; lane GISHADE1: nosee; lane GIBLACK1: borrow; lane GIBLACK2: lendamb, strand
+			s.passRed |= t == "direct" ? 1 : t == "nonormal" ? 2 : t == "open" ? 4 : t == "noclamp" ? 8 : t == "nosee" ? 16 : t == "borrow" ? 32 : t == "lendamb" ? 64 : t == "strand" ? 128 : t == "firstslot" ? 256 : t == "tiepick" ? 512 : t == "lonesky" ? 1024 : t == "nofilter" ? 2048 : t == "nolastfill" ? 4096 : t == "bumpn" ? 16384 : 0;	// lane GIDARK1: firstslot, tiepick, lonesky; lane WALLSTACK1: nofilter, nolastfill   // lane ROOMCLAMP1: noclamp; lane GISHADE1: nosee; lane GIBLACK1: borrow; lane GIBLACK2: lendamb, strand
 		}
 		// lane GIWALL2: a GI voxel with its centre in solid or behind a wall from the surface counts again (GISHADE1's
 		// 12 taps short of the centre), in the volumes and the march alike; it picks no march (both paths carry the rule)
@@ -3979,6 +3979,7 @@ bool giVolMaskPass( Scene * scene, AoGpu & g, const WwCellGi * G, int W, int H, 
 	}
 	const float bias = 0.75f * G->roomsCell;	// the room grid's read (cell_lights.glsl cellGiVolAt)
 	prog->uni1f( "volBias", bias );
+	prog->uni1b( "volGeoN", ( st().passRed & 16384 ) == 0 );	// lane GISUNBLOTCH1: the bias along the face's normal (red bumpn: the shading normal)
 	prog->uni1f( "volGrow", bias + 1.0f );
 	prog->uni2f( "volProj", p00, p11 );
 	fn->glUniform2i( prog->uniLocation( "volFull" ), W, H );

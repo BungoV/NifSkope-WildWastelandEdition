@@ -869,6 +869,15 @@ void main()
 	// Emissive
 	color.rgb += emissive * glowScaleSRGB;
 #ifdef WW_CELLLIGHTS
+	/* lane GISUNBLOTCH1: the face's normal for the GI's discrete reads (cell_lights.glsl cellGiGeoN): the plane of the
+	 * view position's derivatives, on the side the shading normal faces (the screen pass takes the same face from the
+	 * depth, cell_gihalf.frag). Uniform condition: the derivatives stay defined. */
+	if ( cellOn && cellGiOn ) {
+		vec3 ng = cross( dFdx( -ViewDir ), dFdy( -ViewDir ) );
+		cellGiGeoN = dot( ng, ng ) > 1.0e-20 ? cellWorldDir( ng ) : vec3( 0.0 );
+		if ( dot( cellGiGeoN, cellWorldDir( normal ) ) < 0.0 )
+			cellGiGeoN = -cellGiGeoN;
+	}
 #if defined( WW_CELL_GI_MARCH ) && defined( WW_CELL_GI_MARCH_ONCE )
 	// lane GIBLACKLINK1: the march red's one GI read, at the (P, N) every later caller passes (cellPassOut's nonormal red: up)
 	if ( cellOn && cellGiOn )

@@ -69,6 +69,34 @@ the plugin is read here, every ray is traced here through the run's own soup.psp
           pocket the recess read as an interior grid (the gap fill on): the room fill's buried voxels, within 1%
           taps   the red's taps are GISHADE1's exactly: 20000 random segments, gi_wall under the red == the old rule
         Run with GI_CHECK_GIWALL=0 (the fix rows take the red) and --expect fail: it FAILS.
+  blotch <dump> <shots dir> --tag T --box x0,y0,x1,y1 --center cx,cy,cz [--max 400] [--osample 3000]
+         [--nface mean|fit|both] [--why] [--expect fail]
+        Lane GISUNBLOTCH1: the GI pass's dark points on one wall (WW_CELL_PASS=1, sum of RGB < 90 in the box) against their
+        lit neighbours on the same wall (lit, within 40 px, face normal within 20 degrees, within 30 units of the dark
+        point's plane), redone here (gi_volume, the GI pass's read: the room grid's volume at 0.75 / 1.75 cell) from the
+        run's GI dump at the pixels' points: P from probes 2/3 (hi x 256 + lo - 32768 + 0.5 + the notes' center=), the
+        shading normal from probe 4. The normal without the normal map (the shader takes the vertex normal): --nface
+        mean (the default: the mean shading normal of the points within 6 px and 40 units, within 60 degrees of the
+        centre's), fit (round 1's plane fit of the decoded points within 5 px: 514 of 3600 on run1), both (the fit, else
+        the mean). Pictures <T>_p2/p3/p4/p95/passgi.png in <shots dir>. The fix is GI_CHECK_GEON's law (geon_parse;
+        unset: the shader's, the corner set; r1: round 1's room, view point and guard; 0: the red, today's law).
+          X  the twin under the red (every read along the shading normal) draws at least half the dark points under 0.5x
+             their lit neighbours: it reproduces the defect (else NOT REPRODUCED: the dark read is not the one modelled)
+          K  the cause (round 2), under the red: the share of the dark and of the lit points whose corner set the bump
+             moves (the floor of P + N x half a voxel is not the face normal's), their kept weight (pass 0, seen) and the
+             corners the wall test refused; then the dark points split into moved / not moved, red and fix in the band
+          C  the chain under the red, per dark point: which read named the room (0.75 / 1.75 / none) and its kind, the
+             view point, the paths (and the picture's probe 95 paths), what the fix moves (the room, the view point, the
+             corner set), and the corner that carries most of the kept weight (behind the face's plane, an indoor slot)
+          F  with the fix at least 80% of the dark points read 0.5x..2x of their lit neighbours
+          R  the red keeps them dark: at most half in that band
+          O  outside the box (--osample px spread over the frame, 0: none): the fix moves at most 0.5% of the GI pass
+             px by more than 4 levels against the red (cellPassOut's curve on the twin's sample; the live judge's O is
+             the gate, this is its offline stand-in)
+          W  the wall's lit points: the share the fix moves by more than 5% (reported)
+          A  --why: one line per arm (BLOTCH_ARMS: each read on the face's normal alone, all of them, the wall test
+             off): F, O, W. The arm that reaches F >= 80% with O <= 0.5% names the read that carries the defect.
+        Run with GI_CHECK_GEON=0 (the fix rows take the red) and --expect fail: it FAILS.
 One verdict line per subcommand last; exit 0 on PASS, 1 on FAIL.
 """
 import math
@@ -679,6 +707,24 @@ BOTH_RED = [os.environ.get('GI_CHECK_BOTH', '1') == '0']   # lane GIDARK1: red f
 RED_EMPTY = [False]   # red emptyslot: the twin weighs a room's empty slots (the old shader: black, the no-probe marker)
 SEE_RED = [os.environ.get('GI_CHECK_SEE', '1') == '0']   # lane GISHADE1: red nosee (the shader's WW_CELL_PV_RED=nosee)
 LASTFILL_RED = [os.environ.get('GI_CHECK_LASTFILL', '1') == '0']   # lane WALLSTACK1: red nolastfill (the shader's WW_CELL_PV_RED=nolastfill)
+def geon_parse(v):
+    """Lane GISUNBLOTCH1: which of the volumes' reads take the normal without the normal map (cellGiReadN). '0' or '':
+    none (the red WW_CELL_PV_RED=bumpn, today's law); '1' (unset): the shader's law, round 2's corner set; 'r1': round
+    1's law (room, frm, guard); else a comma list of: room (the volume read, cellGiVolAt), frm (the wall test's view
+    point), guard (the third-cell guard), set (the corner set: the voxels round P + Nf x half a voxel, the weights
+    from the shading normal's point held inside it), point (the whole sample point, the weights too), slab (the
+    axis slabs n2 / sl)."""
+    v = (v or '').strip()
+    if v in ('', '0'):
+        return frozenset()
+    if v == '1':
+        return frozenset(['set'])
+    if v == 'r1':
+        return frozenset(['room', 'frm', 'guard'])
+    return frozenset(t.strip() for t in v.split(',') if t.strip())
+
+
+GEON = [geon_parse(os.environ.get('GI_CHECK_GEON', '1'))]   # lane GISUNBLOTCH1: the reads on the face's normal; GI_CHECK_GEON=0: the red bumpn (WW_CELL_PV_RED=bumpn), every read along the shading normal
 GIWALL_RED = [os.environ.get('GI_CHECK_GIWALL', '1') == '0']   # lane GIWALL2: red WW_CELL_GIWALL_RED=off (GISHADE1's taps, no wall test in the fill or the volumes)
 GI_PLAIN = [0]     # samples that found rooms but no room with weight: the shader's plain (unclamped) trilinear
 GI_FILL = [os.environ.get('GI_CHECK_FILL', '1') != '0']   # lane GICAL1: the gap fill (GI_CHECK_FILL=0: the shader pin WW_CELL_GI_FILL=0)
@@ -903,31 +949,53 @@ def vol_at(R, P, N):
     return (-2, -2)
 
 
-def gi_volume(G, R, P, N, L=None, sky=False):
+def gi_volume(G, R, P, N, L=None, sky=False, Ng=None, trace=None, use=None):
     """cellGiVolume (lane PERF1, the default GI visibility: WW_CELL_GI_VIS unset): the 8 corners' slots of the pixel's
     volume L (None: vol_at, the read a pixel without the shapes' mask takes), none with weight: the 27 round the nearest
     corner; a threshold's other side (G['thr'], per voxel (t0, t1, other0, other1); absent: none) blended in by t / 2;
     nothing: the plain trilinear. Outdoors (sky) a surface in no volume stands in the outdoors' (room 0), and buried a
     third cell deep takes the darker of that and the trilinear. Lane GIWALL2: every pass keeps only the voxels seen
     from see_from (gi_wall); pass 1 keeps the buried apart as the last answer before the trilinear. The edge
-    fade (cellGiEdgeFade) is left out: a fixture keeps clear of the grid's pad. Returns (rgba, probe 95 path)."""
+    fade (cellGiEdgeFade) is left out: a fixture keeps clear of the grid's pad. Returns (rgba, probe 95 path).
+    Ng (lane GISUNBLOTCH1, cellGiReadN): the normal without the normal map; the reads `use` names (None: GEON[0], from
+    GI_CHECK_GEON; geon_parse) take it when it faces N's side; Ng None, or GI_CHECK_GEON=0: every read along N
+    (today's law). The shader's law is the corner set ('set'). trace: a dict to fill (L, frm, No, i0 the corner set,
+    moved: the shading normal's point outside it, and per corner tested: ps, cell, slot rooms, the slot used, its a,
+    its luminance / a, the wall test, the weight)."""
     P, N = np.asarray(P, float), np.asarray(N, float)
     dm = np.array(G['dims'])
-    g = (P + N * 0.5 * G['voxel'] - G['origin']) / G['voxel'] - 0.5
-    i0 = np.floor(g).astype(int)
+    use = GEON[0] if use is None else use
+    if Ng is None or float(np.dot(Ng, N)) <= 0.0:
+        use = frozenset()
+    Nf = np.asarray(Ng, float) if use else N
+    on = lambda k: Nf if k in use else N
+    # lane GISUNBLOTCH1: the corner set round the point along Nf ('set'; 'point': the weights' point too), the weights
+    # from the shading normal's point, held 1/64 inside the set on an axis where the tilt takes it out (cellGiVolume gf)
+    g = (P + on('point') * 0.5 * G['voxel'] - G['origin']) / G['voxel'] - 0.5
+    gs = (P + (Nf if ('set' in use or 'point' in use) else N) * 0.5 * G['voxel'] - G['origin']) / G['voxel'] - 0.5
+    i0 = np.floor(gs).astype(int)
     f = g - i0
-    r0 = np.floor(g + 0.5).astype(int)
-    sl = (0 if N[0] >= 0 else 1, 2 if N[1] >= 0 else 3, 4 if N[2] >= 0 else 5)
-    n2 = N * N
+    out = (f < 0.0) | (f >= 1.0)
+    f = np.where(out, np.clip(f, 1.0 / 64.0, 63.0 / 64.0), f)
+    r0 = np.floor(gs + 0.5).astype(int)
+    it0 = np.floor(g).astype(int)   # cellGiTrilinear reads its own point (the shading normal's)
+    ft = g - it0
+    Ns = on('slab')
+    sl = (0 if Ns[0] >= 0 else 1, 2 if Ns[1] >= 0 else 3, 4 if Ns[2] >= 0 else 5)
+    n2 = Ns * Ns
     rooms = R is not None and 'slots' in G
+    No = on('room')
     if L is None:
-        L = vol_at(R, P, N) if rooms else (-2, -2)
+        L = vol_at(R, P, No) if rooms else (-2, -2)
     strand = rooms and sky and L[0] == -2
     if strand:
         L = (0, -1)
     any_room = not rooms or L[0] == -2
     wall = rooms and not GIWALL_RED[0] and not SEE_RED[0]
-    frm = see_from(R, P, N) if wall else P
+    frm = see_from(R, P, on('frm')) if wall else P
+    if trace is not None:
+        trace.update(L=tuple(int(v) for v in L), frm=np.asarray(frm, float), No=No, i0=tuple(int(v) for v in i0),
+                     moved=bool(out.any()), corners=[])
     own, oth, bur = np.zeros(4), np.zeros(4), np.zeros(4)
     w_own = w_oth = t_acc = t_best = w_bur = 0.0
     other, near = -1, False
@@ -963,6 +1031,9 @@ def gi_volume(G, R, P, N, L=None, sky=False):
             if u[3] <= 0:
                 continue
             see = gi_wall(R, frm, G['origin'] + (c + 0.5) * G['voxel'], ps == 1) if wall else 2
+            if trace is not None:
+                trace['corners'].append((ps, tuple(int(v) for v in c), (int(S[0]), int(S[1])), q, float(u[3]),
+                                         float(u[:3] @ (0.2126, 0.7152, 0.0722)) / max(float(u[3]), 1e-9), int(see), w))
             if see == 0:
                 continue
             if see == 1:
@@ -985,9 +1056,9 @@ def gi_volume(G, R, P, N, L=None, sky=False):
     if w_oth > 0:
         s = s + (oth / w_oth - s) * 0.5 * min(max(t_acc / w_own, 0.0), 1.0)
     path = 4 if any_room else (2 if near else 1) + (5 if strand else 0)
-    lone = strand and w_own > 0 and room_solid(R, P + N * 2.75 * R['cell'])
+    lone = strand and w_own > 0 and room_solid(R, P + on('guard') * 2.75 * R['cell'])
     if w_own <= 0 or lone:
-        tr, _ = gi_blend(G, None, i0, f, sl, n2)
+        tr, _ = gi_blend(G, None, it0, ft, sl, n2)
         lum = lambda v: float(v[:3] @ (0.2126, 0.7152, 0.0722))
         if w_own <= 0 or (tr[3] > 0 and lum(tr) / tr[3] < lum(s) / max(float(s[3]), 1e-6)):
             return tr, (5 if strand and w_own <= 0 else 4)
@@ -1737,6 +1808,233 @@ def giwall_cmd(expect):
     return 0 if good else 1
 
 
+def face_normal(Pimg, ok, y, x, Nb, r=5, reach=40.0):
+    # lane GISUNBLOTCH1: the face's normal at pixel (y, x) from the decoded points (whole units): the least-squares plane
+    # of the points within r px and reach units of the centre's, on Nb's side. None: under 12 points, or no plane.
+    H, W = ok.shape
+    ya, yb, xa, xb = max(y - r, 0), min(y + r + 1, H), max(x - r, 0), min(x + r + 1, W)
+    Q = Pimg[ya:yb, xa:xb][ok[ya:yb, xa:xb]]
+    Q = Q[np.linalg.norm(Q - Pimg[y, x], axis=1) < reach]
+    if len(Q) < 12:
+        return None
+    Q = Q - Q.mean(axis=0)
+    _, sv, vt = np.linalg.svd(Q, full_matrices=False)
+    if sv[1] < 3.0 * sv[2] + 1e-9:
+        return None
+    n = vt[2]
+    return n if float(n @ Nb) >= 0.0 else -n
+
+
+BLOTCH_ARMS = [   # lane GISUNBLOTCH1 round 2 (blotch --why): each arm's reads on the face's normal (geon_parse's names)
+    ('red: today', ''),
+    ('round 1: room, view point, guard', 'r1'),
+    ('round 2: the corner set', 'set'),
+    ('round 2 + the view point', 'set,frm'),
+    ('the whole sample point', 'point'),
+    ('the slabs alone', 'slab'),
+    ('every read on the face', 'room,frm,guard,point,slab'),
+    ('red, no wall test', '!nowall'),
+]
+
+
+def arm_use(spec):
+    """Lane GISUNBLOTCH1: an arm's (reads on the face's normal, the wall test off): spec a set, or a geon_parse string
+    (a leading '!nowall' also turns the wall test off: GI_CHECK_GIWALL=0's law)."""
+    if isinstance(spec, frozenset):
+        return spec, False
+    nowall = spec.startswith('!nowall')
+    return geon_parse(spec[len('!nowall'):].lstrip(',') if nowall else spec), nowall
+
+
+def pass_px(s):
+    """cellPassOut's GI pass (WW_CELL_PASS=1) of a sample, 0..255: pow(clamp(rgb / a / pi), 1 / 2.2); a <= 0.01 the
+    no-cover cyan."""
+    if s[3] <= 0.01:
+        return np.array([0.0, 255.0, 255.0])
+    return 255.0 * np.clip(np.maximum(s[:3] / s[3], 0.0) / math.pi, 0.0, 1.0) ** (1.0 / 2.2)
+
+
+def mean_normal(Nimg, Pimg, ok, y, x, r=6, reach=40.0):
+    # lane GISUNBLOTCH1 round 2: the stand-in for the normal without the normal map the shader takes (fo4_default's
+    # btnMatrix[2], pbrm's tbn[2]): the mean shading normal of the points within r px and reach units whose normal is
+    # within 60 degrees of the centre's (a normal map's tilts average out on a flat wall). None: under 12 points.
+    H, W = ok.shape
+    ya, yb, xa, xb = max(y - r, 0), min(y + r + 1, H), max(x - r, 0), min(x + r + 1, W)
+    m = ok[ya:yb, xa:xb]
+    Q, M = Pimg[ya:yb, xa:xb][m], Nimg[ya:yb, xa:xb][m]
+    k = (np.linalg.norm(Q - Pimg[y, x], axis=1) < reach) & (M @ Nimg[y, x] > 0.5)
+    if int(k.sum()) < 12:
+        return None
+    nm = M[k].sum(axis=0)
+    return nm / max(float(np.linalg.norm(nm)), 1e-9)
+
+
+def blotch_cmd(dump, shots, tag, box, center, maxpts, expect, why=False, osample=3000, nface='mean'):
+    # lane GISUNBLOTCH1: see the head. C: round 1's chain; K: round 2's measurement of the cause (the corner set the
+    # bump moves); O: the frame outside the box; A (--why): the arms.
+    from PIL import Image
+    pic = lambda k: np.asarray(Image.open(os.path.join(shots, '%s_%s.png' % (tag, k))).convert('RGB')).astype(np.int64)
+    hi, lo, nb, gp, pp = pic('p2'), pic('p3'), pic('p4'), pic('passgi'), pic('p95')
+    Pimg = (hi * 256 + lo).astype(float) - 32768.0 + 0.5 + np.asarray(center, float)
+    Nimg = nb / 255.0 * 2.0 - 1.0
+    nl = np.linalg.norm(Nimg, axis=2)
+    ok = (nl > 0.9) & (nl < 1.1)
+    Nimg = Nimg / np.maximum(nl, 1e-6)[..., None]
+    gsum = gp.sum(axis=2)
+    ppath = np.rint(pp[..., 0] * 16.0 / 255.0).astype(int)
+    x0, y0, x1, y1 = [int(v) for v in box]
+    inb = np.zeros(ok.shape, bool)
+    inb[y0:y1, x0:x1] = True
+    dark_all = np.argwhere(ok & inb & (gsum < 90))
+    lit_all = np.argwhere(ok & inb & (gsum >= 90))
+    if len(dark_all) == 0 or len(lit_all) == 0:
+        print('SKIP  blotch: %d dark, %d lit points in the box' % (len(dark_all), len(lit_all)))
+        return 0
+    pick = lambda A, n: A[np.unique(np.linspace(0, len(A) - 1, min(n, len(A))).astype(int))]
+    dark, lit = pick(dark_all, maxpts), pick(lit_all, 8 * maxpts)
+    outer = np.argwhere(ok & ~inb)
+    osm = pick(outer, osample) if osample > 0 and len(outer) else outer[:0]
+    G = read_grid(dump + '/gi_grid.bin', dump + '/gi_slots.bin')
+    R = read_rooms(dump + '/gi_rooms.bin')
+    Y = np.array([0.2126, 0.7152, 0.0722])
+    vox = G['voxel']
+    fix = GEON[0]   # the fix rows: GI_CHECK_GEON's reads (unset: the shader's, the corner set); 0: the red (the refuter)
+    K = lambda y, x: (int(y), int(x))
+    nf, nfit, nmean = {}, {}, {}
+    for (y, x) in np.vstack([dark, lit, osm]):
+        k = K(y, x)
+        if k in nf:
+            continue
+        nmean[k] = mean_normal(Nimg, Pimg, ok, k[0], k[1])
+        nfit[k] = face_normal(Pimg, ok, k[0], k[1], Nimg[k]) if inb[k] else None   # in the box: the B line's check
+        nf[k] = nmean[k] if nface == 'mean' else nfit[k] if nface == 'fit' else (nfit[k] if nfit[k] is not None else nmean[k])
+    nrm = lambda y, x: nf[K(y, x)] if nf[K(y, x)] is not None else Nimg[int(y), int(x)]
+    # the judged dark points: 3+ lit neighbours on their wall (the normals above; the same for every arm)
+    lp = lit.astype(float)
+    sel_of, idx = {}, []
+    for i, (y, x) in enumerate(dark):
+        n0 = nrm(y, x)
+        sel = [j for j in np.where(np.hypot(lp[:, 0] - y, lp[:, 1] - x) < 40.0)[0]
+               if float(nrm(*lit[j]) @ n0) > 0.94 and abs(float((Pimg[lit[j][0], lit[j][1]] - Pimg[y, x]) @ n0)) < 30.0]
+        if len(sel) >= 3:
+            sel_of[i] = sel
+            idx.append(i)
+    n = len(idx)
+    nk = [k for k in nf if inb[k]]
+    ang = [math.degrees(math.acos(min(1.0, abs(float(nfit[k] @ nmean[k]))))) for k in nk
+           if nfit[k] is not None and nmean[k] is not None]
+    print('B  box %d,%d-%d,%d: dark (sum < 90) %d, judged %d (3+ lit neighbours on their wall), lit sample %d, outside sample %d; '
+          'rooms cell %.1f, GI voxel %.1f; the normal without the normal map: %s (in the box: plane fit %d, mean %d of %d; '
+          'fit vs mean median %.1f deg)' % (x0, y0, x1, y1, len(dark_all), n, len(lit), len(osm), R['cell'], vox, nface,
+                                            sum(nfit[k] is not None for k in nk), sum(nmean[k] is not None for k in nk),
+                                            len(nk), float(np.median(ang)) if ang else -1.0))
+    if n == 0:
+        print('SKIP  blotch: no dark point has lit neighbours on its wall')
+        return 0
+
+    def run(pts, spec):
+        use, nowall = arm_use(spec)
+        keep = GIWALL_RED[0]
+        GIWALL_RED[0] = keep or nowall
+        res = []
+        try:
+            for (y, x) in pts:
+                tr = {}
+                s, pth = gi_volume(G, R, Pimg[y, x], Nimg[y, x], sky=True, Ng=nf[K(y, x)], trace=tr, use=use)
+                res.append((float(s[:3] @ Y) / float(s[3]) if s[3] > 0.01 else 0.0, pth, tr, pass_px(s)))
+        finally:
+            GIWALL_RED[0] = keep
+        return res
+    Dr, Lr, Or = run(dark, ''), run(lit, ''), run(osm, '')
+    Df, Lf, Of = run(dark, fix), run(lit, fix), run(osm, fix)
+    ratios = lambda D, L: np.array([D[i][0] / max(float(np.median([L[j][0] for j in sel_of[i]])), 1e-9) for i in idx])
+    band = lambda r: float(((r >= 0.5) & (r <= 2.0)).mean()) if len(r) else 0.0
+    omove = lambda A, B: float(np.mean([float(np.abs(a[3] - b[3]).max()) > 4.0 for a, b in zip(A, B)])) if len(A) else 0.0
+    litmove = lambda L: float(np.mean([abs(L[j][0] / max(Lr[j][0], 1e-9) - 1.0) > 0.05 for j in range(len(lit))]))
+    rr, rf = ratios(Dr, Lr), ratios(Df, Lf)
+    rep = float((rr < 0.5).mean())
+    print('X  the red twin draws %.1f%% of the judged dark points under 0.5x their lit neighbours (median %.3f; bar >= 50%%): %s'
+          % (100 * rep, float(np.median(rr)), 'reproduced' if rep >= 0.5 else 'NOT REPRODUCED'))
+
+    # K (round 2): does the bump move the corner set, and is that where the dark points are
+    def moved(y, x):
+        P, N, Nf = Pimg[y, x], Nimg[y, x], nf[K(y, x)]
+        if Nf is None or float(Nf @ N) <= 0.0:
+            return False
+        a_ = np.floor((P + N * 0.5 * vox - G['origin']) / vox - 0.5)
+        b_ = np.floor((P + Nf * 0.5 * vox - G['origin']) / vox - 0.5)
+        return bool((a_ != b_).any())
+
+    def kept0(tr):
+        c0 = [cr for cr in tr['corners'] if cr[0] == 0]
+        return (sum(cr[7] for cr in c0 if cr[6] == 2), sum(1 for cr in c0 if cr[6] == 0))
+    mD = np.array([moved(*dark[i]) for i in idx], bool)
+    mL = np.array([moved(*p) for p in lit], bool)
+    kD = np.array([kept0(Dr[i][2]) for i in idx], float).reshape(-1, 2)
+    kL = np.array([kept0(t[2]) for t in Lr], float).reshape(-1, 2)
+    print('K  under the red: the bump moves the corner set (the floor of P + N x half a voxel is not the face normal\'s) on '
+          '%.1f%% of the judged dark points, %.1f%% of the lit sample; kept weight (pass 0, seen) median dark %.3f, lit %.3f; '
+          'corners the wall test refused (pass 0) median dark %.1f, lit %.1f'
+          % (100 * float(mD.mean()), 100 * float(mL.mean()), float(np.median(kD[:, 0])), float(np.median(kL[:, 0])),
+             float(np.median(kD[:, 1])), float(np.median(kL[:, 1]))))
+    for name, m in (('moved by the bump', mD), ('not moved', ~mD)):
+        if m.any():
+            print('K  dark points whose corner set is %s: %d; red %.1f%% within 0.5x..2x (median %.3f), fix %.1f%% (median %.3f)'
+                  % (name, int(m.sum()), 100 * band(rr[m]), float(np.median(rr[m])), 100 * band(rf[m]), float(np.median(rf[m]))))
+    # C: the chain under the red (round 1's task 1)
+    cnt = lambda it: dict(sorted(((k, sum(1 for v in it if v == k)) for k in set(it)), key=lambda kv: -kv[1]))
+    cell = R['cell']
+    reads, kinds, frmk, carry = [], [], [], []
+    Lmove = Fmove = Smove = 0
+    for i in idx:
+        y, x = dark[i]
+        P, N = Pimg[y, x], Nimg[y, x]
+        tr, tf = Dr[i][2], Df[i][2]
+        reads.append('0.75' if room_at(R, P + N * 0.75 * cell)[0] >= 0 else '1.75' if room_at(R, P + N * 1.75 * cell)[0] >= 0 else 'none')
+        L = tr['L']
+        kinds.append('unknown' if L[0] == -2 else 'outdoors' if 0 in L else 'indoor %d' % L[0])
+        q = tr['frm']
+        frmk.append('0.75' if np.linalg.norm(q - (P + N * 0.75 * cell)) < 0.01 else '1.75' if np.linalg.norm(q - (P + N * 1.75 * cell)) < 0.01 else 'beside' if np.linalg.norm(q - P) > 0.01 else 'P')
+        Lmove += tf['L'] != L
+        Fmove += float(np.linalg.norm(tf['frm'] - q)) > 1.0
+        Smove += tf['i0'] != tr['i0']
+        kc = [cr for cr in tr['corners'] if cr[6] == 2 and cr[0] != 2] or [cr for cr in tr['corners'] if cr[6] == 1]
+        if kc:
+            cr = max(kc, key=lambda c_: c_[7])
+            C = G['origin'] + (np.array(cr[1]) + 0.5) * vox
+            n0 = nrm(y, x)
+            room = cr[2][cr[3]] if cr[3] in (0, 1) else cr[2][0]
+            carry.append(('behind the face' if float((C - P) @ n0) < 0.0 else 'in front') + (', indoor slot' if room > 0 else ', outdoor slot' if room == 0 else ''))
+        else:
+            carry.append('no corner kept')
+    print('C  the room read (shading normal): %s; the volume: %s; the view point: %s' % (cnt(reads), cnt(kinds), cnt(frmk)))
+    print('C  paths, the red twin %s; the picture (probe 95, the mask) %s; the fix moves the room on %d, the view point on %d, '
+          'the corner set on %d of %d' % (cnt([Dr[i][1] for i in idx]), cnt([int(ppath[dark[i][0], dark[i][1]]) for i in idx]),
+                                          Lmove, Fmove, Smove, n))
+    print('C  the corner carrying the most kept weight: %s' % cnt(carry))
+    okF, okR = band(rf), band(rr)
+    print('F  fix (%s): %.1f%% of the dark points within 0.5x..2x of their lit neighbours (median %.3f; bar >= 80%%)'
+          % (','.join(sorted(fix)) or 'none: the red, GI_CHECK_GEON=0', 100 * okF, float(np.median(rf))))
+    print('R  red: %.1f%% within the band (bar <= 50%%: the red keeps them dark)' % (100 * okR))
+    of = omove(Of, Or)
+    print('O  outside the box (%d px sampled): the fix moves %.2f%% of the GI pass px by more than 4 levels against the red '
+          '(bar <= 0.5%%; the offline stand-in, the live judge\'s O is the gate)' % (len(osm), 100 * of))
+    print('W  the wall\'s lit sample: the fix moves %.1f%% by more than 5%% (reported)' % (100 * litmove(Lf)))
+    if why:
+        for name, spec in BLOTCH_ARMS:
+            Da, La, Oa = (Dr, Lr, Or) if spec == '' else (run(dark, spec), run(lit, spec), run(osm, spec))
+            ra = ratios(Da, La)
+            print('A  %-34s F %5.1f%% (median %.3f)  O %5.2f%%  lit moved %5.1f%%'
+                  % (name, 100 * band(ra), float(np.median(ra)), 100 * omove(Oa, Or), 100 * litmove(La)))
+    good = rep >= 0.5 and okF >= 0.8 and okR <= 0.5 and of <= 0.005
+    if expect == 'fail':
+        print('%s  blotch (red): %s' % ('PASS' if not good else 'FAIL', 'the old law keeps the points dark' if not good else 'the red passes the bar'))
+        return 0 if not good else 1
+    print('%s  blotch: the wall\'s dark GI points read like their lit neighbours, the frame outside the box kept%s'
+          % ('PASS' if good else 'FAIL', '' if rep >= 0.5 else ' (NOT REPRODUCED by the twin)'))
+    return 0 if good else 1
+
+
 if __name__ == '__main__':
     a = sys.argv[1:]
     opt = (lambda k, d='': a[a.index(k) + 1] if k in a else d)
@@ -1757,6 +2055,10 @@ if __name__ == '__main__':
         sys.exit(points_cmd(a[1], a[2], [float(v) for v in bx.split(',')] if bx else None, float(opt('--maxx', '0')),
                             float(opt('--darkshare', '-1')), opt('--expect', 'pass'), float(opt('--upshare', '-1')),
                             float(opt('--minmed', '0'))))
+    if a and a[0] == 'blotch':
+        sys.exit(blotch_cmd(a[1], a[2], opt('--tag', 'c3_gsb'), [float(v) for v in opt('--box', '1740,120,1920,700').split(',')],
+                            [float(v) for v in opt('--center').split(',')], int(opt('--max', '400')), opt('--expect', 'pass'),
+                            '--why' in a, int(opt('--osample', '3000')), opt('--nface', 'mean')))
     if a and a[0] == 'giwall':
         sys.exit(giwall_cmd(opt('--expect', 'pass')))
     if a and a[0] == 'recess':
