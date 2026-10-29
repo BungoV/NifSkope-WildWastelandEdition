@@ -27,11 +27,13 @@
 #include <QStringList>
 
 #include <cstdint>
+#include <functional>
 #include <vector>
 
 struct ProbeSoup;
 struct ProbeSkyLight;
 struct WwCellLighting;
+namespace bakert { struct DdgiGpuSession; }
 
 struct RtDdgiSpec
 {
@@ -83,6 +85,7 @@ struct RtDdgiVolume
 	// census
 	QString path;                   //!< "gpu (<device>)" or "cpu" + why
 	int probes = 0, off = 0, asleep = 0, vigilant = 0, moved = 0;
+	int fresh = 0;                  //!< M3: probes a scroll reset whose classification has not come back yet
 	qint64 rays = 0;
 	double msBuild = 0, msReloc = 0, msFrames = 0;
 	int skyClamped = 0;             //!< sky cube parts clamped to 0 (rtddgimath.h skyRadianceCube)
@@ -100,7 +103,21 @@ bool rtddgiRun( const ProbeSoup & soup, const WwCellLighting & lighting, const P
  *  and classifies; volume() then holds the grid, the states, offsets and the census (no tiles). step(k) runs k updates
  *  (the rotations updateRotation(spec.seed, n) for the volume's update numbers n, as the CLI's) and copies the tiles to
  *  the host: irr(), dist(), age() in the GPU's layout (rtddgi_gpu.h), valid until the next step or close. There is no
- *  CPU twin here: open() fails with why() when the GPU path cannot run (a frame's worth of rays is a GPU's work). */
+ *  CPU twin here: open() fails with why() when the GPU path cannot run (a frame's worth of rays is a GPU's work).
+ *
+ *  M3 (2026-10-29): open( ..., share ) exports the device's atlas to GL (rtddgi_gpu.h ddgiGpuShare: the cell view
+ *  reads it in place, no copy back); a step may scroll the volume first (whole cells: the kept probes keep their data,
+ *  the new planes reset and are relocated and classified alone), skip the host copies, and return before the device
+ *  is done (a later step, or finish(), collects it). */
+struct RtDdgiStep
+{
+	int k = 0;                            //!< updates (0..16)
+	int scroll[3] = { 0, 0, 0 };          //!< whole cells the volume's first probe moves first (0 0 0: none)
+	bool host = true;                     //!< the tiles back to the host (irr(), dist(), age() once the step is done)
+	bool wait = true;                     //!< false: submit only (lastMs() then tells an earlier, finished step)
+	std::function<bool()> beforeSubmit;   //!< interop: rtddgi_gpu.h DdgiGpuStepIn::beforeSubmit
+};
+
 class RtDdgiLive
 {
 public:
@@ -109,21 +126,35 @@ public:
 	RtDdgiLive( const RtDdgiLive & ) = delete;
 	RtDdgiLive & operator=( const RtDdgiLive & ) = delete;
 
-	bool open( const ProbeSoup & soup, const WwCellLighting & lighting, const ProbeSkyLight & sky, const RtDdgiSpec & spec );
+	bool open( const ProbeSoup & soup, const WwCellLighting & lighting, const ProbeSkyLight & sky, const RtDdgiSpec & spec,
+		bool share = false );
 	bool isOpen() const;
-	//! k updates (0..16); false: the device was busy (busy() true: nothing ran, try next frame) or failed (why())
+	//! k updates (0..16), host copies, waits; false: the device was busy (busy() true: nothing ran, try next frame) or failed (why())
 	bool step( int k );
+	//! M3: the whole order (see RtDdgiStep)
+	bool step( const RtDdgiStep & order );
+	//! M3: waits for a step still running on the device and takes its results (a dump's tiles)
+	bool finish();
 	void close();
 
 	const RtDdgiVolume & volume() const;
 	const RtDdgiSpec & spec() const;
 	QString why() const;
 	bool busy() const;
-	int updates() const;              //!< updates run since open
-	const float * irr() const;        //!< 64 vec4 a probe (encoded rgb, sky visibility), nullptr before the first step
+	int updates() const;              //!< updates run since open (the rotations' numbers)
+	int updatesSinceScroll() const;   //!< M3: updates since the last scroll (or the open)
+	bool submitted() const;           //!< M3: the last step put a submit in (the GL side then waits on vkDone once)
+	bakert::DdgiGpuSession * session() const;   //!< M3: for ddgiGpuShare
+	//! M3: scrolls since open, cells moved by the last one (|x| + |y| + |z|), probes it reset, probes reset in all
+	int scrolls() const;
+	int lastScrollCells() const;
+	int lastScrollFresh() const;
+	qint64 freshTotal() const;
+	const float * irr() const;        //!< 64 vec4 a probe (encoded rgb, sky visibility), nullptr before the first host step
 	const float * dist() const;       //!< 256 vec2 a probe
 	const quint32 * age() const;
-	//! the last step: GPU ms of trace, blend, border summed over its updates, [3] the copy to the host (-1: no timer), wall ms
+	//! the last FINISHED step: GPU ms of trace, blend, border summed over its updates, [3] the copies to the host, [4] its
+	//! scroll (-1: no timer, or none); lastWallMs: the last step on the CPU's clock
 	const double * lastMs() const;
 	double lastWallMs() const;
 	qint64 lastRays() const;

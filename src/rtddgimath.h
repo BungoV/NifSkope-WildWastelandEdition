@@ -50,6 +50,9 @@ constexpr float kMiss = 1e27f;             // a miss's stored distance (the blen
 constexpr float kTraceTmin = 1e-4f;        // probebvh's ray / anyHitIn: a hit counts only at t > 1e-4 (the GPU's too, M1FIX)
 constexpr float kTieAbs = 1e-4f, kTieRel = 2e-6f;   // ours (M1FIX): the nearest hit's tie window, tieWindow
 enum State : int { kOff = 0, kAsleep = 1, kVigilant = 2 };
+//! M3 (ours): a probe a scroll has just reset; relocated and classified alone before the next update (GLSL DDGI_FRESH).
+//! The read never takes it (only kVigilant is usable)
+constexpr int kFresh = 3;
 
 // ------------------------------------------------------------------ vectors
 struct V3
@@ -596,6 +599,69 @@ inline int classify( const V3 * dirs, const float * dist, int n, V3 step )
 			return kVigilant;
 	}
 	return kAsleep;
+}
+
+// ------------------------------------------------------------------ M3: the volume follows the camera (scrolling)
+/*! [SDK doc, DDGIVolume.md "Infinite Scrolling Movement"] the volume moves by whole probe cells: the interior probes
+ *  keep their values, the planes that come in are reset and converge again. The SDK keeps the probes in place and
+ *  offsets the index (a ring); ours moves the kept probes' data in the device's
+ *  buffers (src/rtddgi/rtddgi_vk.inc), so probe p stays grid point p and the read (sampleVolume, cell_ddgi.glsl) and
+ *  every kernel keep their indexing: no ring offset in the 13 inlined read sites of fo4_cell (skill
+ *  ww-shader-link-limit). The rules here: where the window wants to be, how many cells that is, and which old probe
+ *  each new grid point keeps. */
+
+//! one axis: the low corner of a window `extent` wide centred on the eye, kept inside [gridLo, gridHi] when it fits
+//! (else gridLo: the window covers the grid on this axis and never scrolls on it)
+inline double scrollWindowLo( double eye, double gridLo, double gridHi, double extent )
+{
+	const double top = gridHi - extent;
+	if ( top <= gridLo )
+		return gridLo;
+	const double lo = eye - 0.5 * extent;
+	return lo < gridLo ? gridLo : lo > top ? top : lo;
+}
+//! one axis: whole cells from the volume's first probe (a multiple of step, packVolume's floor) to the window's
+inline int scrollCells( double origin, double windowLo, double step )
+{
+	return int( std::floor( windowLo / step ) - std::floor( origin / step + 0.5 ) );
+}
+/*! after a scroll by s cells (new first probe = old first probe + s steps) the old probe that new grid point (x, y, z)
+ *  keeps (same world point), or -1: a fresh probe (its point was outside the old volume) */
+inline int scrollSource( const int dims[3], const int s[3], int x, int y, int z )
+{
+#ifdef RTDDGI_RED_SCROLL
+	const int ox = x - s[0], oy = y - s[1], oz = z - s[2];   // red: the shift taken the wrong way round
+#else
+	const int ox = x + s[0], oy = y + s[1], oz = z + s[2];
+#endif
+	if ( ox < 0 || oy < 0 || oz < 0 || ox >= dims[0] || oy >= dims[1] || oz >= dims[2] )
+		return -1;
+	return ox + dims[0] * ( oy + dims[1] * oz );
+}
+/*! the kept probes as copy runs, run( old first probe, new first probe, count ), contiguous along x (one a kept
+ *  (y, z) row); returns the fresh count. The GPU copies exactly these (src/rtddgi.cpp RtDdgiLive::step) */
+template <class F>
+inline int scrollRuns( const int dims[3], const int s[3], F && run )
+{
+	int kept = 0;
+	for ( int z = 0; z < dims[2]; z++ )
+		for ( int y = 0; y < dims[1]; y++ ) {
+			int x = 0;
+			while ( x < dims[0] ) {
+				const int src = scrollSource( dims, s, x, y, z );
+				if ( src < 0 ) {
+					x++;
+					continue;
+				}
+				int n = 1;
+				while ( x + n < dims[0] && scrollSource( dims, s, x + n, y, z ) == src + n )
+					n++;
+				run( src, x + dims[0] * ( y + dims[1] * z ), n );
+				kept += n;
+				x += n;
+			}
+		}
+	return dims[0] * dims[1] * dims[2] - kept;
 }
 
 // ------------------------------------------------------------------ the light at a hit (probegi's rules)
