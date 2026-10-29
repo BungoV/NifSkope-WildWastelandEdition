@@ -4,7 +4,8 @@
 //    0xFF, alpha test ref 110, texture alpha 96..239 with percentiles 10/50/90 = 133/150/179): the decal must be
 //    cut along its border (a hole edge frays) and kept inside. With the old rule the vertex alpha read 1 and the
 //    border passed everywhere: a hard-edged hole, bungo's grey blocks.
-// `--red` evaluates the old rule (WW_CELL_VERTEXALPHA_RED=1): it must FAIL.
+// 3. GLTFCELL1: a coloured shape without the flag keeps it too (the church window panes).
+// `--red` evaluates the old rule (WW_CELL_VERTEXALPHA_RED=1), `--flagred` the flag rule (=flag): both must FAIL.
 #include "cellvertexalpha.h"
 
 #include <cstdio>
@@ -47,15 +48,26 @@ double passShare( double drawnVa )
 int main( int argc, char ** argv )
 {
 	const bool red = argc > 1 && !std::strcmp( argv[1], "--red" );
+	const bool flagRed = argc > 1 && !std::strcmp( argv[1], "--flagred" );
 	// own colour, effect, cable, Vertex_Alpha flag, tree anim
-	expect( wwCellKeepsVertexAlpha( false, true, false, true, false, red ), false, "no colour stream" );
-	expect( wwCellKeepsVertexAlpha( true, true, false, false, false, red ), true, "effect shader" );
-	expect( wwCellKeepsVertexAlpha( true, false, true, false, false, red ), true, "cable wind weight" );
-	expect( wwCellKeepsVertexAlpha( true, false, false, true, false, red ), true, "lit shape with Vertex_Alpha" );
-	expect( wwCellKeepsVertexAlpha( true, false, false, false, false, red ), false, "lit shape without Vertex_Alpha" );
-	expect( wwCellKeepsVertexAlpha( true, false, false, true, true, red ), false, "tree: wind weight, not opacity" );
+	expect( wwCellKeepsVertexAlpha( false, true, false, true, false, red, flagRed ), false, "no colour stream" );
+	expect( wwCellKeepsVertexAlpha( true, true, false, false, false, red, flagRed ), true, "effect shader" );
+	expect( wwCellKeepsVertexAlpha( true, false, true, false, false, red, flagRed ), true, "cable wind weight" );
+	expect( wwCellKeepsVertexAlpha( true, false, false, true, false, red, flagRed ), true, "lit shape with Vertex_Alpha" );
+	expect( wwCellKeepsVertexAlpha( true, false, false, false, false, red, flagRed ), true, "lit shape without Vertex_Alpha" );
+	expect( wwCellKeepsVertexAlpha( true, false, false, true, true, red, flagRed ), false, "tree: wind weight, not opacity" );
+	expect( wwCellKeepsVertexAlpha( true, false, false, false, true, red, flagRed ), false, "tree without the flag" );
 
-	const bool keep = wwCellKeepsVertexAlpha( true, false, false, true, false, red );
+	// GLTFCELL1: BldChurch01Open's window pane, no Vertex_Alpha flag, vertex alpha 0x19, texture alpha 80, ref 10
+	const bool paneKeep = wwCellKeepsVertexAlpha( true, false, false, false, false, red, flagRed );
+	const double pane = ( paneKeep ? 25.0 / 255.0 : 1.0 ) * 80.0;
+	std::printf( "church pane drawn alpha %.1f (want <= 10: cut, as in the game)\n", pane );
+	if ( pane > 10.0 ) {
+		std::printf( "FAIL church window panes drawn solid\n" );
+		fails++;
+	}
+
+	const bool keep = wwCellKeepsVertexAlpha( true, false, false, true, false, red, flagRed );
 	const double border = passShare( keep ? 159.0 / 255.0 : 1.0 ), inner = passShare( 1.0 );
 	std::printf( "decal pass share: border %.3f (want < 0.25), inner %.3f (want > 0.9)\n", border, inner );
 	if ( !( border < 0.25 ) ) {

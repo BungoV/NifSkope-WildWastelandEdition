@@ -50,6 +50,7 @@ struct NearShapeFacts
 	bool waterShader = false;       //!< BSWaterShaderProperty (lane WATER1: a placed water mesh's surface)
 	bool alphaBlend = false;        //!< NiAlphaProperty flags bit 0, or BGSM bAlphaBlend
 	bool alphaTest = false;         //!< NiAlphaProperty flags bit 9, or BGSM bAlphaTest
+	quint8 tile = 3;                //!< texture border: bit 0x2 U repeats, 0x1 V; clear = clamp (NIF Texture Clamp Mode, or BGSM tile flags)
 	quint8 alphaRef = 128;          //!< the test's cutoff: BGSM ref when it tests, else the property's own
 	bool decal = false;             //!< BGSM bDecal, or SLSF1 Decal (26) / Dynamic_Decal (27)
 	bool treeAnim = false;          //!< SLSF2 Tree_Anim (29), or BGSM bTree

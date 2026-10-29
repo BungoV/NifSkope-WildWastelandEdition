@@ -5322,8 +5322,9 @@ static bool cellBuild( NifModel * nif, const CellSceneSpec & specAsked, CellChun
 			}
 			const int base = int( b.verts.size() );
 			static const bool vaRed = qgetenv( "WW_CELL_VERTEXALPHA_RED" ) == "1";
+			static const bool vaFlagRed = qgetenv( "WW_CELL_VERTEXALPHA_RED" ) == "flag";
 			const bool keepVa = wwCellKeepsVertexAlpha( ownColor, !b.effectMat.isEmpty() || !b.effectBlock.isEmpty(),
-				cableSway, s.geom.vertexAlpha, s.nearFacts.treeAnim, vaRed );
+				cableSway, s.geom.vertexAlpha, s.nearFacts.treeAnim, vaRed, vaFlagRed );
 			for ( size_t v = 0; v < nv; v++ ) {
 				const Vector3 lp( s.geom.pos[v * 3 + 0], s.geom.pos[v * 3 + 1],
 					s.geom.pos[v * 3 + 2] );
@@ -5394,8 +5395,10 @@ static bool cellBuild( NifModel * nif, const CellSceneSpec & specAsked, CellChun
 			drawn += isActor ? 0 : 1;
 		}
 	}
-	if ( exportSink )
+	if ( exportSink ) {
+		exportSink->decals( decalRefs );
 		return true;   // lane GLTFCELL1: the export has what it came for
+	}
 	CellSpeed::mark( "models loaded and placements welded" );
 	/* lane CABLES1: the cables' census. "XBSD refs" counts every reference read that carries one and is not
 	 * deleted or hidden; "placed" those on a BNDS base that reached the placements; "built" those the
