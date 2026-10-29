@@ -615,8 +615,11 @@ bool gltfExportWrite( const GltfExportScene & scene, const QString & gltfPath, Q
 	// character -- writes neither `meshes` nor `materials` rather than a pair
 	// of empty ones. They are built aside and appended only when non-empty.
 	QByteArray images, textures, materials, meshesJson;
-	int nImages = 0;
-	QHash<QString, int> imageOf;
+	int nImages = 0, nTextures = 0;
+	QHash<QString, int> imageOf, textureOf;
+	// sampler 0 repeats; a clamped wrap appends its own on first use, so a repeat-only file keeps its bytes
+	QByteArray samplers = "{\"magFilter\":9729,\"minFilter\":9987,\"wrapS\":10497,\"wrapT\":10497}";
+	QHash<int, int> samplerOf{ { 3, 0 } };
 	for ( int m = 0; m < scene.meshes.size(); m++ ) {
 		const GltfExportMesh & mesh = scene.meshes[m];
 		if ( m )
@@ -649,18 +652,33 @@ bool gltfExportWrite( const GltfExportScene & scene, const QString & gltfPath, Q
 		materials += "{\"name\":" + jstr( mesh.materialName.isEmpty()
 			? ( mesh.name + QStringLiteral( "_material" ) ) : mesh.materialName )
 			+ ( mesh.doubleSided ? ",\"doubleSided\":true" : "" ) + ",\"pbrMetallicRoughness\":{";
-		// one texture per image; with shareImages (a cell) an image URI is written once and shared
+		// one texture per image and wrap; with shareImages (a cell) an image URI is written once and shared
 		auto texOf = [&]( const QString & uri ) -> int {
-			if ( scene.shareImages && imageOf.contains( uri ) )
-				return imageOf.value( uri );
-			if ( nImages )
-				images += ",";
-			images += "{\"uri\":" + juri( uri ) + "}";
-			if ( nImages )
+			const int wrap = mesh.wrap & 3;
+			const QString key = wrap == 3 ? uri : uri + QStringLiteral( "|wrap" ) + QString::number( wrap );
+			if ( scene.shareImages && textureOf.contains( key ) )
+				return textureOf.value( key );
+			int img = scene.shareImages ? imageOf.value( uri, -1 ) : -1;
+			if ( img < 0 ) {
+				if ( nImages )
+					images += ",";
+				images += "{\"uri\":" + juri( uri ) + "}";
+				imageOf.insert( uri, nImages );
+				img = nImages++;
+			}
+			int smp = samplerOf.value( wrap, -1 );
+			if ( smp < 0 ) {
+				smp = samplerOf.size();
+				samplerOf.insert( wrap, smp );
+				samplers += ",{\"magFilter\":9729,\"minFilter\":9987,\"wrapS\":"
+					+ QByteArray( ( wrap & 2 ) ? "10497" : "33071" ) + ",\"wrapT\":"
+					+ QByteArray( ( wrap & 1 ) ? "10497" : "33071" ) + "}";
+			}
+			if ( nTextures )
 				textures += ",";
-			textures += "{\"sampler\":0,\"source\":" + QByteArray::number( nImages ) + "}";
-			imageOf.insert( uri, nImages );
-			return nImages++;
+			textures += "{\"sampler\":" + QByteArray::number( smp ) + ",\"source\":" + QByteArray::number( img ) + "}";
+			textureOf.insert( key, nTextures );
+			return nTextures++;
 		};
 		if ( !mesh.diffuseUri.isEmpty() ) {
 			materials += "\"baseColorTexture\":{\"index\":" + QByteArray::number( texOf( mesh.diffuseUri ) ) + "},";
@@ -691,7 +709,7 @@ bool gltfExportWrite( const GltfExportScene & scene, const QString & gltfPath, Q
 	if ( nImages ) {
 		j += "\"images\":[" + images + "],\n";
 		j += "\"textures\":[" + textures + "],\n";
-		j += "\"samplers\":[{\"magFilter\":9729,\"minFilter\":9987,\"wrapS\":10497,\"wrapT\":10497}],\n";
+		j += "\"samplers\":[" + samplers + "],\n";
 	}
 
 	// skins

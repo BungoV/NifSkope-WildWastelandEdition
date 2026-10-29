@@ -141,6 +141,12 @@ QJsonObject shapeJson( const ProbeVolumeShape & s )
 	o.insert( QStringLiteral( "center" ), vec3( s.center ) );
 	o.insert( QStringLiteral( "size" ), vec3( s.size ) );
 	o.insert( QStringLiteral( "rotation" ), vec3( s.rotation ) );
+	if ( s.hull ) {   // lane VOLPLACE2: a threshold snapped to its opening's frame
+		QJsonArray c;
+		for ( int k = 0; k < 8; k++ )
+			c.append( vec3( s.corners[k] ) );
+		o.insert( QStringLiteral( "corners" ), c );
+	}
 	return o;
 }
 
@@ -180,6 +186,35 @@ bool shapeFromJson( const QJsonObject & o, ProbeVolumeShape * s, QStringList * l
 	}
 	if ( !readVec3( o.value( QStringLiteral( "rotation" ) ), s->rotation ) )
 		s->rotation[0] = s->rotation[1] = s->rotation[2] = 0.0f;
+	const QJsonArray corners = o.value( QStringLiteral( "corners" ) ).toArray();
+	s->hull = corners.size() == 8;
+	for ( int k = 0; k < 8 && s->hull; k++ )
+		s->hull = readVec3( corners[k], s->corners[k] );
+	return true;
+}
+
+//! lane VOLPLACE2: inside the 8-corner hexahedron (bit 0 x, bit 1 y, bit 2 z): on the centroid's side of its 12 triangles
+bool hullContains( const float c[8][3], const float p[3] )
+{
+	static const int q[6][4] = { { 0, 2, 6, 4 }, { 1, 5, 7, 3 }, { 0, 4, 5, 1 }, { 2, 3, 7, 6 }, { 0, 1, 3, 2 }, { 4, 6, 7, 5 } };
+	double g[3] = { 0, 0, 0 };
+	for ( int k = 0; k < 8; k++ )
+		for ( int i = 0; i < 3; i++ )
+			g[i] += c[k][i] / 8.0;
+	for ( const auto & f : q )
+		for ( int t = 0; t < 2; t++ ) {
+			const float * a = c[f[0]], * b = c[f[1 + t]], * d = c[f[2 + t]];
+			const double u[3] = { double( b[0] ) - a[0], double( b[1] ) - a[1], double( b[2] ) - a[2] };
+			const double v[3] = { double( d[0] ) - a[0], double( d[1] ) - a[1], double( d[2] ) - a[2] };
+			const double n[3] = { u[1] * v[2] - u[2] * v[1], u[2] * v[0] - u[0] * v[2], u[0] * v[1] - u[1] * v[0] };
+			double sg = 0, sp = 0;
+			for ( int i = 0; i < 3; i++ ) {
+				sg += n[i] * ( g[i] - a[i] );
+				sp += n[i] * ( double( p[i] ) - a[i] );
+			}
+			if ( sg * sp < 0 )
+				return false;
+		}
 	return true;
 }
 
@@ -194,6 +229,8 @@ void sha( QCryptographicHash & h, const void * p, size_t n )
 
 bool ProbeVolumeShape::contains( const float p[3] ) const
 {
+	if ( hull )
+		return hullContains( corners, p );
 	double m[3][3];
 	rotMatrix( rotation, m );
 	const double d[3] = { double( p[0] ) - center[0], double( p[1] ) - center[1], double( p[2] ) - center[2] };
@@ -409,6 +446,57 @@ bool probeVolumesBuild( const ProbeSoup & soup, const std::vector<ProbeVolumeMar
 	if ( red == QLatin1String( "nomerge" ) )
 		spec.mergeShare = 2.0f;
 	const bool useFloor = red != QLatin1String( "nofloor" );
+	/* lane VOLPLACE2 (bungo 10-28: "use as few of these as possible, to wholly fill the room"): rooms parted only at
+	 * walls, each room's boxes square to its own walls, the fewest boxes that fill it, thresholds fitted to the open
+	 * hole. The default; any red keeps the stages as they were ("volplace1" = VOLPLACE1's bytes).
+	 * Knobs WW_VOLFIT_SPEC=join=0,joinwall=0.5,joinmin=4,jointop=0,joinlog=1,wallyaw=0,yawshare=0.35,openfit=0,greedy2=6,
+	 * place2fine=0 */
+	const bool place2 = red.isEmpty();
+	bool joinOn = true, wallYawOn = true, openFitOn = true, joinTop = true, joinLog = false;
+	/* knob greedy2 (bits): 1 cover to 97 % (off: it laid extra boxes, the store's main room 2 -> 1 box without it),
+	 * 2 the slab test on the room's own air, 4 the 3 % stop */
+	int greedyBits = 6;
+	double joinWall = 0.5, joinMin = 4, yawShare = 0.35;
+	/* VOLPLACE2 (bungo 10-28): a roofed room must fit a standing person: clear height >= minHeight and a floor of
+	 * >= minFloor u2 (the store's fire escape: a 244 x 244 x 122 u landing under the landing above read as a room) */
+	double minHeight = 180.0, minFloor = 14884.0;
+	int rejHeight = 0, rejFloor = 0;
+	bool stripOn = true, rimOn = true;
+	bool personAll = true;   // VOLPLACE2 (bungo 10-29 "the same issues"): the person rule for EVERY room, not only roofed ones
+	for ( const QString & kv : qEnvironmentVariable( "WW_VOLFIT_SPEC" ).split( QLatin1Char( ',' ), Qt::SkipEmptyParts ) ) {
+		const QString k = kv.section( QLatin1Char( '=' ), 0, 0 ).trimmed();
+		const double x = kv.section( QLatin1Char( '=' ), 1 ).toDouble();
+		if ( k == QLatin1String( "join" ) )
+			joinOn = x != 0;
+		else if ( k == QLatin1String( "joinwall" ) && x >= 0 )
+			joinWall = x;
+		else if ( k == QLatin1String( "joinmin" ) && x >= 0 )
+			joinMin = x;
+		else if ( k == QLatin1String( "wallyaw" ) )
+			wallYawOn = x != 0;
+		else if ( k == QLatin1String( "yawshare" ) && x > 0 )
+			yawShare = x;
+		else if ( k == QLatin1String( "openfit" ) )
+			openFitOn = x != 0;
+		else if ( k == QLatin1String( "jointop" ) )
+			joinTop = x != 0;
+		else if ( k == QLatin1String( "joinlog" ) )
+			joinLog = x != 0;
+		else if ( k == QLatin1String( "greedy2" ) )
+			greedyBits = int( x );
+		else if ( k == QLatin1String( "minheight" ) && x >= 0 )
+			minHeight = x;
+		else if ( k == QLatin1String( "minfloor" ) && x >= 0 )
+			minFloor = x;
+		else if ( k == QLatin1String( "strip" ) )
+			stripOn = x != 0;
+		else if ( k == QLatin1String( "rim" ) )
+			rimOn = x != 0;
+		else if ( k == QLatin1String( "personall" ) )
+			personAll = x != 0;
+	}
+	QString place2Note;
+	QStringList joinLines;
 
 	// the door boxes' narrow side (what the pinch must close: half a door)
 	{
@@ -694,6 +782,30 @@ bool probeVolumesBuild( const ProbeSoup & soup, const std::vector<ProbeVolumeMar
 				V.rejectedBack++;
 				continue;
 			}
+			if ( place2 ) {
+				// the tallest air column and the footprint of the candidate
+				std::map<qint64, std::pair<int, int>> col;
+				for ( size_t i : members ) {
+					int x, y, z;
+					G.xyz( i, x, y, z );
+					auto it = col.find( qint64( y ) * G.X + x );
+					if ( it == col.end() )
+						col[qint64( y ) * G.X + x] = { z, z };
+					else
+						it->second = { std::min( it->second.first, z ), std::max( it->second.second, z ) };
+				}
+				int tall = 0;
+				for ( const auto & c : col )
+					tall = std::max( tall, c.second.second - c.second.first + 1 );
+				if ( double( tall ) * C < minHeight ) {
+					rejHeight++;
+					continue;
+				}
+				if ( double( col.size() ) * C * C < minFloor ) {
+					rejFloor++;
+					continue;
+				}
+			}
 			const qint32 l = nextLabel++;
 			for ( size_t i : members )
 				lab[i] = l;
@@ -789,6 +901,174 @@ bool probeVolumesBuild( const ProbeSoup & soup, const std::vector<ProbeVolumeMar
 			if ( lab[i] > 0 && !info.count( lab[i] ) )
 				lab[i] = -1;
 	}
+	/* lane VOLPLACE2: the watershed parts one open floor at a pinch where no wall stands (the Concord store: five rooms
+	 * and free-standing thresholds on one floor). A real opening sits in a wall: around the side faces two rooms share,
+	 * the rim (the next face positions in the plane that touch solid: left, right, above, below) is mostly wall that parts the two rooms
+	 * (a solid cell with one room's air behind it and the other's in front, within 3 cells), and a door or window has a
+	 * lintel (the rim above is such a wall). Two rooms (neither roofed) sharing at least joinMin side faces are one when
+	 * the parting wall holds under joinWall of their rim, or (jointop=1) under half of the rim above */
+	if ( place2 && joinOn ) {
+		QElapsedTimer jc;
+		jc.start();
+		struct Rim
+		{
+			qint64 faces = 0, rim = 0, wall = 0, top = 0, topWall = 0;
+			double s[3] = { 0, 0, 0 };
+		};
+		std::map<std::pair<qint32, qint32>, Rim> rims;
+		auto cellLab = [&]( int x, int y, int z, int & l ) -> int {   // 0 off the grid, 1 solid, 2 air (l its label)
+			if ( !G.in( x, y, z ) )
+				return 0;
+			const size_t i = G.idx( x, y, z );
+			if ( st[i] )
+				return 1;
+			l = lab[i];
+			return 2;
+		};
+		// the face between cell q and q + 1 along n: 1 a face of the pair, 2 a wall parting the pair, 3 air both sides (the
+		// parting surface steps: no rim), 0 else
+		auto rimKind = [&]( const int q[3], int n, qint32 a, qint32 b ) -> int {
+			int q1[3] = { q[0], q[1], q[2] };
+			q1[n]++;
+			int l0 = 0, l1 = 0;
+			const int k0 = cellLab( q[0], q[1], q[2], l0 ), k1 = cellLab( q1[0], q1[1], q1[2], l1 );
+			if ( !k0 || !k1 )
+				return 0;
+			if ( k0 == 2 && k1 == 2 )
+				return ( ( l0 == a && l1 == b ) || ( l0 == b && l1 == a ) ) ? 1 : 3;
+			qint32 side[2] = { 0, 0 };
+			for ( int s = 0; s < 2; s++ )
+				for ( int k = 0; k <= 3; k++ ) {
+					int p[3] = { s ? q1[0] : q[0], s ? q1[1] : q[1], s ? q1[2] : q[2] };
+					p[n] += s ? k : -k;
+					int l = 0;
+					const int kk = cellLab( p[0], p[1], p[2], l );
+					if ( kk == 1 )
+						continue;
+					if ( kk == 2 )
+						side[s] = l;
+					break;
+				}
+			return ( ( side[0] == a && side[1] == b ) || ( side[0] == b && side[1] == a ) ) ? 2 : 0;
+		};
+		for ( size_t i = 0; i < N; i++ ) {
+			const qint32 la = lab[i];
+			if ( la <= 0 || st[i] )
+				continue;
+			int x, y, z;
+			G.xyz( i, x, y, z );
+			for ( int n = 0; n < 2; n++ ) {
+				int q1[3] = { x, y, z };
+				q1[n]++;
+				int lb = 0;
+				if ( cellLab( q1[0], q1[1], q1[2], lb ) != 2 || lb < 0 || lb == la )
+					continue;
+				const qint32 a = std::min( la, lb ), b = std::max( la, lb );
+				Rim & R = rims[{ a, b }];
+				R.faces++;
+				R.s[0] += x;
+				R.s[1] += y;
+				R.s[2] += z;
+				const int p = 1 - n;
+				const int dirs[4][2] = { { p, 1 }, { p, -1 }, { 2, 1 }, { 2, -1 } };
+				for ( const auto & d : dirs ) {
+					int q[3] = { x, y, z };
+					q[d[0]] += d[1];
+					const int k = rimKind( q, n, a, b );
+					if ( k == 1 || k == 3 )
+						continue;
+					R.rim++;
+					R.wall += k == 2;
+					if ( d[0] == 2 && d[1] > 0 ) {
+						R.top++;
+						R.topWall += k == 2;
+					}
+				}
+			}
+		}
+		std::map<qint32, qint32> up;
+		auto findR = [&]( qint32 l ) {
+			for ( auto it = up.find( l ); it != up.end(); it = up.find( l ) )
+				l = it->second;
+			return l;
+		};
+		int joined = 0;
+		QStringList pairs;
+		for ( const auto & a : nbFaces )
+			for ( const auto & b : a.second ) {
+				if ( a.first <= 0 || b.first <= a.first || !info.count( a.first ) || !info.count( b.first ) )
+					continue;
+				if ( info[a.first].source == QLatin1String( "roofed" ) || info[b.first].source == QLatin1String( "roofed" ) )
+					continue;
+				const auto w = rims.find( { a.first, b.first } );
+				if ( w == rims.end() )
+					continue;
+				const Rim & R = w->second;
+				const bool open = double( R.wall ) < joinWall * double( R.rim ) || ( joinTop && 2 * R.topWall < R.top );
+				// two small pockets (under 8 x joinMin cells) need only a face per 8 cells of the smaller one
+				const double jm = std::min( joinMin, std::max( 1.0, double( std::min( info[a.first].cells, info[b.first].cells ) ) / 8.0 ) );
+				if ( joinLog )
+					joinLines << QStringLiteral( "%1+%2 at %3,%4,%5 faces %6 rim %7 wall %8 top %9 lintel %10%11" ).arg( a.first ).arg( b.first )
+						.arg( qRound( V.origin[0] + ( R.s[0] / R.faces + 0.5 ) * C ) ).arg( qRound( V.origin[1] + ( R.s[1] / R.faces + 0.5 ) * C ) )
+						.arg( qRound( V.origin[2] + ( R.s[2] / R.faces + 0.5 ) * C ) ).arg( R.faces ).arg( R.rim ).arg( R.wall ).arg( R.top )
+						.arg( R.topWall ).arg( open && double( R.faces ) >= jm ? QStringLiteral( " JOIN" ) : QString() );
+				if ( double( R.faces ) < jm || !open )
+					continue;
+				const qint64 W = R.wall;
+				const qint32 ra = findR( a.first ), rb2 = findR( b.first );
+				if ( ra == rb2 )
+					continue;
+				up[std::max( ra, rb2 )] = std::min( ra, rb2 );
+				joined++;
+				if ( pairs.size() < 12 )
+					pairs << QStringLiteral( "%1+%2 faces %3 rim %4 wall %5" ).arg( a.first ).arg( b.first ).arg( R.faces ).arg( R.rim ).arg( W );
+			}
+		if ( joined ) {
+			for ( size_t i = 0; i < N; i++ )
+				if ( lab[i] > 0 )
+					lab[i] = findR( lab[i] );
+			std::map<qint32, std::map<qint32, qint64>> nb2;
+			for ( const auto & a : nbFaces )
+				for ( const auto & b : a.second ) {
+					const qint32 x = a.first > 0 ? findR( a.first ) : a.first, y = b.first > 0 ? findR( b.first ) : b.first;
+					if ( x != y )
+						nb2[x][y] += b.second;
+				}
+			nbFaces.swap( nb2 );
+			for ( const auto & u : up ) {
+				const qint32 to = findR( u.first );
+				if ( !info.count( u.first ) || !info.count( to ) )
+					continue;
+				RoomInfo & d = info[to];
+				const RoomInfo & s = info[u.first];
+				d.cells += s.cells;
+				d.sky += s.sky;
+				d.wall += s.wall;
+				d.open += s.open;
+				d.closed += s.closed;
+				d.back += s.back;
+				d.known += s.known;
+				if ( s.source == QLatin1String( "enclosed" ) )
+					d.source = s.source;
+				info.erase( u.first );
+			}
+		}
+		place2Note += QStringLiteral( "; volplace2 person rule: under %1 u tall %2, floor under %3 u2 %4" ).arg( minHeight )
+			.arg( rejHeight ).arg( minFloor ).arg( rejFloor );
+		place2Note += QStringLiteral( "; volplace2 joined %1 (%2) ms %3" ).arg( joined ).arg( pairs.join( QStringLiteral( ", " ) ) )
+			.arg( qRound( jc.nsecsElapsed() / 1e6 ) );
+		if ( joinLog ) {
+			for ( const auto & w : rims )
+				if ( w.first.first == 0 && w.second.faces >= joinMin ) {
+					const Rim & R = w.second;
+					joinLines << QStringLiteral( "out+%1 at %2,%3,%4 faces %5 rim %6 wall %7 top %8 lintel %9" ).arg( w.first.second )
+						.arg( qRound( V.origin[0] + ( R.s[0] / R.faces + 0.5 ) * C ) ).arg( qRound( V.origin[1] + ( R.s[1] / R.faces + 0.5 ) * C ) )
+						.arg( qRound( V.origin[2] + ( R.s[2] / R.faces + 0.5 ) * C ) ).arg( R.faces ).arg( R.rim ).arg( R.wall ).arg( R.top )
+						.arg( R.topWall );
+				}
+			place2Note += QStringLiteral( "; volplace2 join pairs: " ) + joinLines.join( QStringLiteral( " | " ) );
+		}
+	}
 	// fold the rooms under minVolume, smallest first, into the neighbor sharing most faces (sealed: dropped)
 	{
 		std::map<qint32, qint32> into;
@@ -835,6 +1115,55 @@ bool probeVolumesBuild( const ProbeSoup & soup, const std::vector<ProbeVolumeMar
 				lab[i] = root( lab[i] );
 		for ( const auto & f : into )
 			info.erase( f.first );
+	}
+	/* VOLPLACE2 (bungo 10-29): air pockets sealed inside props (a sign box, a car, the space under a roof's skin) passed as
+	 * enclosed/sealed rooms and drew boxes in the street. After the joins and folds, a room nobody can stand in is no
+	 * room: under minHeight of clear air in its tallest column, or a floor under minFloor. Touching the outside: outdoor
+	 * air (0); else no air (-1, as inside a rock) */
+	int rejAllHeight = 0, rejAllFloor = 0;
+	if ( place2 && personAll ) {
+		/* the floor counts only the columns a person stands in: an unbroken run of air at least minHeight tall (a pocket
+		 * of 14 cells strung up a wall cavity has columns, but no place to stand) */
+		std::map<qint32, std::map<qint64, std::vector<int>>> cols;
+		for ( size_t i = 0; i < N; i++ ) {
+			const qint32 l = lab[i];
+			if ( l <= 0 || st[i] || !info.count( l ) || info[l].source == QLatin1String( "roofed" ) )
+				continue;
+			int x, y, z;
+			G.xyz( i, x, y, z );
+			cols[l][qint64( y ) * G.X + x].push_back( z );
+		}
+		/* the grid marks a cell solid when any triangle touches it, so a column's air run is short of the clear height by
+		 * about half a cell at the floor and half at the ceiling: one cell of grace (Goodneighbor C 48.8: a 2.2 m room
+		 * measures 3 cells) */
+		const int needRun = std::max( 2, int( std::ceil( ( minHeight - C ) / C - 1e-6 ) ) );
+		std::map<qint32, qint32> to;
+		for ( auto & c : cols ) {
+			int tall = 0;
+			qint64 stand = 0;
+			for ( auto & k : c.second ) {
+				std::sort( k.second.begin(), k.second.end() );
+				int run = 1, best = 1;
+				for ( size_t q = 1; q < k.second.size(); q++ ) {
+					run = k.second[q] == k.second[q - 1] + 1 ? run + 1 : 1;
+					best = std::max( best, run );
+				}
+				tall = std::max( tall, best );
+				stand += best >= needRun ? 1 : 0;
+			}
+			const bool low = double( tall + 1 ) * C < minHeight, small = double( stand ) * C * C < minFloor;
+			if ( !low && !small )
+				continue;
+			( low ? rejAllHeight : rejAllFloor )++;
+			to[c.first] = nbFaces[c.first].count( 0 ) ? 0 : -1;
+		}
+		for ( size_t i = 0; i < N; i++ )
+			if ( lab[i] > 0 && to.count( lab[i] ) )
+				lab[i] = to[lab[i]];
+		for ( const auto & t : to )
+			info.erase( t.first );
+		place2Note += QStringLiteral( "; volplace2 person rule all rooms: under %1 u tall %2, floor under %3 u2 %4" ).arg( minHeight )
+			.arg( rejAllHeight ).arg( minFloor ).arg( rejAllFloor );
 	}
 	// compact: rooms 1 .. n in label order
 	std::map<qint32, int> roomOf;
@@ -1541,6 +1870,55 @@ bool probeVolumesBuild( const ProbeSoup & soup, const std::vector<ProbeVolumeMar
 				}
 			}
 	};
+	/* lane VOLPLACE2: each room's wall yaw. The area of the vertical triangles beside its air (a cell of the room within
+	 * one of the triangle's middle), by their normal's yaw mod 90; the best three degrees holding yawShare of it set the
+	 * room's frame (the store's walls stand at 50.5 degrees, its footprint read 45 and 0) */
+	std::vector<std::array<double, 90>> wallHist( place2 && wallYawOn ? V.rooms.size() : 0 );
+	if ( !wallHist.empty() ) {
+		QElapsedTimer yc;
+		yc.start();
+		for ( auto & h : wallHist )
+			h.fill( 0.0 );
+		const size_t nt = soup.tris.size() / 9;
+		for ( size_t k = 0; k < nt; k++ ) {
+			const float * p = &soup.tris[k * 9];
+			int g[3];
+			bool in = true;
+			for ( int c = 0; c < 3 && in; c++ ) {
+				g[c] = int( std::floor( ( ( double( p[c] ) + p[c + 3] + p[c + 6] ) / 3.0 - V.origin[c] ) / C ) );
+				in = g[c] >= 0 && g[c] < V.dims[c];
+			}
+			if ( !in )
+				continue;
+			const double e1[3] = { double( p[3] ) - p[0], double( p[4] ) - p[1], double( p[5] ) - p[2] };
+			const double e2[3] = { double( p[6] ) - p[0], double( p[7] ) - p[1], double( p[8] ) - p[2] };
+			const double n[3] = { e1[1] * e2[2] - e1[2] * e2[1], e1[2] * e2[0] - e1[0] * e2[2], e1[0] * e2[1] - e1[1] * e2[0] };
+			const double l = std::sqrt( n[0] * n[0] + n[1] * n[1] + n[2] * n[2] );
+			if ( l < 2.0 || std::fabs( n[2] ) > 0.2 * l )
+				continue;
+			double yaw = std::fmod( std::atan2( n[1], n[0] ) * 180.0 / kPi, 90.0 );
+			if ( yaw < 0 )
+				yaw += 90.0;
+			const int bin = std::clamp( int( yaw ), 0, 89 );
+			qint32 seen[27];
+			int ns = 0;
+			for ( int dz = -1; dz <= 1; dz++ )
+				for ( int dy = -1; dy <= 1; dy++ )
+					for ( int dx = -1; dx <= 1; dx++ ) {
+						if ( !G.in( g[0] + dx, g[1] + dy, g[2] + dz ) )
+							continue;
+						const size_t j = G.idx( g[0] + dx, g[1] + dy, g[2] + dz );
+						const qint32 lb = V.labels[j];
+						if ( st[j] || lb <= 0 || std::find( seen, seen + ns, lb ) != seen + ns )
+							continue;
+						seen[ns++] = lb;
+					}
+			for ( int q = 0; q < ns; q++ )
+				wallHist[size_t( seen[q] - 1 )][size_t( bin )] += l * 0.5;
+		}
+		place2Note += QStringLiteral( "; volplace2 wall yaw ms %1" ).arg( qRound( yc.nsecsElapsed() / 1e6 ) );
+	}
+	std::atomic<int> wallYawRooms( 0 );
 	std::vector<double> roomYaw( V.rooms.size(), 0.0 );
 	std::vector<char> keepGrid( V.rooms.size(), 0 );
 	// lane VOLFIT6: the fit stage's profile (wall ms): before the rooms, the room loop and its ray refine, the thresholds
@@ -1575,6 +1953,29 @@ bool probeVolumesBuild( const ProbeSoup & soup, const std::vector<ProbeVolumeMar
 		double th = footprintYaw( pts, &a0, &aBest );
 		if ( a0 <= aBest * 1.03 || std::fabs( th ) < 2.0 * kPi / 180.0 || std::fabs( th - kPi / 2 ) < 2.0 * kPi / 180.0 )
 			th = 0.0;   // the grid's own axes unless the turn saves over 3 % (rooms are mostly square to the world)
+		if ( r < wallHist.size() ) {
+			const std::array<double, 90> & h = wallHist[r];
+			double tot = 0, bw = 0;
+			int bi = -1;
+			for ( int b = 0; b < 90; b++ ) {
+				tot += h[size_t( b )];
+				const double w = h[size_t( ( b + 89 ) % 90 )] + h[size_t( b )] + h[size_t( ( b + 1 ) % 90 )];
+				if ( w > bw ) {
+					bw = w;
+					bi = b;
+				}
+			}
+			if ( bi >= 0 && tot > 0 && bw >= yawShare * tot ) {
+				double s = 0;
+				for ( int d = -1; d <= 1; d++ )
+					s += h[size_t( ( bi + d + 90 ) % 90 )] * ( bi + 0.5 + d );
+				double yaw = std::fmod( s / bw + 90.0, 90.0 );
+				if ( yaw < 2.0 || yaw > 88.0 )
+					yaw = 0.0;
+				th = yaw * kPi / 180.0;
+				wallYawRooms++;
+			}
+		}
 		roomYaw[r] = th;
 		const double ct = std::cos( th ), sn = std::sin( th );
 		// the local grid (u, v, z) at the room's cell size: 1 room, 2 other air, 3 solid / outside
@@ -1642,6 +2043,9 @@ bool probeVolumesBuild( const ProbeSoup & soup, const std::vector<ProbeVolumeMar
 		const std::vector<qint32> tRoom = table( [&]( size_t i ) { return lc[i] == 1; } );
 		const std::vector<qint32> tOther = table( [&]( size_t i ) { return lc[i] == 2; } );
 		const std::vector<qint32> tSolid = table( [&]( size_t i ) { return lc[i] == 3; } );
+		// VOLPLACE2: a roofed room (street air under a roof) keeps the old slab test: its walls are not all there, and
+		// Goodneighbor's 4,-2 street grew two boxes up to 2146 u long into the open (pokes 480 -> 2565 M u3)
+		const bool slab2 = place2 && ( greedyBits & 2 ) && rm.source != QLatin1String( "roofed" );
 		std::vector<quint8> covered( NL, 0 );
 		auto boxShape = [&]( const int lo[3], const int hi[3] ) {
 			ProbeVolumeShape s;
@@ -1685,7 +2089,7 @@ bool probeVolumesBuild( const ProbeSoup & soup, const std::vector<ProbeVolumeMar
 			shapes.push_back( boxShape( lo, hi ) );
 		} else {
 			qint64 coveredN = 0;
-			for ( int step = 0; step < spec.maxShapes && coveredN < spec.coverTarget * roomN; step++ ) {
+			for ( int step = 0; step < spec.maxShapes && coveredN < ( place2 && ( greedyBits & 1 ) ? std::max( spec.coverTarget, 0.97f ) : spec.coverTarget ) * roomN; step++ ) {
 				const std::vector<qint32> tU = table( [&]( size_t i ) { return lc[i] == 1 && !covered[i]; } );
 				// the seed: the uncovered room cell deepest from the walls
 				size_t seed = NL;
@@ -1720,7 +2124,8 @@ bool probeVolumesBuild( const ProbeSoup & soup, const std::vector<ProbeVolumeMar
 						}
 						const qint64 vol = qint64( sh[0] - sl[0] + 1 ) * ( sh[1] - sl[1] + 1 ) * ( sh[2] - sl[2] + 1 );
 						const qint64 m = sum( tRoom, sl, sh ), o = sum( tOther, sl, sh ), s = sum( tSolid, sl, sh );
-						if ( m == 0 || double( o ) > spec.slabOther * double( m + o ) || s * 2 > vol )
+						// VOLPLACE2: a slab may hold solid (clutter, the wall's jags) while a quarter of it is the room's own air
+						if ( m == 0 || double( o ) > spec.slabOther * double( m + o ) || ( slab2 ? m * 4 < vol : s * 2 > vol ) )
 							continue;
 						const double fill = double( m ) / double( vol );
 						const qint64 gain = sum( tU, sl, sh );
@@ -1794,7 +2199,11 @@ bool probeVolumesBuild( const ProbeSoup & soup, const std::vector<ProbeVolumeMar
 					}
 				}
 				const qint64 gain = wedge ? 0 : gainBox;
-				if ( !wedge && ( gain <= 0 || ( step > 0 && double( gain ) < 0.01 * double( roomN ) ) ) )
+				/* VOLPLACE2 (bungo 10-28, store room 0x000F: "it'd be two rectangles here"): under the 3 % stop, a leftover
+				 * strip of the room's air wider than one cell on both floor axes still gets its own box (knob strip=0) */
+				const bool strip = place2 && stripOn && ( greedyBits & 4 ) && hi[0] - lo[0] >= 1 && hi[1] - lo[1] >= 1
+					&& gain >= 2 * ( hi[2] - lo[2] + 1 );
+				if ( !wedge && ( gain <= 0 || ( step > 0 && !strip && double( gain ) < ( place2 && ( greedyBits & 4 ) ? 0.03 : 0.01 ) * double( roomN ) ) ) )
 					break;
 				if ( wedge ) {
 					qint64 g = 0;
@@ -2181,6 +2590,11 @@ bool probeVolumesBuild( const ProbeSoup & soup, const std::vector<ProbeVolumeMar
 			return l > 0 ? ( n[0] * d[0] + n[1] * d[1] + n[2] * d[2] ) / l : 1.0;
 		};
 		ProbeFineSpec spec;
+		/* lane VOLPLACE2: the fine fit moves each room's own boxes onto the walls and merges them, but adds no lattice
+		 * boxes (extras 0: they were the thin slabs in open floor); knob place2fine=0 skips the fine fit */
+		bool place2Fine = true;
+		if ( place2 )
+			spec.extras = 0;
 		// lane VOLPLACE1: the wall placement pass after the fit (knobs place=0 off, placepad, placeq; red "noplace")
 		bool placeOn = !legacyFine && red != QLatin1String( "noplace" );
 		double placePad = rC * 0.5, placeQ = 0.1;
@@ -2212,6 +2626,7 @@ bool probeVolumesBuild( const ProbeSoup & soup, const std::vector<ProbeVolumeMar
 			else if ( k == QLatin1String( "jitter" ) ) spec.jitter = x != 0;
 			else if ( k == QLatin1String( "edgegpu" ) ) spec.edgeGpu = x != 0;
 			else if ( k == QLatin1String( "bigpar" ) ) spec.bigPar = x != 0;
+			else if ( k == QLatin1String( "place2fine" ) ) place2Fine = x != 0;
 		}
 		spec.legacy = legacyFine;
 		if ( red == QLatin1String( "volfit3" ) )   // lane VOLFIT4's red: overlaps priced as plain foreign air
@@ -2223,7 +2638,8 @@ bool probeVolumesBuild( const ProbeSoup & soup, const std::vector<ProbeVolumeMar
 			fg.grid = &gridShapes;
 		}
 		ProbeFineStats fs;
-		const std::vector<std::vector<ProbeVolumeShape>> fine = probeVolumesFineFit( rb, rO, fg, int( V.rooms.size() ), roomYaw, spec, &fs );
+		const std::vector<std::vector<ProbeVolumeShape>> fine = place2 && !place2Fine ? std::vector<std::vector<ProbeVolumeShape>>()
+			: probeVolumesFineFit( rb, rO, fg, int( V.rooms.size() ), roomYaw, spec, &fs );
 		pf.start();
 		for ( size_t r = 0; r < V.rooms.size() && r < fine.size(); r++ ) {
 			if ( fine[r].empty() || keepGrid[r] )
@@ -2414,7 +2830,9 @@ bool probeVolumesBuild( const ProbeSoup & soup, const std::vector<ProbeVolumeMar
 						std::sort( st2.begin(), st2.end() );
 						const double tq = sw[size_t( std::floor( placeQ * double( nw - 1 ) ) )];
 						const double thMed = st2[nw / 2];
-						double target = tq + std::min( placePad, 0.5 * thMed );
+						/* lane VOLPLACE2: a face with an opening takes no pad (the padded strip over the opening is outdoor air:
+						 * the synth church and turned rooms poked 1-2 samples there) */
+						double target = tq + ( place2 && nOpen ? 0.0 : std::min( placePad, 0.5 * thMed ) );
 						for ( size_t i = 0; i < nw; i++ )   // never past the middle of a wall at or beyond the plane
 							if ( tw[i] >= tq )
 								target = std::min( target, tw[i] + 0.5 * th[i] );
@@ -2610,6 +3028,361 @@ bool probeVolumesBuild( const ProbeSoup & soup, const std::vector<ProbeVolumeMar
 			placeTrim = placeTrimmed;
 			msPlace = pc.nsecsElapsed() / 1e6;
 		}
+		/* lane VOLPLACE2 (bungo 10-28: "it doesn't cover just the hole in the boarded up window"): a threshold holds only
+		 * the open part of its opening. 16 x 16 rays along its normal through its depth (+16 each side): a sample is open
+		 * when no solid triangle crosses it (glass panes pass light and stay in). Up to 4 all-open rectangles, the largest
+		 * first, until 90 % of the open samples are held (a further piece only for 15 % of them), replace it; shut (< 3 open)
+		 * or 95 % open ones stay as fitted */
+		if ( place2 && openFitOn ) {
+			QElapsedTimer oc;
+			oc.start();
+			const int S = 16;
+			int nThr = 0, nFit = 0, nPieces = 0;
+			double shareBefore = 0, shareAfter = 0;
+			std::vector<ProbeVolumeThreshold> outT;
+			for ( const ProbeVolumeThreshold & t : V.thresholds ) {
+				if ( std::fabs( t.normal[2] ) > 0.7 ) {
+					outT.push_back( t );
+					continue;
+				}
+				nThr++;
+				double m[3][3];
+				rotMatrix( t.shape.rotation, m );
+				const double sx = t.shape.size[0], sz = t.shape.size[2], hy = t.shape.size[1] * 0.5 + 16.0;
+				std::vector<int> open( size_t( S * S ), 0 );
+				int nOpen = 0;
+				for ( int iz = 0; iz < S; iz++ )
+					for ( int ix = 0; ix < S; ix++ ) {
+						const double lx = -sx * 0.5 + ( ix + 0.5 ) * sx / S, lz = -sz * 0.5 + ( iz + 0.5 ) * sz / S;
+						double o[3], d[3];
+						for ( int c = 0; c < 3; c++ ) {
+							o[c] = t.shape.center[c] + m[c][0] * lx - m[c][1] * hy + m[c][2] * lz - ( c < 2 ? rO[c] : 0.0 );
+							d[c] = m[c][1];
+						}
+						bool blocked = false;
+						double from = 0;
+						for ( int hop = 0; hop < 8 && from < 2.0 * hy; hop++ ) {
+							double th = 0;
+							int tri = -1;
+							const double o2[3] = { o[0] + d[0] * from, o[1] + d[1] * from, o[2] + d[2] * from };
+							if ( !rb.ray( o2, d, 2.0 * hy - from, &th, &tri ) )
+								break;
+							if ( tri < 0 || size_t( tri ) < nSoupTris ) {
+								blocked = true;
+								break;
+							}
+							from += th + 0.5;
+						}
+						open[size_t( iz * S + ix )] = blocked ? 0 : 1;
+						nOpen += blocked ? 0 : 1;
+					}
+				shareBefore += double( nOpen ) / ( S * S );
+				if ( nOpen < 3 || nOpen * 20 >= 19 * S * S ) {   // shut, or a frame or a pole across an open hole
+					shareAfter += double( nOpen ) / ( S * S );
+					outT.push_back( t );
+					continue;
+				}
+				nFit++;
+				std::vector<int> left = open;
+				int leftN = nOpen, pieces = 0;
+				auto prefix = [&]( const std::vector<int> & v ) {
+					std::vector<int> p( size_t( ( S + 1 ) * ( S + 1 ) ), 0 );
+					for ( int z = 0; z < S; z++ )
+						for ( int x = 0; x < S; x++ )
+							p[size_t( ( z + 1 ) * ( S + 1 ) + x + 1 )] = v[size_t( z * S + x )] + p[size_t( z * ( S + 1 ) + x + 1 )]
+								+ p[size_t( ( z + 1 ) * ( S + 1 ) + x )] - p[size_t( z * ( S + 1 ) + x )];
+					return p;
+				};
+				auto rsum = [&]( const std::vector<int> & p, int x0, int z0, int x1, int z1 ) {
+					return p[size_t( ( z1 + 1 ) * ( S + 1 ) + x1 + 1 )] - p[size_t( z0 * ( S + 1 ) + x1 + 1 )] - p[size_t( ( z1 + 1 ) * ( S + 1 ) + x0 )]
+						+ p[size_t( z0 * ( S + 1 ) + x0 )];
+				};
+				const std::vector<int> pOpen = prefix( open );
+				while ( pieces < 4 && leftN * 10 > nOpen ) {
+					const std::vector<int> pLeft = prefix( left );
+					int best = 0, bx0 = 0, bz0 = 0, bx1 = 0, bz1 = 0;
+					for ( int x0 = 0; x0 < S; x0++ )
+						for ( int x1 = x0; x1 < S; x1++ )
+							for ( int z0 = 0; z0 < S; z0++ )
+								for ( int z1 = z0; z1 < S; z1++ ) {
+									if ( rsum( pOpen, x0, z0, x1, z1 ) != ( x1 - x0 + 1 ) * ( z1 - z0 + 1 ) )
+										break;   // taller only adds the blocked sample again
+									const int g = rsum( pLeft, x0, z0, x1, z1 );
+									if ( g > best ) {
+										best = g;
+										bx0 = x0;
+										bz0 = z0;
+										bx1 = x1;
+										bz1 = z1;
+									}
+								}
+					if ( best < 3 || ( pieces && best * 100 < 15 * nOpen ) )   // a further piece holds 15 % of the hole
+						break;
+					for ( int z = bz0; z <= bz1; z++ )
+						for ( int x = bx0; x <= bx1; x++ ) {
+							leftN -= left[size_t( z * S + x )];
+							left[size_t( z * S + x )] = 0;
+						}
+					ProbeVolumeThreshold pt = t;
+					const double cx = -sx * 0.5 + ( bx0 + bx1 + 1 ) * 0.5 * sx / S, cz = -sz * 0.5 + ( bz0 + bz1 + 1 ) * 0.5 * sz / S;
+					for ( int c = 0; c < 3; c++ )
+						pt.shape.center[c] = float( t.shape.center[c] + m[c][0] * cx + m[c][2] * cz );
+					pt.shape.size[0] = float( ( bx1 - bx0 + 1 ) * sx / S );
+					pt.shape.size[2] = float( ( bz1 - bz0 + 1 ) * sz / S );
+					pt.area = pt.shape.size[0] * pt.shape.size[2];
+					pt.evidence << QStringLiteral( "volplace2 open %1 of %2 samples, piece %3" ).arg( nOpen ).arg( S * S ).arg( pieces + 1 );
+					outT.push_back( pt );
+					pieces++;
+				}
+				if ( !pieces ) {
+					outT.push_back( t );
+					shareAfter += double( nOpen ) / ( S * S );
+					continue;
+				}
+				nPieces += pieces;
+				shareAfter += 1.0;
+			}
+			V.thresholds.swap( outT );
+			place2Note += QStringLiteral( "; volplace2 thresholds %1 fitted %2 pieces %3 open share %4 -> %5 ms %6" ).arg( nThr ).arg( nFit )
+				.arg( nPieces ).arg( nThr ? shareBefore / nThr : 0.0, 0, 'f', 3 ).arg( nThr ? shareAfter / nThr : 0.0, 0, 'f', 3 )
+				.arg( qRound( oc.nsecsElapsed() / 1e6 ) );
+		}
+		/* VOLPLACE2 (bungo 10-28, his hand-made store doorway 'TEST': "it conforms to the real geometry"): a threshold
+		 * is the opening snapped to its frame. Each wall face is a line fitted to rays beside and over the hole (so it
+		 * carries the wall's turn and thickness); each jamb is found along each face, the sill and the head over each
+		 * jamb: 8 corners. Its box becomes the corners' box in the wall's frame (what the GI mask reads: the wall's angle
+		 * and depth). A hole whose floor runs on through the wall on both sides is a door. Left as it was when a face or
+		 * a jamb is not found, the wall is under 4 or over 80 u thick, or the corners are not convex (knob rim=0) */
+		if ( place2 && rimOn ) {
+			QElapsedTimer rc;
+			rc.start();
+			int nTried = 0, nRim = 0, whyFace = 0, whyJamb = 0, whyThick = 0, whyConvex = 0, nDoor = 0;
+			auto solidAt = [&]( const double w[3], const double d[3], double tmax ) -> double {
+				double from = 0;
+				for ( int hop = 0; hop < 8 && from < tmax; hop++ ) {
+					double th = 0;
+					int tri = -1;
+					const double o2[3] = { w[0] - rO[0] + d[0] * from, w[1] - rO[1] + d[1] * from, w[2] + d[2] * from };
+					if ( !rb.ray( o2, d, tmax - from, &th, &tri ) )
+						return -1.0;
+					if ( tri < 0 || size_t( tri ) < nSoupTris )
+						return from + th;
+					from += th + 0.5;
+				}
+				return -1.0;
+			};
+			auto median = []( std::vector<double> v ) {
+				std::sort( v.begin(), v.end() );
+				return v.empty() ? 0.0 : v[v.size() / 2];
+			};
+			for ( ProbeVolumeThreshold & t : V.thresholds ) {
+				if ( std::fabs( t.normal[2] ) > 0.7 )
+					continue;
+				nTried++;
+				double m[3][3];
+				rotMatrix( t.shape.rotation, m );
+				const double hx = t.shape.size[0] * 0.5, hy = t.shape.size[1] * 0.5, hz = t.shape.size[2] * 0.5;
+				auto W = [&]( double lx, double ly, double lz, double w[3] ) {
+					for ( int c = 0; c < 3; c++ )
+						w[c] = t.shape.center[c] + m[c][0] * lx + m[c][1] * ly + m[c][2] * lz;
+				};
+				auto Dir = [&]( double lx, double ly, double lz, double d[3] ) {
+					const double n = std::sqrt( lx * lx + ly * ly + lz * lz );
+					for ( int c = 0; c < 3; c++ )
+						d[c] = ( m[c][0] * lx + m[c][1] * ly + m[c][2] * lz ) / n;
+				};
+				/* 1. the jambs, scanned across the wall 1 u at a time: at each depth y three rays (a quarter, half and three
+				 * quarters up) from the hole's middle out along x; the jamb is there while 2 of 3 hit within 24 u of the
+				 * opening's side, and a step over 0.75 u (a splayed reveal past the face) ends it. The run of depths around
+				 * the middle is the wall's thickness AT that jamb: its ends are the two faces there (a frame turned in a
+				 * straight wall, ends that are not parallel, are kept). fa + fb x: each face through its two jamb ends */
+				double fa[2] = { 0, 0 }, fb[2] = { 0, 0 }, jx[2][2] = { { 0, 0 }, { 0, 0 } }, jy[2][2] = { { 0, 0 }, { 0, 0 } };
+				double sill[2][2], head[2][2];
+				bool ok = true;
+				const int Dy = int( hy + 48.0 );
+				for ( int j = 0; j < 2 && ok; j++ ) {
+					const double dirx = j ? 1.0 : -1.0;
+					double d[3], w[3];
+					Dir( dirx, 0, 0, d );
+					std::vector<double> at( size_t( 2 * Dy + 1 ), -1.0 );
+					for ( int iy = -Dy; iy <= Dy; iy++ ) {
+						std::vector<double> u;
+						for ( double fz : { -0.5, 0.0, 0.5 } ) {
+							W( 0, iy, fz * hz, w );
+							const double h = solidAt( w, d, hx + 24.0 );
+							if ( h >= 8.0 )
+								u.push_back( h );
+						}
+						if ( u.size() >= 2 )
+							at[size_t( iy + Dy )] = median( u );
+					}
+					int c0 = -1;   // the depth nearest the middle where the jamb is there
+					for ( int k = 0; k <= Dy && c0 < 0; k++ )
+						for ( int sgn : { -1, 1 } )
+							if ( c0 < 0 && at[size_t( Dy + sgn * k )] >= 0 )
+								c0 = Dy + sgn * k;
+					if ( c0 < 0 ) {
+						ok = false;
+						whyJamb++;
+						t.evidence << QStringLiteral( "volplace2 rim: jamb %1 not found" ).arg( j );
+						break;
+					}
+					int lo = c0, hi = c0;
+					while ( lo > 0 && at[size_t( lo - 1 )] >= 0 && std::fabs( at[size_t( lo - 1 )] - at[size_t( lo )] ) <= 0.75 )
+						lo--;
+					while ( hi < 2 * Dy && at[size_t( hi + 1 )] >= 0 && std::fabs( at[size_t( hi + 1 )] - at[size_t( hi )] ) <= 0.75 )
+						hi++;
+					jy[0][j] = lo - Dy - 0.5;
+					jy[1][j] = hi - Dy + 0.5;
+					jx[0][j] = dirx * at[size_t( lo )];
+					jx[1][j] = dirx * at[size_t( hi )];
+					if ( lo == 0 || hi == 2 * Dy ) {
+						ok = false;
+						whyThick++;
+						t.evidence << QStringLiteral( "volplace2 rim: jamb %1 runs past the scan (%2 .. %3)" ).arg( j ).arg( jy[0][j] ).arg( jy[1][j] );
+					}
+				}
+				if ( !ok )
+					continue;
+				for ( int s = 0; s < 2; s++ ) {
+					fb[s] = ( jy[s][1] - jy[s][0] ) / ( jx[s][1] - jx[s][0] );
+					fa[s] = jy[s][0] - fb[s] * jx[s][0];
+				}
+				const double thick = 0.5 * ( jy[1][0] - jy[0][0] + jy[1][1] - jy[0][1] );
+				if ( thick < 4.0 || thick > 80.0 || std::fabs( fb[0] ) > 0.36 || std::fabs( fb[1] ) > 0.36 ) {
+					whyThick++;
+					t.evidence << QStringLiteral( "volplace2 rim: wall %1 u thick, faces turned %2 %3" ).arg( thick, 0, 'f', 1 )
+						.arg( fb[0], 0, 'f', 2 ).arg( fb[1], 0, 'f', 2 );
+					continue;
+				}
+				// 2. the sill and the head over each jamb end: the highest sill and the lowest head 4, 10 and 16 u in from it, 3 u in from the face
+				for ( int s = 0; s < 2 && ok; s++ ) {
+					const double in = s ? -3.0 : 3.0;
+					for ( int j = 0; j < 2 && ok; j++ ) {
+						const double dirx = j ? 1.0 : -1.0;
+						double dn[3], up[3], w[3];
+						Dir( 0, 0, -1, dn );
+						Dir( 0, 0, 1, up );
+						sill[s][j] = -HUGE_VAL;
+						head[s][j] = HUGE_VAL;
+						for ( double inj : { 4.0, 10.0, 16.0 } ) {
+							const double x = jx[s][j] - dirx * inj, y = fa[s] + fb[s] * x + in;
+							W( x, y, 0, w );
+							const double hd = solidAt( w, dn, hz + 64.0 ), hu = solidAt( w, up, hz + 64.0 );
+							sill[s][j] = std::max( sill[s][j], hd >= 0 ? -hd : -hz );
+							head[s][j] = std::min( head[s][j], hu >= 0 ? hu : hz );
+						}
+						if ( head[s][j] - sill[s][j] < 30.0 ) {
+							ok = false;
+							whyJamb++;
+							t.evidence << QStringLiteral( "volplace2 rim: sill %1 head %2" ).arg( sill[s][j], 0, 'f', 1 ).arg( head[s][j], 0, 'f', 1 );
+						}
+					}
+				}
+				if ( !ok )
+					continue;
+				ProbeVolumeShape h = t.shape;
+				h.hull = true;
+				for ( int k = 0; k < 8; k++ ) {
+					const int bx = k & 1, by = ( k >> 1 ) & 1, bz = ( k >> 2 ) & 1;
+					const double x = jx[by][bx];
+					double w[3];
+					W( x, fa[by] + fb[by] * x, bz ? head[by][bx] : sill[by][bx], w );
+					for ( int c = 0; c < 3; c++ )
+						h.corners[k][c] = float( w[c] );
+				}
+				double g[3] = { 0, 0, 0 };
+				for ( int k = 0; k < 8; k++ )
+					for ( int c = 0; c < 3; c++ )
+						g[c] += h.corners[k][c] / 8.0;
+				// convex: no corner more than 4 u outside any of the 12 triangles (a frame a little twisted still is)
+				double worst = 0;
+				{
+					static const int q[6][4] = { { 0, 2, 6, 4 }, { 1, 5, 7, 3 }, { 0, 4, 5, 1 }, { 2, 3, 7, 6 }, { 0, 1, 3, 2 }, { 4, 6, 7, 5 } };
+					for ( const auto & f : q )
+						for ( int tr = 0; tr < 2; tr++ ) {
+							const float * a = h.corners[f[0]], * b = h.corners[f[1 + tr]], * e = h.corners[f[2 + tr]];
+							const double u[3] = { double( b[0] ) - a[0], double( b[1] ) - a[1], double( b[2] ) - a[2] };
+							const double v[3] = { double( e[0] ) - a[0], double( e[1] ) - a[1], double( e[2] ) - a[2] };
+							double n[3] = { u[1] * v[2] - u[2] * v[1], u[2] * v[0] - u[0] * v[2], u[0] * v[1] - u[1] * v[0] };
+							const double nl = std::sqrt( n[0] * n[0] + n[1] * n[1] + n[2] * n[2] );
+							if ( nl < 1e-9 )
+								continue;
+							double sgc = 0;
+							for ( int c = 0; c < 3; c++ ) {
+								n[c] /= nl;
+								sgc += n[c] * ( g[c] - a[c] );
+							}
+							for ( int k = 0; k < 8; k++ ) {
+								double dk = 0;
+								for ( int c = 0; c < 3; c++ )
+									dk += n[c] * ( double( h.corners[k][c] ) - a[c] );
+								worst = std::max( worst, sgc < 0 ? dk : -dk );
+							}
+						}
+				}
+				if ( worst > 4.0 ) {
+					whyConvex++;
+					t.evidence << QStringLiteral( "volplace2 rim: corners %1 u off convex (jambs %2 %3 / %4 %5, faces %6 %7 turn %8 %9, "
+						"sills %10 %11 / %12 %13, heads %14 %15 / %16 %17)" ).arg( worst, 0, 'f', 1 )
+						.arg( jx[0][0], 0, 'f', 1 ).arg( jx[0][1], 0, 'f', 1 ).arg( jx[1][0], 0, 'f', 1 ).arg( jx[1][1], 0, 'f', 1 )
+						.arg( fa[0], 0, 'f', 1 ).arg( fa[1], 0, 'f', 1 ).arg( fb[0], 0, 'f', 3 ).arg( fb[1], 0, 'f', 3 )
+						.arg( sill[0][0], 0, 'f', 1 ).arg( sill[0][1], 0, 'f', 1 ).arg( sill[1][0], 0, 'f', 1 ).arg( sill[1][1], 0, 'f', 1 )
+						.arg( head[0][0], 0, 'f', 1 ).arg( head[0][1], 0, 'f', 1 ).arg( head[1][0], 0, 'f', 1 ).arg( head[1][1], 0, 'f', 1 );
+					continue;
+				}
+				// its box in the wall's frame
+				const double turn = std::atan( 0.5 * ( fb[0] + fb[1] ) ) * 180.0 / kPi;
+				h.rotation[2] = float( t.shape.rotation[2] + turn );
+				double m2[3][3];
+				rotMatrix( h.rotation, m2 );
+				double lo[3] = { HUGE_VAL, HUGE_VAL, HUGE_VAL }, hi[3] = { -HUGE_VAL, -HUGE_VAL, -HUGE_VAL };
+				for ( int k = 0; k < 8; k++ )
+					for ( int a = 0; a < 3; a++ ) {
+						double l = 0;
+						for ( int c = 0; c < 3; c++ )
+							l += m2[c][a] * ( h.corners[k][c] - t.shape.center[c] );
+						lo[a] = std::min( lo[a], l );
+						hi[a] = std::max( hi[a], l );
+					}
+				for ( int c = 0; c < 3; c++ ) {
+					double l = 0;
+					for ( int a = 0; a < 3; a++ )
+						l += m2[c][a] * 0.5 * ( lo[a] + hi[a] );
+					h.center[c] = float( t.shape.center[c] + l );
+					h.size[c] = float( hi[c] - lo[c] );
+				}
+				double nd[3];
+				for ( int c = 0; c < 3; c++ )
+					nd[c] = m2[c][1];
+				const double sgn = nd[0] * t.normal[0] + nd[1] * t.normal[1] + nd[2] * t.normal[2] < 0 ? -1.0 : 1.0;
+				for ( int c = 0; c < 3; c++ )
+					t.normal[c] = float( sgn * nd[c] );
+				// a door: the floor under the sill runs on 16 u past both faces within 24 u of it
+				bool door = true;
+				for ( int s = 0; s < 2 && door; s++ ) {
+					const double sg = s ? 1.0 : -1.0, sz = 0.5 * ( sill[s][0] + sill[s][1] );
+					double w[3], dn[3];
+					Dir( 0, 0, -1, dn );
+					W( 0.5 * ( jx[s][0] + jx[s][1] ), fa[s] + sg * 16.0, sz + 8.0, w );
+					const double hd = solidAt( w, dn, 32.0 );
+					door = hd >= 0 && hd <= 32.0;
+				}
+				if ( door && t.opening != QLatin1String( "door" ) ) {
+					t.opening = QStringLiteral( "door" );
+					nDoor++;
+				}
+				t.evidence << QStringLiteral( "volplace2 rim: wall turn %1 deg, depth %2 u, jambs %3/%4 u, %5" ).arg( turn, 0, 'f', 1 )
+					.arg( thick, 0, 'f', 1 ).arg( jx[0][1] - jx[0][0], 0, 'f', 0 ).arg( jx[1][1] - jx[1][0], 0, 'f', 0 )
+					.arg( door ? QStringLiteral( "the floor runs through (door)" ) : QStringLiteral( "a sill" ) );
+				t.shape = h;
+				t.area = h.size[0] * h.size[2];
+				nRim++;
+			}
+			place2Note += QStringLiteral( "; volplace2 rim %1 of %2 (no face %3, no jamb %4, thickness %5, not convex %6, doors %7) ms %8" )
+				.arg( nRim ).arg( nTried ).arg( whyFace ).arg( whyJamb ).arg( whyThick ).arg( whyConvex ).arg( nDoor )
+				.arg( qRound( rc.nsecsElapsed() / 1e6 ) );
+		}
 		V.fineBoxes = fs.boxes;
 		V.fineRays = fs.rays + fs.snapRays + fs.encTests * spec.sphereK;
 		V.fineGrown = fs.encGrown;
@@ -2630,7 +3403,9 @@ bool probeVolumesBuild( const ProbeSoup & soup, const std::vector<ProbeVolumeMar
 		if ( fg.scene )   // ROOMFIT10: the fit's own ray census (sure, re-cast, the check's unlike answers)
 			prof += QStringLiteral( "; " ) + QString::fromStdString( bakert::census( "fit", *fg.scene ) );
 	}
-	V.fineNote += prof;
+	if ( place2 )
+		place2Note += QStringLiteral( "; volplace2 wall yaw rooms %1" ).arg( wallYawRooms.load() );
+	V.fineNote += place2Note + prof;
 	V.refineRays = refineRays;
 	V.msFit = clock.nsecsElapsed() / 1e6;
 	V.msTotal = total.nsecsElapsed() / 1e6;

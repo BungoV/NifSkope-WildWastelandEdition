@@ -985,6 +985,7 @@ bool ImpostorDraw::drawCardsInstanced( Scene * scene, const QVector< InstCard > 
 	WW_SWITCH_STATIC( bool, zcullOn, wwEnv( "WW_FARCARD_ZCULL" ) != "0" );
 	WW_SWITCH_STATIC( bool, zcullRed, wwEnv( "WW_FARCARD_ZCULL_RED" ) == "1" );
 	const unsigned int zTex = zcullOn ? wwCellHdrDepthMax( scene ) : 0u;
+	wwCellHdrDepthMaxWrote();	// lane CELLUNI6: the cards write depth below; the readers after them make it again
 	{
 		static QString said;
 		const QString line = !zcullOn ? QStringLiteral( "far cards: depth reject off (WW_FARCARD_ZCULL=0)" )

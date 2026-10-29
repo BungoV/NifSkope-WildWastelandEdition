@@ -34174,9 +34174,14 @@ void NifSkope::onLoadComplete( bool success, QString & fname )
 		CellSpawn spawn;
 		const bool tookSpawn = cellSpawnTake( nif, spawn );
 		if ( success && tookSpawn && spawn.valid && fname.endsWith( QLatin1String( ".wwcell" ), Qt::CaseInsensitive )
-			&& !GLView::wwCameraPinFromEnvironment().active )
-			qInfo().noquote() << ogl->wwSpawnAt( Vector3( spawn.eye[0], spawn.eye[1], spawn.eye[2] ), spawn.yawDeg );
-		else
+			&& !GLView::wwCameraPinFromEnvironment().active ) {
+			if ( spawn.favorite ) {	// lane FAVCAM1: the start favorite, with its pitch and field of view
+				const float rot[3] = { spawn.pitchDeg - 90.0f, spawn.rollDeg, spawn.yawDeg };
+				qInfo().noquote() << ogl->wwCameraGoTo( spawn.eye, rot, spawn.fovDeg, spawn.dist ) << "|" << spawn.rule;
+			} else {
+				qInfo().noquote() << ogl->wwSpawnAt( Vector3( spawn.eye[0], spawn.eye[1], spawn.eye[2] ), spawn.yawDeg );
+			}
+		} else
 			ogl->center();
 	}
 	hasLoadedDocument = success;

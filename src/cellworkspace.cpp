@@ -5,6 +5,7 @@ BSD License - see nifskope.h
 ***** END LICENCE BLOCK *****/
 
 #include "cellworkspace.h"
+#include "cellfavoritespanel.h"	// lane FAVCAM1: the Favorites tab
 
 #include "cellclick.h"
 #include "cellpick.h"
@@ -135,6 +136,14 @@ void cellWorkspaceNoteOpened( const QString & path, const CellSceneSpec & spec,
 QString cellWorkspacePath()
 {
 	return g_path;
+}
+
+bool cellWorkspaceOpenSpec( CellSceneSpec & out )
+{
+	if ( g_path.isEmpty() )
+		return false;
+	out = g_spec;
+	return true;
 }
 
 QString cellWorkspaceNotesLive()
@@ -365,6 +374,8 @@ void CellWorkspacePanel::buildUi()
 	QVBoxLayout * cellsL = newPage( "cells" );
 	QVBoxLayout * refsL = newPage( "references" );
 	QVBoxLayout * showL = newPage( "show" );
+	QVBoxLayout * favL = newPage( "favorites" );
+	favL->addWidget( new CellFavoritesPanel, 1 );
 	auto * showScroll = new QScrollArea;
 	showScroll->setObjectName( QStringLiteral( "CellWorkspaceShowScroll" ) );
 	showScroll->setWidgetResizable( true );
@@ -375,6 +386,7 @@ void CellWorkspacePanel::buildUi()
 	addTab( tr( "Cells" ), "cells", cellsL->parentWidget() );
 	addTab( tr( "References" ), "references", refsL->parentWidget() );
 	addTab( tr( "Display" ), "show", showScroll );	// lane OPENCELLFIX2: renamed; the id stays (saved tab)
+	addTab( tr( "Favorites" ), "favorites", favL->parentWidget() );
 	outer->addWidget( tabs, 0 );
 	outer->addWidget( tabStack, 1 );
 
@@ -1636,6 +1648,10 @@ void CellWorkspacePanel::setNif( NifModel * n )
 void CellWorkspacePanel::setGLView( GLView * v )
 {
 	glView = v;
+	if ( auto * f = findChild<CellFavoritesPanel *>() ) {
+		f->setGLView( v );
+		f->refresh();
+	}
 }
 
 // ---- readers

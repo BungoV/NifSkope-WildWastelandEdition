@@ -426,6 +426,8 @@ void wwGameTaaArmJitter( bool armed )
 		ts().jittered = false;	// a frame that never reached its resolve leaves nothing behind (disarming keeps it)
 }
 
+quint64 wwGlPaintCount();	// glview.cpp
+
 void wwGameTaaJitterProjection( Scene * scene, Matrix4 & proj )
 {
 	TaaState & s = ts();
@@ -434,6 +436,8 @@ void wwGameTaaJitterProjection( Scene * scene, Matrix4 & proj )
 	s.armed = false;	// one projection a frame: a tool's own glProjection later in the frame is not jittered again
 	GLint vp[4] = { 0, 0, 1, 1 };
 	scene->renderer->fn->glGetIntegerv( GL_VIEWPORT, vp );
+	if ( !wwCellUni6Red( "jitter" ) )	// lane CELLUNI6: the global uniforms' upload next takes it (celluniform.h VpNote)
+		WwCellUni::jitterVp().put( wwGlPaintCount(), vp );
 	s.W = std::max( int( vp[2] ), 1 );
 	s.H = std::max( int( vp[3] ), 1 );
 	if ( s.fixedFrame >= 0 ) {
@@ -550,8 +554,15 @@ bool taaResolveImpl( Scene * scene )
 	auto fn = r->fn;
 	static WwCellUni::DepthCfg depthCfg;	// the frame's depth format, asked once per framebuffer and size
 	static WwCellUni::CtxWatch ctxWatch;	// lane FRAMESPEED1: a context made again may reuse the fbo id and size
-	if ( ctxWatch.changed( r, wwGlContextSerial() ) && depthCfg.ctx == r )
+	/* lane CELLUNI6: a serial that also changes when the same context object is made again, and part of the cache's key
+	 * (WW_CELL_UNI6_RED=depthcfg: FRAMESPEED1's serial and the watch alone) */
+	const bool cfgBySerial = !wwCellUni6Red( "depthcfg" );
+	const std::uint64_t ctxSerial = cfgBySerial ? wwGlContextLife() : wwGlContextSerial();
+	if ( ctxWatch.changed( r, ctxSerial ) && depthCfg.ctx == r )
 		depthCfg.forget();
+	auto cfgHitAt = [&]( int fb, int w, int h ) {
+		return cfgBySerial ? depthCfg.hit( r, ctxSerial, fb, w, h ) : depthCfg.hit( r, fb, w, h );
+	};
 
 	GLint prevDraw = 0, prevRead = 0, vp[4] = { 0, 0, 1, 1 };
 	fn->glGetIntegerv( GL_DRAW_FRAMEBUFFER_BINDING, &prevDraw );
@@ -559,8 +570,10 @@ bool taaResolveImpl( Scene * scene )
 	fn->glGetIntegerv( GL_VIEWPORT, vp );
 	const int W = vp[2], H = vp[3];
 	// lane FRAMESPEED2 (CELLUNI6): the toned frame's depth format is cached on (context, fbo, size) too; red asks every frame
-	const bool cfgHit = !wwCellUniRed() && depthCfg.hit( r, prevDraw, W, H );
-	const bool checkErr = !cfgHit || !depthCfg.trusted;	// errors read until a frame on this framebuffer raised none
+	// lane CELLUNI6: keyed on the context's life (depthcfg); under WW_SETUP_MEMO_CHECK=1 errors are read at the trust point
+	const bool cfgHit = !wwCellUniRed() && cfgHitAt( prevDraw, W, H );
+	const bool trustErrCheck = WwCellUni::checkTrusted( cfgHit && depthCfg.trusted, wwSetupMemoChecking(), wwCellUni6Red( "glerror" ) );
+	const bool checkErr = !cfgHit || !depthCfg.trusted || trustErrCheck;
 	if ( checkErr ) {
 		while ( fn->glGetError() != GL_NO_ERROR ) {
 		}
@@ -582,7 +595,7 @@ bool taaResolveImpl( Scene * scene )
 		fn->glGetFramebufferAttachmentParameteriv( GL_DRAW_FRAMEBUFFER, prevDraw ? GL_STENCIL_ATTACHMENT : GL_STENCIL,
 			GL_FRAMEBUFFER_ATTACHMENT_STENCIL_SIZE, &stencilBits );
 		fn->glGetFramebufferAttachmentParameteriv( GL_DRAW_FRAMEBUFFER, att, GL_FRAMEBUFFER_ATTACHMENT_COMPONENT_TYPE, &compType );
-		depthCfg.keep( r, prevDraw, W, H, depthBits, stencilBits, compType );
+		depthCfg.keep( r, ctxSerial, prevDraw, W, H, depthBits, stencilBits, compType );
 	}
 	GLenum dsFormat = 0, dsFmt = 0, dsType = 0;
 	GLbitfield blitBits = GL_DEPTH_BUFFER_BIT;
@@ -729,9 +742,11 @@ bool taaResolveImpl( Scene * scene )
 	fn->glBlitFramebuffer( 0, 0, W, H, 0, 0, W, H, GL_COLOR_BUFFER_BIT, GL_NEAREST );
 	fn->glBlitFramebuffer( 0, 0, W, H, 0, 0, W, H, g.depthBits, GL_NEAREST );
 	const GLenum blitErr = checkErr ? fn->glGetError() : GLenum( GL_NO_ERROR );
+	if ( trustErrCheck && blitErr != GL_NO_ERROR )
+		WwCellUni::trustedError( "temporal aa", "the frame's blit", unsigned( blitErr ) );
 	if ( blitErr != GL_NO_ERROR )
 		depthCfg.forget();	// lane CELLUNI4: asked again, and errors read, next frame
-	else if ( checkErr && depthCfg.hit( r, prevDraw, W, H ) )
+	else if ( checkErr && cfgHitAt( prevDraw, W, H ) )
 		depthCfg.trusted = true;
 
 	fn->glDisable( GL_DEPTH_TEST );

@@ -6,6 +6,7 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdio>
+#include <cstdlib>
 #include <cstring>
 
 bool wwLookdevRed( const char * )
@@ -29,6 +30,107 @@ void wwFogPackK( WwFog & )
 #include "cut.inc"
 
 static int fails = 0, checks = 0;
+
+// lane WEATHERBLEND6: the region walk on a synthetic streamed path. Fake regions: an area polygon, a rank and a
+// weather list (no game data); the polygons are tested here (the product tests the REGN's RPLD in regionWeatherAt)
+struct FakeRegion
+{
+	quint32 form;
+	std::vector<float> poly;	// x0,y0, x1,y1, ...
+	WwRegionRank rank;
+	QVector<WwRegionWeatherEntry> list;
+	const char * edid;
+};
+
+static bool inPoly( const std::vector<float> & p, float x, float y )
+{
+	bool in = false;
+	const size_t n = p.size() / 2;
+	for ( size_t i = 0, j = n - 1; i < n; j = i++ ) {
+		const float xi = p[i * 2], yi = p[i * 2 + 1], xj = p[j * 2], yj = p[j * 2 + 1];
+		if ( ( yi > y ) != ( yj > y ) && x < ( xj - xi ) * ( y - yi ) / ( yj - yi ) + xi )
+			in = !in;
+	}
+	return in;
+}
+
+struct WalkLog
+{
+	int frames = 0, samples = 0, repicks = 0, holdSamples = 0;
+	float repickX = -1.0f;
+	quint32 weather = 0;	// the weather after the walk
+	QString why;
+	QVector<quint32> repickRegions;
+};
+
+/* the camera from x0 to x1 at y (speed units/s, 16 ms frames), holding still `holdS` seconds at holdX; samples when
+ * due, the regions counting at the eye chosen by rank; a re-pick applies the follow law (elapsed, duration, draw, u01) */
+static WalkLog walkPath( const std::vector<FakeRegion> & R, float x0, float x1, float y, float speed, float holdX,
+	double holdS, quint32 cur, double elapsed, double duration, quint32 draw, double u01, int red )
+{
+	WalkLog log;
+	log.weather = cur;
+	WwRegionWalk w;
+	qint64 ms = 0;
+	float x = x0;
+	double held = 0.0;
+	bool holding = false;
+	while ( x < x1 ) {
+		log.frames++;
+		const float eye[2] = { x, y };
+		const int cx = int( std::floor( x / 4096.0f ) ), cy = int( std::floor( y / 4096.0f ) );
+		if ( wwRegionWalkDue( w, ms, cx, cy, eye ) ) {
+			QVector<WwRegionWeather> in;
+			QVector<WwRegionRank> rank;
+			QVector<quint32> under;
+			for ( const FakeRegion & f : R ) {	// every fake cell lists every region (XCLR)
+				WwRegionWeather g;
+				g.hasWeather = true;
+				g.areas = true;
+				g.inside = inPoly( f.poly, x, y );
+				g.rank = f.rank;
+				g.list = f.list;
+				g.form = f.form;
+				g.edid = QString::fromLatin1( f.edid );
+				if ( wwRegionCounts( g, 0u ) ) {
+					in.append( g );
+					rank.append( g.rank );
+					under.append( g.form );
+				}
+			}
+			const int k = wwRegionChoose( rank.constData(), int( rank.size() ) );
+			log.samples++;
+			if ( holding )
+				log.holdSamples++;
+			if ( wwRegionWalkSample( w, ms, cx, cy, eye, under, k < 0 ? 0u : in.at( k ).form, red ) ) {
+				log.repicks++;
+				log.repickRegions.append( w.region );
+				if ( log.repicks == 1 )
+					log.repickX = x;
+				if ( k >= 0 ) {
+					const quint32 p = wwRegionWalkFollow( in.at( k ).list.constData(), int( in.at( k ).list.size() ),
+						log.weather, elapsed, duration, draw, u01, &log.why );
+					if ( p )
+						log.weather = p;
+				}
+			}
+		}
+		ms += 16;
+		if ( !holding && held == 0.0 && x < holdX && x + speed * 0.016f >= holdX ) {
+			holding = true;
+			x = holdX;
+		}
+		if ( holding ) {
+			held += 0.016;
+			holding = held < holdS;
+			if ( !holding )
+				held = -1.0;
+			continue;
+		}
+		x += speed * 0.016f;
+	}
+	return log;
+}
 
 static void near3( const char * what, const float got[3], double e0, double e1, double e2, double tol = 0.05 )
 {
@@ -325,6 +427,64 @@ int main()
 		near1( "follow: new region, u > elapsed/duration: kept", wwRegionWeatherFollow( L, 2, 0xA, false, 1.0, 4.0, 70u, 0.9 ), 0xA, 0.0 );
 		near1( "follow: new region, u <= elapsed/duration: picked", wwRegionWeatherFollow( L, 2, 0xA, false, 1.0, 4.0, 70u, 0.1 ), 0xC, 0.0 );
 		near1( "follow: an unlisted weather: picked", wwRegionWeatherFollow( L, 2, 0xD, true, 0.0, 4.0, 10u, 0.9 ), 0xA, 0.0 );
+	}
+
+	// 17. lane WEATHERBLEND6: the region walk. Two fake regions side by side (A x < 8192, B x >= 8192, one cell row),
+	// a low-priority C inside A; the camera runs 1000 -> 15000 at 600 units/s in 16 ms frames, 2 s still at 3000.
+	// Red WW_CELL_REGION_RED=spawnonly (as the viewer's switch) or the base build: no re-pick, the crossing fails
+	{
+		const int red = std::getenv( "WW_CELL_REGION_RED" ) && std::strstr( std::getenv( "WW_CELL_REGION_RED" ), "spawnonly" )
+			? int( WwRegionWalkRedSpawnOnly ) : 0;
+		if ( red )
+			std::printf( "red: WW_CELL_REGION_RED=spawnonly\n" );
+		const quint32 W1 = 0x100, W2 = 0x200, W3 = 0x300;
+		const std::vector<FakeRegion> R = {
+			{ 0xA0, { 0, 0, 8192, 0, 8192, 4096, 0, 4096 }, { false, 10 }, { { W1, 100 } }, "RegionA" },
+			{ 0xB0, { 8192, 0, 16384, 0, 16384, 4096, 8192, 4096 }, { false, 10 }, { { W1, 50 }, { W2, 50 } }, "RegionB" },
+			{ 0xC0, { 5000, 0, 6000, 0, 6000, 4096, 5000, 4096 }, { false, 1 }, { { W3, 100 } }, "RegionC" } };
+		// keep: W1 listed in B, elapsed / duration 1 / 4 = 0.25 < u01 0.9 -> W1 kept
+		const WalkLog keep = walkPath( R, 1000.0f, 15000.0f, 2048.0f, 600.0f, 3000.0f, 2.0, W1, 1.0, 4.0, 70u, 0.9, red );
+		near1( "walk: one re-pick on the path (A -> B)", keep.repicks, 1.0, 0.0 );
+		near1( "walk: the re-pick enters B", keep.repickRegions.isEmpty() ? 0.0 : double( keep.repickRegions.at( 0 ) ), 0xB0, 0.0 );
+		near1( "walk: it fires at the first sample past the border (x - 8192 in [0, 153.6))",
+			keep.repickX >= 8192.0f && keep.repickX < 8192.0f + 600.0f * 0.256f ? 1.0 : 0.0, 1.0, 0.0 );
+		near1( "walk: keep rule, u01 0.9 > 0.25: W1 kept", keep.weather, W1, 0.0 );
+		near1( "walk: the reason names u01", keep.why.contains( QLatin1String( "u01 >" ) ) ? 1.0 : 0.0, 1.0, 0.0 );
+		near1( "walk: at most one sample a 250 ms (not per frame)",
+			keep.samples <= keep.frames * 16 / 250 + 1 && keep.samples * 10 < keep.frames ? 1.0 : 0.0, 1.0, 0.0 );
+		near1( "walk: standing still 2 s, only the sample that sees it arrive", keep.holdSamples <= 1 ? 1.0 : 0.0, 1.0, 0.0 );
+		// change by the duration rule: elapsed 5 > duration 4 -> B's draw (70 of 100 -> W2)
+		const WalkLog dur = walkPath( R, 1000.0f, 15000.0f, 2048.0f, 600.0f, 3000.0f, 2.0, W1, 5.0, 4.0, 70u, 0.9, red );
+		near1( "walk: duration over: B's draw W2 starts", dur.weather, W2, 0.0 );
+		near1( "walk: the reason names the duration rule", dur.why.contains( QLatin1String( "duration rule" ) ) ? 1.0 : 0.0, 1.0, 0.0 );
+		// change by u01: u01 0.1 <= 0.25 -> W2
+		const WalkLog lo = walkPath( R, 1000.0f, 15000.0f, 2048.0f, 600.0f, 3000.0f, 2.0, W1, 1.0, 4.0, 70u, 0.1, red );
+		near1( "walk: u01 0.1 <= 0.25: W2 starts", lo.weather, W2, 0.0 );
+		near1( "walk: the reason names u01 <=", lo.why.contains( QLatin1String( "u01 <=" ) ) ? 1.0 : 0.0, 1.0, 0.0 );
+		// inside one region (cell borders at 4096, C's area entered and left: the set changes, A still wins): none
+		const WalkLog inA = walkPath( R, 100.0f, 8100.0f, 2048.0f, 600.0f, 3000.0f, 2.0, W1, 1.0, 4.0, 70u, 0.1, red );
+		near1( "walk: inside A (cells and C crossed): no re-pick", inA.repicks, 0.0, 0.0 );
+		near1( "walk: inside A the weather stays", inA.weather, W1, 0.0 );
+		// the follow law at a re-pick, case by case (B's list: W1 50, W2 50)
+		const WwRegionWeatherEntry B[2] = { { W1, 50 }, { W2, 50 } };
+		QString why;
+		near1( "walk follow: not listed -> the draw", wwRegionWalkFollow( B, 2, W3, 1.0, 4.0, 70u, 0.9, &why ), W2, 0.0 );
+		near1( "walk follow: why not listed", why.contains( QLatin1String( "does not list" ) ) ? 1.0 : 0.0, 1.0, 0.0 );
+		near1( "walk follow: the draw is cur -> kept", wwRegionWalkFollow( B, 2, W1, 5.0, 4.0, 10u, 0.0, &why ), W1, 0.0 );
+		near1( "walk follow: why the draw", why.contains( QLatin1String( "draw is the current" ) ) ? 1.0 : 0.0, 1.0, 0.0 );
+		const WwRegionWeatherEntry none[1] = { { W1, 0 } };
+		near1( "walk follow: no chances -> nothing", wwRegionWalkFollow( none, 1, W1, 1.0, 4.0, 10u, 0.0, &why ), 0.0, 0.0 );
+		// due: the first time; not within 250 ms; not without a move; on a cell change or a move after 250 ms
+		WwRegionWalk w;
+		const float e0[2] = { 10.0f, 10.0f }, e1[2] = { 10.5f, 10.0f }, e2[2] = { 30.0f, 10.0f };
+		near1( "walk due: first", wwRegionWalkDue( w, 0, 0, 0, e0 ) ? 1.0 : 0.0, 1.0, 0.0 );
+		wwRegionWalkSample( w, 0, 0, 0, e0, {}, 0u, red );
+		near1( "walk due: not within 250 ms", wwRegionWalkDue( w, 249, 1, 0, e2 ) ? 1.0 : 0.0, 0.0, 0.0 );
+		near1( "walk due: not without a move", wwRegionWalkDue( w, 1000, 0, 0, e1 ) ? 1.0 : 0.0, 0.0, 0.0 );
+		near1( "walk due: a move after 250 ms", wwRegionWalkDue( w, 250, 0, 0, e2 ) ? 1.0 : 0.0, 1.0, 0.0 );
+		near1( "walk due: a cell change after 250 ms", wwRegionWalkDue( w, 250, 1, 0, e0 ) ? 1.0 : 0.0, 1.0, 0.0 );
+		std::printf( "walk: %d frames, %d samples, %d re-pick(s) at x %.1f\n", keep.frames, keep.samples, keep.repicks,
+			double( keep.repickX ) );
 	}
 
 	std::printf( "WEATHERBLEND %s %d of %d failed\n", fails ? "FAIL" : "PASS", fails, checks );

@@ -92,6 +92,8 @@ void wwLookdevSetCellPlugins( const QStringList & plugins );
 //! the loaded weathers, "EDID [FormID]" order as the Scene window lists them
 QVector<WwWeatherEntry> wwLookdevWeathers();
 QString wwLookdevWeatherKey();
+//! lane WEATHERBLEND6: the region whose weather is current (its EditorID; "none"; empty before any region pick)
+QString wwLookdevRegion();
 /*! lane VOLAIR1 (record extension files, src/recx.h): the loaded weather's identity: its load-order FormID, EditorID,
  *  the plugin that defines it (file name), the loaded plugins (full paths, load order) and the game's Data; false
  *  when no weather is loaded */

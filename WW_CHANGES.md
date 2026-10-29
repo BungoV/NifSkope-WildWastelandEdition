@@ -44,6 +44,24 @@
   `--red notie` (no tie rule: 49 differ).
 - **Sky visibility** is the irradiance texel's alpha (cosine-weighted share of missing rays, linear); dump columns
   V+X..V-Z. `--dump-fixed` writes the 32 fixed distances a probe. Unit gate: tests/rtddgi_math (13 checks + 13 reds).
+## Lane MARCHLINK1 (2026-10-29, branch marchlink1-20261029): march-mode shaders link again
+
+- GIWALL2's wall-tested fills took fo4_effectdecalcsm and pbrm_cellcsm past the driver's instruction limit in the
+  WW_FRAME_UBO + WW_CELL_GI_MARCH mode ("too many instructions"; every other program and mode linked).
+- The stranded-surface pick now has one answer site (a loop with non-constant bounds) and the answer's two fills run
+  in one pass (`cellGiFillPair`), both in the march mode only. Same calls in the same order: the same values.
+- fo4_effectdecalcsm march: 1620155 bytes (1640172 before GIWALL2). The default and WW_FRAME_UBO binaries of
+  fo4_effectdecalcsm, pbrm_cellcsm, fo4_cellcsm, fo4_cell and pbrm_cell are identical but the run stamp and the
+  source hash. Shader-only: no exe build.
+
+## Batch merge 10-29 (merge1029): FAVCAM1, SPAWNEYE1, VOLPLACE2, GLTFCELL1, CELLUNI6, LANDSPEC9, WEATHERBLEND6, GIWALL2, FOGGI1
+
+- **CELLUNI6 on FRAMESPEED2's one TAA path:** FRAMESPEED2 (already in main) runs the temporal AA after the tone map
+  only, so CELLUNI6's `nonlinear` item (the depth-format cache on HDR-off frames) is what main does now: the merge keeps
+  main's path, with CELLUNI6's context-life cache key (`depthcfg`) and the trust-point GL error reads (`glerror`).
+  `WW_CELL_UNI6_RED=nonlinear` no longer changes the product (its unit check in tests/celluni6 stays).
+- **WEATHERBLEND6 x LANDSPEC8:** the region walk's camera block loops over LANDSPEC8's grid (uGridsToLoad / 2).
+- src/wwswitchstages.inc regenerated with tools/wwswitch_survey.py after the merges.
 
 ## Lane GLTFCELL1 (2026-10-28, branch gltfcell1-20261028): glTF export of whole exterior cells
 
@@ -80,6 +98,23 @@
     its layers in `layerN` / `layerNNormal` extras: 56 layers over 16 quadrants.
   - The writer's `colorSets` field is empty for a character, so MaleBody.nif is still byte-identical (both modes).
 - **Not written yet:** billboard turning, interiors.
+## Lane FAVCAM1 (2026-10-28, branch favcam1-20261028): favorite camera spots in the cell view
+
+- **What (bungo 10-28):** the Cell dock has a Favorites tab. Save Camera stores where the camera stands and where it
+  points (eye, yaw, pitch, roll, field of view, orbit distance, plus a spot 512 units ahead) and opens the new row's name
+  for typing ("Favorite N" if left). A click jumps the camera there. F2 or Rename (right-click) renames, Del or Delete
+  (right-click) removes. The row last saved or jumped to is marked Start; rows outside the opened cells are greyed.
+- **It always opens there:** a cell's first open in a tab stands the camera at the Start favorite of that worldspace
+  (an interior cell has its own list) when it lies in the opened cells, else at the most recent one that does, else the
+  spawn rule (src/cellspawn.cpp). `WW_CELL_SPAWN_EYE` still wins over favorites, and a pinned harness camera
+  (`WW_RENDER_CENTER/DIST/FOV/ORTHO`) wins over both. A shot run (`WW_RENDER_SHOT` or `--port`) reads favorites only from
+  an explicit `WW_CELL_FAVORITES` file, so unpinned harness pictures do not move. The notes line says
+  `cell spawn: rule=favorite "<name>"`; the window prints `camera favorite eye ... | eye residual`.
+- **Where:** one JSON file, `camera_favorites.json` in the app data folder (`%APPDATA%\NifTools\NifSkope 2.0\`, follows
+  `WW_SETTINGS_SCOPE`); `WW_CELL_FAVORITES=<file>` points it elsewhere. Code: src/cellfavorites.{h,cpp} (file + pick),
+  src/cellfavoritespanel.{h,cpp} (the tab), GLView::wwCameraNow / wwCameraGoTo.
+- **Gate:** tests/cellfavorites (notes/favcam1/unit/unit.sh): 22 checks PASS; reds `WW_CELL_FAVORITES_RED=range` (the
+  pick ignores the opened cells, 5 FAIL) and `=angles` (the writer drops yaw and pitch, 1 FAIL).
 
 ## Lane REFLDRAWS1 (2026-10-27, branch refldraws1-20261027): the reflections pass stops re-walking the opaque scene
 
@@ -100,6 +135,17 @@
   Telemetry: `cell ssr water rays: sorted list reused, no opaque walk` / `opaque scene walked again (RED=1)`.
 - **Gates:** offline mask-machine model (notes/refldraws1/model/maskmodel.py, 200000 sequences): green 0 differ, reds
   `naive` (water alone) and `waterpart` (water + particles) FAIL. Live hold owed: notes/refldraws1/hold.sh + judge.py.
+## Lane LANDSPEC9 (2026-10-28, branch landspec9-20261028): uGridsToLoad from an MO2 profile's own inis
+
+- **uGridsToLoad follows the MO2 profile's local inis:** when the Mods list's source (cellModSource: the LOD panel's
+  MO2 profile, else an MO2 instance on this machine) is an MO2 profile with local inis (a Fallout4.ini or
+  Fallout4Custom.ini in the profile folder, the same test sTestFile already used), [General] uGridsToLoad is read from
+  that profile's Fallout4.ini, Fallout4Prefs.ini and Fallout4Custom.ini in place of My Games'. Fallout4_Default.ini
+  from the game folder is still read first. No MO2, or a profile without local inis: LANDSPEC8's My Games order.
+  The lookup is the one sTestFile uses (src/cellmodsource.cpp iniFolder, gameInis now calls it); no second one.
+- The stream line now names the folder read: `cell stream: uGridsToLoad <n> (<ini>); read the MO2 profile's own
+  inis in <dir>: n x n cells` (or `read My Games <dir>`). Red `WW_LANDSPEC_RED=mygames` (My Games always: LANDSPEC8).
+- Not built here (Linux cloud session, no Qt, no game data): compile and the Windows gates are owed.
 
 ## Lane LANDSPEC8 (2026-10-28, branch landspec8-20261028): land LOD chunks on first load, the whole Commonwealth, uGridsToLoad
 
@@ -131,6 +177,25 @@
   exterior lit-effect path was already the default.
 - Notes-side fixes (no build): the GIREBAKE3 bake script now gives each cell its own camera. The CHECKKIT1 hold no
   longer passes its part filter (ONLY/SKIP) to the live runner. Evidence: notes/shotfix1/RESULTS.md.
+## Lane WEATHERBLEND6 (2026-10-28, branch weatherblend6-20261028): the region weather follows the streamed camera
+
+- **Re-pick on a border:** in a streamed exterior cell view the camera moves like the player; when its cell or the set
+  of regions counting under it changes, the region choice runs again by the WEATHERBLEND5 rules (the camera's eye,
+  deleted / other-worldspace / no-area regions skipped, override and priority). Entering a new region applies the
+  follow law: the current weather is kept when the region lists it and u01 > elapsed/duration, else that region's
+  draw (seeded by the cell the border is crossed in) starts its weather through the existing weather change (a pick
+  during a change waits for its end). The first sample after an open or a teleport only sets the baseline.
+- **Cost:** sampled at most every 250 ms and only after the camera moved; the region areas are tested only then, never
+  per frame. The camera cell's region list (XCLR) is read once each time the camera enters a cell.
+- **Census:** a stderr line on each re-pick: `lookdev region walk: cell x,y region A -> B, weather kept|changed W[ -> W2]:
+  <why>` (why: the duration rule, u01 against elapsed/duration, not listed, the draw, no region); the echo's `region=`
+  reads `B:<weather|keep>(walk A->B kept|changed)`.
+- **Weather box:** follows a re-pick's weather, and its tooltip names the current region ("Region: <EditorID>").
+- **Red:** `WW_CELL_REGION_RED=spawnonly` keeps the old behavior (the teleport's pick only).
+- **Tests:** tests/weatherblend gains a synthetic two-region path (section 17: one re-pick at the border, the keep rule,
+  none inside one region or while still, the 250 ms throttle) and `run_linux.sh` (system g++ and Qt6Core); the switch
+  red and the base build fail the crossing.
+
 ## Lane WEATHERBLEND5 (2026-10-28, branch weatherblend5-20261028): region weather by the game's rules, the fog drift fixes
 
 - **Which regions count:** a region with no area (no RPLD) is never inside, as in the game; a deleted region and a
@@ -192,6 +257,39 @@
   `WW_CELL_STREAM_TEXKEEP=0` A/B walk.
 - LEFTOVER: CELLUNI6 items not done here: the jitter viewport ask, cellhdr's Begin, the bsshape blend asks,
   wwCellHdrDepthMax, and a GL error check on the trusted frame.
+## Lane VOLPLACE2 (2026-10-28, branch volplace2-20261028): rooms part only at walls, the fewest boxes fill them, thresholds sit in the hole
+
+- **Why:** in the Concord hardware store the Space stage cut one open floor into five rooms at pinches where no wall
+  stands, so flat boxes and free-standing thresholds sat in the middle of the floor. Default now; any red keeps the
+  stages as they were (`--red volplace1` / `WW_CELL_VOLUMES_RED=volplace1` = VOLPLACE1's bytes, checked on 25 cells).
+- **Rooms join unless a wall parts them (src/probevolumes.cpp, after the room labels):** for each side face two rooms
+  share, the four next face positions in the plane (left, right, above, below) are read. A position is a parting wall
+  when it is solid with one room's air on one side and the other's on the other within 3 cells. Two rooms (neither
+  roofed) are one when the parting wall is under half of that rim, or under half of the rim above (no lintel).
+  At least 4 shared faces are needed (two small pockets need one face per 8 cells of the smaller). A real door keeps
+  its rooms apart. Knobs `WW_VOLFIT_SPEC=join=0,joinwall=0.5,joinmin=4,jointop=0,joinlog=1`.
+- **Boxes square to the room's own walls:** the area of the vertical triangles beside a room's air, by yaw mod 90,
+  sets the room's frame when 3 degrees of it hold 35 % (the store stands at 50.5 degrees). Knobs `wallyaw=0`, `yawshare`.
+- **The fewest boxes:** the greedy cover lets a slab hold clutter while a quarter of it is the room's own air (roofed
+  rooms keep the old test), stops at a 3 % gain, and the fine fit adds no lattice boxes (`place2fine=0` skips it; knob
+  `greedy2` bits 1/2/4). A placement face with an opening takes no pad (the synth church and turned rooms poked there).
+- **Thresholds cover the open hole only:** 16 x 16 rays across each wall threshold; the open samples get up to 4
+  all-open rectangles until 90 % are held. Shut (< 3 open) or 95 % open ones stay. Knob `openfit=0`.
+- **A roofed room must fit a person:** clear height 180 u and a floor of 14884 u2 (the store's fire escape landing,
+  244 x 244 x 122 u, read as a room). Knobs `minheight`, `minfloor`.
+- **A leftover strip gets its own box:** under the 3 % stop, a strip of the room's air wider than one cell on both floor
+  axes still gets a box. Knob `strip=0`.
+- **Thresholds snap to the door frame:** each jamb is scanned across the wall 1 u at a time; where the jamb starts and
+  ends are the wall's two faces at that jamb, the sill and the head are read over each jamb end, and the threshold
+  holds those 8 corners (`"corners"` in the .space shape; `contains()` is inside its 12 triangles; its box becomes the
+  corners' box in the wall's frame, so the GI mask gets the wall's turn and depth). A hole whose floor runs on through
+  the wall is a door. The store's front door: 7 degrees turned, as bungo's hand-made reference. Knob `rim=0`.
+- **PRTP Debug View:** rooms are drawn solid and thresholds dashed (still in their two rooms' colours);
+  `WW_CELL_VOLUMES_DASHRED=1` (live) draws VOLVIEW2's style.
+- **Gate:** `tests/spells/cell_volplace.sh gate|red` rebuilds the store window's soup and checks it against the soup's
+  own walls (tests/spells/cell_volplace_check.py): no room-to-room threshold away from a real opening, at most 3
+  boxes per room. The `red` phase (`--red volplace1`) must fail.
+
 ## Lane VOLPLACE1 (2026-10-28, branch volview2-20261028): room boxes hug their walls; volume labels stop overlapping
 
 - **Placement pass (src/probevolumes.cpp, after the fine fit):** every Box shape of every room casts rays from its middle
@@ -239,6 +337,99 @@
 - **Cost:** CPU only, while the tick is on. About 28 MB (cached line arrays: 241k segments) and about 22 (CPU, Concord 5x5) ms of draw
   time per frame. GPU 1080p: not separable here (the lines are a few hundred thousand vertices; whole-frame medians on 87-108 ms vs off 114-124 ms came from separate launches sharing the GPU with other lanes). When the tick is off it costs nothing.
 - The self-test check names "PRTP: Show probes off ..." are now "PRTP: Debug View off ..." (tests/spells/cell_workspace.sh).
+## Lane CELLUNI6 (2026-10-28, branch celluni6-20261028): the CELLUNI5 leftovers, one red each
+
+- **Jitter viewport:** the TAA jitter's GL_VIEWPORT ask now feeds glview's global-uniform upload right after it (a
+  one-shot note keyed on the paint, `WwCellUni::VpNote`); that upload no longer asks again. Red `jitter`.
+- **Non-linear TAA:** on HDR-off frames the TAA takes its depth format from the cache CELLUNI4 keeps (window
+  framebuffer 0 only; a harness framebuffer's name can come back with another format) and stops draining and reading
+  errors after one clean frame, as the linear path does. Red `nonlinear`.
+- **Depth max once per HDR frame:** `wwCellHdrDepthMax` is kept for the frame and handed to later readers. The far
+  cards write depth after taking it, so the clouds still make their own (sharing it would show clouds through far
+  cards); the underwater pass takes the clouds' one. Red `hdrdepth`.
+- **HDR Begin:** viewport, draw and read framebuffer come from the obscurance pass's asks in the same paint (every
+  cell pass between puts them back); no obscurance pass: asked. Red `hdrbegin`.
+- **Shape blend:** the X-ray / ghost blend and the SSR hook's blend-off now go through the draw's blend note, and
+  BSShape's three GL_BLEND asks read it (a pick asks). Red `bsshape`.
+- **TAA depth cache on a re-created context:** FRAMESPEED1's serial survives the same QOpenGLContext object being made
+  again; `wwGlContextLife()` drops at `aboutToBeDestroyed`, and the cache keys on it. Red `depthcfg`.
+- **Errors at trust points:** with `WW_SETUP_MEMO_CHECK=1` the TAA, FO4CS bloom and fog bloom read GL errors on
+  trusted frames too, refuse that frame as before the trust, and print one line per new site ("setup memo check: GL
+  error 0x0502 at the FO4CS bloom (the chain) on a frame the memo trusted ..."). Red `glerror`.
+- **Reds:** `WW_CELL_UNI6_RED=<name>[,<name>]` (live; `all`; `WW_CELL_UNI_RED=1` holds them all). `WW_SETUP_MEMO_CHECK=1`
+  checks every note (vpstale, knownstale, blendstale on the `cell uni:` line).
+- Tests: tests/celluni6/run.sh (g++ -std=c++17, fake GL state; green passes, each `-DCELLUNI6_RED_<ITEM>` build fails on
+  its own lines only). Live only: the picture, the Qt context-destroy hook, the check counters on real frames.
+- Cost: fewer CPU-side driver asks (per frame: 1 with TAA on, 3 at HDR Begin with the obscurance pass, about 5 on an
+  HDR-off TAA frame once trusted; per shape draw outside the HDR frame up to 3) and one depth-max pass fewer under
+  water. No shader or memory change.
+## Lane GIWALL2 (2026-10-28, branch giwall2-20261028): a GI voxel in a wall or behind one gets no weight
+
+- **Why:** on Concord's hardware store ceiling a few points read 10-18x the path-traced reference (p90), and the walls
+  about 3x. The GI voxels there are 267 units and straddle the wall. For the hot points 64% of the blend weight sat in
+  voxels whose centres are in solid, and 87.5% in voxels behind a wall, which hold the sunlit street's light. There
+  were three causes in res/shaders/cell_lights.glsl:
+  - The volumes read (`cellGiVolume`, the default GI visibility) had no wall test. The store is open to the street,
+    so it is one room (and one volume) with the street, and the slot label kept the street's voxels.
+  - The march's `cellGiSeen` left the voxel's centre out, so a voxel whose centre is just inside the wall passed.
+  - `cellGiSeen` stopped at 12 taps. At this voxel size a segment's taps fell more than a room cell apart, so a wall
+    one cell thick could be stepped over.
+- **Fix:** `cellGiWall` taps up to and including the centre, never more than half a room cell apart on any axis. A
+  voxel counts only when its centre is air and no solid cell lies between it and the surface's view point
+  (`cellGiSeeFrom`). The test now runs in every path that weighs voxels by room: the march's room blend, its gap fill
+  (`cellGiFillAt` for a room), its seen fill, the stranded answers, and all three passes of the volumes read.
+- **No black recesses (GIBLACK1):** when no voxel is seen, the room fill, the seen fill and the volumes' second pass
+  take the *buried* voxels before the plain trilinear (which reads through walls). A buried voxel's centre is inside
+  the wall the surface faces: air up to the first solid tap, solid from there to the centre. A voxel behind a wall is
+  never taken. This applies in every grid, so an interior pocket keeps its own room's light and does not fall to the
+  trilinear. The last fill and the plain trilinear stay as the final fallbacks, as before.
+- **Red:** `WW_CELL_GIWALL_RED=off` (`cellPassRed` 8192) gives the old weights exactly: GISHADE1's taps, no test in
+  the fill or the volumes, no buried fallback. It is a uniform bit, so it does not switch the GI visibility mode.
+- **Check (Linux, synthetic, no game data):** `python3 tests/spells/cell_rooms_check.py giwall`. The mirror adds
+  `gi_wall`, the fill's and seen fill's rules, and a mirror of the volumes read (`gi_volume`). The fixture is a store
+  open to the street, voxel 267, room cell 16, indoor 0.05, street 2.0. The fix reads indoor in both paths; the red
+  reads the street's light:
+  - wall (the voxel column and layer inside the wall and ceiling): fix 0.0500 / 0.0500; red 1.84 (march), 1.91 (volumes).
+  - thin (the column in open air past a thin wall): fix 0.0500 / 0.0500; red 0.27 / 0.95.
+  - recess (no voxel seen, a sealed pocket behind): fix 2.00 / 2.00 (buried voxels); red 1.88 (the pocket's black mixed in).
+    Without the buried fallback it would be the plain trilinear, 1.88.
+  - pocket (the same recess read as an interior grid, gap fill on): fix 2.00 / 2.00; red 1.88 / 1.88.
+  - taps: the red equals the old rule on 20000 random segments.
+  With `GI_CHECK_GIWALL=0` it FAILS (`--expect fail` passes).
+- **Shader compile:** glslangValidator compiled the programs that include cell_lights.glsl in the volumes, march and
+  march-once modes. Before and after alike, cell_gihalf, cell_volair and cell_reflrelight need a variable named `cast`
+  renamed in the scratch copy first (a reserved word to glslang).
+- **Not built here:** not compiled, run or timed on Windows. The cost is the wall walk: at most one room-grid fetch
+  per half cell, per voxel kept. The march programs grow, and GIDARK1 hit the driver's link limit there, so the fo4_cell
+  link and the GPU ms are still to be checked. The Concord ceiling and walls against the reference are still to be
+  measured.
+## Lane FOGGI1, sun gate (2026-10-28, branch foggi1-20261028): no sun in the air indoors unless the shadow map says lit — BUILD PENDING
+
+- **Why:** a measurement in the Concord hardware store found the indoor air lit mostly by sun in-scatter (sun 35.7,
+  GI 23.8, lamps 2.5), even where the room test calls the sample indoors.
+- **What the air's sun did with shadows before this** (`res/shaders/cell_volair.frag` airSun, exterior cells):
+  visibility = `wwSunShadow` when the cascades are drawn. That is min(cascades faded to 1 by distance, terrain
+  height map, screen-space contact) x clouds. Without cascades it was the clouds alone, so no geometry shadow at all.
+  With the far grid on it was `airFarVis` (cascades faded to 1, terrain, clouds). The shadow map was read wherever
+  the cascades reach. Three paths answered 1 regardless of the geometry: (a) past the cascades' reach, through their
+  distance fade, (b) no cascades, (c) the multiple-scattering octaves (the "Fog multiple scattering" row) lifting a
+  shadowed sample toward 1 (octave 1 by 1/2, octave 2 by 3/4). In interior cells the directional light (the template's,
+  not a sun) is never shadowed (vis = 1). This lane leaves interior cells alone.
+- **The gate:** per sample, gate = indoor share x (1 - open-sky share toward the sun). The indoor share comes from
+  the 8 room cells around P, with the same labels and trilinear weights the air's GI read uses; indoors means both
+  labels are non-zero. The open-sky share is the probe sky grid read along the sun, the slot SPECOCC1 packs. With no
+  slot packed, or no evidence, it counts as 0. Under the gate, vis = mix(vis, min(vis, map), gate). Here map is the
+  shadow map's own verdict times its coverage (the cascades' fade weight), min the terrain map, times the clouds.
+  It is 0 without cascades. The octaves lose their lift by the same gate. Inside the cascades' reach the shadow-map
+  term is unchanged. Only the parts that ignore shadowing go.
+- **Sky slot:** `celllights.cpp` now packs the sky grid's slot when the air is on with the gate (it was packed only
+  for the SpecOcc or Water sky visibility rows). The surfaces read it only through those rows, so they are unchanged.
+- **Census:** the air's line ends `sungate=on(rooms=0|1 sky=0|1)`, `off(interior)` or `off(red sun)`.
+- **Red:** `WW_CELL_FOGGI_RED=sun` gives the sun as before and the GI texture packed as before.
+- **Checked here (Linux, no game data):** the old and new `cell_volair.frag`, with includes inlined, both compile
+  under glslangValidator (GLSL 4.10). The `cast` identifier in `ww_sunshadow.glsl` is renamed for that check only.
+  `src/wwswitchstages.inc` was regenerated with `tools/wwswitch_survey.py`, which first reproduced HEAD's table
+  byte for byte. The C++ is not compiled (no Qt here), and nothing is rendered.
 
 ## Lane ROOMFIT10 (2026-10-28, branch roomfit10-20261028): the volume fit's rays, mostly on the GPU, still exact
 

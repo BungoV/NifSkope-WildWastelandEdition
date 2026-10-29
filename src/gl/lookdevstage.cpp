@@ -33,6 +33,7 @@ BSD License - see nifskope.h
 #include "harnesswindow.h"
 #include "lodgen.h"
 #include "cellmodsource.h"	// lane SKYTOP1: the active load order
+#include "cellstream.h"	// lane WEATHERBLEND6: the streamed camera's cell, for the region walk
 
 #include <QBuffer>
 #include <QDir>
@@ -146,6 +147,10 @@ struct LdState
 	// lane WEATHERBLEND5: the region the last pick chose, and the current weather's form and start hour (its elapsed)
 	quint32 regionForm = 0, startForm = 0;
 	double startHour = 0.0;
+	// lane WEATHERBLEND6: the region walk round a streamed camera, its clock, and the current region's EditorID
+	WwRegionWalk walk;
+	QElapsedTimer walkClock;
+	QString regionName;
 	QString skyLast = QStringLiteral( "pending" );	// what the last sky pass drew, for the echo
 
 	// the weather fog (lane FOG1)
@@ -473,6 +478,20 @@ void noteWeatherStart( LdState & s )
 	}
 }
 
+//! the region's weather becomes the weather key (the region's, not the user's pick: not saved); its key
+QString regionApply( LdState & s, quint32 pick )
+{
+	QString key = hex8( pick );
+	for ( const WwWeatherEntry & e : s.list )
+		if ( e.formID == pick && !e.edid.isEmpty() )
+			key = e.edid;
+	if ( key != s.weatherKey ) {
+		s.weatherKey = key;
+		s.dirtyWeather = true;
+	}
+	return key;
+}
+
 /* lane WEATHERBLEND4: a teleport to an exterior picks the region weather (Sky::UpdateWeather on a new region): of the
  * cell's regions (XCLR) with weather data whose areas hold the player, the override / priority winner; then its list's
  * chance draw, seeded by the cell (a reopen repeats). Red WW_WEATHER_BLEND_RED=noregionpick.
@@ -503,11 +522,13 @@ void regionPick( LdState & s )
 	if ( k < 0 ) {
 		s.regionLast = QStringLiteral( "none(%1 regions)" ).arg( cl->regions.size() );
 		s.regionForm = 0;
+		s.regionName = QStringLiteral( "none" );	// lane WEATHERBLEND6
 		return;
 	}
 	const WwRegionWeather & g = in.at( k );
 	const bool same = g.form == s.regionForm;
 	s.regionForm = g.form;
+	s.regionName = g.edid;	// lane WEATHERBLEND6
 	const quint32 cur = s.haveWeather ? s.w.formID : 0u;
 	const quint32 draw = wwRegionDraw( cl->regionSeed );
 	const double dur = wwWeatherDurationHours( s.clim.tnam[4], s.haveWeather ? s.w.volMult : 1.0f, s.gmst );
@@ -527,15 +548,92 @@ void regionPick( LdState & s )
 		s.regionLast = QStringLiteral( "%1:%2%3" ).arg( g.edid, pick ? QStringLiteral( "keep" ) : QStringLiteral( "empty" ), law );
 		return;
 	}
-	QString key = hex8( pick );
+	s.regionLast = QStringLiteral( "%1:%2%3" ).arg( g.edid, regionApply( s, pick ), law );
+}
+
+//! lane WEATHERBLEND6: a region weather's name (its EditorID when the list has one)
+QString weatherName( const LdState & s, quint32 form )
+{
+	if ( !form )
+		return QStringLiteral( "none" );
 	for ( const WwWeatherEntry & e : s.list )
-		if ( e.formID == pick && !e.edid.isEmpty() )
-			key = e.edid;
-	s.regionLast = QStringLiteral( "%1:%2%3" ).arg( g.edid, key, law );
-	if ( key != s.weatherKey ) {	// the region's, not the user's pick: not saved
-		s.weatherKey = key;
-		s.dirtyWeather = true;
+		if ( e.formID == form && !e.edid.isEmpty() )
+			return e.edid;
+	return hex8( form );
+}
+
+/* lane WEATHERBLEND6: the region walk. A streamed exterior's camera moves like the player and cells load round it;
+ * when its cell or the regions counting under it change (sampled at most every kWwRegionWalkMs, only after a move,
+ * so the areas are never tested per frame), the region choice runs again by regionPick's rules (the camera's eye,
+ * the skips, override / priority) and on entering a new region the follow law keeps the current weather when
+ * u01 > elapsed / duration, else that region's draw starts its weather through the weather change (a pick during
+ * a change waits for its end). The first sample after an open or a teleport is the baseline. A stderr line and the
+ * echo's region= on each re-pick. Red WW_CELL_REGION_RED=spawnonly: the teleport's pick only (WEATHERBLEND5) */
+void regionWalk( LdState & s, const NifModel * doc )
+{
+	if ( s.regionDoc || s.dirtyLoad || !s.loadRefusal.isEmpty() || s.pinWeather || weatherBlendRed( "noregionpick" ) )
+		return;
+	const CellStreamCamera * cam = cellStreamCamera( doc );
+	const WwCellLighting * cl = cam ? wwCellLightsFor( doc ) : nullptr;
+	if ( !cl || cl->interior )
+		return;
+	if ( !s.walkClock.isValid() )
+		s.walkClock.start();
+	const qint64 now = s.walkClock.elapsed();
+	if ( !wwRegionWalkDue( s.walk, now, cam->cx, cam->cy, cam->eye ) )
+		return;
+	const int red = ( weatherBlendRed( "noareainside" ) ? int( WwRegionRedNoAreaInside ) : 0 )
+		| ( weatherBlendRed( "noregionskip" ) ? int( WwRegionRedNoSkip ) : 0 );
+	QVector<WwRegionWeather> in;
+	QVector<WwRegionRank> rank;
+	QVector<quint32> under;
+	for ( quint32 regn : cam->regions ) {
+		WwRegionWeather g;
+		if ( s.esm.regionWeatherAt( regn, cam->eye[0], cam->eye[1], g ) && wwRegionCounts( g, cam->world, red ) ) {
+			in.append( g );
+			rank.append( g.rank );
+			under.append( g.form );
+		}
 	}
+	const int k = wwRegionChoose( rank.constData(), int( rank.size() ) );
+	WW_SWITCH_STATIC( int, walkRed, wwEnvStr( "WW_CELL_REGION_RED" ).contains( QLatin1String( "spawnonly" ) )
+		? int( WwRegionWalkRedSpawnOnly ) : 0 );
+	const bool first = !s.walk.started;
+	const quint32 wasRegion = s.walk.region;
+	if ( !wwRegionWalkSample( s.walk, now, cam->cx, cam->cy, cam->eye, under, k < 0 ? 0u : in.at( k ).form, walkRed ) ) {
+		if ( first && s.regionName.isEmpty() && k >= 0 )
+			s.regionName = in.at( k ).edid;	// the region the open stands in, for the Weather box
+		return;
+	}
+	noteWeatherStart( s );
+	const QString from = !s.regionName.isEmpty() ? s.regionName : wasRegion ? hex8( wasRegion ) : QStringLiteral( "none" );
+	s.regionForm = s.walk.region;
+	s.regionName = k < 0 ? QStringLiteral( "none" ) : in.at( k ).edid;
+	const quint32 cur = s.haveWeather ? s.w.formID : 0u;
+	quint32 pick = 0;
+	QString why = QStringLiteral( "no region counts under the camera: the weather stays" );
+	if ( k >= 0 ) {
+		const WwRegionWeather & g = in.at( k );
+		const double dur = wwWeatherDurationHours( s.clim.tnam[4], s.haveWeather ? s.w.volMult : 1.0f, s.gmst );
+		const double el = wwWeatherElapsedHours( s.hour, s.startHour );
+		const quint32 draw = wwRegionDraw( cam->cellForm );	// seeded by the cell the border is crossed in
+		if ( weatherBlendRed( "nodurationkeep" ) ) {	// regionPick's red: a listed current weather is kept outright
+			const bool usesCur = cur && std::any_of( g.list.cbegin(), g.list.cend(),
+				[&]( const WwRegionWeatherEntry & e ) { return e.weather == cur; } );
+			pick = usesCur ? cur : wwRegionWeatherPick( g.list.constData(), int( g.list.size() ), draw );
+			why = QStringLiteral( "red nodurationkeep" );
+		} else {
+			pick = wwRegionWalkFollow( g.list.constData(), int( g.list.size() ), cur, el, dur, draw,
+				double( wwRegionDraw( cam->cellForm ^ 0x9e3779b9u ) ) / 4294967296.0, &why );
+		}
+	}
+	const bool changed = pick && pick != cur;
+	const QString key = changed ? regionApply( s, pick ) : weatherName( s, cur );
+	s.regionLast = QStringLiteral( "%1:%2(walk %3->%4 %5)" ).arg( s.regionName, changed ? key : QStringLiteral( "keep" ), from,
+		s.regionName, changed ? QStringLiteral( "changed" ) : QStringLiteral( "kept" ) );
+	std::fprintf( stderr, "lookdev region walk: cell %d,%d region %s -> %s, weather %s %s%s: %s\n", cam->cx, cam->cy,
+		qPrintable( from ), qPrintable( s.regionName ), changed ? "changed" : "kept", qPrintable( weatherName( s, cur ) ),
+		changed ? qPrintable( QStringLiteral( " -> " ) + key ) : "", qPrintable( why ) );
 }
 
 void resolve()
@@ -585,8 +683,10 @@ void resolve()
 		}
 	}
 	noteWeatherStart( s );	// lane WEATHERBLEND5
-	if ( s.regionDoc && s.loadRefusal.isEmpty() )
+	if ( s.regionDoc && s.loadRefusal.isEmpty() ) {
 		regionPick( s );
+		s.walk = WwRegionWalk();	// lane WEATHERBLEND6: the walk starts again from the teleport's eye
+	}
 	if ( s.dirtyWeather ) {
 		s.dirtyWeather = false;
 		// lane WEATHERBLEND1: a change of weather keeps the one it leaves; a new load, a refusal or the snap red snaps
@@ -1089,6 +1189,11 @@ QVector<WwWeatherEntry> wwLookdevWeathers()
 QString wwLookdevWeatherKey()
 {
 	return st().weatherKey;
+}
+
+QString wwLookdevRegion()
+{
+	return st().regionName;
 }
 
 bool wwLookdevWeatherId( quint32 & formID, QString & edid, QString & owner, QStringList & files, QString & dataDir )
@@ -2663,7 +2768,9 @@ bool wwLookdevDrawBackground( Scene * scene )
 			sx.regionDoc = scene->nifModel;	// lane WEATHERBLEND4: and its region's weather
 		}
 		sx.lastDoc = scene->nifModel;
+		sx.walk = WwRegionWalk();	// lane WEATHERBLEND6: another document: the walk's baseline again
 	}
+	regionWalk( sx, scene->nifModel );	// lane WEATHERBLEND6: a few samples a second at most, after a move
 	const bool anyPart = sx.sky || sx.sun || sx.clouds || sx.moon
 		|| wwLookdevRed( "skyleak" ) || wwLookdevRed( "sunleak" ) || wwLookdevRed( "cloudleak" ) || wwLookdevRed( "moonleak" );
 	const bool perspective = r->globalUniforms->projectionMatrix[3][3] != 1.0f;

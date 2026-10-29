@@ -105,6 +105,9 @@ void cellWorkspaceNoteOpened( const QString & path, const CellSceneSpec & spec,
 //! The `.wwcell` that is open, or empty. The view rows re-open this path.
 QString cellWorkspacePath();
 
+//! lane FAVCAM1: the spec of the cell that is open; false when none is
+bool cellWorkspaceOpenSpec( CellSceneSpec & out );
+
 //! lane DUNESAND3: after a live set, rewrite the notes' ground TX07 clause to the switch's value now; empty if unchanged
 QString cellWorkspaceNotesLive();
 

@@ -650,6 +650,11 @@ public:
 	QString wwPlaceCamera( const Vector3 & eye, const Vector3 & at );
 	//! lane CELLSPAWN1: a level view standing at eye, looking along yawDeg (0 north, 90 east); a cell's first open
 	QString wwSpawnAt( const Vector3 & eye, float yawDeg );
+	/*! lane FAVCAM1: the camera now, for a favorite: the eye (world), Rot (pitch x, roll y, yaw z, degrees), the vertical
+	 *  field of view, Dist and a spot 512 units ahead. False while a path camera or a non-Z up axis holds the view. */
+	bool wwCameraNow( float eye[3], float rot[3], float & fovDeg, float & dist, float at[3] ) const;
+	//! lane FAVCAM1: stand at eye with Rot = rot (degrees), field of view fovDeg (0 keeps it), orbit Dist dist
+	QString wwCameraGoTo( const float eye[3], const float rot[3], float fovDeg, float dist );
 
 	//! Where the timeline is parked right now.
 	/*! The freeze dialog seeds itself from this, so "scrub until it looks right,

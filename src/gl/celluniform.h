@@ -6,9 +6,11 @@
  * bind through EXT_direct_state_access, so the active unit is never asked for. WW_CELL_UNI_RED=1: the old path.
  * Lane CELLUNI2: the per-draw setters (AO, SSR, SSGI, reflection probes) and the scene globals (fog, sun) use it too.
  * Lane CELLUNI3: the CE1 tail scalars, the draw's blend (a note from its setup) and the sky / air / far units.
- * Lane CELLUNI4: the frame end's passes (TAA, bloom, fog bloom) take the state cellhdr's End read once (KnownGl). */
+ * Lane CELLUNI4: the frame end's passes (TAA, bloom, fog bloom) take the state cellhdr's End read once (KnownGl).
+ * Lane CELLUNI6: the CELLUNI5 leftovers, each behind its own red (WW_CELL_UNI6_RED=<name>, redHas below). */
 
 #include <cstdint>
+#include <cstdio>
 #include <cstring>
 #include <type_traits>
 #include <vector>
@@ -373,6 +375,37 @@ template <class F> void drainErrors( F * fn )
 	}
 }
 
+/* lane CELLUNI6 (glerror): a GL error raised on a frame the memo trusts (ErrTrust, DepthCfg::trusted) goes unread.
+ * WW_SETUP_MEMO_CHECK=1 reads at those trust points anyway, as an untrusted frame does (the error then refuses the frame
+ * and drops the trust, as it would have before the trust), and prints one line the first time each site sees one. */
+inline bool checkTrusted( bool trustedSkip, bool check, bool red )
+{
+	return trustedSkip && check && !red;
+}
+struct ErrSites
+{
+	std::vector<std::pair<const char *, const char *>> said;	// (pass, read point): string literals
+	std::uint64_t seen = 0;	// errors read at a trusted point, every site
+};
+inline ErrSites & errSites()
+{
+	static ErrSites e;
+	return e;
+}
+//! an error read at a trust point on a frame the memo trusted: counted; true (and one line) the first time at that site
+inline bool trustedError( const char * pass, const char * at, unsigned err )
+{
+	ErrSites & e = errSites();
+	e.seen++;
+	for ( const auto & s : e.said )
+		if ( std::strcmp( s.first, pass ) == 0 && std::strcmp( s.second, at ) == 0 )
+			return false;
+	e.said.emplace_back( pass, at );
+	std::fprintf( stderr, "setup memo check: GL error 0x%04X at the %s (%s) on a frame the memo trusted (unread without "
+		"WW_SETUP_MEMO_CHECK=1)\n", err, pass, at );
+	return true;
+}
+
 //! lane CELLUNI4: a framebuffer's depth format, asked once per (context, framebuffer, size); another key asks again
 struct DepthCfg
 {
@@ -380,7 +413,10 @@ struct DepthCfg
 	int fbo = -1, w = 0, h = 0;
 	int depthBits = 0, stencilBits = 0, compType = 0;
 	bool trusted = false;	// a frame on this key raised no GL error: its error reads are skipped
+	std::uint64_t serial = 0;	// lane CELLUNI6: the GL context's serial it was asked under (glctxserial.h)
 	bool hit( const void * c, int f, int ww, int hh ) const { return fbo >= 0 && ctx == c && fbo == f && w == ww && h == hh; }
+	//! lane CELLUNI6: the context's serial in the key too: a context made again never hits, whoever owns the cache
+	bool hit( const void * c, std::uint64_t s, int f, int ww, int hh ) const { return hit( c, f, ww, hh ) && serial == s; }
 	void keep( const void * c, int f, int ww, int hh, int d, int s, int t )
 	{
 		ctx = c;
@@ -391,6 +427,12 @@ struct DepthCfg
 		stencilBits = s;
 		compType = t;
 		trusted = false;
+		serial = 0;
+	}
+	void keep( const void * c, std::uint64_t ser, int f, int ww, int hh, int d, int s, int t )
+	{
+		keep( c, f, ww, hh, d, s, t );
+		serial = ser;
 	}
 	void forget()
 	{
@@ -398,6 +440,104 @@ struct DepthCfg
 		trusted = false;
 	}
 };
+
+/* lane CELLUNI6 (nonlinear): whether the temporal AA's depth-format cache answers a frame. Before the tone map (a known
+ * state, CELLUNI4) on any framebuffer; after it (HDR off) on the window's own framebuffer (0) only, whose format is fixed
+ * for its context's life (lane SYNC1's rule): another framebuffer's name can come back holding another format. */
+inline bool depthCfgServes( bool known, bool linear, int drawFb, bool red )
+{
+	return known || ( !linear && drawFb == 0 && !red );
+}
+
+/* lane CELLUNI6 (hdrdepth): a value made from the frame once and handed to every later reader of the same frame, until a
+ * writer of what it was made from says it changed (dirty). The frame: a serial the maker bumps at each frame's start. */
+struct FrameOnce
+{
+	const void * owner = nullptr;
+	std::uint64_t frame = 0, key = 0;
+	unsigned value = 0;
+	bool have = false;
+	bool take( const void * o, std::uint64_t f, std::uint64_t k, unsigned & v ) const
+	{
+		if ( !have || owner != o || frame != f || key != k )
+			return false;
+		v = value;
+		return true;
+	}
+	void keep( const void * o, std::uint64_t f, std::uint64_t k, unsigned v )
+	{
+		owner = o;
+		frame = f;
+		key = k;
+		value = v;
+		have = true;
+	}
+	void dirty() { have = false; }
+};
+
+/* lane CELLUNI6 (hdrbegin): the frame's target (draw and read framebuffer, viewport) as the first cell pass of the paint
+ * asked it (the obscurance pass, wwCellAoPass). Every cell pass from there to the HDR frame's Begin binds its own targets
+ * and puts these three back, so Begin takes them instead of asking. Taken once, in the same paint. */
+struct TargetNote
+{
+	std::uint64_t frame = 0;	// the paint that asked (0: none)
+	int draw = 0, read = 0, vp[4] = {};
+	void put( std::uint64_t f, int d, int r, const int v[4] )
+	{
+		frame = f;
+		draw = d;
+		read = r;
+		std::memcpy( vp, v, sizeof vp );
+	}
+	bool take( std::uint64_t f, int & d, int & r, int v[4] )
+	{
+		const bool ok = frame != 0 && frame == f;
+		if ( ok ) {
+			d = draw;
+			r = read;
+			std::memcpy( v, vp, sizeof vp );
+		}
+		frame = 0;
+		return ok;
+	}
+};
+inline TargetNote & frameTarget()
+{
+	static TargetNote n;
+	return n;
+}
+//! the note's target, else asked (viewport, draw, read: Begin's order). WW_SETUP_MEMO_CHECK=1 asks anyway, counts a
+//! wrong note (knownStale) and returns the driver's
+template <class F> bool targetFrom( F * fn, TargetNote & n, std::uint64_t frame, int & draw, int & read, int vp[4], bool check )
+{
+	const bool noted = n.take( frame, draw, read, vp );
+	if ( noted && !check )
+		return true;
+	int real[4] = {}, d = 0, r = 0;
+	fn->glGetIntegerv( 0x0BA2, real );	// GL_VIEWPORT
+	fn->glGetIntegerv( 0x8CA6, &d );	// GL_DRAW_FRAMEBUFFER_BINDING
+	fn->glGetIntegerv( 0x8CAA, &r );	// GL_READ_FRAMEBUFFER_BINDING
+	if ( noted && ( d != draw || r != read || std::memcmp( real, vp, sizeof real ) != 0 ) )
+		state().knownStale++;
+	draw = d;
+	read = r;
+	std::memcpy( vp, real, sizeof real );
+	return noted;
+}
+
+/* lane CELLUNI6 (bsshape): GL_BLEND for a shape's draw from its blend note (setupProgram's writes, the census hooks', the
+ * X-ray blend after it), when the draw's own setup made the note (not a pick); -1 in the note, or not held: asked.
+ * WW_SETUP_MEMO_CHECK=1 asks anyway, counts a wrong note (blendStale) and returns the driver's. */
+template <class Ask> bool blendFor( bool held, bool check, Ask ask )
+{
+	const int on = held ? blendNote().on : -1;
+	if ( on >= 0 && !check )
+		return on != 0;
+	const bool real = ask();
+	if ( on >= 0 && ( real ? 1 : 0 ) != on )
+		state().blendStale++;
+	return real;
+}
 
 /*! lane FRAMESPEED1: an owner (a Renderer) whose GL context was made again (a context loss) shows a new serial: what was
  *  cached for the old context (DepthCfg: the same fbo id and size may now hold another format) must be forgotten */
@@ -417,6 +557,70 @@ struct CtxWatch
 		return false;
 	}
 };
+
+//! lane CELLUNI6: whether a red list ("jitter", "jitter,bsshape", "all") names an item (exact words, ',' or ' ' apart)
+inline bool redHas( const char * list, const char * name )
+{
+	if ( !list || !name || !*name )
+		return false;
+	const size_t n = std::strlen( name );
+	for ( const char * p = list; *p; ) {
+		while ( *p == ',' || *p == ' ' )
+			p++;
+		const char * e = p;
+		while ( *e && *e != ',' && *e != ' ' )
+			e++;
+		const size_t len = size_t( e - p );
+		if ( ( len == n && std::strncmp( p, name, n ) == 0 ) || ( len == 3 && std::strncmp( p, "all", 3 ) == 0 ) )
+			return true;
+		p = e;
+	}
+	return false;
+}
+
+/* lane CELLUNI6 (jitter): the viewport the temporal AA's jitter asked for this paint's one projection. glview uploads
+ * the global uniforms next, with no viewport write between, so that upload takes it instead of asking again. Taken
+ * once: a second take, or a take in another paint, asks. */
+struct VpNote
+{
+	std::uint64_t frame = 0;	// the paint that asked (0: none)
+	int vp[4] = {};
+	void put( std::uint64_t f, const int v[4] )
+	{
+		frame = f;
+		std::memcpy( vp, v, sizeof vp );
+	}
+	bool take( std::uint64_t f, int v[4] )
+	{
+		const bool ok = frame != 0 && frame == f;
+		if ( ok )
+			std::memcpy( v, vp, sizeof vp );
+		frame = 0;
+		return ok;
+	}
+};
+inline VpNote & jitterVp()
+{
+	static VpNote n;
+	return n;
+}
+//! the note's viewport, else asked. WW_SETUP_MEMO_CHECK=1 asks anyway, counts a wrong note (vpStale), returns the driver's
+template <class F> bool viewportFrom( F * fn, VpNote & n, std::uint64_t frame, int vp[4], bool check )
+{
+	if ( !n.take( frame, vp ) ) {
+		fn->glGetIntegerv( 0x0BA2, vp );	// GL_VIEWPORT
+		return false;
+	}
+	if ( check ) {
+		int real[4] = {};
+		fn->glGetIntegerv( 0x0BA2, real );
+		if ( std::memcmp( real, vp, sizeof real ) != 0 ) {
+			state().vpStale++;
+			std::memcpy( vp, real, sizeof real );
+		}
+	}
+	return true;
+}
 }
 
 //! the DSA entry points of the current context (null members: the extension is missing)
@@ -425,5 +629,10 @@ const WwCellUni::Dsa * wwCellUniDsa();
 bool wwCellUniRed();
 //! lane CELLUNI2: the per-frame tick and the `cell uni:` line (any scope's first call in a frame)
 void wwCellUniFrame();
+/*! lane CELLUNI6: WW_CELL_UNI6_RED=<name>[,<name>...] (live): that item asks as before. Names: jitter, nonlinear,
+ *  hdrdepth, hdrbegin, bsshape, depthcfg, glerror (all: every one). WW_CELL_UNI_RED=1 holds them all too. */
+bool wwCellUni6Red( const char * name );
+//! lane CELLUNI6: WW_SETUP_MEMO_CHECK=1 (live), for a check outside an armed setup-memo pass
+bool wwSetupMemoChecking();
 
 #endif
