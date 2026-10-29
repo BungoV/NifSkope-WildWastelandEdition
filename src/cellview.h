@@ -223,6 +223,7 @@ bool nifCreateCellScene( NifModel * nif, const CellSceneSpec & spec,
  *  loads -- the model as the cell view loaded it (material swap applied, sky cards and markers already out) and
  *  the placement's world transform -- and stops after the model loop: no weld, no ground, no GI. */
 struct NativeSrcShape;
+struct CellDecalRef;
 struct CellExportPlaced
 {
 	quint32 ref = 0, base = 0;
@@ -243,6 +244,8 @@ public:
 	virtual ~CellExportSink() = default;
 	virtual void begin( const EsmWorld & world, const QString & dataRoot ) = 0;
 	virtual void placed( const CellExportPlaced & p ) = 0;
+	//! the placed decal references (TXST bases), once, after the last placement
+	virtual void decals( const std::vector<CellDecalRef> & refs ) { (void)refs; }
 };
 void cellExportSetSink( CellExportSink * sink );
 

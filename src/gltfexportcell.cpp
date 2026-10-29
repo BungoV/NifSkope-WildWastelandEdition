@@ -2,6 +2,7 @@
 
 #include "gltfexportcell.h"
 
+#include "celldecal.h"
 #include "cellground.h"
 #include "cellvertexalpha.h"
 #include "cellview.h"
@@ -83,6 +84,30 @@ public:
 	int meshesClamped = 0;   //!< materials whose texture clamps on an axis (the game's tile flags off)
 	qint64 trisPlaced = 0;
 	float decalOffset = 1.0f;      // game units pushed along the normal: Blender has no depth bias for coplanar decals
+	// the opaque surfaces a placed decal may land on, (world - origin), pos + normal interleaved (the cell view's
+	// receivers: its welded opaque buckets and the ground)
+	struct Receiver
+	{
+		std::vector<float> pn;
+		std::vector<quint32> tris;
+	};
+	std::vector<Receiver> receivers;
+	CellDecalResult decalResult;
+	int meshesPlacedDecal = 0;
+
+	void receive( const QVector<Vector3> & pos, const QVector<Vector3> & nrm, const QVector<quint32> & idx )
+	{
+		if ( pos.isEmpty() || nrm.size() != pos.size() || idx.size() < 3 )
+			return;
+		Receiver r;
+		r.pn.reserve( size_t( pos.size() ) * 6 );
+		for ( int v = 0; v < pos.size(); v++ )
+			for ( const Vector3 * p : { &pos[v], &nrm[v] } )
+				for ( int k = 0; k < 3; k++ )
+					r.pn.push_back( ( *p )[k] );
+		r.tris.assign( idx.begin(), idx.end() );
+		receivers.push_back( std::move( r ) );
+	}
 
 	// FO4 vertex colours multiply the gamma-space diffuse; glTF COLOR_n is linear
 	static float linearOf( quint8 b ) { return std::pow( b / 255.0f, 2.2f ); }
@@ -228,6 +253,7 @@ public:
 				landLayers += nl;
 				m.materialExtras.append( { QStringLiteral( "paintLayers" ), QString::number( nl ) } );
 				m.node = node( m.name, landNode );
+				receive( m.positions, m.normals, m.indices );
 				scene.meshes.append( m );
 				landQuads++;
 			}
@@ -371,7 +397,26 @@ public:
 	void placed( const CellExportPlaced & p ) override
 	{
 		placementsSeen++;
-		if ( !p.shapes || !want( p.pos[0], p.pos[1] ) )
+		if ( !p.shapes )
+			return;
+		for ( const NativeSrcShape & s : *p.shapes ) {   // the decal receivers, as the cell view's opaque buckets
+			const NearShapeFacts & f = s.nearFacts;
+			const LodoSrcShape & g = s.geom;
+			const size_t nv = g.pos.size() / 3;
+			if ( nv == 0 || g.tris.size() < 3 || g.nrm.size() != nv * 3 || f.alphaTest || f.alphaBlend || s.effectBlend
+				|| f.effectShader || f.decal || f.waterShader )
+				continue;
+			QVector<Vector3> wp( static_cast<int>( nv ) ), wn( static_cast<int>( nv ) );
+			for ( size_t v = 0; v < nv; v++ )
+				for ( int r = 0; r < 3; r++ ) {
+					wp[int( v )][r] = p.rot[r * 3] * g.pos[v * 3] * p.scale + p.rot[r * 3 + 1] * g.pos[v * 3 + 1] * p.scale
+						+ p.rot[r * 3 + 2] * g.pos[v * 3 + 2] * p.scale + p.pos[r] - origin[r];
+					wn[int( v )][r] = p.rot[r * 3] * g.nrm[v * 3] + p.rot[r * 3 + 1] * g.nrm[v * 3 + 1]
+						+ p.rot[r * 3 + 2] * g.nrm[v * 3 + 2];
+				}
+			receive( wp, wn, QVector<quint32>( g.tris.begin(), g.tris.end() ) );
+		}
+		if ( !want( p.pos[0], p.pos[1] ) )
 			return;
 		const QString label = QFileInfo( p.model ).completeBaseName();
 		const QVector<int> ms = meshes( p, label );
@@ -397,6 +442,65 @@ public:
 			else
 				scene.nodes[c].mesh = m;
 			trisPlaced += scene.meshes[m].indices.size() / 3;
+		}
+	}
+
+	/* The placed decals, clipped out of the receivers by the cell view's own rule (celldecal.h) and written in world
+	 * space under one node. Blended; COLOR_0 alpha = the angle fade per vertex (the game fades per pixel). No
+	 * specular: the game lights a decal like the surface under it, which a material of its own cannot say. */
+	void decals( const std::vector<CellDecalRef> & all ) override
+	{
+		if ( !world )
+			return;
+		std::vector<CellDecalRef> refs;
+		for ( const CellDecalRef & d : all )
+			if ( want( d.pos[0], d.pos[1] ) )
+				refs.push_back( d );
+		if ( refs.empty() )
+			return;
+		std::vector<CellDecalReceiver> rcv;
+		for ( const Receiver & r : receivers ) {
+			CellDecalReceiver c;
+			c.pos = &r.pn[0];
+			c.nrm = &r.pn[3];
+			c.stride = 6 * sizeof( float );
+			c.numVerts = r.pn.size() / 6;
+			c.tris = r.tris.data();
+			c.numTris = r.tris.size() / 3;
+			rcv.push_back( c );
+		}
+		cellProjectDecals( *world, dataRoot, refs, rcv, origin, decalResult, QString() );
+		int parent = -1;
+		for ( const CellDecalMesh & d : decalResult.meshes ) {
+			if ( d.tris.empty() )
+				continue;
+			GltfExportMesh m;
+			m.name = d.name;   // "decal <EDID>"
+			QVector<float> vc;
+			for ( const CellDecalVert & v : d.verts ) {
+				const Vector3 n( v.nrm[0], v.nrm[1], v.nrm[2] );
+				m.positions.append( Vector3( v.pos[0], v.pos[1], v.pos[2] ) + n * decalOffset );
+				m.normals.append( n );
+				m.texCoords.append( Vector2( v.uv[0], v.uv[1] ) );
+				vc << 1.0f << 1.0f << 1.0f << v.alpha;
+			}
+			m.colorSets.append( vc );
+			for ( quint32 t : d.tris )
+				m.indices.append( t );
+			m.materialName = d.name;
+			m.diffuseSourcePath = d.diffuse;
+			m.diffuseUri = tex( d.diffuse );
+			m.normalUri = tex( d.normal );
+			m.alphaMode = 2;
+			m.materialExtras.append( { QStringLiteral( "decal" ), QString::number( decalOffset ) } );
+			m.materialExtras.append( { QStringLiteral( "placedDecals" ), QString::number( d.decals ) } );
+			m.materialExtras.append( { QStringLiteral( "vertexColors" ), QStringLiteral( "COLOR_0" ) } );
+			m.materialExtras.append( { QStringLiteral( "vertexAlpha" ), QStringLiteral( "1" ) } );
+			if ( parent < 0 )
+				parent = node( QStringLiteral( "placed decals" ), -1 );
+			m.node = node( m.name, parent );
+			scene.meshes.append( m );
+			meshesPlacedDecal++;
 		}
 	}
 };
@@ -547,13 +651,16 @@ int gltfCellCli( const QStringList & args )
 	std::printf( "MEASURED placements_seen=%d placements=%d placements_empty=%d models=%d meshes=%d nodes=%d "
 		"land_quads=%d land_layers=%d ltex_bgsm=%d ltex_unresolved=%d meshes_coloured=%d meshes_decal=%d "
 		"meshes_painted=%d decal_offset=%g shapes_skipped=%d tris_placed=%lld textures=%d copied=%d missing=%d origin=%g,%g,%g "
-		"meshes_clamped=%d\n",
+		"meshes_clamped=%d placed_decals=%d decals_drawn=%d meshes_placed_decal=%d decal_receivers=%d\n",
 		sink.placementsSeen, sink.placementsKept, sink.placementsEmpty, int( sink.meshesOf.size() ),
 		int( sink.scene.meshes.size() ), int( sink.scene.nodes.size() ), sink.landQuads, sink.landLayers,
 		sink.ltexFromMaterial, sink.ltexUnresolved, sink.meshesColored, sink.meshesDecal, sink.meshesPainted,
 		double( sink.decalOffset ),
 		sink.shapesSkipped,
 		sink.trisPlaced, int( sink.textures.size() ), copied, missing, sink.origin[0], sink.origin[1], sink.origin[2],
-		sink.meshesClamped );
+		sink.meshesClamped, int( sink.decalResult.fates.size() ), sink.decalResult.count[int( CellDecalFate::Drawn )],
+		sink.meshesPlacedDecal, int( sink.receivers.size() ) );
+	if ( !sink.decalResult.fates.empty() )
+		std::printf( "%s\n", qPrintable( cellDecalCensusLine( sink.decalResult ) ) );
 	return 0;
 }

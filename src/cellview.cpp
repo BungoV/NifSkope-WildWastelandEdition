@@ -5395,8 +5395,10 @@ static bool cellBuild( NifModel * nif, const CellSceneSpec & specAsked, CellChun
 			drawn += isActor ? 0 : 1;
 		}
 	}
-	if ( exportSink )
+	if ( exportSink ) {
+		exportSink->decals( decalRefs );
 		return true;   // lane GLTFCELL1: the export has what it came for
+	}
 	CellSpeed::mark( "models loaded and placements welded" );
 	/* lane CABLES1: the cables' census. "XBSD refs" counts every reference read that carries one and is not
 	 * deleted or hidden; "placed" those on a BNDS base that reached the placements; "built" those the
