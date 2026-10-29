@@ -88,7 +88,7 @@ float cloudDensity( vec3 p )
  * by a curl field and eroded more, less at the base. Sources and the CPU twin: src/gl/cloudvolmath.h varietyDensity. */
 uniform vec4 cvVarA;	// x the weather's Low type, y the type's swing, z the coverage's swing, w the Low band's own depth km
 uniform vec4 cvVarB;	// x a cumulonimbus' depth km, y the erosion, z the curl km (0 = red nocurl), w the anvil
-uniform float cvCalT[119];	// the Low band's coverage tables at T = k / 6, 7 x 17 (cloudvolmath.h kVarCal, varCalibrate)
+uniform float cvCalT[221];	// the Low band's coverage tables at T = 1 - (1 - k / 12)^2, 13 x 17 (cloudvolmath.h kVarCal, varCalT)
 
 const float kCvVarWrapKm = 384.0;	// cloudvolmath.h kVarWrapKm (the wind's wrap)
 const float kCvCurlPeriodKm = 24.0;
@@ -102,6 +102,13 @@ float cvVarHash( int ix, int iy, int oct )
 	return float( h >> 8u ) * ( 1.0 / 16777216.0 );
 }
 
+// antithetic: half a wrap east holds 1 - the value, so the noise's mean over the wrap is exactly 0 (cloudvolmath.h varLattice)
+float cvVarLattice( int ix, int iy, int cells, int oct )
+{
+	int h = cells / 2;
+	return ix >= h ? 1.0 - cvVarHash( ix - h, iy, oct ) : cvVarHash( ix, iy, oct );
+}
+
 float cvVarValue( vec2 xy, float cellKm, int cells, int oct )
 {
 	vec2 u = mod( xy, vec2( kCvVarWrapKm ) ) / cellKm;
@@ -109,7 +116,8 @@ float cvVarValue( vec2 xy, float cellKm, int cells, int oct )
 	vec2 f = u - vec2( i );
 	ivec2 j = ivec2( i.x + 1 == cells ? 0 : i.x + 1, i.y + 1 == cells ? 0 : i.y + 1 );
 	vec2 w = f * f * ( 3.0 - 2.0 * f );
-	float a = cvVarHash( i.x, i.y, oct ), b = cvVarHash( j.x, i.y, oct ), c = cvVarHash( i.x, j.y, oct ), e = cvVarHash( j.x, j.y, oct );
+	float a = cvVarLattice( i.x, i.y, cells, oct ), b = cvVarLattice( j.x, i.y, cells, oct );
+	float c = cvVarLattice( i.x, j.y, cells, oct ), e = cvVarLattice( j.x, j.y, cells, oct );
 	return mix( mix( a, b, w.x ), mix( c, e, w.x ), w.y );
 }
 
@@ -147,15 +155,15 @@ float cvTypeProfile( float T, float hf )
 	const float fall[4] = float[4]( 0.60, 0.45, 0.55, 0.85 );
 	float u = clamp( T, 0.0, 1.0 ) * 3.0;
 	int k = min( int( u ), 2 );
-	float a = cvSmooth( 0.0, rise[k], hf ) * ( 1.0 - cvSmooth( fall[k], 1.0, hf ) );
-	float b = cvSmooth( 0.0, rise[k + 1], hf ) * ( 1.0 - cvSmooth( fall[k + 1], 1.0, hf ) );
-	return mix( a, b, u - float( k ) );
+	// the rise and fall heights blend, not the profiles' values (cloudvolmath.h typeProfile: no shoulder half way up)
+	float r = mix( rise[k], rise[k + 1], u - float( k ) ), f = mix( fall[k], fall[k + 1], u - float( k ) );
+	return cvSmooth( 0.0, r, hf ) * ( 1.0 - cvSmooth( f, 1.0, hf ) );
 }
 
 float cvCalAtT( float T, float c )
 {
-	float u = clamp( T, 0.0, 1.0 ) * 6.0;
-	int k = min( int( u ), 5 );
+	float u = ( 1.0 - sqrt( 1.0 - clamp( T, 0.0, 1.0 ) ) ) * 12.0;	// cloudvolmath.h varCalT's inverse
+	int k = min( int( u ), 11 );
 	float t = clamp( c, 0.0, 1.0 ) * 16.0;
 	int i = min( int( t ), 15 );
 	float f = t - float( i );

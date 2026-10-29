@@ -2,7 +2,7 @@
 // g++). No GL, no Qt: src/gl/cloudnoise.h (the exe's noise bytes) + src/gl/cloudvolmath.h (the twin).
 //
 //   cloudvar_dump cal  <base0> <dens0> <depthKm> <base1> <top1> <dens1> <curlKm> <nocal 0|1>
-//       "calT <k> v0..v16" for the kVarCal type anchors (Low, T = k / (kVarCal - 1)), "calM v0..v16" (Mid)
+//       "calT <k> v0..v16" for the kVarCal type anchors (Low, T = varCalT(k)), "calM v0..v16" (Mid)
 //   cloudvar_dump grid <base0> <dens0> <depthKm> <base1> <top1> <dens1> <curlKm> <type> <spread> <swing>
 //                      <mapR> <mapG> <mapB> <Ox> <Oy> <Oz> <Ux> <Uy> <Uz> <Vx> <Vy> <Vz> <nx> <ny>
 //       the cal lines, then per row j: "g <j> d.." (varietyDensity at O + i U + j V), "n <j> .." (weatherNoise),
@@ -38,7 +38,7 @@ void tables( const V::VarVolumes & vol, const V::Variety & v, float base0, float
 	bool nocal, Tables & t )
 {
 	for ( int k = 0; k < V::kVarCal; k++ ) {
-		const float T = float( k ) / float( V::kVarCal - 1 );
+		const float T = V::varCalT( k );
 		V::varCalibrate( vol, v, 0, T, base0, base0 + V::typeDepthKm( T, v.depthKm, v.towerKm ), dens0, nocal, t.calT[k] );
 	}
 	V::varCalibrate( vol, v, 1, 0.0f, base1, top1, dens1, nocal, t.calM );

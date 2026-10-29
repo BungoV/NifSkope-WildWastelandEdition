@@ -12,6 +12,7 @@
 #include "gl/renderer.h"
 #include "harnesswindow.h"
 
+#include <QFile>
 #include <QHash>
 #include <QSettings>
 
@@ -149,6 +150,8 @@ struct CvGpu
 	bool varRed = false;
 	float calT[V::kVarCal][V::kCalN] = {};
 	float calMidV[V::kCalN] = {};
+	GLuint blue = 0;	// lane CLOUD5 round 2: the variety march's step offsets (EA's FAST blue noise sheet), 0 = IGN
+	bool blueTried = false;
 	// lane CLOUD2B: the scene's depth (wwCloudVolSceneDepth, before the tone map) and what the pass over the scene needs
 	bool drewNow = false;	// the volume drew in this frame's backdrop
 	GLuint sceneTex = 0;	// the linear frame's farthest window depth (cellhdr.cpp owns it)
@@ -311,8 +314,8 @@ void calibrated( CvGpu & g, const Bands & b, float out[2 * V::kCalN] )
 }
 
 /* lane CLOUD5: the Cloud Variety tables: the Low band at the kVarCal type anchors (calT, cvCalT) and the Mid band (cvCal's
- * second half), the variety density's own column opacity (cloudvolmath.h varCalibrate). ~8x one CLOUD2 table on a
- * change of the band's heights, density or the reds (the weather's type and swing are not inputs: they pick a blend) */
+ * second half), the variety density's own column opacity (cloudvolmath.h varCalibrate). 14 tables on a change of the
+ * band's heights, density or the reds (the weather's type and swing are not inputs: they pick a blend) */
 void calibratedVariety( CvGpu & g, const Bands & b, float calT[V::kVarCal * V::kCalN], float cal[2 * V::kCalN] )
 {
 	const bool noCal = red( "nocal" );
@@ -327,7 +330,7 @@ void calibratedVariety( CvGpu & g, const Bands & b, float calT[V::kVarCal * V::k
 		const V::VarVolumes vol{ noise( false ).data(), WwCloudNoise::kShapeN, noise( true ).data(), WwCloudNoise::kDetailN };
 		const auto t0 = std::chrono::steady_clock::now();
 		for ( int k = 0; k < V::kVarCal; k++ )
-			V::varCalibrate( vol, b.var, 0, float( k ) / float( V::kVarCal - 1 ), b.baseKm[0], b.topKm[0], b.density[0], noCal,
+			V::varCalibrate( vol, b.var, 0, V::varCalT( k ), b.baseKm[0], b.topKm[0], b.density[0], noCal,
 				g.calT[k] );
 		V::varCalibrate( vol, b.var, 1, 0.0f, b.baseKm[1], b.topKm[1], b.density[1], noCal, g.calMidV );
 		// the CPU cost a weather change pays (on the GL thread): the hold's notes carry it
@@ -404,6 +407,31 @@ bool ensureNoise( Renderer * r, CvGpu & g )
 	return g.shape && g.detail;
 }
 
+/* lane CLOUD5 round 2: EA's FAST spatiotemporal blue noise (res/ssgi, BSD-3; cellssgi.cpp loads the same sheet), 64 slices
+ * of 128 x 128 RG8 stacked in y. Missing: the variety march keeps IGN (cvBlueSlice -1) and says so once. */
+void ensureBlue( Renderer * r, CvGpu & g )
+{
+	if ( g.blueTried )
+		return;
+	g.blueTried = true;
+	QFile file( QStringLiteral( ":/ssgi/fast_2uges.rg8" ) );
+	const QByteArray b = file.open( QIODevice::ReadOnly ) ? file.readAll() : QByteArray();
+	if ( b.size() != 128 * 8192 * 2 ) {
+		std::fprintf( stderr, "cloudvol: blue noise sheet missing, the variety march keeps IGN\n" );
+		return;
+	}
+	auto fn = r->fn;
+	fn->glGenTextures( 1, &g.blue );
+	fn->glBindTexture( GL_TEXTURE_2D, g.blue );
+	fn->glPixelStorei( GL_UNPACK_ALIGNMENT, 1 );
+	fn->glTexImage2D( GL_TEXTURE_2D, 0, GL_RG8, 128, 8192, 0, GL_RG, GL_UNSIGNED_BYTE, b.constData() );
+	fn->glPixelStorei( GL_UNPACK_ALIGNMENT, 4 );
+	fn->glTexParameteri( GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST );
+	fn->glTexParameteri( GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST );
+	fn->glTexParameteri( GL_TEXTURE_2D, GL_TEXTURE_MAX_LEVEL, 0 );
+	fn->glBindTexture( GL_TEXTURE_2D, 0 );
+}
+
 //! the camera this frame: world columns (right, up, back), the projection's terms, the eye in km
 struct Cam
 {
@@ -477,6 +505,7 @@ struct CvRedo
 	float keyW[3] = {}, keyK = 0.0f, amb[3] = {};
 	int tier = 0, hw = 1, hh = 1, mw = 1, mh = 1, stride = 1, cur = 0, prev = 1;
 	float phase[2] = {}, frameNo = 0.0f;
+	int blueSlice = 0;	// lane CLOUD5 round 2: the blue noise slice of this 16-frame refresh cycle
 	double secs = 0.0;
 	bool histOn = false;
 	float prevCam[9] = {}, prevProj[4] = {}, prevKm[3] = {};
@@ -531,8 +560,14 @@ bool marchPass( Renderer * r, CvGpu & g, const CvRedo & d, const WwAtmoFrame & f
 	p->uni1i( "cvTaps", pr.taps );
 	p->uni1i( "cvOctaves", noOct ? 1 : 4 );
 	p->uni1f( "cvLightKm", var ? varLightKm( d.b, pr ) : pr.lightKm );
-	if ( var )
+	if ( var ) {
 		p->uni1f( "cvAmbKm", varAmbKm( d.b ) );
+		// lane CLOUD5 round 2: the step offsets from one blue noise slice a refresh cycle; red ign: CLOUD2's IGN (the stripes)
+		fn->glActiveTexture( GL_TEXTURE8 );
+		fn->glBindTexture( GL_TEXTURE_2D, g.blue );
+		p->uni1i( "cvBlue", 8 );
+		p->uni1i( "cvBlueSlice", g.blue && !red( "ign" ) ? d.blueSlice : -1 );
+	}
 	p->uni4f( "cvPhasePrm", FloatVector4( drop.gHg, drop.gD, drop.alpha, drop.wD ) );
 	p->uni3f( "cvAmb", d.amb[0], d.amb[1], d.amb[2] );
 	p->uni1f( "cvAmbOn", 1.0f );
@@ -565,6 +600,10 @@ bool marchPass( Renderer * r, CvGpu & g, const CvRedo & d, const WwAtmoFrame & f
 	r->stopProgram();
 	if ( fly )
 		wwCloudFlyRelease( r, 7 );
+	if ( var ) {
+		fn->glActiveTexture( GL_TEXTURE8 );
+		fn->glBindTexture( GL_TEXTURE_2D, 0 );
+	}
 	return true;
 }
 
@@ -889,6 +928,7 @@ bool wwCloudVolDraw( Scene * scene, const WwCloudVolView & view, QStringList & d
 		drew << refusal( s, QStringLiteral( "noise upload" ) );
 		return false;
 	}
+	ensureBlue( r, g );
 	GLint vp[4] = { 0, 0, 1, 1 };
 	fn->glGetIntegerv( GL_VIEWPORT, vp );
 	const Preset & pr = preset( s.tier );
@@ -962,6 +1002,7 @@ bool wwCloudVolDraw( Scene * scene, const WwCloudVolView & view, QStringList & d
 	d.prev = 1 - g.cur;
 	std::copy( phase, phase + 2, d.phase );
 	d.frameNo = everyPixel ? 0.0f : float( g.frame % 64 );
+	d.blueSlice = everyPixel ? 0 : int( ( g.frame / 16 ) % 64 );	// one slice for all 16 phases: the picture is one slice
 	d.secs = view.cloudSeconds;
 	d.histOn = histOn;
 	std::copy( g.prevCam, g.prevCam + 9, d.prevCam );
@@ -1053,7 +1094,7 @@ bool wwCloudVolDraw( Scene * scene, const WwCloudVolView & view, QStringList & d
 		if ( red( w ) )
 			reds += QStringLiteral( ",RED=%1" ).arg( QLatin1StringView( w ) );
 	if ( b.variety ) {	// lane CLOUD5: the echo a row's notes need to prove the twins drew (absent when Off)
-		for ( const char * w : { "onetype", "nocurl", "shortlight" } )
+		for ( const char * w : { "onetype", "nocurl", "shortlight", "ign" } )
 			if ( red( w ) )
 				reds += QStringLiteral( ",RED=%1" ).arg( QLatin1StringView( w ) );
 		reds += QStringLiteral( ",variety=type %1+-%2 lowtop %3km light %4km" ).arg( double( b.var.type ), 0, 'f', 3 )

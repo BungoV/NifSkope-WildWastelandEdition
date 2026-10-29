@@ -12,7 +12,11 @@ New row Render > Scene > Cloud Variety (Off / On, ships Off; needs Volume Clouds
 - Storm bases are dark because the light samples now reach through the tower (the reach follows the weather's tallest
   cloud), not by painting.
 - Off draws exactly what it drew before (the old shader programs, unchanged).
-Reds: WW_CLOUDVOL_RED = onetype | nocurl | shortlight. Offline gate: tests/spells/cloudvar_check.py.
+- Round 2: a uniform cloud map now draws uniform with Variety on (the types blend their height shapes smoothly, 13
+  calibration points instead of 7, the weather noise averages to exactly zero); storm-tower bases are as dark as a
+  light-transport reference (one more light sample reaches the tower top); the march's step offsets come from a blue
+  noise sheet, so the fine vertical stripes seen when zooming on clouds are gone (an even grain is left).
+Reds: WW_CLOUDVOL_RED = onetype | nocurl | shortlight | ign. Offline gate: tests/spells/cloudvar_check.py.
 
 ## RTXGI1 M2: the ray-traced GI volume lights the cell view (switch, live; ships Off)
 

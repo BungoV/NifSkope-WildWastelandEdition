@@ -3,7 +3,7 @@ no NifSkope. The density is res/shaders/cloud_common.glsl's WW_CLOUD_VARIETY clo
 and its CPU twin src/gl/cloudvolmath.h varietyDensity (tests/cloudvar/cloudvar_dump.cpp, g++); the noise bytes and CLOUD2's
 helpers come from cloudvol_check (imported, none of its gates run).
 
-    python -I tests/spells/cloudvar_check.py <scratch dir> [--red onetype|nocurl|nocal|shortlight] [--only TSAVCE]
+    python -I tests/spells/cloudvar_check.py <scratch dir> [--red onetype|nocurl|nocal|shortlight|ign] [--only TSAVCBE]
 
 Gates (bars written before the first run, lane CLOUD5 2026-10-29; a bar changed later says so here):
   T twin      GPU density == the CPU twin on two fixed point grids (a storm sky across 0..8.5 km and a clear sky at
@@ -14,7 +14,10 @@ Gates (bars written before the first run, lane CLOUD5 2026-10-29; a bar changed 
               neighbour pair's normalised profiles differ by L1 >= 0.2.
   A coverage  the column opacity from above == the map: stripes 0.1 .. 0.9 at T = 0, 2/3, 1 (Low) and the Mid band, no
               swing: |mean - map| <= 0.05 each (CLOUD2's bar); a uniform map 0.3 / 0.5 / 0.7 with the swing and the
-              type spread on, over 192 km: |mean - map| <= 0.06. Red nocal fails.
+              type spread on: |mean - map| <= 0.06. Red nocal fails. Round 2 (10-29) moved the uniform arm from a 192 km
+              square to the noise's whole 384 km wrap, bar unchanged: that square's noise averaged -0.098, so it
+              measured where the square sat, not the swing (the swing's "mean kept" is over the wrap, exact since the
+              lattice is antithetic). The square is still printed as INFO.
   V variety   one fixed sky (coverage 0.45, Mid off), storm (type 0.9 +- 0.25) and clear (0.6 +- 0.2), 96 km at 0.15 km:
               V1 the cloud tops' IQR (columns of opacity > 0.5) >= 1.0 km storm, >= 0.5 km clear; V2 the std of the 12 km
               tiles' mean opacity >= 0.06 (big masses beside small puffs); V3 the field's correlation with itself one
@@ -27,6 +30,14 @@ Gates (bars written before the first run, lane CLOUD5 2026-10-29; a bar changed 
               cloud_march_v.prog at the light reach cloudvol.cpp gives a cumulonimbus sky (cloudvolmath.h varLightKm):
               the underside within 0.5 .. 1.6 x a Monte Carlo of the same slab (same droplet phase). Red shortlight (the
               preset's 1.2 km reach) fails (a tower base too bright: the column above it unseen).
+              Round 2 (10-29): the twin's taps go on to the Low band's top (one tap past the reach, at most a reach long);
+              before it the ratio read 2.10 (FAIL), bar unchanged.
+  B banding   (round 2, bungo 10-29 "banding if you zoom in"; bar written before its first run) cloud_march_v.prog at a
+              5 deg field of view on a storm sky, 640 x 360, as the live view holds it (16 phases of a still camera, each
+              history pixel the march of its 4x4 Bayer slot's frame, one blue noise slice a cycle) minus a reference (8x
+              the steps, the mean of 8 slices), inside cloud: the error's correlation with itself 2 px along x and along
+              y <= 0.10 each (stripes are long in one of them; even grain is not). Red ign (CLOUD2's IGN) fails. INFO: the
+              error's std and its 4 px blur, in 8-bit levels at an exposure that puts the reference's median at 0.18.
   E cost      GPU ms of the march at 1080p per preset, today's cloud_march.prog vs cloud_march_v.prog, clear and storm
               skies: INFO; says OVER when Ultra's variety march is above the brief's 1.5 ms.
 Exit 0 only when every gate run passes.
@@ -38,7 +49,7 @@ TREE = os.path.dirname(os.path.dirname(HERE))
 args = sys.argv[1:]
 scratch = args[0] if args and not args[0].startswith('--') else os.path.join(TREE, '..', 'cloudvar_scratch')
 red = args[args.index('--red') + 1] if '--red' in args else ''
-only = set(args[args.index('--only') + 1]) if '--only' in args else set('TSAVCE')
+only = set(args[args.index('--only') + 1]) if '--only' in args else set('TSAVCBE')
 os.makedirs(scratch, exist_ok=True)
 
 sys.path.insert(0, HERE)
@@ -76,20 +87,44 @@ for name in ('cloud_fly_v.prog', 'cloud_shadowmap_v.prog', 'cloud_flybake_v.prog
     linked(C.build(SDIR, name), name)
 
 
+def blue_tex():
+    """round 2: EA's FAST blue noise sheet (res/ssgi/fast_2uges.rg8, 64 slices of 128 x 128 RG8), as cloudvol.cpp ensureBlue"""
+    a = np.fromfile(os.path.join(TREE, 'res', 'ssgi', 'fast_2uges.rg8'), np.uint8)
+    assert a.size == 128 * 8192 * 2
+    t = GLuint()
+    gl.glGenTextures(1, ctypes.byref(t))
+    gl.glBindTexture(0x0DE1, t)
+    gl.glPixelStorei(0x0CF5, 1)
+    gl.glTexImage2D(0x0DE1, 0, 0x822B, 128, 8192, 0, 0x8227, 0x1401, a.ctypes.data)   # RG8 (a stays alive: see the skill)
+    gl.glPixelStorei(0x0CF5, 4)
+    for k, v in ((0x2801, 0x2600), (0x2800, 0x2600), (0x813D, 0)):
+        gl.glTexParameteri(0x0DE1, k, v)
+    return t.value
+
+
+BLUE = blue_tex()
+
+
+def vtexs(trans, sunview):
+    """the variety march's samplers: CLOUD2's plus cvBlue on its own unit (an unset sampler2D on unit 0 beside cvShape's
+    sampler3D drops the draw without an error)"""
+    return K.march_texs(trans, sunview) + [('cvBlue', 0x0DE1, BLUE)]
+
+
 def dumpv(*a):
     return subprocess.run([DUMPV] + ['%.9g' % x if isinstance(x, float) else str(x) for x in a], env=ENV,
                           capture_output=True, text=True, check=True).stdout.split('\n')
 
 
 def parse_cal(out):
-    calT, calM = [None] * 7, None   # cloudvolmath.h kVarCal (MERGE1029C: 4 -> 7 anchors)
+    calT, calM = {}, None   # cloudvolmath.h kVarCal anchors (MERGE1029C: 4 -> 7; round 2: 13 at varCalT)
     for l in out:
         w = l.split()
         if w and w[0] == 'calT':
             calT[int(w[1])] = [float(x) for x in w[2:]]
         elif w and w[0] == 'calM':
             calM = [float(x) for x in w[1:]]
-    return calT, calM
+    return [calT[k] for k in range(len(calT))], calM
 
 
 def type_depth(T, depth=1.5, tower=TOWER):
@@ -260,18 +295,27 @@ if 'A' in only:
             got.append(m)
             worst = max(worst, abs(m - c))
         msgs.append('%s %s' % (label, ' '.join('%.3f' % v for v in got)))
-    sw_worst, sw = 0.0, []
+    sw_worst, sw, win = 0.0, [], []
     for c in (0.3, 0.5, 0.7):
         s = sky(0.75, 0.25, cov=c, curl=CURL_G, nocal=nocal)
         n = 384
-        op = probe(s, 1, (0.0, 0.0, 0.0), (192.0 / n, 0.0, 0.0), (0.0, 192.0 / n, 0.0), n, n,
-                   zr=(s['base0'], s['top0'] + 0.01), nz=96)[..., 0]
-        m = float(op.mean())
+        zr = (s['base0'], s['top0'] + 0.01)
+        # the noise's whole wrap (384 km) in 2 x 2 tiles of 192 km at 0.5 km (12 columns a shape period, as the tables)
+        acc = 0.0
+        for ty in (0.0, 192.0):
+            for tx in (0.0, 192.0):
+                acc += float(probe(s, 1, (tx, ty, 0.0), (192.0 / n, 0.0, 0.0), (0.0, 192.0 / n, 0.0), n, n, zr=zr,
+                                   nz=96)[..., 0].mean())
+                if tx == 0.0 and ty == 0.0:
+                    win.append('%.2f->%.3f' % (c, acc))
+        m = acc / 4.0
         sw.append('%.2f->%.3f' % (c, m))
         sw_worst = max(sw_worst, abs(m - c))
+    noise = probe(sky(0.75, 0.25), 2, (0.0, 0.0, 0.0), (0.5, 0.0, 0.0), (0.0, 0.5, 0.0), 384, 384)[..., 0]
     gate('A coverage', worst <= 0.05 and sw_worst <= 0.06,
-         'stripes 0.1 .. 0.9 -> %s; worst |d| %.3f (bar 0.05) | uniform maps with the swing and spread, 192 km: %s, '
-         'worst |d| %.3f (bar 0.06)' % ('; '.join(msgs), worst, ' '.join(sw), sw_worst))
+         'stripes 0.1 .. 0.9 -> %s; worst |d| %.3f (bar 0.05) | uniform maps with the swing and spread, the noise\'s '
+         '384 km wrap: %s, worst |d| %.3f (bar 0.06) | INFO the 192 km square alone (noise mean there %+.3f): %s'
+         % ('; '.join(msgs), worst, ' '.join(sw), sw_worst, float(noise.mean()), ' '.join(win)))
 
 
 # ---- V: the variety metric -----------------------------------------------------------------------------------------------
@@ -360,7 +404,7 @@ if 'C' in only:
     g.use(P_MV)
     K.setuni(P_MV, u)
     set_calT(P_MV, s['calT'])
-    K.bind(P_MV, K.march_texs(K.trans, K.trans))
+    K.bind(P_MV, vtexs(K.trans, K.trans))
     gl.glDrawArrays(5, 0, 4)
     o = tgt.read()
     T = K.A.transmittance(K.sky.P, np.array([6360.0 + slab[0]]), np.array([mu0]), 400)[0]
@@ -371,6 +415,59 @@ if 'C' in only:
     gate('C towers', 0.5 <= ratio <= 1.6,
          'tau %.0f slab 1.5..7.5 km, light reach %.2f km: underside %.4g x sun vs Monte Carlo %.4g (ratio %.3f, bar '
          '0.5 .. 1.6)' % (tau, reach, under, ref, ratio))
+
+# ---- B: banding when zoomed ----------------------------------------------------------------------------------------------
+if 'B' in only:
+    W, H, VFOV, PITCH, STEPS = 640, 360, 5.0, 9.0, 96
+    BAYER = [0, 8, 2, 10, 12, 4, 14, 6, 3, 11, 1, 9, 15, 7, 13, 5]   # cloudvol.cpp's phase order
+    sv = K.sky.view_lut(192, 108, 6360.05, K.R.sundir(20, 30))
+    s = sky(0.9, 0.25, cov=0.5)
+
+    def bmarch(steps, frame, slice_):
+        tgt = K.Mrt(W, H)
+        u = var_uni(s)
+        u['cvAmbKm'] = (5.0,)
+        u['cvBlueSlice'] = -1 if red == 'ign' else slice_
+        u.update(K.march_uni(K.camera(0, PITCH), (0, 0, 0.05), (W, H), 1, (0, 0), 30.0, sun_az=20, steps=steps, taps=6,
+                             drop=K.drop, amb=0.05, ap=1.0, maxKm=100.0, vfov=VFOV, frame=float(frame),
+                             lightKm=light_km(1.0, 1.2)))
+        g.bindfb(0x8D40, tgt.fb)
+        gl.glViewport(0, 0, W, H)
+        g.use(P_MV)
+        K.setuni(P_MV, u)
+        set_calT(P_MV, s['calT'])
+        K.bind(P_MV, vtexs(K.trans, sv))
+        gl.glDrawArrays(5, 0, 4)
+        return tgt.read(0)
+
+    yy, xx = np.mgrid[0:H, 0:W]
+    slot = (xx % 4) + 4 * (yy % 4)
+    live = np.zeros((H, W, 4))
+    for f in range(16):
+        live[slot == BAYER[f]] = bmarch(STEPS, f, 0)[slot == BAYER[f]]
+    ref = sum(bmarch(STEPS * 8, f, f) for f in range(8)) / 8.0
+    lum = lambda x: x[..., :3] @ np.array([0.2126, 0.7152, 0.0722])
+    cl = (1.0 - ref[..., 3]) > 0.5
+    inner = cl.copy()
+    for ax in (0, 1):   # 3 px away from the cloud's edge
+        for sh in (-3, 3):
+            inner &= np.roll(cl, sh, axis=ax)
+    expo = 0.18 / max(float(np.median(lum(ref)[inner] / (1.0 - ref[..., 3])[inner])), 1e-9)
+    # 8-bit display levels (sRGB of the exposed light: the composite's Standard view)
+    srgb = lambda v: np.where(v <= 0.0031308, 12.92 * v, 1.055 * np.power(np.maximum(v, 0.0031308), 1 / 2.4) - 0.055)
+    E = 255.0 * (srgb(np.clip(lum(live) * expo, 0, 1)) - srgb(np.clip(lum(ref) * expo, 0, 1)))
+    E = np.where(inner, E - E[inner].mean(), 0.0)
+    ee = max(float((E * E).sum()), 1e-9)
+    cy = float((E[:-2] * E[2:]).sum()) / ee
+    cx = float((E[:, :-2] * E[:, 2:]).sum()) / ee
+    k = np.ones(4) / 4.0
+    bl = np.apply_along_axis(lambda v: np.convolve(v, k, mode='same'), 1, E)
+    bl = np.apply_along_axis(lambda v: np.convolve(v, k, mode='same'), 0, bl)
+    gate('B banding', max(cx, cy) <= 0.10 and int(inner.sum()) > 10000,
+         '5 deg view, storm sky, %d px inside cloud: march error 2 px correlation along y %.3f, along x %.3f (bar 0.10 each)%s'
+         ' | INFO error std %.2f levels, after a 4 px box %.2f levels'
+         % (int(inner.sum()), cy, cx, ' (red ign: IGN offsets)' if red == 'ign' else '', float(E[inner].std()),
+            float(np.abs(bl[inner]).mean())))
 
 # ---- E: cost ------------------------------------------------------------------------------------------------------------
 if 'E' in only:
@@ -408,7 +505,7 @@ if 'E' in only:
                 K.setuni(prog, u)
                 if arm == 'variety':
                     set_calT(prog, s['calT'])
-                K.bind(prog, K.march_texs(K.trans, sv))
+                K.bind(prog, vtexs(K.trans, sv))
                 gl.glDrawArrays(5, 0, 4)
                 gl.glFinish()
                 reps = 20

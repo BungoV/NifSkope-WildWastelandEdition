@@ -49,6 +49,8 @@ uniform vec4 cvSceneZ;	// the projection's [2][2], [3][2]; km per view unit; 1 =
 uniform float cvTopOn;	// lane CLOUD2C: the light the cloud below reflects back up (0 = the red notop)
 #ifdef WW_CLOUD_VARIETY
 uniform float cvAmbKm;	// lane CLOUD5: the span of the ambient's height ramp (the bands without the towers), km
+uniform sampler2D cvBlue;	// lane CLOUD5 round 2: EA's FAST blue noise, 64 slices of 128 x 128 stacked in y (R used)
+uniform int cvBlueSlice;	// this 16-frame refresh cycle's slice; -1 = the red ign (CLOUD2's IGN, the stripes)
 #endif
 
 layout ( location = 0 ) out vec4 cvOut;
@@ -62,6 +64,20 @@ float cvDens( vec3 p )
 		return ( p.z > cvBands.baseKm.x && p.z < cvBands.topKm.x ) ? cvSlab : 0.0;
 	return cloudDensity( p );
 }
+
+#ifdef WW_CLOUD_VARIETY
+/* lane CLOUD5 round 2: the march's per-pixel step offset. IGN is a gradient whose lines of equal value run at a slope of
+ * -0.0671 / 0.00584 (near vertical), and nothing averages it (the resolve keeps one march a history pixel), so a zoomed,
+ * smooth cloud wore fine vertical stripes (bungo 10-29 "banding"; cloudvar_check gate B, MEASURED). One blue noise slice a
+ * 16-frame cycle: all 16 phases of the stride-4 picture come from the one slice, so it holds that slice's even grain. */
+float cvJitter( vec2 q )
+{
+	if ( cvBlueSlice >= 0 )
+		return ( floor( texelFetch( cvBlue, ivec2( mod( q, 128.0 ) ) + ivec2( 0, 128 * ( cvBlueSlice & 63 ) ), 0 ).r * 255.0
+			+ 0.5 ) + 0.5 ) / 256.0;
+	return fract( 52.9829189 * fract( dot( q, vec2( 0.06711056, 0.00583715 ) ) ) + cvFrame * 0.618034 );
+}
+#endif
 
 // the ray's hits of the sphere of radius R about the planet's centre (origin height h0): near, far; far < 0 = none
 vec2 cvSphere( float h0, vec3 d, float R )
@@ -248,7 +264,11 @@ void main()
 	if ( hi > lo && t0 >= 0.0 && t1 > t0 && t0 < tGround ) {
 #ifdef WW_CLOUDFLY
 		float pixKm = 2.0 / ( cvProj.y * cvHistSize.y );
+#ifdef WW_CLOUD_VARIETY
+		float j = cvJitter( q );
+#else
 		float j = fract( 52.9829189 * fract( dot( q, vec2( 0.06711056, 0.00583715 ) ) ) + cvFrame * 0.618034 );
+#endif
 		// lane CLOUD4: fine steps through the box first, jumping its free cells; the plain march takes the rest of the ray
 		if ( cfOn > 0.5 ) {
 			float tEnd = min( t1, cfExit( o, d ) ), tc = t0, tn = t0;
@@ -274,7 +294,11 @@ void main()
 #else
 		float dt = ( t1 - t0 ) / float( cvSteps );
 		float pixKm = 2.0 / ( cvProj.y * cvHistSize.y );	// one history pixel's angle (the light taps share it)
+#ifdef WW_CLOUD_VARIETY
+		float j = cvJitter( q );
+#else
 		float j = fract( 52.9829189 * fract( dot( q, vec2( 0.06711056, 0.00583715 ) ) ) + cvFrame * 0.618034 );
+#endif
 		for ( int i = 0; i < cvSteps; i++ ) {
 #endif
 			float t = t0 + ( float( i ) + j ) * dt;
