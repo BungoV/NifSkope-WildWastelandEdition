@@ -1,5 +1,15 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## Lane MARCHLINK1 (2026-10-29, branch marchlink1-20261029): march-mode shaders link again
+
+- GIWALL2's wall-tested fills took fo4_effectdecalcsm and pbrm_cellcsm past the driver's instruction limit in the
+  WW_FRAME_UBO + WW_CELL_GI_MARCH mode ("too many instructions"; every other program and mode linked).
+- The stranded-surface pick now has one answer site (a loop with non-constant bounds) and the answer's two fills run
+  in one pass (`cellGiFillPair`), both in the march mode only. Same calls in the same order: the same values.
+- fo4_effectdecalcsm march: 1620155 bytes (1640172 before GIWALL2). The default and WW_FRAME_UBO binaries of
+  fo4_effectdecalcsm, pbrm_cellcsm, fo4_cellcsm, fo4_cell and pbrm_cell are identical but the run stamp and the
+  source hash. Shader-only: no exe build.
+
 ## Batch merge 10-29 (merge1029): FAVCAM1, SPAWNEYE1, VOLPLACE2, GLTFCELL1, CELLUNI6, LANDSPEC9, WEATHERBLEND6, GIWALL2, FOGGI1
 
 - **CELLUNI6 on FRAMESPEED2's one TAA path:** FRAMESPEED2 (already in main) runs the temporal AA after the tone map

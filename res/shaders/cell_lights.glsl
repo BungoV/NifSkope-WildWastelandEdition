@@ -623,6 +623,69 @@ vec4 cellGiSeenFill( vec3 P, vec3 N, vec3 from )
 	}
 	return ws > 0.0 ? s / ws : wb > 0.0 ? sb / wb : vec4( 0.0 );
 }
+#ifdef WW_CELL_GI_MARCH
+/* lane MARCHLINK1: cellGiFillAt( P, N, L, from ) (when `room`) and cellGiSeenFill( P, N, from ) (in `seen`) in one pass
+ * over the 4x4x4 block, one wall test a voxel: the stranded answer's two fills, inlined at each of its sites, took
+ * fo4_effectdecalcsm past what the driver links in the march mode. Same terms in the same order: the same values. */
+vec4 cellGiFillPair( vec3 P, vec3 N, ivec2 L, vec3 from, bool room, out vec4 seen )
+{
+	vec3 g = ( P + N * ( 0.5 * cellGiVoxel ) - cellGiOrigin ) / cellGiVoxel - 0.5;
+	ivec3 i0 = ivec3( floor( g ) );
+	ivec3 dm = ivec3( cellGiDims );
+	ivec3 sl = ivec3( N.x >= 0.0 ? 0 : 1, N.y >= 0.0 ? 2 : 3, N.z >= 0.0 ? 4 : 5 ) * dm.z;
+	vec3 n2 = N * N;
+	vec4 s = vec4( 0.0 ), sb = vec4( 0.0 ), t = vec4( 0.0 ), tb = vec4( 0.0 );
+	float ws = 0.0, wb = 0.0, wt = 0.0, wtb = 0.0;
+	bool byRoom = cellGiRooms && L != cellGiAnyRoom;
+	bool see = byRoom && ( cellPassRed & ( 16 | 8192 ) ) == 0;
+	bool seenOn = ( cellPassRed & 16 ) == 0;
+	bool loose = ( cellPassRed & ( 16 | 8192 ) ) == 0;
+	bool roomNone = room && byRoom && L.x < 0;	// rooms but no room here: nothing safe to borrow
+	room = room && !roomNone;
+	for ( int k = 0; k < 64; k++ ) {
+		ivec3 c = i0 + ivec3( k & 3, ( k >> 2 ) & 3, ( k >> 4 ) & 3 ) - 1;
+		if ( any( lessThan( c, ivec3( 0 ) ) ) || any( greaterThanEqual( c, dm ) ) )
+			continue;
+		float w = 1.0 - length( vec3( c ) - g ) / 2.5;
+		if ( w <= 0.0 )
+			continue;
+		int base = 0;
+		bool rOn = room;
+		if ( rOn && byRoom ) {
+			ivec2 S = cellRoomUnpack( texelFetch( cellGiSlots, c, 0 ).r );
+			base = ( S.x >= 0 && ( S.x == L.x || S.x == L.y ) ) ? 0 : ( S.y >= 0 && ( S.y == L.x || S.y == L.y ) ) ? 6 * dm.z : -1;
+			rOn = base >= 0;
+		}
+		int wl = ( ( rOn && see ) || seenOn ) ? cellGiWall( from, c, loose ) : 2;
+		w *= w;
+		vec4 v0 = n2.x * texelFetch( cellGi, ivec3( c.xy, c.z + sl.x ), 0 )
+		        + n2.y * texelFetch( cellGi, ivec3( c.xy, c.z + sl.y ), 0 )
+		        + n2.z * texelFetch( cellGi, ivec3( c.xy, c.z + sl.z ), 0 );
+		if ( rOn ) {
+			vec4 v = base == 0 ? v0 : n2.x * texelFetch( cellGi, ivec3( c.xy, c.z + base + sl.x ), 0 )
+			                        + n2.y * texelFetch( cellGi, ivec3( c.xy, c.z + base + sl.y ), 0 )
+			                        + n2.z * texelFetch( cellGi, ivec3( c.xy, c.z + base + sl.z ), 0 );
+			int sn = see ? wl : 2;
+			if ( v.a > 0.0 && sn == 1 ) {
+				sb += w * v;
+				wb += w;
+			} else if ( v.a > 0.0 && sn == 2 ) {
+				s += w * v;
+				ws += w;
+			}
+		}
+		if ( seenOn && v0.a > 0.0 && wl == 1 ) {
+			tb += w * v0;
+			wtb += w;
+		} else if ( seenOn && v0.a > 0.0 && wl == 2 ) {
+			t += w * v0;
+			wt += w;
+		}
+	}
+	seen = wt > 0.0 ? t / wt : wtb > 0.0 ? tb / wtb : vec4( 0.0 );
+	return ws > 0.0 ? s / ws : wb > 0.0 ? sb / wb : vec4( 0.0 );
+}
+#endif
 
 /* lane GIBLACK2: the stranded surface's evidence. Outdoors (a sky-lit grid; also an interior that shows the sky), a
  * surface whose own reads are both solid (cellGiSample's lend rule) sits in air the room grid could not resolve. The
@@ -685,6 +748,18 @@ vec4 cellGiStrandAnswer( vec3 P, vec3 N, ivec2 L, vec3 C, out int path )
 	path = 6;
 	if ( ws > 0.0 )
 		return s / ws;
+#ifdef WW_CELL_GI_MARCH
+	vec4 fs;
+	vec4 fr = cellGiFillPair( P, N, L, C, indoor, fs );	// lane MARCHLINK1: both fills in one pass
+	if ( indoor ) {
+		path = 7;
+		if ( fr.a > 0.01 )
+			return fr;
+	}
+	path = 8;
+	if ( ( cellPassRed & 16 ) == 0 && fs.a > 0.01 )
+		return fs;
+#else
 	if ( indoor ) {
 		path = 7;
 		vec4 f = cellGiFillAt( P, N, L, C );
@@ -697,6 +772,7 @@ vec4 cellGiStrandAnswer( vec3 P, vec3 N, ivec2 L, vec3 C, out int path )
 		if ( f.a > 0.01 )
 			return f;
 	}
+#endif
 	path = indoor ? 9 : 5;
 	return indoor ? vec4( 0.0, 0.0, 0.0, 1.0 ) : vec4( -1.0 );
 }
@@ -754,10 +830,27 @@ vec4 cellGiStrandPick( vec3 P, vec3 N, out int path )
 	bool wantOut = LOut.x >= 0 && ( tie || !wantIn );
 	int pi = 5, po = 5;
 	vec4 a = vec4( -1.0 ), o = vec4( -1.0 );
+#ifdef WW_CELL_GI_MARCH
+	/* lane MARCHLINK1: one answer site in the march mode. GIWALL2's wall-tested fills made each inlined answer bigger,
+	 * and the two sites took fo4_effectdecalcsm and pbrm_cellcsm past what the driver links. The bounds are not
+	 * constants, so the loop is not unrolled into two copies again. Same calls in the same order: same answers. */
+	for ( int t = wantIn ? 0 : 1; t <= ( wantOut ? 1 : 0 ); t++ ) {
+		int pt = 5;
+		vec4 r = cellGiStrandAnswer( P, N, t == 0 ? LIn : LOut, t == 0 ? CIn : COut, pt );
+		if ( t == 0 ) {
+			a = r;
+			pi = pt;
+		} else {
+			o = r;
+			po = pt;
+		}
+	}
+#else
 	if ( wantIn )
 		a = cellGiStrandAnswer( P, N, LIn, CIn, pi );
 	if ( wantOut )
 		o = cellGiStrandAnswer( P, N, LOut, COut, po );
+#endif
 	bool needT = lone || ( tie && o.a >= 0.0 && ( cellPassRed & 512 ) != 0 );
 	vec4 tr = needT ? cellGiTrilinear( P, N ) : vec4( 0.0 );
 	if ( lone ) {
