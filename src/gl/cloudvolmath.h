@@ -295,6 +295,10 @@ inline void lowColour( float keyK, const float T[3], float mu, float skyK, const
  *   painted or simulated [recalled]; RDR2's cloud map is "modulated by texture and weather data" [read, slide 14]).
  *   Swing kept mean-preserving in map coverage, so the calibration still holds (gate A). */
 constexpr int kVarTypes = 4;	// type anchors: 0 stratus, 1/3 stratocumulus, 2/3 cumulus, 1 cumulonimbus
+/* the Low band's coverage tables at T = k / (kVarCal - 1). Four (the type anchors) left a type between cumulus and
+ * cumulonimbus 0.14 short of the map (T 0.75, coverage 0.5 drew 0.356: gate A, MERGE1029C 10-29): the column depth
+ * runs 1.5 -> 7 km there and a linear blend of two thresholds does not follow it. */
+constexpr int kVarCal = 7;
 constexpr float kVarTowerKm = 7.0f;	// a cumulonimbus' depth (ours; typical tops 8-12 km over a ~1 km base: unknown source)
 constexpr float kVarWrapKm = 384.0f;	// the weather noise's period: 64 shape periods, windKm's wrap (no seam at the wrap)
 constexpr float kVarCurlPeriodKm = 24.0f;	// the curl potential's period (divides kVarWrapKm)
@@ -393,11 +397,11 @@ inline float typeProfile( float T, float hf )
 	return mixf( a, b, u - float( k ) );
 }
 
-//! the Low band's coverage table at type T (the four anchors' tables blended), c the map's coverage
-inline float calAtT( const float cal[kVarTypes][kCalN], float T, float c )
+//! the Low band's coverage table at type T (the kVarCal anchors' tables blended), c the map's coverage
+inline float calAtT( const float cal[kVarCal][kCalN], float T, float c )
 {
-	const float u = sat( T ) * 3.0f;
-	const int k = std::min( int( u ), 2 );
+	const float u = sat( T ) * float( kVarCal - 1 );
+	const int k = std::min( int( u ), kVarCal - 2 );
 	return mixf( calAt( cal[k], c ), calAt( cal[k + 1], c ), u - float( k ) );
 }
 
@@ -439,7 +443,7 @@ struct VarVolumes
 /*! the whole density at (x, y, z) km (wind 0, mip 0): the twin of the WW_CLOUD_VARIETY cloudDensity. map = cvMapAt's
  *  (R Low, G Mid, B Low sheet, A High); base/top/density per band (Low's top is the map's, already raised for towers) */
 inline float varietyDensity( const VarVolumes & vol, const Variety & v, const float baseKm[2], const float topKm[2],
-	const float density[2], const float calLow[kVarTypes][kCalN], const float calMid[kCalN], const float map[4], float x,
+	const float density[2], const float calLow[kVarCal][kCalN], const float calMid[kCalN], const float map[4], float x,
 	float y, float z )
 {
 	const float n = weatherNoise( x, y );

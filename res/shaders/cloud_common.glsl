@@ -88,7 +88,7 @@ float cloudDensity( vec3 p )
  * by a curl field and eroded more, less at the base. Sources and the CPU twin: src/gl/cloudvolmath.h varietyDensity. */
 uniform vec4 cvVarA;	// x the weather's Low type, y the type's swing, z the coverage's swing, w the Low band's own depth km
 uniform vec4 cvVarB;	// x a cumulonimbus' depth km, y the erosion, z the curl km (0 = red nocurl), w the anvil
-uniform float cvCalT[68];	// the Low band's coverage tables at the 4 type anchors, 17 each (cloudvolmath.h varCalibrate)
+uniform float cvCalT[119];	// the Low band's coverage tables at T = k / 6, 7 x 17 (cloudvolmath.h kVarCal, varCalibrate)
 
 const float kCvVarWrapKm = 384.0;	// cloudvolmath.h kVarWrapKm (the wind's wrap)
 const float kCvCurlPeriodKm = 24.0;
@@ -154,8 +154,8 @@ float cvTypeProfile( float T, float hf )
 
 float cvCalAtT( float T, float c )
 {
-	float u = clamp( T, 0.0, 1.0 ) * 3.0;
-	int k = min( int( u ), 2 );
+	float u = clamp( T, 0.0, 1.0 ) * 6.0;
+	int k = min( int( u ), 5 );
 	float t = clamp( c, 0.0, 1.0 ) * 16.0;
 	int i = min( int( t ), 15 );
 	float f = t - float( i );

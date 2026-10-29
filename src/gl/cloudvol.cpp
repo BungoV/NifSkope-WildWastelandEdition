@@ -147,7 +147,7 @@ struct CvGpu
 	// lane CLOUD5: the Cloud Variety tables (the Low band at its 4 type anchors, the Mid band), memoised on their inputs
 	int varKey[12] = { -1 };
 	bool varRed = false;
-	float calT[V::kVarTypes][V::kCalN] = {};
+	float calT[V::kVarCal][V::kCalN] = {};
 	float calMidV[V::kCalN] = {};
 	// lane CLOUD2B: the scene's depth (wwCloudVolSceneDepth, before the tone map) and what the pass over the scene needs
 	bool drewNow = false;	// the volume drew in this frame's backdrop
@@ -310,10 +310,10 @@ void calibrated( CvGpu & g, const Bands & b, float out[2 * V::kCalN] )
 	}
 }
 
-/* lane CLOUD5: the Cloud Variety tables: the Low band at the 4 type anchors (calT, cvCalT) and the Mid band (cvCal's
- * second half), the variety density's own column opacity (cloudvolmath.h varCalibrate). ~5x one CLOUD2 table on a
+/* lane CLOUD5: the Cloud Variety tables: the Low band at the kVarCal type anchors (calT, cvCalT) and the Mid band (cvCal's
+ * second half), the variety density's own column opacity (cloudvolmath.h varCalibrate). ~8x one CLOUD2 table on a
  * change of the band's heights, density or the reds (the weather's type and swing are not inputs: they pick a blend) */
-void calibratedVariety( CvGpu & g, const Bands & b, float calT[V::kVarTypes * V::kCalN], float cal[2 * V::kCalN] )
+void calibratedVariety( CvGpu & g, const Bands & b, float calT[V::kVarCal * V::kCalN], float cal[2 * V::kCalN] )
 {
 	const bool noCal = red( "nocal" );
 	const int key[12] = { int( std::lround( b.baseKm[0] * 50.0f ) ), int( std::lround( b.var.depthKm * 50.0f ) ),
@@ -326,15 +326,16 @@ void calibratedVariety( CvGpu & g, const Bands & b, float calT[V::kVarTypes * V:
 		g.varRed = noCal;
 		const V::VarVolumes vol{ noise( false ).data(), WwCloudNoise::kShapeN, noise( true ).data(), WwCloudNoise::kDetailN };
 		const auto t0 = std::chrono::steady_clock::now();
-		for ( int k = 0; k < V::kVarTypes; k++ )
-			V::varCalibrate( vol, b.var, 0, float( k ) / 3.0f, b.baseKm[0], b.topKm[0], b.density[0], noCal, g.calT[k] );
+		for ( int k = 0; k < V::kVarCal; k++ )
+			V::varCalibrate( vol, b.var, 0, float( k ) / float( V::kVarCal - 1 ), b.baseKm[0], b.topKm[0], b.density[0], noCal,
+				g.calT[k] );
 		V::varCalibrate( vol, b.var, 1, 0.0f, b.baseKm[1], b.topKm[1], b.density[1], noCal, g.calMidV );
 		// the CPU cost a weather change pays (on the GL thread): the hold's notes carry it
 		fprintf( stderr, "cloudvol: variety tables %.1f ms (low depth %.2f km, mid %.2f..%.2f km)\n",
 			std::chrono::duration<double, std::milli>( std::chrono::steady_clock::now() - t0 ).count(), double( b.var.depthKm ),
 			double( b.baseKm[1] ), double( b.topKm[1] ) );
 	}
-	for ( int k = 0; k < V::kVarTypes; k++ )
+	for ( int k = 0; k < V::kVarCal; k++ )
 		std::copy( g.calT[k], g.calT[k] + V::kCalN, calT + k * V::kCalN );
 	std::copy( g.calMidV, g.calMidV + V::kCalN, cal + V::kCalN );
 }
@@ -376,9 +377,9 @@ void densityUniforms( Renderer * r, NifSkopeOpenGLContext::Program * p, CvGpu & 
 	float cal[2 * V::kCalN];
 	calibrated( g, b, cal );
 	if ( b.variety ) {	// lane CLOUD5: the twins' uniforms (an old program has no cvVarA: never set there)
-		float calT[V::kVarTypes * V::kCalN];
+		float calT[V::kVarCal * V::kCalN];
 		calibratedVariety( g, b, calT, cal );
-		p->uni1fv( "cvCalT", calT, V::kVarTypes * V::kCalN );
+		p->uni1fv( "cvCalT", calT, V::kVarCal * V::kCalN );
 		p->uni4f( "cvVarA", FloatVector4( b.var.type, b.var.spread, b.var.swing, b.var.depthKm ) );
 		p->uni4f( "cvVarB", FloatVector4( b.var.towerKm, b.var.erode, b.var.curlKm, b.var.anvil ) );
 	}

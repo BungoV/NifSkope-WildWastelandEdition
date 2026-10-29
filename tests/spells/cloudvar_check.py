@@ -82,7 +82,7 @@ def dumpv(*a):
 
 
 def parse_cal(out):
-    calT, calM = [None] * 4, None
+    calT, calM = [None] * 7, None   # cloudvolmath.h kVarCal (MERGE1029C: 4 -> 7 anchors)
     for l in out:
         w = l.split()
         if w and w[0] == 'calT':
