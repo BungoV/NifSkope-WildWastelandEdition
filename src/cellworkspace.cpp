@@ -20,6 +20,7 @@ BSD License - see nifskope.h
 #include "cellfarlod.h"
 #include "cellmodpickbox.h"	// lane MODPICK1: the Mods band
 #include "gl/celllights.h"
+#include "rtddgicell.h"	// lane RTXGI1 M2: the Ray-traced GI rows
 #include "gl/cellcull.h"	// lane SUNCELL1: the Culling row
 #include "gl/cellssr.h"	// lane CELLALL1: the SSR rows
 #include "gl/cellreflprobe.h"	// lane REFLPROBE1: the Reflection probes row
@@ -584,6 +585,17 @@ void CellWorkspacePanel::buildUi()
 	section( tr( "Lighting" ), "lighting" );
 	cellLights = tick( showMenu, tr( "Cell lights" ), "CellWorkspaceCellLights", wwCellLightsOn() );
 	cellGi = tick( showMenu, tr( "Precomputed Radiance Transfer" ), "CellWorkspaceCellGi", wwCellGiOn() );	// bungo 10-27 note 12: the label only
+	/* lane RTXGI1 M2 (src/rtddgicell.h): the ray-traced GI volume in place of the baked grid where it reaches; ships Off.
+	 * Live: a tick reloads the shaders (the read is a #define) and the next frame builds or frees the volume. */
+	{
+		QAction * rt = tick( showMenu, tr( "Ray-traced GI" ), "CellWorkspaceRtDdgi", rtddgiCellOn() );
+		rt->setEnabled( !rtddgiCellPinned() );
+		connect( rt, &QAction::toggled, this, [this]( bool on ) {
+			rtddgiCellSetOn( on );
+			if ( glView )
+				glView->updateShaders();
+		} );
+	}
 	/* lane SKYSTR1 (bungo 10-13, FO4CS's Skylighting strength): how much the GI's sky visibility darkens, 0-100 %.
 	 * A label | field row as the Bloom rows; live (the grid relights 0.4 s after the value stands still) */
 	{
@@ -644,6 +656,26 @@ void CellWorkspacePanel::buildUi()
 		}
 	}
 	cellPass->setEnabled( false );
+	{	// lane RTXGI1 M2: the ray-traced GI volume's probes over the frame (src/rtddgicell.h), live; Off by default
+		QMenu * m = showMenu->addMenu( tr( "Ray-traced GI probes" ) );
+		m->setObjectName( QStringLiteral( "CellWorkspaceRtDdgiView" ) );
+		QActionGroup * grp = new QActionGroup( m );
+		grp->setExclusive( true );
+		const QStringList names = { tr( "Off" ), tr( "Probe states" ), tr( "Probe irradiance" ) };
+		for ( int k = 0; k < names.size(); k++ ) {
+			QAction * a = m->addAction( names.at( k ) );
+			a->setCheckable( true );
+			a->setData( k );
+			a->setChecked( k == rtddgiCellView() );
+			grp->addAction( a );
+		}
+		m->setEnabled( !rtddgiCellViewPinned() );
+		connect( grp, &QActionGroup::triggered, this, [this]( QAction * a ) {
+			rtddgiCellSetView( a->data().toInt() );
+			if ( glView )
+				glView->update();
+		} );
+	}
 	cellShadow = tick( showMenu, tr( "Light shadows" ), "CellWorkspaceLightShadows", wwCellShadowOn() );
 	cellFlicker = tick( showMenu, tr( "Light flicker" ), "CellWorkspaceLightFlicker", wwCellFlickerOn() );
 	// lane LAMPSHADOW1: stored lamp shadows, ships Off; the tier is the face size (Medium = the cube pass's own)

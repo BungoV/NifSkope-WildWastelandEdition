@@ -36,6 +36,7 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include "wwswitch.h"	// lane TESTDRIVER1: the WW_* switch store
 #include "celldoorlive.h"	// lane DOORLIVE1: a path frame poses the live door
 #include "probesky.h"	// fix 10-22: the live driver waits for a pending sky relight
+#include "rtddgicell.h"	// lane RTXGI1 M2: and for the ray-traced GI volume (rtddgiCellPending)
 #include "gl/shadowset.h"	// fix 10-22: ... and for the terrain shadow sweep
 #include "lodgen.h"
 #include "lodgengpu.h"
@@ -2508,7 +2509,7 @@ QString wwLiveSettleBackground( GLView * ogl )
 			probeSkyRelightNow();
 			relit = true;
 		}
-		if ( !wwTerrainShadowPending() && !probeSkyRelightPending() )
+		if ( !wwTerrainShadowPending() && !probeSkyRelightPending() && !rtddgiCellPending() )
 			break;
 		wwLivePump( ogl, 1 );
 		frames++;

@@ -61,6 +61,11 @@ void probeSkyCube( const float vis[8], const unsigned char ( *tint )[3], const P
 //! sky-lit) and a Probe sharing tick relights any cell (lane GPURELIGHT1).
 //! Lane LIGHTS5: skyKept false = kept only so the emittance row can flip it live (an interior without sky).
 void probeSkyKeep( const void * nif, const ProbeSoup & soup, const QString & bakeDir, const ProbeGiSpec & spec, bool skyKept = true );
+/*! lane RTXGI1 M2 (src/rtddgicell.h): the kept cell's soup when it is `nif`'s (else nullptr), the sky its last relight
+ *  took (`on` false for an interior that shows none) and the lights that relight takes (the .nifx bulbs in): what the
+ *  ray-traced GI volume traces and shades. The pointer lives until the next probeSkyKeep / probeSkyForget. */
+struct WwCellLighting;
+const ProbeSoup * probeSkyKeptSoup( const void * nif, ProbeSkyLight * sky, WwCellLighting * lights );
 //! One call a frame: relights the kept bake when the view's weather light has changed. Lane SKYPIC1: with
 //! WW_CELL_SKYPIC=1 it also captures the drawn sky (the view's GL context is current here) when it has changed,
 //! and the first capture relights at once (the cell opened before any frame was drawn).

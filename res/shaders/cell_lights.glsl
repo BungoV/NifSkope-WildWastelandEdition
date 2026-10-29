@@ -886,6 +886,9 @@ ivec2 cellGiVolAt( vec3 P, vec3 N )
 	return ivec2( -2 );
 }
 
+#ifdef WW_CELL_RTDDGI
+#define cellGiVolume cellGiVolumeGrid	// lane RTXGI1 M2: the baked grid's read keeps its body; the volume's read wraps it below
+#endif
 vec4 cellGiVolume( vec3 P, vec3 N, ivec2 L )
 {
 	vec3 g = ( P + N * ( 0.5 * cellGiVoxel ) - cellGiOrigin ) / cellGiVoxel - 0.5;
@@ -979,6 +982,36 @@ vec4 cellGiVolume( vec3 P, vec3 N, ivec2 L )
 	float fe = cellGiEdgeFade( g.xy + 0.5 );
 	return fe < 1.0 ? s * fe : s;
 }
+
+#ifdef WW_CELL_RTDDGI
+#undef cellGiVolume
+/* lane RTXGI1 M2 (src/rtddgicell.h): the ray-traced GI volume's read (cell_ddgi.glsl) in place of the baked grid's
+ * inside its probe box; the grid's read (cellGiVolumeGrid above, unchanged) past the box, across its last cell (the
+ * fade), and wherever none of the 8 probes is usable. Its .a is 1: the volume holds the sky (its misses) and every
+ * bounce, so it replaces the flat ambient whole (cellGiSkyK's k; the linear law of ww-probe-sky-shade). The Sky
+ * visibility pass (cellPass 2) shows the volume's sky visibility (the irradiance tiles' alpha). Probe 95: path 12. One
+ * read site and one grid site: every cellGiSample inlines this (the program's size). */
+#include "cell_ddgi.glsl"
+vec4 cellGiVolume( vec3 P, vec3 N, ivec2 L )
+{
+	CellDdgiOut d;
+	d.E = vec3( 0.0 );
+	d.vis = 0.0;
+	d.w = 0.0;
+	d.fade = 0.0;
+	if ( cellDdgiOn )
+		d = cellDdgiRead( P, N, normalize( vec3( cellRow[0].w, cellRow[1].w, cellRow[2].w ) - P ), N );
+	bool own = d.w > 0.0 && d.fade > 0.0;
+	vec4 g = vec4( 0.0 );
+	if ( !own || d.fade < 1.0 )
+		g = cellGiVolumeGrid( P, N, L );
+	if ( !own )
+		return g;
+	vec4 r = cellPass == 2 ? vec4( vec3( d.vis ), 1.0 ) : vec4( d.E, 1.0 );
+	cellGiPath = 12;
+	return d.fade < 1.0 ? mix( g, r, d.fade ) : r;
+}
+#endif
 
 // the screen GI's upsample: the 4 screen texels round this pixel; false: none is this surface
 bool cellGiHalfAt( vec3 P, vec3 N, out vec4 s )
@@ -1163,6 +1196,13 @@ float cellSpecSky( vec3 P, vec3 N, vec3 R, float rough )
 		vec4 s = texture( cellGi, vec3( t.xy / cellGiDims.xy, ( ( cellSpecSkyBase + sl[k] ) * cellGiDims.z + z ) / depth ) );
 		a += w[k] * s.ra;
 	}
+#if defined( WW_CELL_RTDDGI ) && !defined( WW_CELL_GI_MARCH )
+	if ( cellDdgiOn ) {	// lane RTXGI1 M2: the volume's sky visibility on the lobe's direction (the grid's past its box)
+		CellDdgiOut dv = cellDdgiRead( P, N, normalize( vec3( cellRow[0].w, cellRow[1].w, cellRow[2].w ) - P ), D );
+		if ( dv.w > 0.0 && dv.fade > 0.0 )
+			a = vec2( mix( a.y < 0.01 ? 1.0 : clamp( a.x / a.y, 0.0, 1.0 ), dv.vis, dv.fade ), 1.0 );
+	}
+#endif
 	if ( a.y < 0.01 )
 		return 1.0;
 	float f = cellGiEdgeFade( t.xy );	// lane GIEDGE1: no occlusion read off the clamped edge column

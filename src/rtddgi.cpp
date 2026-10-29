@@ -143,55 +143,22 @@ struct Twin
 		const double od[3] = { o.x, o.y, o.z }, dd[3] = { d.x, d.y, d.z };
 		return S.bvh.anyHitIn( od, dd, 1e-4, double( tmax ), []( int ) { return true; } );
 	}
-	// MIRROR trace.comp ddgiIrradianceAt
+	// MIRROR trace.comp ddgiIrradianceAt (M2: the rule is rtddgimath.h sampleVolume, the cell view's GLSL read's too)
 	V3 sampleVolume( V3 Pw, V3 n, V3 o ) const
 	{
-		const float D = S.prm.stepv[3];
-		V3 Pb = Pw;
-		if ( !( red & kRedNoBias ) )
-			Pb = Pb + biasVector( n, o, D, S.prm.blendp[2] );
-		int base[3];
-		float a[3];
-		for ( int k = 0; k < 3; k++ ) {
-			const float g = ( Pb[k] - origin[k] ) / step[k];
-			base[k] = std::min( std::max( int( std::floor( g ) ), 0 ), std::max( dims[k] - 2, 0 ) );
-			a[k] = clampf( g - float( base[k] ), 0.0f, 1.0f );
-		}
-		double sum[3] = { 0, 0, 0 }, wsum = 0;
-		for ( int c = 0; c < 8; c++ ) {
-			const int off[3] = { c & 1, ( c >> 1 ) & 1, ( c >> 2 ) & 1 };
-			int pc[3];
-			for ( int k = 0; k < 3; k++ )
-				pc[k] = std::min( base[k] + off[k], dims[k] - 1 );
-			const int p = pc[0] + dims[0] * ( pc[1] + dims[1] * pc[2] );
-			if ( state( p ) != kVigilant || age[size_t( p )] == 0 )
-				continue;
-			float trilinear = 1.0f;
-			for ( int k = 0; k < 3; k++ )
-				trilinear *= off[k] ? a[k] : 1.0f - a[k];
-			const V3 pp = probePos( p );
-			const V3 toProbe = normalize( pp - Pw );
-			float w = backfaceWeight( toProbe, n );
-			const V3 bToProbe = pp - Pb;
-			const float r = length( bToProbe );
-			if ( !( red & kRedNoCheb ) && r > 0.0f ) {
-				float m[2];
-				sampleTile( &dist[size_t( p ) * 512], kDistTile, 2, bToProbe * ( -1.0f / r ), m );
-				w *= chebyshevWeight( r, m[0], m[1] );
-			}
-			w = std::max( w, 1e-6f );
-			w = crushWeight( w );
-			w *= trilinear;
-			float e[4];
-			sampleTile( &irr[size_t( p ) * 256], kIrrTile, 4, n, e );
-			for ( int k = 0; k < 3; k++ )
-				sum[k] += double( w ) * std::pow( std::max( e[k], 0.0f ), 2.5f );
-			wsum += w;
-		}
-		if ( wsum <= 0.0 )
-			return V3( 0, 0, 0 );
-		V3 m( float( sum[0] / wsum ), float( sum[1] / wsum ), float( sum[2] / wsum ) );
-		return m * m * ( 2.0f * kPi );
+		SampleVolume v;
+		v.irr = irr.data();
+		v.dist = dist.data();
+		v.probes = probes.data();
+		v.age = age.data();
+		v.origin = origin;
+		v.step = step;
+		for ( int k = 0; k < 3; k++ )
+			v.dims[k] = dims[k];
+		v.D = S.prm.stepv[3];
+		v.B = S.prm.blendp[2];
+		// the volume's red bits: only nocheb / nobias reach the read (noback = 1 is the trace's, not kSampleTrilinear)
+		return rtddgi::sampleVolume( v, Pw, n, o, n, red & ( kSampleNoCheb | kSampleNoBias ) ).E;
 	}
 	// MIRROR trace.comp ddgiDirect
 	V3 direct( V3 Pw, V3 n ) const
@@ -508,8 +475,9 @@ void RtDdgiVolume::position( int p, float out[3] ) const
 		out[k] = origin[k] + float( idx[k] ) * step[k] + ( offset.size() > size_t( p ) * 3 + 2 ? offset[size_t( p ) * 3 + size_t( k )] : 0.0f );
 }
 
-bool rtddgiRun( const ProbeSoup & soup, const WwCellLighting & lighting, const ProbeSkyLight & sky, const RtDdgiSpec & spec,
-	RtDdgiVolume * out )
+//! the volume's grid and every packed input both runs read (rtddgiRun and RtDdgiLive::open)
+static bool packVolume( const ProbeSoup & soup, const WwCellLighting & lighting, const ProbeSkyLight & sky, const RtDdgiSpec & spec,
+	RtDdgiVolume * out, Packed & S )
 {
 	*out = RtDdgiVolume();
 	QElapsedTimer tm;
@@ -523,10 +491,17 @@ bool rtddgiRun( const ProbeSoup & soup, const WwCellLighting & lighting, const P
 		return false;
 	}
 	// ---- the grid's box: the placement's probes (probegi's), one step past them each side (ours), else the soup's
-	const float st[3] = { spec.spacing, spec.spacing, spec.spacing * spec.zScale };
+	float st[3] = { spec.spacing, spec.spacing, spec.spacing * spec.zScale };
 	float lo[3] = { 3.4e38f, 3.4e38f, 3.4e38f }, hi[3] = { -3.4e38f, -3.4e38f, -3.4e38f };
 	bool have = false;
-	if ( spec.place ) {
+	if ( spec.box[3] > spec.box[0] && spec.box[4] > spec.box[1] && spec.box[5] > spec.box[2] ) {   // M2: the caller's box
+		for ( int k = 0; k < 3; k++ ) {
+			lo[k] = spec.box[k];
+			hi[k] = spec.box[3 + k];
+		}
+		have = true;
+	}
+	if ( !have && spec.place ) {
 		ProbePlaceSpec ps;
 		ps.minX = spec.rect[0];
 		ps.minY = spec.rect[1];
@@ -556,11 +531,20 @@ bool rtddgiRun( const ProbeSoup & soup, const WwCellLighting & lighting, const P
 		}
 	}
 	qint64 nP = 1;
-	for ( int k = 0; k < 3; k++ ) {
-		out->step[k] = st[k];
-		out->origin[k] = std::floor( lo[k] / st[k] ) * st[k];   // world multiples of the spacing
-		out->dims[k] = std::max( 2, int( std::floor( ( hi[k] - out->origin[k] ) / st[k] ) ) + 1 );
-		nP *= out->dims[k];
+	for ( int pass = 0; pass < 64; pass++ ) {
+		nP = 1;
+		for ( int k = 0; k < 3; k++ ) {
+			out->step[k] = st[k];
+			out->origin[k] = std::floor( lo[k] / st[k] ) * st[k];   // world multiples of the spacing
+			out->dims[k] = std::max( 2, int( std::floor( ( hi[k] - out->origin[k] ) / st[k] ) ) + 1 );
+			nP *= out->dims[k];
+		}
+		if ( !spec.fitProbes || nP <= spec.maxProbes )
+			break;
+		// M2: the cell's volume keeps its cap by a wider spacing (the census names it), never by a smaller box
+		const float g = std::max( 1.02f, float( std::cbrt( double( nP ) / double( std::max( spec.maxProbes, 8 ) ) ) ) );
+		for ( int k = 0; k < 3; k++ )
+			st[k] *= g;
 	}
 	out->probes = int( std::min<qint64>( nP, 0x7fffffff ) );
 	if ( nP > spec.maxProbes ) {
@@ -572,7 +556,6 @@ bool rtddgiRun( const ProbeSoup & soup, const WwCellLighting & lighting, const P
 		: 2.0f * std::sqrt( st[0] * st[0] + st[1] * st[1] + st[2] * st[2] );
 
 	// ---- the packed inputs (the soup's local frame, probegi's: x, y moved by the floor of the box centre)
-	Packed S;
 	{
 		double mn[2] = { 1e300, 1e300 }, mx[2] = { -1e300, -1e300 };
 		for ( size_t i = 0; i < soup.tris.size(); i += 3 )
@@ -663,6 +646,16 @@ bool rtddgiRun( const ProbeSoup & soup, const WwCellLighting & lighting, const P
 	P.blendp[1] = spec.sharpness;
 	P.blendp[2] = spec.bias;
 	out->msBuild = double( tm.nsecsElapsed() ) / 1e6;
+	return true;
+}
+
+bool rtddgiRun( const ProbeSoup & soup, const WwCellLighting & lighting, const ProbeSkyLight & sky, const RtDdgiSpec & spec,
+	RtDdgiVolume * out )
+{
+	Packed S;
+	if ( !packVolume( soup, lighting, sky, spec, out, S ) )
+		return false;
+	const qint64 nP = out->probeCount();
 
 	// ---- the GPU when asked and able, else the twin
 	bool done = false;
@@ -716,6 +709,170 @@ bool rtddgiRun( const ProbeSoup & soup, const WwCellLighting & lighting, const P
 	}
 	out->ok = true;
 	return true;
+}
+
+// ------------------------------------------------------------------ M2: the live volume (the cell view's)
+struct RtDdgiLive::Impl
+{
+	RtDdgiSpec spec;
+	RtDdgiVolume vol;
+	bakert::DdgiGpuSession * s = nullptr;
+	QString why;
+	bool busy = false;
+	int updates = 0;
+	double ms[4] = { -1, -1, -1, -1 };
+	double wall = 0;
+	qint64 rays = 0;
+};
+
+RtDdgiLive::RtDdgiLive() : d( new Impl ) {}
+RtDdgiLive::~RtDdgiLive()
+{
+	close();
+	delete d;
+}
+
+bool RtDdgiLive::open( const ProbeSoup & soup, const WwCellLighting & lighting, const ProbeSkyLight & sky, const RtDdgiSpec & specIn )
+{
+	close();
+	d->spec = specIn;
+	d->spec.frames = 0;   // the packed rotations: none, step() makes each update's own
+	d->spec.gpu = 1;
+	d->why.clear();
+	Packed S;
+	if ( !packVolume( soup, lighting, sky, d->spec, &d->vol, S ) ) {
+		d->why = d->vol.error;
+		return false;
+	}
+	bakert::DdgiGpuJob job;
+	job.bvh = &S.bvh;
+	job.params = S.prm;
+	job.triAttr = std::move( S.triAttr );
+	job.lights = std::move( S.lights );
+	job.frames = 0;
+	job.relocate = d->spec.relocate;
+	job.classify = d->spec.classify;
+	bakert::DdgiGpuOut g;
+	d->s = bakert::ddgiGpuOpen( job, &g );
+	if ( !d->s ) {
+		d->why = QStringLiteral( "the GPU did not run: %1" ).arg( QString::fromStdString( g.why ) );
+		return false;
+	}
+	RtDdgiVolume & v = d->vol;
+	const int nP = v.probeCount();
+	v.path = QStringLiteral( "gpu (%1)" ).arg( QString::fromStdString( g.device ) );
+	v.offset.resize( size_t( nP ) * 3 );
+	v.state.resize( size_t( nP ) );
+	v.off = v.asleep = v.vigilant = v.moved = 0;
+	for ( int p = 0; p < nP; p++ ) {
+		for ( int k = 0; k < 3; k++ )
+			v.offset[size_t( p ) * 3 + size_t( k )] = g.probes[size_t( p ) * 4 + size_t( k )];
+		const int st = int( g.probes[size_t( p ) * 4 + 3] + 0.5f );
+		v.state[size_t( p )] = st;
+		v.off += st == kOff ? 1 : 0;
+		v.asleep += st == kAsleep ? 1 : 0;
+		v.vigilant += st == kVigilant ? 1 : 0;
+		const float * o = &v.offset[size_t( p ) * 3];
+		v.moved += ( o[0] * o[0] + o[1] * o[1] + o[2] * o[2] ) > 1e-6f ? 1 : 0;
+	}
+	v.blasGrow = g.blasGrow;
+	v.rays = g.rays;
+	v.msBuild += g.msBuild;
+	v.msReloc = g.msReloc;
+	v.ok = true;
+	d->updates = 0;
+	return true;
+}
+
+bool RtDdgiLive::isOpen() const { return d->s != nullptr; }
+
+bool RtDdgiLive::step( int k )
+{
+	d->busy = false;
+	if ( !d->s ) {
+		d->why = QStringLiteral( "not open" );
+		return false;
+	}
+	k = std::max( 0, std::min( k, 16 ) );
+	std::vector<float> rot( size_t( k ) * 9 );
+	const bool noRot = hasRed( d->spec.red, "norot" );
+	for ( int f = 0; f < k; f++ ) {
+		const M3 r = noRot ? M3() : updateRotation( d->spec.seed, quint32( d->updates + f ) );
+		std::memcpy( &rot[size_t( f ) * 9], r.m, 36 );
+	}
+	bakert::DdgiGpuStepOut so;
+	if ( !bakert::ddgiGpuStep( d->s, rot.data(), k, quint32( d->updates ), false, &so ) ) {
+		d->busy = so.busy;
+		d->why = QString::fromStdString( so.why );
+		return false;
+	}
+	d->updates += k;
+	for ( int c = 0; c < 4; c++ )
+		d->ms[c] = so.ms[c];
+	d->wall = so.msWall;
+	d->rays = so.rays;
+	d->vol.rays += so.rays;
+	d->vol.msFrames += so.msWall;
+	return true;
+}
+
+void RtDdgiLive::close()
+{
+	if ( d->s )
+		bakert::ddgiGpuClose( d->s );
+	d->s = nullptr;
+	d->updates = 0;
+}
+
+const RtDdgiVolume & RtDdgiLive::volume() const { return d->vol; }
+const RtDdgiSpec & RtDdgiLive::spec() const { return d->spec; }
+QString RtDdgiLive::why() const { return d->why; }
+bool RtDdgiLive::busy() const { return d->busy; }
+int RtDdgiLive::updates() const { return d->updates; }
+const float * RtDdgiLive::irr() const { return bakert::ddgiGpuHostIrr( d->s ); }
+const float * RtDdgiLive::dist() const { return bakert::ddgiGpuHostDist( d->s ); }
+const quint32 * RtDdgiLive::age() const { return reinterpret_cast<const quint32 *>( bakert::ddgiGpuHostAge( d->s ) ); }
+const double * RtDdgiLive::lastMs() const { return d->ms; }
+double RtDdgiLive::lastWallMs() const { return d->wall; }
+qint64 RtDdgiLive::lastRays() const { return d->rays; }
+
+void RtDdgiLive::snapshot( RtDdgiVolume * out ) const
+{
+	*out = d->vol;
+	const int nP = d->vol.probeCount();
+	const float * ir = irr(), * di = dist();
+	const quint32 * ag = age();
+	out->irr.assign( size_t( nP ) * 256, 0.0f );
+	out->dist.assign( size_t( nP ) * 512, 0.0f );
+	out->age.assign( size_t( nP ), 0u );
+	if ( !ir || !di || !ag )
+		return;
+	std::memcpy( out->irr.data(), ir, out->irr.size() * 4 );
+	std::memcpy( out->dist.data(), di, out->dist.size() * 4 );
+	std::memcpy( out->age.data(), ag, out->age.size() * 4 );
+}
+
+quint64 rtddgiLightsKey( const WwCellLighting & lighting )
+{
+	quint64 h = 0xCBF29CE484222325ULL;
+	auto eat = [&h]( const void * p, size_t n ) {
+		const unsigned char * b = static_cast<const unsigned char *>( p );
+		for ( size_t i = 0; i < n; i++ )
+			h = ( h ^ b[i] ) * 0x100000001B3ULL;
+	};
+	const double O[2] = { 0, 0 };
+	float o[kLight];
+	for ( const WwCellLight & l : lighting.lights ) {
+		if ( l.radius <= 0.0f )
+			continue;
+		packLight( l, O, o );   // exactly what the volume's lights buffer gets (in the world frame)
+		eat( o, sizeof o );
+	}
+	const int flags[2] = { lighting.interior ? 1 : 0, lighting.hasDirectional ? 1 : 0 };
+	eat( flags, sizeof flags );
+	eat( lighting.dirTo, sizeof lighting.dirTo );
+	eat( lighting.dirColor, sizeof lighting.dirColor );
+	return h;
 }
 
 void rtddgiProbeIrradiance( const RtDdgiVolume & vol, int p, const float dir[3], float out[3] )

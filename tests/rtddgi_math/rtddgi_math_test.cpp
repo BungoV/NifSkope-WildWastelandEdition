@@ -1,7 +1,7 @@
 // rtddgi_math_test -- lane RTXGI1 M1 (2026-10-29): the DDGI probe math of src/rtddgimath.h, no Qt, no GPU.
 //
 //   g++ -O2 -std=c++17 -I src tests/rtddgi_math/rtddgi_math_test.cpp -o rtddgi_math_test -static
-//   ./rtddgi_math_test            -> every check PASS, last line "RTDDGI_MATH PASS 13", exit 0
+//   ./rtddgi_math_test            -> every check PASS, last line "RTDDGI_MATH PASS 14", exit 0
 //   -DRTDDGI_RED_<NAME>           -> swaps a wrong rule into the header; check <name> must FAIL (exit 1)
 //
 // Checks and their reds (tests/rtddgi_math/run.sh builds all fourteen and asserts each):
@@ -19,13 +19,23 @@
 //   tie     M1FIX nearest-hit tie: front beats back, then the lower number    RED_TIE     the number alone
 //   skyvis  M1FIX sky visibility: cosine-weighted miss share, no gamma, the   RED_SKYVIS  plain share of facing rays
 //           irradiance texel's own h
-// Every check is independent of the others' reds (a red build may pass the other twelve).
+//   sample  M2 the 8-probe read: res/shaders/cell_ddgi.glsl (compiled here    RED_SAMPLE  the header drops the
+//           through glsl_shim.h) equals sampleVolume; a wall's far side is     backface weight
+//           dropped, the trilinear red takes it in
+// Every check is independent of the others' reds (a red build may pass the other thirteen).
 
 #include "rtddgimath.h"
 
 #include <cmath>
 #include <cstdio>
 #include <vector>
+
+// M2: the cell view's GLSL read, compiled here from the shader's own file (res/shaders/cell_ddgi.glsl)
+namespace glsl {
+#include "glsl_shim.h"
+#include "../../res/shaders/cell_ddgi.glsl"
+}
+#undef uniform
 
 using namespace rtddgi;
 
@@ -325,6 +335,146 @@ void checkSkyVis()
 		"open cone cos > 0.5: %.4f (0.75), h 0.5 over 0.2: %.4f (0.475), hOut - the texel's h %.2g (0)", v0, v1, h - hWant );
 }
 
+// M2: a volume in the GPU's buffers and the same volume as the cell view's texture buffer (cell_ddgi.glsl's layout)
+struct TestVolume
+{
+	SampleVolume v;
+	std::vector<float> irr, dist, probes, atlas;
+	std::vector<uint32_t> age;
+	void pack( int nP )
+	{
+		atlas.assign( size_t( nP ) * 193 * 4, 0.0f );
+		std::copy( irr.begin(), irr.end(), atlas.begin() );                                   // 64 texels a probe
+		std::copy( dist.begin(), dist.end(), atlas.begin() + std::ptrdiff_t( nP ) * 64 * 4 );  // 128 texels a probe
+		for ( int p = 0; p < nP; p++ ) {   // src/rtddgicell.cpp packs the probes' texels the same way
+			float * t = &atlas[( size_t( nP ) * 192 + size_t( p ) ) * 4];
+			for ( int k = 0; k < 3; k++ )
+				t[k] = probes[size_t( p ) * 4 + size_t( k )];
+			t[3] = probeUsable( int( probes[size_t( p ) * 4 + 3] + 0.5f ), age[size_t( p )] ) ? float( kVigilant ) : float( kOff );
+		}
+		v.irr = irr.data();
+		v.dist = dist.data();
+		v.probes = probes.data();
+		v.age = age.data();
+	}
+	void toGlsl( int nP, unsigned red ) const
+	{
+		glsl::cellDdgiAtlas.data = atlas.data();
+		glsl::cellDdgiAtlas.texels = nP * 193;
+		glsl::cellDdgiAtlas.outside = 0;
+		glsl::cellDdgiOrigin = glsl::vec4( v.origin.x, v.origin.y, v.origin.z, v.D );
+		glsl::cellDdgiStep = glsl::vec4( v.step.x, v.step.y, v.step.z, v.B );
+		glsl::cellDdgiDims.x = v.dims[0];
+		glsl::cellDdgiDims.y = v.dims[1];
+		glsl::cellDdgiDims.z = v.dims[2];
+		glsl::cellDdgiDims.w = nP;
+		glsl::cellDdgiRed = int( red );
+	}
+};
+
+V3 randUnit( uint64_t & s )
+{
+	for ( ;; ) {
+		const V3 q( unit01( s ) * 2.0f - 1.0f, unit01( s ) * 2.0f - 1.0f, unit01( s ) * 2.0f - 1.0f );
+		const float l = length( q );
+		if ( l > 0.05f && l <= 1.0f )
+			return q * ( 1.0f / l );
+	}
+}
+
+void checkSample()
+{
+	// (1) the GLSL read (res/shaders/cell_ddgi.glsl, as written) equals rtddgimath.h sampleVolume on random volumes,
+	// points, normals, view and read directions, under each red bit the cell passes (0, trilinear, nocheb + nobias)
+	uint64_t s = 0x5eed2910ULL;
+	TestVolume T;
+	const int dims[3] = { 5, 4, 3 }, nP = 5 * 4 * 3;
+	T.v.origin = V3( -1000.0f, 2000.0f, 50.0f );
+	T.v.step = V3( 140.0f, 140.0f, 105.0f );
+	for ( int k = 0; k < 3; k++ )
+		T.v.dims[k] = dims[k];
+	T.v.D = 105.0f;
+	T.v.B = kSelfShadowBias;
+	T.irr.resize( size_t( nP ) * 256 );
+	T.dist.resize( size_t( nP ) * 512 );
+	T.probes.resize( size_t( nP ) * 4 );
+	T.age.resize( size_t( nP ) );
+	for ( float & x : T.irr )
+		x = unit01( s );
+	for ( size_t i = 0; i < T.dist.size(); i += 2 ) {
+		const float mean = 20.0f + 380.0f * unit01( s );
+		T.dist[i] = mean;
+		T.dist[i + 1] = mean * mean + 4000.0f * unit01( s );
+	}
+	for ( int p = 0; p < nP; p++ ) {
+		for ( int k = 0; k < 3; k++ )
+			T.probes[size_t( p ) * 4 + size_t( k )] = ( unit01( s ) - 0.5f ) * 40.0f;
+		const float u = unit01( s );
+		T.probes[size_t( p ) * 4 + 3] = float( u < 0.12f ? kOff : u < 0.24f ? kAsleep : kVigilant );
+		T.age[size_t( p )] = unit01( s ) < 0.1f ? 0u : 1u + uint32_t( unit01( s ) * 50.0f );
+	}
+	T.pack( nP );
+	double worstE = 0, worstV = 0, worstW = 0, worstF = 0;
+	int points = 0, noProbe = 0, outside = 0;
+	const unsigned reds[3] = { 0u, kSampleTrilinear, kSampleNoCheb | kSampleNoBias };
+	for ( unsigned red : reds ) {
+		T.toGlsl( nP, red );
+		for ( int i = 0; i < 4000; i++ ) {
+			// the box and a cell past it (the fade and the clamped cage are read there too)
+			const V3 P( T.v.origin.x + ( unit01( s ) * 6.0f - 1.0f ) * T.v.step.x, T.v.origin.y + ( unit01( s ) * 5.0f - 1.0f ) * T.v.step.y,
+				T.v.origin.z + ( unit01( s ) * 4.0f - 1.0f ) * T.v.step.z );
+			const V3 n = randUnit( s ), o = randUnit( s ), d = i % 3 == 0 ? randUnit( s ) : n;
+			const SampleResult a = sampleVolume( T.v, P, n, o, d, red );
+			const glsl::CellDdgiOut b = glsl::cellDdgiRead( glsl::vec3( P.x, P.y, P.z ), glsl::vec3( n.x, n.y, n.z ),
+				glsl::vec3( o.x, o.y, o.z ), glsl::vec3( d.x, d.y, d.z ) );
+			points++;
+			noProbe += a.w <= 0.0f ? 1 : 0;
+			const double eMax = std::max( { 1e-3, double( a.E.x ), double( a.E.y ), double( a.E.z ) } );
+			worstE = std::max( { worstE, std::fabs( a.E.x - b.E.x ) / eMax, std::fabs( a.E.y - b.E.y ) / eMax, std::fabs( a.E.z - b.E.z ) / eMax } );
+			worstV = std::max( worstV, double( std::fabs( a.vis - b.vis ) ) );
+			worstW = std::max( worstW, std::fabs( a.w - b.w ) / std::max( 1e-6, double( a.w ) ) );
+			worstF = std::max( worstF, double( std::fabs( a.fade - b.fade ) ) );
+		}
+		outside += glsl::cellDdgiAtlas.outside;
+	}
+	const bool same = worstE < 1e-3 && worstV < 1e-4 && worstW < 1e-3 && worstF < 1e-5 && outside == 0 && noProbe < points / 4;
+
+	// (2) the leak the read exists to stop: a lit layer of probes behind a wall the distance tiles see 10 units away
+	// (var 0). The default read drops them (Chebyshev floor, then the crush); the trilinear red takes them in.
+	TestVolume L;
+	const int nL = 8;
+	L.v.origin = V3( 0, 0, 0 );
+	L.v.step = V3( 100, 100, 100 );
+	L.v.dims[0] = L.v.dims[1] = L.v.dims[2] = 2;
+	L.v.D = 100.0f;
+	L.irr.assign( size_t( nL ) * 256, 0.0f );
+	L.dist.assign( size_t( nL ) * 512, 0.0f );
+	L.probes.assign( size_t( nL ) * 4, 0.0f );
+	L.age.assign( size_t( nL ), 1u );
+	for ( int p = 0; p < nL; p++ ) {
+		const bool up = p >= 4;   // z = 100: the far side of a slab at z ~ 90
+		for ( int t = 0; t < 64; t++ )
+			for ( int c = 0; c < 3; c++ )
+				L.irr[( size_t( p ) * 64 + size_t( t ) ) * 4 + size_t( c )] = up ? 0.9f : 0.3f;
+		for ( int t = 0; t < 256; t++ ) {
+			const float mean = up ? 10.0f : 1000.0f;
+			L.dist[( size_t( p ) * 256 + size_t( t ) ) * 2] = mean;
+			L.dist[( size_t( p ) * 256 + size_t( t ) ) * 2 + 1] = mean * mean;
+		}
+		L.probes[size_t( p ) * 4 + 3] = float( kVigilant );
+	}
+	L.pack( nL );
+	const V3 P( 50, 50, 40 ), n( 0, 0, 1 ), o = normalize( V3( 0.3f, 0.2f, 1.0f ) );
+	const SampleResult g = sampleVolume( L.v, P, n, o, n, 0u ), r = sampleVolume( L.v, P, n, o, n, kSampleTrilinear );
+	const double lg = g.E.x, lr = r.E.x, dark = 2.0 * kPi * std::pow( 0.3, 5.0 );
+	// worked by hand: the wall side ~0.021 (the dark layer's 0.0153 plus the crushed lit one), the red ~1.5
+	const bool leak = lg < 2.0 * dark && lr > 10.0 * lg;
+	report( "sample", same && leak, "GLSL read vs header on %g points: E worst rel %.2g (bar 1e-3), vis worst %.2g (bar 1e-4)",
+		points, worstE, worstV );
+	std::printf( "      w worst rel %.3g, fade %.3g, reads outside the atlas %d, points with no probe %d; leak: wall side E %.5f "
+		"(bar 2 x the dark side's %.5f), trilinear red %.5f (bar 10 x)\n", worstW, worstF, outside, noProbe, lg, dark, lr );
+}
+
 } // namespace
 
 int main()
@@ -342,6 +492,7 @@ int main()
 	checkReloc();
 	checkTie();
 	checkSkyVis();
+	checkSample();
 	std::printf( "RTDDGI_MATH %s %d%s\n", g_fail ? "FAIL" : "PASS", g_fail ? g_fail : g_pass, g_fail ? " failed" : "" );
 	return g_fail ? 1 : 0;
 }

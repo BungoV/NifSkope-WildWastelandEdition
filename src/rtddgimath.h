@@ -417,6 +417,110 @@ inline float crushWeight( float w )
 	return w < kCrush ? w * w * w / ( kCrush * kCrush ) : w;
 }
 
+// ------------------------------------------------------------------ the 8-probe read (M2: the bounce and the surfaces)
+//! the read's red bits: the twin's (src/rtddgi.cpp kRedNoCheb / kRedNoBias, ddgi_common.glsl DDGI_RED_*) and the cell's
+constexpr unsigned kSampleTrilinear = 1u;   // WW_CELL_RTDDGI_RED=trilinear: the trilinear weight alone (no backface, no Chebyshev, no crush)
+constexpr unsigned kSampleNoCheb = 2u;      // no Chebyshev factor
+constexpr unsigned kSampleNoBias = 4u;      // no self-shadow bias
+//! a probe the read takes: Vigilant and blended at least once (Asleep probes are not traced, Off ones sit in walls)
+inline bool probeUsable( int state, uint32_t age )
+{
+	return state == kVigilant && age > 0;
+}
+/*! A volume as the read sees it: the GPU's buffers (one probe after another: irr 8 x 8 x 4 floats, dist 16 x 16 x 2,
+ *  probes 4 = offset xyz + state, age 1), the first probe, the spacing, the probe counts, D = the smallest spacing and
+ *  B = the self-shadow bias. */
+struct SampleVolume
+{
+	const float * irr = nullptr;
+	const float * dist = nullptr;
+	const float * probes = nullptr;
+	const uint32_t * age = nullptr;
+	V3 origin, step;
+	int dims[3] = { 0, 0, 0 };
+	float D = 1.0f, B = kSelfShadowBias;
+};
+//! E = irradiance (decoded x 2 pi), vis = sky visibility, w = the weights' sum (0: no probe usable), fade = see below
+struct SampleResult
+{
+	V3 E;
+	float vis = 0.0f, w = 0.0f, fade = 0.0f;
+};
+/*! The irradiance at surface point P (normal n, o = unit direction to the viewer, or back along the ray for a hit)
+ *  from the 8 probes of the cage round the biased point P' = P + biasVector ([J19 5.2], [J21 4.1 eq 2], GUIDE 3):
+ *  per probe w = backfaceWeight(dir P -> probe) x max(0.05, Chebyshev(|P' - probe|) at dir probe -> P') floored at
+ *  1e-6, crushed, x the trilinear weight of P' in the cage; probes that are not usable weigh 0. The tiles are read at
+ *  direction d (n for the irradiance; a reflection's lobe for the sky visibility): bilinear on the ENCODED value,
+ *  then e^2.5 per probe, the weighted mean, squared, x 2 pi ([J21] fig 4: the blend's gamma 5). vis is the weighted
+ *  mean of the tile's alpha (linear, M1FIX). fade (ours, M2): 1 one cell inside the probe box, falling to 0 at its
+ *  faces and past them (the cell view hands over to the baked grid there). The twin's bounce (traceRay) and the
+ *  GLSL read (res/shaders/cell_ddgi.glsl cellDdgiRead, the unit test's "sample" check) both follow it.
+ *  GLSL: trace.comp ddgiIrradianceAt (d = n, no vis, no fade), res/shaders/cell_ddgi.glsl cellDdgiRead */
+inline SampleResult sampleVolume( const SampleVolume & v, V3 P, V3 n, V3 o, V3 d, unsigned red )
+{
+	SampleResult out;
+	V3 Pb = P;
+	if ( !( red & kSampleNoBias ) )
+		Pb = Pb + biasVector( n, o, v.D, v.B );
+	int base[3];
+	float a[3];
+	float fade = 1.0f;
+	for ( int k = 0; k < 3; k++ ) {
+		const float g = ( Pb[k] - v.origin[k] ) / v.step[k];
+		base[k] = std::min( std::max( int( std::floor( g ) ), 0 ), std::max( v.dims[k] - 2, 0 ) );
+		a[k] = clampf( g - float( base[k] ), 0.0f, 1.0f );
+		fade = std::min( fade, clampf( std::min( g, float( v.dims[k] - 1 ) - g ), 0.0f, 1.0f ) );
+	}
+	out.fade = fade;
+	double sum[3] = { 0, 0, 0 }, vsum = 0, wsum = 0;
+	for ( int c = 0; c < 8; c++ ) {
+		const int off[3] = { c & 1, ( c >> 1 ) & 1, ( c >> 2 ) & 1 };
+		int pc[3];
+		for ( int k = 0; k < 3; k++ )
+			pc[k] = std::min( base[k] + off[k], v.dims[k] - 1 );
+		const int p = pc[0] + v.dims[0] * ( pc[1] + v.dims[1] * pc[2] );
+		const float * pr = &v.probes[size_t( p ) * 4];
+		if ( !probeUsable( int( pr[3] + 0.5f ), v.age[size_t( p )] ) )
+			continue;
+		float trilinear = 1.0f;
+		for ( int k = 0; k < 3; k++ )
+			trilinear *= off[k] ? a[k] : 1.0f - a[k];
+		const V3 pp( v.origin.x + float( pc[0] ) * v.step.x + pr[0], v.origin.y + float( pc[1] ) * v.step.y + pr[1],
+			v.origin.z + float( pc[2] ) * v.step.z + pr[2] );
+		float w = 1.0f;
+		if ( !( red & kSampleTrilinear ) ) {
+#ifdef RTDDGI_RED_SAMPLE
+			w = 1.0f;   // red: the backface weight dropped (the GLSL read keeps it: the "sample" check must fail)
+#else
+			w = backfaceWeight( normalize( pp - P ), n );
+#endif
+			const V3 bToProbe = pp - Pb;
+			const float r = length( bToProbe );
+			if ( !( red & kSampleNoCheb ) && r > 0.0f ) {
+				float m[2];
+				sampleTile( &v.dist[size_t( p ) * kDistTile * kDistTile * 2], kDistTile, 2, bToProbe * ( -1.0f / r ), m );
+				w *= chebyshevWeight( r, m[0], m[1] );
+			}
+			w = std::max( w, 1e-6f );
+			w = crushWeight( w );
+		}
+		w *= trilinear;
+		float e[4];
+		sampleTile( &v.irr[size_t( p ) * kIrrTile * kIrrTile * 4], kIrrTile, 4, d, e );
+		for ( int k = 0; k < 3; k++ )
+			sum[k] += double( w ) * std::pow( std::max( e[k], 0.0f ), 2.5f );
+		vsum += double( w ) * e[3];
+		wsum += w;
+	}
+	if ( wsum <= 0.0 )
+		return out;
+	const V3 m( float( sum[0] / wsum ), float( sum[1] / wsum ), float( sum[2] / wsum ) );
+	out.E = m * m * ( 2.0f * kPi );
+	out.vis = float( vsum / wsum );
+	out.w = float( wsum );
+	return out;
+}
+
 // ------------------------------------------------------------------ relocation and classification [J21 5, 6; SDK doc]
 /*! one relocation iteration of a probe from its fixed rays (dirs, signed stored distances: a backface hit stores
  *  -0.2 t, a miss kMiss), its current offset and its cell (step per axis). [J21 fig 8]: backface share > 0.25 ->

@@ -62,7 +62,39 @@ struct DdgiGpuOut
 };
 
 //! the whole run (build, relocation, classification, frames, read back) on the bake device; false + why when it cannot
+//! (M2: open, steps of up to 16 updates, the host copies, close)
 bool ddgiGpuRun( const DdgiGpuJob & job, DdgiGpuOut * out );
+
+/* M2 (2026-10-29): a volume kept on the device and updated a few times a frame (the cell view, src/rtddgicell.cpp).
+ * The working buffers are device local; each step copies the tiles to host buffers (cached when the device has such
+ * memory) that the caller reads until the next step. A step takes the device's lock only if it is free (a bake in
+ * flight makes it `busy`, nothing run). Not thread-safe per session: one caller at a time. */
+struct DdgiGpuSession;
+
+//! builds the scene and the buffers, relocates and classifies as ddgiGpuRun does; out gets the states (probes), the
+//! build and relocation ms, the BLAS growth and the device; nullptr + out->why when it cannot (job.frames unused)
+DdgiGpuSession * ddgiGpuOpen( const DdgiGpuJob & job, DdgiGpuOut * out );
+
+struct DdgiGpuStepOut
+{
+	bool ok = false, busy = false;
+	std::string why;
+	double ms[4] = { -1, -1, -1, -1 };    // GPU ms summed over the step's updates: trace, blend, border; [3] the copy to the host (-1: no timestamps)
+	double msWall = 0;                    // the step on the CPU's clock, submit to fence
+	long long rays = 0;
+};
+//! k updates (rotations: 9 floats each, row major, k of them), numbered frame0..; then the host copies (k = 0: the
+//! copies alone). copyRays adds the rays buffer (the fixed rays' distances, ddgiGpuRun's dumpFixed).
+bool ddgiGpuStep( DdgiGpuSession * s, const float * rotations, int k, uint32_t frame0, bool copyRays, DdgiGpuStepOut * out );
+//! the host copies of the last step (nullptr before the first): irr 64 vec4 a probe, dist 256 vec2, age 1, probes 4
+//! (offset xyz, state; written at open), rays N vec4 (copyRays only)
+const float * ddgiGpuHostIrr( const DdgiGpuSession * s );
+const float * ddgiGpuHostDist( const DdgiGpuSession * s );
+const uint32_t * ddgiGpuHostAge( const DdgiGpuSession * s );
+const float * ddgiGpuHostProbes( const DdgiGpuSession * s );
+const float * ddgiGpuHostRays( const DdgiGpuSession * s );
+//! frees everything (waits for the device's lock)
+void ddgiGpuClose( DdgiGpuSession * s );
 
 } // namespace bakert
 

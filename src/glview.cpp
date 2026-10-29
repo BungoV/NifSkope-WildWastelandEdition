@@ -66,6 +66,7 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include "data/nifitem.h"
 #include "nifsnapshot.h"
 #include "probesky.h"	// lane SKY1: one call a frame
+#include "rtddgicell.h"	// lane RTXGI1 M2: the ray-traced GI volume, one call a frame
 #include "celldoorlive.h"	// lane DOORLIVE1: one call a frame
 #include "cellworldanim.h"	// lane FXPARITY2: the cell's world clock
 #include "shortcutregistry.h"
@@ -4114,6 +4115,7 @@ void GLView::paintGL()
 	wwCellShadowPass( scene );
 	PassTime::end( PassTime::CellShadows );
 	probeSkyTick( scene, scene->nifModel, this );	// lane SKY1: an exterior's bounce follows the weather
+	rtddgiCellFrame( scene );	// lane RTXGI1 M2: the ray-traced GI volume builds, updates and uploads (off: nothing)
 
 	PassTime::begin( PassTime::Background );	// lane PERF1: the sky (or background) and the ground plane
 	if ( perspectiveMode ) {
@@ -4365,6 +4367,7 @@ void GLView::paintGL()
 	// lane PROBEVIEW1: the PRTP band's Pass overlays (surfel tiles, lit probes, the picked probe's links)
 	wwCellProbeViewDraw( scene, viewTrans );
 	wwCellVolumeViewDraw( scene, viewTrans );   // lane VOLFIT1: rooms, shapes, thresholds; VOLVIEW2: in the PRTP Debug View
+	rtddgiCellViewDraw( scene, viewTrans );	// lane RTXGI1 M2: the Ray-traced GI probes row (states / irradiance)
 
 	if ( !cleanView ) {	// lane VIEWFULL1: Clean View hides the paint helpers (block kept at its old indent)
 	// Selected-bone weight heatmap. Per-corner colours are supplied by the

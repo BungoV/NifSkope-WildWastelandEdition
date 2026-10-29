@@ -17,7 +17,11 @@
  *
  *  M1 draws nothing: `nifskope -no-gui rtddgi ...` builds a volume from a soup and dumps it (rtddgiDump), so its
  *  per-probe irradiance can be compared with tests/bounce_reference at the same points. Nothing outside that CLI
- *  calls this code: the viewer is byte for byte as before. */
+ *  calls this code: the viewer is byte for byte as before.
+ *
+ *  M2 (2026-10-29): RtDdgiLive keeps a volume on the GPU and updates it a few times a frame; the cell view
+ *  (src/rtddgicell.h, switch WW_CELL_RTDDGI / the "Ray-traced GI" row, default off) builds one for the open cell and its
+ *  surfaces read it (res/shaders/cell_ddgi.glsl). The CLI and its dumps are unchanged. */
 
 #include <QString>
 #include <QStringList>
@@ -55,6 +59,10 @@ struct RtDdgiSpec
 	QString red;
 	bool dumpFixed = false;     //!< keep each probe's 32 fixed-ray distances for rtddgi_fixed.tsv (the CLI's --dump-fixed)
 	float rect[4] = { 0, 0, 0, 0 };   //!< minX minY maxX maxY (world), the placement's and the grid's xy box
+	/*! M2: the grid's box given (world lo xyz, hi xyz; the cell view's: the probe GI's grid round the camera), no
+	 *  placement; unused while hi <= lo on any axis */
+	float box[6] = { 0, 0, 0, 0, 0, 0 };
+	bool fitProbes = false;     //!< M2: over maxProbes the spacing grows until the grid fits (else the run refuses)
 };
 
 struct RtDdgiVolume
@@ -86,6 +94,49 @@ struct RtDdgiVolume
 //! Build and converge a volume over `soup` lit by `lighting` (lights, interior directional) and `sky` (sun, weather).
 bool rtddgiRun( const ProbeSoup & soup, const WwCellLighting & lighting, const ProbeSkyLight & sky, const RtDdgiSpec & spec,
 	RtDdgiVolume * out );
+
+/*! M2 (2026-10-29): a volume kept on the GPU and updated a few times a frame (the cell view's, src/rtddgicell.h).
+ *  open() packs the inputs as rtddgiRun does (spec.frames unused), builds the device's scene and buffers, relocates
+ *  and classifies; volume() then holds the grid, the states, offsets and the census (no tiles). step(k) runs k updates
+ *  (the rotations updateRotation(spec.seed, n) for the volume's update numbers n, as the CLI's) and copies the tiles to
+ *  the host: irr(), dist(), age() in the GPU's layout (rtddgi_gpu.h), valid until the next step or close. There is no
+ *  CPU twin here: open() fails with why() when the GPU path cannot run (a frame's worth of rays is a GPU's work). */
+class RtDdgiLive
+{
+public:
+	RtDdgiLive();
+	~RtDdgiLive();
+	RtDdgiLive( const RtDdgiLive & ) = delete;
+	RtDdgiLive & operator=( const RtDdgiLive & ) = delete;
+
+	bool open( const ProbeSoup & soup, const WwCellLighting & lighting, const ProbeSkyLight & sky, const RtDdgiSpec & spec );
+	bool isOpen() const;
+	//! k updates (0..16); false: the device was busy (busy() true: nothing ran, try next frame) or failed (why())
+	bool step( int k );
+	void close();
+
+	const RtDdgiVolume & volume() const;
+	const RtDdgiSpec & spec() const;
+	QString why() const;
+	bool busy() const;
+	int updates() const;              //!< updates run since open
+	const float * irr() const;        //!< 64 vec4 a probe (encoded rgb, sky visibility), nullptr before the first step
+	const float * dist() const;       //!< 256 vec2 a probe
+	const quint32 * age() const;
+	//! the last step: GPU ms of trace, blend, border summed over its updates, [3] the copy to the host (-1: no timer), wall ms
+	const double * lastMs() const;
+	double lastWallMs() const;
+	qint64 lastRays() const;
+	//! the volume with this step's tiles and ages copied in (rtddgiDump's input)
+	void snapshot( RtDdgiVolume * out ) const;
+
+private:
+	struct Impl;
+	Impl * d;
+};
+
+//! M2: a key of everything in `lighting` the volume's shading reads (the cell view rebuilds when it moves)
+quint64 rtddgiLightsKey( const WwCellLighting & lighting );
 
 /*! The gate's dump in folder `dir`:
  *    rtddgi_probes.tsv  per probe: index, ix iy iz, x y z (world, offset in), state, age, then E (decoded x 2 pi) on

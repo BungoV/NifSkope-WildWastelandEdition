@@ -494,6 +494,23 @@ void probeSkyForget()
 	picNow() = PicNow();
 }
 
+const ProbeSoup * probeSkyKeptSoup( const void * nif, ProbeSkyLight * sky, WwCellLighting * lights )
+{
+	Kept & k = kept();
+	if ( !nif || k.nif != nif || k.soup.tris.empty() )
+		return nullptr;
+	const WwCellLighting * L = wwCellLightsFor( nif );
+	if ( !L )
+		return nullptr;
+	if ( sky )
+		*sky = k.skyKept && !( L->interior && !k.spec.interiorSky ) ? k.spec.sky : ProbeSkyLight();
+	if ( lights ) {
+		WwCellLighting withBulbs;
+		*lights = wwNifxGiLights( *L, wwNifxLightsRed(), withBulbs ) ? withBulbs : *L;
+	}
+	return &k.soup;
+}
+
 void probeSkyKeep( const void * nif, const ProbeSoup & soup, const QString & bakeDir, const ProbeGiSpec & spec, bool skyKept )
 {
 	Kept & k = kept();   // one cell at a time: the latest relit

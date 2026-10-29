@@ -1,5 +1,36 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## RTXGI1 M2: the ray-traced GI volume lights the cell view (switch, live; ships Off)
+
+- **Show > Lighting > Ray-traced GI** (`WW_CELL_RTDDGI=1`, default Off): with the probe GI's relit cell open, a DDGI
+  volume is built on a worker from the same soup, the same relight lights (placed lights, spots, the interior
+  directional, the .nifx bulbs) and the weather's sky. The box is the probe GI's grid within one cell of the camera, a
+  probe every 140 units, wider when needed to stay under 4096 probes. The bake device then runs 4 updates a frame
+  (trace, blend, border) and copies the tiles into one GL texture buffer. The surfaces read it where the volume
+  reaches; the baked grid is still read past it and across its last cell (`res/shaders/cell_ddgi.glsl`, called from
+  `cellGiVolume` and `cellSpecSky`). The read uses 8 probes with these weights: trilinear, smooth backface, Chebyshev
+  from the distance tiles, the low-weight crush, and the normal/view self-shadow bias. Probes that are Off or never
+  blended weigh 0, and the irradiance is decoded with the blend's gamma 5. It replaces the flat ambient whole (k = 1,
+  linear). The Sky visibility pass and the specular sky occlusion read the volume's own sky visibility (the tiles'
+  alpha).
+- **Off is today's frame:** the read is compiled only under the loader's `#define WW_CELL_RTDDGI` (the off programs'
+  source differs by `#ifdef` lines only). Off also binds, uploads and draws nothing. Setting the switch reloads the
+  shaders, and the next frame builds or frees the volume: live, no reopen.
+- **Show > Lighting > Ray-traced GI probes** (`WW_CELL_RTDDGI_VIEW=0|states|irradiance`): the volume's probes over the
+  frame as small spheres, coloured by state (vigilant green, asleep blue, off red), or shaded by their own irradiance
+  per direction. Debug view > GI shows the surfaces' sampled irradiance (it reads the volume while it is on).
+- Harness keys: `WW_CELL_RTDDGI_RED=trilinear` (the plain trilinear read, the leak gate's red; also `nocheb`,
+  `nobias`). `WW_CELL_RTDDGI_SPEC=spacing=,probes=,reach=,rays=,updates=,max=,zscale=` (`max` stops after that many
+  updates, for pictures that repeat). `WW_CELL_RTDDGI_DUMP=<dir>` writes the CLI's dump of the live volume. The live
+  driver's settle waits for the build and for `max`.
+- Census lines `rtddgi cell: built ...` and `rtddgi cell: set N ...` give the probes by state, the update count, GPU ms
+  per pass (trace, blend, border, copy, from Vulkan timestamps), the readback ms (device copy + GL upload) and the
+  atlas bytes.
+- The math lives once, in `src/rtddgimath.h sampleVolume`: the CPU twin's bounce reads it too, and the unit test
+  compiles the shader's own `cell_ddgi.glsl` text against it (check `sample` with red `RTDDGI_RED_SAMPLE`; 14 checks +
+  14 reds). The GPU run is now a session (open, steps, close): device-local buffers, timestamps, and up to 16 updates
+  a submit. The CLI keeps its output.
+
 ## RTXGI1 M1 + M1FIX: ray-traced DDGI volume (CLI only, nothing drawn yet)
 
 - **`NifSkope -no-gui rtddgi`**: a DDGI probe volume (our own code, from the 2019/2021 papers) traced on the GPU with
