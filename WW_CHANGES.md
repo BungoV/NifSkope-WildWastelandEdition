@@ -31,6 +31,36 @@
   (files through the real reader: round trip, keep, GI conversion identity, rooms mode, novol, refusals).
 - Not yet: a drag gizmo for volumes (the band's fields and To 3D cursor place them), an ambient particle emitter, a
   room-aware ray-traced GI read, live gi blocks.
+## RTXGI1 M3: the ray-traced GI volume follows the camera, and GL reads it in place (still ships Off)
+
+- **No copy back (interop):** the volume's irradiance, distance and probe tiles now sit in one device buffer, laid out
+  the way the cell shader reads them. The bake device exports that buffer to the GL view (Win32 external memory), and
+  GL uses it as the texture buffer's storage. There is no copy to the host and no upload: the census's `readback ms`
+  reads 0. Two shared semaphores order the two APIs: GL waits for the device's update set before it reads, and the
+  device waits for GL's earlier reads before it writes. A step no longer waits for the device: a later frame collects
+  it, or counts a busy frame. Both sides must be the same GPU and driver (checked by UUID). Otherwise the census says
+  why and the volume falls back to M2's readback.
+- **The volume follows the camera (scrolling):** the box is now a window, 2 x reach on each side (or the probe GI
+  grid's own size where that is smaller), kept inside the grid round the camera. Its size no longer depends on where
+  the camera was at the build. When the camera crosses a probe cell, the window moves by whole cells. Probes it keeps
+  keep their tiles, age, offset and state, and nothing is rebuilt. The new planes are reset, then relocated and
+  classified on the device before the next update (only those planes). The spec's `max` counts again from each scroll.
+  Census: `rtddgi cell: scroll N: scrolled C cells (dx dy dz), reset K probes (T in all); first probe ...`.
+- **Pictures wait for it:** a camera path (`WW_RENDER_PATH`, the live `path` step) and the streaming walk's last
+  shot now wait until the volume has stood still at the camera for its `max`. This happens only while the volume's
+  define is on, so an off row paints what it painted before.
+- **Census:** the built line names the grid box, the window and the first probe, and whether the volume runs interop
+  or readback (and why). The stop line says whether the camera is inside the probe box and counts the probes within
+  1.5 cells of it by state. M2's census could not tell a box that missed the view from a view with no usable probe
+  (the Memory Den night case).
+- **Reds** (in `WW_CELL_RTDDGI_RED`'s list, live; each one rebuilds): `readback` (M2's copy back and GL upload) and
+  `rebuild` (a camera move builds a new volume round the camera, no scroll). `trilinear`, `nocheb` and `nobias` are
+  as before. A dump asked for after the volume stopped is now written; before, only the build's own stop wrote one.
+- **Math, once:** `rtddgimath.h scrollWindowLo / scrollCells / scrollSource / scrollRuns` (unit check `scroll`, red
+  `RTDDGI_RED_SCROLL`: 15 checks + 15 reds). The kernels only gained a fresh-probes-only pass for relocation and
+  classification (`job.y = 1`, state `DDGI_FRESH` 3). The CLI's passes keep `job.y = 0`, so they are unchanged.
+- **Bake device:** it enables `VK_KHR_external_memory_win32` and `VK_KHR_external_semaphore_win32` when the GPU has
+  them. The bakes do not use them; `WW_BAKE_RT_RED=noshare` leaves them off.
 
 ## RTXGI1 M2: the ray-traced GI volume lights the cell view (switch, live; ships Off)
 

@@ -13,6 +13,7 @@
 #define DDGI_OFF 0
 #define DDGI_ASLEEP 1
 #define DDGI_VIGILANT 2
+#define DDGI_FRESH 3     // M3: rtddgimath.h kFresh, a probe a scroll reset (relocated + classified alone, never read)
 // red bits (params.flags.w): the volume's runtime refuters (src/rtddgi.h RtDdgiSpec::red)
 #define DDGI_RED_NOBACK 1u   // backface hits shaded as front faces, distance kept
 #define DDGI_RED_NOCHEB 2u   // the bounce sampler without the Chebyshev factor
@@ -51,6 +52,7 @@ layout( std430, set = 0, binding = 13 ) readonly buffer Lights { vec4 lights[]; 
 layout( std430, set = 0, binding = 14 ) readonly buffer ParamBuf { Params P; };
 
 // mode 0 trace an update, 1 trace the fixed rays (relocation / classification), 2 blend, 3 border, 4 relocate, 5 classify
+// M3: modes 1, 4 and 5 with job.y = 1 take only DDGI_FRESH probes (a scroll's new planes); 0 = every probe (M1's)
 layout( push_constant ) uniform Pc { vec4 rot0; vec4 rot1; vec4 rot2; uvec4 job; } pc;   // job: mode, frame, ray first, ray count
 
 uint ddgiLinearId() { return gl_GlobalInvocationID.x + gl_GlobalInvocationID.y * ( gl_NumWorkGroups.x * gl_WorkGroupSize.x ); }

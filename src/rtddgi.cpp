@@ -718,11 +718,58 @@ struct RtDdgiLive::Impl
 	RtDdgiVolume vol;
 	bakert::DdgiGpuSession * s = nullptr;
 	QString why;
-	bool busy = false;
-	int updates = 0;
-	double ms[4] = { -1, -1, -1, -1 };
+	bool busy = false, submitted = false;
+	int updates = 0, sinceScroll = 0;
+	double ms[5] = { -1, -1, -1, -1, -1 };
 	double wall = 0;
 	qint64 rays = 0;
+	double O[2] = { 0, 0 };   // M3: the soup's local frame (packVolume's), for the params' first probe after a scroll
+	int scrolls = 0, scrollCells = 0, scrollFresh = 0;
+	qint64 freshTotal = 0;
+
+	//! the census of the volume's states (and moved offsets) from vol.state / vol.offset
+	void count()
+	{
+		RtDdgiVolume & v = vol;
+		v.off = v.asleep = v.vigilant = v.moved = v.fresh = 0;
+		const int nP = v.probeCount();
+		for ( int p = 0; p < nP && size_t( p ) < v.state.size(); p++ ) {
+			const int st = v.state[size_t( p )];
+			v.off += st == kOff ? 1 : 0;
+			v.asleep += st == kAsleep ? 1 : 0;
+			v.vigilant += st == kVigilant ? 1 : 0;
+			v.fresh += st == kFresh ? 1 : 0;
+			const float * o = &v.offset[size_t( p ) * 3];
+			v.moved += ( o[0] * o[0] + o[1] * o[1] + o[2] * o[2] ) > 1e-6f ? 1 : 0;
+		}
+	}
+	//! the states and offsets a finished scroll sent back (4 a probe: offset xyz, state)
+	void statesFrom( const std::vector<float> & probes )
+	{
+		const float * pr = probes.data();
+		RtDdgiVolume & v = vol;
+		const int nP = v.probeCount();
+		if ( nP <= 0 || probes.size() < size_t( nP ) * 4 )
+			return;
+		v.offset.resize( size_t( nP ) * 3 );
+		v.state.resize( size_t( nP ) );
+		for ( int p = 0; p < nP; p++ ) {
+			for ( int k = 0; k < 3; k++ )
+				v.offset[size_t( p ) * 3 + size_t( k )] = pr[size_t( p ) * 4 + size_t( k )];
+			v.state[size_t( p )] = int( pr[size_t( p ) * 4 + 3] + 0.5f );
+		}
+		count();
+	}
+	//! a finished submit's report (ms, and the states of a scroll)
+	void take( const bakert::DdgiGpuStepOut & so )
+	{
+		if ( !so.done )
+			return;
+		for ( int c = 0; c < 5; c++ )
+			ms[c] = so.ms[c];
+		if ( so.probesNew )
+			statesFrom( so.probes );
+	}
 };
 
 RtDdgiLive::RtDdgiLive() : d( new Impl ) {}
@@ -732,7 +779,8 @@ RtDdgiLive::~RtDdgiLive()
 	delete d;
 }
 
-bool RtDdgiLive::open( const ProbeSoup & soup, const WwCellLighting & lighting, const ProbeSkyLight & sky, const RtDdgiSpec & specIn )
+bool RtDdgiLive::open( const ProbeSoup & soup, const WwCellLighting & lighting, const ProbeSkyLight & sky, const RtDdgiSpec & specIn,
+	bool share )
 {
 	close();
 	d->spec = specIn;
@@ -752,6 +800,10 @@ bool RtDdgiLive::open( const ProbeSoup & soup, const WwCellLighting & lighting, 
 	job.frames = 0;
 	job.relocate = d->spec.relocate;
 	job.classify = d->spec.classify;
+	job.share = share;
+	job.scroll = true;   // M3: the cell view's volume follows the camera
+	d->O[0] = S.O[0];
+	d->O[1] = S.O[1];
 	bakert::DdgiGpuOut g;
 	d->s = bakert::ddgiGpuOpen( job, &g );
 	if ( !d->s ) {
@@ -763,24 +815,20 @@ bool RtDdgiLive::open( const ProbeSoup & soup, const WwCellLighting & lighting, 
 	v.path = QStringLiteral( "gpu (%1)" ).arg( QString::fromStdString( g.device ) );
 	v.offset.resize( size_t( nP ) * 3 );
 	v.state.resize( size_t( nP ) );
-	v.off = v.asleep = v.vigilant = v.moved = 0;
 	for ( int p = 0; p < nP; p++ ) {
 		for ( int k = 0; k < 3; k++ )
 			v.offset[size_t( p ) * 3 + size_t( k )] = g.probes[size_t( p ) * 4 + size_t( k )];
-		const int st = int( g.probes[size_t( p ) * 4 + 3] + 0.5f );
-		v.state[size_t( p )] = st;
-		v.off += st == kOff ? 1 : 0;
-		v.asleep += st == kAsleep ? 1 : 0;
-		v.vigilant += st == kVigilant ? 1 : 0;
-		const float * o = &v.offset[size_t( p ) * 3];
-		v.moved += ( o[0] * o[0] + o[1] * o[1] + o[2] * o[2] ) > 1e-6f ? 1 : 0;
+		v.state[size_t( p )] = int( g.probes[size_t( p ) * 4 + 3] + 0.5f );
 	}
+	d->count();
 	v.blasGrow = g.blasGrow;
 	v.rays = g.rays;
 	v.msBuild += g.msBuild;
 	v.msReloc = g.msReloc;
 	v.ok = true;
-	d->updates = 0;
+	d->updates = d->sinceScroll = 0;
+	d->scrolls = d->scrollCells = d->scrollFresh = 0;
+	d->freshTotal = 0;
 	return true;
 }
 
@@ -788,31 +836,104 @@ bool RtDdgiLive::isOpen() const { return d->s != nullptr; }
 
 bool RtDdgiLive::step( int k )
 {
+	RtDdgiStep o;
+	o.k = k;
+	return step( o );
+}
+
+bool RtDdgiLive::step( const RtDdgiStep & order )
+{
 	d->busy = false;
+	d->submitted = false;
 	if ( !d->s ) {
 		d->why = QStringLiteral( "not open" );
 		return false;
 	}
-	k = std::max( 0, std::min( k, 16 ) );
-	std::vector<float> rot( size_t( k ) * 9 );
+	const int k = std::max( 0, std::min( order.k, 16 ) );
+	std::vector<float> rot( size_t( std::max( k, 1 ) ) * 9 );
 	const bool noRot = hasRed( d->spec.red, "norot" );
 	for ( int f = 0; f < k; f++ ) {
 		const M3 r = noRot ? M3() : updateRotation( d->spec.seed, quint32( d->updates + f ) );
 		std::memcpy( &rot[size_t( f ) * 9], r.m, 36 );
 	}
+	RtDdgiVolume & v = d->vol;
+	bakert::DdgiGpuStepIn in;
+	in.rotations = rot.data();
+	in.k = k;
+	in.frame0 = quint32( d->updates );
+	in.host = order.host;
+	in.wait = order.wait;
+	in.beforeSubmit = order.beforeSubmit;
+	const bool scroll = order.scroll[0] != 0 || order.scroll[1] != 0 || order.scroll[2] != 0;
+	float origin[3] = { v.origin[0], v.origin[1], v.origin[2] };
+	int fresh = 0;
+	if ( scroll ) {   // rtddgimath.h: the kept probes as copy runs; the new first probe s steps on (world, then local)
+		in.scroll = true;
+		fresh = scrollRuns( v.dims, order.scroll, [&in]( int src, int dst, int n ) {
+			in.runs.push_back( quint32( src ) );
+			in.runs.push_back( quint32( dst ) );
+			in.runs.push_back( quint32( n ) );
+		} );
+		for ( int c = 0; c < 3; c++ ) {
+			origin[c] = float( double( v.origin[c] ) + double( order.scroll[c] ) * double( v.step[c] ) );
+			in.origin[c] = float( double( origin[c] ) - ( c < 2 ? d->O[c] : 0.0 ) );
+		}
+	}
 	bakert::DdgiGpuStepOut so;
-	if ( !bakert::ddgiGpuStep( d->s, rot.data(), k, quint32( d->updates ), false, &so ) ) {
+	if ( !bakert::ddgiGpuStepEx( d->s, in, &so ) ) {
 		d->busy = so.busy;
+		d->why = QString::fromStdString( so.why );
+		d->take( so );   // a finished earlier submit may have been collected before the refusal
+		return false;
+	}
+	d->submitted = so.submitted;
+	if ( !order.wait )
+		d->take( so );   // an earlier submit's report: before this scroll moves the CPU's copy
+	if ( scroll ) {
+		// the CPU's copy of the states follows at once (kept probes moved, the rest kFresh until the device's
+		// classification comes back with a finished step's probesNew)
+		const int nP = v.probeCount();
+		std::vector<int> st( size_t( nP ), kFresh );
+		std::vector<float> off( size_t( nP ) * 3, 0.0f );
+		for ( size_t i = 0; i + 2 < in.runs.size(); i += 3 )
+			for ( quint32 j = 0; j < in.runs[i + 2]; j++ ) {
+				const size_t a = size_t( in.runs[i] + j ), b = size_t( in.runs[i + 1] + j );
+				st[b] = v.state[a];
+				for ( int c = 0; c < 3; c++ )
+					off[b * 3 + size_t( c )] = v.offset[a * 3 + size_t( c )];
+			}
+		v.state.swap( st );
+		v.offset.swap( off );
+		for ( int c = 0; c < 3; c++ )
+			v.origin[c] = origin[c];
+		d->count();
+		d->scrolls++;
+		d->scrollCells = std::abs( order.scroll[0] ) + std::abs( order.scroll[1] ) + std::abs( order.scroll[2] );
+		d->scrollFresh = fresh;
+		d->freshTotal += fresh;
+		d->sinceScroll = 0;
+	}
+	if ( order.wait )
+		d->take( so );   // this step's own report (a scroll's states replace the CPU's guess)
+	d->updates += k;
+	d->sinceScroll += k;
+	d->wall = so.msWall;
+	d->rays = so.rays;
+	v.rays += so.rays;
+	v.msFrames += so.msWall;
+	return true;
+}
+
+bool RtDdgiLive::finish()
+{
+	if ( !d->s )
+		return false;
+	bakert::DdgiGpuStepOut so;
+	if ( !bakert::ddgiGpuFinish( d->s, &so ) ) {
 		d->why = QString::fromStdString( so.why );
 		return false;
 	}
-	d->updates += k;
-	for ( int c = 0; c < 4; c++ )
-		d->ms[c] = so.ms[c];
-	d->wall = so.msWall;
-	d->rays = so.rays;
-	d->vol.rays += so.rays;
-	d->vol.msFrames += so.msWall;
+	d->take( so );
 	return true;
 }
 
@@ -821,7 +942,8 @@ void RtDdgiLive::close()
 	if ( d->s )
 		bakert::ddgiGpuClose( d->s );
 	d->s = nullptr;
-	d->updates = 0;
+	d->updates = d->sinceScroll = 0;
+	d->submitted = false;
 }
 
 const RtDdgiVolume & RtDdgiLive::volume() const { return d->vol; }
@@ -829,6 +951,13 @@ const RtDdgiSpec & RtDdgiLive::spec() const { return d->spec; }
 QString RtDdgiLive::why() const { return d->why; }
 bool RtDdgiLive::busy() const { return d->busy; }
 int RtDdgiLive::updates() const { return d->updates; }
+int RtDdgiLive::updatesSinceScroll() const { return d->sinceScroll; }
+bool RtDdgiLive::submitted() const { return d->submitted; }
+bakert::DdgiGpuSession * RtDdgiLive::session() const { return d->s; }
+int RtDdgiLive::scrolls() const { return d->scrolls; }
+int RtDdgiLive::lastScrollCells() const { return d->scrollCells; }
+int RtDdgiLive::lastScrollFresh() const { return d->scrollFresh; }
+qint64 RtDdgiLive::freshTotal() const { return d->freshTotal; }
 const float * RtDdgiLive::irr() const { return bakert::ddgiGpuHostIrr( d->s ); }
 const float * RtDdgiLive::dist() const { return bakert::ddgiGpuHostDist( d->s ); }
 const quint32 * RtDdgiLive::age() const { return reinterpret_cast<const quint32 *>( bakert::ddgiGpuHostAge( d->s ) ); }

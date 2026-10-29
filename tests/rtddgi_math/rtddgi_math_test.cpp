@@ -1,10 +1,10 @@
 // rtddgi_math_test -- lane RTXGI1 M1 (2026-10-29): the DDGI probe math of src/rtddgimath.h, no Qt, no GPU.
 //
 //   g++ -O2 -std=c++17 -I src tests/rtddgi_math/rtddgi_math_test.cpp -o rtddgi_math_test -static
-//   ./rtddgi_math_test            -> every check PASS, last line "RTDDGI_MATH PASS 14", exit 0
+//   ./rtddgi_math_test            -> every check PASS, last line "RTDDGI_MATH PASS 15", exit 0
 //   -DRTDDGI_RED_<NAME>           -> swaps a wrong rule into the header; check <name> must FAIL (exit 1)
 //
-// Checks and their reds (tests/rtddgi_math/run.sh builds all fourteen and asserts each):
+// Checks and their reds (tests/rtddgi_math/run.sh builds all fifteen and asserts each):
 //   oct     octahedral encode/decode round trip + texel centres            RED_OCT     no lower-hemisphere fold
 //   fib     spherical Fibonacci covers the sphere; rotation; fixed rays     RED_FIB     strata from the pole only
 //   hyst    [J21] per-texel thresholds 0.25 / 0.8, age ramp                 RED_HYST    thresholds swapped
@@ -22,7 +22,10 @@
 //   sample  M2 the 8-probe read: res/shaders/cell_ddgi.glsl (compiled here    RED_SAMPLE  the header drops the
 //           through glsl_shim.h) equals sampleVolume; a wall's far side is     backface weight
 //           dropped, the trilinear red takes it in
-// Every check is independent of the others' reds (a red build may pass the other thirteen).
+//   scroll  M3 the volume follows the camera: kept probes keep their world     RED_SCROLL  the shift taken the
+//           point, fresh = outside the old box, the window lands where a fresh   wrong way round
+//           volume's first probe would (no drift)
+// Every check is independent of the others' reds (a red build may pass the other fourteen).
 
 #include "rtddgimath.h"
 
@@ -475,6 +478,70 @@ void checkSample()
 		"(bar 2 x the dark side's %.5f), trilinear red %.5f (bar 10 x)\n", worstW, worstF, outside, noProbe, lg, dark, lr );
 }
 
+void checkScroll()
+{
+	// (1) M3: after a scroll every kept probe holds the world point it held before, the fresh ones are exactly the grid
+	// points outside the old volume, and the copy runs write each kept probe once (random volumes and shifts, a jump
+	// past the whole box included)
+	uint64_t s = 0x5c7011ULL;
+	int moved = 0, twice = 0, freshWrong = 0, cases = 0, fullResets = 0;
+	for ( int t = 0; t < 400; t++ ) {
+		const int dims[3] = { 2 + int( unit01( s ) * 12.0f ), 2 + int( unit01( s ) * 12.0f ), 2 + int( unit01( s ) * 6.0f ) };
+		int sh[3];
+		for ( int k = 0; k < 3; k++ )
+			sh[k] = int( std::floor( ( unit01( s ) * 2.0f - 1.0f ) * float( dims[k] + 2 ) ) );
+		const int nP = dims[0] * dims[1] * dims[2];
+		std::vector<int> got( size_t( nP ), -1 );
+		const int fresh = scrollRuns( dims, sh, [&]( int src, int dst, int n ) {
+			for ( int i = 0; i < n; i++ ) {
+				twice += got[size_t( dst + i )] >= 0 ? 1 : 0;
+				got[size_t( dst + i )] = src + i;
+			}
+		} );
+		int freshSeen = 0;
+		for ( int p = 0; p < nP; p++ ) {
+			const int c[3] = { p % dims[0], ( p / dims[0] ) % dims[1], p / ( dims[0] * dims[1] ) };
+			bool inside = true;
+			for ( int k = 0; k < 3; k++ )
+				inside = inside && c[k] + sh[k] >= 0 && c[k] + sh[k] < dims[k];
+			const int o = got[size_t( p )];
+			if ( o < 0 ) {
+				freshSeen++;
+				freshWrong += inside ? 1 : 0;
+				continue;
+			}
+			// the old probe's grid point + 0 steps from the old origin == the new point + s steps: same world point
+			const int oc[3] = { o % dims[0], ( o / dims[0] ) % dims[1], o / ( dims[0] * dims[1] ) };
+			for ( int k = 0; k < 3; k++ )
+				moved += oc[k] != c[k] + sh[k] ? 1 : 0;
+		}
+		freshWrong += freshSeen != fresh ? 1 : 0;
+		fullResets += fresh == nP ? 1 : 0;
+		cases++;
+	}
+	// (2) the window follows a walking camera by whole cells and lands where a fresh volume at the end would put its
+	// first probe (no drift), inside the grid; the window never moves on an axis the grid is too small for
+	const double step = 158.0, gLo = -10240.0, gHi = 9216.0, extent = 13.0 * step;
+	double eye = 0.0, origin = std::floor( scrollWindowLo( eye, gLo, gHi, extent ) / step ) * step;
+	int drift = 0, off = 0, scrolls = 0;
+	for ( int t = 0; t < 2000; t++ ) {
+		eye += ( unit01( s ) * 2.0 - 1.0 ) * ( t % 97 == 0 ? 9000.0 : 120.0 );
+		const double lo = scrollWindowLo( eye, gLo, gHi, extent );
+		const int c = scrollCells( origin, lo, step );
+		origin += double( c ) * step;
+		scrolls += c != 0 ? 1 : 0;
+		drift += std::fabs( origin - std::floor( lo / step ) * step ) > 1e-6 ? 1 : 0;
+		off += origin < std::floor( gLo / step ) * step - 1e-6 || origin + extent > gHi + step ? 1 : 0;
+	}
+	const int still = scrollCells( 0.0, scrollWindowLo( 5000.0, 0.0, 1000.0, extent ), step );
+	const bool ok = moved == 0 && twice == 0 && freshWrong == 0 && drift == 0 && off == 0 && still == 0 && scrolls > 100
+		&& fullResets > 0;
+	report( "scroll", ok, "%g random scrolls: kept probes off their world point %g, written twice %g", cases, moved, twice );
+	std::printf( "      fresh miscounted %d (%d jumps past the box); camera walk: %d scrolls, drift from a fresh origin %d, "
+		"outside the grid %d, a grid narrower than the window scrolled %d cells\n", freshWrong, fullResets, scrolls, drift, off,
+		still );
+}
+
 } // namespace
 
 int main()
@@ -493,6 +560,7 @@ int main()
 	checkTie();
 	checkSkyVis();
 	checkSample();
+	checkScroll();
 	std::printf( "RTDDGI_MATH %s %d%s\n", g_fail ? "FAIL" : "PASS", g_fail ? g_fail : g_pass, g_fail ? " failed" : "" );
 	return g_fail ? 1 : 0;
 }
