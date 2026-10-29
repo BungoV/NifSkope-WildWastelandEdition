@@ -6,6 +6,7 @@
 #   (b) the picture after streaming in == the fixed-block open at the same centre and camera (far LOD off)
 #   (c) far LOD on: no hole and no double draw either side of the loaded / unloaded border
 #   (d) private bytes after crossing 20 within 5% of the first full load
+#   (e) lane STREAMTEX1: the texture pool's census per crossing (cell_stream_check.py; SKIP on an older exe)
 #   reds: WW_CELL_STREAM_RED=nounload must fail (d) (nohandover retired 10-28, FRAMESPEED2: confirmed live)
 #
 # usage: bash tests/spells/cell_stream.sh            every phase

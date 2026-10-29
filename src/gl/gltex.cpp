@@ -34,6 +34,7 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include "wwswitch.h"	// lane TESTDRIVER1: the WW_* switch store
 #include "cellspeed.h"
 #include "celltexahead.h"
+#include "cellstreamtex.h"	// lane STREAMTEX1
 #include "cellpasstime.h"	// lane STREAM1
 #include "celldrawpacket.h"	// lane GAPPERF-BINDLESS
 #include "cellbindless.h"	// lane BINDLESS2
@@ -548,6 +549,7 @@ std::uint16_t TexCache::loadTex( Tex & txIn, const NifModel * nif )
 	if ( t->target )
 		glBindTexture( t->target, t->id[0] );
 
+	const qint64	bytes0 = PassTime::cacheCounts().texBytes;	// lane STREAMTEX1
 	try
 	{
 		i->mipmaps = texLoad( nif, i->filepath, i->format, t->target, i->width, i->height, t->id );
@@ -558,6 +560,8 @@ std::uint16_t TexCache::loadTex( Tex & txIn, const NifModel * nif )
 		i->status = e;
 	}
 	paramForget( t->id[1] );	// lane CELLUNI4: FO76's second cube (a fresh name may reuse a freed one)
+	if ( t->mipmaps )	// lane STREAMTEX1: the stream's pool counts it (no stream: one map lookup)
+		cellStreamTexLoaded( nif, i->filename, PassTime::cacheCounts().texBytes - bytes0 );
 
 	return t->mipmaps;
 }
@@ -631,28 +635,74 @@ void TexCache::flush()
 	embedTextures.clear();
 }
 
-int TexCache::evictUnused( std::uint32_t tick, QStringList * names )
+int TexCache::evictUnused( std::uint32_t tick, QStringList * names, const std::function<bool( QStringView )> & mayFree )
 {
 	int n = 0;
 	for ( size_t i = 0; i <= textureHashMask; i++ ) {
 		Tex &	tx = textures[i];
 		if ( !tx.nameLen || !tx.isLoaded() || !tx.mipmaps || tx.useTick >= tick )
 			continue;
-		PassTime::texResidentDrop( tx.id[0] );	// lane STREAM1
-		paramForget( tx.id[0] );	// lane PERF5
-		paramForget( tx.id[1] );	// lane CELLUNI4
-		WwDp::invalidate();	// lane GAPPERF-BINDLESS
-		WwBl::forget( tx.id[0] );	// lane BINDLESS2
-		WwBl::forget( tx.id[1] );
-		glDeleteTextures( ( !tx.id[1] ? 1 : 2 ), tx.id );
-		tx.id[0] = tx.id[1] = 0;
-		tx.mipmaps = 0;
-		tx.target = 0;
+		if ( mayFree && !mayFree( tx.filename() ) )	// lane STREAMTEX1: a loaded cell names it, or the pool owns it
+			continue;
+		freeLoaded( tx );
 		if ( names )
 			names->append( tx.filename().toString() );
 		n++;
 	}
 	return n;
+}
+
+void TexCache::freeLoaded( Tex & tx )
+{
+	PassTime::texResidentDrop( tx.id[0] );	// lane STREAM1
+	paramForget( tx.id[0] );	// lane PERF5
+	paramForget( tx.id[1] );	// lane CELLUNI4
+	WwDp::invalidate();	// lane GAPPERF-BINDLESS
+	WwBl::forget( tx.id[0] );	// lane BINDLESS2
+	WwBl::forget( tx.id[1] );
+	glDeleteTextures( ( !tx.id[1] ? 1 : 2 ), tx.id );
+	tx.id[0] = tx.id[1] = 0;
+	tx.mipmaps = 0;
+	tx.target = 0;
+}
+
+int TexCache::evictNamed( const QStringList & names, QStringList * freed, QStringList * missing )
+{
+	int n = 0;
+	for ( const QString & name : names ) {
+		Tex *	tx = findTex( name );
+		if ( !tx || !tx->isLoaded() || !tx->mipmaps ) {
+			if ( missing )
+				missing->append( name );
+			continue;
+		}
+		freeLoaded( *tx );
+		if ( freed )
+			freed->append( name );
+		n++;
+	}
+	return n;
+}
+
+TexCache::Tex * TexCache::findTex( QStringView file ) const
+{
+	if ( file.isEmpty() || !textures )
+		return nullptr;
+	const size_t	nameLen = size_t( file.size() );
+	std::uint32_t	h = hashFunctionUInt32( file.data(), nameLen * sizeof( QChar ) );
+	const std::uint32_t	m = textureHashMask;
+	for ( h = h & m; textures[h].nameLen; h = ( h + 1U ) & m ) {
+		Tex &	p = textures[h];
+		if ( p.nameLen == nameLen && std::memcmp( p.nameData, file.data(), nameLen * sizeof( QChar ) ) == 0 )
+			return &p;
+	}
+	return nullptr;
+}
+
+std::uint32_t TexCache::wwUseTick( QStringView file ) const
+{
+	const Tex *	tx = findTex( file );
+	return tx ? tx->useTick : 0;
 }
 
 int TexCache::wwPump( const NifModel * nif, qint64 budgetBytes )

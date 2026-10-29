@@ -57,6 +57,7 @@ int wwLodMaskByTree = 0;
 #include <limits>
 #include "gamemanager.h"
 #include "celltexahead.h"
+#include "cellstreamtex.h"	// lane STREAMTEX1
 #include "cellssgi.h"	// lane SSGI1
 #include "libfo76utils/src/ddstxt16.hpp"
 #include "glview.h"
@@ -1041,6 +1042,12 @@ void BSShaderLightingProperty::setMaterial( const NifModel * nif, const QModelIn
 		for ( int i = 0; i < 10; i++ )
 			names << fileName( i );
 		CellTexAhead::want( nif, names );
+	}
+	if ( cellStreamTexCounting( nif ) ) {   // lane STREAMTEX1: the stream counts each texture by the cells naming it
+		QStringList names;
+		for ( int i = 0; i < 10; i++ )
+			names << fileName( i );
+		cellStreamTexNote( nif, nif->getBlockNumber( index ), names );
 	}
 
 	resolvePbrm( nif, index );

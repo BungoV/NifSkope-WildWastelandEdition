@@ -85,6 +85,37 @@
 - **Owed live:** the build and the `octaves=medium` line; D7's air values fed back to the model; D7 before/after blown
   share for the whole frame and the left third, plus the sky-off and bloom-off arms; a red pixel diff against the rung;
   the GPU ms (rows in RESULTS.md, Step 3).
+## Lane STREAMTEX1 (2026-10-29, branch STREAMTEX1-20261029): the stream's file textures, counted by cell
+
+- **Why:** FRAMESPEED2's D3: the streamed walk ends at x1.275 of the fresh open's private memory. The suspect was
+  "the stream keeps every file texture it ever loaded". It does not quite: since CELLSTREAM1 the view frees a file
+  texture no paint bound for `WW_CELL_STREAM_TEXKEEP` s (5). That rule also frees the textures of a LOADED cell the
+  camera turned from, which then load again when it turns back (churn: the driver keeps its pools at the high mark,
+  as STREAMMEM1 found for meshes). Which of the two moves the 1.275 is the first owed live row (A/B below).
+- **Now (`src/gl/streamtexpool.h`, policy; `src/cellstreamtex.h`, the hooks):** every texture a streamed cell's shader
+  properties name (the property resolve, glproperty.cpp, next to SPEED1's read-ahead) is counted once per cell. While
+  any loaded cell names it, nothing frees it. When its last cell leaves it joins a pool, least recently released first
+  out, of at most `WW_CELL_STREAMTEX_MB` (default 256) MB; every 2 s the view frees the oldest past the budget, never
+  what the last 3 paints bound. Textures no streamed cell named (the open's own blocks, far field, sky, splats, water,
+  or a load the pool never saw) keep the keep timer as before. GAPFIX1's read-ahead forget runs for both.
+- **Default 256 MB, from the code's own numbers:** the walk bar is 1.05 x the fresh open; STREAMMEM1's walk opened at
+  11788 MB, so 589 MB is all the walk may add. 256 MB is the geometry cache's own floor (STREAM1: VRAM/8, never under
+  256), so the pool and the meshes together stay under the bar.
+- **Census:** one stderr line per crossing, `stream tex: crossing N centre x,y kept K (MB) refd R (MB) evicted E (MB)
+  reloaded L (MB) released ... loads ... keepEvicted ... budget ... MB`. Reloaded = freed and loaded again within 2
+  crossings. The walk dump gets the same as pairs (`texCrossing ... texReloadedMb ... texBudgetMb texRed`) plus the
+  sums `texReloaded texKeepEvicted`; cell_stream_check.py row (e): no loaded cell's texture freed, and no crossing
+  reloads more than the 2 before it released past the budget. The walk lingers one 2 s pool turn per step.
+- **Red:** `WW_CELL_STREAMTEX_RED=off`: the keep timer frees every file texture as before this lane and the pool
+  frees none (the census still prints, so the A/B can read the old path's churn).
+- **Offline:** `bash tests/spells/stream_tex_unit.sh` (g++, no Qt): a synthetic 5x5 walk, 26 crossings out, back and
+  zigzag, two worlds (a row releasing 200 MB and 820 MB). Green PASS; `--red` (the timer), `--red-keep0` (keep-all)
+  and `--red-norefs` (no count by cell) each FAIL a pre-registered row. The changed sources syntax-check against Qt 6.4
+  (nifskope_ui.cpp's two `processEvents( ..., QDeadlineTimer )` errors are the older Qt, there before this lane).
+- **Owed live (not built, no GPU here):** notes_cloud/STREAMTEX1/OWED_LIVE.md. `src/wwswitchstages.inc` got its two
+  rows by hand in the generator's form; a full `tools/wwswitch_survey.py --inc` re-run is left to the merge (line drift).
+- Cost: one hash insert per property resolve and per texture load while a document streams; a scan of the pool's
+  entries every 2 s. No GPU memory beyond the budget it allows.
 
 ## Lane REFLDRAWS1 (2026-10-27, branch refldraws1-20261027): the reflections pass stops re-walking the opaque scene
 
