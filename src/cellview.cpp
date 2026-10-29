@@ -61,6 +61,8 @@ BSD License - see nifskope.h
 #include "gl/lookdevstage.h"	// lane SKYTOP1: the cell's load order feeds the weather
 #include "gl/cellvolumeview.h"	// lane VOLFIT1
 #include "probevolumes.h"	// lane VOLFIT1: the Space stage
+#include "airzone.h"	// lane AIRZONE1: the hand-placed volumes' files (the cells, the GI merge, the converter)
+#include "gl/cellairzone.h"	// lane AIRZONE1: the Air zones row
 #include "probevolumesgi.h"	// lane VOLFIT1: its rooms as the GI's volumes
 #include "gl/cellfxlit.h"
 #include "gl/celllensflare.h"	// lane LIGHTS3 (LENSFLARE1)
@@ -119,6 +121,53 @@ template <class R>
 static bool wwVolumesIntoGi( R &, const ProbeVolumesGi &, long )
 {
 	return false;
+}
+
+/* lane AIRZONE1: the cells this document shows, for the hand-placed volumes' files (src/airzone.h): an interior its one
+ * cell, an exterior the loaded block; each by its CELL record's defining plugin and local id (the .recx "cell" key, as
+ * LIGHTS5's recxKey names a light), the worldspace and grid beside it. A streamed chunk (no document) publishes nothing. */
+static void cellAirZonePublish( const NifModel * nif, const EsmWorld & world, const CellSceneSpec & spec )
+{
+	if ( !nif )
+		return;
+	QStringList plugins;
+	for ( const QString & pl : world.pluginList().split( QLatin1Char( ',' ), Qt::SkipEmptyParts ) )
+		plugins << pl.trimmed();
+	auto keyOf = [&]( quint32 f, QString & plugin, quint32 & local ) {
+		const quint32 idx = world.plugin() ? world.plugin()->getFormIDFile( f ) : ( f >> 24 );
+		plugin = idx < quint32( plugins.size() ) ? QFileInfo( plugins.at( int( idx ) ) ).fileName() : QString();
+		local = ESMFile::getFormIDLocal( f );
+	};
+	std::vector<AirZoneCell> cells;
+	if ( spec.interior ) {
+		AirZoneCell c;
+		c.interior = true;
+		c.edid = world.interior().edid;
+		if ( world.interior().cellForm )
+			keyOf( world.interior().cellForm, c.plugin, c.localId );
+		cells.push_back( c );
+	} else {
+		QString wp;
+		quint32 wl = 0;
+		if ( world.worldspace() )
+			keyOf( world.worldspace(), wp, wl );
+		const int h = ( std::max( spec.n, 1 ) - 1 ) / 2;
+		for ( int y = spec.cy - h; y <= spec.cy + h; y++ )
+			for ( int x = spec.cx - h; x <= spec.cx + h; x++ ) {
+				AirZoneCell c;
+				c.interior = false;
+				c.gx = x;
+				c.gy = y;
+				c.worldPlugin = wp;
+				c.worldLocalId = wl;
+				c.worldEdid = world.worldspaceEdid();
+				const quint32 f = world.cellForm( x, y );
+				if ( f )
+					keyOf( f, c.plugin, c.localId );
+				cells.push_back( c );
+			}
+	}
+	wwAirZoneCellsPublish( nif, cells, plugins, EsmWeather::gameDataDir() );
 }
 
 namespace
@@ -7172,6 +7221,7 @@ static bool cellBuild( NifModel * nif, const CellSceneSpec & specAsked, CellChun
 	// lane PRTP3: the renderer lights this document with the cell's own lights (the Cell lights row)
 	cellPublishLighting( nif, world, spec, lightRefs, primRefs, origin, nullptr, &lightStartOff, &nifxFix,
 		spawnAt ? spawnXY : nullptr );
+	cellAirZonePublish( nif, world, spec );	// lane AIRZONE1: the cells whose hand-placed volumes this view reads
 	wwCellFxLitPick( nif );   // lane FXLIT1: each lit effect model's four placed lights
 	if ( streamInit ) {	// lane CELLSTREAM1: the cells themselves come from the streamer, round the camera
 		seed.origin = origin;
@@ -7412,6 +7462,23 @@ static bool cellBuild( NifModel * nif, const CellSceneSpec & specAsked, CellChun
 						probeNotes += QStringLiteral( "  space to GI: this build's GI takes no volume set (lane PERF1 not merged); not fed\n" );
 					else if ( vg.shapes.empty() )
 						probeNotes += QStringLiteral( "  space to GI: no room mapped; the GI keeps its stand-in\n" );
+				}
+				// lane AIRZONE1: the hand-placed volumes' gi blocks (src/airzone.h): today's set kept for the converter, then the
+				// cells' volumes merged in; WW_CELL_AIRZONE_EXPORT=<Data root> writes today's set into each cell's file
+				const QByteArray azExport = wwEnv( "WW_CELL_AIRZONE_EXPORT" );
+				if ( gr.roomsOn && ( wwAirZonesOn() || !azExport.isEmpty() ) ) {
+					if ( gr.volumes.shapes.empty() && gr.volumes.thresholds.empty() )
+						gr.volumes = giVolumesFromRooms( gr.rooms );	// the stand-in probeGiRoomsInto would take (the same call)
+					const QString azLine = wwAirZoneGiApply( nif, gr.volumes, wwAirZonesOn() );
+					if ( !azLine.isEmpty() )
+						probeNotes += QStringLiteral( "  %1\n" ).arg( azLine );
+					if ( !azExport.isEmpty() ) {
+						QString azErr;
+						const QStringList azFiles = wwAirZoneGiExport( nif, QString::fromLocal8Bit( azExport ),
+							QString::fromLocal8Bit( wwEnv( "WW_CELL_AIRZONE_PROVIDER" ) ), &azErr );
+						probeNotes += QStringLiteral( "  air zones gi export: %1 file(s)%2\n" ).arg( azFiles.size() )
+							.arg( azErr.isEmpty() ? QString() : QStringLiteral( " FAILED: %1" ).arg( azErr ) );
+					}
 				}
 				probeGiRoomsInto( gr, gi );   // lane ROOMCLAMP1: the second slots and the rooms
 				wwCellGiPublish( nif, gi );

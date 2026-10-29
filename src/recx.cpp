@@ -200,7 +200,7 @@ QJsonValue wwRecxBlockValue( const QJsonObject & entry, const QString & block, b
 
 WwRecxHit wwRecxFind( const QStringList & roots, const QStringList & pluginFiles, const QString & category,
 	const QString & key, const QString & plugin, quint32 localId, const QString & edid, const QString & block,
-	bool caseFree )
+	bool caseFree, bool arrayBlock )
 {
 	RecxCategory & c = cats()[category];
 	rescan( c, roots, category );
@@ -221,7 +221,8 @@ WwRecxHit wwRecxFind( const QStringList & roots, const QStringList & pluginFiles
 	std::vector<Claim> claims;
 	for ( const RecxFile & f : std::as_const( c.files ) )
 		for ( int e = 0; e < f.entries.size(); e++ ) {
-			if ( !wwRecxBlockValue( f.entries.at( e ), block, caseFree ).isObject() )
+			const QJsonValue bv = wwRecxBlockValue( f.entries.at( e ), block, caseFree );
+			if ( !( arrayBlock ? bv.isArray() : bv.isObject() ) )
 				continue;
 			const int r = rankOf( f.entries.at( e ), key, plugin, localId, edid, caseFree );
 			if ( r >= 0 )

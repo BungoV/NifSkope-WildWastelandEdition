@@ -42,6 +42,10 @@
 #define WW_AIR_GIVOL 1
 #endif
 #include "cell_airmed.glsl"
+// lane AIRZONE1: the hand-placed volumes' particles block (the lit-decal programs sit at the limit: not there)
+#if defined( WW_CELL_AIRZONE ) && !defined( WW_FX_DECALLIT )
+#include "cell_airzone.glsl"
+#endif
 uniform int volPart;			// 0 off: the law above, as before; 1 on
 uniform int volPartRed;			// gates only: 1 flat, 2 nothick, 4 nosoft, 8 nolights, 16 white, 32 nofog, 64 noshadow,
 								// 128 noedge, 256 nophase, 512 nonear
@@ -193,6 +197,10 @@ vec3 vpLit( vec3 posView, vec3 Nview, float a )
 	vec3 thin, thick;
 	vpLight( posView, cellWorldPos( posView ), cellWorldDir( posView ), dot( fogView.xyz, posView ) + fogView.w,
 		cellWorldDir( Nview ), m, thin, thick );
+#if defined( WW_CELL_AIRZONE ) && !defined( WW_FX_DECALLIT )
+	if ( azCount > 0 )	// lane AIRZONE1: a volume's particles block at the puff, one read (the alpha takes its density after)
+		return mix( vec3( 1.0 ), azPartLit( cellWorldPos( posView ), m * thin + ( 1.0 - m ) * thick ), lightingInfluence );
+#endif
 	return mix( vec3( 1.0 ), m * thin + ( 1.0 - m ) * thick, lightingInfluence );
 }
 

@@ -8,6 +8,7 @@ BSD License - see nifskope.h
 #include "wwswitch.h"	// lane TESTDRIVER1: the WW_* switch store
 #include "cellunits.h"
 
+#include "gl/cellairzone.h"	// lane AIRZONE1: the hand-placed volumes' fog and particle blocks
 #include "gl/cellgrass.h"	// lane FOGWIND1: the game's wind angle, shared with the grass
 #include "gl/cellhdr.h"
 #include "gl/celllights.h"
@@ -1559,6 +1560,7 @@ static void vaPassInner( Scene * scene, bool run )
 	for ( int o = 0; o < 2; o++ )
 		prog->uni4f_l( prog->uniLocation( "volDriftOfs[%d]", o ), FloatVector4( dr.ofs[o][0], dr.ofs[o][1], dr.ofs[o][2],
 			1.0f / ( kDriftTile * ( o ? kDriftDetail : 1.0f ) ) ) );
+	wwAirZoneUniforms( scene );	// lane AIRZONE1: the hand-placed volumes' fog (a no-op without the Air zones define)
 
 	/* THE OPTIMISATION (coordinator 10-14; WW_CELL_AIR_OPT, default both): 1 the clustered lights (vaBuildClusters),
 	 * 2 the conservative depth skip: stage 0 writes, per froxel column, the farthest and the nearest ray distance of
@@ -2396,6 +2398,7 @@ bool wwVolPartUniforms( Scene * scene )
 	prog->uni1b( "volCsm", air ? g.csm : wwSunShadowWanted( scene ) );
 	prog->uni1i( "volTerms", vs().terms );
 	prog->uni1i( "volPartRed", s.red );
+	wwAirZoneUniforms( scene );	// lane AIRZONE1: the hand-placed volumes' particles block (a no-op without the Air zones define)
 	return true;
 }
 

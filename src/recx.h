@@ -50,7 +50,9 @@ QStringList wwRecxRoots( const QStringList & pluginFiles, const QString & gameDa
  *  half second); logs every override once on stderr. */
 WwRecxHit wwRecxFind( const QStringList & roots, const QStringList & pluginFiles, const QString & category,
 	const QString & key, const QString & plugin, quint32 localId, const QString & edid, const QString & block,
-	bool caseFree = false );
+	bool caseFree = false, bool arrayBlock = false );
+//! lane AIRZONE1: arrayBlock true = the block is a JSON list (the Cells category's "volumes": [...]); the hit's `block`
+//! is then empty and the caller reads `entry[block]`. False (every other caller) = objects only, as before.
 //! lane WX1: `block` spelled any case (the spec's rule); the exact spelling first (Qt keeps no file order for the rest)
 QJsonValue wwRecxBlockValue( const QJsonObject & entry, const QString & block, bool caseFree );
 

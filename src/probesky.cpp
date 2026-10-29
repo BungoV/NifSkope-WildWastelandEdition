@@ -12,6 +12,8 @@
 #include "gl/atmosphere.h"	// SKY3: the physical sky's capture height
 #include "gl/cloudshadow.h"	// lane CLOUD3: the clouds over the eye dim the bounce's sun
 #include "gl/scenelighting.h"
+#include "airzone.h"	// lane AIRZONE1: the hand-placed volumes' gi blocks on a relight
+#include "gl/cellairzone.h"	// lane AIRZONE1: the Air zones row
 #include "probegi.h"
 #include "gl/celllooks.h"	// lane LIGHTS5: the emittance row's live flip
 
@@ -437,6 +439,11 @@ void relightKept( bool emitOnly = false )
 	probeGiAoFreeSwap( gr );	// lane AODECAL1: the kept spec carries the decal copies
 	gi.rgba = std::move( gr.grid );
 	gi.sky = std::move( gr.gridSky );	// the Pass drop-down's sky share (weather-free, carried over)
+	if ( gr.roomsOn && wwAirZonesOn() ) {	// lane AIRZONE1: the hand-placed gi volumes, as the build merged them
+		if ( gr.volumes.shapes.empty() && gr.volumes.thresholds.empty() )
+			gr.volumes = giVolumesFromRooms( gr.rooms );	// the stand-in probeGiRoomsInto would take (the same call)
+		wwAirZoneGiApply( k.nif, gr.volumes, true );
+	}
 	probeGiRoomsInto( gr, gi );   // lane ROOMCLAMP1
 	// lane GIPROBE2: Probe light smoothing: the same grid shape on screen fades toward this relight
 	const WwCellGi * was = wwLookOn( WwLook::ProbeSmooth ) ? wwCellGiFor( k.nif ) : nullptr;

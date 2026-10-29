@@ -78,6 +78,13 @@ layout ( location = 1 ) out vec4 volMrt[7];	// stage 3: layers volLayer + 1 .. +
 // SKY2 FOGSLICE1: the air pass reads the air volume (cell_airmed.glsl); the lit particles keep the grid
 #define WW_AIR_GIVOL 1
 #include "cell_airmed.glsl"
+// lane AIRZONE1: the hand-placed volumes (cell_airzone.glsl): one read a sub-step, the light it scatters x the tint
+#ifdef WW_CELL_AIRZONE
+#include "cell_airzone.glsl"
+#define AZ_TINT( q ) * azTintQ[q]
+#else
+#define AZ_TINT( q )
+#endif
 
 /* lane FOGDRIFT1: the density factor at distance t along dirView, around 1 (the texture's exact mean subtracted, so
  * the mean density holds); fades to 1 with distance, the detail octave sooner (it would alias in the deep slices) */
@@ -597,6 +604,9 @@ void main()
 	// lane PERF2: the sub-steps' optical depths first; no weight in any of them (air above the top, or none) adds
 	// exactly 0, so the lights, GI and ambient are skipped. Red noearly (536870912): airRest always, as before
 	float tauQ[4];
+#ifdef WW_CELL_AIRZONE
+	vec3 azTintQ[4] = vec3[4]( vec3( 1.0 ), vec3( 1.0 ), vec3( 1.0 ), vec3( 1.0 ) );	// lane AIRZONE1: 1 outside every zone
+#endif
 	bool scatters = ( volRed & 536870912 ) != 0;
 	for ( int q = 0; q < 4; q++ ) {
 		float ta = mix( t0, t1, float( q ) * 0.25 ), tb = mix( t0, t1, float( q + 1 ) * 0.25 );
@@ -605,6 +615,13 @@ void main()
 		tauQ[q] = airOd( zc + dzdt * ta, zc + dzdt * tb, tb - ta );
 		if ( volDrift.x > 0.0 )	// lane FOGDRIFT1: one noisy density for every term below (the lamps' glow too)
 			tauQ[q] *= airDrift( dirView, 0.5 * ( ta + tb ) );
+#ifdef WW_CELL_AIRZONE
+		if ( azCount > 0 ) {	// lane AIRZONE1: the volumes' fog at the sub-step's middle (x scale + add len; outside: exactly as is)
+			AzFog zf = azFogAt( cellWorldPos( dirView * ( 0.5 * ( ta + tb ) / fogDistScale ) ) );
+			tauQ[q] = tauQ[q] * zf.k + zf.add * ( tb - ta );
+			azTintQ[q] = zf.tint;
+		}
+#endif
 		scatters = scatters || air1mE( tauQ[q] ) > 0.0;
 	}
 	float keep = fogK[0].x + fogK[1].x + fogK[2].x + fogK[3].x + fogK[4].x + fogK[5].x;
@@ -669,16 +686,16 @@ void main()
 			float t = 0.5 * ( ta + tb ), zt = zc + dzdt * t;
 			vec3 Cq;
 			if ( ( need & ( 1 << q ) ) != 0 ) {
-				Cq = 0.25 * W * Jq[q];
+				Cq = 0.25 * W * Jq[q] AZ_TINT( q );
 				if ( wq[q] > 0.0 )
-					Cq += Tq[q] * wq[q] * airEnvColour( airSun( dirView * ( t / fogDistScale ), dirView, zt ), t, zt, dirView );
+					Cq += Tq[q] * wq[q] * airEnvColour( airSun( dirView * ( t / fogDistScale ), dirView, zt ), t, zt, dirView ) AZ_TINT( q );
 				so[q] = vec4( Cq / W, 1.0 );
 			} else {
 				Cq = h[q].rgb * W;
 				so[q] = vec4( h[q].rgb, 1.0 );
 			}
 			if ( wq[q] > 0.0 )
-				acc += Tq[q] * wq[q] * airEnvColour( Jenv, t, zt, dirView );
+				acc += Tq[q] * wq[q] * airEnvColour( Jenv, t, zt, dirView ) AZ_TINT( q );
 			acc += Cq;
 		}
 		volMrt[0] = so[0];
@@ -703,7 +720,7 @@ void main()
 		if ( w > 0.0 ) {
 			float t = 0.5 * ( ta + tb );
 			float zt = zc + dzdt * t;
-			acc += T * w * ( Jrest + airEnvColour( Jenv + airSun( dirView * ( t / fogDistScale ), dirView, zt ), t, zt, dirView ) );
+			acc += T * w * ( Jrest + airEnvColour( Jenv + airSun( dirView * ( t / fogDistScale ), dirView, zt ), t, zt, dirView ) ) AZ_TINT( q );
 		}
 		T *= exp( -tau );
 	}

@@ -21,6 +21,8 @@ BSD License - see nifskope.h
 #include "cellfarlod.h"
 #include "cellmodpickbox.h"	// lane MODPICK1: the Mods band
 #include "gl/celllights.h"
+#include "airzonepanel.h"	// lane AIRZONE1: the Air zones band
+#include "gl/cellairzone.h"	// lane AIRZONE1: the Air zones row
 #include "rtddgicell.h"	// lane RTXGI1 M2: the Ray-traced GI rows
 #include "gl/cellcull.h"	// lane SUNCELL1: the Culling row
 #include "gl/cellssr.h"	// lane CELLALL1: the SSR rows
@@ -1048,6 +1050,17 @@ void CellWorkspacePanel::buildUi()
 	liveTier( "CellWorkspaceFarAir", tr( "Far air" ), "farAir", &wwVolAirFarTier, &wwVolAirSetFarTier );
 	liveTick( "CellWorkspaceVolPart", tr( "Particles" ), "volPart", &wwVolPartOn, &wwVolPartSetOn );
 	liveTick( "CellWorkspaceFogDrift", tr( "Drift" ), "fogDrift", &wwVolAirDriftOn, &wwVolAirSetDriftOn );
+	{	// lane AIRZONE1 (src/gl/cellairzone.h): the hand-placed volumes; ships Off. The read is a #define: a tick reloads the shaders
+		QAction * az = tick( groupsMenu, tr( "Air zones" ), "CellWorkspaceAirZones", wwAirZonesOn() );
+		az->setEnabled( !wwAirZonesPinned() );
+		connect( az, &QAction::toggled, this, [this]( bool on ) {
+			wwAirZonesSetOn( on );
+			if ( glView )
+				glView->updateShaders();
+			if ( auto * z = findChild<AirZonePanel *>() )
+				z->refresh();
+		} );
+	}
 	liveTick( "CellWorkspaceCascadedShadows", tr( "Cascaded shadows" ), "lookdevShadows", &wwLookdevShadows, &wwLookdevSetShadows );
 	liveTier( "CellWorkspaceCascadeQuality", tr( "Cascade quality" ), "cascadeQuality", &wwShadowCascadeTier, &wwShadowSetCascadeTier );
 	{	// the cascades' reach, a label | field row folded under Cascaded shadows
@@ -1234,6 +1247,7 @@ void CellWorkspacePanel::buildUi()
 		kid( "CellWorkspaceVolPart", tr( "Particles" ) );
 		rows.last().heavy = true;
 		kid( "CellWorkspaceFogDrift", tr( "Drift" ) );
+		kid( "CellWorkspaceAirZones", tr( "Air zones" ) );	// lane AIRZONE1
 		master( F, WwGroup::Sky );
 		look( WwLook::Ephemeris, tr( "Real sun and moon" ) );
 		look( WwLook::WeatherRecx, tr( "Weather .recx" ) );
@@ -1535,6 +1549,10 @@ void CellWorkspacePanel::buildUi()
 		emit reopenRequested( g_path );
 	} );
 
+	// ---- lane AIRZONE1: the hand-placed volumes (src/airzonepanel.h), under PRTP on the Display tab
+	page = box( showL, "CellWorkspaceAirZones", 0 );
+	page->addWidget( new AirZonePanel( this ) );
+
 	/* ---- lane MODPICK1: which mods the cells load (bungo 10-12). The list, the saved choice per worldspace
 	 * and the one-stack rule live in cellmodpick.h; Apply or Reset rebuilds the cell like the Far LOD row. */
 	page = box( loL, "CellWorkspaceMods", 1 );
@@ -1630,7 +1648,7 @@ void CellWorkspacePanel::setCurrentTab( const QString & id )
 
 void CellWorkspacePanel::showCellParts( bool on )
 {
-	for ( QWidget * w : { refsBox, modsBox, prtpBox } )
+	for ( QWidget * w : { refsBox, modsBox, prtpBox, findChild<QWidget *>( QStringLiteral( "CellWorkspaceAirZones" ) ) } )
 		if ( w )
 			w->setVisible( on );
 }
@@ -1727,6 +1745,10 @@ void CellWorkspacePanel::onSceneChanged()
 	}
 	rebuildList();
 	rebuildLegendAndCensus();
+	if ( auto * z = findChild<AirZonePanel *>() ) {	// lane AIRZONE1: the band follows the open document
+		z->setGLView( glView );
+		z->setNif( nif );
+	}
 	if ( cellPass )	// lane PROBEVIEW1: a Pass needs this document's bake relit
 		cellPass->setEnabled( nif && wwCellGiFor( nif ) );
 	if ( modPick )	// lane MODPICK1: the open exterior's mods
