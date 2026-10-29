@@ -479,7 +479,8 @@ public:
 			QVector<float> vc;
 			for ( const CellDecalVert & v : d.verts ) {
 				const Vector3 n( v.nrm[0], v.nrm[1], v.nrm[2] );
-				m.positions.append( Vector3( v.pos[0], v.pos[1], v.pos[2] ) + n * decalOffset );
+				// twice the offset: the shape decals (road cracks, details) over the same receiver sit at 1x
+				m.positions.append( Vector3( v.pos[0], v.pos[1], v.pos[2] ) + n * ( 2.0f * decalOffset ) );
 				m.normals.append( n );
 				m.texCoords.append( Vector2( v.uv[0], v.uv[1] ) );
 				vc << 1.0f << 1.0f << 1.0f << v.alpha;
