@@ -430,6 +430,7 @@ HEADERS += \
 	src/proberooms.h \
 	src/probevolcheck.h \
 	src/probevolfine.h \
+	src/roomfitbatch.h \
 	src/probevolumes.h \
 	src/probevolumesgi.h \
 	src/probesky.h \

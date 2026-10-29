@@ -3,6 +3,7 @@
 #include "bakert.h"
 #include "probebvh.h"
 #include "probevolopen.h"
+#include "roomfitbatch.h"
 
 #include <QElapsedTimer>
 #include <QStringList>
@@ -345,6 +346,15 @@ std::vector<std::vector<ProbeVolumeShape>> probeVolumesFineFit( const probebvh::
 		std::vector<double> gain;
 	};
 	std::vector<V3Room> v3r( static_cast<size_t>( rooms ) );
+	/* ROOMFIT11: while the small rooms run, their casts go through one batcher (many rooms' rays in one scene cast);
+	 * null = each room casts alone (the big rooms, and red WW_CELL_ROOMFIT_RED=serial: ROOMFIT10's path) */
+	RoomCastBatcher<bakert::XRay, bakert::XHit> * smallBatch = nullptr;
+	auto sceneCast = [&]( const bakert::XRay * rays, size_t n, bakert::XHit * hits, bool anyHit, bool par ) {
+		if ( smallBatch && !par )
+			smallBatch->cast( rays, n, hits, anyHit );
+		else
+			g.scene->cast( rays, n, hits, anyHit );
+	};
 	auto fitRoom = [&]( int r, bool par ) {
 		const std::array<double, 6> & b = bb[size_t( r )];
 		if ( b[0] > b[1] )
@@ -538,7 +548,7 @@ std::vector<std::vector<ProbeVolumeShape>> probeVolumesFineFit( const probebvh::
 				nsEBuild += te.nsecsElapsed();
 				te.start();
 				if ( !rays.empty() )
-					g.scene->cast( rays.data(), rays.size(), hits.data(), g.scene->whole() );
+					sceneCast( rays.data(), rays.size(), hits.data(), g.scene->whole(), par );
 				nsECast += te.nsecsElapsed();
 				te.start();
 				nEdgeCast += qint64( rays.size() );
@@ -616,7 +626,7 @@ std::vector<std::vector<ProbeVolumeShape>> probeVolumesFineFit( const probebvh::
 					}
 				} );
 				if ( g.scene )
-					g.scene->cast( rays.data(), rays.size(), hits.data(), false );
+					sceneCast( rays.data(), rays.size(), hits.data(), false, par );
 				nCRays += qint64( rays.size() );
 				fineFor( nChunks, par, [&]( size_t ci ) {
 					const size_t x1 = std::min( e, b + ( ci + 1 ) * chunk );
@@ -1522,6 +1532,14 @@ std::vector<std::vector<ProbeVolumeShape>> probeVolumesFineFit( const probebvh::
 	}
 	S.msBig = tb.nsecsElapsed() / 1e6;
 	tb.start();
+	// ROOMFIT11: the small rooms' casts merged across rooms (a ray's hit depends on the ray alone, so no byte moves)
+	static const bool smallSerial = qEnvironmentVariable( "WW_CELL_ROOMFIT_RED" ) == QLatin1String( "serial" );
+	RoomCastBatcher<bakert::XRay, bakert::XHit> batcher( [&]( const bakert::XRay * rays, size_t n, bakert::XHit * hits, bool anyHit ) {
+		g.scene->cast( rays, n, hits, anyHit );
+	} );
+	if ( g.scene && !smallSerial && small.size() > 1 )
+		smallBatch = &batcher;
+	std::atomic<int> nSmallDone( 0 );
 	fineFor( small.size(), true, [&]( size_t k ) {
 		QElapsedTimer tr;
 		tr.start();
@@ -1529,7 +1547,9 @@ std::vector<std::vector<ProbeVolumeShape>> probeVolumesFineFit( const probebvh::
 		const qint64 ns = tr.nsecsElapsed();
 		for ( qint64 m = nsSmallMax.load(); ns > m && !nsSmallMax.compare_exchange_weak( m, ns ); )
 			;
+		nSmallDone++;
 	} );
+	smallBatch = nullptr;
 	S.msSmall = tb.nsecsElapsed() / 1e6;
 	if ( !spec.legacy && g.grid ) {
 		// VOLFIT3: each room the best of its grid fit and its moved set within the grid fit's count; then the extra boxes
@@ -1650,6 +1670,11 @@ std::vector<std::vector<ProbeVolumeShape>> probeVolumesFineFit( const probebvh::
 		.arg( qRound( double( nsEPost ) / 1e6 ) ).arg( nECalls.load() ).arg( nERecast.load() ).arg( qRound( double( nsEScat ) / 1e6 ) )
 		.arg( qRound( double( nsCLock ) / 1e6 ) ).arg( qRound( double( nsCGpu ) / 1e6 ) ).arg( qRound( double( nsCPost ) / 1e6 ) )
 		.arg( nCRays.load() ).arg( nCRecast.load() );
+	// ROOMFIT11: the small rooms' split (rooms done, slowest room ms) and how many room casts each scene cast carried
+	S.prof += QStringLiteral( "; small rooms done %1 of %2 slowest %3 ms, casts %4 (room casts %5 most rooms %6)" )
+		.arg( nSmallDone.load() ).arg( small.size() ).arg( qRound( double( nsSmallMax ) / 1e6 ) )
+		.arg( smallSerial || !g.scene || small.size() < 2 ? QStringLiteral( "serial" ) : QStringLiteral( "batched %1" ).arg( batcher.calls() ) )
+		.arg( batcher.requests() ).arg( batcher.mostRooms() );
 	if ( stats )
 		*stats = S;
 	return out;

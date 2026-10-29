@@ -376,6 +376,24 @@
   under glslangValidator (GLSL 4.10). The `cast` identifier in `ww_sunshadow.glsl` is renamed for that check only.
   `src/wwswitchstages.inc` was regenerated with `tools/wwswitch_survey.py`, which first reproduced HEAD's table
   byte for byte. The C++ is not compiled (no Qt here), and nothing is rendered.
+## Lane ROOMFIT11 (2026-10-29, branch roomfit11-20261028): the small rooms' rays merged across rooms
+
+- **What was serial:** the fine fit already ran its small rooms a room per thread (VOLFIT6). The serial part is the
+  scene: every room sent its own edge and classification batches, and the scene casts one batch at a time under one
+  device lock, so the rooms queued for it batch by batch, each batch paying its own submit, wait and post pass.
+- **Merged casts (`src/roomfitbatch.h`):** while the small rooms run, a room's batch joins a queue. The room that finds
+  no cast running takes every queued batch of the same kind (any-hit or nearest), in queue order, up to 4 M rays,
+  casts them as one and hands each room its own hits back. A ray's hit depends only on the ray and its kind, so each
+  room reads exactly what it read alone: the `.space` bytes do not change. The big rooms cast as before.
+- **Red `WW_CELL_ROOMFIT_RED=serial`:** each small room casts alone (ROOMFIT10's path), for timing and diffing.
+- **Census:** the fit's profile adds "small rooms done N of M slowest S ms, casts batched C (room casts R most rooms K)"
+  (or "casts serial" on the red / without a scene).
+- **Test:** `tests/roomfit11/roomfit11_test.cpp` (g++, stand-in scene): 96 synthetic rooms on 16 threads give the
+  serial path's hits room by room; floors for real work and real merging; `-DROOMFIT11_RED` (hits handed back in
+  reverse room order) fails. Clean under ThreadSanitizer.
+- **Owed live (Windows):** Concord, Goodneighbor, museum, Sanctuary fits with and without the red: msSmall, the new
+  census tail, and `.space` byte identity between the two arms and ROOMFIT10.
+- Cost: offline bakes only. 0 GPU ms at draw time, no GPU memory; up to one merged copy of the queued rays on the CPU.
 
 ## Lane ROOMFIT10 (2026-10-28, branch roomfit10-20261028): the volume fit's rays, mostly on the GPU, still exact
 
