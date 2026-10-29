@@ -1200,6 +1200,18 @@ bool probeGiRelight( const ProbeSoup & soup, const QString & bakeDir, const WwCe
 	}
 	const int kPad = 5;
 	double v = spec.voxelMin;
+	/* lane GIROOMDARK1 (10-29): the voxel budget. 400000 voxels over an exterior bake's box made the Concord 5 x 5 voxel
+	 * 266.9 (radius 533.8; GN 3 x 3 200.5, the museum 93.5): coarser than the room grid (149) and one voxel for a whole
+	 * storey of the hardware store. Such a voxel is read by the store, the street and the floor above, and only the two
+	 * rooms most surfels read keep a slot (the vote below), so a room can lose the voxels at its own windows. The budget
+	 * is now probegi.h's 1200000; WW_CELL_GI_MAXVOXELS=<n> sets it (read at every relight: a launch key). The GI texture
+	 * holds 12 slabs and 6 sky slabs a z layer (celllights.cpp), so z stays under 2048 / 18. Red WW_CELL_GI_RED=voxbudget:
+	 * 400000 and the old z cap (dims[2] x 6), the grid before the lane. */
+	const bool voxRed = spec.red == QLatin1String( "voxbudget" );
+	qint64 maxVox = voxRed ? qint64( 400000 ) : qint64( spec.maxVoxels );
+	if ( !voxRed && wwEnvInt( "WW_CELL_GI_MAXVOXELS" ) > 0 )
+		maxVox = qint64( wwEnvInt( "WW_CELL_GI_MAXVOXELS" ) );
+	const int zSlabs = voxRed ? 6 : 18;
 	int dims[3];
 	for ( ;; ) {
 		qint64 total = 6;
@@ -1207,7 +1219,7 @@ bool probeGiRelight( const ProbeSoup & soup, const QString & bakeDir, const WwCe
 			dims[c] = int( std::ceil( ( mx[c] - mn[c] ) / v ) ) + 4 + 2 * kPad;
 			total *= dims[c];
 		}
-		if ( total / 6 <= spec.maxVoxels && dims[2] * 6 <= 2048 && dims[0] <= 2048 && dims[1] <= 2048 )
+		if ( total / 6 <= maxVox && dims[2] * zSlabs <= 2048 && dims[0] <= 2048 && dims[1] <= 2048 )
 			break;
 		v *= 1.1;
 	}

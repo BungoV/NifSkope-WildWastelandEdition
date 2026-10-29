@@ -23,6 +23,7 @@ BSD License - see nifskope.h
 #include "gl/glproperty.h"	// lane VOLAIR1: alpha-tested casters read the base map
 #include "gl/glscene.h"
 #include "gl/glshape.h"
+#include "io/material.h"	// lane SUNGAP1: a caster's alpha test from its material, as the colour pass
 #include "gl/lookdevstage.h"
 #include "gl/renderer.h"
 #include "gl/shadowset.h"	// lane TERRSHADOW1: the unified set (presets, terrain, contact, composition)
@@ -141,6 +142,8 @@ CsmState & cs()
 		if ( ok && f >= 0.0f && f <= 1.0f )
 			s.force = f;
 		s.reds = wwEnvStr( "WW_CSM_RED" ).split( QChar( ',' ), Qt::SkipEmptyParts );
+		// lane SUNGAP1: WW_SUNSHADOW_RED=<red,...> joins the same list (nifalpha: the casters' alpha test from the NIF)
+		s.reds += wwEnvStr( "WW_SUNSHADOW_RED" ).split( QChar( ',' ), Qt::SkipEmptyParts );
 		for ( QString & r : s.reds )
 			r = r.trimmed().toLower();
 	}
@@ -156,6 +159,23 @@ bool red( const char * name )
 	if ( qstrcmp( name, "atsolid" ) == 0 && reds.contains( QStringLiteral( "solidcast" ) ) )
 		return true;
 	return reds.contains( QString::fromLatin1( name ) );
+}
+
+/* lane SUNGAP1 (10-29): a caster's alpha test as the colour pass draws it. A shape with a material file takes the test
+ * and its threshold from the material alone (renderer.cpp: mat->hasAlphaTest(), iAlphaTestRef / 255); the casters took
+ * the NIF's NiAlphaProperty. A NIF that tests over a material that does not cut sun holes where the picture is solid (a
+ * light band through a wall or a sill), and a material test the NIF lacks cast a solid card where the picture shows a
+ * hole. Red WW_SUNSHADOW_RED=nifalpha (or WW_CSM_RED=nifalpha): the NIF's test and threshold again. */
+bool casterAlphaTest( const Shape * sh, float * thr )
+{
+	const BSShaderLightingProperty * bsp = sh->wwShaderLighting();
+	const Material * mat = bsp && !red( "nifalpha" ) ? bsp->getMaterial() : nullptr;
+	if ( mat ) {
+		*thr = float( mat->alphaTestThreshold() ) / 255.0f;
+		return mat->hasAlphaTest();
+	}
+	*thr = sh->wwAlphaThreshold();
+	return sh->wwAlphaTested();
 }
 
 int redBits()
@@ -324,6 +344,7 @@ struct Caster
 	bool alphaTested = false;	// lane VOLAIR1: drawn by lookdev_csmdepth_at.prog (the base map's alpha test)
 	bool dynamic = false;		// lane SHADOWCACHE1: drawn over the cached static layer every pass
 	std::uint64_t sig = 0;
+	float alphaThr = 0.0f;		// lane SUNGAP1: the threshold the colour pass tests (casterAlphaTest)
 };
 
 // lane FAR5: fo4_default.vert's grass wind on the CPU (model space) for a wind cable; false for any other shape.
@@ -891,11 +912,13 @@ static void sunShadowPassImpl( Scene * scene )
 		// lane VOLAIR1: red WW_CSM_RED=atnone drops the alpha-tested casters (the window gate's ceiling: glass gone)
 		if ( red( "atnone" ) && sh->wwAlphaTested() )
 			continue;
-		Caster c { sh, sh->wwDoubleSided(), {} };
+		// lane SUNGAP1 (diagnostic): red WW_CSM_RED=twosidedcast casts every caster's both faces, so a one-sided face turned
+		// away from the sun (culled below: CCW front, GL_BACK) shows as the light it let through
+		Caster c { sh, sh->wwDoubleSided() || red( "twosidedcast" ), {} };
 		// lane VOLAIR1 (10-15): an alpha-tested shape (a window's GlassWindows01 glass, a leaf card) casts what its
 		// alpha test keeps, as the colour pass draws it; it cast a solid card before, and the sun never reached the
 		// air behind a window. Red WW_CSM_RED=atsolid casts them solid again.
-		c.alphaTested = !red( "atsolid" ) && sh->wwAlphaTested() && sh->wwShaderLighting()
+		c.alphaTested = !red( "atsolid" ) && casterAlphaTest( sh, &c.alphaThr ) && sh->wwShaderLighting()
 			&& ( sh->wwFarInstData() || ( !sh->coords.isEmpty() && sh->coords.constFirst().size() == sh->verts.size() ) );
 		if ( cpuSkin && sh->wwGpuSkinned() ) {
 			c.skinned.resize( size_t( sh->verts.size() ) );
@@ -1278,7 +1301,7 @@ static void sunShadowPassImpl( Scene * scene )
 					progAtQ->uni2f( "uvScale", bsp->uvScale.x, bsp->uvScale.y );
 					progAtQ->uni2f( "uvOffset", bsp->uvOffset.x, bsp->uvOffset.y );
 					progAtQ->uni1f( "alpha", lsp ? lsp->alpha : 1.0f );
-					progAtQ->uni1f( "alphaThreshold", k.sh->wwAlphaThreshold() );
+					progAtQ->uni1f( "alphaThreshold", k.alphaThr );
 					GpuDriven::poolDraw( r, sp.first, sp.n );
 					PassTime::countDraw( qint64( sp.n ) );
 					qCalls++;
@@ -1321,7 +1344,7 @@ static void sunShadowPassImpl( Scene * scene )
 				p->uni2f( "uvScale", bsp->uvScale.x, bsp->uvScale.y );
 				p->uni2f( "uvOffset", bsp->uvOffset.x, bsp->uvOffset.y );
 				p->uni1f( "alpha", lsp ? lsp->alpha : 1.0f );
-				p->uni1f( "alphaThreshold", k.sh->wwAlphaThreshold() );
+				p->uni1f( "alphaThreshold", k.alphaThr );
 				if ( !k.sh->wwFarInstData() )
 					attrv[7] = &( k.sh->coords.constFirst().constFirst()[0] );
 				mask = 0x20000003ULL;

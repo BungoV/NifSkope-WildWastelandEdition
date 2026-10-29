@@ -172,7 +172,7 @@ struct ProbeGiSpec
 {
 	float fixtureClear = 24.0f;     //!< units before the light a shadow ray does not test
 	float voxelMin = 48.0f;         //!< the grid's voxel, raised until it fits maxVoxels
-	int maxVoxels = 400000;
+	int maxVoxels = 1200000;        //!< lane GIROOMDARK1: was 400000 (red WW_CELL_GI_RED=voxbudget); WW_CELL_GI_MAXVOXELS sets it
 	float radiusScale = 2.0f;       //!< blend radius = this x the median probe-to-nearest-probe distance
 	/*! deliberate defects for the gate's refuters: "noshadow" (no shadow rays), "novis" (the grid
 	 *  ignores visibility), "flip" (links gathered from the opposite direction), "noeye" (lane ROOMCLAMP1:
