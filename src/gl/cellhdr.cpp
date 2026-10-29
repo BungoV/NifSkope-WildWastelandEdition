@@ -177,6 +177,7 @@ struct HdrState
 	Scene * scene = nullptr;
 	GLint prevDraw = 0, prevRead = 0;
 	int w = 0, h = 0, samples = 0;
+	std::uint64_t serial = 0;	// lane CELLUNI6: the HDR frames begun (the depth max's once-a-frame key)
 	bool red = wwEnv( "WW_CELL_HDR_RED" ) == "perfrag";
 	QString last = QStringLiteral( "off" );
 	QString said;
@@ -647,7 +648,7 @@ struct DepthMaxGpu
 };
 }
 
-unsigned int wwCellHdrDepthMax( Scene * scene )
+static unsigned int depthMaxMake( Scene * scene )
 {
 	HdrState & s = hst();
 	if ( !s.active || s.scene != scene || !scene || !scene->renderer )
@@ -732,6 +733,60 @@ unsigned int wwCellHdrDepthMax( Scene * scene )
 }
 
 namespace {
+WwCellUni::FrameOnce & depthMaxOnce()
+{
+	static WwCellUni::FrameOnce o;
+	return o;
+}
+template <class F> std::vector<float> depthMaxRead( F * fn, GLuint tex, int w, int h )
+{
+	std::vector<float> px( size_t( w ) * size_t( h ) );
+	GLint prev = 0;
+	fn->glGetIntegerv( GL_TEXTURE_BINDING_2D, &prev );
+	fn->glBindTexture( GL_TEXTURE_2D, tex );
+	fn->glGetTexImage( GL_TEXTURE_2D, 0, GL_RED, GL_FLOAT, px.data() );
+	fn->glBindTexture( GL_TEXTURE_2D, GLuint( prev ) );
+	return px;
+}
+}
+
+/* lane CELLUNI6: made once per HDR frame and handed to every later reader of that frame (the far cards, the volume
+ * clouds, the underwater pass), until a draw that writes the frame's depth says so (wwCellHdrDepthMaxWrote: the far
+ * cards, which draw after taking it). WW_SETUP_MEMO_CHECK=1 makes it again on a hit and counts a different one
+ * (knownstale). WW_CELL_UNI6_RED=hdrdepth: made at every call. */
+unsigned int wwCellHdrDepthMax( Scene * scene )
+{
+	HdrState & s = hst();
+	if ( !s.active || s.scene != scene || !scene || !scene->renderer )
+		return 0;
+	Renderer * r = scene->renderer;
+	WwCellUni::FrameOnce & once = depthMaxOnce();
+	const std::uint64_t key = ( std::uint64_t( std::uint32_t( s.w ) ) << 32 ) | std::uint32_t( s.h );
+	unsigned int tex = 0;
+	if ( wwCellUni6Red( "hdrdepth" ) )
+		return depthMaxMake( scene );
+	if ( !once.take( r, s.serial, key, tex ) ) {
+		tex = depthMaxMake( scene );
+		if ( tex )
+			once.keep( r, s.serial, key, tex );
+		return tex;
+	}
+	if ( wwSetupMemoChecking() ) {
+		const std::vector<float> kept = depthMaxRead( r->fn, GLuint( tex ), s.w, s.h );
+		const unsigned int made = depthMaxMake( scene );
+		if ( made != tex || depthMaxRead( r->fn, GLuint( made ), s.w, s.h ) != kept )
+			WwCellUni::state().knownStale++;
+		return made;
+	}
+	return tex;
+}
+
+void wwCellHdrDepthMaxWrote()
+{
+	depthMaxOnce().dirty();
+}
+
+namespace {
 struct ColorOnlyGpu
 {
 	GLuint fbo = 0, color = 0;
@@ -794,6 +849,8 @@ void wwCellHdrDepthMsEnd( Scene * scene, int unit )
 	fn->glBindFramebuffer( GL_DRAW_FRAMEBUFFER, GLuint( colorOnlyGpus()[r].prevDraw ) );
 }
 
+quint64 wwGlPaintCount();	// glview.cpp
+
 bool wwCellHdrBegin( Scene * scene )
 {
 	HdrState & s = hst();
@@ -814,9 +871,9 @@ bool wwCellHdrBegin( Scene * scene )
 	r->stopProgram();
 
 	GLint vp[4] = { 0, 0, 1, 1 }, samples = 0;
-	fn->glGetIntegerv( GL_VIEWPORT, vp );
-	fn->glGetIntegerv( GL_DRAW_FRAMEBUFFER_BINDING, &s.prevDraw );
-	fn->glGetIntegerv( GL_READ_FRAMEBUFFER_BINDING, &s.prevRead );
+	/* lane CELLUNI6: the frame's target as the obscurance pass asked it in this paint (every cell pass since put it
+	 * back); no note (no obscurance pass, another paint) or WW_CELL_UNI6_RED=hdrbegin (it keeps none): asked */
+	WwCellUni::targetFrom( fn, WwCellUni::frameTarget(), wwGlPaintCount(), s.prevDraw, s.prevRead, vp, wwSetupMemoChecking() );
 	const int W = vp[0] + vp[2], H = vp[1] + vp[3];
 	HdrGpu & g = hdrGpus()[r];
 	const bool sync = syncOn();
@@ -949,6 +1006,7 @@ bool wwCellHdrBegin( Scene * scene )
 		fn->glEnable( GL_SCISSOR_TEST );
 	aaVidmemNote( fn );
 	s.active = true;
+	s.serial++;
 	s.scene = scene;
 	s.w = W;
 	s.h = H;

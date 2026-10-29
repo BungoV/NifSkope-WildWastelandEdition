@@ -10,6 +10,7 @@
 #include "gl/celllooks.h"	// lane DECALS1: the Decal distance fade row
 #include "gl/cellvolair.h"	// lane VOLPART1: volumetric lit effect cards
 #include "gl/cellhdr.h"	// finalfix: blended draws single-sample outside the linear frame
+#include "gl/celluniform.h"	// lane CELLUNI6: the draw's blend note
 #include "gl/cellpasstime.h"	// lane PERF1
 #include "gl/cellqueue.h"	// lane GPUDRIVEN1: the main walks' render queues
 #include "gl/cellgpucull.h"	// lane GPUDRIVEN1 step B: the GPU cluster cull
@@ -442,8 +443,15 @@ void BSShape::drawShapes( NodeList * secondPass )
 		glEnable( GL_BLEND );
 		context->fn->glBlendColor( 1.0f, 1.0f, 1.0f, 0.45f );
 		glBlendFunc( GL_CONSTANT_ALPHA, GL_ONE_MINUS_CONSTANT_ALPHA );
+		WwCellUni::noteBlend( true );	// lane CELLUNI6: through the draw's blend note
+		WwCellUni::noteBlendDst( GL_ONE_MINUS_CONSTANT_ALPHA );
 		glDepthMask( GL_FALSE );
 	}
+	// lane CELLUNI6: GL_BLEND below from this draw's blend note (a pick has none); WW_CELL_UNI6_RED=bsshape: asked
+	const bool blendHeld = !selectionFlags && !wwCellUni6Red( "bsshape" );
+	auto blendNow = [blendHeld]() {
+		return WwCellUni::blendFor( blendHeld, wwSetupMemoChecking(), []() { return glIsEnabled( GL_BLEND ) != GL_FALSE; } );
+	};
 
 	// edit-mode hidden triangles (Blender H): draw only the visible index
 	// runs; the cached element buffer is reused with byte offsets
@@ -479,7 +487,7 @@ void BSShape::drawShapes( NodeList * secondPass )
 	const bool fgZone = !selectionFlags && CellFarGround::ring0( nif, id() );
 	if ( fgZone )
 		PassTime::subBegin( PassTime::FarGroundDraw );
-	const bool singleSample = !wwCellHdrActive() && glIsEnabled( GL_BLEND ) && glIsEnabled( GL_MULTISAMPLE );	// lane PERF1: the cheap test first
+	const bool singleSample = !wwCellHdrActive() && blendNow() && glIsEnabled( GL_MULTISAMPLE );	// lane PERF1: the cheap test first
 	if ( singleSample )
 		glDisable( GL_MULTISAMPLE );
 
@@ -535,10 +543,10 @@ void BSShape::drawShapes( NodeList * secondPass )
 			if ( la >= 0 )
 				context->fn->glGetUniformfv( cur->id, la, &a0 );
 			// a blended shape scales its own alpha; any other blends by a constant alpha for the band
-			const bool viaAlpha = la >= 0 && ( aFlags & 8 ) != 0 && glIsEnabled( GL_BLEND );
+			const bool viaAlpha = la >= 0 && ( aFlags & 8 ) != 0 && blendNow();
 			GLint prevBlend[4] = { GL_ONE, GL_ZERO, GL_ONE, GL_ZERO };
 			GLfloat prevColor[4] = { 0, 0, 0, 0 };
-			const bool blendWas = glIsEnabled( GL_BLEND );
+			const bool blendWas = blendNow();
 			if ( !viaAlpha ) {
 				glGetIntegerv( GL_BLEND_SRC_RGB, &prevBlend[0] );
 				glGetIntegerv( GL_BLEND_DST_RGB, &prevBlend[1] );

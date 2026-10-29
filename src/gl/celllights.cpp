@@ -1429,6 +1429,13 @@ bool wwCellUniRed()
 	return red;
 }
 
+// lane CELLUNI6: one name per leftover (celluniform.h)
+bool wwCellUni6Red( const char * name )
+{
+	WW_SWITCH_STATIC( QByteArray, list, wwEnv( "WW_CELL_UNI6_RED" ).trimmed() );
+	return wwCellUniRed() || WwCellUni::redHas( list.constData(), name );
+}
+
 // lane CELLUNI2: totals, then per site (lights = this file's scope, draw = the per-draw setters, globals = fog + sun)
 void wwCellUniFrame()
 {
@@ -4270,6 +4277,8 @@ void wwCellAoPass( Scene * scene, bool run )
 	fn->glGetIntegerv( GL_DRAW_FRAMEBUFFER_BINDING, &prevFbo );
 	fn->glGetIntegerv( GL_READ_FRAMEBUFFER_BINDING, &prevRead );
 	fn->glGetIntegerv( GL_VIEWPORT, vp );
+	if ( !wwCellUni6Red( "hdrbegin" ) )	// lane CELLUNI6: the HDR frame's Begin takes them (every pass after puts them back)
+		WwCellUni::frameTarget().put( wwGlPaintCount(), prevFbo, prevRead, vp );
 	fn->glGetIntegerv( GL_ACTIVE_TEXTURE, &prevActive );
 	fn->glGetBooleanv( GL_DEPTH_WRITEMASK, &depthMask );
 	fn->glGetBooleanv( GL_COLOR_WRITEMASK, colorMask );

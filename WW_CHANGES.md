@@ -244,6 +244,32 @@
 - **Cost:** CPU only, while the tick is on. About 28 MB (cached line arrays: 241k segments) and about 22 (CPU, Concord 5x5) ms of draw
   time per frame. GPU 1080p: not separable here (the lines are a few hundred thousand vertices; whole-frame medians on 87-108 ms vs off 114-124 ms came from separate launches sharing the GPU with other lanes). When the tick is off it costs nothing.
 - The self-test check names "PRTP: Show probes off ..." are now "PRTP: Debug View off ..." (tests/spells/cell_workspace.sh).
+## Lane CELLUNI6 (2026-10-28, branch celluni6-20261028): the CELLUNI5 leftovers, one red each
+
+- **Jitter viewport:** the TAA jitter's GL_VIEWPORT ask now feeds glview's global-uniform upload right after it (a
+  one-shot note keyed on the paint, `WwCellUni::VpNote`); that upload no longer asks again. Red `jitter`.
+- **Non-linear TAA:** on HDR-off frames the TAA takes its depth format from the cache CELLUNI4 keeps (window
+  framebuffer 0 only; a harness framebuffer's name can come back with another format) and stops draining and reading
+  errors after one clean frame, as the linear path does. Red `nonlinear`.
+- **Depth max once per HDR frame:** `wwCellHdrDepthMax` is kept for the frame and handed to later readers. The far
+  cards write depth after taking it, so the clouds still make their own (sharing it would show clouds through far
+  cards); the underwater pass takes the clouds' one. Red `hdrdepth`.
+- **HDR Begin:** viewport, draw and read framebuffer come from the obscurance pass's asks in the same paint (every
+  cell pass between puts them back); no obscurance pass: asked. Red `hdrbegin`.
+- **Shape blend:** the X-ray / ghost blend and the SSR hook's blend-off now go through the draw's blend note, and
+  BSShape's three GL_BLEND asks read it (a pick asks). Red `bsshape`.
+- **TAA depth cache on a re-created context:** FRAMESPEED1's serial survives the same QOpenGLContext object being made
+  again; `wwGlContextLife()` drops at `aboutToBeDestroyed`, and the cache keys on it. Red `depthcfg`.
+- **Errors at trust points:** with `WW_SETUP_MEMO_CHECK=1` the TAA, FO4CS bloom and fog bloom read GL errors on
+  trusted frames too, refuse that frame as before the trust, and print one line per new site ("setup memo check: GL
+  error 0x0502 at the FO4CS bloom (the chain) on a frame the memo trusted ..."). Red `glerror`.
+- **Reds:** `WW_CELL_UNI6_RED=<name>[,<name>]` (live; `all`; `WW_CELL_UNI_RED=1` holds them all). `WW_SETUP_MEMO_CHECK=1`
+  checks every note (vpstale, knownstale, blendstale on the `cell uni:` line).
+- Tests: tests/celluni6/run.sh (g++ -std=c++17, fake GL state; green passes, each `-DCELLUNI6_RED_<ITEM>` build fails on
+  its own lines only). Live only: the picture, the Qt context-destroy hook, the check counters on real frames.
+- Cost: fewer CPU-side driver asks (per frame: 1 with TAA on, 3 at HDR Begin with the obscurance pass, about 5 on an
+  HDR-off TAA frame once trusted; per shape draw outside the HDR frame up to 3) and one depth-max pass fewer under
+  water. No shader or memory change.
 
 ## Lane ROOMFIT10 (2026-10-28, branch roomfit10-20261028): the volume fit's rays, mostly on the GPU, still exact
 

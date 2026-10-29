@@ -145,7 +145,10 @@ bool wwCellFogBloomRun( Scene * scene, unsigned hdrFbo, unsigned ds, int W, int 
 	FbGpu & g = gpus()[r];
 	const bool remake = !g.fbo || g.w != W || g.h != H || g.samples != S || g.dsFormat != GLenum( dsFormat );
 	// lane CELLUNI5: the drain and the error reads until a clean frame on these targets (WW_CELL_UNI_RED=1: every frame)
-	const bool check = g.err.check( wwCellUniRed(), remake );
+	// lane CELLUNI6: WW_SETUP_MEMO_CHECK=1 reads on a trusted frame too, and names an error found there
+	const bool trustedSkip = !g.err.check( wwCellUniRed(), remake );
+	const bool trustErrCheck = WwCellUni::checkTrusted( trustedSkip, wwSetupMemoChecking(), wwCellUni6Red( "glerror" ) );
+	const bool check = !trustedSkip || trustErrCheck;
 	if ( check )
 		WwCellUni::drainErrors( fn );
 	if ( s.time ) {
@@ -230,6 +233,8 @@ bool wwCellFogBloomRun( Scene * scene, unsigned hdrFbo, unsigned ds, int W, int 
 	fn->glBindFramebuffer( GL_DRAW_FRAMEBUFFER, g.depthFbo );
 	fn->glBlitFramebuffer( 0, 0, W, H, 0, 0, W, H, GL_DEPTH_BUFFER_BIT, GL_NEAREST );
 	if ( const GLenum e = check ? fn->glGetError() : GLenum( GL_NO_ERROR ); e != GL_NO_ERROR ) {
+		if ( trustErrCheck )
+			WwCellUni::trustedError( "fog bloom", "the depth resolve", unsigned( e ) );
 		ok = false;
 		why = QStringLiteral( "the depth resolve failed, GL error %1" ).arg( e );
 	}
@@ -294,6 +299,8 @@ bool wwCellFogBloomRun( Scene * scene, unsigned hdrFbo, unsigned ds, int W, int 
 		else
 			fn->glFramebufferRenderbuffer( GL_FRAMEBUFFER, GL_DEPTH_STENCIL_ATTACHMENT, GL_RENDERBUFFER, 0 );
 		if ( const GLenum e = check ? fn->glGetError() : GLenum( GL_NO_ERROR ); ok && e != GL_NO_ERROR ) {
+			if ( trustErrCheck )
+				WwCellUni::trustedError( "fog bloom", "the pass", unsigned( e ) );
 			ok = false;
 			why = QStringLiteral( "the pass failed, GL error %1" ).arg( e );
 		}
