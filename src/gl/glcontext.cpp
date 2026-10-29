@@ -47,6 +47,7 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 bool rtddgiCellShaderDefine();	// lane RTXGI1 M2: src/rtddgicell.cpp (the Ray-traced GI row / WW_CELL_RTDDGI)
 bool wwAirZoneShaderDefine();	// lane AIRZONE1: src/gl/cellairzone.cpp (the Air zones row / WW_CELL_AIRZONE)
 int wwCellGiVis();	// lane PERF1: src/gl/celllights.cpp (1: the march, WW_CELL_GI_MARCH)
+bool wwCellPrtOn();	// lane PRTOFF1: src/gl/celllights.cpp (the old baked probe GI, only under its red)
 
 #include <QElapsedTimer>
 #include <QOpenGLContext>
@@ -421,6 +422,10 @@ bool NifSkopeOpenGLContext::Shader::load( const QString & filepath )
 		const bool giMarch = wwCellGiVis() == 1;	// not static: a live set reloads the shaders (stage shaders)
 		if ( giMarch && data.startsWith( "#version" ) )
 			data.insert( data.indexOf( '\n' ) + 1, "#define WW_CELL_GI_MARCH 1\n" );
+		/* lane PRTOFF1: the old baked probe GI's reads (cell_lights.glsl), compiled only under its red WW_CELL_PRT_RED=1;
+		 * without the define no program holds a grid read (not a "WW_" literal: the switch survey would list it) */
+		if ( wwCellPrtOn() && data.startsWith( "#version" ) && data.contains( "_CELL_PRT" ) )
+			data.insert( data.indexOf( '\n' ) + 1, "#define WW_CELL_PRT 1\n" );
 		// lane RTXGI1 M2: the ray-traced GI volume's read (cell_lights.glsl + cell_ddgi.glsl); not static: a set reloads the shaders
 		if ( !giMarch && rtddgiCellShaderDefine() && data.startsWith( "#version" ) && data.contains( "_CELL_RTDDGI" ) )
 			data.insert( data.indexOf( '\n' ) + 1, "#define WW_CELL_RTDDGI 1\n" );

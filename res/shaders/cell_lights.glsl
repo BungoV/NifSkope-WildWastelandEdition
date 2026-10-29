@@ -69,6 +69,25 @@ uniform vec4 cellGiFineDim[8];		// nx, ny, nz, first layer
 // In the Sky visibility pass the CPU binds the sky grid on cellGi (same layout, rgb = the probes' sky share).
 uniform int cellPass;
 uniform int cellPassRed;			// the gate's reds: 1 direct (the lights leak into GI), 2 nonormal (sampled facing up); 8192 WW_CELL_GIWALL_RED=off (lane GIWALL2)
+/* lane PRTOFF1 (bungo 10-29: "just don't ever render it since it gets removed"): the old baked probe GI (the grid above,
+ * the PRT) compiles only under WW_CELL_PRT, the loader's define for the red WW_CELL_PRT_RED=1. Without it cellGiOn (the
+ * grid drawn) is false at compile time, so no grid read is left in a program (the air's, the particles', the water's
+ * too), the march (the grid's per-pixel chain) is never compiled, and CELL_GI_UP (a surface reads a GI) is the
+ * ray-traced volume's cellDdgiOn (cell_ddgi.glsl, included before the first read) or false. With WW_CELL_PRT every
+ * CELL_GI_UP is the old cellGiOn token: the old program. */
+#ifdef WW_CELL_PRT
+#define CELL_GI_UP cellGiOn
+#else
+#define cellGiOn false
+#ifdef WW_CELL_GI_MARCH
+#undef WW_CELL_GI_MARCH
+#endif
+#ifdef WW_CELL_RTDDGI
+#define CELL_GI_UP cellDdgiOn
+#else
+#define CELL_GI_UP false
+#endif
+#endif
 
 // lane IMGS1: the cell's imagespace, the game's own HDR -> display chain (src/gl/celllights.h)
 uniform bool cellIsOn;
@@ -988,6 +1007,7 @@ vec3 cellGiKeyNormal( float k )
  * voxels in reach (the trilinear); outdoors, a surface the room grid cannot place (lane GIBLACK2's stranded): 6 and 7
  * the outdoors' volume, 5 none in reach. A probe picture reads the mask at its own pixel (the screen pass's read). */
 uniform int cellGiLoop8;		// 8: the corner loop's bound, a uniform so the loop stays one body; MARCHTOOLS: declared for both modes (EMISSIVEGRID1 reads it in the march mode too)
+#ifdef WW_CELL_PRT
 #ifdef WW_CELL_GI_MARCH
 #ifdef WW_CELL_GI_MARCH_ONCE
 /* lane GIBLACKLINK1: the march once a fragment (fo4_default: its main primes it). Every call site inlines the whole chain,
@@ -1222,6 +1242,33 @@ vec4 cellGiSample( vec3 P, vec3 N )
 	return cellGiVolume( P, N, m > 0.5 ? ivec2( int( m + 0.5 ) - 1, -1 ) : cellGiVolAt( P, N ) );
 }
 #endif
+#else
+/* lane PRTOFF1: no baked grid. The surfaces' GI is the ray-traced volume's read alone (RTXGI1 M2's cellGiVolume with no
+ * grid under it): inside its box E with .a 1 (the volume holds the sky and every bounce, so it replaces the flat ambient
+ * whole); across its last cell E and .a fade together, so past the box the ambient applies alone (.a 0). The Sky
+ * visibility pass (cellPass 2): the volume's sky visibility. Probe 95: path 12. Without the volume: nothing. */
+#ifdef WW_CELL_RTDDGI
+#include "cell_ddgi.glsl"
+#endif
+/* the uniform (true on a weather-lit exterior, src/gl/celllights.cpp) counts only while the volume is read, so the sky's
+ * branches below and in the programs (the PBR ambient, cellGiSkyK) stay the no-GI ones before the volume is up or with
+ * it off. Defined here, after cellDdgiOn: the grid's helpers above never run without the PRT. */
+#define cellGiSky ( cellGiSky && CELL_GI_UP )
+vec4 cellGiSample( vec3 P, vec3 N )
+{
+#ifdef WW_CELL_RTDDGI
+	if ( !cellDdgiOn )
+		return vec4( 0.0 );
+	CellDdgiOut d = cellDdgiRead( P, N, normalize( vec3( cellRow[0].w, cellRow[1].w, cellRow[2].w ) - P ), N );
+	if ( !( d.w > 0.0 && d.fade > 0.0 ) )
+		return vec4( 0.0 );
+	cellGiPath = 12;
+	return d.fade * ( cellPass == 2 ? vec4( vec3( d.vis ), 1.0 ) : vec4( d.E, 1.0 ) );
+#else
+	return vec4( 0.0 );
+#endif
+}
+#endif
 
 // lane AODECAL1 (src/gl/cellaodecalgl.h): the baked AO decals of the big movable statics, one texel per pixel,
 // multiplied into the probe term only (the grid was rebuilt without those copies' blocked sky)
@@ -1306,9 +1353,11 @@ vec3 cellGiFineAdd( vec3 P, vec3 N, vec3 base, float kC )
 vec3 cellGiE0( vec3 P, vec3 N )
 {
 	vec4 s = cellGiSample( P, N );
+#ifdef WW_CELL_PRT
 	if ( cellGiFineOn )	// lane EMISSIVEGRID1: the sample as below, then the fine boxes
 		return cellGiFineAdd( P, N, cellGiSky ? max( s.rgb, vec3( 0.0 ) ) : s.a > 0.01 ? max( s.rgb / s.a, vec3( 0.0 ) ) : vec3( 0.0 ),
 			cellGiSky ? clamp( s.a, 0.0, 1.0 ) : s.a > 0.01 ? 1.0 : 0.0 );
+#endif
 	// lane SKY1: with the sky in the grid the sample keeps its valid share (E x share), the other
 	// ( 1 - share ) being the weather's own ambient the program leaves in (cellGiSkyK)
 	if ( cellGiSky )
@@ -1319,6 +1368,9 @@ vec3 cellGiE0( vec3 P, vec3 N )
 vec3 cellGiE( vec3 P, vec3 N )
 {
 	vec3 e = cellGiE0( P, N );
+#ifndef WW_CELL_PRT
+	return e;	// lane PRTOFF1: the AO decals are the PRT relight's
+#else
 	if ( !( cellAoDecalOn && cellPass < 2 ) )
 		return e;
 	float d = cellAoDecalAt();
@@ -1326,11 +1378,12 @@ vec3 cellGiE( vec3 P, vec3 N )
 	if ( cellGiSky && cellSkyVis < 1.0 )
 		d = 1.0 + cellSkyVis * ( d - 1.0 );
 	return e * d;
+#endif
 }
 // lane SKY1: the share of the weather's ambient the grid's sky replaces at P (0: not a sky grid)
 float cellGiSkyK( vec3 P, vec3 N )
 {
-	if ( !cellGiOn || !cellGiSky || cellInterior )
+	if ( !CELL_GI_UP || !cellGiSky || cellInterior )
 		return 0.0;
 	return clamp( cellGiSample( P, N ).a, 0.0, 1.0 );
 }
@@ -1343,10 +1396,11 @@ uniform int cellSpecOcc;		// 0 off (the material AO alone), 1 on, 2 the hemi red
 uniform float cellSpecSkyBase;		// the sky grid's slot 0 rides cellGi after its own slabs (6, or 12 with rooms): no new sampler
 float cellSpecSky( vec3 P, vec3 N, vec3 R, float rough )
 {
-	if ( cellSpecOcc == 0 || !cellGiOn || !cellGiSky || cellInterior )
+	if ( cellSpecOcc == 0 || !CELL_GI_UP || !cellGiSky || cellInterior )
 		return 1.0;
 	float r = clamp( rough, 0.0, 1.0 );
 	vec3 D = cellSpecOcc == 2 ? N : normalize( mix( N, R, ( 1.0 - r ) * ( sqrt( 1.0 - r ) + r ) ) );
+#ifdef WW_CELL_PRT
 	vec3 t = ( P + N * ( 0.5 * cellGiVoxel ) - cellGiOrigin ) / cellGiVoxel;	// texels: voxel i's centre is i + 0.5
 	float z = clamp( t.z, 0.5, cellGiDims.z - 0.5 );	// the slabs stack on z: never filter across one
 	vec3 sl = vec3( D.x >= 0.0 ? 0.0 : 1.0, D.y >= 0.0 ? 2.0 : 3.0, D.z >= 0.0 ? 4.0 : 5.0 );
@@ -1368,6 +1422,15 @@ float cellSpecSky( vec3 P, vec3 N, vec3 R, float rough )
 		return 1.0;
 	float f = cellGiEdgeFade( t.xy );	// lane GIEDGE1: no occlusion read off the clamped edge column
 	float v = 1.0 + ( f < 1.0 ? f * cellSkyVis : cellSkyVis ) * ( clamp( a.x / a.y, 0.0, 1.0 ) - 1.0 );
+#elif defined( WW_CELL_RTDDGI )
+	// lane PRTOFF1: the volume's sky visibility on the lobe's direction (RTXGI1 M2's read with no grid under it: 1 past the box)
+	CellDdgiOut dv = cellDdgiRead( P, N, normalize( vec3( cellRow[0].w, cellRow[1].w, cellRow[2].w ) - P ), D );
+	if ( !( dv.w > 0.0 && dv.fade > 0.0 ) )
+		return 1.0;
+	float v = 1.0 + dv.fade * cellSkyVis * ( clamp( dv.vis, 0.0, 1.0 ) - 1.0 );
+#else
+	float v = 1.0;
+#endif
 	return cellSpecOcc == 2 ? mix( 1.0, v, r ) : v;
 }
 
@@ -1377,7 +1440,7 @@ float cellAmbShare( vec3 P, vec3 N )
 {
 	if ( !cellInterior )
 		return cellGiSkyK( P, N );
-	if ( !cellGiOn || !cellHasDalc || cellGiAmb != 1 )
+	if ( !CELL_GI_UP || !cellHasDalc || cellGiAmb != 1 )
 		return 0.0;
 	return clamp( cellGiSample( P, N ).a, 0.0, 1.0 );
 }
@@ -1653,11 +1716,11 @@ vec3 cellProbeRaw( vec3 P, vec3 N )
 	if ( cellProbe >= 70 && cellProbe <= 74 )	// lane FXLIT1's probes: the lit effects alone, a surface writes black
 		return vec3( 0.0 );
 	if ( cellProbe == 5 )	// lane SSGI2: E_probe x the open share + E_screen when SSGI runs (the double-count gate)
-		return clamp( cellSsgiE( cellGiOn ? cellGiE( P, N ) : vec3( 0.0 ) ) * 0.31830989, 0.0, 1.0 );
+		return clamp( cellSsgiE( CELL_GI_UP ? cellGiE( P, N ) : vec3( 0.0 ) ) * 0.31830989, 0.0, 1.0 );
 	if ( cellProbe == 90 )	// lane SKY1: the share of the weather's ambient the grid's sky replaced (lane GIAMB1: indoors the DALC's)
 		return vec3( cellAmbShare( P, N ) );
 	if ( cellProbe == 95 ) {	// lane GIBLACK1: r = the branch cellGiSample took / 16 (lane GIBLACK2; it was / 4), g = its .a, b = its E luminance / pi (sqrt)
-		vec4 s = cellGiOn ? cellGiSample( P, N ) : vec4( 0.0 );
+		vec4 s = CELL_GI_UP ? cellGiSample( P, N ) : vec4( 0.0 );
 		return vec3( float( cellGiPath ) * 0.0625, clamp( s.a, 0.0, 1.0 ),
 		             sqrt( clamp( dot( max( s.rgb, vec3( 0.0 ) ), vec3( 0.2126, 0.7152, 0.0722 ) ) * 0.31830989, 0.0, 1.0 ) ) );
 	}
@@ -1698,10 +1761,14 @@ vec3 cellPassOut( vec3 P, vec3 N )
 	 * the one cellGiSample call below: each call site inlines the whole chain, and one more takes fo4_cell past what
 	 * the driver links (GIDARK1: the surfaces then fall back to the legacy program, silently). */
 	const vec3 hole = vec3( 1.0, 0.0, 1.0 );
-	if ( ( cellPass >= 3 && cellPass != 6 ) || !cellGiOn )
+	if ( ( cellPass >= 3 && cellPass != 6 ) || !CELL_GI_UP )
 		return cellPass == 6 ? hole : none;
+#ifdef WW_CELL_PRT
 	vec4 s = cellPass == 6 && ( cellPassRed & 2048 ) != 0 ? cellGiTrilinear( P, N )
 	       : cellGiSample( P, cellPass != 6 && ( cellPassRed & 2 ) != 0 ? vec3( 0.0, 0.0, 1.0 ) : N );
+#else
+	vec4 s = cellGiSample( P, cellPass != 6 && ( cellPassRed & 2 ) != 0 ? vec3( 0.0, 0.0, 1.0 ) : N );
+#endif
 	if ( cellPass == 6 )
 		return s.a <= 0.01 ? hole : vec3( 0.25 + 0.5 * clamp( s.a, 0.0, 1.0 ) );
 	if ( s.a <= 0.01 )
@@ -1882,7 +1949,7 @@ vec3 cellAmbGi( vec3 amb, vec3 gi, vec3 P, vec3 N )
 {
 	if ( cellGiAmb == 2 )
 		return vec3( 0.0 );	// off: also with the GI off (the energy check's "neither" arm)
-	if ( cellGiAmb == 0 || !cellGiOn )
+	if ( cellGiAmb == 0 || !CELL_GI_UP )
 		return amb;
 	if ( cellGiAmb == 1 )
 		return amb * ( 1.0 - clamp( cellGiSample( P, N ).a, 0.0, 1.0 ) );
@@ -1967,7 +2034,7 @@ vec3 cellLit( vec3 color, vec3 albedo, vec3 normalView, vec3 posView, vec3 Vview
 	float gloss = 1.0 - sqrt( alphaR );	// the program's rough = 1 - gloss, alphaR = rough^2
 	cellSumLights( P, N, Vw, gloss, diff, diffOn, spec );
 	vec3 alb = albedo * albedo;
-	vec3 gi = cellSsgiE( cellGiOn ? cellGiE( P, N ) : vec3( 0.0 ) ) * 0.31830989;
+	vec3 gi = cellSsgiE( CELL_GI_UP ? cellGiE( P, N ) : vec3( 0.0 ) ) * 0.31830989;
 	vec3 farF, farGP;	// lane FARVIEW1: the far placed light (diffuse only); the GI's placed share out x w
 	float farW = cellFarTerms( P, N, farF, farGP );
 	if ( farW > 0.0 ) {
@@ -2028,7 +2095,7 @@ vec3 cellProbeOut( vec3 normalView, vec3 posView, float alphaR, float kSmith )
 	if ( cellProbe >= 70 && cellProbe <= 74 )	// lane FXLIT1's probes: the lit effects alone, a surface writes black
 		return vec3( 0.0 );
 	if ( cellProbe == 5 )	// lane SSGI2: as cellProbeRaw's
-		return clamp( cellSsgiE( cellGiOn ? cellGiE( P, N ) : vec3( 0.0 ) ) * 0.31830989, 0.0, 1.0 );
+		return clamp( cellSsgiE( CELL_GI_UP ? cellGiE( P, N ) : vec3( 0.0 ) ) * 0.31830989, 0.0, 1.0 );
 	if ( cellProbe == 90 )	// lane SKY1 (60-74 are other lanes'): the share of the weather's ambient the grid's sky replaced (lane GIAMB1: indoors the DALC's)
 		return vec3( cellAmbShare( P, N ) );
 	if ( cellProbe == 95 )	// lane GIBLACK1: the branch cellGiSample took, its .a and its E (cellProbeRaw's)

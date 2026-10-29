@@ -8,7 +8,7 @@
 
 struct WwWaterGiGuard
 {
-	static constexpr int kN = 4;	// cellGiOn, cellGiSky, cellSpecOcc, cellGiFineOn (cellGiHalfOn is set per draw)
+	static constexpr int kN = 5;	// cellGiOn, cellGiSky, cellSpecOcc, cellGiFineOn, cellDdgiOn (lane PRTOFF1) (cellGiHalfOn is set per draw)
 	struct Entry
 	{
 		int saved[kN] = {};

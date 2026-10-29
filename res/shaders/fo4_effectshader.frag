@@ -228,7 +228,7 @@ vec3 fxRoomLitMul( vec3 Pv, vec3 normal )
 	float nl = max( dot( Nw, normalize( cellDirTo ) ), 0.0 );
 	vec3 amb = cellExtDalc ? cellAmbient( Nw, Pw ) : A.rgb * A.rgb;
 	float k = cellGiSkyK( Pw, Nw );
-	vec3 gi = cellGiOn ? cellGiE( Pw, Nw ) * 0.31830989 : vec3( 0.0 );
+	vec3 gi = CELL_GI_UP ? cellGiE( Pw, Nw ) * 0.31830989 : vec3( 0.0 );	// lane PRTOFF1: the PRT's grid or the ray-traced volume
 	vec3 open = cellDirColor * nl + amb;
 	vec3 here = cellDirColor * nl * cellDirVis + amb * ( 1.0 - k ) + gi;
 	fxRoomShare = clamp( here / max( open, vec3( 1e-5 ) ), vec3( 0.0 ), vec3( 4.0 ) );
