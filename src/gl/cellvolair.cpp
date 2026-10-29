@@ -1568,6 +1568,9 @@ static void vaPassInner( Scene * scene, bool run )
 	// lane GAPLOOK1 (FOGEXTRAS): the sun's scattering octaves a = b = c = 1/2 (Oz 2013's); red hard: shadows not lifted
 	prog->uni4f( "volMs", wwLookOn( WwLook::AirMultiScatter ) ? FloatVector4( 0.5f, 0.5f, 0.5f,
 		wwEnvStr( "WW_CELL_AIR_MS_RED" ) == QLatin1String( "hard" ) ? 0.0f : 1.0f ) : FloatVector4( 0.0f, 0.0f, 0.0f, 0.0f ) );
+	// lane GLAREBLOW1: the octaves' a capped by the air's own re-scatter chance (src/gl/airmsweight.h); red off: a = 1/2
+	const bool msMedium = wwEnvStr( "WW_CELL_GLAREBLOW_RED" ) != QLatin1String( "off" );
+	prog->uni1b( "volMsMedium", msMedium );
 	if ( !surfCl && ( s.opt & 1 ) && g.optUnitsOk && ( s.terms & 2 ) && !( s.red & 16 ) && uniI( "cellOn" ) ) {
 		const std::vector<float> * sp = wwCellLightSpheres( scene );
 		const int nL = uniI( "cellLightCount" );
@@ -1916,13 +1919,14 @@ static void vaPassInner( Scene * scene, bool run )
 		ms = double( timer.nsecsElapsed() ) / 1.0e6;
 	}
 	s.last = QStringLiteral( "on(%1x%2x%3 near=%4 far=%5 sigma0=%6 zb=%7 H=%8 top=%9 phase=%10 tint=%11,%12,%13 lights=%14 "
-		"gi=%15 csm=%16 terms=%17 red=%18 ms=%19)" )
+		"gi=%15 csm=%16 terms=%17 red=%18 ms=%19 octaves=%20)" )
 		.arg( cols ).arg( rows ).arg( kSlices ).arg( double( nearD ), 0, 'f', 1 ).arg( double( farD ), 0, 'f', 1 )
 		.arg( double( M.sigma0 ), 0, 'g', 6 ).arg( double( M.zb ), 0, 'f', 1 )
 		.arg( M.invH > 0.0f ? QString::number( double( 1.0f / M.invH ), 'f', 1 ) : QStringLiteral( "uniform" ) )
 		.arg( double( zTop ), 0, 'f', 1 ).arg( medNote )
 		.arg( double( ph.gi[0] ), 0, 'f', 4 ).arg( double( ph.gi[1] ), 0, 'f', 4 ).arg( double( ph.gi[2] ), 0, 'f', 4 )
-		.arg( cellLightCountV ).arg( cellGiOnV ).arg( csm ? 1 : 0 ).arg( s.terms ).arg( s.red ).arg( ms, 0, 'f', 3 );
+		.arg( cellLightCountV ).arg( cellGiOnV ).arg( csm ? 1 : 0 ).arg( s.terms ).arg( s.red ).arg( ms, 0, 'f', 3 )
+		.arg( !wwLookOn( WwLook::AirMultiScatter ) ? QStringLiteral( "off" ) : msMedium ? QStringLiteral( "medium" ) : QStringLiteral( "half(red)" ) );
 	// the optimisation's echo: the mode, the clusters (all / non-empty / mean list over the non-empty), the CPU build,
 	// the depth skip (0 off, 1 on, 2 the red)
 	const QString optNote = QStringLiteral( "opt=%1 clusters=%2 nonempty=%3 meanlist=%4 buildms=%5 depthskip=%6 zsource=%7 farclamp=%8 temporal=%9" )

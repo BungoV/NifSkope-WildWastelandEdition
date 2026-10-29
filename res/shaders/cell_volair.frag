@@ -55,6 +55,7 @@ uniform bool volSurfClusters;	// lane GAPLOOK1 (LIGHTSYS-4): the lights from the
 uniform vec2 volSurfPx;			// the main viewport's pixels a froxel column (x, y)
 uniform bool volSurfRed;		// red drop: each walk leaves out its first light
 uniform vec4 volMs;				// lane GAPLOOK1 (FOGEXTRAS): the sun's scattering octaves a, b, c, w 1 = shadows lift (x 0: off)
+uniform bool volMsMedium;		// lane GLAREBLOW1: a = min(volMs.x, the air's re-scatter chance) (red WW_CELL_GLAREBLOW_RED=off: volMs.x)
 // lane FOGDRIFT1 (cellvolair.h): x amp / span (0: smooth air), y the fade's start, z 1 / its length, w the noise's mean
 uniform vec4 volDrift;
 uniform vec4 volDriftOfs[2];	// per octave: xyz the wind's offset (world units), w 1 / its tile
@@ -132,15 +133,36 @@ float airFarVis( vec3 posView )
 	return min( c, t ) * airCloudShadow( posView );
 }
 
+/* lane GLAREBLOW1: the octaves' a at height z. Oz's a = 1/2 is a thick cloud's (half the scattered light meets the
+ * medium again); the clear air near the ground lets most of it leave, so the octaves gave 1.2-1.6x the multiple
+ * scattering of a Monte Carlo of the same medium and phase, the share that took the sky near the sun over 1.0
+ * (notes_cloud/GLAREBLOW1/RESULTS.md). a = min(1/2, f), f the chance that light scattered at z meets the air again:
+ * half the sphere up through the column to the top, half down to the ground, each 1 - E2(tau) (4-point Gauss-Legendre
+ * over mu), the light reaching the ground back at albedo 0.2. CPU twin: src/gl/airmsweight.h (tests/glareblow1_test.cpp). */
+float airMsEsc( float tau )
+{
+	return 0.1739274226 * exp( -tau / 0.0694318442 ) + 0.3260725774 * exp( -tau / 0.3300094782 )
+		+ 0.3260725774 * exp( -tau / 0.6699905218 ) + 0.1739274226 * exp( -tau / 0.9305681558 );
+}
+
+float airMsA( float z )
+{
+	if ( !volMsMedium )
+		return volMs.x;
+	float eu = airMsEsc( z < airMed.w ? airMed.x * airCol( z, airMed.w ) : 0.0 );
+	float ed = airMsEsc( airMed.x * airCol( min( airGz, z ), z ) );
+	return min( volMs.x, 0.5 * ( 1.0 - eu ) + 0.5 * ( 1.0 - ed ) + 0.5 * ed * 0.2 );
+}
+
 /* lane GAPLOOK1 (FOGEXTRAS): the multiple-scattering octaves (Wrenninge, Kulla, Lundqvist, "Oz: The Great and
  * Volumetric", SIGGRAPH 2013): octave i scatters a^i, sees the optical depth to the sun x b^i and the phase's g x c^i;
  * vis the sun's shadow, lifted toward 1 as b^i shrinks (w 1). Octave 0 is the single scattering. */
-vec3 airMsSum( float vis, float T, float c )
+vec3 airMsSum( float vis, float T, float c, float a0 )
 {
 	vec3 r = vis * T * volPhasePi( c );
 	float a = 1.0, b = 1.0, g = 1.0;
 	for ( int i = 1; i < 3; i++ ) {
-		a *= volMs.x;
+		a *= a0;
 		b *= volMs.y;
 		g *= volMs.z;
 		float v = volMs.w > 0.5 ? mix( 1.0, vis, b ) : vis;
@@ -165,7 +187,7 @@ vec3 airSun( vec3 posView, vec3 dirView, float z )
 		if ( volDriftSun && volDrift.x > 0.0 )	// lane WEATHERBLEND4: the sun's light through the drifting air
 			Ts = pow( Ts, airDriftSunK( posView, z, to.z ) );
 		if ( volMs.x > 0.0 )
-			return cellDirColor * airMsSum( vis, Ts, dot( to, cellWorldDir( dirView ) ) );
+			return cellDirColor * airMsSum( vis, Ts, dot( to, cellWorldDir( dirView ) ), airMsA( z ) );
 		return cellDirColor * vis * Ts * volPhasePi( dot( to, cellWorldDir( dirView ) ) );
 	}
 	if ( fogSun.w > 0.0 ) {
@@ -174,7 +196,7 @@ vec3 airSun( vec3 posView, vec3 dirView, float z )
 			: volCsm ? wwSunShadow( posView ) : airCloudShadow( posView );
 		float mu = dot( fogView.xyz, fogSun.xyz ) / length( fogView.xyz );
 		if ( volMs.x > 0.0 )
-			return fogSunColour.rgb * fogSun.w * airMsSum( vis, airTup( z, mu ), dot( dirView, fogSun.xyz ) );
+			return fogSunColour.rgb * fogSun.w * airMsSum( vis, airTup( z, mu ), dot( dirView, fogSun.xyz ), airMsA( z ) );
 		return fogSunColour.rgb * fogSun.w * vis * airTup( z, mu ) * volPhasePi( dot( dirView, fogSun.xyz ) );
 	}
 	return vec3( 0.0 );
