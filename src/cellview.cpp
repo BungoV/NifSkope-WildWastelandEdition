@@ -2949,7 +2949,7 @@ static bool cellBuild( NifModel * nif, const CellSceneSpec & specAsked, CellChun
 	float spawnXY[2] = { 0.0f, 0.0f };	// lane WEATHERBLEND5: the region weather's test point
 	bool spawnAt = false;
 	if ( !chunk ) {
-		const CellSpawn spawn = cellSpawnCompute( world, spec );
+		const CellSpawn spawn = cellSpawnCompute( world, spec, true );
 		spawnAt = spawn.valid;
 		spawnXY[0] = spawn.eye[0];
 		spawnXY[1] = spawn.eye[1];
