@@ -202,6 +202,29 @@
   within the repeat floor. 313 one-per-second grabs of the live window (tools/grab.ps1), every one looked at on
   contact sheets (240 px; three at full size): no under-terrain or out-of-bounds frame. Shader sweep (no shader change): 393 + 262 programs x modes LINK OK.
 
+## GLARESB2 (2026-10-30): a live set of GLAREBLOW2's particle red leaves no streak behind
+
+- **What came back:** GLAREBLOW2's repeat row (run2 c3_t2z_fix2b, the fixed exe, shot after two rows with
+  `WW_CELL_PSYS_OBJ_RED=setup` set live) drew the red's two pale strands again: in a 180x200 crop it differs from the red
+  row by 585 px over 8 levels and from the first fix row by 1524. The batch's row 6 with no particle red before it
+  (finish1030 run1 c3_gb_t2z_e, other reds set live) is clean.
+- **Why (read in the code):** the red's reader re-reads per step, but the PARTICLES its steps moved are state. Every bit
+  dragged toward the unplaced object frame stayed in the system after the red went off, until it died (never, in a
+  system with no age-death modifier); a fresh open has none. And the object node was a raw pointer, read every step
+  since GLAREBLOW2, with nothing to say when that node goes. NOT proven: the harness prerolls every shot from empty
+  (`wwParticlePreroll`), so the particle restart alone does not account for the HARNESS repeat row; that row's cause
+  is still open (the object pointer is the other suspect) until the repeat picture is shot.
+- **Now:** `gl/psyslive.h` -- the first step after `WW_CELL_PSYS_OBJ_RED` is set or unset live empties the system and
+  takes the step a freshly built controller takes first (`lastTime` as constructed). The gravity / drag / bomb objects
+  are held by `QPointer` with their block and found again from it when the node went. With no live set of that name
+  nothing changes: the default picture is the same code path. The switch stays live (stage table regenerated: line
+  numbers only).
+- **Gate:** unit `tests/psyslive/run.sh` (twin of updateTime's clock and spherical pull on the real switch store): green
+  PASS -- after the unset the system equals a fresh build's bit for bit (66 bits, worst difference 0), cloud centre
+  14.9 u off the devil's as fresh; red `-DPSYSLIVE_RED` (today's code, no restart) FAIL -- 121 bits against 66, centre
+  65.8 u off. Both builds agree that the red does drag (87.7 u against 26.2 u off) and that a live set of another switch
+  restarts nothing. Owed: the fix2b repeat picture when bungo asks.
+
 ## RTXFIX1 (2026-10-30): the Ray-traced GI probes inside the frame (rounder, fogged, exposed); the atlas order's red
 
 - **Probes view** (bungo 10-29: "Could our probes have a rounder shape?", "fog", the spheres by the string lights and the

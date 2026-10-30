@@ -33,6 +33,7 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include "controllers.h"
 #include "wwswitch.h"	// lane TESTDRIVER1: the WW_* switch store
 #include "gl/fxparity.h"	// lane FXPARITY1
+#include "gl/psyslive.h"	// lane GLARESB2
 
 #include "gl/glshape.h"
 #include "gl/glparticles.h"
@@ -1156,6 +1157,7 @@ bool PSysSimController::update( const NifModel * nif, const QModelIndex & index 
 				if ( Node * n = target->scene->getNode( nif, iGObj ) ) {
 					const Transform t = n->worldTrans();
 					g.obj = n;	// lane GLAREBLOW2: updateTime reads its frame each step
+					g.iObj = iGObj;
 					g.axisLocal = g.axis;
 					g.axis = t.rotation * g.axis;
 					g.origin = t.translation;
@@ -1177,6 +1179,7 @@ bool PSysSimController::update( const NifModel * nif, const QModelIndex & index 
 			if ( iDObj.isValid() ) {
 				if ( Node * n = target->scene->getNode( nif, iDObj ) ) {
 					d.obj = n;	// lane GLAREBLOW2: updateTime reads its frame each step
+					d.iObj = iDObj;
 					d.axisLocal = d.axis;
 					d.axis = n->worldTrans().rotation * d.axis;
 					d.origin = n->worldTrans().translation;
@@ -1198,6 +1201,7 @@ bool PSysSimController::update( const NifModel * nif, const QModelIndex & index 
 			if ( iBObj.isValid() ) {
 				if ( Node * n = target->scene->getNode( nif, iBObj ) ) {
 					b.obj = n;	// lane GLAREBLOW2: updateTime reads its frame each step
+					b.iObj = iBObj;
 					b.axisLocal = b.axis;
 					b.axis = n->worldTrans().rotation * b.axis;
 					b.origin = n->worldTrans().translation;
@@ -1684,6 +1688,17 @@ void PSysSimController::updateTime( float time )
 	if ( !( target && active ) )
 		return;
 
+	/* lane GLARESB2: WW_CELL_PSYS_OBJ_RED was set or unset live (gl/psyslive.h). The bits its steps dragged toward the
+	 * other object frame go, and this step is the one a freshly built controller takes first: empty, lastTime as made */
+	if ( wwPsysObjRedMoved( objRedSeen ) ) {
+		parts.clear();
+		for ( Emitter & e : emitters )
+			e.accum = 0;
+		for ( InheritVel & iv : inherits )
+			iv.havePrev = false;
+		lastTime = kWwPsysFreshLastTime;
+	}
+
 	float dt = time - lastTime;
 	if ( dt < 0.0f ) {
 		// scrubbed backwards or the sequence looped: restart the simulation
@@ -1749,20 +1764,27 @@ void PSysSimController::updateTime( float time )
 	 * dust devils' spherical gravity (FXBitsDebrisSpiral01) dragged their bits off in long pale streaks over Concord.
 	 * Red WW_CELL_PSYS_OBJ_RED=setup: the frames update() read, as before. */
 	WW_SWITCH_STATIC( bool, objSetupRed, wwEnv( "WW_CELL_PSYS_OBJ_RED" ).trimmed() == "setup" );
+	/* lane GLARESB2: the object is held by a guarded pointer and found again from its block when that node went (a
+	 * raw pointer read a deleted node's frame), the way the inherit-velocity objects are found below */
+	auto objNode = [this]( QPointer<Node> & obj, const QPersistentModelIndex & iObj ) -> Node * {
+		if ( iObj.isValid() && ( !obj || iObj != obj->index() ) && target->scene )
+			obj = target->scene->getNode( target->scene->nifModel, QModelIndex( iObj ) );
+		return obj.data();
+	};
 	for ( GravityMod & g : gravities ) {
-		const bool live = g.obj && !objSetupRed;
-		g.axis = live ? g.obj->worldTrans().rotation * g.axisLocal : g.axisSetup;
-		g.origin = live ? g.obj->worldTrans().translation : g.originSetup;
+		const Node * o = objSetupRed ? nullptr : objNode( g.obj, g.iObj );
+		g.axis = o ? o->worldTrans().rotation * g.axisLocal : g.axisSetup;
+		g.origin = o ? o->worldTrans().translation : g.originSetup;
 	}
 	for ( DragMod & d : drags ) {
-		const bool live = d.obj && !objSetupRed;
-		d.axis = live ? d.obj->worldTrans().rotation * d.axisLocal : d.axisSetup;
-		d.origin = live ? d.obj->worldTrans().translation : d.originSetup;
+		const Node * o = objSetupRed ? nullptr : objNode( d.obj, d.iObj );
+		d.axis = o ? o->worldTrans().rotation * d.axisLocal : d.axisSetup;
+		d.origin = o ? o->worldTrans().translation : d.originSetup;
 	}
 	for ( BombMod & b : bombs ) {
-		const bool live = b.obj && !objSetupRed;
-		b.axis = live ? b.obj->worldTrans().rotation * b.axisLocal : b.axisSetup;
-		b.origin = live ? b.obj->worldTrans().translation : b.originSetup;
+		const Node * o = objSetupRed ? nullptr : objNode( b.obj, b.iObj );
+		b.axis = o ? o->worldTrans().rotation * b.axisLocal : b.axisSetup;
+		b.origin = o ? o->worldTrans().translation : b.originSetup;
 	}
 
 	/* Every ACTIVE gravity, summed.

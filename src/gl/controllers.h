@@ -384,6 +384,7 @@ class PSysSimController final : public Controller
 	QVector<SimParticle> parts;
 	int maxParticles = 512;
 	float lastTime = -1.0e30f;
+	quint64 objRedSeen = 0;	//!< lane GLARESB2: the switch generation a live set of WW_CELL_PSYS_OBJ_RED is compared to
 
 	/*! Every modifier's Active state, by the order they appear in the chain, plus
 	 *  the name each of the flat members below came from — so an Active
@@ -418,7 +419,8 @@ class PSysSimController final : public Controller
 		bool spherical = false;	//!< Force Type FORCE_SPHERICAL
 		bool hasOrigin = false;
 		float decay = 0, turbulence = 0, turbulenceScale = 1;	//!< lane FXPARITY2: read by the game rule only
-		Node * obj = nullptr;	//!< lane GLAREBLOW2: the Gravity Object; axis / origin follow its frame each step
+		QPointer<Node> obj;	//!< lane GLAREBLOW2: the Gravity Object; axis / origin follow its frame each step
+		QPersistentModelIndex iObj;	//!< lane GLARESB2: its block; the node is found again when the pointer went
 		Vector3 axisLocal, axisSetup, originSetup;	//!< the axis in the object's frame; the pair update() read (red)
 	};
 	QVector<GravityMod> gravities;
@@ -442,7 +444,8 @@ class PSysSimController final : public Controller
 		Vector3 origin;			//!< lane FXPARITY2: world space, the drag object's position (the range's centre)
 		bool hasOrigin = false;
 		float range = 0, falloff = 0;
-		Node * obj = nullptr;	//!< lane GLAREBLOW2: the Drag Object; axis / origin follow its frame each step
+		QPointer<Node> obj;	//!< lane GLAREBLOW2: the Drag Object; axis / origin follow its frame each step
+		QPersistentModelIndex iObj;	//!< lane GLARESB2
 		Vector3 axisLocal, axisSetup, originSetup;
 	};
 	QVector<DragMod> drags;
@@ -455,7 +458,8 @@ class PSysSimController final : public Controller
 		bool hasOrigin = false;
 		float decay = 0, deltaV = 0;
 		int decayType = 0, symmetry = 0;
-		Node * obj = nullptr;	//!< lane GLAREBLOW2: the Bomb Object; axis / origin follow its frame each step
+		QPointer<Node> obj;	//!< lane GLAREBLOW2: the Bomb Object; axis / origin follow its frame each step
+		QPersistentModelIndex iObj;	//!< lane GLARESB2
 		Vector3 axisLocal, axisSetup, originSetup;
 	};
 	QVector<BombMod> bombs;
