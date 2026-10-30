@@ -3,6 +3,7 @@
 
 #include "gl/cellgrass.h"
 #include "gl/cellunits.h"	// lane WATERFIX7: the passes' named units
+#include "gl/alphabgsm.h"	// lane ALPHABGSM1: the side passes' alpha-test census
 #include "gl/gametaa.h"
 #include "gl/glparticles.h"
 #include "gl/glproperty.h"
@@ -641,6 +642,7 @@ void wwTaaInputsPass( Scene * scene )
 		auto prog = r->useProgram( "taa_objvel.prog" );
 		if ( prog ) {
 			std::vector<Vector3> prevPos;
+			AlphaBgsmTally atTally;	// lane ALPHABGSM1: the census (gl/alphabgsm.h)
 			for ( const Mover & m : movers ) {
 				const Shape * sh = m.sh;
 				const Matrix4 mv = sh->viewTrans().toMatrix4();
@@ -649,12 +651,16 @@ void wwTaaInputsPass( Scene * scene )
 				prog->uni4m( "clipPrev", m.rec->prevClip );
 				prog->uni4m( "modelViewMatrix", mv );
 				prog->uni1i( "velMode", m.mode );
-				const bool at = sh->wwAlphaTested() && bindBase( prog, sh );
+				/* lane ALPHABGSM1: the colour draw's test (a BGSM's wins over the NIF's); a BGSM-only test moved its
+				 * whole card. Red WW_ALPHABGSM_RED=taa */
+				const Shape::WwDrawAlpha da = sh->wwDrawAlpha( "taa" );
+				AlphaBgsmTally::note( atTally, sh->wwAlphaTested(), da.test );
+				const bool at = da.test && bindBase( prog, sh );
 				prog->uni1i( "alphaTest", at ? 1 : 0 );
 				if ( at ) {
 					const BSLightingShaderProperty * lsp = sh->wwLightingShader();
 					prog->uni1f( "alpha", lsp ? lsp->alpha : 1.0f );
-					prog->uni1f( "alphaThreshold", sh->wwAlphaThreshold() );
+					prog->uni1f( "alphaThreshold", da.threshold );
 				}
 				if ( m.mode == 2 )
 					wwCellGrassUniforms( scene, sh->id() );	// the fade and the wind's previous + current phase
@@ -675,6 +681,7 @@ void wwTaaInputsPass( Scene * scene )
 				}
 				drawnObj++;
 			}
+			AlphaBgsmTally::report( atTally, "taa velocity", qint64( movers.size() ) );
 			r->stopProgram();
 		} else {
 			ok = false;

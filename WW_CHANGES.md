@@ -1,5 +1,35 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## CAMGATE1 (2026-10-30): the camera never shows an out-of-bounds or under-terrain view
+
+- bungo 10-30, watching a live hold window that showed the underside of the cells: "Stop placing the camera out of
+  bounds anywhere". **Cause, measured** (notes/camgate1, hold run1): between rows and at every launch the harness's
+  overview (`render shot camera: view 5 refit`, WW_RENDER_VIEW unset = Front refit over the 5x5 + far LOD bounds) put
+  the eye far outside the loaded cells: Concord at -35233,178040,5238 (cell -9,43), Memory Den at 18082,43530,596
+  (cell 4,10, **934 u under the LAND** there). The live window showed that view between every two rows. Path files
+  were not the cause: a census of 169 paths (perf2/t3 + every lane folder of the last 6 days) found one offender,
+  edge_c3.path (far5/6/7, an eye five cells south of the block), moved inside the block's south edge.
+- **The gate:** every reader of the view (paintGL, the shots, path frames, picks, favorites) takes it through
+  `GLView::viewTransform()`, which now passes the raw view (`wwViewTransformRaw`, the old body) through
+  `wwCameraBoundsGate`. In an exterior cell document an eye outside the loaded n x n (a streamed document: any cell
+  with LAND) or under the LAND + 50 (bilinear on VHGT) is refused: the view keeps the last in-bounds pose, or before
+  there is one (a fresh document, world origin, the overview refit) the cell's home (the open's spawn, else the centre
+  cell's middle at ground + eye height). Notes: `camera refused: <why> (<kept>)` once per refusal (kind + cell).
+  In-bounds views come back as the same Transform. Interiors are not judged (no LAND). src/cellcambounds.{h,cpp};
+  hooks in cellview.cpp (liveKeep, the spawn, reset/destroy).
+- Path side file: each frame line ends ` | bounds ok` or ` | bounds refused (<why>)`.
+- Red `WW_CAMERA_BOUNDS_RED=allow` (live): the old behaviour. Not run in a live window (it would put an under-terrain
+  view on screen); the rule's reds are in the unit test.
+- Unit: tests/cambounds (run.sh): green 14 checks; `-DCAMBOUNDS_RED_UNDER` fails under/underedge/roamunder,
+  `-DCAMBOUNDS_RED_OUTSIDE` fails outside/edgeout/origin. C++ ground vs the runner's Python twin
+  (notes/camgate1/tools/camgate2.py): 1575 points on Concord and Memory Den LAND, worst 0.0000 u.
+- Hold run1 (snap 5211c30c, c3 + mem 5x5, one launch each, live_group_rtx_gate2.sh): NifSkope refused the camera 7 + 6
+  times (6 + 5 overview refits outside the loaded cells, 1 + 1 red rows under the terrain); every in-bounds row's 24
+  frames `bounds ok`; both red rows (eye at ground - 100) refused by NifSkope and then by the runner (EYE REFUSED),
+  their queue-time twins CAMERA REFUSED; c3 red's picture = the previous row's view (1 px > 2 levels); after == base
+  within the repeat floor. 313 one-per-second grabs of the live window (tools/grab.ps1), every one looked at on
+  contact sheets (240 px; three at full size): no under-terrain or out-of-bounds frame. Shader sweep (no shader change): 393 + 262 programs x modes LINK OK.
+
 ## RTXFIX1 (2026-10-30): the Ray-traced GI probes inside the frame (rounder, fogged, exposed); the atlas order's red
 
 - **Probes view** (bungo 10-29: "Could our probes have a rounder shape?", "fog", the spheres by the string lights and the
@@ -155,6 +185,32 @@ Reds: WW_CLOUDVOL_RED = onetype | nocurl | shortlight | ign. Offline gate: tests
   programs are the old ones: 378 of 378 binaries (126 programs x 3 modes) are the old machine code, differing only in
   the stamp, the source hash and, in fo4_effectcellfx, one line number in the driver's warning text (notes/prtoff1/sweep).
 
+## SKYINT1: an interior with Use Sky Lighting is lit by the current weather and hour
+
+- **What the game does (game-derived):** on entering a cell, the game sets the sky's
+  mode from CELL DATA. An interior without Show Sky (bit 7) gets the interior mode. Show Sky alone gets the sky-dome
+  mode. Show Sky plus Use Sky Lighting (bit 8) gets the FULL mode, the same as an exterior. Outside the interior mode
+  the sky updates the weather, colours, fog and sun every frame at the game hour. The colour update then copies the
+  cell's (or a lighting template's) directional, ambient, fog colours and DALC over the weather's. It does that for
+  the sky-dome mode in an interior, and it skips it in the full mode. So in a Use Sky Lighting interior
+  (ConcordMuseum01, 0x1181) the ambient (DALC) and the fog colours are the CURRENT weather's at the current hour, and
+  the cell's XCLL ones are not used. Such a cell takes the cell's image space, not the weather's. The fog distances
+  in that mode and whether a sun light is drawn indoors were not read.
+- **The viewer does the same:** a Use Sky Lighting interior (`WwCellLighting::skyLighting`, bits 7 + 8) draws with the
+  Lookdev weather's DALC (the exterior sky's six, encoded to the stored gamma so the ambient law is unchanged) and its
+  fog colours (fog rows 1..4; the cell keeps its own distances, power and max). These are uploaded every draw, so a
+  set of `WW_LOOKDEV_HOUR` / `WW_LOOKDEV_WEATHER` moves them live. Census: `cell sky lighting: Use Sky Lighting
+  interior: ambient (DALC) and fog colours from <weather> hour <h>`.
+- **The ray-traced GI volume's sky** in such a cell is now the current weather and hour (`probeSkyLightNow`), taken
+  once it has stood still for 400 ms. It no longer depends on the baked probe GI's relight of the kept cell. A new
+  sky builds the volume again (about 1 s; the settle waits on `rtddgiCellPending`).
+- **Red** `WW_CELL_SKYLIT_RED` (live): `fixed` = both as before (XCLL ambient and fog, the volume's sky held at its
+  first build's), `xcll` = the ambient and fog only, `sky` = the volume's sky only. Interiors without bit 8 and
+  exteriors take none of this.
+- **Placed-light shadows ship on (Medium)** when nothing is saved or pinned (the menu default and every harness run):
+  the museum has 39 shadow-casting lights (17 omni, 22 spot) and drew none by default. `WW_CELL_LAMPSHADOW=off` (live)
+  pins the old default. Cost and pixels: FINISH1030's batch hold (museum + Memory Den, budget 2.0 ms GPU at 1080p).
+
 ## RTXGI1 M3: the ray-traced GI volume follows the camera, and GL reads it in place (still ships Off)
 
 - **No copy back (interop):** the volume's irradiance, distance and probe tiles now sit in one device buffer, laid out
@@ -185,6 +241,67 @@ Reds: WW_CLOUDVOL_RED = onetype | nocurl | shortlight | ign. Offline gate: tests
   classification (`job.y = 1`, state `DDGI_FRESH` 3). The CLI's passes keep `job.y = 0`, so they are unchanged.
 - **Bake device:** it enables `VK_KHR_external_memory_win32` and `VK_KHR_external_semaphore_win32` when the GPU has
   them. The bakes do not use them; `WW_BAKE_RT_RED=noshare` leaves them off.
+
+## GLAREBLOW2: the FO4CS glow over the sky follows the tone curve; particle pull objects follow their copy (Concord sky)
+
+- **The bloom no longer blows the sky near the sun.** The FO4CS bloom reaches the pixels the cell does not light (the
+  sky backdrop) as the tone-mapped difference it makes from black (cell_hdr.frag mode 3): the curve's steepest part,
+  whatever the backdrop already shows, so a sky pixel at 0.85 took +0.15 from a glow of 0.02 and went white. The game
+  runs the sky through the curve with its bloom. Now the view is copied (resolved) once modes 0-2 are drawn and the
+  glow is scaled by the curve's slope at the backdrop's own place on it (`cellGlowShoulder`, closed-form inverse of
+  cellImageSpace's curve): 1 over black, toward 0 toward white. Red `WW_CELL_BLOOM_SKY_RED=add` (live): the glow as
+  before. Measured (GLAREBLOW2 run1, Concord sun camera S, noon Clear): blown share 12.24 % (red, = the base exe: 830
+  px > 8 levels against a repeat of 883) -> 9.08 % with the fix; bloom off reads 8.71 %. Left third 35.2 -> 25.8 %.
+- **"Ghost riders" over Concord: the dust devils' debris strands.** A particle system's gravity, drag and bomb objects
+  were read once when the scene was made, before the cell copy of the model is placed, so in the cell view the pull
+  point stood the copy's whole placement away from its emitter: FXBitsDebrisSpiral01's spherical gravity dragged its
+  bits into long pale vertical streaks hanging in the sky (bungo 10-29). PSysSimController::updateTime now reads the
+  objects' frames every step, in the same frame as the system's own. Red `WW_CELL_PSYS_OBJ_RED=setup` (live): the
+  frames update() read, as before.
+- New pass unit `WwPassUnit::HdrBackdrop` (6) for the copy in cell_hdr.prog. Stage table regenerated.
+
+## SHADOWBAND1: no more banding in the sun shadows on lit walls (the contact far tier gives way to the cascades)
+
+- **What bungo saw** (10-29, a Concord daylight shot looking up the brick wall by the church, GLAREBLOW2's camera D7):
+  stripes across the lit brick and the window. Measured on a close camera on that wall (CommonwealthClear 12 h, all
+  shadow tiers 4, SHADOWPAR all), one term at a time with the shadow debug ladder (`WW_SHADOW_VIEW`): the cascades
+  (v1) and the terrain map (v2) are clean there (factor HF 1.56 and 0.02 levels on the lit wall, 0.03 and 0 stripe
+  periods per 100 px); the contact view (v3) carries the stripes (HF 6.02, 1.57 periods) and the composed factor (v4)
+  is the contact's (HF 6.31). Not the cascades' bias, map precision or kernel: the screen-space contact shadows.
+- **Why:** GAPLOOK1's far contact tier (the FO4CS port: depth min-reduced 4x4, 96 coarse samples = 384 pixels further,
+  a 250-unit thickness floor for tree crowns) takes any surface up to 500 units in front of the ray as a solid
+  occluder. A thin caster in front of a wall -- the power line 85 units off it -- became a 384-pixel band of stripes
+  and dashed arcs (its blocky coarse footprint hit or missed line by line). An offline twin of both tiers
+  (notes/shadowband1/tools/contact_twin.py on the GI soup's depth) draws the same band from the same line, and none
+  without the far tier.
+- **Fix:** inside the cascades' reach the far tier counts by 1 - the cascades' own distance-fade weight, (r / D)^8 at
+  the radial distance (`ww_contact_farcomp.frag`, uniform `farFade`): there the cascade map holds the far casters to
+  the texel. Past the reach, and whenever the cascades are off, the tier is today's exactly (the weight is 1). The near
+  tier (contact at a caster's base) is untouched. Red `WW_CELL_CONTACT_FAR_RED=inside`: the tier at every distance.
+- **Gate tool:** `WW_SHADOW_CONTACT_DUMP=<absolute dir>` writes the frame's opaque pass (gbuf.bin: view normal + linear
+  depth), the composed contact mask and the march's inputs, for the twin to replay.
+
+## FIREFX1 (2026-10-29): fire barrels, street lamps, banners and every other Animated object draw again
+
+- **The cause.** The Animated objects row (FXPARITY2) leaves a model that moves on its own out of the weld and copies
+  it whole (`cellCopyDoorBranch`). The copy's wrapper node took `p.pos - origin` as its place. But the cell document's
+  frame is the world's: every welded shape keeps its vertices relative to `origin` and carries `origin` in its own
+  Translation (`emitBucket`). So every copy stood one cell origin away: about 60 km in Concord 5x5, 22 km in Memory Den.
+  It was in the scene tree and drawn every frame, but never in view. The live door (DOORLIVE1) and the Particles row's
+  copies (SUNCELL1, `cellCopyParticleBranch`, streamed chunks too) used the same wrong place.
+- **The fix.** The three copy sites place at `p.pos`. Reds (read at the build, launch keys):
+  `WW_CELL_ANIMOBJ_RED=origin` (animated objects + the door at the old place), `WW_CELL_PFX_RED=origin` (the particles).
+- **Census (new):** once per cell document, on its third paint, one line per copied model:
+  `cell animated objects drawn: <model> xN: copies with a node, shapes, in the scene tree, hidden, reached a draw, in
+  the frame; first at ...; probe <shape>: verts, tris, first vertex in model / world / view`, a total line, and
+  `cell particles placed: N systems, K in the frame, live sprites; first ...`.
+- **Measured** (b2d5d2c4 + this lane, RTXGI on, old GI off). Memory Den night, 5x5:
+  - 77 copies of 21 models: in the frame 15 with the fix, 0 with the red.
+  - Barrel box (12000 px): a1 vs red 7990 px moved, a1 vs a1 again 1296 (noise), a1 vs welded 65.
+  - Particles: 4 of 20 systems in the frame with the fix, 0 with the red.
+  - Before the fix every copy's first vertex sat at view x -22700 (Memory Den) / +60000 (Concord): all copies in
+    both scenes (Concord 55 of 29 models, Memory Den 77 of 21), not only the barrels (notes/firefx1/r2/diag_census.txt).
+
 ## AIRZONE1: hand-placed volumes for GI rooms, fog and air particles (row, ships Off; built and gated by the main session)
 
 - **One kind of volume, placed by hand per cell**, stored as `.recx` (the shared standard):
@@ -216,6 +333,25 @@ Reds: WW_CLOUDVOL_RED = onetype | nocurl | shortlight | ign. Offline gate: tests
   (files through the real reader: round trip, keep, GI conversion identity, rooms mode, novol, refusals).
 - Not yet: a drag gizmo for volumes (the band's fields and To 3D cursor place them), an ambient particle emitter, a
   room-aware ray-traced GI read, live gi blocks.
+
+## ALPHABGSM1: the side passes alpha-test BGSM-tested shapes the way the frame draws them
+
+- The sun cascades, the light shadow maps (lamp maps and light cubes), the reflection probes' captures and the TAA
+  object-velocity pass took the alpha test from the NIF's NiAlphaProperty only. The frame's draw takes it from the
+  material file whenever the shader property has one (setupProgramCE1, the game's rule). The cell build writes a
+  bucket's NiAlphaProperty from the source NIF alone, so a shape tested only by its BGSM was drawn solid in those
+  passes. Example: the Concord hardware store's broken windows (`Bld03CornerBrickACom01Open01.nif`, one glass shape,
+  `GlassWindows01.BGSM`: test 128, two-sided, no NiAlphaProperty in the NIF) cast and captured as whole panes.
+- `Shape::wwDrawAlpha( pass )` (src/gl/glshape.cpp) gives the test and threshold the colour draw uses: the
+  material's whenever one is read, else the NIF's (a blended ground layer keeps the cell build's). The four passes
+  read it, threshold included. The reflection probes re-capture when it changes.
+- Red `WW_ALPHABGSM_RED` (live): `nif` puts every pass back on the NIF's test, or a comma list of `sun`, `cube`,
+  `refl`, `taa` for one pass each.
+- Census (stderr, one line per pass when the numbers move, gl/alphabgsm.h): `alphabgsm <pass>: shapes N,
+  alpha-tested NIF K (before) drawn M (after), material only A, NIF only B`.
+- Blend was already the material's in these passes: they skip second-pass shapes, and drawInSecondPass reads the
+  material's blend (unchanged).
+
 ## RTXGI1 M2: the ray-traced GI volume lights the cell view (switch, live; ships Off)
 
 - **Show > Lighting > Ray-traced GI** (`WW_CELL_RTDDGI=1`, default Off): with the probe GI's relit cell open, a DDGI

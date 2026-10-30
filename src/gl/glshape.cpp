@@ -261,6 +261,46 @@ float Shape::wwAlphaThreshold() const
 	return alphaProperty ? float( alphaProperty->alphaThreshold ) : 0.0f;
 }
 
+int Shape::wwDrawAlphaGen()
+{
+	WW_SWITCH_STATIC( QByteArray, v, wwEnv( "WW_ALPHABGSM_RED" ) );
+	static QByteArray last;
+	static int gen = 0;
+	if ( v != last ) {
+		last = v;
+		gen++;
+	}
+	return gen;
+}
+
+Shape::WwDrawAlpha Shape::wwDrawAlpha( const char * pass ) const
+{
+	/* lane ALPHABGSM1: setupProgramCE1 (renderer.cpp) tests with the material's bAlphaTest and iAlphaTestRef whenever
+	 * the shader property names a readable material, whatever the NiAlphaProperty says (the game's ApplyMaterialData
+	 * rule, skill fo4-effect-and-material-alpha-parity); a blended ground layer keeps the cell build's property
+	 * (ALLON2). The cell build writes a bucket's NiAlphaProperty from the source NIF alone, so a test that only the
+	 * BGSM has (the hardware store's GlassWindows01 panes, Bld03CornerBrickACom01Open01.nif: no NiAlphaProperty)
+	 * never reached wwAlphaTested(), and the sun cascades, the light cubes, the reflection probes and the TAA
+	 * velocity drew such shapes solid. Red WW_ALPHABGSM_RED: nif, or a list of sun,cube,refl,taa. */
+	WW_SWITCH_STATIC( QStringList, reds,
+		QString::fromLatin1( wwEnv( "WW_ALPHABGSM_RED" ) ).split( QLatin1Char( ',' ), Qt::SkipEmptyParts ) );
+	WwDrawAlpha a;
+	a.test = wwAlphaTested();
+	a.threshold = wwAlphaThreshold();
+	bool red = false;
+	for ( const QString & r : reds )
+		red = red || r.trimmed() == QLatin1String( "nif" ) || r.trimmed() == QLatin1String( pass );
+	if ( red || !bssp || bssp->bsVersion >= 170 || ( scene && wwCellLandIs( scene->nifModel, id() ) ) )
+		return a;
+	const Material * mat = bssp->getMaterial();
+	if ( !mat )
+		return a;
+	a.fromMaterial = true;
+	a.test = mat->hasAlphaTest();
+	a.threshold = float( mat->alphaTestThreshold() ) / 255.0f;
+	return a;
+}
+
 Vector3 Shape::skinVertex( int vertexIndex, const Vector3 & local ) const
 {
 	Matrix4 m;

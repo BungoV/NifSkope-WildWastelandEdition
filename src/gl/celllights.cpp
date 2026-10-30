@@ -8,6 +8,7 @@ BSD License - see nifskope.h
 #include "wwswitch.h"	// lane TESTDRIVER1: the WW_* switch store
 
 #include "gl/cellclustergl.h"
+#include "gl/alphabgsm.h"	// lane ALPHABGSM1: the side passes' alpha-test census
 #include "gl/cellssr.h"
 #include "gl/cellvolair.h"	// lane VOLAIR1
 #include "gl/shadowset.h"	// lane TERRSHADOW1
@@ -2196,15 +2197,45 @@ void wwCellLightsUniforms( Scene * scene )
 			vt.rotation( 1, k ) / sc, vt.rotation( 2, k ) / sc, w / sc ) );
 	}
 	// PRTP2 section 4: per channel, ((p - n) / 2 per axis, mean of the six), gamma; the shader powers it
-	const bool dalc = L->hasDalc && !( s.red & 4 );
+	/* lane SKYINT1 (10-29): a Use Sky Lighting interior takes the CURRENT weather's DALC at the hour, as the game's
+	 * full-mode sky does there (the cell's XCLL DALC is not read); the same six as the exterior sky (probesky.cpp's
+	 * order, its red dalcflip), encoded back to the stored gamma so the shader's law is unchanged */
+	const float ( *D )[3] = L->dalc;
+	float skyD[6][3];
+	bool skyLitAmb = false;
+	if ( wwCellSkyLitNow( L ) ) {
+		float lin[6][3];
+		if ( wwLookdevDalc( lin ) ) {
+			const bool flip = wwLookdevRed( "dalcflip" );
+			for ( int a = 0; a < 6; a++ )
+				for ( int c = 0; c < 3; c++ )
+					skyD[a][c] = std::pow( std::max( lin[flip ? a : ( a ^ 1 )][c], 0.0f ), 1.0f / 2.2f );
+			D = skyD;
+			skyLitAmb = true;
+		}
+	}
+	const bool dalc = ( L->hasDalc || skyLitAmb ) && !( s.red & 4 );
 	prog->uni1b( "cellHasDalc", dalc );
 	for ( int c = 0; c < 3 && dalc; c++ ) {
 		float mean = 0.0f;
 		for ( int a = 0; a < 6; a++ )
-			mean += L->dalc[a][c] / 6.0f;
+			mean += D[a][c] / 6.0f;
 		prog->uni4f_l( prog->uniLocation( "cellDalc[%d]", c ), FloatVector4(
-			( L->dalc[0][c] - L->dalc[1][c] ) * 0.5f, ( L->dalc[2][c] - L->dalc[3][c] ) * 0.5f,
-			( L->dalc[4][c] - L->dalc[5][c] ) * 0.5f, mean ) );
+			( D[0][c] - D[1][c] ) * 0.5f, ( D[2][c] - D[3][c] ) * 0.5f,
+			( D[4][c] - D[5][c] ) * 0.5f, mean ) );
+	}
+	if ( L->interior && L->skyLighting ) {	// telemetry, once per change
+		static QString skyLitLast;
+		const QString line = skyLitAmb
+			? QStringLiteral( "cell sky lighting: Use Sky Lighting interior: ambient (DALC) and fog colours from %1 hour %2" )
+				.arg( wwLookdevWeatherKey() ).arg( wwLookdevHour(), 0, 'f', 2 )
+			: QStringLiteral( "cell sky lighting: Use Sky Lighting interior: the cell's own ambient and fog (%1)" )
+				.arg( !wwLookdevActive() ? QStringLiteral( "Lookdev off" ) : ( wwCellSkyLitRed() & 1 )
+					? QStringLiteral( "WW_CELL_SKYLIT_RED" ) : QStringLiteral( "no weather" ) );
+		if ( line != skyLitLast ) {
+			fprintf( stderr, "%s\n", qPrintable( line ) );
+			skyLitLast = line;
+		}
 	}
 	// lane AMBO2: the Ambient Only volumes, in plugin order (the shader takes the first that holds a point)
 	const int ambo = ( dalc && !( s.red & 1024 ) ) ? std::min( int( L->ambientLights.size() ), kAmbientSlots ) : 0;
@@ -2430,9 +2461,19 @@ void wwCellLightsUniforms( Scene * scene )
 	 * fog term follows the sun, which an interior lacks). */
 	if ( L->hasFog && prog->uniLocation( "fogOn" ) >= 0 ) {
 		prog->uni1b( "fogOn", true );
+		/* lane SKYINT1 (10-29): a Use Sky Lighting interior's fog colours (K rows 1..4) are the current weather's, as the
+		 * game's full-mode sky keeps them; the distances, power and max stay the cell's (the engine's fog distances there
+		 * were not read: unknown) */
+		float fK[6][4];
+		std::memcpy( fK, L->fogK, sizeof fK );
+		WwFog wf;
+		if ( wwCellSkyLitNow( L ) && wwLookdevFogNow( wf ) )
+			for ( int k = 1; k <= 4; k++ )
+				for ( int c = 0; c < 3; c++ )
+					fK[k][c] = wf.K[k][c];
 		for ( int k = 0; k < 6; k++ )
 			prog->uni4f_l( prog->uniLocation( "fogK[%d]", k ),
-				FloatVector4( L->fogK[k][0], L->fogK[k][1], L->fogK[k][2], L->fogK[k][3] ) );
+				FloatVector4( fK[k][0], fK[k][1], fK[k][2], fK[k][3] ) );
 		float zr[4] = { 0, 0, 0, 0 };
 		for ( int k = 0; k < 3; k++ ) {
 			zr[k] = vt.rotation( k, 2 ) / sc;
@@ -2450,6 +2491,23 @@ void wwCellLightsUniforms( Scene * scene )
 bool wwCellImageSpaceOn()
 {
 	return st().isOn;
+}
+
+int wwCellSkyLitRed()
+{
+	WW_SWITCH_STATIC( int, red, [] {
+		int bits = 0;	// a comma list
+		for ( const QString & v : wwEnvStr( "WW_CELL_SKYLIT_RED" ).trimmed().toLower().split( QLatin1Char( ',' ), Qt::SkipEmptyParts ) )
+			bits |= v == QLatin1String( "fixed" ) ? 3 : v == QLatin1String( "xcll" ) ? 1 : v == QLatin1String( "sky" ) ? 2
+				: v == QLatin1String( "ground" ) ? 4 : 0;
+		return bits;
+	}() );
+	return red;
+}
+
+bool wwCellSkyLitNow( const WwCellLighting * L )
+{
+	return L && L->interior && L->skyLighting && wwLookdevActive() && !( wwCellSkyLitRed() & 1 );
 }
 
 bool wwCellShadowOn()
@@ -2948,23 +3006,26 @@ LsRect lsPacked( const LsRect & room, int member, int S )
 /* lane GAPFIX1: an alpha-tested shape casts what its alpha test keeps into the light cubes, as the sun's map
  * does (VOLAIR1); the cube passes skipped it, and a barrel's own lamp drew an empty cube (lightbooth1).
  * Red WW_CELL_SHADOW_RED=atskip skips them again. */
+/* lane ALPHABGSM1: the test is the colour draw's (Shape::wwDrawAlpha: a BGSM's wins over the NIF's); a BGSM-only
+ * test cast solid into the cubes before. Red WW_ALPHABGSM_RED=cube. */
 static bool cubeCasterAt( const Shape * sh )
 {
-	return sh->wwAlphaTested() && sh->wwShaderLighting() && !sh->coords.isEmpty()
+	return sh->wwDrawAlpha( "cube" ).test && sh->wwShaderLighting() && !sh->coords.isEmpty()
 		&& sh->coords.constFirst().size() == sh->verts.size();
 }
 
 static bool cubeSkipsCaster( const Shape * sh )
 {
 	WW_SWITCH_STATIC( bool, atRed, wwEnv( "WW_CELL_SHADOW_RED" ).trimmed() == "atskip" );	// lane LIVESET3: live
-	return sh->wwAlphaTested() && ( atRed || !cubeCasterAt( sh ) );
+	return sh->wwDrawAlpha( "cube" ).test && ( atRed || !cubeCasterAt( sh ) );
 }
 
 static qint64 g_cubeAtCasters = 0, g_cubeAtDraws = 0;
 
 static void cubeDrawCaster( Renderer * r, NifSkopeOpenGLContext::Program * prog, const Shape * sh )
 {
-	const bool at = sh->wwAlphaTested();
+	const Shape::WwDrawAlpha da = sh->wwDrawAlpha( "cube" );	// lane ALPHABGSM1
+	const bool at = da.test;
 	const float * attrv[8] = { &( sh->verts.constFirst()[0] ), nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr };
 	std::uint64_t mask = 3;
 	prog->uni1i( "shAlphaTest", at ? 1 : 0 );
@@ -2976,7 +3037,7 @@ static void cubeDrawCaster( Renderer * r, NifSkopeOpenGLContext::Program * prog,
 		prog->uni2f( "uvScale", bsp->uvScale.x, bsp->uvScale.y );
 		prog->uni2f( "uvOffset", bsp->uvOffset.x, bsp->uvOffset.y );
 		prog->uni1f( "alpha", lsp ? lsp->alpha : 1.0f );
-		prog->uni1f( "alphaThreshold", sh->wwAlphaThreshold() );
+		prog->uni1f( "alphaThreshold", da.threshold );
 		attrv[7] = &( sh->coords.constFirst().constFirst()[0] );
 		mask = 0x20000003ULL;
 		g_cubeAtDraws++;
@@ -2992,7 +3053,8 @@ static void lampShadowPass( Scene * scene, Gpu & g, const WwCellLighting & L, st
 	auto fn = r->fn;
 	const int S = wwCellLampShadowFace();
 	const int red = wwCellLampShadowRed();
-	const int ver = s.version.value( scene->nifModel );
+	// lane ALPHABGSM1: a moved alpha-rule red (Shape::wwDrawAlphaGen) stores every lamp map again
+	const int ver = s.version.value( scene->nifModel ) + ( Shape::wwDrawAlphaGen() << 24 );
 	const std::uint64_t blockBytes = std::uint64_t( 3 ) * std::uint64_t( S ) * std::uint64_t( S ) * 2u;
 	QElapsedTimer timer;
 	timer.start();
@@ -3025,9 +3087,15 @@ static void lampShadowPass( Scene * scene, Gpu & g, const WwCellLighting & L, st
 	// the casters, as the cube pass takes them (the water too: SUNCELL1's red keeps it)
 	WW_SWITCH_STATIC( bool, waterCastsRed, qgetenv( "WW_CELL_SHADOW_RED" ).trimmed() == "watercasts" );	// fix TDFIX2: follows a live set
 	std::vector<LsCaster> casters;
+	AlphaBgsmTally atTally;	// lane ALPHABGSM1: the census (gl/alphabgsm.h)
+	qint64 atShapes = 0;
 	for ( Node * node : scene->nodes.list() ) {
 		const Shape * sh = dynamic_cast<const Shape *>( node );
-		if ( !sh || !sh->isVisible() || !sh->wwCastsSunShadow() || cubeSkipsCaster( sh ) )
+		if ( !sh || !sh->isVisible() || !sh->wwCastsSunShadow() )
+			continue;
+		atShapes++;
+		AlphaBgsmTally::note( atTally, sh->wwAlphaTested(), sh->wwDrawAlpha( "cube" ).test );
+		if ( cubeSkipsCaster( sh ) )
 			continue;
 		if ( sh->verts.isEmpty() || sh->triangles.isEmpty() )
 			continue;
@@ -3036,6 +3104,7 @@ static void lampShadowPass( Scene * scene, Gpu & g, const WwCellLighting & L, st
 		const BoundSphere b = sh->bounds();
 		casters.push_back( { sh, sh->id(), b.center, b.radius } );
 	}
+	AlphaBgsmTally::report( atTally, "lamp maps", atShapes );
 	// what moved since the last frame; a first move makes a caster a mover and drops the stored maps it was in
 	auto slotOfLight = [&g]( int li ) {
 		for ( int k = 0; k < kShadowSlots; k++ )
@@ -3566,6 +3635,11 @@ void wwCellShadowPass( Scene * scene )
 		}
 	}
 	{
+		static int atGen = 0;	// lane ALPHABGSM1: a moved alpha-rule red draws every held cube again
+		if ( atGen != Shape::wwDrawAlphaGen() ) {
+			atGen = Shape::wwDrawAlphaGen();
+			wwCellShadowKick( scene->nifModel );
+		}
 		const int kick = shadowKicks().value( scene->nifModel );
 		if ( g.shKick != kick ) {
 			g.shKick = kick;
@@ -3615,9 +3689,15 @@ void wwCellShadowPass( Scene * scene )
 	// plane under a lamp shadowed its own bed). Red WW_CELL_SHADOW_RED=watercasts keeps it.
 	WW_SWITCH_STATIC( bool, waterCastsRed, wwEnv( "WW_CELL_SHADOW_RED" ).trimmed() == "watercasts" );
 	int waterSkipped = 0;
+	AlphaBgsmTally atTally;	// lane ALPHABGSM1: the census (gl/alphabgsm.h)
+	qint64 atShapes = 0;
 	for ( Node * node : scene->nodes.list() ) {
 		const Shape * sh = dynamic_cast<const Shape *>( node );
-		if ( !sh || !sh->isVisible() || !sh->wwCastsSunShadow() || cubeSkipsCaster( sh ) )
+		if ( !sh || !sh->isVisible() || !sh->wwCastsSunShadow() )
+			continue;
+		atShapes++;
+		AlphaBgsmTally::note( atTally, sh->wwAlphaTested(), sh->wwDrawAlpha( "cube" ).test );
+		if ( cubeSkipsCaster( sh ) )
 			continue;
 		if ( sh->verts.isEmpty() || sh->triangles.isEmpty() )
 			continue;
@@ -3625,10 +3705,11 @@ void wwCellShadowPass( Scene * scene )
 			waterSkipped++;
 			continue;
 		}
-		g_cubeAtCasters += sh->wwAlphaTested() ? 1 : 0;
+		g_cubeAtCasters += sh->wwDrawAlpha( "cube" ).test ? 1 : 0;	// lane ALPHABGSM1
 		const BoundSphere b = sh->bounds();
 		casters.push_back( { sh, b.center, b.radius, sh->viewTrans().toMatrix4() } );
 	}
+	AlphaBgsmTally::report( atTally, "light cubes", atShapes );
 
 	NifSkopeOpenGLContext::Program * prog = r->useProgram( "cell_shadowdepth.prog" );
 	if ( !prog ) {

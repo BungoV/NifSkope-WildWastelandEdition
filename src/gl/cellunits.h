@@ -111,6 +111,7 @@ namespace WwPassUnit
 {
 constexpr int FullScreen0 = 0;	// cellfxres: the full-screen passes' first unit
 constexpr int HdrStencil = 9;	// cell_hdr.prog: the frame's stencil (usampler2DMS), lane TONEMAP1
+constexpr int HdrBackdrop = 6;	// cell_hdr.prog: the view under the FO4CS glow's mode 3, resolved (sampler2D), lane GLAREBLOW2
 constexpr int VrsSrc = 8;	// cell_vrs_rate.prog: the units the tone map used, free once its quads are drawn
 constexpr int VrsMv = 9;
 constexpr int TaaLock = 12;	// the TAA resolve: lane TAA3's lock, velocity and mask, above its 8-11

@@ -418,6 +418,8 @@ class PSysSimController final : public Controller
 		bool spherical = false;	//!< Force Type FORCE_SPHERICAL
 		bool hasOrigin = false;
 		float decay = 0, turbulence = 0, turbulenceScale = 1;	//!< lane FXPARITY2: read by the game rule only
+		Node * obj = nullptr;	//!< lane GLAREBLOW2: the Gravity Object; axis / origin follow its frame each step
+		Vector3 axisLocal, axisSetup, originSetup;	//!< the axis in the object's frame; the pair update() read (red)
 	};
 	QVector<GravityMod> gravities;
 
@@ -440,6 +442,8 @@ class PSysSimController final : public Controller
 		Vector3 origin;			//!< lane FXPARITY2: world space, the drag object's position (the range's centre)
 		bool hasOrigin = false;
 		float range = 0, falloff = 0;
+		Node * obj = nullptr;	//!< lane GLAREBLOW2: the Drag Object; axis / origin follow its frame each step
+		Vector3 axisLocal, axisSetup, originSetup;
 	};
 	QVector<DragMod> drags;
 
@@ -451,6 +455,8 @@ class PSysSimController final : public Controller
 		bool hasOrigin = false;
 		float decay = 0, deltaV = 0;
 		int decayType = 0, symmetry = 0;
+		Node * obj = nullptr;	//!< lane GLAREBLOW2: the Bomb Object; axis / origin follow its frame each step
+		Vector3 axisLocal, axisSetup, originSetup;
 	};
 	QVector<BombMod> bombs;
 

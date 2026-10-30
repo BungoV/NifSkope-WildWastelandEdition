@@ -42,8 +42,11 @@ LsState & st()
 		liveGen = wwSwitchGen();
 		const QByteArray pin = qgetenv( "WW_CELL_LAMPSHADOW" );
 		s.pinned = !pin.trimmed().isEmpty();
+		/* lane SKYINT1 step 3: placed-light shadows ship ON (Medium) when nothing is saved or pinned; the cost is
+		 * measured in the batch hold (FINISH1030, museum + Memory Den, budget 2.0 ms GPU at 1080p).
+		 * WW_CELL_LAMPSHADOW=off pins the old default (none). */
 		s.tier = s.pinned ? tierFromText( pin )
-			: std::clamp( QSettings().value( QStringLiteral( "WW/CellLampShadow" ), -1 ).toInt(), -1, 3 );
+			: std::clamp( QSettings().value( QStringLiteral( "WW/CellLampShadow" ), 1 ).toInt(), -1, 3 );
 		const QByteArray red = qgetenv( "WW_CELL_LAMPSHADOW_RED" ).trimmed();
 		s.red = red == "live" ? 1 : red == "cube" ? 2 : 0;
 	}

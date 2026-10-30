@@ -159,6 +159,19 @@ public:
 	BSShaderLightingProperty * wwShaderLighting() const { return bssp; }
 	const BSLightingShaderProperty * wwLightingShader() const { return bslsp; }
 	float wwAlphaThreshold() const;
+	/*! lane ALPHABGSM1: the alpha test the colour draw runs with (Renderer::setupProgramCE1): a material file's test
+	 *  and threshold whenever the shader property has one, the NiAlphaProperty's only without. The side passes read
+	 *  this: `pass` is "sun", "cube", "refl" or "taa", for the red WW_ALPHABGSM_RED (nif = every pass, or a comma
+	 *  list of passes: they read the NIF's test again). */
+	struct WwDrawAlpha
+	{
+		bool test = false;
+		float threshold = 0.0f;
+		bool fromMaterial = false;	// the material file decided (it may say "no test" where the NIF tests)
+	};
+	WwDrawAlpha wwDrawAlpha( const char * pass ) const;
+	//! lane ALPHABGSM1: moves when WW_ALPHABGSM_RED does, so the passes that keep their maps draw them again
+	static int wwDrawAlphaGen();
 	//! the GPU applies the bone transforms to this shape (the caster pass skins it on the CPU)
 	bool wwGpuSkinned() const { return isSkinned && !transformRigid && !boneTransforms.empty(); }
 	//! lane FARDRAW1: the instanced far ring this shape draws, or null

@@ -28,8 +28,17 @@ struct WwAnimObjRoot
 {
 	qint32 root = -1;
 	QString loopSeq;
+	QString model;	// lane FIREFX1: the census names it
 };
 //! cellBuild: the copies of this document (replaces any earlier list for it)
 void wwCellAnimObjSet( const NifModel * nif, const QVector<WwAnimObjRoot> & roots );
+
+/*! lane FIREFX1: THE COPIES' DRAW CENSUS. Once per cell document, on its third paint, one line per copied model:
+ *  `cell animated objects drawn: <model> x<copies>: shapes S, in the scene tree T, hidden H, reached a draw D; first at
+ *  x y z`, and a total line. "Reached a draw" = BSShape::drawShapes got its program for the shape on the second paint
+ *  (wwCellAnimObjNoteDraw), before any cull. Runs with the World animation row off too. */
+void wwCellAnimObjCensus( Scene * scene );
+//! BSShape::drawShapes: this shape got its program this paint (a no-op unless the census is listening)
+void wwCellAnimObjNoteDraw( const void * shape );
 
 #endif // CELLWORLDANIM_H

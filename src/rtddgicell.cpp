@@ -244,6 +244,64 @@ Cell & cell()
 	return *c;
 }
 
+/* lane SKYINT1 (10-29): a Use Sky Lighting interior (WwCellLighting skyLighting) takes the CURRENT Lookdev weather and
+ * hour as the volume's sky, as the game's full-mode sky does there, whether or not the baked probe GI relit the kept
+ * cell. A change is taken once it has stood still kSkyStillMs (an hour slider drags through many values; each new sky
+ * builds the volume again). Red WW_CELL_SKYLIT_RED=sky|fixed: the sky the document's first build took, held. */
+constexpr qint64 kSkyStillMs = 400;
+
+struct SkyLit
+{
+	const void * nif = nullptr;
+	ProbeSkyLight first, used, wanted;
+	QElapsedTimer still;
+	bool waiting = false;
+};
+
+SkyLit & skyLit()
+{
+	static SkyLit s;
+	return s;
+}
+
+//! the sky to build with for `nif` (the kept relight's in `sky` on entry)
+void skyLitSky( const void * nif, ProbeSkyLight & sky )
+{
+	SkyLit & s = skyLit();
+	if ( s.nif != nif ) {
+		s = SkyLit();
+		s.nif = nif;
+		s.first = sky;
+		s.used = sky;
+		const ProbeSkyLight now = probeSkyLightNow();
+		if ( now.on )
+			s.used = now;   // the first build takes the hour it opens at, no wait
+		s.wanted = s.used;
+	}
+	if ( wwCellSkyLitRed() & 2 ) {
+		s.waiting = false;
+		sky = s.first;
+		return;
+	}
+	const ProbeSkyLight now = probeSkyLightNow();
+	if ( now.on && !now.same( s.wanted ) ) {
+		s.wanted = now;
+		s.still.start();
+		s.waiting = true;
+	}
+	if ( s.waiting && s.still.elapsed() >= kSkyStillMs ) {
+		s.used = s.wanted;
+		s.waiting = false;
+	}
+	sky = s.used;
+	/* the void under an interior cell is ground in the game, never sky: a ray leaving downward (a broken floor, a
+	 * probe under the slab) took the weather's ground-facing colour and lit the floor from below (the 10-29 dump: floor
+	 * probes 0.2-0.44 sky). The face a surface facing down takes is 0; red WW_CELL_SKYLIT_RED=ground keeps it */
+	if ( !( wwCellSkyLitRed() & 4 ) )
+		for ( int c = 0; c < 3; c++ )
+			sky.amb[5][c] = 0.0f;
+}
+
 //! the GUI's settings file (bakert.cpp's; a harness WW_SETTINGS_SCOPE starts empty, so the rows read off there)
 QString rowSettingsApp()
 {
@@ -814,6 +872,8 @@ void rtddgiCellFrame( Scene * scene )
 		refuse( c, QStringLiteral( "no relit cell in this view: the volume traces the soup the Precomputed Radiance Transfer relight keeps" ) );
 		return;
 	}
+	if ( lights.interior && lights.skyLighting && sky.on )
+		skyLitSky( nif, sky );   // lane SKYINT1: the current weather and hour
 	const WwCellGi * G = wwCellGiFor( nif );
 	const CellSpec sp = cellSpecNow();
 	const int paths = cellRedPaths();
@@ -1002,6 +1062,9 @@ bool rtddgiCellPending()
 	const Cell & c = cell();
 	if ( c.pending )
 		return true;   // the worker's build (a failed one is harvested by the next frame, then nothing is pending)
+	if ( c.nif && skyLit().nif == c.nif && skyLit().waiting )
+		return true;   // lane SKYINT1: a new sky waits to stand still, then builds
+
 	return c.live && c.live->spec.max > 0 && !c.stopped;
 }
 

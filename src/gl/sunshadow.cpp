@@ -8,6 +8,7 @@ BSD License - see nifskope.h
 #include "wwswitch.h"	// lane TESTDRIVER1: the WW_* switch store
 #include "cellunits.h"
 #include "celluniform.h"	// lane CELLUNI2
+#include "gl/alphabgsm.h"	// lane ALPHABGSM1: the side passes' alpha-test census
 #include "gametaa.h"
 #include "gl/cellwater.h"	// lane SUNCELL1: water never casts
 #include "cellmesh.h"	// lane FARDRAW1: CellMeshInst
@@ -322,6 +323,7 @@ struct Caster
 	bool twoSided;
 	std::vector<Vector3> skinned;
 	bool alphaTested = false;	// lane VOLAIR1: drawn by lookdev_csmdepth_at.prog (the base map's alpha test)
+	float atRef = 0.0f;			// lane ALPHABGSM1: its threshold, as the colour draw tests (Shape::wwDrawAlpha)
 	bool dynamic = false;		// lane SHADOWCACHE1: drawn over the cached static layer every pass
 	std::uint64_t sig = 0;
 };
@@ -569,7 +571,7 @@ bool classify( const Shape * sh, bool skinned, bool twoSided, bool alphaTested, 
 			h.w( qHash( bsp->fileName( 0 ) ) );
 		}
 		h.f( lsp ? lsp->alpha : 1.0f );
-		h.f( sh->wwAlphaThreshold() );
+		h.f( sh->wwDrawAlpha( "sun" ).threshold );	// lane ALPHABGSM1
 		h.p( sh->coords.isEmpty() ? nullptr : sh->coords.constFirst().constData() );
 	}
 	sig = h.h;
@@ -874,6 +876,7 @@ static void sunShadowPassImpl( Scene * scene )
 
 	// the casters
 	std::vector<Caster> casters;
+	AlphaBgsmTally atTally;	// lane ALPHABGSM1: the census (gl/alphabgsm.h)
 	s.tris = 0;
 	const bool cpuSkin = scene->hasOption( Scene::DoSkinning );
 	const bool cableSwayOn = wwLookOn( WwLook::CableShadowSway );
@@ -888,15 +891,19 @@ static void sunShadowPassImpl( Scene * scene )
 			continue;
 		if ( !sh->wwFarInstData() && ( sh->verts.isEmpty() || sh->triangles.isEmpty() ) )
 			continue;   // lane FARDRAW1: an instanced far ring has no rows and casts through gl/cellfarinst
+		// lane ALPHABGSM1: the test the colour draw runs (a BGSM's wins over the NIF's); red WW_ALPHABGSM_RED=sun
+		const Shape::WwDrawAlpha da = sh->wwDrawAlpha( "sun" );
+		AlphaBgsmTally::note( atTally, sh->wwAlphaTested(), da.test );
 		// lane VOLAIR1: red WW_CSM_RED=atnone drops the alpha-tested casters (the window gate's ceiling: glass gone)
-		if ( red( "atnone" ) && sh->wwAlphaTested() )
+		if ( red( "atnone" ) && da.test )
 			continue;
 		Caster c { sh, sh->wwDoubleSided(), {} };
 		// lane VOLAIR1 (10-15): an alpha-tested shape (a window's GlassWindows01 glass, a leaf card) casts what its
 		// alpha test keeps, as the colour pass draws it; it cast a solid card before, and the sun never reached the
 		// air behind a window. Red WW_CSM_RED=atsolid casts them solid again.
-		c.alphaTested = !red( "atsolid" ) && sh->wwAlphaTested() && sh->wwShaderLighting()
+		c.alphaTested = !red( "atsolid" ) && da.test && sh->wwShaderLighting()
 			&& ( sh->wwFarInstData() || ( !sh->coords.isEmpty() && sh->coords.constFirst().size() == sh->verts.size() ) );
+		c.atRef = da.threshold;
 		if ( cpuSkin && sh->wwGpuSkinned() ) {
 			c.skinned.resize( size_t( sh->verts.size() ) );
 			for ( qsizetype v = 0; v < sh->verts.size(); v++ )
@@ -911,6 +918,7 @@ static void sunShadowPassImpl( Scene * scene )
 		casters.push_back( std::move( c ) );
 	}
 	s.casters = int( casters.size() );
+	AlphaBgsmTally::report( atTally, "sun cascades", s.casters );	// lane ALPHABGSM1: once per change
 	s.atCasters = int( std::count_if( casters.begin(), casters.end(), []( const Caster & k ) { return k.alphaTested; } ) );
 	float gz = 0, gxy[2] = { 0, 0 }, ghalf = 0;
 	s.groundCast = wwLookdevGroundFrame( scene, gz, gxy, ghalf );
@@ -1278,7 +1286,7 @@ static void sunShadowPassImpl( Scene * scene )
 					progAtQ->uni2f( "uvScale", bsp->uvScale.x, bsp->uvScale.y );
 					progAtQ->uni2f( "uvOffset", bsp->uvOffset.x, bsp->uvOffset.y );
 					progAtQ->uni1f( "alpha", lsp ? lsp->alpha : 1.0f );
-					progAtQ->uni1f( "alphaThreshold", k.sh->wwAlphaThreshold() );
+					progAtQ->uni1f( "alphaThreshold", k.atRef );
 					GpuDriven::poolDraw( r, sp.first, sp.n );
 					PassTime::countDraw( qint64( sp.n ) );
 					qCalls++;
@@ -1321,7 +1329,7 @@ static void sunShadowPassImpl( Scene * scene )
 				p->uni2f( "uvScale", bsp->uvScale.x, bsp->uvScale.y );
 				p->uni2f( "uvOffset", bsp->uvOffset.x, bsp->uvOffset.y );
 				p->uni1f( "alpha", lsp ? lsp->alpha : 1.0f );
-				p->uni1f( "alphaThreshold", k.sh->wwAlphaThreshold() );
+				p->uni1f( "alphaThreshold", k.atRef );
 				if ( !k.sh->wwFarInstData() )
 					attrv[7] = &( k.sh->coords.constFirst().constFirst()[0] );
 				mask = 0x20000003ULL;
