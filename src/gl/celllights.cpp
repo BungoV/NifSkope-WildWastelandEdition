@@ -3033,11 +3033,13 @@ static void cubeDrawCaster( Renderer * r, NifSkopeOpenGLContext::Program * prog,
 		int texunit = 0;
 		BSShaderLightingProperty * bsp = sh->wwShaderLighting();
 		const BSLightingShaderProperty * lsp = sh->wwLightingShader();
+		sh->wwLeafCovArm( "cube" );	// lane TREELEAF2: the colour pass's coverage copy (src/gl/wwleafcov.h)
 		prog->uniSampler( bsp, "BaseMap", 0, texunit, QString(), bsp->clampMode, QString() );
+		sh->wwLeafCovDisarm();
 		prog->uni2f( "uvScale", bsp->uvScale.x, bsp->uvScale.y );
 		prog->uni2f( "uvOffset", bsp->uvOffset.x, bsp->uvOffset.y );
 		prog->uni1f( "alpha", lsp ? lsp->alpha : 1.0f );
-		prog->uni1f( "alphaThreshold", da.threshold );
+		prog->uni1f( "alphaThreshold", sh->wwLeafSideThreshold( da, "cube" ) );	// lane TREELEAF2: the colour test's texels
 		attrv[7] = &( sh->coords.constFirst().constFirst()[0] );
 		mask = 0x20000003ULL;
 		g_cubeAtDraws++;

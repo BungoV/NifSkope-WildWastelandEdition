@@ -2461,25 +2461,11 @@ bool Renderer::setupProgramCE1( const NifModel * nif, Program * prog, Shape * me
 		 * alpha-tested, unblended material binds its base map with coverage-preserving alpha mips at its own threshold
 		 * (gltex.h wwCovArmed, src/gl/wwalphacov.h), so each mip passes the test on level 0's share of texels.
 		 * WW_TREELEAF_RED=1 binds the file's own mips (today's flecks). The material decides, as the test below does
-		 * (ALPHABGSM1); a blended-ground pass and a ref of 0 or 255 are left alone. */
-		WW_SWITCH_STATIC( bool, leafRed, wwEnvInt( "WW_TREELEAF_RED" ) == 1 );
-		int covRef = 0;
-		if ( !leafRed && scene->hasOption( Scene::DoBlending ) && !wwCellLandIs( scene->nifModel, mesh->id() ) ) {
-			if ( mat ) {
-				if ( mat->hasAlphaTest() && !mat->hasAlphaBlend() )
-					covRef = int( mat->iAlphaTestRef );
-			} else if ( !mesh->translucent && mesh->alphaProperty && mesh->alphaProperty->hasAlphaTest()
-				&& !mesh->alphaProperty->hasAlphaBlend() ) {
-				const int r = int( std::lround( mesh->alphaProperty->alphaThreshold * 255.0f ) );
-				if ( mesh->alphaProperty->alphaTestFunc() == 4 )	// alpha > r
-					covRef = r;
-				else if ( mesh->alphaProperty->alphaTestFunc() == 6 )	// alpha >= r is alpha > r - 1
-					covRef = r - 1;
-			}
-		}
-		scene->textures->wwCovArmed = ( covRef > 0 && covRef < 255 ) ? covRef : 0;
+		 * (ALPHABGSM1); a blended-ground pass and a ref of 0 or 255 are left alone. TREELEAF2: the rule lives in
+		 * Shape::wwLeafCovRef (src/gl/wwleafcov.h), so the side passes that alpha-test this map bind the same copy. */
+		mesh->wwLeafCovArm( "colour" );
 		prog->uniSampler( bsprop, "BaseMap", 0, texunit, alt, clamp, *forced );
-		scene->textures->wwCovArmed = 0;
+		mesh->wwLeafCovDisarm();
 
 		forced = &emptyString;
 		if ( !scene->hasOption(Scene::DoLighting) || !scene->hasOption(Scene::DoNormalMap) )
@@ -2965,11 +2951,9 @@ bool Renderer::setupProgramCE1( const NifModel * nif, Program * prog, Shape * me
 			 * WW_LODL_TREE_ALPHA=1..255 tests every BGSM whose first texture
 			 * lives under a trees/ folder at that threshold instead of the
 			 * BGSM's own (80/82 on the tree LOD sets). The BGSM wins over the
-			 * NiAlphaProperty here, so this is the only place the dial bites. */
-			WW_SWITCH_STATIC( int, treeDial, wwEnvInt( "WW_LODL_TREE_ALPHA" ) );
-			if ( treeDial >= 1 && treeDial <= 255 && !mat->textureList.isEmpty()
-				&& QString( mat->textureList.at( 0 ) ).replace( QChar( '\\' ), QChar( '/' ) )
-					.contains( QLatin1String( "/trees/" ), Qt::CaseInsensitive ) )
+			 * NiAlphaProperty here, so this is the only place the dial bites. TREELEAF2: the dial's read moved to
+			 * glshape.cpp wwLodlTreeDial, which the coverage copy and the side passes' threshold read too. */
+			if ( const int treeDial = wwLodlTreeDial( mat ) )
 				alphaThreshold = float( treeDial ) / 255.0f;
 		}
 		prog->uni1i( "alphaFlags", alphaFlags );

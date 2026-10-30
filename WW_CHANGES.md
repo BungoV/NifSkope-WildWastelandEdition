@@ -52,6 +52,33 @@
   0 of 48 channels off the game's term), red -DGLASSPANE2_RED FAILS (45 of 48 off, cube x2.0). Offline link sweeps:
   base 393/393, RTDDGI 262/262, PRT 392/393 (the one row, fo4_effectdecalcsm march+PRT, is "too many instructions"
   on the base commit too).
+## TREELEAF2 (2026-10-30): a leaf's shadow, light-cube, TAA-mask and probe silhouette is the leaf's own texel set
+
+- TREELEAF1 gave the colour pass a coverage-preserving copy of an alpha-tested base map ("<file>|wwcov<ref>"); the side
+  passes that alpha-test the same map still bound the plain file, whose mips drift (0.68-2.50 x the colour pass's
+  coverage per level on the 8 textures measured). And the side shaders discard `a < t` (a texel AT the ref passes) where the colour pass with a
+  material keeps only `a > ref` (alphaFlags 4); the copy piles texels on the ref (12713 vs 4286 in the plain files).
+- **One rule:** src/gl/wwleafcov.h (pure C++): `colourRef` (TREELEAF1's setupProgramCE1 rule, moved unchanged, plus the
+  WW_LODL_TREE_ALPHA dial so the copy is built at the threshold the colour pass tests), `sideThreshold` (the next float
+  above ref / 255 for a strict colour test, so `discard a < t` keeps exactly `a > ref`), `passRed`. Shape (glshape.*):
+  `wwLeafCovRef/Arm/Disarm( pass )`, `wwLeafSideThreshold( da, pass )`, `wwLodlTreeDial( mat )` (the dial's read moved
+  from renderer.cpp, unchanged).
+- **The passes:** the colour pass (renderer.cpp setupProgramCE1), the sun cascades (sunshadow.cpp per draw + the queued
+  atq path; the static cache's signature keys the copy and the threshold), the cell-light shadow cubes (celllights.cpp
+  cubeDrawCaster), the TAA inputs (taainputs.cpp bindBase) and the reflection-probe capture (cellreflprobe.cpp; its scene
+  key takes the copy) arm the same TexCache entry and upload the colour test's threshold. No shader change.
+- **Red** `WW_TREELEAF_RED` (live, stage 0): `1` the plain file everywhere (TREELEAF1's red, now every pass);
+  `side` or a list of `sun,cube,taa,refl`: those passes as before (plain file, old threshold). Shape::wwDrawAlphaGen
+  moves with it, so the light cubes store their maps again.
+- **Gates** (tests/treeleaf2/run.sh; the dumps from notes/fix1030b/treeleaf2/tools/dump_few.py): rule 339 checks 0
+  failed (colourRef == TREELEAF1's rule on 6656 inputs); texels: 8 game textures (BNS maple/redpine/elm, vanilla
+  boxwood/bramble/deadshrub/vines/forsythia), 64 levels >= 16x16, the side passes' texel set == the colour pass's on 64 of
+  64. Reds: RED_PLAIN (today's side passes) 3 of 64 levels equal, 196438 texels differ, FAIL; RED_NOSTRICT (copy, old
+  threshold) 18 of 64, 12713 texels, FAIL. Text twin sites.py: 6 BaseMap binds armed in 5 files, every side threshold from
+  wwLeafSideThreshold; red = the files at d05945bb, FAIL (5 files).
+- Not done: alpha-to-coverage (the cascades, cubes and TAA inputs are single-sample targets: they cannot hold A2C's
+  fractional coverage, so A2C in colour alone would make the edge differ again; row TREELEAF3 stays).
+
 ## SHADOWSHIMMER2 (2026-10-30): far tree shadows sway with the trees, a still terrain penumbra, Off's tight contact
 
 - **FARSWAYSHADOW:** the far LOD trees swayed in the colour pass (fo4_default.vert, farSwayAmp 10 x vertex alpha beyond

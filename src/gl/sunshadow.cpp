@@ -594,7 +594,8 @@ bool classify( const Shape * sh, bool skinned, bool twoSided, bool alphaTested, 
 			h.w( qHash( bsp->fileName( 0 ) ) );
 		}
 		h.f( lsp ? lsp->alpha : 1.0f );
-		h.f( sh->wwDrawAlpha( "sun" ).threshold );	// lane ALPHABGSM1
+		h.f( sh->wwLeafSideThreshold( sh->wwDrawAlpha( "sun" ), "sun" ) );	// lane ALPHABGSM1 (TREELEAF2: the colour test's)
+		h.w( std::uint64_t( sh->wwLeafCovRef( "sun" ) ) );	// lane TREELEAF2: the coverage copy (a live red redraws)
 		h.p( sh->coords.isEmpty() ? nullptr : sh->coords.constFirst().constData() );
 	}
 	sig = h.h;
@@ -937,7 +938,7 @@ static void sunShadowPassImpl( Scene * scene )
 		// air behind a window. Red WW_CSM_RED=atsolid casts them solid again.
 		c.alphaTested = !red( "atsolid" ) && da.test && sh->wwShaderLighting()
 			&& ( sh->wwFarInstData() || ( !sh->coords.isEmpty() && sh->coords.constFirst().size() == sh->verts.size() ) );
-		c.atRef = da.threshold;
+		c.atRef = sh->wwLeafSideThreshold( da, "sun" );	// lane TREELEAF2: keeps the colour pass's texels (wwleafcov.h)
 		if ( cpuSkin && sh->wwGpuSkinned() ) {
 			c.skinned.resize( size_t( sh->verts.size() ) );
 			for ( qsizetype v = 0; v < sh->verts.size(); v++ )
@@ -1332,7 +1333,9 @@ static void sunShadowPassImpl( Scene * scene )
 					int texunit = 0;
 					const BSLightingShaderProperty * lsp = k.sh->wwLightingShader();
 					BSShaderLightingProperty * bsp = k.sh->wwShaderLighting();
+					k.sh->wwLeafCovArm( "sun" );	// lane TREELEAF2: the colour pass's coverage copy
 					progAtQ->uniSampler( bsp, "BaseMap", 0, texunit, QString(), bsp->clampMode, QString() );
+					k.sh->wwLeafCovDisarm();
 					progAtQ->uni2f( "uvScale", bsp->uvScale.x, bsp->uvScale.y );
 					progAtQ->uni2f( "uvOffset", bsp->uvOffset.x, bsp->uvOffset.y );
 					progAtQ->uni1f( "alpha", lsp ? lsp->alpha : 1.0f );
@@ -1382,7 +1385,9 @@ static void sunShadowPassImpl( Scene * scene )
 				int texunit = 0;
 				const BSLightingShaderProperty * lsp = k.sh->wwLightingShader();
 				BSShaderLightingProperty * bsp = k.sh->wwShaderLighting();
+				k.sh->wwLeafCovArm( "sun" );	// lane TREELEAF2: the colour pass's coverage copy
 				p->uniSampler( bsp, "BaseMap", 0, texunit, QString(), bsp->clampMode, QString() );
+				k.sh->wwLeafCovDisarm();
 				p->uni2f( "uvScale", bsp->uvScale.x, bsp->uvScale.y );
 				p->uni2f( "uvOffset", bsp->uvOffset.x, bsp->uvOffset.y );
 				p->uni1f( "alpha", lsp ? lsp->alpha : 1.0f );

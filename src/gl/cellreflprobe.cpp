@@ -378,9 +378,10 @@ void wwCellReflProbePass( Scene * scene, bool run )
 		AlphaBgsmTally::note( atTally, sh->wwAlphaTested(), da.test );
 		c.alphaTested = da.test && sh->wwShaderLighting() && !sh->coords.isEmpty()
 			&& sh->coords.constFirst().size() == sh->verts.size();
-		c.atRef = da.threshold;
+		c.atRef = sh->wwLeafSideThreshold( da, "refl" );	// lane TREELEAF2: keeps the colour pass's texels
 		casters.push_back( c );
 		sceneKey = mix64( sceneKey, quint64( sh->id() ) );
+		sceneKey = mix64( sceneKey, quint64( sh->wwLeafCovRef( "refl" ) ) );	// lane TREELEAF2: a live red re-captures
 		sceneKey = mix64( sceneKey, quint64( c.alphaTested ? 1 : 0 ) );	// lane ALPHABGSM1: a live red re-captures
 	}
 	AlphaBgsmTally::report( atTally, "reflection probes", qint64( casters.size() ) );
@@ -631,7 +632,9 @@ void wwCellReflProbePass( Scene * scene, bool run )
 				BSShaderLightingProperty * bsp = c.sh->wwShaderLighting();
 				const BSLightingShaderProperty * lsp = c.sh->wwLightingShader();
 				const bool uv = !c.sh->coords.isEmpty() && c.sh->coords.constFirst().size() == c.sh->verts.size();
+				c.sh->wwLeafCovArm( "refl" );	// lane TREELEAF2: the colour pass's coverage copy (src/gl/wwleafcov.h)
 				const bool base = bsp && uv && prog->uniSampler( bsp, "BaseMap", 0, texunit, QString(), bsp->clampMode, QString() );
+				c.sh->wwLeafCovDisarm();
 				prog->uni1b( "rpHasBase", base );
 				prog->uni1b( "rpAlphaTest", c.alphaTested && base );
 				if ( bsp ) {
