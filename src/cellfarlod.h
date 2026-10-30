@@ -116,6 +116,17 @@ Vector3 wwCellFarLodOrigin( const Scene * scene );
 
 //! Before the scene draws: the far sway uniforms (zeroed once when no far field is active).
 void wwCellFarLodFrame( Scene * scene );
+/*! lane SHADOWSHIMMER2 (FARSWAYSHADOW): the far sway of THIS paint, one sample a paint (the clock read once), so the
+ *  colour pass's uniforms (wwCellFarLodFrame) and the sun cascades' casters (gl/sunshadow.cpp) sway by the same values.
+ *  amp 0 = no sway (no far field, or WW_CELL_FARLOD_SWAY=0); block: the loaded block's centre in view space and its half
+ *  edge scaled (the uniform farSwayBlock), world: its centre x, y and half edge in scene units (unscaled). */
+struct WwFarSway
+{
+	float amp = 0.0f, time = 0.0f;
+	float block[4] = { 0.0f, 0.0f, 0.0f, 0.0f };
+	float world[3] = { 0.0f, 0.0f, 0.0f };
+};
+WwFarSway wwCellFarLodSway( Scene * scene );
 //! lane GAPFIX1: the last frame drew a moving far sway, so the view paints again (never in a harness)
 bool wwCellFarLodWantsRepaint();
 

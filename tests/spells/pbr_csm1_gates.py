@@ -53,6 +53,18 @@ BLEND = 100.0                 # fSunShadowBlend, spec 2.3 / 2.4
 BACK = 15000.0                # the shadow camera sits 15000 up-sun, spec 2.2
 NEAR = 150.0                  # spec 2.3
 OFFA, OFFB = 0.275, 1.0       # receiver offsets, spec 2.4
+# lane SHADOWSHIMMER2 (CSM1GATEFIT): the law the gates judge. The harness runs Cascade Quality Off, which ships since
+# SHADOWSHIMMER1 the stable fit (each slice's bounding SPHERE, whole texels in absolute light space, the depth range a
+# fixed bound on 64-quantum steps) and since SHADOWSHIMMER2 the stable bias (caster glPolygonOffset 0.5 / 2, receiver
+# 0.25 of the cascade's texel along the light, a normal offset of 1 texel x sin(the light's angle to the surface)).
+# Re-derived here from that law, not read from the code. --law csm1 judges the spec's box fit and 6 / 12 / 0.275-1.0
+# bias (what main shipped before; a run with WW_SUN_SHADOW_STABLE_RED=fit,offbias matches it).
+LAWS = {
+    "stable": dict(fit="sphere", slope=0.5, units=2.0, recv_texels=0.25, normal_texels=1.0),
+    "csm1": dict(fit="box", slope=6.0, units=12.0, recv_texels=None, normal_texels=0.0),
+}
+LAW = dict(LAWS["stable"])
+DEPTH_STEP = 64               # the stable fit's depth origin moves in steps of this many D16 quanta
 # spec 2.5, the sun permutation's fixed 16 taps (x, y on [0,1]; used as (p - 0.5) x 6 texels)
 POISSON = [(0.493393, 0.394269), (0.798547, 0.885922), (0.247322, 0.926450), (0.051454, 0.140782),
            (0.831843, 0.009552), (0.428632, 0.017151), (0.015656, 0.749779), (0.758385, 0.496170),
@@ -127,6 +139,40 @@ def parse_echo(path):
 
 
 def fit(L, cam, D, mapsz, split=SPLIT):
+    """the law's fit (LAW["fit"]): the stable sphere (default) or the spec's box"""
+    return fit_box(L, cam, D, mapsz, split) if LAW["fit"] == "box" else fit_sphere(L, cam, D, mapsz, split)
+
+
+def fit_sphere(L, cam, D, mapsz, split=SPLIT):
+    """the stable fit, independently: the slice's bounding sphere (the first slice from the eye, never the near plane),
+    texel = diameter / (map - 1), the window's low corner floored onto whole texels in ABSOLUTE light space (no box
+    corner: l = b = 0), the viewport map x map, the depth range the fixed bound back + centre + radius with 64 quanta of
+    margin and its origin floored onto 64-quantum steps"""
+    right, up = basis(L)
+    fars = [split[0], split[1], D]
+    k = math.hypot(cam.tanX, cam.tanY)
+    out = []
+    for i in range(3):
+        zn = cam.near if i == 0 else fars[i - 1] - BLEND
+        zf = fars[i] + BLEND
+        n0, f0 = (0.0 if i == 0 else zn), zf
+        # equidistant from the near and the far corner ring, never past the far plane
+        zc = min(0.5 * (f0 + n0) * (1.0 + k * k), f0)
+        r = math.ceil(max(math.hypot(zc - n0, n0 * k), math.hypot(f0 - zc, f0 * k)))
+        ctr = cam.C + zc * cam.fwd
+        tex = 2.0 * r / max(mapsz - 1, 1)
+        pb0 = math.floor((ctr @ right - r) / tex) * tex
+        pb1 = math.floor((ctr @ up - r) / tex) * tex
+        vw = min(max(int(math.ceil(2.0 * r / tex - 1e-9)) + 1, 1), mapsz)
+        dq = (BACK + zc + r) / (65535 - DEPTH_STEP)
+        step = DEPTH_STEP * dq
+        pb2 = math.floor((cam.C @ L - BACK) / step) * step
+        out.append(dict(zn=zn, zf=zf, tex=tex, n=0, vw=vw, vh=vw, pb=np.array([pb0, pb1, pb2]), l=0.0, b=0.0,
+                        far=65535.0 * dq + NEAR, mapsz=mapsz))
+    return out
+
+
+def fit_box(L, cam, D, mapsz, split=SPLIT):
     """spec 2.1-2.3, independently: planar slices, light-space AABB, texel law, snapping"""
     right, up = basis(L)
     fars = [split[0], split[1], D]
@@ -237,17 +283,34 @@ def stored_depth(x, y, c, right, up):
             Q = x[..., None] * right + y[..., None] * up + z[..., None] * L
             o = [k for k in range(3) if k != ax]
             on = (np.abs(Q[..., o[0]]) <= HALF) & (np.abs(Q[..., o[1]]) <= HALF)
-            bias = SLOPE * tex * max(abs(n @ right), abs(n @ up)) / abs(nL) + UNITS * quantum
+            bias = LAW["slope"] * tex * max(abs(n @ right), abs(n @ up)) / abs(nL) + LAW["units"] * quantum
             best = np.where(on, np.minimum(best, z + bias), best)
     return best
 
 
-def hard(G, c, hull, right, up, ds=0.0, dt=0.0, off=OFFA):
+def receiver(G, c, L, off, nrm=None):
+    """the law's receiver: (the shifted point, its depth offset). The stable law moves the point along its normal toward
+    the eye (the ground's +z unless `nrm` gives one per point) by normal_texels x texel x sin(angle to the light) and
+    offsets 0.25 texel along the light; CSM1's keeps the point and the spec's offset `off` (A / B)"""
+    if LAW["recv_texels"] is None:
+        return G, off
+    tex = c["tex"]
+    if LAW["normal_texels"]:
+        n = np.broadcast_to(np.array([0.0, 0.0, 1.0]) if nrm is None else nrm, np.shape(G))
+        cth = n @ L if n.ndim == 1 else (n * L).sum(-1)
+        s = np.sqrt(np.maximum(1.0 - cth * cth, 0.0))
+        G = G + n * (LAW["normal_texels"] * tex * s)[..., None]
+    return G, LAW["recv_texels"] * tex
+
+
+def hard(G, c, hull, right, up, ds=0.0, dt=0.0, off=OFFA, nrm=None):
     """one bilinear depth-compare tap for GROUND receivers (probe 1 / one Poisson tap): each of
-    the four texels compares the receiver's depth less its offset `off` against the stored
-    depth at the texel centre; texels outside the viewport hold the clear value"""
+    the four texels compares the receiver's depth less its offset against the stored
+    depth at the texel centre; texels outside the viewport hold the clear value (the law's
+    receiver: CSM1's spec offset `off`, or the stable offset + normal offset)"""
     tex = c["tex"]
     L = np.cross(up, right)
+    G, off = receiver(G, c, L, off, nrm)
     zref = G @ L - off
     s = (G @ right - c["pb"][0] - c["l"]) / tex - 0.5 + ds
     t = (G @ up - c["pb"][1] - c["b"]) / tex - 0.5 + dt
@@ -265,10 +328,10 @@ def hard(G, c, hull, right, up, ds=0.0, dt=0.0, off=OFFA):
     return val
 
 
-def filtered(G, c, hull, right, up, kernel=POISSON, off=OFFA):
+def filtered(G, c, hull, right, up, kernel=POISSON, off=OFFA, nrm=None):
     acc = np.zeros(len(G))
     for px, py in kernel:
-        acc += hard(G, c, hull, right, up, (px - 0.5) * 6.0, (py - 0.5) * 6.0, off)
+        acc += hard(G, c, hull, right, up, (px - 0.5) * 6.0, (py - 0.5) * 6.0, off, nrm)
     return acc / len(kernel)
 
 
@@ -281,24 +344,24 @@ def select(dv, split=SPLIT, blend="smooth"):
     return a, b, t
 
 
-def blended(G, dv, fits, hull, right, up, D):
+def blended(G, dv, fits, hull, right, up, D, nrm=None):
     a, b, t = select(dv)
     sA = np.ones(len(G))
     sB = np.ones(len(G))
     for i in range(3):
         wa = (a == i) & (t < 1)
         wb = (b == i) & (t > 0)
-        # cascade A takes offset A, cascade B offset B (spec 2.4)
+        # cascade A takes offset A, cascade B offset B (spec 2.4; the stable law: each cascade its own 0.25 texel)
         if wa.any():
-            sA[wa] = filtered(G[wa], fits[i], hull, right, up, off=OFFA)
+            sA[wa] = filtered(G[wa], fits[i], hull, right, up, off=OFFA, nrm=None if nrm is None else nrm[wa])
         if wb.any():
-            sB[wb] = filtered(G[wb], fits[i], hull, right, up, off=OFFB)
+            sB[wb] = filtered(G[wb], fits[i], hull, right, up, off=OFFB, nrm=None if nrm is None else nrm[wb])
     res = sA * (1 - t) + sB * t
     return np.where(dv > D + BLEND, 1.0, res)
 
 
-def final(G, dv, C, fits, hull, right, up, D):
-    sh = blended(G, dv, fits, hull, right, up, D)
+def final(G, dv, C, fits, hull, right, up, D, nrm=None):
+    sh = blended(G, dv, fits, hull, right, up, D, nrm)
     s = np.clip(((G - C) ** 2).sum(-1) / (D * D), 0, 1)
     sh = 1 - (1 - sh) * (1 - s ** 4)
     return np.where(dv > D + BLEND, 1.0, sh)
@@ -415,7 +478,10 @@ def main():
     ap.add_argument("--out", required=True)
     ap.add_argument("--red", default="none")
     ap.add_argument("--kernel-file", default="")
+    ap.add_argument("--law", default="stable", choices=sorted(LAWS))
     a = ap.parse_args()
+    LAW.clear()
+    LAW.update(LAWS[a.law])
     OUT = a.out
     lines, verdicts = [], []
 
@@ -440,7 +506,7 @@ def main():
         e = parse_echo(os.path.join(OUT, tag + ".csm.txt"))
         return e if e is not None else parse_echo(os.path.join(OUT, tag + ".pbrm.txt"))
 
-    say("pbr_csm1_gates.py  out=%s  red=%s" % (OUT, a.red))
+    say("pbr_csm1_gates.py  out=%s  red=%s  law=%s %s" % (OUT, a.red, a.law, LAW))
 
     # ------------------------------------------------------------------ fit
     for tag, h in (("fit_11", 11.0), ("fit_1730", 17.5)):
@@ -640,7 +706,12 @@ def main():
         mface = np.ones((H, W))
         if lit_face.any():
             dvP = (P - cam.C) @ cam.fwd
-            mface[lit_face] = final(P[lit_face], dvP[lit_face], cam.C, fits, hull, right, up, e["Dn"])
+            # lane SHADOWSHIMMER2: each face receives with its own normal (the stable law's normal offset)
+            fn = np.zeros(P.shape)
+            for ax in range(3):
+                sel = axis == ax
+                fn[sel, ax] = np.sign(P[sel, ax])
+            mface[lit_face] = final(P[lit_face], dvP[lit_face], cam.C, fits, hull, right, up, e["Dn"], fn[lit_face])
         litg = ground & (mfin >= 0.98)
         shg = ground & (mfin <= 0.02)
         acne = (litg & (meas < 0.9)).sum() + (lit_face & (meas < mface - 0.1)).sum()

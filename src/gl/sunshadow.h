@@ -71,7 +71,10 @@ QString wwSunShadowSummary();
 void wwSunShadowForget();
 /*! lane SHADOWSHIMMER1: the parts of the stable sun shadows taken back to today's path by the red
  *  WW_SUN_SHADOW_STABLE_RED = old (all) | fit,kernel,bias: bit 1 CSM1's box fit, 2 the screen + frame kernel rotation,
- *  4 the CSM1 caster/receiver bias without the normal offset. 0 = all stable (the default). */
+ *  4 the CSM1 caster/receiver bias without the normal offset. 0 = all stable (the default).
+ *  lane SHADOWSHIMMER2 adds sway (8: the far trees' casters stand still while the trees sway), terr (16: the terrain
+ *  penumbra and the air tail rotate by the screen pixel) and offbias (32: Cascade Quality Off on CSM1's spec bias);
+ *  old / all = 63. */
 int wwSunShadowStableRed();
 
 #endif

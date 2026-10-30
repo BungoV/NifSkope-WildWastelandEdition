@@ -31,6 +31,8 @@
 #   CPU reds (WW_CSM_RED): flipsun nofloor nosnap onecascade wrongsplit nobias bigbias
 #   shader reds (WW_CSM_RED): noblend nofade diffonly factorhalf
 #   judge red: kernelmut (the judge reads a copy of the shader with one tap changed)
+#   lane SHADOWSHIMMER2: stablefit (WW_SUN_SHADOW_STABLE_RED=fit: CSM1's box fit; the judge's sphere must refuse it),
+#   offbias (WW_SUN_SHADOW_STABLE_RED=offbias: Off on CSM1's 6 / 12 / 0.275-1.0 bias; the stable law must refuse it)
 #   WW_R2A_RED: nolive nosave (live)
 # Every red must end FAIL. One NifSkope of ours at a time (our --port), second
 # monitor; bungo's window (no --port) and other lanes' harnesses are never touched.
@@ -80,6 +82,8 @@ case "$RED" in
 		KERNEL="$OUT/ww_sunshadow_mutated.glsl"
 		sed 's/vec2( 0.758385, 0.496170 )/vec2( 0.758385, 0.596170 )/' "$ARM/shaders/ww_sunshadow.glsl" > "$KERNEL" ;;
 	nolive|nosave) REDPIN="WW_R2A_RED=$RED" ;;
+	stablefit) REDPIN="WW_SUN_SHADOW_STABLE_RED=fit" ;;
+	offbias) REDPIN="WW_SUN_SHADOW_STABLE_RED=offbias" ;;
 	*) echo "unknown red $RED"; exit 2 ;;
 esac
 { echo "red=${RED:-none}"; sha1sum "$ARM/NifSkope.exe" "$OLD/NifSkope.exe"; echo "game=$GAME"; } > "$OUT/arms.txt"

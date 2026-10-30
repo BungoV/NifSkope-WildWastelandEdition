@@ -30,6 +30,7 @@ BSD License - see nifskope.h
 #include "gl/cloudshadow.h"	// lane CLOUD3
 #include "gl/cellfarground.h"	// lane FARDRAW1
 #include "gl/sunshadowfit.h"	// lane SHADOWSHIMMER1: the fit and the kernel's rotation (tests/shadowshimmer1 runs them)
+#include "cellfarlod.h"	// lane SHADOWSHIMMER2: the far sway sample the colour pass takes
 
 #include <QDir>
 #include <QFile>
@@ -107,6 +108,8 @@ struct CsmState
 	double split[2] = { kSplit0, kSplit1 };
 	int casters = 0, tris = 0, atCasters = 0;
 	int swayCables = -1;	// lane FAR5: wind cables cast where they sway (-1 = Cable shadows sway off)
+	int swayCasters = 0;	// lane SHADOWSHIMMER2: far tree-animation casters swayed as the colour pass sways them
+	bool offStable = false;	// lane SHADOWSHIMMER2: Cascade Quality Off on the stable bias (CSMOFFBIAS)
 	int slopeClamp = 0;	// lane SHADOWPAR1: 1 the caster bias clamped (FO4CS's slope 4), -1 no glPolygonOffsetClamp
 	// lane TERRSHADOW1: the fit's numbers, CSM1's constants unless Cascade Quality picks a preset
 	double baseD = kDefaultDistance, split0 = kSplit0, split1 = kSplit1, blend = kBlend, lightBack = kLightBack;
@@ -161,20 +164,31 @@ bool red( const char * name )
 	return reds.contains( QString::fromLatin1( name ) );
 }
 
-// lane SHADOWSHIMMER1: WW_SUN_SHADOW_STABLE_RED = old (all) | fit,kernel,bias -> bits 1 / 2 / 4 (today's path back)
+// lane SHADOWSHIMMER1: WW_SUN_SHADOW_STABLE_RED = old (all) | fit,kernel,bias -> bits 1 / 2 / 4 (today's path back);
+// lane SHADOWSHIMMER2: sway 8 (the casters stand still), terr 16 (screen-pixel terrain penumbra / air tail), offbias 32
 int stableRedBits( const QString & v )
 {
 	const QString t = v.trimmed().toLower();
 	if ( t.isEmpty() )
 		return 0;
 	if ( t == QLatin1String( "old" ) || t == QLatin1String( "all" ) || t == QLatin1String( "1" ) )
-		return 7;
+		return 63;
 	int bits = 0;
 	for ( const QString & p : t.split( QChar( ',' ), Qt::SkipEmptyParts ) ) {
 		const QString q = p.trimmed();
-		bits |= q == QLatin1String( "fit" ) ? 1 : q == QLatin1String( "kernel" ) ? 2 : q == QLatin1String( "bias" ) ? 4 : 0;
+		bits |= q == QLatin1String( "fit" ) ? 1 : q == QLatin1String( "kernel" ) ? 2 : q == QLatin1String( "bias" ) ? 4
+			: q == QLatin1String( "sway" ) ? 8 : q == QLatin1String( "terr" ) ? 16 : q == QLatin1String( "offbias" ) ? 32 : 0;
 	}
 	return bits;
+}
+
+/* lane SHADOWSHIMMER2 (CSMOFFBIAS): Cascade Quality Off on the tiers' stable bias (gl/sunshadowfit.h kOff*): the caster
+ * 0.5 / 2 quanta, the receiver 0.25 texel + a 1-texel normal offset. CSM1's reds that ARE about the bias (nobias,
+ * bigbias) and the red offbias keep CSM1's spec numbers. */
+bool offStableNow()
+{
+	WwCascadePreset cp;
+	return !wwShadowCascadePreset( cp ) && !( wwSunShadowStableRed() & 32 ) && !red( "nobias" ) && !red( "bigbias" );
 }
 
 int redBits()
@@ -333,6 +347,7 @@ struct Caster
 	bool alphaTested = false;	// lane VOLAIR1: drawn by lookdev_csmdepth_at.prog (the base map's alpha test)
 	float atRef = 0.0f;			// lane ALPHABGSM1: its threshold, as the colour draw tests (Shape::wwDrawAlpha)
 	bool dynamic = false;		// lane SHADOWCACHE1: drawn over the cached static layer every pass
+	bool sway = false;			// lane SHADOWSHIMMER2: the far sway moves it (lookdev_csmdepth(_at).vert)
 	std::uint64_t sig = 0;
 };
 
@@ -874,6 +889,11 @@ static void sunShadowPassImpl( Scene * scene )
 		s.slopeBias = kSlopeBias;
 		s.unitBias = kUnitBias;
 	}
+	s.offStable = !presetOn && offStableNow();
+	if ( s.offStable ) {
+		s.slopeBias = WwCsmFit::kOffSlope;	// lane SHADOWSHIMMER2 (CSMOFFBIAS)
+		s.unitBias = WwCsmFit::kOffUnits;
+	}
 
 	// lane SHADOWCACHE1: the cascades' own light directions (a far cascade may hold its last one a little)
 	ShadowCache::State & cst = ShadowCache::st();
@@ -889,6 +909,12 @@ static void sunShadowPassImpl( Scene * scene )
 	const bool cpuSkin = scene->hasOption( Scene::DoSkinning );
 	const bool cableSwayOn = wwLookOn( WwLook::CableShadowSway );
 	s.swayCables = cableSwayOn ? 0 : -1;
+	/* lane SHADOWSHIMMER2 (FARSWAYSHADOW): the far trees' wind, the colour pass's sample of this paint. A tree-animation
+	 * shape (the shader property's flag, as the legacy colour draw sets lodTreeAnim) that reaches outside the loaded
+	 * block sways in lookdev_csmdepth(_at).vert as fo4_default.vert sways it; it draws per draw (the vertex alpha) and as
+	 * dynamic over the static cache. Red WW_SUN_SHADOW_STABLE_RED=sway: the casters stand still. */
+	const WwFarSway farSway = ( wwSunShadowStableRed() & 8 ) ? WwFarSway() : wwCellFarLodSway( scene );
+	s.swayCasters = 0;
 	for ( Node * node : scene->nodes.list() ) {
 		const Shape * sh = dynamic_cast<const Shape *>( node );
 		if ( !sh || !sh->isVisible() || !sh->wwCastsSunShadow() )
@@ -919,9 +945,15 @@ static void sunShadowPassImpl( Scene * scene )
 		}
 		if ( cableSwayOn && c.skinned.empty() && !sh->wwFarInstData() && cableSway( scene, sh, c.skinned ) )
 			s.swayCables++;
+		if ( farSway.amp > 0.0f && c.skinned.empty() && sh->wwShaderLighting() && sh->wwShaderLighting()->isVertexAlphaAnimation ) {
+			const BoundSphere bs = sh->bounds();
+			c.sway = std::max( std::fabs( bs.center[0] - farSway.world[0] ), std::fabs( bs.center[1] - farSway.world[1] ) ) + bs.radius
+				> farSway.world[2];
+			s.swayCasters += c.sway ? 1 : 0;
+		}
 		if ( cst.on )
 			c.dynamic = !ShadowCache::classify( sh, sh->wwGpuSkinned() || !c.skinned.empty(), c.twoSided, c.alphaTested,
-				c.sig );
+				c.sig ) || c.sway;
 		s.tris += sh->wwFarInstData() ? int( sh->wwFarInstData()->drawnTris ) : int( sh->triangles.size() );
 		casters.push_back( std::move( c ) );
 	}
@@ -985,12 +1017,22 @@ static void sunShadowPassImpl( Scene * scene )
 	}
 
 	const int lMvp = prog->uniLocation( "csmClipFromView" );
+	// lane SHADOWSHIMMER2: the far sway's uniforms, fo4_default.vert's values of this paint (amp 0: none)
+	auto swayUniforms = [&farSway]( NifSkopeOpenGLContext::Program * p ) {
+		p->uni1f( "farSwayAmp", farSway.amp );
+		p->uni1f( "farSwayTime", farSway.time );
+		p->uni4f( "farSwayBlock", FloatVector4( farSway.block[0], farSway.block[1], farSway.block[2], farSway.block[3] ) );
+		p->uni1i( "lodTreeAnim", 0 );
+	};
+	swayUniforms( prog );
 	// lane VOLAIR1: the alpha-tested casters' program; without it they cast solid as before (said in the line)
 	NifSkopeOpenGLContext::Program * progAt = nullptr;
 	if ( s.atCasters ) {
 		progAt = r->useProgram( "lookdev_csmdepth_at.prog" );
 		if ( !progAt )
 			s.atCasters = -1;
+		else
+			swayUniforms( progAt );
 		r->useProgram( "lookdev_csmdepth.prog" );
 	}
 	// lane SHADOWPAR1: FO4CS clamps the caster's slope bias at a slope of 4 texels per texel (D3D DepthBiasClamp)
@@ -1193,8 +1235,8 @@ static void sunShadowPassImpl( Scene * scene )
 	if ( progQ ) {
 		for ( std::size_t n = 0; n < casters.size(); n++ ) {
 			const Caster & k = casters[n];
-			if ( !k.skinned.empty() || k.sh->wwGpuSkinned() || k.sh->wwFarInstData() )
-				continue;
+			if ( !k.skinned.empty() || k.sh->wwGpuSkinned() || k.sh->wwFarInstData() || k.sway )
+				continue;	// lane SHADOWSHIMMER2: a swaying caster needs its vertex alpha (the per-draw loop)
 			const bool at = progAt && k.alphaTested;
 			if ( ( at && !progAtQ ) || !GpuDriven::poolEnsure( r, k.sh, entry[n] ) || ( at && !entry[n].uv ) )
 				continue;
@@ -1326,9 +1368,16 @@ static void sunShadowPassImpl( Scene * scene )
 			else
 				fn->glEnable( GL_CULL_FACE );
 			p->uni4m( "modelViewMatrix", k.sh->viewTrans().toMatrix4() );
+			p->uni1i( "lodTreeAnim", k.sway ? 1 : 0 );	// lane SHADOWSHIMMER2
 			const float * pos = k.skinned.empty() ? &( k.sh->verts.constFirst()[0] ) : &( k.skinned.front()[0] );
 			const float * attrv[8] = { pos, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr };
 			std::uint64_t mask = 3;
+			// lane SHADOWSHIMMER2: the wind weight (vertex alpha), as Shape::wwVertexAttrs hands the colour draw its colours
+			const bool swayColors = k.sway && !k.sh->wwFarInstData() && k.sh->colors.size() >= k.sh->verts.size();
+			if ( swayColors ) {
+				attrv[1] = &( k.sh->colors.constFirst()[0] );
+				mask |= 0x40;
+			}
 			if ( pass ) {
 				int texunit = 0;
 				const BSLightingShaderProperty * lsp = k.sh->wwLightingShader();
@@ -1340,7 +1389,7 @@ static void sunShadowPassImpl( Scene * scene )
 				p->uni1f( "alphaThreshold", k.atRef );
 				if ( !k.sh->wwFarInstData() )
 					attrv[7] = &( k.sh->coords.constFirst().constFirst()[0] );
-				mask = 0x20000003ULL;
+				mask = 0x20000003ULL | ( swayColors ? 0x40ULL : 0 );
 			}
 			if ( k.sh->wwFarInstData() ) {
 				// lane FARDRAW1: the ring's tiles inside this cascade, one indirect call (gl/cellfarinst.h)
@@ -1379,6 +1428,7 @@ static void sunShadowPassImpl( Scene * scene )
 			// the ground quad, exactly as wwLookdevDrawGround places it (world space, Z up); static
 			fn->glEnable( GL_CULL_FACE );
 			prog->uni4m( "modelViewMatrix", vt.toMatrix4() );
+			prog->uni1i( "lodTreeAnim", 0 );	// lane SHADOWSHIMMER2: the ground never sways
 			const float x0 = gxy[0] - ghalf, x1 = gxy[0] + ghalf, y0 = gxy[1] - ghalf, y1 = gxy[1] + ghalf;
 			const float quad[12] = { x0, y0, gz, x1, y0, gz, x0, y1, gz, x1, y1, gz };
 			static const std::uint16_t idx[6] = { 0, 1, 2, 2, 1, 3 };
@@ -1648,8 +1698,17 @@ void wwSunShadowUniforms( Scene * scene )
 		WwCascadePreset cp;
 		const bool up = wwShadowCascadePreset( cp );
 		const bool volume = prog->uniLocation( "volStage" ) >= 0;	// the fog's froxels: no surface, no normal
+		/* lane SHADOWSHIMMER2: z 1 = the red terr (screen-pixel terrain penumbra and air tail); w the Off tier's stable bias
+		 * (the normal offset in texels, -1 = the bias alone in the fog's froxels, 0 = CSM1's: the red offbias) */
+		const bool offOn = !up && s.offStable;
 		prog->uni4f( "ussCsmStable", FloatVector4( ( sr & 2 ) ? 0.0f : 1.0f, ( up && !volume && !( sr & 4 ) ) ? cp.normalTexels : 0.0f,
-			0.0f, 0.0f ) );
+			( sr & 16 ) ? 1.0f : 0.0f, offOn ? ( volume ? -1.0f : WwCsmFit::kOffNormalTexels ) : 0.0f ) );
+		if ( offOn ) {
+			// the Off tier's receiver: 0.25 of each cascade's texel along the light, and the texel for the normal offset
+			prog->uni3f( "ussCsmTexel", texel[0], texel[1], texel[2] );
+			prog->uni3f( "ussCsmBias", WwCsmFit::kOffRecvTexels * texel[0], WwCsmFit::kOffRecvTexels * texel[1],
+				WwCsmFit::kOffRecvTexels * texel[2] );
+		}
 		float cx[kCascades], cy[kCascades];
 		for ( int i = 0; i < kCascades; i++ ) {
 			WwCsmFit::Out o;
@@ -1709,8 +1768,10 @@ QString wwSunShadowSummary()
 		o += QString( " m%1=%2" ).arg( i ).arg( m.join( QChar( ',' ) ) );
 	}
 	// lane SHADOWSHIMMER1: which parts run stable (red bits 1 fit, 2 kernel, 4 bias) and each cascade's sphere radius
-	o += QString( " stable=%1 sphere=%2,%3,%4" ).arg( wwSunShadowStableRed() ^ 7 ).arg( g( s.c[0].sphereR ), g( s.c[1].sphereR ),
+	o += QString( " stable=%1 sphere=%2,%3,%4" ).arg( wwSunShadowStableRed() ^ 63 ).arg( g( s.c[0].sphereR ), g( s.c[1].sphereR ),
 		g( s.c[2].sphereR ) );
+	// lane SHADOWSHIMMER2: the casters the far sway moves, and Off on the stable bias (1) or CSM1's (0)
+	o += QString( " swaycasters=%1 offstable=%2" ).arg( s.swayCasters ).arg( s.offStable ? 1 : 0 );
 	o += QString( " csmat=%1 slopeclamp=%2" ).arg( s.atCasters ).arg( s.slopeClamp );	// lane VOLAIR1: -1 = no program (they cast solid)
 	if ( s.swayCables >= 0 )
 		o += QString( " cablesway=%1" ).arg( s.swayCables );	// lane FAR5: the wind cables cast where they sway
