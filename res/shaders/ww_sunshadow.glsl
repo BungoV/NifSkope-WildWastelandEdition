@@ -45,6 +45,7 @@ uniform vec4 ussCsmWorld;		// lane SHADOWPAR1: x world-unit radius on, yzw each 
 uniform vec3 ussCsmTexel;		// each cascade's texel (world units)
 uniform float ussCsmPhase;		// the rotation's temporal phase (frame % 61; 0 without TAA)
 uniform vec4 ussCsmStable;		// lane SHADOWSHIMMER1: x 1 the kernel rotation world-locked (0 the red: screen + frame), y the normal offset (texels)
+// lane SHADOWSHIMMER3: ussCsmStable.z -1 = the red airslide (the air tail on SHADOWSHIMMER2's world-direction hash)
 // lane SHADOWSHIMMER2: ussCsmStable.z 1 = the red (the terrain penumbra and the air tail rotate by the screen pixel; 0, also
 // in a program that never gets it, = world-locked); .w the Off tier's stable bias: 0 the red (CSM1's 0.275 / 1.0 units, no
 // normal offset), > 0 the normal offset in texels with ussCsmBias, < 0 ussCsmBias alone (the fog's froxels: no surface)
@@ -515,14 +516,26 @@ float wwAirTailShadow( vec3 dirView, float t0, float t1, float tau )
 	vec3 p0 = dirView * ( t0 / fogDistScale );
 	float v0 = ( terr ? ussTerrain( p0, inMap, 0.0, false ) : 1.0 ) * ( cloud ? ussCloudT( p0 ) : 1.0 );
 	float e = 1.0 - exp( -max( tau, 0.0 ) );
-	/* lane SHADOWSHIMMER2 (TERRPENSTABLE): the start of the strata hashed from the ray's WORLD direction (octahedral,
-	 * 2048 cells a unit, wrapped at 4096): a camera turn keeps it on the same sky; red (ussCsmStable.z 1): the pixel's */
-	vec3 dw = mat3( ussWorldFromView ) * dirView;
-	if ( dot( dw, dw ) <= 1e-20 )
-		dw = dirView;
-	dw /= abs( dw.x ) + abs( dw.y ) + abs( dw.z );
-	vec2 oct = dw.z >= 0.0 ? dw.xy : ( 1.0 - abs( dw.yx ) ) * vec2( dw.x >= 0.0 ? 1.0 : -1.0, dw.y >= 0.0 ? 1.0 : -1.0 );
-	float jit = ussIgn( ussCsmStable.z > 0.5 ? gl_FragCoord.xy : mod( floor( oct * 2048.0 ), 4096.0 ) );
+	/* lane SHADOWSHIMMER3 (AIRTAILSLIDE): the start of the strata hashed from the WORLD point the tail ends at (the
+	 * surface this pixel shades), on a lattice of power-of-two cells of about 1/2048 of its distance (at least 1 unit),
+	 * IGN of (x + 37 z, y + 61 z) wrapped at 4096: a still world point keeps it on a turn and on a slide (a slide moves it
+	 * only where the distance crosses a power of two). Red airslide (ussCsmStable.z -1): SHADOWSHIMMER2's hash of the
+	 * ray's WORLD direction (octahedral, 2048 cells a unit, wrapped at 4096), which a slide moves; red terr (z 1): the pixel's */
+	vec2 key;
+	if ( ussCsmStable.z < -0.5 ) {
+		vec3 dw = mat3( ussWorldFromView ) * dirView;
+		if ( dot( dw, dw ) <= 1e-20 )
+			dw = dirView;
+		dw /= abs( dw.x ) + abs( dw.y ) + abs( dw.z );
+		vec2 oct = dw.z >= 0.0 ? dw.xy : ( 1.0 - abs( dw.yx ) ) * vec2( dw.x >= 0.0 ? 1.0 : -1.0, dw.y >= 0.0 ? 1.0 : -1.0 );
+		key = mod( floor( oct * 2048.0 ), 4096.0 );
+	} else {
+		vec3 w1 = ( ussWorldFromView * vec4( dirView * ( t1 / fogDistScale ), 1.0 ) ).xyz;
+		float cell = exp2( max( ceil( log2( max( t1, 1.0 ) / 2048.0 ) ), 0.0 ) );	// t1: game units, as the world's
+		vec3 c = floor( w1 / cell );
+		key = mod( c.xy + c.z * vec2( 37.0, 61.0 ), 4096.0 );
+	}
+	float jit = ussIgn( ussCsmStable.z > 0.5 ? gl_FragCoord.xy : key );
 	float acc = 0.0;
 	for ( int i = 0; i < 8; i++ ) {
 		float q = ( float( i ) + jit ) / 8.0;

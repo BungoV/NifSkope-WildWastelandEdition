@@ -2895,7 +2895,11 @@ bool Renderer::setupProgramCE1( const NifModel * nif, Program * prog, Shape * me
 	 * is a shape that emits nothing. */
 	prog->uni3f( "lodEmissiveColor", lsp ? lsp->emissiveColor.red() : 0.0f,
 		lsp ? lsp->emissiveColor.green() : 0.0f, lsp ? lsp->emissiveColor.blue() : 0.0f );
-	prog->uni1i( "lodTreeAnim", bsprop->isVertexAlphaAnimation ? 1 : 0 );
+	/* lane SHADOWSHIMMER3 (FARSWAYLEGACY): the SHAPE's tree flag (TREECROWN1's FarLOD Tree_Anim rule included), the value
+	 * Shape::setUniforms set above for the PBR path and the sun casters read. The property's flag written here dropped
+	 * that rule, so a far tree bucket whose .bgsm says Tree off stood still on this path while it swayed on the PBR one.
+	 * Red WW_SUN_SHADOW_STABLE_RED=treeanim: the property's flag (here and in the casters). */
+	prog->uni1i( "lodTreeAnim", ( ( wwSunShadowStableRed() & 128 ) ? bsprop->isVertexAlphaAnimation : mesh->isVertexAlphaAnimation ) ? 1 : 0 );
 	prog->uni1i( "lodMaskByTree", wwLodMaskByTree );
 	prog->uni1f( "lodSpecStrength", lsp ? lsp->specularStrength : 1.0f );
 

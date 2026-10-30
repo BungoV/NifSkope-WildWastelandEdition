@@ -253,6 +253,29 @@ inline double jitAirStable( const double d[3] )
 	return ign( glslMod( std::floor( ox * kAirCells ), kCellWrap ), glslMod( std::floor( oy * kAirCells ), kCellWrap ) );
 }
 
+// ---- lane SHADOWSHIMMER3 ----
+
+/* AIRTAILSLIDE (ww_sunshadow.glsl wwAirTailShadow): jitAirStable above keeps a still world point's strata start on a turn,
+ * but a camera SLIDE turns the ray to it, and the start moves. Stable on both: IGN of the world lattice cell of the point
+ * the tail ends at (the surface the pixel shades); the cell a power of two of about distance / kAirCells world units (at
+ * least 1), so the lattice is as fine on screen as the direction's, and only a distance crossing a power of two re-picks
+ * it. The cell's z folds in as (x + kAirZx z, y + kAirZy z) so walls do not stripe. Red WW_SUN_SHADOW_STABLE_RED=airslide. */
+constexpr double kAirZx = 37.0, kAirZy = 61.0;
+
+//! the lattice level (log2 of the cell, world units) of a tail end at world distance `dist` from the eye
+inline double airLevel( double dist )
+{
+	return std::max( std::ceil( std::log2( std::max( dist, 1.0 ) / kAirCells ) ), 0.0 );
+}
+
+//! the air tail's strata start for the tail ending at WORLD point w, `dist` world units from the eye
+inline double jitAirWorld( const double w[3], double dist )
+{
+	const double cell = std::exp2( airLevel( dist ) );
+	const double cx = std::floor( w[0] / cell ), cy = std::floor( w[1] / cell ), cz = std::floor( w[2] / cell );
+	return ign( glslMod( cx + cz * kAirZx, kCellWrap ), glslMod( cy + cz * kAirZy, kCellWrap ) );
+}
+
 } // namespace WwCsmFit
 
 #endif
