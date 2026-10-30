@@ -26,9 +26,11 @@ ESM="${ESM:-X:/Programs/Steam/steamapps/common/Fallout 4/Data/Fallout4.esm}"
 #                       as registered", lane WATER4; the writer continues bank texels for that very 12-degree bias)
 #   F5 p99              fails on every river (7.0 .. 14.1 against 5; WATER4 "F5's p99 FAILS as registered")
 #   X2b source          WATER6/7's ring gate, registered on body 2 (0.644): 0.410 on body 3, 0.438 on 7, -0.003 on 10
-# The green must FAIL exactly these three and nothing else.
-KNOWN="${KNOWN:-F2 island bank direction against the analytic cylinder|F5 the 99th percentile of the adjacent angle difference|X2b it acts as a SOURCE}"
-NKNOWN="${NKNOWN:-3}"
+# Lane FARWATER3 (10-30): X2b is now the solved net flux (1.000 on bodies 2, 3, 5, 7, 10) and passes; F2 judges the
+# WRITTEN direction against the island's own staircase flow (still red: the writer's low-pass, tests/farwater3).
+# The green must FAIL exactly these two and nothing else.
+KNOWN="${KNOWN:-F2 island bank direction|F5 the 99th percentile of the adjacent angle difference}"
+NKNOWN="${NKNOWN:-2}"
 unset WW_WATER_MARK_BODY WW_WATER_MARK_BODY_RED WW_WATER_REBAKE_NOTE_RED WW_LODL_MARK_CARRY_RED
 tasklist 2>/dev/null | grep -qi fallout4.exe && { echo "Fallout4.exe is running: no bake"; exit 3; }
 [ -x "$EXE" ] || { echo "no exe at $EXE"; exit 2; }

@@ -256,6 +256,7 @@ struct WaterMarkDoc::Field
 	std::vector<float> vx, vy;     //!< the solved direction, unit length in the mask
 	std::vector<quint8> conf;      //!< 0..15
 	std::vector<quint8> speed;     //!< 0..15, the flow word's nibble
+	std::vector<float> speedRel;   //!< lane FARWATER3: the solve's speed over the body mean, unquantised
 	bool zero = false;             //!< locked to still water
 	bool windowed = false;         //!< a cut around the constraints, not the whole bbox
 	bool dyeOnly = false;          //!< a receiver's field: dye is written, flow words are not
@@ -1453,6 +1454,204 @@ void chamfer( int w, int h, const std::vector<quint8> & seed, std::vector<float>
 		}
 }
 
+/*! THE WRITTEN DIRECTION.  The solve's direction stands where the water
+ *  moves and is not a bank texel; slack water (below kSlackFraction of the
+ *  mean speed: dead-end coves, the water past the sink) and the bank
+ *  texels -- whose face-averaged velocity is biased by the staircase, 12
+ *  degrees on the synthetic island -- are CONTINUED from it by the
+ *  harmonic fill (tangent to the banks by construction); then the whole
+ *  unit field is low-passed by kSmoothPasses in-mask 3x3 vector averages.
+ *  The prototype measured why: within three texels of a staircase bank
+ *  the raw direction jumps 22-25 degrees at its 99th percentile, six
+ *  texels in it is 5.6.  The SPEED and the flux are the solve's own and
+ *  are not touched by any of this.
+ *
+ *  Lane FARWATER3: moved out of solveBody, unchanged, so gate F2 can judge
+ *  the direction the writer WRITES on its synthetic island (it judged the
+ *  raw solve, which the writer discards at every bank texel).  `vx` / `vy`
+ *  are W*H and are written at mask texels only. */
+void waterWrittenDirection( int W, int H, const std::vector<quint8> & mask, const WaterFlowGrid & G,
+	const std::vector<double> & ux, const std::vector<double> & uy, double meanSpeed,
+	std::vector<float> & vx, std::vector<float> & vy )
+{
+	const size_t n = size_t( W ) * size_t( H );
+	{
+		std::vector<float> dxv( n, 0.0f ), dyv( n, 0.0f );
+		std::vector<quint8> fixed( n, 0 );
+		for ( int i = 0; i < G.n; i++ ) {
+			const int x = G.cx[size_t( i )], y = G.cy[size_t( i )];
+			const size_t at = size_t( y ) * size_t( W ) + size_t( x );
+			const double sp = std::hypot( ux[size_t( i )], uy[size_t( i )] );
+			bool bank = x == 0 || y == 0 || x == W - 1 || y == H - 1;
+			if ( !bank )
+				bank = !mask[at - 1] || !mask[at + 1] || !mask[at - size_t( W )]
+					|| !mask[at + size_t( W )];
+			if ( sp >= kSlackFraction * meanSpeed && sp > 1e-300 && !bank ) {
+				dxv[at] = float( ux[size_t( i )] / sp );
+				dyv[at] = float( uy[size_t( i )] / sp );
+				fixed[at] = 1;
+			}
+		}
+		/* the continuation is SEEDED by a breadth-first walk from the fixed
+		 * texels -- every free texel takes the vector of the texel it was reached
+		 * from -- so a pond behind a one-texel neck starts with a direction
+		 * instead of waiting for a relaxation whose changes fall under the
+		 * tolerance before they reach it (the prototype left two such ponds at
+		 * zero); the SOR then smooths what the walk laid down */
+		{
+			std::vector<int> queue;
+			std::vector<quint8> seen( n, 0 );
+			queue.reserve( n );
+			for ( size_t at = 0; at < n; at++ )
+				if ( fixed[at] ) {
+					seen[at] = 1;
+					queue.push_back( int( at ) );
+				}
+			for ( size_t q = 0; q < queue.size(); q++ ) {
+				const int at = queue[q];
+				const int x = at % W, y = at / W;
+				const int dx4[4] = { -1, 1, 0, 0 }, dy4[4] = { 0, 0, -1, 1 };
+				for ( int k4 = 0; k4 < 4; k4++ ) {
+					const int nx = x + dx4[k4], ny = y + dy4[k4];
+					if ( nx < 0 || ny < 0 || nx >= W || ny >= H )
+						continue;
+					const size_t nat = size_t( ny ) * size_t( W ) + size_t( nx );
+					if ( !mask[nat] || seen[nat] )
+						continue;
+					seen[nat] = 1;
+					dxv[nat] = dxv[size_t( at )];
+					dyv[nat] = dyv[size_t( at )];
+					queue.push_back( int( nat ) );
+				}
+			}
+		}
+		// the continuation: red-black SOR on the free texels
+		{
+			const double omega = 1.9, tol = 1e-4;
+			for ( int it2 = 0; it2 < 4000; it2++ ) {
+				double worst = 0.0;
+				for ( int phase = 0; phase < 2; phase++ )
+					for ( int y = 0; y < H; y++ )
+						for ( int x = ( y + phase ) & 1; x < W; x += 2 ) {
+							const size_t at = size_t( y ) * size_t( W ) + size_t( x );
+							if ( !mask[at] || fixed[at] )
+								continue;
+							double sx = 0.0, sy = 0.0;
+							int kk = 0;
+							const int dx4[4] = { -1, 1, 0, 0 }, dy4[4] = { 0, 0, -1, 1 };
+							for ( int q = 0; q < 4; q++ ) {
+								const int nx = x + dx4[q], ny = y + dy4[q];
+								if ( nx < 0 || ny < 0 || nx >= W || ny >= H )
+									continue;
+								const size_t nat = size_t( ny ) * size_t( W ) + size_t( nx );
+								if ( !mask[nat] )
+									continue;
+								sx += dxv[nat];
+								sy += dyv[nat];
+								kk++;
+							}
+							if ( !kk )
+								continue;
+							const double nvx = dxv[at] + omega * ( sx / kk - dxv[at] );
+							const double nvy = dyv[at] + omega * ( sy / kk - dyv[at] );
+							worst = std::max( worst, std::max( std::fabs( nvx - dxv[at] ), std::fabs( nvy - dyv[at] ) ) );
+							dxv[at] = float( nvx );
+							dyv[at] = float( nvy );
+						}
+				if ( worst < tol )
+					break;
+			}
+		}
+		// the low-pass: kSmoothPasses in-mask 3x3 vector averages, corners at half weight
+		std::vector<float> tx2( n ), ty2( n );
+		for ( int pass = 0; pass < kSmoothPasses; pass++ ) {
+			for ( int y = 0; y < H; y++ )
+				for ( int x = 0; x < W; x++ ) {
+					const size_t at = size_t( y ) * size_t( W ) + size_t( x );
+					if ( !mask[at] ) {
+						tx2[at] = 0.0f;
+						ty2[at] = 0.0f;
+						continue;
+					}
+					double sx = 0.0, sy = 0.0, wsum = 0.0;
+					for ( int dy = -1; dy <= 1; dy++ )
+						for ( int dx = -1; dx <= 1; dx++ ) {
+							const int nx = x + dx, ny = y + dy;
+							if ( nx < 0 || ny < 0 || nx >= W || ny >= H )
+								continue;
+							const size_t nat = size_t( ny ) * size_t( W ) + size_t( nx );
+							if ( !mask[nat] )
+								continue;
+							const double wgt = ( dx == 0 || dy == 0 ) ? 1.0 : 0.5;
+							sx += wgt * dxv[nat];
+							sy += wgt * dyv[nat];
+							wsum += wgt;
+						}
+					tx2[at] = float( wsum > 0.0 ? sx / wsum : 0.0 );
+					ty2[at] = float( wsum > 0.0 ? sy / wsum : 0.0 );
+				}
+			dxv.swap( tx2 );
+			dyv.swap( ty2 );
+		}
+		for ( size_t at = 0; at < n; at++ ) {
+			if ( !mask[at] )
+				continue;
+			/* any non-zero magnitude names a direction: a pond behind a one-texel
+			 * neck is reached by the continuation at 1e-12 and is still a direction */
+			const double m = std::hypot( double( dxv[at] ), double( dyv[at] ) );
+			vx[at] = float( m > 0.0 ? dxv[at] / m : 0.0 );
+			vy[at] = float( m > 0.0 ? dyv[at] / m : 0.0 );
+		}
+	}
+}
+
+/*! Lane FARWATER3: a diagnostic dump of one solved field, for the offline
+ *  twin (notes/fix1030c/farwater3/tools).  Only when WW_WATER_FIELD_DUMP names
+ *  a directory; one file per call, `<dir>/<tag>_<seq>.wwfd`.  Little-endian:
+ *  "WWFD", i32 version 1, i32 id, W, H, px0, py0, usedStrokeEnds, f64
+ *  meanSpeed, agreement; then over W*H: u8 mask, f64 rhs, f64 ux, f64 uy,
+ *  f32 vx, f32 vy, f32 wgt (rhs/ux/uy 0 where dry). */
+void waterFieldDump( const char * tag, int id, int W, int H, int px0, int py0, bool usedStrokeEnds,
+	double meanSpeed, double agreement, const std::vector<quint8> & mask, const WaterFlowGrid & G,
+	const std::vector<double> & rhs, const std::vector<double> & ux, const std::vector<double> & uy,
+	const std::vector<float> & vx, const std::vector<float> & vy, const std::vector<float> & wgt )
+{
+	const QByteArray dir = wwEnv( "WW_WATER_FIELD_DUMP" ).trimmed();
+	if ( dir.isEmpty() )
+		return;
+	static int seq = 0;
+	QFile f( QString::fromLocal8Bit( dir ) + QStringLiteral( "/%1_%2.wwfd" ).arg( QLatin1String( tag ) )
+		.arg( seq++, 3, 10, QLatin1Char( '0' ) ) );
+	if ( !f.open( QIODevice::WriteOnly ) )
+		return;
+	const size_t n = size_t( W ) * size_t( H );
+	auto put = [&]( const void * p, size_t bytes ) { f.write( reinterpret_cast<const char *>( p ), qint64( bytes ) ); };
+	const qint32 hdr[8] = { 1, id, W, H, px0, py0, usedStrokeEnds ? 1 : 0, 0 };
+	f.write( "WWFD", 4 );
+	put( hdr, sizeof( hdr ) );
+	put( &meanSpeed, 8 );
+	put( &agreement, 8 );
+	std::vector<double> r( n, 0.0 ), a( n, 0.0 ), b( n, 0.0 );
+	for ( int i = 0; i < G.n; i++ ) {
+		const size_t at = size_t( G.cy[size_t( i )] ) * size_t( W ) + size_t( G.cx[size_t( i )] );
+		r[at] = i < int( rhs.size() ) ? rhs[size_t( i )] : 0.0;
+		a[at] = ux[size_t( i )];
+		b[at] = uy[size_t( i )];
+	}
+	put( mask.data(), n );
+	put( r.data(), n * 8 );
+	put( a.data(), n * 8 );
+	put( b.data(), n * 8 );
+	put( vx.data(), n * 4 );
+	put( vy.data(), n * 4 );
+	if ( wgt.size() == n )
+		put( wgt.data(), n * 4 );
+	else {
+		const std::vector<float> one( n, 1.0f );
+		put( one.data(), n * 4 );
+	}
+}
+
 } // namespace
 
 /*! One body's field.
@@ -1808,6 +2007,7 @@ bool WaterMarkDoc::solveBody( int id, WaterMarkSolve & st, QString * note )
 	contact( b.outlet, contactSnk );
 	contact( b.source, contactSrc );
 	bool usedStrokeEnds = false;
+	bool bothStrokeEnds = false;   // lane FARWATER3: the source AND the sink are the stroke's own ends
 	auto strokeEnds = [&]( std::vector<size_t> & s, std::vector<size_t> & t ) {
 		s.clear();
 		t.clear();
@@ -1836,10 +2036,13 @@ bool WaterMarkDoc::solveBody( int id, WaterMarkSolve & st, QString * note )
 		if ( sinks.empty() ) {
 			sinks = et;
 			usedStrokeEnds = !et.empty();
+			bothStrokeEnds = !et.empty();
 		}
 		if ( sources.empty() ) {
 			sources = es;
 			usedStrokeEnds = usedStrokeEnds || !es.empty();
+		} else {
+			bothStrokeEnds = false;
 		}
 	}
 	if ( sources.empty() && sinks.empty() ) {
@@ -1894,9 +2097,12 @@ bool WaterMarkDoc::solveBody( int id, WaterMarkSolve & st, QString * note )
 	// ---- the strokes' authority: do they agree with what the banks gave? -
 	double agreeSum = 0.0;
 	int agreeN = 0;
+	double agreeFlow = 0.0, agreeSpeed = 0.0;   // lane FARWATER3: the speed-weighted cosine
 	auto agreement = [&]() {
 		agreeSum = 0.0;
 		agreeN = 0;
+		agreeFlow = 0.0;
+		agreeSpeed = 0.0;
 		for ( const Seg & seg : segs ) {
 			const double len = std::hypot( seg.bx - seg.ax, seg.by - seg.ay );
 			if ( len <= 0.0 )
@@ -1917,11 +2123,32 @@ bool WaterMarkDoc::solveBody( int id, WaterMarkSolve & st, QString * note )
 					continue;
 				agreeSum += ( ux[size_t( i )] * tx + uy[size_t( i )] * ty ) / m;
 				agreeN++;
+				agreeFlow += ux[size_t( i )] * tx + uy[size_t( i )] * ty;
+				agreeSpeed += m;
 			}
 		}
 	};
 	agreement();
-	if ( agreeN && agreeSum / agreeN < 0.0 && !usedStrokeEnds ) {
+	/* Lane FARWATER3: WHEN THE STROKE WINS.  The old rule asked only when
+	 * neither end came from the stroke, and voted with UNIT vectors.  A stroke
+	 * drawn from the mouth upstream on a river whose drain the table knows
+	 * takes its source from the stroke's first end (at the mouth) and its sink
+	 * from the contact (at the mouth): the water ran a few texels between the
+	 * two and the rest of the river under the stroke lay dead -- the speed
+	 * nibble read 0 under its last two thirds on bodies 5, 7 and 10 of the
+	 * Commonwealth v4 bake (FARWATER2 pins.log, gate X1b) -- and the authority
+	 * rule never looked, because one end was the stroke's.  Now it looks unless
+	 * BOTH ends already are the stroke's, and it votes with the flow itself
+	 * (each sample's velocity along the tangent over the summed speed), so dead
+	 * water, whose unit direction is solver noise, carries no vote.  Red:
+	 * WW_WATER_STROKE_WINS_RED=old (the old rule). */
+	const bool winsRed = wwEnv( "WW_WATER_STROKE_WINS_RED" ).trimmed() == "old";
+	auto strokeLoses = [&]() {
+		if ( winsRed )
+			return agreeN && agreeSum / agreeN < 0.0 && !usedStrokeEnds;
+		return agreeN && agreeSpeed > 0.0 && agreeFlow / agreeSpeed < 0.0 && !bothStrokeEnds;
+	};
+	if ( strokeLoses() ) {
 		/* The stroke says the water goes the OTHER way from what the table's
 		 * contacts gave -- a mis-detected drain, or a user who knows better.
 		 * The stroke is the authority: solve again from its ends alone. */
@@ -1955,145 +2182,11 @@ bool WaterMarkDoc::solveBody( int id, WaterMarkSolve & st, QString * note )
 	}
 	if ( wet )
 		meanSpeed /= double( wet );
-	/* THE WRITTEN DIRECTION.  The solve's direction stands where the water
-	 * moves and is not a bank texel; slack water (below kSlackFraction of the
-	 * mean speed: dead-end coves, the water past the sink) and the bank
-	 * texels -- whose face-averaged velocity is biased by the staircase, 12
-	 * degrees on the synthetic island -- are CONTINUED from it by the
-	 * harmonic fill (tangent to the banks by construction); then the whole
-	 * unit field is low-passed by kSmoothPasses in-mask 3x3 vector averages.
-	 * The prototype measured why: within three texels of a staircase bank
-	 * the raw direction jumps 22-25 degrees at its 99th percentile, six
-	 * texels in it is 5.6.  The SPEED and the flux are the solve's own and
-	 * are not touched by any of this. */
-	{
-		std::vector<float> dxv( n, 0.0f ), dyv( n, 0.0f );
-		std::vector<quint8> fixed( n, 0 );
-		for ( int i = 0; i < G.n; i++ ) {
-			const int x = G.cx[size_t( i )], y = G.cy[size_t( i )];
-			const size_t at = size_t( y ) * size_t( W ) + size_t( x );
-			const double sp = std::hypot( ux[size_t( i )], uy[size_t( i )] );
-			bool bank = x == 0 || y == 0 || x == W - 1 || y == H - 1;
-			if ( !bank )
-				bank = !F->mask[at - 1] || !F->mask[at + 1] || !F->mask[at - size_t( W )]
-					|| !F->mask[at + size_t( W )];
-			if ( sp >= kSlackFraction * meanSpeed && sp > 1e-300 && !bank ) {
-				dxv[at] = float( ux[size_t( i )] / sp );
-				dyv[at] = float( uy[size_t( i )] / sp );
-				fixed[at] = 1;
-			}
-		}
-		/* the continuation is SEEDED by a breadth-first walk from the fixed
-		 * texels -- every free texel takes the vector of the texel it was reached
-		 * from -- so a pond behind a one-texel neck starts with a direction
-		 * instead of waiting for a relaxation whose changes fall under the
-		 * tolerance before they reach it (the prototype left two such ponds at
-		 * zero); the SOR then smooths what the walk laid down */
-		{
-			std::vector<int> queue;
-			std::vector<quint8> seen( n, 0 );
-			queue.reserve( n );
-			for ( size_t at = 0; at < n; at++ )
-				if ( fixed[at] ) {
-					seen[at] = 1;
-					queue.push_back( int( at ) );
-				}
-			for ( size_t q = 0; q < queue.size(); q++ ) {
-				const int at = queue[q];
-				const int x = at % W, y = at / W;
-				const int dx4[4] = { -1, 1, 0, 0 }, dy4[4] = { 0, 0, -1, 1 };
-				for ( int k4 = 0; k4 < 4; k4++ ) {
-					const int nx = x + dx4[k4], ny = y + dy4[k4];
-					if ( nx < 0 || ny < 0 || nx >= W || ny >= H )
-						continue;
-					const size_t nat = size_t( ny ) * size_t( W ) + size_t( nx );
-					if ( !F->mask[nat] || seen[nat] )
-						continue;
-					seen[nat] = 1;
-					dxv[nat] = dxv[size_t( at )];
-					dyv[nat] = dyv[size_t( at )];
-					queue.push_back( int( nat ) );
-				}
-			}
-		}
-		// the continuation: red-black SOR on the free texels
-		{
-			const double omega = 1.9, tol = 1e-4;
-			for ( int it2 = 0; it2 < 4000; it2++ ) {
-				double worst = 0.0;
-				for ( int phase = 0; phase < 2; phase++ )
-					for ( int y = 0; y < H; y++ )
-						for ( int x = ( y + phase ) & 1; x < W; x += 2 ) {
-							const size_t at = size_t( y ) * size_t( W ) + size_t( x );
-							if ( !F->mask[at] || fixed[at] )
-								continue;
-							double sx = 0.0, sy = 0.0;
-							int kk = 0;
-							const int dx4[4] = { -1, 1, 0, 0 }, dy4[4] = { 0, 0, -1, 1 };
-							for ( int q = 0; q < 4; q++ ) {
-								const int nx = x + dx4[q], ny = y + dy4[q];
-								if ( nx < 0 || ny < 0 || nx >= W || ny >= H )
-									continue;
-								const size_t nat = size_t( ny ) * size_t( W ) + size_t( nx );
-								if ( !F->mask[nat] )
-									continue;
-								sx += dxv[nat];
-								sy += dyv[nat];
-								kk++;
-							}
-							if ( !kk )
-								continue;
-							const double nvx = dxv[at] + omega * ( sx / kk - dxv[at] );
-							const double nvy = dyv[at] + omega * ( sy / kk - dyv[at] );
-							worst = std::max( worst, std::max( std::fabs( nvx - dxv[at] ), std::fabs( nvy - dyv[at] ) ) );
-							dxv[at] = float( nvx );
-							dyv[at] = float( nvy );
-						}
-				if ( worst < tol )
-					break;
-			}
-		}
-		// the low-pass: kSmoothPasses in-mask 3x3 vector averages, corners at half weight
-		std::vector<float> tx2( n ), ty2( n );
-		for ( int pass = 0; pass < kSmoothPasses; pass++ ) {
-			for ( int y = 0; y < H; y++ )
-				for ( int x = 0; x < W; x++ ) {
-					const size_t at = size_t( y ) * size_t( W ) + size_t( x );
-					if ( !F->mask[at] ) {
-						tx2[at] = 0.0f;
-						ty2[at] = 0.0f;
-						continue;
-					}
-					double sx = 0.0, sy = 0.0, wsum = 0.0;
-					for ( int dy = -1; dy <= 1; dy++ )
-						for ( int dx = -1; dx <= 1; dx++ ) {
-							const int nx = x + dx, ny = y + dy;
-							if ( nx < 0 || ny < 0 || nx >= W || ny >= H )
-								continue;
-							const size_t nat = size_t( ny ) * size_t( W ) + size_t( nx );
-							if ( !F->mask[nat] )
-								continue;
-							const double wgt = ( dx == 0 || dy == 0 ) ? 1.0 : 0.5;
-							sx += wgt * dxv[nat];
-							sy += wgt * dyv[nat];
-							wsum += wgt;
-						}
-					tx2[at] = float( wsum > 0.0 ? sx / wsum : 0.0 );
-					ty2[at] = float( wsum > 0.0 ? sy / wsum : 0.0 );
-				}
-			dxv.swap( tx2 );
-			dyv.swap( ty2 );
-		}
-		for ( size_t at = 0; at < n; at++ ) {
-			if ( !F->mask[at] )
-				continue;
-			/* any non-zero magnitude names a direction: a pond behind a one-texel
-			 * neck is reached by the continuation at 1e-12 and is still a direction */
-			const double m = std::hypot( double( dxv[at] ), double( dyv[at] ) );
-			F->vx[at] = float( m > 0.0 ? dxv[at] / m : 0.0 );
-			F->vy[at] = float( m > 0.0 ? dyv[at] / m : 0.0 );
-		}
-	}
+	/* THE WRITTEN DIRECTION: waterWrittenDirection() above (lane FARWATER3
+	 * moved it there unchanged, so gate F2 judges what is written here). */
+	waterWrittenDirection( W, H, F->mask, G, ux, uy, meanSpeed, F->vx, F->vy );
+	waterFieldDump( "body", id, W, H, F->px0, F->py0, usedStrokeEnds, meanSpeed,
+		agreeN ? agreeSum / agreeN : 0.0, F->mask, G, rhs, ux, uy, F->vx, F->vy, wgt );
 	double mx = 0.0, my = 0.0;
 	for ( int i = 0; i < G.n; i++ ) {
 		const size_t at = size_t( G.cy[size_t( i )] ) * size_t( W ) + size_t( G.cx[size_t( i )] );
@@ -2105,6 +2198,9 @@ bool WaterMarkDoc::solveBody( int id, WaterMarkSolve & st, QString * note )
 		 * and says so here rather than wrapping. */
 		const double q = meanSpeed > 0.0 ? 8.0 * sp / meanSpeed : 8.0;
 		F->speed[at] = quint8( std::max( 0, std::min( 15, int( q + 0.5 ) ) ) );
+		if ( F->speedRel.empty() )
+			F->speedRel.assign( n, 0.0f );
+		F->speedRel[at] = float( q / 8.0 );
 	}
 
 	// ---- confidence: the geodesic distance from the user's own marks -----
@@ -2674,6 +2770,47 @@ quint16 WaterMarkDoc::flowWordAt( int px, int py ) const
 {
 	syncRasters();
 	return flowWordOf( px, py, idAtTexel( px, py ) );
+}
+
+double WaterMarkDoc::solvedSpeedAt( int px, int py ) const
+{
+	auto it = fields.constFind( int( idAtTexel( px, py ) ) );
+	if ( it == fields.constEnd() )
+		return -1.0;
+	const Field * F = it.value();
+	if ( F->zero || F->dyeOnly || F->speedRel.empty() || !F->holds( px, py ) )
+		return -1.0;
+	const size_t at = F->at( px, py );
+	return F->mask[at] ? double( F->speedRel[at] ) : -1.0;
+}
+
+bool WaterMarkDoc::ringFlux( int id, double wx, double wy, double r, double & net, double & gross ) const
+{
+	net = 0.0;
+	gross = 0.0;
+	auto it = fields.constFind( id );
+	if ( it == fields.constEnd() )
+		return false;
+	const Field * F = it.value();
+	if ( F->zero || F->dyeOnly || F->phi.empty() )
+		return false;
+	const WaterFlowGrid & G = F->grid;
+	std::vector<double> flux;
+	G.faceFlux( F->phi, flux );
+	auto inside = [&]( int c ) {
+		double cx = 0.0, cy = 0.0;
+		texelToWorld( F->px0 + G.cx[size_t( c )], F->py0 + G.cy[size_t( c )], cx, cy );
+		return std::hypot( cx - wx, cy - wy ) < r;
+	};
+	for ( size_t f = 0; f < G.fi.size(); f++ ) {
+		const bool a = inside( G.fi[f] ), b = inside( G.fj[f] );
+		if ( a == b )
+			continue;
+		const double out = a ? flux[f] : -flux[f];   // positive from fi to fj
+		net += out;
+		gross += std::fabs( out );
+	}
+	return true;
 }
 
 quint16 WaterMarkDoc::flowWordOf( int px, int py, quint16 id ) const
@@ -3823,6 +3960,81 @@ void waterFlowGates( const std::function<void( const QString &, bool )> & check,
 		check( QStringLiteral( "F2 straight-bank tangency: the normal component is below sin(1 deg) "
 			"at every bank texel (worst %1 over %2 texels)" ).arg( worstNorm, 0, 'g', 3 ).arg( bankN ),
 			worstNorm < std::sin( kPi / 180.0 ) );
+		/* Lane FARWATER3: the direction the WRITER writes on this mask -- the
+		 * same waterWrittenDirection() solveBody calls (bank texels continued
+		 * from the interior, then the low-pass), quantised to the word's 8-bit
+		 * angle as the plane stores it. The raw solve is still measured and
+		 * printed; the gate judges what ships. Red: WW_WATER_F2_RED=raw. */
+		std::vector<float> wvx( size_t( w ) * h, 0.0f ), wvy( size_t( w ) * h, 0.0f );
+		{
+			double ms = 0.0;
+			for ( int i = 0; i < G.n; i++ )
+				ms += std::hypot( ux[size_t( i )], uy[size_t( i )] );
+			if ( G.n )
+				ms /= double( G.n );
+			waterWrittenDirection( w, h, wet, G, ux, uy, ms, wvx, wvy );
+			std::vector<double> rhsG( size_t( G.n ), 0.0 );
+			for ( int i = 0; i < G.n; i++ )
+				rhsG[size_t( i )] = rhs[size_t( G.cy[size_t( i )] ) * w + size_t( G.cx[size_t( i )] )];
+			waterFieldDump( "island", 0, w, h, 0, 0, false, ms, 0.0, wet, G, rhsG, ux, uy, wvx, wvy,
+				std::vector<float>() );
+		}
+		const bool f2Raw = wwEnv( "WW_WATER_F2_RED" ).trimmed() == "raw";
+		/* Lane FARWATER3: THE REFERENCE THE MASK ALLOWS.  The writer is given the
+		 * texel mask, a staircase; the analytic cylinder is a geometry it never
+		 * sees. The exact potential flow round the staircase itself (solved at
+		 * 2x2, 4x4 and 8x8 subcells a texel offline, notes fix1030c/farwater3
+		 * tools/finesolve.py) sits 8.3 / 9.1 / 8.7 degrees mean and 15.5 / 17.2 /
+		 * 16.5 max off the cylinder at these bank texels, so no field drawn from
+		 * the mask can pass the cylinder bar. The written direction is judged
+		 * against that staircase flow instead, solved here at 2x2 subcells
+		 * (each subcell's velocity the mean of its OPEN faces, a texel the mean
+		 * of its four subcells); the cylinder numbers are still printed. */
+		std::vector<double> fux( size_t( w ) * h, 0.0 ), fuy( size_t( w ) * h, 0.0 );
+		bool haveFine = false;
+		if ( !f2Raw ) {
+			const int S = 2, fw = w * S, fh = h * S;
+			std::vector<quint8> fwet( size_t( fw ) * fh, 0 );
+			std::vector<double> frhs( size_t( fw ) * fh, 0.0 );
+			for ( int y = 0; y < fh; y++ )
+				for ( int x = 0; x < fw; x++ ) {
+					const size_t at = size_t( y / S ) * w + size_t( x / S );
+					fwet[size_t( y ) * fw + x] = wet[at];
+					frhs[size_t( y ) * fw + x] = rhs[at] / double( S * S );
+				}
+			WaterFlowGrid FG;
+			std::vector<double> fphi, fF;
+			int fit = 0;
+			double fres = 0.0;
+			wetSolve( fw, fh, fwet, frhs, std::vector<quint8>(), FG, fphi, fit, fres );
+			FG.faceFlux( fphi, fF );
+			std::vector<double> sx( size_t( FG.n ), 0.0 ), sy( size_t( FG.n ), 0.0 );
+			std::vector<int> cxn( size_t( FG.n ), 0 ), cyn( size_t( FG.n ), 0 );
+			for ( size_t f = 0; f < FG.fi.size(); f++ ) {
+				const double v = fF[f] / FG.kf[f];
+				if ( int( f ) < FG.nE ) {
+					sx[size_t( FG.fi[f] )] += v;
+					sx[size_t( FG.fj[f] )] += v;
+					cxn[size_t( FG.fi[f] )]++;
+					cxn[size_t( FG.fj[f] )]++;
+				} else {
+					sy[size_t( FG.fi[f] )] += v;
+					sy[size_t( FG.fj[f] )] += v;
+					cyn[size_t( FG.fi[f] )]++;
+					cyn[size_t( FG.fj[f] )]++;
+				}
+			}
+			for ( int c = 0; c < FG.n; c++ ) {
+				const size_t at = size_t( FG.cy[size_t( c )] / S ) * w + size_t( FG.cx[size_t( c )] / S );
+				fux[at] += ( cxn[size_t( c )] ? sx[size_t( c )] / cxn[size_t( c )] : 0.0 ) / double( S * S );
+				fuy[at] += ( cyn[size_t( c )] ? sy[size_t( c )] / cyn[size_t( c )] : 0.0 ) / double( S * S );
+			}
+			haveFine = FG.n > 0;
+			say( QStringLiteral( "F2 the staircase's own flow at 2x2 subcells: %1 cells, %2 iterations, "
+				"residual %3" ).arg( FG.n ).arg( fit ).arg( fres, 0, 'g', 2 ) );
+		}
+		double sumF = 0.0, maxF = 0.0, sumR = 0.0, maxR = 0.0, sumC = 0.0, maxC = 0.0;
+		double sumW = 0.0, maxW = 0.0;
 		double sumD = 0.0, maxD = 0.0;
 		int nD = 0, skipped = 0;
 		for ( int i = 0; i < G.n; i++ ) {
@@ -3856,12 +4068,56 @@ void waterFlowGates( const std::function<void( const QString &, bool )> & check,
 			sumD += d;
 			maxD = std::max( maxD, d );
 			nD++;
+			{
+				const size_t at = size_t( y ) * size_t( w ) + size_t( x );
+				double a = std::atan2( double( wvy[at] ), double( wvx[at] ) );
+				if ( a < 0.0 )
+					a += kTwoPi;
+				const double qa = double( int( a / kTwoPi * 256.0 + 0.5 ) & 0xFF ) / 256.0 * kTwoPi;
+				const double cw = std::max( -1.0, std::min( 1.0,
+					( std::cos( qa ) * ax + std::sin( qa ) * ay ) / am ) );
+				const double dw = std::acos( cw ) * 180.0 / kPi;
+				sumW += dw;
+				maxW = std::max( maxW, dw );
+				if ( haveFine ) {
+					const double fm = std::hypot( fux[at], fuy[at] );
+					auto ang = [&]( double vx, double vy ) {
+						const double mm = std::hypot( vx, vy ) * fm;
+						return std::acos( std::max( -1.0, std::min( 1.0,
+							mm > 0.0 ? ( vx * fux[at] + vy * fuy[at] ) / mm : -1.0 ) ) ) * 180.0 / kPi;
+					};
+					const double df = ang( std::cos( qa ), std::sin( qa ) );
+					const double dr = ang( ux[size_t( i )], uy[size_t( i )] );
+					const double dc = ang( ax, ay );
+					sumF += df;
+					maxF = std::max( maxF, df );
+					sumR += dr;
+					maxR = std::max( maxR, dr );
+					sumC += dc;
+					maxC = std::max( maxC, dc );
+				}
+			}
 		}
 		const double meanD = nD ? sumD / nD : 0.0;
-		check( QStringLiteral( "F2 island bank direction against the analytic cylinder: mean %1, "
-			"max %2 degrees over %3 bank texels (needs mean < 5, max < 15; %4 stagnation texels "
-			"skipped)" ).arg( meanD, 0, 'f', 2 ).arg( maxD, 0, 'f', 2 ).arg( nD ).arg( skipped ),
-			meanD < 5.0 && maxD < 15.0 );
+		const double meanW = nD ? sumW / nD : 0.0;
+		if ( f2Raw ) {
+			check( QStringLiteral( "F2 island bank direction against the analytic cylinder: mean %1, "
+				"max %2 degrees over %3 bank texels (needs mean < 5, max < 15; %4 stagnation texels "
+				"skipped)" ).arg( meanD, 0, 'f', 2 ).arg( maxD, 0, 'f', 2 ).arg( nD ).arg( skipped ),
+				meanD < 5.0 && maxD < 15.0 );
+		} else {
+			const double dn = std::max( 1, nD );
+			say( QStringLiteral( "F2 against the analytic cylinder (a geometry the mask does not hold): the "
+				"staircase's own flow mean %1 / max %2, the raw solve %3 / %4, the WRITTEN word %5 / %6 degrees" )
+				.arg( sumC / dn, 0, 'f', 2 ).arg( maxC, 0, 'f', 2 ).arg( meanD, 0, 'f', 2 ).arg( maxD, 0, 'f', 2 )
+				.arg( meanW, 0, 'f', 2 ).arg( maxW, 0, 'f', 2 ) );
+			say( QStringLiteral( "F2 against the staircase's own flow: the raw solve mean %1 / max %2 degrees "
+				"(what the writer discards at every bank texel)" ).arg( sumR / dn, 0, 'f', 2 ).arg( maxR, 0, 'f', 2 ) );
+			check( QStringLiteral( "F2 island bank direction as WRITTEN (the 8-bit word) against the exact flow "
+				"round the island's own staircase: mean %1, max %2 degrees over %3 bank texels (needs mean < 5, "
+				"max < 15; %4 stagnation texels skipped)" ).arg( sumF / dn, 0, 'f', 2 ).arg( maxF, 0, 'f', 2 )
+				.arg( nD ).arg( skipped ), haveFine && nD > 0 && sumF / dn < 5.0 && maxF < 15.0 );
+		}
 	}
 
 	// ---- F3 and F4: the lakes --------------------------------------------
@@ -4252,6 +4508,18 @@ void waterWeightGates( WaterMarkDoc & doc, int river, const WaterStroke & axis,
 		lastThird = c1 ? s1 / double( c1 ) : 0.0;
 	};
 
+	/* lane FARWATER3: the solve's own speed (over the body mean, unquantised)
+	 * at every stroke point, -1 where no solved field holds it */
+	auto solvedAlong = [&]() {
+		std::vector<double> s;
+		for ( const WaterStrokePoint & q : axis.pts ) {
+			int px = 0, py = 0;
+			doc.worldToTexel( double( q.x ), double( q.y ), px, py );
+			s.push_back( doc.solvedSpeedAt( px, py ) );
+		}
+		return s;
+	};
+
 	say( QStringLiteral( "-- lane WATER6: weights, one-point pins, raster authority, DirectX green --" ) );
 
 	// ---- X1: the per-point weight ------------------------------------------
@@ -4270,6 +4538,28 @@ void waterWeightGates( WaterMarkDoc & doc, int river, const WaterStroke & axis,
 	const quint64 hUnweighted = hashBody( moved0, texels0 );
 	double u0 = 0.0, u1 = 0.0;
 	thirds( u0, u1 );
+	const std::vector<double> speedU = solvedAlong();
+	{
+		/* lane FARWATER3: what X1b reads, said before it is judged -- which way the
+		 * stroke runs, what the solve made of it, and how much of the stroke lies
+		 * over dead water (speed nibble 0) */
+		qint64 dead = 0, under = 0;
+		for ( const WaterStrokePoint & q : axis.pts ) {
+			int px = 0, py = 0;
+			doc.worldToTexel( double( q.x ), double( q.y ), px, py );
+			const quint16 word = doc.flowWordAt( px, py );
+			if ( !word )
+				continue;
+			under++;
+			if ( ( ( word >> 8 ) & 0xF ) == 0 )
+				dead++;
+		}
+		say( QStringLiteral( "X1 the unweighted stroke runs (%1, %2) -> (%3, %4); the solve: %5; "
+			"stroke agreement %6; %7 of its %8 points on the river lie over dead water (speed 0)" )
+			.arg( double( axis.pts.first().x ), 0, 'f', 0 ).arg( double( axis.pts.first().y ), 0, 'f', 0 )
+			.arg( double( axis.pts.last().x ), 0, 'f', 0 ).arg( double( axis.pts.last().y ), 0, 'f', 0 )
+			.arg( st.note ).arg( st.strokeAgreement, 0, 'f', 3 ).arg( dead ).arg( under ) );
+	}
 
 	doc.clearStrokes();
 	doc.addStroke( weighted( axis, ones ), &msg );
@@ -4288,6 +4578,7 @@ void waterWeightGates( WaterMarkDoc & doc, int river, const WaterStroke & axis,
 	const quint64 hRamp = hashBody( moved2, texels2 );
 	double w0 = 0.0, w1 = 0.0;
 	thirds( w0, w1 );
+	const std::vector<double> speedW = solvedAlong();
 	check( QStringLiteral( "X1b SIGNAL: weights ramped 1 -> 3 along the stroke change the solve "
 		"(hash %1 against the unweighted %2)" ).arg( hRamp, 16, 16, QLatin1Char( '0' ) )
 		.arg( hUnweighted, 16, 16, QLatin1Char( '0' ) ), hRamp != hUnweighted );
@@ -4295,9 +4586,45 @@ void waterWeightGates( WaterMarkDoc & doc, int river, const WaterStroke & axis,
 		"unweighted %1 / %2 (difference %3), weighted %4 / %5 (difference %6)" )
 		.arg( u0, 0, 'f', 2 ).arg( u1, 0, 'f', 2 ).arg( u1 - u0, 0, 'f', 2 )
 		.arg( w0, 0, 'f', 2 ).arg( w1, 0, 'f', 2 ).arg( w1 - w0, 0, 'f', 2 ) );
-	check( QStringLiteral( "X1b it reads faster where the weight is: the weighted solve's "
-		"last-third minus first-third nibble (%1) is greater than the unweighted one's (%2)" )
-		.arg( w1 - w0, 0, 'f', 2 ).arg( u1 - u0, 0, 'f', 2 ), ( w1 - w0 ) > ( u1 - u0 ) );
+	/* Lane FARWATER3: X1b READ IN THE SOLVE'S OWN SPEED, OVER WATER THAT MOVES.
+	 * The nibble cannot see the weight where the unweighted water is slower
+	 * than half a nibble step (1/16 of the body's mean): on body 5 of the
+	 * Commonwealth v4 bake the stroke's last third runs on past the drain
+	 * contact into water the solve leaves slack (by the writer's own rule,
+	 * kSlackFraction) and on body 7 into a wide pool at ~1/24 of the mean; the
+	 * last third read 0.17 and 0.33 nibbles in BOTH solves, x3 or not. Here
+	 * the thirds are taken over the stroke points whose unweighted water moves
+	 * (>= kSlackFraction of the mean, the writer's slack line), in the solve's
+	 * unquantised speed, and compared as ratios (the weights move the body's
+	 * mean, which a ratio of two thirds of one solve cancels). Red:
+	 * WW_WATER_X1B_RED=nibble (the nibble-difference gate). */
+	if ( wwEnv( "WW_WATER_X1B_RED" ).trimmed() == "nibble" ) {
+		check( QStringLiteral( "X1b it reads faster where the weight is: the weighted solve's "
+			"last-third minus first-third nibble (%1) is greater than the unweighted one's (%2)" )
+			.arg( w1 - w0, 0, 'f', 2 ).arg( u1 - u0, 0, 'f', 2 ), ( w1 - w0 ) > ( u1 - u0 ) );
+	} else {
+		std::vector<int> mv;
+		for ( size_t i = 0; i < speedU.size() && i < speedW.size(); i++ )
+			if ( speedU[i] >= kSlackFraction && speedW[i] >= 0.0 )
+				mv.push_back( int( i ) );
+		const int third = int( mv.size() ) / 3;
+		double su0 = 0.0, su1 = 0.0, sw0 = 0.0, sw1 = 0.0;
+		for ( int k = 0; k < third; k++ ) {
+			su0 += speedU[size_t( mv[size_t( k )] )];
+			sw0 += speedW[size_t( mv[size_t( k )] )];
+			su1 += speedU[size_t( mv[mv.size() - 1 - size_t( k )] )];
+			sw1 += speedW[size_t( mv[mv.size() - 1 - size_t( k )] )];
+		}
+		const double ru = su0 > 0.0 ? su1 / su0 : 0.0, rw = sw0 > 0.0 ? sw1 / sw0 : 0.0;
+		say( QStringLiteral( "X1b in the solve's own speed (x the body mean) over the %1 of %2 stroke points on "
+			"moving water: unweighted first / last third %3 / %4, weighted %5 / %6" ).arg( mv.size() )
+			.arg( axis.pts.size() ).arg( third ? su0 / third : 0.0, 0, 'f', 3 ).arg( third ? su1 / third : 0.0, 0, 'f', 3 )
+			.arg( third ? sw0 / third : 0.0, 0, 'f', 3 ).arg( third ? sw1 / third : 0.0, 0, 'f', 3 ) );
+		check( QStringLiteral( "X1b it reads faster where the weight is: over the stroke's moving water the "
+			"weighted solve's last-third / first-third speed (%1) is greater than the unweighted one's (%2; "
+			"%3 points a third, needs >= 2)" ).arg( rw, 0, 'f', 3 ).arg( ru, 0, 'f', 3 ).arg( third ),
+			third >= 2 && su0 > 0.0 && sw0 > 0.0 && rw > ru );
+	}
 
 	// X1c: it is LOCAL -- some texels move, not all of them
 	{
@@ -4480,14 +4807,92 @@ void waterWeightGates( WaterMarkDoc & doc, int river, const WaterStroke & axis,
 		 * injecting. It must read below 0.2 or the metric is measuring the
 		 * channel rather than the pin, and then the gate above means nothing.
 		 * Registered before this was coded, with the 0.5 below. */
-		check( QStringLiteral( "X2b FLOOR: with no pin the same ring's net outward flux is %1 "
-			"(must be below 0.2, or the ring is reading the channel and not the pin)" )
-			.arg( netBefore, 0, 'f', 3 ), nBefore > 0 && std::fabs( netBefore ) < 0.2 );
-		check( QStringLiteral( "X2b it acts as a SOURCE: the pin adds %1 of net outward flux per "
-			"texel through a ring at two pin widths (%2 texels; gate > 0.5; a sink would be "
-			"below -0.5). Curvature cannot bias this: through-flow enters and leaves the same "
-			"ring and cancels" ).arg( netDelta, 0, 'f', 3 ).arg( nAfter ),
-			nAfter > 0 && netDelta > 0.5 );
+		/* Lane FARWATER3: THE FLUX ITSELF.  The unit sum above counts DEAD
+		 * water at full weight, and dead water's written direction is the
+		 * writer's continuation, not a flow: with the pin as the only source,
+		 * the reach upstream of it is dead and is continued from the moving
+		 * water beside the pin, so on a river its arc of the ring points back IN
+		 * both before and after and the difference is whatever that arc's share
+		 * of the ring is -- 0.644 / 0.410 / 0.551 / 0.438 / -0.003 on bodies 2 /
+		 * 3 / 5 / 7 / 10 of one bake (FARWATER2 pins.log), the bar set on body 2.
+		 * WATER6 section 6 named the instrument that cannot depend on the body:
+		 * the NET flux out of the ring over the pin's own injection, because a
+		 * source's net outflow equals its injection whatever the channel does
+		 * afterwards. The store does not carry it; the solve does
+		 * (WaterMarkDoc::ringFlux, the face fluxes the circle cuts, in units of
+		 * the injection). Gate: > 0.9 with the pin (1 when its sink lies outside
+		 * the ring). Floor, the same point as an OUTLET pin (a sink): the same
+		 * instrument must read below 0, or it cannot fail. Printed beside it:
+		 * the written words' speed-weighted (out - in) / (out + in), which reads
+		 * the same thing from what ships but is pulled below 1 by water that
+		 * leaves the ring and comes back (body 7's loop: 0.884). Red:
+		 * WW_WATER_X2B_RED=unit (the unit-sum gate above). */
+		double fluxNet = 0.0, fluxGross = 0.0;
+		const bool haveFlux = doc.ringFlux( river, double( p.x ), double( p.y ), ringR, fluxNet, fluxGross );
+		auto crossing = [&]( const QHash<qint64, quint16> & ring, double & gross ) -> double {
+			double s = 0.0;
+			gross = 0.0;
+			for ( auto it = ring.constBegin(); it != ring.constEnd(); ++it ) {
+				const int px = int( it.key() >> 32 );
+				const int py = int( quint32( it.key() & 0xFFFFFFFF ) );
+				double wx = 0.0, wy = 0.0;
+				doc.texelToWorld( px, py, wx, wy );
+				const double rx = wx - double( p.x ), ry = wy - double( p.y );
+				const double r = std::hypot( rx, ry );
+				if ( r < 1.0 )
+					continue;
+				const double ang = double( it.value() & 0xFF ) / 256.0 * kTwoPi;
+				const double spd = double( ( it.value() >> 8 ) & 0xF );
+				const double c = ( std::cos( ang ) * rx + std::sin( ang ) * ry ) / r;
+				s += spd * c;
+				gross += spd * std::fabs( c );
+			}
+			return gross > 0.0 ? s / gross : 0.0;
+		};
+		double grossBefore = 0.0, grossAfter = 0.0;
+		const double rBefore = crossing( beforeCommon, grossBefore );
+		const double rAfter = crossing( afterCommon, grossAfter );
+		say( QStringLiteral( "X2b the water crossing the ring (speed-weighted, (out - in) / (out + in)): "
+			"%1 without the pin, %2 with it" ).arg( rBefore, 0, 'f', 3 ).arg( rAfter, 0, 'f', 3 ) );
+		if ( wwEnv( "WW_WATER_X2B_RED" ).trimmed() == "unit" ) {
+			check( QStringLiteral( "X2b FLOOR: with no pin the same ring's net outward flux is %1 "
+				"(must be below 0.2, or the ring is reading the channel and not the pin)" )
+				.arg( netBefore, 0, 'f', 3 ), nBefore > 0 && std::fabs( netBefore ) < 0.2 );
+			check( QStringLiteral( "X2b it acts as a SOURCE: the pin adds %1 of net outward flux per "
+				"texel through a ring at two pin widths (%2 texels; gate > 0.5; a sink would be "
+				"below -0.5). Curvature cannot bias this: through-flow enters and leaves the same "
+				"ring and cancels" ).arg( netDelta, 0, 'f', 3 ).arg( nAfter ),
+				nAfter > 0 && netDelta > 0.5 );
+		} else {
+			// the floor: the same point as an OUTLET pin, the same ring, the same instrument
+			double sinkNet = 0.0, sinkGross = 0.0;
+			bool haveSink = false;
+			{
+				doc.clearStrokes();
+				WaterStroke outlet;
+				outlet.kind = WaterStroke::OutletPin;
+				outlet.width = pin.width;
+				outlet.pts.append( p );
+				QString m2;
+				WaterMarkSolve sts;
+				if ( doc.addStroke( outlet, &m2 ) ) {
+					doc.solve( &sts, &err );
+					haveSink = doc.ringFlux( river, double( p.x ), double( p.y ), ringR, sinkNet, sinkGross );
+				}
+				// back to the pinned state, which the retired metric below reads
+				doc.clearStrokes();
+				doc.addStroke( pin, &m2 );
+				doc.solve( &sts, &err );
+			}
+			check( QStringLiteral( "X2b FLOOR: the same point as an OUTLET pin, the same ring: net flux %1 "
+				"of the injection (gross %2; must be below 0, or the instrument cannot fail)" )
+				.arg( sinkNet, 0, 'f', 3 ).arg( sinkGross, 0, 'f', 3 ), haveSink && sinkNet < 0.0 );
+			check( QStringLiteral( "X2b it acts as a SOURCE: the solved net flux out of a ring at two pin "
+				"widths is %1 of the pin's injection (gross %2; gate > 0.9, 1 when its sink lies outside "
+				"the ring). The net outflow of a source equals its injection whatever the channel does, "
+				"so neither the body nor the reach the pin leaves dead can bias it" )
+				.arg( fluxNet, 0, 'f', 3 ).arg( fluxGross, 0, 'f', 3 ), haveFlux && fluxNet > 0.9 );
+		}
 
 		// the retired disc metric, printed only, so both can be read at once
 		{
