@@ -57,6 +57,7 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include "gl/cellgrass.h"	// lane GRASSMB1: the grass wind's clock
 #include "impostorchunk.h"
 #include "cellfarlod.h"		// lane FARLOD1: the far field's planes, sway and cards
+#include "gl/cellwater.h"	// lane FARWATER1: far water held until its dry mask's lookup lands
 #include "landlodspec.h"		// lane LANDSPEC2: the land-LOD blend centre's glide
 #include "cellmodpick.h"	// lane MODPICK1: "Mods differ from the far LOD bake" over the view
 #include "impostorpreviewtest.h"
@@ -6229,6 +6230,9 @@ void GLView::paintGL()
 		QTimer::singleShot( 16, this, [this]() { update(); } );
 	// lane LANDSPEC2: the land-LOD blend centre glides after a cell cross (never with its time pinned)
 	else if ( wwLandLodWantsRepaint() )
+		QTimer::singleShot( 16, this, [this]() { update(); } );
+	// lane FARWATER1: a far water sheet waited for the .lodl lookup this frame: draw again until it lands
+	else if ( wwCellWaterWantsRepaint() )
 		QTimer::singleShot( 16, this, [this]() { update(); } );
 
 	emit paintUpdate();

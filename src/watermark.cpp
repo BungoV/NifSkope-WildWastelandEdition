@@ -23,6 +23,7 @@ BSD License - see nifskope.h
 #include <vector>
 #include <QList>
 #include <QPointF>
+#include <QPair>
 #include <functional>
 #include <limits>
 
@@ -70,6 +71,13 @@ constexpr qsizetype kOffDye     = 0xF4;   //!< the reserved word: the dye plane 
 constexpr quint32 kSectDye = LODL_SECT_DYE;
 constexpr qsizetype kOffSurface = 0xF8;   //!< lane WATER1: the surface plane, u64
 constexpr quint32 kSectSurface = LODL_SECT_SURFACE;
+/* Lane FARWATER1: version 4 (WATERSKYVISFAR1) grew the header by the sky plane's u64 at 0x100 and its rate at
+ * 0x108. save() copied those bytes verbatim and dropped the plane itself, so a saved v4 file pointed its sky
+ * section into the middle of whatever followed the surface plane and would not re-open ("a plane store tiles
+ * 0x0"): the marking tool could not save any bake written since 10-27. The sky plane is now carried verbatim,
+ * rebased, like the surface plane. */
+constexpr qsizetype kOffSky     = 0x100;	// its rate at 0x108 is copied verbatim with the header
+constexpr quint32 kSectSky = LODL_SECT_SKY;
 constexpr int kBodyRecord = 48;
 constexpr double kTwoPi = 6.283185307179586;
 //! World units a cell edge. FO4's, and the same constant the writer uses.
@@ -372,6 +380,9 @@ bool WaterMarkDoc::open( const QString & path, QString * error )
 	surfacePlane = Plane();
 	if ( oSurface && !readPlane( *reader, oSurface, 4, surfacePlane, error ) )
 		return false;
+	skyPlane = Plane();
+	if ( oSky && !readPlane( *reader, oSky, 1, skyPlane, error ) )	// lane FARWATER1
+		return false;
 	opened = true;
 	return true;
 }
@@ -418,6 +429,16 @@ bool WaterMarkDoc::readTail( QString * error )
 	oSurface = ( sect & kSectSurface ) ? rd64( p + kOffSurface ) : quint64( 0 );
 	if ( ( sect & kSectSurface ) && !oSurface )
 		return fail( QStringLiteral( "section surface is declared present but its offset is empty" ) );
+	oSky = 0;
+	if ( lodl->headerVersion() >= 4 && ( sect & kSectSky ) ) {	// lane FARWATER1
+		f.seek( kOffSky );
+		const QByteArray s = f.read( 16 );
+		if ( s.size() < 16 )
+			return fail( QStringLiteral( "%1 is shorter than a version-4 header" ).arg( filePath ) );
+		oSky = rd64( s.constData() );
+		if ( !oSky )
+			return fail( QStringLiteral( "section sky is declared present but its offset is empty" ) );
+	}
 
 	if ( bodyStride != kBodyRecord )
 		return fail( QStringLiteral( "the body table's records are %1 bytes; this tool writes %2" )
@@ -435,6 +456,11 @@ bool WaterMarkDoc::readTail( QString * error )
 		return fail( QStringLiteral( "the surface plane at 0x%1 is not after the flow and shore "
 			"planes; this tool rewrites the tail in the writer's own order and refuses another" )
 			.arg( oSurface, 0, 16 ) );
+	if ( oSky && !( oSky > oFlow && oSky > oShore && oSky > oSurface && oSky < sizeOnDisk
+			&& ( !oDye || oDye > oSky ) ) )
+		return fail( QStringLiteral( "the sky plane at 0x%1 is not after the surface plane and before any dye "
+			"plane; this tool rewrites the tail in the writer's own order and refuses another" )
+			.arg( oSky, 0, 16 ) );
 	if ( oDye && !( oDye > oFlow && oDye > oShore && oDye > oSurface && oDye < sizeOnDisk ) )
 		return fail( QStringLiteral( "the dye plane at 0x%1 is not after the other planes; this "
 			"tool rewrites the tail in the writer's own order and refuses another" )
@@ -3148,6 +3174,22 @@ bool WaterMarkDoc::save( QString * error )
 		pos += quint64( moved.size() );
 	}
 
+	/* the sky plane (lane FARWATER1; WATERSKYVISFAR1's version 4): verbatim, rebased, where the writer puts it,
+	 * right after the surface plane. Its u64 at 0x100 lies past the 0x100 bytes `hdr` holds, so it is patched
+	 * in the output after the copy below. */
+	quint64 skyAt = 0;
+	if ( oSky && skyPlane.ok ) {
+		in.seek( qint64( oSky ) );
+		const QByteArray bytes = in.read( qint64( skyPlane.bytes ) );
+		if ( bytes.size() != qint64( skyPlane.bytes ) )
+			return fail( QStringLiteral( "the sky plane is short on disk" ) );
+		const QByteArray moved = rebasePlane( bytes, oSky, pos );
+		if ( out.write( moved ) != moved.size() )
+			return fail( QStringLiteral( "could not write the sky plane" ) );
+		skyAt = pos;
+		pos += quint64( moved.size() );
+	}
+
 	/* the dye plane: written only when the store carries a dye mark, so a
 	 * file nobody dyed -- and a file whose dye was undone -- keeps the
 	 * writer's own bytes; referenced from the reserved word at 0xF4 */
@@ -3173,6 +3215,12 @@ bool WaterMarkDoc::save( QString * error )
 	out.seek( 0 );
 	if ( out.write( hdr ) != hdr.size() )
 		return fail( QStringLiteral( "could not rewrite the header" ) );
+	if ( skyAt ) {	// lane FARWATER1: the version-4 sky offset, past the 0x100 bytes above
+		QByteArray s( 8, char( 0 ) );
+		patch64( s, 0, skyAt );
+		if ( !out.seek( kOffSky ) || out.write( s ) != s.size() )
+			return fail( QStringLiteral( "could not rewrite the sky plane's offset" ) );
+	}
 	out.close();
 	in.close();
 
@@ -3225,6 +3273,331 @@ bool WaterMarkDoc::save( QString * error )
 		solve( &st, &serr );
 	}
 	dirty = false;
+	return true;
+}
+
+// =========================================================================
+//  lane FARWATER1: a re-bake carries the marks
+// =========================================================================
+
+QString WaterMarkCarryReport::line() const
+{
+	return QStringLiteral( "water marks carried: %1 body(ies) -> %2 mapped (%3 under a new id, %4 onto a body "
+		"another also took), %5 with no home; %6 stroke(s) -> %7 carried (%8 re-resolved by their points), "
+		"%9 dropped (%10 raster layer(s) on another grid)" )
+		.arg( bodies ).arg( mapped ).arg( moved ).arg( shared ).arg( unmapped )
+		.arg( strokes ).arg( carried ).arg( resolved ).arg( dropped ).arg( rastersDropped );
+}
+
+bool WaterMarkDoc::carryOut( WaterMarkCarry & c, QString * error ) const
+{
+	c = WaterMarkCarry();
+	if ( !opened || !reader ) {
+		if ( error )
+			*error = QStringLiteral( "no landscape file is open" );
+		return false;
+	}
+	c.strokes = marks;
+	c.cellMinX = lodl->cellMinX();
+	c.cellMinY = lodl->cellMinY();
+	c.idRate = idRate;
+	QHash<int, int> slot;	// old id -> index into c.bodies
+	auto want = [&]( int id ) {
+		if ( id < 1 || id > table.size() || slot.contains( id ) )
+			return;
+		WaterMarkCarry::Body b;
+		b.oldId = quint16( id );
+		b.rec = table[id - 1];
+		b.name = names[id - 1];
+		slot.insert( id, c.bodies.size() );
+		c.bodies.append( b );
+	};
+	for ( int i = 1; i <= table.size(); i++ )
+		if ( ( table[i - 1].flags & WaterMarkCarry::kUserFlags ) || !names[i - 1].isEmpty() ) {
+			want( i );
+			c.userBodies++;
+		}
+	for ( const WaterStroke & s : marks )
+		want( int( s.body ) );
+	if ( c.bodies.isEmpty() )
+		return true;
+	/* Every k-th texel of each named body in the plane's own order, k from its
+	 * area, so a sea and a pond both give about kSamples points: deterministic,
+	 * and the same old file always maps the same way. */
+	QVector<qint64> seen( c.bodies.size(), 0 ), stride( c.bodies.size(), 1 );
+	for ( int k = 0; k < c.bodies.size(); k++ )
+		stride[k] = qMax<qint64>( 1, qint64( c.bodies[k].rec.area ) / WaterMarkCarry::kSamples );
+	QFile f( filePath );
+	if ( !f.open( QIODevice::ReadOnly ) ) {
+		if ( error )
+			*error = QStringLiteral( "could not open %1" ).arg( filePath );
+		return false;
+	}
+	const int e = idPlane.tileEdge;
+	QByteArray raw;
+	quint32 uni = 0;
+	bool isUni = false;
+	for ( int ty = 0; ty < idPlane.tilesY; ty++ )
+		for ( int tx = 0; tx < idPlane.tilesX; tx++ ) {
+			if ( !tileOf( f, idPlane, tx, ty, raw, uni, isUni ) ) {
+				if ( error )
+					*error = QStringLiteral( "tile %1,%2 of the body plane would not inflate" ).arg( tx ).arg( ty );
+				return false;
+			}
+			if ( isUni && !slot.contains( int( uni & 0xFFFF ) ) )
+				continue;
+			for ( int j = 0; j < e; j++ )
+				for ( int i = 0; i < e; i++ ) {
+					const quint16 id = isUni ? quint16( uni )
+						: rd16( raw.constData() + ( qsizetype( j ) * e + i ) * 2 );
+					const auto it = slot.constFind( int( id ) );
+					if ( !id || it == slot.constEnd() )
+						continue;
+					const int k = it.value();
+					if ( seen[k]++ % stride[k] )
+						continue;
+					double wx = 0.0, wy = 0.0;
+					texelToWorld( tx * e + i, ty * e + j, wx, wy );
+					WaterStrokePoint p;
+					p.x = float( wx );
+					p.y = float( wy );
+					c.bodies[k].where.append( p );
+				}
+		}
+	return true;
+}
+
+void WaterMarkDoc::carryIn( const WaterMarkCarry & c, WaterMarkCarryReport & rep, bool byId )
+{
+	rep = WaterMarkCarryReport();
+	rep.bodies = c.bodies.size();
+	rep.strokes = c.strokes.size();
+	QHash<int, int> map, claimed;	// old -> new, new -> old
+	for ( const WaterMarkCarry::Body & b : c.bodies ) {
+		QHash<int, int> votes;
+		for ( const WaterStrokePoint & p : b.where )
+			if ( const int n = bodyAtWorld( double( p.x ), double( p.y ) ) )
+				votes[n]++;
+		int best = 0, bestN = 0;
+		for ( auto it = votes.constBegin(); it != votes.constEnd(); ++it )
+			if ( it.value() > bestN || ( it.value() == bestN && it.key() < best ) ) {
+				best = it.key();
+				bestN = it.value();
+			}
+		if ( byId ) {	// the red: the old id, wherever that body now is
+			best = int( b.oldId ) <= table.size() ? int( b.oldId ) : 0;
+			bestN = int( b.where.size() );
+		}
+		if ( !best || qint64( bestN ) * 4 < qint64( b.where.size() ) ) {
+			rep.unmapped++;
+			continue;
+		}
+		map.insert( int( b.oldId ), best );
+		rep.mapped++;
+		if ( best != int( b.oldId ) )
+			rep.moved++;
+		if ( claimed.contains( best ) )
+			rep.shared++;
+		claimed.insert( best, int( b.oldId ) );
+		// the fields the panel owns; everything else is the new bake's
+		LodtWaterBody & r = table[best - 1];
+		const quint8 u = quint8( b.rec.flags & WaterMarkCarry::kUserFlags );
+		if ( u & ( 1u << 5 ) )
+			r.cls = b.rec.cls;
+		if ( u & ( 1u << 2 ) )
+			for ( int k = 0; k < 4; k++ )
+				r.colour[k] = b.rec.colour[k];
+		if ( ( u & ( 1u << 0 ) ) && b.rec.watrForm )
+			r.watrForm = b.rec.watrForm;
+		r.flags = quint8( ( r.flags & quint8( ~WaterMarkCarry::kUserFlags ) ) | u );
+		if ( !b.name.isEmpty() )
+			names[best - 1] = b.name;
+	}
+	const bool sameGrid = lodl && c.cellMinX == lodl->cellMinX() && c.cellMinY == lodl->cellMinY()
+		&& c.idRate == idRate;
+	for ( const WaterStroke & s : c.strokes ) {
+		WaterStroke t = s;
+		if ( t.kind == WaterCurveDoc::kRasterKind ) {
+			if ( !sameGrid ) {	// its words sit on the OLD body plane's texels
+				rep.dropped++;
+				rep.rastersDropped++;
+				continue;
+			}
+		} else if ( t.body ) {
+			const auto it = map.constFind( int( t.body ) );
+			if ( it != map.constEnd() ) {
+				t.body = quint16( it.value() );
+			} else {
+				t.body = 0;
+				for ( const WaterStrokePoint & p : t.pts ) {
+					t.body = bodyAtWorld( double( p.x ), double( p.y ) );
+					if ( t.body )
+						break;
+				}
+				if ( !t.body ) {
+					rep.dropped++;
+					continue;
+				}
+				rep.resolved++;
+			}
+		}
+		marks.append( t );
+		rep.carried++;
+	}
+	syncLocks();
+	dirty = true;
+}
+
+bool waterMarkCarryTake( const QString & path, WaterMarkCarry & carry, QString * note )
+{
+	carry = WaterMarkCarry();
+	if ( note )
+		note->clear();
+	if ( !QFileInfo::exists( path ) )
+		return false;
+	{	// the cheap look first: a file nobody marked costs one header read
+		LodtFile f;
+		QString err;
+		if ( !f.open( path, &err ) ) {
+			/* a file this reader refuses may still hold marks (a v4 file the marking tool saved before
+			 * FARWATER1 would not re-open): keep it rather than truncate it */
+			if ( note )
+				*note = QStringLiteral( "water marks: the old file would not open (%1), so any marks in it are "
+					"not carried" ).arg( err );
+			return false;
+		}
+		if ( f.headerVersion() < 3 || f.bodyCount() <= 0 )
+			return false;
+		bool any = f.strokeCount() > 0;
+		for ( int i = 1; !any && i <= f.bodyCount(); i++ ) {
+			LodtWaterBody b;
+			if ( f.waterBody( i, b ) && ( ( b.flags & WaterMarkCarry::kUserFlags ) || b.nameOffset ) )
+				any = true;
+		}
+		if ( !any )
+			return false;
+	}
+	WaterMarkDoc d;
+	QString err;
+	if ( !d.open( path, &err ) || !d.carryOut( carry, &err ) ) {
+		if ( note )
+			*note = QStringLiteral( "water marks: the old file's marks could not be read (%1); it is kept "
+				"beside the new one" ).arg( err );
+		carry = WaterMarkCarry();
+		return false;
+	}
+	return carry.any();
+}
+
+bool waterMarkCarryPut( const QString & path, const WaterMarkCarry & carry, QString * note )
+{
+	auto say = [note]( const QString & m ) {
+		if ( note )
+			*note = m;
+	};
+	WaterMarkDoc d;
+	QString err;
+	if ( !d.open( path, &err ) ) {
+		say( QStringLiteral( "water marks: %1 stroke(s) and %2 hand-edited body(ies) NOT carried: the new "
+			"file will not open for marking (%3)" ).arg( carry.strokes.size() ).arg( carry.userBodies ).arg( err ) );
+		return false;
+	}
+	WaterMarkCarryReport rep;
+	d.carryIn( carry, rep, wwEnv( "WW_LODL_MARK_CARRY_RED" ).trimmed() == "byid" );
+	WaterMarkSolve st;
+	if ( !d.solve( &st, &err ) || !d.save( &err ) ) {
+		say( rep.line() + QStringLiteral( "; NOT saved: %1" ).arg( err ) );
+		return false;
+	}
+	/* save() moved the unmarked bake aside as .bak-watermark: it is exactly what
+	 * this bake just wrote, so it is no way back to anything */
+	QFile::remove( path + QStringLiteral( ".bak-watermark" ) );
+	say( rep.line() + QStringLiteral( "; solve: %1" ).arg( st.note ) );
+	return rep.dropped == 0 && rep.unmapped == 0;
+}
+
+bool lodtWaterMarkFixture( const QString & path, QString * text, QString * error )
+{
+	auto fail = [error]( const QString & m ) {
+		if ( error )
+			*error = m;
+		return false;
+	};
+	WaterMarkDoc d;
+	QString err;
+	if ( !d.open( path, &err ) )
+		return fail( err );
+	/* The bodies of each class by area, biggest first (ties by id): deterministic for one file.
+	 * WW_WATER_MARK_FIXTURE_RANK=k marks the k-th river / lake instead of the biggest -- smaller bodies,
+	 * whose ids a re-bake with other classifier options renumbers (the re-map gate). */
+	const int rank = qMax( 0, wwEnvInt( "WW_WATER_MARK_FIXTURE_RANK" ) );
+	QVector<QPair<quint32, int>> rivers, lakes;
+	for ( int id = 1; id <= d.bodyCount(); id++ ) {
+		LodtWaterBody b;
+		d.body( id, b );
+		if ( b.cls == 1 )
+			rivers.append( qMakePair( b.area, id ) );
+		else if ( b.cls == 2 )
+			lakes.append( qMakePair( b.area, id ) );
+	}
+	auto byArea = []( const QPair<quint32, int> & a, const QPair<quint32, int> & b ) {
+		return a.first != b.first ? a.first > b.first : a.second < b.second;
+	};
+	std::sort( rivers.begin(), rivers.end(), byArea );
+	std::sort( lakes.begin(), lakes.end(), byArea );
+	int river[2] = { 0, 0 }, lake = 0, other = 0;
+	if ( !rivers.isEmpty() )
+		river[0] = rivers[qMin( rank, int( rivers.size() ) - 1 )].second;
+	if ( rivers.size() > 1 )
+		river[1] = rivers[qMin( rank + 1, int( rivers.size() ) - 1 )].second;
+	if ( river[1] == river[0] )
+		river[1] = 0;
+	if ( !lakes.isEmpty() )
+		lake = lakes[qMin( rank, int( lakes.size() ) - 1 )].second;
+	for ( int id = 1; id <= d.bodyCount() && !other; id++ )
+		if ( id != river[0] && id != river[1] && id != lake )
+			other = id;
+	if ( !river[0] || !lake )
+		return fail( QStringLiteral( "the file has no river or no lake to mark" ) );
+	// three wet points of the river, from its bounding box on a 256-unit grid: the first, the middle, the last
+	LodtWaterBody rb;
+	d.body( river[0], rb );
+	QVector<WaterStrokePoint> wet;
+	for ( double y = rb.y0 * kCellUnits + 128.0; y < ( rb.y1 + 1 ) * kCellUnits; y += 256.0 )
+		for ( double x = rb.x0 * kCellUnits + 128.0; x < ( rb.x1 + 1 ) * kCellUnits; x += 256.0 )
+			if ( d.bodyAtWorld( x, y ) == river[0] ) {
+				WaterStrokePoint p;
+				p.x = float( x );
+				p.y = float( y );
+				wet.append( p );
+			}
+	if ( wet.size() < 3 )
+		return fail( QStringLiteral( "river %1 has %2 wet points on the grid" ).arg( river[0] ).arg( wet.size() ) );
+	WaterStroke s;
+	s.kind = WaterStroke::Stroke;
+	s.flags = WaterStroke::SetsDirection | WaterStroke::SetsSpeed;
+	s.speed = 96.0f;
+	s.width = 1024.0f;
+	s.pts = { wet.first(), wet[wet.size() / 2], wet.last() };
+	QString msg;
+	if ( !d.addStroke( s, &msg ) )
+		return fail( msg );
+	d.setBodyName( river[0], QStringLiteral( "FARWATER1 river" ) );
+	d.setBodyColour( river[0], 200, 40, 40, true );
+	d.setBodyName( lake, QStringLiteral( "FARWATER1 still lake" ) );
+	d.setBodyLockZero( lake, true );
+	if ( river[1] )
+		d.setBodyDyeMouth( river[1], true, 0.5f );
+	d.setDyeHalfDistance( 12288.0 );
+	if ( other )
+		d.setBodyClass( other, 2 );
+	WaterMarkSolve st;
+	if ( !d.solve( &st, &err ) || !d.save( &err ) )
+		return fail( err );
+	if ( text )
+		*text = QStringLiteral( "water mark fixture: stroke on river %1 (%2), named + coloured; lake %3 named + "
+			"still; dye mouth on river %4; dye half-distance 12288; class 2 on body %5; %6 stroke(s) saved; solve: %7" )
+			.arg( river[0] ).arg( msg ).arg( lake ).arg( river[1] ).arg( other ).arg( d.strokes().size() ).arg( st.note );
 	return true;
 }
 

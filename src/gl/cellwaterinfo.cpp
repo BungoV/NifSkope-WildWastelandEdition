@@ -907,6 +907,12 @@ bool wwCellWaterInfoAt( const void * nif, float x, float y, WwWaterInfoHit & hit
 	return true;
 }
 
+bool wwCellWaterInfoBuilding( const void * nif )
+{
+	const std::shared_ptr<Job> job = st().docs.value( nif );
+	return job && job->state.load( std::memory_order_acquire ) == 0 && !infoRed();
+}
+
 QString wwCellWaterInfoEcho( const void * nif )
 {
 	const State & s = st();

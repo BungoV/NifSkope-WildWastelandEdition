@@ -7168,6 +7168,10 @@ int usage()
 		  << "  lodl <file.lodl> --water-mark-selftest  the MARKING tool's gates. It\n"
 		  << "                                          REWRITES the file it is given,\n"
 		  << "                                          so give it a copy\n"
+		  << "  lodl <file.lodl> --water-mark-fixture   mark the file as a user would (a\n"
+		  << "                                          stroke, names, a colour, a still\n"
+		  << "                                          lake, a dye mouth) and save it; the\n"
+		  << "                                          re-bake gate of tests/farwater1\n"
 		  << "  lodl <file.lodl> --water-info <dir>     the water shader's sparse tables (index,\n"
 		  << "                                          atlas, bodies, census, sky line) into <dir>, and the\n"
 		  << "                                          land side's (land_index, land_atlas)\n"
@@ -8322,6 +8326,7 @@ int nifskopeCliMain( const QStringList & args )
 	bool lodtWaterCensusOnly = false;
 	bool lodtWaterSelfTestOnly = false;
 	bool lodtWaterMarkSelfTestOnly = false;
+	bool lodtWaterMarkFixtureOnly = false;	// lane FARWATER1
 	bool lodtWaterSlopeSelfTestOnly = false;
 	QString lodlWaterInfoDir;	// lane WATERDATA1
 	QString lodtWaterSlopeFlat;
@@ -8605,6 +8610,7 @@ int nifskopeCliMain( const QStringList & args )
 		else if ( t == QLatin1String( "--water-census" ) ) lodtWaterCensusOnly = true;
 		else if ( t == QLatin1String( "--water-selftest" ) ) lodtWaterSelfTestOnly = true;
 		else if ( t == QLatin1String( "--water-mark-selftest" ) ) lodtWaterMarkSelfTestOnly = true;
+		else if ( t == QLatin1String( "--water-mark-fixture" ) ) lodtWaterMarkFixtureOnly = true;
 		else if ( t == QLatin1String( "--water-slope-selftest" ) ) lodtWaterSlopeSelfTestOnly = true;
 		else if ( t == QLatin1String( "--water-info" ) ) lodlWaterInfoDir = next();
 		else if ( t == QLatin1String( "--water-slope-flat" ) ) lodtWaterSlopeFlat = next();
@@ -9935,6 +9941,15 @@ int nifskopeCliMain( const QStringList & args )
 			const bool ok = lodtWaterMarkSelfTest( file, &report, &werr );
 			out() << report << Qt::endl;
 			if ( !ok && !werr.isEmpty() )
+				err() << "error: " << werr << Qt::endl;
+			rc = ok ? 0 : 1;
+		} else if ( lodtWaterMarkFixtureOnly ) {
+			// lane FARWATER1: mark the file as a user would, for the re-bake gate (tests/farwater1)
+			QString report, werr;
+			const bool ok = lodtWaterMarkFixture( file, &report, &werr );
+			if ( ok )
+				out() << report << Qt::endl;
+			else
 				err() << "error: " << werr << Qt::endl;
 			rc = ok ? 0 : 1;
 		} else if ( !lodlWaterInfoDir.isEmpty() ) {

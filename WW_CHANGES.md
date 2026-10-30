@@ -1,5 +1,42 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## FARWATER1 (2026-10-30): a LOD water re-bake keeps the user's marks; far water waits for its dry mask
+
+- **A. Re-bake discarded the marks (LANES "LOD water-marking tool: re-bake discards user marks").** Cause, measured:
+  the .lodl writer truncates the old file and always writes an EMPTY stroke store and a table with no hand edits
+  (src/lodtfile.cpp lodtBuildWater), and nothing read the old file first. Now `lodtWriteSourceOrV2` reads the old
+  file's marks before the write (`waterMarkCarryTake`: a header look, the full read only when a stroke or a hand-set
+  body exists), moves it aside as `<ws>.lodl.premarks`, bakes, and puts the marks into the new file through the
+  marking tool's own document (`waterMarkCarryPut`: `WaterMarkDoc::carryIn`, solve, save). Body ids are the
+  classifier's numbering, so a body is carried by POSITION: ~1024 world samples of its old texels vote on the new body
+  plane (winner needs a quarter of them); its name, class, colour, form and flag bits 0/2/5 follow it, and so do its
+  strokes. A stroke whose body found no home is re-resolved by its points; one on no water is dropped and counted; a
+  raster layer is dropped when the grid changed. `.premarks` is removed only when every mark found a home, else it
+  stays and the census line says so; a failed bake puts the old file back. Census line in the bake's notes:
+  `water marks carried: ...`. A file nobody marked costs one header read; its bytes are unchanged.
+- **The marking tool could not save a version-4 file** (found by this gate): `WaterMarkDoc::save` copied the v4
+  header's sky offset (0x100) verbatim and dropped the sky plane, so every bake since WATERSKYVISFAR1 saved to a file
+  that would not re-open ("a plane store tiles 0x0"). The sky plane is now carried verbatim, rebased, and 0x100
+  patched. Measured on a v4 bake: `--water-mark-selftest` save/re-open, P8 round trip and P3 undo all ok.
+- CLI `lodl <file> --water-mark-fixture` marks a file as a user would (stroke, names, colour, still lake, dye mouth,
+  dye knob, class by hand); `WW_WATER_MARK_FIXTURE_RANK=k` marks the k-th river/lake.
+- Reds: `WW_LODL_MARK_CARRY_RED=drop` (the old writer: marks lost), `=byid` (carried by old id, not by position).
+- Gate tests/farwater1/run.sh (Commonwealth .lodl, ~2.5 min, no window): GREEN re-bake over a marked file is
+  byte-equal to it (strokes 124 B, names 38 B, every hand-set field, whole file: the planes re-derive); RED drop
+  fails 4 checks; REMAP (rank 6, `--water-bridge 0`, 346 -> 793 bodies) every name/field/stroke follows its body,
+  2 strokes changed id, the stroke's 3 points lie on its new body (own decoder); RED byid fails (0 of 3 points).
+- **B. Far water drawn whole over dry land while the dry mask's lookup builds** (SHORE2's leftover). Measured: the
+  lookup builds in 1.61 s on the Commonwealth bake; with the mask off rings 1-4 draw water on samples the .lodl calls
+  dry (harbour r1/r2/r4 429/1082/6353, lakes 594/948/3040; FALSE up to 4932), and that water reflects 51-98 % of the
+  sky at the rings' grazing angles (tests/farwater1/grazing_fresnel.py, a twin of wwWaterFresnel): a bright sheet on
+  the far bank. Now a far-mask water block is not drawn while its document's lookup is building
+  (`wwCellWaterHeld`, BSShape::drawShapes), and the view repaints until it lands (`wwCellWaterWantsRepaint`). Not
+  held with WW_CELL_WATER_INFO_RED=off or WW_CELL_FARWATER_RED=nomask. Red: `WW_CELL_FARWATER_RED=early` (drawn
+  whole while it builds, the old path). SHORE2's bars re-run on this exe: judge 0 FAIL, nomask red 12 FAIL, swap 28
+  FAIL; with the mask FALSE 0 / FLOAT 0 / NOTCH 0 on every ring. Owed: the first frames after an open (pictures when
+  bungo asks).
+- src/wwswitchstages.inc regenerated (WW_LODL_MARK_CARRY_RED, WW_WATER_MARK_FIXTURE_RANK live; line shifts).
+
 ## CAMGATE1 (2026-10-30): the camera never shows an out-of-bounds or under-terrain view
 
 - bungo 10-30, watching a live hold window that showed the underside of the cells: "Stop placing the camera out of

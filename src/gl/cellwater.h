@@ -42,6 +42,12 @@ void wwCellWaterForget( const void * nif, int block );
 void wwCellWaterRemap( const void * nif, const WwBlockMap & m );
 //! True when `block` draws as water this frame (the row on, not pinned off, a registered water shape).
 bool wwCellWaterWanted( Scene * scene, int block );
+/*! Lane FARWATER1: `block` is far water whose dry mask cannot apply yet -- the .lodl lookup is still building
+ *  (WATERDATA1's thread, ~2 s at an open): it is not drawn at all, rather than drawn whole over the dry land the
+ *  mask would cut away (SHORE2's leftover). Red: WW_CELL_FARWATER_RED=early (drawn whole while it builds). */
+bool wwCellWaterHeld( Scene * scene, int block );
+//! Lane FARWATER1: a sheet was held since the last ask; the view repaints until the lookup lands.
+bool wwCellWaterWantsRepaint();
 //! Lane SUNCELL1: `block` is a registered water surface (row or not): it never casts a sun shadow, as in the game.
 bool wwCellWaterIsShape( const void * nif, int block );
 //! lane WATERLOOK1: the document registered any water shape (the ocean pass builds only then)
