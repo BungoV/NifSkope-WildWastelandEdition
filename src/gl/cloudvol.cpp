@@ -111,15 +111,17 @@ CvState & cs()
 		} else {
 			s.variety = QSettings().value( QLatin1StringView( kVarKey ), 0 ).toInt() != 0 ? 1 : 0;
 		}
-		/* lane CLOUDBAND1 (bungo 10-30 "the clouds have banding"): Cloud Accumulation, ships Off; a set is live (this
-		 * block re-reads on any WW_CLOUDVOL* move). On: blue noise step offsets and the fresh march accumulated into the
-		 * clamped history (cloud_march_a / cloud_fly_a / cloud_resolve_a); Off draws the old programs unchanged. */
-		const QString a = wwEnvStr( "WW_CLOUDVOL_ACCUM" ).trimmed().toLower();
-		s.accum = ( a == QLatin1StringView( "1" ) || a == QLatin1StringView( "on" ) ) ? 1 : 0;
+		/* lane CLOUDBAND1 (bungo 10-30 "the clouds have banding"): Cloud Accumulation; a set is live (this block re-reads
+		 * on any WW_CLOUDVOL* move). On: blue noise step offsets and the fresh march accumulated into the clamped history
+		 * (cloud_march_a / cloud_fly_a / cloud_resolve_a); Off draws the old programs unchanged.
+		 * lane CLOUDBAND2: the DEFAULT (harness runs too); WW_CLOUDVOL_ACCUM=0 / off is the old path, kept as the red. */
+		const QByteArray a = wwEnvStr( "WW_CLOUDVOL_ACCUM" ).trimmed().toLower().toLatin1();
+		s.accum = V::defaultOnSwitch( a.constData() ) ? 1 : 0;
 		/* lane CLOUDBAND1 (b), RDR2's darker sky light inside thick cloud: the march's ambient through the column above
-		 * (cloud_march_step.glsl cvAmbDark; gate tests/spells/cloudamb_check.py), ships Off, live. Off: the height ramp. */
-		const QString ad = wwEnvStr( "WW_CLOUDVOL_AMBDARK" ).trimmed().toLower();
-		s.ambDark = ( ad == QLatin1StringView( "1" ) || ad == QLatin1StringView( "on" ) ) ? 1 : 0;
+		 * (cloud_march_step.glsl cvAmbDark; gate tests/spells/cloudamb_check.py), live. Off: the height ramp.
+		 * lane CLOUDBAND2: the DEFAULT; WW_CLOUDVOL_AMBDARK=0 / off is the old ramp, kept as the red (as is RED=flatamb). */
+		const QByteArray ad = wwEnvStr( "WW_CLOUDVOL_AMBDARK" ).trimmed().toLower().toLatin1();
+		s.ambDark = V::defaultOnSwitch( ad.constData() ) ? 1 : 0;
 	}
 	return s;
 }
@@ -1141,9 +1143,13 @@ bool wwCloudVolDraw( Scene * scene, const WwCloudVolView & view, QStringList & d
 			reds += QStringLiteral( ",RED=ign" );
 		reds += QStringLiteral( ",accum=%1%2" ).arg( double( d.accAlpha ), 0, 'f', 3 )
 			.arg( g.blue ? QString() : QStringLiteral( " (no blue noise: IGN)" ) );
+	} else {
+		reds += QStringLiteral( ",RED=accumoff" );	// lane CLOUDBAND2: the old path is the red now (WW_CLOUDVOL_ACCUM=0)
 	}
-	if ( d.ambDark )	// lane CLOUDBAND1 (b): the echo a row's notes need (absent when Off)
+	if ( d.ambDark )	// lane CLOUDBAND1 (b): the echo a row's notes need
 		reds += red( "flatamb" ) ? QStringLiteral( ",RED=flatamb" ) : QStringLiteral( ",ambdark=column" );
+	else
+		reds += QStringLiteral( ",RED=ambdarkoff" );	// lane CLOUDBAND2: the old ramp is the red (WW_CLOUDVOL_AMBDARK=0)
 	// lane CLOUD2C: clip = which scene depth ends the march (last = the last paint's, this = this paint's, after the scene)
 	const QString clip = sceneOn ? QStringLiteral( "last" ) : g.redo ? QStringLiteral( "this" ) : QStringLiteral( "none" );
 	s.last = ok ? QStringLiteral( "volclouds:%1(hist=%2x%3,march=%4x%5,steps=%6,taps=%7,key=%8,map=%9,mem=%10MB,clip=%11,"

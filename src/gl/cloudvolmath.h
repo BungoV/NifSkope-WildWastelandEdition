@@ -270,6 +270,28 @@ inline float accumAlpha( long long cycles )
 	return 1.0f / float( std::min( std::max( cycles, 0LL ) + 1, static_cast<long long>( kAccumN ) ) );
 }
 
+/* lane CLOUDBAND2 (manager 10-30: bungo's rule, a code choice is never handed to him): Cloud Accumulation
+ * (WW_CLOUDVOL_ACCUM) and the ambient through the column above (WW_CLOUDVOL_AMBDARK) are the DEFAULT. A switch's value
+ * (trimmed, lower case) turns it off only as "0", "off", "false" or "no" (the old path, kept as the red); unset, empty
+ * or anything else is on. cloudvol.cpp cs() reads both through this; tests/cloudband/cloudband_dump.cpp prints it. */
+inline bool defaultOnSwitch( const char * v )
+{
+	if ( !v )
+		return true;
+	static const char * const kOff[4] = { "0", "off", "false", "no" };
+	for ( const char * off : kOff ) {
+		const char * a = v;
+		const char * b = off;
+		while ( *a && *b && *a == *b ) {
+			a++;
+			b++;
+		}
+		if ( !*a && !*b )
+			return false;
+	}
+	return true;
+}
+
 inline float readerWindKm( double drawnSecs, bool red )
 {
 	return red ? 0.0f : windKm( drawnSecs );
