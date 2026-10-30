@@ -184,6 +184,7 @@ HEADERS += \
 	src/gl/BSMesh.h \
 	src/gl/bsshape.h \
 	src/gl/controllers.h \
+	src/gl/psyslive.h \
 	src/gl/glcontext.hpp \
 	src/gl/glcontroller.h \
 	src/gl/glmarker.h \
