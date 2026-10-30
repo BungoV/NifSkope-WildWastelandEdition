@@ -5,14 +5,19 @@
  *   ... -DCAMBOUNDS_RED_FREEZE   (lane CAMGATE2) CAMGATE1's frozen view, the camera state left where it was refused:
  *                                checks "putback", "nextinput", "hold", "homeput", "roomkeep" must FAIL
  *   ... -DCAMBOUNDS_RED_INTERIOR (lane CAMGATE2) interiors not judged: "roomout", "roombelow", "roomkeep" must FAIL
+ *   ... -DCAMBOUNDS_RED_LOOSEBOX (lane CAMGATE3) CAMGATE2's one box of the origins: "clumps", "setboxes", "setgap",
+ *                                "sethall", "setmarker" must FAIL; on a real fixture "realin" / "realout" / "realtwin"
  *   cambounds_test --land <33 lines of 33 heights> <cx> <cy> <points file: x y per line>
  *       prints "x y ground" per point (the twin check against notes/camgate1/tools/camgate2.py ground())
- *   cambounds_test --room <points file: x y z per line, optional "# coc x y z">
- *       (lane CAMGATE2) a real interior's placements (notes/fix1030b/camgate2/tools/interior_census.py --dump): the
- *       room holds the COC marker and the box centre, refuses an eye one margin past each face; rc 0 / 1 */
+ *   cambounds_test --room <fixture>
+ *       (lane CAMGATE2) a real interior's placements (notes/fix1030b/camgate2/tools/interior_census.py --dump);
+ *       (lane CAMGATE3) or a box-set fixture (notes/fix1030b/camgate3/tools/mk_fixtures.py, format at roomMode): the set
+ *       holds the spawn, the navmesh, the room corners and the lane paths, refuses the void and the outside; rc 0 / 1 */
 #define CAMBOUNDS_PURE
 #include "cellcambounds.h"
 
+#include <array>
+#include <cctype>
 #include <cstdio>
 #include <cstring>
 #include <fstream>
@@ -107,49 +112,192 @@ struct ToyOps
 	}
 };
 
+/* lane CAMGATE3: a real interior through the box set (WwCamBounds::roomSetOf, the code cellCamBoundsKeep runs). Lines:
+ *   x y z                                     (CAMGATE2 fixtures) a placement's origin
+ *   r x y z rx ry rz s [b lx ly lz hx hy hz]  a placement: origin, rotation, scale, its base's OBND
+ *   m x y z rx ry rz s hx hy hz               a RoomMarker / PortalMarker (XPRM half extents)
+ *   # coc x y z                               the spawn eye (always in bounds)
+ *   in x y z / out x y z                      must be in bounds / refused (notes/fix1030b/camgate3/tools/mk_fixtures.py)
+ *   # expect boxes N                          the offline twin's box count (room_census.py tight_boxes) */
 static int roomMode( const char * file )
 {
 	std::ifstream f( file );
 	if ( !f )
 		return 2;
-	Room r;
+	std::vector<Placed> P;
+	std::vector<Room> marks;
+	std::vector<std::array<double, 3>> ins, outs;
 	bool haveCoc = false;
 	double coc[3] = { 0, 0, 0 };
-	int n = 0;
+	int expect = -1;
 	std::string line;
 	while ( std::getline( f, line ) ) {
 		std::istringstream s( line );
+		std::string tag;
 		if ( line.rfind( "# coc", 0 ) == 0 ) {
 			std::string h, c;
 			s >> h >> c >> coc[0] >> coc[1] >> coc[2];
 			haveCoc = true;
 			continue;
 		}
-		double x, y, z;
-		if ( s >> x >> y >> z ) {
-			r.add( x, y, z );
-			n++;
+		if ( line.rfind( "# expect boxes", 0 ) == 0 ) {
+			std::string h, a, b;
+			s >> h >> a >> b >> expect;
+			continue;
+		}
+		if ( line.empty() || line[0] == '#' )
+			continue;
+		if ( !std::isalpha( (unsigned char) line[0] ) ) {	// CAMGATE2: an origin
+			Placed p;
+			if ( s >> p.pos[0] >> p.pos[1] >> p.pos[2] )
+				P.push_back( p );
+			continue;
+		}
+		s >> tag;
+		double v[16];
+		int n = 0;
+		std::string b;
+		if ( tag == "r" ) {
+			for ( ; n < 7 && s >> v[n]; n++ ) {}
+			if ( n < 7 )
+				continue;
+			Placed p;
+			for ( int k = 0; k < 3; k++ )
+				p.pos[k] = v[k];
+			if ( s >> b && b == "b" ) {
+				double o[6];
+				int m = 0;
+				for ( ; m < 6 && s >> o[m]; m++ ) {}
+				if ( m == 6 )
+					p.box = obndWorldBox( v, v + 3, v[6], o, o + 3 );
+			}
+			P.push_back( p );
+		} else if ( tag == "m" ) {
+			for ( ; n < 10 && s >> v[n]; n++ ) {}
+			if ( n == 10 )
+				marks.push_back( markerBox( v, v + 3, v[6], v + 7 ) );
+		} else if ( tag == "in" || tag == "out" ) {
+			std::array<double, 3> q;
+			if ( s >> q[0] >> q[1] >> q[2] )
+				( tag == "in" ? ins : outs ).push_back( q );
 		}
 	}
-	r.grow( kRoomMargin );
+	RoomSet set = roomSetOf( P, marks );
+	const size_t before = set.boxes.size();
 	if ( haveCoc )
-		r.include( coc[0], coc[1], coc[2], kRoomMargin );
-	std::printf( "room %s: %d placements, box %.0f,%.0f,%.0f .. %.0f,%.0f,%.0f\n", file, n, r.lo[0], r.lo[1], r.lo[2], r.hi[0],
-		r.hi[1], r.hi[2] );
-	const double c[3] = { 0.5 * ( r.lo[0] + r.hi[0] ), 0.5 * ( r.lo[1] + r.hi[1] ), 0.5 * ( r.lo[2] + r.hi[2] ) };
-	check( "realcentre", judgeRoom( r, c[0], c[1], c[2] ) == Verdict::Ok, "the box centre is in the room" );
+		set.include( coc[0], coc[1], coc[2], kRoomMargin );
+	const Room u = set.bound();
+	std::printf( "room %s: %zu placements, %zu markers, %zu boxes (%d clumps) within %.0f,%.0f,%.0f .. %.0f,%.0f,%.0f\n", file,
+		P.size(), marks.size(), before, set.clumps, u.lo[0], u.lo[1], u.lo[2], u.hi[0], u.hi[1], u.hi[2] );
+	if ( expect >= 0 ) {
+		char what[96];
+		std::snprintf( what, sizeof what, "%zu boxes = the offline twin's %d (room_census.py)", before, expect );
+		check( "realtwin", int( before ) == expect, what );
+	}
+	if ( set.mainBox >= 0 ) {
+		const Room & m = set.boxes[size_t( set.mainBox )];
+		check( "realcentre", judgeRoomSet( set, 0.5 * ( m.lo[0] + m.hi[0] ), 0.5 * ( m.lo[1] + m.hi[1] ), 0.5 * ( m.lo[2] + m.hi[2] ) )
+			== Verdict::Ok, "the biggest clump's box centre (the home with no spawn) is in bounds" );
+	}
 	if ( haveCoc )
-		check( "realcoc", judgeRoom( r, coc[0], coc[1], coc[2] ) == Verdict::Ok, "the COC marker (the open's spawn) is in the room" );
+		check( "realcoc", judgeRoomSet( set, coc[0], coc[1], coc[2] ) == Verdict::Ok, "the spawn (COC marker / door arrival) is in bounds" );
+	int inBad = 0, outBad = 0;
+	for ( const auto & q : ins )
+		inBad += judgeRoomSet( set, q[0], q[1], q[2] ) != Verdict::Ok;
+	for ( const auto & q : outs )
+		outBad += judgeRoomSet( set, q[0], q[1], q[2] ) != Verdict::OutsideRoom;
+	if ( !ins.empty() ) {
+		char what[128];
+		std::snprintf( what, sizeof what, "%zu points of the real interior (navmesh, room corners, spawns, lane paths): %d refused",
+			ins.size(), inBad );
+		check( "realin", inBad == 0, what );
+	}
+	if ( !outs.empty() ) {
+		char what[128];
+		std::snprintf( what, sizeof what, "%zu void / outside points (gaps between clumps, a path shot from outside): %d let through",
+			outs.size(), outBad );
+		check( "realout", outBad == 0, what );
+	}
 	for ( int k = 0; k < 3; k++ )
 		for ( int sgn = -1; sgn <= 1; sgn += 2 ) {
-			double e[3] = { c[0], c[1], c[2] };
-			e[k] = ( sgn < 0 ? r.lo[k] : r.hi[k] ) + sgn * kRoomMargin;
+			double e[3] = { 0.5 * ( u.lo[0] + u.hi[0] ), 0.5 * ( u.lo[1] + u.hi[1] ), 0.5 * ( u.lo[2] + u.hi[2] ) };
+			e[k] = ( sgn < 0 ? u.lo[k] : u.hi[k] ) + sgn * kRoomMargin;
 			char what[96];
-			std::snprintf( what, sizeof what, "one margin past the %s%c face: refused", sgn < 0 ? "-" : "+", "xyz"[k] );
-			check( "realface", judgeRoom( r, e[0], e[1], e[2] ) == Verdict::OutsideRoom, what );
+			std::snprintf( what, sizeof what, "one margin past the set's %s%c face: refused", sgn < 0 ? "-" : "+", "xyz"[k] );
+			check( "realface", judgeRoomSet( set, e[0], e[1], e[2] ) == Verdict::OutsideRoom, what );
 		}
 	std::printf( "%d checks, %d failures\n%s\n", g_checks, g_fail, g_fail ? "FAIL" : "PASS" );
 	return g_fail ? 1 : 0;
+}
+
+// ---- lane CAMGATE3: the box set on synthetic data (each check names the red that must fail it)
+static void setChecks()
+{
+	const double PI = 3.14159265358979323846;
+	{
+		// fromEuler(-rot), yaw +90 degrees: local (x, y) -> world (y, -x) (niftypes.cpp Matrix::fromEuler)
+		const double pos[3] = { 1000, 2000, 0 }, rot[3] = { 0, 0, PI / 2 }, lo[3] = { -100, -10, 0 }, hi[3] = { 300, 10, 50 };
+		const Room b = obndWorldBox( pos, rot, 2.0, lo, hi );
+		check( "obndrot", std::fabs( b.lo[0] - 980 ) < 1e-6 && std::fabs( b.hi[0] - 1020 ) < 1e-6 && std::fabs( b.lo[1] - 1400 ) < 1e-6
+			&& std::fabs( b.hi[1] - 2200 ) < 1e-6 && std::fabs( b.lo[2] ) < 1e-6 && std::fabs( b.hi[2] - 100 ) < 1e-6,
+			"an OBND turned 90 degrees and scaled 2: x 980..1020, y 1400..2200, z 0..100" );
+		const double half[3] = { 100, 10, 50 };
+		const Room m = markerBox( pos, rot, 1.0, half );
+		check( "markerrot", std::fabs( ( m.hi[0] - m.lo[0] ) - 20 ) < 1e-6 && std::fabs( ( m.hi[1] - m.lo[1] ) - 200 ) < 1e-6,
+			"a room marker turned 90 degrees: its long axis lies along y" );
+	}
+	// two buildings 9000 apart (one clump each, the far one a single crate) and a long hall mesh whose origin is at
+	// its west end (its OBND reaches 2600 east)
+	std::vector<Placed> P;
+	for ( int i = 0; i < 40; i++ ) {
+		Placed p;
+		p.pos[0] = ( i % 8 ) * 256.0;
+		p.pos[1] = ( i / 8 ) * 256.0;
+		p.pos[2] = 0.0;
+		P.push_back( p );
+	}
+	Placed hall;
+	hall.pos[0] = 0;
+	hall.pos[1] = -512;
+	{
+		const double rot[3] = { 0, 0, 0 }, lo[3] = { 0, -128, 0 }, hi[3] = { 4600, 128, 400 };
+		hall.box = obndWorldBox( hall.pos, rot, 1.0, lo, hi );
+	}
+	P.push_back( hall );
+	Placed crate;
+	crate.pos[0] = 9000;
+	crate.pos[1] = 0;
+	P.push_back( crate );
+	std::vector<Room> marks;
+	{
+		const double pos[3] = { 900, 500, 300 }, rot[3] = { 0, 0, 0 }, half[3] = { 900, 600, 2500 };	// a tall stair room
+		marks.push_back( markerBox( pos, rot, 1.0, half ) );
+	}
+	const RoomSet s = roomSetOf( P, marks );
+	check( "clumps", s.clumps == 2, "two clumps: the building (with the hall's origin) and the far crate (red loosebox: 1)" );
+	check( "setboxes", s.boxes.size() == 3, "three boxes: two clumps + one room marker (red loosebox: 1)" );
+	check( "setin", judgeRoomSet( s, 1000, 600, 120 ) == Verdict::Ok, "an eye inside the building: ok" );
+	check( "setcrate", judgeRoomSet( s, 9000, 100, 120 ) == Verdict::Ok, "an eye at the far crate: ok (its own box)" );
+	check( "setgap", judgeRoomSet( s, 6000, 600, 120 ) == Verdict::OutsideRoom,
+		"an eye in the void between the building and the crate: refused (red loosebox: inside the one box)" );
+	check( "sethall", judgeRoomSet( s, 4400, -1100, 120 ) == Verdict::Ok,
+		"an eye beside the far end of the hall mesh, 4400 past its origin: ok (red loosebox: refused)" );
+	check( "setmarker", judgeRoomSet( s, 900, 500, 2600 ) == Verdict::Ok,
+		"an eye high in the stair room marker, 2600 above every origin: ok (red loosebox: refused)" );
+	check( "setbelow", judgeRoomSet( s, 1000, 600, -3000 ) == Verdict::OutsideRoom, "an eye far below everything: refused" );
+	RoomSet h = s;
+	h.include( 6000, 600, 120, kRoomMargin );
+	check( "setspawn", judgeRoomSet( h, 6000, 600, 120 ) == Verdict::Ok && judgeRoomSet( h, 6400, 600, 120 ) == Verdict::Ok
+		&& judgeRoomSet( h, 7000, 600, 120 ) == Verdict::OutsideRoom, "a spawn in the gap gets its own box (+ margin), no more" );
+	check( "setempty", judgeRoomSet( RoomSet(), 1e6, 1e6, 1e6 ) == Verdict::Ok, "an empty set judges nothing" );
+	std::vector<Placed> chain;
+	for ( int i = 0; i < 12; i++ ) {
+		Placed p;
+		p.pos[0] = -5000.0 + i * 1000.0;	// 1000 apart: always in the same or the next 1024 voxel -> one clump
+		p.pos[1] = -1.0;
+		chain.push_back( p );
+	}
+	check( "clumpchain", clumpsOf( chain ).size() == 1, "origins 1000 apart along a corridor (crossing 0, negative cells): one clump" );
 }
 
 int main( int argc, char ** argv )
@@ -355,6 +503,7 @@ int main( int argc, char ** argv )
 		check( "roomkeep", refusedOnce && sameS( cam, lastIn ) && judgeRoom( r, viewOf( cam ).e[0], viewOf( cam ).e[1], viewOf( cam ).e[2] ) == Verdict::Ok,
 			"flying east through the wall: refused, the camera state put back inside the room" );
 	}
+	setChecks();	// lane CAMGATE3
 	std::printf( "%d checks, %d failures\n%s\n", g_checks, g_fail, g_fail ? "FAIL" : "PASS" );
 	return g_fail ? 1 : 0;
 }

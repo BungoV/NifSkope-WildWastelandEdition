@@ -1,5 +1,33 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## CAMGATE3 (2026-10-30, FIX1030B round 2): an interior's camera bounds are a set of boxes built from what is drawn
+
+- CAMGATE2 judged an interior's camera by ONE axis box of the placements' ORIGINS + 512. Measured offline over all
+  1276 interiors of Fallout4.esm + DLCNukaWorld.esm (notes/fix1030b/camgate3, an own GRUP walk with navmesh NVNM,
+  XPRM, XTEL and the bases' OBND): that box was loose (outlier refs: CambridgePolymerLabs01 34.6 km, Vault95 36.1 km
+  across) and also **not conservative**: big meshes reach past their origin + 512, so navmesh vertices lay outside it in
+  43 cells (worst 5312 u) and the game's own RoomMarker corners in 24 (Vault111Cryo's stair room 3168 u above): views
+  inside the real interior were refused.
+- **The rule now (src/cellcambounds.h WwCamBounds::roomSetOf, cellcambounds.cpp cellCamBoundsKeep), ON by default:**
+  clumps of placement origins (26-touching 1024 u voxels); one box per clump = its origins + every placement's OBND
+  world box (placed with fromEuler(-rot), as the cell view places it; sky / effects cards left out, as the spawn's
+  blockers do); one box per RoomMarker / PortalMarker (XPRM, cellPrimAxes); the spawn always inside (its own box when
+  no box holds it); each + 512. An eye is in bounds in ANY box: the void between a building and its outlier clumps is
+  refused, the edge of every mesh is not. No spawn: the home is the biggest clump's box centre. Notes once per open:
+  `camera bounds: interior <EDID> box set: N boxes (C clumps, B placement boxes, M room/portal markers) within ...`.
+- **Red** `WW_CAMERA_BOUNDS_RED=loosebox` (live, the comma list of CAMGATE2): CAMGATE2's one box judges again.
+- **Gates (offline):** census (tools/census_main.py, nav_miss.py, union_vol.py): every navmesh vertex within 512 of any
+  placement (and at eye height above it), every room / portal corner, every COC marker and door arrival, and the 16
+  interior paths the lanes shot are inside the set; the navmesh left out is 974 "island" points in 43 cells, each
+  farther than 512 from every placement (a stray 4-vertex quad at 1940..2410, 1974..2444, z 256 is copied into ~25
+  cells). The set is under half today's volume in 45 cells (under a quarter in 23); it grows by p50 x1.19 elsewhere
+  (the meshes' real extent). shotpass1's mus_cam.path (rows.txt mus_gi_*: a Memory Den eye opened in
+  ConcordMuseum01, 20 km out) is refused by both rules. Unit `bash tests/cambounds/run.sh <out> [<fixtures dir>]`:
+  green 46/46 + the real fixture tests/cambounds/fixtures/room_DmndSolomonsHouse01.txt; red CAMBOUNDS_RED_LOOSEBOX
+  fails clumps, setboxes, setgap, sethall, setmarker, setspawn; on 9 real interiors (notes fixtures) the C++ set's box
+  count equals the Python twin's in all 9, and RED_LOOSEBOX fails 7 of them (Vault111Cryo: realin, its room corners).
+- Owed: pictures when bungo asks (an interior row with the set's notes line; the `loosebox` red live).
+
 ## SHADOWSHIMMER1 (2026-10-30): sun shadows stand still (no crawl, no shimmer on a turn, a tight contact)
 
 - bungo 10-29: "shadows move for some reason, yet they shouldn't, the leaves are totally static"; SHADOWBAND1's
