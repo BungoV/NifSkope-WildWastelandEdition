@@ -48,6 +48,7 @@ BSD License - see nifskope.h
 #include "cellaodecal.h"		// lane AODECAL1: baked AO decals under big movable statics
 #include "cellstream.h"		// lane CELLSTREAM1: the cells round the camera
 #include "cellspawn.h"		// lane CELLSPAWN1: where the camera starts
+#include "cellcambounds.h"	// lane CAMGATE1: the block and the ground the camera is judged against
 
 #include <limits>
 
@@ -2591,17 +2592,21 @@ void liveKeep( NifModel * nif, const CellSceneSpec & spec, const std::shared_ptr
 	d.tailEnd = nif->getBlockCount();
 	d.farSeen = d.probesSeen = d.terrSeen = wwSwitchGen();
 	liveDocs()[nif] = std::move( d );
+	cellCamBoundsKeep( nif, world, spec.cx, spec.cy, spec.n, spec.interior, streamed );	// lane CAMGATE1
 	static QSet<const void *> hooked;
 	if ( hooked.contains( nif ) )
 		return;
 	hooked.insert( nif );
 	const NifModel * key = nif;
 	QObject::connect( nif, &QAbstractItemModel::modelReset, nif, [nif]() {
-		if ( nif->getBlockCount() == 0 )
+		if ( nif->getBlockCount() == 0 ) {
 			liveForget( nif );
+			cellCamBoundsForget( nif );	// lane CAMGATE1: a plain NIF in this tab is not judged against old cells
+		}
 	} );
 	QObject::connect( nif, &QObject::destroyed, [key]() {
 		liveForget( key );
+		cellCamBoundsForget( key );
 		hooked.remove( key );
 	} );
 }
@@ -3018,6 +3023,7 @@ static bool cellBuild( NifModel * nif, const CellSceneSpec & specAsked, CellChun
 		spawnXY[0] = spawn.eye[0];
 		spawnXY[1] = spawn.eye[1];
 		cellSpawnPublish( nif, spawn );
+		cellCamBoundsHome( nif, spawn.valid, spawn.eye, spawn.yawDeg );	// lane CAMGATE1: where a refused first view goes
 		spawnNote += QStringLiteral( "  %1\n" ).arg( spawn.line() );
 	}
 

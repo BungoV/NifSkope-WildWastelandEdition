@@ -33,6 +33,7 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include "glview.h"
 #include "wwswitch.h"	// lane TESTDRIVER1: the WW_* switch store
 #include "cellspeed.h"
+#include "cellcambounds.h"	// lane CAMGATE1: the camera never shows an out-of-bounds or under-terrain view
 #include "cellstream.h"		// lane CELLSTREAM1: the cells round the camera
 #include "celltexahead.h"
 
@@ -7665,7 +7666,105 @@ void GLView::wwSetPathCamera( bool on, const Vector3 & eye, const Vector3 & at, 
 	wwPathFov = fov;
 }
 
+/* lane CAMGATE1 (bungo 10-30: "Stop placing the camera out of bounds anywhere"): every reader of the view (paintGL, the
+ * shots, the path frames, the picks, the favorites) takes it through the bounds gate. A view whose eye is outside the
+ * loaded cells or under the terrain + 50 is refused: the last in-bounds view stays, or the cell's home before there is
+ * one (src/cellcambounds.h). In-bounds views come back unchanged (the same Transform, the same pixels). */
 Transform GLView::viewTransform() const
+{
+	return wwCameraBoundsGate( wwViewTransformRaw() );
+}
+
+// lane CAMGATE1: a level look along yawDeg (0 north = +y, 90 east = +x) from eye; rows = right, up, back (as the path's)
+static Transform wwCamLookYaw( const float eye[3], float yawDeg )
+{
+	const double a = double( yawDeg ) * M_PI / 180.0;
+	const double f[3] = { std::sin( a ), std::cos( a ), 0.0 };
+	const double r[3] = { f[1], -f[0], 0.0 };	// f x up(0,0,1)
+	const double u[3] = { 0.0, 0.0, 1.0 };
+	const double b[3] = { -f[0], -f[1], -f[2] };
+	const double * rows[3] = { r, u, b };
+	Transform vt;
+	for ( int i = 0; i < 3; i++ ) {
+		for ( int j = 0; j < 3; j++ )
+			vt.rotation( i, j ) = float( rows[i][j] );
+		vt.translation[i] = float( -( rows[i][0] * eye[0] + rows[i][1] * eye[1] + rows[i][2] * eye[2] ) );
+	}
+	return vt;
+}
+
+Transform GLView::wwCameraBoundsGate( const Transform & raw ) const
+{
+	const NifModel * nif = scene ? scene->nifModel : nullptr;
+	if ( !cellCamBoundsActive( nif ) ) {	// not an exterior cell document, or the red (WW_CAMERA_BOUNDS_RED=allow)
+		wwCamWhy.clear();
+		wwCamAskedValid = false;
+		return raw;
+	}
+	const quint64 gen = cellCamBoundsGen( nif );
+	if ( wwCamDoc != nif || wwCamDocGen != gen ) {	// a new open: the old document's last view is not this one's
+		wwCamDoc = nif;
+		wwCamDocGen = gen;
+		wwCamHaveGood = false;
+		wwCamAskedValid = false;
+		wwCamSaidKey.clear();
+	}
+	auto same = []( const Transform & p, const Transform & q ) {
+		for ( int i = 0; i < 3; i++ ) {
+			if ( p.translation[i] != q.translation[i] )
+				return false;
+			for ( int j = 0; j < 3; j++ )
+				if ( p.rotation( i, j ) != q.rotation( i, j ) )
+					return false;
+		}
+		return p.scale == q.scale;
+	};
+	if ( wwCamAskedValid && same( raw, wwCamAsked ) )
+		return wwCamGiven;
+	const Vector3 e = raw.rotation.inverted() * ( Vector3() - raw.translation );
+	QString why, key;
+	Transform given = raw;
+	if ( cellCamBoundsJudge( nif, e[0], e[1], e[2], &why, &key ) == WwCamBounds::Verdict::Ok ) {
+		wwCamGood = raw;
+		wwCamHaveGood = true;
+		wwCamWhy.clear();
+		wwCamSaidKey.clear();	// the next refusal is told again
+	} else {
+		QString kept;
+		float home[3];
+		float yaw = 0.0f;
+		if ( wwCamHaveGood ) {
+			given = wwCamGood;
+			kept = QStringLiteral( "kept the last in-bounds view" );
+		} else if ( cellCamBoundsHomeOf( nif, home, yaw ) ) {
+			given = wwCamLookYaw( home, yaw );
+			kept = QStringLiteral( "the cell's home: eye %1,%2,%3 yaw %4" ).arg( double( home[0] ), 0, 'f', 0 )
+				.arg( double( home[1] ), 0, 'f', 0 ).arg( double( home[2] ), 0, 'f', 0 ).arg( double( yaw ), 0, 'f', 1 );
+		} else {
+			kept = QStringLiteral( "no home pose: drawn as asked" );
+		}
+		wwCamWhy = why;
+		if ( key != wwCamSaidKey ) {
+			wwCamSaidKey = key;
+			qInfo().noquote() << QStringLiteral( "camera refused: %1 (%2)" ).arg( why, kept );
+		}
+	}
+	wwCamAsked = raw;
+	wwCamGiven = given;
+	wwCamAskedValid = true;
+	return given;
+}
+
+QString GLView::wwCameraBoundsEcho() const
+{
+	const NifModel * nif = scene ? scene->nifModel : nullptr;
+	if ( !cellCamBoundsActive( nif ) )
+		return cellCamBoundsRed() && nif ? QStringLiteral( "bounds off (red WW_CAMERA_BOUNDS_RED=allow)" ) : QString();
+	( void ) viewTransform();	// the verdict of the view as it stands now
+	return wwCamWhy.isEmpty() ? QStringLiteral( "bounds ok" ) : QStringLiteral( "bounds refused (%1)" ).arg( wwCamWhy );
+}
+
+Transform GLView::wwViewTransformRaw() const
 {
 	Transform vt;
 	if ( wwPathActive ) {

@@ -410,6 +410,7 @@ HEADERS += \
 	src/cellspeed.h \
 	src/cellstream.h \
 	src/cellspawn.h \
+	src/cellcambounds.h \
 	src/celltexahead.h \
 	src/cellmodelahead.h \
 	src/probealbedo.h \
@@ -757,6 +758,7 @@ SOURCES += \
 	src/cellspeed.cpp \
 	src/cellstream.cpp \
 	src/cellspawn.cpp \
+	src/cellcambounds.cpp \
 	src/cellstreamwalk.cpp \
 	src/wwsharedread.cpp \
 	src/celltexahead.cpp \

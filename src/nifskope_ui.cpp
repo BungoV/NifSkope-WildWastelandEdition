@@ -2443,6 +2443,8 @@ static void wwRenderPathRun( GLView * ogl, const QString & pathFile, const QStri
 				<< " | " << wwSunShadowSummary() << " | " << wwCellPostEcho() << " | " << wwCellBloomEcho()
 				// lane REDFIX1: the switch is live (read per draw) but its echo had no caller; print it per frame
 				<< ( wwLookOn( WwLook::LensFlares ) ? QStringLiteral( " | " ) + wwCellLensFlareEcho( ogl->getScene() ) : QString() )
+				// lane CAMGATE1: the bounds gate's word on this frame's view (the runner refuses a row with a refused frame)
+				<< [ogl]() { const QString b = ogl->wwCameraBoundsEcho(); return b.isEmpty() ? b : QStringLiteral( " | " ) + b; }()
 				<< "\n";
 	}
 	// lane PERF1: WW_RENDER_GPUMS=<frames> times that many repaints at the path's last camera (as the still shot does)

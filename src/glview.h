@@ -1074,6 +1074,10 @@ public:
 	//! Camera transform identical to the one paintGL uses (used by the UV
 	//! editor's Project From View)
 	Transform viewTransform() const;
+	//! lane CAMGATE1: the view as the camera state asks it (viewTransform() = this through the bounds gate,
+	//! src/cellcambounds.h); and the gate's word on the last view asked ("ok", "refused (<why>)", empty: not judged)
+	Transform wwViewTransformRaw() const;
+	QString wwCameraBoundsEcho() const;
 	//! Project a world point to logical widget coordinates
 	bool worldToScreen( const Vector3 & w, QPointF & out ) const;
 private:
@@ -2037,6 +2041,13 @@ private:
 	bool wwPathActive = false;
 	Vector3 wwPathEye, wwPathAt;
 	float wwPathFov = 70.0f;
+	// lane CAMGATE1: the bounds gate's memo (viewTransform is const and asked several times a frame)
+	Transform wwCameraBoundsGate( const Transform & raw ) const;
+	mutable Transform wwCamGood, wwCamAsked, wwCamGiven;
+	mutable bool wwCamHaveGood = false, wwCamAskedValid = false;
+	mutable const void * wwCamDoc = nullptr;
+	mutable quint64 wwCamDocGen = 0;
+	mutable QString wwCamWhy, wwCamSaidKey;
 	unsigned char updatePending = 0;
 	//! Extra repaints scheduled after a scene compile: the first frame after
 	//! a compile renders the streaming line geometry (grid / origin axes)
