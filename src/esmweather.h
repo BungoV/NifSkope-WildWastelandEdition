@@ -290,6 +290,12 @@ struct WwWeatherData
 	// byte 10, Thunder/Lightning Frequency; the cloud type reads them (gl/cloudmath.h lowTypeOf)
 	quint8 classFlags = 0, thunderFreq = 0;
 	bool hasClass = false;
+	/* lane CLOUD6f: the lightning (gl/cloudlightning.h): DATA bytes 8 / 9 (Thunder/Lightning Begin Fade In / End Fade
+	 * Out, /255 of a change), 12..14 (Lightning Color); thunderSounds = the SNAM sounds of type 3 (thunder): a weather with
+	 * one storms (15 of 107 vanilla; the thunder byte is 133..255 in all 107 and tells nothing apart) */
+	quint8 thunderFadeIn = 0, thunderFadeOut = 0;
+	quint8 lightningRgb[3] = {};
+	int thunderSounds = 0;
 	quint32 imsp[8] = {};	// IMSP: the IMGS per ToD (mapped FormIDs; 4-slot records mapped to 8)
 	float skyScale[8] = { 1, 1, 1, 1, 1, 1, 1, 1 };	// IMGS HNAM[7] per ToD (1.0 where absent)
 	int skyScaleFound = 0;	// how many ToD slots had an IMGS with HNAM

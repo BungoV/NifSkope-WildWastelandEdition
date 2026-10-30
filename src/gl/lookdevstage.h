@@ -103,6 +103,11 @@ bool wwLookdevWeatherClass( unsigned & flags, unsigned & thunder );
 /*! lane WEATHERLOOK1 B: while a change blends, the weather left behind: its load-order FormID, EditorID, the plugin
  *  that defines it, its class flags (DATA byte 11) and the NEW weather's share pct; false when no change runs */
 bool wwLookdevWeatherLeaving( quint32 & formID, QString & edid, QString & owner, unsigned & classFlags, float & pct );
+/*! lane CLOUD6f: the storm's lightning for the volume clouds (gl/cloudlightning.h): share = how much of a storm the sky is
+ *  (1 in a storm weather, 0 otherwise, the fade bytes' ramps during a change), rgb = its Lightning Color (DATA 12..14,
+ *  0..1; the storm side's while a change blends), seed = the storm weather's FormID (the strikes' draws); false when
+ *  no weather is loaded */
+bool wwLookdevLightning( float & share, float rgb[3], quint32 & seed );
 void wwLookdevSetWeather( const QString & key );
 double wwLookdevHour();
 void wwLookdevClimateTnam( unsigned char out[4] );	// lane GAPLOOK1: the climate's TNAM sunrise/sunset bytes (10 min units)
