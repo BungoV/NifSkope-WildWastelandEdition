@@ -68,6 +68,50 @@
   checker) so the measurement can be repeated. Test: `bash tests/cloudedge/run.sh <scratch>` = the refusal test (green:
   the refinement helps at its step count, its off arm equals the shipping march pixel for pixel, and loses at equal
   cost; red `--red off` must fail the edge gate).
+## FARWATER3 (2026-10-30, FIX1030C): the marking selftest's X2b and X1b hold on every river; F2 judges what is written
+
+FARWATER2's leftovers in `lodl <f> --water-mark-selftest` (src/watermark.cpp), measured on a fresh Commonwealth v4 bake
+with the selftest pinned to rivers 2, 3, 5, 7 and 10 (`WW_WATER_MARK_BODY`). Green on the selftest's own river (body 3):
+62 of 64, the two registered FAILs F2 and F5 p99 (was 61, X2b failing). Unit: `bash tests/farwater3/run.sh [exe] [out]`
+(0 FAIL; every red below FAILs; all four reds at once == main's ok/FAIL lines, 0 diff against FARWATER2's log of main).
+- **X2b (gate, body-independent):** "the one-point pin acts as a SOURCE" summed UNIT outward directions on a ring. The
+  pin leaves the reach upstream of it dead, and dead water's written direction is the writer's continuation, so that
+  arc pointed back in with and without the pin: 0.644 / 0.410 / 0.551 / 0.438 / -0.003 on bodies 2 / 3 / 5 / 7 / 10, bar
+  0.5 set on body 2. Now WATER6 section 6's own instrument: the solve's NET face flux out of the ring over the pin's
+  injection (new `WaterMarkDoc::ringFlux`): **1.000 on all five**; floor = the same point as an OUTLET pin, -0.13 ..
+  -0.86 (< 0). Printed beside it: the written words' speed-weighted (out - in) / (out + in), 0.884 .. 1.000 (body 7's
+  loop sends water out and back in). Red `WW_WATER_X2B_RED=unit` (the old gate): FAILS on body 3 (0.410).
+- **X1b, body 10 (code): the stroke now wins when it runs against the drain.** A stroke drawn from the mouth upstream
+  took its source from its own first end and its sink from the table's drain contact, both at the mouth; the rest of
+  the river under it lay dead (8 of 10 stroke points, speed nibble 0), and the authority rule never looked, because one
+  end was the stroke's (its unit-vector vote read -0.148 and was ignored). solveBody now asks unless BOTH ends are the
+  stroke's, and votes with the flow itself (velocity along the tangent over the summed speed: dead water's noise carries
+  no vote). Body 10: "the stroke won", agreement 0.982, X1b ok. Red `WW_WATER_STROKE_WINS_RED=old`: X1b FAILS on body 10.
+  The X1 axis on body 7 now wins too (its solved hash moved); on bodies 2, 3 and 5 the X1a hashes are main's.
+- **X1b, bodies 5 and 7 (gate):** the stroke's last third lies where the 4-bit speed nibble cannot see a weight: body 5
+  runs on past its drain contact (mid-river) into water the solve leaves slack by the writer's own rule; body 7 ends in
+  a pool at ~1/24 of the body mean. Both read 0.17 / 0.33 nibbles there in BOTH solves, x3 or not. X1b now reads the
+  solve's own unquantised speed (new `WaterMarkDoc::solvedSpeedAt`) over the stroke points on moving water (>= the
+  writer's slack line, 2 % of the mean) and compares last/first-third ratios: ok on 2 / 3 / 5 / 7 / 10 (1.07 / 1.04 /
+  1.05 / ~1.18 / 1.18 x the unweighted ratio; thin, because the weight's conductance boost slows the water its speed
+  multiplier speeds up). Red `WW_WATER_X1B_RED=nibble`: FAILS on bodies 5 and 7.
+- **F2 (gate) judges the WRITTEN word now**, through the writer's own code: the written-direction pass moved out of
+  solveBody unchanged into `waterWrittenDirection()` (byte-identical: all reds == main, the X1a hash unchanged), and F2
+  runs it on its island. The analytic cylinder was a reference no field drawn from the texel mask can meet: the exact
+  flow round the island's own staircase sits 8.3 / 15.5 deg (mean / max) off it (2x2 subcells; 9.1 / 17.2 at 4x4, 8.7 /
+  16.5 at 8x8, notes fix1030c/farwater3/tools/finesolve.py). F2 now judges against that staircase flow (solved in the
+  selftest at 2x2 subcells, 0.05 s): the raw solve meets the bar (4.16 / 8.08), **the written word does not (17.85 /
+  45.79)**: the bank continuation and the 8-pass low-pass wash out the turning flow next to the stagnation points.
+  Registered FAIL, now attributed to the writer. Red `WW_WATER_F2_RED=raw` (the old line, raw vs cylinder 12.01 / 22.40).
+- **F5 p99 < 5 (not changed; not a writer defect):** the low-pass is the only lever and buys p99 with F2: 8 passes
+  8.44 / 14.06 / 9.84 / 7.03 on bodies 3 / 5 / 7 / 10, 32 passes 5.62 / 8.44 / 5.62 / 4.22, 128 passes still 5.62 on body
+  5 while the island's written bank error grows to 31 deg. The exact flow of each river's own mask has p99 28 / 48 / 30 /
+  24 deg; the written field is already 3-6x smoother than the flow of its geometry. A numpy twin of the writer
+  (byte-exact on 5 dumped fields) measured it. The bar stays registered; it is a look call (pictures).
+- `WW_WATER_FIELD_DUMP=<dir>`: a diagnostic dump of every solved field (raw velocity, rhs, written direction) for that
+  twin. tests/farwater2/run.sh: its green now expects 2 FAILs (X2b passes). Stage table regenerated (lines only + the
+  five keys). Owed: nothing visual changes for an unmarked file; a stroke drawn from a mouth upstream now flows as drawn
+  (pictures when bungo asks).
 
 ## CLOUDBAND2 (2026-10-30, CODE1030): Cloud Accumulation and the column ambient are the default
 

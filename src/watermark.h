@@ -371,6 +371,17 @@ public:
 	 *  the picture and the file can never disagree. */
 	quint16 flowWordAt( int px, int py ) const;
 
+	/*! Lane FARWATER3 (selftest gates X1b, X2b): the last solve's own numbers,
+	 *  read back unquantised.  `solvedSpeedAt` is the solve's speed at a plane
+	 *  texel over its body's mean -- what the speed nibble holds 8x, before the
+	 *  rounding and the 0..15 clamp -- and -1 where no solved field holds it.
+	 *  `ringFlux` is the solved face flux of body `id` out of the circle of
+	 *  radius `r` world units about (wx, wy): `net` = out - in and `gross` =
+	 *  out + in over the faces the circle cuts, in units of the solve's own
+	 *  injection (its sources sum to 1).  False when `id` has no solved field. */
+	double solvedSpeedAt( int px, int py ) const;
+	bool ringFlux( int id, double wx, double wy, double r, double & net, double & gross ) const;
+
 	//! One line per body, for the panel's list.
 	QString describeBody( int id ) const;
 
