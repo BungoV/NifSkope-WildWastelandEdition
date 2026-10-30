@@ -233,6 +233,13 @@ bool waterMarkCarryTake( const QString & path, WaterMarkCarry & carry, QString *
 /*! And put them into the freshly written `path`: re-mapped bodies, the strokes,
  *  the solve, the save. `note` is the census line either way. */
 bool waterMarkCarryPut( const QString & path, const WaterMarkCarry & carry, QString * note );
+/*! Lane FARWATER2: the re-bake carry line for the marking panel, read from
+ *  the files on disk. When a re-bake could not carry every mark it keeps the
+ *  old file as `<path>.premarks`; this re-runs that carry on `path` in memory
+ *  (nothing is saved) and returns the bake's own census line. Empty when no
+ *  .premarks sits beside the file (every mark was carried, or nothing was
+ *  marked). Red: WW_WATER_REBAKE_NOTE_RED=off (empty, the panel's old text). */
+QString waterMarkRebakeNote( const QString & path );
 
 /*! An open `.lodl` version-3 file, its body table, its strokes, and the solve.
  *
