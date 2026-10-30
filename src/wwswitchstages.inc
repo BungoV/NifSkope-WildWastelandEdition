@@ -977,6 +977,7 @@
 { "WW_PERF_TEST", 2, "src/nifskope.cpp:2707 NifSkope::NifSkope | constructor/startup of a window-lifetime object" },
 { "WW_PHYSICS_TEST", 2, "src/nifskope_ui.cpp:22263 NifSkope::createWindow | createWindow: picks which harness the window runs" },
 { "WW_PINNED_TEST", 2, "src/nifskope_ui.cpp:7304 NifSkope::createWindow | createWindow: picks which harness the window runs" },
+{ "WW_PLACE_VBOX", 0, "src/cellstreamwalk.cpp:166 placeVBox | re-read per frame or per call (a)" },
 { "WW_POSEDOCK_TEST", 2, "src/nifskope_ui.cpp:4979 NifSkope::createWindow | createWindow: picks which harness the window runs" },
 { "WW_POSEDRAW_TEST", 2, "src/nifskope_ui.cpp:5225 NifSkope::createWindow | createWindow: picks which harness the window runs" },
 { "WW_POSEEXTRAS_TEST", 2, "src/nifskope_ui.cpp:5411 NifSkope::createWindow | createWindow: picks which harness the window runs" },

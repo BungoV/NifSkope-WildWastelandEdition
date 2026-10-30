@@ -150,13 +150,42 @@ struct FarTrack
 	}
 };
 
+/* lane SKYSHARDS2: WW_PLACE_VBOX=x0,y0,x1,y1,zmin adds every WORLD vertex inside that XY box at or above zmin, of every
+ * shape ("W name id x y z") and of every far row ("J name id ref row x y z"), up to 400 a shape: what the cell view
+ * built over a footprint, vertex by vertex (tests/skyshards: the Concord sky shards sit 2,500-3,000 u over their ground) */
+struct PlaceVBox
+{
+	bool on = false;
+	float x0 = 0, y0 = 0, x1 = 0, y1 = 0, zmin = 0;
+	bool in( const Vector3 & p ) const { return on && p[0] >= x0 && p[0] <= x1 && p[1] >= y0 && p[1] <= y1 && p[2] >= zmin; }
+};
+
+PlaceVBox placeVBox()
+{
+	PlaceVBox b;
+	const QStringList f = wwEnvStr( "WW_PLACE_VBOX" ).split( QLatin1Char( ',' ), Qt::SkipEmptyParts );
+	if ( f.size() == 5 ) {
+		b.on = true;
+		b.x0 = f[0].toFloat();
+		b.y0 = f[1].toFloat();
+		b.x1 = f[2].toFloat();
+		b.y1 = f[3].toFloat();
+		b.zmin = f[4].toFloat();
+	}
+	return b;
+}
+
 // --place: world boxes, one line a far row / shape, plus the far terrain's vertices
 qint64 farPlaceDump( Scene * scene, NifModel * nif, QFile & f )
 {
 	QTextStream o( &f );
 	o.setRealNumberNotation( QTextStream::FixedNotation );
 	o.setRealNumberPrecision( 1 );
-	o << "# kind name id ref row x y zlo zhi upz drawn | S: kind name id - - xlo ylo zlo xhi yhi zhi drawn | V: name x y z\n";
+	o << "# kind name id ref row x y zlo zhi upz drawn | S: kind name id - - xlo ylo zlo xhi yhi zhi drawn | V: name x y z"
+		" | W: name id x y z | J: name id ref row x y z (WW_PLACE_VBOX)\n";
+	const PlaceVBox vb = placeVBox();
+	if ( vb.on )
+		o << "# vbox " << vb.x0 << ' ' << vb.y0 << ' ' << vb.x1 << ' ' << vb.y1 << " zmin " << vb.zmin << '\n';
 	qint64 lines = 0;
 	for ( Node * n : scene->nodes.list() ) {
 		Shape * sh = dynamic_cast<Shape *>( n );
@@ -206,6 +235,26 @@ qint64 farPlaceDump( Scene * scene, NifModel * nif, QFile & f )
 					o << "I " << name << ' ' << sh->id() << ' ' << QString::number( ref, 16 ) << ' ' << r << ' ' << at[0] << ' '
 					  << at[1] << ' ' << zlo << ' ' << zhi << ' ' << ( s > 0.0f ? w[10] / s : 0.0f ) << ' ' << ( hid ? 0 : 1 ) << '\n';
 					lines++;
+					// lane SKYSHARDS2: the row's own vertices over the footprint (the box test first: cheap rows skip)
+					if ( vb.on && zhi >= vb.zmin && at[0] >= vb.x0 - 8192.0f && at[0] <= vb.x1 + 8192.0f
+						&& at[1] >= vb.y0 - 8192.0f && at[1] <= vb.y1 + 8192.0f ) {
+						int said = 0;
+						for ( quint32 i = c.firstIndex; i < c.firstIndex + c.count && i < quint32( d->ebo.size() ) && said < 400; i++ ) {
+							const qint64 vi = qint64( d->ebo[qsizetype( i )] ) + c.baseVertex;
+							if ( vi < 0 || ( vi + 1 ) * 36 > d->vbo.size() )
+								continue;
+							float p[3];
+							std::memcpy( p, d->vbo.constData() + vi * 36, 12 );
+							const Vector3 wp = W * Vector3( w[0] * p[0] + w[1] * p[1] + w[2] * p[2] + w[3],
+								w[4] * p[0] + w[5] * p[1] + w[6] * p[2] + w[7], w[8] * p[0] + w[9] * p[1] + w[10] * p[2] + w[11] );
+							if ( !vb.in( wp ) )
+								continue;
+							o << "J " << name << ' ' << sh->id() << ' ' << QString::number( ref, 16 ) << ' ' << r << ' ' << wp[0] << ' '
+							  << wp[1] << ' ' << wp[2] << '\n';
+							said++;
+							lines++;
+						}
+					}
 				}
 			}
 			continue;
@@ -220,6 +269,7 @@ qint64 farPlaceDump( Scene * scene, NifModel * nif, QFile & f )
 			continue;
 		const bool terrain = name.startsWith( QLatin1String( "FarLOD_terrain" ) );
 		Vector3 lo( 3.4e38f, 3.4e38f, 3.4e38f ), hi( -3.4e38f, -3.4e38f, -3.4e38f );
+		int vSaid = 0;
 		for ( const Vector3 & v : verts ) {
 			const Vector3 wp = W * v;
 			for ( int k = 0; k < 3; k++ ) {
@@ -228,6 +278,10 @@ qint64 farPlaceDump( Scene * scene, NifModel * nif, QFile & f )
 			}
 			if ( terrain ) {
 				o << "V " << name << ' ' << wp[0] << ' ' << wp[1] << ' ' << wp[2] << '\n';
+				lines++;
+			} else if ( vSaid < 400 && vb.in( wp ) ) {	// lane SKYSHARDS2
+				o << "W " << name << ' ' << sh->id() << ' ' << wp[0] << ' ' << wp[1] << ' ' << wp[2] << '\n';
+				vSaid++;
 				lines++;
 			}
 		}
