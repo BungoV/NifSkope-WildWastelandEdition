@@ -38,4 +38,29 @@ inline WwFxEnvMask wwFxEnvMaskRule( const char * red )
 #endif
 }
 
+/* lane GLASSPANE2 (FXNORMALA1, 10-30): the game's env effect pixel shaders also scale the cube by the NORMAL map's alpha
+ * (the env mask's R x env scale x normal.a; every env effect PS samples the normal map's w into the cube's factor).
+ * NifSkope left it out. Vanilla effect normals have alpha 1.000 (181 of 181 decoded, GLASSPANE1), so vanilla does not
+ * move; a mod normal with alpha < 1 now dims its cube as in game.
+ * Red WW_FX_NORMALA_RED=1 (any value but "" / "0"): the old cube without the factor. GLASSPANE2_RED (the unit's red
+ * build) = the base's rule (no factor). The shader's uniform is the RED sense, so a program that never sets it keeps
+ * the game's rule. */
+inline bool wwFxEnvNormalAlphaRule( const char * red )
+{
+	const char * r = red ? red : "";
+	if ( r[0] != '\0' && std::strcmp( r, "0" ) != 0 )
+		return false;
+#ifdef GLASSPANE2_RED
+	return false;	// the base: the cube took no normal alpha
+#else
+	return true;
+#endif
+}
+
+//! The env cube's factor from the normal map's alpha a (0..1), by the rule: a when it applies, else 1
+inline float wwFxEnvNormalAlphaFactor( bool rule, float a )
+{
+	return rule ? ( a < 0.0f ? 0.0f : ( a > 1.0f ? 1.0f : a ) ) : 1.0f;
+}
+
 #endif // GLASSPANERULES_H

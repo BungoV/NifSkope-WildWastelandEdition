@@ -27,6 +27,31 @@
   fails clumps, setboxes, setgap, sethall, setmarker, setspawn; on 9 real interiors (notes fixtures) the C++ set's box
   count equals the Python twin's in all 9, and RED_LOOSEBOX fails 7 of them (Vault111Cryo: realin, its room corners).
 - Owed: pictures when bungo asks (an interior row with the set's notes line; the `loosebox` red live).
+## GLASSPANE2 (2026-10-30): the BGSM reader is proven aligned; receive-shadows and back-lighting flags stay unread; the effect cube takes the normal map's alpha
+
+- **BGSMRECV1 (measured, closed, no code):** GLASSPANE1 found receiveShadows 0 on 99.2 % of vanilla BGSMs and doubted
+  our reader. tests/glasspane2/bgsm_census.py reads every BGSM in src/io/materialfile.cpp's order and checks it two
+  independent ways: all 8911 vanilla BGSMs (all version 2) are consumed to their exact last byte, and over 224734 NIFs
+  (1,100,966 lighting-property / BGSM pairs) the fields read AFTER the receive byte agree with the flags and floats
+  Bethesda's exporter wrote into the NIFs (cast shadows 97.6 %, hair 99.97 %, skin tint 100 %, tessellate 100 %,
+  grayscale scale 96.2 %). The reader is right; receive 0 is the data. FO4's NIF flag set has no receive-shadows bit,
+  no NIF bit follows the BGSM's, and the game's own material setup reads the receive byte nowhere but its save path.
+  Not honoured (the game shadows walls); the row is closed.
+- **BACKLIGHTFLAG1 (measured, closed, no code):** BGSMs with back-lighting 0 and power > 0: 219 (human skin, the store
+  glass); the exporter kept that power in the NIF on 23433 of 23734 such pairs, and the game's lighting setup copies
+  the backlight power whatever the flag says (its subsurface rolloff IS gated by its flag). fo4_default.frag's
+  power-driven backlight already is the game's rule; nothing changed.
+- **FXNORMALA1 (code):** the game's env effect pixel shaders scale the cube by env scale x the env mask's R x the
+  NORMAL map's alpha; ours left the alpha out. res/shaders/fo4_effectshader.frag now multiplies the cube by
+  normalMap.a (uniform `envNormalAlphaRed`, red sense, so a program that never sets it keeps the game's rule);
+  src/gl/glasspanerules.h wwFxEnvNormalAlphaRule, renderer.cpp wwFxEnvNormalAlpha (live, stage 0; stderr
+  `fx env cube x normal alpha: on (the game's)`). **ON by default; red WW_FX_NORMALA_RED=1** = the old cube. Vanilla
+  effect normals have alpha 1.000 (181 of 181), so vanilla does not move; a mod normal with alpha < 1 dims its cube.
+- **Gates:** tests/glasspane2/run.sh: A census green `BGSMRECV PASS 7`, reds RED=short (8911 of 8911 misread) and
+  RED=swap (cast agrees on 1918 of 14671) FAIL; B unit green `GLASSPANE2 PASS 4` (fixture 15 texels with alpha < 1,
+  0 of 48 channels off the game's term), red -DGLASSPANE2_RED FAILS (45 of 48 off, cube x2.0). Offline link sweeps:
+  base 393/393, RTDDGI 262/262, PRT 392/393 (the one row, fo4_effectdecalcsm march+PRT, is "too many instructions"
+  on the base commit too).
 
 ## SHADOWSHIMMER1 (2026-10-30): sun shadows stand still (no crawl, no shimmer on a turn, a tight contact)
 

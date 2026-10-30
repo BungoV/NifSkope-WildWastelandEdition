@@ -378,6 +378,19 @@ static bool wwFxEnvNone()
 	return wwFxEnvMaskMode() == WwFxEnvMask::None;
 }
 
+/* lane GLASSPANE2 (FXNORMALA1): the game's env effect cube is also x the normal map's alpha (src/gl/glasspanerules.h);
+ * on by default, red WW_FX_NORMALA_RED=1 (the old cube without it). Live: re-read per draw through the switch store. */
+static bool wwFxEnvNormalAlpha()
+{
+	WW_SWITCH_STATIC( int, v, [] {
+		const QByteArray red = wwEnv( "WW_FX_NORMALA_RED" ).trimmed();
+		const bool on = wwFxEnvNormalAlphaRule( red.constData() );
+		fprintf( stderr, "fx env cube x normal alpha: %s\n", on ? "on (the game's)" : "off (red WW_FX_NORMALA_RED)" );
+		return on ? 1 : 0;
+	}() );
+	return v != 0;
+}
+
 /* lane LANDSPEC1: the game's LOD land spec on the ground (src/landlodspec.h): far LOD terrain whole, the cells' LAND by
  * the land-LOD blend round the camera's cell. (LANDSPEC8 retired its red off, confirmed live by SHOTPASS1.) */
 static int wwLandLodMode( Scene * scene, const Shape * mesh )
@@ -2797,6 +2810,7 @@ bool Renderer::setupProgramCE1( const NifModel * nif, Program * prog, Shape * me
 				refl = 0.0f;
 			prog->uni1f( "envReflection", refl );
 			prog->uni1b( "envMaskR", wwFxEnvMaskR() );
+			prog->uni1b( "envNormalAlphaRed", !wwFxEnvNormalAlpha() );	// lane GLASSPANE2: red sense (unset = the game's)
 
 			GLint uniCubeMap = prog->uniLocation( "CubeMap" );
 			if ( uniCubeMap >= 0 ) {
