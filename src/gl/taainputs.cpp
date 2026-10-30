@@ -286,7 +286,10 @@ bool bindBase( NifSkopeOpenGLContext::Program * prog, const Shape * sh )
 	if ( !bsp || sh->coords.isEmpty() || sh->coords.constFirst().size() != sh->verts.size() )
 		return false;
 	int texunit = 0;
-	if ( !prog->uniSampler( bsp, "BaseMap", 0, texunit, QString(), bsp->clampMode, QString() ) )
+	sh->wwLeafCovArm( "taa" );	// lane TREELEAF2: the colour pass's coverage copy (src/gl/wwleafcov.h)
+	const bool bound = prog->uniSampler( bsp, "BaseMap", 0, texunit, QString(), bsp->clampMode, QString() );
+	sh->wwLeafCovDisarm();
+	if ( !bound )
 		return false;
 	prog->uni2f( "uvScale", bsp->uvScale.x, bsp->uvScale.y );
 	prog->uni2f( "uvOffset", bsp->uvOffset.x, bsp->uvOffset.y );
@@ -660,7 +663,7 @@ void wwTaaInputsPass( Scene * scene )
 				if ( at ) {
 					const BSLightingShaderProperty * lsp = sh->wwLightingShader();
 					prog->uni1f( "alpha", lsp ? lsp->alpha : 1.0f );
-					prog->uni1f( "alphaThreshold", da.threshold );
+					prog->uni1f( "alphaThreshold", sh->wwLeafSideThreshold( da, "taa" ) );	// lane TREELEAF2
 				}
 				if ( m.mode == 2 )
 					wwCellGrassUniforms( scene, sh->id() );	// the fade and the wind's previous + current phase

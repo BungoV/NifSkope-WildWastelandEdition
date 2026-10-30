@@ -172,6 +172,16 @@ public:
 	WwDrawAlpha wwDrawAlpha( const char * pass ) const;
 	//! lane ALPHABGSM1: moves when WW_ALPHABGSM_RED does, so the passes that keep their maps draw them again
 	static int wwDrawAlphaGen();
+	/*! lane TREELEAF2: the ref the colour pass binds this shape's base map at (the TexCache "<file>|wwcov<ref>" copy,
+	 *  src/gl/wwleafcov.h colourRef; 0 = the plain file). `pass` is "colour", "sun", "cube", "taa" or "refl", for the red
+	 *  WW_TREELEAF_RED (1: every pass, side or a comma list: those side passes bind the plain file again). */
+	int wwLeafCovRef( const char * pass ) const;
+	//! lane TREELEAF2: arms the scene's TexCache with wwLeafCovRef( pass ) for the next base-map bind; disarm after it
+	void wwLeafCovArm( const char * pass ) const;
+	void wwLeafCovDisarm() const;
+	/*! lane TREELEAF2: the threshold a side pass uploads for its `discard a < t` test (da = wwDrawAlpha of that pass), so
+	 *  it keeps the colour pass's texels: the next float above ref / 255 where the colour test is a strict `>` */
+	float wwLeafSideThreshold( const WwDrawAlpha & da, const char * pass ) const;
 	//! the GPU applies the bone transforms to this shape (the caster pass skins it on the CPU)
 	bool wwGpuSkinned() const { return isSkinned && !transformRigid && !boneTransforms.empty(); }
 	//! lane FARDRAW1: the instanced far ring this shape draws, or null
@@ -251,5 +261,11 @@ public:
 		needUpdateData = true;
 	}
 };
+
+class Material;
+/*! lane TREELEAF2 (TREELEAF5's dial): WW_LODL_TREE_ALPHA (1..255) when the material's first texture lives under a trees/
+ *  folder, else 0. The colour pass tests such a material at the dial (renderer.cpp), so its coverage copy and the side
+ *  passes' threshold take the dial too. */
+int wwLodlTreeDial( const Material * mat );
 
 #endif

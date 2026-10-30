@@ -44,6 +44,8 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include "gl/cellwater.h"	// lane WATER1
 #include "gl/cellfxlit.h"	// lane FXRES1: wwCellFxRoomLit
 #include "gl/glmesh.h"
+#include "gl/gltex.h"	// lane TREELEAF2: TexCache::wwCovArmed
+#include "gl/wwleafcov.h"	// lane TREELEAF2
 #include "glview.h"
 
 #include <QDebug>
@@ -263,7 +265,8 @@ float Shape::wwAlphaThreshold() const
 
 int Shape::wwDrawAlphaGen()
 {
-	WW_SWITCH_STATIC( QByteArray, v, wwEnv( "WW_ALPHABGSM_RED" ) );
+	// lane TREELEAF2: WW_TREELEAF_RED moves it too (the side passes' coverage copy and threshold)
+	WW_SWITCH_STATIC( QByteArray, v, wwEnv( "WW_ALPHABGSM_RED" ) + QByteArray( "|" ) + wwEnv( "WW_TREELEAF_RED" ) );
 	static QByteArray last;
 	static int gen = 0;
 	if ( v != last ) {
@@ -299,6 +302,84 @@ Shape::WwDrawAlpha Shape::wwDrawAlpha( const char * pass ) const
 	a.test = mat->hasAlphaTest();
 	a.threshold = float( mat->alphaTestThreshold() ) / 255.0f;
 	return a;
+}
+
+int wwLodlTreeDial( const Material * mat )
+{
+	/* PICTURE-ONLY dial for the tree-card cutoff question (bungo 2026-09-18, "what is going with those trees? They seem
+	 * broken"): WW_LODL_TREE_ALPHA=1..255 tests every BGSM whose first texture lives under a trees/ folder at that
+	 * threshold instead of the BGSM's own (80/82 on the tree LOD sets). Moved here from renderer.cpp unchanged (TREELEAF2):
+	 * the colour pass, its coverage copy and the side passes read it from this one place. */
+	WW_SWITCH_STATIC( int, treeDial, wwEnvInt( "WW_LODL_TREE_ALPHA" ) );
+	if ( mat && treeDial >= 1 && treeDial <= 255 && !mat->textures().isEmpty()
+		&& QString( mat->textures().at( 0 ) ).replace( QChar( '\\' ), QChar( '/' ) )
+			.contains( QLatin1String( "/trees/" ), Qt::CaseInsensitive ) )
+		return treeDial;
+	return 0;
+}
+
+// lane TREELEAF2: the shape's alpha test as the colour pass reads it (src/gl/wwleafcov.h In)
+static WwLeafCov::In wwLeafIn( const Shape * sh, BSShaderLightingProperty * bssp,const BSLightingShaderProperty * lsp,
+	const AlphaProperty * ap, const Scene * scene, bool translucent )
+{
+	WwLeafCov::In in;
+	in.lighting = lsp != nullptr;
+	in.blendingOn = scene && scene->hasOption( Scene::DoBlending );
+	in.land = scene && wwCellLandIs( scene->nifModel, sh->id() );
+	const Material * mat = bssp ? bssp->getMaterial() : nullptr;
+	if ( mat ) {
+		in.hasMat = true;
+		in.matTest = mat->hasAlphaTest();
+		in.matBlend = mat->hasAlphaBlend();
+		in.matRef = int( mat->alphaTestThreshold() );
+		in.treeDial = wwLodlTreeDial( mat );
+	}
+	in.translucent = translucent;
+	if ( ap ) {
+		in.nifTest = ap->hasAlphaTest();
+		in.nifBlend = ap->hasAlphaBlend();
+		in.nifFunc = ap->alphaTestFunc();
+		in.nifThreshold = float( ap->alphaThreshold );
+	}
+	return in;
+}
+
+static bool wwLeafPassRed( const char * pass )
+{
+	WW_SWITCH_STATIC( QByteArray, spec, wwEnv( "WW_TREELEAF_RED" ).trimmed() );
+	return WwLeafCov::passRed( spec.constData(), pass );
+}
+
+int Shape::wwLeafCovRef( const char * pass ) const
+{
+	/* lane TREELEAF2 (TREELEAF1's rule, moved here from setupProgramCE1): an alpha-tested, unblended lighting material
+	 * binds its base map with coverage-preserving alpha mips at its own threshold; the side passes that alpha-test the
+	 * same map (sun cascades, light cubes, TAA inputs, reflection probes) bind the same copy, so a leaf's shadow and
+	 * motion mask cut the leaf's own silhouette. WW_TREELEAF_RED=1: the plain file everywhere; =side or sun,cube,taa,refl:
+	 * those passes bind the plain file again. */
+	if ( wwLeafPassRed( pass ) )
+		return 0;
+	return WwLeafCov::colourRef( wwLeafIn( this, bssp, bslsp, alphaProperty, scene, translucent ) );
+}
+
+void Shape::wwLeafCovArm( const char * pass ) const
+{
+	if ( scene && scene->textures )
+		scene->textures->wwCovArmed = wwLeafCovRef( pass );
+}
+
+void Shape::wwLeafCovDisarm() const
+{
+	if ( scene && scene->textures )
+		scene->textures->wwCovArmed = 0;
+}
+
+float Shape::wwLeafSideThreshold( const WwDrawAlpha & da, const char * pass ) const
+{
+	if ( wwLeafPassRed( pass ) || !da.test )
+		return da.threshold;
+	return WwLeafCov::sideThreshold( wwLeafIn( this, bssp, bslsp, alphaProperty, scene, translucent ), da.fromMaterial,
+		da.threshold );
 }
 
 Vector3 Shape::skinVertex( int vertexIndex, const Vector3 & local ) const
