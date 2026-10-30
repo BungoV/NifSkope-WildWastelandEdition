@@ -100,6 +100,9 @@ QString wwLookdevRegion();
 bool wwLookdevWeatherId( quint32 & formID, QString & edid, QString & owner, QStringList & files, QString & dataDir );
 //! lane CLOUD5: the loaded weather's class (WTHR DATA flags byte, thunder frequency byte); false (both 0) when none
 bool wwLookdevWeatherClass( unsigned & flags, unsigned & thunder );
+/*! lane WEATHERLOOK1 B: while a change blends, the weather left behind: its load-order FormID, EditorID, the plugin
+ *  that defines it, its class flags (DATA byte 11) and the NEW weather's share pct; false when no change runs */
+bool wwLookdevWeatherLeaving( quint32 & formID, QString & edid, QString & owner, unsigned & classFlags, float & pct );
 void wwLookdevSetWeather( const QString & key );
 double wwLookdevHour();
 void wwLookdevClimateTnam( unsigned char out[4] );	// lane GAPLOOK1: the climate's TNAM sunrise/sunset bytes (10 min units)

@@ -82,3 +82,31 @@ and its column has a closed form. Its floor is the weather's near height band. W
 NifSkope's air has two test switches, set in `WW_CELL_AIR_RED`:
 - `nosidecar` ignores the files;
 - `noground` draws the far band alone, which is the air from before this layer was added.
+
+## precipitation (Weathers)
+
+Rain, sleet, hail and snow particles for the weather (Show > Improved Sky > Precipitation, off until switched on). A
+list of layers; a weather may mix several (fine snow with wet clumps, rain with sleet). During a weather change the new
+weather's layers come in with the change and the old weather's go out with it.
+
+```json
+"precipitation": { "layers": [ { "type": "snow_fine", "rate": 1.5 }, { "type": "snow_wet_clump", "rate": 0.5, "size": 14 } ] }
+```
+
+| key | meaning |
+| --- | --- |
+| `type` | `rain`, `sleet`, `hail`, `snow_fine`, `snow_far_dot`, `snow_wet_clump` or `snow_big_clump` (required) |
+| `rate` | how hard it falls, in mm of water per hour; with `size` it sets how many particles hang in each cubic metre |
+| `density` | particles per cubic metre, instead of `rate` |
+| `size` | the particle size in mm; the fall speed follows from the type and the size |
+| `drawScale` | the drawn size as a multiple of the true size (snow defaults draw larger than life, as in many games) |
+| `wind` | how much of the weather's wind it rides, 0 to 2 (default 1) |
+| `translucency` | 0 to 1: how much light passes through (a flake in front of a lamp glows) |
+| `spin` | the fastest turn about the view axis, radians per second |
+| `sway` | how far light flakes flutter from side to side, game units |
+| `texture` | the particle atlas, under `Textures\`, as the game links textures (default: one shipped per type, `Textures\WW\Precip\`) |
+| `atlas` | `[columns, rows]` of that atlas |
+
+With no `precipitation` block, the weather's own record decides: a weather flagged Rainy gets one rain layer, a weather
+flagged Snow one snow layer, each with the type's defaults. Textures are read as loose files (BC1, BC3 or BC7 DDS) from
+the same folders the `.recx` files are found in.

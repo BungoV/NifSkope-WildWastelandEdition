@@ -146,6 +146,9 @@ void wwVolPartSetOn( bool on );
 int wwVolPartRed();
 //! the uniforms of the renderer's CURRENT program (particles_cell.prog); true while on
 bool wwVolPartUniforms( Scene * scene );
+//! lane WEATHERLOOK1 B: the air's medium, phase and terms on the CURRENT program whatever the row (the precipitation
+//! program lights its flakes with cell_volpart.glsl's vpLight); wwVolPartUniforms calls it while on
+void wwVolPartMediumUniforms( Scene * scene );
 QString wwVolPartSummary();
 //! the effect card the renderer just set up (fo4_effectcell.prog, read by BSShape's draw): 0 not volumetric, else
 //! 1 a volumetric lit card | 2 its soft fade is on (drawn with no depth test: the fade is the occlusion)

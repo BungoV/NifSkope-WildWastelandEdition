@@ -50,6 +50,7 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include "gl/renderer.h"
 #include "gl/cellhdr.h"
 #include "gl/celllensflare.h"	// lane LIGHTS3 (LENSFLARE1)
+#include "gl/cellprecip.h"	// lane WEATHERLOOK1 B
 #include "gl/gametaa.h"	// lane MOTION1: the game's temporal AA
 #include "gl/taainputs.h"	// lane TAAINPUTS1: velocity + reactive mask for a temporal resolve
 #include "gl/cellpost.h"	// lane GRASSMB1: the game's depth of field + motion blur
@@ -4313,6 +4314,7 @@ void GLView::paintGL()
 				wwCellFarLodCards( scene, true, true );	// lane FARLOD1: the far tree cards, lit, into the linear frame
 				PassTime::subEnd( PassTime::FarCardsLit );
 				PassTime::end( PassTime::FarCards );
+				wwCellPrecipDraw( scene );	// lane WEATHERLOOK1 B: rain / snow from the weather, into the linear frame (row off: no GL call)
 				wwCellLensFlareGrab( scene );	// lane LIGHTS3: the opaque depth for the flares' occlusion test
 				wwCloudVolSceneDepth( scene );	// lane CLOUD2B: the depth the volume clouds test against
 				wwCellUnderwaterPass( scene );	// lane WATERUNDER1: the camera under water (no GL call off or above it)
@@ -22481,6 +22483,8 @@ void GLView::advanceGears()
 		update();	// lane FXPARITY2: the world clock moves the cell
 	if ( wwLookdevWeatherChanging() )
 		update();	// lane WEATHERBLEND1: a weather change blends a little every frame
+	if ( wwCellPrecipWantsFrames( scene ) )
+		update();	// lane WEATHERLOOK1 B: precipitation falls (never with its clock pinned)
 	if ( CellFarGround::wantsFrames( scene ) )
 		update();	// lane FARPAGES1: far ground pages still painting or fading in
 
