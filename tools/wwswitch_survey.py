@@ -42,6 +42,8 @@ OVERRIDES = {
     'WW_CELL_RTDDGI_SPEC': ('live', 'read every frame by rtddgiCellFrame; a changed value is in the build key and rebuilds the volume in place (RTXGI1 M2)'),
     'WW_CELL_RTDDGI_DUMP': ('live', 'read by rtddgiCellFrame at the dump point (RTXGI1 M2)'),
     'WW_CELL_RTDDGI_VIEW': ('live', 'read every frame by rtddgiCellViewDraw (RTXGI1 M2)'),
+    'WW_CELL_RT_PRESET': ('shaders', 'the RT quality preset: Medium+ is the loader define WW_CELL_RESTIR (Shader::load via rtddgiRestirShaderDefine) and turns the volume on; rtddgiRestirPass and the cube pass read it every frame (RESTIRDI1)'),
+    'WW_CELL_RESTIR_RED': ('live', 'restirRedBits read every frame by rtddgiRestirPass: the kernel red bits (RESTIRDI1)'),
     'WW_CELL_AIRZONE': ('shaders', 'the zones read is a #define every shader gets at load (Shader::load via wwAirZoneShaderDefine); the gi blocks merge at the GI build (AIRZONE1)'),
     'WW_CELL_AIRZONE_RED': ('live', 'wwAirZoneRed() re-read by every wwAirZoneFor (novol reloads the cells) and every program setup (hardedge, a uniform) (AIRZONE1)'),
     'WW_CELL_AIRZONE_VIEW': ('live', 'read every frame by wwAirZoneViewDraw (AIRZONE1)'),

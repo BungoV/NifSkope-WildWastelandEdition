@@ -110,6 +110,13 @@ uniform samplerCubeArrayShadow cellShadow;
 uniform float cellShadowTexel;
 uniform bool cellShadowFadeOn;		// lane GAPLOOK1 (LIGHTSYS-3): the budget's per-slot strength (celllights.cpp shFade)
 uniform float cellShadowFade[16];
+#ifdef WW_CELL_RESTIR
+// lane RESTIRDI1 (src/rtddgicell.cpp, src/rtddgi/restir.comp): the RT quality preset Medium+. ReSTIR DI's ratio a pixel
+// (Heitz 2018: the shadowed / unshadowed estimates of the shadow-casting lights) and the linear depth it was traced for
+uniform bool cellRestirOn;
+uniform samplerBuffer cellRestir;	// RG32F, bottom row first: ratio, linear depth
+uniform vec4 cellRestirSize;		// W, H
+#endif
 // lane FARVIEW1 (src/farlight.h): distant light from the surfels, set by celllights.cpp
 uniform bool cellFarOn;
 uniform samplerBuffer cellFarSlots;	// a slot: x, y, z x 8 + side, record + 1 (0 empty); exact integers
@@ -245,6 +252,23 @@ float cellShadowF( int i, vec3 P, vec3 N )
 	vec4 t0 = texelFetch( cellLights, i * CELL_TPL );
 	if ( t4.y > 1.5 && t4.y < 2.5 && dot( P - t0.xyz, texelFetch( cellLights, i * CELL_TPL + 2 ).xyz ) < 0.0 )
 		return 0.0;	// the mask's paraboloid: behind the hemisphere's plane is unlit (in a slot or not)
+#ifdef WW_CELL_RESTIR
+	/* lane RESTIRDI1: every shadow-casting light takes the pixel's ray-traced ratio in place of its cube (the 16 slots are
+	 * not drawn). A fragment that is not the surface the opaque pass saw (blended, an effect, water) is unshadowed, as a
+	 * light past the slot budget was */
+	if ( cellRestirOn ) {
+		ivec2 q = ivec2( gl_FragCoord.xy );
+		int W = int( cellRestirSize.x + 0.5 ), H = int( cellRestirSize.y + 0.5 );
+		if ( q.x < 0 || q.y < 0 || q.x >= W || q.y >= H )
+			return 1.0;
+		vec2 rr = texelFetch( cellRestir, q.y * W + q.x ).rg;
+		// the fragment's linear depth: world -> view through cellRow (rows of the view's inverse, / scale)
+		vec3 w = P - vec3( cellRow[0].w, cellRow[1].w, cellRow[2].w );
+		float s2 = 1.0 / max( dot( cellRow[0].xyz, cellRow[0].xyz ), 1e-12 );
+		float D = -s2 * ( cellRow[0].z * w.x + cellRow[1].z * w.y + cellRow[2].z * w.z );
+		return abs( D - rr.y ) <= 0.02 * rr.y + 2.0 ? rr.x : 1.0;
+	}
+#endif
 	if ( t4.x < -0.5 )
 		return 1.0;	// a shadow light beyond the slot budget: unshadowed (the game's budget is unread)
 	vec3 r = P - t0.xyz;

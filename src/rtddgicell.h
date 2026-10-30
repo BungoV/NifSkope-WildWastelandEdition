@@ -58,4 +58,17 @@ void rtddgiCellViewDrawLinear( Scene * scene, const Transform & viewTrans );
 //! reached since the build or the last scroll
 bool rtddgiCellPending();
 
+/* lane RESTIRDI1 (2026-10-30): the RT quality preset (bungo 10-29: Low = the volume only, Medium = + ReSTIR DI, High =
+ * + ReSTIR GI, Ultra = + ReSTIR PT; High and Ultra are Medium for now). WW_CELL_RT_PRESET pins it, else the Show row.
+ * Medium and up turn the volume on (its BVH is what ReSTIR traces) and the loader's WW_CELL_RESTIR define: the
+ * shadow-casting lights take the pixel's ray-traced ratio in place of the 16 depth cubes (cell_lights.glsl cellShadowF). */
+int rtddgiRtPreset();
+bool rtddgiRtPresetPinned();
+void rtddgiRtPresetSet( int preset );
+//! Shader::load's question, and the cube pass's (it draws no cube while this holds)
+bool rtddgiRestirShaderDefine();
+//! one call a frame after the shared opaque pass (glview.cpp, after wwCellAoPass): the g-buffer to the device, the four
+//! ReSTIR passes on the volume's BVH, the ratio back in place for the opaque pass (no-op while the preset is Low)
+void rtddgiRestirPass( Scene * scene );
+
 #endif // RTDDGICELL_H

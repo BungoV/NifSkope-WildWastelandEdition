@@ -3533,6 +3533,16 @@ void wwCellShadowPass( Scene * scene )
 		s.shadowLast = s.shadowPinned ? QStringLiteral( "off(WW_CELL_SHADOW=0)" ) : QStringLiteral( "off(row)" );
 		return;
 	}
+	/* lane RESTIRDI1: the RT quality preset Medium+ traces the shadow-casting lights (ReSTIR DI, rtddgiRestirPass): no cube
+	 * is drawn and every slot is let go (a frame the trace refuses draws those lights unshadowed, as past the budget) */
+	if ( rtddgiRestirShaderDefine() ) {
+		if ( std::any_of( g.shSlot, g.shSlot + kShadowSlots, []( int v ) { return v >= 0; } ) ) {
+			std::fill( g.shSlot, g.shSlot + kShadowSlots, -1 );
+			g.shStamp++;
+		}
+		s.shadowLast = QStringLiteral( "off(ray-traced: the RT quality preset's ReSTIR DI)" );
+		return;
+	}
 	// lane LAMPSHADOW1: the tier's face edge; a change remakes the cube array and empties the slots
 	const int face = wwCellLampShadowFace();
 	if ( g.shTex && g.shFace != face ) {
@@ -4363,7 +4373,8 @@ void wwCellAoPass( Scene * scene, bool run )
 			.arg( forDecalAngle ? QStringLiteral( " decalangle" ) : QString() )
 			: QStringLiteral( "off (row); no opaque pass (nothing reads it)" ) );
 		// lane SSAO2: the keep rule lives in cellaomethod.h (tests/aomethod); its red drops SSR's claim
-		if ( !wwAoSharedPassRuns( false, forSsr, forDecal || forContact || forGi || forDecalAngle, a.ssrRedOld ) ) {
+		// lane RESTIRDI1: the RT quality preset's ReSTIR pass reads it too (rtddgiRestirPass)
+		if ( !wwAoSharedPassRuns( false, forSsr, forDecal || forContact || forGi || forDecalAngle || rtddgiRestirShaderDefine(), a.ssrRedOld ) ) {
 			a.last = QStringLiteral( "off" );
 			return;
 		}

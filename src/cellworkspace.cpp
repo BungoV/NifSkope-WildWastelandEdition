@@ -610,6 +610,34 @@ void CellWorkspacePanel::buildUi()
 				glView->updateShaders();
 		} );
 	}
+	/* lane RESTIRDI1 (bungo 10-29's ruling): the RT quality preset. Low = the ray-traced GI volume (as the row above), Medium =
+	 * + ReSTIR DI (ray-traced shadows for the shadow-casting lights, the 16 cube shadows off); High / Ultra = Medium for now.
+	 * Live: a pick reloads the shaders (WW_CELL_RESTIR is a loader define); Medium and up also turn the volume on */
+	{
+		QMenu * m = showMenu->addMenu( tr( "Ray-traced quality" ) );
+		m->setObjectName( QStringLiteral( "CellWorkspaceRtPreset" ) );
+		m->setToolTip( tr( "Low: ray-traced GI only. Medium: + ReSTIR DI ray-traced shadows for the lights that cast shadows "
+			"(in place of the 16 shadow cubes). High (+ ReSTIR GI) and Ultra (+ ReSTIR PT) are Medium for now." ) );
+		m->setToolTipsVisible( true );
+		QActionGroup * grp = new QActionGroup( m );
+		grp->setExclusive( true );
+		const QStringList names = { tr( "Low" ), tr( "Medium" ), tr( "High" ), tr( "Ultra" ) };
+		for ( int k = 0; k < names.size(); k++ ) {
+			QAction * a = m->addAction( names.at( k ) );
+			a->setCheckable( true );
+			a->setData( k );
+			a->setChecked( k == rtddgiRtPreset() );
+			if ( k >= 2 )
+				a->setToolTip( tr( "Medium for now (ReSTIR GI / PT are planned)" ) );
+			grp->addAction( a );
+		}
+		m->setEnabled( !rtddgiRtPresetPinned() );
+		connect( grp, &QActionGroup::triggered, this, [this]( QAction * a ) {
+			rtddgiRtPresetSet( a->data().toInt() );
+			if ( glView )
+				glView->updateShaders();
+		} );
+	}
 	/* lane SKYSTR1 (bungo 10-13, FO4CS's Skylighting strength): how much the GI's sky visibility darkens, 0-100 %.
 	 * A label | field row as the Bloom rows; live (the grid relights 0.4 s after the value stands still) */
 	{

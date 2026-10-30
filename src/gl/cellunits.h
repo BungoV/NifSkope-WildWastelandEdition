@@ -77,6 +77,7 @@ constexpr int WaterOceanD = 78;	// lane WATERLOOK1 step 2: its heights + chop (s
 constexpr int LandWaterInfo = 79;	// lane WATERLOOK1 step 14: the cell programs' water lookup for the Wave run-up row (79-81: index, atlas, bodies) (71-73 in the lane)
 constexpr int UnderDepthMs = 82;	// lane WATERUNDER4: the underwater pass reads the frame's depth per sample (sampler2DMS) (74 in the lane)
 constexpr int DdgiAtlas = 84;	// lane RTXGI1 M2: the ray-traced GI volume's tiles and probes (samplerBuffer, RGBA32F; src/rtddgicell.cpp)
+constexpr int Restir = 85;	// lane RESTIRDI1: ReSTIR DI's shadow ratio a pixel (samplerBuffer, RG32F; src/rtddgicell.cpp), WW_CELL_RESTIR programs only
 constexpr int FxDepth = 83;	// lane WATERFIX7: a particle's soft-depth read of the opaque pass (sampler2D; was 9, a TexCache unit)
 constexpr int WaterFlowAtlas = 67;	// lane WATERFLOWBAKE1: its sparse tiles (usampler2D R32UI; was 11, under Bloom)	// lane WATERWETBAKE1: its sparse tiles (usampler2D R8UI; 47 in the lane)
 
@@ -88,7 +89,7 @@ constexpr int kAll[] = { Shadow, Bloom, Lut, Gi, Lights, Csm, Ao, Ssr, GiSlot, R
 	WaterMoment0, WaterMoment1, WaterMoment2, WaterCloudMap,
 	LandShoreIndex, LandShoreAtlas, WaterFlowIndex, WaterFlowAtlas, WaterOceanB, WaterOceanC, WaterSkyIndex, WaterSkyAtlas, AirTerrain,
 	LandLodDiff, LandLodOuter, LandLodNoise, LandLodDetail, WaterOceanD,
-	LandWaterInfo, LandWaterInfo + 1, LandWaterInfo + 2, UnderDepthMs, FxDepth, DdgiAtlas };
+	LandWaterInfo, LandWaterInfo + 1, LandWaterInfo + 2, UnderDepthMs, FxDepth, DdgiAtlas, Restir };
 
 constexpr bool distinct()
 {

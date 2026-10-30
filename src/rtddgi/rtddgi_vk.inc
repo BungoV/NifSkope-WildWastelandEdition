@@ -19,6 +19,7 @@
 
 #include <algorithm>
 #include <thread>   // ddgiGpuRun waits for the device's lock (bakert.cpp does not include it)
+#include <map>      // lane RESTIRDI1: restir_vk.inc's per-session state
 
 #if defined( __has_include )
 #if __has_include( "trace.spv.h" ) && __has_include( "blend.spv.h" ) && __has_include( "border.spv.h" ) && __has_include( "reloc.spv.h" )
@@ -84,6 +85,18 @@ const uint32_t * ddgiGpuHostAge( const DdgiGpuSession * ) { return nullptr; }
 const float * ddgiGpuHostProbes( const DdgiGpuSession * ) { return nullptr; }
 const float * ddgiGpuHostRays( const DdgiGpuSession * ) { return nullptr; }
 void ddgiGpuClose( DdgiGpuSession * ) {}
+bool restirGpuStep( DdgiGpuSession *, const RestirGpuIn &, RestirGpuOut * out )   // lane RESTIRDI1: no kernels, no ReSTIR
+{
+	*out = RestirGpuOut();
+	out->why = kDdgiNoKernels;
+	return false;
+}
+bool restirGpuShare( DdgiGpuSession *, int, int, RestirGpuShare * out )
+{
+	*out = RestirGpuShare();
+	out->why = kDdgiNoKernels;
+	return false;
+}
 
 #else
 
@@ -459,11 +472,14 @@ struct DdgiGpuSession
 
 namespace {
 
+void restirFreeFor( Dev & D, DdgiGpuSession * s );   // lane RESTIRDI1: restir_vk.inc (its set reads this session's TLAS)
+
 void ddgiFree( Dev & D, DdgiGpuSession * s )
 {
 	DdgiExtra & X = ddgiExtra( D );
 	if ( s->inFlight && s->fence )
 		vk.vkWaitForFences( D.dev, 1, &s->fence, VK_TRUE, UINT64_MAX );
+	restirFreeFor( D, s );
 	if ( s->set )
 		vk.vkFreeDescriptorSets( D.dev, D.dpool, 1, &s->set );
 	DdgiTimer & T = ddgiTimer( D );
@@ -1049,6 +1065,8 @@ bool ddgiGpuRun( const DdgiGpuJob & job, DdgiGpuOut * out )
 	out->ok = ok;
 	return ok;
 }
+
+#include "restir_vk.inc"   // lane RESTIRDI1: ReSTIR DI on this device and BVH
 
 #endif // RTDDGI_HAVE_SPIRV
 
