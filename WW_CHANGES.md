@@ -15,7 +15,8 @@
   volumes leave still goes to the flat ambient, as past M3's box.
 - **One sampler:** the volumes' atlases are copied on the GPU (glCopyBufferSubData, after each volume's interop wait)
   into one texture buffer, so the cell programs read no new sampler. Off programs: the macros are empty, M3's machine
-  code (offline sweep: 42 programs x 5 modes link, off and one-volume binaries identical to the base but the source hash).
+  code (offline sweep of the 42 programs that paste the read in: off none/ubo/march, one volume none/ubo and cascades
+  none/ubo all link; the off and one-volume binaries equal the base's but the source hash).
 - **Cost lever:** cascade L updates every `cevery`^L frames (WW_CELL_RTDDGI_SPEC cevery=4: cascade 1 every 4th frame,
   cascade 2 every 16th, on separate frames); with a spec max (pictures) every frame until it is reached.
 - **Census:** coarse lines start `rtddgi cell: cascade L (every P frames): ` (built, set N ... gpu ms, scroll, freed);
