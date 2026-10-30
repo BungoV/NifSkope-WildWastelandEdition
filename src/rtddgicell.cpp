@@ -52,6 +52,7 @@ struct CellSpec
 	int rays = 128;
 	int updates = 4;          // a frame (budget: M3)
 	int max = 0;              // stop after this many updates since the build or the last scroll (0: never; pictures that must repeat set it)
+	int every = 4;            // RTXCASCADE1: cascade L updates every every^L frames (rtddgimath.h cascadeDue)
 	QString text;
 };
 
@@ -75,6 +76,7 @@ CellSpec cellSpecNow()
 		else if ( k == QLatin1String( "rays" ) && v >= 33.0 ) s.rays = int( std::min( v, 256.0 ) );
 		else if ( k == QLatin1String( "updates" ) && v >= 1.0 ) s.updates = int( std::min( v, 16.0 ) );
 		else if ( k == QLatin1String( "max" ) && v >= 0.0 ) s.max = int( v );
+		else if ( k == QLatin1String( "cevery" ) && v >= 1.0 ) s.every = int( std::min( v, 64.0 ) );
 	}
 	return s;
 }
@@ -220,12 +222,54 @@ struct Cell
 	// the debug view's geometry, rebuilt each frame it draws
 	std::vector<Vector3> vp;
 	std::vector<FloatVector4> vc;
+	// RTXCASCADE1: the cascade this is (0 = M3's volume, cell()), its census prefix ("" for cascade 0: M3's lines),
+	// and new tiles in buf since the last copy into the cascades' texture buffer
+	int level = 0;
+	QString tag;
+	bool fresh = false;
 };
 
 Cell & cell()
 {
 	static Cell * c = new Cell;   // never destroyed: a live volume must not close after the bake device's statics
 	return *c;
+}
+
+//! RTXCASCADE1: cascade `level`'s volume (0: cell(), M3's)
+Cell & cascCell( int level )
+{
+	if ( level <= 0 )
+		return cell();
+	static Cell * cs = []() {
+		Cell * a = new Cell[rtddgi::kMaxCascades];   // never destroyed, as cell()
+		for ( int l = 1; l < rtddgi::kMaxCascades; l++ ) {
+			a[l].level = l;
+			a[l].tag = QStringLiteral( "cascade %1: " ).arg( l );
+		}
+		return a;
+	}();
+	return cs[std::min( level, rtddgi::kMaxCascades - 1 )];
+}
+
+/*! RTXCASCADE1: the cascades' one texture buffer (no new sampler: cellDdgiAtlas reads it). Cascade l's atlas (M3's
+ *  layout, its own nP) at texel base[l]; copied on the GPU (glCopyBufferSubData) from its own buffer, the device's
+ *  atlas with interop, after the GL side's wait on that cascade's submit. count = the cascades ready from 0 */
+struct Combined
+{
+	const void * owner = nullptr;
+	GLuint buf = 0, tex = 0;
+	size_t bytes = 0;
+	bool attach = false;
+	int count = 0;
+	int base[rtddgi::kMaxCascades] = {}, nP[rtddgi::kMaxCascades] = {};
+	double copyMs = 0;
+	qint64 copies = 0;
+};
+
+Combined & combined()
+{
+	static Combined * k = new Combined;
+	return *k;
 }
 
 //! the GUI's settings file (bakert.cpp's; a harness WW_SETTINGS_SCOPE starts empty, so the rows read off there)
@@ -261,7 +305,7 @@ void refuse( Cell & c, const QString & why )
 	if ( why == c.refused )
 		return;
 	c.refused = why;
-	say( QStringLiteral( "refused(%1)" ).arg( why ) );
+	say( c.tag + QStringLiteral( "refused(%1)" ).arg( why ) );
 }
 
 //! the GL side: the texture buffer, and with interop the imported memory and semaphores (before the session closes)
@@ -288,6 +332,7 @@ void freeGl( Cell & c, Renderer * r )
 	c.glOwner = nullptr;
 	c.uploaded = c.attach = c.probesPacked = false;
 	c.interop = c.glRead = false;
+	c.fresh = false;
 }
 
 //! the volume and its GL objects (GL first: its import holds the device's memory)
@@ -596,7 +641,7 @@ void censusBuilt( const Cell & c, const Build & b )
 	const RtDdgiSpec & s = b.live.spec();
 	const int nP = v.probeCount();
 	const bool grown = std::fabs( v.step[0] - s.spacing ) > 1e-3f;
-	say( QStringLiteral( "built %1 in %2 ms (soup copy %3 ms); grid %4 x %5 x %6, spacing %7 x %8 x %9%10; box %11; first probe %12 %13 "
+	say( c.tag + QStringLiteral( "built %1 in %2 ms (soup copy %3 ms); grid %4 x %5 x %6, spacing %7 x %8 x %9%10; box %11; first probe %12 %13 "
 		"%14; %15; relocate+classify %16 ms; BLAS grown %17 u; rays %18 a probe, %19 updates a frame%20; atlas bytes %21 (irr %22, "
 		"dist %23, probes %24); lights %25; sky %26; %27; %28" )
 		.arg( v.path ).arg( b.ms, 0, 'f', 1 ).arg( b.msCopy, 0, 'f', 1 ).arg( v.dims[0] ).arg( v.dims[1] ).arg( v.dims[2] )
@@ -622,7 +667,7 @@ void censusSet( const Cell & c, const RtDdgiLive & L, int k, const QString & tai
 	else
 		rb = QStringLiteral( "readback ms %1 (device copy %2 + GL upload %3; interop owed when over 0.2: %4)" )
 			.arg( msText( ms[3] < 0.0 ? -1.0 : ms[3] + c.uploadMs ) ).arg( msText( ms[3] ) ).arg( c.uploadMs, 0, 'f', 3 ).arg( c.interopWhy );
-	say( QStringLiteral( "set %1, updates %2 (+%3); gpu ms trace %4 blend %5 border %6 scroll %7 (the last finished set's); %8; wall %9 ms; "
+	say( c.tag + QStringLiteral( "set %1, updates %2 (+%3); gpu ms trace %4 blend %5 border %6 scroll %7 (the last finished set's); %8; wall %9 ms; "
 		"rays %10; %11; atlas bytes %12; busy frames %13%14" )
 		.arg( c.sets ).arg( L.updates() ).arg( k ).arg( msText( ms[0] ), msText( ms[1] ), msText( ms[2] ), msText( ms[4] ) ).arg( rb )
 		.arg( L.lastWallMs(), 0, 'f', 3 ).arg( L.lastRays() ).arg( statesOf( L.volume() ) ).arg( atlasBytes( L.volume().probeCount() ) )
@@ -631,18 +676,20 @@ void censusSet( const Cell & c, const RtDdgiLive & L, int k, const QString & tai
 
 void dumpLive( Cell & c, RtDdgiLive & L )
 {
-	const QString dir = QString::fromLocal8Bit( wwEnv( "WW_CELL_RTDDGI_DUMP" ) ).trimmed();
+	QString dir = QString::fromLocal8Bit( wwEnv( "WW_CELL_RTDDGI_DUMP" ) ).trimmed();
 	if ( dir.isEmpty() || c.dumped )
 		return;
+	if ( c.level > 0 )   // RTXCASCADE1: a coarse cascade's dump in a folder of its own under the key's
+		dir += QStringLiteral( "/cascade%1" ).arg( c.level );
 	c.dumped = true;
 	L.finish();   // the step that copied the tiles back, done
 	RtDdgiVolume v;
 	L.snapshot( &v );
 	QString err;
 	if ( rtddgiDump( v, L.spec(), dir, &err ) )
-		say( QStringLiteral( "dumped %1 updates to %2" ).arg( L.updates() ).arg( QDir::toNativeSeparators( dir ) ) );
+		say( c.tag + QStringLiteral( "dumped %1 updates to %2" ).arg( L.updates() ).arg( QDir::toNativeSeparators( dir ) ) );
 	else
-		say( QStringLiteral( "dump refused(%1)" ).arg( err ) );
+		say( c.tag + QStringLiteral( "dump refused(%1)" ).arg( err ) );
 }
 
 // a unit sphere for the debug view: an octahedron split once (32 triangles), vertices on the sphere
@@ -722,11 +769,12 @@ void rtddgiCellSetView( int mode )
 	rowWrite( QStringLiteral( "WW/CellRtDdgiView" ), c.guiView );
 }
 
-void rtddgiCellFrame( Scene * scene )
+/*! one volume's frame (M3's rtddgiCellFrame body): cascade 0 = cell() with the spec of the key and due every frame;
+ *  RTXCASCADE1: a coarse cascade with its own spec (spIn) steps only on its due frames (a build is harvested on any) */
+static void volumeFrame( Scene * scene, Cell & c, const CellSpec * spIn, bool due )
 {
 	if ( !scene || !scene->nifModel || !scene->renderer )
 		return;
-	Cell & c = cell();
 	const void * nif = scene->nifModel;
 	Renderer * r = scene->renderer;
 	if ( !rtddgiCellShaderDefine() ) {   // off (or the march red): nothing kept, nothing bound
@@ -751,7 +799,7 @@ void rtddgiCellFrame( Scene * scene )
 		return;
 	}
 	const WwCellGi * G = wwCellGiFor( nif );
-	const CellSpec sp = cellSpecNow();
+	const CellSpec sp = spIn ? *spIn : cellSpecNow();
 	const int paths = cellRedPaths();
 	float eye[3];
 	eyeOf( scene->view, eye );
@@ -784,7 +832,7 @@ void rtddgiCellFrame( Scene * scene )
 	QString rebuildWhy = QStringLiteral( "the soup, lights, sky, spec, reds or GI grid moved" );
 	int cells[3] = { 0, 0, 0 };
 	bool moved = false;
-	if ( key == c.key && c.nif == nif && c.live )
+	if ( due && key == c.key && c.nif == nif && c.live )
 		moved = scrollFor( *c.live, c.live->live.volume(), eye, cells );
 	if ( moved && ( c.live->paths & kPathRebuild ) ) {   // the red: M2's volume built again round the camera
 		rebuildWhy = QStringLiteral( "the camera moved %1 %2 %3 cells (the rebuild red)" ).arg( cells[0] ).arg( cells[1] ).arg( cells[2] );
@@ -798,7 +846,7 @@ void rtddgiCellFrame( Scene * scene )
 		c.nif = nif;
 		c.refused.clear();
 		startBuild( c, *soup, lights, sky, G, eye, sp, paths );
-		say( QStringLiteral( "%1 (%2 triangles)" ).arg( had ? QStringLiteral( "rebuilding: " ) + rebuildWhy : QStringLiteral( "building" ) )
+		say( c.tag + QStringLiteral( "%1 (%2 triangles)" ).arg( had ? QStringLiteral( "rebuilding: " ) + rebuildWhy : QStringLiteral( "building" ) )
 			.arg( qint64( nTris / 9 ) ) );
 	}
 	if ( c.pending ) {
@@ -824,10 +872,10 @@ void rtddgiCellFrame( Scene * scene )
 			}
 		}
 	}
-	if ( !c.live )
+	if ( !c.live || !due )
 		return;
 	RtDdgiLive & L = c.live->live;
-	const int view = rtddgiCellView();
+	const int view = c.level == 0 ? rtddgiCellView() : 0;   // the debug views draw cascade 0
 	const bool wantDump = !c.dumped && !wwEnvStr( "WW_CELL_RTDDGI_DUMP" ).trimmed().isEmpty();
 	GlShare & g = glShare();
 	auto fn = r->fn;
@@ -854,6 +902,7 @@ void rtddgiCellFrame( Scene * scene )
 			c.glWaitMs = double( t.nsecsElapsed() ) / 1e6;
 			c.glRead = true;
 			c.uploaded = true;
+			c.fresh = true;
 		}
 		return ok;
 	};
@@ -905,10 +954,11 @@ void rtddgiCellFrame( Scene * scene )
 			refuse( c, QStringLiteral( "no tiles came back" ) );
 			return;
 		}
+		c.fresh = true;
 	}
 	if ( moved && ( L.scrolls() <= kScrollEcho || L.scrolls() % 64 == 0 ) ) {
 		const RtDdgiVolume & v = L.volume();
-		say( QStringLiteral( "scroll %1: scrolled %2 cells (%3 %4 %5), reset %6 probes (%7 in all); first probe %8 %9 %10; camera %11 %12 %13" )
+		say( c.tag + QStringLiteral( "scroll %1: scrolled %2 cells (%3 %4 %5), reset %6 probes (%7 in all); first probe %8 %9 %10; camera %11 %12 %13" )
 			.arg( L.scrolls() ).arg( L.lastScrollCells() ).arg( cells[0] ).arg( cells[1] ).arg( cells[2] ).arg( L.lastScrollFresh() )
 			.arg( L.freshTotal() ).arg( double( v.origin[0] ), 0, 'f', 0 ).arg( double( v.origin[1] ), 0, 'f', 0 )
 			.arg( double( v.origin[2] ), 0, 'f', 0 ).arg( double( eye[0] ), 0, 'f', 0 ).arg( double( eye[1] ), 0, 'f', 0 )
@@ -926,14 +976,164 @@ void rtddgiCellFrame( Scene * scene )
 	}
 }
 
+int rtddgiCellCascades()
+{
+	const QByteArray v = wwEnv( "WW_CELL_RTDDGI_CASCADES" ).trimmed();
+	bool ok = false;
+	const int n = v.toInt( &ok );
+	return ok ? std::clamp( n, 1, rtddgi::kMaxCascades ) : 1;   // unset, 0, 1 or not a number: M3's one volume
+}
+
+//! RTXCASCADE1: the cascades' texture buffer, freed (its own context only, as freeGl)
+static void freeCombined( Renderer * r )
+{
+	Combined & K = combined();
+	if ( r && K.owner == r ) {
+		if ( K.tex )
+			r->fn->glDeleteTextures( 1, &K.tex );
+		if ( K.buf )
+			r->fn->glDeleteBuffers( 1, &K.buf );
+	}
+	K = Combined();
+}
+
+/*! RTXCASCADE1: the ready cascades (from 0, each live with tiles in its own buffer in this context) copied into the one
+ *  texture buffer: a cascade whose buffer has new tiles (fresh), or all of them when the layout moved. GL commands
+ *  only, after each cascade's wait on its submit (runStep): the copies read the finished atlas */
+static void combinedUpdate( Renderer * r, int n, const void * nif )
+{
+	Combined & K = combined();
+	if ( K.owner != r )
+		freeCombined( nullptr );
+	int m = 0, nP[rtddgi::kMaxCascades] = {};
+	for ( int l = 0; l < n; l++ ) {
+		const Cell & c = cascCell( l );
+		if ( !c.live || !c.uploaded || !c.buf || c.glOwner != r || c.nif != nif )
+			break;
+		nP[l] = c.live->live.volume().probeCount();
+		m++;
+	}
+	K.count = 0;   // nothing reads it until the copies below are in
+	if ( !m )
+		return;
+	auto fn = r->fn;
+	bool relayout = false;
+	size_t texels = 0;
+	for ( int l = 0; l < m; l++ ) {
+		relayout = relayout || K.base[l] != int( texels ) || K.nP[l] != nP[l];
+		K.base[l] = int( texels );
+		K.nP[l] = nP[l];
+		texels += size_t( nP[l] ) * kAtlasTexels;
+	}
+	const size_t bytes = texels * 16;
+	if ( !K.buf ) {
+		fn->glGenBuffers( 1, &K.buf );
+		fn->glGenTextures( 1, &K.tex );
+		K.owner = r;
+	}
+	QElapsedTimer t;
+	t.start();
+	if ( bytes > K.bytes ) {   // grows only: a smaller layout reads the front of it
+		fn->glBindBuffer( GL_COPY_WRITE_BUFFER, K.buf );
+		fn->glBufferData( GL_COPY_WRITE_BUFFER, GLsizeiptr( bytes ), nullptr, GL_DYNAMIC_COPY );
+		fn->glBindBuffer( GL_COPY_WRITE_BUFFER, 0 );
+		K.bytes = bytes;
+		K.attach = true;
+		relayout = true;
+	}
+	for ( int l = 0; l < m; l++ ) {
+		Cell & c = cascCell( l );
+		if ( !relayout && !c.fresh )
+			continue;
+		fn->glBindBuffer( GL_COPY_READ_BUFFER, c.buf );
+		fn->glBindBuffer( GL_COPY_WRITE_BUFFER, K.buf );
+		fn->glCopyBufferSubData( GL_COPY_READ_BUFFER, GL_COPY_WRITE_BUFFER, 0, GLintptr( size_t( K.base[l] ) * 16 ),
+			GLsizeiptr( size_t( nP[l] ) * kAtlasTexels * 16 ) );
+		c.fresh = false;
+		K.copies++;
+	}
+	fn->glBindBuffer( GL_COPY_READ_BUFFER, 0 );
+	fn->glBindBuffer( GL_COPY_WRITE_BUFFER, 0 );
+	K.copyMs = double( t.nsecsElapsed() ) / 1e6;
+	K.count = m;
+}
+
+/*! RTXCASCADE1: cascades 1..n-1 after cascade 0's frame. Cascade L = cascade 0's built step x 2^L (rtddgimath.h
+ *  cascadeScale), its window x 2^L; built only while cascade 0 is up (its step sizes them) */
+static void cascadesFrame( Scene * scene )
+{
+	if ( !scene || !scene->nifModel || !scene->renderer )
+		return;
+	Renderer * r = scene->renderer;
+	const int n = rtddgiCellShaderDefine() ? rtddgiCellCascades() : 1;
+	for ( int l = std::max( n, 1 ); l < rtddgi::kMaxCascades; l++ ) {   // past the count: freed
+		Cell & c = cascCell( l );
+		if ( c.pending || c.live || c.buf ) {
+			dropLive( c, r );
+			c.key = 0;
+			c.nif = nullptr;
+			say( c.tag + QStringLiteral( "freed (WW_CELL_RTDDGI_CASCADES %1)" ).arg( n ) );
+		}
+		c.refused.clear();
+	}
+	if ( n <= 1 ) {
+		if ( combined().buf )
+			freeCombined( r );
+		return;
+	}
+	static quint64 frame = 0;
+	frame++;
+	const CellSpec sp = cellSpecNow();
+	const Cell & c0 = cell();
+	for ( int l = 1; l < n; l++ ) {
+		Cell & c = cascCell( l );
+		if ( !c0.live || c0.nif != scene->nifModel ) {   // cascade 0 building or refused: no step to size this one from
+			if ( c.pending || c.live ) {
+				dropLive( c, r );
+				c.key = 0;
+			}
+			continue;
+		}
+		const RtDdgiVolume & v0 = c0.live->live.volume();
+		const double k = rtddgi::cascadeScale( l );
+		CellSpec q = sp;
+		q.spacing = float( double( v0.step[0] ) * k );
+		q.zscale = v0.step[0] > 0.0f ? v0.step[2] / v0.step[0] : sp.zscale;
+		q.reach = float( double( sp.reach ) * k );
+		q.text = sp.text + QStringLiteral( "|cascade %1 of step %2 x %3" ).arg( l ).arg( double( v0.step[0] ), 0, 'f', 3 )
+			.arg( double( v0.step[2] ), 0, 'f', 3 );
+		/* with a spec max (pictures): every frame, so a camera move scrolls it at once and rtddgiCellPending holds the
+		 * picture until it has its updates again (a stopped volume that did not move steps nothing); running: every
+		 * cevery^L frames (the cost lever) */
+		const bool due = rtddgi::cascadeDue( l, frame, sp.every ) || sp.max > 0;
+		// the census prefix carries the period: device ms a frame = sum over cascades of a set's ms / its period
+		c.tag = QStringLiteral( "cascade %1 (every %2 frames): " ).arg( l ).arg( qlonglong( std::llround( std::pow( double( std::max( sp.every, 1 ) ), l ) ) ) );
+		volumeFrame( scene, c, &q, due );
+	}
+	combinedUpdate( r, n, scene->nifModel );
+}
+
+void rtddgiCellFrame( Scene * scene )
+{
+	volumeFrame( scene, cell(), nullptr, true );   // M3's volume, cascade 0
+	cascadesFrame( scene );                        // RTXCASCADE1: nothing while WW_CELL_RTDDGI_CASCADES is 1
+}
+
 bool rtddgiCellPending()
 {
 	if ( !rtddgiCellShaderDefine() )
 		return false;
-	const Cell & c = cell();
-	if ( c.pending )
-		return true;   // the worker's build (a failed one is harvested by the next frame, then nothing is pending)
-	return c.live && c.live->spec.max > 0 && !c.stopped;
+	const int n = rtddgiCellCascades();
+	for ( int l = 0; l < n; l++ ) {   // RTXCASCADE1: every cascade (n = 1: M3's test exactly)
+		const Cell & c = cascCell( l );
+		if ( c.pending )
+			return true;   // the worker's build (a failed one is harvested by the next frame, then nothing is pending)
+		if ( c.live && c.live->spec.max > 0 && !c.stopped )
+			return true;
+		if ( l > 0 && !c.live && cell().live && c.refused.isEmpty() )
+			return true;   // a coarse cascade not started yet (it starts on the frame after cascade 0 is up)
+	}
+	return false;
 }
 
 void rtddgiCellUniforms( Scene * scene )
@@ -946,6 +1146,56 @@ void rtddgiCellUniforms( Scene * scene )
 	if ( locOn < 0 )
 		return;   // a program without the read: with the switch off, every program
 	Cell & c = cell();
+	// RTXCASCADE1: a program compiled under WW_CELL_RTDDGI_CASCADES reads the cascades' one texture buffer
+	if ( const int locCount = prog->uniLocation( "cellDdgiCount" ); locCount >= 0 ) {
+		Combined & K = combined();
+		int cnt = 0;   // the cascades still live (the copy's count was taken this frame, after every drop)
+		while ( cnt < K.count && cascCell( cnt ).live )
+			cnt++;
+		const bool on = cnt > 0 && K.owner == r && K.tex && c.nif == scene->nifModel;
+		auto fn = r->fn;
+		GLint prevActive = 0;
+		fn->glGetIntegerv( GL_ACTIVE_TEXTURE, &prevActive );
+		fn->glActiveTexture( GLenum( GL_TEXTURE0 + WwCellUnit::DdgiAtlas ) );
+		fn->glBindTexture( GL_TEXTURE_BUFFER, on ? K.tex : 0 );
+		if ( on && K.attach ) {
+			fn->glTexBuffer( GL_TEXTURE_BUFFER, GL_RGBA32F, K.buf );
+			K.attach = false;
+		}
+		fn->glActiveTexture( GLenum( prevActive ) );
+		prog->uni1i( "cellDdgiAtlas", WwCellUnit::DdgiAtlas );
+		prog->uni1b_l( locOn, on );
+		if ( !on )
+			return;
+		GLfloat org[4 * rtddgi::kMaxCascades] = {}, stp[4 * rtddgi::kMaxCascades] = {};
+		GLint dims[4 * rtddgi::kMaxCascades] = {}, base[rtddgi::kMaxCascades] = {};
+		for ( int l = 0; l < cnt; l++ ) {
+			const RtDdgiLive & L = cascCell( l ).live->live;
+			const RtDdgiVolume & v = L.volume();
+			for ( int a = 0; a < 3; a++ ) {
+				org[4 * l + a] = v.origin[a];
+				stp[4 * l + a] = v.step[a];
+				dims[4 * l + a] = v.dims[a];
+			}
+			org[4 * l + 3] = std::min( v.step[0], std::min( v.step[1], v.step[2] ) );
+			stp[4 * l + 3] = L.spec().bias;
+			dims[4 * l + 3] = v.probeCount();
+			base[l] = K.base[l];
+		}
+		fn->glUniform1i( locCount, cnt );
+		const int locO = prog->uniLocation( "cellDdgiCOrigin" ), locS = prog->uniLocation( "cellDdgiCStep" ),
+			locD = prog->uniLocation( "cellDdgiCDims" ), locB = prog->uniLocation( "cellDdgiCBase" );
+		if ( locO >= 0 )
+			fn->glUniform4fv( locO, cnt, org );
+		if ( locS >= 0 )
+			fn->glUniform4fv( locS, cnt, stp );
+		if ( locD >= 0 )
+			fn->glUniform4iv( locD, cnt, dims );
+		if ( locB >= 0 )
+			fn->glUniform1iv( locB, cnt, base );
+		prog->uni1i( "cellDdgiRed", cellRedBits() );
+		return;
+	}
 	const bool ready = c.live && c.uploaded && c.tex && c.glOwner == r && c.nif == scene->nifModel;
 	auto fn = r->fn;
 	GLint prevActive = 0;
