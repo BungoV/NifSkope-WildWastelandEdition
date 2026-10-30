@@ -33,6 +33,31 @@
   Link sweep (131 programs): base 393/393, rtx (WW_CELL_RTDDGI, none+ubo) 262/262 LINK OK. Build RC 0.
 - Owed (pictures when bungo asks): the still-camera crawl sequence (phase on, TAA), the brick-wall contact, the leaf
   shadows, the shadow cache's scroll cost while moving (the sphere covers more than the box).
+## GLASSPANE1 (2026-10-30): effect glass reads the env mask's R by default; the store glass and receive-shadows measured
+
+- **Effect (BGEM) glass, the env mask channel (FIX1030B item 4):** an effect shape's env cube is scaled by its env
+  mask's R channel (the specular mask), as the game's effect shader does. Measured over the game's shader package
+  (private notes): 202 of 202 effect pixel shaders with the env technique bit read the mask's R, times the env mask
+  scale and the normal map's alpha. NifSkope read G (gloss): over the 190 decoded vanilla env masks R averages 0.386
+  and G 0.465 (G/R median 1.14, up to 1 against 0.03 on reflexglass), so too much cube was added and the glass came
+  out milky. FXCHECK1 shipped the R read OFF; it is now the **default**, and its toggle (`WW_FX_ENVMASK` /
+  `WW/FxEnvMaskR`) is gone (no fix-only toggle). Red `WW_FX_ENVMASK_RED=gloss` = the old G read; `=noenv` = no cube.
+  The rule lives in `src/gl/glasspanerules.h` (`wwFxEnvMaskRule`), read live by renderer.cpp `wwFxEnvMaskMode`;
+  the stage table drops `WW_FX_ENVMASK`. Shader unchanged (`envMaskR` was already there).
+- **Gate:** `tests/glasspane1/run.sh <out> [<Data dir> [<resource roots>]]`: `glass_census.py` reads the
+  Materials and texture BA2s by bytes (no NifSkope), the unit `glasspane_test.cpp` judges the header's default on every
+  decoded mask: green `GLASSPANE PASS 6` (0 of 190 masks off the game's R); red `-DGLASSPANE_RED` (the base's G default)
+  fails the rule and the census (144 of 190 masks, 138 of 171 panes off by > 0.02, cube x 1.206 overall).
+- **The hardware store's glass (item 2), measured, nothing coded:** `GlassWindows01.BGSM` says receive shadows 0,
+  and so do **8840 of 8911** vanilla BGSMs (99.2%: bricks, rubble, terrain, actors; 98.8% on bungo's 43-root stack).
+  A rule "receive shadows 0 = no shadow" would unshadow nearly the whole world, which the game does not do, so the
+  flag is not honoured (the census prints `A VERDICT receive-shadows rule: REFUSED`). The pale panes: the census twin
+  of the material (albedo over the alpha-test-kept texels, linear 0.146 = sRGB 0.41 grey; `_s` R 0.125 G 0.490; its own
+  cube 0.088 linear) puts the env cube term at 0.0172 per unit of light by the game's deferred law and by ours alike
+  (12% of the albedo), the panes face the sun at c3_fin_c (N.L 0.47 / 0.68, no backlight), and the sun's specular is
+  ~0 there: no material term of our path is above the game's. The pale look is the sheet's own light-grey albedo in
+  the sun; what else lights it (the GI's sky, 1.5 to 4.4x the weather's ambient per axis in that scene's notes) is a
+  GI matter, not the glass.
 
 ## CAMGATE1 (2026-10-30): the camera never shows an out-of-bounds or under-terrain view
 

@@ -39,6 +39,7 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include "gl/cellvrs.h"	// lane VRS1
 #include "gl/cellfxres.h"	// lane FXRES1
 #include "gl/celluniform.h"	// lane CELLUNI1
+#include "gl/glasspanerules.h"	// lane GLASSPANE1: the effect shader's env mask channel
 #include "wwswitch.h"	// lane TESTDRIVER1: the WW_* switch store
 
 #include "message.h"
@@ -352,24 +353,29 @@ static const QString grayCube = "#FF555555c";
 static const QString pbr_lut_sf = "#sfpbr.dds";
 
 /* lane FXCHECK1: the game scales an effect's cube by the env mask's R (specular), not G (gloss, often 1.0).
- * WW/FxEnvMaskR or WW_FX_ENVMASK (off until seen); red WW_FX_ENVMASK_RED=gloss (old) | noenv (no cube). */
-bool wwFxEnvMaskR()
+ * lane GLASSPANE1: the default since 10-30 (src/gl/glasspanerules.h: 202 of 202 of the game's env effect pixel shaders
+ * read R; the R read matches all 190 decoded vanilla env masks, the old G read is off on 144). The WW_FX_ENVMASK /
+ * WW/FxEnvMaskR toggle is gone (no fix-only toggle); reds WW_FX_ENVMASK_RED=gloss (the old G read) | noenv (no cube). */
+static WwFxEnvMask wwFxEnvMaskMode()
 {
 	WW_SWITCH_STATIC( int, v, [] {	// lane LIVESET1: follows a live set (the uniform is set per draw)
-		const QByteArray red = qgetenv( "WW_FX_ENVMASK_RED" ).trimmed();
-		const QByteArray pin = qgetenv( "WW_FX_ENVMASK" ).trimmed();
-		const bool on = !pin.isEmpty() ? pin != "0" : QSettings().value( QStringLiteral( "WW/FxEnvMaskR" ), false ).toBool();
-		const bool r = on && red != "gloss";
-		fprintf( stderr, "fx env mask: %s\n", r ? "R (the game's)" : on ? "G (red WW_FX_ENVMASK_RED=gloss)" : "G (as before)" );
-		return r ? 1 : 0;
+		const QByteArray red = wwEnv( "WW_FX_ENVMASK_RED" ).trimmed();
+		const WwFxEnvMask m = wwFxEnvMaskRule( red.constData() );
+		fprintf( stderr, "fx env mask: %s\n", m == WwFxEnvMask::R ? "R (the game's)"
+			: m == WwFxEnvMask::G ? "G (red WW_FX_ENVMASK_RED=gloss)" : "no cube (red WW_FX_ENVMASK_RED=noenv)" );
+		return int( m );
 	}() );
-	return v != 0;
+	return WwFxEnvMask( v );
+}
+
+bool wwFxEnvMaskR()
+{
+	return wwFxEnvMaskMode() == WwFxEnvMask::R;
 }
 
 static bool wwFxEnvNone()
 {
-	WW_SWITCH_STATIC( bool, v, qgetenv( "WW_FX_ENVMASK_RED" ).trimmed() == "noenv" );
-	return v;
+	return wwFxEnvMaskMode() == WwFxEnvMask::None;
 }
 
 /* lane LANDSPEC1: the game's LOD land spec on the ground (src/landlodspec.h): far LOD terrain whole, the cells' LAND by
