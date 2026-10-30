@@ -47,6 +47,7 @@ uniform vec3 cvTint[3];	// CLOUD1's band tints (Low, Mid, High): a linear albedo
 uniform sampler2D cvScene;	// lane CLOUD2B: the scene's window depth (the last frame's), r = farthest sample
 uniform vec4 cvSceneZ;	// the projection's [2][2], [3][2]; km per view unit; 1 = clip the march at the scene
 uniform float cvTopOn;	// lane CLOUD2C: the light the cloud below reflects back up (0 = the red notop)
+uniform float cvAmbDark;	// lane CLOUDBAND1 (b): 1 = the sky's ambient through the cloud above (0 = Off: the height ramp)
 #ifdef WW_CLOUD_VARIETY
 uniform float cvAmbKm;	// lane CLOUD5: the span of the ambient's height ramp (the bands without the towers), km
 #endif

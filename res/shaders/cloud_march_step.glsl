@@ -63,7 +63,25 @@
 		ph = max( ph, fd / kPi );
 	}
 	vec3 tint = p.z < cvBands.topKm.x ? cvTint[0] : cvTint[1];
-	vec3 S = kCvAlbedo * tint * ( key * ph + cvAmbOn * cvAmb * mix( 0.5, 1.0, hf ) );
+	float ambF = mix( 0.5, 1.0, hf );
+	/* lane CLOUDBAND1 (b), RDR2's darker sky light inside thick cloud (Bauer 2019 darkens it by a sun-ward sample): the open
+	 * sky's light reaching the sample is its transmission through the column above: the delta-Eddington scaled direct
+	 * part exp(-(1 - g^2 w) tau / 0.6) + the two-stream Tdif, both at mu 0.6 (the diffusivity cosine), tau from three
+	 * taps straight up to the top of the sample's band.
+	 * Off keeps the 0.5 .. 1 height ramp (a dense deck's base kept half the sky: 7.9x the Monte Carlo at tau 40). */
+	if ( cvAmbDark > 0.5 ) {
+		float topZ = p.z < cvBands.topKm.x ? cvBands.topKm.x : cvBands.topKm.y;
+		float span = max( topZ - p.z, 0.0 ), tauU = 0.0;
+		for ( int k = 0; k < 3; k++ ) {
+			float tk = span * ( float( k ) + 0.5 ) / 3.0;
+			vec3 pu = p + up * tk;
+			pu.z = p.z + tk;
+			tauU += cvDens( pu ) * kCvSigma * span / 3.0;
+		}
+		// the direct part of the delta-Eddington scaled slab (the forward peak counts as passed through, as in cvTdif)
+		ambF = exp( -( 1.0 - cvMsG * cvMsG * kCvAlbedo ) * tauU / 0.6 ) + cvTdif( tauU, 0.6, cvMsG, kCvAlbedo );
+	}
+	vec3 S = kCvAlbedo * tint * ( key * ph + cvAmbOn * cvAmb * ambF );
 	float tr = exp( -dens * kCvSigma * dt );
 	float w = T * ( 1.0 - tr );
 	L += S * w;	// Frostbite: S (1 - e^(-sigma dt)) / sigma x sigma_s, sigma_s = albedo sigma

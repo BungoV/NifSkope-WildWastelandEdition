@@ -11,6 +11,11 @@ for r in ign noaccum noclamp; do
 	python -I tests/spells/cloudband_check.py "$S/$r" --red $r --only LMGF < /dev/null > "$S/red_$r.log" 2>&1
 	rc=$?; echo "red $r rc=$rc (want 1)"; [ $rc -eq 1 ] || fail=1
 done
+# item (b): the ambient through the cloud above
+python -I tests/spells/cloudamb_check.py "$S/amb" --only A < /dev/null > "$S/amb.log" 2>&1
+rc=$?; echo "amb green rc=$rc (want 0)"; [ $rc -eq 0 ] || fail=1
+python -I tests/spells/cloudamb_check.py "$S/amb" --red flatamb --only A < /dev/null > "$S/amb_red.log" 2>&1
+rc=$?; echo "amb red flatamb rc=$rc (want 1)"; [ $rc -eq 1 ] || fail=1
 python -I tests/cloudband/stage_check.py src/wwswitchstages.inc
 rc=$?; echo "stage rc=$rc (want 0)"; [ $rc -eq 0 ] || fail=1
 git show f46b1c76:src/wwswitchstages.inc > "$S/base_stages.inc" 2>/dev/null && {

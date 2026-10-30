@@ -1,5 +1,19 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## CLOUDBAND1 (b) (2026-10-30): the sky's light inside thick cloud (RDR2 look), WW_CLOUDVOL_AMBDARK
+
+- Off (today) lights each march sample with the open sky's mean radiance x a 0.5 .. 1 height ramp, so a dense deck's
+  base keeps half the sky's light however thick it is (MEASURED offline: 7.9x a Monte Carlo at tau 40; the underside stays
+  sky-blue). On (`WW_CLOUDVOL_AMBDARK` 0/1, ships Off, live; uniform cvAmbDark in every march program): the ambient
+  reaching a sample is the sky's x its transmission through the column above, the delta-Eddington scaled direct part
+  exp(-(1 - g^2 w) tau / 0.6) plus the two-stream Tdif at mu 0.6 (the diffusivity cosine), tau from three taps straight
+  up to the top of the sample's band (Bauer 2019, RDR2, darkens the ambient by a sun-ward sample; straight up is the
+  column the sky light crosses). Red `WW_CLOUDVOL_RED=flatamb` (the ramp). Notes: `,ambdark=column`.
+- Gate (tests/spells/cloudamb_check.py, the real cloud_march / cloud_march_v): a uniform slab, the sun off, seen from
+  under it, vs a Monte Carlo of the slab under a uniform sky: On 0.835 / 0.872 / 1.020 x MC at tau 2.5 / 10 / 40 (bar
+  0.67 .. 1.5); Off 0.681 / 1.087 / 7.946 (fails at 40); red flatamb FAILS. Cost (1080p Ultra march, offline): 0.103 ->
+  0.122 ms, variety 0.758 -> 0.903 ms. CLOUD2's and CLOUD5's gates still pass with it Off (the uniform's default 0).
+
 ## CLOUDBAND1 (2026-10-30): the volume clouds' diagonal banding; Cloud Accumulation (RDR2's temporal accumulation)
 
 - **What made the diagonal lines** (bungo 10-30, a cloud-edge crop: "the clouds have banding"; MEASURED offline,

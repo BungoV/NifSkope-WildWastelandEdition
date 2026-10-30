@@ -75,6 +75,7 @@ struct CvState
 	int variety = 0;	// lane CLOUD5: the Cloud Variety row
 	bool varietyPinned = false;
 	int accum = 0;	// lane CLOUDBAND1: Cloud Accumulation (WW_CLOUDVOL_ACCUM)
+	int ambDark = 0;	// lane CLOUDBAND1 (b): the sky's ambient through the cloud above (WW_CLOUDVOL_AMBDARK)
 };
 
 CvState & cs()
@@ -115,6 +116,10 @@ CvState & cs()
 		 * clamped history (cloud_march_a / cloud_fly_a / cloud_resolve_a); Off draws the old programs unchanged. */
 		const QString a = wwEnvStr( "WW_CLOUDVOL_ACCUM" ).trimmed().toLower();
 		s.accum = ( a == QLatin1StringView( "1" ) || a == QLatin1StringView( "on" ) ) ? 1 : 0;
+		/* lane CLOUDBAND1 (b), RDR2's darker sky light inside thick cloud: the march's ambient through the column above
+		 * (cloud_march_step.glsl cvAmbDark; gate tests/spells/cloudamb_check.py), ships Off, live. Off: the height ramp. */
+		const QString ad = wwEnvStr( "WW_CLOUDVOL_AMBDARK" ).trimmed().toLower();
+		s.ambDark = ( ad == QLatin1StringView( "1" ) || ad == QLatin1StringView( "on" ) ) ? 1 : 0;
 	}
 	return s;
 }
@@ -515,6 +520,7 @@ struct CvRedo
 	int blueSlice = 0;	// lane CLOUD5 round 2: the blue noise slice of this 16-frame refresh cycle
 	bool accum = false;	// lane CLOUDBAND1: the *_a twins (Cloud Accumulation)
 	float accAlpha = 1.0f;	// the fresh march's weight (cloudvolmath.h accumAlpha; 1 = none)
+	bool ambDark = false;	// lane CLOUDBAND1 (b): cvAmbDark
 	double secs = 0.0;
 	bool histOn = false;
 	float prevCam[9] = {}, prevProj[4] = {}, prevKm[3] = {};
@@ -592,6 +598,7 @@ bool marchPass( Renderer * r, CvGpu & g, const CvRedo & d, const WwAtmoFrame & f
 	p->uni1f( "cvMsOn", noMs ? 0.0f : 1.0f );
 	p->uni1f( "cvMsG", V::msMeanCosine( drop ) );
 	p->uni1f( "cvTopOn", red( "notop" ) ? 0.0f : 1.0f );	// lane CLOUD2C: the light the cloud below reflects up
+	p->uni1f( "cvAmbDark", d.ambDark && !red( "flatamb" ) ? 1.0f : 0.0f );	// lane CLOUDBAND1 (b); red flatamb: the ramp
 	// lane CLOUDLOOK1: literal names (the location cache keys on the name's address; a heap name per loop set all three
 	// through cvTint[0]). Red tintname: the old heap names.
 	static const char * const kTint[3] = { "cvTint[0]", "cvTint[1]", "cvTint[2]" };
@@ -1023,6 +1030,7 @@ bool wwCloudVolDraw( Scene * scene, const WwCloudVolView & view, QStringList & d
 	/* lane CLOUDBAND1: the accumulation's weight by refresh cycle since the history began (a reset, a resize, a jump);
 	 * a harness run marches every pixel every frame, so it takes each march whole (weight 1: a picture of its pins) */
 	d.accum = s.accum != 0;
+	d.ambDark = s.ambDark != 0;
 	if ( !histOn )
 		g.accFrom = g.frame;
 	d.accAlpha = everyPixel ? 1.0f : V::accumAlpha( static_cast<long long>( ( g.frame - g.accFrom ) / 16 ) );
@@ -1134,6 +1142,8 @@ bool wwCloudVolDraw( Scene * scene, const WwCloudVolView & view, QStringList & d
 		reds += QStringLiteral( ",accum=%1%2" ).arg( double( d.accAlpha ), 0, 'f', 3 )
 			.arg( g.blue ? QString() : QStringLiteral( " (no blue noise: IGN)" ) );
 	}
+	if ( d.ambDark )	// lane CLOUDBAND1 (b): the echo a row's notes need (absent when Off)
+		reds += red( "flatamb" ) ? QStringLiteral( ",RED=flatamb" ) : QStringLiteral( ",ambdark=column" );
 	// lane CLOUD2C: clip = which scene depth ends the march (last = the last paint's, this = this paint's, after the scene)
 	const QString clip = sceneOn ? QStringLiteral( "last" ) : g.redo ? QStringLiteral( "this" ) : QStringLiteral( "none" );
 	s.last = ok ? QStringLiteral( "volclouds:%1(hist=%2x%3,march=%4x%5,steps=%6,taps=%7,key=%8,map=%9,mem=%10MB,clip=%11,"
