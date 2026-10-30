@@ -46,6 +46,7 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include "gl/glmesh.h"
 #include "gl/gltex.h"	// lane TREELEAF2: TexCache::wwCovArmed
 #include "gl/wwleafcov.h"	// lane TREELEAF2
+#include "gl/wwfxcov.h"	// lane TREELEAF3
 #include "glview.h"
 
 #include <QDebug>
@@ -380,6 +381,34 @@ float Shape::wwLeafSideThreshold( const WwDrawAlpha & da, const char * pass ) co
 		return da.threshold;
 	return WwLeafCov::sideThreshold( wwLeafIn( this, bssp, bslsp, alphaProperty, scene, translucent ), da.fromMaterial,
 		da.threshold );
+}
+
+Shape::WwFxAlpha Shape::wwFxSideAlpha( const WwDrawAlpha & da, const char * pass ) const
+{
+	/* lane TREELEAF3 (src/gl/wwfxcov.h): an alpha-tested effect shape's side pass tests the colour pass's composed alpha.
+	 * The vertex alpha is read exactly when setupProgramCE1 leaves vertexColorOverride.a at 0 (FO4: colours present and
+	 * shown, Vertex Alpha shown, no Tree_Anim; the vertex-colour view reads them always). */
+	WwFxCov::In in;
+	in.lightingAlpha = bslsp ? bslsp->alpha : 1.0f;
+	in.threshold = wwLeafSideThreshold( da, pass );
+	in.effect = bsesp && bssp && bssp->bsVersion >= 130 && bssp->bsVersion <= 139 && da.test;
+	if ( in.effect ) {
+		in.baseColorA = bsesp->getAlpha();
+		in.greyscaleAlpha = bsesp->greyscaleAlpha;
+		in.strict = da.fromMaterial || ( alphaProperty && alphaProperty->alphaTestFunc() == 4 );
+		const bool vcs = hasVertexColors && !colors.isEmpty() && colors.size() >= verts.size();
+		if ( scene && scene->hasVisMode( Scene::VisVertexColors ) )
+			in.vertexAlpha = vcs;
+		else
+			in.vertexAlpha = vcs && scene && scene->hasOption( Scene::DoVertexColors )
+				&& scene->hasOption( Scene::DoVertexAlpha ) && !isVertexAlphaAnimation;
+	}
+	const WwFxCov::Side s = WwFxCov::side( in, wwLeafPassRed( "fx" ) );
+	WwFxAlpha o;
+	o.mode = s.mode;
+	o.mult = s.mult;
+	o.threshold = s.threshold;
+	return o;
 }
 
 Vector3 Shape::skinVertex( int vertexIndex, const Vector3 & local ) const

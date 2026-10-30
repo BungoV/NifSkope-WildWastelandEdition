@@ -184,6 +184,17 @@ public:
 	/*! lane TREELEAF2: the threshold a side pass uploads for its `discard a < t` test (da = wwDrawAlpha of that pass), so
 	 *  it keeps the colour pass's texels: the next float above ref / 255 where the colour test is a strict `>` */
 	float wwLeafSideThreshold( const WwDrawAlpha & da, const char * pass ) const;
+	/*! lane TREELEAF3: what a side pass's `discard a < t` test reads (src/gl/wwfxcov.h Side): fxMode, the alpha factor
+	 *  and the threshold. A lighting shape: today's (mode 0, its material alpha, wwLeafSideThreshold); an alpha-tested
+	 *  effect shape (fo4_effectshader): the colour pass's composed alpha (baseColor.a^2, the vertex alpha, the palette's
+	 *  alpha) and its strict `>`. Red WW_TREELEAF_RED=fx (or 1 / side): the raw base alpha, `>=`. */
+	struct WwFxAlpha
+	{
+		int mode = 0;	// 0 today's test; 4 + 1 the vertex alpha + 2 the palette's alpha
+		float mult = 1.0f;
+		float threshold = 0.0f;
+	};
+	WwFxAlpha wwFxSideAlpha( const WwDrawAlpha & da, const char * pass ) const;
 	//! the GPU applies the bone transforms to this shape (the caster pass skins it on the CPU)
 	bool wwGpuSkinned() const { return isSkinned && !transformRigid && !boneTransforms.empty(); }
 	//! lane FARDRAW1: the instanced far ring this shape draws, or null

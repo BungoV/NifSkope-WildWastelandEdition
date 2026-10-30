@@ -195,6 +195,9 @@ HEADERS += \
 	src/gl/glscene.h \
 	src/gl/glshape.h \
 	src/gl/gltex.h \
+	src/gl/wwleafcov.h \
+	src/gl/wwalphacov.h \
+	src/gl/wwfxcov.h \
 	src/gl/gltools.h \
 	src/gl/hknpdecode.h \
 	src/hkxanim.h \
