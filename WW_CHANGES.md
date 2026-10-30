@@ -1,5 +1,27 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## CLOUD6d (2026-10-30, FIX1030C): one cloud profile set per weather, no towers beside puffs (on; WW_CLOUDVOL_PROFILESET=0 = before)
+
+- **What changed:** with Cloud Variety on, each weather's Low clouds now take ONE cloud type everywhere in its sky (the
+  type its record gives: fair = cumulus, cloudy = stratocumulus, rain = cumulonimbus, snow / radstorm = stratiform),
+  instead of CLOUD5's weather noise swinging the type +- 0.15..0.25 from place to place (storm towers 7 km deep beside
+  1.5 km cumulus, fair-weather 3.6 km heaps beside 0.7 km puffs). RDR2 picks one height profile per weather (Bauer 2019,
+  SIGGRAPH Advances, slide 16 + its note: "LUT defines altitude-based shape ... slice determined by weather parameters").
+  Big masses beside small puffs stay: the coverage swing is unchanged.
+- **Census first** (107 vanilla WTHR records, notes/fix1030c/cloud6d census_profiles.py): 66 have Low cloud, and all 66
+  spanned two cloud families under the old swing (26 % of the sky's area off the weather's own family on average; local
+  cloud depth p90/p10 3.1x on average, 4.1x worst). The sheet (Fill) share is 0 in 64 of 66, so the type is the only mix.
+  Also found: the thunder byte (DATA 10) is 133..255 in every vanilla weather, so every rain weather reads as a storm.
+- **Switch:** `WW_CLOUDVOL_PROFILESET` (live, stage 0; cloudvol.cpp cs() re-reads it): unset = on; `0` / `off` or
+  `WW_CLOUDVOL_RED=typemix` = the red, CLOUD5's type swing. Notes echo `,profileset=one` / `,RED=typemix` on the
+  `,variety=` line. Cloud Variety Off draws exactly as before (the type is not read there). No shader changed.
+- **Gate (offline, real driver, tests/spells/cloudprofile_check.py; `bash tests/cloudprofile/run.sh <scratch>`):** per
+  census class (uniform map at the class's coverage, the coverage swing on, 384 km at 0.5 km), cloud tops p90/p10 of
+  the substantial columns, bar <= 1.67 (one family step): Pleasant 1.28 (red 3.51), Rainy 1.26 (red 2.45), Cloudy 1.36
+  (red 2.16), Snow 1.20 (red 1.58, INFO). Coverage == map within 0.022 (bar 0.06); 12 km tile std (the masses) kept
+  (>= 0.97x the red). The Low band's top falls with the tallest type (storm 7.00 -> 5.35 km, fair 3.60 -> 1.22 km).
+  Reds: typemix and `=0` fail P; the base's sources fail the wiring check; the base's stage table lacks the name.
+
 ## SKYSHARDS3 (2026-10-30, CODE1030): the far rings never draw with the bindless twin (the shards in Concord's sky)
 
 - The faceted, ground-textured shards (and two bright glows) floating ~3 km over Concord, a new shape every frame, were

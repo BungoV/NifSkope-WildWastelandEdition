@@ -76,6 +76,7 @@ struct CvState
 	bool varietyPinned = false;
 	int accum = 0;	// lane CLOUDBAND1: Cloud Accumulation (WW_CLOUDVOL_ACCUM)
 	int ambDark = 0;	// lane CLOUDBAND1 (b): the sky's ambient through the cloud above (WW_CLOUDVOL_AMBDARK)
+	int profileSet = 1;	// lane CLOUD6d: one cloud profile set per weather (WW_CLOUDVOL_PROFILESET)
 };
 
 CvState & cs()
@@ -122,6 +123,10 @@ CvState & cs()
 		 * lane CLOUDBAND2: the DEFAULT; WW_CLOUDVOL_AMBDARK=0 / off is the old ramp, kept as the red (as is RED=flatamb). */
 		const QByteArray ad = wwEnvStr( "WW_CLOUDVOL_AMBDARK" ).trimmed().toLower().toLatin1();
 		s.ambDark = V::defaultOnSwitch( ad.constData() ) ? 1 : 0;
+		/* lane CLOUD6d (RDR2: one height-LUT slice per weather, Bauer 2019 slide 16): the weather's cloud type everywhere
+		 * in its sky (cloudmath.h lowTypeOf oneSet), the DEFAULT, live; WW_CLOUDVOL_PROFILESET=0 / off = CLOUD5's swing */
+		const QByteArray ps = wwEnvStr( "WW_CLOUDVOL_PROFILESET" ).trimmed().toLower().toLatin1();
+		s.profileSet = V::defaultOnSwitch( ps.constData() ) ? 1 : 0;
 	}
 	return s;
 }
@@ -849,6 +854,11 @@ bool wwCloudVolVarietyOn()
 	return s.variety != 0 && s.tier >= 2;
 }
 
+bool wwCloudVolProfileSet()
+{
+	return cs().profileSet != 0 && !red( "typemix" );	// lane CLOUD6d: the red typemix = CLOUD5's type swing
+}
+
 bool wwCloudVolLowColour( float out[3] )
 {
 	CvState & s = cs();
@@ -1134,6 +1144,8 @@ bool wwCloudVolDraw( Scene * scene, const WwCloudVolView & view, QStringList & d
 		reds += QStringLiteral( ",variety=type %1+-%2 lowtop %3km light %4km" ).arg( double( b.var.type ), 0, 'f', 3 )
 			.arg( double( b.var.spread ), 0, 'f', 3 ).arg( double( b.topKm[0] - b.baseKm[0] ), 0, 'f', 2 )
 			.arg( double( varLightKm( b, pr ) ), 0, 'f', 2 );
+		// lane CLOUD6d: the echo a row's notes need (the profile set, or the old type swing as the red)
+		reds += wwCloudVolProfileSet() ? QStringLiteral( ",profileset=one" ) : QStringLiteral( ",RED=typemix" );
 	}
 	if ( d.accum ) {	// lane CLOUDBAND1: the echo a row's notes need to prove the accumulation drew (absent when Off)
 		for ( const char * w : { "noaccum", "noclamp" } )
