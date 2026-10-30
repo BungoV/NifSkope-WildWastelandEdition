@@ -3516,6 +3516,35 @@ bool waterMarkCarryPut( const QString & path, const WaterMarkCarry & carry, QStr
 	return rep.dropped == 0 && rep.unmapped == 0;
 }
 
+QString waterMarkRebakeNote( const QString & path )
+{
+	if ( wwEnv( "WW_WATER_REBAKE_NOTE_RED" ).trimmed() == "off" )
+		return QString();
+	const QString kept = path + QStringLiteral( ".premarks" );
+	if ( path.isEmpty() || !QFileInfo::exists( kept ) )
+		return QString();
+	const QString keptName = QFileInfo( kept ).fileName();
+	WaterMarkCarry carry;
+	QString note;
+	const bool have = waterMarkCarryTake( kept, carry, &note );
+	if ( !have ) {
+		if ( !note.isEmpty() )
+			return QStringLiteral( "a re-bake kept the file before it as %1: %2" ).arg( keptName, note );
+		return QStringLiteral( "%1 (the file before a re-bake) sits beside this one but holds no marks; it can "
+			"be deleted" ).arg( keptName );
+	}
+	/* the carry the bake ran, again, on this file in memory only: the same
+	 * census line the bake printed (the document is never saved here) */
+	WaterMarkDoc d;
+	QString err;
+	if ( !d.open( path, &err ) )
+		return QStringLiteral( "a re-bake kept the file before it as %1; this file would not open to compare (%2)" )
+			.arg( keptName, err );
+	WaterMarkCarryReport rep;
+	d.carryIn( carry, rep );
+	return QStringLiteral( "a re-bake kept the marked file before it as %1 -- %2" ).arg( keptName, rep.line() );
+}
+
 bool lodtWaterMarkFixture( const QString & path, QString * text, QString * error )
 {
 	auto fail = [error]( const QString & m ) {
@@ -4726,6 +4755,74 @@ bool lodtWaterMarkSelfTest( const QString & path, QString * text, QString * erro
 			bestArea = b.area;
 			river = i;
 		}
+	}
+	/* Lane FARWATER2: THE RIVER HAS A MOUTH. The mouth gates (F5's "the mean
+	 * direction points at the mouth" and the dye's four) need the river to
+	 * TOUCH the body it drains into, within the dye solve's own reach (an
+	 * outlet texel within dx*dx + dy*dy <= 6 of a river texel, solveDye's
+	 * DyeMouth rule). The largest river outright is no such river on the
+	 * Commonwealth v4 bake: body 2 drains into body 19 and never touches it,
+	 * so the dye had no mouth and the selftest read 8 FAIL whatever the code
+	 * did. Now: the largest river (ties by id) whose outlet touches it; the
+	 * largest river outright only when none does. Red:
+	 * WW_WATER_MARK_BODY_RED=largest (the old pick). */
+	if ( wwEnv( "WW_WATER_MARK_BODY_RED" ).trimmed() != "largest" ) {
+		QVector<QPair<quint32, int>> rivers;
+		for ( int i = 1; i <= doc.bodyCount(); i++ ) {
+			LodtWaterBody b;
+			doc.body( i, b );
+			if ( b.cls == 1 && b.area > 0 )
+				rivers.append( qMakePair( b.area, i ) );
+		}
+		std::sort( rivers.begin(), rivers.end(), []( const QPair<quint32, int> & a,
+			const QPair<quint32, int> & b ) { return a.first != b.first ? a.first > b.first : a.second < b.second; } );
+		auto touchesOutlet = [&]( const LodtWaterBody & b ) {
+			if ( !b.outlet || int( b.outlet ) == int( b.id ) )
+				return false;
+			int px0 = 0, py0 = 0, px1 = 0, py1 = 0;
+			doc.worldToTexel( double( b.x0 ) * kCellUnits, double( b.y0 ) * kCellUnits, px0, py0 );
+			doc.worldToTexel( ( double( b.x1 ) + 1.0 ) * kCellUnits,
+				( double( b.y1 ) + 1.0 ) * kCellUnits, px1, py1 );
+			auto idAt = [&]( int px, int py ) {
+				double wx = 0.0, wy = 0.0;
+				doc.texelToWorld( px, py, wx, wy );
+				return doc.bodyAtWorld( wx, wy );
+			};
+			for ( int py = py0; py <= py1; py++ )
+				for ( int px = px0; px <= px1; px++ ) {
+					if ( idAt( px, py ) != b.id )
+						continue;
+					for ( int dy = -2; dy <= 2; dy++ )
+						for ( int dx = -2; dx <= 2; dx++ )
+							if ( dx * dx + dy * dy <= 6 && idAt( px + dx, py + dy ) == b.outlet )
+								return true;
+				}
+			return false;
+		};
+		QStringList passed;
+		int chosen = 0;
+		for ( const auto & r : rivers ) {
+			LodtWaterBody b;
+			doc.body( r.second, b );
+			if ( touchesOutlet( b ) ) {
+				chosen = r.second;
+				break;
+			}
+			passed << QStringLiteral( "body %1 (%2 texels, outlet %3)" ).arg( r.second ).arg( r.first )
+				.arg( b.outlet );
+		}
+		if ( chosen ) {
+			river = chosen;
+			LodtWaterBody cb;
+			doc.body( river, cb );
+			bestArea = cb.area;
+		}
+		say( QStringLiteral( "the river: the largest whose outlet touches it, body %1%2" )
+			.arg( chosen ? QString::number( chosen ) : QStringLiteral( "none -- the largest outright, %1" ).arg( river ) )
+			.arg( passed.isEmpty() ? QString()
+				: QStringLiteral( "; passed over (outlet out of reach): %1" ).arg( passed.join( QStringLiteral( ", " ) ) ) ) );
+	} else {
+		say( QStringLiteral( "WW_WATER_MARK_BODY_RED=largest: the largest river outright, body %1" ).arg( river ) );
 	}
 	for ( int i = 1; i <= doc.bodyCount(); i++ ) {
 		LodtWaterBody b;

@@ -609,6 +609,7 @@ public:
 	{
 		delete doc;
 		doc = new WaterMarkDoc();
+		rebakeNote.clear();
 		QString err;
 		if ( !doc->open( path, &err ) ) {
 			refusal = err;
@@ -619,6 +620,9 @@ public:
 			return false;
 		}
 		refusal.clear();
+		/* lane FARWATER2: a re-bake that could not carry every mark left the old
+		 * file as .premarks -- say what was carried, from the files themselves */
+		rebakeNote = waterMarkRebakeNote( path );
 		fileEdit->setText( path );
 		formBox->clear();
 		for ( quint32 f : doc->waterForms() )
@@ -718,6 +722,8 @@ public:
 				text += QStringLiteral( "\n" ) + doc->describeBody( selected );
 			if ( !lastSolve.isEmpty() )
 				text += QStringLiteral( "\n" ) + lastSolve;
+			if ( !rebakeNote.isEmpty() )
+				text += QStringLiteral( "\n" ) + rebakeNote;
 		}
 		summary->setText( text );
 		summary->setStyleSheet( QStringLiteral( "color: %1;" )
@@ -736,6 +742,7 @@ public:
 	}
 
 	QString refusalText() const { return refusal; }
+	QString rebakeText() const { return rebakeNote; }
 	void setRefusal( const QString & r ) { refusal = r; refreshSummary(); }
 
 private:
@@ -766,6 +773,7 @@ private:
 	MarkSection * bakeSection = nullptr;
 	QColor pick = QColor( 60, 130, 200 );
 	QString refusal, lastSolve;
+	QString rebakeNote;   //!< lane FARWATER2: waterMarkRebakeNote() of the open file
 	int selected = 0;
 	bool loadingBody = false;
 };

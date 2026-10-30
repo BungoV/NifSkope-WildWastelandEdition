@@ -7172,6 +7172,9 @@ int usage()
 		  << "                                          stroke, names, a colour, a still\n"
 		  << "                                          lake, a dye mouth) and save it; the\n"
 		  << "                                          re-bake gate of tests/farwater1\n"
+		  << "  lodl <file.lodl> --water-rebake-note    the line the marking panel shows\n"
+		  << "                                          about the last re-bake (from a\n"
+		  << "                                          <file>.premarks beside it; read only)\n"
 		  << "  lodl <file.lodl> --water-info <dir>     the water shader's sparse tables (index,\n"
 		  << "                                          atlas, bodies, census, sky line) into <dir>, and the\n"
 		  << "                                          land side's (land_index, land_atlas)\n"
@@ -8327,6 +8330,7 @@ int nifskopeCliMain( const QStringList & args )
 	bool lodtWaterSelfTestOnly = false;
 	bool lodtWaterMarkSelfTestOnly = false;
 	bool lodtWaterMarkFixtureOnly = false;	// lane FARWATER1
+	bool lodtWaterRebakeNoteOnly = false;	// lane FARWATER2
 	bool lodtWaterSlopeSelfTestOnly = false;
 	QString lodlWaterInfoDir;	// lane WATERDATA1
 	QString lodtWaterSlopeFlat;
@@ -8611,6 +8615,7 @@ int nifskopeCliMain( const QStringList & args )
 		else if ( t == QLatin1String( "--water-selftest" ) ) lodtWaterSelfTestOnly = true;
 		else if ( t == QLatin1String( "--water-mark-selftest" ) ) lodtWaterMarkSelfTestOnly = true;
 		else if ( t == QLatin1String( "--water-mark-fixture" ) ) lodtWaterMarkFixtureOnly = true;
+		else if ( t == QLatin1String( "--water-rebake-note" ) ) lodtWaterRebakeNoteOnly = true;
 		else if ( t == QLatin1String( "--water-slope-selftest" ) ) lodtWaterSlopeSelfTestOnly = true;
 		else if ( t == QLatin1String( "--water-info" ) ) lodlWaterInfoDir = next();
 		else if ( t == QLatin1String( "--water-slope-flat" ) ) lodtWaterSlopeFlat = next();
@@ -9952,6 +9957,13 @@ int nifskopeCliMain( const QStringList & args )
 			else
 				err() << "error: " << werr << Qt::endl;
 			rc = ok ? 0 : 1;
+		} else if ( lodtWaterRebakeNoteOnly ) {
+			// lane FARWATER2: the marking panel's re-bake line, as the panel computes it at open
+			const QString note = waterMarkRebakeNote( file );
+			out() << ( note.isEmpty() ? QStringLiteral( "re-bake note: none (no %1.premarks beside the file)" )
+					.arg( QFileInfo( file ).fileName() )
+				: QStringLiteral( "re-bake note: " ) + note ) << Qt::endl;
+			rc = 0;
 		} else if ( !lodlWaterInfoDir.isEmpty() ) {
 			// lane WATERDATA1: the same build the cell view uploads, dumped for the offline gate
 			WwWaterInfoTables t;

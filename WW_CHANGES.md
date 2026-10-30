@@ -1,5 +1,25 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## FARWATER2 (2026-10-30): the marking selftest marks a river with a mouth; the panel says what a re-bake carried
+
+- **Selftest river** (src/watermark.cpp lodtWaterMarkSelfTest): `lodl <f> --water-mark-selftest` marked the largest river
+  outright. On the Commonwealth v4 bake that is body 2, which drains into body 19 and never touches it, so the dye had
+  no mouth and 8 of 64 checks failed whatever the code did. Now the river is the largest whose outlet touches it within
+  the dye solve's own reach (dx*dx + dy*dy <= 6 texels): body 3 (it drains into the sea). `WW_WATER_MARK_BODY=<id>`
+  still wins. Red: `WW_WATER_MARK_BODY_RED=largest` (the old pick). Measured on one v4 bake: green 61 of 64 (3 FAIL),
+  red 8 FAIL, and the red's ok/FAIL lines equal FARWATER1's log of main's code on the same bake. The new pick gives
+  the same lines as main's exe pinned to body 3.
+  Of the 8: **6 came from the body choice** (F5 mouth direction, F5 seams, dye x4). **2 are real and stay**: F2 island
+  bank (a synthetic mask with no body in it; WATER4 registered it as a FAIL) and F5 p99 (8.44 on body 3; it fails on
+  every river tried, 7.0-14.1). Body 3 adds **X2b** (the pin's ring flux, registered on body 2 at 0.644): 0.410 on
+  body 3, 0.438 on body 7, -0.003 on body 10. No gate was moved, so the count is 61, not 64.
+- **Re-bake line in the panel** (waterMarkRebakeNote, src/watermarkpanel.cpp): if a re-bake could not carry every mark,
+  it keeps the old file as `<file>.premarks`. When the panel opens a file with a .premarks beside it, it re-runs that
+  carry in memory (nothing is saved) and shows the bake's own census line ("water marks carried: ..."). With no
+  .premarks it shows nothing. CLI: `lodl <f> --water-rebake-note`. Red: `WW_WATER_REBAKE_NOTE_RED=off` (the old text).
+- Gate: tests/farwater2/run.sh (bakes, then the selftest green / red / pinned, the note against a real re-bake's
+  census line, read-only shas, the note red): 0 FAIL. No shader touched.
+
 ## SHADOWSHIMMER1 (2026-10-30): sun shadows stand still (no crawl, no shimmer on a turn, a tight contact)
 
 - bungo 10-29: "shadows move for some reason, yet they shouldn't, the leaves are totally static"; SHADOWBAND1's
