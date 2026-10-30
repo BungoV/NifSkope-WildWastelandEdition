@@ -425,6 +425,28 @@
   a pixel) and RESTIRDI1 (8 frames) both 0 of 20736 pixels keep another light, 0 hit/miss differ on the same ray, ratio
   difference 0; red novis reads ratio 1.0000 on both. The nohole red cannot bite there (no alpha-tested cards).
 
+## FARTOGGLE2 (2026-10-30, CODE1030 2b round 2): the GPU-driven occlusion cull does not toggle far objects (twin)
+
+- **Asked:** is the far-LOD "on and off with a steady camera" a frame-to-frame loop in the GPU-driven step B cull
+  (src/gl/cellgpucull.cpp: occluders learned from their draws, a depth prepass with glPolygonOffset(1, 2), a max
+  Hi-Z, the clusters culled against it)? No code changed: it is not.
+- **tests/gpucull_twin/** (`bash tests/gpucull_twin/run.sh`, python + numpy, no exe): kHiz0 / kHizN / kCull's
+  occlusion branch op for op over 24 TAA-jittered frames of a steady camera, on a synthetic scene (hills, 600
+  partly buried clusters near, mid and far), the prepass with the polygon offset, `--feedback` feeding the occluder
+  list frame to frame. MEASURED: today's cull hides 0 visible objects and adds 0 flips; the feedback model adds 0
+  (the real occluder list is learned from draw state, never from the cull's result, and the test is conservative:
+  the sphere's nearest depth against the farthest depth under its box widened by a pixel, depthEps 4e-6, which is
+  hundreds of units at 30,000 u and more past it). Red `--red minhiz` (a nearest pyramid): 780 visible-and-culled
+  in 93 objects, FAIL. The code's own red `hard` (c.z) changes nothing on this scene (the tolerance swamps it).
+- **What the twin does show:** with no cull at all, the jitter alone makes 85 of 101 visible mid objects (median 0.39
+  px) and 74 of 85 far ones (0.61 px) appear in some frames and not in others (one sample a pixel, no history): the
+  sub-pixel far field blinks unless the temporal AA holds it. Also read and ruled out by code: the far cards' depth
+  reject (nearest card depth against the scene's farthest depth per pixel, same frame), the instanced far rows
+  (camera-plane tile cull only, never queued for step B), VRS (off by default, alpha-tested draws 1x1).
+- **Next (row FARTOGGLE3):** the temporal AA on sub-pixel far rows and cards (history clamp / reactive mask /
+  missing motion vectors on instanced rows), MSAA of the far rows in the linear frame, then pictures: a steady camera
+  over several frames with TAA on / off.
+
 ## LODPLACE1 (2026-10-30, CODE1030 2a + 2b): far-LOD placement and far-state censuses (no misplacement, no toggle found)
 
 - **What was asked** (bungo 10-30): far-LOD objects "placed underneath the map" (trees, a radar dish, buildings,
