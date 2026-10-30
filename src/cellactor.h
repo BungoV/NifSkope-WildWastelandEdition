@@ -34,8 +34,31 @@
  *   scale   = the reference's scale * the race's height for the sex * the
  *             actor's own height
  *
- * NAMED DIFFERENCES from the game: bind pose, no idle; dead-on-start actors
- * stand where they were placed (the game drops them as ragdolls); no body
+ * THE POSE (lane ACTORPOSE1). The skeleton's bind pose is arms out: every
+ * actor drawn on it stood in a T pose. Now the skeleton is posed first:
+ *   dead on start, with ragdoll data (the reference's XRGD: one entry per
+ *             ragdoll body, in a depth-first walk of skeleton.hkx's ragdoll
+ *             skeleton; each body is the animation bone at its bind position;
+ *             the rotation is the bone's local one, in the reference rotation's
+ *             own convention, entry 0 places the root): lying where the game
+ *             left its ragdoll. Refused, by name, when the entries' lengths do
+ *             not fit the skeleton's bones, or when 4 or more bodies sit at
+ *             their bind rotation (a ragdoll the Creation Kit never settled).
+ *   dead on start otherwise: frame 0 of the race's death pose
+ *             (animations\deathpose1.hkx), flat on the reference's heading, its
+ *             tilt taken out: the game drops such a body as a ragdoll.
+ *   otherwise  frame 0 of the race's idle clip, the first that exists of
+ *             <actor folder>\animations: mt\neutral\posea_idle1.hkx (human),
+ *             idle.hkx, idle_mt.hkx, mt\idle.hkx, <folder>_idle.hkx; tracks
+ *             named through <actor folder>\characterassets\skeleton.hkx.
+ *   neither    the bind pose, counted with its reason.
+ * A bone only a part has (hair cloth bones) rides its nearest ancestor the
+ * skeleton names, by that ancestor's move from the part's own node.
+ *
+ * NAMED DIFFERENCES from the game: no package idle (furniture, a leaning
+ * marker: the actor stands in its race's idle instead), frame 0 of the idle,
+ * not a moment of it; a dead-on-start actor without usable ragdoll data lies
+ * in one fixed death pose (the game simulates its fall); no body
  * weight morph, no face tint, no hair color, no weapons; a creature's gore
  * caps are drawn (they sit inside the whole body); an actor with a height
  * range stands at the middle of it (the game rolls it); interiors only.
@@ -65,10 +88,23 @@ enum class CellActorFate
 	Count
 };
 
+//! lane ACTORPOSE1: the pose a drawn actor stands (or lies) in
+enum class CellActorPose
+{
+	Bind = 0,       //!< the skeleton's bind pose (arms out): no idle clip, or the red control
+	Idle,           //!< frame 0 of the race's idle clip
+	Ragdoll,        //!< dead on start: the reference's own ragdoll data
+	Death,          //!< dead on start, ragdoll data none, refused or never settled: the race's death pose
+	Count
+};
+
 struct CellActorRow
 {
 	quint32 form = 0, base = 0;
 	CellActorFate fate = CellActorFate::Hidden;
+	CellActorPose pose = CellActorPose::Bind;
+	QString poseWhy;            //!< the clip read, or why the pose is not the one asked for
+	QByteArray ragdoll;         //!< the reference's XRGD (dead-on-start actors)
 	bool dead = false;          //!< starts dead
 	quint32 looks = 0;          //!< the actor record the Traits come from
 	QString raceEdid;
@@ -105,7 +141,7 @@ public:
 	 *  at the start) or a named refusal, counted either way. */
 	bool place( const EsmRefr & r, bool hidden, QString & key, float & scale );
 
-	//! The built actor, actor space, bind pose.
+	//! The built actor, actor space, posed (lane ACTORPOSE1).
 	bool shapes( const QString & key, std::vector<NativeSrcShape> * out ) const;
 
 	/*! `  placed actors: R read, drawn D (...), not shown H, refused F: <reason> <count>, ...`.

@@ -18,6 +18,10 @@ places is resolved and posed again from the published record layouts (the xEdit 
            hair when slot 30 or 31 is worn, facial hair when slot 48 is.
   POSE     every vertex = sum of weight * (bone's rest transform in the SKELETON, by name) * (the part's
            skin-to-bone transform) * vertex; a bone the skeleton does not name keeps the part's own node.
+           Lane ACTORPOSE1: the skeleton is posed first (tests/spells/cell_actor_pose.py: a dead-on-start actor's
+           XRGD ragdoll, else frame 0 of the race's idle clip, else the bind pose), and a bone only the part has
+           rides its nearest ancestor the skeleton names. The clips come from Fallout4 - Animations.ba2 beside the
+           plugin (WW_ANIM_BA2 overrides); WW_CELL_ACTOR_RED=bind is read as the app reads it.
   PLACE    world = position + R * (vertex * scale), R = euler(-rx, -ry, -rz),
            scale = XSCL * race height for the sex * the middle of the actor's own height range.
   NOT SHOWN  deleted, no base, or disabled at the start (its own flag; with an enable parent, the parent's
@@ -50,6 +54,7 @@ import numpy as np
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from cell_lit_check import euler, walk  # noqa: E402  (the plugin walk only)
 from gltf_nifread import Nif  # noqa: E402
+import cell_actor_pose as cap  # noqa: E402  (lane ACTORPOSE1)
 
 TYPES = (b'NPC_', b'LVLN', b'LVLI', b'RACE', b'ARMO', b'ARMA', b'OTFT', b'HDPT')
 PLACED_TYPES = (b'REFR', b'ACHR', b'PGRE', b'PMIS', b'PHZD', b'PARW', b'PBAR', b'PBEA', b'PCON', b'PFLA')
@@ -333,7 +338,7 @@ def resolve(pl, data, form, flags, f):
     rot = struct.unpack_from('<3f', f[b'DATA'], 12)
     xscl = struct.unpack('<f', f[b'XSCL'][:4])[0] if b'XSCL' in f else 1.0
     out.update(fate='drawn', looks=looks, race=race['edid'], sex='F' if sex else 'M', skeleton=skel, parts=parts,
-               hidden=hidden, face=face, outfit=outfit, worn=worn, pos=pos, rot=rot,
+               hidden=hidden, face=face, outfit=outfit, worn=worn, pos=pos, rot=rot, ragdoll=f.get(b'XRGD', b''),
                scale=xscl * race['height'][sex] * n['height'], headless=race['face'] and not worn & 4 and not face)
     return out
 
@@ -366,12 +371,16 @@ def skeleton_rest(path):
     return _rest[path]
 
 
-def posed_part(data, skel, model):
-    """[(shape name, Nx3 actor-space vertices, Mx3 triangles)] of one part on the skeleton's rest pose."""
-    key = (skel.lower(), model.lower())
+def posed_part(data, skel, model, pose=None):
+    """[(shape name, Nx3 actor-space vertices, Mx3 triangles)] of one part on the skeleton's rest pose; `pose`
+    (lane ACTORPOSE1) = (key, name -> world) of a posed skeleton, None = the bind pose."""
+    pkey, rest = pose if pose else ('bind', None)
+    key = (skel.lower(), pkey, model.lower())
     if key in _part:
         return _part[key]
-    rest = skeleton_rest(mesh_file(data, skel))
+    moved = rest is not None
+    if rest is None:
+        rest = skeleton_rest(mesh_file(data, skel))
     out = []
     path = mesh_file(data, model)
     pt = Nif(path) if os.path.isfile(path) else None
@@ -384,7 +393,8 @@ def posed_part(data, skel, model):
             sk = pt.skins[sh['skin']]
             MR, Mt = [], []
             for k, (name, bd) in enumerate(bones):
-                R, t, s = rest[name] if name in rest else node_world(pt, sk['bones'][k])
+                R, t, s = rest[name] if name in rest else cap.part_only_bone(pt, sk['bones'][k], rest, moved,
+                                                                             node_world)
                 MR.append(R @ np.array(bd['r']).reshape(3, 3) * (s * bd['s']))
                 Mt.append(R @ np.array(bd['t']) * s + t)
             MR, Mt = np.array(MR), np.array(Mt)
@@ -420,7 +430,7 @@ def posed_actor(pl, data, a):
     verts, tris, base = [], [], 0
     worn = a['worn']
     for model, is_face in [(m, False) for m in a['parts']] + ([(a['face'], True)] if a['face'] else []):
-        for name, v, t in posed_part(data, a['skeleton'], model):
+        for name, v, t in posed_part(data, a['skeleton'], model, a.get('pose_world')):
             if is_face:
                 kind = pl.head_part.get(name.lower(), -1)
                 if kind == 7 or (kind == 3 and worn & 3) or (kind == 4 and worn & (1 << 18)):
@@ -433,8 +443,24 @@ def posed_actor(pl, data, a):
     return np.concatenate(verts), np.concatenate(tris)
 
 
+def pose_actor(arc, data, a, red):
+    """lane ACTORPOSE1: a['pose'] = kind, a['pose_why'], a['pose_world'] = (cache key, name -> world) or None."""
+    nodes = cap.nif_nodes(Nif(mesh_file(data, a['skeleton'])))
+    kind, why, w = cap.pose_for(arc, a['skeleton'], nodes, a['dead'], a['ragdoll'], red, a['rot'])
+    a['pose'], a['pose_why'] = kind, why
+    per_actor = kind == 'ragdoll' or (kind == 'death' and (a['rot'][0] != 0.0 or a['rot'][1] != 0.0))
+    a['pose_world'] = None if w is None else ('%s%08x' % (kind, a['form']) if per_actor else kind, w)
+
+
+def anim_archive(esm):
+    return cap.Archive(os.environ.get('WW_ANIM_BA2')
+                       or os.path.join(os.path.dirname(os.path.abspath(esm)), 'Fallout4 - Animations.ba2'))
+
+
 def walk_cell(esm, data, cell):
     pl = Plugin(esm, cell)
+    arc = anim_archive(esm)
+    red = os.environ.get('WW_CELL_ACTOR_RED', '').strip().lower()
     actors = []
     for form, off in pl.refs:
         flags = struct.unpack_from('<I', pl.buf, off + 8)[0]
@@ -442,6 +468,7 @@ def walk_cell(esm, data, cell):
         a = resolve(pl, data, form, flags, f)
         a['form'] = form
         if a['fate'] == 'drawn':
+            pose_actor(arc, data, a, red)
             v, t = posed_actor(pl, data, a)
             if not len(t):
                 a['fate'] = 'nogeometry'
@@ -483,7 +510,7 @@ def main():
                 line += ' %s %s%s pos %.0f,%.0f,%.0f scale %.3f z %.1f..%.1f parts %d hidden %d face %s outfit %s' % (
                     a['race'], a['sex'], ' DEAD' if a['dead'] else '', a['pos'][0], a['pos'][1], a['pos'][2],
                     a['scale'], lo[2], hi[2], len(a['parts']), len(a['hidden']), 'yes' if a['face'] else 'no',
-                    a['outfit'])
+                    a['outfit']) + ' pose %s %s' % (a['pose'], a['pose_why'])
             if fh:
                 fh.write(line + '\n')
         return 0
@@ -495,24 +522,36 @@ def main():
 
     # ---- K: the census against the walk
     notes = open(f'{run}/on.notes', errors='replace').read()
-    m = re.search(r'placed actors: (\d+) read, drawn (\d+) in the skeleton\'s bind pose \((\d+) triangles; (\d+) dead '
-                  r'on start[^;]*; (\d+) without a head[^;]*; (\d+) in their skin and (\d+) short of outfit pieces'
-                  r'[^)]*\), not shown (\d+) \([^)]*\), refused (\d+)([^\n\[]*)(\[RED CONTROL (\w+)\])?', notes)
+    # lane ACTORPOSE1: the drawn count carries the pose split (idle clip, ragdoll data, bind pose and its reasons)
+    m = re.search(r'placed actors: (\d+) read, drawn (\d+) \((\d+) in their race\'s idle clip, (\d+) lying in their '
+                  r'ragdoll data, (\d+) lying in their race\'s death pose, (\d+) in the skeleton\'s bind pose[^;]*?, '
+                  r'ragdoll data refused (\d+); (\d+) triangles; '
+                  r'(\d+) dead on start[^;]*; (\d+) without a head[^;]*; (\d+) in their skin and (\d+) short of outfit '
+                  r'pieces[^)]*\), not shown (\d+) \([^)]*\), refused (\d+)([^\n\[]*)(\[RED CONTROL (\w+)\])?', notes)
     if not m:
         print('K FAIL  no "placed actors" line in the census')
         k_ok = False
     else:
-        read, c_drawn, _tris, c_dead, c_headless, _skin, _short, c_hidden, c_refused = (int(m.group(k))
-                                                                                     for k in range(1, 10))
-        why = {a.strip(): int(b) for a, b in re.findall(r'([a-z][a-z ()]+?) (\d+)(?:,|\s*$)', m.group(10).lstrip(': '))}
+        read, c_drawn, c_idle, c_rag, c_death, c_bind, c_ragref, _tris, c_dead, c_headless, _skin, _short, \
+            c_hidden, c_refused = (int(m.group(k)) for k in range(1, 15))
+        poses = {k: sum(a.get('pose') == k for a in drawn) for k in ('idle', 'ragdoll', 'death', 'bind')}
+        ragref = sum(bool(a['dead'] and a['ragdoll']) and a.get('pose') != 'ragdoll' for a in drawn) \
+            if os.environ.get('WW_CELL_ACTOR_RED', '').strip().lower() != 'bind' else 0
+        print(f"K poses: census idle {c_idle}, ragdoll {c_rag}, death {c_death}, bind {c_bind}, ragdoll refused "
+              f"{c_ragref}; the walk {poses}, ragdoll refused {ragref}")
+        pose_ok = (c_idle, c_rag, c_death, c_bind, c_ragref) == (poses['idle'], poses['ragdoll'], poses['death'],
+                                                                 poses['bind'], ragref)
+        why = {a.strip(): int(b) for a, b in re.findall(r'([a-z][a-z ()]+?) (\d+)(?:,|\s*$)', m.group(15).lstrip(': '))}
         want = {REASONS[k]: v for k, v in refused.items()}
+        red_seen = m.group(16) and m.group(17) != 'bind'   # the bind red is a pose control: the census stays whole
         k_ok = (read == len(actors) and c_drawn == len(drawn) and c_hidden == count.get('hidden', 0)
                 and c_refused == sum(refused.values()) and why == want and c_drawn > 0
                 and c_dead == sum(a['dead'] for a in drawn) and c_headless == sum(a['headless'] for a in drawn)
-                and c_drawn + c_hidden + c_refused == read and not m.group(11))
+                and c_drawn + c_hidden + c_refused == read and not red_seen and pose_ok
+                and c_idle + c_rag + c_death + c_bind == c_drawn)
         print(f"K {word('K', k_ok)}  census: read {read}, drawn {c_drawn} ({c_dead} dead on start, {c_headless} "
               f"headless), not shown {c_hidden}, refused {c_refused} {why}"
-              f"{', RED CONTROL ' + m.group(12) if m.group(11) else ''}; the walk: read {len(actors)}, drawn "
+              f"{', RED CONTROL ' + m.group(17) if m.group(16) else ''}; the walk: read {len(actors)}, drawn "
               f"{len(drawn)} ({sum(a['dead'] for a in drawn)} dead on start, {sum(a['headless'] for a in drawn)} "
               f"headless), not shown {count.get('hidden', 0)}, refused {sum(refused.values())} {want}")
     ok &= k_ok or 'K' not in stages
@@ -531,7 +570,8 @@ def main():
                 pos=np.array([float(v) for v in c[8].split()]), rot=[float(v) for v in c[9].split()],
                 tris=int(c[10]), lo=np.array([float(v) for v in c[11].split()]),
                 hi=np.array([float(v) for v in c[12].split()]), skeleton=c[13].lower(), parts=lst(c[14]),
-                hidden=lst(c[15]), face='' if c[16] == '-' else c[16].lower(), outfit=c[17])
+                hidden=lst(c[15]), face='' if c[16] == '-' else c[16].lower(), outfit=c[17],
+                pose=c[18].split(' ', 1)[0] if len(c) > 18 else None)   # lane ACTORPOSE1
     f_bad, p_bad, g_bad, g_done, hides = [], [], [], 0, 0
     for a in actors:
         t = theirs.get(a['form'])
@@ -546,9 +586,9 @@ def main():
         if (t['looks'] != a['looks'] or t['race'] != a['race'] or t['sex'] != a['sex']
                 or t['skeleton'] != a['skeleton'].lower() or t['dead'] != a['dead']
                 or np.abs(t['pos'] - a['pos']).max() > 0.01 or np.abs(np.array(t['rot']) - a['rot']).max() > 1e-4
-                or abs(t['scale'] - a['scale']) > 1e-4):
-            f_bad.append('%08x placed or resolved differently (scale %.4f vs %.4f, %s vs %s)' % (
-                a['form'], t['scale'], a['scale'], t['race'], a['race']))
+                or abs(t['scale'] - a['scale']) > 1e-4 or t['pose'] != a.get('pose')):
+            f_bad.append('%08x placed or resolved differently (scale %.4f vs %.4f, %s vs %s, pose %s vs %s)' % (
+                a['form'], t['scale'], a['scale'], t['race'], a['race'], t['pose'], a.get('pose')))
         hides += bool(a['hidden'])
         if (sorted(t['parts']) != sorted(p.lower() for p in a['parts'])
                 or sorted(t['hidden']) != sorted(p.lower() for p in a['hidden'])
