@@ -45,6 +45,7 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 // lane CELLUNI1: inside the cell-uniform scope an unchanged value is not uploaded again (celluniform.h)
 #define WWCU( k, l, v, n ) WwCellUni::want( wwUni, l, WwCellUni::k, v, n, WwDp::rec != nullptr )
 bool rtddgiCellShaderDefine();	// lane RTXGI1 M2: src/rtddgicell.cpp (the Ray-traced GI row / WW_CELL_RTDDGI)
+int rtddgiCellCascades();	// lane RTXCASCADE1: src/rtddgicell.h (WW_CELL_RTDDGI_CASCADES)
 bool wwAirZoneShaderDefine();	// lane AIRZONE1: src/gl/cellairzone.cpp (the Air zones row / WW_CELL_AIRZONE)
 int wwCellGiVis();	// lane PERF1: src/gl/celllights.cpp (1: the march, WW_CELL_GI_MARCH)
 bool wwCellPrtOn();	// lane PRTOFF1: src/gl/celllights.cpp (the old baked probe GI, only under its red)
@@ -427,8 +428,12 @@ bool NifSkopeOpenGLContext::Shader::load( const QString & filepath )
 		if ( wwCellPrtOn() && data.startsWith( "#version" ) && data.contains( "_CELL_PRT" ) )
 			data.insert( data.indexOf( '\n' ) + 1, "#define WW_CELL_PRT 1\n" );
 		// lane RTXGI1 M2: the ray-traced GI volume's read (cell_lights.glsl + cell_ddgi.glsl); not static: a set reloads the shaders
-		if ( !giMarch && rtddgiCellShaderDefine() && data.startsWith( "#version" ) && data.contains( "_CELL_RTDDGI" ) )
+		if ( !giMarch && rtddgiCellShaderDefine() && data.startsWith( "#version" ) && data.contains( "_CELL_RTDDGI" ) ) {
 			data.insert( data.indexOf( '\n' ) + 1, "#define WW_CELL_RTDDGI 1\n" );
+			// lane RTXCASCADE1: 2..4 nested volumes (cell_ddgi.glsl's cascades' read); 1 = M3's program, not a line added
+			if ( rtddgiCellCascades() > 1 )
+				data.insert( data.indexOf( '\n' ) + 1, "#define WW_CELL_RTDDGI_CASCADES 1\n" );
+		}
 		// lane AIRZONE1: the hand-placed volumes' read (cell_airzone.glsl, via cell_volair.frag and cell_volpart.glsl); not static:
 		// the row's tick reloads the shaders
 		if ( wwAirZoneShaderDefine() && data.startsWith( "#version" ) && data.contains( "_CELL_AIRZONE" ) )

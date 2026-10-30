@@ -1,5 +1,29 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## Lane RTXCASCADE1 (2026-10-30, branch rtxcascade1-20261030): nested ray-traced GI volumes round the camera (ships Off)
+
+- **Why:** bungo 10-29: far buildings (the Concord bank's porch, his shot) sit outside the ray-traced GI volume and read
+  open sky. M3 keeps ONE camera-following window (4096 u a side by default), so past it every surface takes the flat
+  ambient.
+- **What:** `WW_CELL_RTDDGI_CASCADES=2..4` builds nested camera-following volumes ([J21 7.3]): cascade 0 is M3's
+  volume; cascade L takes cascade 0's built step x 2^L and its window x 2^L (kept inside the probe GI grid, so every
+  coarse probe sits on a fine lattice point). Each scrolls with the camera by whole cells like M3's. Unset, 0 or 1 =
+  M3 exactly (no line of the cascades' read in any program).
+- **The read** (res/shaders/cell_ddgi.glsl, MIRROR rtddgimath.h sampleCascades): dense to coarse, each cascade takes
+  its blend weight's share of what the denser ones left, stop at 1. The weight falls 1 -> 0 over the last cell, and a
+  camera-locked volume tightens it by one cell (the outer plane, which a scroll has just reset, weighs 0). What the
+  volumes leave still goes to the flat ambient, as past M3's box.
+- **One sampler:** the volumes' atlases are copied on the GPU (glCopyBufferSubData, after each volume's interop wait)
+  into one texture buffer, so the cell programs read no new sampler. Off programs: the macros are empty, M3's machine
+  code (offline sweep of the 42 programs that paste the read in: off none/ubo/march, one volume none/ubo and cascades
+  none/ubo all link; the off and one-volume binaries equal the base's but the source hash).
+- **Cost lever:** cascade L updates every `cevery`^L frames (WW_CELL_RTDDGI_SPEC cevery=4: cascade 1 every 4th frame,
+  cascade 2 every 16th, on separate frames); with a spec max (pictures) every frame until it is reached.
+- **Census:** coarse lines start `rtddgi cell: cascade L (every P frames): ` (built, set N ... gpu ms, scroll, freed);
+  cascade 0 keeps M3's lines. WW_CELL_RTDDGI_DUMP writes cascade L under `<dir>/cascadeL`.
+- **Tests:** tests/rtddgi_math green 19 + 19 reds (cascade: the GLSL read == the header and the rule on flat volumes;
+  casctight; cascscale; cascdue). The live hold (porch vs a path-traced reference, cost) is notes/rtxcascade1/hold.
+
 ## RTXFIX1 (2026-10-30): the Ray-traced GI probes inside the frame (rounder, fogged, exposed); the atlas order's red
 
 - **Probes view** (bungo 10-29: "Could our probes have a rounder shape?", "fog", the spheres by the string lights and the
@@ -19,7 +43,6 @@
   `sync glDone N vkDone waits M` (the red: `(the nowait red: no order)`).
 - Not in this lane (rows): the light budget per hit (cost lever), no-probe coverage indoors, the classify tie at an
   exact probe step (RTXCASCADE1's finding).
-
 ## Lane GLAREBLOW1 (2026-10-29, branch GLAREBLOW1-20261029, cloud): the air's multiple scattering near the sun
 
 - **Measured offline first (no exe):** notes_cloud/GLAREBLOW1/RESULTS.md. The cell air's sky term (cell_volsky.frag ->

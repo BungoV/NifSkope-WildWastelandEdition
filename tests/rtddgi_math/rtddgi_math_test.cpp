@@ -25,7 +25,17 @@
 //   scroll  M3 the volume follows the camera: kept probes keep their world     RED_SCROLL  the shift taken the
 //           point, fresh = outside the old box, the window lands where a fresh   wrong way round
 //           volume's first probe would (no drift)
-// Every check is independent of the others' reds (a red build may pass the other fourteen).
+//   cascade   RTXCASCADE1 [J21 7.3] the cascades' read: cell_ddgi.glsl under    RED_CASCADE   coarse to dense
+//             WW_CELL_RTDDGI_CASCADES equals sampleCascades; dense to coarse,
+//             stop at 1 (the near volume's value where it holds, a blend across
+//             its edge, the far one past it, nothing past them all)
+//   casctight RTXCASCADE1 a camera-locked volume's fade is 0 over its outer    RED_CASCTIGHT  no tightening
+//             cell (the fresh plane), 0 -> 1 over the next; M2's fade unchanged
+//   cascscale RTXCASCADE1 each cascade 2x coarser; coarse probes sit on fine    RED_CASCSCALE  1 + level
+//             lattice points
+//   cascdue   RTXCASCADE1 cascade L updates every every^L frames, the coarse   RED_CASCDUE    one short period
+//             ones on separate frames
+// Every check is independent of the others' reds (a red build may pass the other eighteen).
 
 #include "rtddgimath.h"
 
@@ -37,6 +47,13 @@
 namespace glsl {
 #include "glsl_shim.h"
 #include "../../res/shaders/cell_ddgi.glsl"
+}
+// RTXCASCADE1: the same file under the cascades' define (the loader's, src/gl/glcontext.cpp): cellDdgiRead walks them
+namespace glslc {
+#define WW_CELL_RTDDGI_CASCADES 1
+#include "glsl_shim.h"
+#include "../../res/shaders/cell_ddgi.glsl"
+#undef WW_CELL_RTDDGI_CASCADES
 }
 #undef uniform
 
@@ -542,6 +559,214 @@ void checkScroll()
 		still );
 }
 
+// ------------------------------------------------------------------ RTXCASCADE1
+//! n nested volumes in one atlas, as src/rtddgicell.cpp lays them out (cascade c from texel base[c])
+struct CascTest
+{
+	TestVolume v[3];
+	int nP[3] = { 0, 0, 0 }, base[3] = { 0, 0, 0 };
+	std::vector<float> atlas;
+	SampleVolume sv[3];
+	//! cascade c: dims d, step = step0 x cascadeScale(c), centred on `centre`; tiles random (s) or flat (enc >= 0)
+	void make( int c, const int d[3], V3 centre, V3 step0, uint64_t & s, float enc )
+	{
+		TestVolume & T = v[c];
+		const float k = float( cascadeScale( c ) );
+		T.v.step = V3( step0.x * k, step0.y * k, step0.z * k );
+		for ( int a = 0; a < 3; a++ )
+			T.v.dims[a] = d[a];
+		T.v.origin = V3( centre.x - 0.5f * float( d[0] - 1 ) * T.v.step.x, centre.y - 0.5f * float( d[1] - 1 ) * T.v.step.y,
+			centre.z - 0.5f * float( d[2] - 1 ) * T.v.step.z );
+		T.v.D = std::min( T.v.step.x, std::min( T.v.step.y, T.v.step.z ) );
+		T.v.B = kSelfShadowBias;
+		const int n = d[0] * d[1] * d[2];
+		nP[c] = n;
+		T.irr.resize( size_t( n ) * 256 );
+		T.dist.resize( size_t( n ) * 512 );
+		T.probes.assign( size_t( n ) * 4, 0.0f );
+		T.age.assign( size_t( n ), 1u );
+		for ( size_t i = 0; i < T.irr.size(); i++ )
+			T.irr[i] = enc >= 0.0f ? ( i % 4 == 3 ? 0.5f : enc ) : unit01( s );
+		for ( size_t i = 0; i < T.dist.size(); i += 2 ) {
+			const float mean = enc >= 0.0f ? 1e5f : ( 20.0f + 380.0f * k * unit01( s ) );
+			T.dist[i] = mean;
+			T.dist[i + 1] = mean * mean + ( enc >= 0.0f ? 0.0f : 4000.0f * k * k * unit01( s ) );
+		}
+		for ( int p = 0; p < n; p++ ) {
+			if ( enc >= 0.0f ) {
+				T.probes[size_t( p ) * 4 + 3] = float( kVigilant );
+				continue;
+			}
+			for ( int a = 0; a < 3; a++ )
+				T.probes[size_t( p ) * 4 + size_t( a )] = ( unit01( s ) - 0.5f ) * 40.0f * k;
+			const float u = unit01( s );
+			T.probes[size_t( p ) * 4 + 3] = float( u < 0.12f ? kOff : u < 0.24f ? kAsleep : kVigilant );
+			T.age[size_t( p )] = unit01( s ) < 0.1f ? 0u : 1u + uint32_t( unit01( s ) * 50.0f );
+		}
+		T.pack( n );
+	}
+	void pack( int n )
+	{
+		atlas.clear();
+		for ( int c = 0; c < n; c++ ) {
+			base[c] = int( atlas.size() / 4 );
+			atlas.insert( atlas.end(), v[c].atlas.begin(), v[c].atlas.end() );
+			sv[c] = v[c].v;
+		}
+	}
+	void toGlsl( int n, unsigned red )
+	{
+		glslc::cellDdgiAtlas.data = atlas.data();
+		glslc::cellDdgiAtlas.texels = int( atlas.size() / 4 );
+		glslc::cellDdgiAtlas.outside = 0;
+		glslc::cellDdgiCount = n;
+		for ( int c = 0; c < n; c++ ) {
+			const SampleVolume & q = v[c].v;
+			glslc::cellDdgiCOrigin[c] = glslc::vec4( q.origin.x, q.origin.y, q.origin.z, q.D );
+			glslc::cellDdgiCStep[c] = glslc::vec4( q.step.x, q.step.y, q.step.z, q.B );
+			glslc::cellDdgiCDims[c].x = q.dims[0];
+			glslc::cellDdgiCDims[c].y = q.dims[1];
+			glslc::cellDdgiCDims[c].z = q.dims[2];
+			glslc::cellDdgiCDims[c].w = nP[c];
+			glslc::cellDdgiCBase[c] = base[c];
+		}
+		glslc::cellDdgiRed = int( red );
+	}
+};
+
+double relE( V3 a, V3 b )
+{
+	const double m = std::max( { 1e-6, double( std::fabs( a.x ) ), double( std::fabs( a.y ) ), double( std::fabs( a.z ) ) } );
+	return std::max( { std::fabs( a.x - b.x ), std::fabs( a.y - b.y ), std::fabs( a.z - b.z ) } ) / m;
+}
+
+void checkCascade()
+{
+	// (1) the GLSL read under WW_CELL_RTDDGI_CASCADES equals sampleCascades: 3 random nested volumes (each 2x coarser,
+	// one centre), points over the coarsest box and a cell past it, the cell's red bits
+	uint64_t s = 0xca5cade1ULL;
+	CascTest R;
+	const int dr[3] = { 9, 8, 7 };   // a tight fade needs two cells in from each face: room for the coarse ones' interior
+	for ( int c = 0; c < 3; c++ )
+		R.make( c, dr, V3( 300.0f, -200.0f, 80.0f ), V3( 140.0f, 140.0f, 105.0f ), s, -1.0f );
+	R.pack( 3 );
+	double worstE = 0, worstV = 0, worstW = 0, worstF = 0;
+	int points = 0, covered = 0, outside = 0;
+	const unsigned reds[3] = { 0u, kSampleTrilinear, kSampleNoCheb | kSampleNoBias };
+	for ( unsigned red : reds ) {
+		R.toGlsl( 3, red );
+		const SampleVolume & C = R.v[2].v;
+		for ( int i = 0; i < 6000; i++ ) {
+			const V3 P( C.origin.x + ( unit01( s ) * 10.0f - 1.0f ) * C.step.x, C.origin.y + ( unit01( s ) * 9.0f - 1.0f ) * C.step.y,
+				C.origin.z + ( unit01( s ) * 8.0f - 1.0f ) * C.step.z );
+			const V3 n = randUnit( s ), o = randUnit( s ), d = i % 3 == 0 ? randUnit( s ) : n;
+			const SampleResult a = sampleCascades( R.sv, 3, P, n, o, d, red );
+			const glslc::CellDdgiOut b = glslc::cellDdgiRead( glslc::vec3( P.x, P.y, P.z ), glslc::vec3( n.x, n.y, n.z ),
+				glslc::vec3( o.x, o.y, o.z ), glslc::vec3( d.x, d.y, d.z ) );
+			points++;
+			covered += a.fade > 0.0f ? 1 : 0;
+			worstE = std::max( worstE, relE( a.E, V3( b.E.x, b.E.y, b.E.z ) ) );
+			worstV = std::max( worstV, double( std::fabs( a.vis - b.vis ) ) );
+			worstW = std::max( worstW, std::fabs( a.w - b.w ) / std::max( 1e-6, double( a.w ) ) );
+			worstF = std::max( worstF, double( std::fabs( a.fade - b.fade ) ) );
+		}
+		outside += glslc::cellDdgiAtlas.outside;
+	}
+	const bool same = worstE < 1e-3 && worstV < 1e-4 && worstW < 1e-3 && worstF < 1e-5 && outside == 0 && covered > points / 10;
+
+	// (2) the rule on flat volumes (cascade c reads E_c everywhere: one encoded value, Chebyshev 1, no bias), 9 probes
+	// an axis, steps 100 / 200 / 400 about 0: the centre reads E0 alone; g0 = 1.5 half E0 half E1; x = 450 (past
+	// cascade 0) 0.75 E1 + 0.25 E2 (cascade 1's tight fade 0.75 there); x = 5000 nothing
+	CascTest F;
+	const int df[3] = { 9, 9, 9 };
+	const float enc[3] = { 0.3f, 0.5f, 0.7f };
+	for ( int c = 0; c < 3; c++ )
+		F.make( c, df, V3( 0, 0, 0 ), V3( 100, 100, 100 ), s, enc[c] );
+	F.pack( 3 );
+	double Ec[3];
+	for ( int c = 0; c < 3; c++ )
+		Ec[c] = 2.0 * kPi * std::pow( double( enc[c] ), 5.0 );
+	const V3 up( 0, 0, 1 ), view = normalize( V3( 0.2f, 0.3f, 1.0f ) );
+	auto at = [&]( float x ) { return sampleCascades( F.sv, 3, V3( x, 0, 0 ), up, view, up, kSampleNoBias ); };
+	const SampleResult c0 = at( 0.0f ), c1 = at( -400.0f + 150.0f ), c2 = at( 450.0f ), c3 = at( 5000.0f );
+	const double e0 = std::fabs( c0.E.x - Ec[0] ) / Ec[0], e1 = std::fabs( c1.E.x - 0.5 * ( Ec[0] + Ec[1] ) ) / Ec[1],
+		e2 = std::fabs( c2.E.x - ( 0.75 * Ec[1] + 0.25 * Ec[2] ) ) / Ec[2];
+	const bool rule = e0 < 1e-4 && e1 < 1e-4 && e2 < 1e-4 && std::fabs( c0.fade - 1.0f ) < 1e-6f && std::fabs( c2.fade - 1.0f ) < 1e-6f
+		&& c3.fade == 0.0f && c3.w == 0.0f;
+	report( "cascade", same && rule, "GLSL cascades vs header on %g points: E worst rel %.2g (bar 1e-3), vis worst %.2g (bar 1e-4)",
+		points, worstE, worstV );
+	std::printf( "        w worst rel %.3g, fade %.3g, reads outside the atlas %d, points covered %d; rule: centre E0 off %.2g, "
+		"g0 1.5 half/half off %.2g, x 450 0.75 E1 + 0.25 E2 off %.2g (bars 1e-4), past all fade %.2g w %.2g\n", worstW, worstF,
+		outside, covered, e0, e1, e2, double( c3.fade ), double( c3.w ) );
+}
+
+void checkCascTight()
+{
+	// a camera-locked volume: fade 0 over its outer cell (g 0.5), 0.5 at g 1.5, 1 from g 2; M2's untightened 0.5 at 0.5
+	const float t05 = cascadeEdge( 0.5f, 9, true ), t15 = cascadeEdge( 1.5f, 9, true ), t25 = cascadeEdge( 2.5f, 9, true ),
+		hi = cascadeEdge( 7.5f, 9, true ), m2 = cascadeEdge( 0.5f, 9, false );
+	// and the read: a point in cascade 0's outer cell (x = -350, g0 = 0.5) takes cascade 1 alone
+	uint64_t s = 1;
+	CascTest F;
+	const int df[3] = { 9, 9, 9 };
+	const float enc[2] = { 0.3f, 0.6f };
+	for ( int c = 0; c < 2; c++ )
+		F.make( c, df, V3( 0, 0, 0 ), V3( 100, 100, 100 ), s, enc[c] );
+	F.pack( 2 );
+	const SampleResult r = sampleCascades( F.sv, 2, V3( -350.0f, 0, 0 ), V3( 0, 0, 1 ), V3( 0, 0, 1 ), V3( 0, 0, 1 ), kSampleNoBias );
+	const double E1 = 2.0 * kPi * std::pow( 0.6, 5.0 ), off = std::fabs( r.E.x - E1 ) / E1;
+	const bool ok = t05 == 0.0f && std::fabs( t15 - 0.5f ) < 1e-6f && t25 == 1.0f && hi == 0.0f && std::fabs( m2 - 0.5f ) < 1e-6f && off < 1e-4;
+	report( "casctight", ok, "tight fade at g 0.5 / 1.5 / 2.5: %g / %g / %g (bars 0 / 0.5 / 1)", t05, t15, t25 );
+	std::printf( "        g 7.5 of 9: %g (bar 0), M2's untightened at 0.5: %g (bar 0.5); outer-cell point reads cascade 1 alone: off %.2g (bar 1e-4)\n",
+		double( hi ), double( m2 ), off );
+}
+
+void checkCascScale()
+{
+	// 2x each; and every coarse probe on a fine lattice point (origins at whole multiples of each step, packVolume's floor)
+	bool twice = true;
+	for ( int l = 0; l < kMaxCascades; l++ )
+		twice = twice && cascadeScale( l ) == double( 1 << l );
+	uint64_t s = 77;
+	int offLattice = 0;
+	for ( int i = 0; i < 2000; i++ ) {
+		const double step = 100.0 + 200.0 * unit01( s ), lo = ( unit01( s ) - 0.5 ) * 1e5;
+		const double o0 = std::floor( lo / step ) * step;
+		for ( int l = 1; l < kMaxCascades; l++ ) {
+			const double sl = step * cascadeScale( l ), ol = std::floor( lo / sl ) * sl;
+			for ( int p = 0; p < 4; p++ ) {   // coarse probe p in fine cells from the fine origin
+				const double cells = ( ol + double( p ) * sl - o0 ) / step;
+				offLattice += std::fabs( cells - std::round( cells ) ) > 1e-6 ? 1 : 0;
+			}
+		}
+	}
+	report( "cascscale", twice && offLattice == 0, "scales of levels 1 / 2 / 3: %g / %g / %g (bars 2 / 4 / 8)", cascadeScale( 1 ),
+		cascadeScale( 2 ), cascadeScale( 3 ) );
+	std::printf( "        coarse probes off the fine lattice %d (bar 0)\n", offLattice );
+}
+
+void checkCascDue()
+{
+	// every = 4 over 4096 frames: levels 0..3 update 4096 / 1024 / 256 / 64 times, no frame holds two coarse ones;
+	// every = 2: 4096 / 2048 / 1024 / 512
+	int n4[4] = { 0, 0, 0, 0 }, n2[4] = { 0, 0, 0, 0 }, shared = 0;
+	for ( uint64_t f = 0; f < 4096; f++ ) {
+		int coarse = 0;
+		for ( int l = 0; l < 4; l++ ) {
+			const bool d4 = cascadeDue( l, f, 4 );
+			n4[l] += d4 ? 1 : 0;
+			coarse += d4 && l > 0 ? 1 : 0;
+			n2[l] += cascadeDue( l, f, 2 ) ? 1 : 0;
+		}
+		shared += coarse > 1 ? 1 : 0;
+	}
+	const bool ok = n4[0] == 4096 && n4[1] == 1024 && n4[2] == 256 && n4[3] == 64 && shared == 0 && n2[0] == 4096 && n2[1] == 2048
+		&& n2[2] == 1024 && n2[3] == 512;
+	report( "cascdue", ok, "every 4: levels 1..3 update %g / %g / %g times in 4096 frames (bars 1024 / 256 / 64)", n4[1], n4[2], n4[3] );
+	std::printf( "        frames with two coarse cascades %d (bar 0); every 2: %d / %d / %d (bars 2048 / 1024 / 512)\n", shared, n2[1],
+		n2[2], n2[3] );
+}
+
 } // namespace
 
 int main()
@@ -561,6 +786,10 @@ int main()
 	checkSkyVis();
 	checkSample();
 	checkScroll();
+	checkCascade();
+	checkCascTight();
+	checkCascScale();
+	checkCascDue();
 	std::printf( "RTDDGI_MATH %s %d%s\n", g_fail ? "FAIL" : "PASS", g_fail ? g_fail : g_pass, g_fail ? " failed" : "" );
 	return g_fail ? 1 : 0;
 }
