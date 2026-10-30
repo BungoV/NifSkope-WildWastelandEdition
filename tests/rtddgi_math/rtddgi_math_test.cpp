@@ -40,12 +40,19 @@
 //             tight fade is 1 over its whole support, and every such probe is                 traced)
 //   cascjump  RTXCASCADE2 a camera jump steps every cascade and resets every    RED_CASCJUMP   no jump rule
 //             coarse plane at once; a walk keeps RTXCASCADE1's periods
+//   skybelow  SKYBELOW1 a below-horizon miss returns the ground (exterior       RED_SKYBELOW   the sky below too
+//             albedo x eUp / pi, interior 0)                                                    (today's main)
+//   skyabove  SKYBELOW1 a miss on or above the horizon is the sky cube byte     RED_SKYABOVE   horizon lifted to
+//             for byte; the runtime red is today's main everywhere                              z 0.1
+//   skyvisup  SKYBELOW1 sky visibility counts the upper hemisphere only (a      RED_SKYVISUP   every miss counts
+//             probe over a ground disk: -Z texel 0, +Z ~1)
 // Every check is independent of the others' reds (a red build may pass the other twenty-one).
 
 #include "rtddgimath.h"
 
 #include <cmath>
 #include <cstdio>
+#include <cstring>
 #include <vector>
 
 // M2: the cell view's GLSL read, compiled here from the shader's own file (res/shaders/cell_ddgi.glsl)
@@ -358,6 +365,109 @@ void checkSkyVis()
 	const float hWant = texelHysteresis( 0.97f, old3, encNew );
 	report( "skyvis", std::fabs( v0 - 0.75f ) < 0.005f && std::fabs( v1 - 0.475f ) < 0.005f && std::fabs( h - hWant ) < 1e-6f && hWant < 0.9f,
 		"open cone cos > 0.5: %.4f (0.75), h 0.5 over 0.2: %.4f (0.475), hOut - the texel's h %.2g (0)", v0, v1, h - hWant );
+}
+
+// lane SKYBELOW1 (bungo 10-30): a weather sky cube with a bright ground-facing side (today's main returned it below the
+// horizon), an exterior ground of albedo 0.2 under it
+void skyBelowFixture( float R[6][3], float ground[3], float eUp[3] )
+{
+	const float amb[6][3] = { { 0.9f, 1.0f, 1.2f }, { 0.8f, 0.9f, 1.1f }, { 0.85f, 0.95f, 1.15f }, { 0.85f, 0.95f, 1.15f },
+		{ 1.4f, 1.6f, 2.0f }, { 0.6f, 0.6f, 0.65f } };
+	skyRadianceCube( amb, R );
+	const float alb[3] = { 0.2f, 0.18f, 0.15f };
+	for ( int c = 0; c < 3; c++ )
+		eUp[c] = amb[4][c];
+	groundRadiance( alb, eUp, false, ground );
+}
+
+void checkSkyBelow()
+{
+	// (a) every below-horizon miss returns the ground: an exterior's albedo x eUp / pi exactly, an interior's 0. The red
+	// (today's main) returns the sky cube there, which this weather makes bright (R-Z > 0)
+	float R[6][3], G[3], eUp[3];
+	skyBelowFixture( R, G, eUp );
+	const int M = 4096;
+	int below = 0, bad = 0, badInt = 0;
+	const float zero[3] = { 0, 0, 0 };
+	for ( int i = 0; i < M; i++ ) {
+		const V3 d = sphericalFibonacci( i, M );
+		if ( !( d.z < 0.0f ) )
+			continue;
+		below++;
+		float o[3], oi[3], gi[3];
+		missRadiance( R, G, d, true, o );
+		groundRadiance( G, eUp, true, gi );   // an interior: 0 whatever the albedo
+		missRadiance( R, gi, d, true, oi );
+		for ( int c = 0; c < 3; c++ ) {
+			bad += o[c] != G[c] ? 1 : 0;
+			badInt += oi[c] != zero[c] ? 1 : 0;
+		}
+	}
+	const float wantG = 0.2f * eUp[0] / kPi;
+	report( "skybelow", below > M / 3 && bad == 0 && badInt == 0 && std::fabs( G[0] - wantG ) < 1e-7f,
+		"%g below-horizon misses: %g channels not the ground (0), %g interior channels not 0 (0)", below, bad, badInt );
+}
+
+void checkSkyAbove()
+{
+	// (b) every miss on or above the horizon returns the sky cube byte for byte (today's main there). The red lifts the
+	// horizon to z 0.1: the sky just above it turns ground
+	float R[6][3], G[3], eUp[3];
+	skyBelowFixture( R, G, eUp );
+	const int M = 4096;
+	int above = 0, diff = 0;
+	for ( int i = 0; i < M; i++ ) {
+		const V3 d = sphericalFibonacci( i, M );
+		if ( d.z < 0.0f )
+			continue;
+		above++;
+		float o[3], s[3];
+		missRadiance( R, G, d, true, o );
+		skyRadiance( R, d, s );
+		diff += std::memcmp( o, s, sizeof o ) != 0 ? 1 : 0;
+	}
+	// the runtime red (rule false, WW_SKYBELOW_RED) is today's main everywhere: the sky below too
+	int redDiff = 0;
+	for ( int i = 0; i < M; i++ ) {
+		const V3 d = sphericalFibonacci( i, M );
+		float o[3], s[3];
+		missRadiance( R, G, d, false, o );
+		skyRadiance( R, d, s );
+		redDiff += std::memcmp( o, s, sizeof o ) != 0 ? 1 : 0;
+	}
+	report( "skyabove", above > M / 3 && diff == 0 && redDiff == 0,
+		"%g misses on or above the horizon: %g differ from the sky cube (0); the runtime red: %g differ anywhere (0)", above, diff, redDiff );
+}
+
+void checkSkyVisUp()
+{
+	// (c) a probe floating 100 u over a flat ground disk of radius 300 (rays steeper than |z| 0.316 hit it, the rest
+	// miss): sky visibility counts the upper hemisphere only. +Z texel 1, -Z texel 0 (the red reads the grazing misses
+	// under the disk's rim as sky); a horizontal texel (+X) reads the cosine-weighted upper half, 0.5 (the red more)
+	const int M = 20000;
+	std::vector<V3> dirs;
+	std::vector<float> dist;
+	for ( int i = 0; i < M; i++ ) {
+		const V3 d = sphericalFibonacci( i, M );
+		dirs.push_back( d );
+		float t = kMiss;
+		if ( d.z < 0.0f ) {
+			const float th = 100.0f / -d.z;   // to the ground plane
+			const float r = th * std::sqrt( std::max( 0.0f, 1.0f - d.z * d.z ) );
+			if ( r <= 300.0f )
+				t = th;
+		}
+		dist.push_back( t );
+	}
+	float up = -1, down = -1, side = -1, downRed = -1, sideRed = -1;
+	blendSkyVisTexel( V3( 0, 0, 1 ), dirs.data(), dist.data(), M, 0.0f, 0.0f, &up );
+	blendSkyVisTexel( V3( 0, 0, -1 ), dirs.data(), dist.data(), M, 0.0f, 0.0f, &down );
+	blendSkyVisTexel( V3( 1, 0, 0 ), dirs.data(), dist.data(), M, 0.0f, 0.0f, &side );
+	blendSkyVisTexel( V3( 0, 0, -1 ), dirs.data(), dist.data(), M, 0.0f, 0.0f, &downRed, false );   // the runtime red
+	blendSkyVisTexel( V3( 1, 0, 0 ), dirs.data(), dist.data(), M, 0.0f, 0.0f, &sideRed, false );
+	report( "skyvisup", up > 0.98f && down == 0.0f && downRed > 0.05f && sideRed > side + 0.05f,
+		"+Z %.4f (1), -Z %.4f (0; the runtime red %.4f)", up, down, downRed );
+	std::printf( "      skyvisup: +X %.4f (cosine-weighted upper half 0.5), the runtime red %.4f\n", side, sideRed );
 }
 
 // M2: a volume in the GPU's buffers and the same volume as the cell view's texture buffer (cell_ddgi.glsl's layout)
@@ -886,6 +996,9 @@ int main()
 	checkCascRays();
 	checkCascSkip();
 	checkCascJump();
+	checkSkyBelow();
+	checkSkyAbove();
+	checkSkyVisUp();
 	std::printf( "RTDDGI_MATH %s %d%s\n", g_fail ? "FAIL" : "PASS", g_fail ? g_fail : g_pass, g_fail ? " failed" : "" );
 	return g_fail ? 1 : 0;
 }

@@ -232,6 +232,20 @@ vec3 ddgiSky( vec3 d )
 	const vec3 rz = d.z >= 0.0 ? P.sky[4].rgb : P.sky[5].rgb;
 	return d.x * d.x * rx + d.y * d.y * ry + d.z * d.z * rz;
 }
+// lane SKYBELOW1 (bungo 10-30): below the horizon is ground, never sky. P.sky[1..3].w = the ground's radiance (an
+// exterior's albedo x the sky irradiance from above / pi; 0 in an interior), P.sky[4].w = 1 the rule, 0 the red
+// (WW_SKYBELOW_RED: today's main, the sky in every direction and every miss sky visibility)
+// MIRROR rtddgimath.h belowHorizon
+bool ddgiBelowHorizon( vec3 d ) { return d.z < 0.0; }
+// MIRROR rtddgimath.h skyVisRay
+bool ddgiSkyVisRay( vec3 d, float dist ) { return dist >= DDGI_MISS * 0.5 && !( P.sky[4].w > 0.5 && ddgiBelowHorizon( d ) ); }
+// MIRROR rtddgimath.h missRadiance
+vec3 ddgiMiss( vec3 d )
+{
+	if ( P.sky[4].w > 0.5 && ddgiBelowHorizon( d ) )
+		return vec3( P.sky[1].w, P.sky[2].w, P.sky[3].w );
+	return ddgiSky( d );
+}
 
 // probe p's grid index, position (grid + offset) and state
 ivec3 ddgiProbeCoord( uint p ) { return ivec3( int( p ) % P.dims.x, ( int( p ) / P.dims.x ) % P.dims.y, int( p ) / ( P.dims.x * P.dims.y ) ); }

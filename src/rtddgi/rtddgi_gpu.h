@@ -67,6 +67,7 @@ struct DdgiGpuOut
 	std::vector<float> irr;                // 8 x 8 x 4 a probe (encoded rgb, sky visibility)
 	std::vector<float> dist;               // 16 x 16 x 2 a probe
 	std::vector<float> fixedDist;          // 32 a probe, the stored distances of its fixed rays (job.dumpFixed only)
+	std::vector<float> raysAll;            // lane SKYBELOW1: the rays buffer after the last update (job.dumpFixed only)
 	double msBuild = 0, msReloc = 0, msFrames = 0;
 	long long rays = 0;                    // probe rays traced: every probe's fixed rays per relocation / classification
 	                                       // pass, then the ACTIVE probes' (not Off, not skipped Asleep) N per update

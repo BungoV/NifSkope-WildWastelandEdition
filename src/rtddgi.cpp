@@ -277,7 +277,8 @@ struct Twin
 				const float R[6][3] = { { P.sky[0][0], P.sky[0][1], P.sky[0][2] }, { P.sky[1][0], P.sky[1][1], P.sky[1][2] },
 					{ P.sky[2][0], P.sky[2][1], P.sky[2][2] }, { P.sky[3][0], P.sky[3][1], P.sky[3][2] },
 					{ P.sky[4][0], P.sky[4][1], P.sky[4][2] }, { P.sky[5][0], P.sky[5][1], P.sky[5][2] } };
-				skyRadiance( R, d, sky );
+				const float ground[3] = { P.sky[1][3], P.sky[2][3], P.sky[3][3] };
+				missRadiance( R, ground, d, P.sky[4][3] > 0.5f, sky );   // lane SKYBELOW1: the ground below the horizon
 			}
 			rec[0] = sky[0];
 			rec[1] = sky[1];
@@ -331,7 +332,7 @@ struct Twin
 				const V3 td = texelDir( tx, ty, kIrrInterior );
 				float out[3], h = hBase, vis = at[3];
 				if ( blendIrradianceTexel( td, dirs.data(), rad.data(), nb, hBase, at, out, &h ) ) {
-					blendSkyVisTexel( td, dirs.data(), dd.data(), nb, h, at[3], &vis );   // M1FIX: the alpha
+					blendSkyVisTexel( td, dirs.data(), dd.data(), nb, h, at[3], &vis, S.prm.sky[4][3] > 0.5f );   // M1FIX: the alpha (SKYBELOW1: above the horizon)
 					at[0] = out[0];
 					at[1] = out[1];
 					at[2] = out[2];
@@ -406,7 +407,7 @@ M3 rotationOf( const Packed & S, int f )
 	return r;
 }
 
-void runTwin( const Packed & S, const RtDdgiSpec & spec, RtDdgiVolume * out )
+void runTwin( const Packed & S, const RtDdgiSpec & spec, RtDdgiVolume * out, std::vector<float> * raysOut = nullptr )
 {
 	Twin T( S );
 	QElapsedTimer tm;
@@ -459,6 +460,8 @@ void runTwin( const Packed & S, const RtDdgiSpec & spec, RtDdgiVolume * out )
 		for ( int p = 0; p < T.nP; p++ )
 			for ( int i = 0; i < kFixedRays; i++ )
 				out->fixedDist[size_t( p ) * kFixedRays + size_t( i )] = T.rays[( size_t( p ) * size_t( T.N ) + size_t( i ) ) * 4 + 3];
+		if ( raysOut )   // lane SKYBELOW1: the miss census
+			*raysOut = std::move( T.rays );
 	}
 	out->age = std::move( T.age );
 	out->irr = std::move( T.irr );
@@ -644,6 +647,34 @@ static bool packVolume( const ProbeSoup & soup, const WwCellLighting & lighting,
 				P.sky[f][c] = R[f][c];
 		P.sky[0][3] = 1.0f;
 	}
+	/* lane SKYBELOW1 (bungo 10-30, "Shouldn't that be a rule for every probe"): a miss below the horizon returns the
+	 * GROUND, never sky, and no below-horizon direction is sky visibility (the rule is P.sky[4].w, on unless red; the
+	 * visibility half holds with no sky too). An exterior's ground = the soup's up-facing albedo (area-weighted, the
+	 * triangles' ALB1, 0.5 grey without it as at a hit) x the weather's +Z irradiance (an open up-facing surface's) / pi;
+	 * an interior's = 0, which replaces SKYINT1's zeroed ground-facing sky (rtddgicell.cpp skyLitSky) */
+	out->skyBelowRule = !hasRed( spec.red, "skybelow" );
+	P.sky[4][3] = out->skyBelowRule ? 1.0f : 0.0f;
+	{
+		double a[3] = { 0, 0, 0 }, w = 0;
+		for ( size_t t = 0; t < nTri; t++ ) {
+			const float * v = &S.bvh.t[t * 9];
+			const V3 v0( v[0], v[1], v[2] );
+			const V3 n = cross( V3( v[3], v[4], v[5] ) - v0, V3( v[6], v[7], v[8] ) - v0 );   // |n| = 2 x area
+			const float l = length( n );
+			if ( !( l > 0.0f ) || n.z < 0.7f * l )
+				continue;
+			for ( int c = 0; c < 3; c++ )
+				a[c] += double( l ) * S.triAttr[t * kAttr + size_t( c )];
+			w += double( l );
+		}
+		for ( int c = 0; c < 3; c++ )
+			out->groundAlbedo[c] = w > 0.0 ? float( a[c] / w ) : 0.5f;
+	}
+	if ( sky.on && !spec.noSky ) {
+		groundRadiance( out->groundAlbedo, sky.amb[4], lighting.interior, out->ground );
+		for ( int c = 0; c < 3; c++ )
+			P.sky[1 + c][3] = out->ground[c];
+	}
 	P.counts[0] = spec.rays;
 	P.counts[1] = S.nLights;
 	P.counts[2] = int( nTri );
@@ -657,6 +688,61 @@ static bool packVolume( const ProbeSoup & soup, const WwCellLighting & lighting,
 	return true;
 }
 
+/* lane SKYBELOW1: the miss census of the last update's rays (`rays` = the rays buffer, 4 floats a probe x ray; the
+ * states in out). Counts the blended rays (i >= 32) of every probe the update traced. A miss "returns sky" when its
+ * radiance is the sky cube's for its direction (within 1e-5 relative: the GPU's float order) and not the ground's;
+ * aboveHash = FNV-1a over the above-horizon misses' radiance bytes in ray order */
+static void missCensus( const Packed & S, const RtDdgiSpec & spec, const std::vector<float> & rays, RtDdgiVolume * out )
+{
+	const auto & P = S.prm;
+	const int N = P.counts[0];
+	const qint64 nP = out->probeCount();
+	if ( spec.frames <= 0 || N <= kFixedRays || rays.size() < size_t( nP ) * size_t( N ) * 4 || out->state.size() < size_t( nP ) )
+		return;
+	const M3 rot = rotationOf( S, spec.frames - 1 );
+	float R[6][3];
+	for ( int f = 0; f < 6; f++ )
+		for ( int c = 0; c < 3; c++ )
+			R[f][c] = P.sky[0][3] > 0.5f ? P.sky[f][c] : 0.0f;
+	const float * G = out->ground;
+	auto near3 = []( const float * a, const float * b ) {
+		for ( int c = 0; c < 3; c++ )
+			if ( std::fabs( a[c] - b[c] ) > 1e-5f * std::max( 1.0f, std::fabs( b[c] ) ) )
+				return false;
+		return true;
+	};
+	out->missBelow = out->missBelowSky = out->missBelowGround = out->missAbove = out->missAboveSky = 0;
+	quint64 h = 0xCBF29CE484222325ULL;
+	for ( qint64 p = 0; p < nP; p++ ) {
+		const int st = out->state[size_t( p )];
+		if ( st == kOff || ( st == kAsleep && P.flags[1] ) )
+			continue;
+		for ( int i = kFixedRays; i < N; i++ ) {
+			const float * rec = &rays[( size_t( p ) * size_t( N ) + size_t( i ) ) * 4];
+			if ( !( rec[3] >= kMiss * 0.5f ) )
+				continue;
+			const V3 d = rayDir( i, N, rot );
+			if ( std::fabs( d.z ) < 1e-6f )
+				continue;   // on the horizon: the GPU's rotation may put it on the other side
+			float sky[3];
+			skyRadiance( R, d, sky );
+			if ( d.z < 0.0f ) {
+				out->missBelow++;
+				const bool isGround = near3( rec, G );
+				out->missBelowGround += isGround ? 1 : 0;
+				out->missBelowSky += ( near3( rec, sky ) && !isGround ) ? 1 : 0;
+			} else {
+				out->missAbove++;
+				out->missAboveSky += near3( rec, sky ) ? 1 : 0;
+				const unsigned char * b = reinterpret_cast<const unsigned char *>( rec );
+				for ( int k = 0; k < 12; k++ )
+					h = ( h ^ b[k] ) * 0x100000001B3ULL;
+			}
+		}
+	}
+	out->aboveHash = h;
+}
+
 bool rtddgiRun( const ProbeSoup & soup, const WwCellLighting & lighting, const ProbeSkyLight & sky, const RtDdgiSpec & spec,
 	RtDdgiVolume * out )
 {
@@ -668,6 +754,7 @@ bool rtddgiRun( const ProbeSoup & soup, const WwCellLighting & lighting, const P
 	// ---- the GPU when asked and able, else the twin
 	bool done = false;
 	QString why = QStringLiteral( "cpu (asked)" );
+	std::vector<float> lastRays;   // lane SKYBELOW1: the miss census (spec.dumpFixed runs)
 	if ( spec.gpu > 0 ) {
 		bakert::DdgiGpuJob job;
 		job.bvh = &S.bvh;
@@ -694,6 +781,7 @@ bool rtddgiRun( const ProbeSoup & soup, const WwCellLighting & lighting, const P
 			out->irr = std::move( g.irr );
 			out->dist = std::move( g.dist );
 			out->fixedDist = std::move( g.fixedDist );
+			lastRays = std::move( g.raysAll );
 			out->blasGrow = g.blasGrow;
 			out->rays = g.rays;
 			out->msBuild += g.msBuild;
@@ -705,8 +793,10 @@ bool rtddgiRun( const ProbeSoup & soup, const WwCellLighting & lighting, const P
 	}
 	if ( !done ) {
 		out->path = why;
-		runTwin( S, spec, out );
+		runTwin( S, spec, out, &lastRays );
 	}
+	if ( spec.dumpFixed )
+		missCensus( S, spec, lastRays, out );
 	for ( int p = 0; p < out->probes; p++ ) {
 		const int s = out->state[size_t( p )];
 		out->off += s == kOff ? 1 : 0;
@@ -1258,6 +1348,19 @@ float rtddgiProbeSkyVis( const RtDdgiVolume & vol, int p, const float dir[3] )
 	return e[3];
 }
 
+/* lane SKYBELOW1: the rule, the ground and the miss census in one line (the dump header and the CLI's stdout).
+ * Gate: "below returning sky 0" under the rule, > 0 under the red; the above hash equal between the two */
+static QByteArray skyBelowLine( const RtDdgiVolume & vol )
+{
+	char b[512];
+	std::snprintf( b, sizeof b, "skybelow: rule %s; ground %.6g %.6g %.6g (albedo %.4f %.4f %.4f); misses below %lld (returning sky %lld, "
+		"ground %lld), above %lld (sky %lld), above hash %016llx", vol.skyBelowRule ? "on" : "OFF (red)", double( vol.ground[0] ),
+		double( vol.ground[1] ), double( vol.ground[2] ), double( vol.groundAlbedo[0] ), double( vol.groundAlbedo[1] ),
+		double( vol.groundAlbedo[2] ), (long long)vol.missBelow, (long long)vol.missBelowSky, (long long)vol.missBelowGround,
+		(long long)vol.missAbove, (long long)vol.missAboveSky, (unsigned long long)vol.aboveHash );
+	return QByteArray( b );
+}
+
 bool rtddgiDump( const RtDdgiVolume & vol, const RtDdgiSpec & spec, const QString & dir, QString * err )
 {
 	if ( !QDir().mkpath( dir ) ) {
@@ -1285,6 +1388,7 @@ bool rtddgiDump( const RtDdgiVolume & vol, const RtDdgiSpec & spec, const QStrin
 	std::fprintf( f, "# probes %d off %d asleep %d vigilant %d moved %d rays %lld ms build %.1f reloc %.1f frames %.1f skyClamped %d "
 		"blasGrow %.4f\n", vol.probes, vol.off, vol.asleep, vol.vigilant, vol.moved, (long long)vol.rays, vol.msBuild, vol.msReloc,
 		vol.msFrames, vol.skyClamped, vol.blasGrow );
+	std::fprintf( f, "# %s\n", skyBelowLine( vol ).constData() );   // lane SKYBELOW1
 	std::fprintf( f, "# index\tix\tiy\tiz\tx\ty\tz\tstate\tage\tE+X r g b\tE-X\tE+Y\tE-Y\tE+Z\tE-Z (decoded x 2 pi)"
 		"\tV+X\tV-X\tV+Y\tV-Y\tV+Z\tV-Z (sky visibility)\n" );
 	static const float kAx[6][3] = { { 1, 0, 0 }, { -1, 0, 0 }, { 0, 1, 0 }, { 0, -1, 0 }, { 0, 0, 1 }, { 0, 0, -1 } };
@@ -1349,6 +1453,7 @@ int rtddgiCli( const QStringList & args )
 	RtDdgiSpec spec;
 	int cascades = 1, crays = 0;   // RTXCASCADE2
 	bool perBlas = false, cskip = false;
+	bool forceInterior = false;   // lane SKYBELOW1
 	spec.gpu = 0;
 	WwCellLighting L;
 	L.interior = true;
@@ -1381,6 +1486,7 @@ int rtddgiCli( const QStringList & args )
 		else if ( a == QLatin1String( "--no-classify" ) ) spec.classify = false;
 		else if ( a == QLatin1String( "--trace-asleep" ) ) spec.skipAsleep = false;
 		else if ( a == QLatin1String( "--dump-fixed" ) ) spec.dumpFixed = true;
+		else if ( a == QLatin1String( "--interior" ) ) forceInterior = true;   // SKYBELOW1: a sky-lit interior (SKYINT1's kind)
 		else if ( a == QLatin1String( "--sun" ) || a == QLatin1String( "--sky" ) ) {   // probegi's arguments
 			const QStringList v = nx.split( ',' );
 			const bool sun = a == QLatin1String( "--sun" );
@@ -1415,6 +1521,8 @@ int rtddgiCli( const QStringList & args )
 			i++;
 		}
 	}
+	if ( forceInterior )   // lane SKYBELOW1: --sky/--sun with --interior = an interior that shows the sky (its ground is 0)
+		L.interior = true;
 	if ( !lightsFile.isEmpty() ) {   // tests/bounce_reference's lights.txt: "x y z radius r g b" a line, the default falloff
 		QFile lf( lightsFile );
 		if ( !lf.open( QIODevice::ReadOnly | QIODevice::Text ) ) {
@@ -1499,6 +1607,7 @@ int rtddgiCli( const QStringList & args )
 		"ms build %.1f, relocate+classify %.1f, %d updates %.1f; BLAS grown %.4f u (re-tested on the true triangles)\n",
 		qPrintable( vol.path ), vol.dims[0], vol.dims[1], vol.dims[2], vol.probes, vol.off, vol.asleep, vol.vigilant, vol.moved,
 		(long long)vol.rays, vol.msBuild, vol.msReloc, spec.frames, vol.msFrames, vol.blasGrow );
+	std::printf( "%s\n", skyBelowLine( vol ).constData() );   // lane SKYBELOW1
 	return 0;
 }
 

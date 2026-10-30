@@ -265,6 +265,18 @@ Cell & cell()
 	return *c;
 }
 
+/* lane SKYBELOW1 (bungo 10-30): every probe ray that misses below the horizon returns the ground (an exterior's albedo x
+ * the sky from above, an interior's 0), never sky, and no below-horizon direction is sky visibility (src/rtddgimath.h
+ * missRadiance / skyVisRay). Ships ON; WW_SKYBELOW_RED=1 keeps today's main (the sky in every direction, every miss sky
+ * visibility, and SKYINT1's zeroed ground-facing sky). Read every frame: it is in the build key, a set rebuilds the volume */
+bool rtddgiSkyBelowRed()
+{
+	if ( !wwEnvIsSet( "WW_SKYBELOW_RED" ) )
+		return false;
+	const QByteArray v = wwEnv( "WW_SKYBELOW_RED" ).trimmed();
+	return !v.isEmpty() && v != "0";
+}
+
 /* lane SKYINT1 (10-29): a Use Sky Lighting interior (WwCellLighting skyLighting) takes the CURRENT Lookdev weather and
  * hour as the volume's sky, as the game's full-mode sky does there, whether or not the baked probe GI relit the kept
  * cell. A change is taken once it has stood still kSkyStillMs (an hour slider drags through many values; each new sky
@@ -317,8 +329,10 @@ void skyLitSky( const void * nif, ProbeSkyLight & sky )
 	sky = s.used;
 	/* the void under an interior cell is ground in the game, never sky: a ray leaving downward (a broken floor, a
 	 * probe under the slab) took the weather's ground-facing colour and lit the floor from below (the 10-29 dump: floor
-	 * probes 0.2-0.44 sky). The face a surface facing down takes is 0; red WW_CELL_SKYLIT_RED=ground keeps it */
-	if ( !( wwCellSkyLitRed() & 4 ) )
+	 * probes 0.2-0.44 sky). The face a surface facing down takes is 0; red WW_CELL_SKYLIT_RED=ground keeps it.
+	 * Lane SKYBELOW1: replaced by the one miss rule (an interior's below-horizon miss is 0, rtddgi.cpp packVolume); kept
+	 * only under WW_SKYBELOW_RED (today's main) */
+	if ( rtddgiSkyBelowRed() && !( wwCellSkyLitRed() & 4 ) )
 		for ( int c = 0; c < 3; c++ )
 			sky.amb[5][c] = 0.0f;
 }
@@ -702,6 +716,8 @@ void startBuild( Cell & c, const ProbeSoup & soup, const WwCellLighting & lights
 	spec.fitProbes = true;
 	spec.place = false;
 	spec.gpu = 1;
+	if ( rtddgiSkyBelowRed() )
+		spec.red = QStringLiteral( "skybelow" );   // lane SKYBELOW1: the red, today's main miss and visibility
 	if ( !boxFor( G, soup, eye, sp, spec.box, *b ) ) {
 		std::lock_guard<std::mutex> lk( b->m );
 		b->done = true;
@@ -753,7 +769,11 @@ void censusBuilt( const Cell & c, const Build & b )
 		.arg( c.interop ? QStringLiteral( "interop (GL reads the device's atlas in place)" )
 			: QStringLiteral( "readback (%1)" ).arg( c.interopWhy ) )
 		.arg( ( b.paths & kPathRebuild ) ? QStringLiteral( "a camera move rebuilds (the rebuild red)" )
-			: QStringLiteral( "scrolls with the camera by whole cells" ) ) + blas );
+			: QStringLiteral( "scrolls with the camera by whole cells" ) ) + blas
+		+ ( v.skyBelowRule   // lane SKYBELOW1
+			? QStringLiteral( "; below the horizon: ground %1 %2 %3 (albedo %4), no sky visibility" ).arg( double( v.ground[0] ), 0, 'g', 4 )
+				.arg( double( v.ground[1] ), 0, 'g', 4 ).arg( double( v.ground[2] ), 0, 'g', 4 ).arg( double( v.groundAlbedo[1] ), 0, 'f', 3 )
+			: QStringLiteral( "; below the horizon: sky (the red WW_SKYBELOW_RED)" ) ) );
 }
 
 void censusSet( const Cell & c, const RtDdgiLive & L, int k, const QString & tail )
@@ -1432,6 +1452,8 @@ static void volumeFrame( Scene * scene, Cell & c, const CellSpec * spIn, bool du
 	const QByteArray st = sp.text.toUtf8();
 	key = fnv( key, st.constData(), size_t( st.size() ) );
 	key = fnv( key, &paths, sizeof paths );
+	const int skyBelowRed = rtddgiSkyBelowRed() ? 1 : 0;   // lane SKYBELOW1: a set rebuilds (the volume re-converges)
+	key = fnv( key, &skyBelowRed, sizeof skyBelowRed );
 	if ( G ) {
 		key = fnv( key, G->origin, sizeof G->origin );
 		key = fnv( key, G->dims, sizeof G->dims );

@@ -1,5 +1,39 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## SKYBELOW1 (2026-10-30, CODE1030): below the horizon is ground, never sky, for every ray-traced GI probe
+
+- bungo 10-30: "Shouldn't that be a rule for every probe, don't most games do this" and "treat the lower portion of
+  the sky as not sky visibility". **The rule (src/rtddgimath.h, ON by default, every RTXGI volume and every RTXCASCADE
+  cascade: they share the kernels):** a probe ray that MISSES with a direction below the horizon (world z < 0) returns
+  the GROUND (`missRadiance`): an exterior's ground radiance = the soup's up-facing albedo (area-weighted ALB1, 0.5 grey
+  without it, as at a hit) x the weather's +Z irradiance (what an open up-facing surface takes) / pi (`groundRadiance`;
+  Unreal SkyLight "Lower Hemisphere Is Solid Color", Unity gradient ambient "ground"); an interior's = 0. A miss on or
+  above the horizon returns the sky cube exactly as before. **Sky visibility** (the irradiance texel's alpha) counts a
+  miss only above the horizon (`skyVisRay`): a below-horizon direction is never sky visibility, open or not. GLSL
+  mirror: src/rtddgi/ddgi_common.glsl ddgiBelowHorizon / ddgiSkyVisRay / ddgiMiss (trace.comp's miss, blend.comp's
+  alpha); Params sky[1..3].w = the ground, sky[4].w = the rule (no Params size change); SPIR-V regenerated (trace,
+  blend; border/reloc identical).
+- **Replaces SKYINT1's interior-only case** (rtddgicell.cpp skyLitSky zeroed the weather's ground-facing amb[5] for a
+  Use Sky Lighting interior): the one miss rule gives that interior 0 below the horizon; the zeroing now runs only
+  under the red. A sky-lit interior's above-horizon sky is therefore the weather's own cube (the exterior's).
+- **Red** `WW_SKYBELOW_RED=1` (live: read every frame, in every cascade's build key, a set rebuilds and re-converges;
+  stage table regenerated, survey OVERRIDE): today's main (sky in every direction, every miss sky visibility, SKYINT1's
+  zeroing). CLI: `-no-gui rtddgi ... --red skybelow`; new `--interior` (a sky-lit interior with --sky/--sun).
+- **Census** (`-no-gui rtddgi ... --dump-fixed`, both paths): stdout + the dump header print `skybelow: rule ...;
+  ground ...; misses below N (returning sky S, ground G), above M (sky M'), above hash H`; the cell view's build line
+  says `below the horizon: ground r g b (albedo a), no sky visibility`.
+- **Gates (offline, MEASURED):** unit `bash tests/rtddgi_math/run.sh <out>` green 25 + 25 reds (new: skybelow /
+  RED_SKYBELOW the sky below too, skyabove / RED_SKYABOVE a horizon lifted to z 0.1, skyvisup / RED_SKYVISUP every miss
+  counts: a probe 100 u over a ground disk reads -Z 0.0000, +Z 1.0000, +X 0.5000; the red -Z 0.1000, +X 0.6979).
+  CLI census, c3 (Concord, hardware store rect, GPU, 64 updates): below-horizon misses returning sky 0 of 2473 (red
+  2473 of 2473), above-horizon hash equal rule vs red; Goodneighbor (Memory Den's street): 0 of 6393 (red 6393).
+  The red is today's main byte for byte: base exe e8fad765 vs this exe `--red skybelow`, tiles + probe table
+  IDENTICAL (twin and GPU; the GPU is run-to-run exact); the rule changes the irradiance tiles only (distances
+  identical). Twin vs GPU (c3, 756 probes): states 0 differ, irradiance p99 4.8e-4, sky visibility max 1e-6.
+  Mean -Z sky visibility over c3's 2632 usable probes 0.0229 -> 0.0035 (a tilted texel keeps its above-horizon share).
+- Not done here (rows): the old baked probe GI (probesky.cpp probeSkyCube, probegi's octant shares) and the other
+  sky-visibility readers built on it (clouds, fog, water, LOD) keep the old rule (bungo 10-29: the old GI is no longer
+  tested); a Memory Den soup is owed (a soup needs a window). Pictures owed when bungo asks.
 ## CAMGATE3 (2026-10-30, FIX1030B round 2): an interior's camera bounds are a set of boxes built from what is drawn
 
 - CAMGATE2 judged an interior's camera by ONE axis box of the placements' ORIGINS + 512. Measured offline over all

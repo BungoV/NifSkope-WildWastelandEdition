@@ -1318,6 +1318,8 @@ bool ddgiGpuRun( const DdgiGpuJob & job, DdgiGpuOut * out )
 			for ( uint64_t p = 0; r && p < nProbes; p++ )
 				for ( int i = 0; i < 32; i++ )
 					out->fixedDist[size_t( p ) * 32 + size_t( i )] = r[( p * N + uint64_t( i ) ) * 4 + 3];
+			if ( r )   // lane SKYBELOW1: every record of the last update, for the miss census (src/rtddgi.cpp missCensus)
+				out->raysAll.assign( r, r + size_t( nProbes ) * N * 4 );
 		}
 	}
 	ddgiGpuClose( s );
