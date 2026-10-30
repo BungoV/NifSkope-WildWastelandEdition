@@ -290,6 +290,8 @@ struct WwWeatherData
 	// byte 10, Thunder/Lightning Frequency; the cloud type reads them (gl/cloudmath.h lowTypeOf)
 	quint8 classFlags = 0, thunderFreq = 0;
 	bool hasClass = false;
+	// lane CLOUD6e: MNAM, the precipitation shader (an SPGD; 0 = none): the rain fog's "this weather rains"
+	quint32 precipForm = 0;
 	quint32 imsp[8] = {};	// IMSP: the IMGS per ToD (mapped FormIDs; 4-slot records mapped to 8)
 	float skyScale[8] = { 1, 1, 1, 1, 1, 1, 1, 1 };	// IMGS HNAM[7] per ToD (1.0 where absent)
 	int skyScaleFound = 0;	// how many ToD slots had an IMGS with HNAM
