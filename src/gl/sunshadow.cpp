@@ -29,6 +29,7 @@ BSD License - see nifskope.h
 #include "gl/shadowset.h"	// lane TERRSHADOW1: the unified set (presets, terrain, contact, composition)
 #include "gl/cloudshadow.h"	// lane CLOUD3
 #include "gl/cellfarground.h"	// lane FARDRAW1
+#include "gl/sunshadowfit.h"	// lane SHADOWSHIMMER1: the fit and the kernel's rotation (tests/shadowshimmer1 runs them)
 
 #include <QDir>
 #include <QFile>
@@ -75,6 +76,7 @@ struct Cascade
 	double pb[3] = { 0, 0, 0 };	// the snapped light origin (dot(C,right), dot(C,up), dot(C,L) - 15000)
 	double l = 0, b = 0;		// the snapped window corner
 	double far = 0;
+	double sphereZ = 0, sphereR = 0;	// lane SHADOWSHIMMER1: the stable fit's sphere (0 = CSM1's box, the red)
 	float clipFromView[16];		// the caster pass: view space -> the cascade's clip space
 	float uvdFromView[16];		// the receiver: view space -> (u, v, depth)
 };
@@ -159,6 +161,22 @@ bool red( const char * name )
 	return reds.contains( QString::fromLatin1( name ) );
 }
 
+// lane SHADOWSHIMMER1: WW_SUN_SHADOW_STABLE_RED = old (all) | fit,kernel,bias -> bits 1 / 2 / 4 (today's path back)
+int stableRedBits( const QString & v )
+{
+	const QString t = v.trimmed().toLower();
+	if ( t.isEmpty() )
+		return 0;
+	if ( t == QLatin1String( "old" ) || t == QLatin1String( "all" ) || t == QLatin1String( "1" ) )
+		return 7;
+	int bits = 0;
+	for ( const QString & p : t.split( QChar( ',' ), Qt::SkipEmptyParts ) ) {
+		const QString q = p.trimmed();
+		bits |= q == QLatin1String( "fit" ) ? 1 : q == QLatin1String( "kernel" ) ? 2 : q == QLatin1String( "bias" ) ? 4 : 0;
+	}
+	return bits;
+}
+
 int redBits()
 {
 	return ( red( "noblend" ) ? 1 : 0 ) | ( red( "nofade" ) ? 2 : 0 ) | ( red( "diffonly" ) ? 4 : 0 )
@@ -187,15 +205,7 @@ bool norm3( double * v )
 	return true;
 }
 
-//! the spec's snap: onto the texel (integer branch) or onto 1/n (the sub-unit branch)
-double snap( double v, const Cascade & c )
-{
-	if ( red( "nosnap" ) )
-		return v;
-	if ( c.n > 0 )
-		return std::floor( v * c.n ) / c.n;
-	return std::floor( v / c.texel ) * c.texel;
-}
+// the spec's snap (onto the texel, or 1/n) moved to gl/sunshadowfit.h snapOld (lane SHADOWSHIMMER1)
 
 /*! One affine row out = a . Q + k over WORLD Q, re-expressed over VIEW space p
  *  (posView = R (sc Q) + t, so Q = R^T (p - t) / sc), written into row `row` of
@@ -241,52 +251,50 @@ void fitCascades( CsmState & s, const Transform & vt )
 		c = Cascade();
 		c.zn = ( i == 0 || one ) ? s.camNear : far[i - 1] - s.blend;
 		c.zf = ( one ? s.D : far[i] ) + s.blend;
-		bool first = true;
-		for ( int zi = 0; zi < 2; zi++ ) {
-			const double z = zi ? c.zf : c.zn;
-			for ( int sx = -1; sx <= 1; sx += 2 ) {
-				for ( int sy = -1; sy <= 1; sy += 2 ) {
-					double q[3];	// Q - C
-					for ( int j = 0; j < 3; j++ )
-						q[j] = z * ( s.fwd[j] + sx * s.tanX * rc[j] + sy * s.tanY * uc[j] );
-					const double x = dot3( q, Rr ), y = dot3( q, Ur ), zz = dot3( q, Lr ) + s.lightBack;
-					if ( first ) {
-						c.minX = c.maxX = x;
-						c.minY = c.maxY = y;
-						c.maxZ = zz;
-						first = false;
-					} else {
-						c.minX = std::min( c.minX, x );
-						c.maxX = std::max( c.maxX, x );
-						c.minY = std::min( c.minY, y );
-						c.maxY = std::max( c.maxY, y );
-						c.maxZ = std::max( c.maxZ, zz );
-					}
-				}
-			}
+		/* lane SHADOWSHIMMER1: the fit is gl/sunshadowfit.h's (the unit runs the same code). Stable (default): the
+		 * slice's bounding sphere, whole texels in absolute light space, a fixed depth range on 64-quantum steps. Red
+		 * WW_SUN_SHADOW_STABLE_RED=fit (or old): CSM1's box, which re-sizes its texel on every camera turn. */
+		WwCsmFit::In fi;
+		for ( int j = 0; j < 3; j++ ) {
+			fi.C[j] = s.C[j];
+			fi.fwd[j] = s.fwd[j];
+			fi.rc[j] = rc[j];
+			fi.uc[j] = uc[j];
+			fi.R[j] = Rr[j];
+			fi.U[j] = Ur[j];
+			fi.L[j] = Lr[j];
 		}
-		c.w = std::floor( c.maxX - c.minX );
-		c.h = std::floor( c.maxY - c.minY );
-		const double ext = std::max( std::max( c.w, c.h ), 1.0 );
-		const double ratio = ext / s.map;
-		if ( red( "nosnap" ) ) {
-			c.texel = ratio;
-			c.n = 0;
-		} else if ( ratio > 0.5 ) {
-			c.texel = std::ceil( ratio );
-			c.n = 0;
-		} else {
-			c.n = std::max( 1, int( std::floor( 1.0 / ratio ) ) );
-			c.texel = 1.0 / c.n;
-		}
-		c.pb[0] = snap( dot3( s.C, Rr ), c );
-		c.pb[1] = snap( dot3( s.C, Ur ), c );
-		c.pb[2] = snap( dot3( s.C, Lr ) - s.lightBack, c );
-		c.l = snap( c.minX, c );
-		c.b = snap( c.minY, c );
-		c.vw = std::clamp( int( std::floor( c.w / c.texel + 1e-9 ) ), 1, s.map );
-		c.vh = std::clamp( int( std::floor( c.h / c.texel + 1e-9 ) ), 1, s.map );
-		c.far = c.maxZ + kNear;
+		fi.tanX = s.tanX;
+		fi.tanY = s.tanY;
+		fi.zn = c.zn;
+		fi.zf = c.zf;
+		fi.first = i == 0 || one;
+		fi.map = s.map;
+		fi.lightBack = s.lightBack;
+		fi.nosnap = red( "nosnap" );
+		WwCsmFit::Out fo;
+		if ( wwSunShadowStableRed() & 1 )
+			WwCsmFit::fitOld( fi, fo );
+		else
+			WwCsmFit::fitStable( fi, fo );
+		c.minX = fo.minX;
+		c.maxX = fo.maxX;
+		c.minY = fo.minY;
+		c.maxY = fo.maxY;
+		c.maxZ = fo.maxZ;
+		c.w = fo.w;
+		c.h = fo.h;
+		c.texel = fo.texel;
+		c.n = fo.n;
+		for ( int j = 0; j < 3; j++ )
+			c.pb[j] = fo.pb[j];
+		c.l = fo.l;
+		c.b = fo.b;
+		c.vw = fo.vw;
+		c.vh = fo.vh;
+		c.far = fo.far;
+		c.sphereZ = fo.sphereZ;
+		c.sphereR = fo.sphereR;
 
 		// world rows: x_l = right.Q - pb.x, window [l, l + vw texel] (INFERRED right edge)
 		const double wx = c.vw * c.texel, wy = c.vh * c.texel, wz = c.far - kNear;
@@ -1634,6 +1642,36 @@ void wwSunShadowUniforms( Scene * scene )
 	// lane TERRSHADOW1: the composition (ussOn = 0 keeps the code above exactly CSM1's)
 	const float texel[3] = { float( s.c[0].texel ), float( s.c[1].texel ), float( s.c[2].texel ) };
 	wwShadowSetUniforms( scene, prog, s.valid, texel );
+	// lane SHADOWSHIMMER1: the kernel's world-locked lattice (each window's corner in cells) and the normal offset
+	if ( prog->uniLocation( "ussCsmStable" ) >= 0 ) {
+		const int sr = wwSunShadowStableRed();
+		WwCascadePreset cp;
+		const bool up = wwShadowCascadePreset( cp );
+		const bool volume = prog->uniLocation( "volStage" ) >= 0;	// the fog's froxels: no surface, no normal
+		prog->uni4f( "ussCsmStable", FloatVector4( ( sr & 2 ) ? 0.0f : 1.0f, ( up && !volume && !( sr & 4 ) ) ? cp.normalTexels : 0.0f,
+			0.0f, 0.0f ) );
+		float cx[kCascades], cy[kCascades];
+		for ( int i = 0; i < kCascades; i++ ) {
+			WwCsmFit::Out o;
+			o.texel = s.c[i].texel > 0.0 ? s.c[i].texel : 1.0;
+			o.pb[0] = s.c[i].pb[0];
+			o.pb[1] = s.c[i].pb[1];
+			o.l = s.c[i].l;
+			o.b = s.c[i].b;
+			double ox = 0.0, oy = 0.0;
+			WwCsmFit::cellOrigin( o, ox, oy );
+			cx[i] = float( ox );
+			cy[i] = float( oy );
+		}
+		prog->uni3f( "ussCsmCellX", cx[0], cx[1], cx[2] );
+		prog->uni3f( "ussCsmCellY", cy[0], cy[1], cy[2] );
+	}
+}
+
+int wwSunShadowStableRed()
+{
+	WW_SWITCH_STATIC( int, bits, stableRedBits( wwEnvStr( "WW_SUN_SHADOW_STABLE_RED" ) ) );
+	return bits;
 }
 
 void wwSunShadowForget()
@@ -1670,6 +1708,9 @@ QString wwSunShadowSummary()
 			m << QString::number( double( s.c[i].uvdFromView[k] ), 'g', 9 );
 		o += QString( " m%1=%2" ).arg( i ).arg( m.join( QChar( ',' ) ) );
 	}
+	// lane SHADOWSHIMMER1: which parts run stable (red bits 1 fit, 2 kernel, 4 bias) and each cascade's sphere radius
+	o += QString( " stable=%1 sphere=%2,%3,%4" ).arg( wwSunShadowStableRed() ^ 7 ).arg( g( s.c[0].sphereR ), g( s.c[1].sphereR ),
+		g( s.c[2].sphereR ) );
 	o += QString( " csmat=%1 slopeclamp=%2" ).arg( s.atCasters ).arg( s.slopeClamp );	// lane VOLAIR1: -1 = no program (they cast solid)
 	if ( s.swayCables >= 0 )
 		o += QString( " cablesway=%1" ).arg( s.swayCables );	// lane FAR5: the wind cables cast where they sway

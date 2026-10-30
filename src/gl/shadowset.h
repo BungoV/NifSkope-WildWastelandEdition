@@ -80,6 +80,7 @@ struct WwCascadePreset
 	int taps = 32;
 	float biasTexels = 1.5f;	// the receiver offset, texels of each cascade (world units along the light)
 	float slopeBias = 6.0f, unitBias = 12.0f;	// glPolygonOffset of the caster pass
+	float normalTexels = 0.0f;	// lane SHADOWSHIMMER1: the receiver's normal offset, texels of each cascade (0 off)
 };
 bool wwShadowCascadePreset( WwCascadePreset & p );
 

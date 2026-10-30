@@ -1,5 +1,39 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## SHADOWSHIMMER1 (2026-10-30): sun shadows stand still (no crawl, no shimmer on a turn, a tight contact)
+
+- bungo 10-29: "shadows move for some reason, yet they shouldn't, the leaves are totally static"; SHADOWBAND1's
+  leftovers: the cascade view changed 152 k px/frame on a still scene (98 k with the Vogel phase off) and the
+  peter-panning bar read 2.3-3.6 px. **Causes, from the code** (src/gl/sunshadow.cpp, res/shaders/ww_sunshadow.glsl):
+  (1) the Vogel kernel's rotation was 2 pi IGN(gl_FragCoord + frame % 61 x (32.665, 11.815)): under TAA a new
+  rotation every frame, and without the phase a screen-locked pattern that swims over the world as the camera moves;
+  (2) the fit boxed each slice's corners in light space, so a camera TURN re-sized the box and its texel
+  (ceil(extent / map)): every edge crawled; a slide was already whole-texel; (3) the bias: glPolygonOffset(6, 12) on a
+  D16 map of a ~32000-unit depth range (12 quanta = 6 units) plus 1.5 texels at the receiver: a thin caster's
+  contact gap B sin e cos e / texel was 6-7.6 texels. **Not a cause** (G3): no caster program reads a clock, a sway or
+  the jitter (the fit already used the unjittered projection, MOTION1); the sun moves only with the hour row.
+- **The fix (the way shipped engines do stable cascades), ON by default:** gl/sunshadowfit.h (new, pure C++; the
+  unit runs it) fits each slice's bounding SPHERE (rotation-invariant; the first slice from the eye), texel =
+  diameter / (map - 1), the window corner floored onto whole texels in absolute light space, a fixed depth range
+  (lightBack + centre + radius + 64 quanta) whose origin moves in 64-quantum steps (a stored depth is never
+  re-quantised; the shadow cache keeps scrolling between steps). The kernel rotates by IGN of the absolute
+  light-space lattice cell (4 per texel, wrapped at 4096; uniforms ussCsmStable, ussCsmCellX/Y): the same for a still
+  world point in every frame and from every camera. The bias (Cascade Quality Low..Ultra): a receiver normal offset of
+  1 texel x sin(the light's angle to the surface) along the derivative normal does the acne work, so the caster keeps
+  slope 0.5 / 2 quanta and the receiver 0.25 texel. Cascade Quality Off keeps CSM1's bias (its fit is the stable one).
+- Echo: `stable=<7 - red bits> sphere=<r0,r1,r2>` in the CSM summary line (WW_CSM_ECHO).
+- **Red** `WW_SUN_SHADOW_STABLE_RED=old` (live, stage 0) = today's path; parts: `fit`, `kernel`, `bias` (comma list).
+- **Gates (offline):** tests/shadowshimmer1 (run.sh; g++ only): green PASS 0 failed. G1 still 30 TAA frames 0 changed
+  origins / 0 changed rotations over 2884 world points; sub-texel slide: 43 whole-texel moves, 0 fractional, 0 rotation
+  changes; 30-degree turn: texel and window unchanged, 0 rotation changes over 2948 points. G2 (Ultra, D 14000) worst
+  contact gap 0.879 / 0.658 / 0.598 texel (cascades 0/1/2, sun 5..85 deg), acne guard 0 short. G3 6 caster programs
+  read no per-frame uniform; one CPU deformer (the wind cables, FAR5). Reds: RED_FIT fails the turn (texel 4, size
+  90 changes); RED_KERNEL fails still/slide/turn (83630 / 61202 / 72789 rotation changes); RED_BIAS fails G2 (7.59 /
+  6.57 / 6.33 texels); RED_NONORMAL fails the acne guard (44 short); RED_G3 (a sway clock injected) fails G3.
+  Link sweep (131 programs): base 393/393, rtx (WW_CELL_RTDDGI, none+ubo) 262/262 LINK OK. Build RC 0.
+- Owed (pictures when bungo asks): the still-camera crawl sequence (phase on, TAA), the brick-wall contact, the leaf
+  shadows, the shadow cache's scroll cost while moving (the sphere covers more than the box).
+
 ## CAMGATE1 (2026-10-30): the camera never shows an out-of-bounds or under-terrain view
 
 - bungo 10-30, watching a live hold window that showed the underside of the cells: "Stop placing the camera out of

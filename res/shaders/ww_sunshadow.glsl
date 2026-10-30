@@ -44,6 +44,9 @@ uniform int ussRed;			// 1 terrseam, 2 mulcompose
 uniform vec4 ussCsmWorld;		// lane SHADOWPAR1: x world-unit radius on, yzw each cascade's radius (world units)
 uniform vec3 ussCsmTexel;		// each cascade's texel (world units)
 uniform float ussCsmPhase;		// the rotation's temporal phase (frame % 61; 0 without TAA)
+uniform vec4 ussCsmStable;		// lane SHADOWSHIMMER1: x 1 the kernel rotation world-locked (0 the red: screen + frame), y the normal offset (texels)
+uniform vec3 ussCsmCellX;		// lane SHADOWSHIMMER1: each cascade's window corner in kernel lattice cells, wrapped (gl/sunshadowfit.h)
+uniform vec3 ussCsmCellY;
 uniform vec2 ussTail;			// lane SHADOWPAR1: x the air's far tail reads the terrain map, y the ambient's share of its light
 uniform vec4 ussTerrAtlas;		// the near tier shares the far map's texture: far v scale, near u scale, near v offset, near v scale
 uniform vec2 ussTerrSize;		// the far and near tiers' texels across (near 0: off)
@@ -124,10 +127,11 @@ float ussIgn( vec2 p )
 	return fract( 52.9829189 * fract( dot( p, vec2( 0.06711056, 0.00583715 ) ) ) );
 }
 
-//! (A) the Vogel-disk filter, rotated per pixel, with the receiver-plane depth bias
-float ussVogel( int i, vec3 posView, float offsetWorld, vec3 dPx, vec3 dPy )
+//! (A) the Vogel-disk filter, rotated per world point (lane SHADOWSHIMMER1), with the receiver-plane depth bias;
+//! nOff: the normal offset per world unit of this cascade's texel (view space; 0 off)
+float ussVogel( int i, vec3 posView, float offsetWorld, vec3 dPx, vec3 dPy, vec3 nOff )
 {
-	vec3 q = csmUvd( i, posView );
+	vec3 q = csmUvd( i, posView + nOff * ussCsmTexel[i] );
 	float zRef = q.z - offsetWorld * csmInvRange[i];
 	vec2 rpdb = vec2( 0.0 );
 	if ( ussCsmFilter.w > 0.5 ) {
@@ -143,7 +147,11 @@ float ussVogel( int i, vec3 posView, float offsetWorld, vec3 dPx, vec3 dPy )
 		R = clamp( ussCsmWorld[i + 1] / max( ussCsmTexel[i], 1e-6 ), 0.5, 16.0 );
 		n = int( clamp( floor( 32.0 * ( R / 3.0 ) * ( R / 3.0 ) + 0.5 ), 8.0, 48.0 ) );
 	}
-	float rot = 6.2831853 * ussIgn( gl_FragCoord.xy + ussCsmPhase * vec2( 32.665, 11.815 ) );
+	// lane SHADOWSHIMMER1: the rotation of the absolute light-space lattice cell (4 per texel, wrapped at 4096): the same
+	// for a still world point in every frame and from every camera. Red (x 0): the pixel's, plus the TAA frame's phase
+	vec2 rp = ussCsmStable.x > 0.5 ? mod( floor( q.xy * ( csmParams.z * 4.0 ) ) + vec2( ussCsmCellX[i], ussCsmCellY[i] ), 4096.0 )
+		: gl_FragCoord.xy + ussCsmPhase * vec2( 32.665, 11.815 );
+	float rot = 6.2831853 * ussIgn( rp );
 	float k = 1.0 / csmParams.z;
 	float lim = 2000.0 * csmInvRange[i];
 	float sum = 0.0;
@@ -172,10 +180,23 @@ float ussCascades( vec3 posView, vec3 dPx, vec3 dPy, out float w )
 	csmSelect( posView, a, b, t );
 	float sA = 1.0, sB = 1.0;
 	if ( ussCsmFilter.x > 0.5 ) {
+		// lane SHADOWSHIMMER1: the normal offset, ussCsmStable.y texels of the cascade x sin(the light's angle to the
+		// surface), along the geometric normal (the position's derivatives) turned toward the eye; once for both cascades
+		vec3 nOff = vec3( 0.0 );
+		if ( ussCsmStable.y > 0.0 ) {
+			vec3 n = cross( dPx, dPy );
+			float ln = length( n );
+			vec3 lv = vec3( csmMat[a][0][2], csmMat[a][1][2], csmMat[a][2][2] );
+			if ( ln > 1e-20 && dot( lv, lv ) > 0.0 ) {
+				n = dot( n, posView ) > 0.0 ? -n / ln : n / ln;
+				float c = dot( n, normalize( lv ) );
+				nOff = n * ( ussCsmStable.y * sqrt( max( 1.0 - c * c, 0.0 ) ) / csmParams.x );
+			}
+		}
 		if ( t < 1.0 )
-			sA = ussVogel( a, posView, ussCsmBias[a], dPx, dPy );
+			sA = ussVogel( a, posView, ussCsmBias[a], dPx, dPy, nOff );
 		if ( t > 0.0 )
-			sB = ussVogel( b, posView, ussCsmBias[b], dPx, dPy );
+			sB = ussVogel( b, posView, ussCsmBias[b], dPx, dPy, nOff );
 	} else {
 		if ( t < 1.0 )
 			sA = csmFiltered( a, posView, csmSplitOffset.z );
