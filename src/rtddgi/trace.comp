@@ -1,7 +1,8 @@
 #version 460
 // Lane RTXGI1: the probe trace. One invocation a (probe, ray): ray query against bakert's BLAS (geometry 0 opaque,
 // geometry 1 alpha-tested), nearest hit. The CPU twin is src/rtddgi.cpp traceRay(); the rules:
-//   miss          sky radiance (0 without sky), distance DDGI_MISS
+//   miss          sky radiance above the horizon, the ground's below it (SKYBELOW1, ddgiMiss; 0 without sky),
+//                 distance DDGI_MISS
 //   backface      radiance 0, distance -0.2 t (a one-sided face seen from behind) [J21 4.1]
 //   fixed ray     distance only (rays < 32 are never blended [SDK])
 //   front face    albedo / pi x (sun behind a shadow ray + interior directional + the placed lights behind shadow
@@ -272,7 +273,7 @@ void main()
 	float t;
 	vec4 rec;
 	if ( !ddgiNearest( o, d, P.sun.w, pr, t ) ) {
-		rec = vec4( P.sky[0].w > 0.5 && i >= DDGI_FIXED ? ddgiSky( d ) : vec3( 0.0 ), DDGI_MISS );
+		rec = vec4( P.sky[0].w > 0.5 && i >= DDGI_FIXED ? ddgiMiss( d ) : vec3( 0.0 ), DDGI_MISS );   // SKYBELOW1: ground below
 	} else {
 		const int tri = remap[pr];
 		const uint vb = pr * 9u;

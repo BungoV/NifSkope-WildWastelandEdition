@@ -40,7 +40,7 @@ void main()
 			if ( c <= 0.0 )
 				continue;
 			s += c * sRay[r].rgb;
-			sv += sRay[r].w >= DDGI_MISS * 0.5 ? c : 0.0;
+			sv += ddgiSkyVisRay( sDir[r], sRay[r].w ) ? c : 0.0;   // SKYBELOW1: a miss above the horizon only
 			w += c;
 		}
 		const uint at = p * uint( DDGI_IRR_S * DDGI_IRR_S ) + uint( ( ty + 1 ) * DDGI_IRR_S + tx + 1 );

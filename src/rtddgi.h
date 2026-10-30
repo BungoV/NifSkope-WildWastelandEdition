@@ -89,6 +89,16 @@ struct RtDdgiVolume
 	qint64 rays = 0;
 	double msBuild = 0, msReloc = 0, msFrames = 0;
 	int skyClamped = 0;             //!< sky cube parts clamped to 0 (rtddgimath.h skyRadianceCube)
+	/* lane SKYBELOW1 (bungo 10-30): a below-horizon miss returns the ground, never sky, and is never sky visibility.
+	 * ground = the radiance it returns (an exterior's groundAlbedo x the sky's +Z irradiance / pi; 0 in an interior or
+	 * with no sky), skyBelowRule false = the red (spec.red "skybelow", the cell view's WW_SKYBELOW_RED: today's main).
+	 * The miss census (spec.dumpFixed runs, both paths): the last update's blended rays of the traced probes; a miss
+	 * "returns sky" when its radiance is the sky cube's for its direction and not the ground's; aboveHash = FNV-1a of
+	 * the above-horizon misses' radiance bytes (the rule leaves them byte-equal to the red) */
+	float ground[3] = { 0, 0, 0 }, groundAlbedo[3] = { 0, 0, 0 };
+	bool skyBelowRule = true;
+	qint64 missBelow = -1, missBelowSky = 0, missBelowGround = 0, missAbove = 0, missAboveSky = 0;
+	quint64 aboveHash = 0;
 	int probeCount() const { return dims[0] * dims[1] * dims[2]; }
 	//! probe p's position (world): grid + offset
 	void position( int p, float out[3] ) const;

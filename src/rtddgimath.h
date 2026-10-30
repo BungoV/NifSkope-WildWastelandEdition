@@ -330,19 +330,40 @@ inline bool blendIrradianceTexel( V3 t, const V3 * dirs, const float * rad, int 
 		*hOut = h;
 	return true;
 }
+/*! lane SKYBELOW1 (bungo 10-30): is a ray direction below the horizon (the volume's frame is the world's, z up).
+ *  GLSL: ddgiBelowHorizon */
+inline bool belowHorizon( V3 d )
+{
+#ifdef RTDDGI_RED_SKYABOVE
+	return d.z < 0.1f;   // red: a lifted horizon (the near-horizon sky above it turns ground)
+#else
+	return d.z < 0.0f;
+#endif
+}
+/*! lane SKYBELOW1: does a ray count as sky visibility: a miss (nothing within the trace reach) ABOVE the horizon; a
+ *  below-horizon direction is never sky, open or not (bungo 10-30). rule false = the red WW_SKYBELOW_RED (every miss,
+ *  today's main).  GLSL: ddgiSkyVisRay */
+inline bool skyVisRay( V3 d, float dist, bool rule )
+{
+#ifdef RTDDGI_RED_SKYVISUP
+	rule = false;   // red: a below-horizon miss is sky visibility too
+#endif
+	return dist >= kMiss * 0.5f && !( rule && belowHorizon( d ) );
+}
 /*! one sky-visibility texel (ours, bungo 10-29; GUIDE section 1, stored in the irradiance texel's alpha): the
  *  cosine-weighted share of the blended rays that MISS (stored distance kMiss: nothing within the trace reach),
  *  NOT gamma encoded, blended with old by h = the same texel's irradiance hysteresis this update (hOut above).
  *  Geometry only: a --no-sky volume still has it. Returns false when no ray faces the texel (out = old).
- *  GLSL: blend.comp */
-inline bool blendSkyVisTexel( V3 t, const V3 * dirs, const float * dist, int nRays, float h, float old, float * out )
+ *  SKYBELOW1: a miss counts only above the horizon (skyVisRay; upper false = the red).  GLSL: blend.comp */
+inline bool blendSkyVisTexel( V3 t, const V3 * dirs, const float * dist, int nRays, float h, float old, float * out,
+	bool upper = true )
 {
 	double s = 0, w = 0;
 	for ( int r = 0; r < nRays; r++ ) {
 		const float c = std::max( 0.0f, dot( t, dirs[r] ) );
 		if ( c <= 0.0f )
 			continue;
-		const double miss = dist[r] >= kMiss * 0.5f ? 1.0 : 0.0;
+		const double miss = skyVisRay( dirs[r], dist[r], upper ) ? 1.0 : 0.0;
 #ifdef RTDDGI_RED_SKYVIS
 		s += miss;   // red: the plain share of the facing rays, not cosine weighted
 		w += 1.0;
@@ -880,6 +901,31 @@ inline void skyRadiance( const float R[6][3], V3 d, float out[3] )
 	const int fx = d.x >= 0.0f ? 0 : 1, fy = d.y >= 0.0f ? 2 : 3, fz = d.z >= 0.0f ? 4 : 5;
 	for ( int c = 0; c < 3; c++ )
 		out[c] = d.x * d.x * R[fx][c] + d.y * d.y * R[fy][c] + d.z * d.z * R[fz][c];
+}
+
+// ------------------------------------------------------------------ lane SKYBELOW1 (bungo 10-30): below the horizon is ground
+/*! the ground a below-horizon miss sees (Unreal SkyLight "Lower Hemisphere Is Solid Color", Unity gradient ambient
+ *  "ground"): an exterior's ground radiance = its albedo x the sky irradiance from above (eUp, what an up-facing open
+ *  surface takes: the weather's +Z amb) / pi; an interior's = 0 (the void under a cell is never sky).  C++ only: the
+ *  kernels read the result (Params sky[1..3].w) */
+inline void groundRadiance( const float albedo[3], const float eUp[3], bool interior, float out[3] )
+{
+	for ( int c = 0; c < 3; c++ )
+		out[c] = interior ? 0.0f : albedo[c] * eUp[c] / kPi;
+}
+/*! a miss's radiance: above the horizon the sky cube (skyRadiance, unchanged), below it the ground (rgb, 0 in an
+ *  interior). rule false = the red WW_SKYBELOW_RED (today's main: the sky in every direction).  GLSL: ddgiMiss */
+inline void missRadiance( const float R[6][3], const float ground[3], V3 d, bool rule, float out[3] )
+{
+#ifdef RTDDGI_RED_SKYBELOW
+	rule = false;   // red: the sky below the horizon too
+#endif
+	if ( rule && belowHorizon( d ) ) {
+		for ( int c = 0; c < 3; c++ )
+			out[c] = ground[c];
+		return;
+	}
+	skyRadiance( R, d, out );
 }
 
 } // namespace rtddgi
