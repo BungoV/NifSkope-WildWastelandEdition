@@ -86,7 +86,18 @@ void main()
 		float h0 = ( lo.z - base ) / max( top - base, 1e-3 ), h1 = ( hi.z - base ) / max( top - base, 1e-3 );
 		if ( h1 <= 0.0 || h0 >= 1.0 || cvBands.density[b] <= 0.0 )
 			continue;
+#ifdef WW_CLOUD_VARIETY
+		/* lane CLOUD5: the weather noise's swing raises the coverage by at most swing x min(c, 1 - c) (rising in c); the
+		 * type tables are bounded by their largest anchor (a blend never exceeds both), the anvil by sqrt (its power >=
+		 * 0.5); every type profile is <= 1 (gm below); the curl moves only the detail read, which only erodes */
+		float cv = b == 0 ? cov.x : cov.y;
+		cv += cvVarA.z * min( cv, 1.0 - cv );
+		float c = b == 0 ? sqrt( max( max( cvCalAtT( 0.0, cv ), cvCalAtT( 1.0 / 3.0, cv ) ),
+								 max( cvCalAtT( 2.0 / 3.0, cv ), cvCalAtT( 1.0, cv ) ) ) )
+						 : cvCalAt( 1, cv );
+#else
 		float c = cvCalAt( b, b == 0 ? cov.x : cov.y );	// cvCalAt rises with the coverage (the gate checks it)
+#endif
 		if ( c <= 0.0 )
 			continue;
 		if ( s < 0.0 ) {
@@ -94,7 +105,12 @@ void main()
 			s = max( cfShapeMip( q0, q1, 0 ), max( cfShapeMip( q0, q1, 1 ), cfShapeMip( q0, q1, 2 ) ) );
 			s = min( s + cfMargin, 1.0 );
 		}
+#ifdef WW_CLOUD_VARIETY
+		float gm = b == 0 ? 1.0 : cfGradMax( b, clamp( h0, 0.0, 1.0 ), clamp( h1, 0.0, 1.0 ) );
+		if ( s * gm > 1.0 - c )
+#else
 		if ( s * cfGradMax( b, clamp( h0, 0.0, 1.0 ), clamp( h1, 0.0, 1.0 ) ) > 1.0 - c )
+#endif
 			occ = 1.0;
 	}
 	cfOut = vec4( occ );

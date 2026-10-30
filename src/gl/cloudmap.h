@@ -31,6 +31,12 @@ struct WwCloudBandInfo
 	float sheet = 0.0f;	//!< 0..1, the share of the band's coverage from sheet (stratus, Fill) layers
 	float tint[3] = { 1, 1, 1 };	//!< linear albedo tint, white unless the weather's clouds are deliberately coloured
 	int layers = 0;	//!< how many weather layers fed the band this frame
+	/* lane CLOUD5 (Cloud Variety): the Low band's cloud type 0..1 (stratus .. cumulonimbus) and the weather noise's swing
+	 * of it (cloudmath.h lowTypeOf); depthZ = the band's own depth, game units. With Cloud Variety on, topZ of the Low
+	 * band is raised to the tallest type's top (baseZ + typeDepthKm(type + spread)); off, topZ = baseZ + depthZ. */
+	float type = 0.0f;
+	float typeSpread = 0.0f;
+	float depthZ = 0.0f;
 };
 
 /*! The map: GL_TEXTURE_2D, RGBA8, linear filtered, clamp to edge, of the context current at the build.
@@ -49,6 +55,7 @@ struct WwCloudMap
 	WwCloudBandInfo band[WwCloudBandCount];
 	float transition = 1.0f;	//!< 0..1 from the previous weather's parameters to the current (1 = settled)
 	quint64 generation = 0;	//!< bumps on every rebuild (a reader's cache key)
+	bool variety = false;	//!< lane CLOUD5: built for Cloud Variety (the Low top raised for towers)
 };
 
 //! the latest map; call after wwCloudMapUpdate in the same frame. Never null.

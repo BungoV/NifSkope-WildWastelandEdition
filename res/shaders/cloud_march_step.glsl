@@ -16,7 +16,28 @@
 		pl.z = p.z + dot( up, cvKeyW ) * tk;
 		tauL += cvDens( pl ) * kCvSigma * dk;
 	}
+#ifdef WW_CLOUD_VARIETY
+	/* lane CLOUD5 round 2: a tower's column goes on past the taps' reach (6 km of a 7 km tower with the sun at 60 deg is
+	 * 6.9 km along it): one tap at the middle of the rest, up to the Low band's top along the key, at most one reach
+	 * long. Without it the floor's slab is too thin and, at albedo 0.99, the base 2.1x too bright (gate C, MEASURED). */
+	{
+		float muK = dot( up, cvKeyW );
+		float rest = muK > 0.01 ? clamp( ( cvBands.topKm.x - p.z ) / muK - cvLightKm, 0.0, cvLightKm ) : 0.0;
+		if ( rest > 0.0 ) {
+			float tk = cvLightKm + 0.5 * rest;
+			vec3 pl = p + cvKeyW * tk;
+			pl.z = p.z + muK * tk;
+			tauL += cvDens( pl ) * kCvSigma * rest;
+		}
+	}
+#endif
+#ifdef WW_CLOUD_VARIETY
+	// lane CLOUD5: the ambient's height ramp over the bands' span without the towers (cvAmbKm), so a storm tower in the
+	// sky does not dim the small cumulus beside it
+	float hf = clamp( ( p.z - lo ) / max( cvAmbKm, 1e-3 ), 0.0, 1.0 );
+#else
 	float hf = clamp( ( p.z - lo ) / max( hi - lo, 1e-3 ), 0.0, 1.0 );
+#endif
 	float mu0 = dot( up, cvKeyW );
 	vec3 key = cvKeyK * atTrans( cvTrans, kRb + p.z, mu0 );
 	float ph = cvOctaveSum( cosT, tauL );

@@ -1,0 +1,3 @@
+# lane CLOUD5: the fly-through grid occupancy bake for Cloud Variety (src/gl/cloudfly.cpp), selected by name.
+
+shaders cell_ao.vert cloud_flybake_v.frag

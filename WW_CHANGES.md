@@ -1,5 +1,23 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## CLOUD5 (2026-10-29): Cloud Variety -- cloud types, many sizes in one sky, storm towers
+
+New row Render > Scene > Cloud Variety (Off / On, ships Off; needs Volume Clouds Medium or up; pin WW_CLOUDVOL_VARIETY).
+- Each weather gets a Low cloud type from its record (WTHR DATA class flags and thunder byte): fair-weather cumulus,
+  cloudy stratocumulus, rain congestus, thunderstorm cumulonimbus towers up to 7 km deep with an anvil, snow stratiform.
+  A weather .recx can set it: `clouds.type` = 0..1 or stratus / stratocumulus / cumulus / cumulonimbus (with `hours`).
+- A weather noise over tens of km makes big masses beside small puffs and varies the tops; the coverage per area still
+  equals the cloud map's.
+- Wispy edges: the detail noise is displaced by a curl field and erodes more, less at the base (flat bases).
+- Storm bases are dark because the light samples now reach through the tower (the reach follows the weather's tallest
+  cloud), not by painting.
+- Off draws exactly what it drew before (the old shader programs, unchanged).
+- Round 2: a uniform cloud map now draws uniform with Variety on (the types blend their height shapes smoothly, 13
+  calibration points instead of 7, the weather noise averages to exactly zero); storm-tower bases are as dark as a
+  light-transport reference (one more light sample reaches the tower top); the march's step offsets come from a blue
+  noise sheet, so the fine vertical stripes seen when zooming on clouds are gone (an even grain is left).
+Reds: WW_CLOUDVOL_RED = onetype | nocurl | shortlight | ign. Offline gate: tests/spells/cloudvar_check.py.
+
 ## FOGGLOW1: the fog's bands and rings were the 8-bit write; the 8-bit writes are dithered now (on; WW_CELL_DITHER=0 = before)
 
 - **Cause, measured (bungo 10-29, Memory Den night fog):** the faint horizontal stripes on the left building and the

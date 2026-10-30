@@ -12,10 +12,12 @@
 #include "gl/renderer.h"
 #include "harnesswindow.h"
 
+#include <QFile>
 #include <QHash>
 #include <QSettings>
 
 #include <algorithm>
+#include <chrono>
 #include <cmath>
 #include <cstdint>
 #include <cstdio>
@@ -31,6 +33,7 @@ using WwAtmoMath::kUnitKm;
 namespace V = WwCloudVolMath;
 
 constexpr const char * kKey = "Settings/Render/Scene/Volume Clouds";
+constexpr const char * kVarKey = "Settings/Render/Scene/Cloud Variety";	// lane CLOUD5
 constexpr GLenum kTimestamp = 0x8E28;	// GL_TIMESTAMP
 
 struct Preset
@@ -69,6 +72,8 @@ struct CvState
 	int irrKey[4] = { -999, 0, 0, 0 };
 	float irr[3] = { 0, 0, 0 };
 	double drawnSecs = 0.0;	// lane CLOUD2C: the clock of the last draw (the bind hands readers its wind)
+	int variety = 0;	// lane CLOUD5: the Cloud Variety row
+	bool varietyPinned = false;
 };
 
 CvState & cs()
@@ -91,6 +96,18 @@ CvState & cs()
 			s.pinned = true;
 		} else {
 			s.tier = std::clamp( QSettings().value( QLatin1StringView( kKey ), 0 ).toInt(), 0, 4 );
+		}
+		// lane CLOUD5: Cloud Variety, its own pin; a harness run measures what it pins (Off)
+		s.varietyPinned = false;
+		const QString v = wwEnvStr( "WW_CLOUDVOL_VARIETY" ).trimmed().toLower();
+		if ( !v.isEmpty() ) {
+			s.variety = ( v == QLatin1StringView( "1" ) || v == QLatin1StringView( "on" ) ) ? 1 : 0;
+			s.varietyPinned = true;
+		} else if ( wwHarnessRun() ) {
+			s.variety = 0;
+			s.varietyPinned = true;
+		} else {
+			s.variety = QSettings().value( QLatin1StringView( kVarKey ), 0 ).toInt() != 0 ? 1 : 0;
 		}
 	}
 	return s;
@@ -128,6 +145,13 @@ struct CvGpu
 	int calKey[2][4] = { { -1, 0, 0, 0 }, { -1, 0, 0, 0 } };
 	bool calRed[2] = { false, false };
 	float cal[2][V::kCalN] = {};
+	// lane CLOUD5: the Cloud Variety tables (the Low band at its 4 type anchors, the Mid band), memoised on their inputs
+	int varKey[12] = { -1 };
+	bool varRed = false;
+	float calT[V::kVarCal][V::kCalN] = {};
+	float calMidV[V::kCalN] = {};
+	GLuint blue = 0;	// lane CLOUD5 round 2: the variety march's step offsets (EA's FAST blue noise sheet), 0 = IGN
+	bool blueTried = false;
 	// lane CLOUD2B: the scene's depth (wwCloudVolSceneDepth, before the tone map) and what the pass over the scene needs
 	bool drewNow = false;	// the volume drew in this frame's backdrop
 	GLuint sceneTex = 0;	// the linear frame's farthest window depth (cellhdr.cpp owns it)
@@ -235,11 +259,25 @@ struct Bands
 	float rect[4];
 	bool mapBound;
 	float tint[3][3];	// lane CLOUD2B: CLOUD1's band tints (the march only; not in cloud_common's struct)
+	bool variety;	// lane CLOUD5: the *_v twins and their uniforms (cvVarA, cvVarB, cvCalT)
+	V::Variety var;
+	float typeMax;	// the tallest type the sky holds (the light taps' reach, the ambient span)
 };
 
 Bands bandsOf( const WwCloudMap & m )
 {
 	Bands b{};
+	/* lane CLOUD5: Cloud Variety from the map (the type per weather; the map raised the Low top already). Red onetype:
+	 * one cumulus profile everywhere (CLOUD2's), no swing of the type; red nocurl: the detail read not displaced */
+	b.variety = wwCloudVolVarietyOn() && m.variety;
+	if ( b.variety ) {
+		const bool one = red( "onetype" );
+		b.var.type = one ? 2.0f / 3.0f : std::clamp( m.band[0].type, 0.0f, 1.0f );
+		b.var.spread = one ? 0.0f : std::max( m.band[0].typeSpread, 0.0f );
+		b.var.depthKm = std::max( m.band[0].depthZ * kUnitKm, 0.05f );
+		b.var.curlKm = red( "nocurl" ) ? 0.0f : V::kVarCurlKm;
+		b.typeMax = std::min( 1.0f, b.var.type + b.var.spread );
+	}
 	for ( int i = 0; i < 3; i++ ) {
 		b.baseKm[i] = m.band[i].baseZ * kUnitKm;
 		b.topKm[i] = std::max( m.band[i].topZ * kUnitKm, b.baseKm[i] + 1e-3f );
@@ -275,6 +313,58 @@ void calibrated( CvGpu & g, const Bands & b, float out[2 * V::kCalN] )
 	}
 }
 
+/* lane CLOUD5: the Cloud Variety tables: the Low band at the kVarCal type anchors (calT, cvCalT) and the Mid band (cvCal's
+ * second half), the variety density's own column opacity (cloudvolmath.h varCalibrate). 14 tables on a change of the
+ * band's heights, density or the reds (the weather's type and swing are not inputs: they pick a blend) */
+void calibratedVariety( CvGpu & g, const Bands & b, float calT[V::kVarCal * V::kCalN], float cal[2 * V::kCalN] )
+{
+	const bool noCal = red( "nocal" );
+	const int key[12] = { int( std::lround( b.baseKm[0] * 50.0f ) ), int( std::lround( b.var.depthKm * 50.0f ) ),
+		int( std::lround( b.density[0] * 100.0f ) ), int( std::lround( b.baseKm[1] * 50.0f ) ),
+		int( std::lround( b.topKm[1] * 50.0f ) ), int( std::lround( b.density[1] * 100.0f ) ),
+		int( std::lround( b.var.curlKm * 1000.0f ) ), int( std::lround( b.var.erode * 1000.0f ) ),
+		int( std::lround( b.var.anvil * 100.0f ) ), int( std::lround( b.var.towerKm * 50.0f ) ), 1, 0 };
+	if ( std::memcmp( key, g.varKey, sizeof( key ) ) || g.varRed != noCal ) {
+		std::memcpy( g.varKey, key, sizeof( key ) );
+		g.varRed = noCal;
+		const V::VarVolumes vol{ noise( false ).data(), WwCloudNoise::kShapeN, noise( true ).data(), WwCloudNoise::kDetailN };
+		const auto t0 = std::chrono::steady_clock::now();
+		for ( int k = 0; k < V::kVarCal; k++ )
+			V::varCalibrate( vol, b.var, 0, V::varCalT( k ), b.baseKm[0], b.topKm[0], b.density[0], noCal,
+				g.calT[k] );
+		V::varCalibrate( vol, b.var, 1, 0.0f, b.baseKm[1], b.topKm[1], b.density[1], noCal, g.calMidV );
+		// the CPU cost a weather change pays (on the GL thread): the hold's notes carry it
+		fprintf( stderr, "cloudvol: variety tables %.1f ms (low depth %.2f km, mid %.2f..%.2f km)\n",
+			std::chrono::duration<double, std::milli>( std::chrono::steady_clock::now() - t0 ).count(), double( b.var.depthKm ),
+			double( b.baseKm[1] ), double( b.topKm[1] ) );
+	}
+	for ( int k = 0; k < V::kVarCal; k++ )
+		std::copy( g.calT[k], g.calT[k] + V::kCalN, calT + k * V::kCalN );
+	std::copy( g.calMidV, g.calMidV + V::kCalN, cal + V::kCalN );
+}
+
+/* lane CLOUD5: the light taps' reach under Cloud Variety: the weather's tallest type sets it (Bauer 2019, RDR2: the
+ * sun sample's distance is a weather parameter), so a 7 km tower's base sees the column above it (its dark, flat base
+ * comes from that depth and the multiple-scattering floor, cvTdif, nothing painted). Red shortlight: the preset's */
+float varLightKm( const Bands & b, const Preset & pr )
+{
+	if ( red( "shortlight" ) )
+		return pr.lightKm;
+	return V::varLightKm( b.typeMax, b.var.depthKm, b.var.towerKm, pr.lightKm );
+}
+
+//! the ambient's height ramp span (cloud_march.frag lo .. hi) with the Low band at its own depth, not the towers' top
+float varAmbKm( const Bands & b )
+{
+	const float top0 = b.baseKm[0] + b.var.depthKm;
+	float lo = std::min( b.baseKm[0], b.baseKm[1] ), hi = std::max( top0, b.topKm[1] );
+	if ( b.density[0] <= 0.0f )
+		lo = b.baseKm[1];
+	if ( b.density[1] <= 0.0f )
+		hi = top0;
+	return std::max( hi - lo, 1e-3f );
+}
+
 //! cloud_common.glsl's uniforms and samplers on the current program
 void densityUniforms( Renderer * r, NifSkopeOpenGLContext::Program * p, CvGpu & g, const Bands & b, const WwCloudMap & m,
 	float windKm, int unit )
@@ -289,6 +379,13 @@ void densityUniforms( Renderer * r, NifSkopeOpenGLContext::Program * p, CvGpu & 
 	p->uni3f( "cvBands.windKm", windKm, 0.0f, 0.0f );
 	float cal[2 * V::kCalN];
 	calibrated( g, b, cal );
+	if ( b.variety ) {	// lane CLOUD5: the twins' uniforms (an old program has no cvVarA: never set there)
+		float calT[V::kVarCal * V::kCalN];
+		calibratedVariety( g, b, calT, cal );
+		p->uni1fv( "cvCalT", calT, V::kVarCal * V::kCalN );
+		p->uni4f( "cvVarA", FloatVector4( b.var.type, b.var.spread, b.var.swing, b.var.depthKm ) );
+		p->uni4f( "cvVarB", FloatVector4( b.var.towerKm, b.var.erode, b.var.curlKm, b.var.anvil ) );
+	}
 	p->uni1fv( "cvCal", cal, 2 * V::kCalN );
 	fn->glActiveTexture( GLenum( GL_TEXTURE0 + unit ) );
 	fn->glBindTexture( GL_TEXTURE_3D, g.shape );
@@ -308,6 +405,31 @@ bool ensureNoise( Renderer * r, CvGpu & g )
 	if ( !g.detail )
 		g.detail = upload3d( r->fn, noise( true ), WwCloudNoise::kDetailN );
 	return g.shape && g.detail;
+}
+
+/* lane CLOUD5 round 2: EA's FAST spatiotemporal blue noise (res/ssgi, BSD-3; cellssgi.cpp loads the same sheet), 64 slices
+ * of 128 x 128 RG8 stacked in y. Missing: the variety march keeps IGN (cvBlueSlice -1) and says so once. */
+void ensureBlue( Renderer * r, CvGpu & g )
+{
+	if ( g.blueTried )
+		return;
+	g.blueTried = true;
+	QFile file( QStringLiteral( ":/ssgi/fast_2uges.rg8" ) );
+	const QByteArray b = file.open( QIODevice::ReadOnly ) ? file.readAll() : QByteArray();
+	if ( b.size() != 128 * 8192 * 2 ) {
+		std::fprintf( stderr, "cloudvol: blue noise sheet missing, the variety march keeps IGN\n" );
+		return;
+	}
+	auto fn = r->fn;
+	fn->glGenTextures( 1, &g.blue );
+	fn->glBindTexture( GL_TEXTURE_2D, g.blue );
+	fn->glPixelStorei( GL_UNPACK_ALIGNMENT, 1 );
+	fn->glTexImage2D( GL_TEXTURE_2D, 0, GL_RG8, 128, 8192, 0, GL_RG, GL_UNSIGNED_BYTE, b.constData() );
+	fn->glPixelStorei( GL_UNPACK_ALIGNMENT, 4 );
+	fn->glTexParameteri( GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST );
+	fn->glTexParameteri( GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST );
+	fn->glTexParameteri( GL_TEXTURE_2D, GL_TEXTURE_MAX_LEVEL, 0 );
+	fn->glBindTexture( GL_TEXTURE_2D, 0 );
 }
 
 //! the camera this frame: world columns (right, up, back), the projection's terms, the eye in km
@@ -383,6 +505,7 @@ struct CvRedo
 	float keyW[3] = {}, keyK = 0.0f, amb[3] = {};
 	int tier = 0, hw = 1, hh = 1, mw = 1, mh = 1, stride = 1, cur = 0, prev = 1;
 	float phase[2] = {}, frameNo = 0.0f;
+	int blueSlice = 0;	// lane CLOUD5 round 2: the blue noise slice of this 16-frame refresh cycle
 	double secs = 0.0;
 	bool histOn = false;
 	float prevCam[9] = {}, prevProj[4] = {}, prevKm[3] = {};
@@ -399,7 +522,9 @@ bool marchPass( Renderer * r, CvGpu & g, const CvRedo & d, const WwAtmoFrame & f
 {
 	auto fn = r->fn;
 	const bool fly = wwCloudFlyActive( r );	// lane CLOUD4: the march with the fly-through box
-	NifSkopeOpenGLContext::Program * p = r->useProgram( fly ? "cloud_fly.prog" : "cloud_march.prog" );
+	const bool var = d.b.variety;	// lane CLOUD5: the Cloud Variety twins
+	NifSkopeOpenGLContext::Program * p = r->useProgram( var ? ( fly ? "cloud_fly_v.prog" : "cloud_march_v.prog" )
+														   : ( fly ? "cloud_fly.prog" : "cloud_march.prog" ) );
 	if ( !p )
 		return false;
 	const Preset & pr = preset( d.tier );
@@ -434,7 +559,15 @@ bool marchPass( Renderer * r, CvGpu & g, const CvRedo & d, const WwAtmoFrame & f
 	p->uni1i( "cvSteps", pr.steps );
 	p->uni1i( "cvTaps", pr.taps );
 	p->uni1i( "cvOctaves", noOct ? 1 : 4 );
-	p->uni1f( "cvLightKm", pr.lightKm );
+	p->uni1f( "cvLightKm", var ? varLightKm( d.b, pr ) : pr.lightKm );
+	if ( var ) {
+		p->uni1f( "cvAmbKm", varAmbKm( d.b ) );
+		// lane CLOUD5 round 2: the step offsets from one blue noise slice a refresh cycle; red ign: CLOUD2's IGN (the stripes)
+		fn->glActiveTexture( GL_TEXTURE8 );
+		fn->glBindTexture( GL_TEXTURE_2D, g.blue );
+		p->uni1i( "cvBlue", 8 );
+		p->uni1i( "cvBlueSlice", g.blue && !red( "ign" ) ? d.blueSlice : -1 );
+	}
 	p->uni4f( "cvPhasePrm", FloatVector4( drop.gHg, drop.gD, drop.alpha, drop.wD ) );
 	p->uni3f( "cvAmb", d.amb[0], d.amb[1], d.amb[2] );
 	p->uni1f( "cvAmbOn", 1.0f );
@@ -467,6 +600,10 @@ bool marchPass( Renderer * r, CvGpu & g, const CvRedo & d, const WwAtmoFrame & f
 	r->stopProgram();
 	if ( fly )
 		wwCloudFlyRelease( r, 7 );
+	if ( var ) {
+		fn->glActiveTexture( GL_TEXTURE8 );
+		fn->glBindTexture( GL_TEXTURE_2D, 0 );
+	}
 	return true;
 }
 
@@ -661,6 +798,31 @@ bool wwCloudVolPinned()
 	return cs().pinned;
 }
 
+int wwCloudVolVariety()
+{
+	return cs().variety;
+}
+
+void wwCloudVolSetVariety( int on )
+{
+	CvState & s = cs();
+	if ( s.varietyPinned )
+		return;
+	s.variety = on ? 1 : 0;
+	QSettings().setValue( QLatin1StringView( kVarKey ), s.variety );
+}
+
+bool wwCloudVolVarietyPinned()
+{
+	return cs().varietyPinned;
+}
+
+bool wwCloudVolVarietyOn()
+{
+	const CvState & s = cs();
+	return s.variety != 0 && s.tier >= 2;
+}
+
 bool wwCloudVolLowColour( float out[3] )
 {
 	CvState & s = cs();
@@ -766,6 +928,7 @@ bool wwCloudVolDraw( Scene * scene, const WwCloudVolView & view, QStringList & d
 		drew << refusal( s, QStringLiteral( "noise upload" ) );
 		return false;
 	}
+	ensureBlue( r, g );
 	GLint vp[4] = { 0, 0, 1, 1 };
 	fn->glGetIntegerv( GL_VIEWPORT, vp );
 	const Preset & pr = preset( s.tier );
@@ -839,6 +1002,7 @@ bool wwCloudVolDraw( Scene * scene, const WwCloudVolView & view, QStringList & d
 	d.prev = 1 - g.cur;
 	std::copy( phase, phase + 2, d.phase );
 	d.frameNo = everyPixel ? 0.0f : float( g.frame % 64 );
+	d.blueSlice = everyPixel ? 0 : int( ( g.frame / 16 ) % 64 );	// one slice for all 16 phases: the picture is one slice
 	d.secs = view.cloudSeconds;
 	d.histOn = histOn;
 	std::copy( g.prevCam, g.prevCam + 9, d.prevCam );
@@ -850,7 +1014,7 @@ bool wwCloudVolDraw( Scene * scene, const WwCloudVolView & view, QStringList & d
 	// 1. the march: one fragment a history pixel of this frame's phase; 2. the resolve into this frame's history
 	if ( ok && !marchPass( r, g, d, f, m, sceneOn ? g.sceneTex : 0 ) ) {
 		ok = false;
-		why = QStringLiteral( "cloud_march.prog did not link" );
+		why = b.variety ? QStringLiteral( "cloud_march_v.prog did not link" ) : QStringLiteral( "cloud_march.prog did not link" );
 	}
 	if ( ok && !resolvePass( r, g, d ) ) {
 		ok = false;
@@ -929,6 +1093,14 @@ bool wwCloudVolDraw( Scene * scene, const WwCloudVolView & view, QStringList & d
 			  "display", "firstpaint", "lookdevback", "tintname" } )
 		if ( red( w ) )
 			reds += QStringLiteral( ",RED=%1" ).arg( QLatin1StringView( w ) );
+	if ( b.variety ) {	// lane CLOUD5: the echo a row's notes need to prove the twins drew (absent when Off)
+		for ( const char * w : { "onetype", "nocurl", "shortlight", "ign" } )
+			if ( red( w ) )
+				reds += QStringLiteral( ",RED=%1" ).arg( QLatin1StringView( w ) );
+		reds += QStringLiteral( ",variety=type %1+-%2 lowtop %3km light %4km" ).arg( double( b.var.type ), 0, 'f', 3 )
+			.arg( double( b.var.spread ), 0, 'f', 3 ).arg( double( b.topKm[0] - b.baseKm[0] ), 0, 'f', 2 )
+			.arg( double( varLightKm( b, pr ) ), 0, 'f', 2 );
+	}
 	// lane CLOUD2C: clip = which scene depth ends the march (last = the last paint's, this = this paint's, after the scene)
 	const QString clip = sceneOn ? QStringLiteral( "last" ) : g.redo ? QStringLiteral( "this" ) : QStringLiteral( "none" );
 	s.last = ok ? QStringLiteral( "volclouds:%1(hist=%2x%3,march=%4x%5,steps=%6,taps=%7,key=%8,map=%9,mem=%10MB,clip=%11,"

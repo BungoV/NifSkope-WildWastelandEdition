@@ -1,0 +1,3 @@
+# lane CLOUD5: the cloud shadow map over the Cloud Variety density (src/gl/cloudshadow.cpp), selected by name.
+
+shaders cell_ao.vert cloud_shadowmap_v.frag

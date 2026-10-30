@@ -11,6 +11,7 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdint>
+#include <vector>
 
 namespace WwCloudVolMath
 {
@@ -272,6 +273,298 @@ inline void lowColour( float keyK, const float T[3], float mu, float skyK, const
 	const float sunTerm = std::max( mu + 0.1f, 0.0f ) / 1.1f;
 	for ( int c = 0; c < 3; c++ )
 		out[c] = kAlbedo * ( keyK * T[c] * sunTerm + skyK * E[c] ) / kPi;
+}
+
+/* ---- lane CLOUD5: Cloud Variety (row Render > Scene > Cloud Variety, ships Off). Twin of cloud_common.glsl's
+ * WW_CLOUD_VARIETY cloudDensity: keep the two in step (tests/spells/cloudvar_check.py gate T compares them).
+ * Sources, per rule:
+ * - a cloud TYPE beside the coverage, each type its own height profile: Schneider & Vos 2015 (HZD; weather map B = type,
+ *   stratus / stratocumulus / cumulus gradients) [recalled, not re-read this lane]; Bauer 2019 (RDR2, Advances) slide 16:
+ *   "LUT defines altitude-based shape, (Alto)Cumulus and stratus ... slice determined by weather parameters" [read,
+ *   notes/fogheight1/rdr2/deck.txt]. The four profiles' numbers and the cumulonimbus anchor are ours (unknown in both).
+ * - the anvil (coverage raised near a tall cloud's top): Schneider, GPU Pro 7 "Real-Time Volumetric Cloudscapes"
+ *   (anvil_bias, a power on the coverage over the top of the profile) [recalled]; our heights 0.65..0.85, power 0.5.
+ * - erosion that changes with height: Schneider & Vos 2015 (wispy bottoms, billowy tops: the detail fbm inverted with
+ *   height, x 0.2) [recalled]; Bauer 2019 slide 18: "the z channel of the LUT controls the softness of the noise" over
+ *   altitude [read]. Ours: 0.35 (CLOUD2's 0.2 read plain), x 0.55 at the base (flat bases) rising to x 1 by 35 %.
+ * - a distortion of the detail lookup (wispy edges): Schneider & Vos 2015 (curl noise on the detail coordinates)
+ *   [recalled]; Bauer 2019 slide 17 ("2x 2D displacement samples at xy and xz ... offset a 3D noise volume lookup")
+ *   [read]. Ours: the curl of a sum of sines (Bridson, Hourihan & Nordenstam 2007, curl-noise) in xy and xz, no texture.
+ * - the light taps' reach by weather: Bauer 2019 slide 33 ("the distance of this sample is controlled by weather
+ *   parameters ... large, small or flat cloud shapes") [read]. Ours: 0.8 x the tallest type's depth, 1.2..6 km.
+ * - a low-frequency weather noise over tens of km that moves coverage and type: ours (Schneider 2017's weather map is
+ *   painted or simulated [recalled]; RDR2's cloud map is "modulated by texture and weather data" [read, slide 14]).
+ *   Swing kept mean-preserving in map coverage, so the calibration still holds (gate A). */
+constexpr int kVarTypes = 4;	// type anchors: 0 stratus, 1/3 stratocumulus, 2/3 cumulus, 1 cumulonimbus
+/* the Low band's coverage tables at T = varCalT(k). Four (the type anchors) left a type between cumulus and
+ * cumulonimbus 0.14 short of the map (T 0.75, coverage 0.5 drew 0.356: gate A, MERGE1029C 10-29); seven at k / 6 still
+ * drew 0.05 for a map of 0.5 at T 0.92 (CLOUD5 round 2, MEASURED): a tower's threshold falls from 0.18 to 0.065 over T
+ * 0.83 .. 1 and the opacity moves ~10x the threshold there, so a straight blend between anchors 1/6 apart misses. 13
+ * anchors at T = 1 - (1 - k / 12)^2: 0.16 apart at stratus (where 1/6 was already within 0.02), 0.007 at the top. */
+constexpr int kVarCal = 13;
+inline float varCalT( int k )
+{
+	const float u = 1.0f - float( k ) / float( kVarCal - 1 );
+	return 1.0f - u * u;
+}
+constexpr float kVarTowerKm = 7.0f;	// a cumulonimbus' depth (ours; typical tops 8-12 km over a ~1 km base: unknown source)
+constexpr float kVarWrapKm = 384.0f;	// the weather noise's period: 64 shape periods, windKm's wrap (no seam at the wrap)
+constexpr float kVarCurlPeriodKm = 24.0f;	// the curl potential's period (divides kVarWrapKm)
+constexpr float kVarErode = 0.35f, kVarCurlKm = 0.15f, kVarAnvil = 1.0f, kVarSwing = 0.9f;
+
+struct Variety
+{
+	float type = 2.0f / 3.0f;	// the Low band's weather type, 0..1
+	float spread = 0.0f;	// the weather noise's swing of the type
+	float swing = kVarSwing;	// the weather noise's swing of the coverage (x min(c, 1 - c), mean kept)
+	float depthKm = 1.5f;	// the Low band's own depth (the cumulus anchor's), km
+	float towerKm = kVarTowerKm;
+	float erode = kVarErode;
+	float curlKm = kVarCurlKm;	// 0 = the red nocurl
+	float anvil = kVarAnvil;
+};
+
+inline float fractf( float x )
+{
+	return x - std::floor( x );
+}
+
+//! GLSL mod(x, y): x - y floor(x / y)
+inline float gmod( float x, float y )
+{
+	return x - y * std::floor( x / y );
+}
+
+//! integer hash (32-bit wrap, as GLSL uint) -> [0, 1) on 24 bits (exact in float on both sides)
+inline float varHash( int ix, int iy, int oct )
+{
+	std::uint32_t h = std::uint32_t( ix ) * 0x8da6b343u ^ std::uint32_t( iy ) * 0xd8163841u ^ std::uint32_t( oct ) * 0xcb1ab31fu;
+	h ^= h >> 13;
+	h *= 0x5bd1e995u;
+	h ^= h >> 15;
+	return float( h >> 8 ) * ( 1.0f / 16777216.0f );
+}
+
+/*! a lattice value, antithetic: the cell half a wrap east holds 1 - this one's (CLOUD5 round 2). Then the noise half a
+ *  wrap east is exactly the negative, and its mean over the wrap is exactly 0: a plain hash averaged -0.098 over the
+ *  gate's 192 km square, which drew a uniform map 0.044 thin at 0.5 through the swing alone (MEASURED). cells is even. */
+inline float varLattice( int ix, int iy, int cells, int oct )
+{
+	const int h = cells / 2;
+	return ix >= h ? 1.0f - varHash( ix - h, iy, oct ) : varHash( ix, iy, oct );
+}
+
+//! value noise on a cellKm lattice wrapped every kVarWrapKm (cells = kVarWrapKm / cellKm), smoothstep weights
+inline float varValue( float x, float y, float cellKm, int cells, int oct )
+{
+	const float ux = gmod( x, kVarWrapKm ) / cellKm, uy = gmod( y, kVarWrapKm ) / cellKm;
+	const int ix = std::min( int( std::floor( ux ) ), cells - 1 ), iy = std::min( int( std::floor( uy ) ), cells - 1 );
+	const float fx = ux - float( ix ), fy = uy - float( iy );
+	const int jx = ix + 1 == cells ? 0 : ix + 1, jy = iy + 1 == cells ? 0 : iy + 1;
+	const float wx = fx * fx * ( 3.0f - 2.0f * fx ), wy = fy * fy * ( 3.0f - 2.0f * fy );
+	const float a = varLattice( ix, iy, cells, oct ), b = varLattice( jx, iy, cells, oct );
+	const float c = varLattice( ix, jy, cells, oct ), d = varLattice( jx, jy, cells, oct );
+	return mixf( mixf( a, b, wx ), mixf( c, d, wx ), wy );
+}
+
+//! the weather noise, -1..1, mean 0: two octaves (16 km and 6 km cells), gain 4, clamped (a symmetric clamp keeps the
+//! antithetic lattice's exact 0 mean)
+inline float weatherNoise( float x, float y )
+{
+	const float v = 0.65f * varValue( x, y, 16.0f, 24, 0 ) + 0.35f * varValue( x, y, 6.0f, 64, 1 );
+	return std::clamp( ( v - 0.5f ) * 4.0f, -1.0f, 1.0f );
+}
+
+/*! the detail lookup's displacement per km of amplitude: the curl of psi = sum sin(2 pi (m.u + phase)) / |m| (integer
+ *  wave numbers m over the 24 km period: wavelengths 1.7..2.0 km), two waves in xy and two in xz; divergence free */
+inline void curlRaw( float x, float y, float z, float out[3] )
+{
+	const float ux = gmod( x, kVarCurlPeriodKm ) / kVarCurlPeriodKm, uy = gmod( y, kVarCurlPeriodKm ) / kVarCurlPeriodKm;
+	const float uz = gmod( z, kVarCurlPeriodKm ) / kVarCurlPeriodKm;
+	constexpr float k2Pi = 6.2831853f;
+	const float c1 = std::cos( k2Pi * fractf( 13.0f * ux + 5.0f * uy + 0.11f ) );
+	const float c2 = std::cos( k2Pi * fractf( -6.0f * ux + 11.0f * uy + 0.33f ) );
+	const float c3 = std::cos( k2Pi * fractf( 10.0f * ux + 8.0f * uz + 0.64f ) );
+	const float c4 = std::cos( k2Pi * fractf( -7.0f * ux + 12.0f * uz + 0.85f ) );
+	const float ax = c1 * 0.358979f + c2 * 0.877896f, ay = c1 * -0.933346f + c2 * 0.478852f;
+	const float bx = c3 * 0.624695f + c4 * 0.863779f, bz = c3 * -0.780869f + c4 * 0.503871f;
+	out[0] = 0.5f * ( ax + bx );
+	out[1] = 0.5f * ay;
+	out[2] = 0.5f * bz;
+}
+
+//! a type's depth, km: stratus 0.3, stratocumulus 0.6, cumulus 1.0 x the band's own depth, cumulonimbus the tower's
+inline float typeDepthKm( float T, float depthKm, float towerKm )
+{
+	const float u = sat( T ) * 3.0f;
+	if ( u < 1.0f )
+		return depthKm * mixf( 0.3f, 0.6f, u );
+	if ( u < 2.0f )
+		return depthKm * mixf( 0.6f, 1.0f, u - 1.0f );
+	return mixf( depthKm, std::max( towerKm, depthKm ), u - 2.0f );
+}
+
+/*! a type's height profile over its own depth (hf 0..1): rise to a plateau, fall to the top. Between the anchors the
+ *  rise and fall heights blend, not the two profiles' values (CLOUD5 round 2): a blend of values left a shoulder at
+ *  ~w x 1 above the lower type's fall, under the 1 - c a thin coverage needs, so a type at T 0.94 drew far less than
+ *  one at 0.98 for the same threshold (the coverage tables' cliff, MEASURED) and the towers wore a step half way up. */
+inline float typeProfile( float T, float hf )
+{
+	static const float rise[kVarTypes] = { 0.10f, 0.08f, 0.07f, 0.03f };
+	static const float fall[kVarTypes] = { 0.60f, 0.45f, 0.55f, 0.85f };	// cumulus = CLOUD2's Low profile
+	const float u = sat( T ) * 3.0f;
+	const int k = std::min( int( u ), 2 );
+	const float r = mixf( rise[k], rise[k + 1], u - float( k ) ), f = mixf( fall[k], fall[k + 1], u - float( k ) );
+	return smooth( 0.0f, r, hf ) * ( 1.0f - smooth( f, 1.0f, hf ) );
+}
+
+//! the Low band's coverage table at type T (the kVarCal anchors' tables blended), c the map's coverage
+inline float calAtT( const float cal[kVarCal][kCalN], float T, float c )
+{
+	const float u = ( 1.0f - std::sqrt( 1.0f - sat( T ) ) ) * float( kVarCal - 1 );	// varCalT's inverse
+	const int k = std::min( int( u ), kVarCal - 2 );
+	return mixf( calAt( cal[k], c ), calAt( cal[k + 1], c ), u - float( k ) );
+}
+
+//! the anvil: the coverage raised near a tall type's top (power 1 -> 0.5 over hf 0.65..0.85, for T 0.8..1)
+inline float anvilCover( float c, float T, float hf, float anvil )
+{
+	const float e = mixf( 1.0f, 0.5f, anvil * smooth( 0.8f, 1.0f, T ) * smooth( 0.65f, 0.85f, hf ) );
+	return c > 0.0f ? std::pow( c, e ) : 0.0f;
+}
+
+//! one band's density given the shape read s, the (displaced) detail read det, the profile, the threshold coverage c
+inline float varCore( float s, float det, float prof, float c, float hf, float erode )
+{
+	if ( hf <= 0.0f || hf >= 1.0f || c <= 0.0f )
+		return 0.0f;
+	const float t = 1.0f - c;
+	const float base = sat( ( s * prof - t ) / std::max( 1.0f - t, 1e-4f ) ) * c;
+	if ( base <= 0.0f )
+		return 0.0f;
+	const float e = erode * mixf( 0.55f, 1.0f, smooth( 0.0f, 0.35f, hf ) );
+	const float mod = mixf( det, 1.0f - det, sat( hf * 4.0f ) ) * e;
+	return sat( ( base - mod ) / ( 1.0f - mod ) );
+}
+
+//! the light taps' reach for a sky whose tallest type is typeMax (Bauer 2019: the weather sets it); the preset's at least
+inline float varLightKm( float typeMax, float depthKm, float towerKm, float presetKm )
+{
+	return std::clamp( 0.8f * typeDepthKm( typeMax, depthKm, towerKm ), presetKm, std::max( presetKm, 6.0f ) );
+}
+
+struct VarVolumes
+{
+	const std::uint8_t * shape;
+	int ns;
+	const std::uint8_t * detail;
+	int nd;
+};
+
+/*! the whole density at (x, y, z) km (wind 0, mip 0): the twin of the WW_CLOUD_VARIETY cloudDensity. map = cvMapAt's
+ *  (R Low, G Mid, B Low sheet, A High); base/top/density per band (Low's top is the map's, already raised for towers) */
+inline float varietyDensity( const VarVolumes & vol, const Variety & v, const float baseKm[2], const float topKm[2],
+	const float density[2], const float calLow[kVarCal][kCalN], const float calMid[kCalN], const float map[4], float x,
+	float y, float z )
+{
+	const float n = weatherNoise( x, y );
+	float d = 0.0f, s = -1.0f, curl[3] = { 0, 0, 0 };
+	bool curlOk = false;
+	for ( int b = 0; b < 2; b++ ) {
+		if ( density[b] <= 0.0f )
+			continue;
+		float cov = b == 0 ? map[0] : map[1];
+		cov += v.swing * n * std::min( cov, 1.0f - cov );
+		float hf, prof, c;
+		if ( b == 0 ) {
+			const float sheet = sat( map[2] / std::max( map[0], 1e-3f ) );
+			const float T = sat( v.type + v.spread * n ) * ( 1.0f - sheet );
+			hf = ( z - baseKm[0] ) / std::max( typeDepthKm( T, v.depthKm, v.towerKm ), 1e-3f );
+			if ( hf <= 0.0f || hf >= 1.0f )
+				continue;
+			c = anvilCover( calAtT( calLow, T, cov ), T, hf, v.anvil );
+			prof = typeProfile( T, hf );
+		} else {
+			hf = ( z - baseKm[1] ) / std::max( topKm[1] - baseKm[1], 1e-3f );
+			if ( hf <= 0.0f || hf >= 1.0f )
+				continue;
+			c = calAt( calMid, cov );
+			prof = gradient( 1, hf, 0.0f );
+		}
+		if ( c <= 0.0f )
+			continue;
+		if ( s < 0.0f )
+			s = sample3( vol.shape, vol.ns, x / kShapeKm, y / kShapeKm, z / kShapeKm );
+		if ( !curlOk ) {
+			curlRaw( x, y, z, curl );
+			curlOk = true;
+		}
+		const float a = v.curlKm * ( 1.0f - 0.5f * hf );
+		const float det = sample3( vol.detail, vol.nd, ( x + curl[0] * a ) / kDetailKm, ( y + curl[1] * a ) / kDetailKm,
+			( z + curl[2] * a ) / kDetailKm );
+		d += varCore( s, det, prof, c, hf, v.erode ) * density[b];
+	}
+	return d;
+}
+
+/*! the coverage table of one band under Cloud Variety (calibrate's rule: cal[i] = the threshold coverage whose mean
+ *  column opacity from above is i / 16), the weather noise at 0. Band 0 at the type anchor T (its own depth, the anvil),
+ *  band 1 over [baseKm, topKm] with the Mid profile. The curl and the new erosion are in. */
+inline void varCalibrate( const VarVolumes & vol, const Variety & v, int band, float T, float baseKm, float topKm,
+	float density, bool redNoCal, float cal[kCalN] )
+{
+	for ( int i = 0; i < kCalN; i++ )
+		cal[i] = float( i ) / float( kCalN - 1 );
+	const float th = band == 0 ? typeDepthKm( T, v.depthKm, v.towerKm ) : topKm - baseKm;
+	if ( redNoCal || th <= 1e-3f || density <= 0.0f )
+		return;
+	constexpr int NC = 12, NZ = 40, NG = 33;
+	/* the reads do not depend on the threshold: once per point, not once per level (CLOUD5 round 2: 21 -> ~3 ms a table on
+	 * the lane's machine, the same numbers; 13 tables now) */
+	std::vector<float> rs( NC * NC * NZ ), rd( NC * NC * NZ ), rp( NC * NC * NZ );
+	for ( int j = 0, n = 0; j < NC; j++ )
+		for ( int i = 0; i < NC; i++ ) {
+			const float x = ( float( i ) + 0.5f ) / NC * kShapeKm, y = ( float( j ) + 0.37f ) / NC * kShapeKm;
+			for ( int k = 0; k < NZ; k++, n++ ) {
+				const float hf = ( float( k ) + 0.5f ) / NZ, z = baseKm + hf * th;
+				float cu[3];
+				curlRaw( x, y, z, cu );
+				const float a = v.curlKm * ( 1.0f - 0.5f * hf );
+				rs[n] = sample3( vol.shape, vol.ns, x / kShapeKm, y / kShapeKm, z / kShapeKm );
+				rd[n] = sample3( vol.detail, vol.nd, ( x + cu[0] * a ) / kDetailKm, ( y + cu[1] * a ) / kDetailKm,
+					( z + cu[2] * a ) / kDetailKm );
+				rp[n] = band == 0 ? typeProfile( T, hf ) : gradient( 1, hf, 0.0f );
+			}
+		}
+	auto opacity = [&]( float cp ) {
+		double acc = 0.0;
+		for ( int col = 0, n = 0; col < NC * NC; col++ ) {
+			float tau = 0.0f;
+			for ( int k = 0; k < NZ; k++, n++ ) {
+				const float hf = ( float( k ) + 0.5f ) / NZ;
+				const float c = band == 0 ? anvilCover( cp, T, hf, v.anvil ) : cp;
+				tau += varCore( rs[n], rd[n], rp[n], c, hf, v.erode ) * kSigma * density * th / NZ;
+			}
+			acc += 1.0 - std::exp( -double( tau ) );
+		}
+		return float( acc / ( NC * NC ) );
+	};
+	float o[NG];
+	o[0] = 0.0f;
+	for ( int j = 1; j < NG; j++ )
+		o[j] = std::max( o[j - 1], opacity( float( j ) / ( NG - 1 ) ) );
+	for ( int i = 1; i < kCalN; i++ ) {
+		const float want = float( i ) / float( kCalN - 1 );
+		float cp = 1.0f;
+		for ( int j = 1; j < NG; j++ )
+			if ( o[j] >= want ) {
+				const float a = o[j - 1], b = o[j];
+				const float f = b > a ? ( want - a ) / ( b - a ) : 1.0f;
+				cp = ( float( j - 1 ) + f ) / ( NG - 1 );
+				break;
+			}
+		cal[i] = std::max( cal[i - 1], cp );
+	}
 }
 
 } // namespace WwCloudVolMath

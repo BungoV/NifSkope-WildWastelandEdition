@@ -1,6 +1,8 @@
 #include "cloudmap.h"
 #include "cloudmath.h"
 #include "cloudfly.h"
+#include "cloudvol.h"	// lane CLOUD5: Cloud Variety raises the Low top for towers
+#include "cloudvolmath.h"
 #include "wwswitch.h"
 #include "gl/glscene.h"
 #include "gl/lookdevstage.h"
@@ -566,6 +568,11 @@ const WwCloudMap & wwCloudMapUpdate( Scene * scene )
 	} else {
 		paramsOf( cur, now, redMax, nullptr, wx.on ? &wx : nullptr, eye[2] );
 	}
+	{	// lane CLOUD5: the Low band's cloud type from the record's class (DATA flags, thunder), a .recx clouds.type wins
+		unsigned flags = 0, thunder = 0;
+		wwLookdevWeatherClass( flags, thunder );
+		lowTypeOf( flags, thunder, wx.on ? wx.type : -1.0f, now[0].type, now[0].typeSpread );
+	}
 
 	// the transition: a new weather starts from the parameters shown at the change
 	if ( wkey != s.weather ) {
@@ -623,6 +630,9 @@ const WwCloudMap & wwCloudMapUpdate( Scene * scene )
 	if ( world )	// lane CLOUD4: the projection follows the heights
 		for ( int b = 0; b < 3; b++ )
 			key += QStringLiteral( "|w%1,%2" ).arg( double( shown[b].baseM ), 0, 'f', 1 ).arg( double( shown[b].topM ), 0, 'f', 1 );
+	const bool variety = wwCloudVolVarietyOn();	// lane CLOUD5
+	if ( variety )
+		key += QStringLiteral( "|var%1,%2" ).arg( double( shown[0].type ), 0, 'f', 3 ).arg( double( shown[0].typeSpread ), 0, 'f', 3 );
 
 	WwCloudMap & m = s.map;
 	m.centerX = eye[0];	// the sky follows the camera: only the square moves
@@ -630,6 +640,17 @@ const WwCloudMap & wwCloudMapUpdate( Scene * scene )
 	for ( int b = 0; b < 3; b++ ) {
 		m.band[b].baseZ = ( world ? 0.0f : eye[2] ) + shown[b].baseM * kUnitsPerM;
 		m.band[b].topZ = ( world ? 0.0f : eye[2] ) + shown[b].topM * kUnitsPerM;
+		m.band[b].depthZ = ( shown[b].topM - shown[b].baseM ) * kUnitsPerM;
+	}
+	/* lane CLOUD5: Cloud Variety on: the Low band reaches the tallest type its sky can hold (a cumulonimbus' tower over a
+	 * storm); every reader (the march's span, the shadow map's steps, the fly box) takes this one top. shown[] keeps the
+	 * band's own top, so a later transition never raises it twice. */
+	m.variety = variety;
+	if ( variety ) {
+		const float tmax = std::min( 1.0f, shown[0].type + shown[0].typeSpread );
+		const float depthKm = std::max( shown[0].topM - shown[0].baseM, 1.0f ) / 1000.0f;
+		m.band[0].topZ = m.band[0].baseZ
+			+ 1000.0f * WwCloudVolMath::typeDepthKm( tmax, depthKm, WwCloudVolMath::kVarTowerKm ) * kUnitsPerM;
 	}
 	if ( key != s.key || !m.valid ) {
 		Renderer * r = scene->renderer;
@@ -672,6 +693,8 @@ const WwCloudMap & wwCloudMapUpdate( Scene * scene )
 			for ( int c = 0; c < 3; c++ )
 				bi.tint[c] = shown[b].tint[c];
 			bi.layers = counts[b];
+			bi.type = shown[b].type;	// lane CLOUD5
+			bi.typeSpread = shown[b].typeSpread;
 		}
 		m.transition = t;
 		m.generation++;
@@ -686,7 +709,11 @@ const WwCloudMap & wwCloudMapUpdate( Scene * scene )
 			.arg( n ).arg( double( m.band[0].coverage ), 0, 'f', 3 ).arg( double( m.band[1].coverage ), 0, 'f', 3 )
 			.arg( double( m.band[2].coverage ), 0, 'f', 3 ).arg( double( m.band[0].sheet ), 0, 'f', 3 ).arg( cur.size() )
 			.arg( unc ? QStringLiteral( " uncensused=%1" ).arg( unc ) : QString() ).arg( double( t ), 0, 'f', 2 )
-			.arg( redMax || redColor ? QStringLiteral( " red=%1%2" ).arg( redMax ? "max" : "" ).arg( redColor ? "colorblend" : "" ) : QString() ) );
+			.arg( redMax || redColor ? QStringLiteral( " red=%1%2" ).arg( redMax ? "max" : "" ).arg( redColor ? "colorblend" : "" ) : QString() )
+			+ ( variety ? QStringLiteral( " type=%1+-%2 lowtop=%3m" ).arg( double( shown[0].type ), 0, 'f', 3 )
+							  .arg( double( shown[0].typeSpread ), 0, 'f', 3 )
+							  .arg( double( ( m.band[0].topZ - m.band[0].baseZ ) / kUnitsPerM ), 0, 'f', 0 )
+						: QString() ) );
 	}
 	show( scene, s );
 	return m;

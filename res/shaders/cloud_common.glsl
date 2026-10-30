@@ -53,6 +53,7 @@ float cvGradient( int b, float hf, float sheet )
 	return cvSmooth( 0.0, 0.15, hf ) * ( 1.0 - cvSmooth( 0.35, 0.9, hf ) );
 }
 
+#ifndef WW_CLOUD_VARIETY
 // relative density (extinction = kCvSigma x this, /km); 0 outside the Low and Mid bands
 float cloudDensity( vec3 p )
 {
@@ -80,3 +81,146 @@ float cloudDensity( vec3 p )
 	}
 	return d;
 }
+#else
+/* lane CLOUD5: Cloud Variety (the *_v.prog twins define WW_CLOUD_VARIETY; Off draws the function above unchanged).
+ * The Low band takes a cloud TYPE 0..1 (stratus, stratocumulus, cumulus, cumulonimbus), each with its own depth and
+ * profile; a weather noise over tens of km swings the coverage (mean kept) and the type; the detail lookup is displaced
+ * by a curl field and eroded more, less at the base. Sources and the CPU twin: src/gl/cloudvolmath.h varietyDensity. */
+uniform vec4 cvVarA;	// x the weather's Low type, y the type's swing, z the coverage's swing, w the Low band's own depth km
+uniform vec4 cvVarB;	// x a cumulonimbus' depth km, y the erosion, z the curl km (0 = red nocurl), w the anvil
+uniform float cvCalT[221];	// the Low band's coverage tables at T = 1 - (1 - k / 12)^2, 13 x 17 (cloudvolmath.h kVarCal, varCalT)
+
+const float kCvVarWrapKm = 384.0;	// cloudvolmath.h kVarWrapKm (the wind's wrap)
+const float kCvCurlPeriodKm = 24.0;
+
+float cvVarHash( int ix, int iy, int oct )
+{
+	uint h = uint( ix ) * 0x8da6b343u ^ uint( iy ) * 0xd8163841u ^ uint( oct ) * 0xcb1ab31fu;
+	h ^= h >> 13u;
+	h *= 0x5bd1e995u;
+	h ^= h >> 15u;
+	return float( h >> 8u ) * ( 1.0 / 16777216.0 );
+}
+
+// antithetic: half a wrap east holds 1 - the value, so the noise's mean over the wrap is exactly 0 (cloudvolmath.h varLattice)
+float cvVarLattice( int ix, int iy, int cells, int oct )
+{
+	int h = cells / 2;
+	return ix >= h ? 1.0 - cvVarHash( ix - h, iy, oct ) : cvVarHash( ix, iy, oct );
+}
+
+float cvVarValue( vec2 xy, float cellKm, int cells, int oct )
+{
+	vec2 u = mod( xy, vec2( kCvVarWrapKm ) ) / cellKm;
+	ivec2 i = min( ivec2( floor( u ) ), ivec2( cells - 1 ) );
+	vec2 f = u - vec2( i );
+	ivec2 j = ivec2( i.x + 1 == cells ? 0 : i.x + 1, i.y + 1 == cells ? 0 : i.y + 1 );
+	vec2 w = f * f * ( 3.0 - 2.0 * f );
+	float a = cvVarLattice( i.x, i.y, cells, oct ), b = cvVarLattice( j.x, i.y, cells, oct );
+	float c = cvVarLattice( i.x, j.y, cells, oct ), e = cvVarLattice( j.x, j.y, cells, oct );
+	return mix( mix( a, b, w.x ), mix( c, e, w.x ), w.y );
+}
+
+float cvWeatherNoise( vec2 xy )
+{
+	float v = 0.65 * cvVarValue( xy, 16.0, 24, 0 ) + 0.35 * cvVarValue( xy, 6.0, 64, 1 );
+	return clamp( ( v - 0.5 ) * 4.0, -1.0, 1.0 );
+}
+
+vec3 cvCurlRaw( vec3 q )
+{
+	vec3 u = mod( q, vec3( kCvCurlPeriodKm ) ) / kCvCurlPeriodKm;
+	float c1 = cos( 6.2831853 * fract( 13.0 * u.x + 5.0 * u.y + 0.11 ) );
+	float c2 = cos( 6.2831853 * fract( -6.0 * u.x + 11.0 * u.y + 0.33 ) );
+	float c3 = cos( 6.2831853 * fract( 10.0 * u.x + 8.0 * u.z + 0.64 ) );
+	float c4 = cos( 6.2831853 * fract( -7.0 * u.x + 12.0 * u.z + 0.85 ) );
+	float ax = c1 * 0.358979 + c2 * 0.877896, ay = c1 * -0.933346 + c2 * 0.478852;
+	float bx = c3 * 0.624695 + c4 * 0.863779, bz = c3 * -0.780869 + c4 * 0.503871;
+	return 0.5 * vec3( ax + bx, ay, bz );
+}
+
+float cvTypeDepth( float T )
+{
+	float u = clamp( T, 0.0, 1.0 ) * 3.0, dc = cvVarA.w;
+	if ( u < 1.0 )
+		return dc * mix( 0.3, 0.6, u );
+	if ( u < 2.0 )
+		return dc * mix( 0.6, 1.0, u - 1.0 );
+	return mix( dc, max( cvVarB.x, dc ), u - 2.0 );
+}
+
+float cvTypeProfile( float T, float hf )
+{
+	const float rise[4] = float[4]( 0.10, 0.08, 0.07, 0.03 );
+	const float fall[4] = float[4]( 0.60, 0.45, 0.55, 0.85 );
+	float u = clamp( T, 0.0, 1.0 ) * 3.0;
+	int k = min( int( u ), 2 );
+	// the rise and fall heights blend, not the profiles' values (cloudvolmath.h typeProfile: no shoulder half way up)
+	float r = mix( rise[k], rise[k + 1], u - float( k ) ), f = mix( fall[k], fall[k + 1], u - float( k ) );
+	return cvSmooth( 0.0, r, hf ) * ( 1.0 - cvSmooth( f, 1.0, hf ) );
+}
+
+float cvCalAtT( float T, float c )
+{
+	float u = ( 1.0 - sqrt( 1.0 - clamp( T, 0.0, 1.0 ) ) ) * 12.0;	// cloudvolmath.h varCalT's inverse
+	int k = min( int( u ), 11 );
+	float t = clamp( c, 0.0, 1.0 ) * 16.0;
+	int i = min( int( t ), 15 );
+	float f = t - float( i );
+	float a = mix( cvCalT[k * 17 + i], cvCalT[k * 17 + i + 1], f );
+	float b = mix( cvCalT[k * 17 + 17 + i], cvCalT[k * 17 + 18 + i], f );
+	return mix( a, b, u - float( k ) );
+}
+
+float cloudDensity( vec3 p )
+{
+	vec4 m = cvMapAt( p.xy );
+	vec3 q = p + cvBands.windKm;
+	float n = cvWeatherNoise( q.xy );
+	float d = 0.0, s = -1.0;
+	vec3 curl = vec3( 0.0 );
+	bool curlOk = false;
+	for ( int b = 0; b < 2; b++ ) {
+		if ( cvBands.density[b] <= 0.0 )
+			continue;
+		float cov = b == 0 ? m.r : m.g;
+		cov += cvVarA.z * n * min( cov, 1.0 - cov );
+		float hf, prof, c;
+		if ( b == 0 ) {
+			float sheet = clamp( m.b / max( m.r, 1e-3 ), 0.0, 1.0 );
+			float T = clamp( cvVarA.x + cvVarA.y * n, 0.0, 1.0 ) * ( 1.0 - sheet );
+			hf = ( p.z - cvBands.baseKm.x ) / max( cvTypeDepth( T ), 1e-3 );
+			if ( hf <= 0.0 || hf >= 1.0 )
+				continue;
+			c = cvCalAtT( T, cov );
+			float e = mix( 1.0, 0.5, cvVarB.w * cvSmooth( 0.8, 1.0, T ) * cvSmooth( 0.65, 0.85, hf ) );
+			c = c > 0.0 ? pow( c, e ) : 0.0;
+			prof = cvTypeProfile( T, hf );
+		} else {
+			hf = ( p.z - cvBands.baseKm.y ) / max( cvBands.topKm.y - cvBands.baseKm.y, 1e-3 );
+			if ( hf <= 0.0 || hf >= 1.0 )
+				continue;
+			c = cvCalAt( 1, cov );
+			prof = cvGradient( 1, hf, 0.0 );
+		}
+		if ( c <= 0.0 )
+			continue;
+		if ( s < 0.0 )
+			s = textureLod( cvShape, q / kCvShapeKm, log2( max( cvFootKm * 128.0 / kCvShapeKm, 1.0 ) ) ).r;
+		float t = 1.0 - c;
+		float base_ = clamp( ( s * prof - t ) / max( 1.0 - t, 1e-4 ), 0.0, 1.0 ) * c;
+		if ( base_ <= 0.0 )
+			continue;
+		if ( !curlOk ) {
+			curl = cvCurlRaw( q );
+			curlOk = true;
+		}
+		vec3 qd = q + curl * ( cvVarB.z * ( 1.0 - 0.5 * hf ) );
+		float det = textureLod( cvDetail, qd / kCvDetailKm, log2( max( cvFootKm * 32.0 / kCvDetailKm, 1.0 ) ) ).r;
+		float er = cvVarB.y * mix( 0.55, 1.0, cvSmooth( 0.0, 0.35, hf ) );
+		float mod_ = mix( det, 1.0 - det, clamp( hf * 4.0, 0.0, 1.0 ) ) * er;
+		d += clamp( ( base_ - mod_ ) / ( 1.0 - mod_ ), 0.0, 1.0 ) * cvBands.density[b];
+	}
+	return d;
+}
+#endif
