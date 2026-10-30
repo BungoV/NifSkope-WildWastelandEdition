@@ -1,0 +1,12 @@
+{
+ "entries": [
+  {
+   "name": "CommonwealthFoggy",
+   "weather": "Fallout4.esm|0x001C3473",
+   "groundFog": {
+    "thickness": 1000,
+    "strength": 3
+   }
+  }
+ ]
+}

@@ -87,6 +87,28 @@
   fails; `-DTREELEAF1_RED_ENDPOINTS` (scale only the two BC3 endpoints: an edge block spanning 0..255 keeps its
   palette) 700/894, fails; `-DTREELEAF1_RED_NEAREST` (re-encode ignores the side of the test) fails the side rule.
   Pictures owed (near-tree leaves at distance, on vs red) when bungo asks.
+## FOGHEIGHT2 (2026-10-30, branch fogheight2-20261030): the fog climbs on the vanilla weathers (ground layer on)
+
+- bungo 10-27, on a screenshot: "the fog is uniform everywhere". FOGHEIGHT1 added a ground layer derived from the
+  weather's own fog, but it shipped off, and FO4CS's groundFog .recx files win over it on every vanilla Commonwealth
+  weather. Those files are 4-12 m thick (300-864 units), so the air above the first metres stayed flat: the density at
+  500 m was 0.88-0.97 of the density at 50 m in every one of the 40 weather/hour cases.
+- **"Ground fog from weather" is on by default.** The row has a new settings key (`WW/CellAirGroundDerived2`), so the
+  OFF it shipped with does not stick.
+- **A groundFog file thinner than the weather's derived layer now gives way to it.** The derived law keeps the game's
+  street density. A file that asks for a layer at least as thick (a weather mod's own fog) still wins.
+- Offline, on bungo's load order (40 weather/hour cases, the shipped FO4CS files): density at 500 m over density at
+  50 m is now 0.27-0.83 (it was 0.88-0.97; the hazy weathers' derived layer is up to 1.2 km thick, so they thin least). The street density is the game's within 1e-5. The census reads
+  `derived(V .. thickness .. m ..) over a thinner file (9.0 m < 60 m) form:FO4CS/Weathers/<weather>.recx`.
+- Red `WW_CELL_AIR_GROUND_DERIVED_RED=filewins`: any file wins again (FOGHEIGHT1's precedence). The older red `=drop`
+  still drops the derived layer.
+- Gate `bash tests/fogheight2/run.sh <out> [green|red]` builds the real air code twice (this tree, and 2190b994) with
+  tests/fogground's harness. Green: PASS 299 FAIL 0. Red (today's code and row default judged as the fix): FAIL 161,
+  JUDGE-RC=1. Arms: shipped files, no file, the precedence fixture, a thick-file fixture, burn-off, the red.
+- Visible change, judged by reason only (no pictures, bungo 10-30): the first ~10 m lose the shipped files' extra
+  skin density (Rain at 0 m: 2.8e-2 -> 6.7e-3 per m, which is the game's own street value). The air then thins
+  with height. Pictures are owed.
+- CPU only. The shader's ground term is unchanged, so no link sweep is needed.
 
 ## CAMGATE1 (2026-10-30): the camera never shows an out-of-bounds or under-terrain view
 

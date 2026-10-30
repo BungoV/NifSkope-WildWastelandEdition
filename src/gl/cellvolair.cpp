@@ -918,6 +918,25 @@ void vaGround( const float K[6][4], const VaMedium & M, bool interior, bool igno
 		L.invHg = float( 1.0 / ( thick * ( 1.0 - 0.75 * burnt ) ) );
 		L.recx += QStringLiteral( "(burn-off %1)" ).arg( burnt, 0, 'f', 2 );
 	}
+	// lane FOGHEIGHT2 (bungo 10-27 "the fog is uniform everywhere"): the FO4CS groundFog files shipped for every vanilla
+	// weather are a 4-12 m skin, so with them the air above the street stayed flat. A file layer THINNER than the
+	// weather's derived layer now gives way to it (the derived law keeps the game's street density); a file that asks
+	// for a layer at least as thick (a weather mod's own fog) still wins. Red WW_CELL_AIR_GROUND_DERIVED_RED=filewins:
+	// any file wins (FOGHEIGHT1's precedence).
+	if ( wwEnvStr( "WW_CELL_AIR_GROUND_DERIVED_RED" ) != QLatin1String( "filewins" ) && L.invHg > 0.0f ) {
+		VaLayer D;
+		D.zg = L.zg;
+		vaDerived( M, QString(), D );
+		if ( D.derived && D.invHg > 0.0f && D.invHg < L.invHg ) {
+			const double upm = double( kUnitsPerKm ) / 1000.0;
+			const double fileM = 1.0 / ( double( L.invHg ) * upm ), derM = 1.0 / ( double( D.invHg ) * upm );
+			L.recx = D.recx.trimmed() + QStringLiteral( " over a thinner file (%1 m < %2 m) %3" )
+				.arg( fileM, 0, 'f', 1 ).arg( derM, 0, 'f', 0 ).arg( L.recx );
+			L.s = D.s;
+			L.invHg = D.invHg;
+			L.derived = true;
+		}
+	}
 }
 
 }	// namespace
