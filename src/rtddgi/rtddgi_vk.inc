@@ -18,6 +18,7 @@
 #include "rtddgi_gpu.h"
 
 #include <algorithm>
+#include <atomic>   // RTXCASCADE2: the BLAS-build and submit counters (the CLI's census)
 #include <thread>   // ddgiGpuRun waits for the device's lock (bakert.cpp does not include it)
 
 #if defined( __has_include )
@@ -84,6 +85,17 @@ const uint32_t * ddgiGpuHostAge( const DdgiGpuSession * ) { return nullptr; }
 const float * ddgiGpuHostProbes( const DdgiGpuSession * ) { return nullptr; }
 const float * ddgiGpuHostRays( const DdgiGpuSession * ) { return nullptr; }
 void ddgiGpuClose( DdgiGpuSession * ) {}
+bool ddgiGpuStepGroup( DdgiGpuSession * const *, const DdgiGpuStepIn *, DdgiGpuStepOut * out, int n )
+{
+	for ( int i = 0; i < n; i++ ) {
+		out[i] = DdgiGpuStepOut();
+		out[i].why = kDdgiNoKernels;
+	}
+	return false;
+}
+bool ddgiGpuSameScene( const DdgiGpuSession *, const DdgiGpuSession * ) { return false; }
+long long ddgiGpuBlasBuilds() { return 0; }
+long long ddgiGpuSubmits() { return 0; }
 
 #else
 
@@ -430,13 +442,29 @@ struct DdgiCbSwap
 	~DdgiCbSwap() { D.cb = keep; }
 };
 
+/* RTXCASCADE2 (2026-10-30): what every session opened on one soup traces alike, in the soup's local frame: the BLAS +
+ * TLAS and alpha masks (bakert's Scene::Impl), the triangle attributes and the lights. A session opened with
+ * job.sceneFrom takes the other session's (the cell view's cascades: one soup, so one BLAS, not one a cascade); counted,
+ * the last session out frees it (under D.m). The group step (ddgiGpuStepGroup) records every member into the scene's
+ * own command buffer and submits once on its fence (both made on the first group step). */
+struct DdgiScene
+{
+	Scene::Impl I;
+	Buf attr, lights;
+	int refs = 0;
+	VkCommandBuffer cb = VK_NULL_HANDLE;
+	VkFence fence = VK_NULL_HANDLE;
+	bool groupSubmitted = false;   // the fence belongs to a group submit not yet seen signalled
+};
+std::atomic<long long> g_ddgiBlasBuilds { 0 }, g_ddgiSubmits { 0 };
+
 } // namespace
 
 struct DdgiGpuSession
 {
-	Scene::Impl I;
+	DdgiScene * sc = nullptr;                      // RTXCASCADE2: the scene, maybe shared (was a Scene::Impl of its own)
 	DdgiGpuParams prm;
-	Buf rays, atlas, age, attr, lights, params;   // the device's working set; the atlas holds irr, dist and probes
+	Buf rays, atlas, age, params;                  // the device's working set; the atlas holds irr, dist and probes
 	Buf irrRb, distRb, probesRb, ageRb, raysRb;   // the host copies
 	Buf scratch, freshTpl;                         // M3: a scroll's copy through, and nP x (0, 0, 0, DDGI_FRESH)
 	VkDeviceSize offIrr = 0, offDist = 0, offProbes = 0, atlasBytes = 0, atlasAlloc = 0;
@@ -444,6 +472,7 @@ struct DdgiGpuSession
 	VkQueryPool qp = VK_NULL_HANDLE;
 	VkCommandBuffer cb = VK_NULL_HANDLE;           // M3: the steps' own (a submit may run past its step)
 	VkFence fence = VK_NULL_HANDLE;
+	VkFence inFence = VK_NULL_HANDLE;              // RTXCASCADE2: the fence of the submit in flight (its own, or the scene's group)
 	VkSemaphore vkDone = VK_NULL_HANDLE, glDone = VK_NULL_HANDLE;
 	bool shared = false, released = false, relocate = true;
 	std::string shareWhy;
@@ -462,8 +491,8 @@ namespace {
 void ddgiFree( Dev & D, DdgiGpuSession * s )
 {
 	DdgiExtra & X = ddgiExtra( D );
-	if ( s->inFlight && s->fence )
-		vk.vkWaitForFences( D.dev, 1, &s->fence, VK_TRUE, UINT64_MAX );
+	if ( s->inFlight && s->inFence )
+		vk.vkWaitForFences( D.dev, 1, &s->inFence, VK_TRUE, UINT64_MAX );
 	if ( s->set )
 		vk.vkFreeDescriptorSets( D.dev, D.dpool, 1, &s->set );
 	DdgiTimer & T = ddgiTimer( D );
@@ -476,11 +505,34 @@ void ddgiFree( Dev & D, DdgiGpuSession * s )
 	for ( VkSemaphore sem : { s->vkDone, s->glDone } )
 		if ( sem && X.destroySem )
 			X.destroySem( D.dev, sem, nullptr );
-	for ( Buf * b : { &s->rays, &s->atlas, &s->age, &s->attr, &s->lights, &s->params, &s->irrRb, &s->distRb, &s->probesRb,
+	for ( Buf * b : { &s->rays, &s->atlas, &s->age, &s->params, &s->irrRb, &s->distRb, &s->probesRb,
 			&s->ageRb, &s->raysRb, &s->scratch, &s->freshTpl } )
 		freeBuf( D, *b );
-	s->I.release( D );
+	if ( DdgiScene * sc = s->sc; sc && --sc->refs <= 0 ) {   // RTXCASCADE2: the last session on the scene frees it
+		if ( sc->groupSubmitted && sc->fence )
+			vk.vkWaitForFences( D.dev, 1, &sc->fence, VK_TRUE, UINT64_MAX );
+		if ( sc->cb && X.freeCbs )
+			X.freeCbs( D.dev, D.pool, 1, &sc->cb );
+		if ( sc->fence && X.destroyFence )
+			X.destroyFence( D.dev, sc->fence, nullptr );
+		freeBuf( D, sc->attr );
+		freeBuf( D, sc->lights );
+		sc->I.release( D );
+		delete sc;
+	}
+	s->sc = nullptr;
 	delete s;
+}
+
+/* RTXCASCADE2: the session's active probes skip the coarse probes a finer cascade covers (params skipLo / skipHi, grid
+ * indices inclusive, skipLo[3] = 1 on; ddgi_common.glsl ddgiSkipped) */
+bool ddgiSkipped( const DdgiGpuParams & P, uint64_t p )
+{
+	if ( !P.skipLo[3] || P.dims[0] <= 0 || P.dims[1] <= 0 )
+		return false;
+	const int64_t ix = int64_t( p % uint64_t( P.dims[0] ) ), iy = int64_t( ( p / uint64_t( P.dims[0] ) ) % uint64_t( P.dims[1] ) ),
+		iz = int64_t( p / uint64_t( P.dims[0] * P.dims[1] ) );
+	return ix >= P.skipLo[0] && ix <= P.skipHi[0] && iy >= P.skipLo[1] && iy <= P.skipHi[1] && iz >= P.skipLo[2] && iz <= P.skipHi[2];
 }
 
 // the active probes (trace.comp mode 0 skips Off and, with skipAsleep, Asleep) from the host copy of the probes
@@ -490,7 +542,7 @@ void ddgiCountActive( DdgiGpuSession * s )
 	s->nActive = 0;
 	for ( uint64_t p = 0; pr && p < s->nProbes; p++ ) {
 		const int st = int( pr[p * 4 + 3] + 0.5f );
-		s->nActive += ( st == 0 || ( st == 1 && s->prm.flags[1] ) ) ? 0 : 1;   // rtddgimath.h kOff / kAsleep
+		s->nActive += ( st == 0 || ( st == 1 && s->prm.flags[1] ) || ddgiSkipped( s->prm, p ) ) ? 0 : 1;   // rtddgimath.h kOff / kAsleep
 	}
 }
 
@@ -615,17 +667,28 @@ DdgiGpuSession * ddgiGpuOpen( const DdgiGpuJob & job, DdgiGpuOut * out )
 	s->nProbes = nProbes;
 	s->N = N;
 	s->relocate = job.relocate;
-	if ( !buildMasks( D, *job.bvh, s->I ) || !buildRt( D, *job.bvh, s->I ) ) {
-		ddgiFree( D, s );
-		out->why = "the soup's BLAS did not build (out of GPU memory?)";
-		return nullptr;
+	if ( job.sceneFrom && job.sceneFrom->sc ) {   // RTXCASCADE2: the other session's scene (the caller keeps it open until this returns)
+		s->sc = job.sceneFrom->sc;
+		s->sc->refs++;
+		out->blasShared = true;
+	} else {
+		s->sc = new DdgiScene;
+		s->sc->refs = 1;
+		if ( !buildMasks( D, *job.bvh, s->sc->I ) || !buildRt( D, *job.bvh, s->sc->I ) ) {
+			ddgiFree( D, s );
+			out->why = "the soup's BLAS did not build (out of GPU memory?)";
+			return nullptr;
+		}
+		g_ddgiBlasBuilds++;
+		out->blasBuilt = true;
 	}
-	out->blasGrow = s->I.inflate;   // M1FIX: the BLAS holds grown triangles when > 0; trace.comp re-tests the true ones
-	out->blasGrowTris = s->I.inflateTris;
+	Scene::Impl & I = s->sc->I;
+	out->blasGrow = I.inflate;   // M1FIX: the BLAS holds grown triangles when > 0; trace.comp re-tests the true ones
+	out->blasGrowTris = I.inflateTris;
 	s->prm = job.params;
-	s->prm.counts[2] = int32_t( s->I.nTri );
-	s->prm.counts[3] = int32_t( s->I.nOpaque );
-	s->prm.flags[2] = int32_t( s->I.useMask );
+	s->prm.counts[2] = int32_t( I.nTri );
+	s->prm.counts[3] = int32_t( I.nOpaque );
+	s->prm.flags[2] = int32_t( I.useMask );
 
 	const VkBufferUsageFlags u = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_SRC_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT;
 	const VkBufferUsageFlags rb = VK_BUFFER_USAGE_TRANSFER_DST_BIT;
@@ -670,8 +733,8 @@ DdgiGpuSession * ddgiGpuOpen( const DdgiGpuJob & job, DdgiGpuOut * out )
 		&& makeBuf( D, nProbes * 16, rb, { cached, kHost }, s->probesRb )
 		&& makeBuf( D, nProbes * 4, rb, { cached, kHost }, s->ageRb )
 		&& ( !job.dumpFixed || makeBuf( D, nProbes * N * 16, rb, { cached, kHost }, s->raysRb ) )
-		&& upload( D, job.triAttr.data(), job.triAttr.size() * 4, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT, s->attr )
-		&& upload( D, job.lights.data(), job.lights.size() * 4, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT, s->lights )
+		&& ( out->blasShared || upload( D, job.triAttr.data(), job.triAttr.size() * 4, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT, s->sc->attr ) )
+		&& ( out->blasShared || upload( D, job.lights.data(), job.lights.size() * 4, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT, s->sc->lights ) )
 		&& upload( D, &s->prm, sizeof s->prm, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT, s->params );
 	ok = ok && s->irrRb.map && s->distRb.map && s->probesRb.map && s->ageRb.map && ( !job.dumpFixed || s->raysRb.map );
 	ok = ok && ddgiPut( D, zTiles.data(), zTiles.size() * 4, s->atlas, s->offIrr ) && ddgiPut( D, zAge.data(), zAge.size() * 4, s->age )
@@ -700,8 +763,8 @@ DdgiGpuSession * ddgiGpuOpen( const DdgiGpuJob & job, DdgiGpuOut * out )
 	}
 	if ( ok ) {
 		// bindings 1, 2, 3 are the atlas's three ranges; the rest whole buffers
-		const Buf * bs[kDdgiBindings] = { &s->rays, &s->atlas, &s->atlas, &s->atlas, &s->age, &s->attr, nullptr, &s->I.remap, &s->I.verts,
-			&s->I.triOf, &s->I.maskTris, &s->I.maps, &s->I.alpha, &s->lights, &s->params };
+		const Buf * bs[kDdgiBindings] = { &s->rays, &s->atlas, &s->atlas, &s->atlas, &s->age, &s->sc->attr, nullptr, &I.remap, &I.verts,
+			&I.triOf, &I.maskTris, &I.maps, &I.alpha, &s->sc->lights, &s->params };
 		const VkDeviceSize off[kDdgiBindings] = { 0, s->offIrr, s->offDist, s->offProbes, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0 };
 		const VkDeviceSize len[kDdgiBindings] = { VK_WHOLE_SIZE, VkDeviceSize( nProbes ) * kAtlasIrr, VkDeviceSize( nProbes ) * kAtlasDist,
 			VkDeviceSize( nProbes ) * kAtlasProbe, VK_WHOLE_SIZE, VK_WHOLE_SIZE, VK_WHOLE_SIZE, VK_WHOLE_SIZE, VK_WHOLE_SIZE, VK_WHOLE_SIZE,
@@ -710,7 +773,7 @@ DdgiGpuSession * ddgiGpuOpen( const DdgiGpuJob & job, DdgiGpuOut * out )
 		std::vector<VkWriteDescriptorSet> w;
 		VkWriteDescriptorSetAccelerationStructureKHR wa { VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET_ACCELERATION_STRUCTURE_KHR };
 		wa.accelerationStructureCount = 1;
-		wa.pAccelerationStructures = &s->I.tlas;
+		wa.pAccelerationStructures = &I.tlas;
 		for ( int i = 0; i < kDdgiBindings; i++ ) {
 			VkWriteDescriptorSet x { VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET };
 			x.dstSet = s->set;
@@ -778,6 +841,125 @@ DdgiGpuSession * ddgiGpuOpen( const DdgiGpuJob & job, DdgiGpuOut * out )
 	return s;
 }
 
+namespace {
+
+/* RTXCASCADE2: a step's parts, shared by the one-session step (ddgiGpuStepEx, M3's) and the group step: ready = the
+ * session's last submit harvested if done (false: busy, or a scroll without its scratch); record = its commands into
+ * D.cb (begun); submitted = the session's in-flight state once the submit went in */
+bool ddgiStepReady( Dev & D, DdgiExtra & X, DdgiGpuSession * s, const DdgiGpuStepIn & in, DdgiGpuStepOut * out )
+{
+	if ( s->inFlight ) {   // M3: the last submit first (never waited on here: a step that would wait says busy)
+		const VkResult fs = X.fenceStatus ? X.fenceStatus( D.dev, s->inFence ) : vk.vkWaitForFences( D.dev, 1, &s->inFence, VK_TRUE, 0 );
+		if ( fs != VK_SUCCESS ) {
+			out->busy = true;
+			out->pending = true;
+			out->why = "the last update set still runs on the device";
+			return false;
+		}
+		ddgiHarvest( D, s, out );
+	}
+	if ( in.scroll && ( !s->scratch.b || !X.fill || !X.update ) ) {
+		out->why = "a scroll needs the session's scratch (job.scroll) and vkCmdFillBuffer / vkCmdUpdateBuffer";
+		return false;
+	}
+	if ( in.skipSet && !X.update ) {
+		bool same = true;
+		for ( int c = 0; c < 4; c++ )
+			same = same && s->prm.skipLo[c] == in.skipLo[c] && s->prm.skipHi[c] == in.skipHi[c];
+		if ( !same ) {
+			out->why = "a skip range needs vkCmdUpdateBuffer";
+			return false;
+		}
+	}
+	return true;
+}
+
+uint32_t ddgiStepRecord( Dev & D, DdgiPipes & S, DdgiExtra & X, DdgiTimer & T, DdgiGpuSession * s, const DdgiGpuStepIn & in, int k,
+	bool copyRays, bool gl )
+{
+	const uint64_t nProbes = s->nProbes;
+	const uint32_t N = s->N;
+	const uint64_t traceGroups = ( nProbes * N + 63 ) / 64;
+	const uint64_t borderGroups = ( nProbes * 88 + 63 ) / 64;
+	const bool timed = s->qp != VK_NULL_HANDLE;
+	const bool scroll = in.scroll;
+	uint32_t q = 0;
+	auto stamp = [&]() {
+		if ( timed )
+			T.write( D.cb, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, s->qp, q++ );
+	};
+	if ( timed )
+		T.reset( D.cb, s->qp, 0, kDdgiStamps );
+	if ( s->released )
+		ddgiOwner( D, s->atlas.b, true );
+	stamp();
+	if ( in.skipSet ) {   // RTXCASCADE2: the covered coarse probes the updates skip, written only when the range moved
+		bool same = true;
+		for ( int c = 0; c < 4; c++ )
+			same = same && s->prm.skipLo[c] == in.skipLo[c] && s->prm.skipHi[c] == in.skipHi[c];
+		if ( !same ) {
+			for ( int c = 0; c < 4; c++ ) {
+				s->prm.skipLo[c] = in.skipLo[c];
+				s->prm.skipHi[c] = in.skipHi[c];
+			}
+			ddgiXferBarrier( D );
+			X.update( D.cb, s->params.b, 0, sizeof s->prm, &s->prm );
+			ddgiXferBarrier( D );
+			ddgiCountActive( s );
+		}
+	}
+	if ( scroll ) {
+		ddgiScrollRecord( D, S, X, s, in );
+		stamp();
+	}
+	// the updates: trace every ray of the active probes, blend, border (M1FIX's order, one barrier between each two)
+	for ( int f = 0; f < k; f++ ) {
+		const float * rot = in.rotations ? in.rotations + size_t( f ) * 9 : nullptr;
+		const uint32_t fr = in.frame0 + uint32_t( f );
+		ddgiDispatch( D, S, s->set, 0, ddgiPc( rot, 0, fr, 0, N ), traceGroups );
+		ddgiBarrier( D );
+		stamp();
+		ddgiDispatch( D, S, s->set, 1, ddgiPc( rot, 2, fr, 0, N ), nProbes );
+		ddgiBarrier( D );
+		stamp();
+		ddgiDispatch( D, S, s->set, 2, ddgiPc( rot, 3, fr, 0, 0 ), borderGroups );
+		ddgiBarrier( D );
+		stamp();
+	}
+	ddgiCopyBarrier( D );
+	if ( in.host ) {
+		ddgiCopy( D, s->atlas, s->irrRb, nProbes * kAtlasIrr, s->offIrr, 0 );
+		ddgiCopy( D, s->atlas, s->distRb, nProbes * kAtlasDist, s->offDist, 0 );
+		ddgiCopy( D, s->age, s->ageRb, nProbes * 4 );
+	}
+	if ( scroll )   // the fresh probes' states for the CPU (the census, the debug view, the active count)
+		ddgiCopy( D, s->atlas, s->probesRb, nProbes * kAtlasProbe, s->offProbes, 0 );
+	if ( copyRays )
+		ddgiCopy( D, s->rays, s->raysRb, nProbes * N * 16 );
+	stamp();
+	ddgiEndBarrier( D );
+	if ( gl )
+		ddgiOwner( D, s->atlas.b, false );
+	return q;
+}
+
+void ddgiStepSubmitted( DdgiGpuSession * s, VkFence f, uint32_t q, int k, const DdgiGpuStepIn & in, bool copyRays, bool gl,
+	DdgiGpuStepOut * out )
+{
+	s->inFlight = true;
+	s->inFence = f;
+	s->inStamps = q;
+	s->inK = k;
+	s->inScroll = in.scroll;
+	s->inHost = in.host;
+	s->inRays = copyRays;
+	s->released = gl;
+	out->submitted = true;
+	out->rays = s->nActive * (long long)s->N * k;   // a scroll's new actives count from its harvest on
+}
+
+} // namespace
+
 bool ddgiGpuStepEx( DdgiGpuSession * s, const DdgiGpuStepIn & in, DdgiGpuStepOut * out )
 {
 	*out = DdgiGpuStepOut();
@@ -794,30 +976,12 @@ bool ddgiGpuStepEx( DdgiGpuSession * s, const DdgiGpuStepIn & in, DdgiGpuStepOut
 	}
 	DdgiExtra & X = ddgiExtra( D );
 	const auto t0 = std::chrono::steady_clock::now();
-	if ( s->inFlight ) {   // M3: the last submit first (never waited on here: a step that would wait says busy)
-		const VkResult fs = X.fenceStatus ? X.fenceStatus( D.dev, s->fence ) : vk.vkWaitForFences( D.dev, 1, &s->fence, VK_TRUE, 0 );
-		if ( fs != VK_SUCCESS ) {
-			out->busy = true;
-			out->pending = true;
-			out->why = "the last update set still runs on the device";
-			return false;
-		}
-		ddgiHarvest( D, s, out );
-	}
+	if ( !ddgiStepReady( D, X, s, in, out ) )
+		return false;
 	DdgiPipes & S = ddgiPipes( D );
 	DdgiTimer & T = ddgiTimer( D );
 	const int k = std::max( 0, std::min( in.k, kDdgiStepMax ) );
 	const bool copyRays = in.copyRays && s->raysRb.b;
-	const bool scroll = in.scroll;
-	if ( scroll && ( !s->scratch.b || !X.fill || !X.update ) ) {
-		out->why = "a scroll needs the session's scratch (job.scroll) and vkCmdFillBuffer / vkCmdUpdateBuffer";
-		return false;
-	}
-	const uint64_t nProbes = s->nProbes;
-	const uint32_t N = s->N;
-	const uint64_t traceGroups = ( nProbes * N + 63 ) / 64;
-	const uint64_t borderGroups = ( nProbes * 88 + 63 ) / 64;
-	const bool timed = s->qp != VK_NULL_HANDLE;
 	// interop in use: a shared atlas AND a GL side that orders itself (beforeSubmit); a shared session whose GL import
 	// failed reads back like an unshared one: no vkDone signal nobody would wait on, no release to GL
 	const bool gl = s->shared && bool( in.beforeSubmit );
@@ -827,47 +991,7 @@ bool ddgiGpuStepEx( DdgiGpuSession * s, const DdgiGpuStepIn & in, DdgiGpuStepOut
 		DdgiCbSwap sw( D, s->cb );
 		ok = begin( D );
 		if ( ok ) {
-			auto stamp = [&]() {
-				if ( timed )
-					T.write( D.cb, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, s->qp, q++ );
-			};
-			if ( timed )
-				T.reset( D.cb, s->qp, 0, kDdgiStamps );
-			if ( s->released )
-				ddgiOwner( D, s->atlas.b, true );
-			stamp();
-			if ( scroll ) {
-				ddgiScrollRecord( D, S, X, s, in );
-				stamp();
-			}
-			// the updates: trace every ray of the active probes, blend, border (M1FIX's order, one barrier between each two)
-			for ( int f = 0; f < k; f++ ) {
-				const float * rot = in.rotations ? in.rotations + size_t( f ) * 9 : nullptr;
-				const uint32_t fr = in.frame0 + uint32_t( f );
-				ddgiDispatch( D, S, s->set, 0, ddgiPc( rot, 0, fr, 0, N ), traceGroups );
-				ddgiBarrier( D );
-				stamp();
-				ddgiDispatch( D, S, s->set, 1, ddgiPc( rot, 2, fr, 0, N ), nProbes );
-				ddgiBarrier( D );
-				stamp();
-				ddgiDispatch( D, S, s->set, 2, ddgiPc( rot, 3, fr, 0, 0 ), borderGroups );
-				ddgiBarrier( D );
-				stamp();
-			}
-			ddgiCopyBarrier( D );
-			if ( in.host ) {
-				ddgiCopy( D, s->atlas, s->irrRb, nProbes * kAtlasIrr, s->offIrr, 0 );
-				ddgiCopy( D, s->atlas, s->distRb, nProbes * kAtlasDist, s->offDist, 0 );
-				ddgiCopy( D, s->age, s->ageRb, nProbes * 4 );
-			}
-			if ( scroll )   // the fresh probes' states for the CPU (the census, the debug view, the active count)
-				ddgiCopy( D, s->atlas, s->probesRb, nProbes * kAtlasProbe, s->offProbes, 0 );
-			if ( copyRays )
-				ddgiCopy( D, s->rays, s->raysRb, nProbes * N * 16 );
-			stamp();
-			ddgiEndBarrier( D );
-			if ( gl )
-				ddgiOwner( D, s->atlas.b, false );
+			q = ddgiStepRecord( D, S, X, T, s, in, k, copyRays, gl );
 			ok = vk.vkEndCommandBuffer( D.cb ) == VK_SUCCESS;
 		}
 		if ( ok ) {
@@ -889,15 +1013,8 @@ bool ddgiGpuStepEx( DdgiGpuSession * s, const DdgiGpuStepIn & in, DdgiGpuStepOut
 		out->why = "a DDGI submit failed (lost device or out of memory)";
 		return false;
 	}
-	s->inFlight = true;
-	s->inStamps = q;
-	s->inK = k;
-	s->inScroll = scroll;
-	s->inHost = in.host;
-	s->inRays = copyRays;
-	s->released = gl;
-	out->submitted = true;
-	out->rays = s->nActive * (long long)N * k;   // a scroll's new actives count from its harvest on
+	g_ddgiSubmits++;
+	ddgiStepSubmitted( s, s->fence, q, k, in, copyRays, gl, out );
 	if ( in.wait ) {
 		if ( vk.vkWaitForFences( D.dev, 1, &s->fence, VK_TRUE, UINT64_MAX ) != VK_SUCCESS ) {
 			out->why = "a DDGI submit failed (lost device or out of memory)";
@@ -911,6 +1028,148 @@ bool ddgiGpuStepEx( DdgiGpuSession * s, const DdgiGpuStepIn & in, DdgiGpuStepOut
 	out->ok = true;
 	return true;
 }
+
+/* RTXCASCADE2: one submit for several sessions on ONE scene (the cell view's cascades): every member's step recorded in
+ * order into the scene's command buffer (each with its own timestamps, scroll, updates, copies, ownership), then one
+ * vkQueueSubmit that waits on every member's glDone its beforeSubmit signalled and signals every interop member's vkDone,
+ * on the scene's fence. A member not ready (its last submit still running) makes the whole group busy (nothing recorded);
+ * members harvested before that keep their reports in out[]. */
+bool ddgiGpuStepGroup( DdgiGpuSession * const * ss, const DdgiGpuStepIn * ins, DdgiGpuStepOut * outs, int n )
+{
+	for ( int i = 0; i < n; i++ )
+		outs[i] = DdgiGpuStepOut();
+	if ( n <= 0 )
+		return false;
+	for ( int i = 0; i < n; i++ ) {
+		if ( !ss[i] || !ss[i]->sc || ss[i]->sc != ss[0]->sc ) {
+			for ( int j = 0; j < n; j++ )
+				outs[j].why = ss[i] ? "the sessions do not share one scene (no group submit)" : "no session";
+			return false;
+		}
+	}
+	Dev & D = dev();
+	std::unique_lock<std::mutex> lk( D.m, std::try_to_lock );
+	if ( !lk.owns_lock() ) {
+		for ( int i = 0; i < n; i++ ) {
+			outs[i].busy = true;
+			outs[i].why = "the bake device is busy";
+		}
+		return false;
+	}
+	DdgiExtra & X = ddgiExtra( D );
+	const auto t0 = std::chrono::steady_clock::now();
+	DdgiScene & G = *ss[0]->sc;
+	auto allBusy = [&]( const char * why, bool pending ) {
+		for ( int j = 0; j < n; j++ ) {
+			outs[j].busy = true;
+			outs[j].pending = outs[j].pending || pending;
+			outs[j].why = why;
+		}
+		return false;
+	};
+	if ( G.groupSubmitted ) {   // its command buffer is recorded again only once that submit is done
+		const VkResult fs = X.fenceStatus ? X.fenceStatus( D.dev, G.fence ) : vk.vkWaitForFences( D.dev, 1, &G.fence, VK_TRUE, 0 );
+		if ( fs != VK_SUCCESS )
+			return allBusy( "the last group submit still runs on the device", true );
+	}
+	for ( int i = 0; i < n; i++ ) {
+		if ( !ddgiStepReady( D, X, ss[i], ins[i], &outs[i] ) ) {
+			const bool busy = outs[i].busy;
+			const std::string why = outs[i].why;
+			for ( int j = 0; j < n; j++ ) {
+				outs[j].busy = busy;
+				outs[j].why = why;
+			}
+			return false;
+		}
+	}
+	if ( !G.cb ) {
+		VkCommandBufferAllocateInfo cai { VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO };
+		cai.commandPool = D.pool;
+		cai.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
+		cai.commandBufferCount = 1;
+		VkFenceCreateInfo fi { VK_STRUCTURE_TYPE_FENCE_CREATE_INFO };
+		if ( vk.vkAllocateCommandBuffers( D.dev, &cai, &G.cb ) != VK_SUCCESS || vk.vkCreateFence( D.dev, &fi, nullptr, &G.fence ) != VK_SUCCESS ) {
+			for ( int j = 0; j < n; j++ )
+				outs[j].why = "no command buffer or fence for the group submit";
+			return false;
+		}
+	}
+	DdgiPipes & S = ddgiPipes( D );
+	DdgiTimer & T = ddgiTimer( D );
+	std::vector<int> ks( size_t( n ), 0 );
+	std::vector<uint32_t> qs( size_t( n ), 0 );
+	std::vector<char> rays( size_t( n ), 0 ), gls( size_t( n ), 0 );
+	bool ok = true, wait = false;
+	{
+		DdgiCbSwap sw( D, G.cb );
+		ok = begin( D );
+		for ( int i = 0; ok && i < n; i++ ) {
+			ks[size_t( i )] = std::max( 0, std::min( ins[i].k, kDdgiStepMax ) );
+			rays[size_t( i )] = ins[i].copyRays && ss[i]->raysRb.b ? 1 : 0;
+			gls[size_t( i )] = ss[i]->shared && bool( ins[i].beforeSubmit ) ? 1 : 0;
+			qs[size_t( i )] = ddgiStepRecord( D, S, X, T, ss[i], ins[i], ks[size_t( i )], rays[size_t( i )] != 0, gls[size_t( i )] != 0 );
+			wait = wait || ins[i].wait;
+		}
+		ok = ok && vk.vkEndCommandBuffer( D.cb ) == VK_SUCCESS;
+		if ( ok ) {
+			std::vector<VkSemaphore> waits, sigs;
+			for ( int i = 0; i < n; i++ ) {
+				if ( !gls[size_t( i )] )
+					continue;
+				if ( ins[i].beforeSubmit() )
+					waits.push_back( ss[i]->glDone );
+				sigs.push_back( ss[i]->vkDone );
+			}
+			const std::vector<VkPipelineStageFlags> ws( waits.size(), VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT | VK_PIPELINE_STAGE_TRANSFER_BIT );
+			VkSubmitInfo si { VK_STRUCTURE_TYPE_SUBMIT_INFO };
+			si.waitSemaphoreCount = uint32_t( waits.size() );
+			si.pWaitSemaphores = waits.data();
+			si.pWaitDstStageMask = ws.data();
+			si.commandBufferCount = 1;
+			si.pCommandBuffers = &G.cb;
+			si.signalSemaphoreCount = uint32_t( sigs.size() );
+			si.pSignalSemaphores = sigs.data();
+			vk.vkResetFences( D.dev, 1, &G.fence );
+			ok = vk.vkQueueSubmit( D.q, 1, &si, G.fence ) == VK_SUCCESS;
+		}
+	}
+	if ( !ok ) {
+		for ( int j = 0; j < n; j++ )
+			outs[j].why = "a DDGI group submit failed (lost device or out of memory)";
+		return false;
+	}
+	g_ddgiSubmits++;
+	G.groupSubmitted = true;
+	for ( int i = 0; i < n; i++ )
+		ddgiStepSubmitted( ss[i], G.fence, qs[size_t( i )], ks[size_t( i )], ins[i], rays[size_t( i )] != 0, gls[size_t( i )] != 0, &outs[i] );
+	if ( wait ) {
+		if ( vk.vkWaitForFences( D.dev, 1, &G.fence, VK_TRUE, UINT64_MAX ) != VK_SUCCESS ) {
+			for ( int j = 0; j < n; j++ )
+				outs[j].why = "a DDGI group submit failed (lost device or out of memory)";
+			return false;
+		}
+		for ( int i = 0; i < n; i++ )
+			ddgiHarvest( D, ss[i], &outs[i] );
+	} else {
+		for ( int i = 0; i < n; i++ )
+			outs[i].pending = true;
+	}
+	const double wall = std::chrono::duration<double, std::milli>( std::chrono::steady_clock::now() - t0 ).count();
+	for ( int i = 0; i < n; i++ ) {
+		outs[i].msWall = wall;
+		outs[i].ok = true;
+	}
+	return true;
+}
+
+bool ddgiGpuSameScene( const DdgiGpuSession * a, const DdgiGpuSession * b )
+{
+	return a && b && a->sc && a->sc == b->sc;
+}
+
+long long ddgiGpuBlasBuilds() { return g_ddgiBlasBuilds.load(); }
+long long ddgiGpuSubmits() { return g_ddgiSubmits.load(); }
 
 bool ddgiGpuStep( DdgiGpuSession * s, const float * rotations, int k, uint32_t frame0, bool copyRays, DdgiGpuStepOut * out )
 {
@@ -934,7 +1193,7 @@ bool ddgiGpuFinish( DdgiGpuSession * s, DdgiGpuStepOut * out )
 	Dev & D = dev();
 	std::lock_guard<std::mutex> lk( D.m );
 	if ( s->inFlight ) {
-		if ( vk.vkWaitForFences( D.dev, 1, &s->fence, VK_TRUE, UINT64_MAX ) != VK_SUCCESS ) {
+		if ( vk.vkWaitForFences( D.dev, 1, &s->inFence, VK_TRUE, UINT64_MAX ) != VK_SUCCESS ) {
 			out->why = "a DDGI submit failed (lost device or out of memory)";
 			return false;
 		}

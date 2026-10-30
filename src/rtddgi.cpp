@@ -22,7 +22,9 @@
 #include <cmath>
 #include <cstdio>
 #include <cstring>
+#include <chrono>
 #include <functional>
+#include <memory>
 #include <thread>
 
 using namespace rtddgi;
@@ -477,7 +479,7 @@ void RtDdgiVolume::position( int p, float out[3] ) const
 
 //! the volume's grid and every packed input both runs read (rtddgiRun and RtDdgiLive::open)
 static bool packVolume( const ProbeSoup & soup, const WwCellLighting & lighting, const ProbeSkyLight & sky, const RtDdgiSpec & spec,
-	RtDdgiVolume * out, Packed & S )
+	RtDdgiVolume * out, Packed & S, bool buildBvh = true )   // RTXCASCADE2: buildBvh false = S.bvh.t filled, its tree not built
 {
 	*out = RtDdgiVolume();
 	QElapsedTimer tm;
@@ -572,7 +574,8 @@ static bool packVolume( const ProbeSoup & soup, const WwCellLighting & lighting,
 		S.bvh.t[i + 1] = float( double( soup.tris[i + 1] ) - S.O[1] );
 		S.bvh.t[i + 2] = soup.tris[i + 2];
 	}
-	S.bvh.build();
+	if ( buildBvh )
+		S.bvh.build();
 	S.bvh.mask = &soup.amask;
 	const size_t nTri = soup.tris.size() / 9;
 	S.triAttr.assign( nTri * kAttr, 0.0f );
@@ -726,6 +729,122 @@ struct RtDdgiLive::Impl
 	double O[2] = { 0, 0 };   // M3: the soup's local frame (packVolume's), for the params' first probe after a scroll
 	int scrolls = 0, scrollCells = 0, scrollFresh = 0;
 	qint64 freshTotal = 0;
+	// RTXCASCADE2: the scene (BLAS) this volume traces: built here or taken from another volume (sceneFrom)
+	quint64 sceneKey = 0;
+	bool builtBlas = false;
+	QString sceneWhy;
+	int skipped = 0;
+
+	//! RTXCASCADE2: one step's device order, made from an RtDdgiStep before the submit (step and stepGroup)
+	struct Prep
+	{
+		bakert::DdgiGpuStepIn in;
+		std::vector<float> rot;
+		bool scroll = false;
+		float origin[3] = { 0, 0, 0 };
+		int fresh = 0, k = 0, cells[3] = { 0, 0, 0 };
+	};
+	void prepare( const RtDdgiStep & order, Prep & P )
+	{
+		busy = false;
+		submitted = false;
+		P.k = std::max( 0, std::min( order.k, 16 ) );
+		P.rot.assign( size_t( std::max( P.k, 1 ) ) * 9, 0.0f );
+		const bool noRot = hasRed( spec.red, "norot" );
+		for ( int f = 0; f < P.k; f++ ) {
+			const M3 r = noRot ? M3() : updateRotation( spec.seed, quint32( updates + f ) );
+			std::memcpy( &P.rot[size_t( f ) * 9], r.m, 36 );
+		}
+		RtDdgiVolume & v = vol;
+		bakert::DdgiGpuStepIn & in = P.in;
+		in.rotations = P.rot.data();
+		in.k = P.k;
+		in.frame0 = quint32( updates );
+		in.host = order.host;
+		in.wait = order.wait;
+		in.beforeSubmit = order.beforeSubmit;
+		for ( int c = 0; c < 3; c++ ) {
+			P.cells[c] = order.scroll[c];
+			P.origin[c] = v.origin[c];
+		}
+		P.scroll = order.scroll[0] != 0 || order.scroll[1] != 0 || order.scroll[2] != 0 || order.resetAll;
+		if ( P.scroll ) {   // rtddgimath.h: the kept probes as copy runs; the new first probe s steps on (world, then local)
+			in.scroll = true;
+			if ( order.resetAll )   // RTXCASCADE2: a camera jump keeps no plane
+				P.fresh = v.probeCount();
+			else
+				P.fresh = scrollRuns( v.dims, order.scroll, [&in]( int src, int dst, int n ) {
+					in.runs.push_back( quint32( src ) );
+					in.runs.push_back( quint32( dst ) );
+					in.runs.push_back( quint32( n ) );
+				} );
+			for ( int c = 0; c < 3; c++ ) {
+				P.origin[c] = float( double( v.origin[c] ) + double( order.scroll[c] ) * double( v.step[c] ) );
+				in.origin[c] = float( double( P.origin[c] ) - ( c < 2 ? O[c] : 0.0 ) );
+			}
+		}
+		// RTXCASCADE2: the covered-probe skip against the finer cascade, on this volume's grid after the scroll; an order
+		// without it clears a range an earlier step set (M3's volume never had one: nothing is written for it)
+		in.skipSet = true;
+		skipped = 0;
+		if ( order.skip ) {
+			double oC[3], sC[3];
+			for ( int c = 0; c < 3; c++ ) {
+				oC[c] = double( P.origin[c] );
+				sC[c] = double( v.step[c] );
+			}
+			int lo[3], hi[3];
+			if ( cascadeCovered( oC, sC, v.dims, order.fineOrigin, order.fineStep, order.fineDims, lo, hi ) ) {
+				for ( int c = 0; c < 3; c++ ) {
+					in.skipLo[c] = lo[c];
+					in.skipHi[c] = hi[c];
+				}
+				in.skipLo[3] = 1;
+				skipped = ( hi[0] - lo[0] + 1 ) * ( hi[1] - lo[1] + 1 ) * ( hi[2] - lo[2] + 1 );
+			}
+		}
+	}
+	//! after the submit went in (so: a finished submit's report, maybe this one's)
+	void after( const RtDdgiStep & order, const Prep & P, const bakert::DdgiGpuStepOut & so )
+	{
+		submitted = so.submitted;
+		if ( !order.wait )
+			take( so );   // an earlier submit's report: before this scroll moves the CPU's copy
+		RtDdgiVolume & v = vol;
+		if ( P.scroll ) {
+			// the CPU's copy of the states follows at once (kept probes moved, the rest kFresh until the device's
+			// classification comes back with a finished step's probesNew)
+			const int nP = v.probeCount();
+			std::vector<int> st( size_t( nP ), kFresh );
+			std::vector<float> off( size_t( nP ) * 3, 0.0f );
+			const std::vector<quint32> & runs = P.in.runs;
+			for ( size_t i = 0; i + 2 < runs.size(); i += 3 )
+				for ( quint32 j = 0; j < runs[i + 2]; j++ ) {
+					const size_t a = size_t( runs[i] + j ), b = size_t( runs[i + 1] + j );
+					st[b] = v.state[a];
+					for ( int c = 0; c < 3; c++ )
+						off[b * 3 + size_t( c )] = v.offset[a * 3 + size_t( c )];
+				}
+			v.state.swap( st );
+			v.offset.swap( off );
+			for ( int c = 0; c < 3; c++ )
+				v.origin[c] = P.origin[c];
+			count();
+			scrolls++;
+			scrollCells = std::abs( P.cells[0] ) + std::abs( P.cells[1] ) + std::abs( P.cells[2] );
+			scrollFresh = P.fresh;
+			freshTotal += P.fresh;
+			sinceScroll = 0;
+		}
+		if ( order.wait )
+			take( so );   // this step's own report (a scroll's states replace the CPU's guess)
+		updates += P.k;
+		sinceScroll += P.k;
+		wall = so.msWall;
+		rays = so.rays;
+		v.rays += so.rays;
+		v.msFrames += so.msWall;
+	}
 
 	//! the census of the volume's states (and moved offsets) from vol.state / vol.offset
 	void count()
@@ -780,19 +899,53 @@ RtDdgiLive::~RtDdgiLive()
 }
 
 bool RtDdgiLive::open( const ProbeSoup & soup, const WwCellLighting & lighting, const ProbeSkyLight & sky, const RtDdgiSpec & specIn,
-	bool share )
+	bool share, const RtDdgiLive * sceneFrom )
 {
 	close();
 	d->spec = specIn;
 	d->spec.frames = 0;   // the packed rotations: none, step() makes each update's own
 	d->spec.gpu = 1;
 	d->why.clear();
+	d->sceneWhy.clear();
+	d->builtBlas = false;
+	d->skipped = 0;
+	const bool want = sceneFrom && sceneFrom->d->s;   // RTXCASCADE2: the BLAS of an open volume on the same soup
 	Packed S;
-	if ( !packVolume( soup, lighting, sky, d->spec, &d->vol, S ) ) {
+	if ( !packVolume( soup, lighting, sky, d->spec, &d->vol, S, !want ) ) {
 		d->why = d->vol.error;
 		return false;
 	}
+	/* RTXCASCADE2: what the device's scene holds (the soup in its local frame, the triangle attributes, the lights): a
+	 * volume may trace another's BLAS only when this key matches (else it builds its own; sceneWhy says why) */
+	{
+		quint64 h = 0xCBF29CE484222325ULL;
+		auto eat = [&h]( const void * p, size_t n ) {
+			const unsigned char * b = static_cast<const unsigned char *>( p );
+			for ( size_t i = 0; i < n; i++ )
+				h = ( h ^ b[i] ) * 0x100000001B3ULL;
+		};
+		eat( S.O, sizeof S.O );
+		const size_t nt = S.bvh.t.size(), na = S.triAttr.size(), nl = S.lights.size();
+		eat( &nt, sizeof nt );
+		eat( &na, sizeof na );
+		eat( &nl, sizeof nl );
+		for ( size_t i = 0; i < nt; i += 4099 )   // a sample of the soup and its attributes (the cell's key already holds them whole)
+			eat( &S.bvh.t[i], 4 );
+		if ( nt >= 9 )
+			eat( &S.bvh.t[nt - 9], 36 );
+		for ( size_t i = 0; i < na; i += 4093 )
+			eat( &S.triAttr[i], 4 );
+		if ( nl )
+			eat( S.lights.data(), nl * 4 );
+		d->sceneKey = h;
+	}
+	const bool take = want && sceneFrom->d->sceneKey == d->sceneKey;
+	if ( want && !take ) {
+		d->sceneWhy = QStringLiteral( "the soup, its attributes or the lights differ from the other volume's: a BLAS of its own" );
+		S.bvh.build();
+	}
 	bakert::DdgiGpuJob job;
+	job.sceneFrom = take ? sceneFrom->d->s : nullptr;
 	job.bvh = &S.bvh;
 	job.params = S.prm;
 	job.triAttr = std::move( S.triAttr );
@@ -810,6 +963,7 @@ bool RtDdgiLive::open( const ProbeSoup & soup, const WwCellLighting & lighting, 
 		d->why = QStringLiteral( "the GPU did not run: %1" ).arg( QString::fromStdString( g.why ) );
 		return false;
 	}
+	d->builtBlas = g.blasBuilt;
 	RtDdgiVolume & v = d->vol;
 	const int nP = v.probeCount();
 	v.path = QStringLiteral( "gpu (%1)" ).arg( QString::fromStdString( g.device ) );
@@ -849,80 +1003,57 @@ bool RtDdgiLive::step( const RtDdgiStep & order )
 		d->why = QStringLiteral( "not open" );
 		return false;
 	}
-	const int k = std::max( 0, std::min( order.k, 16 ) );
-	std::vector<float> rot( size_t( std::max( k, 1 ) ) * 9 );
-	const bool noRot = hasRed( d->spec.red, "norot" );
-	for ( int f = 0; f < k; f++ ) {
-		const M3 r = noRot ? M3() : updateRotation( d->spec.seed, quint32( d->updates + f ) );
-		std::memcpy( &rot[size_t( f ) * 9], r.m, 36 );
-	}
-	RtDdgiVolume & v = d->vol;
-	bakert::DdgiGpuStepIn in;
-	in.rotations = rot.data();
-	in.k = k;
-	in.frame0 = quint32( d->updates );
-	in.host = order.host;
-	in.wait = order.wait;
-	in.beforeSubmit = order.beforeSubmit;
-	const bool scroll = order.scroll[0] != 0 || order.scroll[1] != 0 || order.scroll[2] != 0;
-	float origin[3] = { v.origin[0], v.origin[1], v.origin[2] };
-	int fresh = 0;
-	if ( scroll ) {   // rtddgimath.h: the kept probes as copy runs; the new first probe s steps on (world, then local)
-		in.scroll = true;
-		fresh = scrollRuns( v.dims, order.scroll, [&in]( int src, int dst, int n ) {
-			in.runs.push_back( quint32( src ) );
-			in.runs.push_back( quint32( dst ) );
-			in.runs.push_back( quint32( n ) );
-		} );
-		for ( int c = 0; c < 3; c++ ) {
-			origin[c] = float( double( v.origin[c] ) + double( order.scroll[c] ) * double( v.step[c] ) );
-			in.origin[c] = float( double( origin[c] ) - ( c < 2 ? d->O[c] : 0.0 ) );
-		}
-	}
+	Impl::Prep P;
+	d->prepare( order, P );
 	bakert::DdgiGpuStepOut so;
-	if ( !bakert::ddgiGpuStepEx( d->s, in, &so ) ) {
+	if ( !bakert::ddgiGpuStepEx( d->s, P.in, &so ) ) {
 		d->busy = so.busy;
 		d->why = QString::fromStdString( so.why );
 		d->take( so );   // a finished earlier submit may have been collected before the refusal
 		return false;
 	}
-	d->submitted = so.submitted;
-	if ( !order.wait )
-		d->take( so );   // an earlier submit's report: before this scroll moves the CPU's copy
-	if ( scroll ) {
-		// the CPU's copy of the states follows at once (kept probes moved, the rest kFresh until the device's
-		// classification comes back with a finished step's probesNew)
-		const int nP = v.probeCount();
-		std::vector<int> st( size_t( nP ), kFresh );
-		std::vector<float> off( size_t( nP ) * 3, 0.0f );
-		for ( size_t i = 0; i + 2 < in.runs.size(); i += 3 )
-			for ( quint32 j = 0; j < in.runs[i + 2]; j++ ) {
-				const size_t a = size_t( in.runs[i] + j ), b = size_t( in.runs[i + 1] + j );
-				st[b] = v.state[a];
-				for ( int c = 0; c < 3; c++ )
-					off[b * 3 + size_t( c )] = v.offset[a * 3 + size_t( c )];
-			}
-		v.state.swap( st );
-		v.offset.swap( off );
-		for ( int c = 0; c < 3; c++ )
-			v.origin[c] = origin[c];
-		d->count();
-		d->scrolls++;
-		d->scrollCells = std::abs( order.scroll[0] ) + std::abs( order.scroll[1] ) + std::abs( order.scroll[2] );
-		d->scrollFresh = fresh;
-		d->freshTotal += fresh;
-		d->sinceScroll = 0;
-	}
-	if ( order.wait )
-		d->take( so );   // this step's own report (a scroll's states replace the CPU's guess)
-	d->updates += k;
-	d->sinceScroll += k;
-	d->wall = so.msWall;
-	d->rays = so.rays;
-	v.rays += so.rays;
-	v.msFrames += so.msWall;
+	d->after( order, P, so );
 	return true;
 }
+
+bool RtDdgiLive::stepGroup( RtDdgiLive * const * lives, const RtDdgiStep * orders, int n )
+{
+	if ( n <= 0 )
+		return false;
+	std::vector<Impl::Prep> P( static_cast<size_t>( n ) );   // sized once: each in.rotations points into its own P.rot
+	std::vector<bakert::DdgiGpuSession *> ss( size_t( n ), nullptr );
+	std::vector<bakert::DdgiGpuStepIn> ins( static_cast<size_t>( n ) );
+	std::vector<bakert::DdgiGpuStepOut> outs( static_cast<size_t>( n ) );
+	for ( int i = 0; i < n; i++ ) {
+		Impl * d = lives[i]->d;
+		d->busy = false;
+		d->submitted = false;
+		if ( !d->s || !bakert::ddgiGpuSameScene( d->s, lives[0]->d->s ) ) {
+			d->why = d->s ? QStringLiteral( "not on one BLAS with the group" ) : QStringLiteral( "not open" );
+			return false;
+		}
+		d->prepare( orders[i], P[size_t( i )] );
+		ss[size_t( i )] = d->s;
+		ins[size_t( i )] = P[size_t( i )].in;
+	}
+	if ( !bakert::ddgiGpuStepGroup( ss.data(), ins.data(), outs.data(), n ) ) {
+		for ( int i = 0; i < n; i++ ) {
+			Impl * d = lives[i]->d;
+			d->busy = outs[size_t( i )].busy;
+			d->why = QString::fromStdString( outs[size_t( i )].why );
+			d->take( outs[size_t( i )] );
+		}
+		return false;
+	}
+	for ( int i = 0; i < n; i++ )
+		lives[i]->d->after( orders[i], P[size_t( i )], outs[size_t( i )] );
+	return true;
+}
+
+bool RtDdgiLive::sameScene( const RtDdgiLive & other ) const { return bakert::ddgiGpuSameScene( d->s, other.d->s ); }
+bool RtDdgiLive::builtBlas() const { return d->builtBlas; }
+QString RtDdgiLive::sceneWhy() const { return d->sceneWhy; }
+int RtDdgiLive::lastSkipped() const { return d->skipped; }
 
 bool RtDdgiLive::finish()
 {
@@ -979,6 +1110,98 @@ void RtDdgiLive::snapshot( RtDdgiVolume * out ) const
 	std::memcpy( out->irr.data(), ir, out->irr.size() * 4 );
 	std::memcpy( out->dist.data(), di, out->dist.size() * 4 );
 	std::memcpy( out->age.data(), ag, out->age.size() * 4 );
+}
+
+// ------------------------------------------------------------------ RTXCASCADE2: the cascades offline (the CLI's gate)
+bool rtddgiRunCascades( const ProbeSoup & soup, const WwCellLighting & lighting, const ProbeSkyLight & sky,
+	const std::vector<RtDdgiSpec> & specs, bool oneBlas, bool oneSubmit, bool cskip, std::vector<RtDdgiVolume> * vols,
+	RtDdgiCascadeRun * census )
+{
+	const int n = int( specs.size() );
+	vols->assign( size_t( std::max( n, 1 ) ), RtDdgiVolume() );
+	*census = RtDdgiCascadeRun();
+	if ( n <= 0 ) {
+		( *vols )[0].error = QStringLiteral( "no cascades" );
+		return false;
+	}
+	const long long blas0 = bakert::ddgiGpuBlasBuilds(), sub0 = bakert::ddgiGpuSubmits();
+	std::vector<std::unique_ptr<RtDdgiLive>> L;
+	for ( int c = 0; c < n; c++ ) {
+		L.push_back( std::make_unique<RtDdgiLive>() );
+		if ( !L.back()->open( soup, lighting, sky, specs[size_t( c )], false, oneBlas && c > 0 ? L[0].get() : nullptr ) ) {
+			( *vols )[0].error = QStringLiteral( "cascade %1: %2" ).arg( c ).arg( L.back()->why() );
+			return false;
+		}
+	}
+	census->path = L[0]->volume().path;
+	const int frames = std::max( specs[0].frames, 0 );
+	std::vector<RtDdgiLive *> lives;
+	for ( auto & l : L )
+		lives.push_back( l.get() );
+	for ( int f = 0; f < frames || f == 0; ) {
+		const int k = std::min( 16, frames - f );
+		const bool last = f + k >= frames;
+		std::vector<RtDdgiStep> orders( static_cast<size_t>( n ) );
+		for ( int c = 0; c < n; c++ ) {
+			RtDdgiStep & o = orders[size_t( c )];
+			o.k = std::max( k, 0 );
+			o.host = last;
+			o.wait = true;
+			if ( cskip && c > 0 ) {   // the next finer cascade's grid (the CLI's volumes do not scroll)
+				const RtDdgiVolume & fv = L[size_t( c - 1 )]->volume();
+				o.skip = true;
+				for ( int a = 0; a < 3; a++ ) {
+					o.fineOrigin[a] = double( fv.origin[a] );
+					o.fineStep[a] = double( fv.step[a] );
+					o.fineDims[a] = fv.dims[a];
+				}
+			}
+		}
+		bool ok = false;
+		for ( int tries = 0; tries < 10000; tries++ ) {   // the steps never wait for the device's lock; the CLI does
+			if ( oneSubmit ) {
+				ok = RtDdgiLive::stepGroup( lives.data(), orders.data(), n );
+			} else {
+				ok = true;
+				for ( int c = 0; c < n && ok; c++ )
+					ok = L[size_t( c )]->step( orders[size_t( c )] );
+			}
+			bool busy = false;
+			for ( auto & l : L )
+				busy = busy || l->busy();
+			if ( ok || !busy )
+				break;
+			std::this_thread::sleep_for( std::chrono::milliseconds( 5 ) );
+		}
+		if ( !ok ) {
+			QString why;
+			for ( int c = 0; c < n; c++ )
+				if ( !L[size_t( c )]->why().isEmpty() )
+					why = QStringLiteral( "cascade %1: %2" ).arg( c ).arg( L[size_t( c )]->why() );
+			( *vols )[0].error = why;
+			return false;
+		}
+		if ( frames <= 0 )
+			break;
+		f += k;
+	}
+	census->blasBuilds = bakert::ddgiGpuBlasBuilds() - blas0;
+	census->submits = bakert::ddgiGpuSubmits() - sub0;
+	for ( int c = 0; c < n; c++ ) {
+		RtDdgiVolume & v = ( *vols )[size_t( c )];
+		L[size_t( c )]->snapshot( &v );
+		v.ok = true;
+		v.off = v.asleep = v.vigilant = v.moved = 0;
+		for ( int p = 0; p < v.probes && size_t( p ) < v.state.size(); p++ ) {
+			const int s = v.state[size_t( p )];
+			v.off += s == kOff ? 1 : 0;
+			v.asleep += s == kAsleep ? 1 : 0;
+			v.vigilant += s == kVigilant ? 1 : 0;
+			const float * o = &v.offset[size_t( p ) * 3];
+			v.moved += ( o[0] * o[0] + o[1] * o[1] + o[2] * o[2] ) > 1e-6f ? 1 : 0;
+		}
+	}
+	return true;
 }
 
 quint64 rtddgiLightsKey( const WwCellLighting & lighting )
@@ -1114,6 +1337,8 @@ int rtddgiCli( const QStringList & args )
 {
 	QString soupPath, outDir, rect, lightsFile;
 	RtDdgiSpec spec;
+	int cascades = 1, crays = 0;   // RTXCASCADE2
+	bool perBlas = false, cskip = false;
 	spec.gpu = 0;
 	WwCellLighting L;
 	L.interior = true;
@@ -1134,6 +1359,10 @@ int rtddgiCli( const QStringList & args )
 		else if ( a == QLatin1String( "--max-probes" ) ) { spec.maxProbes = nx.toInt(); i++; }
 		else if ( a == QLatin1String( "--gpu" ) ) { spec.gpu = nx.toInt(); i++; }
 		else if ( a == QLatin1String( "--red" ) ) { spec.red = nx; i++; }
+		else if ( a == QLatin1String( "--cascades" ) ) { cascades = std::clamp( nx.toInt(), 1, rtddgi::kMaxCascades ); i++; }
+		else if ( a == QLatin1String( "--cascade-red" ) ) { perBlas = nx.split( ',' ).contains( QStringLiteral( "perblas" ) ); i++; }
+		else if ( a == QLatin1String( "--cskip" ) ) { cskip = nx.toInt() != 0; i++; }
+		else if ( a == QLatin1String( "--crays" ) ) { crays = nx.toInt(); i++; }
 		else if ( a == QLatin1String( "--lights" ) ) { lightsFile = nx; i++; }
 		else if ( a == QLatin1String( "--one-bounce" ) ) spec.oneBounce = true;
 		else if ( a == QLatin1String( "--no-sky" ) ) spec.noSky = true;
@@ -1210,6 +1439,42 @@ int rtddgiCli( const QStringList & args )
 	if ( !probeSoupRead( soupPath, &soup, &err ) ) {
 		std::fprintf( stderr, "rtddgi: %s\n", qPrintable( err ) );
 		return 1;
+	}
+	if ( cascades > 1 ) {   // RTXCASCADE2: the cascades about the rect's centre, cascade c at spacing x 2^c over a rect 2^c as wide
+		std::vector<RtDdgiSpec> specs;
+		const double cx = 0.5 * ( double( spec.rect[0] ) + double( spec.rect[2] ) ), cy = 0.5 * ( double( spec.rect[1] ) + double( spec.rect[3] ) );
+		const double hx = 0.5 * ( double( spec.rect[2] ) - double( spec.rect[0] ) ), hy = 0.5 * ( double( spec.rect[3] ) - double( spec.rect[1] ) );
+		for ( int c = 0; c < cascades; c++ ) {
+			RtDdgiSpec s = spec;
+			const double k = rtddgi::cascadeScale( c );
+			s.spacing = float( double( spec.spacing ) * k );
+			s.rays = rtddgi::cascadeRays( spec.rays, crays, c );
+			s.rect[0] = float( cx - hx * k );
+			s.rect[1] = float( cy - hy * k );
+			s.rect[2] = float( cx + hx * k );
+			s.rect[3] = float( cy + hy * k );
+			specs.push_back( s );
+		}
+		std::vector<RtDdgiVolume> vols;
+		RtDdgiCascadeRun cr;
+		if ( !rtddgiRunCascades( soup, L, sky, specs, !perBlas, !perBlas, cskip, &vols, &cr ) ) {
+			std::fprintf( stderr, "rtddgi: %s\n", qPrintable( vols.empty() ? QString() : vols[0].error ) );
+			return 1;
+		}
+		std::printf( "rtddgi cascades: %s; %d cascades, BLAS builds %lld, submits %lld (%s)\n", qPrintable( cr.path ), cascades,
+			cr.blasBuilds, cr.submits, perBlas ? "the perblas red: a BLAS and a submit a cascade" : "one BLAS, one submit a chunk of updates" );
+		for ( int c = 0; c < cascades; c++ ) {
+			const RtDdgiVolume & v = vols[size_t( c )];
+			const QString dir = outDir + QStringLiteral( "/cascade%1" ).arg( c );
+			if ( !rtddgiDump( v, specs[size_t( c )], dir, &err ) ) {
+				std::fprintf( stderr, "rtddgi: %s\n", qPrintable( err ) );
+				return 1;
+			}
+			std::printf( "rtddgi cascade %d: spacing %.1f, rays %d, grid %d x %d x %d (%d probes: off %d, asleep %d, vigilant %d, moved %d); "
+				"rays traced %lld\n", c, double( specs[size_t( c )].spacing ), specs[size_t( c )].rays, v.dims[0], v.dims[1], v.dims[2],
+				v.probes, v.off, v.asleep, v.vigilant, v.moved, (long long)v.rays );
+		}
+		return 0;
 	}
 	RtDdgiVolume vol;
 	if ( !rtddgiRun( soup, L, sky, spec, &vol ) ) {

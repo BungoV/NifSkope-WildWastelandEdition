@@ -29,11 +29,21 @@ struct DdgiGpuParams
 	int32_t counts[4] = { 0, 0, 0, 0 };   // rays, lights, soup triangles, opaque triangles (the runner fills z, w)
 	int32_t flags[4] = { 0, 0, 0, 0 };    // oneBounce, skipAsleep, useMask (the runner fills it), red bits
 	float blendp[4] = { 0, 0, 0, 0 };     // hysteresis, sharpness, self-shadow bias B, 0
+	/* RTXCASCADE2: the probes the updates skip (trace mode 0, blend, border): grid indices skipLo..skipHi inclusive per
+	 * axis, skipLo[3] = 1 on (rtddgimath.h cascadeCovered: a coarse cascade's probes a finer one covers whole); 0 off */
+	int32_t skipLo[4] = { 0, 0, 0, 0 };
+	int32_t skipHi[4] = { -1, -1, -1, 0 };
 };
-static_assert( sizeof( DdgiGpuParams ) == 16 * 16, "DdgiGpuParams must match the GLSL block" );
+static_assert( sizeof( DdgiGpuParams ) == 18 * 16, "DdgiGpuParams must match the GLSL block" );
+
+struct DdgiGpuSession;
 
 struct DdgiGpuJob
 {
+	/* RTXCASCADE2: open on this session's scene (its BLAS + TLAS, alpha masks, triangle attributes and lights: the same
+	 * soup and lights in the same local frame; the caller keeps it open until ddgiGpuOpen returns); bvh then unused for
+	 * the device (no BLAS is built) */
+	DdgiGpuSession * sceneFrom = nullptr;
 	const probebvh::Bvh * bvh = nullptr;   // the soup in its local frame, alpha masks set (bakert builds the BLAS from it)
 	DdgiGpuParams params;
 	std::vector<float> triAttr;            // 8 floats a soup triangle: albedo rgb, two-sided, Le rgb, 0
@@ -63,6 +73,7 @@ struct DdgiGpuOut
 	double blasGrow = 0.0;                 // how far bakert grew each BLAS edge (0 = the true triangles; the trace re-tests)
 	long long blasGrowTris = 0;
 	std::string device;
+	bool blasBuilt = false, blasShared = false;   // RTXCASCADE2: this open built a BLAS / took job.sceneFrom's
 };
 
 //! the whole run (build, relocation, classification, frames, read back) on the bake device; false + why when it cannot
@@ -127,9 +138,24 @@ struct DdgiGpuStepIn
 	/* interop: called with the device's lock held, the last submit finished and this one recorded, just before the
 	 * submit; returns true when the caller has signalled glDone (the submit then waits on it before its first write) */
 	std::function<bool()> beforeSubmit;
+	/* RTXCASCADE2: skipSet = the session's skip range becomes skipLo / skipHi (DdgiGpuParams; written to the device only
+	 * when it moved, before the scroll and the updates); false = left as it is (M3's steps never set it) */
+	bool skipSet = false;
+	int32_t skipLo[4] = { 0, 0, 0, 0 };
+	int32_t skipHi[4] = { -1, -1, -1, 0 };
 };
 //! false + busy: the lock is taken or the last submit still runs (nothing recorded, beforeSubmit not called)
 bool ddgiGpuStepEx( DdgiGpuSession * s, const DdgiGpuStepIn & in, DdgiGpuStepOut * out );
+/*! RTXCASCADE2: one submit for n sessions on one scene (job.sceneFrom): each member's step recorded in order into one
+ *  command buffer, one vkQueueSubmit (waits on every glDone a member's beforeSubmit signalled, signals every interop
+ *  member's vkDone). False: not one scene (why), or busy (a member's last submit still runs, or the lock is taken:
+ *  nothing recorded); members harvested before the refusal keep their reports in out[]. */
+bool ddgiGpuStepGroup( DdgiGpuSession * const * s, const DdgiGpuStepIn * in, DdgiGpuStepOut * out, int n );
+//! RTXCASCADE2: the two sessions trace one scene (one BLAS)
+bool ddgiGpuSameScene( const DdgiGpuSession * a, const DdgiGpuSession * b );
+//! RTXCASCADE2: the BLAS builds of DDGI sessions and the DDGI step submits since the process started (the CLI's census)
+long long ddgiGpuBlasBuilds();
+long long ddgiGpuSubmits();
 //! waits for a submit still running and reports it as done (out->done false: there was none)
 bool ddgiGpuFinish( DdgiGpuSession * s, DdgiGpuStepOut * out );
 

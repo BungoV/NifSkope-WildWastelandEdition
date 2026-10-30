@@ -55,6 +55,8 @@ struct CellSpec
 	int updates = 4;          // a frame (budget: M3)
 	int max = 0;              // stop after this many updates since the build or the last scroll (0: never; pictures that must repeat set it)
 	int every = 4;            // RTXCASCADE1: cascade L updates every every^L frames (rtddgimath.h cascadeDue)
+	int crays = 0;            // RTXCASCADE2 cost lever: a coarse cascade's rays (0 = `rays`, RTXCASCADE1's; rtddgimath.h cascadeRays)
+	int cskip = 0;            // RTXCASCADE2 cost lever: 1 = a coarse cascade skips the probes the finer one covers whole (cascadeCovered)
 	QString text;
 };
 
@@ -79,6 +81,8 @@ CellSpec cellSpecNow()
 		else if ( k == QLatin1String( "updates" ) && v >= 1.0 ) s.updates = int( std::min( v, 16.0 ) );
 		else if ( k == QLatin1String( "max" ) && v >= 0.0 ) s.max = int( v );
 		else if ( k == QLatin1String( "cevery" ) && v >= 1.0 ) s.every = int( std::min( v, 64.0 ) );
+		else if ( k == QLatin1String( "crays" ) && v >= 0.0 ) s.crays = int( std::min( v, 256.0 ) );   // RTXCASCADE2
+		else if ( k == QLatin1String( "cskip" ) && v >= 0.0 ) s.cskip = v > 0.5 ? 1 : 0;              // RTXCASCADE2
 	}
 	return s;
 }
@@ -90,6 +94,9 @@ constexpr int kPathRebuild = 2;    // WW_CELL_RTDDGI_RED=rebuild: a camera move 
  * WW_CELL_RTDDGI_RED=nowait drops both: no beforeSubmit (the device then neither waits nor signals: rtddgi_vk.inc), no
  * GL wait; the census's "sync" counts go 0. Live. */
 constexpr int kPathNoWait = 4;
+/* lane RTXCASCADE2: WW_CELL_RTDDGI_RED=perblas, RTXCASCADE1's cascades: each coarse cascade builds its own BLAS from the
+ * same soup and steps in its own submit (the one-BLAS / one-submit red). Live (a set rebuilds the coarse cascades). */
+constexpr int kPathPerCascade = 8;
 
 /*! WW_CELL_RTDDGI_RED, live: [0] the read's red bits (rtddgimath.h kSample*, the shader's cellDdgiRed), [1] the path
  *  reds (kPath*). One list, both parts: "trilinear,readback" sets one of each */
@@ -109,6 +116,7 @@ const int * cellRedParts()
 			if ( t == QLatin1String( "readback" ) ) b.v[1] |= kPathReadback;
 			if ( t == QLatin1String( "rebuild" ) ) b.v[1] |= kPathRebuild;
 			if ( t == QLatin1String( "nowait" ) ) b.v[1] |= kPathNoWait;   // lane RTXFIX1
+			if ( t == QLatin1String( "perblas" ) ) b.v[1] |= kPathPerCascade;   // lane RTXCASCADE2
 		}
 		return b;
 	}() );
@@ -243,6 +251,11 @@ struct Cell
 	int level = 0;
 	QString tag;
 	bool fresh = false;
+	/* RTXCASCADE2: the rows (cell() only): the cascades count and the debug view's cascade; and the frame this volume's
+	 * step was last ordered on with its first probe after that step (the next coarser cascade's skip range reads it) */
+	int guiCascades = 1, guiViewCascade = 0;
+	quint64 orderFrame = 0;
+	double orderOrigin[3] = { 0, 0, 0 };
 };
 
 Cell & cell()
@@ -366,6 +379,9 @@ void loadRows( Cell & c )
 	QSettings s( QStringLiteral( "NifTools" ), rowSettingsApp() );
 	c.guiOn = s.value( QStringLiteral( "WW/CellRtDdgi" ), false ).toBool();
 	c.guiView = std::clamp( s.value( QStringLiteral( "WW/CellRtDdgiView" ), 0 ).toInt(), 0, 2 );
+	// RTXCASCADE2: the cascades row (1 = M3's one volume, the default) and the debug view's cascade (0 = the nearest)
+	c.guiCascades = std::clamp( s.value( QStringLiteral( "WW/CellRtDdgiCascades" ), 1 ).toInt(), 1, rtddgi::kMaxCascades );
+	c.guiViewCascade = std::clamp( s.value( QStringLiteral( "WW/CellRtDdgiViewCascade" ), 0 ).toInt(), 0, rtddgi::kMaxCascades - 1 );
 }
 
 void say( const QString & line )
@@ -667,8 +683,10 @@ bool upload( Cell & c, Renderer * r, const RtDdgiLive & L )
 	return true;
 }
 
+/* RTXCASCADE2: `from` = cascade 0's built volume for a coarse cascade (it opens on that BLAS: one BLAS for every cascade;
+ * the worker holds it until the open returns, so a drop of cascade 0 meanwhile cannot free the scene under it) */
 void startBuild( Cell & c, const ProbeSoup & soup, const WwCellLighting & lights, const ProbeSkyLight & sky, const WwCellGi * G,
-	const float eye[3], const CellSpec & sp, int paths )
+	const float eye[3], const CellSpec & sp, int paths, std::shared_ptr<Build> from = nullptr )
 {
 	auto b = std::make_shared<Build>();
 	b->spec = sp;
@@ -696,10 +714,10 @@ void startBuild( Cell & c, const ProbeSoup & soup, const WwCellLighting & lights
 	auto soupCopy = std::make_shared<ProbeSoup>( soup );   // the kept soup may be replaced while the worker reads
 	b->msCopy = double( t.nsecsElapsed() ) / 1e6;
 	c.pending = b;
-	std::thread( [b, soupCopy, lights, sky, spec, share]() {
+	std::thread( [b, soupCopy, lights, sky, spec, share, from]() {
 		QElapsedTimer tm;
 		tm.start();
-		const bool ok = b->live.open( *soupCopy, lights, sky, spec, share );
+		const bool ok = b->live.open( *soupCopy, lights, sky, spec, share, from ? &from->live : nullptr );
 		std::lock_guard<std::mutex> lk( b->m );
 		b->ok = ok;
 		b->why = b->live.why();
@@ -716,6 +734,10 @@ void censusBuilt( const Cell & c, const Build & b )
 	const RtDdgiSpec & s = b.live.spec();
 	const int nP = v.probeCount();
 	const bool grown = std::fabs( v.step[0] - s.spacing ) > 1e-3f;
+	// RTXCASCADE2: whose BLAS a coarse cascade traces (cascade 0's: one BLAS for all; its own: the perblas red, or why)
+	const QString blas = c.level == 0 ? QString() : b.live.builtBlas()
+		? QStringLiteral( "; BLAS: its own%1" ).arg( b.live.sceneWhy().isEmpty() ? QString() : QStringLiteral( " (%1)" ).arg( b.live.sceneWhy() ) )
+		: QStringLiteral( "; BLAS: cascade 0's (one BLAS)" );
 	say( c.tag + QStringLiteral( "built %1 in %2 ms (soup copy %3 ms); grid %4 x %5 x %6, spacing %7 x %8 x %9%10; box %11; first probe %12 %13 "
 		"%14; %15; relocate+classify %16 ms; BLAS grown %17 u; rays %18 a probe, %19 updates a frame%20; atlas bytes %21 (irr %22, "
 		"dist %23, probes %24); lights %25; sky %26; %27; %28" )
@@ -730,7 +752,7 @@ void censusBuilt( const Cell & c, const Build & b )
 		.arg( c.interop ? QStringLiteral( "interop (GL reads the device's atlas in place)" )
 			: QStringLiteral( "readback (%1)" ).arg( c.interopWhy ) )
 		.arg( ( b.paths & kPathRebuild ) ? QStringLiteral( "a camera move rebuilds (the rebuild red)" )
-			: QStringLiteral( "scrolls with the camera by whole cells" ) ) );
+			: QStringLiteral( "scrolls with the camera by whole cells" ) ) + blas );
 }
 
 void censusSet( const Cell & c, const RtDdgiLive & L, int k, const QString & tail )
@@ -891,9 +913,164 @@ void rtddgiCellSetView( int mode )
 	rowWrite( QStringLiteral( "WW/CellRtDdgiView" ), c.guiView );
 }
 
+/* RTXCASCADE2: one volume's ordered step this frame. Run at once (runOne: M3's one volume, the perblas red, the stop's copy
+ * steps), or collected and submitted with the other cascades' in ONE submit (groupStep), then finished alike (stepDone). */
+struct Deferred
+{
+	Cell * c = nullptr;
+	RtDdgiStep o;
+	int k = 0, max = 0;
+	bool atMax = false, moved = false;
+	int cells[3] = { 0, 0, 0 };
+	float eye[3] = { 0, 0, 0 };
+};
+static quint64 s_cellFrame = 0;   // RTXCASCADE2: rtddgiCellFrame's count (the skip range reads the finer cascade's order of this frame)
+static bool s_jump = false;       // RTXCASCADE2: cascade 0 jumped this frame (rtddgimath.h cascadeJump)
+
+//! RTXCASCADE2: the cascade the debug views draw (the row's pick, within the cascades there are)
+static int viewLevel()
+{
+	return std::max( 0, std::min( rtddgiCellViewCascade(), rtddgiCellCascades() - 1 ) );
+}
+
+/* with interop the submit is ordered against GL both ways (GL signals glDone before it, so the device writes only after
+ * GL's reads so far; GL waits on vkDone after it, before any read of this frame). True = this step orders itself */
+template <class F>
+static bool stepGlBefore( Cell & c, RtDdgiStep & o, F * fn )
+{
+	GlShare & g = glShare();
+	const bool gl = c.interop && g.ok && !( cellRedPaths() & kPathNoWait );   // lane RTXFIX1: the red drops the order
+	if ( gl ) {
+		Cell * cp = &c;
+		GlShare * gp = &g;
+		o.beforeSubmit = [cp, gp, fn]() {
+			if ( !cp->glRead )
+				return false;
+			gp->signalSem( cp->semGl, 1, &cp->buf, 0, nullptr, nullptr );
+			cp->glRead = false;
+			cp->syncSignals++;
+			fn->glFlush();   // the signal reaches the GPU before the device's submit waits on it
+			return true;
+		};
+	}
+	return gl;
+}
+
+static void stepGlAfter( Cell & c, const RtDdgiLive & L, bool ok, bool gl )
+{
+	GlShare & g = glShare();
+	if ( ok && gl && L.submitted() ) {   // every such submit signalled vkDone: GL waits on it exactly once
+		QElapsedTimer t;
+		t.start();
+		g.waitSem( c.semVk, 1, &c.buf, 0, nullptr, nullptr );
+		c.glWaitMs = double( t.nsecsElapsed() ) / 1e6;
+		c.glRead = true;
+		c.syncWaits++;
+		c.uploaded = true;
+		c.fresh = true;
+	} else if ( ok && c.interop && !gl && L.submitted() ) {
+		c.uploaded = true;   // the nowait red: GL reads the device's atlas with no order at all
+		c.fresh = true;
+	}
+}
+
+//! the rest of a frame's step once it ran (or was refused): the upload, the census, the stop and the dump (M3's tail)
+static void stepDone( Renderer * r, Deferred & j, bool ok )
+{
+	Cell & c = *j.c;
+	if ( !c.live )
+		return;
+	RtDdgiLive & L = c.live->live;
+	if ( !ok ) {
+		if ( L.busy() ) {
+			c.busy++;
+			return;
+		}
+		refuse( c, QStringLiteral( "an update failed: %1" ).arg( L.why() ) );
+		dropLive( c, r );   // the key stays: no rebuild until an input moves
+		return;
+	}
+	c.sets++;
+	if ( !c.interop ) {
+		if ( j.moved )
+			c.probesPacked = false;   // the states moved with the scroll (and came back with it: the step waited)
+		if ( !upload( c, r, L ) ) {
+			refuse( c, QStringLiteral( "no tiles came back" ) );
+			return;
+		}
+		c.fresh = true;
+	}
+	if ( j.moved && ( L.scrolls() <= kScrollEcho || L.scrolls() % 64 == 0 ) ) {
+		const RtDdgiVolume & v = L.volume();
+		say( c.tag + QStringLiteral( "scroll %1: scrolled %2 cells (%3 %4 %5), reset %6 probes (%7 in all); first probe %8 %9 %10; camera %11 %12 %13%14" )
+			.arg( L.scrolls() ).arg( L.lastScrollCells() ).arg( j.cells[0] ).arg( j.cells[1] ).arg( j.cells[2] ).arg( L.lastScrollFresh() )
+			.arg( L.freshTotal() ).arg( double( v.origin[0] ), 0, 'f', 0 ).arg( double( v.origin[1] ), 0, 'f', 0 )
+			.arg( double( v.origin[2] ), 0, 'f', 0 ).arg( double( j.eye[0] ), 0, 'f', 0 ).arg( double( j.eye[1] ), 0, 'f', 0 )
+			.arg( double( j.eye[2] ), 0, 'f', 0 )
+			.arg( j.o.resetAll ? QStringLiteral( " (a camera jump: every plane reset)" ) : QString() ) );   // RTXCASCADE2
+	}
+	const bool pow2 = ( c.sets & ( c.sets - 1 ) ) == 0;
+	if ( pow2 || j.atMax || c.sets % 256 == 0 ) {
+		QString tail = j.atMax ? QStringLiteral( "; stopped at the spec's max (%1 updates since the build or the last scroll); %2" )
+			.arg( j.max ).arg( cameraWords( L.volume(), j.eye ) ) : QString();
+		if ( L.lastSkipped() > 0 )   // RTXCASCADE2: the covered-probe skip (WW_CELL_RTDDGI_SPEC cskip=1)
+			tail += QStringLiteral( "; skips %1 probes the finer cascade covers" ).arg( L.lastSkipped() );
+		censusSet( c, L, j.k, tail );
+	}
+	if ( j.atMax ) {
+		c.stopped = true;
+		dumpLive( c, L );
+	} else if ( j.max <= 0 && c.sets == 64 ) {
+		dumpLive( c, L );
+	}
+}
+
+static void runOne( Renderer * r, Deferred & j )
+{
+	Cell & c = *j.c;
+	RtDdgiLive & L = c.live->live;
+	const bool gl = stepGlBefore( c, j.o, r->fn );
+	const bool ok = L.step( j.o );
+	stepGlAfter( c, L, ok, gl );
+	stepDone( r, j, ok );
+}
+
+/* RTXCASCADE2: every cascade due this frame in one submit (RtDdgiLive::stepGroup: one command buffer, densest first);
+ * volumes not on one BLAS (a coarse one that could not take cascade 0's) step one by one as before */
+static void groupStep( Renderer * r, std::vector<Deferred> & J )
+{
+	const size_t n = J.size();
+	if ( n == 0 )
+		return;
+	bool one = n > 1;
+	for ( size_t i = 1; i < n && one; i++ )
+		one = J[i].c->live->live.sameScene( J[0].c->live->live );
+	if ( !one ) {
+		for ( Deferred & j : J )
+			runOne( r, j );
+		J.clear();
+		return;
+	}
+	std::vector<RtDdgiLive *> lives( n );
+	std::vector<RtDdgiStep> orders( n );
+	std::vector<char> gls( n, 0 );
+	for ( size_t i = 0; i < n; i++ ) {
+		gls[i] = stepGlBefore( *J[i].c, J[i].o, r->fn ) ? 1 : 0;
+		lives[i] = &J[i].c->live->live;
+		orders[i] = J[i].o;
+	}
+	const bool ok = RtDdgiLive::stepGroup( lives.data(), orders.data(), int( n ) );
+	for ( size_t i = 0; i < n; i++ ) {
+		stepGlAfter( *J[i].c, *lives[i], ok, gls[i] != 0 );
+		stepDone( r, J[i], ok );
+	}
+	J.clear();
+}
+
 /*! one volume's frame (M3's rtddgiCellFrame body): cascade 0 = cell() with the spec of the key and due every frame;
  *  RTXCASCADE1: a coarse cascade with its own spec (spIn) steps only on its due frames (a build is harvested on any) */
-static void volumeFrame( Scene * scene, Cell & c, const CellSpec * spIn, bool due )
+static void volumeFrame( Scene * scene, Cell & c, const CellSpec * spIn, bool due, bool resetAll = false,
+	std::vector<Deferred> * defer = nullptr )
 {
 	if ( !scene || !scene->nifModel || !scene->renderer )
 		return;
@@ -958,6 +1135,9 @@ static void volumeFrame( Scene * scene, Cell & c, const CellSpec * spIn, bool du
 	bool moved = false;
 	if ( due && key == c.key && c.nif == nif && c.live )
 		moved = scrollFor( *c.live, c.live->live.volume(), eye, cells );
+	// RTXCASCADE2: a coarse cascade on a camera-jump frame resets every plane (a scroll that keeps none), moved or not
+	if ( resetAll && due && key == c.key && c.nif == nif && c.live && !( c.live->paths & kPathRebuild ) )
+		moved = true;
 	if ( moved && ( c.live->paths & kPathRebuild ) ) {   // the red: M2's volume built again round the camera
 		rebuildWhy = QStringLiteral( "the camera moved %1 %2 %3 cells (the rebuild red)" ).arg( cells[0] ).arg( cells[1] ).arg( cells[2] );
 		c.key = 0;
@@ -969,7 +1149,8 @@ static void volumeFrame( Scene * scene, Cell & c, const CellSpec * spIn, bool du
 		c.key = key;
 		c.nif = nif;
 		c.refused.clear();
-		startBuild( c, *soup, lights, sky, G, eye, sp, paths );
+		startBuild( c, *soup, lights, sky, G, eye, sp, paths,
+			c.level > 0 && !( paths & kPathPerCascade ) ? cell().live : nullptr );   // RTXCASCADE2: one BLAS
 		say( c.tag + QStringLiteral( "%1 (%2 triangles)" ).arg( had ? QStringLiteral( "rebuilding: " ) + rebuildWhy : QStringLiteral( "building" ) )
 			.arg( qint64( nTris / 9 ) ) );
 	}
@@ -996,45 +1177,13 @@ static void volumeFrame( Scene * scene, Cell & c, const CellSpec * spIn, bool du
 			}
 		}
 	}
+	if ( c.level == 0 && moved && c.live )   // RTXCASCADE2: every plane of cascade 0 reset = the camera jumped
+		s_jump = rtddgi::cascadeJump( cells, c.live->live.volume().dims );
 	if ( !c.live || !due )
 		return;
 	RtDdgiLive & L = c.live->live;
-	const int view = c.level == 0 ? rtddgiCellView() : 0;   // the debug views draw cascade 0
+	const int view = c.level == viewLevel() ? rtddgiCellView() : 0;   // RTXCASCADE2: the debug views' cascade (the row)
 	const bool wantDump = !c.dumped && !wwEnvStr( "WW_CELL_RTDDGI_DUMP" ).trimmed().isEmpty();
-	GlShare & g = glShare();
-	auto fn = r->fn;
-	/* one step: with interop the submit is ordered against GL both ways (GL signals glDone before it, so the device
-	 * writes only after GL's reads so far; GL waits on vkDone after it, before any read of this frame) */
-	auto runStep = [&c, &L, &g, fn]( RtDdgiStep & o ) {
-		const bool gl = c.interop && g.ok && !( cellRedPaths() & kPathNoWait );   // lane RTXFIX1: the red drops the order
-		if ( gl ) {
-			Cell * cp = &c;
-			o.beforeSubmit = [cp, &g, fn]() {
-				if ( !cp->glRead )
-					return false;
-				g.signalSem( cp->semGl, 1, &cp->buf, 0, nullptr, nullptr );
-				cp->glRead = false;
-				cp->syncSignals++;
-				fn->glFlush();   // the signal reaches the GPU before the device's submit waits on it
-				return true;
-			};
-		}
-		const bool ok = L.step( o );
-		if ( ok && gl && L.submitted() ) {   // every such submit signalled vkDone: GL waits on it exactly once
-			QElapsedTimer t;
-			t.start();
-			g.waitSem( c.semVk, 1, &c.buf, 0, nullptr, nullptr );
-			c.glWaitMs = double( t.nsecsElapsed() ) / 1e6;
-			c.glRead = true;
-			c.syncWaits++;
-			c.uploaded = true;
-			c.fresh = true;
-		} else if ( ok && c.interop && !gl && L.submitted() ) {
-			c.uploaded = true;   // the nowait red: GL reads the device's atlas with no order at all
-			c.fresh = true;
-		}
-		return ok;
-	};
 	if ( moved )
 		c.stopped = false;   // a scroll re-arms the spec's max: the new planes converge too
 	if ( c.stopped ) {
@@ -1044,7 +1193,8 @@ static void volumeFrame( Scene * scene, Cell & c, const CellSpec * spIn, bool du
 		if ( ( view == 2 && viewOverlay() && !L.irr() ) || ( wantDump && !L.irr() ) ) {   // lane RTXFIX1: the in-frame view reads the atlas
 			RtDdgiStep o;
 			o.k = 0;
-			runStep( o );
+			const bool gl = stepGlBefore( c, o, r->fn );
+			stepGlAfter( c, L, L.step( o ), gl );
 		}
 		if ( wantDump && L.irr() )
 			dumpLive( c, L );
@@ -1059,59 +1209,98 @@ static void volumeFrame( Scene * scene, Cell & c, const CellSpec * spIn, bool du
 		return;
 	}
 	const bool atMax = max > 0 && ( moved ? 0 : L.updatesSinceScroll() ) + k >= max;
-	RtDdgiStep o;
+	Deferred j;
+	j.c = &c;
+	j.k = k;
+	j.max = max;
+	j.atMax = atMax;
+	j.moved = moved;
+	RtDdgiStep & o = j.o;
 	o.k = k;
-	for ( int a = 0; a < 3; a++ )
+	for ( int a = 0; a < 3; a++ ) {
 		o.scroll[a] = moved ? cells[a] : 0;
+		j.cells[a] = cells[a];
+		j.eye[a] = eye[a];
+	}
+	o.resetAll = moved && resetAll;   // RTXCASCADE2: a camera jump keeps no plane of a coarse cascade
 	// interop: no host copy unless the debug view or a dump at this step needs one; the step then waits for it
 	// lane RTXFIX1: the in-frame irradiance view reads the atlas on the GPU; only the overlay (WW_CELL_RTDDGI_VIEW_FOG=0) needs the tiles here
 	o.host = !c.interop || ( view == 2 && viewOverlay() ) || ( wantDump && ( atMax || ( max <= 0 && c.sets + 1 == 64 ) ) );
 	o.wait = !c.interop || o.host;
-	if ( !runStep( o ) ) {
-		if ( L.busy() ) {
-			c.busy++;
-			return;
+	/* RTXCASCADE2 cost lever (cskip=1): skip the probes the next finer cascade covers whole, on its grid as it stands after
+	 * its own step this frame (it was ordered first: densest first) */
+	const RtDdgiVolume & vNow = L.volume();
+	if ( c.level > 0 && sp.cskip ) {
+		const Cell & f = cascCell( c.level - 1 );
+		if ( f.live && f.nif == nif ) {
+			const RtDdgiVolume & fv = f.live->live.volume();
+			o.skip = true;
+			for ( int a = 0; a < 3; a++ ) {
+				o.fineOrigin[a] = f.orderFrame == s_cellFrame ? f.orderOrigin[a] : double( fv.origin[a] );
+				o.fineStep[a] = double( fv.step[a] );
+				o.fineDims[a] = fv.dims[a];
+			}
 		}
-		refuse( c, QStringLiteral( "an update failed: %1" ).arg( L.why() ) );
-		dropLive( c, r );   // the key stays: no rebuild until an input moves
+	}
+	c.orderFrame = s_cellFrame;
+	for ( int a = 0; a < 3; a++ )
+		c.orderOrigin[a] = double( vNow.origin[a] ) + double( o.scroll[a] ) * double( vNow.step[a] );
+	if ( defer ) {   // RTXCASCADE2: submitted with the other cascades' steps (groupStep)
+		defer->push_back( j );
 		return;
 	}
-	c.sets++;
-	if ( !c.interop ) {
-		if ( moved )
-			c.probesPacked = false;   // the states moved with the scroll (and came back with it: the step waited)
-		if ( !upload( c, r, L ) ) {
-			refuse( c, QStringLiteral( "no tiles came back" ) );
-			return;
-		}
-		c.fresh = true;
-	}
-	if ( moved && ( L.scrolls() <= kScrollEcho || L.scrolls() % 64 == 0 ) ) {
-		const RtDdgiVolume & v = L.volume();
-		say( c.tag + QStringLiteral( "scroll %1: scrolled %2 cells (%3 %4 %5), reset %6 probes (%7 in all); first probe %8 %9 %10; camera %11 %12 %13" )
-			.arg( L.scrolls() ).arg( L.lastScrollCells() ).arg( cells[0] ).arg( cells[1] ).arg( cells[2] ).arg( L.lastScrollFresh() )
-			.arg( L.freshTotal() ).arg( double( v.origin[0] ), 0, 'f', 0 ).arg( double( v.origin[1] ), 0, 'f', 0 )
-			.arg( double( v.origin[2] ), 0, 'f', 0 ).arg( double( eye[0] ), 0, 'f', 0 ).arg( double( eye[1] ), 0, 'f', 0 )
-			.arg( double( eye[2] ), 0, 'f', 0 ) );
-	}
-	const bool pow2 = ( c.sets & ( c.sets - 1 ) ) == 0;
-	if ( pow2 || atMax || c.sets % 256 == 0 )
-		censusSet( c, L, k, atMax ? QStringLiteral( "; stopped at the spec's max (%1 updates since the build or the last scroll); %2" )
-			.arg( max ).arg( cameraWords( L.volume(), eye ) ) : QString() );
-	if ( atMax ) {
-		c.stopped = true;
-		dumpLive( c, L );
-	} else if ( max <= 0 && c.sets == 64 ) {
-		dumpLive( c, L );
-	}
+	runOne( r, j );
 }
 
 int rtddgiCellCascades()
 {
+	if ( !wwEnvIsSet( "WW_CELL_RTDDGI_CASCADES" ) ) {   // RTXCASCADE2: the row (default 1: M3's one volume)
+		Cell & c = cell();
+		loadRows( c );
+		return c.guiCascades;
+	}
 	const QByteArray v = wwEnv( "WW_CELL_RTDDGI_CASCADES" ).trimmed();
 	bool ok = false;
 	const int n = v.toInt( &ok );
 	return ok ? std::clamp( n, 1, rtddgi::kMaxCascades ) : 1;   // unset, 0, 1 or not a number: M3's one volume
+}
+
+bool rtddgiCellCascadesPinned()
+{
+	return wwEnvIsSet( "WW_CELL_RTDDGI_CASCADES" );
+}
+
+void rtddgiCellSetCascades( int n )
+{
+	Cell & c = cell();
+	loadRows( c );
+	c.guiCascades = std::clamp( n, 1, rtddgi::kMaxCascades );
+	rowWrite( QStringLiteral( "WW/CellRtDdgiCascades" ), c.guiCascades );
+}
+
+int rtddgiCellViewCascade()
+{
+	if ( wwEnvIsSet( "WW_CELL_RTDDGI_VIEW_CASCADE" ) ) {   // RTXCASCADE2: pins the debug views' cascade (0 = the nearest)
+		bool ok = false;
+		const int l = wwEnv( "WW_CELL_RTDDGI_VIEW_CASCADE" ).trimmed().toInt( &ok );
+		return ok ? std::clamp( l, 0, rtddgi::kMaxCascades - 1 ) : 0;
+	}
+	Cell & c = cell();
+	loadRows( c );
+	return c.guiViewCascade;
+}
+
+bool rtddgiCellViewCascadePinned()
+{
+	return wwEnvIsSet( "WW_CELL_RTDDGI_VIEW_CASCADE" );
+}
+
+void rtddgiCellSetViewCascade( int level )
+{
+	Cell & c = cell();
+	loadRows( c );
+	c.guiViewCascade = std::clamp( level, 0, rtddgi::kMaxCascades - 1 );
+	rowWrite( QStringLiteral( "WW/CellRtDdgiViewCascade" ), c.guiViewCascade );
 }
 
 //! RTXCASCADE1: the cascades' texture buffer, freed (its own context only, as freeGl)
@@ -1190,7 +1379,7 @@ static void combinedUpdate( Renderer * r, int n, const void * nif )
 
 /*! RTXCASCADE1: cascades 1..n-1 after cascade 0's frame. Cascade L = cascade 0's built step x 2^L (rtddgimath.h
  *  cascadeScale), its window x 2^L; built only while cascade 0 is up (its step sizes them) */
-static void cascadesFrame( Scene * scene )
+static void cascadesFrame( Scene * scene, std::vector<Deferred> * defer )
 {
 	if ( !scene || !scene->nifModel || !scene->renderer )
 		return;
@@ -1232,21 +1421,40 @@ static void cascadesFrame( Scene * scene )
 		q.reach = float( double( sp.reach ) * k );
 		q.text = sp.text + QStringLiteral( "|cascade %1 of step %2 x %3" ).arg( l ).arg( double( v0.step[0] ), 0, 'f', 3 )
 			.arg( double( v0.step[2] ), 0, 'f', 3 );
+		q.rays = rtddgi::cascadeRays( sp.rays, sp.crays, l );   // RTXCASCADE2 cost lever (crays; 0 = cascade 0's)
 		/* with a spec max (pictures): every frame, so a camera move scrolls it at once and rtddgiCellPending holds the
 		 * picture until it has its updates again (a stopped volume that did not move steps nothing); running: every
-		 * cevery^L frames (the cost lever) */
-		const bool due = rtddgi::cascadeDue( l, frame, sp.every ) || sp.max > 0;
+		 * cevery^L frames (the cost lever). RTXCASCADE2: a camera jump (cascade 0 kept no plane) steps every cascade
+		 * this frame and resets every plane (rtddgimath.h cascadeStepPlan) */
+		bool due = false, resetAll = false;
+		rtddgi::cascadeStepPlan( l, frame, sp.every, s_jump, due, resetAll );
+		due = due || sp.max > 0;
 		// the census prefix carries the period: device ms a frame = sum over cascades of a set's ms / its period
 		c.tag = QStringLiteral( "cascade %1 (every %2 frames): " ).arg( l ).arg( qlonglong( std::llround( std::pow( double( std::max( sp.every, 1 ) ), l ) ) ) );
-		volumeFrame( scene, c, &q, due );
+		// RTXCASCADE2: cascade 0 was built again on a new BLAS (its own key moved): open this one again on it (one BLAS)
+		if ( c.live && !c.pending && !( cellRedPaths() & kPathPerCascade ) && !c.live->live.sameScene( c0.live->live )
+			&& c.live->live.sceneWhy().isEmpty() )
+			c.key = 0;
+		volumeFrame( scene, c, &q, due, resetAll, defer );
 	}
+	if ( defer )
+		groupStep( r, *defer );   // RTXCASCADE2: every cascade due this frame in one submit, before the copies read them
 	combinedUpdate( r, n, scene->nifModel );
 }
 
 void rtddgiCellFrame( Scene * scene )
 {
-	volumeFrame( scene, cell(), nullptr, true );   // M3's volume, cascade 0
-	cascadesFrame( scene );                        // RTXCASCADE1: nothing while WW_CELL_RTDDGI_CASCADES is 1
+	s_cellFrame++;
+	s_jump = false;
+	/* RTXCASCADE2: with cascades (and not the perblas red) the cascades' steps are collected and go in one submit at the
+	 * end of cascadesFrame; one volume (WW_CELL_RTDDGI_CASCADES 1, the default) steps at once as M3's did */
+	const int n = rtddgiCellShaderDefine() ? rtddgiCellCascades() : 1;
+	std::vector<Deferred> jobs;
+	std::vector<Deferred> * defer = n > 1 && !( cellRedPaths() & kPathPerCascade ) ? &jobs : nullptr;
+	volumeFrame( scene, cell(), nullptr, true, false, defer );   // M3's volume, cascade 0
+	cascadesFrame( scene, defer );                               // RTXCASCADE1: nothing while WW_CELL_RTDDGI_CASCADES is 1
+	if ( !jobs.empty() && scene && scene->renderer )
+		groupStep( scene->renderer, jobs );   // cascade 0's, when cascadesFrame left early
 }
 
 bool rtddgiCellPending()
@@ -1267,6 +1475,35 @@ bool rtddgiCellPending()
 			return true;   // a coarse cascade not started yet (it starts on the frame after cascade 0 is up)
 	}
 	return false;
+}
+
+/* the one-volume read's uniforms and texture buffer from volume `c` (M3's; RTXCASCADE2: the probes view passes the
+ * picked cascade's own volume, in M3's layout) */
+static void bindOne( Scene * scene, Renderer * r, NifSkopeOpenGLContext::Program * prog, int locOn, Cell & c )
+{
+	const bool ready = c.live && c.uploaded && c.tex && c.glOwner == r && c.nif == scene->nifModel;
+	auto fn = r->fn;
+	GLint prevActive = 0;
+	fn->glGetIntegerv( GL_ACTIVE_TEXTURE, &prevActive );
+	fn->glActiveTexture( GLenum( GL_TEXTURE0 + WwCellUnit::DdgiAtlas ) );
+	fn->glBindTexture( GL_TEXTURE_BUFFER, ready ? c.tex : 0 );
+	if ( ready && c.attach ) {
+		fn->glTexBuffer( GL_TEXTURE_BUFFER, GL_RGBA32F, c.buf );
+		c.attach = false;
+	}
+	fn->glActiveTexture( GLenum( prevActive ) );
+	prog->uni1i( "cellDdgiAtlas", WwCellUnit::DdgiAtlas );
+	prog->uni1b_l( locOn, ready );
+	if ( !ready )
+		return;
+	const RtDdgiVolume & v = c.live->live.volume();
+	const float D = std::min( v.step[0], std::min( v.step[1], v.step[2] ) );
+	prog->uni4f( "cellDdgiOrigin", FloatVector4( v.origin[0], v.origin[1], v.origin[2], D ) );
+	prog->uni4f( "cellDdgiStep", FloatVector4( v.step[0], v.step[1], v.step[2], c.live->live.spec().bias ) );
+	const int locDims = prog->uniLocation( "cellDdgiDims" );
+	if ( locDims >= 0 )
+		fn->glUniform4i( locDims, v.dims[0], v.dims[1], v.dims[2], v.probeCount() );
+	prog->uni1i( "cellDdgiRed", cellRedBits() );
 }
 
 void rtddgiCellUniforms( Scene * scene )
@@ -1329,29 +1566,7 @@ void rtddgiCellUniforms( Scene * scene )
 		prog->uni1i( "cellDdgiRed", cellRedBits() );
 		return;
 	}
-	const bool ready = c.live && c.uploaded && c.tex && c.glOwner == r && c.nif == scene->nifModel;
-	auto fn = r->fn;
-	GLint prevActive = 0;
-	fn->glGetIntegerv( GL_ACTIVE_TEXTURE, &prevActive );
-	fn->glActiveTexture( GLenum( GL_TEXTURE0 + WwCellUnit::DdgiAtlas ) );
-	fn->glBindTexture( GL_TEXTURE_BUFFER, ready ? c.tex : 0 );
-	if ( ready && c.attach ) {
-		fn->glTexBuffer( GL_TEXTURE_BUFFER, GL_RGBA32F, c.buf );
-		c.attach = false;
-	}
-	fn->glActiveTexture( GLenum( prevActive ) );
-	prog->uni1i( "cellDdgiAtlas", WwCellUnit::DdgiAtlas );
-	prog->uni1b_l( locOn, ready );
-	if ( !ready )
-		return;
-	const RtDdgiVolume & v = c.live->live.volume();
-	const float D = std::min( v.step[0], std::min( v.step[1], v.step[2] ) );
-	prog->uni4f( "cellDdgiOrigin", FloatVector4( v.origin[0], v.origin[1], v.origin[2], D ) );
-	prog->uni4f( "cellDdgiStep", FloatVector4( v.step[0], v.step[1], v.step[2], c.live->live.spec().bias ) );
-	const int locDims = prog->uniLocation( "cellDdgiDims" );
-	if ( locDims >= 0 )
-		fn->glUniform4i( locDims, v.dims[0], v.dims[1], v.dims[2], v.probeCount() );
-	prog->uni1i( "cellDdgiRed", cellRedBits() );
+	bindOne( scene, r, prog, locOn, c );
 }
 
 void rtddgiCellViewDraw( Scene * scene, const Transform & viewTrans )
@@ -1362,9 +1577,10 @@ void rtddgiCellViewDraw( Scene * scene, const Transform & viewTrans )
 	Cell & c = cell();
 	const bool inFrame = c.viewDrewInFrame;   // lane RTXFIX1: drawn inside the linear frame this paint: no overlay
 	c.viewDrewInFrame = false;
-	if ( !mode || !c.live || c.nif != scene->nifModel || inFrame )
+	const Cell & vc = cascCell( viewLevel() );   // RTXCASCADE2: the picked cascade (0 = M3's volume)
+	if ( !mode || !vc.live || vc.nif != scene->nifModel || inFrame )
 		return;
-	const RtDdgiLive & L = c.live->live;
+	const RtDdgiLive & L = vc.live->live;
 	const RtDdgiVolume & v = L.volume();
 	const float * irr = L.irr();
 	const quint32 * age = L.age();
@@ -1440,11 +1656,12 @@ void rtddgiCellViewDrawLinear( Scene * scene, const Transform & viewTrans )
 	const int mode = rtddgiCellView();
 	Cell & c = cell();
 	Renderer * r = scene->renderer;
-	if ( !mode || !c.live || c.nif != scene->nifModel || !c.uploaded || !c.tex || c.glOwner != r )
+	Cell & vc = cascCell( viewLevel() );   // RTXCASCADE2: the picked cascade's volume and atlas (0 = M3's volume)
+	if ( !mode || !vc.live || vc.nif != scene->nifModel || !vc.uploaded || !vc.tex || vc.glOwner != r )
 		return;
 	QElapsedTimer t;
 	t.start();
-	const RtDdgiVolume & v = c.live->live.volume();
+	const RtDdgiVolume & v = vc.live->live.volume();
 	const float rad = 0.12f * std::min( v.step[0], std::min( v.step[1], v.step[2] ) );
 	const int nP = v.probeCount();
 	// the instances: near ones first (x = the probe, y = its state code: 0 Vigilant, 1 Asleep, 2 Off, 3 fresh)
@@ -1507,7 +1724,7 @@ void rtddgiCellViewDrawLinear( Scene * scene, const Transform & viewTrans )
 	fn->glActiveTexture( GLenum( prevActive ) );
 	prog->uni1i( "probeMesh", WwCellUnit::GiHalf );
 	prog->uni1i( "probeList", WwCellUnit::GiHalfKey );
-	rtddgiCellUniforms( scene );   // cellDdgiOn, the atlas, origin, step, dims
+	bindOne( scene, r, prog, prog->uniLocation( "cellDdgiOn" ), vc );   // cellDdgiOn, the atlas, origin, step, dims (RTXCASCADE2: the pick's)
 	prog->uni4m( "modelViewMatrix", viewTrans.toMatrix4() );
 	prog->uni1f( "probeRad", rad );
 	prog->uni1i( "probeMode", mode );
@@ -1540,9 +1757,10 @@ void rtddgiCellViewDrawLinear( Scene * scene, const Transform & viewTrans )
 	const double ms = double( t.nsecsElapsed() ) / 1e6;
 	// the census, when the counts move: the view's size and its CPU cost (bungo: inside the budget at 20000 probes)
 	const QString line = QStringLiteral( "probes view in the frame (%1): %2 near spheres x %3 triangles + %4 far x %5, %6 hidden at the camera; "
-		"%7 triangles" ).arg( fogMode == 1 ? QStringLiteral( "fogged" ) : QStringLiteral( "no fog" ) ).arg( nNear )
+		"%7 triangles%8" ).arg( fogMode == 1 ? QStringLiteral( "fogged" ) : QStringLiteral( "no fog" ) ).arg( nNear )
 		.arg( meshNear.size() / 3 ).arg( nFar ).arg( meshFar.size() / 3 ).arg( culled )
-		.arg( qint64( nNear ) * qint64( meshNear.size() / 3 ) + qint64( nFar ) * qint64( meshFar.size() / 3 ) );
+		.arg( qint64( nNear ) * qint64( meshNear.size() / 3 ) + qint64( nFar ) * qint64( meshFar.size() / 3 ) )
+		.arg( vc.level > 0 ? QStringLiteral( "; cascade %1" ).arg( vc.level ) : QString() );   // RTXCASCADE2
 	if ( line != c.viewLast ) {
 		c.viewLast = line;
 		say( line + QStringLiteral( "; CPU %1 ms" ).arg( ms, 0, 'f', 3 ) );

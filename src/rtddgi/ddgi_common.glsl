@@ -33,6 +33,8 @@ struct Params {
 	ivec4 counts;     // rays per probe, lights, soup triangles, opaque triangles (the BLAS's geometry 0)
 	ivec4 flags;      // oneBounce, skipAsleep, useMask, red bits
 	vec4 blendp;      // base hysteresis, distance sharpness, self-shadow bias B, 0
+	ivec4 skipLo;     // RTXCASCADE2: the probes the updates skip, grid indices skipLo.xyz..skipHi.xyz; skipLo.w = 1 on
+	ivec4 skipHi;
 };
 
 layout( std430, set = 0, binding = 0 ) buffer Rays { vec4 rays[]; };            // per probe x ray: radiance rgb, signed distance
@@ -235,6 +237,16 @@ vec3 ddgiSky( vec3 d )
 ivec3 ddgiProbeCoord( uint p ) { return ivec3( int( p ) % P.dims.x, ( int( p ) / P.dims.x ) % P.dims.y, int( p ) / ( P.dims.x * P.dims.y ) ); }
 vec3 ddgiProbePos( uint p ) { return P.origin.xyz + vec3( ddgiProbeCoord( p ) ) * P.stepv.xyz + probes[p].xyz; }
 int ddgiProbeState( uint p ) { return int( probes[p].w + 0.5 ); }
+// RTXCASCADE2: a coarse cascade's probe a finer cascade covers whole (the range: src/rtddgimath.h cascadeCovered, set per
+// step by the cell view; src/rtddgi/rtddgi_vk.inc ddgiSkipped is this test on the CPU for the active count). The CPU
+// twin never sets it (rtddgiRun is one volume): off, every probe as before
+bool ddgiSkipped( uint p )
+{
+	if ( P.skipLo.w == 0 )
+		return false;
+	const ivec3 g = ivec3( int( p % uint( P.dims.x ) ), int( ( p / uint( P.dims.x ) ) % uint( P.dims.y ) ), int( p / uint( P.dims.x * P.dims.y ) ) );
+	return all( greaterThanEqual( g, P.skipLo.xyz ) ) && all( lessThanEqual( g, P.skipHi.xyz ) );
+}
 
 // the alpha-test hole at barycentrics (b1, b2) of soup triangle tri (src/bakert/common.glsl's hole, this set's bindings)
 bool ddgiHole( int tri, float b1, float b2 )

@@ -35,7 +35,12 @@
 //             lattice points
 //   cascdue   RTXCASCADE1 cascade L updates every every^L frames, the coarse   RED_CASCDUE    one short period
 //             ones on separate frames
-// Every check is independent of the others' reds (a red build may pass the other eighteen).
+//   cascrays  RTXCASCADE2 coarse cascades trace `crays` (unset: cascade 0's)   RED_CASCRAYS   cascade 0's count
+//   cascskip  RTXCASCADE2 a coarse probe is skipped only where the finer one's  RED_CASCSKIP   none skipped (all
+//             tight fade is 1 over its whole support, and every such probe is                 traced)
+//   cascjump  RTXCASCADE2 a camera jump steps every cascade and resets every    RED_CASCJUMP   no jump rule
+//             coarse plane at once; a walk keeps RTXCASCADE1's periods
+// Every check is independent of the others' reds (a red build may pass the other twenty-one).
 
 #include "rtddgimath.h"
 
@@ -767,6 +772,94 @@ void checkCascDue()
 		n2[2], n2[3] );
 }
 
+// RTXCASCADE2: fewer rays for the coarse cascades (the crays knob); unset = RTXCASCADE1's count everywhere
+void checkCascRays()
+{
+	const int a = cascadeRays( 128, 0, 2 ), b = cascadeRays( 128, 64, 0 ), c = cascadeRays( 128, 64, 1 ), d = cascadeRays( 128, 16, 3 ),
+		e = cascadeRays( 128, 999, 2 );
+	const bool ok = a == 128 && b == 128 && c == 64 && d == kFixedRays + 1 && e == kMaxRays;
+	report( "cascrays", ok, "crays 64: level 0 %g, level 1 %g (bars 128 / 64); crays unset level 2 %g (bar 128)", b, c, a );
+	std::printf( "        crays 16 clamps to %d (bar %d), 999 to %d (bar %d)\n", d, kFixedRays + 1, e, kMaxRays );
+}
+
+/* RTXCASCADE2: the coarse probes a finer cascade covers whole. Brute force from the read's own weight: coarse probe i
+ * is never taken when, over its whole trilinear support (q - sC, q + sC), the finer cascade's tight fade (cascadeEdge,
+ * the read's take) is 1. Every skipped probe must be such a probe (0 unsafe), the range must be the whole set of them on
+ * that axis (0 missed), and real windows (the finer 2x inside the coarser) must skip some (the red skips none) */
+void checkCascSkip()
+{
+	uint64_t s = 4242;
+	long long skipped = 0, unsafe = 0, missed = 0, configs = 0, probes = 0;
+	for ( int it = 0; it < 3000; it++ ) {
+		const double sF = 60.0 + 200.0 * unit01( s ), sC = 2.0 * sF;
+		const int dF = 6 + int( 26.0 * unit01( s ) ), dC = 6 + int( 26.0 * unit01( s ) );
+		const double centre = ( unit01( s ) - 0.5 ) * 1e5;
+		const double oF = std::floor( ( centre - 0.5 * double( dF - 1 ) * sF ) / sF ) * sF;
+		const double oC = std::floor( ( centre - 0.5 * double( dC - 1 ) * sC + ( unit01( s ) - 0.5 ) * 6.0 * sC ) / sC ) * sC;
+		int lo = 0, hi = -1;
+		cascadeCoveredAxis( oC, sC, dC, oF, sF, dF, lo, hi );
+		configs++;
+		for ( int i = 0; i < dC; i++ ) {
+			const double q = oC + double( i ) * sC;
+			bool covered = true;
+			for ( int j = 1; j < 64 && covered; j++ ) {   // the open support, 63 points
+				const double x = q - sC + 2.0 * sC * double( j ) / 64.0;
+				covered = cascadeEdge( float( ( x - oF ) / sF ), dF, true ) >= 1.0f;
+			}
+			// and the support's ends (the read's weight of probe i is 0 there, but the cage still holds it)
+			covered = covered && cascadeEdge( float( ( q - sC - oF ) / sF ), dF, true ) >= 1.0f
+				&& cascadeEdge( float( ( q + sC - oF ) / sF ), dF, true ) >= 1.0f;
+			const bool skip = i >= lo && i <= hi;
+			probes++;
+			skipped += skip ? 1 : 0;
+			unsafe += skip && !covered ? 1 : 0;
+			missed += covered && !skip ? 1 : 0;
+		}
+	}
+	// a 3-axis box: the product of the axes (cascadeCovered), and the box-of-boxes count
+	const double oC3[3] = { -1120, -1120, -560 }, sC3[3] = { 280, 280, 140 }, oF3[3] = { -560, -560, -280 }, sF3[3] = { 140, 140, 70 };
+	const int dC3[3] = { 9, 9, 9 }, dF3[3] = { 9, 9, 9 };
+	int lo3[3], hi3[3];
+	const bool any3 = cascadeCovered( oC3, sC3, dC3, oF3, sF3, dF3, lo3, hi3 );
+	const bool box = any3 && lo3[0] == 4 && hi3[0] == 4 && lo3[2] == 4 && hi3[2] == 4;
+	const bool ok = unsafe == 0 && missed == 0 && skipped > 0 && box;
+	report( "cascskip", ok, "skipped %g of %g coarse probes over 3000 axes; unsafe (read there) %g (bar 0)", double( skipped ),
+		double( probes ), double( unsafe ) );
+	std::printf( "        covered but traced %lld (bar 0); 9^3 cascade 1 round a 9^3 cascade 0 of half the step: box x %d..%d z %d..%d "
+		"(bar 4..4 4..4)\n", missed, lo3[0], hi3[0], lo3[2], hi3[2] );
+}
+
+/* RTXCASCADE2: a camera jump (cascade 0 scrolls its whole size on an axis) steps every cascade this frame and resets
+ * every coarse plane; a walk (fewer cells) keeps RTXCASCADE1's periods and planes */
+void checkCascJump()
+{
+	const int dims[3] = { 8, 8, 6 };
+	const int walk[3] = { 1, -2, 0 }, nearly[3] = { 7, -7, 5 }, jx[3] = { 8, 0, 0 }, jz[3] = { 0, 0, -6 }, far[3] = { 40, -3, 1 };
+	const bool rule = !cascadeJump( walk, dims ) && !cascadeJump( nearly, dims ) && cascadeJump( jx, dims ) && cascadeJump( jz, dims )
+		&& cascadeJump( far, dims );
+	int dueJ = 0, resetJ = 0, resetW = 0, dueDiff = 0;
+	for ( uint64_t f = 0; f < 1024; f++ ) {
+		const bool j = f % 97 == 5;
+		for ( int l = 0; l < 4; l++ ) {
+			bool due = false, reset = false;
+			cascadeStepPlan( l, f, 4, j && cascadeJump( jx, dims ), due, reset );
+			if ( j ) {
+				dueJ += due ? 1 : 0;
+				resetJ += reset ? 1 : 0;
+			} else {
+				resetW += reset ? 1 : 0;
+				dueDiff += due != cascadeDue( l, f, 4 ) ? 1 : 0;
+			}
+		}
+	}
+	const int jumps = 11;   // frames 5, 102, ..., 975
+	const bool ok = rule && dueJ == jumps * 4 && resetJ == jumps * 3 && resetW == 0 && dueDiff == 0;
+	report( "cascjump", ok, "jump frames: cascades stepped %g, coarse reset %g (bars 44 / 33); walk frames reset %g (bar 0)", dueJ,
+		resetJ, resetW );
+	std::printf( "        rule (walk 1, nearly 7 of 8 kept; 8 of 8 / 6 of 6 / 40 jump): %s; walk frames off RTXCASCADE1's period %d (bar 0)\n",
+		rule ? "yes" : "NO", dueDiff );
+}
+
 } // namespace
 
 int main()
@@ -790,6 +883,9 @@ int main()
 	checkCascTight();
 	checkCascScale();
 	checkCascDue();
+	checkCascRays();
+	checkCascSkip();
+	checkCascJump();
 	std::printf( "RTDDGI_MATH %s %d%s\n", g_fail ? "FAIL" : "PASS", g_fail ? g_fail : g_pass, g_fail ? " failed" : "" );
 	return g_fail ? 1 : 0;
 }

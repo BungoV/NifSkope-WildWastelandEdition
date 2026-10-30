@@ -16,8 +16,8 @@ void main()
 	const uint p = id / per;
 	const int k = int( id % per );
 	const int st = ddgiProbeState( p );
-	if ( st == DDGI_OFF || ( st == DDGI_ASLEEP && P.flags.y != 0 ) )
-		return;
+	if ( st == DDGI_OFF || ( st == DDGI_ASLEEP && P.flags.y != 0 ) || ddgiSkipped( p ) )
+		return;   // RTXCASCADE2: a covered coarse probe was not blended: no border, its age stays
 	if ( k < 4 * DDGI_IRR_S - 4 ) {
 		const ivec2 xy = ddgiBorderXY( k, DDGI_IRR_S );
 		const ivec2 s = ddgiBorderSource( xy.x, xy.y, DDGI_IRR_S );

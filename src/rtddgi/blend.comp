@@ -17,8 +17,8 @@ void main()
 	if ( p >= uint( P.dims.w ) )
 		return;
 	const int st = ddgiProbeState( p );
-	if ( st == DDGI_OFF || ( st == DDGI_ASLEEP && P.flags.y != 0 ) )
-		return;   // the whole group leaves together: no barrier is skipped by part of it
+	if ( st == DDGI_OFF || ( st == DDGI_ASLEEP && P.flags.y != 0 ) || ddgiSkipped( p ) )
+		return;   // the whole group leaves together: no barrier is skipped by part of it (RTXCASCADE2: + a covered probe)
 	const int N = P.counts.x;
 	const int nb = N - DDGI_FIXED;
 	const uint t = gl_LocalInvocationID.x;

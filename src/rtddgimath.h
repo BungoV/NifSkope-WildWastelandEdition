@@ -570,6 +570,84 @@ inline bool cascadeDue( int level, uint64_t frame, int every )
 #endif
 	return frame % period == uint64_t( level ) % period;
 }
+/*! RTXCASCADE2 (2026-10-30) cost lever "fewer rays for coarse cascades" (Flax; PLAN.md): cascade 0 traces `rays`, a
+ *  coarse cascade `crays` when that is set (0 = the same as cascade 0: RTXCASCADE1's), clamped to the volume's range
+ *  (kFixedRays + 1 .. kMaxRays).  GLSL: none (src/rtddgicell.cpp sizes each cascade's spec) */
+inline int cascadeRays( int rays, int crays, int level )
+{
+#ifdef RTDDGI_RED_CASCRAYS
+	(void)crays;
+	(void)level;
+	return rays;   // red: every cascade traces cascade 0's count (RTXCASCADE1's)
+#else
+	if ( level <= 0 || crays <= 0 )
+		return rays;
+	return std::min( std::max( crays, kFixedRays + 1 ), kMaxRays );
+#endif
+}
+/*! RTXCASCADE2 cost lever "skip a coarse probe a finer cascade covers whole": the coarse volume's probes (first probe
+ *  oC, step sC, dims dC; one axis) the read never takes because the finer cascade inside it holds there. sampleCascades
+ *  reads dense to coarse and stops once the weights reach 1: where the finer one's tight fade (cascadeEdge, tight) is 1
+ *  the coarser one takes nothing. A coarse probe at q weighs in the read of points in (q - sC, q + sC) only (its
+ *  trilinear cage), and the finer fade is 1 on [oF + 2 sF, oF + (dF - 3) sF] (tight: e - 1 >= 1). So probe i is
+ *  covered whole when q - sC >= oF + 2 sF and q + sC <= oF + (dF - 3) sF. Out: the covered indices lo..hi (inclusive);
+ *  false when none. Caveat (REASONED, why it is a knob): where the finer cascade has no usable probe at a point (w = 0)
+ *  the read falls through to the coarse one, which is then not updated.  GLSL: ddgi_common.glsl ddgiSkipped (the
+ *  kernels read the range from the params) */
+inline bool cascadeCoveredAxis( double oC, double sC, int dC, double oF, double sF, int dF, int & lo, int & hi )
+{
+	lo = 0;
+	hi = -1;
+#ifdef RTDDGI_RED_CASCSKIP
+	(void)oC; (void)sC; (void)dC; (void)oF; (void)sF; (void)dF;
+	return false;   // red: every coarse probe is traced
+#else
+	if ( sC <= 0.0 || sF <= 0.0 || dF < 6 || dC < 1 )
+		return false;
+	const double fLo = oF + 2.0 * sF, fHi = oF + double( dF - 3 ) * sF;
+	const double eps = 1e-6 * sC;
+	lo = std::max( 0, int( std::ceil( ( fLo + sC - oC ) / sC - 1e-9 ) ) );
+	hi = std::min( dC - 1, int( std::floor( ( fHi - sC - oC ) / sC + 1e-9 ) ) );
+	while ( lo <= hi && oC + double( lo ) * sC - sC < fLo - eps )
+		lo++;
+	while ( hi >= lo && oC + double( hi ) * sC + sC > fHi + eps )
+		hi--;
+	return lo <= hi;
+#endif
+}
+//! the three axes of cascadeCoveredAxis: a box of covered coarse probes (lo..hi inclusive per axis); false when empty
+inline bool cascadeCovered( const double oC[3], const double sC[3], const int dC[3], const double oF[3], const double sF[3],
+	const int dF[3], int lo[3], int hi[3] )
+{
+	bool any = true;
+	for ( int k = 0; k < 3; k++ )
+		any = cascadeCoveredAxis( oC[k], sC[k], dC[k], oF[k], sF[k], dF[k], lo[k], hi[k] ) && any;
+	return any;
+}
+/*! RTXCASCADE2: a camera jump. Cascade 0 scrolls `cells` whole cells this frame; when any axis moves its whole size
+ *  (|cells| >= dims: no plane is kept, scrollRuns keeps nothing) the camera jumped (a teleport, a new place), not
+ *  walked. Then every cascade steps this frame (whatever its period, cascadeDue) and resets every plane (no kept
+ *  plane, so no hysteresis against the old place: the first blend of a fresh probe takes its update whole). Walking
+ *  keeps RTXCASCADE1's rule: a coarse cascade scrolls on its own frames and keeps its planes.  GLSL: none */
+inline bool cascadeJump( const int cells[3], const int dims[3] )
+{
+#ifdef RTDDGI_RED_CASCJUMP
+	(void)cells;
+	(void)dims;
+	return false;   // red: no jump rule (RTXCASCADE1: the coarse ones wait for their frames and keep their planes)
+#else
+	for ( int k = 0; k < 3; k++ )
+		if ( dims[k] > 0 && std::abs( cells[k] ) >= dims[k] )
+			return true;
+	return false;
+#endif
+}
+//! RTXCASCADE2: what cascade `level` does on `frame` (cascadeDue, cascadeJump): step it (due), reset every plane (resetAll)
+inline void cascadeStepPlan( int level, uint64_t frame, int every, bool jump, bool & due, bool & resetAll )
+{
+	due = cascadeDue( level, frame, every ) || jump;
+	resetAll = jump && level > 0;   // cascade 0's own jump already resets every plane (scrollRuns keeps none)
+}
 /*! [J21 7.3] the read over n cascades (v[0] the densest): each one's weight is its tight fade (cascadeEdge, the
  *  camera-locked blend), and it takes that share of what the denser ones left: take = w x left, left -= take, stop
  *  when left is 0. A cascade with no usable probe at P (w = 0) takes nothing. E and vis = the takes' weighted mean;

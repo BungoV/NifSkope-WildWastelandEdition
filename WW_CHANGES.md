@@ -1,5 +1,41 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## Lane RTXCASCADE2 (2026-10-30, branch rtxcascade2-20261030): the cascades on one BLAS and one submit, their cost levers, a menu row (cascades still ship Off)
+
+- **Lands RTXCASCADE1** (merge of origin/merge1030b-20261030 = RTXCASCADE1 010bf8c4 on main 19f8ebb1). **Cascades stay OFF by
+  default**: unset WW_CELL_RTDDGI_CASCADES and the new row's default (One volume) are M3's one volume exactly; RTXCASCADE1's
+  Memory Den cost (4.09 x one volume in its hold, unequal samples) is unjudged, so they stay off until a cost run.
+- **One BLAS for every cascade:** a coarse cascade opens on cascade 0's scene (BLAS + TLAS, alpha masks, triangle
+  attributes, lights: rtddgi_vk.inc DdgiScene, counted, freed by the last session) instead of building its own from the
+  same soup (GPU memory and build time were x N). It also skips the CPU tree build of the soup. A key of the packed soup,
+  attributes, lights and local frame must match, else it builds its own and the census says why. Census of a coarse
+  cascade's build: `BLAS: cascade 0's (one BLAS)`.
+- **One submit for all cascades:** the cascades due on a frame are recorded into one command buffer (densest first, each
+  with its own timestamps, scroll, updates, copies and GL ownership) and go in ONE vkQueueSubmit that waits on every
+  glDone and signals every vkDone (rtddgi_vk.inc ddgiGpuStepGroup, RtDdgiLive::stepGroup, rtddgicell.cpp groupStep).
+  Red, live: `WW_CELL_RTDDGI_RED=perblas` = RTXCASCADE1's own BLAS and own submit per cascade.
+- **Debug views take a cascade pick:** the "Ray-traced GI probes" menu has Cascade 0 (nearest) .. Cascade 3 (live;
+  pin `WW_CELL_RTDDGI_VIEW_CASCADE`); the states/irradiance views (in the frame and the overlay) draw that cascade's own
+  volume and atlas. Default 0 = before.
+- **Menu row:** Show > "Ray-traced GI cascades" (One volume, 2, 3, 4 cascades), live (a pick reloads the shaders, as the
+  env key's stage 4); pinned by WW_CELL_RTDDGI_CASCADES.
+- **Cost levers (WW_CELL_RTDDGI_SPEC, both off by default):** `crays=N` coarse cascades trace N rays (rtddgimath.h
+  cascadeRays); `cskip=1` a coarse cascade skips the probes the next finer cascade covers whole (cascadeCovered: the
+  probe's whole trilinear support lies where the finer cascade's tight fade is 1, so the read never takes it; the
+  kernels read the range from two new params vec4s: trace mode 0, blend, border). Caveat (REASONED): where the finer
+  cascade has no usable probe at a point the read falls through to a skipped (stale) coarse probe. The cost of both is a
+  live run: owed.
+- **Camera jump:** when cascade 0 keeps no plane (it scrolled its whole size on an axis: cascadeJump), every cascade
+  steps that frame whatever its period and resets every plane (cascadeStepPlan); a walk keeps RTXCASCADE1's periods.
+- **CLI:** `-no-gui rtddgi ... --cascades N [--cascade-red perblas] [--cskip 1] [--crays n]` runs the cascades offline
+  (rtddgiRunCascades) and prints BLAS builds and submits.
+- **Gates (MEASURED):** unit tests/rtddgi_math/run.sh green 22 + 22 reds (new cascrays / cascskip / cascjump, each
+  failed by its own red); CLI (gpurelight's room, 3 cascades, 64 updates, GPU): one BLAS = `BLAS builds 1, submits 4`
+  vs the perblas red `BLAS builds 3, submits 12`, and every cascade's dump byte-identical between them and to the
+  single-volume GPU run; cskip: cascade 0 identical, cascade 1 192 probes skipped, rays 8.04 M -> 6.47 M; crays 64:
+  coarse rays 8.04 M -> 4.17 M; offline link sweep 393/393 and +WW_CELL_RTDDGI 262/262 LINK OK (no GL shader edit);
+  build RC 0. Owed: the cost run (Memory Den, c3) and RTXCASCADE1's porch-vs-tracer gate B, when bungo allows.
+
 ## Lane RTXCASCADE1 (2026-10-30, branch rtxcascade1-20261030): nested ray-traced GI volumes round the camera (ships Off)
 
 - **Why:** bungo 10-29: far buildings (the Concord bank's porch, his shot) sit outside the ray-traced GI volume and read
