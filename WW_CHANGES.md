@@ -1,5 +1,33 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## SKYBELOW2 (2026-10-31, FIX1030C): below the horizon is ground for the reflection probes too (on; WW_SKYBELOW_RED=1 = before)
+
+- **What changed:** SKYBELOW1's rule (bungo 10-30, LATE ITEMs 3 + 3b: a probe ray that misses below the horizon sees
+  ground, never sky) now holds for the one other sky reader that does not need the old baked probe GI: the reflection
+  probes' relight (`cell_reflrelight.frag`, row "Reflection probes", ships Off). A G-buffer cube texel that misses with a
+  world direction below the horizon returned the sky ambient for that direction; it now returns the ground: outdoors the
+  probe's own ground albedo (the mean of its below-horizon hits on 9 fixed taps, 0.5 when none hit) x what an open
+  up-facing white surface shows (the sky from above / pi, SKYBELOW1's ground law), indoors 0. On/above the horizon the
+  miss is unchanged. The rule is one include, `res/shaders/cell_skybelow.glsl` (mirror of rtddgimath.h belowHorizon /
+  groundRadiance).
+- **Switch:** the same red as SKYBELOW1, `WW_SKYBELOW_RED=1` (live, stage 0: it is in the relight's light hash, so a
+  set relights every probe; stage table regenerated, hand reason extended). The notes' reflprobe line ends
+  `below-horizon miss=ground` (red: `=sky (WW_SKYBELOW_RED)`).
+- **Survey (every other sky reader that can look below the horizon):** RTXGI volume + cascades = SKYBELOW1 (done);
+  physical-sky ambient (atmomath skyIrradiance), cloud ambient (cloudvol skyAmbient), LOD terrain horizon AO, LOD vertex
+  sky (skyVisibilityFace) and the far water's sky byte all integrate the upper hemisphere only (already the rule); fog
+  reads no sky; water's sky reflection is the game's own horizon/lower/upper gradient; the volume air and particles take
+  the GI's own cube. The old baked probe GI (bake skyVis lower octants, probegi gridSky, the relight's flat-sky fallback,
+  edge sky / own-sky floor, and the readers that exist only through its grid: SPECOCC1 cellSpecSky's PRT branch, the
+  near Water sky visibility) is PARKED: bungo stopped testing the old GI (10-29). Its drawn-sky picture already puts
+  the weather's ground colour below the horizon (SKYPIC1).
+- **Gates (offline):** `bash tests/skybelow2/run.sh <out>` compiles the shader's own include through
+  tests/rtddgi_math/glsl_shim.h: green 6 + 6 reds (below: below-horizon misses returning sky 0 of 2048, the ground ==
+  rtddgimath.h groundRadiance within 7.5e-9; above: 0 of 2049 changed, bit for bit; interior 0; red == today's miss
+  bit for bit; albedo taps; openprobe census, a probe 100 u over a 3000 u ground disk, 64 x 64 tile: below misses
+  returning sky 0 of 8, red 8 of 8, above-horizon hash equal). Link sweeps base 405 / RTDDGI 270 / PRT 405 LINK OK.
+  Pictures owed (when bungo asks): a reflection-probe live pair WW_SKYBELOW_RED=0/1 at a cell edge and in an interior.
+
 ## CLOUD6d (2026-10-30, FIX1030C): one cloud profile set per weather, no towers beside puffs (on; WW_CLOUDVOL_PROFILESET=0 = before)
 
 - **What changed:** with Cloud Variety on, each weather's Low clouds now take ONE cloud type everywhere in its sky (the

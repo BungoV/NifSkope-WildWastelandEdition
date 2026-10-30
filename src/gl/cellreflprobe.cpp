@@ -35,6 +35,8 @@ BSD License - see nifskope.h
 #include <vector>
 
 /* ---- lane REFLPROBE1: the placed reflection probes (cellreflprobe.h, res/shaders/cell_refl*.{frag,glsl}) ---- */
+bool rtddgiSkyBelowRedNow();	// lane SKYBELOW2: SKYBELOW1's red (src/rtddgicell.cpp), read every frame (live)
+
 namespace
 {
 
@@ -709,6 +711,11 @@ void wwCellReflProbePass( Scene * scene, bool run )
 		prog->uni1i( "cellPass", 0 );
 		prog->uni1i( "cellProbe", 0 );
 		prog->uni1i( "rpRed", ( s.red >> 1 ) & 15 );
+		/* lane SKYBELOW2 (bungo 10-30, SKYBELOW1's rule for every probe): a G-buffer miss below the horizon is the
+		 * ground (outdoors the probe's own ground albedo x the sky from above, indoors 0), never the sky ambient
+		 * (res/shaders/cell_skybelow.glsl). Ships on; WW_SKYBELOW_RED=1 keeps today's main, live: it is in the hash */
+		const bool skyBelowRed = rtddgiSkyBelowRedNow();
+		prog->uni1i( "rpSkyBelow", skyBelowRed ? 0 : 1 );
 		auto uniF = [&]( const char * name, int cnt, quint64 h ) {
 			float v[4] = {};
 			const int l = prog->uniLocation( name );
@@ -740,6 +747,7 @@ void wwCellReflProbePass( Scene * scene, bool run )
 			h = mixF( h, r->globalUniforms->lightSourceAmbient[a] );
 		h = mix64( h, quint64( reinterpret_cast<std::uintptr_t>( G ) ) );
 		h = mix64( h, G ? quint64( G->rgba.size() ) : 0 );
+		h = mix64( h, skyBelowRed ? 0x5b2u : 0x5b1u );	// lane SKYBELOW2: a set relights every probe
 		std::vector<int> todo;
 		if ( g.slot[0].faces >= 6 && ( !g.slot[0].lit || g.slot[0].litHash != h ) )
 			todo.push_back( 0 );
@@ -840,7 +848,9 @@ void wwCellReflProbePass( Scene * scene, bool run )
 		.arg( ( s.red & 1 ) ? QStringLiteral( "(RED=fixed: material cube returned)" ) : QString() )
 		.arg( byRooms ? QStringLiteral( "rooms" ) : QStringLiteral( "grid" ) ).arg( cand.size() ).arg( resident ).arg( kPlaced )
 		.arg( placedLit ).arg( g.slot[0].lit ? QStringLiteral( "lit" ) : QStringLiteral( "capturing" ) )
-		.arg( s.all ? QStringLiteral( "all" ) : QStringLiteral( "2" ) ).arg( g.kb ) );
+		.arg( s.all ? QStringLiteral( "all" ) : QStringLiteral( "2" ) ).arg( g.kb )
+		+ ( rtddgiSkyBelowRedNow() ? QStringLiteral( " below-horizon miss=sky (WW_SKYBELOW_RED)" )	// lane SKYBELOW2
+			: QStringLiteral( " below-horizon miss=ground" ) ) );
 	if ( qEnvironmentVariableIsSet( "WW_CELL_REFLPROBE_TIME" ) && ( captured || relit ) )
 		std::fprintf( stderr, "reflprobe frame: captured=%d draws=%lld relit=%d cpu-ms=%lld\n", captured,
 			(long long) draws, relit, (long long) timer.elapsed() );
