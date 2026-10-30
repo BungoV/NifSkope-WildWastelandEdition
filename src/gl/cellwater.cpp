@@ -31,6 +31,7 @@
 #include <QVector>
 
 #include <algorithm>
+#include <atomic>
 #include <cmath>
 #include <cstdio>
 #include <vector>
@@ -280,6 +281,30 @@ bool wwCellWaterWanted( Scene * scene, int block )
 		return false;
 	const auto it = s.docs.constFind( scene->nifModel );
 	return it != s.docs.constEnd() && it->shapeBody.contains( block );
+}
+
+namespace {
+std::atomic<bool> wwFarWaterHeldFlag { false };	// lane FARWATER1: a sheet waited for the lookup this frame
+}
+
+bool wwCellWaterHeld( Scene * scene, int block )
+{
+	if ( !scene )
+		return false;
+	const WaterState & s = st();
+	const auto it = s.docs.constFind( scene->nifModel );
+	if ( it == s.docs.constEnd() || !it->farMask.contains( block ) )
+		return false;
+	WW_SWITCH_STATIC( QByteArray, red, wwEnv( "WW_CELL_FARWATER_RED" ).trimmed() );
+	if ( red == "nomask" || red == "early" || !wwCellWaterInfoBuilding( scene->nifModel ) )
+		return false;
+	wwFarWaterHeldFlag.store( true, std::memory_order_relaxed );
+	return true;
+}
+
+bool wwCellWaterWantsRepaint()
+{
+	return wwFarWaterHeldFlag.exchange( false, std::memory_order_relaxed );
 }
 
 bool wwCellWaterSsrWanted( Scene * scene )

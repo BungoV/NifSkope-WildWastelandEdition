@@ -3272,7 +3272,69 @@ template <typename T> T rd( const QByteArray & b, qsizetype at )
  *  big to hold) under a DEFAULT that asked for the fallback, the same write
  *  again without them: a version-2 file and one line saying why. An explicit
  *  --water-bodies keeps its refusal (lane WATER1). */
+static bool lodtWriteSourceOrV2Bare( const LodtSource & src, const QString & outDir,
+	const LodtOptions & opts, QString * outPath, QString * error );
+
+/*! Lane FARWATER1: the file lodtWriteSource will write, composed the way it
+ *  composes it (no folder is made here). */
+static QString lodtSourcePath( const LodtSource & src, const QString & outDir )
+{
+	if ( !src.outFile.isEmpty() )
+		return src.outFile;
+	return lodgenFo4csWorldDir( outDir, src.edid ) + QStringLiteral( "/" ) + src.edid + QStringLiteral( ".lodl" );
+}
+
+/*! Lane FARWATER1: A RE-BAKE KEEPS THE USER'S WATER MARKS.
+ *
+ *  The writer truncates the old .lodl and writes an empty stroke store, so
+ *  before this every re-bake lost the strokes and the hand edits of the body
+ *  table (name, class, colour, form) -- although watermark.h promises "a
+ *  re-bake ... keeps the user's work". Now the old file's marks are read
+ *  FIRST, the old file is moved aside as <file>.premarks, the bake writes, and
+ *  the marks go into the new file through the marking tool's own document
+ *  (bodies re-mapped by position, the solve, the save). The .premarks file is
+ *  removed only when every mark found a home; otherwise it stays as the way
+ *  back and the census says so. A file nobody marked costs one header read
+ *  and its bytes are what they always were.
+ *  Red: WW_LODL_MARK_CARRY_RED=drop -- the old path, the marks are lost. */
 static bool lodtWriteSourceOrV2( const LodtSource & src, const QString & outDir,
+	const LodtOptions & opts, QString * outPath, QString * error )
+{
+	const bool carryOn = !src.edid.isEmpty() && wwEnv( "WW_LODL_MARK_CARRY_RED" ).trimmed() != "drop";
+	if ( !carryOn )
+		return lodtWriteSourceOrV2Bare( src, outDir, opts, outPath, error );
+	const QString target = lodtSourcePath( src, outDir );
+	WaterMarkCarry carry;
+	QString note;
+	const bool haveMarks = waterMarkCarryTake( target, carry, &note );
+	QString keptAs;
+	if ( haveMarks || !note.isEmpty() ) {	// marks (or marks this reader could not take): keep the old file
+		keptAs = target + QStringLiteral( ".premarks" );
+		QFile::remove( keptAs );
+		if ( !QFile::rename( target, keptAs ) )
+			keptAs.clear();
+	}
+	QString written, err;
+	const bool ok = lodtWriteSourceOrV2Bare( src, outDir, opts, &written, &err );
+	if ( ok && haveMarks ) {
+		const bool all = waterMarkCarryPut( written, carry, &note );
+		if ( all && !keptAs.isEmpty() ) {
+			QFile::remove( keptAs );
+			keptAs.clear();
+		}
+	}
+	if ( !ok && !keptAs.isEmpty() && !QFileInfo::exists( target ) && QFile::rename( keptAs, target ) )
+		keptAs.clear();	// the bake failed: the marked file goes back where it was
+	if ( !keptAs.isEmpty() )
+		note += QStringLiteral( "; the file before this bake is kept as %1" ).arg( keptAs );
+	if ( ok && outPath )
+		*outPath = written;
+	if ( error )
+		*error = note.isEmpty() ? err : err + QStringLiteral( "\n  " ) + note;
+	return ok;
+}
+
+static bool lodtWriteSourceOrV2Bare( const LodtSource & src, const QString & outDir,
 	const LodtOptions & opts, QString * outPath, QString * error )
 {
 	QString err;

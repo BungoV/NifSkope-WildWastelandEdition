@@ -125,6 +125,8 @@ int wwCellWaterInfoUniforms( Scene * scene, int unit );
 void wwCellLandShoreUniforms( Scene * scene, bool terrain );
 //! One census line: what this document's water info is and what was uploaded (read back from the GL).
 QString wwCellWaterInfoEcho( const void * nif );
+//! Lane FARWATER1: the document's lookup is still building (not with WW_CELL_WATER_INFO_RED=off: the mask never applies)
+bool wwCellWaterInfoBuilding( const void * nif );
 
 //! Lane WATERUNDER1: one texel of the lookup on the CPU (the same word water_info.glsl reads).
 struct WwWaterInfoHit

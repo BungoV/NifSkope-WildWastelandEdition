@@ -189,6 +189,51 @@ struct WaterFlowGrid
 		const std::vector<quint8> & stop, int maxCells ) const;
 };
 
+/*! Lane FARWATER1: what a RE-BAKE must carry from the old `.lodl` into the new one.
+ *
+ *  The writer (lodtfile.cpp lodtBuildWater) always writes an EMPTY stroke store
+ *  and a table with no names, colours or classes set by hand, and it truncates
+ *  the old file: before this, every re-bake threw the user's marks away. Body
+ *  ids are the classifier's numbering and can change between bakes, so a body
+ *  is carried by WHERE it is -- world samples of its old texels, voted on the
+ *  new body plane -- never by its id alone. */
+struct WaterMarkCarry
+{
+	struct Body
+	{
+		quint16 oldId = 0;
+		LodtWaterBody rec;                  //!< the record as the old file held it
+		QString name;
+		QVector<WaterStrokePoint> where;    //!< world samples of its old texels (~kSamples)
+	};
+	static constexpr int kSamples = 1024;   //!< samples a body, at most ~2x this
+	//! the table fields the PANEL owns (watermark.cpp solve(): bits 0, 2, 5)
+	static constexpr quint8 kUserFlags = quint8( ( 1u << 0 ) | ( 1u << 2 ) | ( 1u << 5 ) );
+	QVector<Body> bodies;                   //!< every body a user edit or a stroke names
+	QVector<WaterStroke> strokes;           //!< the old store, in its order
+	int cellMinX = 0, cellMinY = 0;         //!< the old grid: a raster layer is in its texels
+	quint32 idRate = 0;
+	int userBodies = 0;                     //!< bodies with a name, colour, class or form set by hand
+	bool any() const { return !strokes.isEmpty() || userBodies > 0; }
+};
+
+//! What carryIn() did, every number printed in one line by the writer.
+struct WaterMarkCarryReport
+{
+	int bodies = 0, mapped = 0, moved = 0, unmapped = 0, shared = 0;
+	int strokes = 0, carried = 0, resolved = 0, dropped = 0, rastersDropped = 0;
+	QString line() const;
+};
+
+/*! Lane FARWATER1: read the marks out of `path` (a `.lodl` about to be
+ *  re-baked). False with `note` empty when there is nothing to carry (no file,
+ *  version 1-2, no strokes and no body edited by hand); false with a note when
+ *  the file has marks this reader cannot take. */
+bool waterMarkCarryTake( const QString & path, WaterMarkCarry & carry, QString * note );
+/*! And put them into the freshly written `path`: re-mapped bodies, the strokes,
+ *  the solve, the save. `note` is the census line either way. */
+bool waterMarkCarryPut( const QString & path, const WaterMarkCarry & carry, QString * note );
+
 /*! An open `.lodl` version-3 file, its body table, its strokes, and the solve.
  *
  *  It does NOT hold a plane in memory. The body-ID plane is 75 MB at the
@@ -340,6 +385,18 @@ public:
 	bool sweep( const std::function<void( int px, int py, quint16 id,
 		quint16 wordAuto, quint16 wordNow )> & cb, QString * error ) const;
 
+	/*! Lane FARWATER1: the user's marks and hand edits, with world samples of
+	 *  every body they name (a re-bake's left-hand side). */
+	bool carryOut( WaterMarkCarry & c, QString * error ) const;
+	/*! ...and onto THIS file's bodies: each carried body goes to the new body
+	 *  most of its samples land on (at least a quarter of them), its panel
+	 *  fields and flag bits 0, 2, 5 are copied, and the strokes follow it. A
+	 *  stroke whose body found no home is resolved by its points, as addStroke
+	 *  does; one that lands on no water is dropped and counted. Nothing is
+	 *  solved or saved here. `byId` is the red (WW_LODL_MARK_CARRY_RED=byid): every body keeps its OLD id,
+	 *  wherever the classifier now numbers it. */
+	void carryIn( const WaterMarkCarry & c, WaterMarkCarryReport & rep, bool byId = false );
+
 private:
 	struct Field;           //!< a solved body's own little grid
 	struct Plane            //!< one tiled zlib plane container, as it sits on disk
@@ -403,6 +460,7 @@ private:
 	Plane idPlane, flowPlane, shorePlane;
 	Plane dyePlane;
 	Plane surfacePlane;              //!< lane WATER1: carried through verbatim, rebased
+	Plane skyPlane;                  //!< lane FARWATER1: the version-4 sky plane, verbatim, rebased
 	QByteArray originalTable;        //!< the table's bytes as read, for the repack gate
 	/*! The body table as it was READ.  flowX, flowY, flowSource, confidence,
 	 *  source, outlet and flag bit 1 are DERIVED from the strokes, so every
@@ -422,6 +480,7 @@ private:
 	quint64 oBody = 0, oName = 0, oId = 0, oFlow = 0, oShore = 0, oStroke = 0;
 	quint64 oDye = 0;
 	quint64 oSurface = 0;            //!< lane WATER1: the u64 at 0xF8, 0 when absent
+	quint64 oSky = 0;                //!< lane FARWATER1: the version-4 u64 at 0x100, 0 when absent
 	quint32 nameLen = 0, strokeLen = 0, bodyStride = 0;
 	quint32 idRate = 0, flowRate = 0, shoreRate = 0, shoreQuantum = 32, flowEnc = 0;
 	quint32 sect = 0;
@@ -445,5 +504,11 @@ private:
  *    undo             remove the stroke, re-derive: byte-identical to the start
  */
 bool lodtWaterMarkSelfTest( const QString & path, QString * text, QString * error );
+
+/*! Lane FARWATER1: `lodl <file.lodl> --water-mark-fixture` marks a file the
+ *  way a user would -- a stroke, names, a colour, a still lake, a dye mouth,
+ *  the dye knob, a class by hand -- and saves it. The re-bake gate
+ *  (tests/farwater1) marks a bake with it, bakes again, and compares. */
+bool lodtWaterMarkFixture( const QString & path, QString * text, QString * error );
 
 #endif // WATERMARK_H

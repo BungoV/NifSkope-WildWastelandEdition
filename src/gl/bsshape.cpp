@@ -313,6 +313,10 @@ void BSShape::drawShapes( NodeList * secondPass )
 	if ( scene->flatGrey && !scene->selecting )
 		return;
 
+	// lane FARWATER1: far water waits for its dry mask's lookup (SHORE2 drew it whole over dry land for ~2 s)
+	if ( wwCellWaterHeld( scene, id() ) )
+		return;
+
 	// Draw translucent meshes in second pass
 	if ( secondPass && drawInSecondPass ) {
 		secondPass->add( this );
