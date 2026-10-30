@@ -74,6 +74,8 @@ struct CvState
 	double drawnSecs = 0.0;	// lane CLOUD2C: the clock of the last draw (the bind hands readers its wind)
 	int variety = 0;	// lane CLOUD5: the Cloud Variety row
 	bool varietyPinned = false;
+	int accum = 0;	// lane CLOUDBAND1: Cloud Accumulation (WW_CLOUDVOL_ACCUM)
+	int ambDark = 0;	// lane CLOUDBAND1 (b): the sky's ambient through the cloud above (WW_CLOUDVOL_AMBDARK)
 };
 
 CvState & cs()
@@ -109,6 +111,15 @@ CvState & cs()
 		} else {
 			s.variety = QSettings().value( QLatin1StringView( kVarKey ), 0 ).toInt() != 0 ? 1 : 0;
 		}
+		/* lane CLOUDBAND1 (bungo 10-30 "the clouds have banding"): Cloud Accumulation, ships Off; a set is live (this
+		 * block re-reads on any WW_CLOUDVOL* move). On: blue noise step offsets and the fresh march accumulated into the
+		 * clamped history (cloud_march_a / cloud_fly_a / cloud_resolve_a); Off draws the old programs unchanged. */
+		const QString a = wwEnvStr( "WW_CLOUDVOL_ACCUM" ).trimmed().toLower();
+		s.accum = ( a == QLatin1StringView( "1" ) || a == QLatin1StringView( "on" ) ) ? 1 : 0;
+		/* lane CLOUDBAND1 (b), RDR2's darker sky light inside thick cloud: the march's ambient through the column above
+		 * (cloud_march_step.glsl cvAmbDark; gate tests/spells/cloudamb_check.py), ships Off, live. Off: the height ramp. */
+		const QString ad = wwEnvStr( "WW_CLOUDVOL_AMBDARK" ).trimmed().toLower();
+		s.ambDark = ( ad == QLatin1StringView( "1" ) || ad == QLatin1StringView( "on" ) ) ? 1 : 0;
 	}
 	return s;
 }
@@ -152,6 +163,7 @@ struct CvGpu
 	float calMidV[V::kCalN] = {};
 	GLuint blue = 0;	// lane CLOUD5 round 2: the variety march's step offsets (EA's FAST blue noise sheet), 0 = IGN
 	bool blueTried = false;
+	unsigned long long accFrom = 0;	// lane CLOUDBAND1: g.frame when the history last began (accumAlpha's cycles)
 	// lane CLOUD2B: the scene's depth (wwCloudVolSceneDepth, before the tone map) and what the pass over the scene needs
 	bool drewNow = false;	// the volume drew in this frame's backdrop
 	GLuint sceneTex = 0;	// the linear frame's farthest window depth (cellhdr.cpp owns it)
@@ -506,6 +518,9 @@ struct CvRedo
 	int tier = 0, hw = 1, hh = 1, mw = 1, mh = 1, stride = 1, cur = 0, prev = 1;
 	float phase[2] = {}, frameNo = 0.0f;
 	int blueSlice = 0;	// lane CLOUD5 round 2: the blue noise slice of this 16-frame refresh cycle
+	bool accum = false;	// lane CLOUDBAND1: the *_a twins (Cloud Accumulation)
+	float accAlpha = 1.0f;	// the fresh march's weight (cloudvolmath.h accumAlpha; 1 = none)
+	bool ambDark = false;	// lane CLOUDBAND1 (b): cvAmbDark
 	double secs = 0.0;
 	bool histOn = false;
 	float prevCam[9] = {}, prevProj[4] = {}, prevKm[3] = {};
@@ -523,7 +538,10 @@ bool marchPass( Renderer * r, CvGpu & g, const CvRedo & d, const WwAtmoFrame & f
 	auto fn = r->fn;
 	const bool fly = wwCloudFlyActive( r );	// lane CLOUD4: the march with the fly-through box
 	const bool var = d.b.variety;	// lane CLOUD5: the Cloud Variety twins
+	// lane CLOUDBAND1: Cloud Accumulation's twins take blue noise offsets (the variety twins have them already)
+	const bool acc = d.accum && !var, blue = var || d.accum;
 	NifSkopeOpenGLContext::Program * p = r->useProgram( var ? ( fly ? "cloud_fly_v.prog" : "cloud_march_v.prog" )
+														   : acc ? ( fly ? "cloud_fly_a.prog" : "cloud_march_a.prog" )
 														   : ( fly ? "cloud_fly.prog" : "cloud_march.prog" ) );
 	if ( !p )
 		return false;
@@ -560,8 +578,9 @@ bool marchPass( Renderer * r, CvGpu & g, const CvRedo & d, const WwAtmoFrame & f
 	p->uni1i( "cvTaps", pr.taps );
 	p->uni1i( "cvOctaves", noOct ? 1 : 4 );
 	p->uni1f( "cvLightKm", var ? varLightKm( d.b, pr ) : pr.lightKm );
-	if ( var ) {
+	if ( var )
 		p->uni1f( "cvAmbKm", varAmbKm( d.b ) );
+	if ( blue ) {
 		// lane CLOUD5 round 2: the step offsets from one blue noise slice a refresh cycle; red ign: CLOUD2's IGN (the stripes)
 		fn->glActiveTexture( GL_TEXTURE8 );
 		fn->glBindTexture( GL_TEXTURE_2D, g.blue );
@@ -579,6 +598,7 @@ bool marchPass( Renderer * r, CvGpu & g, const CvRedo & d, const WwAtmoFrame & f
 	p->uni1f( "cvMsOn", noMs ? 0.0f : 1.0f );
 	p->uni1f( "cvMsG", V::msMeanCosine( drop ) );
 	p->uni1f( "cvTopOn", red( "notop" ) ? 0.0f : 1.0f );	// lane CLOUD2C: the light the cloud below reflects up
+	p->uni1f( "cvAmbDark", d.ambDark && !red( "flatamb" ) ? 1.0f : 0.0f );	// lane CLOUDBAND1 (b); red flatamb: the ramp
 	// lane CLOUDLOOK1: literal names (the location cache keys on the name's address; a heap name per loop set all three
 	// through cvTint[0]). Red tintname: the old heap names.
 	static const char * const kTint[3] = { "cvTint[0]", "cvTint[1]", "cvTint[2]" };
@@ -600,7 +620,7 @@ bool marchPass( Renderer * r, CvGpu & g, const CvRedo & d, const WwAtmoFrame & f
 	r->stopProgram();
 	if ( fly )
 		wwCloudFlyRelease( r, 7 );
-	if ( var ) {
+	if ( blue ) {
 		fn->glActiveTexture( GL_TEXTURE8 );
 		fn->glBindTexture( GL_TEXTURE_2D, 0 );
 	}
@@ -611,7 +631,7 @@ bool marchPass( Renderer * r, CvGpu & g, const CvRedo & d, const WwAtmoFrame & f
 bool resolvePass( Renderer * r, CvGpu & g, const CvRedo & d )
 {
 	auto fn = r->fn;
-	NifSkopeOpenGLContext::Program * p = r->useProgram( "cloud_resolve.prog" );
+	NifSkopeOpenGLContext::Program * p = r->useProgram( d.accum ? "cloud_resolve_a.prog" : "cloud_resolve.prog" );
 	if ( !p )
 		return false;
 	fn->glBindFramebuffer( GL_FRAMEBUFFER, g.hist[d.cur].fbo );
@@ -636,6 +656,10 @@ bool resolvePass( Renderer * r, CvGpu & g, const CvRedo & d )
 	p->uni3f( "cvPrevCamKm", d.prevKm[0], d.prevKm[1], d.prevKm[2] );
 	p->uni1f( "cvHistOn", d.histOn ? 1.0f : 0.0f );
 	p->uni1f( "cvReproj", red( "noreproj" ) ? 0.0f : 1.0f );
+	if ( d.accum ) {	// lane CLOUDBAND1: reds noaccum (weight 1) and noclamp (the history unclamped)
+		p->uni1f( "cvAccAlpha", red( "noaccum" ) ? 1.0f : d.accAlpha );
+		p->uni1f( "cvAccClamp", red( "noclamp" ) ? 0.0f : 1.0f );
+	}
 	quad( r );
 	r->stopProgram();
 	return true;
@@ -1003,6 +1027,13 @@ bool wwCloudVolDraw( Scene * scene, const WwCloudVolView & view, QStringList & d
 	std::copy( phase, phase + 2, d.phase );
 	d.frameNo = everyPixel ? 0.0f : float( g.frame % 64 );
 	d.blueSlice = everyPixel ? 0 : int( ( g.frame / 16 ) % 64 );	// one slice for all 16 phases: the picture is one slice
+	/* lane CLOUDBAND1: the accumulation's weight by refresh cycle since the history began (a reset, a resize, a jump);
+	 * a harness run marches every pixel every frame, so it takes each march whole (weight 1: a picture of its pins) */
+	d.accum = s.accum != 0;
+	d.ambDark = s.ambDark != 0;
+	if ( !histOn )
+		g.accFrom = g.frame;
+	d.accAlpha = everyPixel ? 1.0f : V::accumAlpha( static_cast<long long>( ( g.frame - g.accFrom ) / 16 ) );
 	d.secs = view.cloudSeconds;
 	d.histOn = histOn;
 	std::copy( g.prevCam, g.prevCam + 9, d.prevCam );
@@ -1014,11 +1045,12 @@ bool wwCloudVolDraw( Scene * scene, const WwCloudVolView & view, QStringList & d
 	// 1. the march: one fragment a history pixel of this frame's phase; 2. the resolve into this frame's history
 	if ( ok && !marchPass( r, g, d, f, m, sceneOn ? g.sceneTex : 0 ) ) {
 		ok = false;
-		why = b.variety ? QStringLiteral( "cloud_march_v.prog did not link" ) : QStringLiteral( "cloud_march.prog did not link" );
+		why = b.variety ? QStringLiteral( "cloud_march_v.prog did not link" )
+			: d.accum ? QStringLiteral( "cloud_march_a.prog did not link" ) : QStringLiteral( "cloud_march.prog did not link" );
 	}
 	if ( ok && !resolvePass( r, g, d ) ) {
 		ok = false;
-		why = QStringLiteral( "cloud_resolve.prog did not link" );
+		why = d.accum ? QStringLiteral( "cloud_resolve_a.prog did not link" ) : QStringLiteral( "cloud_resolve.prog did not link" );
 	}
 	d.ok = ok;
 	if ( !ok )
@@ -1101,6 +1133,17 @@ bool wwCloudVolDraw( Scene * scene, const WwCloudVolView & view, QStringList & d
 			.arg( double( b.var.spread ), 0, 'f', 3 ).arg( double( b.topKm[0] - b.baseKm[0] ), 0, 'f', 2 )
 			.arg( double( varLightKm( b, pr ) ), 0, 'f', 2 );
 	}
+	if ( d.accum ) {	// lane CLOUDBAND1: the echo a row's notes need to prove the accumulation drew (absent when Off)
+		for ( const char * w : { "noaccum", "noclamp" } )
+			if ( red( w ) )
+				reds += QStringLiteral( ",RED=%1" ).arg( QLatin1StringView( w ) );
+		if ( !b.variety && red( "ign" ) )
+			reds += QStringLiteral( ",RED=ign" );
+		reds += QStringLiteral( ",accum=%1%2" ).arg( double( d.accAlpha ), 0, 'f', 3 )
+			.arg( g.blue ? QString() : QStringLiteral( " (no blue noise: IGN)" ) );
+	}
+	if ( d.ambDark )	// lane CLOUDBAND1 (b): the echo a row's notes need (absent when Off)
+		reds += red( "flatamb" ) ? QStringLiteral( ",RED=flatamb" ) : QStringLiteral( ",ambdark=column" );
 	// lane CLOUD2C: clip = which scene depth ends the march (last = the last paint's, this = this paint's, after the scene)
 	const QString clip = sceneOn ? QStringLiteral( "last" ) : g.redo ? QStringLiteral( "this" ) : QStringLiteral( "none" );
 	s.last = ok ? QStringLiteral( "volclouds:%1(hist=%2x%3,march=%4x%5,steps=%6,taps=%7,key=%8,map=%9,mem=%10MB,clip=%11,"
