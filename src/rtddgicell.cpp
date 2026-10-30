@@ -15,6 +15,7 @@
 #include "wwswitch.h"
 #include "gl/celllights.h"
 #include "gl/cellunits.h"
+#include "gl/cellssr.h"      // lane RESTIRDI1: wwCellAoTargets (the shared opaque pass ReSTIR reads)
 #include "gl/glscene.h"
 #include "gl/lookdevstage.h"   // lane RTXFIX1: wwLookdevFogUniforms (the probes view in the frame takes the fog)
 #include "gl/renderer.h"
@@ -860,6 +861,313 @@ std::vector<Vector3> sphereLevel( int level )
 
 } // namespace
 
+// ------------------------------------------------------------------ lane RESTIRDI1 (2026-10-30): the RT quality preset
+/* bungo's ruling (10-29): Low = the ray-traced GI volume only (today), Medium = + ReSTIR DI (ray-traced shadows for the
+ * shadow-casting lights in place of the 16 depth cubes), High = + ReSTIR GI, Ultra = + ReSTIR PT. High and Ultra are
+ * Medium until those lanes land (the row's tooltip says so). WW_CELL_RT_PRESET (low|medium|high|ultra or 0..3) pins it,
+ * else the Show menu row (WW/CellRtPreset, harness-scoped settings: a harness starts Low). Live: the row reloads the
+ * shaders (WW_CELL_RESTIR is a loader define) and the next frame's pass imports or frees its buffers. */
+namespace {
+
+int presetParse( const QByteArray & v0 )
+{
+	const QByteArray v = v0.trimmed().toLower();
+	if ( v == "medium" || v == "1" )
+		return 1;
+	if ( v == "high" || v == "2" )
+		return 2;
+	if ( v == "ultra" || v == "3" )
+		return 3;
+	return 0;
+}
+
+struct PresetRow
+{
+	bool loaded = false;
+	int gui = 0;
+};
+
+PresetRow & presetRow()
+{
+	static PresetRow p;
+	if ( !p.loaded ) {
+		p.loaded = true;
+		QSettings s( QStringLiteral( "NifTools" ), rowSettingsApp() );
+		p.gui = std::clamp( s.value( QStringLiteral( "WW/CellRtPreset" ), 0 ).toInt(), 0, 3 );
+	}
+	return p;
+}
+
+//! WW_CELL_RESTIR_RED (live, read every frame): novis, nopdf, notemporal, noclamp, nohole (restir_common.glsl RESTIR_BIT_*)
+int restirRedBits()
+{
+	int b = 0;
+	for ( const QString & r : wwEnvStr( "WW_CELL_RESTIR_RED" ).split( QLatin1Char( ',' ), Qt::SkipEmptyParts ) ) {
+		const QString t = r.trimmed();
+		b |= t == QLatin1String( "novis" ) ? 1 : t == QLatin1String( "nopdf" ) ? 2 : t == QLatin1String( "notemporal" ) ? 4
+			: t == QLatin1String( "noclamp" ) ? 8 : t == QLatin1String( "nohole" ) ? 16 : 0;
+	}
+	return b;
+}
+
+//! the pass's GL side: the shared g-buffer copy (a pixel-pack buffer) and the ratio (a texture buffer, RG32F)
+struct RestirGl
+{
+	const void * owner = nullptr;
+	const bakert::DdgiGpuSession * session = nullptr;
+	int W = 0, H = 0;
+	GLuint mem[2] = { 0, 0 }, buf[2] = { 0, 0 }, tex = 0, semVk = 0, semGl = 0;
+	bool ready = false, history = false;
+	quint32 frame = 0;
+	qint64 runs = 0, busy = 0;
+	float prows[12] = { 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0 }, pproj[4] = { 1, 1, 0, 0 };
+	QString last;
+};
+
+RestirGl & restirGl()
+{
+	static RestirGl * g = new RestirGl;   // never destroyed (as cell())
+	return *g;
+}
+
+void restirSay( RestirGl & G, const QString & line )
+{
+	if ( line == G.last )
+		return;
+	G.last = line;
+	std::fprintf( stderr, "restir cell: %s\n", qPrintable( line ) );
+	std::fflush( stderr );
+}
+
+void restirDropGl( RestirGl & G, Renderer * r )
+{
+	if ( r && G.owner == r ) {
+		auto fn = r->fn;
+		GlShare & sh = glShare();
+		if ( G.tex )
+			fn->glDeleteTextures( 1, &G.tex );
+		for ( GLuint & b : G.buf )
+			if ( b )
+				fn->glDeleteBuffers( 1, &b );
+		if ( sh.ok ) {
+			for ( GLuint & m : G.mem )
+				if ( m )
+					sh.deleteMem( 1, &m );
+			for ( GLuint * s : { &G.semVk, &G.semGl } )
+				if ( *s )
+					sh.deleteSem( 1, s );
+		}
+	}
+	const QString last = G.last;
+	G = RestirGl();
+	G.last = last;
+}
+
+bool restirImport( RestirGl & G, Renderer * r, bakert::DdgiGpuSession * s, int W, int H, QString * why )
+{
+	GlShare & g = glShare();
+	if ( !g.ok ) {
+		*why = g.why;
+		return false;
+	}
+	bakert::RestirGpuShare sh;
+	if ( !bakert::restirGpuShare( s, W, H, &sh ) ) {
+		*why = QString::fromStdString( sh.why );
+		return false;
+	}
+	auto fn = r->fn;
+	for ( int i = 0; i < 16 && fn->glGetError() != GL_NO_ERROR; i++ ) {}
+	G.owner = r;
+	const GLint dedicated = 1;
+	void * mems[2] = { sh.gbufMemory, sh.outMemory };
+	const quint64 sizes[2] = { sh.gbufSize, sh.outSize };
+	const GLsizeiptr bytes[2] = { GLsizeiptr( W ) * H * 16, GLsizeiptr( W ) * H * 8 };
+	const GLenum targets[2] = { GL_PIXEL_PACK_BUFFER, GL_TEXTURE_BUFFER };
+	for ( int k = 0; k < 2; k++ ) {
+		g.createMem( 1, &G.mem[k] );
+		g.memParam( G.mem[k], kGlDedicatedMemoryObject, &dedicated );
+		g.importMem( G.mem[k], sizes[k], kGlHandleOpaqueWin32, mems[k] );
+		fn->glGenBuffers( 1, &G.buf[k] );
+		fn->glBindBuffer( targets[k], G.buf[k] );
+		g.bufferStorageMem( targets[k], bytes[k], G.mem[k], 0 );
+		fn->glBindBuffer( targets[k], 0 );
+	}
+	g.genSem( 1, &G.semVk );
+	g.importSem( G.semVk, kGlHandleOpaqueWin32, sh.vkDone );
+	g.genSem( 1, &G.semGl );
+	g.importSem( G.semGl, kGlHandleOpaqueWin32, sh.glDone );
+	GLint prevActive = 0;
+	fn->glGetIntegerv( GL_ACTIVE_TEXTURE, &prevActive );
+	fn->glActiveTexture( GLenum( GL_TEXTURE0 + WwCellUnit::Restir ) );
+	fn->glGenTextures( 1, &G.tex );
+	fn->glBindTexture( GL_TEXTURE_BUFFER, G.tex );
+	fn->glTexBuffer( GL_TEXTURE_BUFFER, GL_RG32F, G.buf[1] );
+	fn->glBindTexture( GL_TEXTURE_BUFFER, 0 );
+	fn->glActiveTexture( GLenum( prevActive ) );
+	const GLenum err = fn->glGetError();
+	for ( void * h : { sh.gbufMemory, sh.outMemory, sh.vkDone, sh.glDone } )
+		bakert::ddgiGpuCloseHandle( h );
+	if ( err != GL_NO_ERROR ) {
+		*why = QStringLiteral( "the GL import failed (GL error 0x%1)" ).arg( qulonglong( err ), 0, 16 );
+		return false;
+	}
+	G.session = s;
+	G.W = W;
+	G.H = H;
+	return true;
+}
+
+//! the ratio's texture buffer and size on a program compiled under WW_CELL_RESTIR (cell_lights.glsl cellRestirAt)
+void restirUniforms( Renderer * r, NifSkopeOpenGLContext::Program * prog )
+{
+	const int loc = prog->uniLocation( "cellRestirOn" );
+	if ( loc < 0 )
+		return;
+	RestirGl & G = restirGl();
+	const bool on = G.ready && G.owner == r && G.tex;
+	auto fn = r->fn;
+	GLint prevActive = 0;
+	fn->glGetIntegerv( GL_ACTIVE_TEXTURE, &prevActive );
+	fn->glActiveTexture( GLenum( GL_TEXTURE0 + WwCellUnit::Restir ) );
+	fn->glBindTexture( GL_TEXTURE_BUFFER, on ? G.tex : 0 );
+	fn->glActiveTexture( GLenum( prevActive ) );
+	prog->uni1i( "cellRestir", WwCellUnit::Restir );
+	prog->uni1b_l( loc, on );
+	prog->uni4f( "cellRestirSize", FloatVector4( float( G.W ), float( G.H ), 0.0f, 0.0f ) );
+}
+
+} // namespace
+
+bool rtddgiRtPresetPinned()
+{
+	return wwEnvIsSet( "WW_CELL_RT_PRESET" );
+}
+
+int rtddgiRtPreset()
+{
+	if ( wwEnvIsSet( "WW_CELL_RT_PRESET" ) )
+		return presetParse( wwEnv( "WW_CELL_RT_PRESET" ) );
+	return presetRow().gui;
+}
+
+void rtddgiRtPresetSet( int preset )
+{
+	PresetRow & p = presetRow();
+	p.gui = std::clamp( preset, 0, 3 );
+	rowWrite( QStringLiteral( "WW/CellRtPreset" ), p.gui );
+}
+
+bool rtddgiRestirShaderDefine()
+{
+	return rtddgiRtPreset() >= 1 && rtddgiCellShaderDefine();
+}
+
+void rtddgiRestirPass( Scene * scene )
+{
+	RestirGl & G = restirGl();
+	G.ready = false;
+	Renderer * r = scene ? scene->renderer : nullptr;
+	if ( !r || scene->selecting || !scene->nifModel )
+		return;
+	if ( !rtddgiRestirShaderDefine() ) {
+		if ( G.owner ) {
+			restirDropGl( G, r );
+			restirSay( G, QStringLiteral( "freed (the RT quality is Low)" ) );
+		}
+		return;
+	}
+	Cell & c = cell();
+	if ( !c.live || !c.live->live.isOpen() || c.nif != scene->nifModel || c.glOwner != r ) {
+		restirSay( G, QStringLiteral( "waiting for the ray-traced GI volume (ReSTIR traces its BVH); the shadow lights are unshadowed meanwhile" ) );
+		return;
+	}
+	if ( !c.interop ) {
+		restirSay( G, QStringLiteral( "refused(the volume has no GL interop: %1)" ).arg( c.interopWhy ) );
+		return;
+	}
+	WwCellAoTargets t;
+	if ( !wwCellAoTargets( scene, t ) || !t.gbuf || t.w <= 0 || t.h <= 0 ) {
+		restirSay( G, QStringLiteral( "refused(no shared opaque pass this frame)" ) );
+		return;
+	}
+	bakert::DdgiGpuSession * s = c.live->live.session();
+	if ( G.owner != r || G.session != s || G.W != t.w || G.H != t.h ) {
+		restirDropGl( G, r );
+		QString why;
+		if ( !restirImport( G, r, s, t.w, t.h, &why ) ) {
+			restirDropGl( G, r );
+			restirSay( G, QStringLiteral( "refused(%1)" ).arg( why ) );
+			return;
+		}
+	}
+	auto fn = r->fn;
+	GlShare & sh = glShare();
+	// the shared g-buffer into the device's buffer (a GPU copy through the pixel-pack binding)
+	GLint prevActive = 0, prevPack = 0;
+	fn->glGetIntegerv( GL_ACTIVE_TEXTURE, &prevActive );
+	fn->glGetIntegerv( GL_PIXEL_PACK_BUFFER_BINDING, &prevPack );
+	fn->glActiveTexture( GLenum( GL_TEXTURE0 + WwCellUnit::Restir ) );
+	fn->glBindTexture( GL_TEXTURE_2D, t.gbuf );
+	fn->glBindBuffer( GL_PIXEL_PACK_BUFFER, G.buf[0] );
+	fn->glPixelStorei( GL_PACK_ALIGNMENT, 4 );
+	fn->glGetTexImage( GL_TEXTURE_2D, 0, GL_RGBA, GL_FLOAT, nullptr );
+	fn->glBindBuffer( GL_PIXEL_PACK_BUFFER, GLuint( prevPack ) );
+	fn->glBindTexture( GL_TEXTURE_2D, 0 );
+	fn->glActiveTexture( GLenum( prevActive ) );
+	// the camera: view -> world rows (celllights.cpp cellRow), moved into the soup's local frame; the frame's projection
+	bakert::RestirGpuIn in;
+	const Transform & vt = scene->view;
+	const float sc = vt.scale != 0.0f ? vt.scale : 1.0f;
+	for ( int k = 0; k < 3; k++ ) {
+		float w = 0.0f;
+		for ( int j = 0; j < 3; j++ )
+			w -= vt.rotation( j, k ) * vt.translation[j];
+		for ( int j = 0; j < 3; j++ )
+			in.rows[k * 4 + j] = vt.rotation( j, k ) / sc;
+		in.rows[k * 4 + 3] = w / sc;
+	}
+	in.rows[3] = float( double( in.rows[3] ) - c.live->live.localX() );
+	in.rows[7] = float( double( in.rows[7] ) - c.live->live.localY() );
+	const auto & pm = r->globalUniforms->projectionMatrix;
+	in.proj[0] = pm[0][0];
+	in.proj[1] = pm[1][1];
+	in.proj[2] = pm[2][0];
+	in.proj[3] = pm[2][1];
+	std::copy( G.prows, G.prows + 12, in.prows );
+	std::copy( G.pproj, G.pproj + 4, in.pproj );
+	in.history = G.history;
+	in.W = t.w;
+	in.H = t.h;
+	in.frame = G.frame++;
+	in.red = restirRedBits();
+	const std::vector<float> & pl = c.live->live.packedLights();
+	for ( size_t i = 0; i + 31 < pl.size(); i += 32 )
+		if ( pl[i + 30] > 0.5f )
+			in.cand.push_back( int( i / 32 ) );
+	in.beforeSubmit = [&G, &sh, fn]() {
+		sh.signalSem( G.semGl, 2, G.buf, 0, nullptr, nullptr );
+		fn->glFlush();
+		return true;
+	};
+	bakert::RestirGpuOut out;
+	if ( !bakert::restirGpuStep( s, in, &out ) ) {
+		G.history = false;
+		G.busy += out.busy ? 1 : 0;
+		restirSay( G, out.busy ? QStringLiteral( "busy (a bake holds the device): this frame unshadowed" )
+			: QStringLiteral( "refused(%1)" ).arg( QString::fromStdString( out.why ) ) );
+		return;
+	}
+	sh.waitSem( G.semVk, 2, G.buf, 0, nullptr, nullptr );
+	G.ready = true;
+	G.history = true;
+	std::copy( in.rows, in.rows + 12, G.prows );
+	std::copy( in.proj, in.proj + 4, G.pproj );
+	if ( ( G.runs++ % 64 ) == 0 )
+		restirSay( G, QStringLiteral( "on %1 x %2, %3 shadow lights of %4 (candidates %5, neighbours %6), frame %7, device wall %8 ms, red %9" )
+			.arg( t.w ).arg( t.h ).arg( in.cand.size() ).arg( pl.size() / 32 ).arg( in.candidates ).arg( in.spatial ).arg( in.frame )
+			.arg( out.msWall, 0, 'f', 3 ).arg( in.red ) );
+}
+
 bool rtddgiCellPinned()
 {
 	return wwEnvIsSet( "WW_CELL_RTDDGI" );
@@ -873,7 +1181,7 @@ bool rtddgiCellOn()
 	}
 	Cell & c = cell();
 	loadRows( c );
-	return c.guiOn;
+	return c.guiOn || rtddgiRtPreset() >= 1;   // lane RESTIRDI1: Medium and up trace on the volume's BVH
 }
 
 void rtddgiCellSetOn( bool on )
@@ -1512,6 +1820,7 @@ void rtddgiCellUniforms( Scene * scene )
 	NifSkopeOpenGLContext::Program * prog = r ? r->getCurrentProgram() : nullptr;
 	if ( !prog )
 		return;
+	restirUniforms( r, prog );   // lane RESTIRDI1: a program compiled under WW_CELL_RESTIR (else no location: nothing)
 	const int locOn = prog->uniLocation( "cellDdgiOn" );
 	if ( locOn < 0 )
 		return;   // a program without the read: with the switch off, every program

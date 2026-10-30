@@ -4255,6 +4255,7 @@ void GLView::paintGL()
 	PassTime::begin( PassTime::Obscurance );	// lane PERF1: one bracket per pass
 	wwCellAoPass( scene, cellPasses );
 	PassTime::end( PassTime::Obscurance );
+	rtddgiRestirPass( scene );	// lane RESTIRDI1: the RT quality preset's ReSTIR DI on that pass's g-buffer (Low: nothing)
 	wwCellOceanPass( scene, cellPasses );	// lane WATERLOOK1: the wind's waves, before any pass that draws water
 	PassTime::begin( PassTime::Reflections );
 	wwCellSsrPass( scene, cellPasses );	// lane SSR1: needs that pass's depth

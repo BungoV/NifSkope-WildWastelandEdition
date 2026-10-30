@@ -1,0 +1,270 @@
+#version 460
+// Lane RESTIRDI1 (2026-10-30): ReSTIR DI for the shadow-casting cell lights, one invocation a pixel. The CPU twin is
+// src/restirmath.h restir::frame() (passCandidates = mode 0, passSpatial = mode 1, accumulate = mode 2, passRatio =
+// mode 3); the per-pixel rules are src/rtddgi/restir_common.glsl (MIRROR restirmath.h). Set 0 is the DDGI volume's own
+// descriptor set (its TLAS, true triangles, alpha masks and packed lights, ddgi_common.glsl), set 1 ReSTIR's buffers.
+// The g-buffer is the cell view's shared opaque pass (view normal, linear depth; 1e6 none), bottom row first.
+#extension GL_EXT_ray_query : require
+#extension GL_GOOGLE_include_directive : require
+layout( local_size_x = 64 ) in;
+#include "ddgi_common.glsl"
+#include "restir_common.glsl"
+
+struct RestirParams {
+	ivec4 size;       // W, H, candidates in the list, frame
+	ivec4 opts;       // candidates a pixel (C), neighbours (K), the ratio's window half-size, red bits
+	vec4 knobs;       // neighbour radius (pixels), shadow-ray bias, fixture clear, history (1: the previous g-buffer is valid)
+	vec4 rows[3];     // view -> world (the soup's local frame)
+	vec4 proj;        // P00, P11, P20, P21
+	vec4 prows[3];    // the previous frame's
+	vec4 pproj;
+};
+layout( std430, set = 1, binding = 0 ) readonly buffer RParams { RestirParams R; };
+layout( std430, set = 1, binding = 1 ) readonly buffer RGbuf { vec4 gbuf[]; };
+layout( std430, set = 1, binding = 2 ) readonly buffer RPrevGbuf { vec4 prevGbuf[]; };
+layout( std430, set = 1, binding = 3 ) buffer RCur { RestirRes resCur[]; };
+layout( std430, set = 1, binding = 4 ) buffer RHist { RestirRes resHist[]; };
+layout( std430, set = 1, binding = 5 ) buffer RHistPix { int histPix[]; };
+layout( std430, set = 1, binding = 6 ) buffer RNumDen { vec4 numDen[]; };     // num, den, blocked (0, 1; 2 no ray), 0
+layout( std430, set = 1, binding = 7 ) buffer RAcc { vec4 acc[]; };           // the running means: num, den, frames, 0
+layout( std430, set = 1, binding = 8 ) readonly buffer RAccPrev { vec4 accPrev[]; };
+layout( std430, set = 1, binding = 9 ) readonly buffer RCand { int cand[]; };
+layout( std430, set = 1, binding = 10 ) buffer ROut { vec2 outRatio[]; };     // the ratio, the linear depth it is for
+
+// BLAS (geometry g, primitive i) -> its row in remap[] / verts[] (trace.comp ddgiPrim)
+uint rsPrim( uint g, uint i ) { return i + ( g == 1u ? uint( P.counts.w ) : 0u ); }
+
+// MIRROR trace.comp ddgiTriTest (the TRUE triangle; the BLAS is grown)
+bool rsTriTest( uint pr, vec3 o, vec3 d, out float t, out float u, out float v )
+{
+	t = 0.0;
+	u = 0.0;
+	v = 0.0;
+	const uint vb = pr * 9u;
+	const vec3 p0 = vec3( verts[vb], verts[vb + 1u], verts[vb + 2u] );
+	const vec3 e1 = vec3( verts[vb + 3u], verts[vb + 4u], verts[vb + 5u] ) - p0;
+	const vec3 e2 = vec3( verts[vb + 6u], verts[vb + 7u], verts[vb + 8u] ) - p0;
+	const vec3 pv = cross( d, e2 );
+	const float det = dot( e1, pv );
+	if ( abs( det ) < 1e-12 )
+		return false;
+	const float id = 1.0 / det;
+	const vec3 tv = o - p0;
+	u = dot( tv, pv ) * id;
+	if ( u < 0.0 || u > 1.0 )
+		return false;
+	const vec3 qv = cross( tv, e1 );
+	v = dot( d, qv ) * id;
+	if ( v < 0.0 || u + v > 1.0 )
+		return false;
+	t = dot( e2, qv ) * id;
+	return true;
+}
+
+// MIRROR trace.comp ddgiShadow / probebvh.h Bvh::anyHitIn: anything in (1e-4, tmax]? (red NOHOLE: holes block)
+bool rsBlocked( vec3 o, vec3 d, float tmax )
+{
+	if ( tmax <= 1e-3 )
+		return false;
+	const bool noHole = ( R.opts.w & RESTIR_BIT_NOHOLE ) != 0;
+	rayQueryEXT q;
+	rayQueryInitializeEXT( q, tlas, gl_RayFlagsTerminateOnFirstHitEXT | gl_RayFlagsNoOpaqueEXT, 0xFF, o, 0.0, d, tmax );
+	while ( rayQueryProceedEXT( q ) ) {
+		if ( rayQueryGetIntersectionTypeEXT( q, false ) != gl_RayQueryCandidateIntersectionTriangleEXT )
+			continue;
+		const uint pr = rsPrim( rayQueryGetIntersectionGeometryIndexEXT( q, false ), rayQueryGetIntersectionPrimitiveIndexEXT( q, false ) );
+		float t, u, v;
+		if ( rsTriTest( pr, o, d, t, u, v ) && t > DDGI_TMIN && t <= tmax && ( noHole || !ddgiHole( remap[pr], u, v ) ) )
+			rayQueryConfirmIntersectionEXT( q );
+	}
+	return rayQueryGetIntersectionTypeEXT( q, true ) == gl_RayQueryCommittedIntersectionTriangleEXT;
+}
+
+vec3 rsToWorld( vec4 r0, vec4 r1, vec4 r2, vec3 v )
+{
+	return vec3( dot( r0.xyz, v ) + r0.w, dot( r1.xyz, v ) + r1.w, dot( r2.xyz, v ) + r2.w );
+}
+
+struct RsPixel { bool ok; float D; vec3 P; vec3 N; vec3 Nv; };
+
+// MIRROR restirmath.h pixelAt
+RsPixel rsPixel( bool prev, int x, int y )
+{
+	RsPixel o;
+	o.ok = false;
+	o.P = vec3( 0.0 );
+	o.N = vec3( 0.0, 0.0, 1.0 );
+	o.Nv = o.N;
+	const vec4 g = prev ? prevGbuf[y * R.size.x + x] : gbuf[y * R.size.x + x];
+	o.D = g.w;
+	if ( !( o.D > 0.0 ) || o.D >= 1e5 )
+		return o;
+	o.Nv = g.xyz;
+	const vec4 pj = prev ? R.pproj : R.proj;
+	const vec3 pv = restirViewPos( float( x ), float( y ), float( R.size.x ), float( R.size.y ), o.D, pj );
+	if ( prev ) {
+		o.P = rsToWorld( R.prows[0], R.prows[1], R.prows[2], pv );
+		o.N = normalize( vec3( dot( R.prows[0].xyz, g.xyz ), dot( R.prows[1].xyz, g.xyz ), dot( R.prows[2].xyz, g.xyz ) ) );
+	} else {
+		o.P = rsToWorld( R.rows[0], R.rows[1], R.rows[2], pv );
+		o.N = normalize( vec3( dot( R.rows[0].xyz, g.xyz ), dot( R.rows[1].xyz, g.xyz ), dot( R.rows[2].xyz, g.xyz ) ) );
+	}
+	o.ok = true;
+	return o;
+}
+
+// MIRROR restirmath.h targetOf
+float rsTarget( int y, RsPixel p )
+{
+	if ( y < 0 || y >= P.counts.y || !p.ok )
+		return 0.0;
+	const uint b = uint( y ) * 8u;
+	return restirTarget( lights[b], lights[b + 1u], lights[b + 2u], lights[b + 3u], lights[b + 4u], lights[b + 5u], lights[b + 6u],
+		lights[b + 7u], p.P, p.N );
+}
+
+// mode 0, MIRROR restirmath.h passCandidates
+void modeCandidates( int x, int y, uint id )
+{
+	histPix[id] = -1;
+	resCur[id] = restirMake( -1, 0.0, 0.0, 0.0 );
+	const RsPixel p = rsPixel( false, x, y );
+	const int nCand = R.size.z;
+	if ( !p.ok || nCand <= 0 )
+		return;
+	const int red = R.opts.w;
+	const uint s0 = restirSeed( id, uint( R.size.w ), 0u );
+	RestirRes r = restirMake( -1, 0.0, 0.0, 0.0 );
+	for ( int k = 0; k < R.opts.x; k++ ) {
+		const int j = min( int( restirRand( s0, uint( 2 * k ) ) * float( nCand ) ), nCand - 1 );
+		const int l = cand[j];
+		const float w = rsTarget( l, p ) * float( nCand );
+		r = restirUpdate( r, l, w, 1.0, restirRand( s0, uint( 2 * k + 1 ) ) );
+	}
+	r = restirFinalize( r, rsTarget( r.y, p ), r.M, red );
+	resCur[id] = r;
+	if ( ( red & RESTIR_BIT_NOTEMPORAL ) != 0 || R.knobs.w < 0.5 )
+		return;
+	// world -> the previous view: the transpose of its rows' rotation
+	const vec3 t = p.P - vec3( R.prows[0].w, R.prows[1].w, R.prows[2].w );
+	const vec3 pv = vec3( R.prows[0].x * t.x + R.prows[1].x * t.y + R.prows[2].x * t.z, R.prows[0].y * t.x + R.prows[1].y * t.y + R.prows[2].y * t.z,
+		R.prows[0].z * t.x + R.prows[1].z * t.y + R.prows[2].z * t.z );
+	if ( !( pv.z < -1e-3 ) )
+		return;
+	const float Dp = -pv.z;
+	const float nx = ( R.pproj.x * pv.x - R.pproj.z * Dp ) / Dp, ny = ( R.pproj.y * pv.y - R.pproj.w * Dp ) / Dp;
+	const int qx = int( floor( ( nx + 1.0 ) * 0.5 * float( R.size.x ) ) ), qy = int( floor( ( ny + 1.0 ) * 0.5 * float( R.size.y ) ) );
+	if ( qx < 0 || qy < 0 || qx >= R.size.x || qy >= R.size.y )
+		return;
+	const RsPixel q = rsPixel( true, qx, qy );
+	if ( !q.ok || !restirSimilar( Dp, p.N, q.D, q.N ) )
+		return;
+	histPix[id] = qy * R.size.x + qx;
+	RestirRes h = resHist[qy * R.size.x + qx];
+	h.M = restirClampM( h.M, float( R.opts.x ), red );
+	const uint s1 = restirSeed( id, uint( R.size.w ), 1u );
+	RestirRes s = restirMake( -1, 0.0, 0.0, 0.0 );
+	s = restirUpdate( s, r.y, rsTarget( r.y, p ) * r.W * r.M, r.M, restirRand( s1, 0u ) );
+	s = restirUpdate( s, h.y, rsTarget( h.y, p ) * h.W * h.M, h.M, restirRand( s1, 1u ) );
+	float Z = 0.0;
+	if ( rsTarget( s.y, p ) > 0.0 )
+		Z += r.M;
+	if ( rsTarget( s.y, q ) > 0.0 )
+		Z += h.M;
+	resCur[id] = restirFinalize( s, rsTarget( s.y, p ), Z, red );
+}
+
+// mode 1, MIRROR restirmath.h passSpatial
+void modeSpatial( int x, int y, uint id )
+{
+	numDen[id] = vec4( 0.0, 0.0, 2.0, 0.0 );
+	resHist[id] = restirMake( -1, 0.0, 0.0, 0.0 );
+	const RsPixel p = rsPixel( false, x, y );
+	if ( !p.ok )
+		return;
+	const int red = R.opts.w;
+	const uint s2 = restirSeed( id, uint( R.size.w ), 2u );
+	const RestirRes own = resCur[id];
+	RestirRes s = restirMake( -1, 0.0, 0.0, 0.0 );
+	s = restirUpdate( s, own.y, rsTarget( own.y, p ) * own.W * own.M, own.M, restirRand( s2, 0u ) );
+	int qs[16];
+	int nq = 0;
+	for ( int k = 0; k < R.opts.y && k < 16; k++ ) {
+		const float a = 6.283185307179586 * restirRand( s2, uint( 1 + 3 * k ) );
+		const float rr = R.knobs.x * sqrt( restirRand( s2, uint( 2 + 3 * k ) ) );
+		const int qx = x + int( floor( rr * cos( a ) + 0.5 ) ), qy = y + int( floor( rr * sin( a ) + 0.5 ) );
+		if ( ( qx == x && qy == y ) || qx < 0 || qy < 0 || qx >= R.size.x || qy >= R.size.y )
+			continue;
+		const RsPixel q = rsPixel( false, qx, qy );
+		if ( !q.ok || !restirSimilar( p.D, p.Nv, q.D, q.Nv ) )
+			continue;
+		const RestirRes n = resCur[qy * R.size.x + qx];
+		s = restirUpdate( s, n.y, rsTarget( n.y, p ) * n.W * n.M, n.M, restirRand( s2, uint( 3 + 3 * k ) ) );
+		qs[nq] = qy * R.size.x + qx;
+		nq++;
+	}
+	float Z = rsTarget( s.y, p ) > 0.0 ? own.M : 0.0;
+	for ( int k = 0; k < nq; k++ ) {
+		const RsPixel q = rsPixel( false, qs[k] % R.size.x, qs[k] / R.size.x );
+		if ( rsTarget( s.y, q ) > 0.0 )
+			Z += resCur[qs[k]].M;
+	}
+	s = restirFinalize( s, rsTarget( s.y, p ), Z, red );
+	resHist[id] = s;
+	if ( s.y < 0 || !( s.W > 0.0 ) )
+		return;
+	const uint b = uint( s.y ) * 8u;
+	const uint s3 = restirSeed( id, uint( R.size.w ), 3u );
+	const vec3 X = restirSpherePoint( lights[b].xyz, lights[b + 7u].y, p.P, restirRand( s3, 0u ), restirRand( s3, 1u ) );
+	const vec3 o = p.P + p.N * R.knobs.y;
+	const vec3 dl = X - o;
+	const float len = length( dl );
+	const bool blocked = len > 1e-6 && rsBlocked( o, dl * ( 1.0 / len ), len - R.knobs.z );
+	const float ph = rsTarget( s.y, p );
+	numDen[id] = vec4( restirShadowed( ph, s.W, !blocked, red ), ph * s.W, blocked ? 1.0 : 0.0, 0.0 );
+}
+
+// mode 2, MIRROR restirmath.h frame's pass 2 (accumulate)
+void modeAccumulate( uint id )
+{
+	const int hp = histPix[id];
+	const vec4 nd = numDen[id];
+	acc[id] = restirAccumulate( hp >= 0 ? accPrev[hp] : vec4( 0.0 ), nd.x, nd.y, hp >= 0, R.opts.w );
+}
+
+// mode 3, MIRROR restirmath.h passRatio
+void modeRatio( int x, int y, uint id )
+{
+	const vec4 g = gbuf[id];
+	float n = 0.0, d = 0.0;
+	const int f = R.opts.z;
+	for ( int dy = -f; dy <= f; dy++ )
+		for ( int dx = -f; dx <= f; dx++ ) {
+			const int qx = x + dx, qy = y + dy;
+			if ( qx < 0 || qy < 0 || qx >= R.size.x || qy >= R.size.y )
+				continue;
+			const vec4 h = gbuf[qy * R.size.x + qx];
+			if ( ( dx != 0 || dy != 0 ) && !restirSimilar( g.w, g.xyz, h.w, h.xyz ) )
+				continue;
+			n += acc[qy * R.size.x + qx].x;
+			d += acc[qy * R.size.x + qx].y;
+		}
+	outRatio[id] = vec2( restirRatio( n, d ), g.w );
+}
+
+void main()
+{
+	const uint id = ddgiLinearId();
+	if ( id >= uint( R.size.x * R.size.y ) )
+		return;
+	const int x = int( id % uint( R.size.x ) ), y = int( id / uint( R.size.x ) );
+	const uint mode = pc.job.x;
+	if ( mode == 0u )
+		modeCandidates( x, y, id );
+	else if ( mode == 1u )
+		modeSpatial( x, y, id );
+	else if ( mode == 2u )
+		modeAccumulate( id );
+	else
+		modeRatio( x, y, id );
+}

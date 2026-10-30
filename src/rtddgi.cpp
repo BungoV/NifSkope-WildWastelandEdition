@@ -10,6 +10,7 @@
 #include "probeplace.h"
 #include "probesky.h"
 #include "rtddgimath.h"
+#include "restirmath.h"   // lane RESTIRDI1: the twin of restir.comp (restirCli)
 #include "rtddgi/rtddgi_gpu.h"
 #include "gl/celllights.h"
 
@@ -75,6 +76,10 @@ void packLight( const WwCellLight & l, const double O[2], float * o )
 		o[16 + k * 4 + 3] = float( double( l.box[k][3] ) + double( l.box[k][0] ) * O[0] + double( l.box[k][1] ) * O[1] );
 	}
 	o[28] = float( l.shape );
+	// lane RESTIRDI1 (unused by the DDGI kernels): ReSTIR DI's shadow sphere, lightphys.h's area rule min(8, 0.3 r)
+	// clamped 2..32 units, and whether the light casts shadows (the ReSTIR candidates)
+	o[29] = std::clamp( std::min( 8.0f, 0.3f * l.radius ), 2.0f, 32.0f );
+	o[30] = l.shadow ? 1.0f : 0.0f;
 }
 
 unsigned redBits( const QString & red )
@@ -727,6 +732,7 @@ struct RtDdgiLive::Impl
 	double wall = 0;
 	qint64 rays = 0;
 	double O[2] = { 0, 0 };   // M3: the soup's local frame (packVolume's), for the params' first probe after a scroll
+	std::vector<float> lights;   // lane RESTIRDI1: the packed lights the session holds
 	int scrolls = 0, scrollCells = 0, scrollFresh = 0;
 	qint64 freshTotal = 0;
 	// RTXCASCADE2: the scene (BLAS) this volume traces: built here or taken from another volume (sceneFrom)
@@ -949,6 +955,7 @@ bool RtDdgiLive::open( const ProbeSoup & soup, const WwCellLighting & lighting, 
 	job.bvh = &S.bvh;
 	job.params = S.prm;
 	job.triAttr = std::move( S.triAttr );
+	d->lights = S.lights;   // lane RESTIRDI1
 	job.lights = std::move( S.lights );
 	job.frames = 0;
 	job.relocate = d->spec.relocate;
@@ -1085,6 +1092,9 @@ int RtDdgiLive::updates() const { return d->updates; }
 int RtDdgiLive::updatesSinceScroll() const { return d->sinceScroll; }
 bool RtDdgiLive::submitted() const { return d->submitted; }
 bakert::DdgiGpuSession * RtDdgiLive::session() const { return d->s; }
+const std::vector<float> & RtDdgiLive::packedLights() const { return d->lights; }
+double RtDdgiLive::localX() const { return d->O[0]; }
+double RtDdgiLive::localY() const { return d->O[1]; }
 int RtDdgiLive::scrolls() const { return d->scrolls; }
 int RtDdgiLive::lastScrollCells() const { return d->scrollCells; }
 int RtDdgiLive::lastScrollFresh() const { return d->scrollFresh; }
@@ -1489,5 +1499,256 @@ int rtddgiCli( const QStringList & args )
 		"ms build %.1f, relocate+classify %.1f, %d updates %.1f; BLAS grown %.4f u (re-tested on the true triangles)\n",
 		qPrintable( vol.path ), vol.dims[0], vol.dims[1], vol.dims[2], vol.probes, vol.off, vol.asleep, vol.vigilant, vol.moved,
 		(long long)vol.rays, vol.msBuild, vol.msReloc, spec.frames, vol.msFrames, vol.blasGrow );
+	return 0;
+}
+
+// ------------------------------------------------------------------ lane RESTIRDI1: ReSTIR DI, twin vs GPU
+int restirCli( const QStringList & args )
+{
+	QString soupPath, outDir, rect, lightsFile, redText;
+	RtDdgiSpec spec;
+	spec.gpu = 1;
+	spec.place = false;
+	spec.fitProbes = true;
+	spec.maxProbes = 4096;
+	spec.rays = 64;
+	WwCellLighting L;
+	L.interior = true;
+	ProbeSkyLight sky;
+	float cam[6] = { 0, 0, 0, 0, 1, 0 };
+	bool haveCam = false;
+	int W = 160, H = 96, frames = 4, only = -1, gpu = 1;
+	float fov = 55.0f;
+	bakert::RestirGpuIn base;
+	auto addLight = [&L]( const QStringList & v ) {
+		WwCellLight l;
+		for ( int c = 0; c < 3; c++ ) {
+			l.pos[c] = v[c].toFloat();
+			l.color[c] = v[4 + c].toFloat();
+		}
+		l.radius = v[3].toFloat();
+		l.shadow = 3;   // every CLI light casts shadows (an omni)
+		L.lights.push_back( l );
+	};
+	for ( int i = 0; i < args.size(); i++ ) {
+		const QString & a = args[i];
+		const QString nx = i + 1 < args.size() ? args[i + 1] : QString();
+		if ( a == QLatin1String( "--soup" ) ) { soupPath = nx; i++; }
+		else if ( a == QLatin1String( "--out" ) ) { outDir = nx; i++; }
+		else if ( a == QLatin1String( "--rect" ) ) { rect = nx; i++; }
+		else if ( a == QLatin1String( "--lights" ) ) { lightsFile = nx; i++; }
+		else if ( a == QLatin1String( "--red" ) ) { redText = nx; i++; }
+		else if ( a == QLatin1String( "--frames" ) ) { frames = std::max( 1, nx.toInt() ); i++; }
+		else if ( a == QLatin1String( "--only" ) ) { only = nx.toInt(); i++; }
+		else if ( a == QLatin1String( "--gpu" ) ) { gpu = nx.toInt(); i++; }
+		else if ( a == QLatin1String( "--fov" ) ) { fov = nx.toFloat(); i++; }
+		else if ( a == QLatin1String( "--candidates" ) ) { base.candidates = std::max( 1, nx.toInt() ); i++; }
+		else if ( a == QLatin1String( "--spatial" ) ) { base.spatial = std::clamp( nx.toInt(), 0, 16 ); i++; }
+		else if ( a == QLatin1String( "--size" ) ) {
+			const QStringList v = nx.split( ',' );
+			if ( v.size() == 2 ) {
+				W = std::max( 8, v[0].toInt() );
+				H = std::max( 8, v[1].toInt() );
+			}
+			i++;
+		} else if ( a == QLatin1String( "--cam" ) ) {
+			const QStringList v = nx.split( ',' );
+			if ( v.size() == 6 ) {
+				for ( int k = 0; k < 6; k++ )
+					cam[k] = v[k].toFloat();
+				haveCam = true;
+			}
+			i++;
+		} else if ( a == QLatin1String( "--light" ) ) {
+			const QStringList v = nx.split( ',' );
+			if ( v.size() == 7 )
+				addLight( v );
+			i++;
+		}
+	}
+	if ( !lightsFile.isEmpty() ) {
+		QFile lf( lightsFile );
+		if ( lf.open( QIODevice::ReadOnly | QIODevice::Text ) )
+			while ( !lf.atEnd() ) {
+				const QStringList v = QString::fromLatin1( lf.readLine() ).simplified().split( ' ', Qt::SkipEmptyParts );
+				if ( v.size() == 7 && !v[0].startsWith( '#' ) )
+					addLight( v );
+			}
+	}
+	const QStringList rc = rect.split( ',' );
+	if ( soupPath.isEmpty() || outDir.isEmpty() || rc.size() != 4 || L.lights.isEmpty() || !haveCam ) {
+		std::fprintf( stderr, "usage: restir --soup <file> --rect minX,minY,maxX,maxY --out <dir> --cam ex,ey,ez,tx,ty,tz "
+			"--light x,y,z,radius,r,g,b [...] [--lights <file>] [--size W,H] [--fov deg] [--frames n] [--only i] [--candidates C] "
+			"[--spatial K] [--gpu 0|1] [--red novis,nopdf,notemporal,noclamp,nohole]\n" );
+		return 2;
+	}
+	for ( int k = 0; k < 4; k++ )
+		spec.rect[k] = rc[k].toFloat();
+	int red = 0;
+	for ( const QString & r : redText.split( ',', Qt::SkipEmptyParts ) ) {
+		const QString t = r.trimmed();
+		red |= t == QLatin1String( "novis" ) ? restir::kRedNoVis : t == QLatin1String( "nopdf" ) ? restir::kRedNoPdf
+			: t == QLatin1String( "notemporal" ) ? restir::kRedNoTemporal : t == QLatin1String( "noclamp" ) ? restir::kRedNoClamp
+			: t == QLatin1String( "nohole" ) ? restir::kRedNoHole : 0;
+	}
+	ProbeSoup soup;
+	QString err;
+	if ( !probeSoupRead( soupPath, &soup, &err ) ) {
+		std::fprintf( stderr, "restir: %s\n", qPrintable( err ) );
+		return 1;
+	}
+	RtDdgiVolume vol;
+	Packed S;
+	if ( !packVolume( soup, L, sky, spec, &vol, S ) ) {
+		std::fprintf( stderr, "restir: %s\n", qPrintable( vol.error ) );
+		return 1;
+	}
+	// the camera in the soup's local frame; the g-buffer traced on the CPU (view normal, linear depth, bottom row first)
+	const V3 eye( float( cam[0] - S.O[0] ), float( cam[1] - S.O[1] ), cam[2] );
+	const V3 at( float( cam[3] - S.O[0] ), float( cam[4] - S.O[1] ), cam[5] );
+	const V3 f = normalize( at - eye );
+	const V3 rt = normalize( cross( f, std::fabs( f.z ) > 0.99f ? V3( 0, 1, 0 ) : V3( 0, 0, 1 ) ) );
+	const V3 up = cross( rt, f );
+	restir::Cam C;
+	const float rows[12] = { rt.x, up.x, -f.x, eye.x, rt.y, up.y, -f.y, eye.y, rt.z, up.z, -f.z, eye.z };
+	std::copy( rows, rows + 12, C.rows );
+	const float fy = 1.0f / std::tan( 0.5f * fov * kPi / 180.0f );
+	C.proj[0] = fy * float( H ) / float( W );
+	C.proj[1] = fy;
+	C.proj[2] = C.proj[3] = 0.0f;
+	const size_t n = size_t( W ) * size_t( H );
+	std::vector<float> gbuf( n * 4, 0.0f );
+	int hits = 0;
+	for ( int y = 0; y < H; y++ )
+		for ( int x = 0; x < W; x++ ) {
+			float * g = &gbuf[( size_t( y ) * size_t( W ) + size_t( x ) ) * 4];
+			g[3] = 1e6f;
+			const float nxv = ( float( x ) + 0.5f ) / float( W ) * 2.0f - 1.0f, nyv = ( float( y ) + 0.5f ) / float( H ) * 2.0f - 1.0f;
+			const V3 dv( nxv / C.proj[0], nyv / C.proj[1], -1.0f );
+			const V3 dw = C.dirToWorld( dv );
+			const float len = length( dw );
+			const double od[3] = { eye.x, eye.y, eye.z }, dd[3] = { dw.x / len, dw.y / len, dw.z / len };
+			double t = 0.0;
+			int tri = -1;
+			if ( !S.bvh.ray( od, dd, 1e6, &t, &tri ) || tri < 0 )
+				continue;
+			const float * v = &S.bvh.t[size_t( tri ) * 9];
+			V3 nf = normalize( cross( V3( v[3] - v[0], v[4] - v[1], v[5] - v[2] ), V3( v[6] - v[0], v[7] - v[1], v[8] - v[2] ) ) );
+			if ( dot( nf, dw ) > 0.0f )
+				nf = -nf;   // the side the camera sees
+			g[0] = dot( nf, rt );
+			g[1] = dot( nf, up );
+			g[2] = -dot( nf, f );
+			g[3] = float( t ) / len;   // view z of the hit = -t / |dv|
+			hits++;
+		}
+	std::vector<int> cand;
+	const int nL = S.nLights;
+	for ( int i = 0; i < nL; i++ )
+		if ( S.lights[size_t( i ) * kLight + 30] > 0.5f && ( only < 0 || i == only ) )
+			cand.push_back( i );
+	// the twin (probebvh with the soup's alpha masks; NOHOLE is the GPU's red: the twin keeps the holes)
+	restir::Buffers B;
+	restir::FrameIn F;
+	F.W = W;
+	F.H = H;
+	F.gbuf = gbuf.data();
+	F.cam = C;
+	F.prev = C;
+	F.lights = S.lights.data();
+	F.nLights = nL;
+	F.cand = cand.data();
+	F.nCand = int( cand.size() );
+	F.red = red & ~restir::kRedNoHole;
+	F.set.candidates = base.candidates;
+	F.set.spatial = base.spatial;
+	auto vis = [&S]( V3 o, V3 d, float tmax ) {
+		if ( tmax <= 1e-3f )
+			return false;
+		const double od[3] = { o.x, o.y, o.z }, dd[3] = { d.x, d.y, d.z };
+		return S.bvh.anyHitIn( od, dd, 1e-4, double( tmax ), []( int ) { return true; } );
+	};
+	// the GPU: the volume's session (its BVH and packed lights), the same frames
+	RtDdgiLive live;
+	bool gpuOk = false;
+	QString gpuWhy = QStringLiteral( "not asked (--gpu 0)" );
+	if ( gpu ) {
+		RtDdgiSpec gs = spec;
+		gs.relocate = false;
+		gs.classify = false;
+		gpuOk = live.open( soup, L, sky, gs, false );
+		gpuWhy = gpuOk ? QString() : live.why();
+	}
+	QDir().mkpath( outDir );
+	std::printf( "restir: %d x %d, %d of %d pixels hit, %d candidate lights of %d, %d frames, red %d; twin + %s\n", W, H, hits, int( n ),
+		int( cand.size() ), nL, frames, red, gpuOk ? "gpu" : qPrintable( QStringLiteral( "no gpu (%1)" ).arg( gpuWhy ) ) );
+	bakert::RestirGpuOut go;
+	for ( int fr = 0; fr < frames; fr++ ) {
+		F.frame = uint32_t( fr );
+		F.prevGbuf = fr ? gbuf.data() : nullptr;
+		QElapsedTimer tm;
+		tm.start();
+		restir::frame( F, B, vis );
+		const double cpuMs = double( tm.nsecsElapsed() ) / 1e6;
+		if ( !gpuOk ) {
+			std::printf( "frame %d: twin %.1f ms\n", fr, cpuMs );
+			continue;
+		}
+		bakert::RestirGpuIn in = base;
+		in.W = W;
+		in.H = H;
+		in.frame = uint32_t( fr );
+		in.red = red;
+		std::copy( C.rows, C.rows + 12, in.rows );
+		std::copy( C.proj, C.proj + 4, in.proj );
+		std::copy( C.rows, C.rows + 12, in.prows );
+		std::copy( C.proj, C.proj + 4, in.pproj );
+		in.history = fr > 0;
+		in.cand = cand;
+		in.gbuf = gbuf.data();
+		in.readBack = true;
+		if ( !bakert::restirGpuStep( live.session(), in, &go ) ) {
+			std::printf( "frame %d: the GPU refused (%s)\n", fr, go.why.c_str() );
+			gpuOk = false;
+			continue;
+		}
+		// the differences: the light kept, the shadow ray's answer where both kept the same light (the same ray), the ratio
+		int valid = 0, lightDiff = 0, sameRay = 0, blockDiff = 0;
+		double ratioMax = 0, ratioSum = 0, cpuMean = 0, gpuMean = 0;
+		for ( size_t i = 0; i < n; i++ ) {
+			if ( !( gbuf[i * 4 + 3] < restir::kNone ) )
+				continue;
+			valid++;
+			const int yc = B.hist[i].y, yg = int( go.res[i * 4] );
+			lightDiff += yc != yg ? 1 : 0;
+			const int bc = B.blocked[i], bg = int( go.numDen[i * 4 + 2] + 0.5f );
+			if ( yc == yg && bc != 2 && bg != 2 ) {
+				sameRay++;
+				blockDiff += bc != bg ? 1 : 0;
+			}
+			const double d = std::fabs( double( B.rat[i] ) - go.ratio[i * 2] );
+			ratioMax = std::max( ratioMax, d );
+			ratioSum += d;
+			cpuMean += B.rat[i];
+			gpuMean += go.ratio[i * 2];
+		}
+		const double vd = std::max( valid, 1 );
+		std::printf( "frame %d: %d pixels; light kept differs %d (%.3f %%); same light %d, shadow ray hit/miss differs %d; ratio |twin - gpu| "
+			"mean %.5f max %.4f; mean ratio twin %.4f gpu %.4f; twin %.1f ms, gpu wall %.1f ms\n", fr, valid, lightDiff, 100.0 * lightDiff / vd,
+			sameRay, blockDiff, ratioSum / vd, ratioMax, cpuMean / vd, gpuMean / vd, cpuMs, go.msWall );
+		std::fflush( stdout );   // a hung GPU step must not hide the frames before it
+	}
+	QFile o( outDir + QStringLiteral( "/restir_frame.tsv" ) );
+	if ( o.open( QIODevice::WriteOnly | QIODevice::Text ) ) {
+		o.write( "x\ty\tdepth\tlight_twin\tblocked_twin\tratio_twin\tlight_gpu\tblocked_gpu\tratio_gpu\n" );
+		for ( int y = 0; y < H; y++ )
+			for ( int x = 0; x < W; x++ ) {
+				const size_t i = size_t( y ) * size_t( W ) + size_t( x );
+				const bool g = gpuOk && go.res.size() == n * 4;
+				o.write( QStringLiteral( "%1\t%2\t%3\t%4\t%5\t%6\t%7\t%8\t%9\n" ).arg( x ).arg( y ).arg( gbuf[i * 4 + 3] ).arg( B.hist[i].y )
+					.arg( int( B.blocked[i] ) ).arg( B.rat[i] ).arg( g ? int( go.res[i * 4] ) : -9 ).arg( g ? int( go.numDen[i * 4 + 2] + 0.5f ) : -9 )
+					.arg( g ? go.ratio[i * 2] : -1.0f ).toLatin1() );
+			}
+	}
 	return 0;
 }

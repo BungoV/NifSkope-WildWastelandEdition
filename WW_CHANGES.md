@@ -384,6 +384,47 @@
   FAIL; F flicker (CLOUD2's gate D on the accum arm) 0.063 (bar 0.08). Stage table: WW_CLOUDVOL_ACCUM at stage 0
   (tests/cloudband/stage_check.py; red = the base table, name missing). Batch: tests/cloudband/run.sh.
 
+## RESTIRDI1 (2026-10-30): ReSTIR DI for the shadow-casting cell lights, the rules and their CPU reference gate
+
+- **The rules** (src/restirmath.h, header-only; GLSL mirror src/rtddgi/restir_common.glsl, each function tagged
+  `MIRROR restirmath.h <name>`): Bitterli 2020 reservoirs over the shadow-flag lights (C = 8 uniform candidates a
+  pixel, target p_hat = the light's unshadowed Lambert irradiance luminance with its hemisphere / box clip, radial curve
+  and spot cone: the DDGI volume's light law), the reprojected history with M clamped to 20 x C, K = 4 neighbours
+  within 16 px (depth 10 %, normal 25 deg), Z counting only the reservoirs whose domain holds the light (unbiased), one
+  shadow ray to a point on the light's sphere (packed light float 29 = its source radius), then Heitz 2018's ratio:
+  the running means (at most 16 frames, reset on a lost history) of p_hat W V and p_hat W over a 5 x 5 edge-stopped
+  window. restir::frame() is the CPU twin of the GPU passes.
+- **Gate** (tests/restir_math/run.sh, offline, no NifSkope): an analytic fixture (floor, three boxes, six shadow lights
+  incl. a spot, a hemisphere and a box light, one unshadowed light, a 96 x 64 off-centre camera) against a brute-force
+  reference (every light x 256 stratified points on its sphere). Green 7 checks: mirror 0 of 40000 GLSL/header
+  comparisons differ; view point from the stored depth 1.5e-7 of the depth; shape clip 0 wrong; the shadowed estimate's
+  64-seed mean 1.0013 of the reference; 2 of 4566 pixels outside 4 standard errors (unbiased); U x ratio relative RMSE
+  0.064 after 16 frames (bar 0.08); a light switched on is kept at 53 % of its ideal share within 4 frames (bar 35 %).
+  Reds, each failing its own check: HASH (mirror, 20000 differ), VIEWPOS (2.2e-2), NOSHAPE (2847 lit), NOVIS (1.084),
+  NOPDF (4482 of 4566 out), NOTEMPORAL (0.103), NOCLAMP (5 pixels of 3082).
+- Measured on the way: without the running means the windowed ratio got WORSE with reuse (0.100 after 16 frames vs
+  0.071 without history): the reuse makes neighbours keep the same light, so the window no longer mixes lights.
+- **The RT quality preset** (bungo 10-29's ruling): Show menu > Lighting > "Ray-traced quality" Low / Medium / High / Ultra,
+  pinned by `WW_CELL_RT_PRESET` (low|medium|high|ultra or 0..3), harness-scoped row `WW/CellRtPreset`. **Default Low =
+  today's picture**: no define, no pass, the cube shadows as before (the Low programs' driver binaries equal the base's
+  but the stamp and the 8-byte source hash: fo4_cell, fo4_cellcsm, pbrm_cell, pbrm_cellcsm, none + UBO). Medium turns
+  the ray-traced GI volume on (its BVH is what ReSTIR traces) and the loader define `WW_CELL_RESTIR`: every
+  shadow-flag light takes the pixel's ray-traced ratio in cell_lights.glsl cellShadowF (a fragment that is not the
+  surface the opaque pass saw stays unshadowed), the 16 depth cubes are not drawn (the cube census says
+  `off(ray-traced: ...)`). High and Ultra are Medium for now (the row's tooltip says so). Live: a pick reloads the
+  shaders (stage table: WW_CELL_RT_PRESET shaders, WW_CELL_RESTIR_RED live).
+- **The GPU pass** (src/rtddgi/restir.comp + restir_vk.inc on bakert's device, the volume's own descriptor set for the
+  TLAS, true triangles, alpha masks and packed lights; packLight float 29 = the shadow sphere's radius, lightphys.h's
+  min(8, 0.3 r) clamped 2..32, float 30 = the shadow flag). rtddgicell.cpp rtddgiRestirPass, after the shared opaque
+  pass: the g-buffer copied on the GPU into an exported buffer (GL_EXT_memory_object, glGetTexImage into the pixel-pack
+  binding), four dispatches (candidates + history, neighbours + one shadow ray, running means, ratio window), the ratio
+  read in place as an RG32F texture buffer (unit 85); GL signals before the submit and waits on it after, once a frame.
+  Census lines `restir cell: ...`. Red `WW_CELL_RESTIR_RED=novis,nopdf,notemporal,noclamp,nohole` (live).
+- **CLI gate** `-no-gui restir` (tests/restir_math/cli_gate.sh): a CPU-traced g-buffer of a soup, the twin
+  (restir::frame) and the GPU on the same frames. gpurelight's synthetic room, 192 x 108: RESTIRDI0 (one light, one ray
+  a pixel) and RESTIRDI1 (8 frames) both 0 of 20736 pixels keep another light, 0 hit/miss differ on the same ray, ratio
+  difference 0; red novis reads ratio 1.0000 on both. The nohole red cannot bite there (no alpha-tested cards).
+
 ## RTXFIX1 (2026-10-30): the Ray-traced GI probes inside the frame (rounder, fogged, exposed); the atlas order's red
 
 - **Probes view** (bungo 10-29: "Could our probes have a rounder shape?", "fog", the spheres by the string lights and the

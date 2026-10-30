@@ -183,6 +183,52 @@ const float * ddgiGpuHostRays( const DdgiGpuSession * s );
 //! frees everything (waits for the device's lock and a submit still running)
 void ddgiGpuClose( DdgiGpuSession * s );
 
+/* Lane RESTIRDI1 (2026-10-30): ReSTIR DI for the shadow-casting lights, per pixel, on the volume's own BVH and packed
+ * lights (src/rtddgi/restir.comp; the CPU twin is src/restirmath.h restir::frame). One step = the four passes on a
+ * W x H g-buffer (view normal, linear depth; 1e6 none; bottom row first), then the copies that make this frame the next
+ * one's history. Its own command buffer, fence and (shared) semaphores: the volume's steps are not disturbed. */
+struct RestirGpuIn
+{
+	int W = 0, H = 0;
+	uint32_t frame = 0;
+	int red = 0;                          // restir_common.glsl RESTIR_BIT_* (novis, nopdf, notemporal, noclamp, nohole)
+	int candidates = 8, spatial = 4, filter = 2;
+	float radius = 16.0f, bias = 0.5f, clear = 0.0f;
+	float rows[12] = { 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0 };   // view -> the soup's local frame
+	float proj[4] = { 1, 1, 0, 0 };                            // P00, P11, P20, P21
+	float prows[12] = { 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0 };  // the previous frame's
+	float pproj[4] = { 1, 1, 0, 0 };
+	bool history = false;                 // the previous frame's g-buffer, reservoirs and running means are valid
+	std::vector<int> cand;                // the candidate lights (indices into the volume's packed list)
+	const float * gbuf = nullptr;         // host g-buffer W x H x 4 (the CLI); nullptr: GL wrote the shared one
+	bool readBack = false;                // copy the ratio, num / den / blocked, reservoirs and running means to the host
+	std::function<bool()> beforeSubmit;   // interop (restirGpuShare): GL signalled glDone; the submit waits on it
+};
+struct RestirGpuOut
+{
+	bool ok = false, busy = false;
+	std::string why;
+	double ms = -1;                       // the four passes + copies on the device (-1: no timestamps)
+	double msWall = 0;
+	std::vector<float> ratio;             // readBack: 2 a pixel (ratio, linear depth)
+	std::vector<float> numDen;            // 4 a pixel (num, den, blocked 0/1 (2: no ray), 0)
+	std::vector<float> res;               // 4 a pixel (light as a float, wsum, M, W): the frame's output reservoir
+	std::vector<float> acc;               // 4 a pixel (the running means: num, den, frames, 0)
+};
+//! false + busy when the device's lock is taken; waits for its own submit
+bool restirGpuStep( DdgiGpuSession * s, const RestirGpuIn & in, RestirGpuOut * out );
+//! interop: the g-buffer (W x H x 16 bytes) and the ratio (W x H x 8 bytes) exported to GL, with two semaphores;
+//! remade when W x H changes (every handle is a new NT handle the caller closes)
+struct RestirGpuShare
+{
+	bool ok = false;
+	std::string why;
+	void * gbufMemory = nullptr, * outMemory = nullptr;
+	uint64_t gbufSize = 0, outSize = 0;   // the allocations' sizes (GL imports exactly these)
+	void * vkDone = nullptr, * glDone = nullptr;
+};
+bool restirGpuShare( DdgiGpuSession * s, int W, int H, RestirGpuShare * out );
+
 } // namespace bakert
 
 #endif // RTDDGI_GPU_H

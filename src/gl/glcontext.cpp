@@ -46,6 +46,7 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #define WWCU( k, l, v, n ) WwCellUni::want( wwUni, l, WwCellUni::k, v, n, WwDp::rec != nullptr )
 bool rtddgiCellShaderDefine();	// lane RTXGI1 M2: src/rtddgicell.cpp (the Ray-traced GI row / WW_CELL_RTDDGI)
 int rtddgiCellCascades();	// lane RTXCASCADE1: src/rtddgicell.h (WW_CELL_RTDDGI_CASCADES)
+bool rtddgiRestirShaderDefine();	// lane RESTIRDI1: src/rtddgicell.cpp (the RT quality row Medium+ / WW_CELL_RT_PRESET)
 bool wwAirZoneShaderDefine();	// lane AIRZONE1: src/gl/cellairzone.cpp (the Air zones row / WW_CELL_AIRZONE)
 int wwCellGiVis();	// lane PERF1: src/gl/celllights.cpp (1: the march, WW_CELL_GI_MARCH)
 bool wwCellPrtOn();	// lane PRTOFF1: src/gl/celllights.cpp (the old baked probe GI, only under its red)
@@ -434,6 +435,9 @@ bool NifSkopeOpenGLContext::Shader::load( const QString & filepath )
 			if ( rtddgiCellCascades() > 1 )
 				data.insert( data.indexOf( '\n' ) + 1, "#define WW_CELL_RTDDGI_CASCADES 1\n" );
 		}
+		// lane RESTIRDI1: the RT quality preset's ray-traced shadow ratio (cell_lights.glsl cellShadowF); not static: the row reloads
+		if ( !giMarch && rtddgiRestirShaderDefine() && data.startsWith( "#version" ) && data.contains( "_CELL_RESTIR" ) )
+			data.insert( data.indexOf( '\n' ) + 1, "#define WW_CELL_RESTIR 1\n" );
 		// lane AIRZONE1: the hand-placed volumes' read (cell_airzone.glsl, via cell_volair.frag and cell_volpart.glsl); not static:
 		// the row's tick reloads the shaders
 		if ( wwAirZoneShaderDefine() && data.startsWith( "#version" ) && data.contains( "_CELL_AIRZONE" ) )

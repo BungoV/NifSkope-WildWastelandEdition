@@ -178,6 +178,11 @@ public:
 	qint64 lastRays() const;
 	//! the volume with this step's tiles and ages copied in (rtddgiDump's input)
 	void snapshot( RtDdgiVolume * out ) const;
+	//! lane RESTIRDI1: the packed lights the session holds (32 floats a light, the soup's local frame: [29] the shadow
+	//! sphere's radius, [30] 1 for a shadow-casting light) and that frame's offset (local = world - (ox, oy, 0))
+	const std::vector<float> & packedLights() const;
+	double localX() const;
+	double localY() const;
 
 private:
 	struct Impl;
@@ -225,5 +230,12 @@ bool rtddgiRunCascades( const ProbeSoup & soup, const WwCellLighting & lighting,
  *  over a rect 2^c as wide (rtddgiRunCascades), dumps <out>/cascade<c>; `--cascade-red perblas` = RTXCASCADE1's own
  *  BLAS and submit a cascade (the one-BLAS gate's red); `--cskip 1` the covered-probe skip; `--crays n` coarse rays */
 int rtddgiCli( const QStringList & args );
+
+/*! lane RESTIRDI1: `nifskope -no-gui restir --soup <f> --rect minX,minY,maxX,maxY --out <dir> --cam ex,ey,ez,tx,ty,tz
+ *  [--size W,H] [--fov deg] [--frames n] [--light x,y,z,radius,r,g,b ...] [--lights <file>] [--only i] [--candidates C]
+ *  [--spatial K] [--gpu 0|1] [--red novis,nopdf,notemporal,noclamp,nohole]`: ReSTIR DI over the soup's lights (every
+ *  CLI light casts shadows) on a g-buffer the CPU traces from the camera; the CPU twin (src/restirmath.h) and, with
+ *  --gpu 1, the GPU (src/rtddgi/restir.comp) run the same frames; prints their differences, writes restir_frame.tsv */
+int restirCli( const QStringList & args );
 
 #endif // RTDDGI_H

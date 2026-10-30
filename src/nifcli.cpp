@@ -8210,6 +8210,13 @@ int nifskopeCliMain( const QStringList & args )
 		err().flush();
 		return rc;
 	}
+	// `restir` runs ReSTIR DI on a soup's BVH, the CPU twin against the GPU (lane RESTIRDI1; src/rtddgi.cpp restirCli)
+	if ( cmd == QLatin1String( "restir" ) ) {
+		const int rc = restirCli( a );
+		out().flush();
+		err().flush();
+		return rc;
+	}
 	// `volumes` builds the Space stage (rooms, thresholds, shapes) of a soup (lane VOLFIT1; src/probevolumes.cpp)
 	// `volcheck` checks a Space stage's shapes against the soup's real triangles by rays (lane VOLRAY1; src/probevolcheck.cpp)
 	if ( cmd == QLatin1String( "volcheck" ) ) {
