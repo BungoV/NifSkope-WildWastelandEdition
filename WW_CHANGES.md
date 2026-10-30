@@ -1,5 +1,25 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## RTXFIX1 (2026-10-30): the Ray-traced GI probes inside the frame (rounder, fogged, exposed); the atlas order's red
+
+- **Probes view** (bungo 10-29: "Could our probes have a rounder shape?", "fog", the spheres by the string lights and the
+  red lamps read as dark as the rest): the Ray-traced GI probes row is drawn inside the cell's linear frame, after the
+  opaque scene and before the tone map, by its own program (res/shaders/cell_ddgiprobe.*). One unit sphere instanced per
+  probe: 512 triangles within 800 u of the camera, 128 beyond (the old view: 32). The irradiance is read from the atlas
+  on the GPU (the read's own tile decode), so with interop no tiles come back to the host for the view. It is shown as
+  a white surface lit by it (E / pi, linear): the exposure and the tone map treat it as they treat every surface, and
+  the fog covers it as it covers every surface (wwFog). A sphere that would hold the camera is not drawn (it clipped
+  open at the near plane). Census: `rtddgi cell: probes view in the frame (fogged): N near spheres x 512 triangles + M
+  far x 128, K hidden at the camera; T triangles; CPU X ms`.
+- Switch `WW_CELL_RTDDGI_VIEW_FOG` (live): unset = in the frame, fogged; `nofog` = in the frame without the fog; `0` =
+  the old overlay (after the tone map, unfogged, 32 triangles, the tiles copied back).
+- **The atlas order** (Bryant 10-29, the Fusion Shaders bug "the next update overwrites the atlas while GL still reads
+  it"): ours orders each submit both ways already (GL signals glDone before the device's submit, which waits on it; GL
+  waits on vkDone after it). New red `WW_CELL_RTDDGI_RED=nowait` drops both; the census's interop line prints
+  `sync glDone N vkDone waits M` (the red: `(the nowait red: no order)`).
+- Not in this lane (rows): the light budget per hit (cost lever), no-probe coverage indoors, the classify tie at an
+  exact probe step (RTXCASCADE1's finding).
+
 ## Lane GLAREBLOW1 (2026-10-29, branch GLAREBLOW1-20261029, cloud): the air's multiple scattering near the sun
 
 - **Measured offline first (no exe):** notes_cloud/GLAREBLOW1/RESULTS.md. The cell air's sky term (cell_volsky.frag ->
