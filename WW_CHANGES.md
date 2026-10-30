@@ -99,6 +99,32 @@
   the baker (.lodo/.lodi/.lodl), not by the placements or welds the cell view builds. They vanish in a probe pass
   (WW_CELL_LIT_PROBE=95) and in the finals env on the same exe. The owner is named by the live rows in
   notes/code1030/skyshards2/HANDOFF.md, not here.
+## FARTOGGLE3 (2026-10-30, CODE1030 late item 4): sub-pixel far objects no longer go on and off under the Modern temporal AA
+
+- **The owner (MEASURED, offline twin tests/taafar_twin, the real taa2.frag through the driver, the real jitter, 4x
+  MSAA, 288 far objects 0.3-1.4 px on ground and skyline, still camera):** the jitter catches an object under a pixel in
+  size in some frames only; in the frames it misses, the 3x3 holds no trace of it, so the neighbourhood clip threw its
+  history away and the object went on and off (Medium: 57 of 228 seen objects drop under a quarter within one 8-frame
+  jitter cycle; TAA off at 4x MSAA: 0). The noclip red took Medium from 75 to 1 (min < half its best over 64 frames).
+  High and Ultra had a second owner: the depth disocclusion test read the object leaving the 3x3's closest depth as a
+  disocclusion and zeroed the history (still 33 / 38 with no clip at all). Not the far selection, the placement or the
+  GPU cull (LODPLACE1 / FARTOGGLE2: 0 changes on a still camera).
+- **The rule now (res/shaders/taa2.frag, ON by default, every tier):** the thin-feature lock texture (now RGBA16F,
+  src/gl/gametaa.cpp) also carries how far the pixel recently stood ABOVE / BELOW the mean of its 8 neighbours (an
+  isolated peak or dip, fading 0.08 a frame). A history inside [current - below, current + above] (and the 8-neighbour
+  mean) is kept: no clip, no depth disocclusion, a 0.96 history weight; it fades out by 2 px a frame of camera motion
+  and with the reactive / own-motion mask. A broad mover never raises that range (its inside and its edges are not
+  isolated), so its trail is still clipped: the ghost bar holds.
+- **Red:** `WW_TAA2_RED=oldlock` (taa2Red 128) = the resolve before this. `nolock` now drops both locks.
+- **Gates (MEASURED):** `bash tests/taafar_twin/run.sh` -> TAAFAR RESULT PASS. Still camera, objects off within one
+  jitter cycle: Low 0 (red 52), Medium 0 (57), High 0 (72), Ultra 0 (68); biggest one-frame step p95 0.15-0.18 (red
+  ~1.0); pan 0.5 px flicker 0.054-0.066 (red 0.118-0.173); ghost of an unvectored bar 0.0218 vs 0.0205 at Medium (bar
+  red + 0.002), all tiers within it. Three scene seeds (7, 11, 23) pass on all tiers. TAA3's chart gates (notes
+  taa4/sim/taa3_gates.py) base vs now: ghost identical every tier, still shimmer lower every tier (Medium 0.0028 ->
+  0.0022), wire 0.5 px detail/ref 1.16 -> 1.10 (Ultra, ideal 1.0), move0.5 err +0.0001..0.0010 (Low 0.0117 -> 0.0127,
+  game 0.0124), move2 unchanged, every red still fails. The game copy ("Temporal AA") is the game's own resolve and
+  stays as it is (its twin row: 71 objects off). Offline link sweep: base 405, RTXGI 270, PRT 405 rows, all LINK OK.
+- Owed: a steady-camera frame series at Concord, Modern TAA on vs `WW_TAA2_RED=oldlock`, when bungo asks.
 
 ## CAMGATE3 (2026-10-30, FIX1030B round 2): an interior's camera bounds are a set of boxes built from what is drawn
 

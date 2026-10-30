@@ -12,20 +12,22 @@
  * 3 High: + luma weights, depth disocclusion. 4 Ultra: + a tighter box while moving (gamma 1 -> 0.75), and
  * TAAINPUTS1's velocity / mask when present (TAA3).
  * Every tier: a history the clip moved far gets less weight (offline ghost gate, notes/taa2/sim).
- * Outputs: o0 the next history (rgb, a = 1 - the closest depth), o1 the picture, o2 the lock (r flip rate, g sign). */
+ * Outputs: o0 the next history (rgb, a = 1 - the closest depth), o1 the picture, o2 the lock (r flip rate, g sign; lane FARTOGGLE3: b, a how far the pixel
+ * recently stood above / below its 8 neighbours). */
 
 uniform sampler2D curTex;	// this frame, NEAREST
 uniform sampler2D histTex;	// the history, LINEAR (RGBA16F)
 uniform sampler2D mvTex;	// previous minus current, texture units (game_taa_mv.frag)
 uniform sampler2D depthTex;
-uniform sampler2D lockTex;	// lane TAA3: last frame's o2, NEAREST
+uniform sampler2D lockTex;	// lane TAA3: last frame's o2, NEAREST (FARTOGGLE3: RGBA16F, b a the isolated range)
 uniform sampler2D velTex;	// lane TAA3: TAAINPUTS1 velocity (the mvTex convention, with things that move on their own)
 uniform sampler2D maskTex;	// lane TAA3: TAAINPUTS1 mask: r reactive, g composition, b own motion
 uniform vec2 invSize;
 uniform vec2 jitterPx;	// how far this frame's content moved (pixels, x right, y up): pixel p saw the scene at p - jitterPx
 uniform int taa2Tier;
-uniform int taa2Red;	// bits: 1 noclip, 2 nobicubic, 4 wrongjitter (the filter told the opposite jitter), 8 nolock,
-						// 32 oldmotion, 64 oldfilter (lane TAA4: the TAA2 motion weight / current filter width)
+uniform int taa2Red;	// bits: 1 noclip, 2 nobicubic, 4 wrongjitter (the filter told the opposite jitter), 8 nolock (both locks),
+						// 32 oldmotion, 64 oldfilter (lane TAA4: the TAA2 motion weight / current filter width),
+						// 128 oldlock (lane FARTOGGLE3: no recent-range lock, the resolve before it)
 uniform int taa2NoHist;	// 1: no history this frame (first frame, reset, size change)
 uniform int taa2Inputs;	// lane TAA3: bits 1 velTex bound, 2 maskTex bound
 uniform mat4 reproj;	// current unjittered clip -> previous unjittered clip
@@ -126,6 +128,22 @@ void main()
 	bool offscreen = any( lessThan( huv, vec2( 0.0 ) ) ) || any( greaterThan( huv, vec2( 1.0 ) ) );
 	vec3 res = cur;
 	vec2 lockOut = vec2( 0.0 );
+	/* lane FARTOGGLE3: a far object under a pixel in size is caught by the jitter in some frames only. In the frames
+	 * it misses, the 3x3 holds no trace of it, so the clip threw its history away and the object blinked on a still
+	 * camera (offline twin tests/taafar_twin: 75 of 228 seen objects at Medium). Lock b, a carry how far this pixel's
+	 * luma recently stood above / below the mean of its 8 neighbours (an isolated peak or dip: a sub-pixel thing, never
+	 * the inside or the edge of a broad mover), each fading by kRangeRelax a frame, so a dip the jitter brings back
+	 * within its 8-frame cycle is still there on the frames it misses. A history inside [cur - below, cur + above] is
+	 * kept (no clip, no depth disocclusion, and a longer average); a mover's trail never raised that range, so the
+	 * clip still takes it (the twin's ghost bar). taa2Red 128 is the resolve before this. */
+	vec4 lk4 = vec4( 0.0 );
+	float m8 = ( m1.x - cC.x ) / 8.0;
+	vec2 rng = vec2( max( cC.x - m8, 0.0 ), max( m8 - cC.x, 0.0 ) );
+	if ( taa2NoHist == 0 && !offscreen ) {
+		lk4 = texelFetch( lockTex, clamp( ivec2( huv * vec2( size ) ), ivec2( 0 ), size - 1 ), 0 );
+		const float kRangeRelax = 0.08;	// twin: 0.04 .. 0.15 all pass the ghost bar; 0.25+ lets more objects go
+		rng = max( rng, lk4.ba * ( 1.0 - kRangeRelax ) );
+	}
 	if ( taa2NoHist == 0 && !offscreen ) {
 		bool bicubic = taa2Tier >= 2 && ( taa2Red & 2 ) == 0;
 		vec3 h = toYCoCg( bicubic ? histCatmullRom( huv ) : texture( histTex, huv ).rgb );
@@ -142,12 +160,23 @@ void main()
 		/* lane TAA3: a sub-pixel wire the jitter hits every other frame empties the 3x3 on the misses, and the clip
 		 * threw its history away (detail 0.17 vs the game's 0.29). Where the current keeps flipping sides of the
 		 * history (aliasing, not change) the history is kept; a real change flips once, so the clip still takes it. */
-		vec2 lk = texelFetch( lockTex, clamp( ivec2( huv * vec2( size ) ), ivec2( 0 ), size - 1 ), 0 ).rg;
+		vec2 lk = lk4.rg;
 		float dY = cur.x - h0.x;
 		float sgn = abs( dY ) > 0.02 ? sign( dY ) : lk.g;
 		float flipRate = mix( lk.r, sgn * lk.g < 0.0 ? 1.0 : 0.0, 0.2 );
 		lockOut = vec2( flipRate, sgn );
 		float keep = ( taa2Red & 8 ) == 0 ? smoothstep( 0.25, 0.5, flipRate ) * ( 1.0 - clamp( motionPx / 4.0, 0.0, 1.0 ) ) : 0.0;
+		float keepR = 0.0;
+		if ( ( taa2Red & ( 128 | 8 ) ) == 0 ) {	// lane FARTOGGLE3: a history inside the recent range is kept (above)
+			// (the 8-neighbour mean is inside too: on a frame the jitter hits it, the history lies between the hit and
+			// the ground around it, and the depth test below must not drop it there either)
+			float outside = max( h0.x - max( cur.x + rng.x, m8 ), min( cur.x - rng.y, m8 ) - h0.x );
+			// (fading out over 6 8-bit steps past it: 2 left a few 0.3 px objects going at Low / High / Ultra)
+			// (gone by 2 px a frame of camera motion: by 4 the chart's 0.5 px pan read 0.0117 -> 0.0136 at Low)
+			keepR = ( 1.0 - smoothstep( 0.0, 6.0 / 255.0, outside ) ) * ( 1.0 - clamp( motionPx / 2.0, 0.0, 1.0 ) )
+				* ( 1.0 - max( msk.r, msk.b ) );
+			keep = max( keep, keepR );
+		}
 		keep *= 1.0 - max( msk.r, msk.b );	// an effect or a thing moving on its own is no thin wire
 		vec3 hc = h;
 		if ( ( taa2Red & 1 ) == 0 )
@@ -159,6 +188,10 @@ void main()
 		// lane TAA4: moving, the history weight falls to 0.4 by 2 px a frame (was 0.8 by 32 px: the lag over the game's)
 		bool oldMotion = ( taa2Red & 32 ) != 0;
 		float alpha = mix( rest, oldMotion ? 0.8 : 0.4, clamp( motionPx / ( oldMotion ? 32.0 : 2.0 ), 0.0, 1.0 ) ) * ( 1.0 - rej );
+		// lane FARTOGGLE3: a kept sub-pixel thing averages over more than one 8-frame jitter cycle, else the history
+		// saws up at each hit and down between (0.07 a frame) and the object still pulses
+		const float kLockRest = 0.96;
+		alpha = mix( alpha, max( alpha, kLockRest ), keepR );
 		alpha *= 1.0 - msk.r;	// reactive: particles and effects follow this frame
 		alpha = min( alpha, mix( alpha, 0.5, msk.g ) );	// water, glass: their depth is the thing behind them
 		if ( taa2Tier >= 3 ) {
@@ -167,7 +200,9 @@ void main()
 			vec4 p = reproj * vec4( ( vec2( dTap ) + 0.5 ) * invSize * 2.0 - 1.0, dMin * 2.0 - 1.0, 1.0 );
 			float expect = 1.0 - ( p.z / p.w * 0.5 + 0.5 );
 			float was = texelFetch( histTex, clamp( ivec2( huv * vec2( size ) ), ivec2( 0 ), size - 1 ), 0 ).a;
-			if ( msk.b < 0.5 && was > expect * 1.05 + 1e-4 )
+			// lane FARTOGGLE3: not on a kept history: the jitter moves a sub-pixel object in and out of the 3x3's
+			// closest depth, which read as a disocclusion every frame it missed (High/Ultra blinked with no clip at all)
+			if ( msk.b < 0.5 && was > expect * 1.05 + 1e-4 && ( ( taa2Red & 128 ) != 0 || keep < 0.5 ) )
 				alpha = 0.0;
 			// Karis 2014: each side weighted by 1 / (1 + luma), so a lone bright sample cannot flicker the pixel
 			float wc = ( 1.0 - alpha ) / ( 1.0 + cur.x ), wh = alpha / ( 1.0 + h.x );
@@ -179,5 +214,5 @@ void main()
 	vec3 rgb = max( toRgb( res ), vec3( 0.0 ) );
 	o0 = vec4( rgb, 1.0 - min( dMin, 1.0 ) );
 	o1 = vec4( wwDither8( clamp( rgb, 0.0, 1.0 ), gl_FragCoord.xy ), 1.0 );	// lane FOGGLOW1: into the 8-bit picture, dithered
-	o2 = vec4( lockOut, 0.0, 1.0 );
+	o2 = vec4( lockOut, rng );	// lane FARTOGGLE3: b, a the recent range (was 0, 1; the lock is RGBA16F now)
 }

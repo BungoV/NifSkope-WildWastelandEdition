@@ -53,7 +53,11 @@ class Transform;
  *  Lane TAA3 (2026-10-25): every tier keeps a thin-feature lock (taa2.frag o2; AMD FSR 2's idea) so a sub-pixel
  *  wire standing still keeps its history; Ultra reads TAAINPUTS1's velocity and mask (gl/taainputs.h).
  *  Lane FRAMESPEED2 (TAAHDRPICK1): the resolve runs on the tone-mapped frame only (the before-tone-map row is gone).
- *   WW_TAA2_RED=...|nolock|noinputs  more reds (no lock; Ultra without the inputs) */
+ *   WW_TAA2_RED=...|nolock|noinputs  more reds (no lock; Ultra without the inputs)
+ *  Lane FARTOGGLE3 (2026-10-30): the lock also keeps a history inside the pixel's recent ISOLATED range (how far it
+ *  stood above / below its 8 neighbours, lock b, a), so a far object under a pixel in size no longer goes on and off
+ *  with the jitter on a still camera (offline gate tests/taafar_twin).
+ *   WW_TAA2_RED=oldlock        the resolve before it (the gate's red); nolock now drops both locks */
 
 //! True when either resolve runs (the game's row or a Modern tier): the frame is jittered.
 bool wwGameTaaOn();
