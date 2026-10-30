@@ -25,6 +25,7 @@
 #include "gl/glproperty.h"
 #include "cellmesh.h"
 #include "cellspeed.h"
+#include "cellworldanim.h"	// lane FIREFX1: the copies' draw census
 #include "gl/glnode.h"
 #include "gl/glscene.h"
 #include "gl/renderer.h"
@@ -422,6 +423,7 @@ void BSShape::drawShapes( NodeList * secondPass )
 			PassTime::CpuScope ptSetup( PassTime::ShapeSetup );	// lane PERF1
 			shader = context->setupProgram( this, shader );
 		}
+		wwCellAnimObjNoteDraw( static_cast<const Node *>( this ) );	// lane FIREFX1 (a no-op unless the census listens)
 		if ( wwOpaqueCutChecking() && wwOpaqueCutArmed() )
 			wwOpaqueCutCheckNote( cutSkip, name );
 
@@ -729,6 +731,7 @@ bool BSShape::wwMdiDraw( const void * hint, const std::vector<std::uint32_t> * r
 		WwDp::counted( true, -1 );
 		GpuDriven::mainSkipNext();
 		joined.push_back( f );
+		wwCellAnimObjNoteDraw( static_cast<const Node *>( f ) );	// lane FIREFX1: a follower draws in its leader's multi-draw
 	}
 	if ( !WwBl::runIssue( context->fn ) )
 		return false;
