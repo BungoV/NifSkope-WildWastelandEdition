@@ -21,6 +21,37 @@
   (red 2.16), Snow 1.20 (red 1.58, INFO). Coverage == map within 0.022 (bar 0.06); 12 km tile std (the masses) kept
   (>= 0.97x the red). The Low band's top falls with the tallest type (storm 7.00 -> 5.35 km, fair 3.60 -> 1.22 km).
   Reds: typemix and `=0` fail P; the base's sources fail the wiring check; the base's stage table lacks the name.
+## TREELEAF3 (2026-10-30, FIX1030C): effect shapes' TAA alpha test = their colour pass's; alpha-to-coverage caster path refused
+
+- **FXCOVTAA (on):** census first (tests/treeleaf3/fx_census.py, 224734 vanilla NIFs by bytes): of the side passes that
+  alpha-test a base map, only the TAA object vectors (src/gl/taainputs.cpp, the movers) ever draw a BSEffectShaderProperty
+  shape -- the sun cascades, light cubes and reflection probes take wwCastsSunShadow() shapes (`!bsesp`), and the GPU
+  cull's Hi-Z takes only fo4_cell/fo4_default-family programs. 25389 effect shapes, 2264 alpha-tested as drawn, 214 can
+  move (skinned, or the NIF animates transforms: bloatfly / bloodbug / stingwing wings, DiMa, the tesla cannon), 166 of
+  them compose an alpha other than base.a (baseColor.a^2 108, vertex alpha 68, palette alpha 62, falloff 39, soft 31) and
+  all 214 test with a strict `>`. The TAA pass tested `base.a x 1 >= t`. Now (src/gl/wwfxcov.h, Shape::wwFxSideAlpha,
+  taa_objvel.vert/.frag fxMode) it tests the colour pass's composed alpha: x baseColor.a^2, x the vertex alpha (the same
+  attribute; the CPU-skinned draw now carries the colours), the palette's alpha at (base.a, the rest) under greyscale
+  alpha, and the next float above the threshold for a `>` test. Not reproduced (they need the normal-map normal and the
+  frame's depth): falloff and the soft fade, which only lower the colour pass's alpha (52 of the 166 keep that residual).
+  Lighting shapes keep TREELEAF2's test bit for bit (mode 0, the old GLSL expression).
+- Red `WW_TREELEAF_RED=fx` (also `1` and `side`, live, stage 0 as before): the raw base alpha with `>=`.
+- **Alpha-to-coverage: REFUSED with numbers** (tests/treeleaf3/a2c_refusal.cpp, the arithmetic as a test). Sharpened A2C
+  ramps a leaf edge over one screen pixel centred on the hard test's contour, so a matching multisampled caster would only
+  convolve the shadow edge with that 1-px box under the receiver's PCF disc: the penumbra's sigma moves by at most
+  0.0726 px (720p, every Cascade Quality tier and cascade, texel from the shipping fit) against a pre-registered 0.10 px
+  bar; a hard 1-tap shadow (the red) would move 0.2031 px. The path would cost 4x D16 (Ultra/High 96 -> 384 MiB) and
+  lose hardware PCF (no multisample shadow sampler) inside ww_sunshadow.glsl, where fo4_effectdecalcsm march+PRT sits
+  ~18 KB under the instruction limit. The TAA inputs are single-sample against today's 4x MSAA colour for every polygon
+  edge already, and Hi-Z loses no occluder (alpha-tested draws are refused as occluders since SIGNDROP1). A2C itself
+  (colour pass only) is left as a row: it changes the colour programs' output alpha and needs pictures.
+- NifSkope.pro HEADERS: + src/gl/wwleafcov.h, src/gl/wwalphacov.h, src/gl/wwfxcov.h (qmake already listed the first two
+  as dependencies of their includers on this tree). tests/treeleaf2/sites.py accepts the TAA's fx.threshold.
+- Gates: tests/treeleaf3/run.sh: rule 18548 checks 0 failed (every 8-bit base alpha x 8 vertex alphas, refs 1..254, a
+  material `>` / NIF 4 / NIF 6, the movers' base colour alphas, palette on/off); RED_RAW (today) 18017 failed, 9839103
+  texels differ; RED_NOSTRICT 5282 failed, 54402 texels, all exactly on the threshold; sites text twin green PASS, red
+  (6fa08fed) FAIL; A2C refusal PASS, red FAIL. Link sweeps 405 / 270 / 405 LINK OK (fo4_effectdecalcsm march+PRT
+  unchanged at 1619262 B). Pictures owed when bungo asks.
 
 ## SKYSHARDS3 (2026-10-30, CODE1030): the far rings never draw with the bindless twin (the shards in Concord's sky)
 

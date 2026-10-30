@@ -22,6 +22,7 @@ out vec4 cCur;
 out vec4 cPrev;
 out vec3 viewPos;
 out vec2 texCoord;
+out float vAlpha;	// lane TREELEAF3: the vertex alpha an effect shape's colour pass multiplies in (fxMode & 1)
 
 vec3 grassOffset( float phase )
 {
@@ -50,5 +51,6 @@ void main()
 	cPrev = clipPrev * vec4( prev, 1.0 );
 	viewPos = ( modelViewMatrix * vec4( cur, 1.0 ) ).xyz;
 	texCoord = multiTexCoord0;
+	vAlpha = vertexColor.a;
 	gl_Position = clipJit * vec4( cur, 1.0 );
 }

@@ -660,11 +660,21 @@ void wwTaaInputsPass( Scene * scene )
 				AlphaBgsmTally::note( atTally, sh->wwAlphaTested(), da.test );
 				const bool at = da.test && bindBase( prog, sh );
 				prog->uni1i( "alphaTest", at ? 1 : 0 );
+				/* lane TREELEAF3: an effect shape tests its colour pass's composed alpha (src/gl/wwfxcov.h: baseColor.a^2,
+				 * the vertex alpha, the palette's alpha, strict `>`); a lighting shape keeps TREELEAF2's test (mode 0).
+				 * Red WW_TREELEAF_RED=fx: the raw base alpha. */
+				const Shape::WwFxAlpha fx = at ? sh->wwFxSideAlpha( da, "taa" ) : Shape::WwFxAlpha();
+				prog->uni1i( "fxMode", fx.mode );
 				if ( at ) {
-					const BSLightingShaderProperty * lsp = sh->wwLightingShader();
-					prog->uni1f( "alpha", lsp ? lsp->alpha : 1.0f );
-					prog->uni1f( "alphaThreshold", sh->wwLeafSideThreshold( da, "taa" ) );	// lane TREELEAF2
+					prog->uni1f( "alpha", fx.mult );
+					prog->uni1f( "alphaThreshold", fx.threshold );	// lane TREELEAF2 (wwLeafSideThreshold inside)
+					if ( fx.mode & 2 ) {
+						int texunit = 1;	// BaseMap took unit 0 (bindBase); the palette as the colour pass binds it
+						prog->uniSampler( sh->wwShaderLighting(), "GreyscaleMap", 1, texunit, QString(),
+							TexClampMode::CLAMP_S_CLAMP_T, QString() );
+					}
 				}
+				const bool vtxA = ( fx.mode & 1 ) != 0;	// mode 1 below: the colours ride as attribute 1
 				if ( m.mode == 2 )
 					wwCellGrassUniforms( scene, sh->id() );	// the fade and the wind's previous + current phase
 				else
@@ -672,9 +682,10 @@ void wwTaaInputsPass( Scene * scene )
 				if ( m.mode == 1 ) {
 					const std::vector<Vector3> & cur = m.rec->curSkin;
 					const std::vector<Vector3> & prv = m.rec->prevSkin.size() == cur.size() ? m.rec->prevSkin : cur;
-					const float * attrv[9] = { &( cur.front()[0] ), nullptr, nullptr, nullptr, nullptr, nullptr, nullptr,
-						at ? &( sh->coords.constFirst().constFirst()[0] ) : nullptr, &( prv.front()[0] ) };
-					const std::uint64_t mask = 0x300000003ULL | ( at ? 0x20000000ULL : 0ULL );
+					const float * attrv[9] = { &( cur.front()[0] ), vtxA ? &( sh->colors.constFirst()[0] ) : nullptr, nullptr,
+						nullptr, nullptr, nullptr, nullptr, at ? &( sh->coords.constFirst().constFirst()[0] ) : nullptr,
+						&( prv.front()[0] ) };
+					const std::uint64_t mask = 0x300000003ULL | ( at ? 0x20000000ULL : 0ULL ) | ( vtxA ? 0x40ULL : 0ULL );
 					r->drawShape( (unsigned int) sh->verts.size(), mask, (unsigned int) ( sh->triangles.size() * 3 ),
 						GL_TRIANGLES, GL_UNSIGNED_SHORT, attrv, sh->triangles.constData() );
 				} else {

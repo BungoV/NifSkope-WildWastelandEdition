@@ -54,6 +54,8 @@ for f, (pas, span, wantBinds, wantThr) in SITES.items():
             continue
         thr += 1
         good = 'wwLeafSideThreshold( ' in s and ('"%s"' % pas) in s or (up and re.search(r'\b[kc]\.atRef\b', s))
+        # lane TREELEAF3: the TAA movers upload Shape::wwFxSideAlpha( da, "taa" ).threshold (wwLeafSideThreshold inside)
+        good = good or (up and 'fx.threshold' in s and any(('wwFxSideAlpha( da, "%s" )' % pas) in t for t in L[lo:hi]))
         thrOk += bool(good)
         if not good:
             print('FAIL %s:%d side threshold not the colour test\'s: %s' % (f, i + 1, s.strip()[:100]))
