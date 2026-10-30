@@ -177,6 +177,9 @@ Reds: WW_CLOUDVOL_RED = onetype | nocurl | shortlight | ign. Offline gate: tests
 - **Red** `WW_CELL_SKYLIT_RED` (live): `fixed` = both as before (XCLL ambient and fog, the volume's sky held at its
   first build's), `xcll` = the ambient and fog only, `sky` = the volume's sky only. Interiors without bit 8 and
   exteriors take none of this.
+- **Placed-light shadows ship on (Medium)** when nothing is saved or pinned (the menu default and every harness run):
+  the museum has 39 shadow-casting lights (17 omni, 22 spot) and drew none by default. `WW_CELL_LAMPSHADOW=off` (live)
+  pins the old default. Cost and pixels: FINISH1030's batch hold (museum + Memory Den, budget 2.0 ms GPU at 1080p).
 
 ## RTXGI1 M3: the ray-traced GI volume follows the camera, and GL reads it in place (still ships Off)
 
