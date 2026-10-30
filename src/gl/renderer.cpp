@@ -2438,7 +2438,29 @@ bool Renderer::setupProgramCE1( const NifModel * nif, Program * prog, Shape * me
 			)
 			forced = &white;	// diffuse -> white so the vertex colour becomes the albedo
 		const QString &	alt = ( !scene->hasOption(Scene::DoErrorColor) ? white : magenta );
+		/* lane TREELEAF1 (bungo 10-19: near tree leaves break into flecks with hard cut edges, worse at distance): an
+		 * alpha-tested, unblended material binds its base map with coverage-preserving alpha mips at its own threshold
+		 * (gltex.h wwCovArmed, src/gl/wwalphacov.h), so each mip passes the test on level 0's share of texels.
+		 * WW_TREELEAF_RED=1 binds the file's own mips (today's flecks). The material decides, as the test below does
+		 * (ALPHABGSM1); a blended-ground pass and a ref of 0 or 255 are left alone. */
+		WW_SWITCH_STATIC( bool, leafRed, wwEnvInt( "WW_TREELEAF_RED" ) == 1 );
+		int covRef = 0;
+		if ( !leafRed && scene->hasOption( Scene::DoBlending ) && !wwCellLandIs( scene->nifModel, mesh->id() ) ) {
+			if ( mat ) {
+				if ( mat->hasAlphaTest() && !mat->hasAlphaBlend() )
+					covRef = int( mat->iAlphaTestRef );
+			} else if ( !mesh->translucent && mesh->alphaProperty && mesh->alphaProperty->hasAlphaTest()
+				&& !mesh->alphaProperty->hasAlphaBlend() ) {
+				const int r = int( std::lround( mesh->alphaProperty->alphaThreshold * 255.0f ) );
+				if ( mesh->alphaProperty->alphaTestFunc() == 4 )	// alpha > r
+					covRef = r;
+				else if ( mesh->alphaProperty->alphaTestFunc() == 6 )	// alpha >= r is alpha > r - 1
+					covRef = r - 1;
+			}
+		}
+		scene->textures->wwCovArmed = ( covRef > 0 && covRef < 255 ) ? covRef : 0;
 		prog->uniSampler( bsprop, "BaseMap", 0, texunit, alt, clamp, *forced );
+		scene->textures->wwCovArmed = 0;
 
 		forced = &emptyString;
 		if ( !scene->hasOption(Scene::DoLighting) || !scene->hasOption(Scene::DoNormalMap) )
