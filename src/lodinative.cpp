@@ -13,6 +13,7 @@ BSD License - see nifskope.h
 #include "cellfarhide.h"	// lane FARHOLE2: rows a streamed near cell leaves out (and the farobjcensus gate)
 #include "cellmesh.h"
 #include "esmdata.h"
+#include "gl/cellfarinst.h"	// lane SKYSHARDS3: the rows an instanced ring's commands read (farobjcensus)
 #include "model/nifmodel.h"
 #include "spells/blocks.h"
 
@@ -1982,6 +1983,34 @@ int lodiFarObjCensusCli( const QStringList & args, QTextStream & out )
 				.arg( i ).arg( c.placed ).arg( c.instancesDrawn ).arg( c.tris ).arg( c.uniqueVerts ).arg( c.uniqueTris )
 				.arg( double( c.geoBytes ) / ( 1024.0 * 1024.0 ), 0, 'f', 2 )
 				.arg( double( c.instBytes ) / ( 1024.0 * 1024.0 ), 0, 'f', 2 );
+		if ( c.instanced ) {
+			/* lane SKYSHARDS3: the per-draw row each command of this ring reads in the cell view with the Bindless
+			 * draws row on, by the program the renderer gives the ring now (its own, or the twin under the red
+			 * WW_CELL_FARINST_RED=blrow). foreign > 0 = a command reads another draw's matrices and texture handles */
+			const bool twin = CellFarInst::bindlessTwinAllowed();
+			CellFarInst::RowAudit ra, rt;
+			qint64 rings = 0;
+			for ( int b = blocks0; b < nif.getBlockCount(); b++ ) {
+				const QSharedPointer<CellMesh> cm = cellMeshFor( &nif, nif.getBlockIndex( b ) );
+				if ( !cm || !cm->inst )
+					continue;
+				rings++;
+				const CellFarInst::RowAudit a = CellFarInst::rowAudit( *cm->inst, twin );
+				const CellFarInst::RowAudit t = CellFarInst::rowAudit( *cm->inst, true );
+				ra.cmds += a.cmds;
+				ra.foreign += a.foreign;
+				ra.pastRing += a.pastRing;
+				ra.maxOffset = std::max( ra.maxOffset, a.maxOffset );
+				rt.foreign += t.foreign;
+				rt.pastRing += t.pastRing;
+				rt.maxOffset = std::max( rt.maxOffset, t.maxOffset );
+			}
+			out << QString( "farobjcensus ring %1 bindless rows: %2 shapes, %3 commands, drawn with %4; %5 read another "
+				"draw's row, %6 past the 65536-row ring, max row offset %7 (under the twin: %8 foreign, %9 past, max %10)\n" )
+				.arg( i ).arg( rings ).arg( ra.cmds )
+				.arg( twin ? QStringLiteral( "the bindless twin [red blrow]" ) : QStringLiteral( "its own program" ) )
+				.arg( ra.foreign ).arg( ra.pastRing ).arg( ra.maxOffset ).arg( rt.foreign ).arg( rt.pastRing ).arg( rt.maxOffset );
+		}
 		out.flush();
 	}
 	if ( !loaded.isEmpty() ) {

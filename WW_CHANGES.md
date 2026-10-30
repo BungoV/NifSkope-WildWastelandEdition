@@ -1,5 +1,24 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## SKYSHARDS3 (2026-10-30, CODE1030): the far rings never draw with the bindless twin (the shards in Concord's sky)
+
+- The faceted, ground-textured shards (and two bright glows) floating ~3 km over Concord, a new shape every frame, were
+  the INSTANCED far object rings (FARDRAW1, gl/cellfarinst.cpp) drawn with the Bindless draws twin (fo4_cellbl /
+  fo4_cellcsmbl). The twin reads its per-draw row (matrices + texture handles) at `wwDrawBase + gl_BaseInstance`
+  (ww_bindless.glsl), and a far command's base instance is its first PLACEMENT row: 98 % of Concord's far commands
+  (536 / 10658 / 11745 of 565 / 10802 / 11902, rings 0-2, offsets up to 21544) read another draw's row in the
+  persistent 65536-row ring, which the CPU rewrites as it advances. Actors outdoors / weapon parts only moved which rows
+  were hit (why they seemed to clear it).
+- Fix (default, no toggle): renderer.cpp's twin choice skips a shape with an instanced far ring
+  (`CellFarInst::bindlessTwinAllowed()`); the ring draws with fo4_cell / fo4_cellcsm, which bind their own matrices and
+  maps. A `farinst: far rings drawn with <program>` stderr line names the program once per change. No shader change.
+- Red `WW_CELL_FARINST_RED=blrow` (live, stage 0 as before): the twin as before.
+- Gates: tests/farinstrow/run.sh (`-no-gui farobjcensus ... --instanced` now prints a `bindless rows:` line per ring):
+  green 0 foreign rows on 3 rings, red blrow FAIL (3 of 3 rings foreign). Live c3 still_close5, rt env, Commonwealth bake
+  pinned, fresh launch per row (crop A / C mean abs diff vs the 10-30 shard frame): default 52.34 / 61.97 (gone),
+  ACTORS_OUT=1 52.34 / 61.97, red blrow 0.08 / 0.27 (shards back). One launch with live FARLOD 0 -> 1, FARLOD_SWAY 0 and
+  PARTICLES 0 reopens: no WerFault (peak private 20.7 GB; the shard exe crashed 5 of 5 there, WerFault, 32 GB).
+
 ## CLOUDBAND2 (2026-10-30, CODE1030): Cloud Accumulation and the column ambient are the default
 
 - bungo's rule "no fix-only toggles, a code choice is never handed to him": CLOUDBAND1's two switches, which shipped

@@ -11,8 +11,10 @@
 #include <QHash>
 #include <QOpenGLContext>
 
+#include <algorithm>
 #include <cmath>
 #include <cstdio>
+#include <string>
 #include <vector>
 
 namespace
@@ -258,10 +260,41 @@ bool draw( NifSkopeOpenGLContext * r, Scene * scene, const CellMeshInst & d, Nif
 	}
 	if ( cmds.empty() )
 		return true;
+	{	// lane SKYSHARDS3: the program the far rings draw with, once a change (a live row reads it)
+		static std::string lastProg;
+		if ( std::string( prog->name ) != lastProg ) {
+			lastProg = std::string( prog->name );
+			std::fprintf( stderr, "farinst: far rings drawn with %s%s\n", lastProg.c_str(),
+				prog->wwBindless ? " (bindless twin: rows read at the base instance, red WW_CELL_FARINST_RED=blrow)" : "" );
+			std::fflush( stderr );
+		}
+	}
 	prog->uni1i( "farInst", 1 );
 	submit( r, *cp, *k, cmds );
 	prog->uni1i( "farInst", 0 );
 	return true;
+}
+
+bool bindlessTwinAllowed()
+{
+	WW_SWITCH_STATIC( bool, red, wwEnv( "WW_CELL_FARINST_RED" ) == "blrow" );
+	return red;
+}
+
+RowAudit rowAudit( const CellMeshInst & d, bool bindlessProgram, quint32 ringRows )
+{
+	RowAudit a;
+	for ( const CellMeshInst::Cmd & m : d.cmds ) {
+		a.cmds++;
+		const quint32 off = bindlessProgram ? m.baseInstance : 0u;	// wwDrawIdx - wwDrawBase
+		if ( off == 0 )
+			continue;
+		a.foreign++;
+		if ( off >= ringRows )
+			a.pastRing++;
+		a.maxOffset = std::max( a.maxOffset, off );
+	}
+	return a;
 }
 
 bool drawCascade( NifSkopeOpenGLContext * r, const CellMeshInst & d, NifSkopeOpenGLContext::Program * prog,

@@ -74,6 +74,7 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include "gl/cellunits.h"	// lane PERF1: the first dedicated unit
 #include "gl/cellvolair.h"	// lane VOLPART1: volumetric lit effect cards
 #include "gl/cellfarground.h"	// lane FARDRAW1: the far ring 0's live ground
+#include "gl/cellfarinst.h"	// lane SKYSHARDS3: the far ring keeps its own program
 #include "landlodspec.h"	// lane LANDSPEC1
 #include "libfo76utils/src/ddstxt16.hpp"
 #include "glview.h"
@@ -1232,6 +1233,9 @@ NifSkopeOpenGLContext::Program * Renderer::setupProgram( Shape * mesh, Program *
 	 * draws row is on: the shapes the draw packets record (no selection, refraction or census pass) */
 	auto wwBlWants = [mesh]() -> bool {
 		if ( !mesh->bslsp || !WwBl::on() )
+			return false;
+		// lane SKYSHARDS3: an instanced far ring's base instance is a placement row, not the row offset the twin reads
+		if ( mesh->wwFarInstData() && !CellFarInst::bindlessTwinAllowed() )
 			return false;
 		const Scene * scene = mesh->scene;
 		const auto v = scene->nifModel->getBSVersion();
