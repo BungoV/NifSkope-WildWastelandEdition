@@ -371,7 +371,8 @@ float wwCellSkyVis();
 /*! Lane SKYINT1 (10-29): a Use Sky Lighting interior lit by the current Lookdev weather and hour (WwCellLighting
  *  skyLighting): its DALC and fog colours in place of XCLL's (celllights.cpp), and the ray-traced GI volume's sky
  *  (rtddgicell.cpp). WW_CELL_SKYLIT_RED (live): fixed = both as before (XCLL ambient and fog, the volume's sky held at
- *  the one its first build took), xcll = the ambient and fog only, sky = the volume's sky only. Bits: 1 xcll, 2 sky. */
+ *  the one its first build took), xcll = the ambient and fog only, sky = the volume's sky only, ground = the volume's
+ *  sky from below as the weather's again (default: none from below). A comma list. Bits: 1 xcll, 2 sky, 4 ground. */
 int wwCellSkyLitRed();
 //! true: L is a Use Sky Lighting interior that takes the weather's ambient and fog colours now (Lookdev on, no red)
 bool wwCellSkyLitNow( const WwCellLighting * L );

@@ -2495,8 +2495,11 @@ bool wwCellImageSpaceOn()
 int wwCellSkyLitRed()
 {
 	WW_SWITCH_STATIC( int, red, [] {
-		const QString v = wwEnvStr( "WW_CELL_SKYLIT_RED" ).trimmed().toLower();
-		return v == QLatin1String( "fixed" ) ? 3 : v == QLatin1String( "xcll" ) ? 1 : v == QLatin1String( "sky" ) ? 2 : 0;
+		int bits = 0;	// a comma list
+		for ( const QString & v : wwEnvStr( "WW_CELL_SKYLIT_RED" ).trimmed().toLower().split( QLatin1Char( ',' ), Qt::SkipEmptyParts ) )
+			bits |= v == QLatin1String( "fixed" ) ? 3 : v == QLatin1String( "xcll" ) ? 1 : v == QLatin1String( "sky" ) ? 2
+				: v == QLatin1String( "ground" ) ? 4 : 0;
+		return bits;
 	}() );
 	return red;
 }

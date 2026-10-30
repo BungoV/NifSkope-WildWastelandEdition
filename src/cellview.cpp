@@ -4131,6 +4131,7 @@ static bool cellBuild( NifModel * nif, const CellSceneSpec & specAsked, CellChun
 	};
 	QHash<QString, int> maskModelIdx;
 	int amShapes = 0, amShapesNoHole = 0, amShapesUnread = 0, amAlbMoved = 0;
+	QString amSolidList;   // lane SKYINT1: the alpha-tested shapes left solid, named (the first 80)
 	// gate only (tests/spells/alphatest_check.py): one row per kept shape: first soup triangle, count, model, material, map
 	const QByteArray soupShapesPath = wwEnv( "WW_CELL_PROBE_SOUP_SHAPES" );
 	QString soupShapes;
@@ -5008,6 +5009,11 @@ static bool cellBuild( NifModel * nif, const CellSceneSpec & specAsked, CellChun
 							amShapesUnread++;
 						} else if ( ( mi.map < 0 || mi.minA >= int( amThr ) ) && !scaleHole ) {
 							amShapesNoHole++;
+							if ( amShapesNoHole <= 80 )
+								amSolidList += QStringLiteral( "    %1 | %2 | %3 | threshold %4 map min alpha %5 scale min %6 | tris %7 | at %8 %9 %10\n" )
+									.arg( model, s.matName, s.tex0 ).arg( int( amThr ) ).arg( mi.minA ).arg( double( amScaleMin ), 0, 'f', 3 )
+									.arg( qint64( s.geom.tris.size() / 3 ) ).arg( double( p.pos[0] ), 0, 'f', 0 )
+									.arg( double( p.pos[1] ), 0, 'f', 0 ).arg( double( p.pos[2] ), 0, 'f', 0 );
 						} else if ( mi.map < 0 && ( amMap = fullMaskOf( s.tex0 ) ) < 0 ) {
 							amShapesUnread++;   // read once, unreadable the second time (never seen)
 						} else {
@@ -6500,7 +6506,8 @@ static bool cellBuild( NifModel * nif, const CellSceneSpec & specAsked, CellChun
 			t << "  probe soup alpha-test masks" << ( alphaPin ? " PIN off (every face solid)" : "" ) << ": shapes masked "
 			  << amShapes << ", triangles " << int( probeSoup.amask.tris.size() ) << ", maps " << int( probeSoup.amask.maps.size() )
 			  << "; alpha-tested shapes left solid: map with no texel under the threshold " << amShapesNoHole
-			  << ", map unread " << amShapesUnread << "; triangle colors read off a centroid hole " << amAlbMoved << "\n";
+			  << ", map unread " << amShapesUnread << "; triangle colors read off a centroid hole " << amAlbMoved << "\n"
+			  << amSolidList;
 			// lane ALPHATEST2: masks scaled by vertex alpha x material alpha
 			t << "  probe soup alpha-test scale" << ( alphaNoScale ? " RED noscale" : "" ) << ": shapes scaled " << amShapesScaled
 			  << ", shapes masked by the scale alone " << amShapesScaleOnly << ", triangles scaled " << amTrisScaled << "\n";
