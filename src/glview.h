@@ -36,6 +36,7 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include "gl/glscene.h"
 #include "physics/physicspreview.h"
 #include "model/nifmodel.h"
+#include "cellcambounds.h"	// lane CAMGATE2: WwCamBounds::Keeper, the bounds gate's memo + write-back
 
 #include <QOpenGLWindow> // Inherited
 #include <QByteArray>
@@ -2041,13 +2042,12 @@ private:
 	bool wwPathActive = false;
 	Vector3 wwPathEye, wwPathAt;
 	float wwPathFov = 70.0f;
-	// lane CAMGATE1: the bounds gate's memo (viewTransform is const and asked several times a frame)
+	// lane CAMGATE1: the bounds gate's memo (viewTransform is const and asked several times a frame). CAMGATE2: the memo
+	// and the write-back of a refused free-camera pose live in WwCamBounds::Keeper, which tests/cambounds drives too
 	Transform wwCameraBoundsGate( const Transform & raw ) const;
-	mutable Transform wwCamGood, wwCamAsked, wwCamGiven;
-	mutable bool wwCamHaveGood = false, wwCamAskedValid = false;
+	mutable WwCamBounds::Keeper<Transform, CameraKeep, QString> wwCamKeep;
 	mutable const void * wwCamDoc = nullptr;
 	mutable quint64 wwCamDocGen = 0;
-	mutable QString wwCamWhy, wwCamSaidKey;
 	unsigned char updatePending = 0;
 	//! Extra repaints scheduled after a scene compile: the first frame after
 	//! a compile renders the streaming line geometry (grid / origin axes)

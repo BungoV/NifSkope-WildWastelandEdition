@@ -1,5 +1,32 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## CAMGATE2 (2026-10-30, FIX1030B): the camera state snaps back to the kept pose; interiors get bounds
+
+- **The camera state follows the gate.** CAMGATE1 froze the DRAWN view at the last in-bounds pose while the free
+  camera's own state (Pos / Rot / Dist: the fly keys, the readouts, the favorites) went on moving under the ground or
+  out of the block, so the user flew on blind and every readout lied. Now a refused view that came from that state
+  writes the kept pose back into it (the last in-bounds state, or the cell's home before there is one), so the next
+  input starts from the kept pose. The write-back is plain member writes inside the gate (no signal, no repaint call,
+  no recursion); holding a fly key against the ground puts the state back every frame and logs one
+  `camera refused: ... (kept the last in-bounds view; the camera put back there)` line. A path camera or a pinned
+  harness camera (WW_RENDER_CENTER/DIST/FOV/ORTHO) is never written: the runner judges those from the side file.
+  The memo, the kept view and the write-back now live in one pure template, `WwCamBounds::Keeper`
+  (src/cellcambounds.h), which GLView::wwCameraBoundsGate and the unit test both run.
+- **Interiors are judged.** No LAND there, so the bounds are the box of the cell's placements (every REFR not deleted,
+  EsmWorld::interiorRefrs) grown by 512 units, the open's spawn (COC marker / door arrival) always inside; no spawn:
+  the home is the box centre. Notes once per open: `camera bounds: interior <EDID>: N placements, box ... (+512)`.
+  Offline (notes/fix1030b/camgate2): Fallout4.esm 1195 interiors, the COC marker inside the box in 287 of 287 cells
+  that have one (NukaWorld 35 of 35); every interior path the lanes shot (16, CAMGATE1's census) lies inside its own
+  cell's box + 512.
+- Reds (WW_CAMERA_BOUNDS_RED, a comma list, live): `freeze` = CAMGATE1's frozen view, the state left at the refused
+  eye; `interior` = interiors not judged; `allow` = no gate at all (as before). The fix ships ON.
+- Unit: tests/cambounds (run.sh <out> [<interior fixtures dir>]): green 33 checks; `-DCAMBOUNDS_RED_FREEZE` fails
+  putback/nextinput/hold/onelog/homeput/roomkeep, `-DCAMBOUNDS_RED_INTERIOR` fails roomout/roombelow/roomkeep (the
+  CAMGATE1 reds still fail theirs); `--room` on six real interiors' placements (Museum, Solomon's house, Vault 111
+  cryo, Cabot House, East Boston Prep, Nuka-World bottling plant): COC marker and box centre in, one margin past every
+  face refused. Owed (needs a window, when bungo asks): the `allow` red in an invisible window, and the water rows'
+  lower-half sky share.
+
 ## CAMGATE1 (2026-10-30): the camera never shows an out-of-bounds or under-terrain view
 
 - bungo 10-30, watching a live hold window that showed the underside of the cells: "Stop placing the camera out of
