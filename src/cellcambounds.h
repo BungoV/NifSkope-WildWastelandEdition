@@ -34,7 +34,11 @@ BSD License - see nifskope.h
  *
  * The pure part (namespace WwCamBounds) has no Qt and no NifModel, so the unit test includes it alone. */
 
+#include <algorithm>
+#include <array>
 #include <cmath>
+#include <map>
+#include <vector>
 
 namespace WwCamBounds
 {
@@ -159,6 +163,265 @@ inline Verdict judgeRoom( const Room & r, double x, double y, double z )
 		return Verdict::OutsideRoom;
 #ifndef CAMBOUNDS_RED_INTERIOR
 	if ( r.valid && !r.holds( x, y, z ) )
+		return Verdict::OutsideRoom;
+#endif
+	return Verdict::Ok;
+}
+
+/* lane CAMGATE3 (FIX1030B round 2): AN INTERIOR IS A SET OF BOXES, built from what is drawn. CAMGATE2's one box of the
+ * placements' ORIGINS was loose (outlier refs: 85 Fallout4.esm cells, CambridgePolymerLabs01 34.6 km across) and
+ * also, measured, NOT CONSERVATIVE: a big mesh reaches past its origin + 512, so its navmesh (43 cells, worst 5312 u)
+ * and the game's own RoomMarker boxes (24 cells, Vault111Cryo 3168 u above) lay outside it: views inside the real
+ * interior were refused. The rule now (notes/fix1030b/camgate3, room_census.py is its offline twin):
+ *   - clumps of placement origins: origins in 26-touching kClumpVoxel voxels are one clump;
+ *   - one box per clump = its origins + each placement's OBND world box (fromEuler(-rot), as the cell view places it;
+ *     sky / effects cards left out by the caller), + kRoomMargin;
+ *   - one box per RoomMarker (XPRM box) and PortalMarker (XPRM plane), oriented as cellview.cpp cellPrimAxes, + margin;
+ *   - the open's spawn (COC marker / door arrival) always inside (RoomSet::include).
+ * An eye is in bounds when it is in ANY box: the void between a building and its outlier clumps is refused, the edge of
+ * every mesh is not. Census over all 1276 interiors of Fallout4.esm + DLCNukaWorld.esm: every navmesh vertex within 512
+ * of any placement, every room / portal corner, every COC marker and door arrival, and the 16 interior paths the lanes
+ * shot are inside; the set is under half today's volume in 45 cells. Red WW_CAMERA_BOUNDS_RED=loosebox (CAMGATE2's box);
+ * unit red CAMBOUNDS_RED_LOOSEBOX. */
+constexpr double kClumpVoxel = 1024.0;
+
+//! niftypes.cpp Matrix::fromEuler( x, y, z ) (= Rx( x ) Ry( y ) Rz( z )); a ref is placed with fromEuler( -rot )
+inline void eulerMatrix( double x, double y, double z, double m[3][3] )
+{
+	const double sx = std::sin( x ), cx = std::cos( x ), sy = std::sin( y ), cy = std::cos( y ), sz = std::sin( z ),
+		cz = std::cos( z );
+	m[0][0] = cy * cz;
+	m[0][1] = -cy * sz;
+	m[0][2] = sy;
+	m[1][0] = sx * sy * cz + sz * cx;
+	m[1][1] = cx * cz - sx * sy * sz;
+	m[1][2] = -sx * cy;
+	m[2][0] = sx * sz - cx * sy * cz;
+	m[2][1] = cx * sy * sz + sx * cz;
+	m[2][2] = cx * cy;
+}
+
+//! cellview.cpp cellPrimAxes: Rz( -rz ) Rx( -rx ) Ry( -ry ); column k = the marker's local axis k in world
+inline void primMatrix( double rx, double ry, double rz, double m[3][3] )
+{
+	auto rot = []( int a, double ang, double o[3][3] ) {
+		const double c = std::cos( ang ), s = std::sin( ang );
+		const int i = ( a + 1 ) % 3, j = ( a + 2 ) % 3;
+		for ( int u = 0; u < 3; u++ )
+			for ( int v = 0; v < 3; v++ )
+				o[u][v] = u == v ? 1.0 : 0.0;
+		o[i][i] = c;
+		o[i][j] = -s;
+		o[j][i] = s;
+		o[j][j] = c;
+	};
+	auto mul = []( const double a[3][3], const double b[3][3], double o[3][3] ) {
+		for ( int u = 0; u < 3; u++ )
+			for ( int v = 0; v < 3; v++ )
+				o[u][v] = a[u][0] * b[0][v] + a[u][1] * b[1][v] + a[u][2] * b[2][v];
+	};
+	double z[3][3], x[3][3], y[3][3], t[3][3];
+	rot( 2, -rz, z );
+	rot( 0, -rx, x );
+	rot( 1, -ry, y );
+	mul( z, x, t );
+	mul( t, y, m );
+}
+
+//! the world AABB of the box c + m * ( +-half ): half along world axis i = sum_k |m[i][k]| half[k]
+inline Room orientedBox( const double c[3], const double m[3][3], const double half[3] )
+{
+	Room r;
+	for ( int i = 0; i < 3; i++ ) {
+		const double e = std::fabs( m[i][0] ) * half[0] + std::fabs( m[i][1] ) * half[1] + std::fabs( m[i][2] ) * half[2];
+		r.lo[i] = c[i] - e;
+		r.hi[i] = c[i] + e;
+	}
+	r.valid = std::isfinite( r.lo[0] + r.lo[1] + r.lo[2] + r.hi[0] + r.hi[1] + r.hi[2] );
+	return r;
+}
+
+//! a placement's world box from its base's OBND (base-local lo / hi): pos + fromEuler( -rot ) ( v * scale )
+inline Room obndWorldBox( const double pos[3], const double rot[3], double scale, const double olo[3], const double ohi[3] )
+{
+	const double s = scale > 0.0 ? scale : 1.0;
+	double m[3][3];
+	eulerMatrix( -rot[0], -rot[1], -rot[2], m );
+	double c[3], h[3], cw[3];
+	for ( int k = 0; k < 3; k++ ) {
+		c[k] = 0.5 * ( olo[k] + ohi[k] ) * s;
+		h[k] = 0.5 * std::fabs( ohi[k] - olo[k] ) * s;
+	}
+	for ( int i = 0; i < 3; i++ )
+		cw[i] = pos[i] + m[i][0] * c[0] + m[i][1] * c[1] + m[i][2] * c[2];
+	return orientedBox( cw, m, h );
+}
+
+//! a RoomMarker / PortalMarker's box: XPRM half extents |h| * scale (at least 1), axes as cellview.cpp cellPrimAxes
+inline Room markerBox( const double pos[3], const double rot[3], double scale, const double half[3] )
+{
+	double m[3][3], h[3];
+	primMatrix( rot[0], rot[1], rot[2], m );
+	for ( int k = 0; k < 3; k++ )
+		h[k] = std::fmax( std::fabs( half[k] ) * scale, 1.0 );
+	return orientedBox( pos, m, h );
+}
+
+//! one placement of an interior: its origin and, when its base has an OBND (not a sky / effects card), its world box
+struct Placed
+{
+	double pos[3] = { 0, 0, 0 };
+	Room box;	//!< invalid = origin only
+};
+
+/*! the clumps of the origins (26-touching kClumpVoxel voxels), each a list of indices into P, ordered by first member.
+ *  Union-find over the occupied voxels (std::map: no hashing of negative keys to get wrong). */
+inline std::vector<std::vector<int>> clumpsOf( const std::vector<Placed> & P )
+{
+	std::map<std::array<long long, 3>, int> vox;
+	std::vector<std::array<long long, 3>> keys;
+	std::vector<int> of( P.size(), -1 );
+	for ( size_t i = 0; i < P.size(); i++ ) {
+		std::array<long long, 3> k;
+		for ( int c = 0; c < 3; c++ )
+			k[c] = (long long) std::floor( P[i].pos[c] / kClumpVoxel );
+		auto it = vox.find( k );
+		if ( it == vox.end() ) {
+			it = vox.emplace( k, int( keys.size() ) ).first;
+			keys.push_back( k );
+		}
+		of[i] = it->second;
+	}
+	std::vector<int> par( keys.size() );
+	for ( size_t i = 0; i < par.size(); i++ )
+		par[i] = int( i );
+	auto find = [&par]( int a ) {
+		while ( par[a] != a ) {
+			par[a] = par[par[a]];
+			a = par[a];
+		}
+		return a;
+	};
+	for ( size_t a = 0; a < keys.size(); a++ )
+		for ( int dx = -1; dx <= 1; dx++ )
+			for ( int dy = -1; dy <= 1; dy++ )
+				for ( int dz = -1; dz <= 1; dz++ ) {
+					auto it = vox.find( { keys[a][0] + dx, keys[a][1] + dy, keys[a][2] + dz } );
+					if ( it == vox.end() )
+						continue;
+					const int ra = find( int( a ) ), rb = find( it->second );
+					if ( ra != rb )
+						par[std::max( ra, rb )] = std::min( ra, rb );
+				}
+	std::map<int, int> slot;	// root -> index in out, in order of each clump's first member
+	std::vector<std::vector<int>> out;
+	for ( size_t i = 0; i < P.size(); i++ ) {
+		if ( of[i] < 0 || !std::isfinite( P[i].pos[0] + P[i].pos[1] + P[i].pos[2] ) )
+			continue;
+		const int r = find( of[i] );
+		auto it = slot.find( r );
+		if ( it == slot.end() ) {
+			it = slot.emplace( r, int( out.size() ) ).first;
+			out.emplace_back();
+		}
+		out[it->second].push_back( int( i ) );
+	}
+	return out;
+}
+
+//! an interior's bounds: in bounds = inside any box (lane CAMGATE3)
+struct RoomSet
+{
+	std::vector<Room> boxes;
+	int clumps = 0;
+	int mainBox = -1;	//!< the box of the biggest clump (the home when there is no spawn)
+
+	bool valid() const { return !boxes.empty(); }
+	bool holds( double x, double y, double z ) const
+	{
+		for ( const Room & r : boxes )
+			if ( r.holds( x, y, z ) )
+				return true;
+		return false;
+	}
+	//! the spawn is always in bounds: one more box round it when no box holds it
+	void include( double x, double y, double z, double m )
+	{
+		if ( !valid() || holds( x, y, z ) || !std::isfinite( x ) || !std::isfinite( y ) || !std::isfinite( z ) )
+			return;
+		Room r;
+		r.add( x, y, z );
+		r.grow( m );
+		boxes.push_back( r );
+	}
+	//! the union's AABB (for the notes)
+	Room bound() const
+	{
+		Room u;
+		for ( const Room & r : boxes ) {
+			u.add( r.lo[0], r.lo[1], r.lo[2] );
+			u.add( r.hi[0], r.hi[1], r.hi[2] );
+		}
+		return u;
+	}
+};
+
+/*! the set: one box per clump (origins + their placements' boxes) + one per marker box, each + kRoomMargin.
+ *  Red CAMBOUNDS_RED_LOOSEBOX: CAMGATE2's one box of every origin + the margin (markers and placement boxes ignored). */
+inline RoomSet roomSetOf( const std::vector<Placed> & P, const std::vector<Room> & markers )
+{
+	RoomSet s;
+#ifdef CAMBOUNDS_RED_LOOSEBOX
+	Room all;
+	for ( const Placed & p : P )
+		all.add( p.pos[0], p.pos[1], p.pos[2] );
+	all.grow( kRoomMargin );
+	if ( all.valid ) {
+		s.boxes.push_back( all );
+		s.clumps = 1;
+		s.mainBox = 0;
+	}
+	(void) markers;
+	return s;
+#else
+	const std::vector<std::vector<int>> C = clumpsOf( P );
+	s.clumps = int( C.size() );
+	size_t most = 0;
+	for ( const std::vector<int> & members : C ) {
+		Room b;
+		for ( const int i : members ) {
+			b.add( P[i].pos[0], P[i].pos[1], P[i].pos[2] );
+			if ( P[i].box.valid ) {
+				b.add( P[i].box.lo[0], P[i].box.lo[1], P[i].box.lo[2] );
+				b.add( P[i].box.hi[0], P[i].box.hi[1], P[i].box.hi[2] );
+			}
+		}
+		if ( !b.valid )
+			continue;
+		b.grow( kRoomMargin );
+		if ( members.size() > most ) {
+			most = members.size();
+			s.mainBox = int( s.boxes.size() );
+		}
+		s.boxes.push_back( b );
+	}
+	for ( Room r : markers ) {
+		if ( !r.valid )
+			continue;
+		r.grow( kRoomMargin );
+		s.boxes.push_back( r );
+	}
+	return s;
+#endif
+}
+
+//! the verdict for an eye in an interior's set (lane CAMGATE3): outside every box = refused (an empty set judges nothing)
+inline Verdict judgeRoomSet( const RoomSet & s, double x, double y, double z )
+{
+	if ( !std::isfinite( x ) || !std::isfinite( y ) || !std::isfinite( z ) )
+		return Verdict::OutsideRoom;
+#ifndef CAMBOUNDS_RED_INTERIOR
+	if ( s.valid() && !s.holds( x, y, z ) )
 		return Verdict::OutsideRoom;
 #endif
 	return Verdict::Ok;
@@ -294,7 +557,7 @@ WwCamBounds::Verdict cellCamBoundsJudge( const NifModel * nif, double x, double 
 bool cellCamBoundsHomeOf( const NifModel * nif, float eye[3], float & yawDeg );
 //! WW_CAMERA_BOUNDS_RED=allow (live)
 bool cellCamBoundsRed();
-//! lane CAMGATE2: one word of the WW_CAMERA_BOUNDS_RED comma list (allow, freeze, interior), live
+//! lane CAMGATE2: one word of the WW_CAMERA_BOUNDS_RED comma list (allow, freeze, interior; CAMGATE3: loosebox), live
 bool cellCamBoundsRedHas( const char * word );
 #endif
 

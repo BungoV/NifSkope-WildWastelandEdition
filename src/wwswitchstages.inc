@@ -73,7 +73,7 @@
 { "WW_BOLT_DEBUG", 1, "src/gl/controllers.cpp:2652 ProcLightningController::buildRibbon | read when the renderer is handed the cell (publish/load/build)" },
 { "WW_BROWSER_TEST", 2, "src/nifskope_ui.cpp:25960 NifSkope::createWindow | createWindow: picks which harness the window runs" },
 { "WW_BTD_REGION", 1, "src/btdterrain.cpp:851 btdRegionFromEnv | read while the cell document is built" },
-{ "WW_CAMERA_BOUNDS_RED", 0, "src/cellcambounds.cpp:82 cellCamBoundsRedHas | re-read per frame or per call (a)" },
+{ "WW_CAMERA_BOUNDS_RED", 0, "src/cellcambounds.cpp:92 cellCamBoundsRedHas | re-read per frame or per call (a)" },
 { "WW_CAMERA_CENSUS", 0, "src/glview.cpp:7126 GLView::wwLogCameraCensus | re-read per frame or per call (a)" },
 { "WW_CAMERA_LOG", 0, "src/glview.cpp:220 wwCameraLog | re-read per frame or per call (a)" },
 { "WW_CARDBAKE_TIMES", 0, "src/nifskope_ui.cpp:1555 wwCardTimesMainEntry | re-read per frame or per call (a)" },
