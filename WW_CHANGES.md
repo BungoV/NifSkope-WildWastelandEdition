@@ -1,5 +1,36 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## FARTOGGLE4 (2026-10-31, FIX1030C): far objects blinking on a moving camera with the TAA off -- measured, fix REFUSED with numbers (no code change)
+
+- **Bungo's settings** (his saved QSettings, read-only): Antialiasing 4 = 4x MSAA, Field Of View 60, Modern temporal AA
+  0 (off), the game-copy Temporal AA key absent (off). So his window shows each frame as it is drawn: nothing is
+  carried from frame to frame.
+- **What decides it (MEASURED, tests/farshimmer):** the 4x MSAA coverage test alone. The cell view has no screen-size
+  cull, no per-frame LOD pick (LODPLACE1: 0 far row changes on a slow walk) and no conservative raster. With the TAA off a
+  frame shows an object at hits / 4 px^2 (hits = how many of the 4 sample points its footprint covers). A footprint
+  narrower than the pattern's gaps covers 0 samples at some sub-pixel phases: a square narrower than s* = 0.742 px, or a
+  strip narrower than the 0.25 px sample-column gap. On a moving camera the phase changes every frame, so the object
+  goes on and off.
+- **Census on the real far rings** (tests/farshimmer/census.py: the c3 bake's .lodo/.lodi boxes of LODPLACE1's 143,733
+  drawn Concord far rows, projected frame by frame at FOV 60 on 1920x1045, hidden behind the far terrain dropped,
+  through the exact 4x lattice count). c3 move row, 24 frames: 14,573 rows visible in every frame, 1,406 of them sub-pixel
+  (236 dots, 1,170 thin). 548 rows blink (216 dots, 332 thin: I-beams, scrap metal sheets, roof trims), mean 178 on<->off
+  switches per frame (max 255). A slow pan of 0.5 px a frame: 471 rows, 138 a frame; 0.1 px a frame: 402 rows, 142 a frame.
+  Thin blinkers with area >= 1/8 px^2 have a narrow side of 0.17 px median (p90 0.22), under the 0.25 px gap.
+- **Why there is no fix with the TAA off (arithmetic, tests/farshimmer/selftest.py):** to stay on at every phase a
+  footprint must cover >= 1 sample, so it shows >= 1/4 px^2. An object of true area under 1/8 px^2 therefore either blinks
+  or is drawn at >= 2x its weight. Only a history (the temporal AA) or a blend (a splat of alpha = its coverage) can show it
+  at its weight in every frame. The census of the min-footprint rule FARTOGGLE3 proposed (each side widened to >= s px):
+  0.5 px 100 blinkers at 1.29x the sub-pixel ink; 0.7 px 8 at 1.52x; 0.8 px 0 at 1.66x (dots 6.5x, thin p90 32x); with
+  the widened area capped at 1.25x / 1.5x, 274 / 270 blinkers. Bar (set after the first census run): 0 blinkers within
+  1.25x ink (one sample level of 4). No rule meets it, so nothing ships: no switch, no shader, no C++ change.
+- **What works today:** Modern temporal AA (FARTOGGLE3's isolated-range lock), on the FARTOGGLE3 twin at a 0.5 px pan:
+  TAA off 90 of 242 objects drop within a cycle, Medium 33, Ultra 26 (re-run 10-31 on this tree's shaders).
+- **Test:** `bash tests/farshimmer/run.sh` -> FARSHIMMER RESULT PASS (the refusal holds). Inside it: green = the ideal
+  area-weighted raster blinks 0; red = today's coverage rule fails "no blink" (567 of 800 synthetic rows); the test's
+  own red `FARSHIMMER_INK_BAR=5` (a bar fitted to pass the 0.8 px rule) makes it FAIL. A later lane that finds a
+  blink-free rule within the bar must delete that case. Pictures and a moving live row are owed when bungo asks.
+
 ## CLOUD6d (2026-10-30, FIX1030C): one cloud profile set per weather, no towers beside puffs (on; WW_CLOUDVOL_PROFILESET=0 = before)
 
 - **What changed:** with Cloud Variety on, each weather's Low clouds now take ONE cloud type everywhere in its sky (the
