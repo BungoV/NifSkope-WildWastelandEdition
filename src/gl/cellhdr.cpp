@@ -33,6 +33,7 @@ constexpr int kFogBloomUnit = 7;	// lane FOGBLOOM1: the bloom-intensity target (
 constexpr int kFoBloomUnit = WwCellUnit::Bloom;	// lane BLOOM1b: the FO4CS chain's top (sampler2D), on the vanilla bloom's unit (same type)
 
 constexpr int kStencilUnit = WwPassUnit::HdrStencil;	// lane TONEMAP1: the frame's stencil (usampler2DMS) in cell_hdr.prog, always assigned
+constexpr int kBackdropUnit = WwPassUnit::HdrBackdrop;	// lane GLAREBLOW2: the view under mode 3 (sampler2D) in cell_hdr.prog, always assigned
 
 // lane TONEMAP1: the depth / stencil is a texture and the tone map tests the stencil in its shader, so only the depth
 // goes back to the view (the MSAA stencil blit was the pass's cost). WW_CELL_HDR_STEX_RED=1: renderbuffer + both blitted.
@@ -646,6 +647,75 @@ struct DepthMaxGpu
 	int w = 0, h = 0;
 	bool ok = false;
 };
+
+/* lane GLAREBLOW2: THE FO4CS GLOW OVER THE SKY FOLLOWS THE CURVE. Mode 3 (cell_hdr.frag) lays the bloom over every
+ * pixel mode 0 does not take (the sky backdrop, the other programs) in display space, as IS(bloom) - IS(0): the curve's
+ * response from black, its steepest part (the 1 / 2.2 toe), whatever the backdrop already shows. A sky pixel at 0.85
+ * took + 0.15 from a glow of 0.02 exposed and blew, where the game runs the sky through the curve with its bloom
+ * (FO4CS spreads it over its whole HDR target): IS(sky + b), + 0.002 there. So the view is copied (resolved) once mode
+ * 0-2 are drawn and the shader scales the glow by the curve's slope at the backdrop (cellGlowShoulder): 1 over black,
+ * toward 0 toward white. Red WW_CELL_BLOOM_SKY_RED=add: no copy, the glow as before. */
+struct BackdropGpu
+{
+	GLuint fbo = 0, tex = 0;
+	int w = 0, h = 0;
+	bool ok = false, tested = false;
+};
+}
+
+// lane GLAREBLOW2: the view's colour as mode 3 finds it, resolved into a texture left bound on kBackdropUnit (prevTex:
+// the unit's 2D texture before, for the caller to put back); the framebuffers and the active unit (kSrcUnit, the
+// quads') as they were. 0: refused (the glow as before).
+static GLuint backdropCopy( Renderer * r, GLint viewDraw, GLint viewRead, int w, int h, GLint & prevTex )
+{
+	auto fn = r->fn;
+	static QHash<Renderer *, BackdropGpu> gpus;
+	BackdropGpu & d = gpus[r];
+	fn->glActiveTexture( GLenum( GL_TEXTURE0 + kBackdropUnit ) );
+	fn->glGetIntegerv( GL_TEXTURE_BINDING_2D, &prevTex );
+	if ( !d.fbo || d.w != w || d.h != h ) {
+		if ( !d.fbo )
+			fn->glGenFramebuffers( 1, &d.fbo );
+		if ( d.tex )
+			fn->glDeleteTextures( 1, &d.tex );
+		fn->glGenTextures( 1, &d.tex );
+		fn->glBindTexture( GL_TEXTURE_2D, d.tex );
+		fn->glTexImage2D( GL_TEXTURE_2D, 0, GL_RGBA16F, w, h, 0, GL_RGBA, GL_HALF_FLOAT, nullptr );
+		fn->glTexParameteri( GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST );
+		fn->glTexParameteri( GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST );
+		fn->glTexParameteri( GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE );
+		fn->glTexParameteri( GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE );
+		fn->glBindFramebuffer( GL_DRAW_FRAMEBUFFER, d.fbo );
+		fn->glFramebufferTexture2D( GL_DRAW_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, d.tex, 0 );
+		d.ok = fn->glCheckFramebufferStatus( GL_DRAW_FRAMEBUFFER ) == GL_FRAMEBUFFER_COMPLETE;
+		fn->glBindFramebuffer( GL_DRAW_FRAMEBUFFER, GLuint( viewDraw ) );
+		d.w = w;
+		d.h = h;
+		if ( !d.ok )
+			qInfo().noquote() << "cell hdr: the FO4CS glow's backdrop copy is incomplete; the glow over the sky as before";
+	}
+	if ( d.ok ) {
+		if ( !d.tested ) {	// the first copy on this renderer: a refused blit (a view format it cannot take) turns it off
+			while ( fn->glGetError() != GL_NO_ERROR ) {
+			}
+		}
+		fn->glBindFramebuffer( GL_READ_FRAMEBUFFER, GLuint( viewDraw ) );
+		fn->glBindFramebuffer( GL_DRAW_FRAMEBUFFER, d.fbo );
+		fn->glBlitFramebuffer( 0, 0, w, h, 0, 0, w, h, GL_COLOR_BUFFER_BIT, GL_NEAREST );
+		fn->glBindFramebuffer( GL_READ_FRAMEBUFFER, GLuint( viewRead ) );
+		fn->glBindFramebuffer( GL_DRAW_FRAMEBUFFER, GLuint( viewDraw ) );
+		if ( !d.tested ) {
+			d.tested = true;
+			const GLenum err = fn->glGetError();
+			if ( err != GL_NO_ERROR ) {
+				d.ok = false;
+				qInfo().noquote() << QStringLiteral( "cell hdr: the FO4CS glow's backdrop copy refused (GL error %1); the glow over the sky as before" ).arg( err );
+			}
+		}
+	}
+	fn->glBindTexture( GL_TEXTURE_2D, d.ok ? d.tex : 0 );
+	fn->glActiveTexture( GLenum( GL_TEXTURE0 + kSrcUnit ) );
+	return d.ok ? d.tex : 0;
 }
 
 static unsigned int depthMaxMake( Scene * scene )
@@ -1187,6 +1257,8 @@ void wwCellHdrEnd( Scene * scene )
 	}
 	prog->uni1i( "hdrStencil", kStencilUnit );
 	prog->uni1i( "hdrStencilTest", 0 );
+	prog->uni1i( "hdrBackdrop", kBackdropUnit );	// lane GLAREBLOW2: its own unit (one sampler type a unit), read in mode 3 only
+	prog->uni1b( "hdrBackdropOn", false );
 	/* lane CELLUNI5: from here to the fog bloom's Done the active unit is kSrcUnit (the quads draw on it, the VRS build
 	 * ends on its own source unit, the same one), so the bloom passes take it instead of asking (red: they ask) */
 	static_assert( WwPassUnit::VrsSrc == kSrcUnit, "the VRS build must end on the tone map's source unit" );
@@ -1258,6 +1330,17 @@ void wwCellHdrEnd( Scene * scene )
 	 * the sky), added in display space: FO4CS spreads it over its whole HDR target, the sky included; here only the
 	 * cell-lit pixels are light, so the rest take the tone-mapped difference the bloom makes (cell_hdr.frag mode 3) */
 	if ( foBloom && sorted ) {
+		// lane GLAREBLOW2: the view as mode 3 finds it (modes 0-2 drawn), so the glow follows the curve there
+		WW_SWITCH_STATIC( bool, skyAdd, wwEnv( "WW_CELL_BLOOM_SKY_RED" ).trimmed() == "add" );
+		static int skySaid = -1;
+		if ( skySaid != int( skyAdd ) ) {
+			skySaid = int( skyAdd );
+			qInfo().noquote() << "cell hdr: the FO4CS glow over the sky" << ( skyAdd
+				? "added from black (RED add)" : "at the backdrop's place on the curve (lane GLAREBLOW2)" );
+		}
+		GLint backdropPrev = 0;
+		const GLuint backdrop = skyAdd ? 0 : backdropCopy( r, s.prevDraw, s.prevRead, s.w, s.h, backdropPrev );
+		prog->uni1b( "hdrBackdropOn", backdrop != 0 );
 		fn->glEnable( GL_BLEND );
 		fn->glBlendFunc( GL_ONE, GL_ONE );
 		prog->uni1i( "hdrMode", 3 );
@@ -1272,6 +1355,11 @@ void wwCellHdrEnd( Scene * scene )
 			fn->glDepthFunc( GLenum( prevDepthFunc ) );
 		}
 		fn->glDisable( GL_BLEND );
+		if ( !skyAdd ) {	// lane GLAREBLOW2: the unit's 2D texture as it was before the copy
+			fn->glActiveTexture( GLenum( GL_TEXTURE0 + kBackdropUnit ) );
+			fn->glBindTexture( GL_TEXTURE_2D, GLuint( backdropPrev ) );
+			fn->glActiveTexture( GLenum( GL_TEXTURE0 + kSrcUnit ) );
+		}
 	}
 	r->stopProgram();
 	wwCellBloomDone( r, kFoBloomUnit, quadsActive );

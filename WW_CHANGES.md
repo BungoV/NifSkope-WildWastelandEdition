@@ -1,5 +1,23 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## GLAREBLOW2: the FO4CS glow over the sky follows the tone curve; particle pull objects follow their copy (Concord sky)
+
+- **The bloom no longer blows the sky near the sun.** The FO4CS bloom reaches the pixels the cell does not light (the
+  sky backdrop) as the tone-mapped difference it makes from black (cell_hdr.frag mode 3): the curve's steepest part,
+  whatever the backdrop already shows, so a sky pixel at 0.85 took +0.15 from a glow of 0.02 and went white. The game
+  runs the sky through the curve with its bloom. Now the view is copied (resolved) once modes 0-2 are drawn and the
+  glow is scaled by the curve's slope at the backdrop's own place on it (`cellGlowShoulder`, closed-form inverse of
+  cellImageSpace's curve): 1 over black, toward 0 toward white. Red `WW_CELL_BLOOM_SKY_RED=add` (live): the glow as
+  before. Measured (GLAREBLOW2 run1, Concord sun camera S, noon Clear): blown share 12.24 % (red, = the base exe: 830
+  px > 8 levels against a repeat of 883) -> 9.08 % with the fix; bloom off reads 8.71 %. Left third 35.2 -> 25.8 %.
+- **"Ghost riders" over Concord: the dust devils' debris strands.** A particle system's gravity, drag and bomb objects
+  were read once when the scene was made, before the cell copy of the model is placed, so in the cell view the pull
+  point stood the copy's whole placement away from its emitter: FXBitsDebrisSpiral01's spherical gravity dragged its
+  bits into long pale vertical streaks hanging in the sky (bungo 10-29). PSysSimController::updateTime now reads the
+  objects' frames every step, in the same frame as the system's own. Red `WW_CELL_PSYS_OBJ_RED=setup` (live): the
+  frames update() read, as before.
+- New pass unit `WwPassUnit::HdrBackdrop` (6) for the copy in cell_hdr.prog. Stage table regenerated.
+
 ## AIRZONE1: hand-placed volumes for GI rooms, fog and air particles (row, ships Off; built and gated by the main session)
 
 - **One kind of volume, placed by hand per cell**, stored as `.recx` (the shared standard):
