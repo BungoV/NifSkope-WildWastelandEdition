@@ -48,6 +48,26 @@
   1,615,280 B: the first form of the hash, with a fallback branch and its own length, refused it).
 - Owed: pictures when bungo asks (far tree shadows swaying on the legacy and PBR paths, treeanim red pair; air tail
   under a slide, airslide red pair), the caster pass's GPU ms with the far trees swaying (Ultra, Concord).
+## CLOUD6c (2026-10-30, FIX1030C): edge refinement in the cloud march measured and REFUSED (nothing shipped changes)
+
+- The RDR2 gap "step refinement at cloud edges" (Bauer 2019, SIGGRAPH Advances, slide 50: on hitting the base shape halve
+  the step and move back, i_max = 3, continue at the small step, back to the base step after leaving the cloud) was coded
+  and gated offline through the real driver. **It does not ship**: at the SAME number of density reads the plain uniform
+  march is 1.8-5.5x more accurate at the edges in every tier and view, and the refinement costs 2.1-5.7x the reads and
+  7.5-8.7x the march's GPU time on this machine. No switch was added; res/shaders and src/ are unchanged (the cloud
+  march programs are byte for byte main's).
+- Why (MEASURED, tests/spells/cloudedge_check.py, Off sky coverage 0.6, Medium 48 / Ultra 96 steps, two views): the
+  refinement fixes the edges at its own step count (single-march edge error 0.33-0.43 x today; the live accumulated
+  history 0.53-0.80 x today) but our lit sample reads 10 (Medium) / 16 (Ultra) densities (the taps toward the sun, the
+  taps down for the top reflection, the 3 taps up for the ambient) where RDR2's reads about 2 (one sun-ward sample, their
+  slide 33), so the fine steps inside cloud are expensive; a cheaper variant that reads the light's optical depths only
+  every 4 fine steps and interpolates is biased at the edge (+0.2..0.7 levels after averaging). Today's uniform march at
+  1.5 x steps halves the Medium edge error (4.91 -> 2.67 levels) for 1.5 x the reads; at 2 x steps it reads 1.69 levels
+  for 1.8 x the march's GPU time (a preset question, proposed as its own row).
+- The refinement is kept as a TEST overlay (tests/cloudedge/shaders, laid over a scratch copy of res/shaders by the
+  checker) so the measurement can be repeated. Test: `bash tests/cloudedge/run.sh <scratch>` = the refusal test (green:
+  the refinement helps at its step count, its off arm equals the shipping march pixel for pixel, and loses at equal
+  cost; red `--red off` must fail the edge gate).
 
 ## CLOUDBAND2 (2026-10-30, CODE1030): Cloud Accumulation and the column ambient are the default
 
