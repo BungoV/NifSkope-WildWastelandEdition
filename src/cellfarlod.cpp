@@ -1410,28 +1410,55 @@ Vector3 wwCellFarLodOrigin( const Scene * scene )
 	return f ? Vector3( f->origin[0], f->origin[1], f->origin[2] ) : Vector3();
 }
 
+quint64 wwGlPaintCount();	// glview.cpp
+
+WwFarSway wwCellFarLodSway( Scene * scene )
+{
+	// lane SHADOWSHIMMER2: one sample a paint (the sun pass runs before the colour pass's wwCellFarLodFrame)
+	static WwFarSway memo;
+	static const Scene * memoScene = nullptr;
+	static quint64 memoPaint = ~quint64( 0 );
+	if ( !scene )
+		return WwFarSway();
+	const quint64 paint = wwGlPaintCount();
+	if ( scene == memoScene && paint == memoPaint )
+		return memo;
+	WwFarSway o;
+	const FarDoc * f = farFor( scene );
+	o.amp = ( f && f->reach > 0.0f ) ? swayAmp() : 0.0f;
+	o.time = swayTime();
+	/* the loaded block, in view space: the sway is the FAR field's, so the cell's own tree-animation shapes inside
+	 * the block stand as they did with the row off (g10 measured them swaying: 68,366 sky-band px on the eye view) */
+	if ( f ) {
+		const float kC = 4096.0f;
+		const Vector3 w( float( f->bx0 + f->bx1 + 1 ) * 0.5f * kC, float( f->by0 + f->by1 + 1 ) * 0.5f * kC, 0.0f );
+		const Vector3 c = scene->view * w;
+		o.block[0] = c[0]; o.block[1] = c[1]; o.block[2] = c[2];
+		o.world[0] = w[0];
+		o.world[1] = w[1];
+		o.world[2] = float( std::max( f->bx1 - f->bx0, f->by1 - f->by0 ) + 1 ) * 0.5f * kC;
+		o.block[3] = o.world[2] * scene->view.scale;
+	}
+	memo = o;
+	memoScene = scene;
+	memoPaint = paint;
+	return o;
+}
+
 void wwCellFarLodFrame( Scene * scene )
 {
 	static bool wasSet = false;
 	if ( !scene || !scene->renderer )
 		return;
-	const FarDoc * f = farFor( scene );
-	const float amp = ( f && f->reach > 0.0f ) ? swayAmp() : 0.0f;
+	const WwFarSway fs = wwCellFarLodSway( scene );	// lane SHADOWSHIMMER2: the sample the sun casters take too
+	const float amp = fs.amp;
 	if ( amp <= 0.0f && !wasSet )
 		return;   // nothing ever set: not one GL call (the off path)
 	Renderer * r = scene->renderer;
-	const float t = swayTime();
+	const float t = fs.time;
 	/* every program on fo4_default.vert a far shape can draw with: the legacy path, the PBR path, and SUNCELL1's
 	 * cascade variants (absent before that merge: useProgram returns null and the name is skipped) */
-	/* the loaded block, in view space: the sway is the FAR field's, so the cell's own tree-animation shapes inside
-	 * the block stand as they did with the row off (g10 measured them swaying: 68,366 sky-band px on the eye view) */
-	float blk[4] = { 0.0f, 0.0f, 0.0f, 0.0f };
-	if ( f ) {
-		const float kC = 4096.0f;
-		const Vector3 c = scene->view * Vector3( float( f->bx0 + f->bx1 + 1 ) * 0.5f * kC, float( f->by0 + f->by1 + 1 ) * 0.5f * kC, 0.0f );
-		blk[0] = c[0]; blk[1] = c[1]; blk[2] = c[2];
-		blk[3] = float( std::max( f->bx1 - f->bx0, f->by1 - f->by0 ) + 1 ) * 0.5f * kC * scene->view.scale;
-	}
+	const float * blk = fs.block;
 	QStringList set;
 	std::vector<const char *> swayProgs = { "fo4_cell.prog", "fo4_default.prog", "fo4_fog.prog", "pbrm_cell.prog",
 		"pbrm_default.prog", "pbrm_csm.prog", "fo4_cellcsm.prog", "fo4_csm.prog", "fo4_fogcsm.prog", "pbrm_cellcsm.prog" };

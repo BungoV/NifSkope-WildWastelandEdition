@@ -45,6 +45,9 @@ uniform vec4 ussCsmWorld;		// lane SHADOWPAR1: x world-unit radius on, yzw each 
 uniform vec3 ussCsmTexel;		// each cascade's texel (world units)
 uniform float ussCsmPhase;		// the rotation's temporal phase (frame % 61; 0 without TAA)
 uniform vec4 ussCsmStable;		// lane SHADOWSHIMMER1: x 1 the kernel rotation world-locked (0 the red: screen + frame), y the normal offset (texels)
+// lane SHADOWSHIMMER2: ussCsmStable.z 1 = the red (the terrain penumbra and the air tail rotate by the screen pixel; 0, also
+// in a program that never gets it, = world-locked); .w the Off tier's stable bias: 0 the red (CSM1's 0.275 / 1.0 units, no
+// normal offset), > 0 the normal offset in texels with ussCsmBias, < 0 ussCsmBias alone (the fog's froxels: no surface)
 uniform vec3 ussCsmCellX;		// lane SHADOWSHIMMER1: each cascade's window corner in kernel lattice cells, wrapped (gl/sunshadowfit.h)
 uniform vec3 ussCsmCellY;
 uniform vec2 ussTail;			// lane SHADOWPAR1: x the air's far tail reads the terrain map, y the ambient's share of its light
@@ -63,6 +66,7 @@ uniform sampler2D ussCloudMap;		// x height (km) where the cloud starts from the
 uniform mat4 ussCloudFromView;		// view space -> (u, v, height km); u, v across the sun
 uniform vec4 ussCloudFar;		// x transmittance past the map, y edge fade (uv), z the air tail's cloud taps (Ultra), w the air's ambient share
 float ussLastTerr = 1.0;		// the terrain visibility of the last composition (cell_lights.glsl dims by it)
+vec3 csmNOff = vec3( 0.0 );		// lane SHADOWSHIMMER2: the Off tier's normal offset per world unit of a texel (wwSunShadowGeo)
 
 // spec 2.5: the 16 Poisson taps on [0,1]^2, used as (p - 0.5) x 6 texels
 const vec2 csmPoisson[16] = vec2[16](
@@ -76,18 +80,34 @@ vec3 csmUvd( int i, vec3 posView )
 	return ( csmMat[i] * vec4( posView, 1.0 ) ).xyz;
 }
 
+/*! lane SHADOWSHIMMER2 (CSMOFFBIAS): the Off tier's normal offset, ussCsmStable.w texels x sin(the light's angle to the
+ *  surface), along the geometric normal turned toward the eye (ussCascades' rule; the light row of cascade 0) */
+vec3 csmNormalOff( vec3 posView, vec3 dPx, vec3 dPy )
+{
+	vec3 n = cross( dPx, dPy );
+	float ln = length( n );
+	vec3 lv = vec3( csmMat[0][0][2], csmMat[0][1][2], csmMat[0][2][2] );
+	if ( ln <= 1e-20 || dot( lv, lv ) <= 0.0 )
+		return vec3( 0.0 );
+	n = dot( n, posView ) > 0.0 ? -n / ln : n / ln;
+	float c = dot( n, normalize( lv ) );
+	return n * ( ussCsmStable.w * sqrt( max( 1.0 - c * c, 0.0 ) ) / csmParams.x );
+}
+
 //! one bilinear comparison tap (GL_LINEAR + COMPARE_REF_TO_TEXTURE): 1 lit, 0 shadowed
 float csmHard( int i, vec3 posView, float offsetWorld )
 {
-	vec3 q = csmUvd( i, posView );
-	return texture( csmMap, vec4( q.xy, float( i ), q.z - offsetWorld * csmInvRange[i] ) );
+	// lane SHADOWSHIMMER2: the Off tier's stable bias (csmNOff 0 and CSM1's offset with the red)
+	vec3 q = csmUvd( i, posView + csmNOff * ussCsmTexel[i] );
+	float off = ussCsmStable.w != 0.0 ? ussCsmBias[i] : offsetWorld;
+	return texture( csmMap, vec4( q.xy, float( i ), q.z - off * csmInvRange[i] ) );
 }
 
 //! the 16-tap Poisson filter, radius 3 texels
 float csmFiltered( int i, vec3 posView, float offsetWorld )
 {
-	vec3 q = csmUvd( i, posView );
-	float zRef = q.z - offsetWorld * csmInvRange[i];
+	vec3 q = csmUvd( i, posView + csmNOff * ussCsmTexel[i] );	// lane SHADOWSHIMMER2: as csmHard
+	float zRef = q.z - ( ussCsmStable.w != 0.0 ? ussCsmBias[i] : offsetWorld ) * csmInvRange[i];
 	float k = 6.0 / csmParams.z;
 	float sum = 0.0;
 	for ( int t = 0; t < 16; t++ )
@@ -230,7 +250,7 @@ float ussTerrVis( vec2 rg, float z )
 /*! one tier at its uv. lane SHADOWPAR1 (FO4CS FarFieldMaskCS): the disc penumbra -- the occluder's distance from the
  *  limbs' spread (lo - hi) / (tan hi - tan lo), half the sun's width at that distance in texels (<= 16), the centre
  *  and 8 Vogel taps */
-float ussTerrTier( vec2 uv, int tier, float z, float texel, bool pen )
+float ussTerrTier( vec2 uv, int tier, float z, float texel, bool pen, vec2 wxy )
 {
 	vec2 rg = texture( ussTerrMap, ussTerrAtlasUv( uv, tier ) ).rg;
 	float c = ussTerrVis( rg, z );
@@ -243,7 +263,10 @@ float ussTerrTier( vec2 uv, int tier, float z, float texel, bool pen )
 	float n = tier == 0 ? ussTerrSize.x : ussTerrSize.y;
 	if ( n <= 0.0 )
 		n = 1.0 / max( ussTerrXform.x * texel, 1e-12 );	// one tier: N = span / texel
-	float rot = 6.2831853 * ussIgn( gl_FragCoord.xy );
+	// lane SHADOWSHIMMER2 (TERRPENSTABLE): the rotation of the world lattice cell (4 per tier texel, wrapped at 4096), the
+	// cascades' hash: a still world point keeps it in every frame and from every camera. Red (z 1): the screen pixel's
+	float rot = 6.2831853 * ussIgn( ussCsmStable.z > 0.5 ? gl_FragCoord.xy
+		: mod( floor( wxy * ( 4.0 / max( texel, 1e-6 ) ) ), 4096.0 ) );
 	float sum = c;
 	for ( int t = 0; t < 8; t++ ) {
 		float th = float( t ) * 2.39996323 + rot;
@@ -320,14 +343,14 @@ float ussTerrain( vec3 posView, out float inMap, float grad, bool pen )
 		grad = ussTerrBias.x > 2.5 ? 0.0 : h.z;
 	// lane SHADOWPAR1: FO4CS's bias 12 (1 + slope) / sin(elevation); else TERRSHADOW1's 0.05 T + 4
 	float z = wp.z + ( ussTerrBias.x > 0.5 ? 12.0 * ( 1.0 + clamp( grad, 0.0, 4.0 ) ) / ussTerrBias.y : ussTerrRange.z );
-	float vis = ussTerrTier( uv, 0, z, ussTerrPen.y, pen );
+	float vis = ussTerrTier( uv, 0, z, ussTerrPen.y, pen, wp.xy );
 	if ( ussTerrSize.y > 0.0 ) {
 		// the near tier, faded in over 128 of its texels from its window's edge
 		vec2 un = vec2( wp.x * ussTerrNearXform.x + ussTerrNearXform.y, wp.y * ussTerrNearXform.z + ussTerrNearXform.w );
 		vec2 en = min( un, 1.0 - un ) * ussTerrSize.y / 128.0;
 		float w = smoothstep( 0.0, 1.0, clamp( min( en.x, en.y ), 0.0, 1.0 ) );
 		if ( w > 0.0 )
-			vis = mix( vis, ussTerrTier( un, 1, z, ussTerrBias.w, pen ), w );
+			vis = mix( vis, ussTerrTier( un, 1, z, ussTerrBias.w, pen, wp.xy ), w );
 	}
 	if ( ussTerrExtra.y > 0.0 ) {
 		// lane FAR5 (FO4CS FarFieldMaskCS, the ground-band branch): a receiver above the ground band melts to the
@@ -403,6 +426,9 @@ float wwSunShadowGeo( vec3 posView )
 		return 0.5;
 	if ( csmForce >= 0.0 )
 		return csmForce;
+	// lane SHADOWSHIMMER2 (CSMOFFBIAS): the Off tier's normal offset, before any per-pixel branch (derivatives)
+	if ( ussCsmStable.w > 0.0 )
+		csmNOff = csmNormalOff( posView, dFdx( posView ), dFdy( posView ) );
 	if ( ussOn != 0 )
 		return ussCompose( posView );
 	float dv = -posView.z * csmParams.x;
@@ -448,6 +474,8 @@ bool wwSunShadowProbe( vec3 posView, vec3 shaded, out vec3 outc )
 	}
 	if ( csmProbe <= 0 )
 		return false;
+	if ( ussCsmStable.w > 0.0 )
+		csmNOff = csmNormalOff( posView, dFdx( posView ), dFdy( posView ) );	// lane SHADOWSHIMMER2: probes 1 / 3 as drawn
 	float dv = -posView.z * csmParams.x;
 	int a, b;
 	float t;
@@ -487,7 +515,14 @@ float wwAirTailShadow( vec3 dirView, float t0, float t1, float tau )
 	vec3 p0 = dirView * ( t0 / fogDistScale );
 	float v0 = ( terr ? ussTerrain( p0, inMap, 0.0, false ) : 1.0 ) * ( cloud ? ussCloudT( p0 ) : 1.0 );
 	float e = 1.0 - exp( -max( tau, 0.0 ) );
-	float jit = ussIgn( gl_FragCoord.xy );
+	/* lane SHADOWSHIMMER2 (TERRPENSTABLE): the start of the strata hashed from the ray's WORLD direction (octahedral,
+	 * 2048 cells a unit, wrapped at 4096): a camera turn keeps it on the same sky; red (ussCsmStable.z 1): the pixel's */
+	vec3 dw = mat3( ussWorldFromView ) * dirView;
+	if ( dot( dw, dw ) <= 1e-20 )
+		dw = dirView;
+	dw /= abs( dw.x ) + abs( dw.y ) + abs( dw.z );
+	vec2 oct = dw.z >= 0.0 ? dw.xy : ( 1.0 - abs( dw.yx ) ) * vec2( dw.x >= 0.0 ? 1.0 : -1.0, dw.y >= 0.0 ? 1.0 : -1.0 );
+	float jit = ussIgn( ussCsmStable.z > 0.5 ? gl_FragCoord.xy : mod( floor( oct * 2048.0 ), 4096.0 ) );
 	float acc = 0.0;
 	for ( int i = 0; i < 8; i++ ) {
 		float q = ( float( i ) + jit ) / 8.0;

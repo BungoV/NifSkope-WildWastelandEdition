@@ -212,6 +212,47 @@ inline double rotStable( const Out & c, const double R[3], const double U[3], co
 	return 6.2831853 * ign( x, y );
 }
 
+// ---- lane SHADOWSHIMMER2 ----
+
+/* CSMOFFBIAS: Cascade Quality Off kept CSM1's spec 2.6 / 2.4 bias (glPolygonOffset 6, 12; receiver offsets 0.275 / 1.0
+ * units; no normal offset): a thin caster's contact gap of ~6 texels. Off takes the tiers' stable numbers (red
+ * WW_SUN_SHADOW_STABLE_RED=offbias: CSM1's). gl/sunshadow.cpp uses these; tests/shadowshimmer2 G2 runs them. */
+constexpr float kOffSlope = 0.5f, kOffUnits = 2.0f;		// the caster's glPolygonOffset
+constexpr float kOffRecvTexels = 0.25f, kOffNormalTexels = 1.0f;	// the receiver's offset and normal offset, texels of each cascade
+
+/* TERRPENSTABLE (ww_sunshadow.glsl ussTerrTier, wwAirTailShadow): the terrain penumbra's Vogel rotation and the air
+ * tail's strata start were 2 pi IGN(gl_FragCoord) / IGN(gl_FragCoord): a screen-locked pattern that swims over the
+ * world on every camera turn. Stable: IGN of the world lattice cell (kCells per tier texel, wrapped at kCellWrap; the
+ * cascades' hash), and for the air (a ray, no surface point) of the ray's WORLD direction on an octahedral lattice of
+ * kAirCells a unit. */
+constexpr double kAirCells = 2048.0;
+
+//! the terrain tier's rotation at world (x, y), tier texel `texel` (world units)
+inline double rotTerrStable( double wx, double wy, double texel )
+{
+	const double k = double( kCells ) / std::max( texel, 1e-6 );
+	return 6.2831853 * ign( glslMod( std::floor( wx * k ), kCellWrap ), glslMod( std::floor( wy * k ), kCellWrap ) );
+}
+
+//! the old terrain rotation / air jitter: the pixel's (fragment centre, pixels)
+inline double ignPixel( double fragX, double fragY )
+{
+	return ign( fragX, fragY );
+}
+
+//! the air tail's strata start for a ray of WORLD direction d (any length; the shader's octahedral map)
+inline double jitAirStable( const double d[3] )
+{
+	const double s = std::fabs( d[0] ) + std::fabs( d[1] ) + std::fabs( d[2] );
+	const double x = d[0] / s, y = d[1] / s, z = d[2] / s;
+	double ox = x, oy = y;
+	if ( z < 0.0 ) {
+		ox = ( 1.0 - std::fabs( y ) ) * ( x >= 0.0 ? 1.0 : -1.0 );
+		oy = ( 1.0 - std::fabs( x ) ) * ( y >= 0.0 ? 1.0 : -1.0 );
+	}
+	return ign( glslMod( std::floor( ox * kAirCells ), kCellWrap ), glslMod( std::floor( oy * kAirCells ), kCellWrap ) );
+}
+
 } // namespace WwCsmFit
 
 #endif

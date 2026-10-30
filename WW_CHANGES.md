@@ -1,6 +1,45 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
-## SHADOWSHIMMER2 (2026-10-30): fo4_effectdecalcsm links again in march + WW_CELL_PRT
+## SHADOWSHIMMER2 (2026-10-30): far tree shadows sway with the trees, a still terrain penumbra, Off's tight contact
+
+- **FARSWAYSHADOW:** the far LOD trees swayed in the colour pass (fo4_default.vert, farSwayAmp 10 x vertex alpha beyond
+  the loaded block) while their cascade casters stood still. lookdev_csmdepth.vert / _at.vert now carry fo4_default.vert's
+  sway block text for text (viewMatrix from globalUniforms, the vertex alpha at location 1, farXY as there), and both
+  passes read ONE per-paint sample: cellfarlod.cpp `wwCellFarLodSway( scene )` (amp, clock, block; memo on the paint
+  count, so the sun pass, which runs first, and wwCellFarLodFrame's colour uniforms get the same clock). gl/sunshadow.cpp
+  sets the caster programs' farSway* uniforms; a tree-animation caster (the shader property's flag, as the legacy colour
+  draw sets lodTreeAnim) whose bounds reach outside the block sways: it draws per draw with its colours (never through
+  the render queues) and as dynamic over SHADOWCACHE1's static layer. Echo `swaycasters=N`. Red
+  `WW_SUN_SHADOW_STABLE_RED=sway` (the casters stand still).
+- **TERRPENSTABLE:** the terrain penumbra's Vogel rotation (ussTerrTier) and the air tail's strata start
+  (wwAirTailShadow) were IGN(gl_FragCoord): a screen-locked pattern that swims over the world on every turn. Now the
+  terrain hashes its WORLD lattice cell (4 per tier texel, wrap 4096: the cascades' hash; ussTerrTier takes wp.xy) and
+  the air the ray's world direction (octahedral, 2048 cells a unit). Red `WW_SUN_SHADOW_STABLE_RED=terr`
+  (ussCsmStable.z = 1; 0, also in a program that never gets the uniform, is the stable path).
+- **CSMOFFBIAS:** Cascade Quality Off (the harness's tier and the settings default) kept CSM1's spec bias (polygon
+  offset 6 / 12, receiver 0.275 / 1.0 units, no normal offset): a thin caster's contact gap of 6.1-6.7 texels. Off now
+  takes the tiers' stable numbers (gl/sunshadowfit.h kOffSlope 0.5, kOffUnits 2, kOffRecvTexels 0.25, kOffNormalTexels
+  1): csmHard / csmFiltered read the point moved by csmNOff (wwSunShadowGeo's normal offset, computed once before any
+  per-pixel branch, the light row of cascade 0) and each cascade's ussCsmBias; the fog's froxels take the offset with no
+  normal (ussCsmStable.w = -1). Read why Off kept the spec: it is CSM1's spec tier and its judge modelled that bias; the
+  judge now models the shipped law (below), so nothing holds it. Red `WW_SUN_SHADOW_STABLE_RED=offbias`; CSM1's reds
+  nobias / bigbias keep the spec path. `old` / `all` is now 63 (every part). Echo `offstable=1`, `stable=` = red ^ 63.
+- **CSM1GATEFIT:** tests/spells/pbr_csm1_gates.py judged CSM1's box fit and spec bias, so the harness's Off tier could
+  not pass since SHADOWSHIMMER1. Its LAW is now the shipped one (fit_sphere: the bounding sphere, texel 2r / (map - 1),
+  whole-texel corner, 64-quantum depth origin; the stable bias with a receiver() that moves a point along its normal and
+  offsets 0.25 texel; per-face normals for the cube faces), re-derived from the law, not read from the code. `--law csm1`
+  keeps the spec (box + 6 / 12 / 0.275-1.0). pbr_csm1_gates.sh gains the reds `stablefit` and `offbias`.
+- Gates (MEASURED, offline): tests/shadowshimmer2/run.sh green PASS; reds RED_TERR (still 76276 / turn 89505 rotation
+  changes over ~3600 world points), RED_OFFBIAS (gap 6.705 / 6.087 / 6.087 texels), RED_SWAY (caster absent, the twin's
+  offset 11.56 units) all FAIL; green: 0 changes, the Off gap 0.722 / 0.587 / 0.587 texel, acne guard 0 short, the sway
+  block identical and the twin 0.0000 units apart. CSM1GATEFIT self-test: the judge's sphere = the code's stable fit on 4
+  cameras x 3 cascades (0 fields differ), the judge's box = the code's old fit (0), red (sphere judge vs old fit) 84
+  fields differ. tests/shadowshimmer1 still green, 5 reds FAIL (its G3 now allows the far sway; its red reads the TAA
+  phase). Link sweeps on the branch: base 393/393, WW_CELL_RTDDGI (none, ubo) 262/262, WW_CELL_PRT 393/393 LINK OK.
+- Owed (pictures when bungo asks): far tree shadows swaying with the trees, a still-frame terrain penumbra under a turn,
+  Off's brick-wall contact; pbr_csm1_gates.sh live on the new law (and its stablefit / offbias reds).
+
+### fo4_effectdecalcsm links again in march + WW_CELL_PRT
 
 - **Link fix (FIX1030B priority):** origin/main 3555a000 refused fo4_effectdecalcsm.prog in the mode WW_FRAME_UBO +
   WW_CELL_GI_MARCH + WW_CELL_PRT (the PRT red's program): "too many instructions" (line 66267), while f46b1c76 linked it

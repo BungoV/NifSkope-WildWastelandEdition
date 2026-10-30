@@ -13,7 +13,8 @@
  *
  * Reds (each must FAIL): -DSS_RED_FIT (CSM1's box fit), -DSS_RED_KERNEL (the pixel + frame % 61 rotation),
  * -DSS_RED_BIAS (slope 6, 12 quanta, 1.5 texels, no normal offset), -DSS_RED_NONORMAL (the new bias without the normal
- * offset: the acne guard), -DSS_RED_G3 (a caster shader that reads a sway clock).
+ * offset: the acne guard), -DSS_RED_G3 (a caster shader that reads the TAA frame's clock; since SHADOWSHIMMER2 the far
+ * sway, the colour pass's own, is the one per-frame input a caster may read).
  * Build: g++ -std=c++17 -I<tree>/src tests/shadowshimmer1/shadowshimmer1_test.cpp; run: <exe> <tree>. */
 
 #include "gl/sunshadowfit.h"
@@ -465,8 +466,11 @@ static void gateG3( const std::string & tree )
 {
 	const char * files[] = { "lookdev_csmdepth.vert", "lookdev_csmdepth.frag", "lookdev_csmdepth_at.vert", "lookdev_csmdepth_at.frag",
 		"lookdev_csmdepth_q.vert", "lookdev_csmdepth_atq.vert" };
+	/* lane SHADOWSHIMMER2 (FARSWAYSHADOW): the far trees' wind is the one per-frame input a caster may read, the colour
+	 * pass's own (farSway*, lodTreeAnim; tests/shadowshimmer2 G3 holds it to fo4_default.vert's block); the near cells'
+	 * leaves stand inside the loaded block and never sway */
 	const std::set<std::string> allowed = { "csmClipFromView", "modelViewMatrix", "farInst", "BaseMap", "uvScale", "uvOffset", "alpha",
-		"alphaThreshold" };
+		"alphaThreshold", "farSwayAmp", "farSwayTime", "farSwayBlock", "lodTreeAnim" };
 	int read = 0;
 	std::string extra;
 	for ( const char * f : files ) {
@@ -476,7 +480,7 @@ static void gateG3( const std::string & tree )
 		read++;
 #ifdef SS_RED_G3
 		if ( std::strcmp( f, "lookdev_csmdepth.vert" ) == 0 )
-			text += "\nuniform float farSwayTime;\n";	// the red: a caster that sways by the clock
+			text += "\nuniform float ussCsmPhase;\n";	// the red: a caster that moves by the TAA frame's clock
 #endif
 		for ( const std::string & n : uniformsOf( text ) ) {
 			if ( !allowed.count( n ) )
