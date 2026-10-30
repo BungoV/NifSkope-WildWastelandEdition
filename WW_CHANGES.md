@@ -1,5 +1,41 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## CLOUD6g (2026-10-31, FIX1030C): the volume clouds under a moving camera and partial cloud changes (Move Clamp + Change Clamp, both on)
+
+- **What changed (1), Move Clamp:** the clouds' resolve marches 1 of 16 history pixels a frame and reprojects the rest.
+  Under camera motion a reprojected pixel's Catmull-Rom read lands among neighbours that were not refreshed since the
+  cloud changed: the refresh slots are fixed in SCREEN space and the content slides across them. A clearing seen from
+  a turning camera (0.4 deg + 0.5 m a frame) stayed 28.9 display levels off 16 frames later and 17.4 after 32 (0.00
+  with a still camera). Now a pixel the reprojection MOVED takes its history clamped to the min / max of this frame's
+  3x3 march texels around it, so the current frame's data bounds what a stale neighbour can bring in; a still camera
+  reads its history as before. Both resolve programs (Accumulation on and the old path) carry it
+  (res/shaders/cloud_resolve.frag cvMoveBox).
+- **What changed (2), Change Clamp:** with Cloud Accumulation (the default) a partly changed field (a thinning
+  0.6 -> 0.05, or 0.35 coverage plus a 3 km wind step) got through CLOUDBAND1's variance clip, because a thin field's
+  3x3 box still spans old texture: 12.7 levels off 16 frames after a thinning with a still camera (the old path 3.1),
+  16.8 vs 12.6 with the moving camera. Now a fresh pixel compares the history at its 9 march texels' own places with
+  the fresh marches there; when their mean transmittance differs by more than 0.0075 + 1.5 x min(deviation of the fresh
+  9, of the history 9) / 3 (cloudvolmath.h kChangeReset / kChangeResetSd), the pixel's weight rises to 1 (the
+  accumulation restarts from this march). A fixed threshold alone reset on the Variety sky's noise (CLOUDBAND1's gate M
+  0.87, bar 0.6); a threshold on the fresh deviation alone missed the 3 km shift.
+- **Switches (live, stage 0; cloudvol.cpp cs() re-reads them):** `WW_CLOUDVOL_MOVECLAMP` and `WW_CLOUDVOL_CHANGECLAMP`:
+  unset = on; `0` / `off` / `false` / `no` = the red (the old path), as are `WW_CLOUDVOL_RED=staleread` and
+  `WW_CLOUDVOL_RED=looseclamp`. Notes echo `,moveclamp=box` / `,RED=staleread` and (with Accumulation)
+  `,changeclamp=0.0075+1.50sd` / `,RED=looseclamp`. The red `noclamp` turns Change Clamp off too (it lives in the clamp).
+- **Gates (offline, real driver, tests/spells/cloudstale_check.py; `bash tests/cloudstale/run.sh <scratch>`), bars set
+  after a baseline of the old paths and before any candidate ran (notes/fix1030c/cloud6g/tmp/bars.txt), mean |E| in
+  display levels vs the 64-jitter reference of the new field on the px the jump changed, 16 frames after it:**
+  S moving clearing: old path 0.00 (was 28.90), default 0.00 (was 28.97), bar 2.0; red staleread 28.90 FAIL.
+  T default <= old path + 1 level (Medium / Ultra): moving thinning 9.21 / 5.53 vs 12.57 / 7.61, moving shift 7.22 /
+  4.28 vs 10.99 / 6.72, still thinning 3.14 / 1.57 vs 3.09 / 1.53, still shift 5.34 / 2.96 vs 4.50 / 2.08; red
+  looseclamp 12.68 / 9.56 (still thinning) FAIL. R no change (bar + 0.3): moving 2.68 vs 2.60, still 1.81 vs 1.80
+  (Medium). CLOUDBAND1/2's gates on the new default all PASS (L lattice 19.9 / 27.8, M 0.372 / 0.373, Variety M 0.435 /
+  0.404, F 0.0608, Q 20.0 / 19.7); its gate G now also judges the clearing with a still camera (Move Clamp makes the
+  moving case pass without the history clamp: the red noclamp then reads 44.31 and fails). Cost (INFO, this machine,
+  offline): one resolve at 960 x 540 (Ultra 1080p) 0.019 -> 0.023 ms with Accumulation, 0.018 -> 0.017 ms old path. Three link sweeps LINK OK (405 / 270 / 405).
+- **Owed:** pictures when bungo asks (a turning camera through a weather change, default vs `^WW_CLOUDVOL_MOVECLAMP=0`
+  and `^WW_CLOUDVOL_CHANGECLAMP=0`); a live set of each switch.
+
 ## CLOUD6d (2026-10-30, FIX1030C): one cloud profile set per weather, no towers beside puffs (on; WW_CLOUDVOL_PROFILESET=0 = before)
 
 - **What changed:** with Cloud Variety on, each weather's Low clouds now take ONE cloud type everywhere in its sky (the

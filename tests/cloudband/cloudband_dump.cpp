@@ -33,5 +33,11 @@ int main()
 	const std::string a = norm( "WW_CLOUDVOL_ACCUM" ), d = norm( "WW_CLOUDVOL_AMBDARK" );
 	std::printf( "default accum %d ambdark %d\n", WwCloudVolMath::defaultOnSwitch( a.c_str() ) ? 1 : 0,
 				 WwCloudVolMath::defaultOnSwitch( d.c_str() ) ? 1 : 0 );
+	// lane CLOUD6g: Move Clamp / Change Clamp for this env (cloudvol.cpp cs()) and Change Clamp's threshold, its own line
+	// (the "default" line's readers split it by position)
+	const std::string mc = norm( "WW_CLOUDVOL_MOVECLAMP" ), cc = norm( "WW_CLOUDVOL_CHANGECLAMP" );
+	std::printf( "cloud6g moveclamp %d changeclamp %d reset %.9g sd %.9g\n", WwCloudVolMath::defaultOnSwitch( mc.c_str() ) ? 1 : 0,
+				 WwCloudVolMath::defaultOnSwitch( cc.c_str() ) ? 1 : 0, double( WwCloudVolMath::kChangeReset ),
+				 double( WwCloudVolMath::kChangeResetSd ) );
 	return 0;
 }

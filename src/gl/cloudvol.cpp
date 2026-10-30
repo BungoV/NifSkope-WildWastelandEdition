@@ -79,6 +79,8 @@ struct CvState
 	int accum = 0;	// lane CLOUDBAND1: Cloud Accumulation (WW_CLOUDVOL_ACCUM)
 	int ambDark = 0;	// lane CLOUDBAND1 (b): the sky's ambient through the cloud above (WW_CLOUDVOL_AMBDARK)
 	int profileSet = 1;	// lane CLOUD6d: one cloud profile set per weather (WW_CLOUDVOL_PROFILESET)
+	int moveClamp = 1;	// lane CLOUD6g: Move Clamp (WW_CLOUDVOL_MOVECLAMP)
+	int changeClamp = 1;	// lane CLOUD6g: Change Clamp (WW_CLOUDVOL_CHANGECLAMP)
 };
 
 CvState & cs()
@@ -129,6 +131,15 @@ CvState & cs()
 		 * in its sky (cloudmath.h lowTypeOf oneSet), the DEFAULT, live; WW_CLOUDVOL_PROFILESET=0 / off = CLOUD5's swing */
 		const QByteArray ps = wwEnvStr( "WW_CLOUDVOL_PROFILESET" ).trimmed().toLower().toLatin1();
 		s.profileSet = V::defaultOnSwitch( ps.constData() ) ? 1 : 0;
+		/* lane CLOUD6g (CLOUDBAND1 leftover), both the DEFAULT, live, gated by tests/spells/cloudstale_check.py:
+		 * Move Clamp: a reprojected (not marched) pixel the camera moved takes its history clamped to this frame's 3x3
+		 * march box (cloud_resolve.frag cvMoveBox; Off and Accumulation alike); =0 / RED=staleread = the old read.
+		 * Change Clamp: a fresh pixel whose 9 march texels disagree with the history there restarts its accumulation
+		 * (cvAccReset); =0 / RED=looseclamp = CLOUDBAND1's clamp alone. */
+		const QByteArray mc = wwEnvStr( "WW_CLOUDVOL_MOVECLAMP" ).trimmed().toLower().toLatin1();
+		s.moveClamp = V::defaultOnSwitch( mc.constData() ) ? 1 : 0;
+		const QByteArray cc = wwEnvStr( "WW_CLOUDVOL_CHANGECLAMP" ).trimmed().toLower().toLatin1();
+		s.changeClamp = V::defaultOnSwitch( cc.constData() ) ? 1 : 0;
 	}
 	return s;
 }
@@ -530,6 +541,8 @@ struct CvRedo
 	bool accum = false;	// lane CLOUDBAND1: the *_a twins (Cloud Accumulation)
 	float accAlpha = 1.0f;	// the fresh march's weight (cloudvolmath.h accumAlpha; 1 = none)
 	bool ambDark = false;	// lane CLOUDBAND1 (b): cvAmbDark
+	bool moveClamp = false;	// lane CLOUD6g: cvMoveClamp
+	bool changeClamp = false;	// lane CLOUD6g: cvAccReset = kChangeReset
 	double secs = 0.0;
 	bool histOn = false;
 	float prevCam[9] = {}, prevProj[4] = {}, prevKm[3] = {};
@@ -665,9 +678,12 @@ bool resolvePass( Renderer * r, CvGpu & g, const CvRedo & d )
 	p->uni3f( "cvPrevCamKm", d.prevKm[0], d.prevKm[1], d.prevKm[2] );
 	p->uni1f( "cvHistOn", d.histOn ? 1.0f : 0.0f );
 	p->uni1f( "cvReproj", red( "noreproj" ) ? 0.0f : 1.0f );
+	p->uni1f( "cvMoveClamp", d.moveClamp ? 1.0f : 0.0f );	// lane CLOUD6g: set on every draw (a program keeps uniforms)
 	if ( d.accum ) {	// lane CLOUDBAND1: reds noaccum (weight 1) and noclamp (the history unclamped)
 		p->uni1f( "cvAccAlpha", red( "noaccum" ) ? 1.0f : d.accAlpha );
 		p->uni1f( "cvAccClamp", red( "noclamp" ) ? 0.0f : 1.0f );
+		p->uni1f( "cvAccReset", d.changeClamp ? V::kChangeReset : 0.0f );	// lane CLOUD6g: Change Clamp
+		p->uni1f( "cvAccResetSd", V::kChangeResetSd );
 	}
 	quad( r );
 	r->stopProgram();
@@ -1147,6 +1163,8 @@ bool wwCloudVolDraw( Scene * scene, const WwCloudVolView & view, QStringList & d
 	 * a harness run marches every pixel every frame, so it takes each march whole (weight 1: a picture of its pins) */
 	d.accum = s.accum != 0;
 	d.ambDark = s.ambDark != 0;
+	d.moveClamp = s.moveClamp != 0 && !red( "staleread" );	// lane CLOUD6g
+	d.changeClamp = s.changeClamp != 0 && !red( "looseclamp" );
 	if ( !histOn )
 		g.accFrom = g.frame;
 	d.accAlpha = everyPixel ? 1.0f : V::accumAlpha( static_cast<long long>( ( g.frame - g.accFrom ) / 16 ) );
@@ -1271,6 +1289,12 @@ bool wwCloudVolDraw( Scene * scene, const WwCloudVolView & view, QStringList & d
 	} else {
 		reds += QStringLiteral( ",RED=accumoff" );	// lane CLOUDBAND2: the old path is the red now (WW_CLOUDVOL_ACCUM=0)
 	}
+	// lane CLOUD6g: the echoes a row's notes need (Change Clamp acts only with Accumulation)
+	reds += d.moveClamp ? QStringLiteral( ",moveclamp=box" ) : QStringLiteral( ",RED=staleread" );
+	if ( d.accum )
+		reds += d.changeClamp ? QStringLiteral( ",changeclamp=%1+%2sd" ).arg( double( V::kChangeReset ), 0, 'f', 4 )
+			.arg( double( V::kChangeResetSd ), 0, 'f', 2 )
+			: QStringLiteral( ",RED=looseclamp" );
 	if ( d.ambDark )	// lane CLOUDBAND1 (b): the echo a row's notes need
 		reds += red( "flatamb" ) ? QStringLiteral( ",RED=flatamb" ) : QStringLiteral( ",ambdark=column" );
 	else
