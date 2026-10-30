@@ -230,6 +230,27 @@ Reds: WW_CLOUDVOL_RED = onetype | nocurl | shortlight | ign. Offline gate: tests
   frames update() read, as before.
 - New pass unit `WwPassUnit::HdrBackdrop` (6) for the copy in cell_hdr.prog. Stage table regenerated.
 
+## SHADOWBAND1: no more banding in the sun shadows on lit walls (the contact far tier gives way to the cascades)
+
+- **What bungo saw** (10-29, a Concord daylight shot looking up the brick wall by the church, GLAREBLOW2's camera D7):
+  stripes across the lit brick and the window. Measured on a close camera on that wall (CommonwealthClear 12 h, all
+  shadow tiers 4, SHADOWPAR all), one term at a time with the shadow debug ladder (`WW_SHADOW_VIEW`): the cascades
+  (v1) and the terrain map (v2) are clean there (factor HF 1.56 and 0.02 levels on the lit wall, 0.03 and 0 stripe
+  periods per 100 px); the contact view (v3) carries the stripes (HF 6.02, 1.57 periods) and the composed factor (v4)
+  is the contact's (HF 6.31). Not the cascades' bias, map precision or kernel: the screen-space contact shadows.
+- **Why:** GAPLOOK1's far contact tier (the FO4CS port: depth min-reduced 4x4, 96 coarse samples = 384 pixels further,
+  a 250-unit thickness floor for tree crowns) takes any surface up to 500 units in front of the ray as a solid
+  occluder. A thin caster in front of a wall -- the power line 85 units off it -- became a 384-pixel band of stripes
+  and dashed arcs (its blocky coarse footprint hit or missed line by line). An offline twin of both tiers
+  (notes/shadowband1/tools/contact_twin.py on the GI soup's depth) draws the same band from the same line, and none
+  without the far tier.
+- **Fix:** inside the cascades' reach the far tier counts by 1 - the cascades' own distance-fade weight, (r / D)^8 at
+  the radial distance (`ww_contact_farcomp.frag`, uniform `farFade`): there the cascade map holds the far casters to
+  the texel. Past the reach, and whenever the cascades are off, the tier is today's exactly (the weight is 1). The near
+  tier (contact at a caster's base) is untouched. Red `WW_CELL_CONTACT_FAR_RED=inside`: the tier at every distance.
+- **Gate tool:** `WW_SHADOW_CONTACT_DUMP=<absolute dir>` writes the frame's opaque pass (gbuf.bin: view normal + linear
+  depth), the composed contact mask and the march's inputs, for the twin to replay.
+
 ## AIRZONE1: hand-placed volumes for GI rooms, fog and air particles (row, ships Off; built and gated by the main session)
 
 - **One kind of volume, placed by hand per cell**, stored as `.recx` (the shared standard):

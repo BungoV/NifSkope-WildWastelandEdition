@@ -235,6 +235,7 @@ struct SetState
 	bool terrainAll = false;	// WW_SHADOW_TERRAIN_ALL=1: every visible shape is terrain (the known-answer fixtures)
 	QString dump, echo;
 	QStringList reds;
+	bool csmSeen = false;	// lane SHADOWBAND1: the cascades were valid at the last receiver upload (the far contact tier)
 	bool unitsOk = true;
 	int unitsChecked = 0;
 
@@ -1964,6 +1965,17 @@ QString contactFarPass( Renderer * r, Contact & c, unsigned int gbuf, int W, int
 	prog->uni1f( "maskScale", float( scale ) );
 	prog->uni1i( "divisor", div );
 	prog->uni1f( "tolerance", halo ? 1e6f : 0.02f );
+	/* lane SHADOWBAND1: inside the cascades' reach the tier gives way to them (it counts by 1 - their fade weight): there
+	 * the cascade map holds the far casters to the texel, and the tier's 250-unit slab made a thin caster in front of a
+	 * wall (a power line 85 u off it) a 384-pixel band of stripes. Past the reach, and with the cascades off, today's tier.
+	 * Red WW_CELL_CONTACT_FAR_RED=inside: the tier at every distance (the banding) */
+	{
+		WwCascadePreset cp;
+		const bool give = ss().csmSeen && wwShadowCascadePreset( cp ) && wwEnvStr( "WW_CELL_CONTACT_FAR_RED" ) != QLatin1String( "inside" );
+		const auto & pm = r->globalUniforms->projectionMatrix;
+		prog->uni4f( "farFade", FloatVector4( give ? float( cp.D ) : 0.0f, give ? 1.0f : 0.0f,
+			pm[0][0] != 0.0f ? 1.0f / pm[0][0] : 1.0f, pm[1][1] != 0.0f ? 1.0f / pm[1][1] : 1.0f ) );
+	}
 	fn->glEnable( GL_BLEND );
 	fn->glBlendEquation( GL_MIN );
 	r->drawShape( 4, 3, 6, GL_TRIANGLES, GL_UNSIGNED_SHORT, &attrs, idx );
@@ -2112,6 +2124,39 @@ void wwContactShadowPass( Scene * scene )
 	const QString far = wwLookOn( WwLook::ContactFar )
 		? contactFarPass( r, c, g.gbuf, W, H, mw, mh, p.scale, cx / cw, cy / cw, lz, cw, lv, par, earlyExit ) : QStringLiteral( "far=off" );
 	timerEnd( fn, s.tmContact );
+	/* lane SHADOWBAND1: WW_SHADOW_CONTACT_DUMP=<ABSOLUTE dir> (gates only): the frame's opaque pass (gbuf.bin, RGBA32F view
+	 * normal + linear depth, bottom row first), the composed mask (mask.bin, R8) and the march's inputs (contact.txt),
+	 * rewritten every pass (the last write is the grabbed frame); notes/shadowband1/tools/contact_twin.py replays them */
+	{
+		const QString cd = wwEnvStr( "WW_SHADOW_CONTACT_DUMP" ).trimmed();
+		if ( !cd.isEmpty() && QDir::isAbsolutePath( cd ) && QDir().mkpath( cd ) ) {
+			std::vector<float> gb( size_t( W ) * size_t( H ) * 4 );
+			std::vector<unsigned char> mk( size_t( mw ) * size_t( mh ) );
+			GLint pack = 0, align = 4;
+			fn->glGetIntegerv( GL_PIXEL_PACK_BUFFER_BINDING, &pack );
+			fn->glGetIntegerv( GL_PACK_ALIGNMENT, &align );
+			fn->glBindBuffer( GL_PIXEL_PACK_BUFFER, 0 );
+			fn->glPixelStorei( GL_PACK_ALIGNMENT, 1 );
+			fn->glActiveTexture( GL_TEXTURE0 );
+			fn->glBindTexture( GL_TEXTURE_2D, g.gbuf );
+			fn->glGetTexImage( GL_TEXTURE_2D, 0, GL_RGBA, GL_FLOAT, gb.data() );
+			fn->glBindTexture( GL_TEXTURE_2D, c.tex );
+			fn->glGetTexImage( GL_TEXTURE_2D, 0, GL_RED, GL_UNSIGNED_BYTE, mk.data() );
+			fn->glBindTexture( GL_TEXTURE_2D, 0 );
+			fn->glPixelStorei( GL_PACK_ALIGNMENT, align );
+			fn->glBindBuffer( GL_PIXEL_PACK_BUFFER, GLuint( pack ) );
+			QFile fg( cd + QStringLiteral( "/gbuf.bin" ) ), fm( cd + QStringLiteral( "/mask.bin" ) ), ft( cd + QStringLiteral( "/contact.txt" ) );
+			if ( fg.open( QIODevice::WriteOnly ) )
+				fg.write( reinterpret_cast<const char *>( gb.data() ), qint64( gb.size() * sizeof( float ) ) );
+			if ( fm.open( QIODevice::WriteOnly ) )
+				fm.write( reinterpret_cast<const char *>( mk.data() ), qint64( mk.size() ) );
+			if ( ft.open( QIODevice::WriteOnly | QIODevice::Text ) )
+				ft.write( QStringLiteral( "full %1 %2\nmask %3 %4\nscale %5\nlight %6 %7 %8 %9\nsamples %10\npar %11\nexit %12\nlightview %13 %14 %15\nfar %16\n" )
+					.arg( W ).arg( H ).arg( mw ).arg( mh ).arg( p.scale ).arg( lx, 0, 'f', 3 ).arg( ly, 0, 'f', 3 ).arg( lz, 0, 'f', 6 )
+					.arg( cw > 0 ? 1 : -1 ).arg( p.samples ).arg( par ? 1 : 0 ).arg( earlyExit ? 1 : 0 )
+					.arg( lv[0], 0, 'f', 6 ).arg( lv[1], 0, 'f', 6 ).arg( lv[2], 0, 'f', 6 ).arg( far ).toUtf8() );
+		}
+	}
 
 	fn->glActiveTexture( GLenum( prevActive ) );
 	fn->glBindFramebuffer( GL_DRAW_FRAMEBUFFER, GLuint( prevFbo ) );
@@ -2163,6 +2208,7 @@ void wwShadowSetUniforms( Scene * scene, NifSkopeOpenGLContext::Program * prog, 
 	const bool terr = s.terrain > 0 && s.t.valid && s.t.tex[s.t.front];
 	const bool contact = !noScreen && s.c.valid && s.c.doc == scene->nifModel && s.c.tex;
 	const bool upgraded = s.cascade > 0 && csmValid;
+	s.csmSeen = csmValid;
 	// a frame with the cascades invalid (the Shadows row off) runs the composition so CSM1's path never reads them
 	const bool on = upgraded || terr || contact || !csmValid;
 	prog->uni1i( "ussOn", on ? 1 : 0 );
