@@ -26,8 +26,9 @@
 - **Reds** `WW_CELL_PRECIP_RED=constdensity,nowrap,onespeed,nowind` (live). Harness clock pin `WW_CELL_PRECIP_TIME=<s>`.
   Census: `precip: on, wind ... u/s, red N: <type>(<weather> from recx:<file>|record(flags), w, /m3, size, fall, near
   box x count, far box x count thin, tex)`.
-- **Gates (offline)**: tests/precip/run.sh (green 0 of 57; reds 1/2/4/8 fail their own rules); the shipped textures'
-  header, bytes = phase A, checks.json PASS, gutter per mip (texgate.py in the lane notes); the shader link sweep.
+- **Gates (offline)**: tests/precip/run.sh (green 0 of 58, incl. the prepared fast path = the slow path bit for bit;
+  reds 1/2/4/8 fail their own rules; one dense layer 3.5 ms CPU a frame); the shipped textures' header, bytes = phase A,
+  checks.json PASS, gutter per mip (texgate.py in the lane notes, 0 of 42); shader link sweep 396 + 264 LINK OK.
   Owed: pictures (a Division-style blizzard, rain at a lamp) when bungo asks.
 
 ## RTXFIX1 (2026-10-30): the Ray-traced GI probes inside the frame (rounder, fogged, exposed); the atlas order's red
