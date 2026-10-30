@@ -52,6 +52,8 @@ BSD License - see nifskope.h
 #include <QTabBar>
 #include <QWidgetAction>
 
+bool wwCellPrtOn();	// lane PRTOFF1: src/gl/celllights.h (the old baked probe GI, only under its red)
+
 namespace {
 
 struct Row
@@ -274,7 +276,10 @@ bool runPrtpStage( NifSkope * skope, int stage )
 	}
 	{	// lane PROBEVIEW1: the bake relit, the Pass drop-down is live
 		QMenu * pass = dCell->findChild<QMenu *>( QStringLiteral( "CellWorkspaceCellPass" ) );
-		add( "PRTP: Pass is on after Bake", pass && pass->isEnabled() );
+		if ( wwCellPrtOn() )
+			add( "PRTP: Pass is on after Bake", pass && pass->isEnabled() );
+		else	// lane PRTOFF1 (10-29): without the PRT's red nothing relights the bake, so the Pass never lights
+			add( "PRTP: Pass after Bake not checked (lane PRTOFF1 10-29: the PRT draws only under WW_CELL_PRT_RED=1)", true );
 	}
 	const QString shotDir = QString::fromLocal8Bit( wwEnv( "WW_CELLWS_SHOTS" ) );
 	if ( !shotDir.isEmpty() ) {

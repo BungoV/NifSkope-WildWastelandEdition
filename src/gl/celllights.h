@@ -330,6 +330,10 @@ const WwCellGi * wwCellGiFor( const void * nif );
 int wwCellGiVersion( const void * nif );
 //! the GI row (ships off); the pin WW_CELL_GI wins. Draws only while the Cell lights row is on.
 bool wwCellGiOn();
+/*! lane PRTOFF1 (bungo 10-29): the old baked probe GI (PRT) draws only under the red WW_CELL_PRT_RED=1 (read once, at
+ *  launch). Off: wwCellGiOn() is false whatever the row or WW_CELL_GI say, WW_CELL_GI_FROM loads no bake, nothing
+ *  relights one, the march is never compiled and the shaders hold no grid read (WW_CELL_PRT, src/gl/glcontext.cpp) */
+bool wwCellPrtOn();
 /*! lane PERF1: the GI's visibility, WW_CELL_GI_VIS: 0 the volumes (default: the pixel's volume, the threshold blend),
  *  1 march (red: the per-pixel chain as before the volumes, compiled in by WW_CELL_GI_MARCH, src/gl/glcontext.cpp) */
 int wwCellGiVis();

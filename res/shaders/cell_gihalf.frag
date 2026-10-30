@@ -30,6 +30,7 @@ void main()
 		giKey = vec4( 0.0, 0.0, 0.0, -1.0 );
 		return;
 	}
+#ifdef WW_CELL_PRT	// lane PRTOFF1: the PRT's screen pass (never run without it; cellGiOn is false there)
 	float z = -g.w / length( cellRow[0].xyz );	// back to view units
 	vec2 ndc = ( vec2( f ) + 0.5 ) / vec2( giFull ) * 2.0 - 1.0;
 	vec3 posView = vec3( -z * ndc / giProj, z );
@@ -42,4 +43,5 @@ void main()
 	giOut = cellGiVolume( P, N, m > 0.5 ? ivec2( int( m + 0.5 ) - 1, -1 ) : cellGiVolAt( P, N ) );
 #endif
 	giKey = vec4( P, cellGiKeyPack( N ) );
+#endif
 }

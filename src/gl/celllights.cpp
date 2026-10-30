@@ -187,7 +187,9 @@ ClState & st()
 			s.on = QSettings().value( QStringLiteral( "WW/CellLights" ), false ).toBool();
 		}
 		const QByteArray giPin = wwEnv( "WW_CELL_GI" );
-		if ( !giPin.isEmpty() ) {
+		if ( !wwCellPrtOn() ) {
+			s.giOn = false;	// lane PRTOFF1: the old GI never draws; its pin and its row do nothing
+		} else if ( !giPin.isEmpty() ) {
 			s.giPinned = true;
 			s.giOn = giPin.trimmed() != "0";
 		} else {
@@ -645,10 +647,16 @@ bool wwCellGiOn()
 	return st().giOn;
 }
 
+bool wwCellPrtOn()
+{
+	static const bool red = qEnvironmentVariableIntValue( "WW_CELL_PRT_RED" ) == 1;	// lane PRTOFF1: the old draw back (launch)
+	return red;
+}
+
 void wwCellGiSetOn( bool on )
 {
 	ClState & s = st();
-	if ( s.giPinned )
+	if ( s.giPinned || !wwCellPrtOn() )	// lane PRTOFF1: the row is gone; the stored value stays as it was
 		return;
 	s.giOn = on;
 	QSettings().setValue( QStringLiteral( "WW/CellGi" ), on );
@@ -1054,6 +1062,8 @@ int wwCellPassRed()
  * chain as before, compiled in by src/gl/glcontext.cpp's WW_CELL_GI_MARCH, no screen pass) */
 int wwCellGiVis()
 {
+	if ( !wwCellPrtOn() )
+		return 0;	// lane PRTOFF1: the march is the PRT's chain (and a march red would turn the ray-traced GI off)
 	WW_SWITCH_STATIC( int, mode, [] {
 		const QByteArray v = wwEnv( "WW_CELL_GI_VIS" ).trimmed().toLower();
 		if ( v == "march" || v == "red" || v == "old" )
@@ -2022,11 +2032,13 @@ void wwCellLightsUniforms( Scene * scene )
 	prog->uni1i( "cellGi", kGiUnit );
 	prog->uni1b( "cellGiOn", giDraw );
 	rtddgiCellUniforms( scene );	// lane RTXGI1 M2: the ray-traced GI volume (src/rtddgicell.h); no-op in an off program
-	prog->uni1b( "cellGiSky", giDraw && !skyDraw && G->skyLit );	// lane SKY1 (never on the sky-share grid)
+	// lane PRTOFF1: without the PRT a weather-lit exterior's sky is the ray-traced volume's (its misses: cell_lights.glsl CELL_GI_UP)
+	const bool ddgiSky = !wwCellPrtOn() && L && !L->interior && wwLookdevActive();
+	prog->uni1b( "cellGiSky", ( giDraw && !skyDraw && G->skyLit ) || ddgiSky );	// lane SKY1 (never on the sky-share grid)
 	prog->uni1f( "cellSkyVis", wwCellSkyVis() );	// lane SKYSTR1: the Sky visibility row, for the AO decals
 	// lane SPECOCC1: the sky grid's slabs start after the GI's own (6, or 12 with the rooms' second slot)
 	const bool specOccDraw = giDraw && !skyDraw && G->skyLit && g.giSpecSky;
-	prog->uni1i( "cellSpecOcc", specOccDraw ? wwCellSpecOccMode() : 0 );
+	prog->uni1i( "cellSpecOcc", specOccDraw || ddgiSky ? wwCellSpecOccMode() : 0 );	// lane PRTOFF1: or the volume's sky visibility
 	prog->uni1f( "cellSpecSkyBase", specOccDraw ? ( G->slotRooms.empty() ? 6.0f : 12.0f ) : 0.0f );	// 0: no sky slot (the water reads it)
 	prog->uni1i( "cellGiAmb", s.giAmb );	// lane GICAL1
 	prog->uni1b( "cellGiFill", s.giFill && !skyDraw );	// the gap fill is the GI grid's, never the sky share's
@@ -4704,11 +4716,12 @@ void wwCellGiWaterDraw( Scene * scene, int block, bool cellProgram )
 	if ( !scene || !scene->renderer )
 		return;
 	NifSkopeOpenGLContext::Program * prog = scene->renderer->getCurrentProgram();
-	if ( !prog || prog->uniLocation( "cellGiOn" ) < 0 )
+	// lane PRTOFF1: without the PRT a program reads no grid (no cellGiOn), the ray-traced volume's cellDdgiOn instead
+	if ( !prog || ( prog->uniLocation( "cellGiOn" ) < 0 && prog->uniLocation( "cellDdgiOn" ) < 0 ) )
 		return;
 	WW_SWITCH_STATIC( bool, red, wwEnv( "WW_CELL_WATER_PRTP_RED" ).trimmed() == "1" );	// red: water reads the GI as before
 	const bool water = cellProgram && !red && wwCellWaterIsShape( scene->nifModel, block );
-	static const char * const names[WwWaterGiGuard::kN] = { "cellGiOn", "cellGiSky", "cellSpecOcc", "cellGiFineOn" };
+	static const char * const names[WwWaterGiGuard::kN] = { "cellGiOn", "cellGiSky", "cellSpecOcc", "cellGiFineOn", "cellDdgiOn" };
 	auto fn = scene->renderer->fn;
 	switch ( waterGi().draw( prog, water ) ) {
 	case WwWaterGiGuard::Zero: {
