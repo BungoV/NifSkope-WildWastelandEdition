@@ -2,8 +2,10 @@
 // Prints one line per check, then PASS or FAIL; exit code 0 only on PASS.
 // Red: WW_CELLSHOW_RED=menu (a tick closes the menu again) must FAIL.
 // Red: WW_CELLSHOW_RED=sync (an action that changes leaves its box behind) must FAIL.
-// lane OPENCELLFIX2 reds, each must FAIL: WW_CELLSHOW_RED=ticks|groups|dropdown|presets|nest|livebind, WW_DROPDOWN_RED=1.
-// Round 4 reds, each must FAIL: WW_CELLSHOW_RED=arrowframe|dropright|override|builtin|presetbar, WW_DROPDOWN_RED=fit.
+// lane OPENCELLFIX2 reds, each must FAIL: WW_CELLSHOW_RED=groups, WW_DROPDOWN_RED=1.
+// lane REDRETIRE1: OPENCELLFIX2's other reds are twins of the red build (qmake REDTWIN=1, src/wwredtwin.h), each must
+// FAIL: REDTWIN=CELLSHOW=ticks|dropdown|presets|nest|livebind|foldrows|inline (round 3),
+// arrowframe|dropright|override|builtin|presetbar (round 4), REDTWIN=DROPDOWN=fit. tests/cellshow/run.sh runs them all.
 
 #include "cellshowpanel.h"
 #include "widgets/wwdropdown.h"

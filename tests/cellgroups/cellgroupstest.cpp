@@ -1,7 +1,8 @@
 // lane OPENCELLFIX2 unit test: a Display group's master (gl/celllooks.h WwGroup) gates its rows' readers.
 // Prints one line per check, then PASS or FAIL; exit code 0 only on PASS.
-// Reds, each must FAIL: WW_CELLGROUP_RED=<a group name> (that master gates nothing), WW_CELLGROUP_RED=ssr (the one
-// Screen-Space Reflections row sets indoors only).
+// Reds, each must FAIL (lane REDRETIRE1: twins of the red build, qmake REDTWIN=1, src/wwredtwin.h):
+// REDTWIN=CELLGROUP=<a group name> (that master gates nothing), REDTWIN=CELLGROUP=ssr (the one Screen-Space
+// Reflections row sets indoors only). tests/cellgroups/run.sh runs green and every red.
 
 #include "celllooks.h"
 
