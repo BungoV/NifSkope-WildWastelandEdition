@@ -22,6 +22,7 @@ BSD License - see nifskope.h
 #include "gl/weatherrecx.h"	// lane WX1: the weather .recx night block
 #include "gl/cloudmap.h"	// lane CLOUD1: the cloud map
 #include "gl/cloudvol.h"	// lane CLOUD2: the volume clouds
+#include "gl/cloudlightning.h"	// lane CLOUD6f: the storm share of the lightning
 #include "gl/atmomath.h"	// lane SKYA (ATMOCHECK1): the weather tint table
 #include "gl/skyephem.h"	// lane EPHEM1: the real moon's phase texture
 #include "gl/skydisc.h"	// lane SKYDISC1: our moon globe's math
@@ -1222,6 +1223,28 @@ bool wwLookdevWeatherClass( unsigned & flags, unsigned & thunder )
 		return false;
 	flags = s.w.classFlags;	// lane CLOUD5: WTHR DATA bytes 11 and 10 (esmweather.cpp)
 	thunder = s.w.thunderFreq;
+	return true;
+}
+
+bool wwLookdevLightning( float & share, float rgb[3], quint32 & seed )
+{
+	resolve();
+	const LdState & s = st();
+	share = 0.0f;
+	rgb[0] = rgb[1] = rgb[2] = 0.0f;
+	seed = 0;
+	if ( !s.haveWeather )
+		return false;
+	const WwWeatherData & w = s.w;
+	const bool changing = w.blending();
+	const WwWeatherData * L = changing ? w.last.get() : nullptr;
+	const bool stormNow = w.thunderSounds > 0, stormLast = L && L->thunderSounds > 0;
+	share = WwCloudLightning::stormShare( stormNow, float( w.thunderFadeIn ) / 255.0f, changing, stormLast,
+		L ? float( L->thunderFadeOut ) / 255.0f : 1.0f, w.transPct );
+	const WwWeatherData & src = ( stormNow || !stormLast ) ? w : *L;
+	for ( int c = 0; c < 3; c++ )
+		rgb[c] = float( src.lightningRgb[c] ) / 255.0f;
+	seed = src.formID;
 	return true;
 }
 

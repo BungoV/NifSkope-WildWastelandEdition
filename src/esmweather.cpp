@@ -809,6 +809,18 @@ bool EsmWeather::read( quint32 formID, WwWeatherData & out, QString * why )
 					out.classFlags = quint8( f.data()[11] );
 					out.hasClass = true;
 				}
+				if ( f.size() >= 15 ) {	// lane CLOUD6f: the lightning's fade bytes and colour (gl/cloudlightning.h)
+					out.thunderFadeIn = quint8( f.data()[8] );
+					out.thunderFadeOut = quint8( f.data()[9] );
+					for ( int c = 0; c < 3; c++ )
+						out.lightningRgb[c] = quint8( f.data()[12 + c] );
+				}
+			}
+			else if ( f == "SNAM" && f.size() >= 8 ) {	// lane CLOUD6f: sound form + type (3 = thunder): a storm
+				quint32 type = 0;
+				std::memcpy( &type, f.data() + 4, 4 );
+				if ( type == 3 )
+					out.thunderSounds++;
 			}
 			else if ( f == "IMSP" )
 				imsp = bytes();
