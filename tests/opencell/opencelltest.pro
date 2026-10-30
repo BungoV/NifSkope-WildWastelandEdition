@@ -8,6 +8,9 @@ CONFIG -= app_bundle
 ROOT = $$PWD/../..
 INCLUDEPATH += $$ROOT/src/ui $$ROOT/src $$ROOT/lib/libfo76utils/src
 !*msvc*:QMAKE_CXXFLAGS += -march=haswell
+# lane REDRETIRE1: the red build (qmake6 <this> REDTWIN=1) brings back the retired reds as twins (src/wwredtwin.h);
+# run it with REDTWIN=OPENCELL=<value>. tests/opencell/run.sh builds and runs both.
+!isEmpty(REDTWIN): DEFINES += WW_REDTWIN
 
 HEADERS += $$ROOT/src/ui/opencellcatalog.h $$ROOT/src/ui/opencelldialog.h \
 	$$ROOT/src/ui/widgets/wwdropdown.h

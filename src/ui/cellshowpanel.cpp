@@ -6,6 +6,7 @@ BSD License - see nifskope.h
 
 #include "cellshowpanel.h"
 #include "wwswitch.h"
+#include "wwredtwin.h"	// lane REDRETIRE1: OPENCELLFIX2's retired reds, tests/cellshow's red build only
 #include "widgets/wwdropdown.h"	// lane OPENCELLFIX2: the dock's one dropdown
 
 #include <QAction>
@@ -40,9 +41,17 @@ BSD License - see nifskope.h
 
 namespace {
 
+//! WW_CELLSHOW_RED=menu|sync (OPENCELLFIX1) and =groups (the in-app gate src/cellworkspacetest.cpp names it).
 bool red( const char * which )
 {
 	return wwEnvStr( "WW_CELLSHOW_RED" ) == QLatin1String( which );
+}
+
+/*! lane REDRETIRE1: OPENCELLFIX2's other reds (bungo OK on the panel 10-27) are retired; a constant false outside
+ * tests/cellshow's red build (src/wwredtwin.h, REDTWIN=CELLSHOW=<which>). */
+bool twin( const char * which )
+{
+	return wwRedTwin( "CELLSHOW", which );
 }
 
 //! The release that would close the menu triggers the row instead (as src/nifskope_ui.cpp PersistentActionMenu).
@@ -143,7 +152,7 @@ struct Builder
 	QVBoxLayout * foldBody( QVBoxLayout * into, QToolButton * arrow, const QString & id, bool openFirst, int indent,
 		QAction * enabler, QWidget * head )
 	{
-		if ( !red( "arrowframe" ) )	// bungo 10-27: an open arrow is a folded one pointing down -- no frame, any state
+		if ( !twin( "arrowframe" ) )	// bungo 10-27: an open arrow is a folded one pointing down -- no frame, any state
 			arrow->setStyleSheet( QStringLiteral( "QToolButton { border: none; background: transparent; padding: 0px; }"
 				" QToolButton:hover, QToolButton:pressed, QToolButton:checked, QToolButton:checked:hover, QToolButton:focus"
 				" { border: none; background: transparent; }" ) );
@@ -453,7 +462,7 @@ QMenu * menuOf( const QWidget * panel )
 
 void unstyleRed( QToolButton * d )
 {
-	if ( red( "dropdown" ) ) {	// red: a dropdown without the Object Mode selector's look
+	if ( twin( "dropdown" ) ) {	// red: a dropdown without the Object Mode selector's look
 		d->setStyleSheet( QString() );
 		d->setAutoRaise( true );
 	}
@@ -492,7 +501,7 @@ void refreshPresetBar( QWidget * panel )
 	if ( !pick )
 		return;
 	const QStringList own = wwDisplayPresetNames();
-	const QStringList names = ( red( "presetbar" ) ? QStringList() : wwDisplayPresetBuiltins() ) + own;	// red: no built-ins
+	const QStringList names = ( twin( "presetbar" ) ? QStringList() : wwDisplayPresetBuiltins() ) + own;	// red: no built-ins
 	const QString cur = wwDisplayPresetCurrent();
 	const bool same = !cur.isEmpty() && names.contains( cur ) && presetMatches( panel );
 	{
@@ -600,10 +609,10 @@ struct DisplayBuilder
 	QSet<QAction *> used;
 	QHash<QString, QVBoxLayout *> groups;
 	QVBoxLayout * fusion = nullptr;
-	const bool noTicks = red( "ticks" );
+	const bool noTicks = twin( "ticks" );
 	const bool oneGroup = red( "groups" );
-	const bool foldRows = red( "foldrows" );	// red: "<row> settings" on a row of its own (note 11)
-	const bool flat = red( "nest" );	// red: a group's children lie flat after it (note 18)
+	const bool foldRows = twin( "foldrows" );	// red: "<row> settings" on a row of its own (note 11)
+	const bool flat = twin( "nest" );	// red: a group's children lie flat after it (note 18)
 	const QList<WwDisplayRow> * all = nullptr;
 	int leftovers = 0;
 	PresetSteps * steps = nullptr;
@@ -656,7 +665,7 @@ struct DisplayBuilder
 				hl->setSpacing( 6 );
 				auto * l = new QLabel( a->text(), w );
 				WwDropdown * d = dropdown( QStringLiteral( "CellDisplayChoice_" ) + m->objectName(), items, false );
-				if ( red( "dropright" ) ) {	// red: the dropdown on the right of its row
+				if ( twin( "dropright" ) ) {	// red: the dropdown on the right of its row
 					hl->addWidget( l, 1 );
 					hl->addWidget( d );
 				} else {	// bungo 10-27 "Just move it to the left side": where a tick would be, its name after it
@@ -731,11 +740,11 @@ struct DisplayBuilder
 
 	/* bungo 10-27 "if a setting in fusion shaders overrides something in vanilla, grey it out in vanilla": while the
 	 * Fusion Shaders row named by overriddenBy is on, the engine skips this row's path, so the row and its fold grey
-	 * (live; the tick keeps its value). WW_CELLSHOW_RED=override: never greyed. */
+	 * (live; the tick keeps its value). Red twin CELLSHOW=override: never greyed. */
 	void overridden( const WwDisplayRow & r, const QList<QWidget *> & added )
 	{
 		QAction * by = r.overriddenBy.isEmpty() ? nullptr : findAction( menu, r.overriddenBy );
-		if ( !by || added.isEmpty() || red( "override" ) )
+		if ( !by || added.isEmpty() || twin( "override" ) )
 			return;
 		QList<QAction *> items = by->menu() ? exclusiveItems( by->menu() ) : QList<QAction *>();
 		QPointer<QAction> pb( by );
@@ -795,8 +804,8 @@ struct DisplayBuilder
 			d = dropdown( QStringLiteral( "CellDisplayChoice_" ) + key, list, r.quality );
 		/* bungo 10-27 "they should become the first thing under each unwrapped thing" + "Just move it to the left side"
 		 * + "closer": a row's dropdown is the first row of its fold, at the child ticks' indent, nothing before it.
-		 * WW_CELLSHOW_RED=dropright: on the right of the tick row, as before. */
-		const bool dropIn = d && !red( "dropright" );
+		 * Red twin CELLSHOW=dropright: on the right of the tick row, as before. */
+		const bool dropIn = d && !twin( "dropright" );
 		const bool folds = dropIn || !more.isEmpty() || ( !kids.isEmpty() && !flat );
 
 		auto * w = new QWidget;
@@ -840,7 +849,7 @@ struct DisplayBuilder
 		hl->addWidget( tickOrLabel, 1 );
 		if ( d ) {
 			d->setParent( w );
-			if ( !red( "inline" ) )	// red: the dropdown keeps its own taller box (note 10)
+			if ( !twin( "inline" ) )	// red: the dropdown keeps its own taller box (note 10)
 				d->setRowBuddy( tickOrLabel );
 			if ( dropIn )
 				d->setElide( true );	// the fold's width decides; the list keeps the whole names
@@ -1198,7 +1207,7 @@ bool wwDisplayPresetSave( QWidget * panel, const QString & name )
 {
 	if ( !presetName( name ) || !menuOf( panel ) )
 		return false;
-	if ( !red( "presets" ) ) {	// red: nothing is kept
+	if ( !twin( "presets" ) ) {	// red: nothing is kept
 		QSettings().setValue( presetKey( name ), wwDisplayState( panel ) );
 		presetIsNow( panel, name );
 	}
@@ -1215,7 +1224,7 @@ bool wwDisplayPresetApply( QWidget * panel, const QString & name )
 			return false;
 		for ( int pass = 0; pass < 2; pass++ )	// twice: a master on can enable its rows
 			for ( const auto & step : st->steps )
-				step( red( "builtin" ) ? 3 : builtin );	// red: every built-in is Ultra
+				step( twin( "builtin" ) ? 3 : builtin );	// red: every built-in is Ultra
 		syncInto( panel );
 	} else {
 		const QVariant v = QSettings().value( presetKey( name ) );
@@ -1284,7 +1293,7 @@ void wwLiveWatch( QObject * owner, const QString & topic, const std::function<vo
 void wwLiveChanged( const QString & topic )
 {
 	static bool telling = false;	// a re-read that sets an action tells again: once is enough
-	if ( telling || red( "livebind" ) )
+	if ( telling || twin( "livebind" ) )
 		return;
 	telling = true;
 	QList<LiveWatch> ws = liveWatches().values( topic );

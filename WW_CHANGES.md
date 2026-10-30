@@ -23,6 +23,31 @@
   field alone 19.9, bar 1.5 x the screen white floor 22.3. No diagonal period is left for the dither to explain, and
   without it the 8-bit rounding reads 29.9 / 41.5: the dither lowers it. Red bayerdither (an ordered 4x4 dither in its
   place): 3014 / 2784 FAIL. Nothing to fix in FOGGLOW1.
+## REDRETIRE1 (2026-10-30, CODE1030 item 3): the reds of the lanes bungo confirmed live leave the shipping build
+
+- bungo 10-27: "Reds are scaffolding": a red keeps the old path only until bungo himself confirms the lane live.
+  Census (committed, `python -I tests/spells/red_census.py [--busy <file>] [--tsv <out>]`): 266 WW_*_RED names in src/
+  and res/shaders/, each with its reader sites, values, owner lane (first commit adding it) and bungo's own
+  confirmation (quotes checked verbatim in the notes; a sub-agent's pictures do not count). Two lanes are confirmed:
+  OPENCELLFIX2 (the Cell dock panel, "bungo OK on the panel 10-27") and FLYFIX1 ("I can finally fly").
+- **Retired (16 reds of OPENCELLFIX2):** the whole name `WW_CELLGROUP_RED`, and the values `WW_CELLSHOW_RED=ticks,
+  dropdown, presets, nest, livebind, foldrows, inline, arrowframe, dropright, override, builtin, presetbar`,
+  `WW_DROPDOWN_RED=fit`, `WW_OPENCELL_RED=lang, dblclick`. The shipping build has no env reader for them and no
+  stage-table row (WW_CELLGROUP_RED left src/wwswitchstages.inc); the new path is the only one.
+- Their committed unit tests keep a red: the old paths sit behind `wwRedTwin()` (src/wwredtwin.h), a constant false
+  unless the TEST's red build is compiled with `REDTWIN=1` (-DWW_REDTWIN); that build picks one with
+  `REDTWIN=<GROUP>=<value>`. tests/cellshow, tests/opencell, tests/cellgroups each have a run.sh now (green build +
+  red build, every red must fail, and every retired env value must do nothing on the green build).
+- **Kept:** WW_CELLSHOW_RED=groups and WW_DROPDOWN_RED=1 (the in-app gate src/cellworkspacetest.cpp names them);
+  the values of the unconfirmed lanes OPENCELL1, OPENCELLFIX1, CELLSPAWN1, LEFTOVERS1. **Deferred:**
+  WW_CELLSHOW_RED=showbutton (src/cellworkspace.cpp) and WW_FLYFIX_RED (src/glview.cpp; the in-app flycheck gate's red).
+- **Gates (offline):** build RC 0, the retired literals count 0 in the exe (base e8fad765's exe: 1-2 each); the batch
+  unit set green; tests/cellshow 83 checks (green 0 failed, 13 twins + 4 kept reds each fail), tests/opencell 112
+  checks (2 twins + 4 kept reds fail), tests/cellgroups 59 checks (12 twins, every group master + ssr, each fails);
+  each twin's green build ignores both REDTWIN and the old env value (27 of 27 pass). Red: the same run.sh files on
+  the base sources, where no twin exists: 54 BAD (cellgroups 24, opencell 4, cellshow 26). Census: this tree GONE x16 rc 0, the base STILL READ x16
+  rc 1. No shader changed (the default draw path is unchanged; wwRedTwin is constexpr false in NifSkope.exe).
+- Owed: none visual.
 
 ## CAMGATE3 (2026-10-30, FIX1030B round 2): an interior's camera bounds are a set of boxes built from what is drawn
 

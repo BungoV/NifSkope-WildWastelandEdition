@@ -104,7 +104,7 @@ OpenCellStrings openCellLoadStrings( const QString & pluginPath, const QString &
 
 //! lane OPENCELLFIX2: the string-table language the game uses: `[General] sLanguage` of Fallout4.ini, Fallout4Prefs.ini
 //! and Fallout4Custom.ini (the MO2 profile's set when `profileDir` has one, else My Games), default "en".
-//! WW_OPENCELL_RED=lang: the old reader (the saved box value).
+//! Red twin REDTWIN=OPENCELL=lang (REDRETIRE1, tests/opencell's red build only): the old reader (the saved box value).
 QString openCellStringsLanguage( const QString & profileDir = QString() );
 
 //! The `.wwcell` spec line, in the form cellSpecFromLine() parses.

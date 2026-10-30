@@ -6,6 +6,7 @@ BSD License - see nifskope.h
 
 #include "opencellcatalog.h"
 #include "wwswitch.h"	// lane TESTDRIVER1: the WW_* switch store
+#include "wwredtwin.h"	// lane REDRETIRE1: OPENCELLFIX2's retired red "lang"
 #include "lodgenloadorder.h"	// lane OPENCELLFIX1: the masters and the MO2 profile, as the LOD panel reads them
 
 #include "ba2file.hpp"
@@ -418,7 +419,9 @@ static bool isGameLanguage( const QString & l )
 
 QString openCellStringsLanguage( const QString & profileDir )
 {
-	if ( wwEnvStr( "WW_OPENCELL_RED" ) == QLatin1String( "lang" ) ) {	// red: the old reader, the saved box value
+	// lane REDRETIRE1: OPENCELLFIX2's red (the old reader, the saved box value) is a twin of tests/opencell's red
+	// build only (src/wwredtwin.h, REDTWIN=OPENCELL=lang)
+	if ( wwRedTwin( "OPENCELL", "lang" ) ) {
 		const QString l = QSettings().value( settingsKey( "Language" ) ).toString().trimmed();
 		return l.isEmpty() ? QStringLiteral( "en" ) : l;
 	}
@@ -482,7 +485,7 @@ bool openCellReadCatalog( const QStringList & paths, OpenCellCatalog & out, QStr
 		bool found = false;
 		if ( localized[i] )
 			tables[i] = openCellLoadStrings( paths[i], lang, opt.dataDir, &found );
-		if ( localized[i] && !found && lang != QLatin1String( "en" ) && wwEnvStr( "WW_OPENCELL_RED" ) != QLatin1String( "lang" ) )
+		if ( localized[i] && !found && lang != QLatin1String( "en" ) && !wwRedTwin( "OPENCELL", "lang" ) )
 			tables[i] = openCellLoadStrings( paths[i], QStringLiteral( "en" ), opt.dataDir, &found );	// OPENCELLFIX2: names show
 		if ( localized[i] && !found )
 			out.noStrings.append( QFileInfo( paths[i] ).fileName() );

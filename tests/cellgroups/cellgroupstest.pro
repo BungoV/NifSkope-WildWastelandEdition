@@ -9,5 +9,8 @@ CONFIG -= app_bundle
 ROOT = $$PWD/../..
 INCLUDEPATH += $$ROOT/src $$ROOT/src/gl
 !*msvc*:QMAKE_CXXFLAGS += -march=haswell
+# lane REDRETIRE1: the red build (qmake6 <this> REDTWIN=1) brings back the retired reds as twins (src/wwredtwin.h);
+# run it with REDTWIN=CELLGROUP=<value>. tests/cellgroups/run.sh builds and runs both.
+!isEmpty(REDTWIN): DEFINES += WW_REDTWIN
 
 SOURCES += cellgroupstest.cpp $$ROOT/src/gl/celllooks.cpp $$ROOT/src/wwswitch.cpp

@@ -3,7 +3,9 @@
 // Red: WW_OPENCELL_RED=writer swaps x and y in the writer, and this test must then FAIL.
 // Red: WW_OPENCELL_RED=strings (and the off switch WW_OPENCELL_STRINGS=0) leave localized names blank: FAIL.
 // Red: WW_ESM_LIGHT_RED=full numbers light plugins as full ones (top byte = file index): FAIL.
-// Reds (OPENCELLFIX2): WW_OPENCELL_RED=lang (the saved box value, no en retry), =dblclick, WW_DROPDOWN_RED=1: FAIL.
+// Reds (OPENCELLFIX2): WW_DROPDOWN_RED=1: FAIL. Retired by REDRETIRE1 to twins of the red build (qmake REDTWIN=1,
+// src/wwredtwin.h): REDTWIN=OPENCELL=lang (the saved box value, no en retry), REDTWIN=OPENCELL=dblclick: FAIL.
+// tests/opencell/run.sh runs green and every red.
 
 #include "opencellcatalog.h"
 #include "opencelldialog.h"
@@ -514,7 +516,7 @@ int main( int argc, char ** argv )
 		QStringLiteral( "interior list (no grid columns)" ) );
 
 	/* lane OPENCELLFIX2 notes 1, 2, 7: no language box, no Open button (a double-click opens), every dropdown is the
-	 * toolbar's Object Mode selector. Reds: WW_OPENCELL_RED=dblclick, WW_DROPDOWN_RED=1. */
+	 * toolbar's Object Mode selector. Reds: REDTWIN=OPENCELL=dblclick (red build), WW_DROPDOWN_RED=1. */
 	std::printf( "dock look\n" );
 	{
 		check( !dlg.findChild<QWidget *>( QStringLiteral( "OpenCellLanguage" ) ), QStringLiteral( "no language box" ) );
@@ -730,7 +732,7 @@ int main( int argc, char ** argv )
 	}
 
 	/* lane OPENCELLFIX2 note 3: the strings language is the game's [General] sLanguage (Fallout4.ini, Prefs, Custom; a
-	 * later one wins; an MO2 profile's own inis first); default en. A saved "e" never blanks names. Red: WW_OPENCELL_RED=lang. */
+	 * later one wins; an MO2 profile's own inis first); default en. A saved "e" never blanks names. Red: REDTWIN=OPENCELL=lang (red build). */
 	std::printf( "strings language\n" );
 	{
 		const QString mg = tmp.path() + QStringLiteral( "/MyGames" ), prof = tmp.path() + QStringLiteral( "/Profile" );

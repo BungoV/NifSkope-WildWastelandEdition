@@ -6,6 +6,7 @@ BSD License - see nifskope.h
 
 #include "opencelldialog.h"
 #include "wwswitch.h"	// lane CELLSPAWN1: WW_OPENCELL_RED=list, the shot harness
+#include "wwredtwin.h"	// lane REDRETIRE1: OPENCELLFIX2's retired red "dblclick"
 #include "widgets/wwdropdown.h"	// lane OPENCELLFIX2: the dock's one dropdown
 
 #include <QAction>
@@ -279,7 +280,7 @@ void OpenCellPicker::build()
 		sortCells( col, col == sortColumn ? !sortDescending : false );
 	} );
 	connect( cellTree, &QTreeWidget::itemSelectionChanged, this, &OpenCellPicker::cellPicked );
-	if ( wwEnvStr( "WW_OPENCELL_RED" ) != QLatin1String( "dblclick" ) ) {	// red: the double-click opens nothing
+	if ( !wwRedTwin( "OPENCELL", "dblclick" ) ) {	// REDRETIRE1: the red twin (tests/opencell's red build) opens nothing
 		// the clicked row is made current first, so the cell opened is the one under the pointer
 		connect( cellTree, &QTreeWidget::itemDoubleClicked, this, [this]( QTreeWidgetItem * it ) {
 			if ( !it )
