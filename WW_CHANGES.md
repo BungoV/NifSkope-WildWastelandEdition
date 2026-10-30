@@ -225,6 +225,37 @@
   65.8 u off. Both builds agree that the red does drag (87.7 u against 26.2 u off) and that a live set of another switch
   restarts nothing. Owed: the fix2b repeat picture when bungo asks.
 
+## BINDREOPEN1 (2026-10-30): the bindless geometry pool gives memory back; the reopen tears bindless down in order
+
+- **Pool** (STREAMTEX2's walk: the pool grew 84 -> 312 -> 672 -> 2400/2496 MB and never came down). The arena of
+  src/gl/cellbindlesspool.h was append-only: a released span only counted as garbage until a rebuild, and a rebuild
+  doubled from the CURRENT size while the live part was over half, so the size never fell. Now a released span (a shape
+  undrawn for 600 frames, or its data changed) waits in a grave stamped with its frame; the frame gets a fence, and once
+  it has passed the span's vertex and index ranges join free lists (adjacent ranges merged, a run at the end given back to
+  the append point) and are reused best-fit. A rebuild sizes the arena at 1.5x its live part (4096-element steps, the old
+  64k/192k floors), and every 64 frames an arena whose live part fell under half is re-made at that size (a shrink).
+  Frame line: `bindless: ... poolLive=MB reused=N shrinks=N graves=N` at the end.
+- **Reopen** (FRAMESPEED2 D1: the live 5x5 all-on reopen crashed 3 of 3 with bindless on, in the driver under the first
+  frame's glTexImage2D). Named from the code, what a reopen left naming the old document: the pool's entries keyed by the
+  deleted shapes (the whole old scene kept live, so the reopen frame's rebuild sized the arena for both), the staged row's
+  handles (non-resident, deleted) in any slot a draw does not restage, and a context's state (its persistently mapped
+  rings) that outlived a destroyed context. None is proven to be D1 (owed: the live reopen). WwBl::forgetAll (the
+  reopen's TexCache::flush) now runs the order of the new src/gl/cellbindlessreopen.h: a fence wait, the ring's fences
+  and cursors reset, the staged row zeroed, every handle non-resident before the textures go, the pool's entries and
+  buffers dropped (the next document starts at the floor). A context's aboutToBeDestroyed unmaps the rings before their
+  buffers go and forgets the context's state. Census before the teardown: `bindless reopen: handles resident N, pool MB M
+  (live L, entries E), mapped K, other contexts C holding H handles, order fenced`.
+- Reds (WW_BINDLESS_RED, live): `poolgrow` = the append-only arena; `reopenraw` = the old reopen order (glFinish, handles
+  non-resident; row, ring, pool and a dead context's state kept). The multi-draw stays on under both.
+- Gates (offline): tests/bindreopen1/run.sh `BINDREOPEN1 PASS` -- the real arena under a twin of the pool policy over a
+  22-step 5x5 walk plus a 4-step tail: green step21/step3 x1.000 (bar 1.3), peak size/peak live x1.249 (bar 1.6), tail
+  750 -> 12.7 MB (3 shrinks), 5261 spans reused, 0 bad / overlapping / reused-before-its-fence; red poolgrow FAIL (peak
+  x3.143, tail stays 1888 MB). The real teardown order on a mock GL, 60 reopens + 6 contexts re-made: green PASS; red
+  reopenraw ABORT at the first reopen. tests/bindlesspool still PASS (its off1 red FAIL). The offline GL probe
+  (Qt6 offscreen 4.5 core, RTX 5070 Ti, driver 610.74; notes/code1030/bindreopen1/probe): 200 reopen cycles each of the
+  new order, the old order with a stale row handle sampled, textures deleted while resident, and deletes with draws in
+  flight -- GL errors 0, no crash. It does NOT reproduce D1; the reopen fix is reasoned, the live reopen is owed.
+
 ## RTXFIX1 (2026-10-30): the Ray-traced GI probes inside the frame (rounder, fogged, exposed); the atlas order's red
 
 - **Probes view** (bungo 10-29: "Could our probes have a rounder shape?", "fog", the spheres by the string lights and the

@@ -282,6 +282,7 @@ HEADERS += \
 	src/gl/celldrawpacket.h \
 	src/gl/cellbindless.h \
 	src/gl/cellbindlesspool.h \
+	src/gl/cellbindlessreopen.h \
 	src/gl/cellgpucull.h \
 	src/gl/cellfarinst.h \
 	src/gl/cellfarground.h \
