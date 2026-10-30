@@ -881,6 +881,12 @@ std::vector<Vector3> sphereLevel( int level )
 
 } // namespace
 
+// lane SKYBELOW2: SKYBELOW1's red for the rule's other readers (the reflection probes' relight, gl/cellreflprobe.cpp)
+bool rtddgiSkyBelowRedNow()
+{
+	return rtddgiSkyBelowRed();
+}
+
 // ------------------------------------------------------------------ lane RESTIRDI1 (2026-10-30): the RT quality preset
 /* bungo's ruling (10-29): Low = the ray-traced GI volume only (today), Medium = + ReSTIR DI (ray-traced shadows for the
  * shadow-casting lights in place of the 16 depth cubes), High = + ReSTIR GI, Ultra = + ReSTIR PT. High and Ultra are
