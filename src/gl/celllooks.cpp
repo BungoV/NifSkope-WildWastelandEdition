@@ -74,6 +74,7 @@ const LookRow kRows[] = {
 	{ "Wave run-up", "WW/CellLandSwash" },
 	{ "River foam", "WW/CellWaterRiverFoam" },
 	{ "Underwater light", "WW/CellWaterUnderLight" },
+	{ "Precipitation", "WW/CellPrecip" },	// lane WEATHERLOOK1 B: ships off until bungo sees it
 };
 static_assert( sizeof( kRows ) / sizeof( kRows[0] ) == size_t( WwLook::Count ), "a row per look" );
 
@@ -319,6 +320,10 @@ QByteArray pinOf( WwLook l )
 		WW_SWITCH_STATIC( QByteArray, p, wwEnv( "WW_CELL_WATER_UNDERLIGHT" ).trimmed() );
 		return p;
 	}
+	case WwLook::Precip: {
+		WW_SWITCH_STATIC( QByteArray, p, wwEnv( "WW_CELL_PRECIP" ).trimmed() );
+		return p;
+	}
 	default:
 		return QByteArray();
 	}
@@ -390,6 +395,7 @@ const char * wwLookPinName( WwLook l )
 	case WwLook::LandSwash: return "WW_CELL_LAND_SWASH";
 	case WwLook::WaterRiverFoam: return "WW_CELL_WATER_RIVERFOAM";
 	case WwLook::WaterUnderLight: return "WW_CELL_WATER_UNDERLIGHT";
+	case WwLook::Precip: return "WW_CELL_PRECIP";
 	default: return "";
 	}
 }
@@ -507,7 +513,7 @@ WwGroup wwLookGroup( WwLook l )
 		return WwGroup::ShadowsVanilla;
 	case WwLook::PlacementEmittance: case WwLook::RegionEmittance: case WwLook::ParticleEmittance:
 		return WwGroup::Emittance;
-	case WwLook::Ephemeris: case WwLook::WeatherRecx:
+	case WwLook::Ephemeris: case WwLook::WeatherRecx: case WwLook::Precip:
 		return WwGroup::Sky;
 	case WwLook::WaterDepth: case WwLook::WaterCaustics: case WwLook::WaterSoftEdge: case WwLook::ShoreFoam:
 	case WwLook::WaterSwell: case WwLook::WaterRefl: case WwLook::WaterGlint: case WwLook::WaterOcean:

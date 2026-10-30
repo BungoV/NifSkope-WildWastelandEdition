@@ -2375,6 +2375,17 @@ bool wwVolPartUniforms( Scene * scene )
 	prog->uni1i( "volPartDump", 0 );
 	if ( !s.on )
 		return false;
+	wwVolPartMediumUniforms( scene );
+	return true;
+}
+
+void wwVolPartMediumUniforms( Scene * scene )
+{
+	if ( !scene || !scene->renderer || !scene->renderer->getCurrentProgram() )
+		return;
+	Renderer * r = scene->renderer;
+	NifSkopeOpenGLContext::Program * prog = r->getCurrentProgram();
+	const VpState & s = vps();
 	// the air's medium and phase this frame; no air drawn: a clear medium (the light alone) and the phase the air
 	// would take (the cell's god-ray record indoors, the weather's outdoors, else the fallback)
 	const VaGpu & g = vaGpus()[r];
@@ -2422,7 +2433,6 @@ bool wwVolPartUniforms( Scene * scene )
 	prog->uni1i( "volTerms", vs().terms );
 	prog->uni1i( "volPartRed", s.red );
 	wwAirZoneUniforms( scene );	// lane AIRZONE1: the hand-placed volumes' particles block (a no-op without the Air zones define)
-	return true;
 }
 
 QString wwVolPartSummary()

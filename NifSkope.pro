@@ -238,6 +238,9 @@ HEADERS += \
 	src/gl/cellclustergl.h \
 	src/gl/cellfxlit.h \
 	src/gl/celllensflare.h \
+	src/gl/cellprecip.h \
+	src/gl/precipmath.h \
+	src/gl/precipspec.h \
 	src/gl/cellcull.h \
 	src/gl/cellumbra.h \
 	src/gl/cellwater.h \
@@ -569,6 +572,7 @@ SOURCES += \
 	src/gl/cellclustergl.cpp \
 	src/gl/cellfxlit.cpp \
 	src/gl/celllensflare.cpp \
+	src/gl/cellprecip.cpp \
 	src/gl/cellcull.cpp \
 	src/gl/cellfarinst.cpp \
 	src/gl/cellfarground.cpp \

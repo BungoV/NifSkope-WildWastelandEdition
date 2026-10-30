@@ -1225,6 +1225,24 @@ bool wwLookdevWeatherClass( unsigned & flags, unsigned & thunder )
 	return true;
 }
 
+bool wwLookdevWeatherLeaving( quint32 & formID, QString & edid, QString & owner, unsigned & classFlags, float & pct )
+{
+	resolve();
+	const LdState & s = st();
+	if ( !s.haveWeather || !s.w.blending() )
+		return false;
+	const WwWeatherData & L = *s.w.last;
+	formID = L.formID;
+	edid = L.edid;
+	owner.clear();
+	for ( const WwWeatherEntry & e : s.list )
+		if ( e.formID == L.formID )
+			owner = e.ownerFile;
+	classFlags = L.hasClass ? L.classFlags : 0u;
+	pct = s.w.transPct;
+	return true;
+}
+
 void wwLookdevSetWeather( const QString & key )
 {
 	LdState & s = st();

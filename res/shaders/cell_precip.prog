@@ -1,0 +1,5 @@
+# lane WEATHERLOOK1 phase B: precipitation from the weather's .recx (src/gl/cellprecip.cpp; the field is
+# src/gl/precipmath.h). Points expanded to camera-facing quads in the cell view's linear frame.
+# No conditions: never picked for a shape; cellprecip.cpp selects it by name.
+
+shaders cell_precip.vert cell_precip.geom cell_precip.frag

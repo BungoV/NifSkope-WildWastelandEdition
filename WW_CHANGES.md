@@ -256,6 +256,37 @@
   new order, the old order with a stale row handle sampled, textures deleted while resident, and deletes with draws in
   flight -- GL errors 0, no crash. It does NOT reproduce D1; the reopen fix is reasoned, the live reopen is owed.
 
+## WEATHERLOOK1 phase B (2026-10-30): precipitation from the weather's .recx, with the phase A textures
+
+- **New row** Show > Improved Sky > Precipitation (`WW/CellPrecip`, pin `WW_CELL_PRECIP=0|1`, live), **ships off**. Off,
+  nothing of it runs (no GL call, the frame as before). Before this lane the cell view drew no precipitation at all.
+- **Source per weather**: its `.recx` block `precipitation` (a list of layers: type, rate or density, size, drawScale,
+  wind, translucency, spin, sway, texture, atlas; docs/RECX.md), else its own record (WTHR DATA class flags: Rainy -> a
+  rain layer, Snow -> a snow_fine layer). Types: rain, sleet, hail, snow_fine, snow_far_dot, snow_wet_clump,
+  snow_big_clump. The phase A atlases ship as the defaults (res/Data/Textures/WW/Precip/*_d.dds, BC7 sRGB; a .recx
+  texture is looked up loose in the .recx roots).
+- **The field** (src/gl/precipmath.h, the code the view draws with): fall speed per type and size (ATLAS73/GK49 rain and
+  sleet, KK01 hail, LH74 dry snow 0.8 D^0.16, LH74 rimed 0.79 D^0.27 for wet clumps), mass per type, density = rate x
+  277.78 / (m v) per m^3; a camera-centred box of world-anchored particles that wrap (count constant), the weather's wind
+  at the game bearing (the fog drift's 400 u/s x speed/255), a slow spin and flutter for snow. Near: true density, quads
+  flat-on to the camera, stretched over a 1/120 s shutter with coverage kept. Far (to 6 x the near box): thinned dots of
+  the atlas cell's mean colour (the 1-texel-a-cell mip), each standing for many. A weather change: the new weather's
+  layers at pct, the leaving weather's at 1 - pct (wwLookdevWeatherLeaving, new).
+- **Light**: res/shaders/cell_precip.* lights each flake with the volumetric particles' law (cell_volpart.glsl vpLight:
+  sun x cascades, every placed light x the air, GI + ambient, the air's phase), thin share = translucency (dry snow 0.6,
+  wet 0.3, rain 0.9, sleet 0.8, hail 0.5), so a flake in front of a lamp glows; then the air (wwFogFx); linear frame,
+  stencil 1 (bloom + tone map with the cell). None indoors. wwVolPartUniforms' medium half is now its own function
+  (wwVolPartMediumUniforms), same calls as before.
+- **Mip cap** (measured, texgate): the 4x2 atlases' shapes touch their cell border below 16 px a cell (hail below 64 px),
+  so near quads read at most mip 4 (hail 2), half a texel inset; the far dots read the 1-texel-a-cell mip's centre.
+- **Reds** `WW_CELL_PRECIP_RED=constdensity,nowrap,onespeed,nowind` (live). Harness clock pin `WW_CELL_PRECIP_TIME=<s>`.
+  Census: `precip: on, wind ... u/s, red N: <type>(<weather> from recx:<file>|record(flags), w, /m3, size, fall, near
+  box x count, far box x count thin, tex)`.
+- **Gates (offline)**: tests/precip/run.sh (green 0 of 58, incl. the prepared fast path = the slow path bit for bit;
+  reds 1/2/4/8 fail their own rules; one dense layer 3.5 ms CPU a frame); the shipped textures' header, bytes = phase A,
+  checks.json PASS, gutter per mip (texgate.py in the lane notes, 0 of 42); shader link sweep 396 + 264 LINK OK.
+  Owed: pictures (a Division-style blizzard, rain at a lamp) when bungo asks.
+
 ## RTXFIX1 (2026-10-30): the Ray-traced GI probes inside the frame (rounder, fogged, exposed); the atlas order's red
 
 - **Probes view** (bungo 10-29: "Could our probes have a rounder shape?", "fog", the spheres by the string lights and the

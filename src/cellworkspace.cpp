@@ -1272,6 +1272,7 @@ void CellWorkspacePanel::buildUi()
 		master( F, WwGroup::Sky );
 		look( WwLook::Ephemeris, tr( "Real sun and moon" ) );
 		look( WwLook::WeatherRecx, tr( "Weather .recx" ) );
+		look( WwLook::Precip, tr( "Precipitation" ) );	// lane WEATHERLOOK1 B
 		master( F, WwGroup::Water );
 		look( WwLook::WaterDepth, tr( "Depth colour" ) );
 		look( WwLook::WaterCaustics, tr( "Caustics" ) );
