@@ -29,6 +29,10 @@ void wwCloudVolSetVariety( int on );	//!< refused while WW_CLOUDVOL_VARIETY pins
 bool wwCloudVolVarietyPinned();
 //! the row on and the volume at Medium or up: readers of the density take the *_v.prog twins
 bool wwCloudVolVarietyOn();
+/*! lane CLOUD6d: one cloud profile set per weather (cloudmath.h lowTypeOf oneSet: the weather's type everywhere, no
+ *  towers beside puffs), WW_CLOUDVOL_PROFILESET, ON BY DEFAULT, live; =0 / off or WW_CLOUDVOL_RED=typemix = CLOUD5's
+ *  type swing (the red). Gate tests/spells/cloudprofile_check.py. */
+bool wwCloudVolProfileSet();
 
 /* lane CLOUDBAND1 (bungo 10-30 "the clouds have banding"): Cloud Accumulation, WW_CLOUDVOL_ACCUM (0/1, off/on), live;
  * ON BY DEFAULT since lane CLOUDBAND2 (=0 / off is the old path, the red; so is WW_CLOUDVOL_AMBDARK=0). On, the march takes blue noise step offsets (cloud_march_a / cloud_fly_a; the variety twins have them) and

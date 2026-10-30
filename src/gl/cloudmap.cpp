@@ -569,9 +569,10 @@ const WwCloudMap & wwCloudMapUpdate( Scene * scene )
 		paramsOf( cur, now, redMax, nullptr, wx.on ? &wx : nullptr, eye[2] );
 	}
 	{	// lane CLOUD5: the Low band's cloud type from the record's class (DATA flags, thunder), a .recx clouds.type wins
+		// lane CLOUD6d: one profile set per weather (spread 0) unless WW_CLOUDVOL_PROFILESET=0 / RED=typemix
 		unsigned flags = 0, thunder = 0;
 		wwLookdevWeatherClass( flags, thunder );
-		lowTypeOf( flags, thunder, wx.on ? wx.type : -1.0f, now[0].type, now[0].typeSpread );
+		lowTypeOf( flags, thunder, wx.on ? wx.type : -1.0f, now[0].type, now[0].typeSpread, wwCloudVolProfileSet() );
 	}
 
 	// the transition: a new weather starts from the parameters shown at the change

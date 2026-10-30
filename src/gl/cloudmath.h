@@ -94,8 +94,12 @@ constexpr unsigned kWxPleasant = 1, kWxCloudy = 2, kWxRainy = 4, kWxSnow = 8;
  * the sky (the weather noise moves it by +- spread), from the record's class. Ours (no shipped source gives this map):
  * fair or unflagged -> cumulus-ish 0.6 +- 0.2 (stratocumulus to congestus); cloudy 0.45; rainy 0.75 (congestus, deep
  * rain clouds); rainy with thunder 0.9 +- 0.25 (cumulonimbus towers); snow 0.3 (stratiform). The sheet (Fill) layers
- * still pull a texel toward stratus through the map's B channel. recxType >= 0 (a weather .recx clouds.type) wins. */
-inline void lowTypeOf( unsigned flags, unsigned thunder, float recxType, float & type, float & spread )
+ * still pull a texel toward stratus through the map's B channel. recxType >= 0 (a weather .recx clouds.type) wins.
+ * lane CLOUD6d: oneSet = ONE profile set per weather (WW_CLOUDVOL_PROFILESET, the default): the weather's type is
+ * the type everywhere in its sky, spread 0, so a storm draws one cumulonimbus family and a fair sky one cumulus family
+ * (RDR2: one height-LUT slice per weather, "slice determined by weather parameters", Bauer 2019 slide 16 + note 16).
+ * Size variety stays with the coverage swing. oneSet false = CLOUD5's +- spread (towers beside puffs), the red. */
+inline void lowTypeOf( unsigned flags, unsigned thunder, float recxType, float & type, float & spread, bool oneSet = false )
 {
 	type = 0.6f;
 	spread = 0.2f;
@@ -110,6 +114,8 @@ inline void lowTypeOf( unsigned flags, unsigned thunder, float recxType, float &
 	}
 	if ( recxType >= 0.0f )
 		type = std::clamp( recxType, 0.0f, 1.0f );
+	if ( oneSet )
+		spread = 0.0f;
 }
 
 /* the band parameters of one weather from its layers (role, cover); heights, density and tint are coverage-weighted
