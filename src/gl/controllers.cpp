@@ -1155,11 +1155,15 @@ bool PSysSimController::update( const NifModel * nif, const QModelIndex & index 
 			if ( iGObj.isValid() ) {
 				if ( Node * n = target->scene->getNode( nif, iGObj ) ) {
 					const Transform t = n->worldTrans();
+					g.obj = n;	// lane GLAREBLOW2: updateTime reads its frame each step
+					g.axisLocal = g.axis;
 					g.axis = t.rotation * g.axis;
 					g.origin = t.translation;
 					g.hasOrigin = true;
 				}
 			}
+			g.axisSetup = g.axis;
+			g.originSetup = g.origin;
 			gravities.append( g );
 		} else if ( mtype == QLatin1String( "NiPSysDragModifier" ) ) {
 			DragMod d;
@@ -1172,11 +1176,15 @@ bool PSysSimController::update( const NifModel * nif, const QModelIndex & index 
 			QModelIndex iDObj = nif->getBlockIndex( nif->getLink( iMod, "Drag Object" ) );
 			if ( iDObj.isValid() ) {
 				if ( Node * n = target->scene->getNode( nif, iDObj ) ) {
+					d.obj = n;	// lane GLAREBLOW2: updateTime reads its frame each step
+					d.axisLocal = d.axis;
 					d.axis = n->worldTrans().rotation * d.axis;
 					d.origin = n->worldTrans().translation;
 					d.hasOrigin = true;
 				}
 			}
+			d.axisSetup = d.axis;
+			d.originSetup = d.origin;
 			drags.append( d );
 		} else if ( mtype == QLatin1String( "NiPSysBombModifier" ) ) {
 			BombMod b;
@@ -1189,11 +1197,15 @@ bool PSysSimController::update( const NifModel * nif, const QModelIndex & index 
 			QModelIndex iBObj = nif->getBlockIndex( nif->getLink( iMod, "Bomb Object" ) );
 			if ( iBObj.isValid() ) {
 				if ( Node * n = target->scene->getNode( nif, iBObj ) ) {
+					b.obj = n;	// lane GLAREBLOW2: updateTime reads its frame each step
+					b.axisLocal = b.axis;
 					b.axis = n->worldTrans().rotation * b.axis;
 					b.origin = n->worldTrans().translation;
 					b.hasOrigin = true;
 				}
 			}
+			b.axisSetup = b.axis;
+			b.originSetup = b.origin;
 			bombs.append( b );
 		} else if ( mtype == QLatin1String( "BSPSysSimpleColorModifier" ) ) {
 			hasColorMod = true;
@@ -1730,6 +1742,28 @@ void PSysSimController::updateTime( float time )
 	Transform pw = target->worldTrans();
 	const Matrix psysFromWorld = pw.rotation.inverted();
 	const float psysScale = ( pw.scale != 0.0f ) ? pw.scale : 1.0f;
+
+	/* lane GLAREBLOW2: the gravity, drag and bomb objects' frames are read here, in the same frame as pw, every step.
+	 * update() reads them when the scene is made, before a cell copy of the model is placed, so in the cell view the
+	 * pull point stood the copy's whole placement away from its emitter (the system's own frame pw has it): the
+	 * dust devils' spherical gravity (FXBitsDebrisSpiral01) dragged their bits off in long pale streaks over Concord.
+	 * Red WW_CELL_PSYS_OBJ_RED=setup: the frames update() read, as before. */
+	WW_SWITCH_STATIC( bool, objSetupRed, wwEnv( "WW_CELL_PSYS_OBJ_RED" ).trimmed() == "setup" );
+	for ( GravityMod & g : gravities ) {
+		const bool live = g.obj && !objSetupRed;
+		g.axis = live ? g.obj->worldTrans().rotation * g.axisLocal : g.axisSetup;
+		g.origin = live ? g.obj->worldTrans().translation : g.originSetup;
+	}
+	for ( DragMod & d : drags ) {
+		const bool live = d.obj && !objSetupRed;
+		d.axis = live ? d.obj->worldTrans().rotation * d.axisLocal : d.axisSetup;
+		d.origin = live ? d.obj->worldTrans().translation : d.originSetup;
+	}
+	for ( BombMod & b : bombs ) {
+		const bool live = b.obj && !objSetupRed;
+		b.axis = live ? b.obj->worldTrans().rotation * b.axisLocal : b.axisSetup;
+		b.origin = live ? b.obj->worldTrans().translation : b.originSetup;
+	}
 
 	/* Every ACTIVE gravity, summed.
 	 *
