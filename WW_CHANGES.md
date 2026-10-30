@@ -1,5 +1,28 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## CLOUDBAND1 (2026-10-30): the volume clouds' diagonal banding; Cloud Accumulation (RDR2's temporal accumulation)
+
+- **What made the diagonal lines** (bungo 10-30, a cloud-edge crop: "the clouds have banding"; MEASURED offline,
+  tests/spells/cloudband_check.py gate D): the cloud march's per-pixel step offset. Off takes interleaved gradient noise
+  (IGN) plus a per-frame offset, in the 4x4 phase order of the stride-4 march, and keeps ONE march per history pixel, so
+  the history holds that offset pattern as a lattice (a ring-normalised FFT peak 72.6 at Medium, 349.5 at Ultra, against
+  a white-noise floor of 26.6 / 66.6; about 5 screen px at Ultra, the crop's stripes 4.6 px). Not FOGGLOW1's dither (its
+  hash: 19.8 against a floor of 61.3; in the crop the plain sky shows white grain, the stripes sit on the cloud only).
+- **Cloud Accumulation** (`WW_CLOUDVOL_ACCUM` 0/1, ships Off, live): the march takes blue noise offsets (EA's FAST sheet,
+  a new slice each 16-frame refresh; twins cloud_march_a / cloud_fly_a; the Cloud Variety twins already had them), and
+  cloud_resolve_a blends each pixel's fresh march into its history, clamped to the box of the fresh march and its 8
+  neighbours tightened to their mean +- one deviation (Bauer 2019, RDR2: 3x3 clamp, then accumulate; Salvi 2016 variance
+  clipping). Weight 1, 1/2, 1/3 over the first refresh cycles of a history, then 1/4 (cloudvolmath.h accumAlpha). A
+  harness run (every pixel marched each frame) takes each march whole. Notes line: `,accum=<weight>`. Off draws
+  cloud_march / cloud_fly / cloud_resolve unchanged (driver binaries equal but the stamp and the source hash).
+- Reds (`WW_CLOUDVOL_RED`): `noaccum` (weight 1), `noclamp`, `ign` (the accum march keeps IGN).
+- Gates (offline, the real programs through the driver, the live view played frame by frame): L lattice: accum 17.4
+  (Medium) / 27.8 (Ultra) under the bar 1.5 x floor, today 72.6 / 349.5 over it, red ign 78.9 / 395.0 FAIL; M
+  converge: rms error vs the 64-jitter mean 0.37 x today's (bar 0.6), red noaccum 1.00 FAIL; G ghost (a moving camera,
+  the sky clears at frame 40): accum 28.97 vs today 28.90 levels 16 frames later (bar today + 2), red noclamp 44.90
+  FAIL; F flicker (CLOUD2's gate D on the accum arm) 0.063 (bar 0.08). Stage table: WW_CLOUDVOL_ACCUM at stage 0
+  (tests/cloudband/stage_check.py; red = the base table, name missing). Batch: tests/cloudband/run.sh.
+
 ## RTXFIX1 (2026-10-30): the Ray-traced GI probes inside the frame (rounder, fogged, exposed); the atlas order's red
 
 - **Probes view** (bungo 10-29: "Could our probes have a rounder shape?", "fog", the spheres by the string lights and the

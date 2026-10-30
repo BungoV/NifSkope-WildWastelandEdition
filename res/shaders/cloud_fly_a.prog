@@ -1,0 +1,3 @@
+# lane CLOUDBAND1: the volume clouds march with the fly-through grid and Cloud Accumulation (src/gl/cloudvol.cpp).
+
+shaders cell_ao.vert cloud_fly_a.frag

@@ -30,6 +30,12 @@ bool wwCloudVolVarietyPinned();
 //! the row on and the volume at Medium or up: readers of the density take the *_v.prog twins
 bool wwCloudVolVarietyOn();
 
+/* lane CLOUDBAND1 (bungo 10-30 "the clouds have banding"): Cloud Accumulation, WW_CLOUDVOL_ACCUM (0/1, off/on), ships
+ * Off, live. On, the march takes blue noise step offsets (cloud_march_a / cloud_fly_a; the variety twins have them) and
+ * cloud_resolve_a blends each fresh march into the history clamped to the fresh 3x3 box (RDR2, Bauer 2019): weight 1, 1/2,
+ * 1/3, then 1/4 per refresh cycle (cloudvolmath.h accumAlpha). Off draws cloud_march / cloud_resolve unchanged. Reds in
+ * WW_CLOUDVOL_RED: noaccum (weight 1), noclamp, ign (IGN offsets). Gates: tests/spells/cloudband_check.py. */
+
 struct WwCloudVolView
 {
 	float exposure = 1.0f;

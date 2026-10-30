@@ -260,6 +260,16 @@ inline float windKm( double secs )
 
 /*! lane CLOUD2C: the offset wwCloudVolBindDensity hands a reader: the one the last draw used (its clock), so a cloud
  *  shadow moves with the drawn clouds. red = the old bind (0: shadows stood still while the clouds drifted). */
+/* lane CLOUDBAND1: Cloud Accumulation's weight of a pixel's fresh march (cloud_resolve_a.frag cvAccAlpha) in refresh
+ * cycle `cycles` since its history began (a cycle = the 16 frames of the stride-4 phase order): 1, 1/2, 1/3, then
+ * 1/kAccumN (a plain mean of the first kAccumN marches of a pixel, then an exponential one of about the last kAccumN).
+ * A fixed 1/4 from the first frame kept 0.75^n of the first frame's upsampled march (a startup pattern, cloudband_check). */
+constexpr int kAccumN = 4;
+inline float accumAlpha( long long cycles )
+{
+	return 1.0f / float( std::min( std::max( cycles, 0LL ) + 1, static_cast<long long>( kAccumN ) ) );
+}
+
 inline float readerWindKm( double drawnSecs, bool red )
 {
 	return red ? 0.0f : windKm( drawnSecs );

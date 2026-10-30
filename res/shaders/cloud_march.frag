@@ -49,6 +49,9 @@ uniform vec4 cvSceneZ;	// the projection's [2][2], [3][2]; km per view unit; 1 =
 uniform float cvTopOn;	// lane CLOUD2C: the light the cloud below reflects back up (0 = the red notop)
 #ifdef WW_CLOUD_VARIETY
 uniform float cvAmbKm;	// lane CLOUD5: the span of the ambient's height ramp (the bands without the towers), km
+#endif
+// lane CLOUDBAND1: the *_a.prog twins (Cloud Accumulation, WW_CLOUDVOL_ACCUM) take the same blue noise offsets
+#if defined( WW_CLOUD_VARIETY ) || defined( WW_CLOUD_ACCUM )
 uniform sampler2D cvBlue;	// lane CLOUD5 round 2: EA's FAST blue noise, 64 slices of 128 x 128 stacked in y (R used)
 uniform int cvBlueSlice;	// this 16-frame refresh cycle's slice; -1 = the red ign (CLOUD2's IGN, the stripes)
 #endif
@@ -65,7 +68,7 @@ float cvDens( vec3 p )
 	return cloudDensity( p );
 }
 
-#ifdef WW_CLOUD_VARIETY
+#if defined( WW_CLOUD_VARIETY ) || defined( WW_CLOUD_ACCUM )
 /* lane CLOUD5 round 2: the march's per-pixel step offset. IGN is a gradient whose lines of equal value run at a slope of
  * -0.0671 / 0.00584 (near vertical), and nothing averages it (the resolve keeps one march a history pixel), so a zoomed,
  * smooth cloud wore fine vertical stripes (bungo 10-29 "banding"; cloudvar_check gate B, MEASURED). One blue noise slice a
@@ -264,7 +267,7 @@ void main()
 	if ( hi > lo && t0 >= 0.0 && t1 > t0 && t0 < tGround ) {
 #ifdef WW_CLOUDFLY
 		float pixKm = 2.0 / ( cvProj.y * cvHistSize.y );
-#ifdef WW_CLOUD_VARIETY
+#if defined( WW_CLOUD_VARIETY ) || defined( WW_CLOUD_ACCUM )
 		float j = cvJitter( q );
 #else
 		float j = fract( 52.9829189 * fract( dot( q, vec2( 0.06711056, 0.00583715 ) ) ) + cvFrame * 0.618034 );
@@ -294,7 +297,7 @@ void main()
 #else
 		float dt = ( t1 - t0 ) / float( cvSteps );
 		float pixKm = 2.0 / ( cvProj.y * cvHistSize.y );	// one history pixel's angle (the light taps share it)
-#ifdef WW_CLOUD_VARIETY
+#if defined( WW_CLOUD_VARIETY ) || defined( WW_CLOUD_ACCUM )
 		float j = cvJitter( q );
 #else
 		float j = fract( 52.9829189 * fract( dot( q, vec2( 0.06711056, 0.00583715 ) ) ) + cvFrame * 0.618034 );
