@@ -41,6 +41,10 @@ Gates (bars written before the first green run, CLOUDBAND1 10-30):
               <= 1.5 x today) let the red noclamp pass (15.03 vs bar 15.31; green 13.96), and a clearing to 0.05 still
               held thin cloud (mean opacity 0.5 on the changed px) in most 3x3 boxes: both kept as INFO. The box was
               tightened (variance clipping) after the same runs.
+              Lane CLOUD6g: Move Clamp clamps every reprojected pixel under the moving camera to this frame's march
+              box, so the moving clearing reads 0.00 with or without the history clamp and the red noclamp passed it
+              (0.00). The same clearing is judged with the camera STILL at the last frame's view too (same bar):
+              there only the fresh pixels' clamp (and Change Clamp inside it) removes the old field.
   F flicker   CLOUD2's gate D on the accum arm (its path, its metric, its bar 0.08): the history's frame-to-frame change
               minus the clouds' own, frames 17..47.
   Q dither    (lane CLOUDBAND2, LATE ITEM 2's first suspect) FOGGLOW1's TPDF dither added at the 8-bit write over the
@@ -81,12 +85,33 @@ if _r.returncode:
 # lane CLOUDBAND2: the dump also prints what cloudvol.cpp turns on for this env (cloudvolmath.h defaultOnSwitch); the red
 # off hands it WW_CLOUDVOL_ACCUM=0, the old path
 DENV = dict(V['ENV'], WW_CLOUDVOL_ACCUM='0') if red == 'off' else V['ENV']
+# lane CLOUD6g: its reds hand the dump the old path of Move Clamp / Change Clamp (tests/spells/cloudstale_check.py)
+if red == 'staleread':
+    DENV = dict(DENV, WW_CLOUDVOL_MOVECLAMP='0')
+if red == 'looseclamp':
+    DENV = dict(DENV, WW_CLOUDVOL_CHANGECLAMP='0')
 _out = subprocess.run([DUMPB], env=DENV, capture_output=True, text=True, check=True).stdout.split('\n')
 ACC = {int(l.split()[1]): float(l.split()[2]) for l in _out if l.startswith('acc ')}
 _dl = [l.split() for l in _out if l.startswith('default ')][0]
 DEF_ACCUM = int(_dl[2]) == 1
 print('DEFAULT      INFO  cloudvol.cpp draws Cloud Accumulation %s for this env (dump: %s)'
       % ('ON' if DEF_ACCUM else 'OFF (the old path)', ' '.join(_dl)), flush=True)
+# lane CLOUD6g: Move Clamp + Change Clamp as cloudvol.cpp sets them for this env; only the "default" arms draw them (the
+# "today" / "accum" arms stay the paths before CLOUD6g: an unset uniform is 0 = the old read)
+_gl = [l.split() for l in _out if l.startswith('cloud6g ')][0]
+DEF_MOVE, DEF_RESET, DEF_RESETSD = float(int(_gl[2])), float(_gl[6]) if int(_gl[4]) else 0.0, float(_gl[8])
+print('DEFAULT      INFO  Move Clamp %s, Change Clamp %s (dump: %s)' % ('ON' if DEF_MOVE else 'OFF', DEF_RESET or 'OFF',
+                                                                     ' '.join(_gl)), flush=True)
+
+
+def new_uni(arm, accum):
+    """lane CLOUD6g: the resolve uniforms of the shipped arms (cloudvol.cpp resolvePass)"""
+    on = arm.startswith('default')   # the other arms set 0 explicitly: a program keeps its uniforms between draws
+    u = {'cvMoveClamp': (DEF_MOVE if on else 0.0,)}
+    if accum:
+        u['cvAccReset'] = (DEF_RESET if on else 0.0,)
+        u['cvAccResetSd'] = (DEF_RESETSD,)
+    return u
 
 
 def alpha(fr):
@@ -190,6 +215,7 @@ def live(arm, tier, nframes, path, field=None, keep=None):
         if accum:
             ru['cvAccAlpha'] = (alpha(fr),)
             ru['cvAccClamp'] = (0.0 if red == 'noclamp' else 1.0,)
+        ru.update(new_uni(arm, accum))   # lane CLOUD6g
         run(pr, hist[cur], ru, [('cvMarch', 0x0DE1, march.col), ('cvMarchDepth', 0x0DE1, march.dep),
                                 ('cvPrev', 0x0DE1, hist[1 - cur].col), ('cvPrevDepth', 0x0DE1, hist[1 - cur].dep)])
         if keep:
@@ -292,7 +318,7 @@ MEMO = {}
 
 def measure(arm, tier):
     """memoised by (programs, tier) (lane CLOUDBAND2: gate Q reuses L's runs; a run is deterministic)"""
-    mk = (ARMS[arm], tier)
+    mk = (ARMS[arm], tier, arm.startswith('default'))   # lane CLOUD6g: the default arms' uniforms differ, same programs
     if mk not in MEMO:
         MEMO[mk] = measure_(arm, tier)
     return MEMO[mk]
@@ -418,6 +444,16 @@ if 'G' in only and P['cloud_resolve_a.prog'] is not None:
         if case == 'clearing':
             gate('G ghost', err['default'] <= err['today'] + 2.0, msg + ' (bar accum <= today + 2 levels)%s'
                  % (' (red %s)' % red if red else ''))
+            # lane CLOUD6g: the same clearing with the camera still (Move Clamp does not act; the history clamp must)
+            def spath(fr):
+                return path(JUMP + AFTER - 1)
+            es = {}
+            for arm in ('today', 'default'):
+                L = live(arm, tier, JUMP + AFTER, spath, field)
+                es[arm] = float(np.abs(display(L, expo) - display(new, expo))[changed].mean())
+            gate('G ghost', es['default'] <= es['today'] + 2.0, 'clearing, camera still: %d frames after it mean |E| vs '
+                 'the new field: accum %.2f, today %.2f levels (bar accum <= today + 2 levels)%s'
+                 % (AFTER, es['default'], es['today'], ' (red %s)' % red if red else ''))
         else:
             print('G ghost      INFO  ' + msg + ' (a 3x3 box of march texels 4 history px apart holds part of a textured old '
                   'field: the clamp rejects what no neighbour has)', flush=True)
@@ -523,6 +559,7 @@ if 'F' in only and P['cloud_resolve_a.prog'] is not None:
               'cvAccAlpha': (alpha(fr),), 'cvAccClamp': (0.0 if red == 'noclamp' else 1.0,)}
         p0 = prev or (cam, base['cvProj'], pos)
         ru.update({'cvPrevCam': p0[0], 'cvPrevProj': p0[1], 'cvPrevCamKm': p0[2]})
+        ru.update(new_uni('default', DEF_ACCUM))   # lane CLOUD6g
         run(P[ARMS['default'][1]], hist[cur], ru, [('cvMarch', 0x0DE1, march.col), ('cvMarchDepth', 0x0DE1, march.dep),
                                                       ('cvPrev', 0x0DE1, hist[1 - cur].col), ('cvPrevDepth', 0x0DE1, hist[1 - cur].dep)])
         if fr >= 16:

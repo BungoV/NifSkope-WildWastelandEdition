@@ -270,6 +270,15 @@ inline float accumAlpha( long long cycles )
 	return 1.0f / float( std::min( std::max( cycles, 0LL ) + 1, static_cast<long long>( kAccumN ) ) );
 }
 
+/* lane CLOUD6g: Change Clamp's threshold (cloud_resolve_a.frag cvAccReset, cvAccResetSd): the mean transmittance of the
+ * 9 fresh march texels against the history at their places; a difference past te = kChangeReset + kChangeResetSd x
+ * min( deviation of the fresh 9, of the history 9 ) / 3 starts the pixel's weight rising, at 2 te it is 1 (the
+ * accumulation restarts from the fresh march). Tuned offline (tests/spells/cloudstale_check.py, notes fix1030c/cloud6g):
+ * a fixed 0.0125 held the Off sky's bars but reset on the Variety sky's noise (CLOUDBAND1 gate M 0.87, bar 0.6); a
+ * threshold on the fresh deviation alone missed the 3 km shift (5.65 levels, bar 5.50). The red (0) = CLOUDBAND1's clamp. */
+constexpr float kChangeReset = 0.0075f;
+constexpr float kChangeResetSd = 1.5f;
+
 /* lane CLOUDBAND2 (manager 10-30: bungo's rule, a code choice is never handed to him): Cloud Accumulation
  * (WW_CLOUDVOL_ACCUM) and the ambient through the column above (WW_CLOUDVOL_AMBDARK) are the DEFAULT. A switch's value
  * (trimmed, lower case) turns it off only as "0", "off", "false" or "no" (the old path, kept as the red); unset, empty
