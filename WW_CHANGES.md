@@ -1,5 +1,29 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## CLOUDBAND2 (2026-10-30, CODE1030): Cloud Accumulation and the column ambient are the default
+
+- bungo's rule "no fix-only toggles, a code choice is never handed to him": CLOUDBAND1's two switches, which shipped
+  Off, are now ON BY DEFAULT. **WW_CLOUDVOL_ACCUM** (the banding fix: blue noise step offsets and each fresh march
+  blended into the clamped history, cloud_march_a / cloud_fly_a / cloud_resolve_a) and **WW_CLOUDVOL_AMBDARK** (the
+  sky's ambient through the cloud column above, RDR2's darker deck undersides). Both are read in cloudvol.cpp cs()
+  through one rule, src/gl/cloudvolmath.h `defaultOnSwitch`: unset or any value is on; `0`, `off`, `false`, `no` (trimmed,
+  any case) is the old path, kept as the red. A harness run takes the default too. Both stay live (stage 0; cs()
+  re-reads on any WW_CLOUDVOL* set); the stage table only moved line numbers. The notes line echoes `,RED=accumoff` /
+  `,RED=ambdarkoff` when a switch is off (the On echoes `,accum=...` / `,ambdark=column` are unchanged).
+- Gates (offline, no NifSkope; `bash tests/cloudband/run.sh <scratch>`, a python with numpy first on PATH): the
+  checkers now judge the arm cloudvol.cpp draws for the env (tests/cloudband/cloudband_dump.cpp prints `default accum
+  a ambdark b` from the same header). Green: lattice Medium 17.4 / Ultra 27.8 (bars 39.9 / 99.9), convergence 0.369 /
+  0.357 / 0.373 / 0.383 (bar 0.6), ghost 28.97 vs 28.90 (+2), flicker 0.0627 (0.08), ambient vs Monte Carlo 0.835 /
+  0.872 / 1.020 (0.67 .. 1.5). Red **off** (WW_CLOUDVOL_ACCUM=0, the old default): lattice 72.6 / 349.5 and convergence
+  1.000 FAIL; red off for the ambient (WW_CLOUDVOL_AMBDARK=0): tau 40 ratio 7.946 FAIL; the old reds (ign, noaccum,
+  noclamp, flatamb) still FAIL. tests/cloudband/default_check.py: the rule over 11 values + cs() reads both through it;
+  red = main e8fad765's cloudvol.cpp (the `== "1" || == "on"` test, unset = Off) FAILs.
+- FOGGLOW1's dither as a banding suspect (gate Q, tests/spells/cloudband_check.py): the default clouds composited at
+  screen px (bilinear), the TPDF dither added and rounded to 8 bits: lattice 20.0 Medium / 19.7 Ultra vs the dither
+  field alone 19.9, bar 1.5 x the screen white floor 22.3. No diagonal period is left for the dither to explain, and
+  without it the 8-bit rounding reads 29.9 / 41.5: the dither lowers it. Red bayerdither (an ordered 4x4 dither in its
+  place): 3014 / 2784 FAIL. Nothing to fix in FOGGLOW1.
+
 ## CAMGATE3 (2026-10-30, FIX1030B round 2): an interior's camera bounds are a set of boxes built from what is drawn
 
 - CAMGATE2 judged an interior's camera by ONE axis box of the placements' ORIGINS + 512. Measured offline over all

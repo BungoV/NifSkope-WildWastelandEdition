@@ -2,7 +2,8 @@
 the real cloud_march(_v).prog, no NifSkope; CLOUD2's helpers and Monte Carlo from cloudvol_check (imported, none of its gates
 run), CLOUD5's variety helpers from cloudvar_check.
 
-    python -I tests/spells/cloudamb_check.py <scratch dir> [--red flatamb] [--only AE]
+    python -I tests/spells/cloudamb_check.py <scratch dir> [--red flatamb|off] [--only AE]
+(lane CLOUDBAND2: On is the default; the gate judges the arm cloudvol.cpp draws for this env, red off = the old ramp.)
 
 Off (today): the march lights each sample with the sky's mean radiance x a height ramp 0.5 .. 1 over the band, so a deck's
 base gets half the open sky's light however thick the deck is (a dense deck's underside stays sky-blue). On
@@ -35,7 +36,23 @@ sys.argv = [os.path.join(HERE, 'cloudvar_check.py'), scratch, '--only', 'Z']
 V = runpy.run_path(os.path.join(HERE, 'cloudvar_check.py'), run_name='cloudamb_helpers')
 np, K = V['np'], V['K']
 S, C, g, gl = K.S, K.C, K.g, K.gl
-ON = 0.0 if red == 'flatamb' else 1.0
+# lane CLOUDBAND2: the column ambient is the DEFAULT. The arm judged is what cloudvol.cpp turns on for this env
+# (tests/cloudband/cloudband_dump.cpp's "default ... ambdark" line, cloudvolmath.h defaultOnSwitch); the red off hands
+# the dump WW_CLOUDVOL_AMBDARK=0 (the old ramp), the red flatamb forces the ramp in the shader. Both must FAIL A.
+import subprocess   # noqa: E402
+DUMPB = os.path.join(scratch, 'cloudband_dump.exe')
+_r = subprocess.run(['C:/msys64/ucrt64/bin/g++.exe', '-O2', '-std=c++17', '-I', os.path.join(TREE, 'src'),
+                     os.path.join(TREE, 'tests', 'cloudband', 'cloudband_dump.cpp'), '-o', DUMPB], env=V['ENV'],
+                    capture_output=True, text=True)
+if _r.returncode:
+    raise SystemExit('BUILD FAIL ' + _r.stderr[-2000:])
+_dl = [l.split() for l in subprocess.run([DUMPB], env=dict(V['ENV'], WW_CLOUDVOL_AMBDARK='0') if red == 'off' else V['ENV'],
+                                         capture_output=True, text=True, check=True).stdout.split('\n')
+       if l.startswith('default ')][0]
+DEF_AMB = int(_dl[4]) == 1
+print('DEFAULT      INFO  cloudvol.cpp draws the column ambient %s for this env (dump: %s)'
+      % ('ON' if DEF_AMB else 'OFF (the old ramp)', ' '.join(_dl)), flush=True)
+ON = 0.0 if red == 'flatamb' or not DEF_AMB else 1.0
 results = []
 
 
@@ -105,7 +122,7 @@ if 'A' in only:
                 ok &= not (0.67 <= ro <= 1.5)   # the Off ramp must fail the thick deck, else the gate cannot tell
             rows.append('tau %g %s: on %.4g off %.4g vs MC %.4g (ratio on %.3f, off %.3f)' % (tau, name, got, off, ref, r, ro))
     gate('A ambient', ok, '; '.join(rows) + ' (bar on 0.67 .. 1.5 x MC at every tau; off must fail at tau 40)%s'
-         % (' (red flatamb)' if red else ''))
+         % (' (red %s)' % red if red else ''))
 
 if 'E' in only:
     q = ctypes.c_uint()

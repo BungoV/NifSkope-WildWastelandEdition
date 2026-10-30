@@ -4,7 +4,7 @@ driver, no NifSkope. The live view is played frame by frame as cloudvol.cpp driv
 order, cvFrame = frame % 64, the blue noise slice = frame / 16), through the REAL cloud_march*.prog and cloud_resolve*.prog.
 CLOUD2's helpers come from cloudvol_check, CLOUD5's variety helpers from cloudvar_check (imported, none of their gates run).
 
-    python -I tests/spells/cloudband_check.py <scratch dir> [--red noclamp|ign|noaccum] [--only DLMGF]
+    python -I tests/spells/cloudband_check.py <scratch dir> [--red noclamp|ign|noaccum|off|bayerdither] [--only DLMGQF]
 
 Arms: today  = cloud_march.prog + cloud_resolve.prog (Off: IGN step offsets, one march a history pixel)
       accum  = cloud_march_a.prog + cloud_resolve_a.prog (WW_CLOUDVOL_ACCUM=1: blue noise offsets, one slice a refresh
@@ -43,6 +43,11 @@ Gates (bars written before the first green run, CLOUDBAND1 10-30):
               tightened (variance clipping) after the same runs.
   F flicker   CLOUD2's gate D on the accum arm (its path, its metric, its bar 0.08): the history's frame-to-frame change
               minus the clouds' own, frames 17..47.
+  Q dither    (lane CLOUDBAND2, LATE ITEM 2's first suspect) FOGGLOW1's TPDF dither added at the 8-bit write over the
+              default arm, at screen px: lattice <= 1.5 x the screen floor; red bayerdither (an ordered 4x4 dither) fails.
+Lane CLOUDBAND2 (Cloud Accumulation is the DEFAULT): the gates judge the "default" arms = the programs cloudvol.cpp
+draws for this env (cloudband_dump's "default accum" line, cloudvolmath.h defaultOnSwitch); the "today" arms stay the
+old path. Red off: the dump gets WW_CLOUDVOL_ACCUM=0, the default arm becomes the old path and L + M must FAIL.
 Exit 0 only when every gate run passes.
 """
 import ctypes, math, os, runpy, sys
@@ -52,7 +57,7 @@ TREE = os.path.dirname(os.path.dirname(HERE))
 args = sys.argv[1:]
 scratch = args[0] if args and not args[0].startswith('--') else os.path.join(TREE, '..', 'cloudband_scratch')
 red = args[args.index('--red') + 1] if '--red' in args else ''
-only = set(args[args.index('--only') + 1]) if '--only' in args else set('DLMGF')
+only = set(args[args.index('--only') + 1]) if '--only' in args else set('DLMGQF')
 os.makedirs(scratch, exist_ok=True)
 
 # CLOUD5's helpers (and through them CLOUD2's): cloudvar_check run with a gate letter it does not have runs none
@@ -73,8 +78,15 @@ _r = subprocess.run(['C:/msys64/ucrt64/bin/g++.exe', '-O2', '-std=c++17', '-I', 
                     capture_output=True, text=True)
 if _r.returncode:
     raise SystemExit('BUILD FAIL ' + _r.stderr[-2000:])
-ACC = {int(l.split()[1]): float(l.split()[2]) for l in subprocess.run([DUMPB], env=V['ENV'], capture_output=True, text=True,
-                                                                        check=True).stdout.split('\n') if l.startswith('acc ')}
+# lane CLOUDBAND2: the dump also prints what cloudvol.cpp turns on for this env (cloudvolmath.h defaultOnSwitch); the red
+# off hands it WW_CLOUDVOL_ACCUM=0, the old path
+DENV = dict(V['ENV'], WW_CLOUDVOL_ACCUM='0') if red == 'off' else V['ENV']
+_out = subprocess.run([DUMPB], env=DENV, capture_output=True, text=True, check=True).stdout.split('\n')
+ACC = {int(l.split()[1]): float(l.split()[2]) for l in _out if l.startswith('acc ')}
+_dl = [l.split() for l in _out if l.startswith('default ')][0]
+DEF_ACCUM = int(_dl[2]) == 1
+print('DEFAULT      INFO  cloudvol.cpp draws Cloud Accumulation %s for this env (dump: %s)'
+      % ('ON' if DEF_ACCUM else 'OFF (the old path)', ' '.join(_dl)), flush=True)
 
 
 def alpha(fr):
@@ -100,6 +112,11 @@ P = {n: prog(n) for n in ('cloud_march.prog', 'cloud_resolve.prog', 'cloud_march
                            'cloud_resolve_a.prog', 'cloud_fly_a.prog')}
 ARMS = {'today': ('cloud_march.prog', 'cloud_resolve.prog', False), 'accum': ('cloud_march_a.prog', 'cloud_resolve_a.prog', False),
         'today_v': ('cloud_march_v.prog', 'cloud_resolve.prog', True), 'accum_v': ('cloud_march_v.prog', 'cloud_resolve_a.prog', True)}
+# lane CLOUDBAND2: the gates' "default" arms are the programs cloudvol.cpp draws by default (the dump's line): the accum
+# twins since CLOUDBAND2; the red off (WW_CLOUDVOL_ACCUM=0) gives the old programs, which must FAIL L and M. The "today"
+# arms stay the old path (the comparison base: today = main before CLOUDBAND2's default).
+ARMS['default'] = ARMS['accum'] if DEF_ACCUM else ARMS['today']
+ARMS['default_v'] = ARMS['accum_v'] if DEF_ACCUM else ARMS['today_v']
 results = []
 
 
@@ -270,9 +287,18 @@ def still(fr):
 
 
 CACHE = {}
+MEMO = {}
 
 
 def measure(arm, tier):
+    """memoised by (programs, tier) (lane CLOUDBAND2: gate Q reuses L's runs; a run is deterministic)"""
+    mk = (ARMS[arm], tier)
+    if mk not in MEMO:
+        MEMO[mk] = measure_(arm, tier)
+    return MEMO[mk]
+
+
+def measure_(arm, tier):
     var = ARMS[arm][2]
     key = (var, tier)
     if key not in CACHE:
@@ -346,7 +372,7 @@ if 'D' in only:
 # ---- L + M: the lattice and the convergence ----------------------------------------------------------------------------
 if ('L' in only or 'M' in only) and P['cloud_resolve_a.prog'] is not None:
     for tier in ('medium', 'ultra'):
-        for base, acc in (('today', 'accum'), ('today_v', 'accum_v')):
+        for base, acc in (('today', 'default'), ('today_v', 'default_v')):
             t = measure(base, tier)
             a = measure(acc, tier)
             div = TIERS[tier][0]
@@ -382,19 +408,99 @@ if 'G' in only and P['cloud_resolve_a.prog'] is not None:
         new = reference('today', tier, cam, pos, n=64, cov=cov1, wind=wind1)
         changed = np.abs(display(new, expo) - display(old, expo)) > 8.0
         err = {}
-        for arm in ('today', 'accum'):
+        for arm in ('today', 'default'):
             L = live(arm, tier, JUMP + AFTER, path, field)
             err[arm] = float(np.abs(display(L, expo) - display(new, expo))[changed].mean())
             png(os.path.join(scratch, 'ghost_%s_%s.png' % (case, arm)), display(L, expo))
         msg = ('%s: %d px changed by the jump (mean %.1f levels); %d frames after it mean |E| vs the new field: accum %.2f, '
                'today %.2f levels' % (case, int(changed.sum()), float(np.abs(display(new, expo) - display(old, expo))[changed].mean()),
-                                      AFTER, err['accum'], err['today']))
+                                      AFTER, err['default'], err['today']))
         if case == 'clearing':
-            gate('G ghost', err['accum'] <= err['today'] + 2.0, msg + ' (bar accum <= today + 2 levels)%s'
+            gate('G ghost', err['default'] <= err['today'] + 2.0, msg + ' (bar accum <= today + 2 levels)%s'
                  % (' (red %s)' % red if red else ''))
         else:
             print('G ghost      INFO  ' + msg + ' (a 3x3 box of march texels 4 history px apart holds part of a textured old '
                   'field: the clamp rejects what no neighbour has)', flush=True)
+
+# ---- Q: FOGGLOW1's dither on the default (accumulated) clouds, at screen res (lane CLOUDBAND2) ---------------------------
+def dither_hash(px, py, s):
+    """wwDitherHash (res/shaders/ww_dither.glsl), uint32 arithmetic (gate D's twin, at module level)"""
+    M32 = np.uint32(0xFFFFFFFF)
+    with np.errstate(over='ignore'):
+        h = (px * np.uint32(1664525) + py * np.uint32(1013904223) + np.uint32(s) * np.uint32(2654435769)) & M32
+        h ^= h >> np.uint32(16)
+        h = (h * np.uint32(2246822519)) & M32
+        h ^= h >> np.uint32(13)
+        h = (h * np.uint32(3266489917)) & M32
+        h ^= h >> np.uint32(16)
+    return (h >> np.uint32(8)).astype(np.float64) / 16777216.0
+
+
+def upsample(a, w, h):
+    """the composite's bilinear read of the history (cloud_composite.frag texture( cvHist, uv )) at w x h screen px"""
+    ah, aw = a.shape
+    x = np.clip((np.arange(w) + 0.5) * aw / w - 0.5, 0.0, aw - 1.0)
+    y = np.clip((np.arange(h) + 0.5) * ah / h - 0.5, 0.0, ah - 1.0)
+    x0, y0 = np.floor(x).astype(int), np.floor(y).astype(int)
+    x1, y1 = np.minimum(x0 + 1, aw - 1), np.minimum(y0 + 1, ah - 1)
+    fx, fy = (x - x0)[None, :], (y - y0)[:, None]
+    top = a[y0][:, x0] * (1 - fx) + a[y0][:, x1] * fx
+    bot = a[y1][:, x0] * (1 - fx) + a[y1][:, x1] * fx
+    return top * (1 - fy) + bot * fy
+
+
+if 'Q' in only:
+    """LATE ITEM 2's first banding suspect: FOGGLOW1's TPDF dither (ww_dither.glsl wwDither8, added at the 8-bit write in
+    cell_hdr.frag / taa2.frag / game_taa.frag). Bars written before the first run (CLOUDBAND2 10-30): the default arm's
+    live history (gate L's run) composited at screen res (bilinear), the dither added (+-1 level TPDF, faded at 0 and 255
+    as wwDither8, seed 79 = the frame index) and rounded to 8 bits; E = that minus the reference (float, no dither).
+    PASS iff its lattice <= 1.5 x the screen floor. Red bayerdither: a 4x4 ordered dither of the same amplitude (a
+    lattice) in its place must FAIL. INFO: the same without the dither, the today arm through the dither (the measure
+    still sees the old lattice), the dither field alone.
+    Amended after the first run (default arm only, no red run yet): the floor was 16 white HISTORY fields through the
+    same bilinear upsample; the upsample's falling spectrum put it at 28454.8 (Medium) / 4084.4 (Ultra), a bar nothing
+    could fail. The floor is now 16 white fields at SCREEN px (the dither's domain, as gate D); the bar (1.5 x) unchanged.
+    The upsampled floor stays an INFO number."""
+    SEED = 79
+    for tier in ('medium', 'ultra'):
+        div = TIERS[tier][0]
+        res = {}
+        for arm in ('default', 'today'):
+            pk, fl, rms, nw, npx, E, L, ref, expo = measure(arm, tier)
+            dL, dR = display(L, expo), display(ref, expo)
+            uL, uR = upsample(dL, SW, SH), upsample(dR, SW, SH)
+            er = CACHE[(ARMS[arm][2], tier)][2]
+            mS = upsample(er.astype(np.float64), SW, SH) > 0.999
+            wins = windows(mS)
+            if len(wins) > 48:   # evenly thinned: the ring measure costs ~10 ms a window
+                wins = [wins[i] for i in np.linspace(0, len(wins) - 1, 48).astype(int)]
+            yy, xx = np.mgrid[0:SH, 0:SW].astype(np.uint32)
+            if red == 'bayerdither':
+                B4 = np.array([[0, 8, 2, 10], [12, 4, 14, 6], [3, 11, 1, 9], [15, 7, 13, 5]], np.float64)
+                n = ((B4[yy % 4, xx % 4] + 0.5) / 16.0 - 0.5) * 2.0
+            else:
+                n = dither_hash(xx, yy, 2 * SEED) + dither_hash(xx, yy, 2 * SEED + 1) - 1.0
+            wfade = np.clip(np.minimum(uL, 255.0 - uL), 0.0, 1.0)
+            Ed = np.round(uL + n * wfade) - uR
+            Eq = np.round(uL) - uR
+            if 'flo' not in res:   # white fields at SCREEN px (the dither's own domain; see the amendment above)
+                rng = np.random.default_rng(2030)
+                res['flo'] = max(ring_peak(rng.standard_normal(mS.shape), mS, wins)[0] for _ in range(16))
+                res['floup'] = max(ring_peak(upsample(rng.standard_normal(dL.shape), SW, SH), mS, wins)[0] for _ in range(4))
+            res[arm] = (ring_peak(Ed, mS, wins), ring_peak(Eq, mS, wins), len(wins))
+            if arm == 'default':
+                res['field'] = ring_peak(n, mS, wins)
+                png(os.path.join(scratch, 'q_%s_%s_Ed.png' % (arm, tier)), 128 + 16 * Ed)
+        d, t, flo = res['default'], res['today'], res['flo']
+        gate('Q %s dither' % tier[:3], d[0][0] <= 1.5 * flo,
+             'default arm + %s, 8-bit, screen px: lattice %.1f (%s); bar <= 1.5 x screen floor %.1f (%d windows)%s'
+             % ('ordered 4x4 dither (red)' if red == 'bayerdither' else 'FOGGLOW1 TPDF dither', d[0][0],
+                describe(d[0][1], d[0][2], 1), flo, d[2], ' (red %s)' % red if red else ''))
+        print('Q %s dither  INFO  default arm without the dither %.1f (%s); dither field alone %.1f (%s); today arm + dither '
+              '%.1f (%s), without %.1f; floor of upsampled white history fields %.1f; bungo crop: period 4.58 screen px, '
+              'normal -22 deg'
+              % (tier[:3], d[1][0], describe(d[1][1], d[1][2], 1), res['field'][0], describe(res['field'][1], res['field'][2], 1),
+                 t[0][0], describe(t[0][1], t[0][2], 1), t[1][0], res['floup']), flush=True)
 
 # ---- F: CLOUD2's flicker gate D on the accum arm -------------------------------------------------------------------------
 if 'F' in only and P['cloud_resolve_a.prog'] is not None:
@@ -411,13 +517,13 @@ if 'F' in only and P['cloud_resolve_a.prog'] is not None:
                     **K.march_uni(cam, pos, (W, H), ST, ph, 35.0, sun_az=30, steps=64, taps=6, frame=float(fr % 64),
                                   drop=K.drop, amb=0.05))
         base['cvBlueSlice'] = -1 if red == 'ign' else (fr // 16) % 64
-        run(P['cloud_march_a.prog'], march, base, V['vtexs'](K.trans, sv))
+        run(P[ARMS['default'][0]], march, base, V['vtexs'](K.trans, sv) if DEF_ACCUM else K.march_texs(K.trans, sv))
         ru = {'cvHistSize': (float(W), float(H)), 'cvStride': (float(ST),), 'cvPhase': ph, 'cvCam': cam, 'cvProj': base['cvProj'],
               'cvCamKm': pos, 'cvHistOn': (1.0 if prev else 0.0,), 'cvReproj': (1.0,),
               'cvAccAlpha': (alpha(fr),), 'cvAccClamp': (0.0 if red == 'noclamp' else 1.0,)}
         p0 = prev or (cam, base['cvProj'], pos)
         ru.update({'cvPrevCam': p0[0], 'cvPrevProj': p0[1], 'cvPrevCamKm': p0[2]})
-        run(P['cloud_resolve_a.prog'], hist[cur], ru, [('cvMarch', 0x0DE1, march.col), ('cvMarchDepth', 0x0DE1, march.dep),
+        run(P[ARMS['default'][1]], hist[cur], ru, [('cvMarch', 0x0DE1, march.col), ('cvMarchDepth', 0x0DE1, march.dep),
                                                       ('cvPrev', 0x0DE1, hist[1 - cur].col), ('cvPrevDepth', 0x0DE1, hist[1 - cur].dep)])
         if fr >= 16:
             r = hist[cur].read()
@@ -434,7 +540,7 @@ if 'F' in only and P['cloud_resolve_a.prog'] is not None:
         prev = (cam, base['cvProj'], pos)
         cur = 1 - cur
     e = float(np.mean(flick))
-    gate('F flicker', e <= 0.08, 'accum arm: excess frame-to-frame change %.4f over 31 frame pairs (CLOUD2 gate D bar 0.08; '
+    gate('F flicker', e <= 0.08, 'default arm (%s):' % ARMS['default'][1] + ' excess frame-to-frame change %.4f over 31 frame pairs (CLOUD2 gate D bar 0.08; '
          'max %.4f; the clouds themselves change %.4f a frame)%s' % (e, max(flick), float(np.mean(flickref)),
                                                                    ' (red %s)' % red if red else ''))
 
