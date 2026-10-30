@@ -1,10 +1,12 @@
 #include "gl/cellbindless.h"
 
 #include "gl/cellbindlesspool.h"
+#include "gl/cellbindlessreopen.h"
 #include "gl/celllooks.h"
 #include "gl/glshape.h"
 #include "wwswitch.h"
 
+#include <QObject>
 #include <QOpenGLContext>
 #include <QOpenGLFunctions>
 #include <QString>
@@ -12,7 +14,9 @@
 #include <algorithm>
 #include <cstdio>
 #include <cstring>
+#include <deque>
 #include <unordered_map>
+#include <utility>
 #include <vector>
 
 bool wwFrameLog();	// gl/cellcull.cpp
@@ -108,6 +112,12 @@ struct Ctx
 	long long conflictsAll = 0;
 	long long runs = 0, merged = 0, mdiCalls = 0, longest = 0;	// lane BINDLESSMDI1
 	QString line;
+	/* lane BINDREOPEN1: the functions of the last draw (the frame sweep's fences and shrinks have no caller's), one
+	 * fence per frame that released pool spans (a grave's range is reused once its frame's fence passed), counters */
+	NifSkopeOpenGLContext::GLFunctions * fn = nullptr;
+	std::deque<std::pair<std::uint64_t, GLsync>> frameFences;
+	std::uint64_t doneEpoch = 0;
+	long long shrinks = 0, reopens = 0;
 };
 
 std::unordered_map<const QOpenGLContext *, Ctx> & ctxs()
@@ -116,11 +126,14 @@ std::unordered_map<const QOpenGLContext *, Ctx> & ctxs()
 	return m;
 }
 
+// lane BINDREOPEN1: at namespace scope, so a destroyed context's Ctx can be forgotten (ctxGone)
+const QOpenGLContext * lastQ = nullptr;
+Ctx * lastC = nullptr;
+void ctxGone( const QOpenGLContext * q );
+
 Ctx & cx()
 {
 	// lane BINDLESSPERF1: the last context's state without a map lookup (several calls a draw; map nodes never move)
-	static const QOpenGLContext * lastQ = nullptr;
-	static Ctx * lastC = nullptr;
 	const QOpenGLContext * q = QOpenGLContext::currentContext();
 	if ( !lastC || q != lastQ ) {
 		lastC = &ctxs()[q];
@@ -154,6 +167,10 @@ bool init( Ctx & c )
 	c.ok = c.texHandle && c.texSamplerHandle && c.resident && c.nonResident && c.bufferStorage;
 	if ( !c.ok )
 		std::fprintf( stderr, "bindless: unsupported (entry points missing)\n" );
+	// lane BINDREOPEN1: a context's state (its mapped rings, handles, pool) goes with the context, so a new context
+	// made at the same address never writes through the dead one's mapped pointers
+	if ( c.ok )
+		QObject::connect( q, &QOpenGLContext::aboutToBeDestroyed, [q]() { ctxGone( q ); } );
 	return c.ok;
 }
 
@@ -173,7 +190,8 @@ int red()
 {
 	WW_SWITCH_STATIC( int, r, [] {
 		const QByteArray v = wwEnv( "WW_BINDLESS_RED" ).trimmed();
-		return v == "sampler" ? 1 : v == "pooloff1" ? 2 : v == "nopool" ? 3 : v == "cellname" ? 4 : v == "slow" ? 5 : 0;
+		return v == "sampler" ? 1 : v == "pooloff1" ? 2 : v == "nopool" ? 3 : v == "cellname" ? 4 : v == "slow" ? 5
+			: v == "poolgrow" ? 6 : v == "reopenraw" ? 7 : 0;	// lane BINDREOPEN1: 6, 7
 	}() );
 	return r;
 }
@@ -205,7 +223,8 @@ bool mdiOn()
 		const QByteArray v = wwEnv( "WW_BINDLESS_MDI" ).trimmed();
 		return v.isEmpty() ? kMdiDefault : v != "0";
 	}() );
-	return want && red() == 0 && on() && cx().mdi;
+	const int r = red();	// lane BINDREOPEN1: the pool and reopen reds keep the multi-draw
+	return want && ( r == 0 || r == 6 || r == 7 ) && on() && cx().mdi;
 }
 
 bool frozenSkip( GLuint tex, int wrapS, int wrapT, int minFilter, float aniso )
@@ -323,6 +342,7 @@ void commit( NifSkopeOpenGLContext::GLFunctions * f, NifSkopeOpenGLContext::Prog
 	Ctx & c = cx();
 	if ( !c.ok )
 		return;
+	c.fn = f;	// lane BINDREOPEN1
 	if ( !c.ring ) {
 		f->glGenBuffers( 1, &c.ring );
 		f->glBindBuffer( GL_SHADER_STORAGE_BUFFER, c.ring );
@@ -485,21 +505,6 @@ void forget( GLuint tex )
 	c.frozen.erase( tex );
 }
 
-void forgetAll()
-{
-	if ( !anyFrozen )
-		return;
-	Ctx & c = cx();
-	if ( QOpenGLContext * q = QOpenGLContext::currentContext() )
-		q->functions()->glFinish();	// the ring's rows in flight name these handles
-	for ( auto * m : { &c.handles, &c.redHandles } ) {
-		for ( auto & e : *m )
-			c.nonResident( e.second );
-		m->clear();
-	}
-	c.frozen.clear();
-}
-
 // ---- the geometry pool (step 3) ----
 
 namespace
@@ -581,12 +586,205 @@ void rebuild( Ctx & c, NifSkopeOpenGLContext::GLFunctions * f, Class & k, std::u
 	c.rebuilds++;
 }
 
-void release( Entry & e )
+//! lane BINDREOPEN1: `epoch` = the last frame whose draws may read the span (its fence frees the range for reuse)
+void release( Entry & e, std::uint64_t epoch )
 {
 	if ( e.cls )
-		e.cls->a.release( e.span );
+		e.cls->a.release( e.span, epoch );
 	e.cls = nullptr;
 }
+
+//! lane BINDREOPEN1: every arena's buffers and every entry go (the next draws upload again, from the floor)
+void poolDrop( Ctx & c, bool gl )
+{
+	if ( gl && c.fn ) {
+		c.fn->glBindVertexArray( 0 );
+		for ( auto & kv : c.classes ) {
+			Class & k = kv.second;
+			for ( GLuint & b : k.vbo )
+				if ( b )
+					c.fn->glDeleteBuffers( 1, &b );
+			if ( k.ebo )
+				c.fn->glDeleteBuffers( 1, &k.ebo );
+			if ( k.vao )
+				c.fn->glDeleteVertexArrays( 1, &k.vao );
+		}
+	}
+	c.classes.clear();
+	c.entries.clear();
+	c.lastAlloc = nullptr;
+	c.boundCls = nullptr;
+	geo.on = false;
+}
+
+double poolMB( const Ctx & c, double * liveMB = nullptr )
+{
+	double cap = 0.0, live = 0.0;
+	for ( auto & k : c.classes ) {
+		const double fpv = double( k.second.floatsPerVert ) * 4.0;
+		cap += double( k.second.a.vertCap ) * fpv + double( k.second.a.idxCap ) * 2.0;
+		live += double( k.second.a.liveVerts() ) * fpv + double( k.second.a.liveIdx() ) * 2.0;
+	}
+	if ( liveMB )
+		*liveMB = live / 1048576.0;
+	return cap / 1048576.0;
+}
+
+//! lane BINDREOPEN1: the teardown steps of src/gl/cellbindlessreopen.h on the real GL (`gl` false: no GL call is made)
+struct GlSteps
+{
+	Ctx & c;
+	bool gl;
+	QOpenGLFunctions * qf;
+
+	void finish()
+	{
+		if ( gl && qf )
+			qf->glFinish();
+	}
+	void fenceWait()
+	{
+		if ( !gl )
+			return;
+		if ( !c.fn ) {	// nothing of ours was ever issued in this context
+			finish();
+			return;
+		}
+		GLsync s = c.fn->glFenceSync( GL_SYNC_GPU_COMMANDS_COMPLETE, 0 );
+		for ( int k = 0; k < 30 && c.fn->glClientWaitSync( s, GL_SYNC_FLUSH_COMMANDS_BIT, 1000000000ULL ) == GL_TIMEOUT_EXPIRED; k++ ) {}
+		c.fn->glDeleteSync( s );
+	}
+	void ringReset()
+	{
+		for ( GLsync & s : c.fences ) {
+			if ( s && gl && c.fn )
+				c.fn->glDeleteSync( s );
+			s = nullptr;
+		}
+		for ( auto & ff : c.frameFences )
+			if ( gl && c.fn )
+				c.fn->glDeleteSync( ff.second );
+		c.frameFences.clear();
+		c.doneEpoch = c.frameNo;
+		c.cursor = 0;
+		c.cmdCursor = 0;
+		c.bound = false;
+		run.open = false;
+	}
+	void rowZero()
+	{
+		std::memset( &row, 0, sizeof( row ) );
+		lastKeyValid = false;
+		resolvedTex = 0;
+	}
+	void handlesNonResident()
+	{
+		for ( auto * m : { &c.handles, &c.redHandles } ) {
+			if ( gl )
+				for ( auto & e : *m )
+					c.nonResident( e.second );
+			m->clear();
+		}
+	}
+	void frozenClear()
+	{
+		c.frozen.clear();
+	}
+	void poolDrop()
+	{
+		WwBl::poolDrop( c, gl );
+	}
+	void unmapRings()
+	{
+		if ( gl && c.fn && c.map ) {
+			c.fn->glBindBuffer( GL_SHADER_STORAGE_BUFFER, c.ring );
+			c.fn->glUnmapBuffer( GL_SHADER_STORAGE_BUFFER );
+			c.fn->glBindBuffer( GL_SHADER_STORAGE_BUFFER, 0 );
+		}
+		if ( gl && c.fn && c.cmdMap ) {
+			c.fn->glBindBuffer( GL_DRAW_INDIRECT_BUFFER, c.cmdBuf );
+			c.fn->glUnmapBuffer( GL_DRAW_INDIRECT_BUFFER );
+			c.fn->glBindBuffer( GL_DRAW_INDIRECT_BUFFER, 0 );
+		}
+		c.map = nullptr;
+		c.cmdMap = nullptr;
+	}
+	void deleteBuffers()
+	{
+		if ( gl && c.fn ) {
+			if ( c.ring )
+				c.fn->glDeleteBuffers( 1, &c.ring );
+			if ( c.cmdBuf )
+				c.fn->glDeleteBuffers( 1, &c.cmdBuf );
+			if ( c.blackHandle )
+				c.nonResident( c.blackHandle );
+			if ( c.black )
+				c.fn->glDeleteTextures( 1, &c.black );
+			if ( c.redSampler )
+				c.fn->glDeleteSamplers( 1, &c.redSampler );
+		}
+		ringReset();
+		WwBl::poolDrop( c, gl );
+	}
+	void forgetCtx()
+	{
+		for ( auto it = ctxs().begin(); it != ctxs().end(); ++it ) {
+			if ( &it->second == &c ) {
+				ctxs().erase( it );
+				break;
+			}
+		}
+		lastQ = nullptr;
+		lastC = nullptr;
+	}
+};
+
+void ctxGone( const QOpenGLContext * q )
+{
+	auto it = ctxs().find( q );
+	if ( it == ctxs().end() )
+		return;
+	// GL calls only while the dying context is current; otherwise the driver frees its objects with it
+	const bool gl = QOpenGLContext::currentContext() == q;
+	GlSteps g{ it->second, gl, gl ? QOpenGLContext::currentContext()->functions() : nullptr };
+	if ( red() == 7 ) {	// the red keeps the dead context's state (and its mapped pointers)
+		WwBlReopen::contextGone( g, true );
+		return;
+	}
+	WwBlReopen::contextGone( g, false );
+	std::fprintf( stderr, "bindless: context gone, its rings unmapped and its state forgotten\n" );
+}
+}
+
+void forgetAll()
+{
+	Ctx & c = cx();
+	const bool raw = red() == 7;
+	if ( raw && !anyFrozen )
+		return;	// the red: as before the lane
+	if ( !c.ok )
+		return;
+	/* lane BINDREOPEN1: the reopen census, printed before the teardown (and so before the first frame's re-specify that
+	 * D1 crashed in): handles still resident here, the pool, the mapped rings, handles held by OTHER contexts (a flush
+	 * made while another context is current releases none of them) */
+	std::size_t otherHandles = 0, otherCtx = 0;
+	for ( auto & kv : ctxs() )
+		if ( &kv.second != &c && ( kv.second.handles.size() + kv.second.redHandles.size() ) ) {
+			otherCtx++;
+			otherHandles += kv.second.handles.size() + kv.second.redHandles.size();
+		}
+	double liveMB = 0.0;
+	const double capMB = poolMB( c, &liveMB );
+	std::fprintf( stderr, "bindless reopen: handles resident %zu, pool MB %.1f (live %.1f, entries %zu), mapped %d, "
+		"other contexts %zu holding %zu handles, order %s\n",
+		c.handles.size() + c.redHandles.size(), capMB, liveMB, c.entries.size(), int( c.map != nullptr ) + int( c.cmdMap != nullptr ),
+		otherCtx, otherHandles, raw ? "RED reopenraw" : "fenced" );
+	std::fflush( stderr );
+	QOpenGLContext * q = QOpenGLContext::currentContext();
+	GlSteps g{ c, q != nullptr, q ? q->functions() : nullptr };
+	WwBlReopen::teardown( g, raw );
+	if ( !raw )
+		c.reopens++;
 }
 
 bool poolBind( const Shape * sh, NifSkopeOpenGLContext::GLFunctions * f, unsigned int ownVao )
@@ -598,6 +796,7 @@ bool poolBind( const Shape * sh, NifSkopeOpenGLContext::GLFunctions * f, unsigne
 	Ctx & c = cx();
 	if ( !c.ok )
 		return false;
+	c.fn = f;	// lane BINDREOPEN1
 	const float * attrs[16] = {};
 	const NifSkopeOpenGLContext::ShapeDataHash * h = sh->wwDataHash( attrs );
 	if ( !h || ( h->attrMask >> 60 ) != 0 || h->numVerts > 65536 )
@@ -609,10 +808,11 @@ bool poolBind( const Shape * sh, NifSkopeOpenGLContext::GLFunctions * f, unsigne
 	if ( !same ) {
 		// new or changed: (re)placed and uploaded from the shape's arrays, as ShapeData uploads them (fp32)
 		std::uint32_t verts = h->numVerts, idx = h->elementBytes / 2;
-		release( e );
+		release( e, c.frameNo );
 		if ( !k.attrMask ) {
 			k.attrMask = h->attrMask;
 			k.floatsPerVert = floatsOf( h->attrMask );
+			k.a.grow = red() == 6;	// lane BINDREOPEN1: red poolgrow, the append-only arena
 		}
 		WwBlPool::Span sp;
 		if ( !k.a.alloc( verts, idx, sp ) ) {
@@ -712,6 +912,32 @@ void frame()
 	if ( !c.tried )
 		return;
 	c.bound = false;
+	/* lane BINDREOPEN1: the frame just issued gets a fence when pool spans wait in graves; a passed fence frees the
+	 * graves of its frame and before (their ranges join the free lists). A live set of the poolgrow red re-makes the
+	 * pool in the new rule. */
+	const bool growNow = red() == 6;
+	bool modeMoved = false, pending = false;
+	for ( auto & k : c.classes ) {
+		modeMoved |= k.second.a.grow != growNow;
+		pending |= !k.second.a.graves.empty();
+	}
+	if ( modeMoved )
+		poolDrop( c, true );
+	if ( c.fn && pending )
+		c.frameFences.emplace_back( c.frameNo, c.fn->glFenceSync( GL_SYNC_GPU_COMMANDS_COMPLETE, 0 ) );
+	while ( c.fn && !c.frameFences.empty() ) {
+		auto & ff = c.frameFences.front();
+		GLenum r = c.fn->glClientWaitSync( ff.second, 0, 0 );
+		if ( r == GL_TIMEOUT_EXPIRED && c.frameFences.size() > 8 )	// the GPU 8 frames behind: wait for the oldest
+			r = c.fn->glClientWaitSync( ff.second, GL_SYNC_FLUSH_COMMANDS_BIT, 1000000000ULL );
+		if ( r != GL_ALREADY_SIGNALED && r != GL_CONDITION_SATISFIED )
+			break;
+		c.doneEpoch = std::max( c.doneEpoch, ff.first );
+		c.fn->glDeleteSync( ff.second );
+		c.frameFences.pop_front();
+	}
+	for ( auto & k : c.classes )
+		k.second.a.retire( c.doneEpoch );
 	c.frameNo++;
 	static quint64 lineGen = 0;	// lane BINDLESS2FIX: a live set says the line again (the check row repeated the on row's)
 	if ( wwSwitchMoved( lineGen ) )
@@ -719,7 +945,7 @@ void frame()
 	if ( ( c.frameNo % 64 ) == 0 ) {	// shapes not drawn for 600 frames give their span back
 		for ( auto it = c.entries.begin(); it != c.entries.end(); ) {
 			if ( c.frameNo - it->second.lastFrame > 600 ) {
-				release( it->second );
+				release( it->second, c.frameNo );
 				if ( c.lastAlloc == it->first )
 					c.lastAlloc = nullptr;
 				it = c.entries.erase( it );
@@ -727,11 +953,28 @@ void frame()
 				++it;
 			}
 		}
+		// lane BINDREOPEN1: an arena whose live part fell under half is re-made at 1.5x its live part (never the red)
+		if ( c.fn ) {
+			GLint vao = -1, ab = 0;
+			for ( auto & k : c.classes ) {
+				if ( !k.second.a.shrinkWanted() )
+					continue;
+				if ( vao < 0 ) {	// at most once per 64 frames, and only when an arena shrinks
+					c.fn->glGetIntegerv( GL_VERTEX_ARRAY_BINDING, &vao );
+					c.fn->glGetIntegerv( GL_ARRAY_BUFFER_BINDING, &ab );
+				}
+				rebuild( c, c.fn, k.second, 0, 0 );
+				c.shrinks++;
+			}
+			if ( vao >= 0 ) {
+				c.fn->glBindVertexArray( GLuint( vao ) );
+				c.fn->glBindBuffer( GL_ARRAY_BUFFER, GLuint( ab ) );
+			}
+		}
 	}
 	if ( c.draws || c.conflicts || c.fallbacks ) {
-		double poolBytes = 0.0;
-		for ( auto & k : c.classes )
-			poolBytes += double( k.second.a.vertCap ) * k.second.floatsPerVert * 4.0 + double( k.second.a.idxCap ) * 2.0;
+		double liveMB = 0.0;
+		const double poolBytes = poolMB( c, &liveMB ) * 1048576.0;
 		const QString line = QStringLiteral( "bindless: draws=%1 pooled=%2 handles=%3 uploads=%4 classes=%5 pool=%6MB ring=%7MB "
 			"waits=%8 conflicts=%9 fallbacks=%10 rebuilds=%11 (conflicts all frames %12)%13" )
 			.arg( c.draws ).arg( c.pooled ).arg( c.handles.size() + c.redHandles.size() ).arg( c.uploads ).arg( c.classes.size() )
@@ -739,11 +982,17 @@ void frame()
 			.arg( c.waits ).arg( c.conflicts ).arg( c.fallbacks ).arg( c.rebuilds ).arg( c.conflictsAll )
 			.arg( red() == 1 ? QStringLiteral( " RED sampler" ) : red() == 2 ? QStringLiteral( " RED pooloff1" )
 				: red() == 3 ? QStringLiteral( " RED nopool" ) : red() == 4 ? QStringLiteral( " RED cellname" )
-				: red() == 5 ? QStringLiteral( " RED slow" ) : QString() )
+				: red() == 5 ? QStringLiteral( " RED slow" ) : red() == 6 ? QStringLiteral( " RED poolgrow" )
+				: red() == 7 ? QStringLiteral( " RED reopenraw" ) : QString() )
 			// lane BINDLESSMDI1: runs = multi-draws of more than one shape, merged = the shapes that joined a leader
 			+ ( mdiOn() ? QStringLiteral( " mdi: runs=%1 merged=%2 calls=%3 longest=%4 cmds=%5MB%6" ).arg( c.runs ).arg( c.merged )
 				.arg( c.mdiCalls ).arg( c.longest ).arg( double( kCmds ) * kCmdBytes / 1048576.0, 0, 'f', 2 )
-				.arg( mdiRed() == 1 ? QStringLiteral( " RED rowoff" ) : QString() ) : QStringLiteral( " mdi: off" ) );
+				.arg( mdiRed() == 1 ? QStringLiteral( " RED rowoff" ) : QString() ) : QStringLiteral( " mdi: off" ) )
+			// lane BINDREOPEN1: the pool's live part, its reused spans and shrinks (all frames), graves waiting on a fence
+			+ QStringLiteral( " poolLive=%1MB reused=%2 shrinks=%3 graves=%4" ).arg( liveMB, 0, 'f', 1 )
+				.arg( [&c] { unsigned long long n = 0; for ( auto & k : c.classes ) n += k.second.a.reused; return n; }() )
+				.arg( c.shrinks )
+				.arg( [&c] { unsigned long long n = 0; for ( auto & k : c.classes ) n += k.second.a.graves.size(); return n; }() );
 		if ( line != c.line && wwFrameLog() ) {
 			c.line = line;
 			std::fprintf( stderr, "%s\n", line.toLocal8Bit().constData() );

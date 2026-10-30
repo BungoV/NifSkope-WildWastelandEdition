@@ -11,7 +11,9 @@
  * the span allocated before its own), =nopool (handles and the buffer, the shapes' own buffers), =cellname (lane BINDLESS2FIX:
  * the twins not taken as cell programs, so no cell uniform reaches them -- the black, fogless frame of the MERGE1026 hold),
  * =slow (lane BINDLESSPERF1: the per-draw path before it -- two vertex array queries, three binds, a texture query and
- * restore per map; each query waits for the driver's thread, which made the pooled frame slower than the plain one). */
+ * restore per map; each query waits for the driver's thread, which made the pooled frame slower than the plain one),
+ * =poolgrow (lane BINDREOPEN1: the append-only geometry arena that never gave memory back), =reopenraw (lane BINDREOPEN1:
+ * the reopen teardown before the lane, and a destroyed context's state kept). */
 
 #include "gl/glcontext.hpp"
 
@@ -30,7 +32,7 @@ int slotOf( const char * var );
 
 //! the look is on and this context has the extensions (and the program twins linked)
 bool on();
-//! 0 none, 1 sampler, 2 pooloff1, 3 nopool, 4 cellname, 5 slow
+//! 0 none, 1 sampler, 2 pooloff1, 3 nopool, 4 cellname, 5 slow, 6 poolgrow, 7 reopenraw (lane BINDREOPEN1)
 int red();
 //! lane BINDLESSPERF1: on, pooling, and not the slow red: a draw binds its own vertex array only when it is not pooled
 bool fastOn();
@@ -62,6 +64,9 @@ const Row & staged();
 
 void frame();
 void forget( GLuint tex );	// a texture is deleted
+/* a reopen / texture flush (TexCache::flush). lane BINDREOPEN1: prints `bindless reopen: ...` and tears down in the
+ * order of gl/cellbindlessreopen.h -- fence wait, ring reset, staged row zeroed, handles non-resident (before the
+ * textures go), the geometry pool's entries and buffers dropped. Red WW_BINDLESS_RED=reopenraw: the order before. */
 void forgetAll();
 
 //! the pooled draw of the shape now drawing: valid while `on`
