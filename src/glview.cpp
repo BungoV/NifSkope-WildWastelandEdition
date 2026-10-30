@@ -7696,63 +7696,84 @@ static Transform wwCamLookYaw( const float eye[3], float yawDeg )
 Transform GLView::wwCameraBoundsGate( const Transform & raw ) const
 {
 	const NifModel * nif = scene ? scene->nifModel : nullptr;
-	if ( !cellCamBoundsActive( nif ) ) {	// not an exterior cell document, or the red (WW_CAMERA_BOUNDS_RED=allow)
-		wwCamWhy.clear();
-		wwCamAskedValid = false;
+	if ( !cellCamBoundsActive( nif ) ) {	// not a judged cell document, or the red (WW_CAMERA_BOUNDS_RED=allow)
+		wwCamKeep.why.clear();
+		wwCamKeep.askedValid = false;
 		return raw;
 	}
 	const quint64 gen = cellCamBoundsGen( nif );
 	if ( wwCamDoc != nif || wwCamDocGen != gen ) {	// a new open: the old document's last view is not this one's
 		wwCamDoc = nif;
 		wwCamDocGen = gen;
-		wwCamHaveGood = false;
-		wwCamAskedValid = false;
-		wwCamSaidKey.clear();
+		wwCamKeep.reset();
 	}
-	auto same = []( const Transform & p, const Transform & q ) {
-		for ( int i = 0; i < 3; i++ ) {
-			if ( p.translation[i] != q.translation[i] )
-				return false;
-			for ( int j = 0; j < 3; j++ )
-				if ( p.rotation( i, j ) != q.rotation( i, j ) )
+	/* lane CAMGATE2: the memo, the kept view and the write-back are WwCamBounds::Keeper (src/cellcambounds.h). The
+	 * free camera's state is Pos / Rot / Dist (the fly keys, the readouts and the favorites read them); a refusal of a
+	 * view made from it puts the kept pose back there. A path camera or a pinned harness camera is never written. */
+	struct Ops
+	{
+		GLView * v;
+		const NifModel * nif;
+		bool same( const Transform & p, const Transform & q ) const
+		{
+			for ( int i = 0; i < 3; i++ ) {
+				if ( p.translation[i] != q.translation[i] )
 					return false;
+				for ( int j = 0; j < 3; j++ )
+					if ( p.rotation( i, j ) != q.rotation( i, j ) )
+						return false;
+			}
+			return p.scale == q.scale;
 		}
-		return p.scale == q.scale;
-	};
-	if ( wwCamAskedValid && same( raw, wwCamAsked ) )
-		return wwCamGiven;
-	const Vector3 e = raw.rotation.inverted() * ( Vector3() - raw.translation );
-	QString why, key;
-	Transform given = raw;
-	if ( cellCamBoundsJudge( nif, e[0], e[1], e[2], &why, &key ) == WwCamBounds::Verdict::Ok ) {
-		wwCamGood = raw;
-		wwCamHaveGood = true;
-		wwCamWhy.clear();
-		wwCamSaidKey.clear();	// the next refusal is told again
-	} else {
-		QString kept;
-		float home[3];
-		float yaw = 0.0f;
-		if ( wwCamHaveGood ) {
-			given = wwCamGood;
-			kept = QStringLiteral( "kept the last in-bounds view" );
-		} else if ( cellCamBoundsHomeOf( nif, home, yaw ) ) {
-			given = wwCamLookYaw( home, yaw );
-			kept = QStringLiteral( "the cell's home: eye %1,%2,%3 yaw %4" ).arg( double( home[0] ), 0, 'f', 0 )
-				.arg( double( home[1] ), 0, 'f', 0 ).arg( double( home[2] ), 0, 'f', 0 ).arg( double( yaw ), 0, 'f', 1 );
-		} else {
-			kept = QStringLiteral( "no home pose: drawn as asked" );
+		WwCamBounds::Verdict judge( const Transform & t, QString * why, QString * key ) const
+		{
+			const Vector3 e = t.rotation.inverted() * ( Vector3() - t.translation );
+			return cellCamBoundsJudge( nif, e[0], e[1], e[2], why, key );
 		}
-		wwCamWhy = why;
-		if ( key != wwCamSaidKey ) {
-			wwCamSaidKey = key;
+		GLView::CameraKeep state() const { return v->keepCamera(); }
+		void put( const GLView::CameraKeep & k ) const	// plain member writes: no signal, no repaint call, no recursion
+		{
+			v->Pos = k.pos;
+			v->Rot = k.rot;
+			v->Dist = k.dist;
+		}
+		Transform rawNow() const { return v->wwViewTransformRaw(); }
+		bool home( Transform & view, GLView::CameraKeep & st, QString & words ) const
+		{
+			float h[3];
+			float yaw = 0.0f;
+			if ( !cellCamBoundsHomeOf( nif, h, yaw ) )
+				return false;
+			view = wwCamLookYaw( h, yaw );
+			// the state that gives that view: wwSpawnAt's level look (Rot x -90), the orbit pivot 2 x Dist ahead
+			st = v->keepCamera();
+			st.rot = Vector3( -90.0f, 0.0f, yaw );
+			Matrix m;
+			m.fromEuler( deg2rad( st.rot[0] ), deg2rad( st.rot[1] ), deg2rad( st.rot[2] ) );
+			st.pos = Vector3() - Vector3( h[0], h[1], h[2] )
+				+ ( v->view != GLView::ViewWalk ? m.inverted() * Vector3( 0.0f, 0.0f, 2.0f * st.dist ) : Vector3() );
+			words = QStringLiteral( "the cell's home: eye %1,%2,%3 yaw %4" ).arg( double( h[0] ), 0, 'f', 0 )
+				.arg( double( h[1] ), 0, 'f', 0 ).arg( double( h[2] ), 0, 'f', 0 ).arg( double( yaw ), 0, 'f', 1 );
+			return true;
+		}
+		void say( const QString & why, WwCamBounds::Kept k, const QString & homeWords ) const
+		{
+			QString kept;
+			switch ( k ) {
+			case WwCamBounds::Kept::Last: kept = QStringLiteral( "kept the last in-bounds view" ); break;
+			case WwCamBounds::Kept::LastPut:
+				kept = QStringLiteral( "kept the last in-bounds view; the camera put back there" );
+				break;
+			case WwCamBounds::Kept::Home: kept = homeWords; break;
+			case WwCamBounds::Kept::HomePut: kept = homeWords + QStringLiteral( "; the camera put there" ); break;
+			case WwCamBounds::Kept::None: kept = QStringLiteral( "no home pose: drawn as asked" ); break;
+			}
 			qInfo().noquote() << QStringLiteral( "camera refused: %1 (%2)" ).arg( why, kept );
 		}
-	}
-	wwCamAsked = raw;
-	wwCamGiven = given;
-	wwCamAskedValid = true;
-	return given;
+	};
+	Ops ops{ const_cast<GLView *>( this ), nif };
+	const bool stateDriven = !wwPathActive && !wwPin.active && cfg.upAxis == ZAxis;
+	return wwCamKeep.pass( raw, stateDriven, !cellCamBoundsRedHas( "freeze" ), ops );
 }
 
 QString GLView::wwCameraBoundsEcho() const
@@ -7761,7 +7782,8 @@ QString GLView::wwCameraBoundsEcho() const
 	if ( !cellCamBoundsActive( nif ) )
 		return cellCamBoundsRed() && nif ? QStringLiteral( "bounds off (red WW_CAMERA_BOUNDS_RED=allow)" ) : QString();
 	( void ) viewTransform();	// the verdict of the view as it stands now
-	return wwCamWhy.isEmpty() ? QStringLiteral( "bounds ok" ) : QStringLiteral( "bounds refused (%1)" ).arg( wwCamWhy );
+	return wwCamKeep.why.isEmpty() ? QStringLiteral( "bounds ok" )
+		: QStringLiteral( "bounds refused (%1)" ).arg( wwCamKeep.why );
 }
 
 Transform GLView::wwViewTransformRaw() const
