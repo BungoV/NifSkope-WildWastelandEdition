@@ -7,6 +7,7 @@ BSD License - see nifskope.h
 #include "cellreflprobe.h"
 #include "cellunits.h"
 #include "celluniform.h"	// lane CELLUNI2
+#include "gl/alphabgsm.h"	// lane ALPHABGSM1: the side passes' alpha-test census
 #include "gl/celldrawstate.h"
 #include "wwswitch.h"	// fix TDFIX2: a live set re-reads the switches
 #include "gl/celllooks.h"	// lane OPENCELLFIX2: the Reflections master
@@ -285,6 +286,7 @@ struct Caster
 	float rad;
 	Matrix4 mv;
 	bool alphaTested;
+	float atRef;	// lane ALPHABGSM1: the threshold the colour draw tests with (Shape::wwDrawAlpha)
 };
 
 // GL's cube faces: major axis m, s along u, t along v (as the light shadow cubes, celllights.cpp)
@@ -360,6 +362,7 @@ void wwCellReflProbePass( Scene * scene, bool run )
 
 	// the statics the captures draw: what the GI bake's soup takes (no actors, effects, blends, water)
 	std::vector<Caster> casters;
+	AlphaBgsmTally atTally;	// lane ALPHABGSM1: the census (gl/alphabgsm.h)
 	quint64 sceneKey = mix64( 0, quint64( reinterpret_cast<std::uintptr_t>( scene->nifModel ) ) );
 	for ( Node * node : scene->nodes.list() ) {
 		const Shape * sh = dynamic_cast<const Shape *>( node );
@@ -368,12 +371,19 @@ void wwCellReflProbePass( Scene * scene, bool run )
 		if ( sh->verts.isEmpty() || sh->triangles.isEmpty() || wwCellWaterIsShape( scene->nifModel, sh->id() ) )
 			continue;
 		const BoundSphere b = sh->bounds();
-		Caster c { sh, { b.center[0], b.center[1], b.center[2] }, b.radius, sh->viewTrans().toMatrix4(), false };
-		c.alphaTested = sh->wwAlphaTested() && sh->wwShaderLighting() && !sh->coords.isEmpty()
+		Caster c { sh, { b.center[0], b.center[1], b.center[2] }, b.radius, sh->viewTrans().toMatrix4(), false, 0.0f };
+		/* lane ALPHABGSM1: the colour draw's test (a BGSM's wins over the NIF's): a BGSM-only test (GlassWindows01)
+		 * was captured solid into the cubes. Red WW_ALPHABGSM_RED=refl */
+		const Shape::WwDrawAlpha da = sh->wwDrawAlpha( "refl" );
+		AlphaBgsmTally::note( atTally, sh->wwAlphaTested(), da.test );
+		c.alphaTested = da.test && sh->wwShaderLighting() && !sh->coords.isEmpty()
 			&& sh->coords.constFirst().size() == sh->verts.size();
+		c.atRef = da.threshold;
 		casters.push_back( c );
 		sceneKey = mix64( sceneKey, quint64( sh->id() ) );
+		sceneKey = mix64( sceneKey, quint64( c.alphaTested ? 1 : 0 ) );	// lane ALPHABGSM1: a live red re-captures
 	}
+	AlphaBgsmTally::report( atTally, "reflection probes", qint64( casters.size() ) );
 	if ( g.doc != scene->nifModel || g.sceneKey != sceneKey ) {
 		for ( Probe & p : g.slot )
 			p = Probe();
@@ -632,7 +642,7 @@ void wwCellReflProbePass( Scene * scene, bool run )
 					prog->uni2f( "uvOffset", 0.0f, 0.0f );
 				}
 				prog->uni1f( "alpha", lsp ? lsp->alpha : 1.0f );
-				prog->uni1f( "alphaThreshold", c.sh->wwAlphaThreshold() );
+				prog->uni1f( "alphaThreshold", c.atRef );
 				const bool vc = c.sh->colors.size() == c.sh->verts.size();
 				const bool nm = c.sh->norms.size() == c.sh->verts.size();
 				prog->uni1b( "rpHasVc", vc );

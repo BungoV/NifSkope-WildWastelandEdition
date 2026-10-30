@@ -282,6 +282,25 @@ Reds: WW_CLOUDVOL_RED = onetype | nocurl | shortlight | ign. Offline gate: tests
   (files through the real reader: round trip, keep, GI conversion identity, rooms mode, novol, refusals).
 - Not yet: a drag gizmo for volumes (the band's fields and To 3D cursor place them), an ambient particle emitter, a
   room-aware ray-traced GI read, live gi blocks.
+
+## ALPHABGSM1: the side passes alpha-test BGSM-tested shapes the way the frame draws them
+
+- The sun cascades, the light shadow maps (lamp maps and light cubes), the reflection probes' captures and the TAA
+  object-velocity pass took the alpha test from the NIF's NiAlphaProperty only. The frame's draw takes it from the
+  material file whenever the shader property has one (setupProgramCE1, the game's rule). The cell build writes a
+  bucket's NiAlphaProperty from the source NIF alone, so a shape tested only by its BGSM was drawn solid in those
+  passes. Example: the Concord hardware store's broken windows (`Bld03CornerBrickACom01Open01.nif`, one glass shape,
+  `GlassWindows01.BGSM`: test 128, two-sided, no NiAlphaProperty in the NIF) cast and captured as whole panes.
+- `Shape::wwDrawAlpha( pass )` (src/gl/glshape.cpp) gives the test and threshold the colour draw uses: the
+  material's whenever one is read, else the NIF's (a blended ground layer keeps the cell build's). The four passes
+  read it, threshold included. The reflection probes re-capture when it changes.
+- Red `WW_ALPHABGSM_RED` (live): `nif` puts every pass back on the NIF's test, or a comma list of `sun`, `cube`,
+  `refl`, `taa` for one pass each.
+- Census (stderr, one line per pass when the numbers move, gl/alphabgsm.h): `alphabgsm <pass>: shapes N,
+  alpha-tested NIF K (before) drawn M (after), material only A, NIF only B`.
+- Blend was already the material's in these passes: they skip second-pass shapes, and drawInSecondPass reads the
+  material's blend (unchanged).
+
 ## RTXGI1 M2: the ray-traced GI volume lights the cell view (switch, live; ships Off)
 
 - **Show > Lighting > Ray-traced GI** (`WW_CELL_RTDDGI=1`, default Off): with the probe GI's relit cell open, a DDGI
