@@ -13,6 +13,7 @@ uniform ivec2 coarseSize;
 uniform float maskScale;
 uniform int divisor;
 uniform float tolerance;
+uniform vec4 farFade;		// lane SHADOWBAND1: x the cascades' reach D (game units), y 1 = the tier gives way to them, zw tan(fov/2) x, y
 
 out float fragMask;
 
@@ -46,4 +47,14 @@ void main()
 	}
 	if ( wsum > 1e-4 )
 		fragMask = acc / wsum;
+	// lane SHADOWBAND1: inside the cascades' reach the cascade map holds the far casters (to the texel); the tier's
+	// 250-unit slab there turns a thin caster in front (a cable) into a long false band. It counts by 1 - the cascades'
+	// own fade weight, (r / D)^8 at the radial distance r: the cascades' complement, today's tier past D
+	if ( farFade.y > 0.5 ) {
+		vec2 ndc = full / vec2( fullSize ) * 2.0 - 1.0;
+		float r = fine * length( vec3( ndc * farFade.zw, 1.0 ) );
+		float s = clamp( r * r / max( farFade.x * farFade.x, 1.0 ), 0.0, 1.0 );
+		float s2 = s * s;
+		fragMask = mix( 1.0, fragMask, s2 * s2 );
+	}
 }
