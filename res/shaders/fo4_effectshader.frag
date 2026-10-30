@@ -36,6 +36,9 @@ uniform float lightingInfluence;
 uniform float envReflection;
 // lane FXCHECK1: the game masks an effect's cube with the env mask's R (the _s specular); false = G, as before
 uniform bool envMaskR;
+// lane GLASSPANE2 (FXNORMALA1): the game's env cube is also x the normal map's alpha; true = the red (the old cube
+// without it, WW_FX_NORMALA_RED). Red sense, so a program that never sets it keeps the game's rule.
+uniform bool envNormalAlphaRed;
 
 in vec3 LightDir;
 in vec3 ViewDir;
@@ -400,6 +403,8 @@ void main()
 	vec4 cube = texture( CubeMap, reflectedWS );
 	if ( hasCubeMap ) {
 		cube.rgb *= envReflection * s;
+		if ( !envNormalAlphaRed )
+			cube.rgb *= normalMap.a;
 #ifdef WW_CELLLIGHTS
 		if ( !cellOn )
 #endif
