@@ -37,6 +37,27 @@ bool rtddgiCellPinned();
 void rtddgiCellSetOn( bool on );
 //! what Shader::load asks: the read compiled in (on, and the GI's volumes path: the march red has no cellGiVolume)
 bool rtddgiCellShaderDefine();
+/*! lane RTXCASCADE1 (2026-10-30): WW_CELL_RTDDGI_CASCADES = 2..4 nested camera-following volumes round the camera, each
+ *  2x coarser than the one inside it ([J21 7.3], rtddgimath.h sampleCascades); unset, 0 or 1 = M3's one volume exactly.
+ *  Cascade 0 is M3's volume; cascade L takes its step x 2^L and its window x 2^L (inside the probe GI's grid), and
+ *  updates every `cevery`^L frames (WW_CELL_RTDDGI_SPEC cevery=4; every frame while a spec max is not reached). The
+ *  volumes' atlases are copied on the GPU into one texture buffer (no new sampler); Shader::load adds
+ *  #define WW_CELL_RTDDGI_CASCADES beside WW_CELL_RTDDGI when this is > 1 (a set reloads the shaders). */
+int rtddgiCellCascades();
+/*! lane RTXCASCADE2 (2026-10-30): the cascades are a Show-menu row too ("Ray-traced GI cascades": 1 = one volume, the
+ *  default, .. 4), pinned by WW_CELL_RTDDGI_CASCADES; a set reloads the shaders (the define) and the next frame builds or
+ *  frees the coarse volumes. Every coarse cascade opens on cascade 0's BLAS (one BLAS for the soup) and the cascades due
+ *  on a frame step in ONE submit (red WW_CELL_RTDDGI_RED=perblas: RTXCASCADE1's own BLAS and submit a cascade). Cost
+ *  levers (WW_CELL_RTDDGI_SPEC): crays=N coarse cascades trace N rays (0: cascade 0's), cskip=1 a coarse cascade skips
+ *  the probes the next finer one covers whole (rtddgimath.h cascadeCovered); a camera jump (cascade 0 keeps no plane)
+ *  steps every cascade that frame and resets every plane (cascadeJump). Ships Off (1 cascade) until a cost run. */
+bool rtddgiCellCascadesPinned();
+void rtddgiCellSetCascades( int n );
+/*! lane RTXCASCADE2: the cascade the probe debug views draw (0 = the nearest, M3's volume; past the cascades there are,
+ *  the coarsest); the "Ray-traced GI probes" row's cascade pick, pinned by WW_CELL_RTDDGI_VIEW_CASCADE. Live. */
+int rtddgiCellViewCascade();
+bool rtddgiCellViewCascadePinned();
+void rtddgiCellSetViewCascade( int level );
 
 //! the debug view row ("Ray-traced GI probes"): 0 off, 1 probe states, 2 probe irradiance; WW_CELL_RTDDGI_VIEW pins it
 int rtddgiCellView();

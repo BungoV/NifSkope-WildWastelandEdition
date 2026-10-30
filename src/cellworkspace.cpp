@@ -610,6 +610,28 @@ void CellWorkspacePanel::buildUi()
 				glView->updateShaders();
 		} );
 	}
+	/* lane RTXCASCADE2 (src/rtddgicell.h): the ray-traced GI's nested volumes round the camera, 1 (one volume, the default)
+	 * to 4. Live: a pick reloads the shaders (the cascades' read is a #define) and the next frame builds or frees them */
+	{
+		QMenu * m = showMenu->addMenu( tr( "Ray-traced GI cascades" ) );
+		m->setObjectName( QStringLiteral( "CellWorkspaceRtDdgiCascades" ) );
+		QActionGroup * grp = new QActionGroup( m );
+		grp->setExclusive( true );
+		const QStringList names = { tr( "One volume" ), tr( "2 cascades" ), tr( "3 cascades" ), tr( "4 cascades" ) };
+		for ( int k = 0; k < names.size(); k++ ) {
+			QAction * a = m->addAction( names.at( k ) );
+			a->setCheckable( true );
+			a->setData( k + 1 );
+			a->setChecked( k + 1 == rtddgiCellCascades() );
+			grp->addAction( a );
+		}
+		m->setEnabled( !rtddgiCellCascadesPinned() );
+		connect( grp, &QActionGroup::triggered, this, [this]( QAction * a ) {
+			rtddgiCellSetCascades( a->data().toInt() );
+			if ( glView )
+				glView->updateShaders();
+		} );
+	}
 	/* lane SKYSTR1 (bungo 10-13, FO4CS's Skylighting strength): how much the GI's sky visibility darkens, 0-100 %.
 	 * A label | field row as the Bloom rows; live (the grid relights 0.4 s after the value stands still) */
 	{
@@ -689,6 +711,24 @@ void CellWorkspacePanel::buildUi()
 		m->setEnabled( !rtddgiCellViewPinned() );
 		connect( grp, &QActionGroup::triggered, this, [this]( QAction * a ) {
 			rtddgiCellSetView( a->data().toInt() );
+			if ( glView )
+				glView->update();
+		} );
+		// lane RTXCASCADE2: which cascade the views draw (live; past the cascades there are, the coarsest)
+		m->addSeparator();
+		QActionGroup * cg = new QActionGroup( m );
+		cg->setExclusive( true );
+		for ( int l = 0; l < 4; l++ ) {
+			QAction * a = m->addAction( l == 0 ? tr( "Cascade 0 (nearest)" ) : tr( "Cascade %1" ).arg( l ) );
+			a->setObjectName( QStringLiteral( "CellWorkspaceRtDdgiViewCascade%1" ).arg( l ) );
+			a->setCheckable( true );
+			a->setData( l );
+			a->setChecked( l == rtddgiCellViewCascade() );
+			a->setEnabled( !rtddgiCellViewCascadePinned() );
+			cg->addAction( a );
+		}
+		connect( cg, &QActionGroup::triggered, this, [this]( QAction * a ) {
+			rtddgiCellSetViewCascade( a->data().toInt() );
 			if ( glView )
 				glView->update();
 		} );

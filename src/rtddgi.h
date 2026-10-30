@@ -116,6 +116,14 @@ struct RtDdgiStep
 	bool host = true;                     //!< the tiles back to the host (irr(), dist(), age() once the step is done)
 	bool wait = true;                     //!< false: submit only (lastMs() then tells an earlier, finished step)
 	std::function<bool()> beforeSubmit;   //!< interop: rtddgi_gpu.h DdgiGpuStepIn::beforeSubmit
+	/*! RTXCASCADE2: reset every probe (a scroll by `scroll` that keeps no plane: a camera jump, rtddgimath.h cascadeJump),
+	 *  even when `scroll` is 0 0 0 */
+	bool resetAll = false;
+	/*! RTXCASCADE2 cost lever: skip the probes a finer cascade covers whole (rtddgimath.h cascadeCovered) against that
+	 *  cascade's grid as it stands after its own step this frame (first probe world xyz, step, dims); skip false = none */
+	bool skip = false;
+	double fineOrigin[3] = { 0, 0, 0 }, fineStep[3] = { 0, 0, 0 };
+	int fineDims[3] = { 0, 0, 0 };
 };
 
 class RtDdgiLive
@@ -126,13 +134,23 @@ public:
 	RtDdgiLive( const RtDdgiLive & ) = delete;
 	RtDdgiLive & operator=( const RtDdgiLive & ) = delete;
 
+	/*! RTXCASCADE2: sceneFrom = an open volume over the same soup and lights (the cell view's cascade 0): this one traces
+	 *  its BLAS (no BLAS of its own; checked by a key of the packed soup, lights and frame, else it builds its own and
+	 *  sceneWhy() says why). The caller keeps sceneFrom open until open() returns. */
 	bool open( const ProbeSoup & soup, const WwCellLighting & lighting, const ProbeSkyLight & sky, const RtDdgiSpec & spec,
-		bool share = false );
+		bool share = false, const RtDdgiLive * sceneFrom = nullptr );
 	bool isOpen() const;
 	//! k updates (0..16), host copies, waits; false: the device was busy (busy() true: nothing ran, try next frame) or failed (why())
 	bool step( int k );
 	//! M3: the whole order (see RtDdgiStep)
 	bool step( const RtDdgiStep & order );
+	/*! RTXCASCADE2: one submit for n volumes on one BLAS (sameScene): each one's order as step(order) does, recorded in
+	 *  the given order. False when they are not on one scene (nothing ran; step each alone) or busy (busy() on each). */
+	static bool stepGroup( RtDdgiLive * const * lives, const RtDdgiStep * orders, int n );
+	bool sameScene( const RtDdgiLive & other ) const;
+	bool builtBlas() const;           //!< RTXCASCADE2: open() built a BLAS (false: it took sceneFrom's)
+	QString sceneWhy() const;         //!< RTXCASCADE2: why a sceneFrom was not taken (empty when it was, or none asked)
+	int lastSkipped() const;          //!< RTXCASCADE2: probes the last step's skip range holds (0: none)
 	//! M3: waits for a step still running on the device and takes its results (a dump's tiles)
 	bool finish();
 	void close();
@@ -185,10 +203,27 @@ void rtddgiProbeIrradiance( const RtDdgiVolume & vol, int p, const float dir[3],
 //! The sky visibility (0..1, the cosine-weighted miss share, M1FIX) of probe p for unit direction (x, y, z), bilinear
 float rtddgiProbeSkyVis( const RtDdgiVolume & vol, int p, const float dir[3] );
 
+/*! RTXCASCADE2: n nested volumes over one soup as the cell view's cascades (specs[c]: cascade c's spacing and rect), on
+ *  the GPU: oneBlas = cascades 1.. open on cascade 0's BLAS (else each builds its own: RTXCASCADE1's, the gate's red);
+ *  oneSubmit = every chunk of updates of every cascade in one submit (else one submit a cascade); cskip = a coarse
+ *  cascade skips the probes the next finer one covers whole. vols[c] = cascade c's volume and tiles (rtddgiDump's input);
+ *  census: BLAS builds and submits this run, rays per cascade. False + vols[0].error when the GPU cannot run. */
+struct RtDdgiCascadeRun
+{
+	long long blasBuilds = 0, submits = 0;
+	QString path;
+};
+bool rtddgiRunCascades( const ProbeSoup & soup, const WwCellLighting & lighting, const ProbeSkyLight & sky,
+	const std::vector<RtDdgiSpec> & specs, bool oneBlas, bool oneSubmit, bool cskip, std::vector<RtDdgiVolume> * vols,
+	RtDdgiCascadeRun * census );
+
 /*! `nifskope -no-gui rtddgi --soup <f> --rect minX,minY,maxX,maxY --out <dir> [--light x,y,z,radius,r,g,b ...]
  *  [--sun tx,ty,tz,r,g,b] [--sky r,g,b | 18 values] [--spacing s] [--zscale k] [--rays n] [--frames n] [--hyst h]
  *  [--seed n] [--one-bounce] [--no-sky] [--gpu 0|1] [--no-place] [--no-reloc] [--no-classify] [--trace-asleep]
- *  [--dump-fixed] [--red noback,nocheb,nobias,norot,hwhit,notie]` (probegi's light/sun/sky arguments) */
+ *  [--dump-fixed] [--red noback,nocheb,nobias,norot,hwhit,notie]` (probegi's light/sun/sky arguments)
+ *  RTXCASCADE2: `--cascades N` (2..4, the GPU) runs N nested volumes about the rect's centre, cascade c at spacing x 2^c
+ *  over a rect 2^c as wide (rtddgiRunCascades), dumps <out>/cascade<c>; `--cascade-red perblas` = RTXCASCADE1's own
+ *  BLAS and submit a cascade (the one-BLAS gate's red); `--cskip 1` the covered-probe skip; `--crays n` coarse rays */
 int rtddgiCli( const QStringList & args );
 
 #endif // RTDDGI_H

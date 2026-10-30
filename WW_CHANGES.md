@@ -287,6 +287,66 @@
   checks.json PASS, gutter per mip (texgate.py in the lane notes, 0 of 42); shader link sweep 396 + 264 LINK OK.
   Owed: pictures (a Division-style blizzard, rain at a lamp) when bungo asks.
 
+## Lane RTXCASCADE2 (2026-10-30, branch rtxcascade2-20261030): the cascades on one BLAS and one submit, their cost levers, a menu row (cascades still ship Off)
+
+- **Lands RTXCASCADE1** (merge of origin/merge1030b-20261030 = RTXCASCADE1 010bf8c4 on main 19f8ebb1). **Cascades stay OFF by
+  default**: unset WW_CELL_RTDDGI_CASCADES and the new row's default (One volume) are M3's one volume exactly; RTXCASCADE1's
+  Memory Den cost (4.09 x one volume in its hold, unequal samples) is unjudged, so they stay off until a cost run.
+- **One BLAS for every cascade:** a coarse cascade opens on cascade 0's scene (BLAS + TLAS, alpha masks, triangle
+  attributes, lights: rtddgi_vk.inc DdgiScene, counted, freed by the last session) instead of building its own from the
+  same soup (GPU memory and build time were x N). It also skips the CPU tree build of the soup. A key of the packed soup,
+  attributes, lights and local frame must match, else it builds its own and the census says why. Census of a coarse
+  cascade's build: `BLAS: cascade 0's (one BLAS)`.
+- **One submit for all cascades:** the cascades due on a frame are recorded into one command buffer (densest first, each
+  with its own timestamps, scroll, updates, copies and GL ownership) and go in ONE vkQueueSubmit that waits on every
+  glDone and signals every vkDone (rtddgi_vk.inc ddgiGpuStepGroup, RtDdgiLive::stepGroup, rtddgicell.cpp groupStep).
+  Red, live: `WW_CELL_RTDDGI_RED=perblas` = RTXCASCADE1's own BLAS and own submit per cascade.
+- **Debug views take a cascade pick:** the "Ray-traced GI probes" menu has Cascade 0 (nearest) .. Cascade 3 (live;
+  pin `WW_CELL_RTDDGI_VIEW_CASCADE`); the states/irradiance views (in the frame and the overlay) draw that cascade's own
+  volume and atlas. Default 0 = before.
+- **Menu row:** Show > "Ray-traced GI cascades" (One volume, 2, 3, 4 cascades), live (a pick reloads the shaders, as the
+  env key's stage 4); pinned by WW_CELL_RTDDGI_CASCADES.
+- **Cost levers (WW_CELL_RTDDGI_SPEC, both off by default):** `crays=N` coarse cascades trace N rays (rtddgimath.h
+  cascadeRays); `cskip=1` a coarse cascade skips the probes the next finer cascade covers whole (cascadeCovered: the
+  probe's whole trilinear support lies where the finer cascade's tight fade is 1, so the read never takes it; the
+  kernels read the range from two new params vec4s: trace mode 0, blend, border). Caveat (REASONED): where the finer
+  cascade has no usable probe at a point the read falls through to a skipped (stale) coarse probe. The cost of both is a
+  live run: owed.
+- **Camera jump:** when cascade 0 keeps no plane (it scrolled its whole size on an axis: cascadeJump), every cascade
+  steps that frame whatever its period and resets every plane (cascadeStepPlan); a walk keeps RTXCASCADE1's periods.
+- **CLI:** `-no-gui rtddgi ... --cascades N [--cascade-red perblas] [--cskip 1] [--crays n]` runs the cascades offline
+  (rtddgiRunCascades) and prints BLAS builds and submits.
+- **Gates (MEASURED):** unit tests/rtddgi_math/run.sh green 22 + 22 reds (new cascrays / cascskip / cascjump, each
+  failed by its own red); CLI (gpurelight's room, 3 cascades, 64 updates, GPU): one BLAS = `BLAS builds 1, submits 4`
+  vs the perblas red `BLAS builds 3, submits 12`, and every cascade's dump byte-identical between them and to the
+  single-volume GPU run; cskip: cascade 0 identical, cascade 1 192 probes skipped, rays 8.04 M -> 6.47 M; crays 64:
+  coarse rays 8.04 M -> 4.17 M; offline link sweep 393/393 and +WW_CELL_RTDDGI 262/262 LINK OK (no GL shader edit);
+  build RC 0. Owed: the cost run (Memory Den, c3) and RTXCASCADE1's porch-vs-tracer gate B, when bungo allows.
+
+## Lane RTXCASCADE1 (2026-10-30, branch rtxcascade1-20261030): nested ray-traced GI volumes round the camera (ships Off)
+
+- **Why:** bungo 10-29: far buildings (the Concord bank's porch, his shot) sit outside the ray-traced GI volume and read
+  open sky. M3 keeps ONE camera-following window (4096 u a side by default), so past it every surface takes the flat
+  ambient.
+- **What:** `WW_CELL_RTDDGI_CASCADES=2..4` builds nested camera-following volumes ([J21 7.3]): cascade 0 is M3's
+  volume; cascade L takes cascade 0's built step x 2^L and its window x 2^L (kept inside the probe GI grid, so every
+  coarse probe sits on a fine lattice point). Each scrolls with the camera by whole cells like M3's. Unset, 0 or 1 =
+  M3 exactly (no line of the cascades' read in any program).
+- **The read** (res/shaders/cell_ddgi.glsl, MIRROR rtddgimath.h sampleCascades): dense to coarse, each cascade takes
+  its blend weight's share of what the denser ones left, stop at 1. The weight falls 1 -> 0 over the last cell, and a
+  camera-locked volume tightens it by one cell (the outer plane, which a scroll has just reset, weighs 0). What the
+  volumes leave still goes to the flat ambient, as past M3's box.
+- **One sampler:** the volumes' atlases are copied on the GPU (glCopyBufferSubData, after each volume's interop wait)
+  into one texture buffer, so the cell programs read no new sampler. Off programs: the macros are empty, M3's machine
+  code (offline sweep of the 42 programs that paste the read in: off none/ubo/march, one volume none/ubo and cascades
+  none/ubo all link; the off and one-volume binaries equal the base's but the source hash).
+- **Cost lever:** cascade L updates every `cevery`^L frames (WW_CELL_RTDDGI_SPEC cevery=4: cascade 1 every 4th frame,
+  cascade 2 every 16th, on separate frames); with a spec max (pictures) every frame until it is reached.
+- **Census:** coarse lines start `rtddgi cell: cascade L (every P frames): ` (built, set N ... gpu ms, scroll, freed);
+  cascade 0 keeps M3's lines. WW_CELL_RTDDGI_DUMP writes cascade L under `<dir>/cascadeL`.
+- **Tests:** tests/rtddgi_math green 19 + 19 reds (cascade: the GLSL read == the header and the rule on flat volumes;
+  casctight; cascscale; cascdue). The live hold (porch vs a path-traced reference, cost) is notes/rtxcascade1/hold.
+
 ## RTXFIX1 (2026-10-30): the Ray-traced GI probes inside the frame (rounder, fogged, exposed); the atlas order's red
 
 - **Probes view** (bungo 10-29: "Could our probes have a rounder shape?", "fog", the spheres by the string lights and the
@@ -306,7 +366,6 @@
   `sync glDone N vkDone waits M` (the red: `(the nowait red: no order)`).
 - Not in this lane (rows): the light budget per hit (cost lever), no-probe coverage indoors, the classify tie at an
   exact probe step (RTXCASCADE1's finding).
-
 ## Lane GLAREBLOW1 (2026-10-29, branch GLAREBLOW1-20261029, cloud): the air's multiple scattering near the sun
 
 - **Measured offline first (no exe):** notes_cloud/GLAREBLOW1/RESULTS.md. The cell air's sky term (cell_volsky.frag ->

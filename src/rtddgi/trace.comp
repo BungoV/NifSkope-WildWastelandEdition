@@ -262,8 +262,8 @@ void main()
 	const int i = int( pc.job.z + id % nRay );
 	const int N = P.counts.x;
 	const int st = ddgiProbeState( p );
-	if ( pc.job.x == 0u && ( st == DDGI_OFF || ( st == DDGI_ASLEEP && P.flags.y != 0 ) ) )
-		return;
+	if ( pc.job.x == 0u && ( st == DDGI_OFF || ( st == DDGI_ASLEEP && P.flags.y != 0 ) || ddgiSkipped( p ) ) )
+		return;   // RTXCASCADE2: and a coarse probe a finer cascade covers (ddgiSkipped: off unless the cell view sets it)
 	if ( pc.job.x == 1u && pc.job.y == 1u && st != DDGI_FRESH )
 		return;   // M3: a scroll relocates and classifies its fresh probes only
 	const vec3 o = ddgiProbePos( p );
