@@ -413,12 +413,21 @@ void main()
 	}
 
 #ifdef WW_FX_DECALLIT
+#if defined( WW_SUNSHADOW ) && defined( WW_CELL_GI_MARCH )
+	/* lane SHADOWSHIMMER2: ONE wwSunShadow site in the GI-march mode. Its two branch copies below each inlined the whole
+	 * cascade chain, and fo4_effectdecalcsm stopped linking in march + WW_CELL_PRT (too many instructions) after
+	 * SHADOWSHIMMER1's world-locked kernel. Same call, same point: both branches below run only under cellOn and read
+	 * cellDirVis after it. Other modes keep the two sites (their machine code unchanged). */
+	if ( cellOn )
+		cellDirVis = wwSunShadow( -ViewDir );
+#define WW_FX_SUNVIS_ONCE 1
+#endif
 	if ( cellOn && fxRoomLit ) {	// lane GIDARK1: a lit effect outdoors, lit by the spot it stands in (fxRoomLitMul)
 		vec3 lin = ( fxRed & 4 ) != 0 ? max( color.rgb, vec3( 0.0 ) ) : pow( max( color.rgb, vec3( 0.0 ) ), vec3( 2.2 ) );
 		vec3 Ng = normalize( btnMatrix[2] );	// the face the eye sees
 		if ( !gl_FrontFacing )
 			Ng = -Ng;
-#ifdef WW_SUNSHADOW
+#if defined( WW_SUNSHADOW ) && !defined( WW_FX_SUNVIS_ONCE )
 		cellDirVis = wwSunShadow( -ViewDir );
 #endif
 		vec3 m = fxRoomLitMul( -ViewDir, Ng );
@@ -452,7 +461,7 @@ void main()
 		vec3 Ng = normalize( btnMatrix[2] );	// the decal's plane: the surface it lies on
 		if ( !gl_FrontFacing )
 			Ng = -Ng;
-#ifdef WW_SUNSHADOW
+#if defined( WW_SUNSHADOW ) && !defined( WW_FX_SUNVIS_ONCE )
 		cellDirVis = wwSunShadow( -ViewDir );
 #endif
 		vec3 lin = fxDecalLin( alb, Ng );

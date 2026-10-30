@@ -1,5 +1,20 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## SHADOWSHIMMER2 (2026-10-30): fo4_effectdecalcsm links again in march + WW_CELL_PRT
+
+- **Link fix (FIX1030B priority):** origin/main 3555a000 refused fo4_effectdecalcsm.prog in the mode WW_FRAME_UBO +
+  WW_CELL_GI_MARCH + WW_CELL_PRT (the PRT red's program): "too many instructions" (line 66267), while f46b1c76 linked it
+  at 1620155 bytes; the only shader change between them was SHADOWSHIMMER1's ww_sunshadow.glsl (world-locked kernel,
+  normal offset). Cause: fo4_effectshader.frag's two WW_FX_DECALLIT branches each called wwSunShadow( -ViewDir ), so
+  the whole cascade chain (ussCompose -> ussCascades -> two ussVogel) was inlined twice. Fix (skill ww-shader-link-limit,
+  one answer site): under `WW_SUNSHADOW && WW_CELL_GI_MARCH` the call runs ONCE before the two branches (`if ( cellOn )`;
+  both branches run only under cellOn and read cellDirVis after it: same call, same point, same value) and the branch
+  sites drop out (`WW_FX_SUNVIS_ONCE`). The other modes keep the two sites.
+- Gates (MEASURED, offline, NVIDIA driver): on main's shaders + this file, fo4_effectdecalcsm march + PRT LINK OK
+  1587623 bytes (main: LINK FAIL), march 1071414; the none / ubo binaries of all 7 programs on fo4_effectshader.frag
+  (fo4_effectcell, fo4_effectcellfx, fo4_effectdecal, fo4_effectdecalcsm, fo4_effectshader, particles, particles_cell)
+  equal main's but the 8-byte source hash (bincmp IDENTICAL-CODE): the default picture is unchanged.
+
 ## SHADOWSHIMMER1 (2026-10-30): sun shadows stand still (no crawl, no shimmer on a turn, a tight contact)
 
 - bungo 10-29: "shadows move for some reason, yet they shouldn't, the leaves are totally static"; SHADOWBAND1's
