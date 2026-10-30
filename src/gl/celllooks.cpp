@@ -1,6 +1,7 @@
 #include "celllooks.h"
 
 #include "wwswitch.h"
+#include "wwredtwin.h"	// lane REDRETIRE1
 #include "gl/lightphys.h"
 
 #include <QSettings>
@@ -464,10 +465,12 @@ int & groupVal( WwGroup g )
 	return v[size_t( g )];
 }
 
-QByteArray groupRed()
+/* lane REDRETIRE1: OPENCELLFIX2's group reds (bungo OK on the panel 10-27) left the shipping build; they live on only
+ * in tests/cellgroups' red build (src/wwredtwin.h): REDTWIN=CELLGROUP=<wwGroupName> (that master gates nothing) and
+ * REDTWIN=CELLGROUP=ssr (the Screen-Space Reflections row sets indoors only). */
+bool groupTwin( const char * which )
 {
-	WW_SWITCH_STATIC( QByteArray, r, wwEnv( "WW_CELLGROUP_RED" ).trimmed() );
-	return r;
+	return wwRedTwin( "CELLGROUP", which );
 }
 }	// namespace
 
@@ -496,7 +499,7 @@ void wwGroupSet( WwGroup g, bool on )
 
 bool wwGroupLets( WwGroup g )
 {
-	return g >= WwGroup::Count || groupVal( g ) != 0 || groupRed() == wwGroupName( g );
+	return g >= WwGroup::Count || groupVal( g ) != 0 || groupTwin( wwGroupName( g ) );
 }
 
 WwGroup wwLookGroup( WwLook l )
@@ -537,7 +540,7 @@ void wwCellSsrExteriorSetOn( bool on );
 void wwCellSsrRowSet( bool on )
 {
 	wwCellSsrSetOn( on );
-	if ( groupRed() != "ssr" )
+	if ( !groupTwin( "ssr" ) )
 		wwCellSsrExteriorSetOn( on );
 }
 

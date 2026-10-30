@@ -6,6 +6,7 @@ BSD License - see nifskope.h
 
 #include "wwdropdown.h"
 #include "wwswitch.h"
+#include "wwredtwin.h"
 
 #include <QAction>
 #include <QActionGroup>
@@ -200,7 +201,9 @@ QSize WwDropdown::minimumSizeHint() const
 
 void WwDropdown::setElide( bool on )
 {
-	elide = on && wwEnvStr( "WW_DROPDOWN_RED" ) != QLatin1String( "fit" );	// red: the box keeps its longest item's width
+	// lane REDRETIRE1: OPENCELLFIX2's red "fit" (the box keeps its longest item's width) is a twin of tests/cellshow's
+	// red build only (src/wwredtwin.h, REDTWIN=DROPDOWN=fit); WW_DROPDOWN_RED=1 stays (the in-app gate names it).
+	elide = on && !wwRedTwin( "DROPDOWN", "fit" );
 	updateGeometry();
 	update();
 }

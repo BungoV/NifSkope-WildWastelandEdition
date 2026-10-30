@@ -87,7 +87,8 @@ bool wwLookBounceEmitRedStale();
 /* lane OPENCELLFIX2 (bungo 10-27 notes 17, 18, 23-26): a Display group's master tick, a key of its own, ships on.
  * Off, the group's rows read off and keep their own saved state; a row's env pin still wins. A group headed by a
  * feature's own tick (Cell lights, Precomputed Radiance Transfer, LOD, ...) has no master. A group split between
- * Vanilla and Fusion Shaders has a master per half. Red WW_CELLGROUP_RED=<wwGroupName>: that master gates nothing. */
+ * Vanilla and Fusion Shaders has a master per half. Red twin (REDRETIRE1, tests/cellgroups' red build only):
+ * REDTWIN=CELLGROUP=<wwGroupName>: that master gates nothing. */
 enum class WwGroup : int
 {
 	ImprovedLights = 0,	// WW/CellImprovedLights
@@ -112,7 +113,7 @@ void wwGroupSet( WwGroup g, bool on );
 bool wwGroupLets( WwGroup g );	//!< its rows may be on (Count: no group)
 WwGroup wwLookGroup( WwLook l );	//!< Count: not under a master
 /* note 20: the one Screen-Space Reflections row sets indoors and outdoors alike (cellssr.h's two setters).
- * Red WW_CELLGROUP_RED=ssr: indoors only. */
+ * Red twin REDTWIN=CELLGROUP=ssr: indoors only. */
 void wwCellSsrRowSet( bool on );
 
 /* LIGHTSYS-3: the lamp-shadow budget. 0 Off (the 16 nearest shadow lights, as before); else at most N slots, ranked

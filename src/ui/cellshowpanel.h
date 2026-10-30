@@ -65,7 +65,7 @@ struct WwDisplayRow
 	bool quality = false;          //!< the dropdown is the four quality levels
 	QStringList extras;            //!< more of the menu (ticks, submenus, value rows) folded under the row
 	/* lane OPENCELLFIX2 (bungo 10-27 note 18): a group is one row. A child names its group row's tick (or submenu)
-	 * and unfolds indented under the group row's arrow, in list order. WW_CELLSHOW_RED=nest: children lie flat. */
+	 * and unfolds indented under the group row's arrow, in list order. Red twin CELLSHOW=nest: children lie flat. */
 	QString parent;
 	bool master = false;           //!< the group row's tick is a master: off, its children grey
 	bool shared = false;           //!< a child its master does not gate (a Scene window setting): never greyed
@@ -79,17 +79,18 @@ struct WwDisplayRow
 QStringList wwDisplayGroups();   //!< Editor, Vanilla, Fusion Shaders
 
 /*! The Display panel of `menu` laid out by `rows`, with the preset bar on top. A checkable action no row names gets a
- *  row of its own in Fusion Shaders and is counted (wwDisplayLeftovers). Reds (WW_CELLSHOW_RED): `ticks` (a row
- *  with settings has no tick), `groups` (one group), `dropdown` (the dropdowns lose the mode selector's look),
+ *  row of its own in Fusion Shaders and is counted (wwDisplayLeftovers). Red WW_CELLSHOW_RED=groups (one group).
+ *  Retired by REDRETIRE1 to red twins (src/wwredtwin.h, REDTWIN=CELLSHOW=<v>, tests/cellshow's red build only):
+ *  `ticks` (a row with settings has no tick), `dropdown` (the dropdowns lose the mode selector's look),
  *  `arrowframe` (an open fold arrow keeps its pressed frame), `dropright` (a dropdown on the right of its row, not
  *  first in its fold), `override` (a Vanilla row never greys for Fusion Shaders), `builtin` (every built-in is Ultra),
- *  `presetbar` (no built-ins in the Preset dropdown). */
+ *  `presetbar` (no built-ins in the Preset dropdown), `foldrows`, `inline`. */
 QWidget * wwMenuAsDisplay( QMenu * menu, const QList<WwDisplayRow> & rows, QWidget * parent, const WwMenuPanelStyle & style );
 int wwDisplayLeftovers( const QWidget * panel );
 
 /* Named presets of the whole Display state: every tick and choice of the menu, every value field, and the panel's
  * own dropdowns (Color). Saved in QSettings CellEditor/DisplayPresets; applying one goes through the actions, so it
- * is live. WW_CELLSHOW_RED=presets: a save writes nothing. */
+ * is live. Red twin CELLSHOW=presets: a save writes nothing. */
 QVariantMap wwDisplayState( const QWidget * panel );
 void wwDisplaySetState( QWidget * panel, const QVariantMap & state );
 QStringList wwDisplayPresetNames();      //!< his own, sorted
@@ -103,7 +104,7 @@ QString wwDisplayPresetNext( QWidget * panel );   //!< applies the preset after 
 
 /* lane OPENCELLFIX2 (bungo 10-27 notes 22, 26): one setting with two homes (a Display row and a Scene window row)
  * follows itself live. Each home watches the topic with a re-read of the setting; whoever changed it says so.
- * A watch ends with its owner. WW_CELLSHOW_RED=livebind: nobody is told. */
+ * A watch ends with its owner. Red twin CELLSHOW=livebind: nobody is told. */
 void wwLiveWatch( QObject * owner, const QString & topic, const std::function<void()> & reread );
 void wwLiveChanged( const QString & topic );
 
