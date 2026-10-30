@@ -1,0 +1,12 @@
+{
+ "entries": [
+  {
+   "name": "any Commonwealth",
+   "editorId": "Commonwealth*",
+   "groundFog": {
+    "thickness": 2000,
+    "strength": 2
+   }
+  }
+ ]
+}

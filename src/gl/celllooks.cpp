@@ -56,7 +56,7 @@ const LookRow kRows[] = {
 	{ "Mesh lights (.nifx)", "WW/CellNifxLights" },
 	{ "Bindless draws", "WW/CellBindlessDraws", true },	// BINDLESSPERF1: faster on c3 + Memory Den; new key so an old OFF does not stick
 	{ "Weather .recx (sky, clouds, night)", "WW/WeatherRecx" },
-	{ "Ground fog from weather", "WW/CellAirGroundDerived" },
+	{ "Ground fog from weather", "WW/CellAirGroundDerived2", true },	// FOGHEIGHT2: on by default (gate tests/fogheight2); new key so the old shipped OFF does not stick
 	{ "Water depth colour", "WW/CellWaterDepth" },
 	{ "Water caustics", "WW/CellWaterCaustics" },
 	{ "Water soft edge", "WW/CellWaterEdge" },

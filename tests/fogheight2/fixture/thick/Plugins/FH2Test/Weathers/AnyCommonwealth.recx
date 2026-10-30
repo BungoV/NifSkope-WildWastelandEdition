@@ -1,0 +1,12 @@
+{
+ "entries": [
+  {
+   "name": "any Commonwealth, a weather mod's own thick layer (about 2.1 km: thicker than any derived layer)",
+   "editorId": "Commonwealth*",
+   "groundFog": {
+    "thickness": 150000,
+    "strength": 2
+   }
+  }
+ ]
+}
