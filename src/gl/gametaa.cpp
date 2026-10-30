@@ -186,7 +186,8 @@ struct TaaState
 	// lane TAA2: the Modern temporal AA tier (0 Off = the game's resolve), its reds and its dump
 	int taa2 = 0;
 	bool taa2Pinned = false, taa2Fresh = true;
-	int taa2Red = 0;	// bits: 1 noclip, 2 nobicubic, 4 wrongjitter, 8 nolock, 16 noinputs (lane TAA3), 32 oldmotion, 64 oldfilter (TAA4)
+	int taa2Red = 0;	// bits: 1 noclip, 2 nobicubic, 4 wrongjitter, 8 nolock, 16 noinputs (lane TAA3), 32 oldmotion, 64 oldfilter (TAA4),
+						// 128 oldlock (FARTOGGLE3)
 	QString taa2Dump;
 	double taa2Ms = 0.0;
 	int taa2Timed = 0;
@@ -265,7 +266,8 @@ TaaState & ts()
 		s.taa2Red = ( red2.contains( QLatin1StringView( "noclip" ) ) ? 1 : 0 ) | ( red2.contains( QLatin1StringView( "nobicubic" ) ) ? 2 : 0 )
 			| ( red2.contains( QLatin1StringView( "wrongjitter" ) ) ? 4 : 0 ) | ( red2.contains( QLatin1StringView( "nolock" ) ) ? 8 : 0 )
 			| ( red2.contains( QLatin1StringView( "noinputs" ) ) ? 16 : 0 )
-			| ( red2.contains( QLatin1StringView( "oldmotion" ) ) ? 32 : 0 ) | ( red2.contains( QLatin1StringView( "oldfilter" ) ) ? 64 : 0 );
+			| ( red2.contains( QLatin1StringView( "oldmotion" ) ) ? 32 : 0 ) | ( red2.contains( QLatin1StringView( "oldfilter" ) ) ? 64 : 0 )
+			| ( red2.contains( QLatin1StringView( "oldlock" ) ) ? 128 : 0 );	// lane FARTOGGLE3
 		s.taa2Dump = wwEnvStr( "WW_TAA2_DUMP" ).trimmed();
 		if ( s.taa2 != was2 )
 			s.taa2Fresh = true;
@@ -898,7 +900,8 @@ bool taaResolveImpl( Scene * scene )
 		if ( !g.hist2[0] ) {
 			for ( int i = 0; i < 2; i++ ) {
 				g.hist2[i] = makeTex( r, GL_RGBA16F, GL_RGBA, GL_FLOAT, W, H, GL_LINEAR );
-				g.lock[i] = makeTex( r, GL_RG16F, GL_RG, GL_FLOAT, W, H, GL_NEAREST );	// lane TAA3
+				// lane TAA3; lane FARTOGGLE3: RGBA (b, a: the isolated-range lock that keeps sub-pixel far objects)
+				g.lock[i] = makeTex( r, GL_RGBA16F, GL_RGBA, GL_FLOAT, W, H, GL_NEAREST );
 			}
 			s.taa2Fresh = true;
 		}
