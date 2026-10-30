@@ -11,6 +11,8 @@ void main()
 	const uint p = ddgiLinearId();
 	if ( p >= uint( P.dims.w ) )
 		return;
+	if ( pc.job.y == 1u && ddgiProbeState( p ) != DDGI_FRESH )
+		return;   // M3: a scroll's pass touches its fresh probes only (the kept ones keep offset and state)
 	const int N = P.counts.x;
 	const vec3 stepv = P.stepv.xyz;
 	if ( pc.job.x == 4u ) {

@@ -78,6 +78,10 @@ struct Buf
 struct Dev
 {
 	bool ok = false, rt = false, x = false;   // x: lane RTGI1's whole-ray tracer (rt + shaderFloat64)
+	// lane RTXGI1 M3: the Win32 external memory + semaphore extensions are on (the DDGI volume shares its atlas with GL);
+	// the device's and driver's UUIDs (GL_EXT_memory_object matches them against the GL context's)
+	bool share = false;
+	uint8_t deviceUuid[16] = {}, driverUuid[16] = {};
 	std::string name, why;
 	VkInstance inst = VK_NULL_HANDLE;
 	VkPhysicalDevice pd = VK_NULL_HANDLE;
@@ -394,12 +398,25 @@ void init( Dev & D )
 	f2on.features.shaderFloat64 = wantX ? VK_TRUE : VK_FALSE;
 	f2on.pNext = &v12;
 	const char * exts[] = { VK_KHR_ACCELERATION_STRUCTURE_EXTENSION_NAME, VK_KHR_RAY_QUERY_EXTENSION_NAME,
-		VK_KHR_DEFERRED_HOST_OPERATIONS_EXTENSION_NAME };
+		VK_KHR_DEFERRED_HOST_OPERATIONS_EXTENSION_NAME, "VK_KHR_external_memory_win32", "VK_KHR_external_semaphore_win32" };
+	// lane RTXGI1 M3: the two Win32 export extensions (their base, external memory / semaphore, is core 1.1) when the
+	// device has both; the bakes never use them. WW_BAKE_RT_RED=noshare leaves them off (the DDGI volume reads back)
+	bool share = false;
+#ifdef _WIN32
+	if ( wantRt && !( red && !std::strcmp( red, "noshare" ) ) ) {
+		uint32_t ne = 0;
+		vk.vkEnumerateDeviceExtensionProperties( D.pd, nullptr, &ne, nullptr );
+		std::vector<VkExtensionProperties> ex( ne );
+		if ( ne )
+			vk.vkEnumerateDeviceExtensionProperties( D.pd, nullptr, &ne, ex.data() );
+		share = hasExt( ex, exts[3] ) && hasExt( ex, exts[4] );
+	}
+#endif
 	VkDeviceCreateInfo di { VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO };
 	di.pNext = &f2on;
 	di.queueCreateInfoCount = 1;
 	di.pQueueCreateInfos = &qi;
-	di.enabledExtensionCount = wantRt ? 3 : 0;
+	di.enabledExtensionCount = wantRt ? ( share ? 5 : 3 ) : 0;
 	di.ppEnabledExtensionNames = exts;
 	if ( vk.vkCreateDevice( D.pd, &di, nullptr, &D.dev ) != VK_SUCCESS ) {
 		D.why = "vkCreateDevice failed on " + D.name;
@@ -416,6 +433,15 @@ void init( Dev & D )
 		D.scratchAlign = std::max<VkDeviceSize>( ap.minAccelerationStructureScratchOffsetAlignment, 1 );
 	}
 	vk.vkGetDeviceQueue( D.dev, D.qf, 0, &D.q );
+	D.share = share;
+	{
+		VkPhysicalDeviceIDProperties idp { VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_ID_PROPERTIES };
+		VkPhysicalDeviceProperties2 p2 { VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2 };
+		p2.pNext = &idp;
+		vk.vkGetPhysicalDeviceProperties2( D.pd, &p2 );
+		std::memcpy( D.deviceUuid, idp.deviceUUID, sizeof D.deviceUuid );
+		std::memcpy( D.driverUuid, idp.driverUUID, sizeof D.driverUuid );
+	}
 	VkCommandPoolCreateInfo ci { VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO };
 	ci.flags = VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT;
 	ci.queueFamilyIndex = D.qf;

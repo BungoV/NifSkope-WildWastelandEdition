@@ -18,7 +18,15 @@
  *  backface, no Chebyshev: the leak gate's red), WW_CELL_RTDDGI_SPEC=spacing=140,probes=4096,reach=2048,rays=128,
  *  updates=4,max=0,zscale=1 (live: a changed value rebuilds; max > 0 stops after that many updates, for pictures that
  *  repeat), WW_CELL_RTDDGI_DUMP=<dir> (rtddgiDump of the volume at the stop, or at update set 64 without a max),
- *  WW_CELL_RTDDGI_VIEW=0|states|irradiance (pins the debug view row). Census lines start "rtddgi cell:". */
+ *  WW_CELL_RTDDGI_VIEW=0|states|irradiance (pins the debug view row). Census lines start "rtddgi cell:".
+ *
+ *  M3 (2026-10-29): the volume is a window of 2 x reach a side round the camera (kept inside the probe GI's grid) that
+ *  scrolls with it by whole probe cells: the kept probes keep their data, the new planes reset and are relocated and
+ *  classified on the device, and the spec's max counts again from each scroll. GL reads the device's atlas in place
+ *  (GL_EXT_memory_object_win32 + GL_EXT_semaphore_win32, the same GPU and driver by UUID), no copy back and no upload.
+ *  Path reds (in WW_CELL_RTDDGI_RED's list, live, each rebuilds): readback (M2's copy back + upload), rebuild (a camera
+ *  move builds a new volume, no scroll). A camera path (nifskope_ui.cpp wwRenderPathRun) waits at its first key until
+ *  rtddgiCellPending() is false, so its pictures repeat. */
 
 class Scene;
 class Transform;
@@ -42,7 +50,8 @@ void rtddgiCellFrame( Scene * scene );
 void rtddgiCellUniforms( Scene * scene );
 //! the debug view over the frame (glview.cpp, beside the PRTP views)
 void rtddgiCellViewDraw( Scene * scene, const Transform & viewTrans );
-//! the live driver's settle waits on this (nifskope_ui.cpp): a build in flight, or a spec max not reached yet
+//! the live driver's settle and a path's first key wait on this (nifskope_ui.cpp): a build in flight, or a spec max not
+//! reached since the build or the last scroll
 bool rtddgiCellPending();
 
 #endif // RTDDGICELL_H

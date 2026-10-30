@@ -2279,6 +2279,23 @@ static void wwCellStreamPathRun( GLView * ogl, const QString & pathFile, const Q
 		}
 	}
 	wwCellStreamSettle( ogl, 16, waitMs );   // the caches dropped above come back before the shot
+	// lane RTXGI1 M3: the ray-traced GI volume scrolled with the walk; the shot waits until it stood still for its spec's
+	// max updates at the last camera (only while its define is on: an off walk shoots what it shot before)
+	if ( rtddgiCellShaderDefine() ) {
+		QElapsedTimer rt;
+		rt.start();
+		int n = 0;
+		do {
+			ogl->wwCellStreamFrame();
+			ogl->wwPaintNow();
+			n++;
+		} while ( rtddgiCellPending() && rt.elapsed() < 120000 );
+		if ( dumpOk ) {
+			log << "rtddgi settled at the last step in " << n << " frames " << rt.elapsed() << " ms"
+				<< ( rtddgiCellPending() ? " TIMED OUT" : "" ) << "\n";
+			log.flush();
+		}
+	}
 	ogl->grabFramebuffer().save( out );
 	ogl->wwSetPathCamera( false );
 }
@@ -2376,6 +2393,21 @@ static void wwRenderPathRun( GLView * ogl, const QString & pathFile, const QStri
 	path.sample( 0, eye, at, fov );
 	ogl->wwSetPathCamera( true, eye, at, fov );
 	wwDoorLiveStep( ogl->getScene(), 0.0 );	// lane DOORLIVE1: the preroll sees the door at its first frame
+	/* lane RTXGI1 M3: the ray-traced GI volume follows the camera (it scrolls to the path's first key here, or builds
+	 * there); a picture waits until it has stood still for its spec's max updates, as the live settle does before the
+	 * path. Only while the volume's define is on: an off row paints exactly what it painted before */
+	if ( rtddgiCellShaderDefine() ) {
+		QElapsedTimer rt;
+		rt.start();
+		int n = 0;
+		do {
+			ogl->wwPaintNow();
+			n++;
+		} while ( rtddgiCellPending() && rt.elapsed() < 120000 );
+		if ( sideOk )
+			log << "rtddgi settled at the first key in " << n << " frames " << rt.elapsed() << " ms"
+				<< ( rtddgiCellPending() ? " TIMED OUT" : "" ) << "\n";
+	}
 	for ( int k = 0; k < preroll; k++ ) {
 		wwGameTaaSetFrame( k );
 		wwCellPostSetPath( k, float( path.fps() ) );	// lane GRASSMB1: the motion blur's frame and frame time
