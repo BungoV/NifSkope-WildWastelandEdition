@@ -155,6 +155,29 @@ Reds: WW_CLOUDVOL_RED = onetype | nocurl | shortlight | ign. Offline gate: tests
   programs are the old ones: 378 of 378 binaries (126 programs x 3 modes) are the old machine code, differing only in
   the stamp, the source hash and, in fo4_effectcellfx, one line number in the driver's warning text (notes/prtoff1/sweep).
 
+## SKYINT1: an interior with Use Sky Lighting is lit by the current weather and hour
+
+- **What the game does (game-derived):** on entering a cell, the game sets the sky's
+  mode from CELL DATA. An interior without Show Sky (bit 7) gets the interior mode. Show Sky alone gets the sky-dome
+  mode. Show Sky plus Use Sky Lighting (bit 8) gets the FULL mode, the same as an exterior. Outside the interior mode
+  the sky updates the weather, colours, fog and sun every frame at the game hour. The colour update then copies the
+  cell's (or a lighting template's) directional, ambient, fog colours and DALC over the weather's. It does that for
+  the sky-dome mode in an interior, and it skips it in the full mode. So in a Use Sky Lighting interior
+  (ConcordMuseum01, 0x1181) the ambient (DALC) and the fog colours are the CURRENT weather's at the current hour, and
+  the cell's XCLL ones are not used. Such a cell takes the cell's image space, not the weather's. The fog distances
+  in that mode and whether a sun light is drawn indoors were not read.
+- **The viewer does the same:** a Use Sky Lighting interior (`WwCellLighting::skyLighting`, bits 7 + 8) draws with the
+  Lookdev weather's DALC (the exterior sky's six, encoded to the stored gamma so the ambient law is unchanged) and its
+  fog colours (fog rows 1..4; the cell keeps its own distances, power and max). These are uploaded every draw, so a
+  set of `WW_LOOKDEV_HOUR` / `WW_LOOKDEV_WEATHER` moves them live. Census: `cell sky lighting: Use Sky Lighting
+  interior: ambient (DALC) and fog colours from <weather> hour <h>`.
+- **The ray-traced GI volume's sky** in such a cell is now the current weather and hour (`probeSkyLightNow`), taken
+  once it has stood still for 400 ms. It no longer depends on the baked probe GI's relight of the kept cell. A new
+  sky builds the volume again (about 1 s; the settle waits on `rtddgiCellPending`).
+- **Red** `WW_CELL_SKYLIT_RED` (live): `fixed` = both as before (XCLL ambient and fog, the volume's sky held at its
+  first build's), `xcll` = the ambient and fog only, `sky` = the volume's sky only. Interiors without bit 8 and
+  exteriors take none of this.
+
 ## RTXGI1 M3: the ray-traced GI volume follows the camera, and GL reads it in place (still ships Off)
 
 - **No copy back (interop):** the volume's irradiance, distance and probe tiles now sit in one device buffer, laid out

@@ -2196,15 +2196,45 @@ void wwCellLightsUniforms( Scene * scene )
 			vt.rotation( 1, k ) / sc, vt.rotation( 2, k ) / sc, w / sc ) );
 	}
 	// PRTP2 section 4: per channel, ((p - n) / 2 per axis, mean of the six), gamma; the shader powers it
-	const bool dalc = L->hasDalc && !( s.red & 4 );
+	/* lane SKYINT1 (10-29): a Use Sky Lighting interior takes the CURRENT weather's DALC at the hour, as the game's
+	 * full-mode sky does there (the cell's XCLL DALC is not read); the same six as the exterior sky (probesky.cpp's
+	 * order, its red dalcflip), encoded back to the stored gamma so the shader's law is unchanged */
+	const float ( *D )[3] = L->dalc;
+	float skyD[6][3];
+	bool skyLitAmb = false;
+	if ( wwCellSkyLitNow( L ) ) {
+		float lin[6][3];
+		if ( wwLookdevDalc( lin ) ) {
+			const bool flip = wwLookdevRed( "dalcflip" );
+			for ( int a = 0; a < 6; a++ )
+				for ( int c = 0; c < 3; c++ )
+					skyD[a][c] = std::pow( std::max( lin[flip ? a : ( a ^ 1 )][c], 0.0f ), 1.0f / 2.2f );
+			D = skyD;
+			skyLitAmb = true;
+		}
+	}
+	const bool dalc = ( L->hasDalc || skyLitAmb ) && !( s.red & 4 );
 	prog->uni1b( "cellHasDalc", dalc );
 	for ( int c = 0; c < 3 && dalc; c++ ) {
 		float mean = 0.0f;
 		for ( int a = 0; a < 6; a++ )
-			mean += L->dalc[a][c] / 6.0f;
+			mean += D[a][c] / 6.0f;
 		prog->uni4f_l( prog->uniLocation( "cellDalc[%d]", c ), FloatVector4(
-			( L->dalc[0][c] - L->dalc[1][c] ) * 0.5f, ( L->dalc[2][c] - L->dalc[3][c] ) * 0.5f,
-			( L->dalc[4][c] - L->dalc[5][c] ) * 0.5f, mean ) );
+			( D[0][c] - D[1][c] ) * 0.5f, ( D[2][c] - D[3][c] ) * 0.5f,
+			( D[4][c] - D[5][c] ) * 0.5f, mean ) );
+	}
+	if ( L->interior && L->skyLighting ) {	// telemetry, once per change
+		static QString skyLitLast;
+		const QString line = skyLitAmb
+			? QStringLiteral( "cell sky lighting: Use Sky Lighting interior: ambient (DALC) and fog colours from %1 hour %2" )
+				.arg( wwLookdevWeatherKey() ).arg( wwLookdevHour(), 0, 'f', 2 )
+			: QStringLiteral( "cell sky lighting: Use Sky Lighting interior: the cell's own ambient and fog (%1)" )
+				.arg( !wwLookdevActive() ? QStringLiteral( "Lookdev off" ) : ( wwCellSkyLitRed() & 1 )
+					? QStringLiteral( "WW_CELL_SKYLIT_RED" ) : QStringLiteral( "no weather" ) );
+		if ( line != skyLitLast ) {
+			fprintf( stderr, "%s\n", qPrintable( line ) );
+			skyLitLast = line;
+		}
 	}
 	// lane AMBO2: the Ambient Only volumes, in plugin order (the shader takes the first that holds a point)
 	const int ambo = ( dalc && !( s.red & 1024 ) ) ? std::min( int( L->ambientLights.size() ), kAmbientSlots ) : 0;
@@ -2430,9 +2460,19 @@ void wwCellLightsUniforms( Scene * scene )
 	 * fog term follows the sun, which an interior lacks). */
 	if ( L->hasFog && prog->uniLocation( "fogOn" ) >= 0 ) {
 		prog->uni1b( "fogOn", true );
+		/* lane SKYINT1 (10-29): a Use Sky Lighting interior's fog colours (K rows 1..4) are the current weather's, as the
+		 * game's full-mode sky keeps them; the distances, power and max stay the cell's (the engine's fog distances there
+		 * were not read: unknown) */
+		float fK[6][4];
+		std::memcpy( fK, L->fogK, sizeof fK );
+		WwFog wf;
+		if ( wwCellSkyLitNow( L ) && wwLookdevFogNow( wf ) )
+			for ( int k = 1; k <= 4; k++ )
+				for ( int c = 0; c < 3; c++ )
+					fK[k][c] = wf.K[k][c];
 		for ( int k = 0; k < 6; k++ )
 			prog->uni4f_l( prog->uniLocation( "fogK[%d]", k ),
-				FloatVector4( L->fogK[k][0], L->fogK[k][1], L->fogK[k][2], L->fogK[k][3] ) );
+				FloatVector4( fK[k][0], fK[k][1], fK[k][2], fK[k][3] ) );
 		float zr[4] = { 0, 0, 0, 0 };
 		for ( int k = 0; k < 3; k++ ) {
 			zr[k] = vt.rotation( k, 2 ) / sc;
@@ -2450,6 +2490,20 @@ void wwCellLightsUniforms( Scene * scene )
 bool wwCellImageSpaceOn()
 {
 	return st().isOn;
+}
+
+int wwCellSkyLitRed()
+{
+	WW_SWITCH_STATIC( int, red, [] {
+		const QString v = wwEnvStr( "WW_CELL_SKYLIT_RED" ).trimmed().toLower();
+		return v == QLatin1String( "fixed" ) ? 3 : v == QLatin1String( "xcll" ) ? 1 : v == QLatin1String( "sky" ) ? 2 : 0;
+	}() );
+	return red;
+}
+
+bool wwCellSkyLitNow( const WwCellLighting * L )
+{
+	return L && L->interior && L->skyLighting && wwLookdevActive() && !( wwCellSkyLitRed() & 1 );
 }
 
 bool wwCellShadowOn()

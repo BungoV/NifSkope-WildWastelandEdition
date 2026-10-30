@@ -1614,6 +1614,15 @@ bool wwLookdevDalc( float rgb[6][3] )
 	return L.fromWeather;
 }
 
+bool wwLookdevFogNow( WwFog & out )
+{
+	resolve();
+	if ( !st().haveWeather )
+		return false;
+	out = currentFog();
+	return true;
+}
+
 namespace
 {
 bool computeImageSpace( WwLookdevIs & o );
