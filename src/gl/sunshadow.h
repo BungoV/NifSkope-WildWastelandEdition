@@ -69,5 +69,9 @@ void wwSunShadowUniforms( Scene * scene );
 QString wwSunShadowSummary();
 //! lane LIVESET1: the casters were rebuilt live: the held cascade layers and caster tracks start over
 void wwSunShadowForget();
+/*! lane SHADOWSHIMMER1: the parts of the stable sun shadows taken back to today's path by the red
+ *  WW_SUN_SHADOW_STABLE_RED = old (all) | fit,kernel,bias: bit 1 CSM1's box fit, 2 the screen + frame kernel rotation,
+ *  4 the CSM1 caster/receiver bias without the normal offset. 0 = all stable (the default). */
+int wwSunShadowStableRed();
 
 #endif

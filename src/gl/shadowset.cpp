@@ -13,6 +13,7 @@ BSD License - see nifskope.h
 #include "gl/celllooks.h"	// lane GAPLOOK1: the contact far tier's switch
 #include "gl/skyephem.h"	// lane EPHEM1: FO4CS Solar's sun + moon arithmetic
 #include "gl/gametaa.h"
+#include "gl/sunshadow.h"	// lane SHADOWSHIMMER1: the stable shadows' red
 #include "gl/cellssr.h"		// the cell view's shared opaque pass (contact shadows read its depth)
 #include "gl/glnode.h"
 #include "gl/glscene.h"
@@ -1858,6 +1859,17 @@ bool wwShadowCascadePreset( WwCascadePreset & p )
 	p.biasTexels = 1.5f;
 	p.slopeBias = 6.0f;
 	p.unitBias = 12.0f;
+	/* lane SHADOWSHIMMER1: the contact gap of a thin caster (B sin e cos e / texel, B the caster's slope + unit offset plus
+	 * the receiver's) was 4-7 texels: the unit bias alone is 12 D16 quanta of a ~32000-unit range, 6 world units. A normal
+	 * offset of 1 texel x sin(angle) does the acne work instead (its depth margin is texel x the plane's own slope), so the
+	 * caster keeps slope 0.5 and 2 quanta and the receiver 0.25 texel: the gap <= 0.9 texel at any sun (tests/shadowshimmer1
+	 * G2). Red WW_SUN_SHADOW_STABLE_RED=bias (or old): the numbers above, no normal offset. */
+	if ( !( wwSunShadowStableRed() & 4 ) ) {
+		p.biasTexels = 0.25f;
+		p.slopeBias = 0.5f;
+		p.unitBias = 2.0f;
+		p.normalTexels = 1.0f;
+	}
 	return true;
 }
 
