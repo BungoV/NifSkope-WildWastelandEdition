@@ -425,6 +425,38 @@
   a pixel) and RESTIRDI1 (8 frames) both 0 of 20736 pixels keep another light, 0 hit/miss differ on the same ray, ratio
   difference 0; red novis reads ratio 1.0000 on both. The nohole red cannot bite there (no alpha-tested cards).
 
+## LODPLACE1 (2026-10-30, CODE1030 2a + 2b): far-LOD placement and far-state censuses (no misplacement, no toggle found)
+
+- **What was asked** (bungo 10-30): far-LOD objects "placed underneath the map" (trees, a radar dish, buildings,
+  terrain-like strips seen from under the terrain; ground-textured "shards" in Concord's sky) and far-LOD objects
+  "toggled on and off" with a steady camera. Both were MEASURED offline; neither fault is in the far-LOD placement or
+  in the CPU-side far selection, so no render code changed. The censuses stay as gates.
+- **`NifSkope -no-gui streamwalk <path> --still <n> --place <file> [--still-red]`** (src/cellstreamwalk.cpp): after
+  the walk, n frames at the last eye; each frame's far state (the rows every instanced far ring draws through
+  CellFarHide, the masked far triangles, the hidden far nodes, the loaded cells) against the frame before:
+  `farstate still: ... changes C, row changes R, flip-flops F ... VERDICT`. Every walk step also counts per far row the
+  frames it changed on (`farstate step`, `farstate walk`: a change with the loaded cells unchanged has no cause; two
+  changes inside one step are a flip-flop). `--place` writes every far object row, every other shape and every far
+  terrain vertex in world units. `--still-red` (the census's own red) hides and shows one far row's cell on alternate
+  frames.
+- **tests/lodplace/** (`bash tests/lodplace/run.sh`): bake_census.py (the baked .lodi/.lodo/manifests against the
+  bake's own 43 plugins: REFR DATA/XSCL, SCOL parts composed, LAND VHGT), place_census.py (the far field as the cell
+  view built it against the bake's independent decode and the LAND), place_red.py (a dump with one fault put in).
+- **Measured, Concord c3 (the bake the c3 rows load, Fo4CS_Bakes/FO4CSLOD/Commonwealth; rings -48,-16..15,47):**
+  bake: 151,690 placements (110,609 plain refs, 41,081 collection parts), moved or flipped by the writer 0 (Z off
+  > 1 u: 4 plain refs, worst 191 u; collection parts off: 0; 166 parts differ by a yaw only, the tree yaw hash);
+  562 placements lie wholly under the LAND - 50 u and every one but 4 has its own ESM origin under too (basement and
+  foundation walls, quarry blocks, garage floors: buried in the game's data). As built: 143,733 drawn far rows,
+  reader-moved 0, flipped 0; far terrain 399,873 vertices |z - LAND| median 0, p99 0, max 976. Still camera, 120
+  frames: changes 0; slow walk (88 steps of 128 u, then +-160 u at the block's shift line): 0 row flip-flops, 0
+  changes with the loaded cells unchanged.
+- **Reds:** bake census `--red under` / `--red flip`, place census reds origin (FIREFX1's defect: a cell origin off) /
+  flip / under, streamwalk `--still-red`: each FAILs.
+- **Owed (pictures when bungo asks):** c3 still_close5 rows default vs `^WW_CELL_FARLOD=0` vs `^WW_CELL_ANIMOBJ=0` to
+  name the sky shards' owner (they are not a far placement); a steady-camera row pair (several frames) with TAA on /
+  off for the toggling, whose remaining suspects are GPU-side (TAA jitter on sub-pixel far objects, the far rows'
+  polygon offset against the far ground, the far cards' depth reject).
+
 ## RTXFIX1 (2026-10-30): the Ray-traced GI probes inside the frame (rounder, fogged, exposed); the atlas order's red
 
 - **Probes view** (bungo 10-29: "Could our probes have a rounder shape?", "fog", the spheres by the string lights and the
