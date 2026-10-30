@@ -20,6 +20,7 @@
 #include "uniforms.glsl"
 #include "cell_lights.glsl"
 #include "cell_bloom.glsl"
+#include "ww_dither.glsl"
 
 uniform sampler2DMS hdrSrc;
 uniform int hdrMode;
@@ -75,7 +76,7 @@ void main()
 			return;
 		}
 		if ( A > 1.0 / 1024.0 )
-			fragColor = vec4( cellImageSpace( sqrt( v / A ) ) * A, A );
+			fragColor = vec4( wwDither8( cellImageSpace( sqrt( v / A ) ) * A, gl_FragCoord.xy ), A );	// FOGGLOW1: the sky's air too
 		else	// no coverage (an additive glow): its light added to the sky
 			fragColor = vec4( max( cellImageSpace( sqrt( v ) ) - cellImageSpace( vec3( 0.0 ) ), vec3( 0.0 ) ), 0.0 );
 		return;
@@ -84,5 +85,6 @@ void main()
 		fragColor = x;
 		return;
 	}
-	fragColor = vec4( cellImageSpace( sqrt( max( x.rgb, vec3( 0.0 ) ) ) ), 1.0 );
+	// lane FOGGLOW1: dithered before the 8-bit view (ww_dither.glsl; WW_CELL_DITHER=0: as before)
+	fragColor = vec4( wwDither8( cellImageSpace( sqrt( max( x.rgb, vec3( 0.0 ) ) ) ), gl_FragCoord.xy ), 1.0 );
 }

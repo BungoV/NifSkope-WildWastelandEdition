@@ -81,6 +81,9 @@ bool wwGameTaaUnjittered( Matrix4 & proj );
 bool wwGameTaaJitter( float & offX, float & offY );
 //! lane TAA4: this frame's TAA frame index (the history's step key); false when not jittered.
 bool wwGameTaaFrame( int & frame );
+/*! lane FOGGLOW1: the 8-bit writes' dither (res/shaders/ww_dither.glsl): the seed for wwDitherSeed, the TAA frame index
+ *  when jittered, else 0; -1 when off (WW_CELL_DITHER=0, the red: the picture as before). Read per call (live). */
+int wwCellDitherSeed();
 
 //! After the scene's draw (and the cell view's one tone map): the vectors, the resolve, the frame back.
 void wwGameTaaResolve( Scene * scene );

@@ -491,6 +491,15 @@ bool wwGameTaaFrame( int & frame )
 	return true;
 }
 
+int wwCellDitherSeed()
+{
+	WW_SWITCH_STATIC( bool, off, wwEnv( "WW_CELL_DITHER" ).trimmed() == "0" );
+	if ( off )
+		return -1;
+	int f = 0;
+	return wwGameTaaFrame( f ) ? ( f & 0xffff ) : 0;
+}
+
 bool wwGameTaaWantsSettle()
 {
 	TaaState & s = ts();
@@ -806,6 +815,9 @@ bool taaResolveImpl( Scene * scene )
 			prog->uni4f( "c5", c5 );
 			prog->uni1i( "taaRed", s.redNoClamp ? 1 : 0 );
 			prog->uni1i( "taaTap", tap );
+			const int dither = wwCellDitherSeed();	// lane FOGGLOW1: the picture's 8-bit write dithered
+			prog->uni1i( "wwDitherOn", dither >= 0 ? 1 : 0 );
+			prog->uni1i( "wwDitherSeed", std::max( dither, 0 ) );
 			r->drawShape( 4, 3, 6, GL_TRIANGLES, GL_UNSIGNED_SHORT, &attrs, idx );
 			r->stopProgram();
 		}
@@ -942,6 +954,9 @@ bool taaResolveImpl( Scene * scene )
 			prog->uni1i( "taa2Tier", s.taa2 );
 			prog->uni1i( "taa2Red", s.taa2Red );
 			prog->uni1i( "taa2NoHist", noHist2 ? 1 : 0 );
+			const int dither = wwCellDitherSeed();	// lane FOGGLOW1: the picture's 8-bit write dithered
+			prog->uni1i( "wwDitherOn", dither >= 0 ? 1 : 0 );
+			prog->uni1i( "wwDitherSeed", std::max( dither, 0 ) );
 			prog->uni4m( "reproj", reproj4 );
 			fn->glActiveTexture( GLenum( GL_TEXTURE0 + kUnitLock ) );
 			fn->glBindTexture( GL_TEXTURE_2D, g.lock[rd] );

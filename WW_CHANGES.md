@@ -1,5 +1,27 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## FOGGLOW1: the fog's bands and rings were the 8-bit write; the 8-bit writes are dithered now (on; WW_CELL_DITHER=0 = before)
+
+- **Cause, measured (bungo 10-29, Memory Den night fog):** the faint horizontal stripes on the left building and the
+  stepped rings round the red neon are an 8-bit staircase: the tone map writes the view (and the TAA its picture) as one of
+  256 levels with no dither, so a slow dark gradient of fog steps in flat plateaus a level apart. Gate (notes/fogglow1/
+  tools/bandgate.py, mean plateau run along y and x in four smooth regions of the still_memden camera): before 7.8-16 px
+  runs, up to 73 % of the pixels on runs of 8 px or more. Not the froxel grid: the air's own L (WW_CELL_AIR_PROBE=1, the
+  HDR dump) shows no phase peak at its 12 px column in any region (MOD at 12 <= its 11 / 13 neighbours; a pure 12 px
+  bilinear read scores 6.0, tools/bandstat_selftest.py). Not the HDR frame (RGBA32F). Not the march's step offset
+  (froxels: no per-pixel offset to stripe, unlike CLOUD5's clouds).
+- **Fix:** `res/shaders/ww_dither.glsl`, a triangular (TPDF) noise of +-1 level added to the display value before each
+  8-bit write (Gjol, "Banding in Games: A Noisy Rant", Playdead 2016), fading to 0 at exactly 0 and 1. Applied in
+  cell_hdr.frag modes 0 (the tone map) and 2 (the sky's air), game_taa.frag and taa2.frag (the TAA picture: the game
+  TAA's tent averages the tone map's grain away). Seed = the TAA frame index (`wwCellDitherSeed`, gametaa.cpp): a path
+  frame k is the same picture every run. Programs that never set `wwDitherOn` keep 0: no change.
+- **Switch:** `WW_CELL_DITHER` (live): unset = on; `0` = the red, the picture as before.
+- **Measured live (Memory Den night 5x5, base env + glare, game TAA):** on: worst run 1.98 px PASS (bar 4); the red
+  `WW_CELL_DITHER=0`: 9.65 px FAIL; red vs the rung exe's base 0 px; on, on again, on after an off row: identical. On vs
+  off: means within 0.1 level per channel; 166 px move >= 8 levels, single pixels on the sign and door edges where the
+  game TAA's bracket picks another neighbour (4x crop: no visible change).
+- Link: cell_hdr, cell_hdr_fd, game_taa, taa2 x 3 modes LINK OK.
+
 ## PRTOFF1: the old baked probe GI (PRT) never draws; the ray-traced GI stands on its own
 
 - bungo 10-29: "stop testing the old GI prtp" / "just don't ever render it since it gets removed". The old baked
@@ -59,7 +81,6 @@
   classification (`job.y = 1`, state `DDGI_FRESH` 3). The CLI's passes keep `job.y = 0`, so they are unchanged.
 - **Bake device:** it enables `VK_KHR_external_memory_win32` and `VK_KHR_external_semaphore_win32` when the GPU has
   them. The bakes do not use them; `WW_BAKE_RT_RED=noshare` leaves them off.
-
 ## AIRZONE1: hand-placed volumes for GI rooms, fog and air particles (row, ships Off; built and gated by the main session)
 
 - **One kind of volume, placed by hand per cell**, stored as `.recx` (the shared standard):
