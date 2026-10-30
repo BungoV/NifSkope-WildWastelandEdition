@@ -449,6 +449,20 @@ struct SampleResult
 	V3 E;
 	float vis = 0.0f, w = 0.0f, fade = 0.0f;
 };
+/*! RTXCASCADE1 (2026-10-30), one axis of a volume's blend weight at grid coordinate g (0 at the first probe, dims - 1
+ *  at the last): 1 inside, falling to 0 over the last cell [J21 7.3]; a camera-locked volume tightens the region by
+ *  one cell (tight: 0 over the outer cell, where the plane a scroll has just reset sits, then 0 -> 1 over the next).
+ *  M2's fade is the untightened one (sampleVolume's tight = false).  GLSL: cell_ddgi.glsl fade lines (CELL_DDGI_TIGHT) */
+inline float cascadeEdge( float g, int dims, bool tight )
+{
+	const float e = std::min( g, float( dims - 1 ) - g );
+#ifdef RTDDGI_RED_CASCTIGHT
+	(void)tight;
+	return clampf( e, 0.0f, 1.0f );   // red: a camera-locked volume blends over its outer cell (the fresh plane) too
+#else
+	return clampf( tight ? e - 1.0f : e, 0.0f, 1.0f );
+#endif
+}
 /*! The irradiance at surface point P (normal n, o = unit direction to the viewer, or back along the ray for a hit)
  *  from the 8 probes of the cage round the biased point P' = P + biasVector ([J19 5.2], [J21 4.1 eq 2], GUIDE 3):
  *  per probe w = backfaceWeight(dir P -> probe) x max(0.05, Chebyshev(|P' - probe|) at dir probe -> P') floored at
@@ -458,8 +472,9 @@ struct SampleResult
  *  mean of the tile's alpha (linear, M1FIX). fade (ours, M2): 1 one cell inside the probe box, falling to 0 at its
  *  faces and past them (the cell view hands over to the baked grid there). The twin's bounce (traceRay) and the
  *  GLSL read (res/shaders/cell_ddgi.glsl cellDdgiRead, the unit test's "sample" check) both follow it.
- *  GLSL: trace.comp ddgiIrradianceAt (d = n, no vis, no fade), res/shaders/cell_ddgi.glsl cellDdgiRead */
-inline SampleResult sampleVolume( const SampleVolume & v, V3 P, V3 n, V3 o, V3 d, unsigned red )
+ *  GLSL: trace.comp ddgiIrradianceAt (d = n, no vis, no fade), res/shaders/cell_ddgi.glsl cellDdgiRead.
+ *  RTXCASCADE1: tight = a cascade's read (cascadeEdge's camera-locked fade; cell_ddgi.glsl cellDdgiReadOne) */
+inline SampleResult sampleVolume( const SampleVolume & v, V3 P, V3 n, V3 o, V3 d, unsigned red, bool tight = false )
 {
 	SampleResult out;
 	V3 Pb = P;
@@ -472,7 +487,7 @@ inline SampleResult sampleVolume( const SampleVolume & v, V3 P, V3 n, V3 o, V3 d
 		const float g = ( Pb[k] - v.origin[k] ) / v.step[k];
 		base[k] = std::min( std::max( int( std::floor( g ) ), 0 ), std::max( v.dims[k] - 2, 0 ) );
 		a[k] = clampf( g - float( base[k] ), 0.0f, 1.0f );
-		fade = std::min( fade, clampf( std::min( g, float( v.dims[k] - 1 ) - g ), 0.0f, 1.0f ) );
+		fade = std::min( fade, cascadeEdge( g, v.dims[k], tight ) );
 	}
 	out.fade = fade;
 	double sum[3] = { 0, 0, 0 }, vsum = 0, wsum = 0;
@@ -521,6 +536,76 @@ inline SampleResult sampleVolume( const SampleVolume & v, V3 P, V3 n, V3 o, V3 d
 	out.E = m * m * ( 2.0f * kPi );
 	out.vis = float( vsum / wsum );
 	out.w = float( wsum );
+	return out;
+}
+
+// ------------------------------------------------------------------ RTXCASCADE1: nested camera-following volumes [J21 7.3]
+/*! Cascades (GUIDE 4, [J21 7.3]): nested axis-aligned volumes round the camera, each 2x coarser than the one inside
+ *  it; a surface samples them dense to coarse and stops once the weights reach 1. Cascade 0 is M3's volume; the
+ *  coarser ones reach the far buildings M3's window leaves on the flat ambient. */
+constexpr int kMaxCascades = 4;   // ours: 4 x 2^3 = 8x the near window's reach
+/*! cascade `level`'s spacing (and window) as a multiple of cascade 0's: 2^level on every axis [J21 7.3 "each 2x
+ *  coarser"]. With the lattice at whole multiples of the step (packVolume's floor), every coarse probe sits on a
+ *  fine one.  GLSL: none (the C++ sizes the volumes; src/rtddgicell.cpp) */
+inline double cascadeScale( int level )
+{
+#ifdef RTDDGI_RED_CASCSCALE
+	return 1.0 + double( level );   // red: each cascade one step coarser, not twice as coarse
+#else
+	return std::ldexp( 1.0, level );
+#endif
+}
+/*! the frames cascade `level` updates on (ours, PLAN.md cost lever "far ones update less often"): cascade 0 every
+ *  frame, cascade L every `every`^L frames, at frame % every^L == L so the coarse ones take turns (for every >= 4
+ *  and L <= 3 no two coarse cascades share a frame).  GLSL: none (src/rtddgicell.cpp's frame tick) */
+inline bool cascadeDue( int level, uint64_t frame, int every )
+{
+	if ( level <= 0 )
+		return true;
+	uint64_t period = 1;
+	for ( int l = 0; l < level; l++ )
+		period *= uint64_t( std::max( every, 1 ) );
+#ifdef RTDDGI_RED_CASCDUE
+	period = uint64_t( std::max( every, 1 ) );   // red: every coarse cascade on the same short period (no "less often")
+#endif
+	return frame % period == uint64_t( level ) % period;
+}
+/*! [J21 7.3] the read over n cascades (v[0] the densest): each one's weight is its tight fade (cascadeEdge, the
+ *  camera-locked blend), and it takes that share of what the denser ones left: take = w x left, left -= take, stop
+ *  when left is 0. A cascade with no usable probe at P (w = 0) takes nothing. E and vis = the takes' weighted mean;
+ *  w = the weights' sum over the cascades read (0: none); fade = the takes' sum (the share the volumes cover: the
+ *  caller's flat ambient takes the rest, as past M3's box).  GLSL: res/shaders/cell_ddgi.glsl cellDdgiRead under
+ *  WW_CELL_RTDDGI_CASCADES */
+inline SampleResult sampleCascades( const SampleVolume * v, int n, V3 P, V3 nrm, V3 o, V3 d, unsigned red )
+{
+	SampleResult out;
+	double E[3] = { 0, 0, 0 }, vis = 0, acc = 0, wsum = 0, left = 1.0;
+	for ( int i = 0; i < n; i++ ) {
+#ifdef RTDDGI_RED_CASCADE
+		const int c = n - 1 - i;   // red: coarse to dense (the far volume's value wins where the near one holds)
+#else
+		const int c = i;
+#endif
+		const SampleResult r = sampleVolume( v[c], P, nrm, o, d, red, true );
+		if ( !( r.w > 0.0f && r.fade > 0.0f ) )
+			continue;
+		const double take = double( r.fade ) * left;
+		E[0] += take * r.E.x;
+		E[1] += take * r.E.y;
+		E[2] += take * r.E.z;
+		vis += take * r.vis;
+		wsum += r.w;
+		acc += take;
+		left -= take;
+		if ( left <= 0.0 )
+			break;
+	}
+	out.w = float( wsum );
+	out.fade = float( acc );
+	if ( acc > 0.0 ) {
+		out.E = V3( float( E[0] / acc ), float( E[1] / acc ), float( E[2] / acc ) );
+		out.vis = float( vis / acc );
+	}
 	return out;
 }
 

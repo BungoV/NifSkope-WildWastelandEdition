@@ -10,11 +10,36 @@
 //   texels [64 nP, 192 nP)       distance: probe p's 16 x 16 (mean, mean^2) pairs at 64 nP + 128 p, two a texel
 //   texels [192 nP, 193 nP)      probes: offset xyz, w = the state when usable (Vigilant, blended), else 0 (Off)
 
+//
+// Lane RTXCASCADE1 (2026-10-30): under WW_CELL_RTDDGI_CASCADES (the loader's define while WW_CELL_RTDDGI_CASCADES > 1)
+// the atlas holds 2-4 nested camera-following volumes, each 2x coarser ([J21 7.3], rtddgimath.h sampleCascades):
+// cascade c's texels start at cellDdgiCBase[c], laid out as above with its own nP. The one-volume read below is then
+// cellDdgiReadOne on cascade cellDdgiC (the macros swap its uniforms for the arrays' element c and tighten its fade by
+// one cell: a camera-locked volume), and cellDdgiRead (at the end) walks the cascades dense to coarse. Without the
+// define the macros are empty: the off source differs by preprocessor lines only (M3's machine code).
+
 uniform bool cellDdgiOn;			// a volume is up for this document
 uniform samplerBuffer cellDdgiAtlas;
+#ifndef WW_CELL_RTDDGI_CASCADES
 uniform vec4 cellDdgiOrigin;		// the first probe (world), w = D, the smallest spacing
 uniform vec4 cellDdgiStep;			// the spacing per axis, w = B, the self-shadow bias
 uniform ivec4 cellDdgiDims;			// probes per axis, w = nP
+#define CELL_DDGI_BASE
+#define CELL_DDGI_TIGHT
+#else
+uniform int cellDdgiCount;			// cascades up (1..4), cascade 0 the densest
+uniform vec4 cellDdgiCOrigin[4];	// per cascade: cellDdgiOrigin's, cellDdgiStep's, cellDdgiDims's, the first texel
+uniform vec4 cellDdgiCStep[4];
+uniform ivec4 cellDdgiCDims[4];
+uniform int cellDdgiCBase[4];
+int cellDdgiC = 0;					// the cascade cellDdgiReadOne reads
+#define cellDdgiOrigin cellDdgiCOrigin[cellDdgiC]
+#define cellDdgiStep cellDdgiCStep[cellDdgiC]
+#define cellDdgiDims cellDdgiCDims[cellDdgiC]
+#define CELL_DDGI_BASE cellDdgiCBase[cellDdgiC] +
+#define CELL_DDGI_TIGHT - 1.0
+#define cellDdgiRead cellDdgiReadOne
+#endif
 uniform int cellDdgiRed;			// rtddgimath.h kSample*: 1 trilinear (WW_CELL_RTDDGI_RED), 2 nocheb, 4 nobias
 
 struct CellDdgiOut
@@ -52,10 +77,10 @@ vec4 cellDdgiTile( int p, vec3 d, int S )
 		int x = x0 + k % 2;
 		int y = y0 + k / 2;
 		if ( S == 8 ) {
-			t[k] = texelFetch( cellDdgiAtlas, 64 * p + y * 8 + x );
+			t[k] = texelFetch( cellDdgiAtlas, CELL_DDGI_BASE 64 * p + y * 8 + x );
 		} else {
 			int i = y * 16 + x;
-			vec4 q = texelFetch( cellDdgiAtlas, 64 * cellDdgiDims.w + 128 * p + i / 2 );
+			vec4 q = texelFetch( cellDdgiAtlas, CELL_DDGI_BASE 64 * cellDdgiDims.w + 128 * p + i / 2 );
 			t[k] = i % 2 == 0 ? vec4( q.x, q.y, 0.0, 0.0 ) : vec4( q.z, q.w, 0.0, 0.0 );
 		}
 	}
@@ -97,9 +122,9 @@ CellDdgiOut cellDdgiRead( vec3 P, vec3 n, vec3 o, vec3 d )
 	float ay = clamp( gy - float( by ), 0.0, 1.0 );
 	float az = clamp( gz - float( bz ), 0.0, 1.0 );
 	float fade = 1.0;
-	fade = min( fade, clamp( min( gx, float( cellDdgiDims.x - 1 ) - gx ), 0.0, 1.0 ) );
-	fade = min( fade, clamp( min( gy, float( cellDdgiDims.y - 1 ) - gy ), 0.0, 1.0 ) );
-	fade = min( fade, clamp( min( gz, float( cellDdgiDims.z - 1 ) - gz ), 0.0, 1.0 ) );
+	fade = min( fade, clamp( min( gx, float( cellDdgiDims.x - 1 ) - gx ) CELL_DDGI_TIGHT, 0.0, 1.0 ) );	// MIRROR rtddgimath.h cascadeEdge
+	fade = min( fade, clamp( min( gy, float( cellDdgiDims.y - 1 ) - gy ) CELL_DDGI_TIGHT, 0.0, 1.0 ) );
+	fade = min( fade, clamp( min( gz, float( cellDdgiDims.z - 1 ) - gz ) CELL_DDGI_TIGHT, 0.0, 1.0 ) );
 	r.fade = fade;
 	vec3 sum = vec3( 0.0 );
 	float vsum = 0.0;
@@ -112,7 +137,7 @@ CellDdgiOut cellDdgiRead( vec3 P, vec3 n, vec3 o, vec3 d )
 		int py = cellDdgiIMin( by + oy, cellDdgiDims.y - 1 );
 		int pz = cellDdgiIMin( bz + oz, cellDdgiDims.z - 1 );
 		int p = px + cellDdgiDims.x * ( py + cellDdgiDims.y * pz );
-		vec4 pr = texelFetch( cellDdgiAtlas, 192 * cellDdgiDims.w + p );
+		vec4 pr = texelFetch( cellDdgiAtlas, CELL_DDGI_BASE 192 * cellDdgiDims.w + p );
 		if ( int( pr.w + 0.5 ) != 2 )
 			continue;	// rtddgimath.h probeUsable: the CPU writes 0 for a probe that is not
 		float tri = ( ox == 1 ? ax : 1.0 - ax ) * ( oy == 1 ? ay : 1.0 - ay ) * ( oz == 1 ? az : 1.0 - az );
@@ -145,3 +170,43 @@ CellDdgiOut cellDdgiRead( vec3 P, vec3 n, vec3 o, vec3 d )
 	r.w = wsum;
 	return r;
 }
+
+#ifdef WW_CELL_RTDDGI_CASCADES
+#undef cellDdgiRead
+/* MIRROR rtddgimath.h sampleCascades (lane RTXCASCADE1, [J21 7.3]): the cascades dense to coarse, each takes its tight
+ * fade's share of what the denser ones left, stop at 1; fade = the share covered (the flat ambient takes the rest, as
+ * past M3's box). One call site in a loop on a uniform bound: the one-volume read is inlined once per caller */
+CellDdgiOut cellDdgiRead( vec3 P, vec3 n, vec3 o, vec3 d )
+{
+	CellDdgiOut r;
+	r.E = vec3( 0.0 );
+	r.vis = 0.0;
+	r.w = 0.0;
+	r.fade = 0.0;
+	float left = 1.0;
+	for ( int c = 0; c < cellDdgiCount; c++ ) {
+		cellDdgiC = c;
+		CellDdgiOut q = cellDdgiReadOne( P, n, o, d );
+		if ( !( q.w > 0.0 && q.fade > 0.0 ) )
+			continue;
+		float take = q.fade * left;
+		r.E = r.E + q.E * take;
+		r.vis += q.vis * take;
+		r.w += q.w;
+		r.fade += take;
+		left -= take;
+		if ( left <= 0.0 )
+			break;
+	}
+	if ( r.fade > 0.0 ) {
+		r.E = r.E * ( 1.0 / r.fade );
+		r.vis = r.vis / r.fade;
+	}
+	return r;
+}
+#undef cellDdgiOrigin
+#undef cellDdgiStep
+#undef cellDdgiDims
+#endif
+#undef CELL_DDGI_BASE
+#undef CELL_DDGI_TIGHT

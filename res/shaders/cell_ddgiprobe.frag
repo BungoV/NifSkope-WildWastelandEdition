@@ -10,6 +10,9 @@
 #include "uniforms.glsl"
 
 uniform int cellGiLoop8;	// cell_ddgi.glsl's read names it (cellDdgiRead is not called here)
+// MERGE1030A (RTXFIX1 x RTXCASCADE1): the view reads cascade 0's own atlas in M3's layout (rtddgiCellUniforms' one-volume
+// path: this program has no cellDdgiCount); the loader's cascades define would rename cellDdgiDims to the cascades' array
+#undef WW_CELL_RTDDGI_CASCADES
 #include "cell_ddgi.glsl"
 
 uniform int probeMode;		// 1 states, 2 irradiance
