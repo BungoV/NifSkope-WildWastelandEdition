@@ -251,6 +251,27 @@ Reds: WW_CLOUDVOL_RED = onetype | nocurl | shortlight | ign. Offline gate: tests
 - **Gate tool:** `WW_SHADOW_CONTACT_DUMP=<absolute dir>` writes the frame's opaque pass (gbuf.bin: view normal + linear
   depth), the composed contact mask and the march's inputs, for the twin to replay.
 
+## FIREFX1 (2026-10-29): fire barrels, street lamps, banners and every other Animated object draw again
+
+- **The cause.** The Animated objects row (FXPARITY2) leaves a model that moves on its own out of the weld and copies
+  it whole (`cellCopyDoorBranch`). The copy's wrapper node took `p.pos - origin` as its place. But the cell document's
+  frame is the world's: every welded shape keeps its vertices relative to `origin` and carries `origin` in its own
+  Translation (`emitBucket`). So every copy stood one cell origin away: about 60 km in Concord 5x5, 22 km in Memory Den.
+  It was in the scene tree and drawn every frame, but never in view. The live door (DOORLIVE1) and the Particles row's
+  copies (SUNCELL1, `cellCopyParticleBranch`, streamed chunks too) used the same wrong place.
+- **The fix.** The three copy sites place at `p.pos`. Reds (read at the build, launch keys):
+  `WW_CELL_ANIMOBJ_RED=origin` (animated objects + the door at the old place), `WW_CELL_PFX_RED=origin` (the particles).
+- **Census (new):** once per cell document, on its third paint, one line per copied model:
+  `cell animated objects drawn: <model> xN: copies with a node, shapes, in the scene tree, hidden, reached a draw, in
+  the frame; first at ...; probe <shape>: verts, tris, first vertex in model / world / view`, a total line, and
+  `cell particles placed: N systems, K in the frame, live sprites; first ...`.
+- **Measured** (b2d5d2c4 + this lane, RTXGI on, old GI off). Memory Den night, 5x5:
+  - 77 copies of 21 models: in the frame 15 with the fix, 0 with the red.
+  - Barrel box (12000 px): a1 vs red 7990 px moved, a1 vs a1 again 1296 (noise), a1 vs welded 65.
+  - Particles: 4 of 20 systems in the frame with the fix, 0 with the red.
+  - Before the fix every copy's first vertex sat at view x -22700 (Memory Den) / +60000 (Concord): all copies in
+    both scenes (Concord 55 of 29 models, Memory Den 77 of 21), not only the barrels (notes/firefx1/r2/diag_census.txt).
+
 ## AIRZONE1: hand-placed volumes for GI rooms, fog and air particles (row, ships Off; built and gated by the main session)
 
 - **One kind of volume, placed by hand per cell**, stored as `.recx` (the shared standard):

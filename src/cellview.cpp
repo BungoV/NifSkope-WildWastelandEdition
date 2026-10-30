@@ -4189,6 +4189,15 @@ static bool cellBuild( NifModel * nif, const CellSceneSpec & specAsked, CellChun
 	 * The probe soup above still takes its triangles, so the GI is the same. Not in streamed chunks. */
 	const bool animObjOn = !chunk && !bakeLean && wwLookOn( WwLook::AnimObjects );
 	WW_SWITCH_STATIC( int, animObjCap, wwEnvIsSet( "WW_CELL_ANIMOBJ_MAX" ) ? wwEnvInt( "WW_CELL_ANIMOBJ_MAX" ) : 256 );
+	/* lane FIREFX1: A COPIED BRANCH STANDS IN THE WORLD'S FRAME. Every welded shape keeps its vertices relative to `origin`
+	 * and carries `origin` in its own Translation (emitBucket), so the document's frame is the world's. The copies (the
+	 * animated objects, the live door, the particles) took p.pos - origin as their place and stood one origin away (Concord
+	 * 60 km off, Memory Den 22 km): drawn every frame, never in view. They take p.pos now. Reds (read at the build, launch
+	 * keys): WW_CELL_ANIMOBJ_RED=origin (the animated objects and the door), WW_CELL_PFX_RED=origin (the particles). */
+	WW_SWITCH_STATIC( bool, copyRedOrigin, wwEnvStr( "WW_CELL_ANIMOBJ_RED" ).trimmed() == QLatin1String( "origin" ) );
+	WW_SWITCH_STATIC( bool, pfxRedOrigin, wwEnvStr( "WW_CELL_PFX_RED" ).trimmed() == QLatin1String( "origin" ) );
+	const Vector3 copyShift = copyRedOrigin ? origin : Vector3( 0.0f, 0.0f, 0.0f );
+	const Vector3 pfxShift = pfxRedOrigin ? origin : Vector3( 0.0f, 0.0f, 0.0f );
 	QSet<quint32> animObjRefs, animObjCapped;
 	int animObjShapes = 0;
 	auto soupLeavesOut = [&]( const Placement & p, bool counted ) -> bool {
@@ -6858,7 +6867,7 @@ static bool cellBuild( NifModel * nif, const CellSceneSpec & specAsked, CellChun
 				continue;
 			const QString model = world.lodBase( p.base ).model;
 			if ( !model.isEmpty() && lodgenModelHasParticles( model ) )
-				chunk->pfx.push_back( { model, p.pos - origin, p.rot, p.scale } );
+				chunk->pfx.push_back( { model, p.pos - pfxShift, p.rot, p.scale } );	// lane FIREFX1: the world's frame
 		}
 		chunk->ok = true;
 		return true;
@@ -6989,7 +6998,7 @@ static bool cellBuild( NifModel * nif, const CellSceneSpec & specAsked, CellChun
 					iPfx = iP;
 				}
 				QVector<CellPfxSystem> copied;
-				const int n = cellCopyParticleBranch( nif, QModelIndex( iPfx ), *it.value(), p.pos - origin, p.rot, p.scale,
+				const int n = cellCopyParticleBranch( nif, QModelIndex( iPfx ), *it.value(), p.pos - pfxShift, p.rot, p.scale,
 					&pfxWhy, &copied );
 				/* lane SUNCELL1 (last round): A LIT PARTICLE. In the game the effect technique's Lit bit comes from the
 				 * property's lighting flag alone, beside Ptcl (checked in Todd's treat),
@@ -7111,7 +7120,7 @@ static bool cellBuild( NifModel * nif, const CellSceneSpec & specAsked, CellChun
 			if ( !good )
 				why = QStringLiteral( "%1 unreadable or not this version" ).arg( model );
 			else
-				count = cellCopyDoorBranch( nif, iRoot, *m, p.pos - origin, p.rot, p.scale, p.ref, &wrapper, &root, &why );
+				count = cellCopyDoorBranch( nif, iRoot, *m, p.pos - copyShift, p.rot, p.scale, p.ref, &wrapper, &root, &why );
 			break;
 		}
 		if ( model.isEmpty() && why.isEmpty() )
@@ -7158,7 +7167,7 @@ static bool cellBuild( NifModel * nif, const CellSceneSpec & specAsked, CellChun
 				}
 				qint32 wrapper = -1, root = -1;
 				QString loop;
-				const int n = cellCopyDoorBranch( nif, iRoot, *it.value(), p.pos - origin, p.rot, p.scale, p.ref, &wrapper,
+				const int n = cellCopyDoorBranch( nif, iRoot, *it.value(), p.pos - copyShift, p.rot, p.scale, p.ref, &wrapper,
 					&root, &why, &loop );
 				if ( n <= 0 ) {
 					refused++;
@@ -7167,6 +7176,7 @@ static bool cellBuild( NifModel * nif, const CellSceneSpec & specAsked, CellChun
 				WwAnimObjRoot r;
 				r.root = root;
 				r.loopSeq = loop;
+				r.model = model;	// lane FIREFX1: the draw census names it
 				roots.append( r );
 				blocks += n;
 				looping += loop.isEmpty() ? 0 : 1;
