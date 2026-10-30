@@ -1,5 +1,40 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## CLOUD6f (2026-10-30, FIX1030C): lightning lights the volume clouds from inside in storm weathers
+
+- RDR2's lightning (Bauer 2019, SIGGRAPH Advances, slide 40 + note 40: each strike a point light inside the cloud,
+  exponential falloff + HG phase, simplified local extinction, added to the scattering). Nothing lit a storm before (no
+  flash anywhere in the sky or cloud code). With Volume Clouds Medium+ in a storm weather, a flash now lights the cloud
+  from inside, coloured by the weather's Lightning Color (WTHR DATA 12..14, sRGB decoded, luminance 1).
+- Which weathers storm: a WTHR SNAM sound of type 3 (thunder): 15 of 107 vanilla weathers (the rains, the radstorms,
+  the Glowing Sea fog), none Pleasant. The DATA thunder byte is 133..255 in every weather and tells nothing apart
+  (CLOUD6d). esmweather reads the SNAM types, DATA 8/9 (thunder fade in / out) and 12..14; during a weather change the
+  storm share ramps by those two bytes (REASONED from their names: the game's law is not known here).
+- Where: the march is NOT touched (a lit sample already reads 10-16 densities, CLOUD6c). cloud_composite.frag adds, at
+  the clouds' transmittance-weighted mean depth (the history's depth target, the nearest cloudy texel of the bilinear
+  footprint), the diffusion Green's function of the strike (exp(-r/delta)/r, delta from the Low band's extinction at
+  albedo 0.99) with image sources across the band's extrapolated boundaries, plus the first-order radiance term toward
+  the eye: no density read, every frame at screen resolution (no history lag for a 0.3 s flash). Twin and constants:
+  src/gl/cloudlightning.h (no Qt/GL). Both composites (the backdrop and the pass over the scene) take it.
+- Timing: the clouds' own clock (view.cloudSeconds; pinned by WW_LOOKDEV_CLOUDTIME, so rows repeat): 8 s slots, a
+  strike in 75 % of them (mean gap 10.8 s), 1-4 return strokes of 40 ms decay, 2-12 km from the camera at 35 % of the
+  Low band's depth, the base under a strike at 0.5 x a white sunlit surface (a look choice: owed to bungo's eye). Between
+  flashes, outside storms, and at clock 0 (a strike starts >= 0.5 s into its slot) cvLtOn is 0 and the composite draws
+  exactly as before. Notes echo `,lightning=flash|dark <level> share <s> next <t>s`, `,lightning=nostorm|off`,
+  `,RED=lightning`.
+- Switch **WW_CLOUD_LIGHTNING** (live, stage 0): ON by default (0 / off / false / no = off). Red
+  **WW_CLOUD_LIGHTNING_RED=1** = today's composite (no flash). No menu row.
+- Gates (offline, real cloud_march + cloud_composite through this machine's driver; `bash tests/cloudlightning/run.sh
+  <scratch>`): L inside a tau-60 slab vs a Monte Carlo point source (droplet phase, albedo 0.99), offsets 0.25 / 0.5 /
+  1.0 / 1.5 km: 0.79 / 0.93 / 1.22 / 1.27 (bar 0.5 .. 2.0), exitance 0.93 (bar 0.67 .. 1.5); red iso (no first-order
+  term) 0.43 FAIL; red today 0 FAIL. I identity: cvLtOn 0 / unset == main's composite bit for bit in all three modes; a
+  flash changes 35755 px. F field: sky px untouched, the light 3.6 deg from the strike (bar 12), GPU == CPU twin 1.1e-3
+  (bar 2e-3). T timing: lit 3.9 % of the time, mean gap 10.8 s, flash <= 0.65 s, deterministic; red today FAIL. S storms:
+  15 of 107 (red thunderbyte: 106 FAIL). Wiring + stage table: green; main 0e7c2c3a FAIL. Composite cost at 1080p
+  0.059 -> 0.065 ms during a flash (INFO). Link sweeps 405 / 270 / 405 LINK OK.
+- Owed: pictures when bungo asks (a storm at a pinned flash time from the echo's `next`, default vs
+  `^WW_CLOUD_LIGHTNING_RED=1`); a live set of WW_CLOUD_LIGHTNING=0 and back.
+
 ## SKYSHARDS3 (2026-10-30, CODE1030): the far rings never draw with the bindless twin (the shards in Concord's sky)
 
 - The faceted, ground-textured shards (and two bright glows) floating ~3 km over Concord, a new shape every frame, were

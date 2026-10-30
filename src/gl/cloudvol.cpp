@@ -3,6 +3,8 @@
 #include "cloudnoise.h"
 #include "cloudvolmath.h"
 #include "cloudfly.h"
+#include "cloudlightning.h"	// lane CLOUD6f: the storm's lightning inside the clouds
+#include "lookdevstage.h"
 #include "atmosphere.h"
 #include "atmomath.h"
 #include "cellhdr.h"
@@ -748,6 +750,105 @@ void redoWithDepth( Renderer * r, CvGpu & g )
 		resolvePass( r, g, *it );
 }
 
+/* lane CLOUD6f (CLOUDBAND1 leftover, RDR2 gap f; Bauer 2019 slide 40: a strike is a point light inside the cloud, added to
+ * the scattering): in a storm weather (a thunder SNAM, lookdevstage wwLookdevLightning) a flash lights the volume from
+ * inside. The march is not touched (a lit sample already reads 10-16 densities, CLOUD6c): cloud_composite.frag adds the
+ * diffusion field of the strike at the clouds' mean depth (the history's depth target), every frame at screen res.
+ * Timing: the clouds' clock (view.cloudSeconds, pinned by WW_LOOKDEV_CLOUDTIME, so rows repeat), cloudlightning.h's
+ * slots. Switch WW_CLOUD_LIGHTNING (live; on by default; 0 / off = off), red WW_CLOUD_LIGHTNING_RED=1 = today's composite.
+ * No storm, between flashes, or off: cvLtOn 0, the composite draws as before bit for bit (tests/spells/
+ * cloudlightning_check.py gate I). */
+struct CvLightning
+{
+	bool on = false;	// a flash lights the clouds this frame
+	float share = 0.0f, level = 0.0f;
+	double nextS = -1.0;	// the next strike's start on the clouds' clock (-1 = none / no storm)
+	const char * state = "nostorm";
+	WwCloudLightning::Field f;
+	float col[3] = {};	// cvLtCol: colour x share x level x power x f.norm x the Low band's tint
+};
+
+//! WW_CLOUD_LIGHTNING (cloudvolmath.h defaultOnSwitch: on unless 0 / off / false / no) and its red (any value but 0)
+bool lightningSwitch( bool & isRed )
+{
+	const QString r = wwEnvStr( "WW_CLOUD_LIGHTNING_RED" ).trimmed();
+	isRed = !r.isEmpty() && r != QLatin1StringView( "0" );
+	const QByteArray v = wwEnvStr( "WW_CLOUD_LIGHTNING" ).trimmed().toLower().toLatin1();
+	return !isRed && WwCloudLightning::switchOn( v.constData() );
+}
+
+float srgbByteToLinear( float c )
+{
+	return c <= 0.04045f ? c / 12.92f : std::pow( ( c + 0.055f ) / 1.055f, 2.4f );
+}
+
+CvLightning lightningOf( const Bands & b, const float camKm[3], double secs, float sunK )
+{
+	namespace L = WwCloudLightning;
+	CvLightning lt;
+	bool isRed = false;
+	if ( !lightningSwitch( isRed ) ) {
+		lt.state = isRed ? "RED" : "off";
+		return lt;
+	}
+	float rgb[3] = { 0, 0, 0 };
+	quint32 seed = 0;
+	if ( !wwLookdevLightning( lt.share, rgb, seed ) || lt.share <= 0.0f )
+		return lt;	// "nostorm"
+	lt.nextS = L::nextStrikeS( secs, seed );
+	if ( b.density[0] <= 0.0f || b.topKm[0] <= b.baseKm[0] ) {
+		lt.state = "nolow";
+		return lt;
+	}
+	L::Strike s;
+	lt.level = L::levelAt( secs, seed, &s );
+	if ( lt.level <= 0.0f ) {
+		lt.state = "dark";
+		return lt;
+	}
+	// the Lightning Color's hue (sRGB bytes, decoded; luminance 1: the brightness is kFlashUnder's)
+	float lin[3], lum = 0.0f;
+	for ( int c = 0; c < 3; c++ )
+		lin[c] = srgbByteToLinear( rgb[c] );
+	lum = 0.2126f * lin[0] + 0.7152f * lin[1] + 0.0722f * lin[2];
+	if ( lum <= 1e-4f ) {	// a storm with a black colour: white light
+		lin[0] = lin[1] = lin[2] = 1.0f;
+		lum = 1.0f;
+	}
+	const float src[3] = { camKm[0] + s.offKm[0], camKm[1] + s.offKm[1],
+		b.baseKm[0] + L::kSourceHf * ( b.topKm[0] - b.baseKm[0] ) };
+	const float sigma = V::kSigma * b.density[0];
+	lt.f = L::fieldOf( sigma, V::kAlbedo, V::msMeanCosine( V::dropletParams( V::kDropletUm ) ), b.baseKm[0], b.topKm[0], src );
+	const float k = lt.share * lt.level * L::powerFor( lt.f, b.baseKm[0], sigma, sunK ) * lt.f.norm;
+	for ( int c = 0; c < 3; c++ )
+		lt.col[c] = k * lin[c] / lum * b.tint[0][c];
+	lt.on = k > 0.0f;
+	lt.state = lt.on ? "flash" : "dark";
+	return lt;
+}
+
+//! this frame's flash per renderer (the passes over the scene after the backdrop take the backdrop's)
+QHash<Renderer *, CvLightning> & lightnings()
+{
+	static QHash<Renderer *, CvLightning> l;
+	return l;
+}
+
+//! cloud_composite.frag's flash uniforms; cvLtOn is set on EVERY draw (a program keeps its uniforms between draws)
+void lightningUniforms( Renderer * r, NifSkopeOpenGLContext::Program * p, const CvLightning & lt, const float cam[9],
+	const float km[3], const float proj[4] )
+{
+	p->uni1i( "cvLtOn", lt.on ? 1 : 0 );
+	if ( !lt.on )
+		return;
+	p->uni4f( "cvLtSrc", FloatVector4( lt.f.src[0], lt.f.src[1], lt.f.src[2], lt.f.invDelta ) );
+	p->uni4f( "cvLtPrm", FloatVector4( lt.f.r0sq, lt.f.mirLo, lt.f.mirHi, lt.f.flux ) );
+	p->uni3f( "cvLtCol", lt.col[0], lt.col[1], lt.col[2] );
+	setMat3( r, p, "cvCam", cam );
+	p->uni3f( "cvCamKm", km[0], km[1], km[2] );
+	p->uni4f( "cvProj", FloatVector4( proj[0], proj[1], proj[2], proj[3] ) );
+}
+
 //! the history over the scene where the clouds' mean depth is in front of it (cloud_composite.frag cvFront): mode 1 in
 //! display space (exposure, view transform; blend SRC_ALPHA), mode 2 linear light into the cell frame's stencil-1 pixels
 void frontPass( Renderer * r, CvGpu & g, int mode )
@@ -772,6 +873,9 @@ void frontPass( Renderer * r, CvGpu & g, int mode )
 	p->uni4f( "cvRect", FloatVector4( float( keep.vp[0] ), float( keep.vp[1] ), 1.0f / float( keep.vp[2] ), 1.0f / float( keep.vp[3] ) ) );
 	p->uni1f( "sceneExposure", g.frontExposure );
 	p->uni1i( "viewTransform", g.frontVt );
+	// lane CLOUD6f: the backdrop's flash over the scene too (g.prevCam / prevKm hold this frame's camera after a draw)
+	const auto lit = lightnings().constFind( r );
+	lightningUniforms( r, p, lit != lightnings().constEnd() ? *lit : CvLightning(), g.prevCam, g.prevKm, g.frontProj );
 	fn->glEnable( GL_BLEND );
 	if ( mode == 2 ) {
 		// the cell's linear light only (stencil 1, cellhdr.cpp): the tone map takes those pixels; the others pass as written
@@ -1072,6 +1176,15 @@ bool wwCloudVolDraw( Scene * scene, const WwCloudVolView & view, QStringList & d
 			p->uni1f( "sceneExposure", view.exposure );
 			p->uni1i( "viewTransform", view.viewTransform );
 			p->uni1i( "cvFront", 0 );
+			// lane CLOUD6f: a storm's flash inside the clouds (cvLtOn 0 otherwise: the composite as before)
+			const CvLightning lt = lightningOf( b, cam.km, view.cloudSeconds, f.sunK );
+			lightnings()[r] = lt;
+			if ( lt.on ) {
+				fn->glActiveTexture( GL_TEXTURE1 );
+				fn->glBindTexture( GL_TEXTURE_2D, g.hist[cur].dep );
+				p->uni1i( "cvHistDepth", 1 );
+			}
+			lightningUniforms( r, p, lt, cam.m, cam.km, cam.proj );
 			fn->glEnable( GL_BLEND );
 			fn->glBlendFuncSeparate( GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA, GL_ZERO, GL_ONE );	// as the 2D layers
 			quad( r );
@@ -1150,6 +1263,14 @@ bool wwCloudVolDraw( Scene * scene, const WwCloudVolView & view, QStringList & d
 		reds += red( "flatamb" ) ? QStringLiteral( ",RED=flatamb" ) : QStringLiteral( ",ambdark=column" );
 	else
 		reds += QStringLiteral( ",RED=ambdarkoff" );	// lane CLOUDBAND2: the old ramp is the red (WW_CLOUDVOL_AMBDARK=0)
+	if ( ok && lightnings().contains( r ) ) {	// lane CLOUD6f: the flash's state, the next strike on the clouds' clock
+		const CvLightning & lt = lightnings()[r];
+		const QString st = QLatin1StringView( lt.state );
+		reds += st == QLatin1StringView( "RED" ) ? QStringLiteral( ",RED=lightning" )
+			: lt.share > 0.0f ? QStringLiteral( ",lightning=%1 %2 share %3 next %4s" ).arg( st ).arg( double( lt.level ), 0, 'f', 3 )
+				.arg( double( lt.share ), 0, 'f', 2 ).arg( lt.nextS, 0, 'f', 2 )
+			: QStringLiteral( ",lightning=%1" ).arg( st );
+	}
 	// lane CLOUD2C: clip = which scene depth ends the march (last = the last paint's, this = this paint's, after the scene)
 	const QString clip = sceneOn ? QStringLiteral( "last" ) : g.redo ? QStringLiteral( "this" ) : QStringLiteral( "none" );
 	s.last = ok ? QStringLiteral( "volclouds:%1(hist=%2x%3,march=%4x%5,steps=%6,taps=%7,key=%8,map=%9,mem=%10MB,clip=%11,"
