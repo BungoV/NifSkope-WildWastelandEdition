@@ -58,6 +58,35 @@
   ~0 there: no material term of our path is above the game's. The pale look is the sheet's own light-grey albedo in
   the sun; what else lights it (the GI's sky, 1.5 to 4.4x the weather's ambient per axis in that scene's notes) is a
   GI matter, not the glass.
+## TREELEAF1 (2026-10-30): alpha-tested leaves keep their coverage in every mip (no more flecks at distance)
+
+- bungo 10-19: "near tree leaves break into flecks with hard cut edges, worse at distance". **Cause, measured**
+  (notes/fix1030b/treeleaf1/census, 142 BC3 base maps of the 163 alpha-tested foliage materials of the game, BNS Trees
+  and BNS Landscape): the share of texels passing the material's test (alpha > ref) drifts mip by mip as the files hold
+  them. Down for high refs (BNS maple atlases, ref 185: 0.675 of level 0 at 16 x 16; vanilla fungal tree atlas, ref 160:
+  0.74) = flecks; up for low refs (BNS red pine, ref 35/45: 2.1-3.1 x) = blobs. 373 of 894 levels of 16 x 16 or more
+  were within 2 % of level 0. Some vanilla plant mips are 1-bit (alpha 0 or 255 only: hedgerow, forsythia, dead shrub).
+- **Fix (coverage-preserving alpha mips, Castano 2010 / Golus 2017's mip-scale section):** an alpha-tested, unblended
+  material binds its base map through a copy whose levels 1.. are rewritten at load (src/gl/wwalphacov.h): each level's
+  alpha is scaled by the factor that gives it level 0's count at the material's ref, then the texels still over or
+  under the count cross the test in order of (scaled alpha, 3 x 3 neighbourhood alpha), so ties and 1-bit mips land on
+  the count too. BC3 alpha blocks are decoded, scaled and encoded again with each texel on its required side of the
+  test; colour bytes and level 0 are never touched; a level within 0.5 % of its target keeps its bytes. The copy is its
+  own TexCache entry ("<file>|wwcov<ref>", gltex.cpp), armed around setupProgramCE1's BaseMap bind (renderer.cpp), so
+  draw packets and bindless handles take it like any texture. Cost, measured: 15.6 ms mean, 55 ms worst (a 4096 x 2048
+  atlas) per texture load, CPU, once.
+- Why not alpha-to-coverage / a sharpened test: the cell frame is 4x MSAA by default and TAA follows, but a sharpened
+  test with a hard cut is the same test (alpha' > 0.5 iff alpha > ref), and A2C needs the depth/AO/shadow passes that
+  test the same texture to agree with the main pass; neither moves the mip coverage that makes the flecks. Left as a
+  proposed row.
+- Switch: ON by default. Red `WW_TREELEAF_RED=1` (live, stage 0): the file's own mips (today's flecks). Not covered:
+  the shadow-depth, AO and Hi-Z passes that alpha-test the same base map still read the plain file (proposed row);
+  materials with ref 0; the WW_LODL_TREE_ALPHA picture dial (the copy keeps the material's own ref).
+- Unit: tests/treeleaf1 (run.sh <out> [<dump folder>]): green on the synthetic atlas 16/16 levels within 2 % and on the
+  142 game textures 894/894 (2 % or half a texel; worst before 207 %); `-DTREELEAF1_RED_NOSCALE` (today) 373/894,
+  fails; `-DTREELEAF1_RED_ENDPOINTS` (scale only the two BC3 endpoints: an edge block spanning 0..255 keeps its
+  palette) 700/894, fails; `-DTREELEAF1_RED_NEAREST` (re-encode ignores the side of the test) fails the side rule.
+  Pictures owed (near-tree leaves at distance, on vs red) when bungo asks.
 
 ## CAMGATE1 (2026-10-30): the camera never shows an out-of-bounds or under-terrain view
 

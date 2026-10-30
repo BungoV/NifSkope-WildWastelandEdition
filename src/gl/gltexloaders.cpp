@@ -38,6 +38,7 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include "cellspeed.h"
 #include "celltexahead.h"
 #include "cellpasstime.h"	// lane PERF1
+#include "wwalphacov.h"	// lane TREELEAF1
 
 #include "libfo76utils/src/filebuf.hpp"
 #include "libfo76utils/src/pbr_lut.hpp"
@@ -943,10 +944,40 @@ static gli::texture load_if_valid( const char * data, unsigned int size, DdsView
 }
 
 
+/*! lane TREELEAF1: an alpha-tested base map's BC3 mips, rewritten in this load's own bytes before the upload so each level
+ *  keeps level 0's coverage at ref (src/gl/wwalphacov.h; the leaves stop breaking into flecks / blobs as they shrink on
+ *  screen). Anything but a 2D, one-layer, one-face BC3 chain with mips is left as the file has it. */
+static void wwCovPreserve( const QString & filepath, QByteArray & data, int ref )
+{
+	DdsView	v;
+	load_if_valid( data.constData(), static_cast<unsigned int>( data.size() ), &v );
+	if ( v.empty() || v.levels() < 2 || v.layers() != 1 || v.faces() != 1 || v.target() != gli::TARGET_2D
+		|| ( v.format() != gli::FORMAT_RGBA_DXT5_UNORM_BLOCK16 && v.format() != gli::FORMAT_RGBA_DXT5_SRGB_BLOCK16 ) )
+		return;
+	const char *	base = data.constData();
+	char *	bytes = data.data();	// detaches when shared: the rewrite never reaches a cached copy of the file
+	std::uint8_t *	lv[32];
+	for ( size_t l = 0; l < v.levels(); l++ )
+		lv[l] = reinterpret_cast<std::uint8_t *>( bytes + ( static_cast<const char *>( v.data( 0, 0, l ) ) - base ) );
+	WwAlphaCov::LevelStat	st[32];
+	const int changed = WwAlphaCov::preserve( lv, int( v.levels() ), int( v.extent().x ), int( v.extent().y ), ref, st );
+	// WW_TEX_CENSUS=1 (lane PERF1's upload census): one line per rewritten texture, level 0 and the 16 x 16 level's coverage
+	WW_SWITCH_STATIC( bool, census, wwEnvInt( "WW_TEX_CENSUS" ) == 1 );
+	if ( census ) {
+		QString lvls;
+		for ( size_t l = 1; l < v.levels(); l++ )
+			lvls += QStringLiteral( " %1:%2>%3" ).arg( l ).arg( st[l].before, 0, 'f', 3 ).arg( st[l].after, 0, 'f', 3 );
+		std::fprintf( stderr, "tex leafcov: ref %d level0 %.3f rewritten %d of %d levels%s %s\n", ref, st[0].before, changed,
+			int( v.levels() ) - 1, qPrintable( lvls ), qPrintable( filepath ) );
+	}
+}
+
 GLuint TexCache::texLoadDDS( const QString & filepath, GLenum & target, QByteArray & data, GLuint * id )
 {
 	if ( data.size() < 128 )
 		return 0;
+	if ( wwCovLoadRef > 0 )	// lane TREELEAF1: an alpha-tested base map's "|wwcov" entry (gltex.cpp loadTex)
+		wwCovPreserve( filepath, data, wwCovLoadRef );
 
 	GLuint mipmaps = 0;
 	GLuint result = 0;

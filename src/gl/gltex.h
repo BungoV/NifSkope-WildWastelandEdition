@@ -257,6 +257,12 @@ public:
 	bool wwParamCaller = false;	//!< lane PERF5: set around the shadowed bind; any other bind forgets its texture
 	GLuint wwParamPeek() const { return paramId; }	// lane BINDLESS2: the bind's texture, not consumed
 	void wwParamArm( GLuint id ) { paramId = id; }	//!< lane GAPPERF-BINDLESS: a replayed bind's texture (celldrawpacket.h)
+	/*! lane TREELEAF1: set around an alpha-tested material's base-map bind (renderer.cpp setupProgramCE1, 0 = off). A .dds
+	 *  bound while armed binds its coverage-preserving copy (src/gl/wwalphacov.h at this ref), a cache entry of its own
+	 *  named "<file>|wwcov<ref>", loaded, evicted and flushed like any other file. */
+	int wwCovArmed = 0;
+	int wwCovLoadRef = 0;	//!< lane TREELEAF1: the ref loadTex hands texLoadDDS for a "|wwcov" entry (0: none)
+	QString wwCovKey;	//!< lane TREELEAF1: bind()'s reused name buffer for the copy's entry
 	/*! lane STREAM1 (TEXSTREAM1): uploads the streaming read-ahead's ready files, up to `budgetBytes` of them this
 	 *  frame (at least one), before anything draws, so a streamed cell's first frame finds them loaded. Returns
 	 *  how many went up. The same loadTex as a bind's, so what a draw sees is the same texture. */

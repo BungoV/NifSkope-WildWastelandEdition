@@ -246,6 +246,7 @@ public:
 
 	bool hasAlphaBlend() const { return alphaBlend; }
 	bool hasAlphaTest() const { return alphaTest; }
+	int alphaTestFunc() const { return alphaFunc; }	// lane TREELEAF1: -1 disabled, 4 >, 6 >= (glProperty's table)
 
 	GLfloat alphaThreshold = 0;
 

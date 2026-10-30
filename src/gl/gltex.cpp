@@ -362,7 +362,22 @@ int TexCache::bind( const QStringView & fname, const NifModel * nif )
 {
 	paramId = 0;	// lane PERF5
 	wwBound = 0;	// lane CELLUNI3
-	Tex *	tx = insertTex( fname );
+	Tex *	tx;
+	// lane TREELEAF1: an alpha-tested base map (armed by setupProgramCE1) binds its coverage-preserving copy
+	if ( wwCovArmed > 0 && wwCovArmed < 255 && fname.size() > 4 && fname.front() != QChar( '#' )
+		&& fname.endsWith( QLatin1StringView( ".dds" ), Qt::CaseInsensitive ) ) {
+		wwCovKey.resize( 0 );
+		wwCovKey.append( fname );
+		wwCovKey.append( QLatin1StringView( "|wwcov" ) );
+		if ( wwCovArmed >= 100 )
+			wwCovKey.append( QChar( '0' + wwCovArmed / 100 ) );
+		if ( wwCovArmed >= 10 )
+			wwCovKey.append( QChar( '0' + ( wwCovArmed / 10 ) % 10 ) );
+		wwCovKey.append( QChar( '0' + wwCovArmed % 10 ) );
+		tx = insertTex( wwCovKey );
+	} else {
+		tx = insertTex( fname );
+	}
 	if ( !tx ) [[unlikely]]
 		return 0;
 	tx->useTick = useTick;
@@ -514,12 +529,22 @@ std::uint16_t TexCache::loadTex( Tex & txIn, const NifModel * nif )
 	Tex::ImageInfo *	i = t->imageInfo;
 	CellSpeed::Acc speedAcc( "texture loads (find, decode, upload)" );   // lane SPEED1
 
-	if ( !isSupported( i->filename ) ) {
+	// lane TREELEAF1: "<file>|wwcov<ref>" is <file> loaded with coverage-preserving alpha mips at <ref>
+	int covRef = 0;
+	QString covBase;
+	const qsizetype covAt = i->filename.lastIndexOf( QLatin1StringView( "|wwcov" ) );
+	if ( covAt > 0 ) {
+		covBase = i->filename.left( covAt );
+		covRef = i->filename.mid( covAt + 6 ).toInt();
+	}
+	const QString & fileName = covAt > 0 ? covBase : i->filename;
+
+	if ( !isSupported( fileName ) ) {
 		t->id[0] = GLuint( -1 );
 		return 0;
 	}
 
-	i->filepath = find( i->filename, nif );
+	i->filepath = find( fileName, nif );
 
 	/* lane PERF1: before this file is read here (one at a time), the files the read-ahead workers already hold go
 	 * up first, so their byte bound frees and they read on in parallel; each binds on this unit, and this file's
@@ -548,6 +573,7 @@ std::uint16_t TexCache::loadTex( Tex & txIn, const NifModel * nif )
 	if ( t->target )
 		glBindTexture( t->target, t->id[0] );
 
+	wwCovLoadRef = covRef;	// lane TREELEAF1: read by texLoadDDS
 	try
 	{
 		i->mipmaps = texLoad( nif, i->filepath, i->format, t->target, i->width, i->height, t->id );
@@ -557,6 +583,7 @@ std::uint16_t TexCache::loadTex( Tex & txIn, const NifModel * nif )
 	{
 		i->status = e;
 	}
+	wwCovLoadRef = 0;
 	paramForget( t->id[1] );	// lane CELLUNI4: FO76's second cube (a fresh name may reuse a freed one)
 
 	return t->mipmaps;
