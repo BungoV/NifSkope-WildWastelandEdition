@@ -48,8 +48,12 @@ void rtddgiCellFrame( Scene * scene );
 //! the current cell program's read uniforms and its texture buffer (from wwCellLightsUniforms; a program without the
 //! read, every program while the switch is off, returns at once)
 void rtddgiCellUniforms( Scene * scene );
-//! the debug view over the frame (glview.cpp, beside the PRTP views)
+//! the debug view over the frame (glview.cpp, beside the PRTP views): since RTXFIX1 only with WW_CELL_RTDDGI_VIEW_FOG=0,
+//! or on a frame the view did not draw inside (no linear frame)
 void rtddgiCellViewDraw( Scene * scene, const Transform & viewTrans );
+//! lane RTXFIX1: the debug view inside the linear frame (glview.cpp, after the opaque scene, before the tone map): rounder
+//! instanced spheres, the irradiance read on the GPU, the fog and the exposure as on any surface
+void rtddgiCellViewDrawLinear( Scene * scene, const Transform & viewTrans );
 //! the live driver's settle and a path's first key wait on this (nifskope_ui.cpp): a build in flight, or a spec max not
 //! reached since the build or the last scroll
 bool rtddgiCellPending();

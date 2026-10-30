@@ -1,0 +1,5 @@
+# Lane RTXFIX1 (2026-10-30): the Ray-traced GI probes view drawn INSIDE the cell's linear frame (src/rtddgicell.cpp
+# rtddgiCellViewDrawLinear): instanced unit spheres, the irradiance read from the atlas, then the fog like any surface.
+# Selected by name; never enabled on a model.
+
+shaders cell_ddgiprobe.vert cell_ddgiprobe.frag

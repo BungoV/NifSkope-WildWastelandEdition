@@ -4300,6 +4300,8 @@ void GLView::paintGL()
 			PassTime::end( PassTime::Background );
 			scene->draw();	// lane PERF1: opaque / sorted / effects timed inside (Scene::drawShapes)
 			wwVolAirSkyDraw( scene, true );	// lane VOLAIR1: the sky's air probes (gates only; no GL call otherwise)
+			if ( hdr )
+				rtddgiCellViewDrawLinear( scene, viewTrans );	// lane RTXFIX1: the Ray-traced GI probes inside the linear frame (fog, exposure)
 			if ( !hdr )
 				wwCloudVolLookdevFront( scene );	// lane CLOUD2C: clouds in front of a single NIF (its opaque depth)
 			if ( hdr ) {

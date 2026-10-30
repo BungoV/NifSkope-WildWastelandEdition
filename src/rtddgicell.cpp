@@ -16,7 +16,9 @@
 #include "gl/celllights.h"
 #include "gl/cellunits.h"
 #include "gl/glscene.h"
+#include "gl/lookdevstage.h"   // lane RTXFIX1: wwLookdevFogUniforms (the probes view in the frame takes the fog)
 #include "gl/renderer.h"
+#include "gl/scenelighting.h"  // lane RTXFIX1: wwSceneExposureScale
 
 #include <QDir>
 #include <QElapsedTimer>
@@ -81,6 +83,11 @@ CellSpec cellSpecNow()
 
 constexpr int kPathReadback = 1;   // WW_CELL_RTDDGI_RED=readback: M2's copy back + GL upload, no interop
 constexpr int kPathRebuild = 2;    // WW_CELL_RTDDGI_RED=rebuild: a camera move builds a new volume (M2's way), no scroll
+/* lane RTXFIX1 (Bryant 10-29, the Fusion Shaders bug "the next update overwrites the atlas while GL still reads it"): ours
+ * orders both ways per submit (GL signals glDone before it, the device waits on that, GL waits on vkDone after it).
+ * WW_CELL_RTDDGI_RED=nowait drops both: no beforeSubmit (the device then neither waits nor signals: rtddgi_vk.inc), no
+ * GL wait; the census's "sync" counts go 0. Live. */
+constexpr int kPathNoWait = 4;
 
 /*! WW_CELL_RTDDGI_RED, live: [0] the read's red bits (rtddgimath.h kSample*, the shader's cellDdgiRed), [1] the path
  *  reds (kPath*). One list, both parts: "trilinear,readback" sets one of each */
@@ -99,6 +106,7 @@ const int * cellRedParts()
 			if ( t == QLatin1String( "nobias" ) ) b.v[0] |= int( rtddgi::kSampleNoBias );
 			if ( t == QLatin1String( "readback" ) ) b.v[1] |= kPathReadback;
 			if ( t == QLatin1String( "rebuild" ) ) b.v[1] |= kPathRebuild;
+			if ( t == QLatin1String( "nowait" ) ) b.v[1] |= kPathNoWait;   // lane RTXFIX1
 		}
 		return b;
 	}() );
@@ -220,6 +228,14 @@ struct Cell
 	// the debug view's geometry, rebuilt each frame it draws
 	std::vector<Vector3> vp;
 	std::vector<FloatVector4> vc;
+	// lane RTXFIX1: the GL order's counts since the build (the census's "sync"), the in-frame view's GL objects (the
+	// context of the renderer that made them), its instance list, and whether it drew this frame (the overlay then not)
+	qint64 syncSignals = 0, syncWaits = 0;
+	const void * viewOwner = nullptr;
+	GLuint viewVao = 0, viewMeshBuf = 0, viewMeshTex = 0, viewListBuf = 0, viewListTex = 0;
+	std::vector<float> viewList;
+	bool viewDrewInFrame = false;
+	QString viewLast;
 };
 
 Cell & cell()
@@ -303,6 +319,7 @@ void dropLive( Cell & c, Renderer * r )
 	c.pending.reset();
 	c.live.reset();   // its RtDdgiLive closes the device's session
 	c.sets = c.busy = 0;
+	c.syncSignals = c.syncWaits = 0;   // lane RTXFIX1
 	c.stopped = c.dumped = c.censusBuilt = false;
 	c.interopWhy.clear();
 }
@@ -618,7 +635,9 @@ void censusSet( const Cell & c, const RtDdgiLive & L, int k, const QString & tai
 	const double * ms = L.lastMs();
 	QString rb;
 	if ( c.interop )   // nothing comes back: the census's readback is 0 (the brief's key), the GL wait is the GPU-side order
-		rb = QStringLiteral( "readback ms 0.000 (interop: no copy, no upload; GL waits on the device %1 ms on the CPU)" ).arg( c.glWaitMs, 0, 'f', 3 );
+		rb = QStringLiteral( "readback ms 0.000 (interop: no copy, no upload; GL waits on the device %1 ms on the CPU); sync glDone %2 "
+			"vkDone waits %3%4" ).arg( c.glWaitMs, 0, 'f', 3 ).arg( c.syncSignals ).arg( c.syncWaits )
+			.arg( ( cellRedPaths() & kPathNoWait ) ? QStringLiteral( " (the nowait red: no order)" ) : QString() );   // lane RTXFIX1
 	else
 		rb = QStringLiteral( "readback ms %1 (device copy %2 + GL upload %3; interop owed when over 0.2: %4)" )
 			.arg( msText( ms[3] < 0.0 ? -1.0 : ms[3] + c.uploadMs ) ).arg( msText( ms[3] ) ).arg( c.uploadMs, 0, 'f', 3 ).arg( c.interopWhy );
@@ -664,6 +683,51 @@ const std::vector<Vector3> & sphereTris()
 				for ( const Vector3 & v : { a, ab, ca, ab, b, bc, ca, bc, cz, ab, bc, ca } )
 					t.push_back( v );
 			}
+	return t;
+}
+
+/* lane RTXFIX1 (bungo 10-29 "Could our probes have a rounder shape?" + "fog"): WW_CELL_RTDDGI_VIEW_FOG, live:
+ * unset / 1 = the probes view drawn INSIDE the linear frame (rtddgiCellViewDrawLinear: rounder spheres, the fog and the
+ * exposure on them as on any surface); nofog = in the frame without the fog; 0 = the old overlay (after the tone map,
+ * unfogged, 32 triangles a sphere, the tiles copied to the host) */
+int viewFogMode()
+{
+	const QString v = wwEnvStr( "WW_CELL_RTDDGI_VIEW_FOG" ).trimmed().toLower();
+	if ( v == QLatin1String( "0" ) || v == QLatin1String( "overlay" ) )
+		return 0;
+	return v == QLatin1String( "nofog" ) ? 2 : 1;
+}
+bool viewOverlay() { return viewFogMode() == 0; }
+
+constexpr int kViewLevelNear = 3;           // lane RTXFIX1: 512 triangles a sphere within kViewNear of the camera
+constexpr int kViewLevelFar = 2;            // and 128 beyond (the old view: 32)
+constexpr double kViewNear = 800.0;         // view units
+
+//! lane RTXFIX1: a unit sphere, the octahedron split `level` times (8 x 4^level triangles), corners on the sphere
+std::vector<Vector3> sphereLevel( int level )
+{
+	auto unit = []( const Vector3 & v ) {
+		const float l = std::sqrt( v[0] * v[0] + v[1] * v[1] + v[2] * v[2] );
+		return Vector3( v[0] / l, v[1] / l, v[2] / l );
+	};
+	std::vector<Vector3> t;
+	const Vector3 ax[6] = { Vector3( 1, 0, 0 ), Vector3( -1, 0, 0 ), Vector3( 0, 1, 0 ), Vector3( 0, -1, 0 ), Vector3( 0, 0, 1 ), Vector3( 0, 0, -1 ) };
+	for ( int sx = 0; sx < 2; sx++ )
+		for ( int sy = 2; sy < 4; sy++ )
+			for ( int sz = 4; sz < 6; sz++ )
+				for ( const Vector3 & v : { ax[sx], ax[sy], ax[sz] } )
+					t.push_back( v );
+	for ( int l = 0; l < level; l++ ) {
+		std::vector<Vector3> n;
+		n.reserve( t.size() * 4 );
+		for ( size_t i = 0; i + 2 < t.size(); i += 3 ) {
+			const Vector3 a = t[i], b = t[i + 1], c = t[i + 2];
+			const Vector3 ab = unit( a + b ), bc = unit( b + c ), ca = unit( c + a );
+			for ( const Vector3 & v : { a, ab, ca, ab, b, bc, ca, bc, c, ab, bc, ca } )
+				n.push_back( v );
+		}
+		t.swap( n );
+	}
 	return t;
 }
 
@@ -834,7 +898,7 @@ void rtddgiCellFrame( Scene * scene )
 	/* one step: with interop the submit is ordered against GL both ways (GL signals glDone before it, so the device
 	 * writes only after GL's reads so far; GL waits on vkDone after it, before any read of this frame) */
 	auto runStep = [&c, &L, &g, fn]( RtDdgiStep & o ) {
-		const bool gl = c.interop && g.ok;
+		const bool gl = c.interop && g.ok && !( cellRedPaths() & kPathNoWait );   // lane RTXFIX1: the red drops the order
 		if ( gl ) {
 			Cell * cp = &c;
 			o.beforeSubmit = [cp, &g, fn]() {
@@ -842,6 +906,7 @@ void rtddgiCellFrame( Scene * scene )
 					return false;
 				g.signalSem( cp->semGl, 1, &cp->buf, 0, nullptr, nullptr );
 				cp->glRead = false;
+				cp->syncSignals++;
 				fn->glFlush();   // the signal reaches the GPU before the device's submit waits on it
 				return true;
 			};
@@ -853,7 +918,10 @@ void rtddgiCellFrame( Scene * scene )
 			g.waitSem( c.semVk, 1, &c.buf, 0, nullptr, nullptr );
 			c.glWaitMs = double( t.nsecsElapsed() ) / 1e6;
 			c.glRead = true;
+			c.syncWaits++;
 			c.uploaded = true;
+		} else if ( ok && c.interop && !gl && L.submitted() ) {
+			c.uploaded = true;   // the nowait red: GL reads the device's atlas with no order at all
 		}
 		return ok;
 	};
@@ -863,7 +931,7 @@ void rtddgiCellFrame( Scene * scene )
 		/* the irradiance view and a dump need the tiles on the host: one copy step (k = 0). A dump asked for after the
 		 * stop is written now (M2 wrote it only at the stop: a row that set the key on a volume an earlier row had
 		 * already stopped, with nothing to rebuild it, never dumped: M2's mem_rt_dump) */
-		if ( ( view == 2 && !L.irr() ) || ( wantDump && !L.irr() ) ) {
+		if ( ( view == 2 && viewOverlay() && !L.irr() ) || ( wantDump && !L.irr() ) ) {   // lane RTXFIX1: the in-frame view reads the atlas
 			RtDdgiStep o;
 			o.k = 0;
 			runStep( o );
@@ -886,7 +954,8 @@ void rtddgiCellFrame( Scene * scene )
 	for ( int a = 0; a < 3; a++ )
 		o.scroll[a] = moved ? cells[a] : 0;
 	// interop: no host copy unless the debug view or a dump at this step needs one; the step then waits for it
-	o.host = !c.interop || view == 2 || ( wantDump && ( atMax || ( max <= 0 && c.sets + 1 == 64 ) ) );
+	// lane RTXFIX1: the in-frame irradiance view reads the atlas on the GPU; only the overlay (WW_CELL_RTDDGI_VIEW_FOG=0) needs the tiles here
+	o.host = !c.interop || ( view == 2 && viewOverlay() ) || ( wantDump && ( atMax || ( max <= 0 && c.sets + 1 == 64 ) ) );
 	o.wait = !c.interop || o.host;
 	if ( !runStep( o ) ) {
 		if ( L.busy() ) {
@@ -977,7 +1046,9 @@ void rtddgiCellViewDraw( Scene * scene, const Transform & viewTrans )
 		return;
 	const int mode = rtddgiCellView();
 	Cell & c = cell();
-	if ( !mode || !c.live || c.nif != scene->nifModel )
+	const bool inFrame = c.viewDrewInFrame;   // lane RTXFIX1: drawn inside the linear frame this paint: no overlay
+	c.viewDrewInFrame = false;
+	if ( !mode || !c.live || c.nif != scene->nifModel || inFrame )
 		return;
 	const RtDdgiLive & L = c.live->live;
 	const RtDdgiVolume & v = L.volume();
@@ -1040,4 +1111,126 @@ void rtddgiCellViewDraw( Scene * scene, const Transform & viewTrans )
 	for ( size_t i = 0; i < c.vp.size(); i += kChunk )
 		scene->drawTriangles( c.vp.data() + i, std::min( kChunk, c.vp.size() - i ), c.vc.data() + i, true );
 	fn->glDepthFunc( GL_LESS );
+}
+
+/* lane RTXFIX1 (bungo 10-29: rounder spheres, "fog", the spheres by the lamps as dark as the rest): the probes view drawn
+ * INSIDE the cell's linear frame, after the opaque scene and before the tone map, by its own program
+ * (res/shaders/cell_ddgiprobe.*): one unit sphere instanced per probe, 512 triangles within kViewNear of the camera and
+ * 128 beyond, the irradiance read from the atlas on the GPU (no host copy under interop), E / pi linear (the exposure and
+ * the tone map treat it as a white surface), then the fog. A probe whose sphere would hold the camera (2 radii + 10 u)
+ * is not drawn: it clipped open at the near plane. WW_CELL_RTDDGI_VIEW_FOG=0 keeps the old overlay. */
+void rtddgiCellViewDrawLinear( Scene * scene, const Transform & viewTrans )
+{
+	if ( !scene || !scene->renderer || scene->selecting || !rtddgiCellShaderDefine() || viewOverlay() )
+		return;
+	const int mode = rtddgiCellView();
+	Cell & c = cell();
+	Renderer * r = scene->renderer;
+	if ( !mode || !c.live || c.nif != scene->nifModel || !c.uploaded || !c.tex || c.glOwner != r )
+		return;
+	QElapsedTimer t;
+	t.start();
+	const RtDdgiVolume & v = c.live->live.volume();
+	const float rad = 0.12f * std::min( v.step[0], std::min( v.step[1], v.step[2] ) );
+	const int nP = v.probeCount();
+	// the instances: near ones first (x = the probe, y = its state code: 0 Vigilant, 1 Asleep, 2 Off, 3 fresh)
+	std::vector<float> nearL, farL;
+	int culled = 0;
+	for ( int p = 0; p < nP && nearL.size() / 4 + farL.size() / 4 < kViewMaxProbes; p++ ) {
+		float pos[3];
+		v.position( p, pos );
+		const double d = double( ( viewTrans * Vector3( pos[0], pos[1], pos[2] ) ).length() );
+		if ( d > kViewReach )
+			continue;
+		if ( d < 2.0 * double( rad ) + 10.0 ) {
+			culled++;
+			continue;
+		}
+		const int st = v.state[size_t( p )];
+		const float code = st == rtddgi::kAsleep ? 1.0f : st == rtddgi::kOff ? 2.0f : st == rtddgi::kFresh ? 3.0f : 0.0f;
+		std::vector<float> & L = d < kViewNear ? nearL : farL;
+		L.insert( L.end(), { float( p ), code, 0.0f, 0.0f } );
+	}
+	const int nNear = int( nearL.size() / 4 ), nFar = int( farL.size() / 4 );
+	if ( nNear + nFar == 0 )
+		return;
+	auto fn = r->fn;
+	static const std::vector<Vector3> meshNear = sphereLevel( kViewLevelNear );
+	static const std::vector<Vector3> meshFar = sphereLevel( kViewLevelFar );
+	if ( c.viewOwner != r || !c.viewVao ) {   // made once in this context (a new context makes its own; the old ones go with it)
+		fn->glGenVertexArrays( 1, &c.viewVao );
+		fn->glGenBuffers( 1, &c.viewMeshBuf );
+		fn->glGenTextures( 1, &c.viewMeshTex );
+		fn->glGenBuffers( 1, &c.viewListBuf );
+		fn->glGenTextures( 1, &c.viewListTex );
+		std::vector<float> m;
+		for ( const std::vector<Vector3> * s : { &meshNear, &meshFar } )
+			for ( const Vector3 & q : *s )
+				m.insert( m.end(), { q[0], q[1], q[2], 0.0f } );
+		fn->glBindBuffer( GL_TEXTURE_BUFFER, c.viewMeshBuf );
+		fn->glBufferData( GL_TEXTURE_BUFFER, GLsizeiptr( m.size() * sizeof( float ) ), m.data(), GL_STATIC_DRAW );
+		fn->glBindBuffer( GL_TEXTURE_BUFFER, 0 );
+		c.viewOwner = r;
+	}
+	c.viewList = nearL;
+	c.viewList.insert( c.viewList.end(), farL.begin(), farL.end() );
+	fn->glBindBuffer( GL_TEXTURE_BUFFER, c.viewListBuf );
+	fn->glBufferData( GL_TEXTURE_BUFFER, GLsizeiptr( c.viewList.size() * sizeof( float ) ), c.viewList.data(), GL_STREAM_DRAW );
+	fn->glBindBuffer( GL_TEXTURE_BUFFER, 0 );
+	NifSkopeOpenGLContext::Program * prog = r->useProgram( "cell_ddgiprobe.prog" );
+	if ( !prog )
+		return;
+	GLint prevActive = 0;
+	fn->glGetIntegerv( GL_ACTIVE_TEXTURE, &prevActive );
+	// units: the old GI's half-res pair (cellunits.h GiHalf / GiHalfKey; that pass never runs since PRTOFF1, and every
+	// user binds its own), the atlas on its own unit by rtddgiCellUniforms
+	fn->glActiveTexture( GLenum( GL_TEXTURE0 + WwCellUnit::GiHalf ) );
+	fn->glBindTexture( GL_TEXTURE_BUFFER, c.viewMeshTex );
+	fn->glTexBuffer( GL_TEXTURE_BUFFER, GL_RGBA32F, c.viewMeshBuf );
+	fn->glActiveTexture( GLenum( GL_TEXTURE0 + WwCellUnit::GiHalfKey ) );
+	fn->glBindTexture( GL_TEXTURE_BUFFER, c.viewListTex );
+	fn->glTexBuffer( GL_TEXTURE_BUFFER, GL_RGBA32F, c.viewListBuf );
+	fn->glActiveTexture( GLenum( prevActive ) );
+	prog->uni1i( "probeMesh", WwCellUnit::GiHalf );
+	prog->uni1i( "probeList", WwCellUnit::GiHalfKey );
+	rtddgiCellUniforms( scene );   // cellDdgiOn, the atlas, origin, step, dims
+	prog->uni4m( "modelViewMatrix", viewTrans.toMatrix4() );
+	prog->uni1f( "probeRad", rad );
+	prog->uni1i( "probeMode", mode );
+	const int fogMode = viewFogMode();
+	prog->uni1b( "probeFog", fogMode == 1 );
+	prog->uni1f( "probeExposure", wwSceneExposureScale() );
+	wwLookdevFogUniforms( scene );
+	GLint prevDepthFunc = GL_LESS;
+	fn->glGetIntegerv( GL_DEPTH_FUNC, &prevDepthFunc );
+	fn->glEnable( GL_DEPTH_TEST );
+	fn->glDepthFunc( GL_LEQUAL );
+	fn->glDepthMask( GL_TRUE );
+	fn->glDisable( GL_BLEND );
+	fn->glDisable( GL_CULL_FACE );
+	fn->glBindVertexArray( c.viewVao );
+	if ( nNear ) {
+		prog->uni1i( "meshBase", 0 );
+		prog->uni1i( "listBase", 0 );
+		fn->glDrawArraysInstanced( GL_TRIANGLES, 0, GLsizei( meshNear.size() ), nNear );
+	}
+	if ( nFar ) {
+		prog->uni1i( "meshBase", int( meshNear.size() ) );
+		prog->uni1i( "listBase", nNear );
+		fn->glDrawArraysInstanced( GL_TRIANGLES, 0, GLsizei( meshFar.size() ), nFar );
+	}
+	fn->glBindVertexArray( 0 );
+	fn->glDepthFunc( GLenum( prevDepthFunc ) );
+	r->stopProgram();
+	c.viewDrewInFrame = true;
+	const double ms = double( t.nsecsElapsed() ) / 1e6;
+	// the census, when the counts move: the view's size and its CPU cost (bungo: inside the budget at 20000 probes)
+	const QString line = QStringLiteral( "probes view in the frame (%1): %2 near spheres x %3 triangles + %4 far x %5, %6 hidden at the camera; "
+		"%7 triangles" ).arg( fogMode == 1 ? QStringLiteral( "fogged" ) : QStringLiteral( "no fog" ) ).arg( nNear )
+		.arg( meshNear.size() / 3 ).arg( nFar ).arg( meshFar.size() / 3 ).arg( culled )
+		.arg( qint64( nNear ) * qint64( meshNear.size() / 3 ) + qint64( nFar ) * qint64( meshFar.size() / 3 ) );
+	if ( line != c.viewLast ) {
+		c.viewLast = line;
+		say( line + QStringLiteral( "; CPU %1 ms" ).arg( ms, 0, 'f', 3 ) );
+	}
 }
