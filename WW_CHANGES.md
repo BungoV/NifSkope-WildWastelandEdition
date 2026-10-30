@@ -1,5 +1,22 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## SKYSHARDS2 (2026-10-30, CODE1030 LATE ITEMs 10 + 6): the Concord sky shards are not in the bake nor in the built document
+
+- **Census tool:** `streamwalk --place` (LODPLACE1) takes `WW_PLACE_VBOX=x0,y0,x1,y1,zmin`: every WORLD vertex of every
+  shape (`W` lines) and of every far row (`J` lines) inside that XY box at or above zmin, up to 400 a shape. No render
+  code changed; without the key the dump is byte-for-byte as before. Stage table regenerated (+1 tool row).
+- **Gates (offline, `bash tests/skyshards/run.sh`):** `lodo_census.py` reads the bake's `.lodo` through the independent
+  decoder (tests/spells/lodgen_native_decode.py) and checks every mesh box against its source model's bound radius and
+  every level-0 triangle against its box: Commonwealth bake 4705 meshes, 173,716 triangles, 0 boxes past 2x the source
+  radius, 0 stretched triangles PASS; red (a copy with one mesh's extent z x 40, CRCs re-sealed) FAIL.
+  `place_gate.py` reads a `--place` dump of the c3 open (rt env, Concord -15,17 |5, -no-gui) over the shards'
+  footprint: 0 built vertices within 900 u of the measured shard points (S1 -61515,64794,8594 and S3
+  -65090,59181,8130, MOVEFRAMES' parallax), far terrain on its LAND (max 0 u) PASS; red (one vertex planted at S1) FAIL.
+- **What it says:** the shards (bungo 10-30, c3 still_close5 in the merge1030a rt rows) are made at DRAW time: not by
+  the baker (.lodo/.lodi/.lodl), not by the placements or welds the cell view builds. They vanish in a probe pass
+  (WW_CELL_LIT_PROBE=95) and in the finals env on the same exe. The owner is named by the live rows in
+  notes/code1030/skyshards2/HANDOFF.md, not here.
+
 ## CAMGATE3 (2026-10-30, FIX1030B round 2): an interior's camera bounds are a set of boxes built from what is drawn
 
 - CAMGATE2 judged an interior's camera by ONE axis box of the placements' ORIGINS + 512. Measured offline over all
