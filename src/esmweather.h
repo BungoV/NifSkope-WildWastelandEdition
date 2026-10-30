@@ -296,6 +296,8 @@ struct WwWeatherData
 	quint8 thunderFadeIn = 0, thunderFadeOut = 0;
 	quint8 lightningRgb[3] = {};
 	int thunderSounds = 0;
+	// lane CLOUD6e: MNAM, the precipitation shader (an SPGD; 0 = none): the rain fog's "this weather rains"
+	quint32 precipForm = 0;
 	quint32 imsp[8] = {};	// IMSP: the IMGS per ToD (mapped FormIDs; 4-slot records mapped to 8)
 	float skyScale[8] = { 1, 1, 1, 1, 1, 1, 1, 1 };	// IMGS HNAM[7] per ToD (1.0 where absent)
 	int skyScaleFound = 0;	// how many ToD slots had an IMGS with HNAM

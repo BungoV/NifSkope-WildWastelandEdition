@@ -86,6 +86,34 @@
   0.059 -> 0.065 ms during a flash (INFO). Link sweeps 405 / 270 / 405 LINK OK.
 - Owed: pictures when bungo asks (a storm at a pinned flash time from the echo's `next`, default vs
   `^WW_CLOUD_LIGHTNING_RED=1`); a live set of WW_CLOUD_LIGHTNING=0 and back.
+## CLOUD6e (2026-10-30, FIX1030C): rain fog under the rain clouds (RDR2 gap e), WW_CLOUD_RAINFOG on
+
+- RDR2 (Bauer 2019, SIGGRAPH Advances, slide 19 + its note): "rain fog beneath clouds, where placement is derived off the
+  density in the cloud map; a height-based falloff connects the fog to the cloud". No numbers in the talk; ours below.
+- Which weathers: those whose record links a precipitation shader (WTHR MNAM, an SPGD; esmweather.cpp now reads it,
+  lookdevstage `wwLookdevWeatherRains`). Census of the 107 vanilla weathers (tests/rainfog/census_rain.tsv): 10 do (all
+  Rainy-flagged: ActualRain 8, RealRain 2); 4 more carry the Rainy flag with NO precipitation shader (DiamondWeather,
+  DiamondWeatherPastel, TCommonwealthMarshOvercast, CommonwealthGSRadstormOld) and stay dry. The DATA thunder byte is not
+  used (CLOUD6d: 133-255 in every weather). A weather change weighs the new weather by pct, the leaving one by 1 - pct.
+- The law (src/gl/rainfogmath.h, res/shaders/cell_rainfog.glsl): sigma = the rain's own drop extinction (N Q pi D^2 / 4,
+  N from gl/precipmath.h densityFromRate, the particles' law, Q 2) x the Low band's map coverage straight above (CLOUD1's
+  map, R) x a height profile 1 + exp(-h / 0.3 km) under the base, fading to 0 over 0.15 km above it. The default rain
+  (2 mm, 4 mm/h): 0.2545 / km at the ground (visibility 15 km), twice that at the base. The air's froxel pass
+  (cell_volair.frag) adds sigma x length to each sub-step's optical depth, so the sun (with the cloud shadows), lights, GI
+  and ambient light it as they light the air; the far grid keys on it. Not in the closed-form far tail (lookdev_fog.glsl:
+  the PRT effect-decal programs sit at the instruction limit).
+- Needs the Cloud Map row (ships Off): without a map the echo reads `rainfog=none(no cloud map)`. Outdoors only.
+- Switch: WW_CLOUD_RAINFOG, ON by default (off for 0 / off / false / no), live (stage 0). Red WW_CLOUD_RAINFOG_RED=old
+  (or 1 / on) = the old path (today's air). Echo in the `cell air:` line: `rainfog=on(share= sigma= base= cov= map=)`,
+  `none(no rain)`, `none(interior)`, `none(no cloud map)`, `off`, `RED(old)`.
+- Gates (offline, the real cell_volair program through the driver; `bash tests/rainfog/run.sh <scratch>`):
+  Z a weather that does not rain draws today's air bit for bit (rfOn 0 vs the base program, air on: max |diff| 0 over
+  1.77 M values); I slice T vs a fine quadrature max 0.0046 (bar 0.01), column 0.0019 (0.02); P covered 6..8 km od 0.5882
+  (want 0.5882), clear side 0; S 1024 columns corr 1.00000, slope 1.0000; H falloff within 0.24 %, above the base T == 1;
+  M sigma == the drop extinction recomputed (rel 2.3e-6: precipmath's 0.5236); D rules; K census 10 rain (red flagrule:
+  14 FAIL); W wiring (red: base sources FAIL); C inject 160x90x64: today 0.176 ms, rfOn 0 0.181, rfOn 1 0.209 (offline).
+  Reds: today's program fails I, P, S, H each. Stage: both names stage 0 (red: base table, missing).
+- Owed: pictures when bungo asks (a rain weather with the Cloud Map on, default vs `^WW_CLOUD_RAINFOG_RED=old`).
 
 ## SKYSHARDS3 (2026-10-30, CODE1030): the far rings never draw with the bindless twin (the shards in Concord's sky)
 

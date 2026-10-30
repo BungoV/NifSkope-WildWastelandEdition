@@ -108,6 +108,9 @@ bool wwLookdevWeatherLeaving( quint32 & formID, QString & edid, QString & owner,
  *  0..1; the storm side's while a change blends), seed = the storm weather's FormID (the strikes' draws); false when
  *  no weather is loaded */
 bool wwLookdevLightning( float & share, float rgb[3], quint32 & seed );
+/*! lane CLOUD6e: whether the loaded weather rains (its record links a precipitation shader, WTHR MNAM) and, while a
+ *  change blends, whether the one left behind does and the NEW weather's share pct; false when no weather is loaded */
+bool wwLookdevWeatherRains( bool & cur, bool & blending, bool & old, float & pct );
 void wwLookdevSetWeather( const QString & key );
 double wwLookdevHour();
 void wwLookdevClimateTnam( unsigned char out[4] );	// lane GAPLOOK1: the climate's TNAM sunrise/sunset bytes (10 min units)

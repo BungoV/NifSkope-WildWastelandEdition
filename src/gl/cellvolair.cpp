@@ -8,7 +8,10 @@ BSD License - see nifskope.h
 #include "wwswitch.h"	// lane TESTDRIVER1: the WW_* switch store
 #include "cellunits.h"
 
+#include "gl/atmomath.h"	// lane CLOUD6e: kUnitKm, the cloud map's units
 #include "gl/cellairzone.h"	// lane AIRZONE1: the hand-placed volumes' fog and particle blocks
+#include "gl/cloudmap.h"	// lane CLOUD6e: the rain fog follows the Low band's coverage
+#include "gl/rainfogmath.h"	// lane CLOUD6e: the rain fog's law
 #include "gl/cellgrass.h"	// lane FOGWIND1: the game's wind angle, shared with the grass
 #include "gl/cellhdr.h"
 #include "gl/celllights.h"
@@ -358,6 +361,8 @@ struct VaGpu
 	bool farOn = false;
 	float farStart = 0.0f, farLog = 1.0f;
 	std::vector<float> farKey;	// what the far grid was built from (the view, the sun, the medium)
+	float rfKey[5] = { 0, 0, 0, 0, 0 };	// lane CLOUD6e: the rain fog this frame (on, sigma, base, coverage, map size)
+	QString rfNote = QStringLiteral( "off" );
 	int farAge = 0;
 	int farBuilds = 0;
 	GLuint farQ[2] = { 0, 0 };
@@ -1125,6 +1130,89 @@ static float vaShapesTop( Scene * scene, const BoundSphere & bs )
 	return top;
 }
 
+/* lane CLOUD6e (RDR2 gap e, Bauer 2019 slide 19): the rain fog under the rain clouds (gl/rainfogmath.h the law,
+ * cell_rainfog.glsl the read). rfOn 1 while the loaded weather rains (WTHR MNAM, a change weighs both weathers),
+ * outdoors, with CLOUD1's map built (the Cloud Map row). WW_CLOUD_RAINFOG (on unless 0 / off / false / no) and the
+ * red WW_CLOUD_RAINFOG_RED=old (today's air) re-read on a set. Returns the echo; key = what the far grid keys on. */
+static QString vaRainFog( Scene * scene, NifSkopeOpenGLContext::Program * prog, bool interior, float key[5] )
+{
+	namespace RF = WwRainFog;
+	std::fill( key, key + 5, 0.0f );
+	WW_SWITCH_STATIC( bool, rfSwitch, RF::switchOn( wwEnv( "WW_CLOUD_RAINFOG" ).trimmed().toLower().constData() ) );
+	WW_SWITCH_STATIC( bool, rfRed, RF::redOn( wwEnv( "WW_CLOUD_RAINFOG_RED" ).trimmed().toLower().constData() ) );
+	bool cur = false, blending = false, old = false;
+	float pct = 1.0f;
+	const bool have = wwLookdevWeatherRains( cur, blending, old, pct );
+	const double share = have ? RF::share( cur, old, blending, double( pct ) ) : 0.0;
+	const WwCloudMap & m = wwCloudMap();
+	const WwCloudBandInfo & low = m.band[WwCloudLow];
+	QString why;
+	if ( !rfSwitch )
+		why = QStringLiteral( "off" );
+	else if ( rfRed )
+		why = QStringLiteral( "RED(old)" );
+	else if ( interior )
+		why = QStringLiteral( "none(interior)" );
+	else if ( !have )
+		why = QStringLiteral( "none(no weather)" );
+	else if ( !( share > 0.0 ) )
+		why = QStringLiteral( "none(no rain)" );
+	else if ( !m.valid || !m.tex || !( m.halfExtent > 0.0f ) || low.layers <= 0 )
+		why = QStringLiteral( "none(no cloud map)" );
+	const bool on = why.isEmpty();
+	prog->uni1i( "rfOn", on ? 1 : 0 );
+	// the sampler always gets its own unit: an unset sampler2D on unit 0 beside the pass's other types drops the draw
+	auto fn = scene->renderer->fn;
+	WwCellUni::Units<std::remove_pointer_t<decltype( fn )>> u( fn, wwCellUniDsa() );
+	u.bind( WwCellUnit::CloudBuildMap, GL_TEXTURE_2D, on ? m.tex : 0 );
+	u.done();
+	prog->uni1i( "rfMap", WwCellUnit::CloudBuildMap );
+	if ( !on )
+		return why;
+	// view -> world (game units): Q = R^T (p - t) / sc (cloudshadow.cpp worldFromView), then the map's (u, v) and the
+	// height below the Low base in km
+	const Transform & vt = scene->view;
+	const double sc = vt.scale != 0.0f ? double( vt.scale ) : 1.0;
+	const double ku = double( WwAtmoMath::kUnitKm );
+	const double he = double( m.halfExtent );
+	double A[3][4];
+	for ( int i = 0; i < 3; i++ ) {
+		double b = 0.0;
+		for ( int j = 0; j < 3; j++ ) {
+			A[i][j] = double( vt.rotation( j, i ) ) / sc;
+			b -= double( vt.rotation( j, i ) ) * double( vt.translation[j] );
+		}
+		A[i][3] = b / sc;
+	}
+	double R[3][4];
+	for ( int j = 0; j < 4; j++ ) {
+		R[0][j] = A[0][j] / ( 2.0 * he );
+		R[1][j] = A[1][j] / ( 2.0 * he );
+		R[2][j] = -A[2][j] * ku;
+	}
+	R[0][3] += 0.5 - double( m.centerX ) / ( 2.0 * he );
+	R[1][3] += 0.5 - double( m.centerY ) / ( 2.0 * he );
+	R[2][3] += double( low.baseZ ) * ku;
+	float mf[16] = { 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1 };
+	for ( int i = 0; i < 3; i++ )
+		for ( int j = 0; j < 4; j++ )
+			mf[j * 4 + i] = float( R[i][j] );
+	const int l = prog->uniLocation( "rfFromView" );
+	if ( l >= 0 ) {
+		fn->glUniformMatrix4fv( l, 1, GL_FALSE, mf );
+		WwCellUni::wrote( prog->wwUni, l, 1 );	// lane CELLUNI2: a raw write
+	}
+	const double sigmaKm = RF::defaultSigmaPerKm() * share;
+	prog->uni4f( "rfLaw", FloatVector4( float( sigmaKm * ku ), float( RF::kBaseExcess ), float( 1.0 / RF::kFalloffKm ),
+		float( 1.0 / RF::kAboveKm ) ) );
+	prog->uni2f( "rfFar", std::clamp( low.coverage, 0.0f, 1.0f ), float( RF::kEdgeFade ) );
+	const float k[5] = { 1.0f, float( sigmaKm ), low.baseZ, low.coverage, m.halfExtent };
+	std::copy( k, k + 5, key );
+	return QStringLiteral( "on(share=%1 sigma=%2/km base=%3 cov=%4 map=%5%6)" ).arg( share, 0, 'f', 3 ).arg( sigmaKm, 0, 'f', 4 )
+		.arg( double( low.baseZ ), 0, 'f', 0 ).arg( double( low.coverage ), 0, 'f', 3 ).arg( m.size )
+		.arg( m.stub ? QStringLiteral( " stub" ) : QString() );
+}
+
 static void vaPassInner( Scene * scene, bool run )
 {
 	if ( !scene || !scene->renderer )
@@ -1453,6 +1541,7 @@ static void vaPassInner( Scene * scene, bool run )
 			: !( G.s > 0.0f ) ? QStringLiteral( "off(no ground layer)" ) : flat ? QStringLiteral( "off(flat at the frame's ground)" )
 			: QStringLiteral( "off(no terrain heights yet)" );
 	}
+	g.rfNote = vaRainFog( scene, prog, L && L->interior, g.rfKey );	// lane CLOUD6e: the rain fog (both grids)
 	prog->uni1b( "volCsm", csm );
 	prog->uni1i( "volRed", s.red & ~1 );
 	prog->uni1f( "volShell", s.shellStep ? 0.0f : 1.0f );
@@ -1838,6 +1927,7 @@ static void vaPassInner( Scene * scene, bool run )
 			float( s.red ), csm ? 1.0f : 0.0f } );
 		for ( int k = 0; k < 6; k++ )
 			key.insert( key.end(), K[k], K[k] + 4 );
+		key.insert( key.end(), g.rfKey, g.rfKey + 5 );	// lane CLOUD6e: the rain fog (the map's drift lands at the refresh)
 		float sunV[4];
 		for ( const char * n : { "cellDirTo", "cellDirColor", "fogSun", "fogSunColour" } ) {
 			uniF( n, -1, sunV, 4 );
@@ -1999,7 +2089,8 @@ static void vaPassInner( Scene * scene, bool run )
 			.arg( volMb, 0, 'f', 1 ).arg( [] { WwTerrainShadowMap t; return wwTerrainShadowMap( t ) ? 1 : 0; }() );
 	s.last.chop( 1 );
 	s.last += QStringLiteral( " " ) + optNote + QStringLiteral( " " ) + groundNote + ( s.farTier > 0 ? QStringLiteral( " " ) + farNote : QString() )
-		+ ( dr.on ? QStringLiteral( " drift=" ) + dr.note : QString() ) + QStringLiteral( " sungate=" ) + sunGateNote + QStringLiteral( ")" );
+		+ ( dr.on ? QStringLiteral( " drift=" ) + dr.note : QString() ) + QStringLiteral( " sungate=" ) + sunGateNote
+		+ QStringLiteral( " rainfog=" ) + g.rfNote + QStringLiteral( ")" );
 
 	/* WW_CELL_AIR_DUMP=<file>: int32 cols rows slices; the injected and the integrated volumes (cols x rows RGBA float
 	 * per layer, layer 0 first, bottom row first); <file>.txt the numbers an independent rebuild needs */

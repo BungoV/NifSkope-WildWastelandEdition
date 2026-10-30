@@ -830,6 +830,8 @@ bool EsmWeather::read( quint32 formID, WwWeatherData & out, QString * why )
 				std::memcpy( &gnam, f.data(), 4 );
 			else if ( f == "VNAM" && f.size() >= 4 )	// lane WEATHERBLEND5: the volatility multiplier
 				std::memcpy( &out.volMult, f.data(), 4 );
+			else if ( f == "MNAM" && f.size() >= 4 )	// lane CLOUD6e: the precipitation shader (the rain fog's "it rains")
+				std::memcpy( &out.precipForm, f.data(), 4 );
 			else if ( f == "PNAM" )
 				pnam = bytes();
 			else if ( f == "JNAM" )

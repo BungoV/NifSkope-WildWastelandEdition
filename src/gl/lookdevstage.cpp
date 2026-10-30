@@ -1266,6 +1266,23 @@ bool wwLookdevWeatherLeaving( quint32 & formID, QString & edid, QString & owner,
 	return true;
 }
 
+bool wwLookdevWeatherRains( bool & cur, bool & blending, bool & old, float & pct )
+{
+	resolve();
+	const LdState & s = st();
+	cur = blending = old = false;
+	pct = 1.0f;
+	if ( !s.haveWeather )
+		return false;
+	cur = s.w.precipForm != 0;	// lane CLOUD6e: WTHR MNAM (esmweather.cpp)
+	if ( s.w.blending() ) {
+		blending = true;
+		old = s.w.last->precipForm != 0;
+		pct = s.w.transPct;
+	}
+	return true;
+}
+
 void wwLookdevSetWeather( const QString & key )
 {
 	LdState & s = st();

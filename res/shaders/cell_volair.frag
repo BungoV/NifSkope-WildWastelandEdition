@@ -79,6 +79,8 @@ layout ( location = 1 ) out vec4 volMrt[7];	// stage 3: layers volLayer + 1 .. +
 // SKY2 FOGSLICE1: the air pass reads the air volume (cell_airmed.glsl); the lit particles keep the grid
 #define WW_AIR_GIVOL 1
 #include "cell_airmed.glsl"
+// lane CLOUD6e: the rain fog under the rain clouds (cell_rainfog.glsl; rfOn 0 = the air exactly as before)
+#include "cell_rainfog.glsl"
 // lane AIRZONE1: the hand-placed volumes (cell_airzone.glsl): one read a sub-step, the light it scatters x the tint
 #ifdef WW_CELL_AIRZONE
 #include "cell_airzone.glsl"
@@ -644,6 +646,8 @@ void main()
 			azTintQ[q] = zf.tint;
 		}
 #endif
+		if ( rfOn != 0 )	// lane CLOUD6e: the rain fog at the sub-step's middle, x its length (WW_CLOUD_RAINFOG)
+			tauQ[q] += rfSigma( dirView * ( 0.5 * ( ta + tb ) / fogDistScale ) ) * ( tb - ta );
 		scatters = scatters || air1mE( tauQ[q] ) > 0.0;
 	}
 	float keep = fogK[0].x + fogK[1].x + fogK[2].x + fogK[3].x + fogK[4].x + fogK[5].x;
