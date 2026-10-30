@@ -1,5 +1,26 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## RESTIRDI1 (2026-10-30): ReSTIR DI for the shadow-casting cell lights, the rules and their CPU reference gate
+
+- **The rules** (src/restirmath.h, header-only; GLSL mirror src/rtddgi/restir_common.glsl, each function tagged
+  `MIRROR restirmath.h <name>`): Bitterli 2020 reservoirs over the shadow-flag lights (C = 8 uniform candidates a
+  pixel, target p_hat = the light's unshadowed Lambert irradiance luminance with its hemisphere / box clip, radial curve
+  and spot cone: the DDGI volume's light law), the reprojected history with M clamped to 20 x C, K = 4 neighbours
+  within 16 px (depth 10 %, normal 25 deg), Z counting only the reservoirs whose domain holds the light (unbiased), one
+  shadow ray to a point on the light's sphere (packed light float 29 = its source radius), then Heitz 2018's ratio:
+  the running means (at most 16 frames, reset on a lost history) of p_hat W V and p_hat W over a 5 x 5 edge-stopped
+  window. restir::frame() is the CPU twin of the GPU passes.
+- **Gate** (tests/restir_math/run.sh, offline, no NifSkope): an analytic fixture (floor, three boxes, six shadow lights
+  incl. a spot, a hemisphere and a box light, one unshadowed light, a 96 x 64 off-centre camera) against a brute-force
+  reference (every light x 256 stratified points on its sphere). Green 7 checks: mirror 0 of 40000 GLSL/header
+  comparisons differ; view point from the stored depth 1.5e-7 of the depth; shape clip 0 wrong; the shadowed estimate's
+  64-seed mean 1.0013 of the reference; 2 of 4566 pixels outside 4 standard errors (unbiased); U x ratio relative RMSE
+  0.064 after 16 frames (bar 0.08); a light switched on is kept at 53 % of its ideal share within 4 frames (bar 35 %).
+  Reds, each failing its own check: HASH (mirror, 20000 differ), VIEWPOS (2.2e-2), NOSHAPE (2847 lit), NOVIS (1.084),
+  NOPDF (4482 of 4566 out), NOTEMPORAL (0.103), NOCLAMP (5 pixels of 3082).
+- Measured on the way: without the running means the windowed ratio got WORSE with reuse (0.100 after 16 frames vs
+  0.071 without history): the reuse makes neighbours keep the same light, so the window no longer mixes lights.
+
 ## RTXFIX1 (2026-10-30): the Ray-traced GI probes inside the frame (rounder, fogged, exposed); the atlas order's red
 
 - **Probes view** (bungo 10-29: "Could our probes have a rounder shape?", "fog", the spheres by the string lights and the
