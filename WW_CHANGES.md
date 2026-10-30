@@ -1,5 +1,36 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## SHADOWSHIMMER3 (2026-10-30, FIX1030C): far tree shadows sway on both colour paths; the air tail holds on a slide
+
+- **FARSWAYLEGACY (on):** the far trees' sway flag (lodTreeAnim) is now ONE value in every pass that draws a shape: the
+  SHAPE's (Shape::isVertexAlphaAnimation, TREECROWN1's rule included: a "FarLOD " bucket with the NIF Tree_Anim bit sways
+  although its LOD .bgsm says Tree off). The PBR colour pass already used it; the legacy colour pass
+  (Renderer::setupProgramCE1, src/gl/renderer.cpp) wrote the shader property's flag over it, and the sun casters
+  (src/gl/sunshadow.cpp, SHADOWSHIMMER2's c.sway) tested the property's flag too. So on the PBR path those buckets swayed
+  in colour while their shadows stood still, and on the legacy path they stood still in both. Now both colour paths and
+  the casters sway them. New accessor Shape::wwTreeAnim() (src/gl/glshape.h).
+- **AIRTAILSLIDE (on):** the air tail's strata start (ww_sunshadow.glsl wwAirTailShadow) is IGN of the WORLD lattice cell
+  of the point the tail ends at (the surface the pixel shades), cells a power of two of about distance / 2048 game units
+  (at least 1), folded as (x + 37 z, y + 61 z), wrapped at 4096. SHADOWSHIMMER2's world-direction hash held on a turn but
+  moved on every camera slide; this one moves only where a point's distance crosses a power of two. Twin:
+  src/gl/sunshadowfit.h jitAirWorld / airLevel.
+- **FARSWAYCOST (census):** `farobjcensus` now prints per ring `sway: N shapes, T tris` and a `sway total` line (the tree
+  buckets the sun casters sway and draw as dynamic every paint). Concord rings 0-2 (Commonwealth.lodi): 187 flat / 62
+  instanced shapes, 3,437,231 of 4,508,725 far object tris (76.2 %) are tree buckets. GPU ms of the caster pass: owed (a
+  live row); the instanced casters draw only the tiles inside each cascade.
+- **Reds:** `WW_SUN_SHADOW_STABLE_RED=treeanim` (the property's flag in the legacy colour line and the casters: main's
+  rule), `=airslide` (the world-direction hash); both live (stage 0, the existing name; the stage table only moves lines).
+  `old` / `all` / `1` now mean all 8 parts (255), and the csm summary's `stable=` prints `bits ^ 255`.
+- **Gates (offline):** `bash tests/shadowshimmer3/run.sh <out>`: green PASS; red RED_TREEANIM FAIL (1 of 8 flag cases
+  disagree: property 0, NIF Tree_Anim 1, FarLOD name 1 -> PBR 1, legacy 0, caster 0); red RED_AIRSLIDE FAIL (side slide
+  86.9 %, forward 56.5 %, crane 58.6 % of point-frames change, none a level crossing) vs green 0 / 0 / 0.044 / 0.162 /
+  0.007 % (still, turn, side, forward, crane), every change a level crossing; float reconstruction flips <= 0.057 %.
+  tests/shadowshimmer2 and tests/shadowshimmer1 still PASS with their reds failing. Link sweeps: base 405/405,
+  WW_CELL_RTDDGI none+ubo 270/270, WW_CELL_PRT 405/405 LINK OK (fo4_effectdecalcsm march+PRT 1,619,262 B, main
+  1,615,280 B: the first form of the hash, with a fallback branch and its own length, refused it).
+- Owed: pictures when bungo asks (far tree shadows swaying on the legacy and PBR paths, treeanim red pair; air tail
+  under a slide, airslide red pair), the caster pass's GPU ms with the far trees swaying (Ultra, Concord).
+
 ## CLOUDBAND2 (2026-10-30, CODE1030): Cloud Accumulation and the column ambient are the default
 
 - bungo's rule "no fix-only toggles, a code choice is never handed to him": CLOUDBAND1's two switches, which shipped

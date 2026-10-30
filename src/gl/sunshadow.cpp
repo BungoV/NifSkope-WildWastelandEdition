@@ -172,12 +172,13 @@ int stableRedBits( const QString & v )
 	if ( t.isEmpty() )
 		return 0;
 	if ( t == QLatin1String( "old" ) || t == QLatin1String( "all" ) || t == QLatin1String( "1" ) )
-		return 63;
+		return 255;
 	int bits = 0;
 	for ( const QString & p : t.split( QChar( ',' ), Qt::SkipEmptyParts ) ) {
 		const QString q = p.trimmed();
 		bits |= q == QLatin1String( "fit" ) ? 1 : q == QLatin1String( "kernel" ) ? 2 : q == QLatin1String( "bias" ) ? 4
-			: q == QLatin1String( "sway" ) ? 8 : q == QLatin1String( "terr" ) ? 16 : q == QLatin1String( "offbias" ) ? 32 : 0;
+			: q == QLatin1String( "sway" ) ? 8 : q == QLatin1String( "terr" ) ? 16 : q == QLatin1String( "offbias" ) ? 32
+			: q == QLatin1String( "airslide" ) ? 64 : q == QLatin1String( "treeanim" ) ? 128 : 0;	// lane SHADOWSHIMMER3
 	}
 	return bits;
 }
@@ -911,7 +912,8 @@ static void sunShadowPassImpl( Scene * scene )
 	const bool cableSwayOn = wwLookOn( WwLook::CableShadowSway );
 	s.swayCables = cableSwayOn ? 0 : -1;
 	/* lane SHADOWSHIMMER2 (FARSWAYSHADOW): the far trees' wind, the colour pass's sample of this paint. A tree-animation
-	 * shape (the shader property's flag, as the legacy colour draw sets lodTreeAnim) that reaches outside the loaded
+	 * shape (lane SHADOWSHIMMER3: the SHAPE's flag, TREECROWN1's FarLOD Tree_Anim rule included, as both colour paths now
+	 * set lodTreeAnim; red WW_SUN_SHADOW_STABLE_RED=treeanim: the shader property's flag) that reaches outside the loaded
 	 * block sways in lookdev_csmdepth(_at).vert as fo4_default.vert sways it; it draws per draw (the vertex alpha) and as
 	 * dynamic over the static cache. Red WW_SUN_SHADOW_STABLE_RED=sway: the casters stand still. */
 	const WwFarSway farSway = ( wwSunShadowStableRed() & 8 ) ? WwFarSway() : wwCellFarLodSway( scene );
@@ -946,7 +948,8 @@ static void sunShadowPassImpl( Scene * scene )
 		}
 		if ( cableSwayOn && c.skinned.empty() && !sh->wwFarInstData() && cableSway( scene, sh, c.skinned ) )
 			s.swayCables++;
-		if ( farSway.amp > 0.0f && c.skinned.empty() && sh->wwShaderLighting() && sh->wwShaderLighting()->isVertexAlphaAnimation ) {
+		if ( farSway.amp > 0.0f && c.skinned.empty() && sh->wwShaderLighting()
+			&& ( ( wwSunShadowStableRed() & 128 ) ? sh->wwShaderLighting()->isVertexAlphaAnimation : sh->wwTreeAnim() ) ) {
 			const BoundSphere bs = sh->bounds();
 			c.sway = std::max( std::fabs( bs.center[0] - farSway.world[0] ), std::fabs( bs.center[1] - farSway.world[1] ) ) + bs.radius
 				> farSway.world[2];
@@ -1707,7 +1710,8 @@ void wwSunShadowUniforms( Scene * scene )
 		 * (the normal offset in texels, -1 = the bias alone in the fog's froxels, 0 = CSM1's: the red offbias) */
 		const bool offOn = !up && s.offStable;
 		prog->uni4f( "ussCsmStable", FloatVector4( ( sr & 2 ) ? 0.0f : 1.0f, ( up && !volume && !( sr & 4 ) ) ? cp.normalTexels : 0.0f,
-			( sr & 16 ) ? 1.0f : 0.0f, offOn ? ( volume ? -1.0f : WwCsmFit::kOffNormalTexels ) : 0.0f ) );
+			( ( sr & 16 ) ? 1.0f : 0.0f ) - ( ( sr & 80 ) == 64 ? 1.0f : 0.0f ),	// lane SHADOWSHIMMER3: -1 = the red airslide
+			offOn ? ( volume ? -1.0f : WwCsmFit::kOffNormalTexels ) : 0.0f ) );
 		if ( offOn ) {
 			// the Off tier's receiver: 0.25 of each cascade's texel along the light, and the texel for the normal offset
 			prog->uni3f( "ussCsmTexel", texel[0], texel[1], texel[2] );
@@ -1773,7 +1777,7 @@ QString wwSunShadowSummary()
 		o += QString( " m%1=%2" ).arg( i ).arg( m.join( QChar( ',' ) ) );
 	}
 	// lane SHADOWSHIMMER1: which parts run stable (red bits 1 fit, 2 kernel, 4 bias) and each cascade's sphere radius
-	o += QString( " stable=%1 sphere=%2,%3,%4" ).arg( wwSunShadowStableRed() ^ 63 ).arg( g( s.c[0].sphereR ), g( s.c[1].sphereR ),
+	o += QString( " stable=%1 sphere=%2,%3,%4" ).arg( wwSunShadowStableRed() ^ 255 ).arg( g( s.c[0].sphereR ), g( s.c[1].sphereR ),
 		g( s.c[2].sphereR ) );
 	// lane SHADOWSHIMMER2: the casters the far sway moves, and Off on the stable bias (1) or CSM1's (0)
 	o += QString( " swaycasters=%1 offstable=%2" ).arg( s.swayCasters ).arg( s.offStable ? 1 : 0 );

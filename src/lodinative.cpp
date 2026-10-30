@@ -1504,6 +1504,10 @@ bool nifAppendLodiObjects( NifModel * nif, const QModelIndex & iRoot,
 				continue;
 			emitInstBucket( nif, iRoot, ib.meta, ib.d, shapeOrigin, lo, hi );
 			shapes++;
+			if ( ib.meta.sway ) {	// lane SHADOWSHIMMER3 (FARSWAYCOST)
+				cnt.swayShapes++;
+				cnt.swayTris += d.drawnTris;
+			}
 			cnt.instancesDrawn += d.instances;
 			cnt.uniqueVerts += d.uniqueVerts;
 			cnt.uniqueTris += d.uniqueTris;
@@ -1539,14 +1543,24 @@ bool nifAppendLodiObjects( NifModel * nif, const QModelIndex & iRoot,
 		auto sit = spilled.find( key );
 		for ( int s = 0; sit != spilled.end() && s < sit.value().size(); s++ ) {
 			Bucket & full = sit.value()[s];
+			const qint64 shapesBefore = shapes;	// lane SHADOWSHIMMER3 (FARSWAYCOST)
 			ok = ok && emitBucket( nif, iRoot, full, shapeOrigin, shapes, verts, error, side, &kept );
 			cnt.tris += qint64( full.tris.size() );
+			if ( full.sway ) {
+				cnt.swayShapes += shapes - shapesBefore;
+				cnt.swayTris += qint64( full.tris.size() );
+			}
 			std::vector<OutVert>().swap( full.verts );   // lane FAR3: emitted buckets free as they go
 			std::vector<Triangle>().swap( full.tris );
 		}
 		Bucket & bkEmit = buckets[key];
 		cnt.tris += qint64( bkEmit.tris.size() );
+		const qint64 shapesBefore = shapes;	// lane SHADOWSHIMMER3 (FARSWAYCOST)
 		const bool emitted = ok && emitBucket( nif, iRoot, bkEmit, shapeOrigin, shapes, verts, error, side, &kept );
+		if ( bkEmit.sway ) {
+			cnt.swayShapes += shapes - shapesBefore;
+			cnt.swayTris += qint64( bkEmit.tris.size() );
+		}
 		std::vector<OutVert>().swap( bkEmit.verts );
 		std::vector<Triangle>().swap( bkEmit.tris );
 		if ( !emitted ) {
@@ -1930,7 +1944,7 @@ int lodiFarObjCensusCli( const QStringList & args, QTextStream & out )
 	nif.holdUpdates( true );
 	const QModelIndex iRoot = nif.insertNiBlock( QStringLiteral( "NiNode" ) );
 	nif.set<QString>( iRoot, "Name", QStringLiteral( "FarLOD" ) );
-	qint64 allTris = 0, allKept = 0;
+	qint64 allTris = 0, allKept = 0, allSwayTris = 0, allSwayShapes = 0;
 	for ( int i = 0; i < rings.size(); i++ ) {
 		const Ring & g = rings[i];
 		LodiSceneSpec os;
@@ -1982,8 +1996,20 @@ int lodiFarObjCensusCli( const QStringList & args, QTextStream & out )
 				.arg( i ).arg( c.placed ).arg( c.instancesDrawn ).arg( c.tris ).arg( c.uniqueVerts ).arg( c.uniqueTris )
 				.arg( double( c.geoBytes ) / ( 1024.0 * 1024.0 ), 0, 'f', 2 )
 				.arg( double( c.instBytes ) / ( 1024.0 * 1024.0 ), 0, 'f', 2 );
+		/* lane SHADOWSHIMMER3 (FARSWAYCOST): the tree buckets the sun casters sway (gl/sunshadow.cpp c.sway: a far ring
+		 * reaches outside the loaded block), drawn as dynamic in each cascade on every paint instead of from the cache */
+		allSwayTris += c.swayTris;
+		allSwayShapes += c.swayShapes;
+		out << QString( "farobjcensus ring %1 sway: %2 shapes, %3 tris (%4 % of the ring's tris)\n" )
+			.arg( i ).arg( c.swayShapes ).arg( c.swayTris )
+			.arg( c.tris > 0 ? 100.0 * double( c.swayTris ) / double( c.tris ) : 0.0, 0, 'f', 1 );
 		out.flush();
 	}
+	out << QString( "farobjcensus sway total: %1 shapes, %2 tris (%3 % of %4); the sun casters draw them every paint in each "
+		"cascade: %5 tris a paint over 3 cascades\n" )
+		.arg( allSwayShapes ).arg( allSwayTris )
+		.arg( allTris > 0 ? 100.0 * double( allSwayTris ) / double( allTris ) : 0.0, 0, 'f', 1 ).arg( allTris )
+		.arg( 3 * allSwayTris );
 	if ( !loaded.isEmpty() ) {
 		const int rc = farHideCensus( nif, loaded, esmPath, wsForm, out );
 		if ( rc ) {

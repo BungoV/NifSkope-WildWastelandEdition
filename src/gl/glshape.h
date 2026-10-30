@@ -140,6 +140,8 @@ public:
 	//! lane CSM1: an opaque, depth-writing, non-effect shape goes into the sun's shadow map
 	bool wwCastsSunShadow() const { return !drawInSecondPass && !translucent && depthWrite && !bsesp; }
 	bool wwDoubleSided() const { return isDoubleSided; }
+	//! lane SHADOWSHIMMER3 (FARSWAYLEGACY): the tree flag every pass sways by (TREECROWN1's FarLOD Tree_Anim rule included)
+	bool wwTreeAnim() const { return isVertexAlphaAnimation; }
 	//! lane FXD1: with Cell lights on, a second-pass decal of the lighting shader draws before the blended shapes
 	bool wwDecalDrawsFirst() const;
 	//! lane EFFECTPARITY1: an alpha-tested, unblended material clears the NIF's blend bit (game rule)

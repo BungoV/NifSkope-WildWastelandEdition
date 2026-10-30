@@ -103,6 +103,9 @@ struct LodiAppendCounts
 	//! lane FARDRAW1: instanced rings -- placements drawn, the unique mesh copy, and the bytes of each half
 	bool instanced = false;
 	qint64 instancesDrawn = 0, uniqueVerts = 0, uniqueTris = 0, geoBytes = 0, instBytes = 0;
+	//! lane SHADOWSHIMMER3 (FARSWAYCOST): the tree (sway) buckets -- shapes and triangles drawn; the sun casters draw
+	//! these every pass as dynamic (gl/sunshadow.cpp c.sway), not from the shadow cache
+	qint64 swayShapes = 0, swayTris = 0;
 };
 
 /*! lane FAR3: `NifSkope -no-gui farobjcensus <ws.lodi> --ring x0,y0,x1,y1,hx0,hy0,hx1,hy1,slot ...` builds the far
