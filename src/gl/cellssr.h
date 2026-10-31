@@ -59,7 +59,16 @@ bool wwCellSsrFlagged();
 void wwCellSsrKeepFrame( Scene * scene, unsigned int hdrFbo, int w, int h );
 
 /*! Water reflections: when a cell water with the WATR SSR flag draws, wwCellSsrPass also draws the water into a
- *  ray target and the march uses that ray where the water is in front (outdoors the pass runs for water alone). */
+ *  ray target and the march uses that ray where the water is in front (outdoors the pass runs for water alone).
+ *  Lane FIX1101A (src/gl/cellssrwater.h): the water's part has its own row, WW_CELL_SSR_WATER / WW/CellSsrWater, ON
+ *  by default indoors and outdoors whatever the SSR row; with the SSR row off the pass runs for the water alone and
+ *  reuses the previous frame (PERF3). Red WW_CELL_SSR_WATER_RED=1: the water follows the SSR row as before. */
+//! lane FIX1101A: the water ray pass reflects off the flat surface and the colour pass bends the read (water_refl.glsl
+//! wwWaterSsrBend); false under WW_CELL_SSR_WATER_RED=1 (the ray from the full normal)
+bool wwCellSsrWaterFlat();
+//! lane FIX1101A: the water's own SSR part reflects EVERY drawn body (the WATR flag and the Water reflections row
+//! aside) and marches with the water twin, at every water preset; false with its row off or under its red
+bool wwCellSsrWaterAll();
 //! true while the water ray pass draws; gbufTex = the obscurance pass's target (its .a the opaque view depth)
 bool wwCellSsrWaterRayPass( unsigned int * gbufTex );
 //! true while either of the reflections' scene passes draws (the water then grabs no frame copy)

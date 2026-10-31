@@ -117,6 +117,29 @@ vec4 wwWaterRiverFoam( vec2 P, float t, float foot )
 		float sf = waterRiverFoamK2.z;
 		a = smoothstep( z - sf, z + sf, n );
 	}
-	a = mix( D, a, vis ) * waterRiverFoamK.w;
+	a = mix( D, a, vis );
+	/* lane FIX1101A (P0, the manager's rvc6_on 10-31: "flat grey hard-edged blotches, like paint"): the streaks say where
+	 * the foam GATHERS; inside them river foam is a lace of bubbles with holes, never a solid sheet. The shared foam
+	 * texture (water_shore.glsl wwFoamDetail: 24 .. 0.3 u noise + a 1.2 u bubble lace) is thresholded by the streak's
+	 * density (at most 60 % foam in a full streak: 40 % holes in its cores, tests/waterfoam2), as the contact and shore foam are, carried with the water (two reads
+	 * half a life apart, crossfaded like the streaks). Red WW_CELL_WATER_RIVERFOAM_RED=paint (32): the solid streaks */
+	if ( ( waterRiverFoamRed & 32 ) == 0 && a > 0.002 ) {
+		float T2 = waterRiverFoamK.x, ph2 = fract( t / T2 );
+		float w0 = 1.0 - abs( 2.0 * ph2 - 1.0 );
+		vec3 d0 = wwFoamDetail( P - v * ( ph2 * T2 ), foot, t ), d1 = wwFoamDetail( P - v * ( fract( ph2 + 0.5 ) * T2 ), foot, t );
+		vec3 det = mix( d1, d0, w0 );
+		float dens = 0.6 * a;
+		float s = mix( 0.5, waterShoreK0.w, det.z );
+		a = smoothstep( 1.0 - dens - s, 1.0 - dens + s, det.x ) * mix( det.y, 1.0, dens * dens ) * min( 1.0, 1.5 * dens );
+	}
+	a *= waterRiverFoamK.w;
 	return vec4( D, a, CT, spd );
+}
+
+/* lane FIX1101A (P0: a grey shape on the dry bank): the floating foams (river, contact, whitecaps) only on water: x the
+ * water's own share the soft edge leaves (edgeV 1 = the water has become the scene it covers) and nothing over a column
+ * under 4 u (6 cm), full from 16 u. Red WW_CELL_WATER_RIVERFOAM_RED=paint (32): 1 everywhere, as before */
+float wwFoamWet( float edgeV, float column )
+{
+	return ( waterRiverFoamRed & 32 ) != 0 ? 1.0 : ( 1.0 - clamp( edgeV, 0.0, 1.0 ) ) * smoothstep( 4.0, 16.0, column );
 }

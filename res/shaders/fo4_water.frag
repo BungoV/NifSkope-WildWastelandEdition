@@ -121,6 +121,7 @@ uniform int waterProbe;
 #endif
 #ifdef WW_WATER_REFL	// lane WATERREFL1: fo4_waterlook.prog only (fo4_water.prog keeps its machine code)
 #include "water_refl.glsl"
+#include "water_ssrbend.glsl"
 // lane WATERLOOK1 step 9 (WATERGLINT1): the glare as counted facets
 #include "water_glitter.glsl"
 #endif
@@ -129,6 +130,10 @@ uniform int waterProbe;
 #include "water_ripple.glsl"
 #include "water_sss.glsl"
 #include "water_flowwaves.glsl"
+#endif
+// lane FIX1101A (LATE ITEM 1): the WATR's own fine layers draw the sea spectrum's unresolved tail near the camera
+#if defined( WW_WATER_OCEAN ) && defined( WW_WATER_REFL )
+#include "water_detail.glsl"
 #endif
 // lane WATERLOOK1 step 12 (WATERCONTACT1): foam where the water meets anything standing in it (after shore + ripple)
 #ifdef WW_WATER_CONTACT
@@ -263,6 +268,16 @@ void main()
 	float dist = length( ray );
 	vec3 V = ray / max( dist, 1e-6 );
 	bool under = eye.z < P.z;
+#ifdef WW_WATER_REFL
+	if ( waterSslr == 1 && waterSsrFlat ) {
+		// lane FIX1101A: the ray pass off the flat surface, before any normal work; the colour pass bends the read
+		vec3 Rf = vec3( V.xy, -V.z );
+		vec3 Rv = vec3( dot( Rf, cellWorldDir( vec3( 1.0, 0.0, 0.0 ) ) ), dot( Rf, cellWorldDir( vec3( 0.0, 1.0, 0.0 ) ) ),
+			dot( Rf, cellWorldDir( vec3( 0.0, 0.0, 1.0 ) ) ) );
+		fragColor = vec4( -Rv.z > 0.2 && !under ? Rv : vec3( 0.0 ), max( -posView.z, 1e-3 ) );
+		return;
+	}
+#endif
 
 	float dfade = clamp( ( dist - 8192.0 ) / ( P1.x - 8192.0 ), 0.0, 1.0 );
 
@@ -361,6 +376,14 @@ void main()
 		N = normalize( vec3( N.xy / max( N.z, 1e-3 ) + rip.xy, 1.0 ) );
 		oc.var += rip.z;
 	}
+#ifdef WW_WATER_REFL
+	// lane FIX1101A (LATE ITEM 1, water_detail.glsl): the record's fine layers as the spectrum's tail, crisp near
+	float ocKeep = 0.0;
+	if ( waterOceanOn && oc.w > 0.0 ) {
+		vec2 det = wwWaterOceanDetail( wxy, UV.z, waterScroll1.xy, oc.var, dfade * oc.w, ocKeep );
+		N = normalize( vec3( N.xy / max( N.z, 1e-3 ) + det, 1.0 ) );
+	}
+#endif
 #endif
 #ifdef WW_WATER_CONTACT
 	// lane WATERLOOK1 step 12: the contact foam's density, distance, trust, foot (uniform flow: derivatives)
@@ -395,7 +418,7 @@ void main()
 		vec2 ocSx = dFdx( ocS ), ocSy = dFdy( ocS );
 		bool ocLean = ( waterGlintRed & 2 ) == 0;
 		float ocFoot = ocLean ? min( 0.5 * ( dot( ocSx, ocSx ) + dot( ocSy, ocSy ) ), waterGlintK.z ) : 0.0;
-		reflA2 = mix( reflA2, 1e-4 + ( ocLean ? oc.var * flatten * flatten : 0.0 ) + ocFoot, oc.w );
+		reflA2 = mix( reflA2, 1e-4 + ( ocLean ? oc.var * ( 1.0 - ocKeep ) * flatten * flatten : 0.0 ) + ocFoot, oc.w );
 	}
 #endif
 
@@ -445,6 +468,10 @@ void main()
 	if ( waterSsrOn && !under ) {
 		vec2 suv = clamp( ( gl_FragCoord.xy - vec2( viewportDimensions.xy ) ) / vec2( viewportDimensions.zw ), 0.0, 1.0 );
 		vec2 st = vec2( suv.x, 1.0 - suv.y );
+#ifdef WW_WATER_REFL
+		if ( waterSsrFlat )
+			st += wwWaterSsrBend( R, vec3( V.xy, -V.z ) );	// lane FIX1101A: the flat ray's hit, bent by this normal
+#endif
 		ssr = mix( textureLod( waterSsrRaw, st, 0.0 ), textureLod( waterSsrFin, st, 0.0 ), 0.9 );
 #ifdef WW_WATER_REFL
 		reflRaw = textureLod( waterSsrRaw, st, 0.0 );
@@ -505,7 +532,7 @@ void main()
 #ifdef WW_WATER_CLEAR	// lane WATERLOOK1 step 8: no bed drawn = the class's bed albedo, lit
 		if ( waterClearOn && waterClearRed != 4 ) {
 			// lane FIX1031B: the baked and the drawn bed blend (no hard switch: the teeth); red old = the step below
-			float bedW = wwWaterBedBakeW( bed.bd, vert, true );
+			float bedW = wwWaterBedNearW( bed.bd, vert, dist, waterClearRed != 6 );	// lane FIX1101A: near = the scene, per pixel
 			vec3 bedC = bedW > 0.0 ? depthFog( wwWaterClearBed(), bed.bd / max( -V.z, 1e-3 ), bed.bd ) : vec3( 0.0 );
 			refr = bedW >= 1.0 ? bedC : mix( depthFog( refr, along, vert ), bedC, bedW );
 		} else
@@ -608,14 +635,24 @@ void main()
 		 * 23(11)) lit by the sun and the water's upper sky row; opacity K1.w lets the water read through its holes */
 		vec3 foamLin = 0.55 * ( sun * clamp( Ldir.z, 0.0, 1.0 ) + waterSky[2].rgb );
 		lin = mix( lin, foamLin, shoreFoamV * waterShoreK1.w );
+		/* lane FIX1101A (P0, the manager's rvc6_on 10-31: a large grey shape on the dry bank): the water plane runs on
+		 * under a bank that lies a little below it, where the soft edge has made the water the scene it covers; the
+		 * river, contact foam and whitecaps still painted there. They float only on water: x the water's own share
+		 * left by the edge, and nothing over a column under 4 u (6 cm; full from 16 u). Red
+		 * WW_CELL_WATER_RIVERFOAM_RED=paint (32) */
+#ifdef WW_WATER_RIVERFOAM
+		float foamWet = wwFoamWet( shoreEdgeV, vert );
+#else
+		float foamWet = 1.0;
+#endif
 #ifdef WW_WATER_SURF
 		lin = mix( lin, foamLin, wwSurfFoamAlpha( surf.foam, P.xy, surfFoot, waterShoreTime ) );	// step 11: the breakers' foam
 #endif
 #ifdef WW_WATER_CONTACT
-		lin = mix( lin, foamLin, wwContactFoamAlpha( contact.x, P.xy, contact.w, waterShoreTime ) );	// step 12: contact foam
+		lin = mix( lin, foamLin, foamWet * wwContactFoamAlpha( contact.x, P.xy, contact.w, waterShoreTime ) );	// step 12: contact foam
 #endif
 #ifdef WW_WATER_RIVERFOAM
-		lin = mix( lin, foamLin, rfoam.y );	// step 15: river foam streaks
+		lin = mix( lin, foamLin, foamWet * rfoam.y );	// step 15: river foam streaks
 #endif
 #endif
 #ifdef WW_WATER_OCEAN
@@ -625,7 +662,11 @@ void main()
 		/* lane WATERLOOK1: whitecaps where the chop folds the surface (its Jacobian, Tessendorf 2001 section 4.4), from
 		 * 4 m/s; lit as WATERSHORE1's foam (albedo 0.55, Koepke 1984) */
 		if ( oc.white > 0.0 )
+#if defined( WW_WATER_SHORE ) && defined( WW_WATER_RIVERFOAM )
+			lin = mix( lin, 0.55 * ( sun * clamp( Ldir.z, 0.0, 1.0 ) + waterSky[2].rgb ), 0.8 * oc.white * foamWet );
+#else
 			lin = mix( lin, 0.55 * ( sun * clamp( Ldir.z, 0.0, 1.0 ) + waterSky[2].rgb ), 0.8 * oc.white );
+#endif
 #endif
 	}
 	lin = max( lin, vec3( 0.0 ) );

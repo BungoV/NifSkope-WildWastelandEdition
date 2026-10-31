@@ -96,6 +96,23 @@ float wwWaterBedBakeW( float bd, float sceneVert, bool soft )
 	return soft ? smoothstep( bd + 64.0, bd + 768.0, sceneVert ) : ( sceneVert > bd + 256.0 ? 1.0 : 0.0 );
 }
 
+/* lane FIX1101A (LATE ITEM 7, bungo 10-31: "isn't the lod water too imprecise?"): the bake is 128 u a texel (1.8 m), so
+ * near the camera the bed's depth and colour come PER PIXEL from the drawn scene behind the water (the bed, rocks, pier
+ * legs: the same ground that shows above the waterline, so the two sides of the waterline match), and the bake only
+ * stands in where the frame has no bed at all there (sceneVert > 1e8) or a true hole (the scene 2048 u under the bake).
+ * Past the loaded cells (12288 u, 3 cells, to 16384 u) the drawn ground is the coarse far LOD: the rule above (the
+ * scene loses where it lies 64..768 u under the bake) takes over, blended over that distance (no seam). The result
+ * multiplies nothing: it REPLACES wwWaterBedBakeW's weight. Red WW_CELL_WATER_CLEAR_RED=bake (waterClearRed 6): the
+ * rule above at every distance (today). */
+float wwWaterBedNearW( float bd, float sceneVert, float dist, bool on )
+{
+	float far = wwWaterBedBakeW( bd, sceneVert, true );
+	if ( !on || bd < 0.0 || sceneVert > 1e8 )
+		return far;
+	float hole = smoothstep( bd + 2048.0, bd + 4096.0, sceneVert );
+	return mix( hole, far, smoothstep( 12288.0, 16384.0, dist ) );
+}
+
 // the game's depth colour over c (fogC its ramp colour, a its opacity) with pure water's absorption on top
 vec3 wwWaterDepthMix( vec3 c, vec3 fogC, float a, float along )
 {
