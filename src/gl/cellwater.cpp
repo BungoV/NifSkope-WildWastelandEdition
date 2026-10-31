@@ -320,7 +320,8 @@ bool wwCellWaterSsrWanted( Scene * scene )
 	for ( const WaterBody & b : it->bodies )
 		if ( b.rec.ssr )
 			return true;
-	return wwLookOn( WwLook::WaterRefl );	// lane WATERREFL1: every body reflects the scene (lakes' WATR flag is 0)
+	// lane WATERREFL1: every body reflects the scene (lakes' WATR flag is 0); FIX1101A: so does the water SSR part
+	return wwLookOn( WwLook::WaterRefl ) || wwCellSsrWaterAll();
 }
 
 bool wwCellWaterIsShape( const void * nif, int block )
@@ -409,7 +410,7 @@ bool wwCellWaterUniforms( Scene * scene, int block, int unit )
 		WW_SWITCH_STATIC( QByteArray, cl, wwEnv( "WW_CELL_WATER_CLEAR_RED" ).trimmed() );
 		// lane FIX1031B: old = WATERCOLOR1's clear-ocean law, its hard bed switch and no Fresnel coupling (before Boston)
 		prog->uni1i( "waterClearRed", cl == "noscatter" ? 1 : cl == "nodown" ? 2 : cl == "fast" ? 3 : cl == "old" ? 4
-			: cl == "secchi" ? 5 : 0 );	// FIX1031B LATE ITEMs 9-10: secchi = the overhaul's first k (sea 2.5 m, river 1.2 m)
+			: cl == "secchi" ? 5 : cl == "bake" ? 6 : 0 );	// FIX1031B LATE ITEMs 9-10: secchi = the overhaul's first k (sea 2.5 m, river 1.2 m); FIX1101A LATE ITEM 7: bake = the bed weight before the per-pixel near bed
 	}
 	if ( prog->uniLocation( "waterSkyVisOn" ) >= 0 ) {	// lane WATERLOOK1 step 10: the Water sky visibility row
 		prog->uni1b( "waterSkyVisOn", wwLookOn( WwLook::WaterSkyVis ) );
@@ -443,7 +444,8 @@ bool wwCellWaterUniforms( Scene * scene, int block, int unit )
 		prog->uni1b( "waterRiverFoamOn", wwLookOn( WwLook::WaterRiverFoam ) );
 		WW_SWITCH_STATIC( QByteArray, rr, wwEnv( "WW_CELL_WATER_RIVERFOAM_RED" ).trimmed() );
 		prog->uni1i( "waterRiverFoamRed", ( rr.contains( "nodiv" ) ? 1 : 0 ) | ( rr.contains( "still" ) ? 2 : 0 )
-			| ( rr.contains( "iso" ) ? 4 : 0 ) | ( rr.contains( "alias" ) ? 8 : 0 ) | ( rr.contains( "raw" ) ? 16 : 0 ) );
+			| ( rr.contains( "iso" ) ? 4 : 0 ) | ( rr.contains( "alias" ) ? 8 : 0 ) | ( rr.contains( "raw" ) ? 16 : 0 )
+			| ( rr.contains( "paint" ) ? 32 : 0 ) );	// FIX1101A P0: paint = solid streaks, foam on the dry bank (before the lace + wet cut)
 		/* FIX1031B LATE ITEM 8: the flow is m/s (carried at v / 0.0142875 u/s), so the foam lives 8 s (about one streak
 		 * length at the river's speed); red raw = the old raw-flow reading with its 120 s life */
 		prog->uni4f( "waterRiverFoamK", FloatVector4( rr.contains( "raw" ) ? 120.0f : 8.0f, 0.12f, 0.4f, 0.85f ) );
@@ -529,7 +531,7 @@ bool wwCellWaterUniforms( Scene * scene, int block, int unit )
 	s.linear = wwCellHdrActive() && s.probe == 0 && !rayPass && !( s.red & 1024 );
 	// this frame's reflections (the game reads them only when its WATR's SSR flag is set)
 	unsigned int ssrRaw = 0, ssrFin = 0;
-	const bool ssrOn = !inSsr && ( b.rec.ssr || wwLookOn( WwLook::WaterRefl ) ) && wwCellSsrWaterTextures( scene, ssrRaw, ssrFin );
+	const bool ssrOn = !inSsr && ( b.rec.ssr || wwLookOn( WwLook::WaterRefl ) || wwCellSsrWaterAll() ) && wwCellSsrWaterTextures( scene, ssrRaw, ssrFin );
 	fn->glActiveTexture( GLenum( GL_TEXTURE0 + unit ) );
 	fn->glBindTexture( GL_TEXTURE_2D, ssrOn ? ssrRaw : 0 );
 	prog->uni1i_l( prog->uniLocation( "waterSsrRaw" ), unit++ );
@@ -604,6 +606,8 @@ bool wwCellWaterUniforms( Scene * scene, int block, int unit )
 			: gr == "noglitter" ? 8 : gr == "nodisc" ? 16 : gr == "pixel" ? 32 : gr == "nolodblend" ? 64
 			: gr == "sparse" ? 128 : 0 );	// WATERLOOK1 step 9; FIX1031B: sparse = the bare count, then the shoulder
 		prog->uni4f( "waterGlintK", FloatVector4( 16.0f, 0.0204f, 0.18f, 0.015f ) );
+		// lane FIX1101A: the ray pass off the flat surface, the read bent by the normal (red WW_CELL_SSR_WATER_RED=1)
+		prog->uni1b( "waterSsrFlat", wwCellSsrWaterFlat() );
 		static const char * const momentUni[3] = { "waterMoment0", "waterMoment1", "waterMoment2" };
 		for ( int k = 0; k < 3; k++ ) {
 			const int mu = WwCellUnit::WaterMoment0 + k;
@@ -657,6 +661,16 @@ const char * wwCellWaterProgram()
 	// lane WATERFIX7: the probes live in the *p twins (in the shipping look they tipped a compiler cliff, +0.18 ms)
 	if ( st().probe != 0 )
 		return wwCellOceanDispOn() ? "fo4_waterlookdp.prog" : "fo4_waterlookp.prog";
+	/* lane FIX1101A: the flat ray pass needs no look, so it takes the smallest twin (the full one's registers made the
+	 * same few lines cost 0.10 ms at 1080p, the Medium twin's 0.017: tests/watercost); and the Medium preset draws its own
+	 * twin while no row outside its set is on (0.45 vs 0.65 ms, tests/watercost; src/gl/waterpreset.h) */
+	if ( wwCellSsrWaterRayPass( nullptr ) && wwCellSsrWaterFlat() )
+		return "fo4_waterlookm.prog";
+	if ( wwCellWaterPreset() == 1 && !wwLookOn( WwLook::WaterCaustics ) && !wwLookOn( WwLook::WaterSwell )
+		&& !wwLookOn( WwLook::WaterGlint ) && !wwLookOn( WwLook::WaterOcean ) && !wwLookOn( WwLook::WaterSkyVis )
+		&& !wwLookOn( WwLook::WaterSurf ) && !wwLookOn( WwLook::WaterContact ) && !wwLookOn( WwLook::WaterUnderLight )
+		&& !wwLookOn( WwLook::ShoreFoam ) )
+		return "fo4_waterlookm.prog";
 	return wwCellOceanDispOn() ? "fo4_waterlookd.prog" : "fo4_waterlook.prog";
 }
 

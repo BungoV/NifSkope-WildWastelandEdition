@@ -6,7 +6,8 @@ This gate runs the REAL water_riverfoam.glsl (wwWaterRiverFoam) with water_info.
 through the driver over one uniform river tile (body 1, class 1, flow (0.5, 0.3) bake units = 0.583 m/s, Cutler Bend's
 0.36-0.79), the uniforms cellwater.cpp sets (K = life 8 s / 0.12 / 0.4 m/s / 0.85; K2 24 / 8 / 0.3 / 0.8; raw red: life
 120 s), 256 x 256 u at 1 u a sample, foot 1 u.
-  cover   mean alpha at 0.583 m/s over a 2.9 m deep bed in [0.03, 0.15]; at 0.29 m/s lower than at 0.58 m/s (the source
+  cover   mean alpha at 0.583 m/s over a 2.9 m deep bed in [0.015, 0.15] (FIX1101A: was 0.03 for the solid streaks; the
+          streaks are lace now, 40 % holes in their cores, tests/waterfoam2); at 0.29 m/s lower than at 0.58 m/s (the source
           grows with speed); over a 0.5 m deep bed >= 1.5 x the deep bed's (shallows foam more)
   carry   the foam pattern's shift between world clock 1.0 and 1.5 s is along the flow (cos > 0.9) and within 30 % of
           v dt (20.4 u); read with the iso bit (round blobs, the same carry code)
@@ -83,9 +84,9 @@ for name, vx, vy, code in (('fast deep', 0.5, 0.3, DEEP), ('slow deep', 0.25, 0.
     f = draw(1.0)
     print('  %-12s v %.3f m/s, bed %.2f m: density D %.4f, mean alpha %.4f' % (
         name, np.hypot(vx, vy), dm(code), f[..., 0].mean(), res[name]))
-cover_ok = 0.03 <= res['fast deep'] <= 0.15 and res['slow deep'] < res['fast deep'] and \
+cover_ok = 0.015 <= res['fast deep'] <= 0.15 and res['slow deep'] < res['fast deep'] and \
     res['fast shallow'] >= 1.5 * res['fast deep']
-print('cover: fast deep %.4f in [0.03, 0.15], slow %.4f < fast, shallow %.4f >= 1.5 x deep: %s' % (
+print('cover: fast deep %.4f in [0.015, 0.15], slow %.4f < fast, shallow %.4f >= 1.5 x deep: %s' % (
     res['fast deep'], res['slow deep'], res['fast shallow'], 'ok' if cover_ok else 'FAIL'))
 
 setup(0.5, 0.3, DEEP)

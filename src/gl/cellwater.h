@@ -102,7 +102,8 @@ bool wwCellWaterLookOn();
 inline bool wwIsCellWaterProgramName( std::string_view n )
 {
 	return n == "fo4_water.prog" || n == "fo4_waterlook.prog" || n == "fo4_waterlookd.prog"
-		|| n == "fo4_waterlookp.prog" || n == "fo4_waterlookdp.prog";	// lane WATERFIX7: the probe twins
+		|| n == "fo4_waterlookp.prog" || n == "fo4_waterlookdp.prog"	// lane WATERFIX7: the probe twins
+		|| n == "fo4_waterlookm.prog";	// lane FIX1101A: the Medium preset's twin (and every flat ray pass)
 }
 //! One census line: how many shapes and records this document registered.
 QString wwCellWaterEcho( const void * nif );

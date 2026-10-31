@@ -113,6 +113,9 @@ vec3 wwWaterCloudSky( vec3 sky, vec3 P, vec3 R )
 	return mix( sky, waterCloudTint * ( 1.5 * l ), clamp( cov, 0.0, 1.0 ) );
 }
 
+// lane FIX1101A (water SSR on by default): the ray pass off the flat surface + the bent read (water_ssrbend.glsl)
+uniform bool waterSsrFlat;
+
 // the reflected scene: the march where it is confident (sharp on calm water, its blur as the waves roughen), else the
 // sky (the fallback off screen, at the edges and behind the camera; the march's confidence fades between them)
 vec3 wwWaterReflEnv( vec3 sky, vec4 raw, vec4 fin, bool haveSsr, float alpha )
@@ -120,6 +123,8 @@ vec3 wwWaterReflEnv( vec3 sky, vec4 raw, vec4 fin, bool haveSsr, float alpha )
 	if ( !haveSsr )
 		return sky;
 	float w = ( waterReflRed & 4 ) != 0 ? 0.9 : smoothstep( waterGlintK.w, 8.0 * waterGlintK.w, alpha );
+	if ( waterSsrFlat )	// lane FIX1101A: the blur fills the sharp march's holes (dither, refusals): no sky speckle on calm water
+		w = max( w, clamp( fin.a - raw.a, 0.0, 1.0 ) );
 	vec4 s = mix( raw, fin, w );
 	return mix( sky, max( s.rgb, vec3( 0.0 ) ), clamp( s.a, 0.0, 1.0 ) );
 }

@@ -50,9 +50,13 @@ out vec4 fragColor;
 #ifdef WW_SSR_WATER_LOOK	// lane WATERREFL1 (cell_ssrwater.prog): a water ray (stage 1 alpha 2) marches 64 steps, colour unclamped
 #define WW_SSR_STEPS ( waterLook ? 64 : 32 )
 #define WW_SSR_HITMAX ( waterLook ? 64.0 : 1.0 )
+// lane FIX1101A: a water ray takes a surface as thick as 6 % of its depth (at least the game's 50 u): a far bank's
+// rays cross ~100 u of depth a texel near the horizon, so the game's 50 u refused most of them; red 8 = 50 u
+#define WW_SSR_THICK( d ) ( waterLook && ( ssrRed & 8 ) == 0 ? max( 50.0, 0.06 * ( d ) ) : 50.0 )
 #else
 #define WW_SSR_STEPS 32
 #define WW_SSR_HITMAX 1.0
+#define WW_SSR_THICK( d ) 50.0
 #endif
 
 // the game's load: outside the mip reads 0
@@ -173,7 +177,7 @@ void main()
 			d = zLoad( level, cell );
 			float rz = 1.0 / p.z;
 			bool isL1 = level == 1 && ( ssrRed & 2 ) == 0;
-			bool ref = refused || ( isL1 && rz - d >= 50.0 );
+			bool ref = refused || ( isL1 && rz - d >= WW_SSR_THICK( d ) );
 			if ( d < rz && !ref ) {
 				level -= 1;
 				vec2 h = vec2( greaterThanEqual( p.xy - ( cell + 0.5 ) / G, vec2( 0.0 ) ) );
@@ -187,7 +191,7 @@ void main()
 				cell += stepv;
 				p = A + min( tc.x, tc.y ) * D;
 				float rz2 = 1.0 / p.z;
-				refused = ref || ( isL1 && rz2 - d >= 50.0 );
+				refused = ref || ( isL1 && rz2 - d >= WW_SSR_THICK( d ) );
 				if ( !refused ) {
 					if ( d < rz2 ) {
 						p = A + ( ( 1.0 / d - A.z ) / D.z ) * D;
@@ -214,6 +218,9 @@ void main()
 		if ( waterLook ) {	// the far bank half a screen away stays: the screen edges fade (10% a side), nothing else
 			vec2 e = min( p.xy, 1.0 - p.xy );
 			c = smoothstep( 0.0, 0.1, e.x ) * smoothstep( 0.0, 0.1, e.y );
+			// lane FIX1101A: a ray near the end of its steps fades to the miss (no seam where the budget ends); red 8
+			if ( ( ssrRed & 8 ) == 0 )
+				c *= clamp( float( WW_SSR_STEPS - count ) / 8.0, 0.0, 1.0 );
 		}
 #endif
 		if ( ssrPrev ) {	// lane PERF3: the hit in the previous frame's view; off its screen or behind it: no hit

@@ -62,9 +62,10 @@ int redNow()
 	WW_SWITCH_STATIC( QByteArray, rr, wwEnv( "WW_CELL_WATER_OCEAN_RED" ).trimmed() );
 	return rr == "old" ? 1 : rr == "tile" ? 2 : rr == "nopatch" ? 4 : rr == "novar" ? 8 : rr == "nochop" ? 16
 		: rr == "flat" ? 32 : rr == "norip" ? 64 : rr == "noglow" ? 128 : rr == "noflow" ? 256
-		: rr == "dimglow" ? 512 : rr == "rawflow" ? 1024 : rr == "oldwhite" ? 2048 : 0;	// FIX1031B: dimglow = the crest
+		: rr == "dimglow" ? 512 : rr == "rawflow" ? 1024 : rr == "oldwhite" ? 2048 : rr == "nodetail" ? 4096 : 0;	// FIX1031B: dimglow = the crest
 		// glow's gain before (0.25), rawflow = the bake's flow read as u/s (the waves carried at 1/70 of the river's speed),
 		// oldwhite = the whitecap ramp before LATE ITEM 8 (J 0.15..0.55: no whitecap at any wind)
+		// FIX1101A (LATE ITEM 1): nodetail = the spectrum alone (no WATR fine layers as its tail, water_detail.glsl)
 }
 
 GLuint tex2d( NifSkopeOpenGLContext::GLFunctions * fn, GLint ifmt, int w, int h, GLenum fmt, const float * data )

@@ -3,10 +3,12 @@
 #include "wwswitch.h"
 #include "wwredtwin.h"	// lane REDRETIRE1
 #include "gl/lightphys.h"
+#include "gl/waterpreset.h"	// lane FIX1101A: the water quality preset
 
 #include <QSettings>
 
 #include <algorithm>
+#include <cstdio>
 
 namespace {
 
@@ -72,10 +74,10 @@ const LookRow kRows[] = {
 	{ "Water clear colour", "WW/CellWaterClear2", true },
 	{ "Water sky visibility", "WW/CellWaterSkyVis" },
 	{ "Surf", "WW/CellWaterSurf" },
-	{ "Contact foam", "WW/CellWaterContact2" },	// FIX1101A: OFF again (flat grey patches, one on a dry bank at spot 6)
+	{ "Contact foam", "WW/CellWaterContact3", true },	// FIX1101A P0: ON again with the lace + wet cut (tests/waterfoam2); new key over FOAMOFF (FIX1031B LATE ITEM 8: current-made foam)
 	{ "Wet shore", "WW/CellLandWet" },
 	{ "Wave run-up", "WW/CellLandSwash" },
-	{ "River foam", "WW/CellWaterRiverFoam2" },	// FIX1101A: OFF again until the foam gate (no foam on land, lacy) holds
+	{ "River foam", "WW/CellWaterRiverFoam3", true },	// FIX1101A P0: ON again with the lace + wet cut (tests/waterfoam2); new key over FOAMOFF (FIX1031B LATE ITEM 8: m/s flow, shallows + shoals)
 	{ "Underwater light", "WW/CellWaterUnderLight" },
 	{ "Precipitation", "WW/CellPrecip" },	// lane WEATHERLOOK1 B: ships off until bungo sees it
 };
@@ -558,11 +560,66 @@ static bool wwLookWaterShippedRed( WwLook l )
 	return shipped;
 }
 
+/* lane FIX1101A (src/gl/waterpreset.h): the water quality preset steps the water looks; Ultra (the default) lets every
+ * row as it ships, Low none (the game's water + its SSR). A row's own pin wins (pinOf above). */
+static WwWaterPreset::Term wwLookWaterTerm( WwLook l )
+{
+	using namespace WwWaterPreset;
+	switch ( l ) {
+	case WwLook::WaterClear: return Clear;
+	case WwLook::WaterRefl: return Refl;
+	case WwLook::WaterSoftEdge: return SoftEdge;
+	case WwLook::ShoreFoam: return ShoreFoam;
+	case WwLook::WaterRiverFoam: return RiverFoam;
+	case WwLook::WaterOcean: return Ocean;
+	case WwLook::WaterGlint: return Glint;
+	case WwLook::WaterContact: return Contact;
+	case WwLook::WaterDepth: case WwLook::WaterCaustics: case WwLook::WaterSwell: case WwLook::Underwater:
+	case WwLook::WaterSkyVis: case WwLook::WaterSurf: case WwLook::LandWet: case WwLook::LandSwash:
+	case WwLook::WaterUnderLight:
+		return OffRow;
+	default:
+		return NotWater;
+	}
+}
+
+namespace {
+int & waterPresetRow()
+{
+	static int v = -1;
+	if ( v < 0 )
+		v = std::clamp( QSettings().value( QStringLiteral( "WW/CellWaterPreset" ), int( WwWaterPreset::Ultra ) ).toInt(), 0, 3 );
+	return v;
+}
+}	// namespace
+
+int wwCellWaterPreset()
+{
+	WW_SWITCH_STATIC( QByteArray, p, wwEnv( "WW_CELL_WATER_PRESET" ).trimmed() );
+	const int pinned = WwWaterPreset::parse( p.constData() );
+	const int step = pinned >= 0 ? pinned : waterPresetRow();
+	static int said = -1;
+	if ( step != said ) {
+		said = step;
+		static const char * const names[4] = { "low", "medium", "high", "ultra" };
+		std::fprintf( stderr, "water preset: %s%s\n", names[step], pinned >= 0 ? " (WW_CELL_WATER_PRESET)" : "" );
+	}
+	return step;
+}
+
+void wwCellWaterPresetSet( int step )
+{
+	waterPresetRow() = std::clamp( step, 0, 3 );
+	QSettings().setValue( QStringLiteral( "WW/CellWaterPreset" ), waterPresetRow() );
+}
+
 bool wwLookOn( WwLook l )
 {
 	const QByteArray p = pinOf( l );
 	if ( p.isEmpty() )
-		return wwLookHasRow( l ) ? rowVal( l ) != 0 && wwGroupLets( wwLookGroup( l ) ) && !wwLookWaterShippedRed( l ) : true;
+		return wwLookHasRow( l ) ? rowVal( l ) != 0 && wwGroupLets( wwLookGroup( l ) ) && !wwLookWaterShippedRed( l )
+			&& WwWaterPreset::lets( wwLookWaterTerm( l ) == WwWaterPreset::NotWater ? 3 : wwCellWaterPreset(), wwLookWaterTerm( l ) )
+			: true;
 	return p != "0";
 }
 

@@ -115,6 +115,9 @@ WwGroup wwLookGroup( WwLook l );	//!< Count: not under a master
 /* note 20: the one Screen-Space Reflections row sets indoors and outdoors alike (cellssr.h's two setters).
  * Red twin REDTWIN=CELLGROUP=ssr: indoors only. */
 void wwCellSsrRowSet( bool on );
+//! lane FIX1101A (src/gl/waterpreset.h): the water quality preset 0 low .. 3 ultra (the default); WW_CELL_WATER_PRESET pins it
+int wwCellWaterPreset();
+void wwCellWaterPresetSet( int step );
 
 /* LIGHTSYS-3: the lamp-shadow budget. 0 Off (the 16 nearest shadow lights, as before); else at most N slots, ranked
  * by brightness x radius / distance with 20 % hysteresis; a light's shadow fades out over the last 25 % of score

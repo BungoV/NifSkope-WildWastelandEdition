@@ -12,6 +12,42 @@ cost (Concord 5x5 all-on, about 1080p, the "post" pass GPU median over 334 frame
 0.24, High 0.26, Ultra 0.37. So High costs 0.06 ms over Off. The setting moved to a new key ("Modern temporal AA 2"), so
 an Off saved while it shipped Off does not stick. Harness runs without WW_TAA2 still pin it Off, which keeps the gates
 deterministic. WW_TAA2=off is the red (the old resolve). Unit: tests/taa2default.
+## FIX1101A water (2026-10-31): SSR on water by default, a GPU budget per preset, the sea's fine ripples, the near bed per pixel, river foam as lace
+
+bungo 10-31: "the new water you showed me looks very plain"; RULED "we need ssr for water"; RULED "we need water that looks
+good and is not expensive to render"; "make sure the water texture you use has the correct scale"; "isn't the lod water
+too imprecise?". Manager P0: river / contact foam drew flat grey blotches and a grey shape on the dry bank (main 9b443dcf,
+spot 6). Every change ships ON; the old path is a red. Gates offline through the driver (no NifSkope).
+
+- WATER SSR, ON by default outdoors and indoors (src/gl/cellssrwater.h): the water's reflections are their own part of the
+  SSR pass, row WW_CELL_SSR_WATER / WW/CellSsrWater (default on), whatever the SSR row (WW_CELL_SSR=0, every shot runner's
+  pin, now leaves the water's SSR on: verdict 6 "water only (SSR row off)"); every drawn body reflects (the WATR ssr flag
+  and the Water reflections row aside), marched by the water twin cell_ssrwater.prog; the previous frame is reused for a
+  water-only pass (no second scene pass). Speed: the water ray pass reflects off the FLAT surface (no normal stack; it
+  draws with the Medium twin) and the colour pass bends its read by its normal (water_ssrbend.glsl; flat + bent vs the old
+  full-normal ray: error 0.087 vs 0.121 unbent of a stripe's contrast); ray pass 0.655 -> 0.017 ms at 1080p, all water.
+  Quality: a water ray takes a surface as thick as 6 % of its depth (the game's 50 u refused most far-bank rays: wall
+  share 0.097 -> 0.904), a ray near the end of its 64 steps fades to the miss, the blur fills the sharp march's holes.
+  Red WW_CELL_SSR_WATER_RED=1: the old coupling to the SSR row, the full-normal ray, 50 u, no fades. tests/waterssr.
+- WATER PRESET (src/gl/waterpreset.h): WW_CELL_WATER_PRESET low|medium|high|ultra (WW/CellWaterPreset, default ULTRA =
+  today's rows). Low = the game's water + its SSR; Medium + clear colour, reflections, soft edge, river foam (its own twin
+  fo4_waterlookm.prog: 0.45 vs 0.65 ms); High + ocean spectrum, shore foam; Ultra + glare facets, contact foam, the OFF
+  rows. MEASURED (tests/watercost, RTX 5070 Ti, 1080p, a frame all water, sea): Low 0.31, Medium 0.55, High 1.10,
+  Ultra 1.27 ms incl. the SSR (budget 0.4 / 0.8 / 1.2 / 1.8); today 1.71 ms at every step. tests/waterpreset. Show menu
+  "Water quality" (cellworkspace.cpp) sets it live.
+- THE SEA'S FINE RIPPLES (LATE ITEM 1; res/shaders/water_detail.glsl): the sea's finest wave cascade is 15.3 m on 128
+  texels and the record's finest layer holds its energy at 23 cm (MEASURED from the game's textures): nothing under ~24 cm
+  drew. Two octaves of the record's OWN NAM4 at its uv scale / 4.1 and / 6.7, turned 37 and -71 deg (median wavelengths
+  5.6 and 3.4 cm), normalised to the spectrum's unresolved slope variance, taken back out of the roughness where the mips
+  keep them. Red WW_CELL_WATER_OCEAN_RED=nodetail. tests/waterscale (every texture in metres vs real bands, the repeat).
+- NEAR BED PER PIXEL (LATE ITEM 7; water_depth.glsl wwWaterBedNearW): near the camera the clear colour's bed is the drawn
+  scene's per pixel (the same ground as above the waterline); the bake only where no bed is drawn or a true hole, and past
+  the loaded cells (12288 .. 16384 u, blended). Red WW_CELL_WATER_CLEAR_RED=bake. tests/waterbed.
+- RIVER / CONTACT FOAM (P0): the streaks are lace (the shared foam texture thresholded by the streak's density, at most
+  60 %, carried with the water: 40 % holes in the cores, largest solid patch 0.12 m^2 vs 1.4 m^2), and the floating foams
+  (river, contact, whitecaps) only on water: x the soft edge's water share, nothing over a column under 4 u (0 samples on
+  the dry bank vs 73921). Rows ON under new keys WW/CellWaterContact3, WW/CellWaterRiverFoam3. Red
+  WW_CELL_WATER_RIVERFOAM_RED=paint. tests/waterfoam2; tests/waterlook2's river foam cover band 0.03 -> 0.015 (lace).
 
 ## HORIZONBAND1 (FIX1031B area A, 2026-10-31): the horizon blends - no cyan strip with a hard top edge
 

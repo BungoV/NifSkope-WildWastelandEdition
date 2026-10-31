@@ -5,6 +5,7 @@ BSD License - see nifskope.h
 ***** END LICENCE BLOCK *****/
 
 #include "cellssr.h"
+#include "cellssrwater.h"	// lane FIX1101A: the water's own reflections part
 #include "wwswitch.h"	// lane TESTDRIVER1: the WW_* switch store
 #include "cellssgi.h"
 #include "gl/cellpasstime.h"	// lane PERF2: the draws' CPU setup time
@@ -53,6 +54,8 @@ struct SsrState
 	bool flagged = false;	// the draw being set up carries the flag
 	int zreuse = 0;			// lane PERF4: the scene pass tests against the obscurance pass's depth (1; 2 = its red)
 	bool on = true, ext = false, pinOn = false, pinExt = false;	// the rows (cellssr.h)
+	// lane FIX1101A (cellssrwater.h): the water's own part, on by default; its red ties it to the SSR row again
+	bool water = true, pinWater = false, waterRed = false;
 	int lastVerdict = -1;	// the telemetry line prints when it changes
 };
 
@@ -72,8 +75,27 @@ SsrState & ssr()
 		s.pinExt = !pinExt.isEmpty();
 		s.on = s.pinOn ? pinOn != "0" : QSettings().value( QStringLiteral( "WW/CellSsr" ), true ).toBool();
 		s.ext = s.pinExt ? pinExt != "0" : QSettings().value( QStringLiteral( "WW/CellSsrExterior" ), false ).toBool();
+		const QByteArray pinWater = wwEnv( "WW_CELL_SSR_WATER" ).trimmed();
+		s.pinWater = !pinWater.isEmpty();
+		s.water = s.pinWater ? pinWater != "0" : QSettings().value( QStringLiteral( "WW/CellSsrWater" ), true ).toBool();
+		s.waterRed = wwEnv( "WW_CELL_SSR_WATER_RED" ).trimmed() == "1";
 	}
 	return s;
+}
+
+//! lane FIX1101A: this frame's verdict inputs (cellssrwater.h)
+WwSsrVerdictIn ssrVerdictIn( const SsrState & s, const WwCellLighting * L, bool waterSsr, bool aoTargets )
+{
+	WwSsrVerdictIn v;
+	v.cell = L != nullptr;
+	v.rowOn = s.on;
+	v.ext = s.ext;
+	v.interior = L && L->interior;
+	v.waterWanted = waterSsr;
+	v.waterRow = s.water;
+	v.red = s.waterRed;
+	v.aoTargets = aoTargets;
+	return v;
 }
 
 struct SsrTarget
@@ -95,6 +117,7 @@ struct SsrGpu
 	bool emitReady = false;		// lane SSGI2: step 1 also wrote the emission (the bounce's emissive cast)
 	bool waterOnly = false;		// an exterior: the pass ran for the water alone
 	bool haveWater = false;		// the water ray pass drew
+	bool waterPart = false;		// lane FIX1101A: this frame's pass ran for the water (its previous frame is kept too)
 	int unit = -1;
 	// lane PERF3 (WW_CELL_SSR_PREV): the previous frame's resolved linear color and its camera
 	SsrTarget prev;
@@ -220,8 +243,8 @@ bool wwCellSsrWantsTargets( Scene * scene )
 		return false;
 	const SsrState & s = ssr();
 	const WwCellLighting * L = wwCellLightsFor( scene->nifModel );
-	// the same verdict as wwCellSsrPass, before its "no obscurance pass" step
-	return ( L && s.on && ( L->interior || s.ext || wwCellWaterSsrWanted( scene ) ) ) || wwCellSsgiWantsScene( scene );
+	// the same verdict as wwCellSsrPass, before its "no obscurance pass" step (lane FIX1101A: cellssrwater.h)
+	return wwSsrWantsTargets( ssrVerdictIn( s, L, wwCellWaterSsrWanted( scene ), true ) ) || wwCellSsgiWantsScene( scene );
 }
 
 void wwCellSsrNote( bool flagged )
@@ -241,10 +264,13 @@ bool wwCellSsrFlagged()
 
 void wwCellSsrKeepFrame( Scene * scene, unsigned int hdrFbo, int w, int h )
 {
-	if ( !wwCellSsrPrevStencil() || !scene || !scene->renderer || !hdrFbo || w <= 0 || h <= 0 )
+	if ( !ssrPrevOn() || !scene || !scene->renderer || !hdrFbo || w <= 0 || h <= 0 )
 		return;
 	Renderer * r = scene->renderer;
 	SsrGpu & g = ssrGpus()[r];
+	// lane FIX1101A: kept for the SSR row (as before) or for a frame whose pass ran for the water alone
+	if ( !ssr().on && !g.waterPart )
+		return;
 	auto fn = r->fn;
 	GLint prevDraw = 0, prevRead = 0;
 	if ( const WwCellUni::KnownGl * kn = WwCellUni::known( fn ) ) {	// lane CELLUNI4: the tone map's known state
@@ -283,27 +309,33 @@ void wwCellSsrPass( Scene * scene, bool run )
 	SsrGpu & g = ssrGpus()[r];
 	g.ready = false;
 	g.sceneReady = false;
+	g.waterPart = false;
 	if ( !run || !wwCellLightsWanted( scene ) )
 		return;
 	const WwCellLighting * L = wwCellLightsFor( scene->nifModel );
 	WwCellAoTargets ao;
-	const bool waterSsr = wwCellWaterSsrWanted( scene );
-	// the rows; an exterior only with "SSR outdoors"
-	/* an exterior with SSR outdoors off runs the pass for the water alone: reported as verdict 5, not "on" */
-	int verdict = !L ? 0 : !s.on ? 1 : ( !L->interior && !s.ext && !waterSsr ) ? 2 : !wwCellAoTargets( scene, ao ) ? 3 : 4;
-	if ( verdict == 4 && !L->interior && !s.ext )
-		verdict = 5;
+	/* the rows; an exterior only with "SSR outdoors". Lane FIX1101A (cellssrwater.h): the water's part runs on its own
+	 * row (on by default) whatever the SSR row says, outdoors and indoors: verdict 5 (exterior, SSR outdoors off) or 6
+	 * (SSR row off) is the pass for the water alone. The red WW_CELL_SSR_WATER_RED=1 ties it to the SSR row again. */
+	const bool aoHave = L && wwCellAoTargets( scene, ao );
+	const WwSsrVerdictIn vin = ssrVerdictIn( s, L, wwCellWaterSsrWanted( scene ), aoHave );
+	const bool waterSsr = wwSsrWaterPart( vin );
+	const int verdict = wwSsrVerdict( vin );
 	if ( verdict != s.lastVerdict ) {
-		static const char * const words[6] = { "no cell", "off (row)", "off (exterior, SSR outdoors row off)",
-			"off (no obscurance pass)", "on", "water only (exterior, SSR outdoors row off)" };
-		std::fprintf( stderr, "cell ssr: %s %s\n", words[verdict], L ? ( L->interior ? "interior" : "exterior" ) : "-" );
+		static const char * const words[7] = { "no cell", "off (row)", "off (exterior, SSR outdoors row off)",
+			"off (no obscurance pass)", "on", "water only (exterior, SSR outdoors row off)",
+			"water only (SSR row off; the water's own row WW_CELL_SSR_WATER on)" };
+		std::fprintf( stderr, "cell ssr: %s %s%s\n", words[verdict], L ? ( L->interior ? "interior" : "exterior" ) : "-",
+			s.waterRed ? " (WW_CELL_SSR_WATER_RED=1: the water follows the SSR row)" : "" );
 		s.lastVerdict = verdict;
 	}
+	const bool passOn = verdict == 4 || verdict == 5 || verdict == 6;
 	// lane SSGI1: the bounce reads step 1 alone; the printed verdict stays the reflections'
-	const bool sceneOnly = verdict != 4 && verdict != 5 && L && wwCellSsgiWantsScene( scene ) && wwCellAoTargets( scene, ao );
-	if ( verdict != 4 && verdict != 5 && !sceneOnly )
+	const bool sceneOnly = !passOn && L && wwCellSsgiWantsScene( scene ) && aoHave;
+	if ( !passOn && !sceneOnly )
 		return;
-	g.waterOnly = !L->interior && !s.ext;	// SSR outdoors runs the full pass, else water only
+	g.waterOnly = wwSsrWaterOnly( vin );	// SSR outdoors (or indoors) with the row on runs the full pass, else water only
+	g.waterPart = waterSsr && passOn;
 	g.haveWater = false;
 	QElapsedTimer timer;
 	timer.start();
@@ -352,9 +384,9 @@ void wwCellSsrPass( Scene * scene, bool run )
 	/* lane PERF3 (cellssr.h): the flag from the obscurance pass's stencil and the color from the previous frame, when
 	 * this frame can use them; else the scene pass as before */
 	int prevWhy = 0;
-	if ( ssrPrevOn() && s.on ) {
+	if ( ssrPrevOn() && ( s.on || g.waterPart ) ) {	// lane FIX1101A: the water-only pass reuses the previous frame too
 		// lane WATERREFL1: with the Water reflections row the water's rays march the previous frame too (no second scene)
-		prevWhy = sceneOnly || wwCellSsgiWantsScene( scene ) ? 2 : waterSsr && !wwLookOn( WwLook::WaterRefl ) ? 3 : !g.prevValid ? 4
+		prevWhy = sceneOnly || wwCellSsgiWantsScene( scene ) ? 2 : waterSsr && !wwLookOn( WwLook::WaterRefl ) && !wwCellSsrWaterAll() ? 3 : !g.prevValid ? 4
 			: g.prevDoc != scene->nifModel ? 5 : ( g.prev.w != W || g.prev.h != H ) ? 6 : 1;
 		if ( prevWhy != g.lastPrev ) {
 			static const char * const words[7] = { "", "on", "scene pass (the bounce reads it)", "scene pass (water rays)",
@@ -393,7 +425,8 @@ void wwCellSsrPass( Scene * scene, bool run )
 	fn->glDrawBuffers( wantEmit ? 2 : 1, sceneBufs );
 	const bool complete = fn->glCheckFramebufferStatus( GL_FRAMEBUFFER ) == GL_FRAMEBUFFER_COMPLETE;
 	// lane WATERREFL1: the twin (cell_ssrwater.prog) marches the water's rays further, edge fade only, unclamped
-	const char * ssrProg = wwLookOn( WwLook::WaterRefl ) ? "cell_ssrwater.prog" : "cell_ssr.prog";
+	// lane FIX1101A: the water twin also whenever the water's own SSR part reflects every body (any water preset)
+	const char * ssrProg = wwLookOn( WwLook::WaterRefl ) || wwCellSsrWaterAll() ? "cell_ssrwater.prog" : "cell_ssr.prog";
 	NifSkopeOpenGLContext::Program * prog = complete ? r->useProgram( ssrProg ) : nullptr;
 	if ( prog )
 		r->stopProgram();
@@ -602,7 +635,7 @@ void wwCellSsrPass( Scene * scene, bool run )
 	prog->uni2f( "proj", p00, p11 );
 	prog->uni4f( "ssrK", FloatVector4( kSsrK[0], kSsrK[1], kSsrK[2], kSsrK[3] ) );
 	prog->uni2f( "ssrClip", kSsrNear, farZ );
-	prog->uni1i( "ssrRed", s.red );
+	prog->uni1i( "ssrRed", s.red | ( s.waterRed ? 8 : 0 ) );	// lane FIX1101A: 8 = the water rays' old end (no step fade)
 	prog->uni1b( "ssrPrev", usePrev );
 	if ( usePrev ) {
 		/* game-unit view P = R world + t / sc (cellAoPassOut's depth); the previous view: M P + T with
@@ -764,6 +797,17 @@ void wwCellSsrDraw( Scene * scene, bool cellProgram )
 		prog->uni4f_l( prog->uniLocation( "cellSsrRect" ), FloatVector4( float( vp[0] ), float( vp[1] ),
 			1.0f / float( std::max( vp[2], 1 ) ), 1.0f / float( std::max( vp[3], 1 ) ) ) );
 	}
+}
+
+bool wwCellSsrWaterFlat()
+{
+	return !ssr().waterRed;
+}
+
+bool wwCellSsrWaterAll()
+{
+	const SsrState & s = ssr();
+	return s.water && !s.waterRed;
 }
 
 bool wwCellSsrWaterRayPass( unsigned int * gbufTex )

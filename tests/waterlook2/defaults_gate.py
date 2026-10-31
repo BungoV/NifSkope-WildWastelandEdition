@@ -23,14 +23,16 @@ ROWS = {'Water clear colour': 'WaterClear', 'Water reflections': 'WaterRefl', 'W
 OLD = {'Water clear colour': 'WW/CellWaterClear', 'Water reflections': 'WW/CellWaterRefl',
        'Water sun glare': 'WW/CellWaterGlint', 'Ocean waves': 'WW/CellWaterOcean', 'Water soft edge': 'WW/CellWaterEdge',
        'Shore foam': 'WW/CellWaterFoam', 'Contact foam': 'WW/CellWaterContact', 'River foam': 'WW/CellWaterRiverFoam'}
-# FIX1101A (10-31 22:2x): the two foam rows ship OFF again: on main 9b443dcf they drew flat grey patches on the river
-# and one on a dry bank at spot 6 (notes/fix1101a/HANDOFF.md); they go back ON only with the water agent's foam gate.
-OFFNOW = {'Contact foam', 'River foam'}
+# FIX1101A (10-31 22:2x): the two foam rows shipped OFF (FOAMOFF: flat grey patches on the river, one on a dry bank at
+# spot 6). 11-01: back ON with the lace + dry-bank cut (tests/waterfoam2) under NEW keys ...3, so FOAMOFF's ...2 (and any
+# Off stored under it) does not stick either.
+OFFNOW = set()
+OLD2 = {'Contact foam': 'WW/CellWaterContact2', 'River foam': 'WW/CellWaterRiverFoam2'}
 ok = True
 for label, enum in ROWS.items():
     m = re.search(r'\{ "%s", "([^"]+)"(, (true|false))? \}' % re.escape(label), src)
     on = bool(m and m.group(3) == 'true')
-    newkey = bool(m and m.group(1) != OLD[label])
+    newkey = bool(m and m.group(1) != OLD[label] and m.group(1) != OLD2.get(label))
     print('%-20s key %-24s default %s %s%s' % (label, m.group(1) if m else '?', 'ON' if on else 'off',
                                              'new key' if newkey else 'OLD KEY', ' (want off)' if label in OFFNOW else ''))
     ok &= (on != (label in OFFNOW)) and newkey

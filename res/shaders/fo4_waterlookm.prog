@@ -1,0 +1,4 @@
+# fo4_waterlook for the Medium water preset (lane FIX1101A, src/gl/waterpreset.h): only the looks Medium draws.
+# Picked by name while the preset is Medium and no other water look row is on (src/gl/cellwater.cpp wwCellWaterProgram).
+
+shaders fo4_default.vert fo4_waterlookm.frag
