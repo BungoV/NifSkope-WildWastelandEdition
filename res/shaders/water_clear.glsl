@@ -30,9 +30,17 @@ const vec3 kWwClearBw = vec3( 0.0004, 0.00095, 0.00225 );	// half of pure seawat
 const vec3 kWwClearA[3] = vec3[3]( vec3( 0.002, 0.004, 0.012 ), vec3( 0.06, 0.20, 0.70 ), vec3( 0.02, 0.08, 0.28 ) );
 const vec3 kWwClearBb[3] = vec3[3]( vec3( 0.0006 ), vec3( 0.020, 0.018, 0.016 ), vec3( 0.004 ) );
 const vec3 kWwClearBed[3] = vec3[3]( vec3( 0.55, 0.48, 0.36 ), vec3( 0.20, 0.18, 0.13 ), vec3( 0.22, 0.20, 0.15 ) );
-// FIX1031B: Boston (notes/fix1031b/water/tools/boston_coef.py): k = a_w + a + bb (1/m), the physics' deep reflectance R
-const vec3 kWwBostonK[3] = vec3[3]( vec3( 0.589, 0.680, 1.737 ), vec3( 0.880, 1.417, 3.790 ), vec3( 0.650, 0.850, 2.233 ) );
-const vec3 kWwBostonR[3] = vec3[3]( vec3( 0.0388, 0.0400, 0.0194 ), vec3( 0.0543, 0.0400, 0.0184 ),
+// FIX1031B: Boston (notes/fix1031b/water/tools/boston_coef.py 0.011 real): k = a_w + a + bb (1/m), the physics' deep R.
+// MEASURED values (notes/fix1031b/water/REALVALUES.md): sea k(550) = the harbour's measured Kd(PAR) 0.631 /m (MWRA
+// 2018-06: mean 1 % light depth 7.3 m, 1996-2017; Secchi-equivalent 2.7 m, inside Luis et al. 2019's in-situ 1-5 m at
+// station 142); river Secchi 1.0 m (EPA Clean Charles 2002 mean, Daly Field - BU Bridge); lake 2.0 m (no cited value).
+// Rule: k(550) = Kd(PAR) where measured, else Poole-Atkins Kd = 1.7 / Secchi. Red WW_CELL_WATER_CLEAR_RED=secchi (5)
+// = the overhaul's first constants (sea 2.5 m, river 1.2 m).
+const vec3 kWwBostonK[3] = vec3[3]( vec3( 0.570, 0.631, 1.599 ), vec3( 0.992, 1.700, 4.580 ), vec3( 0.650, 0.850, 2.233 ) );
+const vec3 kWwBostonR[3] = vec3[3]( vec3( 0.0372, 0.0400, 0.0195 ), vec3( 0.0578, 0.0400, 0.0182 ),
+	vec3( 0.0385, 0.0350, 0.0164 ) );
+const vec3 kWwBostonK5[3] = vec3[3]( vec3( 0.589, 0.680, 1.737 ), vec3( 0.880, 1.417, 3.790 ), vec3( 0.650, 0.850, 2.233 ) );
+const vec3 kWwBostonR5[3] = vec3[3]( vec3( 0.0388, 0.0400, 0.0194 ), vec3( 0.0543, 0.0400, 0.0184 ),
 	vec3( 0.0385, 0.0350, 0.0164 ) );
 // wet sand (sea; wet sand reads about half its dry albedo) and darker river / lake silt
 const vec3 kWwBostonBed[3] = vec3[3]( vec3( 0.20, 0.18, 0.14 ), vec3( 0.10, 0.085, 0.06 ), vec3( 0.12, 0.10, 0.075 ) );
@@ -63,7 +71,8 @@ vec3 wwClearDeepR( int cls )
 {
 	const vec3 lum = vec3( 0.2126, 0.7152, 0.0722 );
 	float y = dot( wwClearDeep, lum );
-	return y > 1e-6 ? wwClearDeep * ( dot( kWwBostonR[cls], lum ) / y ) : kWwBostonR[cls];
+	vec3 r = waterClearRed == 5 ? kWwBostonR5[cls] : kWwBostonR[cls];
+	return y > 1e-6 ? wwClearDeep * ( dot( r, lum ) / y ) : r;
 }
 
 vec3 wwClearK( int cls, out vec3 bb )
@@ -73,7 +82,7 @@ vec3 wwClearK( int cls, out vec3 bb )
 		bb = kWwClearBw + kWwClearBb[cls];
 		k = kWwPureWater + kWwClearA[cls] + bb;
 	} else {
-		k = kWwBostonK[cls];
+		k = waterClearRed == 5 ? kWwBostonK5[cls] : kWwBostonK[cls];
 		bb = wwClearDeepR( cls ) * k / 0.33;	// Gordon R = 0.33 bb / k, solved for bb
 	}
 	if ( waterClearRed == 3 ) {
