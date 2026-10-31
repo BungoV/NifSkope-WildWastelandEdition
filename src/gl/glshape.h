@@ -184,6 +184,10 @@ public:
 	/*! lane TREELEAF2: the threshold a side pass uploads for its `discard a < t` test (da = wwDrawAlpha of that pass), so
 	 *  it keeps the colour pass's texels: the next float above ref / 255 where the colour test is a strict `>` */
 	float wwLeafSideThreshold( const WwDrawAlpha & da, const char * pass ) const;
+	/*! lane FIX1031B: the colour pass multiplies this shape's texture alpha by something under 1 (its vertex alpha, not a
+	 *  tree; or its material alpha), so its test is not tex.a > ref and the coverage copy does not fit it
+	 *  (src/gl/wwleafcov.h vertexAlphaModulates; the Concord church's window quad, vertex alpha 25 / 255) */
+	bool wwAlphaModulated() const;
 	/*! lane TREELEAF3: what a side pass's `discard a < t` test reads (src/gl/wwfxcov.h Side): fxMode, the alpha factor
 	 *  and the threshold. A lighting shape: today's (mode 0, its material alpha, wwLeafSideThreshold); an alpha-tested
 	 *  effect shape (fo4_effectshader): the colour pass's composed alpha (baseColor.a^2, the vertex alpha, the palette's
@@ -266,6 +270,10 @@ protected:
 	bool translucent = false;
 	bool surfaceDecal = false;	// lane FXD1
 	bool effectDecal = false;	// lane DECALLIT1: an effect shader with the Decal flag (the game draws it into the surface)
+	//! lane FIX1031B: the lowest vertex alpha (0..1), kept for the colours array it was taken from (data, size)
+	mutable const void * wwVaKey = nullptr;
+	mutable qsizetype wwVaCount = -1;
+	mutable float wwVaMin = 1.0f;
 
 	void updateShader();
 

@@ -337,6 +337,9 @@ static WwLeafCov::In wwLeafIn( const Shape * sh, BSShaderLightingProperty * bssp
 		in.treeDial = wwLodlTreeDial( mat );
 	}
 	in.translucent = translucent;
+	// lane FIX1031B: a test multiplied by a vertex / material alpha under 1 binds the plain file (red: modulate)
+	WW_SWITCH_STATIC( bool, modRed, WwLeafCov::modulateRed( wwEnv( "WW_TREELEAF_RED" ).trimmed().constData() ) );
+	in.modulated = !modRed && in.lighting && sh->wwAlphaModulated();
 	if ( ap ) {
 		in.nifTest = ap->hasAlphaTest();
 		in.nifBlend = ap->hasAlphaBlend();
@@ -362,6 +365,28 @@ int Shape::wwLeafCovRef( const char * pass ) const
 	if ( wwLeafPassRed( pass ) )
 		return 0;
 	return WwLeafCov::colourRef( wwLeafIn( this, bssp, bslsp, alphaProperty, scene, translucent ) );
+}
+
+bool Shape::wwAlphaModulated() const
+{
+	/* lane FIX1031B: renderer.cpp setupProgramCE1's vertexColorOverride and alpha uniform, as plain values. The lowest
+	 * vertex alpha is taken once per colours array (the shape reassigns it on a data update). */
+	if ( colors.constData() != wwVaKey || colors.size() != wwVaCount ) {
+		float m = 1.0f;
+		for ( const Color4 & c : colors )
+			m = std::min( m, c.alpha() );
+		wwVaKey = colors.constData();
+		wwVaCount = colors.size();
+		wwVaMin = m;
+	}
+	const NifModel * nif = scene ? scene->nifModel : nullptr;
+	const bool pre130 = nif && nif->getBSVersion() < 130;
+	bool draws = scene && hasVertexColors && !colors.isEmpty() && scene->hasOption( Scene::DoVertexColors );
+	if ( pre130 && !( bssp && bssp->hasSF2( ShaderFlags::SLSF2_Vertex_Colors ) ) )
+		draws = false;
+	const bool noFlag = pre130 && bslsp && !bslsp->hasSF1( ShaderFlags::SLSF1_Vertex_Alpha );
+	return WwLeafCov::vertexAlphaModulates( draws, scene && scene->hasOption( Scene::DoVertexAlpha ), isVertexAlphaAnimation,
+		noFlag, wwVaMin, bslsp ? bslsp->alpha : 1.0f );
 }
 
 void Shape::wwLeafCovArm( const char * pass ) const
