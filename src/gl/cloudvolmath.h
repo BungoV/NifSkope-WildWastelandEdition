@@ -665,6 +665,7 @@ constexpr float kShpDir[2] = { 1.0f, 0.0f };	// the shear's direction: the wind'
 // cumulus core, so the erosion carves their surface only)
 constexpr float kShpBillow = 4.0f, kShpBillowW = 0.5f, kShpWxScale = 4.7f, kShpWx = 0.6f, kShpDetailK = 0.6f;
 constexpr float kShpTowerGain = 2.5f;
+constexpr float kShpInner = 0.8f, kShpInnerLo = 1.0f;	// LATE ITEM 14: the interior's density ramp (no uniform fill)
 
 /*! the per-type rule (the map's Low type T: 0 stratus, 1/3 stratocumulus, 2/3 cumulus, 1 cumulonimbus): the domes'
  *  height in the band, their shape exponent (2 = round domes; 1.2 for towers: the height follows the cell's strength, so
@@ -733,7 +734,7 @@ inline float shapeCore( float cell, float cellBig, float s, float s2, float det,
 		f += ( s2 - kShpMean ) / kShpSd * kShpBillowW * kShpLump * mixf( 0.5f, 1.0f, hf );
 	const float er = kShpErode * mixf( kShpBaseErode, 1.0f, smooth( 0.0f, 0.3f, hf ) );
 	f -= mixf( det, 1.0f - det, sat( hf * 4.0f ) ) * er;
-	return sat( f / std::max( kShpSoft + footKm * kShpSoftPerKm, 1e-3f ) ) * kShpScale;
+	return sat( f / std::max( kShpSoft + footKm * kShpSoftPerKm, 1e-3f ) ) * mixf( kShpInnerLo, 1.0f, sat( f / kShpInner ) ) * kShpScale;
 }
 
 struct ShapeVolumes

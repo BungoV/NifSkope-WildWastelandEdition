@@ -151,7 +151,8 @@
 #ifdef WW_CLOUD_SHAPE
 	/* lane CLOUDSHAPE1: the ambient's split (Hillaire 2016 p. 30; Nubis 2017: the sky from above at the tops, the ground's
 	 * bounce from below at the bases): the base takes a grey, darker light (the ground's albedo x the sky + sun on it) */
-	vec3 ambC = mix( vec3( dot( cvAmb, vec3( 0.2126, 0.7152, 0.0722 ) ) ) * cvShpK( 2, kShpGround ), cvAmb,
+	vec3 ambG = vec3( dot( cvAmb, vec3( 0.2126, 0.7152, 0.0722 ) ) );
+	vec3 ambC = mix( ambG * cvShpK( 2, kShpGround ), mix( ambG, cvAmb, kShpAmbSat ),
 		cvSmooth( 0.0, 0.6, clamp( ( p.z - cvBands.baseKm.x ) / max( cvBands.topKm.x - cvBands.baseKm.x, 1e-3 ), 0.0, 1.0 ) ) );
 	vec3 S = kCvAlbedo * tint * ( key * ph + cvAmbOn * ambC * ambF * cvShpK( 3, kShpSkyOcc ) );
 #else
