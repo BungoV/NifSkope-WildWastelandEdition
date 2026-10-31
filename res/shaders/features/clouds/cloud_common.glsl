@@ -76,6 +76,9 @@ const float kShpSoftPerKm = 0.5, kShpMean = 0.884, kShpSd = 0.053, kShpTowerScal
 // body leaves its sides (MEASURED against bungo_refs: notes/cloudshape1/v2)
 const float kShpBillow = 4.0, kShpBillowW = 0.5, kShpWxScale = 4.7, kShpWx = 0.6, kShpDetailK = 0.6, kShpSkyOcc = 0.7;
 const float kShpTowerGain = 2.5;
+const float kShpInner = 0.8, kShpInnerLo = 1.0;	// the interior's density ramp (LATE ITEM 14): 1 = off (0.45 and 0.7 took up50's
+// contrast range to 1.85 / 1.97, under the references' 2.00: notes/cloudshape1/v2/gate_v2c.txt)
+const float kShpAmbSat = 0.5;	// the sky ambient's saturation kept (Godot demo v2: half toward its grey)
 const int kShpSub = 2;	// the march's sub-steps inside cloud (cloud_march.frag), each at most kShpSubKm (4 and 8 cost 1.5-2x
 // and drew no better once the taps' jitter was its own: notes/cloudshape1/v2/zs2_m.png)
 const float kShpSubKm = 0.06;
@@ -159,7 +162,10 @@ float cloudDensity( vec3 p )
 		float dk = kCvDetailKm * cvShpK( 5, kShpDetailK );
 		float det = textureLod( cvDetail, qd / dk, log2( max( cvFootKm * 32.0 / dk, 1.0 ) ) ).r;
 		f -= mix( det, 1.0 - det, clamp( hf * 4.0, 0.0, 1.0 ) ) * cvShpK( 4, kShpErode ) * mix( kShpBaseErode, 1.0, cvSmooth( 0.0, 0.3, hf ) );
-		d += clamp( f / max( cvShpK( 7, kShpSoft ) + cvFootKm * kShpSoftPerKm, 1e-3 ), 0.0, 1.0 ) * kShpScale * cvBands.density[b];
+		/* LATE ITEM 14 (uniform fill = toon; clayjohn's Godot demo v2 clouds.glsl:136, MIT, keeps the remapped density as is):
+		 * the inside rises from kShpInnerLo at the edge to full kShpInner f units in, so the lumps vary the interior too */
+		d += clamp( f / max( cvShpK( 7, kShpSoft ) + cvFootKm * kShpSoftPerKm, 1e-3 ), 0.0, 1.0 )
+			* mix( kShpInnerLo, 1.0, clamp( f / kShpInner, 0.0, 1.0 ) ) * kShpScale * cvBands.density[b];
 	}
 	return d;
 }
