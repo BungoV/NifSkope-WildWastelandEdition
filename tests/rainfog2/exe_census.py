@@ -11,7 +11,7 @@ rule replaced). Exit 0 = all match.
 import os, re, subprocess, sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-exe, data = sys.argv[1], sys.argv[2]
+exe, data = os.path.abspath(sys.argv[1]), sys.argv[2]	# FIX1031B: CreateProcess does not find a relative 'release/NifSkope.exe'
 outp = sys.argv[3] if len(sys.argv) > 3 else None
 MASTERS = ['Fallout4.esm', 'DLCRobot.esm', 'DLCworkshop01.esm', 'DLCCoast.esm', 'DLCworkshop02.esm',
            'DLCworkshop03.esm', 'DLCNukaWorld.esm']
