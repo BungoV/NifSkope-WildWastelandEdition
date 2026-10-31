@@ -18,6 +18,7 @@ class QDoubleSpinBox;
 class QLabel;
 class QMenu;
 class QObject;
+class QToolButton;
 class QWidget;
 
 /* lane OPENCELLFIX1 (bungo 10-27): the Cell dock's Show switches as a tab, and a Show menu that stays open.
@@ -87,6 +88,11 @@ QStringList wwDisplayGroups();   //!< Editor, Vanilla, Fusion Shaders
  *  `presetbar` (no built-ins in the Preset dropdown), `foldrows`, `inline`. */
 QWidget * wwMenuAsDisplay( QMenu * menu, const QList<WwDisplayRow> & rows, QWidget * parent, const WwMenuPanelStyle & style );
 int wwDisplayLeftovers( const QWidget * panel );
+
+/*! lane OPENCELLFIX2 (bungo: "there is a redundant show on the right"): the Cell dock has no Show button beside Color,
+ *  so this returns nullptr. lane REDRETIRE2 retired its env red: the old button (objectName CellWorkspaceShowButton,
+ *  the Show menu on it) lives only as the red twin REDTWIN=CELLSHOW=showbutton of tests/cellshow's red build. */
+QToolButton * wwCellShowButton( QWidget * parent );
 
 /* Named presets of the whole Display state: every tick and choice of the menu, every value field, and the panel's
  * own dropdowns (Color). Saved in QSettings CellEditor/DisplayPresets; applying one goes through the actions, so it

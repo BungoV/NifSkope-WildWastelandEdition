@@ -31,7 +31,7 @@ run green 0 "$G"
 run green_on_red_build 0 "$R"	# the red build with no twin picked is the green
 for r in menu sync groups; do run red_$r 1 "$G" WW_CELLSHOW_RED=$r; done
 run red_wwdropdown 1 "$G" WW_DROPDOWN_RED=1
-for r in ticks dropdown presets nest livebind foldrows inline arrowframe dropright override builtin presetbar; do
+for r in ticks dropdown presets nest livebind foldrows inline arrowframe dropright override builtin presetbar showbutton; do
 	run twin_$r 1 "$R" REDTWIN=CELLSHOW=$r
 	run twin_${r}_green_build 0 "$G" REDTWIN=CELLSHOW=$r WW_CELLSHOW_RED=$r	# retired: the shipping build ignores both
 done

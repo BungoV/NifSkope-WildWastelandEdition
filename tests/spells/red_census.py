@@ -12,7 +12,7 @@ and, with --tsv, the reader sites (file:line), the values, the first commit and 
     A lane judged only by a sub-agent's pictures or holds does not count.
   * a confirmed red whose reader sits in a busy file (--busy, one path per line) is "deferred (file busy)".
   * a red a committed test still uses as its red stays, unless its test red moved to a twin (src/wwredtwin.h).
-  * RETIRED lists what REDRETIRE1 removed; each entry is checked GONE from src/res (no env reader left).
+  * RETIRED lists what REDRETIRE1 and REDRETIRE2 removed; each entry is checked GONE from src/res (no env reader left).
 
 Usage: python -I tests/spells/red_census.py [--root <tree>] [--notes E:/Projects/Claude/notes] [--busy <file>]
        [--tsv <out>] [--names-only]
@@ -33,6 +33,7 @@ READER_RE = re.compile(r'wwEnv|qEnvironmentVariable|qgetenv|getenv|qputenv|wwSwi
 
 # Bungo's OWN confirmations, searched 10-30 in LANES.md, LANES_DONE.md, HANDOVER_1030.md, MORNING_1030.md, the
 # merge*/ RESULTS + LANES backups, weatherlook1/APPROVALS.md and the git log. Lane -> [(quote, notes-relative file)].
+# REDRETIRE2 searched again 10-31 (LANES.md, fix1030c HANDOFF/BRIEF_B, HANDOVER_1030.md): no new live confirmation.
 CONFIRM = {
     # bungo ran the exe himself ("exe opened for bungo; merge after his OK") and OK'd the Cell dock panel.
     'OPENCELLFIX2': [('bungo OK on the panel 10-27', 'LANES.md'),
@@ -64,7 +65,7 @@ VALUES = {
                                                'inline', 'arrowframe', 'dropright', 'override', 'builtin',
                                                'presetbar')]
         + [('groups', ('OPENCELLFIX2', 'kept: the in-app gate src/cellworkspacetest.cpp names it')),
-           ('showbutton', ('OPENCELLFIX2', 'deferred (file busy): src/cellworkspace.cpp')),
+           ('showbutton', ('OPENCELLFIX2', 'twin')),
            ('menu', ('OPENCELLFIX1', 'kept: lane not confirmed')), ('sync', ('OPENCELLFIX1', 'kept: lane not confirmed'))]),
     'WW_OPENCELL_RED': {'lang': ('OPENCELLFIX2', 'twin'), 'dblclick': ('OPENCELLFIX2', 'twin'),
                         'writer': ('OPENCELL1', 'kept: lane not confirmed'),
@@ -72,11 +73,12 @@ VALUES = {
                         'masters': ('OPENCELLFIX1', 'kept: lane not confirmed'),
                         'restore': ('OPENCELLFIX1', 'kept: lane not confirmed'),
                         'list': ('CELLSPAWN1', 'kept: lane not confirmed')},
-    'WW_FLYFIX_RED': {'1': ('FLYFIX1', 'deferred (file busy): src/glview.cpp')},
+    # WW_FLYFIX_RED (FLYFIX1, value 1): the whole name retired by REDRETIRE2 (RETIRED below).
 }
 
-# What REDRETIRE1 retired: (name, value or None for the whole name, the test whose red build keeps the twin).
-RETIRED = [('WW_CELLGROUP_RED', None, 'tests/cellgroups (REDTWIN=CELLGROUP=<group>|ssr)')] + \
+# What REDRETIRE1 + REDRETIRE2 retired: (name, value or None for the whole name, the test whose red build keeps the twin).
+RETIRED = [('WW_CELLGROUP_RED', None, 'tests/cellgroups (REDTWIN=CELLGROUP=<group>|ssr)'),
+           ('WW_FLYFIX_RED', None, 'tests/flyfix (REDTWIN=FLYFIX=tick|refocus)')] + \
     [('WW_CELLSHOW_RED', v, 'tests/cellshow (REDTWIN=CELLSHOW=%s)' % v)
      for v, (o, w) in VALUES['WW_CELLSHOW_RED'].items() if w == 'twin'] + \
     [('WW_DROPDOWN_RED', 'fit', 'tests/cellshow (REDTWIN=DROPDOWN=fit)'),
@@ -277,7 +279,7 @@ def main():
     for r in rows:
         print('%s | %s | %s | %s (%s)' % (r[0], r[1], r[3], r[4], r[5]))
     rc = 0
-    print('RETIRED (REDRETIRE1; the env reader is gone, the old path lives only in the named test\'s red build):')
+    print('RETIRED (REDRETIRE1 + REDRETIRE2; the env reader is gone, the old path lives only in the named test\'s red build):')
     for what, ok, test, bad in retired_check(a.root):
         print('  %s %s -> %s%s' % ('GONE' if ok else 'STILL READ', what, test, '' if ok else ' at ' + ' '.join(bad)))
         rc |= 0 if ok else 1

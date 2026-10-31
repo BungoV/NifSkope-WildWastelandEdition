@@ -537,7 +537,8 @@ void runCellWorkspaceTest( NifSkope * skope, const QString & reportPath )
 				shown += b->objectName().startsWith( QLatin1String( "CellDisplayTick_" ) );
 		add( "OPENCELLFIX2: the Display tab holds a tick per feature", shown >= 20, QString::number( shown ) );
 		/* lane OPENCELLFIX2 notes 5, 7, 8: the three groups, every menu row reached, no Show button by Color, and
-		 * every dock dropdown is the toolbar's Object Mode selector. Reds: WW_CELLSHOW_RED=showbutton|groups, WW_DROPDOWN_RED=1. */
+		 * every dock dropdown is the toolbar's Object Mode selector. Reds: WW_CELLSHOW_RED=groups, WW_DROPDOWN_RED=1; the
+		 * Show button's red is the twin REDTWIN=CELLSHOW=showbutton of tests/cellshow (REDRETIRE2). */
 		QStringList groups;
 		for ( const QString & g : wwDisplayGroups() )
 			if ( panel && panel->showTabPanel()

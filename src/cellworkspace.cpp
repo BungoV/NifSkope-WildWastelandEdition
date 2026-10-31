@@ -473,7 +473,8 @@ void CellWorkspacePanel::buildUi()
 	page = showL;
 
 	/* lane OPENCELLFIX2: Color is the Display tab's first Editor row (Textured = its tick off), and the Show button
-	 * that sat beside it is gone (bungo: "there is a redundant show on the right"). WW_CELLSHOW_RED=showbutton keeps it. */
+	 * that sat beside it is gone (bungo: "there is a redundant show on the right"). Its old way is the red twin
+ * REDTWIN=CELLSHOW=showbutton of tests/cellshow since REDRETIRE2 (src/ui/cellshowpanel.cpp wwCellShowButton). */
 	overlayBox = new WwDropdown( this );
 	overlayBox->setObjectName( QStringLiteral( "CellWorkspaceOverlay" ) );
 	/* The names are the enum's own spellings (`cellOverlayName`), so the row,
@@ -489,14 +490,9 @@ void CellWorkspacePanel::buildUi()
 
 	/* THE SHOW MENU -- a child of this panel, so it lives only in the Cell workspace. Since OPENCELLFIX2 nothing pops
 	 * it: the Display tab is built from it and its actions stay the one truth. */
-	QToolButton * showButton = nullptr;
-	if ( wwEnvStr( "WW_CELLSHOW_RED" ) == QLatin1String( "showbutton" ) ) {
-		showButton = new QToolButton( this );
-		showButton->setObjectName( QStringLiteral( "CellWorkspaceShowButton" ) );
-		showButton->setText( tr( "Show" ) );
-		WwDropdown::applyStyle( showButton );
+	QToolButton * showButton = wwCellShowButton( this );	// nullptr outside tests/cellshow's red build
+	if ( showButton )
 		page->addWidget( showButton );
-	}
 	QMenu * showMenu = new QMenu( this );
 	showMenu->setObjectName( QStringLiteral( "CellWorkspaceShowMenu" ) );
 
