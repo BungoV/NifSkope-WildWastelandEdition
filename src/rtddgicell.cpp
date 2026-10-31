@@ -119,6 +119,9 @@ constexpr int kPathNoWait = 4;
 /* lane RTXCASCADE2: WW_CELL_RTDDGI_RED=perblas, RTXCASCADE1's cascades: each coarse cascade builds its own BLAS from the
  * same soup and steps in its own submit (the one-BLAS / one-submit red). Live (a set rebuilds the coarse cascades). */
 constexpr int kPathPerCascade = 8;
+/* FIX1101A: WW_CELL_RTDDGI_RED=noalbkey, today's main: the build key leaves the soup's albedo out, so a reopen that changes
+ * only the albedo (WW_SOUPALB_RED) keeps the old volume. Live (a set moves the key: the volume rebuilds). */
+constexpr int kPathNoAlbKey = 16;
 
 /*! WW_CELL_RTDDGI_RED, live: [0] the read's red bits (rtddgimath.h kSample*, the shader's cellDdgiRed), [1] the path
  *  reds (kPath*). One list, both parts: "trilinear,readback" sets one of each */
@@ -140,6 +143,7 @@ const int * cellRedParts()
 			if ( t == QLatin1String( "rebuild" ) ) b.v[1] |= kPathRebuild;
 			if ( t == QLatin1String( "nowait" ) ) b.v[1] |= kPathNoWait;   // lane RTXFIX1
 			if ( t == QLatin1String( "perblas" ) ) b.v[1] |= kPathPerCascade;   // lane RTXCASCADE2
+			if ( t == QLatin1String( "noalbkey" ) ) b.v[1] |= kPathNoAlbKey;   // FIX1101A
 		}
 		return b;
 	}() );
@@ -296,6 +300,18 @@ bool rtddgiSkyBelowRed()
 	if ( !wwEnvIsSet( "WW_SKYBELOW_RED" ) )
 		return false;
 	const QByteArray v = wwEnv( "WW_SKYBELOW_RED" ).trimmed();
+	return !v.isEmpty() && v != "0";
+}
+
+/* FIX1101A (leftover of FIX1031B's cover rule): a probe ray's hit takes the volume's irradiance by the same fade x cover
+ * the surfaces take, the flat ambient for the rest (src/rtddgimath.h bounceIrradiance; before: renormalised over the
+ * usable corners, BLACK past them: the trunks' hard plane in the second bounce). Ships ON; WW_CELL_RTDDGI_BOUNCE_RED=1
+ * keeps today's main (spec.red "bouncenocover"). Read every frame: it is in the build key, a set rebuilds the volume */
+bool rtddgiBounceRed()
+{
+	if ( !wwEnvIsSet( "WW_CELL_RTDDGI_BOUNCE_RED" ) )
+		return false;
+	const QByteArray v = wwEnv( "WW_CELL_RTDDGI_BOUNCE_RED" ).trimmed();
 	return !v.isEmpty() && v != "0";
 }
 
@@ -741,6 +757,8 @@ void startBuild( Cell & c, const ProbeSoup & soup, const WwCellLighting & lights
 	spec.gpu = 1;
 	if ( rtddgiSkyBelowRed() )
 		spec.red = QStringLiteral( "skybelow" );   // lane SKYBELOW1: the red, today's main miss and visibility
+	if ( rtddgiBounceRed() )   // FIX1101A: the red, today's main bounce read (renormalised, black past the usable probes)
+		spec.red += spec.red.isEmpty() ? QStringLiteral( "bouncenocover" ) : QStringLiteral( ",bouncenocover" );
 	if ( !boxFor( G, soup, eye, sp, spec.box, *b ) ) {
 		std::lock_guard<std::mutex> lk( b->m );
 		b->done = true;
@@ -796,7 +814,10 @@ void censusBuilt( const Cell & c, const Build & b )
 		+ ( v.skyBelowRule   // lane SKYBELOW1
 			? QStringLiteral( "; below the horizon: ground %1 %2 %3 (albedo %4), no sky visibility" ).arg( double( v.ground[0] ), 0, 'g', 4 )
 				.arg( double( v.ground[1] ), 0, 'g', 4 ).arg( double( v.ground[2] ), 0, 'g', 4 ).arg( double( v.groundAlbedo[1] ), 0, 'f', 3 )
-			: QStringLiteral( "; below the horizon: sky (the red WW_SKYBELOW_RED)" ) ) );
+			: QStringLiteral( "; below the horizon: sky (the red WW_SKYBELOW_RED)" ) )
+		+ ( s.red.contains( QLatin1String( "bouncenocover" ) )   // FIX1101A: the rule this volume was built with
+			? QStringLiteral( "; bounce read renormalised, black past the usable probes (the red WW_CELL_RTDDGI_BOUNCE_RED)" )
+			: QStringLiteral( "; bounce read: fade x cover, the flat ambient for the rest" ) ) );
 }
 
 void censusSet( const Cell & c, const RtDdgiLive & L, int k, const QString & tail )
@@ -1471,6 +1492,17 @@ static void volumeFrame( Scene * scene, Cell & c, const CellSpec * spIn, bool du
 		key = fnv( key, soup->tris.data(), 36 );
 		key = fnv( key, soup->tris.data() + nTris - 9, 36 );
 	}
+	/* FIX1101A: the soup's albedo (SOUPALB1) is part of what the trace shades. A reopen that changes it alone (WW_SOUPALB_RED,
+	 * stage reopen) kept the old volume: the same soup slot and the same triangles gave the same key (manager hold h1 10-31:
+	 * no "rebuilding" line after the grey reopen, the after / soupred pair 240 px). Its size and ~1024 sampled triangles'
+	 * bytes join the key; red WW_CELL_RTDDGI_RED=noalbkey (today's main) */
+	if ( !( paths & kPathNoAlbKey ) ) {
+		const size_t nAlb = soup->alb.size();
+		key = fnv( key, &nAlb, sizeof nAlb );
+		const size_t stride = std::max<size_t>( 3, nAlb / 3 / 1024 * 3 );
+		for ( size_t i = 0; i + 3 <= nAlb; i += stride )
+			key = fnv( key, &soup->alb[i], 3 );
+	}
 	const int skyOn = sky.on ? 1 : 0;
 	key = fnv( key, &skyOn, sizeof skyOn );
 	key = fnv( key, sky.amb, sizeof sky.amb );
@@ -1483,6 +1515,8 @@ static void volumeFrame( Scene * scene, Cell & c, const CellSpec * spIn, bool du
 	key = fnv( key, &paths, sizeof paths );
 	const int skyBelowRed = rtddgiSkyBelowRed() ? 1 : 0;   // lane SKYBELOW1: a set rebuilds (the volume re-converges)
 	key = fnv( key, &skyBelowRed, sizeof skyBelowRed );
+	const int bounceRed = rtddgiBounceRed() ? 1 : 0;   // FIX1101A: a set rebuilds (the volume re-converges)
+	key = fnv( key, &bounceRed, sizeof bounceRed );
 	if ( G ) {
 		key = fnv( key, G->origin, sizeof G->origin );
 		key = fnv( key, G->dims, sizeof G->dims );
@@ -1919,10 +1953,73 @@ void rtddgiCellUniforms( Scene * scene )
 	bindOne( scene, r, prog, locOn, c );
 }
 
+/* FIX1101A (LATE ITEM 9, bungo 10-31 "and for GI, the pic of it covering further areas?"): WW_CELL_RTDDGI_VIEW_BOXES=1,
+ * live, a debug view: every cascade's probe box (first probe to last, the window round the camera after its scrolls)
+ * drawn as its 12 edges over the frame, no depth test (the reach shows through the buildings), each cascade its own
+ * colour: 0 white, 1 yellow, 2 orange, 3 red. The census line `rtddgi cell: boxes` gives each box's reach in metres.
+ * Off (the default) draws nothing. */
+static void cascadeBoxesDraw( Scene * scene, const Transform & viewTrans )
+{
+	if ( !wwEnvIsSet( "WW_CELL_RTDDGI_VIEW_BOXES" ) )
+		return;
+	const QByteArray on = wwEnv( "WW_CELL_RTDDGI_VIEW_BOXES" ).trimmed();
+	if ( on.isEmpty() || on == "0" )
+		return;
+	static const FloatVector4 kCol[rtddgi::kMaxCascades] = { FloatVector4( 1.0f, 1.0f, 1.0f, 1.0f ),
+		FloatVector4( 1.0f, 0.9f, 0.1f, 1.0f ), FloatVector4( 1.0f, 0.5f, 0.05f, 1.0f ), FloatVector4( 1.0f, 0.1f, 0.1f, 1.0f ) };
+	std::vector<Vector3> vp;
+	std::vector<FloatVector4> vcol;
+	QString reach;
+	for ( int l = 0; l < rtddgi::kMaxCascades && l < rtddgiCellCascades(); l++ ) {
+		const Cell & c = cascCell( l );
+		if ( !c.live || c.nif != scene->nifModel )
+			continue;
+		const RtDdgiVolume & v = c.live->live.volume();
+		float lo[3], hi[3];
+		for ( int k = 0; k < 3; k++ ) {
+			lo[k] = v.origin[k];
+			hi[k] = v.origin[k] + float( std::max( v.dims[k] - 1, 0 ) ) * v.step[k];
+		}
+		for ( int e = 0; e < 12; e++ ) {   // edge e runs along axis e / 4; its other two coordinates are bits 0 and 1 of e
+			const int ax = e / 4, a1 = ( ax + 1 ) % 3, a2 = ( ax + 2 ) % 3;
+			float p0[3], p1[3];
+			p0[ax] = lo[ax];
+			p1[ax] = hi[ax];
+			p0[a1] = p1[a1] = ( e & 1 ) ? hi[a1] : lo[a1];
+			p0[a2] = p1[a2] = ( e & 2 ) ? hi[a2] : lo[a2];
+			vp.push_back( Vector3( p0[0], p0[1], p0[2] ) );
+			vp.push_back( Vector3( p1[0], p1[1], p1[2] ) );
+			vcol.push_back( kCol[l] );
+			vcol.push_back( kCol[l] );
+		}
+		reach += QStringLiteral( "%1cascade %2 %3 x %4 x %5 m (spacing %6 m)" ).arg( reach.isEmpty() ? QString() : QStringLiteral( "; " ) )
+			.arg( l ).arg( double( hi[0] - lo[0] ) * 0.01428, 0, 'f', 0 ).arg( double( hi[1] - lo[1] ) * 0.01428, 0, 'f', 0 )
+			.arg( double( hi[2] - lo[2] ) * 0.01428, 0, 'f', 0 ).arg( double( v.step[0] ) * 0.01428, 0, 'f', 2 );
+	}
+	if ( vp.empty() )
+		return;
+	static QString said;
+	if ( reach != said ) {   // once per change (a scroll moves no reach; a rebuild or another preset does)
+		said = reach;
+		say( QStringLiteral( "rtddgi cell: boxes (WW_CELL_RTDDGI_VIEW_BOXES, 1 u = 1.428 cm): " ) + reach );
+	}
+	auto fn = scene->renderer->fn;
+	scene->loadModelViewMatrix( viewTrans );
+	GLint prevDepthFunc = GL_LESS;
+	fn->glGetIntegerv( GL_DEPTH_FUNC, &prevDepthFunc );
+	const GLboolean depthOn = fn->glIsEnabled( GL_DEPTH_TEST );
+	fn->glDisable( GL_DEPTH_TEST );
+	scene->drawLines( vp.data(), vp.size(), vcol.data() );
+	if ( depthOn )
+		fn->glEnable( GL_DEPTH_TEST );
+	fn->glDepthFunc( GLenum( prevDepthFunc ) );
+}
+
 void rtddgiCellViewDraw( Scene * scene, const Transform & viewTrans )
 {
 	if ( !scene || !scene->renderer || scene->selecting || !rtddgiCellShaderDefine() )
 		return;
+	cascadeBoxesDraw( scene, viewTrans );   // FIX1101A: the cascades' boxes (WW_CELL_RTDDGI_VIEW_BOXES; off: nothing)
 	const int mode = rtddgiCellView();
 	Cell & c = cell();
 	const bool inFrame = c.viewDrewInFrame;   // lane RTXFIX1: drawn inside the linear frame this paint: no overlay
@@ -1946,7 +2043,8 @@ void rtddgiCellViewDraw( Scene * scene, const Transform & viewTrans )
 		float pos[3];
 		v.position( p, pos );
 		const Vector3 P( pos[0], pos[1], pos[2] );
-		if ( double( ( viewTrans * P ).length() ) > kViewReach )   // view units, as the PRTP view's rings (cellvolumeview.cpp)
+		// view units, as the PRTP view's rings (cellvolumeview.cpp); FIX1101A: x 2^cascade (a coarse cascade's reach)
+		if ( double( ( viewTrans * P ).length() ) > kViewReach * double( 1 << viewLevel() ) )
 			continue;
 		drawn++;
 		const int st = v.state[size_t( p )];
@@ -2021,7 +2119,7 @@ void rtddgiCellViewDrawLinear( Scene * scene, const Transform & viewTrans )
 		float pos[3];
 		v.position( p, pos );
 		const double d = double( ( viewTrans * Vector3( pos[0], pos[1], pos[2] ) ).length() );
-		if ( d > kViewReach )
+		if ( d > kViewReach * double( 1 << viewLevel() ) )   // FIX1101A: x 2^cascade, a coarse cascade's reach (LATE ITEM 9)
 			continue;
 		if ( d < 2.0 * double( rad ) + 10.0 ) {
 			culled++;

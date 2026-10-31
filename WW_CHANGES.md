@@ -1,3 +1,24 @@
+## GI1101A (FIX1101A area G, 2026-10-31): the bounce read hands over like the surfaces, the albedo rebuilds the volume, the cascades' boxes
+
+- Bounce read (leftover of FIX1031B's cover rule; ships ON): a probe ray's hit takes the volume's irradiance by the same
+  fade x cover the surfaces take, the flat ambient for the rest (src/rtddgimath.h flatAmbient + bounceIrradiance, the twin
+  src/rtddgi.cpp, src/rtddgi/trace.comp ddgiIrradianceAt + trace.spv.h). Before, the bounce renormalised over the usable
+  corners and fell to BLACK where none was usable: the trunks' hard plane, one bounce on. flatAmbient = the sky cube's own
+  axis irradiance x n^2 (0 without a sky: an interior volume's void is never sky). Red WW_CELL_RTDDGI_BOUNCE_RED=1 (live:
+  in the build key, a set rebuilds the volume; CLI --red bouncenocover). Unit tests/rtddgi_math check `bounce` (green 27
+  + 27 reds): walking up a trunk past the top usable layer the bounce's largest step is 0.0025 of the gap (bar 0.01), past
+  it the flat ambient 0.15708 = 0.15708; red RTDDGI_RED_BOUNCE / the runtime red: step 1.4738 of the gap, black past it;
+  flat ambient vs the cube's integral on the 6 axes worst rel 2.7e-06. tests/spvsync PASS 8.
+- Build key holds the soup's albedo (ships ON): manager hold h1 (10-31) showed a WW_SOUPALB_RED reopen rebuilt the soup
+  grey but NOT the volume (no "rebuilding" line: the same soup slot and triangles gave the same key), so SOUPALB1's
+  after / grey pair compared one volume with itself (240 px). The key now mixes the albedo's size and ~1024 sampled
+  triangles. Red WW_CELL_RTDDGI_RED=noalbkey. Unit tests/rtddgikey (source rule) green; red = main 9b443dcf's file FAIL.
+- WW_CELL_RTDDGI_VIEW_BOXES=1 (debug, live, off by default; LATE ITEM 9 "the pic of it covering further areas"): every
+  cascade's probe box drawn as its 12 edges over the frame (0 white, 1 yellow, 2 orange, 3 red; no depth test), census
+  line `rtddgi cell: boxes` with each box in metres. The probe dots of a coarse cascade (WW_CELL_RTDDGI_VIEW_CASCADE)
+  now reach 3000 u x 2^cascade (was 3000 u for all).
+- No shader under res/shaders changed (no link sweep owed); trace.comp is a Vulkan kernel (its .spv.h regenerated).
+
 ## HORIZONBAND1 (FIX1031B area A, 2026-10-31): the horizon blends - no cyan strip with a hard top edge
 
 bungo's pictures (notes/shots1031 sheet_1 spot 3, sheet_spot5 sea, CommonwealthClear 12:00): a saturated cyan strip

@@ -49,6 +49,9 @@
 //   cover     FIX1031B the read hands over to the flat ambient across the cell  RED_COVER      the old fade (a
 //             under a top usable layer with Asleep probes over it (a trunk                        hard line: today's
 //             walked up: no step); Off corners keep their cover (no leak)                         main)
+//   bounce    FIX1101A the bounce read (a probe ray's hit) hands over the same  RED_BOUNCE     renormalised, black
+//             way: no step up a trunk, the flat ambient past it (= the cube's                     past the usable
+//             own axis irradiance; 0 without a sky)                                               probes (today's main)
 // Every check is independent of the others' reds (a red build may pass the other twenty-one).
 
 #include "rtddgimath.h"
@@ -697,6 +700,101 @@ void checkCover()
 		"fade between an Off and a usable layer %.6f / %.6f (bar 1: no ambient leak at a wall)\n", rH, rG, tH, tG, f150, f150g );
 }
 
+/* FIX1101A: the BOUNCE read (a probe ray's hit, the twin's traceRay / trace.comp ddgiIrradianceAt) hands over to the flat
+ * ambient as the surfaces' read does: walked up a trunk past the top usable layer (checkCover's volume), the bounce
+ * irradiance has no step; past it, the flat ambient (not black). flatAmbient on each axis equals the sky cube's own
+ * irradiance there (a lat-long integral of skyRadiance over the axis's hemisphere), and 0 without a sky. */
+void checkBounce()
+{
+	TestVolume V;
+	const int nV = 4 * 4 * 6;
+	V.v.origin = V3( 0, 0, 0 );
+	V.v.step = V3( 100, 100, 100 );
+	V.v.dims[0] = V.v.dims[1] = 4;
+	V.v.dims[2] = 6;
+	V.v.D = 100.0f;
+	V.v.B = kSelfShadowBias;
+	V.irr.assign( size_t( nV ) * 256, 0.6f );
+	V.dist.assign( size_t( nV ) * 512, 0.0f );
+	V.probes.assign( size_t( nV ) * 4, 0.0f );
+	V.age.assign( size_t( nV ), 1u );
+	for ( int p = 0; p < nV; p++ ) {
+		for ( int t = 0; t < 256; t++ ) {
+			V.dist[( size_t( p ) * 256 + size_t( t ) ) * 2] = 1e5f;
+			V.dist[( size_t( p ) * 256 + size_t( t ) ) * 2 + 1] = 1e10f;
+		}
+		const int layer = p / 16;
+		const bool asleep = layer >= 3;
+		V.probes[size_t( p ) * 4 + 3] = float( layer <= 1 ? kOff : asleep ? kAsleep : kVigilant );
+		V.age[size_t( p )] = asleep ? 0u : 1u;
+	}
+	V.pack( nV );
+	// a uniform sky cube: every axis's open irradiance is pi x the radiance
+	const float Lsky = 0.05f;
+	float Ru[6][3];
+	for ( int f = 0; f < 6; f++ )
+		for ( int c = 0; c < 3; c++ )
+			Ru[f][c] = Lsky;
+	const V3 n( 1, 0, 0 ), o( 1, 0, 0 );
+	float flat[3];
+	flatAmbient( Ru, true, n, flat );
+	const double Eamb = flat[0], Evol = 2.0 * kPi * std::pow( 0.6, 5.0 );
+	auto walk = [&]( bool rule, double * past ) {
+		double worst = 0, prev = -1;
+		for ( int i = 0; i <= 1900; i++ ) {
+			const float z = 120.0f + 0.25f * float( i );
+			const SampleResult a = sampleVolume( V.v, V3( 150.0f, 150.0f, z ), n, o, n, kSampleNoCheb );   // the twin's bits
+			const double c = bounceIrradiance( a, flat, rule ).x;
+			if ( prev >= 0.0 )
+				worst = std::max( worst, std::fabs( c - prev ) );
+			prev = c;
+			if ( past && std::fabs( z - 450.0f ) < 0.01f )
+				*past = c;
+		}
+		return worst / std::fabs( Evol - Eamb );
+	};
+	double pastG = -1, pastR = -1;
+	const double jG = walk( true, &pastG ), jR = walk( false, &pastR );
+	// the forward map: flatAmbient on each axis == the cube's irradiance there (midpoint lat-long integral of skyRadiance)
+	float R[6][3];
+	uint64_t s = 0x5eedb0b0ULL;
+	for ( int f = 0; f < 6; f++ )
+		for ( int c = 0; c < 3; c++ )
+			R[f][c] = 0.02f + unit01( s );
+	double worstAx = 0;
+	const V3 axes[6] = { V3( 1, 0, 0 ), V3( -1, 0, 0 ), V3( 0, 1, 0 ), V3( 0, -1, 0 ), V3( 0, 0, 1 ), V3( 0, 0, -1 ) };
+	for ( int f = 0; f < 6; f++ ) {
+		const V3 a = axes[f];
+		const V3 t1 = std::fabs( a.z ) < 0.5f ? normalize( cross( a, V3( 0, 0, 1 ) ) ) : V3( 1, 0, 0 );
+		const V3 t2 = cross( a, t1 );
+		double E[3] = { 0, 0, 0 };
+		const int nt = 400, np = 800;
+		for ( int i = 0; i < nt; i++ ) {
+			const double th = ( double( i ) + 0.5 ) / nt * 0.5 * kPi;
+			for ( int j = 0; j < np; j++ ) {
+				const double ph = ( double( j ) + 0.5 ) / np * 2.0 * kPi;
+				const V3 d = a * float( std::cos( th ) ) + t1 * float( std::sin( th ) * std::cos( ph ) ) + t2 * float( std::sin( th ) * std::sin( ph ) );
+				float L[3];
+				skyRadiance( R, d, L );
+				const double dw = std::cos( th ) * std::sin( th ) * ( 0.5 * kPi / nt ) * ( 2.0 * kPi / np );
+				for ( int c = 0; c < 3; c++ )
+					E[c] += L[c] * dw;
+			}
+		}
+		float fa[3];
+		flatAmbient( R, true, a, fa );
+		for ( int c = 0; c < 3; c++ )
+			worstAx = std::max( worstAx, std::fabs( fa[c] - E[c] ) / E[c] );
+	}
+	float off[3];
+	flatAmbient( R, false, V3( 0, 0, 1 ), off );
+	const bool ok = jG < 0.01 && std::fabs( pastG - Eamb ) < 1e-6 * Eamb && worstAx < 1e-3 && off[0] == 0.0f && off[1] == 0.0f && off[2] == 0.0f;
+	report( "bounce", ok, "bounce read walked up a trunk past the top usable layer: largest step %.4f of the gap (bar 0.01); "
+		"past it %.5f (the flat ambient %.5f)", jG, pastG, Eamb );
+	std::printf( "      the runtime red bouncenocover (today's main): largest step %.4f of the gap, past it %.5f (black); flat "
+		"ambient vs the cube's integral on the 6 axes worst rel %.2g (bar 1e-3), no sky %g\n", jR, pastR, worstAx, double( off[0] ) );
+}
+
 void checkScroll()
 {
 	// (1) M3: after a scroll every kept probe holds the world point it held before, the fresh ones are exactly the grid
@@ -1076,6 +1174,7 @@ int main()
 	checkSkyVis();
 	checkSample();
 	checkCover();
+	checkBounce();
 	checkScroll();
 	checkCascade();
 	checkCascTight();
