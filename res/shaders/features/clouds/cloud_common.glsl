@@ -69,9 +69,19 @@ float cvShpAnvil( float anvil, float hf )	// cloudvolmath.h shapeAnvil
 	return anvil * cvSmooth( 0.8, 0.9, hf ) * ( 1.0 - cvSmooth( 0.96, 1.0, hf ) );
 }
 
-const float kShpSoft = 0.2, kShpErode = 0.7, kShpScale = 0.7, kShpShearKm = 0.3, kShpRise = 0.04, kShpCurlKm = 0.25;
+const float kShpSoft = 0.1, kShpErode = 1.0, kShpScale = 0.7, kShpShearKm = 0.3, kShpRise = 0.04, kShpCurlKm = 0.25;
 const float kShpBaseErode = 0.3, kShpLump = 0.45, kShpCellKm = 32.0, kShpGrowth = 0.8, kShpTapFoot = 0.2;
 const float kShpSoftPerKm = 0.5, kShpMean = 0.884, kShpSd = 0.053, kShpTowerScale = 3.0;
+// sheet review 11:52 (v2): the billows' octave, the weather swing, the detail's period share, the sky's share a cloud's own
+// body leaves its sides (MEASURED against bungo_refs: notes/cloudshape1/v2)
+const float kShpBillow = 4.0, kShpBillowW = 0.5, kShpWxScale = 4.7, kShpWx = 0.6, kShpDetailK = 0.6, kShpSkyOcc = 0.7;
+const float kShpTowerGain = 2.5;
+const int kShpSub = 2;	// the march's sub-steps inside cloud (cloud_march.frag), each at most kShpSubKm (4 and 8 cost 1.5-2x
+// and drew no better once the taps' jitter was its own: notes/cloudshape1/v2/zs2_m.png)
+const float kShpSubKm = 0.06;
+const float kShpMs = 0.2, kShpGround = 0.4;	// the slab floor's share (3D clouds lose light out of their sides), the base's ambient
+// the v2 knobs' constant (the offline sweep read a uniform here: notes/cloudshape1/v2/tools; the shipped code reads none)
+#define cvShpK( i, k ) ( k )
 const vec2 kShpDir = vec2( 1.0, 0.0 );	// the wind's direction (cvBands.windKm is along +x): the tops lean downwind
 const float kShpBack = 1.0, kShpBackLo = 4.0, kShpBackHi = 20.0;	// the back-scatter clamp's weight, its extinction ramp /km
 
@@ -99,10 +109,19 @@ float cloudDensity( vec3 p )
 		vec4 st = b == 0 ? cvShpT0 : cvShpT1;
 		float cov = b == 0 ? m.r : m.g;
 		float sheet = b == 0 ? max( clamp( m.b / max( m.r, 1e-3 ), 0.0, 1.0 ), st.z ) : st.z;
+		vec3 q = p + cvBands.windKm;
+		/* sheet review item 6 (rows of like clouds to the horizon): the weather's own swing at tens of km (Schneider 2015
+		 * p. 31: the weather map's coverage varies in km-sized regions): the body field again at kShpWxScale x its period,
+		 * turned 37 deg (no common period with the bodies), moves the coverage by +-kShpWx x min(cov, 1 - cov) (never past 0
+		 * or 1: a clamp raised the mean at low coverage, 0.184 for 0.1, gate A) */
+		{
+			vec2 wq = mat2( 0.7986, 0.6018, -0.6018, 0.7986 ) * q.xy / ( kShpCellKm * cvShpK( 11, kShpWxScale ) );
+			float wx = textureLod( cvCell, wq + vec2( 0.61, 0.13 ), 0.0 ).r;	// 0.3 km texels: mip 0, as the twin
+			cov = clamp( cov + ( wx - 0.5 ) * 2.0 * cvShpK( 10, kShpWx ) * min( cov, 1.0 - cov ), 0.0, 1.0 );	// no clamp: the mean holds
+		}
 		float c = cvCalAt( b, cov );
 		if ( c <= 0.0 )
 			continue;
-		vec3 q = p + cvBands.windKm;
 		q.xy += kShpDir * ( kShpShearKm * ( p.z - base ) );
 		float cell = textureLod( cvCell, q.xy / kShpCellKm + vec2( 0.37 * float( b ) ),
 			log2( max( cvFootKm * 512.0 / kShpCellKm, 1.0 ) ) ).r;
@@ -113,20 +132,34 @@ float cloudDensity( vec3 p )
 			float big = textureLod( cvCell, q.xy / ( kShpCellKm * kShpTowerScale ) + vec2( 0.21 ),
 				log2( max( cvFootKm * 512.0 / ( kShpCellKm * kShpTowerScale ), 1.0 ) ) ).r;
 			float ft = ( big - ( 1.0 - c ) ) / max( c, 1e-3 ) - ( 0.5 + 0.5 * pow( hf, 1.2 ) );
+			// sheet review item 5 (lace, no tower): the tower's margin over 0 (<= 0.5) is less than the erosion's bite, so
+			// the detail shredded the column; its interior as deep as a cumulus core, the erosion carves its surface only
+			ft *= cvShpK( 12, kShpTowerGain );
 			f = mix( f, max( f, ft ), st.w * 2.0 );
 		}
 		f += cvShpAnvil( st.w, hf ) - ( 1.0 - cvSmooth( 0.0, kShpRise, hf ) );
 		float grow = mix( 1.0 - kShpGrowth, 1.0, hf );
-		if ( f + kShpLump * grow * 3.0 <= 0.0 )
-			continue;	// no lump reaches this far out ((1 - kShpMean) / kShpSd < 3): the density is 0 either way
+		if ( f + kShpLump * ( grow + max( cvShpK( 9, kShpBillowW ), 0.0 ) * mix( 0.5, 1.0, hf ) ) * 3.0 <= 0.0 )
+			continue;	// no lump (nor billow) reaches this far out ((1 - kShpMean) / kShpSd < 3): the density is 0 either way
 		float s = textureLod( cvShape, q / kCvShapeKm, log2( max( cvFootKm * 128.0 / kCvShapeKm, 1.0 ) ) ).r;
 		f += ( s - kShpMean ) / kShpSd * kShpLump * grow;
+		/* sheet review item 1 (smooth plastic): the cauliflower's middle scale (HZD's base shape is an FBM: Perlin-Worley +
+		 * Worley octaves 2-4x finer, Schneider 2015 p. 37): the same Perlin-Worley again at 1 / kShpBillow its period, turned,
+		 * as rounded heaps on the heaps; only near the surface (the inside stays dense) */
+		float bw = cvShpK( 9, kShpBillowW );
+		if ( bw > 0.0 && f < 1.0 ) {
+			float bk = kCvShapeKm / cvShpK( 8, kShpBillow );
+			vec3 qb = vec3( mat2( 0.6, -0.8, 0.8, 0.6 ) * q.xy, q.z ) + vec3( 0.31, 0.77, 0.0 );
+			float s2 = textureLod( cvShape, qb / bk, log2( max( cvFootKm * 128.0 / bk, 1.0 ) ) ).r;
+			f += ( s2 - kShpMean ) / kShpSd * bw * kShpLump * mix( 0.5, 1.0, hf );
+		}
 		if ( f <= 0.0 )
 			continue;	// the erosion only lowers f
 		vec3 qd = q + cvShpCurl( q ) * ( kShpCurlKm * ( 1.0 - 0.5 * hf ) );
-		float det = textureLod( cvDetail, qd / kCvDetailKm, log2( max( cvFootKm * 32.0 / kCvDetailKm, 1.0 ) ) ).r;
-		f -= mix( det, 1.0 - det, clamp( hf * 4.0, 0.0, 1.0 ) ) * kShpErode * mix( kShpBaseErode, 1.0, cvSmooth( 0.0, 0.3, hf ) );
-		d += clamp( f / max( kShpSoft + cvFootKm * kShpSoftPerKm, 1e-3 ), 0.0, 1.0 ) * kShpScale * cvBands.density[b];
+		float dk = kCvDetailKm * cvShpK( 5, kShpDetailK );
+		float det = textureLod( cvDetail, qd / dk, log2( max( cvFootKm * 32.0 / dk, 1.0 ) ) ).r;
+		f -= mix( det, 1.0 - det, clamp( hf * 4.0, 0.0, 1.0 ) ) * cvShpK( 4, kShpErode ) * mix( kShpBaseErode, 1.0, cvSmooth( 0.0, 0.3, hf ) );
+		d += clamp( f / max( cvShpK( 7, kShpSoft ) + cvFootKm * kShpSoftPerKm, 1e-3 ), 0.0, 1.0 ) * kShpScale * cvBands.density[b];
 	}
 	return d;
 }

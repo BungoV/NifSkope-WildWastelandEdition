@@ -108,7 +108,9 @@ void main()
 		{	/* lane CLOUDSHAPE1: f <= the body's largest strength - the reach at the cell's bottom (the reach rises with
 			 * height: a dome or the sheet's hf x 4, a blend never below the smaller) - the base cut at its top + the
 			 * largest lump; the erosion only lowers f */
-			float c = cvCalAt( b, b == 0 ? cov.x : cov.y );
+			float cv = b == 0 ? cov.x : cov.y;
+			cv += kShpWx * min( cv, 1.0 - cv );	// the weather swing's largest lift (rising in cv)
+			float c = cvCalAt( b, cv );
 			if ( c <= 0.0 )
 				continue;
 			vec4 st = b == 0 ? cvShpT0 : cvShpT1;
@@ -120,9 +122,9 @@ void main()
 			if ( st.w > 0.0 ) {	// the towers' field (a blend of f and max(f, f_t) never exceeds max(f, f_t))
 				float s3 = 1.0 / kShpTowerScale;
 				float wt = ( cfCellMax( q0 * s3, q1 * s3, 0.21 ) - ( 1.0 - c ) ) / max( c, 1e-3 );
-				w = max( w - r0, wt - 0.5 - 0.5 * pow( hz0, 1.2 ) ) + r0;
+				w = max( w - r0, kShpTowerGain * ( wt - 0.5 - 0.5 * pow( hz0, 1.2 ) ) ) + r0;
 			}
-			if ( w - r0 - ( 1.0 - cvSmooth( 0.0, kShpRise, hz1 ) ) + st.w + kShpLump * ( 1.0 - kShpMean ) / kShpSd > 0.0 )
+			if ( w - r0 - ( 1.0 - cvSmooth( 0.0, kShpRise, hz1 ) ) + st.w + kShpLump * ( 1.0 + kShpBillowW ) * ( 1.0 - kShpMean ) / kShpSd > 0.0 )	// lumps + billows
 				occ = 1.0;
 			continue;
 		}
