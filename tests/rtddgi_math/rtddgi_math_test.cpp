@@ -46,6 +46,9 @@
 //             for byte; the runtime red is today's main everywhere                              z 0.1
 //   skyvisup  SKYBELOW1 sky visibility counts the upper hemisphere only (a      RED_SKYVISUP   every miss counts
 //             probe over a ground disk: -Z texel 0, +Z ~1)
+//   cover     FIX1031B the read hands over to the flat ambient across the cell  RED_COVER      the old fade (a
+//             under a top usable layer with Asleep probes over it (a trunk                        hard line: today's
+//             walked up: no step); Off corners keep their cover (no leak)                         main)
 // Every check is independent of the others' reds (a red build may pass the other twenty-one).
 
 #include "rtddgimath.h"
@@ -74,6 +77,14 @@ using namespace rtddgi;
 namespace {
 
 int g_fail = 0, g_pass = 0;
+
+// FIX1031B: the COVER red swaps the header's fade back to today's; the GLSL takes the same old fade through its runtime
+// red bit (WW_CELL_RTDDGI_RED=nocover), so the "sample" / "cascade" mirror checks keep comparing like with like
+#ifdef RTDDGI_RED_COVER
+constexpr unsigned kRedCoverBit = kSampleNoCover;
+#else
+constexpr unsigned kRedCoverBit = 0u;
+#endif
 
 void report( const char * name, bool ok, const char * fmt, double a = 0, double b = 0, double c = 0 )
 {
@@ -485,7 +496,8 @@ struct TestVolume
 			float * t = &atlas[( size_t( nP ) * 192 + size_t( p ) ) * 4];
 			for ( int k = 0; k < 3; k++ )
 				t[k] = probes[size_t( p ) * 4 + size_t( k )];
-			t[3] = probeUsable( int( probes[size_t( p ) * 4 + 3] + 0.5f ), age[size_t( p )] ) ? float( kVigilant ) : float( kOff );
+			const int st = int( probes[size_t( p ) * 4 + 3] + 0.5f );   // FIX1031B: a missing probe keeps the Asleep code
+			t[3] = probeUsable( st, age[size_t( p )] ) ? float( kVigilant ) : probeMissing( st, age[size_t( p )] ) ? float( kAsleep ) : float( kOff );
 		}
 		v.irr = irr.data();
 		v.dist = dist.data();
@@ -503,7 +515,7 @@ struct TestVolume
 		glsl::cellDdgiDims.y = v.dims[1];
 		glsl::cellDdgiDims.z = v.dims[2];
 		glsl::cellDdgiDims.w = nP;
-		glsl::cellDdgiRed = int( red );
+		glsl::cellDdgiRed = int( red | kRedCoverBit );
 	}
 };
 
@@ -608,6 +620,81 @@ void checkSample()
 		points, worstE, worstV );
 	std::printf( "      w worst rel %.3g, fade %.3g, reads outside the atlas %d, points with no probe %d; leak: wall side E %.5f "
 		"(bar 2 x the dark side's %.5f), trilinear red %.5f (bar 10 x)\n", worstW, worstF, outside, noProbe, lg, dark, lr );
+}
+
+/* FIX1031B (bungo 10-31, spot 6 river trunks: "halfway it switches to ambient fill"): the picture a surface gets, walked up
+ * through a volume whose top usable layer sits under Asleep ones (a trunk the fixed rays missed), is continuous: no step
+ * where the usable corners' trilinear weight reaches 0. 4 x 4 x 6 probes 100 apart: z 0 / 100 Off (in the ground),
+ * z 200 Vigilant (bright), z 300 .. 500 Asleep (or, for the box-top walk, all Vigilant); the flat ambient past the volume
+ * is darker. The cell's rule (cell_lights.glsl cellGiSample): own = w > 0 and fade > 0, then fade E + (1 - fade) ambient,
+ * else the ambient. Header and GLSL both. */
+void checkCover()
+{
+	TestVolume V;
+	const int nV = 4 * 4 * 6;
+	V.v.origin = V3( 0, 0, 0 );
+	V.v.step = V3( 100, 100, 100 );
+	V.v.dims[0] = V.v.dims[1] = 4;
+	V.v.dims[2] = 6;
+	V.v.D = 100.0f;
+	V.v.B = kSelfShadowBias;
+	V.irr.assign( size_t( nV ) * 256, 0.6f );
+	V.dist.assign( size_t( nV ) * 512, 0.0f );
+	V.probes.assign( size_t( nV ) * 4, 0.0f );
+	V.age.assign( size_t( nV ), 1u );
+	auto states = [&]( bool asleepAbove ) {
+		for ( int p = 0; p < nV; p++ ) {
+			for ( int t = 0; t < 256; t++ ) {
+				V.dist[( size_t( p ) * 256 + size_t( t ) ) * 2] = 1e5f;
+				V.dist[( size_t( p ) * 256 + size_t( t ) ) * 2 + 1] = 1e10f;
+			}
+			const int layer = p / 16;
+			const bool asleep = asleepAbove && layer >= 3;
+			V.probes[size_t( p ) * 4 + 3] = float( layer <= 1 ? kOff : asleep ? kAsleep : kVigilant );
+			V.age[size_t( p )] = asleep ? 0u : 1u;   // an Asleep probe is never traced
+		}
+		V.pack( nV );
+	};
+	const double Eamb = 2.0 * kPi * std::pow( 0.3, 5.0 ), Evol = 2.0 * kPi * std::pow( 0.6, 5.0 );
+	const V3 n( 1, 0, 0 ), o( 1, 0, 0 );   // a trunk's side, seen level
+	// walk z 120 .. 595 (the Off layer's cell, the usable layer, the Asleep cells, the box top's last cell and past it)
+	auto walk = [&]( unsigned red, bool glslRead, double * fadeAt150 ) {
+		double worst = 0, prev = -1;
+		V.toGlsl( nV, red );
+		glsl::cellDdgiRed = int( red );   // the walk sets the runtime bit itself (red or not), whatever the build
+		for ( int i = 0; i <= 1900; i++ ) {
+			const float z = 120.0f + 0.25f * float( i );
+			const V3 P( 150.0f, 150.0f, z );
+			double E, w, f;
+			if ( glslRead ) {
+				const glsl::CellDdgiOut b = glsl::cellDdgiRead( glsl::vec3( P.x, P.y, P.z ), glsl::vec3( n.x, n.y, n.z ),
+					glsl::vec3( o.x, o.y, o.z ), glsl::vec3( n.x, n.y, n.z ) );
+				E = b.E.x; w = b.w; f = b.fade;
+			} else {
+				const SampleResult a = sampleVolume( V.v, P, n, o, n, red );
+				E = a.E.x; w = a.w; f = a.fade;
+			}
+			const double c = ( w > 0.0 && f > 0.0 ) ? f * E + ( 1.0 - f ) * Eamb : Eamb;
+			if ( fadeAt150 && std::fabs( z - 150.0f ) < 0.01f )
+				*fadeAt150 = f;
+			if ( prev >= 0.0 )
+				worst = std::max( worst, std::fabs( c - prev ) );
+			prev = c;
+		}
+		return worst / ( Evol - Eamb );
+	};
+	states( true );
+	double f150 = -1, f150g = -1;
+	const double jH = walk( 0u, false, &f150 ), jG = walk( 0u, true, &f150g );
+	const double rH = walk( kSampleNoCover, false, nullptr ), rG = walk( kSampleNoCover, true, nullptr );
+	states( false );   // every layer over the ground usable: the walk crosses the box's top face
+	const double tH = walk( 0u, false, nullptr ), tG = walk( 0u, true, nullptr );
+	// a 0.25 u step of a linear hand-over across one 100 u cell moves 0.0025 of the gap; the old fade jumps the whole gap
+	const bool ok = jH < 0.01 && jG < 0.01 && tH < 0.01 && tG < 0.01 && f150 > 1.0 - 1e-5 && f150g > 1.0 - 1e-5;
+	report( "cover", ok, "largest step walking up a trunk past the top usable layer: header %.4f, GLSL %.4f of the gap (bar 0.01)",
+		jH, jG );
+	std::printf( "      the runtime red nocover (today's main): header %.4f, GLSL %.4f of the gap; across the box top %.4f / %.4f; "
+		"fade between an Off and a usable layer %.6f / %.6f (bar 1: no ambient leak at a wall)\n", rH, rG, tH, tG, f150, f150g );
 }
 
 void checkScroll()
@@ -745,7 +832,7 @@ struct CascTest
 			glslc::cellDdgiCDims[c].w = nP[c];
 			glslc::cellDdgiCBase[c] = base[c];
 		}
-		glslc::cellDdgiRed = int( red );
+		glslc::cellDdgiRed = int( red | kRedCoverBit );
 	}
 };
 
@@ -988,6 +1075,7 @@ int main()
 	checkTie();
 	checkSkyVis();
 	checkSample();
+	checkCover();
 	checkScroll();
 	checkCascade();
 	checkCascTight();

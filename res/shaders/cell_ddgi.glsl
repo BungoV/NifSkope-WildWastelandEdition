@@ -8,7 +8,8 @@
 // cellDdgiAtlas, RGBA32F, one texture buffer, the GPU's buffers as they come back (src/rtddgi/rtddgi_vk.inc):
 //   texels [0, 64 nP)            irradiance: probe p's 8 x 8 tile at 64 p (encoded rgb, a = sky visibility)
 //   texels [64 nP, 192 nP)       distance: probe p's 16 x 16 (mean, mean^2) pairs at 64 nP + 128 p, two a texel
-//   texels [192 nP, 193 nP)      probes: offset xyz, w = the state when usable (Vigilant, blended), else 0 (Off)
+//   texels [192 nP, 193 nP)      probes: offset xyz, w = the state when usable (Vigilant, blended), else 0 (Off) or
+//                                another code (FIX1031B: missing, Asleep / fresh / not blended: the fade loses its weight)
 
 //
 // Lane RTXCASCADE1 (2026-10-30): under WW_CELL_RTDDGI_CASCADES (the loader's define while WW_CELL_RTDDGI_CASCADES > 1)
@@ -129,6 +130,7 @@ CellDdgiOut cellDdgiRead( vec3 P, vec3 n, vec3 o, vec3 d )
 	vec3 sum = vec3( 0.0 );
 	float vsum = 0.0;
 	float wsum = 0.0;
+	float cover = 0.0;	// FIX1031B: rtddgimath.h sampleVolume's cover (the corners that are not missing)
 	for ( int c = 0; c < cellGiLoop8; c++ ) {	// cell_lights.glsl's uniform bound: one body, never unrolled
 		int ox = c % 2;
 		int oy = ( c / 2 ) % 2;
@@ -138,9 +140,13 @@ CellDdgiOut cellDdgiRead( vec3 P, vec3 n, vec3 o, vec3 d )
 		int pz = cellDdgiIMin( bz + oz, cellDdgiDims.z - 1 );
 		int p = px + cellDdgiDims.x * ( py + cellDdgiDims.y * pz );
 		vec4 pr = texelFetch( cellDdgiAtlas, CELL_DDGI_BASE 192 * cellDdgiDims.w + p );
-		if ( int( pr.w + 0.5 ) != 2 )
-			continue;	// rtddgimath.h probeUsable: the CPU writes 0 for a probe that is not
 		float tri = ( ox == 1 ? ax : 1.0 - ax ) * ( oy == 1 ? ay : 1.0 - ay ) * ( oz == 1 ? az : 1.0 - az );
+		int st = int( pr.w + 0.5 );
+		if ( st != 2 ) {	// rtddgimath.h probeUsable / probeMissing: 2 usable, 0 Off (keeps its cover), else missing
+			cover += st == 0 ? tri : 0.0;
+			continue;
+		}
+		cover += tri;
 		vec3 pp = vec3( cellDdgiOrigin.x + float( px ) * cellDdgiStep.x + pr.x, cellDdgiOrigin.y + float( py ) * cellDdgiStep.y + pr.y,
 			cellDdgiOrigin.z + float( pz ) * cellDdgiStep.z + pr.z );
 		float w = 1.0;
@@ -162,6 +168,8 @@ CellDdgiOut cellDdgiRead( vec3 P, vec3 n, vec3 o, vec3 d )
 		vsum += w * e.w;
 		wsum += w;
 	}
+	if ( ( cellDdgiRed & 8 ) == 0 )	// rtddgimath.h kSampleNoCover (WW_CELL_RTDDGI_RED=nocover: today's main, the hard line)
+		r.fade = fade * min( cover, 1.0 );
 	if ( wsum <= 0.0 )
 		return r;
 	vec3 m = sum * ( 1.0 / wsum );
