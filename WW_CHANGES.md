@@ -1,5 +1,38 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## CLOUDTYPE2 + CLOUD6h (2026-10-31, FIX1031A lane CLOUD7): the cloud type reads the thunder; old history traces and light changes in the volume clouds' resolve
+
+- **CLOUDTYPE2 (CLOUD6d's leftover):** the Low band's cloud type (cloudmath.h lowTypeOf, seen with Cloud Variety on)
+  took "storm" from the WTHR DATA thunder byte > 0, which is 133..255 in 106 of the 107 vanilla weathers: every Rainy
+  weather was a cumulonimbus and the 6 radstorms (DATA flags 24 / 8 = the Snow bit) got the Snow flag's stratus 0.3.
+  A census of the 107 records (notes/fix1031a/cloud7/tools/census_type.py; the fixture tests/cloudtype/weathers.tsv)
+  found one field that separates: the SNAM sounds of type 3 (thunder), present in 15 weathers (7 rains, the radstorms,
+  the 2 Glowing Sea fogs) = exactly CLOUD6f's lightning set; the byte shares 137 between quiet and thundering ones.
+  The rule now asks the thunder sounds FIRST: a weather that thunders is 0.9 +- 0.25, a Rainy-flag one that does not
+  is 0.75 (7 weathers: MistyRainy x2, NukaWorldRainMarkT, the Diamond / Marsh / GSRadstormOld flag-4 records), all
+  other classes keep their type. **Switch** `WW_CLOUDVOL_TYPERULE` (ON by default, live); **red**
+  `WW_CLOUDVOL_TYPERULE=0` / `WW_CLOUDVOL_RED=thunderbyte` = CLOUD5's rule. Echo `,typerule=thundersound` /
+  `,RED=thunderbyte` (Variety on). `wwLookdevWeatherClass` hands the thunder sound count (optional out).
+- **CLOUD6h (CLOUD6g's leftovers), with Cloud Accumulation + Change Clamp:** **History Age** - the history depth
+  target is RG32F now (.r the depth every reader reads, .g the trace's age: 0 where this frame marched, +1 per
+  reprojected frame). A trace older than 16 frames (a still camera never makes one) gets Change Clamp's test at 1.25x
+  its threshold against the 9 places the march texels looked this frame; when they differ this frame's march stands
+  in, read where its samples sit (m x stride + phase, the bilinear read was up to 1.5 history px off). **Lit Clamp** -
+  Change Clamp also compares the light (relative change of the 9-mean luminance, threshold 0.07 + the deviation
+  term): a sun move leaves the transmittance alike and was left to the variance clip. **Switches**
+  `WW_CLOUDVOL_HISTAGE`, `WW_CLOUDVOL_LITCLAMP` (ON by default, live); **reds** `=0` / `WW_CLOUDVOL_RED=noage` |
+  `litblind` = CLOUD6g's resolve. Echoes `,histage=16x1.25`, `,litclamp=0.070` / `,RED=noage`, `,RED=litblind`.
+- **Gates (offline, real programs through the driver):** tests/cloudtype/run.sh (A thunder <=> 0.9 107/107, red
+  92/107; R radstorms 6/6 vs red 0/6; N rain 7/7 vs 0/7; K 85 quiet weathers unchanged; W wiring, D switch, stage).
+  tests/cloudage/run.sh (16 frames after a jump, mean |E| in display levels): moving thinning 9.21 -> 7.43 (Medium),
+  5.53 -> 5.08 (Ultra); moving shift 7.22 -> 5.67, 4.28 -> 3.94, Variety 8.23 -> 6.59; still sun 30 -> 10 deg
+  6.59 -> 4.07 (Off path 3.88), Ultra 4.28 -> 2.17 (1.87); steady error moving 2.68 -> 2.54, still 1.81 -> 1.82;
+  reds noage / litblind FAIL. The brief's target (moving partial changes at the still level, 3.14) is out of reach:
+  an arm that shows this frame's march on every reprojected px reads 7.63 there, the floor for a trace no march has
+  seen since the change. CLOUDBAND (L M G Q F) and CLOUD6g (S T R) runs PASS on the new default (Lit 0.05 was refused
+  by gate Q's dither lattice 37.1 > 33.5). Link sweeps 405 / 270 / 405 not ok 0. Cost: one accum resolve at 960x540
+  0.035 -> 0.037 ms offline.
+
 ## LEANCOMMENTS1 (2026-10-31, FIX1031A): the comment trim pass lands on main (comments only, exe byte-identical)
 
 - **What:** origin/cloud-leancomments1 (cut from 5c98715a, 918 commits behind main) trims comments in `src/cell*`,

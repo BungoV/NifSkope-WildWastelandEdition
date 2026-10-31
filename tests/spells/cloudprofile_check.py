@@ -88,7 +88,8 @@ if 'D' in only:
 if 'W' in only:
     cm = open(os.path.join(src, 'cloudmap.cpp'), encoding='latin1').read()
     cv = open(os.path.join(src, 'cloudvol.cpp'), encoding='latin1').read()
-    w1 = re.search(r'lowTypeOf\([^;]*wwCloudVolProfileSet\(\)\s*\)\s*;', cm) is not None
+    # lane CLOUDTYPE2: the call takes one more argument after the switch (the thunder sounds): ',' or ')' may follow
+    w1 = re.search(r'lowTypeOf\([^;]*wwCloudVolProfileSet\(\)\s*[,)][^;]*;', cm) is not None
     m = re.search(r'CvState & cs\(\)\s*\{(.*?)\n\}', cv, re.S)
     w2 = bool(m) and re.search(r'"WW_CLOUDVOL_PROFILESET"', m.group(1)) is not None and 'defaultOnSwitch' in m.group(1)
     w3 = re.search(r'bool wwCloudVolProfileSet\(\)[^}]*red\( "typemix" \)', cv, re.S) is not None

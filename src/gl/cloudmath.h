@@ -98,17 +98,29 @@ constexpr unsigned kWxPleasant = 1, kWxCloudy = 2, kWxRainy = 4, kWxSnow = 8;
  * lane CLOUD6d: oneSet = ONE profile set per weather (WW_CLOUDVOL_PROFILESET, the default): the weather's type is
  * the type everywhere in its sky, spread 0, so a storm draws one cumulonimbus family and a fair sky one cumulus family
  * (RDR2: one height-LUT slice per weather, "slice determined by weather parameters", Bauer 2019 slide 16 + note 16).
- * Size variety stays with the coverage swing. oneSet false = CLOUD5's +- spread (towers beside puffs), the red. */
-inline void lowTypeOf( unsigned flags, unsigned thunder, float recxType, float & type, float & spread, bool oneSet = false )
+ * Size variety stays with the coverage swing. oneSet false = CLOUD5's +- spread (towers beside puffs), the red.
+ * lane CLOUDTYPE2: thunderSounds >= 0 = the weather's thunder SNAMs (type 3), the storm signal, checked BEFORE the flags:
+ * a weather that thunders is a cumulonimbus 0.9 +- 0.25, a rainy one that does not is 0.75. Census of the 107 vanilla
+ * WTHR (notes/fix1031a/cloud7/census_type.tsv; tests/cloudtype/weathers.tsv): the thunder BYTE is 133..255 in 106 and 0
+ * in one (a never-false `thunder > 0`), 137 in 65 quiet weathers and 2 thundering ones; 15 weathers thunder (7 rains,
+ * the 5 radstorms + GSRadstormBackup, the 2 Glowing Sea fogs), exactly CLOUD6f's lightning set. Before, the 6 radstorms
+ * carried the Snow flag (24 / 8) and got stratus 0.3, and 7 Rainy-flag weathers that never thunder got 0.9.
+ * thunderSounds < 0 = CLOUD5's rule (Snow first, `thunder > 0` on the byte): WW_CLOUDVOL_TYPERULE=0 / RED=thunderbyte. */
+inline void lowTypeOf( unsigned flags, unsigned thunder, float recxType, float & type, float & spread, bool oneSet = false,
+	int thunderSounds = -1 )
 {
 	type = 0.6f;
 	spread = 0.2f;
-	if ( flags & kWxSnow ) {
+	if ( thunderSounds > 0 ) {	// lane CLOUDTYPE2: the weather thunders
+		type = 0.9f;
+		spread = 0.25f;
+	} else if ( flags & kWxSnow ) {
 		type = 0.3f;
 		spread = 0.15f;
 	} else if ( flags & kWxRainy ) {
-		type = thunder > 0 ? 0.9f : 0.75f;
-		spread = thunder > 0 ? 0.25f : 0.2f;
+		const bool storm = thunderSounds < 0 && thunder > 0;	// CLOUD5's byte test, the red only
+		type = storm ? 0.9f : 0.75f;
+		spread = storm ? 0.25f : 0.2f;
 	} else if ( flags & kWxCloudy ) {
 		type = 0.45f;
 	}

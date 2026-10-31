@@ -279,6 +279,22 @@ inline float accumAlpha( long long cycles )
 constexpr float kChangeReset = 0.0075f;
 constexpr float kChangeResetSd = 1.5f;
 
+/* lane CLOUD6h: History Age (cloud_resolve_a.frag cvHistAge, cvAgeK) and Lit Clamp (cvLitReset, cvLitFloor). A trace not
+ * marched for more than kHistAgeOld frames (a still camera refreshes every pixel within 16) gets Change Clamp's test at
+ * kAgeChangeK x its threshold, against the 9 places the march looked this frame; the march stands in when they differ.
+ * Lit Clamp: the relative change of the 9-mean luminance (history vs march) past kLitReset + kChangeResetSd x
+ * min( deviations ) / 3 / mean restarts the pixel too; the mean is floored at kLitFloor (dark sky light). Tuned offline
+ * (notes/fix1031a/cloud7/tmp/diag_*.log): age 16 x 1.0 raised the Variety sky's moving steady error +0.50 levels (the
+ * history read off the march's sample places) and +0.23 aligned; x 1.5 aligned +0.14; Lit 0.03 / 0.05 / 0.10: still sun
+ * move 4.01 / 4.03 / 4.13 levels (Off path 3.88), still steady +0.06 / +0.02 / +0.00; but 0.05 made a period-8 lattice
+ * under FOGGLOW1's dither (cloudband_check Q 37.1, bar 33.5: resets on noise), 0.07 reads 24.8 and keeps the Ultra moving
+ * shift under its bar (0.10: 4.04 > 3.98); x 1.25 then (Ultra moving shift 3.94, Variety moving steady +0.00).
+ * The reds (0) = CLOUD6g's resolve. */
+constexpr float kHistAgeOld = 16.0f;
+constexpr float kAgeChangeK = 1.25f;
+constexpr float kLitReset = 0.07f;
+constexpr float kLitFloor = 0.02f;
+
 /* lane CLOUDBAND2 (manager 10-30: bungo's rule, a code choice is never handed to him): Cloud Accumulation
  * (WW_CLOUDVOL_ACCUM) and the ambient through the column above (WW_CLOUDVOL_AMBDARK) are the DEFAULT. A switch's value
  * (trimmed, lower case) turns it off only as "0", "off", "false" or "no" (the old path, kept as the red); unset, empty

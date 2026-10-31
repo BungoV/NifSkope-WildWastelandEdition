@@ -90,6 +90,11 @@ if red == 'staleread':
     DENV = dict(DENV, WW_CLOUDVOL_MOVECLAMP='0')
 if red == 'looseclamp':
     DENV = dict(DENV, WW_CLOUDVOL_CHANGECLAMP='0')
+# lane CLOUD6h: its reds hand the dump the old path of History Age / Lit Clamp (tests/spells/cloudage_check.py)
+if red == 'noage':
+    DENV = dict(DENV, WW_CLOUDVOL_HISTAGE='0')
+if red == 'litblind':
+    DENV = dict(DENV, WW_CLOUDVOL_LITCLAMP='0')
 _out = subprocess.run([DUMPB], env=DENV, capture_output=True, text=True, check=True).stdout.split('\n')
 ACC = {int(l.split()[1]): float(l.split()[2]) for l in _out if l.startswith('acc ')}
 _dl = [l.split() for l in _out if l.startswith('default ')][0]
@@ -102,6 +107,12 @@ _gl = [l.split() for l in _out if l.startswith('cloud6g ')][0]
 DEF_MOVE, DEF_RESET, DEF_RESETSD = float(int(_gl[2])), float(_gl[6]) if int(_gl[4]) else 0.0, float(_gl[8])
 print('DEFAULT      INFO  Move Clamp %s, Change Clamp %s (dump: %s)' % ('ON' if DEF_MOVE else 'OFF', DEF_RESET or 'OFF',
                                                                      ' '.join(_gl)), flush=True)
+# lane CLOUD6h: History Age + Lit Clamp as cloudvol.cpp sets them for this env (only the "default" arms draw them)
+_hl = [l.split() for l in _out if l.startswith('cloud6h ')][0]
+DEF_AGE = float(_hl[4]) if int(_hl[2]) else 0.0
+DEF_AGEK, DEF_LIT, DEF_LITF = float(_hl[6]), float(_hl[10]) if int(_hl[8]) else 0.0, float(_hl[12])
+print('DEFAULT      INFO  History Age %s, Lit Clamp %s (dump: %s)' % (DEF_AGE or 'OFF', DEF_LIT or 'OFF', ' '.join(_hl)),
+      flush=True)
 
 
 def new_uni(arm, accum):
@@ -111,6 +122,11 @@ def new_uni(arm, accum):
     if accum:
         u['cvAccReset'] = (DEF_RESET if on else 0.0,)
         u['cvAccResetSd'] = (DEF_RESETSD,)
+        # lane CLOUD6h: History Age + Lit Clamp (0 = CLOUD6g's resolve in every other arm)
+        u['cvHistAge'] = (DEF_AGE if on else 0.0,)
+        u['cvAgeK'] = (DEF_AGEK,)
+        u['cvLitReset'] = (DEF_LIT if on else 0.0,)
+        u['cvLitFloor'] = (DEF_LITF,)
     return u
 
 
