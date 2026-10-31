@@ -189,6 +189,27 @@ struct WaterFlowGrid
 		const std::vector<quint8> & stop, int maxCells ) const;
 };
 
+/*! THE WRITTEN DIRECTION of a solved field (watermark.cpp, lane FARWATER3): the
+ *  solve's unit direction where the water moves and is not a bank texel, the
+ *  rest continued by a harmonic fill, then kSmoothPasses in-mask 3x3 averages.
+ *  `ux` / `uy` are per cell of `G`; `vx` / `vy` are W*H, written at mask texels.
+ *  Lane FARWATER4 (L5): lodgen's per-texel river bake writes through it too. */
+void waterWrittenDirection( int W, int H, const std::vector<quint8> & mask, const WaterFlowGrid & G,
+	const std::vector<double> & ux, const std::vector<double> & uy, double meanSpeed,
+	std::vector<float> & vx, std::vector<float> & vy );
+/*! Lane FARWATER3: a solved field to `<WW_WATER_FIELD_DUMP>/<tag>_<seq>.wwfd`
+ *  (nothing when the variable is unset); `rhs` per cell of `G`. */
+void waterFieldDump( const char * tag, int id, int W, int H, int px0, int py0, bool usedStrokeEnds,
+	double meanSpeed, double agreement, const std::vector<quint8> & mask, const WaterFlowGrid & G,
+	const std::vector<double> & rhs, const std::vector<double> & ux, const std::vector<double> & uy,
+	const std::vector<float> & vx, const std::vector<float> & vy, const std::vector<float> & wgt );
+/*! Lane FARWATER4 (L4): water that moves (`sp` at or above the writer's slack
+ *  line, a fraction of `meanSpeed`) never writes speed nibble 0; `nib` is the
+ *  writer's own rounded nibble. `red` = waterSpeedFloorRed()
+ *  (WW_WATER_SPEED_FLOOR_RED=round, the old rounding), read once a body. */
+bool waterSpeedFloorRed();
+int waterSpeedFloor( int nib, double sp, double meanSpeed, bool red );
+
 /*! Lane FARWATER1: what a RE-BAKE must carry from the old `.lodl` into the new one.
  *
  *  The writer (lodtfile.cpp lodtBuildWater) always writes an EMPTY stroke store

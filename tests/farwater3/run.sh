@@ -31,7 +31,7 @@ OUT="${2:-$ROOT/tests/farwater3/out}"
 ESM="${ESM:-X:/Programs/Steam/steamapps/common/Fallout 4/Data/Fallout4.esm}"
 KNOWN="F2 island bank direction|F5 the 99th percentile of the adjacent angle difference"
 unset WW_WATER_MARK_BODY WW_WATER_MARK_BODY_RED WW_WATER_X2B_RED WW_WATER_X1B_RED WW_WATER_F2_RED \
-	WW_WATER_STROKE_WINS_RED WW_WATER_FIELD_DUMP
+	WW_WATER_STROKE_WINS_RED WW_WATER_FIELD_DUMP WW_WATER_X1_WEIGHT_RED WW_WATER_SPEED_FLOOR_RED WW_LODL_FLOW_DIR_RED
 tasklist 2>/dev/null | grep -qi fallout4.exe && { echo "Fallout4.exe is running: no bake"; exit 3; }
 [ -x "$EXE" ] || { echo "no exe at $EXE"; exit 2; }
 mkdir -p "$OUT"
@@ -39,11 +39,11 @@ W="$(cygpath -m "$OUT" 2>/dev/null || echo "$OUT")"
 fails=0
 ok()  { echo "OK   $*"; }
 bad() { echo "FAIL $*"; fails=$((fails+1)); }
-lines() { grep -a '^  ok \|^  FAIL ' "$1" | sed -E 's/[0-9.]+ s\b/T s/g; s/[0-9]+ iterations/N iterations/g; s/residual [0-9.e-]+/residual R/g; s#/lanes/[^/]+/release/#/lanes/TREE/release/#g'; }
+lines() { grep -a '^  ok \|^  FAIL ' "$1" | grep -av '^  [okFAIL]* *\(L4 moving water\|X1d \)' | sed -E 's/[0-9.]+ s\b/T s/g; s/[0-9]+ iterations/N iterations/g; s/residual [0-9.e-]+/residual R/g; s#/lanes/[^/]+/release/#/lanes/TREE/release/#g'; }
 verdict() { grep -a "^  \(ok  \|FAIL\) *$2" "$OUT/st_$1.log" | head -1 | cut -c3-6; }   # verdict <tag> <check words>
 selftest() {   # selftest <tag> [env...]
 	local tag=$1; shift
-	cp "$OUT/base.lodl" "$OUT/st_$tag.lodl"
+	cp "${SRC:-$OUT/base.lodl}" "$OUT/st_$tag.lodl"
 	env "$@" "$EXE" -no-gui lodl "$W/st_$tag.lodl" --water-mark-selftest < /dev/null > "$OUT/st_$tag.log" 2>&1
 	rm -f "$OUT/st_$tag.lodl" "$OUT/st_$tag.lodl.bak-watermark"
 	echo "[$tag] $* : $(grep -a 'checks, ' "$OUT/st_$tag.log" | tail -1)  $(grep -a '^river  = ' "$OUT/st_$tag.log" | cut -c1-30)"
@@ -82,11 +82,14 @@ grep -aq "^  FAIL F2 island bank direction as WRITTEN" "$OUT/st_green.log" && ok
 echo "== 3. REDS (each must FAIL on its own gate)"
 selftest x2red WW_WATER_X2B_RED=unit
 [ "$(verdict x2red "X2b it acts as a SOURCE")" = "FAIL" ] && ok "red X2b unit: FAILS on body 3" || bad "red X2b unit did not fail"
+# lane FARWATER4: these two reds also take FARWATER4's weight and speed-floor reds, so they run the code FARWATER3
+# judged (the weight now speeds the water x its own factor and moving water never reads 0, which feeds the nibble gate)
+F4RED="WW_WATER_X1_WEIGHT_RED=boost WW_WATER_SPEED_FLOOR_RED=round"
 for b in 5 7; do
-	selftest x1red$b WW_WATER_MARK_BODY=$b WW_WATER_X1B_RED=nibble
+	selftest x1red$b WW_WATER_MARK_BODY=$b WW_WATER_X1B_RED=nibble $F4RED
 	[ "$(verdict x1red$b "X1b it reads faster")" = "FAIL" ] && ok "red X1b nibble: FAILS on body $b" || bad "red X1b nibble did not fail on $b"
 done
-selftest winsred WW_WATER_MARK_BODY=10 WW_WATER_STROKE_WINS_RED=old
+selftest winsred WW_WATER_MARK_BODY=10 WW_WATER_STROKE_WINS_RED=old $F4RED
 [ "$(verdict winsred "X1b it reads faster")" = "FAIL" ] && ok "red stroke rule old: X1b FAILS on body 10" || bad "red stroke rule did not fail on 10"
 grep -a "^X1 the unweighted" "$OUT/st_winsred.log" | cut -c1-200 | sed 's/^/     /'
 grep -a "^X1 the unweighted" "$OUT/st_p10.log" | cut -c1-200 | sed 's/^/     /'
@@ -96,8 +99,17 @@ grep -aq "^  FAIL F2 island bank direction against the analytic cylinder" "$OUT/
 	&& ok "red F2 raw: the old line, FAILS" || bad "red F2 raw did not give the old failing line"
 
 echo "== 4. ALL REDS == main's code"
-selftest allred WW_WATER_X2B_RED=unit WW_WATER_X1B_RED=nibble WW_WATER_F2_RED=raw WW_WATER_STROKE_WINS_RED=old
-n=$(grep -ac '^  FAIL ' "$OUT/st_allred.log")
+# lane FARWATER4: main's code also means lodgen's raw river direction and the old speed rounding (a bake with
+# FARWATER4's two bake reds) and FARWATER4's marking reds; FARWATER4's own check lines (L4, X1d) are left out
+if [ ! -f "$OUT/base_f4red.lodl" ]; then
+	rm -rf "$OUT/bake"
+	WW_LODL_FLOW_DIR_RED=raw WW_WATER_SPEED_FLOOR_RED=round "$EXE" -no-gui lodgen "$ESM" --worldspace 3C --lodl "$W/bake" \
+		< /dev/null > "$OUT/base_f4red_bake.log" 2>&1 || { echo "FAIL red base bake rc=$?"; exit 1; }
+	cp "$OUT/bake/FO4CSLOD/Commonwealth/Commonwealth.lodl" "$OUT/base_f4red.lodl" && rm -rf "$OUT/bake"
+fi
+SRC="$OUT/base_f4red.lodl" selftest allred WW_WATER_X2B_RED=unit WW_WATER_X1B_RED=nibble WW_WATER_F2_RED=raw \
+	WW_WATER_STROKE_WINS_RED=old $F4RED
+n=$(grep -a '^  FAIL ' "$OUT/st_allred.log" | grep -avc '^  FAIL *\(L4 moving water\|X1d \)')
 [ "$n" = 3 ] && ok "all reds: 3 FAIL (F2 raw, F5 p99, X2b unit), as main" || bad "all reds: $n FAIL"
 if [ -n "${REF_LOG:-}" ] && [ -f "$REF_LOG" ]; then
 	diff <(lines "$REF_LOG") <(lines "$OUT/st_allred.log") > "$OUT/allred_vs_ref.diff" \

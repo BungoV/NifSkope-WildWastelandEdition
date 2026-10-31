@@ -1454,6 +1454,29 @@ void chamfer( int w, int h, const std::vector<quint8> & seed, std::vector<float>
 		}
 }
 
+} // namespace
+
+/*! Lane FARWATER4 L4: the speed nibble of water that MOVES.  A linear nibble
+ *  (8 = the body's reference speed) rounds everything below 1/16 of that
+ *  reference to 0, and 0 is what every reader takes for still water: on the
+ *  Commonwealth v4 bake 14.6 percent of lodgen's solved river texels and up to
+ *  31 percent of a marked river's read 0 though the solve moves them.  Water
+ *  at or above the writer's own slack line (kSlackFraction of the mean speed,
+ *  the line waterWrittenDirection() keeps a solved direction above) now writes
+ *  at least 1; the format is unchanged (a reader still takes code c as c/8 of
+ *  the reference).  Red: WW_WATER_SPEED_FLOOR_RED=round (the old rounding). */
+bool waterSpeedFloorRed()
+{
+	return wwEnv( "WW_WATER_SPEED_FLOOR_RED" ).trimmed() == "round";
+}
+
+int waterSpeedFloor( int nib, double sp, double meanSpeed, bool red )
+{
+	if ( red || nib != 0 || !( meanSpeed > 0.0 ) )
+		return nib;
+	return sp >= kSlackFraction * meanSpeed ? 1 : 0;
+}
+
 /*! THE WRITTEN DIRECTION.  The solve's direction stands where the water
  *  moves and is not a bank texel; slack water (below kSlackFraction of the
  *  mean speed: dead-end coves, the water past the sink) and the bank
@@ -1651,8 +1674,6 @@ void waterFieldDump( const char * tag, int id, int W, int H, int px0, int py0, b
 		put( one.data(), n * 4 );
 	}
 }
-
-} // namespace
 
 /*! One body's field.
  *
@@ -1854,6 +1875,7 @@ bool WaterMarkDoc::solveBody( int id, WaterMarkSolve & st, QString * note )
 	 * being asked to change. */
 	std::vector<float> wgt( n, 1.0f );
 	std::vector<float> wgtDist( n, 3.4e38f );
+	const bool weightRed = wwEnv( "WW_WATER_X1_WEIGHT_RED" ).trimmed() == "boost";
 	auto texelOf = [&]( double wx, double wy, int & x, int & y ) {
 		int px = 0, py = 0;
 		worldToTexel( wx, wy, px, py );
@@ -1896,8 +1918,18 @@ bool WaterMarkDoc::solveBody( int id, WaterMarkSolve & st, QString * note )
 					wgtDist[at] = float( dd );
 					wgt[at] = float( sw );
 				}
+				/* Lane FARWATER4 (L3): the weight SPEEDS, it does not steer.  It
+				 * used to multiply the stroke's conductance boost as well, and the
+				 * solve's speed is flux / k: on a reach the stroke spans, x3 the
+				 * conductance carried the same flux at a third of the speed, so a
+				 * 1 -> 3 ramp moved the last-third / first-third speed only
+				 * 1.04-1.18x (FARWATER3 X1b).  The boost is the stroke's own
+				 * preference and stays at kStrokeBoost; the weight acts once, on
+				 * the speed above.  At w = 1 both expressions are the same
+				 * (gate X1a).  Red: WW_WATER_X1_WEIGHT_RED=boost (the old one). */
+				const double bw = weightRed ? sw : 1.0;
 				boost[at] = float( std::max( double( boost[at] ),
-					1.0 + ( kStrokeBoost * sw - 1.0 ) * q * q ) );
+					1.0 + ( kStrokeBoost * bw - 1.0 ) * q * q ) );
 			}
 	}
 	int heldHere = 0;
@@ -2173,18 +2205,27 @@ bool WaterMarkDoc::solveBody( int id, WaterMarkSolve & st, QString * note )
 	F->phi = phi;
 
 	// ---- direction and speed, per texel ----------------------------------
-	double meanSpeed = 0.0;
+	double meanSpeed = 0.0, meanSpeedU = 0.0;
 	qint64 wet = 0;
 	for ( int i = 0; i < G.n; i++ ) {
 		const size_t wat = size_t( G.cy[size_t( i )] ) * size_t( W ) + size_t( G.cx[size_t( i )] );
-		meanSpeed += std::hypot( ux[size_t( i )], uy[size_t( i )] ) * double( wgt[wat] );
+		const double s = std::hypot( ux[size_t( i )], uy[size_t( i )] );
+		meanSpeed += s * double( wgt[wat] );
+		meanSpeedU += s;
 		wet++;
 	}
-	if ( wet )
+	if ( wet ) {
 		meanSpeed /= double( wet );
+		meanSpeedU /= double( wet );
+	}
 	/* THE WRITTEN DIRECTION: waterWrittenDirection() above (lane FARWATER3
-	 * moved it there unchanged, so gate F2 judges what is written here). */
-	waterWrittenDirection( W, H, F->mask, G, ux, uy, meanSpeed, F->vx, F->vy );
+	 * moved it there unchanged, so gate F2 judges what is written here).
+	 * Lane FARWATER4 (L3): its slack line takes the UNWEIGHTED mean, so a
+	 * weight cannot move which texels keep the solved direction: the weight
+	 * changes the speed and nothing else (gate X1d).  With no weight the two
+	 * means are the same sum (w = 1.0f). */
+	waterWrittenDirection( W, H, F->mask, G, ux, uy, weightRed ? meanSpeed : meanSpeedU, F->vx, F->vy );
+	const bool floorRed = waterSpeedFloorRed();
 	waterFieldDump( "body", id, W, H, F->px0, F->py0, usedStrokeEnds, meanSpeed,
 		agreeN ? agreeSum / agreeN : 0.0, F->mask, G, rhs, ux, uy, F->vx, F->vy, wgt );
 	double mx = 0.0, my = 0.0;
@@ -2197,7 +2238,8 @@ bool WaterMarkDoc::solveBody( int id, WaterMarkSolve & st, QString * note )
 		 * own quantum), so a narrows that doubles the speed saturates at 15
 		 * and says so here rather than wrapping. */
 		const double q = meanSpeed > 0.0 ? 8.0 * sp / meanSpeed : 8.0;
-		F->speed[at] = quint8( std::max( 0, std::min( 15, int( q + 0.5 ) ) ) );
+		F->speed[at] = quint8( waterSpeedFloor( std::max( 0, std::min( 15, int( q + 0.5 ) ) ), sp, meanSpeed,
+			floorRed ) );
 		if ( F->speedRel.empty() )
 			F->speedRel.assign( n, 0.0f );
 		F->speedRel[at] = float( q / 8.0 );
@@ -4561,6 +4603,32 @@ void waterWeightGates( WaterMarkDoc & doc, int river, const WaterStroke & axis,
 			.arg( st.note ).arg( st.strokeAgreement, 0, 'f', 3 ).arg( dead ).arg( under ) );
 	}
 
+	/* Lane FARWATER4 (L4): water that moves never reads speed 0 -- over the
+	 * marked river, every texel whose solved speed is at or above the writer's
+	 * slack line (kSlackFraction of the body mean) carries a non-zero nibble.
+	 * The mean-scaled nibble left 0.9-31 percent of the moving water of rivers
+	 * 3 / 5 / 7 / 10 at 0. Red: WW_WATER_SPEED_FLOOR_RED=round. */
+	{
+		qint64 moving = 0, dead = 0, slackZero = 0;
+		doc.sweep( [&]( int px, int py, quint16 id, quint16, quint16 n ) {
+			if ( int( id ) != river )
+				return;
+			const double s = doc.solvedSpeedAt( px, py );
+			if ( s < 0.0 )
+				return;
+			const bool zero = ( ( n >> 8 ) & 0xF ) == 0;
+			if ( s >= kSlackFraction * 1.000001 ) {   // speedRel is a float: no texel ON the line
+				moving++;
+				dead += zero;
+			} else {
+				slackZero += zero;
+			}
+		}, &err );
+		check( QStringLiteral( "L4 moving water never reads speed 0: %1 of the %2 texels of body %3 at or above "
+			"the slack line carry nibble 0 (gate 0; %4 slack texels read 0)" ).arg( dead ).arg( moving )
+			.arg( river ).arg( slackZero ), moving > 0 && dead == 0 );
+	}
+
 	doc.clearStrokes();
 	doc.addStroke( weighted( axis, ones ), &msg );
 	doc.solve( &st, &err );
@@ -4625,6 +4693,37 @@ void waterWeightGates( WaterMarkDoc & doc, int river, const WaterStroke & axis,
 			"%3 points a third, needs >= 2)" ).arg( rw, 0, 'f', 3 ).arg( ru, 0, 'f', 3 ).arg( third ),
 			third >= 2 && su0 > 0.0 && sw0 > 0.0 && rw > ru );
 	}
+	/* Lane FARWATER4 (L3): X1d, the weight SPEEDS the water BY ITS OWN FACTOR.
+	 * Over the stroke points on moving water (X1b's set), the weighted solve's
+	 * last-third / first-third speed over the unweighted one's must be the
+	 * ramp's own last-third / first-third weight (each third's weights averaged
+	 * with the unweighted speed as the weight), within 10 percent.  The old
+	 * rule, which also multiplied the conductance, read 1.04-1.18x for a ramp
+	 * whose thirds differ ~2x.  Red: WW_WATER_X1_WEIGHT_RED=boost. */
+	{
+		std::vector<int> mv;
+		for ( size_t i = 0; i < speedU.size() && i < speedW.size(); i++ )
+			if ( speedU[i] >= kSlackFraction && speedW[i] >= 0.0 )
+				mv.push_back( int( i ) );
+		const int third = int( mv.size() ) / 3;
+		double su0 = 0.0, su1 = 0.0, sw0 = 0.0, sw1 = 0.0, eu0 = 0.0, eu1 = 0.0;
+		for ( int k = 0; k < third; k++ ) {
+			const size_t a = size_t( mv[size_t( k )] ), b = size_t( mv[mv.size() - 1 - size_t( k )] );
+			su0 += speedU[a];
+			sw0 += speedW[a];
+			eu0 += speedU[a] * double( ramp[int( a )] );
+			su1 += speedU[b];
+			sw1 += speedW[b];
+			eu1 += speedU[b] * double( ramp[int( b )] );
+		}
+		const double measured = ( su0 > 0.0 && sw0 > 0.0 && su1 > 0.0 ) ? ( sw1 / sw0 ) / ( su1 / su0 ) : 0.0;
+		const double expected = ( su0 > 0.0 && su1 > 0.0 && eu0 > 0.0 ) ? ( eu1 / su1 ) / ( eu0 / su0 ) : 0.0;
+		const double ratio = expected > 0.0 ? measured / expected : 0.0;
+		check( QStringLiteral( "X1d the weight speeds the water by its own factor: the weighted / unweighted "
+			"last-third over first-third speed is %1, the ramp's own weights say %2 (ratio %3, needs 0.9 .. 1.1; "
+			"%4 points a third)" ).arg( measured, 0, 'f', 3 ).arg( expected, 0, 'f', 3 ).arg( ratio, 0, 'f', 3 )
+			.arg( third ), third >= 2 && ratio > 0.9 && ratio < 1.1 );
+	}
 
 	// X1c: it is LOCAL -- some texels move, not all of them
 	{
@@ -4641,11 +4740,14 @@ void waterWeightGates( WaterMarkDoc & doc, int river, const WaterStroke & axis,
 		doc.addStroke( weighted( axis, ramp ), &msg );
 		doc.solve( &st, &err );
 		size_t at = 0;
+		qint64 dirDiff = 0;
 		doc.sweep( [&]( int, int, quint16 id, quint16, quint16 n ) {
 			if ( int( id ) != river )
 				return;
 			if ( at < before.size() && before[at] != n )
 				diff++;
+			if ( at < before.size() && ( before[at] & 0xFF ) != ( n & 0xFF ) )
+				dirDiff++;
 			tot++;
 			at++;
 		}, &err );
@@ -4653,6 +4755,11 @@ void waterWeightGates( WaterMarkDoc & doc, int river, const WaterStroke & axis,
 		check( QStringLiteral( "X1c the weight is LOCAL: %1 of %2 texels of body %3 changed "
 			"(%4 percent, gate above 0 and below 100)" ).arg( diff ).arg( tot ).arg( river )
 			.arg( pct, 0, 'f', 1 ), diff > 0 && diff < tot );
+		/* Lane FARWATER4 (L3): and it does not STEER -- the direction byte of every
+		 * texel is the weight-1 solve's (the conductance and the slack line no longer
+		 * see the weight). Red: WW_WATER_X1_WEIGHT_RED=boost. */
+		check( QStringLiteral( "X1d the weight does not steer: %1 of %2 texels of body %3 changed direction "
+			"(gate 0)" ).arg( dirDiff ).arg( tot ).arg( river ), tot > 0 && dirDiff == 0 );
 	}
 
 	// ---- X2: a ONE-POINT curve is a pin -------------------------------------
