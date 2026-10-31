@@ -250,6 +250,13 @@ void medium( NifSkopeOpenGLContext::Program * p, const float haze[3], bool noOzo
 	else
 		p->uni3f( "atOzone", kOzone[0] * g_ozone, kOzone[1] * g_ozone, kOzone[2] * g_ozone );
 	p->uni3f( "atHaze", haze[0], haze[1], haze[2] );
+	// lane FIX1101A (atmo): the MS LUT's sqrt height rows + 40 packed steps (red msold: linear rows, 20 uniform), read
+	// and written by every pass that takes this medium; the night floor (red nofloor: none), read by atmo_sky only
+	p->uni1f( "atMsOld", red( "msold" ) ? 1.0f : 0.0f );
+	if ( red( "nofloor" ) )
+		p->uni3f( "atFloor", 0.0f, 0.0f, 0.0f );
+	else
+		p->uni3f( "atFloor", kNightFloor[0], kNightFloor[1], kNightFloor[2] );
 }
 
 void bindTex( NifSkopeOpenGLContext::GLFunctions * fn, NifSkopeOpenGLContext::Program * p, int unit, const char * name, GLuint tex )
@@ -486,7 +493,8 @@ bool wwAtmoDrawSky( Scene * scene, const WwAtmoInputs & in, QString * line )
 		why = QStringLiteral( "a LUT target is incomplete" );
 	const QString hazeKey = QString( "%1,%2,%3,%4" ).arg( double( s.haze[0] ), 0, 'g', 6 ).arg( double( s.haze[1] ), 0, 'g', 6 )
 		.arg( double( s.haze[2] ), 0, 'g', 6 ).arg( noOzone )
-		+ ( g_ozone != 1.0f ? QStringLiteral( ",oz%1" ).arg( double( g_ozone ) ) : QString() );
+		+ ( g_ozone != 1.0f ? QStringLiteral( ",oz%1" ).arg( double( g_ozone ) ) : QString() )
+		+ ( red( "msold" ) ? QStringLiteral( ",msold" ) : QString() );	// lane FIX1101A (atmo): the red's LUT is another table
 	// 1. transmittance and multiple scattering: only when the medium moves (weather, hour through the fog keys)
 	if ( ok && g.transKey != hazeKey ) {
 		auto p = r->useProgram( "atmo_transmittance.prog" );
@@ -699,7 +707,7 @@ bool wwAtmoDrawSky( Scene * scene, const WwAtmoInputs & in, QString * line )
 
 	const float sunEl = std::asin( std::clamp( sunW[2], -1.0f, 1.0f ) ) * 180.0f / kPi;
 	QString reds;
-	for ( const char * w : { "noozone", "noms", "nohaze" } )
+	for ( const char * w : { "noozone", "noms", "nohaze", "msold", "nofloor" } )	// FIX1101A (atmo): msold, nofloor
 		if ( red( w ) )
 			reds = QStringLiteral( ",RED=%1" ).arg( QLatin1StringView( w ) );
 	for ( const char * w : { "nosunt", "double", "skyclamp" } )

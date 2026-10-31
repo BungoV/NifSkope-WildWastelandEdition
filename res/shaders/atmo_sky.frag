@@ -29,6 +29,10 @@ uniform vec2 atMsSize;
 uniform float atMsOn;
 uniform float atGround;
 uniform float atPerPixel;	// 1 = march per pixel instead of the sky-view LUT (the LUT's resolution measured against it)
+/* lane FIX1101A (atmo): the moonless night sky's own light (airglow + zodiacal light + unresolved starlight), per unit
+ * sun irradiance at the top like the LUTs, zenith ~4e-4 cd/m2 (natural dark sky 21-22 V mag / arcsec2, Leinert et al.
+ * 1998); 0 = the red WW_ATMO_RED=nofloor (the sky fell 30-160x under that at sun -18). gl/atmomath.h kNightFloor. */
+uniform vec3 atFloor;
 
 out vec4 fragColor;
 
@@ -71,6 +75,13 @@ void main()
 		c = atSunK * atLookup( atSunView, d, atSunW );
 		if ( atMoonK > 0.0 )
 			c += atMoonK * atLookup( atMoonView, d, atMoonW );
+	}
+	if ( atFloor.g > 0.0 ) {
+		// the emitting shell at ~90 km seen slant (van Rhijn 1921): brighter toward the horizon, then dimmed by the air
+		// below it (the view ray's transmittance: 0 where the ray meets the ground, so no edge at the horizon)
+		float sz2 = 1.0 - d.z * d.z;
+		float vr = inversesqrt( max( 1.0 - 0.97226 * sz2, 0.02 ) );	// (6360 / 6450)^2
+		c += atSunK * atFloor * vr * atTrans( atTransTex, atCamR, d.z );
 	}
 	if ( atTintOn > 0.5 )	// the disc below keeps the physical color
 		c = atWeatherTint( c, degrees( asin( clamp( d.z, -1.0, 1.0 ) ) ) );
