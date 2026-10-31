@@ -49,6 +49,69 @@
 - **Gates:** tests/shadowshimmer4 (G1 cost, G2 composition, G3 clock step, G4 reach / tileMeets, G5 mirror) green;
   reds RED_TODAY (G1, G2, G3) and RED_REACH (G4) FAIL; tests/shadowshimmer1-3 still PASS. Link sweeps 405 / 270
   (WW_CELL_RTDDGI) / 405 (WW_CELL_PRT) LINK OK. Owed: pictures and a live GPU ms row when bungo asks.
+## CLOUDLIGHT1 + CLOUDSTEPS1 + CLOUDVAR2 (2026-10-31, FIX1031A lane CLOUD7): a read-free top light pays for Medium 60 / High 80 march steps
+
+- **CLOUDLIGHT1 (CLOUD6c's leftover, a cheaper lit sample):** a lit sample read 10 densities on Medium (3 key taps +
+  CLOUD2C's 3 taps straight down + CLOUDBAND1's 3 taps up + the sample) and 16 on Ultra; RDR2 lights with one sun-ward
+  sample (Bauer 2019 slide 33). Measured offline (notes/fix1031a/cloud7/tmp/light1.log): one tap down fails CLOUD2C's
+  gate R (0.634 / 0.705 vs Monte Carlo, the red notop's numbers), one tap up moves the converged picture +0.9 levels,
+  half the key taps +2.6 levels (all refused). Shipped: CLOUD2C's top light takes the slab under the sample as uniform at
+  the sample's own density down to its band's base (at most the taps' reach): no read (cloud_march_step.glsl
+  `cvTopOn` 2). **Switch** `WW_CLOUDVOL_TOPCOLUMN` (ON by default, live); **red** `=0` / `WW_CLOUDVOL_RED=toptaps` =
+  the taps (`cvTopOn` 1). Echo `,topcolumn=on` / `,RED=toptaps`. The offline checkers draw the default (cloudvol_check
+  `march_uni` cvTopOn 2; red toptaps 1).
+- **CLOUDSTEPS1:** the saved reads buy steps at main's cost: Medium 48 -> 60, High 64 -> 80 (cloudvolmath.h
+  `marchSteps`), only while the column is on. **Switch** `WW_CLOUDVOL_MORESTEPS` (ON, live); **red** `=0` /
+  `RED=oldsteps` = the preset's steps (echo `,RED=oldsteps`, `steps=` in the volclouds line). 72 (Medium) and 96
+  (High) were measured and refused: their reads per ray pass main's (96.5 > 83.4, 162.8 > 157.5).
+- **CLOUDVAR2:** cloudvar_check gate V judges the shipped arm (CLOUD6d's profile set, spread 0); its V1 (tops IQR >= 1 km
+  storm, CLOUD5's towers beside puffs) is RETIRED to INFO: CLOUD6d's gate P asks for the opposite now, and the default
+  arm reads 0.22 km there. V2 / V3 (tile std, 6 km correlation) still gate it, today's density still fails them.
+  The red onetype now fails nothing in V (it was V1's red): REDRETIRE.
+- **CLOUDVARDEF1:** Cloud Variety stays Off (no measurement here compares it with the game's sky: the game draws 2D
+  layers; no change).
+- **Gates (offline, real programs):** tests/cloudlight/run.sh: E converged picture vs the taps rms 0.02-0.21 levels,
+  mean +0.00..+0.10 (bars 0.5 / 0.25), single-march edge / interior unchanged (+0.01); N reads per ray 0.692-0.782 x
+  (bar 0.85; red toptaps 1.000 FAIL); Monte Carlo C 0.697, R 0.957 / 1.253 (bar 0.75..1.33; red notop still fails),
+  D flicker 0.0717. tests/cloudsteps/run.sh: R reads Medium 80.7 / 53.6 / 125.8 vs main 83.4 / 55.8 / 129.0, High
+  136.0 / 90.2 / 213.9 vs 157.5 / 104.9 / 246.4; E edge error Medium 4.91 -> 3.65 (up18), 6.13 -> 4.54 (low5), High
+  2.85 -> 1.97, 3.74 -> 2.58 (bar 0.8 x; red oldsteps 1.000 FAIL). GPU INFO (this machine, a 1080p history marched at
+  stride 1): Medium 0.628 / 0.472 ms -> 0.599 / 0.451, High 1.015 / 0.829 -> 0.875 / 0.720. Edge refinement re-measured
+  with the column (CLOUD6c's rdr2): uniform steps still win at equal reads in every case (1.81 @338 vs 0.20 @343, Medium
+  up18): stays refused. cloudband / cloudage / cloudstale / cloudedge / cloudvar / cloudvol PASS. Sweeps 405 / 270 / 405.
+
+## CLOUDTYPE2 + CLOUD6h (2026-10-31, FIX1031A lane CLOUD7): the cloud type reads the thunder; old history traces and light changes in the volume clouds' resolve
+
+- **CLOUDTYPE2 (CLOUD6d's leftover):** the Low band's cloud type (cloudmath.h lowTypeOf, seen with Cloud Variety on)
+  took "storm" from the WTHR DATA thunder byte > 0, which is 133..255 in 106 of the 107 vanilla weathers: every Rainy
+  weather was a cumulonimbus and the 6 radstorms (DATA flags 24 / 8 = the Snow bit) got the Snow flag's stratus 0.3.
+  A census of the 107 records (notes/fix1031a/cloud7/tools/census_type.py; the fixture tests/cloudtype/weathers.tsv)
+  found one field that separates: the SNAM sounds of type 3 (thunder), present in 15 weathers (7 rains, the radstorms,
+  the 2 Glowing Sea fogs) = exactly CLOUD6f's lightning set; the byte shares 137 between quiet and thundering ones.
+  The rule now asks the thunder sounds FIRST: a weather that thunders is 0.9 +- 0.25, a Rainy-flag one that does not
+  is 0.75 (7 weathers: MistyRainy x2, NukaWorldRainMarkT, the Diamond / Marsh / GSRadstormOld flag-4 records), all
+  other classes keep their type. **Switch** `WW_CLOUDVOL_TYPERULE` (ON by default, live); **red**
+  `WW_CLOUDVOL_TYPERULE=0` / `WW_CLOUDVOL_RED=thunderbyte` = CLOUD5's rule. Echo `,typerule=thundersound` /
+  `,RED=thunderbyte` (Variety on). `wwLookdevWeatherClass` hands the thunder sound count (optional out).
+- **CLOUD6h (CLOUD6g's leftovers), with Cloud Accumulation + Change Clamp:** **History Age** - the history depth
+  target is RG32F now (.r the depth every reader reads, .g the trace's age: 0 where this frame marched, +1 per
+  reprojected frame). A trace older than 16 frames (a still camera never makes one) gets Change Clamp's test at 1.25x
+  its threshold against the 9 places the march texels looked this frame; when they differ this frame's march stands
+  in, read where its samples sit (m x stride + phase, the bilinear read was up to 1.5 history px off). **Lit Clamp** -
+  Change Clamp also compares the light (relative change of the 9-mean luminance, threshold 0.07 + the deviation
+  term): a sun move leaves the transmittance alike and was left to the variance clip. **Switches**
+  `WW_CLOUDVOL_HISTAGE`, `WW_CLOUDVOL_LITCLAMP` (ON by default, live); **reds** `=0` / `WW_CLOUDVOL_RED=noage` |
+  `litblind` = CLOUD6g's resolve. Echoes `,histage=16x1.25`, `,litclamp=0.070` / `,RED=noage`, `,RED=litblind`.
+- **Gates (offline, real programs through the driver):** tests/cloudtype/run.sh (A thunder <=> 0.9 107/107, red
+  92/107; R radstorms 6/6 vs red 0/6; N rain 7/7 vs 0/7; K 85 quiet weathers unchanged; W wiring, D switch, stage).
+  tests/cloudage/run.sh (16 frames after a jump, mean |E| in display levels): moving thinning 9.21 -> 7.43 (Medium),
+  5.53 -> 5.08 (Ultra); moving shift 7.22 -> 5.67, 4.28 -> 3.94, Variety 8.23 -> 6.59; still sun 30 -> 10 deg
+  6.59 -> 4.07 (Off path 3.88), Ultra 4.28 -> 2.17 (1.87); steady error moving 2.68 -> 2.54, still 1.81 -> 1.82;
+  reds noage / litblind FAIL. The brief's target (moving partial changes at the still level, 3.14) is out of reach:
+  an arm that shows this frame's march on every reprojected px reads 7.63 there, the floor for a trace no march has
+  seen since the change. CLOUDBAND (L M G Q F) and CLOUD6g (S T R) runs PASS on the new default (Lit 0.05 was refused
+  by gate Q's dither lattice 37.1 > 33.5). Link sweeps 405 / 270 / 405 not ok 0. Cost: one accum resolve at 960x540
+  0.035 -> 0.037 ms offline.
 
 ## LEANCOMMENTS1 (2026-10-31, FIX1031A): the comment trim pass lands on main (comments only, exe byte-identical)
 

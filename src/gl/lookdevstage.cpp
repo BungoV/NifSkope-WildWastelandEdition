@@ -1214,15 +1214,19 @@ bool wwLookdevWeatherId( quint32 & formID, QString & edid, QString & owner, QStr
 	return true;
 }
 
-bool wwLookdevWeatherClass( unsigned & flags, unsigned & thunder )
+bool wwLookdevWeatherClass( unsigned & flags, unsigned & thunder, int * thunderSounds )
 {
 	resolve();
 	const LdState & s = st();
 	flags = thunder = 0;
+	if ( thunderSounds )
+		*thunderSounds = 0;
 	if ( !s.haveWeather || !s.w.hasClass )
 		return false;
 	flags = s.w.classFlags;	// lane CLOUD5: WTHR DATA bytes 11 and 10 (esmweather.cpp)
 	thunder = s.w.thunderFreq;
+	if ( thunderSounds )	// lane CLOUDTYPE2: the thunder SNAMs (esmweather.cpp, CLOUD6f's storm signal)
+		*thunderSounds = s.w.thunderSounds;
 	return true;
 }
 

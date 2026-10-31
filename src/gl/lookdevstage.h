@@ -99,7 +99,8 @@ QString wwLookdevRegion();
  *  when no weather is loaded */
 bool wwLookdevWeatherId( quint32 & formID, QString & edid, QString & owner, QStringList & files, QString & dataDir );
 //! lane CLOUD5: the loaded weather's class (WTHR DATA flags byte, thunder frequency byte); false (both 0) when none
-bool wwLookdevWeatherClass( unsigned & flags, unsigned & thunder );
+// lane CLOUDTYPE2: thunderSounds (when given) = the weather's SNAM sounds of type 3 (thunder), 0 when none
+bool wwLookdevWeatherClass( unsigned & flags, unsigned & thunder, int * thunderSounds = nullptr );
 /*! lane WEATHERLOOK1 B: while a change blends, the weather left behind: its load-order FormID, EditorID, the plugin
  *  that defines it, its class flags (DATA byte 11) and the NEW weather's share pct; false when no change runs */
 bool wwLookdevWeatherLeaving( quint32 & formID, QString & edid, QString & owner, unsigned & classFlags, float & pct );

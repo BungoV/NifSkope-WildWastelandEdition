@@ -117,12 +117,18 @@
 			float tauB = tauI.y;
 #else
 			float tauB = 0.0;
-			for ( int k = 0; k < cvTaps; k++ ) {
-				float a = float( k ) / float( cvTaps ), b = float( k + 1 ) / float( cvTaps );
-				float tk = cvLightKm * 0.5 * ( a * a + b * b ), dk = cvLightKm * ( b * b - a * a );
-				vec3 pb = p - up * tk;
-				pb.z = p.z - tk;
-				tauB += cvDens( pb ) * kCvSigma * dk;
+			// lane CLOUDLIGHT1: the shipping step's column (cvTopOn 2) or the taps (1), as res/shaders
+			if ( cvTopOn > 1.5 ) {
+				float zb = p.z < cvBands.topKm.x ? cvBands.baseKm.x : cvBands.baseKm.y;
+				tauB = dens * kCvSigma * clamp( p.z - zb, 0.0, cvLightKm );
+			} else {
+				for ( int k = 0; k < cvTaps; k++ ) {
+					float a = float( k ) / float( cvTaps ), b = float( k + 1 ) / float( cvTaps );
+					float tk = cvLightKm * 0.5 * ( a * a + b * b ), dk = cvLightKm * ( b * b - a * a );
+					vec3 pb = p - up * tk;
+					pb.z = p.z - tk;
+					tauB += cvDens( pb ) * kCvSigma * dk;
+				}
 			}
 #endif
 			float fu = cvRdir( tauB, mu0, cvMsG, kCvAlbedo ) * ( mu0 * exp( -tauL ) + fd );

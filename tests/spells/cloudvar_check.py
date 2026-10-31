@@ -26,6 +26,10 @@ Gates (bars written before the first run, lane CLOUD5 2026-10-29; a bar changed 
               V4 wisps: the high-passed density's correlation at one detail period (0.6 km) on a slice inside thick
               cumulus, with the curl / without it, <= 0.75 (4 windows of 6 km at 0.03 km). Red onetype fails V1; red
               nocurl fails V4.
+              Lane CLOUDVAR2 (10-31): V judges the SHIPPED arm: CLOUD6d's one profile set per weather (spread 0 unless
+              WW_CLOUDVOL_PROFILESET=0 / RED=typemix). V1 asked for CLOUD5's type swing (towers beside puffs), which is
+              CLOUD6d's red now (its gate P asks for one family a weather): V1 is RETIRED to INFO (printed, no bar), and
+              today's density must fail V2 + V3. The red onetype then fails nothing in V (it was V1's red): REDRETIRE.
   C towers    CLOUD2B's dark core for a 6 km tower: a slab 1.5..7.5 km of tau 60, sun 60 deg, seen from below with
               cloud_march_v.prog at the light reach cloudvol.cpp gives a cumulonimbus sky (cloudvolmath.h varLightKm):
               the underside within 0.5 .. 1.6 x a Monte Carlo of the same slab (same droplet phase). Red shortlight (the
@@ -207,6 +211,10 @@ def gate(name, ok, msg):
 
 
 ONE = red == 'onetype'
+# lane CLOUDVAR2: the arm cloudvol.cpp draws: CLOUD6d's profile set (WW_CLOUDVOL_PROFILESET, defaultOnSwitch; RED=typemix off)
+_ps = os.environ.get('WW_CLOUDVOL_PROFILESET')
+PROFILESET = (_ps is None or _ps.strip().lower() not in ('0', 'off', 'false', 'no')) and \
+    'typemix' not in [w.strip() for w in os.environ.get('WW_CLOUDVOL_RED', '').lower().split(',')]
 NOCURL = red == 'nocurl'
 CURL_G = 0.0 if NOCURL else CURL
 
@@ -354,19 +362,24 @@ if 'V' in only:
     px = 96.0 / 640
     lines, ok_green, today_fails = [], True, True
     for label, ty, sp, b1, b2 in (('storm', 0.9, 0.25, 1.0, 0.06), ('clear', 0.6, 0.2, 0.5, 0.06)):
-        s = sky(2.0 / 3.0 if ONE else ty, 0.0 if ONE else sp, curl=CURL_G)
+        # lane CLOUDVAR2: the green arm is the shipped default: CLOUD6d's one profile set per weather (spread 0) unless
+        # WW_CLOUDVOL_PROFILESET=0 / RED=typemix; V1 (the tops' IQR, which asked for CLOUD5's type swing: towers beside
+        # puffs) is RETIRED to INFO, since CLOUD6d's gate P now asks for the opposite (one family per weather).
+        spd = sp if not PROFILESET else 0.0
+        s = sky(2.0 / 3.0 if ONE else ty, 0.0 if ONE else spd, curl=CURL_G)
         op, top = field(s)
         iqr, tstd, corr, frac = metrics(op, top, s['base0'], px)
-        g_ok = iqr >= b1 and tstd >= b2 and corr <= 0.9
+        g_ok = tstd >= b2 and corr <= 0.9   # lane CLOUDVAR2: V1 retired (INFO), V2 + V3 gate the default arm
         ok_green = ok_green and g_ok
         so = sky(ty, sp)
         op0, top0 = field(so, old=True, oldcal=oldcal)
         iqr0, tstd0, corr0, frac0 = metrics(op0, top0, so['base0'], px)
-        t_fail = iqr0 < b1 and tstd0 < b2 and corr0 > 0.9
+        t_fail = tstd0 < b2 and corr0 > 0.9
         today_fails = today_fails and t_fail
-        lines.append('%s: variety V1 tops IQR %.2f km (bar %.1f) V2 tile std %.3f (bar %.2f) V3 6 km corr %.3f (bar 0.9) '
+        lines.append('%s%s: variety V1 tops IQR %.2f km (INFO, retired; the swing arm\'s bar was %.1f) V2 tile std %.3f (bar %.2f) V3 6 km corr %.3f (bar 0.9) '
                      'cloudy %.2f %s | today %.2f km, %.3f, %.3f, cloudy %.2f %s'
-                     % (label, iqr, b1, tstd, b2, corr, frac, 'pass' if g_ok else 'FAIL', iqr0, tstd0, corr0, frac0,
+                     % (label, ' (profile set: spread 0)' if PROFILESET else ' (type swing +- %.2f)' % sp, iqr, b1, tstd,
+                        b2, corr, frac, 'pass' if g_ok else 'FAIL', iqr0, tstd0, corr0, frac0,
                         'fails every bar' if t_fail else 'PASSES A BAR'))
     # V4: the curl's wisps (the detail's tiling broken): the density on a horizontal slice inside thick cumulus (cov
     # 0.85, hf 0.33: the shape term is smooth over 0.6 km there, so the high-passed density is the eroded detail), 4

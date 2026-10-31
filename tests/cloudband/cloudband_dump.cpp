@@ -39,5 +39,11 @@ int main()
 	std::printf( "cloud6g moveclamp %d changeclamp %d reset %.9g sd %.9g\n", WwCloudVolMath::defaultOnSwitch( mc.c_str() ) ? 1 : 0,
 				 WwCloudVolMath::defaultOnSwitch( cc.c_str() ) ? 1 : 0, double( WwCloudVolMath::kChangeReset ),
 				 double( WwCloudVolMath::kChangeResetSd ) );
+	// lane CLOUD6h: History Age / Lit Clamp for this env and their constants, their own line
+	const std::string ha = norm( "WW_CLOUDVOL_HISTAGE" ), lc = norm( "WW_CLOUDVOL_LITCLAMP" );
+	std::printf( "cloud6h histage %d old %.9g k %.9g litclamp %d reset %.9g floor %.9g\n",
+				 WwCloudVolMath::defaultOnSwitch( ha.c_str() ) ? 1 : 0, double( WwCloudVolMath::kHistAgeOld ),
+				 double( WwCloudVolMath::kAgeChangeK ), WwCloudVolMath::defaultOnSwitch( lc.c_str() ) ? 1 : 0,
+				 double( WwCloudVolMath::kLitReset ), double( WwCloudVolMath::kLitFloor ) );
 	return 0;
 }
