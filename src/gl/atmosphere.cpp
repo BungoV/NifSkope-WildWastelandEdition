@@ -702,7 +702,7 @@ bool wwAtmoDrawSky( Scene * scene, const WwAtmoInputs & in, QString * line )
 	for ( const char * w : { "noozone", "noms", "nohaze" } )
 		if ( red( w ) )
 			reds = QStringLiteral( ",RED=%1" ).arg( QLatin1StringView( w ) );
-	for ( const char * w : { "nosunt", "double" } )
+	for ( const char * w : { "nosunt", "double", "skyclamp" } )
 		if ( apRed( w ) )
 			reds += QStringLiteral( ",AP_RED=%1" ).arg( QLatin1StringView( w ) );
 	if ( in.discs )
@@ -1102,6 +1102,8 @@ void wwAtmoApUniforms( Scene * scene )
 		u.done();
 		prog->uni1i( "atSkyTransTex", WwCellUnit::AtmoTrans );
 		prog->uni1f( "atSkyCamR", on ? v->camR : 0.0f );
+		// lane HORIZONBAND1: the sky's horizon band (atmo_skyband.glsl); the red skyclamp = the clamp before it (live)
+		prog->uni1i( "atApSkyRule", apRed( "skyclamp" ) ? 0 : 1 );
 	}
 	if ( !on )
 		return;
