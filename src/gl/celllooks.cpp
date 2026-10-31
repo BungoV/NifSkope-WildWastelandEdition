@@ -72,10 +72,10 @@ const LookRow kRows[] = {
 	{ "Water clear colour", "WW/CellWaterClear2", true },
 	{ "Water sky visibility", "WW/CellWaterSkyVis" },
 	{ "Surf", "WW/CellWaterSurf" },
-	{ "Contact foam", "WW/CellWaterContact2", true },	// FIX1031B LATE ITEM 8: foam ON (current-made foam on rivers)
+	{ "Contact foam", "WW/CellWaterContact2" },	// FIX1101A: OFF again (flat grey patches, one on a dry bank at spot 6)
 	{ "Wet shore", "WW/CellLandWet" },
 	{ "Wave run-up", "WW/CellLandSwash" },
-	{ "River foam", "WW/CellWaterRiverFoam2", true },	// FIX1031B LATE ITEM 8: m/s flow, shallows + shoals
+	{ "River foam", "WW/CellWaterRiverFoam2" },	// FIX1101A: OFF again until the foam gate (no foam on land, lacy) holds
 	{ "Underwater light", "WW/CellWaterUnderLight" },
 	{ "Precipitation", "WW/CellPrecip" },	// lane WEATHERLOOK1 B: ships off until bungo sees it
 };

@@ -1,3 +1,11 @@
+## FOAMOFF (FIX1101A, 2026-10-31): River foam and Contact foam ship OFF again
+
+The batch that landed WATERFOAM2 (main 9b443dcf) turned both rows on. The first pictures on that build (spot 6 river,
+CommonwealthClear 12:00) show flat grey patches with hard edges all over the river, and a large grey shape on a dry bank
+below the waterline. The build before the batch draws neither, and the shipped look draws neither. Both rows are off by
+default again under the same keys. They come back on when the foam is fixed and a gate holds: no foam on land, and lacy
+breakup instead of solid patches. tests/waterlook2/defaults_gate.py now expects the two rows off.
+
 ## HORIZONBAND1 (FIX1031B area A, 2026-10-31): the horizon blends - no cyan strip with a hard top edge
 
 bungo's pictures (notes/shots1031 sheet_1 spot 3, sheet_spot5 sea, CommonwealthClear 12:00): a saturated cyan strip

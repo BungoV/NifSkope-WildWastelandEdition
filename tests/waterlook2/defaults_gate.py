@@ -23,14 +23,17 @@ ROWS = {'Water clear colour': 'WaterClear', 'Water reflections': 'WaterRefl', 'W
 OLD = {'Water clear colour': 'WW/CellWaterClear', 'Water reflections': 'WW/CellWaterRefl',
        'Water sun glare': 'WW/CellWaterGlint', 'Ocean waves': 'WW/CellWaterOcean', 'Water soft edge': 'WW/CellWaterEdge',
        'Shore foam': 'WW/CellWaterFoam', 'Contact foam': 'WW/CellWaterContact', 'River foam': 'WW/CellWaterRiverFoam'}
+# FIX1101A (10-31 22:2x): the two foam rows ship OFF again: on main 9b443dcf they drew flat grey patches on the river
+# and one on a dry bank at spot 6 (notes/fix1101a/HANDOFF.md); they go back ON only with the water agent's foam gate.
+OFFNOW = {'Contact foam', 'River foam'}
 ok = True
 for label, enum in ROWS.items():
     m = re.search(r'\{ "%s", "([^"]+)"(, (true|false))? \}' % re.escape(label), src)
     on = bool(m and m.group(3) == 'true')
     newkey = bool(m and m.group(1) != OLD[label])
-    print('%-20s key %-24s default %s %s' % (label, m.group(1) if m else '?', 'ON' if on else 'off',
-                                           'new key' if newkey else 'OLD KEY'))
-    ok &= on and newkey
+    print('%-20s key %-24s default %s %s%s' % (label, m.group(1) if m else '?', 'ON' if on else 'off',
+                                             'new key' if newkey else 'OLD KEY', ' (want off)' if label in OFFNOW else ''))
+    ok &= (on != (label in OFFNOW)) and newkey
 red = re.search(r'bool wwLookWaterShippedRed\( WwLook l \)\s*\{(.*?)\n\}', src, re.S)
 names = set(re.findall(r'WwLook::(\w+)', red.group(1))) if red else set()
 redok = bool(red) and names == set(ROWS.values()) and 'WW_CELL_WATER_LOOK_RED' in red.group(1) and '"shipped"' in red.group(1)
