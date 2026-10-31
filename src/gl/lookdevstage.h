@@ -108,7 +108,7 @@ bool wwLookdevWeatherLeaving( quint32 & formID, QString & edid, QString & owner,
  *  (1 in a storm weather, 0 otherwise, the fade bytes' ramps during a change), rgb = its Lightning Color (DATA 12..14,
  *  0..1; the storm side's while a change blends), seed = the storm weather's FormID (the strikes' draws); false when
  *  no weather is loaded */
-bool wwLookdevLightning( float & share, float rgb[3], quint32 & seed );
+bool wwLookdevLightning( float & share, float rgb[3], quint32 & seed, unsigned * freq = nullptr );	// lane LIGHTNING2: + DATA byte 10
 /*! lane CLOUD6e: whether the loaded weather rains (its record links a precipitation shader, WTHR MNAM) and, while a
  *  change blends, whether the one left behind does and the NEW weather's share pct; false when no weather is loaded */
 bool wwLookdevWeatherRains( bool & cur, bool & blending, bool & old, float & pct );

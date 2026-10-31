@@ -39,6 +39,7 @@ BSD License - see nifskope.h
 #include "recx.h"	// lane LIGHTS5 (FOGSCALE1): fog.scale
 #include "gl/cellnifxlights.h"	// lane NIFXLIGHT1: a fixture mesh's .nifx lights
 #include "rtddgicell.h"	// lane RTXGI1 M2: the ray-traced GI volume's read (rtddgiCellUniforms)
+#include "gl/cloudvol.h"	// lane LIGHTNING2: a storm's flash on the exterior ambient (wwLightningGround)
 #include "cellworldanim.h"	// lane NIFXLIGHT3: the world clock a .nifx light's dimmer follows
 
 #include <QDateTime>
@@ -2381,6 +2382,14 @@ void wwCellLightsUniforms( Scene * scene )
 		WW_SWITCH_STATIC( QByteArray, extRed, wwEnv( "WW_CELL_EXTAMB_RED" ).trimmed() );
 		float w[6][3];
 		if ( extRed != "flat" && wwLookdevDalc( w ) ) {
+			/* lane LIGHTNING2 (LIGHTNINGSKY1): a storm's flash lights the terrain, the objects and the air through the
+			 * one ambient they share, the lit cloud base above integrated over the ground (cloudlightning.h
+			 * groundDalc); all 0 between flashes (the weather's DALC as before), WW_LIGHTNING_SKY_RED = none */
+			float flash[6][3];
+			if ( wwLightningGround( flash ) )
+				for ( int a = 0; a < 6; a++ )
+					for ( int c = 0; c < 3; c++ )
+						w[a][c] += flash[a][c];
 			const bool flip = extRed == "flip";
 			float g[6][3];
 			for ( int a = 0; a < 6; a++ )

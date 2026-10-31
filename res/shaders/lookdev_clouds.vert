@@ -19,9 +19,11 @@ out vec4 vcol;
 out vec2 uv;
 out vec2 uv2;
 out vec2 ndc;
+out vec3 wdir;	// lane LIGHTNING2: the world direction of the texel (the dome is the eye's, rotation only)
 
 void main()
 {
+	wdir = probe ? vec3( 0.0, 0.0, 1.0 ) : vertexPosition;
 	if ( probe ) {
 		ndc = vertexPosition.xy;
 		vcol = vec4( 1.0 );

@@ -824,7 +824,38 @@ struct CvLightning
 	const char * state = "nostorm";
 	WwCloudLightning::Field f;
 	float col[3] = {};	// cvLtCol: colour x share x level x power x f.norm x the Low band's tint
+	// lane LIGHTNING2: the schedule (LIGHTNINGFREQ1) and what the ground / the 2D layers need (LIGHTNINGSKY1)
+	bool law = false;	// the DATA frequency law (WW_LIGHTNING_FREQ); false = CLOUD6f's 8 s / 75 %
+	unsigned freq = 255;	// DATA byte 10 of the storm weather
+	double everyS = -1.0;	// the schedule's mean time between strikes
+	float baseKm = 0.0f, sigma = 0.0f, gain = 0.0f;
+	float lin[3] = {};	// the colour, luminance 1, x the Low band's tint
 };
+
+/* lane LIGHTNING2 (LIGHTNINGFREQ1): WW_LIGHTNING_FREQ (live; on unless 0 / off / false / no) = the strikes follow the
+ * WTHR DATA frequency byte and the fade bytes scale their chance (cloudlightning.h freqSchedule); its red
+ * WW_LIGHTNING_FREQ_RED (any value but 0) or the switch off = CLOUD6f's own 8 s / 75 % schedule, the share on the
+ * brightness. */
+bool lightningFreqLaw()
+{
+	const QString r = wwEnvStr( "WW_LIGHTNING_FREQ_RED" ).trimmed();
+	if ( !r.isEmpty() && r != QLatin1StringView( "0" ) )
+		return false;
+	const QByteArray v = wwEnvStr( "WW_LIGHTNING_FREQ" ).trimmed().toLower().toLatin1();
+	return WwCloudLightning::switchOn( v.constData() );
+}
+
+/* lane LIGHTNING2 (LIGHTNINGSKY1): WW_LIGHTNING_SKY (live; on unless 0 / off / false / no) = the flash also lights the
+ * 2D cloud layers (Volume Clouds Off / Low) and the exterior cell's DALC (terrain, objects, the air); its red
+ * WW_LIGHTNING_SKY_RED (any value but 0) or the switch off = the volume clouds alone (CLOUD6f). */
+bool lightningSkyOn()
+{
+	const QString r = wwEnvStr( "WW_LIGHTNING_SKY_RED" ).trimmed();
+	if ( !r.isEmpty() && r != QLatin1StringView( "0" ) )
+		return false;
+	const QByteArray v = wwEnvStr( "WW_LIGHTNING_SKY" ).trimmed().toLower().toLatin1();
+	return WwCloudLightning::switchOn( v.constData() );
+}
 
 //! WW_CLOUD_LIGHTNING (cloudvolmath.h defaultOnSwitch: on unless 0 / off / false / no) and its red (any value but 0)
 bool lightningSwitch( bool & isRed )
@@ -840,7 +871,9 @@ float srgbByteToLinear( float c )
 	return c <= 0.04045f ? c / 12.92f : std::pow( ( c + 0.055f ) / 1.055f, 2.4f );
 }
 
-CvLightning lightningOf( const Bands & b, const float camKm[3], double secs, float sunK )
+//! the flash of the Low band baseKm .. topKm at a relative density (lane LIGHTNING2: one function for every reader)
+CvLightning lightningAt( float baseKm, float topKm, float density, const float tint[3], const float camKm[3], double secs,
+	float sunK )
 {
 	namespace L = WwCloudLightning;
 	CvLightning lt;
@@ -851,15 +884,22 @@ CvLightning lightningOf( const Bands & b, const float camKm[3], double secs, flo
 	}
 	float rgb[3] = { 0, 0, 0 };
 	quint32 seed = 0;
-	if ( !wwLookdevLightning( lt.share, rgb, seed ) || lt.share <= 0.0f )
+	unsigned freq = 255;
+	if ( !wwLookdevLightning( lt.share, rgb, seed, &freq ) || lt.share <= 0.0f )
 		return lt;	// "nostorm"
-	lt.nextS = L::nextStrikeS( secs, seed );
-	if ( b.density[0] <= 0.0f || b.topKm[0] <= b.baseKm[0] ) {
+	// lane LIGHTNING2 (LIGHTNINGFREQ1): the DATA frequency law, or CLOUD6f's schedule (the red)
+	lt.law = lightningFreqLaw();
+	lt.freq = freq;
+	const L::Schedule sc = lt.law ? L::freqSchedule( lt.share, freq ) : L::oldSchedule( lt.share );
+	lt.everyS = L::meanIntervalS( sc );
+	lt.gain = sc.gain;
+	lt.nextS = L::nextStrikeS( secs, seed, sc );
+	if ( density <= 0.0f || topKm <= baseKm ) {
 		lt.state = "nolow";
 		return lt;
 	}
 	L::Strike s;
-	lt.level = L::levelAt( secs, seed, &s );
+	lt.level = L::levelAt( secs, seed, sc, &s );
 	if ( lt.level <= 0.0f ) {
 		lt.state = "dark";
 		return lt;
@@ -873,16 +913,69 @@ CvLightning lightningOf( const Bands & b, const float camKm[3], double secs, flo
 		lin[0] = lin[1] = lin[2] = 1.0f;
 		lum = 1.0f;
 	}
-	const float src[3] = { camKm[0] + s.offKm[0], camKm[1] + s.offKm[1],
-		b.baseKm[0] + L::kSourceHf * ( b.topKm[0] - b.baseKm[0] ) };
-	const float sigma = V::kSigma * b.density[0];
-	lt.f = L::fieldOf( sigma, V::kAlbedo, V::msMeanCosine( V::dropletParams( V::kDropletUm ) ), b.baseKm[0], b.topKm[0], src );
-	const float k = lt.share * lt.level * L::powerFor( lt.f, b.baseKm[0], sigma, sunK ) * lt.f.norm;
-	for ( int c = 0; c < 3; c++ )
-		lt.col[c] = k * lin[c] / lum * b.tint[0][c];
+	const float src[3] = { camKm[0] + s.offKm[0], camKm[1] + s.offKm[1], baseKm + L::kSourceHf * ( topKm - baseKm ) };
+	const float sigma = V::kSigma * density;
+	lt.f = L::fieldOf( sigma, V::kAlbedo, V::msMeanCosine( V::dropletParams( V::kDropletUm ) ), baseKm, topKm, src );
+	// the old schedule's gain is the share (CLOUD6f's k, the same product in the same order)
+	const float k = sc.gain * lt.level * L::powerFor( lt.f, baseKm, sigma, sunK ) * lt.f.norm;
+	for ( int c = 0; c < 3; c++ ) {
+		lt.col[c] = k * lin[c] / lum * tint[c];
+		lt.lin[c] = lin[c] / lum * tint[c];
+	}
+	lt.baseKm = baseKm;
+	lt.sigma = sigma;
 	lt.on = k > 0.0f;
 	lt.state = lt.on ? "flash" : "dark";
 	return lt;
+}
+
+CvLightning lightningOf( const Bands & b, const float camKm[3], double secs, float sunK )
+{
+	return lightningAt( b.baseKm[0], b.topKm[0], b.density[0], b.tint[0], camKm, secs, sunK );
+}
+
+/* lane LIGHTNING2 (LIGHTNINGSKY1): the frame's clock and camera, noted by whichever sky pass drew (the volume or the 2D
+ * layers), so the cell's ambient (wwLightningGround, called per program setup) takes the same strike */
+struct LtFrame
+{
+	bool valid = false;
+	double secs = 0.0;
+	float camKm[3] = {};
+	quint64 serial = 0;	// bumps on every note: one per sky pass, so a memo keyed on it is a per-frame memo
+};
+
+LtFrame & ltFrame()
+{
+	static LtFrame f;
+	return f;
+}
+
+void noteLightningFrame( double secs, const float camKm[3] )
+{
+	LtFrame & f = ltFrame();
+	f.valid = true;
+	f.secs = secs;
+	std::copy( camKm, camKm + 3, f.camKm );
+	f.serial++;
+}
+
+//! the Low band the flash lives in outside the volume: the cloud map's (as bandsOf) when there is one (its Low band may
+//! be empty: no flash), else (Cloud Map off) the default slab
+void lowBandForFlash( float & baseKm, float & topKm, float & density, float tint[3] )
+{
+	const WwCloudMap & m = wwCloudMap();
+	if ( m.valid ) {
+		const Bands b = bandsOf( m );
+		baseKm = b.baseKm[0];
+		topKm = b.topKm[0];
+		density = b.density[0];
+		std::copy( b.tint[0], b.tint[0] + 3, tint );
+		return;
+	}
+	baseKm = WwCloudLightning::kDefBaseKm;
+	topKm = WwCloudLightning::kDefTopKm;
+	density = 1.0f;
+	tint[0] = tint[1] = tint[2] = 1.0f;
 }
 
 //! this frame's flash per renderer (the passes over the scene after the backdrop take the backdrop's)
@@ -1019,6 +1112,79 @@ bool wwCloudVolProfileSet()
 bool wwCloudVolTypeRule()
 {
 	return cs().typeRule != 0 && !red( "thunderbyte" );	// lane CLOUDTYPE2: the red thunderbyte = CLOUD5's rule
+}
+
+void wwLightningFrameBegin()
+{
+	ltFrame().valid = false;
+}
+
+bool wwLightningSky( Scene * scene, double secs, float unitK, WwLightningSky & out )
+{
+	out = WwLightningSky();
+	if ( !scene || !scene->renderer || !lightningSkyOn() )
+		return false;
+	const Cam cam = cameraOf( scene );
+	noteLightningFrame( secs, cam.km );
+	float base = 0.0f, top = 0.0f, dens = 0.0f, tint[3];
+	lowBandForFlash( base, top, dens, tint );
+	const CvLightning lt = lightningAt( base, top, dens, tint, cam.km, secs, unitK );
+	if ( !lt.on )
+		return false;
+	out.on = true;
+	const float src[4] = { lt.f.src[0], lt.f.src[1], lt.f.src[2], lt.f.invDelta };
+	const float prm[4] = { lt.f.r0sq, lt.f.mirLo, lt.f.mirHi, lt.f.flux };
+	std::copy( src, src + 4, out.src );
+	std::copy( prm, prm + 4, out.prm );
+	std::copy( lt.col, lt.col + 3, out.col );
+	out.deckKm = WwCloudLightning::deckKm( lt.baseKm, lt.sigma );
+	std::copy( cam.km, cam.km + 3, out.camKm );
+	out.level = lt.level;
+	return true;
+}
+
+bool wwLightningGround( float add[6][3] )
+{
+	struct Memo
+	{
+		bool have = false, on = false;
+		quint64 serial = 0;
+		float add[6][3] = {};
+	};
+	static Memo memo;
+	for ( int a = 0; a < 6; a++ )
+		for ( int c = 0; c < 3; c++ )
+			add[a][c] = 0.0f;
+	const LtFrame & fr = ltFrame();
+	if ( !fr.valid || !lightningSkyOn() )
+		return false;
+	/* called per program setup: the strike is the frame's (the clock and camera the sky pass noted), so memoise on the
+	 * note's serial; the switches, the weather and its share are read again on each new frame */
+	if ( !( memo.have && memo.serial == fr.serial ) ) {
+		memo.have = true;
+		memo.serial = fr.serial;
+		float base = 0.0f, top = 0.0f, dens = 0.0f, tint[3];
+		lowBandForFlash( base, top, dens, tint );
+		const CvLightning lt = lightningAt( base, top, dens, tint, fr.camKm, fr.secs, 1.0f );
+		memo.on = lt.on;
+		if ( lt.on ) {
+			float e[6];
+			WwCloudLightning::groundDalc( lt.f, lt.baseKm, lt.sigma, fr.camKm, e );
+			const float k = lt.gain * lt.level;
+			memo.on = false;
+			for ( int a = 0; a < 6; a++ )
+				for ( int c = 0; c < 3; c++ ) {
+					memo.add[a][c] = k * e[a] * lt.lin[c];
+					memo.on = memo.on || memo.add[a][c] > 0.0f;
+				}
+		}
+	}
+	if ( !memo.on )
+		return false;
+	for ( int a = 0; a < 6; a++ )
+		for ( int c = 0; c < 3; c++ )
+			add[a][c] = memo.add[a][c];
+	return true;
 }
 
 bool wwCloudVolLowColour( float out[3] )
@@ -1253,6 +1419,7 @@ bool wwCloudVolDraw( Scene * scene, const WwCloudVolView & view, QStringList & d
 			// lane CLOUD6f: a storm's flash inside the clouds (cvLtOn 0 otherwise: the composite as before)
 			const CvLightning lt = lightningOf( b, cam.km, view.cloudSeconds, f.sunK );
 			lightnings()[r] = lt;
+			noteLightningFrame( view.cloudSeconds, cam.km );	// lane LIGHTNING2: the cell's ambient takes this strike
 			if ( lt.on ) {
 				fn->glActiveTexture( GL_TEXTURE1 );
 				fn->glBindTexture( GL_TEXTURE_2D, g.hist[cur].dep );
@@ -1362,6 +1529,10 @@ bool wwCloudVolDraw( Scene * scene, const WwCloudVolView & view, QStringList & d
 			: lt.share > 0.0f ? QStringLiteral( ",lightning=%1 %2 share %3 next %4s" ).arg( st ).arg( double( lt.level ), 0, 'f', 3 )
 				.arg( double( lt.share ), 0, 'f', 2 ).arg( lt.nextS, 0, 'f', 2 )
 			: QStringLiteral( ",lightning=%1" ).arg( st );
+		if ( lt.share > 0.0f )	// lane LIGHTNING2: the schedule (the DATA law, or CLOUD6f's: the red)
+			reds += lt.law ? QStringLiteral( ",lightfreq=%1 every %2s" ).arg( lt.freq ).arg( lt.everyS, 0, 'f', 1 )
+				: QStringLiteral( ",RED=lightfreq" );
+		reds += lightningSkyOn() ? QStringLiteral( ",lightsky=on" ) : QStringLiteral( ",RED=lightsky" );
 	}
 	// lane CLOUD2C: clip = which scene depth ends the march (last = the last paint's, this = this paint's, after the scene)
 	const QString clip = sceneOn ? QStringLiteral( "last" ) : g.redo ? QStringLiteral( "this" ) : QStringLiteral( "none" );
