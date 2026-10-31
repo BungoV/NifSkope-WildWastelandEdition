@@ -6,6 +6,7 @@
 // lane REDRETIRE1: OPENCELLFIX2's other reds are twins of the red build (qmake REDTWIN=1, src/wwredtwin.h), each must
 // FAIL: REDTWIN=CELLSHOW=ticks|dropdown|presets|nest|livebind|foldrows|inline (round 3),
 // arrowframe|dropright|override|builtin|presetbar (round 4), REDTWIN=DROPDOWN=fit. tests/cellshow/run.sh runs them all.
+// lane REDRETIRE2: REDTWIN=CELLSHOW=showbutton (the Show button beside Color comes back) must FAIL too.
 
 #include "cellshowpanel.h"
 #include "widgets/wwdropdown.h"
@@ -707,6 +708,13 @@ int main( int argc, char ** argv )
 	groupChecks( style );
 	overrideChecks( style );
 	liveBindChecks();
+	{
+		// lane OPENCELLFIX2 note 7 (REDRETIRE2): the Cell dock builds no Show button beside Color
+		QWidget host;
+		QToolButton * b = wwCellShowButton( &host );
+		check( !b && !host.findChild<QToolButton *>( QStringLiteral( "CellWorkspaceShowButton" ) ),
+			"no Show button beside Color" );
+	}
 
 	std::printf( "%d checks, %d failed\n%s\n", checks, fails, fails ? "FAIL" : "PASS" );
 	return fails ? 1 : 0;

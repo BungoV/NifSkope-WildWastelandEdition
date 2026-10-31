@@ -1,5 +1,29 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## REDRETIRE2 (2026-10-31, FIX1030C): FLYFIX1's red and the Cell dock's Show-button red leave NifSkope.exe
+
+- **Why:** bungo 10-27 "Reds are scaffolding": a lane's WW_*_RED keeps the old path only until bungo himself confirms
+  the lane live. Both were confirmed by him and deferred by REDRETIRE1 only because their files were busy:
+  FLYFIX1 (bungo 10-23: "I can finally fly") and OPENCELLFIX2 (bungo OK on the panel 10-27).
+- **WW_FLYFIX_RED (the whole name) is gone.** The free camera's two rules moved to src/wwflyfix.h, which GLView calls:
+  `wwFlyTickSeconds` (a gears tick moves at most 0.1 s, so a stall is never one long jump) and `wwFlyResyncOnly` (the
+  first move after focus / activation / the cursor coming back only re-centres). The old way lives only as red twins
+  of the new unit test's red build (src/wwredtwin.h, -DWW_REDTWIN): REDTWIN=FLYFIX=tick and REDTWIN=FLYFIX=refocus.
+  The in-app gate (live verb `flycheck`) runs the same rules and now prints `flycheck PASS|FAIL | ...` (no red suffix).
+  The switch table loses WW_FLYFIX_RED (1241 -> 1240 names, no stage moved).
+- **WW_CELLSHOW_RED=showbutton is gone** (the name stays for menu|sync|groups). The Cell dock asks
+  `wwCellShowButton()` (src/ui/cellshowpanel.cpp), which returns no button; the old Show button beside Color lives only
+  as the twin REDTWIN=CELLSHOW=showbutton of tests/cellshow's red build. The in-app gate's "no Show button beside
+  Color" check is unchanged.
+- **Default path:** unchanged (the twins are a constant false without WW_REDTWIN, so the compiler drops the old
+  branches). Nothing to see in a picture.
+- **Gates:** build RC 0; the new exe holds WW_FLYFIX_RED 0 times and "showbutton" 0 times (the batch-3 exe: 3 and 1).
+  tests/flyfix (new): green 9 checks 0 failed; twin tick fails 1, twin refocus fails 3; the green build ignores the twin
+  and the old env name. tests/cellshow: green 84 checks 0 failed (+1: no Show button), twin showbutton fails 1, every
+  earlier red and twin still fails. tests/spells/red_census.py: both GONE; 274 names. No shader changed (no sweep).
+- **Census re-run (10-31):** no new bungo live confirmation on record since 10-30 19:25; tonight's FIX1030C lanes keep
+  their reds (no pictures yet).
+
 ## FARTOGGLE4 (2026-10-31, FIX1030C): far objects blinking on a moving camera with the TAA off -- measured, fix REFUSED with numbers (no code change)
 
 - **Bungo's settings** (his saved QSettings, read-only): Antialiasing 4 = 4x MSAA, Field Of View 60, Modern temporal AA

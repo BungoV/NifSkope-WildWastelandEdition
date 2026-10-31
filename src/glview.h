@@ -55,9 +55,6 @@ class NifSkope;
 class QMenu;
 class QTimer;
 
-//! lane FLYFIX1: WW_FLYFIX_RED=1 brings back the free camera's old refocus jump and 1 s tick
-bool wwFlyFixRed();
-
 
 //! The main [Viewport](@ref viewport_details) class
 class GLView final : public QOpenGLWindow

@@ -1104,6 +1104,17 @@ int wwDisplayLeftovers( const QWidget * panel )
 	return panel ? panel->property( "wwDisplayLeftovers" ).toInt() : -1;
 }
 
+QToolButton * wwCellShowButton( QWidget * parent )
+{
+	if ( !twin( "showbutton" ) )
+		return nullptr;
+	auto * b = new QToolButton( parent );
+	b->setObjectName( QStringLiteral( "CellWorkspaceShowButton" ) );
+	b->setText( QCoreApplication::translate( "CellWorkspace", "Show" ) );
+	WwDropdown::applyStyle( b );
+	return b;
+}
+
 QVariantMap wwDisplayState( const QWidget * panel )
 {
 	QVariantMap s;

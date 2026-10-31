@@ -32,6 +32,7 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 #include "glview.h"
 #include "wwswitch.h"	// lane TESTDRIVER1: the WW_* switch store
+#include "wwflyfix.h"	// lane REDRETIRE2: FLYFIX1's free-camera rules (their old way is a test twin now)
 #include "cellspeed.h"
 #include "cellcambounds.h"	// lane CAMGATE1: the camera never shows an out-of-bounds or under-terrain view
 #include "cellstream.h"		// lane CELLSTREAM1: the cells round the camera
@@ -22668,8 +22669,7 @@ void GLView::advanceGears()
 	}
 
 	// lane FLYFIX1: the camera moves at most 0.1 s a tick, so a stalled frame or a spell away is never one long jump
-	if ( !wwFlyFixRed() )
-		dT = std::min( dT, 0.1f );
+	dT = wwFlyTickSeconds( dT );
 	float	rotateStep = cfg.rotSpd * dT;
 	// Fix movement speed for Starfield scale
 	dT *= scale();
@@ -22976,8 +22976,8 @@ QString GLView::wwFlyRefocusCheck()
 	flyResync = false;
 	updateViewpoint();
 	update();
-	return QStringLiteral( "flycheck %1%2 | %3" ).arg( pass ? QStringLiteral( "PASS" ) : QStringLiteral( "FAIL" ) )
-		.arg( wwFlyFixRed() ? QStringLiteral( " (red WW_FLYFIX_RED=1)" ) : QString() ).arg( out.join( QStringLiteral( " | " ) ) );
+	return QStringLiteral( "flycheck %1 | %2" ).arg( pass ? QStringLiteral( "PASS" ) : QStringLiteral( "FAIL" ) )
+		.arg( out.join( QStringLiteral( " | " ) ) );
 }
 
 QImage GLView::grabSupersampled( int shift )
@@ -23450,7 +23450,8 @@ void GLView::focusOutEvent( QFocusEvent * )
 }
 
 /* lane FLYFIX1 (bungo 10-23: the free camera swung to the void on coming back to the window): focus, activation or
- * the cursor leaving/entering makes the next free-camera move a re-centre, never a look; WW_FLYFIX_RED=1 is the old way */
+ * the cursor leaving/entering makes the next free-camera move a re-centre, never a look (src/wwflyfix.h; the old way is
+ * the red twin REDTWIN=FLYFIX=refocus of tests/flyfix since REDRETIRE2) */
 bool GLView::event( QEvent * e )
 {
 	switch ( e->type() ) {
@@ -23467,12 +23468,6 @@ bool GLView::event( QEvent * e )
 		break;
 	}
 	return QOpenGLWindow::event( e );
-}
-
-bool wwFlyFixRed()
-{
-	WW_SWITCH_STATIC( bool, red, qEnvironmentVariableIntValue( "WW_FLYFIX_RED" ) == 1 );
-	return red;
 }
 
 bool GLView::viewportClaimsKey( int n ) const
@@ -24239,8 +24234,7 @@ void GLView::mouseMoveEvent( QMouseEvent * event )
 		QPointF c( width() * 0.5, height() * 0.5 );
 		auto p = getQMouseEventPosition( event );
 		// lane FLYFIX1: the first move after a refocus is where the cursor came back, not a look: re-centre only
-		if ( flyResync && !wwFlyFixRed() ) {
-			flyResync = false;
+		if ( wwFlyResyncOnly( flyResync ) ) {
 			if ( flyGrab )
 				QCursor::setPos( mapToGlobal( QPoint( int( c.x() ), int( c.y() ) ) ) );
 			return;
