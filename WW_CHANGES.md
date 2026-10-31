@@ -1,3 +1,32 @@
+## FIX1101A atmo (2026-10-31): the physical sky's multiple scattering at the horizon, and a night sky floor
+
+The full-day audit (notes/fix1101a/atmo/ATMO_TABLE.md): the physical sky drawn by the real shaders against an
+independent Monte Carlo of the same medium (all orders, the Earth's shadow exact) at sun -18..+60 deg, and against
+published clear-sky values. The sun (illuminance 103.7 klx at 60 deg, CCT 5665 / 3847 / 2013 K at 60 / 10 / 2 deg),
+the zenith (-12..+20 %), the Belt of Venus and the twilight darkening are in tolerance. Two faults are fixed here:
+
+- F1, the multiple-scattering LUT's rows (ships ON): the 3-degree horizon read 20-37 % under the Monte Carlo at sun 0..35
+  because the MS LUT's first row above the ground sat at 3.2 km and its 20 uniform steps put the first sample 25 km
+  out, so the weather's 0.1-1 km haze layer had no row. res/shaders/atmo_common.glsl (atMsUv, atMsRowToH): rows at
+  sqrt(height / 100 km); atmo_ms.frag: 40 steps packed toward the texel. Horizon mean error 24.8 -> 18.0 %, worst
+  -33.5 -> -26.4 %. Red (live): WW_ATMO_RED=msold (atmosphere.cpp medium() sets atMsOld for every atmo pass; the LUT
+  key carries msold so a live set rebuilds the table; the sky line echoes RED=msold).
+- F2, the night sky's own light (ships ON): at sun -18 the moonless sky read 6.3e-6 cd/m2 at the zenith, 30-160x under
+  the natural night sky (airglow, zodiacal light, unresolved stars: 1.7e-4..4.3e-4 cd/m2, Leinert et al. 1998).
+  atmo_sky.frag adds atFloor = gl/atmomath.h kNightFloor (zenith 3.8e-4 cd/m2), van Rhijn's slant factor for a 90 km
+  shell, times the view ray's transmittance (0 into the ground: no horizon edge). ~1e-7 of the day zenith: no daytime
+  change (4.4e-7 of the zenith at sun 10). Red (live): WW_ATMO_RED=nofloor.
+- Not fixed (leftovers in ATMO_TABLE.md sec. 8): the Earth's shadow at civil twilight (anti-sun sky 1.4-2.8x at sun
+  -3..-6, Hillaire's isotropic MS inside the shadow), the remaining -18..-27 % horizon at sun 2-10, a spectral sky.
+- Volumetric air (LATE ITEM 14), no code change: the froxels against a brute-force march with the shadow geometry keep
+  the shafts (shadow deficit 1.00, shape 0.998-0.999, mean error 0.1-0.4 %, no slice staircase); strength per weather
+  (Foggy 06:00 V 0.24 km glows, Clear noon V 7.4 km faint) from the records (notes/fix1101a/atmo/tools/shafts.py,
+  fogstrength.py).
+- Unit: tests/atmofix1101a/run.sh (real shaders in the hidden GL context, Monte Carlo fixture mc_ref.tsv): green GATE OK;
+  red msold fails ms-horizon-mean / -worst; red nofloor fails floor-zenith / floor-anti30.
+- Gates: build rc 0 (exe literals atMsOld, atFloor, nofloor, ",msold" UTF-16 present); link sweeps base 405, RTDDGI none,ubo 270, PRT 405 (not ok 0). src/wwswitchstages.inc
+  regenerated (line numbers only; WW_ATMO_RED stays live).
+
 ## HORIZONBAND1 (FIX1031B area A, 2026-10-31): the horizon blends - no cyan strip with a hard top edge
 
 bungo's pictures (notes/shots1031 sheet_1 spot 3, sheet_spot5 sea, CommonwealthClear 12:00): a saturated cyan strip
