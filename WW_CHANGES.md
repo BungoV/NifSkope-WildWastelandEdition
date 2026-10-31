@@ -44,6 +44,34 @@
 - **Gates:** `bash tests/treeleaf4/run.sh <out>`: sites green PASS, red (563dcf97) FAIL; fxcov_gate (the real
   fo4_effectcell vs the real taa_objvel, hidden GL context) green 0 of 32 checks fail, reds base + resid FAIL.
   tests/treeleaf3 green. Owed: pictures of a moving alpha-tested / blended effect under TAA (red pairs above).
+## WATERGLINT2 (2026-10-31, FIX1031B area B, parent row WATERLOOK1): near sun glare, crest glow, river flow
+
+- **Near sun glare (WATERGLINT1 erased it).** bungo's 10-31 river and sea frames: with the glitter on, the near sun path
+  showed the bed only (river box 88.9 levels vs 123.2 with WW_CELL_WATER_GLINT_RED=noglitter; sea 75.2 vs 160.3) and
+  no specks. Near water a 2 cm cell holds about 1e-4 lit facets (the sun's cone is 0.27 deg), so nearly every pixel
+  counted 0 and the rare lit one carried 1e4 x the mean: the highlight shoulder after the count squashed it (the glare's
+  mean fell to 0.2-1.3 %), and even an exact count is clipped by the tone curve. Now the shoulder takes the mean glare
+  first and the count multiplies it, and a cell counts at least 4 lit facets (`kWwGlitLamMin`, the spread a display
+  can show). New `wwWaterGlareGlit` (res/shaders/water_glitter.glsl); fo4_water.frag calls it. Ships ON (it is the
+  Water sun glare row's own law). Red `WW_CELL_WATER_GLINT_RED=sparse` (live): the count and order before.
+  Far water (more than 4 lit facets a cell) is unchanged; WATERGLINT1's offline density/spread gates below 4 lit
+  facets a cell no longer apply (notes/waterlook1/tools/glitter_gl.py: mean, anchor, lodblend, sun, disc PASS).
+- **Crest glow could not be seen.** Facing a 15.8 deg sun the glow was 0.75 % of the near sea's light (mean +0.3
+  levels, crest faces p99 +2; measured from the run6 frames through the tone curve's inverse). Gain 0.25 -> 2.5
+  (res/shaders/water_sss.glsl): a single-scatter estimate (b ~ 0.3 / m coastal, ~0.5 m of crest, crests ~15 % of the
+  area) puts the area mean near 10x; projected on that frame +2.6 levels mean, crest faces +9 (p90) to +17 (p99).
+  Red `WW_CELL_WATER_OCEAN_RED=dimglow` (live): 0.25.
+- **River waves did not flow.** The bake's flow is the WATR NAM0 linear velocity (median 0.40, max 1.6; WATERFLOWBAKE1
+  left the scale to the look), and the look read it as u/s: the waves moved 6 mm/s. NAM0 is the current the game's
+  physics pushes floating things with, and the physics works in metres: river bodies now read it as m/s (0.4 m/s =
+  28 u/s; res/shaders/water_flowwaves.glsl). INFERRED from the numbers and the convention, not from a capture. Lakes and
+  the sea (one constant NAM0 a body, 0.3-0.5) keep the reading before. Red `WW_CELL_WATER_OCEAN_RED=rawflow` (live).
+  Contact ripples: no fault (rings = 0.7 x the incident wave slope; the river's own waves barely show in those frames).
+- Gates (offline, the real shaders through the driver at the cameras of bungo's frames; each red = main 5422be6c):
+  tests/waterglint2 (sun-path box: linear mean 0.999-1.002, shown 0.976-0.989 of the noglitter red, specks >= 1.5x
+  15-18 % and <= 0.5x 17-24 %; red sparse and main: linear 0.002-0.013, shown 0.722 river / 0.470 sea = the frames'
+  88.9 / 75.3 levels, no specks), tests/watercrestglow (share of the water's light 0.075, p90 0.236; red 0.0075),
+  tests/waterflowspeed (river 27.79 u/s, lake / sea 0.40; red 0.40 everywhere).
 
 ## RESTIRSPV1 (2026-10-31, FIX1031A): restir.spv.h regenerated from its own source, and a test that every SPIR-V header matches its source
 

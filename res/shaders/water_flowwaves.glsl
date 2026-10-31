@@ -45,10 +45,20 @@ float wwOcFlowNorm( vec2 v, int set )
 	return inversesqrt( max( a * a + b * b + 2.0 * rho * a * b, 1e-6 ) );
 }
 
+/* lane FIX1031B: the bake's flow is the WATR NAM0 linear velocity (WATERFLOWBAKE1: "FO4 NAM0 speeds are small; scale
+ * in the look", and the look never did): median 0.40, max 1.6, read as u/s the waves moved 6 mm/s (bungo's 10-31 river
+ * frames: flow on = off). NAM0 is the current the game's physics pushes floating objects with, and the physics works in
+ * metres (kOcMetre): 0.4 m/s is a slow river. INFERRED from the numbers and the convention, not from a capture.
+ * Rivers only: a lake's or the sea's one constant NAM0 (0.3-0.5) is the game's push on floating things, not a current
+ * to carry the whole body's waves (an engineering choice; they keep the reading before).
+ * Red WW_CELL_WATER_OCEAN_RED=rawflow (1024): the bake's numbers as u/s everywhere. */
+const float kOcFlowUnit = 1.0 / kOcMetre;	// u/s a bake unit (m/s)
+
 // the spectrum at P (as wwWaterOcean) carried by the flow there; red noflow (256) reads it in place
 WwOcean wwWaterOceanFlowed( vec2 P, vec2 dPx, vec2 dPy )
 {
-	vec2 v = ( waterOceanRed & 256 ) != 0 ? vec2( 0.0 ) : wwWaterFlowSmooth( P );
+	vec2 v = ( waterOceanRed & 256 ) != 0 ? vec2( 0.0 ) : wwWaterFlowSmooth( P )
+		* ( ( waterOceanRed & 1024 ) != 0 || abs( wwWaterInfo( P ).w - 1.0 ) > 0.5 ? 1.0 : kOcFlowUnit );
 	if ( v == vec2( 0.0 ) )
 		return wwWaterOcean( P, dPx, dPy );
 	int set;

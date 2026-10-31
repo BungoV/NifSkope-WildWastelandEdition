@@ -12,10 +12,16 @@
  *              bin (the sun cone's width), so the specks follow the sun, the view and the waves
  *   sun disc   the sun's radius (0.267 deg) widens the lobe: alpha^2 += r^2 / 8 (the half-vector's disc, per axis)
  * Reds (WW_CELL_WATER_GLINT_RED): noglitter (the mean alone), nodisc (a point sun), pixel (the cells in screen pixels,
- * not the world: specks swim with the camera), nolodblend (one level: specks pop where the footprint crosses 2^l). */
+ * not the world: specks swim with the camera), nolodblend (one level: specks pop where the footprint crosses 2^l).
+ * lane FIX1031B (WATERGLINT2): near water a cell holds about 1e-4 of a lit facet (the sun's cone is 0.27 deg), so the
+ * count was 0 in nearly every pixel and the rare lit one carries 1e4 x the mean: the tone map clips it, and the sun path
+ * lost 30% (river) to 53% (sea) of its shown brightness (bungo's 10-31 frames). A cell now counts at least
+ * kWwGlitLamMin lit facets (the spread a display can show; the mean is unchanged), and the shoulder takes the mean
+ * glare BEFORE the count (the count's mean then stays 1 after it). Red sparse (128): the count and order before. */
 
 const float kWwGlitFacet = 1.4;	// u, a facet's width (2 cm: the capillary scale)
 const float kWwGlitSunR = 0.00466;	// rad, the sun's angular radius
+const float kWwGlitLamMin = 4.0;	// FIX1031B: the fewest lit facets a cell counts (shown mean kept within ~2-3%)
 
 // the sun disc's share of the lobe (GGX alpha^2), none under red nodisc
 float wwGlitSunA2()
@@ -57,7 +63,10 @@ float wwGlitLevel( vec2 xy, float lev, float p, uvec2 hb )
 	uvec4 h = wwGlitHash( uvec4( uvec2( ic ), uint( lev ) * 0x9E37u ^ hb.x, hb.y ) );
 	vec2 u = vec2( h.xy >> 8u ) / 16777216.0;
 	float n = exp2( 2.0 * lev );	// facets in the cell
-	return wwGlitCount( n * p, u );
+	float lam = n * p;
+	if ( ( waterGlintRed & 128 ) == 0 )	// FIX1031B: no count the display cannot show (red sparse: the bare count)
+		lam = max( lam, kWwGlitLamMin );
+	return wwGlitCount( lam, u );
 }
 
 /* the factor on the glare (mean 1). xy world (u), foot the pixel's footprint area (u^2), h the half-vector's slope
@@ -82,4 +91,23 @@ float wwWaterGlitter( vec2 xy, float foot, vec2 h, float a2, float cosH )
 		f = 0.0;
 	float g0 = wwGlitLevel( xy, l0, p, hb );
 	return f > 0.0 ? mix( g0, wwGlitLevel( xy, l0 + 1.0, p, hb ), f ) : g0;
+}
+
+/* lane FIX1031B: the glare (x the sun colour) of fo4_water.frag: the mean lobe with the sun's disc, its highlight
+ * shoulder (red noshoulder: none), then the facets counted in this pixel. Red sparse: the count before the shoulder
+ * (WATERGLINT1's order, which also bent the specks' mean down). reflA2 > 0, xy world (u), foot the footprint (u^2). */
+float wwWaterGlareGlit( vec3 Ns, vec3 V, vec3 Ldir, float reflA2, vec2 xy, float foot )
+{
+	float glA2 = reflA2 + wwGlitSunA2();
+	vec3 glH = normalize( Ldir - V );
+	float g = wwWaterGlare( Ns, V, Ldir, vec3( 1.0 ), glA2, waterGlintK.y, false ).x;
+	float k = wwWaterGlitter( xy, foot, glH.xy / max( glH.z, 1e-3 ) - Ns.xy / max( Ns.z, 1e-3 ), glA2, dot( glH, Ns ) );
+	bool shoulder = ( waterGlintRed & 4 ) == 0;
+	if ( ( waterGlintRed & 128 ) != 0 ) {
+		g *= k;
+		return shoulder ? g / ( 1.0 + g / waterGlintK.x ) : g;
+	}
+	if ( shoulder )
+		g = g / ( 1.0 + g / waterGlintK.x );
+	return g * k;
 }

@@ -5,7 +5,11 @@
 // slopes the spectrum's mips lost (Gaussian, the LEAN variance), so it takes the EXPECTED facing part,
 // a Phi( a / sd ) + sd phi( a / sd ): near it is the slope's own face, far it becomes the spectrum's mean
 // ( sd / sqrt( 2 pi ) ), the far water's colour, with no shimmer and no change in the mean between the two.
-const float kGlowGain = 0.25;	// the glow per unit facing slope at the forward peak / the sun x body colour
+/* lane FIX1031B: the gain was 0.25, and bungo's 10-31 sea frame facing a 15.8 deg sun showed the glow as 0.75% of the
+ * near water's light (mean +0.3 levels, crest faces p99 +2): nothing. Single scattering through a crest (b ~ 0.3 / m
+ * coastal, ~0.5 m of water, the crests ~15% of the area, the HG lobe / 4 pi on the Lambert sun scale) puts the area
+ * mean near 10x that: gain 2.5 (crest faces +9 levels at p90 in that frame). Red WW_CELL_WATER_OCEAN_RED=dimglow: 0.25. */
+const float kGlowGain = 2.5;	// the glow per unit facing slope at the forward peak / the sun x body colour
 
 // the expected positive part of a + b, b ~ N( 0, sd^2 )
 float wwPosMean( float a, float sd )
@@ -32,5 +36,6 @@ vec3 wwWaterCrestGlow( vec2 s, float var, vec3 V, vec3 L, vec3 sun, vec3 body )
 	float c = wwPosMean( a, sqrt( 0.5 * max( var, 0.0 ) ) );
 	const float g = 0.5;
 	float hg = ( 1.0 - g * g ) / pow( 1.0 + g * g - 2.0 * g * clamp( dot( V, L ), -1.0, 1.0 ), 1.5 );	// / isotropic
-	return kGlowGain * c * hg * smoothstep( 0.0, 0.05, L.z ) * sun * body;
+	float gain = ( waterOceanRed & 512 ) != 0 ? 0.25 : kGlowGain;	// FIX1031B: red dimglow, the gain before
+	return gain * c * hg * smoothstep( 0.0, 0.05, L.z ) * sun * body;
 }
