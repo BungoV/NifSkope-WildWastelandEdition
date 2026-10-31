@@ -18,8 +18,9 @@ spot 6). Every change ships ON; the old path is a red. Gates offline through the
 - WATER PRESET (src/gl/waterpreset.h): WW_CELL_WATER_PRESET low|medium|high|ultra (WW/CellWaterPreset, default ULTRA =
   today's rows). Low = the game's water + its SSR; Medium + clear colour, reflections, soft edge, river foam (its own twin
   fo4_waterlookm.prog: 0.45 vs 0.65 ms); High + ocean spectrum, shore foam; Ultra + glare facets, contact foam, the OFF
-  rows. MEASURED (tests/watercost, RTX 5070 Ti, 1080p, a frame all water, sea): Low 0.31, Medium 0.58, High 1.12,
-  Ultra 1.30 ms incl. the SSR (budget 0.4 / 0.8 / 1.2 / 1.8); today 1.71 ms at every step. tests/waterpreset.
+  rows. MEASURED (tests/watercost, RTX 5070 Ti, 1080p, a frame all water, sea): Low 0.31, Medium 0.55, High 1.10,
+  Ultra 1.27 ms incl. the SSR (budget 0.4 / 0.8 / 1.2 / 1.8); today 1.71 ms at every step. tests/waterpreset. Show menu
+  "Water quality" (cellworkspace.cpp) sets it live.
 - THE SEA'S FINE RIPPLES (LATE ITEM 1; res/shaders/water_detail.glsl): the sea's finest wave cascade is 15.3 m on 128
   texels and the record's finest layer holds its energy at 23 cm (MEASURED from the game's textures): nothing under ~24 cm
   drew. Two octaves of the record's OWN NAM4 at its uv scale / 4.1 and / 6.7, turned 37 and -71 deg (median wavelengths

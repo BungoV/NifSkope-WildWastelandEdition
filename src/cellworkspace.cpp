@@ -837,6 +837,21 @@ void CellWorkspacePanel::buildUi()
 	cellSsr = tick( showMenu, tr( "Screen-Space Reflections" ), "CellWorkspaceSsr", wwCellSsrOn() );	// note 15: labels only
 	if ( wwCellSsrExteriorOn() != wwCellSsrOn() )
 		wwCellSsrRowSet( wwCellSsrOn() );	// note 20: one row sets both halves; an old split takes the row's state
+	// lane FIX1101A (src/gl/waterpreset.h): the water look's four GPU steps; Ultra (the default) = every water row as it ships
+	cellWaterQ = showMenu->addMenu( tr( "Water quality" ) );
+	cellWaterQ->setObjectName( QStringLiteral( "CellWorkspaceWaterQuality" ) );
+	cellWaterQGroup = new QActionGroup( cellWaterQ );
+	cellWaterQGroup->setExclusive( true );
+	{
+		const QStringList names = { tr( "Low" ), tr( "Medium" ), tr( "High" ), tr( "Ultra" ) };
+		for ( int k = 0; k < names.size(); k++ ) {
+			QAction * a = cellWaterQ->addAction( names.at( k ) );
+			a->setCheckable( true );
+			a->setData( k );
+			a->setChecked( k == wwCellWaterPreset() );
+			cellWaterQGroup->addAction( a );
+		}
+	}
 	cellReflProbe = tick( showMenu, tr( "Reflection probes" ), "CellWorkspaceReflProbe", wwCellReflProbeOn() );	// lane REFLPROBE1
 	// lane SSGI1: the screen-space bounce, ships off; its quality is FO4CS's four tiers
 	cellSsgi = tick( showMenu, tr( "Screen-Space Global Illumination" ), "CellWorkspaceSsgi", wwCellSsgiOn() );	// note 14: label only
@@ -1454,6 +1469,11 @@ void CellWorkspacePanel::buildUi()
 	} );
 	connect( cellSsgiQGroup, &QActionGroup::triggered, this, [this]( QAction * a ) {
 		wwCellSsgiSetQuality( a->data().toInt() );
+		if ( glView )
+			glView->update();
+	} );
+	connect( cellWaterQGroup, &QActionGroup::triggered, this, [this]( QAction * a ) {	// lane FIX1101A: live (per draw)
+		wwCellWaterPresetSet( a->data().toInt() );
 		if ( glView )
 			glView->update();
 	} );

@@ -196,6 +196,8 @@ private:
 	QAction * cellSsgi = nullptr;	// lane SSGI1
 	QMenu * cellSsgiQ = nullptr;
 	QActionGroup * cellSsgiQGroup = nullptr;
+	QMenu * cellWaterQ = nullptr;	// lane FIX1101A: the water quality preset
+	QActionGroup * cellWaterQGroup = nullptr;
 	QAction * cellAoDecal = nullptr;
 	QAction * cellSpecOcc = nullptr;	// lane SPECOCC1: specular occlusion from the baked sky visibility; ships off
 	QAction * cellGiGpu = nullptr;
