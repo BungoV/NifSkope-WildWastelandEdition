@@ -10,6 +10,7 @@ BSD License - see nifskope.h
 #include "esmfile.hpp"
 #include "gamemanager.h"
 #include "cellmodsource.h"	// lane SKYTOP1: weather --load-order
+#include "gl/precipmath.h"	// lane RAINFOG2: weather --precip (the record rules)
 
 #include <QDir>
 #include <QElapsedTimer>
@@ -566,7 +567,7 @@ namespace {
 // lane SKYTOP1: one plugin as its TES4 record plus only the wanted top groups (each skipped by its size)
 bool groupImage( const QString & path, QByteArray & out, qint64 & fileSize, bool dropOverrides, QString * why )
 {
-	static const char * const kWanted[] = { "WTHR", "CLMT", "IMGS", "GMST", "GDRY", "LENS", "REGN", "GLOB" };	// GLOB: WEATHERBLEND4's RDWT chances
+	static const char * const kWanted[] = { "WTHR", "CLMT", "IMGS", "GMST", "GDRY", "LENS", "REGN", "GLOB", "SPGD" };	// GLOB: WEATHERBLEND4's RDWT chances; SPGD: RAINFOG2's precipitation shaders
 	out.clear();
 	QFile f( path );
 	if ( !f.open( QIODevice::ReadOnly ) ) {
@@ -1025,6 +1026,11 @@ bool EsmWeather::read( quint32 formID, WwWeatherData & out, QString * why )
 	out.sunLensForm = gnam ? esm->mapFormID( *r, gnam ) : 0;
 	if ( out.sunLensForm && !wwLensRead( *esm, out.sunLensForm, out.sunLens ) )
 		out.sunLens = WwLens();
+	// lane RAINFOG2: MNAM -> the SPGD's type and density (the rain amount; the particles and the rain fog read them)
+	if ( out.precipForm && !wwSpgdRead( *esm, esm->mapFormID( *r, out.precipForm ), out.precipType, out.precipDensity, out.precipEdid ) ) {
+		out.precipType = -1;
+		out.precipDensity = -1.0f;
+	}
 	if ( why )
 		why->clear();
 	return true;
@@ -1140,6 +1146,37 @@ bool wwLensRead( ESMFile & esm, quint32 formID, WwLens & out )
 		return false;
 	}
 	return true;
+}
+
+bool wwSpgdRead( ESMFile & esm, quint32 formID, int & type, float & density, QString & edid )
+{
+	type = -1;
+	density = -1.0f;
+	edid.clear();
+	const ESMFile::ESMRecord * r = formID ? esm.findRecord( formID ) : nullptr;
+	if ( !r || r->type == GRUP || !( *r == "SPGD" ) )
+		return false;
+	bool got = false;
+	try {
+		ESMFile::ESMField f( esm, *r );
+		while ( f.next() ) {
+			if ( f == "EDID" ) {
+				edid = fieldString( f );
+			} else if ( f == "DATA" && ( f.size() >= 96 || f.size() >= 48 ) ) {
+				const int stride = f.size() >= 96 ? 8 : 4;	// 96: each field + 4 unused bytes (Fallout4.esm)
+				quint32 t = 0;
+				std::memcpy( &t, reinterpret_cast<const char *>( f.data() ) + 9 * stride, 4 );
+				std::memcpy( &density, reinterpret_cast<const char *>( f.data() ) + 11 * stride, 4 );
+				type = t == 1u ? 1 : 0;
+				if ( !std::isfinite( density ) )
+					density = -1.0f;
+				got = true;
+			}
+		}
+	} catch ( std::exception & ) {
+		return false;
+	}
+	return got;
 }
 
 quint32 EsmWeather::regionWeather( quint32 regn, int * listed )
@@ -1947,6 +1984,8 @@ QString WwFog::describe() const
  *   --census          every WTHR: parse verdict + the NAM0/DALC histograms
  *   --list            every WTHR, one line each
  *   --imagespace      (with --weather) an `imgs` line per ToD: the IMGS read, default=1 where the game's 0x167 stands in
+ *   --precip          lane RAINFOG2: a `precip` line per WTHR: flags, MNAM, the SPGD's EDID/type/density, the record
+ *                     rule's kind (gl/precipmath.h spgdKind) and rate scale, the old class-flag rule's kind
  *   --region r[;r..]  lane WEATHERBLEND4: with --at x,y and --seed s, a `region` line per REGN and the `regionpick`
  *   --sky             (with --weather + --hour) the engine clock (lane PBRWX1): `gmst`, `climate2`, and per
  *                     hour `skyclock`, `skycolor`, `cloud` (layers 0..15) and `moon` (per --day)
@@ -1970,6 +2009,7 @@ int cmdWeather( const QStringList & args )
 	bool census = false, doList = false, sky = false, fog = false;
 	bool groups = false, loadOrder = false;	// lane SKYTOP1
 	bool imgs = false;	// lane WEATHERBLEND3
+	bool precipList = false;	// lane RAINFOG2
 	QString regionArg, atArg;	// lane WEATHERBLEND4
 	quint32 regionSeed = 0, regionWorld = 0;
 	int regionRed = 0;	// lane WEATHERBLEND5
@@ -2001,6 +2041,8 @@ int cmdWeather( const QStringList & args )
 			doList = true;
 		else if ( a == "--imagespace" )	// lane WEATHERBLEND3: an `imgs` line per ToD
 			imgs = true;
+		else if ( a == "--precip" )	// lane RAINFOG2: a `precip` line per WTHR (MNAM -> SPGD, the record rules)
+			precipList = true;
 		else if ( a == "--region" )	// lane WEATHERBLEND4: the teleport's region pick
 			regionArg = next();
 		else if ( a == "--at" )
@@ -2135,6 +2177,25 @@ int cmdWeather( const QStringList & args )
 			: wwRegionWeatherPick( in.at( k ).list.constData(), int( in.at( k ).list.size() ), wwRegionDraw( regionSeed ) );
 		say( QString( "regionpick chosen=%1 seed=%2 draw=%3 pick=%4" ).arg( k < 0 ? QStringLiteral( "none" ) : in.at( k ).edid )
 			.arg( hex8( regionSeed ) ).arg( wwRegionDraw( regionSeed ) ).arg( hex8( pick ) ) );
+	}
+
+	if ( precipList ) {	// lane RAINFOG2: what each record says about its precipitation (tests/rainfog2 diffs it with a census)
+		static const char * const kKind[3] = { "none", "rain", "snow" };
+		for ( const WwWeatherEntry & e : all ) {
+			WwWeatherData w;
+			QString why;
+			if ( !ew.read( e.formID, w, &why ) ) {
+				say( QString( "precip refused id=%1 reason=\"%2\"" ).arg( hex8( e.formID ), why ) );
+				continue;
+			}
+			const int st = w.precipForm ? w.precipType : -2;
+			const int fk = WwPrecip::flagKinds( w.classFlags );
+			say( QString( "precip id=%1 edid=%2 flags=%3 mnam=%4 spgd=%5 type=%6 density=%7 kind=%8 scale=%9" )
+				.arg( hex8( e.formID ), w.edid ).arg( unsigned( w.classFlags ) ).arg( w.precipForm ? 1 : 0 )
+				.arg( w.precipEdid.isEmpty() ? QStringLiteral( "-" ) : w.precipEdid ).arg( st ).arg( double( w.precipDensity ), 0, 'g', 9 )
+				.arg( QLatin1String( kKind[WwPrecip::spgdKind( st )] ) ).arg( WwPrecip::spgdRateScale( w.precipDensity ), 0, 'f', 6 )
+				+ QString( " flagkind=%1" ).arg( fk == 3 ? QStringLiteral( "rain+snow" ) : QLatin1String( fk == 1 ? "rain" : fk == 2 ? "snow" : "none" ) ) );
+		}
 	}
 
 	if ( doList )

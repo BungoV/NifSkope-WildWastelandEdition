@@ -1,0 +1,108 @@
+edid	form	flags	precipIn	precipOut	spgd	spgdDensity	spgdType
+DLC03_RadStorm	DLCCoast.esm|0074C6	24	124	255			
+DLC03_UNUSEDMistyFogWeather	DLCCoast.esm|0074F2	2	128	255			
+DLC03_TestMistyWeather	DLCCoast.esm|0074F3	2	128	255			
+DLC03_RadMistWeather	DLCCoast.esm|0074F5	2	128	163			
+DLC03_RainWeather	DLCCoast.esm|0074FA	196	128	163	ActualRain	7.0	0
+DLC03_RadFogWeather	DLCCoast.esm|007FBA	2	128	163			
+DLC03_ClearWeather	DLCCoast.esm|009962	1	128	255			
+DLC03VirtualWeather01	DLCCoast.esm|023A97	0	128	255			
+DLC03AtomM01_RadStorm	DLCCoast.esm|0247B6	24	124	255			
+DLC03VirtualWeather01Original	DLCCoast.esm|031416	0	128	255			
+DLC03_RadMistWeatherBeforeGrantMessedItUp	DLCCoast.esm|0427EB	2	128	163			
+DLC03_ClearWeatherFast	DLCCoast.esm|045F6F	1	128	255			
+DLC03VirtualWeather01OriginalFog	DLCCoast.esm|054132	0	128	255			
+FXWthrWindowNoGlow01	DLCCoast.esm|056378	0	0	0			
+DLC03_ClearWeatherFastBackup	DLCCoast.esm|056638	1	128	255			
+dlc03_radmistweatherFast	DLCCoast.esm|05D0C4	2	128	163			
+DLC04NukaWorldClear	DLCNukaWorld.esm|007E3B	1	128	255			
+DLC04NukaWorldRainMarkT	DLCNukaWorld.esm|00C60B	196	0	7	ActualRain	7.0	0
+DLC04NukaWorldDustMarkT	DLCNukaWorld.esm|01FAB4	1	128	255			
+DLC04NukaWorldClearMarkT	DLCNukaWorld.esm|030AC6	1	128	255			
+DLC04NukaWorldDustBackup	DLCNukaWorld.esm|030AC7	1	128	255			
+DLC04NukaWorldRainBackup	DLCNukaWorld.esm|030AC8	196	128	163	ActualRain	7.0	0
+DLC04NukaWorldClearBackup	DLCNukaWorld.esm|030ACA	1	128	255			
+DLC04NukaWorldDustBackup2	DLCNukaWorld.esm|030ACB	1	128	255			
+DLC04NukaWorldRainBackup2	DLCNukaWorld.esm|030ACC	196	128	163	ActualRain	7.0	0
+DLC04NukaWorldRain	DLCNukaWorld.esm|030ACD	196	128	163	ActualRain	7.0	0
+DLC04NukaWorldDust	DLCNukaWorld.esm|030ACE	8	128	255			
+DLC04NukaWorldClearDusty	DLCNukaWorld.esm|0367CA	1	128	255			
+DLC04NukaWorldClear_Trailer2	DLCNukaWorld.esm|0396A2	1	128	255			
+DLC04NukaWorldClear_Trailer	DLCNukaWorld.esm|0396A3	1	128	255			
+DLC04NukaWorldEndGameDark	DLCNukaWorld.esm|043B70	1	128	163			
+DLC04NukaWorldClearBackup2	DLCNukaWorld.esm|04F57A	1	128	255			
+DLC04NukaWorldClearDustyOLD	DLCNukaWorld.esm|04F57B	1	128	255			
+DLC05CommonwealthClearFastTransition	DLCworkshop02.esm|000A4D	1	128	255			
+DLC05CommonwealthRainFastTransition	DLCworkshop02.esm|000A4E	196	128	163	ActualRain	7.0	0
+DLC05CommonwealthGSRadstormFastTransition	DLCworkshop02.esm|000A4F	24	124	255			
+DefaultWeather	Fallout4.esm|00015E	1	128	255			
+FXDiamondSunlightBounce	Fallout4.esm|00116B	0	0	0			
+DiamondWeather	Fallout4.esm|00116D	4	128	255			
+DiamondWeatherPastel	Fallout4.esm|00116E	4	128	255			
+IstWeather	Fallout4.esm|0016EC	0	0	0			
+FXWthrSunlightOffAtNight	Fallout4.esm|029BB8	0	0	0			
+CommonwealthClear	Fallout4.esm|02B52A	1	128	255			
+FXWthrInvertDayNight	Fallout4.esm|06ED5A	0	0	0			
+FXConcord01	Fallout4.esm|0747C8	1	128	255			
+FXWthrSunlight	Fallout4.esm|07548F	0	0	0			
+FXWthrSunlightWhite	Fallout4.esm|075491	0	0	0			
+FXConcord01OffatNight	Fallout4.esm|076A58	1	128	255			
+FXWthrInvertDayNighWarm	Fallout4.esm|0777CF	0	0	0			
+FXWthrMoonlightOnly	Fallout4.esm|088C57	0	0	0			
+FXWthrMorningOnly	Fallout4.esm|096C61	0	0	0			
+NeutralWeather	Fallout4.esm|0A1588	1	128	255			
+WorldMapWeather	Fallout4.esm|0A6858	0	0	0			
+MQ203Weather	Fallout4.esm|0DB2A1	24	128	255			
+CommonwealthGSOvercast	Fallout4.esm|0F1033	1	128	255			
+PrewarPlayerHouseInteriorWeather	Fallout4.esm|0FF98F	1	128	255			
+FXInstituteDayNightCycle	Fallout4.esm|108640	1	128	255			
+FXInstituteDayNightCycleKey	Fallout4.esm|10D573	1	128	255			
+EditorCloudPreview	Fallout4.esm|10E3D4	1	0	0			
+TCommonwealthMarshOvercast	Fallout4.esm|10F781	4	0	255			
+GoodneighborWeatherBase	Fallout4.esm|115C64	1	128	255			
+NeutralOvercast	Fallout4.esm|1209AF	1	128	255			
+FXNukeWeather	Fallout4.esm|1256FB	1	128	255			
+CommonwealthSanctuaryClear	Fallout4.esm|12A18E	1	128	255			
+FXWthrSunlightWhiteBounce	Fallout4.esm|141AB4	0	0	0			
+DefaultInteriorWeatherNoLUT	Fallout4.esm|171621	1	128	255			
+FXWthrSunlightOffAtNightGlass	Fallout4.esm|171636	0	0	0			
+FXWthrInvertDayNightGS	Fallout4.esm|191647	0	0	0			
+ConcMuseumWeather	Fallout4.esm|1A65E5	1	128	255			
+DefaultInteriorWeather	Fallout4.esm|1A65F0	1	128	255			
+CommonwealthSanctuaryClearNukeFog	Fallout4.esm|1A6994	1	128	255			
+CommonwealthGSFoggy	Fallout4.esm|1BD481	8	128	255			
+CommonwealthFoggy	Fallout4.esm|1C3473	2	128	255			
+CommonwealthGSRadstorm	Fallout4.esm|1C3D5E	24	124	255			
+CommonwealthOvercast	Fallout4.esm|1C8556	2	128	255			
+CommonwealthRain	Fallout4.esm|1CA7E4	196	128	163	ActualRain	7.0	0
+CommonwealthMisty	Fallout4.esm|1CC186	2	128	255			
+CommonwealthMistyRainy	Fallout4.esm|1CD096	196	128	255	RealRain	7.0	0
+FXWthrSunlightOffAtNightBlack	Fallout4.esm|1D1CEC	0	0	0			
+CommonwealthClearestSkies	Fallout4.esm|1D670E	1	128	255			
+CommonwealthDarkSkies	Fallout4.esm|1E5E60	2	128	255			
+CommonwealthPolluted	Fallout4.esm|1EB2FF	1	128	255			
+CommOvercastTest2	Fallout4.esm|1F2529	1	128	255			
+CommonwealthDusty	Fallout4.esm|1F61A1	1	128	255			
+CGPrewarNukeFXWeather	Fallout4.esm|1F61FD	1	128	255			
+CommonwealthOvercastBackup	Fallout4.esm|20F46C	1	128	255			
+VideoVaultExit	Fallout4.esm|211221	1	128	255			
+CommonwealthMistyRainyBackup	Fallout4.esm|2115D7	196	128	255	RealRain	7.0	0
+CommonwealthClearBackup	Fallout4.esm|216A98	1	128	255			
+CommonwealthClearTrailer1	Fallout4.esm|21A563	1	128	255			
+CommonwealthClearTrailer2	Fallout4.esm|21A564	1	128	255			
+CommonwealthGSRadstormOld	Fallout4.esm|222394	4	128	255			
+CommonwealthRainBackup	Fallout4.esm|22239A	196	128	163	ActualRain	7.0	0
+CommonwealthSanctuaryClearNoAttach	Fallout4.esm|225922	1	128	255			
+CommonwealthDarkSkies3	Fallout4.esm|226448	1	128	255			
+CommonwealthDarkSkies2	Fallout4.esm|2385FB	1	128	255			
+CommonwealthClear2	Fallout4.esm|2385FD	1	128	255			
+CommonwealthFoggyBackup	Fallout4.esm|2392A2	2	128	255			
+CommonwealthGSRadstormBackup	Fallout4.esm|2392A3	8	124	255			
+CommonwealthGSFoggyBackup	Fallout4.esm|2392A4	8	128	255			
+CommonwealthMistyBackup	Fallout4.esm|2392A5	2	128	255			
+CommonwealthSanctuaryClearBackup	Fallout4.esm|2392A6	1	128	255			
+CommonwealthClearBackup2	Fallout4.esm|23AB9C	1	128	255			
+CommonwealthClear_VBFog	Fallout4.esm|2486A4	1	128	255			
+CommonwealthOvercast_VBFog	Fallout4.esm|2486A5	2	128	255			
+VRWorkshopShared_CommonwealthGSRadstormNoHazard	Fallout4.esm|24A3C0	24	124	255			
+VRWorkshopShared_CommonwealthGSOvercastNoHazard	Fallout4.esm|24A3C1	1	128	255			

@@ -174,6 +174,61 @@ inline double densityFromRate( int type, double D, double rateMmH )
 	return mv > 0.0 && rateMmH > 0.0 ? rateMmH * kFluxPerMmH / mv : 0.0;
 }
 
+/* lane RAINFOG2: what a weather record says about its precipitation (no .recx block). The game's precipitation is the
+ * shader a WTHR links (MNAM, an SPGD: Shader Particle Geometry); its DATA holds the particles' Type (0 Rain, 1 Snow) and
+ * Particle Density (xEdit wbDefinitionsFO4). Census of the 107 vanilla weathers (notes/fix1031a/rainfog2/census): 10
+ * link one (ActualRain 8, RealRain 2; both Type 0, density 7, box 1200); the 4 Rainy-flag weathers with no MNAM and the
+ * 10 Snow-flag ones (radstorms, foggy, dust) link none, so they draw no particles in the game. The kind: -2 no MNAM, -1
+ * MNAM whose SPGD was not read (taken as rain, as CLOUD6e did), else the SPGD's type. */
+enum SpgdKind : int { SpgdNone = 0, SpgdRain = 1, SpgdSnow = 2 };
+constexpr double kVanillaSpgdDensity = 7.0;	// every vanilla rain SPGD's Particle Density: the default layer stands for it
+
+inline int spgdKind( int spgdType )
+{
+	if ( spgdType < -1 )
+		return SpgdNone;
+	return spgdType == 1 ? SpgdSnow : SpgdRain;
+}
+
+//! the layer's rate over the type default: the SPGD's density over vanilla's 7 (unread / not positive: 1)
+inline double spgdRateScale( double density )
+{
+	return density > 0.0 ? density / kVanillaSpgdDensity : 1.0;
+}
+
+/* the switch WW_PRECIP_SPGD (on unless 0 / off / false / no) and its red WW_PRECIP_SPGD_RED (comma words: flags = the
+ * particles from the class flags again, rate = the type default rate again; 1 / on / old = both). Bits of the OLD rules
+ * in force: 1 flags, 2 rate (the switch off = both). Lower-case, trimmed input. */
+enum SpgdRed : int { SpgdRedFlags = 1, SpgdRedRate = 2 };
+inline int spgdRedBits( const char * sw, const char * red )
+{
+	int bits = 0;
+	if ( sw )
+		for ( const char * off : { "0", "off", "false", "no" } )
+			if ( std::strcmp( sw, off ) == 0 )
+				bits = SpgdRedFlags | SpgdRedRate;
+	const char * p = red;
+	while ( p && *p ) {
+		const char * e = std::strchr( p, ',' );
+		const std::size_t n = e ? std::size_t( e - p ) : std::strlen( p );
+		auto is = [&]( const char * w ) { return std::strlen( w ) == n && std::strncmp( p, w, n ) == 0; };
+		if ( is( "flags" ) )
+			bits |= SpgdRedFlags;
+		else if ( is( "rate" ) )
+			bits |= SpgdRedRate;
+		else if ( is( "1" ) || is( "on" ) || is( "old" ) )
+			bits |= SpgdRedFlags | SpgdRedRate;
+		p = e ? e + 1 : nullptr;
+	}
+	return bits;
+}
+
+//! the old record rule (WEATHERLOOK1 B, red WW_PRECIP_SPGD_RED=flags): DATA class flag 4 Rainy -> rain, 8 Snow -> snow
+inline int flagKinds( unsigned classFlags )
+{
+	return ( ( classFlags & 4u ) ? 1 : 0 ) | ( ( classFlags & 8u ) ? 2 : 0 );
+}
+
 //! a layer's weight in a weather change: the new weather's layers pct, the leaving weather's 1 - pct
 inline double blendWeight( bool leaving, double pct )
 {

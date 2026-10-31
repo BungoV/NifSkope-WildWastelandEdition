@@ -108,10 +108,14 @@ bool wwLookdevWeatherLeaving( quint32 & formID, QString & edid, QString & owner,
  *  (1 in a storm weather, 0 otherwise, the fade bytes' ramps during a change), rgb = its Lightning Color (DATA 12..14,
  *  0..1; the storm side's while a change blends), seed = the storm weather's FormID (the strikes' draws); false when
  *  no weather is loaded */
-bool wwLookdevLightning( float & share, float rgb[3], quint32 & seed );
+bool wwLookdevLightning( float & share, float rgb[3], quint32 & seed, unsigned * freq = nullptr );	// lane LIGHTNING2: + DATA byte 10
 /*! lane CLOUD6e: whether the loaded weather rains (its record links a precipitation shader, WTHR MNAM) and, while a
  *  change blends, whether the one left behind does and the NEW weather's share pct; false when no weather is loaded */
 bool wwLookdevWeatherRains( bool & cur, bool & blending, bool & old, float & pct );
+/*! lane RAINFOG2: the loaded weather's precipitation shader ([0]) and, while a change blends, the leaving one's ([1]):
+ *  type -2 no MNAM, -1 MNAM whose SPGD was not read, 0 rain, 1 snow (SPGD DATA Type); density = SPGD DATA Particle
+ *  Density (-1 not read); flags = DATA byte 11 (the old rule's); pct = the NEW weather's share; false when no weather */
+bool wwLookdevWeatherPrecip( int type[2], float density[2], unsigned flags[2], bool & blending, float & pct );
 void wwLookdevSetWeather( const QString & key );
 double wwLookdevHour();
 void wwLookdevClimateTnam( unsigned char out[4] );	// lane GAPLOOK1: the climate's TNAM sunrise/sunset bytes (10 min units)

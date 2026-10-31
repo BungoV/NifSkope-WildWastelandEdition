@@ -1,0 +1,5 @@
+owner	form	edid	datalen	gravity	rotation	sizeX	sizeY	offMin	offMax	rotRange	subX	subY	type	box	density
+DLCNukaWorld.esm	010F16	DLC04lRain	96	750.0	0.0	1.25	1.0	0.0	0.0	0.0	8	2	0	1000	15.0
+Fallout4.esm	126FF2	RealRain	96	775.0	0.0	1.5	0.5	0.0	0.0	0.0	8	2	0	1200	7.0
+Fallout4.esm	1CCE1F	ActualRain	96	750.0	0.0	1.5	0.3499999940395355	0.0	0.0	0.0	8	2	0	1200	7.0
+Fallout4.esm	1D2CCB	MistyRainy	96	775.0	0.0	1.5	0.5	0.0	0.0	0.0	8	2	0	1200	7.0

@@ -171,7 +171,7 @@ bool loadDds( NifSkopeOpenGLContext::GLFunctions * fn, const QString & path, PcT
 
 //! one weather's layers: its .recx block, else its record's class flags
 QVector<PcLayer> layersOf( const QStringList & roots, const QStringList & files, quint32 formID, const QString & edid,
-	const QString & owner, unsigned classFlags, QStringList & notes )
+	const QString & owner, unsigned classFlags, int spgdType, double spgdDensity, int spgdRed, QStringList & notes )
 {
 	QVector<PcLayer> out;
 	const quint32 lid = ( formID >> 24 ) == 0xFEu ? ( formID & 0xFFFu ) : ( formID & 0xFFFFFFu );
@@ -186,8 +186,11 @@ QVector<PcLayer> layersOf( const QStringList & roots, const QStringList & files,
 		for ( const QString & l : n )
 			notes << QStringLiteral( "%1 /precipitation/%2" ).arg( h.file.section( QLatin1Char( '/' ), -3 ), l );
 	} else {
-		specs = wwPrecipFromRecord( classFlags );
-		source = QStringLiteral( "record(flags 0x%1)" ).arg( classFlags, 2, 16, QLatin1Char( '0' ) );
+		// lane RAINFOG2 (PRECIPFLAG1): the precipitation shader's layer (MNAM -> SPGD type, rate x density / 7); red
+		// WW_PRECIP_SPGD_RED=flags: the class flags (WEATHERLOOK1 B), =rate: the type's default rate
+		specs = wwPrecipFromSpgd( spgdType, spgdDensity, classFlags, spgdRed );
+		source = ( spgdRed & WwPrecip::SpgdRedFlags ) ? QStringLiteral( "record(flags 0x%1)" ).arg( classFlags, 2, 16, QLatin1Char( '0' ) )
+			: QStringLiteral( "record(spgd %1 density %2)" ).arg( spgdType ).arg( spgdDensity );
 	}
 	for ( int i = 0; i < specs.size(); i++ ) {
 		PcLayer L;
@@ -256,11 +259,21 @@ int wwCellPrecipDraw( Scene * scene )
 		s.rootsFor = rk;
 		s.roots = wwRecxRoots( files, dataDir );
 	}
-	const QString key = QStringLiteral( "%1|%2|%3" ).arg( formID ).arg( leaving ? oldID : 0u ).arg( rk );
+	// lane RAINFOG2: the precipitation shaders (MNAM -> SPGD) and the switch WW_PRECIP_SPGD / its red
+	WW_SWITCH_STATIC( int, spgdRed, WwPrecip::spgdRedBits( wwEnv( "WW_PRECIP_SPGD" ).trimmed().toLower().constData(),
+		wwEnv( "WW_PRECIP_SPGD_RED" ).trimmed().toLower().constData() ) );
+	int ptype[2] = { -2, -2 };
+	float pdens[2] = { -1.0f, -1.0f };
+	unsigned pflags[2] = { 0u, 0u };
+	bool pblend = false;
+	float ppct = 1.0f;
+	wwLookdevWeatherPrecip( ptype, pdens, pflags, pblend, ppct );
+	const QString key = QStringLiteral( "%1|%2|%3|%4" ).arg( formID ).arg( leaving ? oldID : 0u ).arg( rk ).arg( spgdRed );
 	if ( key != s.specKey || !s.specAge.isValid() || s.specAge.elapsed() > 500 ) {	// files re-read on a change (recx.h)
 		QStringList notes;
-		s.specCur = layersOf( s.roots, files, formID, edid, owner, flags, notes );
-		s.specOld = leaving ? layersOf( s.roots, files, oldID, oldEdid, oldOwner, oldFlags, notes ) : QVector<PcLayer>();
+		s.specCur = layersOf( s.roots, files, formID, edid, owner, flags, ptype[0], double( pdens[0] ), spgdRed, notes );
+		s.specOld = leaving ? layersOf( s.roots, files, oldID, oldEdid, oldOwner, oldFlags, ptype[1], double( pdens[1] ), spgdRed, notes )
+							: QVector<PcLayer>();
 		static QSet<QString> warned;
 		for ( const QString & n : notes )
 			if ( !warned.contains( n ) ) {
