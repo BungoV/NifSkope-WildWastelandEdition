@@ -198,6 +198,65 @@ std::vector<std::uint8_t> build( int n, F f )
 	return v;
 }
 
+/* lane CLOUDSHAPE1: the cloud bodies' placement (RDR2 places clouds with a 2D map and shapes them over height, Bauer 2019
+ * slides 14-16): a tileable 2D field, kCellN^2 texels over one period, octaves of gradient noise at 12, 24 and 48 cells a
+ * period, each 1/sqrt(2) of the one before (a power-law spectrum: many cloud sizes in one sky, no visible tiling), then
+ * RANK-normalised to a uniform 0..1, so a threshold 1 - c keeps the share c of the area. */
+constexpr int kCellN = 512;
+
+inline float perlin2( float x, float y, int n, std::uint32_t seed )
+{
+	const float px = x * float( n ), py = y * float( n );
+	const int ix = int( std::floor( px ) ), iy = int( std::floor( py ) );
+	const float fx = px - float( ix ), fy = py - float( iy );
+	auto g = [&]( int ox, int oy ) {
+		const std::uint32_t h = hash3( wrap( ix + ox, n ), wrap( iy + oy, n ), 0, seed ) % 8u;
+		const float dx = fx - float( ox ), dy = fy - float( oy );
+		switch ( h ) {	// 8 directions
+		case 0: return dx + dy;
+		case 1: return -dx + dy;
+		case 2: return dx - dy;
+		case 3: return -dx - dy;
+		case 4: return 1.41421356f * dx;
+		case 5: return -1.41421356f * dx;
+		case 6: return 1.41421356f * dy;
+		default: return -1.41421356f * dy;
+		}
+	};
+	const float u = fade( fx ), v = fade( fy );
+	const float a = g( 0, 0 ) + ( g( 1, 0 ) - g( 0, 0 ) ) * u, b = g( 0, 1 ) + ( g( 1, 1 ) - g( 0, 1 ) ) * u;
+	return a + ( b - a ) * v;
+}
+
+inline float cellRaw( float x, float y )
+{
+	return perlin2( x, y, 12, 41u ) + 0.70710678f * perlin2( x, y, 24, 42u ) + 0.5f * perlin2( x, y, 48, 43u );
+}
+
+inline std::vector<float> cellField()
+{
+	const int n = kCellN;
+	std::vector<float> raw( static_cast<size_t>( n ) * size_t( n ) );
+	const int nt = std::clamp( int( std::thread::hardware_concurrency() ), 1, 32 );
+	std::vector<std::thread> ts;
+	for ( int t = 0; t < nt; t++ )
+		ts.emplace_back( [&, t]() {
+			for ( int y = t; y < n; y += nt )
+				for ( int x = 0; x < n; x++ )
+					raw[size_t( y ) * size_t( n ) + size_t( x )] = cellRaw( ( float( x ) + 0.5f ) / float( n ), ( float( y ) + 0.5f ) / float( n ) );
+		} );
+	for ( std::thread & th : ts )
+		th.join();
+	std::vector<int> idx( raw.size() );
+	for ( size_t i = 0; i < idx.size(); i++ )
+		idx[i] = int( i );
+	std::sort( idx.begin(), idx.end(), [&]( int a, int b ) { return raw[size_t( a )] < raw[size_t( b )] || ( raw[size_t( a )] == raw[size_t( b )] && a < b ); } );
+	std::vector<float> out( raw.size() );
+	for ( size_t r = 0; r < idx.size(); r++ )
+		out[size_t( idx[r] )] = float( r ) / float( idx.size() - 1 );
+	return out;
+}
+
 inline std::vector<std::uint8_t> shapeVolume()
 {
 	return build( kShapeN, shapeAt );

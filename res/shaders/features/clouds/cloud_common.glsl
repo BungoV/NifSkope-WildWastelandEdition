@@ -53,7 +53,84 @@ float cvGradient( int b, float hf, float sheet )
 	return cvSmooth( 0.0, 0.15, hf ) * ( 1.0 - cvSmooth( 0.35, 0.9, hf ) );
 }
 
-#ifndef WW_CLOUD_VARIETY
+#if defined( WW_CLOUD_SHAPE ) && !defined( WW_CLOUD_VARIETY )
+/* lane CLOUDSHAPE1: Cloud Shapes (the *_s.prog twins define WW_CLOUD_SHAPE; Off draws the function below unchanged).
+ * RDR2 (Bauer 2019 sl. 14-18): clouds PLACED by a 2D field and SHAPED over height, the detail carved by a saturating
+ * rescale. A body field over the coverage threshold, a dome per body on one flat base (taller in stronger cells), the
+ * Perlin-Worley lumps growing with height, HZD's erosion (billows above, wisps at the base), then clamp(f / window):
+ * dense inside, crisp edge, not multiplied by the coverage. The CPU twin and every constant: src/gl/cloudvolmath.h
+ * shapeCore / shapeDensity (kShp*). */
+uniform sampler2D cvCell;	// the bodies' field: kCellN^2 R32F over kShpCellKm, uniform 0..1 (cloudnoise.h cellField)
+uniform vec4 cvShpT0;	// the Low band's type rule: dome height share, exponent, sheet share, anvil (cloudvolmath.h shapeType)
+uniform vec4 cvShpT1;	// the Mid band's
+
+float cvShpAnvil( float anvil, float hf )	// cloudvolmath.h shapeAnvil
+{
+	return anvil * cvSmooth( 0.8, 0.9, hf ) * ( 1.0 - cvSmooth( 0.96, 1.0, hf ) );
+}
+
+const float kShpSoft = 0.2, kShpErode = 0.7, kShpScale = 0.7, kShpShearKm = 0.3, kShpRise = 0.04, kShpCurlKm = 0.25;
+const float kShpBaseErode = 0.3, kShpLump = 0.45, kShpCellKm = 32.0, kShpGrowth = 0.8, kShpTapFoot = 0.2;
+const float kShpSoftPerKm = 0.5, kShpMean = 0.884, kShpSd = 0.053, kShpTowerScale = 3.0;
+const vec2 kShpDir = vec2( 1.0, 0.0 );	// the wind's direction (cvBands.windKm is along +x): the tops lean downwind
+const float kShpBack = 1.0, kShpBackLo = 4.0, kShpBackHi = 20.0;	// the back-scatter clamp's weight, its extinction ramp /km
+
+vec3 cvShpCurl( vec3 q )	// cloudvolmath.h curlRaw (24 km period)
+{
+	vec3 u = mod( q, vec3( 24.0 ) ) / 24.0;
+	float c1 = cos( 6.2831853 * fract( 13.0 * u.x + 5.0 * u.y + 0.11 ) );
+	float c2 = cos( 6.2831853 * fract( -6.0 * u.x + 11.0 * u.y + 0.33 ) );
+	float c3 = cos( 6.2831853 * fract( 10.0 * u.x + 8.0 * u.z + 0.64 ) );
+	float c4 = cos( 6.2831853 * fract( -7.0 * u.x + 12.0 * u.z + 0.85 ) );
+	float ax = c1 * 0.358979 + c2 * 0.877896, ay = c1 * -0.933346 + c2 * 0.478852;
+	float bx = c3 * 0.624695 + c4 * 0.863779, bz = c3 * -0.780869 + c4 * 0.503871;
+	return 0.5 * vec3( ax + bx, ay, bz );
+}
+
+float cloudDensity( vec3 p )
+{
+	vec4 m = cvMapAt( p.xy );
+	float d = 0.0;
+	for ( int b = 0; b < 2; b++ ) {
+		float base = cvBands.baseKm[b], top = cvBands.topKm[b];
+		float hf = ( p.z - base ) / max( top - base, 1e-3 );
+		if ( hf <= 0.0 || hf >= 1.0 || cvBands.density[b] <= 0.0 )
+			continue;
+		vec4 st = b == 0 ? cvShpT0 : cvShpT1;
+		float cov = b == 0 ? m.r : m.g;
+		float sheet = b == 0 ? max( clamp( m.b / max( m.r, 1e-3 ), 0.0, 1.0 ), st.z ) : st.z;
+		float c = cvCalAt( b, cov );
+		if ( c <= 0.0 )
+			continue;
+		vec3 q = p + cvBands.windKm;
+		q.xy += kShpDir * ( kShpShearKm * ( p.z - base ) );
+		float cell = textureLod( cvCell, q.xy / kShpCellKm + vec2( 0.37 * float( b ) ),
+			log2( max( cvFootKm * 512.0 / kShpCellKm, 1.0 ) ) ).r;
+		float w = ( cell - ( 1.0 - c ) ) / max( c, 1e-3 );
+		float reach = mix( pow( hf / max( st.x, 1e-3 ), st.y ), hf * 4.0, sheet );
+		float f = w - reach;
+		if ( st.w > 0.0 ) {	// towers: the body field at kShpTowerScale x its period, only cells past the middle rise
+			float big = textureLod( cvCell, q.xy / ( kShpCellKm * kShpTowerScale ) + vec2( 0.21 ),
+				log2( max( cvFootKm * 512.0 / ( kShpCellKm * kShpTowerScale ), 1.0 ) ) ).r;
+			float ft = ( big - ( 1.0 - c ) ) / max( c, 1e-3 ) - ( 0.5 + 0.5 * pow( hf, 1.2 ) );
+			f = mix( f, max( f, ft ), st.w * 2.0 );
+		}
+		f += cvShpAnvil( st.w, hf ) - ( 1.0 - cvSmooth( 0.0, kShpRise, hf ) );
+		float grow = mix( 1.0 - kShpGrowth, 1.0, hf );
+		if ( f + kShpLump * grow * 3.0 <= 0.0 )
+			continue;	// no lump reaches this far out ((1 - kShpMean) / kShpSd < 3): the density is 0 either way
+		float s = textureLod( cvShape, q / kCvShapeKm, log2( max( cvFootKm * 128.0 / kCvShapeKm, 1.0 ) ) ).r;
+		f += ( s - kShpMean ) / kShpSd * kShpLump * grow;
+		if ( f <= 0.0 )
+			continue;	// the erosion only lowers f
+		vec3 qd = q + cvShpCurl( q ) * ( kShpCurlKm * ( 1.0 - 0.5 * hf ) );
+		float det = textureLod( cvDetail, qd / kCvDetailKm, log2( max( cvFootKm * 32.0 / kCvDetailKm, 1.0 ) ) ).r;
+		f -= mix( det, 1.0 - det, clamp( hf * 4.0, 0.0, 1.0 ) ) * kShpErode * mix( kShpBaseErode, 1.0, cvSmooth( 0.0, 0.3, hf ) );
+		d += clamp( f / max( kShpSoft + cvFootKm * kShpSoftPerKm, 1e-3 ), 0.0, 1.0 ) * kShpScale * cvBands.density[b];
+	}
+	return d;
+}
+#elif !defined( WW_CLOUD_VARIETY )
 // relative density (extinction = kCvSigma x this, /km); 0 outside the Low and Mid bands
 float cloudDensity( vec3 p )
 {

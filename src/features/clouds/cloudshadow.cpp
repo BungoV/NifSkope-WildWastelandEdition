@@ -114,6 +114,7 @@ struct CsGpu
 	int mode = 0;	// 1 volume, 2 map
 	bool redVertical = false;
 	bool variety = false;	// lane CLOUD5: built over the Cloud Variety density
+	bool shape = false;	// lane CLOUDSHAPE1: built over the Cloud Shapes density
 	M::Basis basis{};
 	M::Fit fit{};
 	double lightFromWorld[16] = {};
@@ -452,12 +453,16 @@ void wwCloudShadowPass( Scene * scene )
 	giRead( fn, g, s );
 
 	// lane CLOUD5: Cloud Variety on, the twin over the variety density (wwCloudVolBindDensity sets its uniforms)
-	const bool variety = wwCloudVolVarietyOn() && m.variety;
-	NifSkopeOpenGLContext::Program * p = r->useProgram( variety ? "cloud_shadowmap_v.prog" : "cloud_shadowmap.prog" );
+	// lane CLOUDSHAPE1: Cloud Shapes on, its twin (it supersedes Variety's density; wwCloudVolBindDensity binds cvCell)
+	const bool shape = wwCloudVolShapeOn();
+	const bool variety = !shape && wwCloudVolVarietyOn() && m.variety;
+	NifSkopeOpenGLContext::Program * p = r->useProgram( shape ? "cloud_shadowmap_s.prog"
+														   : variety ? "cloud_shadowmap_v.prog" : "cloud_shadowmap.prog" );
 	if ( !p ) {
 		restore();
-		return off( variety ? QStringLiteral( "refused(cloud_shadowmap_v.prog did not link)" )
-							: QStringLiteral( "refused(cloud_shadowmap.prog did not link)" ) );
+		return off( shape ? QStringLiteral( "refused(cloud_shadowmap_s.prog did not link)" )
+			: variety ? QStringLiteral( "refused(cloud_shadowmap_v.prog did not link)" )
+					  : QStringLiteral( "refused(cloud_shadowmap.prog did not link)" ) );
 	}
 	// the volume's density at Medium and up (it needs the Volume Clouds row at Medium or up), else the map's coverage
 	int mode = 2;
@@ -469,7 +474,7 @@ void wwCloudShadowPass( Scene * scene )
 	 * rows a frame under the new fit while the receivers keep the front, then swaps (cloudshadowslice.h). Red
 	 * WW_CLOUDSHADOW_RED=fullmove: a move rebuilds the front whole at once (CLOUD3) */
 	namespace SL = WwCloudShadowSlice;
-	const bool hard = every || !g.valid || g.mode != mode || g.redVertical != redV || g.variety != variety;
+	const bool hard = every || !g.valid || g.mode != mode || g.redVertical != redV || g.variety != variety || g.shape != shape;
 	const bool moved = f.a0 != g.fit.a0 || f.b0 != g.fit.b0 || f.extentKm != g.fit.extentKm || M::angleDeg( b.s, g.basis.s ) > 0.25;
 	if ( !g.valid )
 		g.sl.frontValid = false;
@@ -482,6 +487,7 @@ void wwCloudShadowPass( Scene * scene )
 		g.mode = mode;
 		g.redVertical = redV;
 		g.variety = variety;
+		g.shape = shape;
 		M::lightFromWorld( b, f, unitKm, g.lightFromWorld );
 	}
 	if ( st.startBack ) {
