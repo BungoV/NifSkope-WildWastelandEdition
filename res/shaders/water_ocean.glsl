@@ -178,6 +178,24 @@ int wwOcBody( vec2 P, out float ws, out float a, out vec3 gc, out float m, out f
 	return set;
 }
 
+/* lane FIX1031B (LATE ITEM 8, foam): whitecap cover from the folding chop. The old ramp smoothstep( 0.15, 0.55, J ) sat
+ * under the lowest J our spectrum makes (p0.1 0.63 at 9.9 m/s): 0 cover at every wind (red oldwhite). The threshold is
+ * now fitted per wind so the near sea's mean cover equals the measured whitecap fraction, Monahan and O'Muircheartaigh
+ * 1980: W = 3.84e-6 U^3.41 (0.09 % at 5 m/s, 1 % at 10, 3.9 % at 15), on WATERLOOK1's float64 ocean model over the 3 sea
+ * cascades (notes/fix1031b/water/tools/whitecap_fit.py); ramp half width 0.10. */
+float wwOcWhite( float J, float U )
+{
+	const float kU[8] = float[8]( 3.0, 4.0, 5.0, 6.0, 8.0, 10.0, 12.0, 15.0 );
+	const float kJ[8] = float[8]( 0.7000, 0.6907, 0.6852, 0.6827, 0.6836, 0.6870, 0.6944, 0.7151 );
+	float u = clamp( U, 3.0, 15.0 ), jt = kJ[7];
+	for ( int i = 0; i < 7; i++ )
+		if ( u <= kU[i + 1] ) {
+			jt = mix( kJ[i], kJ[i + 1], ( u - kU[i] ) / ( kU[i + 1] - kU[i] ) );
+			break;
+		}
+	return ( 1.0 - smoothstep( jt - 0.10, jt + 0.10, J ) ) * smoothstep( 2.0, 3.0, U );
+}
+
 /* the spectrum at world xy P (u); dPx, dPy its screen derivatives; w = 0 off a baked body (today's water). Q: where
  * the cascades are read (step 5: the flow carries the waves, so a river reads them upstream); the body is P's, its
  * set (0 sea, 1 fresh, -1 none) in setOut */
@@ -216,7 +234,8 @@ WwOcean wwWaterOceanQ( vec2 P, vec2 Q, vec2 dPx, vec2 dPy, out int setOut )
 	o.slope = -( st.x * d + st.y * e );
 	o.var = var;
 	float J = jx * jy - lam * lam * dxy * dxy;
-	o.white = ( 1.0 - smoothstep( 0.15, 0.55, J ) ) * smoothstep( 4.0, 8.0, U ) * ws;
+	o.white = ( waterOceanRed & 2048 ) != 0 ? ( 1.0 - smoothstep( 0.15, 0.55, J ) ) * smoothstep( 4.0, 8.0, U ) * ws
+		: wwOcWhite( J, U ) * ws;
 	o.cau = clamp( a * waterOceanSetB[set].y * gc.z / max( waterOceanWind.w, 1e-3 ), 0.0, 3.0 );
 	return o;
 }

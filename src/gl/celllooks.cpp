@@ -72,10 +72,10 @@ const LookRow kRows[] = {
 	{ "Water clear colour", "WW/CellWaterClear2", true },
 	{ "Water sky visibility", "WW/CellWaterSkyVis" },
 	{ "Surf", "WW/CellWaterSurf" },
-	{ "Contact foam", "WW/CellWaterContact" },
+	{ "Contact foam", "WW/CellWaterContact2", true },	// FIX1031B LATE ITEM 8: foam ON (current-made foam on rivers)
 	{ "Wet shore", "WW/CellLandWet" },
 	{ "Wave run-up", "WW/CellLandSwash" },
-	{ "River foam", "WW/CellWaterRiverFoam" },
+	{ "River foam", "WW/CellWaterRiverFoam2", true },	// FIX1031B LATE ITEM 8: m/s flow, shallows + shoals
 	{ "Underwater light", "WW/CellWaterUnderLight" },
 	{ "Precipitation", "WW/CellPrecip" },	// lane WEATHERLOOK1 B: ships off until bungo sees it
 };
@@ -551,7 +551,7 @@ void wwCellSsrRowSet( bool on )
 static bool wwLookWaterShippedRed( WwLook l )
 {
 	if ( l != WwLook::WaterClear && l != WwLook::WaterRefl && l != WwLook::WaterGlint && l != WwLook::WaterOcean
-		&& l != WwLook::WaterSoftEdge && l != WwLook::ShoreFoam )
+		&& l != WwLook::WaterSoftEdge && l != WwLook::ShoreFoam && l != WwLook::WaterContact && l != WwLook::WaterRiverFoam )
 		return false;
 	WW_SWITCH_STATIC( bool, shipped, wwSwitchEcho( "water look red shipped",
 		wwEnv( "WW_CELL_WATER_LOOK_RED" ).trimmed() == "shipped" ) );

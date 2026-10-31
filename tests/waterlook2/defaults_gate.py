@@ -18,10 +18,11 @@ ap.add_argument('--src', default=os.path.join(TREE, 'src', 'gl', 'celllooks.cpp'
 a = ap.parse_args()
 src = open(a.src, encoding='latin-1').read()
 ROWS = {'Water clear colour': 'WaterClear', 'Water reflections': 'WaterRefl', 'Water sun glare': 'WaterGlint',
-        'Ocean waves': 'WaterOcean', 'Water soft edge': 'WaterSoftEdge', 'Shore foam': 'ShoreFoam'}
+        'Ocean waves': 'WaterOcean', 'Water soft edge': 'WaterSoftEdge', 'Shore foam': 'ShoreFoam',
+        'Contact foam': 'WaterContact', 'River foam': 'WaterRiverFoam'}   # FIX1031B LATE ITEM 8: the two foam rows too
 OLD = {'Water clear colour': 'WW/CellWaterClear', 'Water reflections': 'WW/CellWaterRefl',
        'Water sun glare': 'WW/CellWaterGlint', 'Ocean waves': 'WW/CellWaterOcean', 'Water soft edge': 'WW/CellWaterEdge',
-       'Shore foam': 'WW/CellWaterFoam'}
+       'Shore foam': 'WW/CellWaterFoam', 'Contact foam': 'WW/CellWaterContact', 'River foam': 'WW/CellWaterRiverFoam'}
 ok = True
 for label, enum in ROWS.items():
     m = re.search(r'\{ "%s", "([^"]+)"(, (true|false))? \}' % re.escape(label), src)

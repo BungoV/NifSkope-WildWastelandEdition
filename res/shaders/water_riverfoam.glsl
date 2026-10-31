@@ -8,9 +8,15 @@
 // speed) and gathered where the surface flow converges: steady foam c = s / ( 1 / T - C ) for a source s, life T and
 // convergence C = -div v, so the cover grows 1 / ( 1 - C T ) where the flow squeezes together, thins where it spreads.
 // Needs water_info.glsl (wwWaterFlow, wwWaterInfo) and water_shore.glsl (wwShoreNoise, wwShoreHash) before it.
+// Lane FIX1031B (LATE ITEM 8, foam): the bake's flow is m/s (the first FIX1031B agent's measure: 0.36-0.79 at Cutler Bend),
+// so the streaks are now carried at v / kRfMetre u/s (they crawled at 1/70 of the river) with an 8 s life (the Vlachos
+// period ~ one streak length at the river's speed), the source half at 0.4 m/s, and the source grows where the river runs
+// SHALLOW (under 1.5 m) or SHOALS along its flow (the bed rising downstream: turbulence, rapids): x ( 1 + 2 shallow +
+// 2 shoal ). Red WW_CELL_WATER_RIVERFOAM_RED=raw (16): the old reading (raw flow, no depth term; life from C++).
 uniform bool waterRiverFoamOn;
-uniform int waterRiverFoamRed;	// 1 nodiv (no gathering), 2 still (not carried), 4 iso (round blobs), 8 alias (no far fade)
-uniform vec4 waterRiverFoamK;	// foam life (s), cover at full source, half-source speed (u/s), opacity
+uniform int waterRiverFoamRed;	// 1 nodiv (no gathering), 2 still (not carried), 4 iso (round blobs), 8 alias (no far fade), 16 raw
+uniform vec4 waterRiverFoamK;	// foam life (s), cover at full source, half-source speed (m/s), opacity
+const float kRfMetre = 0.0142875;	// m per world unit
 uniform vec4 waterRiverFoamK2;	// streak width (u), length / width, edge softness (sd), gathering cap (C T)
 
 // one read's sd, and the value noise's correlation exp( -d^2 / kRfCorr ) at a lattice offset d (fit within 0.01),
@@ -50,8 +56,12 @@ vec4 wwWaterRiverFoam( vec2 P, float t, float foot )
 	vec2 g = ( P - waterFlowGrid.xy ) / tex - 0.5;
 	vec2 t0 = floor( g ), f = g - t0;
 	vec2 c0 = waterFlowGrid.xy + ( t0 + 0.5 ) * tex;
+	bool raw = ( waterRiverFoamRed & 16 ) != 0;
+	float uq = raw ? 1.0 : 1.0 / kRfMetre;	// bake units -> u/s
 	vec2 vc[4] = vec2[4]( wwWaterFlow( c0 ), wwWaterFlow( c0 + vec2( tex, 0.0 ) ), wwWaterFlow( c0 + vec2( 0.0, tex ) ),
 		wwWaterFlow( c0 + vec2( tex, tex ) ) );
+	for ( int i = 0; i < 4; i++ )
+		vc[i] *= uq;
 	vec2 v = mix( mix( vc[0], vc[1], f.x ), mix( vc[2], vc[3], f.x ), f.y );
 	float spd = length( v );
 	if ( spd < 1e-4 )
@@ -60,7 +70,15 @@ vec4 wwWaterRiverFoam( vec2 P, float t, float foot )
 	float div = ( mix( vc[1].x - vc[0].x, vc[3].x - vc[2].x, f.y ) + mix( vc[2].y - vc[0].y, vc[3].y - vc[1].y, f.x ) ) / tex;
 	float T = waterRiverFoamK.x;
 	float CT = ( waterRiverFoamRed & 1 ) != 0 ? 0.0 : clamp( -div * T, -9.0, waterRiverFoamK2.w );
-	float D = clamp( waterRiverFoamK.y * spd / ( spd + waterRiverFoamK.z ) / ( 1.0 - CT ), 0.0, 1.0 );
+	float sm = spd / uq;	// the source's speed in bake units (m/s; raw: u/s as before)
+	float src = waterRiverFoamK.y * sm / ( sm + waterRiverFoamK.z );
+	if ( !raw ) {
+		float dHere = wwWaterInfo( P ).y * kRfMetre, dDown = wwWaterInfo( P + v / spd * tex ).y * kRfMetre;
+		float shallow = 1.0 - smoothstep( 0.3, 1.5, dHere );
+		float shoal = clamp( ( dHere - dDown ) / 0.5, 0.0, 1.0 );	// the bed rises 0.5 m within a texel downstream
+		src *= 1.0 + 2.0 * shallow + 2.0 * shoal;
+	}
+	float D = clamp( src / ( 1.0 - CT ), 0.0, 1.0 );
 	if ( D < 0.002 )
 		return vec4( 0.0, 0.0, CT, spd );
 	float W = waterRiverFoamK2.x;

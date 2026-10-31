@@ -1,5 +1,28 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## WATERFOAM2 + WATERREAL1 (2026-10-31, FIX1031B area B, parent row WATERLOOK1): foam shows, Boston's measured water
+
+- **Why no foam showed (bungo: "our foaming is missing?").** Measured (notes/fix1031b/water/HANDOFF.md "## Foam + real
+  values"): the sheets ran before the overhaul, with every foam row off; whitecaps could never draw (the ramp
+  1 - smoothstep( 0.15, 0.55, J ) sat under the lowest Jacobian the spectrum makes, 0.63 at 9.9 m/s); river shore and
+  contact foam scaled with a 40 m fetch's wind waves (amount 0.001); river foam read the m/s flow as u/s.
+- **Whitecaps** (res/shaders/water_ocean.glsl `wwOcWhite`): the Jacobian threshold per wind is fitted so the open sea's
+  cover equals the measured whitecap fraction (Monahan and O'Muircheartaigh 1980, 0.09 % at 5 m/s, 1 % at 10, 3.9 % at
+  15). Red `WW_CELL_WATER_OCEAN_RED=oldwhite` (live).
+- **River foam ships ON** (row "River foam", new key `WW/CellWaterRiverFoam2`): the flow read as m/s (streaks carried at
+  the river's speed, 8 s life), the source grows in shallows (under 1.5 m) and where the bed shoals downstream.
+  Red `WW_CELL_WATER_RIVERFOAM_RED=raw` (live).
+- **Contact foam ships ON** (row "Contact foam", new key `WW/CellWaterContact2`): a river's current breaking on boats,
+  piers and rocks makes a ~1 m band (amount (v / 1.2 m/s)^2). Red `WW_CELL_WATER_CONTACT_RED=noflow` (live).
+  `WW_CELL_WATER_LOOK_RED=shipped` now turns these two off as well.
+- **Boston's measured water** (notes/fix1031b/water/REALVALUES.md: MWRA, UMass Boston / Luis et al. 2019, EPA Region 1,
+  NOAA NDBC 44013 + tides, Bar Harbor): sea k(550) = the harbour's measured Kd(PAR) 0.631 /m (was Secchi 2.5 m ->
+  0.680), river Secchi 1.0 m (was 1.2 m: k(550) 1.700, was 1.417). Red `WW_CELL_WATER_CLEAR_RED=secchi` (live).
+- Gates: tests/waterlook2/run.sh adds realvalues (in the measured band and at its centre; reds secchi 3.0 / 6.0 levels
+  off, old 52-92), whitecap (cover / Monahan 0.999-1.001 at 4-15 m/s; red 0), riverfoam (cover 0.074 at 0.58 m/s, 0.27
+  in 0.3 m shallows, carried 20.6 u in 0.5 s vs 20.4; reds row off 0, raw carried 0 u), contactfoam (0.18 at the hull,
+  0.011 at 3 m, 0.008 in slack water; reds row off 0, noflow 0.003).
+
 ## WATERLOOK2 (2026-10-31, FIX1031B area B, parent row WATERLOOK1): the water look overhaul ships ON
 
 - **The water looks are the default now.** Water clear colour, Water reflections, Water sun glare, Ocean waves, Water

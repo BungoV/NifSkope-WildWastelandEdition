@@ -408,7 +408,8 @@ bool wwCellWaterUniforms( Scene * scene, int block, int unit )
 		prog->uni1b( "waterClearOn", wwLookOn( WwLook::WaterClear ) );
 		WW_SWITCH_STATIC( QByteArray, cl, wwEnv( "WW_CELL_WATER_CLEAR_RED" ).trimmed() );
 		// lane FIX1031B: old = WATERCOLOR1's clear-ocean law, its hard bed switch and no Fresnel coupling (before Boston)
-		prog->uni1i( "waterClearRed", cl == "noscatter" ? 1 : cl == "nodown" ? 2 : cl == "fast" ? 3 : cl == "old" ? 4 : 0 );
+		prog->uni1i( "waterClearRed", cl == "noscatter" ? 1 : cl == "nodown" ? 2 : cl == "fast" ? 3 : cl == "old" ? 4
+			: cl == "secchi" ? 5 : 0 );	// FIX1031B LATE ITEMs 9-10: secchi = the overhaul's first k (sea 2.5 m, river 1.2 m)
 	}
 	if ( prog->uniLocation( "waterSkyVisOn" ) >= 0 ) {	// lane WATERLOOK1 step 10: the Water sky visibility row
 		prog->uni1b( "waterSkyVisOn", wwLookOn( WwLook::WaterSkyVis ) );
@@ -432,7 +433,8 @@ bool wwCellWaterUniforms( Scene * scene, int block, int unit )
 		prog->uni1b( "waterContactOn", wwLookOn( WwLook::WaterContact ) );
 		WW_SWITCH_STATIC( QByteArray, cr, wwEnv( "WW_CELL_WATER_CONTACT_RED" ).trimmed() );
 		prog->uni1i( "waterContactRed", ( cr.contains( "nodepth" ) ? 1 : 0 ) | ( cr.contains( "flat" ) ? 2 : 0 )
-			| ( cr.contains( "still" ) ? 4 : 0 ) | ( cr.contains( "noshorecut" ) ? 8 : 0 ) );
+			| ( cr.contains( "still" ) ? 4 : 0 ) | ( cr.contains( "noshorecut" ) ? 8 : 0 )
+			| ( cr.contains( "noflow" ) ? 16 : 0 ) );	// FIX1031B LATE ITEM 8: noflow = no current-made foam
 		prog->uni4f( "waterContactK", FloatVector4( 4.0f, 2.0f, 0.04f, 0.9f ) );
 	}
 	if ( prog->uniLocation( "waterRiverFoamOn" ) >= 0 ) {	// lane WATERLOOK1 step 15: the River foam row
@@ -441,8 +443,10 @@ bool wwCellWaterUniforms( Scene * scene, int block, int unit )
 		prog->uni1b( "waterRiverFoamOn", wwLookOn( WwLook::WaterRiverFoam ) );
 		WW_SWITCH_STATIC( QByteArray, rr, wwEnv( "WW_CELL_WATER_RIVERFOAM_RED" ).trimmed() );
 		prog->uni1i( "waterRiverFoamRed", ( rr.contains( "nodiv" ) ? 1 : 0 ) | ( rr.contains( "still" ) ? 2 : 0 )
-			| ( rr.contains( "iso" ) ? 4 : 0 ) | ( rr.contains( "alias" ) ? 8 : 0 ) );
-		prog->uni4f( "waterRiverFoamK", FloatVector4( 120.0f, 0.12f, 0.4f, 0.85f ) );
+			| ( rr.contains( "iso" ) ? 4 : 0 ) | ( rr.contains( "alias" ) ? 8 : 0 ) | ( rr.contains( "raw" ) ? 16 : 0 ) );
+		/* FIX1031B LATE ITEM 8: the flow is m/s (carried at v / 0.0142875 u/s), so the foam lives 8 s (about one streak
+		 * length at the river's speed); red raw = the old raw-flow reading with its 120 s life */
+		prog->uni4f( "waterRiverFoamK", FloatVector4( rr.contains( "raw" ) ? 120.0f : 8.0f, 0.12f, 0.4f, 0.85f ) );
 		prog->uni4f( "waterRiverFoamK2", FloatVector4( 24.0f, 8.0f, 0.3f, 0.8f ) );
 	}
 	if ( prog->uniLocation( "waterUnderOn" ) >= 0 ) {	// lane WATERLOOK1 step 16: the Underwater light row (Snell's window)

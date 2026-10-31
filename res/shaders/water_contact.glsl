@@ -6,7 +6,8 @@
 // calm water gives at most a thin lap line. A bank the baked shore field already knows is left to the Shore foam row.
 // Needs water_shore.glsl and water_ripple.glsl before it.
 uniform bool waterContactOn;
-uniform int waterContactRed;	// 1 nodepth (no contact found), 2 flat (full energy on any water), 4 still (no pulse), 8 noshorecut
+uniform int waterContactRed;	// 1 nodepth (no contact found), 2 flat (full energy on any water), 4 still (no pulse), 8 noshorecut,
+				// 16 noflow (FIX1031B: no current-made foam)
 uniform vec4 waterContactK;	// band width / Hs, foam life (wave periods), wind-sea steepness Hs / L, foam opacity
 
 // the foam density 0..1 at distance d (u) from the contact: hs the significant wave height (u), pers the foam's
@@ -47,7 +48,17 @@ vec4 wwWaterContact( float vert, vec3 P, vec3 S, vec3 eye, float t )
 	if ( !waterContactOn || trust <= 0.0 || d > 1e8 )
 		return vec4( 0.0, d, trust, foot );
 	vec4 wv = wwShoreWave( P.xy );
-	if ( wv.w < 0.5 )
+	/* lane FIX1031B (LATE ITEM 8): a river's current breaking on the object (piers, boats, rocks) makes foam by itself; the
+	 * wind waves of a 40 m fetch give none (amount 0.001 at Cutler Bend). Amount ( v / 1.2 m/s )^2 (0.17 at 0.5 m/s, 0.43
+	 * at 0.79), a steady band 1 m wide (e-fold) on the object's sides, broken by the shared foam texture. Red
+	 * WW_CELL_WATER_CONTACT_RED=noflow (16). */
+	float flowD = 0.0;
+	if ( ( waterContactRed & 16 ) == 0 && waterFlowOn && abs( wwWaterInfo( P.xy ).w - 1.0 ) < 0.5 ) {
+		float sm = length( wwWaterFlow( P.xy ) );	// m/s (the bake's flow)
+		float Wf = 1.0 / kShoreM;
+		flowD = clamp( sm * sm / 1.44, 0.0, 1.0 ) * exp( -d / Wf ) * ( Wf / ( Wf + foot ) );
+	}
+	if ( wv.w < 0.5 && flowD <= 0.0 )
 		return vec4( 0.0, d, trust, foot );
 	float hs = max( wv.x, 1e-3 );
 	float cut = 1.0;
@@ -58,7 +69,8 @@ vec4 wwWaterContact( float vert, vec3 P, vec3 S, vec3 eye, float t )
 		if ( field.y > 0.5 )
 			cut = smoothstep( 1.5, 2.5, max( field.x - waterShoreK0.x, 0.0 ) / ( d + waterShoreK4.z + 1.0 ) );
 	}
-	float D = trust * cut * wwContactLaw( d, hs, wv.y, t, P.xy - d * dir, foot );
+	float wave = wv.w < 0.5 ? 0.0 : wwContactLaw( d, hs, wv.y, t, P.xy - d * dir, foot );
+	float D = trust * cut * max( wave, flowD );
 	return vec4( D, d, trust, foot );
 }
 
