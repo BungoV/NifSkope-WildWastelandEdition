@@ -635,8 +635,11 @@ const WwCloudMap & wwCloudMapUpdate( Scene * scene )
 		for ( int b = 0; b < 3; b++ )
 			key += QStringLiteral( "|w%1,%2" ).arg( double( shown[b].baseM ), 0, 'f', 1 ).arg( double( shown[b].topM ), 0, 'f', 1 );
 	const bool variety = wwCloudVolVarietyOn();	// lane CLOUD5
+	const bool shapes = wwCloudVolShapeOn();	// lane CLOUDSHAPE1: Cloud Shapes raises the Low top as Variety does
 	if ( variety )
 		key += QStringLiteral( "|var%1,%2" ).arg( double( shown[0].type ), 0, 'f', 3 ).arg( double( shown[0].typeSpread ), 0, 'f', 3 );
+	if ( shapes )
+		key += QStringLiteral( "|shp%1,%2" ).arg( double( shown[0].type ), 0, 'f', 3 ).arg( double( shown[0].typeSpread ), 0, 'f', 3 );
 
 	WwCloudMap & m = s.map;
 	m.centerX = eye[0];	// the sky follows the camera: only the square moves
@@ -650,7 +653,7 @@ const WwCloudMap & wwCloudMapUpdate( Scene * scene )
 	 * storm); every reader (the march's span, the shadow map's steps, the fly box) takes this one top. shown[] keeps the
 	 * band's own top, so a later transition never raises it twice. */
 	m.variety = variety;
-	if ( variety ) {
+	if ( variety || shapes ) {
 		const float tmax = std::min( 1.0f, shown[0].type + shown[0].typeSpread );
 		const float depthKm = std::max( shown[0].topM - shown[0].baseM, 1.0f ) / 1000.0f;
 		m.band[0].topZ = m.band[0].baseZ

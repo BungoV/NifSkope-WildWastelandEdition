@@ -638,6 +638,194 @@ inline void varCalibrate( const VarVolumes & vol, const Variety & v, int band, f
 	}
 }
 
+/* lane CLOUDSHAPE1 (bungo 10-31 "do we have shapes like in rdr2?" MEASURED no: the Off density never passes 0.113 and
+ * ramps over 2.4 km): Cloud Shapes, the twin of cloud_common.glsl's WW_CLOUD_SHAPE cloudDensity. RDR2 (Bauer 2019 slides
+ * 14-18) places clouds with a 2D map, shapes them over height with a LUT, and carves the detail with a SATURATING rescale
+ * whose window sets the edge's softness; Schneider 2015 (HZD) gives the Perlin-Worley lumps and the Worley erosion,
+ * inverted at the base. Here: a body field (cloudnoise.h cellField) over the coverage threshold, a dome on ONE flat base
+ * per body (taller in stronger cells), lumps that grow with height, the eroded edge, then clamp(f / window): dense
+ * inside, not multiplied by the coverage. Constants: notes/cloudshape1 (gate.py, the u2 set; RESEARCH.md). */
+constexpr float kShpSoft = 0.2f;	// the rescale window (f units): RDR2's LUT z
+constexpr float kShpErode = 0.7f;	// the detail erosion's depth (f units)
+constexpr float kShpScale = 0.7f;	// the density inside a cloud (x kSigma: 28 /km; 1.0 put the shaded undersides past RDR2's contrast at 4 bearings)
+constexpr float kShpShearKm = 0.3f;	// the tops lean downwind, km per km of height (HZD: wind varies over altitude)
+constexpr float kShpRise = 0.04f;	// the base's rise (height fraction): a flat base
+constexpr float kShpCurlKm = 0.25f;	// the detail lookup's curl displacement at the base, km
+constexpr float kShpBaseErode = 0.3f;	// the erosion at the base, a share of kShpErode (keeps the base flat)
+constexpr float kShpLump = 0.45f;	// the Perlin-Worley lumps' amplitude (f units per sd)
+constexpr float kShpCellKm = 32.0f;	// the body field's period
+constexpr float kShpGrowth = 0.8f;	// the lumps grow from 1 - this at the base to 1 at the top
+constexpr float kShpTapFoot = 0.2f;	// a light tap reads the density at this share of its segment (HZD's cone smooths)
+constexpr float kShpSoftPerKm = 0.5f;	// the window widens with the reader's footprint, per km (no aliasing)
+constexpr float kShpMean = 0.884f, kShpSd = 0.053f;	// the shape volume's mean and sd (MEASURED; cloudshape_dump prints them)
+constexpr float kShpDir[2] = { 1.0f, 0.0f };	// the shear's direction: the wind's (windKm is along +x)
+
+/*! the per-type rule (the map's Low type T: 0 stratus, 1/3 stratocumulus, 2/3 cumulus, 1 cumulonimbus): the domes'
+ *  height in the band, their shape exponent (2 = round domes; 1.2 for towers: the height follows the cell's strength, so
+ *  only the strongest cells tower over the cumulus round them), the sheet share (stratus spreads flat), the anvil (the
+ *  threshold lowered near the top: the towers' tops spread) */
+struct ShapeType
+{
+	float topFrac, domeK, sheet, anvil;
+};
+inline ShapeType shapeType( float T )
+{
+	const float tw = smooth( 2.0f / 3.0f, 1.0f, T );
+	// towers (tw > 0): the cumulus round them keep low domes (0.15 of the tall band), the towers come from shapeTower
+	return { mixf( 0.6f, 0.15f, tw ), 2.0f, sat( 1.0f - 3.0f * T ), 0.5f * tw };
+}
+
+/* the towers of a cumulonimbus sky (anvil > 0: the tower share is anvil / 0.5): the body field read at kShpTowerScale x its
+ * period (towers 3x the cumulus' width), only cells past the middle strength rise, their height following the strength:
+ * f_t = w_big - (0.5 + 0.5 hf^1.2). The towers join the cumulus field (the larger f) */
+constexpr float kShpTowerScale = 3.0f;
+inline float shapeTowerF( float cellBig, float c, float hf )
+{
+	const float w = ( cellBig - ( 1.0f - c ) ) / std::max( c, 1e-3f );
+	return w - ( 0.5f + 0.5f * std::pow( std::max( hf, 0.0f ), 1.2f ) );
+}
+
+//! the anvil's lift of f at hf (0 below 80 % of the band, the full anvil from 90 to 96 %, gone at the top)
+inline float shapeAnvil( float anvil, float hf )
+{
+	return anvil * smooth( 0.8f, 0.9f, hf ) * ( 1.0f - smooth( 0.96f, 1.0f, hf ) );
+}
+
+//! a bilinear, repeating read of an n x n float field at (u, w) in periods, texel centres at (i + 0.5) / n
+inline float sample2( const float * v, int n, float u, float w )
+{
+	const float fx = u * float( n ) - 0.5f, fy = w * float( n ) - 0.5f;
+	const float x0 = std::floor( fx ), y0 = std::floor( fy );
+	const float ax = fx - x0, ay = fy - y0;
+	auto at = [&]( float x, float y ) {
+		auto wr = [n]( float c ) {
+			int i = int( c ) % n;
+			return i < 0 ? i + n : i;
+		};
+		return v[size_t( wr( y ) ) * size_t( n ) + size_t( wr( x ) )];
+	};
+	return mixf( mixf( at( x0, y0 ), at( x0 + 1.0f, y0 ), ax ), mixf( at( x0, y0 + 1.0f ), at( x0 + 1.0f, y0 + 1.0f ), ax ), ay );
+}
+
+/*! the shape density's core given its reads: the body cell (0..1), the shape s, the detail det, the height fraction hf,
+ *  the calibrated coverage c, the sheet share, the type rule, the reader's footprint km. Relative (x kSigma x the band's
+ *  density). */
+inline float shapeCore( float cell, float cellBig, float s, float det, float hf, float c, float sheet, const ShapeType & st,
+	float footKm )
+{
+	if ( hf <= 0.0f || hf >= 1.0f || c <= 0.0f )
+		return 0.0f;
+	const float w = ( cell - ( 1.0f - c ) ) / std::max( c, 1e-3f );
+	const float hd = hf / std::max( st.topFrac, 1e-3f );
+	const float reach = mixf( std::pow( hd, st.domeK ), hf * 4.0f, sheet );
+	float f = w - reach;
+	if ( st.anvil > 0.0f )
+		f = mixf( f, std::max( f, shapeTowerF( cellBig, c, hf ) ), st.anvil * 2.0f );
+	f += shapeAnvil( st.anvil, hf ) - ( 1.0f - smooth( 0.0f, kShpRise, hf ) );
+	f += ( s - kShpMean ) / kShpSd * kShpLump * mixf( 1.0f - kShpGrowth, 1.0f, hf );
+	const float er = kShpErode * mixf( kShpBaseErode, 1.0f, smooth( 0.0f, 0.3f, hf ) );
+	f -= mixf( det, 1.0f - det, sat( hf * 4.0f ) ) * er;
+	return sat( f / std::max( kShpSoft + footKm * kShpSoftPerKm, 1e-3f ) ) * kShpScale;
+}
+
+struct ShapeVolumes
+{
+	const std::uint8_t * shape;
+	int ns;
+	const std::uint8_t * detail;
+	int nd;
+	const float * cell;
+	int nc;
+};
+
+//! the three reads at (x, y, z) km for a band whose base is baseKm (wind 0, mip 0), as cloud_common.glsl takes them
+inline void shapeReads( const ShapeVolumes & vol, int band, float baseKm, float hf, float x, float y, float z, float & cell,
+	float & cellBig, float & s, float & det )
+{
+	const float qx = x + kShpDir[0] * kShpShearKm * ( z - baseKm ), qy = y + kShpDir[1] * kShpShearKm * ( z - baseKm );
+	cell = sample2( vol.cell, vol.nc, qx / kShpCellKm + 0.37f * float( band ), qy / kShpCellKm + 0.37f * float( band ) );
+	cellBig = sample2( vol.cell, vol.nc, qx / ( kShpCellKm * kShpTowerScale ) + 0.21f, qy / ( kShpCellKm * kShpTowerScale ) + 0.21f );
+	s = sample3( vol.shape, vol.ns, qx / kShapeKm, qy / kShapeKm, z / kShapeKm );
+	float cu[3];
+	curlRaw( qx, qy, z, cu );
+	const float a = kShpCurlKm * ( 1.0f - 0.5f * hf );
+	det = sample3( vol.detail, vol.nd, ( qx + cu[0] * a ) / kDetailKm, ( qy + cu[1] * a ) / kDetailKm, ( z + cu[2] * a ) / kDetailKm );
+}
+
+/*! the whole density at (x, y, z) km: the twin of the WW_CLOUD_SHAPE cloudDensity (wind 0, footprint 0). map = cvMapAt's;
+ *  the Low band's top is the map's (raised to the type's depth); types per band; cal per band (calAt) */
+inline float shapeDensity( const ShapeVolumes & vol, const ShapeType st[2], const float baseKm[2], const float topKm[2],
+	const float density[2], const float cal[2][kCalN], const float map[4], float x, float y, float z )
+{
+	float d = 0.0f;
+	for ( int b = 0; b < 2; b++ ) {
+		if ( density[b] <= 0.0f )
+			continue;
+		const float hf = ( z - baseKm[b] ) / std::max( topKm[b] - baseKm[b], 1e-3f );
+		if ( hf <= 0.0f || hf >= 1.0f )
+			continue;
+		const float cov = b == 0 ? map[0] : map[1];
+		const float sheet = b == 0 ? std::max( sat( map[2] / std::max( map[0], 1e-3f ) ), st[0].sheet ) : st[1].sheet;
+		const float c = calAt( cal[b], cov );
+		float cell, cellBig, s, det;
+		shapeReads( vol, b, baseKm[b], hf, x, y, z, cell, cellBig, s, det );
+		d += shapeCore( cell, cellBig, s, det, hf, c, sheet, st[b], 0.0f ) * density[b];
+	}
+	return d;
+}
+
+/*! the coverage table of one band under Cloud Shapes (calibrate's rule: cal[i] = the threshold coverage whose mean
+ *  column opacity from above is i / 16), over 64 x 64 columns of one body-field period (the towers' period with
+ *  towers), 40 steps through the band */
+inline void shapeCalibrate( const ShapeVolumes & vol, const ShapeType & st, int band, float baseKm, float topKm,
+	float density, float sheet, bool redNoCal, float cal[kCalN] )
+{
+	for ( int i = 0; i < kCalN; i++ )
+		cal[i] = float( i ) / float( kCalN - 1 );
+	const float th = topKm - baseKm;
+	if ( redNoCal || th <= 1e-3f || density <= 0.0f )
+		return;
+	// 64 x 64 columns (0.5 km apart over the 32 km field: its smallest bodies are ~0.7 km; 32 x 32 missed the 0.7 stripe by
+	// 0.06, tests/spells/cloudshape_check.py gate A)
+	constexpr int NC = 64, NZ = 40, NG = 33;
+	std::vector<float> rc( NC * NC * NZ ), rb( NC * NC * NZ ), rs( NC * NC * NZ ), rd( NC * NC * NZ );
+	const float span = kShpCellKm * ( st.anvil > 0.0f ? kShpTowerScale : 1.0f );
+	for ( int j = 0, n = 0; j < NC; j++ )
+		for ( int i = 0; i < NC; i++ ) {
+			const float x = ( float( i ) + 0.5f ) / NC * span, y = ( float( j ) + 0.37f ) / NC * span;
+			for ( int k = 0; k < NZ; k++, n++ ) {
+				const float hf = ( float( k ) + 0.5f ) / NZ;
+				shapeReads( vol, band, baseKm, hf, x, y, baseKm + hf * th, rc[n], rb[n], rs[n], rd[n] );
+			}
+		}
+	auto opacity = [&]( float cp ) {
+		double acc = 0.0;
+		for ( int col = 0, n = 0; col < NC * NC; col++ ) {
+			float tau = 0.0f;
+			for ( int k = 0; k < NZ; k++, n++ )
+				tau += shapeCore( rc[n], rb[n], rs[n], rd[n], ( float( k ) + 0.5f ) / NZ, cp, sheet, st, 0.0f ) * kSigma * density * th / NZ;
+			acc += 1.0 - std::exp( -double( tau ) );
+		}
+		return float( acc / ( NC * NC ) );
+	};
+	float o[NG];
+	o[0] = 0.0f;
+	for ( int j = 1; j < NG; j++ )
+		o[j] = std::max( o[j - 1], opacity( float( j ) / ( NG - 1 ) ) );
+	for ( int i = 1; i < kCalN; i++ ) {
+		const float want = float( i ) / float( kCalN - 1 );
+		float cp = 1.0f;
+		for ( int j = 1; j < NG; j++ )
+			if ( o[j] >= want ) {
+				const float a = o[j - 1], b = o[j];
+				const float f = b > a ? ( want - a ) / ( b - a ) : 1.0f;
+				cp = ( float( j - 1 ) + f ) / ( NG - 1 );
+				break;
+			}
+		cal[i] = std::max( cal[i - 1], cp );
+	}
+}
+
 } // namespace WwCloudVolMath
 
 #endif

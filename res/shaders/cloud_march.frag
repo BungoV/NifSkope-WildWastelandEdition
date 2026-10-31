@@ -294,6 +294,9 @@ void main()
 			t0 = T < 0.005 ? t1 : tc;
 		}
 		float dt = ( t1 - t0 ) / float( cvSteps );
+#ifdef WW_CLOUD_SHAPE
+		bool fine = false;	// lane CLOUDSHAPE1: inside cloud (the step refinement below)
+#endif
 		for ( int i = 0; i < cvSteps && t1 > t0; i++ ) {
 #else
 		float dt = ( t1 - t0 ) / float( cvSteps );
@@ -303,10 +306,32 @@ void main()
 #else
 		float j = fract( 52.9829189 * fract( dot( q, vec2( 0.06711056, 0.00583715 ) ) ) + cvFrame * 0.618034 );
 #endif
+#ifdef WW_CLOUD_SHAPE
+		bool fine = false;	// lane CLOUDSHAPE1: inside cloud (the step refinement below)
+#endif
 		for ( int i = 0; i < cvSteps; i++ ) {
 #endif
+#ifdef WW_CLOUD_SHAPE
+			/* lane CLOUDSHAPE1, step refinement (RDR2 halves its step on hitting cloud, Bauer 2019 sl. 50): a dense, crisp
+			 * cloud between coarse samples aliases (Ultra's steps reach ~1 km toward the horizon). Once an interval drew
+			 * cloud, the next ones take 2 sub-steps (4 cost the mid view 0.119 ms vs Off's 0.089 at Ultra, offline); an
+			 * interval that drew none returns to the coarse step. */
+			{
+				float dtO = dt, T0 = T;
+				int nsub = fine ? 2 : 1;
+				for ( int s = 0; s < nsub; s++ ) {
+					float dt = dtO / float( nsub );
+					float t = t0 + float( i ) * dtO + ( float( s ) + j ) * dt;
+					#include "cloud_march_step.glsl"
+				}
+				fine = T < T0;
+				if ( T < 0.005 )
+					break;
+			}
+#else
 			float t = t0 + ( float( i ) + j ) * dt;
 			#include "cloud_march_step.glsl"
+#endif
 		}
 	}
 	// the High band: a thin sheet at its base, behind the volume

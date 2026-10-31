@@ -64,6 +64,24 @@ float cfGradMax( int b, float h0, float h1 )
 	return cvGradient( b, clamp( 0.15, h0, h1 ), 0.0 );
 }
 
+#ifdef WW_CLOUD_SHAPE
+/* lane CLOUDSHAPE1: the largest body-field texel a read at mips 0..2 can mix anywhere in [q0, q1] (km, wind and shear
+ * added, the band's offset off): the rect widened by 4 mip-0 texels; 1 = too wide to bound */
+float cfCellMax( vec2 q0, vec2 q1, float off )
+{
+	int n = textureSize( cvCell, 0 ).x;
+	vec2 u0 = ( q0 / kShpCellKm + off ) * float( n ) - 0.5, u1 = ( q1 / kShpCellKm + off ) * float( n ) - 0.5;
+	ivec2 a = ivec2( floor( u0 ) ) - 4, b = ivec2( floor( u1 ) ) + 5;
+	if ( any( greaterThan( b - a, ivec2( 40 ) ) ) )
+		return 1.0;
+	float m = 0.0;
+	for ( int y = a.y; y <= b.y; y++ )
+		for ( int x = a.x; x <= b.x; x++ )
+			m = max( m, texelFetch( cvCell, ivec2( ( x % n + n ) % n, ( y % n + n ) % n ), 0 ).r );
+	return m;
+}
+#endif
+
 void main()
 {
 	ivec2 ij = ivec2( gl_FragCoord.xy );
@@ -86,6 +104,29 @@ void main()
 		float h0 = ( lo.z - base ) / max( top - base, 1e-3 ), h1 = ( hi.z - base ) / max( top - base, 1e-3 );
 		if ( h1 <= 0.0 || h0 >= 1.0 || cvBands.density[b] <= 0.0 )
 			continue;
+#ifdef WW_CLOUD_SHAPE
+		{	/* lane CLOUDSHAPE1: f <= the body's largest strength - the reach at the cell's bottom (the reach rises with
+			 * height: a dome or the sheet's hf x 4, a blend never below the smaller) - the base cut at its top + the
+			 * largest lump; the erosion only lowers f */
+			float c = cvCalAt( b, b == 0 ? cov.x : cov.y );
+			if ( c <= 0.0 )
+				continue;
+			vec4 st = b == 0 ? cvShpT0 : cvShpT1;
+			float hz0 = clamp( h0, 0.0, 1.0 ), hz1 = clamp( h1, 0.0, 1.0 );
+			vec2 sa = kShpDir * ( kShpShearKm * ( lo.z - base ) ), sb = kShpDir * ( kShpShearKm * ( hi.z - base ) );
+			vec2 q0 = lo.xy + min( sa, sb ) + cvBands.windKm.xy, q1 = hi.xy + max( sa, sb ) + cvBands.windKm.xy;
+			float w = ( cfCellMax( q0, q1, 0.37 * float( b ) ) - ( 1.0 - c ) ) / max( c, 1e-3 );
+			float r0 = min( pow( hz0 / max( st.x, 1e-3 ), st.y ), hz0 * 4.0 );
+			if ( st.w > 0.0 ) {	// the towers' field (a blend of f and max(f, f_t) never exceeds max(f, f_t))
+				float s3 = 1.0 / kShpTowerScale;
+				float wt = ( cfCellMax( q0 * s3, q1 * s3, 0.21 ) - ( 1.0 - c ) ) / max( c, 1e-3 );
+				w = max( w - r0, wt - 0.5 - 0.5 * pow( hz0, 1.2 ) ) + r0;
+			}
+			if ( w - r0 - ( 1.0 - cvSmooth( 0.0, kShpRise, hz1 ) ) + st.w + kShpLump * ( 1.0 - kShpMean ) / kShpSd > 0.0 )
+				occ = 1.0;
+			continue;
+		}
+#endif
 #ifdef WW_CLOUD_VARIETY
 		/* lane CLOUD5: the weather noise's swing raises the coverage by at most swing x min(c, 1 - c) (rising in c); the
 		 * type tables are bounded by their largest anchor (a blend never exceeds both), the anvil by sqrt (its power >=

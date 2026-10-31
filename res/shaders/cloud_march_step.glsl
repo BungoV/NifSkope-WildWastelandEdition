@@ -12,17 +12,33 @@
 	for ( int k = 0; k < cvTaps; k++ ) {
 		float a = float( k ) / float( cvTaps ), b = float( k + 1 ) / float( cvTaps );
 		float tk = cvLightKm * 0.5 * ( a * a + b * b ), dk = cvLightKm * ( b * b - a * a );
+#ifdef WW_CLOUD_SHAPE
+		/* lane CLOUDSHAPE1: a dense, crisp cloud bands the light at fixed tap places: each tap sits jittered inside its
+		 * segment (the accumulation averages the steps away) and reads the density at its segment's footprint (HZD's
+		 * cone of light samples smooths the same way, Schneider 2015 p. 85) */
+		{
+			float u = mix( a, b, fract( j + 0.618034 * float( k + 1 ) + 0.5 * cvFrame ) );
+			tk = cvLightKm * u * u;
+		}
+		cvFootKm = max( t * pixKm, kShpTapFoot * dk );
+#endif
 		vec3 pl = p + cvKeyW * tk;
 		pl.z = p.z + dot( up, cvKeyW ) * tk;
 		tauL += cvDens( pl ) * kCvSigma * dk;
 	}
-#ifdef WW_CLOUD_VARIETY
+#if defined( WW_CLOUD_VARIETY ) || defined( WW_CLOUD_SHAPE )	// lane CLOUDSHAPE1: the shapes' towers too
 	/* lane CLOUD5 round 2: a tower's column goes on past the taps' reach (6 km of a 7 km tower with the sun at 60 deg is
 	 * 6.9 km along it): one tap at the middle of the rest, up to the Low band's top along the key, at most one reach
 	 * long. Without it the floor's slab is too thin and, at albedo 0.99, the base 2.1x too bright (gate C, MEASURED). */
 	{
 		float muK = dot( up, cvKeyW );
 		float rest = muK > 0.01 ? clamp( ( cvBands.topKm.x - p.z ) / muK - cvLightKm, 0.0, cvLightKm ) : 0.0;
+#ifdef WW_CLOUD_SHAPE
+		/* lane CLOUDSHAPE1: towers only (the storm type, cvShpT0.w > 0): on cumulus the extra tap took the mid view's
+		 * contrast to 0.28, past RDR2's 0.22 (notes/cloudshape1/gate3.txt; RDR2 lightens the same bases with its
+		 * back-scatter clamp, Bauer 2019 sl. 30) */
+		rest = cvShpT0.w > 0.0 ? rest : 0.0;
+#endif
 		if ( rest > 0.0 ) {
 			float tk = cvLightKm + 0.5 * rest;
 			vec3 pl = p + cvKeyW * tk;
@@ -71,6 +87,25 @@
 		}
 		ph = max( ph, fd / kPi );
 	}
+#ifdef WW_CLOUD_SHAPE
+	/* lane CLOUDSHAPE1 (LATE ITEM 7, MEASURED: the light march alone left the sunlit side dark at back-scatter angles and
+	 * the floor + ambient flattened every cloud to top/base 1.00, references 0.99-1.74): two published terms.
+	 * RDR2's back-scatter clamp (Bauer 2019 sl. 30): the phase never under a Lambertian 1/pi where the cloud is dense,
+	 * times the light that reaches the sample (exp(-tauL)): a sunlit face is bright from any side, a shaded one stays dark.
+	 * Nubis 2017's in-scatter probability (Schneider p. 89-92): few scattering sources at the thin edges facing the light
+	 * and at the cloud's bottom: depth 0.05 + d^(0.5..2 over the height), vertical (0.1 .. 1 over 7-14 % of the layer)^0.8;
+	 * it scales the key light only (the ambient keeps AMBDARK's column). */
+	{
+		float hfB = clamp( ( p.z - cvBands.baseKm.x ) / max( cvBands.topKm.x - cvBands.baseKm.x, 1e-3 ), 0.0, 1.0 );
+		ph = max( ph, kShpBack / kPi * cvSmooth( kShpBackLo, kShpBackHi, dens * kCvSigma ) * exp( -tauL ) );
+		float dl = clamp( dens / max( kShpScale * cvBands.density.x, 1e-3 ), 0.0, 1.0 );
+		float depthP = 0.05 + pow( dl, mix( 0.5, 2.0, clamp( ( hfB - 0.3 ) / 0.55, 0.0, 1.0 ) ) );
+		// the base's floor 0.35, not Nubis' 0.1: our bases get no ground bounce (completeness row 15), and at 0.1 the sky's
+		// blue ambient alone painted them blue (diag/up50_sp_lit_d2.png)
+		float vertP = pow( mix( 0.35, 1.0, clamp( ( hfB - 0.07 ) / 0.07, 0.0, 1.0 ) ), 0.8 );
+		ph *= min( depthP, 1.0 ) * vertP;
+	}
+#endif
 	vec3 tint = p.z < cvBands.topKm.x ? cvTint[0] : cvTint[1];
 	float ambF = mix( 0.5, 1.0, hf );
 	/* lane CLOUDBAND1 (b), RDR2's darker sky light inside thick cloud (Bauer 2019 darkens it by a sun-ward sample): the open
@@ -83,6 +118,10 @@
 		float span = max( topZ - p.z, 0.0 ), tauU = 0.0;
 		for ( int k = 0; k < 3; k++ ) {
 			float tk = span * ( float( k ) + 0.5 ) / 3.0;
+#ifdef WW_CLOUD_SHAPE
+			// lane CLOUDSHAPE1: jittered inside its third (fixed places banded a thin anvil's underside in contour lines)
+			tk = span * ( float( k ) + fract( j + 0.381966 * float( k + 1 ) + 0.25 * cvFrame ) ) / 3.0;
+#endif
 			vec3 pu = p + up * tk;
 			pu.z = p.z + tk;
 			tauU += cvDens( pu ) * kCvSigma * span / 3.0;

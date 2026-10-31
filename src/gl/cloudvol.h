@@ -29,6 +29,17 @@ void wwCloudVolSetVariety( int on );	//!< refused while WW_CLOUDVOL_VARIETY pins
 bool wwCloudVolVarietyPinned();
 //! the row on and the volume at Medium or up: readers of the density take the *_v.prog twins
 bool wwCloudVolVarietyOn();
+/*! lane CLOUDSHAPE1 (bungo 10-31 "do we have shapes like in rdr2?"): Cloud Shapes, WW_CLOUDVOL_SHAPE, ON BY DEFAULT, live
+ *  (the volume at Medium or up): every reader of the density takes its *_s.prog twin (cloud_march_s, cloud_fly_s,
+ *  cloud_shadowmap_s, cloud_flybake_s; cloud_common.glsl WW_CLOUD_SHAPE): bodies placed by a 2D field on one flat base,
+ *  domes by the weather's type, dense inside, a crisp eroded edge (RDR2, Bauer 2019 sl. 14-18; HZD 2015). Supersedes Cloud
+ *  Variety's density while on; the map raises the Low top to the type's depth for either. =0 / off = the old density (the
+ *  red). Gates: tests/spells/cloudshape_check.py; notes/cloudshape1/tools/gate.py (RDR2 + reference frames). */
+bool wwCloudVolShapeOn();
+//! the row Render > Scene > Cloud Shapes: 0 Off / 1 On (QSettings, default On; WW_CLOUDVOL_SHAPE pins it)
+int wwCloudVolShape();
+void wwCloudVolSetShape( int on );	//!< refused while WW_CLOUDVOL_SHAPE pins it
+bool wwCloudVolShapePinned();
 /*! lane CLOUD6d: one cloud profile set per weather (cloudmath.h lowTypeOf oneSet: the weather's type everywhere, no
  *  towers beside puffs), WW_CLOUDVOL_PROFILESET, ON BY DEFAULT, live; =0 / off or WW_CLOUDVOL_RED=typemix = CLOUD5's
  *  type swing (the red). Gate tests/spells/cloudprofile_check.py. */

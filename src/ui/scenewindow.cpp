@@ -233,6 +233,14 @@ SceneWindow::SceneWindow( QWidget * mainWindow, std::function<void()> repaint, s
 	cloudVarietyBox->setCurrentIndex( std::clamp( wwCloudVolVariety(), 0, 1 ) );
 	wwMatchFieldStyle( cloudVarietyBox );
 	row( tr( "Cloud Variety" ), cloudVarietyBox, true );
+	// lane CLOUDSHAPE1: cloud bodies on flat bases, dense inside, crisp eroded edges, storm towers (needs Volume Clouds
+	// Medium+); ships On, Off = the old density
+	cloudShapesBox = new QComboBox( tree );
+	cloudShapesBox->setObjectName( QStringLiteral( "cloudShapes" ) );
+	cloudShapesBox->addItems( { tr( "Off" ), tr( "On" ) } );
+	cloudShapesBox->setCurrentIndex( std::clamp( wwCloudVolShape(), 0, 1 ) );
+	wwMatchFieldStyle( cloudShapesBox );
+	row( tr( "Cloud Shapes" ), cloudShapesBox, true );
 	// lane CLOUD3: the clouds' shadows on the ground, in the fog and in the GI's sun; ships Off
 	cloudShadowsBox = new QComboBox( tree );
 	cloudShadowsBox->setObjectName( QStringLiteral( "cloudShadows" ) );
@@ -454,6 +462,7 @@ SceneWindow::SceneWindow( QWidget * mainWindow, std::function<void()> repaint, s
 	liveTier( cloudMapBox, &wwCloudMapSetTier );	// lane CLOUD1
 	liveTier( volumeCloudsBox, &wwCloudVolSetTier );	// lane CLOUD2
 	liveTier( cloudVarietyBox, &wwCloudVolSetVariety );	// lane CLOUD5
+	liveTier( cloudShapesBox, &wwCloudVolSetShape );	// lane CLOUDSHAPE1
 	liveTier( cloudShadowsBox, &wwCloudShadowSetTier );	// lane CLOUD3
 	liveTier( flyThroughCloudsBox, &wwCloudFlySetTier );	// lane CLOUD4
 	liveTier( modernTaaBox, &wwTaa2SetTier );	// lane TAA2
@@ -584,7 +593,7 @@ void SceneWindow::syncEnabled()
 			static_cast<QWidget *>( moonPhaseStarsBox ), static_cast<QWidget *>( exposureFromSkyBox ),
 			static_cast<QWidget *>( skyColorBox ), static_cast<QWidget *>( giSkyFromPhysicalBox ),
 			static_cast<QWidget *>( cloudMapBox ), static_cast<QWidget *>( volumeCloudsBox ),
-			static_cast<QWidget *>( cloudVarietyBox ),
+			static_cast<QWidget *>( cloudVarietyBox ), static_cast<QWidget *>( cloudShapesBox ),
 			static_cast<QWidget *>( cloudShadowsBox ), static_cast<QWidget *>( flyThroughCloudsBox ),
 			static_cast<QWidget *>( cascadeQualityBox ),
 			static_cast<QWidget *>( contactShadowsBox ), static_cast<QWidget *>( terrainShadowsBox ),

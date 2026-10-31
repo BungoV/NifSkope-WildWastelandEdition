@@ -1,5 +1,37 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## CLOUDSHAPE1 (2026-10-31): Cloud Shapes, volume clouds with bodies, flat bases and crisp edges (RDR2 / HZD / Nubis)
+
+- **Why (bungo 10-31 "do we have shapes like in rdr2?" - MEASURED no):** the default density (Cloud Variety ships Off)
+  never got dense: its peak was 0.113 of a plain cumulus (4.5 /km) and its edge ramped over 2.4 km, so every cloud was
+  transition. The 128^3 shape volume holds mean 0.884, sd 0.053, and the coverage threshold sat inside that sliver; HZD's
+  `*= coverage` then thinned a sparse sky. Research, sources and the completeness table: notes/cloudshape1/RESEARCH.md.
+- **Cloud Shapes (row Render > Scene > Cloud Shapes, On by default, live; WW_CLOUDVOL_SHAPE=0 / Off = the old density, the
+  red):** every reader of the density takes its *_s.prog twin (cloud_march_s, cloud_fly_s, cloud_shadowmap_s,
+  cloud_flybake_s; cloud_common.glsl WW_CLOUD_SHAPE; the CPU twin and every constant in src/gl/cloudvolmath.h kShp*):
+  - **Placement:** a 2D body field (src/gl/cloudnoise.h cellField: 512^2, 3 octaves of gradient noise at 2.7 / 1.3 /
+    0.7 km over a 32 km period, rank-normalised to uniform 0..1). This is RDR2's cloud map role (Bauer 2019 sl. 14).
+  - **Shape over height:** a dome per body on ONE flat base (RDR2's height LUT, sl. 16). Stronger cells grow taller.
+    The weather's type (cloudmap.cpp lowTypeOf) sets the domes; the storm type adds towers (the field at 3x) and an
+    anvil lift; the map raises the Low top to the type's depth, as Variety does.
+  - **Lumps and erosion:** the Perlin-Worley lumps (normalised by the volume's own mean / sd) grow with height. HZD's
+    curl-displaced Worley erosion (billows above, wisps at a flat base) carves the edge, followed by a SATURATING
+    rescale (RDR2 sl. 18): dense inside (28 /km) and not multiplied by the coverage. The tops lean downwind.
+  - **Coverage calibration:** new tables (shapeCalibrate, 64 x 64 columns) keep the drawn opacity at the map's coverage.
+  - **Lighting, shape twin only:** RDR2's back-scatter clamp (sl. 30) and Nubis 2017's in-scatter probability
+    (Schneider p. 89-92) give bright sunlit faces and darker flat bases. The light taps are jittered inside their
+    segments and read at their footprint, as are the ambient column's 3 taps. The tower's rest-of-column tap (CLOUD5)
+  is applied to towers only.
+  - **Step refinement (RDR2 sl. 50):** once an interval of the march drew cloud, the next one takes 2 sub-steps, so a
+    crisp edge does not alias between coarse steps. The offline march costs at most today's (one view +0.001 ms).
+  - **Readers and units:** the shadow map and the fly-through grid take the twin (the bake gets its own conservative
+    bound). The body field binds on unit 9 (march, bake) / WwCellUnit::CloudBuildCell 58 (the shadow build).
+    Notes echo `shape=typeT.TT` or `RED=shapeoff`.
+- **Gates:** tests/spells/cloudshape_check.py: L link, M stats, T twin (GPU vs CPU max 0.0037), A coverage (worst 0.018;
+  red nocal 0.157), B bound (0 of 15508 occupied cells marked empty); red off fails T. The look gate against RDR2's slide
+  frames, clayjohn/realtime_clouds' frames and bungo's references lives in notes/cloudshape1/tools/gate.py (the frames
+  never go in the repo). The Off path is unchanged: cloudvol_check A B C R G as before.
+
 ## TREELEAF1 fix (2026-10-31, FIX1031B): the coverage copy no longer erases the Concord church's window tracery
 
 - **The regression (bungo's sheet_3, SHOTS1031B run4a c3_p3i_e700_* / c3_p3i_e1700_*):** with TREELEAF1's coverage

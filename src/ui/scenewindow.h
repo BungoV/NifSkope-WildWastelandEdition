@@ -84,6 +84,7 @@ public:
 	QComboBox * cloudMapBox = nullptr;	// lane CLOUD1
 	QComboBox * volumeCloudsBox = nullptr;	// lane CLOUD2
 	QComboBox * cloudVarietyBox = nullptr;	// lane CLOUD5
+	QComboBox * cloudShapesBox = nullptr;	// lane CLOUDSHAPE1
 	QComboBox * cloudShadowsBox = nullptr;	// lane CLOUD3
 	QComboBox * flyThroughCloudsBox = nullptr;	// lane CLOUD4
 	QComboBox * cascadeQualityBox = nullptr;

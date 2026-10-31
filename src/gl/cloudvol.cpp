@@ -8,6 +8,7 @@
 #include "atmosphere.h"
 #include "atmomath.h"
 #include "cellhdr.h"
+#include "cellunits.h"	// lane CLOUDSHAPE1: the shadow build's unit for the body field
 #include "cellunderwater.h"	// lane WATERUNDER3: no clouds over a camera under water
 #include "wwswitch.h"
 #include "gl/glscene.h"
@@ -36,6 +37,7 @@ namespace V = WwCloudVolMath;
 
 constexpr const char * kKey = "Settings/Render/Scene/Volume Clouds";
 constexpr const char * kVarKey = "Settings/Render/Scene/Cloud Variety";	// lane CLOUD5
+constexpr const char * kShpKey = "Settings/Render/Scene/Cloud Shapes";	// lane CLOUDSHAPE1
 constexpr GLenum kTimestamp = 0x8E28;	// GL_TIMESTAMP
 
 struct Preset
@@ -86,6 +88,8 @@ struct CvState
 	int litClamp = 1;	// lane CLOUD6h: Lit Clamp (WW_CLOUDVOL_LITCLAMP)
 	int topColumn = 1;	// lane CLOUDLIGHT1: the top light's slab without reads (WW_CLOUDVOL_TOPCOLUMN)
 	int moreSteps = 1;	// lane CLOUDSTEPS1: Medium 60 / High 80 steps (WW_CLOUDVOL_MORESTEPS)
+	int shape = 1;	// lane CLOUDSHAPE1: Cloud Shapes (WW_CLOUDVOL_SHAPE, the row)
+	bool shapePinned = false;
 };
 
 CvState & cs()
@@ -167,6 +171,17 @@ CvState & cs()
 		 * Gate tests/spells/cloudsteps_check.py. */
 		const QByteArray ms = wwEnvStr( "WW_CLOUDVOL_MORESTEPS" ).trimmed().toLower().toLatin1();
 		s.moreSteps = V::defaultOnSwitch( ms.constData() ) ? 1 : 0;
+		/* lane CLOUDSHAPE1 (bungo 10-31 "do we have shapes like in rdr2?"): Cloud Shapes, the DEFAULT, live: every reader
+		 * of the density takes its *_s.prog twin (cloud_common.glsl WW_CLOUD_SHAPE: bodies on flat bases, dense inside,
+		 * a crisp eroded edge; the type per weather sets the domes; the Low top rises to the type's depth). It supersedes
+		 * Cloud Variety's density while on. =0 / off = the old density (the red: "plain puffs of smoke"). Offline gate:
+		 * notes/cloudshape1/tools/gate.py (RDR2 + clayjohn frames); in tree tests/spells/cloudshape_check.py. */
+		const QByteArray sh = wwEnvStr( "WW_CLOUDVOL_SHAPE" ).trimmed().toLower().toLatin1();
+		s.shapePinned = !sh.isEmpty();
+		if ( s.shapePinned || wwHarnessRun() )	// a pin, or a harness run (it measures what it pins: the default On)
+			s.shape = V::defaultOnSwitch( sh.constData() ) ? 1 : 0;
+		else	// the row Render > Scene > Cloud Shapes, On unless the user turned it Off
+			s.shape = QSettings().value( QLatin1StringView( kShpKey ), 1 ).toInt() != 0 ? 1 : 0;
 	}
 	return s;
 }
@@ -208,6 +223,11 @@ struct CvGpu
 	bool varRed = false;
 	float calT[V::kVarCal][V::kCalN] = {};
 	float calMidV[V::kCalN] = {};
+	// lane CLOUDSHAPE1: the body field (2D R32F) and the Cloud Shapes tables per band, memoised on their inputs
+	GLuint cell = 0;
+	int shpKey[2][5] = { { -1, 0, 0, 0, 0 }, { -1, 0, 0, 0, 0 } };
+	bool shpRed[2] = { false, false };
+	float shpCal[2][V::kCalN] = {};
 	GLuint blue = 0;	// lane CLOUD5 round 2: the variety march's step offsets (EA's FAST blue noise sheet), 0 = IGN
 	bool blueTried = false;
 	unsigned long long accFrom = 0;	// lane CLOUDBAND1: g.frame when the history last began (accumAlpha's cycles)
@@ -235,6 +255,13 @@ const std::vector<std::uint8_t> & noise( bool detail )
 	static const std::vector<std::uint8_t> s = WwCloudNoise::shapeVolume();
 	static const std::vector<std::uint8_t> d = WwCloudNoise::detailVolume();
 	return detail ? d : s;
+}
+
+//! lane CLOUDSHAPE1: the bodies' field (cloudnoise.h cellField), built once a process (~0.1 s)
+const std::vector<float> & cellField()
+{
+	static const std::vector<float> c = WwCloudNoise::cellField();
+	return c;
 }
 
 GLuint upload3d( NifSkopeOpenGLContext::GLFunctions * fn, const std::vector<std::uint8_t> & v, int n )
@@ -321,6 +348,9 @@ struct Bands
 	bool variety;	// lane CLOUD5: the *_v twins and their uniforms (cvVarA, cvVarB, cvCalT)
 	V::Variety var;
 	float typeMax;	// the tallest type the sky holds (the light taps' reach, the ambient span)
+	bool shape;	// lane CLOUDSHAPE1: the *_s twins and their uniforms (cvShpT0/1, cvCell, the shape tables)
+	V::ShapeType shp[2];	// the Low band's type rule (the map's type), the Mid band's (stratocumulus-like)
+	float shpT;	// the Low type it came from (the tables' key)
 };
 
 Bands bandsOf( const WwCloudMap & m )
@@ -328,7 +358,17 @@ Bands bandsOf( const WwCloudMap & m )
 	Bands b{};
 	/* lane CLOUD5: Cloud Variety from the map (the type per weather; the map raised the Low top already). Red onetype:
 	 * one cumulus profile everywhere (CLOUD2's), no swing of the type; red nocurl: the detail read not displaced */
-	b.variety = wwCloudVolVarietyOn() && m.variety;
+	/* lane CLOUDSHAPE1: Cloud Shapes on supersedes Cloud Variety's density (the map raised the Low top for either); the
+	 * Low band's type rule from the map's type (always computed: cloudmap.cpp lowTypeOf), red onetype = cumulus */
+	b.shape = wwCloudVolShapeOn();
+	if ( b.shape ) {
+		b.shpT = red( "onetype" ) ? 2.0f / 3.0f : std::clamp( m.band[0].type, 0.0f, 1.0f );
+		b.shp[0] = V::shapeType( b.shpT );
+		b.shp[1] = V::shapeType( 1.0f / 3.0f );
+		b.typeMax = b.shpT;
+		b.var.depthKm = std::max( m.band[0].depthZ * kUnitKm, 0.05f );	// varLightKm's inputs: the band's own depth
+	}
+	b.variety = !b.shape && wwCloudVolVarietyOn() && m.variety;
 	if ( b.variety ) {
 		const bool one = red( "onetype" );
 		b.var.type = one ? 2.0f / 3.0f : std::clamp( m.band[0].type, 0.0f, 1.0f );
@@ -402,7 +442,33 @@ void calibratedVariety( CvGpu & g, const Bands & b, float calT[V::kVarCal * V::k
 	std::copy( g.calMidV, g.calMidV + V::kCalN, cal + V::kCalN );
 }
 
-/* lane CLOUD5: the light taps' reach under Cloud Variety: the weather's tallest type sets it (Bauer 2019, RDR2: the
+/* lane CLOUDSHAPE1: the Cloud Shapes tables of the Low and Mid bands (cloudvolmath.h shapeCalibrate: the shape density's
+ * own column opacity from above = the map's coverage), memoised on the band's heights, density, sheet and the Low type */
+void calibratedShape( CvGpu & g, const Bands & b, float out[2 * V::kCalN] )
+{
+	const bool noCal = red( "nocal" );
+	for ( int band = 0; band < 2; band++ ) {
+		const int key[5] = { int( std::lround( b.baseKm[band] * 50.0f ) ), int( std::lround( b.topKm[band] * 50.0f ) ),
+			int( std::lround( b.density[band] * 100.0f ) ), int( std::lround( ( band == 0 ? b.sheet : 0.0f ) * 32.0f ) ),
+			band == 0 ? int( std::lround( b.shpT * 100.0f ) ) : 0 };
+		if ( std::memcmp( key, g.shpKey[band], sizeof( key ) ) || g.shpRed[band] != noCal ) {
+			std::memcpy( g.shpKey[band], key, sizeof( key ) );
+			g.shpRed[band] = noCal;
+			const V::ShapeVolumes vol{ noise( false ).data(), WwCloudNoise::kShapeN, noise( true ).data(), WwCloudNoise::kDetailN,
+				cellField().data(), WwCloudNoise::kCellN };
+			const float sheet = band == 0 ? std::max( b.sheet, b.shp[0].sheet ) : b.shp[1].sheet;
+			const auto t0 = std::chrono::steady_clock::now();
+			V::shapeCalibrate( vol, b.shp[band], band, b.baseKm[band], b.topKm[band], b.density[band], sheet, noCal,
+				g.shpCal[band] );
+			fprintf( stderr, "cloudvol: shape table band %d %.1f ms (%.2f..%.2f km, type %.2f)\n", band,
+				std::chrono::duration<double, std::milli>( std::chrono::steady_clock::now() - t0 ).count(),
+				double( b.baseKm[band] ), double( b.topKm[band] ), double( band == 0 ? b.shpT : 1.0f / 3.0f ) );
+		}
+		std::copy( g.shpCal[band], g.shpCal[band] + V::kCalN, out + band * V::kCalN );
+	}
+}
+
+/* lane CLOUD5: the light taps' reach under Cloud Variety:the weather's tallest type sets it (Bauer 2019, RDR2: the
  * sun sample's distance is a weather parameter), so a 7 km tower's base sees the column above it (its dark, flat base
  * comes from that depth and the multiple-scattering floor, cvTdif, nothing painted). Red shortlight: the preset's */
 float varLightKm( const Bands & b, const Preset & pr )
@@ -437,7 +503,19 @@ void densityUniforms( Renderer * r, NifSkopeOpenGLContext::Program * p, CvGpu & 
 	p->uni4f( "cvBands.mapRect", FloatVector4( b.rect[0], b.rect[1], b.rect[2], b.rect[3] ) );
 	p->uni3f( "cvBands.windKm", windKm, 0.0f, 0.0f );
 	float cal[2 * V::kCalN];
-	calibrated( g, b, cal );
+	if ( b.shape )	// lane CLOUDSHAPE1: the shape density's own tables
+		calibratedShape( g, b, cal );
+	else
+		calibrated( g, b, cal );
+	if ( b.shape ) {	// lane CLOUDSHAPE1: the twins' uniforms (an old program has no cvShpT0: never set there)
+		p->uni4f( "cvShpT0", FloatVector4( b.shp[0].topFrac, b.shp[0].domeK, b.shp[0].sheet, b.shp[0].anvil ) );
+		p->uni4f( "cvShpT1", FloatVector4( b.shp[1].topFrac, b.shp[1].domeK, b.shp[1].sheet, b.shp[1].anvil ) );
+		// the body field on its own unit: 9 beside the march's 0..8, CloudBuildCell beside the shadow build's 47..49
+		const int cellUnit = unit == 0 ? 9 : WwCellUnit::CloudBuildCell;
+		fn->glActiveTexture( GLenum( GL_TEXTURE0 + cellUnit ) );
+		fn->glBindTexture( GL_TEXTURE_2D, g.cell );
+		p->uni1i( "cvCell", cellUnit );
+	}
 	if ( b.variety ) {	// lane CLOUD5: the twins' uniforms (an old program has no cvVarA: never set there)
 		float calT[V::kVarCal * V::kCalN];
 		calibratedVariety( g, b, calT, cal );
@@ -463,7 +541,21 @@ bool ensureNoise( Renderer * r, CvGpu & g )
 		g.shape = upload3d( r->fn, noise( false ), WwCloudNoise::kShapeN );
 	if ( !g.detail )
 		g.detail = upload3d( r->fn, noise( true ), WwCloudNoise::kDetailN );
-	return g.shape && g.detail;
+	if ( !g.cell ) {	// lane CLOUDSHAPE1: the bodies' field, R32F, repeat, trilinear mips (uploaded with the noise)
+		auto fn = r->fn;
+		const int n = WwCloudNoise::kCellN;
+		fn->glGenTextures( 1, &g.cell );
+		fn->glBindTexture( GL_TEXTURE_2D, g.cell );
+		fn->glPixelStorei( GL_UNPACK_ALIGNMENT, 4 );
+		fn->glTexImage2D( GL_TEXTURE_2D, 0, GL_R32F, n, n, 0, GL_RED, GL_FLOAT, cellField().data() );
+		fn->glGenerateMipmap( GL_TEXTURE_2D );
+		fn->glTexParameteri( GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR_MIPMAP_LINEAR );
+		fn->glTexParameteri( GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR );
+		fn->glTexParameteri( GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_REPEAT );
+		fn->glTexParameteri( GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_REPEAT );
+		fn->glBindTexture( GL_TEXTURE_2D, 0 );
+	}
+	return g.shape && g.detail && g.cell;
 }
 
 /* lane CLOUD5 round 2: EA's FAST spatiotemporal blue noise (res/ssgi, BSD-3; cellssgi.cpp loads the same sheet), 64 slices
@@ -592,8 +684,11 @@ bool marchPass( Renderer * r, CvGpu & g, const CvRedo & d, const WwAtmoFrame & f
 	const bool fly = wwCloudFlyActive( r );	// lane CLOUD4: the march with the fly-through box
 	const bool var = d.b.variety;	// lane CLOUD5: the Cloud Variety twins
 	// lane CLOUDBAND1: Cloud Accumulation's twins take blue noise offsets (the variety twins have them already)
-	const bool acc = d.accum && !var, blue = var || d.accum;
-	NifSkopeOpenGLContext::Program * p = r->useProgram( var ? ( fly ? "cloud_fly_v.prog" : "cloud_march_v.prog" )
+	// lane CLOUDSHAPE1: the Cloud Shapes twins (blue noise offsets as Accumulation's; IGN when Accumulation is off)
+	const bool shp = d.b.shape;
+	const bool acc = d.accum && !var, blue = var || d.accum || shp;
+	NifSkopeOpenGLContext::Program * p = r->useProgram( shp ? ( fly ? "cloud_fly_s.prog" : "cloud_march_s.prog" )
+														   : var ? ( fly ? "cloud_fly_v.prog" : "cloud_march_v.prog" )
 														   : acc ? ( fly ? "cloud_fly_a.prog" : "cloud_march_a.prog" )
 														   : ( fly ? "cloud_fly.prog" : "cloud_march.prog" ) );
 	if ( !p )
@@ -630,7 +725,7 @@ bool marchPass( Renderer * r, CvGpu & g, const CvRedo & d, const WwAtmoFrame & f
 	p->uni1i( "cvSteps", V::marchSteps( d.tier, pr.steps, d.moreSteps ) );	// lane CLOUDSTEPS1
 	p->uni1i( "cvTaps", pr.taps );
 	p->uni1i( "cvOctaves", noOct ? 1 : 4 );
-	p->uni1f( "cvLightKm", var ? varLightKm( d.b, pr ) : pr.lightKm );
+	p->uni1f( "cvLightKm", var || shp ? varLightKm( d.b, pr ) : pr.lightKm );	// lane CLOUDSHAPE1: towers too
 	if ( var )
 		p->uni1f( "cvAmbKm", varAmbKm( d.b ) );
 	if ( blue ) {
@@ -638,7 +733,7 @@ bool marchPass( Renderer * r, CvGpu & g, const CvRedo & d, const WwAtmoFrame & f
 		fn->glActiveTexture( GL_TEXTURE8 );
 		fn->glBindTexture( GL_TEXTURE_2D, g.blue );
 		p->uni1i( "cvBlue", 8 );
-		p->uni1i( "cvBlueSlice", g.blue && !red( "ign" ) ? d.blueSlice : -1 );
+		p->uni1i( "cvBlueSlice", g.blue && !red( "ign" ) && ( var || d.accum ) ? d.blueSlice : -1 );
 	}
 	p->uni4f( "cvPhasePrm", FloatVector4( drop.gHg, drop.gD, drop.alpha, drop.wD ) );
 	p->uni3f( "cvAmb", d.amb[0], d.amb[1], d.amb[2] );
@@ -1011,6 +1106,31 @@ bool wwCloudVolVarietyOn()
 	return s.variety != 0 && s.tier >= 2;
 }
 
+bool wwCloudVolShapeOn()
+{
+	const CvState & s = cs();
+	return s.shape != 0 && s.tier >= 2;	// lane CLOUDSHAPE1
+}
+
+int wwCloudVolShape()
+{
+	return cs().shape;
+}
+
+void wwCloudVolSetShape( int on )
+{
+	CvState & s = cs();
+	if ( s.shapePinned )
+		return;
+	s.shape = on ? 1 : 0;
+	QSettings().setValue( QLatin1StringView( kShpKey ), s.shape );
+}
+
+bool wwCloudVolShapePinned()
+{
+	return cs().shapePinned;
+}
+
 bool wwCloudVolProfileSet()
 {
 	return cs().profileSet != 0 && !red( "typemix" );	// lane CLOUD6d: the red typemix = CLOUD5's type swing
@@ -1225,7 +1345,8 @@ bool wwCloudVolDraw( Scene * scene, const WwCloudVolView & view, QStringList & d
 	// 1. the march: one fragment a history pixel of this frame's phase; 2. the resolve into this frame's history
 	if ( ok && !marchPass( r, g, d, f, m, sceneOn ? g.sceneTex : 0 ) ) {
 		ok = false;
-		why = b.variety ? QStringLiteral( "cloud_march_v.prog did not link" )
+		why = b.shape ? QStringLiteral( "cloud_march_s.prog did not link" )
+			: b.variety ? QStringLiteral( "cloud_march_v.prog did not link" )
 			: d.accum ? QStringLiteral( "cloud_march_a.prog did not link" ) : QStringLiteral( "cloud_march.prog did not link" );
 	}
 	if ( ok && !resolvePass( r, g, d ) ) {
@@ -1348,6 +1469,8 @@ bool wwCloudVolDraw( Scene * scene, const WwCloudVolView & view, QStringList & d
 		reds += d.litClamp ? QStringLiteral( ",litclamp=%1" ).arg( double( V::kLitReset ), 0, 'f', 3 )
 			: QStringLiteral( ",RED=litblind" );
 	}
+	// lane CLOUDSHAPE1: the echo a row's notes need (the shapes drew, and the Low type their domes took)
+	reds += d.b.shape ? QStringLiteral( ",shape=type%1" ).arg( double( d.b.shpT ), 0, 'f', 2 ) : QStringLiteral( ",RED=shapeoff" );
 	reds += d.topColumn ? QStringLiteral( ",topcolumn=on" ) : QStringLiteral( ",RED=toptaps" );	// lane CLOUDLIGHT1
 	if ( !d.moreSteps && ( s.tier == 2 || s.tier == 3 ) )	// lane CLOUDSTEPS1: the step count is in steps=; the red named
 		reds += QStringLiteral( ",RED=oldsteps" );

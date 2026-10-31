@@ -1,0 +1,3 @@
+# lane CLOUDSHAPE1: the cloud shadow map over the Cloud Shapes density (src/gl/cloudshadow.cpp), selected by name.
+
+shaders cell_ao.vert cloud_shadowmap_s.frag
