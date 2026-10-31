@@ -645,8 +645,8 @@ inline void varCalibrate( const VarVolumes & vol, const Variety & v, int band, f
  * inverted at the base. Here: a body field (cloudnoise.h cellField) over the coverage threshold, a dome on ONE flat base
  * per body (taller in stronger cells), lumps that grow with height, the eroded edge, then clamp(f / window): dense
  * inside, not multiplied by the coverage. Constants: notes/cloudshape1 (gate.py, the u2 set; RESEARCH.md). */
-constexpr float kShpSoft = 0.2f;	// the rescale window (f units): RDR2's LUT z
-constexpr float kShpErode = 0.7f;	// the detail erosion's depth (f units)
+constexpr float kShpSoft = 0.1f;	// the rescale window (f units): RDR2's LUT z (0.2 drew smooth plastic: sheet review 10-31 11:52)
+constexpr float kShpErode = 1.0f;	// the detail erosion's depth (f units)
 constexpr float kShpScale = 0.7f;	// the density inside a cloud (x kSigma: 28 /km; 1.0 put the shaded undersides past RDR2's contrast at 4 bearings)
 constexpr float kShpShearKm = 0.3f;	// the tops lean downwind, km per km of height (HZD: wind varies over altitude)
 constexpr float kShpRise = 0.04f;	// the base's rise (height fraction): a flat base
@@ -659,6 +659,12 @@ constexpr float kShpTapFoot = 0.2f;	// a light tap reads the density at this sha
 constexpr float kShpSoftPerKm = 0.5f;	// the window widens with the reader's footprint, per km (no aliasing)
 constexpr float kShpMean = 0.884f, kShpSd = 0.053f;	// the shape volume's mean and sd (MEASURED; cloudshape_dump prints them)
 constexpr float kShpDir[2] = { 1.0f, 0.0f };	// the shear's direction: the wind's (windKm is along +x)
+// sheet review 10-31 11:52 (notes/cloudshape1/v2): the cauliflower's middle scale (HZD's base FBM: the Perlin-Worley again at
+// 1 / kShpBillow its period, turned, kShpBillowW x the lumps), the weather's swing of the coverage at kShpWxScale x the body
+// field's period (turned 37 deg, +-kShpWx x min(cov, 1 - cov)), the detail's period share, the towers' gain (their interior as deep as a
+// cumulus core, so the erosion carves their surface only)
+constexpr float kShpBillow = 4.0f, kShpBillowW = 0.5f, kShpWxScale = 4.7f, kShpWx = 0.6f, kShpDetailK = 0.6f;
+constexpr float kShpTowerGain = 2.5f;
 
 /*! the per-type rule (the map's Low type T: 0 stratus, 1/3 stratocumulus, 2/3 cumulus, 1 cumulonimbus): the domes'
  *  height in the band, their shape exponent (2 = round domes; 1.2 for towers: the height follows the cell's strength, so
@@ -710,8 +716,8 @@ inline float sample2( const float * v, int n, float u, float w )
 /*! the shape density's core given its reads: the body cell (0..1), the shape s, the detail det, the height fraction hf,
  *  the calibrated coverage c, the sheet share, the type rule, the reader's footprint km. Relative (x kSigma x the band's
  *  density). */
-inline float shapeCore( float cell, float cellBig, float s, float det, float hf, float c, float sheet, const ShapeType & st,
-	float footKm )
+inline float shapeCore( float cell, float cellBig, float s, float s2, float det, float hf, float c, float sheet,
+	const ShapeType & st, float footKm )
 {
 	if ( hf <= 0.0f || hf >= 1.0f || c <= 0.0f )
 		return 0.0f;
@@ -720,9 +726,11 @@ inline float shapeCore( float cell, float cellBig, float s, float det, float hf,
 	const float reach = mixf( std::pow( hd, st.domeK ), hf * 4.0f, sheet );
 	float f = w - reach;
 	if ( st.anvil > 0.0f )
-		f = mixf( f, std::max( f, shapeTowerF( cellBig, c, hf ) ), st.anvil * 2.0f );
+		f = mixf( f, std::max( f, kShpTowerGain * shapeTowerF( cellBig, c, hf ) ), st.anvil * 2.0f );
 	f += shapeAnvil( st.anvil, hf ) - ( 1.0f - smooth( 0.0f, kShpRise, hf ) );
 	f += ( s - kShpMean ) / kShpSd * kShpLump * mixf( 1.0f - kShpGrowth, 1.0f, hf );
+	if ( f < 1.0f )
+		f += ( s2 - kShpMean ) / kShpSd * kShpBillowW * kShpLump * mixf( 0.5f, 1.0f, hf );
 	const float er = kShpErode * mixf( kShpBaseErode, 1.0f, smooth( 0.0f, 0.3f, hf ) );
 	f -= mixf( det, 1.0f - det, sat( hf * 4.0f ) ) * er;
 	return sat( f / std::max( kShpSoft + footKm * kShpSoftPerKm, 1e-3f ) ) * kShpScale;
@@ -740,16 +748,27 @@ struct ShapeVolumes
 
 //! the three reads at (x, y, z) km for a band whose base is baseKm (wind 0, mip 0), as cloud_common.glsl takes them
 inline void shapeReads( const ShapeVolumes & vol, int band, float baseKm, float hf, float x, float y, float z, float & cell,
-	float & cellBig, float & s, float & det )
+	float & cellBig, float & s, float & s2, float & det )
 {
 	const float qx = x + kShpDir[0] * kShpShearKm * ( z - baseKm ), qy = y + kShpDir[1] * kShpShearKm * ( z - baseKm );
 	cell = sample2( vol.cell, vol.nc, qx / kShpCellKm + 0.37f * float( band ), qy / kShpCellKm + 0.37f * float( band ) );
 	cellBig = sample2( vol.cell, vol.nc, qx / ( kShpCellKm * kShpTowerScale ) + 0.21f, qy / ( kShpCellKm * kShpTowerScale ) + 0.21f );
 	s = sample3( vol.shape, vol.ns, qx / kShapeKm, qy / kShapeKm, z / kShapeKm );
+	const float bk = kShapeKm / kShpBillow;	// GLSL: mat2( 0.6, -0.8, 0.8, 0.6 ) * q.xy + ( 0.31, 0.77 )
+	s2 = sample3( vol.shape, vol.ns, ( 0.6f * qx + 0.8f * qy + 0.31f ) / bk, ( -0.8f * qx + 0.6f * qy + 0.77f ) / bk, z / bk );
 	float cu[3];
 	curlRaw( qx, qy, z, cu );
 	const float a = kShpCurlKm * ( 1.0f - 0.5f * hf );
-	det = sample3( vol.detail, vol.nd, ( qx + cu[0] * a ) / kDetailKm, ( qy + cu[1] * a ) / kDetailKm, ( z + cu[2] * a ) / kDetailKm );
+	const float dk = kDetailKm * kShpDetailK;
+	det = sample3( vol.detail, vol.nd, ( qx + cu[0] * a ) / dk, ( qy + cu[1] * a ) / dk, ( z + cu[2] * a ) / dk );
+}
+
+//! the weather's swing of the map's coverage at (x, y) km (wind 0): the body field at kShpWxScale x its period, turned 37 deg
+inline float shapeWxCov( const ShapeVolumes & vol, float cov, float x, float y )
+{
+	const float k = kShpCellKm * kShpWxScale;	// GLSL: mat2( 0.7986, 0.6018, -0.6018, 0.7986 ) * q.xy
+	const float wx = sample2( vol.cell, vol.nc, ( 0.7986f * x - 0.6018f * y ) / k + 0.61f, ( 0.6018f * x + 0.7986f * y ) / k + 0.13f );
+	return sat( cov + ( wx - 0.5f ) * 2.0f * kShpWx * std::min( cov, 1.0f - cov ) );
 }
 
 /*! the whole density at (x, y, z) km: the twin of the WW_CLOUD_SHAPE cloudDensity (wind 0, footprint 0). map = cvMapAt's;
@@ -764,12 +783,11 @@ inline float shapeDensity( const ShapeVolumes & vol, const ShapeType st[2], cons
 		const float hf = ( z - baseKm[b] ) / std::max( topKm[b] - baseKm[b], 1e-3f );
 		if ( hf <= 0.0f || hf >= 1.0f )
 			continue;
-		const float cov = b == 0 ? map[0] : map[1];
 		const float sheet = b == 0 ? std::max( sat( map[2] / std::max( map[0], 1e-3f ) ), st[0].sheet ) : st[1].sheet;
-		const float c = calAt( cal[b], cov );
-		float cell, cellBig, s, det;
-		shapeReads( vol, b, baseKm[b], hf, x, y, z, cell, cellBig, s, det );
-		d += shapeCore( cell, cellBig, s, det, hf, c, sheet, st[b], 0.0f ) * density[b];
+		const float c = calAt( cal[b], shapeWxCov( vol, b == 0 ? map[0] : map[1], x, y ) );
+		float cell, cellBig, s, s2, det;
+		shapeReads( vol, b, baseKm[b], hf, x, y, z, cell, cellBig, s, s2, det );
+		d += shapeCore( cell, cellBig, s, s2, det, hf, c, sheet, st[b], 0.0f ) * density[b];
 	}
 	return d;
 }
@@ -788,14 +806,14 @@ inline void shapeCalibrate( const ShapeVolumes & vol, const ShapeType & st, int 
 	// 64 x 64 columns (0.5 km apart over the 32 km field: its smallest bodies are ~0.7 km; 32 x 32 missed the 0.7 stripe by
 	// 0.06, tests/spells/cloudshape_check.py gate A)
 	constexpr int NC = 64, NZ = 40, NG = 33;
-	std::vector<float> rc( NC * NC * NZ ), rb( NC * NC * NZ ), rs( NC * NC * NZ ), rd( NC * NC * NZ );
+	std::vector<float> rc( NC * NC * NZ ), rb( NC * NC * NZ ), rs( NC * NC * NZ ), rs2( NC * NC * NZ ), rd( NC * NC * NZ );
 	const float span = kShpCellKm * ( st.anvil > 0.0f ? kShpTowerScale : 1.0f );
 	for ( int j = 0, n = 0; j < NC; j++ )
 		for ( int i = 0; i < NC; i++ ) {
 			const float x = ( float( i ) + 0.5f ) / NC * span, y = ( float( j ) + 0.37f ) / NC * span;
 			for ( int k = 0; k < NZ; k++, n++ ) {
 				const float hf = ( float( k ) + 0.5f ) / NZ;
-				shapeReads( vol, band, baseKm, hf, x, y, baseKm + hf * th, rc[n], rb[n], rs[n], rd[n] );
+				shapeReads( vol, band, baseKm, hf, x, y, baseKm + hf * th, rc[n], rb[n], rs[n], rs2[n], rd[n] );
 			}
 		}
 	auto opacity = [&]( float cp ) {
@@ -803,7 +821,7 @@ inline void shapeCalibrate( const ShapeVolumes & vol, const ShapeType & st, int 
 		for ( int col = 0, n = 0; col < NC * NC; col++ ) {
 			float tau = 0.0f;
 			for ( int k = 0; k < NZ; k++, n++ )
-				tau += shapeCore( rc[n], rb[n], rs[n], rd[n], ( float( k ) + 0.5f ) / NZ, cp, sheet, st, 0.0f ) * kSigma * density * th / NZ;
+				tau += shapeCore( rc[n], rb[n], rs[n], rs2[n], rd[n], ( float( k ) + 0.5f ) / NZ, cp, sheet, st, 0.0f ) * kSigma * density * th / NZ;
 			acc += 1.0 - std::exp( -double( tau ) );
 		}
 		return float( acc / ( NC * NC ) );

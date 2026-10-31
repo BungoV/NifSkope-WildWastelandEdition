@@ -8,6 +8,15 @@
 	float dens = cvDens( p );
 	if ( dens <= 0.0 )
 		continue;
+#ifdef WW_CLOUD_SHAPE
+	/* lane CLOUDSHAPE1 (the anvils' contour stripes, MEASURED in v2/zx: not the step length, not the frame count): the taps'
+	 * jitter was the view sample's own j, so how deep the sample sat in the cloud and where its light taps fell moved
+	 * together, a bias that followed the surface's phase on the step grid. The taps take their own white hash of (pixel, t,
+	 * frame): a second IGN (R2 pair with j) left a crosshatch (notes/cloudshape1/v2/zr2_m.png); the history averages grain. */
+	float jT = fract( sin( dot( vec3( gl_FragCoord.xy, t * 61.7 + cvFrame * 1.618 ), vec3( 12.9898, 78.233, 37.719 ) ) ) * 43758.5453 );
+#else
+	float jT = j;
+#endif
 	float tauL = 0.0;
 	for ( int k = 0; k < cvTaps; k++ ) {
 		float a = float( k ) / float( cvTaps ), b = float( k + 1 ) / float( cvTaps );
@@ -17,7 +26,7 @@
 		 * segment (the accumulation averages the steps away) and reads the density at its segment's footprint (HZD's
 		 * cone of light samples smooths the same way, Schneider 2015 p. 85) */
 		{
-			float u = mix( a, b, fract( j + 0.618034 * float( k + 1 ) + 0.5 * cvFrame ) );
+			float u = mix( a, b, fract( jT + 0.618034 * float( k + 1 ) + 0.5 * cvFrame ) );
 			tk = cvLightKm * u * u;
 		}
 		cvFootKm = max( t * pixKm, kShpTapFoot * dk );
@@ -41,6 +50,11 @@
 #endif
 		if ( rest > 0.0 ) {
 			float tk = cvLightKm + 0.5 * rest;
+#ifdef WW_CLOUD_SHAPE
+			// lane CLOUDSHAPE1 (sheet review item 5, the anvils' contour stripes): jittered inside the rest like the taps; at
+			// its fixed middle it fell in or out of the thin anvil plate with the sample's height, banding the underside
+			tk = cvLightKm + rest * fract( jT + 0.754878 + 0.5 * cvFrame );
+#endif
 			vec3 pl = p + cvKeyW * tk;
 			pl.z = p.z + muK * tk;
 			tauL += cvDens( pl ) * kCvSigma * rest;
@@ -85,6 +99,9 @@
 			float fu = cvRdir( tauB, mu0, cvMsG, kCvAlbedo ) * ( mu0 * exp( -tauL ) + fd );
 			fd += 0.5 * ( 1.0 - cvMsG * d.z ) * fu;
 		}
+#ifdef WW_CLOUD_SHAPE
+		fd *= cvShpK( 0, kShpMs );
+#endif
 		ph = max( ph, fd / kPi );
 	}
 #ifdef WW_CLOUD_SHAPE
@@ -103,7 +120,9 @@
 		// the base's floor 0.35, not Nubis' 0.1: our bases get no ground bounce (completeness row 15), and at 0.1 the sky's
 		// blue ambient alone painted them blue (diag/up50_sp_lit_d2.png)
 		float vertP = pow( mix( 0.35, 1.0, clamp( ( hfB - 0.07 ) / 0.07, 0.0, 1.0 ) ), 0.8 );
-		ph *= min( depthP, 1.0 ) * vertP;
+		// the in-scatter probability darkens the edges seen with the sun BEHIND the eye; looking into the sun the thin edges
+		// glow (the droplet phase's forward peak: the silver lining, Schneider 2017 p. 93 keeps it for the forward lobe)
+		ph *= mix( min( depthP, 1.0 ) * vertP, 1.0, cvSmooth( cvShpK( 1, 0.3 ), 0.95, cosT ) );
 	}
 #endif
 	vec3 tint = p.z < cvBands.topKm.x ? cvTint[0] : cvTint[1];
@@ -120,7 +139,7 @@
 			float tk = span * ( float( k ) + 0.5 ) / 3.0;
 #ifdef WW_CLOUD_SHAPE
 			// lane CLOUDSHAPE1: jittered inside its third (fixed places banded a thin anvil's underside in contour lines)
-			tk = span * ( float( k ) + fract( j + 0.381966 * float( k + 1 ) + 0.25 * cvFrame ) ) / 3.0;
+			tk = span * ( float( k ) + fract( jT + 0.381966 * float( k + 1 ) + 0.25 * cvFrame ) ) / 3.0;
 #endif
 			vec3 pu = p + up * tk;
 			pu.z = p.z + tk;
@@ -129,7 +148,15 @@
 		// the direct part of the delta-Eddington scaled slab (the forward peak counts as passed through, as in cvTdif)
 		ambF = exp( -( 1.0 - cvMsG * cvMsG * kCvAlbedo ) * tauU / 0.6 ) + cvTdif( tauU, 0.6, cvMsG, kCvAlbedo );
 	}
+#ifdef WW_CLOUD_SHAPE
+	/* lane CLOUDSHAPE1: the ambient's split (Hillaire 2016 p. 30; Nubis 2017: the sky from above at the tops, the ground's
+	 * bounce from below at the bases): the base takes a grey, darker light (the ground's albedo x the sky + sun on it) */
+	vec3 ambC = mix( vec3( dot( cvAmb, vec3( 0.2126, 0.7152, 0.0722 ) ) ) * cvShpK( 2, kShpGround ), cvAmb,
+		cvSmooth( 0.0, 0.6, clamp( ( p.z - cvBands.baseKm.x ) / max( cvBands.topKm.x - cvBands.baseKm.x, 1e-3 ), 0.0, 1.0 ) ) );
+	vec3 S = kCvAlbedo * tint * ( key * ph + cvAmbOn * ambC * ambF * cvShpK( 3, kShpSkyOcc ) );
+#else
 	vec3 S = kCvAlbedo * tint * ( key * ph + cvAmbOn * cvAmb * ambF );
+#endif
 	float tr = exp( -dens * kCvSigma * dt );
 	float w = T * ( 1.0 - tr );
 	L += S * w;	// Frostbite: S (1 - e^(-sigma dt)) / sigma x sigma_s, sigma_s = albedo sigma

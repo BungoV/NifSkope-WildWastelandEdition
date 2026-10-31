@@ -296,6 +296,7 @@ void main()
 		float dt = ( t1 - t0 ) / float( cvSteps );
 #ifdef WW_CLOUD_SHAPE
 		bool fine = false;	// lane CLOUDSHAPE1: inside cloud (the step refinement below)
+		float prevA = -1.0;	// the last interval's probe ahead = this interval's own sample's density (-1 unknown)
 #endif
 		for ( int i = 0; i < cvSteps && t1 > t0; i++ ) {
 #else
@@ -308,6 +309,7 @@ void main()
 #endif
 #ifdef WW_CLOUD_SHAPE
 		bool fine = false;	// lane CLOUDSHAPE1: inside cloud (the step refinement below)
+		float prevA = -1.0;	// the last interval's probe ahead = this interval's own sample's density (-1 unknown)
 #endif
 		for ( int i = 0; i < cvSteps; i++ ) {
 #endif
@@ -318,10 +320,32 @@ void main()
 			 * interval that drew none returns to the coarse step. */
 			{
 				float dtO = dt, T0 = T;
-				int nsub = fine ? 2 : 1;
+				int nsubF = clamp( int( ceil( dtO / kShpSubKm ) ), 2, kShpSub );	// sub-steps of at most kShpSubKm, 2..kShpSub
+				int nsub = fine ? nsubF : 1;
+				/* sheet review item 5: a coarse sample that lands in a crisp cloud is already opaque, so the entry was
+				 * quantised to the coarse step (the stripes' main cause was the taps' jitter: cloud_march_step.glsl). Probe
+				 * the density one interval AHEAD (no light taps) and, on cloud, march THIS interval finely: the surface lies in it
+				 * or the next (HZD / RDR2 step back; probing this interval's own sample missed the part before it) */
+				if ( !fine ) {
+					float tp = t0 + ( float( i ) + 1.0 + j ) * dtO;
+					vec3 upP;
+					vec3 pp = o + d * tp;
+					pp.z = cvHeight( o, d, tp, upP );
+					cvFootKm = tp * pixKm;
+					float dA = cvDens( pp );
+					bool empty = dA <= 0.0 && prevA == 0.0;	// own sample (probed last time) and the next: no cloud
+					bool own = prevA > 0.0;	// own sample in cloud, the next not (a wisp): fine too (one coarse dt banded it)
+					prevA = dA > 0.0 ? 1.0 : 0.0;
+					if ( dA > 0.0 || own )
+						nsub = nsubF;
+					else if ( empty )
+						continue;	// the step's own read would draw nothing: skip it (empty space costs one read, as Off)
+				} else
+					prevA = -1.0;
 				for ( int s = 0; s < nsub; s++ ) {
 					float dt = dtO / float( nsub );
-					float t = t0 + float( i ) * dtO + ( float( s ) + j ) * dt;
+					// each sub-step its own jitter (one shared offset lined the entries up in contour stripes)
+					float t = t0 + float( i ) * dtO + ( float( s ) + ( nsub > 1 ? fract( j + 0.618034 * float( s + 1 ) ) : j ) ) * dt;
 					#include "cloud_march_step.glsl"
 				}
 				fine = T < T0;
