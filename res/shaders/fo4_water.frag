@@ -544,13 +544,8 @@ void main()
 	vec3 glare = vec3( 0.0 );
 	float glFoot = length( cross( dFdx( P ), dFdy( P ) ) );	// lane WATERLOOK1 step 9: the footprint (u^2), uniform flow
 	if ( waterGlintOn && ( waterGlintRed & 1 ) == 0 && !under ) {
-		// step 9: the sun's disc in the lobe; the mean glare x the facets counted in this pixel, then the shoulder
-		float glA2 = max( reflA2, 1e-6 ) + wwGlitSunA2();
-		vec3 glH = normalize( Ldir - V );
-		float glX = wwWaterGlare( Ns, V, Ldir, vec3( 1.0 ), glA2, waterGlintK.y, false ).x
-			* wwWaterGlitter( P.xy, glFoot, glH.xy / max( glH.z, 1e-3 ) - Ns.xy / max( Ns.z, 1e-3 ), glA2, dot( glH, Ns ) );
-		if ( ( waterGlintRed & 4 ) == 0 )
-			glX = glX / ( 1.0 + glX / waterGlintK.x );
+		// step 9: the sun's disc in the lobe; the mean glare, its shoulder, x the facets counted in this pixel (FIX1031B)
+		float glX = wwWaterGlareGlit( Ns, V, Ldir, max( reflA2, 1e-6 ), P.xy, glFoot );
 		glare = sun * glX;
 		spec = glare;
 	}

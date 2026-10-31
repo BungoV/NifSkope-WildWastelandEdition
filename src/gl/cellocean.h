@@ -38,7 +38,8 @@ class Scene;
  *  Red WW_CELL_WATER_OCEAN_RED = old (today's normals under the row) | tile (plain repeats) | nopatch (no wind patches)
  *  | novar (no lost slope variance, so no rings either) | nochop (no chop in the slopes, the whitecaps or the vertices)
  *  | flat (step 2: no displacement, fo4_waterlook.prog) | norip (step 3: no contact rings) | noglow (step 4: no crest
- *  glow) | noflow (step 5: the waves stay put on a flowing river).
+ *  glow) | noflow (step 5: the waves stay put on a flowing river) | dimglow (FIX1031B: the crest glow's gain before, 0.25)
+ *  | rawflow (FIX1031B: the baked flow read as u/s, not m/s: the waves crawl at 1/70 of the river's speed).
  *  Probes WW_CELL_WATER_PROBE=39 (the spectrum's slope, its weight) and 40 (whitecaps, lost slope rms, caustic factor). */
 
 //! Build this frame's spectrum (before the reflections pass: the water's ray pass reads it too).

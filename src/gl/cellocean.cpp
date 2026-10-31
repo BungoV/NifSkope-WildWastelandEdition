@@ -61,7 +61,9 @@ int redNow()
 {
 	WW_SWITCH_STATIC( QByteArray, rr, wwEnv( "WW_CELL_WATER_OCEAN_RED" ).trimmed() );
 	return rr == "old" ? 1 : rr == "tile" ? 2 : rr == "nopatch" ? 4 : rr == "novar" ? 8 : rr == "nochop" ? 16
-		: rr == "flat" ? 32 : rr == "norip" ? 64 : rr == "noglow" ? 128 : rr == "noflow" ? 256 : 0;
+		: rr == "flat" ? 32 : rr == "norip" ? 64 : rr == "noglow" ? 128 : rr == "noflow" ? 256
+		: rr == "dimglow" ? 512 : rr == "rawflow" ? 1024 : 0;	// FIX1031B: dimglow = the crest glow's gain before (0.25),
+		// rawflow = the bake's flow read as u/s (the waves carried at 1/70 of the river's speed)
 }
 
 GLuint tex2d( NifSkopeOpenGLContext::GLFunctions * fn, GLint ifmt, int w, int h, GLenum fmt, const float * data )
@@ -356,10 +358,10 @@ void wwCellOceanPass( Scene * scene, bool cellPasses )
 	if ( wasCull ) fn->glEnable( GL_CULL_FACE );
 	if ( wasScissor ) fn->glEnable( GL_SCISSOR_TEST );
 	restoreBindings();
-	static const char * const redName[9] = { "old", "tile", "nopatch", "novar", "nochop", "flat", "norip", "noglow",
-		"noflow" };
+	static const char * const redName[11] = { "old", "tile", "nopatch", "novar", "nochop", "flat", "norip", "noglow",
+		"noflow", "dimglow", "rawflow" };
 	QString red;
-	for ( int k = 1; k < 9; k++ )
+	for ( int k = 1; k < 11; k++ )
 		if ( s.red & ( 1 << k ) )
 			red = QStringLiteral( ", RED %1" ).arg( QLatin1String( redName[k] ) );
 	s.why = s.built ? QStringLiteral( "ocean: wind %1 m/s, swell %2 m, Hs sea %3 m, fresh %4 m, gpu %5 ms, displaced %6%7" )
