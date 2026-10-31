@@ -297,8 +297,31 @@ RowAudit rowAudit( const CellMeshInst & d, bool bindlessProgram, quint32 ringRow
 	return a;
 }
 
+// lane SHADOWSHIMMER4: a tile meets the cascade's view slice (gl/farswayslice.h); mv column-major, uniform scale
+static bool tileInSlice( const CellMeshInst::Tile & t, const float * mv, const WwFarSwaySlice::Slice & s )
+{
+	const double x = double( mv[0] ) * t.centre[0] + double( mv[4] ) * t.centre[1] + double( mv[8] ) * t.centre[2] + mv[12];
+	const double y = double( mv[1] ) * t.centre[0] + double( mv[5] ) * t.centre[1] + double( mv[9] ) * t.centre[2] + mv[13];
+	const double z = double( mv[2] ) * t.centre[0] + double( mv[6] ) * t.centre[1] + double( mv[10] ) * t.centre[2] + mv[14];
+	const double sc = std::sqrt( double( mv[0] ) * mv[0] + double( mv[1] ) * mv[1] + double( mv[2] ) * mv[2] );
+	return WwFarSwaySlice::tileMeets( s, x, y, z, double( t.radius ) * sc );
+}
+
+int sliceTiles( const CellMeshInst & d, const float mv[16], const WwFarSwaySlice::Slice & s, quint64 & hash )
+{
+	const CellFarHide::View vw = CellFarHide::view( d );
+	int n = 0;
+	for ( qsizetype i = 0; i < vw.tiles->size(); i++ ) {
+		if ( !tileInSlice( ( *vw.tiles )[i], mv, s ) )
+			continue;
+		n++;
+		hash ^= quint64( i ) + 0x9e3779b97f4a7c15ULL + ( hash << 6 ) + ( hash >> 2 );
+	}
+	return n;
+}
+
 bool drawCascade( NifSkopeOpenGLContext * r, const CellMeshInst & d, NifSkopeOpenGLContext::Program * prog,
-	const float m[16] )
+	const float m[16], const float * mv, const WwFarSwaySlice::Slice * slice, int part )
 {
 	Ctx * cp = ctxOf();
 	if ( !r || !prog || !cp )
@@ -309,7 +332,10 @@ bool drawCascade( NifSkopeOpenGLContext * r, const CellMeshInst & d, NifSkopeOpe
 	const CellFarHide::View vw = CellFarHide::view( d );   // lane FARHOLE2
 	std::vector<CellMeshInst::Cmd> cmds;
 	cmds.reserve( std::size_t( vw.cmds->size() ) );
+	const bool split = slice && mv && part != WwFarSwaySlice::Both;
 	for ( const CellMeshInst::Tile & t : *vw.tiles ) {
+		if ( split && tileInSlice( t, mv, *slice ) != ( part == WwFarSwaySlice::Sway ) )
+			continue;	// lane SHADOWSHIMMER4: the other part of the bucket
 		if ( !redNoCull() ) {
 			// the cascade is orthographic: the tile's centre in clip space, its radius scaled per axis
 			const float x = m[0] * t.centre[0] + m[4] * t.centre[1] + m[8] * t.centre[2] + m[12];

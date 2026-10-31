@@ -1,5 +1,37 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## SHADOWSHIMMER4 (2026-10-31, FIX1031A): the far tree sway's caster cost cut; fo4_effectdecalcsm's headroom back
+
+- **FARSWAYCOST2 (why):** SHADOWSHIMMER3 made every far tree bucket a swaying sun caster, so the static cascade cache
+  (SHADOWCACHE1) lost them: every still paint each cascade blitted its static layer and drew the whole bucket again.
+  Measured OFFLINE (no window): the real Concord rings 0-2 sway buckets (new census dump, below) through the real
+  caster programs in a hidden GL context, GL_TIME_ELAPSED, 32 sun x camera views x 3 eyes, 5070 Ti / 610.74:
+  Ultra 1.41 ms a still paint median, 2.66 ms worst; High 1.21 / 2.39; even Cascade Quality Off 0.53 / 1.15 ms,
+  against SHADOWPAR1's budget for the whole shadow set (0.8 ms of 8.3 at 1080p).
+- **The fix (src/gl/farswayslice.h, gl/sunshadow.cpp, gl/cellfarinst.cpp), on by default:** (1) a far bucket's 4x4-cell
+  tile sways in cascade i only where its sphere meets the camera frustum's slice of that cascade (the pixels it
+  shades); its other tiles cast still and stay in the static layer; a slice that lies wholly inside the loaded block
+  (where the caster shader sways no vertex) sways nothing. (2) The casters' sway clock steps every 0.05 s
+  (`WW_SUN_SHADOW_SWAYSTEP=<s>`, 0 = every paint), each cascade on its own step a third apart, and a cascade whose only
+  dynamic casters are those tiles keeps its live layer until its step ticks (no blit, no redraw). Per-cascade Skip/Hit
+  replaces the one `anyDyn`. Same bench with the fix: Ultra 0.29 ms a paint amortised median (0.49 worst), peak paint
+  (one cascade) 0.37 / 0.58; High 0.27 / 0.48. Look change, bounded: a still-casting tile's shadow on another slice's
+  receivers <= the sway amplitude (10 units) from the swaying one; the caster sway lags the colour pass <= one step
+  (<= 0.7 units). Red: `WW_SUN_SHADOW_STABLE_RED=swayall` (bit 256; old/all now 511) = SHADOWSHIMMER3's pass exactly.
+  Echo: `swaysplit= swaytiles=a,b,c swaystep=`; the shadowcache census line adds `farsway split .. tiles .. step .. reuse`.
+- **Census dump:** `WW_FAROBJ_SWAYDUMP=<file>` makes `-no-gui farobjcensus ... --instanced` append each swaying instanced
+  bucket (arrays, commands, tiles) for the offline bench (src/lodinative.cpp instSwayDump; census only).
+- **EFFECTDECALHEADROOM:** fo4_effectdecalcsm in WW_FRAME_UBO + WW_CELL_GI_MARCH + WW_CELL_PRT sat at 65482 fragment
+  instructions (NV assembly in the driver's binary; GL_MAX_PROGRAM_NATIVE_INSTRUCTIONS_ARB 65536: 54 = 0.08 % left).
+  In a lit-decal program every cellOn path returns before fo4_effectshader.frag's WW_CELLLIGHTS block (cellOn is a
+  uniform), so that block is dead there; the compiler dropped it in plain march but kept it with PRT. Not compiled in
+  the GI-march mode of the lit-decal programs: 35670 instructions (45.6 % left). Every other mode keeps its source: the
+  saved binaries of all 8 effect/particle programs x 9 modes equal main's but the 8-byte source hash (70 of 72; the 2
+  others are the two lit-decal PRT-march programs). Tightest program now: pbrm_cellcsm PRT-march, 5689 left (8.7 %).
+- **Gates:** tests/shadowshimmer4 (G1 cost, G2 composition, G3 clock step, G4 reach / tileMeets, G5 mirror) green;
+  reds RED_TODAY (G1, G2, G3) and RED_REACH (G4) FAIL; tests/shadowshimmer1-3 still PASS. Link sweeps 405 / 270
+  (WW_CELL_RTDDGI) / 405 (WW_CELL_PRT) LINK OK. Owed: pictures and a live GPU ms row when bungo asks.
+
 ## LEANCOMMENTS1 (2026-10-31, FIX1031A): the comment trim pass lands on main (comments only, exe byte-identical)
 
 - **What:** origin/cloud-leancomments1 (cut from 5c98715a, 918 commits behind main) trims comments in `src/cell*`,
