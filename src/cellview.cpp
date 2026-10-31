@@ -3781,6 +3781,11 @@ static bool cellBuild( NifModel * nif, const CellSceneSpec & specAsked, CellChun
 	const QString bakeEnv = QString::fromLocal8Bit( wwEnv( "WW_CELL_PROBE_BAKE" ) );
 	const QString bakeDirEnv = QString::fromLocal8Bit( wwEnv( "WW_CELL_PROBE_BAKE_DIR" ) );
 	const bool baking = probeAsked && ( spec.probesBake || !bakeEnv.isEmpty() );
+	/* FIX1031B SOUPALB1: the ray-traced GI's soup takes the bake's per-surface albedo (ALB1) too, so the live bounce
+	 * is the surfaces' own colour, not a flat grey 0.5 (covered shade read 1.05-1.2x open shade in the probe census).
+	 * Albedo only: the smooth normals (VNM1) stay a bake's. WW_SOUPALB_RED=grey (any value) = the old grey soup;
+	 * read at the open (a reopen applies it). */
+	const bool soupAlb = baking || ( rtSoup && wwEnvIsEmpty( "WW_SOUPALB_RED" ) );
 	ProbeAlbedo probeAlb( dataRoot );
 	/* WW_CELL_BAKE_ALBEDO=tri|hit|cube: where the surfels' albedo and normal come from (ProbeBakeSpec::albedoWay);
 	 * hit and cube need every triangle's UVs, colors, normals and maps in the soup.
@@ -4885,7 +4890,7 @@ static bool cellBuild( NifModel * nif, const CellSceneSpec & specAsked, CellChun
 						}
 					}
 					const int amFirst = probeSoup.triCount();
-					const PbrmMaterial * shapePbrm = baking ? bakePbrmFor( s ) : nullptr;   // lane FIXPACK1
+					const PbrmMaterial * shapePbrm = soupAlb ? bakePbrmFor( s ) : nullptr;   // lane FIXPACK1
 					for ( size_t t = 0; t + 2 < s.geom.tris.size(); t += 3 ) {
 						float w[3][3];
 						bool okTri = true;
@@ -4902,7 +4907,7 @@ static bool cellBuild( NifModel * nif, const CellSceneSpec & specAsked, CellChun
 							w[k][1] = wp[1];
 							w[k][2] = wp[2];
 						}
-						if ( okTri && baking ) {
+						if ( okTri && soupAlb ) {
 							// the map at the triangle's UV centroid, times its vertex color
 							float uv[2] = { 0.5f, 0.5f }, vc[3] = { 1, 1, 1 }, lin[3];
 							const size_t i0 = size_t( s.geom.tris[t] ), i1 = size_t( s.geom.tris[t + 1] ),
@@ -4961,7 +4966,7 @@ static bool cellBuild( NifModel * nif, const CellSceneSpec & specAsked, CellChun
 							probeSoup.addTri( w[0], w[1], w[2], rgb );
 							if ( wantMat )
 								probeSoup.setLastMat( triMat( t, s.tex0, true ) );
-							if ( smoothOn && s.geom.nrm.size() >= nv * 3 ) {   // the NIF's vertex normals, world
+							if ( baking && smoothOn && s.geom.nrm.size() >= nv * 3 ) {   // the NIF's vertex normals, world
 								float vn9[9];
 								for ( int i = 0; i < 3; i++ ) {
 									const size_t vi = size_t( s.geom.tris[t + size_t( i )] );
@@ -5474,7 +5479,7 @@ static bool cellBuild( NifModel * nif, const CellSceneSpec & specAsked, CellChun
 					CELL_GROUND_TILING, sb, &serr ) && !sb.quads.empty() ) {
 					landsDrawn = sb.cells;
 					groundNote = cellSplatLegend( sb ) + splatNote;
-					if ( baking ) {
+					if ( soupAlb ) {
 						/* The ground's albedo per 128-unit quad: each pass's map mean x its VCLR x the pass's mean share,
 						 * summed (the engine's weighted sum). */
 						std::vector<size_t> order( sb.quads.size() );
@@ -5968,7 +5973,7 @@ static bool cellBuild( NifModel * nif, const CellSceneSpec & specAsked, CellChun
 							const float b[3] = { ox + ( c + 1 ) * st, oy + r * st, l.heights[r][c + 1] };
 							const float cc[3] = { ox + ( c + 1 ) * st, oy + ( r + 1 ) * st, l.heights[r + 1][c + 1] };
 							const float d[3] = { ox + c * st, oy + ( r + 1 ) * st, l.heights[r + 1][c] };
-							if ( baking ) {
+							if ( soupAlb ) {
 								/* the splat's composite; without one, a stated dirt tone (sRGB 110, 100, 85)
 								 * times the cell's VCLR */
 								const qint64 gx = qint64( std::lround( a[0] / 128.0f ) ), gy = qint64( std::lround( a[1] / 128.0f ) );
@@ -5989,7 +5994,7 @@ static bool cellBuild( NifModel * nif, const CellSceneSpec & specAsked, CellChun
 								for ( int k = 0; k < 3; k++ )
 									rgb[k] = quint8( std::lround( ProbeAlbedo::srgbToLinear( g[k] ) * 255.0f ) );
 								probeSoup.addTri( a, b, cc, rgb );
-								if ( smoothOn ) {
+								if ( baking && smoothOn ) {
 									float vn9[9];
 									landN( r, c, vn9 );
 									landN( r, c + 1, vn9 + 3 );
@@ -5997,7 +6002,7 @@ static bool cellBuild( NifModel * nif, const CellSceneSpec & specAsked, CellChun
 									probeSoup.setLastNormals( vn9 );
 								}
 								probeSoup.addTri( a, cc, d, rgb );
-								if ( smoothOn ) {
+								if ( baking && smoothOn ) {
 									float vn9[9];
 									landN( r, c, vn9 );
 									landN( r + 1, c + 1, vn9 + 3 );
@@ -7276,8 +7281,9 @@ static bool cellBuild( NifModel * nif, const CellSceneSpec & specAsked, CellChun
 		ProbeGiSpec ks;
 		ks.interiorSky = spec.interior && ( cellInteriorFlags( world.interior() ) & 0x0080u ) != 0;
 		probeSkyKeep( nif, probeSoup, QString(), ks, !spec.interior || ks.interiorSky );
-		probeNotes += QStringLiteral( "  ray-traced GI soup kept: %1 triangles (the PRT is off: no bake loaded, none relit)\n" )
-			.arg( probeSoup.triCount() );
+		probeNotes += QStringLiteral( "  ray-traced GI soup kept: %1 triangles (the PRT is off: no bake loaded, none relit), albedo %2\n" )
+			.arg( probeSoup.triCount() ).arg( probeSoup.alb.empty() ? QStringLiteral( "grey 0.5 (WW_SOUPALB_RED)" )
+				: QStringLiteral( "per surface (SOUPALB1)" ) );
 	}
 
 	// ---- the census
