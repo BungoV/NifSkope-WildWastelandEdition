@@ -1,5 +1,36 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## WATERLOOK2 (2026-10-31, FIX1031B area B, parent row WATERLOOK1): the water look overhaul ships ON
+
+- **The water looks are the default now.** Water clear colour, Water reflections, Water sun glare, Ocean waves, Water
+  soft edge and Shore foam ship ON (src/gl/celllooks.cpp, new settings keys `WW/Cell...2` so an old OFF does not
+  stick). Red `WW_CELL_WATER_LOOK_RED=shipped` (live) turns the six off: the water exactly as it shipped before (the
+  WATR depth ramp, F x reflectivity, the noise layers). A pin (`WW_CELL_WATER_CLEAR=0` ...) still wins per row.
+  Research first: notes/fix1031b/water/RESEARCH.md (the core terms, the MIT projects read and credited, our baked data).
+- **Reflections with the clear colour (bungo: "no reflections on water?").** With the clear colour on and the
+  reflections row off, the surface mixed body and sky by the WATR's F x reflectivity (0.21 Charles, 0.29 ocean): a
+  see-through body hid the sky even at grazing angles (80 deg: 0.10-0.12 vs Schlick 0.40). The clear colour now always
+  composes through the physical Fresnel (`wwWaterReflPhys`, res/shaders/water_refl.glsl). Exterior SSR is unchanged
+  (ships off; cost rows owed in the hand-back).
+- **Boston's water colour (bungo: "look up boston water color").** res/shaders/water_clear.glsl: per class attenuation
+  from the Secchi depth (Kd = 1.7 / Zsd: sea 2.5 m, lake 2.0, river 1.2; MWRA: the harbour is turbid), a particle-like
+  spectral slope, and the deep reflectance's hue from the cell's own WATR deep colour (ExtOceanWater 46, 61, 57;
+  ExtRiverCharlesUpper 47, 51, 43), so a modder's record drives it. The bed shows through the first 1-2 m, then the
+  record's grey-green; no turquoise sea, no lime river (the sunken boat's glow was the old river law: green transmitted
+  most). The bed where none is drawn is wet sand / silt (the old dry 0.55 sand was the teeth's beige).
+- **Choppy shore (the teeth).** The baked bed and the drawn ground now blend over 64-768 u of depth difference
+  (`wwWaterBedBakeW`, res/shaders/water_depth.glsl) instead of a hard step at 256 u, where a coarse ground mesh cut
+  straight-edged teeth. Red for all three: `WW_CELL_WATER_CLEAR_RED=old` (live) = the clear colour as it shipped behind
+  its row (its coefficients, its bed, the hard step, no Fresnel coupling).
+- **Shore foam shows.** Full foam from 0.3 m breakers (was 0.6 m: a 0.29 m sea at 5 m/s covered 1 % of its surf zone).
+  src/gl/cellwater.cpp `wwCellWaterSurfConsts` (shared with Wave run-up and Contact foam). Red
+  `WW_CELL_WATER_FOAM_RED=dim` (live).
+- Gates: tests/waterlook2/run.sh (the real res/shaders functions through the driver; every red fails): Fresnel share
+  within 1.7 % of Schlick n 1.33 at 0/60/80 deg (red -15..-75 %); colour per depth in band (red: sea turquoise S 0.55-0.89,
+  river lime S 0.53, bed still at 10 m); waterline hard edges 0 / km (red 62.9 / km, steps to 186 levels); foam band
+  0.32 over the first 600 u, 0 past 1600 u (reds 0 / 0.013); flow pattern along the baked direction cos 0.98 (reds
+  no motion); the six rows ON (red main's celllooks.cpp).
+
 ## WATERGLINT2 (2026-10-31, FIX1031B area B, parent row WATERLOOK1): near sun glare, crest glow, river flow
 
 - **Near sun glare (WATERGLINT1 erased it).** bungo's 10-31 river and sea frames: with the glitter on, the near sun path

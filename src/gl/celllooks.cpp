@@ -60,14 +60,16 @@ const LookRow kRows[] = {
 	{ "Ground fog from weather", "WW/CellAirGroundDerived2", true },	// FOGHEIGHT2: on by default (gate tests/fogheight2); new key so the old shipped OFF does not stick
 	{ "Water depth colour", "WW/CellWaterDepth" },
 	{ "Water caustics", "WW/CellWaterCaustics" },
-	{ "Water soft edge", "WW/CellWaterEdge" },
-	{ "Shore foam", "WW/CellWaterFoam" },
+	// lane FIX1031B (WATERLOOK1 overhaul, LATE ITEM 7): the gated water looks ship ON; new keys so an old OFF does not
+	// stick; WW_CELL_WATER_LOOK_RED=shipped draws the water as it shipped before (wwLookOn below)
+	{ "Water soft edge", "WW/CellWaterEdge2", true },
+	{ "Shore foam", "WW/CellWaterFoam2", true },
 	{ "Water swell", "WW/CellWaterWaves" },
-	{ "Water reflections", "WW/CellWaterRefl" },
-	{ "Water sun glare", "WW/CellWaterGlint" },
-	{ "Ocean waves", "WW/CellWaterOcean" },
+	{ "Water reflections", "WW/CellWaterRefl2", true },
+	{ "Water sun glare", "WW/CellWaterGlint2", true },
+	{ "Ocean waves", "WW/CellWaterOcean2", true },
 	{ "Underwater fog", "WW/CellUnderwater" },
-	{ "Water clear colour", "WW/CellWaterClear" },
+	{ "Water clear colour", "WW/CellWaterClear2", true },
 	{ "Water sky visibility", "WW/CellWaterSkyVis" },
 	{ "Surf", "WW/CellWaterSurf" },
 	{ "Contact foam", "WW/CellWaterContact" },
@@ -544,11 +546,23 @@ void wwCellSsrRowSet( bool on )
 		wwCellSsrExteriorSetOn( on );
 }
 
+/* lane FIX1031B: the water looks the overhaul ships on (the rows marked true above). WW_CELL_WATER_LOOK_RED=shipped turns
+ * them off unless pinned: the water as it shipped before (the WATR's depth ramp, F x reflectivity, the noise layers) */
+static bool wwLookWaterShippedRed( WwLook l )
+{
+	if ( l != WwLook::WaterClear && l != WwLook::WaterRefl && l != WwLook::WaterGlint && l != WwLook::WaterOcean
+		&& l != WwLook::WaterSoftEdge && l != WwLook::ShoreFoam )
+		return false;
+	WW_SWITCH_STATIC( bool, shipped, wwSwitchEcho( "water look red shipped",
+		wwEnv( "WW_CELL_WATER_LOOK_RED" ).trimmed() == "shipped" ) );
+	return shipped;
+}
+
 bool wwLookOn( WwLook l )
 {
 	const QByteArray p = pinOf( l );
 	if ( p.isEmpty() )
-		return wwLookHasRow( l ) ? rowVal( l ) != 0 && wwGroupLets( wwLookGroup( l ) ) : true;
+		return wwLookHasRow( l ) ? rowVal( l ) != 0 && wwGroupLets( wwLookGroup( l ) ) && !wwLookWaterShippedRed( l ) : true;
 	return p != "0";
 }
 

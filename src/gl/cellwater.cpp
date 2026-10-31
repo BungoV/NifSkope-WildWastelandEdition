@@ -76,6 +76,7 @@ struct WaterState
 	int shoreRed = 0;	// WATERSHORE1: 1 nearest (WW_CELL_WATER_SHORE_RED)
 	int wavesRed = 0;	// WATERWAVES1: 1 flat, 2 noshore, 4 alias (WW_CELL_WATER_WAVES_RED)
 	bool foamOld = false;	// WATERFOAMDETAIL1: WW_CELL_WATER_FOAM_RED=old, the distance band instead of the wave law
+	bool foamDim = false;	// FIX1031B: WW_CELL_WATER_FOAM_RED=dim, full foam only at 0.6 m breakers (the calibration before)
 	int foamWind = -1;	// WATERFOAMDETAIL1: WW_CELL_WATER_FOAM_WIND=0..255 pins the weather's wind byte (gates)
 	bool edgeOld = false;	// WATERFOAMDETAIL1: WW_CELL_WATER_EDGE_RED=old, the baked band only (no soft contact)
 	bool linear = false;	// the last water draw wrote linear light into the HDR frame
@@ -105,6 +106,7 @@ WaterState & st()
 		const QByteArray wr = wwEnv( "WW_CELL_WATER_WAVES_RED" ).trimmed();
 		s->wavesRed = wr == "flat" ? 1 : wr == "noshore" ? 2 : wr == "alias" ? 4 : 0;
 		s->foamOld = wwEnv( "WW_CELL_WATER_FOAM_RED" ).trimmed() == "old";
+		s->foamDim = wwEnv( "WW_CELL_WATER_FOAM_RED" ).trimmed() == "dim";
 		const QByteArray fw = wwEnv( "WW_CELL_WATER_FOAM_WIND" ).trimmed();
 		s->foamWind = fw.isEmpty() ? -1 : std::clamp( fw.toInt(), 0, 255 );
 		s->edgeOld = wwEnv( "WW_CELL_WATER_EDGE_RED" ).trimmed() == "old";
@@ -345,7 +347,10 @@ void wwCellWaterSurfConsts( float surfK[4], float shoreK2[4], float shoreK3[4] )
 	float windMs = 0.0f, swellM = 0.0f;
 	foamDrive( st(), windMs, swellM );
 	const float k[4] = { 8.0f, 0.78f, 7.0f, 0.9f };
-	const float k2[4] = { windMs, swellM, 40.0f, 0.6f };
+	/* lane FIX1031B: full foam from 0.3 m breakers (was 0.6 m): a 0.29 m sea at 5 m/s covered 1 % of its surf zone
+	 * (tests/waterlook2/foam_gate.py), where every breaking crest of a surf zone is white water (REASONED: the share of
+	 * breaking waves there runs 0.1-0.5, Battjes and Janssen 1978). Red WW_CELL_WATER_FOAM_RED=dim */
+	const float k2[4] = { windMs, swellM, 40.0f, st().foamDim ? 0.6f : 0.3f };
 	const float k3[4] = { 0.25f, 0.78f, 0.35f, 0.05f };
 	for ( int i = 0; i < 4; i++ ) {
 		surfK[i] = k[i];
@@ -402,7 +407,8 @@ bool wwCellWaterUniforms( Scene * scene, int block, int unit )
 	if ( prog->uniLocation( "waterClearOn" ) >= 0 ) {	// lane WATERLOOK1 step 8: the Water clear colour row
 		prog->uni1b( "waterClearOn", wwLookOn( WwLook::WaterClear ) );
 		WW_SWITCH_STATIC( QByteArray, cl, wwEnv( "WW_CELL_WATER_CLEAR_RED" ).trimmed() );
-		prog->uni1i( "waterClearRed", cl == "noscatter" ? 1 : cl == "nodown" ? 2 : cl == "fast" ? 3 : 0 );
+		// lane FIX1031B: old = WATERCOLOR1's clear-ocean law, its hard bed switch and no Fresnel coupling (before Boston)
+		prog->uni1i( "waterClearRed", cl == "noscatter" ? 1 : cl == "nodown" ? 2 : cl == "fast" ? 3 : cl == "old" ? 4 : 0 );
 	}
 	if ( prog->uniLocation( "waterSkyVisOn" ) >= 0 ) {	// lane WATERLOOK1 step 10: the Water sky visibility row
 		prog->uni1b( "waterSkyVisOn", wwLookOn( WwLook::WaterSkyVis ) );

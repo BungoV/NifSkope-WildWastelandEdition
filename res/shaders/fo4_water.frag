@@ -384,12 +384,13 @@ void main()
 		N = normalize( vec3( N.xy / max( N.z, 1e-3 ) + surf.slope, 1.0 ) );
 #endif
 #ifdef WW_WATER_REFL	// lane WATERREFL1: GGX alpha^2 from the slopes the filtered noise lost + the footprint
-	float reflA2 = waterReflOn || waterGlintOn ? wwWaterAlpha2( wxy / UV.x + waterScroll0.xy, wxy / UV.y + waterScroll0.zw,
+	bool reflPhys = wwWaterReflPhys();	// lane FIX1031B: the physical Fresnel with the clear colour too (water_refl.glsl)
+	float reflA2 = reflPhys || waterGlintOn ? wwWaterAlpha2( wxy / UV.x + waterScroll0.xy, wxy / UV.y + waterScroll0.zw,
 		wxy / UV.z + waterScroll1.xy, tap0, tap1, tap2, Amp, dfade, flatten, Var.x, N, ( waterGlintRed & 2 ) == 0 ) : 0.0;
 #endif
 #if defined( WW_WATER_OCEAN ) && defined( WW_WATER_REFL )
 	// lane WATERLOOK1: on a baked body the roughness is the spectrum's: the slopes the mips lost, the tail, the footprint
-	if ( waterOceanOn && ( waterReflOn || waterGlintOn ) ) {
+	if ( waterOceanOn && ( reflPhys || waterGlintOn ) ) {
 		vec2 ocS = N.xy / max( N.z, 0.05 );
 		vec2 ocSx = dFdx( ocS ), ocSy = dFdy( ocS );
 		bool ocLean = ( waterGlintRed & 2 ) == 0;
@@ -475,8 +476,9 @@ void main()
 	float cauFw = min( length( fwidth( cellWorldPos( cauSv ).xy ) ), 64.0 );
 #endif
 #ifdef WW_WATER_DEPTH
-	WwWaterBed bed = WwWaterBed( false, false, 1e9, 1e9 );	// lane WATERDEPTH1: the bed depth this pixel uses
+	WwWaterBed bed = WwWaterBed( false, false, 1e9, 1e9, -1.0 );	// lane WATERDEPTH1: the bed depth this pixel uses
 #ifdef WW_WATER_CLEAR	// lane WATERLOOK1 step 8: the clear colour reads the same bed, lit by this frame's sun and sky
+	wwClearDeep = waterMat[1].rgb;	// lane FIX1031B: the in-scatter's hue is the cell's WATR deep colour
 	if ( waterClearOn )
 		wwWaterClearSetup( P, V, D.rgb * D.rgb, normalize( cellWorldDir( LightDir ) ), waterSky[0].rgb, waterSky[2].rgb );
 	if ( waterDepthOn || waterClearOn )
@@ -501,8 +503,14 @@ void main()
 #endif
 #ifdef WW_WATER_DEPTH
 #ifdef WW_WATER_CLEAR	// lane WATERLOOK1 step 8: no bed drawn = the class's bed albedo, lit
-		refr = bed.baked ? depthFog( waterClearOn ? wwWaterClearBed() : waterMat[0].rgb, bed.along, bed.vert )
-			: depthFog( refr, along, vert );
+		if ( waterClearOn && waterClearRed != 4 ) {
+			// lane FIX1031B: the baked and the drawn bed blend (no hard switch: the teeth); red old = the step below
+			float bedW = wwWaterBedBakeW( bed.bd, vert, true );
+			vec3 bedC = bedW > 0.0 ? depthFog( wwWaterClearBed(), bed.bd / max( -V.z, 1e-3 ), bed.bd ) : vec3( 0.0 );
+			refr = bedW >= 1.0 ? bedC : mix( depthFog( refr, along, vert ), bedC, bedW );
+		} else
+			refr = bed.baked ? depthFog( waterClearOn ? wwWaterClearBed() : waterMat[0].rgb, bed.along, bed.vert )
+				: depthFog( refr, along, vert );
 #else
 		refr = bed.baked ? depthFog( waterMat[0].rgb, bed.along, bed.vert ) : depthFog( refr, along, vert );
 #endif
@@ -587,7 +595,7 @@ void main()
 		lin = mix( silted, sky, wRefl );
 		lin = mix( far, lin, dfade ) + spec;
 #ifdef WW_WATER_REFL
-		if ( waterReflOn && ( waterRed & 1 ) == 0 )	// lane WATERREFL1: physical Fresnel, near law to the horizon
+		if ( reflPhys && ( waterRed & 1 ) == 0 )	// lane WATERREFL1: physical Fresnel, near law to the horizon
 			lin = wwWaterReflMix( silted, reflEnv, reflF, F, Var.y, far, dfade ) + spec;
 #endif
 		lin = mix( lin, refrOff, shore );
