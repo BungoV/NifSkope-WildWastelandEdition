@@ -73,6 +73,27 @@ inline QVector<WwPrecipLayerSpec> wwPrecipFromRecord( unsigned classFlags )
 	return out;
 }
 
+/* lane RAINFOG2 (PRECIPFLAG1 + the per-weather rate): the record's own layers from its precipitation shader (WTHR MNAM
+ * -> SPGD, gl/precipmath.h spgdKind): none without one (the game draws no particles there: the 4 Rainy-flag and 10
+ * Snow-flag vanilla weathers with no MNAM), else one layer of the SPGD's type at the type's default rate x the SPGD's
+ * density / 7 (vanilla's). redBits (spgdRedBits): flags = wwPrecipFromRecord (the class flags) again, rate = the
+ * default rate again. spgdType: -2 no MNAM, -1 MNAM not read, 0 rain, 1 snow. */
+inline QVector<WwPrecipLayerSpec> wwPrecipFromSpgd( int spgdType, double density, unsigned classFlags, int redBits )
+{
+	QVector<WwPrecipLayerSpec> out = ( redBits & WwPrecip::SpgdRedFlags ) ? wwPrecipFromRecord( classFlags ) : QVector<WwPrecipLayerSpec>();
+	if ( !( redBits & WwPrecip::SpgdRedFlags ) ) {
+		const int k = WwPrecip::spgdKind( spgdType );
+		if ( k == WwPrecip::SpgdRain )
+			out.append( wwPrecipDefault( WwPrecip::Rain, QStringLiteral( "record" ) ) );
+		else if ( k == WwPrecip::SpgdSnow )
+			out.append( wwPrecipDefault( WwPrecip::SnowFine, QStringLiteral( "record" ) ) );
+	}
+	if ( !( redBits & WwPrecip::SpgdRedRate ) && spgdType >= -1 )
+		for ( WwPrecipLayerSpec & s : out )
+			s.rateMmH *= WwPrecip::spgdRateScale( density );
+	return out;
+}
+
 //! the block's layers; `notes` gets one line per dropped key or layer
 inline QVector<WwPrecipLayerSpec> wwPrecipParse( const QJsonObject & block, QStringList & notes )
 {

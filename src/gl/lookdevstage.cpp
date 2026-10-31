@@ -1287,6 +1287,33 @@ bool wwLookdevWeatherRains( bool & cur, bool & blending, bool & old, float & pct
 	return true;
 }
 
+bool wwLookdevWeatherPrecip( int type[2], float density[2], unsigned flags[2], bool & blending, float & pct )
+{
+	resolve();
+	const LdState & s = st();
+	for ( int i = 0; i < 2; i++ ) {
+		type[i] = -2;
+		density[i] = -1.0f;
+		flags[i] = 0u;
+	}
+	blending = false;
+	pct = 1.0f;
+	if ( !s.haveWeather )
+		return false;
+	auto one = []( const WwWeatherData & w, int & t, float & d, unsigned & f ) {	// lane RAINFOG2: MNAM -> SPGD (esmweather.cpp)
+		t = w.precipForm ? w.precipType : -2;
+		d = w.precipDensity;
+		f = w.hasClass ? w.classFlags : 0u;
+	};
+	one( s.w, type[0], density[0], flags[0] );
+	if ( s.w.blending() ) {
+		blending = true;
+		one( *s.w.last, type[1], density[1], flags[1] );
+		pct = s.w.transPct;
+	}
+	return true;
+}
+
 void wwLookdevSetWeather( const QString & key )
 {
 	LdState & s = st();
