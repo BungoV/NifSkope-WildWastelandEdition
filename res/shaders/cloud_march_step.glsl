@@ -50,12 +50,21 @@
 		 * scattered toward the eye (Coakley & Chylek 1975: a backscatter fraction (1 - g) / 2). Gate R. */
 		if ( cvTopOn > 0.5 ) {
 			float tauB = 0.0;
-			for ( int k = 0; k < cvTaps; k++ ) {
-				float a = float( k ) / float( cvTaps ), b = float( k + 1 ) / float( cvTaps );
-				float tk = cvLightKm * 0.5 * ( a * a + b * b ), dk = cvLightKm * ( b * b - a * a );
-				vec3 pb = p - up * tk;
-				pb.z = p.z - tk;
-				tauB += cvDens( pb ) * kCvSigma * dk;
+			/* lane CLOUDLIGHT1: cvTopOn 2 (the default, WW_CLOUDVOL_TOPCOLUMN) takes the slab under the sample as uniform
+			 * at the sample's own density down to its band's base (at most the taps' reach): no read, where the taps
+			 * cost cvTaps (3 Medium / 6 Ultra) of the lit sample's 10 / 16. Gate tests/spells/cloudlight_check.py
+			 * (MEASURED: converged picture vs the taps <= 0.21 levels rms, gate R 0.957 / 1.253 vs MC). 1 = the taps. */
+			if ( cvTopOn > 1.5 ) {
+				float zb = p.z < cvBands.topKm.x ? cvBands.baseKm.x : cvBands.baseKm.y;
+				tauB = dens * kCvSigma * clamp( p.z - zb, 0.0, cvLightKm );
+			} else {
+				for ( int k = 0; k < cvTaps; k++ ) {
+					float a = float( k ) / float( cvTaps ), b = float( k + 1 ) / float( cvTaps );
+					float tk = cvLightKm * 0.5 * ( a * a + b * b ), dk = cvLightKm * ( b * b - a * a );
+					vec3 pb = p - up * tk;
+					pb.z = p.z - tk;
+					tauB += cvDens( pb ) * kCvSigma * dk;
+				}
 			}
 			float fu = cvRdir( tauB, mu0, cvMsG, kCvAlbedo ) * ( mu0 * exp( -tauL ) + fd );
 			fd += 0.5 * ( 1.0 - cvMsG * d.z ) * fu;

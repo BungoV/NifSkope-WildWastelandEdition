@@ -295,6 +295,20 @@ constexpr float kAgeChangeK = 1.25f;
 constexpr float kLitReset = 0.07f;
 constexpr float kLitFloor = 0.02f;
 
+/* lane CLOUDSTEPS1 (CLOUD6c's leftover): the march's step count. With CLOUDLIGHT1's read-free top light a lit sample
+ * reads 7 (Medium) / 10 (High) densities instead of 10 / 16, and the saved reads buy steps at main's cost: the most
+ * steps (of 48 / 60 / 72 / 96 Medium, 64 / 80 / 96 / 128 High) whose density reads per ray stay <= main's (the taps at the
+ * preset steps) in both of CLOUD6c's views: Medium 60 (80.7 / 53.6 reads vs 83.4 / 55.8; 72 reads 96.5 > 83.4), High 80
+ * (136.0 / 90.2 vs 157.5 / 104.9; 96 reads 162.8 > 157.5). Edge error (display levels vs a 16x-steps reference):
+ * Medium 4.91 -> 3.65 / 6.13 -> 4.54, High 2.85 -> 1.97 / 3.74 -> 2.58 (notes/fix1031a/cloud7/tmp/steps1.log).
+ * more = WW_CLOUDVOL_MORESTEPS (the default) AND the top column on (the cost holds only with it); else the preset's. */
+inline int marchSteps( int tier, int presetSteps, bool more )
+{
+	if ( !more )
+		return presetSteps;
+	return tier == 2 ? 60 : tier == 3 ? 80 : presetSteps;
+}
+
 /* lane CLOUDBAND2 (manager 10-30: bungo's rule, a code choice is never handed to him): Cloud Accumulation
  * (WW_CLOUDVOL_ACCUM) and the ambient through the column above (WW_CLOUDVOL_AMBDARK) are the DEFAULT. A switch's value
  * (trimmed, lower case) turns it off only as "0", "off", "false" or "no" (the old path, kept as the red); unset, empty

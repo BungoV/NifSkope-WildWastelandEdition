@@ -1,5 +1,36 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## CLOUDLIGHT1 + CLOUDSTEPS1 + CLOUDVAR2 (2026-10-31, FIX1031A lane CLOUD7): a read-free top light pays for Medium 60 / High 80 march steps
+
+- **CLOUDLIGHT1 (CLOUD6c's leftover, a cheaper lit sample):** a lit sample read 10 densities on Medium (3 key taps +
+  CLOUD2C's 3 taps straight down + CLOUDBAND1's 3 taps up + the sample) and 16 on Ultra; RDR2 lights with one sun-ward
+  sample (Bauer 2019 slide 33). Measured offline (notes/fix1031a/cloud7/tmp/light1.log): one tap down fails CLOUD2C's
+  gate R (0.634 / 0.705 vs Monte Carlo, the red notop's numbers), one tap up moves the converged picture +0.9 levels,
+  half the key taps +2.6 levels (all refused). Shipped: CLOUD2C's top light takes the slab under the sample as uniform at
+  the sample's own density down to its band's base (at most the taps' reach): no read (cloud_march_step.glsl
+  `cvTopOn` 2). **Switch** `WW_CLOUDVOL_TOPCOLUMN` (ON by default, live); **red** `=0` / `WW_CLOUDVOL_RED=toptaps` =
+  the taps (`cvTopOn` 1). Echo `,topcolumn=on` / `,RED=toptaps`. The offline checkers draw the default (cloudvol_check
+  `march_uni` cvTopOn 2; red toptaps 1).
+- **CLOUDSTEPS1:** the saved reads buy steps at main's cost: Medium 48 -> 60, High 64 -> 80 (cloudvolmath.h
+  `marchSteps`), only while the column is on. **Switch** `WW_CLOUDVOL_MORESTEPS` (ON, live); **red** `=0` /
+  `RED=oldsteps` = the preset's steps (echo `,RED=oldsteps`, `steps=` in the volclouds line). 72 (Medium) and 96
+  (High) were measured and refused: their reads per ray pass main's (96.5 > 83.4, 162.8 > 157.5).
+- **CLOUDVAR2:** cloudvar_check gate V judges the shipped arm (CLOUD6d's profile set, spread 0); its V1 (tops IQR >= 1 km
+  storm, CLOUD5's towers beside puffs) is RETIRED to INFO: CLOUD6d's gate P asks for the opposite now, and the default
+  arm reads 0.22 km there. V2 / V3 (tile std, 6 km correlation) still gate it, today's density still fails them.
+  The red onetype now fails nothing in V (it was V1's red): REDRETIRE.
+- **CLOUDVARDEF1:** Cloud Variety stays Off (no measurement here compares it with the game's sky: the game draws 2D
+  layers; no change).
+- **Gates (offline, real programs):** tests/cloudlight/run.sh: E converged picture vs the taps rms 0.02-0.21 levels,
+  mean +0.00..+0.10 (bars 0.5 / 0.25), single-march edge / interior unchanged (+0.01); N reads per ray 0.692-0.782 x
+  (bar 0.85; red toptaps 1.000 FAIL); Monte Carlo C 0.697, R 0.957 / 1.253 (bar 0.75..1.33; red notop still fails),
+  D flicker 0.0717. tests/cloudsteps/run.sh: R reads Medium 80.7 / 53.6 / 125.8 vs main 83.4 / 55.8 / 129.0, High
+  136.0 / 90.2 / 213.9 vs 157.5 / 104.9 / 246.4; E edge error Medium 4.91 -> 3.65 (up18), 6.13 -> 4.54 (low5), High
+  2.85 -> 1.97, 3.74 -> 2.58 (bar 0.8 x; red oldsteps 1.000 FAIL). GPU INFO (this machine, a 1080p history marched at
+  stride 1): Medium 0.628 / 0.472 ms -> 0.599 / 0.451, High 1.015 / 0.829 -> 0.875 / 0.720. Edge refinement re-measured
+  with the column (CLOUD6c's rdr2): uniform steps still win at equal reads in every case (1.81 @338 vs 0.20 @343, Medium
+  up18): stays refused. cloudband / cloudage / cloudstale / cloudedge / cloudvar / cloudvol PASS. Sweeps 405 / 270 / 405.
+
 ## CLOUDTYPE2 + CLOUD6h (2026-10-31, FIX1031A lane CLOUD7): the cloud type reads the thunder; old history traces and light changes in the volume clouds' resolve
 
 - **CLOUDTYPE2 (CLOUD6d's leftover):** the Low band's cloud type (cloudmath.h lowTypeOf, seen with Cloud Variety on)

@@ -265,7 +265,9 @@ def march_uni(cam, camKm, hist, stride, phase, sun_el, sun_az=0.0, steps=64, tap
             'cvTint[0]': (1.0, 1.0, 1.0), 'cvTint[1]': (1.0, 1.0, 1.0), 'cvTint[2]': (1.0, 1.0, 1.0),
             'cvSceneZ': (0.0, 0.0, 0.0, 0.0),
             # CLOUD2C: the light the cloud below reflects up (off in the red notop)
-            'cvTopOn': (0.0 if red == 'notop' else 1.0,)}
+            # lane CLOUDLIGHT1: 2 = the column under the sample (the shipped default, WW_CLOUDVOL_TOPCOLUMN), 1 = the taps
+            # (the red toptaps, CLOUD2C's), 0 = no top light (the red notop)
+            'cvTopOn': (0.0 if red == 'notop' else 1.0 if red == 'toptaps' else 2.0,)}
 
 
 SCENE1 = None
