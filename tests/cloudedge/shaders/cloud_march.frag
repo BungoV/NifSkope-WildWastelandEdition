@@ -232,7 +232,10 @@ vec3 cvTaus( vec3 o, vec3 d, float tt, float pixKm )
 	}
 #endif
 	float tauB = 0.0;
-	if ( cvMsOn > 0.5 && muK > 0.01 && cvTopOn > 0.5 ) {
+	if ( cvMsOn > 0.5 && muK > 0.01 && cvTopOn > 1.5 ) {	// lane CLOUDLIGHT1: the column (one read: the sample)
+		float zb = p.z < cvBands.topKm.x ? cvBands.baseKm.x : cvBands.baseKm.y;
+		tauB = cvDens( p ) * kCvSigma * clamp( p.z - zb, 0.0, cvLightKm );
+	} else if ( cvMsOn > 0.5 && muK > 0.01 && cvTopOn > 0.5 ) {
 		for ( int k = 0; k < cvTaps; k++ ) {
 			float a = float( k ) / float( cvTaps ), b = float( k + 1 ) / float( cvTaps );
 			float tk = cvLightKm * 0.5 * ( a * a + b * b ), dk = cvLightKm * ( b * b - a * a );

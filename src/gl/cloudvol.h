@@ -33,6 +33,10 @@ bool wwCloudVolVarietyOn();
  *  towers beside puffs), WW_CLOUDVOL_PROFILESET, ON BY DEFAULT, live; =0 / off or WW_CLOUDVOL_RED=typemix = CLOUD5's
  *  type swing (the red). Gate tests/spells/cloudprofile_check.py. */
 bool wwCloudVolProfileSet();
+/*! lane CLOUDTYPE2: the cloud type's storm signal = the weather's thunder sounds (cloudmath.h lowTypeOf thunderSounds),
+ *  WW_CLOUDVOL_TYPERULE, ON BY DEFAULT, live; =0 / off or WW_CLOUDVOL_RED=thunderbyte = CLOUD5's rule (the DATA thunder
+ *  byte, Snow first: the red). Gate tests/cloudtype/run.sh. */
+bool wwCloudVolTypeRule();
 
 /* lane CLOUDBAND1 (bungo 10-30 "the clouds have banding"): Cloud Accumulation, WW_CLOUDVOL_ACCUM (0/1, off/on), live;
  * ON BY DEFAULT since lane CLOUDBAND2 (=0 / off is the old path, the red; so is WW_CLOUDVOL_AMBDARK=0). On, the march takes blue noise step offsets (cloud_march_a / cloud_fly_a; the variety twins have them) and

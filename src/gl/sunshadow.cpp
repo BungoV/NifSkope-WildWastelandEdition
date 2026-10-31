@@ -109,6 +109,8 @@ struct CsmState
 	int casters = 0, tris = 0, atCasters = 0;
 	int swayCables = -1;	// lane FAR5: wind cables cast where they sway (-1 = Cable shadows sway off)
 	int swayCasters = 0;	// lane SHADOWSHIMMER2: far tree-animation casters swayed as the colour pass sways them
+	int swaySplit = 0, swayTiles[kCascades] = {};	// lane SHADOWSHIMMER4: far sway casters split by the view slice, their swaying tiles
+	double swayStep = 0.0;	// lane SHADOWSHIMMER4: their clock step (s; 0 = every paint)
 	bool offStable = false;	// lane SHADOWSHIMMER2: Cascade Quality Off on the stable bias (CSMOFFBIAS)
 	int slopeClamp = 0;	// lane SHADOWPAR1: 1 the caster bias clamped (FO4CS's slope 4), -1 no glPolygonOffsetClamp
 	// lane TERRSHADOW1: the fit's numbers, CSM1's constants unless Cascade Quality picks a preset
@@ -172,15 +174,25 @@ int stableRedBits( const QString & v )
 	if ( t.isEmpty() )
 		return 0;
 	if ( t == QLatin1String( "old" ) || t == QLatin1String( "all" ) || t == QLatin1String( "1" ) )
-		return 255;
+		return 511;
 	int bits = 0;
 	for ( const QString & p : t.split( QChar( ',' ), Qt::SkipEmptyParts ) ) {
 		const QString q = p.trimmed();
 		bits |= q == QLatin1String( "fit" ) ? 1 : q == QLatin1String( "kernel" ) ? 2 : q == QLatin1String( "bias" ) ? 4
 			: q == QLatin1String( "sway" ) ? 8 : q == QLatin1String( "terr" ) ? 16 : q == QLatin1String( "offbias" ) ? 32
-			: q == QLatin1String( "airslide" ) ? 64 : q == QLatin1String( "treeanim" ) ? 128 : 0;	// lane SHADOWSHIMMER3
+			: q == QLatin1String( "airslide" ) ? 64 : q == QLatin1String( "treeanim" ) ? 128	// lane SHADOWSHIMMER3
+			: q == QLatin1String( "swayall" ) ? 256 : 0;	// lane SHADOWSHIMMER4: every far tile sways in every cascade
 	}
 	return bits;
+}
+
+/* lane SHADOWSHIMMER4: the far sway casters' clock step in seconds (WW_SUN_SHADOW_SWAYSTEP, default 0.05; 0 = every
+ * paint). Each cascade samples the sway on its own staggered step, so its live layer is kept until its step ticks. */
+double swayStep()
+{
+	WW_SWITCH_STATIC( double, st, wwEnvStr( "WW_SUN_SHADOW_SWAYSTEP" ).trimmed().isEmpty() ? 0.05
+		: std::clamp( wwEnvStr( "WW_SUN_SHADOW_SWAYSTEP" ).trimmed().toDouble(), 0.0, 1.0 ) );
+	return st;
 }
 
 /* lane SHADOWSHIMMER2 (CSMOFFBIAS): Cascade Quality Off on the tiers' stable bias (gl/sunshadowfit.h kOff*): the caster
@@ -349,6 +361,9 @@ struct Caster
 	float atRef = 0.0f;			// lane ALPHABGSM1: its threshold, as the colour draw tests (Shape::wwDrawAlpha)
 	bool dynamic = false;		// lane SHADOWCACHE1: drawn over the cached static layer every pass
 	bool sway = false;			// lane SHADOWSHIMMER2: the far sway moves it (lookdev_csmdepth(_at).vert)
+	bool split = false;			// lane SHADOWSHIMMER4: an instanced far sway bucket, its tiles split by each cascade's view slice
+	int meets[kCascades] = { 0, 0, 0 };	// lane SHADOWSHIMMER4: its tiles meeting each cascade's view slice (they sway there)
+	std::uint64_t sliceHash = 0;		// lane SHADOWSHIMMER4: which tiles, for the static set's signature
 	std::uint64_t sig = 0;
 };
 
@@ -481,6 +496,7 @@ struct Layer
 {
 	bool valid = false;
 	bool liveIsStatic = false;	// the live layer holds exactly the static layer (no dynamic caster drawn over it)
+	std::uint64_t liveDyn = 0;	// lane SHADOWSHIMMER4: != 0: it holds the static layer + only these split far sway tiles
 	std::uint64_t key = 0, setSig = 0, stateSig = 0;
 	double corner[2] = { 0, 0 }, nearZ = 0, wz = 0, texel = 0;
 	double L[3] = { 0, 0, 0 };
@@ -643,8 +659,10 @@ bool ensure( Renderer * r, int map, unsigned int liveTex )
 	}
 	if ( liveTex != s.liveTex ) {
 		s.liveTex = liveTex;	// the live map was made again: its content is gone
-		for ( Layer & l : s.c )
+		for ( Layer & l : s.c ) {
 			l.liveIsStatic = false;
+			l.liveDyn = 0;
+		}
 	}
 	if ( !s.tex || s.texMap != map ) {
 		if ( !s.tex )
@@ -918,6 +936,37 @@ static void sunShadowPassImpl( Scene * scene )
 	 * dynamic over the static cache. Red WW_SUN_SHADOW_STABLE_RED=sway: the casters stand still. */
 	const WwFarSway farSway = ( wwSunShadowStableRed() & 8 ) ? WwFarSway() : wwCellFarLodSway( scene );
 	s.swayCasters = 0;
+	/* lane SHADOWSHIMMER4 (FARSWAYCOST2, gl/farswayslice.h): an instanced far sway bucket sways only in the tiles meeting
+	 * each cascade's view slice; its other tiles cast still from the static layer (they drew as dynamic every paint in
+	 * every cascade: 1.43 ms median on Ultra offline). Red WW_SUN_SHADOW_STABLE_RED=swayall: SHADOWSHIMMER3's path. */
+	const bool swaySplitOn = !( wwSunShadowStableRed() & 256 );
+	WwFarSwaySlice::Slice slices[kCascades];
+	for ( int i = 0; i < kCascades; i++ ) {
+		slices[i].tanX = s.tanX;
+		slices[i].tanY = s.tanY;
+		slices[i].zn = s.c[i].zn * s.sc;
+		slices[i].zf = s.c[i].zf * s.sc;
+		// the eye's distance to the loaded block's border (farSway.world: its centre and half size, world units)
+		const double edge = double( farSway.world[2] )
+			- std::max( std::fabs( s.C[0] - double( farSway.world[0] ) ), std::fabs( s.C[1] - double( farSway.world[1] ) ) );
+		slices[i].empty = farSway.amp > 0.0f && WwFarSwaySlice::reachInside( s.c[i].zf, s.tanX, s.tanY, edge );
+	}
+	s.swaySplit = 0;
+	for ( int i = 0; i < kCascades; i++ )
+		s.swayTiles[i] = 0;
+	/* the casters' sway clock: each cascade on its own step (offset a third of a step apart), at most one step behind the
+	 * colour pass's (WW_CELL_FARLOD_SWAY 10 units: <= 0.7 units at the 0.05 s default), so a still view redraws one
+	 * cascade's swaying tiles per step instead of all three every paint. The red swayall: the paint's clock. */
+	const double swayStepS = swaySplitOn ? swayStep() : 0.0;
+	float swayTq[kCascades];
+	for ( int i = 0; i < kCascades; i++ ) {
+		swayTq[i] = farSway.time;
+		if ( swayStepS > 0.0 ) {
+			const double o = swayStepS * double( i ) / double( kCascades );
+			swayTq[i] = float( std::floor( ( double( farSway.time ) + o ) / swayStepS ) * swayStepS - o );
+		}
+	}
+	s.swayStep = swayStepS;
 	for ( Node * node : scene->nodes.list() ) {
 		const Shape * sh = dynamic_cast<const Shape *>( node );
 		if ( !sh || !sh->isVisible() || !sh->wwCastsSunShadow() )
@@ -955,9 +1004,19 @@ static void sunShadowPassImpl( Scene * scene )
 				> farSway.world[2];
 			s.swayCasters += c.sway ? 1 : 0;
 		}
+		c.split = c.sway && swaySplitOn && sh->wwFarInstData();
+		if ( c.split ) {
+			const Matrix4 smv = sh->viewTrans().toMatrix4();
+			for ( int i = 0; i < kCascades; i++ ) {
+				c.meets[i] = CellFarInst::sliceTiles( *sh->wwFarInstData(), smv.data(), slices[i], c.sliceHash );
+				c.sliceHash = c.sliceHash * 0x100000001b3ULL + std::uint64_t( c.meets[i] ) + 1;
+				s.swayTiles[i] += c.meets[i];
+			}
+			s.swaySplit++;
+		}
 		if ( cst.on )
 			c.dynamic = !ShadowCache::classify( sh, sh->wwGpuSkinned() || !c.skinned.empty(), c.twoSided, c.alphaTested,
-				c.sig ) || c.sway;
+				c.sig ) || ( c.sway && !c.split );
 		s.tris += sh->wwFarInstData() ? int( sh->wwFarInstData()->drawnTris ) : int( sh->triangles.size() );
 		casters.push_back( std::move( c ) );
 	}
@@ -1069,16 +1128,22 @@ static void sunShadowPassImpl( Scene * scene )
 	Mode mode[kCascades] = { ShadowCache::Off, ShadowCache::Off, ShadowCache::Off };
 	const bool cacheOn = cst.on && ShadowCache::ensure( r, s.map, s.tex );
 	std::uint64_t setSig = 0, stateSig = 0, key[kCascades] = {};
-	bool anyDyn = false;
+	// lane SHADOWSHIMMER4: per cascade (was one anyDyn): something is drawn over that cascade's static layer
+	bool dynC[kCascades] = { false, false, false };
+	bool dynReuse = false;	// lane SHADOWSHIMMER4: the only dynamic casters are split far sway tiles (a live layer may be kept)
+	std::uint64_t dynSig[kCascades] = {};
 	int nStatic = 0, srcOff[kCascades][2] = {}, oldSize[kCascades][2] = {};
 	float zMap[kCascades][2] = {};
 	int strip[kCascades][4][4] = {}, nStrip[kCascades] = {};
 	if ( cacheOn ) {
 		ShadowCache::Hash hs, ht;
 		for ( const Caster & k : casters ) {
-			anyDyn |= k.dynamic;
+			for ( int i = 0; i < kCascades; i++ )
+				dynC[i] |= k.dynamic || ( k.split && k.meets[i] > 0 );
 			if ( !k.dynamic ) {
 				hs.w( k.sig );
+				if ( k.split )
+					hs.w( k.sliceHash );	// lane SHADOWSHIMMER4: the static layer holds this bucket's still tiles only
 				nStatic++;
 			}
 		}
@@ -1090,6 +1155,25 @@ static void sunShadowPassImpl( Scene * scene )
 			hs.f( ghalf );
 		}
 		setSig = hs.h;
+		// lane SHADOWSHIMMER4: what a cascade's live layer holds over its static layer when only split sway tiles are dynamic
+		bool nonSplitDyn = false;
+		for ( const Caster & k : casters )
+			nonSplitDyn |= k.dynamic;
+		dynReuse = swayStepS > 0.0 && !nonSplitDyn;
+		for ( int i = 0; i < kCascades; i++ ) {
+			ShadowCache::Hash hd;
+			hd.f( swayTq[i] );
+			hd.f( farSway.amp );
+			for ( int j = 0; j < 3; j++ )
+				hd.f( farSway.world[j] );
+			for ( const Caster & k : casters ) {
+				if ( k.split && k.meets[i] > 0 ) {
+					hd.w( k.sig );
+					hd.w( k.sliceHash );
+				}
+			}
+			dynSig[i] = hd.h | 1;
+		}
 		ht.w( std::uint64_t( s.map ) );
 		ht.f( s.slopeBias );
 		ht.f( s.unitBias );
@@ -1116,7 +1200,9 @@ static void sunShadowPassImpl( Scene * scene )
 		if ( cst.red == 1 || !L.valid || L.map != s.map )
 			continue;
 		if ( cst.red == 2 || L.key == key[i] ) {
-			mode[i] = ( L.liveIsStatic && !anyDyn ) ? ShadowCache::Skip : ShadowCache::Hit;
+			// lane SHADOWSHIMMER4: or it holds exactly this pass's split sway tiles (their clock step has not ticked)
+			mode[i] = ( ( L.liveIsStatic && !dynC[i] ) || ( dynReuse && L.liveDyn == dynSig[i] ) ) ? ShadowCache::Skip
+				: ShadowCache::Hit;
 			continue;
 		}
 		// the scroll: same casters, state, light and lattice; the window moved by whole texels
@@ -1212,11 +1298,14 @@ static void sunShadowPassImpl( Scene * scene )
 		default:
 			break;
 		}
-		if ( mode[i] != ShadowCache::Off && mode[i] != ShadowCache::Skip && anyDyn )
+		if ( mode[i] != ShadowCache::Off && mode[i] != ShadowCache::Skip && dynC[i] )
 			add( 2, nullptr );
 	}
-	// set 0 is every caster; 1 the static ones; 2 the dynamic ones
-	auto inSet = []( const Caster & k, int set ) { return set == 0 || ( set == 1 ) != k.dynamic; };
+	// set 0 is every caster; 1 the static ones; 2 the dynamic ones (lane SHADOWSHIMMER4: a split bucket's swaying tiles too)
+	auto inSet = []( const Caster & k, int set, int i ) {
+		return k.split ? ( WwFarSwaySlice::parts( set, k.dynamic ) & ( k.meets[i] > 0 ? 3 : 1 ) ) != 0
+			: ( set == 0 || ( set == 1 ) != k.dynamic );
+	};
 
 	/* lane GPUDRIVEN1: the casters' render queues (gl/cellqueue.h). Solid one-sided, solid two-sided and alpha-tested
 	 * casters draw from the shared pool, each solid queue as one indirect multi-draw per cascade; skinned casters
@@ -1272,7 +1361,7 @@ static void sunShadowPassImpl( Scene * scene )
 					const std::size_t n = std::size_t( queue[q][j] ), f = cmds.size();
 					const GpuDriven::PoolEntry & e = entry[n];
 					const Shape * sh = casters[n].sh;
-					if ( !inSet( casters[n], J.set ) ) {
+					if ( !inSet( casters[n], J.set, J.i ) ) {
 					} else if ( wwCellCullCaster( scene, sh, sh->id(), J.i, J.m, cullRanges ) ) {
 						for ( std::size_t r2 = 0; r2 + 1 < cullRanges.size(); r2 += 2 ) {
 							if ( cullRanges[r2 + 1] )
@@ -1360,9 +1449,10 @@ static void sunShadowPassImpl( Scene * scene )
 			if ( l >= 0 )
 				fn->glUniformMatrix4fv( l, 1, GL_FALSE, c.clipFromView );
 		}
+		p->uni1f( "farSwayTime", swayTq[J.i] );	// lane SHADOWSHIMMER4: this cascade's caster clock
 		for ( std::size_t kn = 0; kn < casters.size(); kn++ ) {
 			const Caster & k = casters[kn];
-			if ( ( progAt && k.alphaTested != bool( pass ) ) || queued[kn] || !inSet( k, J.set ) )
+			if ( ( progAt && k.alphaTested != bool( pass ) ) || queued[kn] || !inSet( k, J.set, J.i ) )
 				continue;
 			// lane SUNCELL1: a welded cell shape gives this cascade only the placements inside its own window
 			const bool runs = wwCellCullCaster( scene, k.sh, k.sh->id(), J.i, J.m, cullRanges );
@@ -1408,7 +1498,20 @@ static void sunShadowPassImpl( Scene * scene )
 					for ( int row = 0; row < 4; row++ )
 						m[col * 4 + row] = a[row] * b[col * 4] + a[4 + row] * b[col * 4 + 1] + a[8 + row] * b[col * 4 + 2]
 							+ a[12 + row] * b[col * 4 + 3];
-				CellFarInst::drawCascade( r, *k.sh->wwFarInstData(), p, m );
+				if ( !k.split ) {
+					CellFarInst::drawCascade( r, *k.sh->wwFarInstData(), p, m );
+					continue;
+				}
+				// lane SHADOWSHIMMER4: the still tiles (lodTreeAnim 0), then the ones meeting this cascade's view slice
+				const int part = WwFarSwaySlice::parts( J.set, k.dynamic );
+				if ( part & WwFarSwaySlice::Still ) {
+					p->uni1i( "lodTreeAnim", 0 );
+					CellFarInst::drawCascade( r, *k.sh->wwFarInstData(), p, m, b, &slices[J.i], WwFarSwaySlice::Still );
+				}
+				if ( ( part & WwFarSwaySlice::Sway ) && k.meets[J.i] > 0 ) {
+					p->uni1i( "lodTreeAnim", 1 );
+					CellFarInst::drawCascade( r, *k.sh->wwFarInstData(), p, m, b, &slices[J.i], WwFarSwaySlice::Sway );
+				}
 				continue;
 			}
 			const float * const * attrs = attrv;
@@ -1552,7 +1655,8 @@ static void sunShadowPassImpl( Scene * scene )
 		if ( attach( s.tex, i ) ) {
 			copyFrom( cst.tex, i );
 			runSet( i, 2 );
-			L.liveIsStatic = !anyDyn;
+			L.liveIsStatic = !dynC[i];
+			L.liveDyn = dynReuse ? dynSig[i] : 0;	// lane SHADOWSHIMMER4
 		}
 	}
 	if ( cacheOn && !complete )
@@ -1569,7 +1673,9 @@ static void sunShadowPassImpl( Scene * scene )
 		static const char * const names[] = { "off", "skip", "hit", "full", "scroll" };
 		GpuDriven::censusLine( "shadowcache", QStringLiteral( "c0 %1 c1 %2 c2 %3 static %4 dynamic %5 jobs %6 strips %7,%8 grew %9" )
 			.arg( names[mode[0]] ).arg( names[mode[1]] ).arg( names[mode[2]] ).arg( nStatic )
-			.arg( qint64( casters.size() ) - nStatic ).arg( qint64( jobs.size() ) ).arg( nStrip[1] ).arg( nStrip[2] ).arg( grew ) );
+			.arg( qint64( casters.size() ) - nStatic ).arg( qint64( jobs.size() ) ).arg( nStrip[1] ).arg( nStrip[2] ).arg( grew )
+			+ QStringLiteral( " farsway split %1 tiles %2,%3,%4 step %5 reuse %6" ).arg( s.swaySplit ).arg( s.swayTiles[0] )
+			.arg( s.swayTiles[1] ).arg( s.swayTiles[2] ).arg( s.swayStep ).arg( dynReuse ? 1 : 0 ) );	// lane SHADOWSHIMMER4
 	}
 	if ( cst.on )
 		ShadowCache::sweep();
@@ -1777,10 +1883,13 @@ QString wwSunShadowSummary()
 		o += QString( " m%1=%2" ).arg( i ).arg( m.join( QChar( ',' ) ) );
 	}
 	// lane SHADOWSHIMMER1: which parts run stable (red bits 1 fit, 2 kernel, 4 bias) and each cascade's sphere radius
-	o += QString( " stable=%1 sphere=%2,%3,%4" ).arg( wwSunShadowStableRed() ^ 255 ).arg( g( s.c[0].sphereR ), g( s.c[1].sphereR ),
+	o += QString( " stable=%1 sphere=%2,%3,%4" ).arg( wwSunShadowStableRed() ^ 511 ).arg( g( s.c[0].sphereR ), g( s.c[1].sphereR ),
 		g( s.c[2].sphereR ) );
 	// lane SHADOWSHIMMER2: the casters the far sway moves, and Off on the stable bias (1) or CSM1's (0)
 	o += QString( " swaycasters=%1 offstable=%2" ).arg( s.swayCasters ).arg( s.offStable ? 1 : 0 );
+	// lane SHADOWSHIMMER4: the split far sway buckets and their tiles swaying in each cascade
+	o += QString( " swaysplit=%1 swaytiles=%2,%3,%4 swaystep=%5" ).arg( s.swaySplit ).arg( s.swayTiles[0] ).arg( s.swayTiles[1] )
+		.arg( s.swayTiles[2] ).arg( s.swayStep );
 	o += QString( " csmat=%1 slopeclamp=%2" ).arg( s.atCasters ).arg( s.slopeClamp );	// lane VOLAIR1: -1 = no program (they cast solid)
 	if ( s.swayCables >= 0 )
 		o += QString( " cablesway=%1" ).arg( s.swayCables );	// lane FAR5: the wind cables cast where they sway

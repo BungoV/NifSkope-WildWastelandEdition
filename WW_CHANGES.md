@@ -1,5 +1,147 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## RESTIRSPV1 (2026-10-31, FIX1031A): restir.spv.h regenerated from its own source, and a test that every SPIR-V header matches its source
+
+- **What:** `src/rtddgi/restir.spv.h` (the ReSTIR DI kernel the exe embeds) was stale vs `restir.comp` since the
+  CODE1030 merge of RESTIRDI1 (d88154ca): RESTIRDI1 compiled it against the pre-RTXCASCADE2 `ddgi_common.glsl`, and the
+  merge brought RTXCASCADE2's two new trailing Params members (skipLo, skipHi). Rebuilt with `tools/rtddgi_spirv.sh`
+  (glslangValidator 11:16.3.0, `--target-env vulkan1.2 -V --vn rtddgi_restir_spv`): 197823 B -> 198069 B. The
+  disassembly differs ONLY in the Params struct (2 members, offsets 256/272, names): the old kernel read the same
+  offsets, so the ReSTIR result does not change (cli gate below). The other 7 committed SPIR-V headers (bakert rq, bvh,
+  rqx; rtddgi trace, blend, border, reloc) rebuild byte-identical: unchanged.
+- **New test:** `bash tests/spvsync/run.sh <out>` (`tests/spvsync/check_spv.py`): rebuilds every `src/**/*.spv.h` from
+  its source into scratch with the generator scripts' own flags and FAILs when a committed header differs; also FAILs
+  on a `.spv.h` no generator makes, or when `tools/bakert_spirv.sh` / `tools/rtddgi_spirv.sh` drift from its table.
+  No glslangValidator (`GLSLANG=`, default the RenderDoc 1.45 copy), or a glslang whose version differs from the
+  header's `// <stamp>` first line: SKIP, rc 77 (never a pass). Reds in run.sh: the 563dcf97 restir.spv.h (stale) and
+  today's with one word flipped; both FAIL. No switch: a generated file, no runtime path changed.
+- **Gates:** spvsync green PASS 8 (rc 0; rc 1 on the old tree); tests/restir_math/cli_gate.sh GATE OK (GPU vs twin
+  light kept / hit-miss differ 0 every frame, novis red ratio 1.0000); tests/restir_math/run.sh green 7 + 7 reds; the
+  exe holds the new kernel's words once and the old ones 0 times; sweeps base 405 / rtx 270 / prt 405 LINK OK.
+## SHADOWSHIMMER4 (2026-10-31, FIX1031A): the far tree sway's caster cost cut; fo4_effectdecalcsm's headroom back
+
+- **FARSWAYCOST2 (why):** SHADOWSHIMMER3 made every far tree bucket a swaying sun caster, so the static cascade cache
+  (SHADOWCACHE1) lost them: every still paint each cascade blitted its static layer and drew the whole bucket again.
+  Measured OFFLINE (no window): the real Concord rings 0-2 sway buckets (new census dump, below) through the real
+  caster programs in a hidden GL context, GL_TIME_ELAPSED, 32 sun x camera views x 3 eyes, 5070 Ti / 610.74:
+  Ultra 1.41 ms a still paint median, 2.66 ms worst; High 1.21 / 2.39; even Cascade Quality Off 0.53 / 1.15 ms,
+  against SHADOWPAR1's budget for the whole shadow set (0.8 ms of 8.3 at 1080p).
+- **The fix (src/gl/farswayslice.h, gl/sunshadow.cpp, gl/cellfarinst.cpp), on by default:** (1) a far bucket's 4x4-cell
+  tile sways in cascade i only where its sphere meets the camera frustum's slice of that cascade (the pixels it
+  shades); its other tiles cast still and stay in the static layer; a slice that lies wholly inside the loaded block
+  (where the caster shader sways no vertex) sways nothing. (2) The casters' sway clock steps every 0.05 s
+  (`WW_SUN_SHADOW_SWAYSTEP=<s>`, 0 = every paint), each cascade on its own step a third apart, and a cascade whose only
+  dynamic casters are those tiles keeps its live layer until its step ticks (no blit, no redraw). Per-cascade Skip/Hit
+  replaces the one `anyDyn`. Same bench with the fix: Ultra 0.29 ms a paint amortised median (0.49 worst), peak paint
+  (one cascade) 0.37 / 0.58; High 0.27 / 0.48. Look change, bounded: a still-casting tile's shadow on another slice's
+  receivers <= the sway amplitude (10 units) from the swaying one; the caster sway lags the colour pass <= one step
+  (<= 0.7 units). Red: `WW_SUN_SHADOW_STABLE_RED=swayall` (bit 256; old/all now 511) = SHADOWSHIMMER3's pass exactly.
+  Echo: `swaysplit= swaytiles=a,b,c swaystep=`; the shadowcache census line adds `farsway split .. tiles .. step .. reuse`.
+- **Census dump:** `WW_FAROBJ_SWAYDUMP=<file>` makes `-no-gui farobjcensus ... --instanced` append each swaying instanced
+  bucket (arrays, commands, tiles) for the offline bench (src/lodinative.cpp instSwayDump; census only).
+- **EFFECTDECALHEADROOM:** fo4_effectdecalcsm in WW_FRAME_UBO + WW_CELL_GI_MARCH + WW_CELL_PRT sat at 65482 fragment
+  instructions (NV assembly in the driver's binary; GL_MAX_PROGRAM_NATIVE_INSTRUCTIONS_ARB 65536: 54 = 0.08 % left).
+  In a lit-decal program every cellOn path returns before fo4_effectshader.frag's WW_CELLLIGHTS block (cellOn is a
+  uniform), so that block is dead there; the compiler dropped it in plain march but kept it with PRT. Not compiled in
+  the GI-march mode of the lit-decal programs: 35670 instructions (45.6 % left). Every other mode keeps its source: the
+  saved binaries of all 8 effect/particle programs x 9 modes equal main's but the 8-byte source hash (70 of 72; the 2
+  others are the two lit-decal PRT-march programs). Tightest program now: pbrm_cellcsm PRT-march, 5689 left (8.7 %).
+- **Gates:** tests/shadowshimmer4 (G1 cost, G2 composition, G3 clock step, G4 reach / tileMeets, G5 mirror) green;
+  reds RED_TODAY (G1, G2, G3) and RED_REACH (G4) FAIL; tests/shadowshimmer1-3 still PASS. Link sweeps 405 / 270
+  (WW_CELL_RTDDGI) / 405 (WW_CELL_PRT) LINK OK. Owed: pictures and a live GPU ms row when bungo asks.
+## CLOUDLIGHT1 + CLOUDSTEPS1 + CLOUDVAR2 (2026-10-31, FIX1031A lane CLOUD7): a read-free top light pays for Medium 60 / High 80 march steps
+
+- **CLOUDLIGHT1 (CLOUD6c's leftover, a cheaper lit sample):** a lit sample read 10 densities on Medium (3 key taps +
+  CLOUD2C's 3 taps straight down + CLOUDBAND1's 3 taps up + the sample) and 16 on Ultra; RDR2 lights with one sun-ward
+  sample (Bauer 2019 slide 33). Measured offline (notes/fix1031a/cloud7/tmp/light1.log): one tap down fails CLOUD2C's
+  gate R (0.634 / 0.705 vs Monte Carlo, the red notop's numbers), one tap up moves the converged picture +0.9 levels,
+  half the key taps +2.6 levels (all refused). Shipped: CLOUD2C's top light takes the slab under the sample as uniform at
+  the sample's own density down to its band's base (at most the taps' reach): no read (cloud_march_step.glsl
+  `cvTopOn` 2). **Switch** `WW_CLOUDVOL_TOPCOLUMN` (ON by default, live); **red** `=0` / `WW_CLOUDVOL_RED=toptaps` =
+  the taps (`cvTopOn` 1). Echo `,topcolumn=on` / `,RED=toptaps`. The offline checkers draw the default (cloudvol_check
+  `march_uni` cvTopOn 2; red toptaps 1).
+- **CLOUDSTEPS1:** the saved reads buy steps at main's cost: Medium 48 -> 60, High 64 -> 80 (cloudvolmath.h
+  `marchSteps`), only while the column is on. **Switch** `WW_CLOUDVOL_MORESTEPS` (ON, live); **red** `=0` /
+  `RED=oldsteps` = the preset's steps (echo `,RED=oldsteps`, `steps=` in the volclouds line). 72 (Medium) and 96
+  (High) were measured and refused: their reads per ray pass main's (96.5 > 83.4, 162.8 > 157.5).
+- **CLOUDVAR2:** cloudvar_check gate V judges the shipped arm (CLOUD6d's profile set, spread 0); its V1 (tops IQR >= 1 km
+  storm, CLOUD5's towers beside puffs) is RETIRED to INFO: CLOUD6d's gate P asks for the opposite now, and the default
+  arm reads 0.22 km there. V2 / V3 (tile std, 6 km correlation) still gate it, today's density still fails them.
+  The red onetype now fails nothing in V (it was V1's red): REDRETIRE.
+- **CLOUDVARDEF1:** Cloud Variety stays Off (no measurement here compares it with the game's sky: the game draws 2D
+  layers; no change).
+- **Gates (offline, real programs):** tests/cloudlight/run.sh: E converged picture vs the taps rms 0.02-0.21 levels,
+  mean +0.00..+0.10 (bars 0.5 / 0.25), single-march edge / interior unchanged (+0.01); N reads per ray 0.692-0.782 x
+  (bar 0.85; red toptaps 1.000 FAIL); Monte Carlo C 0.697, R 0.957 / 1.253 (bar 0.75..1.33; red notop still fails),
+  D flicker 0.0717. tests/cloudsteps/run.sh: R reads Medium 80.7 / 53.6 / 125.8 vs main 83.4 / 55.8 / 129.0, High
+  136.0 / 90.2 / 213.9 vs 157.5 / 104.9 / 246.4; E edge error Medium 4.91 -> 3.65 (up18), 6.13 -> 4.54 (low5), High
+  2.85 -> 1.97, 3.74 -> 2.58 (bar 0.8 x; red oldsteps 1.000 FAIL). GPU INFO (this machine, a 1080p history marched at
+  stride 1): Medium 0.628 / 0.472 ms -> 0.599 / 0.451, High 1.015 / 0.829 -> 0.875 / 0.720. Edge refinement re-measured
+  with the column (CLOUD6c's rdr2): uniform steps still win at equal reads in every case (1.81 @338 vs 0.20 @343, Medium
+  up18): stays refused. cloudband / cloudage / cloudstale / cloudedge / cloudvar / cloudvol PASS. Sweeps 405 / 270 / 405.
+
+## CLOUDTYPE2 + CLOUD6h (2026-10-31, FIX1031A lane CLOUD7): the cloud type reads the thunder; old history traces and light changes in the volume clouds' resolve
+
+- **CLOUDTYPE2 (CLOUD6d's leftover):** the Low band's cloud type (cloudmath.h lowTypeOf, seen with Cloud Variety on)
+  took "storm" from the WTHR DATA thunder byte > 0, which is 133..255 in 106 of the 107 vanilla weathers: every Rainy
+  weather was a cumulonimbus and the 6 radstorms (DATA flags 24 / 8 = the Snow bit) got the Snow flag's stratus 0.3.
+  A census of the 107 records (notes/fix1031a/cloud7/tools/census_type.py; the fixture tests/cloudtype/weathers.tsv)
+  found one field that separates: the SNAM sounds of type 3 (thunder), present in 15 weathers (7 rains, the radstorms,
+  the 2 Glowing Sea fogs) = exactly CLOUD6f's lightning set; the byte shares 137 between quiet and thundering ones.
+  The rule now asks the thunder sounds FIRST: a weather that thunders is 0.9 +- 0.25, a Rainy-flag one that does not
+  is 0.75 (7 weathers: MistyRainy x2, NukaWorldRainMarkT, the Diamond / Marsh / GSRadstormOld flag-4 records), all
+  other classes keep their type. **Switch** `WW_CLOUDVOL_TYPERULE` (ON by default, live); **red**
+  `WW_CLOUDVOL_TYPERULE=0` / `WW_CLOUDVOL_RED=thunderbyte` = CLOUD5's rule. Echo `,typerule=thundersound` /
+  `,RED=thunderbyte` (Variety on). `wwLookdevWeatherClass` hands the thunder sound count (optional out).
+- **CLOUD6h (CLOUD6g's leftovers), with Cloud Accumulation + Change Clamp:** **History Age** - the history depth
+  target is RG32F now (.r the depth every reader reads, .g the trace's age: 0 where this frame marched, +1 per
+  reprojected frame). A trace older than 16 frames (a still camera never makes one) gets Change Clamp's test at 1.25x
+  its threshold against the 9 places the march texels looked this frame; when they differ this frame's march stands
+  in, read where its samples sit (m x stride + phase, the bilinear read was up to 1.5 history px off). **Lit Clamp** -
+  Change Clamp also compares the light (relative change of the 9-mean luminance, threshold 0.07 + the deviation
+  term): a sun move leaves the transmittance alike and was left to the variance clip. **Switches**
+  `WW_CLOUDVOL_HISTAGE`, `WW_CLOUDVOL_LITCLAMP` (ON by default, live); **reds** `=0` / `WW_CLOUDVOL_RED=noage` |
+  `litblind` = CLOUD6g's resolve. Echoes `,histage=16x1.25`, `,litclamp=0.070` / `,RED=noage`, `,RED=litblind`.
+- **Gates (offline, real programs through the driver):** tests/cloudtype/run.sh (A thunder <=> 0.9 107/107, red
+  92/107; R radstorms 6/6 vs red 0/6; N rain 7/7 vs 0/7; K 85 quiet weathers unchanged; W wiring, D switch, stage).
+  tests/cloudage/run.sh (16 frames after a jump, mean |E| in display levels): moving thinning 9.21 -> 7.43 (Medium),
+  5.53 -> 5.08 (Ultra); moving shift 7.22 -> 5.67, 4.28 -> 3.94, Variety 8.23 -> 6.59; still sun 30 -> 10 deg
+  6.59 -> 4.07 (Off path 3.88), Ultra 4.28 -> 2.17 (1.87); steady error moving 2.68 -> 2.54, still 1.81 -> 1.82;
+  reds noage / litblind FAIL. The brief's target (moving partial changes at the still level, 3.14) is out of reach:
+  an arm that shows this frame's march on every reprojected px reads 7.63 there, the floor for a trace no march has
+  seen since the change. CLOUDBAND (L M G Q F) and CLOUD6g (S T R) runs PASS on the new default (Lit 0.05 was refused
+  by gate Q's dither lattice 37.1 > 33.5). Link sweeps 405 / 270 / 405 not ok 0. Cost: one accum resolve at 960x540
+  0.035 -> 0.037 ms offline.
+## FARWATER4 (2026-10-31, FIX1031A): lodgen's river bake writes the smoothed direction, moving water never reads speed 0, a stroke weight speeds without steering
+
+- **L5, lodgen's per-texel river bake (src/lodtfile.cpp):** it wrote the RAW solve direction. F5's instrument on the
+  Commonwealth v4 bake (346 bodies, 111 rivers solved) read p99 28-69 degrees and seams (> 10 degrees) on 5.6-30.7
+  percent of the adjacent pairs of all 14 rivers of >= 1000 texels. The direction now goes through the marking
+  tool's own `waterWrittenDirection()` (now declared in watermark.h; bank and slack texels continued, then the 8-pass
+  low-pass) over the river's piece; speed and confidence are untouched. Median p99 40.78 -> 9.84, seams 0.16-7.3
+  percent, every river better on both; the bake's river step 0.69 -> 1.15-1.32 s. Red `WW_LODL_FLOW_DIR_RED=raw`.
+- **L4, the speed nibble:** water at or above the writer's slack line (2 percent of the mean speed) now writes at
+  least 1 instead of rounding to 0 (`waterSpeedFloor`, both writers; format and readers unchanged, code c is still
+  c/8 of the reference). Bake: 904 of the 20173 solved texels at speed 0 moved (the other 19269 are slack water by
+  the writer's own rule); the marking selftest's rivers 5 / 7: 587 of 9145 / 3355 of 9948 moving texels read 0
+  under the red, 0 now (new check "L4 moving water", every pinned river). Red
+  `WW_WATER_SPEED_FLOOR_RED=round`. A log nibble would cut the bake's saturated texels (38953 -> 5261) but needs a
+  new flow encoding: not done (a LANES row).
+- **L3, the X1 per-point weight (src/watermark.cpp solveBody):** it multiplied the stroke's conductance boost too,
+  and the solve's speed is flux / k, so a 1 -> 3 ramp moved the last-third / first-third speed only 1.04x. The
+  weight now SPEEDS (its documented job, WATER6 C1) and does not steer: the boost stays kStrokeBoost and the slack
+  line takes the unweighted mean (both identical at w = 1, gate X1a). New selftest X1d: the speed ratio is the
+  ramp's own (0.992-1.094 on rivers 2 / 3 / 5 / 7 / 10; red 0.464) and 0 direction bytes move (red 11546 of 25114).
+  Red `WW_WATER_X1_WEIGHT_RED=boost`.
+- **L1 / L2 refused with numbers:** no bank-preserving smoother passes F2 (bank texels within 5 / 15 degrees of the
+  staircase's own flow) and F5 (p99 < 5) together: bank pairs are 6.5-21 percent of a river's pairs and the mask's
+  own exact flow differs across them by a median 7-14 degrees; 10 variants (vector, bilateral, tangent-projection,
+  bank blend, 8-128 passes) pass one gate or neither. F5 p99 < 5 is not registered; F2 and F5 p99 stay registered
+  FAILs.
+- **Gates:** tests/farwater4/run.sh <exe> <out> (bakes, judges, selftests; 0 FAIL), tests/farwater3/run.sh (0 FAIL,
+  every red at once == FARWATER3's main log line for line), tests/farwater2/run.sh (0 FAIL). Every red at once: the
+  bake is byte-equal to a main-built bake. Each fix ships ON; the old paths stay only as the three reds above.
+
 ## LEANCOMMENTS1 (2026-10-31, FIX1031A): the comment trim pass lands on main (comments only, exe byte-identical)
 
 - **What:** origin/cloud-leancomments1 (cut from 5c98715a, 918 commits behind main) trims comments in `src/cell*`,

@@ -129,6 +129,27 @@ uniform float cvAccClamp;	// 1 = clamp the history to the fresh neighbourhood's 
  * WW_CLOUDVOL_RED=looseclamp (CLOUDBAND1's clamp alone). The red noclamp turns it off too (it lives inside the clamp). */
 uniform float cvAccReset;
 uniform float cvAccResetSd;
+/* lane CLOUD6h (CLOUD6g leftovers): History Age. The history depth target's second channel (RG32F) holds each trace's
+ * age: 0 where this frame's march wrote it, the age at its reprojected place + 1 where it followed the camera. A still
+ * camera refreshes every pixel within 16 frames (ages <= 15); under motion the content slides across the screen-space
+ * slots and some traces go many cycles without a fresh march. A trace older than cvHistAge frames gets Change Clamp's
+ * test (the history at the 9 places the march texels looked vs those 9 marches, threshold x cvAgeK): when they disagree,
+ * the march stands in (the bilinear march read where its samples sit: m x stride + phase, not the texel centre).
+ * Moving thinning 9.21 -> 7.43 levels (Medium; the march itself reads 7.63 there: the floor without a fresh sample).
+ * cvHistAge 0 = WW_CLOUDVOL_HISTAGE=0 / WW_CLOUDVOL_RED=noage (CLOUD6g's resolve). Acts with Change Clamp only.
+ * Lit Clamp: Change Clamp also compares the light (luminance of the 9 history vs the 9 march values, relative to their
+ * mean, floor cvLitFloor; threshold cvLitReset + cvAccResetSd x min( the two deviations ) / 3 / mean): a sun move left
+ * the transmittance alike and read 6.59 levels with a still camera (the variance clip alone; the Off path 3.88), ~4.1
+ * with the term. cvLitReset 0 = WW_CLOUDVOL_LITCLAMP=0 / WW_CLOUDVOL_RED=litblind. Gate tests/spells/cloudage_check.py. */
+uniform float cvHistAge;
+uniform float cvAgeK;
+uniform float cvLitReset;
+uniform float cvLitFloor;
+
+float cvLum( vec3 c )
+{
+	return dot( c, vec3( 0.2126, 0.7152, 0.0722 ) );
+}
 
 //! where this pixel's cloud was in the previous history (Off's reprojection); false = no history there
 bool cvReprojUv( vec2 uv, float dk, out vec2 pv )
@@ -156,12 +177,14 @@ void main()
 	vec2 uv = ( q + 0.5 ) / cvHistSize;
 	bool fresh = all( equal( slot, cvPhase ) );
 	ivec2 m = ivec2( floor( q / cvStride ) );
-	vec4 coarse = fresh ? texelFetch( cvMarch, m, 0 ) : texture( cvMarch, uv );
+	// lane CLOUD6h: with History Age, the march is read where its samples sit (texel m looked at m x stride + phase)
+	vec2 muv = cvHistAge > 0.0 ? ( ( q - cvPhase ) / cvStride + 0.5 ) / vec2( textureSize( cvMarch, 0 ) ) : uv;
+	vec4 coarse = fresh ? texelFetch( cvMarch, m, 0 ) : texture( cvMarch, muv );
 	float dk = fresh ? texelFetch( cvMarchDepth, m, 0 ).r : texture( cvMarchDepth, uv ).r;
 	vec2 pv;
 	if ( cvHistOn < 0.5 || !cvReprojUv( uv, dk, pv ) ) {
 		cvOut = coarse;
-		cvDepth = vec4( dk );
+		cvDepth = vec4( dk, 0.0, 0.0, 0.0 );	// lane CLOUD6h: .g = the age (0: this frame's march)
 		return;
 	}
 	// the history at pv: Catmull-Rom colour, nearest depth (as Off)
@@ -173,9 +196,32 @@ void main()
 		for ( int i = 0; i < 4; i++ )
 			c += wx[i] * wy[j] * texelFetch( cvPrev, clamp( i0 + ivec2( i, j ), ivec2( 0 ), hi ), 0 );
 	c = vec4( max( c.rgb, vec3( 0.0 ) ), clamp( c.a, 0.0, 1.0 ) );
+	ivec2 hp0 = clamp( ivec2( floor( pv * cvHistSize ) ), ivec2( 0 ), hi );
+	vec2 hd = texelFetch( cvPrevDepth, hp0, 0 ).rg;	// lane CLOUD6h: the nearest trace's depth and age
+	float age = hd.g + 1.0;
 	if ( !fresh ) {
 		cvOut = cvMoveBox( q, uv, pv, c );	// lane CLOUD6g
-		cvDepth = texelFetch( cvPrevDepth, clamp( ivec2( floor( pv * cvHistSize ) ), ivec2( 0 ), hi ), 0 );
+		if ( cvHistAge > 0.0 && age > cvHistAge && cvAccReset > 0.0 ) {	// lane CLOUD6h: an old trace
+			// the 9 places the march texels looked this frame (m x stride + phase), moved as this pixel moved
+			ivec2 mhi = textureSize( cvMarch, 0 ) - 1, hp = hp0 + ivec2( vec2( m ) * cvStride + cvPhase - q );
+			float s1 = 0.0, s2 = 0.0, h1 = 0.0, h2 = 0.0;
+			for ( int j = -1; j <= 1; j++ )
+				for ( int i = -1; i <= 1; i++ ) {
+					float n = texelFetch( cvMarch, clamp( m + ivec2( i, j ), ivec2( 0 ), mhi ), 0 ).a;
+					s1 += n;
+					s2 += n * n;
+					float ha = texelFetch( cvPrev, clamp( hp + int( cvStride ) * ivec2( i, j ), ivec2( 0 ), hi ), 0 ).a;
+					h1 += ha;
+					h2 += ha * ha;
+				}
+			float mu = s1 / 9.0, sd = sqrt( max( s2 / 9.0 - mu * mu, 0.0 ) );
+			float hm = h1 / 9.0, hsd = sqrt( max( h2 / 9.0 - hm * hm, 0.0 ) );
+			float te = cvAgeK * ( cvAccReset + cvAccResetSd * min( sd, hsd ) / 3.0 );
+			float w = smoothstep( te, 2.0 * te, abs( hm - mu ) );
+			cvOut = mix( cvOut, coarse, w );
+			age = mix( age, 0.0, w );
+		}
+		cvDepth = vec4( hd.r, age, 0.0, 0.0 );
 		return;
 	}
 	float a = cvAccAlpha;
@@ -199,19 +245,33 @@ void main()
 		c = clamp( c, lo, up );
 		if ( cvAccReset > 0.0 ) {	// lane CLOUD6g: Change Clamp
 			ivec2 hp = ivec2( floor( pv * cvHistSize ) );
-			float h1 = 0.0, h2 = 0.0;
+			float h1 = 0.0, h2 = 0.0, l1 = 0.0, l2 = 0.0, f1 = 0.0, f2 = 0.0;
 			for ( int j = -1; j <= 1; j++ )
 				for ( int i = -1; i <= 1; i++ ) {
-					float ha = texelFetch( cvPrev, clamp( hp + int( cvStride ) * ivec2( i, j ), ivec2( 0 ), hi ), 0 ).a;
-					h1 += ha;
-					h2 += ha * ha;
+					vec4 hv = texelFetch( cvPrev, clamp( hp + int( cvStride ) * ivec2( i, j ), ivec2( 0 ), hi ), 0 );
+					h1 += hv.a;
+					h2 += hv.a * hv.a;
+					if ( cvLitReset > 0.0 ) {	// lane CLOUD6h: Lit Clamp, the light at the same 9 places
+						float hl = cvLum( hv.rgb ), fl = cvLum( texelFetch( cvMarch, clamp( m + ivec2( i, j ), ivec2( 0 ), mhi ), 0 ).rgb );
+						l1 += hl;
+						l2 += hl * hl;
+						f1 += fl;
+						f2 += fl * fl;
+					}
 				}
 			float hm = h1 / 9.0, hsd = sqrt( max( h2 / 9.0 - hm * hm, 0.0 ) );
 			float te = cvAccReset + cvAccResetSd * min( sd.a, hsd ) / 3.0;
 			a = max( a, smoothstep( te, 2.0 * te, abs( hm - mu.a ) ) );
+			if ( cvLitReset > 0.0 ) {
+				float lm = l1 / 9.0, lsd = sqrt( max( l2 / 9.0 - lm * lm, 0.0 ) );
+				float fm = f1 / 9.0, fsd = sqrt( max( f2 / 9.0 - fm * fm, 0.0 ) );
+				float lref = max( 0.5 * ( lm + fm ), cvLitFloor );
+				float tl = cvLitReset + cvAccResetSd * min( fsd, lsd ) / ( 3.0 * lref );
+				a = max( a, smoothstep( tl, 2.0 * tl, abs( lm - fm ) / lref ) );
+			}
 		}
 	}
 	cvOut = mix( c, coarse, a );
-	cvDepth = vec4( dk );	// the fresh march's mean distance (a mix with the 1e4 of no cloud means nothing)
+	cvDepth = vec4( dk, 0.0, 0.0, 0.0 );	// the fresh march's mean distance (a mix with the 1e4 of no cloud means nothing); age 0
 }
 #endif

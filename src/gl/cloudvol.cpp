@@ -81,6 +81,11 @@ struct CvState
 	int profileSet = 1;	// lane CLOUD6d: one cloud profile set per weather (WW_CLOUDVOL_PROFILESET)
 	int moveClamp = 1;	// lane CLOUD6g: Move Clamp (WW_CLOUDVOL_MOVECLAMP)
 	int changeClamp = 1;	// lane CLOUD6g: Change Clamp (WW_CLOUDVOL_CHANGECLAMP)
+	int typeRule = 1;	// lane CLOUDTYPE2: the cloud type's storm signal = the thunder sounds (WW_CLOUDVOL_TYPERULE)
+	int histAge = 1;	// lane CLOUD6h: History Age (WW_CLOUDVOL_HISTAGE)
+	int litClamp = 1;	// lane CLOUD6h: Lit Clamp (WW_CLOUDVOL_LITCLAMP)
+	int topColumn = 1;	// lane CLOUDLIGHT1: the top light's slab without reads (WW_CLOUDVOL_TOPCOLUMN)
+	int moreSteps = 1;	// lane CLOUDSTEPS1: Medium 60 / High 80 steps (WW_CLOUDVOL_MORESTEPS)
 };
 
 CvState & cs()
@@ -140,6 +145,28 @@ CvState & cs()
 		s.moveClamp = V::defaultOnSwitch( mc.constData() ) ? 1 : 0;
 		const QByteArray cc = wwEnvStr( "WW_CLOUDVOL_CHANGECLAMP" ).trimmed().toLower().toLatin1();
 		s.changeClamp = V::defaultOnSwitch( cc.constData() ) ? 1 : 0;
+		/* lane CLOUDTYPE2: the Low band's type reads the weather's thunder sounds (cloudmath.h lowTypeOf), the DEFAULT,
+		 * live; WW_CLOUDVOL_TYPERULE=0 / off = CLOUD5's DATA thunder byte (never 0 in vanilla: every rain a storm) */
+		const QByteArray trule = wwEnvStr( "WW_CLOUDVOL_TYPERULE" ).trimmed().toLower().toLatin1();
+		s.typeRule = V::defaultOnSwitch( trule.constData() ) ? 1 : 0;
+		/* lane CLOUD6h (CLOUD6g leftovers), both the DEFAULT, live, gated by tests/spells/cloudage_check.py, acting with
+		 * Accumulation + Change Clamp: History Age (the depth target's .g = frames since the trace's last march; an old
+		 * trace that disagrees with this frame's march takes the march) =0 / RED=noage; Lit Clamp (Change Clamp compares
+		 * the light too: a sun move) =0 / RED=litblind */
+		const QByteArray ha = wwEnvStr( "WW_CLOUDVOL_HISTAGE" ).trimmed().toLower().toLatin1();
+		s.histAge = V::defaultOnSwitch( ha.constData() ) ? 1 : 0;
+		const QByteArray lc = wwEnvStr( "WW_CLOUDVOL_LITCLAMP" ).trimmed().toLower().toLatin1();
+		s.litClamp = V::defaultOnSwitch( lc.constData() ) ? 1 : 0;
+		/* lane CLOUDLIGHT1, a cheaper lit sample: CLOUD2C's top light takes the slab under the sample as uniform at its
+		 * density down to the band's base (cloud_march_step.glsl cvTopOn 2: no read, 3 / 6 fewer a lit sample), the
+		 * DEFAULT, live; =0 / RED=toptaps = the taps down. Gate tests/spells/cloudlight_check.py. */
+		const QByteArray tc = wwEnvStr( "WW_CLOUDVOL_TOPCOLUMN" ).trimmed().toLower().toLatin1();
+		s.topColumn = V::defaultOnSwitch( tc.constData() ) ? 1 : 0;
+		/* lane CLOUDSTEPS1: the saved reads buy steps at main's cost (cloudvolmath.h marchSteps: Medium 48 -> 60, High
+		 * 64 -> 80, only while the column is on), the DEFAULT, live; =0 / RED=oldsteps = the preset's steps.
+		 * Gate tests/spells/cloudsteps_check.py. */
+		const QByteArray ms = wwEnvStr( "WW_CLOUDVOL_MORESTEPS" ).trimmed().toLower().toLatin1();
+		s.moreSteps = V::defaultOnSwitch( ms.constData() ) ? 1 : 0;
 	}
 	return s;
 }
@@ -245,7 +272,7 @@ bool ensure( NifSkopeOpenGLContext::GLFunctions * fn, Tgt & t, int w, int h )
 		fn->glTexParameteri( GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE );
 	};
 	make( t.col, GL_RGBA16F, GL_RGBA );
-	make( t.dep, GL_R32F, GL_RED );
+	make( t.dep, GL_RG32F, GL_RG );	// lane CLOUD6h: .r = the depth (km, every reader), .g = the trace's age (History Age)
 	fn->glBindTexture( GL_TEXTURE_2D, 0 );
 	fn->glBindFramebuffer( GL_FRAMEBUFFER, t.fbo );
 	fn->glFramebufferTexture2D( GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, t.col, 0 );
@@ -543,6 +570,10 @@ struct CvRedo
 	bool ambDark = false;	// lane CLOUDBAND1 (b): cvAmbDark
 	bool moveClamp = false;	// lane CLOUD6g: cvMoveClamp
 	bool changeClamp = false;	// lane CLOUD6g: cvAccReset = kChangeReset
+	bool histAge = false;	// lane CLOUD6h: cvHistAge = kHistAgeOld
+	bool litClamp = false;	// lane CLOUD6h: cvLitReset = kLitReset
+	bool topColumn = false;	// lane CLOUDLIGHT1: cvTopOn 2
+	bool moreSteps = false;	// lane CLOUDSTEPS1: cloudvolmath.h marchSteps
 	double secs = 0.0;
 	bool histOn = false;
 	float prevCam[9] = {}, prevProj[4] = {}, prevKm[3] = {};
@@ -596,7 +627,7 @@ bool marchPass( Renderer * r, CvGpu & g, const CvRedo & d, const WwAtmoFrame & f
 	p->uni2f( "cvHistSize", float( d.hw ), float( d.hh ) );
 	p->uni1f( "cvStride", float( d.stride ) );
 	p->uni2f( "cvPhase", d.phase[0], d.phase[1] );
-	p->uni1i( "cvSteps", pr.steps );
+	p->uni1i( "cvSteps", V::marchSteps( d.tier, pr.steps, d.moreSteps ) );	// lane CLOUDSTEPS1
 	p->uni1i( "cvTaps", pr.taps );
 	p->uni1i( "cvOctaves", noOct ? 1 : 4 );
 	p->uni1f( "cvLightKm", var ? varLightKm( d.b, pr ) : pr.lightKm );
@@ -619,7 +650,9 @@ bool marchPass( Renderer * r, CvGpu & g, const CvRedo & d, const WwAtmoFrame & f
 	p->uni1i( "cvProbe", 0 );
 	p->uni1f( "cvMsOn", noMs ? 0.0f : 1.0f );
 	p->uni1f( "cvMsG", V::msMeanCosine( drop ) );
-	p->uni1f( "cvTopOn", red( "notop" ) ? 0.0f : 1.0f );	// lane CLOUD2C: the light the cloud below reflects up
+	// lane CLOUD2C: the light the cloud below reflects up; lane CLOUDLIGHT1: 2 = its slab as the column under the sample
+	// (no read, the default), 1 = CLOUD2C's taps down (WW_CLOUDVOL_TOPCOLUMN=0 / RED=toptaps)
+	p->uni1f( "cvTopOn", red( "notop" ) ? 0.0f : d.topColumn ? 2.0f : 1.0f );
 	p->uni1f( "cvAmbDark", d.ambDark && !red( "flatamb" ) ? 1.0f : 0.0f );	// lane CLOUDBAND1 (b); red flatamb: the ramp
 	// lane CLOUDLOOK1: literal names (the location cache keys on the name's address; a heap name per loop set all three
 	// through cvTint[0]). Red tintname: the old heap names.
@@ -684,6 +717,10 @@ bool resolvePass( Renderer * r, CvGpu & g, const CvRedo & d )
 		p->uni1f( "cvAccClamp", red( "noclamp" ) ? 0.0f : 1.0f );
 		p->uni1f( "cvAccReset", d.changeClamp ? V::kChangeReset : 0.0f );	// lane CLOUD6g: Change Clamp
 		p->uni1f( "cvAccResetSd", V::kChangeResetSd );
+		p->uni1f( "cvHistAge", d.histAge ? V::kHistAgeOld : 0.0f );	// lane CLOUD6h: History Age + Lit Clamp, every draw
+		p->uni1f( "cvAgeK", V::kAgeChangeK );
+		p->uni1f( "cvLitReset", d.litClamp ? V::kLitReset : 0.0f );
+		p->uni1f( "cvLitFloor", V::kLitFloor );
 	}
 	quad( r );
 	r->stopProgram();
@@ -979,6 +1016,11 @@ bool wwCloudVolProfileSet()
 	return cs().profileSet != 0 && !red( "typemix" );	// lane CLOUD6d: the red typemix = CLOUD5's type swing
 }
 
+bool wwCloudVolTypeRule()
+{
+	return cs().typeRule != 0 && !red( "thunderbyte" );	// lane CLOUDTYPE2: the red thunderbyte = CLOUD5's rule
+}
+
 bool wwCloudVolLowColour( float out[3] )
 {
 	CvState & s = cs();
@@ -1165,6 +1207,10 @@ bool wwCloudVolDraw( Scene * scene, const WwCloudVolView & view, QStringList & d
 	d.ambDark = s.ambDark != 0;
 	d.moveClamp = s.moveClamp != 0 && !red( "staleread" );	// lane CLOUD6g
 	d.changeClamp = s.changeClamp != 0 && !red( "looseclamp" );
+	d.histAge = s.histAge != 0 && !red( "noage" );	// lane CLOUD6h
+	d.litClamp = s.litClamp != 0 && !red( "litblind" );
+	d.topColumn = s.topColumn != 0 && !red( "toptaps" );	// lane CLOUDLIGHT1
+	d.moreSteps = s.moreSteps != 0 && d.topColumn && !red( "oldsteps" );	// lane CLOUDSTEPS1: only with the column (its cost)
 	if ( !histOn )
 		g.accFrom = g.frame;
 	d.accAlpha = everyPixel ? 1.0f : V::accumAlpha( static_cast<long long>( ( g.frame - g.accFrom ) / 16 ) );
@@ -1277,6 +1323,7 @@ bool wwCloudVolDraw( Scene * scene, const WwCloudVolView & view, QStringList & d
 			.arg( double( varLightKm( b, pr ) ), 0, 'f', 2 );
 		// lane CLOUD6d: the echo a row's notes need (the profile set, or the old type swing as the red)
 		reds += wwCloudVolProfileSet() ? QStringLiteral( ",profileset=one" ) : QStringLiteral( ",RED=typemix" );
+		reds += wwCloudVolTypeRule() ? QStringLiteral( ",typerule=thundersound" ) : QStringLiteral( ",RED=thunderbyte" );	// lane CLOUDTYPE2
 	}
 	if ( d.accum ) {	// lane CLOUDBAND1: the echo a row's notes need to prove the accumulation drew (absent when Off)
 		for ( const char * w : { "noaccum", "noclamp" } )
@@ -1295,6 +1342,15 @@ bool wwCloudVolDraw( Scene * scene, const WwCloudVolView & view, QStringList & d
 		reds += d.changeClamp ? QStringLiteral( ",changeclamp=%1+%2sd" ).arg( double( V::kChangeReset ), 0, 'f', 4 )
 			.arg( double( V::kChangeResetSd ), 0, 'f', 2 )
 			: QStringLiteral( ",RED=looseclamp" );
+	if ( d.accum ) {	// lane CLOUD6h: the echoes a row's notes need
+		reds += d.histAge ? QStringLiteral( ",histage=%1x%2" ).arg( double( V::kHistAgeOld ), 0, 'f', 0 )
+			.arg( double( V::kAgeChangeK ), 0, 'f', 2 ) : QStringLiteral( ",RED=noage" );
+		reds += d.litClamp ? QStringLiteral( ",litclamp=%1" ).arg( double( V::kLitReset ), 0, 'f', 3 )
+			: QStringLiteral( ",RED=litblind" );
+	}
+	reds += d.topColumn ? QStringLiteral( ",topcolumn=on" ) : QStringLiteral( ",RED=toptaps" );	// lane CLOUDLIGHT1
+	if ( !d.moreSteps && ( s.tier == 2 || s.tier == 3 ) )	// lane CLOUDSTEPS1: the step count is in steps=; the red named
+		reds += QStringLiteral( ",RED=oldsteps" );
 	if ( d.ambDark )	// lane CLOUDBAND1 (b): the echo a row's notes need
 		reds += red( "flatamb" ) ? QStringLiteral( ",RED=flatamb" ) : QStringLiteral( ",ambdark=column" );
 	else
@@ -1311,7 +1367,7 @@ bool wwCloudVolDraw( Scene * scene, const WwCloudVolView & view, QStringList & d
 	const QString clip = sceneOn ? QStringLiteral( "last" ) : g.redo ? QStringLiteral( "this" ) : QStringLiteral( "none" );
 	s.last = ok ? QStringLiteral( "volclouds:%1(hist=%2x%3,march=%4x%5,steps=%6,taps=%7,key=%8,map=%9,mem=%10MB,clip=%11,"
 								  "wind=%12km/s%13)" )
-			.arg( QLatin1StringView( tierName( s.tier ) ) ).arg( hw ).arg( hh ).arg( mw ).arg( mh ).arg( pr.steps ).arg( pr.taps )
+			.arg( QLatin1StringView( tierName( s.tier ) ) ).arg( hw ).arg( hh ).arg( mw ).arg( mh ).arg( V::marchSteps( s.tier, pr.steps, d.moreSteps ) ).arg( pr.taps )
 			.arg( keyK == f.sunK ? QStringLiteral( "sun" ) : QStringLiteral( "moon" ) )
 			.arg( m.stub ? QStringLiteral( "stub" ) : QString::number( m.size ) ).arg( mb, 0, 'f', 1 ).arg( clip )
 			.arg( double( V::kWindKmS ), 0, 'g', 3 ).arg( reds )
