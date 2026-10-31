@@ -447,6 +447,7 @@ constexpr unsigned kSampleTrilinear = 1u;   // WW_CELL_RTDDGI_RED=trilinear: the
 constexpr unsigned kSampleNoCheb = 2u;      // no Chebyshev factor
 constexpr unsigned kSampleNoBias = 4u;      // no self-shadow bias
 constexpr unsigned kSampleNoCover = 8u;     // FIX1031B: WW_CELL_RTDDGI_RED=nocover, the fade ignores the missing probes (today's main)
+constexpr unsigned kSampleSlowRead = 16u;   // FIX1101A: WW_CELL_RTDDGI_RED=slowread, no early out, no per-fragment memo (today's main)
 //! a probe the read takes: Vigilant and blended at least once (Asleep probes are not traced, Off ones sit in walls)
 inline bool probeUsable( int state, uint32_t age )
 {
@@ -524,6 +525,11 @@ inline SampleResult sampleVolume( const SampleVolume & v, V3 P, V3 n, V3 o, V3 d
 		a[k] = clampf( g - float( base[k] ), 0.0f, 1.0f );
 		fade = std::min( fade, cascadeEdge( g, v.dims[k], tight ) );
 	}
+	/* FIX1101A (manager hold 1 part C: the read costs +98 ms of the opaque pass with the cascades): a cascade's read
+	 * (tight) with fade 0 is skipped by sampleCascades whatever its probes hold, so it returns before their fetches
+	 * (w 0, fade 0: the walk's result is unchanged). Red kSampleSlowRead (WW_CELL_RTDDGI_RED=slowread): read anyway */
+	if ( tight && fade <= 0.0f && !( red & kSampleSlowRead ) )
+		return out;
 	double sum[3] = { 0, 0, 0 }, vsum = 0, wsum = 0, cover = 0;
 	for ( int c = 0; c < 8; c++ ) {
 		const int off[3] = { c & 1, ( c >> 1 ) & 1, ( c >> 2 ) & 1 };

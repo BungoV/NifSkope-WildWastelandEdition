@@ -17,7 +17,19 @@
   cascade's probe box drawn as its 12 edges over the frame (0 white, 1 yellow, 2 orange, 3 red; no depth test), census
   line `rtddgi cell: boxes` with each box in metres. The probe dots of a coarse cascade (WW_CELL_RTDDGI_VIEW_CASCADE)
   now reach 3000 u x 2^cascade (was 3000 u for all).
-- No shader under res/shaders changed (no link sweep owed); trace.comp is a Vulkan kernel (its .spv.h regenerated).
+- The surfaces' read costs less, bit for bit (ships ON; manager hold 1 part C, c3 still_close5: the opaque pass 12.4 ms
+  GI off, 54.7 one volume, 110.9 cascades): cell_lights.glsl cellGiSample keeps a per-fragment memo (the programs asked
+  for the same (P, N) 2-3 times: cellGiSkyK and cellLit's cellGiE / the PBR ambient now share one read), and a cascade
+  outside its tight box returns before its probes' fetches (cell_ddgi.glsl cellDdgiReadOne, MIRROR rtddgimath.h
+  sampleVolume). Red WW_CELL_RTDDGI_RED=slowread (every call reads in full). Unit check `readonce` (green 28 + 28 reds):
+  0 of 8000 answers differ; the GLSL read's texel fetches 188.0 -> 10.3 (uniform points), 153.6 -> 83.0 (near-weighted).
+  Live ms owed (notes/fix1101a/gi/cost_rows.txt). Link sweeps: base 405/405, +RTDDGI 270/270, +RTDDGI+CASCADES 270/270,
+  +PRT 405/405.
+- Interiors (LATE ITEM 17, bungo 11-01 "they have a sky, but it's fake ... only the fake lights do"): an interior's volume
+  takes no sky and no sun (misses 0, no sun ray), whatever its Show Sky / Use Sky Lighting flags; the placed lights and
+  the cell's directional stay. Red WW_CELL_RTDDGI_INTSKY_RED=1 (SKYINT1's weather sky + sun). Census line `rtddgi cell:
+  interior (...)`. One-sided back faces were already hits in the trace (radiance 0, distance -0.2 t). The surfaces'
+  weather DALC / fog in Use Sky Lighting interiors (SKYINT1, celllights.cpp) is unchanged here.
 
 ## HORIZONBAND1 (FIX1031B area A, 2026-10-31): the horizon blends - no cyan strip with a hard top edge
 

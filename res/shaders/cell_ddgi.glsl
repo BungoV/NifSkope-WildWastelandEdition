@@ -41,7 +41,7 @@ int cellDdgiC = 0;					// the cascade cellDdgiReadOne reads
 #define CELL_DDGI_TIGHT - 1.0
 #define cellDdgiRead cellDdgiReadOne
 #endif
-uniform int cellDdgiRed;			// rtddgimath.h kSample*: 1 trilinear (WW_CELL_RTDDGI_RED), 2 nocheb, 4 nobias
+uniform int cellDdgiRed;			// rtddgimath.h kSample*: 1 trilinear (WW_CELL_RTDDGI_RED), 2 nocheb, 4 nobias, 8 nocover, 16 slowread
 
 struct CellDdgiOut
 {
@@ -127,6 +127,12 @@ CellDdgiOut cellDdgiRead( vec3 P, vec3 n, vec3 o, vec3 d )
 	fade = min( fade, clamp( min( gy, float( cellDdgiDims.y - 1 ) - gy ) CELL_DDGI_TIGHT, 0.0, 1.0 ) );
 	fade = min( fade, clamp( min( gz, float( cellDdgiDims.z - 1 ) - gz ) CELL_DDGI_TIGHT, 0.0, 1.0 ) );
 	r.fade = fade;
+#ifdef WW_CELL_RTDDGI_CASCADES
+	// FIX1101A (MIRROR rtddgimath.h sampleVolume's tight early out): outside this cascade's tight box the walk below skips
+	// the cascade (fade 0); return before the 8 probes' fetches. Red WW_CELL_RTDDGI_RED=slowread (bit 16): read anyway
+	if ( fade <= 0.0 && ( cellDdgiRed & 16 ) == 0 )
+		return r;
+#endif
 	vec3 sum = vec3( 0.0 );
 	float vsum = 0.0;
 	float wsum = 0.0;

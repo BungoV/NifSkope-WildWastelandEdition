@@ -1243,16 +1243,37 @@ vec4 cellGiSample( vec3 P, vec3 N )
  * branches below and in the programs (the PBR ambient, cellGiSkyK) stay the no-GI ones before the volume is up or with
  * it off. Defined here, after cellDdgiOn: the grid's helpers above never run without the PRT. */
 #define cellGiSky ( cellGiSky && CELL_GI_UP )
+#ifdef WW_CELL_RTDDGI
+/* FIX1101A (manager hold 1 part C, c3 still_close5: the opaque pass 12.4 ms GI off, 54.7 one volume, 110.9 cascades): one
+ * read a fragment. A program asks for the sample at the same (P, N) two or three times (cellGiSkyK, cellLit's cellGiE,
+ * the PBR ambient); the first call keeps its answer and a later call at the same point returns it, bit for bit (same
+ * inputs, same value). Red WW_CELL_RTDDGI_RED=slowread (cellDdgiRed & 16): every call reads (today's main) */
+bool cellGiMemoOk = false;
+vec3 cellGiMemoP = vec3( 0.0 );
+vec3 cellGiMemoN = vec3( 0.0 );
+vec4 cellGiMemoS = vec4( 0.0 );
+#endif
 vec4 cellGiSample( vec3 P, vec3 N )
 {
 #ifdef WW_CELL_RTDDGI
 	if ( !cellDdgiOn )
 		return vec4( 0.0 );
+	if ( cellGiMemoOk && ( cellDdgiRed & 16 ) == 0 && P == cellGiMemoP && N == cellGiMemoN ) {
+		if ( cellGiMemoS.a > 0.0 )
+			cellGiPath = 12;
+		return cellGiMemoS;
+	}
 	CellDdgiOut d = cellDdgiRead( P, N, normalize( vec3( cellRow[0].w, cellRow[1].w, cellRow[2].w ) - P ), N );
-	if ( !( d.w > 0.0 && d.fade > 0.0 ) )
-		return vec4( 0.0 );
-	cellGiPath = 12;
-	return d.fade * ( cellPass == 2 ? vec4( vec3( d.vis ), 1.0 ) : vec4( d.E, 1.0 ) );
+	vec4 s = vec4( 0.0 );
+	if ( d.w > 0.0 && d.fade > 0.0 ) {
+		cellGiPath = 12;
+		s = d.fade * ( cellPass == 2 ? vec4( vec3( d.vis ), 1.0 ) : vec4( d.E, 1.0 ) );
+	}
+	cellGiMemoOk = true;
+	cellGiMemoP = P;
+	cellGiMemoN = N;
+	cellGiMemoS = s;
+	return s;
 #else
 	return vec4( 0.0 );
 #endif

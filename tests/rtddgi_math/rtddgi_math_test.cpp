@@ -1000,6 +1000,62 @@ void checkCascade()
 		outside, covered, e0, e1, e2, double( c3.fade ), double( c3.w ) );
 }
 
+/* FIX1101A (manager hold 1 part C: the opaque pass 12.4 ms off, 54.7 one volume, 110.9 cascades): a cascade outside its
+ * tight box returns before its probes' fetches (rtddgimath.h sampleVolume, cell_ddgi.glsl cellDdgiReadOne). The walk's
+ * answer is unchanged bit for bit (header and GLSL, against the slowread red), and the GLSL's texel fetches a read fall:
+ * points over the coarsest box uniformly, and near-weighted (radius ~ u^2 about the centre, as a frame's pixels crowd
+ * near the camera). Red RTDDGI_RED_READONCE: the fast arm reads in full (the fetches do not fall). */
+#ifdef RTDDGI_RED_READONCE
+constexpr unsigned kFastBit = kSampleSlowRead;
+#else
+constexpr unsigned kFastBit = 0u;
+#endif
+void checkReadOnce()
+{
+	uint64_t s = 0x5eadc0deULL;
+	CascTest R;
+	const int dr[3] = { 9, 8, 7 };
+	for ( int c = 0; c < 3; c++ )
+		R.make( c, dr, V3( 300.0f, -200.0f, 80.0f ), V3( 140.0f, 140.0f, 105.0f ), s, -1.0f );
+	R.pack( 3 );
+	const SampleVolume & C = R.v[2].v;
+	const V3 mid( C.origin.x + 4.0f * C.step.x, C.origin.y + 3.5f * C.step.y, C.origin.z + 3.0f * C.step.z );
+	int diff = 0, points = 0;
+	long long fSlow[2] = { 0, 0 }, fFast[2] = { 0, 0 };
+	for ( int dist = 0; dist < 2; dist++ )
+		for ( int i = 0; i < 4000; i++ ) {
+			V3 P;
+			if ( dist == 0 ) {
+				P = V3( C.origin.x + ( unit01( s ) * 10.0f - 1.0f ) * C.step.x, C.origin.y + ( unit01( s ) * 9.0f - 1.0f ) * C.step.y,
+					C.origin.z + ( unit01( s ) * 8.0f - 1.0f ) * C.step.z );
+			} else {
+				const float u = unit01( s );
+				P = mid + randUnit( s ) * ( u * u * 4.5f * C.step.x );
+			}
+			const V3 n = randUnit( s ), o = randUnit( s );
+			const SampleResult hs = sampleCascades( R.sv, 3, P, n, o, n, kSampleSlowRead ), hf = sampleCascades( R.sv, 3, P, n, o, n, kFastBit );
+			R.toGlsl( 3, kSampleSlowRead );
+			const glslc::CellDdgiOut gs = glslc::cellDdgiRead( glslc::vec3( P.x, P.y, P.z ), glslc::vec3( n.x, n.y, n.z ),
+				glslc::vec3( o.x, o.y, o.z ), glslc::vec3( n.x, n.y, n.z ) );
+			fSlow[dist] += glslc::cellDdgiAtlas.fetches;
+			glslc::cellDdgiAtlas.fetches = 0;
+			R.toGlsl( 3, kFastBit );
+			const glslc::CellDdgiOut gf = glslc::cellDdgiRead( glslc::vec3( P.x, P.y, P.z ), glslc::vec3( n.x, n.y, n.z ),
+				glslc::vec3( o.x, o.y, o.z ), glslc::vec3( n.x, n.y, n.z ) );
+			fFast[dist] += glslc::cellDdgiAtlas.fetches;
+			glslc::cellDdgiAtlas.fetches = 0;
+			points++;
+			const bool same = hs.E.x == hf.E.x && hs.E.y == hf.E.y && hs.E.z == hf.E.z && hs.vis == hf.vis && hs.w == hf.w && hs.fade == hf.fade
+				&& gs.E.x == gf.E.x && gs.E.y == gf.E.y && gs.E.z == gf.E.z && gs.vis == gf.vis && gs.w == gf.w && gs.fade == gf.fade;
+			diff += same ? 0 : 1;
+		}
+	const double rU = double( fFast[0] ) / double( std::max( 1LL, fSlow[0] ) ), rN = double( fFast[1] ) / double( std::max( 1LL, fSlow[1] ) );
+	report( "readonce", diff == 0 && rU < 0.8 && rN < 0.95, "%g points: answers differing from the full read %g (bar 0); GLSL fetches "
+		"a read, uniform points: fast / full %.3f (bar 0.8)", points, diff, rU );
+	std::printf( "        near-weighted points: fast / full %.3f (bar 0.95); fetches a read uniform %.1f -> %.1f, near %.1f -> %.1f\n", rN,
+		double( fSlow[0] ) / 4000.0, double( fFast[0] ) / 4000.0, double( fSlow[1] ) / 4000.0, double( fFast[1] ) / 4000.0 );
+}
+
 void checkCascTight()
 {
 	// a camera-locked volume: fade 0 over its outer cell (g 0.5), 0.5 at g 1.5, 1 from g 2; M2's untightened 0.5 at 0.5
@@ -1177,6 +1233,7 @@ int main()
 	checkBounce();
 	checkScroll();
 	checkCascade();
+	checkReadOnce();
 	checkCascTight();
 	checkCascScale();
 	checkCascDue();

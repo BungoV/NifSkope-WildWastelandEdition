@@ -139,6 +139,7 @@ const int * cellRedParts()
 			if ( t == QLatin1String( "nocheb" ) ) b.v[0] |= int( rtddgi::kSampleNoCheb );
 			if ( t == QLatin1String( "nobias" ) ) b.v[0] |= int( rtddgi::kSampleNoBias );
 			if ( t == QLatin1String( "nocover" ) ) b.v[0] |= int( rtddgi::kSampleNoCover );   // FIX1031B: the old fade (hard line)
+			if ( t == QLatin1String( "slowread" ) ) b.v[0] |= int( rtddgi::kSampleSlowRead );   // FIX1101A: every call reads in full
 			if ( t == QLatin1String( "readback" ) ) b.v[1] |= kPathReadback;
 			if ( t == QLatin1String( "rebuild" ) ) b.v[1] |= kPathRebuild;
 			if ( t == QLatin1String( "nowait" ) ) b.v[1] |= kPathNoWait;   // lane RTXFIX1
@@ -312,6 +313,15 @@ bool rtddgiBounceRed()
 	if ( !wwEnvIsSet( "WW_CELL_RTDDGI_BOUNCE_RED" ) )
 		return false;
 	const QByteArray v = wwEnv( "WW_CELL_RTDDGI_BOUNCE_RED" ).trimmed();
+	return !v.isEmpty() && v != "0";
+}
+
+//! FIX1101A LATE ITEM 17: WW_CELL_RTDDGI_INTSKY_RED=1 = today's main (an interior's volume may take the weather's sky and sun)
+bool rtddgiIntSkyRed()
+{
+	if ( !wwEnvIsSet( "WW_CELL_RTDDGI_INTSKY_RED" ) )
+		return false;
+	const QByteArray v = wwEnv( "WW_CELL_RTDDGI_INTSKY_RED" ).trimmed();
 	return !v.isEmpty() && v != "0";
 }
 
@@ -1475,8 +1485,28 @@ static void volumeFrame( Scene * scene, Cell & c, const CellSpec * spIn, bool du
 		refuse( c, QStringLiteral( "no relit cell in this view: the volume traces the soup the Precomputed Radiance Transfer relight keeps" ) );
 		return;
 	}
-	if ( lights.interior && lights.skyLighting && sky.on )
+	/* FIX1101A LATE ITEM 17 (bungo 11-01: "places like Concord museum, they have a sky, but it's fake, doesn't provide
+	 * sunlight, only the fake lights do"): an interior's volume takes no sky and no sun, whatever its flags (Show Sky / Use
+	 * Sky Lighting): every miss is 0 (the open top of the museum, a ray past a one-sided wall's open side) and no sun ray
+	 * lights a hit; the placed lights and the cell's directional stay. The drawn sky is visual only. Red
+	 * WW_CELL_RTDDGI_INTSKY_RED=1 = today's main (SKYINT1: the current weather's sky and sun in a Use Sky Lighting one).
+	 * In the build key through sky.on: a set rebuilds the volume */
+	if ( lights.interior && !rtddgiIntSkyRed() ) {
+		sky.on = false;
+	} else if ( lights.interior && lights.skyLighting && sky.on ) {
 		skyLitSky( nif, sky );   // lane SKYINT1: the current weather and hour
+	}
+	if ( lights.interior ) {   // census once per change: which sky terms the interior's volume takes
+		static int saidInt = -1;
+		const int now = sky.on ? 1 : 0;
+		if ( now != saidInt ) {
+			saidInt = now;
+			say( c.tag + ( sky.on ? QStringLiteral( "interior (%1): the weather's sky and sun in the volume (the red WW_CELL_RTDDGI_INTSKY_RED)" )
+					.arg( lights.skyLighting ? QStringLiteral( "Use Sky Lighting" ) : QStringLiteral( "no sky flags" ) )
+				: QStringLiteral( "interior (%1): no sky, no sun in the volume, misses 0 (FIX1101A)" )
+					.arg( lights.skyLighting ? QStringLiteral( "Use Sky Lighting" ) : QStringLiteral( "no sky flags" ) ) ) );
+		}
+	}
 	const WwCellGi * G = wwCellGiFor( nif );
 	const CellSpec sp = spIn ? *spIn : cellSpecNow();
 	const int paths = cellRedPaths();
