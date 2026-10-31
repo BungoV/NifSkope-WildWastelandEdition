@@ -26,7 +26,10 @@
 namespace {
 
 const char * const kTaaKey = "Settings/Render/Temporal AA";
-const char * const kTaa2Key = "Settings/Render/Modern temporal AA";	// lane TAA2: 0 Off .. 4 Ultra
+// lane TAA2: 0 Off .. 4 Ultra. FIX1101A: ships High (MEASURED c3 1080p: +0.06 ms over Off, Ultra +0.17); a new key
+// so an Off stored while it shipped Off does not stick. The old resolve stays as WW_TAA2=off (the red).
+const char * const kTaa2Key = "Settings/Render/Modern temporal AA 2";
+constexpr int kTaa2Default = 3;
 
 // lane TAA2: RCAS strength in stops per tier (0 Off .. 4 Ultra; High and Ultra sharpen), tuned by notes/taa2/sim
 constexpr float kRcasStops[5] = { 0.0f, 0.0f, 0.0f, 0.5f, 0.3f };
@@ -260,7 +263,7 @@ TaaState & ts()
 		} else if ( wwHarnessRun() ) {
 			s.taa2 = 0;
 		} else {
-			s.taa2 = std::clamp( QSettings().value( QLatin1StringView( kTaa2Key ), 0 ).toInt(), 0, 4 );
+			s.taa2 = std::clamp( QSettings().value( QLatin1StringView( kTaa2Key ), kTaa2Default ).toInt(), 0, 4 );
 		}
 		const QString red2 = wwEnvStr( "WW_TAA2_RED" ).trimmed();
 		s.taa2Red = ( red2.contains( QLatin1StringView( "noclip" ) ) ? 1 : 0 ) | ( red2.contains( QLatin1StringView( "nobicubic" ) ) ? 2 : 0 )

@@ -1,3 +1,11 @@
+## TAA2 default (FIX1101A, 2026-10-31): Modern temporal AA ships High
+
+Modern temporal AA (lanes TAA2/TAA3: the fix for far blink and shimmer) shipped Off. It now ships on, at High. Measured
+cost (Concord 5x5 all-on, about 1080p, the "post" pass GPU median over 334 frames each): Off 0.20 ms, Low 0.24, Medium
+0.24, High 0.26, Ultra 0.37. So High costs 0.06 ms over Off. The setting moved to a new key ("Modern temporal AA 2"), so
+an Off saved while it shipped Off does not stick. Harness runs without WW_TAA2 still pin it Off, which keeps the gates
+deterministic. WW_TAA2=off is the red (the old resolve). Unit: tests/taa2default.
+
 ## HORIZONBAND1 (FIX1031B area A, 2026-10-31): the horizon blends - no cyan strip with a hard top edge
 
 bungo's pictures (notes/shots1031 sheet_1 spot 3, sheet_spot5 sea, CommonwealthClear 12:00): a saturated cyan strip
