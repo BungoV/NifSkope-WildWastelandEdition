@@ -61,6 +61,27 @@ bool wwCloudVolDraw( Scene * scene, const WwCloudVolView & view, QStringList & d
  *  the drawn tier or the sky did not draw this frame: the caller keeps the weather's colour. */
 bool wwCloudVolLowColour( float out[3] );
 
+/*! lane LIGHTNING2 (LIGHTNINGSKY1): the storm's flash for the rest of the frame, the same strike, level and colour as the
+ *  volume's (one schedule on the clouds' clock, gl/cloudlightning.h). Switch WW_LIGHTNING_SKY (live, on), red
+ *  WW_LIGHTNING_SKY_RED = the volume clouds alone (CLOUD6f).
+ *  wwLightningFrameBegin: the lookdev backdrop's first line (no sky pass this frame = no ground flash).
+ *  wwLightningSky: the 2D layers' field (lightning_field.glsl) for the camera of scene; unitK = the layers' scene units
+ *  x pi of a white sunlit surface (Volume Clouds Low: the atmosphere's sunK; the weather's own colours: pi x Sky Scale).
+ *  False = no flash for the layers (no storm, between flashes, WW_CLOUD_LIGHTNING off, the sky switch off / red).
+ *  wwLightningGround: this frame's DALC add (linear, [travel axis X+ X- Y+ Y- Z+ Z-][rgb], 1 = a white surface under the
+ *  Day sun) for the exterior cell programs and the air; false (all 0) = none. */
+struct WwLightningSky
+{
+	bool on = false;
+	float src[4] = {}, prm[4] = {}, col[3] = {};	// as cloud_composite's cvLtSrc / cvLtPrm / cvLtCol
+	float deckKm = 0.0f;	// the height a layer texel is lit at (the Low base, one extinction length in)
+	float camKm[3] = {};
+	float level = 0.0f;
+};
+void wwLightningFrameBegin();
+bool wwLightningSky( Scene * scene, double secs, float unitK, WwLightningSky & out );
+bool wwLightningGround( float add[6][3] );
+
 /*! For readers of the density (CLOUD3, CLOUD4): sets cloud_common.glsl's uniforms (cvBands, cvCal) on the CURRENT
  *  program and binds cvShape, cvDetail, cvMap to units firstUnit .. firstUnit + 2. False (nothing bound) when the volume
  *  has no map this frame. Needs the GL context current; call after wwCloudMapUpdate.

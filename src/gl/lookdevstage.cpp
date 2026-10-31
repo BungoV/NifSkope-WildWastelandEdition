@@ -1230,13 +1230,15 @@ bool wwLookdevWeatherClass( unsigned & flags, unsigned & thunder, int * thunderS
 	return true;
 }
 
-bool wwLookdevLightning( float & share, float rgb[3], quint32 & seed )
+bool wwLookdevLightning( float & share, float rgb[3], quint32 & seed, unsigned * freq )
 {
 	resolve();
 	const LdState & s = st();
 	share = 0.0f;
 	rgb[0] = rgb[1] = rgb[2] = 0.0f;
 	seed = 0;
+	if ( freq )
+		*freq = 255u;
 	if ( !s.haveWeather )
 		return false;
 	const WwWeatherData & w = s.w;
@@ -1249,6 +1251,8 @@ bool wwLookdevLightning( float & share, float rgb[3], quint32 & seed )
 	for ( int c = 0; c < 3; c++ )
 		rgb[c] = float( src.lightningRgb[c] ) / 255.0f;
 	seed = src.formID;
+	if ( freq )	// lane LIGHTNING2 (LIGHTNINGFREQ1): the storm side's Thunder/Lightning - Frequency (cloudlightning.h)
+		*freq = src.thunderFreq;
 	return true;
 }
 
@@ -2452,6 +2456,23 @@ void drawClouds( Scene * scene, const SkyFrame & f, float mul, QStringList & dre
 	const double secs = wwLookdevCloudSeconds();
 	const bool full = mul >= 1.0f;
 	QStringList drawn, skipped;
+	/* lane LIGHTNING2 (LIGHTNINGSKY1): a storm's flash on the layers, the volume's strike at the Low base
+	 * (lightning_field.glsl; ldLtOn 0 = the layer as before). Units: Low's colour is scene units (the atmosphere's
+	 * sunK); the weather's own colour x Sky Scale is 1 for a white sunlit layer (pi x skyScale) */
+	float lowCol[3];
+	const bool lowTier = wwCloudVolLowColour( lowCol );
+	const WwAtmoFrame & atf = wwAtmoFrame();
+	WwLightningSky lsky;
+	wwLightningSky( scene, secs, lowTier && atf.valid ? atf.sunK : WwCloudVolMath::kPi * f.skyScale, lsky );
+	auto flashUniforms = [&]( NifSkopeOpenGLContext::Program * prog, bool on ) {
+		prog->uni1i( "ldLtOn", on ? 1 : 0 );	// every draw: a program keeps its uniforms between draws
+		if ( !on )
+			return;
+		prog->uni4f( "ldLtSrc", FloatVector4( lsky.src[0], lsky.src[1], lsky.src[2], lsky.src[3] ) );
+		prog->uni4f( "ldLtPrm", FloatVector4( lsky.prm[0], lsky.prm[1], lsky.prm[2], lsky.prm[3] ) );
+		prog->uni3f( "ldLtCol", lsky.col[0], lsky.col[1], lsky.col[2] );
+		prog->uni4f( "ldLtCam", FloatVector4( lsky.camKm[0], lsky.camKm[1], lsky.camKm[2], lsky.deckKm ) );
+	};
 	// lane WEATHERBLEND1: W = the weather whose texture and scroll a pass draws (s.w, or the one a change leaves)
 	auto layerUniforms = [&]( NifSkopeOpenGLContext::Program * prog, const WwWeatherData & W, int i, float alpha ) {
 		float rgb[3], a = 0.0f;
@@ -2497,6 +2518,7 @@ void drawClouds( Scene * scene, const SkyFrame & f, float mul, QStringList & dre
 		prog->uni1i( "Tex2", 1 );
 		prog->uni1f( "texBlend", 0.0f );
 		prog->uni1b( "probe", true );
+		flashUniforms( prog, false );
 		prog->uni2f( "probeUV", s.probeUV[0], s.probeUV[1] );
 		const float a = layerUniforms( prog, s.w, s.probeLayer, -1.0f );
 		static const float quad[12] = { -1, -1, 0, 1, -1, 0, -1, 1, 0, 1, 1, 0 };
@@ -2561,6 +2583,7 @@ void drawClouds( Scene * scene, const SkyFrame & f, float mul, QStringList & dre
 		prog->uni1b( "probe", false );
 		layerUniforms( prog, *W, i, full ? a : mul * share );
 		prog->uni1f( "texBlend", fade ? pct : 0.0f );
+		flashUniforms( prog, lsky.on );
 		if ( fade )	// lane WEATHERBLEND3: the same one scroll (red cloudtwo: the new weather's own)
 			prog->uni2f( "uvOffset2", cloudScroll( s, s.w, i, 0, secs ), cloudScroll( s, s.w, i, 1, secs ) );
 		const float * attrs[8] = { m.pos.constData(), m.col.constData(), nullptr, nullptr, nullptr, nullptr, nullptr,
@@ -2573,6 +2596,8 @@ void drawClouds( Scene * scene, const SkyFrame & f, float mul, QStringList & dre
 	drew << QString( "clouds:drawn=%1%2 t=%3" ).arg( drawn.isEmpty() ? QStringLiteral( "none" ) : drawn.join( QChar( ',' ) ),
 		skipped.isEmpty() ? QString() : QStringLiteral( " skipped=" ) + skipped.join( QChar( ',' ) ) )
 		.arg( secs, 0, 'f', 3 );
+	if ( lsky.on && !drawn.isEmpty() )	// lane LIGHTNING2: the flash the layers took
+		drew.last() += QStringLiteral( " flash=%1" ).arg( double( lsky.level ), 0, 'f', 3 );
 }
 
 } // namespace
@@ -2866,6 +2891,7 @@ bool drawAtmo( Scene * scene, QStringList & drew, bool capture = false )
 bool wwLookdevDrawBackground( Scene * scene )
 {
 	wwAtmoApFrame();	// lane SKYA: last frame's aerial perspective is stale (drawAtmo builds this frame's)
+	wwLightningFrameBegin();	// lane LIGHTNING2: no sky pass this frame = no flash on the cell's ambient
 	if ( !scene || !scene->renderer || scene->selecting || scene->hasVisMode( Scene::VisSilhouette ) )
 		return false;
 	Renderer * r = scene->renderer;
