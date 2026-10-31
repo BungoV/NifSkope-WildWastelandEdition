@@ -218,6 +218,69 @@ float wwAirCol( float lo, float hi, vec4 ground )
 	return wwAirColLaw( lo, hi, volAirMed, volAirLayer, ground );
 }
 
+/* lane RAINFOG2 (CLOUD6e's leftover): the rain fog (cell_rainfog.glsl, src/gl/rainfogmath.h) in the closed-form tails
+ * past the froxel grids (wwVolAirAtUv, wwVolAirAtFar) and in the sky's tail (wwVolAirSky). Its optical depth along a
+ * view segment: the segment cut to the heights the fog reaches (above base + the fade nothing), then n sub-segments,
+ * each the cloud map's coverage at its middle (faded to the band's scalar past the map) x the profile's EXACT mean over
+ * its height range (wwAirRainP, the antiderivative). volAirRain.x 0 (no rain or snow, the red, no cloud map, the air
+ * pass's rain fog off): 0, the tails exactly as before. The loop's bound is a uniform: one copy, not unrolled. */
+uniform vec4 volAirRain;		// x sigma per game unit near the ground (0 = none), y the base excess, z 1 / falloff km, w 1 / fade km
+uniform vec4 volAirRainFar;		// x the Low band's coverage past the map, y the map's edge band (uv), z the sub-segments
+uniform mat4 volAirRainXf;		// view -> (u, v, km below the Low base): cell_rainfog.glsl's rfFromView
+uniform sampler2D volAirRainMap;	// CLOUD1's cloud map (R: the Low band's coverage)
+
+// the integral of the height profile p(h) from 0 to h (km below the base; above it the fade, flat past the fade's top)
+float wwAirRainP( float h )
+{
+	if ( h >= 0.0 )
+		return h + volAirRain.y * ( 1.0 - exp( -h * volAirRain.z ) ) / volAirRain.z;
+	float hc = max( h, -1.0 / volAirRain.w );
+	return ( 1.0 + volAirRain.y ) * ( hc + 0.5 * hc * hc * volAirRain.w );
+}
+
+// the rain fog's optical depth between view points pA and pB
+float wwAirRainTau( vec3 pA, vec3 pB )
+{
+	if ( volAirRain.x <= 0.0 )
+		return 0.0;
+	vec3 qA = ( volAirRainXf * vec4( pA, 1.0 ) ).xyz;
+	vec3 dq = ( volAirRainXf * vec4( pB, 1.0 ) ).xyz - qA;
+	float hTop = -1.0 / volAirRain.w;	// the fade's top: no fog above it
+	float t0 = 0.0, t1 = 1.0;
+	if ( abs( dq.z ) > 1e-9 ) {
+		float tc = ( hTop - qA.z ) / dq.z;
+		if ( dq.z > 0.0 )
+			t0 = max( t0, tc );
+		else
+			t1 = min( t1, tc );
+	} else if ( qA.z <= hTop ) {
+		return 0.0;
+	}
+	if ( t1 <= t0 )
+		return 0.0;
+	int n = int( volAirRainFar.z );
+	float w = ( t1 - t0 ) / float( n );
+	float dh = dq.z * w;	// every sub-segment's height range (km)
+	bool level = abs( dh ) <= 1e-4;
+	float Pa = level ? 0.0 : wwAirRainP( qA.z + dq.z * t0 );	// the profile's integral at the sub-segment's start
+	float sum = 0.0;
+	for ( int k = 0; k < n; k++ ) {
+		vec3 qm = qA + dq * ( t0 + ( float( k ) + 0.5 ) * w );
+		vec2 e = abs( qm.xy - 0.5 ) * 2.0;
+		float c = mix( textureLod( volAirRainMap, qm.xy, 0.0 ).r, volAirRainFar.x, smoothstep( 1.0 - volAirRainFar.y, 1.0, max( e.x, e.y ) ) );
+		float p;
+		if ( level ) {
+			p = qm.z >= 0.0 ? 1.0 + volAirRain.y * exp( -qm.z * volAirRain.z ) : ( 1.0 + volAirRain.y ) * max( 1.0 + qm.z * volAirRain.w, 0.0 );
+		} else {
+			float Pb = wwAirRainP( qA.z + dq.z * ( t0 + float( k + 1 ) * w ) );
+			p = ( Pb - Pa ) / dh;
+			Pa = Pb;
+		}
+		sum += c * p;
+	}
+	return volAirRain.x * length( pB - pA ) * fogDistScale * w * sum;
+}
+
 // the records' haze colour at distance d, height z, view direction dirView (cell_volair.frag airEnvColour), unit luminance
 vec3 wwAirRecordColour( float d, float z, vec3 dirView, out bool ok );
 #ifdef WW_SUNSHADOW
@@ -273,7 +336,7 @@ vec4 wwVolAirAtFar( float d, vec2 uv, vec3 posView )
 	float dz = z1 - z0;
 	vec4 gT = wwAirGroundRay( posView * ( far / d ), posView / max( length( posView ), 1e-12 ), len, dz / max( len, 1e-6 ) );	// FOGTERRAIN3: along the tail
 	float tau = abs( dz ) < 0.5 ? volAirMed.x * len * wwAirCol( z0, z0 + 1.0, gT ) : volAirMed.x * len * wwAirCol( min( z0, z1 ), max( z0, z1 ), gT ) / abs( dz );
-	float Tt = exp( -tau );
+	float Tt = exp( -( tau + wwAirRainTau( posView * ( far / d ), posView ) ) );	// lane RAINFOG2: + the rain fog
 	if ( ( volAirFlags & 4 ) != 0 ) {
 		vec3 dirV = posView / max( length( posView ), 1e-12 );
 		bool ok0, ok1;
@@ -355,7 +418,7 @@ vec4 wwVolAirAtUv( vec3 posView, vec2 uv )	// lane VOLPART1: uv = the column (a 
 	float dz = z1 - z0;
 	vec4 gT = wwAirGroundRay( posView * ( far / d ), posView / max( length( posView ), 1e-12 ), len, dz / max( len, 1e-6 ) );	// FOGTERRAIN3: along the tail
 	float tau = abs( dz ) < 0.5 ? volAirMed.x * len * wwAirCol( z0, z0 + 1.0, gT ) : volAirMed.x * len * wwAirCol( min( z0, z1 ), max( z0, z1 ), gT ) / abs( dz );
-	float Tt = exp( -tau );
+	float Tt = exp( -( tau + wwAirRainTau( posView * ( far / d ), posView ) ) );	// lane RAINFOG2: + the rain fog
 #ifdef WW_SUNSHADOW
 	J *= wwAirTailShadow( posView / max( length( posView ), 1e-12 ), far, d, tau );
 #endif
@@ -414,7 +477,8 @@ vec4 wwVolAirSky( vec3 dirView )
 	if ( s > 1e-4 ) {
 		dEnd = far + min( max( top - z0, 0.0 ) / s, 1e7 );
 		// FOGTERRAIN3: the ground along the climb, inside the grid's window (wwAirGroundRay)
-		Tt = exp( -volAirMed.x * wwAirCol( z0, top, wwAirGroundRay( dirView * ( far / max( fogDistScale, 1e-12 ) ), dirView, dEnd - far, s ) ) / s );
+		Tt = exp( -volAirMed.x * wwAirCol( z0, top, wwAirGroundRay( dirView * ( far / max( fogDistScale, 1e-12 ) ), dirView, dEnd - far, s ) ) / s
+			- wwAirRainTau( dirView * ( far / max( fogDistScale, 1e-12 ) ), dirView * ( ( far + 1e7 ) / max( fogDistScale, 1e-12 ) ) ) );	// lane RAINFOG2: + the rain fog, to where the ray leaves it
 	} else {
 		Tt = ( s >= 0.0 && z0 >= top ) ? 1.0 : 0.0;
 		dEnd = far + 1e7;

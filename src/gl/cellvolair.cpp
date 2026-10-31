@@ -363,6 +363,13 @@ struct VaGpu
 	std::vector<float> farKey;	// what the far grid was built from (the view, the sun, the medium)
 	float rfKey[5] = { 0, 0, 0, 0, 0 };	// lane CLOUD6e: the rain fog this frame (on, sigma, base, coverage, map size)
 	QString rfNote = QStringLiteral( "off" );
+	// lane RAINFOG2: the rain fog the surfaces' and the sky's tails read (lookdev_fog.glsl wwAirRainTau; on false: none)
+	struct RainTail
+	{
+		bool on = false;
+		float law[4] = { 0, 0, 0, 0 }, edge[3] = { 0, 0, 0 }, xf[16] = {};	// edge: coverage past the map, edge band, segments
+		GLuint tex = 0;
+	} rfTail;
 	int farAge = 0;
 	int farBuilds = 0;
 	GLuint farQ[2] = { 0, 0 };
@@ -1134,16 +1141,36 @@ static float vaShapesTop( Scene * scene, const BoundSphere & bs )
  * cell_rainfog.glsl the read). rfOn 1 while the loaded weather rains (WTHR MNAM, a change weighs both weathers),
  * outdoors, with CLOUD1's map built (the Cloud Map row). WW_CLOUD_RAINFOG (on unless 0 / off / false / no) and the
  * red WW_CLOUD_RAINFOG_RED=old (today's air) re-read on a set. Returns the echo; key = what the far grid keys on. */
-static QString vaRainFog( Scene * scene, NifSkopeOpenGLContext::Program * prog, bool interior, float key[5] )
+static QString vaRainFog( Scene * scene, NifSkopeOpenGLContext::Program * prog, bool interior, float key[5],
+	VaGpu::RainTail & tail )
 {
 	namespace RF = WwRainFog;
 	std::fill( key, key + 5, 0.0f );
+	tail = VaGpu::RainTail();
 	WW_SWITCH_STATIC( bool, rfSwitch, RF::switchOn( wwEnv( "WW_CLOUD_RAINFOG" ).trimmed().toLower().constData() ) );
 	WW_SWITCH_STATIC( bool, rfRed, RF::redOn( wwEnv( "WW_CLOUD_RAINFOG_RED" ).trimmed().toLower().constData() ) );
-	bool cur = false, blending = false, old = false;
+	// lane RAINFOG2: the tails (WW_CLOUD_RAINFOG_TAIL, red _RED), the snow law (WW_CLOUD_SNOWFOG, red _RED), the rate from
+	// the precipitation shader (WW_PRECIP_SPGD, red _RED=rate; gl/precipmath.h spgdRedBits)
+	WW_SWITCH_STATIC( bool, rfTailOn, RF::switchOn( wwEnv( "WW_CLOUD_RAINFOG_TAIL" ).trimmed().toLower().constData() )
+		&& !RF::redOn( wwEnv( "WW_CLOUD_RAINFOG_TAIL_RED" ).trimmed().toLower().constData() ) );
+	WW_SWITCH_STATIC( bool, snowOn, RF::switchOn( wwEnv( "WW_CLOUD_SNOWFOG" ).trimmed().toLower().constData() )
+		&& !RF::redOn( wwEnv( "WW_CLOUD_SNOWFOG_RED" ).trimmed().toLower().constData() ) );
+	WW_SWITCH_STATIC( int, spgdRed, WwPrecip::spgdRedBits( wwEnv( "WW_PRECIP_SPGD" ).trimmed().toLower().constData(),
+		wwEnv( "WW_PRECIP_SPGD_RED" ).trimmed().toLower().constData() ) );
+	int ptype[2] = { -2, -2 };
+	float pdens[2] = { -1.0f, -1.0f };
+	unsigned pflags[2] = { 0u, 0u };
+	bool blending = false;
 	float pct = 1.0f;
-	const bool have = wwLookdevWeatherRains( cur, blending, old, pct );
-	const double share = have ? RF::share( cur, old, blending, double( pct ) ) : 0.0;
+	const bool have = wwLookdevWeatherPrecip( ptype, pdens, pflags, blending, pct );
+	double scale[2] = { 1.0, 1.0 };
+	if ( !( spgdRed & WwPrecip::SpgdRedRate ) )
+		for ( int i = 0; i < 2; i++ )
+			scale[i] = WwPrecip::spgdRateScale( pdens[i] );
+	double rainShare = 0.0, snowShare = 0.0;
+	if ( have )
+		RF::shares( ptype, scale, blending, double( pct ), snowOn, rainShare, snowShare );
+	const double share = rainShare + snowShare;
 	const WwCloudMap & m = wwCloudMap();
 	const WwCloudBandInfo & low = m.band[WwCloudLow];
 	QString why;
@@ -1202,15 +1229,30 @@ static QString vaRainFog( Scene * scene, NifSkopeOpenGLContext::Program * prog, 
 		fn->glUniformMatrix4fv( l, 1, GL_FALSE, mf );
 		WwCellUni::wrote( prog->wwUni, l, 1 );	// lane CELLUNI2: a raw write
 	}
-	const double sigmaKm = RF::defaultSigmaPerKm() * share;
+	// lane RAINFOG2: rain (x its rate scale) and snow (its own law) in one extinction under the Low band; no snow and
+	// scale 1: CLOUD6e's number exactly (defaultSigmaPerKm() x share)
+	const double sigmaKm = snowShare > 0.0 ? RF::defaultSigmaPerKm() * rainShare + RF::defaultSnowSigmaPerKm() * snowShare
+										   : RF::defaultSigmaPerKm() * share;
 	prog->uni4f( "rfLaw", FloatVector4( float( sigmaKm * ku ), float( RF::kBaseExcess ), float( 1.0 / RF::kFalloffKm ),
 		float( 1.0 / RF::kAboveKm ) ) );
 	prog->uni2f( "rfFar", std::clamp( low.coverage, 0.0f, 1.0f ), float( RF::kEdgeFade ) );
 	const float k[5] = { 1.0f, float( sigmaKm ), low.baseZ, low.coverage, m.halfExtent };
 	std::copy( k, k + 5, key );
+	if ( rfTailOn ) {	// the surfaces' and the sky's tails read the same law (wwVolAirUniforms)
+		tail.on = true;
+		const float lw[4] = { float( sigmaKm * ku ), float( RF::kBaseExcess ), float( 1.0 / RF::kFalloffKm ), float( 1.0 / RF::kAboveKm ) };
+		std::copy( lw, lw + 4, tail.law );
+		tail.edge[0] = std::clamp( low.coverage, 0.0f, 1.0f );
+		tail.edge[1] = float( RF::kEdgeFade );
+		tail.edge[2] = float( RF::kTailSegments );
+		std::copy( mf, mf + 16, tail.xf );
+		tail.tex = m.tex;
+	}
 	return QStringLiteral( "on(share=%1 sigma=%2/km base=%3 cov=%4 map=%5%6)" ).arg( share, 0, 'f', 3 ).arg( sigmaKm, 0, 'f', 4 )
 		.arg( double( low.baseZ ), 0, 'f', 0 ).arg( double( low.coverage ), 0, 'f', 3 ).arg( m.size )
-		.arg( m.stub ? QStringLiteral( " stub" ) : QString() );
+		.arg( m.stub ? QStringLiteral( " stub" ) : QString() )
+		+ QStringLiteral( " rain=%1 snow=%2%3 tail=%4" ).arg( rainShare, 0, 'f', 3 ).arg( snowShare, 0, 'f', 3 )
+		.arg( snowOn ? QString() : QStringLiteral( "(snow as rain)" ) ).arg( rfTailOn ? QStringLiteral( "on" ) : QStringLiteral( "off" ) );
 }
 
 static void vaPassInner( Scene * scene, bool run )
@@ -1541,7 +1583,7 @@ static void vaPassInner( Scene * scene, bool run )
 			: !( G.s > 0.0f ) ? QStringLiteral( "off(no ground layer)" ) : flat ? QStringLiteral( "off(flat at the frame's ground)" )
 			: QStringLiteral( "off(no terrain heights yet)" );
 	}
-	g.rfNote = vaRainFog( scene, prog, L && L->interior, g.rfKey );	// lane CLOUD6e: the rain fog (both grids)
+	g.rfNote = vaRainFog( scene, prog, L && L->interior, g.rfKey, g.rfTail );	// lane CLOUD6e: the rain fog (both grids; RAINFOG2: and the tails)
 	prog->uni1b( "volCsm", csm );
 	prog->uni1i( "volRed", s.red & ~1 );
 	prog->uni1f( "volShell", s.shellStep ? 0.0f : 1.0f );
@@ -2203,7 +2245,25 @@ void wwVolAirUniforms( Scene * scene )
 		u.bind( kNoiseUnit, GL_TEXTURE_3D, drift ? g.noise : 0 );
 		prog->uni1i_l( noiseLoc, kNoiseUnit );
 	}
+	// lane RAINFOG2: the rain fog in the tails past the grids and the sky's (lookdev_fog.glsl wwAirRainTau); the map the
+	// air pass read this frame (CLOUD6e's unit)
+	const int rainLoc = prog->uniLocation( "volAirRainMap" );
+	const bool rainTail = on && g.rfTail.on && g.rfTail.tex;
+	if ( rainLoc >= 0 ) {
+		u.bind( WwCellUnit::CloudBuildMap, GL_TEXTURE_2D, rainTail ? g.rfTail.tex : 0 );
+		prog->uni1i_l( rainLoc, WwCellUnit::CloudBuildMap );
+	}
 	u.done();
+	if ( rainLoc >= 0 || prog->uniLocation( "volAirRain" ) >= 0 ) {
+		const VaGpu::RainTail & rt = g.rfTail;
+		prog->uni4f( "volAirRain", rainTail ? FloatVector4( rt.law[0], rt.law[1], rt.law[2], rt.law[3] ) : FloatVector4( 0.0f, 0.0f, 1.0f, 1.0f ) );
+		prog->uni4f( "volAirRainFar", FloatVector4( rt.edge[0], rt.edge[1], rainTail ? rt.edge[2] : 0.0f, 0.0f ) );
+		const int xl = prog->uniLocation( "volAirRainXf" );
+		if ( xl >= 0 && rainTail ) {
+			r->fn->glUniformMatrix4fv( xl, 1, GL_FALSE, rt.xf );
+			WwCellUni::wrote( prog->wwUni, xl, 1 );	// lane CELLUNI2: a raw write
+		}
+	}
 	prog->uni1i( "volTex", kVolTexUnit );
 	prog->uni1i( "volTile", kTileUnit );
 	prog->uni1i( "volFarClamp", clamp ? 1 : 0 );

@@ -257,6 +257,10 @@ struct WwLens
 };
 //! read one LENS; false when `formID` is not one
 bool wwLensRead( ESMFile & esm, quint32 formID, WwLens & out );
+/* lane RAINFOG2: one SPGD (Shader Particle Geometry, a weather's precipitation shader): DATA's Type (0 Rain, 1 Snow) and
+ * Particle Density (xEdit wbDefinitionsFO4; Fallout4.esm stores 96 bytes, each field followed by 4 unused bytes; a packed
+ * 48-byte DATA is read too). false when `formID` is not one */
+bool wwSpgdRead( ESMFile & esm, quint32 formID, int & type, float & density, QString & edid );
 
 struct WwWeatherData
 {
@@ -298,6 +302,10 @@ struct WwWeatherData
 	int thunderSounds = 0;
 	// lane CLOUD6e: MNAM, the precipitation shader (an SPGD; 0 = none): the rain fog's "this weather rains"
 	quint32 precipForm = 0;
+	// lane RAINFOG2: that SPGD's DATA Type (0 rain, 1 snow; -1 not read) and Particle Density (-1 not read), its EDID
+	int precipType = -1;
+	float precipDensity = -1.0f;
+	QString precipEdid;
 	quint32 imsp[8] = {};	// IMSP: the IMGS per ToD (mapped FormIDs; 4-slot records mapped to 8)
 	float skyScale[8] = { 1, 1, 1, 1, 1, 1, 1, 1 };	// IMGS HNAM[7] per ToD (1.0 where absent)
 	int skyScaleFound = 0;	// how many ToD slots had an IMGS with HNAM
