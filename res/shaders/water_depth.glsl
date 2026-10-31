@@ -28,6 +28,7 @@ struct WwWaterBed
 	bool known;	// a depth is known (the scene's or the bake's)
 	float vert;	// vertical depth, units
 	float along;	// path along the view ray, units
+	float bd;	// lane FIX1031B: the baked bed's vertical depth here (< 0 = not known)
 };
 
 // the vertical bed depth under the water surface point P (world units); < 0 = not known here
@@ -78,7 +79,21 @@ WwWaterBed wwWaterBedAt( vec3 P, vec3 V, float sceneVert, float sceneAlong )
 	b.known = b.baked || sceneVert < 1e8;
 	b.vert = b.baked ? bd : sceneVert;
 	b.along = b.baked ? bd / max( -V.z, 1e-3 ) : sceneAlong;
+	b.bd = bd;
 	return b;
+}
+
+/* lane FIX1031B (the teeth, LATE ITEM 6.2): how much the baked bed counts at this pixel (0 = the drawn scene). The rule
+ * above is a hard step where the scene lies 256 u under the baked bed; a coarse ground mesh (far LOD, 512-4096 u
+ * triangles) crossing that line cut straight-edged teeth into the clear shallows (sheet_W0sea waterline 4x). soft = a
+ * ramp from 64 u to 768 u under the baked bed, so the two beds blend; not soft = the step (red old) */
+float wwWaterBedBakeW( float bd, float sceneVert, bool soft )
+{
+	if ( bd < 0.0 )
+		return 0.0;
+	if ( sceneVert > 1e8 )
+		return 1.0;
+	return soft ? smoothstep( bd + 64.0, bd + 768.0, sceneVert ) : ( sceneVert > bd + 256.0 ? 1.0 : 0.0 );
 }
 
 // the game's depth colour over c (fogC its ramp colour, a its opacity) with pure water's absorption on top

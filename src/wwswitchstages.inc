@@ -608,6 +608,7 @@
 { "WW_CELL_WATER_GLINT_RED", 0, "src/gl/cellwater.cpp:589 wwCellWaterUniforms | re-read per frame or per call (a)" },
 { "WW_CELL_WATER_INFO_PROBE", 4, "src/gl/glcontext.cpp:451 NifSkopeOpenGLContext::Shader::load | read when the shader programs load (in place: reload shaders)" },
 { "WW_CELL_WATER_INFO_RED", 0, "src/gl/cellwaterinfo.cpp:562 infoRed | re-read per frame or per call (a)" },
+{ "WW_CELL_WATER_LOOK_RED", 0, "src/gl/celllooks.cpp:557 wwLookWaterShippedRed | re-read per frame or per call (a)" },
 { "WW_CELL_WATER_OCEAN", 0, "src/gl/celllooks.cpp:285 pinOf | re-read per frame or per call (a)" },
 { "WW_CELL_WATER_OCEAN_RED", 0, "src/gl/cellocean.cpp:62 redNow | re-read per frame or per call (a)" },
 { "WW_CELL_WATER_PROBE", 0, "src/gl/cellwater.cpp:103 st | init-once state, re-read when a live set moves its prefix (b)" },

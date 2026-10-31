@@ -124,6 +124,18 @@ vec3 wwWaterReflEnv( vec3 sky, vec4 raw, vec4 fin, bool haveSsr, float alpha )
 	return mix( sky, max( s.rgb, vec3( 0.0 ) ), clamp( s.a, 0.0, 1.0 ) );
 }
 
+/* lane FIX1031B (LATE ITEM 5.1): the physical Fresnel composes this water when the reflections row is on, and always
+ * with the clear colour (red WW_CELL_WATER_CLEAR_RED=old: the WATR's F x reflectivity, as the clear colour shipped):
+ * a bright see-through body under F x reflectivity 0.2-0.3 showed no sky even at grazing angles (bungo 10-31) */
+bool wwWaterReflPhys()
+{
+#ifdef WW_WATER_CLEAR
+	return waterReflOn || ( waterClearOn && waterClearRed != 4 );
+#else
+	return waterReflOn;
+#endif
+}
+
 /* the surface: the body seen through by 1 - F, the reflection by F, the same law near and far (the game swaps to one
  * WATR colour past 8192 u). Reds: record = the game's F0 and its reflectivity cap; farcolour = the game's far swap */
 vec3 wwWaterReflMix( vec3 body, vec3 env, float F, float Fgame, float reflectivity, vec3 far, float dfade )
