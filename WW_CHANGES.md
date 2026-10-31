@@ -1,5 +1,43 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## FIX1031B clouds (2026-10-31, parent CLOUDBAND1): the rain fog shows, the storm flash lights the sky layers and the ground
+
+- **Rain fog scale (bungo's run3b pair: CommonwealthRain + Cloud Map Ultra moved the frame by a mean 0.6 level).**
+  MEASURED on that frame's own uniforms (its `cell air:` line, now `tests/rainfogscale/frame_c3_rain_h150.txt`): the
+  rain fog (0.2545 / km x the map cover 0.488) lived only in the froxel grid (441 m in that frame), so nothing past it
+  got any, and its law counted one 2-mm drop size, a third of the rain's real shading area. Now: the fog is the whole
+  rain's extinction, Marshall & Palmer (1948) drop sizes (N0 8000 m^-3 mm^-1, Lambda 4.1 R^-0.21, Q 2):
+  0.874 / km at the default 4 mm/h (visibility 4.5 km), x s^0.63 for a precipitation shader's rate scale s
+  (`gl/rainfogmath.h` mpSigmaPerKm, mpRateFactor); and RAINFOG2's tails carry it past the grids (see below). Added fog
+  share at 1 km, 300 m over the street, map cover 0.488: today 0.021, now 0.136.
+  Also MEASURED there (not changed here): at street level the frame's air alone already hides 99.9 % at 1 km (its
+  derived 60 m ground layer, V 442 m) while the game's own CommonwealthRain FNAM hides 77.4 % at 1 km: under that air
+  no rain fog can show at eye height; it shows above ~100 m (towers, hills, the low sky band).
+- **RAINFOG2 (FIX1031A's stopped WIP, reviewed and kept):** the rain fog in the closed-form tails past the grids and in
+  the sky's tail (`lookdev_fog.glsl` wwAirRainTau: 8 sub-segments of the cloud map x the profile's exact mean;
+  `WW_CLOUD_RAINFOG_TAIL`, red `WW_CLOUD_RAINFOG_TAIL_RED`); the rate from the weather's precipitation shader (MNAM ->
+  SPGD Particle Density / 7; `WW_PRECIP_SPGD`, red `WW_PRECIP_SPGD_RED=flags|rate`); PRECIPFLAG1: the rain/snow
+  particles follow the SPGD, so the 4 shaderless Rainy-flag and the 10 Snow-flag weathers (radstorms, foggy) draw no
+  particles, as in the game; SNOWFOG1: a snow shader gets the snow law (`WW_CLOUD_SNOWFOG`, red `_RED`; no vanilla
+  weather snows). `weather --precip` CLI lines.
+- **Switch / reds:** all live (stage 0). `WW_CLOUD_RAINFOG_RED=mono` = the one-drop law, `=today` = that and no tails
+  (main 5422be6c's rain fog exactly); `=old` / `1` = no rain fog (as before). Echo: `rainfog=on(... tail=on
+  law=marshall-palmer)`.
+- **LIGHTNING2 (FIX1031A's stopped WIP, reviewed):** a storm's flash now also lights the 2D cloud layers (Volume Clouds
+  Off / Low: `lookdev_clouds.frag` + `lightning_field.glsl`, the volume's field at the Low base) and the exterior cell's
+  ambient (DALC add from the lit base integrated over the ground: terrain, objects, the air). `WW_LIGHTNING_SKY` ON,
+  red `WW_LIGHTNING_SKY_RED=1`. Between flashes / no storm: bit-identical (gate K). The DATA frequency law
+  (`WW_LIGHTNING_FREQ`) ships OFF: the byte's direction is sourced (255 = rarest), the linear rate is ours (it would
+  make the vanilla rains flash every 102 s and the radstorms every 4.2 s, no game-match gate); opt in with
+  `WW_LIGHTNING_FREQ=1`.
+- **Deck rings (sheet_4b) - not fixed:** MEASURED centred on the zenith, uniform in view angle (period 0.0113 rad),
+  0.285 levels rms, the same with AMBDARK on/off, 4.7x weaker under Rain. Not reproduced offline by the real march +
+  resolve (Ultra, 24 frames), not float32 radii (a heights rewrite moved 0.01 %), not CLOUD1's map (no radial
+  coherence): the owner is outside the cloud march (leftover with the split rows).
+- **Gates:** `bash tests/rainfogscale/run.sh <out>` (M Marshall-Palmer vs the checker's own integral, V visible at 1 km,
+  D red words, W wiring; reds today / mono / notail / wiring fail); `bash tests/rainfog2/run.sh <out>`;
+  `bash tests/lightning2/run.sh <out>` (Q W O G K U + wiring; reds oldfreq, today, base wiring fail).
+
 ## RESTIRSPV1 (2026-10-31, FIX1031A): restir.spv.h regenerated from its own source, and a test that every SPIR-V header matches its source
 
 - **What:** `src/rtddgi/restir.spv.h` (the ReSTIR DI kernel the exe embeds) was stale vs `restir.comp` since the

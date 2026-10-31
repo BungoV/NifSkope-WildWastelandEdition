@@ -34,6 +34,8 @@ checks = [
     ('cloudvol reads WW_LIGHTNING_FREQ + red', 'wwEnvStr( "WW_LIGHTNING_FREQ" )' in cv and 'wwEnvStr( "WW_LIGHTNING_FREQ_RED" )' in cv),
     ('cloudvol reads WW_LIGHTNING_SKY + red', 'wwEnvStr( "WW_LIGHTNING_SKY" )' in cv and 'wwEnvStr( "WW_LIGHTNING_SKY_RED" )' in cv),
     ('the schedule from the DATA byte', 'L::freqSchedule( lt.share, freq ) : L::oldSchedule( lt.share )' in cv),
+    # FIX1031B review: the DATA law is ours (no game law read): opt-in, CLOUD6f's schedule by default
+    ('the DATA law ships Off (opt-in)', 'return v == "1" || v == "on" || v == "true" || v == "yes";' in cv),
     ('cloudlightning.h freqChance = (255 - byte) / 255', 'float( 255u - std::min( byte, 255u ) ) / 255.0f' in cl),
     ('one flash function for every reader', 'CvLightning lightningAt(' in cv and cv.count('lightningAt( ') >= 3),
     ('wwLightningSky + wwLightningGround', 'bool wwLightningSky( Scene * scene' in cv and 'bool wwLightningGround( float add[6][3] )' in cv),

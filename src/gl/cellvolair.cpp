@@ -1157,6 +1157,11 @@ static QString vaRainFog( Scene * scene, NifSkopeOpenGLContext::Program * prog, 
 		&& !RF::redOn( wwEnv( "WW_CLOUD_SNOWFOG_RED" ).trimmed().toLower().constData() ) );
 	WW_SWITCH_STATIC( int, spgdRed, WwPrecip::spgdRedBits( wwEnv( "WW_PRECIP_SPGD" ).trimmed().toLower().constData(),
 		wwEnv( "WW_PRECIP_SPGD_RED" ).trimmed().toLower().constData() ) );
+	// lane FIX1031B clouds: the whole rain's extinction (Marshall-Palmer, gl/rainfogmath.h mpSigmaPerKm); the red
+	// WW_CLOUD_RAINFOG_RED=mono the 2-mm drops' law (CLOUD6e), =today that and no tails (main 5422be6c)
+	WW_SWITCH_STATIC( int, rfWords, RF::redWords( wwEnv( "WW_CLOUD_RAINFOG_RED" ).trimmed().toLower().constData() ) );
+	const bool mono = ( rfWords & RF::RedMono ) != 0;
+	const bool tailOn = rfTailOn && !( rfWords & RF::RedNoTail );
 	int ptype[2] = { -2, -2 };
 	float pdens[2] = { -1.0f, -1.0f };
 	unsigned pflags[2] = { 0u, 0u };
@@ -1167,9 +1172,18 @@ static QString vaRainFog( Scene * scene, NifSkopeOpenGLContext::Program * prog, 
 	if ( !( spgdRed & WwPrecip::SpgdRedRate ) )
 		for ( int i = 0; i < 2; i++ )
 			scale[i] = WwPrecip::spgdRateScale( pdens[i] );
+	double rscale[2] = { scale[0], scale[1] };	// the rain's: Marshall-Palmer's sigma goes as rate^0.63
+	if ( !mono )
+		for ( int i = 0; i < 2; i++ )
+			rscale[i] = RF::mpRateFactor( scale[i] );
 	double rainShare = 0.0, snowShare = 0.0;
-	if ( have )
+	if ( have ) {
 		RF::shares( ptype, scale, blending, double( pct ), snowOn, rainShare, snowShare );
+		if ( !mono ) {	// the rain at its own factor, the snow as before
+			double unused = 0.0;
+			RF::shares( ptype, rscale, blending, double( pct ), snowOn, rainShare, unused );
+		}
+	}
 	const double share = rainShare + snowShare;
 	const WwCloudMap & m = wwCloudMap();
 	const WwCloudBandInfo & low = m.band[WwCloudLow];
@@ -1231,14 +1245,16 @@ static QString vaRainFog( Scene * scene, NifSkopeOpenGLContext::Program * prog, 
 	}
 	// lane RAINFOG2: rain (x its rate scale) and snow (its own law) in one extinction under the Low band; no snow and
 	// scale 1: CLOUD6e's number exactly (defaultSigmaPerKm() x share)
-	const double sigmaKm = snowShare > 0.0 ? RF::defaultSigmaPerKm() * rainShare + RF::defaultSnowSigmaPerKm() * snowShare
-										   : RF::defaultSigmaPerKm() * share;
+	// FIX1031B: the rain at Marshall-Palmer's law unless the red mono
+	const double rainKm = mono ? RF::defaultSigmaPerKm() : RF::defaultMpSigmaPerKm();
+	const double sigmaKm = snowShare > 0.0 ? rainKm * rainShare + RF::defaultSnowSigmaPerKm() * snowShare
+										   : rainKm * share;
 	prog->uni4f( "rfLaw", FloatVector4( float( sigmaKm * ku ), float( RF::kBaseExcess ), float( 1.0 / RF::kFalloffKm ),
 		float( 1.0 / RF::kAboveKm ) ) );
 	prog->uni2f( "rfFar", std::clamp( low.coverage, 0.0f, 1.0f ), float( RF::kEdgeFade ) );
 	const float k[5] = { 1.0f, float( sigmaKm ), low.baseZ, low.coverage, m.halfExtent };
 	std::copy( k, k + 5, key );
-	if ( rfTailOn ) {	// the surfaces' and the sky's tails read the same law (wwVolAirUniforms)
+	if ( tailOn ) {	// the surfaces' and the sky's tails read the same law (wwVolAirUniforms)
 		tail.on = true;
 		const float lw[4] = { float( sigmaKm * ku ), float( RF::kBaseExcess ), float( 1.0 / RF::kFalloffKm ), float( 1.0 / RF::kAboveKm ) };
 		std::copy( lw, lw + 4, tail.law );
@@ -1251,8 +1267,9 @@ static QString vaRainFog( Scene * scene, NifSkopeOpenGLContext::Program * prog, 
 	return QStringLiteral( "on(share=%1 sigma=%2/km base=%3 cov=%4 map=%5%6)" ).arg( share, 0, 'f', 3 ).arg( sigmaKm, 0, 'f', 4 )
 		.arg( double( low.baseZ ), 0, 'f', 0 ).arg( double( low.coverage ), 0, 'f', 3 ).arg( m.size )
 		.arg( m.stub ? QStringLiteral( " stub" ) : QString() )
-		+ QStringLiteral( " rain=%1 snow=%2%3 tail=%4" ).arg( rainShare, 0, 'f', 3 ).arg( snowShare, 0, 'f', 3 )
-		.arg( snowOn ? QString() : QStringLiteral( "(snow as rain)" ) ).arg( rfTailOn ? QStringLiteral( "on" ) : QStringLiteral( "off" ) );
+		+ QStringLiteral( " rain=%1 snow=%2%3 tail=%4 law=%5" ).arg( rainShare, 0, 'f', 3 ).arg( snowShare, 0, 'f', 3 )
+		.arg( snowOn ? QString() : QStringLiteral( "(snow as rain)" ) ).arg( tailOn ? QStringLiteral( "on" ) : QStringLiteral( "off" ) )
+		.arg( mono ? QStringLiteral( "mono(RED)" ) : QStringLiteral( "marshall-palmer" ) );
 }
 
 static void vaPassInner( Scene * scene, bool run )

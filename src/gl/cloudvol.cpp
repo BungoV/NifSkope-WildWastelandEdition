@@ -832,17 +832,19 @@ struct CvLightning
 	float lin[3] = {};	// the colour, luminance 1, x the Low band's tint
 };
 
-/* lane LIGHTNING2 (LIGHTNINGFREQ1): WW_LIGHTNING_FREQ (live; on unless 0 / off / false / no) = the strikes follow the
- * WTHR DATA frequency byte and the fade bytes scale their chance (cloudlightning.h freqSchedule); its red
- * WW_LIGHTNING_FREQ_RED (any value but 0) or the switch off = CLOUD6f's own 8 s / 75 % schedule, the share on the
- * brightness. */
+/* lane LIGHTNING2 (LIGHTNINGFREQ1): WW_LIGHTNING_FREQ (live) = the strikes follow the WTHR DATA frequency byte and the
+ * fade bytes scale their chance (cloudlightning.h freqSchedule); its red WW_LIGHTNING_FREQ_RED (any value but 0) =
+ * CLOUD6f's own 8 s / 75 % schedule, the share on the brightness.
+ * FIX1031B review: OFF unless set to 1 / on / true / yes. The byte's direction is sourced (255 = rarest), the linear
+ * 2 s-slot rate is ours (no game law read): it would turn the vanilla rains' flash from every 10.7 s into every 102 s and
+ * the radstorms' into every 4.2 s, a look change with no game-match gate (CLOUDVARDEF1's rule: stays Off until one). */
 bool lightningFreqLaw()
 {
 	const QString r = wwEnvStr( "WW_LIGHTNING_FREQ_RED" ).trimmed();
 	if ( !r.isEmpty() && r != QLatin1StringView( "0" ) )
 		return false;
 	const QByteArray v = wwEnvStr( "WW_LIGHTNING_FREQ" ).trimmed().toLower().toLatin1();
-	return WwCloudLightning::switchOn( v.constData() );
+	return v == "1" || v == "on" || v == "true" || v == "yes";
 }
 
 /* lane LIGHTNING2 (LIGHTNINGSKY1): WW_LIGHTNING_SKY (live; on unless 0 / off / false / no) = the flash also lights the
@@ -1531,7 +1533,7 @@ bool wwCloudVolDraw( Scene * scene, const WwCloudVolView & view, QStringList & d
 			: QStringLiteral( ",lightning=%1" ).arg( st );
 		if ( lt.share > 0.0f )	// lane LIGHTNING2: the schedule (the DATA law, or CLOUD6f's: the red)
 			reds += lt.law ? QStringLiteral( ",lightfreq=%1 every %2s" ).arg( lt.freq ).arg( lt.everyS, 0, 'f', 1 )
-				: QStringLiteral( ",RED=lightfreq" );
+				: QStringLiteral( ",lightfreq=off" );	// FIX1031B: the DATA law ships Off (opt-in WW_LIGHTNING_FREQ=1)
 		reds += lightningSkyOn() ? QStringLiteral( ",lightsky=on" ) : QStringLiteral( ",RED=lightsky" );
 	}
 	// lane CLOUD2C: clip = which scene depth ends the march (last = the last paint's, this = this paint's, after the scene)
