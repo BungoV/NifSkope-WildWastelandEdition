@@ -483,6 +483,7 @@
 { "WW_CELL_ROOMS_RED", 1, "src/cellview.cpp:6454 cellBuild | read while the cell document is built" },
 { "WW_CELL_RTDDGI", 4, "src/rtddgicell.cpp:1199 rtddgiCellPinned | hand: the volume read is a #define every shader gets at load (Shader::load via rtddgiCellShaderDefine); rtddgiCellFrame builds or frees the volume on its per-frame read (RTXGI1 M2)" },
 { "WW_CELL_RTDDGI_CASCADES", 4, "src/rtddgicell.cpp:1593 rtddgiCellCascades | hand: the cascades read is a #define Shader::load adds beside WW_CELL_RTDDGI (rtddgiCellCascades); rtddgiCellFrame builds or frees the coarse volumes on its per-frame read (RTXCASCADE1)" },
+{ "WW_CELL_RTDDGI_CASCADES_RED", 4, "src/rtddgicell.cpp:1611 rtddgiCellCascades | hand: FIX1031B: =one is the one-volume red of the always-on cascades (the Show-menu picker is gone; the count follows the RT quality preset); read by rtddgiCellCascades like WW_CELL_RTDDGI_CASCADES" },
 { "WW_CELL_RTDDGI_DUMP", 0, "src/rtddgicell.cpp:799 dumpLive | hand: read by rtddgiCellFrame at the dump point (RTXGI1 M2)" },
 { "WW_CELL_RTDDGI_RED", 0, "src/rtddgicell.cpp:112 cellRedParts | hand: cellRedBits (WW_SWITCH_STATIC) read per program setup in rtddgiCellUniforms: a uniform (RTXGI1 M2)" },
 { "WW_CELL_RTDDGI_SPEC", 0, "src/rtddgicell.cpp:67 cellSpecNow | hand: read every frame by rtddgiCellFrame; a changed value is in the build key and rebuilds the volume in place (RTXGI1 M2)" },

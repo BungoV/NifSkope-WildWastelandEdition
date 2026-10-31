@@ -446,10 +446,19 @@ inline float crushWeight( float w )
 constexpr unsigned kSampleTrilinear = 1u;   // WW_CELL_RTDDGI_RED=trilinear: the trilinear weight alone (no backface, no Chebyshev, no crush)
 constexpr unsigned kSampleNoCheb = 2u;      // no Chebyshev factor
 constexpr unsigned kSampleNoBias = 4u;      // no self-shadow bias
+constexpr unsigned kSampleNoCover = 8u;     // FIX1031B: WW_CELL_RTDDGI_RED=nocover, the fade ignores the missing probes (today's main)
 //! a probe the read takes: Vigilant and blended at least once (Asleep probes are not traced, Off ones sit in walls)
 inline bool probeUsable( int state, uint32_t age )
 {
 	return state == kVigilant && age > 0;
+}
+/*! FIX1031B (bungo 10-31, river trunks "halfway it switches to ambient fill"): a probe the read LACKS: not usable and not
+ *  Off. Asleep (no surface within its cell by its 32 fixed rays, so never traced: a thin trunk is missed), a scroll's
+ *  fresh probe, a Vigilant one not blended yet. An Off probe sits in a wall: the read drops it with no loss of cover (the
+ *  surface's own side is lit by the others). The atlas carries the codes (cell_ddgi.glsl: 2 usable, 0 Off, else lacking) */
+inline bool probeMissing( int state, uint32_t age )
+{
+	return state != kOff && !probeUsable( state, age );
 }
 /*! A volume as the read sees it: the GPU's buffers (one probe after another: irr 8 x 8 x 4 floats, dist 16 x 16 x 2,
  *  probes 4 = offset xyz + state, age 1), the first probe, the spacing, the probe counts, D = the smallest spacing and
@@ -493,6 +502,10 @@ inline float cascadeEdge( float g, int dims, bool tight )
  *  mean of the tile's alpha (linear, M1FIX). fade (ours, M2): 1 one cell inside the probe box, falling to 0 at its
  *  faces and past them (the cell view hands over to the baked grid there). The twin's bounce (traceRay) and the
  *  GLSL read (res/shaders/cell_ddgi.glsl cellDdgiRead, the unit test's "sample" check) both follow it.
+ *  FIX1031B: fade x cover, cover = the trilinear weights of the corners that are not MISSING (probeMissing): the weighted
+ *  mean renormalises over the usable corners, so with the corners above a point all Asleep the answer stayed whole up to
+ *  their plane and dropped to the flat ambient past it (a hard line at one world z on every tree trunk, 82 u over the eye
+ *  at spot 6). Now the volume hands over across the cell, as it does at its box faces. Red kSampleNoCover (the old fade).
  *  GLSL: trace.comp ddgiIrradianceAt (d = n, no vis, no fade), res/shaders/cell_ddgi.glsl cellDdgiRead.
  *  RTXCASCADE1: tight = a cascade's read (cascadeEdge's camera-locked fade; cell_ddgi.glsl cellDdgiReadOne) */
 inline SampleResult sampleVolume( const SampleVolume & v, V3 P, V3 n, V3 o, V3 d, unsigned red, bool tight = false )
@@ -510,8 +523,7 @@ inline SampleResult sampleVolume( const SampleVolume & v, V3 P, V3 n, V3 o, V3 d
 		a[k] = clampf( g - float( base[k] ), 0.0f, 1.0f );
 		fade = std::min( fade, cascadeEdge( g, v.dims[k], tight ) );
 	}
-	out.fade = fade;
-	double sum[3] = { 0, 0, 0 }, vsum = 0, wsum = 0;
+	double sum[3] = { 0, 0, 0 }, vsum = 0, wsum = 0, cover = 0;
 	for ( int c = 0; c < 8; c++ ) {
 		const int off[3] = { c & 1, ( c >> 1 ) & 1, ( c >> 2 ) & 1 };
 		int pc[3];
@@ -519,11 +531,15 @@ inline SampleResult sampleVolume( const SampleVolume & v, V3 P, V3 n, V3 o, V3 d
 			pc[k] = std::min( base[k] + off[k], v.dims[k] - 1 );
 		const int p = pc[0] + v.dims[0] * ( pc[1] + v.dims[1] * pc[2] );
 		const float * pr = &v.probes[size_t( p ) * 4];
-		if ( !probeUsable( int( pr[3] + 0.5f ), v.age[size_t( p )] ) )
-			continue;
 		float trilinear = 1.0f;
 		for ( int k = 0; k < 3; k++ )
 			trilinear *= off[k] ? a[k] : 1.0f - a[k];
+		const int st = int( pr[3] + 0.5f );
+		if ( !probeUsable( st, v.age[size_t( p )] ) ) {
+			cover += probeMissing( st, v.age[size_t( p )] ) ? 0.0 : double( trilinear );   // FIX1031B: Off keeps its cover
+			continue;
+		}
+		cover += double( trilinear );
 		const V3 pp( v.origin.x + float( pc[0] ) * v.step.x + pr[0], v.origin.y + float( pc[1] ) * v.step.y + pr[1],
 			v.origin.z + float( pc[2] ) * v.step.z + pr[2] );
 		float w = 1.0f;
@@ -551,6 +567,10 @@ inline SampleResult sampleVolume( const SampleVolume & v, V3 P, V3 n, V3 o, V3 d
 		vsum += double( w ) * e[3];
 		wsum += w;
 	}
+#ifdef RTDDGI_RED_COVER
+	red |= kSampleNoCover;   // red: the fade ignores the missing corners (today's main: the hard line)
+#endif
+	out.fade = ( red & kSampleNoCover ) ? fade : float( double( fade ) * std::min( cover, 1.0 ) );
 	if ( wsum <= 0.0 )
 		return out;
 	const V3 m( float( sum[0] / wsum ), float( sum[1] / wsum ), float( sum[2] / wsum ) );

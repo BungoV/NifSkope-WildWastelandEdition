@@ -39,6 +39,7 @@ OVERRIDES = {
     'WW_CELL_PV_RED': ('shaders', 'its march reds pick the #define every shader gets at load (Shader::load)'),
     'WW_CELL_RTDDGI': ('shaders', 'the volume read is a #define every shader gets at load (Shader::load via rtddgiCellShaderDefine); rtddgiCellFrame builds or frees the volume on its per-frame read (RTXGI1 M2)'),
     'WW_CELL_RTDDGI_CASCADES': ('shaders', 'the cascades read is a #define Shader::load adds beside WW_CELL_RTDDGI (rtddgiCellCascades); rtddgiCellFrame builds or frees the coarse volumes on its per-frame read (RTXCASCADE1)'),
+    'WW_CELL_RTDDGI_CASCADES_RED': ('shaders', 'FIX1031B: =one is the one-volume red of the always-on cascades (the Show-menu picker is gone; the count follows the RT quality preset); read by rtddgiCellCascades like WW_CELL_RTDDGI_CASCADES'),
     'WW_CELL_RTDDGI_RED': ('live', 'cellRedBits (WW_SWITCH_STATIC) read per program setup in rtddgiCellUniforms: a uniform (RTXGI1 M2)'),
     'WW_CELL_RTDDGI_SPEC': ('live', 'read every frame by rtddgiCellFrame; a changed value is in the build key and rebuilds the volume in place (RTXGI1 M2)'),
     'WW_CELL_RTDDGI_DUMP': ('live', 'read by rtddgiCellFrame at the dump point (RTXGI1 M2)'),

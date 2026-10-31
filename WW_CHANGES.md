@@ -140,6 +140,49 @@
 - **Gates:** `bash tests/rainfogscale/run.sh <out>` (M Marshall-Palmer vs the checker's own integral, V visible at 1 km,
   D red words, W wiring; reds today / mono / notail / wiring fail); `bash tests/rainfog2/run.sh <out>`;
   `bash tests/lightning2/run.sh <out>` (Q W O G K U + wiring; reds oldfreq, today, base wiring fail).
+## GIFIX1 (2026-10-31, FIX1031B area F): no hard GI line on tree trunks; the RTXGI cascades always run (picker gone)
+
+- **The line (bungo 10-31, spot 6 river: "look at the tree, halfway it switches to ambient fill?"):** NOT the top of
+  the camera-following volume. At the row camera (-27000 -70300 1560) the box ran z -548 .. 3559 (census `scroll 3:
+  first probe -29294 -72551 -548`, 16 layers 273.8 apart). In rvc_ov the switch is 1-2 px wide at row 329.5 on
+  TreeMapleForest3 (REFR 0011C882, 886 u away) and row 311 on TreeMapleForest5 (00021DAD, 763 u): projected with the
+  path's own camera onto each REFR's axis, world z 1646 and 1647, i.e. probe layer 8 (z 1642.4) on both. Two models,
+  feet at 1270 / 1290, one world z: not the bark texture. The volume had 523 Vigilant probes of 4096 (~2 layers: the
+  ones hugging the ground); the layer over them was Asleep (no surface within its cell by its 32 fixed rays: a thin
+  trunk is missed), and the read renormalised the weights over the usable corners, so the answer stayed whole up to
+  that plane and fell to the flat ambient past it.
+- **Fix (rtddgimath.h sampleVolume == res/shaders/cell_ddgi.glsl, MIRROR):** the read's fade is multiplied by the
+  cover = the trilinear weights of the corners that are not MISSING (`probeMissing`: Asleep, a scroll's fresh probe,
+  Vigilant not yet blended; Off probes in walls keep their cover, so no ambient leaks at a wall). The volume now hands
+  over to the next coarser cascade (or the flat ambient past them all) across the cell, as it already did at its box
+  faces: no hard edge. The readback path's atlas keeps a missing probe's code (Asleep) instead of 0. Red, live:
+  `WW_CELL_RTDDGI_RED=nocover`.
+- **The cascades ARE the ray-traced GI (bungo 10-31: "if gi is on this is on too, it's not a toggle"):** the Show-menu
+  picker "Ray-traced GI cascades" (cellworkspace.cpp) is GONE. With the ray-traced GI on, the cascades always run; the
+  count, the coarse cadence and the coarse rays follow the "Ray-traced quality" preset: Low 3 cascades every 8^L frames
+  64 coarse rays, Medium 3 / 4^L / 64, High 3 / 4^L / 128, Ultra 4 / 4^L / 128 (rtddgicell.cpp kPreset*). Red (test key,
+  no row; stage table: shaders): `WW_CELL_RTDDGI_CASCADES_RED=one` = M3's one volume, the old default;
+  `WW_CELL_RTDDGI_CASCADES=N` stays a harness pin. Cost, MEASURED offline (`-no-gui rtddgi --gpu 1` on the Concord c3
+  soup, RTX 5070 Ti, 64 updates, notes/fix1031b/gi/cli1.out + cli2.out): cascade 0 (273.8 u, 4560 probes) 22.3 / 22.6 ms,
+  cascade 1 (547.6) 19.9 / 19.7 ms at 128 rays and 12.3 / 12.8 at 64, cascade 2 (1095.2) 16.5 at 128 and 10.3 at 64. At 4
+  updates a due frame that is ~1.40 ms a frame for one volume and Low ~1.51, Medium ~1.64, High ~1.77, Ultra ~1.8 ms
+  (RTXCASCADE1's bars: <= 2.0 ms, <= 1.5x one volume). Live GPU ms per preset: rows owed (notes/fix1031b/gi/HANDOFF.md).
+- **Ultra: a finer near cascade (RECESSRES1):** Ultra halves cascade 0's reach (1024: its spacing is then the asked 140 u,
+  not the 4096-probe cap's 273.8) and its 4th cascade keeps the far reach (8192, High's). MEASURED offline at 137 u
+  against the traced references (SKYBELOW1's spot table, notes/fix1031b/gi/spot_table_137.txt): sky visibility over the
+  tracer, Memory Den recess wall 1.54 -> 1.00, store dark room 42.9 -> 8.9, store windows 1.06 -> 0.99, street 1.02 ->
+  0.97; GN recess2 0.199 -> 0.169 (tracer 0.049: still over-lit, a leftover). A `reach=` in WW_CELL_RTDDGI_SPEC wins.
+- **Gates:** tests/rtddgi_math green 26 + 26 reds (new `cover`: the largest step walking up a trunk past the top usable
+  layer 0.0025 of the GI-vs-ambient gap, header and GLSL, across the box top 0.0025; the runtime red nocover = today
+  1.0000; between an Off and a usable layer the fade stays 1; red `RTDDGI_RED_COVER` fails it). Offline link sweeps on
+  the tree: base 405/405, +WW_CELL_RTDDGI none/ubo 270/270, +WW_CELL_RTDDGI +WW_CELL_RTDDGI_CASCADES none/ubo 270/270
+  (the new default's programs), +WW_CELL_PRT 405/405, all LINK OK.
+- **Measured, no change:** SKYBELOW1's below-horizon rule at the store and porch_b (rule vs `--red skybelow` dumps):
+  it acts (porch rect: 6361 of the update's 51255 misses are below the horizon) but only on the lowest probe layers at
+  or under the street (store 68 of 2632 usable probes changed > 5 %, porch 225 of 2464, all in the bottom 4 layers,
+  dark probes: red L median 0.034 vs 0.26 for all, |dL| <= 0.047; the > 1 % sets are the same size). Above open
+  ground a below-horizon ray hits the terrain, so outdoors it is a correct near no-op. The Concord church nave's probes
+  (LATE ITEM 15) are 42 of 44 Vigilant at 273.8 u and 8 of 9 at 547.6 u: classification does not kill that room.
 
 ## RESTIRSPV1 (2026-10-31, FIX1031A): restir.spv.h regenerated from its own source, and a test that every SPIR-V header matches its source
 

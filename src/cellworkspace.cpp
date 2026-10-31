@@ -564,28 +564,8 @@ void CellWorkspacePanel::buildUi()
 				glView->updateShaders();
 		} );
 	}
-	/* lane RTXCASCADE2 (src/rtddgicell.h): the ray-traced GI's nested volumes round the camera, 1 (one volume, the default)
-	 * to 4. Live: a pick reloads the shaders (the cascades' read is a #define) and the next frame builds or frees them */
-	{
-		QMenu * m = showMenu->addMenu( tr( "Ray-traced GI cascades" ) );
-		m->setObjectName( QStringLiteral( "CellWorkspaceRtDdgiCascades" ) );
-		QActionGroup * grp = new QActionGroup( m );
-		grp->setExclusive( true );
-		const QStringList names = { tr( "One volume" ), tr( "2 cascades" ), tr( "3 cascades" ), tr( "4 cascades" ) };
-		for ( int k = 0; k < names.size(); k++ ) {
-			QAction * a = m->addAction( names.at( k ) );
-			a->setCheckable( true );
-			a->setData( k + 1 );
-			a->setChecked( k + 1 == rtddgiCellCascades() );
-			grp->addAction( a );
-		}
-		m->setEnabled( !rtddgiCellCascadesPinned() );
-		connect( grp, &QActionGroup::triggered, this, [this]( QAction * a ) {
-			rtddgiCellSetCascades( a->data().toInt() );
-			if ( glView )
-				glView->updateShaders();
-		} );
-	}
+	/* FIX1031B (bungo 10-31): no "Ray-traced GI cascades" picker any more: the cascades ARE the ray-traced GI; their count,
+	 * cadence and rays follow the RT quality preset below (src/rtddgicell.h rtddgiCellCascades) */
 	/* lane RESTIRDI1 (bungo 10-29's ruling): the RT quality preset. Low = the ray-traced GI volume (as the row above), Medium =
 	 * + ReSTIR DI (ray-traced shadows for the shadow-casting lights, the 16 cube shadows off); High / Ultra = Medium for now.
 	 * Live: a pick reloads the shaders (WW_CELL_RESTIR is a loader define); Medium and up also turn the volume on */

@@ -44,6 +44,15 @@ constexpr int kAtlasTexels = 193;           // a probe's texels in the texture b
 constexpr double kViewReach = 3000.0;       // the debug view draws the probes within this of the camera (the PRTP view's)
 constexpr size_t kViewMaxProbes = 20000;    // and at most this many spheres
 constexpr int kScrollEcho = 16;             // the census prints the first scrolls, then every 64th
+/* FIX1031B (manager LATE ITEMs 2 + 17, 10-31): the cascades always run with the ray-traced GI; count, coarse cadence and
+ * coarse rays per RT quality preset (Low, Medium, High, Ultra). Cost (notes/fix1031b/gi/cli1.out + cli2.out, -no-gui
+ * rtddgi on the Concord c3 soup, RTX 5070 Ti, device ms of 64 updates: cascade 0 (273.8, 4560 probes) 22.3 / 22.6,
+ * cascade 1 (547.6) 128 rays 19.9 / 19.7, 64 rays 12.3 / 12.8, cascade 2 (1095.2) 128 rays 16.5, 64 rays 10.3), at 4
+ * updates a due frame: Low ~1.51, Medium ~1.64, High ~1.77, Ultra ~1.8 ms a frame against one volume's ~1.40 (<= 2.0 ms and
+ * <= 1.5x, RTXCASCADE1's bars). Red: WW_CELL_RTDDGI_CASCADES_RED=one (M3's one volume, the old default). */
+constexpr int kPresetCascades[4] = { 3, 3, 3, 4 };
+constexpr int kPresetEvery[4] = { 8, 4, 4, 4 };      // cascade L steps every every^L frames
+constexpr int kPresetCRays[4] = { 64, 64, 0, 0 };    // coarse cascades' rays (0 = cascade 0's 128)
 
 //! WW_CELL_RTDDGI_SPEC (harness): the volume's knobs, "k=v" comma list; the text is part of the build key
 struct CellSpec
@@ -64,6 +73,10 @@ struct CellSpec
 CellSpec cellSpecNow()
 {
 	CellSpec s;
+	const int preset = std::clamp( rtddgiRtPreset(), 0, 3 );   // FIX1031B: the coarse cascades' cadence and rays per preset
+	s.every = kPresetEvery[preset];
+	s.crays = kPresetCRays[preset];
+	bool reachSet = false;
 	s.text = wwEnvStr( "WW_CELL_RTDDGI_SPEC" ).trimmed();
 	for ( const QString & kv : s.text.split( QLatin1Char( ',' ), Qt::SkipEmptyParts ) ) {
 		const QStringList p = kv.split( QLatin1Char( '=' ) );
@@ -76,7 +89,7 @@ CellSpec cellSpecNow()
 			continue;
 		if ( k == QLatin1String( "spacing" ) && v > 1.0 ) s.spacing = float( v );
 		else if ( k == QLatin1String( "zscale" ) && v > 0.05 ) s.zscale = float( v );
-		else if ( k == QLatin1String( "reach" ) && v > 100.0 ) s.reach = float( v );
+		else if ( k == QLatin1String( "reach" ) && v > 100.0 ) { s.reach = float( v ); reachSet = true; }
 		else if ( k == QLatin1String( "probes" ) && v >= 8.0 ) s.probes = int( std::min( v, 65536.0 ) );
 		else if ( k == QLatin1String( "rays" ) && v >= 33.0 ) s.rays = int( std::min( v, 256.0 ) );
 		else if ( k == QLatin1String( "updates" ) && v >= 1.0 ) s.updates = int( std::min( v, 16.0 ) );
@@ -84,6 +97,14 @@ CellSpec cellSpecNow()
 		else if ( k == QLatin1String( "cevery" ) && v >= 1.0 ) s.every = int( std::min( v, 64.0 ) );
 		else if ( k == QLatin1String( "crays" ) && v >= 0.0 ) s.crays = int( std::min( v, 256.0 ) );   // RTXCASCADE2
 		else if ( k == QLatin1String( "cskip" ) && v >= 0.0 ) s.cskip = v > 0.5 ? 1 : 0;              // RTXCASCADE2
+	}
+	/* FIX1031B (RECESSRES1): Ultra halves cascade 0's reach (its spacing then 140 u, the asked one, not the cap's 273.8)
+	 * and its 4th cascade keeps the far reach (1024 x 2^3 = High's 2048 x 2^2). Measured offline at 137 u (notes/fix1031b/
+	 * gi/spot_table_137.txt vs SKYBELOW1's 273 u table): sky visibility over the tracer, Memory Den recess wall 1.54 ->
+	 * 1.00, store dark room 42.9 -> 8.9; GN recess2 0.199 -> 0.169 (tracer 0.049: still a leftover) */
+	if ( preset == 3 && !reachSet && rtddgiCellCascades() > 1 ) {
+		s.reach = 1024.0f;
+		s.text += QStringLiteral( "|near 1024" );   // the build key
 	}
 	return s;
 }
@@ -114,6 +135,7 @@ const int * cellRedParts()
 			if ( t == QLatin1String( "trilinear" ) ) b.v[0] |= int( rtddgi::kSampleTrilinear );
 			if ( t == QLatin1String( "nocheb" ) ) b.v[0] |= int( rtddgi::kSampleNoCheb );
 			if ( t == QLatin1String( "nobias" ) ) b.v[0] |= int( rtddgi::kSampleNoBias );
+			if ( t == QLatin1String( "nocover" ) ) b.v[0] |= int( rtddgi::kSampleNoCover );   // FIX1031B: the old fade (hard line)
 			if ( t == QLatin1String( "readback" ) ) b.v[1] |= kPathReadback;
 			if ( t == QLatin1String( "rebuild" ) ) b.v[1] |= kPathRebuild;
 			if ( t == QLatin1String( "nowait" ) ) b.v[1] |= kPathNoWait;   // lane RTXFIX1
@@ -254,7 +276,7 @@ struct Cell
 	bool fresh = false;
 	/* RTXCASCADE2: the rows (cell() only): the cascades count and the debug view's cascade; and the frame this volume's
 	 * step was last ordered on with its first probe after that step (the next coarser cascade's skip range reads it) */
-	int guiCascades = 1, guiViewCascade = 0;
+	int guiViewCascade = 0;
 	quint64 orderFrame = 0;
 	double orderOrigin[3] = { 0, 0, 0 };
 };
@@ -394,8 +416,7 @@ void loadRows( Cell & c )
 	QSettings s( QStringLiteral( "NifTools" ), rowSettingsApp() );
 	c.guiOn = s.value( QStringLiteral( "WW/CellRtDdgi" ), false ).toBool();
 	c.guiView = std::clamp( s.value( QStringLiteral( "WW/CellRtDdgiView" ), 0 ).toInt(), 0, 2 );
-	// RTXCASCADE2: the cascades row (1 = M3's one volume, the default) and the debug view's cascade (0 = the nearest)
-	c.guiCascades = std::clamp( s.value( QStringLiteral( "WW/CellRtDdgiCascades" ), 1 ).toInt(), 1, rtddgi::kMaxCascades );
+	// RTXCASCADE2: the debug view's cascade (0 = the nearest); FIX1031B: the cascades row is gone (the RT quality preset)
 	c.guiViewCascade = std::clamp( s.value( QStringLiteral( "WW/CellRtDdgiViewCascade" ), 0 ).toInt(), 0, rtddgi::kMaxCascades - 1 );
 }
 
@@ -687,7 +708,9 @@ bool upload( Cell & c, Renderer * r, const RtDdgiLive & L )
 			for ( int k = 0; k < 3; k++ )
 				pt[size_t( p ) * 4 + size_t( k )] = v.offset[size_t( p ) * 3 + size_t( k )];
 			const int st = v.state[size_t( p )];
-			pt[size_t( p ) * 4 + 3] = float( rtddgi::probeUsable( st, age[p] ) ? st : int( rtddgi::kOff ) );
+			// FIX1031B: a missing probe keeps a code of its own (Asleep), so the read's fade can lose its weight
+			pt[size_t( p ) * 4 + 3] = float( rtddgi::probeUsable( st, age[p] ) ? st
+				: rtddgi::probeMissing( st, age[p] ) ? int( rtddgi::kAsleep ) : int( rtddgi::kOff ) );
 		}
 		fn->glBufferSubData( GL_TEXTURE_BUFFER, GLintptr( size_t( nP ) * 192 * 16 ), GLsizeiptr( pt.size() * 4 ), pt.data() );
 		c.probesPacked = true;
@@ -1588,30 +1611,20 @@ static void volumeFrame( Scene * scene, Cell & c, const CellSpec * spIn, bool du
 	runOne( r, j );
 }
 
+/* FIX1031B (bungo 10-31: "if gi is on this is on too, it's not a toggle"): the cascades ARE the ray-traced GI. The Show-menu
+ * picker is gone; the count comes from the RT quality preset (kPresetCascades: Low..Ultra 3 / 3 / 3 / 4; the coarse
+ * cadence and rays: cellSpecNow). WW_CELL_RTDDGI_CASCADES_RED=one is the red (M3's one volume); WW_CELL_RTDDGI_CASCADES=N
+ * stays a harness pin (1..4). */
 int rtddgiCellCascades()
 {
-	if ( !wwEnvIsSet( "WW_CELL_RTDDGI_CASCADES" ) ) {   // RTXCASCADE2: the row (default 1: M3's one volume)
-		Cell & c = cell();
-		loadRows( c );
-		return c.guiCascades;
-	}
+	if ( wwEnvStr( "WW_CELL_RTDDGI_CASCADES_RED" ).trimmed() == QLatin1String( "one" ) )
+		return 1;
+	if ( !wwEnvIsSet( "WW_CELL_RTDDGI_CASCADES" ) )
+		return kPresetCascades[std::clamp( rtddgiRtPreset(), 0, 3 )];
 	const QByteArray v = wwEnv( "WW_CELL_RTDDGI_CASCADES" ).trimmed();
 	bool ok = false;
 	const int n = v.toInt( &ok );
-	return ok ? std::clamp( n, 1, rtddgi::kMaxCascades ) : 1;   // unset, 0, 1 or not a number: M3's one volume
-}
-
-bool rtddgiCellCascadesPinned()
-{
-	return wwEnvIsSet( "WW_CELL_RTDDGI_CASCADES" );
-}
-
-void rtddgiCellSetCascades( int n )
-{
-	Cell & c = cell();
-	loadRows( c );
-	c.guiCascades = std::clamp( n, 1, rtddgi::kMaxCascades );
-	rowWrite( QStringLiteral( "WW/CellRtDdgiCascades" ), c.guiCascades );
+	return ok ? std::clamp( n, 1, rtddgi::kMaxCascades ) : 1;   // the pin: 0, 1 or not a number = M3's one volume
 }
 
 int rtddgiCellViewCascade()
@@ -1756,7 +1769,7 @@ static void cascadesFrame( Scene * scene, std::vector<Deferred> * defer )
 		q.zscale = v0.step[0] > 0.0f ? v0.step[2] / v0.step[0] : sp.zscale;
 		q.reach = float( double( sp.reach ) * k );
 		q.text = sp.text + QStringLiteral( "|cascade %1 of step %2 x %3" ).arg( l ).arg( double( v0.step[0] ), 0, 'f', 3 )
-			.arg( double( v0.step[2] ), 0, 'f', 3 );
+			.arg( double( v0.step[2] ), 0, 'f', 3 ) + QStringLiteral( "|crays %1" ).arg( sp.crays );   // FIX1031B: per preset
 		q.rays = rtddgi::cascadeRays( sp.rays, sp.crays, l );   // RTXCASCADE2 cost lever (crays; 0 = cascade 0's)
 		/* with a spec max (pictures): every frame, so a camera move scrolls it at once and rtddgiCellPending holds the
 		 * picture until it has its updates again (a stopped volume that did not move steps nothing); running: every
