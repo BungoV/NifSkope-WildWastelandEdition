@@ -19,7 +19,11 @@
  * the vertex alpha (the attribute the colour pass reads), the palette's alpha and the strict threshold. NOT reproduced
  * (they need the per-pixel normal-map normal and the frame's depth): falloff and the soft fade -- both only lower the
  * colour pass's alpha, so the side pass keeps a superset there (52 of the 166 movers). Red WW_TREELEAF_RED=fx (also
- * "1" and "side"): today's raw base alpha, `>=`. */
+ * "1" and "side"): today's raw base alpha, `>=`.
+ * Lane TREELEAF4 (FIX1031A, FXCOVRESID1): both are reproduced now, on the GPU only (they need the per-pixel normal-map
+ * normal and the opaque pass's depth): Shape::wwFxSideAlpha sets mode + 8 (falloff, falloffParams) and + 16 (the cell's
+ * soft fade, softDepth), taa_objvel.frag runs fo4_effectshader.frag's own lines in its order. Gate: the real colour
+ * program against the real side program, texel for texel (tests/treeleaf4/fxcov_gate.py). Red WW_FXCOVRESID_RED=1. */
 
 #include <cmath>
 

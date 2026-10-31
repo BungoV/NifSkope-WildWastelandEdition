@@ -12,8 +12,12 @@ uniform int velMode;
 uniform vec4 wwGrassWind;
 uniform vec4 wwGrassWind2;
 
+uniform mat3 normalMatrix;	// lane TREELEAF4: the shape's view rotation, as Shape::setUniforms gives the colour pass
+
 layout ( location = 0 ) in vec3 vertexPosition;
 layout ( location = 1 ) in vec4 vertexColor;
+layout ( location = 2 ) in vec3 normalVector;
+layout ( location = 3 ) in vec3 tangentVector;
 layout ( location = 4 ) in vec3 bitangentVector;
 layout ( location = 7 ) in vec2 multiTexCoord0;
 layout ( location = 8 ) in vec3 prevPosition;
@@ -23,6 +27,8 @@ out vec4 cPrev;
 out vec3 viewPos;
 out vec2 texCoord;
 out float vAlpha;	// lane TREELEAF3: the vertex alpha an effect shape's colour pass multiplies in (fxMode & 1)
+// lane TREELEAF4 (FXCOVRESID1): fo4_default.vert's btnMatrix (bitangent, tangent, normal in view space), for the falloff
+out mat3 btnMatrix;
 
 vec3 grassOffset( float phase )
 {
@@ -52,5 +58,8 @@ void main()
 	viewPos = ( modelViewMatrix * vec4( cur, 1.0 ) ).xyz;
 	texCoord = multiTexCoord0;
 	vAlpha = vertexColor.a;
+	btnMatrix[2] = normalize( normalVector * normalMatrix );
+	btnMatrix[1] = normalize( tangentVector * normalMatrix );
+	btnMatrix[0] = normalize( bitangentVector * normalMatrix );
 	gl_Position = clipJit * vec4( cur, 1.0 );
 }

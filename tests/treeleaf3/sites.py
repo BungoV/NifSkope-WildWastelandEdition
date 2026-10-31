@@ -25,7 +25,8 @@ def squash(s):
 
 NEED = {
     'src/gl/taainputs.cpp': [
-        'const Shape::WwFxAlpha fx = at ? sh->wwFxSideAlpha( da, "taa" ) : Shape::WwFxAlpha();',
+        # lane TREELEAF4: a blended mover's coverage reads the same composed alpha (was `fx = at ? ...`)
+        'Shape::WwFxAlpha fx = ( at || ( blended && based ) ) ? sh->wwFxSideAlpha( da, "taa" ) : Shape::WwFxAlpha();',
         'prog->uni1i( "fxMode", fx.mode );',
         'prog->uni1f( "alpha", fx.mult );',
         'prog->uni1f( "alphaThreshold", fx.threshold );',
@@ -40,9 +41,11 @@ NEED = {
         'uniform sampler2D GreyscaleMap;',
         'float a = texture( BaseMap, texCoord * uvScale + uvOffset ).a;',
         'float k = ( fxMode & 1 ) != 0 ? vAlpha : 1.0;',
-        'a = ( fxMode & 2 ) != 0 ? textureLod( GreyscaleMap, vec2( a, k * alpha ), 0.0 ).a : a * k * alpha;',
+        # lane TREELEAF4: + the falloff f and the soft fade s in fo4_effectshader.frag's order (f = s = 1 is this rule)
+        'a = ( fxMode & 2 ) != 0 ? textureLod( GreyscaleMap, vec2( a, ( ( 1.0 * f ) * k ) * alpha * s ), 0.0 ).a '
+        ': ( ( a * f ) * k ) * alpha * s;',
         'a *= alpha;',
-        'if ( a < alphaThreshold ) discard;',
+        'if ( alphaTest != 0 && covMode != 2 && a < alphaThreshold ) discard;',
     ],
     'res/shaders/taa_objvel.vert': ['vAlpha = vertexColor.a;'],
     'src/gl/wwfxcov.h': [

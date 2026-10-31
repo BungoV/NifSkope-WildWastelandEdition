@@ -43,6 +43,7 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include "gl/celllights.h"
 #include "gl/cellwater.h"	// lane WATER1
 #include "gl/cellfxlit.h"	// lane FXRES1: wwCellFxRoomLit
+#include "gl/cellvolair.h"	// lane TREELEAF4: wwVolPartOn
 #include "gl/glmesh.h"
 #include "gl/gltex.h"	// lane TREELEAF2: TexCache::wwCovArmed
 #include "gl/wwleafcov.h"	// lane TREELEAF2
@@ -391,7 +392,8 @@ Shape::WwFxAlpha Shape::wwFxSideAlpha( const WwDrawAlpha & da, const char * pass
 	WwFxCov::In in;
 	in.lightingAlpha = bslsp ? bslsp->alpha : 1.0f;
 	in.threshold = wwLeafSideThreshold( da, pass );
-	in.effect = bsesp && bssp && bssp->bsVersion >= 130 && bssp->bsVersion <= 139 && da.test;
+	// lane TREELEAF4: a blended mover's coverage (taainputs.cpp) reads the same composed alpha
+	in.effect = bsesp && bssp && bssp->bsVersion >= 130 && bssp->bsVersion <= 139 && ( da.test || wwBlendedAsDrawn() );
 	if ( in.effect ) {
 		in.baseColorA = bsesp->getAlpha();
 		in.greyscaleAlpha = bsesp->greyscaleAlpha;
@@ -408,7 +410,47 @@ Shape::WwFxAlpha Shape::wwFxSideAlpha( const WwDrawAlpha & da, const char * pass
 	o.mode = s.mode;
 	o.mult = s.mult;
 	o.threshold = s.threshold;
+	/* lane TREELEAF4 (FXCOVRESID1): the two factors TREELEAF3 left out, as setupProgramCE1 and fo4_effectshader.frag
+	 * apply them: the alpha falloff (useFalloff; falloffParams) wherever the effect draws, and the soft fade
+	 * (bsesp->soft with a soft depth) where the draw is cell-lit (fo4_effectcell / fo4_effectdecal: cellOn) and the red
+	 * WW_CELL_FX_RED=nosoft is off. A volumetric lit card (VOLPART1: the volumetric-particles row on and a lit effect)
+	 * composes a puff instead: flagged, neither factor. Red WW_FXCOVRESID_RED=1: TREELEAF3's rule. */
+	WW_SWITCH_STATIC( bool, residRed, [] {
+		const QString v = QString::fromLatin1( wwEnv( "WW_FXCOVRESID_RED" ) ).trimmed();
+		return !v.isEmpty() && v != QLatin1String( "0" );
+	}() );
+	if ( ( o.mode & 4 ) && bsesp ) {
+		o.volPart = scene && wwVolPartOn() && wwCellFxLitFor( scene->nifModel, id() ) != nullptr;
+		if ( !o.volPart && !residRed ) {
+			if ( bsesp->useFalloff ) {
+				o.mode |= 8;
+				o.falloff[0] = bsesp->falloff.startAngle;
+				o.falloff[1] = bsesp->falloff.stopAngle;
+				o.falloff[2] = bsesp->falloff.startOpacity;
+				o.falloff[3] = bsesp->falloff.stopOpacity;
+			}
+			const bool cellFx = scene && wwCellLightsWanted( scene ) && !( wwCellFxRed() & 1 );
+			if ( cellFx && bsesp->soft && bsesp->falloff.softDepth > 0.0f && !( wwCellFxRed() & 2 ) ) {
+				o.mode |= 16;
+				o.softDepth = std::max( bsesp->falloff.softDepth, 1.0f );
+			}
+		}
+	}
 	return o;
+}
+
+bool Shape::wwBlendedAsDrawn() const
+{
+	/* lane TREELEAF4 (TAABLENDMOVER1): setupProgramCE1's blend enable, in its order (renderer.cpp: `if ( mat )`
+	 * hasAlphaBlend, else translucent, else AlphaProperty::glProperty's blend bit); the ground's splat pass never moves */
+	if ( !scene || !scene->hasOption( Scene::DoBlending ) || !bssp || bssp->bsVersion < 130 || bssp->bsVersion >= 170
+		|| wwCellLandIs( scene->nifModel, id() ) )
+		return false;
+	if ( const Material * mat = bssp->getMaterial() )
+		return mat->hasAlphaBlend();
+	if ( translucent )
+		return true;
+	return alphaProperty && alphaProperty->hasAlphaBlend();
 }
 
 Vector3 Shape::skinVertex( int vertexIndex, const Vector3 & local ) const

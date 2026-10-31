@@ -646,6 +646,25 @@ void wwTaaInputsPass( Scene * scene )
 		if ( prog ) {
 			std::vector<Vector3> prevPos;
 			AlphaBgsmTally atTally;	// lane ALPHABGSM1: the census (gl/alphabgsm.h)
+			/* lane TREELEAF4 (TAABLENDMOVER1): a BLENDED mover (the colour draw blends it, Shape::wwBlendedAsDrawn) writes
+			 * its object vector only where its composed alpha >= 0.5, and marks the rest of its triangles reactive (mask
+			 * R = 1; taa_reactive.frag's MAX keeps it). tests/treeleaf4/blendmover_gate.py (the real taa2.frag, 24 scenes):
+			 * the background behind a moving card 15-65 % closer to the reference than today's whole-card vector, the
+			 * card's own pixels within 2 %; no vector policy without the reactive mark passed every scene. Red
+			 * WW_TAABLENDMOVER_RED=1: today's (every covered pixel takes the vector). */
+			WW_SWITCH_STATIC( bool, blendRed, [] {
+				const QString v = QString::fromLatin1( wwEnv( "WW_TAABLENDMOVER_RED" ) ).trimmed();
+				return !v.isEmpty() && v != QLatin1String( "0" );
+			}() );
+			constexpr float kCovThreshold = 0.5f;
+			// lane TREELEAF4 (FXCOVRESID1): the soft fade reads the opaque depth the colour pass's soft effects read
+			// this frame (Scene::grabEffectDepth, once per second pass); none grabbed = none faded there either
+			const bool fxDepthOk = scene->fxDepthPass == Scene::fxDepthPassNow && scene->fxDepthState > 0 && scene->fxDepthTexId
+				&& scene->fxDepthTexW == W && scene->fxDepthTexH == H;
+			const float * Pg = &( r->globalUniforms->projectionMatrix[0][0] );	// column-major, as the shaders read it
+			const float viewSc = scene->view.scale != 0.0f ? scene->view.scale : 1.0f;
+			std::vector<Vector3> skinN, skinT, skinB;
+			int nCov = 0, nFall = 0, nSoft = 0, nVp = 0;
 			for ( const Mover & m : movers ) {
 				const Shape * sh = m.sh;
 				const Matrix4 mv = sh->viewTrans().toMatrix4();
@@ -653,19 +672,27 @@ void wwTaaInputsPass( Scene * scene )
 				prog->uni4m( "clipCur", m.rec->curClip );
 				prog->uni4m( "clipPrev", m.rec->prevClip );
 				prog->uni4m( "modelViewMatrix", mv );
+				prog->uni3m( "normalMatrix", sh->viewTrans().rotation );	// lane TREELEAF4: the falloff's normal
 				prog->uni1i( "velMode", m.mode );
 				/* lane ALPHABGSM1: the colour draw's test (a BGSM's wins over the NIF's); a BGSM-only test moved its
 				 * whole card. Red WW_ALPHABGSM_RED=taa */
 				const Shape::WwDrawAlpha da = sh->wwDrawAlpha( "taa" );
 				AlphaBgsmTally::note( atTally, sh->wwAlphaTested(), da.test );
-				const bool at = da.test && bindBase( prog, sh );
+				const bool blended = !blendRed && sh->wwBlendedAsDrawn();
+				const bool based = ( da.test || blended ) && bindBase( prog, sh );
+				const bool at = da.test && based;
 				prog->uni1i( "alphaTest", at ? 1 : 0 );
 				/* lane TREELEAF3: an effect shape tests its colour pass's composed alpha (src/gl/wwfxcov.h: baseColor.a^2,
 				 * the vertex alpha, the palette's alpha, strict `>`); a lighting shape keeps TREELEAF2's test (mode 0).
-				 * Red WW_TREELEAF_RED=fx: the raw base alpha. */
-				const Shape::WwFxAlpha fx = at ? sh->wwFxSideAlpha( da, "taa" ) : Shape::WwFxAlpha();
+				 * Red WW_TREELEAF_RED=fx: the raw base alpha. Lane TREELEAF4: + the falloff and the soft fade (fx.mode 8,
+				 * 16; red WW_FXCOVRESID_RED=1), and a blended mover's coverage reads the same composed alpha. */
+				Shape::WwFxAlpha fx = ( at || ( blended && based ) ) ? sh->wwFxSideAlpha( da, "taa" ) : Shape::WwFxAlpha();
+				if ( !fxDepthOk )
+					fx.mode &= ~16;
+				const bool cov = blended && based && !fx.volPart;
+				nVp += fx.volPart ? 1 : 0;
 				prog->uni1i( "fxMode", fx.mode );
-				if ( at ) {
+				if ( at || cov ) {
 					prog->uni1f( "alpha", fx.mult );
 					prog->uni1f( "alphaThreshold", fx.threshold );	// lane TREELEAF2 (wwLeafSideThreshold inside)
 					if ( fx.mode & 2 ) {
@@ -673,29 +700,98 @@ void wwTaaInputsPass( Scene * scene )
 						prog->uniSampler( sh->wwShaderLighting(), "GreyscaleMap", 1, texunit, QString(),
 							TexClampMode::CLAMP_S_CLAMP_T, QString() );
 					}
+					if ( fx.mode & 8 ) {	// lane TREELEAF4: the falloff's normal map, as setupProgramCE1 binds it (slot 3)
+						int texunit = 2;
+						prog->uniSampler( sh->wwShaderLighting(), "NormalMap", 3, texunit, QStringLiteral( "#FFFF8080" ),
+							sh->wwShaderLighting()->clampMode, QString() );
+						prog->uni4f( "falloffParams", FloatVector4( fx.falloff[0], fx.falloff[1], fx.falloff[2], fx.falloff[3] ) );
+						prog->uni1b( "fxOrtho", Pg[15] == 1.0f );
+						nFall++;
+					}
+					if ( fx.mode & 16 ) {	// lane TREELEAF4: cellFxFade's inputs (renderer.cpp, celllights.cpp)
+						fn->glActiveTexture( GL_TEXTURE3 );
+						fn->glBindTexture( GL_TEXTURE_2D, scene->fxDepthTexId );
+						prog->uni1i( "fxDepth", 3 );
+						fn->glUniform2i( prog->uniLocation( "fxDepthOrigin" ), r->globalUniforms->viewportDimensions[0],
+							r->globalUniforms->viewportDimensions[1] );
+						prog->uni2f( "fxProj", Pg[10], Pg[14] );
+						prog->uni1f( "fxDistScale", 1.0f / viewSc );
+						prog->uni1f( "fxSoftDepth", fx.softDepth );
+						nSoft++;
+					}
 				}
+				prog->uni1f( "covThreshold", kCovThreshold );
+				prog->uni1i( "covMode", cov ? 1 : 0 );
 				const bool vtxA = ( fx.mode & 1 ) != 0;	// mode 1 below: the colours ride as attribute 1
+				const bool tbn = ( fx.mode & 8 ) != 0;	// lane TREELEAF4: the falloff's frame rides as attributes 2-4
 				if ( m.mode == 2 )
 					wwCellGrassUniforms( scene, sh->id() );	// the fade and the wind's previous + current phase
 				else
 					prog->uni3f( "wwGrassFade", 0.0f, 0.0f, 0.0f );
-				if ( m.mode == 1 ) {
-					const std::vector<Vector3> & cur = m.rec->curSkin;
-					const std::vector<Vector3> & prv = m.rec->prevSkin.size() == cur.size() ? m.rec->prevSkin : cur;
-					const float * attrv[9] = { &( cur.front()[0] ), vtxA ? &( sh->colors.constFirst()[0] ) : nullptr, nullptr,
-						nullptr, nullptr, nullptr, nullptr, at ? &( sh->coords.constFirst().constFirst()[0] ) : nullptr,
-						&( prv.front()[0] ) };
-					const std::uint64_t mask = 0x300000003ULL | ( at ? 0x20000000ULL : 0ULL ) | ( vtxA ? 0x40ULL : 0ULL );
-					r->drawShape( (unsigned int) sh->verts.size(), mask, (unsigned int) ( sh->triangles.size() * 3 ),
-						GL_TRIANGLES, GL_UNSIGNED_SHORT, attrv, sh->triangles.constData() );
-				} else {
-					if ( !sh->bindShape() )
-						continue;
-					fn->glDrawElements( GL_TRIANGLES, GLsizei( sh->triangles.size() * 3 ), GL_UNSIGNED_SHORT, nullptr );
+				const qsizetype nv = sh->verts.size();
+				const bool tbnOk = tbn && sh->norms.size() >= nv && sh->tangents.size() >= nv && sh->bitangents.size() >= nv;
+				if ( m.mode == 1 && tbnOk ) {
+					// the CPU skin of the frame, as boneTransform skins it on the GPU (the skin matrix, no translation)
+					skinN.resize( size_t( nv ) );
+					skinT.resize( size_t( nv ) );
+					skinB.resize( size_t( nv ) );
+					const Vector3 o0( 0.0f, 0.0f, 0.0f );
+					for ( qsizetype v = 0; v < nv; v++ ) {
+						const Vector3 z = sh->skinVertex( int( v ), o0 );
+						skinN[size_t( v )] = sh->skinVertex( int( v ), sh->norms.at( v ) ) - z;
+						skinT[size_t( v )] = sh->skinVertex( int( v ), sh->tangents.at( v ) ) - z;
+						skinB[size_t( v )] = sh->skinVertex( int( v ), sh->bitangents.at( v ) ) - z;
+					}
 				}
+				for ( int pass = 0; pass < ( cov ? 2 : 1 ); pass++ ) {
+					if ( pass == 1 ) {
+						// the rest of its triangles: the mask's R only (the reactive mark), no vector
+						prog->uni1i( "covMode", 2 );
+						fn->glColorMaski( 0, GL_FALSE, GL_FALSE, GL_FALSE, GL_FALSE );
+						fn->glColorMaski( 1, GL_TRUE, GL_FALSE, GL_FALSE, GL_FALSE );
+					}
+					if ( m.mode == 1 ) {
+						const std::vector<Vector3> & cur = m.rec->curSkin;
+						const std::vector<Vector3> & prv = m.rec->prevSkin.size() == cur.size() ? m.rec->prevSkin : cur;
+						const bool uv = at || cov;
+						const float * attrv[9] = { &( cur.front()[0] ), vtxA ? &( sh->colors.constFirst()[0] ) : nullptr,
+							tbnOk ? &( skinN.front()[0] ) : nullptr, tbnOk ? &( skinT.front()[0] ) : nullptr,
+							tbnOk ? &( skinB.front()[0] ) : nullptr, nullptr, nullptr,
+							uv ? &( sh->coords.constFirst().constFirst()[0] ) : nullptr, &( prv.front()[0] ) };
+						const std::uint64_t mask = 0x300000003ULL | ( uv ? 0x20000000ULL : 0ULL ) | ( vtxA ? 0x40ULL : 0ULL )
+							| ( tbnOk ? 0x33300ULL : 0ULL );
+						r->drawShape( (unsigned int) sh->verts.size(), mask, (unsigned int) ( sh->triangles.size() * 3 ),
+							GL_TRIANGLES, GL_UNSIGNED_SHORT, attrv, sh->triangles.constData() );
+					} else {
+						if ( !sh->bindShape() )
+							break;
+						fn->glDrawElements( GL_TRIANGLES, GLsizei( sh->triangles.size() * 3 ), GL_UNSIGNED_SHORT, nullptr );
+					}
+					if ( pass == 1 ) {
+						fn->glColorMaski( 0, GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE );
+						fn->glColorMaski( 1, GL_FALSE, GL_FALSE, GL_TRUE, GL_FALSE );	// the own-motion flag only, as before
+					}
+				}
+				nCov += cov ? 1 : 0;
 				drawnObj++;
 			}
 			AlphaBgsmTally::report( atTally, "taa velocity", qint64( movers.size() ) );
+			// lane TREELEAF4: the census (changes only, as the pass's own line)
+			{
+				static QString saidCov;
+				const QString c = QStringLiteral( "taa movers by coverage: blended %1 (reactive rest), falloff %2, soft %3, "
+					"volumetric not reproduced %4%5%6" ).arg( nCov ).arg( nFall ).arg( nSoft ).arg( nVp )
+					.arg( blendRed ? QStringLiteral( " RED taablendmover" ) : QString() )
+					.arg( fxDepthOk ? QString() : QStringLiteral( " (no opaque depth this pass)" ) );
+				if ( c != saidCov ) {
+					saidCov = c;
+					qInfo().noquote() << c;
+				}
+			}
+			for ( int u : { 2, 3 } ) {
+				fn->glActiveTexture( GLenum( GL_TEXTURE0 + u ) );
+				fn->glBindTexture( GL_TEXTURE_2D, 0 );
+			}
 			r->stopProgram();
 		} else {
 			ok = false;

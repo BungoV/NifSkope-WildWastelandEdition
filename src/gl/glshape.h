@@ -193,8 +193,19 @@ public:
 		int mode = 0;	// 0 today's test; 4 + 1 the vertex alpha + 2 the palette's alpha
 		float mult = 1.0f;
 		float threshold = 0.0f;
+		/* lane TREELEAF4 (FXCOVRESID1): mode + 8 the falloff (falloffParams: start / stop angle, start / stop opacity),
+		 * + 16 the cell's soft fade (softDepth, game units), as fo4_effectshader.frag composes them. Red
+		 * WW_FXCOVRESID_RED=1: TREELEAF3's rule (neither). volPart: a volumetric lit card (cell_volpart.glsl), whose
+		 * colour alpha is a puff the side pass does not reproduce (neither factor, no coverage rule). */
+		float falloff[4] = { 1.0f, 0.0f, 1.0f, 1.0f };
+		float softDepth = 1.0f;
+		bool volPart = false;
 	};
 	WwFxAlpha wwFxSideAlpha( const WwDrawAlpha & da, const char * pass ) const;
+	/*! lane TREELEAF4 (TAABLENDMOVER1): the colour draw blends this shape (Renderer::setupProgramCE1's GL_BLEND: a
+	 *  readable material's alpha blend, else a translucent shape, else the NiAlphaProperty's blend; never with the
+	 *  Blending option off). The TAA object vectors draw such a mover by its coverage (taainputs.cpp). */
+	bool wwBlendedAsDrawn() const;
 	//! the GPU applies the bone transforms to this shape (the caster pass skins it on the CPU)
 	bool wwGpuSkinned() const { return isSkinned && !transformRigid && !boneTransforms.empty(); }
 	//! lane FARDRAW1: the instanced far ring this shape draws, or null
