@@ -1144,6 +1144,7 @@
 { "WW_SKY_EPHEM", 0, "src/gl/celllooks.cpp:133 pinOf | re-read per frame or per call (a)" },
 { "WW_SKY_EPHEM_RED", 0, "src/gl/shadowset.cpp:1687 wwSunPathKey | re-read per frame or per call (a)" },
 { "WW_SKY_REACH", 1, "src/nativeemit.cpp:3640 lodgenNativeWrite | read while the cell document is built" },
+{ "WW_SOUPALB_RED", 1, "src/cellview.cpp:3788 cellBuild | read while the cell document is built" },
 { "WW_SPELLSEARCH_TEST", 2, "src/nifskope_ui.cpp:10771 NifSkope::createWindow | createWindow: picks which harness the window runs" },
 { "WW_SRGBTAG1_RED", 0, "src/gl/gltexloaders.cpp:1420 TexCache::wwFo4SrgbTagAsUnorm | re-read per frame or per call (a)" },
 { "WW_STARTER_SHOT", 2, "src/nifskope_ui.cpp:26281 NifSkope::createWindow | createWindow: picks which harness the window runs" },

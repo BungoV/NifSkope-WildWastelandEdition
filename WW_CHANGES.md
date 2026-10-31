@@ -1,5 +1,24 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## SHADE1 / SOUPALB1 (2026-10-31, FIX1031B area E, LATE ITEM 19): the live ray-traced GI bounces off the surfaces' own colour
+
+- **The defect (bungo 10-31: "are our shadows even shadowed?"):** the GI agent's probe census on the c3 soup put
+  covered shade (porch / canopy probes, up-facing sky visibility 0.05-0.5) at 1.05-1.21x the up-facing irradiance of
+  OPEN shade (sky visibility >= 0.8); interiors were fine (0.03-0.06x). Cause: the ray-traced GI's live soup never had
+  albedo. cellview.cpp filled the soup's ALB1 only when BAKING, so rtddgi.cpp packed 0.5 grey for every hit. With the
+  census weather's sun at 13.6x the sky, a 0.5 ground and a 0.5 roof underside bounce enough sunlight up under a cover
+  to out-shine the open sky.
+- **Fix (src/cellview.cpp):** the soup takes the bake's per-surface albedo whenever it is built for the ray-traced GI
+  (`soupAlb = baking || rtSoup`): object triangles (map at the UV centroid x vertex colour, the PBR diffuse for a
+  .pbrm-served surface, palettes), the ground's splat composite per 128-unit quad, the stated dirt tone where no
+  splat. Albedo only: the smooth normals (VNM1) stay a bake's. The open's census says which one it built
+  (`ray-traced GI soup kept: N triangles (...), albedo per surface (SOUPALB1)`). Ships ON.
+- **Red:** `WW_SOUPALB_RED=grey` (any value) = the old grey soup, read at the open (stage table: reopen).
+- **Gates:** tests/soupalb/run.sh: a porch twin (path tracer; the census's own CommonwealthClear sun / sky) covered /
+  open 0.299 with per-surface albedo vs 1.702 with today's grey soup (the red, FAILs the rule covered < open), and the
+  source rule on this tree vs main 5422be6c (red FAILs). Owed: the live census on the c3 soup with ALB1 (a cell open),
+  the open-time cost of the albedo sampling, and the church view pictures (fin_c3_d 12:00 / 16:00 after vs the red).
+
 ## GIFIX1 (2026-10-31, FIX1031B area F): no hard GI line on tree trunks; the RTXGI cascades always run (picker gone)
 
 - **The line (bungo 10-31, spot 6 river: "look at the tree, halfway it switches to ambient fill?"):** NOT the top of
