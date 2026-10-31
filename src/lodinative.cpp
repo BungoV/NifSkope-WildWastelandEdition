@@ -259,6 +259,51 @@ void attachMaterial( NifModel * nif, const QModelIndex & iRoot, const QModelInde
 	addLink( nif, iRoot, QStringLiteral( "Children" ), nif->getBlockNumber( iShape ) );
 }
 
+/* lane SHADOWSHIMMER4 (FARSWAYCOST2): WW_FAROBJ_SWAYDUMP=<file> appends every swaying instanced far bucket (the
+ * arrays, commands and 4x4-cell tiles gl/cellfarinst.cpp uploads and culls) so an offline bench can draw the sun
+ * casters' far sway work through the real caster programs. Census only: nothing in NifSkope reads the file back. */
+void instSwayDump( const Bucket & b, const CellMeshInst & d, const Vector3 & origin )
+{
+	const QString path = wwEnvStr( "WW_FAROBJ_SWAYDUMP" );
+	if ( path.isEmpty() )
+		return;
+	QFile f( path );
+	if ( !f.open( QIODevice::Append ) )
+		return;
+	auto u32 = [&f]( quint32 v ) { f.write( reinterpret_cast<const char *>( &v ), 4 ); };
+	auto f32 = [&f]( float v ) { f.write( reinterpret_cast<const char *>( &v ), 4 ); };
+	const QByteArray name = b.name.toUtf8();
+	f.write( "WWSD", 4 );
+	u32( 1 );
+	u32( quint32( name.size() ) );
+	f.write( name );
+	u32( d.alphaTested ? 1u : 0u );
+	for ( int k = 0; k < 3; k++ )
+		f32( origin[k] );
+	u32( quint32( d.vbo.size() ) );
+	f.write( d.vbo );
+	u32( quint32( d.ebo.size() ) );
+	f.write( reinterpret_cast<const char *>( d.ebo.constData() ), qint64( d.ebo.size() ) * 2 );
+	u32( quint32( d.inst.size() ) );
+	f.write( reinterpret_cast<const char *>( d.inst.constData() ), qint64( d.inst.size() ) * 4 );
+	u32( quint32( d.cmds.size() ) );
+	for ( const CellMeshInst::Cmd & c : d.cmds ) {
+		u32( c.count );
+		u32( c.instanceCount );
+		u32( c.firstIndex );
+		u32( quint32( c.baseVertex ) );
+		u32( c.baseInstance );
+	}
+	u32( quint32( d.tiles.size() ) );
+	for ( const CellMeshInst::Tile & t : d.tiles ) {
+		for ( int k = 0; k < 3; k++ )
+			f32( t.centre[k] );
+		f32( t.radius );
+		u32( quint32( t.firstCmd ) );
+		u32( quint32( t.cmdCount ) );
+	}
+}
+
 /*! lane FARDRAW1: an instanced bucket as ONE BSTriShape with no vertices of its own. The document holds the same
  *  name, flags and material blocks as the flat shape; the geometry and the placements wait in `d` (gl/cellfarinst.h). */
 void emitInstBucket( NifModel * nif, const QModelIndex & iRoot, const Bucket & b, const QSharedPointer<CellMeshInst> & d,
@@ -1508,6 +1553,7 @@ bool nifAppendLodiObjects( NifModel * nif, const QModelIndex & iRoot,
 			if ( ib.meta.sway ) {	// lane SHADOWSHIMMER3 (FARSWAYCOST)
 				cnt.swayShapes++;
 				cnt.swayTris += d.drawnTris;
+				instSwayDump( ib.meta, d, shapeOrigin );	// lane SHADOWSHIMMER4: WW_FAROBJ_SWAYDUMP (census only)
 			}
 			cnt.instancesDrawn += d.instances;
 			cnt.uniqueVerts += d.uniqueVerts;

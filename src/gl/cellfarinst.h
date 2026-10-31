@@ -9,6 +9,7 @@
  *   WW_CELL_FARINST_CENSUS=1     a "farinst:" line on stderr whenever a frame's totals change */
 
 #include "gl/glcontext.hpp"
+#include "gl/farswayslice.h"
 
 struct CellMeshInst;
 class Scene;
@@ -21,8 +22,13 @@ bool draw( NifSkopeOpenGLContext * r, Scene * scene, const CellMeshInst & d, Nif
 	const Transform & viewTrans );
 //! A shadow cascade: clipFromModel (column-major) culls the tiles by the cascade's box; prog's modelViewMatrix is set
 //! by the caller.
+//! lane SHADOWSHIMMER4: with `slice` (+ modelView, column-major) only the tiles of `part` (gl/farswayslice.h: Still =
+//! outside the cascade's view slice, Sway = meeting it) draw; null = every tile, as before.
 bool drawCascade( NifSkopeOpenGLContext * r, const CellMeshInst & d, NifSkopeOpenGLContext::Program * prog,
-	const float clipFromModel[16] );
+	const float clipFromModel[16], const float * modelView = nullptr, const WwFarSwaySlice::Slice * slice = nullptr,
+	int part = 3 );
+//! lane SHADOWSHIMMER4: the tiles (of those a streamed near cell leaves drawn) meeting the slice; their indices into `hash`
+int sliceTiles( const CellMeshInst & d, const float modelView[16], const WwFarSwaySlice::Slice & slice, quint64 & hash );
 
 /* lane SKYSHARDS3 (2026-10-30): the far ring never draws with a bindless twin (fo4_cellbl / fo4_cellcsmbl). The twin
  * reads its per-draw row (matrices + texture handles) at wwDrawBase + gl_BaseInstance (ww_bindless.glsl), and a far

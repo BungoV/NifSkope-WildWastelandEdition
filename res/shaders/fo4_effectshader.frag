@@ -480,7 +480,12 @@ void main()
 		return;
 	}
 #endif
-#ifdef WW_CELLLIGHTS
+/* lane SHADOWSHIMMER4 (EFFECTDECALHEADROOM): in a lit-decal program every cellOn path above returns or discards (the
+ * fxRoomLit branch and the decal branch), so with cellOn a uniform the block below never runs there; the NV compiler kept
+ * it all the same (its cellFxLit / vpLit lights and its wwFogFx: fo4_effectdecalcsm in march + WW_CELL_PRT 65482 -> 35670
+ * fragment instructions, the driver's limit 65536). Dropped in the GI-march mode only; the other modes keep their source
+ * (their machine code unchanged). */
+#if defined( WW_CELLLIGHTS ) && !( defined( WW_FX_DECALLIT ) && defined( WW_CELL_GI_MARCH ) )
 	if ( cellOn && fxDecalProbe ) {
 		if ( color.a < 0.1 )
 			discard;
