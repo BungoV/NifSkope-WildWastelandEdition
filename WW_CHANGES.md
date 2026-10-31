@@ -112,6 +112,35 @@
   seen since the change. CLOUDBAND (L M G Q F) and CLOUD6g (S T R) runs PASS on the new default (Lit 0.05 was refused
   by gate Q's dither lattice 37.1 > 33.5). Link sweeps 405 / 270 / 405 not ok 0. Cost: one accum resolve at 960x540
   0.035 -> 0.037 ms offline.
+## FARWATER4 (2026-10-31, FIX1031A): lodgen's river bake writes the smoothed direction, moving water never reads speed 0, a stroke weight speeds without steering
+
+- **L5, lodgen's per-texel river bake (src/lodtfile.cpp):** it wrote the RAW solve direction. F5's instrument on the
+  Commonwealth v4 bake (346 bodies, 111 rivers solved) read p99 28-69 degrees and seams (> 10 degrees) on 5.6-30.7
+  percent of the adjacent pairs of all 14 rivers of >= 1000 texels. The direction now goes through the marking
+  tool's own `waterWrittenDirection()` (now declared in watermark.h; bank and slack texels continued, then the 8-pass
+  low-pass) over the river's piece; speed and confidence are untouched. Median p99 40.78 -> 9.84, seams 0.16-7.3
+  percent, every river better on both; the bake's river step 0.69 -> 1.15-1.32 s. Red `WW_LODL_FLOW_DIR_RED=raw`.
+- **L4, the speed nibble:** water at or above the writer's slack line (2 percent of the mean speed) now writes at
+  least 1 instead of rounding to 0 (`waterSpeedFloor`, both writers; format and readers unchanged, code c is still
+  c/8 of the reference). Bake: 904 of the 20173 solved texels at speed 0 moved (the other 19269 are slack water by
+  the writer's own rule); the marking selftest's rivers 5 / 7: 587 of 9145 / 3355 of 9948 moving texels read 0
+  under the red, 0 now (new check "L4 moving water", every pinned river). Red
+  `WW_WATER_SPEED_FLOOR_RED=round`. A log nibble would cut the bake's saturated texels (38953 -> 5261) but needs a
+  new flow encoding: not done (a LANES row).
+- **L3, the X1 per-point weight (src/watermark.cpp solveBody):** it multiplied the stroke's conductance boost too,
+  and the solve's speed is flux / k, so a 1 -> 3 ramp moved the last-third / first-third speed only 1.04x. The
+  weight now SPEEDS (its documented job, WATER6 C1) and does not steer: the boost stays kStrokeBoost and the slack
+  line takes the unweighted mean (both identical at w = 1, gate X1a). New selftest X1d: the speed ratio is the
+  ramp's own (0.992-1.094 on rivers 2 / 3 / 5 / 7 / 10; red 0.464) and 0 direction bytes move (red 11546 of 25114).
+  Red `WW_WATER_X1_WEIGHT_RED=boost`.
+- **L1 / L2 refused with numbers:** no bank-preserving smoother passes F2 (bank texels within 5 / 15 degrees of the
+  staircase's own flow) and F5 (p99 < 5) together: bank pairs are 6.5-21 percent of a river's pairs and the mask's
+  own exact flow differs across them by a median 7-14 degrees; 10 variants (vector, bilateral, tangent-projection,
+  bank blend, 8-128 passes) pass one gate or neither. F5 p99 < 5 is not registered; F2 and F5 p99 stay registered
+  FAILs.
+- **Gates:** tests/farwater4/run.sh <exe> <out> (bakes, judges, selftests; 0 FAIL), tests/farwater3/run.sh (0 FAIL,
+  every red at once == FARWATER3's main log line for line), tests/farwater2/run.sh (0 FAIL). Every red at once: the
+  bake is byte-equal to a main-built bake. Each fix ships ON; the old paths stay only as the three reds above.
 
 ## LEANCOMMENTS1 (2026-10-31, FIX1031A): the comment trim pass lands on main (comments only, exe byte-identical)
 

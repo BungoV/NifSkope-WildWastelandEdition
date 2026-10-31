@@ -1481,6 +1481,10 @@ static bool lodtBuildWater( const WaterInput & in, quint64 baseOffset,
 	int riversSolved = 0, riversFellBack = 0;
 	qint64 riverTexels = 0, riverIterations = 0;
 	double riverWorstResidual = 0.0, riverSeconds = 0.0;
+	// lane FARWATER4: the written direction (L5) and the moving-water speed floor (L4)
+	const bool dirRed = wwEnv( "WW_LODL_FLOW_DIR_RED" ).trimmed() == "raw";
+	const bool floorRed = waterSpeedFloorRed();
+	qint64 riverSmoothed = 0, riverLifted = 0, riverDead = 0;
 	if ( in.opt.flowField ) {
 		QElapsedTimer riverClock;
 		riverClock.start();
@@ -1680,6 +1684,41 @@ static bool lodtBuildWater( const WaterInput & in, quint64 baseOffset,
 			if ( a0 < 0.0 )
 				a0 += kTwoPi;
 			const quint16 constant = quint16( ( int( a0 / kTwoPi * 256.0 + 0.5 ) & 0xFF ) | ( 8 << 8 ) );
+			/* Lane FARWATER4 (L5): THE WRITTEN DIRECTION, the marking tool's own.
+			 * This bake wrote the raw solve's direction, and on the Commonwealth v4
+			 * bake F5's instrument read p99 28-69 degrees and seams (> 10 degrees)
+			 * on 5.6-30.7 percent of the adjacent pairs of the 14 rivers of >= 1000
+			 * texels: the staircase banks' own flow. Now the direction goes through
+			 * waterWrittenDirection() (bank texels and slack water continued from
+			 * the interior, then the 8-pass in-mask low-pass) over the river's
+			 * piece; the SPEED stays the raw solve's. Red: WW_LODL_FLOW_DIR_RED=raw
+			 * (the raw direction, byte for byte the old plane). */
+			std::vector<float> wvx, wvy;
+			double pieceMean = 0.0;
+			{
+				std::vector<quint8> pm( size_t( w ) * size_t( h ), quint8( 0 ) );
+				qint64 pn = 0;
+				for ( int c = 0; c < G.n; c++ ) {
+					if ( G.comp[size_t( c )] != piece )
+						continue;
+					pm[size_t( G.cy[size_t( c )] ) * size_t( w ) + size_t( G.cx[size_t( c )] )] = 1;
+					pieceMean += std::sqrt( ux[size_t( c )] * ux[size_t( c )] + uy[size_t( c )] * uy[size_t( c )] );
+					pn++;
+				}
+				if ( pn )
+					pieceMean /= double( pn );
+				if ( !dirRed ) {
+					wvx.assign( size_t( w ) * size_t( h ), 0.0f );
+					wvy.assign( size_t( w ) * size_t( h ), 0.0f );
+					std::vector<double> pux( ux ), puy( uy );
+					for ( int c = 0; c < G.n; c++ )
+						if ( G.comp[size_t( c )] != piece )
+							pux[size_t( c )] = puy[size_t( c )] = 0.0;
+					waterWrittenDirection( w, h, pm, G, pux, puy, pieceMean, wvx, wvy );
+					waterFieldDump( "river", int( id ), w, h, int( R.x0 ), int( R.y0 ), false, pieceMean, median,
+						pm, G, std::vector<double>( size_t( G.n ), 0.0 ), pux, puy, wvx, wvy, std::vector<float>() );
+				}
+			}
 			R.word.assign( size_t( w ) * size_t( h ), quint16( 0 ) );
 			for ( int c = 0; c < G.n; c++ ) {
 				const size_t at = size_t( G.cy[size_t( c )] ) * size_t( w ) + size_t( G.cx[size_t( c )] );
@@ -1689,10 +1728,21 @@ static bool lodtBuildWater( const WaterInput & in, quint64 baseOffset,
 				}
 				const double vx = ux[size_t( c )], vy = uy[size_t( c )];
 				double a = std::atan2( vy, vx );
+				if ( !wvx.empty() && ( wvx[at] != 0.0f || wvy[at] != 0.0f ) ) {
+					a = std::atan2( double( wvy[at] ), double( wvx[at] ) );
+					riverSmoothed++;
+				}
 				if ( a < 0.0 )
 					a += kTwoPi;
 				const int dir = int( a / kTwoPi * 256.0 + 0.5 ) & 0xFF;
-				const int spd = qBound( 0, int( std::floor( 8.0 * std::sqrt( vx * vx + vy * vy ) / median + 0.5 ) ), 15 );
+				const double s = std::sqrt( vx * vx + vy * vy );
+				int spd = qBound( 0, int( std::floor( 8.0 * s / median + 0.5 ) ), 15 );
+				/* Lane FARWATER4 (L4): water that moves never reads 0 (watermark.h
+				 * waterSpeedFloor; red WW_WATER_SPEED_FLOOR_RED=round) */
+				const int spd0 = spd;
+				spd = waterSpeedFloor( spd, s, pieceMean, floorRed );
+				riverLifted += spd != spd0;
+				riverDead += spd == 0;
 				R.word[at] = quint16( dir | ( spd << 8 ) | ( kLodlFlowSolvedConfidence << 12 ) );
 				riverTexels++;
 			}
@@ -2285,6 +2335,10 @@ static bool lodtBuildWater( const WaterInput & in, quint64 baseOffset,
 				"word, %4 iterations, worst residual %5, %6 s" )
 				.arg( riversSolved ).arg( riverTexels ).arg( riversFellBack ).arg( riverIterations )
 				.arg( riverWorstResidual, 0, 'g', 3 ).arg( riverSeconds, 0, 'f', 2 )
+				+ QString( "; written direction on %1 texels%2; speed 0 on %3, %4 moving texel(s) lifted to 1%5" )
+				.arg( riverSmoothed ).arg( dirRed ? QStringLiteral( " (WW_LODL_FLOW_DIR_RED=raw: the raw solve)" ) : QString() )
+				.arg( riverDead ).arg( riverLifted )
+				.arg( floorRed ? QStringLiteral( " (WW_WATER_SPEED_FLOOR_RED=round)" ) : QString() )
 			: QStringLiteral( "  flow field: off (--water-flow-constant), every body carries its constant word" ) );
 		L << QString();
 		L << QStringLiteral( "== THE 20 BIGGEST BODIES ==" );
@@ -2335,8 +2389,10 @@ static bool lodtBuildWater( const WaterInput & in, quint64 baseOffset,
 		if ( in.opt.shore && !in.opt.shorePerBody )
 			out.summary += QString( "; shore to land only: %1 body seam edge(s) are not shore" ).arg( seamEdges );
 		if ( in.opt.flowField )
-			out.summary += QString( "; flow field %1 river(s), %2 texels, %3 constant" )
-				.arg( riversSolved ).arg( riverTexels ).arg( riversFellBack );
+			out.summary += QString( "; flow field %1 river(s), %2 texels, %3 constant, %4 s; written direction on %5, "
+				"speed 0 on %6 (%7 lifted)" )
+				.arg( riversSolved ).arg( riverTexels ).arg( riversFellBack ).arg( riverSeconds, 0, 'f', 2 )
+				.arg( riverSmoothed ).arg( riverDead ).arg( riverLifted );
 	}
 	if ( error )
 		error->clear();
