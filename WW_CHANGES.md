@@ -1,5 +1,24 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## RESTIRSPV1 (2026-10-31, FIX1031A): restir.spv.h regenerated from its own source, and a test that every SPIR-V header matches its source
+
+- **What:** `src/rtddgi/restir.spv.h` (the ReSTIR DI kernel the exe embeds) was stale vs `restir.comp` since the
+  CODE1030 merge of RESTIRDI1 (d88154ca): RESTIRDI1 compiled it against the pre-RTXCASCADE2 `ddgi_common.glsl`, and the
+  merge brought RTXCASCADE2's two new trailing Params members (skipLo, skipHi). Rebuilt with `tools/rtddgi_spirv.sh`
+  (glslangValidator 11:16.3.0, `--target-env vulkan1.2 -V --vn rtddgi_restir_spv`): 197823 B -> 198069 B. The
+  disassembly differs ONLY in the Params struct (2 members, offsets 256/272, names): the old kernel read the same
+  offsets, so the ReSTIR result does not change (cli gate below). The other 7 committed SPIR-V headers (bakert rq, bvh,
+  rqx; rtddgi trace, blend, border, reloc) rebuild byte-identical: unchanged.
+- **New test:** `bash tests/spvsync/run.sh <out>` (`tests/spvsync/check_spv.py`): rebuilds every `src/**/*.spv.h` from
+  its source into scratch with the generator scripts' own flags and FAILs when a committed header differs; also FAILs
+  on a `.spv.h` no generator makes, or when `tools/bakert_spirv.sh` / `tools/rtddgi_spirv.sh` drift from its table.
+  No glslangValidator (`GLSLANG=`, default the RenderDoc 1.45 copy), or a glslang whose version differs from the
+  header's `// <stamp>` first line: SKIP, rc 77 (never a pass). Reds in run.sh: the 563dcf97 restir.spv.h (stale) and
+  today's with one word flipped; both FAIL. No switch: a generated file, no runtime path changed.
+- **Gates:** spvsync green PASS 8 (rc 0; rc 1 on the old tree); tests/restir_math/cli_gate.sh GATE OK (GPU vs twin
+  light kept / hit-miss differ 0 every frame, novis red ratio 1.0000); tests/restir_math/run.sh green 7 + 7 reds; the
+  exe holds the new kernel's words once and the old ones 0 times; sweeps base 405 / rtx 270 / prt 405 LINK OK.
+
 ## LEANCOMMENTS1 (2026-10-31, FIX1031A): the comment trim pass lands on main (comments only, exe byte-identical)
 
 - **What:** origin/cloud-leancomments1 (cut from 5c98715a, 918 commits behind main) trims comments in `src/cell*`,
