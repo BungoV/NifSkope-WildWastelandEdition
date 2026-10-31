@@ -184,6 +184,10 @@ public:
 	/*! lane TREELEAF2: the threshold a side pass uploads for its `discard a < t` test (da = wwDrawAlpha of that pass), so
 	 *  it keeps the colour pass's texels: the next float above ref / 255 where the colour test is a strict `>` */
 	float wwLeafSideThreshold( const WwDrawAlpha & da, const char * pass ) const;
+	/*! lane FIX1031B: the colour pass multiplies this shape's texture alpha by something under 1 (its vertex alpha, not a
+	 *  tree; or its material alpha), so its test is not tex.a > ref and the coverage copy does not fit it
+	 *  (src/gl/wwleafcov.h vertexAlphaModulates; the Concord church's window quad, vertex alpha 25 / 255) */
+	bool wwAlphaModulated() const;
 	/*! lane TREELEAF3: what a side pass's `discard a < t` test reads (src/gl/wwfxcov.h Side): fxMode, the alpha factor
 	 *  and the threshold. A lighting shape: today's (mode 0, its material alpha, wwLeafSideThreshold); an alpha-tested
 	 *  effect shape (fo4_effectshader): the colour pass's composed alpha (baseColor.a^2, the vertex alpha, the palette's
@@ -193,8 +197,19 @@ public:
 		int mode = 0;	// 0 today's test; 4 + 1 the vertex alpha + 2 the palette's alpha
 		float mult = 1.0f;
 		float threshold = 0.0f;
+		/* lane TREELEAF4 (FXCOVRESID1): mode + 8 the falloff (falloffParams: start / stop angle, start / stop opacity),
+		 * + 16 the cell's soft fade (softDepth, game units), as fo4_effectshader.frag composes them. Red
+		 * WW_FXCOVRESID_RED=1: TREELEAF3's rule (neither). volPart: a volumetric lit card (cell_volpart.glsl), whose
+		 * colour alpha is a puff the side pass does not reproduce (neither factor, no coverage rule). */
+		float falloff[4] = { 1.0f, 0.0f, 1.0f, 1.0f };
+		float softDepth = 1.0f;
+		bool volPart = false;
 	};
 	WwFxAlpha wwFxSideAlpha( const WwDrawAlpha & da, const char * pass ) const;
+	/*! lane TREELEAF4 (TAABLENDMOVER1): the colour draw blends this shape (Renderer::setupProgramCE1's GL_BLEND: a
+	 *  readable material's alpha blend, else a translucent shape, else the NiAlphaProperty's blend; never with the
+	 *  Blending option off). The TAA object vectors draw such a mover by its coverage (taainputs.cpp). */
+	bool wwBlendedAsDrawn() const;
 	//! the GPU applies the bone transforms to this shape (the caster pass skins it on the CPU)
 	bool wwGpuSkinned() const { return isSkinned && !transformRigid && !boneTransforms.empty(); }
 	//! lane FARDRAW1: the instanced far ring this shape draws, or null
@@ -255,6 +270,10 @@ protected:
 	bool translucent = false;
 	bool surfaceDecal = false;	// lane FXD1
 	bool effectDecal = false;	// lane DECALLIT1: an effect shader with the Decal flag (the game draws it into the surface)
+	//! lane FIX1031B: the lowest vertex alpha (0..1), kept for the colours array it was taken from (data, size)
+	mutable const void * wwVaKey = nullptr;
+	mutable qsizetype wwVaCount = -1;
+	mutable float wwVaMin = 1.0f;
 
 	void updateShader();
 

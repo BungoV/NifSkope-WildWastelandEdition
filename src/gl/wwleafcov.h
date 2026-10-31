@@ -19,7 +19,18 @@
  *  - sideThreshold(): the threshold a side pass uploads so that its `discard a < t` keeps exactly the colour pass's
  *    `a > ref / 255` texels (the next float above ref / 255) -- for a lighting shape whose colour test is strict;
  *  - passRed(): WW_TREELEAF_RED. "1" every pass binds the plain file (TREELEAF1's red); "side" or a comma list of
- *    sun,cube,taa,refl puts those side passes back to today's draw (the plain file and the old threshold). */
+ *    sun,cube,taa,refl puts those side passes back to today's draw (the plain file and the old threshold).
+ *
+ * lane FIX1031B (bungo's sheet_3, 10-31: the Concord church's gothic window tracery vanished with the copy, the red drew
+ * it): the copy keeps level 0's coverage of `tex.a > ref`, but the colour pass tests `C.a x tex.a x alpha > ref`
+ * (fo4_default.frag). A shape whose vertex alpha is under 1 (and not a tree: NifSkope sets C.a = 1 on Tree_Anim shapes)
+ * or whose material alpha is under 1 tests the texture at a HIGHER threshold, which the copy does not preserve: the
+ * copy lowers the alpha of whole levels (x 0.3 at the small levels of ChurchSidingWindow01, ref 10), and
+ * bldchurch01open.nif's window quad (vertex alpha 25 / 255: the game's "glass gone" trick, the panes at tex.a 80 fail,
+ * the frame at 255 passes) then fails everywhere. Such a shape binds the plain file (In::modulated, colourRef 0). Census
+ * (notes/fix1031b/leaves/census/modcensus.txt, vanilla Meshes + MeshesExtra + BNS): 168906 of 169251 alpha-tested foliage
+ * shapes keep the copy (the 345 that lose it are grass objects whose vertex alpha fades to 0); 5414 of 202328 others
+ * lose it. Red WW_TREELEAF_RED=modulate: the copy on those shapes too (TREELEAF1-3 as they shipped). */
 
 #include <cmath>
 #include <cstring>
@@ -41,13 +52,33 @@ struct In
 	bool nifTest = false, nifBlend = false;
 	int nifFunc = -1;	//!< NiAlphaProperty test: 4 >, 6 >=
 	float nifThreshold = 0.0f;	//!< NiAlphaProperty threshold (0..1)
+	bool modulated = false;	//!< FIX1031B: the colour test multiplies tex.a by a factor under 1 (vertexAlphaModulates)
 };
+
+/*! FIX1031B: does the colour pass multiply this shape's texture alpha by something under 1? Mirrors renderer.cpp's
+ *  vertexColorOverride (setupProgramCE1): the vertex alpha reaches C.a when the shape draws its vertex colours
+ *  (`drawsColours`), the Vertex Alpha option is on, the shape is not a tree (`treeAnim`: C.a = 1), and before BSVER 130
+ *  its SLSF1 Vertex_Alpha flag is set (`pre130NoAlphaFlag`: C.a = 1); `minVertexAlpha` is the lowest over its vertices
+ *  (0..1). `materialAlpha` is the shader's alpha uniform (BGSM / NIF alpha). */
+inline bool vertexAlphaModulates( bool drawsColours, bool vertexAlphaOn, bool treeAnim, bool pre130NoAlphaFlag,
+	float minVertexAlpha, float materialAlpha )
+{
+	if ( materialAlpha < 1.0f )
+		return true;
+	if ( !drawsColours || !vertexAlphaOn || treeAnim || pre130NoAlphaFlag )
+		return false;
+	return minVertexAlpha < 1.0f;
+}
 
 //! the colour pass's base-map copy: alpha > ref with ref in 1..254, else 0 (the plain file)
 inline int colourRef( const In & s )
 {
 	if ( !s.lighting || !s.blendingOn || s.land )
 		return 0;
+#ifndef WWLEAFCOV_RED_MODULATE	// the unit's red: TREELEAF1-3's rule, the copy whatever multiplies the texture alpha
+	if ( s.modulated )
+		return 0;	// FIX1031B: the test is not tex.a > ref, so the copy built at ref does not fit it
+#endif
 	int r = 0;
 	if ( s.hasMat ) {
 		if ( s.matTest && !s.matBlend )
@@ -79,6 +110,22 @@ inline float sideThreshold( const In & s, bool fromMaterial, float today )
 	return today;
 }
 
+//! is `word` one of the comma-separated items of `spec`?
+inline bool listHas( const char * spec, const char * word )
+{
+	const size_t n = std::strlen( word );
+	for ( const char * p = spec; *p; ) {
+		const char * e = std::strchr( p, ',' );
+		const size_t len = e ? size_t( e - p ) : std::strlen( p );
+		if ( len == n && std::strncmp( p, word, n ) == 0 )
+			return true;
+		if ( !e )
+			break;
+		p = e + 1;
+	}
+	return false;
+}
+
 //! WW_TREELEAF_RED for one pass ("colour", "sun", "cube", "taa", "refl"): true = that pass draws as before TREELEAF2/1
 inline bool passRed( const char * spec, const char * pass )
 {
@@ -90,17 +137,13 @@ inline bool passRed( const char * spec, const char * pass )
 		return false;
 	if ( std::strcmp( spec, "side" ) == 0 )
 		return true;
-	const size_t n = std::strlen( pass );
-	for ( const char * p = spec; *p; ) {
-		const char * e = std::strchr( p, ',' );
-		const size_t len = e ? size_t( e - p ) : std::strlen( p );
-		if ( len == n && std::strncmp( p, pass, n ) == 0 )
-			return true;
-		if ( !e )
-			break;
-		p = e + 1;
-	}
-	return false;
+	return listHas( spec, pass );
+}
+
+//! FIX1031B: WW_TREELEAF_RED holds "modulate" (alone or in its comma list): the copy also on shapes In::modulated names
+inline bool modulateRed( const char * spec )
+{
+	return spec && listHas( spec, "modulate" );
 }
 
 }	// namespace WwLeafCov

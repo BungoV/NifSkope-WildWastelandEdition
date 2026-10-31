@@ -1,5 +1,50 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## TREELEAF1 fix (2026-10-31, FIX1031B): the coverage copy no longer erases the Concord church's window tracery
+
+- **The regression (bungo's sheet_3, SHOTS1031B run4a c3_p3i_e700_* / c3_p3i_e1700_*):** with TREELEAF1's coverage
+  copy the church's gothic window frames vanished at 700 u and 1700 u; WW_TREELEAF_RED=1 drew them, red=refl alone left
+  the windows at noise. Cause (MEASURED offline on the game's files, notes/fix1031b/leaves): the tracery is
+  ChurchSidingWindow01.BGSM (alpha test, ref 10, no blend; churchsidingwindow01_d.dds 1024x1024 BC3: frame 255, panes 80,
+  holes 0) on bldchurch01open.nif's window quad, whose vertices carry vertex alpha 25 / 255. The colour pass tests
+  `C.a x tex.a x alpha > ref` (fo4_default.frag), so that quad tests the texture at 102: the panes (80) fail, the frame
+  (255) passes: the game's "glass gone" look. The copy is built for `tex.a > 10` alone; at levels >= 2 it scales the
+  level's alpha down (~0.3) to drop the blurred edges' excess, and the frame then fails 102 everywhere: coverage at the
+  quad's own threshold 0.0 % of level 0 at levels 2..6 (the plain mips 102-140 %). Not a foliage/non-foliage mix-up,
+  not the BC3 re-encode, not a mip dropout. NifSkope draws the refs (the precombined copies carry no vertex colours).
+- **The fix (src/gl/wwleafcov.h, gl/glshape.*), on by default:** a lighting shape whose colour test multiplies the
+  texture alpha by something under 1 -- its vertex alpha (when it draws its vertex colours, the Vertex Alpha option is
+  on and it is not a Tree_Anim shape, whose C.a NifSkope sets to 1) or its material alpha -- binds the plain file in
+  every pass (`WwLeafCov::vertexAlphaModulates`, `In::modulated`; `Shape::wwAlphaModulated` keeps the lowest vertex
+  alpha per colours array). Every other shape keeps the copy byte for byte. Census (vanilla Meshes + MeshesExtra + BNS,
+  alpha-tested unblended BGSMs): 168906 of 169251 foliage shapes keep the copy (the 345 that lose it are grass objects
+  whose vertex alpha fades to 0); 5414 of 202328 other shapes lose it (gore tiles, decal-like overlays, the church).
+- **Red:** `WW_TREELEAF_RED=modulate` (alone or in its comma list; live, stage 0 as before): the copy on those shapes
+  too (TREELEAF1-3 as shipped). `WW_TREELEAF_RED=1` still binds the plain file everywhere.
+- **Gates:** `bash tests/leafcovmod/run.sh <out> [<dumps>]` green 230 checks 0 failed (the church quad keeps 101-140 %
+  of level 0's coverage at its own threshold on levels 1..6; 8 leaf maps + the church's other maps keep coverage at ref
+  within 1.1 %); red (main's colourRef) 10 FAIL church (0.0 % at levels 2..6). tests/treeleaf1 + tests/treeleaf2 green.
+- **Owed:** pictures: c3_p3i_e700_* / c3_p3i_e1700_* again (after vs red=1: the windows must match; the leaves keep
+  their cover vs red=1 as on sheet_3).
+
+## TREELEAF4 (2026-10-31, FIX1031A WIP, finished by FIX1031B): effect coverage residue and blended TAA movers
+
+- **FXCOVRESID1 (src/gl/glshape.*, gl/taainputs.cpp, res/shaders/taa_objvel.*):** TREELEAF3 left two factors of an
+  alpha-tested effect's colour alpha out of the TAA object-vector test; now Shape::wwFxSideAlpha adds the falloff
+  (fxMode + 8, falloffParams, the normal-map normal; the CPU-skinned frame rides as attributes 2-4) and the cell's soft
+  fade (+ 16, the opaque pass's depth, only when it was grabbed this pass), with fo4_effectshader.frag's own lines in
+  its order. A volumetric lit card (VOLPART1) is flagged and left to TREELEAF3's rule. Red `WW_FXCOVRESID_RED=1`.
+- **TAABLENDMOVER1 (gl/taainputs.cpp, taa_objvel.frag):** a BLENDED mover (Shape::wwBlendedAsDrawn = setupProgramCE1's
+  blend enable) writes its object vector only where its composed alpha >= 0.5 and marks the rest of its triangles
+  reactive (mask R). Measured offline on the real taa2.frag (tests/treeleaf4/blendmover_gate.py, 24 scenes): the
+  background behind a moving card 15-65 % closer to the reference, the card within 2 %; no plain vector policy passed
+  every scene. Red `WW_TAABLENDMOVER_RED=1`. The pass prints `taa movers by coverage: ...` when its counts change.
+- **A2CCOLOUR1:** measured (tests/treeleaf4/a2c_gate.py, 4x MSAA): alpha-to-coverage shimmers no less than the test
+  at 4 px a texel (0.1728 vs 0.1698): REFUSED, no code.
+- **Gates:** `bash tests/treeleaf4/run.sh <out>`: sites green PASS, red (563dcf97) FAIL; fxcov_gate (the real
+  fo4_effectcell vs the real taa_objvel, hidden GL context) green 0 of 32 checks fail, reds base + resid FAIL.
+  tests/treeleaf3 green. Owed: pictures of a moving alpha-tested / blended effect under TAA (red pairs above).
+
 ## RESTIRSPV1 (2026-10-31, FIX1031A): restir.spv.h regenerated from its own source, and a test that every SPIR-V header matches its source
 
 - **What:** `src/rtddgi/restir.spv.h` (the ReSTIR DI kernel the exe embeds) was stale vs `restir.comp` since the
