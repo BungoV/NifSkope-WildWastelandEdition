@@ -27,6 +27,11 @@
   cascade 1 (547.6) 19.9 / 19.7 ms at 128 rays and 12.3 / 12.8 at 64, cascade 2 (1095.2) 16.5 at 128 and 10.3 at 64. At 4
   updates a due frame that is ~1.40 ms a frame for one volume and Low ~1.51, Medium ~1.64, High ~1.77, Ultra ~1.8 ms
   (RTXCASCADE1's bars: <= 2.0 ms, <= 1.5x one volume). Live GPU ms per preset: rows owed (notes/fix1031b/gi/HANDOFF.md).
+- **Ultra: a finer near cascade (RECESSRES1):** Ultra halves cascade 0's reach (1024: its spacing is then the asked 140 u,
+  not the 4096-probe cap's 273.8) and its 4th cascade keeps the far reach (8192, High's). MEASURED offline at 137 u
+  against the traced references (SKYBELOW1's spot table, notes/fix1031b/gi/spot_table_137.txt): sky visibility over the
+  tracer, Memory Den recess wall 1.54 -> 1.00, store dark room 42.9 -> 8.9, store windows 1.06 -> 0.99, street 1.02 ->
+  0.97; GN recess2 0.199 -> 0.169 (tracer 0.049: still over-lit, a leftover). A `reach=` in WW_CELL_RTDDGI_SPEC wins.
 - **Gates:** tests/rtddgi_math green 26 + 26 reds (new `cover`: the largest step walking up a trunk past the top usable
   layer 0.0025 of the GI-vs-ambient gap, header and GLSL, across the box top 0.0025; the runtime red nocover = today
   1.0000; between an Off and a usable layer the fade stays 1; red `RTDDGI_RED_COVER` fails it). Offline link sweeps on

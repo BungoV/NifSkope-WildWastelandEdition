@@ -76,6 +76,7 @@ CellSpec cellSpecNow()
 	const int preset = std::clamp( rtddgiRtPreset(), 0, 3 );   // FIX1031B: the coarse cascades' cadence and rays per preset
 	s.every = kPresetEvery[preset];
 	s.crays = kPresetCRays[preset];
+	bool reachSet = false;
 	s.text = wwEnvStr( "WW_CELL_RTDDGI_SPEC" ).trimmed();
 	for ( const QString & kv : s.text.split( QLatin1Char( ',' ), Qt::SkipEmptyParts ) ) {
 		const QStringList p = kv.split( QLatin1Char( '=' ) );
@@ -88,7 +89,7 @@ CellSpec cellSpecNow()
 			continue;
 		if ( k == QLatin1String( "spacing" ) && v > 1.0 ) s.spacing = float( v );
 		else if ( k == QLatin1String( "zscale" ) && v > 0.05 ) s.zscale = float( v );
-		else if ( k == QLatin1String( "reach" ) && v > 100.0 ) s.reach = float( v );
+		else if ( k == QLatin1String( "reach" ) && v > 100.0 ) { s.reach = float( v ); reachSet = true; }
 		else if ( k == QLatin1String( "probes" ) && v >= 8.0 ) s.probes = int( std::min( v, 65536.0 ) );
 		else if ( k == QLatin1String( "rays" ) && v >= 33.0 ) s.rays = int( std::min( v, 256.0 ) );
 		else if ( k == QLatin1String( "updates" ) && v >= 1.0 ) s.updates = int( std::min( v, 16.0 ) );
@@ -96,6 +97,14 @@ CellSpec cellSpecNow()
 		else if ( k == QLatin1String( "cevery" ) && v >= 1.0 ) s.every = int( std::min( v, 64.0 ) );
 		else if ( k == QLatin1String( "crays" ) && v >= 0.0 ) s.crays = int( std::min( v, 256.0 ) );   // RTXCASCADE2
 		else if ( k == QLatin1String( "cskip" ) && v >= 0.0 ) s.cskip = v > 0.5 ? 1 : 0;              // RTXCASCADE2
+	}
+	/* FIX1031B (RECESSRES1): Ultra halves cascade 0's reach (its spacing then 140 u, the asked one, not the cap's 273.8)
+	 * and its 4th cascade keeps the far reach (1024 x 2^3 = High's 2048 x 2^2). Measured offline at 137 u (notes/fix1031b/
+	 * gi/spot_table_137.txt vs SKYBELOW1's 273 u table): sky visibility over the tracer, Memory Den recess wall 1.54 ->
+	 * 1.00, store dark room 42.9 -> 8.9; GN recess2 0.199 -> 0.169 (tracer 0.049: still a leftover) */
+	if ( preset == 3 && !reachSet && rtddgiCellCascades() > 1 ) {
+		s.reach = 1024.0f;
+		s.text += QStringLiteral( "|near 1024" );   // the build key
 	}
 	return s;
 }
