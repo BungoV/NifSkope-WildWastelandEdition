@@ -1,3 +1,27 @@
+## HORIZONBAND1 (FIX1031B area A, 2026-10-31): the horizon blends - no cyan strip with a hard top edge
+
+bungo's pictures (notes/shots1031 sheet_1 spot 3, sheet_spot5 sea, CommonwealthClear 12:00): a saturated cyan strip
+along the horizon (spot 3 rows ~495-551, 150,201,243; the sea 451-460, 176,223,253) with a hard top edge at a fixed
+elevation per camera (+0.69 deg from 134 m, +0.42 deg from 12.9 m), the cloud layers cut off under it.
+
+- Owner (bisect hold notes/fix1031b/h1, one c3 launch; edge step median / share of columns): base 13.7 / 100 %,
+  WW_CELL_AIR_RED=nosky 2.0 / 2 %, WW_ATMO_AP_RED=double 1.3 / 0 %, WW_ATMO_AP=0 1.3 / 2 %, WW_CELL_AIR=0 2.0 / 2 %,
+  WW_CELL_FARLOD=0 12.0 / 100 % (stays). = the Volumetric Air over the physical sky (cell_volsky.frag) with the aerial
+  perspective's residual T' = min(1, Tfog / tSky): toward the horizon both are ~0 and their ratio moves ~e^4 a degree,
+  so the clamp switched the backdrop (sky + cloud layers) to the fog record's colour at infinity within ~0.2 deg.
+  Offline twin on the frame's air dump (notes/fix1031b/sky/tools/twin_cover.py): the switch at +0.55 deg (picture +0.69).
+- Fix (ships ON): res/shaders/atmo_skyband.glsl, called by cell_volsky.frag. A horizon band where the sky's own air is
+  opaque, w = 1 - smoothstep(0, 0.03, tSky): the cover is at least w (fades out by ~2 deg on Clear noon) and its colour
+  in the band is the aerial perspective's own colour at its far end (what far geometry fades to), not the fog record's.
+  Where the fog leads high up (foggy weather, w ~ 0) the cover is today's. Surfaces are unchanged.
+- Red (live): WW_ATMO_AP_RED=skyclamp = today's clamp (atmosphere.cpp sets atApSkyRule; the sky line echoes
+  AP_RED=skyclamp). WW_ATMO_AP_RED was already a live switch in the stage table (no regen).
+- Unit tests/horizonband1/run.sh (the shader file compiled through a shim, on the h1 frame's twin numbers): green max
+  one-row step 3.1 / 1.9 levels (today 8.7 / 10.6), band base b - r 37 / 30 (today 92 / 86), sky -> terrain 9.2 / 12.1
+  (today 30.0 / 24.5; horizon colour a proxy), rows from +2.5 deg unchanged, a foggy case identical; red fails step,
+  cyan, meet. Sweeps 405 / 270 / 405 LINK OK.
+- Owed: the pictures (spot 3 c3_p1s3 env and spot 5 sea_ov12 env: after vs WW_ATMO_AP_RED=skyclamp).
+
 # NifSkope — Wild Wasteland Edition: Change Log
 
 ## RESTIRSPV1 (2026-10-31, FIX1031A): restir.spv.h regenerated from its own source, and a test that every SPIR-V header matches its source
