@@ -818,7 +818,7 @@ void CellWorkspacePanel::buildUi()
 	cellIs = tick( showMenu, tr( "Imagespace" ), "CellWorkspaceCellImageSpace", wwCellImageSpaceOn() );
 	// the game's temporal AA, the same state as the Scene popup's Temporal AA row; ships off
 	cellTaa = tick( showMenu, tr( "Temporal AA" ), "CellWorkspaceTemporalAa", wwGameTaaRowOn() );
-	// lane TAA2: our own resolve in place of the game's, Off | Low | Medium | High | Ultra; ships Off
+	// lane TAA2: our own resolve in place of the game's, Off | Low | Medium | High | Ultra; ships High (FIX1101A)
 	cellModernTaa = showMenu->addMenu( tr( "Improved Temporal Anti-Aliasing" ) );	// note 19: label only
 	cellModernTaa->setObjectName( QStringLiteral( "CellWorkspaceModernTaa" ) );
 	cellModernTaa->setEnabled( !wwTaa2Pinned() );
