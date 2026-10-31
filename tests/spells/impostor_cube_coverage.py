@@ -69,9 +69,8 @@ def main(argv):
     N, tw, th = int(octl[1]), int(octl[2]), int(octl[3])
     fhw, fhh = float(octl[4]), float(octl[5])
     off = {}
-    # the bake's supersample factor K from its own `aa K ...` line (lane
-    # IMPOSTORTEAR1 raised it 2 -> 4); a sidecar without one, or `aa 0` (the
-    # window photograph), is scored against the 2x2 estimator as before
+    # the bake's supersample factor K from its own `aa K ...` line; a sidecar without one, or `aa 0` (the
+    # window photograph), is scored against the 2x2 estimator
     K = 2
     for l in lines:
         if l[0] == 'aa' and len(l) > 1 and l[1].isdigit() and int(l[1]) > 0:
@@ -113,11 +112,8 @@ def main(argv):
         im = Image.new('L', (W, H), 0)
         ImageDraw.Draw(im).polygon(poly, fill=255)
         t = np.asarray(im, np.float64).reshape(th, SS, tw, SS).mean((1, 3)) / 255.0
-        # THE IDEAL KxK ESTIMATOR: the same polygon point-sampled at the K x K
-        # sample centres of the Kx render (K = 2: (x + 1/4, y + 1/4) ..
-        # (x + 3/4, y + 3/4)) -- what a correct Kx bake must reproduce, and so
-        # the design's own ceiling: its error against the area truth is the
-        # K^2-sample quantisation
+        # The ideal KxK estimator: the polygon point-sampled at the Kx render's sample centers -- what a correct
+        # bake must reproduce; its error against the area truth is the K^2-sample quantization.
         ps = np.stack(np.meshgrid((np.arange(K * tw) + 0.5) / (K * tw), (np.arange(K * th) + 0.5) / (K * th)), -1)
         hx = np.array([(x / (2 * fhw) + 0.5) for (x, y) in hull]); hy = np.array([(0.5 - y / (2 * fhh)) for (x, y) in hull])
         inside = np.ones(ps.shape[:2], bool)

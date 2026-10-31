@@ -36,7 +36,7 @@ uniform mat3 viewToWorld;
 uniform vec4 ssrK;			// the game's four: color scale 1, angle gate 0.2, normal z scale 2, confidence scale 1
 uniform vec2 ssrClip;		// the game camera's near (15) and far (the cell's clip distance), game units
 uniform int ssrRed;			// WW_CELL_SSR_RED: 2 nogap (no 50-unit refusal), 4 nofade (confidence 1 on a hit)
-uniform sampler2D waterRay;	// lane WATER2: full size, bottom row first: the water's ray in the view, its view depth
+uniform sampler2D waterRay;	// full size, bottom row first: the water's ray in the view, its view depth
 uniform bool haveWaterRay;
 uniform bool opaqueRays;	// false in an exterior: the water's rays alone
 uniform bool ssrPrev;		// lane PERF3: the hit's color from prevScene
@@ -99,7 +99,7 @@ void main()
 #endif
 		vec4 wr = haveWaterRay ? texelFetch( waterRay, t, 0 ) : vec4( 0.0 );
 		if ( wr.a > 0.0 ) {
-			// lane WATER2: the water lies in front here; its pass (02100) gated and wrote the ray already
+			// the water lies in front here; its pass already gated and wrote the ray
 			if ( dot( wr.xyz, wr.xyz ) == 0.0 )
 				return;
 			z = wr.a;

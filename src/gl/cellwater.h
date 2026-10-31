@@ -10,26 +10,9 @@
 class Scene;
 struct WwWaterRecord;
 
-/*! Lane WATER1 (2026-10-04): THE GAME'S WATER IN THE CELL VIEW.
- *
- *  The cell's water planes (XCWT, else the world's default) and the placed water meshes (an ACTI with a WNAM)
- *  are written as their own shapes (src/cellview.cpp) and registered here with their WATR record
- *  (src/esmwater.h, the one reader). While the Cell lights row draws, such a shape draws in the second pass
- *  through fo4_water.prog, the game's near-water pixel shader term for term:
- *    three noise normals (world xy / UV scale, amplitude-weighted, the 2nd and 3rd faded by the noise falloff,
- *    all flattened toward the shore), Fresnel F0 + (1 - F0)(1 - N.V)^5, the reflection = the game's 3-colour
- *    water sky (horizon, lower, upper by the reflected ray's z) from the weather rows the dome uses, the
- *    refraction = the scene behind (the renderer's copy) silt-tinted over the depth curve, the sun specular and
- *    the sparkle, the shore blend to the plain refraction, the far fade to the reflection colour, then the fog.
- *  Under the surface: the game's underwater variant (half sky + half underwater colour, mixed by 1 - F).
- *
- *  Part of the Cell lights row: no setting of its own. Harness only:
- *    WW_CELL_WATER=0            the water draws as before this lane (the off identity's pin)
- *    WW_CELL_WATER_RED=<term>   norefl | nofresnel | nosilt | nospec | noshore | nonormal: that term left out;
- *                               lane WATER2: nodepthfog (the second pass), nofar (the noise sampler's anisotropy),
- *                               nossr (the reflections computed, not read), fogunits (that pass's distances in metres)
- *    WW_CELL_WATER_PROBE=<n>    raw values instead of the colour (res/shaders/fo4_water.frag lists them)
- *    WW_CELL_WATER_DUMP=<file>  the records, the sky and the sun the draw used, one line each */
+/*! The game's water in the cell view: water planes and placed water meshes, registered with their WATR record,
+ *  draw through fo4_water.prog (the game's water pixel shader term for term) while the Cell lights row is on.
+ *  WW_CELL_WATER=0 draws them plainly; WW_CELL_WATER_RED=<term>, _PROBE=<n> and _DUMP=<file> are debug aids. */
 
 //! A new scene for this document: its table is emptied.
 void wwCellWaterBegin( const void * nif );
@@ -48,7 +31,7 @@ bool wwCellWaterWanted( Scene * scene, int block );
 bool wwCellWaterHeld( Scene * scene, int block );
 //! Lane FARWATER1: a sheet was held since the last ask; the view repaints until the lookup lands.
 bool wwCellWaterWantsRepaint();
-//! Lane SUNCELL1: `block` is a registered water surface (row or not): it never casts a sun shadow, as in the game.
+//! `block` is a registered water surface (row or not): it never casts a sun shadow, as in the game.
 bool wwCellWaterIsShape( const void * nif, int block );
 //! lane WATERLOOK1: the document registered any water shape (the ocean pass builds only then)
 bool wwCellWaterHasShapes( const void * nif );
@@ -58,15 +41,15 @@ void wwCellWaterDrive( float & windMs, float & swellM );
  *  breaker index, waves a group, foam opacity), waterShoreK2 (wind m/s, sea swell m, river fetch cap m, full-foam
  *  height m), waterShoreK3 (fresh-water foam persistence, breaker index, lap line opacity, lap line onset m) */
 void wwCellWaterSurfConsts( float surfK[4], float shoreK2[4], float shoreK3[4] );
-//! lane CELLALL1: the Water row (WW/CellWater, default on as before); the pin WW_CELL_WATER wins
+//! the Water row (WW/CellWater, default on as before); the pin WW_CELL_WATER wins
 bool wwCellWaterOn();
 void wwCellWaterSetOn( bool on );
 //! With fo4_water.prog bound for `block`: the record, the sky, the textures. False = draw it the old way.
 bool wwCellWaterUniforms( Scene * scene, int block, int firstTextureUnit );
-//! WATERHDR1: the water just set up writes linear light into the cell view's HDR frame (the renderer marks its
+//! the water just set up writes linear light into the cell view's HDR frame (the renderer marks its
 //! pixels for the one tone map, cellhdr.h). False for its probes and its reflection-ray pass (raw data).
 bool wwCellWaterWritesLinear();
-//! Lane WATER2: a water surface of this scene draws as water and its WATR's SSR flag is set (cellssr.h).
+//! a water surface of this scene draws as water and its WATR's SSR flag is set (cellssr.h).
 bool wwCellWaterSsrWanted( Scene * scene );
 /*! lane WATERCOMBINE1 (2026-10-27): every water look row below draws through ONE twin, fo4_waterlook.prog (all four
  *  defines compiled in), and each look reads its own uniform (waterDepthOn, waterCauOn, waterShoreOn bits 1 edge and

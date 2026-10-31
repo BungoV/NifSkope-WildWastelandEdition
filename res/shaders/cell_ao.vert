@@ -1,6 +1,6 @@
 #version 410 core
 
-// lane AO1: a full-screen quad (the obscurance's passes, cell_ao.frag)
+// a full-screen quad (the obscurance's passes, cell_ao.frag)
 
 layout ( location = 0 ) in vec3 vertexPosition;
 

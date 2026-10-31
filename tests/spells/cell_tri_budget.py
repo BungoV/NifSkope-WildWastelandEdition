@@ -86,9 +86,8 @@ def main():
             ut += nt
             wv += nv * cnt
             wt += nt * cnt
-        # VRAM: FO4 full-model vertex is 32 bytes at the common descriptor
-        # (position+uv+normal+tangent+colour, stride from vertexDesc low nibble
-        # x 4); index is 3 x u16 per triangle.
+        # VRAM: FO4 full-model vertex is 32 bytes at the common descriptor (stride from
+        # vertexDesc low nibble x 4); index is 3 x u16 per triangle.
         uvram = (uv * 32 + ut * 6) / 1048576.0
         wvram = (wv * 32 + wt * 6) / 1048576.0
         print('| %s | %d | %d | %d | %d | %d | %d | %.1f | %.1f |'

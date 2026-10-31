@@ -12,58 +12,9 @@ BSD License - see nifskope.h
 #include <QString>
 #include <QVector>
 
-/* ---------------------------------------------------------------------------
- * THE CELL'S REFERENCE MODEL -- every placed reference the plugin has, drawn or
- * not (lane CELLWORK1, 2026-09-19).
- *
- * bungo, verbatim: "The goal for cell viewer, is to eventually edit and save the
- * cells, view all the technical placed objects, do everything creation kit does
- * with cell editing".
- *
- * ===========================================================================
- * WHY THIS IS NOT `cellPickTable()`
- * ===========================================================================
- *
- * `src/cellpick.h` is DRAW DATA: one entry per thing that was welded into the
- * scene, with the world box the ray tests against.  Four kinds of reference
- * never reach it at all --
- *
- *   - a light, a sound marker, a trigger box or any other record whose base
- *     carries no MODL: the builder counts it as "skipped, no model" and moves
- *     on;
- *   - an editor marker, while the Markers row is off;
- *   - an initially-disabled reference, while the Disabled row is off;
- *   - a deleted reference, and a reference with no base at all.
- *
- * -- and one kind reaches it MORE THAN ONCE: an SCOL expands into a row per
- * part, because each part is a separately pickable box.
- *
- * So a list built on the pick table is a list of what was DRAWN, and the
- * Creation Kit's cell view is a list of what EXISTS.  This table is the second
- * thing: one entry per REFR the reader returned, keyed by reference form id,
- * appended at the single funnel every REFR passes through
- * (`pushRefr` in src/cellview.cpp) BEFORE any decision about drawing is taken.
- * Its count is therefore the plugin's placed-reference count for the block, and
- * a gate can check that against an independent read of the same plugin.
- *
- * `fate` is why a reference is not on screen, in the builder's own words. It is
- * set on the way out of each of pushRefr's early returns, so it cannot drift
- * from the reason the census counts.
- *
- * ===========================================================================
- * THIS IS THE EDITOR'S MODEL, AND IT IS DELIBERATELY NOT A WIDGET
- * ===========================================================================
- *
- * Pure data -- no Qt widget, no GL, no NifModel -- exactly like the pick table,
- * for the same reason: a gate can build a cell, count its references and check
- * one by form id without a window and without a screenshot.  A later lane that
- * makes rows EDITABLE wants a model keyed by reference form id with an undo
- * stack over it (the animation workspace's shape), and this is the object that
- * model edits.  What does not exist anywhere in this tree yet is a WRITER: the
- * ESM/ESP side is read-only (src/esmdata.h has no save, no record emit, and no
- * byte writer), so editing and saving a cell is a plugin-writing lane before it
- * is a UI lane.
- * --------------------------------------------------------------------------- */
+/* The cell's reference model: one entry per REFR the plugin has, drawn or not, keyed by form id and
+ * appended in pushRefr (src/cellview.cpp) before any draw decision. Unlike cellPickTable() (what was
+ * DRAWN), this is what EXISTS; `fate` says why a reference is not on screen. Pure data, no widgets or GL. */
 
 //! Why a placed reference is, or is not, on screen -- the builder's own reason.
 enum class CellRefFate
@@ -74,32 +25,18 @@ enum class CellRefFate
 	Disabled,       //!< initially disabled (or enable parent inverted), row off
 	NoModel,        //!< the base carries no MODL: lights, sounds, primitives
 	Marker,         //!< an editor marker model, and the Markers row is off
-	Projected,      //!< lane PLACED1: a decal, drawn on the surfaces under it (no shape of its own to pick)
-	Refused         //!< lane PLACED1: placed content this view names and does not draw (the census says why)
+	Projected,      //!< a decal, drawn on the surfaces under it (no shape of its own to pick)
+	Refused         //!< placed content this view names and does not draw (the census says why)
 };
 
-/*! ONE LOADED CELL (lane CELLWORK1, bungo: "the viewed cells should include
- *  their names too if they have them" / "display a set amount of loaded cells
- *  near the camera, so not just one if you so choose").
- *
- *  The view has ALWAYS loaded a block (`CellSceneSpec::n`, odd: 1, 3, 5), so
- *  "more than one cell" is not new -- what was missing is that nothing said
- *  which cells those were or what each one carried.  This list is one entry per
- *  grid position in the block that the worldspace actually has a CELL record
- *  for, and the workspace's list carries a Cell column keyed to it.
- *
- *  It is deliberately a LIST OF CELLS and not a single cell with extra fields,
- *  so the camera-following streaming lane has the shape it needs already: rows
- *  come and go, nothing else changes. */
+/*! One loaded cell of the block (CellSceneSpec::n, odd): one entry per grid position the worldspace
+ *  has a CELL record for. A list, so camera-following streaming only adds and removes rows. */
 struct CellBlockEntry
 {
 	int cx = 0, cy = 0;
 	quint32 cellForm = 0;
-	/*! The CELL record's EDID, empty when it carries none.  The DISPLAY name
-	 *  (FULL) is NOT here: Fallout4.esm is localised, so FULL is a four-byte
-	 *  index into a string table this reader does not read.  An empty edid is a
-	 *  cell with no editor id, which is ordinary; there is no field that means
-	 *  "we could not be bothered to look". */
+	/*! The CELL record's EDID, empty when it carries none. FULL is not here: Fallout4.esm is
+	 *  localized, so FULL is a string-table index this reader does not resolve. */
 	QString edid;
 	int references = 0;     //!< reference-model entries from this grid position
 	int drawn = 0;          //!< of those, the ones that reached the scene
@@ -155,10 +92,8 @@ public:
 	const CellBlockEntry & cellAt( int i ) const { return cells.at( i ); }
 	//! The label for the cell at this grid position, or `(x,y)` if unknown.
 	QString labelOfGrid( int cx, int cy ) const;
-	/*! Count each cell's references and drawn references from the entries
-	 *  themselves. Called once after the reads, so the per-cell numbers are a
-	 *  WALK of the table the list shows and not a second set of counters that
-	 *  could disagree with it. */
+	/*! Count each cell's references and drawn references by walking the entries, so the per-cell
+	 *  numbers cannot disagree with the list. Called once after the reads. */
 	void tallyCells();
 
 private:
@@ -168,8 +103,7 @@ private:
 	QHash<QPair<int, int>, int> byGrid;
 };
 
-/*! THE REFERENCE MODEL OF THE CELL THAT IS OPEN. The builder fills it; the
- *  workspace's list and the gates read it. One at a time, like the document. */
+/*! The reference model of the open cell. The builder fills it; the workspace list and gates read it. */
 const CellRefTable & cellRefTable();
 CellRefTable & cellRefTableMutable();
 

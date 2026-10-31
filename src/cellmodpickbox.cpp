@@ -29,7 +29,7 @@ BSD License - see nifskope.h
 #include <QUrl>
 #include <QVBoxLayout>
 
-// lane MODPICK1 -- see cellmodpickbox.h
+// see cellmodpickbox.h
 
 namespace {
 enum { kFile = 0, kMod = 1 };

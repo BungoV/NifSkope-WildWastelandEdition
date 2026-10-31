@@ -179,7 +179,7 @@ def billboard_cards(path):
 def cards_of(esm, data, cell_edid):
     buf = open(esm, 'rb').read()
     cell_form, models, refs = None, {}, []
-    start = {}      # lane MISS1: ref form -> (initially disabled, enable parent, opposite), in the order of refs
+    start = {}      # ref form -> (initially disabled, enable parent, opposite), in the order of refs
 
     def hidden(form, depth=0):
         # the game's start state: the enable parent's own state (its flag, or its parent's in turn), inverted

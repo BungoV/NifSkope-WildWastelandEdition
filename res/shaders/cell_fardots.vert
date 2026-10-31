@@ -1,9 +1,7 @@
 #version 410 core
 
-/* lane FARVIEW1: one bulb a point. World -> view by dotRow (rows of the view transform), view -> clip by dotProj.
- * Its value spreads over a normalised Gaussian of sigma = max(0.6 px, the bulb's projected size): a pixel shows
- * I x (f / d)^2 x G / (2 pi sigma^2), so the dot's sum over the screen is the light that reaches the camera.
- * Faded in by w = smoothstep(band) of the camera distance, as the surfel light is. */
+/* One bulb a point, spread over a normalized Gaussian of sigma = max(0.6 px, projected bulb size): a pixel shows
+ * I x (f / d)^2 x G / (2 pi sigma^2), so the dot's screen sum is the light reaching the camera. */
 
 layout ( location = 0 ) in vec3 vertexPosition;	// world
 layout ( location = 1 ) in vec3 vertexColor;	// the bulb's intensity I (the frame's linear units x area)
@@ -14,7 +12,7 @@ uniform vec3 dotCam;	// the camera, world
 uniform vec2 dotBand;
 uniform float dotFocal;	// f, pixels
 uniform float dotBulb;	// the bulb radius, world units
-uniform int dotRed;	// 1 = never faded (the dots at every distance)
+uniform int dotRed;	// 1 = never faded (debug)
 
 out vec3 dotValue;
 out vec3 dotView;	// lane VOLAIR1: the bulb in view space, for the air between it and the camera

@@ -1,26 +1,8 @@
 #!/usr/bin/env python3
-# Lane VTFIX1 (2026-09-24) -- the three measurements of tests/spells/lodgen_vtfix.sh.
-# Every sub-command prints ONE verdict line starting "PASS" or "FAIL" (plus numbers).
-#
-#   fixture <root> <ws> <dim> <x> <y> [res]
-#       Writes <root>/Textures/Terrain/<ws>/<ws>.<dim>.<x>.<y>_msn.DDS: a KNOWN-ANSWER
-#       vanilla `_msn` whose fine relief runs along EAST ONLY. Channel law is the tree's
-#       (lodgenTerrainMsnPixel): R = east, G = up, B = north. East is a period-4 ripple
-#       (+,+,-,- at +-0.6) so its mip-2 average -- the coarse lodgenVanillaMsnDetail
-#       subtracts -- is flat and the detail field is dE = the ripple, dN = 0.
-#       Uncompressed B8G8R8A8 through a DX10 header, full mip chain (box filter), exactly
-#       the layout lodgenWriteDdsBgra8 writes, so no codec stands between the known answer
-#       and the reader.
-#
-#   g2 <base_msn.dds> <blend_msn.dds>
-#       Decodes both baked `_msn` sheets (BC1/BC3/uncompressed) at mip 0 and reports the
-#       mean |delta| per channel. The blend must move EAST (R), not NORTH (B):
-#       PASS iff mean|dR| >= 8 levels and mean|dB| <= 0.25 * mean|dR|.
-#       On the pre-VTFIX1 exe the detail lands in B: that is the red.
-#
-#   g1 <VT .lodm>
-#       Reads terrain.maskRules and checks pbrm + legacyInverted + noneDefault == distinctLtex.
-#       Red on the pre-VTFIX1 exe on the whole Commonwealth: 100 != 101.
+# The three measurements of tests/spells/lodgen_vtfix.sh; each sub-command prints one PASS/FAIL line.
+#   fixture <root> <ws> <dim> <x> <y> [res]  -- a known-answer uncompressed _msn, east-only ripple
+#   g2 <base_msn.dds> <blend_msn.dds>        -- the blend must move east (R), not north (B)
+#   g1 <VT .lodm>                            -- pbrm + legacyInverted + noneDefault == distinctLtex
 import json
 import os
 import struct

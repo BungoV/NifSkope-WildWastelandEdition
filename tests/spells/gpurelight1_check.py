@@ -53,7 +53,7 @@ NRAY = 1024          # rays per probe
 LINK_CAP = 256       # links kept per probe (FO4CS's in-game bake keeps 256); the rest is unlinked weight
 FIXTURE = 24.0       # shadow segment stops this far before the light (probegi.cpp fixtureClear)
 SURF_OFF = 2.0       # shadow / feed segments start this far off the surface
-SETTLE = 1e-3        # pass bar: largest change <= SETTLE x brightest B (lane BOUNCE2)
+SETTLE = 1e-3        # pass bar: largest change <= SETTLE x brightest B
 CAP = 64
 AXES = np.array([[1, 0, 0], [-1, 0, 0], [0, 1, 0], [0, -1, 0], [0, 0, 1], [0, 0, -1]], float)
 TOL = 1e-4
@@ -200,7 +200,7 @@ def bake():
     keep = rank < LINK_CAP
     unl = np.bincount(lp[~keep], w[~keep], M)
     lp, ls, w, ldir = lp[keep], ls[keep], w[keep], ldir[keep]
-    # feed lists: each surfel's visible probes within r (BOUNCE2), closest visible within 2r as fallback
+    # feed lists: each surfel's visible probes within r, closest visible within 2r as fallback
     dd = np.linalg.norm(P[:, None] - P[None], axis=2)
     np.fill_diagonal(dd, np.inf)
     r = 2.0 * float(np.median(dd.min(1)))

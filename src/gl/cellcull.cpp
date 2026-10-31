@@ -1,4 +1,4 @@
-/*! Lane SUNCELL1: the cell view's per-placement culling (see cellcull.h). */
+/*! The cell view's per-placement culling (see cellcull.h). */
 #include "cellcull.h"
 #include "wwswitch.h"	// lane TESTDRIVER1: the WW_* switch store
 
@@ -29,8 +29,8 @@ namespace
 struct Counts
 {
 	std::int64_t shapes = 0, runs = 0, drawn = 0, culled = 0, calls = 0, tris = 0, trisAll = 0;
-	std::int64_t occluded = 0, roomCulled = 0, casterHidden = 0;	// lane SUNCELL1: the Previs row's share
-	std::int64_t tomeDrawn = 0, tomeCulled = 0, ungoverned = 0, tomeCasterHidden = 0;	// lane UMBRA1: the tome's share
+	std::int64_t occluded = 0, roomCulled = 0, casterHidden = 0;	// the Previs row's share
+	std::int64_t tomeDrawn = 0, tomeCulled = 0, ungoverned = 0, tomeCasterHidden = 0;	// the tome's share
 	std::int64_t cDrawn[3] = { 0, 0, 0 }, cCulled[3] = { 0, 0, 0 };
 	bool operator==( const Counts & o ) const
 	{
@@ -44,7 +44,7 @@ struct Counts
 	}
 };
 
-//! lane SUNCELL1: one primitive in view space
+//! one primitive in view space
 struct ViewBox
 {
 	Vector3 c, ax[3];
@@ -69,7 +69,7 @@ struct OccFaces
 	int n = 0;
 };
 
-//! lane SUNCELL1: the previs scene in this frame's view space, with the rooms the camera reaches
+//! the previs scene in this frame's view space, with the rooms the camera reaches
 struct PrevisCache
 {
 	const void * nif = nullptr;
@@ -80,12 +80,12 @@ struct PrevisCache
 	std::vector<char> roomSeen;
 	bool roomsActive = false;
 	int roomsSeen = 0, portalsPassed = 0;
-	Vector3 eye;	// finalfix: the camera in world units (telemetry)
-	std::vector<std::uint32_t> occRef;	// finalfix: each occluder's ref, and the runs it hid this frame (telemetry)
+	Vector3 eye;	// the camera in world units (telemetry)
+	std::vector<std::uint32_t> occRef;	// each occluder's ref, and the runs it hid this frame (telemetry)
 	mutable std::vector<int> occHits;
 };
 
-/*! lane UMBRA1: one previs block's decoded tome and this camera's query of it */
+/*! one previs block's decoded tome and this camera's query of it */
 struct UmbraBlock
 {
 	std::uint32_t block = 0;
@@ -95,7 +95,7 @@ struct UmbraBlock
 	bool usable = false;	//!< decoded, queried for this camera, and a start cell found
 };
 
-//! lane UMBRA1: what a ref form id is to the tomes (block -1 = nothing, -2 = an ambiguous low-24-bit match)
+//! what a ref form id is to the tomes (block -1 = nothing, -2 = an ambiguous low-24-bit match)
 struct UmbraRef
 {
 	int block = -1, obj = -1;
@@ -103,7 +103,7 @@ struct UmbraRef
 	bool combined = false;
 };
 
-//! lane UMBRA1: one run's governance: the block whose tome decides it (-1 = none) and the objects it stands for
+//! one run's governance: the block whose tome decides it (-1 = none) and the objects it stands for
 struct UmbraGov
 {
 	int block = -1;
@@ -144,14 +144,14 @@ struct CullState
 	QHash<const void *, QHash<int, std::vector<WwCullRun>>> docs;
 	Counts cur, last;
 	bool any = false, printed = false;
-	// lane SUNCELL1: the Previs row
+	// the Previs row
 	bool previsOn = false, previsPinned = false;
 	int previsRed = 0;
 	QHash<const void *, WwPrevisScene> previs;
 	PrevisCache pc;
 	std::uint64_t frame = 0;
 	int lastOcc = -1, lastRooms = -1, lastSeen = -1, lastPortals = -1;
-	// lane UMBRA1: the tome path (it rides the Previs row)
+	// the tome path (it rides the Previs row)
 	bool umbraOn = true, umbraDepth = false, probing = false;
 	int umbraRed = 0;
 	QString umbraDump;
@@ -198,7 +198,6 @@ CullState & st()
 			s.previsOn = QSettings().value( QStringLiteral( "WW/CellPrevis" ), false ).toBool();
 		}
 		s.previsRed = wwEnv( "WW_CELL_PREVIS_RED" ).trimmed() == "casters" ? 1 : 0;
-		// lane UMBRA1
 		s.umbraOn = wwEnv( "WW_CELL_UMBRA" ).trimmed() != "0";
 		s.umbraRed = wwEnv( "WW_CELL_UMBRA_RED" ).trimmed() == "casters" ? 1 : 0;
 		s.umbraDump = QString::fromLocal8Bit( wwEnv( "WW_CELL_UMBRA_DUMP" ) ).trimmed();
@@ -426,10 +425,8 @@ bool insidePlanes( const float pl[4][4], const Vector3 & v, float r )
 	return true;
 }
 
-/*! lane SUNCELL1: the previs scene in this frame's view space, and the rooms the camera reaches: the rooms that
- *  hold the camera and their linked rooms, then through every portal of a reached room that lies in the frustum,
- *  the room on its other side (and its linked rooms), until nothing new is reached. A camera in no room culls by
- *  no room. Built in the camera pass only, so a shadow pass's matrices never feed it. */
+/*! the previs scene in view space and the rooms the camera reaches (its rooms, linked rooms, and through in-frustum
+ *  portals to a fixpoint). Built in the camera pass only, so a shadow pass's matrices never feed it. */
 void previsBuild( CullState & s, Scene * scene, const float pl[4][4] )
 {
 	PrevisCache & pc = s.pc;
@@ -493,7 +490,7 @@ void previsBuild( CullState & s, Scene * scene, const float pl[4][4] )
 	pc.valid = true;
 }
 
-//! lane SUNCELL1: 0 = drawn, 1 = behind an occluder, 2 = in a room the camera does not reach
+//! 0 = drawn, 1 = behind an occluder, 2 = in a room the camera does not reach
 int previsHidden( const PrevisCache & pc, const Vector3 & v, float r )
 {
 	if ( !pc.valid )
@@ -549,7 +546,7 @@ std::int64_t collect( const std::vector<WwCullRun> & runs, std::int64_t numTris,
 	return culled;
 }
 
-/*! lane UMBRA1: the GL world -> clip matrix, row-major, in double. The cell document's scene space is the game's
+/*! the GL world -> clip matrix, row-major, in double. The cell document's scene space is the game's
  *  world (every cell shape carries the build origin as its translation), so this is world -> clip. */
 void umbraGlClip( Scene * scene, double G[4][4] )
 {
@@ -576,7 +573,7 @@ void umbraGlClip( Scene * scene, double G[4][4] )
 		}
 }
 
-//! lane UMBRA1: the camera as the tome's query takes it: world -> D3D clip (GL's z row becomes (z + w) / 2)
+//! the camera as the tome's query takes it: world -> D3D clip (GL's z row becomes (z + w) / 2)
 bool umbraCamera( Scene * scene, WwUmbraCamera & cam )
 {
 	if ( !scene || !scene->renderer )
@@ -609,7 +606,7 @@ QString umbraHex( std::uint32_t v )
 	return QStringLiteral( "%1" ).arg( v, 8, 16, QLatin1Char( '0' ) ).toUpper();
 }
 
-//! lane UMBRA1: every block's query, once a frame and only when the camera moved (the camera pass only)
+//! every block's query, once a frame and only when the camera moved (the camera pass only)
 void umbraFrame( CullState & s, Scene * scene, UmbraDoc & d )
 {
 	if ( d.frame == s.frame )
@@ -669,7 +666,7 @@ UmbraRef umbraLookup( const UmbraDoc & d, std::uint32_t ref )
 	return UmbraRef();
 }
 
-//! lane UMBRA1: one shape's runs' governance, worked out once (a cell shape's world spheres never move)
+//! one shape's runs' governance, worked out once (a cell shape's world spheres never move)
 const std::vector<UmbraGov> & umbraGovFor( UmbraDoc & d, const Shape * sh, int block, const std::vector<WwCullRun> & runs )
 {
 	auto it = d.gov.find( block );
@@ -714,7 +711,7 @@ const std::vector<UmbraGov> & umbraGovFor( UmbraDoc & d, const Shape * sh, int b
 	return d.gov.find( block ).value();
 }
 
-//! lane UMBRA1: 0 = not governed (or its block has no answer for this camera), 1 = the tome sees it, 2 = it hides it
+//! 0 = not governed (or its block has no answer for this camera), 1 = the tome sees it, 2 = it hides it
 int umbraRun( const UmbraDoc & d, const std::vector<UmbraGov> & g, size_t i )
 {
 	if ( i >= g.size() || g[i].block < 0 )
@@ -728,7 +725,7 @@ int umbraRun( const UmbraDoc & d, const std::vector<UmbraGov> & g, size_t i )
 	return 2;
 }
 
-//! lane UMBRA1: Gauss-Jordan with partial pivoting
+//! Gauss-Jordan with partial pivoting
 bool invert4( const double m[4][4], double out[4][4] )
 {
 	double a[4][8];
@@ -768,9 +765,9 @@ void wwCellCullBegin( const void * nif )
 {
 	st().memo.clear();	// lane PERF5
 	st().docs.remove( nif );
-	st().previs.remove( nif );	// lane SUNCELL1
+	st().previs.remove( nif );
 	st().pc = PrevisCache();
-	st().umbra.remove( nif );	// lane UMBRA1
+	st().umbra.remove( nif );
 	st().umbraLast = nullptr;
 	st().decalFade.remove( nif );	// lane DECALS1
 	st().decalPom.remove( nif );
@@ -1138,8 +1135,8 @@ bool wwCellCullCamera( Scene * scene, const Shape * sh, int block, std::int64_t 
 	PassTime::CpuScope pt( PassTime::CullCamera );	// lane PERF1
 	CullState & s = st();
 	if ( !scene || !sh || !scene->renderer || numTris <= 0 || s.docs.isEmpty() || s.probing )
-		return false;	// lane UMBRA1: the depth probe draws everything and counts nothing
-	// lane UMBRA1: the tome's query, once a frame (also with the row off when dumping, for the gates)
+		return false;	// the depth probe draws everything and counts nothing
+	// the tome's query, once a frame (also with the row off when dumping)
 	UmbraDoc * ud = nullptr;
 	{
 		auto it = s.umbra.find( scene->nifModel );
@@ -1152,8 +1149,8 @@ bool wwCellCullCamera( Scene * scene, const Shape * sh, int block, std::int64_t 
 	const std::vector<WwCullRun> * runs = wwCellCullRuns( scene->nifModel, block );
 	if ( !runs )
 		return false;
-	const bool umbra = ud && s.previsOn && s.umbraOn;	// lane UMBRA1: rides the Previs row
-	const bool previs = s.previsOn && ( s.previs.contains( scene->nifModel ) || umbra );	// lane SUNCELL1
+	const bool umbra = ud && s.previsOn && s.umbraOn;	// rides the Previs row
+	const bool previs = s.previsOn && ( s.previs.contains( scene->nifModel ) || umbra );
 	if ( !s.on && !previs ) {	// counted all the same, so the off frame's draw calls stand beside the on frame's
 		s.any = true;
 		s.cur.shapes++;
@@ -1210,7 +1207,7 @@ bool wwCellCullCamera( Scene * scene, const Shape * sh, int block, std::int64_t 
 		const float rv = r.radius * std::fabs( vt.scale );
 		if ( s.on && !insidePlanes( pl, v, rv ) )
 			return false;
-		if ( gov ) {	// lane UMBRA1: a run the tome governs is the tome's alone
+		if ( gov ) {	// a run the tome governs is the tome's alone
 			const int u = umbraRun( *ud, *gov, size_t( &r - runs->data() ) );
 			if ( u == 1 ) {
 				tomeDrawn++;
@@ -1222,7 +1219,7 @@ bool wwCellCullCamera( Scene * scene, const Shape * sh, int block, std::int64_t 
 			}
 			ungoverned++;
 		}
-		if ( previs ) {	// lane SUNCELL1: the occluders and the rooms
+		if ( previs ) {	// the occluders and the rooms
 			const int h = previsHidden( s.pc, v, rv );
 			occluded += h == 1 ? 1 : 0;
 			roomCulled += h == 2 ? 1 : 0;
@@ -1236,11 +1233,11 @@ bool wwCellCullCamera( Scene * scene, const Shape * sh, int block, std::int64_t 
 	s.cur.culled += culled - occluded - roomCulled - tomeCulled;
 	s.cur.occluded += occluded;
 	s.cur.roomCulled += roomCulled;
-	s.cur.tomeDrawn += tomeDrawn;	// lane UMBRA1
+	s.cur.tomeDrawn += tomeDrawn;
 	s.cur.tomeCulled += tomeCulled;
 	s.cur.ungoverned += ungoverned;
 	s.cur.drawn += std::int64_t( runs->size() ) - culled;
-	s.cur.calls += out.empty() ? 0 : 1;	// finalfix: the kept ranges are one glMultiDrawElements (bsshape.cpp)
+	s.cur.calls += out.empty() ? 0 : 1;	// the kept ranges are one glMultiDrawElements (bsshape.cpp)
 	s.cur.tris += drawnTris;
 	s.cur.trisAll += numTris;
 	if ( memoMode ) {
@@ -1282,20 +1279,15 @@ bool wwCellCullCaster( Scene * scene, const Shape * sh, int block, int cascade, 
 {
 	PassTime::CpuScope pt( PassTime::CullCascades );	// lane PERF1
 	CullState & s = st();
-	/* lane SUNCELL1: casters always cast -- the Previs row never reaches this pass. Its red control `casters`
-	 * hides the casters the camera pass found occluded or roomed off (this frame's camera view, or none). */
-	/* finalfix: a cell load (wwCellCullBegin / wwCellPrevisSet) clears the previs scene, and the shadow pass runs before
-	 * the camera pass, so the first frame after a load hid no caster (the gate's shot is often that frame). The red
-	 * builds this frame's scene itself: scene->view and the projection are still the camera's here (the cascade fit
-	 * reads the same projection), so it is the scene the camera pass would build. RED only. */
+	/* Casters always cast: the Previs row never reaches this pass. The red control `casters` builds this frame's
+	 * previs scene itself (a load clears it and the shadow pass runs before the camera pass). */
 	if ( s.previsOn && s.previsRed == 1 && scene && scene->renderer && s.previs.contains( scene->nifModel ) ) {
 		float cpl[4][4];
 		cameraPlanes( scene, cpl );
 		previsBuild( s, scene, cpl );
 	}
 	const bool previsRed = s.previsOn && s.previsRed == 1 && s.pc.valid && scene && s.pc.nif == scene->nifModel;
-	/* lane UMBRA1: casters always cast -- the tome never reaches this pass either. Its red control `casters` drops
-	 * the casters the camera pass's tome query hid (the last camera's answer). */
+	/* The tome never reaches this pass either; its red control `casters` drops what the last camera query hid. */
 	UmbraDoc * ud = nullptr;
 	if ( s.previsOn && s.umbraOn && s.umbraRed == 1 && scene && !s.probing ) {
 		auto it = s.umbra.find( scene->nifModel );
@@ -1308,7 +1300,7 @@ bool wwCellCullCaster( Scene * scene, const Shape * sh, int block, int cascade, 
 	if ( !runs )
 		return false;
 	const std::vector<UmbraGov> * gov = umbraRed ? &umbraGovFor( *ud, sh, block, *runs ) : nullptr;
-	auto tomeHides = [&]( const WwCullRun & r ) {	// lane UMBRA1: RED only
+	auto tomeHides = [&]( const WwCullRun & r ) {	// RED only
 		if ( !gov || umbraRun( *ud, *gov, size_t( &r - runs->data() ) ) != 2 )
 			return false;
 		s.cur.tomeCasterHidden++;
@@ -1347,14 +1339,14 @@ bool wwCellCullCaster( Scene * scene, const Shape * sh, int block, int cascade, 
 			const float y = m[1] * v[0] + m[5] * v[1] + m[9] * v[2] + m[13];
 			if ( !( std::fabs( x ) <= 1.0f + rv * lx && std::fabs( y ) <= 1.0f + rv * ly ) )
 				return false;
-			if ( previsRed ) {	// lane SUNCELL1: RED only
+			if ( previsRed ) {	// RED only
 				const Transform cam = scene->view * sh->worldTrans();
 				if ( previsHidden( s.pc, cam * r.center, r.radius * std::fabs( cam.scale ) ) != 0 ) {
 					s.cur.casterHidden++;
 					return false;
 				}
 			}
-			return !tomeHides( r );	// lane UMBRA1: RED only
+			return !tomeHides( r );	// RED only
 		}, out, drawnTris );
 	}
 	if ( cascade >= 0 && cascade < 3 ) {
@@ -1387,7 +1379,7 @@ bool wwFrameLog()
 void wwCellCullFrame()
 {
 	CullState & s = st();
-	s.frame++;	// lane SUNCELL1: the previs scene is rebuilt in the next camera pass
+	s.frame++;	// the previs scene is rebuilt in the next camera pass
 	if ( !s.previs.isEmpty() ) {
 		const PrevisCache & pc = s.pc;
 		const int occ = int( pc.occ.size() ), rooms = int( pc.rooms.size() );
@@ -1401,7 +1393,7 @@ void wwCellCullFrame()
 				"roomCulled=%lld casterHidden=%lld%s\n", s.previsOn ? "on" : "off", occ, rooms, pc.roomsSeen,
 				pc.portalsPassed, (long long)s.cur.occluded, (long long)s.cur.roomCulled, (long long)s.cur.casterHidden,
 				s.previsRed == 1 ? " RED=casters" : "" );
-			// finalfix: where the camera stood and which occluder hid how many runs (a real cull vs a bad box)
+			// where the camera stood and which occluder hid how many runs
 			QString hits;
 			for ( size_t i = 0; i < pc.occHits.size(); i++ )
 				if ( pc.occHits[i] > 0 )
@@ -1410,7 +1402,7 @@ void wwCellCullFrame()
 				hits.isEmpty() ? " none" : qPrintable( hits ) );
 		}
 	}
-	if ( s.umbraLast ) {	// lane UMBRA1: printed when it changes
+	if ( s.umbraLast ) {	// printed when it changes
 		const UmbraDoc & d = *s.umbraLast;
 		const QString line = QStringLiteral( "cell umbra: %1 blocks=%2 decoded=%3 queried=%4 noStart=%5 cells=%6 "
 			"visible=%7/%8 governed=%9 (uid %10, combined %11) tomeDrawn=%12 tomeCulled=%13 ungoverned=%14 "

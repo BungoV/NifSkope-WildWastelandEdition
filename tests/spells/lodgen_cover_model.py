@@ -176,12 +176,8 @@ class Esm(object):
 		return land
 
 
-# THE ENGINE'S DEFAULT LAND TEXTURE (lane SEAM1, 2026-09-25): what a BTXT-less
-# quadrant and a NULL-LTEX layer paint, one set world-wide -- the INI
-# [Landscape] sDefaultLandDiffuseTexture, default Ground\CommonwealthDefault01_d.dds
-# under Landscape\. Mirrors ESM_LTEX_ENGINE_DEFAULT in src/esmdata.h. It is not an
-# LTEX and grows nothing. The per-chunk dominant base it replaces is kept below
-# only so a report can name what the old law would have painted.
+# the engine's default land texture (INI sDefaultLandDiffuseTexture; mirrors ESM_LTEX_ENGINE_DEFAULT
+# in src/esmdata.h), painted by a BTXT-less quadrant and a NULL-LTEX layer; it is not an LTEX.
 ENGINE_DEFAULT = 0xFFFFFFFF
 ENGINE_DEFAULT_TEX = ('Landscape/Ground/CommonwealthDefault01_d.dds',
 					  'Landscape/Ground/CommonwealthDefault01_n.dds',

@@ -24,7 +24,7 @@
 #include <cstdint>
 #include <vector>
 
-// lane HDR1: the cell view's linear frame and its one tone map (cellhdr.h)
+// the cell view's linear frame and its one tone map (cellhdr.h)
 
 namespace {
 
@@ -989,9 +989,8 @@ bool wwCellHdrBegin( Scene * scene )
 			fn->glDeleteTextures( 1, &g.color );
 		fn->glGenTextures( 1, &g.color );
 		fn->glBindTexture( GL_TEXTURE_2D_MULTISAMPLE, g.color );
-		/* finalfix (SUNCELL1): the linear frame is RGBA32F, not RGBA16F. Multisampled additive blending into fp16
-		 * (the blended ground layers, SRC_ALPHA/ONE) rounded +-1 step differently run to run on the same inputs
-		 * (every draw's state, uniforms and textures traced identical); fp32 measured 0 of 7 frames differing. */
+		/* RGBA32F, not RGBA16F: multisampled additive blending into fp16 rounded differently run to run on identical
+		 * inputs. */
 		const HdrFormat & hf = hdrFormat();	// lane AAFORMAT1: RGBA32F unless a study run asks
 		fn->glTexImage2DMultisample( GL_TEXTURE_2D_MULTISAMPLE, S, hf.gl, W, H, GL_TRUE );
 		g.colorFormat = hf.gl;
@@ -1213,7 +1212,7 @@ void wwCellHdrEnd( Scene * scene )
 	PassTime::subBegin( PassTime::ToneMeasure );
 	isMeasureFrame( scene, g, s.w, s.h, s.samples, s.prevDraw, s.prevRead, sync ? &sn : nullptr );
 	PassTime::subEnd( PassTime::ToneMeasure );
-	// lane BLOOM1b: the FO4CS bloom's chain on the linear frame, when that mode is picked (cellbloom.h); Vanilla: no GL call
+	// the FO4CS bloom's chain on the linear frame, when that mode is picked (cellbloom.h); Vanilla: no GL call
 	PassTime::subBegin( PassTime::ToneBloom );
 	const bool foBloom = wwCellBloomRun( scene, g.color, g.ds, s.w, s.h, s.samples, g.dsFormat, g.dsTex );
 	PassTime::subEnd( PassTime::ToneBloom );
@@ -1298,11 +1297,8 @@ void wwCellHdrEnd( Scene * scene )
 	}
 	if ( sorted )
 		pick( 1, 1 );	// a cell program or a cell effect wrote it last: the imagespace
-	/* lane SKYHOLE1: a cell effect over the sky (no opaque draw under it, the depth still at the far plane) blended
-	 * over 0 in the linear frame, and mode 0 laid its tone-mapped value over the backdrop: the Memory Den's steam
-	 * (MistGroundWaterSteam01LongHalf) as a black patch. Mode 0 now takes only the pixels an opaque draw reached
-	 * (the quad at the far plane passes GL_GREATER there), mode 2 the rest (GL_LEQUAL), composited by coverage.
-	 * WW_CELL_SKYHOLE_RED=old: mode 0 over every 1 pixel, as before. */
+	/* Mode 0 takes only pixels an opaque draw reached (GL_GREATER vs the far-plane quad), mode 2 the rest, so a cell
+	 * effect over the sky is not laid over the backdrop as black. WW_CELL_SKYHOLE_RED=old: mode 0 everywhere. */
 	WW_SWITCH_STATIC( bool, skyholeOld, wwEnv( "WW_CELL_SKYHOLE_RED" ).trimmed() == "old" );
 	static bool skyholeSaid = false;
 	if ( !skyholeSaid ) {
@@ -1332,9 +1328,8 @@ void wwCellHdrEnd( Scene * scene )
 		prog->uni1i( "hdrMode", 1 );
 		r->drawShape( 4, 3, 6, GL_TRIANGLES, GL_UNSIGNED_SHORT, &attrs, idx );
 	}
-	/* lane BLOOM1b: the FO4CS glow over every pixel mode 0 did not take (the sky, the other programs, the effects over
-	 * the sky), added in display space: FO4CS spreads it over its whole HDR target, the sky included; here only the
-	 * cell-lit pixels are light, so the rest take the tone-mapped difference the bloom makes (cell_hdr.frag mode 3) */
+	/* The FO4CS glow over the pixels mode 0 did not take, added in display space as the tone-mapped difference the
+	 * bloom makes (cell_hdr.frag mode 3): only cell-lit pixels are light here. */
 	if ( foBloom && sorted ) {
 		// lane GLAREBLOW2: the view as mode 3 finds it (modes 0-2 drawn), so the glow follows the curve there
 		WW_SWITCH_STATIC( bool, skyAdd, wwEnv( "WW_CELL_BLOOM_SKY_RED" ).trimmed() == "add" );

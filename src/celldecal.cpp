@@ -1,4 +1,4 @@
-/* lane PLACED1: placed decals, projected on the CPU. See celldecal.h for the rule. */
+/* Placed decals, projected on the CPU. See celldecal.h for the rule. */
 
 #include "celldecal.h"
 #include "celldecalangle.h"	// lane DECALANGLE: the angle rule per pixel
@@ -23,8 +23,7 @@ namespace
 {
 
 constexpr float DECAL_RAY_LENGTH = 1000.0f;   // the game's reach for a decal without a box
-/* Ours, not the game's: 22 of the Vault's 503 ray decals sit ON their surface (0 to 1 unit past the drawn
- * triangle), where a ray from the reference itself misses by rounding. The ray starts this far behind. */
+// ours, not the game's: decals sitting exactly on their surface miss by rounding, so the ray starts this far behind
 constexpr float DECAL_RAY_SLACK = 1.0f;
 // the angle rule's threshold and fade width: src/celldecalangle.h (lane DECALANGLE)
 

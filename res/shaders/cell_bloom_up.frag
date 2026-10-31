@@ -1,8 +1,7 @@
 #version 410 core
 
-/* lane BLOOM1b (src/gl/cellbloom.h): FO4CS's BloomUpCS as a fragment pass. combined = source x params.y +
- * tent(accumulated) x params.z, the tent's red and blue pushed along the radial by the dispersion. The chain's
- * levels, and (the dump only) the final combine over a zero source. */
+/* FO4CS's BloomUpCS as a fragment pass: source x params.y + tent(accumulated) x params.z, the tent's red and blue
+ * pushed along the radial by the dispersion. */
 
 #include "cell_bloom.glsl"
 

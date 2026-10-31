@@ -258,14 +258,13 @@ def light(x):
 def judge(name, got, exp, tol_abs, shows_at, spread=None, bar=0.99):
     """agree where the expectation OR the viewer shows, and the totals' ratio; returns (verdict, line)."""
     # both sides: a march that skips the 50-unit refusal adds hits where the rebuild has none, and a mask taken
-    # from the expectation alone never looks there (the live nogap red passed at 100.0% before this)
+    # from the expectation alone never looks there
     shows = (exp > shows_at) | (got > shows_at)
     npx = int(shows.sum())
     if npx < MIN_PIXELS:
         return 'SKIP', '%s SKIP (%d pixels show the value, under %d)' % (name, npx, MIN_PIXELS)
-    # measured on two walkway views: the viewer is within 0.0012 of the rebuild on 99.9% of the march's and the
-    # blur's pixels (the same float32 steps), so 0.002 + 2% is slack. The bar is 99%, not 95: a march without the
-    # 50-unit refusal still agrees on 93..96% of these views' pixels, and has to fail
+    # the viewer follows the rebuild's float32 steps, so 0.002 + 2% is slack; the bar is 99% because a march
+    # without the 50-unit refusal still agrees on most pixels and has to fail
     tol = tol_abs + 0.02 * exp + (spread if spread is not None else 0)
     agree = (np.abs(got - exp) <= tol)[shows].mean()
     ratio = got[shows].sum() / max(exp[shows].sum(), 1e-9)

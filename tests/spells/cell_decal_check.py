@@ -186,9 +186,8 @@ def model_shapes(data, model):
                 mat = (bool(fl & 1), bool(fl & 0x200))
         if mat[0] or mat[1]:
             continue
-        # the chain to the root: hidden nodes and editor markers carry nothing. A placed model's ROOT (the
-        # block with no parent) takes the reference's transform in the game: what the file stores on it is
-        # never seen (lane MISS1, 2026-10-02), so the root's own transform is left out of the chain.
+        # the chain to the root: hidden nodes and editor markers carry nothing. A placed model's ROOT takes the
+        # reference's transform in the game, so the root's own transform is left out of the chain.
         xf, k, skip = rec['xf'], parent.get(i), 'editormarker' in rec['name'].lower() or rec['flags'] & 1
         if k is None:
             xf = (np.eye(3), np.zeros(3), 1.0)
@@ -634,7 +633,7 @@ def main():
               f"shot (>= 99.5%)")
     ok &= n_ok or 'N' not in stages
     # ---- C: each decal the camera SEES changes pixels inside its own box (boxes reach through walls, so a
-    # share of all pixels inside all boxes says nothing: it is 1.5% on a correct picture)
+    # share of all pixels inside all boxes says nothing)
     moved_all = int((diff > 3).sum())
     seen_n, shown_n, quiet = 0, 0, []
     for d, polys in own:

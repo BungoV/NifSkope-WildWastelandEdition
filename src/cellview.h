@@ -15,115 +15,9 @@ BSD License - see nifskope.h
 
 class NifModel;
 
-/* ---------------------------------------------------------------------------
- * THE CELL VIEW -- one exterior cell, or an N x N block of them, opened the way
- * the Creation Kit's render window shows it.
- *
- * bungo, 2026-09-19, while asking for whole-BUILDING LODs: "I think a
- * prerequisite would be, to be able to view a whole cell like the CK editor".
- * He wants to SEE what a building is made of, in place, before any generator
- * decides what to do with it.  So this is a READ-ONLY viewer: it never writes a
- * plugin, never writes a bake, and has no save path.
- *
- * ===========================================================================
- * 1. WHAT IT IS BUILT OUT OF, AND WHY THERE IS NO NEW DRAW PATH
- * ===========================================================================
- *
- * The scene is a NifModel DOCUMENT, exactly as `.lodi` and `.lodt` already open
- * (src/lodinative.cpp, src/btdterrain.cpp): one NiNode root, then BSTriShapes
- * carrying world-space geometry, with the same BSLightingShaderProperty /
- * BSShaderTextureSet plumbing the chunk builder writes.  Nothing in
- * src/gl/ changes, no shader is added, and the viewport, the navigation, the
- * lighting and the screenshot hook are the ones the fork already has.
- *
- * That choice was made from a MEASUREMENT, not from taste
- * (scratchpad/cellview1_20260919/cell_census.py + tri_budget.py against
- * X:/Programs/Steam/steamapps/common/Fallout 4/Data/Fallout4.esm, 2026-09-19):
- *
- *   block (Commonwealth)      refrs   drawn  distinct  unique tris  welded tris
- *   5,-11 1x1 (downtown)       1483    1410       375      444,296      741,660
- *   5,-11 3x3                  5325    5057      1163    1,443,135    4,006,174
- *   5,-11 5x5                 12091   11540      2090    2,565,540    9,839,158
- *   -20,7 1x1 (Sanctuary)       142     140       123      152,737      230,965
- *   -30,-30 1x1 (wilderness)     74      74        23       26,632       77,584
- *
- * VRAM at 32 bytes a vertex + 6 bytes a triangle: the 5x5 downtown block is
- * 96.6 MB if each distinct model is resident once, 365.3 MB welded per
- * placement.  A welded 5x5 is therefore expensive but not impossible, and every
- * smaller case is cheap -- a 3x3 downtown is 150 MB and Sanctuary is 8 MB.
- *
- * SO: the scene WELDS, like a `.BTO` does, and the refusal thresholds below are
- * what stop a mistake rather than a promise that 5x5 is comfortable.  This is a
- * DIVERGENCE from the brief's "instanced draws" and it is stated rather than
- * hidden: there is ONE LOAD per distinct model (the model cache below, and
- * `lodgenNativeLoadModel` behind it), but the DRAW is merged, because making it
- * a true instanced draw means editing the renderer, and on 2026-09-19 the
- * renderer files belong to another lane.  The way to the instanced version is
- * open and nothing here blocks it: every placement is already written down in
- * the pick table with its own transform.
- *
- * DIVERGENCE FROM THE CK, stated:
- *   - the CK picks by triangle; this picks by the placement's world AABB,
- *     nearest along the ray (src/cellpick.h).  A ref hidden entirely behind
- *     another ref's box can therefore be picked in front of it, and the panel
- *     says which ref it chose rather than implying it was the only candidate.
- *   - the CK draws LIGH, markers, navmesh, regions, roads and the havok layer.
- *     This draws none of those except LIGH-with-a-model, and the census names
- *     every record type it skipped, with counts, so nothing is silently absent.
- *   - the CK edits.  This does not.
- *
- * ===========================================================================
- * 2. WHAT IS DRAWN
- * ===========================================================================
- *
- * Every persistent and temporary REFR of the chosen cells whose base is one of
- *
- *   STAT  SCOL  MSTT  FURN  CONT  DOOR  ACTI  TREE  FLOR  LIGH
- *
- * and whose base names a MODL.  SCOL is expanded to its parts through
- * `EsmWorld::scolParts`, with the same transform composition the chunk builder
- * uses (src/lodgen.cpp ~3474: `R = fromEuler(-x,-y,-z)`, part position rotated
- * by the ref and scaled by the ref's scale).  A base with no model is counted
- * by record type and skipped; so is a deleted ref.
- *
- * Initially-disabled refs, and refs whose XESP enable parent puts them in the
- * opposite state, are HIDDEN by default and drawn tinted when asked for.
- * Markers (the base's model is one of the marker meshes) are hidden by default.
- *
- * Under it: the LAND heights of each cell as a 32x32 quad grid with the
- * landscape vertex colour, and a water plane at the cell's resolved water
- * height.  The base texture layers are NOT sampled -- that needs the splat
- * compositor the terrain bake owns, and a viewer that quietly showed untextured
- * ground while claiming otherwise would be worse than one that says so.  The
- * ground is therefore flat-shaded with VCLR, and the census line says it.
- *
- * ===========================================================================
- * 3. THE OVERLAYS
- * ===========================================================================
- *
- * One at a time, written into the vertex colour at the point the placement is
- * welded -- the same seam `WW_LODL_CHANNEL` uses for the native LOD scene, so
- * there is no second colouring path.  Deterministic: the colour of a key is a
- * hash of the key, so two runs and two machines agree, and the legend the
- * census prints names every bucket with its colour.
- *
- * ===========================================================================
- * 4. HOW IT IS OPENED
- * ===========================================================================
- *
- *   - a `.wwcell` file: one line, `plugins|worldspace|x,y|n[|overlay]`, which
- *     is also what File > Open Cell... writes.  It is a real file so that the
- *     view is reproducible, scriptable and re-openable, and so that opening one
- *     goes down the SAME suffix branch every other built document goes down.
- *   - `WW_CELL_OPEN=<plugins>|<world>|<x>,<y>|<n>` for the harness, which
- *     overrides the file's line when both are present, and says so in the notes.
- *
- * `WW_CELL_DUMP=<file>` writes one row per DRAWN placement (ref form, base
- * form, part, world position, model).  A gate cannot count placements by
- * looking at welded geometry -- the same reason `WW_LODI_DUMP` exists -- so the
- * builder writes down what it placed and the gate compares that against an
- * independent Python walk of the same plugin.
- * --------------------------------------------------------------------------- */
+/* The Cell view: a read-only viewer for one exterior cell (or an N x N block) or an
+ * interior cell, built as a NifModel document of welded world-space BSTriShapes so the
+ * existing renderer draws it. Opened from a `.wwcell` file or WW_CELL_OPEN. */
 
 //! The colour overlay. One at a time; `None` draws the models' own materials.
 enum class CellOverlay
@@ -159,22 +53,17 @@ struct CellSceneSpec
 	bool showMarkers = false;
 	bool terrain = true;
 	bool water = true;
-	bool grid = false;      //!< the cell grid overlay (lane FIXPACK1 YELLOWSLAB1: off, as the "Cell borders" row ships;
-	                        //!< on, its 512-unit yellow curtains stood in every opened block as flat slabs)
-	/* Lane PRTP1 (2026-09-30): an INTERIOR cell instead of an exterior block.
-	 * Spec line `plugins|interior|<EDID or hex form>[|overlay]`. No LAND, no
-	 * grid, no worldspace water; `world` holds the word "interior". */
+	bool grid = false;      //!< the cell grid overlay (off by default, as the "Cell borders" row ships)
+	/* An INTERIOR cell instead of an exterior block: `plugins|interior|<EDID or hex form>[|overlay]`.
+	 * No LAND, no grid, no worldspace water; `world` holds the word "interior". */
 	bool interior = false;
 	QString interiorCell;
-	/* Lane PRTPPLACE (2026-09-30): the Cell workspace's PRTP band. `probes` places the
-	 * bake's probes over the whole loaded block (as WW_CELL_PROBES does, without the
-	 * file); `probesShow` draws them. */
+	/* `probes` places the bake's probes over the whole loaded block; `probesShow` draws them. */
 	bool probes = false;
 	bool probesShow = true;
 	bool probesHiddenByEnv = false;	//!< lane LIVESET1: WW_CELL_PROBES_HIDE turned probesShow off
-	/* Lane PRTPBAKE (2026-09-30): the band's Bake. Places the probes, then bakes them
-	 * into FO4CS `.tbk` sector files in `bakeDir` (empty = `<app>/prtp_bake/<world or
-	 * cell>`). One-shot: the workspace clears it once the build is noted. */
+	/* Place the probes, then bake them into `.tbk` sector files in `bakeDir` (empty =
+	 * `<app>/prtp_bake/<world or cell>`). One-shot: the workspace clears it once noted. */
 	bool probesBake = false;
 	QString bakeDir;
 	bool valid = false;
@@ -196,7 +85,7 @@ bool cellSpecFromEnv( CellSceneSpec & spec, QString * error );
 //! Apply only the modifier variables to an existing spec (see above).
 void cellApplyEnvModifiers( CellSceneSpec & spec );
 
-//! Lane PRTPPLACE: one probe marker kind -- its name in the PRTP band and its draw color.
+//! One probe marker kind: its name in the PRTP band and its draw color.
 struct CellProbeKind
 {
 	const char * name;
@@ -206,10 +95,8 @@ struct CellProbeKind
 //! The marker kinds in the PRTP band's order; the markers draw with the same table.
 const CellProbeKind * cellProbeKinds( int * count );
 
-/*! Build the document. `notes` receives what the scene MEASURED -- refs read,
- *  refs drawn, refs hidden, skipped counts per record type, distinct models,
- *  shapes, vertices, triangles, the ground and water facts, the overlay legend
- *  and the load time -- so a picture is never the only evidence. */
+/*! Build the document. `notes` receives what the scene measured (counts, skips, legend,
+ *  load time) so a picture is never the only evidence. */
 //! lane BAKEINCR1: sha1 of the far soup a bake of (cx, cy) with a (2 half + 1)^2 block appends; "none" without LOD
 //! lane LANDSPEC5: with `w`, a "Use LOD Data" child's ring is its parent's (the bake's own)
 class EsmWorld;
@@ -258,8 +145,8 @@ int cellLiveProbesShow( NifModel * nif, bool show, QString * why );
  *  against the build's); 0 nothing moved, 1 rebuilt, 2 a reopen is needed (`why` says why) */
 int cellLiveRebuild( NifModel * nif, QString * why );
 
-/*! lane SUNCELL1: the Particles row (WW/CellParticles, env pin WW_CELL_PARTICLES, ships OFF): a placed model's
- *  particle systems are copied into the cell (read when the cell opens). */
+/*! The Particles row (WW/CellParticles, env WW_CELL_PARTICLES, default off): copy a placed
+ *  model's particle systems into the cell when it opens. */
 bool wwCellParticlesOn();
 void wwCellParticlesSetOn( bool on );
 

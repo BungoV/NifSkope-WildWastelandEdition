@@ -98,11 +98,8 @@ def main():
 		if not grp:
 			print('  no group table (version %d); nothing to cross' % h['version'])
 			continue
-		# THE IDS ARE FILE-WIDE AS THE DECODER HANDS THEM (IDENT2, 2026-09-29).
-		# A v13 file stores one u32 id a placement, dense over the whole file; a
-		# v7..v12 file stores a u16 dense per CHUNK, which the decoder offsets by
-		# the earlier chunks' counts (lodgen_native_decode.py). Either way the id
-		# alone is the identity, and a group crossing a chunk line (v13) is ONE.
+		# the ids are file-wide as the decoder hands them (v13: u32 per file; v7..v12: u16 per chunk,
+		# offset by the decoder), so the id alone is the identity, and a group crossing a chunk is ONE.
 		key = list(grp)
 		members = Counter(key)
 		print('  placements %d, groups %d, singletons %d, largest %d'

@@ -140,10 +140,8 @@ if anim_node is not None:
         if not found:
             print("M anim_%s_translation_span NO_CHANNEL" % anim_node)
 
-# ---- the SCALE track of one node (finding 10) ----
-# A scale channel that exists but never leaves (1,1,1) carries nothing. This
-# reports the per-axis range and the largest non-uniformity of one node's scale
-# samples, so the row can say the channel MOVED and that it is not uniform.
+# ---- the SCALE track of one node ----
+# per-axis range and largest non-uniformity, so a row can say the channel MOVED and is not uniform
 scale_node = opt("--scale-node")
 if scale_node is not None:
     ni = byname.get(scale_node)

@@ -25,7 +25,7 @@ import lodgen_native_decode as D  # noqa: E402
 CELL = 4096.0
 NO = 0xFFFF
 TOL = 0.5          # units: a soup triangle's middle against the authored triangle's
-AREA_TOL = 0.05    # the soup's tree area against this file's own cut, set 2026-10-02 before the first run
+AREA_TOL = 0.05    # the soup's tree area against this file's own cut
 BS = chr(92)
 
 

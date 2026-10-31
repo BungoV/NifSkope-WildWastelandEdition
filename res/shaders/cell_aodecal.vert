@@ -1,6 +1,6 @@
 #version 410 core
 
-// lane AODECAL1: model space straight to clip space (the copy's model -> view -> projection, composed on the CPU)
+// model space straight to clip space (model -> view -> projection composed on the CPU)
 
 layout ( location = 0 ) in vec3 vertexPosition;
 

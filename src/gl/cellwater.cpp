@@ -67,18 +67,18 @@ struct WaterState
 {
 	QHash<const void *, WaterDoc> docs;
 	QHash<const void *, quint32> defaultForm;	// lane WATERUNDER5: the worldspace's default WATR (its water reads as sea)
-	bool pinOff = false;	// lane CELLALL1: off (the Water row, or the pin)
+	bool pinOff = false;	// off (the Water row, or the pin)
 	bool pinned = false;
 	int red = 0;		// 1 norefl, 2 nofresnel, 4 nosilt, 8 nospec, 16 noshore, 32 nonormal,
-				// 64 nodepthfog, 128 nofar, 256 nossr, 512 fogunits (lane WATER2)
-				// 1024 hdrraw (WATERHDR1: the water's linear light written back untone-mapped, the old defect)
+				// 64 nodepthfog, 128 nofar, 256 nossr, 512 fogunits,
+				// 1024 hdrraw (linear light written back without the tone map)
 	int probe = 0;
 	int shoreRed = 0;	// WATERSHORE1: 1 nearest (WW_CELL_WATER_SHORE_RED)
 	int wavesRed = 0;	// WATERWAVES1: 1 flat, 2 noshore, 4 alias (WW_CELL_WATER_WAVES_RED)
 	bool foamOld = false;	// WATERFOAMDETAIL1: WW_CELL_WATER_FOAM_RED=old, the distance band instead of the wave law
 	int foamWind = -1;	// WATERFOAMDETAIL1: WW_CELL_WATER_FOAM_WIND=0..255 pins the weather's wind byte (gates)
 	bool edgeOld = false;	// WATERFOAMDETAIL1: WW_CELL_WATER_EDGE_RED=old, the baked band only (no soft contact)
-	bool linear = false;	// WATERHDR1: the last water draw wrote linear light into the HDR frame
+	bool linear = false;	// the last water draw wrote linear light into the HDR frame
 	QString dump;
 	QSet<QString> missing;	// noise textures that did not bind (the census says so)
 	quint64 dumped = 0;
@@ -479,9 +479,8 @@ bool wwCellWaterUniforms( Scene * scene, int block, int unit )
 				s.missing.insert( b.noise[k] );
 			scene->textures->bind( QStringView( u"#FF8080FF" ), scene->nifModel );	// a flat normal
 		}
-		/* lane WATER2: the game's sampler for the noise slots 4..6 (its geometry setup): WRAP_S_WRAP_T, filter
-		 * TEXTURE_FILTER_MODE_ANISO at the INI's iMaxAnisotropy (16). The cache leaves its default (nearest
-		 * within the mip, no anisotropy): the distant ripples average flat and the far glints die. */
+		/* the game samples noise slots 4..6 wrapped, anisotropic at 16x; the cache's default would average distant
+		 * ripples flat and kill far glints */
 		static GLfloat maxAniso = -1.0f;
 		if ( maxAniso < 0.0f ) {
 			maxAniso = 1.0f;
@@ -501,7 +500,7 @@ bool wwCellWaterUniforms( Scene * scene, int block, int unit )
 		prog->uni1i_l( prog->uniLocation( noiseUni[k] ), unit++ );
 	}
 	// the scene behind the water (the second pass's copy) and the opaque frame's depth; in the reflections' scene
-	// passes (lane WATER2) no copy: the ray pass reads the obscurance pass's linear depth instead
+	// passes no copy: the ray pass reads the obscurance pass's linear depth instead
 	unsigned int gbuf = 0;
 	const bool rayPass = wwCellSsrWaterRayPass( &gbuf );
 	const bool inSsr = wwCellSsrInPass();
@@ -515,11 +514,10 @@ bool wwCellWaterUniforms( Scene * scene, int block, int unit )
 	prog->uni1i_l( prog->uniLocation( "waterDepth" ), unit++ );
 	prog->uni1b( "waterHaveDepth", haveDepth );
 	prog->uni1i( "waterSslr", rayPass ? 1 : 0 );
-	/* WATERHDR1: in the linear frame (cellhdr.h) the water writes linear light (fo4_water.frag, cellIsLinear) and
-	 * must be sorted with the cell programs, tone-mapped once at the resolve; its probes and its reflection-ray
-	 * pass write raw data and are written back as drawn */
+	/* in the linear frame (cellhdr.h) the water writes linear light and is tone-mapped once with the cell programs;
+	 * its probes and its reflection-ray pass write raw data */
 	s.linear = wwCellHdrActive() && s.probe == 0 && !rayPass && !( s.red & 1024 );
-	// lane WATER2: this frame's reflections (the game reads them only when its WATR's SSR flag is set)
+	// this frame's reflections (the game reads them only when its WATR's SSR flag is set)
 	unsigned int ssrRaw = 0, ssrFin = 0;
 	const bool ssrOn = !inSsr && ( b.rec.ssr || wwLookOn( WwLook::WaterRefl ) ) && wwCellSsrWaterTextures( scene, ssrRaw, ssrFin );
 	fn->glActiveTexture( GLenum( GL_TEXTURE0 + unit ) );

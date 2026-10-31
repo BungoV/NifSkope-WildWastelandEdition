@@ -11,14 +11,13 @@
 
 #include <cstdio>
 
-// lane SPEED1 (2026-10-02): see cellmodelahead.h.
+// see cellmodelahead.h.
 
 namespace
 {
 
-/* How many workers. Measured on bungo's machine (16 logical cores), WW_CELL_SPEED_THREADS=<n> for the ladder;
- * the generator's own model fan-out is capped at four for the item pool's mutex, which the workers here do
- * not queue on (data/nifitemcache.h). Two cores are left to the window and the graphics driver. */
+/* How many workers (WW_CELL_SPEED_THREADS=<n> overrides). Not capped at four like the generator's fan-out:
+ * these workers do not queue on the item pool's mutex. Two cores are left to the window and the driver. */
 int workerCap()
 {
 	bool ok = false;
@@ -66,9 +65,8 @@ void CellModelAhead::want( const EsmWorld & world, quint32 base, quint32 swap )
 	// the builder leaves the sky's distant cards out (WW_CELL_SKY draws them: then they are loaded late)
 	if ( QString( model ).replace( '/', '\\' ).startsWith( QLatin1String( "sky\\" ), Qt::CaseInsensitive ) )
 		return;
-	/* The swap rows the builder makes of an MSWP (cellview.cpp, "THE MATERIAL SWAP"): first row per key wins,
-	 * a self-swap is dropped. If that rule changes there and not here, take() finds no answer under the
-	 * builder's rows and the builder loads the model itself. */
+	/* Must match the builder's MSWP rule (cellview.cpp, "THE MATERIAL SWAP"): first row per key wins, a
+	 * self-swap is dropped. If they drift, take() misses and the builder loads the model itself. */
 	const LodgenMaterialSubst * subst = nullptr;
 	if ( swap ) {
 		auto it = swaps_.constFind( swap );

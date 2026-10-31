@@ -20,7 +20,7 @@ BSD License - see nifskope.h
 #include "harnesswindow.h"	// lane GAPFIX1
 #include "gl/cellhdr.h"
 #if __has_include( "gl/cellcull.h" )
-#include "gl/cellcull.h"   // lane SUNCELL1's culling, when merged
+#include "gl/cellcull.h"   // the cell cull table, when merged
 #define FARLOD1_HAVE_CULL 1
 #endif
 #include "gl/cellwater.h"
@@ -55,16 +55,15 @@ BSD License - see nifskope.h
 #include <psapi.h>
 #endif
 
-// lane FARLOD1: see cellfarlod.h
+// see cellfarlod.h
 
 namespace
 {
 
 constexpr float kCell = 4096.0f;
-/* lane FARLOD2: what one far-object triangle costs when its ring keeps its arrays beside the document
- * (src/cellmesh.h) instead of as rows. Rows were 2.4 KB a triangle (FINALFIX g3). MEASURED: see the
- * "B a triangle measured" telemetry and notes/finalfix/farlod2.md; the largest ring's figure, rounded up. */
-constexpr double kSideBytesPerTri = 560.0;	// measured 10-06 a1: 545 / 238 / 498 / 81 B rings 0-3 (Sanctuary), largest rounded up
+/* Bytes one far-object triangle costs when its ring keeps its arrays beside the document (src/cellmesh.h);
+ * measured on the largest ring, rounded up. */
+constexpr double kSideBytesPerTri = 560.0;	// largest measured ring, rounded up
 /* lane FAR3 (FARGAP1): one shape per material, not per (base, material): the ~43 KB of document blocks a shape
  * was most of that cost. farobjcensus, Concord rings 0-2: 210 / 159 / 199 B a triangle (per base 430 / 247 / 769) */
 constexpr double kMergedBytesPerTri = 256.0;
@@ -155,7 +154,7 @@ const FarDoc * farFor( const Scene * scene )
 
 bool cellFarLodWanted()
 {
-	// the environment wins, and only for a measuring run (a harness never writes his settings)
+	// the environment wins, and only for a measuring run (a harness never writes the user's settings)
 	if ( wwEnvIsSet( "WW_CELL_FARLOD" ) )
 		return wwEnvInt( "WW_CELL_FARLOD" ) != 0;
 	return QSettings().value( QStringLiteral( "CellView/FarLod" ), false ).toBool();
@@ -174,7 +173,7 @@ int & farlod1LastType()
 	return t;
 }
 
-//! The type this build takes, and why (env pin, his setting, or auto on whether our files exist).
+//! The type this build takes, and why (env pin, the setting, or auto on whether our files exist).
 int farlod1TypeFor( bool oursFound, QString * why )
 {
 	const QByteArray env = wwEnv( "WW_CELL_FARLOD_TYPE" ).toLower();
@@ -191,10 +190,8 @@ int farlod1TypeFor( bool oursFound, QString * why )
 	return oursFound ? WwFarLodFo4cs : WwFarLodVanilla;
 }
 
-/* THE FAR SHAPES IN SUNCELL1'S CULL TABLE. Every far shape (ours and the game's) is one big weld, so a
- * whole-shape test culls nothing: cut each into runs of <= 256 consecutive triangles, a new run as soon as a
- * triangle's centre lies over 2048 units from the run's first, each with a bounding sphere in the shape's own
- * space. The camera pass then skips the runs outside the frustum; the cascades cull their casters themselves. */
+/* Far shapes are single welds, so a whole-shape test culls nothing: cut each into runs of <= 256
+ * triangles (new run past 2048 units from its first), each with a bounding sphere for frustum culling. */
 QString farlod1CullRegister( NifModel * nif, int firstBlock )
 {
 #ifdef FARLOD1_HAVE_CULL
@@ -207,8 +204,8 @@ QString farlod1CullRegister( NifModel * nif, int firstBlock )
 			continue;
 		if ( nif->get<quint32>( iB, "Flags" ) & 1u )
 			continue;
-		/* lane FARLOD2: a far object shape keeps its arrays beside the document (src/cellmesh.h); read them there.
-		 * Looking its rows up by name would WRITE them (the cellmesh net) and undo the representation. */
+		/* Far object shapes keep their arrays beside the document; looking rows up by name would
+		 * WRITE them and undo that representation. */
 		int nv = 0;
 		std::vector<Vector3> p;
 		QVector<Triangle> tris;
@@ -359,8 +356,7 @@ QString cellFarLodAppend( NifModel * nif, const QModelIndex & iRoot, const EsmWo
 		stream->objY1 = oy1;
 	}
 
-	/* THE NEAR GATE'S ARM (WW_CELL_FARLOD_NEARONLY=1): the far field's planes and nothing else -- no shape,
-	 * no card -- so a picture against the off path shows exactly what the planes alone change. */
+	/* WW_CELL_FARLOD_NEARONLY=1: the far field's planes only, no shapes or cards. */
 	if ( wwEnvInt( "WW_CELL_FARLOD_NEARONLY" ) != 0 && nif ) {
 		FarDoc fd;
 		fd.origin[0] = origin[0];
@@ -392,17 +388,14 @@ QString cellFarLodAppend( NifModel * nif, const QModelIndex & iRoot, const EsmWo
 		return L.join( QLatin1Char( '\n' ) ) + QLatin1Char( '\n' );
 	}
 
-	/* THE GAME'S DISTANCES (his Fallout4Prefs.ini): fBlockLevel0Distance 60000, Level1 90000, Level2 110000,
-	 * fBlockMaximumDistance 250000; fTreeLoadDistance 75000. Each ring reaches its level's distance in
-	 * cells from the block centre; the env names are for a measuring run. */
+	/* The game's distances (Fallout4Prefs.ini): fBlockLevel0Distance 60000, Level1 90000, Level2 110000,
+	 * fBlockMaximumDistance 250000. Each ring reaches its level's distance in cells from the block center. */
 	const float d0 = envFloat( "WW_CELL_FARLOD_L0", 60000.0f );
 	const float d1 = envFloat( "WW_CELL_FARLOD_L1", 90000.0f );
 	const float d2 = envFloat( "WW_CELL_FARLOD_L2", 110000.0f );
 	const float dMax = envFloat( "WW_CELL_FARLOD_MAX", 250000.0f );
-	/* lane FARLOD2: NO tree cut by default. fTreeLoadDistance is the FULL trees' reach; the game's tree LOD
-	 * lives inside the .bto and is drawn with the object LOD out to fBlockMaximumDistance (FARLOD1 measured:
-	 * FO4 has no .btt). The 75000 cut dropped 2558 cards at the FARLOD1 eye. WW_CELL_FARLOD_TREE_DIST=<units>
-	 * puts a cut back (the gate's red control and a measuring run); 0 = none. */
+	/* No tree cut by default: fTreeLoadDistance is the FULL trees' reach, the game's tree LOD lives in the
+	 * .bto out to fBlockMaximumDistance. WW_CELL_FARLOD_TREE_DIST=<units> puts a cut back; 0 = none. */
 	const float treeDist = std::max( 0.0f, envFloat( "WW_CELL_FARLOD_TREE_DIST", 0.0f ) );
 	const QString treeCut = treeDist > 0.0f ? QStringLiteral( "past %1" ).arg( double( treeDist ), 0, 'f', 0 )
 		: QStringLiteral( "cut (none: the game's reach)" );
@@ -410,9 +403,8 @@ QString cellFarLodAppend( NifModel * nif, const QModelIndex & iRoot, const EsmWo
 
 	struct RingDef { int lod, sheetDim, reach, slot; };
 	std::vector<RingDef> defs = {
-		/* the band at the block: 32 samples a cell, the LAND's own 128-unit lattice. FINALFIX: at 16 a cell the
-		 * ring's edge already sat on the LAND at its vertices, but the LAND has a vertex between each pair, so the
-		 * seam stood open 140 units (measured, snap on and off alike). The RED nosnap keeps the old 16 a cell. */
+		/* the band at the block: 32 samples a cell, the LAND's own 128-unit lattice, so the seam
+		 * meets every LAND vertex (16 a cell left it open between them). */
 		{ noSnap ? 1 : 0, 8, std::max( h + 1, 3 ), 0 },
 		{ 2, 8, std::max( h + 2, cellsTo( d0 ) ), 0 },   // LOD4 objects
 		{ 3, 16, cellsTo( d1 ), 1 },                     // LOD8
@@ -426,7 +418,7 @@ QString cellFarLodAppend( NifModel * nif, const QModelIndex & iRoot, const EsmWo
 	for ( size_t i = 1; i < defs.size(); i++ )
 		defs[i].reach = std::max( defs[i].reach, defs[i - 1].reach + 1 );
 
-	// the budget: his 12 GB guard killed FARVIEW1. The far field's own share, default 2 GB.
+	// the far field's own memory budget, default 2 GB
 	const double budgetMB = std::max( 64, envInt( "WW_CELL_FARLOD_BUDGET_MB", 2048 ) );
 	constexpr double kBytesPerVert = 1536.0;   // a BSTriShape vertex row in the document + its GL copy, measured order
 	const qint64 maxVerts = qint64( budgetMB * 1024.0 * 1024.0 / kBytesPerVert );
@@ -493,8 +485,7 @@ QString cellFarLodAppend( NifModel * nif, const QModelIndex & iRoot, const EsmWo
 		return true;
 	};
 
-	/* our coverage limit for a MIXED run (WW_CELL_FARLOD_OURS=x0,y0,x1,y1 cells): our files cover that
-	 * rectangle only, the game's chunks the rest -- the boundary gate's arm */
+	/* WW_CELL_FARLOD_OURS=x0,y0,x1,y1 cells: our files cover that rectangle only, the game's chunks the rest */
 	int lim[4] = { 0, 0, -1, -1 };
 	{
 		const QStringList p = wwEnvStr( "WW_CELL_FARLOD_OURS" ).split( QLatin1Char( ',' ) );
@@ -510,9 +501,7 @@ QString cellFarLodAppend( NifModel * nif, const QModelIndex & iRoot, const EsmWo
 	std::vector<LodlFarRing> rings( defs.size() );
 	std::vector<std::array<int, 4>> foot( defs.size() );
 	std::vector<WwFarVanRing> van;
-	/* FINALFIX: no shift. The cell scene is in WORLD units -- every welded shape carries Translation = origin
-	 * (cellview.cpp, "Translation", origin) -- so far content placed at world - origin landed 67584 / 96256
-	 * units off (over the block, the measured double ground and water lines added origin back and read 0). */
+	/* No shift: the cell scene is in WORLD units (every welded shape carries Translation = origin). */
 	const float shift[3] = { 0.0f, 0.0f, 0.0f };
 	QString terr;
 	bool terrOk = true;
@@ -540,7 +529,7 @@ QString cellFarLodAppend( NifModel * nif, const QModelIndex & iRoot, const EsmWo
 			r.ly1 = lim[3];
 		}
 		r.noCut = noCut && i == 0;
-		r.exact = i == 0;	// FINALFIX: ring 0 at the LAND's rate only as far as its reach
+		r.exact = i == 0;	// ring 0 at the LAND's rate only as far as its reach
 		r.snapInner = !noSnap;
 		if ( i == 0 )
 			r.innerZ = innerZ;
@@ -586,9 +575,7 @@ QString cellFarLodAppend( NifModel * nif, const QModelIndex & iRoot, const EsmWo
 		}
 		WwFarVanRing v;
 		v.level = kVanLevel[std::min( i, size_t( 4 ) )];
-		/* FINALFIX: a ring we did not build is the game's -- whole chunks of its level, as the game draws
-		 * them (ours snap to whole sheet tiles the same way). Measured: the Vanilla type's last ring stopped
-		 * at cells -79..45 where ours reach -96..63, and the over view showed sky below the horizon there. */
+		/* A ring we did not build is the game's: whole chunks of its level, as the game draws them. */
 		if ( !r.built ) {
 			const int L = v.level;
 			auto fl = [L]( int a ) { return ( a >= 0 ? a / L : -( ( -a + L - 1 ) / L ) ) * L; };
@@ -707,9 +694,8 @@ QString cellFarLodAppend( NifModel * nif, const QModelIndex & iRoot, const EsmWo
 			.arg( r0.seamSamples ).arg( noSnap ? QStringLiteral( "off (RED nosnap)" ) : QStringLiteral( "on" ) ) );
 	}
 
-	/* ---- the far WATER: the .lodl's water bodies over each built ring, the ring inside (the block for ring 0)
-	 * left dry, each shape registered with its WATR record so the cell's water program draws it (lane WATER1's
-	 * fo4_water.prog, the Cell lights row on) -- the game's LOD water, a plane the ground cuts. */
+	/* ---- the far WATER: the .lodl's water bodies over each built ring (the ring inside left dry), each shape
+	 * registered with its WATR record so the cell's water program draws it. */
 	qint64 wQuads = 0, wShapes = 0, wRegistered = 0;
 	QSet<quint16> wBodies;
 	if ( noWater ) {
@@ -800,9 +786,8 @@ QString cellFarLodAppend( NifModel * nif, const QModelIndex & iRoot, const EsmWo
 		}
 	}
 
-	/* THE DOUBLE GROUND, read back from the document: far terrain triangles whose centre lies over the loaded
-	 * block. 0 is the cut working; the red (WW_CELL_FARLOD_RED=nocut) must count them. The far water the same
-	 * way (red watercut). */
+	/* Double ground, read back from the document: far terrain (and water) triangles whose center lies over
+	 * the loaded block. 0 means the cut works. */
 	qint64 doubleGround = 0, readTris = 0, waterOver = 0, waterTris = 0, vanOver = 0, vanTris = 0;
 	QMap<QString, QString> vanWhere;   // the shapes a vanilla-over-ours count comes from, with their centres' box
 	QHash<QString, std::array<float, 5>> vanBox;
@@ -826,14 +811,12 @@ QString cellFarLodAppend( NifModel * nif, const QModelIndex & iRoot, const EsmWo
 		};
 		const float wx0 = float( bx0 ) * kCell, wy0 = float( by0 ) * kCell;
 		const float wx1 = float( bx1 + 1 ) * kCell, wy1 = float( by1 + 1 ) * kCell;
-		/* THE PLAN CRACKS: an 8-unit grid over the block grown by one cell; every far terrain triangle marks
-		 * the grid points it covers seen from straight above, the block itself counts as covered. A point
-		 * left bare is a crack the top view's sky census can only hit by chance (Vanilla top, 2 px). */
+		/* Plan cracks: an 8-unit grid over the block grown by one cell; each far terrain triangle marks the
+		 * points it covers from above. A bare point is a crack. */
 		const float gs = 8.0f, gx0 = wx0 - kCell, gy0 = wy0 - kCell;
 		const int gw = int( ( wx1 - wx0 + 2.0f * kCell ) / gs ), gh = int( ( wy1 - wy0 + 2.0f * kCell ) / gs );
 		std::vector<quint8> cover( size_t( gw ) * size_t( gh ), 0 );
-		/* and finer along every cell line (chunk seams and clip lines lie on them): points 0.25, 1 and 3 units
-		 * either side, every 2 units along */
+		/* and finer along every cell line (chunk seams and clip lines lie on them) */
 		const float seamOff[6] = { -3.0f, -1.0f, -0.25f, 0.25f, 1.0f, 3.0f };
 		const int nLx = int( ( wx1 - wx0 ) / kCell ) + 3, nLy = int( ( wy1 - wy0 ) / kCell ) + 3;
 		const int alongX = int( ( wy1 - wy0 + 2.0f * kCell ) / 2.0f ), alongY = int( ( wx1 - wx0 + 2.0f * kCell ) / 2.0f );
@@ -1030,7 +1013,7 @@ QString cellFarLodAppend( NifModel * nif, const QModelIndex & iRoot, const EsmWo
 	// lane LIVESET1: the budget charges the far field's own estimate, never the process working set (a live
 	// rebuild reuses freed pages, so a measured delta built ring 1 there and not at the open)
 	double usedMB = double( tVerts ) * kBytesPerVert / ( 1024.0 * 1024.0 );
-	// lane FARLOD2: per ring, for the census against the game's object LOD in the same region
+	// per ring, for the census against the game's object LOD in the same region
 	std::vector<qint64> ringTris( rings.size(), 0 ), ringPlaced( rings.size(), 0 );
 	std::vector<QString> ringState( rings.size(), QStringLiteral( "not reached" ) );
 	std::vector<std::array<int, 8>> ringRegion( rings.size(), std::array<int, 8>{ { 0, 0, -1, -1, 0, 0, -1, -1 } } );
@@ -1088,17 +1071,16 @@ QString cellFarLodAppend( NifModel * nif, const QModelIndex & iRoot, const EsmWo
 			os.shift[0] = shift[0];
 			os.shift[1] = shift[1];
 			os.shift[2] = shift[2];
-			os.dropTreesBeyond = treeDist;   // 0 = no cut (lane FARLOD2)
-			os.sideMesh = true;              // lane FARLOD2: arrays beside the document, not rows
+			os.dropTreesBeyond = treeDist;   // 0 = no cut
+			os.sideMesh = true;              // arrays beside the document, not rows
 			os.mergeBases = !perBaseRed;     // lane FAR3: one shape per material
 			os.instanced = inst;
 			os.dropX = ctrX;
 			os.dropY = ctrY;
 			os.sway = swayAmp() > 0.0f;
 			os.skipRefs = &cardRefs;
-			/* FINALFIX: the ring's triangles are counted before the document grows; a ring that would take the
-			 * far field past its budget is not written. Measured on the merged build (g3, Commonwealth -17,23):
-			 * ring 0 636345 tris +1514 MB, ring 1 1282884 tris +3131 MB -- 2.4 KB a triangle, rounded up. */
+			/* The ring's triangles are counted before the document grows; a ring that would exceed the
+			 * budget is not written. */
 			const bool sideMesh = cellMeshOn();
 			const double kBytesPerTri = !sideMesh ? 2560.0 : perBaseRed ? kSideBytesPerTri : kMergedBytesPerTri;
 			const double leftMB = budgetMB - usedMB;
@@ -1151,9 +1133,8 @@ QString cellFarLodAppend( NifModel * nif, const QModelIndex & iRoot, const EsmWo
 		}
 	}
 
-	/* lane FARLOD2: THE CENSUS. Every object ring against the game's own object LOD (.bto, the game's level for
-	 * that ring) over the same rectangle minus the same hole. A ring the game fills and we leave empty is the
-	 * defect this lane exists to end; the line says which by name. */
+	/* Census: every object ring against the game's own object LOD (.bto) over the same region, naming
+	 * any ring the game fills and we leave empty. */
 	if ( ours && QFileInfo( lodi ).isFile() ) {
 		static const int kGameLevel[5] = { 4, 4, 8, 16, 32 };
 		for ( size_t i = 0; i < rings.size(); i++ ) {
@@ -1202,7 +1183,7 @@ QString cellFarLodAppend( NifModel * nif, const QModelIndex & iRoot, const EsmWo
 		fd.fx1 = r[2];
 		fd.fy1 = r[3];
 	}
-	say( farlod1CullRegister( nif, firstFarBlock ) );   // lane SUNCELL1's cull table, when merged
+	say( farlod1CullRegister( nif, firstFarBlock ) );   // the cull table, when merged
 	docs().insert( nif, fd );
 	if ( !hooked().contains( nif ) ) {
 		hooked().insert( nif );
@@ -1256,7 +1237,7 @@ CellFarStack cellFarLodStackFor( const QString & ws, const QString & lodlPath, c
 			.arg( lerr.isEmpty() ? QString() : QStringLiteral( ": " ) + lerr ).arg( nearList.size() );
 		return r;
 	}
-	r.lodb = lodb;	// lane MODPICK1
+	r.lodb = lodb;
 	for ( const LodbPlugin & p : std::as_const( led.plugins ) )
 		if ( QFileInfo( p.path ).isFile() )
 			r.bakePresent << p.path;
@@ -1302,11 +1283,8 @@ CellFarStack cellFarLodStackFor( const QString & ws, const QString & lodlPath, c
 			"keep their load order)" ).arg( what );
 		return r;
 	}
-	/* lane FARLOD3 (bungo 10-12: "the loaded cells display the same modded trees" as the far LOD): the near
-	 * cells load the BAKE's stack -- the one the displayed far field was baked from, never the live profile --
-	 * minus only the files that are gone, each one logged ("far lod: stack skips ..."). FARLOD2 refused the
-	 * whole stack when one file was gone, so a stale bake drew vanilla near trees beside modded far ones.
-	 * WW_CELL_FARLOD_RED=refusemissing: that old rule (no adoption; the far field's roots are lent instead). */
+	/* The near cells load the BAKE's stack (never the live profile) minus files that are gone, each logged,
+	 * so near and far trees match. WW_CELL_FARLOD_RED=refusemissing: refuse adoption instead. */
 	QStringList paths, missing, keptRes;
 	for ( const LodbPlugin & p : std::as_const( led.plugins ) ) {
 		if ( !QFileInfo( p.path ).isFile() )
@@ -1323,7 +1301,7 @@ CellFarStack cellFarLodStackFor( const QString & ws, const QString & lodlPath, c
 	if ( !missing.isEmpty() && ( wwEnv( "WW_CELL_FARLOD_RED" ) == "refusemissing" || paths.isEmpty() ) ) {
 		r.line = QStringLiteral( "far lod: stack MISMATCH -- %1; NOT adopted: %2 of the bake's files are gone (%3)" )
 			.arg( what ).arg( missing.size() ).arg( QStringList( missing.mid( 0, 3 ) ).join( QStringLiteral( "; " ) ) );
-		// lane FARLOD3: the near cells keep their stack, but the far field still needs its own assets
+		// the near cells keep their stack, but the far field still needs its own assets
 		for ( const LodbResource & res : std::as_const( led.resources ) )
 			if ( QFileInfo( res.path ).isDir() )
 				r.bakeRoots << res.path;
@@ -1332,10 +1310,7 @@ CellFarStack cellFarLodStackFor( const QString & ws, const QString & lodlPath, c
 	r.adopt = true;
 	r.plugins = paths.join( QLatin1Char( ',' ) );
 	r.resources = keptRes;
-	/* lane FIXPACK1 (REDFIX1): WW_CELL_FARLOD_RED=nobakeroots now bites in the adopt regime too: the bake's
-	 * plugins are adopted but NOT its resource roots, so the far field's (and the near cells') mod assets
-	 * resolve through the session's stack alone. FARLOD3's red only stopped the lending, which an adopted
-	 * stack never reaches. */
+	/* WW_CELL_FARLOD_RED=nobakeroots: adopt the bake's plugins but NOT its resource roots. */
 	const bool redNoRoots = wwEnv( "WW_CELL_FARLOD_RED" ) == "nobakeroots";
 	if ( redNoRoots )
 		r.resources.clear();
@@ -1510,8 +1485,7 @@ int wwCellFarLodCards( Scene * scene, bool insideHdr, bool hdrFrame )
 		return 0;
 	ImpostorDraw::Options o;
 	o.cellLit = !redAfter;
-	/* WW_CELL_FARLOD_CARDSWAY=0 (harness only): the cards stand still, so the PBR sway gate (g9) sees the
-	 * mesh trees alone -- the cards sway on their own path and would move both its arms. */
+	/* WW_CELL_FARLOD_CARDSWAY=0: the cards stand still (they sway on their own path). */
 	const float amp = wwEnv( "WW_CELL_FARLOD_CARDSWAY" ) == "0" ? 0.0f : swayAmp();
 	if ( amp > 0.0f ) {
 		// the card's own sway is a UV shear (impostordraw.h), a fraction, not units
@@ -1519,8 +1493,8 @@ int wwCellFarLodCards( Scene * scene, bool insideHdr, bool hdrFrame )
 		o.swayPhase = swayTime() * 1.3f;
 	}
 	if ( insideHdr && wwCellHdrActive() && scene->renderer ) {
-		/* the HDR frame sorts its pixels by the stencil (gl/cellhdr.h): 1 = linear light from a cell program, toned
-		 * once at the resolve. The cards write linear light (cellIsLinear), so they mark 1, as the far bulbs do. */
+		/* the HDR frame sorts pixels by stencil (gl/cellhdr.h): 1 = linear light toned at the resolve.
+		 * The cards write linear light, so they mark 1. */
 		auto fn = scene->renderer->fn;
 		fn->glEnable( GL_STENCIL_TEST );
 		fn->glStencilMask( 0x03 );
@@ -1552,9 +1526,7 @@ double wwCellFarLodNear( double nr )
 void wwCellFarLodPlanes( double nearPlane, double farPlane )
 {
 	static QString said;
-	/* The depth step of a 24-bit buffer at distance d under this perspective: d^2 (f - n) / (n f 2^24).
-	 * The near gate holds it under 1 unit at 1000 (z-fight free where the cell's decals and contacts are);
-	 * the red near (WW_CELL_FARLOD_NEAR=0.01) puts it at 6. */
+	/* The depth step of a 24-bit buffer at distance d under this perspective: d^2 (f - n) / (n f 2^24). */
 	auto step = [nearPlane, farPlane]( double d ) {
 		return d * d * ( farPlane - nearPlane ) / ( nearPlane * farPlane * 16777216.0 );
 	};
@@ -1640,12 +1612,8 @@ void wwCellFarLodSkyCensus( Scene * scene )
 
 	// a pixel is below the horizon when its view ray points down in the world (more than 1 degree)
 	const Matrix toWorld = scene->view.rotation.inverted();
-	/* FINALFIX: WHERE an empty ray goes. A ray that reaches sea level (z 0) past the far field's footprint passed
-	 * over all of it: the footprint is the last ring's square, which holds the game's fBlockMaximumDistance
-	 * (250000) circle, so the game draws no LOD there either -- sky, not a hole. One that reaches z 0 inside the
-	 * footprint crossed where ground should be and is a hole. Counted apart so the gate can tell them (the far
-	 * field off has no footprint: every pixel counts). Measured 10-06: the over view's 2058 (FO4CS) and 2001
-	 * (Vanilla) empty pixels all land at cells x 7.5..104, y -140.9..-62.9: past the footprint (x to 63, y from -64). */
+	/* An empty ray reaching sea level past the far field's footprint passed over all of it (the game draws
+	 * no LOD there either): sky, not a hole. One reaching z 0 inside the footprint is a hole. Counted apart. */
 	const FarDoc * fdoc = farFor( scene );
 	const float vs = scene->view.scale != 0.0f ? scene->view.scale : 1.0f;
 	const Vector3 eye = toWorld * ( Vector3( 0, 0, 0 ) - scene->view.translation ) / vs;
@@ -1679,8 +1647,7 @@ void wwCellFarLodSkyCensus( Scene * scene )
 							px0 = std::min( px0, hx / kC ); px1 = std::max( px1, hx / kC );
 							py0 = std::min( py0, hy / kC ); py1 = std::max( py1, hy / kC );
 						} else if ( tz > 0.0f && inside.size() < 6 ) {	// a hole: where (sea-level cells, to locate it)
-							/* FINALFIX: and where the ground AROUND it is -- the nearest drawn pixel within 3,
-							 * unprojected (world cells x, y and z units): a hole's own ray meets nothing. */
+							/* and where the ground AROUND it is: the nearest drawn pixel within 3, unprojected. */
 							QString around;
 							const float P22 = r->globalUniforms->projectionMatrix[2][2];
 							const float P32 = r->globalUniforms->projectionMatrix[3][2];

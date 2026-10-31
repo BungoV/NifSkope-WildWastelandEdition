@@ -1,10 +1,8 @@
 #version 410 core
 
-/* lane HDR1: the cell view's one tone map (src/gl/cellhdr.h). The main draw went into a linear float frame;
- * this full-screen pass draws it back into the view, sample for sample:
- *   hdrMode 0  the pixels a cell program or a cell effect wrote last: the cell's imagespace (the bloom added
- *              once, the exposure, the curve, the grade, the LUT) on the summed linear light, as the game runs
- *              its imagespace once on its HDR target
+/* The cell view's tone map (src/gl/cellhdr.h): draws the linear float frame back into the view, per sample.
+ * The stencil picks the mode per pixel:
+ *   hdrMode 0  pixels a cell program or effect wrote last: the cell's imagespace on the summed linear light
  *   hdrMode 1  the pixels any other program wrote last: the value as it was written
  *   hdrMode 2  (lane SKYHOLE1) the pixels of mode 0 no opaque draw reached (depth at the far plane): a cell
  *              effect over the sky, composited over the backdrop by its coverage instead of replacing it
@@ -83,8 +81,8 @@ void main()
 	// lane FOGBLOOM1 (cellfogbloom.h): the bloom this pixel receives, raised where its view ray crosses fog
 	if ( cellFogBloomOn )
 		cellBloomGain = 1.0 + 4.0 * texelFetch( cellFogBloom, ivec2( gl_FragCoord.xy ), gl_SampleID ).r;
-	/* lane BLOOM1b: the FO4CS bloom at this pixel, exposed light (cell_bloom.glsl): the tent of the chain's top, red
-	 * and blue pushed by the glare's dispersion, times the bloom weight. cellImageSpace adds it before its curve. */
+	/* the FO4CS bloom at this pixel (cell_bloom.glsl), times the bloom weight; cellImageSpace adds it before
+	 * its curve. */
 	vec3 foBloom = vec3( 0.0 );
 	/* lane GAPLOOK1 (BLOOMMIP): through fog the glow spreads wider (an atmospheric PSF), so the fog's receiver gain
 	 * picks how far down the top's mips the tent reads: log2(gain) levels (w = 1; 0 in clear air: the same bits) */
@@ -108,10 +106,8 @@ void main()
 	// mode 2 (the effects over the sky) takes the glow from mode 3, as every pixel mode 0 does not take
 	cellFoBloomHere = hdrMode == 0 ? foBloom : vec3( 0.0 );
 	if ( hdrMode == 2 ) {
-		/* lane SKYHOLE1: a cell effect over the backdrop (the sky). The game draws its sky into the HDR target and
-		 * blends the effect over it; here the sky is in the view, not the linear frame, so the effect went over 0.
-		 * Its value un-premultiplied by its coverage (the frame's alpha: the effects blend alpha as ONE, dst),
-		 * tone-mapped, then laid over the backdrop by that coverage (blend ONE, ONE_MINUS_SRC_ALPHA). */
+		/* a cell effect over the sky: the sky is in the view, not the linear frame, so the effect went over 0.
+		 * Un-premultiply by coverage (effects blend alpha as ONE, dst), tone-map, lay over by coverage. */
 		float A = clamp( x.a, 0.0, 1.0 );
 		vec3 v = max( x.rgb, vec3( 0.0 ) );
 		if ( !cellOn || !cellIsOn ) {

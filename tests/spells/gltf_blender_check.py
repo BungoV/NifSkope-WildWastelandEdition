@@ -60,12 +60,8 @@ for ob in bpy.data.objects:
         bones += len(ob.data.bones)
         print("BLENDER armature %s bones %d" % (ob.name, len(ob.data.bones)))
 
-# What the FILE says, read straight out of its own JSON: mesh name -> the
-# POSITION accessor's count and a third of the index accessor's. Blender's
-# importer must reproduce every one of them, by name. (Comparing a grand
-# total instead would be wrong: the importer adds a mesh of its own -- an
-# "Icosphere" it uses as a bone display shape -- which is its artefact and
-# not something the export asked for.)
+# What the file says, from its own JSON: mesh name -> POSITION count and index count / 3; Blender must
+# match each by name (a grand total would count the importer's own bone-display Icosphere).
 want = {}
 with open(path, "r", encoding="utf-8") as fh:
     doc = json.load(fh)

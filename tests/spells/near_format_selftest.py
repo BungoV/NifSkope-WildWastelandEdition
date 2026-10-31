@@ -78,7 +78,7 @@ def main():
           and F['header']['version'] == 6 and not F['header']['flags'] & 16
           and all(m['reserved'] == 0 for m in F['materials']), why or '')
     G, why = decode('lodi', FI)
-    # GROUND1 (2026-09-27): a far .lodi is v12 when it carries the ground-contact stream; 11 is near-only
+    # a far .lodi is v12 when it carries the ground-contact stream; 11 is near-only
     check('far .lodi decodes, no instance with bit 8, version below 11 or 12', G is not None
           and G['header']['version'] != 11 and G['header']['version'] <= 12
           and not any(r['flags'] & 256 for r in G['instances']),

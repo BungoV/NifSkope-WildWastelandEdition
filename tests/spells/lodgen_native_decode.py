@@ -45,14 +45,11 @@ CHUNK_UNITS = 16384.0
 CELL_UNITS = 4096.0
 SQRT_HALF = math.sqrt(0.5)
 
-#: One step of the instance position quantiser in X/Y (NATIVE 4.1: 3 x u16 over
-#: the 16,384-unit chunk box).  `lodoQuantU16` rounds to nearest, so a stored
-#: position is at most HALF a step from the float the writer sorted on.
+#: One step of the instance position quantizer in X/Y (NATIVE 4.1: 3 x u16 over the 16,384-unit
+#: chunk box); `lodoQuantU16` rounds to nearest, so a stored position is within HALF a step.
 POS_QUANT_STEP = CHUNK_UNITS / 65535.0
-#: Half a step, plus two ulp of 16,384 for the float32 round trip the C++ side
-#: does and this decoder recomputes in double.  THE CELL AMBIGUITY BAND: a
-#: position this close to a cell line could have been on either side of it
-#: before quantisation, so the writer's cell and ours may differ by one.
+#: Half a step plus two ulp of 16,384 (the float32 round trip): THE CELL AMBIGUITY BAND, inside
+#: which the writer's cell and ours may differ by one.
 CELL_QUANT_TOL = POS_QUANT_STEP / 2.0 + CHUNK_UNITS * 2.0 ** -23
 
 
@@ -101,12 +98,12 @@ def read_lodo(path):
         raise Refusal('version 3: a v3 base row spends crossPx16[0..1] on two screen-size steps in '
                       '1/16 px, and this reader takes those same four bytes as the base FULL-DETAIL '
                       'TRIANGLE COUNT. Re-bake; this reader knows versions 4 to 6')
-    # v5 (lane SEAM1, W4) = v4 + an optional per-vertex RGBA8 colour stream; a v4 file reads as v5 without one
-    # v6 (lane SWAP1) = v5 + material-swap variant base rows (the base row's last u32 = materialSwap)
-    # v7 (lane NEAR1) = v6 + header flag bit 4 NEAR (set exactly on v7) + the material row's
+    # v5 = v4 + an optional per-vertex RGBA8 color stream; a v4 file reads as v5 without one
+    # v6 = v5 + material-swap variant base rows (the base row's last u32 = materialSwap)
+    # v7 = v6 + header flag bit 4 NEAR + the material row's
     #   reserved byte as `features` (bits 0..4: parallax, env map, greyscale, vertex colour, MSN)
-    # v8 (lane LODP1) = v6 or v7 + the per-cluster-triangle CHART stream (u64 offset at 0xE0, the last
-    #   payload, clusterCount x 16 bytes); NEAR is now 'v7 is NEAR, NEAR is v7 or v8'
+    # v8 = v6 or v7 + the per-cluster-triangle CHART stream (u64 offset at 0xE0, the last
+    #   payload, clusterCount x 16 bytes); v7 is always NEAR, a NEAR file is v7 or v8
     if h['version'] not in (4, 5, 6, 7, 8):
         raise Refusal('version %d' % h['version'])
     if crc32(b[0x10:0x100]) != h['headerCrc32']:
@@ -212,7 +209,7 @@ def read_lodo(path):
     L = {'header': h, 'strings': strings, 'string_at': string_at}
     # v4: the row is still 32 bytes, but crossPx16[0..1] is now one u32
     # fullTriangles -- the base's FULL-DETAIL triangle count
-    # v6 (lane SWAP1): the last u32 (v4/v5 crossPx16[2..3], always 0) is materialSwap;
+    # v6: the last u32 (v4/v5 crossPx16[2..3], always 0) is materialSwap;
     # a file before v6 has none, whatever the bytes hold
     L['bases'] = [dict(zip(('formId', 'modelStringOffset', 'rep0', 'rep1', 'rep2', 'rep3', 'cardLayer',
                             'flags', 'boundRadius', 'fullTriangles', 'materialSwap'),
@@ -514,16 +511,15 @@ def read_lodi(path):
     if h['version'] not in (3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13):
         raise Refusal('version %d; this reader knows 3 to 13' % h['version'])
     # v8 = v7 + the per-vertex HORIZON stream, in the room v7's header left reserved.
-    # RETIRED 2026-09-19 (lane HORIZONOUT): no exe writes one, this reader still reads one.
+    # Retired: no exe writes one, this reader still reads one.
     v8 = h['version'] == 8
     # v9 = v7 + instance flag bit 6, the workshop-scrappable bit. It is a superset of v7
     # and NOT of v8: a v9 file carries no horizon stream and its 0x11C..0x1FF are reserved.
-    # v10 = v9 + instance flag bit 7, SCALE_WIDE: scale = 8 + u16 / 8192 (lane BAKE2, 2026-09-25).
-    # v11 = v10 + instance flag bit 8, INITIALLY_DISABLED (lane NEAR1, 2026-09-26; the near library only).
-    # v12 = v11 + the per-vertex GROUND-CONTACT stream at 0x130/0x138 (lane GROUND1, 2026-09-27).
-    # v13 = v12's layout with the group word a FILE-WIDE u32 (stride 4); its ground stream is optional
-    # (lane IDENT2, 2026-09-29). T['group'] is file-wide for every version: v7..v12's per-chunk ids
-    # are offset chunk by chunk below.
+    # v10 = v9 + instance flag bit 7, SCALE_WIDE: scale = 8 + u16 / 8192.
+    # v11 = v10 + instance flag bit 8, INITIALLY_DISABLED (the near library only).
+    # v12 = v11 + the per-vertex GROUND-CONTACT stream at 0x130/0x138.
+    # v13 = v12's layout with the group word a FILE-WIDE u32 (stride 4); its ground stream is optional.
+    # T['group'] is file-wide for every version: v7..v12's per-chunk ids are offset chunk by chunk below.
     v13 = h['version'] == 13
     v12 = h['version'] == 12 or v13
     v11 = h['version'] == 11 or v12
@@ -644,10 +640,8 @@ def read_lodi(path):
                               % (h['vertexSkyBytes'], h['instanceCount'] + 1))
         elif h['vertexSkyBytes']:
             raise Refusal('no vertex-sky stream but vertexSkyBytes is %d' % h['vertexSkyBytes'])
-        # v8: the vertex-horizon stream at 0x11C/0x124, its stride at 0x128, and the
-        # two numbers the cast was run with at 0x12A/0x12C. Version 8 IS the stream:
-        # a bake without one is written at version 7, so an absent stream is a
-        # refusal and not a quiet zero.
+        # v8: the vertex-horizon stream at 0x11C/0x124, its stride at 0x128, the cast's two numbers at
+        # 0x12A/0x12C. Version 8 IS the stream, so an absent one is a refusal, not a quiet zero.
         h['offVertexHorizon'] = h['vertexHorizonBytes'] = 0
         h['horizonAzimuths'] = h['horizonSteps'] = 0
         h['horizonReach'] = 0.0
@@ -753,11 +747,8 @@ def read_lodi(path):
         if any(b[prev:off]):
             raise Refusal('pad before %s not zero' % name)
         prev = off + size
-    # v3: indexCrc32 covers the chunk table, the cell ranges, the occluder table
-    # and the occluder ranges, in that order.
-    # The RANGES are kept as well as the bytes, because a script that edits a
-    # `.lodi` has to rebuild this blob from the file's own definition rather
-    # than from a second copy of the rule (`lodgen_scrappable_flip.py`).
+    # v3: indexCrc32 covers the chunk table, cell ranges, occluder table and occluder ranges; the RANGES
+    # are kept so a script that edits a `.lodi` can rebuild this blob from the file's own definition.
     ranges = [(h['offChunks'], tabs[0][2]),
               (h['offCellRanges'], tabs[1][2]),
               (h['offOccluders'], tabs[4][2]),
@@ -849,9 +840,8 @@ def read_lodi(path):
                                le('ffffffHHHHIHH', b, h['offOccluders'] + i * 40)))
                       for i in range(h['occluderCount'])]
     T['occluderRanges'] = [le('II', b, h['offOccluderRanges'] + i * 8) for i in range(h['presentChunks'] * 16)]
-    #: instances whose cell RANGE and whose re-derived cell differ inside the
-    #: quantiser's ambiguity band (see the per-instance loop below).  Written
-    #: here so it is 0 on a file with none, not absent.
+    #: instances whose cell RANGE and re-derived cell differ inside the quantizer's ambiguity band;
+    #: 0 on a file with none, not absent.
     T['cellAmbiguous'] = []
     groupSum = [0]      # v7: the chunks' group counts, summed, checked against the header word
     occCursor = 0
@@ -954,15 +944,8 @@ def read_lodi(path):
             lx = min(3, max(0, int(fx // CELL_UNITS)))
             ly = min(3, max(0, int(fy // CELL_UNITS)))
             derived = (3 - ly) * 4 + lx
-            # THE WRITER'S CELL RULE, and why we do not simply re-derive it.
-            # `lodifile.cpp:312` sorts on `lodiCellOf(set.instances[i].pos[...])`
-            # -- the FLOAT position, before the u16 quantiser touches it.  We
-            # only ever see the quantised one, and it can have crossed a cell
-            # line by up to half a step.  So the cell we USE is the one the
-            # file itself states (the cell RANGE this index falls in, already
-            # checked above to partition the chunk in order), and the derived
-            # one is kept as a CHECK on it: the two may differ only by one on
-            # ONE axis, and only within the ambiguity band of that cell line.
+            # the writer sorts on the FLOAT position's cell, before quantization; we see only the quantized
+            # one, so the file's stated range is USED and the derived cell checks it (off by one, in the band).
             stored = cellOfIndex[i]
             r['cell'] = stored
             r['cellDerived'] = derived
@@ -1010,10 +993,8 @@ def read_lodi(path):
         raise Refusal("groupCount %d but the chunks' group counts sum to %d"
                       % (h['groupCount'], groupSum[0]))
     # v7: the two streams stand for one vertex population
-    # v8: the horizon stream is the SAME vertex population, A bytes each. This is
-    # the one thing the format can get wrong without announcing it -- a slice
-    # that is not exactly A x the AO slice makes every later vertex read another
-    # vertex's bins, and nothing downstream would notice.
+    # v8: the horizon stream is the SAME vertex population, A bytes each; a slice that is not
+    # exactly A x the AO slice silently shifts every later vertex's bins.
     if T['vertexHorizonFirst'] and T['vertexAoFirst']:
         A = h['horizonAzimuths']
         for i in range(h['instanceCount']):
@@ -1119,9 +1100,8 @@ def check_expect(L, T, expect_path, ck):
         m = L['meshes'][mesh]
         return [i for i in range(m['clusterFirst'], m['clusterFirst'] + m['clusterCount'])
                 if L['clusterLods'][i]['level'] == 0]
-    # lane FIX1 fix 8: each base's stored fullTriangles against (a) a recount from the
-    # rows (level-0 triangles over the DISTINCT meshes its slots name) and (b) the hand
-    # answer. The fixture wrote 0 here until 2026-09-26, and both readers refused it.
+    # each base's stored fullTriangles against (a) a recount from the rows (level-0 triangles over
+    # the DISTINCT meshes its slots name) and (b) the hand answer.
     if h['version'] >= 4:
         stored, recount = [], []
         for bse in L['bases']:

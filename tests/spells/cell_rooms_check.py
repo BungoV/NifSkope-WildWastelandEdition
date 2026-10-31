@@ -80,7 +80,7 @@ import zlib
 import numpy as np
 
 SOUP_MAGIC, TWO_MAGIC, ALB_MAGIC, GLS_MAGIC = 0x31505350, 0x314F5754, 0x31424C41, 0x31534C47
-BACK_MAX = 0.25        # the gate's own bar (src/probebake.h's default, chosen from the Museum histogram)
+BACK_MAX = 0.25        # the gate's own bar (src/probebake.h's default)
 PLACE_REACH = 200.0    # the placer puts its probes at eye height 120 over the face they stand on
 SHARE_TOL = 0.02       # 256 rays, same Fibonacci set: only ties at a triangle edge may differ
 DOOR_REACH = 900.0
@@ -307,7 +307,7 @@ def back_cmd(run, ref, sample):
     for r in pick:
         s = share(T, r['p'], dirs)
         dv = abs(s - r['share'])
-        if dv > SHARE_TOL:     # lane ROOMCLAMP1: a coincident shell's rays may go either way; past them it counts
+        if dv > SHARE_TOL:     # a coincident shell's rays may go either way; past them it counts
             tv = tie_share(tris, two, r['p'], dirs)
             tied += tv > 0
             dv = max(0.0, dv - tv)
@@ -436,7 +436,7 @@ def door_cmd(esm, run, cell, eye=''):
         if esc:
             fails.append('door %08X: %d doorway rays escape' % (fid, esc))
     if eye:
-        # the capture cube's eye (CAPTURE1's Museum probe): every ray of a 16384-ray sphere within the door's cone of
+        # the capture cube's eye: every ray of a 16384-ray sphere within the door's cone of
         # a load door that escapes into the void is the cube view's light-blue patch
         o = np.array([float(v) for v in eye.split(',')])
         sph = fib(16384)
@@ -462,7 +462,7 @@ def door_cmd(esm, run, cell, eye=''):
 # relights it and dumps the labels (gi_rooms.bin) and the two-slot grid (gi_grid.bin, gi_slots.bin). The shader's
 # blend (res/shaders/cell_lights.glsl cellGiRoomSample, and the plain trilinear one without rooms) is redone here.
 LEAK_TOL = 1.02      # the dark side of a shared wall reads no more than the dark room's own brightest probe face
-COVER_MIN = 0.01     # cellGiE's own floor: a sample with less weight paints the no-probe marker (cyan since FIXPACK1) in the pass view
+COVER_MIN = 0.01     # cellGiE's own floor: a sample with less weight paints the no-probe marker in the pass view
 QUAD = lambda a, b, c, d: [(a, b, c), (a, c, d)]
 
 
@@ -562,16 +562,15 @@ def gi_sample(G, R, P, N, fill=None, sky=False):
     sl = (0 if N[0] >= 0 else 1, 2 if N[1] >= 0 else 3, 4 if N[2] >= 0 else 5)
     n2 = N * N
     if R is not None:
-        # the shader (lane ROOMCLAMP1): the read room's blend; without weight (or no read: a wall's cells) of the read's
-        # air neighbours the nearest whose blend has weight (an inner corner's nearest air is the outdoors across the
-        # wall, which no voxel there holds; a pocket behind a pipe no voxel holds); none: the plain trilinear
+        # the shader: the read room's blend; without weight (or no read: a wall's cells), the nearest air
+        # neighbour whose blend has weight (an inner corner's nearest air is outdoors); none: the plain trilinear
         L, cand = surface_reads(R, P, N)
         out, Ls = None, L
         frm = see_from(R, P, N)
         L2 = room_at(R, P + N * 1.75 * R['cell'])
         lend = sky and not BORROW_RED[0] and room_solid(R, P + N * 0.75 * R['cell']) and (L2[0] < 0 or (L2[0] != 0 and L2[1] != 0))
         if lend and not STRAND_RED[0]:
-            # lane GIBLACK2: a stranded surface takes the room its evidence search reaches (strand_pick), never a
+            # a stranded surface takes the room its evidence search reaches (strand_pick), never a
             # guess at the outdoors; nothing reached: the plain trilinear
             GI_STRAND[0] += 1
             v, code = strand_pick(G, R, P, N, i0, f, sl, n2)
@@ -591,7 +590,7 @@ def gi_sample(G, R, P, N, fill=None, sky=False):
             best, best_any = 3.0, 3.0
             for d, c in cand:
                 if L is None and d < best_any:
-                    best_any, Ls = d, c   # lane GICAL1: the nearest air cell, with weight or not (the fill's room)
+                    best_any, Ls = d, c   # the nearest air cell, with weight or not (the fill's room)
                 if d >= best or (lend and c[0] != 0 and c[1] != 0):
                     continue
                 s, ws = gi_blend(G, c, i0, f, sl, n2, R, frm)
@@ -611,15 +610,14 @@ def gi_sample(G, R, P, N, fill=None, sky=False):
             if so[3] > 0.01:
                 return so
         if lend:
-            GI_LENT[0] += 1   # lane GIBLACK2: the plain trilinear below, never the flat ambient (zeros)
+            GI_LENT[0] += 1   # the plain trilinear below, never the flat ambient (zeros)
             if LENDAMB_RED[0] or STRAND_RED[0]:
                 return np.zeros(4)
         else:
             GI_PLAIN[0] += 1
     s, ws = gi_blend(G, None, i0, f, sl, n2)
-    # lane WALLSTACK1: with rooms too, the last fill (the shader's probe 95 path 10): a pocket no probe reached whose seen
-    # fill finds nothing; the trilinear's reach and rule (every voxel's first slot), weighted over the valid voxels only.
-    # GI_CHECK_LASTFILL=0: the plain trilinear's black (the shader's red WW_CELL_PV_RED=nolastfill)
+    # with rooms too, the last fill: a pocket no probe reached; the trilinear's reach and rule (every voxel's
+    # first slot), weighted over valid voxels only. GI_CHECK_LASTFILL=0: the plain trilinear's black
     if fill and (R is None or not LASTFILL_RED[0]) and s[3] <= 0.01:
         fo = gi_fill(G, None, P, N, False)
         if fo[3] > 0.01:
@@ -673,22 +671,22 @@ def gi_fill(G, L, P, N, rooms, R=None, frm=None):
     return s / ws if ws > 0 else sb / wb if wb > 0 else np.zeros(4)
 
 
-TIE_RED = [os.environ.get('GI_CHECK_TIE', '1') == '0']   # lane GIDARK1: red tiepick (WW_CELL_PV_RED=tiepick): a tie takes the answer nearer the plain trilinear (GIBLACK2)
-LONE_RED = [os.environ.get('GI_CHECK_LONE', '1') == '0']   # lane GIDARK1: red lonesky (WW_CELL_PV_RED=lonesky): a buried surface with only outdoor evidence takes the outdoor answer
-BOTH_RED = [os.environ.get('GI_CHECK_BOTH', '1') == '0']   # lane GIDARK1: red firstslot (WW_CELL_PV_RED=firstslot): a two-room read takes the voxel's first matching slot alone
-RED_EMPTY = [False]   # red emptyslot: the twin weighs a room's empty slots (the old shader: black, the no-probe marker)
-SEE_RED = [os.environ.get('GI_CHECK_SEE', '1') == '0']   # lane GISHADE1: red nosee (the shader's WW_CELL_PV_RED=nosee)
-LASTFILL_RED = [os.environ.get('GI_CHECK_LASTFILL', '1') == '0']   # lane WALLSTACK1: red nolastfill (the shader's WW_CELL_PV_RED=nolastfill)
+TIE_RED = [os.environ.get('GI_CHECK_TIE', '1') == '0']   # red tiepick (WW_CELL_PV_RED=tiepick): a tie takes the answer nearer the plain trilinear
+LONE_RED = [os.environ.get('GI_CHECK_LONE', '1') == '0']   # red lonesky (WW_CELL_PV_RED=lonesky): a buried surface with only outdoor evidence takes the outdoor answer
+BOTH_RED = [os.environ.get('GI_CHECK_BOTH', '1') == '0']   # red firstslot (WW_CELL_PV_RED=firstslot): a two-room read takes the voxel's first matching slot alone
+RED_EMPTY = [False]   # red emptyslot: the twin weighs a room's empty slots (black, the no-probe marker)
+SEE_RED = [os.environ.get('GI_CHECK_SEE', '1') == '0']   # red nosee (the shader's WW_CELL_PV_RED=nosee)
+LASTFILL_RED = [os.environ.get('GI_CHECK_LASTFILL', '1') == '0']   # red nolastfill (the shader's WW_CELL_PV_RED=nolastfill)
 GIWALL_RED = [os.environ.get('GI_CHECK_GIWALL', '1') == '0']   # lane GIWALL2: red WW_CELL_GIWALL_RED=off (GISHADE1's taps, no wall test in the fill or the volumes)
 GI_PLAIN = [0]     # samples that found rooms but no room with weight: the shader's plain (unclamped) trilinear
-GI_FILL = [os.environ.get('GI_CHECK_FILL', '1') != '0']   # lane GICAL1: the gap fill (GI_CHECK_FILL=0: the shader pin WW_CELL_GI_FILL=0)
+GI_FILL = [os.environ.get('GI_CHECK_FILL', '1') != '0']   # the gap fill (GI_CHECK_FILL=0: the shader pin WW_CELL_GI_FILL=0)
 GI_FILLED = [0]    # samples the fill answered
-BORROW_RED = [os.environ.get('GI_CHECK_BORROW', '0') == '1']   # lane GIBLACK1: red borrow (the shader's WW_CELL_PV_RED=borrow)
-LENDAMB_RED = [os.environ.get('GI_CHECK_LENDAMB', '0') == '1']   # lane GIBLACK2: red lendamb (WW_CELL_PV_RED=lendamb): a lent surface with no answer takes the flat ambient
-GI_LENT = [0]      # lane GIBLACK1: samples the lend rule left with no answer (lane GIBLACK2: they take the plain trilinear)
-STRAND_RED = [os.environ.get('GI_CHECK_STRAND', '0') == '1']   # lane GIBLACK2: red strand (WW_CELL_PV_RED=strand): GIBLACK1's whole law (the outdoors-only borrow, then the flat ambient) instead of the evidence search
-STRAND_LAST = [0]  # lane GIBLACK2: the stranded branch of the last sample (5 trilinear, 6 blend, 7 room fill, 8 seen fill, 9 indoor no data)
-GI_STRAND = [0]    # lane GIBLACK2: samples of stranded surfaces (the evidence search ran)
+BORROW_RED = [os.environ.get('GI_CHECK_BORROW', '0') == '1']   # red borrow (the shader's WW_CELL_PV_RED=borrow)
+LENDAMB_RED = [os.environ.get('GI_CHECK_LENDAMB', '0') == '1']   # red lendamb (WW_CELL_PV_RED=lendamb): a lent surface with no answer takes the flat ambient
+GI_LENT = [0]      # samples the lend rule left with no answer (they take the plain trilinear)
+STRAND_RED = [os.environ.get('GI_CHECK_STRAND', '0') == '1']   # red strand (WW_CELL_PV_RED=strand): the outdoors-only borrow, then the flat ambient, instead of the evidence search
+STRAND_LAST = [0]  # the stranded branch of the last sample (5 trilinear, 6 blend, 7 room fill, 8 seen fill, 9 indoor no data)
+GI_STRAND = [0]    # samples of stranded surfaces (the evidence search ran)
 STRAND_T = (0.75, 1.75, 2.75)   # the evidence search: along the normal (cells) ...
 STRAND_S = 2                    # ... and up to 2 cells round it in the plane of the two axes off the normal's largest
 STRAND_TIE = 1.0                # indoor and outdoor cells within this many cells of each other: the tie rule (strand_pick)
@@ -755,9 +753,8 @@ def strand_pick(G, R, P, N, i0, f, sl, n2):
     if a is None and o is None:
         return None, 5
     if a is None and not LONE_RED[0] and all(room_solid(R, P + N * k * R['cell']) for k in (0.75, 1.75, 2.75)):
-        # lane GIDARK1: buried three cells deep with only the outdoors in reach, the search may have gone round a
-        # building's corner (Concord Hardware's front pillar, 6.5x the tracer): the darker of the outdoor answer and
-        # the plain trilinear (the sealed dark blacked out Goodneighbor's recess walls)
+        # buried three cells deep with only the outdoors in reach, the search may have gone round a
+        # building's corner: the darker of the outdoor answer and the plain trilinear
         vo, co = strand_answer(G, R, P, N, i0, f, sl, n2, o[1], o[2])
         t, w = gi_blend(G, None, i0, f, sl, n2)
         lum = lambda v: float(v[:3] @ (0.2126, 0.7152, 0.0722)) / max(float(v[3]), 1e-6)
@@ -782,9 +779,8 @@ def strand_pick(G, R, P, N, i0, f, sl, n2):
     t, _ = gi_blend(H, None, i0, f, sl, n2)
     lum = lambda v: float(v[:3] @ (0.2126, 0.7152, 0.0722))
     if not TIE_RED[0] and ho is not None:
-        # lane GIDARK1: a tie is the room grid saying it cannot tell the sides apart, and the plain trilinear reads the
-        # voxels' first slot only (the indoor room beside a doorway: Goodneighbor's recess2 took the sealed room's
-        # dark, 0.0001 where the tracer says 0.007-0.01): the mean of both answers
+        # a tie: the room grid cannot tell the sides apart, and the plain trilinear reads the voxels'
+        # first slot only: the mean of both answers
         return 0.5 * (va + vo), 20
     if ho is None or abs(lum(ha) - lum(t)) <= abs(lum(ho) - lum(t)):
         return va, ca + 10
@@ -1015,18 +1011,18 @@ def gi_blend(G, L, i0, f, sl, n2, R=None, frm=None):
         if w <= 0:
             continue
         if L is not None and not gi_seen(R, frm, G['origin'] + (c + 0.5) * G['voxel']):
-            continue   # lane GISHADE1: a wall between the surface and the voxel's centre
+            continue   # a wall between the surface and the voxel's center
         v = sum(n2[a] * src[sl[a], c[2], c[1], c[0]] for a in range(3))
         if L is not None and not BOTH_RED[0] and L[0] >= 0 and L[1] >= 0 and L[0] != L[1] and S[0] in L and S[1] in L:
-            # lane GIDARK1: the read cell holds both rooms (an opening's cell: it sees both) and so does the voxel: the
-            # mean of both slots that hold light (the first slot alone left a recess beside a doorway on the dark room)
+            # the read cell and the voxel both hold both rooms (an opening's cell): the mean of
+            # both slots that hold light
             v2 = sum(n2[a] * G['g2'][sl[a], c[2], c[1], c[0]] for a in range(3))
             if v[3] > 0 and v2[3] > 0:
                 v = 0.5 * (v + v2)
             elif v2[3] > 0:
                 v = v2
         if L is not None and v[3] <= 0 and not RED_EMPTY[0]:
-            continue   # lane ROOMCLAMP1: a slot no probe of its room reached (empty): no weight
+            continue   # a slot no probe of its room reached (empty): no weight
         s += w * v
         ws += w
     return s, ws
@@ -1214,7 +1210,7 @@ def synth_cmd(exe, work, red):
         s = fn()
         soup = os.path.join(work, name + '.psp')
         am = s.get('amask')
-        if am and red == 'noscale':   # lane ALPHATEST2's scale red: the masks without their scales (AMK1)
+        if am and red == 'noscale':   # the scale red: the masks without their scales (AMK1)
             am = dict(am, recs=[r[:5] + (None,) for r in am['recs']])
         write_soup(soup, s['T'], [(160, 160, 160)] * len(s['T']), glass=s.get('glass'), amask=am)
         out = os.path.join(work, name)
@@ -1434,8 +1430,8 @@ def strand_cmd(dump, fixture, margin, margin1, expect):
         ind = tr <= 0.02
         gi = drawn[ind] - tr[ind]
         mg = margin if s == 0 else margin1
-        # tight spaces (attic and wall voids): the mean, and at most 1% open-sky bright (a rooms-grid leak to room 0 there,
-        # e.g. the Concord Hardware attic at -58744 69998 6973: GIBLACK1's law draws it the same)
+        # tight spaces (attic and wall voids): the mean, and at most 1% open-sky bright
+        # (a rooms-grid leak to room 0 there)
         okI = (not ind.any()) or (gi.mean() <= mg and (drawn[ind] >= 0.5).sum() <= (0 if s == 0 else 0.01 * ind.sum())
                                   and (s == 1 or (gi > 0.1).sum() <= 0.05 * ind.sum()))
         black = int(((drawn < 0.01) & (tr >= 0.03)).sum())

@@ -4,20 +4,8 @@ BSD License - see nifskope.h
 
 ***** END LICENCE BLOCK *****/
 
-/* ---------------------------------------------------------------------------
- * WW_CELLWS_TEST=<report path> -- lane CELLWORK1's gate, run INSIDE the running
- * application.
- *
- * Every row here is a claim the report makes, measured where the claim lives:
- * the workspace switch is asked of the window, the hidden NIF column is asked
- * of the dock, the layout round trip is compared as BYTES, and the two ways to
- * select a reference are driven one after the other and compared. None of it is
- * judged from a screenshot.
- *
- * A harness FORCES the state it measures. It never inherits it from QSettings:
- * the run is started with WW_SETTINGS_SCOPE pointing at a scratch scope, and
- * each row sets up its own precondition immediately before asserting.
- * --------------------------------------------------------------------------- */
+/* WW_CELLWS_TEST=<report path>: the Cell workspace self-test, run inside the running application.
+ * Each row forces its own precondition (run with a scratch WW_SETTINGS_SCOPE), never inheriting QSettings. */
 
 #include "cellworkspace.h"
 #include "wwswitch.h"	// lane TESTDRIVER1: the WW_* switch store
@@ -29,7 +17,7 @@ BSD License - see nifskope.h
 #include "cellpick.h"
 #include "cellrefs.h"
 #include "glview.h"
-#include "harnesswindow.h"	// lane WSRESTORE1: the scratch settings scope
+#include "harnesswindow.h"	// the scratch settings scope
 #include "nifskope.h"
 #include "model/nifmodel.h"
 
@@ -63,28 +51,9 @@ struct Row
 	QString detail;
 };
 
-/* THE WHOLE WINDOW, WITH THE VIEWPORT IN IT.
- *
- * `QWidget::grab()` renders the WIDGET TREE through Qt's paint system, and this
- * tree's GL view is not in that tree at all: `GLView` is a **QOpenGLWindow**,
- * embedded through `QWidget::createWindowContainer()`, so the viewport is a
- * separate native window and comes out of a widget grab as an empty hole.
- *
- * There are two honest ways round it and this is the FIRST: grab the window
- * through Qt, ask the GL view for its own framebuffer (`grabFramebuffer()`,
- * which reads the buffer without repainting), and paint the second into the
- * first at the CONTAINER WIDGET's rectangle -- the container is the only thing
- * in the widget tree that knows where the viewport is.
- *
- * The other way is `QScreen::grabWindow()`, which captures whatever the
- * compositor has -- correct for the GL view, but it captures anything sitting on
- * top of the window as well, and a harness window on the second monitor cannot
- * promise nothing is on top of it. Composition promises the picture is of THIS
- * window and nothing else.
- *
- * Returns the size written so the caller can put it in the report: a picture
- * whose size nobody stated is a picture nobody can check against the window log.
- */
+/* The whole window with the viewport in it. GLView is a QOpenGLWindow in a window container, so a
+ * widget grab leaves a hole: paint grabFramebuffer() into the window grab at the container's rect.
+ * (QScreen::grabWindow would also capture anything on top.) Returns the size written. */
 QSize composeWindowShot( NifSkope * skope, const QString & path )
 {
 	if ( !skope )
@@ -104,10 +73,7 @@ QSize composeWindowShot( NifSkope * skope, const QString & path )
 		if ( !fb.isNull() ) {
 			const QPoint at = container->mapTo( skope, QPoint( 0, 0 ) );
 			QPainter p( &window );
-			// grabFramebuffer() comes back in DEVICE pixels; the window pixmap
-			// carries a devicePixelRatio, so draw the image into the container's
-			// own RECTANGLE rather than at 1:1, which would land wrong on a
-			// high-dpi screen.
+			// grabFramebuffer() is in DEVICE pixels: draw into the container's rect, not 1:1 (high-dpi)
 			p.drawImage( QRect( at, container->size() ), fb );
 		}
 	}
@@ -155,10 +121,9 @@ int probeShapes( NifSkope * skope )
 	return n;
 }
 
-/* ---- lane PRTPPLACE: THE PRTP BAND (WW_CELLWS_PRTP=1). Place, Show probes and Bake
- * each re-open the cell, so each stage runs on the NEXT completeLoading. Returns true
- * when the run is finished and the report can be written. Stage 3 (lane PRTPBAKE)
- * checks the bake's files; set WW_CELL_PROBE_BAKE_DIR to keep them out of release/. */
+/* ---- The PRTP band (WW_CELLWS_PRTP=1). Place, Show probes and Bake each re-open the cell, so each
+ * stage runs on the NEXT completeLoading. Returns true when the report can be written.
+ * Set WW_CELL_PROBE_BAKE_DIR to keep the bake's files out of release/. */
 bool runPrtpStage( NifSkope * skope, int stage )
 {
 	auto add = []( const QString & what, bool ok, const QString & detail = QString() ) {
@@ -190,8 +155,8 @@ bool runPrtpStage( NifSkope * skope, int stage )
 				&& dCell->findChild<QWidget *>( QStringLiteral( "CellWorkspaceProbesBake" ) ) );
 		QWidget * bake = dCell->findChild<QWidget *>( QStringLiteral( "CellWorkspaceProbesBake" ) );
 		add( "PRTP: Bake is on", bake && bake->isEnabled() );
-		// lane PROBEVIEW1: the Pass drop-down, its five entries, off until a bake is relit
-		QMenu * pass = dCell->findChild<QMenu *>( QStringLiteral( "CellWorkspaceCellPass" ) );	// SHOWMENU1: a Show submenu
+		// the Pass drop-down, its five entries, off until a bake is relit
+		QMenu * pass = dCell->findChild<QMenu *>( QStringLiteral( "CellWorkspaceCellPass" ) );	// a Show submenu
 		QStringList items;
 		for ( QAction * a : pass ? pass->actions() : QList<QAction *>() )
 			items << a->text();
@@ -236,7 +201,7 @@ bool runPrtpStage( NifSkope * skope, int stage )
 		add( "PRTP: Debug View off keeps the counts", !rows.isEmpty() && rows.join( QLatin1Char( '|' ) ) == keptRows,
 			rows.join( QLatin1Char( '|' ) ) );
 		add( "PRTP: Debug View off draws no markers", probeShapes( skope ) == 0, QString::number( probeShapes( skope ) ) );
-		// lane PRTPBAKE: Bake re-opens once more; stage 3 reads what it wrote
+		// Bake re-opens once more; stage 3 reads what it wrote
 		panel->bakeProbes();
 		return false;
 	}
@@ -258,9 +223,8 @@ bool runPrtpStage( NifSkope * skope, int stage )
 	const int filesSaid = note.section( QLatin1Char( ' ' ), 1, 1 ).toInt();
 	add( "PRTP: the note's file count is the folder's", filesSaid > 0 && filesSaid == tbks.size(),
 		QStringLiteral( "%1 vs %2" ).arg( filesSaid ).arg( tbks.size() ) );
-	{	// lane BAKEBLOCK1: an exterior Bake loads the 5x5 around the asked cell, so the probes it places see the
-		// neighbours' walls and cover -- the asked block's probes, kinds judged with more of the world around them.
-		// The rows must stay whole (8 kinds + All, adding up) and All may move only by edge probes (<= 5%).
+	{	// an exterior Bake loads the 5x5 around the asked cell, so its probes see the
+		// neighbors' walls; the rows must stay whole and All may move only by edge probes (<= 5%).
 		const QStringList baked = panel->probeKindRows();
 		auto countOf = []( const QString & row ) { return row.section( QLatin1Char( ' ' ), -1 ).toInt(); };
 		const QStringList kept = keptRows.split( QLatin1Char( '|' ) );
@@ -274,7 +238,7 @@ bool runPrtpStage( NifSkope * skope, int stage )
 				&& qAbs( allBaked - allKept ) * 20 <= allKept,
 			baked.join( QLatin1Char( '|' ) ) + QStringLiteral( " vs Place All %1" ).arg( allKept ) );
 	}
-	{	// lane PROBEVIEW1: the bake relit, the Pass drop-down is live
+	{	// the bake relit, the Pass drop-down is live
 		QMenu * pass = dCell->findChild<QMenu *>( QStringLiteral( "CellWorkspaceCellPass" ) );
 		if ( wwCellPrtOn() )
 			add( "PRTP: Pass is on after Bake", pass && pass->isEnabled() );
@@ -311,9 +275,7 @@ void runCellWorkspaceTest( NifSkope * skope, const QString & reportPath )
 	add( "the Cell workspace is in the Workspaces menu", cellWs >= 0,
 		QStringLiteral( "index %1 of %2" ).arg( cellWs ).arg( skope->workspaceCount() ) );
 
-	/* THE EXISTING WORKSPACES MUST NOT MOVE. The persisted `UI/Workspace` index
-	 * is positional, so an entry inserted rather than appended silently reopens
-	 * somebody else's window in the wrong workspace. */
+	/* Existing workspaces must not move: the persisted `UI/Workspace` index is positional. */
 	const QStringList names = skope->workspaceNamesInOrder();
 	const QStringList expected = {
 		"Default", "Animation", "Materials", "Collision", "Rigging",
@@ -346,11 +308,8 @@ void runCellWorkspaceTest( NifSkope * skope, const QString & reportPath )
 		list->topLevelItemCount() == refs.size(),
 		QStringLiteral( "rows %1, reference model %2, pick table %3" )
 			.arg( list->topLevelItemCount() ).arg( refs.size() ).arg( picks.size() ) );
-	// The pick table is NOT comparable to the model by SIZE: it holds one entry
-	// per drawn SHAPE, so one reference with three shapes is three pick entries
-	// (Sanctuary: 240 pick entries for 141 drawn references). The claim that
-	// actually distinguishes a model from draw data is that the model carries
-	// references NOTHING drew.
+	// The pick table holds one entry per drawn SHAPE, so compare by content: the model carries
+	// references nothing drew.
 	const int drawnRefs = refs.countOfFate( CellRefFate::Drawn );
 	add( "the reference model is not the draw data (it carries the undrawn too)",
 		refs.size() > 0 && drawnRefs < refs.size(),
@@ -369,13 +328,8 @@ void runCellWorkspaceTest( NifSkope * skope, const QString & reportPath )
 		QStringLiteral( "cells %1" ).arg( refs.cellCount() ) );
 	if ( refs.cellCount() > 0 ) {
 		const CellBlockEntry & c = refs.cellAt( 0 );
-		// The cell's FORM ID always exists; its EDID does not. Measured in
-		// Fallout4.esm: 755 of the Commonwealth's 36865 exterior cells carry an
-		// EDID, and (-20,7) -- Sanctuary's own cell -- is NOT one of them, so
-		// the honest label here is the bare grid. The row that proves the EDID
-		// READER works runs the gate a second time on (-21,7) "POIJS021",
-		// which does carry one. Asserting a name here would assert something
-		// false about the data.
+		// A cell's form id always exists, its EDID often does not (Sanctuary's -20,7 has none),
+		// so the label may be the bare grid.
 		add( "the cell carries its form id from the plugin, and names itself by "
 		     "its editor id only when the plugin gave it one",
 			c.cellForm != 0
@@ -404,16 +358,14 @@ void runCellWorkspaceTest( NifSkope * skope, const QString & reportPath )
 		add( "a list row click selects that reference", afterRow >= 0,
 			QStringLiteral( "ref row %1 -> pick %2" ).arg( drawnRow ).arg( afterRow ) );
 
-		/* The SAME reference, selected the other way: straight through the pick
-		 * tail the mouse uses. Equal answers is the claim. */
+		/* The same reference selected through the pick tail the mouse uses; answers must match. */
 		cellPickSelect( skope->getNifModel(), afterRow, 1 );
 		add( "a viewport pick of the same reference selects the same row",
 			cellPickCurrent() == afterRow && panel->selectedEntry() == drawnRow,
 			QStringLiteral( "pick %1, panel row %2" )
 				.arg( cellPickCurrent() ).arg( panel->selectedEntry() ) );
 
-		// RED: a reference that was never drawn refuses BY NAME rather than
-		// selecting something else.
+		// a reference that was never drawn refuses by name rather than selecting something else
 		int undrawn = -1;
 		for ( int i = 0; i < refs.size(); i++ ) {
 			if ( refs.at( i ).fate != CellRefFate::Drawn ) {
@@ -427,7 +379,7 @@ void runCellWorkspaceTest( NifSkope * skope, const QString & reportPath )
 				"the selection", panel->noteIsRefusal()
 					&& panel->noteText().contains( QLatin1String( "not drawn" ) ),
 				panel->noteText() );
-			panel->selectEntry( drawnRow, false );	// leave it on the honest one
+			panel->selectEntry( drawnRow, false );	// leave it on the drawn one
 		}
 	} else {
 		add( "a drawn reference exists to select", false );
@@ -449,13 +401,12 @@ void runCellWorkspaceTest( NifSkope * skope, const QString & reportPath )
 	add( "none of the Show rows is in the Workspaces menu",
 		!skope->workspaceNamesInOrder().contains( QLatin1String( "Cell borders" ) ) );
 
-	/* lane SHOWMENU1: the Show dropdown is the one home of every viewport switch. Walk the menu
-	 * as drawn: section -> ticks (submenus by title), and each label exactly once in the window. */
+	/* Walk the Show menu as drawn: section -> ticks (submenus by title), each label exactly once. */
 	if ( QMenu * sm = dCell->findChild<QMenu *>( QStringLiteral( "CellWorkspaceShowMenu" ) ) ) {
 		QStringList layout;
 		QString section;
 		for ( QAction * a : sm->actions() ) {
-			// a heading is a widget row named CellWorkspaceShowSection_*; lane SKYSTR1: any other widget row is a value row
+			// a heading is a widget row named CellWorkspaceShowSection_*; any other widget row is a value row
 			if ( qobject_cast<QWidgetAction *>( a ) && a->objectName().startsWith( QLatin1String( "CellWorkspaceShowSection_" ) ) ) {
 				section = a->text();
 				continue;
@@ -499,7 +450,7 @@ void runCellWorkspaceTest( NifSkope * skope, const QString & reportPath )
 		add( "SHOWMENU1: LOD source is a submenu of Vanilla and Fusion Shaders, one ticked",
 			srcItems.size() == 2 && srcItems.filter( QLatin1String( "*" ) ).size() == 1,
 			srcItems.join( QLatin1Char( '|' ) ) );
-		// lane BLOOM1b: Bloom is a submenu of Vanilla and FO4CS (one ticked), its eight rows and the glare tick
+		// Bloom is a submenu of Vanilla and FO4CS (one ticked), its eight rows and the glare tick
 		QMenu * bm = dCell->findChild<QMenu *>( QStringLiteral( "CellWorkspaceBloom" ) );
 		QStringList bloomItems;
 		for ( QAction * a : bm ? bm->actions() : QList<QAction *>() )
@@ -585,9 +536,7 @@ void runCellWorkspaceTest( NifSkope * skope, const QString & reportPath )
 		beforeCell == backInCell,
 		QStringLiteral( "%1 vs %2 bytes" ).arg( beforeCell.size() ).arg( backInCell.size() ) );
 
-	/* The claim the brief actually asks for, the other way round: leave the
-	 * cell, snapshot the NIF workspace, go into the cell and come back, and
-	 * compare THOSE bytes. This is the one a person notices. */
+	/* The other direction: snapshot the NIF workspace, go into the cell and back, compare bytes. */
 	skope->setWorkspace( 0 );
 	const QByteArray nifBefore = skope->saveState( 0x074 );
 	skope->setWorkspace( cellWs );
@@ -597,7 +546,7 @@ void runCellWorkspaceTest( NifSkope * skope, const QString & reportPath )
 		nifBefore == nifAfter,
 		QStringLiteral( "%1 vs %2 bytes" ).arg( nifBefore.size() ).arg( nifAfter.size() ) );
 
-	// RED: the comparison can fail. If it cannot, it is not measuring anything.
+	// the comparison must be able to fail
 	skope->setWorkspace( 1 );
 	add( "RED: a DIFFERENT workspace does not produce those bytes",
 		skope->saveState( 0x074 ) != nifAfter );
@@ -608,11 +557,7 @@ void runCellWorkspaceTest( NifSkope * skope, const QString & reportPath )
 		panel->censusText().contains( QString::number( refs.size() ) ),
 		panel->censusText() );
 
-	/* ---- 8. THE PICTURES. Taken last, so the window is in the state every row
-	 * above just measured: the Cell workspace up, a drawn reference selected.
-	 * Each row prints the SIZE, which is the number the window log is checked
-	 * against -- a picture with no stated size proves nothing about the window
-	 * it claims to be of. */
+	/* ---- 8. The pictures, taken last so the window is in the state measured above; each row prints its size. */
 	const QString shotDir = QString::fromLocal8Bit( wwEnv( "WW_CELLWS_SHOTS" ) );
 	if ( !shotDir.isEmpty() ) {
 		if ( drawnRow >= 0 )
@@ -641,18 +586,13 @@ void runCellWorkspaceTest( NifSkope * skope, const QString & reportPath )
 } // namespace
 
 /* ---------------------------------------------------------------------------
- * lane SHOWMENU1: THE SHOW DROPDOWN GATE (WW_SHOWMENU_GATE=<out dir>).
- *
- * Runs the steps in WW_SHOWMENU_GATE_STEPS (comma separated) once the cell has opened,
- * each after the last has settled, and writes what it saw as files for an outside
- * script to judge (tests/spells/cell_showmenu.py) -- the driver measures nothing itself:
- *   dump:<file>          the Show menu as drawn (SECTION / TICK / SUBMENU / SUBITEM lines)
- *                        and every checkbox and drop-down left in the Cell dock (BOX lines)
+ * The Show dropdown gate (WW_SHOWMENU_GATE=<out dir>): runs WW_SHOWMENU_GATE_STEPS (comma separated)
+ * once the cell has opened, each after the last settles, and writes files for an outside script:
+ *   dump:<file>          the Show menu as drawn, plus every checkbox and drop-down left in the Cell dock
  *   panel / menu         PNG of the Cell dock, and of the Show menu popped up under its button
  *   window               PNG of the whole window with the viewport composed in
  *   shot:<name>          the viewport's own framebuffer, PNG
- *   flip:<objectName>    trigger() the menu tick (the path a click takes); a trailing
- *                        ":reopen" waits for the cell to be built again before settling
+ *   flip:<objectName>    trigger() the menu tick; a trailing ":reopen" waits for the cell rebuild
  *   other:<objectName>   tick the unticked entry of that submenu
  *   quit                 close the window (settings are written as they change)
  * --------------------------------------------------------------------------- */
@@ -692,7 +632,7 @@ void smDump( const QString & name )
 		for ( QAction * a : m->actions() ) {
 			auto * wa = qobject_cast<QWidgetAction *>( a );
 			if ( wa && !a->objectName().startsWith( QLatin1String( "CellWorkspaceShowSection_" ) ) ) {
-				// lane SKYSTR1: a value row (label | field): its field's name and value
+				// a value row (label | field): its field's name and value
 				QDoubleSpinBox * sb = wa->defaultWidget() ? wa->defaultWidget()->findChild<QDoubleSpinBox *>() : nullptr;
 				s << "VALUE\t" << section << "\t" << a->text() << "\t" << ( sb ? sb->objectName() : QString() ) << "\t"
 				  << ( sb ? QString::number( sb->value() ) : QStringLiteral( "-" ) ) << "\n";
@@ -819,8 +759,8 @@ void smNext()
 		else
 			smSettle( 1500 );
 	} else if ( step.startsWith( QLatin1String( "set:" ) ) ) {
-		/* lane SKYSTR1: set:<field objectName>=<value>[:<settle ms>] -- types a value into a menu row's field as a
-		 * user would (valueChanged fires), then repaints for the settle time (default 6000: a relight's wait) */
+		/* set:<field objectName>=<value>[:<settle ms>] -- types a value into a menu row's field as a user
+		 * would, then repaints for the settle time (default 6000: a relight's wait) */
 		const QString name = arg.section( QLatin1Char( '=' ), 0, 0 );
 		const double v = arg.section( QLatin1Char( '=' ), 1, 1 ).toDouble();
 		const int ms = step.section( QLatin1Char( ':' ), 2, 2 ).isEmpty() ? 6000 : step.section( QLatin1Char( ':' ), 2, 2 ).toInt();
@@ -840,8 +780,7 @@ void smNext()
 			} );
 		smSettle( ms );
 	} else if ( step.startsWith( QLatin1String( "cam:" ) ) ) {
-		/* lane SKYSTR1: cam:<ex ey ez ax ay az fov> -- holds the view on that eye and target (the path camera), so
-		 * a live run is shot from the same in-bounds player-eye camera as the headless shots */
+		/* cam:<ex ey ez ax ay az fov> -- holds the view on that eye and target (the path camera) */
 		const QStringList w = arg.split( QLatin1Char( ' ' ), Qt::SkipEmptyParts );
 		GLView * ogl = g_sm.skope->getGLView();
 		if ( w.size() == 7 && ogl ) {
@@ -902,7 +841,7 @@ void wwShowMenuGate( NifSkope * skope, const QString & dir )
 
 void wwCellWorkspaceHarness( NifSkope * skope )
 {
-	// lane SHOWMENU1: the Show dropdown gate takes the run when it is asked for
+	// the Show dropdown gate takes the run when it is asked for
 	const QString showMenuDir = QString::fromLocal8Bit( wwEnv( "WW_SHOWMENU_GATE" ) );
 	if ( !showMenuDir.isEmpty() && skope ) {
 		wwShowMenuGate( skope, showMenuDir );
@@ -912,13 +851,10 @@ void wwCellWorkspaceHarness( NifSkope * skope )
 	if ( reportPath.isEmpty() || !skope )
 		return;
 
-	/* AFTER the load, because everything this measures is a consequence of one:
-	 * the workspace switch, the reference model, the list and the census are all
-	 * filled by opening the cell. */
+	/* After the load: everything measured here is filled by opening the cell. */
 	QObject::connect( skope, &NifSkope::completeLoading, skope,
 		[skope, reportPath]( bool, QString & ) {
-			/* Lane PRTPPLACE: with WW_CELLWS_PRTP set, the PRTP band's stages run on
-			 * the re-opens its own buttons cause; the report is written after each. */
+			/* With WW_CELLWS_PRTP set, the PRTP stages run on the re-opens their buttons cause. */
 			static int stage = -1;
 			const bool prtp = !wwEnv( "WW_CELLWS_PRTP" ).isEmpty();
 			bool done = true;
@@ -957,21 +893,14 @@ void wwCellWorkspaceHarness( NifSkope * skope )
 
 
 /* ---------------------------------------------------------------------------
- * lane WSRESTORE1: THE LEFT COLUMN AFTER A CLOSE (bungo 2026-10-03: the block
- * list was gone after a launch).
- *
- * The bug lives across TWO processes -- a close writes the layout, the next
- * launch reads it -- so this driver does one process's half: it runs the steps
- * it is given (WW_CELL_WSRESTORE_STEPS, comma separated), probes the dock state
- * as it goes, and ends with a REAL close so saveUi() runs. The script relaunches
- * and reads the next report. Steps:
+ * WW_CELL_WSRESTORE: the left column after a close. A close writes the layout and the next launch
+ * reads it, so this does one process's half: run WW_CELL_WSRESTORE_STEPS (comma separated), probe the
+ * dock state, end with a REAL close so saveUi() runs. Steps:
  *   probe    one report line: workspace, left column up, Cell dock up
  *   cell     enter the Cell workspace;  ws:N  enter workspace N
- *   poison   hide the left column and show the Cell dock outside Cell -- the
- *            layout an older build saved when it was closed in Cell
+ *   poison   hide the left column and show the Cell dock outside Cell (an older build's saved layout)
  *   close    write the report and close the window (saveUi runs)
- * The run starts and ends with a probe. It writes the layout only into a
- * scratch WW_SETTINGS_SCOPE (wwWorkspaceRestoreSavesUi); without one it refuses.
+ * Writes the layout only into a scratch WW_SETTINGS_SCOPE; without one it refuses.
  * --------------------------------------------------------------------------- */
 bool wwWorkspaceRestoreSavesUi()
 {

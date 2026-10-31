@@ -381,9 +381,8 @@ unsigned wwCellAoDecalRun( Scene * scene, unsigned gbufTex, unsigned depthRb, in
 		.arg( S.copies.size() ).arg( drawn ).arg( culled ).arg( s.add ? QStringLiteral( "add" ) : QStringLiteral( "none" ) )
 		.arg( timer.elapsed() );
 
-	/* WW_CELL_AODECAL_DUMP=<file>: int32 W H, the target (W x H float, bottom row first), the copies' ids (index + 1,
-	 * 0 none), the opaque pass (W x H RGBA float); <file>.txt the view (sc, Rv rows, tv, P00 P11 P20 P21), then one
-	 * line per copy: index, its .ao file, R (row-major), t, s -- as PLACED (Copy::placed*, not what was drawn) */
+	/* WW_CELL_AODECAL_DUMP=<file>: binary target, copy ids and opaque pass; <file>.txt the view, then one line per
+	 * copy (index, .ao file, R, t, s) as PLACED, not as drawn */
 	if ( !s.dump.isEmpty() ) {
 		std::vector<float> tg( size_t( W ) * size_t( H ) ), id( tg.size() ), gb( tg.size() * 4 );
 		fn->glPixelStorei( GL_PACK_ALIGNMENT, 4 );
@@ -428,7 +427,7 @@ unsigned wwCellAoDecalRun( Scene * scene, unsigned gbufTex, unsigned depthRb, in
 				if ( c.model < 0 )
 					continue;
 				ts << "copy " << ci << " " << aovol::aoFileName( S.models[size_t( c.model )].norm );
-				for ( double e : c.placedR )	// as placed: the red "frozen" draws elsewhere, the gate must see it
+				for ( double e : c.placedR )	// as placed, not as drawn
 					ts << " " << e;
 				ts << " " << c.placedT[0] << " " << c.placedT[1] << " " << c.placedT[2] << " " << c.placedS << "\n";
 			}

@@ -226,7 +226,7 @@ def gate_c(files):
 
 # ------------------------------------------------------------------ (d)
 
-# what HKXCLASS (ww-hkx-animation s9) and HKX1 (docs/HKX_ANIMATION_FORMAT.md) measured
+# the measured class layouts (docs/HKX_ANIMATION_FORMAT.md)
 MEASURED = {
     "hkaSplineCompressedAnimation": (0xb0, {"numFrames": 0x38, "numBlocks": 0x3c, "maxFramesPerBlock": 0x40, "maskAndQuantizationSize": 0x44,
                                             "blockDuration": 0x48, "blockInverseDuration": 0x4c, "frameDuration": 0x50, "blockOffsets": 0x58,

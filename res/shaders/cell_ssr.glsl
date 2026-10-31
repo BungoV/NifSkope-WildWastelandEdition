@@ -1,5 +1,5 @@
-// lane SSR1: the screen-space reflection a cell-lit draw reads (src/gl/cellssr.cpp, cell_ssr.frag).
-// Included after cell_lights.glsl by the two cell programs.
+// Screen-space reflection read by cell-lit draws (src/gl/cellssr.cpp, cell_ssr.frag).
+// Included after cell_lights.glsl.
 
 uniform bool cellSsrOn;			// an opaque draw of a flagged material, with this frame's reflections bound
 uniform bool cellSsrMat;		// the material's flag: environment-mapped AND its material file's reflections switch
@@ -12,10 +12,8 @@ vec4 cellSsrTexel()
 	return texture( cellSsr, vec2( uv.x, 1.0 - uv.y ) );
 }
 
-/* The game's composite: lerp(cube, reflection, min(confidence, 1)) x the env scale of lane CUBE1's term
- * (cell_lights.glsl cellCubeGame). cubeK is that term (cube x k); the caller multiplies the diffuse light.
- * Probe 60, the reflections' own scene pass, carries no reflection term at all (the game marches the frame
- * before its env term). */
+/* The game's composite: lerp(cube, reflection, min(confidence, 1)) x env scale (cell_lights.glsl cellCubeGame).
+ * Probe 60, the reflections' own scene pass, carries no reflection: the game marches before its env term. */
 vec3 cellSsrMix( vec3 cubeK, float gloss, float spec, float envScale )
 {
 	if ( cellProbe == 60 )
@@ -30,9 +28,7 @@ vec3 cellSsrMix( vec3 cubeK, float gloss, float spec, float envScale )
 }
 
 // probe 60: the scene pass (linear lit color without reflection, obscurance and fog; alpha the flag).
-// probe 61 (the gate's): the reflection as this draw read it, the square roots of c = min(confidence, 1),
-// green x c and the mean of rgb x c; black elsewhere, with alpha 0 (a blended draw over a reflecting surface, a
-// decal or a glass, leaves that surface's value standing, as it leaves its reflection standing in the picture)
+// probe 61: sqrt of c = min(confidence, 1), green x c, mean rgb x c; alpha 0 elsewhere so blended draws keep it
 vec4 cellSsrProbeOut( vec3 sceneLinear )
 {
 	if ( cellProbe == 60 )

@@ -11,50 +11,20 @@ BSD License - see nifskope.h
 #include <QString>
 #include <QStringList>
 
-/* ---------------------------------------------------------------------------
- * THE `.lodi` IDENTITY GROUP, JOINED TO A PLACED REFR.
- *
- * bungo's ruling of 2026-09-18 -- "The houses should be one object each though,
- * for identity" -- made the native object LOD carry a GROUP table: one u16 per
- * instance, dense from 0 INSIDE EACH CHUNK, written at `.lodi` version 7
- * (src/lodifile.h, LODI_VERSION_GROUP_SKY).  The proximity join that builds
- * those groups has a ruled 64-unit radius, and the only way to judge a join is
- * to LOOK at which placements came out in the same group.
- *
- * This is the read side of that, for the cell view's `identity` overlay:
- *
- *      refFormId  ->  { group id, how many placements share it, is it a tree }
- *
- * THE GROUP ID IS `table.group[i]`, AS IT STANDS.  Before `.lodi` v13 the ids
- * were dense per CHUNK and this index keyed on `(chunkIndex << 16) | group`;
- * since lane IDENT2 (2026-09-29) the reader hands every version's table over
- * as FILE-WIDE u32 ids (v13 writes them so; a v7..v12 file's per-chunk ids are
- * offset chunk by chunk), so the id is the key and a group cut by a chunk line
- * in a v13 file is one key.
- *
- * WHY A REFR CAN HAVE SEVERAL INSTANCES.  A SCOL part is its own `.lodi`
- * instance with the collection's refFormId and its own `scolPart`, so a single
- * REFR maps to several rows.  The index keeps the FIRST row for the form and
- * counts the rest, because the cell view colours a placement and a SCOL part is
- * a placement of the collection; `parts` says how many were folded so a picture
- * that looks wrong can be checked against a number.
- *
- * WHAT IS NOT DONE HERE.  Nothing writes a `.lodi`.  No group is INVENTED for a
- * placement the bake never saw: a reference the file does not name comes back
- * `false` and the overlay draws it GREY and counts it, which is what makes the
- * picture an answer about the bake instead of about this reader.
- * --------------------------------------------------------------------------- */
+/* Reads a `.lodi` identity group table (v7+) and joins it to placed REFRs for the cell view's `identity`
+ * overlay: refFormId -> { file-wide group id, group size, is it a tree }. A SCOL's parts fold into the
+ * first row for the form; a reference the file does not name gets no group and draws grey. */
 
 //! What the `.lodi` says about one placed reference.
 struct CellIdentity
 {
-	quint32 group = 0;      //!< `(chunkIndex << 16) | groupId`, unique over the FILE
+	quint32 group = 0;      //!< the file-wide group id
 	int size = 0;           //!< placements sharing that group over the whole file
 	bool tree = false;      //!< the instance carries a tree seed (LodiInstance::seed != 0)
 	int parts = 1;          //!< `.lodi` instances that shared this refFormId
 };
 
-//! Census of one loaded `.lodi`, for the notes line and for a gate.
+//! Census of one loaded `.lodi`, for the notes line.
 struct CellIdentityCensus
 {
 	QString path;
@@ -69,19 +39,13 @@ struct CellIdentityCensus
 	bool hasGroups = false;     //!< the file is version 7 or later AND carries the table
 };
 
-/*! Read `lodiPath` and build the index.  False, with `*error` NAMING the field
- *  or the file, on anything that does not read -- never a silent empty index,
- *  because an empty index and a missing bake would then draw the same picture.
- *
- *  A file BELOW version 7 opens and reports `hasGroups = false`: it is a valid
- *  `.lodi` that simply predates the group table, and the caller must say so by
- *  name rather than colouring every placement grey in silence. */
+/*! Read `lodiPath` and build the index. False, with `*error` naming the field or file, on anything that
+ *  does not read (never a silent empty index). A file below version 7 opens with `hasGroups = false`. */
 bool cellIdentityLoad( const QString & lodiPath, QHash<quint32, CellIdentity> & index,
 	CellIdentityCensus * census, QString * error );
 
-/*! The legend line for the notes: how many groups, how many singletons, the
- *  biggest, and the tree statement -- one string, so the census and the picture
- *  cannot disagree about what was drawn. */
+/*! The legend line for the notes: groups, singletons, the biggest, and the tree statement, built from
+ *  the same census as the picture. */
 QString cellIdentityLegend( const CellIdentityCensus & c );
 
 #endif // CELLIDENTITY_H

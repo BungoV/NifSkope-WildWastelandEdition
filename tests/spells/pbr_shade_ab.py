@@ -174,7 +174,7 @@ for name, gate, missing, dirs in cases:
                 if bad:
                     notes.append("pbrm=R0-NOT-LEGACY(%d)" % len(bad)); ok = False
             elif "mode=legacy" in hdr[0]:
-                # R1+: the display default is Legacy (ruling Q9), so every row a
+                # the display default is Legacy, so every row a
                 # Legacy run writes is served by the legacy route.
                 bad = [r for r in body if "route=legacy" not in r]
                 if bad:
@@ -214,7 +214,7 @@ for name, gate, missing, dirs in cases:
     if not ok:
         fails += 1; census_fail += 1; census_failed.add(name)
 
-# ---- the census must MOVE across the fixtures (rule 2026-09-04 21:33 #1)
+# ---- the census must MOVE across the fixtures
 if len(cases) >= 3:
     moves = len(kinds) >= 2 and len(refusals) >= 2
     say("pbr_shade_ab census-moves kinds=%s distinct_refusals=%d -> %s"

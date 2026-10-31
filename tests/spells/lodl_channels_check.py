@@ -188,11 +188,8 @@ def main():
           '(%.3f vs %.3f) -- so (c) is not vacuous'
           % (id_mean or -1, table['sky']['mean']))
 
-    # (f) THE VERSION-6 FALLBACK (v7). This fixture is a version-6 pair: it has no
-    # group table and no per-vertex sky stream. Both new channels must therefore
-    # fall back, and -- the part that matters -- must SAY SO. A viewer that drew
-    # the fallback silently would be indistinguishable from one that drew the
-    # feature, which is the whole defect class root MISTAKES 05:1x records.
+    # (f) the version-6 fallback: a version-6 pair has no group table and no per-vertex sky stream,
+    # so both new channels must fall back AND say so; a silent fallback looks like the feature.
     idn = refusal(os.path.join(d, 'identity.log')) or ''
     if not idn:
         idn = ' '.join(notes(os.path.join(d, 'identity.log'), 'identity') or [])

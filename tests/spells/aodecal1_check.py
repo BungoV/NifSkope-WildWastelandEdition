@@ -58,8 +58,7 @@ G_FLOOR = 0.1                    # a probe octant the copy blocks beyond this is
 
 # bars (set from the design's tolerance budget, see the design doc section 7)
 BAR_A_MEAN, BAR_A_P95, BAR_A_MAX = 0.02, 0.05, 0.12   # receivers at least one voxel from the model
-BAR_AN_MEAN, BAR_AN_P95 = 0.05, 0.15                  # the contact band (within one voxel); first set 0.03 / 0.10,
-                                                      # which the leaning copy failed (L2 cannot hold a contact step)
+BAR_AN_MEAN, BAR_AN_P95 = 0.05, 0.15                  # the contact band (within one voxel); L2 cannot hold a contact step
 BAR_B_MEAN, BAR_B_MAX, BAR_B_DROP = 0.01, 0.06, 0.02   # the far field past the box, and what the cut drops
 BAR_D_P95, BAR_D_BIAS, BAR_D_WORST = 0.05, -0.02, -0.10
 

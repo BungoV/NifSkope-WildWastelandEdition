@@ -72,7 +72,7 @@ def resign_lodo(b):
         # (the fixture has none; a real baked library does)
         table.append((offColours, colourCount * 4))
     if get(b, 0x04, 'I')[0] == 8:
-        # v8 (lane LODP1): the chart stream after everything, clusterCount x 16 bytes
+        # v8: the chart stream after everything, clusterCount x 16 bytes
         table.append((get(b, 0xE0, 'Q')[0], clusterCount * 16))
     crc = 0
     for off, size in table:
@@ -143,9 +143,8 @@ def cases(lodo, lodi):
     # --- plain flips: the CRCs must answer
     add('lodo headerCrc32 flip', 'lodo', lambda b: put(b, 0x0C, 'I', get(b, 0x0C, 'I')[0] ^ 1), False,
         'headerCrc32')
-    # a PAYLOAD byte, with only the HEADER crc re-signed, so indexCrc32 answers
-    # (flipping the stored indexCrc32 itself is caught by headerCrc32 first,
-    # which covers 0x10..0x100 -- lane NATIVE1a, one gate-only correction)
+    # a PAYLOAD byte, with only the HEADER crc re-signed, so indexCrc32 answers (flipping the
+    # stored indexCrc32 itself is caught by headerCrc32 first, which covers 0x10..0x100)
     add('lodo a vertex byte, header re-signed', 'lodo',
         lambda b: b.__setitem__(get(b, 0x98, 'Q')[0], b[get(b, 0x98, 'Q')[0]] ^ 0xFF), 'header',
         'indexCrc32')
@@ -157,7 +156,7 @@ def cases(lodo, lodi):
     # --- v1 row rules, re-signed so the RULE answers
     add('lodo base table out of formId order', 'lodo',
         lambda b: put(b, offBases, 'I', 0xFFFFFFFF), True, 'sorted by (formId')
-    # --- v6 (lane SWAP1): the material-swap variant rows, row 0 of the base table
+    # --- v6: the material-swap variant rows, row 0 of the base table
     if get(lodo, 0x04, 'I')[0] >= 6:
         add('v6 lodo SWAPPED flag with materialSwap 0', 'lodo',
             lambda b: put(b, offBases + 18, 'H', get(b, offBases + 18, 'H')[0] | 8), True, 'disagree')
@@ -191,8 +190,7 @@ def cases(lodo, lodi):
     add('v2 lodi version back to 1', 'lodi', lambda b: put(b, 0x04, 'I', 1), True, 'version 1')
     add('v3 lodo reserved byte at 0xCE', 'lodo', lambda b: put(b, 0xCE, 'B', 1), True, '0xCE')
     add('v3 lodi reserved byte at 0xB0', 'lodi', lambda b: put(b, 0xB0, 'B', 1), True, '0xB0')
-    # 0x20 = the lowest bit outside LODO_FLAGS_KNOWN (0x1F). It was 0x10 until lane NEAR1 (09-26) made bit 4 the
-    # NEAR flag; from then this mutation was refused by the NEAR rule, not as an unknown bit (MERGE1, 2026-09-29).
+    # 0x20 = the lowest bit outside LODO_FLAGS_KNOWN (0x1F); bit 4 is the NEAR flag, refused by its own rule
     add('v3 lodo unknown header flag bit', 'lodo',
         lambda b: put(b, 0x08, 'I', get(b, 0x08, 'I')[0] | 0x20), True, 'reserved flag')
     add('v2 loadOrderHash in the .lodo only', 'lodo',

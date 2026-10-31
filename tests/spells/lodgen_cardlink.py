@@ -43,8 +43,7 @@ def contract_hash(pairdir):
         # family's colour, mask (and emissive) after the first family's four
         fams = [t[f] for f in ('legacy', 'pbr') if f in t] if m.get('lodm') == 3 else [t]
         f0 = fams[0]
-        # a set whose emissive is black everywhere names no emissive sheet (lane TIDY1,
-        # 2026-09-27): it contributes four files, not five
+        # a set whose emissive is black everywhere names no emissive sheet: four files, not five
         files = [n, f0.get('diffuse') or f0.get('baseColor'), t['normal'], f0.get('gsaos') or f0.get('rmaos')]
         if f0.get('emissive'):
             files.append(f0['emissive'])

@@ -23,11 +23,7 @@ def _bc3_alpha(blk):   # blk: (n,8) uint8 -> (n,4,4) float
     pal=np.zeros((n,8))
     pal[:,0]=a0; pal[:,1]=a1
     big=a0>a1
-    # D3D10 BC4/BC3 alpha ramps. BOTH were one step short until 2026-09-19
-    # (lane IMPOSTORFIX3): the eight-level branch ran k=1..5 with (6-k) and
-    # never assigned index 7; the six-level branch ran k=1..3 with (4-k) and
-    # never assigned index 5. Both read LOW, so the gate that selects covered
-    # texels by this alpha silently skipped the texels it was meant to test.
+    # D3D10 BC4/BC3 alpha ramps: every index must be assigned, or covered texels read LOW
     for k in range(1,7): pal[:,k+1]=np.where(big,((7-k)*a0+k*a1)/7,0)
     for k in range(1,5): pal[:,k+1]=np.where(big,pal[:,k+1],((5-k)*a0+k*a1)/5)
     pal[:,6]=np.where(big,pal[:,6],0.0); pal[:,7]=np.where(big,pal[:,7],255.0)
@@ -43,9 +39,8 @@ def load_dds(path):
     ht,wd=h[2],h[3]; fourcc=b[84:88]
     bw,bh=(wd+3)//4,(ht+3)//4
     if fourcc==b'DX10':
-        # Lane IMPOSTORDEPTH2 (2026-09-23): the card `_n` is DX10 BC7_UNORM (dxgi 98).
-        # BC7 is decoded by Pillow, a decoder independent of the tree's encoder; a
-        # DX10 BC3 / BC1 (dxgi 77 / 71, the arrays' layer 0) reads through the paths below.
+        # the card `_n` is DX10 BC7_UNORM (dxgi 98), decoded by Pillow (independent of the tree's encoder);
+        # a DX10 BC3 / BC1 (dxgi 77 / 71, the arrays' layer 0) reads through the paths below.
         dxgi=struct.unpack_from('<I',b,128)[0]
         if dxgi==98:
             from PIL import Image

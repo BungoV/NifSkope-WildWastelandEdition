@@ -154,19 +154,14 @@ bool cellPickClick( NifModel * nif, const float origin[3], const float direction
 	const int hit = table.pick( ray, &candidates, nullptr );
 
 	cellPickSelect( nif, hit, candidates );
-	/* A MISS IS STILL A CLICK THIS OWNS.  Returning false on a miss would let
-	 * the ordinary block selection run and select the welded bucket under the
-	 * cursor, which is a hundred thousand vertices of unrelated references --
-	 * the one selection a person clicking in a cell view never wants. */
+	/* A miss is still owned: falling through would select the welded bucket under the
+	 * cursor, a hundred thousand vertices of unrelated references. */
 	return true;
 }
 
 bool cellPickSelect( NifModel * nif, int index, int candidates )
 {
-	/* THE TAIL THE MOUSE ALREADY USED (lane CELLWORK1). This was the last eight
-	 * lines of cellPickClick; the Cell workspace's reference list needed the
-	 * same eight and copying them would have been two answers to "what is
-	 * selected". No master check here -- see cellclick.h for why. */
+	/* Shared by the viewport click and the workspace reference list; no master check here. */
 	const CellPickTable & table = cellPickTable();
 	if ( index >= table.size() )
 		return false;
@@ -249,10 +244,8 @@ int cellHighlightCreate( NifModel * nif, const QModelIndex & iRoot, const float 
 	}
 	nif->restoreState();
 
-	/* EMISSIVE, and with the same `#AARRGGBB` one-texel diffuse the ground uses
-	 * (src/cellview.cpp): an EMPTY diffuse slot is not neutral, it binds the
-	 * missing-texture magenta under Scene::DoErrorColor (src/gl/renderer.cpp
-	 * ~951), which is exactly how this lane's first terrain came out magenta. */
+	/* Emissive with a one-texel diffuse: an empty diffuse slot binds the
+	 * missing-texture magenta under Scene::DoErrorColor. */
 	QModelIndex iShader = nif->insertNiBlock( QStringLiteral( "BSLightingShaderProperty" ) );
 	nif->set<quint32>( iShader, "Shader Type", 0 );
 	nif->set<quint32>( iShader, "Shader Flags 1", 2151677953U );

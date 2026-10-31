@@ -168,7 +168,7 @@ def gate_a(exe, data, work, red=None, aodir=None, model=MODEL, label='A', env=No
         got, bf, inside = res[:, 0].astype(float), res[:, 1].astype(float), res[:, 2]
         keep = inside <= 0.5
         P, N, K, got, bf = P[keep], N[keep], K[keep], got[keep], bf[keep]
-        # the twin's reader and lookup on the exe's file: the same numbers (worlddown is the exe's red only)
+        # the twin's reader and lookup on the exe's file must give the same numbers
         cpy = twin.Copy(name, R, t, s)
         if red != 'worlddown':
             tl = twin.lookup(vol, cpy.to_model(P), cpy.dir_to_model(N))
@@ -179,9 +179,8 @@ def gate_a(exe, data, work, red=None, aodir=None, model=MODEL, label='A', env=No
         ok_far = len(ef) > 0 and ef.mean() <= twin.BAR_A_MEAN and np.percentile(ef, 95) <= twin.BAR_A_P95 \
             and ef.max() <= twin.BAR_A_MAX
         ok_near = (not near.any()) or (en.mean() <= twin.BAR_AN_MEAN and np.percentile(en, 95) <= twin.BAR_AN_P95)
-        # the contact band (within one voxel) is REPORTED against the twin's bar, not gated: on a real mesh an L2
-        # voxel straddles thin panels and tyre contacts (2026-10-04: near p95 0.34-0.39, all of it within half a
-        # voxel); the design's open question 7 leaves that band to the game's SSAO. The far bars are the gate.
+        # the contact band (within one voxel) is reported, not gated: on a real mesh a voxel straddles thin
+        # panels and tyre contacts, and that band is left to the game's SSAO. The far bars are the gate.
         ok = ok_far
         near_over += 0 if ok_near else 1
         ok_all &= ok
@@ -279,9 +278,8 @@ def gate_d(table, red_table=None):
                    % (label, len(w), pooled, float(base.mean()) if pooled else 0.0, mean, p95, worst,
                       'within bars' if ok else 'OUT of bars', float((recb - f)[saw].mean()) if pooled else 0.0))
     green, red = res.get('green', False), res.get('red nodivide')
-    # a cell where the copies take too little of the probes' sky cannot tell the divide from none: the red stays
-    # inside the bars too. That is not a pass: INCONCLUSIVE, rc 1, and the numbers stand as the measured bias.
-    # Fewer than 20 octants is no evidence either way: INCONCLUSIVE (too few octants), rc 1 as well.
+    # a cell whose copies take too little of the probes' sky cannot tell the divide from none:
+    # INCONCLUSIVE, rc 1 (likewise fewer than 20 octants).
     verdict = 'INCONCLUSIVE (too few octants)' if few else (
         'PASS' if green and red is False else ('INCONCLUSIVE' if green and red else 'FAIL'))
     head = 'D %s copy-free sky on a real cell (bars: signed mean >= %+.2f, p95 <= %.2f, worst >= %+.2f, >= 20 octants; '         'the red must miss)' % (verdict, twin.BAR_D_BIAS, twin.BAR_D_P95, twin.BAR_D_WORST)
@@ -348,9 +346,8 @@ def gate_gpu(dump, aodir):
             accsum[inb] += lk - 1.0
             nfac[inb] += (lk < 0.999)
     want[fg] = acc
-    # the reconstruction itself, against the geometry: a copy's own pixels (its id) must land inside its model's
-    # bounding box (the volume box less its margin; margin = fade / 0.25). A wrong depth scale, a flipped
-    # projection term or a wrong view matrix moves them out; the normals-vs-depth planarity cannot see a scale.
+    # a copy's own pixels must land inside its model's box (volume box less margin = fade / 0.25): catches
+    # a wrong depth scale or view matrix, which the normals-vs-depth planarity cannot see
     self_in = self_n = 0
     for ci, fname, R, t, s in copies:
         sel = np.abs(ids - (ci + 1)) < 0.5
@@ -370,8 +367,8 @@ def gate_gpu(dump, aodir):
     touched = want[fg] < 0.999
     ok = self_n > 1000 and self_share >= 0.98 and touched.sum() > 500 and float(np.percentile(e, 99)) <= 0.02 \
         and float(e[touched].mean()) <= 0.005
-    # his call "stacked copies multiply": the pixels where two or more copies darken AND the product and the sum part
-    # by > 0.005 (a summed pass misses each of them by more than that). Their mean |err| must stay <= 0.002.
+    # stacked copies multiply: where 2+ copies darken and product and sum differ by > 0.005,
+    # the mean |err| must stay <= 0.002
     stack = (nfac >= 2) & (np.abs(acc - np.maximum(accsum, 0.0)) > 0.005)
     se = float(e[stack].mean()) if stack.any() else 1.0
     ok = ok and int(stack.sum()) >= 200 and se <= 0.002

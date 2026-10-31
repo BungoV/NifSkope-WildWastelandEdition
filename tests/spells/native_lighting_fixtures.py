@@ -61,7 +61,7 @@ import sys
 
 import numpy as np
 
-# (R east, G up, B north), NATIVEVIEW2's three known-answer normals.
+# (R east, G up, B north), the three known-answer normals.
 WANT = {
     "flat": (128, 255, 128),
     "tilt": (191, 238, 128),

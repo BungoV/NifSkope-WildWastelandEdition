@@ -28,8 +28,7 @@ import time
 import numpy as np
 
 # ---------------------------------------------------------------- the depth map spec (doc section 3)
-# GICAL1_SIDE / GICAL1_WARP override the two layout numbers for a measurement run (doc section 5: 4 x 4 unwarped
-# FAILS the leak gate at 2- and 4-unit walls); the shipped spec is 8 and 4.
+# GICAL1_SIDE / GICAL1_WARP override the two layout numbers for a measurement run; the shipped spec is 8 and 4.
 SIDE = int(os.environ.get('GICAL1_SIDE', '8'))       # texels a side: 8 x 8 = 64 texels over the hemisphere
 PER_TEXEL = 8            # depth rays per texel (512 a surfel)
 LIFT = 1.0               # the depth rays start this far along the surfel's normal (game units)

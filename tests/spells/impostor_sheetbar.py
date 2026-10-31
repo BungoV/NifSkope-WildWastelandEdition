@@ -1,21 +1,6 @@
-# impostor_sheetbar.py -- the depth sheet bar of tests/spells/impostor_trunk.sh.
-# Lane IMPOSTORDEPTH2, 2026-09-23.
-#
+# impostor_sheetbar.py -- the depth sheet bar: BC7 _oct_n.DDS height vs the repaired PNG the bake encoded.
 # usage: python impostor_sheetbar.py <cards dir>        (one line, first word SHEET PASS|FAIL)
-#
-# Reads <id>_oct_n.DDS with Pillow (a decoder independent of the tree's encoder) and
-# measures its HEIGHT (B) against the image lodgen was given to encode: the bake's
-# <id>_oct_normal.png after lodgenRepairOctHeight, reconstructed by
-# impostor_height_ref.py's port, which is believed only when its four-integer census
-# equals the one the bake printed into a log beside the sheets (else: SHEET FAIL
-# REFUSED). The raw PNG numbers are printed beside them; the gap between the two is
-# the repair, not the codec.
-#
-# THE BAR, over the covered texels (albedo alpha >= 16, the coverage floor):
-#   the sheet is DX10 BC7 (DXGI 98); height |err| mean < 1.0 level and p95 <= 3 levels;
-#   at least 90% of the heights the repaired image holds survive the decode.
-# Measured 2026-09-23 on the 8x8 maple (000531b3, 1920x2048): BC7 0.57 / 2 / 57 of 58;
-# the DXT5 sheet of the same bake 2.64 / 7 / 27 of 58 (the red control).
+# Bar over covered texels: BC7, height |err| mean < 1.0 and p95 <= 3 levels, >= 90% of heights survive.
 import sys, os, glob, json, numpy as np
 from PIL import Image
 

@@ -55,13 +55,11 @@ class Lodv(object):
 		self.levelDims = list(struct.unpack_from('<8H', b, 0x88))
 		self.indexCrc = struct.unpack_from('<I', b, 0x98)[0]
 		self.sheets = []
-		# TEN descriptors since 2026-09-18 (0xA0..0xEF); v2 held six at
-		# 0xA0..0xCF and v1 four. Nothing before 0xA0 moved and the stride is
-		# still 8, so a reader that stops at six reads an OLD container
-		# correctly and simply cannot see the horizon sheets.
+		# TEN descriptors (0xA0..0xEF), stride 8; an older container holds six or four and nothing
+		# before 0xA0 moved, so a reader that stops at six reads it but cannot see the horizon sheets.
 		for i in range(10):
 			f0, f1, role, space, skip = struct.unpack_from('<HHBBB', b, 0xA0 + i * 8)
-			# byte 6 is mipSkip (lane VTNORMAL1): 1 on a half-resolution sheet,
+			# byte 6 is mipSkip: 1 on a half-resolution sheet,
 			# which stores the full sheet's mips 1.. and no mip 0
 			self.sheets.append({'dxgi': f0, 'dxgiCover': f1, 'role': role, 'space': space,
 								'skip': skip})
@@ -94,10 +92,8 @@ class Lodv(object):
 		return sum(self.sheetMipBytes(s, m, cover)
 				   for s in range(self.sheetCount) for m in range(self.mips))
 
-	# ONE-VALUE SHEETS (lane FLAT2, docs/LODGEN_TERRAIN_VT.md 3.2): tile flag bit
-	# 2+k set = sheet k is one value; it is stored as a 16-byte record (its one
-	# repeating unit -- a BC block, an R16 or an RGBA8 texel -- then zeros) in
-	# place of all its mips. Expanding it gives back the full sheet byte for byte.
+	# ONE-VALUE SHEETS (docs/LODGEN_TERRAIN_VT.md 3.2): tile flag bit 2+k set = sheet k is one
+	# value, stored as a 16-byte record (its one repeating unit, then zeros) in place of all its mips.
 	def uniformMask(self, e):
 		return (e['flags'] >> 2) & ((1 << self.sheetCount) - 1)
 
@@ -401,15 +397,8 @@ def cmd_filter(finePath, coarsePath):
 			   'south': [(i, j) for j in range(S - B, S) for i in range(S)],
 			   'west': [(i, j) for j in range(S) for i in range(0, B)],
 			   'east': [(i, j) for j in range(S) for i in range(S - B, S)]}
-	# BC1 carries four interpolated levels between 5:6:5 endpoints, so decode(coarse)
-	# and box(decode(fine)) differ by the codec whichever order they are taken in.
-	# The property that is true of a BOX FILTER and false of almost any other rule is
-	# that the parent lies inside its four children's range; BC1_SLOP widens it by one
-	# endpoint quantum a channel (255/31 = 8.2).
-	# BC1: four levels between 5:6:5 endpoints, so a texel's worst error is about a
-	# sixth of its own block's range plus the endpoint quantum (255/31 = 8.2 on red and
-	# blue). A constant cannot bound that - it is too loose on a flat block and too
-	# tight on a contrasty one - so the slop is computed per block, per channel.
+	# a BOX FILTER puts the parent inside its four children's range; BC1's error widens that by a slop
+	# computed per block, per channel (about a sixth of the block's range plus 255/31 = 8.2).
 	BC1_ENDPOINT = 8
 
 	def fineSlop(u, v_, k):
@@ -468,10 +457,8 @@ def cmd_filter(finePath, coarsePath):
 		check('V8 %s obeys (a+b+c+d+2)>>2 exactly on the R16 height sheet' % name, hBad == 0)
 		check('V8 %s colour stays inside the range of the four texels it averaged' % name,
 			  cOut == 0)
-	# V10: the CONTROL, and it has to measure its own power first. Only a texel whose
-	# four children DIFFER can tell a box filter from a nearest resample; a Commonwealth
-	# pyramid is interpolated up from land samples 128 units apart, so most texels cannot.
-	# Search every parent tile for the one with the most relief and use that.
+	# V10: the CONTROL; only a texel whose four children DIFFER can tell a box filter from a nearest
+	# resample, so the parent tile with the most relief is used.
 	best = (-1, 0, 0, 0)          # discriminating, agreeWithBox, agreeWithNearest, tile
 	for cand in range(coarse.tilesX * coarse.tilesY):
 		ctx, cty = cand % coarse.tilesX, cand // coarse.tilesX
@@ -582,9 +569,7 @@ def cmd_ladder(paths):
 	check('a coarse tile covers exactly four finer ones', ok)
 	check('every container agrees on the world rectangle and both corpus hashes',
 		  len(set((v.wWest, v.wSouth, v.wEast, v.wNorth, v.vhgt, v.paint) for v in vs)) == 1)
-	# The msn stores UP in GREEN at EVERY level. The parent-tile filter passed its
-	# channels to the pixel function in the wrong order until 2026-09-18, so every
-	# other level came out with up in BLUE and lit sideways.
+	# The msn stores UP in GREEN at EVERY level (a channel-order slip puts it in BLUE, lit sideways).
 	ups = []
 	for v in vs:
 		img = decode_bc1(v.payload(0), v.sheetOffset(False, 1, 0), v.stored, v.stored)

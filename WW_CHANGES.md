@@ -1,5 +1,21 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## LEANCOMMENTS1 (2026-10-31, FIX1031A): the comment trim pass lands on main (comments only, exe byte-identical)
+
+- **What:** origin/cloud-leancomments1 (cut from 5c98715a, 918 commits behind main) trims comments in `src/cell*`,
+  `src/gl/cell*`, `res/shaders/cell_*|fo4_*|pbrm_*` (not the upstream fo4_default / fo4_effectshader) and
+  `tests/spells/*.py`: lane tags, dates, gate narratives and restated code go; license headers, one-line whys,
+  formula citations, one line per `WW_*` switch and reader warnings stay. Adds `tests/spells/comments_only_check.py`
+  and the cloud report/reply under docs/cloud/.
+- **How it landed:** per file 3-way merge onto main 602ca813; 132 files unchanged on main took the branch copy,
+  80 merged; 6 files gone on main (cell_volfog*, volfog1_cell_check.py) skipped. Inside the 253 conflict hunks each
+  comment edit was applied to main's lines only where its base lines match exactly once (201 applied, 65 left as
+  main's text). No switch, no red: nothing a program sees changed.
+- **Gates:** comments_only_check against origin/main on all 212 changed files + a per-line ending rule: 0 FAIL (reds:
+  one altered token, an LF line in a CRLF file, both FAIL; `--self-test` PASS). Reference build of 602ca813 vs this
+  build (103 objects recompiled): NifSkope.exe byte-identical (every PE section, whole file `cmp`). Offline shader
+  link sweeps 405 / 270 (WW_CELL_RTDDGI) / 405 (WW_CELL_PRT) LINK OK. `git diff --stat` == `--ignore-cr-at-eol`.
+
 ## REDRETIRE2 (2026-10-31, FIX1030C): FLYFIX1's red and the Cell dock's Show-button red leave NifSkope.exe
 
 - **Why:** bungo 10-27 "Reds are scaffolding": a lane's WW_*_RED keeps the old path only until bungo himself confirms

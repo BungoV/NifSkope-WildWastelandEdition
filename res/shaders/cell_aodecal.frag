@@ -1,17 +1,15 @@
 #version 410 core
 
-/* lane AODECAL1: one copy's baked AO volume (src/aovolume.h; design docs/cloud/AODECAL1_DESIGN.md) over the
- * opaque pass. aoMode 0: the copy's own triangles, nothing but its id (the stencil does the masking). aoMode 1:
- * the footprint box's back faces; each covered pixel's receiver is rebuilt from the opaque pass (view normal,
- * linear depth in game units) and taken to the copy's model space; out = AO(m, n), multiplied into the target
- * (red "add": out = AO - 1, added). The lookup is aovol::lookup's, term for term. */
+/* One copy's baked AO volume (src/aovolume.h) over the opaque pass. aoMode 0: the copy's own triangles, writing its
+ * id (the stencil masks). aoMode 1: the footprint box's back faces; each pixel's receiver is rebuilt from the opaque
+ * pass into model space and AO(m, n) multiplied into the target. The lookup must match aovol::lookup term for term. */
 
 layout ( location = 0 ) out vec4 outAo;
 layout ( location = 1 ) out vec4 outId;
 
 uniform int aoMode;
 uniform float aoSelf;		// the copy's index + 1 (mask mode)
-uniform bool aoAdd;			// red "add"
+uniform bool aoAdd;			// debug: out = AO - 1, added instead of multiplied
 uniform sampler2D aoGbuf;	// full size: view normal, linear depth (game units); 1e6 = background
 uniform sampler3D aoVol;	// RGBA32F, dims.x x dims.y x 3 dims.z: slabs k0-3, k4-7, k8
 uniform vec4 aoProj;		// P00, P11, P20, P21

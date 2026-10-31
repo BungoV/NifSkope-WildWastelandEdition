@@ -47,8 +47,8 @@ from PIL import Image
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from cell_gi_check import Soup, read_dump  # noqa: E402   (the checker's own soup and dump readers)
 from probe_bake import read_tbk  # noqa: E402              (the checker's own .tbk reader)
-import cell_gi_check  # noqa: E402   (lane ROOMCLAMP1: stage C's rooms rule)
-import cell_rooms_check  # noqa: E402   (lane ROOMCLAMP1: the shader's room blend)
+import cell_gi_check  # noqa: E402   (stage C's rooms rule)
+import cell_rooms_check  # noqa: E402   (the shader's room blend)
 
 AXES = np.array([[1, 0, 0], [-1, 0, 0], [0, 1, 0], [0, -1, 0], [0, 0, 1], [0, 0, -1]], float)
 SURF_OFF = 2.0          # the sun ray starts this far off the surface
@@ -190,7 +190,7 @@ def weather_light(esm, edid, hour):
         else:
             named[ax] = flat
     # a color is named for the way its light TRAVELS: "Z-" comes down from the sky, so a surface facing up
-    # takes it (measured on the game's own picture by lane PBRR3; the viewer's red "dalcflip" is the other way)
+    # takes it
     amb = np.stack([named[ax ^ 1] for ax in range(6)])
     return dict(amb=amb, sun=sun, sunTo=sun_to(hour, tn), keys=(TODS[a], TODS[b], t), tnam=tn, climate=clim,
                 form=fid, dalc=len(dal), named=named)
@@ -298,7 +298,7 @@ class SunShade:
                 dt = th - q[r, 2][:, None]
                 hit = good[None, :] & (uu >= 0) & (vv >= 0) & (uu + vv <= 1) & (dt > 1e-4) & (dt <= SUN_REACH)
                 sp = getattr(self, 'soup', None)
-                if sp is not None and sp.am is not None and hit.any():   # lane ALPHATEST1
+                if sp is not None and sp.am is not None and hit.any():   # alpha-test holes
                     ti = self.tris[self.first[p]:self.first[p + 1]]
                     rr, cc = np.nonzero(hit & (sp.amOf[ti] >= 0)[None, :])
                     if len(rr):
@@ -317,7 +317,7 @@ def own_sun(S, soup, W):
     shade = np.zeros(len(S), bool)
     if W['sunTo'][2] > 0 and W['sun'].max() > 0:
         sh = SunShade(soup.t, W['sunTo'])
-        sh.soup = soup   # lane ALPHATEST1: hits on an alpha-test hole pass
+        sh.soup = soup   # hits on an alpha-test hole pass
         idx = np.nonzero(faces)[0]
         shade[idx] = sh.blocked(p[idx] + n[idx] * SURF_OFF)
         lit = faces & ~shade
@@ -435,7 +435,7 @@ def dump_rows(tbks, S):
     rows = []
     for _, t in tbks:
         pair = []
-        for arr in t['bysides']:   # lane SIDES6: front|back, or v5's six
+        for arr in t['bysides']:   # front|back, or v5's six
             r = np.full(len(arr), -1, np.int64)
             nn = arr['nrm'].astype(np.float64)
             nn /= np.maximum(np.linalg.norm(nn, axis=1), 1e-9)[:, None]
@@ -552,7 +552,7 @@ def segs_blocked(soup, c, Q):
         v = (d @ qv.T) * idt
         tt = np.einsum('tk,tk->t', e2, qv)[None, :] * idt
         hit = good & (u >= 0) & (u <= 1) & (v >= 0) & (u + v <= 1) & (tt > 1e-4) & (tt <= L[:, None])
-        if soup.am is not None and hit.any():   # lane ALPHATEST1: a hit on an alpha-test hole passes
+        if soup.am is not None and hit.any():   # a hit on an alpha-test hole passes
             rr, cc = np.nonzero(hit & (soup.amOf[ti] >= 0)[None, :])
             if len(rr):
                 h = soup.holes(ti[cc], u[rr, cc], v[rr, cc])
@@ -862,7 +862,7 @@ def stage_r(run, sub, name, X, tag='R'):
                'too few to judge' if lo.sum() < 50 else 'the two pictures are equal on %.1f%%' % (100 * same)))
 
 
-# ---------------------------------------------------------------- lane SKYINT1: an interior's own flags
+# ---------------------------------------------------------------- an interior's own flags
 SHOW_SKY, USE_SKY_LIGHTING, SUNLIGHT_SHADOWS = 0x80, 0x100, 0x800
 MIN_SKY_PROBES = 20     # as stage S outdoors: a Show Sky interior must have at least this many probes seeing sky
 
@@ -1009,7 +1009,7 @@ def interior(d, flags=None):
         ok &= good
         lines.append('I %s %s: %d bytes, %s' % ('PASS' if good else 'FAIL', f, len(ba),
                                                 'byte for byte the same' if ba == bb else 'DIFFERENT (%d bytes after)' % len(bb)))
-    # lane SKYINT1: no sky file only where the cell's Show Sky flag is clear (this arm's cell must be closed)
+    # no sky file only where the cell's Show Sky flag is clear (this arm's cell must be closed)
     extra = sky_files(b)
     closed = flags is None or not flags & SHOW_SKY
     ok &= not extra and closed
@@ -1047,7 +1047,7 @@ def main(argv):
         elif argv[i] == '--fresh':
             fresh = True
             i += 1
-        elif argv[i] == '--cell':   # lane SKYINT1: an interior run, judged by its own flags
+        elif argv[i] == '--cell':   # an interior run, judged by its own flags
             cell = argv[i + 1]
             i += 2
         else:
@@ -1093,7 +1093,7 @@ def main(argv):
                 continue
             views[name] = X
         if 'R' in G:
-            # lane ROOMCLAMP1: the grid by the rooms rule from this file's own totals, the pictures by the room blend
+            # the grid by the rooms rule from this file's own totals, the pictures by the room blend
             sp = S[:, 0:3] + S[:, 3:6] * G['voxel'] * 0.5
             g = np.floor((sp - G['origin']) / G['voxel']).astype(int)
             lines.append(cell_gi_check.stage_c_rooms(S, P, G, soup, sp, g, True, vals=cubes))
@@ -1111,8 +1111,8 @@ def main(argv):
         print(ln)
     bad = [ln for ln in lines if ' FAIL' in ln.split(':')[0]]
     judged = [ln for ln in lines if ' PASS' in ln.split(':')[0]]
-    # lane GICAL1: a cell given no camera (VIEWS_<tag> unset) runs no picture stage; W U S B are all it can judge
-    # (T only with outdoor glass), so it needs 4, not 5 -- Goodneighbor gn:5,-3 read FAIL with 4 PASS and 0 FAIL
+    # a cell given no camera (VIEWS_<tag> unset) runs no picture stage; W U S B (and T with outdoor glass)
+    # are all it can judge, so it needs 4, not 5
     need = 5 if specs else 4
     shot = [ln for ln in judged if ln.startswith('D ')]   # a camera given must be judged on its pictures
     ok = not bad and len(judged) >= need and (not specs or bool(shot))

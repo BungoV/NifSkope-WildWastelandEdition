@@ -1,8 +1,7 @@
 #version 410 core
 
-/* The cell lights' shadow caster pass (lane SHADOW1): depth = the distance to the light over its
- * radius (a cube's texel holds the nearest caster along its direction); nothing nearer the light
- * than its near clip casts. No colour attachment. */
+/* Cell light shadow caster pass: depth = distance to the light over its radius; nothing nearer than
+ * the near clip casts. No color attachment. */
 
 uniform vec2 shRadiusNear;	// radius, near clip
 // lane GAPFIX1: alpha-tested casters keep what the colour pass keeps (as lookdev_csmdepth_at.frag)

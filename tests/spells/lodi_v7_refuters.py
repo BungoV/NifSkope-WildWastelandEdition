@@ -69,8 +69,8 @@ def archpath(s):
 
 is_arch = [archpath(base_model[r['baseId']]) if r['baseId'] < len(base_model) else False
            for r in inst]
-# a tree by the .lodo base flag bit, not by the seed byte: both give 149 here,
-# but the flag is what the library ASSERTS and the seed is a hash that may be 0
+# a tree by the .lodo base flag bit, not by the seed byte: the flag is what the library ASSERTS
+# and the seed is a hash that may be 0
 TREE_BIT = 0x0001
 is_tree = [bool(base_flags[r['baseId']] & TREE_BIT) if r['baseId'] < len(base_flags) else False
            for r in inst]
@@ -100,13 +100,8 @@ print('lodi version %d, %d placements, %d groups, %d architecture placements, %d
       % (h['version'], n, h['groupCount'], sum(is_arch), sum(is_tree)))
 
 # ---------------------------------------------------------------- refuter (b)
-# BRIEF: "every SCOL's parts share one group".
-# MEASURED: exactly one SCOL reference on this bake, 0x000FB3F6, has its 2 parts
-# in DIFFERENT chunks, and so in different groups. That is not the rule failing:
-# it is the brief's own other sentence -- "a house cut by a chunk border is two
-# groups, one a side" -- and a SCOL cut by the same line is cut the same way.
-# The refuter is therefore scoped to a chunk, and the border case is counted out
-# loud rather than quietly tolerated.
+# every SCOL's parts share one group, per chunk: a SCOL cut by a chunk border is two groups,
+# one a side, and the border case is counted out loud.
 scol = collections.defaultdict(list)
 for i in range(n):
     if cold[i]['scolPart'] >= 0:
@@ -155,12 +150,8 @@ red('(d) control: one placement in two groups', False,
     'lodgen_native_decode.py raises by name ("ids are dense per chunk from 0")')
 
 # ---------------------------------------------------------------- refuter (c)
-# BRIEF: "a tree next to a wall keeps its own group".
-# MEASURED: 116 of 149 trees do sit in a group larger than one -- and every one
-# of them is a part of a SCOL of TREES, joined by rule (i), which is the rule
-# working. What the brief is guarding against is a tree welded to a HOUSE by
-# proximity, so that is what is tested: no tree shares a group with an
-# architecture placement unless the two are parts of the same SCOL reference.
+# a tree next to a wall keeps its own group: no tree shares a group with an architecture
+# placement unless both are parts of the same SCOL reference (SCOLs of trees join by rule (i)).
 tree_arch = []
 for i in range(n):
     if not is_tree[i]:
@@ -196,9 +187,8 @@ red('(c) control: architecture gate removed', merged_if_ungated == 0,
     'candidates to merge into it' % (merged_if_ungated, len(near)))
 
 # ---------------------------------------------------------------- refuter (a)
-# The pair is chosen from GEOMETRY that has been read -- the two largest
-# architecture groups with a clear gap between their world boxes -- never from a
-# placement's name.
+# the pair is chosen from GEOMETRY that has been read (the two largest architecture groups with
+# a clear gap between their world boxes), never from a placement's name.
 def gbox(mem):
     xs = [pos[i][0] for i in mem if pos[i]]
     ys = [pos[i][1] for i in mem if pos[i]]
@@ -233,32 +223,9 @@ else:
         '(the street itself) would weld them into one id' % gap)
 
 # ---------------------------------------------------------------- refuter (e)
-# THE CLOSURE. Director, 2026-09-18 17:4x: the group IS the identity the far
-# shadow pass keys on, and that pass excludes self-shadowing BY IDENTITY, so a
-# house left in two groups shadows its own walls. A union-find that missed one
-# pair does not announce itself -- it just leaves two halves of one house in two
-# ids -- so the map from placement to group has to be a function of the CONNECTED
-# COMPONENT and of nothing else, never of the order the pair search visited
-# neighbours in. That is a closure property and it is checkable: no two
-# architecture placements whose world boxes lie within the tolerance may sit in
-# different groups.
-#
-# The boxes are REBUILT here from the shipped bytes -- the .lodo mesh AABB, the
-# instance record's quantised rotation, scale and position -- rather than read
-# from a side channel the writer filled, because a box handed over by the writer
-# would grade the writer against itself.
-#
-# TWO THINGS THIS REBUILD CANNOT READ, both stated out loud rather than guessed:
-# the drawn mesh is `bases[baseId].rep[mnamSlot]` and `mnamSlot` is NOT in the
-# instance record (it survives only as the header's `slotInstances` histogram),
-# and the record's position, rotation and scale are quantised where the writer
-# grouped on the unquantised source. The first is answered by measurement: on
-# this bake no architecture base has more than ONE distinct rep mesh, so the slot
-# cannot change which mesh is drawn, and the count of bases where it COULD is
-# printed. Any such base is skipped and counted, never guessed at. The second is
-# bounded: position quantisation is 16384/65535 = 0.25 u, scale 1/8192, rotation
-# 15-bit smallest-three -- all far under the 16-unit tolerance -- and the gap of
-# every cross-group pair is printed so a near-boundary case could not hide.
+# THE CLOSURE: the far shadow pass keys self-shadowing on the group, so no two architecture
+# placements whose boxes lie within the tolerance may sit in different groups. Boxes are rebuilt
+# from the shipped bytes; a base with more than one rep mesh is skipped and counted (no mnamSlot).
 TOL = 16.0
 NO_MESH = 0xFFFF
 
@@ -350,10 +317,8 @@ ok('(e) the group map is closed under touching', not cut and touching > 0,
       '' if not cut else ' -- closest: %s vs %s at a gap of %.3f u'
       % (shortname(cut[0][0]), shortname(cut[0][1]),
          min(c[2] for c in cut))))
-# RED CONTROL: the same closure run against grouping SWITCHED OFF, each placement
-# keyed on itself. If the test cannot see a missed join it would report 0 here
-# too, and a closure test that examined no pairs would pass vacuously -- so this
-# control proves both that pairs exist and that a cut component is visible.
+# RED CONTROL: grouping SWITCHED OFF (each placement keyed on itself) must show missed joins,
+# so the test is proven to examine pairs and to see a cut component.
 _, touch_off, cut_off = closure([(chunk_of[i], i) for i in range(n)])
 red('(e) control: grouping disabled', not cut_off and touch_off > 0,
     'with every placement its own group the same closure reports %d touching '
@@ -394,9 +359,8 @@ if T['vertexSkyFirst']:
     d = sorted(abs(m - b) for m, b in zip(means, bytes_))
     t = len(d)
     r = pearson(means, bytes_)
-    # THE GATE, pre-registered in report 1.5 and re-stated here with the control
-    # that sets it: the AO stream on this same file, same placements, is the only
-    # honest yardstick for what "agrees with its byte" is worth.
+    # THE GATE: the AO stream on this same file and placements is the yardstick for what
+    # "agrees with its byte" is worth.
     ok('sky: median |mean - 0x11 byte| <= 2', d[t // 2] <= 2.0,
        'median %.2f over %d placements (p90 %.2f, p99 %.2f, max %.2f)'
        % (d[t // 2], t, d[int(.9 * t)], d[int(.99 * t)], d[-1]))

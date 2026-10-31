@@ -19,7 +19,7 @@ BSD License - see nifskope.h
 #include "cellsplat.h"
 #include "cellgroundlegend.h"	// lane DUNESAND3
 #include "cellfarlod.h"
-#include "cellmodpickbox.h"	// lane MODPICK1: the Mods band
+#include "cellmodpickbox.h"	// the Mods band
 #include "gl/celllights.h"
 #include "airzonepanel.h"	// lane AIRZONE1: the Air zones band
 #include "gl/cellairzone.h"	// lane AIRZONE1: the Air zones row
@@ -99,10 +99,7 @@ void cellWorkspaceApplyOverrides( CellSceneSpec & spec )
 {
 	if ( !g_haveOverrides )
 		return;
-	/* ONLY THE FIELDS A ROW OWNS. The worldspace, the cell, the block size, the
-	 * plugins and the data root come from the file and are not the panel's to
-	 * change -- a row that silently re-pointed the view at another cell would
-	 * make the `.wwcell` a lie. */
+	/* Only the fields a row owns; worldspace, cell, block size, plugins and data root stay the file's. */
 	spec.overlay = g_over.overlay;
 	spec.terrain = g_over.terrain;
 	spec.water = g_over.water;
@@ -120,7 +117,7 @@ void cellWorkspaceNoteOpened( const QString & path, const CellSceneSpec & spec,
 	g_path = path;
 	g_spec = spec;
 	g_notes = notes;
-	// lane PRTPBAKE: a bake is one click, not a mode -- the next rebuild does not bake again
+	// a bake is one click, not a mode: the next rebuild does not bake again
 	g_spec.probesBake = false;
 	g_over.probesBake = false;
 	if ( !g_haveOverrides ) {
@@ -128,10 +125,8 @@ void cellWorkspaceNoteOpened( const QString & path, const CellSceneSpec & spec,
 		// a row shows what is actually drawn before anybody touches one.
 		g_over = spec;
 	}
-	/* THE PANEL READS THE NEW NOTES NOW (lane PRTPPLACE, 2026-09-30). The builder's
-	 * own sceneChanged fires inside nifCreateCellScene, BEFORE this stores its notes,
-	 * so after a rebuild the legend, census and PRTP counts showed the build
-	 * before it. A second ring once the notes are stored. */
+	/* The builder's sceneChanged fires before these notes are stored, so ring again now
+	 * or the panel shows the previous build. */
 	emit CellPickBus::instance()->sceneChanged();
 }
 
@@ -189,10 +184,7 @@ struct LegendRow
 };
 
 /*!  key 0x<hex>  <n> placements  rgb r,g,b  <label>
- *
- * The format is src/cellview.cpp's, and this is a READ of it. If the builder's
- * line changes shape this returns nothing and the legend band says so, which is
- * a visible refusal rather than a panel quietly inventing its own colours. */
+ * Parses src/cellview.cpp's line; if its shape changes this returns nothing and the legend says so. */
 QVector<LegendRow> legendFromNotes( const QString & notes )
 {
 	QVector<LegendRow> out;
@@ -270,25 +262,8 @@ CellWorkspacePanel::CellWorkspacePanel( QWidget * parent )
 	onSceneChanged();
 }
 
-/* ---------------------------------------------------------------------------
- * THE SHOW TABLE (bungo 2026-09-19: "And an option to show cell borders too, a
- * lot of visual / visibility toggles that will only live in the cell editor
- * workspace, that are specific to cell stuff").
- *
- * ONE ROW PER TOGGLE, and a later lane adds a toggle by adding a row here --
- * not by adding a widget, a member, a connect and a settings key in four
- * different places, which is how five unrelated checkboxes become six
- * disagreeing ones.
- *
- * `id` is BOTH the QSettings key inside the group and the object-name suffix,
- * so what a gate looks for and what is persisted cannot drift apart.
- *
- * SHIPPED ROWS ARE ONLY THE ONES THE BUILDER ALREADY HAS A FIELD FOR. bungo
- * also named Objects, Bare-ground quads highlight and a Cell name label; none
- * of the three has anything behind it in `CellSceneSpec`, so shipping a row for
- * them would be a control that does nothing. They are in the report's NEXT list
- * with what each needs, which is the honest place for them.
- * --------------------------------------------------------------------------- */
+/* The Show table: one row per toggle, so a toggle is added here and nowhere else.
+ * `id` is both the QSettings key and the object-name suffix. Only fields CellSceneSpec has get a row. */
 struct CellShowRow
 {
 	const char * id;
@@ -299,9 +274,7 @@ struct CellShowRow
 };
 
 static const CellShowRow g_showRows[] = {
-	/* "Cell borders" is bungo's name for what the builder has always called
-	 * `grid`: the lines at the 4096-unit cell edges. It is renamed in the UI and
-	 * NOT in the spec, because the spec's name is in `.wwcell` files that exist. */
+	/* "Cell borders" is the spec's `grid`; renamed in the UI only, since `.wwcell` files use the spec name. */
 	{ "borders",  QT_TRANSLATE_NOOP( "CellWorkspacePanel", "Cell borders" ),        false, &CellSceneSpec::grid },
 	{ "ground",   QT_TRANSLATE_NOOP( "CellWorkspacePanel", "Ground" ),              true,  &CellSceneSpec::terrain },
 	{ "water",    QT_TRANSLATE_NOOP( "CellWorkspacePanel", "Water" ),               true,  &CellSceneSpec::water },
@@ -435,21 +408,8 @@ void CellWorkspacePanel::buildUi()
 
 	list = new QTreeWidget( this );
 	list->setObjectName( QStringLiteral( "CellWorkspaceList" ) );
-	/* SIX COLUMNS, ONE ROW PER PLACED REFERENCE.
-	 *
-	 * DIVERGENCE FROM BLENDER AND FROM THE CREATION KIT, stated because it was a
-	 * choice: both would NEST -- Blender's outliner nests by collection, the CK
-	 * groups by cell. This list is FLAT with a Cell column, because what people
-	 * do with it is sort and filter (what is heavy, what is a marker, where is
-	 * form 0x000ABCDE), and nesting makes sorting lie: a tree sorts inside each
-	 * parent, so "heaviest first" is no longer the list's order. Grouping
-	 * arrives when there are enough cells for it to save more than it costs; the
-	 * model already carries the cell list it would group by.
-	 *
-	 * `State` is the builder's own word for why a reference is not on screen
-	 * (`CellRefTable::fateName`), so a light, a sound marker and a deleted record
-	 * are all IN THE LIST -- which is the point of listing what exists rather
-	 * than what was drawn. */
+	/* One row per placed reference, FLAT with a Cell column (not nested like Blender/CK) so sorting stays
+	 * global. `State` is CellRefTable::fateName, so undrawn references (lights, markers) are listed too. */
 	list->setColumnCount( 6 );
 	list->setHeaderLabels( { tr( "Type" ), tr( "Editor ID" ), tr( "Form" ),
 		tr( "Tris" ), tr( "Cell" ), tr( "State" ) } );
@@ -496,10 +456,8 @@ void CellWorkspacePanel::buildUi()
 	QMenu * showMenu = new QMenu( this );
 	showMenu->setObjectName( QStringLiteral( "CellWorkspaceShowMenu" ) );
 
-	/* LANE SHOWMENU1 (bungo 10-12, "Tidy that up"): the Show dropdown is the ONE home of every
-	 * viewport feature switch, in three sections. Each tick keeps the key, default, objectName and
-	 * live path its old checkbox had; Water is one tick (the Show row), which also drives the
-	 * water shader switch so the two can no longer disagree. */
+	/* The Show dropdown is the one home of every viewport feature switch, in three sections. Water is
+	 * one tick that also drives the water shader switch, so the two cannot disagree. */
 	auto tick = [&]( QMenu * m, const QString & label, const char * name, bool on ) {
 		QAction * a = m->addAction( label );
 		a->setObjectName( QLatin1String( name ) );
@@ -507,8 +465,8 @@ void CellWorkspacePanel::buildUi()
 		a->setChecked( on );
 		return a;
 	};
-	/* A heading row per section. QMenu::addSection's text is not drawn by this style (measured: a bare
-	 * line), so the heading is the panel's own band heading in a widget action, after a separator. */
+	/* A heading row per section: QMenu::addSection's text is not drawn by this style, so use the
+	 * panel's band heading in a widget action, after a separator. */
 	auto section = [&]( const QString & name, const char * id ) {
 		if ( !showMenu->actions().isEmpty() )
 			showMenu->addSeparator();
@@ -535,7 +493,7 @@ void CellWorkspacePanel::buildUi()
 			QSettings().setValue( QString( "%1/%2" )
 				.arg( QLatin1String( CELL_SHOW_GROUP ), QLatin1String( g_showRows[i].id ) ), on );
 			if ( g_showRows[i].field == &CellSceneSpec::water )
-				wwCellWaterSetOn( on );	// SHOWMENU1: the one Water tick
+				wwCellWaterSetOn( on );	// the one Water tick
 			viewRowChanged();
 		} );
 		showActions.append( a );
@@ -545,7 +503,7 @@ void CellWorkspacePanel::buildUi()
 	cellPrevis = tick( showMenu, tr( "Previs" ), "CellWorkspacePrevis", wwCellPrevisOn() );
 	cellCull = tick( showMenu, tr( "Culling" ), "CellWorkspaceCulling", wwCellCullOn() );
 	cellFarLod = tick( showMenu, tr( "Far LOD" ), "CellWorkspaceFarLod", cellFarLodWanted() );
-	// lane FARLOD1: the LOD type -- Vanilla | FO4CS; unset, it shows what the last build resolved to
+	// the LOD type, Vanilla | FO4CS; unset, it shows what the last build resolved to
 	cellFarLodType = showMenu->addMenu( tr( "Far LOD source" ) );
 	cellFarLodType->setObjectName( QStringLiteral( "CellWorkspaceFarLodType" ) );
 	cellFarLodTypeGroup = new QActionGroup( cellFarLodType );
@@ -656,8 +614,8 @@ void CellWorkspacePanel::buildUi()
 				glView->updateShaders();
 		} );
 	}
-	/* lane SKYSTR1 (bungo 10-13, FO4CS's Skylighting strength): how much the GI's sky visibility darkens, 0-100 %.
-	 * A label | field row as the Bloom rows; live (the grid relights 0.4 s after the value stands still) */
+	/* Skylighting strength: how much the GI's sky visibility darkens, 0-100 %. Live (the grid relights
+	 * 0.4 s after the value stands still). */
 	{
 		QWidget * panel = new QWidget( showMenu );
 		panel->setObjectName( QStringLiteral( "CellWorkspaceSkyVisPanel" ) );
@@ -703,7 +661,7 @@ void CellWorkspacePanel::buildUi()
 		showMenu->addAction( wa );
 	}
 	cellFar = tick( showMenu, tr( "Far light" ), "CellWorkspaceCellFar", wwCellFarOn() );
-	// lane PROBEVIEW1: the Pass (Division deck s18/s40/s65), live once a bake is relit
+	// the Pass, live once a bake is relit
 	cellPass = showMenu->addMenu( tr( "Debug view" ) );	// bungo 10-27 note 13: under Precomputed Radiance Transfer
 	cellPass->setObjectName( QStringLiteral( "CellWorkspaceCellPass" ) );
 	cellPassGroup = new QActionGroup( cellPass );
@@ -878,7 +836,7 @@ void CellWorkspacePanel::buildUi()
 	}
 	section( tr( "Effects" ), "effects" );
 	cellIs = tick( showMenu, tr( "Imagespace" ), "CellWorkspaceCellImageSpace", wwCellImageSpaceOn() );
-	// lane MOTION1: the game's temporal AA, the same state as the Scene popup's Temporal AA row; ships off
+	// the game's temporal AA, the same state as the Scene popup's Temporal AA row; ships off
 	cellTaa = tick( showMenu, tr( "Temporal AA" ), "CellWorkspaceTemporalAa", wwGameTaaRowOn() );
 	// lane TAA2: our own resolve in place of the game's, Off | Low | Medium | High | Ultra; ships Off
 	cellModernTaa = showMenu->addMenu( tr( "Improved Temporal Anti-Aliasing" ) );	// note 19: label only
@@ -919,8 +877,8 @@ void CellWorkspacePanel::buildUi()
 	}
 	cellDof = tick( showMenu, tr( "Depth of field" ), "CellWorkspaceCellDof", wwCellDofOn() );
 	cellMblur = tick( showMenu, tr( "Motion blur" ), "CellWorkspaceCellMotionBlur", wwCellMotionBlurOn() );
-	// lane BLOOM1b: the bloom -- Vanilla (the imagespace's own, the default) | FO4CS, then FO4CS's settings, one per
-	// row, and its physical glare. Every change applies on the next paint (gl/cellbloom.h)
+	// the bloom: Vanilla (the imagespace's own, the default) | FO4CS with its settings and physical glare.
+	// Every change applies on the next paint (gl/cellbloom.h)
 	cellBloom = showMenu->addMenu( tr( "Bloom" ) );
 	cellBloom->setObjectName( QStringLiteral( "CellWorkspaceBloom" ) );
 	cellBloom->setToolTipsVisible( true );
@@ -1411,7 +1369,7 @@ void CellWorkspacePanel::buildUi()
 		if ( glView )
 			glView->update();
 	} );
-	// lane CELLALL1: the second row. A shader or pass switch repaints; a switch read when the cell opens reopens it.
+	// the second row: a shader or pass switch repaints; a switch read when the cell opens reopens it.
 	auto fxLive = [this]( QAction * box, void ( *set )( bool ) ) {
 		connect( box, &QAction::toggled, this, [this, set]( bool on ) {
 			set( on );
@@ -1533,7 +1491,7 @@ void CellWorkspacePanel::buildUi()
 	fxReopen( cellAoDecal, &aoDecalSetOn );
 	fxReopen( cellGiGpu, &wwCellGiGpuSetOn );
 	fxReopen( cellEmissiveGrid, &wwCellEmissiveGridSetOn );	// lane EMISSIVEGRID1: built when the cell opens
-	fxReopen( cellParticles, &wwCellParticlesSetOn );	// lane SUNCELL1: the systems are copied in when the cell opens
+	fxReopen( cellParticles, &wwCellParticlesSetOn );	// the systems are copied in when the cell opens
 	connect( cellCull, &QAction::toggled, this, [this]( bool on ) {
 		wwCellCullSetOn( on );
 		if ( glView )
@@ -1549,7 +1507,7 @@ void CellWorkspacePanel::buildUi()
 		if ( glView )
 			glView->update();
 	} );
-	// lane GRASSMB1: the grass is placed when the cell opens, so the switch rebuilds the cell
+	// the grass is placed when the cell opens, so the switch rebuilds the cell
 	connect( cellGrass, &QAction::toggled, this, [this]( bool on ) {
 		wwCellGrassSetOn( on );
 		if ( syncing || g_path.isEmpty() )
@@ -1559,7 +1517,7 @@ void CellWorkspacePanel::buildUi()
 		say( tr( "rebuilding %1 ..." ).arg( QFileInfo( g_path ).fileName() ), false );
 		emit reopenRequested( g_path );
 	} );
-	// lane GRASSMB1: passes on the finished frame, no rebuild
+	// passes on the finished frame, no rebuild
 	connect( cellDof, &QAction::toggled, this, [this]( bool on ) {
 		wwCellDofSetOn( on );
 		if ( glView )
@@ -1570,13 +1528,13 @@ void CellWorkspacePanel::buildUi()
 		if ( glView )
 			glView->update();
 	} );
-	// lane PRTPGI: the bounce of the last bake, drawn while Cell lights is on
+	// the bounce of the last bake, drawn while Cell lights is on
 	connect( cellGi, &QAction::toggled, this, [this]( bool on ) {
 		wwCellGiSetOn( on );
 		if ( glView )
 			glView->update();
 	} );
-	// lane FARVIEW1: a shader switch (the far sectors load with the cell)
+	// a shader switch (the far sectors load with the cell)
 	connect( cellFar, &QAction::toggled, this, [this]( bool on ) {
 		wwCellFarSetOn( on );
 		if ( glView )
@@ -1587,13 +1545,13 @@ void CellWorkspacePanel::buildUi()
 		if ( glView )
 			glView->update();
 	} );
-	// lane IMGS1: the game's exposure, curve, grade and LUT in place of the viewer's curve
+	// the game's exposure, curve, grade and LUT in place of the viewer's curve
 	connect( cellIs, &QAction::toggled, this, [this]( bool on ) {
 		wwCellImageSpaceSetOn( on );
 		if ( glView )
 			glView->update();
 	} );
-	// lane FARLOD1: the far field is document geometry, so the cell is built again with (or without) it
+	// the far field is document geometry, so the cell is built again with (or without) it
 	connect( cellFarLodTypeGroup, &QActionGroup::triggered, this, [this, liveFirst]( QAction * a ) {
 		cellFarLodSetType( a->data().toInt() == 0 ? WwFarLodVanilla : WwFarLodFo4cs );
 		if ( syncing || g_path.isEmpty() || !cellFarLodWanted() )
@@ -1639,8 +1597,8 @@ void CellWorkspacePanel::buildUi()
 	page = box( showL, "CellWorkspaceAirZones", 0 );
 	page->addWidget( new AirZonePanel( this ) );
 
-	/* ---- lane MODPICK1: which mods the cells load (bungo 10-12). The list, the saved choice per worldspace
-	 * and the one-stack rule live in cellmodpick.h; Apply or Reset rebuilds the cell like the Far LOD row. */
+	/* ---- which mods the cells load. The list, saved choice per worldspace and the one-stack rule live
+	 * in cellmodpick.h; Apply or Reset rebuilds the cell like the Far LOD row. */
 	page = box( loL, "CellWorkspaceMods", 1 );
 	modsBox = page->parentWidget();
 	page->addWidget( wwHeading( tr( "Mods" ), this ) );
@@ -1673,9 +1631,7 @@ void CellWorkspacePanel::buildUi()
 	legend->setStyleSheet( wwSelectionTreeQss() );
 	page->addWidget( legend );
 
-	/* PINNED under everything: the cell's one-line census, then the summary or
-	 * the refusal. Neither scrolls away -- the panel style's action-bar rule for
-	 * a panel whose only action is clicking. */
+	/* Pinned under everything: the census, then the summary or refusal. */
 	showL->addStretch( 1 );
 	page = new QVBoxLayout;
 	page->setContentsMargins( 6, 2, 6, 6 );
@@ -1835,9 +1791,9 @@ void CellWorkspacePanel::onSceneChanged()
 		z->setGLView( glView );
 		z->setNif( nif );
 	}
-	if ( cellPass )	// lane PROBEVIEW1: a Pass needs this document's bake relit
+	if ( cellPass )	// a Pass needs this document's bake relit
 		cellPass->setEnabled( nif && wwCellGiFor( nif ) );
-	if ( modPick )	// lane MODPICK1: the open exterior's mods
+	if ( modPick )	// the open exterior's mods
 		modPick->refresh( g_path.isEmpty() || g_spec.interior ? QString() : g_spec.world );
 }
 
@@ -1856,18 +1812,9 @@ void CellWorkspacePanel::rebuildList()
 	QSignalBlocker blockType( filterType );
 	list->clear();
 
-	/* THE LIST IS THE REFERENCE MODEL, NOT THE DRAW DATA (bungo: "view all the
-	 * technical placed objects ... do everything creation kit does with cell
-	 * editing"). One row per REFR the plugin has -- including the lights, the
-	 * sound markers, the triggers and the primitives, which carry no model and
-	 * therefore never reach the pick table at all. Its count IS the plugin's
-	 * placed-reference count for the block, which is what the gate checks
-	 * against an independent read of the same plugin.
-	 *
-	 * The two tables are joined by REFERENCE FORM ID, once, here: a drawn
-	 * reference gets the pick index its row selects with, an undrawn one gets -1
-	 * and an honest refusal when clicked. An SCOL is several pick entries and
-	 * ONE reference, so the join takes the first part. */
+	/* The list is the reference model, not the draw data: one row per REFR, including modelless ones
+	 * that never reach the pick table. Joined to pick entries by form id once, here (-1 when undrawn;
+	 * an SCOL joins to its first part). */
 	const CellPickTable & picks = cellPickTable();
 	const CellRefTable & refs = cellRefTable();
 
@@ -1895,10 +1842,7 @@ void CellWorkspacePanel::rebuildList()
 		item->setText( 0, type );
 		item->setText( 1, e.baseEdid.isEmpty() ? QStringLiteral( "-" ) : e.baseEdid );
 		item->setText( 2, CellPickTable::formName( e.refForm ) );
-		/* The triangle column SORTS AS A NUMBER. A text column would put 9 after
-		 * 10000, and this column exists to answer "what is heavy in this cell".
-		 * A reference that was not drawn prints a DASH rather than 0, because 0
-		 * is a claim about its geometry and a dash is not. */
+		/* Sorts as a number; an undrawn reference prints a dash, not 0. */
 		if ( pick >= 0 )
 			item->setData( 3, Qt::DisplayRole, QVariant( qulonglong( picks.at( pick ).triangles ) ) );
 		else
@@ -1906,8 +1850,7 @@ void CellWorkspacePanel::rebuildList()
 		item->setText( 4, cell );
 		item->setText( 5, e.fate == CellRefFate::Drawn ? QString() : state );
 		item->setData( 0, Qt::UserRole, i );
-		/* The haystack the text filter searches, built once per row rather than
-		 * per keystroke. */
+		/* The haystack the text filter searches, built once per row. */
 		const QString hay = type + QLatin1Char( ' ' ) + e.baseEdid + QLatin1Char( ' ' )
 			+ CellPickTable::formName( e.refForm ) + QLatin1Char( ' ' )
 			+ CellPickTable::formName( e.baseForm ) + QLatin1Char( ' ' ) + e.model
@@ -1984,15 +1927,10 @@ void CellWorkspacePanel::rowClicked()
 
 void CellWorkspacePanel::selectEntry( int index, bool frame )
 {
-	/* ONE FUNCTION FOR BOTH DOORS. A row click and a viewport click end at
-	 * `cellPickSelect`, which is the tail the mouse already used, so the
-	 * selection, the highlight bars and the `picked` signal cannot differ
-	 * between the two -- which is precisely what the gate asserts. */
+	/* Row and viewport clicks both end at `cellPickSelect`, so they cannot differ. */
 	const int pick = ( index >= 0 && index < pickForRef.size() ) ? pickForRef.at( index ) : -1;
 	if ( pick < 0 ) {
-		/* A REFUSAL BY NAME. A light, a sound marker, a trigger box or a deleted
-		 * record has no geometry to select or frame, and saying WHICH of those it
-		 * is beats a click that quietly does nothing. */
+		/* Refuse by name: a light, marker, trigger or deleted record has nothing to select or frame. */
 		const CellRefTable & refs = cellRefTable();
 		if ( index < 0 || index >= refs.size() )
 			say( tr( "no reference %1 in this cell" ).arg( index ), true );
@@ -2014,9 +1952,7 @@ void CellWorkspacePanel::onPicked( int index, int candidates )
 {
 	if ( !list )
 		return;
-	/* `index` is a PICK index -- the viewport picks draw data. The row it lands
-	 * on is found through the same join the list was built with, so the mouse
-	 * and a row click cannot select different rows for the same reference. */
+	/* `index` is a pick index; the row is found through the same join the list was built with. */
 	syncing = true;
 	if ( index < 0 ) {
 		list->clearSelection();
@@ -2057,11 +1993,8 @@ void CellWorkspacePanel::frameEntry( int index )
 		return;
 	const CellPickEntry & e = table.at( index );
 
-	/* THE VIEW IS IN THE SCENE'S SPACE, NOT THE WORLD'S. The cell's shapes carry
-	 * the block origin as their Translation, so the camera target is the box
-	 * centre MINUS that origin -- the same subtraction the highlight bars make
-	 * (src/cellclick.cpp, cellHighlightShow). Framing in world units would put
-	 * the camera tens of thousands of units off for any cell but 0,0. */
+	/* The scene's shapes carry the block origin as Translation, so the camera target is the box
+	 * center MINUS that origin (as cellHighlightShow does). */
 	float origin[3] = { 0, 0, 0 };
 	cellPickOrigin( origin );
 	float centre[3];
@@ -2095,10 +2028,7 @@ void CellWorkspacePanel::viewRowChanged()
 		g_over.*( g_showRows[i].field ) = showActions.at( i )->isChecked();
 	g_haveOverrides = true;
 
-	/* A REBUILD, AND THE PANEL SAYS SO BEFORE IT STARTS. The overlay is baked
-	 * into vertex colours while the scene welds, so this is not a repaint; the
-	 * whole cell is read again. Saying it here means the pause is explained
-	 * rather than looking like a hang. */
+	/* A rebuild, not a repaint (the overlay is baked into vertex colors); say so before the pause. */
 	say( tr( "rebuilding %1 ..." ).arg( QFileInfo( g_path ).fileName() ), false );
 	emit reopenRequested( g_path );
 }
@@ -2117,9 +2047,7 @@ void CellWorkspacePanel::rebuildLegendAndCensus()
 		const int at = overlayBox->findData( name );
 		overlayBox->setCurrentIndex( at >= 0 ? at : 0 );
 	}
-	/* The rows show what the cell WAS BUILT WITH, not what was last asked for.
-	 * If the builder refused a row -- and it can -- the popover says what is on
-	 * screen rather than what was requested. */
+	/* Show what the cell was BUILT with: the builder may refuse a requested row. */
 	for ( int i = 0; i < g_showRowCount && i < showActions.size(); i++ )
 		showActions.at( i )->setChecked( g_spec.*( g_showRows[i].field ) );
 	syncing = false;
@@ -2131,18 +2059,14 @@ void CellWorkspacePanel::rebuildLegendAndCensus()
 		item->setText( 0, r.key );
 		item->setData( 1, Qt::DisplayRole, QVariant( r.placements ) );
 		item->setText( 2, r.label );
-		/* THE SWATCH IS THE PRINTED NUMBER, NOT A SECOND OPINION. The rgb comes
-		 * from the builder's own line, which lane CELLVIEW3 made the draw site's
-		 * own function; painting anything else here would reintroduce exactly
-		 * the disagreement that lane removed. */
+		/* The swatch is the builder's printed rgb, never recomputed here. */
 		item->setBackground( 0, QColor::fromRgbF(
 			qBound( 0.0f, r.rgb[0], 1.0f ),
 			qBound( 0.0f, r.rgb[1], 1.0f ),
 			qBound( 0.0f, r.rgb[2], 1.0f ) ) );
 	}
 
-	/* THE CENSUS COUNTS THE PLUGIN'S REFERENCES, not the drawn ones -- the same
-	 * number the list shows, because it is the same table. */
+	/* The census counts the plugin's references, not the drawn ones, same as the list. */
 	const CellRefTable & refModel = cellRefTable();
 	const int refs = refModel.size();
 	if ( g_path.isEmpty() && refs == 0 ) {
@@ -2158,9 +2082,7 @@ void CellWorkspacePanel::rebuildLegendAndCensus()
 		? tr( "%1 references  -  %2 triangles  -  %3 vertices in %4 shapes" )
 			.arg( formatCount( refs ) ).arg( formatCount( tris ) )
 			.arg( formatCount( verts ) ).arg( formatCount( shapes ) )
-		/* A REFUSAL, NOT A ZERO. Printing "0 triangles" because the notes could
-		 * not be parsed would be this panel asserting something about the cell
-		 * that it does not know. */
+		/* A refusal, not a zero: unparsed notes say nothing about the cell. */
 		: tr( "%1 references  -  the builder's notes did not carry a geometry line" )
 			.arg( formatCount( refs ) ) );
 
@@ -2225,8 +2147,7 @@ QStringList CellWorkspacePanel::probeKindRows() const
 	return out;
 }
 
-/* THE COUNTS ARE READ, NOT COUNTED. They come out of the placer's own census
- * lines in the builder's notes (probeCensusText), the way the legend does. */
+/* The counts are read from the placer's census lines in the builder's notes, like the legend. */
 void CellWorkspacePanel::rebuildProbeKinds()
 {
 	if ( !probeKinds )
@@ -2263,7 +2184,7 @@ void CellWorkspacePanel::rebuildProbeKinds()
 	total->setText( 0, tr( "All" ) );
 	total->setData( 1, Qt::DisplayRole, QVariant( ma.captured( 1 ).toInt() ) );
 	probeKinds->setVisible( true );
-	// lane PRTPBAKE: what the bake wrote, read from its own census lines
+	// what the bake wrote, read from its own census lines
 	static const QRegularExpression reBake( QStringLiteral(
 		"bake: surfels (\\d+), links (\\d+),[^\\n]*sectors (\\d+)" ) );
 	static const QRegularExpression reDir( QStringLiteral( "bake folder ([^\\n]*)" ) );

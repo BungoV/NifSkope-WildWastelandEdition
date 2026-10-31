@@ -48,9 +48,8 @@ import math
 import struct
 import sys
 
-#: 960 / tan(35 deg) -- the contract's REFERENCE projection constant (4.4); a
-#: consumer recomputes it from the live projection, which is why it is named
-#: here instead of hidden in a literal.
+#: 960 / tan(35 deg), the contract's REFERENCE projection constant (4.4); a consumer
+#: recomputes it from the live projection.
 PROJECTION_SCALE = 960.0 / math.tan(math.radians(35.0))
 NO_PARENT = 0xFFFFFFFF
 ROOT_ERROR = struct.unpack('<f', struct.pack('<I', 0x7F7FFFFF))[0]
@@ -254,12 +253,8 @@ def check_bounds_and_cones(L, ck, sample):
             dot = (nx * axis[0] + ny * axis[1] + nz * axis[2]) / ln
             coneWorst = max(coneWorst, cl['coneCos'] - dot)
             worstDot = min(worstDot, dot)
-        # THE FLOOR, and it has to be a cone that CANNOT hold this cluster.
-        # Narrowing by a fixed 5 degrees does not do it: a one-triangle cluster
-        # is a cone of zero width and 5 degrees tighter than zero is still
-        # zero, so the floor read 0.000000 and proved nothing (the first run of
-        # this gate, 2026-09-11). A cone a thousandth tighter than the cluster's
-        # OWN worst face excludes that face by construction, at every width.
+        # the floor: a cone a thousandth tighter than the cluster's OWN worst face excludes that face
+        # at every width (a fixed narrowing proves nothing on a zero-width one-triangle cone).
         if coneChecked:
             coneWorstNarrow = max(coneWorstNarrow, (worstDot + 1.0e-3) - worstDot)
     ck.check('A every triangle is inside its cluster sphere',
@@ -429,11 +424,8 @@ def mesh_soup(L, mi):
 def check_occluders(L, T, ck):
     occ = T['occluders']
     if not occ:
-        # NOT a failure. Measured 2026-09-11: a region whose LOD meshes are none
-        # of them watertight legitimately writes no box, and the nine-chunk
-        # Sanctuary region is exactly that -- 41 distinct meshes, 0 watertight.
-        # The box rules are gated on a region that HAS one instead of being
-        # loosened until this one passes.
+        # NOT a failure: a region whose LOD meshes are none of them watertight writes no box;
+        # the box rules are gated on a region that HAS one.
         ck.skipped('D this .lodi carries no occluder box; nothing here can be asked of it')
         return 0, 0
     soups = {}
@@ -441,12 +433,8 @@ def check_occluders(L, T, ck):
     outside = 0
     grownOutside = 0
     leakFactors = []
-    # THE FLOOR must be a box that CANNOT stay inside. A fixed 10 percent does
-    # not guarantee it -- the fitter shaves a whole voxel off every side, so a
-    # box in a big object has room to grow and the floor reads green while
-    # proving nothing (the first run of this gate, 2026-09-11). The floor
-    # therefore grows the box until it leaks, and REPORTS the factor; it fails
-    # only when even doubling the box stays inside the mesh.
+    # the floor grows the box until it leaks and reports the factor (the fitter shaves a voxel off
+    # every side, so a fixed growth can stay inside); it fails only if doubling stays inside the mesh.
     GROW = (1.1, 1.25, 1.5, 2.0)
     for o in occ:
         mi = o['meshId']

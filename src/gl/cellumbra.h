@@ -8,42 +8,10 @@
 #include <string>
 #include <vector>
 
-/*! Lane UMBRA1 (2026-10-05): THE PREVIS TOME'S VISIBILITY QUERY, IN THE VIEWER.
- *
- *  A worldspace block's previs file (vis/<plugin>/<RVIS>.uvd) is an Umbra 3.3.17 tome. Its layout and the game's
- *  query were read from the 1.10.155 runtime (Todd's treat); the spec and an independent Python reader live in the
- *  lane notes (notes/umbra1/re, notes/umbra1/umbra_query.py). Public pointers only: the middleware's published
- *  documentation describes tomes, cells, portals and gates in general terms.
- *
- *  THE TOME (every offset self-relative to its owner, 0 = absent): header +0x14/+0x20 AABB, +0x2c tree node
- *  count << 5, +0x30 tree bits, +0x3c tree splits, +0x40 objects, +0x44 object boxes (6 floats), +0x48 object
- *  distances (P xyz, near^2, Q xyz, far^2), +0x4c uid starts, +0x50 uids, +0x54 list widths, +0x58/+0x5c object
- *  lists, +0x68 gates, +0x70 gate boxes, +0x78 gate indices, +0x7c clusters, +0x88 cell starts, +0x8c leaf tiles,
- *  +0x90 tiles, +0xa0 tile offsets. A tile: box, KD tree (2 bits a node + rank table), leaf -> cell / BSP, cells
- *  (36 B: portals, objects, clusters, packed box), portals (16 B: face 31-29, outside 28, gate 27, hierarchy 26,
- *  target tile 25-0, +4 z, +6 target cell, +8 / +0xc packed min/max quanta of the tile box; a gate portal's +8 / +0xc
- *  give its gate list and its box).
- *
- *  THE QUERY: the camera's start cells (tome tree, tile tree, BSP), then the portal traversal: each portal not
- *  facing away (quantized camera), its box projected (D3D clip, z in [0, w]), rasterized into the 64 x 64 one-bit
- *  coverage of the cell it leads to, ANDed with the coverage it came through; then each reached cell's objects are
- *  tested: distance window, frustum planes, projected rectangle against the cell's coverage.
- *
- *  THIS IS A CONSERVATIVE RECONSTRUCTION, not the game's query op for op. Divergences (all can only ADD visible
- *  objects, never drop one the game shows, except where noted):
- *   - leaf tiles only (the game may walk coarser tiles far away; theirs are larger, so the game's set can be larger
- *     there -- the one place this may be SMALLER than the game's: nothing has measured it);
- *   - camera-point start (the game's +16 buffer zone is not modelled);
- *   - traversal to a fixpoint, no work budget (the game's order and budgets are not decoded);
- *   - all six planes always; an exact divide where the game uses an approximate reciprocal (a rect edge may move
- *     one pixel);
- *   - no depth form of the object test, no outside portals, no non-leaf targets;
- *   - every gate open (doors are not tracked);
- *   - each previs block is queried as its own tome (the game merges every loaded block into one collection; a
- *     camera outside a block's tome has no start cell there, and that block's refs fall back to the occluder path).
- *
- *  The code is written to the same float32 operation order as umbra_query.py so the two agree bit for bit (FMA
- *  contraction is switched off in cellumbra.cpp). */
+/*! Decoder and visibility query for a worldspace block's previs file (vis/<plugin>/<RVIS>.uvd, an Umbra 3.x tome):
+ *  start cells, portal traversal with 64 x 64 coverage rasters, then per-object tests. A conservative
+ *  reconstruction (it can only add visible objects, except possibly far away where the game walks coarser tiles).
+ *  Float32 order matches umbra_query.py bit for bit: keep FMA contraction off in cellumbra.cpp. */
 
 struct WwUmbraPortal
 {
@@ -119,8 +87,7 @@ struct WwUmbraResult
 	int portals = 0, entered = 0, rastered = 0, whole = 0;
 };
 
-/*! The query. `gateOpen` empty = every gate open. `flipFace` = the red control of the Python reader (one portal face
- *  flipped); the viewer never sets it. */
+/*! The query. `gateOpen` empty = every gate open. `flipFace` flips one portal face (debug control only). */
 void wwUmbraQuery( const WwUmbraTome & t, const WwUmbraCamera & cam, const std::vector<char> & gateOpen,
 	WwUmbraResult & out, bool flipFace = false );
 //! The query file the Python `query` command recomputes (M, pos, gates, start, cell hashes, visible).

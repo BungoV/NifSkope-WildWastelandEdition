@@ -20,7 +20,7 @@
 #include <cstdint>
 #include <vector>
 
-// lane BLOOM1b: the FO4CS bloom and physical glare on the cell view's linear frame (cellbloom.h)
+// the FO4CS bloom and physical glare on the cell view's linear frame (cellbloom.h)
 
 namespace {
 
@@ -686,7 +686,7 @@ bool wwCellBloomRun( Scene * scene, unsigned hdrColor, unsigned ds, int W, int H
 		}
 	}
 
-	// the dump (the gate's food): the source, every mip, every up level, the final bloom over a zero source
+	// the dump: the source, every mip, every up level, the final bloom over a zero source
 	if ( ok && !s.dumpDir.isEmpty() && !s.dumped ) {
 		s.dumped = true;
 		QDir().mkpath( s.dumpDir );

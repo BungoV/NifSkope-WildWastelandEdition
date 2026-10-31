@@ -130,8 +130,8 @@ def bake_camera_dir(d):
     return (-d[0], -d[1], d[2]) if AS_BAKED else tuple(d)
 
 
-# Mirrors ImpostorOct::g_convention, whose default is SpecLiteral since the
-# azimuth repair of 2026-09-19. True here = a LEGACY set, baked before it.
+# Mirrors ImpostorOct::g_convention (default SpecLiteral); True here = a legacy set, baked before the
+# azimuth repair.
 AS_BAKED = False
 
 
@@ -232,15 +232,8 @@ def selftest():
         _, u, _ = frame_basis(d)
         if abs(u[2] - 1.0) > 1e-4:
             fails.append("horizon up not +Z: %s -> %s" % (d, u))
-    # 8. THE REPAIR, stated as a property rather than as prose (2026-09-19,
-    #    bungo's "fix the 180 issue"): the camera the bake drives for a frame
-    #    SITS AT THAT FRAME'S OWN SPEC DIRECTION. This is the whole content of
-    #    the repair, and it is the row that fails on the old rz = 90 - azim.
-    #
-    #    The second half is the red control, run here rather than described:
-    #    force AS_BAKED (the legacy formula) and the same equality must BREAK
-    #    by 180 degrees of azimuth on everything off the pole. A property that
-    #    cannot be made to fail is not measuring anything.
+    # 8. the camera the bake drives for a frame sits at that frame's own spec direction; the red control
+    #    forces AS_BAKED (legacy) and the equality must break by 180 degrees off the pole.
     global AS_BAKED
     saved_conv = AS_BAKED
     try:
@@ -288,10 +281,8 @@ def selftest():
         c = (u[1] * f[2] - u[2] * f[1], u[2] * f[0] - u[0] * f[2], u[0] * f[1] - u[1] * f[0])
         if max(abs(r[k] - c[k]) for k in range(3)) > 1e-4:
             fails.append("right != up x fwd at %s: %s vs %s" % (name, r, c))
-    # 11. the convention round-trips UNDER BOTH: looking from where that bake's
-    #     camera stood picks the frame back, with weight 1. Run for the legacy
-    #     vintage too, because opening an old set is the one thing AsBaked is
-    #     still for and a broken round trip there is a broken diagnostic.
+    # 11. the convention round-trips under both: looking from where that bake's camera stood picks the
+    #     frame back with weight 1 (legacy too: opening old sets is what AsBaked is for).
     saved_conv = AS_BAKED
     try:
         for conv in (False, True):

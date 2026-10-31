@@ -25,7 +25,7 @@ BSD License - see nifskope.h
 #include <array>
 #include <cmath>
 
-// lane FARLOD1: see cellfarvanilla.h
+// see cellfarvanilla.h
 
 namespace
 {
@@ -284,9 +284,8 @@ void fvShape( NifModel & src, const QModelIndex & iS, FvKind kind, const FvRect 
 	}
 	QVector<Triangle> out;
 	bool changed = false;
-	/* FINALFIX: one vertex per clip point. Two triangles sharing an edge each cut it where a clip line
-	 * crosses it, from their own barycentrics -- a float apart, and the hairline between them showed the clear
-	 * colour (single-pixel holes in the sky census of the Vanilla top view). Welded on a 1/8-unit lattice. */
+	/* one vertex per clip point, welded on a 1/8-unit lattice: two triangles cutting a shared edge from their
+	 * own barycentrics land a float apart and leave hairline holes */
 	QHash<quint64, quint16> weld;
 	auto weldKey = []( const Vector3 & p ) {
 		return ( quint64( quint32( qint32( std::lround( p[0] * 8.0f ) ) ) ) << 32 )
@@ -349,10 +348,8 @@ void fvShape( NifModel & src, const QModelIndex & iS, FvKind kind, const FvRect 
 				o.n.normalize();
 				o.t.normalize();
 				Vector3 wo = xf * o.p;
-				/* FINALFIX: a clip point on a cell line (every clip line is one: the block, our chunks, the ring)
-				 * lands on the line exactly. From barycentrics it sat a float off, so where two chunks' cut edges
-				 * meet the LAND (x -16 on the block's north and south edges) each chunk had its own corner -- the
-				 * 2 px pinholes of the Vanilla top view (sky census, 10-06 run8). */
+				/* every clip line is a cell line: put the clip point on it exactly, or neighboring chunks'
+				 * corners land a float apart and leave pinholes */
 				if ( xf.scale > 0.0f ) {
 					bool moved = false;
 					for ( int a = 0; a < 2; a++ ) {
@@ -399,8 +396,8 @@ void fvShape( NifModel & src, const QModelIndex & iS, FvKind kind, const FvRect 
 			|| ( inX && ( std::fabs( y - r.y0 ) < e || std::fabs( y - r.y1 ) < e ) );
 	};
 
-	/* THE SEAM: every vertex on a clip line (the footprint's edge, the cut's, our coverage's) to the LAND's
-	 * height there -- the line our ring's or the block's edge stands on */
+	/* the seam: every vertex on a clip line goes to the LAND's height there, the line our ring's or the
+	 * block's edge stands on */
 	std::vector<char> snappedV( V.size(), 0 );   // moved to the LAND by the seam below (the skirt reads it)
 	if ( changed && upright && landZ ) {
 		std::vector<char> used( V.size(), 0 );
@@ -422,13 +419,8 @@ void fvShape( NifModel & src, const QModelIndex & iS, FvKind kind, const FvRect 
 		}
 	}
 
-	/* FINALFIX THE SKIRT: a clip line is a T-junction -- the LAND's 32 a cell, or the next ring's coarser
-	 * level, bends between this chunk's edge vertices, and the sliver between the two edges showed the clear
-	 * colour (sky census on the Vanilla type: cracks along the block edge, top 13 px, and along ring edges).
-	 * Every open edge lying on a clip line gets a wall, both faces: on the LAND (where landZ answers) from
-	 * the higher of the two edges down past the lower, sampled at the LAND's rate; elsewhere straight down,
-	 * deep enough for the next level's step. The wall's foot leans 2 units to the kept side so it never
-	 * reads as ground over the cut. The outermost ring's rim gets none (nothing lies beyond it). */
+	/* the skirt: a clip line is a T-junction (the LAND or the next ring bends between this chunk's edge
+	 * vertices), so every open edge on a clip line gets a two-sided wall leaning 2 units to the kept side. */
 	const bool skirtOuter = skirt >= 2;
 	if ( skirt > 0 && upright && !out.isEmpty() ) {
 		QHash<quint32, int> uses;
@@ -456,19 +448,15 @@ void fvShape( NifModel & src, const QModelIndex & iS, FvKind kind, const FvRect 
 				const float len = std::sqrt( dx * dx + dy * dy );
 				if ( len < 1.0f || ( std::fabs( dx ) > 0.5f && std::fabs( dy ) > 0.5f ) )
 					continue;   // a clip line is axis-aligned
-				/* FINALFIX: and a chunk's own open edge (a seam with the next chunk) that leaves a snapped
-				 * corner: the snap lifted or dropped that corner to the LAND, the neighbour's seam edge runs to
-				 * its own next vertex, and the tear between the two edges showed sky through the slanted
-				 * rays of the Vanilla top view (2 px at x -16 beside the block, census 10-06). */
+				/* and a chunk's own open edge that leaves a snapped corner: the snap moved that corner and
+				 * the neighbor's seam edge does not follow, so it needs a wall too */
 				const bool tear = ( size_t( a ) < snappedV.size() && snappedV[a] ) || ( size_t( b ) < snappedV.size() && snappedV[b] );
 				if ( !tear && ( !clipLine( wa[0], wa[1] ) || !clipLine( wb[0], wb[1] ) ) )
 					continue;
 				// the kept side: toward the triangle's third corner, across the edge
 				float nx = -dy / len, ny = dx / len;
-				/* FINALFIX: the kept side from the clip rects first, the third corner only when they cannot tell
-				 * -- a clipped sliver's third corner can lie on (or a float hair across) the line, and its wall
-				 * then leaned INTO the cut (census g13: a 16-cell wall of commonwealth.16.-16.-16 counted as
-				 * vanilla over ours, all 2048 of its triangles). */
+				/* the kept side from the clip rects first, the third corner only when they cannot tell: a
+				 * sliver's third corner can lie on the line, and the wall then leaned into the cut */
 				const float mx = 0.5f * ( wa[0] + wb[0] ), my = 0.5f * ( wa[1] + wb[1] );
 				auto removed = [&]( float px, float py ) {
 					return cut.has( px, py ) || ours.has( px, py ) || ( skirtOuter && !outer.has( px, py ) );
@@ -696,9 +684,8 @@ bool wwFarVanAppend( NifModel * nif, const QModelIndex & parent, const QString &
 	}
 	const QString wsl = ws.toLower();
 	const Vector3 shiftV( shift[0], shift[1], shift[2] );
-	/* FINALFIX: two passes -- the terrain (.btr) of EVERY ring first, then the objects (.bto) ring by ring
-	 * under the budget. One pass let ring 1's objects spend the budget and the outer rings' ground was never
-	 * built (sky below the horizon). A chunk is counted in the terrain pass; "any" is its .btr. */
+	/* two passes: the terrain (.btr) of every ring first, then the objects (.bto) ring by ring under the
+	 * budget, so inner objects cannot starve the outer rings' ground. "any" is its .btr. */
 	for ( int pass = 0; pass < 2; pass++ )
 	for ( WwFarVanRing & r : rings ) {
 		if ( r.x1 < r.x0 || r.y1 < r.y0 )
@@ -750,9 +737,8 @@ bool wwFarVanAppend( NifModel * nif, const QModelIndex & parent, const QString &
 						continue;
 					}
 					any = true;
-					/* FINALFIX: a .btr is chunk-local (0..4096 at Scale L, the root at 0): the game places it at
-					 * the chunk's corner. Measured: Commonwealth.4.-20.24.btr 'Land' x 0..4096, Scale 4, no
-					 * Translation -- so every terrain triangle fell outside the ring and was dropped. */
+					/* a .btr is chunk-local (0..4096 at Scale L, root at 0): the game places it at the
+					 * chunk's corner */
 					if ( kind == 0 && src.getBlockCount() > 0 && src.blockInherits( src.getBlockIndex( 0 ), "NiAVObject" ) ) {
 						const QModelIndex i0 = src.getBlockIndex( 0 );
 						const Vector3 t0 = src.get<Vector3>( i0, "Translation" );
@@ -766,10 +752,8 @@ bool wwFarVanAppend( NifModel * nif, const QModelIndex & parent, const QString &
 						if ( src.blockInherits( i, "BSTriShape" ) )
 							shapes << b;
 					}
-					/* FINALFIX: a .btr's water is the shape 'WATER' on a BSEffectShaderProperty (measured,
-					 * Commonwealth.4.-20.20.btr: 'Land' + 'WATER'); drawn as the effect it was a white sheet.
-					 * It goes to the cell's water like a BSWaterShaderProperty shape, and its edge is never
-					 * snapped to the LAND (a sheet at the body's height). */
+					/* a .btr's water is a shape 'WATER' on a BSEffectShaderProperty: send it to the cell's
+					 * water, and never snap its edge to the LAND */
 					std::vector<bool> water( size_t( shapes.size() ), false );
 					for ( int k = 0; k < shapes.size(); k++ ) {
 						const QModelIndex iSh = src.getBlockIndex( src.getLink( src.getBlockIndex( shapes[k] ), "Shader Property" ) );
@@ -821,11 +805,8 @@ bool wwFarVanAppend( NifModel * nif, const QModelIndex & parent, const QString &
 						t.translation = t.translation - shiftV;
 						t.writeBack( &src, src.getBlockIndex( shapes[k] ) );
 					}
-					/* FINALFIX: the .btr 'Land' is Shader Type 18 (LOD landscape), which no cell-lit program
-					 * takes (fo4_default.prog: "Shader Type != 18"); it fell to default.prog / sk_msn.prog and
-					 * drew WHITE (WW_PROGRAM_CENSUS on g12_over_van: 91 default + 45 sk_msn, ours fo4_cellcsm).
-					 * It is drawn the way our own tiles are (btdterrain.cpp): the default type with the
-					 * model-space normal bit, no specular, LOD landscape in Shader Flags 2. */
+					/* the .btr 'Land' is Shader Type 18 (LOD landscape), which no cell-lit program takes:
+					 * draw it as our own tiles are (btdterrain.cpp), default type + model-space normals. */
 					for ( int k = 0; k < shapes.size(); k++ ) {
 						if ( kind != 0 || water[size_t( k )] )
 							continue;
@@ -897,10 +878,8 @@ bool wwFarVanAppend( NifModel * nif, const QModelIndex & parent, const QString &
 	return true;
 }
 
-/* lane FARLOD2: THE GAME'S OBJECT LOD IN A RING, COUNTED AND NOT DRAWN -- the census our rings are read against.
- * The game's chunks at its level for the ring (meshes/terrain/<ws>/objects/<ws>.L.X.Y.bto), each triangle kept
- * by its world centroid when it is inside the ring's rectangle and outside its hole: the same region our ring
- * draws, so "ours 0 where the game has N" is a missing ring and not a different region. */
+/* The game's object LOD in a ring, counted and not drawn: each triangle of its chunks kept by world
+ * centroid inside the ring's rectangle and outside its hole, the same region our ring draws. */
 qint64 wwFarVanObjectCensus( const QString & ws, int level, int x0, int y0, int x1, int y1,
 	int hx0, int hy0, int hx1, int hy1, int * chunksRead )
 {

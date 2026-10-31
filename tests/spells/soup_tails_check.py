@@ -104,14 +104,9 @@ def main():
         print('python readers: alphatest_check + emissive_cell_check parse C, and find AMK1 past the unknown tail in D')
     except Exception as e:   # noqa: BLE001
         fails.append('python reader on C: %r' % (e,))
-    # LAND6: ALPHATEST2's AMK2 (AMK1 + 3 f32 a record, each corner's vertex alpha x material alpha) in AMK1's slot.
-    # Every third triangle masked by one 1x1 map of alpha 200, threshold 128: at scale 1 (AMK1) nothing is a hole,
-    # at scale 0.5 (AMK2) they all are (200 x 0.5 < 128). (Masking every triangle left placement no surface at all:
-    # "no probes to bake".) F = A + AMK2, G = A + AMK1 (same map, scale 1),
-    # H = A + unknown + AMK2 + VNM1 + unknown, I = A + AMK2 + VNM1.
-    # PASS: G == A (scale 1 opens nothing), F != G (the scale is read), H == I (AMK2 is skipped/read by its size,
-    # VNM1 after it still found), H != F (VNM1 read past AMK2); the Python readers find AMK2's 0.5 scales in H.
-    # Red --red amk2unsized: AMK2 written without its byte count (ALPHATEST2's own framing): F's tail is not read.
+    # AMK2 (AMK1 + 3 f32 a record: each corner's vertex alpha x material alpha) in AMK1's slot; every third
+    # triangle masked by a 1x1 map of alpha 200, threshold 128: a hole at scale 0.5 (AMK2), not at scale 1.
+    # F = A + AMK2, G = A + AMK1, H = A + unknown + AMK2 + VNM1 + unknown, I = A + AMK2 + VNM1.
     masked = list(range(0, n, 3))
 
     def amk_tail(scale):

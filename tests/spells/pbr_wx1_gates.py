@@ -715,7 +715,7 @@ def main():
                 n = sum(1 for p in diff.getdata() if p != (0, 0, 0, 0))
             rec("%s: every part OFF = before_pbrwx1, byte for byte" % base, n == 0,
                 "%d px differ, %s vs %s" % (n, a.size, b.size))
-        # lane SKYFULL1: no pins = the rows' shipped defaults, all ON: the picture is the full sky, not the old cube
+        # no pins = the rows' shipped defaults, all ON: the picture is the full sky, not the old cube
         for base in sorted(f[:-12] for f in os.listdir(OUT) if f.startswith("off_") and f.endswith("_default.png")):
             from PIL import Image, ImageChops
             po = os.path.join(OUT, base + "_old.png")

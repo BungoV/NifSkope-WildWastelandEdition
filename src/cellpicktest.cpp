@@ -111,14 +111,11 @@ int cellPickSelfTest( NifModel * nif, QWidget * panel, const QString & reportPat
 		tree != nullptr && summary != nullptr );
 
 	if ( table.size() == 0 || !tree || !summary ) {
-		// Everything below would measure nothing; say so ONCE, as a failure,
-		// rather than printing a page of passes about an empty scene.
+		// everything below would measure nothing: one failure, not a page of passes
 		add( "REFUSED: the rest of this test needs a filled table and the dock",
 			false );
 	} else {
-		/* THE TARGET: the SMALLEST box in the scene. The rule under test is
-		 * "nearest, ties to the smaller", and the smallest box is the one a
-		 * table that ignored the rule would be least likely to return. */
+		/* the target: the smallest box, the one a table ignoring the tie rule is least likely to return */
 		int tgt = -1;
 		double smallest = 0.0;
 		for ( int i = 0; i < table.size(); i++ ) {
@@ -204,9 +201,7 @@ int cellPickSelfTest( NifModel * nif, QWidget * panel, const QString & reportPat
 						.arg( hc[0] ).arg( hc[1] ).arg( hc[2] ).arg( hr )
 						: QStringLiteral( "no shape" ) );
 
-				/* RED CONTROL 1: THE MISS. Same origin, pointed AWAY. A test
-				 * that cannot make this code report "nothing" is not measuring
-				 * the ray at all. */
+				/* the miss: same origin, pointed away, must report nothing */
 				float up[3] = { 0.0f, 0.0f, 1.0f };
 				const bool ownedMiss = cellPickClick( nif, o, up );
 				const int missed = cellPickCurrent();
@@ -223,23 +218,15 @@ int cellPickSelfTest( NifModel * nif, QWidget * panel, const QString & reportPat
 				add( "RED: the highlight collapsed to a point (the block stays)",
 					haveMiss && mr < 1.0f, QStringLiteral( "radius %1" ).arg( mr ) );
 
-				/* RED CONTROL 2: THE MASTER. Everything above is what a user who
-				 * ticks the row gets; this is what everybody else must keep. */
+				/* the master off: the click must be refused and change nothing */
 				cellPickSetEnabled( false );
 				const bool offOwned = cellPickClick( nif, o, d );
 				cellPickSetEnabled( true );
 				add( "RED: with the master row unticked the click is NOT taken",
 					!offOwned );
 
-				/* LEAVE THE WINDOW IN THE STATE THE ROWS ABOVE PROVED (lane
-				 * CELLVIEW2B). The last two red controls deliberately end on a
-				 * MISS and on a refused click, so without this the window a
-				 * picture is taken of (`WW_UI_SHOT=1
-				 * WW_UI_SHOT_DOCK=CellPickDock`) shows a dock reading "Nothing
-				 * under the cursor" and a collapsed highlight -- the opposite
-				 * of what the test just measured. Re-issuing the honest click
-				 * asserts nothing and adds no row: it only restores the picked
-				 * state so the dock and the highlight can be photographed. */
+				/* re-issue the real click so the window is left in the picked state the rows above proved
+				 * (for a screenshot); asserts nothing */
 				cellPickClick( nif, o, d );
 			}
 		}

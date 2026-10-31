@@ -42,11 +42,11 @@ from scipy.spatial import cKDTree
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from cell_gi_check import Soup  # noqa: E402  (a segment test over the soup, no NifSkope code)
 from probe_bake import read_tbk, floordiv  # noqa: E402
-import cell_gi_check  # noqa: E402  (lane ROOMCLAMP1: stage C's rooms rule, rebuilt for the sky grid)
-import cell_rooms_check  # noqa: E402  (lane ROOMCLAMP1: the shader's room blend)
+import cell_gi_check  # noqa: E402  (stage C's rooms rule, rebuilt for the sky grid)
+import cell_rooms_check  # noqa: E402  (the shader's room blend)
 
-# FIXPACK1 NOCOVER-COLOR: the shader's "no probe / no surfel" marker is cyan (magenta means a missing texture).
-# WW_PASS_MARKER=magenta judges a pre-FIXPACK1 exe's pictures.
+# the shader's "no probe / no surfel" marker is cyan (magenta means a missing texture);
+# WW_PASS_MARKER=magenta judges an older exe's pictures.
 NOCOVER = np.array([1.0, 0.0, 1.0]) if os.environ.get('WW_PASS_MARKER') == 'magenta' else np.array([0.0, 1.0, 1.0])
 
 
@@ -207,7 +207,7 @@ def stage_t(G, K, ppos, own_sky, soup, rooms=None, dump=None):
     if gv.shape != kv.shape or np.any(gv != kv):
         return 'T FAIL sky grid: its valid voxels are not the GI grid\'s'
     if rooms is not None:
-        # lane ROOMCLAMP1: the sky grid's two slots by the GI grid's rule, the probes' own sky shares as the values
+        # the sky grid's two slots by the GI grid's rule, the probes' own sky shares as the values
         S, P, D, _clear = cell_gi_check.read_dump(dump)
         sp = S[:, 0:3] + S[:, 3:6] * D['voxel'] * 0.5
         g = np.floor((sp - D['origin']) / D['voxel']).astype(int)
@@ -243,7 +243,7 @@ def judge_pass(run, tag, label, what, G, srf, scale, interior_black=False, rooms
         return None
     ys, xs, Pw, Nw = srf
     if rooms is not None and len(ys) > 20000:
-        # lane ROOMCLAMP1: the room blend is a per-pixel walk here; 20000 pixels, a fixed draw
+        # the room blend is a per-pixel walk here; 20000 pixels, a fixed draw
         keep = np.sort(np.random.default_rng(23).choice(len(ys), 20000, replace=False))
         ys, xs, Pw, Nw = ys[keep], xs[keep], Pw[keep], Nw[keep]
     got = np.asarray(Image.open(path).convert('RGB'), float)[ys, xs] / 255.0
@@ -374,11 +374,9 @@ def stage_z(run):
     lines = [diff('combined_gi%d_new' % g, 'combined_gi%d_old' % g) for g in (1, 0)]
     if None in lines:
         return None
-    # the floor: the pre-lane exe shot twice (same settings) differs from itself by a few 1-LSB pixels
+    # the floor: the same exe shot twice (same settings) differs from itself by a few 1-LSB pixels
     floor = diff('combined_gi1_old2', 'combined_gi1_old') or (0, 0)
-    # lane ROOMCLAMP1: a floor of 0 (the old exe twice, no noise that time) left no room for the GPU's own
-    # 1-LSB noise, so one 1-level pixel failed it (scratch v5: GI on and GI off one pixel each, at different spots);
-    # cell_gi measured the same noise and allows 1 level, so the cap is never below 20 pixels at 1 level
+    # the GPU's own 1-LSB noise can still hit one pixel, so the cap is never below 20 pixels at 1 level
     cap = max(3 * floor[0], 20)
     ok = all(n <= cap and m <= max(floor[1], 1) for n, m in lines)
     return ('Z %s Combined: against the pre-lane exe, differing pixels GI on %d (max %d), GI off %d (max %d); '
@@ -411,7 +409,7 @@ def main(cell, run):
     srf = surface(run)
     interior = cell != 'concord'
     for ln in (judge_pass(run, 'pass1', 'G', 'GI pass', G, srf, 1.0 / math.pi, rooms=rooms,
-                          fill=interior),   # lane GICAL1: the gap fill (the GI grid of an interior only)
+                          fill=interior),   # the gap fill (the GI grid of an interior only)
                judge_pass(run, 'pass2', 'K', 'Sky visibility', K, srf, 1.0, interior_black=interior, rooms=rooms)):
         if ln:
             lines.append(ln)

@@ -42,7 +42,7 @@ try:
 
     def peak_mb():
         return peak_mb()
-except ImportError:  # Windows (lane FARVIEW1): no 'resource'; the peak working set from the process' own counters
+except ImportError:  # Windows: no 'resource'; the peak working set from the process' own counters
     import ctypes
     import ctypes.wintypes as _wt
 
@@ -64,17 +64,15 @@ except ImportError:  # Windows (lane FARVIEW1): no 'resource'; the peak working 
         return c.PeakWorkingSetSize / (1024 * 1024)
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-import farview1_check as fv  # noqa: E402  (scene, surfels, tracer, light evaluator: shared with FARVIEW1)
+import farview1_check as fv  # noqa: E402  (scene, surfels, tracer, light evaluator: shared with farview1)
 
 # ---------------------------------------------------------------- pre-registered bars (set before the first run)
 BAR_L = 1e-6           # layers vs rebake, max abs / max (the brief's tolerance)
 BAR_Q_P99 = 0.01       # stored layers vs rebake, relative error p99 on lit surfels
 BAR_Q_ENERGY = 0.005   # stored layers vs rebake, |sum ratio - 1|
 BAR_X = 1e-9           # GPU-relight direct from the shared record vs the bake's direct (float64)
-# The trim (a storage knob, not a bar): an entry is kept when its luminance > trim x p99 of the all-on light.
-# FVL v1 kept surfels over 1e-3. A first run with 1e-3 for every layer failed Q (each switched layer drops its
-# own dim tail, and the tails of the groups that overlap a surfel add up); the trade-off table this script prints
-# chose 1e-4 for the always-on layer and 3e-5 for the switched layers (design doc section 3.5).
+# The trim (a storage knob, not a bar): an entry is kept when its luminance > trim x p99 of the all-on light;
+# 1e-4 for the always-on layer, 3e-5 for switched layers (design doc section 3.5).
 TRIM_V1 = 1e-3
 TRIM_BASE = 1e-4
 TRIM_LAYER = 3e-5

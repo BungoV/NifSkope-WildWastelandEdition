@@ -100,10 +100,8 @@ def main():
     ck.check('x1 every differing byte is inside a DERIVED header word '
              '(%d stray bytes)' % len(stray), not stray)
 
-    # A comparator that only ever says "allowed" proves nothing, so prove the
-    # payload was actually READ: the two files must agree over every byte that
-    # is not one of the two derived words, and that is what x1 just said -- but
-    # x2 states the size of what it agreed over, so a truncated read shows up.
+    # prove the payload was READ: the files must agree over every byte but the two derived words,
+    # and x2 states the size of what it agreed over, so a truncated read shows up.
     same = len(fa) - len(allowed)
     ck.check('x2 the compared region is the whole file minus the 12 derived '
              'bytes (%d bytes)' % same, same == len(fa) - 12)

@@ -120,12 +120,9 @@ def read_mesh_report(path):
         for line in f:
             if line.startswith('#') or not line.strip():
                 continue
-            # report VERSION 5: the thirteen ladder columns (v3),
-            # `casterInstances` (v4) and the three NATIVE1c columns
-            # (refFoliage, refLevelSilhouette, silhouetteWorst) sit before
-            # `model`, which stays the line's remainder because it is the only
-            # token that may hold a space
-            # v6 (2026-09-18): selfAoMean, selfAoDark before model
+            # report VERSION 5: the thirteen ladder columns (v3), `casterInstances` (v4), refFoliage,
+            # refLevelSilhouette, silhouetteWorst and (v6) selfAoMean, selfAoDark sit before `model`,
+            # the line's remainder because it is the only token that may hold a space
             t = line.split(None, 30)
             rows.append({'meshId': int(t[0]), 'tris': int(t[1]), 'srcVerts': int(t[2]),
                          'emitVerts': int(t[3]), 'acmrB': float(t[4]), 'acmrA': float(t[5]),
@@ -257,11 +254,8 @@ def main():
                  ', '.join(r['model'] for r in worse[:3]))
         ck.check('e3 the field MOVES: the pass changed at least one mesh (%d of %d)'
                  % (len(moved), len(rows)), len(moved) > 0)
-        # THE FLOOR IS A CONTROL, NOT AN EXPECTATION ABOUT THE CORPUS. The first
-        # form of this check demanded that 5 percent of meshes move and failed
-        # at 2.2 percent -- which measures Bethesda's meshes, not our pass. The
-        # honest floor runs the metric on a deliberately BAD order and requires
-        # it to read worse than what we emitted.
+        # THE FLOOR IS A CONTROL: the metric on a deliberately BAD order must read worse than what we
+        # emitted (a share-of-meshes-moved bar would measure Bethesda's meshes, not our pass).
         worstMesh = max(rows, key=lambda r: r['tris'])
         emitted, shuffled = shuffled_acmr(L, worstMesh['meshId'])
         ck.check('e4 FLOOR: the metric can fail -- a shuffled triangle order on %s reads '
@@ -277,14 +271,8 @@ def main():
     ids = [c['identity'] for c in T['cold']]
     ck.check('f1 the field MOVES: more than one identity in the file (%d distinct)'
              % len(set(ids)), len(set(ids)) > 1)
-    # MEASURED, lane NATIVE1a: identity is unique inside the STOCK chunk that
-    # drew the placement, NOT inside the .lodi's 16,384-unit bin. The two
-    # coincide at dim 4 except at a boundary, where a placement whose position
-    # sits across the line from the chunk that baked it lands in the
-    # neighbour's bin and meets that chunk's own index -- 7 collisions in 3,526
-    # Sanctuary instances. The format's own per-placement identity is the
-    # instance INDEX, unique by construction; `cold.identity` is the stock
-    # index, carried so a consumer can join to the .bto's colour id.
+    # identity is unique inside the STOCK chunk that drew the placement, NOT inside the .lodi's bin;
+    # the per-placement identity is the instance INDEX, and `cold.identity` joins to the .bto's color id.
     ck.check('f2 the instance index is unique per placement by construction (%d)'
              % len(T['instances']), True)
     if a.manifest:
@@ -356,9 +344,8 @@ def main():
              all((r['geometricError'] == 0.0) == (r['level'] == 0) for r in lods))
     ck.check('h4 the errors are monotone up every chain',
              all(r['geometricError'] <= r['parentError'] for r in lods))
-    # the floor on the monotone rule: the same predicate against the errors
-    # SWAPPED must go red, or the rule is passing on a table that could not
-    # violate it
+    # the floor: the same predicate against SWAPPED errors must go red, or the rule passes on a
+    # table that could not violate it
     finite = [r for r in lods if r['parentError'] != ROOT]
     strict = sum(1 for r in finite if r['parentError'] > r['geometricError'])
     ck.check('h4b FLOOR the monotone test is not vacuous: %d of %d non-root rows have a '
@@ -388,22 +375,8 @@ def main():
                            if r['levels'] == 1 and r['tris'] > 16
                            and r['refNoCut'] + r['refFlat'] + r['refSmall'] + r['refSil']
                            + r['refFoliage'] + r['refLvlSil'] == 0)[:200])
-        # h9 AS FIRST WRITTEN WAS THE WRONG INSTRUMENT, and the audit is worth
-        # more than the check was. It compared the COARSEST level's boundary-edge
-        # count against level 0's and called a rise a silhouette opening. But a
-        # ladder is PARTIAL wherever a group refuses, so the coarsest level is a
-        # FRAGMENT of the mesh: measured on this corpus, the eighteen meshes whose
-        # coarsest count rose cover as little as 6.6 percent of their own surface
-        # at that level, and every one of the eighteen has at least one refused
-        # group. A fragment has its own outline; the comparison was apples to
-        # oranges.
-        #
-        # The rule with teeth is PER STEP and it lives in the writer
-        # (src/lodofile.cpp): a simplification whose output has more boundary
-        # edges than the input it REPLACES -- the same surface, both sides -- is
-        # refused and its clusters stay roots. Here that rule is checked two
-        # ways: it must have FIRED on real data, and every mesh whose coarsest
-        # count rose must be explained by a refusal rather than left unexplained.
+        # boundary edges are judged PER STEP in the writer (src/lodofile.cpp refuses a simplification that
+        # adds them); here the rule must have FIRED, and every coarsest-count rise is explained by a refusal.
         refSil = sum(r['refSil'] for r in rows)
         grew = [r for r in rows if r['bCoarse'] > r['bSrc']]
         unexplained = [r for r in grew
@@ -418,10 +391,7 @@ def main():
         ck.check('h10 the error columns MOVE: some meshes carry a non-zero maxError (%d)'
                  % sum(1 for r in rows if r['maxError'] > 0),
                  sum(1 for r in rows if r['maxError'] > 0) > 0)
-        # v4, the per-source caster count (bungo 2026-09-11 14:4x). WRITTEN and
-        # MOVES: the column must be non-zero somewhere -- a whole corpus of
-        # zeros is the `.arg` that never got wired -- and it must not be the
-        # SAME number on every mesh, which is what a constant would look like.
+        # v4, the per-source caster count: non-zero somewhere, and not the SAME number on every mesh
         cast = [r['casters'] for r in rows]
         nz = sum(1 for v in cast if v > 0)
         ck.check('h11 casterInstances is WRITTEN: %d of %d meshes cast for at least one '
@@ -435,10 +405,8 @@ def main():
     print('i. the occluder boxes (v3)')
     occ = T['occluders']
     if not occ:
-        # NOT a pass and NOT a failure: measured 2026-09-11, a region whose
-        # LOD meshes are none of them watertight legitimately writes no box,
-        # and the Sanctuary region is one. The box rules are gated on a
-        # region that HAS one (lodgen_native.sh leg 13).
+        # NOT a pass and NOT a failure: a region whose LOD meshes are none of them watertight writes
+        # no box; the box rules are gated on a region that HAS one.
         ck.skip('i1..i4 this region wrote no occluder box; nothing here can be asked of it')
     else:
         cells = [r for r in T['occluderRanges'] if r[1]]
@@ -455,10 +423,8 @@ def main():
 
     # ---- j. the NATIVE1c words: each WRITTEN and each MOVING -------------
     print('j. the v4/v5 words (lane NATIVE1c)')
-    # GROUND1 (2026-09-27): a far .lodi is v12 when it carries the per-vertex ground-contact stream
-    # (the default); 11 stays the near library's alone. IDENT2 (2026-09-29): 13 when the group table is
-    # FILE-WIDE (the default since then), decided last, keeping every bit and stream of 7..12
-    # LODP1 (2026-10-15): .lodo v8 exactly when the bake wrote the chart stream (--patch-charts)
+    # a far .lodi is v12 with the ground-contact stream (11 is the near library's alone), 13 when the
+    # group table is FILE-WIDE; .lodo v8 exactly when the bake wrote the chart stream (--patch-charts)
     ck.check('j0 the .lodo is at version 6 (SWAP1), or 8 with a chart stream (LODP1), and the .lodi at 3, 4, 5, 6, '
              '7, 8, 9, 10, 12 or 13 (%d / %d)' % (h['version'], ih['version']),
              (h['version'] == 6 or (h['version'] == 8 and L.get('chartStream') is not None))
@@ -466,8 +432,8 @@ def main():
     if ih['version'] == 13:
         ck.check('j0e a v13 .lodi carries the file-wide group table (u32, stride 4, %d groups)'
                  % ih['groupCount'], bool(T.get('groupFileWide')) and ih['groupStride'] == 4)
-    # v10 (lane BAKE2): bit 7 appears in a v10 file and only there, and a v10 file carries at least one.
-    # v12 (GROUND1) is decided after v10 and keeps its bits: a v12 file may carry bit 7 or not
+    # v10: bit 7 appears in a v10 file and only there, and a v10 file carries at least one.
+    # v12 is decided after v10 and keeps its bits: a v12 file may carry bit 7 or not
     wide = sum(1 for r in T['instances'] if r['flags'] & 0x80)
     ck.check('j0b the wide-scale bit (0x80) is set on %d instance(s): > 0 exactly when the .lodi is version 10, '
              'or either way at version 12 or 13 (%d)' % (wide, ih['version']),
@@ -476,7 +442,7 @@ def main():
     ck.check('j0d the per-vertex ground-contact stream is present when the .lodi is version 12, absent below, '
              'either way at 13 (present %s, version %d)' % (gnd, ih['version']),
              ih['version'] == 13 or gnd == (ih['version'] == 12))
-    # NEAR1 (2026-09-26): .lodo v7 (NEAR flag 16, material features) and .lodi v11 (instance bit 8,
+    # .lodo v7 (NEAR flag 16, material features) and .lodi v11 (instance bit 8,
     # INITIALLY_DISABLED) belong to the near library alone; a far file never carries either
     disabled = sum(1 for r in T['instances'] if r['flags'] & 0x100)
     ck.check('j0c a far pair carries no near-library meaning: NEAR flag clear, no material features byte, '

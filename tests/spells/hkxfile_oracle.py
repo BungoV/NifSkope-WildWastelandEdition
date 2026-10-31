@@ -441,11 +441,8 @@ def write(pf, db):
             return
         if k == "ptr":
             if fv["o"] >= 0:
-                # the global fixup is recorded when the extras are FLUSHED, so
-                # a pointer inside an earlier member's array payload precedes a
-                # direct pointer member declared later (skeleton.hkx:
-                # hknpRagdollData's bodyCinfos[i].shape fixups come before its
-                # own `skeleton` at +0x88)
+                # the global fixup is recorded when the extras are FLUSHED, so a pointer inside
+                # an earlier member's array payload precedes a direct pointer member declared later
                 extras.append(("ptr", fv["o"], p))
             return
         if k == "struct":
@@ -473,10 +470,8 @@ def write(pf, db):
                 data.extend(s + b"\0")
                 align16(data)
             elif kind == "strA":
-                # the strings of an hkArray<hkStringPtr> are packed: each one
-                # starts at the next EVEN offset (AlienRootBehavior.hkx:
-                # eventNames[0] 9 bytes at 27736, [1] at 27746, [2] at 27756);
-                # the run is padded to 16 once, after the last one
+                # the strings of an hkArray<hkStringPtr> are packed: each one starts at the
+                # next EVEN offset; the run is padded to 16 once, after the last one
                 _, src, s, label = ex
                 if len(data) % 2:
                     data.append(0)
@@ -519,16 +514,8 @@ def write(pf, db):
                         struct.pack_into("<%d%s" % (fv["n"], fmt[1]), data, start, *fv["vals"])
                 else:
                     data[start:start + esz * fv["n"]] = fv["b"]
-                # Padding after an array payload depends on the ELEMENT KIND:
-                # a payload of STRUCTS is not padded (jog.hkx: annotationTracks
-                # ends at 0xac8 and track 0's "" trackName is AT 0xac8); a
-                # payload of pointers or plain values is (skeleton.hkx:
-                # referencedObjects ends at 0x4af8, the name string is at
-                # 0x4b00). The census over 15,320 files is the gate on this.
-                # ... and a payload of STRING POINTERS is not padded either:
-                # its strings start right at its end (AlienRootBehavior.hkx:
-                # eventNames' pointers end at 27736 and eventNames[0] is AT
-                # 27736); the run of strings is padded to 16 once, after.
+                # padding after an array payload depends on the ELEMENT KIND: pointers and plain
+                # values are padded; STRUCTS and STRING POINTERS are not (their strings follow directly)
                 if st not in ("STRUCT", "STRINGPTR", "CSTRING"):
                     align16(data)
                 for s in sub:
@@ -550,11 +537,8 @@ def write(pf, db):
         wchunks.append((off, c["objectSize"], "obj", "%s#%d" % (obj["c"], i)))
         data.extend(b"\0" * c["objectSize"])
         extras = encode_struct(obj["v"], off, "%s#%d" % (obj["c"], i))
-        # hkRelArray payloads sit INSIDE the object's chunk, right after the
-        # body, each 16-aligned, in member order; the u16 offset is measured
-        # from the member's own address (skeleton.hkx's hknpCapsuleShape:
-        # body 112 bytes, vertices at +0x70, planes +0xf0, faces +0x170,
-        # indices +0x190, chunk 432 bytes).
+        # hkRelArray payloads sit INSIDE the object's chunk, right after the body, each 16-aligned,
+        # in member order; the u16 offset is measured from the member's own address
         rest = []
         for ex in extras:
             if ex[0] != "rel":

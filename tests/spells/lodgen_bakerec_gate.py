@@ -36,9 +36,8 @@ CENSUS_KEYWORDS = (
     'bake census:', 'stage times:', 'incremental:', 'bto scratch:',
 )
 
-#: printed from chunk WORKER THREADS, so their order is the scheduler's and
-#: recording them would make the record non-deterministic. Named here so the
-#: floor below does not silently expect them.
+#: printed from chunk WORKER THREADS in scheduler order, so recording them would make the record
+#: non-deterministic.
 CENSUS_NOT_RECORDED = ('cover ', 'roads ', 'bake ')
 
 #: the one line that describes the record and therefore cannot be in it
@@ -97,9 +96,8 @@ def tree(root, skip=None):
 # ---------------------------------------------------------------- sections --
 def cmd_sections(argv):
     rec_path, out_dir, log_path = argv[0], argv[1], argv[2]
-    # <out-dir> is used for the log's sake only; the `end` line is about the
-    # RECORD'S OWN folder (docs/LODGEN_BAKE_RECORD.md section 2.8) and that is
-    # what is counted below.
+    # <out-dir> is for the log only; the `end` line is about the RECORD'S OWN folder
+    # (docs/LODGEN_BAKE_RECORD.md section 2.8), which is what is counted below.
     rec_dir = os.path.dirname(os.path.abspath(rec_path))
     ck = Check()
     raw = open(rec_path, 'rb').read()
@@ -130,10 +128,8 @@ def cmd_sections(argv):
     ck.check('   every hash is 16 hex digits',
              all(len(v) == 16 for v in rec['hashes'].values()),
              repr(sorted(rec['hashes'].items())))
-    # A ZERO IS A FACT, NOT A DEFECT: a bake with no impostors writes
-    # cardCorpusHash 0 into the .lodo header, and the record's law is that it
-    # never disagrees with the pair -- so it copies the zero. What must hold is
-    # that the five are five values and not one value five times.
+    # a bake with no impostors writes cardCorpusHash 0 and the record copies the zero; what must
+    # hold is that the five are five values and not one value five times.
     nonzero = [v for v in rec['hashes'].values() if int(v, 16) != 0]
     ck.check('   at least three of them are distinct and non-zero',
              len(set(nonzero)) >= 3,
@@ -173,16 +169,13 @@ def cmd_sections(argv):
              (n, b) == (rec['endFiles'], rec['endBytes']),
              '%s: record says %d/%d, disk says %d/%d'
              % (rec_dir, rec['endFiles'], rec['endBytes'], n, b))
-    # THE FLOOR: the record's folder must not be the whole bake, or the line
-    # above would be true for an uninteresting reason.
+    # the record's folder must not be the whole bake, or the line above would hold trivially.
     on, ob = tree(out_dir, skip=rec_path)
     print('    note: the whole out-dir holds %d file(s), %d bytes; the '
           'record\'s own folder holds %d, %d' % (on, ob, n, b))
 
-    # ---- THE CENSUS COMPLETENESS FLOOR ------------------------------------
-    # Every census line the bake PRINTED must be in the record, except the two
-    # families that cannot be: the worker-thread lines (scheduler order) and
-    # the one line that describes the record itself.
+    # ---- every census line the bake printed must be in the record, except the worker-thread
+    # lines (scheduler order) and the one line that describes the record itself.
     log = open(log_path, 'rb').read().decode('utf-8', 'replace').split('\n')
     printed = []
     for line in log:
@@ -267,9 +260,7 @@ def cmd_hashes(argv):
     ck.check('the record\'s loadorder line agrees with its hash line',
              rec['loadOrder'] and int(rec['loadOrder'], 16) == h['loadOrderHash'],
              '%s vs %016x' % (rec['loadOrder'], h['loadOrderHash']))
-    # THE FLOOR: a hash the record could have copied from anywhere is no test.
-    # Five DIFFERENT values means the record is carrying five fields and not
-    # one value five times.
+    # five DIFFERENT values: the record carries five fields, not one value copied five times.
     ck.check('the five hashes are not all the same value',
              len(set(v for v in want.values() if v)) >= 3,
              ' '.join('%016x' % v for v in want.values()))
@@ -303,9 +294,8 @@ def cmd_plugins(argv):
         want = fnv1a64_file(want_path)
         ck.check('plugin %d FNV-1a 64 equals an independent Python hash' % i,
                  p['hash'] == want, '%016x vs %016x' % (p['hash'], want))
-    # THE FLOOR: the per-file hash must be able to see what loadOrderHash
-    # cannot. Two plugins of the same size must hash differently; with one
-    # plugin the floor is that the hash is not the basis (an unread file).
+    # the per-file hash must see what loadOrderHash cannot: two plugins of the same size hash
+    # differently; with one plugin, the hash must not be the basis (an unread file).
     hashes = [p['hash'] for p in rec['plugins']]
     ck.check('no plugin line carries a zero or unread hash',
              all(h not in (0, FNV_BASIS) for h in hashes),
@@ -377,12 +367,8 @@ def cmd_identical(argv):
     kinds = sorted(set(ra[i].split('\t')[0] for i in diff))
     ck.check('the RAW records do differ (so the mask is doing work)',
              bool(diff), '%d line(s) differ' % len(diff))
-    # A `census` line may differ only where the MASK covers it -- the
-    # `stage times:` wall clock and the `peak working set:` clause of the
-    # `bake census:` line (the fifth volatile thing, lane INCR1). Asking
-    # normalise() about the ONE line beats a hard-coded prefix: it follows
-    # the mask when the mask grows, and it still goes red for a census line
-    # the mask does NOT cover, which is the whole floor.
+    # a `census` line may differ only where the MASK covers it (stage times, peak working set);
+    # asking normalise() follows the mask as it grows and still fails on an uncovered line.
     census_bad = [i for i in diff if ra[i].split(TAB)[0] == 'census'
                   and lodb_read.normalise(ra[i]) != lodb_read.normalise(rb[i])]
     ck.check('and they differ only on baked / resource / plugin / masked-census lines',

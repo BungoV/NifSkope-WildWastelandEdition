@@ -118,10 +118,8 @@ def main(esm, cell, shots, label=None):
     lights = lights_of(esm, cell)
     exp = np.clip(spec_sum(lights, Pp, Np, V, gloss) / 4.0, 0, 1)
     got = img[30][ys, xs] / 255.0
-    # the lobe is sharp, and the probes carry the gloss and the normal in 8 bits and the position in whole units:
-    # the tolerance takes the spread of the expected value over half a step of each (measured 2026-10-02: with
-    # the gloss alone 51 of 871 highlight pixels missed, all beside a lamp; with all three none did, and the
-    # red control still missed 150 of 1025)
+    # the lobe is sharp and the probes carry gloss and normal in 8 bits and position in whole units: the
+    # tolerance takes the spread of the expected value over half a step of each
     def at(P_, N_, g_):
         return np.clip(spec_sum(lights, P_, N_, V, g_) / 4.0, 0, 1)
     spread = np.abs(at(Pp, Np, np.clip(gloss + 0.5 / 255, 0, 1)) - at(Pp, Np, np.clip(gloss - 0.5 / 255, 0, 1)))

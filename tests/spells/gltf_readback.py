@@ -365,21 +365,9 @@ def main(argv):
                       "R3: mesh %r bone %r inverse-bind last row is %s" % (nm, bn, [m[3], m[7], m[11], m[15]]))
 
     # ---- R5: the bind pose is one rigid transform -------------------
-    # NOT "skinning is the identity". FO4 body meshes store their vertices in
-    # a frame OFFSET from the skeleton: measured on Bethesda's own
-    # MaleBody.nif, global(bone) * storedBoneTransform is
-    # translate(-0.0002, -0.8818, +120.8437) units for all 58 bones -- the
-    # model's origin sits at the top of the head (its z range is -120.25 ..
-    # -5.69) and the skin lifts it onto its feet. So what has to hold is that
-    # every joint agrees on ONE rigid transform:
-    #     J_k = global(joint_k) * inverseBind_k
-    #   * the rotation of every J_k is exactly the Z-up -> Y-up rotation, and
-    #   * the translations of all J_k agree, to --tol-skin units.
-    # A transposed inverse bind, a shifted joint list, a wrong node
-    # composition and a dropped up-axis rotation each break one of the two,
-    # and nothing else in this file tests all four at once. The spread is
-    # also the honest measure of "does this NIF's node pose still equal the
-    # pose its skin was authored against".
+    # Not "skinning is the identity": FO4 bodies store vertices offset from the skeleton, so every joint
+    # must agree on ONE rigid transform J_k = global(joint_k) * inverseBind_k: rotation exactly Z-up -> Y-up,
+    # and all translations equal to --tol-skin units.
     tol_skin = float(opt("--tol-skin", "0.002"))
     for mi, mesh in enumerate(g.get("meshes", [])):
         if mi not in ibms:

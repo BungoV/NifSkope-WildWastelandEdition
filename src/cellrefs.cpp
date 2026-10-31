@@ -60,10 +60,8 @@ int CellRefTable::append( const CellRefEntry & e )
 {
 	const int at = entries.size();
 	entries.append( e );
-	/* FIRST WINS, like the pick table's form index. A persistent reference can
-	 * be returned by the cell it lives in AND by the persistent sweep of the
-	 * block; the form index points at the first, so "find ref 0x...." has one
-	 * answer whichever order the reader produced them in. */
+	/* First wins: a persistent reference can be returned by its cell AND by the persistent sweep,
+	 * so the form index has one answer whatever the read order. */
 	if ( e.refForm && !byForm.contains( e.refForm ) )
 		byForm.insert( e.refForm, at );
 	return at;

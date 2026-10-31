@@ -1,28 +1,6 @@
 #!/usr/bin/env python
-# ---------------------------------------------------------------------------
-# Read a WW_IMPOSTOR_PREVIEW=pair log and answer ONE question per set:
-#
-#   do the three frames this set chose, addressed ON THIS SET'S OWN GRID,
-#   reconstruct the direction the camera was actually pointing?
-#
-# The blend the spec describes is barycentric over the (N-1)^2 triangle mesh
-# whose vertices are the frame directions, so the weighted sum of the three
-# chosen frame directions must point back at the lookup direction to within
-# about half a grid cell -- and half a cell is a number that DEPENDS ON N,
-# which is the whole point of the row this feeds. A set read on somebody
-# else's grid still yields three frames and three weights that sum to one; it
-# just points somewhere else. That is what the error measures.
-#
-# The reconstruction uses tests/spells/impostor_oct_ref.py -- the Python
-# reference the C++ mapping is already gated against -- and never a second copy
-# of the arithmetic written here.
-#
-#   python impostor_pair_check.py <pair log>
-#
-# prints, and exits 1 if it cannot parse:
-#   set A oct 4 mean 3.91 worst 7.72 cellhalf 24.09
-#   set B oct 12 mean 1.02 worst 2.55 cellhalf 7.51
-# ---------------------------------------------------------------------------
+# Read a WW_IMPOSTOR_PREVIEW=pair log: do the three frames each set chose, on its own grid, reconstruct the camera direction?
+#   python impostor_pair_check.py <pair log>   (exits 1 if it cannot parse)
 import math
 import os
 import re
@@ -103,9 +81,8 @@ def score(entries, true_grid=None):
         errs.append(angle_between(acc, look))
     if not errs:
         return None
-    # Half a cell, as an angle: the grid spans a hemisphere (2*pi sr) over
-    # (n-1) steps per axis, so one step subtends roughly 90/(n-1) degrees and
-    # a point can sit half a step from the nearest vertex in each axis.
+    # Half a cell, as an angle: the grid spans a hemisphere over (n-1) steps per axis,
+    # so one step subtends roughly 90/(n-1) degrees; a point can sit half a step off in each axis.
     cellhalf = 90.0 / max(1, (n - 1))
     return n, sum(errs) / len(errs), max(errs), cellhalf, len(errs)
 

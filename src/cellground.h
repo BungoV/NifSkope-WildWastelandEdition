@@ -15,53 +15,11 @@ BSD License - see nifskope.h
 
 class EsmWorld;
 
-/* ---------------------------------------------------------------------------
- * THE GROUND, BUILT OUT OF THE LANDSCAPE RECORD.
- *
- * The cell view's first ground was the LAND heights with the VCLR vertex colour
- * on them and NO texture (src/cellview.h 2, "the base texture layers are NOT
- * sampled").  The heights were real from the first build -- VHGT is decoded in
- * `EsmWorld::land` -- but a relief surface with one flat grey on it and a
- * straight-down camera reads as a sheet of paper, and that is what the first
- * pictures showed.  This adds THE PAINT.
- *
- * ===========================================================================
- * WHAT IT DOES, AND WHAT IT REFUSES TO PRETEND
- * ===========================================================================
- *
- * A cell's paint is four quadrants (docs/LODGEN_ESM_LAYOUTS.md: 0 BL, 1 BR,
- * 2 TL, 3 TR).  Each has ONE base texture (`BTXT`) and any number of additional
- * layers (`ATXT` + `VTXT`), each layer carrying a 17x17 grid of opacities over
- * its quadrant.  The engine BLENDS them per pixel.
- *
- * This does NOT blend.  Every 128-unit quad of the 32x32 grid takes the ONE
- * layer with the highest opacity at its own corner, above
- * `CELL_GROUND_LAYER_MIN`, and the quadrant's base texture when no layer beats
- * that.  So the ground is a hard-edged mosaic of the real landscape textures,
- * not a composite: it answers "what is painted here" exactly and "what does
- * this look like in game" approximately, and the census line says so in those
- * words.  Blending needs the splat compositor the terrain bake owns
- * (docs/LODGEN_TERRAIN_VT.md), which is a bake, not a viewer.
- *
- * `T = 341.3333` world units is the ENGINE's landscape texture repeat, twelve
- * repeats across a cell, measured and written down in
- * docs/LODGEN_TERRAIN_VT.md (the `--land-tiling` paragraph).  It is not in the
- * data -- it is `fLandTextureTilingMult` -- so it is a constant here too, with
- * the same default the bake uses, and a caller may pass its own.
- *
- * ===========================================================================
- * WHY THIS IS A SEPARATE FILE
- * ===========================================================================
- *
- * It hands back PURE DATA -- quads with positions, UVs, normals, vertex colours
- * and a bucket index -- and never touches NifModel, Qt widgets or GL.  The cell
- * view welds those quads into its own buckets with its own vertex writer, so
- * there is no second geometry path; and a gate can ask for the mosaic of a cell
- * and count its buckets without a window, which is the only way the layer
- * choice is checkable at all.
- * --------------------------------------------------------------------------- */
+/* The cell view's ground, built from the LAND record as pure data (no NifModel, no GL): every 128-unit
+ * quad takes the one layer with the highest opacity at its corner (no blending), else the quadrant's base
+ * texture. Blending belongs to the terrain bake's splat compositor (docs/LODGEN_TERRAIN_VT.md). */
 
-//! The engine's landscape texture repeat, world units (docs/LODGEN_TERRAIN_VT.md).
+//! The engine's landscape texture repeat (fLandTextureTilingMult default), world units (docs/LODGEN_TERRAIN_VT.md).
 constexpr float CELL_GROUND_TILING = 341.3333f;
 //! A layer must reach this opacity to beat the quadrant's base texture.
 constexpr float CELL_GROUND_LAYER_MIN = 0.5f;
@@ -92,7 +50,7 @@ struct CellGroundBucket
 	int quads = 0;
 };
 
-//! What the build MEASURED, so the notes line carries its own denominators.
+//! What the build measured, for the notes line.
 struct CellGroundBuild
 {
 	QVector<CellGroundBucket> buckets;
@@ -106,27 +64,15 @@ struct CellGroundBuild
 	int quadsFromLayer = 0;         //!< a layer beat the base texture here
 	int ltexUnresolved = 0;         //!< LTEX forms that named no TXST texture
 	int bucketsSpec = 0;            //!< buckets that carry their LTEX's TX07 map (DUNESAND2)
-	/*! THE TWO REASONS A QUAD IS BARE, WHICH ADD UP TO `quadsBare` EXACTLY.
-	 *
-	 *  `quadsUnpainted`: the quadrant carries no BTXT and every layer is at
-	 *  zero opacity at this quad's corner -- there is no paint in the plugin
-	 *  here, and the Commonwealth WRLD names no default landscape texture to
-	 *  inherit either (scratchpad/mountains_20260907/report_mountains.md R6).
-	 *  `quadsLtexNoTexture`: a real LTEX form was chosen and it named no
-	 *  texture.  The identity `quadsBare == quadsUnpainted +
-	 *  quadsLtexNoTexture` is what the gate asserts, because it holds for any
-	 *  cell in any worldspace and FAILS on the pre-2026-09-19 layer choice
-	 *  (which let a null-form layer win and blank a quadrant that had a
-	 *  perfectly good BTXT). An invariant, not a threshold. */
+	/*! The two reasons a quad is bare, which add up to `quadsBare` exactly. `quadsUnpainted`: no BTXT and
+	 *  every layer at zero opacity here. `quadsLtexNoTexture`: a real LTEX was chosen and named no texture. */
 	int quadsUnpainted = 0;
 	int quadsLtexNoTexture = 0;
 	QStringList notes;
 };
 
-/*! Build the mosaic for the inclusive cell rectangle.  `originX/Y` is
- *  subtracted from every position, exactly as the cell view's own origin is.
- *  False, with `*error`, only on a bad rectangle -- a cell with no LAND is not
- *  an error, it is a cell with no LAND, and `cells` says how many there were. */
+/*! Build the mosaic for the inclusive cell rectangle; `originX/Y` is subtracted from every position.
+ *  False only on a bad rectangle: a cell with no LAND is not an error, and `cells` counts those that had one. */
 bool cellBuildGround( EsmWorld & world, int x0, int y0, int x1, int y1,
 	float originX, float originY, float tiling, CellGroundBuild & out, QString * error );
 

@@ -35,8 +35,7 @@ class Lodt:
     def __init__(self, path):
         self.f = open(path, 'rb')
         h = self.f.read(0x98)
-        # The magic still spells LODT: the 2026-09-09 rename moved the
-        # extension, deliberately not a byte of the file.
+        # The magic still spells LODT: the rename moved the extension, not a byte of the file.
         if len(h) < 0x98 or h[0:4] != b'LODT':
             raise SystemExit('not a .lodl: %s' % path)
         (self.version,) = struct.unpack_from('<I', h, 0x04)
@@ -180,9 +179,8 @@ def main():
                 for x in range(gx0, gx1 + 1, step)]
         print('%.3f' % (max(vals) - min(vals)))
     elif what == 'tiles':
-        # shapes and vertices a cell rectangle meshes to, from the OUTPUT
-        # format's rules (a BSTriShape counts vertices in a u16, so a tile side
-        # stops at 254) rather than from our estimator
+        # shapes and vertices a cell rectangle meshes to, from the OUTPUT format's rules (a BSTriShape
+        # counts vertices in a u16, so a tile side stops at 254) rather than from our estimator
         x0, y0, x1, y1, lod = (int(v) for v in a[:5])
         n = max(1, d.spc >> lod)
         k = max(1, 254 // n)

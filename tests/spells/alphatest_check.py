@@ -38,7 +38,7 @@ import impostor_bc_decode as bcd
 
 EPS = 0.05
 SOUP, ALB, GLS, TWO, AMK = 0x31505350, 0x31424C41, 0x31534C47, 0x314F5754, 0x314B4D41
-AMK2 = 0x324B4D41   # lane ALPHATEST2: AMK1 + 3 f32 a triangle, each corner's vertex alpha x material alpha
+AMK2 = 0x324B4D41   # AMK1 + 3 f32 a triangle, each corner's vertex alpha x material alpha
 AMK_DT = [('tri', '<u4'), ('map', '<i4'), ('model', '<i4'), ('thr', '<u4'), ('uv', '<f4', 6)]
 
 
@@ -75,13 +75,13 @@ def read_soup(path, want_tris=None):
         elif m == TWO:
             p += n
         else:
-            # lane LAND5: every tail after TWO1 is sized (u32 body bytes); one this reader does not use is skipped
+            # every tail after TWO1 is sized (u32 body bytes); one this reader does not use is skipped
             nb, = struct.unpack_from('<I', b, p)
             p += 4
             end = p + nb
             if end > len(b):
                 break
-            if m in (AMK, AMK2):   # lane ALPHATEST2's AMK2 sits in AMK1's slot (LAND6)
+            if m in (AMK, AMK2):   # AMK2 sits in AMK1's slot
                 am = {'maps': [], 'names': [], 'models': []}
                 nm, = struct.unpack_from('<I', b, p); p += 4
                 for _ in range(nm):
@@ -195,7 +195,7 @@ def read_dump(run, digits=None):
         dist = np.frombuffer(b, '<f4', NP, p).astype(np.float64); p += NP * 4
         p += NP * 4 + NP * 12
         P = [float(m[1]), float(m[2]), float(m[3])]
-        if digits:   # lane EDGEGAP1's red: the probe as the old 6-digit dump printed it
+        if digits:   # the red: the probe as the old 6-digit dump printed it
             P = [float('%.*g' % (digits, x)) for x in P]
         out.append((int(m[0]), np.array(P), F, rgb, dist))
     return out
@@ -264,7 +264,7 @@ def main(argv):
     T = tris[rec['tri'].astype(np.int64)].astype(np.float64).reshape(-1, 3, 3)
     uv = rec['uv'].astype(np.float64).reshape(-1, 3, 2)
     thr = rec['thr'].astype(np.float64)
-    asc = rec['as'].astype(np.float64)   # lane ALPHATEST2: each corner's vertex alpha x material alpha (1 = AMK1)
+    asc = rec['as'].astype(np.float64)   # each corner's vertex alpha x material alpha (1 = AMK1)
     say('scaled masked triangles %d (scale min %.3f)' % (int((asc != 1).any(1).sum()), float(asc.min()) if len(asc) else 1.0))
     mapi = rec['map'].astype(np.int64)
     modi = rec['model'].astype(np.int64)
@@ -291,7 +291,7 @@ def main(argv):
         W = T - P[None, None, :]
         hk, hn, hb1, hb2, ht_ = [], [], [], [], []
         npairs = 0
-        CH = 1 << 19   # pairs per chunk: the pair list is streamed, never held whole (19:05 guard kill at 8.3 GB)
+        CH = 1 << 19   # pairs per chunk: the pair list is streamed, never held whole (memory)
 
         def test(k, n):
             v0 = T[k, 0]; e1 = T[k, 1] - v0; e2 = T[k, 2] - v0; d = D[n]
@@ -441,8 +441,7 @@ def main(argv):
             fails.append('FRONT %d of %d' % (fr['ok'], fr['n']))
         if front and behind and shapes is not None and fr.get('pts') is not None and beh_ok < 0.95 * fr['ok']:
             fails.append('FRONT ends on "%s" %d of %d' % (behind, beh_ok, fr['ok']))
-        # 0.75: a window frame and the piece's own trim sit within 100 units behind some holes (measured on
-        # Concord -16,17: 12.5% of the rays end on Bld02CornerBrickACom01RR's own trim or the rubble at its foot)
+        # 0.75: a window frame or the piece's own trim can sit within 100 units behind some holes
         if corner and (co['n'] < 20 or co['ok'] < 0.75 * co['n']):
             fails.append('CORNER %d of %d' % (co['ok'], co['n']))
     else:   # the red must show the defect

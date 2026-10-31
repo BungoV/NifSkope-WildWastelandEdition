@@ -37,7 +37,7 @@ def layout(path):
     for r in rows:
         if r[0] == 'SECTION':
             section = r[1] if len(r) > 1 else ''
-        elif r[0] in ('TICK', 'SUBMENU', 'VALUE'):   # lane SKYSTR1: VALUE, a label | field row
+        elif r[0] in ('TICK', 'SUBMENU', 'VALUE'):   # VALUE: a label | field row
             got.append((section, r[2].replace('&', '')))
     want = [(s, l) for s, labels in WANT for l in labels]
     every = {l for _, labels in WANT for l in labels}

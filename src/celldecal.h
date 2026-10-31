@@ -97,7 +97,7 @@ enum class CellDecalFate
 	RayMissed,      //!< no surface within 1000 units along its axis
 	NoSurface,      //!< nothing opaque inside its box at an angle it takes
 	NoTexture,      //!< no diffuse texture could be named
-	RedOff          //!< the red control switched decals off
+	RedOff          //!< a debug switch turned decals off
 };
 
 struct CellDecalResult
@@ -108,14 +108,13 @@ struct CellDecalResult
 	qint64 triangles = 0;
 	qint64 receiverTris = 0;
 	int withPrimitive = 0, byRay = 0;
-	QString red;                        //!< the red control in force, empty when none
+	QString red;                        //!< the WW_CELL_DECAL_RED debug mode in force, empty when none
 	bool vertexAngle = false;           //!< lane DECALANGLE red "vertexangle": the old per-vertex fade is drawn
 	bool mapped = true;                 //!< lane DECALANGLE2: the rule reads the drawn (normal-mapped) normal; red "nonormalmap"
 };
 
-/*! Project every decal reference onto the receivers. `origin` is what the
- *  receivers' positions were shifted by. `dumpPath`, when not empty, takes one
- *  line per reference (form, fate, box centre, axes, sizes, ray distance). */
+/*! Project every decal reference onto the receivers. `origin` is what the receivers' positions were
+ *  shifted by; `dumpPath`, when not empty, takes one line per reference. */
 void cellProjectDecals( const EsmWorld & world, const QString & dataRoot,
 	const std::vector<CellDecalRef> & refs, const std::vector<CellDecalReceiver> & receivers,
 	const float origin[3], CellDecalResult & out, const QString & dumpPath );

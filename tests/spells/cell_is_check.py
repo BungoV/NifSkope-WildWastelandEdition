@@ -186,7 +186,7 @@ def main(esm, cell, run, red=''):
     # not, so a pixel passes inside the 3x3 range of the rebuilt neighbours (+-3/255): an edge pixel is a mix
     geo = cover == 1
     want = chain(rgb + bloom, im, mine, lut, red)
-    # how much of the picture the bloom moves past the tolerance (the nobloom red needs some to refute)
+    # how much of the picture the bloom moves past the tolerance
     reach = np.abs(want - chain(rgb, im, mine, lut, red)).max(-1)[geo]
     print('bloom reach %.2f%% of the opaque cell-lit pixels move > 3/255 (max %.1f/255)' % (
         100 * float((reach > 3.0 / 255.0).mean()) if reach.size else 0.0, 255 * float(reach.max()) if reach.size else 0))
@@ -199,7 +199,7 @@ def main(esm, cell, run, red=''):
     okP = frac >= 0.97 and d.size >= 5000
     mix = cover == 3
     if d.size < 5000 and int(mix.sum()) >= 2000:
-        # lane HDR1: a camera inside the haze (the walkway) has no bare surface; stage Q judges it instead
+        # a camera inside the haze (the walkway) has no bare surface; stage Q judges it instead
         okP = True
         print('P skip  only %d opaque cell-lit pixels (< 5000); the frame is blended, stage Q judges it' % d.size)
     else:
@@ -208,7 +208,7 @@ def main(esm, cell, run, red=''):
                   'PASS' if okP else 'FAIL', 100 * frac, d.size, 100.0 * d.size / (w * h),
                   100 * float((strict <= 3.0 / 255.0).mean()) if d.size else 0.0,
                   255 * float(np.median(strict)) if d.size else 0.0))
-    # lane HDR1: Q, the blended pixels (stencil 3) against the chain over the linear sum
+    # Q: the blended pixels (stencil 3) against the chain over the linear sum
     dq = np.maximum(np.maximum(lo - pic, pic - hi), 0.0).max(-1)[mix]
     if dq.size < 2000:
         okQ = True

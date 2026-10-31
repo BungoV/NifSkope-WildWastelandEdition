@@ -156,7 +156,7 @@ def write_soup(path, tris, doors, two=None):
         f.write(t.tobytes())
         for ref, lo, hi in doors:
             f.write(struct.pack('<I3f3f', ref, *lo, *hi))
-        # lane ROOMCLAMP1: these boxes are wound inward (winding was never the placer's business here);
+        # these boxes are wound inward (winding is not the placer's business here);
         # every face two-sided keeps this gate on the rules it was written for (cell_rooms gates winding)
         f.write(struct.pack('<II', 0x314F5754, len(t)))
         f.write(b'\x01' * len(t) if two is None else bytes(bytearray(int(v) for v in two)))
@@ -188,7 +188,7 @@ class Tracer:
 
     def __init__(self, tris, mask=None):
         self.t = tris
-        self.mask = mask   # lane WALLSTACK1: the soup's alpha-test holes (read_amask), as the placer's BVH
+        self.mask = mask   # the soup's alpha-test holes (read_amask), as the placer's BVH
         self.lo = tris.min(axis=1)
         self.hi = tris.max(axis=1)
         self.e1 = tris[:, 1] - tris[:, 0]
@@ -280,10 +280,10 @@ class Tracer:
 
 
 # ------------------------------------------------- FO4CS rules, re-derived
-SPACING, EYE, STEP, GAP, LEVELS = 280.0, 120.0, 4.0, 140.0, 24   # LEVELS was 6 before lane WALLSTACK1
+SPACING, EYE, STEP, GAP, LEVELS = 280.0, 120.0, 4.0, 140.0, 24
 SEARCH, STANDOFF = 280.0, 96.0
-# lane WALLSTACK1: the wall stack climbs until its wall ends: 240 apart up to 960 above its origin (the old
-# fixed list), then 480 apart, at most 64 levels
+# the wall stack climbs until its wall ends: 240 apart up to 960 above its origin,
+# then 480 apart, at most 64 levels
 HEIGHTS = tuple(240.0 * (k + 1) for k in range(4)) + tuple(960.0 + 480.0 * (k + 1) for k in range(60))
 BURIED_REACH = 2048.0
 COVER_R, HALL_R = 200.0, 70.0   # the interior rule's radii (probeplace.h)
@@ -335,8 +335,7 @@ def column(tr, x, y, top, bottom, two=None):
         return out
 
     def back_down(i):
-        # lane ROOMCLAMP1's rule, mirrored here by lane WALLSTACK1 (the tall block has one-sided faces): no probe
-        # stands on the back of a one-sided face seen from above
+        # no probe stands on the back of a one-sided face seen from above
         if two is None or two[i]:
             return False
         n = tr.normal(i)
@@ -647,12 +646,12 @@ def synth(exe, work, red):
               verdict, ' [RED %s]' % red if red else '', len(rows), n['first-hit'], n['interior'], n['wall'],
               n['aperture'], n['room'], n['cover'], len(expect), len(traps), len(inner), ninner, len(rooms),
               '; '.join(fails[:6]) if fails else 'all as built'))
-    # lane WALLSTACK1: the tall block (wall stacks to the top, setback, ledge, places under the ground)
+    # the tall block (wall stacks to the top, setback, ledge, places under the ground)
     tall = synth_tall(exe, work, red)
     return 0 if not fails and not tall else 1
 
 
-# ------------------------------------------------ the tall block (lane WALLSTACK1)
+# ------------------------------------------------ the tall block
 def obox(x0, y0, z0, x1, y1, z1, inward=False):
     """A closed box wound so every face's front points out of it (inward=True: into it)."""
     c = np.array([(x0 + x1) * 0.5, (y0 + y1) * 0.5, (z0 + z1) * 0.5])
@@ -906,7 +905,7 @@ def synth_tall(exe, work, red):
 
 def retrace(soup, tsv, n):
     tris, _ = read_soup(soup)
-    two = read_two(soup)   # lane WALLSTACK1: the placer's one-sided rules need the faces' sides
+    two = read_two(soup)   # the placer's one-sided rules need the faces' sides
     rows = read_tsv(tsv)
     rect = None
     with open(tsv) as f:
@@ -921,7 +920,7 @@ def retrace(soup, tsv, n):
     # re-trace works in that same frame
     ox, oy = 0.5 * (rect[0] + rect[2]), 0.5 * (rect[1] + rect[3])
     tris = (tris - np.array([ox, oy, 0.0])).astype(np.float32).astype(np.float64)
-    tr = Tracer(tris, read_amask(soup))   # lane WALLSTACK1: the placer's rays pass alpha-test holes
+    tr = Tracer(tris, read_amask(soup))   # the placer's rays pass alpha-test holes
     top, bottom = float(tris[:, :, 2].max()) + 16.0, float(tris[:, :, 2].min()) - 16.0
     rnd = random.Random(20260930)
     cols = lattice(*rect)

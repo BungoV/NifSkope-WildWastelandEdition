@@ -47,19 +47,9 @@ struct WwFxLitModel
 	float scale[4] = { 1, 1, 1, 1 };            //!< 1, or the nofade red control's ratio
 };
 
-/*! WHICH LIGHTS A LIT EFFECT GETS -- the game's rule, as read from the game's code (lane FXLIT1's notes):
- *    - the list is the placed MODEL's (every shape of it shares one), never the card's or the pixel's;
- *    - a light is a candidate when it reaches the model's bounding sphere:
- *          distance( light, bound centre ) - bound radius < light radius;
- *    - bound radius UNDER 150 units: the candidates are sorted by (distance - bound radius) / light radius,
- *      LARGEST first -- the lights that reach the model least come first;
- *    - bound radius 150 or more: no sort. The order is the one the lights were added to the room in, which
- *      no record states; the plugin's record order stands in for it (INFERRED);
- *    - the FIRST FOUR of that list light the model.
- *  Not modelled: the room / portal visibility test the game also applies to a candidate, and lights that join
- *  the list after the model first showed (they are appended behind).
- *  `strongest` (WW_CELL_FXLIT_PICK=strong, harness only) picks instead the four candidates with the largest
- *  colour x falloff at the bound's centre. */
+/*! The game's light pick: candidates reach the model's bound (distance - bound radius < light radius); under a
+ *  150-unit bound they sort by (distance - bound r) / light r, largest first, else record order (inferred); the
+ *  first four win. `strongest` instead takes the four largest color x falloff at the bound's center. */
 void wwCellFxLitPickLights( const QVector<WwCellLight> & lights, const float center[3], float radius,
 	bool strongest, int out[4] );
 
@@ -83,9 +73,8 @@ const WwFxLitModel * wwCellFxLitFor( const void * nif, int block, int * serial =
 void wwCellFxLitUniforms( Scene * scene, int block );
 //! True when this shape draws in the running probe pass (a lit effect, probe 70..74).
 bool wwCellFxLitProbeShape( Scene * scene, int block );
-/*! lane GIDARK1: true when this lit effect draws through fo4_effectdecal(csm) with fxRoomLit: an exterior's lit effect
- *  (glass, lenses) whose base is scaled by the share of the open-air light reaching its spot (fo4_effectshader.frag
- *  fxRoomLitMul), so a lens inside a dark shop follows the room. Red WW_CELL_FXROOM_RED=game: the game's base. */
+/*! True when this exterior lit effect draws with fxRoomLit: its base scales by the open-air light reaching it, so a
+ *  lens in a dark shop follows the room. WW_CELL_FXROOM_RED=game keeps the game's base. */
 bool wwCellFxRoomLit( Scene * scene, int block );
 
 /*! Lane LIGHTS2 (XEMI1): a placement's emittance colour (REFR XEMI -> its LIGH's colour, 0xRRGGBB) on a written shape.

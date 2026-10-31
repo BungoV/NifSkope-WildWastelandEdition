@@ -66,7 +66,7 @@ class Soup:
         self.keys, first = np.unique(key[order], return_index=True)
         self.first = np.append(first, len(order))
         self.tris = tri[order]
-        # lane ALPHATEST1: the soup's alpha-test masks (AMK1 tail): a hit on a texel under the threshold passes on
+        # the soup's alpha-test masks (AMK1 tail): a hit on a texel under the threshold passes on
         from alphatest_check import read_soup
         _n, _t, am = read_soup(path)
         self.am = None
@@ -94,7 +94,7 @@ class Soup:
             x = min(max(int(u * w), 0), w - 1)
             y = min(max(int(v * h), 0), h - 1)
             s = (b0 * float(rec['as'][0]) + b1[i] * float(rec['as'][1]) + b2[i] * float(rec['as'][2]))
-            # lane ALPHATEST2: map alpha x (vertex alpha x material alpha); all 1 = the integer test
+            # map alpha x (vertex alpha x material alpha); all 1 = the integer test
             out[i] = (int(m[y, x]) < int(rec['thr'])) if s == 1.0 else (float(m[y, x]) * s < float(rec['thr']))
         return out
 
@@ -155,7 +155,7 @@ def read_dump(d):
     meta = open(os.path.join(d, 'gi_meta.txt'), encoding='utf-8').read()
     clear = float(re.search(r'fixtureClear (\S+)', meta).group(1))
     out = dict(origin=np.array([ox, oy, oz], float), voxel=float(vox), radius=float(rad), dims=dims, grid=G)
-    # lane ROOMCLAMP1: the rooms (gi_rooms.bin), each voxel's two slots and slot 1's grid (gi_slots.bin), the probes'
+    # the rooms (gi_rooms.bin), each voxel's two slots and slot 1's grid (gi_slots.bin), the probes'
     # rooms (gi_proberooms.bin); absent with the red noclamp (one value a voxel)
     if all(os.path.exists(os.path.join(d, f)) for f in ('gi_rooms.bin', 'gi_slots.bin', 'gi_proberooms.bin')):
         nv = dims[0] * dims[1] * dims[2]
@@ -177,7 +177,7 @@ def surfel_light(lights, p, n, soup, clear, shapes=True):
         d = float(np.linalg.norm(v))
         if d >= L['r']:
             continue
-        if shapes and not inside(L, p[None, :])[0]:   # lane HEMI1: a hemisphere or box light lights only its volume
+        if shapes and not inside(L, p[None, :])[0]:   # a hemisphere or box light lights only its volume
             continue
         Ld = v / max(d, 1e-3)
         nl = float(n @ Ld)
@@ -206,7 +206,7 @@ def stage_a(esm, cell, tbks, S, soup, clear, light=True):
     # the dump's surfels are the bake's, one per (position, normal)
     want = {}
     for _, t in tbks:
-        for s in list(t['surfels']) + list(t['back']):   # lane BAKE4: v4's back sides are surfels too
+        for s in list(t['surfels']) + list(t['back']):   # v4's back sides are surfels too
             k = tuple(np.float32(s['pos']).tobytes() for _ in (0,)) + (tuple(int(c) for c in s['nrm']),)
             want[k] = (np.array(s['nrm'], float), np.array(s['alb'], float) / 255.0)
     got = {}
@@ -228,7 +228,7 @@ def stage_a(esm, cell, tbks, S, soup, clear, light=True):
             row_of[(pb, nk)] = hit
     if bad:
         return 'A FAIL surfels: %d of the bake\'s surfels are not in the dump' % bad, None
-    # lane EMISSIVEGI1: a glowing surfel's B carries its own Le (the .tbk emissive tail), added once
+    # a glowing surfel's B carries its own Le (the .tbk emissive tail), added once
     Le = np.zeros((len(S), 3))
     nglow = 0
     for _, t in tbks:
@@ -239,7 +239,7 @@ def stage_a(esm, cell, tbks, S, soup, clear, light=True):
             if k in row_of:
                 Le[row_of[k]] = np.array(e['le'], float)
                 nglow += 1
-    if not light:   # lane BOUNCE2: an exterior (its light is cell_sky's to check): the surfels only
+    if not light:   # an exterior (its light is cell_sky's to check): the surfels only
         return 'A PASS surfels: the dump\'s %d are the bake\'s (light not checked here)' % len(S), row_of
     lights = lights_of(esm, cell)
     rng = np.random.default_rng(7)
@@ -248,7 +248,7 @@ def stage_a(esm, cell, tbks, S, soup, clear, light=True):
     for i in pick:
         E, nb = surfel_light(lights, S[i, 0:3], S[i, 3:6], soup, clear)
         B = S[i, 6:9] * E + Le[i]
-        # lane HEMI1: the surfels a light's shape decides (the same sum with every light an omni differs)
+        # the surfels a light's shape decides (the same sum with every light an omni differs)
         shaped += int(not close(B, S[i, 6:9] * surfel_light(lights, S[i, 0:3], S[i, 3:6], soup, clear, False)[0] + Le[i]))
         shadowed += nb
         lit += int(B.max() > 1e-3)
@@ -261,14 +261,14 @@ def stage_a(esm, cell, tbks, S, soup, clear, light=True):
 
 
 def stage_b(tbks, S, P, row_of, Bsrc=None, sky=None):
-    # lane BOUNCE2: Bsrc = the last pass's B (gi_bounce.bin), sky = an exterior's sky part (gi_sky.bin)
+    # Bsrc = the last pass's B (gi_bounce.bin), sky = an exterior's sky part (gi_sky.bin)
     if Bsrc is None:
         Bsrc = S[:, 9:12]
     cubes, k = [], 0
     unresolved = 0
     for _, t in tbks:
         cs = float(t['cell'])
-        keys = tuple({} for _ in t['bysides'])   # lane BAKE4 front|back; lane SIDES6 v5: six
+        keys = tuple({} for _ in t['bysides'])   # v3/v4 front|back; v5: six
         for side, arr in enumerate(t['bysides']):
             for j, s in enumerate(arr):
                 keys[side].setdefault(tuple(floordiv(s['pos'][a], cs) for a in range(3)), j)
@@ -522,7 +522,7 @@ def stage_c_rooms(S, P, G, soup, sp, g, eye_rule, vals=None, grids=None, kset=(0
                ('; ' + '; '.join(fails)) if fails else ''))
 
 
-# ---------------------------------------------------------------- F: more than one bounce (lane BOUNCE2)
+# ---------------------------------------------------------------- F: more than one bounce
 SETTLE, CAP = 1e-3, 64          # the bar: the largest change under a thousandth of the brightest surfel; at most 64
 ROOM_OUT, ROOM_REACH = 17.5, 35.0   # a surfel's air: this far out along its normal; a room box within this reach
 ROOM_NONE = 0xFFFFFFFF
@@ -692,8 +692,8 @@ def stage_f(tbks, S, row_of, soup, G, bn, sky):
     ch = log[1:, 0]
     falls = bool(np.all(ch[1:] < ch[:-1])) if len(ch) > 1 else True
     rate = float((ch[-1] / ch[0]) ** (1.0 / (len(ch) - 1))) if len(ch) > 1 and ch[0] > 0 else 0.0
-    # lane ROOMCLAMP1: a red prelane dump (the WW_CELL_ROOMCLAMP_PIN=off twin) is the exe before the rooms clamp;
-    # its probes may read through walls, so the wall and room rule is printed but not judged
+    # a red prelane dump (WW_CELL_ROOMCLAMP_PIN=off) predates the rooms clamp: its probes may read
+    # through walls, so the wall and room rule is printed but not judged
     prelane = bn.get('red') == 'prelane'
     ok = (bn['passes'] == passes and log_ok and good_B >= 0.97 and agree >= 0.97 * len(pick)
           and (prelane or (leak_room == 0 and leak_wall == 0)))
@@ -759,7 +759,7 @@ def stage_d(run, cell, G, sub='', label='D'):
     pick = rng.choice(len(ys), size=min(20000, len(ys)), replace=False)
     ys, xs = ys[pick], xs[pick]
     exp = sample_grid(G, P[ys, xs], N[ys, xs] / nlen[ys, xs][:, None])
-    if 'R' in G:     # lane ROOMCLAMP1: cellGiRoomSample (cell_rooms_check.gi_sample) where the surface finds a room
+    if 'R' in G:     # cellGiRoomSample (cell_rooms_check.gi_sample) where the surface finds a room
         GG = {'origin': G['origin'], 'voxel': G['voxel'], 'dims': G['dims'], 'g': G['grid'], 'g2': G['grid2'], 'slots': G['slots']}
         Nn = N[ys, xs] / nlen[ys, xs][:, None]
         for t, (pw, nw) in enumerate(zip(P[ys, xs], Nn)):
@@ -795,13 +795,13 @@ def stage_e(run, cell, G):
 def main(esm, cell, run, stages='ABCDEFP'):
     bake = os.path.join(run, 'bake')
     tbks = [(f, read_tbk(os.path.join(bake, f))) for f in sorted(os.listdir(bake)) if f.endswith('.tbk')]
-    dump = os.path.join(run, os.environ.get('GI_CHECK_DUMP', 'dump'))   # lane BOUNCE2: the pin's own dump
+    dump = os.path.join(run, os.environ.get('GI_CHECK_DUMP', 'dump'))   # the pin's own dump
     S, P, G, clear = read_dump(dump)
     soup = Soup(os.path.join(run, 'soup.psp'))
     lines = []
     a, row_of = stage_a(esm, cell, tbks, S, soup, clear, 'A' in stages)
     lines.append(a)
-    # lane BOUNCE2: the probes gathered the last pass's B; an exterior's probes add their sky (gi_sky.bin)
+    # the probes gathered the last pass's B; an exterior's probes add their sky (gi_sky.bin)
     bn = read_bounce(dump)
     sky = None
     sp = os.path.join(dump, 'gi_sky.bin')
@@ -812,7 +812,7 @@ def main(esm, cell, run, stages='ABCDEFP'):
         lines.append(stage_b(tbks, S, P, row_of, bn['B'] if bn else None, sky))
         if 'F' in stages:
             lines.append(stage_f(tbks, S, row_of, soup, G, bn, sky) if bn else 'F FAIL bounce: no gi_bounce.bin in the dump')
-    # lane ROOMCLAMP1: the pin (WW_CELL_ROOMCLAMP_PIN=off, red prelane) is the grid from before the lane: no eye rule
+    # the pin (WW_CELL_ROOMCLAMP_PIN=off, red prelane) predates the rooms clamp: no eye rule
     lines.append(stage_c(S, P, G, soup, eye_rule=not (bn and bn.get('red') == 'prelane')))
     if 'D' in stages and os.path.exists(os.path.join(run, 'probe5.png')):
         lines.append(stage_d(run, cell, G))

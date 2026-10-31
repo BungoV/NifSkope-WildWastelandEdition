@@ -234,11 +234,8 @@ def main():
         return sum(L['clusters'][ci]['triangleCount']
                    for ci in range(m['clusterFirst'], m['clusterFirst'] + m['clusterCount']))
 
-    # THE LARGEST LADDERS FIRST, under a TRIANGLE BUDGET. This rasteriser is
-    # pure Python and a near-model library's meshes are the real models', so
-    # "the 40 largest" is minutes a mesh, not seconds. The budget bounds the
-    # run and the coverage it bought is PRINTED, so a shrinking sample is
-    # visible rather than silent.
+    # The largest ladders first, under a triangle budget (this rasterizer is pure Python and slow); the
+    # coverage it bought is printed, so a shrinking sample is visible.
     sized = sorted(((mesh_tris(mi), mi) for mi in laddered), reverse=True)
     picked = []
     spent = 0

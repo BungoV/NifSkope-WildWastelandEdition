@@ -204,10 +204,8 @@ def img(tag):
 
 
 def covered(a):
-    # any difference from the corner colour: the clean background is one flat
-    # colour, so a drawn pixel differs by >= 1, and a dark texel shaded close to
-    # the background still counts (a +-6 band misread 2.2% of a darker PBR duct
-    # as uncovered); a discarded fragment IS the background colour exactly.
+    # any difference from the corner color: the clean background is one flat color, so a drawn
+    # pixel differs by >= 1 (a +-N band misreads dark texels); a discarded fragment IS the background.
     return np.abs(a - a[0, 0]).max(axis=2) > 0
 
 

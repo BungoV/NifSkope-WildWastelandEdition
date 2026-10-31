@@ -84,7 +84,7 @@ enum class CellActorFate
 	NoSkeleton,     //!< the race's skeleton file does not load
 	NoBodyModel,    //!< no addon of the skin carries a model (a robot built from parts)
 	NoGeometry,     //!< models were named and none gave a triangle
-	RedOff,         //!< the red control switched actors off
+	RedOff,         //!< a debug switch turned actors off
 	Count
 };
 
@@ -135,10 +135,8 @@ public:
 	 *  `box` (minX, minY, maxX, maxY, game units) keeps only the actors standing inside it. */
 	QVector<EsmRefr> referencesIn( const QVector<quint32> & groups, const float * box = nullptr );
 
-	/*! Resolve and build one placed actor. True when it is drawn: `key` is what
-	 *  shapes() answers to and `scale` the whole scale to place it with. False
-	 *  = not shown (deleted, no base, or `hidden`: the caller found it disabled
-	 *  at the start) or a named refusal, counted either way. */
+/*! Resolve and build one placed actor. True when drawn (`key` for shapes(), `scale` the whole
+ *  scale); false when not shown or refused, counted either way. */
 	bool place( const EsmRefr & r, bool hidden, QString & key, float & scale );
 
 	//! The built actor, actor space, posed (lane ACTORPOSE1).
@@ -147,7 +145,7 @@ public:
 	/*! `  placed actors: R read, drawn D (...), not shown H, refused F: <reason> <count>, ...`.
 	 *  Every placed actor is in exactly one of drawn, not shown or a named refusal. */
 	QString censusLine() const;
-	//! One line per placed actor, tab separated (tests/spells/cell_actor_check.py reads it).
+//! One line per placed actor, tab separated.
 	void dump( const QString & path ) const;
 
 	static QString fateName( CellActorFate f );
