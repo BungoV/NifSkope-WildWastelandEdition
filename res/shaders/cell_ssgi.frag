@@ -57,6 +57,7 @@ uniform sampler2D noiseTex;		// EA FAST spatiotemporal blue noise, 128 x (64 x 1
 uniform bool blueNoise;			// false: red `ign`, the closed-form IGN of SSGI1
 uniform sampler2D hiz;			// min/max linear depth, level i = mip i + 1 (sky: min huge, max 0)
 uniform int hizLevels;			// 0: red `nohiz` (no interval skip, no early out)
+uniform bool fullBreak;			// lane PERFFIX2 (3c): the full-mask early out also without the pyramid (not under `nohiz`)
 uniform sampler2D tstate;		// stage 2: last frame's moments; stages 4, 7: this frame's
 uniform bool wantState;
 uniform float robustRadius;		// stage 4, work pixels (FO4CS fBlurRadius)
@@ -164,7 +165,7 @@ vec4 cast( ivec2 wp )
 		for ( int side = 0; side < 2; side++ ) {
 			float sgn = side == 0 ? 1.0 : -1.0;
 			// every later tap of this slice adds no fresh sector (FO4CS breaks the same way)
-			if ( hizLevels > 0 && occ == 0xFFFFFFFFu )
+			if ( ( hizLevels > 0 || fullBreak ) && occ == 0xFFFFFFFFu )
 				break;
 			for ( int k = 0; k < steps; k++ ) {
 				float t = ( float( k ) + ( blueNoise ? sliceStep : fract( n1 + float( k ) * 0.618034 ) ) ) / float( steps );
@@ -172,9 +173,10 @@ vec4 cast( ivec2 wp )
 				vec2 sp = vec2( ft ) + 0.5 + sgn * dir * off;
 				if ( sp.x < 0.0 || sp.y < 0.0 || sp.x >= float( fullSize.x ) || sp.y >= float( fullSize.y ) )
 					break;
+				// lane PERFFIX2 (3c): the full-mask early out without the interval pyramid (fullBreak; exact)
+				if ( ( hizLevels > 0 || fullBreak ) && occ == 0xFFFFFFFFu )
+					break;
 				if ( hizLevels > 0 ) {
-					if ( occ == 0xFFFFFFFFu )
-						break;
 					// FO4CS's geometry mip: a cell whose whole depth interval is beyond z +- (radius + 1) holds no tap
 					// within the radius (|dz| <= distance), so the skip drops exactly the taps `len > radius` drops
 					int m = min( int( max( clamp( log2( off ) - 3.3, 0.0, 5.0 ) - 1.0, 0.0 ) + 0.5 ), hizLevels );

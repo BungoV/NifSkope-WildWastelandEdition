@@ -58,7 +58,8 @@ struct SsgiState
 	int quality = 3;
 	int red = 0;	// 1 off, 2 stack, 4 notemporal, 8 noblur; lane SSGI2: 16 ign, 32 nohiz, 64 oldblur, 128 noemissive;
 					// lane SSGI3: 256 oldlaw (SSGI1's fill law); lane SSGI2FRAMES: 512 oldframes;
-					// lane PERFFIX2: 1024 emitchain (3b: the emissive cast's own chain, cellssgiplan.h)
+					// lane PERFFIX2: 1024 emitchain (3b: the emissive cast's own chain, cellssgiplan.h), 2048 hiz
+					// (3c: the interval pyramid built again)
 	int pathFrame = -1;	// lane SSGI2FRAMES: the camera path's frame (wwCellSsgiSetPath), -1 a still view
 	int lastVerdict = -1;
 	char echo[240] = {};
@@ -85,7 +86,7 @@ SsgiState & st()
 		for ( const QByteArray & w : red.split( ',' ) )
 			s.red |= w == "off" ? 1 : w == "stack" ? 2 : w == "notemporal" ? 4 : w == "noblur" ? 8 : w == "ign" ? 16
 				: w == "nohiz" ? 32 : w == "oldblur" ? 64 : w == "noemissive" ? 128 : w == "oldlaw" ? 256
-				: w == "oldframes" ? 512 : w == "emitchain" ? 1024 : 0;
+				: w == "oldframes" ? 512 : w == "emitchain" ? 1024 : w == "hiz" ? 2048 : 0;
 	}
 	return s;
 }
@@ -252,7 +253,8 @@ void wwCellSsgiPass( Scene * scene, bool run )
 		static const char * const words[4] = { "off", "off (no obscurance pass)", "off (no scene pass)", "on" };
 		std::snprintf( s.echo, sizeof( s.echo ),
 			"cell ssgi: %s quality %d red %d noise %s hiz %s denoise %s emissive %s law %s frames %s",
-			words[verdict], s.quality, s.red, ( s.red & 16 ) ? "ign" : "fast", ( s.red & 32 ) ? "off" : "on",
+			words[verdict], s.quality, s.red, ( s.red & 16 ) ? "ign" : "fast",
+			wwSsgiHizBuilt( s.red ) ? "on" : wwSsgiFullBreak( s.red ) ? "break" : "off",
 			( s.red & 8 ) ? "none" : ( s.red & 64 ) ? "5x5" : "robust+quarter", ( s.red & 128 ) ? "off" : wwSsgiEmissive( s.red ) == WwSsgiEmitChain ? "chain" : "folded",
 			( s.red & 256 ) ? "old" : "fill", !wwHarnessRun() ? "live" : ( s.red & 512 ) ? "per-paint" : "pinned" );
 		std::fprintf( stderr, "%s\n", s.echo );
@@ -287,7 +289,8 @@ void wwCellSsgiPass( Scene * scene, bool run )
 	const bool wasBlend = fn->glIsEnabled( GL_BLEND ), wasScissor = fn->glIsEnabled( GL_SCISSOR_TEST );
 
 	const bool resized = g.cast.w != ww || g.cast.h != wh;
-	const bool newBlur = !( s.red & ( 8 | 64 ) ), hizOn = !( s.red & 32 );
+	// lane PERFFIX2 (3c): the interval pyramid only under red `hiz`; the full-mask early out without it (cellssgiplan.h)
+	const bool newBlur = !( s.red & ( 8 | 64 ) ), hizOn = wwSsgiHizBuilt( s.red );
 	const int qw = ( ww + 1 ) / 2, qh = ( wh + 1 ) / 2;
 	alloc( fn, g.cast, ww, wh, 0, false );
 	alloc( fn, g.acc[0], ww, wh, newBlur ? 2 : 1, false );
@@ -431,6 +434,7 @@ void wwCellSsgiPass( Scene * scene, bool run )
 	prog->uni1b( "emitAdd", false );
 	prog->uni1b( "blueNoise", blue );
 	prog->uni1i( "hizLevels", hizN );
+	prog->uni1b( "fullBreak", wwSsgiFullBreak( s.red ) );
 	prog->uni1b( "wantState", newBlur );
 	prog->uni1f( "robustRadius", kBlurPx );
 	fn->glUniform2i( prog->uniLocation( "quarterSize" ), qw, qh );

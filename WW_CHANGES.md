@@ -19,6 +19,12 @@ notes/perffix2/c/RESULTS.md.
   Ultra 12.0 -> 6.39 ms; the emitters' share of the bounce 0.94 of the separate chain's (FO4CS's importance-sampled cast
   with its facing law and small-emitter boost), their brightest 1 % nearer the emitter 1.9x. This is the path red
   `noemissive` drew (byte-identical). Red WW_CELL_SSGI_RED=emitchain: SSGI2's stage-8 chain as before.
+- SSGI WITHOUT THE FULL-SIZE PYRAMID (item 3c): the interval pyramid (stages 10/11, built over the FULL-size depth at
+  every tier) is no longer built: offline its skip cost more than it saved at every tier (Low 1.84 -> 1.48 ms, Ultra
+  6.39 -> 5.19 ms with 3b; SSGI2's own live bar "nohiz >= ultra" failed the same way), and dropping it is exact (a
+  skipped tap is one `len > radius` drops anyway): pictures byte-identical offline. The full-mask early out stays
+  (shader uniform fullBreak). The per-frame donor mips measured 0.02 ms offline: kept. Red WW_CELL_SSGI_RED=hiz: the
+  pyramid again; `nohiz` keeps SSGI2's meaning (no pyramid, no early out).
 
 ## FOAMOFF2 (FIX1101A, 2026-11-01): River foam and Contact foam stay OFF
 

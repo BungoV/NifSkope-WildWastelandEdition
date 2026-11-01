@@ -57,4 +57,18 @@ inline bool wwSsgiWantsEmissionTarget( int red )
 	return wwSsgiEmissive( red ) == WwSsgiEmitChain;
 }
 
+/*! 3c: the interval pyramid (stages 10/11 over the FULL-size depth, whatever the tier) is built only under red `hiz`
+ *  (2048): offline its skip cost more than it saved at every tier (lane SSGI2's own live bar "nohiz >= ultra" failed
+ *  the same way), and dropping it is exact: a skipped tap was one `len > radius` drops anyway. The full-mask early
+ *  out stays without it (fullBreak, exact too) unless red `nohiz` (32), which keeps SSGI2's meaning (neither). */
+inline bool wwSsgiHizBuilt( int red )
+{
+	return ( red & 2048 ) && !( red & 32 );
+}
+
+inline bool wwSsgiFullBreak( int red )
+{
+	return !( red & 32 );
+}
+
 #endif // CELLSSGIPLAN_H

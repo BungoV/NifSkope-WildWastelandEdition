@@ -43,6 +43,15 @@ static bool wantsTarget( int red )
 #endif
 }
 
+static bool hizBuilt( int red )
+{
+#if defined( SSGIPLAN_RED ) && SSGIPLAN_RED == 5
+	return !( red & 32 );	// before 3c: the full-size interval pyramid every frame unless `nohiz`
+#else
+	return wwSsgiHizBuilt( red );
+#endif
+}
+
 int main()
 {
 	std::setvbuf( stdout, nullptr, _IONBF, 0 );
@@ -75,6 +84,10 @@ int main()
 	check( emissiveOf( 128 ) == WwSsgiEmitFolded && !wantsTarget( 128 ) && emissiveOf( 128 | 1024 ) == WwSsgiEmitFolded,
 		"3b: noemissive wins over emitchain (no target)" );
 	check( emissiveOf( 32 | 64 ) == WwSsgiEmitFolded, "3b: other reds keep the fold" );
+	// 3c: no full-size pyramid by default; the exact early out stays; nohiz keeps SSGI2's meaning (neither)
+	check( !hizBuilt( 0 ) && wwSsgiFullBreak( 0 ), "3c: default: no interval pyramid, full-mask early out on" );
+	check( hizBuilt( 2048 ), "3c: red hiz: the pyramid again" );
+	check( !hizBuilt( 32 ) && !hizBuilt( 32 | 2048 ) && !wwSsgiFullBreak( 32 ), "3c: nohiz: no pyramid, no early out" );
 	std::printf( "SSGIPLAN %s %d failed\n", fails ? "FAIL" : "PASS", fails );
 	return fails ? 1 : 0;
 }
