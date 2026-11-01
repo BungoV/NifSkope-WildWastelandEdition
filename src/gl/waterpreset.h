@@ -15,7 +15,7 @@ BSD License - see nifskope.h
  *  water"). Cost per term: tests/watercost/watercost.py (offline, the real programs through the driver).
  *    Low     no water look: the game's water (fo4_water.prog) + the water SSR
  *    Medium  + clear colour, physical reflections, soft edge, river foam
- *    High    + the wind's wave spectrum (Ocean waves), shore foam
+ *    High    + the wind's wave spectrum (Ocean waves: its normals on the flat surface; displaced at Ultra, PERFFIX3), shore foam
  *    Ultra   + sun glare (facets), contact foam, and the rows that ship OFF when the user turns them on
  *  Pure logic: celllooks.cpp asks wwWaterPresetLets for every water look row. */
 

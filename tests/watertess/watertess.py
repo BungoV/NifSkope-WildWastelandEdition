@@ -83,8 +83,8 @@ def frag_of(prog):
 			return line.split()[-1]
 
 
-def link(prog, tess):
-	fs = slc.expand(os.path.join(SD, frag_of(prog))).replace('NUM_TEXTURE_UNITS', '30')
+def link(prog, tess, frag=None):
+	fs = frag or slc.expand(os.path.join(SD, frag_of(prog))).replace('NUM_TEXTURE_UNITS', '30')
 	pr = G.glCreateProgram()
 	G.glAttachShader(pr, VS)
 	if tess:
@@ -130,6 +130,9 @@ def link(prog, tess):
 
 P_FLAT = link('fo4_waterlook.prog', False)
 P_DISP = link('fo4_waterlookd.prog', True)
+# exploration: the split + move alone (a one-colour fragment): the geometry's share of the cost
+NULLFS = '#version 410 core\nin vec2 wwOcBase;\nout vec4 o;\nvoid main() { o = vec4( wwOcBase * 1e-6, 0.5, 1.0 ); }\n'
+P_GEO = link('fo4_waterlookd.prog', True, NULLFS)
 print('programs: fo4_waterlook (flat) and fo4_waterlookd (vert + fo4_waterdisp.tesc/.tese + frag) linked')
 
 # the cell view's water: 5 x 5 cells round the spot, each 4 x 4 quads of 1024 u (src/cellview.cpp pre-split), ccw
@@ -227,6 +230,8 @@ g['DEF'] = {'clear', 'refl', 'glint', 'ocean', 'edge', 'foam', 'contact', 'river
 # every edge up to waterOceanDisp.w splits (before PERFFIX3); the other disp arms move the uniform (exploration)
 ARMS = [('flat', P_FLAT, False, (4096, 8192, 8, 64)), ('disp default 4096/8192 8px', P_DISP, True, (4096, 8192, 8, 64)),
 		('disp red densetess (before)', P_DISP, True, (4096, 8192, 8, 64, 8192)),
+		('geo only default', P_GEO, True, (4096, 8192, 8, 64)), ('geo only densetess', P_GEO, True, (4096, 8192, 8, 64, 8192)),
+		('geo only level 1', P_GEO, True, (4096, 8192, 1e9, 1)),
 		('disp 12px', P_DISP, True, (4096, 8192, 12, 64)), ('disp 16px', P_DISP, True, (4096, 8192, 16, 64)),
 		('disp 24px', P_DISP, True, (4096, 8192, 24, 64)), ('disp 32px', P_DISP, True, (4096, 8192, 32, 64)),
 		('disp reach 2048/4096 8px', P_DISP, True, (2048, 4096, 8, 64)),
