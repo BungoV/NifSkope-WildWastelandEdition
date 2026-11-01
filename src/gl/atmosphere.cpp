@@ -2,6 +2,8 @@
 #include "atmomath.h"
 #include "gl/weatherrecx.h"	// lane WX1: the weather .recx atmosphere block
 #include "skydisc.h"
+#include "moonlight.h"	// lane FIX1101A (moon): the disc's gain through the air
+#include "gl/cellvolair.h"	// lane FIX1101A (moon): the air's medium for that gain
 #include "wwswitch.h"
 #include "gl/cellunits.h"
 #include "gl/celluniform.h"	// lane CELLUNI3: the units bound without a unit ask
@@ -47,6 +49,7 @@ struct AtState
 	int tier = 0;
 	bool pinned = false;
 	float haze[3] = { 0.0f, 1.0f, 0.0f };	// last drawn: ground extinction /km, scale height km, plateau top km
+	float discAirLast[2] = { 1.0f, 1.0f };	// lane FIX1101A (moon): the sun disc's and our globe's gain through the air
 	QString last = QStringLiteral( "off" );
 	int ap = 0;	// lane SKYA (ATMO2): the Aerial Perspective row, 0 Off / 1 On (pin WW_ATMO_AP)
 	bool apPinned = false;
@@ -623,6 +626,24 @@ bool wwAtmoDrawSky( Scene * scene, const WwAtmoInputs & in, QString * line )
 	fn->glBindFramebuffer( GL_DRAW_FRAMEBUFFER, GLuint( prevDraw ) );
 	fn->glBindFramebuffer( GL_READ_FRAMEBUFFER, GLuint( prevRead ) );
 	glViewport( vp[0], vp[1], vp[2], vp[3] );
+	/* lane FIX1101A (moon, LATE ITEM 24d(2)): the sun disc and our moon globe end, under the air's composite, dimmed as
+	 * their light is (the sky's own air x the ground layer), not by the bands on top (gl/moonlight.h discAirGain).
+	 * Red WW_ATMO_DISC_RED=airband: gain 1 (the bands dim the disc again, as before). A capture has no air over it. */
+	float discAir[2] = { 1.0f, 1.0f };
+	{
+		float med[4], layer[4], ground[2];
+		if ( !in.capture && !wwAtmoDiscRed( "airband" ) && wwVolAirMediumNow( med, layer, ground ) ) {
+			const float * lights[2] = { sunW, moonW };
+			for ( int b = 0; b < 2; b++ ) {
+				float t[3];
+				cpuTrans( hKm, lights[b][2], s.haze, noOzone, t, g_ozone );
+				const float tSky = ( t[0] + t[1] + t[2] ) / 3.0f;	// cell_volsky.frag's tSky
+				discAir[b] = wwmoon::discAirGain( in.camFogZ, lights[b][2], tSky, med, layer, ground );
+			}
+		}
+		s.discAirLast[0] = discAir[0];
+		s.discAirLast[1] = discAir[1];
+	}
 	// 3. the sky's pixels
 	if ( ok ) {
 		auto p = r->useProgram( "atmo_sky.prog" );
@@ -647,6 +668,7 @@ bool wwAtmoDrawSky( Scene * scene, const WwAtmoInputs & in, QString * line )
 			p->uni1f( "atLimb", ( s.tier >= 3 || in.discs ) ? 1.0f : 0.0f );
 			p->uni1f( "atDiscCap", in.disc ? kDiscCap : 0.0f );
 			p->uni1f( "atDiscHue", in.discs ? 1.0f : 0.0f );	// SKYDISC1: 0 = the per-channel min() as before
+			p->uni1f( "atDiscAir", discAir[0] );	// lane FIX1101A (moon): the disc's gain through the air
 			p->uni1f( "sceneExposure", in.exposure );
 			p->uni1i( "viewTransform", in.viewTransform );
 			// lane SKYA (ATMOCHECK1): the Sky Color row's Weather Tint (atWeatherTint); 0 = the physical color, as before
@@ -700,6 +722,7 @@ bool wwAtmoDrawSky( Scene * scene, const WwAtmoInputs & in, QString * line )
 		f.viewW = vw;
 		f.viewH = vh;
 		f.frame = s.frame;
+		f.moonDiscAir = discAir[1];	// lane FIX1101A (moon): our globe's gain through the air
 		f.tintOn = s.tintDrawn && ok;
 		if ( f.tintOn )
 			std::copy( &in.tint[0][0], &in.tint[0][0] + kTintN * 3, &f.tint[0][0] );
@@ -715,6 +738,9 @@ bool wwAtmoDrawSky( Scene * scene, const WwAtmoInputs & in, QString * line )
 			reds += QStringLiteral( ",AP_RED=%1" ).arg( QLatin1StringView( w ) );
 	if ( in.discs )
 		reds += wwAtmoDiscRed( "nophase" ) ? QStringLiteral( ",discs=ours,DISC_RED=nophase" ) : QStringLiteral( ",discs=ours" );
+	// lane FIX1101A (moon): the sun disc's / our globe's gain through the air (1 = none: no air, or the red airband)
+	reds += QStringLiteral( ",disc_air=%1/%2%3" ).arg( double( discAir[0] ), 0, 'f', 3 ).arg( double( discAir[1] ), 0, 'f', 3 )
+		.arg( wwAtmoDiscRed( "airband" ) ? QStringLiteral( ",DISC_RED=airband" ) : QString() );
 	if ( s.tint > 0 )	// lane SKYA (ATMOCHECK1)
 		reds += in.tintOk ? ( wwAtmoTintRedFlat() ? QStringLiteral( ",tint=weather,TINT_RED=flat" )
 			: wwAtmoTintRedPhysical() ? QStringLiteral( ",tint=weather,TINT_RED=physical" ) : QStringLiteral( ",tint=weather(ap,amb)" ) )

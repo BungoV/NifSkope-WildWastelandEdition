@@ -25,6 +25,7 @@ struct WwAtmoInputs
 	float moonLum = 0.0f;	//!< the Night sunlight luminance (the engine's night key light is the moon's)
 	float fogFar = 0.0f, fogMax = 0.0f, fogMid = 0.0f, fogRange = 10000.0f;	//!< game units; fogFar 0 = no haze
 	float camZ = 0.0f;	//!< game units
+	float camFogZ = 0.0f;	//!< lane FIX1101A (moon): the camera's height in the fog frame (over the lookdev ground), game units
 	bool disc = true;	//!< the sun disc (the Sun row)
 	float exposure = 1.0f;
 	int viewTransform = 0;
@@ -53,6 +54,7 @@ struct WwAtmoFrame
 	unsigned trans = 0, sunView = 0, moonView = 0;
 	int viewW = 0, viewH = 0;
 	unsigned long long frame = 0;	//!< wwAtmoApFrame's count when drawn
+	float moonDiscAir = 1.0f;	//!< lane FIX1101A (moon): our globe's gain through the air (gl/moonlight.h discAirGain)
 	bool tintOn = false;	//!< lane SKYDISC1: the Weather Tint drawn, with its table (the moon redraws the sky behind it)
 	float tint[17][3] = {};
 };

@@ -124,6 +124,9 @@ void wwVolAirSetDriftOn( bool on );
 bool wwVolAirWantsRepaint();
 //! census echo: "volair=on(...)" or why none was drawn
 QString wwVolAirSummary();
+//! lane FIX1101A (moon, 24d(2)): the last air pass's medium (airMed, airLayer, airGround.xy); false when no pass ran in
+//! the last second (the air off) or under the red nosky. gl/moonlight.h discAirGain reads it for the sun disc and moon.
+bool wwVolAirMediumNow( float med[4], float layer[4], float ground[2] );
 
 /*! VOLUMETRIC PARTICLES (lane VOLPART1): a particle system the cell lights (steam, smoke, fog puffs) is a little
  *  piece of the air. In particles_cell.prog (res/shaders/particles.frag, the law written out there):

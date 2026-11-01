@@ -20,6 +20,10 @@ uniform float atMoonK;	// pi * k for the moon; 0 = no moon term
 uniform float atLimb;	// 1 = limb darkening (High+)
 uniform float atDiscCap;	// the disc's display cap (scene units)
 uniform float atDiscHue;	// lane SKYDISC1: 1 = one scale for the whole disc (its centre to the cap): hue and limb kept
+/* lane FIX1101A (moon, LATE ITEM 24d(2)): the disc's gain through the Volumetric Air (gl/moonlight.h discAirGain): the
+ * air's composite keeps T_air / T_sky of the sky, the bands included, while the sun's light takes only the ground layer;
+ * the disc (and its cap) takes this gain first so that it ends dimmed as its light. <= 0 or unset = 1 */
+uniform float atDiscAir;
 uniform float sceneExposure;
 uniform int viewTransform;
 uniform float atTintOn;	// lane SKYA (ATMOCHECK1): 1 = the Sky Color row's Weather Tint
@@ -94,13 +98,14 @@ void main()
 			limb = pow( vec3( sqrt( max( 0.0, 1.0 - x ) ) ), a ) * ( a + 2.0 ) * 0.5;
 		}
 		vec3 disc = atSunK * atTrans( atTransTex, atCamR, d.z ) * limb / kSunSolid;
+		float ga = atDiscAir > 0.0 ? atDiscAir : 1.0;	// lane FIX1101A: the air's gain (the cap capped first, as before)
 		if ( atDiscHue > 0.5 ) {
 			vec3 a = vec3( 0.397, 0.503, 0.652 );
 			vec3 centre = atSunK * atTrans( atTransTex, atCamR, atSunW.z ) * ( a + 2.0 ) * 0.5 / kSunSolid;
 			float m = max( centre.r, max( centre.g, centre.b ) );
-			c += disc * ( m > atDiscCap ? atDiscCap / m : 1.0 );
+			c += disc * ( m > atDiscCap ? atDiscCap / m : 1.0 ) * ga;
 		} else {
-			c += min( disc, vec3( atDiscCap ) );
+			c += min( disc, vec3( atDiscCap ) ) * ga;
 		}
 	}
 	fragColor = vec4( studioOutput( c ), 1.0 );

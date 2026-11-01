@@ -974,6 +974,7 @@
 { "WW_MODPICK_STAY", 3, "src/cellmodpicktest.cpp:394 wwCellModPickHarness | bake/CLI/test path" },
 { "WW_MODPICK_TEST", 3, "src/cellmodpicktest.cpp:377 wwCellModPickHarness | bake/CLI/test path" },
 { "WW_MODPICK_UNTICK", 1, "- | name passed through a variable: conservative" },
+{ "WW_MOON_RED", 0, "src/gl/lookdevstage.cpp:803 wwMoonRed | re-read per frame or per call (a)" },
 { "WW_MORPHCYC_NIFS", 3, "src/morphcyctest.cpp:515 wwMorphCycleHarness | bake/CLI/test path" },
 { "WW_MORPHCYC_SHOT", 3, "src/morphcyctest.cpp:514 wwMorphCycleHarness | bake/CLI/test path" },
 { "WW_MORPHCYC_TEST", 3, "src/morphcyctest.cpp:511 wwMorphCycleHarness | bake/CLI/test path" },

@@ -172,6 +172,50 @@ spot 6). Every change ships ON; the old path is a red. Gates offline through the
   (river, contact, whitecaps) only on water: x the soft edge's water share, nothing over a column under 4 u (0 samples on
   the dry bank vs 73921). Rows ON under new keys WW/CellWaterContact3, WW/CellWaterRiverFoam3. Red
   WW_CELL_WATER_RIVERFOAM_RED=paint. tests/waterfoam2; tests/waterlook2's river foam cover band 0.03 -> 0.015 (lace).
+## FIX1101A moon (2026-11-01): the moon lit like the sun, no step at dusk, no ghost sun, the phase from the ephemeris
+
+- bungo 11-01: "make sure it works well with the moon too", "moon would provide pretty dim light, so make sure its
+  accurate", "why is moon separate from the sun?". The night light IS the cell view's one key light (lookdevstage.cpp
+  computeLight -> fogSunColour / cellDirColor): the moon already took the fog-sun rule of 30dfaadd (only the derived
+  ground layer dims it; the air, the surfaces, the puffs and the WEATHERLOOK1 rain / snow particles through vpLight).
+  Three faults on top, measured on a twin of computeLight (tests/moonlight1101a, DefaultClimate TNAM 30,54,102,126,
+  fSunAlphaTransTime 0.15, fSunShadowMinAngle 30, CommonwealthClear, game day 0, the look env: Sunlight From Sky Full,
+  Moon Phase and Stars on, Sun Path Real):
+  1. the ghost sun: under Sun Path Real the light slerped after the real sunset (17:12) toward the ENGINE's light, which
+     is still its day sun (>= 27.6 deg, the fSunShadowMinAngle floor) at the Day key until the engine's D (19:04:30):
+     the ground lit at 0.656 (86 % of 16:00's) under a dark twilight sky, 17:25-19:04;
+  2. a x14 drop at D (the key switched Day -> Night key, and the phase factor), and at A in the morning;
+  3. the game-clock moon's phase was the vanilla 8-step one (45 degree steps at midnight every 4 game days).
+- Fix (ships ON, gl/moonlight.h): sun part = the Day key through the air toward the REAL sun (0 under the horizon); moon
+  part = the Night key (the record = the full moon at 45 degrees as the night-adapted eye sees it) x Krisciunas &
+  Schaefer at OUR GLOBE's phase angle x the air toward our globe (no more the engine's floored arc) x a night weight
+  (0 at the horizon, 1 by -6 degrees); the light = their sum, its direction their luminance-weighted slerp. Our globe's
+  phase comes from the ephemeris elongation on the game's date and hour (skyephem.h), continuous; its light and its
+  drawn phase are one number (moonAlphaNow). Off Sun Path Real (or off Full) the keys crossfade geometrically over the
+  engine's own 9-minute sun-disc fade (x1.34 a minute) instead of switching at D.
+  A census line per change: `moon light: rule=physical sun_elev= night_w= moon=up|down moon_elev= alpha= ks= sun_lum=
+  moon_lum= light_elev=`.
+- Moonlight vs the sun (cited, notes/fix1101a/moon/MOON_TABLE.md): full moon 0.313 lx above the air (K&S 1991 eqs. 8-9),
+  sun 125.9 klx (V -26.74, NASA), ratio 2.49e-6 (albedo check 0.12 (R/d)^2 = 2.45e-6); quarter x0.091, crescent (135)
+  x0.012. Kyba et al. 2017 measured 0.26 lx at 55.5 deg. The record's Night key is 1/13.8 of its Day key: it bakes ~14.8 EV
+  of night eye adaptation in; the moon is never brighter than its record (gate anchor), the phase and elevation follow
+  the physics.
+- 24d(2), the drawn sun disc and our moon globe through the fog: the Volumetric Air's sky composite (cell_volsky.frag)
+  keeps clamp(T_air / T_sky) of the sky behind it, the bands included, while the light (30dfaadd) takes only the
+  ground layer: Foggy noon at c3 the seen disc was x0.274 of its light's dimming (the moon at 00:00 x0.422; Clear 1.00).
+  Fix (ships ON): the disc and the globe take a gain before the composite, gl/moonlight.h discAirGain =
+  max(T_layer, T_sky / T_band), from the last air pass's medium (cellvolair.cpp wwVolAirMediumNow) at the camera's
+  fog-frame height: they end dimmed as their light. atmo_sky.frag atDiscAir (unset = 1), the globe's sunTerm /
+  earthTerm x WwAtmoFrame.moonDiscAir. Sky line: `,disc_air=<sun>/<moon>`. Red (live): WW_ATMO_DISC_RED=airband (gain 1).
+- Red (live): WW_MOON_RED=handover (the old switch at D + the ghost sun), phase8 (the vanilla 8-step phase), vanilla
+  (both). Stage table: WW_MOON_RED stage 0.
+- Unit tests/moonlight1101a/run.sh: green handover 0.00736 a minute = the real sun's own (red 0.604 at 19:04), ghost 0
+  (red 0.657 at 17:46), anchor 1.000, phase step 0.096 deg / 10 min (red phase8 45), engine path x1.415 a minute (red
+  x13.8), Foggy 00:00 moon 33.7 % of the record (red suncolumn 8.7 %), disc-fog 1.000 (red airband 0.274), header dump
+  vs twin 3e-6 (relative). The rain / snow particles (WEATHERLOOK1 cell_precip.frag) are lit by vpLight with the air's
+  medium uniforms (airSunLayer): the same sun / moon through the same rule (code read, no change). Sweeps base 405 /
+  RTDDGI 270 / PRT 405, not ok 0.
+
 ## FIX1101A atmo (2026-11-01): the night horizon stripe
 
 - SHOTS1101's spot 3 at 22:00 (sheet_lod_proof.png): a flat dark band (18,19,21) between the night sky's horizon glow
