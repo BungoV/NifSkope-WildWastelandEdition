@@ -1,3 +1,37 @@
+## FIX1101A moon (2026-11-01): the moon lit like the sun, no step at dusk, no ghost sun, the phase from the ephemeris
+
+- bungo 11-01: "make sure it works well with the moon too", "moon would provide pretty dim light, so make sure its
+  accurate", "why is moon separate from the sun?". The night light IS the cell view's one key light (lookdevstage.cpp
+  computeLight -> fogSunColour / cellDirColor): the moon already took the fog-sun rule of 30dfaadd (only the derived
+  ground layer dims it; the air, the surfaces, the puffs and the WEATHERLOOK1 rain / snow particles through vpLight).
+  Three faults on top, measured on a twin of computeLight (tests/moonlight1101a, DefaultClimate TNAM 30,54,102,126,
+  fSunAlphaTransTime 0.15, fSunShadowMinAngle 30, CommonwealthClear, game day 0, the look env: Sunlight From Sky Full,
+  Moon Phase and Stars on, Sun Path Real):
+  1. the ghost sun: under Sun Path Real the light slerped after the real sunset (17:12) toward the ENGINE's light, which
+     is still its day sun (>= 27.6 deg, the fSunShadowMinAngle floor) at the Day key until the engine's D (19:04:30):
+     the ground lit at 0.656 (86 % of 16:00's) under a dark twilight sky, 17:25-19:04;
+  2. a x14 drop at D (the key switched Day -> Night key, and the phase factor), and at A in the morning;
+  3. the game-clock moon's phase was the vanilla 8-step one (45 degree steps at midnight every 4 game days).
+- Fix (ships ON, gl/moonlight.h): sun part = the Day key through the air toward the REAL sun (0 under the horizon); moon
+  part = the Night key (the record = the full moon at 45 degrees as the night-adapted eye sees it) x Krisciunas &
+  Schaefer at OUR GLOBE's phase angle x the air toward our globe (no more the engine's floored arc) x a night weight
+  (0 at the horizon, 1 by -6 degrees); the light = their sum, its direction their luminance-weighted slerp. Our globe's
+  phase comes from the ephemeris elongation on the game's date and hour (skyephem.h), continuous; its light and its
+  drawn phase are one number (moonAlphaNow). Off Sun Path Real (or off Full) the keys crossfade geometrically over the
+  engine's own 9-minute sun-disc fade (x1.34 a minute) instead of switching at D.
+  A census line per change: `moon light: rule=physical sun_elev= night_w= moon=up|down moon_elev= alpha= ks= sun_lum=
+  moon_lum= light_elev=`.
+- Moonlight vs the sun (cited, notes/fix1101a/moon/MOON_TABLE.md): full moon 0.313 lx above the air (K&S 1991 eqs. 8-9),
+  sun 125.9 klx (V -26.74, NASA), ratio 2.49e-6 (albedo check 0.12 (R/d)^2 = 2.45e-6); quarter x0.091, crescent (135)
+  x0.012. Kyba et al. 2017 measured 0.26 lx at 55.5 deg. The record's Night key is 1/13.8 of its Day key: it bakes ~14.8 EV
+  of night eye adaptation in; the moon is never brighter than its record (gate anchor), the phase and elevation follow
+  the physics.
+- Red (live): WW_MOON_RED=handover (the old switch at D + the ghost sun), phase8 (the vanilla 8-step phase), vanilla
+  (both). Stage table: WW_MOON_RED stage 0.
+- Unit tests/moonlight1101a/run.sh: green handover 0.00736 a minute = the real sun's own (red 0.604 at 19:04), ghost 0
+  (red 0.657 at 17:46), anchor 1.000, phase step 0.096 deg / 10 min (red phase8 45), engine path x1.415 a minute (red
+  x13.8), Foggy 00:00 moon 33.7 % of the record (red suncolumn 8.7 %), header dump vs twin 7e-8.
+
 ## FIX1101A atmo (2026-11-01): the night horizon stripe
 
 - SHOTS1101's spot 3 at 22:00 (sheet_lod_proof.png): a flat dark band (18,19,21) between the night sky's horizon glow
