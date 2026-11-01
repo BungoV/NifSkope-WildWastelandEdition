@@ -397,6 +397,199 @@ static QByteArray lodtComputeAo( const std::vector<quint16> & grid, int aw, int 
  *  per-form texel totals identical to the read-only census's to the texel.
  * ========================================================================= */
 
+/*! Lane FIX1101A flow (LATE ITEM 10): THE FLOW OVERRIDE SIDECAR, `<ws>.waterflow.txt` beside the `.lodl`.
+ *
+ *  The automatic rules above give a class and a drain to every body from geometry alone, and on the Commonwealth
+ *  they were wrong where bungo looked (notes/watermap: isolated "rivers" that are lakes, swamps with a current, the
+ *  lower Charles / Mystic and every narrow sea-level arm merged into the still sea). The sidecar carries the
+ *  modder's (bungo's) answer, by POSITION: each line names a cell-unit point INSIDE a body, so a later bake that
+ *  numbers bodies differently still finds them. Lines (`#` starts a comment):
+ *    wwflow 1
+ *    body <id> <x> <y> <sea|river|lake|swamp|calm> [dir <fx> <fy> <tx> <ty>]
+ *    join <dam|tributary> <x> <y> into <x> <y>
+ *    path <weight> <radius texels> <x> <y> <x> <y> ...
+ *    channels box <x0> <y0> <x1> <y1> radius <tx> lmin <tx> ocean <x> <y> class <river|sea> speed <u/s>
+ *  lake / swamp / calm = no current (class lake, flow 0). river = solved per texel; `dir` replaces the automatic
+ *  direction (from -> to). join = the first body drains into the second (its sink at their contact, an inflow
+ *  there): the dams' drops and the tributaries the height rule cannot see (same level). path = a drawn current
+ *  (bungo's Neponset bay drawing, the proposal's channel arrows): the solve's conductance x weight within radius
+ *  texels of the polyline, a deeper channel the potential flow follows. channels = the WATERMAP
+ *  channel rule: in the box, sea water outside the ocean's opening (radius texels, the box edge counts as sea) splits
+ *  into one new body per connected part whose farthest texel lies >= lmin texels from the ocean, solved with its
+ *  ocean contact held at 0 and a source on every texel plus its inflows. Red WW_LODL_WATERFLOW_RED=1 or
+ *  --water-no-overrides: the sidecar is not read (the bake of before, byte for byte). */
+struct LodtWaterOverrides
+{
+	struct Body
+	{
+		int line = 0, id = 0, cls = 1;   //!< cls 0 sea, 1 river, 2 still (lake / swamp / calm)
+		double x = 0.0, y = 0.0;
+		QString word;
+		bool dir = false;
+		double fx = 0.0, fy = 0.0, tx = 0.0, ty = 0.0;
+	};
+	struct Join
+	{
+		int line = 0;
+		QString kind;
+		double x0 = 0.0, y0 = 0.0, x1 = 0.0, y1 = 0.0;
+	};
+	//! a drawn current: the solve's conductance x weight within radius texels of the polyline (cell units)
+	struct Path
+	{
+		int line = 0;
+		double weight = 16.0, radius = 6.0;
+		std::vector<double> xy;
+	};
+	QString path;
+	std::vector<Body> bodies;
+	std::vector<Join> joins;
+	std::vector<Path> paths;
+	bool channels = false;
+	int boxX0 = 0, boxY0 = 0, boxX1 = 0, boxY1 = 0, radius = 44, lmin = 30, chanCls = 1;
+	double oceanX = 0.0, oceanY = 0.0, speed = 0.45;
+};
+
+static bool lodtReadWaterOverrides( const QString & path, LodtWaterOverrides & o, QString * err )
+{
+	QFile f( path );
+	if ( !f.open( QIODevice::ReadOnly ) ) {
+		if ( err )
+			*err = QStringLiteral( "cannot open the flow overrides %1" ).arg( path );
+		return false;
+	}
+	o = LodtWaterOverrides();
+	o.path = path;
+	bool version = false;
+	int ln = 0;
+	auto bad = [&]( const QString & m ) {
+		if ( err )
+			*err = QStringLiteral( "%1 line %2: %3" ).arg( path ).arg( ln ).arg( m );
+		return false;
+	};
+	while ( !f.atEnd() ) {
+		QString s = QString::fromUtf8( f.readLine() );
+		ln++;
+		const int hash = s.indexOf( QLatin1Char( '#' ) );
+		if ( hash >= 0 )
+			s.truncate( hash );
+		const QStringList t = s.simplified().split( QLatin1Char( ' ' ), Qt::SkipEmptyParts );
+		if ( t.isEmpty() )
+			continue;
+		bool ok = true;
+		auto num = [&]( int i ) -> double {
+			if ( i >= t.size() ) {
+				ok = false;
+				return 0.0;
+			}
+			bool k = false;
+			const double v = t[i].toDouble( &k );
+			ok = ok && k;
+			return v;
+		};
+		const QString w = t[0].toLower();
+		if ( w == QLatin1String( "wwflow" ) ) {
+			if ( t.size() < 2 || t[1] != QLatin1String( "1" ) )
+				return bad( QStringLiteral( "version %1 is not one this writer reads (1)" ).arg( t.value( 1 ) ) );
+			version = true;
+		} else if ( w == QLatin1String( "worldspace" ) ) {
+			// informative: the sidecar's name already ties it to its file
+		} else if ( w == QLatin1String( "body" ) ) {
+			LodtWaterOverrides::Body b;
+			b.line = ln;
+			b.id = int( num( 1 ) );
+			b.x = num( 2 );
+			b.y = num( 3 );
+			b.word = t.value( 4 ).toLower();
+			if ( b.word == QLatin1String( "sea" ) )
+				b.cls = 0;
+			else if ( b.word == QLatin1String( "river" ) )
+				b.cls = 1;
+			else if ( b.word == QLatin1String( "lake" ) || b.word == QLatin1String( "swamp" )
+				|| b.word == QLatin1String( "calm" ) )
+				b.cls = 2;
+			else
+				return bad( QStringLiteral( "class '%1' is not sea, river, lake, swamp or calm" ).arg( b.word ) );
+			if ( t.size() > 5 ) {
+				if ( t[5].toLower() != QLatin1String( "dir" ) || t.size() < 10 )
+					return bad( QStringLiteral( "after the class only 'dir <fx> <fy> <tx> <ty>' may follow" ) );
+				b.dir = true;
+				b.fx = num( 6 );
+				b.fy = num( 7 );
+				b.tx = num( 8 );
+				b.ty = num( 9 );
+			}
+			if ( !ok )
+				return bad( QStringLiteral( "a body line needs <id> <x> <y> <class> as numbers and a word" ) );
+			o.bodies.push_back( b );
+		} else if ( w == QLatin1String( "join" ) ) {
+			LodtWaterOverrides::Join j;
+			j.line = ln;
+			j.kind = t.value( 1 ).toLower();
+			j.x0 = num( 2 );
+			j.y0 = num( 3 );
+			j.x1 = num( 5 );
+			j.y1 = num( 6 );
+			if ( !ok || t.value( 4 ).toLower() != QLatin1String( "into" ) )
+				return bad( QStringLiteral( "a join line is 'join <kind> <x> <y> into <x> <y>'" ) );
+			o.joins.push_back( j );
+		} else if ( w == QLatin1String( "path" ) ) {
+			LodtWaterOverrides::Path p;
+			p.line = ln;
+			p.weight = num( 1 );
+			p.radius = num( 2 );
+			for ( int i = 3; i < t.size(); i++ )
+				p.xy.push_back( num( i ) );
+			if ( !ok || p.xy.size() < 4 || ( p.xy.size() % 2 ) || p.weight < 1.0 || p.weight > 1000.0
+				|| p.radius < 1.0 || p.radius > 64.0 )
+				return bad( QStringLiteral( "a path line is 'path <weight 1..1000> <radius 1..64> <x> <y> <x> <y> ...'" ) );
+			o.paths.push_back( p );
+		} else if ( w == QLatin1String( "channels" ) ) {
+			o.channels = true;
+			for ( int i = 1; i < t.size() && ok; ) {
+				const QString k = t[i].toLower();
+				if ( k == QLatin1String( "box" ) ) {
+					o.boxX0 = int( num( i + 1 ) );
+					o.boxY0 = int( num( i + 2 ) );
+					o.boxX1 = int( num( i + 3 ) );
+					o.boxY1 = int( num( i + 4 ) );
+					i += 5;
+				} else if ( k == QLatin1String( "radius" ) ) {
+					o.radius = int( num( i + 1 ) );
+					i += 2;
+				} else if ( k == QLatin1String( "lmin" ) ) {
+					o.lmin = int( num( i + 1 ) );
+					i += 2;
+				} else if ( k == QLatin1String( "ocean" ) ) {
+					o.oceanX = num( i + 1 );
+					o.oceanY = num( i + 2 );
+					i += 3;
+				} else if ( k == QLatin1String( "speed" ) ) {
+					o.speed = num( i + 1 );
+					i += 2;
+				} else if ( k == QLatin1String( "class" ) ) {
+					const QString c = t.value( i + 1 ).toLower();
+					if ( c != QLatin1String( "river" ) && c != QLatin1String( "sea" ) )
+						return bad( QStringLiteral( "a channel class is river or sea" ) );
+					o.chanCls = c == QLatin1String( "sea" ) ? 0 : 1;
+					i += 2;
+				} else {
+					return bad( QStringLiteral( "unknown channels key '%1'" ).arg( k ) );
+				}
+			}
+			if ( !ok || o.radius < 1 || o.radius > 512 || o.boxX1 < o.boxX0 || o.boxY1 < o.boxY0 )
+				return bad( QStringLiteral( "a channels line needs box, radius 1..512, lmin, ocean as numbers" ) );
+		} else {
+			return bad( QStringLiteral( "unknown line '%1'" ).arg( t[0] ) );
+		}
+	}
+	if ( !version ) {
+		ln = 0;
+		return bad( QStringLiteral( "no 'wwflow 1' line: not a flow override file" ) );
+	}
+	return true;
+}
+
 //! Everything the water pass reads. It never sees a plugin or a LAND record.
 struct WaterInput
 {
@@ -418,6 +611,10 @@ struct WaterInput
 	const LodtWaterSurface * surface = nullptr;
 	//! Lane WATERSKYVISFAR2: the statics' tops over the input's own cells (LodtOptions::staticTops); empty = none.
 	std::function<bool( const std::function<bool( int, int )> & cellWanted, LodtStaticTops & out )> staticTops;
+	//! Lane FIX1101A flow: the flow override sidecar, or null (= the pass of before, byte for byte).
+	const LodtWaterOverrides * ov = nullptr;
+	QString ovNote;     //!< why there is none, when a flag or the red turned it off (census + summary)
+	QString ovLooked;   //!< the sidecar path looked for and not found (census only)
 };
 
 //! What the pass produces: the sections, already packed, and its own census.
@@ -535,6 +732,11 @@ struct WaterBody
 	int outlet = 0;
 	double nam0X = 0.0, nam0Y = 0.0;
 	bool hasNam0 = false;
+	// lane FIX1101A flow: a channel split from the sea (the sea body's id), and a join's contact (grid texels)
+	int channelOf = 0;
+	double mouthX = 0.0, mouthY = 0.0;   //!< a channel's ocean contact, mean texel
+	bool hasJoin = false;
+	double joinX = 0.0, joinY = 0.0;
 	// accumulators
 	double n = 0, sx = 0, sy = 0, sxx = 0, syy = 0, sxy = 0;
 	double sb = 0, sbb = 0, sxb = 0, syb = 0;
@@ -1236,7 +1438,7 @@ static bool lodtBuildWater( const WaterInput & in, quint64 baseOffset,
 				W.form = in.defaultWaterType;
 		}
 	}
-	const qint64 nBodies = qint64( bodies.size() );
+	qint64 nBodies = qint64( bodies.size() );	// lane FIX1101A flow: the channel split appends bodies
 	if ( nBodies > 65534 )
 		return fail( QString( "%1 water bodies; the body-ID plane is 16-bit" ).arg( nBodies ) );
 
@@ -1247,6 +1449,227 @@ static bool lodtBuildWater( const WaterInput & in, quint64 baseOffset,
 			lut[size_t( b ) + 1] = quint16( cb[size_t( b )].out );
 		for ( size_t i = 0; i < grid.size(); i++ )
 			grid[i] = lut[grid[i]];
+	}
+
+	/* ---- lane FIX1101A flow: the sidecar's CHANNEL SPLIT ---------------------
+	 * notes/watermap/wm_channels.py's rule, step for step: inside the box the sea (every body touching the
+	 * grid's edge) is opened at `radius` texels -- that many erosions then dilations, 4-neighbour on even steps
+	 * and 8-neighbour on odd ones, the box edge padded as sea -- and the OCEAN is the opened part (4-connected)
+	 * holding the ocean point. Every other sea texel in the box is channel water. A BFS from the ocean texels
+	 * touching channel water gives each channel texel its distance; every 4-connected part it reaches whose
+	 * farthest texel is >= lmin becomes a NEW body after the old ids (biggest first), with its sea's height and
+	 * form; the rest (pockets the BFS never reaches, short notches) stays sea. */
+	const LodtWaterOverrides * ov = in.ov;
+	qint64 chanWater = 0, chanSplit = 0, chanPocket = 0, chanShort = 0, chanShortParts = 0;
+	QString chanNote;
+	if ( ov && ov->channels ) {
+		const qint64 R = ov->radius, P = R + 2;
+		const qint64 bx0 = qBound<qint64>( 0, qint64( ov->boxX0 - in.minX ) * spc, gw );
+		const qint64 bx1 = qBound<qint64>( 0, qint64( ov->boxX1 + 1 - in.minX ) * spc, gw );
+		const qint64 by0 = qBound<qint64>( 0, qint64( ov->boxY0 - in.minY ) * spc, gh );
+		const qint64 by1 = qBound<qint64>( 0, qint64( ov->boxY1 + 1 - in.minY ) * spc, gh );
+		const qint64 BW = bx1 - bx0, BH = by1 - by0, PW = BW + 2 * P, PH = BH + 2 * P;
+		std::vector<quint8> isSea( size_t( nBodies ) + 1, quint8( 0 ) );
+		for ( qint64 i = 0; i < nBodies; i++ )
+			isSea[size_t( i ) + 1] = bodies[size_t( i )].edge ? 1 : 0;
+		const qint64 sx = qint64( std::floor( ( ov->oceanX - double( in.minX ) ) * double( spc ) ) ) - bx0;
+		const qint64 sy = qint64( std::floor( ( ov->oceanY - double( in.minY ) ) * double( spc ) ) ) - by0;
+		if ( BW <= 0 || BH <= 0 ) {
+			chanNote = QStringLiteral( "REFUSED: the box holds no texel of this worldspace" );
+		} else if ( sx < 0 || sy < 0 || sx >= BW || sy >= BH ) {
+			chanNote = QStringLiteral( "REFUSED: the ocean point lies outside the box" );
+		} else {
+			std::vector<quint8> pad( size_t( PW * PH ), quint8( 1 ) );   // the box edge counts as sea
+			for ( qint64 y = 0; y < BH; y++ )
+				for ( qint64 x = 0; x < BW; x++ )
+					pad[size_t( ( y + P ) * PW + x + P )] = isSea[grid[size_t( ( by0 + y ) * gw + bx0 + x )]];
+			/* numpy's shifted in-place AND / OR: a neighbour outside the array leaves the texel as it is */
+			auto morph = [&]( std::vector<quint8> & cur, qint64 steps, bool erode ) {
+				std::vector<quint8> nx( cur.size() );
+				for ( qint64 i = 0; i < steps; i++ ) {
+					const bool diag = ( i % 2 ) != 0;
+					for ( qint64 y = 0; y < PH; y++ )
+						for ( qint64 x = 0; x < PW; x++ ) {
+							const size_t k = size_t( y * PW + x );
+							quint8 v = cur[k];
+							for ( int e = 0; e < 8; e++ ) {
+								if ( e >= 4 && !diag )
+									break;
+								static const int ddx[8] = { 0, 0, 1, -1, 1, -1, 1, -1 };
+								static const int ddy[8] = { 1, -1, 0, 0, 1, -1, -1, 1 };
+								const qint64 X = x + ddx[e], Y = y + ddy[e];
+								if ( X < 0 || Y < 0 || X >= PW || Y >= PH )
+									continue;
+								const quint8 u = cur[size_t( Y * PW + X )];
+								v = erode ? quint8( v & u ) : quint8( v | u );
+							}
+							nx[k] = v;
+						}
+					cur.swap( nx );
+				}
+			};
+			std::vector<quint8> opened( pad );
+			morph( opened, R, true );
+			morph( opened, R, false );
+			std::vector<quint8> chan( size_t( BW * BH ), quint8( 0 ) ), ocean( size_t( BW * BH ), quint8( 0 ) );
+			for ( qint64 y = 0; y < BH; y++ )
+				for ( qint64 x = 0; x < BW; x++ ) {
+					const size_t pk = size_t( ( y + P ) * PW + x + P );
+					opened[pk] = quint8( opened[pk] & pad[pk] );
+				}
+			auto openAt = [&]( qint64 x, qint64 y ) { return opened[size_t( ( y + P ) * PW + x + P )] != 0; };
+			auto seaAt = [&]( qint64 x, qint64 y ) { return pad[size_t( ( y + P ) * PW + x + P )] != 0; };
+			if ( !openAt( sx, sy ) ) {
+				chanNote = QStringLiteral( "REFUSED: the ocean point is not open sea at radius %1" ).arg( R );
+			} else {
+				std::vector<qint64> q;
+				q.push_back( sy * BW + sx );
+				ocean[size_t( sy * BW + sx )] = 1;
+				for ( size_t qi = 0; qi < q.size(); qi++ ) {
+					const qint64 x = q[qi] % BW, y = q[qi] / BW;
+					const qint64 nxs[4] = { x, x, x + 1, x - 1 }, nys[4] = { y + 1, y - 1, y, y };
+					for ( int e = 0; e < 4; e++ ) {
+						if ( nxs[e] < 0 || nys[e] < 0 || nxs[e] >= BW || nys[e] >= BH )
+							continue;
+						const size_t k = size_t( nys[e] * BW + nxs[e] );
+						if ( !ocean[k] && openAt( nxs[e], nys[e] ) ) {
+							ocean[k] = 1;
+							q.push_back( qint64( k ) );
+						}
+					}
+				}
+				for ( qint64 y = 0; y < BH; y++ )
+					for ( qint64 x = 0; x < BW; x++ )
+						if ( seaAt( x, y ) && !ocean[size_t( y * BW + x )] ) {
+							chan[size_t( y * BW + x )] = 1;
+							chanWater++;
+						}
+				// distance from the ocean through channel water
+				std::vector<qint32> D( size_t( BW * BH ), qint32( -1 ) );
+				q.clear();
+				for ( qint64 y = 0; y < BH; y++ )
+					for ( qint64 x = 0; x < BW; x++ ) {
+						const size_t k = size_t( y * BW + x );
+						if ( !ocean[k] )
+							continue;
+						const bool touch = ( y + 1 < BH && chan[k + size_t( BW )] ) || ( y > 0 && chan[k - size_t( BW )] )
+							|| ( x + 1 < BW && chan[k + 1] ) || ( x > 0 && chan[k - 1] );
+						if ( touch ) {
+							D[k] = 0;
+							q.push_back( qint64( k ) );
+						}
+					}
+				for ( size_t qi = 0; qi < q.size(); qi++ ) {
+					const qint64 x = q[qi] % BW, y = q[qi] / BW;
+					const qint64 nxs[4] = { x, x, x + 1, x - 1 }, nys[4] = { y + 1, y - 1, y, y };
+					for ( int e = 0; e < 4; e++ ) {
+						if ( nxs[e] < 0 || nys[e] < 0 || nxs[e] >= BW || nys[e] >= BH )
+							continue;
+						const size_t k = size_t( nys[e] * BW + nxs[e] );
+						if ( chan[k] && D[k] < 0 ) {
+							D[k] = D[size_t( q[qi] )] + 1;
+							q.push_back( qint64( k ) );
+						}
+					}
+				}
+				// the reached parts, 4-connected
+				struct Part { qint64 n = 0; qint32 maxD = 0; quint16 sea = 0; double mx = 0.0, my = 0.0; qint64 mn = 0; };
+				std::vector<Part> parts;
+				std::vector<qint32> lab( size_t( BW * BH ), qint32( -1 ) );
+				for ( qint64 s = 0; s < BW * BH; s++ ) {
+					if ( !chan[size_t( s )] )
+						continue;
+					if ( D[size_t( s )] < 0 ) {
+						chanPocket++;
+						continue;
+					}
+					if ( lab[size_t( s )] >= 0 )
+						continue;
+					const qint32 L = qint32( parts.size() );
+					Part pt;
+					pt.sea = grid[size_t( ( by0 + s / BW ) * gw + bx0 + s % BW )];
+					q.clear();
+					q.push_back( s );
+					lab[size_t( s )] = L;
+					for ( size_t qi = 0; qi < q.size(); qi++ ) {
+						const qint64 x = q[qi] % BW, y = q[qi] / BW;
+						pt.n++;
+						pt.maxD = qMax( pt.maxD, D[size_t( q[qi] )] );
+						if ( D[size_t( q[qi] )] == 1 ) {
+							pt.mx += double( bx0 + x );
+							pt.my += double( by0 + y );
+							pt.mn++;
+						}
+						const qint64 nxs[4] = { x, x, x + 1, x - 1 }, nys[4] = { y + 1, y - 1, y, y };
+						for ( int e = 0; e < 4; e++ ) {
+							if ( nxs[e] < 0 || nys[e] < 0 || nxs[e] >= BW || nys[e] >= BH )
+								continue;
+							const size_t k = size_t( nys[e] * BW + nxs[e] );
+							if ( chan[k] && D[k] >= 0 && lab[k] < 0 ) {
+								lab[k] = L;
+								q.push_back( qint64( k ) );
+							}
+						}
+					}
+					parts.push_back( pt );
+				}
+				std::vector<qint32> order;
+				for ( size_t i = 0; i < parts.size(); i++ ) {
+					if ( parts[i].maxD >= ov->lmin && parts[i].sea )
+						order.push_back( qint32( i ) );
+					else {
+						chanShort += parts[i].n;
+						chanShortParts++;
+					}
+				}
+				std::stable_sort( order.begin(), order.end(), [&]( qint32 a, qint32 b ) {
+					return parts[size_t( a )].n > parts[size_t( b )].n;
+				} );
+				if ( nBodies + qint64( order.size() ) > 65534 ) {
+					return fail( QString( "%1 water bodies after the channel split; the body-ID plane is 16-bit" )
+						.arg( nBodies + qint64( order.size() ) ) );
+				}
+				std::vector<quint16> newId( parts.size(), quint16( 0 ) );
+				for ( size_t k = 0; k < order.size(); k++ ) {
+					const Part & pt = parts[size_t( order[k] )];
+					newId[size_t( order[k] )] = quint16( nBodies + qint64( k ) + 1 );
+					const WaterBody & S0 = bodies[size_t( pt.sea ) - 1];
+					WaterBody W;
+					W.wh = S0.wh;
+					W.tq = S0.tq;
+					W.form = S0.form;
+					W.parts = 1;
+					W.x0 = W.y0 = 1 << 30;
+					W.x1 = W.y1 = -1;
+					W.channelOf = int( pt.sea );
+					W.mouthX = pt.mn ? pt.mx / double( pt.mn ) : 0.0;
+					W.mouthY = pt.mn ? pt.my / double( pt.mn ) : 0.0;
+					bodies.push_back( W );
+				}
+				for ( qint64 s = 0; s < BW * BH; s++ ) {
+					const qint32 L = lab[size_t( s )];
+					if ( L < 0 || !newId[size_t( L )] )
+						continue;
+					const qint64 x = bx0 + s % BW, y = by0 + s / BW;
+					quint16 & g = grid[size_t( y * gw + x )];
+					WaterBody & S0 = bodies[size_t( g ) - 1];
+					S0.area--;
+					g = newId[size_t( L )];
+					WaterBody & W = bodies[size_t( g ) - 1];
+					W.area++;
+					W.x0 = qMin( W.x0, qint32( x ) );
+					W.x1 = qMax( W.x1, qint32( x ) );
+					W.y0 = qMin( W.y0, qint32( y ) );
+					W.y1 = qMax( W.y1, qint32( y ) );
+					chanSplit++;
+				}
+				nBodies = qint64( bodies.size() );
+				chanNote = QString( "%1 channel bodies split from the sea (%2 texels); channel water %3 texels, %4 in "
+					"pockets the ocean never reaches, %5 in %6 part(s) under lmin %7 stay sea; opening radius %8" )
+					.arg( order.size() ).arg( chanSplit ).arg( chanWater ).arg( chanPocket ).arg( chanShort )
+					.arg( chanShortParts ).arg( ov->lmin ).arg( R );
+			}
+		}
 	}
 
 	// ---- pass B: the moments the axis, the elongation and the bed need ----
@@ -1308,7 +1731,7 @@ static bool lodtBuildWater( const WaterInput & in, quint64 baseOffset,
 		}
 	}
 	for ( WaterBody & W : bodies )
-		W.bedDrop = W.bedDrop * ( W.tMax - W.tMin );
+		W.bedDrop = W.tMax >= W.tMin ? W.bedDrop * ( W.tMax - W.tMin ) : 0.0;	// lane FIX1101A: a channel has no runs
 
 	// ---- the drainage relation: exact, bucketed at `near` -----------------
 	/* Two texels more than one bucket apart are at least `near`+1 apart, so the
@@ -1450,6 +1873,138 @@ static bool lodtBuildWater( const WaterInput & in, quint64 baseOffset,
 			directionNoSpeed++;
 	}
 
+	/* ---- lane FIX1101A flow: the sidecar's bodies, joins and channels ------
+	 * A point resolves to the body under it (else the nearest wet texel within 4). Bodies first (class, and the
+	 * direction where `dir` names it), then joins (the first body's sink at the contact with the second, the
+	 * second fed there), then each channel: a river draining to its sea, as fast as the fastest body that drains
+	 * into it (else the sidecar's speed), pointing at its ocean contact. */
+	int ovLines = 0, ovMissing = 0, ovMoved = 0, ovStill = 0, ovRiver = 0, ovSea = 0, ovDir = 0, ovNoDir = 0;
+	int joinsApplied = 0, joinsSkipped = 0, chanRivers = 0;
+	if ( ov ) {
+		auto bodyAt = [&]( double x, double y ) -> int {
+			const qint64 gx = qint64( std::floor( ( x - double( in.minX ) ) * double( spc ) ) );
+			const qint64 gy = qint64( std::floor( ( y - double( in.minY ) ) * double( spc ) ) );
+			for ( qint64 r = 0; r <= 4; r++ )
+				for ( qint64 dy = -r; dy <= r; dy++ )
+					for ( qint64 dx = -r; dx <= r; dx++ ) {
+						if ( qMax( qAbs( dx ), qAbs( dy ) ) != r )
+							continue;
+						const qint64 X = gx + dx, Y = gy + dy;
+						if ( X < 0 || Y < 0 || X >= gw || Y >= gh )
+							continue;
+						if ( const quint16 b = grid[size_t( Y * gw + X )] )
+							return int( b );
+					}
+			return 0;
+		};
+		auto mag = []( double a, double b ) { return std::sqrt( a * a + b * b ); };
+		for ( const LodtWaterOverrides::Body & o : ov->bodies ) {
+			ovLines++;
+			const int id = bodyAt( o.x, o.y );
+			if ( !id ) {
+				ovMissing++;
+				continue;
+			}
+			ovMoved += id != o.id;
+			WaterBody & W = bodies[size_t( id ) - 1];
+			if ( W.channelOf )
+				continue;                       // a channel keeps the channel rule
+			const double sp0 = mag( W.flowX, W.flowY ), spN = mag( W.nam0X, W.nam0Y );
+			if ( o.cls != 1 ) {
+				W.cls = o.cls;
+				W.flowSource = 0;
+				W.outlet = 0;
+				W.flowX = W.flowY = 0.0;
+				( o.cls == 2 ? ovStill : ovSea )++;
+				continue;
+			}
+			W.cls = 1;
+			ovRiver++;
+			const double sp = sp0 > 0.0 ? sp0 : ( spN > 0.0 ? spN : ov->speed );
+			if ( o.dir ) {
+				const double dx = o.tx - o.fx, dy = o.ty - o.fy, m = mag( dx, dy );
+				if ( m > 0.0 ) {
+					W.flowX = dx / m * sp;
+					W.flowY = dy / m * sp;
+					if ( !W.flowSource )
+						W.flowSource = 1;
+					ovDir++;
+				}
+			} else if ( sp0 <= 0.0 ) {
+				ovNoDir++;                      // a river the rules gave no direction: a join may give one
+			}
+		}
+		for ( const LodtWaterOverrides::Join & j : ov->joins ) {
+			const int a = bodyAt( j.x0, j.y0 ), b = bodyAt( j.x1, j.y1 );
+			if ( !a || !b || a == b || bodies[size_t( a ) - 1].cls != 1 ) {
+				joinsSkipped++;
+				continue;
+			}
+			WaterBody & W = bodies[size_t( a ) - 1];
+			const qint64 key = ( qint64( qMin( a, b ) ) << 20 ) | qMax( a, b );
+			auto it = nearest.constFind( key );
+			if ( it != nearest.constEnd() ) {
+				W.joinX = it.value().cx;
+				W.joinY = it.value().cy;
+			} else {
+				W.joinX = ( j.x1 - double( in.minX ) ) * double( spc );
+				W.joinY = ( j.y1 - double( in.minY ) ) * double( spc );
+			}
+			W.hasJoin = true;
+			W.outlet = b;
+			W.flowSource = 3;
+			const double mx = W.n > 0 ? W.sx / W.n : 0.0, my = W.n > 0 ? W.sy / W.n : 0.0;
+			const double tx = W.joinX - mx, ty = W.joinY - my;
+			double sp = mag( W.flowX, W.flowY );
+			if ( sp <= 0.0 ) {
+				sp = mag( W.nam0X, W.nam0Y ) > 0.0 ? mag( W.nam0X, W.nam0Y ) : ov->speed;
+				const double sgn = ( tx * W.axX + ty * W.axY ) >= 0.0 ? 1.0 : -1.0;
+				W.flowX = W.axX * sgn * sp;
+				W.flowY = W.axY * sgn * sp;
+			} else if ( tx * W.flowX + ty * W.flowY < 0.0 ) {
+				bool dirLine = false;
+				for ( const LodtWaterOverrides::Body & o : ov->bodies )
+					dirLine = dirLine || ( o.dir && bodyAt( o.x, o.y ) == a );
+				if ( !dirLine ) {               // the drain is downstream: flip the rule's sign, keep the axis
+					W.flowX = -W.flowX;
+					W.flowY = -W.flowY;
+				}
+			}
+			joinsApplied++;
+		}
+		for ( qint64 i = 0; i < nBodies; i++ ) {
+			WaterBody & W = bodies[size_t( i )];
+			if ( !W.channelOf )
+				continue;
+			W.cls = ov->chanCls;
+			W.outlet = W.channelOf;
+			W.flowSource = 0;
+			W.flowX = W.flowY = 0.0;
+			W.hasJoin = false;
+			if ( W.cls != 1 )
+				continue;
+			double sp = 0.0;
+			for ( qint64 k = 0; k < nBodies; k++ ) {
+				const WaterBody & U = bodies[size_t( k )];
+				if ( U.cls == 1 && U.flowSource == 3 && U.outlet == int( i + 1 ) )
+					sp = qMax( sp, mag( U.flowX, U.flowY ) );
+			}
+			if ( sp <= 0.0 )
+				sp = ov->speed;
+			const double mx = W.n > 0 ? W.sx / W.n : 0.0, my = W.n > 0 ? W.sy / W.n : 0.0;
+			double dx = W.mouthX - mx, dy = W.mouthY - my, m = mag( dx, dy );
+			if ( m <= 0.0 ) {
+				dx = W.axX;
+				dy = W.axY;
+				m = 1.0;
+			}
+			W.flowSource = 3;
+			W.flowX = dx / m * sp;
+			W.flowY = dy / m * sp;
+			chanRivers++;
+		}
+	}
+
 	// ---- the sections -----------------------------------------------------
 	const int bodyS = in.opt.bodySamples > 0 ? qMin( in.opt.bodySamples, spc ) : spc;
 	const int flowS = in.opt.flowSamples > 0 ? qMin( in.opt.flowSamples, spc ) : spc;
@@ -1478,7 +2033,8 @@ static bool lodtBuildWater( const WaterInput & in, quint64 baseOffset,
 		std::vector<quint16> word;   //!< empty = the body keeps the constant word
 	};
 	std::vector<RiverField> river;
-	int riversSolved = 0, riversFellBack = 0;
+	int riversSolved = 0, riversFellBack = 0, chanSolved = 0, chanFellBack = 0;	// chan*: lane FIX1101A flow
+	qint64 guidedTexels = 0;	// lane FIX1101A flow: texels a sidecar path deepened
 	qint64 riverTexels = 0, riverIterations = 0;
 	double riverWorstResidual = 0.0, riverSeconds = 0.0;
 	// lane FARWATER4: the written direction (L5) and the moving-water speed floor (L4)
@@ -1512,7 +2068,9 @@ static bool lodtBuildWater( const WaterInput & in, quint64 baseOffset,
 		for ( qint64 i = 0; i < nBodies; i++ ) {
 			const WaterBody & W = bodies[size_t( i )];
 			const std::vector<Lower> & lo = lower[size_t( i )];
-			if ( W.flowSource == 3 && W.outlet > 0 && !lo.empty() && lo[0].body == W.outlet )
+			if ( W.hasJoin && W.outlet > 0 )        // lane FIX1101A flow: a sidecar join feeds at its contact
+				inflow[size_t( W.outlet ) - 1].push_back( { W.joinX, W.joinY } );
+			else if ( W.flowSource == 3 && W.outlet > 0 && !lo.empty() && lo[0].body == W.outlet )
 				inflow[size_t( W.outlet ) - 1].push_back( { lo[0].cx, lo[0].cy } );
 		}
 		// depth = water height - bed, one pass over the rows the rivers cover
@@ -1561,6 +2119,43 @@ static bool lodtBuildWater( const WaterInput & in, quint64 baseOffset,
 					wet[at] = 1;
 					k[at] = qBound( 8.0f, R.depth[at], 1024.0f );
 				}
+			/* lane FIX1101A flow: the sidecar's drawn currents, a deeper channel along each polyline (capsules of
+			 * `radius` texels round every segment; a texel two paths cover takes the larger weight) */
+			if ( ov && !ov->paths.empty() ) {
+				std::vector<float> gk( size_t( w ) * size_t( h ), 1.0f );
+				for ( const LodtWaterOverrides::Path & p : ov->paths ) {
+					const double r = p.radius;
+					for ( size_t s = 0; s + 3 < p.xy.size(); s += 2 ) {
+						const double ax = ( p.xy[s] - double( in.minX ) ) * double( spc ) - 0.5 - double( R.x0 );
+						const double ay = ( p.xy[s + 1] - double( in.minY ) ) * double( spc ) - 0.5 - double( R.y0 );
+						const double bx = ( p.xy[s + 2] - double( in.minX ) ) * double( spc ) - 0.5 - double( R.x0 );
+						const double by = ( p.xy[s + 3] - double( in.minY ) ) * double( spc ) - 0.5 - double( R.y0 );
+						const int x0 = qMax( 0, int( std::floor( qMin( ax, bx ) - r ) ) );
+						const int x1 = qMin( w - 1, int( std::ceil( qMax( ax, bx ) + r ) ) );
+						const int y0 = qMax( 0, int( std::floor( qMin( ay, by ) - r ) ) );
+						const int y1 = qMin( h - 1, int( std::ceil( qMax( ay, by ) + r ) ) );
+						if ( x0 > x1 || y0 > y1 )
+							continue;
+						const double ex = bx - ax, ey = by - ay, ee = ex * ex + ey * ey;
+						for ( int y = y0; y <= y1; y++ )
+							for ( int x = x0; x <= x1; x++ ) {
+								const size_t at = size_t( y ) * size_t( w ) + size_t( x );
+								if ( !wet[at] )
+									continue;
+								const double u = ee > 0.0
+									? qBound( 0.0, ( ( double( x ) - ax ) * ex + ( double( y ) - ay ) * ey ) / ee, 1.0 ) : 0.0;
+								const double dx = double( x ) - ( ax + u * ex ), dy = double( y ) - ( ay + u * ey );
+								if ( dx * dx + dy * dy <= r * r )
+									gk[at] = qMax( gk[at], float( p.weight ) );
+							}
+					}
+				}
+				for ( size_t at = 0; at < gk.size(); at++ )
+					if ( gk[at] > 1.0f ) {
+						k[at] *= gk[at];
+						guidedTexels++;
+					}
+			}
 			R.depth.clear();
 			R.depth.shrink_to_fit();
 			WaterFlowGrid G;
@@ -1583,7 +2178,32 @@ static bool lodtBuildWater( const WaterInput & in, quint64 baseOffset,
 			// the sink: the drain contact, else the texel farthest along the mean flow
 			int sink = -1;
 			const std::vector<Lower> & lo = lower[size_t( i )];
-			if ( W.flowSource == 3 && !lo.empty() ) {
+			/* lane FIX1101A flow: a CHANNEL split from the sea is held at 0 on every texel that touches its sea
+			 * (the ocean contact, Dirichlet) and fed on every texel; a sidecar JOIN drains at its own contact */
+			std::vector<quint8> held;
+			int nHeld = 0;
+			if ( W.channelOf ) {
+				held.assign( size_t( G.n ), quint8( 0 ) );
+				for ( int c = 0; c < G.n; c++ ) {
+					const qint64 gx = R.x0 + G.cx[size_t( c )], gy = R.y0 + G.cy[size_t( c )];
+					const qint64 nxs[4] = { gx - 1, gx + 1, gx, gx }, nys[4] = { gy, gy, gy - 1, gy + 1 };
+					for ( int e = 0; e < 4; e++ ) {
+						if ( nxs[e] < 0 || nys[e] < 0 || nxs[e] >= gw || nys[e] >= gh )
+							continue;
+						if ( grid[size_t( nys[e] * gw + nxs[e] )] == quint16( W.channelOf ) ) {
+							held[size_t( c )] = 1;
+							break;
+						}
+					}
+					if ( held[size_t( c )] ) {
+						nHeld++;
+						if ( sink < 0 )
+							sink = c;
+					}
+				}
+			} else if ( W.hasJoin ) {
+				sink = nearestCell( W.joinX - double( R.x0 ), W.joinY - double( R.y0 ), -1 );
+			} else if ( W.flowSource == 3 && !lo.empty() ) {
 				sink = nearestCell( lo[0].cx - double( R.x0 ), lo[0].cy - double( R.y0 ), -1 );
 			} else {
 				double bt = 0.0;
@@ -1624,10 +2244,29 @@ static bool lodtBuildWater( const WaterInput & in, quint64 baseOffset,
 						q.push_back( nc );
 					}
 				}
-				ok = pieceCells >= 8 && source != sink;
+				ok = pieceCells >= 8 && ( W.channelOf ? nHeld > 0 : source != sink );
 			}
 			std::vector<double> ux, uy;
-			if ( ok ) {
+			if ( ok && W.channelOf ) {
+				// lane FIX1101A flow: the channel, a source on every texel (sum 1) plus 1 per inflow
+				std::vector<double> b( size_t( G.n ), 0.0 );
+				for ( int c = 0; c < G.n; c++ )
+					if ( G.comp[size_t( c )] == piece )
+						b[size_t( c )] = 1.0 / double( pieceCells );
+				for ( const auto & p : inflow[size_t( i )] ) {
+					const int c = nearestCell( p.first - double( R.x0 ), p.second - double( R.y0 ), piece );
+					if ( c >= 0 )
+						b[size_t( c )] += 1.0;
+				}
+				std::vector<double> phi;
+				int it = 0;
+				double res = 0.0;
+				ok = G.solve( b, held, phi, it, res, 1e-8, 40000 ) && res <= 1e-4;
+				riverIterations += it;
+				riverWorstResidual = qMax( riverWorstResidual, res );
+				if ( ok )
+					G.velocity( phi, ux, uy );
+			} else if ( ok ) {
 				std::vector<double> b( size_t( G.n ), 0.0 );
 				double fed = 1.0;
 				/* the source is the upstream END, not one texel: every texel within the last tenth of
@@ -1674,10 +2313,12 @@ static bool lodtBuildWater( const WaterInput & in, quint64 baseOffset,
 					std::nth_element( sp.begin(), sp.begin() + std::ptrdiff_t( sp.size() / 2 ), sp.end() );
 					median = sp[sp.size() / 2];
 				}
-				ok = proj > 0.0 && median > 0.0;
+				// a channel's direction is its ocean contact's by construction (held at 0, fed everywhere)
+				ok = ( proj > 0.0 || W.channelOf ) && median > 0.0;
 			}
 			if ( !ok ) {
 				riversFellBack++;
+				chanFellBack += W.channelOf ? 1 : 0;
 				continue;
 			}
 			double a0 = std::atan2( W.flowY, W.flowX );
@@ -1747,6 +2388,7 @@ static bool lodtBuildWater( const WaterInput & in, quint64 baseOffset,
 				riverTexels++;
 			}
 			riversSolved++;
+			chanSolved += W.channelOf ? 1 : 0;
 		}
 		riverSeconds = double( riverClock.nsecsElapsed() ) / 1e9;
 	}
@@ -2341,6 +2983,45 @@ static bool lodtBuildWater( const WaterInput & in, quint64 baseOffset,
 				.arg( floorRed ? QStringLiteral( " (WW_WATER_SPEED_FLOOR_RED=round)" ) : QString() )
 			: QStringLiteral( "  flow field: off (--water-flow-constant), every body carries its constant word" ) );
 		L << QString();
+		// lane FIX1101A flow: what the sidecar did
+		L << QStringLiteral( "== FLOW OVERRIDES ==" );
+		if ( !ov ) {
+			L << QString( "  none%1%2" ).arg( in.ovNote.isEmpty() ? QString() : QStringLiteral( ": " ) + in.ovNote )
+				.arg( in.ovLooked.isEmpty() ? QString() : QStringLiteral( " (no sidecar at " ) + in.ovLooked + QStringLiteral( ")" ) );
+		} else {
+			L << QString( "  file %1" ).arg( ov->path );
+			L << QString( "  body lines %1: %2 not found, %3 resolved to another id than the line names; "
+					"sea %4, river %5 (%6 with a dir), still %7; %8 river(s) left with no direction" )
+				.arg( ovLines ).arg( ovMissing ).arg( ovMoved ).arg( ovSea ).arg( ovRiver ).arg( ovDir )
+				.arg( ovStill ).arg( ovNoDir );
+			L << QString( "  join lines %1: %2 applied, %3 skipped (a point on no water, the same body twice, or "
+					"a first body that is not a river)" )
+				.arg( int( ov->joins.size() ) ).arg( joinsApplied ).arg( joinsSkipped );
+			L << QString( "  path lines %1: %2 solved texel(s) inside a drawn current (conductance x its weight)" )
+				.arg( int( ov->paths.size() ) ).arg( guidedTexels );
+			if ( ov->channels ) {
+				L << QString( "  channels: %1" ).arg( chanNote );
+				L << QString( "  channels: %1 river(s), %2 solved per texel, %3 kept the constant word" )
+					.arg( chanRivers ).arg( chanSolved ).arg( chanFellBack );
+				for ( qint64 i = 0; i < nBodies; i++ ) {
+					const WaterBody & W = bodies[size_t( i )];
+					if ( !W.channelOf )
+						continue;
+					int fedBy = 0;
+					for ( qint64 k = 0; k < nBodies; k++ )
+						fedBy += ( bodies[size_t( k )].flowSource == 3 && bodies[size_t( k )].outlet == int( i + 1 ) ) ? 1 : 0;
+					L << QString( "    channel %1 of sea %2: %3 texels, cells %4..%5 x %6..%7, mouth %8,%9, "
+							"flow %10 u/s, fed by %11 body(ies)" )
+						.arg( i + 1 ).arg( W.channelOf ).arg( W.area )
+						.arg( in.minX + W.x0 / spc ).arg( in.minX + W.x1 / spc )
+						.arg( in.minY + W.y0 / spc ).arg( in.minY + W.y1 / spc )
+						.arg( double( in.minX ) + W.mouthX / double( spc ), 0, 'f', 2 )
+						.arg( double( in.minY ) + W.mouthY / double( spc ), 0, 'f', 2 )
+						.arg( std::sqrt( W.flowX * W.flowX + W.flowY * W.flowY ), 0, 'f', 3 ).arg( fedBy );
+				}
+			}
+		}
+		L << QString();
 		L << QStringLiteral( "== THE 20 BIGGEST BODIES ==" );
 		L << QStringLiteral( "  id   form     class      area   height parts  elong  aniso flow      cells" );
 		{
@@ -2393,6 +3074,13 @@ static bool lodtBuildWater( const WaterInput & in, quint64 baseOffset,
 				"speed 0 on %6 (%7 lifted)" )
 				.arg( riversSolved ).arg( riverTexels ).arg( riversFellBack ).arg( riverSeconds, 0, 'f', 2 )
 				.arg( riverSmoothed ).arg( riverDead ).arg( riverLifted );
+		if ( ov )   // lane FIX1101A flow
+			out.summary += QString( "; flow overrides %1 body / %2 join line(s) (%3 not found, %4 joins skipped), "
+				"%5 channel(s) split from the sea, %6 solved" )
+				.arg( ovLines ).arg( int( ov->joins.size() ) ).arg( ovMissing ).arg( joinsSkipped )
+				.arg( chanRivers ).arg( chanSolved );
+		else if ( !in.ovNote.isEmpty() )
+			out.summary += QString( "; flow overrides: %1" ).arg( in.ovNote );
 	}
 	if ( error )
 		error->clear();
@@ -3116,6 +3804,31 @@ static bool lodtWriteSource( const LodtSource & src, const QString & outDir,
 			wi.staticTops = [&opts, minX, minY, maxX, maxY]( const std::function<bool( int, int )> & want,
 				LodtStaticTops & o ) { return opts.staticTops( minX, minY, maxX, maxY, want, o ); };
 		wi.surface = surface.texels.empty() ? nullptr : &surface;   // lane WATER1
+		/* lane FIX1101A flow: the override sidecar, named or beside the file (red WW_LODL_WATERFLOW_RED=1) */
+		LodtWaterOverrides waterOv;
+		{
+			const bool ovRed = wwEnv( "WW_LODL_WATERFLOW_RED" ).trimmed() == "1";
+			if ( !opts.water.flowOverrides ) {
+				wi.ovNote = QStringLiteral( "off (--water-no-overrides)" );
+			} else if ( ovRed ) {
+				wi.ovNote = QStringLiteral( "off (WW_LODL_WATERFLOW_RED=1)" );
+			} else {
+				const QFileInfo fi( path );
+				const QString ovPath = !opts.water.flowOverridesPath.isEmpty() ? opts.water.flowOverridesPath
+					: fi.absolutePath() + QStringLiteral( "/" ) + fi.completeBaseName() + QStringLiteral( ".waterflow.txt" );
+				if ( opts.water.flowOverridesPath.isEmpty() && !QFileInfo::exists( ovPath ) ) {
+					wi.ovLooked = ovPath;
+				} else {
+					QString oerr;
+					if ( !lodtReadWaterOverrides( ovPath, waterOv, &oerr ) ) {
+						f.close();
+						QFile::remove( path );
+						return fail( QStringLiteral( "water flow overrides: %1" ).arg( oerr ) );
+					}
+					wi.ov = &waterOv;
+				}
+			}
+		}
 		/* One decoded cell per cell per row, out of the same cache the pyramid
 		 * used, so the two passes over the world cost cache hits and not LAND
 		 * parses. */

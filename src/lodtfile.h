@@ -153,6 +153,12 @@ struct LodtWaterOptions
 	 *  writing zeroes. */
 	QString velocityPlugin;
 	QString reportPath;          //!< --water-report <file>, empty = stdout only
+	/*! Lane FIX1101A flow: the flow OVERRIDE sidecar (bungo's verdicts: body classes, dams and tributary joins, the
+	 *  sea-level channel split), `<ws>.waterflow.txt` beside the `.lodl` being written unless a path is named
+	 *  (--water-flow-overrides <file>). Off (--water-no-overrides, or WW_LODL_WATERFLOW_RED=1) = the sidecar is not
+	 *  read: the bytes of before. A file beside the bake with no `wwflow 1` line, or a bad line, fails the bake. */
+	bool flowOverrides = true;
+	QString flowOverridesPath;
 };
 
 /*! Lane WATERFIX7: one z run of a square's statics (o = the square, row-major from gx0, gy0; lo..hi world z). */

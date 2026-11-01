@@ -1,0 +1,434 @@
+# FO4CS water flow overrides, read by lodgen's .lodl water stage (lane FIX1101A flow, from notes/watermap:
+# bungo_verdicts.csv = ground truth, then the final proposal.csv). Sidecar of <ws>.lodl: the baker reads
+# <ws>.waterflow.txt beside the file it writes (or --water-flow-overrides <file>); --water-no-overrides or
+# WW_LODL_WATERFLOW_RED=1 ignores it (the bake of before, byte for byte).
+# Points are cell units (x east, y north; a texel is 1/32 cell) of a texel INSIDE the body on the bake they were
+# taken from (10-28); the baker resolves each by position and reports an id that moved.
+#   body <id> <x> <y> <class> [dir <fx> <fy> <tx> <ty>]   class: sea | river | lake | swamp | calm
+#        lake / swamp / calm = no current; river = solved per texel (dir: the direction from -> to, when the
+#        automatic rule gets it wrong); a body with no line keeps the automatic rule.
+#   join <dam|tributary> <x> <y> into <x> <y>   the body at the first point drains into the body at the second
+#   channels box <x0> <y0> <x1> <y1> radius <tx> lmin <tx> ocean <x> <y> class <river|sea> speed <u/s>
+#        inside the box, sea water narrower than ~2 x radius texels (opening at that radius; the box edge counts
+#        as sea) that is not the ocean (the opened part holding the ocean point) splits from the sea body: one new
+#        body per connected part whose farthest texel is >= lmin texels from the ocean; each is solved with the
+#        ocean contact held at 0 and a source on every texel plus the bodies that drain into it (dams, joins).
+wwflow 1
+worldspace Commonwealth
+channels box -36 -42 30 36 radius 44 lmin 30 ocean 25 0 class river speed 0.45
+# REVIEW bodies (connectivity rule = lake unless bungo says otherwise): 7 11 33 42 50 55 70
+join dam -13.98438 -3.10938 into -14.01562 -3.10938  # D1: body 3 (Upper Charles (Cutler Bend -> ) over body 1, 12.1 m drop
+join dam -2.73438 9.01562 into -2.73438 8.98438  # D2: body 10 (Upper Mystic (Mystic Pines)) over body 1, 4.3 m drop
+join dam -10.54688 27.82812 into -10.54688 27.79688  # D3: body 102 (Sanctuary hills creek steps) over body 98, 4.1 m drop
+join dam -10.79688 28.04688 into -10.76562 28.04688  # D4: body 105 (Sanctuary hills creek top) over body 102, 3.0 m drop
+join tributary 14.26562 14.01562 into 14.26562 13.98438  # body 6 runs into the sea-level water it meets at cell 14.25,13.97
+join tributary 4.98438 -18.57812 into 5.01562 -18.60938  # body 22 runs into the sea-level water it meets at cell 4.98,-18.59
+body 1 25.51562 0.51562 sea  # the sea | sea body (open water)
+body 2 -3.98438 -29.48438 swamp  # Charles headwater marsh (south of Cutler | WATR ExtMarshDarkWater names a marsh/swamp; baked class river
+body 3 -10.20312 -12.76562 river  # Upper Charles (Cutler Bend -> Charles da | links 2 waters: 1 167; outlet = sea body 1 (across a 12.1 m step)
+body 4 -19.07812 -12.17188 lake  # Lake Cochituate | isolated: touches no other water (8-neighbour), nowhere to flow
+body 5 1.57812 -21.39062 swamp  # Neponset marsh (Quincy Quarries) | bungo 10-31: southern marsh crop, the light blue ones are all a swamp
+body 6 10.35938 19.85938 river  # Saugus River (Parsons -> Saugus Ironwork | one partner (1) and elongated 31; outlet = sea body 1 (same level)
+body 7 -17.39062 21.48438 lake  # Sanctuary creek | isolated: touches no other water (8-neighbour), nowhere to flow; baked class river
+body 8 -0.32812 -25.14062 swamp  # Quincy marsh (Joel) | bungo 10-31: southern marsh crop
+body 9 -21.17188 12.35938 lake  # Wicked Shipping reservoir (dam) | bungo 10-31: This is a lake (class river, WATR ExtLakeForestWater, Wicked Shipping)
+body 10 -3.42188 11.48438 river  # Upper Mystic (Mystic Pines) | one partner (1) and elongated 7; outlet = sea body 1 (across a 4.3 m step)
+body 11 1.10938 27.42188 lake  # north foothills river | isolated: touches no other water (8-neighbour), nowhere to flow; baked class river
+body 12 8.67188 -25.39062 swamp  # Poseidon marsh | bungo 10-31: southern marsh crop
+body 13 1.20312 22.76562 lake  # Lake Quannapowitt | one partner (26), compact (len^2/area 4.7), WATR ExtLakeQuannapowittWater
+body 14 11.92188 -22.54688 swamp  # Warwick marsh pond | WATR ExtMarshScumWater names a marsh/swamp; baked class lake
+body 15 10.48438 -12.17188 lake  # Castle pond | isolated: touches no other water (8-neighbour), nowhere to flow
+body 16 2.35938 17.57812 lake  # Dark Hollow Pond | isolated: touches no other water (8-neighbour), nowhere to flow
+body 17 -17.60938 27.79688 lake  # north foothills S-pond | bungo 10-31: is a lake too (class river, WATR ExtRiverNFoothillsWaterSE, height 10000, S-shaped)
+body 18 -7.07812 -5.98438 lake  # Chestnut Hillock Reservoir | bungo 10-31 (coordinator relay): lake (Chestnut Hillock Reservoir; class river, WATR ExtLakeWater)
+body 19 -2.92188 -22.01562 swamp  # POIJoel02 | bungo 10-31: southern marsh crop
+body 20 5.79688 -25.82812 swamp  # POISC03 | bungo 10-31: southern marsh crop
+body 21 8.01562 -23.32812 swamp  # BillysHouseExt | bungo 10-31: southern marsh crop
+body 22 3.89062 -18.70312 river dir 2.400 -19.000 4.400 -18.500  # Neponset mouth (Neponset Park) | coordinator relay 10-31 with bungo's Neponset bay drawing: body 22 (Neponset mouth) is a river feeding the bay
+body 23 43.98438 -65.60938 lake  #  | isolated: touches no other water (8-neighbour), nowhere to flow
+body 24 -5.48438 -22.14062 swamp  # GNNExt05 | WATR ExtMarshDarkWater names a marsh/swamp; baked class river
+body 25 3.45312 -19.67188 lake  # QuincyQuarriesExt03 | isolated: touches no other water (8-neighbour), nowhere to flow
+body 26 2.95312 24.64062 river  # stream into Lake Quannapowitt | one partner (13) and elongated 66; runs into the larger body 13
+body 27 -7.64062 -28.70312 swamp  #  | WATR ExtMarshDarkWater names a marsh/swamp; baked class lake
+body 28 -17.01562 10.76562 lake  # Walden Pond | isolated: touches no other water (8-neighbour), nowhere to flow
+body 29 0.20312 -17.45312 swamp  # POISC02 | WATR ExtMarshScumWater names a marsh/swamp; baked class lake
+body 30 3.17188 -27.35938 swamp  #  | bungo 10-31: southern marsh crop
+body 31 -23.35938 -69.35938 lake  #  | isolated: touches no other water (8-neighbour), nowhere to flow
+body 32 -22.85938 4.51562 lake  # FederalRationStockpileExt02 | isolated: touches no other water (8-neighbour), nowhere to flow; baked class river
+body 33 -25.98438 18.73438 lake  # POICC09 | isolated: touches no other water (8-neighbour), nowhere to flow; baked class river
+body 34 -6.64062 29.04688 calm  #  | bungo 10-31: calm (baked as river with current)
+body 35 4.45312 -26.64062 swamp  # POISC03 | bungo 10-31: southern marsh crop
+body 36 0.76562 -15.39062 lake  # JamaicaPlainExt03 | isolated: touches no other water (8-neighbour), nowhere to flow
+body 37 -25.73438 23.39062 lake  #  | isolated: touches no other water (8-neighbour), nowhere to flow
+body 38 -9.48438 7.64062 lake  # CorvegaAssemblyPlantExt06 | isolated: touches no other water (8-neighbour), nowhere to flow
+body 39 10.54688 -25.51562 swamp  # POISC01 | bungo 10-31: southern marsh crop
+body 40 -17.64062 2.29688 lake  # ArcjetSystemsExt | isolated: touches no other water (8-neighbour), nowhere to flow; baked class river
+body 41 3.29688 -22.45312 swamp  # AtomatoysFactoryExt04 | bungo 10-31: southern marsh crop
+body 42 -25.70312 17.48438 lake  # POIJS007 | isolated: touches no other water (8-neighbour), nowhere to flow
+body 43 -4.35938 -4.57812 swamp  # Fens stream (Latimer) | WATR ExtMarshDarkWater names a marsh/swamp; baked class river
+body 44 12.85938 25.45312 lake  # ParsonsPOIExt | isolated: touches no other water (8-neighbour), nowhere to flow
+body 45 8.35938 -26.60938 lake  #  | isolated: touches no other water (8-neighbour), nowhere to flow
+body 46 -20.85938 -34.45312 lake  # Glowing Sea pond | isolated: touches no other water (8-neighbour), nowhere to flow
+body 47 8.57812 -22.45312 swamp  # PoseidonEnergyExt | bungo 10-31: southern marsh crop
+body 48 10.64062 -24.39062 swamp  # POISC01 | bungo 10-31: southern marsh crop
+body 49 -1.35938 -18.60938 swamp  # POISC16 | bungo 10-31: southern marsh crop
+body 50 -20.95312 16.45312 lake  # AbernathyFarmExt02 | isolated: touches no other water (8-neighbour), nowhere to flow; baked class river
+body 51 -0.98438 -67.17188 lake  #  | isolated: touches no other water (8-neighbour), nowhere to flow
+body 52 9.64062 -23.07812 swamp  # PoseidonEnergyExt03 | bungo 10-31: southern marsh crop
+body 53 -16.79688 -13.54688 lake  # MassFusionDisposalExt | isolated: touches no other water (8-neighbour), nowhere to flow
+body 54 -24.29688 -28.23438 lake  # GlowingSeaCrater04 | isolated: touches no other water (8-neighbour), nowhere to flow
+body 55 7.17188 24.64062 lake  # POIDeathclawDen01a | isolated: touches no other water (8-neighbour), nowhere to flow; baked class river
+body 56 -2.82812 -23.45312 swamp  # POIJoel02 | WATR ExtMarshDarkWater names a marsh/swamp; baked class lake
+body 57 2.29688 2.92188 lake  # CambridgeConstructionSiteExt | isolated: touches no other water (8-neighbour), nowhere to flow
+body 58 -15.82812 1.73438 lake  # ArcjetSystemsExt | isolated: touches no other water (8-neighbour), nowhere to flow; baked class river
+body 59 -20.57812 2.95312 lake  # POIJoel01 | isolated: touches no other water (8-neighbour), nowhere to flow; baked class river
+body 60 -21.54688 -34.39062 lake  # GlowingSeaSentinelSiteExt | isolated: touches no other water (8-neighbour), nowhere to flow
+body 61 -3.73438 -26.79688 swamp  #  | WATR ExtMarshDarkWater names a marsh/swamp; baked class lake
+body 62 -0.39062 1.89062 lake  # CambridgeCraterExt02 | isolated: touches no other water (8-neighbour), nowhere to flow
+body 63 6.17188 -16.32812 lake  # POIMilitaryBB01 | isolated: touches no other water (8-neighbour), nowhere to flow
+body 64 -0.35938 -27.35938 swamp  # POIJoel03 | WATR ExtMarshDarkWater names a marsh/swamp; baked class lake
+body 65 -4.29688 -29.32812 swamp  #  | WATR ExtMarshDarkWater names a marsh/swamp; baked class lake
+body 66 -10.48438 18.48438 lake  # ThicketExcavationsExt05 | isolated: touches no other water (8-neighbour), nowhere to flow
+body 67 -30.42188 -28.23438 lake  # GlowingSeaPOIDB08 | isolated: touches no other water (8-neighbour), nowhere to flow
+body 68 11.42188 -26.39062 lake  # POISC01 | isolated: touches no other water (8-neighbour), nowhere to flow
+body 69 16.85938 12.29688 lake  # VitalePumphouseExt | isolated: touches no other water (8-neighbour), nowhere to flow
+body 70 17.45312 27.20312 lake  # POIRJ13 | isolated: touches no other water (8-neighbour), nowhere to flow; baked class river
+body 71 0.35938 -20.95312 swamp  # SuffolkCountyCharterSchoolExt | WATR ExtMarshScumWater names a marsh/swamp; baked class lake
+body 72 -5.35938 28.85938 calm  #  | bungo 10-31: calm (baked as river with current)
+body 73 3.17188 -21.20312 swamp  # QuincyQuarriesExt02 | WATR ExtMarshScumWater names a marsh/swamp; baked class river
+body 74 -1.17188 -21.14062 swamp  # POISC19 | WATR ExtMarshScumWater names a marsh/swamp; baked class lake
+body 75 -5.42188 -28.64062 swamp  #  | WATR ExtMarshDarkWater names a marsh/swamp; baked class lake
+body 76 0.85938 3.26562 lake  # CambridgeConstructionSiteExt02 | isolated: touches no other water (8-neighbour), nowhere to flow
+body 77 -21.35938 -19.85938 lake  # GlowingSeaPOIJS01 | isolated: touches no other water (8-neighbour), nowhere to flow
+body 78 -15.48438 27.76562 lake  #  | isolated: touches no other water (8-neighbour), nowhere to flow
+body 79 -11.39062 13.32812 lake  # StarlightDriveInExt02 | isolated: touches no other water (8-neighbour), nowhere to flow
+body 80 -5.20312 -25.20312 swamp  # POIJS036 | WATR ExtMarshDarkWater names a marsh/swamp; baked class lake
+body 81 -24.39062 17.32812 lake  # POIJS007 | isolated: touches no other water (8-neighbour), nowhere to flow; baked class river
+body 82 4.89062 -26.20312 swamp  # POISC03 | WATR ExtMarshDarkWater names a marsh/swamp; baked class river
+body 83 -21.89062 -19.29688 lake  # GlowingSeaPOIJS01 | isolated: touches no other water (8-neighbour), nowhere to flow
+body 84 10.64062 1.39062 lake  # EastBostonPrepSchoolExt03 | isolated: touches no other water (8-neighbour), nowhere to flow
+body 85 12.85938 -22.64062 swamp  # POISC07 | WATR ExtMarshScumWater names a marsh/swamp; baked class river
+body 86 -5.95312 -17.60938 lake  # CutlerBendExt | isolated: touches no other water (8-neighbour), nowhere to flow
+body 87 7.45312 -26.32812 lake  #  | isolated: touches no other water (8-neighbour), nowhere to flow
+body 88 52.57812 -64.26562 lake  #  | isolated: touches no other water (8-neighbour), nowhere to flow; baked class river
+body 89 -19.26562 -8.48438 lake  # MassPikeInterchangeExt05 | isolated: touches no other water (8-neighbour), nowhere to flow
+body 90 -16.76562 4.17188 lake  # ArcjetSystemsExt | isolated: touches no other water (8-neighbour), nowhere to flow; baked class river
+body 91 -4.82812 -25.01562 swamp  # POIJS036 | WATR ExtMarshDarkWater names a marsh/swamp; baked class lake
+body 92 -19.39062 -21.42188 lake  # GlowingSeaPOIJB01c | isolated: touches no other water (8-neighbour), nowhere to flow
+body 93 25.29688 36.14062 lake  #  | isolated: touches no other water (8-neighbour), nowhere to flow
+body 94 16.92188 2.60938 lake  # LibertaliaSouthExt | isolated: touches no other water (8-neighbour), nowhere to flow
+body 95 -15.10938 27.51562 lake  #  | isolated: touches no other water (8-neighbour), nowhere to flow
+body 96 -5.07812 -3.57812 lake  # USSRiptideExt | isolated: touches no other water (8-neighbour), nowhere to flow
+body 97 -5.14062 -4.73438 lake  # FensRaiderCampExt02 | one partner (43), compact (len^2/area 3.9), WATR ExtOceanWater
+body 98 -10.39062 27.73438 river  #  | one partner (102) and WATR ExtCreekSanctuaryWater; baked class lake; source = higher body 102, runs away from 
+body 99 -9.23438 7.17188 lake  # CorvegaAssemblyPlantExt04 | isolated: touches no other water (8-neighbour), nowhere to flow
+body 100 -5.60938 -22.79688 swamp  # POIJS036 | WATR ExtMarshDarkWater names a marsh/swamp; baked class river
+body 101 -14.17188 -14.42188 lake  # POIJoel06 | isolated: touches no other water (8-neighbour), nowhere to flow
+body 102 -10.67188 27.92188 river  # Sanctuary hills creek steps | links 2 waters: 98 105; outlet = lower body 98 (6577 u)
+body 103 6.26562 2.67188 lake  # USSConstitutionExt | isolated: touches no other water (8-neighbour), nowhere to flow
+body 104 -11.29688 14.39062 lake  # StarlightDriveInExt02 | isolated: touches no other water (8-neighbour), nowhere to flow; baked class river
+body 105 -10.95312 27.98438 river  # Sanctuary hills creek top | one partner (102) and elongated 9; outlet = lower body 102 (6861 u)
+body 106 1.89062 -8.20312 lake  # BackBayCarDealershipExt | isolated: touches no other water (8-neighbour), nowhere to flow
+body 107 1.82812 -3.89062 lake  # BostonCommonExt | isolated: touches no other water (8-neighbour), nowhere to flow; baked class river
+body 108 -27.48438 76.51562 lake  #  | isolated: touches no other water (8-neighbour), nowhere to flow; baked class river
+body 109 -26.48438 76.51562 lake  #  | isolated: touches no other water (8-neighbour), nowhere to flow; baked class river
+body 110 -25.48438 76.51562 lake  #  | isolated: touches no other water (8-neighbour), nowhere to flow; baked class river
+body 111 -24.48438 76.51562 lake  #  | isolated: touches no other water (8-neighbour), nowhere to flow; baked class river
+body 112 -23.48438 76.51562 lake  #  | isolated: touches no other water (8-neighbour), nowhere to flow; baked class river
+body 113 -22.48438 76.51562 lake  #  | isolated: touches no other water (8-neighbour), nowhere to flow; baked class river
+body 114 -21.48438 76.51562 lake  #  | isolated: touches no other water (8-neighbour), nowhere to flow; baked class river
+body 115 -20.48438 76.51562 lake  #  | isolated: touches no other water (8-neighbour), nowhere to flow; baked class river
+body 116 -19.48438 76.51562 lake  #  | isolated: touches no other water (8-neighbour), nowhere to flow; baked class river
+body 117 -18.48438 76.51562 lake  #  | isolated: touches no other water (8-neighbour), nowhere to flow; baked class river
+body 118 -17.48438 76.51562 lake  #  | isolated: touches no other water (8-neighbour), nowhere to flow; baked class river
+body 119 -16.48438 76.51562 lake  #  | isolated: touches no other water (8-neighbour), nowhere to flow; baked class river
+body 120 -15.48438 76.51562 lake  #  | isolated: touches no other water (8-neighbour), nowhere to flow; baked class river
+body 121 -14.48438 76.51562 lake  #  | isolated: touches no other water (8-neighbour), nowhere to flow; baked class river
+body 122 -11.48438 76.51562 lake  #  | isolated: touches no other water (8-neighbour), nowhere to flow; baked class river
+body 123 -8.48438 76.51562 lake  #  | isolated: touches no other water (8-neighbour), nowhere to flow; baked class river
+body 124 -7.48438 76.51562 lake  #  | isolated: touches no other water (8-neighbour), nowhere to flow; baked class river
+body 125 -6.48438 76.51562 lake  #  | isolated: touches no other water (8-neighbour), nowhere to flow; baked class river
+body 126 -5.48438 76.51562 lake  #  | isolated: touches no other water (8-neighbour), nowhere to flow; baked class river
+body 127 -4.48438 76.51562 lake  #  | isolated: touches no other water (8-neighbour), nowhere to flow; baked class river
+body 128 -31.45312 76.51562 lake  #  | isolated: touches no other water (8-neighbour), nowhere to flow; baked class river
+body 129 -30.45312 76.51562 lake  #  | isolated: touches no other water (8-neighbour), nowhere to flow; baked class river
+body 130 -29.45312 76.51562 lake  #  | isolated: touches no other water (8-neighbour), nowhere to flow; baked class river
+body 131 -28.45312 76.51562 lake  #  | isolated: touches no other water (8-neighbour), nowhere to flow; baked class river
+body 132 -13.45312 76.51562 lake  #  | isolated: touches no other water (8-neighbour), nowhere to flow; baked class river
+body 133 -12.45312 76.51562 lake  #  | isolated: touches no other water (8-neighbour), nowhere to flow; baked class river
+body 134 -10.45312 76.51562 lake  #  | isolated: touches no other water (8-neighbour), nowhere to flow; baked class river
+body 135 -9.45312 76.51562 lake  #  | isolated: touches no other water (8-neighbour), nowhere to flow; baked class river
+body 136 -75.45312 76.51562 lake  #  | isolated: touches no other water (8-neighbour), nowhere to flow; baked class river
+body 137 -34.45312 76.51562 lake  #  | isolated: touches no other water (8-neighbour), nowhere to flow; baked class river
+body 138 -33.45312 76.51562 lake  #  | isolated: touches no other water (8-neighbour), nowhere to flow; baked class river
+body 139 -32.45312 76.51562 lake  #  | isolated: touches no other water (8-neighbour), nowhere to flow; baked class river
+body 140 -74.42188 76.51562 lake  #  | isolated: touches no other water (8-neighbour), nowhere to flow; baked class river
+body 141 -42.42188 76.51562 lake  #  | isolated: touches no other water (8-neighbour), nowhere to flow; baked class river
+body 142 -41.42188 76.51562 lake  #  | isolated: touches no other water (8-neighbour), nowhere to flow; baked class river
+body 143 -40.42188 76.51562 lake  #  | isolated: touches no other water (8-neighbour), nowhere to flow; baked class river
+body 144 -39.42188 76.51562 lake  #  | isolated: touches no other water (8-neighbour), nowhere to flow; baked class river
+body 145 -38.42188 76.51562 lake  #  | isolated: touches no other water (8-neighbour), nowhere to flow; baked class river
+body 146 -37.42188 76.51562 lake  #  | isolated: touches no other water (8-neighbour), nowhere to flow; baked class river
+body 147 -36.42188 76.51562 lake  #  | isolated: touches no other water (8-neighbour), nowhere to flow; baked class river
+body 148 -35.42188 76.51562 lake  #  | isolated: touches no other water (8-neighbour), nowhere to flow; baked class river
+body 149 19.07812 -16.70312 lake  # SpectacleIslandExt14 | isolated: touches no other water (8-neighbour), nowhere to flow
+body 150 -73.42188 76.51562 lake  #  | isolated: touches no other water (8-neighbour), nowhere to flow; baked class river
+body 151 -72.42188 76.51562 lake  #  | isolated: touches no other water (8-neighbour), nowhere to flow; baked class river
+body 152 -50.42188 76.51562 lake  #  | isolated: touches no other water (8-neighbour), nowhere to flow; baked class river
+body 153 -49.42188 76.51562 lake  #  | isolated: touches no other water (8-neighbour), nowhere to flow; baked class river
+body 154 -48.42188 76.51562 lake  #  | isolated: touches no other water (8-neighbour), nowhere to flow; baked class river
+body 155 -47.42188 76.51562 lake  #  | isolated: touches no other water (8-neighbour), nowhere to flow; baked class river
+body 156 -46.42188 76.51562 lake  #  | isolated: touches no other water (8-neighbour), nowhere to flow; baked class river
+body 157 -45.42188 76.51562 lake  #  | isolated: touches no other water (8-neighbour), nowhere to flow; baked class river
+body 158 -44.42188 76.51562 lake  #  | isolated: touches no other water (8-neighbour), nowhere to flow; baked class river
+body 159 -43.42188 76.51562 lake  #  | isolated: touches no other water (8-neighbour), nowhere to flow; baked class river
+body 160 0.98438 -20.70312 swamp  # SuffolkCountyCharterSchoolExt02 | WATR ExtMarshScumWater names a marsh/swamp; baked class river
+body 161 -71.39062 76.51562 lake  #  | isolated: touches no other water (8-neighbour), nowhere to flow; baked class river
+body 162 -70.39062 76.51562 lake  #  | isolated: touches no other water (8-neighbour), nowhere to flow; baked class river
+body 163 -53.39062 76.51562 lake  #  | isolated: touches no other water (8-neighbour), nowhere to flow; baked class river
+body 164 -52.39062 76.51562 lake  #  | isolated: touches no other water (8-neighbour), nowhere to flow; baked class river
+body 165 -51.39062 76.51562 lake  #  | isolated: touches no other water (8-neighbour), nowhere to flow; baked class river
+body 166 -4.89062 -25.42188 swamp  # POIJS036 | WATR ExtMarshDarkWater names a marsh/swamp; baked class lake
+body 167 -5.76562 -21.04688 swamp  # GNNExt06 | WATR ExtMarshDarkWater names a marsh/swamp; baked class lake
+body 168 -69.39062 76.51562 lake  #  | isolated: touches no other water (8-neighbour), nowhere to flow; baked class river
+body 169 -67.39062 76.51562 lake  #  | isolated: touches no other water (8-neighbour), nowhere to flow; baked class river
+body 170 -56.39062 76.51562 lake  #  | isolated: touches no other water (8-neighbour), nowhere to flow; baked class river
+body 171 -55.39062 76.51562 lake  #  | isolated: touches no other water (8-neighbour), nowhere to flow; baked class river
+body 172 -54.39062 76.51562 lake  #  | isolated: touches no other water (8-neighbour), nowhere to flow; baked class river
+body 173 3.35938 -21.67188 swamp  # AtomatoysFactoryExt04 | WATR ExtMarshScumWater names a marsh/swamp; baked class river
+body 174 -68.35938 76.51562 lake  #  | isolated: touches no other water (8-neighbour), nowhere to flow; baked class river
+body 175 -59.35938 76.51562 lake  #  | isolated: touches no other water (8-neighbour), nowhere to flow; baked class river
+body 176 -58.35938 76.51562 lake  #  | isolated: touches no other water (8-neighbour), nowhere to flow; baked class river
+body 177 -57.35938 76.51562 lake  #  | isolated: touches no other water (8-neighbour), nowhere to flow; baked class river
+body 178 0.48438 -19.14062 swamp  # HydeParkExt06 | WATR ExtMarshScumWater names a marsh/swamp; baked class lake
+body 179 -60.35938 76.51562 lake  #  | isolated: touches no other water (8-neighbour), nowhere to flow; baked class river
+body 180 -5.95312 -24.26562 swamp  # POIJS036 | WATR ExtMarshDarkWater names a marsh/swamp; baked class lake
+body 181 -1.35938 -3.26562 lake  # BackStreetApparelExt | isolated: touches no other water (8-neighbour), nowhere to flow
+body 182 53.20312 -64.39062 lake  #  | fragment of 19 texels (puddle / sliver beside land); baked class river
+body 183 14.42188 -20.39062 lake  # WreckoftheFMSNorthernStarExt01 | fragment of 19 texels (puddle / sliver beside land)
+body 184 11.54688 -24.07812 lake  # POISC01 | fragment of 18 texels (puddle / sliver beside land)
+body 185 -23.89062 -69.92188 lake  #  | fragment of 17 texels (puddle / sliver beside land)
+body 186 2.04688 -14.98438 lake  # JamaicaPlainExt02 | fragment of 17 texels (puddle / sliver beside land)
+body 187 -31.29688 -27.29688 lake  # GlowingSeaPOIDB08 | fragment of 16 texels (puddle / sliver beside land)
+body 188 6.95312 -25.23438 swamp  # QuincyRuinsExt07 | WATR ExtMarshDarkWater names a marsh/swamp; baked class lake
+body 189 11.98438 -21.92188 swamp  # POISC07 | WATR ExtMarshScumWater names a marsh/swamp; baked class lake
+body 190 7.54688 -17.42188 lake  # POIMilitaryBB01 | fragment of 14 texels (puddle / sliver beside land)
+body 191 44.92188 -66.98438 lake  #  | fragment of 13 texels (puddle / sliver beside land)
+body 192 7.20312 -25.73438 swamp  # QuincyRuinsExt07 | WATR ExtMarshScumWater names a marsh/swamp; baked class lake
+body 193 -2.10938 -22.17188 swamp  # POIJoel02 | WATR ExtMarshDarkWater names a marsh/swamp; baked class lake
+body 194 -7.39062 -5.17188 lake  # ChestnutHillockReservoirExt03 | fragment of 13 texels (puddle / sliver beside land)
+body 195 8.04688 -2.17188 lake  # WaterfrontExtN | fragment of 13 texels (puddle / sliver beside land)
+body 196 5.85938 -1.73438 lake  # FaneuilHallExt | fragment of 13 texels (puddle / sliver beside land)
+body 197 -10.73438 21.04688 lake  # USAFSatelliteExt | fragment of 13 texels (puddle / sliver beside land)
+body 198 11.20312 -24.64062 lake  # POISC01 | fragment of 12 texels (puddle / sliver beside land)
+body 199 0.82812 -21.10938 swamp  # SuffolkCountyCharterSchoolExt02 | WATR ExtMarshScumWater names a marsh/swamp; baked class lake
+body 200 -14.67188 -14.10938 lake  # POIJoel06 | fragment of 12 texels (puddle / sliver beside land)
+body 201 15.10938 12.20312 lake  # VitalePumphouseExt | fragment of 11 texels (puddle / sliver beside land)
+body 202 7.39062 -17.64062 lake  # AtomCatsGarageExt | fragment of 10 texels (puddle / sliver beside land)
+body 203 -15.51562 -4.67188 lake  # ForestGroveMarshExt05 | fragment of 10 texels (puddle / sliver beside land)
+body 204 7.89062 -4.42188 lake  # WaterfrontExtE | fragment of 10 texels (puddle / sliver beside land)
+body 205 12.23438 -11.17188 lake  # TheCastleExt08 | fragment of 8 texels (puddle / sliver beside land)
+body 206 4.39062 0.76562 lake  # CabotHouseExt | fragment of 8 texels (puddle / sliver beside land)
+body 207 1.98438 4.89062 lake  # BADTFLExt02 | fragment of 8 texels (puddle / sliver beside land)
+body 208 0.01562 -20.57812 swamp  # SuffolkCountyCharterSchoolExt | WATR ExtMarshScumWater names a marsh/swamp; baked class lake
+body 209 2.20312 -15.76562 lake  # JamaicaPlainExt05 | fragment of 7 texels (puddle / sliver beside land)
+body 210 2.17188 -14.82812 lake  # JamaicaPlainExt02 | fragment of 7 texels (puddle / sliver beside land)
+body 211 5.70312 -1.92188 lake  # FaneuilHallExt | fragment of 7 texels (puddle / sliver beside land)
+body 212 0.92188 2.82812 lake  # CambridgeConstructionSiteExt02 | fragment of 7 texels (puddle / sliver beside land)
+body 213 2.26562 11.54688 lake  # TaffingtonBoatHouseExt | fragment of 7 texels (puddle / sliver beside land)
+body 214 17.01562 17.64062 lake  # DunwichBorersExt05 | fragment of 7 texels (puddle / sliver beside land)
+body 215 45.32812 -66.85938 lake  #  | fragment of 6 texels (puddle / sliver beside land); baked class river
+body 216 51.95312 -64.20312 lake  #  | fragment of 6 texels (puddle / sliver beside land)
+body 217 -30.92188 -27.64062 lake  # GlowingSeaPOIDB08 | fragment of 6 texels (puddle / sliver beside land)
+body 218 2.20312 -14.48438 lake  # POISC13 | fragment of 6 texels (puddle / sliver beside land)
+body 219 2.04688 -14.45312 lake  # POISC13 | fragment of 6 texels (puddle / sliver beside land)
+body 220 4.64062 -4.07812 lake  # GoodneighborExt02 | fragment of 6 texels (puddle / sliver beside land)
+body 221 -5.29688 -30.29688 swamp  #  | WATR ExtMarshDarkWater names a marsh/swamp; baked class lake
+body 222 -5.67188 -26.57812 swamp  # POIJS036 | WATR ExtMarshDarkWater names a marsh/swamp; baked class lake
+body 223 8.98438 -20.23438 lake  # POISC11 | fragment of 5 texels (puddle / sliver beside land)
+body 224 2.26562 -15.07812 lake  # JamaicaPlainExt02 | fragment of 5 texels (puddle / sliver beside land)
+body 225 1.95312 -14.95312 lake  # JamaicaPlainExt02 | fragment of 5 texels (puddle / sliver beside 186)
+body 226 0.45312 3.60938 lake  # CambridgeConstructionSiteExt02 | fragment of 5 texels (puddle / sliver beside land)
+body 227 2.57812 4.51562 lake  # BADTFLExt | fragment of 5 texels (puddle / sliver beside land)
+body 228 -6.04688 -17.95312 lake  # CutlerBendExt | fragment of 4 texels (puddle / sliver beside land)
+body 229 11.32812 -11.60938 lake  # TheCastleExt | fragment of 4 texels (puddle / sliver beside land)
+body 230 -21.07812 -9.48438 lake  # LakeCochituateExt02 | fragment of 4 texels (puddle / sliver beside land)
+body 231 2.01562 -7.98438 lake  # BackBayCarDealershipExt | fragment of 4 texels (puddle / sliver beside land)
+body 232 -6.35938 -5.01562 lake  # FensRaiderCampExt | fragment of 4 texels (puddle / sliver beside land)
+body 233 -15.29688 -4.20312 lake  # ForestGroveMarshExt03 | fragment of 4 texels (puddle / sliver beside land)
+body 234 8.79688 -2.85938 lake  # CustomHouseTowerExt | fragment of 4 texels (puddle / sliver beside land)
+body 235 5.67188 -1.67188 lake  # FaneuilHallExt | fragment of 4 texels (puddle / sliver beside land)
+body 236 6.23438 1.10938 lake  # POIMilitaryMC02 | fragment of 4 texels (puddle / sliver beside land)
+body 237 -31.07812 -27.57812 lake  # GlowingSeaPOIDB08 | fragment of 3 texels (puddle / sliver beside land)
+body 238 -5.45312 -26.64062 swamp  # POIJS036 | WATR ExtMarshDarkWater names a marsh/swamp; baked class lake
+body 239 4.73438 -23.98438 swamp  # POISC03 | WATR ExtMarshScumWater names a marsh/swamp; baked class lake
+body 240 -2.35938 -23.01562 swamp  # POIJoel02 | WATR ExtMarshDarkWater names a marsh/swamp; baked class lake
+body 241 -2.42188 -21.95312 swamp  # POIJoel02 | WATR ExtMarshDarkWater names a marsh/swamp; baked class lake
+body 242 8.92188 -12.29688 lake  # SouthBostonExtS | fragment of 3 texels (puddle / sliver beside land)
+body 243 4.04688 -6.89062 lake  # MassBayMedicalCenterExt | fragment of 3 texels (puddle / sliver beside land)
+body 244 -12.51562 -6.14062 lake  # MQ106TrackingSite03 | fragment of 3 texels (puddle / sliver beside land)
+body 245 8.07812 -0.79688 lake  # NorthEndPOI02Ext | fragment of 3 texels (puddle / sliver beside land)
+body 246 -10.67188 18.23438 lake  # ThicketExcavationsExt | fragment of 3 texels (puddle / sliver beside land)
+body 247 -24.01562 -70.07812 lake  #  | fragment of 2 texels (puddle / sliver beside land)
+body 248 -30.98438 -27.51562 lake  # GlowingSeaPOIDB08 | fragment of 2 texels (puddle / sliver beside land)
+body 249 -31.14062 -27.48438 lake  # GlowingSeaPOIDB08 | fragment of 2 texels (puddle / sliver beside land)
+body 250 -5.07812 -26.32812 swamp  # POIJS036 | WATR ExtMarshDarkWater names a marsh/swamp; baked class lake
+body 251 7.85938 -26.32812 lake  #  | fragment of 2 texels (puddle / sliver beside land)
+body 252 -5.14062 -25.54688 swamp  # POIJS036 | WATR ExtMarshDarkWater names a marsh/swamp; baked class lake
+body 253 11.48438 -23.98438 swamp  # POISC01 | WATR ExtMarshScumWater names a marsh/swamp; baked class lake
+body 254 11.82812 -22.51562 swamp  # POISC07 | WATR ExtMarshScumWater names a marsh/swamp; baked class lake
+body 255 3.01562 -21.64062 swamp  # QuincyQuarriesExt02 | WATR ExtMarshScumWater names a marsh/swamp; baked class lake
+body 256 0.23438 -21.32812 swamp  # SuffolkCountyCharterSchoolExt | WATR ExtMarshScumWater names a marsh/swamp; baked class lake
+body 257 0.39062 -19.26562 swamp  # HydeParkExt06 | WATR ExtMarshScumWater names a marsh/swamp; baked class lake
+body 258 2.64062 -18.73438 swamp  # HydeParkExt02 | WATR ExtMarshScumWater names a marsh/swamp; baked class lake
+body 259 2.42188 -14.95312 lake  # JamaicaPlainExt02 | fragment of 2 texels (puddle / sliver beside land)
+body 260 2.73438 -14.54688 lake  # JamaicaPlainExt | fragment of 2 texels (puddle / sliver beside land)
+body 261 6.20312 -13.23438 lake  # UniversityPointExt05 | fragment of 2 texels (puddle / sliver beside land)
+body 262 8.07812 -12.73438 lake  # SouthBostonExtS | fragment of 2 texels (puddle / sliver beside land)
+body 263 8.10938 -3.98438 lake  # CustomHouseTowerExt | fragment of 2 texels (puddle / sliver beside land)
+body 264 8.70312 -2.35938 lake  # WaterfrontExtN | fragment of 2 texels (puddle / sliver beside land)
+body 265 5.60938 -1.82812 lake  # FaneuilHallExt | fragment of 2 texels (puddle / sliver beside land)
+body 266 0.54688 -0.64062 lake  # CambridgeCampKendallExt | fragment of 2 texels (puddle / sliver beside land)
+body 267 16.51562 -0.51562 lake  # FortStrongExt | fragment of 2 texels (puddle / sliver beside land)
+body 268 10.01562 1.95312 lake  # EastBostonPrepSchoolExt03 | fragment of 2 texels (puddle / sliver beside 1)
+body 269 -20.20312 2.32812 lake  # POIJoel01 | fragment of 2 texels (puddle / sliver beside land)
+body 270 0.64062 3.54688 lake  # CambridgeConstructionSiteExt02 | fragment of 2 texels (puddle / sliver beside land)
+body 271 2.67188 4.07812 lake  # BADTFLExt | fragment of 2 texels (puddle / sliver beside land)
+body 272 2.73438 4.26562 lake  # BADTFLExt | fragment of 2 texels (puddle / sliver beside land)
+body 273 -10.98438 21.20312 lake  # USAFSatelliteExt | fragment of 2 texels (puddle / sliver beside land)
+body 274 -5.70312 -29.07812 swamp  #  | WATR ExtMarshDarkWater names a marsh/swamp; baked class lake
+body 275 -5.39062 -26.54688 swamp  # POIJS036 | WATR ExtMarshDarkWater names a marsh/swamp; baked class lake
+body 276 4.60938 -26.10938 swamp  # POISC03 | WATR ExtMarshDarkWater names a marsh/swamp; baked class lake
+body 277 10.45312 -24.79688 swamp  # POISC01 | WATR ExtMarshScumWater names a marsh/swamp; baked class lake
+body 278 2.26562 -24.48438 swamp  # POIBryanB01 | WATR ExtMarshScumWater names a marsh/swamp; baked class lake
+body 279 11.07812 -23.48438 swamp  # POISC01 | WATR ExtMarshScumWater names a marsh/swamp; baked class lake
+body 280 8.67188 -23.42188 swamp  # PoseidonEnergyExt04 | WATR ExtMarshScumWater names a marsh/swamp; baked class lake
+body 281 8.98438 -23.32812 swamp  # PoseidonEnergyExt04 | WATR ExtMarshScumWater names a marsh/swamp; baked class lake
+body 282 10.98438 -23.07812 swamp  # POISC01 | WATR ExtMarshScumWater names a marsh/swamp; baked class lake
+body 283 12.10938 -22.98438 swamp  # POISC07 | WATR ExtMarshScumWater names a marsh/swamp; baked class lake
+body 284 12.48438 -22.95312 swamp  # POISC07 | WATR ExtMarshScumWater names a marsh/swamp; baked class lake
+body 285 9.98438 -22.76562 swamp  # PoseidonEnergyExt03 | WATR ExtMarshScumWater names a marsh/swamp; baked class lake
+body 286 -5.98438 -21.54688 swamp  # GNNExt06 | WATR ExtMarshDarkWater names a marsh/swamp; baked class lake
+body 287 0.32812 -21.51562 swamp  # SuffolkCountyCharterSchoolExt | WATR ExtMarshScumWater names a marsh/swamp; baked class lake
+body 288 13.60938 -21.10938 lake  # WreckoftheFMSNorthernStarExt01 | fragment of 1 texels (puddle / sliver beside land)
+body 289 13.60938 -21.01562 lake  # WreckoftheFMSNorthernStarExt01 | fragment of 1 texels (puddle / sliver beside land)
+body 290 -6.32812 -20.98438 lake  # CutlerBendExt06 | fragment of 1 texels (puddle / sliver beside 2)
+body 291 0.14062 -20.57812 swamp  # SuffolkCountyCharterSchoolExt | WATR ExtMarshScumWater names a marsh/swamp; baked class lake
+body 292 0.92188 -20.51562 swamp  # SuffolkCountyCharterSchoolExt02 | WATR ExtMarshScumWater names a marsh/swamp; baked class lake
+body 293 12.60938 -20.20312 lake  # WreckofTheFMSNorthernStarExt | fragment of 1 texels (puddle / sliver beside land)
+body 294 12.67188 -20.17188 lake  # WreckofTheFMSNorthernStarExt | fragment of 1 texels (puddle / sliver beside land)
+body 295 -0.98438 -19.89062 swamp  # HydeParkExt07 | WATR ExtMarshScumWater names a marsh/swamp; baked class lake
+body 296 1.17188 -19.32812 swamp  # HydeParkExt | WATR ExtMarshScumWater names a marsh/swamp; baked class lake
+body 297 -6.85938 -19.26562 lake  # CutlerBendExt02 | fragment of 1 texels (puddle / sliver beside land)
+body 298 -7.35938 -18.51562 lake  # CutlerBendExt02 | fragment of 1 texels (puddle / sliver beside land)
+body 299 0.98438 -17.57812 swamp  # HydeParkExt04 | WATR ExtMarshScumWater names a marsh/swamp; baked class lake
+body 300 7.17188 -17.42188 lake  # POIMilitaryBB01 | fragment of 1 texels (puddle / sliver beside land)
+body 301 2.29688 -16.39062 swamp  # JamaicaPlainExt05 | WATR ExtMarshScumWater names a marsh/swamp; baked class lake
+body 302 2.07812 -16.26562 swamp  # JamaicaPlainExt05 | WATR ExtMarshScumWater names a marsh/swamp; baked class lake
+body 303 2.42188 -16.26562 swamp  # JamaicaPlainExt05 | WATR ExtMarshScumWater names a marsh/swamp; baked class lake
+body 304 2.01562 -16.23438 swamp  # JamaicaPlainExt05 | WATR ExtMarshScumWater names a marsh/swamp; baked class lake
+body 305 17.57812 -16.23438 lake  # SpectacleIslandExt10 | fragment of 1 texels (puddle / sliver beside land)
+body 306 2.35938 -15.85938 lake  # JamaicaPlainExt05 | fragment of 1 texels (puddle / sliver beside land)
+body 307 2.35938 -15.70312 lake  # JamaicaPlainExt05 | fragment of 1 texels (puddle / sliver beside land)
+body 308 2.32812 -14.89062 lake  # JamaicaPlainExt02 | fragment of 1 texels (puddle / sliver beside land)
+body 309 2.10938 -14.29688 lake  # POISC13 | fragment of 1 texels (puddle / sliver beside land)
+body 310 -14.51562 -14.17188 lake  # POIJoel06 | fragment of 1 texels (puddle / sliver beside land)
+body 311 6.04688 -13.39062 lake  # UniversityPointExt05 | fragment of 1 texels (puddle / sliver beside land)
+body 312 6.10938 -12.85938 lake  # SouthBostonExtW | fragment of 1 texels (puddle / sliver beside land)
+body 313 8.85938 -12.51562 lake  # SouthBostonExtS | fragment of 1 texels (puddle / sliver beside land)
+body 314 6.48438 -12.29688 lake  # SouthBostonExtW | fragment of 1 texels (puddle / sliver beside land)
+body 315 5.98438 -11.95312 lake  # SouthBostonExtW | fragment of 1 texels (puddle / sliver beside land)
+body 316 5.85938 -6.39062 lake  # WaterfrontExtS | fragment of 1 texels (puddle / sliver beside land)
+body 317 -13.67188 -6.32812 lake  # ForestGroveMarshExt | fragment of 1 texels (puddle / sliver beside land)
+body 318 6.51562 -6.07812 lake  # WaterfrontExtS | fragment of 1 texels (puddle / sliver beside land)
+body 319 5.85938 -4.92188 lake  # TheaterHub360Ext | fragment of 1 texels (puddle / sliver beside land)
+body 320 -15.32812 -4.67188 lake  # ForestGroveMarshExt02 | fragment of 1 texels (puddle / sliver beside land)
+body 321 1.64062 -4.42188 lake  # BostonCommonExt | fragment of 1 texels (puddle / sliver beside land)
+body 322 18.54688 -4.29688 lake  # FortStrongExt06 | fragment of 1 texels (puddle / sliver beside land)
+body 323 14.73438 -2.64062 lake  # BostonAirportExt13 | fragment of 1 texels (puddle / sliver beside land)
+body 324 8.57812 -2.51562 lake  # CustomHouseTowerExt | fragment of 1 texels (puddle / sliver beside land)
+body 325 5.70312 -1.79688 lake  # FaneuilHallExt | fragment of 1 texels (puddle / sliver beside land)
+body 326 -1.32812 -1.04688 lake  # GreenetechGeneticsExt | fragment of 1 texels (puddle / sliver beside land)
+body 327 0.95312 -0.64062 lake  # TiconderogaStationExt | fragment of 1 texels (puddle / sliver beside land)
+body 328 0.67188 -0.54688 lake  # TiconderogaStationExt | fragment of 1 texels (puddle / sliver beside land)
+body 329 -9.29688 1.01562 lake  # POIJS018 | fragment of 1 texels (puddle / sliver beside land)
+body 330 10.82812 1.57812 lake  # EastBostonPrepSchoolExt03 | fragment of 1 texels (puddle / sliver beside land)
+body 331 1.26562 2.14062 lake  # CambridgeMonsignorPlazaExt | fragment of 1 texels (puddle / sliver beside land)
+body 332 -6.07812 2.76562 lake  # CollegeSquareExt03 | fragment of 1 texels (puddle / sliver beside land)
+body 333 -16.14062 4.01562 lake  # ArcjetSystemsExt | fragment of 1 texels (puddle / sliver beside land)
+body 334 2.95312 4.26562 lake  # BADTFLExt | fragment of 1 texels (puddle / sliver beside land)
+body 335 2.79688 4.32812 lake  # BADTFLExt | fragment of 1 texels (puddle / sliver beside land)
+body 336 3.04688 4.82812 lake  # BADTFLExt02 | fragment of 1 texels (puddle / sliver beside land)
+body 337 3.54688 4.82812 lake  # BunkerHillExt02 | fragment of 1 texels (puddle / sliver beside land)
+body 338 2.39062 6.14062 lake  # PoseidonEnergyTurbineExt02 | fragment of 1 texels (puddle / sliver beside land)
+body 339 21.14062 7.26562 lake  # CroupManorExt03 | fragment of 1 texels (puddle / sliver beside land)
+body 340 14.64062 8.26562 lake  # RevereBeachStationExt05 | fragment of 1 texels (puddle / sliver beside land)
+body 341 14.39062 9.29688 lake  # ReebMarinaExt | fragment of 1 texels (puddle / sliver beside land)
+body 342 2.35938 11.51562 lake  # TaffingtonBoatHouseExt | fragment of 1 texels (puddle / sliver beside land)
+body 343 -4.70312 12.70312 lake  # POIPowerArmor03 | fragment of 1 texels (puddle / sliver beside land)
+body 344 -6.85938 13.57812 lake  # POIJS016 | fragment of 1 texels (puddle / sliver beside land)
+body 345 22.60938 17.10938 lake  # CraterHouseExt04 | fragment of 1 texels (puddle / sliver beside land)
+body 346 -25.04688 18.89062 lake  # POICC09 | fragment of 1 texels (puddle / sliver beside land)
+body 347 -18.85938 19.70312 lake  # RedRocketExt02 | fragment of 1 texels (puddle / sliver beside land)
+body 348 8.07812 20.23438 lake  # BreakheartBanksExt02 | fragment of 1 texels (puddle / sliver beside land)
+body 349 7.60938 21.60938 lake  # POIDeathclawDen01a | fragment of 1 texels (puddle / sliver beside land)
+body 350 7.10938 24.01562 lake  # POIDeathclawDen01a | fragment of 1 texels (puddle / sliver beside 6)
+body 351 -16.23438 27.01562 lake  #  | fragment of 1 texels (puddle / sliver beside land)
+body 352 -15.73438 27.64062 lake  #  | fragment of 1 texels (puddle / sliver beside land)
+body 353 -10.60938 27.70312 lake  #  | fragment of 1 texels (puddle / sliver beside land)
+body 354 -10.76562 27.89062 lake  #  | fragment of 1 texels (puddle / sliver beside 102)
+body 355 25.48438 36.26562 lake  #  | fragment of 1 texels (puddle / sliver beside land)
+#   path <weight> <radius texels> <x> <y> <x> <y> ...   a drawn current: the solve's conductance x weight within
+#        radius texels of the polyline (cell units, upstream -> downstream), on rivers and channels alike.
+# C1 Neponset bay current (bungo drawing) (bungo drawn, 645.2 m long / 131.6 m wide)
+path 16 6 6.609 -17.891 6.609 -17.766 6.609 -17.641 6.609 -17.516 6.609 -17.391 6.609 -17.266 6.609 -17.141 6.609 -17.016 6.609 -16.891 6.609 -16.766 6.609 -16.641 6.609 -16.516 6.609 -16.391 6.609 -16.266 6.609 -16.141 6.578 -16.109 6.609 -16.016 6.609 -15.891 6.609 -15.766 6.609 -15.641 6.609 -15.516 6.641 -15.422 6.672 -15.328 6.703 -15.234 6.766 -15.172 6.797 -15.078 6.797 -14.953 6.797 -14.828 6.797 -14.703 6.797 -14.578 6.797 -14.453 6.797 -14.328 6.797 -14.203 6.797 -14.078 6.797 -13.953 6.797 -13.828 6.828 -13.734 6.953 -13.734 7.078 -13.734 7.203 -13.734 7.203 -13.609 7.203 -13.484 7.203 -13.359 7.203 -13.234 7.328 -13.234 7.453 -13.234 7.578 -13.234 7.703 -13.234 7.828 -13.234 7.953 -13.234 8.078 -13.234 8.203 -13.234 8.328 -13.234 8.391 -13.234 8.484 -13.203 8.578 -13.172 8.641 -13.109 8.734 -13.078 8.859 -13.078 8.984 -13.078 9.109 -13.078 9.234 -13.078 9.359 -13.078 9.484 -13.078 9.609 -13.078 9.734 -13.078 9.859 -13.078 9.922 -13.141 9.922 -13.266 9.922 -13.391 9.953 -13.484 10.078 -13.484 10.203 -13.484 10.328 -13.484 10.453 -13.484 10.578 -13.484 10.703 -13.484 10.828 -13.484 10.953 -13.484 11.078 -13.484 11.203 -13.484 11.266 -13.422 11.328 -13.359 11.328 -13.234 11.391 -13.172 11.422 -13.078 11.422 -12.953 11.484 -12.891 11.516 -12.797
+# C2 Lower Charles (below the Charles dam D1) (proposal, 2356.1 m long / 91.4 m wide)
+path 16 6 -14.266 -3.359 -14.141 -3.359 -14.078 -3.297 -14.047 -3.203 -14.016 -3.109 -14.016 -2.984 -13.922 -2.953 -13.828 -2.922 -13.703 -2.922 -13.578 -2.922 -13.453 -2.922 -13.359 -2.891 -13.328 -2.797 -13.328 -2.672 -13.328 -2.547 -13.297 -2.453 -13.266 -2.359 -13.203 -2.297 -13.203 -2.172 -13.203 -2.047 -13.141 -1.984 -13.109 -1.891 -13.078 -1.797 -13.016 -1.734 -12.984 -1.641 -12.953 -1.547 -12.922 -1.453 -12.922 -1.328 -12.922 -1.203 -12.922 -1.078 -12.891 -0.984 -12.859 -0.891 -12.859 -0.766 -12.859 -0.641 -12.766 -0.609 -12.734 -0.516 -12.734 -0.391 -12.734 -0.266 -12.734 -0.141 -12.734 -0.016 -12.734 0.109 -12.734 0.234 -12.703 0.328 -12.672 0.422 -12.672 0.547 -12.672 0.672 -12.672 0.797 -12.641 0.891 -12.609 0.984 -12.578 1.078 -12.547 1.172 -12.453 1.203 -12.391 1.266 -12.359 1.359 -12.297 1.422 -12.266 1.516 -12.266 1.641 -12.203 1.703 -12.141 1.766 -12.016 1.766 -11.891 1.766 -11.828 1.828 -11.797 1.922 -11.703 1.953 -11.578 1.953 -11.453 1.953 -11.328 1.953 -11.203 1.953 -11.078 1.953 -10.953 1.953 -10.828 1.953 -10.703 1.953 -10.578 1.953 -10.453 1.953 -10.328 1.953 -10.203 1.953 -10.078 1.953 -9.953 1.953 -9.828 1.953 -9.703 1.953 -9.578 1.953 -9.453 1.953 -9.328 1.953 -9.203 1.953 -9.078 1.953 -9.016 1.891 -8.922 1.859 -8.859 1.797 -8.797 1.734 -8.734 1.672 -8.672 1.609 -8.641 1.516 -8.578 1.453 -8.547 1.359 -8.453 1.328 -8.422 1.234 -8.391 1.141 -8.391 1.016 -8.391 0.891 -8.391 0.766 -8.391 0.641 -8.391 0.516 -8.391 0.391 -8.391 0.266 -8.391 0.141 -8.391 0.016 -8.391 -0.109 -8.391 -0.234 -8.391 -0.359 -8.359 -0.453 -8.297 -0.516 -8.266 -0.609 -8.203 -0.672 -8.141 -0.734 -8.109 -0.828 -8.047 -0.891 -7.984 -0.953 -7.922 -1.016 -7.859 -1.078 -7.828 -1.172 -7.766 -1.234 -7.641 -1.234 -7.578 -1.297 -7.484 -1.328 -7.359 -1.328 -7.297 -1.391 -7.234 -1.453 -7.203 -1.547 -7.172 -1.641 -7.109 -1.703 -6.984 -1.703 -6.859 -1.703 -6.734 -1.703 -6.609 -1.703 -6.484 -1.703 -6.359 -1.703 -6.234 -1.703 -6.109 -1.703 -6.109 -1.828 -6.078 -1.922 -5.984 -1.953 -5.859 -1.953 -5.734 -1.953 -5.609 -1.953 -5.484 -1.953 -5.359 -1.953 -5.234 -1.953 -5.109 -1.953 -4.984 -1.953 -4.859 -1.953 -4.734 -1.953 -4.609 -1.953 -4.484 -1.953 -4.359 -1.953 -4.234 -1.953 -4.109 -1.953 -3.984 -1.953 -3.859 -1.953 -3.734 -1.953 -3.609 -1.953 -3.484 -1.953 -3.359 -1.953 -3.234 -1.953 -3.109 -1.953 -2.984 -1.953 -2.859 -1.953 -2.734 -1.953 -2.609 -1.953 -2.484 -1.953 -2.359 -1.953 -2.234 -1.953 -2.109 -1.953 -1.984 -1.953 -1.859 -1.953 -1.734 -1.953 -1.609 -1.953 -1.484 -1.953 -1.359 -1.953 -1.234 -1.953 -1.109 -1.953 -0.984 -1.953 -0.859 -1.953 -0.734 -1.953 -0.609 -1.953 -0.484 -1.953 -0.359 -1.953 -0.234 -1.953 -0.109 -1.953 0.016 -1.953 0.141 -1.953 0.266 -1.953 0.391 -1.953 0.516 -1.953 0.641 -1.953 0.766 -1.953 0.891 -1.953 1.016 -1.953 1.141 -1.953 1.266 -1.953 1.328 -1.891 1.391 -1.828 1.484 -1.797 1.578 -1.766 1.641 -1.703 1.734 -1.672 1.859 -1.672 1.984 -1.672 2.109 -1.672 2.234 -1.672 2.328 -1.641 2.391 -1.578 2.484 -1.547 2.516 -1.453 2.516 -1.328 2.516 -1.203 2.516 -1.078 2.547 -0.984 2.547 -0.859 2.547 -0.734 2.578 -0.641 2.641 -0.578 2.672 -0.484 2.734 -0.422 2.797 -0.359 2.859 -0.297 2.922 -0.234 2.984 -0.172 3.016 -0.078 3.016 0.047 3.047 0.141 3.078 0.234 3.109 0.328 3.109 0.453 3.172 0.516 3.203 0.609 3.234 0.703 3.328 0.734 3.391 0.797 3.484 0.828 3.516 0.922 3.641 0.922 3.703 0.984 3.828 0.984 3.922 1.016 4.047 1.016 4.172 1.016 4.297 1.016 4.422 1.016 4.547 1.016 4.609 1.078 4.672 1.141 4.797 1.141 4.922 1.141 5.047 1.141 5.172 1.141 5.297 1.141 5.422 1.141 5.547 1.141 5.672 1.141 5.797 1.141 5.859 1.203 5.953 1.234 6.047 1.266 6.141 1.297 6.203 1.359 6.266 1.422 6.328 1.484 6.391 1.547 6.453 1.609 6.516 1.672 6.641 1.672 6.766 1.672 6.891 1.672 7.016 1.672 7.141 1.672 7.266 1.672 7.391 1.672 7.516 1.672 7.641 1.672 7.766 1.672 7.891 1.672 8.016 1.672 8.141 1.672 8.266 1.672 8.391 1.672 8.516 1.672 8.641 1.672 8.766 1.672 8.891 1.672 9.016 1.672 9.109 1.641 9.109 1.516 9.109 1.391 9.109 1.266 9.109 1.141 9.109 1.016 9.109 0.891 9.109 0.766 9.109 0.641 9.109 0.516 9.109 0.391 9.109 0.266 9.109 0.141 9.109 0.016 9.109 -0.109 9.109 -0.234 9.109 -0.359 9.109 -0.484 9.109 -0.609 9.109 -0.734 9.109 -0.859 9.109 -0.984 9.109 -1.109 9.109 -1.234 9.109 -1.359 9.109 -1.484 9.109 -1.609 9.109 -1.734 9.109 -1.859 9.109 -1.984 9.109 -2.109 9.109 -2.234 9.109 -2.328
+# C3 Lower Mystic (below the Mystic step D2) (proposal, bungo drawn, 1078.4 m long / 84.1 m wide)
+path 16 6 -2.922 8.891 -2.797 8.891 -2.672 8.891 -2.641 8.797 -2.641 8.672 -2.641 8.547 -2.641 8.422 -2.547 8.391 -2.484 8.328 -2.484 8.203 -2.422 8.141 -2.328 8.109 -2.234 8.078 -2.109 8.078 -2.016 8.047 -1.922 8.016 -1.891 7.922 -1.891 7.797 -1.891 7.672 -1.797 7.641 -1.672 7.641 -1.547 7.641 -1.422 7.641 -1.297 7.641 -1.203 7.672 -1.078 7.672 -0.953 7.672 -0.828 7.672 -0.703 7.672 -0.578 7.672 -0.453 7.672 -0.328 7.672 -0.203 7.672 -0.078 7.672 0.047 7.672 0.172 7.672 0.297 7.672 0.422 7.672 0.547 7.672 0.672 7.672 0.797 7.672 0.922 7.672 1.047 7.672 1.172 7.672 1.297 7.672 1.328 7.578 1.328 7.453 1.359 7.359 1.453 7.328 1.484 7.234 1.547 7.172 1.578 7.078 1.609 6.984 1.734 6.984 1.859 6.984 1.984 6.984 1.984 6.859 1.984 6.734 1.984 6.609 1.984 6.484 2.016 6.391 2.078 6.328 2.141 6.266 2.203 6.203 2.266 6.141 2.297 6.047 2.359 5.984 2.453 5.953 2.578 5.953 2.703 5.953 2.828 5.953 2.953 5.953 3.078 5.953 3.203 5.953 3.328 5.953 3.453 5.953 3.578 5.953 3.703 5.953 3.828 5.953 3.953 5.953 4.078 5.953 4.203 5.953 4.328 5.953 4.453 5.953 4.547 5.922 4.672 5.922 4.797 5.922 4.922 5.922 5.047 5.922 5.172 5.922 5.297 5.922 5.422 5.922 5.547 5.922 5.672 5.922 5.703 5.828 5.703 5.703 5.703 5.578 5.766 5.516 5.859 5.484 5.984 5.484 6.078 5.453 6.203 5.453 6.328 5.453 6.453 5.453 6.578 5.453 6.703 5.453 6.828 5.453 6.953 5.453 7.078 5.453 7.203 5.453 7.328 5.453 7.453 5.453 7.547 5.422 7.609 5.359 7.672 5.297 7.703 5.203 7.797 5.172 7.891 5.141 7.984 5.109 8.109 5.109 8.234 5.109 8.359 5.109 8.484 5.109 8.609 5.109 8.734 5.109 8.859 5.109 8.984 5.109 9.109 5.109 9.109 4.984 9.109 4.859 9.109 4.734 9.109 4.609 9.109 4.484 9.109 4.359 9.109 4.234 9.109 4.109 9.109 3.984 9.109 3.859 9.109 3.734 9.109 3.609 9.109 3.484 9.109 3.359 9.109 3.234 9.109 3.109 9.109 2.984 9.109 2.859 9.109 2.734 9.109 2.609 9.109 2.578
+# C4 arm at BostonAirportExt02 (proposal, 517.3 m long / 102.4 m wide)
+path 16 6 11.672 0.203 11.766 0.234 11.828 0.297 11.891 0.359 11.984 0.391 12.109 0.391 12.234 0.391 12.359 0.391 12.484 0.391 12.578 0.422 12.672 0.453 12.734 0.516 12.859 0.516 12.984 0.516 13.016 0.609 13.109 0.641 13.234 0.641 13.359 0.641 13.484 0.641 13.516 0.734 13.609 0.766 13.703 0.797 13.828 0.797 13.953 0.797 14.078 0.797 14.203 0.797 14.328 0.797 14.453 0.797 14.578 0.797 14.703 0.797 14.828 0.797 14.953 0.797 15.016 0.734 15.016 0.609 15.078 0.547 15.109 0.453 15.141 0.359 15.234 0.328 15.297 0.266 15.359 0.203 15.391 0.109 15.453 0.047 15.516 -0.016 15.578 -0.078 15.641 -0.141 15.672 -0.234 15.766 -0.266 15.859 -0.297 15.922 -0.359 16.016 -0.391 16.016 -0.516 16.016 -0.641 16.016 -0.766 16.016 -0.891 16.016 -1.016 16.016 -1.141 16.016 -1.266 16.016 -1.391 16.016 -1.516 16.016 -1.641 16.016 -1.766 16.016 -1.891 16.016 -2.016 16.016 -2.141 16.016 -2.266 16.016 -2.391 16.016 -2.516 16.016 -2.641 16.016 -2.766 16.016 -2.891 16.016 -3.016 16.016 -3.047
+# C5 arm by lake 69 (proposal, 491.7 m long / 87.7 m wide)
+path 16 6 13.328 12.578 13.453 12.578 13.516 12.641 13.516 12.766 13.516 12.891 13.516 13.016 13.516 13.141 13.516 13.266 13.516 13.391 13.578 13.453 13.641 13.516 13.766 13.516 13.859 13.547 13.984 13.547 14.109 13.547 14.234 13.547 14.359 13.547 14.453 13.516 14.453 13.391 14.453 13.266 14.422 13.172 14.422 13.047 14.422 12.922 14.422 12.797 14.422 12.672 14.422 12.547 14.453 12.453 14.484 12.359 14.578 12.328 14.641 12.266 14.703 12.203 14.797 12.172 14.891 12.141 14.953 12.078 15.016 12.016 15.078 11.953 15.141 11.891 15.234 11.859 15.328 11.828 15.422 11.797 15.484 11.734 15.578 11.703 15.641 11.641 15.672 11.547 15.734 11.484 15.797 11.422 15.859 11.359 15.953 11.328 16.078 11.328 16.203 11.328 16.328 11.328 16.453 11.328 16.578 11.328 16.609 11.234 16.609 11.109 16.609 10.984 16.609 10.859 16.609 10.734 16.609 10.609 16.609 10.484 16.609 10.359 16.609 10.234 16.609 10.109 16.609 9.984 16.609 9.859 16.609 9.734 16.609 9.609 16.609 9.516
+# C6 arm at TheaterSE (proposal, 356.4 m long / 84.1 m wide)
+path 16 6 4.422 -9.453 4.547 -9.453 4.609 -9.391 4.672 -9.328 4.734 -9.266 4.797 -9.203 4.891 -9.172 4.984 -9.141 5.078 -9.109 5.203 -9.109 5.328 -9.109 5.453 -9.109 5.547 -9.078 5.641 -9.047 5.766 -9.047 5.891 -9.047 5.984 -9.016 6.047 -8.953 6.141 -8.922 6.172 -8.828 6.266 -8.797 6.328 -8.734 6.359 -8.641 6.422 -8.578 6.484 -8.516 6.547 -8.453 6.609 -8.391 6.672 -8.328 6.703 -8.234 6.734 -8.141 6.766 -8.047 6.766 -7.922 6.828 -7.859 6.891 -7.797 6.953 -7.734 6.953 -7.609 6.984 -7.516 6.984 -7.391 7.109 -7.391 7.203 -7.359 7.297 -7.328 7.391 -7.297 7.484 -7.266 7.609 -7.266 7.703 -7.234 7.797 -7.203 7.922 -7.203 8.047 -7.203 8.109 -7.141 8.141 -7.141
+# C7 Malden arm (Medford / Malden) (proposal, bungo drawn, 349.1 m long / 69.5 m wide)
+path 16 6 1.734 13.141 1.859 13.141 1.859 13.016 1.828 12.922 1.797 12.828 1.797 12.703 1.859 12.641 1.891 12.547 1.891 12.422 1.891 12.297 1.891 12.172 1.891 12.047 1.891 11.922 1.828 11.859 1.766 11.797 1.641 11.797 1.578 11.734 1.578 11.609 1.578 11.484 1.578 11.359 1.547 11.266 1.547 11.141 1.547 11.016 1.453 10.984 1.391 10.922 1.328 10.859 1.328 10.734 1.297 10.641 1.297 10.516 1.297 10.391 1.266 10.297 1.234 10.203 1.172 10.141 1.141 10.047 1.078 9.984 1.078 9.859 1.047 9.766 1.047 9.641 1.047 9.516 1.047 9.391 1.047 9.266 1.047 9.141 1.047 9.016 1.047 8.891 1.047 8.766 1.047 8.641 1.047 8.516 1.047 8.391 1.047 8.328
+# C8 north-east arm into the lower Mystic (Revere) (proposal, bungo drawn, 323.5 m long / 51.2 m wide)
+path 16 6 12.953 7.547 12.828 7.547 12.703 7.547 12.578 7.547 12.453 7.547 12.359 7.516 12.328 7.422 12.266 7.359 12.203 7.297 12.141 7.234 12.078 7.172 12.047 7.078 11.984 7.016 11.953 6.922 11.891 6.859 11.891 6.734 11.797 6.703 11.734 6.641 11.672 6.578 11.672 6.453 11.641 6.359 11.578 6.297 11.547 6.203 11.547 6.078 11.547 5.953 11.547 5.828 11.516 5.734 11.453 5.672 11.422 5.578 11.359 5.516 11.328 5.422 11.297 5.328 11.234 5.266 11.172 5.203 11.078 5.172 10.984 5.141 10.891 5.109 10.766 5.109 10.641 5.109 10.547 5.078 10.422 5.078 10.297 5.078 10.172 5.078 10.047 5.078 9.922 5.078
+# C9 arm at POIMCamp01 (proposal, 318.0 m long / 84.1 m wide)
+path 16 6 18.484 22.078 18.609 22.078 18.672 22.141 18.672 22.266 18.703 22.359 18.734 22.453 18.734 22.578 18.734 22.703 18.734 22.828 18.766 22.922 18.766 23.047 18.797 23.141 18.828 23.234 18.859 23.328 18.891 23.422 18.984 23.453 19.047 23.516 19.141 23.547 19.234 23.578 19.328 23.609 19.391 23.672 19.453 23.734 19.516 23.797 19.578 23.859 19.609 23.953 19.609 24.078 19.609 24.203 19.609 24.328 19.609 24.453 19.641 24.547 19.703 24.609 19.734 24.703 19.828 24.734 19.922 24.766 20.047 24.766 20.141 24.797 20.234 24.828 20.297 24.891 20.359 24.953 20.422 25.016 20.516 25.047 20.641 25.047 20.766 25.047 20.891 25.047 20.891 25.047
+# C10 arm by lake 69 (proposal, 294.3 m long / 91.4 m wide)
+path 16 6 11.953 9.672 12.047 9.703 12.172 9.703 12.266 9.734 12.328 9.797 12.422 9.828 12.516 9.859 12.609 9.891 12.703 9.922 12.797 9.953 12.922 9.953 13.047 9.953 13.172 9.953 13.297 9.953 13.422 9.953 13.547 9.953 13.672 9.953 13.797 9.953 13.922 9.953 14.047 9.953 14.172 9.953 14.297 9.953 14.422 9.953 14.547 9.953 14.672 9.953 14.797 9.953 14.922 9.953 15.047 9.953 15.172 9.953 15.297 9.953 15.359 10.016 15.422 10.078 15.453 10.172 15.516 10.234 15.547 10.328 15.609 10.391 15.672 10.453 15.734 10.516 15.828 10.547 15.922 10.578 16.047 10.578
+# C11 arm at POIRJ09 (proposal, 287.0 m long / 98.7 m wide)
+path 16 6 19.828 19.203 19.953 19.203 20.078 19.203 20.203 19.203 20.328 19.203 20.453 19.203 20.578 19.203 20.703 19.203 20.828 19.203 20.953 19.203 21.078 19.203 21.172 19.234 21.203 19.328 21.234 19.422 21.266 19.516 21.297 19.609 21.391 19.641 21.391 19.766 21.422 19.859 21.453 19.953 21.516 20.016 21.578 20.078 21.609 20.172 21.641 20.266 21.703 20.328 21.766 20.391 21.828 20.453 21.891 20.516 21.953 20.578 21.953 20.703 21.953 20.828 21.953 20.953 21.953 21.078 21.953 21.203 21.953 21.328 21.953 21.453 21.953 21.578 21.953 21.703 21.953 21.828 21.953 21.922
+# C12 arm at PoseidonEnergyExt (proposal, 277.8 m long / 74.9 m wide)
+path 16 6 9.234 -20.828 9.359 -20.828 9.453 -20.797 9.516 -20.734 9.609 -20.703 9.641 -20.609 9.703 -20.547 9.734 -20.453 9.797 -20.391 9.891 -20.359 9.984 -20.328 10.078 -20.297 10.203 -20.297 10.266 -20.234 10.328 -20.172 10.453 -20.172 10.578 -20.172 10.703 -20.172 10.828 -20.172 10.922 -20.141 11.047 -20.141 11.047 -20.016 11.047 -19.891 11.047 -19.766 11.047 -19.641 11.141 -19.609 11.234 -19.578 11.234 -19.453 11.234 -19.328 11.234 -19.203 11.234 -19.078 11.234 -18.953 11.234 -18.828 11.234 -18.703 11.234 -18.578 11.234 -18.453 11.234 -18.328 11.234 -18.203 11.234 -18.141
+# C13 arm at cell 13,-30 (proposal, 237.6 m long / 113.3 m wide)
+path 16 6 12.859 -29.922 12.734 -29.922 12.734 -29.797 12.734 -29.672 12.734 -29.547 12.734 -29.422 12.734 -29.297 12.734 -29.172 12.734 -29.047 12.734 -28.922 12.734 -28.797 12.734 -28.672 12.734 -28.547 12.766 -28.453 12.766 -28.328 12.766 -28.203 12.766 -28.078 12.797 -27.984 12.797 -27.859 12.828 -27.766 12.891 -27.703 12.953 -27.641 13.078 -27.641 13.203 -27.641 13.328 -27.641 13.453 -27.641 13.578 -27.641 13.703 -27.641 13.828 -27.641 13.953 -27.641 14.078 -27.641 14.203 -27.641 14.328 -27.641 14.328 -27.641
+# C16 arm at GwinnettBreweryExt02 (proposal, 221.2 m long / 51.2 m wide)
+path 16 6 7.703 -10.672 7.828 -10.672 7.953 -10.672 8.047 -10.641 8.109 -10.578 8.172 -10.516 8.234 -10.453 8.359 -10.453 8.453 -10.422 8.547 -10.391 8.641 -10.359 8.766 -10.359 8.891 -10.359 8.984 -10.328 9.109 -10.328 9.234 -10.328 9.359 -10.328 9.484 -10.328 9.609 -10.328 9.734 -10.328 9.859 -10.328 9.984 -10.328 10.109 -10.328 10.234 -10.328 10.359 -10.328 10.453 -10.297 10.516 -10.234 10.641 -10.234 10.734 -10.203 10.828 -10.172 10.922 -10.172
+# C18 arm at QuincyQuarriesExt05 (proposal, 204.7 m long / 36.6 m wide)
+path 16 6 5.078 -19.578 5.203 -19.578 5.328 -19.578 5.453 -19.578 5.578 -19.578 5.703 -19.578 5.766 -19.516 5.891 -19.516 6.016 -19.516 6.141 -19.516 6.266 -19.516 6.391 -19.516 6.516 -19.516 6.516 -19.391 6.516 -19.266 6.516 -19.141 6.516 -19.016 6.516 -18.891 6.516 -18.766 6.516 -18.641 6.516 -18.516 6.641 -18.516 6.672 -18.422 6.703 -18.328 6.797 -18.297 6.828 -18.203 6.828 -18.078 6.828 -17.953 6.828 -17.859
+# C19 arm at DNPrimeBridge03 (proposal, 234.0 m long / 84.1 m wide)
+path 16 6 1.078 1.578 1.203 1.578 1.328 1.578 1.453 1.578 1.578 1.578 1.703 1.578 1.766 1.516 1.828 1.453 1.891 1.391 1.953 1.328 2.016 1.266 2.141 1.266 2.266 1.266 2.391 1.266 2.516 1.266 2.641 1.266 2.766 1.266 2.891 1.266 3.016 1.266 3.141 1.266 3.266 1.266 3.391 1.266 3.516 1.266 3.641 1.266 3.766 1.266 3.891 1.266 4.016 1.266 4.141 1.266 4.266 1.266 4.391 1.266 4.516 1.266 4.641 1.266 4.734 1.266
+# C22 arm at AtomCatsGarageExt (proposal, 160.8 m long / 65.8 m wide)
+path 16 6 8.422 -18.328 8.547 -18.328 8.672 -18.328 8.797 -18.328 8.922 -18.328 9.047 -18.328 9.172 -18.328 9.297 -18.328 9.422 -18.328 9.547 -18.328 9.547 -18.203 9.641 -18.172 9.766 -18.172 9.859 -18.203 9.984 -18.203 10.109 -18.203 10.203 -18.172 10.234 -18.078 10.359 -18.078 10.484 -18.078 10.609 -18.078 10.734 -18.078 10.828 -18.078
+# C23 arm at EasyCityDownsExt02 (proposal, 157.2 m long / 62.1 m wide)
+path 16 6 15.516 3.609 15.391 3.609 15.266 3.609 15.141 3.609 15.078 3.547 15.016 3.484 14.953 3.422 14.953 3.297 14.953 3.172 14.953 3.047 14.953 2.922 14.953 2.797 14.953 2.672 14.953 2.547 14.953 2.422 14.953 2.297 14.953 2.172 14.953 2.047 14.953 1.922 14.953 1.797 14.953 1.672 14.953 1.547 14.953 1.516
+# C24 arm at cell 12,-27 (proposal, 171.8 m long / 51.2 m wide)
+path 16 6 11.703 -26.953 11.578 -26.953 11.453 -26.953 11.391 -27.016 11.391 -27.141 11.391 -27.266 11.422 -27.359 11.547 -27.359 11.672 -27.359 11.797 -27.359 11.922 -27.359 12.016 -27.328 12.078 -27.266 12.172 -27.234 12.234 -27.172 12.297 -27.109 12.391 -27.078 12.453 -27.016 12.516 -26.953 12.578 -26.891 12.672 -26.859 12.797 -26.859 12.922 -26.859 13.047 -26.859 13.078 -26.859
+# C27 arm at cell 12,-26 (proposal, 188.3 m long / 76.8 m wide)
+path 16 6 11.984 -26.266 12.016 -26.172 12.047 -26.078 12.047 -25.953 12.047 -25.828 12.047 -25.703 12.141 -25.672 12.266 -25.672 12.328 -25.734 12.422 -25.766 12.547 -25.766 12.641 -25.797 12.766 -25.797 12.891 -25.797 13.016 -25.797 13.141 -25.797 13.234 -25.766 13.234 -25.641 13.359 -25.641 13.484 -25.641 13.547 -25.703 13.641 -25.734 13.766 -25.734 13.891 -25.734 14.016 -25.734 14.016 -25.859 14.016 -25.891
+# C28 arm at NeponsetParkExt03 (proposal, 124.3 m long / 45.7 m wide)
+path 16 6 4.891 -17.141 4.984 -17.172 5.078 -17.203 5.172 -17.234 5.234 -17.297 5.359 -17.297 5.484 -17.297 5.578 -17.328 5.641 -17.391 5.766 -17.391 5.797 -17.484 5.891 -17.516 5.953 -17.578 6.078 -17.578 6.141 -17.641 6.141 -17.766 6.203 -17.828 6.297 -17.828
+# C30 arm at POIRJ13 (proposal, 140.7 m long / 69.5 m wide)
+path 16 6 18.672 25.703 18.734 25.641 18.828 25.609 18.953 25.609 19.047 25.578 19.141 25.547 19.266 25.547 19.391 25.547 19.516 25.547 19.641 25.547 19.766 25.547 19.891 25.547 20.016 25.547 20.141 25.547 20.266 25.547 20.391 25.547 20.516 25.547 20.641 25.547 20.766 25.547 20.859 25.547
+# C45 arm at BADTFLExt02 (proposal, 266.9 m long / 84.1 m wide)
+path 16 6 1.391 5.391 1.516 5.391 1.641 5.391 1.766 5.391 1.891 5.391 2.016 5.391 2.141 5.391 2.266 5.391 2.391 5.391 2.516 5.391 2.641 5.391 2.766 5.391 2.891 5.391 3.016 5.391 3.141 5.391 3.266 5.391 3.391 5.391 3.516 5.391 3.641 5.391 3.766 5.391 3.891 5.391 4.016 5.391 4.141 5.391 4.266 5.391 4.391 5.391 4.516 5.391 4.641 5.391 4.766 5.391 4.891 5.391 5.016 5.391 5.141 5.391 5.266 5.391 5.391 5.391 5.516 5.391 5.641 5.391 5.766 5.391 5.891 5.391 5.922 5.391
+# C48 arm at POISC01 (proposal, 171.8 m long / 78.6 m wide)
+path 16 6 11.266 -25.078 11.391 -25.078 11.516 -25.078 11.641 -25.078 11.766 -25.078 11.891 -25.078 12.016 -25.078 12.141 -25.078 12.266 -25.078 12.391 -25.078 12.516 -25.078 12.641 -25.078 12.766 -25.078 12.891 -25.078 13.016 -25.078 13.141 -25.078 13.266 -25.078 13.391 -25.078 13.516 -25.078 13.641 -25.078 13.766 -25.078 13.891 -25.078 14.016 -25.078 14.141 -25.078 14.141 -25.078
+# C51 arm at NeponsetParkExt02 (proposal, 104.2 m long / 36.6 m wide)
+path 16 6 5.016 -18.484 5.078 -18.547 5.172 -18.578 5.234 -18.641 5.328 -18.672 5.391 -18.734 5.516 -18.734 5.641 -18.734 5.766 -18.734 5.859 -18.703 5.953 -18.672 6.078 -18.672 6.203 -18.672 6.328 -18.672 6.453 -18.672
+# C60 arm at EastBostonPrepSchoolExt02 (proposal, 117.0 m long / 58.5 m wide)
+path 16 6 11.859 4.672 11.734 4.672 11.609 4.672 11.484 4.672 11.359 4.672 11.234 4.672 11.109 4.672 10.984 4.672 10.859 4.672 10.734 4.672 10.609 4.672 10.484 4.672 10.359 4.672 10.234 4.672 10.109 4.672 10.016 4.703 9.922 4.703

@@ -8985,6 +8985,8 @@ int nifskopeCliMain( const QStringList & args )
 		else if ( t == QLatin1String( "--water-sky-one-slab" ) ) gLodlWater.skyOneSlab = true;	// lane WATERFIX7: the old slab
 		else if ( t == QLatin1String( "--water-velocities" ) ) gLodlWater.velocityPlugin = next();
 		else if ( t == QLatin1String( "--water-report" ) ) gLodlWater.reportPath = next();
+		else if ( t == QLatin1String( "--water-flow-overrides" ) ) gLodlWater.flowOverridesPath = next();	// lane FIX1101A flow
+		else if ( t == QLatin1String( "--water-no-overrides" ) ) gLodlWater.flowOverrides = false;	// lane FIX1101A flow: the red
 		else if ( t == QLatin1String( "--dump-land" ) ) lgDumpLand = next();
 		else if ( t == QLatin1String( "--dump-layers" ) ) lgDumpLayers = next();
 		else if ( t == QLatin1String( "--dump-shapes" ) ) lgDumpShapes = next();

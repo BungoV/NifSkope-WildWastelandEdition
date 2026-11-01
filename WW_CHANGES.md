@@ -1,3 +1,15 @@
+## FIX1101A flow (2026-11-01): the .lodl water stage reads a flow OVERRIDE sidecar (bungo's water verdicts)
+
+bungo 10-31 marked the Commonwealth water by hand (lake / swamp / calm bodies, current below every dam, the sea-level
+arms and bays flowing to the open sea, his drawn Neponset bay and Mystic arm currents). The lodgen .lodl water stage now
+reads `<ws>.waterflow.txt` beside the .lodl it writes (or `--water-flow-overrides <file>`): body classes (lake, swamp and
+calm write no current), dam drops and tributary joins, the sea-level channels split out of sea body 1 and solved toward
+their mouths, and drawn currents. The census prints a FLOW OVERRIDES section. A bake with no sidecar beside it writes the
+bytes of before; `--water-no-overrides` or WW_LODL_WATERFLOW_RED=1 is the red (sidecar not read). A sidecar with no
+`wwflow 1` line or a bad line refuses the bake with the line number. The shipped Commonwealth .lodl changes only when it
+is rebaked with the sidecar beside it. Unit: tests/waterflow1101a (gate: mean angle error per reach < 20 deg, zero
+current on still bodies; the shipped 10-28 bake is the red).
+
 ## FOAMOFF2 (FIX1101A, 2026-11-01): River foam and Contact foam stay OFF
 
 The water lane's foam fixes land: lace streaks instead of solid patches, and no foam on a dry bank. Its two rows still
