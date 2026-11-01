@@ -320,6 +320,37 @@ int sliceTiles( const CellMeshInst & d, const float mv[16], const WwFarSwaySlice
 	return n;
 }
 
+bool tileBounds( const CellMeshInst & d, const float m[16], const float * mv, const WwFarSwaySlice::Slice * slice,
+	float grow, float out[4] )
+{
+	const CellFarHide::View vw = CellFarHide::view( d );
+	const float sx = std::sqrt( m[0] * m[0] + m[4] * m[4] + m[8] * m[8] );
+	const float sy = std::sqrt( m[1] * m[1] + m[5] * m[5] + m[9] * m[9] );
+	bool any = false;
+	for ( const CellMeshInst::Tile & t : *vw.tiles ) {
+		if ( slice && mv && !tileInSlice( t, mv, *slice ) )
+			continue;
+		const float x = m[0] * t.centre[0] + m[4] * t.centre[1] + m[8] * t.centre[2] + m[12];
+		const float y = m[1] * t.centre[0] + m[5] * t.centre[1] + m[9] * t.centre[2] + m[13];
+		if ( !redNoCull() && ( std::fabs( x ) > 1.0f + t.radius * sx || std::fabs( y ) > 1.0f + t.radius * sy ) )
+			continue;	// drawCascade skips it: it draws nothing
+		const float rx = ( t.radius + grow ) * sx, ry = ( t.radius + grow ) * sy;
+		if ( !any ) {
+			out[0] = x - rx;
+			out[1] = y - ry;
+			out[2] = x + rx;
+			out[3] = y + ry;
+			any = true;
+		} else {
+			out[0] = std::min( out[0], x - rx );
+			out[1] = std::min( out[1], y - ry );
+			out[2] = std::max( out[2], x + rx );
+			out[3] = std::max( out[3], y + ry );
+		}
+	}
+	return any;
+}
+
 bool drawCascade( NifSkopeOpenGLContext * r, const CellMeshInst & d, NifSkopeOpenGLContext::Program * prog,
 	const float m[16], const float * mv, const WwFarSwaySlice::Slice * slice, int part )
 {

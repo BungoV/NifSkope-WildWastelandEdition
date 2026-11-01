@@ -1,3 +1,22 @@
+## PERFFIX2 b item 8a (2026-11-01): a Hit cascade copies back only the dynamic casters' footprint
+
+PERFRES1101 A sun_shadows gap 1: whenever any dynamic caster existed (a skinned actor, a swaying cable, the far sway
+tiles), every Hit cascade copied its whole static layer into the live map each paint (map x map D16: 0.12 ms a cascade at
+4096, 0.35 ms for three, shadowshimmer4/HANDOFF.md:37) before drawing the dynamic casters over it. The live map already
+holds the static layer except where last paint's dynamic casters wrote, so now (src/gl/sunshadowdyn.h) a Hit on the same
+static write (the layer's own write counter, the same cascade key) copies back only last paint's footprint and keeps
+this paint's for the next. The footprint: each set-2 caster's drawn vertices (CPU-skinned, cable sway or its own) as a
+view-space box through the cascade's orthographic rows, a far bucket's tiles (CellFarInst::tileBounds, the spheres
+drawCascade culls with) grown by the sway's largest offset (1.2 x amp), floor / ceil + 1 texel, clamped. Exact (the live
+map is texel for texel the whole-copy one), ships ON. The brief proposed a separate dynamic map with a min at the
+receiver; that is not exact under the hardware 2x2 compare (the min of two filtered taps is not the filter of the min
+depth) and doubles the receivers' taps in programs with 8.7 % instruction headroom, so the cut restore takes the same
+saving without a shader change. Census (WW_SHADOWCACHE_CENSUS=1): `copy <c0>,<c1>,<c2> cut <texels>` (whole / cut / none).
+Red WW_SHADOWCACHE_RED=fullcopy: every Hit copies the whole layer again. Gate WW_SHADOWCACHE_CHECK=1: each paint also
+builds the old way in the scratch layer and prints `shadowcache check: ... mism=N` (texels that differ). Unit:
+tests/sunshadowdyn (every covered texel of 3000 random casters inside its footprint; 600 paints of a walking caster: the
+cut live map equals the whole-copy one every paint; reds: a truncated footprint and no copy-back must fail).
+
 ## PERFFIX2 b item 8b (2026-11-01): Cascade Quality Low draws 2 sun cascades
 
 PERFRES1101 A sun_shadows missing 1: the cascade count was 3 at every tier (sunshadow.cpp kCascades). Now
