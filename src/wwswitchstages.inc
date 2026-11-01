@@ -910,6 +910,7 @@
 { "WW_LODL_CHANNEL", 1, "src/lodinative.cpp:596 lodlChannelFromEnv | read while the cell document is built" },
 { "WW_LODL_DEPTH_PROBE", 1, "src/btdterrain.cpp:1927 addLodlWater | read while the cell document is built" },
 { "WW_LODL_FLOW_DIR_RED", 0, "src/lodtfile.cpp:1485 lodtBuildWater | re-read per frame or per call (a)" },
+{ "WW_LODL_FLOW_LOG", 0, "src/lodtfile.cpp:1491 lodtBuildWater | re-read per frame or per call (a)" },
 { "WW_LODL_HEIGHT_RANGE", 1, "src/btdterrain.cpp:1535 addLodlWater | read while the cell document is built" },
 { "WW_LODL_MARK_CARRY_RED", 0, "src/lodtfile.cpp:3359 lodtWriteSourceOrV2 | re-read per frame or per call (a)" },
 { "WW_LODL_OBJECTS", 0, "src/nifskope.cpp:10490 NifSkope::load | re-read per frame or per call (a)" },

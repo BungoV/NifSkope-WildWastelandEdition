@@ -1,3 +1,26 @@
+## FARWATER5 L3 (FARLOOK1101, 2026-11-02): a log speed nibble for the far river bake (flow encoding 1, OFF)
+
+The lodgen river bake writes speed as code = round(8 r), where r = the texel speed / the body's median. Code 15 is
+only 1.94 x the median, so 38953 of 138499 solved texels (28.1 %) went past what the nibble can hold. With
+`WW_LODL_FLOW_LOG=1` the bake writes a half-octave log instead: code = round(8 + 2 log2 r), so 1 = 0.088 x, 8 = 1 x
+and 15 = 11.3 x. It also sets the header's flow-encoding word (0xCC) to 1. Code 0 is still water, and the moving-water
+floor (FARWATER4 L4) still applies. Constant words write code 8, which means 1 x in both encodings. Readers:
+gl/cellwaterinfo.cpp decodes through src/lodtflowcode.h by the file's own encoding. The linear decode is bit-exact
+with the old `c * mean / 8`, and an unknown encoding reads as linear. The flow views (btdterrain, the water windows)
+show the code as brightness, which is monotone in both encodings, so they are unchanged. The marking tool still refuses
+an encoding-1 file and says so (FARWATER5 L4 owns one reference for both writers). Off (the default) writes the old
+bytes. The bake line now ends with `speed 15 on N (linear|half-octave log nibble, flow encoding E)`.
+
+Gate (tests/farwater5/run.sh, offline: g++ compiles the header alone over FARWATER4's 111 lodgen river dumps):
+- B1: the linear codes equal the old writer on 138499 of 138499 texels.
+- B2: the log codes equal FARWATER4's nibl.py rule on 138499 of 138499 texels.
+- B3: past the nibble's range, the log code has 5261 texels (3.80 %, bar < 5 %); the red, the linear code, has 38953
+  (28.13 %) and FAILS.
+- B4: the log decode of 111109 moving texels is within a quarter octave of the true speed (worst 0.189, p99 0.187);
+  linear reaches a worst of 6.17.
+
+Not covered: a re-bake on this exe, and the far river picture.
+
 ## FARINSTBL1 (FARLOOK1101, 2026-11-01): far rings may take the bindless twin again, with the row in the uniform (OFF)
 
 SKYSHARDS3 kept the instanced far rings off the bindless twin. The twin reads its row at wwDrawBase + gl_BaseInstance,

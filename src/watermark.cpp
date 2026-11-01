@@ -446,7 +446,7 @@ bool WaterMarkDoc::readTail( QString * error )
 			.arg( bodyStride ).arg( kBodyRecord ) );
 	if ( flowEnc != 0 )
 		return fail( QStringLiteral( "the flow plane uses encoding %1; this tool knows 0 "
-			"(direction 8 / speed 4 / confidence 4)" ).arg( flowEnc ) );
+			"(direction 8 / speed 4 / confidence 4); a WW_LODL_FLOW_LOG bake is marked after FARWATER5 L4" ).arg( flowEnc ) );
 	const quint64 tableEnd = oBody + quint64( lodl->bodyCount() ) * bodyStride;
 	if ( oName && oName != tableEnd )
 		return fail( QStringLiteral( "the body name blob is at 0x%1, not immediately after the "
