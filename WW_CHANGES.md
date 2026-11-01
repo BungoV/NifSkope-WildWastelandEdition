@@ -7,12 +7,14 @@ PERFRES1101 group B found three water costs nobody could see and one default bel
 - **The split cut (fo4_waterdisp.tesc).** No vertex step is finer than the heights' own 64 u filter. The pre-split
   1024 u quads used to split down to 16 u, so the GPU sampled a field already smoothed over 64 u four times over: about
   1 M triangles near the camera. Measured offline with the live frame format (tests/watertess, 1080p 4x MSAA RGBA32F):
-  the split cost +0.56 to +0.75 ms over the flat twin, against +1.39 to +1.52 before. 4 std(z) near the camera is 0.887
+  the split cost +0.56 to +0.75 ms over the flat twin, against +1.39 to +1.52 before; the geometry alone is 0.07-0.09
+  of it (0.12-0.16 before), the rest is the water shader run again on small triangles' edges. 4 std(z) near the camera is 0.887
   of the sea's Hs (0.882 before), with no cracks. High draws the spectrum's normals on the flat surface, so the
   displacement is Ultra only. Red WW_CELL_WATER_OCEAN_RED=densetess (live) brings back both the dense splits and the
   displaced High.
 - **One refraction copy a second pass (Scene::grabRefractionSource).** Before, the water blitted the whole linear frame
-  for EVERY water draw (a 4x RGBA32F resolve, ~0.14-0.18 ms each, 30+ water shapes in a 5x5 water scene). The second
+  for EVERY water draw (a 1920 x 1026 4x RGBA32F resolve: 0.05-0.10 ms each offline, 30+ water shapes in a 5x5 water
+  scene). The second
   pass draws all its water back to back, with nothing else between. One copy at the first water therefore holds what
   each later copy held, except where a later water body lies over an earlier one. There it now reads the frame behind
   both, not the first body's colour (tests/waterrefr: 0 px apart for apart and adjacent bodies, only the overlap moves).
