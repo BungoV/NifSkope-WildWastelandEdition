@@ -40,6 +40,7 @@ BSD License - see nifskope.h
 #include "gl/cellnifxlights.h"	// lane NIFXLIGHT1: a fixture mesh's .nifx lights
 #include "rtddgicell.h"	// lane RTXGI1 M2: the ray-traced GI volume's read (rtddgiCellUniforms)
 #include "gl/celluniprof.h"	// lane PERFFIX1: WW_CELL_UNI_PROF
+#include "gl/cellunirec.h"	// lane PERFFIX1: the cell-uniform class record
 #include "gl/cloudvol.h"	// lane LIGHTNING2: a storm's flash on the exterior ambient (wwLightningGround)
 #include "cellworldanim.h"	// lane NIFXLIGHT3: the world clock a .nifx light's dimmer follows
 
@@ -61,6 +62,7 @@ BSD License - see nifskope.h
 #include <cstring>
 #include <map>
 #include <vector>
+#include <unordered_map>	// lane PERFFIX1: the cell-uniform class records
 
 // lane PRTP6 (cellwatergi.h): the GI switches a water draw zeroed, per program
 static WwWaterGiGuard & waterGi()
@@ -1523,6 +1525,116 @@ const WwCellUni::Dsa * wwCellUniDsa()
 	return &d;
 }
 
+/* lane PERFFIX1 (item 1, bungo 11-01: the per-frame globals were worked out again for every program in every pass,
+ * ~96 us a call x ~675 calls a frame at Concord all-on). What wwCellLightsUniforms sets depends on the scene, the pass
+ * and a few facts of the program only: its CLASS (the program names the body tests, and the locations it tests). Inside
+ * an armed pass (the setup memo's epoch: one pass, one view) the first call of a class records every set and bind in
+ * order; a later call of that class, scene and epoch replays the record onto its own program (each set through the
+ * same setter, so its cache and the draw packets see what they saw), and calls the program-specific setters live at
+ * their places (the ray-traced volume, the water's GI hand-back, the shadow fades, the clusters). Uploads ran in the
+ * recording call. WW_CELL_UNI_CLASS_RED=1: every call works it all out (the old path). WW_CELL_UNI_CLASS_CHECK=1: a
+ * replayed call works it out as well and counts every op that differs (`cell uni class:` line, must say 0). */
+namespace
+{
+using CuOp = WwUniRec::Op;
+using CuRec = WwUniRec::Rec<NifSkopeOpenGLContext::Program, FloatVector4>;
+
+bool cuClassRed()
+{
+	WW_SWITCH_STATIC( bool, red, wwEnvInt( "WW_CELL_UNI_CLASS_RED" ) == 1 );
+	return red;
+}
+
+bool cuClassCheck()
+{
+	WW_SWITCH_STATIC( bool, check, wwEnvInt( "WW_CELL_UNI_CLASS_CHECK" ) == 1 );
+	return check;
+}
+
+struct CuStats
+{
+	long long recorded = 0, replayed = 0, checked = 0, differ = 0, opsDiffer = 0;
+};
+
+CuStats & cuStats()
+{
+	static CuStats s;
+	return s;
+}
+
+// the facts of a program the body tests: its names (ext / fx / decal / volair) and the locations it asks for
+std::uint32_t cuClassOf( NifSkopeOpenGLContext::Program * prog )
+{
+	WW_SWITCH_STATIC( bool, airOldSun, wwEnvStr( "WW_CELL_AIR_RED" ).split( ',' ).contains( QStringLiteral( "oldsun" ) ) );
+	const bool cellName = wwIsCellProgramName( prog->name ), decal = wwIsCellDecalProgramName( prog->name );
+	const bool volair = prog->name == "cell_volair.prog" && !airOldSun;
+	const bool fx = prog->name == std::string_view( "fo4_effectcell.prog" ) || prog->name == std::string_view( "fo4_effectcellfx.prog" )
+		|| prog->name == std::string_view( "particles_cell.prog" );
+	return ( cellName ? 1u : 0u ) | ( decal ? 2u : 0u ) | ( volair ? 4u : 0u ) | ( fx ? 8u : 0u )
+		| ( prog->uniLocation( "fogOn" ) >= 0 ? 16u : 0u ) | ( prog->uniLocation( "csmMap" ) >= 0 ? 32u : 0u )
+		| ( prog->uniLocation( "cellShadowFade[0]" ) >= 0 ? 64u : 0u );
+}
+
+// a record replayed onto another program of its class (see wwCellLightsUniforms; the core in gl/cellunirec.h)
+void cuReplay( Scene * scene, Renderer * r, NifSkopeOpenGLContext::Program * prog, const CuRec & c )
+{
+	auto fn = r->fn;
+	WwCellUni::Units<std::remove_pointer_t<decltype( fn )>> u( fn, wwCellUniDsa() );
+	u.section();
+	WwUniRec::replay( c, prog, u, [&]( const CuOp & o ) {
+		if ( o.kind == CuOp::Cluster ) {
+			wwCellClusterUniforms( scene, c.clTexels, c.clCount, c.clStamp );
+		} else if ( o.arg == 1 ) {
+			rtddgiCellUniforms( scene );
+		} else if ( o.arg == 2 ) {
+			waterGi().passSet( prog );
+		} else if ( o.arg == 3 && o.i && prog->uniLocation( "cellShadowFade[0]" ) >= 0 ) {
+			Gpu & g = gpus()[r];
+			r->fn->glUniform1fv( prog->uniLocation( "cellShadowFade[0]" ), kShadowSlots, g.shFade );
+			prog->wwUni.forget( prog->uniLocation( "cellShadowFade[0]" ), kShadowSlots );	// lane CELLUNI1: a raw write
+		}
+	} );
+	u.done();
+}
+
+//! the end of a call (any return): a recording becomes valid; a checked call's ops are compared with the record
+struct CuEnd
+{
+	CuRec * rec = nullptr;
+	const CuRec * cmp = nullptr;
+	const CuRec * mine = nullptr;
+	~CuEnd()
+	{
+		CuStats & st = cuStats();
+		if ( rec ) {
+			rec->on = false;
+			rec->valid = true;
+			st.recorded++;
+		}
+		if ( cmp && mine ) {
+			st.checked++;
+			long long d = cmp->ops.size() == mine->ops.size() ? 0 : 1;
+			for ( size_t k = 0; k < cmp->ops.size() && k < mine->ops.size(); k++ )
+				if ( !cmp->ops[k].same( mine->ops[k] ) ) {
+					if ( st.opsDiffer < 12 )
+						std::fprintf( stderr, "cell uni class: MISMATCH op %d kind %d %s[%d] i %d -> %d f %g -> %g\n", int( k ),
+							int( cmp->ops[k].kind ), cmp->ops[k].name ? cmp->ops[k].name : "-", cmp->ops[k].arg, cmp->ops[k].i,
+							mine->ops[k].i, double( cmp->ops[k].f[0] ), double( mine->ops[k].f[0] ) );
+					d++;
+				}
+			st.differ += d ? 1 : 0;
+			st.opsDiffer += d;
+		}
+		const long long n = st.recorded + st.replayed;
+		if ( n > 0 && n % 4000 == 0 )
+			std::fprintf( stderr, "cell uni class: recorded %lld replayed %lld checked %lld differ %lld ops differ %lld%s\n",
+				st.recorded, st.replayed, st.checked, st.differ, st.opsDiffer, cuClassCheck() ? " (check: must be 0)" : "" );
+	}
+};
+}	// namespace
+
+quint64 wwSetupMemoEpochArmed();	// gl/renderer.cpp: the armed pass's epoch, 0 outside one
+
 void wwCellLightsUniforms( Scene * scene )
 {
 	PassTime::DrawCpuScope cpuT( PassTime::CpuCellUni );	// lane PERF2
@@ -1536,8 +1648,43 @@ void wwCellLightsUniforms( Scene * scene )
 	WwCellUni::state().red = wwCellUniRed();	// lane CELLUNI1
 	wwCellUniFrame();
 	const WwCellUni::Scope uniScope;
+	// lane PERFFIX1 (item 1): a later call of this program's class in the same armed pass replays the first one's record
+	static CuRec idle;	// outside an armed pass, or the red: records nothing
+	CuRec scratch;
+	CuRec * recp = &idle;
+	CuEnd endOf;
+	if ( const quint64 epoch = cuClassRed() ? 0 : wwSetupMemoEpochArmed() ) {
+		static std::unordered_map<std::uint32_t, CuRec> recs;
+		static quint64 recEpoch = 0;
+		static const void * recScene = nullptr;
+		if ( recEpoch != epoch || recScene != scene ) {
+			for ( auto & kv : recs )
+				kv.second.valid = false;
+			recEpoch = epoch;
+			recScene = scene;
+		}
+		CuRec & c = recs[cuClassOf( prog )];
+		if ( c.valid ) {
+			cuReplay( scene, r, prog, c );
+			cuStats().replayed++;
+			if ( !cuClassCheck() ) {
+				prof.at( 21, "replay" );
+				return;
+			}
+			scratch.on = true;	// the check: the body runs too (its sets win) and its ops are compared at the end
+			recp = &scratch;
+			endOf.cmp = &c;
+			endOf.mine = &scratch;
+		} else {
+			c.ops.clear();
+			c.on = true;
+			recp = &c;
+			endOf.rec = &c;
+		}
+	}
+	CuRec & rec = *recp;
 	const bool on = wwCellLightsWanted( scene );
-	prog->uni1b( "cellOn", on );
+	rec.b( prog, "cellOn", on );
 	prof.prog( prog );
 	auto fn = r->fn;
 	ClState & s = st();
@@ -1823,13 +1970,13 @@ void wwCellLightsUniforms( Scene * scene )
 	WwCellUni::Units<std::remove_pointer_t<decltype( fn )>> u( fn, wwCellUniDsa() );
 	u.section();
 	if ( g.tex && g.buf ) {
-		u.bind( kTextureUnit, GL_TEXTURE_BUFFER, g.tex );
+		rec.bind( u, kTextureUnit, GL_TEXTURE_BUFFER, g.tex );
 		if ( !g.texAttached ) {
 			u.texBuffer( g.tex, GL_RGBA32F, g.buf );
 			g.texAttached = true;
 		}
 	} else {
-		u.bind( kTextureUnit, GL_TEXTURE_BUFFER, 0 );
+		rec.bind( u, kTextureUnit, GL_TEXTURE_BUFFER, 0 );
 	}
 	prof.at( 4, "lightbind" );
 	// the bounce grid, bound (like the buffer above) whether or not this draw uses it; a Pass reads it with the
@@ -1905,7 +2052,7 @@ void wwCellLightsUniforms( Scene * scene )
 	}
 	const bool skyDraw = G && pass == 2 && g.skyTex && g.skyDoc == scene->nifModel;
 	const bool giDraw = skyDraw || ( G && pass != 2 && g.giTex && g.giDoc == scene->nifModel );
-	u.bind( kGiUnit, GL_TEXTURE_3D, skyDraw ? g.skyTex : giDraw ? g.giTex : 0 );
+	rec.bind( u, kGiUnit, GL_TEXTURE_3D, skyDraw ? g.skyTex : giDraw ? g.giTex : 0 );
 	prof.at( 5, "gi" );
 	{	// SKY2 FOGSLICE1: the air volume (the deck's D2 s55), read by the air pass only (cell_airmed.glsl volCubeAll)
 		const bool airUp = giDraw && !skyDraw && G->skyLit && !G->air.empty();
@@ -1926,13 +2073,13 @@ void wwCellLightsUniforms( Scene * scene )
 			g.airVersion = s.giVersion.value( scene->nifModel );
 		}
 		const bool airDraw = airUp && g.airTex && g.airDoc == scene->nifModel;
-		u.bind( WwCellUnit::GiAir, GL_TEXTURE_3D, airDraw ? g.airTex : 0 );
-		prog->uni1i( "cellGiAir", WwCellUnit::GiAir );
-		prog->uni1b( "cellGiAirOn", airDraw );
+		rec.bind( u, WwCellUnit::GiAir, GL_TEXTURE_3D, airDraw ? g.airTex : 0 );
+		rec.i( prog, "cellGiAir", WwCellUnit::GiAir );
+		rec.b( prog, "cellGiAirOn", airDraw );
 		if ( airDraw ) {
-			prog->uni3f( "cellGiAirOrigin", G->airOrigin[0], G->airOrigin[1], G->airOrigin[2] );
-			prog->uni1f( "cellGiAirVoxel", G->airVoxel );
-			prog->uni3f( "cellGiAirDims", float( G->airDims[0] ), float( G->airDims[1] ), float( G->airDims[2] ) );
+			rec.f3( prog, "cellGiAirOrigin", G->airOrigin[0], G->airOrigin[1], G->airOrigin[2] );
+			rec.f( prog, "cellGiAirVoxel", G->airVoxel );
+			rec.f3( prog, "cellGiAirDims", float( G->airDims[0] ), float( G->airDims[1] ), float( G->airDims[2] ) );
 		}
 	}
 	prof.at( 6, "air" );
@@ -1946,10 +2093,10 @@ void wwCellLightsUniforms( Scene * scene )
 		// loop bound (a uniform: the loop stays one body in every program)
 		const bool fits = g.units > WwCellUnit::GiHalfKey;
 		const int u = fits ? WwCellUnit::GiHalf : g.units > WwCellUnit::Ao ? WwCellUnit::Ao : 9;
-		prog->uni1i( "cellGiHalf", u );
-		prog->uni1i( "cellGiHalfKey", fits ? WwCellUnit::GiHalfKey : u );
-		prog->uni1i( "cellGiLoop8", 8 );
-		prog->uni1b( "cellGiHalfOn", false );	// wwCellAoDraw turns it on, per draw, after this
+		rec.i( prog, "cellGiHalf", u );
+		rec.i( prog, "cellGiHalfKey", fits ? WwCellUnit::GiHalfKey : u );
+		rec.i( prog, "cellGiLoop8", 8 );
+		rec.b( prog, "cellGiHalfOn", false );	// wwCellAoDraw turns it on, per draw, after this
 	}
 	const bool roomsUp = giDraw && !G->slotRooms.empty() && !G->rooms.empty() && g.units > kRoomUnit;
 	if ( roomsUp && ( g.roomDoc != scene->nifModel || g.roomVersion != s.giVersion.value( scene->nifModel ) ) ) {
@@ -1985,19 +2132,19 @@ void wwCellLightsUniforms( Scene * scene )
 	}
 	const bool roomsDraw = roomsUp && g.roomDoc == scene->nifModel;
 	if ( g.units > kRoomUnit ) {
-		u.bind( kGiSlotUnit, GL_TEXTURE_3D, roomsDraw ? g.slotTex : 0 );
-		u.bind( kRoomUnit, GL_TEXTURE_3D, roomsDraw ? g.roomTex : 0 );
-		prog->uni1i( "cellGiSlots", kGiSlotUnit );
-		prog->uni1i( "cellRooms", kRoomUnit );
+		rec.bind( u, kGiSlotUnit, GL_TEXTURE_3D, roomsDraw ? g.slotTex : 0 );
+		rec.bind( u, kRoomUnit, GL_TEXTURE_3D, roomsDraw ? g.roomTex : 0 );
+		rec.i( prog, "cellGiSlots", kGiSlotUnit );
+		rec.i( prog, "cellRooms", kRoomUnit );
 	} else {	// two sampler3D may share a unit; a sampler3D on a 2D unit fails the draw
-		prog->uni1i( "cellGiSlots", kGiUnit );
-		prog->uni1i( "cellRooms", kGiUnit );
+		rec.i( prog, "cellGiSlots", kGiUnit );
+		rec.i( prog, "cellRooms", kGiUnit );
 	}
-	prog->uni1b( "cellGiRooms", roomsDraw );
+	rec.b( prog, "cellGiRooms", roomsDraw );
 	if ( roomsDraw ) {
-		prog->uni3f( "cellRoomsOrigin", G->roomsOrigin[0], G->roomsOrigin[1], G->roomsOrigin[2] );
-		prog->uni1f( "cellRoomsCell", G->roomsCell );
-		prog->uni3f( "cellRoomsDims", float( G->roomsDims[0] ), float( G->roomsDims[1] ), float( G->roomsDims[2] ) );
+		rec.f3( prog, "cellRoomsOrigin", G->roomsOrigin[0], G->roomsOrigin[1], G->roomsOrigin[2] );
+		rec.f( prog, "cellRoomsCell", G->roomsCell );
+		rec.f3( prog, "cellRoomsDims", float( G->roomsDims[0] ), float( G->roomsDims[1] ), float( G->roomsDims[2] ) );
 	}
 	prof.at( 7, "rooms" );
 	/* the far tables and the GI grid's placed share, bound (the sampler types fixed) whether or not
@@ -2036,68 +2183,68 @@ void wwCellLightsUniforms( Scene * scene )
 	const bool farPlacedDraw = farDraw && giDraw && !Fr->placed.empty() && g.farPlacedTex;
 	if ( g.units > kFarPlacedUnit ) {
 		// lane CELLUNI1: with DSA attached once per buffer (the old path attaches at every call)
-		u.bind( kFarSlotUnit, GL_TEXTURE_BUFFER, g.farSlotTex );
+		rec.bind( u, kFarSlotUnit, GL_TEXTURE_BUFFER, g.farSlotTex );
 		if ( g.farSlotTex && ( !u.dsa || g.farSlotAtt != g.farSlotBuf ) ) {
 			u.texBuffer( g.farSlotTex, GL_RGBA32F, g.farSlotBuf );
 			g.farSlotAtt = g.farSlotBuf;
 		}
-		u.bind( kFarRecUnit, GL_TEXTURE_BUFFER, g.farRecTex );
+		rec.bind( u, kFarRecUnit, GL_TEXTURE_BUFFER, g.farRecTex );
 		if ( g.farRecTex && ( !u.dsa || g.farRecAtt != g.farRecBuf ) ) {
 			u.texBuffer( g.farRecTex, GL_RGBA32F, g.farRecBuf );
 			g.farRecAtt = g.farRecBuf;
 		}
-		u.bind( kFarPlacedUnit, GL_TEXTURE_3D, farPlacedDraw ? g.farPlacedTex : 0 );
-		prog->uni1i( "cellFarSlots", kFarSlotUnit );
-		prog->uni1i( "cellFarRecs", kFarRecUnit );
-		prog->uni1i( "cellFarPlaced", kFarPlacedUnit );
+		rec.bind( u, kFarPlacedUnit, GL_TEXTURE_3D, farPlacedDraw ? g.farPlacedTex : 0 );
+		rec.i( prog, "cellFarSlots", kFarSlotUnit );
+		rec.i( prog, "cellFarRecs", kFarRecUnit );
+		rec.i( prog, "cellFarPlaced", kFarPlacedUnit );
 	} else {	// never read (cellFarOn false): the far samplers ride units of their own types (two samplers of one type may share)
-		prog->uni1i( "cellFarSlots", kTextureUnit );
-		prog->uni1i( "cellFarRecs", kTextureUnit );
-		prog->uni1i( "cellFarPlaced", kGiUnit );
+		rec.i( prog, "cellFarSlots", kTextureUnit );
+		rec.i( prog, "cellFarRecs", kTextureUnit );
+		rec.i( prog, "cellFarPlaced", kGiUnit );
 	}
-	prog->uni1b( "cellFarOn", farDraw );
-	prog->uni1b( "cellFarPlacedOn", farPlacedDraw );
-	prog->uni1i( "cellFarRed", s.farRed );
+	rec.b( prog, "cellFarOn", farDraw );
+	rec.b( prog, "cellFarPlacedOn", farPlacedDraw );
+	rec.i( prog, "cellFarRed", s.farRed );
 	if ( farDraw ) {
-		prog->uni1i( "cellFarBits", Fr->bits );
-		prog->uni1i( "cellFarProbe", Fr->maxProbe );
-		prog->uni1f( "cellFarCell", Fr->cell );
-		prog->uni2f( "cellFarBand", Fr->band[0], Fr->band[1] );
+		rec.i( prog, "cellFarBits", Fr->bits );
+		rec.i( prog, "cellFarProbe", Fr->maxProbe );
+		rec.f( prog, "cellFarCell", Fr->cell );
+		rec.f2( prog, "cellFarBand", Fr->band[0], Fr->band[1] );
 	}
 	if ( farPlacedDraw ) {
-		prog->uni3f( "cellFarPlacedOrigin", Fr->placedOrigin[0], Fr->placedOrigin[1], Fr->placedOrigin[2] );
-		prog->uni1f( "cellFarPlacedVoxel", Fr->placedVoxel );
-		prog->uni3f( "cellFarPlacedDims", float( Fr->placedDims[0] ), float( Fr->placedDims[1] ), float( Fr->placedDims[2] ) );
+		rec.f3( prog, "cellFarPlacedOrigin", Fr->placedOrigin[0], Fr->placedOrigin[1], Fr->placedOrigin[2] );
+		rec.f( prog, "cellFarPlacedVoxel", Fr->placedVoxel );
+		rec.f3( prog, "cellFarPlacedDims", float( Fr->placedDims[0] ), float( Fr->placedDims[1] ), float( Fr->placedDims[2] ) );
 	}
 	u.done();
 	prof.at( 8, "far" );
-	prog->uni1i( "cellGi", kGiUnit );
-	prog->uni1b( "cellGiOn", giDraw );
-	rtddgiCellUniforms( scene );	// lane RTXGI1 M2: the ray-traced GI volume (src/rtddgicell.h); no-op in an off program
+	rec.i( prog, "cellGi", kGiUnit );
+	rec.b( prog, "cellGiOn", giDraw );
+	rec.live( 1 );	rtddgiCellUniforms( scene );	// lane RTXGI1 M2: the ray-traced GI volume (src/rtddgicell.h); no-op in an off program
 	prof.at( 9, "rtddgi" );
 	// lane PRTOFF1: without the PRT a weather-lit exterior's sky is the ray-traced volume's (its misses: cell_lights.glsl CELL_GI_UP)
 	const bool ddgiSky = !wwCellPrtOn() && L && !L->interior && wwLookdevActive();
-	prog->uni1b( "cellGiSky", ( giDraw && !skyDraw && G->skyLit ) || ddgiSky );	// lane SKY1 (never on the sky-share grid)
-	prog->uni1f( "cellSkyVis", wwCellSkyVis() );	// lane SKYSTR1: the Sky visibility row, for the AO decals
+	rec.b( prog, "cellGiSky", ( giDraw && !skyDraw && G->skyLit ) || ddgiSky );	// lane SKY1 (never on the sky-share grid)
+	rec.f( prog, "cellSkyVis", wwCellSkyVis() );	// lane SKYSTR1: the Sky visibility row, for the AO decals
 	// lane SPECOCC1: the sky grid's slabs start after the GI's own (6, or 12 with the rooms' second slot)
 	const bool specOccDraw = giDraw && !skyDraw && G->skyLit && g.giSpecSky;
-	prog->uni1i( "cellSpecOcc", specOccDraw || ddgiSky ? wwCellSpecOccMode() : 0 );	// lane PRTOFF1: or the volume's sky visibility
-	prog->uni1f( "cellSpecSkyBase", specOccDraw ? ( G->slotRooms.empty() ? 6.0f : 12.0f ) : 0.0f );	// 0: no sky slot (the water reads it)
-	prog->uni1i( "cellGiAmb", s.giAmb );	// lane GICAL1
-	prog->uni1b( "cellGiFill", s.giFill && !skyDraw );	// the gap fill is the GI grid's, never the sky share's
-	prog->uni1i( "cellPass", pass );	// lane PROBEVIEW1
-	prog->uni1i( "cellPassRed", s.passRed & ~4 );	// lane GIWALL2: + 8192 WW_CELL_GIWALL_RED=off	// lane WALLSTACK1: + 2048 nofilter, 4096 nolastfill (was & 251, which dropped them)	// lane ROOMCLAMP1: + 8 noclamp; lane GISHADE1: + 16 nosee; lane GIBLACK1: + 32 borrow; lane GIBLACK2: + 64 lendamb, 128 strand
+	rec.i( prog, "cellSpecOcc", specOccDraw || ddgiSky ? wwCellSpecOccMode() : 0 );	// lane PRTOFF1: or the volume's sky visibility
+	rec.f( prog, "cellSpecSkyBase", specOccDraw ? ( G->slotRooms.empty() ? 6.0f : 12.0f ) : 0.0f );	// 0: no sky slot (the water reads it)
+	rec.i( prog, "cellGiAmb", s.giAmb );	// lane GICAL1
+	rec.b( prog, "cellGiFill", s.giFill && !skyDraw );	// the gap fill is the GI grid's, never the sky share's
+	rec.i( prog, "cellPass", pass );	// lane PROBEVIEW1
+	rec.i( prog, "cellPassRed", s.passRed & ~4 );	// lane GIWALL2: + 8192 WW_CELL_GIWALL_RED=off	// lane WALLSTACK1: + 2048 nofilter, 4096 nolastfill (was & 251, which dropped them)	// lane ROOMCLAMP1: + 8 noclamp; lane GISHADE1: + 16 nosee; lane GIBLACK1: + 32 borrow; lane GIBLACK2: + 64 lendamb, 128 strand
 	if ( giDraw ) {
-		prog->uni3f( "cellGiOrigin", G->origin[0], G->origin[1], G->origin[2] );
-		prog->uni1f( "cellGiVoxel", G->voxel );
-		prog->uni3f( "cellGiDims", float( G->dims[0] ), float( G->dims[1] ), float( G->dims[2] ) );
+		rec.f3( prog, "cellGiOrigin", G->origin[0], G->origin[1], G->origin[2] );
+		rec.f( prog, "cellGiVoxel", G->voxel );
+		rec.f3( prog, "cellGiDims", float( G->dims[0] ), float( G->dims[1] ), float( G->dims[2] ) );
 		// lane GIEDGE1: the x/y edge fade; red WW_CELL_GI_RED=clampedge = the old CLAMP_TO_EDGE read past the box
 		WW_SWITCH_STATIC( bool, giClampEdge, wwEnvStr( "WW_CELL_GI_RED" ).split( ',' ).contains( QStringLiteral( "clampedge" ) ) );
-		prog->uni1f( "cellGiPad", giClampEdge ? 0.0f : float( G->pad ) );
+		rec.f( prog, "cellGiPad", giClampEdge ? 0.0f : float( G->pad ) );
 	}
 	{	// lane EMISSIVEGRID1: the fine boxes (their atlas rides the grid's texture, after its layers)
 		const bool fineDraw = giDraw && !skyDraw && !G->fine.empty();
-		prog->uni1b( "cellGiFineOn", fineDraw );
+		rec.b( prog, "cellGiFineOn", fineDraw );
 		if ( fineDraw ) {
 			WW_SWITCH_STATIC( int, fineRed, []() {	// lane LIVESET1: follows a live set
 				const QByteArray r = qgetenv( "WW_CELL_EMISSIVEGRID_RED" ).trimmed();
@@ -2105,16 +2252,16 @@ void wwCellLightsUniforms( Scene * scene )
 			}() );
 			const int giLayers = G->dims[2] * ( ( G->slotRooms.empty() ? 6 : 12 ) + ( g.giSpecSky ? 6 : 0 ) );	// + SPECOCC1's sky slot
 			const int n = std::min( int( G->fineBox.size() / 8 ), 8 );
-			prog->uni1i( "cellGiFineN", n );
-			prog->uni1i( "cellGiFineRed", fineRed );
+			rec.i( prog, "cellGiFineN", n );
+			rec.i( prog, "cellGiFineRed", fineRed );
 			for ( int k = 0; k < n; k++ ) {
 				const float * b = &G->fineBox[size_t( k ) * 8];
-				prog->uni4f_l( prog->uniLocation( "cellGiFineBox[%d]", k ), FloatVector4( b[0], b[1], b[2], b[3] ) );
-				prog->uni4f_l( prog->uniLocation( "cellGiFineDim[%d]", k ), FloatVector4( b[4], b[5], b[6], b[7] + float( giLayers ) ) );
+				rec.f4l( prog, "cellGiFineBox[%d]", k, FloatVector4( b[0], b[1], b[2], b[3] ) );
+				rec.f4l( prog, "cellGiFineDim[%d]", k, FloatVector4( b[4], b[5], b[6], b[7] + float( giLayers ) ) );
 			}
 		}
 	}
-	waterGi().passSet( prog );	// lane PRTP6: the values just set are the ones a water draw gives back
+	rec.live( 2 );	waterGi().passSet( prog );	// lane PRTP6: the values just set are the ones a water draw gives back
 	prof.at( 10, "gitail" );
 	// the imagespace, once this document has a measure; its LUT bound like the grid above
 	const float adapted = s.adapted.value( scene->nifModel, -1.0f );
@@ -2141,7 +2288,7 @@ void wwCellLightsUniforms( Scene * scene )
 	}
 	const bool lutDraw = isDraw && g.lutTex && g.lutDoc == scene->nifModel && LI->isLut.size() == 16 * 16 * 16 * 3;
 	u.section();
-	u.bind( kLutUnit, GL_TEXTURE_3D, lutDraw ? g.lutTex : 0 );
+	rec.bind( u, kLutUnit, GL_TEXTURE_3D, lutDraw ? g.lutTex : 0 );
 	u.done();
 	prof.at( 11, "islut" );
 	// the measure's bloom, a quarter of the view, sampled at the fragment's place in the view
@@ -2170,80 +2317,80 @@ void wwCellLightsUniforms( Scene * scene )
 	const GLuint bloomTex = B && B->gpuTex ? GLuint( B->gpuTex ) : g.bloomTex;
 	const bool bloomDraw = B && B->w > 0 && bloomTex && ( B->gpuTex || g.bloomDoc == scene->nifModel ) && !( s.isRed & 8 )
 		&& !wwCellBloomReplacing();
-	u.bind( kBloomUnit, GL_TEXTURE_2D, bloomDraw ? bloomTex : 0 );
+	rec.bind( u, kBloomUnit, GL_TEXTURE_2D, bloomDraw ? bloomTex : 0 );
 	u.done();
-	prog->uni1i( "cellIsBloom", kBloomUnit );
-	prog->uni1b( "cellIsBloomOn", bloomDraw );
+	rec.i( prog, "cellIsBloom", kBloomUnit );
+	rec.b( prog, "cellIsBloomOn", bloomDraw );
 	if ( bloomDraw ) {
 		GLint vp[4] = { 0, 0, 1, 1 };
 		WwCellUni::viewport( fn, vp );
-		prog->uni4f_l( prog->uniLocation( "cellIsBloomRect" ), FloatVector4( float( vp[0] ), float( vp[1] ),
+		rec.f4l( prog, "cellIsBloomRect", -1, FloatVector4( float( vp[0] ), float( vp[1] ),
 			1.0f / float( std::max( vp[2], 1 ) ), 1.0f / float( std::max( vp[3], 1 ) ) ) );
 	}
 	prof.at( 12, "bloom" );
 	// the depth cubes, bound (a sampler left on unit 0 beside BaseMap would be a type clash)
 	const bool shadowDraw = L && s.shadowOn && !s.shadowRed && g.shTex && g.shDoc == scene->nifModel;
-	u.bind( kShadowUnit, GL_TEXTURE_CUBE_MAP_ARRAY, shadowDraw ? g.shTex : 0 );
+	rec.bind( u, kShadowUnit, GL_TEXTURE_CUBE_MAP_ARRAY, shadowDraw ? g.shTex : 0 );
 	u.done();
-	prog->uni1i( "cellShadow", kShadowUnit );
-	prog->uni1b( "cellShadowOn", shadowDraw );
-	prog->uni1f( "cellShadowTexel", 2.0f / float( g.shFace > 0 ? g.shFace : kShadowFace ) );	// lane LAMPSHADOW1: the tier's face
+	rec.i( prog, "cellShadow", kShadowUnit );
+	rec.b( prog, "cellShadowOn", shadowDraw );
+	rec.f( prog, "cellShadowTexel", 2.0f / float( g.shFace > 0 ? g.shFace : kShadowFace ) );	// lane LAMPSHADOW1: the tier's face
 	// lane GAPLOOK1 (LIGHTSYS-3): the budget's per-slot strengths; off, the shader keeps its old return
 	const bool fadeOn = shadowDraw && g.shBudget > 0;
-	prog->uni1b( "cellShadowFadeOn", fadeOn );
-	if ( fadeOn && prog->uniLocation( "cellShadowFade[0]" ) >= 0 ) {
+	rec.b( prog, "cellShadowFadeOn", fadeOn );
+	rec.live( 3, fadeOn );	if ( fadeOn && prog->uniLocation( "cellShadowFade[0]" ) >= 0 ) {
 		r->fn->glUniform1fv( prog->uniLocation( "cellShadowFade[0]" ), kShadowSlots, g.shFade );
 		prog->wwUni.forget( prog->uniLocation( "cellShadowFade[0]" ), kShadowSlots );	// lane CELLUNI1: a raw write
 	}
-	prog->uni1i( "cellIsLut", kLutUnit );
-	prog->uni1b( "cellIsOn", isDraw );
-	prog->uni1b( "cellIsLinear", isDraw && wwCellHdrActive() );	// write linear light, tone-mapped once
-	prog->uni1b( "cellIsLutOn", lutDraw );
+	rec.i( prog, "cellIsLut", kLutUnit );
+	rec.b( prog, "cellIsOn", isDraw );
+	rec.b( prog, "cellIsLinear", isDraw && wwCellHdrActive() );	// write linear light, tone-mapped once
+	rec.b( prog, "cellIsLutOn", lutDraw );
 	if ( isDraw ) {
 		const float * h = LI->isHdr;
 		// the tonemap PS: max( mid / (lum + 0.001), cb.y ) then min( .., cb.x ); cb (x, y) = HNAM (max, min)
 		const float e = cellExposure( h, adapted );
-		prog->uni1f( "cellIsExposure", e );
-		prog->uni1f( "cellIsE", h[1] );
-		prog->uni1f( "cellIsAdapted", adapted );
-		prog->uni3f( "cellIsCine", LI->isCine[0], LI->isCine[1], LI->isCine[2] );
-		prog->uni4f_l( prog->uniLocation( "cellIsTint" ), FloatVector4( LI->isTint[0], LI->isTint[1], LI->isTint[2], LI->isTint[3] ) );
-		prog->uni1i( "cellIsRed", s.isRed );
+		rec.f( prog, "cellIsExposure", e );
+		rec.f( prog, "cellIsE", h[1] );
+		rec.f( prog, "cellIsAdapted", adapted );
+		rec.f3( prog, "cellIsCine", LI->isCine[0], LI->isCine[1], LI->isCine[2] );
+		rec.f4l( prog, "cellIsTint", -1, FloatVector4( LI->isTint[0], LI->isTint[1], LI->isTint[2], LI->isTint[3] ) );
+		rec.i( prog, "cellIsRed", s.isRed );
 	}
 	prof.at( 13, "shadow+is" );
-	prog->uni1i( "cellLights", kTextureUnit );
+	rec.i( prog, "cellLights", kTextureUnit );
 	// the cluster lists: their sampler bound on every draw, the lists only on a lit one
-	wwCellClusterUniforms( scene, L ? &g.texels : nullptr, L ? g.count : 0, g.texelStamp );
+	rec.cluster( L ? &g.texels : nullptr, L ? g.count : 0, g.texelStamp );	wwCellClusterUniforms( scene, L ? &g.texels : nullptr, L ? g.count : 0, g.texelStamp );
 	prof.at( 14, "cluster" );
 	if ( !L )
 		return;
-	prog->uni1i( "cellLightCount", g.count );
-	prog->uni1i( "cellBulbBase", g.bulbBase );	// lane NIFXLIGHT2: the air's bulb-tier lights
-	prog->uni1i( "cellBulbCount", g.bulbs );
+	rec.i( prog, "cellLightCount", g.count );
+	rec.i( prog, "cellBulbBase", g.bulbBase );	// lane NIFXLIGHT2: the air's bulb-tier lights
+	rec.i( prog, "cellBulbCount", g.bulbs );
 	{	// lane LIGHTS5: GOBO1's pattern (pin WW_CELL_GOBO_ROT turns it, red WW_CELL_GOBO_RED=flat its mean) and FOGSCALE1
 		WW_SWITCH_STATIC( int, goboRot, wwEnvInt( "WW_CELL_GOBO_ROT" ) & 7 );
 		WW_SWITCH_STATIC( bool, goboFlat, wwEnvStr( "WW_CELL_GOBO_RED" ) == QLatin1String( "flat" ) );
 		WW_SWITCH_STATIC( bool, goboGam, wwEnv( "WW_CELL_GOBO_GAMMA" ).trimmed() == "2.2" );	// GOBO3 red
-		prog->uni1b( "cellGoboOn", g.goboAny );
-		prog->uni1i( "cellGoboRot", goboRot );
-		prog->uni1b( "cellGoboFlat", goboFlat );
-		prog->uni1b( "cellGoboGam", goboGam );
+		rec.b( prog, "cellGoboOn", g.goboAny );
+		rec.i( prog, "cellGoboRot", goboRot );
+		rec.b( prog, "cellGoboFlat", goboFlat );
+		rec.b( prog, "cellGoboGam", goboGam );
 		// lane GOBO2: the omni/box records and the mapping (WW_CELL_GOBO_OMNI 0-15; GOBO3: 0 = the game's, Todd's treat)
 		WW_SWITCH_STATIC( int, goboMap, wwEnvInt( "WW_CELL_GOBO_OMNI" ) & 15 );
-		prog->uni1i( "cellGoboTbl", g.goboTbl );
-		prog->uni1i( "cellGoboMap", goboMap );
-		prog->uni1b( "cellFogScaleOn", g.fogBase >= 0 );
-		prog->uni1i( "cellFogScaleBase", std::max( g.fogBase, 0 ) );
+		rec.i( prog, "cellGoboTbl", g.goboTbl );
+		rec.i( prog, "cellGoboMap", goboMap );
+		rec.b( prog, "cellFogScaleOn", g.fogBase >= 0 );
+		rec.i( prog, "cellFogScaleBase", std::max( g.fogBase, 0 ) );
 	}
 	// world = R^T (posView - t) / sc  (lookdevstage.cpp's fog uses the same inverse)
 	const Transform & vt = scene->view;
 	const float sc = vt.scale != 0.0f ? vt.scale : 1.0f;
-	prog->uni1f( "fxDistScale", 1.0f / sc );	// view units -> game units for the soft fades
+	rec.f( prog, "fxDistScale", 1.0f / sc );	// view units -> game units for the soft fades
 	for ( int k = 0; k < 3; k++ ) {
 		float w = 0.0f;
 		for ( int j = 0; j < 3; j++ )
 			w -= vt.rotation( j, k ) * vt.translation[j];
-		prog->uni4f_l( prog->uniLocation( "cellRow[%d]", k ), FloatVector4( vt.rotation( 0, k ) / sc,
+		rec.f4l( prog, "cellRow[%d]", k, FloatVector4( vt.rotation( 0, k ) / sc,
 			vt.rotation( 1, k ) / sc, vt.rotation( 2, k ) / sc, w / sc ) );
 	}
 	prof.at( 15, "gobo+row" );
@@ -2266,12 +2413,12 @@ void wwCellLightsUniforms( Scene * scene )
 		}
 	}
 	const bool dalc = ( L->hasDalc || skyLitAmb ) && !( s.red & 4 );
-	prog->uni1b( "cellHasDalc", dalc );
+	rec.b( prog, "cellHasDalc", dalc );
 	for ( int c = 0; c < 3 && dalc; c++ ) {
 		float mean = 0.0f;
 		for ( int a = 0; a < 6; a++ )
 			mean += D[a][c] / 6.0f;
-		prog->uni4f_l( prog->uniLocation( "cellDalc[%d]", c ), FloatVector4(
+		rec.f4l( prog, "cellDalc[%d]", c, FloatVector4(
 			( D[0][c] - D[1][c] ) * 0.5f, ( D[2][c] - D[3][c] ) * 0.5f,
 			( D[4][c] - D[5][c] ) * 0.5f, mean ) );
 	}
@@ -2290,14 +2437,14 @@ void wwCellLightsUniforms( Scene * scene )
 	}
 	// the Ambient Only volumes, in plugin order (the shader takes the first that holds a point)
 	const int ambo = ( dalc && !( s.red & 1024 ) ) ? std::min( int( L->ambientLights.size() ), kAmbientSlots ) : 0;
-	prog->uni1i( "cellAmboCount", ambo );
+	rec.i( prog, "cellAmboCount", ambo );
 	for ( int i = 0; i < ambo; i++ ) {
 		const WwCellAmbientLight & a = L->ambientLights[i];
-		prog->uni4f_l( prog->uniLocation( "cellAmbo[%d]", i ), FloatVector4( a.pos[0], a.pos[1], a.pos[2], a.volume ) );
+		rec.f4l( prog, "cellAmbo[%d]", i, FloatVector4( a.pos[0], a.pos[1], a.pos[2], a.volume ) );
 		// K.w = 1 marks a box volume, its three rows in cellAmboBox
-		prog->uni4f_l( prog->uniLocation( "cellAmboK[%d]", i ), FloatVector4( a.k[0], a.k[1], a.k[2], a.hasBox ? 1.0f : 0.0f ) );
+		rec.f4l( prog, "cellAmboK[%d]", i, FloatVector4( a.k[0], a.k[1], a.k[2], a.hasBox ? 1.0f : 0.0f ) );
 		for ( int k = 0; k < 3 && a.hasBox; k++ )
-			prog->uni4f_l( prog->uniLocation( "cellAmboBox[%d]", i * 3 + k ),
+			rec.f4l( prog, "cellAmboBox[%d]", i * 3 + k,
 				FloatVector4( a.box[k][0], a.box[k][1], a.box[k][2], a.box[k][3] ) );
 	}
 	prof.at( 16, "dalc+ambo" );
@@ -2308,7 +2455,7 @@ void wwCellLightsUniforms( Scene * scene )
 	/* The game's lit surfaces take the sun x the imagespace Sunlight Scale, so the sun-to-ambient ratio (and the
 	 * bounce the probes carry) matches the game. 1 indoors. */
 	const float sunScale = ( !L->interior && wwLookdevActive() ) ? wwLookdevSunlightScale() : 1.0f;
-	prog->uni1f( "cellSunScale", sunScale );
+	rec.f( prog, "cellSunScale", sunScale );
 	/* lane VOLAIR1 (LAMPAIR1): the air takes the surfaces' exterior sun and sky (the weather's light x Sunlight Scale,
 	 * its DALC) so it is lit by the light the records give, not the fog-sun glare colour; red WW_CELL_AIR_RED=oldsun */
 	WW_SWITCH_STATIC( bool, airOldSun, wwEnvStr( "WW_CELL_AIR_RED" ).split( ',' ).contains( QStringLiteral( "oldsun" ) ) );
@@ -2375,7 +2522,7 @@ void wwCellLightsUniforms( Scene * scene )
 				for ( int c = 0; c < 3; c++ )
 					base[c] = std::max( fxCol[c], 0.0f ) * fxScale;
 			}
-			prog->uni3f( "cellFxBase", base[0], base[1], base[2] );
+			rec.f3( prog, "cellFxBase", base[0], base[1], base[2] );
 		}
 		if ( !L->interior && fxProg && wwLookdevActive() && wwLookdevDalc( dalc ) ) {
 			float dif[4] = {}, amb[4] = {};
@@ -2463,7 +2610,7 @@ void wwCellLightsUniforms( Scene * scene )
 					mean += g[a][c] / 6.0f;
 				ambLum = std::max( ambLum, 0.0f ) + mean * mean * ( c == 0 ? 0.2126f : c == 1 ? 0.7152f : 0.0722f );
 				const float sgn = flip ? 0.5f : -0.5f;	// travel: n.z = +1 takes Z- (index 5)
-				prog->uni4f_l( prog->uniLocation( "cellDalc[%d]", c ), FloatVector4(
+				rec.f4l( prog, "cellDalc[%d]", c, FloatVector4(
 					( g[0][c] - g[1][c] ) * sgn, ( g[2][c] - g[3][c] ) * sgn, ( g[4][c] - g[5][c] ) * sgn, mean ) );
 			}
 			extDalc = true;
@@ -2491,31 +2638,31 @@ void wwCellLightsUniforms( Scene * scene )
 		}
 	}
 	prof.at( 19, "extamb" );
-	prog->uni1b( "cellExtDalc", extDalc );
-	prog->uni1b( "cellHasDir", hasDir );
-	prog->uni3f( "cellDirColor", dirColor[0], dirColor[1], dirColor[2] );
-	prog->uni3f( "cellDirTo", dirTo[0], dirTo[1], dirTo[2] );
+	rec.b( prog, "cellExtDalc", extDalc );
+	rec.b( prog, "cellHasDir", hasDir );
+	rec.f3( prog, "cellDirColor", dirColor[0], dirColor[1], dirColor[2] );
+	rec.f3( prog, "cellDirTo", dirTo[0], dirTo[1], dirTo[2] );
 	if ( ambLum >= 0.0f ) {
 		// the share of the air's light that no sun shadow dims: the ambient over it and the sun's isotropic quarter
 		const float sunLum = 0.2126f * dirColor[0] + 0.7152f * dirColor[1] + 0.0722f * dirColor[2];
 		wwShadowSetAirAmbientShare( ambLum / std::max( ambLum + 0.25f * sunLum, 1e-6f ) );
 	}
-	prog->uni1b( "cellInterior", L->interior );
-	prog->uni3f( "cellCenter", L->center[0], L->center[1], L->center[2] );
-	prog->uni1i( "cellProbe", s.measuring ? 6 : s.probe );
+	rec.b( prog, "cellInterior", L->interior );
+	rec.f3( prog, "cellCenter", L->center[0], L->center[1], L->center[2] );
+	rec.i( prog, "cellProbe", s.measuring ? 6 : s.probe );
 	// a harness reads a dark linear frame through 8 bits; the imagespace's own measure stays x 1
 	WW_SWITCH_STATIC( float, probeGain, wwEnvIsSet( "WW_CELL_LIT_PROBE_GAIN" )
 		? std::max( wwEnv( "WW_CELL_LIT_PROBE_GAIN" ).toFloat(), 0.0f ) : 1.0f );
-	prog->uni1f( "cellProbeGain", s.measuring ? 1.0f : probeGain );
-	prog->uni1i( "cellRed", s.red );
+	rec.f( prog, "cellProbeGain", s.measuring ? 1.0f : probeGain );
+	rec.i( prog, "cellRed", s.red );
 	// lane LIGHTPHYS1: all zero = the game's curve and point lights (cell_lights.glsl cellPhysFalloff, cellAreaSpec)
-	prog->uni4f_l( prog->uniLocation( "cellLightPhys" ), FloatVector4( float( phys.mode ), phys.anchor, phys.sourceFraction, phys.advNumerator ) );
-	prog->uni4f_l( prog->uniLocation( "cellLightPhysB" ), FloatVector4( phys.advMinMetres, phys.areaWorld, float( phys.red ), 0.0f ) );
+	rec.f4l( prog, "cellLightPhys", -1, FloatVector4( float( phys.mode ), phys.anchor, phys.sourceFraction, phys.advNumerator ) );
+	rec.f4l( prog, "cellLightPhysB", -1, FloatVector4( phys.advMinMetres, phys.areaWorld, float( phys.red ), 0.0f ) );
 	// WW_CELL_CAM_DUMP: wwCellCamDump, once a frame from GLView::paintGL (lane CELLSPAWN2)
 	/* An interior's fog in place of the Lookdev weather fog: the same formula, height = world z. No fog sun
 	 * indoors (inferred: the game's directional fog term follows the sun). */
 	if ( L->hasFog && prog->uniLocation( "fogOn" ) >= 0 ) {
-		prog->uni1b( "fogOn", true );
+		rec.b( prog, "fogOn", true );
 		/* lane SKYINT1 (10-29): a Use Sky Lighting interior's fog colours (K rows 1..4) are the current weather's, as the
 		 * game's full-mode sky keeps them; the distances, power and max stay the cell's (the engine's fog distances there
 		 * were not read: unknown) */
@@ -2527,19 +2674,19 @@ void wwCellLightsUniforms( Scene * scene )
 				for ( int c = 0; c < 3; c++ )
 					fK[k][c] = wf.K[k][c];
 		for ( int k = 0; k < 6; k++ )
-			prog->uni4f_l( prog->uniLocation( "fogK[%d]", k ),
+			rec.f4l( prog, "fogK[%d]", k,
 				FloatVector4( fK[k][0], fK[k][1], fK[k][2], fK[k][3] ) );
 		float zr[4] = { 0, 0, 0, 0 };
 		for ( int k = 0; k < 3; k++ ) {
 			zr[k] = vt.rotation( k, 2 ) / sc;
 			zr[3] -= vt.rotation( k, 2 ) * vt.translation[k] / sc;
 		}
-		prog->uni4f( "fogView", FloatVector4( zr[0], zr[1], zr[2], zr[3] ) );
-		prog->uni1f( "fogDistScale", 1.0f / sc );
-		prog->uni4f( "fogSun", FloatVector4( 0.0f, 0.0f, 1.0f, 0.0f ) );
-		prog->uni4f( "fogSunColour", FloatVector4( 0.0f, 0.0f, 0.0f, 1.0f ) );
-		prog->uni4f( "fogProbe", FloatVector4( 0.0f, 0.0f, float( s.fogProbe ), 0.0f ) );
-		prog->uni1i( "fogRed", 0 );
+		rec.f4( prog, "fogView", FloatVector4( zr[0], zr[1], zr[2], zr[3] ) );
+		rec.f( prog, "fogDistScale", 1.0f / sc );
+		rec.f4( prog, "fogSun", FloatVector4( 0.0f, 0.0f, 1.0f, 0.0f ) );
+		rec.f4( prog, "fogSunColour", FloatVector4( 0.0f, 0.0f, 0.0f, 1.0f ) );
+		rec.f4( prog, "fogProbe", FloatVector4( 0.0f, 0.0f, float( s.fogProbe ), 0.0f ) );
+		rec.i( prog, "fogRed", 0 );
 	}
 	prof.at( 20, "tail" );
 }

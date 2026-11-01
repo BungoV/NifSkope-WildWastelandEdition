@@ -15,6 +15,7 @@
 #include "wwswitch.h"
 #include "gl/celllights.h"
 #include "gl/cellunits.h"
+#include "gl/celluniform.h"	// lane PERFFIX1: the volume's unit bound without asking the driver
 #include "gl/cellssr.h"      // lane RESTIRDI1: wwCellAoTargets (the shared opaque pass ReSTIR reads)
 #include "gl/glscene.h"
 #include "gl/lookdevstage.h"   // lane RTXFIX1: wwLookdevFogUniforms (the probes view in the frame takes the fog)
@@ -1075,11 +1076,12 @@ void restirUniforms( Renderer * r, NifSkopeOpenGLContext::Program * prog )
 	RestirGl & G = restirGl();
 	const bool on = G.ready && G.owner == r && G.tex;
 	auto fn = r->fn;
-	GLint prevActive = 0;
-	fn->glGetIntegerv( GL_ACTIVE_TEXTURE, &prevActive );
-	fn->glActiveTexture( GLenum( GL_TEXTURE0 + WwCellUnit::Restir ) );
-	fn->glBindTexture( GL_TEXTURE_BUFFER, on ? G.tex : 0 );
-	fn->glActiveTexture( GLenum( prevActive ) );
+	{	// lane PERFFIX1: through the CELLUNI kit (DSA: the active unit never asked; WW_CELL_UNI_RED=1 the old calls)
+		WwCellUni::Units<std::remove_pointer_t<decltype( fn )>> u( fn, wwCellUniDsa() );
+		u.section();
+		u.bind( WwCellUnit::Restir, GL_TEXTURE_BUFFER, on ? G.tex : 0 );
+		u.done();
+	}
 	prog->uni1i( "cellRestir", WwCellUnit::Restir );
 	prog->uni1b_l( loc, on );
 	prog->uni4f( "cellRestirSize", FloatVector4( float( G.W ), float( G.H ), 0.0f, 0.0f ) );
@@ -1832,15 +1834,16 @@ static void bindOne( Scene * scene, Renderer * r, NifSkopeOpenGLContext::Program
 {
 	const bool ready = c.live && c.uploaded && c.tex && c.glOwner == r && c.nif == scene->nifModel;
 	auto fn = r->fn;
-	GLint prevActive = 0;
-	fn->glGetIntegerv( GL_ACTIVE_TEXTURE, &prevActive );
-	fn->glActiveTexture( GLenum( GL_TEXTURE0 + WwCellUnit::DdgiAtlas ) );
-	fn->glBindTexture( GL_TEXTURE_BUFFER, ready ? c.tex : 0 );
-	if ( ready && c.attach ) {
-		fn->glTexBuffer( GL_TEXTURE_BUFFER, GL_RGBA32F, c.buf );
-		c.attach = false;
+	{	// lane PERFFIX1: through the CELLUNI kit (DSA: the active unit never asked; WW_CELL_UNI_RED=1 the old calls)
+		WwCellUni::Units<std::remove_pointer_t<decltype( fn )>> u( fn, wwCellUniDsa() );
+		u.section();
+		u.bind( WwCellUnit::DdgiAtlas, GL_TEXTURE_BUFFER, ready ? c.tex : 0 );
+		if ( ready && c.attach ) {
+			u.texBuffer( c.tex, GL_RGBA32F, c.buf );
+			c.attach = false;
+		}
+		u.done();
 	}
-	fn->glActiveTexture( GLenum( prevActive ) );
 	prog->uni1i( "cellDdgiAtlas", WwCellUnit::DdgiAtlas );
 	prog->uni1b_l( locOn, ready );
 	if ( !ready )
@@ -1874,15 +1877,16 @@ void rtddgiCellUniforms( Scene * scene )
 			cnt++;
 		const bool on = cnt > 0 && K.owner == r && K.tex && c.nif == scene->nifModel;
 		auto fn = r->fn;
-		GLint prevActive = 0;
-		fn->glGetIntegerv( GL_ACTIVE_TEXTURE, &prevActive );
-		fn->glActiveTexture( GLenum( GL_TEXTURE0 + WwCellUnit::DdgiAtlas ) );
-		fn->glBindTexture( GL_TEXTURE_BUFFER, on ? K.tex : 0 );
-		if ( on && K.attach ) {
-			fn->glTexBuffer( GL_TEXTURE_BUFFER, GL_RGBA32F, K.buf );
-			K.attach = false;
+		{	// lane PERFFIX1: through the CELLUNI kit (DSA: the active unit never asked; WW_CELL_UNI_RED=1 the old calls)
+			WwCellUni::Units<std::remove_pointer_t<decltype( fn )>> u( fn, wwCellUniDsa() );
+			u.section();
+			u.bind( WwCellUnit::DdgiAtlas, GL_TEXTURE_BUFFER, on ? K.tex : 0 );
+			if ( on && K.attach ) {
+				u.texBuffer( K.tex, GL_RGBA32F, K.buf );
+				K.attach = false;
+			}
+			u.done();
 		}
-		fn->glActiveTexture( GLenum( prevActive ) );
 		prog->uni1i( "cellDdgiAtlas", WwCellUnit::DdgiAtlas );
 		prog->uni1b_l( locOn, on );
 		if ( !on )
