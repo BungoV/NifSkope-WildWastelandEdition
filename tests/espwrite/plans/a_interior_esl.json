@@ -1,0 +1,6 @@
+{"masters": ["Fallout4.esm"], "light": true, "author": "NifSkope WW",
+ "note": "PrydwenHull01: a persistent XMarkerHeading, a temporary scaled STAT, one temporary and one persistent master ref disabled",
+ "cells": [{"cell": "0005C92E", "world": null,
+            "adds": [{"base": "00000034", "pos": [268.0, 4290.0, -980.5], "rot": [0.0, 0.0, 1.5707963267948966], "scale": 1.0, "persistent": true},
+                     {"base": "0008E7C5", "pos": [304.25, 4318.5, -980.25], "rot": [0.0, 0.0, -0.7853981633974483], "scale": 1.5, "persistent": false}],
+            "disable": ["00249D27", "0022B5BD"]}]}
