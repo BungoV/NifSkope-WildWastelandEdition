@@ -31,6 +31,7 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 ***** END LICENSE BLOCK *****/
 
 #include "cellaodecal.h"
+#include "cellaodecalrule.h"	// PERFFIX2: built only when something reads the decals
 #include "wwswitch.h"	// lane TESTDRIVER1: the WW_* switch store
 
 #include "nativeemit.h"
@@ -74,6 +75,19 @@ bool aoDecalOn()
 	if ( !pin.isEmpty() )
 		return pin != "0";
 	return QSettings().value( QStringLiteral( "WW/CellAoDecal" ), false ).toBool();
+}
+
+bool wwCellPrtOn();	// gl/celllights.cpp (lane PRTOFF1): the old baked GI drawn (WW_CELL_PRT_RED=1, launch)
+
+/* PERFFIX2 (PERFRES1101 A gap 10): the decals scale the old PRT's relit sky term only (cell_lights.glsl cellGiE, under
+ * WW_CELL_PRT). The ray-traced volume traces the copies themselves (they stay in the probe soup: cellview.cpp
+ * aoBuild.consider), so without the PRT no pixel reads a decal: building them at the cell open and drawing them every
+ * frame was work for nothing, and a decal applied on the volume's term would darken those copies twice. Red
+ * WW_CELL_AODECAL_RTX_RED=1 (cell open): built and drawn as before. */
+bool aoDecalWorks()
+{
+	const bool row = aoDecalOn();
+	return aoDecalWorksRule( row, row && wwCellPrtOn(), row && wwEnv( "WW_CELL_AODECAL_RTX_RED" ).trimmed() == "1" );
 }
 
 void aoDecalSetOn( bool on )
@@ -145,9 +159,12 @@ bool AoDecalSet::skyFree( const double p[3], const float vis[8], float out[8] ) 
 
 AoDecalBuilder::AoDecalBuilder()
 {
-	on_ = aoDecalOn();
-	if ( !on_ )
+	on_ = aoDecalWorks();	// PERFFIX2: the row's switch, and a reader (the PRT) for the decals
+	if ( !on_ ) {
+		if ( aoDecalOn() )
+			qInfo( "aodecal: off: the ray-traced GI traces the copies itself and no PRT reads a decal (red WW_CELL_AODECAL_RTX_RED=1)" );
 		return;
+	}
 	set_ = std::make_shared<AoDecalSet>();
 	set_->red = redOf();
 	set_->dir = QString::fromLocal8Bit( wwEnv( "WW_CELL_AODECAL_DIR" ) ).trimmed();
