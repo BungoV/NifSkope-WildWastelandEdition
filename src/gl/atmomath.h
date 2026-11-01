@@ -207,6 +207,97 @@ inline void skyIrradiance( float mus, const float haze[3], float out[3] )
 		out[c] = float( acc[c] / wsum * kPi );	// E = pi x the cosine-weighted mean radiance
 }
 
+/* FIX1101A (LATE ITEM 15d, bungo 11-01 "does our GI not take sky into consideration?"): the physical sky's radiance seen
+ * from the ground along unit view v (v.z > 0) with the sun toward unit s (world frame, z up), sun irradiance 1: the
+ * single-scattering sum skyIrradiance integrates, for any sun azimuth (its sun sits in the x-z plane). */
+inline void skyRadianceSingle( const float v[3], const float s[3], const float haze[3], float L[3] )
+{
+	constexpr int NS = 16;
+	const float nu = v[0] * s[0] + v[1] * s[1] + v[2] * s[2];
+	const float pr = 3.0f / ( 16.0f * kPi ) * ( 1.0f + nu * nu );
+	const float g = kMieG, pm = ( 1.0f - g * g ) / ( 4.0f * kPi * std::pow( std::max( 1e-4f, 1.0f + g * g - 2.0f * g * nu ), 1.5f ) );
+	const float r0 = kRb, vz = v[2];
+	const float d = -r0 * vz + std::sqrt( r0 * r0 * ( vz * vz - 1.0f ) + kRt * kRt );
+	double od[3] = { 0, 0, 0 }, acc[3] = { 0, 0, 0 };
+	for ( int k = 0; k < NS; k++ ) {
+		const float a0 = float( k ) / NS, a1 = float( k + 1 ) / NS, am = 0.5f * ( a0 + a1 );
+		const float t = d * am * am, dt = d * ( a1 * a1 - a0 * a0 );
+		const float px = v[0] * t, py = v[1] * t, pz = r0 + vz * t;
+		const float r = std::sqrt( px * px + py * py + pz * pz );
+		const float h = std::max( r - kRb, 0.0f );
+		float e[3];
+		odAt( h, haze, false, e );
+		const float muS = ( px * s[0] + py * s[1] + pz * s[2] ) / r;
+		float Ts[3];
+		if ( muS < 0.0f && r * r * ( muS * muS - 1.0f ) + kRb * kRb >= 0.0f ) {
+			Ts[0] = Ts[1] = Ts[2] = 0.0f;
+		} else {
+			const float dl = std::max( 0.0f, -r * muS + std::sqrt( std::max( 0.0f, r * r * ( muS * muS - 1.0f ) + kRt * kRt ) ) );
+			constexpr int NL = 24;
+			double ol[3] = { 0, 0, 0 };
+			for ( int q = 0; q < NL; q++ ) {
+				const float b0 = float( q ) / NL, b1 = float( q + 1 ) / NL, bm = 0.5f * ( b0 + b1 );
+				const float tt = dl * bm * bm, ww = dl * ( b1 * b1 - b0 * b0 );
+				const float rr = std::sqrt( r * r + tt * tt + 2.0f * r * muS * tt );
+				float el2[3];
+				odAt( rr - kRb, haze, false, el2 );
+				for ( int c = 0; c < 3; c++ )
+					ol[c] += double( el2[c] ) * ww;
+			}
+			for ( int c = 0; c < 3; c++ )
+				Ts[c] = float( std::exp( -ol[c] ) );
+		}
+		const float dr = std::exp( -h / 8.0f ), dm = std::exp( -h / 1.2f );
+		const float dh = haze[0] * std::exp( -std::max( h - haze[2], 0.0f ) / std::max( haze[1], 0.02f ) );
+		for ( int c = 0; c < 3; c++ ) {
+			const double tv = std::exp( -( od[c] + 0.5 * double( e[c] ) * dt ) );
+			const double sc = double( kRay[c] ) * dr * pr + double( kMieS * dm + dh * ( kMieS / kMieE ) ) * pm;
+			acc[c] += tv * sc * Ts[c] * dt;
+			od[c] += double( e[c] ) * dt;
+		}
+	}
+	for ( int c = 0; c < 3; c++ )
+		L[c] = float( acc[c] );
+}
+/* FIX1101A: the physical sky's irradiance on the six world axes (+X -X +Y -Y +Z -Z), the sky above the horizon only (the
+ * ground below it is the GI's SKYBELOW rule), sun toward s, sun irradiance 1: 12 elevations x 32 azimuths of
+ * skyRadianceSingle (~6 ms). +Z equals skyIrradiance at the same sun (the same model; tests/gisky). */
+inline void skyIrradianceAxes( const float s[3], const float haze[3], float out[6][3] )
+{
+	constexpr int NE = 12, NA = 32;
+	double acc[6][3] = {};
+	for ( int i = 0; i < NE; i++ ) {
+		const float el = ( float( i ) + 0.5f ) / NE * 0.5f * kPi;
+		const float ce = std::cos( el ), se = std::sin( el );
+		for ( int j = 0; j < NA; j++ ) {
+			const float az = ( float( j ) + 0.5f ) / NA * 2.0f * kPi;
+			const float v[3] = { ce * std::cos( az ), ce * std::sin( az ), se };
+			float L[3];
+			skyRadianceSingle( v, s, haze, L );
+			const double dw = double( ce ) * ( 0.5 * kPi / NE ) * ( 2.0 * kPi / NA );   // dOmega on the elevation grid
+			const double cosA[6] = { std::max( 0.0f, v[0] ), std::max( 0.0f, -v[0] ), std::max( 0.0f, v[1] ), std::max( 0.0f, -v[1] ),
+				std::max( 0.0f, v[2] ), 0.0 };
+			for ( int a = 0; a < 6; a++ )
+				for ( int c = 0; c < 3; c++ )
+					acc[a][c] += double( L[c] ) * cosA[a] * dw;
+		}
+	}
+	for ( int a = 0; a < 6; a++ )
+		for ( int c = 0; c < 3; c++ )
+			out[a][c] = float( acc[a][c] );
+}
+/* FIX1101A: the GI's sky from the physical sky: each axis takes the physical irradiance's colour and its share against
+ * +Z, scaled so +Z keeps the weather's own luminance there (the exposure the weather was tuned with); -Z keeps the
+ * weather's (the ground's light, not the sky's). Red (the caller's): the weather's DALC as it was. */
+inline void giSkyFromPhysical( const float phys[6][3], const float weather[6][3], float out[6][3] )
+{
+	const float lp = lum( phys[4] ), lw = lum( weather[4] );
+	const float k = lp > 1e-9f ? lw / lp : 0.0f;
+	for ( int a = 0; a < 6; a++ )
+		for ( int c = 0; c < 3; c++ )
+			out[a][c] = ( a == 5 || k <= 0.0f ) ? weather[a][c] : phys[a][c] * k;
+}
+
 /* the ambient's tint: the weather's ambient luminance kept, its colour turned by the sky irradiance's colour now
  * against the same at 45 degrees (E, E45 from skyIrradiance), so a 45-degree sun keeps the weather's colour exactly */
 inline void ambientTint( const float T[3], const float T45[3], float rgb[3] )

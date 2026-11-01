@@ -116,6 +116,48 @@ the zenith (-12..+20 %), the Belt of Venus and the twilight darkening are in tol
   red msold fails ms-horizon-mean / -worst; red nofloor fails floor-zenith / floor-anti30.
 - Gates: build rc 0 (exe literals atMsOld, atFloor, nofloor, ",msold" UTF-16 present); link sweeps base 405, RTDDGI none,ubo 270, PRT 405 (not ok 0). src/wwswitchstages.inc
   regenerated (line numbers only; WW_ATMO_RED stays live).
+## GI1101A (FIX1101A area G, 2026-10-31): the bounce read hands over like the surfaces, the albedo rebuilds the volume, the cascades' boxes
+
+- Bounce read (leftover of FIX1031B's cover rule; ships ON): a probe ray's hit takes the volume's irradiance by the same
+  fade x cover the surfaces take, the flat ambient for the rest (src/rtddgimath.h flatAmbient + bounceIrradiance, the twin
+  src/rtddgi.cpp, src/rtddgi/trace.comp ddgiIrradianceAt + trace.spv.h). Before, the bounce renormalised over the usable
+  corners and fell to BLACK where none was usable: the trunks' hard plane, one bounce on. flatAmbient = the sky cube's own
+  axis irradiance x n^2 (0 without a sky: an interior volume's void is never sky). Red WW_CELL_RTDDGI_BOUNCE_RED=1 (live:
+  in the build key, a set rebuilds the volume; CLI --red bouncenocover). Unit tests/rtddgi_math check `bounce` (green 27
+  + 27 reds): walking up a trunk past the top usable layer the bounce's largest step is 0.0025 of the gap (bar 0.01), past
+  it the flat ambient 0.15708 = 0.15708; red RTDDGI_RED_BOUNCE / the runtime red: step 1.4738 of the gap, black past it;
+  flat ambient vs the cube's integral on the 6 axes worst rel 2.7e-06. tests/spvsync PASS 8.
+- Build key holds the soup's albedo (ships ON): manager hold h1 (10-31) showed a WW_SOUPALB_RED reopen rebuilt the soup
+  grey but NOT the volume (no "rebuilding" line: the same soup slot and triangles gave the same key), so SOUPALB1's
+  after / grey pair compared one volume with itself (240 px). The key now mixes the albedo's size and ~1024 sampled
+  triangles. Red WW_CELL_RTDDGI_RED=noalbkey. Unit tests/rtddgikey (source rule) green; red = main 9b443dcf's file FAIL.
+- WW_CELL_RTDDGI_VIEW_BOXES=1 (debug, live, off by default; LATE ITEM 9 "the pic of it covering further areas"): every
+  cascade's probe box drawn as its 12 edges over the frame (0 white, 1 yellow, 2 orange, 3 red; no depth test), census
+  line `rtddgi cell: boxes` with each box in metres. The probe dots of a coarse cascade (WW_CELL_RTDDGI_VIEW_CASCADE)
+  now reach 3000 u x 2^cascade (was 3000 u for all).
+- The surfaces' read costs less, bit for bit (ships ON; manager hold 1 part C, c3 still_close5: the opaque pass 12.4 ms
+  GI off, 54.7 one volume, 110.9 cascades): cell_lights.glsl cellGiSample keeps a per-fragment memo (the programs asked
+  for the same (P, N) 2-3 times: cellGiSkyK and cellLit's cellGiE / the PBR ambient now share one read), and a cascade
+  outside its tight box returns before its probes' fetches (cell_ddgi.glsl cellDdgiReadOne, MIRROR rtddgimath.h
+  sampleVolume), and the specular occlusion's lobe visibility rides the surfaces' read (cellDdgiTwo / vis2: the same
+  8 probes and weights, 4 fetches a probe for the lobe instead of a second read; cellSpecSky fills the memo). Red
+  WW_CELL_RTDDGI_RED=slowread (every call reads in full). Unit checks (green 29 + 29 reds): `readonce` 0 of 8000 answers
+  differ, the GLSL read's texel fetches 188.0 -> 10.3 (uniform points), 153.6 -> 83.0 (near-weighted); `lobe` the lobe
+  visibility equals a separate read (worst 0), the two reads' fetches 156.6 -> 111.3. A fragment's reads: 3 -> 1.
+  Live ms owed (notes/fix1101a/gi/cost_rows.txt). Link sweeps: base 405/405, +RTDDGI 270/270, +RTDDGI+CASCADES 270/270,
+  +PRT 405/405.
+- Interiors (LATE ITEM 17, bungo 11-01 "they have a sky, but it's fake ... only the fake lights do"): an interior's volume
+  takes no sky and no sun (misses 0, no sun ray), whatever its Show Sky / Use Sky Lighting flags; the placed lights and
+  the cell's directional stay. Red WW_CELL_RTDDGI_INTSKY_RED=1 (SKYINT1's weather sky + sun). Census line `rtddgi cell:
+  interior (...)`. One-sided back faces were already hits in the trace (radiance 0, distance -0.2 t). The surfaces'
+  weather DALC / fog in Use Sky Lighting interiors (SKYINT1, celllights.cpp) is unchanged here.
+- GI sky from the physical sky (LATE ITEM 15d), SHIPS OFF: WW_CELL_RTDDGI_SKY=physical (live: in the build key via the
+  sky) gives an exterior volume the physical sky's irradiance on the six axes (src/gl/atmomath.h skyRadianceSingle /
+  skyIrradianceAxes, single scattering, the sky above the horizon; src/gl/atmosphere.cpp wwAtmoGiSkyAxes, memo on sun +
+  haze), +Z scaled to the weather's luminance, -Z the weather's. Off by default because the measure argues against it
+  for bungo's tan: at CommonwealthClear's DALC and a 30 deg sun the physical sides are LESS blue (R/B 0.41-0.48) than the
+  weather's (0.34; zenith 0.33 both), the sun side 1.47x the anti-sun side. Unit tests/gisky (green 3; red = the weather's
+  DALC fails `sunside`).
 
 ## HORIZONBAND1 (FIX1031B area A, 2026-10-31): the horizon blends - no cyan strip with a hard top edge
 

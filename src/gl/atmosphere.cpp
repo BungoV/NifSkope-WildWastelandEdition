@@ -966,6 +966,27 @@ bool wwAtmoGiActive()
 	return s.gi > 0 && s.tier > 0;
 }
 
+/* FIX1101A (LATE ITEM 15d): the physical sky's irradiance on the six world axes for the ray-traced GI's sky (sun toward
+ * sunTo, sun irradiance 1, the last drawn haze; atmomath skyIrradianceAxes, ~6 ms, kept while sun and haze stand).
+ * False while Physical Sky is off or the sun is under the horizon (the weather's ambient stays the GI's sky then). */
+bool wwAtmoGiSkyAxes( const float sunTo[3], float out[6][3] )
+{
+	const AtState & s = as();
+	if ( s.tier <= 0 || sunTo[2] <= 0.0f )
+		return false;
+	static float key[6] = { -9.0f, -9.0f, -9.0f, -9.0f, -9.0f, -9.0f };
+	static float memo[6][3];
+	const float now[6] = { sunTo[0], sunTo[1], sunTo[2], s.haze[0], s.haze[1], s.haze[2] };
+	if ( !std::equal( now, now + 6, key ) ) {
+		std::copy( now, now + 6, key );
+		skyIrradianceAxes( sunTo, s.haze, memo );
+	}
+	for ( int a = 0; a < 6; a++ )
+		for ( int c = 0; c < 3; c++ )
+			out[a][c] = memo[a][c];
+	return true;
+}
+
 bool wwAtmoGiRedDome()
 {
 	return wwEnvStr( "WW_ATMO_GI_RED" ).trimmed().toLower() == QLatin1StringView( "dome" );

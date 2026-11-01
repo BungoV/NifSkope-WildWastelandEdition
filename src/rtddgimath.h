@@ -447,6 +447,7 @@ constexpr unsigned kSampleTrilinear = 1u;   // WW_CELL_RTDDGI_RED=trilinear: the
 constexpr unsigned kSampleNoCheb = 2u;      // no Chebyshev factor
 constexpr unsigned kSampleNoBias = 4u;      // no self-shadow bias
 constexpr unsigned kSampleNoCover = 8u;     // FIX1031B: WW_CELL_RTDDGI_RED=nocover, the fade ignores the missing probes (today's main)
+constexpr unsigned kSampleSlowRead = 16u;   // FIX1101A: WW_CELL_RTDDGI_RED=slowread, no early out, no per-fragment memo (today's main)
 //! a probe the read takes: Vigilant and blended at least once (Asleep probes are not traced, Off ones sit in walls)
 inline bool probeUsable( int state, uint32_t age )
 {
@@ -506,7 +507,8 @@ inline float cascadeEdge( float g, int dims, bool tight )
  *  mean renormalises over the usable corners, so with the corners above a point all Asleep the answer stayed whole up to
  *  their plane and dropped to the flat ambient past it (a hard line at one world z on every tree trunk, 82 u over the eye
  *  at spot 6). Now the volume hands over across the cell, as it does at its box faces. Red kSampleNoCover (the old fade).
- *  GLSL: trace.comp ddgiIrradianceAt (d = n, no vis, no fade), res/shaders/cell_ddgi.glsl cellDdgiRead.
+ *  GLSL: trace.comp ddgiIrradianceAt (d = n, no vis; FIX1101A: its fade x cover hands over to the flat ambient,
+ *  bounceIrradiance), res/shaders/cell_ddgi.glsl cellDdgiRead.
  *  RTXCASCADE1: tight = a cascade's read (cascadeEdge's camera-locked fade; cell_ddgi.glsl cellDdgiReadOne) */
 inline SampleResult sampleVolume( const SampleVolume & v, V3 P, V3 n, V3 o, V3 d, unsigned red, bool tight = false )
 {
@@ -523,6 +525,11 @@ inline SampleResult sampleVolume( const SampleVolume & v, V3 P, V3 n, V3 o, V3 d
 		a[k] = clampf( g - float( base[k] ), 0.0f, 1.0f );
 		fade = std::min( fade, cascadeEdge( g, v.dims[k], tight ) );
 	}
+	/* FIX1101A (manager hold 1 part C: the read costs +98 ms of the opaque pass with the cascades): a cascade's read
+	 * (tight) with fade 0 is skipped by sampleCascades whatever its probes hold, so it returns before their fetches
+	 * (w 0, fade 0: the walk's result is unchanged). Red kSampleSlowRead (WW_CELL_RTDDGI_RED=slowread): read anyway */
+	if ( tight && fade <= 0.0f && !( red & kSampleSlowRead ) )
+		return out;
 	double sum[3] = { 0, 0, 0 }, vsum = 0, wsum = 0, cover = 0;
 	for ( int c = 0; c < 8; c++ ) {
 		const int off[3] = { c & 1, ( c >> 1 ) & 1, ( c >> 2 ) & 1 };
@@ -946,6 +953,41 @@ inline void missRadiance( const float R[6][3], const float ground[3], V3 d, bool
 		return;
 	}
 	skyRadiance( R, d, out );
+}
+
+// ------------------------------------------------------------------ FIX1101A: the bounce read hands over as the surfaces' read
+/*! the flat ambient's irradiance at normal n, what a surface takes where the volume does not hold (the cell view's weather
+ *  ambient, its six axis values weighted by n^2), from the sky cube R: per axis the open probe's irradiance, the forward
+ *  map skyRadianceCube inverts (E+X = pi/2 R+X + pi/8 (R+Y + R-Y + R+Z + R-Z)). 0 without a sky: an interior volume's
+ *  void is never sky (SKYBELOW1).  GLSL: trace.comp ddgiFlatAmbient */
+inline void flatAmbient( const float R[6][3], bool skyOn, V3 n, float out[3] )
+{
+	const int f[3] = { n.x >= 0.0f ? 0 : 1, n.y >= 0.0f ? 2 : 3, n.z >= 0.0f ? 4 : 5 };
+	const float w[3] = { n.x * n.x, n.y * n.y, n.z * n.z };
+	for ( int c = 0; c < 3; c++ ) {
+		out[c] = 0.0f;
+		if ( !skyOn )
+			continue;
+		const float s = R[0][c] + R[1][c] + R[2][c] + R[3][c] + R[4][c] + R[5][c];
+		for ( int k = 0; k < 3; k++ )
+			out[c] += w[k] * ( 0.5f * kPi * R[f[k]][c] + 0.125f * kPi * ( s - R[k * 2][c] - R[k * 2 + 1][c] ) );
+	}
+}
+/*! FIX1101A (leftover of FIX1031B's cover rule: "the bounce read still renormalises without cover"): a probe ray's hit
+ *  takes the volume's irradiance where the volume holds and the flat ambient for the rest, by the same fade x cover the
+ *  cell view's surfaces take (sampleVolume's fade; no usable probe: the flat ambient alone). Before, the bounce
+ *  renormalised over the usable corners and dropped to BLACK past the top usable layer (w = 0): the trunks' hard plane,
+ *  one bounce on. rule false = the red (CLI --red bouncenocover, the cell view's WW_CELL_RTDDGI_BOUNCE_RED: today's main).
+ *  GLSL: trace.comp ddgiIrradianceAt's tail */
+inline V3 bounceIrradiance( const SampleResult & s, const float flat[3], bool rule )
+{
+#ifdef RTDDGI_RED_BOUNCE
+	rule = false;   // red: the renormalised read, black where no probe is usable (today's main)
+#endif
+	if ( !rule )
+		return s.E;
+	const float f = s.w > 0.0f ? clampf( s.fade, 0.0f, 1.0f ) : 0.0f;
+	return V3( s.E.x * f + flat[0] * ( 1.0f - f ), s.E.y * f + flat[1] * ( 1.0f - f ), s.E.z * f + flat[2] * ( 1.0f - f ) );
 }
 
 } // namespace rtddgi

@@ -36,6 +36,7 @@ constexpr int kAttr = 8;     // floats a soup triangle in triAttr
 constexpr int kLight = 32;   // floats a light in the packed list (8 vec4, ddgi_common.glsl binding 13)
 constexpr unsigned kRedNoBack = 1u, kRedNoCheb = 2u, kRedNoBias = 4u;   // ddgi_common.glsl DDGI_RED_*
 constexpr unsigned kRedHwHit = 8u, kRedNoTie = 16u;   // M1FIX: hwhit is GPU only (the twin has no hardware hit to trust)
+constexpr unsigned kRedBounceNoCover = 32u;   // FIX1101A: the bounce read renormalised, black past the usable probes (today's main)
 
 void parallelFor( size_t n, const std::function<void( size_t )> & fn )
 {
@@ -92,6 +93,7 @@ unsigned redBits( const QString & red )
 		if ( t == QLatin1String( "nobias" ) ) b |= kRedNoBias;
 		if ( t == QLatin1String( "hwhit" ) ) b |= kRedHwHit;
 		if ( t == QLatin1String( "notie" ) ) b |= kRedNoTie;
+		if ( t == QLatin1String( "bouncenocover" ) ) b |= kRedBounceNoCover;
 	}
 	return b;
 }
@@ -165,7 +167,15 @@ struct Twin
 		v.D = S.prm.stepv[3];
 		v.B = S.prm.blendp[2];
 		// the volume's red bits: only nocheb / nobias reach the read (noback = 1 is the trace's, not kSampleTrilinear)
-		return rtddgi::sampleVolume( v, Pw, n, o, n, red & ( kSampleNoCheb | kSampleNoBias ) ).E;
+		const SampleResult s = rtddgi::sampleVolume( v, Pw, n, o, n, red & ( kSampleNoCheb | kSampleNoBias ) );
+		// FIX1101A: the flat ambient takes what the volume does not hold (fade x cover), as on the cell view's surfaces
+		const auto & P = S.prm;
+		const float R[6][3] = { { P.sky[0][0], P.sky[0][1], P.sky[0][2] }, { P.sky[1][0], P.sky[1][1], P.sky[1][2] },
+			{ P.sky[2][0], P.sky[2][1], P.sky[2][2] }, { P.sky[3][0], P.sky[3][1], P.sky[3][2] },
+			{ P.sky[4][0], P.sky[4][1], P.sky[4][2] }, { P.sky[5][0], P.sky[5][1], P.sky[5][2] } };
+		float flat[3];
+		flatAmbient( R, P.sky[0][3] > 0.5f, n, flat );
+		return bounceIrradiance( s, flat, !( red & kRedBounceNoCover ) );
 	}
 	// MIRROR trace.comp ddgiDirect
 	V3 direct( V3 Pw, V3 n ) const
@@ -1547,7 +1557,7 @@ int rtddgiCli( const QStringList & args )
 		std::fprintf( stderr, "usage: rtddgi --soup <file> --rect minX,minY,maxX,maxY --out <dir> [--light x,y,z,radius,r,g,b ...] "
 			"[--lights <file>] [--sun tx,ty,tz,r,g,b] [--sky r,g,b | 18 values] [--spacing s] [--zscale k] [--rays n] [--frames n] "
 			"[--hyst h] [--bias b] [--seed n] [--max-probes n] [--one-bounce] [--no-sky] [--gpu 0|1] [--no-place] [--no-reloc] "
-			"[--no-classify] [--trace-asleep] [--dump-fixed] [--red noback,nocheb,nobias,norot,hwhit,notie]\n" );
+			"[--no-classify] [--trace-asleep] [--dump-fixed] [--red noback,nocheb,nobias,norot,hwhit,notie,skybelow,bouncenocover]\n" );
 		return 2;
 	}
 	for ( int k = 0; k < 4; k++ )

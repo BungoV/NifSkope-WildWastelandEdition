@@ -13,6 +13,7 @@
 #include "rtddgi/rtddgi_gpu.h"
 #include "version.h"
 #include "wwswitch.h"
+#include "gl/atmomath.h"    // FIX1101A: giSkyFromPhysical
 #include "gl/celllights.h"
 #include "gl/cellunits.h"
 #include "gl/cellssr.h"      // lane RESTIRDI1: wwCellAoTargets (the shared opaque pass ReSTIR reads)
@@ -38,9 +39,11 @@
 #include <thread>
 #include <vector>
 
+bool wwAtmoGiSkyAxes( const float sunTo[3], float out[6][3] );   // FIX1101A: src/gl/atmosphere.cpp (the physical sky's six axes)
+
 namespace {
 
-constexpr int kAtlasTexels = 193;           // a probe's texels in the texture buffer: 64 irradiance + 128 distance + 1 probe
+constexpr int kAtlasTexels = 193;          // a probe's texels in the texture buffer: 64 irradiance + 128 distance + 1 probe
 constexpr double kViewReach = 3000.0;       // the debug view draws the probes within this of the camera (the PRTP view's)
 constexpr size_t kViewMaxProbes = 20000;    // and at most this many spheres
 constexpr int kScrollEcho = 16;             // the census prints the first scrolls, then every 64th
@@ -119,6 +122,9 @@ constexpr int kPathNoWait = 4;
 /* lane RTXCASCADE2: WW_CELL_RTDDGI_RED=perblas, RTXCASCADE1's cascades: each coarse cascade builds its own BLAS from the
  * same soup and steps in its own submit (the one-BLAS / one-submit red). Live (a set rebuilds the coarse cascades). */
 constexpr int kPathPerCascade = 8;
+/* FIX1101A: WW_CELL_RTDDGI_RED=noalbkey, today's main: the build key leaves the soup's albedo out, so a reopen that changes
+ * only the albedo (WW_SOUPALB_RED) keeps the old volume. Live (a set moves the key: the volume rebuilds). */
+constexpr int kPathNoAlbKey = 16;
 
 /*! WW_CELL_RTDDGI_RED, live: [0] the read's red bits (rtddgimath.h kSample*, the shader's cellDdgiRed), [1] the path
  *  reds (kPath*). One list, both parts: "trilinear,readback" sets one of each */
@@ -136,10 +142,12 @@ const int * cellRedParts()
 			if ( t == QLatin1String( "nocheb" ) ) b.v[0] |= int( rtddgi::kSampleNoCheb );
 			if ( t == QLatin1String( "nobias" ) ) b.v[0] |= int( rtddgi::kSampleNoBias );
 			if ( t == QLatin1String( "nocover" ) ) b.v[0] |= int( rtddgi::kSampleNoCover );   // FIX1031B: the old fade (hard line)
+			if ( t == QLatin1String( "slowread" ) ) b.v[0] |= int( rtddgi::kSampleSlowRead );   // FIX1101A: every call reads in full
 			if ( t == QLatin1String( "readback" ) ) b.v[1] |= kPathReadback;
 			if ( t == QLatin1String( "rebuild" ) ) b.v[1] |= kPathRebuild;
 			if ( t == QLatin1String( "nowait" ) ) b.v[1] |= kPathNoWait;   // lane RTXFIX1
 			if ( t == QLatin1String( "perblas" ) ) b.v[1] |= kPathPerCascade;   // lane RTXCASCADE2
+			if ( t == QLatin1String( "noalbkey" ) ) b.v[1] |= kPathNoAlbKey;   // FIX1101A
 		}
 		return b;
 	}() );
@@ -296,6 +304,36 @@ bool rtddgiSkyBelowRed()
 	if ( !wwEnvIsSet( "WW_SKYBELOW_RED" ) )
 		return false;
 	const QByteArray v = wwEnv( "WW_SKYBELOW_RED" ).trimmed();
+	return !v.isEmpty() && v != "0";
+}
+
+/* FIX1101A (leftover of FIX1031B's cover rule): a probe ray's hit takes the volume's irradiance by the same fade x cover
+ * the surfaces take, the flat ambient for the rest (src/rtddgimath.h bounceIrradiance; before: renormalised over the
+ * usable corners, BLACK past them: the trunks' hard plane in the second bounce). Ships ON; WW_CELL_RTDDGI_BOUNCE_RED=1
+ * keeps today's main (spec.red "bouncenocover"). Read every frame: it is in the build key, a set rebuilds the volume */
+bool rtddgiBounceRed()
+{
+	if ( !wwEnvIsSet( "WW_CELL_RTDDGI_BOUNCE_RED" ) )
+		return false;
+	const QByteArray v = wwEnv( "WW_CELL_RTDDGI_BOUNCE_RED" ).trimmed();
+	return !v.isEmpty() && v != "0";
+}
+
+//! FIX1101A LATE ITEM 15d: WW_CELL_RTDDGI_SKY=physical (live, ships off): the volume's sky from the physical sky
+bool rtddgiGiSkyPhysical()
+{
+	if ( !wwEnvIsSet( "WW_CELL_RTDDGI_SKY" ) )
+		return false;
+	const QByteArray v = wwEnv( "WW_CELL_RTDDGI_SKY" ).trimmed().toLower();
+	return v == "physical" || v == "1";
+}
+
+//! FIX1101A LATE ITEM 17: WW_CELL_RTDDGI_INTSKY_RED=1 = today's main (an interior's volume may take the weather's sky and sun)
+bool rtddgiIntSkyRed()
+{
+	if ( !wwEnvIsSet( "WW_CELL_RTDDGI_INTSKY_RED" ) )
+		return false;
+	const QByteArray v = wwEnv( "WW_CELL_RTDDGI_INTSKY_RED" ).trimmed();
 	return !v.isEmpty() && v != "0";
 }
 
@@ -741,6 +779,8 @@ void startBuild( Cell & c, const ProbeSoup & soup, const WwCellLighting & lights
 	spec.gpu = 1;
 	if ( rtddgiSkyBelowRed() )
 		spec.red = QStringLiteral( "skybelow" );   // lane SKYBELOW1: the red, today's main miss and visibility
+	if ( rtddgiBounceRed() )   // FIX1101A: the red, today's main bounce read (renormalised, black past the usable probes)
+		spec.red += spec.red.isEmpty() ? QStringLiteral( "bouncenocover" ) : QStringLiteral( ",bouncenocover" );
 	if ( !boxFor( G, soup, eye, sp, spec.box, *b ) ) {
 		std::lock_guard<std::mutex> lk( b->m );
 		b->done = true;
@@ -796,7 +836,10 @@ void censusBuilt( const Cell & c, const Build & b )
 		+ ( v.skyBelowRule   // lane SKYBELOW1
 			? QStringLiteral( "; below the horizon: ground %1 %2 %3 (albedo %4), no sky visibility" ).arg( double( v.ground[0] ), 0, 'g', 4 )
 				.arg( double( v.ground[1] ), 0, 'g', 4 ).arg( double( v.ground[2] ), 0, 'g', 4 ).arg( double( v.groundAlbedo[1] ), 0, 'f', 3 )
-			: QStringLiteral( "; below the horizon: sky (the red WW_SKYBELOW_RED)" ) ) );
+			: QStringLiteral( "; below the horizon: sky (the red WW_SKYBELOW_RED)" ) )
+		+ ( s.red.contains( QLatin1String( "bouncenocover" ) )   // FIX1101A: the rule this volume was built with
+			? QStringLiteral( "; bounce read renormalised, black past the usable probes (the red WW_CELL_RTDDGI_BOUNCE_RED)" )
+			: QStringLiteral( "; bounce read: fade x cover, the flat ambient for the rest" ) ) );
 }
 
 void censusSet( const Cell & c, const RtDdgiLive & L, int k, const QString & tail )
@@ -1454,8 +1497,57 @@ static void volumeFrame( Scene * scene, Cell & c, const CellSpec * spIn, bool du
 		refuse( c, QStringLiteral( "no relit cell in this view: the volume traces the soup the Precomputed Radiance Transfer relight keeps" ) );
 		return;
 	}
-	if ( lights.interior && lights.skyLighting && sky.on )
+	/* FIX1101A LATE ITEM 17 (bungo 11-01: "places like Concord museum, they have a sky, but it's fake, doesn't provide
+	 * sunlight, only the fake lights do"): an interior's volume takes no sky and no sun, whatever its flags (Show Sky / Use
+	 * Sky Lighting): every miss is 0 (the open top of the museum, a ray past a one-sided wall's open side) and no sun ray
+	 * lights a hit; the placed lights and the cell's directional stay. The drawn sky is visual only. Red
+	 * WW_CELL_RTDDGI_INTSKY_RED=1 = today's main (SKYINT1: the current weather's sky and sun in a Use Sky Lighting one).
+	 * In the build key through sky.on: a set rebuilds the volume */
+	if ( lights.interior && !rtddgiIntSkyRed() ) {
+		sky.on = false;
+	} else if ( lights.interior && lights.skyLighting && sky.on ) {
 		skyLitSky( nif, sky );   // lane SKYINT1: the current weather and hour
+	}
+	if ( lights.interior ) {   // census once per change: which sky terms the interior's volume takes
+		static int saidInt = -1;
+		const int now = sky.on ? 1 : 0;
+		if ( now != saidInt ) {
+			saidInt = now;
+			say( c.tag + ( sky.on ? QStringLiteral( "interior (%1): the weather's sky and sun in the volume (the red WW_CELL_RTDDGI_INTSKY_RED)" )
+					.arg( lights.skyLighting ? QStringLiteral( "Use Sky Lighting" ) : QStringLiteral( "no sky flags" ) )
+				: QStringLiteral( "interior (%1): no sky, no sun in the volume, misses 0 (FIX1101A)" )
+					.arg( lights.skyLighting ? QStringLiteral( "Use Sky Lighting" ) : QStringLiteral( "no sky flags" ) ) ) );
+		}
+	}
+	/* FIX1101A LATE ITEM 15d (bungo 11-01 "does our GI not take sky into consideration?"): with Physical Sky on, an
+	 * exterior volume's sky is the physical sky's irradiance on the six axes (its colour and its sun-side / anti-sun /
+	 * zenith shares, src/gl/atmomath.h skyIrradianceAxes), scaled so +Z keeps the weather's own luminance; -Z (the
+	 * ground's light) stays the weather's. Physical Sky off or the sun down: the weather's ambient as before. SHIPS OFF:
+	 * WW_CELL_RTDDGI_SKY=physical turns it on. Measured (tests/gisky, CommonwealthClear's DALC, sun 30 deg): the physical
+	 * sides are LESS blue than the weather's (R/B 0.41-0.48 vs 0.34; zenith 0.33 both) and the sun side 1.47x the
+	 * anti-sun side, so it would warm the shade bungo calls tan (LATE ITEM 15): his call. In the build key via sky.amb */
+	if ( sky.on && !lights.interior && rtddgiGiSkyPhysical() ) {
+		float phys[6][3], mixed[6][3];
+		if ( wwAtmoGiSkyAxes( sky.sunTo, phys ) ) {
+			WwAtmoMath::giSkyFromPhysical( phys, sky.amb, mixed );
+			std::memcpy( sky.amb, mixed, sizeof mixed );
+			static float said = -1.0f;
+			if ( std::fabs( mixed[4][2] - said ) > 1e-6f ) {
+				said = mixed[4][2];
+				auto rb = []( const float * c ) { return double( c[0] / std::max( c[2], 1e-9f ) ); };
+				say( c.tag + QStringLiteral( "sky from the physical sky (FIX1101A): +X %1 %2 %3, -X %4 %5 %6, +Y %7 %8 %9, -Y %10 %11 %12, "
+					"+Z %13 %14 %15 (R/B +Z %16, sides %17..%18)" )
+					.arg( double( mixed[0][0] ), 0, 'f', 4 ).arg( double( mixed[0][1] ), 0, 'f', 4 ).arg( double( mixed[0][2] ), 0, 'f', 4 )
+					.arg( double( mixed[1][0] ), 0, 'f', 4 ).arg( double( mixed[1][1] ), 0, 'f', 4 ).arg( double( mixed[1][2] ), 0, 'f', 4 )
+					.arg( double( mixed[2][0] ), 0, 'f', 4 ).arg( double( mixed[2][1] ), 0, 'f', 4 ).arg( double( mixed[2][2] ), 0, 'f', 4 )
+					.arg( double( mixed[3][0] ), 0, 'f', 4 ).arg( double( mixed[3][1] ), 0, 'f', 4 ).arg( double( mixed[3][2] ), 0, 'f', 4 )
+					.arg( double( mixed[4][0] ), 0, 'f', 4 ).arg( double( mixed[4][1] ), 0, 'f', 4 ).arg( double( mixed[4][2] ), 0, 'f', 4 )
+					.arg( rb( mixed[4] ), 0, 'f', 2 )
+					.arg( std::min( std::min( rb( mixed[0] ), rb( mixed[1] ) ), std::min( rb( mixed[2] ), rb( mixed[3] ) ) ), 0, 'f', 2 )
+					.arg( std::max( std::max( rb( mixed[0] ), rb( mixed[1] ) ), std::max( rb( mixed[2] ), rb( mixed[3] ) ) ), 0, 'f', 2 ) );
+			}
+		}
+	}
 	const WwCellGi * G = wwCellGiFor( nif );
 	const CellSpec sp = spIn ? *spIn : cellSpecNow();
 	const int paths = cellRedPaths();
@@ -1471,6 +1563,17 @@ static void volumeFrame( Scene * scene, Cell & c, const CellSpec * spIn, bool du
 		key = fnv( key, soup->tris.data(), 36 );
 		key = fnv( key, soup->tris.data() + nTris - 9, 36 );
 	}
+	/* FIX1101A: the soup's albedo (SOUPALB1) is part of what the trace shades. A reopen that changes it alone (WW_SOUPALB_RED,
+	 * stage reopen) kept the old volume: the same soup slot and the same triangles gave the same key (manager hold h1 10-31:
+	 * no "rebuilding" line after the grey reopen, the after / soupred pair 240 px). Its size and ~1024 sampled triangles'
+	 * bytes join the key; red WW_CELL_RTDDGI_RED=noalbkey (today's main) */
+	if ( !( paths & kPathNoAlbKey ) ) {
+		const size_t nAlb = soup->alb.size();
+		key = fnv( key, &nAlb, sizeof nAlb );
+		const size_t stride = std::max<size_t>( 3, nAlb / 3 / 1024 * 3 );
+		for ( size_t i = 0; i + 3 <= nAlb; i += stride )
+			key = fnv( key, &soup->alb[i], 3 );
+	}
 	const int skyOn = sky.on ? 1 : 0;
 	key = fnv( key, &skyOn, sizeof skyOn );
 	key = fnv( key, sky.amb, sizeof sky.amb );
@@ -1483,6 +1586,8 @@ static void volumeFrame( Scene * scene, Cell & c, const CellSpec * spIn, bool du
 	key = fnv( key, &paths, sizeof paths );
 	const int skyBelowRed = rtddgiSkyBelowRed() ? 1 : 0;   // lane SKYBELOW1: a set rebuilds (the volume re-converges)
 	key = fnv( key, &skyBelowRed, sizeof skyBelowRed );
+	const int bounceRed = rtddgiBounceRed() ? 1 : 0;   // FIX1101A: a set rebuilds (the volume re-converges)
+	key = fnv( key, &bounceRed, sizeof bounceRed );
 	if ( G ) {
 		key = fnv( key, G->origin, sizeof G->origin );
 		key = fnv( key, G->dims, sizeof G->dims );
@@ -1919,10 +2024,73 @@ void rtddgiCellUniforms( Scene * scene )
 	bindOne( scene, r, prog, locOn, c );
 }
 
+/* FIX1101A (LATE ITEM 9, bungo 10-31 "and for GI, the pic of it covering further areas?"): WW_CELL_RTDDGI_VIEW_BOXES=1,
+ * live, a debug view: every cascade's probe box (first probe to last, the window round the camera after its scrolls)
+ * drawn as its 12 edges over the frame, no depth test (the reach shows through the buildings), each cascade its own
+ * colour: 0 white, 1 yellow, 2 orange, 3 red. The census line `rtddgi cell: boxes` gives each box's reach in metres.
+ * Off (the default) draws nothing. */
+static void cascadeBoxesDraw( Scene * scene, const Transform & viewTrans )
+{
+	if ( !wwEnvIsSet( "WW_CELL_RTDDGI_VIEW_BOXES" ) )
+		return;
+	const QByteArray on = wwEnv( "WW_CELL_RTDDGI_VIEW_BOXES" ).trimmed();
+	if ( on.isEmpty() || on == "0" )
+		return;
+	static const FloatVector4 kCol[rtddgi::kMaxCascades] = { FloatVector4( 1.0f, 1.0f, 1.0f, 1.0f ),
+		FloatVector4( 1.0f, 0.9f, 0.1f, 1.0f ), FloatVector4( 1.0f, 0.5f, 0.05f, 1.0f ), FloatVector4( 1.0f, 0.1f, 0.1f, 1.0f ) };
+	std::vector<Vector3> vp;
+	std::vector<FloatVector4> vcol;
+	QString reach;
+	for ( int l = 0; l < rtddgi::kMaxCascades && l < rtddgiCellCascades(); l++ ) {
+		const Cell & c = cascCell( l );
+		if ( !c.live || c.nif != scene->nifModel )
+			continue;
+		const RtDdgiVolume & v = c.live->live.volume();
+		float lo[3], hi[3];
+		for ( int k = 0; k < 3; k++ ) {
+			lo[k] = v.origin[k];
+			hi[k] = v.origin[k] + float( std::max( v.dims[k] - 1, 0 ) ) * v.step[k];
+		}
+		for ( int e = 0; e < 12; e++ ) {   // edge e runs along axis e / 4; its other two coordinates are bits 0 and 1 of e
+			const int ax = e / 4, a1 = ( ax + 1 ) % 3, a2 = ( ax + 2 ) % 3;
+			float p0[3], p1[3];
+			p0[ax] = lo[ax];
+			p1[ax] = hi[ax];
+			p0[a1] = p1[a1] = ( e & 1 ) ? hi[a1] : lo[a1];
+			p0[a2] = p1[a2] = ( e & 2 ) ? hi[a2] : lo[a2];
+			vp.push_back( Vector3( p0[0], p0[1], p0[2] ) );
+			vp.push_back( Vector3( p1[0], p1[1], p1[2] ) );
+			vcol.push_back( kCol[l] );
+			vcol.push_back( kCol[l] );
+		}
+		reach += QStringLiteral( "%1cascade %2 %3 x %4 x %5 m (spacing %6 m)" ).arg( reach.isEmpty() ? QString() : QStringLiteral( "; " ) )
+			.arg( l ).arg( double( hi[0] - lo[0] ) * 0.01428, 0, 'f', 0 ).arg( double( hi[1] - lo[1] ) * 0.01428, 0, 'f', 0 )
+			.arg( double( hi[2] - lo[2] ) * 0.01428, 0, 'f', 0 ).arg( double( v.step[0] ) * 0.01428, 0, 'f', 2 );
+	}
+	if ( vp.empty() )
+		return;
+	static QString said;
+	if ( reach != said ) {   // once per change (a scroll moves no reach; a rebuild or another preset does)
+		said = reach;
+		say( QStringLiteral( "rtddgi cell: boxes (WW_CELL_RTDDGI_VIEW_BOXES, 1 u = 1.428 cm): " ) + reach );
+	}
+	auto fn = scene->renderer->fn;
+	scene->loadModelViewMatrix( viewTrans );
+	GLint prevDepthFunc = GL_LESS;
+	fn->glGetIntegerv( GL_DEPTH_FUNC, &prevDepthFunc );
+	const GLboolean depthOn = fn->glIsEnabled( GL_DEPTH_TEST );
+	fn->glDisable( GL_DEPTH_TEST );
+	scene->drawLines( vp.data(), vp.size(), vcol.data() );
+	if ( depthOn )
+		fn->glEnable( GL_DEPTH_TEST );
+	fn->glDepthFunc( GLenum( prevDepthFunc ) );
+}
+
 void rtddgiCellViewDraw( Scene * scene, const Transform & viewTrans )
 {
 	if ( !scene || !scene->renderer || scene->selecting || !rtddgiCellShaderDefine() )
 		return;
+	cascadeBoxesDraw( scene, viewTrans );   // FIX1101A: the cascades' boxes (WW_CELL_RTDDGI_VIEW_BOXES; off: nothing)
 	const int mode = rtddgiCellView();
 	Cell & c = cell();
 	const bool inFrame = c.viewDrewInFrame;   // lane RTXFIX1: drawn inside the linear frame this paint: no overlay
@@ -1946,7 +2114,8 @@ void rtddgiCellViewDraw( Scene * scene, const Transform & viewTrans )
 		float pos[3];
 		v.position( p, pos );
 		const Vector3 P( pos[0], pos[1], pos[2] );
-		if ( double( ( viewTrans * P ).length() ) > kViewReach )   // view units, as the PRTP view's rings (cellvolumeview.cpp)
+		// view units, as the PRTP view's rings (cellvolumeview.cpp); FIX1101A: x 2^cascade (a coarse cascade's reach)
+		if ( double( ( viewTrans * P ).length() ) > kViewReach * double( 1 << viewLevel() ) )
 			continue;
 		drawn++;
 		const int st = v.state[size_t( p )];
@@ -2021,7 +2190,7 @@ void rtddgiCellViewDrawLinear( Scene * scene, const Transform & viewTrans )
 		float pos[3];
 		v.position( p, pos );
 		const double d = double( ( viewTrans * Vector3( pos[0], pos[1], pos[2] ) ).length() );
-		if ( d > kViewReach )
+		if ( d > kViewReach * double( 1 << viewLevel() ) )   // FIX1101A: x 2^cascade, a coarse cascade's reach (LATE ITEM 9)
 			continue;
 		if ( d < 2.0 * double( rad ) + 10.0 ) {
 			culled++;

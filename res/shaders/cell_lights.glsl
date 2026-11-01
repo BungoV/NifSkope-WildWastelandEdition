@@ -1248,16 +1248,37 @@ vec4 cellGiSample( vec3 P, vec3 N )
  * branches below and in the programs (the PBR ambient, cellGiSkyK) stay the no-GI ones before the volume is up or with
  * it off. Defined here, after cellDdgiOn: the grid's helpers above never run without the PRT. */
 #define cellGiSky ( cellGiSky && CELL_GI_UP )
+#ifdef WW_CELL_RTDDGI
+/* FIX1101A (manager hold 1 part C, c3 still_close5: the opaque pass 12.4 ms GI off, 54.7 one volume, 110.9 cascades): one
+ * read a fragment. A program asks for the sample at the same (P, N) two or three times (cellGiSkyK, cellLit's cellGiE,
+ * the PBR ambient); the first call keeps its answer and a later call at the same point returns it, bit for bit (same
+ * inputs, same value). Red WW_CELL_RTDDGI_RED=slowread (cellDdgiRed & 16): every call reads (today's main) */
+bool cellGiMemoOk = false;
+vec3 cellGiMemoP = vec3( 0.0 );
+vec3 cellGiMemoN = vec3( 0.0 );
+vec4 cellGiMemoS = vec4( 0.0 );
+#endif
 vec4 cellGiSample( vec3 P, vec3 N )
 {
 #ifdef WW_CELL_RTDDGI
 	if ( !cellDdgiOn )
 		return vec4( 0.0 );
+	if ( cellGiMemoOk && ( cellDdgiRed & 16 ) == 0 && P == cellGiMemoP && N == cellGiMemoN ) {
+		if ( cellGiMemoS.a > 0.0 )
+			cellGiPath = 12;
+		return cellGiMemoS;
+	}
 	CellDdgiOut d = cellDdgiRead( P, N, normalize( vec3( cellRow[0].w, cellRow[1].w, cellRow[2].w ) - P ), N );
-	if ( !( d.w > 0.0 && d.fade > 0.0 ) )
-		return vec4( 0.0 );
-	cellGiPath = 12;
-	return d.fade * ( cellPass == 2 ? vec4( vec3( d.vis ), 1.0 ) : vec4( d.E, 1.0 ) );
+	vec4 s = vec4( 0.0 );
+	if ( d.w > 0.0 && d.fade > 0.0 ) {
+		cellGiPath = 12;
+		s = d.fade * ( cellPass == 2 ? vec4( vec3( d.vis ), 1.0 ) : vec4( d.E, 1.0 ) );
+	}
+	cellGiMemoOk = true;
+	cellGiMemoP = P;
+	cellGiMemoN = N;
+	cellGiMemoS = s;
+	return s;
 #else
 	return vec4( 0.0 );
 #endif
@@ -1418,10 +1439,25 @@ float cellSpecSky( vec3 P, vec3 N, vec3 R, float rough )
 	float v = 1.0 + ( f < 1.0 ? f * cellSkyVis : cellSkyVis ) * ( clamp( a.x / a.y, 0.0, 1.0 ) - 1.0 );
 #elif defined( WW_CELL_RTDDGI )
 	// lane PRTOFF1: the volume's sky visibility on the lobe's direction (RTXGI1 M2's read with no grid under it: 1 past the box)
-	CellDdgiOut dv = cellDdgiRead( P, N, normalize( vec3( cellRow[0].w, cellRow[1].w, cellRow[2].w ) - P ), D );
-	if ( !( dv.w > 0.0 && dv.fade > 0.0 ) )
+	/* FIX1101A (the read's cost): one read at the normal also takes the lobe's visibility with the same weights (vis2),
+	 * and leaves its answer for cellGiSample at this (P, N) (the memo): the surfaces' sample costs no second read. Red
+	 * WW_CELL_RTDDGI_RED=slowread: the lobe's own read, as before */
+	vec3 oSky = normalize( vec3( cellRow[0].w, cellRow[1].w, cellRow[2].w ) - P );
+	bool fast = ( cellDdgiRed & 16 ) == 0;
+	cellDdgiTwo = fast;
+	cellDdgiD2 = D;
+	CellDdgiOut dv = cellDdgiRead( P, N, oSky, fast ? N : D );
+	cellDdgiTwo = false;
+	bool ownSky = dv.w > 0.0 && dv.fade > 0.0;
+	if ( fast ) {
+		cellGiMemoOk = true;
+		cellGiMemoP = P;
+		cellGiMemoN = N;
+		cellGiMemoS = ownSky ? dv.fade * ( cellPass == 2 ? vec4( vec3( dv.vis ), 1.0 ) : vec4( dv.E, 1.0 ) ) : vec4( 0.0 );
+	}
+	if ( !ownSky )
 		return 1.0;
-	float v = 1.0 + dv.fade * cellSkyVis * ( clamp( dv.vis, 0.0, 1.0 ) - 1.0 );
+	float v = 1.0 + dv.fade * cellSkyVis * ( clamp( fast ? dv.vis2 : dv.vis, 0.0, 1.0 ) - 1.0 );
 #else
 	float v = 1.0;
 #endif
