@@ -11,8 +11,11 @@ bungo 11-01 (FIX1101A brief, LATE ITEMs 17c, 27e-27g, 29, 30-30e). NifSkope read
   (NaN = local mean time, the EPHEM1 numbers bit for bit) and a start date. Noon 2287-10-23: Commonwealth 36.04 deg,
   Far Harbor 34.02 deg; day 10.58 h vs 10.48 h. Census `sky place: ...` once per change; CLI `-no-gui skyplace
   --plugins <list> [--interior <EDID>|*]`. Red WW_LOCATION_RED=table|noparent|norecx (live). Unit tests/skyplace
-  (green + 6 reds). The moon's phase and position follow the place too; its brightness keeps the weather's night key
-  x Krisciunas & Schaefer (the FO4CS MOON2 rule).
+  (green + 6 reds). The moon's phase and position follow the place too, and (Real sun and moon) the night light comes
+  FROM the real moon while it is up and fades out over its last 3.5 deg under the horizon (shadowset.cpp
+  wwSunPathApply, lookdevstage.cpp moonLightFactor; red WW_MOONLIGHT_RED=engine). Its brightness stays the weather's
+  night key x Krisciunas & Schaefer x the air at the moon's elevation (the FO4CS MOON2 rule); absolute lux is LATE
+  ITEM 24c's (FIX1101A).
 - **Sunlit interiors.** An interior whose WINNING CELL record has DATA 0x100 (Use Sky Lighting), or a `.recx` Cells
   `sunlight` {enabled, weather} on it, is lit as outdoors, as the game's full sky mode is (gl/cellsunlit.h decides,
   celllights.cpp wwCellSunlit): the weather's sun x Sunlight Scale from the real sun direction, the weather's DALC, the
