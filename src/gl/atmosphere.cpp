@@ -1140,7 +1140,9 @@ void wwAtmoApUniforms( Scene * scene )
 		prog->uni1i( "atSkyTransTex", WwCellUnit::AtmoTrans );
 		prog->uni1f( "atSkyCamR", on ? v->camR : 0.0f );
 		// lane HORIZONBAND1: the sky's horizon band (atmo_skyband.glsl); the red skyclamp = the clamp before it (live)
-		prog->uni1i( "atApSkyRule", apRed( "skyclamp" ) ? 0 : 1 );
+		// lane FIX1101A (atmo, the night horizon stripe): rule 2 (shipped) colours the band with what a black surface at
+		// the far plane gets through the surfaces' own fog path; red apband = rule 1 (the aerial perspective's colour alone)
+		prog->uni1i( "atApSkyRule", apRed( "skyclamp" ) ? 0 : apRed( "apband" ) ? 1 : 2 );
 	}
 	if ( !on )
 		return;

@@ -1,3 +1,18 @@
+## FIX1101A atmo (2026-11-01): the night horizon stripe
+
+- SHOTS1101's spot 3 at 22:00 (sheet_lod_proof.png): a flat dark band (18,19,21) between the night sky's horizon glow
+  (25,40,60) and the far land (36,59,90), hard edges. Owner: HORIZONBAND1's band (cell_volsky.frag) coloured the sky
+  pixels under the horizon with the aerial perspective's far-end colour alone, while the clipped far terrain under it
+  fades through the surfaces' whole fog path (the aerial perspective then the Volumetric Air's residual). By day the
+  aerial perspective leads there and the two meet; at night the air carries the weather's night ambient and the
+  aerial perspective (sun / moon scattering only) does not, so the band was nearly black.
+- Fix (ships ON, rule 2): the band's colour = what a black surface at the far plane gets through wwFog (the surfaces'
+  own path), the colour the far terrain under it fades to, day or night. Red (live): WW_ATMO_AP_RED=apband (rule 1);
+  skyclamp (rule 0) as before.
+- Unit tests/nightband1101a/run.sh (display-space twin of the band on the 22:00 frame's own column, HORIZONBAND1's
+  method; the far-plane colour taken from the far land at the silhouette, a proxy): green step 6.4 levels, the band 2.8
+  over its darker neighbour; red apband 15.7 / 15.3 under: FAIL. Sweeps base 405 / RTDDGI 270 / PRT 405, not ok 0.
+
 ## FIX1101A atmo (2026-11-01): the sun through the fog (shafts in thick fog), and a test white balance
 
 - The fog-sun fault (bungo's thick-fog midday picture, hold h2 c3 CommonwealthFoggy 12:00: no shafts, the ground's sun/
