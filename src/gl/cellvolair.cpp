@@ -2483,7 +2483,8 @@ VpState & vps()
 		for ( const QByteArray & t : qgetenv( "WW_CELL_VOLPART_RED" ).split( ',' ) ) {
 			const QByteArray r = t.trimmed();
 			s.red |= r == "flat" ? 1 : r == "nothick" ? 2 : r == "nosoft" ? 4 : r == "nolights" ? 8 : r == "white" ? 16
-				: r == "nofog" ? 32 : r == "noshadow" ? 64 : r == "noedge" ? 128 : r == "nophase" ? 256 : r == "nonear" ? 512 : 0;
+				: r == "nofog" ? 32 : r == "noshadow" ? 64 : r == "noedge" ? 128 : r == "nophase" ? 256 : r == "nonear" ? 512
+				: r == "flatloop" ? 1024 : 0;	// lane INTERIORPERF1: flatloop = every light per pixel (no cluster list)
 		}
 	}
 	return s;

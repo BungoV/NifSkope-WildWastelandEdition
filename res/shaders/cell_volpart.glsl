@@ -48,7 +48,7 @@
 #endif
 uniform int volPart;			// 0 off: the law above, as before; 1 on
 uniform int volPartRed;			// gates only: 1 flat, 2 nothick, 4 nosoft, 8 nolights, 16 white, 32 nofog, 64 noshadow,
-								// 128 noedge, 256 nophase, 512 nonear
+								// 128 noedge, 256 nophase, 512 nonear, 1024 flatloop
 uniform int volPartDump;		// gates only: the probe row's width in pixels (particles.geom), 0 off
 uniform bool volCsm;			// the sun's cascades are drawn this frame
 uniform int volTerms;			// the air's mask (WW_CELL_AIR_TERMS): 1 directional, 2 placed, 4 GI, 8 ambient
@@ -104,6 +104,31 @@ vec3 vpCubeAt( vec3 C[6], vec3 N )
 	return n2.x * ( N.x >= 0.0 ? C[0] : C[1] ) + n2.y * ( N.y >= 0.0 ? C[2] : C[3] ) + n2.z * ( N.z >= 0.0 ? C[4] : C[5] );
 }
 
+/* lane INTERIORPERF1: the light list of the cluster that holds posView (cell_cluster.glsl). A particle lights at its
+ * sprite's centre, not at this fragment, so the tile is posView's own pixel through this draw's projection, not
+ * gl_FragCoord; the clusters are padded past their tiles and slices. Every light a list leaves out is past its
+ * radius or outside its cone/plane at P: cellLightE gives exactly 0 there, so the sum is the flat loop's bits.
+ * Off screen, outside the depth range, no viewport, no lists or the red flatloop (1024): every light, as before. */
+int vpLightsBegin( vec3 P, vec3 posView, out int n )
+{
+	n = cellLightCount;
+	if ( !cellClusterOn || ( volPartRed & 1024 ) != 0 || volRect.z <= 0.0 || volRect.w <= 0.0 )
+		return -1;
+	vec4 c = projectionMatrix * vec4( posView, 1.0 );
+	if ( c.w <= 0.0 || any( greaterThan( abs( c.xyz ), vec3( c.w ) ) ) )
+		return -1;
+	vec2 px = volRect.xy + ( c.xy / c.w * 0.5 + 0.5 ) / volRect.zw;
+	ivec3 d = ivec3( cellClusterDims.xyz + 0.5 );
+	ivec2 t = clamp( ivec2( floor( ( px - cellClusterOrigin ) / cellClusterDims.w ) ), ivec2( 0 ), d.xy - 1 );
+	float s = floor( ( log( max( dot( cellClusterDepth.xyz, P ) + cellClusterDepth.w, 1e-6 ) ) - cellClusterLog.x ) * cellClusterLog.y );
+	int cl = ( clamp( int( s ), 0, d.z - 1 ) * d.y + t.y ) * d.x + t.x;
+	int k = texelFetch( cellCluster, 2 * cl + 1 ).r;
+	if ( k < 0 )
+		return -1;
+	n = k;
+	return cellClusterBase + texelFetch( cellCluster, 2 * cl ).r;
+}
+
 /* the light at the sprite's point (posView, world P, height z in the fog's frame) toward the eye along dW (world):
  * thin = the air's J there (pi x radiance per unit opacity), thick = the wrapped diffuse at world normal N */
 void vpLight( vec3 posView, vec3 P, vec3 dW, float z, vec3 N, float w, out vec3 thin, out vec3 thick )
@@ -126,7 +151,10 @@ void vpLight( vec3 posView, vec3 P, vec3 dW, float z, vec3 N, float w, out vec3 
 	if ( ( volTerms & 2 ) != 0 && ( volPartRed & 8 ) == 0 ) {
 		float dP = wwAirDriftAt( posView );	// lane WEATHERBLEND4: the drifting air at the puff, on its lamps' paths
 		float s2 = dot( cellRow[0].xyz, cellRow[0].xyz );	// WEATHERBLEND5: world to view = rows transposed / scale^2
-		for ( int i = 0; i < cellLightCount; i++ ) {
+		int nLs;
+		int bLs = vpLightsBegin( P, posView, nLs );	// lane INTERIORPERF1: the cluster's list (was every light)
+		for ( int k = 0; k < nLs; k++ ) {
+			int i = cellLightAt( bLs, k );
 			vec4 t0 = texelFetch( cellLights, i * CELL_TPL );
 			float d = length( t0.xyz - P );
 			if ( d >= t0.w || d < 0.001 )

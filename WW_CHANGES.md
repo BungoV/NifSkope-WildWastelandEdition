@@ -1,3 +1,25 @@
+## INTERIORPERF1 (2026-11-01): the volumetric particles walk their cluster's light list, not every light
+
+TIMING1's Museum of Freedom interior rows ran about 4 fps at every preset: the light loop (lit frames minus unlit
+frames, WW_CELL_PASSTIME_LIGHTLOOP=1) was 106-114 ms, and nearly all of it sat in the SORTED pass (sorted lit/unlit
+110.8/17.7 ms, 114.3/17.4; opaque only 71/60). The surfaces already walk the cluster lists (308 lights, mean list 4.9,
+none over the cap). VOLPART1's lit effect cards and particles (res/shaders/cell_volpart.glsl vpLight) did not: each
+fragment of every overdrawn volumetric card looped over all 308 lights.
+- vpLight now walks `vpLightsBegin( P, posView, n )`, the list of the cluster that holds the point it lights. A particle
+  lights at its sprite's centre, not at the fragment, so the tile comes from posView projected through the draw's
+  projection into volRect (the viewport), not from gl_FragCoord; the slice from P's view depth. The lists are padded past
+  their tiles and slices; every light a list leaves out is past its radius or outside its cone/plane at P, where
+  cellLightE gives exactly 0, and the lists are ascending: the sum is the flat loop's lights in the flat loop's order.
+  Off screen / outside the depth range / no viewport / no lists (WW_CELL_CLUSTER off, or a cluster over the cap): every
+  light, as before.
+- Red: `WW_CELL_VOLPART_RED=flatloop` (bit 1024) = the old loop over every light.
+- Unit: tests/volpartcluster (g++, no Qt, no GL; the real cluster build, the shader's pick mirrored in float):
+  200000 sprite centres per set on 64/308/308/1024-light interior sets, 0 lit lights missing from the picked list;
+  4.4-5.1x fewer lights walked per point (including the 17% of points past the frustum that walk every light). The red
+  (`-DVOLPART_CLUSTER_RED`, the fragment's own pixel as the surfaces pick) misses 777-6521 lights and exits 1.
+- Sweep: the 10 including programs link in base (30), `--extra WW_CELL_RTDDGI --modes none,ubo` (20) and
+  `--extra WW_CELL_PRT` (30), then every program in all three sets (notes/interiorperf1/tools/sweep3.sh).
+
 ## PERFFIX2 a item 6 (2026-11-01): the light cluster build on one thread, its boxes from the tile edges (same lists)
 
 The cluster lists (LIGHTSYS2 / LIGHTCLUSTER1) are rebuilt on every frame the camera moves, once per kept grid. The live
