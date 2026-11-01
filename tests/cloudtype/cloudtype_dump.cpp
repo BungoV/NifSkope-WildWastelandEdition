@@ -28,10 +28,13 @@ int main( int argc, char ** argv )
 			if ( std::sscanf( line, "%255s %u %u %d %d", edid, &flags, &byte, &sounds, &precip ) < 4 )
 				continue;
 			float tn = 0, sn = 0, to = 0, so = 0;
-			WwCloudMath::lowTypeOf( flags, byte, -1.0f, tn, sn, false, sounds );
+			// lane CLOUDTYPE3: the default reads MNAM (precip); CLOUDTYPE_RED=rainflag = CLOUDTYPE2 (precip -1)
+			const char * rr = std::getenv( "CLOUDTYPE_RED" );
+			const bool rainflag = rr && !std::strcmp( rr, "rainflag" );
+			WwCloudMath::lowTypeOf( flags, byte, -1.0f, tn, sn, false, sounds, rainflag ? -1 : precip );
 			WwCloudMath::lowTypeOf( flags, byte, -1.0f, to, so, false, -1 );
-			std::printf( "row %s %u %u %d %.6f %.6f %.6f %.6f\n", edid, flags, byte, sounds, double( tn ), double( sn ),
-				double( to ), double( so ) );
+			std::printf( "row %s %u %u %d %.6f %.6f %.6f %.6f %d\n", edid, flags, byte, sounds, double( tn ), double( sn ),
+				double( to ), double( so ), precip );
 		}
 		std::fclose( f );
 		return 0;

@@ -1214,13 +1214,15 @@ bool wwLookdevWeatherId( quint32 & formID, QString & edid, QString & owner, QStr
 	return true;
 }
 
-bool wwLookdevWeatherClass( unsigned & flags, unsigned & thunder, int * thunderSounds )
+bool wwLookdevWeatherClass( unsigned & flags, unsigned & thunder, int * thunderSounds, int * precip )
 {
 	resolve();
 	const LdState & s = st();
 	flags = thunder = 0;
 	if ( thunderSounds )
 		*thunderSounds = 0;
+	if ( precip )	// lane CLOUDTYPE3: WTHR MNAM (esmweather.cpp, CLOUD6e)
+		*precip = s.haveWeather && s.w.precipForm != 0 ? 1 : 0;
 	if ( !s.haveWeather || !s.w.hasClass )
 		return false;
 	flags = s.w.classFlags;	// lane CLOUD5: WTHR DATA bytes 11 and 10 (esmweather.cpp)

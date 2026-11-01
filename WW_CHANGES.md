@@ -1,3 +1,11 @@
+## CLOUDTYPE3 (SKYCLOUD1101, 2026-11-01): a "rainy" weather that never rains gets overcast clouds
+
+Four vanilla weathers carry the Rainy flag but have no precipitation (no MNAM) and no thunder: DiamondWeather,
+DiamondWeatherPastel, TCommonwealthMarshOvercast and CommonwealthGSRadstormOld. They were typed as rain clouds (0.75); they
+now get the Cloudy type (0.45). Every other weather keeps its type (the gate checks all 107). The type only shows with
+Cloud Variety on, which ships Off, so the default sky does not change. Red: WW_CLOUDVOL_RED=rainflag (the notes say
+`,RED=rainflag`; the green says `,precip=mnam`). Test: tests/cloudtype/run.sh (new gate P).
+
 ## CLOUDSTEPS2 (SKYCLOUD1101, 2026-11-01): Ultra volume clouds march 128 steps at the old cost
 
 CLOUD7's read-free top light already paid for more steps on Medium (60) and High (80). Ultra now gets the same: 96 -> 128

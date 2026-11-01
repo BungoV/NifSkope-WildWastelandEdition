@@ -1117,6 +1117,11 @@ bool wwCloudVolTypeRule()
 	return cs().typeRule != 0 && !red( "thunderbyte" );	// lane CLOUDTYPE2: the red thunderbyte = CLOUD5's rule
 }
 
+bool wwCloudVolPrecipRule()
+{
+	return wwCloudVolTypeRule() && !red( "rainflag" );	// lane CLOUDTYPE3: the red rainflag = CLOUDTYPE2
+}
+
 void wwLightningFrameBegin()
 {
 	ltFrame().valid = false;
@@ -1495,6 +1500,8 @@ bool wwCloudVolDraw( Scene * scene, const WwCloudVolView & view, QStringList & d
 		// lane CLOUD6d: the echo a row's notes need (the profile set, or the old type swing as the red)
 		reds += wwCloudVolProfileSet() ? QStringLiteral( ",profileset=one" ) : QStringLiteral( ",RED=typemix" );
 		reds += wwCloudVolTypeRule() ? QStringLiteral( ",typerule=thundersound" ) : QStringLiteral( ",RED=thunderbyte" );	// lane CLOUDTYPE2
+		if ( wwCloudVolTypeRule() )	// lane CLOUDTYPE3
+			reds += wwCloudVolPrecipRule() ? QStringLiteral( ",precip=mnam" ) : QStringLiteral( ",RED=rainflag" );
 	}
 	if ( d.accum ) {	// lane CLOUDBAND1: the echo a row's notes need to prove the accumulation drew (absent when Off)
 		for ( const char * w : { "noaccum", "noclamp" } )

@@ -12,6 +12,10 @@ Gates (bars written before the first run, 10-31 02:10):
               flashes lightning in exactly those), in all 107. CLOUD5's rule: 92 of 107 (FAIL).
   R radstorm  every weather whose EDID names a radstorm and that thunders is 0.9 (not the Snow flag's 0.3).
   N rain      every Rainy-flag weather that does not thunder is 0.75 (rain is not a storm by itself); at least one exists.
+              lane CLOUDTYPE3 (11-01): only those WITH a precipitation form (MNAM != 0); the red rainflag judges all.
+  P precip    lane CLOUDTYPE3 (bar written before the run, 11-01): every Rainy-flag weather with no MNAM and no thunder
+              is Cloudy 0.45 (4 in vanilla: Diamond x2, TCommonwealthMarshOvercast, CommonwealthGSRadstormOld); every
+              other weather keeps CLOUDTYPE2's type. Red rainflag (the dump's precip -1 = CLOUDTYPE2) FAILS.
   K kept      every weather that neither thunders nor carries the Rainy flag keeps CLOUD5's type and spread exactly
               (fair 0.6, cloudy 0.45, snow 0.3): the rule moves only the storm signal.
   B byte      INFO + a guard: the old predicate (thunder byte > 0) is true in >= 105 of 107 weathers (it decides nothing):
@@ -29,7 +33,7 @@ TREE = os.path.dirname(os.path.dirname(HERE))
 args = sys.argv[1:]
 scratch = args[0] if args and not args[0].startswith('--') else os.path.join(TREE, '..', 'cloudtype_scratch')
 red = args[args.index('--red') + 1] if '--red' in args else ''
-only = set(args[args.index('--only') + 1]) if '--only' in args else set('ARNKBWD')
+only = set(args[args.index('--only') + 1]) if '--only' in args else set('ARNKBWDP')
 src = args[args.index('--src') + 1] if '--src' in args else os.path.join(TREE, 'src', 'gl')
 FIX = os.path.join(TREE, 'tests', 'cloudtype', 'weathers.tsv')
 os.makedirs(scratch, exist_ok=True)
@@ -44,8 +48,12 @@ if r.returncode:
     raise SystemExit('BUILD FAIL ' + r.stderr[-2000:])
 
 
+RAINFLAG = red == 'rainflag' or 'rainflag' in [w.strip() for w in os.environ.get('WW_CLOUDVOL_RED', '').lower().split(',')]
+DENV = dict(ENV, CLOUDTYPE_RED='rainflag') if RAINFLAG else ENV
+
+
 def dump(*a):
-    return subprocess.run([DUMP] + [str(x) for x in a], env=ENV, capture_output=True, text=True,
+    return subprocess.run([DUMP] + [str(x) for x in a], env=DENV, capture_output=True, text=True,
                           check=True).stdout.split('\n')
 
 
@@ -70,7 +78,7 @@ for l in dump('rows', FIX):
     if not w or w[0] != 'row':
         continue
     e = dict(edid=w[1], flags=int(w[2]), byte=int(w[3]), snd=int(w[4]), nt=float(w[5]), ns=float(w[6]), ot=float(w[7]),
-             os=float(w[8]))
+             os=float(w[8]), pr=int(w[9]))
     e['t'], e['s'] = (e['nt'], e['ns']) if NEW else (e['ot'], e['os'])
     rows.append(e)
 n = len(rows)
@@ -89,7 +97,7 @@ if 'R' in only:
     gate('R radstorm', bool(rad) and not bad, '%d thundering radstorms typed 0.9: %d%s' % (
         len(rad), len(rad) - len(bad), ('; wrong: ' + ', '.join(bad[:6])) if bad else ''))
 if 'N' in only:
-    rain = [e for e in rows if e['flags'] & 4 and e['snd'] == 0]
+    rain = [e for e in rows if e['flags'] & 4 and e['snd'] == 0 and (e['pr'] != 0 or RAINFLAG)]
     bad = ['%s %.2f' % (e['edid'], e['t']) for e in rain if abs(e['t'] - 0.75) > 1e-6]
     gate('N rain', bool(rain) and not bad, '%d Rainy-flag weathers that do not thunder typed 0.75: %d%s' % (
         len(rain), len(rain) - len(bad), ('; wrong: ' + ', '.join(bad[:6])) if bad else ''))
@@ -107,13 +115,30 @@ if 'B' in only:
 if 'W' in only:
     cm = open(os.path.join(src, 'cloudmap.cpp'), encoding='latin1').read()
     cv = open(os.path.join(src, 'cloudvol.cpp'), encoding='latin1').read()
-    w1 = re.search(r'wwLookdevWeatherClass\(\s*flags,\s*thunder,\s*&sounds\s*\)', cm) is not None and \
-        re.search(r'lowTypeOf\([^;]*wwCloudVolTypeRule\(\)\s*\?\s*sounds\s*:\s*-1\s*\)\s*;', cm) is not None
+    w1 = re.search(r'wwLookdevWeatherClass\(\s*flags,\s*thunder,\s*&sounds,\s*&precip\s*\)', cm) is not None and \
+        re.search(r'lowTypeOf\([^;]*wwCloudVolTypeRule\(\)\s*\?\s*sounds\s*:\s*-1\s*,\s*wwCloudVolPrecipRule\(\)\s*\?\s*precip\s*:\s*-1\s*\)\s*;', cm) is not None
+    w3b = re.search(r'bool wwCloudVolPrecipRule\(\)[^}]*red\( "rainflag" \)', cv) is not None   # lane CLOUDTYPE3
     m = re.search(r'CvState & cs\(\)\s*\{(.*?)\n\}', cv, re.S)
     w2 = bool(m) and '"WW_CLOUDVOL_TYPERULE"' in m.group(1) and 'defaultOnSwitch' in m.group(1)
     w3 = re.search(r'bool wwCloudVolTypeRule\(\)[^}]*red\( "thunderbyte" \)', cv, re.S) is not None
+    w3 = w3 and w3b
     gate('W wiring', w1 and w2 and w3, 'cloudmap passes the sounds via wwCloudVolTypeRule() %s; cs() reads '
          'WW_CLOUDVOL_TYPERULE via defaultOnSwitch %s; RED=thunderbyte honoured %s (src %s)' % (w1, w2, w3, src))
+if 'P' in only:
+    dry = [e for e in rows if e['flags'] & 4 and e['snd'] == 0 and e['pr'] == 0]
+    bad = ['%s %.2f' % (e['edid'], e['t']) for e in dry if abs(e['t'] - 0.45) > 1e-6]
+    # every other weather: the type CLOUDTYPE2 gave (rows outside the dry set; the dump's old arm is CLOUD5, so re-run
+    # the rule with precip -1 by the red's dump)
+    ref = {}
+    for l in subprocess.run([DUMP, 'rows', FIX], env=dict(ENV, CLOUDTYPE_RED='rainflag'), capture_output=True, text=True,
+                            check=True).stdout.split('\n'):
+        w = l.split()
+        if w and w[0] == 'row':
+            ref[w[1]] = float(w[5])
+    moved = [e['edid'] for e in rows if e not in dry and NEW and abs(e['t'] - ref[e['edid']]) > 1e-6]
+    gate('P precip', len(dry) == 4 and not bad and not moved, '%d dry Rainy-flag weathers typed Cloudy 0.45: %d%s; '
+         'others moved vs CLOUDTYPE2: %d%s' % (len(dry), len(dry) - len(bad), ('; wrong: ' + ', '.join(bad)) if bad else '',
+                                              len(moved), (' ' + ', '.join(moved[:6])) if moved else ''))
 if 'D' in only:
     want = {None: True, '': True, '1': True, 'on': True, 'yes': True, '0': False, 'off': False, 'false': False, 'no': False}
     bad = [k for k, v in want.items() if switch_on(k) != v]

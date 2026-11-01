@@ -572,10 +572,10 @@ const WwCloudMap & wwCloudMapUpdate( Scene * scene )
 		// lane CLOUD6d: one profile set per weather (spread 0) unless WW_CLOUDVOL_PROFILESET=0 / RED=typemix
 		// lane CLOUDTYPE2: the storm signal = the thunder sounds (WW_CLOUDVOL_TYPERULE), -1 = CLOUD5's byte rule (the red)
 		unsigned flags = 0, thunder = 0;
-		int sounds = 0;
-		wwLookdevWeatherClass( flags, thunder, &sounds );
+		int sounds = 0, precip = 0;
+		wwLookdevWeatherClass( flags, thunder, &sounds, &precip );
 		lowTypeOf( flags, thunder, wx.on ? wx.type : -1.0f, now[0].type, now[0].typeSpread, wwCloudVolProfileSet(),
-			wwCloudVolTypeRule() ? sounds : -1 );
+			wwCloudVolTypeRule() ? sounds : -1, wwCloudVolPrecipRule() ? precip : -1 );	// lane CLOUDTYPE3: MNAM
 	}
 
 	// the transition: a new weather starts from the parameters shown at the change
