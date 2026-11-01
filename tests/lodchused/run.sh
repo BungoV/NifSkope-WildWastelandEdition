@@ -28,7 +28,7 @@ verdict() {	# PASS when all 3 rings use the AO stream, the sky and the stream te
 	local f=$1 n ok
 	n=$(grep -c "farobjcensus ring [0-9]* channels:" "$f")
 	ok=$(grep "farobjcensus ring [0-9]* channels:" "$f" \
-		| grep -cE "AO on \([1-9][0-9]* placements from the per-vertex stream.*sky on \([1-9][0-9]* placements.* [1-9][0-9]* stream texels")
+		| grep -cE "AO on \([1-9][0-9]* placements from the per-vertex stream.*sky on \([1-9][0-9]* placements.* [1-9][0-9]* stream texels.*ground contact on \([1-9][0-9]* placements")
 	if [ "$n" -ge 3 ] && [ "$ok" = "$n" ]; then echo PASS; else echo FAIL; fi
 }
 echo "== green ($EXE)"
@@ -39,6 +39,11 @@ echo "== red: WW_LODL_AO_RED=off WW_LODL_SKY_RED=off"
 census red "$EXE" WW_LODL_AO_RED=off WW_LODL_SKY_RED=off
 r=$(verdict "$OUT/red.txt")
 echo "   red: $r (must be FAIL)"
+echo "== red: WW_LODL_AO_RED=noground (r2, LATE ITEM 25: the v12 ground-contact ramp not drawn)"
+census redg "$EXE" WW_LODL_AO_RED=noground
+rg=$(verdict "$OUT/redg.txt")
+echo "   redg: $rg (must be FAIL)"
+[ "$rg" = FAIL ] || r=PASS
 r0=FAIL
 if [ -n "$BASE" ]; then
 	echo "== red0: base exe ($BASE)"

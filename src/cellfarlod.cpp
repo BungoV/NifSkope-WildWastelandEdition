@@ -621,13 +621,14 @@ QString cellFarLodAppend( NifModel * nif, const QModelIndex & iRoot, const EsmWo
 				memNow( w, p );
 				return w - ws0 > budgetMB;
 			}
-			constexpr double kVanBytesPerTri = 2560.0;	// document rows, 2.4 KB a triangle (FINALFIX g3, top of file)
 			double mb = 0.0;
 			for ( size_t i = 0; ours && i < rings.size(); i++ )
 				if ( rings[i].built )
 					mb += double( rings[i].verts ) * kBytesPerVert / ( 1024.0 * 1024.0 );
+			/* lane FIX1101A lodch r2 (LATE ITEM 23): the chunks' arrays beside the document are charged at the arrays'
+			 * rate, the rows left at 2.4 KB a triangle (cellfarvanilla.h wwFarVanChargeMB, unit tests/vanbudget) */
 			for ( const WwFarVanRing & v : van )
-				mb += double( v.terrainTris + v.objectTris + v.skirtTris ) * kVanBytesPerTri / ( 1024.0 * 1024.0 );
+				mb += wwFarVanChargeMB( v.terrainTris + v.objectTris + v.skirtTris, v.sideTerrainTris + v.sideObjectTris );
 			return mb > budgetMB;
 		};
 		QString verr;
@@ -653,6 +654,9 @@ QString cellFarLodAppend( NifModel * nif, const QModelIndex & iRoot, const EsmWo
 					.arg( v.shapes ).arg( v.terrainTris ).arg( v.clipTris ).arg( v.objectTris ).arg( v.droppedTris )
 					.arg( v.snapped ).arg( v.snapMax, 0, 'f', 1 ).arg( int( v.waterBlocks.size() ) ).arg( wReg )
 					+ QStringLiteral( ", %1 land shaders LOD landscape -> default, %2 skirt tris on the clip lines" ).arg( v.landRetyped ).arg( v.skirtTris )
+					+ QStringLiteral( ", arrays beside the document: %1 terrain + %2 object tris%3" ).arg( v.sideTerrainTris )
+						.arg( v.sideObjectTris ).arg( wwEnv( "WW_CELL_FARLOD_RED" ) == "vanrows"
+							? QStringLiteral( " (RED vanrows: document rows)" ) : QString() )
 				+ ( v.btoSwayShapes < 0 ? QString() : QStringLiteral( ", bto sway: %1 trees in %2 shapes (%3 skipped: shared shader)" )
 					.arg( v.btoSwayTrees ).arg( v.btoSwayShapes ).arg( v.btoSwayShared ) )
 				+ ( v.notes.isEmpty() ? QString() : QStringLiteral( " -- " ) + v.notes.join( QLatin1String( "; " ) ) ) );
@@ -885,16 +889,29 @@ QString cellFarLodAppend( NifModel * nif, const QModelIndex & iRoot, const EsmWo
 				continue;
 			const Transform xf( nif, iB );   // FarLOD's own transform is the identity
 			const bool isVan = bn.startsWith( QLatin1String( "FarLOD terrain v " ) );
-			const QModelIndex iVD = nif->getIndex( iB, "Vertex Data" );
-			const QModelIndex iTri = nif->getIndex( iB, "Triangles" );
-			if ( !iVD.isValid() || !iTri.isValid() )
-				continue;
-			const QVector<Triangle> tris = nif->getArray<Triangle>( iTri );
-			const int nv = nif->rowCount( iVD );
-			std::vector<Vector3> p( size_t( std::max( nv, 0 ) ) );
-			for ( int v = 0; v < nv; v++ )
-				p[size_t( v )] = fullPrec ? nif->get<Vector3>( nif->index( v, 0, iVD ), "Vertex" )
-					: Vector3( nif->get<HalfVector3>( nif->index( v, 0, iVD ), "Vertex" ) );
+			/* lane FIX1101A lodch r2: the game's land waits beside the document (cellmesh.h); asking for its rows by
+			 * name would write them back, so the arrays are read where they wait */
+			QVector<Triangle> tris;
+			int nv = 0;
+			std::vector<Vector3> p;
+			if ( const QSharedPointer<CellMesh> cm = cellMeshFor( nif, iB ) ) {
+				if ( cm->inst )
+					continue;
+				tris = cm->triangles;
+				nv = int( cm->verts.size() );
+				p.assign( cm->verts.cbegin(), cm->verts.cend() );
+			} else {
+				const QModelIndex iVD = nif->getIndex( iB, "Vertex Data" );
+				const QModelIndex iTri = nif->getIndex( iB, "Triangles" );
+				if ( !iVD.isValid() || !iTri.isValid() )
+					continue;
+				tris = nif->getArray<Triangle>( iTri );
+				nv = nif->rowCount( iVD );
+				p.resize( size_t( std::max( nv, 0 ) ) );
+				for ( int v = 0; v < nv; v++ )
+					p[size_t( v )] = fullPrec ? nif->get<Vector3>( nif->index( v, 0, iVD ), "Vertex" )
+						: Vector3( nif->get<HalfVector3>( nif->index( v, 0, iVD ), "Vertex" ) );
+			}
 			for ( const Triangle & tr : tris ) {
 				if ( tr.v1() >= nv || tr.v2() >= nv || tr.v3() >= nv )
 					continue;
@@ -1119,7 +1136,8 @@ QString cellFarLodAppend( NifModel * nif, const QModelIndex & iRoot, const EsmWo
 			// lane FIX1101A lodch: which of the bake's channels this ring USED (the census line the unit and the rows read)
 			say( QStringLiteral( "far lod: objects ring %1 channels: AO %2 (%3 placements from the per-vertex stream, %4 from "
 				"self x placement AO, stream mean %5), sky %6 (%7 placements, %8 vertices, factor mean %9, raw byte mean %10); "
-				"%11 stream texels" ).arg( int( i ) )
+				"%11 stream texels (%12 MB, 2 B a vertex a copy), ground contact %13 (%14 placements, %15 vertices)" )
+				.arg( int( i ) )
 				.arg( lodlAoOn() ? QStringLiteral( "on" ) : QStringLiteral( "off" ) )
 				.arg( oc.aoStreamPlacements ).arg( oc.aoFallbackPlacements )
 				.arg( oc.aoBytes ? oc.aoSum / double( oc.aoBytes ) : 255.0, 0, 'f', 1 )
@@ -1128,7 +1146,10 @@ QString cellFarLodAppend( NifModel * nif, const QModelIndex & iRoot, const EsmWo
 				.arg( oc.skyPlacements ).arg( oc.skyBytes )
 				.arg( oc.skyBytes ? oc.skySum / double( oc.skyBytes ) : 1.0, 0, 'f', 3 )
 				.arg( oc.skyBytes ? oc.skyRawSum / double( oc.skyBytes ) : 255.0, 0, 'f', 1 )
-				.arg( oc.streamTexels ) );
+				.arg( oc.streamTexels )
+				.arg( double( oc.streamTexels ) * 2.0 / ( 1024.0 * 1024.0 ), 0, 'f', 2 )
+				.arg( lodlGroundOn() ? QStringLiteral( "on" ) : QStringLiteral( "off" ) )
+				.arg( oc.groundPlacements ).arg( oc.groundBytes ) );
 			ringTris[i] = oc.tris;
 			ringPlaced[i] = oc.placed;
 			ringState[i] = QStringLiteral( "built" );
