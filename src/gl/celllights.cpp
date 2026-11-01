@@ -2156,11 +2156,13 @@ void wwCellLightsUniforms( Scene * scene )
 		prog->uni1i( "cellIsRed", s.isRed );
 	}
 	prog->uni1i( "cellLights", kTextureUnit );
+	// lane TIMING1: WW_CELL_PASSTIME_LIGHTLOOP=1's unlit frames walk no light (the light loop's GPU timer)
+	const int loopCount = PassTime::lightLoopOff() ? 0 : g.count;
 	// the cluster lists: their sampler bound on every draw, the lists only on a lit one
-	wwCellClusterUniforms( scene, L ? &g.texels : nullptr, L ? g.count : 0, g.texelStamp );
+	wwCellClusterUniforms( scene, L ? &g.texels : nullptr, L ? loopCount : 0, g.texelStamp );
 	if ( !L )
 		return;
-	prog->uni1i( "cellLightCount", g.count );
+	prog->uni1i( "cellLightCount", loopCount );
 	prog->uni1i( "cellBulbBase", g.bulbBase );	// lane NIFXLIGHT2: the air's bulb-tier lights
 	prog->uni1i( "cellBulbCount", g.bulbs );
 	{	// lane LIGHTS5: GOBO1's pattern (pin WW_CELL_GOBO_ROT turns it, red WW_CELL_GOBO_RED=flat its mean) and FOGSCALE1

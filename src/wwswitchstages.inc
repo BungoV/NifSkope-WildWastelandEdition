@@ -438,6 +438,7 @@
 { "WW_CELL_PASS", 0, "src/gl/celllights.cpp:274 st | init-once state, re-read when a live set moves its prefix (b)" },
 { "WW_CELL_PASSTIME", 0, "src/gl/cellpasstime.cpp:227 st | init-once state, re-read when a live set moves its prefix (b)" },
 { "WW_CELL_PASSTIME_CENSUS", 0, "src/gl/cellpasstime.cpp:236 st | init-once state, re-read when a live set moves its prefix (b)" },
+{ "WW_CELL_PASSTIME_LIGHTLOOP", 0, "src/gl/cellpasstime.cpp:240 st | init-once state, re-read when a live set moves its prefix (b)" },
 { "WW_CELL_PASSTIME_LOG", 0, "src/gl/cellpasstime.cpp:234 st | init-once state, re-read when a live set moves its prefix (b)" },
 { "WW_CELL_PASSTIME_SYNC", 0, "src/gl/cellpasstime.cpp:235 st | init-once state, re-read when a live set moves its prefix (b)" },
 { "WW_CELL_PFX_RED", 1, "src/cellview.cpp:4003 cellBuild | read while the cell document is built" },

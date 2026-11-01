@@ -735,10 +735,13 @@ void Scene::drawDeferredShapes( NodeList & secondPass )
 		return s && !isDecal( node ) && s->wwWaterDraws();
 	};
 	bool waterDrew = false;
-	for ( Node * node : secondPass.list() ) {
-		if ( isWater( node ) ) {
-			node->drawShapes();
-			waterDrew = true;
+	{
+		PassTime::Swap waterT( PassTime::Sorted, PassTime::Water );	// lane TIMING1: the sorted pass's water is the water zone's
+		for ( Node * node : secondPass.list() ) {
+			if ( isWater( node ) ) {
+				node->drawShapes();
+				waterDrew = true;
+			}
 		}
 	}
 	/* lane GLOWHAZE1: the water writes depth, and the soft fade of every effect after it must see that surface (a mist

@@ -835,8 +835,14 @@ void wwSunShadowPass( Scene * scene )
 	};
 	part( PassTime::SunCasters, PassTime::CpuSunCasters, sunShadowPassImpl );
 	part( PassTime::SunTerrStep, PassTime::CpuSunTerrStep, wwShadowSetFrame );	// lane TERRSHADOW1: the terrain sweep's step, whatever the Shadows row says
-	part( PassTime::CloudShadow, PassTime::CpuCloudShadow, wwCloudShadowPass );	// lane CLOUD3: the clouds' shadow map rows, whatever the Shadows row says
-	part( PassTime::FarGroundPass, PassTime::CpuFarGroundPass, []( Scene * sc ) { CellFarGround::pass( sc ); } );	// lane FARDRAW1: the far ring 0's live ground (uploads, page stamps, frees)
+	{
+		PassTime::Swap pt( PassTime::SunShadows, PassTime::CloudShadows );	// lane TIMING1: out of "sun-cascades"
+		part( PassTime::CloudShadow, PassTime::CpuCloudShadow, wwCloudShadowPass );	// lane CLOUD3: the clouds' shadow map rows, whatever the Shadows row says
+	}
+	{
+		PassTime::Swap pt( PassTime::SunShadows, PassTime::FarGround );	// lane TIMING1: out of "sun-cascades"
+		part( PassTime::FarGroundPass, PassTime::CpuFarGroundPass, []( Scene * sc ) { CellFarGround::pass( sc ); } );	// lane FARDRAW1: the far ring 0's live ground (uploads, page stamps, frees)
+	}
 	csmEchoFrame();
 }
 
