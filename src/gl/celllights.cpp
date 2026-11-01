@@ -3031,6 +3031,25 @@ static bool cubeAllFacesRed()
 	return allFacesRed;
 }
 
+/* lane PERFFIX2 b (item 5c, gl/cubefacecull.h coneMask): a spot's faces that its cone (widened by the lookup's reach)
+ * never meets are read by no lit pixel, so they get no casters (they are still cleared). 959 of 1445 vanilla shadow
+ * lights are spots. Red WW_CELL_SHADOW_RED=nocone (or allfaces). g_cubeConeSkip: the draws it saved (coneSkip=). */
+static qint64 g_cubeConeSkip = 0;
+
+static int cubeConeFaces( const WwCellLight & l, int faceTexels )
+{
+	WW_SWITCH_STATIC( bool, noConeRed, wwEnv( "WW_CELL_SHADOW_RED" ).trimmed() == "nocone" );
+	if ( !l.spot || noConeRed || cubeAllFacesRed() )
+		return 63;
+	return WwCubeFace::coneMask( l.dir, l.cosOuter, WwCubeFace::coneMargin( faceTexels ) );
+}
+
+static bool cubeConeRed()
+{
+	WW_SWITCH_STATIC( bool, noConeRed, wwEnv( "WW_CELL_SHADOW_RED" ).trimmed() == "nocone" );
+	return noConeRed;
+}
+
 static bool cubeFaceKeeps( int face, const float lpos[3], const Vector3 & c, float rad )
 {
 	if ( cubeAllFacesRed() )
@@ -3114,7 +3133,7 @@ static void lampShadowPass( Scene * scene, Gpu & g, const WwCellLighting & L, st
 	const int red = wwCellLampShadowRed();
 	// lane ALPHABGSM1: a moved alpha-rule red (Shape::wwDrawAlphaGen) stores every lamp map again
 	// lane PERFFIX2 b: so does the per-face cull's red
-	const int ver = ( s.version.value( scene->nifModel ) + ( Shape::wwDrawAlphaGen() << 24 ) ) ^ ( cubeAllFacesRed() ? 0x40000000 : 0 );
+	const int ver = ( s.version.value( scene->nifModel ) + ( Shape::wwDrawAlphaGen() << 24 ) ) ^ ( cubeAllFacesRed() ? 0x40000000 : 0 ) ^ ( cubeConeRed() ? 0x20000000 : 0 );
 	const std::uint64_t blockBytes = std::uint64_t( 3 ) * std::uint64_t( S ) * std::uint64_t( S ) * 2u;
 	QElapsedTimer timer;
 	timer.start();
@@ -3243,7 +3262,7 @@ static void lampShadowPass( Scene * scene, Gpu & g, const WwCellLighting & L, st
 			walls += e.back >= 0 ? 1 : 0;
 		const double mb = 1.0 / 1048576.0;
 		s.lampLast = QStringLiteral( "%1 face=%2 store=%3(wall %4) storeMB=%5/%6 slotsMB=%7 slotsDrawn=%8 stored=%9 restored=%10"
-			" direct=%11 movers=%12(new %13) moverDraws=%14 ms=%15%16 faceSkip=%17 slice=%18 waiting=%19" )
+			" direct=%11 movers=%12(new %13) moverDraws=%14 ms=%15%16 faceSkip=%17 slice=%18 waiting=%19 coneSkip=%20%21" )
 			.arg( wwCellLampShadowTierName( wwCellLampShadowTier() ) ).arg( S )
 			.arg( g.lsStore.size() ).arg( walls )
 			.arg( double( used ) * double( blockBytes ) * mb, 0, 'f', 1 ).arg( double( g.lsBlocks ) * double( blockBytes ) * mb, 0, 'f', 1 )
@@ -3252,7 +3271,8 @@ static void lampShadowPass( Scene * scene, Gpu & g, const WwCellLighting & L, st
 			.arg( timer.elapsed() )
 			.arg( red == 1 ? QStringLiteral( " red=live" ) : red == 2 ? QStringLiteral( " red=cube" ) : QString() )
 			.arg( g_cubeFaceSkip )	// lane PERFFIX2 b: draws the per-face cull saved, since the start
-			.arg( wwCellLampShadowSlice() ).arg( s.lampSliced );	// lane PERFFIX2 b: the first-store budget, slots waiting
+			.arg( wwCellLampShadowSlice() ).arg( s.lampSliced )	// lane PERFFIX2 b: the first-store budget, slots waiting
+			.arg( g_cubeConeSkip ).arg( cubeConeRed() ? QStringLiteral( " red=nocone" ) : QString() );	// lane PERFFIX2 b: off-cone draws saved
 	};
 	if ( jobs.empty() ) {
 		s.lampSliced = 0;	// lane PERFFIX2 b
@@ -3357,7 +3377,12 @@ static void lampShadowPass( Scene * scene, Gpu & g, const WwCellLighting & L, st
 		if ( lClip >= 0 )
 			fn->glUniformMatrix4fv( lClip, 1, GL_FALSE, clip );
 		qint64 drawn = 0;
+		const bool coneOff = !( cubeConeFaces( l, S ) >> face & 1 );	// lane PERFFIX2 b: off the spot's cone
+		if ( coneOff )
+			g_cubeConeSkip += qint64( list.size() );
 		for ( const LsCaster * c : list ) {
+			if ( coneOff )
+				break;	// lane PERFFIX2 b: no lit pixel reads this face
 			if ( !cubeFaceKeeps( face, l.pos, c->c, c->rad ) )
 				continue;	// lane PERFFIX2 b: no fragment of it lands in this face
 			prog->uni4m( "modelViewMatrix", c->sh->viewTrans().toMatrix4() );
@@ -3738,8 +3763,8 @@ void wwCellShadowPass( Scene * scene )
 			wwCellShadowKick( scene->nifModel );
 		}
 		static int allGen = -1;	// lane PERFFIX2 b: a moved per-face cull red draws every held cube again
-		if ( allGen != int( cubeAllFacesRed() ) ) {
-			allGen = int( cubeAllFacesRed() );
+		if ( allGen != int( cubeAllFacesRed() ) + 2 * int( cubeConeRed() ) ) {	// (and the cone cull's)
+			allGen = int( cubeAllFacesRed() ) + 2 * int( cubeConeRed() );
 			wwCellShadowKick( scene->nifModel );
 		}
 		const int kick = shadowKicks().value( scene->nifModel );
@@ -3893,6 +3918,7 @@ void wwCellShadowPass( Scene * scene )
 			if ( dx * dx + dy * dy + dz * dz < reach * reach )
 				mine.push_back( &c );
 		}
+		const int coneF = cubeConeFaces( l, face );	// lane PERFFIX2 b: the faces the spot's cone meets (63 for the rest)
 		for ( int face = 0; face < 6; face++ ) {
 			fn->glFramebufferTextureLayer( GL_DRAW_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, g.shTex, 0, 6 * k + face );
 			if ( fn->glCheckFramebufferStatus( GL_DRAW_FRAMEBUFFER ) != GL_FRAMEBUFFER_COMPLETE ) {
@@ -3912,6 +3938,10 @@ void wwCellShadowPass( Scene * scene )
 			clip[14] = B;
 			if ( lClip >= 0 )
 				fn->glUniformMatrix4fv( lClip, 1, GL_FALSE, clip );
+			if ( !( coneF >> face & 1 ) ) {
+				g_cubeConeSkip += qint64( mine.size() );	// lane PERFFIX2 b: cleared, no caster (no lit pixel reads it)
+				continue;
+			}
 			for ( const ShCaster * c : mine ) {
 				if ( !cubeFaceKeeps( face, l.pos, c->c, c->rad ) )
 					continue;	// lane PERFFIX2 b: no fragment of it lands in this face
@@ -3943,10 +3973,10 @@ void wwCellShadowPass( Scene * scene )
 		s.shadowLast = QStringLiteral( "refused(shadow framebuffer incomplete)" );
 		return;
 	}
-	s.shadowLast = QStringLiteral( "on shadowLights=%1 rendered=%2 casters=%3 draws=%4 ms=%5 face=%6 water=%7 faceSkip=%8" )
+	s.shadowLast = QStringLiteral( "on shadowLights=%1 rendered=%2 casters=%3 draws=%4 ms=%5 face=%6 water=%7 faceSkip=%8 coneSkip=%9" )
 		.arg( cand.size() ).arg( dirty.size() ).arg( casters.size() ).arg( drawn ).arg( timer.elapsed() ).arg( face )
 		.arg( waterCastsRed ? QStringLiteral( "casts(RED)" ) : QStringLiteral( "skipped %1" ).arg( waterSkipped ) )
-		.arg( g_cubeFaceSkip );	// lane PERFFIX2 b: draws the per-face cull saved, since the start
+		.arg( g_cubeFaceSkip ).arg( g_cubeConeSkip );	// lane PERFFIX2 b: draws the per-face and the cone cull saved, since the start
 	shadowDump( scene );
 }
 

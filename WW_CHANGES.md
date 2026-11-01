@@ -1,3 +1,18 @@
+## PERFFIX2 b item 5c (2026-11-01): a shadowed spot draws casters only into the cube faces its cone meets
+
+PERFRES1101 A gap 6.2: 959 of 1445 vanilla shadow lights are spots, and each got a full cube. A spot lights nothing
+outside its cone (cell_lights.glsl: base = 1 - (1 - dot(-L, dir)) / (1 - cosOuter) is 0 there, and cellShadowF is only
+asked where the light is above 0), so a face whose directions all lie outside the cone, widened by the lookup's reach
+(16 / face rad + 0.02: the 3x3 taps, their 2x2 compare, the 1.5-texel normal lift), is read by no lit pixel.
+WwCubeFace::coneMask (src/gl/cubefacecull.h) finds each face's nearest direction to the axis exactly (inside the face, or
+the peak on one of its 4 edges) and celllights.cpp draws no caster into the other faces (they are still cleared): exact
+for every lit pixel, ships ON. A narrow spot aimed along an axis keeps 1 face, one at a cube corner 3; 3.46 of 6 on
+average over half angles 5..90 deg. The brief's "spot as ONE 2D map" (a perspective map instead of a cube) would also
+free the memory, but it changes the sampling (a look change) and the slot format: a LANES row. Debug probe 7 still reads
+the off-cone faces (cleared). Census `coneSkip=`. Red WW_CELL_SHADOW_RED=nocone (allfaces also turns it off). Unit:
+tests/cubefacecull part 2b (20000 spots x 300 directions in the widened cone, none in a dropped face; red: the face axis
+in the cone only, loses 3.2 M directions).
+
 ## PERFFIX2 b item 5d (2026-11-01): the stored lamp shadows' first stores spread over frames
 
 PERFRES1101 A gap 6.3: the stored lamp shadows (LAMPSHADOW1) drew every new slot's static map in one frame, so a cell
