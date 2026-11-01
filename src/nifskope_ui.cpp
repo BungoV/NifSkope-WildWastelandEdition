@@ -29867,6 +29867,16 @@ void NifSkope::initDockWidgets()
 				settings.remove( QStringLiteral( "GLView/Display/Contributions" ) );
 				settings.setValue( QStringLiteral( "GLView/Display/ContributionsVersion" ), 2 );
 			}
+			/* lane FXPALETTE1: masks saved before 2026-11-01 are dropped once, back to every contribution on. A
+			 * profile held Shaded = 0x00184b00 (Tint / Greyscale, Vertex Color, Vertex Alpha, Parallax, Detail and
+			 * Gloss off) with nothing on screen saying so: every FO4 effect lost its greyscale palette and its vertex
+			 * alpha (MuzLaserRifle01.nif's ring: grey rays over a dark disc where stock NifSkope draws them red).
+			 * Red WW_FX_MASKRESET_RED=1 (or WW_FXPALETTE_RED=1): the saved masks are kept, the version stays. */
+			if ( settings.value( QStringLiteral( "GLView/Display/ContributionsVersion" ), 1 ).toInt() < 3
+				&& wwEnv( "WW_FX_MASKRESET_RED" ).trimmed() != "1" && wwEnv( "WW_FXPALETTE_RED" ).trimmed() != "1" ) {
+				settings.remove( QStringLiteral( "GLView/Display/Contributions" ) );
+				settings.setValue( QStringLiteral( "GLView/Display/ContributionsVersion" ), 3 );
+			}
 			btnWire->setChecked( settings.value( QStringLiteral( "GLView/Display/Wireframe" ), false ).toBool() );
 			ogl->wireframeOverlay = btnWire->isChecked();
 			connect( btnWire, &QToolButton::toggled, this, []( bool on ) {
