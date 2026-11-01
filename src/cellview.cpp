@@ -43,6 +43,7 @@ BSD License - see nifskope.h
 #include "cellmodelahead.h"	// lane SPEED1: models parsed on worker threads
 #include "cellmesh.h"		// lane SPEED1: the welded geometry beside the document
 #include "cellfarlod.h"		// lane FARLOD1: the far field around the block
+#include "lodinative.h"		// lane FIX1101A lodch: the far LOD's baked AO / sky switches (liveFarKey)
 #include "cellmodpick.h"	// lane MODPICK1
 #include "cellspeed.h"		// lane SPEED1: stage timers (WW_CELL_SPEED_DUMP)
 #include "cellaodecal.h"		// lane AODECAL1: baked AO decals under big movable statics
@@ -2143,6 +2144,9 @@ QByteArray liveFarKey()
 		k += wwEnv( n ) + '\x1f';
 	// lane FAR6: Game LOD trees sway is written into the .bto shapes at build; its menu tick lives in the settings
 	k += QByteArray( wwLookOn( WwLook::BtoSway ) ? "1" : "0" ) + wwEnv( "WW_CELL_FARLOD_BTOSWAY_RED" ) + '\x1f';
+	// lane FIX1101A lodch: the bake's AO and sky are written into the far rows and the far ground while it is built
+	k += QByteArray( lodlAoOn() ? "1" : "0" ) + QByteArray::number( lodlSkyMode() ) + wwEnv( "WW_LODL_AO_RED" )
+		+ wwEnv( "WW_LODL_SKY_RED" ) + '\x1f';
 	return k;
 }
 

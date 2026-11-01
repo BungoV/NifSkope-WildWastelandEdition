@@ -1,3 +1,54 @@
+## LODCH (FIX1101A, 2026-11-01): the LOD bake's channels draw by default (far AO, far sky light, far ground AO)
+
+bungo asked whether the LOD bakes' sky visibility is used, and for proof that the LOD bakes work (LATE ITEMs 11, 16 and
+20). They were mostly not used. On main d78ec45b the far objects drew no baked vertex AO, placement AO, self-AO or sky
+visibility unless WW_LODL_AO=1 was set. With it set, an instanced ring that carried the AO stream fell back to the flat
+copy and its budget refusals. The far ground never bound the VT mask sheet's B (terrain + object AO, sky AO): only the
+.lodl viewer read it, and only with WW_LODL_AO=1.
+
+- **Far objects, AO (ships ON, row "Far LOD baked AO", pin WW_LODL_AO).** The .lodi v6 per-vertex scene AO multiplies
+  the albedo, exactly as WW_LODL_AO=1 drew it (lane AO2's look). The stream already holds the self-AO and the placement
+  AO, so it is used alone; self x placement AO is the fallback for a placement with no slice. It now works on the
+  instanced rings too. Each row carries the first texel of its own (placement, vertex) bytes in a per-ring RG8 buffer
+  texture (CellMeshInst::vstream; gl/cellfarinst.cpp; fo4_default.vert farStream, unit WwCellUnit::FarStream, set at
+  link in gl/glcontext.cpp). The flat copy keeps its vertex-colour route.
+- **Far objects, sky light (ships ON, row "Far LOD baked sky light", pin WW_LODL_SKY).** The .lodi v7 per-vertex sky
+  byte scales the ambient the GI volume did not replace (fo4_default.frag, the exterior sun branch: color and
+  cellExtAmb x wwFarSkyVis). Shapes other than far placements carry exactly 1, so nothing changes there. The byte is
+  read as the GI's share through src/lodchsky.h: f = s / skyRef(nz) removes the surface's own half-space (an open wall
+  reads 0.56 raw). That is then mapped through the uniform horizon the bake's 56-ray set would see it under, to the
+  normal-weighted share the GI computes. Near (GI) and far (bake) therefore agree at the last cascade edge. The ambient
+  takes min(AO, sky), never their product: the AO already darkens the albedo, so the stream's G byte is min(1, sky / AO).
+- **Far ground AO (ships ON, same row).** nifAppendLodlFarRings samples the VT mask sheet's B bilinearly per ring
+  vertex into the ring's vertex colour, the same mapping the .lodl viewer's WW_LODL_AO uses. The far lod terrain line
+  prints "terrain AO (the mask sheet's B) on N vertices, mean M". The .lodl viewer now draws its AO by default too.
+- **Ground contact.** No second darkening. MEASURED on the installed bake: the AO stream already darkens the base
+  (walls at the terrain, ground ramp >= 250: AO mean 137.7, against 158.2 at 256 u up). The ground ramp is a terrain
+  blend weight, and drawing it as darkening as well would count the contact twice. It stays the WW_LODL_CHANNEL=ground
+  view.
+- **Ground cover (VT mask A).** It stays a debug view (WW_LODL_CHANNEL=mask-a). It is a cover density for a consumer
+  that grows cover. The colour sheet already carries the grass tint the bake mixed in (docs/LODGEN_TERRAIN_VT.md 1), so
+  drawing it lit would tint the ground twice. Nothing in the cell view grows far cover.
+- **Far lights: owed.** They need a whole-map far-light bake (WW_CELL_FARLIGHT=<dir>; none exists). That is a rebake.
+- **Cost (LATE ITEM 22 (1)).** Before, WW_LODL_AO=1 dropped the ring to the flat copy: 143 B a triangle against 16,
+  +440 MB, and SHOTS1101's lit launch was killed by the memory guard at 19 GB. Now the AO and the sky add 2 bytes a
+  (placement, vertex) to the instanced ring, and no geometry is copied.
+- **Far emissive at night (LATE ITEM 22 (2)): a bake gap, not a draw bug.** MEASURED (tools/emitmats.py, notes): the
+  installed Commonwealth.lodo has 1 emitting material of 204, BNS AspenAtlas01LOD.BGSM at scale 0.05. The LOD materials
+  carry no window or lamp emissive, so nothing far can glow. The fix is in lodgen (carry the full model's glow into the
+  LOD material) plus a rebake: owed.
+- **Far ground channel views (LATE ITEM 22 (4)).** WW_LODL_CHANNEL=mask-r/-g/-b/-a and `ao` now reach the cell view's
+  far ground too, through the same sampler. An object view leaves the ground lit without its AO.
+- **Live.** All four keys sit in liveFarKey (src/cellview.cpp). A live set or a menu tick rebuilds the far tail in
+  place. The stage table rows are at 0 (tools/wwswitch_survey.py OVERRIDES, FIX1101A lodch).
+- **Reds.** WW_LODL_AO_RED=off: the AO rule before this change (objects and ground, only with WW_LODL_AO=1).
+  WW_LODL_SKY_RED=off: no sky term (today). WW_LODL_SKY_RED=raw: the raw byte as the factor (the twin's second red).
+- **Census lines.** "far lod: objects ring N channels: AO on (P placements from the per-vertex stream, F from self x
+  placement AO, stream mean M), sky on (P placements, V vertices, factor mean G, raw byte mean S); T stream texels". The
+  same line is printed by `-no-gui farobjcensus`.
+- **Gates.** See the lane's hand-back for the numbers: tests/lodchsky and tests/lodchused, three shader sweeps, and
+  the build.
+
 ## FOAMOFF (FIX1101A, 2026-10-31): River foam and Contact foam ship OFF again
 
 The batch that landed WATERFOAM2 (main 9b443dcf) turned both rows on. The first pictures on that build (spot 6 river,

@@ -1116,6 +1116,19 @@ QString cellFarLodAppend( NifModel * nif, const QModelIndex & iRoot, const EsmWo
 					.arg( oc.instancesDrawn ).arg( oc.tris ).arg( oc.uniqueVerts ).arg( oc.uniqueTris )
 					.arg( double( oc.geoBytes ) / ( 1024.0 * 1024.0 ), 0, 'f', 2 )
 					.arg( double( oc.instBytes ) / ( 1024.0 * 1024.0 ), 0, 'f', 2 ) );
+			// lane FIX1101A lodch: which of the bake's channels this ring USED (the census line the unit and the rows read)
+			say( QStringLiteral( "far lod: objects ring %1 channels: AO %2 (%3 placements from the per-vertex stream, %4 from "
+				"self x placement AO, stream mean %5), sky %6 (%7 placements, %8 vertices, factor mean %9, raw byte mean %10); "
+				"%11 stream texels" ).arg( int( i ) )
+				.arg( lodlAoOn() ? QStringLiteral( "on" ) : QStringLiteral( "off" ) )
+				.arg( oc.aoStreamPlacements ).arg( oc.aoFallbackPlacements )
+				.arg( oc.aoBytes ? oc.aoSum / double( oc.aoBytes ) : 255.0, 0, 'f', 1 )
+				.arg( lodlSkyMode() == 0 ? QStringLiteral( "off" ) : lodlSkyMode() == 2 ? QStringLiteral( "raw (red)" )
+					: QStringLiteral( "on" ) )
+				.arg( oc.skyPlacements ).arg( oc.skyBytes )
+				.arg( oc.skyBytes ? oc.skySum / double( oc.skyBytes ) : 1.0, 0, 'f', 3 )
+				.arg( oc.skyBytes ? oc.skyRawSum / double( oc.skyBytes ) : 255.0, 0, 'f', 1 )
+				.arg( oc.streamTexels ) );
 			ringTris[i] = oc.tris;
 			ringPlaced[i] = oc.placed;
 			ringState[i] = QStringLiteral( "built" );

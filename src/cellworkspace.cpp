@@ -1289,6 +1289,8 @@ void CellWorkspacePanel::buildUi()
 		kid( "", tr( "Terrain" ), "CellWorkspaceFarGround" );
 		kid( "", tr( "Terrain pages" ), "CellWorkspaceFarGroundPages" );
 		look( WwLook::BtoSway, tr( "Game trees sway" ) );
+		look( WwLook::FarLodAo, tr( "Baked AO" ) );	// lane FIX1101A lodch: the bake's channels, on by default
+		look( WwLook::FarLodSky, tr( "Baked sky light" ) );
 		head( F, "", "CellWorkspaceModernTaa", 0, true );
 		head( F, "", "CellWorkspaceBloom", 0 );
 		look( WwLook::BloomMip, tr( "Width in fog" ) );

@@ -121,6 +121,7 @@ flat in vec4 A;
 in vec4 C;
 flat in vec4 D;
 in float rawVertexAlpha;	// the vertex colour's own alpha (channel 11 G only)
+in float wwFarSkyVis;	// lane FIX1101A lodch: a far placement vertex's baked sky factor (fo4_default.vert), 1 elsewhere
 
 in mat3 btnMatrix;
 flat in mat3 reflMatrix;
@@ -898,6 +899,13 @@ void main()
 			float k = cellGiSkyK( cellWorldPos( -ViewDir ), cellWorldDir( normal ) );
 			color.rgb *= sqrt( 1.0 - k );
 			cellExtAmb *= 1.0 - k;
+		}
+		/* lane FIX1101A lodch: the share of the weather's ambient the GI did not replace takes the far placement's
+		 * baked sky visibility (src/lodchsky.h: the byte read as the GI's share, so near (GI) and far (bake) agree at
+		 * the last cascade edge). Exactly 1 on every other shape: nothing changes there */
+		if ( wwFarSkyVis < 0.9999 ) {
+			color.rgb *= sqrt( max( wwFarSkyVis, 0.0 ) );
+			cellExtAmb *= max( wwFarSkyVis, 0.0 );
 		}
 	}
 	if ( cellOn && cellGiSky && ( cellRed & 131072 ) == 0 && !( !cellInterior && cellHasDir ) ) {

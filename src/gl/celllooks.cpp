@@ -78,6 +78,9 @@ const LookRow kRows[] = {
 	{ "River foam", "WW/CellWaterRiverFoam2" },	// FIX1101A: OFF again until the foam gate (no foam on land, lacy) holds
 	{ "Underwater light", "WW/CellWaterUnderLight" },
 	{ "Precipitation", "WW/CellPrecip" },	// lane WEATHERLOOK1 B: ships off until bungo sees it
+	// FIX1101A lodch (LATE ITEMs 11 + 16 + 20): the LOD bake's channels drawn by default
+	{ "Far LOD baked AO", "WW/FarLodBakedAo", true },
+	{ "Far LOD baked sky light", "WW/FarLodBakedSky", true },
 };
 static_assert( sizeof( kRows ) / sizeof( kRows[0] ) == size_t( WwLook::Count ), "a row per look" );
 
@@ -327,6 +330,14 @@ QByteArray pinOf( WwLook l )
 		WW_SWITCH_STATIC( QByteArray, p, wwEnv( "WW_CELL_PRECIP" ).trimmed() );
 		return p;
 	}
+	case WwLook::FarLodAo: {
+		WW_SWITCH_STATIC( QByteArray, p, wwEnv( "WW_LODL_AO" ).trimmed() );
+		return p;
+	}
+	case WwLook::FarLodSky: {
+		WW_SWITCH_STATIC( QByteArray, p, wwEnv( "WW_LODL_SKY" ).trimmed() );
+		return p;
+	}
 	default:
 		return QByteArray();
 	}
@@ -399,6 +410,8 @@ const char * wwLookPinName( WwLook l )
 	case WwLook::WaterRiverFoam: return "WW_CELL_WATER_RIVERFOAM";
 	case WwLook::WaterUnderLight: return "WW_CELL_WATER_UNDERLIGHT";
 	case WwLook::Precip: return "WW_CELL_PRECIP";
+	case WwLook::FarLodAo: return "WW_LODL_AO";
+	case WwLook::FarLodSky: return "WW_LODL_SKY";
 	default: return "";
 	}
 }
@@ -414,8 +427,9 @@ bool wwLookReopens( WwLook l )
 	// ProbeClear moves probes at bake time: the cell's own bake runs again when it reopens
 	// lane LIGHTS4: the placement, region and particle emittance rows are read at draw time (live)
 	// lane LIGHTS5: the bounce emittance row relights from the bake's kept other state (probesky.cpp)
+	// FIX1101A lodch: the far LOD's baked AO and sky are written into its vertices and rows while it is built
 	return l == WwLook::ActorsOutdoors || l == WwLook::WeaponParts || l == WwLook::AnimObjects || l == WwLook::BtoSway
-		|| l == WwLook::ProbeClear;
+		|| l == WwLook::ProbeClear || l == WwLook::FarLodAo || l == WwLook::FarLodSky;
 }
 
 bool wwLookHasRow( WwLook l )
