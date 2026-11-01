@@ -59,10 +59,12 @@ void main()
 			// the clipped far terrain under the band fades to. By day the two agree; at night the air carries the weather's
 			// night ambient and the aerial perspective does not: rule 1 drew a dark flat stripe (spot 3 22:00, 18,19,21
 			// between a 25,40,60 sky and a 36,59,90 far land, hard edges).
-			vec4 ap;
+			vec4 ap = vec4( 0.0 );	// unused where the band's weight is 0 (wwSkyBandL mixes it by w)
 			if ( atApSkyRule == 2 ) {
-				float farV = projectionMatrix[3][2] / min( projectionMatrix[2][2] + 1.0, -1e-6 );	// the far plane (view units)
-				ap = vec4( wwFog( vec3( 0.0 ), vr * abs( farV ) ), 0.0 );
+				if ( wwSkyBandW( tSky ) > 0.0 ) {	// the fog path only in the band (~2 deg above the horizon and under it)
+					float farV = projectionMatrix[3][2] / min( projectionMatrix[2][2] + 1.0, -1e-6 );	// the far plane (view units)
+					ap = vec4( wwFog( vec3( 0.0 ), vr * abs( farV ) ), 0.0 );
+				}
 			} else {
 				ap = wwAtmoApAt( vr * ( atAp.y / max( atAp.z, 1e-12 ) ) );
 			}
