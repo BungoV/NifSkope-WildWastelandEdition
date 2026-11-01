@@ -12,7 +12,12 @@ uniform sampler2D atTransTex;
 uniform sampler2D atMsTex;
 uniform vec2 atMsSize;
 uniform vec3 atApDims;	// width, height, slices
+#ifdef WW_AP_LAYERED
+flat in float atApSliceIn;	// lane PERFFIX3: the slice from atmo_apl.geom (one layered draw, gl_Layer)
+#define atApSlice atApSliceIn
+#else
 uniform float atApSlice;	// this draw's slice index
+#endif
 uniform float atApMaxKm;
 uniform vec3 atFrustum0;	// world ray (not unit) at the viewport's lower-left corner
 uniform vec3 atFrustumX;	// its change across the viewport's width

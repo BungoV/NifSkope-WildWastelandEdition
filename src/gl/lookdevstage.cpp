@@ -1847,13 +1847,18 @@ bool drawCube( Scene * scene, bool glow );
  * Otherwise these are the view's own, so every drawn frame is unchanged. */
 bool g_skyCapture = false;
 float g_skyCaptureZ = NAN;	// SKY3: the probes' height for the physical sky's capture (NaN: the view's, as before)
+/* lane PERFFIX3 (item 2): the backdrop drawn INSIDE the cell's linear frame (WW_SKY_LINEAR=1): light in scene units
+ * (exposure 1, view transform 3 = linear), so the cell's one tone map and its one exposure take the sky with the
+ * surfaces. g_skyLinear while that draw runs; g_skyDeferred = the scene whose backdrop waits for the frame. */
+bool g_skyLinear = false;
+const void * g_skyDeferred = nullptr;
 float skyExposure()
 {
-	return g_skyCapture ? 1.0f : wwSceneExposureScale();
+	return ( g_skyCapture || g_skyLinear ) ? 1.0f : wwSceneExposureScale();
 }
 int skyViewTransform()
 {
-	return g_skyCapture ? 3 : wwSceneViewTransform();
+	return ( g_skyCapture || g_skyLinear ) ? 3 : wwSceneViewTransform();
 }
 
 struct SkyFrame
@@ -2888,8 +2893,36 @@ bool drawAtmo( Scene * scene, QStringList & drew, bool capture = false )
 
 } // namespace
 
+bool wwLookdevSkyLinearOn()
+{
+	WW_SWITCH_STATIC( bool, on, wwEnv( "WW_SKY_LINEAR" ).trimmed() == QLatin1StringView( "1" ) );
+	return on;
+}
+
+namespace
+{
+/* lane PERFFIX3 (item 2): the backdrop waits for the cell's linear frame only where that frame will run (a cell-lit
+ * document, a perspective view, not a probe/capture/selection pass) and the backdrop is a sky (an interior without
+ * Show Sky keeps its black clear in the view, as before) */
+bool skyLinearWanted( Scene * scene )
+{
+	if ( g_skyLinear || g_skyCapture || !wwLookdevSkyLinearOn() || !scene || !scene->renderer || scene->selecting )
+		return false;
+	if ( scene->renderer->globalUniforms->projectionMatrix[3][3] == 1.0f || scene->hasVisMode( Scene::VisSilhouette ) )
+		return false;
+	if ( !wwCellImageSpaceWanted( scene ) || wwCellProbePass( scene ) )
+		return false;
+	const WwCellLighting * cl = scene->nifModel ? wwCellLightsFor( scene->nifModel ) : nullptr;
+	return !( cl && cl->interior && !cl->showSky );
+}
+}	// namespace
+
 bool wwLookdevDrawBackground( Scene * scene )
 {
+	if ( skyLinearWanted( scene ) ) {
+		g_skyDeferred = scene;	// the frame draws it (wwLookdevSkyLinearDraw); the view gets the caller's clear
+		return false;
+	}
 	wwAtmoApFrame();	// lane SKYA: last frame's aerial perspective is stale (drawAtmo builds this frame's)
 	wwLightningFrameBegin();	// lane LIGHTNING2: no sky pass this frame = no flash on the cell's ambient
 	if ( !scene || !scene->renderer || scene->selecting || scene->hasVisMode( Scene::VisSilhouette ) )
@@ -2976,6 +3009,8 @@ bool wwLookdevDrawBackground( Scene * scene )
 			drawSunQuad( scene, f, true, sunMul, drew );
 		if ( wwCloudMapTier() > 0 )
 			wwCloudMapUpdate( scene );	// lane CLOUD1: Off builds nothing
+		if ( g_skyLinear )
+			drew << QStringLiteral( "linear frame(one tone map)" );	// lane PERFFIX3
 		const QString line = drew.isEmpty() ? QStringLiteral( "nothing" ) : drew.join( QChar( '|' ) );
 		static const QRegularExpression clock( QStringLiteral( " t=[0-9.]+" ) );
 		if ( QString( sx.skyLast ).remove( clock ) != QString( line ).remove( clock ) )
@@ -2988,6 +3023,43 @@ bool wwLookdevDrawBackground( Scene * scene )
 	}
 	// SKY2 SKYGREY1: nothing on (or ortho) = the grey clear (the caller clears); red cubesky draws the cube
 	return wwLookdevRed( "cubesky" ) && drawCube( scene, true );
+}
+
+void wwLookdevSkyLinearDraw( Scene * scene, bool hdr )
+{
+	if ( !scene || g_skyDeferred != scene )
+		return;
+	g_skyDeferred = nullptr;
+	if ( !hdr ) {	// the frame was refused after all: the backdrop into the view as before (display space)
+		wwLookdevDrawBackground( scene );
+		return;
+	}
+	// into the linear frame: every sky pixel marked as cell light (stencil 1), so the tone map's mode 0, the exposure
+	// measure and the bloom take it; the depth stays at the far plane (every backdrop pass draws with the depth off)
+	Renderer * r = scene->renderer;
+	auto fn = r->fn;
+	GLint sFunc = GL_ALWAYS, sRef = 0, sMask = 0xFF, sWrite = 0xFF, sFail = GL_KEEP, sZFail = GL_KEEP, sPass = GL_KEEP;
+	fn->glGetIntegerv( GL_STENCIL_FUNC, &sFunc );
+	fn->glGetIntegerv( GL_STENCIL_REF, &sRef );
+	fn->glGetIntegerv( GL_STENCIL_VALUE_MASK, &sMask );
+	fn->glGetIntegerv( GL_STENCIL_WRITEMASK, &sWrite );
+	fn->glGetIntegerv( GL_STENCIL_FAIL, &sFail );
+	fn->glGetIntegerv( GL_STENCIL_PASS_DEPTH_FAIL, &sZFail );
+	fn->glGetIntegerv( GL_STENCIL_PASS_DEPTH_PASS, &sPass );
+	const bool wasStencil = fn->glIsEnabled( GL_STENCIL_TEST );
+	fn->glEnable( GL_STENCIL_TEST );
+	fn->glStencilMask( 0x03 );
+	fn->glStencilFunc( GL_ALWAYS, 1, 0xFF );
+	fn->glStencilOp( GL_KEEP, GL_KEEP, GL_REPLACE );
+	g_skyLinear = true;
+	const bool drew = wwLookdevDrawBackground( scene );
+	g_skyLinear = false;
+	fn->glStencilFunc( GLenum( sFunc ), sRef, GLuint( sMask ) );
+	fn->glStencilMask( GLuint( sWrite ) );
+	fn->glStencilOp( GLenum( sFail ), GLenum( sZFail ), GLenum( sPass ) );
+	if ( wasStencil ) fn->glEnable( GL_STENCIL_TEST ); else fn->glDisable( GL_STENCIL_TEST );
+	if ( drew )
+		wwCellHdrNoteSkyIn();	// the tone map takes the sky as cell light (no sky split); the air blends over it
 }
 
 namespace

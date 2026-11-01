@@ -2437,11 +2437,25 @@ void wwVolAirSkyDraw( Scene * scene, bool probes )
 	} else {
 		fn->glDisable( GL_STENCIL_TEST );
 	}
+	/* lane PERFFIX3 (item 2): the sky already in the linear frame (WW_SKY_LINEAR): the air over it in linear light,
+	 * sky x T + L (the pass writes L and 1 - T), the frame's alpha kept; the tone map then takes the sum once */
+	const bool overSky = !probes && wwCellHdrSkyIn();
+	GLint bSrc = GL_ONE, bDst = GL_ZERO, bSrcA = GL_ONE, bDstA = GL_ZERO;
+	if ( overSky ) {
+		fn->glGetIntegerv( GL_BLEND_SRC_RGB, &bSrc );
+		fn->glGetIntegerv( GL_BLEND_DST_RGB, &bDst );
+		fn->glGetIntegerv( GL_BLEND_SRC_ALPHA, &bSrcA );
+		fn->glGetIntegerv( GL_BLEND_DST_ALPHA, &bDstA );
+		fn->glEnable( GL_BLEND );
+		fn->glBlendFuncSeparate( GL_ONE, GL_ONE_MINUS_SRC_ALPHA, GL_ZERO, GL_ONE );
+	}
 	static const float quad[12] = { -1, -1, 0, 1, -1, 0, -1, 1, 0, 1, 1, 0 };
 	static const std::uint16_t idx[6] = { 0, 1, 2, 2, 1, 3 };
 	const float * attrs = quad;
 	r->drawShape( 4, 3, 6, GL_TRIANGLES, GL_UNSIGNED_SHORT, &attrs, idx );
 	r->stopProgram();
+	if ( overSky )
+		fn->glBlendFuncSeparate( GLenum( bSrc ), GLenum( bDst ), GLenum( bSrcA ), GLenum( bDstA ) );
 	fn->glDepthFunc( GLenum( prevDepthFunc ) );
 	if ( wasDepth ) fn->glEnable( GL_DEPTH_TEST ); else fn->glDisable( GL_DEPTH_TEST );
 	if ( wasBlend ) fn->glEnable( GL_BLEND ); else fn->glDisable( GL_BLEND );
@@ -2451,6 +2465,7 @@ void wwVolAirSkyDraw( Scene * scene, bool probes )
 	fn->glColorMask( colorMask[0], colorMask[1], colorMask[2], colorMask[3] );
 	fn->glDepthMask( depthMask );
 	note( probes ? QStringLiteral( "probes (red nosky %1)" ).arg( ( s.red & 65536 ) ? 1 : 0 )
+		: overSky ? QStringLiteral( "through the air (linear frame, over the sky in the frame: sky x T + L)" )
 		: QStringLiteral( "through the air (linear frame, composited by 1 - T over the backdrop)" ) );
 }
 

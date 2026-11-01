@@ -1,3 +1,30 @@
+## PERFFIX3 A (2026-11-01): the aerial perspective in one draw; the sky inside the linear frame (row off)
+
+Item 1, on by default, picture-exact. The Physical Sky's aerial-perspective volume (Aerial Perspective row) is built in
+ONE layered draw: a geometry shader (res/shaders/atmo_apl.geom, 32 invocations) writes every slice of the 3D target
+through gl_Layer and hands each fragment its slice index; atmo_ap.frag reads it as a flat input instead of the uniform
+(atmo_apl.frag = WW_AP_LAYERED + include). Before: one draw and one glFramebufferTextureLayer re-attach per slice
+(16 or 32 a frame). tests/aplayer: every texel of every tier (Low 16^3 .. Ultra 64x64x32, clear and hazy) bit-identical
+to the slice path (0 of 1.47 M texels differ); offline GPU on this machine Ultra 0.370 -> 0.071 ms, High 0.362 -> 0.028,
+Medium 0.181 -> 0.017, Low 0.178 -> 0.017. atmo_ap.prog's binary is unchanged but its source hash. Red
+WW_ATMO_AP_RED=slices (live) = a draw a slice; the sky line's ap= gains /layered or /slices.
+
+Item 2, row WW_SKY_LINEAR (live, default 0 = as before; DEFAULT-ON OWED: a look change for bungo's pair). With 1, the
+Lookdev backdrop (the physical sky or the vanilla dome, stars, moon, sun, 2D and volume clouds) is not drawn in display
+space before the cell frame: glview calls wwLookdevSkyLinearDraw right after wwCellHdrBegin and the backdrop goes INTO
+the linear frame at exposure 1 / view transform 3 (scene units, the same units the capture path already uses), marked
+stencil 1. The cell's one tone map (cell_hdr mode 0, no sky split while the sky is in) and its one exposure (the measure
+now sees the sky's pixels; Exposure From Sky's estimate then adds nothing) take the sky with the surfaces; the vanilla
+bloom takes it as a source, as the game's HDR pass does. The sky's air (cell_volsky) blends over it in linear light
+(ONE, ONE_MINUS_SRC_ALPHA, ZERO, ONE: sky x T + L) instead of mode 2's tone-mapped fog over a display sky. A frame
+refused late draws the backdrop into the view as before; interiors without Show Sky keep their black clear.
+tests/skylinear: the real atmo_sky.frag + cell_hdr.frag: the built frame tone-maps exactly as sky x T + L (0 levels),
+the sky follows the cell exposure (100 % of sky pixels brighter at 2x), a sky pixel and a surface of the same light
+display the same (0 levels; today's path differs by up to 21 levels); reds noblend, old (today's order) and the base
+C++ fail. Moonlight (~4700x, the vanilla Night Sunlight row) and the twilight Earth shadow (MS model) are not changed
+here: INTSKY1 / FIX1101A own the computed moonlight; with the row on the night frame's brightness comes from the
+exposure, as their plan wants.
+
 ## FOAMOFF2 (FIX1101A, 2026-11-01): River foam and Contact foam stay OFF
 
 The water lane's foam fixes land: lace streaks instead of solid patches, and no foam on a dry bank. Its two rows still
