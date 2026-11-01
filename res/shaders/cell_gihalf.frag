@@ -19,24 +19,44 @@ uniform bool giVolOn;		// the mask was drawn this frame
 uniform sampler2D giVolMask;	// full size: the pixel's interior volume's room + 1, 0 none
 
 layout ( location = 0 ) out vec4 giOut;
+#if defined( WW_CELL_RTDDGI ) && !defined( WW_CELL_PRT )
+#define CELL_GIHALF_ON cellDdgiOn	// PERFFIX2: the ray-traced volume's screen read (cellGiOn is false without the PRT)
+#else
+#define CELL_GIHALF_ON cellGiOn
+#endif
 layout ( location = 1 ) out vec4 giKey;
 
 void main()
 {
 	ivec2 f = min( giStep * ivec2( gl_FragCoord.xy ), giFull - 1 );
 	vec4 g = texelFetch( giGbuf, f, 0 );
-	if ( !cellOn || !cellGiOn || g.w >= 1.0e5 || dot( g.xyz, g.xyz ) < 0.5 ) {
+	if ( !cellOn || !CELL_GIHALF_ON || g.w >= 1.0e5 || dot( g.xyz, g.xyz ) < 0.5 ) {
 		giOut = vec4( 0.0 );
 		giKey = vec4( 0.0, 0.0, 0.0, -1.0 );
 		return;
 	}
-#ifdef WW_CELL_PRT	// lane PRTOFF1: the PRT's screen pass (never run without it; cellGiOn is false there)
+#if defined( WW_CELL_PRT ) || defined( WW_CELL_RTDDGI )	// lane PRTOFF1: the PRT's screen pass; PERFFIX2: the volume's
 	float z = -g.w / length( cellRow[0].xyz );	// back to view units
 	vec2 ndc = ( vec2( f ) + 0.5 ) / vec2( giFull ) * 2.0 - 1.0;
 	vec3 posView = vec3( -z * ndc / giProj, z );
 	vec3 P = cellWorldPos( posView );
 	vec3 N = cellWorldDir( g.xyz );
-#ifdef WW_CELL_GI_MARCH
+#if !defined( WW_CELL_PRT )
+	/* PERFFIX2: the volume's own read (cellGiSample's: o to the eye, d the normal), with the mirror direction's sky
+	 * visibility riding it (FIX1101A's cellDdgiTwo: the same 8 probes and weights), packed for the specular occlusion */
+	vec3 V = normalize( vec3( cellRow[0].w, cellRow[1].w, cellRow[2].w ) - P );
+	vec3 R = reflect( -V, N );
+	cellDdgiTwo = true;
+	cellDdgiD2 = normalize( N + R );	// half way: cellSpecSky's bend at k 0.5
+	cellDdgiThree = true;
+	cellDdgiD3 = R;
+	CellDdgiOut d = cellDdgiRead( P, N, V, N );
+	cellDdgiTwo = false;
+	cellDdgiThree = false;
+	vec3 e = d.fade * d.E;
+	giOut = d.w > 0.0 && d.fade > 0.0 ? vec4( cellGiHalfBits( e.r, d.vis ), cellGiHalfBits( e.g, d.vis2 ), cellGiHalfBits( e.b, d.vis3 ),
+		d.fade ) : vec4( 0.0 );
+#elif defined( WW_CELL_GI_MARCH )
 	giOut = cellGiSampleFull( P, N );
 #else
 	float m = giVolOn ? texelFetch( giVolMask, f, 0 ).r : 0.0;

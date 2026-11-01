@@ -52,6 +52,7 @@ struct Settings
 	bool keep = true;   // LIGHTCLUSTER1: grids kept across jitter, camera switches and draws (off/red: one grid, exact key)
 	int stats = 0;      // WW_CELL_CLUSTER_STATS=n: a stats line every n frames (0 none)
 	WwClusterParams params;
+	QString dump;       // lane PERFFIX2 a: WW_CELL_CLUSTER_DUMP=<file>: each build's camera and lights (tests/clusterexact)
 };
 
 const Settings & settings()
@@ -72,6 +73,10 @@ const Settings & settings()
 		// single grid on the exact projection, a rebuild per TAA frame, the buffer re-attached per draw)
 		t.keep = wwEnvStr( "WW_CELL_CLUSTER_KEEP", QStringLiteral( "1" ) ) != QLatin1String( "0" )
 			&& !red.contains( QLatin1String( "rebuild" ) );
+		// lane PERFFIX2 a: the build on one thread with its boxes from the tile edges; the red the old build (same lists)
+		t.params.redOldBuild = red.contains( QLatin1String( "oldbuild" ) );	// (WW_CELL_CLUSTER_THREADS1 is the green now)
+		t.params.threadsFrom = std::max( wwEnvInt( "WW_CELL_CLUSTER_THREADS_FROM" ), 0 );
+		t.dump = wwEnvStr( "WW_CELL_CLUSTER_DUMP" );
 		if ( t.keep )
 			t.params.jitterPadPx = kJitterReusePx;
 		if ( wwEnvIsSet( "WW_CELL_CLUSTER_STATS" ) )
@@ -198,8 +203,28 @@ bool rebuild( Renderer * r, ClusterGpu & c, Slot & sl, const Key & k, const std:
 		return false;
 	}
 	const quint64 kept = sl.scratch.hits;
-	sl.valid = wwClusterBuild( k.proj, k.vp, viewLights( texels, count, vt ), settings().params, sl.grid,
+	const std::vector<WwClusterLight> lights = viewLights( texels, count, vt );
+	sl.valid = wwClusterBuild( k.proj, k.vp, lights, settings().params, sl.grid,
 		settings().keep ? &sl.scratch : nullptr );
+	/* lane PERFFIX2 a: the build's inputs as text, the first 48 builds of a launch (tests/clusterexact replays them
+	 * through the old and the new build and compares the lists): proj (16, %a), vp, pad, then per light pos dir radius
+	 * shape cosOuter, and the build's ms and refs */
+	static int dumped = 0;
+	if ( !settings().dump.isEmpty() && dumped < 48 ) {
+		if ( FILE * f = std::fopen( qPrintable( settings().dump ), "a" ) ) {
+			dumped++;
+			std::fprintf( f, "build %d lights %d vp %d %d %d %d pad %a ms %.4f refs %d\n", dumped, int( lights.size() ),
+				k.vp[0], k.vp[1], k.vp[2], k.vp[3], settings().params.jitterPadPx, sl.grid.buildMs, sl.grid.refs );
+			std::fprintf( f, "proj" );
+			for ( float v : k.proj )
+				std::fprintf( f, " %a", double( v ) );
+			std::fprintf( f, "\n" );
+			for ( const WwClusterLight & l : lights )
+				std::fprintf( f, "l %a %a %a %a %a %a %a %d %a\n", l.pos[0], l.pos[1], l.pos[2], l.dir[0], l.dir[1], l.dir[2],
+					l.radius, l.shape, l.cosOuter );
+			std::fclose( f );
+		}
+	}
 	sl.key = k;
 	sl.used = ++c.tick;
 	if ( !sl.valid )

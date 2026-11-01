@@ -1031,11 +1031,7 @@ vec4 cellGiSample( vec3 P, vec3 N )
 }
 #endif
 #else
-uniform bool cellGiHalfOn;
-uniform sampler2D cellGiHalf;		// rgba: the volume read at the screen texel's pixel
-uniform sampler2D cellGiHalfKey;	// xyz: that pixel's world position, w: its packed normal (< 0: no surface)
-uniform vec4 cellGiHalfRect;		// the viewport's x, y; the screen target's size
-uniform float cellGiHalfScale;		// 0.5 half resolution, 1 full
+#include "cell_gihalfat.glsl"
 
 // the volume of a point with no mask: the fine room grid's two names at P + N x 0.75 cell, else 1.75; -2: unknown
 ivec2 cellGiVolAt( vec3 P, vec3 N )
@@ -1197,39 +1193,6 @@ vec4 cellGiVolume( vec3 P, vec3 N, ivec2 L )
 }
 #endif
 
-// the screen GI's upsample: the 4 screen texels round this pixel; false: none is this surface
-bool cellGiHalfAt( vec3 P, vec3 N, out vec4 s )
-{
-	s = vec4( 0.0 );
-	vec2 u = ( gl_FragCoord.xy - cellGiHalfRect.xy - 0.5 ) * cellGiHalfScale;	// texel h sits at pixel h / scale
-	ivec2 h0 = ivec2( floor( u ) );
-	vec2 t = u - vec2( h0 );
-	ivec2 hs = ivec2( cellGiHalfRect.zw );
-	float tol = 1.0 + 0.01 * distance( P, vec3( cellRow[0].w, cellRow[1].w, cellRow[2].w ) );	// game units
-	vec4 acc = vec4( 0.0 );
-	float wsum = 0.0;
-	for ( int k = 0; k < 4; k++ ) {
-		ivec2 o = ivec2( k & 1, k >> 1 );
-		float wb = ( o.x == 1 ? t.x : 1.0 - t.x ) * ( o.y == 1 ? t.y : 1.0 - t.y );
-		if ( wb <= 0.0 )
-			continue;
-		ivec2 h = clamp( h0 + o, ivec2( 0 ), hs - 1 );
-		vec4 key = texelFetch( cellGiHalfKey, h, 0 );
-		if ( key.w < 0.0 )
-			continue;
-		float w = wb * smoothstep( 0.7, 0.95, dot( N, cellGiKeyNormal( key.w ) ) )
-		        * max( 1.0 - abs( dot( N, key.xyz - P ) ) / tol, 0.0 );
-		if ( w <= 0.0 )
-			continue;
-		acc += w * texelFetch( cellGiHalf, h, 0 );
-		wsum += w;
-	}
-	if ( wsum < 1e-3 )
-		return false;
-	s = acc / wsum;
-	return true;
-}
-
 vec4 cellGiSample( vec3 P, vec3 N )
 {
 	vec4 s;
@@ -1252,6 +1215,7 @@ vec4 cellGiSample( vec3 P, vec3 N )
  * visibility pass (cellPass 2): the volume's sky visibility. Probe 95: path 12. Without the volume: nothing. */
 #ifdef WW_CELL_RTDDGI
 #include "cell_ddgi.glsl"
+#include "cell_gihalfat.glsl"
 #endif
 /* the uniform (true on a weather-lit exterior, src/gl/celllights.cpp) counts only while the volume is read, so the sky's
  * branches below and in the programs (the PBR ambient, cellGiSkyK) stay the no-GI ones before the volume is up or with
@@ -1272,6 +1236,15 @@ vec4 cellGiSample( vec3 P, vec3 N )
 #ifdef WW_CELL_RTDDGI
 	if ( !cellDdgiOn )
 		return vec4( 0.0 );
+	/* PERFFIX2 (PERFRES1101 A gap 2): the volume read once a screen texel (cell_gihalf.frag, giHalfPass) and this
+	 * surface upsampled from the texels that are its own (cellGiHalfAt: plane + normal keys); a miss (an edge, a
+	 * blended draw, a probe picture) reads the volume itself below. Red WW_CELL_GI_RATE=inline: no pass. */
+	vec4 hs;
+	if ( cellGiHalfOn && cellPass == 0 && cellProbe == 0 && cellGiHalfAt( P, N, hs ) ) {
+		if ( hs.a > 0.0 )
+			cellGiPath = 12;
+		return hs;
+	}
 	if ( cellGiMemoOk && ( cellDdgiRed & 16 ) == 0 && P == cellGiMemoP && N == cellGiMemoN ) {
 		if ( cellGiMemoS.a > 0.0 )
 			cellGiPath = 12;
@@ -1451,6 +1424,16 @@ float cellSpecSky( vec3 P, vec3 N, vec3 R, float rough )
 	/* FIX1101A (the read's cost): one read at the normal also takes the lobe's visibility with the same weights (vis2),
 	 * and leaves its answer for cellGiSample at this (P, N) (the memo): the surfaces' sample costs no second read. Red
 	 * WW_CELL_RTDDGI_RED=slowread: the lobe's own read, as before */
+	/* PERFFIX2: with the screen pass, its texel (cellGiHalfAt) holds the sky visibility at the normal, half way and at
+	 * the mirror direction; the lobe's is the three-point read at D's own bend (cellGiHalfLobeVis): no read of its own */
+	vec4 hs;
+	if ( cellGiHalfOn && cellPass == 0 && cellProbe == 0 && cellGiHalfAt( P, N, hs ) ) {
+		if ( hs.a <= 0.0 )
+			return 1.0;
+		float vl = cellSpecOcc == 2 ? cellGiHalfVis.x : cellGiHalfLobeVis( ( 1.0 - r ) * ( sqrt( 1.0 - r ) + r ) );
+		float vh = 1.0 + hs.a * cellSkyVis * ( clamp( vl, 0.0, 1.0 ) - 1.0 );
+		return cellSpecOcc == 2 ? mix( 1.0, vh, r ) : vh;
+	}
 	vec3 oSky = normalize( vec3( cellRow[0].w, cellRow[1].w, cellRow[2].w ) - P );
 	bool fast = ( cellDdgiRed & 16 ) == 0;
 	cellDdgiTwo = fast;

@@ -276,6 +276,37 @@ inline double jitAirWorld( const double w[3], double dist )
 	return ign( glslMod( cx + cz * kAirZx, kCellWrap ), glslMod( cy + cz * kAirZy, kCellWrap ) );
 }
 
+// ---- lane PERFFIX2 b (item 8b): the cascade count per Cascade Quality tier ----
+
+/* Low draws 2 cascades (its reach is 4000 units: the second slice covers split0..D at the same 2048 map), Medium, High
+ * and Ultra 3, the Off tier (CSM1, tier 0) 3. Red WW_SHADOW_CASCADES_RED=1 (shadowset.cpp): 3 at every tier, as before.
+ * With 2, cascade 2 is not drawn and the receivers never select it: their second boundary (csmSplitOffset.y) sits past
+ * the reach + the band, so ww_sunshadow.glsl csmSelect keeps the pair (0, 1) out to the fade (no shader change). */
+inline int cascadesForTier( int tier, bool red )
+{
+#ifdef CASCADES_RED_TODAY
+	(void)tier;
+	(void)red;
+	return 3;
+#else
+	return red || tier != 1 ? 3 : 2;
+#endif
+}
+
+//! the slices' far ends for n cascades of reach D, and the receivers' second boundary (csmSplitOffset.y)
+inline void sliceFars( int n, double split0, double split1, double D, double blend, double far[3], double & recvSplit1 )
+{
+	far[0] = split0;
+	far[1] = n == 2 ? D : split1;
+	far[2] = D;
+#ifdef CASCADES_RED_RECV
+	(void)blend;
+	recvSplit1 = split1;	// the red: the receivers still hand the far half to the undrawn cascade 2
+#else
+	recvSplit1 = n == 2 ? D + blend + 1.0 : split1;
+#endif
+}
+
 } // namespace WwCsmFit
 
 #endif

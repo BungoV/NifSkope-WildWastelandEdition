@@ -10,6 +10,8 @@ BSD License - see nifskope.h
 #include "cellunits.h"
 #include "celluniform.h"	// lane CELLUNI2
 #include "gl/celldrawstate.h"	// lane PERF3
+#include "gl/cellpasstime.h"	// lane PERFFIX2: the stages' GPU sub-timers
+#include "gl/cellssgiplan.h"	// lane PERFFIX2: the pass's pure decisions
 
 #include "gl/celllights.h"
 #include "gl/glnode.h"
@@ -33,11 +35,11 @@ namespace
 {
 
 constexpr int kSsgiUnit = WwCellUnit::Ssgi;
+static_assert( PassTime::SsgiDenoise - PassTime::SsgiHiz == WwSsgiSubDenoise && WwSsgiSubCount == 7,
+	"cellssgiplan.h's groups follow cellpasstime.h's Ssgi* subs" );
 
-// FO4CS's tiers (ScreenSpaceGI.h ApplyScreenSpaceGIQualityPreset): Low = its Standard, Medium = High, High = Ultra,
-// Ultra = Extreme (full resolution); the menu's four rows map to the same ordinals there
-struct Tier { bool full; int slices, steps; };
-constexpr Tier kTiers[4] = { { false, 4, 8 }, { false, 4, 12 }, { false, 6, 12 }, { true, 4, 8 } };
+// lane PERFFIX2 (3d): the tiers are cellssgiplan.h wwSsgiTier (FO4CS's own are its red `oldtiers`: ScreenSpaceGI.h
+// ApplyScreenSpaceGIQualityPreset, Low = its Standard, Medium = High, High = Ultra, Ultra = Extreme)
 
 // FO4CS's live defaults (notes/ssgi1/FO4CS_METHOD.md section 7): fRadius 8 x 32 view units, thickness 32,
 // fHistoryBlend 0.9 (rest ceiling 10 frames), fBlurRadius 3, fSaturation 0.8, fAoAmount 1, fIndirectAmount 1
@@ -53,7 +55,9 @@ struct SsgiState
 	bool on = false, pinOn = false, pinQ = false;
 	int quality = 3;
 	int red = 0;	// 1 off, 2 stack, 4 notemporal, 8 noblur; lane SSGI2: 16 ign, 32 nohiz, 64 oldblur, 128 noemissive;
-					// lane SSGI3: 256 oldlaw (SSGI1's fill law); lane SSGI2FRAMES: 512 oldframes
+					// lane SSGI3: 256 oldlaw (SSGI1's fill law); lane SSGI2FRAMES: 512 oldframes;
+					// lane PERFFIX2: 1024 emitchain (3b: the emissive cast's own chain, cellssgiplan.h), 2048 hiz
+					// (3c: the interval pyramid built again), 4096 oldtiers (3d: FO4CS's four tiers)
 	int pathFrame = -1;	// lane SSGI2FRAMES: the camera path's frame (wwCellSsgiSetPath), -1 a still view
 	int lastVerdict = -1;
 	char echo[240] = {};
@@ -80,7 +84,7 @@ SsgiState & st()
 		for ( const QByteArray & w : red.split( ',' ) )
 			s.red |= w == "off" ? 1 : w == "stack" ? 2 : w == "notemporal" ? 4 : w == "noblur" ? 8 : w == "ign" ? 16
 				: w == "nohiz" ? 32 : w == "oldblur" ? 64 : w == "noemissive" ? 128 : w == "oldlaw" ? 256
-				: w == "oldframes" ? 512 : 0;
+				: w == "oldframes" ? 512 : w == "emitchain" ? 1024 : w == "hiz" ? 2048 : w == "oldtiers" ? 4096 : 0;
 	}
 	return s;
 }
@@ -223,7 +227,7 @@ bool wwCellSsgiWantsScene( Scene * scene )
 
 bool wwCellSsgiWantsEmission( Scene * scene )
 {
-	return wwCellSsgiWantsScene( scene ) && !( st().red & 128 );
+	return wwCellSsgiWantsScene( scene ) && wwSsgiWantsEmissionTarget( st().red );	// lane PERFFIX2 (3b)
 }
 
 const char * wwCellSsgiEcho()
@@ -246,10 +250,12 @@ void wwCellSsgiPass( Scene * scene, bool run )
 	if ( verdict != s.lastVerdict && ( verdict != 0 || s.lastVerdict > 0 ) ) {
 		static const char * const words[4] = { "off", "off (no obscurance pass)", "off (no scene pass)", "on" };
 		std::snprintf( s.echo, sizeof( s.echo ),
-			"cell ssgi: %s quality %d red %d noise %s hiz %s denoise %s emissive %s law %s frames %s",
-			words[verdict], s.quality, s.red, ( s.red & 16 ) ? "ign" : "fast", ( s.red & 32 ) ? "off" : "on",
-			( s.red & 8 ) ? "none" : ( s.red & 64 ) ? "5x5" : "robust+quarter", ( s.red & 128 ) ? "off" : "on",
-			( s.red & 256 ) ? "old" : "fill", !wwHarnessRun() ? "live" : ( s.red & 512 ) ? "per-paint" : "pinned" );
+			"cell ssgi: %s quality %d red %d noise %s hiz %s denoise %s emissive %s law %s frames %s tiers %s",
+			words[verdict], s.quality, s.red, ( s.red & 16 ) ? "ign" : "fast",
+			wwSsgiHizBuilt( s.red ) ? "on" : wwSsgiFullBreak( s.red ) ? "break" : "off",
+			( s.red & 8 ) ? "none" : ( s.red & 64 ) ? "5x5" : "robust+quarter", ( s.red & 128 ) ? "off" : wwSsgiEmissive( s.red ) == WwSsgiEmitChain ? "chain" : "folded",
+			( s.red & 256 ) ? "old" : "fill", !wwHarnessRun() ? "live" : ( s.red & 512 ) ? "per-paint" : "pinned",
+			( s.red & 4096 ) ? "fo4cs" : "perffix2" );
 		std::fprintf( stderr, "%s\n", s.echo );
 		s.lastVerdict = verdict;
 	}
@@ -258,7 +264,8 @@ void wwCellSsgiPass( Scene * scene, bool run )
 		g.eHistory = false;
 		return;
 	}
-	const bool emis = !( s.red & 128 ) && wwCellSsrEmissionTexture( scene, emitTex );
+	// lane PERFFIX2 (3b): the emitters ride the ordinary march (folded); red `emitchain`: the emissive cast's own chain
+	const bool emis = wwSsgiEmissive( s.red ) == WwSsgiEmitChain && wwCellSsrEmissionTexture( scene, emitTex );
 	auto fn = r->fn;
 	if ( g.unit < 0 ) {
 		GLint units = 0;
@@ -267,9 +274,9 @@ void wwCellSsgiPass( Scene * scene, bool run )
 	}
 	if ( g.unit <= 0 )
 		return;
-	const Tier tier = kTiers[s.quality];
+	const WwSsgiTier tier = wwSsgiTier( s.quality, s.red );	// lane PERFFIX2 (3d)
 	const int W = ao.w, H = ao.h;
-	const int ww = tier.full ? W : ( W + 1 ) / 2, wh = tier.full ? H : ( H + 1 ) / 2;
+	const int ww = wwSsgiWorkDim( W, tier.div ), wh = wwSsgiWorkDim( H, tier.div );
 	GLint prevFbo = 0, prevRead = 0, vp[4] = { 0, 0, 1, 1 }, prevActive = 0;
 	fn->glGetIntegerv( GL_DRAW_FRAMEBUFFER_BINDING, &prevFbo );
 	fn->glGetIntegerv( GL_READ_FRAMEBUFFER_BINDING, &prevRead );
@@ -281,7 +288,8 @@ void wwCellSsgiPass( Scene * scene, bool run )
 	const bool wasBlend = fn->glIsEnabled( GL_BLEND ), wasScissor = fn->glIsEnabled( GL_SCISSOR_TEST );
 
 	const bool resized = g.cast.w != ww || g.cast.h != wh;
-	const bool newBlur = !( s.red & ( 8 | 64 ) ), hizOn = !( s.red & 32 );
+	// lane PERFFIX2 (3c): the interval pyramid only under red `hiz`; the full-mask early out without it (cellssgiplan.h)
+	const bool newBlur = !( s.red & ( 8 | 64 ) ), hizOn = wwSsgiHizBuilt( s.red );
 	const int qw = ( ww + 1 ) / 2, qh = ( wh + 1 ) / 2;
 	alloc( fn, g.cast, ww, wh, 0, false );
 	alloc( fn, g.acc[0], ww, wh, newBlur ? 2 : 1, false );
@@ -425,6 +433,7 @@ void wwCellSsgiPass( Scene * scene, bool run )
 	prog->uni1b( "emitAdd", false );
 	prog->uni1b( "blueNoise", blue );
 	prog->uni1i( "hizLevels", hizN );
+	prog->uni1b( "fullBreak", wwSsgiFullBreak( s.red ) );
 	prog->uni1b( "wantState", newBlur );
 	prog->uni1f( "robustRadius", kBlurPx );
 	fn->glUniform2i( prog->uniLocation( "quarterSize" ), qw, qh );
@@ -440,7 +449,8 @@ void wwCellSsgiPass( Scene * scene, bool run )
 	prog->uni1f( "saturation", kSaturation );
 	prog->uni1f( "historyBlend", kHistoryBlend );
 	prog->uni1f( "maxAccum", 1.0f / ( 1.0f - kHistoryBlend ) );
-	prog->uni1f( "blurRadius", ( s.red & 8 ) ? 0.0f : kBlurPx * ( tier.full ? 1.0f : 0.5f ) );
+	prog->uni1f( "blurRadius", ( s.red & 8 ) ? 0.0f : kBlurPx / float( std::max( tier.div, 1 ) ) );
+	prog->uni1i( "robustTaps", tier.robustTaps );
 	prog->uni1f( "normalWeight", kNormalWeight );
 	prog->uni1f( "motionAccum", kMotionAccum );
 	static const float quad[12] = { -1, -1, 0, 1, -1, 0, -1, 1, 0, 1, 1, 0 };
@@ -451,7 +461,21 @@ void wwCellSsgiPass( Scene * scene, bool run )
 		fn->glBindTexture( GL_TEXTURE_2D, t );
 	};
 	const GLenum bufs[3] = { GL_COLOR_ATTACHMENT0, GL_COLOR_ATTACHMENT1, GL_COLOR_ATTACHMENT2 };
+	/* lane PERFFIX2 (3a): each stage's pass is timed in its group (cellssgiplan.h wwSsgiStageSub), two timestamps a
+	 * group change, logged as "| sub ssgi-<group> <ms>" (summed over a harness pre-roll's frames) */
+	int curSub = -1;
+	bool inEmissive = false;
+	auto group = [&]( int sb ) {
+		if ( sb == curSub )
+			return;
+		if ( curSub >= 0 )
+			PassTime::subEnd( PassTime::SsgiHiz + curSub );
+		if ( sb >= 0 )
+			PassTime::subBegin( PassTime::SsgiHiz + sb );
+		curSub = sb;
+	};
 	auto pass = [&]( int stage, const Target & out, GLuint in, int nDraw ) {
+		group( wwSsgiStageSub( stage, inEmissive ) );
 		bind( 2, in );
 		prog->uni1i( "ssgiStage", stage );
 		fn->glBindFramebuffer( GL_FRAMEBUFFER, out.fbo );
@@ -471,6 +495,7 @@ void wwCellSsgiPass( Scene * scene, bool run )
 			}
 			fn->glFramebufferTexture2D( GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, g.hizTex, i );
 			fn->glDrawBuffers( 1, bufs );
+			group( wwSsgiStageSub( i == 0 ? 10 : 11, false ) );
 			prog->uni1i( "ssgiStage", i == 0 ? 10 : 11 );
 			fn->glViewport( 0, 0, std::max( W >> ( i + 1 ), 1 ), std::max( H >> ( i + 1 ), 1 ) );
 			r->drawShape( 4, 3, 6, GL_TRIANGLES, GL_UNSIGNED_SHORT, &attrs, idx );
@@ -481,6 +506,7 @@ void wwCellSsgiPass( Scene * scene, bool run )
 	bind( 5, blue ? g.noiseTex : 0 );
 	bind( 1, sceneTex );
 	// the donor's mips for the far taps; lane SSR1 reads level 0 alone, so its filter is put back below
+	group( WwSsgiSubMips );
 	fn->glTexParameteri( GL_TEXTURE_2D, GL_TEXTURE_MAX_LEVEL, 4 );
 	fn->glGenerateMipmap( GL_TEXTURE_2D );
 	fn->glTexParameteri( GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR_MIPMAP_NEAREST );
@@ -545,7 +571,9 @@ void wwCellSsgiPass( Scene * scene, bool run )
 			// FO4CS: the emitters' own cast, history and denoise; the ordinary result adds it at the end
 			prog->uni1b( "emissivePass", true );
 			prog->uni1b( "historyValid", g.eHistory && !( s.red & 4 ) );
+			inEmissive = true;
 			chain( 8, g.ecast, g.eacc[g.cur ^ 1], g.eacc[g.cur], g.efin );
+			inEmissive = false;
 			prog->uni1b( "emissivePass", false );
 		}
 		// the ordinary cast reads the emission (unit 9) to take it off its donor; its last stage reads efin there
@@ -558,6 +586,7 @@ void wwCellSsgiPass( Scene * scene, bool run )
 		g.eHistory = emis;
 		g.frame++;
 	}
+	group( -1 );
 	prog->uni1b( "emitAdd", false );
 	r->stopProgram();
 	bind( 1, sceneTex );

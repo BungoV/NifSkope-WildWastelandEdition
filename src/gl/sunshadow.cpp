@@ -31,6 +31,14 @@ BSD License - see nifskope.h
 #include "gl/cloudshadow.h"	// lane CLOUD3
 #include "gl/cellfarground.h"	// lane FARDRAW1
 #include "gl/sunshadowfit.h"	// lane SHADOWSHIMMER1: the fit and the kernel's rotation (tests/shadowshimmer1 runs them)
+#include "gl/sunshadowdyn.h"	// lane PERFFIX2 b: a Hit copies back only the dynamic casters' footprint
+
+//! lane PERFFIX2 b: WW_SHADOWCACHE_CHECK=1, the cut restore's in-frame check (gates only; see the live layer below)
+static bool shadowCacheCheck()
+{
+	WW_SWITCH_STATIC( bool, on, wwEnvInt( "WW_SHADOWCACHE_CHECK" ) == 1 );
+	return on;
+}
 #include "cellfarlod.h"	// lane SHADOWSHIMMER2: the far sway sample the colour pass takes
 
 #include <QDir>
@@ -118,6 +126,7 @@ struct CsmState
 	int slopeClamp = 0;	// lane SHADOWPAR1: 1 the caster bias clamped (FO4CS's slope 4), -1 no glPolygonOffsetClamp
 	// lane TERRSHADOW1: the fit's numbers, CSM1's constants unless Cascade Quality picks a preset
 	double baseD = kDefaultDistance, split0 = kSplit0, split1 = kSplit1, blend = kBlend, lightBack = kLightBack;
+	int nCasc = kCascades;	// lane PERFFIX2 b: the cascades drawn this pass (the tier's count; 2 at Low)
 	int baseMap = kDefaultMap;
 	float slopeBias = kSlopeBias, unitBias = kUnitBias;
 	bool groundCast = false;
@@ -268,7 +277,10 @@ void fitCascades( CsmState & s, const Transform & vt )
 	const bool one = red( "onecascade" );
 	s.split[0] = red( "wrongsplit" ) ? 400.0 : s.split0;
 	s.split[1] = red( "wrongsplit" ) ? 1500.0 : s.split1;
-	const double far[kCascades] = { s.split[0], s.split[1], s.D };	// the last is overridden by D
+	/* lane PERFFIX2 b (item 8b, gl/sunshadowfit.h): with 2 cascades the second slice reaches D and the receivers' second
+	 * boundary moves past the reach + band (cascade 2 is neither drawn nor read) */
+	double far[kCascades];
+	WwCsmFit::sliceFars( s.nCasc, s.split[0], s.split[1], s.D, s.blend, far, s.split[1] );
 	double * rc = s.rc, * uc = s.uc;
 	for ( int j = 0; j < 3; j++ ) {
 		rc[j] = vt.rotation( 0, j );
@@ -501,6 +513,8 @@ struct Layer
 	bool liveIsStatic = false;	// the live layer holds exactly the static layer (no dynamic caster drawn over it)
 	std::uint64_t liveDyn = 0;	// lane SHADOWSHIMMER4: != 0: it holds the static layer + only these split far sway tiles
 	std::uint64_t key = 0, setSig = 0, stateSig = 0;
+	unsigned long long gen = 0;	// lane PERFFIX2 b: the static layer's writes (Full / Scroll)
+	WwSunDyn::Live live;		// lane PERFFIX2 b: what the live layer holds over the static one (gl/sunshadowdyn.h)
 	double corner[2] = { 0, 0 }, nearZ = 0, wz = 0, texel = 0;
 	double L[3] = { 0, 0, 0 };
 	int n = 0, vw = 0, vh = 0, map = 0;
@@ -509,7 +523,7 @@ struct Layer
 struct State
 {
 	bool init = false, on = true, census = false;
-	int red = 0;		// 1 full, 2 stale, 3 scrollgrow
+	int red = 0;		// 1 full, 2 stale, 3 scrollgrow, 4 fullcopy (lane PERFFIX2 b: every Hit copies the whole layer)
 	int mask = 6;		// the cascades that scroll and hold the sun
 	double holdDeg = 0.05, holdCos = 1.0;
 	qint64 dynFrames = 120;
@@ -545,7 +559,7 @@ State & st()
 		s.on = qEnvironmentVariable( "WW_SHADOWCACHE" ).trimmed() != QLatin1StringView( "0" );
 		const QString r = qEnvironmentVariable( "WW_SHADOWCACHE_RED" ).trimmed().toLower();
 		s.red = ( r == QLatin1StringView( "full" ) || r == QLatin1StringView( "1" ) ) ? 1 : r == QLatin1StringView( "stale" ) ? 2
-			: r == QLatin1StringView( "scrollgrow" ) ? 3 : 0;
+			: r == QLatin1StringView( "scrollgrow" ) ? 3 : r == QLatin1StringView( "fullcopy" ) ? 4 : 0;
 		bool ok = false;
 		const int m = qEnvironmentVariable( "WW_SHADOWCACHE_SCROLL" ).toInt( &ok );
 		if ( ok )
@@ -665,6 +679,7 @@ bool ensure( Renderer * r, int map, unsigned int liveTex )
 		for ( Layer & l : s.c ) {
 			l.liveIsStatic = false;
 			l.liveDyn = 0;
+			l.live.known = false;	// lane PERFFIX2 b
 		}
 	}
 	if ( !s.tex || s.texMap != map ) {
@@ -812,10 +827,19 @@ void wwSunShadowPass( Scene * scene )
 {
 	if ( scene && scene->selecting )
 		return;
-	sunShadowPassImpl( scene );
-	wwShadowSetFrame( scene );	// lane TERRSHADOW1: the terrain sweep's step, whatever the Shadows row says
-	wwCloudShadowPass( scene );	// lane CLOUD3: the clouds' shadow map rows, whatever the Shadows row says
-	CellFarGround::pass( scene );	// lane FARDRAW1: the far ring 0's live ground (uploads, page stamps, frees)
+	/* lane PERFFIX2 b: the PassTime "sun-cascades" zone holds four things; each gets a GPU sub-timer and a CPU sub
+	 * ("| sub sun-casters", "| cpu sun-casters" ...), so the cascades' own ms is read apart from the clouds' map and the
+	 * far ground's pages (the zone itself is unchanged). */
+	auto part = [scene]( int gpu, int cpu, void ( *f )( Scene * ) ) {
+		PassTime::DrawCpuScope t( cpu );
+		PassTime::subBegin( gpu );
+		f( scene );
+		PassTime::subEnd( gpu );
+	};
+	part( PassTime::SunCasters, PassTime::CpuSunCasters, sunShadowPassImpl );
+	part( PassTime::SunTerrStep, PassTime::CpuSunTerrStep, wwShadowSetFrame );	// lane TERRSHADOW1: the terrain sweep's step, whatever the Shadows row says
+	part( PassTime::CloudShadow, PassTime::CpuCloudShadow, wwCloudShadowPass );	// lane CLOUD3: the clouds' shadow map rows, whatever the Shadows row says
+	part( PassTime::FarGroundPass, PassTime::CpuFarGroundPass, []( Scene * sc ) { CellFarGround::pass( sc ); } );	// lane FARDRAW1: the far ring 0's live ground (uploads, page stamps, frees)
 	csmEchoFrame();
 }
 
@@ -906,7 +930,9 @@ static void sunShadowPassImpl( Scene * scene )
 		s.lightBack = cp.lightBack;
 		s.slopeBias = cp.slopeBias;
 		s.unitBias = cp.unitBias;
+		s.nCasc = std::clamp( cp.cascades, 2, kCascades );	// lane PERFFIX2 b
 	} else {
+		s.nCasc = kCascades;
 		s.D = s.baseD;
 		s.map = s.baseMap;
 		s.split0 = kSplit0;
@@ -1332,6 +1358,8 @@ static void sunShadowPassImpl( Scene * scene )
 	std::vector<Job> jobs;
 	std::vector<int> jobsOf[kCascades][3];
 	for ( int i = 0; i < kCascades; i++ ) {
+		if ( i >= s.nCasc )
+			continue;	// lane PERFFIX2 b: a cascade the tier does not draw (the receivers never select it)
 		const Cascade & c = s.c[i];
 		auto add = [&]( int set, const int * rc ) {
 			Job j;
@@ -1664,12 +1692,83 @@ static void sunShadowPassImpl( Scene * scene )
 		for ( int jb : jobsOf[i][set] )
 			drawJob( std::size_t( jb ) );
 	};
+	/* lane PERFFIX2 b (gl/sunshadowdyn.h): each cascade's footprint of its dynamic casters (set 2), in its viewport's
+	 * texels; fpKnown false = some caster's reach is not known here (the next Hit copies the whole layer) */
+	WwSunDyn::Rect fp[kCascades];
+	bool fpKnown[kCascades] = { true, true, true };
+	if ( cacheOn ) {
+		const float swayGrow = farSway.amp > 0.0f ? 1.2f * farSway.amp : 0.0f;	// |w| <= 1.17 x amp (lookdev_csmdepth.vert)
+		WwSunDyn::Ndc nd[kCascades];
+		for ( const Caster & k : casters ) {
+			bool inAny = false;
+			for ( int i = 0; i < kCascades; i++ )
+				inAny |= dynC[i] && inSet( k, 2, i );
+			if ( !inAny )
+				continue;
+			const Matrix4 mvM = k.sh->viewTrans().toMatrix4();
+			if ( k.sh->wwFarInstData() ) {
+				const float ws = std::fabs( k.sh->worldTrans().scale ) > 1e-6f ? std::fabs( k.sh->worldTrans().scale ) : 1.0f;
+				for ( int i = 0; i < kCascades; i++ ) {
+					if ( !dynC[i] || !inSet( k, 2, i ) )
+						continue;
+					const float * a = s.c[i].clipFromView, * b = mvM.data();
+					float m[16];
+					for ( int col = 0; col < 4; col++ )
+						for ( int row = 0; row < 4; row++ )
+							m[col * 4 + row] = a[row] * b[col * 4] + a[4 + row] * b[col * 4 + 1] + a[8 + row] * b[col * 4 + 2]
+								+ a[12 + row] * b[col * 4 + 3];
+					// set 2 draws a split bucket's swaying tiles (meeting the slice), a dynamic one every tile
+					const bool onlySlice = k.split && !k.dynamic;
+					float o[4];
+					if ( CellFarInst::tileBounds( *k.sh->wwFarInstData(), m, b, onlySlice ? &slices[i] : nullptr,
+							( k.sway ? swayGrow : 0.0f ) / ws + 1.0f, o ) ) {
+						nd[i].add( o[0], o[1] );
+						nd[i].add( o[2], o[3] );
+					}
+				}
+				continue;
+			}
+			// the drawn vertices (CPU-skinned, cable sway, or its own) in view space, as drawJob hands them over
+			const Transform vtK = k.sh->viewTrans();
+			float lo[3] = { 1e30f, 1e30f, 1e30f }, hi[3] = { -1e30f, -1e30f, -1e30f };
+			const qsizetype nv = k.skinned.empty() ? k.sh->verts.size() : qsizetype( k.skinned.size() );
+			for ( qsizetype v = 0; v < nv; v++ ) {
+				const Vector3 p = vtK * ( k.skinned.empty() ? k.sh->verts.at( v ) : k.skinned[size_t( v )] );
+				for ( int j = 0; j < 3; j++ ) {
+					lo[j] = std::min( lo[j], p[j] );
+					hi[j] = std::max( hi[j], p[j] );
+				}
+			}
+			if ( nv <= 0 )
+				continue;
+			const float grow = ( k.sway ? swayGrow * std::fabs( vt.scale ) : 0.0f ) + 1.0f;
+			for ( int i = 0; i < kCascades; i++ )
+				if ( dynC[i] && inSet( k, 2, i ) )
+					WwSunDyn::addBox( nd[i], s.c[i].clipFromView, lo, hi, grow );
+		}
+		for ( int i = 0; i < kCascades; i++ ) {
+			fp[i] = WwSunDyn::texels( nd[i], s.c[i].vw, s.c[i].vh );
+			fpKnown[i] = std::isfinite( nd[i].x0 ) && std::isfinite( nd[i].x1 ) && std::isfinite( nd[i].y0 ) && std::isfinite( nd[i].y1 );
+		}
+	}
+	// one rect of the static layer (tex, layer) into the attached live one: depth bits, exact
+	auto copyRect = [&]( unsigned int tex, int layer, const WwSunDyn::Rect & rc ) {
+		fn->glBindFramebuffer( GL_READ_FRAMEBUFFER, cst.fbo );
+		fn->glFramebufferTextureLayer( GL_READ_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, tex, 0, layer );
+		fn->glReadBuffer( GL_NONE );
+		fn->glBlitFramebuffer( rc.x0, rc.y0, rc.x1, rc.y1, rc.x0, rc.y0, rc.x1, rc.y1, GL_DEPTH_BUFFER_BIT, GL_NEAREST );
+	};
+	const char * copyKind[kCascades] = { "-", "-", "-" };
+	long long cutTexels = 0;
 
 	for ( int i = 0; i < kCascades && complete; i++ ) {
+		if ( i >= s.nCasc )
+			continue;	// lane PERFFIX2 b: not drawn, not read
 		const Cascade & c = s.c[i];
 		ShadowCache::Layer & L = cst.c[i];
 		switch ( mode[i] ) {
 		case ShadowCache::Off:
+			L.live.known = false;	// lane PERFFIX2 b: the live layer is no static copy now
 			if ( attach( s.tex, i ) ) {
 				clearAll();
 				runSet( i, 0 );
@@ -1713,11 +1812,46 @@ static void sunShadowPassImpl( Scene * scene )
 			L.vw = c.vw;
 			L.vh = c.vh;
 			L.map = s.map;
+			L.gen++;	// lane PERFFIX2 b: the static layer was written
 		}
 		// the live layer: the static one, then the dynamic casters over it
 		if ( attach( s.tex, i ) ) {
-			copyFrom( cst.tex, i );
+			/* lane PERFFIX2 b (gl/sunshadowdyn.h): a Hit on the static layer the live one was copied from copies back only
+			 * last paint's dynamic footprint (none at all when there was none); red WW_SHADOWCACHE_RED=fullcopy */
+			if ( mode[i] == ShadowCache::Hit && WwSunDyn::partialOk( L.live, L.gen, key[i], cst.red == 4 ) ) {
+				if ( !L.live.dirty.empty() ) {
+					copyRect( cst.tex, i, L.live.dirty );
+					cutTexels += ( long long )( L.live.dirty.x1 - L.live.dirty.x0 ) * ( L.live.dirty.y1 - L.live.dirty.y0 );
+				}
+				copyKind[i] = L.live.dirty.empty() ? "none" : "cut";
+			} else {
+				copyFrom( cst.tex, i );
+				copyKind[i] = "whole";
+			}
 			runSet( i, 2 );
+			/* lane PERFFIX2 b: WW_SHADOWCACHE_CHECK=1 (gates only) builds the old way too (whole copy + the same draws) in the
+			 * scratch layer and counts the texels that differ from the live one: "shadowcache check: c<i> <kind> mism=N" */
+			if ( shadowCacheCheck() && complete && attach( cst.scratch, 0 ) ) {
+				copyFrom( cst.tex, i );
+				runSet( i, 2 );
+				std::vector<std::uint16_t> a( size_t( s.map ) * size_t( s.map ) ), b2( a.size() );
+				fn->glBindFramebuffer( GL_READ_FRAMEBUFFER, cst.fbo );
+				fn->glReadBuffer( GL_NONE );
+				fn->glFramebufferTextureLayer( GL_READ_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, s.tex, 0, i );
+				fn->glReadPixels( 0, 0, s.map, s.map, GL_DEPTH_COMPONENT, GL_UNSIGNED_SHORT, a.data() );
+				fn->glFramebufferTextureLayer( GL_READ_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, cst.scratch, 0, 0 );
+				fn->glReadPixels( 0, 0, s.map, s.map, GL_DEPTH_COMPONENT, GL_UNSIGNED_SHORT, b2.data() );
+				long long mism = 0;
+				for ( size_t t = 0; t < a.size(); t++ )
+					mism += a[t] != b2[t] ? 1 : 0;
+				std::fprintf( stderr, "shadowcache check: paint %lld c%d %s dirty %d,%d,%d,%d mism=%lld\n", (long long)cst.frame, i,
+					copyKind[i], L.live.dirty.x0, L.live.dirty.y0, L.live.dirty.x1, L.live.dirty.y1, mism );
+				attach( s.tex, i );
+			}
+			L.live.known = complete && fpKnown[i];
+			L.live.gen = L.gen;
+			L.live.key = key[i];
+			L.live.dirty = dynC[i] ? fp[i] : WwSunDyn::Rect();
 			L.liveIsStatic = !dynC[i];
 			L.liveDyn = dynReuse ? dynSig[i] : 0;	// lane SHADOWSHIMMER4
 		}
@@ -1738,7 +1872,9 @@ static void sunShadowPassImpl( Scene * scene )
 			.arg( names[mode[0]] ).arg( names[mode[1]] ).arg( names[mode[2]] ).arg( nStatic )
 			.arg( qint64( casters.size() ) - nStatic ).arg( qint64( jobs.size() ) ).arg( nStrip[1] ).arg( nStrip[2] ).arg( grew )
 			+ QStringLiteral( " farsway split %1 tiles %2,%3,%4 step %5 reuse %6" ).arg( s.swaySplit ).arg( s.swayTiles[0] )
-			.arg( s.swayTiles[1] ).arg( s.swayTiles[2] ).arg( s.swayStep ).arg( dynReuse ? 1 : 0 ) );	// lane SHADOWSHIMMER4
+			.arg( s.swayTiles[1] ).arg( s.swayTiles[2] ).arg( s.swayStep ).arg( dynReuse ? 1 : 0 )	// lane SHADOWSHIMMER4
+			+ QStringLiteral( " copy %1,%2,%3 cut %4" ).arg( QLatin1StringView( copyKind[0] ) ).arg( QLatin1StringView( copyKind[1] ) )
+			.arg( QLatin1StringView( copyKind[2] ) ).arg( cutTexels ) );	// lane PERFFIX2 b: the live layer's restore
 	}
 	if ( cst.on )
 		ShadowCache::sweep();
@@ -1953,7 +2089,7 @@ QString wwSunShadowSummary()
 	// lane SHADOWSHIMMER4: the split far sway buckets and their tiles swaying in each cascade
 	o += QString( " swaysplit=%1 swaytiles=%2,%3,%4 swaystep=%5" ).arg( s.swaySplit ).arg( s.swayTiles[0] ).arg( s.swayTiles[1] )
 		.arg( s.swayTiles[2] ).arg( s.swayStep );
-	o += QString( " csmat=%1 slopeclamp=%2" ).arg( s.atCasters ).arg( s.slopeClamp );	// lane VOLAIR1: -1 = no program (they cast solid)
+	o += QString( " csmat=%1 slopeclamp=%2 cascades=%3" ).arg( s.atCasters ).arg( s.slopeClamp ).arg( s.nCasc );	// lane PERFFIX2 b	// lane VOLAIR1: -1 = no program (they cast solid)
 	if ( s.bothFaces || s.decalsSkipped )	// lane INTSKY1: only in a sunlit interior (exteriors' summary unchanged)
 		o += QString( " sunlitinterior bothfaces=%1 decalspass=%2" ).arg( s.bothFaces ? 1 : 0 ).arg( s.decalsSkipped );
 	if ( s.swayCables >= 0 )

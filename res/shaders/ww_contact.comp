@@ -1,0 +1,193 @@
+#version 430 core
+
+// Copyright 2023 Sony Interactive Entertainment.
+// Licensed under the Apache License, Version 2.0 (http://www.apache.org/licenses/LICENSE-2.0).
+//
+// lane PERFFIX2 (item 7): the contact march (ww_contact.frag: lane TERRSHADOW1's port of Bend Studio's screen-space
+// shadows, FIX1101A's reach) in Bend's own layout: one 64-lane workgroup per light-space LINE. A line runs from the
+// light's projected point through a band of 64 mask columns (major axis) and on toward the light; its depths (the
+// minor-axis bilinear pair with the edge test, as the fragment pass reads them) are read ONCE per line position into
+// shared memory, and lane t, the line's pixel at position t, marches positions t +- 1 .. t +- n out of it. Lines are
+// anchored one minor pixel apart at the band's FAR column, so they are at most a pixel apart anywhere in the band and
+// every pixel has one owner: the line nearest its centre (src/gl/contactlines.h, the band list and the owner rule,
+// unit-tested in tests/contactlines). As in Bend's, the receiver's own depth is the line's sample at its position, so
+// a plane never shadows itself out of the half-pixel between a pixel centre and its line.
+// Per sample (Bend's "under 5 instructions"): the depths are kept x their distance to the light (S = depth x D, the
+// ray is then the constant C = depth0 x D0) with 1 / (thickness floor x D) beside them, so a sample is two shared
+// reads, a min, a multiply-add and an abs; positions with no occluder (sky, off screen, past the light) read S = R = 0
+// (d = 1: no shadow, as the fragment pass's `continue` / `break`). The reach is a per-lane sample count, found by a
+// bisection on the fragment pass's own distance test. Not for SHADOWPAR1's rules (its tiers keep the fragment pass).
+
+layout( local_size_x = 64 ) in;
+layout( r8, binding = 0 ) uniform writeonly image2D maskOut;
+
+struct Band { ivec4 a; };	// x sector (0 X+, 1 X-, 2 Y+, 3 Y-), y the anchor's column rank from the light, z first line, w first wave
+layout( std430, binding = 1 ) readonly buffer Bands { Band bands[]; };
+
+uniform sampler2D gbuf;		// RGBA32F, bottom row first: view normal, linear depth (game units; 1e6 = none)
+uniform ivec2 fullSize;
+uniform ivec2 maskSize;
+uniform float maskScale;	// full pixels per mask pixel (1 or 2)
+uniform vec4 lightCoord;	// the light's projected point in mask pixels (xy), unused z, w = sign of clip w
+uniform vec4 sssParams;		// thickness (fraction of depth), bilinear threshold, contrast, samples
+uniform float sssFloor;		// the thickness floor, game units
+uniform vec4 sssReach;		// lane FIX1101A: x the reach (0 none), y its share of depth, z the cascades' reach D
+uniform vec2 sssTan;
+uniform int bandCount;
+uniform int waveCount;		// the dispatch is (32768, ceil(waves / 32768)) groups
+uniform ivec4 sideFirst;	// per sector: the column (major index) nearest the light on that side
+
+const int kMaxN = 384;
+shared float sS[64 + kMaxN + 1];	// per line position: its sample depth x its distance to the light (0: none)
+shared float sR[64 + kMaxN + 1];	// 1 / (thickness floor x that distance) (0: none)
+shared float sL[64];				// the band's own positions: the sample depth (-1: none), the receivers' depth
+
+vec3 sssViewPos( vec2 maskPx, float z )
+{
+	vec2 ndc = maskPx * maskScale / vec2( fullSize ) * 2.0 - 1.0;
+	return vec3( ndc.x * sssTan.x * z, ndc.y * sssTan.y * z, z );
+}
+
+/* a line's minor coordinate at position u (rank kA - u): through the light and (anchor, j + 0.5), written about the
+ * anchor so it keeps float precision with the light far off screen (Ln ~ 1e4): j + 0.5 - offset x u / Da. `precise`
+ * (no fused or reordered math): every lane gets the same bits for the same line, which the owner rule needs */
+float lineY( int j, float lineOff, int u, float Da )
+{
+	precise float r = float( u ) / Da;
+	precise float y = ( float( j ) + 0.5 ) - lineOff * r;
+	return y;
+}
+
+float linAt( vec2 maskPx, out bool valid )
+{
+	ivec2 q = ivec2( floor( maskPx * maskScale ) );
+	if ( any( lessThan( q, ivec2( 0 ) ) ) || any( greaterThanEqual( q, fullSize ) ) ) {
+		valid = false;
+		return 1e6;
+	}
+	float l = texelFetch( gbuf, q, 0 ).a;
+	valid = l < 9.0e5;
+	return l;
+}
+
+void main()
+{
+	int g = int( gl_WorkGroupID.y ) * 32768 + int( gl_WorkGroupID.x );
+	if ( g >= waveCount )
+		return;	// the whole group: before any barrier
+	int lo = 0, hi = bandCount - 1;
+	while ( lo < hi ) {
+		int mid = ( lo + hi + 1 ) >> 1;
+		if ( bands[mid].a.w <= g )
+			lo = mid;
+		else
+			hi = mid - 1;
+	}
+	ivec4 b = bands[lo].a;
+	int sector = b.x;
+	bool majorX = sector < 2;
+	float s = ( sector & 1 ) == 0 ? 1.0 : -1.0;	// the side's direction away from the light
+	float Lm = majorX ? lightCoord.x : lightCoord.y, Ln = majorX ? lightCoord.y : lightCoord.x;
+	float anchorC = float( sideFirst[sector] ) + s * float( b.y ) + 0.5;
+	float Da = s * ( anchorC - Lm );
+	int j = b.z + ( g - b.w );
+	precise float lineOff = float( j ) + 0.5 - Ln;	// the line's minor offset at the anchor
+	precise float lineOffPrev = float( j - 1 ) + 0.5 - Ln;
+	float direction = lightCoord.w > 0.0 ? -1.0 : 1.0;	// toward the light (rank up) or away
+	int n = min( int( sssParams.w ), kMaxN );
+	int t = int( gl_LocalInvocationID.x );
+	int base = direction < 0.0 ? 0 : n;	// shared index = position + base
+	for ( int idx = t; idx < 64 + n + 1; idx += 64 ) {
+		int u = idx - base;
+		float c = anchorC - s * float( u );
+		float D = s * ( c - Lm );
+		float y = lineY( j, lineOff, u, Da );
+		/* Bend's minor-axis bilinear pair with its edge test, between the two FULL-size texels around the line (at a
+		 * half-size mask the fragment pass blends texels two rows apart by a mask-pixel weight, which a plane reads as
+		 * a depth step every other column); at scale 1 it is the fragment pass's pair exactly */
+		float yF = y * maskScale - 0.5;
+		float r0 = floor( yF ), w = yF - r0;
+		float cF = floor( c * maskScale ) + 0.5;
+		bool va, vb, vn;
+		float la = linAt( ( majorX ? vec2( cF, r0 + 0.5 ) : vec2( r0 + 0.5, cF ) ) / maskScale, va );
+		float lb = linAt( ( majorX ? vec2( cF, r0 + 1.5 ) : vec2( r0 + 1.5, cF ) ) / maskScale, vb );
+		float ln = w < 0.5 ? la : lb;	// the texel the line is in (the point filter at an edge)
+		vn = w < 0.5 ? va : vb;
+		bool edge = !va || !vb || abs( la - lb ) > ln * sssParams.y;
+		float ls = edge ? ln : mix( la, lb, w );
+		va = vn;
+		bool use = va && D >= 1.0;
+		sS[idx] = use ? ls * D : 0.0;
+		sR[idx] = use ? 1.0 / ( sssFloor * D ) : 0.0;
+		if ( u >= 0 && u < 64 )
+			sL[u] = va ? ls : -1.0;
+	}
+	barrier();
+	// this lane's pixel and whether it owns it: the line nearest the pixel's centre
+	float cT = anchorC - s * float( t );
+	float dist0 = s * ( cT - Lm );
+	float yT = lineY( j, lineOff, t, Da );
+	ivec2 pix = majorX ? ivec2( int( floor( cT ) ), int( floor( yT ) ) ) : ivec2( int( floor( yT ) ), int( floor( cT ) ) );
+	if ( dist0 <= 0.0 || any( lessThan( pix, ivec2( 0 ) ) ) || any( greaterThanEqual( pix, maskSize ) ) )
+		return;
+	float minorOff = floor( yT ) + 0.5 - Ln;
+	bool inSector = majorX ? dist0 > abs( minorOff ) : dist0 >= abs( minorOff );	// the fragment pass's |dx| > |dy|
+	// the owner: the first line (smallest j) landing in the pixel; lines are under a pixel apart here, so one always does
+	if ( !inSector || floor( lineY( j - 1, lineOffPrev, t, Da ) ) >= floor( yT ) )
+		return;
+	float lin0 = sL[t];
+	float mask = 1.0;
+	if ( lin0 > 0.0 && dist0 >= 1.0 ) {
+		vec2 p = majorX ? vec2( cT, yT ) : vec2( yT, cT );
+		int nk = n;
+		if ( direction < 0.0 )
+			nk = min( nk, int( floor( dist0 - 1.0 ) ) );	// past that the samples are beyond the light
+		float C = lin0 * dist0;
+		if ( sssReach.x > 0.0 && nk > 0 ) {
+			// FIX1101A's reach: the march stops at the first sample further than reachEff from the receiver (in view
+			// space the ray's samples move away monotonically), so a bisection finds the last one inside
+			vec3 pv0 = sssViewPos( p, lin0 );
+			float ss = clamp( dot( pv0, pv0 ) / max( sssReach.z * sssReach.z, 1.0 ), 0.0, 1.0 );
+			float s2 = ss * ss;
+			float wgt = 1.0 - s2 * s2;
+			float reachEff = wgt > 0.0 ? ( sssReach.x + sssReach.y * lin0 ) / wgt : 1e30;
+			int kl = 0, kh = nk;	// sample kl is inside (0: the receiver), kh is the last candidate
+			for ( int it = 0; it < 10 && kl < kh; it++ ) {
+				int km = ( kl + kh + 1 ) >> 1;
+				float dist = dist0 + float( km ) * direction;
+				int um = t - int( direction ) * km;
+				float yq = lineY( j, lineOff, um, Da );
+				vec2 q = majorX ? vec2( anchorC - s * float( um ), yq ) : vec2( yq, anchorC - s * float( um ) );
+				if ( distance( sssViewPos( q, C / dist ), pv0 ) > reachEff )
+					kh = km - 1;
+				else
+					kl = km;
+			}
+			nk = kl;
+		}
+		float Kc = 1.0 / ( sssParams.x * C );	// 1 / (thickness fraction x depth x distance)
+		vec4 lanes = vec4( 1.0 );
+		int step = -int( direction );	// shared index step per sample
+		int i0 = t + base;
+		int k = 1;
+		for ( ; k + 3 <= nk; k += 4 ) {
+			int i = i0 + step * k;
+			float d1 = abs( ( C - sS[i] ) * min( sR[i], Kc ) - 1.0 );
+			float d2 = abs( ( C - sS[i + step] ) * min( sR[i + step], Kc ) - 1.0 );
+			float d3 = abs( ( C - sS[i + 2 * step] ) * min( sR[i + 2 * step], Kc ) - 1.0 );
+			float d4 = abs( ( C - sS[i + 3 * step] ) * min( sR[i + 3 * step], Kc ) - 1.0 );
+			// sample k lands in lane k & 3: k = 1 mod 4 here
+			lanes = min( lanes, vec4( d4, d1, d2, d3 ) );
+		}
+		for ( ; k <= nk; k++ ) {
+			int i = i0 + step * k;
+			float d = abs( ( C - sS[i] ) * min( sR[i], Kc ) - 1.0 );
+			int lane = k & 3;
+			lanes[lane] = min( lanes[lane], d );
+		}
+		float contrast = sssParams.z;
+		lanes = clamp( lanes * contrast + ( 1.0 - contrast ), 0.0, 1.0 );
+		mask = dot( lanes, vec4( 0.25 ) );
+	}
+	imageStore( maskOut, pix, vec4( mask ) );
+}

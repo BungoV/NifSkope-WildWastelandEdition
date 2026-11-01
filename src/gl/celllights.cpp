@@ -30,6 +30,8 @@ BSD License - see nifskope.h
 #include "esmwater.h"
 #include "gl/cellwatergi.h"	// lane PRTP6: water reads no probe GI
 #include "gl/celllampshadow.h"	// lane LAMPSHADOW1
+#include "gl/cubefacecull.h"	// lane PERFFIX2 b: a caster draws only into the cube faces it can reach
+#include "gl/lampslice.h"	// lane PERFFIX2 b: the lamp store's first stores spread over frames
 #include "gl/celllooks.h"	// lane GAPLOOK1
 #include "gl/celllensflare.h"	// lane LIGHTS3 (LENSFLARE1): its echo
 #include "gl/cellfxlit.h"	// lane LIGHTS4: a placement's emittance colour
@@ -43,6 +45,7 @@ BSD License - see nifskope.h
 #include "cellworldanim.h"	// lane NIFXLIGHT3: the world clock a .nifx light's dimmer follows
 #include "gl/atmosphere.h"	// lane FIX1101A (atmo): wwAtmoWbGain, the test white balance
 #include "gl/cellsunlit.h"	// lane INTSKY1: the sunlit interior rule
+#include "gl/cellflickclock.h"	// lane PERFFIX2 a: the flicker's phase on the world clock
 
 #include <QDateTime>
 #include <QDir>	// lane INTSKY1: the Cells file in the census
@@ -156,6 +159,7 @@ struct ClState
 	bool shadowRed = false; // WW_CELL_SHADOW_RED=noshadow: the maps rendered, every factor read as 1
 	QString shadowLast = QStringLiteral( "none yet" );
 	QString lampLast = QStringLiteral( "off" );	// lane LAMPSHADOW1: the stored lamp shadows' last frame
+	int lampSliced = 0;	// lane PERFFIX2 b: slots whose first store waits (the last frame)
 	int fogProbe = 0;       // WW_CELL_FOG_PROBE=6 (alpha, height blend) | 7 (fog color ^ 1/2.2) | 8 (its d, z)
 	int pass = 0;           // the PRTP band's Pass (WwCellPass); WW_CELL_PASS pins it
 	bool passPinned = false;
@@ -165,6 +169,7 @@ struct ClState
 	// lane LIGHTFLICKER1: the Light flicker row (WW/CellFlicker, pin WW_CELL_FLICKER), its red and gate pins
 	bool flickerOn = false, flickerPinned = false, flickerRed = false;
 	float flickerStep = 0.0f;	// > 0: WW_CELL_FLICKER_STEP, seconds a frame
+	bool flickerClockRed = false;	// lane PERFFIX2 a: WW_CELL_FLICKER_CLOCK_RED=1, the wall-clock dt per painted frame
 	QString flickerDump;
 };
 
@@ -213,6 +218,7 @@ ClState & st()
 		s.flickerOn = s.flickerPinned ? flPin != "0" : QSettings().value( QStringLiteral( "WW/CellFlicker" ), false ).toBool();
 		s.flickerRed = qEnvironmentVariableIntValue( "WW_CELL_FLICKER_RED" ) != 0;
 		s.flickerStep = std::max( 0.0f, qEnvironmentVariable( "WW_CELL_FLICKER_STEP" ).toFloat() );
+		s.flickerClockRed = wwEnvInt( "WW_CELL_FLICKER_CLOCK_RED" ) != 0;
 		s.flickerDump = qEnvironmentVariable( "WW_CELL_FLICKER_DUMP" );
 		const QByteArray farRed = wwEnv( "WW_CELL_FAR_RED" ).trimmed();
 		s.farRed = farRed == "nosurfel" ? 1 : farRed == "noblend" ? 2 : farRed == "flipside" ? 4 : 0;
@@ -346,6 +352,7 @@ struct Gpu
 	int shSlot[kShadowSlots];
 	int shStamp = 1, bufShStamp = 0;
 	int shKick = 0;	// lane DOORLIVE1: a moving caster (a live door) re-renders every held slot
+	int shPend[kShadowSlots];	// lane PERFFIX2 b: the light a slot holds whose first store waits for a later frame (-1 none)
 	int shFace = 0;	// lane LAMPSHADOW1: the face edge shTex was made at (the tier's)
 	float shFade[kShadowSlots];	// lane GAPLOOK1: each slot's shadow strength under the budget (1 without it)
 	int shBudget = 0;
@@ -381,12 +388,14 @@ struct Gpu
 	// lane LIGHTFLICKER1: the buffer before the flicker (base) and as patched (live); the flicker stamp last patched
 	std::vector<float> flickBase, flickLive;
 	std::uint64_t flickStamp = 0;
+	std::uint64_t shWrites = 0;	// lane PERFFIX2 a: shadow cube faces written (drawn or blitted), ever
 	bool flickOn = false;
 	bool dimOn = false;	// lane NIFXLIGHT3: .nifx lights follow their dimmer on the world clock (the bulbs patched too)
 	Gpu()
 	{
 		std::fill( shSlot, shSlot + kShadowSlots, -1 );
 		std::fill( shFade, shFade + kShadowSlots, 1.0f );
+		std::fill( shPend, shPend + kShadowSlots, -1 );
 	}
 };
 QHash<const void *, Gpu> & gpus()
@@ -644,6 +653,36 @@ int wwCellGiVersion( const void * nif )
 	return st().giVersion.value( nif, 0 );
 }
 
+int wwCellLightsVersion( const void * nif )
+{
+	return st().version.value( nif, 0 );
+}
+
+quint64 wwCellLightsStateKey( Scene * scene )
+{
+	if ( !scene || !scene->renderer )
+		return 0;
+	const auto it = gpus().constFind( scene->renderer );
+	if ( it == gpus().constEnd() )
+		return 0;
+	const Gpu & g = *it;
+	quint64 h = 0xcbf29ce484222325ULL;
+	auto mix = [&h]( quint64 v ) { h ^= v + 0x9e3779b97f4a7c15ULL + ( h << 6 ) + ( h >> 2 ); };
+	mix( quint64( reinterpret_cast<std::uintptr_t>( g.doc ) ) );
+	mix( quint64( g.version ) );
+	mix( g.texelStamp );
+	mix( g.flickStamp );
+	mix( quint64( g.shStamp ) );
+	mix( g.shWrites );
+	for ( int k = 0; k < kShadowSlots; k++ ) {
+		std::uint32_t u;
+		std::memcpy( &u, &g.shFade[k], 4 );
+		mix( u );
+		mix( quint64( std::int64_t( g.shSlot[k] ) ) );
+	}
+	return h;
+}
+
 bool wwCellGiOn()
 {
 	return st().giOn;
@@ -707,11 +746,7 @@ int wwCellFarRed()
  *  dimmer = 1 - A + A v with A = Intensity / 2 (x the fade, which the colour already holds). */
 namespace
 {
-struct FlickPhase
-{
-	float p[3] = { 1.0f, 0.0f, 0.0f };
-	quint32 rng = 0;
-};
+using FlickPhase = WwFlick::Phase;	// lane PERFFIX2 a: the phase, its tables and random moved to gl/cellflickclock.h
 struct FlickDoc
 {
 	int version = -1;
@@ -728,25 +763,6 @@ QHash<const void *, FlickDoc> & flickDocs()
 {
 	static QHash<const void *, FlickDoc> d;
 	return d;
-}
-float flickTab( float x, bool cosine )
-{
-	static const std::vector<float> tab = [] {
-		std::vector<float> t( 1024 );
-		for ( int i = 0; i < 512; i++ ) {
-			t[size_t( i )] = float( std::sin( double( i ) * 6.283185307179586 / 512.0 ) );
-			t[size_t( 512 + i )] = float( std::cos( double( i ) * 6.283185307179586 / 512.0 ) );
-		}
-		return t;
-	}();
-	return tab[size_t( ( int( x * ( 512.0f / 6.2831855f ) ) & 511 ) + ( cosine ? 512 : 0 ) )];
-}
-float flickRand( quint32 & r, float lo, float hi )	// a random in [lo, hi); xorshift so a gate's frames repeat
-{
-	r ^= r << 13;
-	r ^= r >> 17;
-	r ^= r << 5;
-	return lo + ( hi - lo ) * float( r >> 8 ) * ( 1.0f / 16777216.0f );
 }
 bool flickLive( Scene * scene )
 {
@@ -815,7 +831,13 @@ void wwCellFlickerFrame( Scene * scene )
 	if ( d.idx.empty() )
 		return;
 	const double worldT = ( mode & 2 ) ? wwCellWorldSeconds() : 0.0;
-	constexpr float kTwoPi = 6.2831855f;
+	/* lane PERFFIX2 a: the flicker's phase is a function of the world clock (the wall clock in a live window, the
+	 * pinned WW_CELL_WORLDANIM_TIME under a harness), so two rows at one time draw the same lights. The red and the
+	 * STEP pin keep LIGHTFLICKER1's one step of this painted frame's dt. */
+	const bool perFrame = s.flickerClockRed || s.flickerStep > 0.0f;
+	const double clockT = perFrame ? 0.0 : wwCellWorldSeconds();
+	const long long catchUp = wwCellWorldClockMoves() ? WwFlick::kLiveCatchUp : -1;
+	const std::vector<float> was = d.val;	// a frame that changes nothing patches nothing (the stamp stays)
 	QFile dump( s.flickerDump );
 	const bool dumping = !s.flickerDump.isEmpty() && dump.open( QIODevice::Append | QIODevice::Text );
 	for ( int i : d.idx ) {
@@ -831,51 +853,27 @@ void wwCellFlickerFrame( Scene * scene )
 			continue;
 		}
 		FlickPhase & ph = d.phase[l.ref];
-		if ( !ph.rng )
-			ph.rng = 0x9E3779B9u ^ ( l.ref * 2654435761u ) ^ quint32( i + 1 );
-		const float sp = dt * l.flickerPeriod;
+		const quint32 seed = WwFlick::seed( l.ref, i );
+		if ( perFrame )
+			WwFlick::stepFrame( ph, seed, l.flicker, l.flickerPeriod, dt );
+		else
+			WwFlick::toTime( ph, seed, l.flicker, l.flickerPeriod, clockT, catchUp );
 		const float m = l.flickerMovement, A = l.flickerIntensity * 0.5f;
-		float v, local[3];
-		if ( l.flicker == 1 ) {
-			ph.p[0] += flickRand( ph.rng, 1.1f, 13.1f ) * sp;
-			ph.p[1] += flickRand( ph.rng, 1.2f, 13.2f ) * sp;
-			ph.p[2] += flickRand( ph.rng, 1.3f, 19.3f ) * sp;
-			for ( float & p : ph.p )
-				if ( p > kTwoPi )
-					p -= kTwoPi;
-			const float q0 = ph.p[0] + 1.7f, q1 = ph.p[1] + 0.5f, q2 = ph.p[2] + 0.3f;
-			const float s0 = flickTab( q0, false ), s1 = flickTab( q1, false );
-			float o = m * s0 * s1 * 0.5f;
-			if ( !( o + m > 0.0f ) )
-				o = 0.0f;
-			local[0] = o * s0;
-			local[1] = o * s1;
-			local[2] = o * flickTab( q2, false );
-			v = ( flickTab( q1 * 1.3f, false ) + 1.0f ) * 0.5f * ( flickTab( q0 * 1.1f, false ) + 1.0f ) * 0.5f * ( 1.0f / 3.0f )
-				+ flickTab( q2 * 3.0f, false ) * 0.2f;
-			v = std::clamp( v, -1.0f, 1.0f );
-		} else {
-			ph.p[0] += sp;
-			if ( ph.p[0] > kTwoPi )
-				ph.p[0] -= kTwoPi;
-			const float c = flickTab( ph.p[0], true ), n = flickTab( ph.p[0], false );
-			v = c;
-			local[0] = m * c;
-			local[1] = m * n;
-			local[2] = m * n * c;
-		}
+		float local[3];
+		const float v = WwFlick::eval( ph, l.flicker, m, local );
 		out[0] = ( 1.0f - A + A * v ) * ( ( mode & 2 ) ? wwNifxDimFactor( l, worldT ) : 1.0f );
 		// a shadow-casting light keeps its place: its depth cube is drawn from there, not redrawn each frame
 		for ( int k = 0; k < 3; k++ )
 			out[1 + k] = l.shadow ? 0.0f
 				: l.flickerAxes[0][k] * local[0] + l.flickerAxes[1][k] * local[1] + l.flickerAxes[2][k] * local[2];
 		if ( dumping )
-			dump.write( QStringLiteral( "%1 %2 %3 %4 %5 %6 %7 %8 %9\n" ).arg( d.frames ).arg( double( dt ), 0, 'g', 6 ).arg( i )
+			dump.write( QStringLiteral( "%1 %2 %3 %4 %5 %6 %7 %8 %9\n" ).arg( d.frames ).arg( perFrame ? double( dt ) : clockT, 0, 'g', 6 ).arg( i )
 				.arg( l.ref, 8, 16, QLatin1Char( '0' ) ).arg( l.flicker ).arg( double( out[0] ), 0, 'f', 6 )
 				.arg( double( out[1] ), 0, 'f', 4 ).arg( double( out[2] ), 0, 'f', 4 ).arg( double( out[3] ), 0, 'f', 4 ).toLatin1() );
 	}
 	d.frames++;
-	d.stamp++;
+	if ( perFrame || d.val != was )
+		d.stamp++;
 }
 
 bool wwCellFlickerWantsFrames( Scene * scene )
@@ -888,7 +886,10 @@ bool wwCellFlickerWantsFrames( Scene * scene )
 	if ( it == flickDocs().constEnd() || it->version != st().version.value( scene->nifModel ) || it->mode != mode )
 		return true;
 	// lane NIFXLIGHT3: a dimmer track moves only while the world clock does
-	return ( ( mode & 1 ) && it->flickN ) || ( ( mode & 2 ) && it->dimN && wwCellWorldAnimWantsFrames( scene ) );
+	// lane PERFFIX2 a: so does the flicker now (its red and the STEP pin step every painted frame)
+	const ClState & s = st();
+	const bool flickMoves = s.flickerClockRed || s.flickerStep > 0.0f || wwCellWorldClockMoves();
+	return ( ( mode & 1 ) && it->flickN && flickMoves ) || ( ( mode & 2 ) && it->dimN && wwCellWorldAnimWantsFrames( scene ) );
 }
 
 bool wwCellFlickerOf( const void * nif, qsizetype i, float * dimmer, float offset[3] )
@@ -1079,14 +1080,14 @@ int wwCellGiVis()
 }
 
 /* lane PERF1: the GI's rate (WW_CELL_GI_RATE, read once): 0 half (the default: the screen GI at half resolution,
- * upsampled by depth and normal), 1 full (the screen GI at full resolution), 2 inline (no screen pass: every surface
+ * upsampled by depth and normal; PERFFIX2: full for the ray-traced volume's read), 4 half (`half`: half for both), 1 full (the screen GI at full resolution), 2 inline (no screen pass: every surface
  * reads the volumes itself), 3 red (the screen pass runs, the surfaces read inline: the inline picture at its cost plus
  * the pass) */
 int wwCellGiRate()
 {
 	WW_SWITCH_STATIC( int, mode, [] {
 		const QByteArray v = wwEnv( "WW_CELL_GI_RATE" ).trimmed().toLower();
-		return v == "full" ? 1 : v == "inline" || v == "old" || v == "0" ? 2 : v == "red" ? 3 : 0;
+		return v == "full" ? 1 : v == "inline" || v == "old" || v == "0" ? 2 : v == "red" ? 3 : v == "half" ? 4 : 0;
 	}() );
 	return mode;
 }
@@ -1541,7 +1542,7 @@ void wwCellLightsUniforms( Scene * scene )
 		std::vector<float> slotOf( size_t( L->lights.size() ), -1.0f );
 		if ( g.shDoc == scene->nifModel && g.shVersion == s.version.value( scene->nifModel ) )
 			for ( int k = 0; k < kShadowSlots; k++ )
-				if ( g.shSlot[k] >= 0 && g.shSlot[k] < L->lights.size() )
+				if ( g.shSlot[k] >= 0 && g.shSlot[k] < L->lights.size() && g.shPend[k] != g.shSlot[k] )	// lane PERFFIX2 b: a waiting store reads unshadowed
 					slotOf[size_t( g.shSlot[k] )] = float( k );
 		std::vector<float> t;
 		t.reserve( size_t( L->lights.size() ) * kTexelsPerLight * 4 + 20 );
@@ -3148,6 +3149,85 @@ static bool cubeSkipsCaster( const Shape * sh )
 
 static qint64 g_cubeAtCasters = 0, g_cubeAtDraws = 0;
 
+/* lane PERFFIX2 b (item 5b): a caster goes only into the cube faces its bounding sphere can reach (gl/cubefacecull.h):
+ * the skipped draws put no fragment into that face, so every depth texel is the old one. Red WW_CELL_SHADOW_RED=allfaces
+ * draws every caster into all six faces again (a live set redraws every held cube and stores every lamp map again).
+ * g_cubeFaceSkip counts the draws saved (the census's faceSkip=). */
+static qint64 g_cubeFaceSkip = 0;
+
+static bool cubeAllFacesRed()
+{
+	WW_SWITCH_STATIC( bool, allFacesRed, wwEnv( "WW_CELL_SHADOW_RED" ).trimmed() == "allfaces" );
+	return allFacesRed;
+}
+
+/* lane PERFFIX2 b (item 5c, gl/cubefacecull.h coneMask): a spot's faces that its cone (widened by the lookup's reach)
+ * never meets are read by no lit pixel, so they get no casters (they are still cleared). 959 of 1445 vanilla shadow
+ * lights are spots. Red WW_CELL_SHADOW_RED=nocone (or allfaces). g_cubeConeSkip: the draws it saved (coneSkip=). */
+static qint64 g_cubeConeSkip = 0;
+
+static int cubeConeFaces( const WwCellLight & l, int faceTexels )
+{
+	WW_SWITCH_STATIC( bool, noConeRed, wwEnv( "WW_CELL_SHADOW_RED" ).trimmed() == "nocone" );
+	if ( !l.spot || noConeRed || cubeAllFacesRed() )
+		return 63;
+	return WwCubeFace::coneMask( l.dir, l.cosOuter, WwCubeFace::coneMargin( faceTexels ) );
+}
+
+static bool cubeConeRed()
+{
+	WW_SWITCH_STATIC( bool, noConeRed, wwEnv( "WW_CELL_SHADOW_RED" ).trimmed() == "nocone" );
+	return noConeRed;
+}
+
+static bool cubeFaceKeeps( int face, const float lpos[3], const Vector3 & c, float rad )
+{
+	if ( cubeAllFacesRed() )
+		return true;
+	const float rel[3] = { c[0] - lpos[0], c[1] - lpos[1], c[2] - lpos[2] };
+	if ( WwCubeFace::touches( face, rel, rad ) )
+		return true;
+	g_cubeFaceSkip++;
+	return false;
+}
+
+/* lane PERFFIX2 b: WW_CELL_SHADOW_HASH=<token> (gates only): every 8th pass, a 64-bit FNV-1a of every held slot's six
+ * faces (the cube array read back) and the light it holds, on stderr: "shadow cube hash <token> pass N: <hex> slots K".
+ * Two rows' hashes equal = the same depth texels (the per-face cull's exactness gate, beside its red). */
+static void cubeHash( Renderer * r, const Gpu & g )
+{
+	WW_SWITCH_STATIC( QByteArray, token, wwEnv( "WW_CELL_SHADOW_HASH" ).trimmed() );
+	static qint64 passes = 0;
+	if ( token.isEmpty() || !g.shTex || g.shFace <= 0 || ( passes++ % 8 ) != 0 )
+		return;
+	auto fn = r->fn;
+	const size_t faceTexels = size_t( g.shFace ) * size_t( g.shFace );
+	std::vector<quint16> buf( faceTexels * 6u * size_t( kShadowSlots ) );
+	GLint prevActive = 0, prevTex = 0;
+	fn->glGetIntegerv( GL_ACTIVE_TEXTURE, &prevActive );
+	fn->glActiveTexture( GLenum( GL_TEXTURE0 + kShadowUnit ) );
+	fn->glGetIntegerv( GL_TEXTURE_BINDING_CUBE_MAP_ARRAY, &prevTex );
+	fn->glBindTexture( GL_TEXTURE_CUBE_MAP_ARRAY, g.shTex );
+	fn->glPixelStorei( GL_PACK_ALIGNMENT, 2 );
+	fn->glGetTexImage( GL_TEXTURE_CUBE_MAP_ARRAY, 0, GL_DEPTH_COMPONENT, GL_UNSIGNED_SHORT, buf.data() );
+	fn->glPixelStorei( GL_PACK_ALIGNMENT, 4 );
+	fn->glBindTexture( GL_TEXTURE_CUBE_MAP_ARRAY, GLuint( prevTex ) );
+	fn->glActiveTexture( GLenum( prevActive ) );
+	std::uint64_t h = 1469598103934665603ULL;
+	int held = 0;
+	for ( int k = 0; k < kShadowSlots; k++ ) {
+		if ( g.shSlot[k] < 0 )
+			continue;
+		held++;
+		h = ( h ^ std::uint64_t( std::uint32_t( g.shSlot[k] ) ) ) * 1099511628211ULL;
+		const quint16 * p = buf.data() + faceTexels * 6u * size_t( k );
+		for ( size_t t = 0; t < faceTexels * 6u; t++ )
+			h = ( h ^ p[t] ) * 1099511628211ULL;
+	}
+	std::fprintf( stderr, "shadow cube hash %s pass %lld: %016llx slots %d face %d\n", token.constData(), (long long)passes,
+		(unsigned long long)h, held, g.shFace );
+}
+
 static void cubeDrawCaster( Renderer * r, NifSkopeOpenGLContext::Program * prog, const Shape * sh )
 {
 	const Shape::WwDrawAlpha da = sh->wwDrawAlpha( "cube" );	// lane ALPHABGSM1
@@ -3182,7 +3262,8 @@ static void lampShadowPass( Scene * scene, Gpu & g, const WwCellLighting & L, st
 	const int S = wwCellLampShadowFace();
 	const int red = wwCellLampShadowRed();
 	// lane ALPHABGSM1: a moved alpha-rule red (Shape::wwDrawAlphaGen) stores every lamp map again
-	const int ver = s.version.value( scene->nifModel ) + ( Shape::wwDrawAlphaGen() << 24 );
+	// lane PERFFIX2 b: so does the per-face cull's red
+	const int ver = ( s.version.value( scene->nifModel ) + ( Shape::wwDrawAlphaGen() << 24 ) ) ^ ( cubeAllFacesRed() ? 0x40000000 : 0 ) ^ ( cubeConeRed() ? 0x20000000 : 0 );
 	const std::uint64_t blockBytes = std::uint64_t( 3 ) * std::uint64_t( S ) * std::uint64_t( S ) * 2u;
 	QElapsedTimer timer;
 	timer.start();
@@ -3300,7 +3381,7 @@ static void lampShadowPass( Scene * scene, Gpu & g, const WwCellLighting & L, st
 			}
 		}
 		const bool isDirty = std::find( dirty.begin(), dirty.end(), k ) != dirty.end();
-		if ( red == 1 || isDirty || anyMoved || j.in != g.lsSlotMovers[k] )
+		if ( red == 1 || isDirty || anyMoved || j.in != g.lsSlotMovers[k] || g.shPend[k] == li )	// lane PERFFIX2 b: a waiting store
 			jobs.push_back( std::move( j ) );
 	}
 	auto census = [&]( int stored, int restored, int direct, int moverDraws ) {
@@ -3311,16 +3392,20 @@ static void lampShadowPass( Scene * scene, Gpu & g, const WwCellLighting & L, st
 			walls += e.back >= 0 ? 1 : 0;
 		const double mb = 1.0 / 1048576.0;
 		s.lampLast = QStringLiteral( "%1 face=%2 store=%3(wall %4) storeMB=%5/%6 slotsMB=%7 slotsDrawn=%8 stored=%9 restored=%10"
-			" direct=%11 movers=%12(new %13) moverDraws=%14 ms=%15%16" )
+			" direct=%11 movers=%12(new %13) moverDraws=%14 ms=%15%16 faceSkip=%17 slice=%18 waiting=%19 coneSkip=%20%21" )
 			.arg( wwCellLampShadowTierName( wwCellLampShadowTier() ) ).arg( S )
 			.arg( g.lsStore.size() ).arg( walls )
 			.arg( double( used ) * double( blockBytes ) * mb, 0, 'f', 1 ).arg( double( g.lsBlocks ) * double( blockBytes ) * mb, 0, 'f', 1 )
 			.arg( double( blockBytes ) * 2.0 * kShadowSlots * mb, 0, 'f', 1 )
 			.arg( jobs.size() ).arg( stored ).arg( restored ).arg( direct ).arg( movers.size() ).arg( newMovers ).arg( moverDraws )
 			.arg( timer.elapsed() )
-			.arg( red == 1 ? QStringLiteral( " red=live" ) : red == 2 ? QStringLiteral( " red=cube" ) : QString() );
+			.arg( red == 1 ? QStringLiteral( " red=live" ) : red == 2 ? QStringLiteral( " red=cube" ) : QString() )
+			.arg( g_cubeFaceSkip )	// lane PERFFIX2 b: draws the per-face cull saved, since the start
+			.arg( wwCellLampShadowSlice() ).arg( s.lampSliced )	// lane PERFFIX2 b: the first-store budget, slots waiting
+			.arg( g_cubeConeSkip ).arg( cubeConeRed() ? QStringLiteral( " red=nocone" ) : QString() );	// lane PERFFIX2 b: off-cone draws saved
 	};
 	if ( jobs.empty() ) {
+		s.lampSliced = 0;	// lane PERFFIX2 b
 		census( 0, 0, 0, 0 );
 		return;
 	}
@@ -3403,6 +3488,8 @@ static void lampShadowPass( Scene * scene, Gpu & g, const WwCellLighting & L, st
 			complete = false;
 			return 0;
 		}
+		if ( t.tex == g.shTex )
+			g.shWrites++;	// lane PERFFIX2 a: wwCellLightsStateKey
 		fn->glViewport( t.vx, t.vy, S, S );
 		fn->glEnable( GL_SCISSOR_TEST );
 		fn->glScissor( t.cut.x, t.cut.y, t.cut.w, t.cut.h );
@@ -3422,7 +3509,14 @@ static void lampShadowPass( Scene * scene, Gpu & g, const WwCellLighting & L, st
 		if ( lClip >= 0 )
 			fn->glUniformMatrix4fv( lClip, 1, GL_FALSE, clip );
 		qint64 drawn = 0;
+		const bool coneOff = !( cubeConeFaces( l, S ) >> face & 1 );	// lane PERFFIX2 b: off the spot's cone
+		if ( coneOff )
+			g_cubeConeSkip += qint64( list.size() );
 		for ( const LsCaster * c : list ) {
+			if ( coneOff )
+				break;	// lane PERFFIX2 b: no lit pixel reads this face
+			if ( !cubeFaceKeeps( face, l.pos, c->c, c->rad ) )
+				continue;	// lane PERFFIX2 b: no fragment of it lands in this face
 			prog->uni4m( "modelViewMatrix", c->sh->viewTrans().toMatrix4() );
 			cubeDrawCaster( r, prog, c->sh );
 			drawn++;
@@ -3439,6 +3533,7 @@ static void lampShadowPass( Scene * scene, Gpu & g, const WwCellLighting & L, st
 	auto blit = [&]( int srcLayer, const LsRect & a, int slotLayer, const LsRect & b ) {
 		fn->glFramebufferTextureLayer( GL_READ_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, g.lsTex, 0, srcLayer );
 		fn->glFramebufferTextureLayer( GL_DRAW_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, g.shTex, 0, slotLayer );
+		g.shWrites++;	// lane PERFFIX2 a: wwCellLightsStateKey
 		if ( fn->glCheckFramebufferStatus( GL_READ_FRAMEBUFFER ) != GL_FRAMEBUFFER_COMPLETE
 			|| fn->glCheckFramebufferStatus( GL_DRAW_FRAMEBUFFER ) != GL_FRAMEBUFFER_COMPLETE ) {
 			complete = false;
@@ -3451,6 +3546,13 @@ static void lampShadowPass( Scene * scene, Gpu & g, const WwCellLighting & L, st
 
 	int nStored = 0, nRestored = 0, nDirect = 0;
 	qint64 moverDraws = 0;
+	/* lane PERFFIX2 b (item 5d, gl/lampslice.h): the first stores of this frame spend at most `slice` cube faces, nearest
+	 * slots first (the dirty list's order); one store always goes. A slot that waits reads unshadowed (its light as past
+	 * the slot budget) until its map is drawn: the light buffer skips it (shPend) */
+	WwLampSlice::Budget budgetF;
+	budgetF.slice = red == 1 ? 0 : wwCellLampShadowSlice();
+	int nWait = 0;
+	bool pendMoved = false;
 	for ( Job & j : jobs ) {
 		if ( !complete )
 			break;
@@ -3493,6 +3595,14 @@ static void lampShadowPass( Scene * scene, Gpu & g, const WwCellLighting & L, st
 				g.lsWall.insert( li, w );
 			}
 			const WwLampWall w = g.lsWall.value( li );
+			if ( !budgetF.spend( w.back >= 0 ? 5 : 6 ) ) {
+				if ( g.shPend[k] != li ) {	// lane PERFFIX2 b: waits for a later frame's budget
+					g.shPend[k] = li;
+					pendMoved = true;
+				}
+				nWait++;
+				continue;
+			}
 			const int need = w.back >= 0 ? 1 : 2;
 			std::vector<int> blocks;
 			for ( int pass = 0; pass < 2 && int( blocks.size() ) < need; pass++ ) {
@@ -3580,6 +3690,10 @@ static void lampShadowPass( Scene * scene, Gpu & g, const WwCellLighting & L, st
 			}
 			nRestored++;
 		}
+		if ( g.shPend[k] >= 0 ) {	// lane PERFFIX2 b: drawn now
+			g.shPend[k] = -1;
+			pendMoved = true;
+		}
 		// the movers in this light's volume, over the static map
 		if ( !mov.empty() )
 			for ( int f = 0; f < 6 && complete; f++ )
@@ -3602,6 +3716,9 @@ static void lampShadowPass( Scene * scene, Gpu & g, const WwCellLighting & L, st
 	wasScissor ? fn->glEnable( GL_SCISSOR_TEST ) : fn->glDisable( GL_SCISSOR_TEST );
 	wasBlend ? fn->glEnable( GL_BLEND ) : fn->glDisable( GL_BLEND );
 
+	if ( pendMoved )
+		g.shStamp++;	// lane PERFFIX2 b: the light buffer reads the slots that wait / are drawn now
+	s.lampSliced = nWait;
 	if ( !complete ) {
 		for ( int k = 0; k < kShadowSlots; k++ )
 			g.shSlot[k] = -1;
@@ -3778,6 +3895,11 @@ void wwCellShadowPass( Scene * scene )
 			atGen = Shape::wwDrawAlphaGen();
 			wwCellShadowKick( scene->nifModel );
 		}
+		static int allGen = -1;	// lane PERFFIX2 b: a moved per-face cull red draws every held cube again
+		if ( allGen != int( cubeAllFacesRed() ) + 2 * int( cubeConeRed() ) ) {	// (and the cone cull's)
+			allGen = int( cubeAllFacesRed() ) + 2 * int( cubeConeRed() );
+			wwCellShadowKick( scene->nifModel );
+		}
 		const int kick = shadowKicks().value( scene->nifModel );
 		if ( g.shKick != kick ) {
 			g.shKick = kick;
@@ -3790,10 +3912,19 @@ void wwCellShadowPass( Scene * scene )
 		g.shStamp++;
 	for ( int k = 0; k < kShadowSlots; k++ )	// lane GAPLOOK1: the strengths follow the camera every pass
 		g.shFade[k] = budget > 0 && g.shSlot[k] >= 0 && size_t( g.shSlot[k] ) < fadeOf.size() ? fadeOf[size_t( g.shSlot[k] )] : 1.0f;
+	cubeHash( r, g );	// lane PERFFIX2 b: the gate's hash of the cubes as the last pass left them (WW_CELL_SHADOW_HASH)
 	if ( wwCellLampShadowTier() >= 0 ) {
 		s.shadowLast = QStringLiteral( "on shadowLights=%1 face=%2 (lamp)" ).arg( cand.size() ).arg( face );
 		lampShadowPass( scene, g, *L, dirty, cam );	// lane LAMPSHADOW1: stored maps, movers redrawn on top
 		return;
+	}
+	for ( int k = 0; k < kShadowSlots; k++ ) {	// lane PERFFIX2 b: the plain cubes draw a slot that waited at once
+		if ( g.shPend[k] >= 0 ) {
+			if ( g.shSlot[k] == g.shPend[k] && std::find( dirty.begin(), dirty.end(), k ) == dirty.end() )
+				dirty.push_back( k );
+			g.shPend[k] = -1;
+			g.shStamp++;
+		}
 	}
 	if ( g.lsTex ) {	// the row turned Off: the store's memory goes back
 		r->fn->glDeleteTextures( 1, &g.lsTex );
@@ -3920,12 +4051,14 @@ void wwCellShadowPass( Scene * scene )
 			if ( dx * dx + dy * dy + dz * dz < reach * reach )
 				mine.push_back( &c );
 		}
+		const int coneF = cubeConeFaces( l, face );	// lane PERFFIX2 b: the faces the spot's cone meets (63 for the rest)
 		for ( int face = 0; face < 6; face++ ) {
 			fn->glFramebufferTextureLayer( GL_DRAW_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, g.shTex, 0, 6 * k + face );
 			if ( fn->glCheckFramebufferStatus( GL_DRAW_FRAMEBUFFER ) != GL_FRAMEBUFFER_COMPLETE ) {
 				complete = false;
 				break;
 			}
+			g.shWrites++;	// lane PERFFIX2 a: wwCellLightsStateKey
 			fn->glClearDepth( 1.0 );
 			fn->glClear( GL_DEPTH_BUFFER_BIT );
 			float clip[16];
@@ -3939,7 +4072,13 @@ void wwCellShadowPass( Scene * scene )
 			clip[14] = B;
 			if ( lClip >= 0 )
 				fn->glUniformMatrix4fv( lClip, 1, GL_FALSE, clip );
+			if ( !( coneF >> face & 1 ) ) {
+				g_cubeConeSkip += qint64( mine.size() );	// lane PERFFIX2 b: cleared, no caster (no lit pixel reads it)
+				continue;
+			}
 			for ( const ShCaster * c : mine ) {
+				if ( !cubeFaceKeeps( face, l.pos, c->c, c->rad ) )
+					continue;	// lane PERFFIX2 b: no fragment of it lands in this face
 				prog->uni4m( "modelViewMatrix", c->mv );
 				cubeDrawCaster( r, prog, c->sh );
 				drawn++;
@@ -3968,9 +4107,10 @@ void wwCellShadowPass( Scene * scene )
 		s.shadowLast = QStringLiteral( "refused(shadow framebuffer incomplete)" );
 		return;
 	}
-	s.shadowLast = QStringLiteral( "on shadowLights=%1 rendered=%2 casters=%3 draws=%4 ms=%5 face=%6 water=%7" )
+	s.shadowLast = QStringLiteral( "on shadowLights=%1 rendered=%2 casters=%3 draws=%4 ms=%5 face=%6 water=%7 faceSkip=%8 coneSkip=%9" )
 		.arg( cand.size() ).arg( dirty.size() ).arg( casters.size() ).arg( drawn ).arg( timer.elapsed() ).arg( face )
-		.arg( waterCastsRed ? QStringLiteral( "casts(RED)" ) : QStringLiteral( "skipped %1" ).arg( waterSkipped ) );
+		.arg( waterCastsRed ? QStringLiteral( "casts(RED)" ) : QStringLiteral( "skipped %1" ).arg( waterSkipped ) )
+		.arg( g_cubeFaceSkip ).arg( g_cubeConeSkip );	// lane PERFFIX2 b: draws the per-face and the cone cull saved, since the start
 	shadowDump( scene );
 }
 
@@ -4035,6 +4175,9 @@ struct AoState
 	bool methodPinned = false;
 	int methodRed = 0;		// WW_CELL_AO_METHOD_RED: 1 vanilla (the method runs, vanilla's term bound), 2 raw (no denoise)
 	bool ssrRedOld = false;	// WW_CELL_AO_SSR_RED=old: AO off leaves the reflections no opaque pass (the old coupling)
+	int quality = WwAoTierUltra;	// lane PERFFIX2 (item 9): WW_CELL_AO_QUALITY (pin) or WW/CellAoQuality, the presets' tier
+	bool qualityPinned = false;
+	bool qualityRedOld = false;	// WW_CELL_AO_QUALITY_RED=old: every tier draws as before the tiers (8 angles, 9 x 3)
 	bool pass = false;		// the opaque pass is drawing
 	QString last = QStringLiteral( "none yet" );
 };
@@ -4060,6 +4203,12 @@ AoState & ao()
 		const QByteArray mRed = wwEnv( "WW_CELL_AO_METHOD_RED" ).trimmed();
 		a.methodRed = mRed == "vanilla" ? 1 : mRed == "raw" ? 2 : 0;
 		a.ssrRedOld = wwEnv( "WW_CELL_AO_SSR_RED" ).trimmed() == "old";
+		const QByteArray qPin = wwEnv( "WW_CELL_AO_QUALITY" ).trimmed().toLower();
+		const int qp = wwAoTierParse( qPin.constData() );
+		a.qualityPinned = qp >= 0;
+		a.quality = qp >= 0 ? qp : std::clamp( QSettings().value( QStringLiteral( "WW/CellAoQuality" ), int( WwAoTierUltra ) ).toInt(),
+			0, WwAoTierCount - 1 );
+		a.qualityRedOld = wwEnv( "WW_CELL_AO_QUALITY_RED" ).trimmed() == "old";
 	}
 	return a;
 }
@@ -4273,7 +4422,10 @@ void giHalfPass( Scene * scene, AoGpu & g, int W, int H, float p00, float p11 )
 	const WwCellGi * G = wwCellGiFor( scene->nifModel );
 	const bool volOn = giVolMaskPass( scene, g, G, W, H, p00, p11 );
 	g.volOn = volOn;
-	g.giStep = wwCellGiRate() == 1 ? 1 : 2;
+	/* PERFFIX2: the ray-traced volume's read is FULL rate unless WW_CELL_GI_RATE=half (4): full is the inline picture
+	 * (tests/ddgiscreen: rel err <= 1e-3), half bilinears across texels with other normals (p99 0.11 there) */
+	const int rate = wwCellGiRate();
+	g.giStep = rate == 1 || ( rate == 0 && !wwCellPrtOn() ) ? 1 : 2;
 	const int hw = ( W + g.giStep - 1 ) / g.giStep, hh = ( H + g.giStep - 1 ) / g.giStep;
 	aoAlloc( fn, g.giHalf, hw, hh, GL_RGBA32F, GL_RGBA, false );
 	if ( !g.giKey )
@@ -4336,10 +4488,11 @@ void giHalfPass( Scene * scene, AoGpu & g, int W, int H, float p00, float p11 )
 	const GLenum one = GL_COLOR_ATTACHMENT0;
 	fn->glDrawBuffers( 1, &one );
 	g.giReady = true;
-	giEcho( QStringLiteral( "%1 %2x%3 screen %4x%5; volumes: mask %6 (%7 shapes)" ).arg( wwCellGiRate() == 3
+	giEcho( QStringLiteral( "%1 %2x%3 screen %4x%5; volumes: mask %6 (%7 shapes)%8" ).arg( wwCellGiRate() == 3
 		? QStringLiteral( "red (the screen pass runs, the surfaces read inline)" ) : g.giStep == 1 ? QStringLiteral( "full" )
 		: QStringLiteral( "half" ) ).arg( W ).arg( H ).arg( hw ).arg( hh ).arg( volOn ? QStringLiteral( "on" ) : QStringLiteral( "off" ) )
-		.arg( G ? qint64( G->volShapes.size() / 12 ) : 0 ) );
+		.arg( G ? qint64( G->volShapes.size() / 12 ) : 0 )
+		.arg( wwCellPrtOn() ? QString() : QStringLiteral( "; the ray-traced volume's read (PERFFIX2)" ) ) );
 }
 
 //! the telemetry line, printed when it changes
@@ -4385,7 +4538,9 @@ const char * aoxPasses( Renderer * r, AoGpu & g, int method, int red, int W, int
 	// view space x right, y up, z forward; uv top row first (FO4CS's NDCToViewMul / NDCToViewAdd)
 	prog->uni4f( "ndcToView", FloatVector4( 2.0f / p00, -2.0f / p11, -1.0f / p00, 1.0f / p11 ) );
 	prog->uni4f( "aoxParams", FloatVector4( kAoxRadius, kAoxFalloff, kAoxIntensity, kAoxPower ) );
-	prog->uni2f( "aoxCounts", float( kAoxSlices ), float( kAoxSteps ) );
+	int slices = kAoxSlices, steps = kAoxSteps;
+	wwAoTierCounts( ao().quality, ao().qualityRedOld, slices, steps );	// lane PERFFIX2 (item 9): the tier's taps
+	prog->uni2f( "aoxCounts", float( slices ), float( steps ) );
 	prog->uni3f( "aoxDenoise", kAoxDenoiseRadius, kAoxDenoiseSigma, kAoxBlurBeta );
 	static const float quad[12] = { -1, -1, 0, 1, -1, 0, -1, 1, 0, 1, 1, 0 };
 	static const std::uint16_t idx[6] = { 0, 1, 2, 2, 1, 3 };
@@ -4460,6 +4615,25 @@ bool wwCellAoMethodPinned()
 	return ao().methodPinned;
 }
 
+int wwCellAoQuality()
+{
+	return ao().quality;
+}
+
+void wwCellAoSetQuality( int tier )
+{
+	AoState & a = ao();
+	if ( a.qualityPinned || tier < 0 || tier >= WwAoTierCount )
+		return;
+	a.quality = tier;
+	QSettings().setValue( QStringLiteral( "WW/CellAoQuality" ), tier );
+}
+
+bool wwCellAoQualityPinned()
+{
+	return ao().qualityPinned;
+}
+
 void wwCellAoPass( Scene * scene, bool run )
 {
 	if ( !scene || !scene->renderer )
@@ -4484,7 +4658,10 @@ void wwCellAoPass( Scene * scene, bool run )
 	const bool forDecalAngle = wwCellDecalMappedHas( scene->nifModel );	// lane DECALANGLE2: placed decals read its normal
 	// lane PERF1: the half-res GI reads it too (the GI row on, no probe pass, a GPU with the units)
 	const int giRate = wwCellGiRate();
-	const bool forGi = giRate != 2 && wwCellGiVis() == 0 && g.giUnits && wwCellGiOn() && wwCellPassFor( scene->nifModel ) == 0;
+	/* PERFFIX2 (PERFRES1101 A gap 2): without the PRT (PRTOFF1) the pass runs for the ray-traced volume's read instead,
+	 * once a screen texel (cell_gihalf.frag), when a volume is up; the stored GI row means nothing there */
+	const bool forGi = giRate != 2 && wwCellGiVis() == 0 && g.giUnits
+		&& ( wwCellPrtOn() ? wwCellGiOn() : rtddgiCellReadUp( scene ) ) && wwCellPassFor( scene->nifModel ) == 0;
 	if ( wwCellGiVis() == 1 )
 		giEcho( QStringLiteral( "march (red WW_CELL_GI_VIS or a march-only WW_CELL_PV_RED: the per-pixel chain every call, no screen pass)" ) );
 	else if ( giRate == 2 )
@@ -4646,7 +4823,8 @@ void wwCellAoPass( Scene * scene, bool run )
 	const float radius = kAoRadius * ( ( a.red & 2 ) ? 0.5f : 1.0f );
 	prog->uni2f( "proj", p00, p11 );
 	prog->uni3f( "aoParams", radius, kAoBias, kAoIntensity );
-	prog->uni1i( "aoAngles", kAoAngles );
+	const int angles = wwAoTierAngles( a.quality, a.qualityRedOld );	// lane PERFFIX2 (item 9): the tier's angles
+	prog->uni1i( "aoAngles", angles );
 	prog->uni1b( "aoNoBlur", ( a.red & 4 ) != 0 );
 	prog->uni1b( "aoNoReset", ( a.red & 8 ) != 0 );
 	static const float quad[12] = { -1, -1, 0, 1, -1, 0, -1, 1, 0, 1, 1, 0 };
@@ -4689,21 +4867,23 @@ void wwCellAoPass( Scene * scene, bool run )
 	g.ready = true;
 	g.aoReady = a.on && g.aoTex;
 	g.doc = scene->nifModel;
+	int aoxSl = 0, aoxSt = 0;
+	wwAoTierCounts( a.quality, a.qualityRedOld, aoxSl, aoxSt );
 	if ( !a.on ) {
 		a.last = QStringLiteral( "off (opaque pass %1x%2 kept, ms %3)" ).arg( W ).arg( H ).arg( timer.elapsed() );
 	} else if ( method != WwAoVanilla ) {
 		a.last = QStringLiteral( "on method %1 full %2x%3 radius %4 falloff %5 intensity %6 power %7 slices %8 steps %9 "
-			"bound %10 red %11 ms %12" ).arg( QString::fromLatin1( wwAoMethodName( method ) ) ).arg( W ).arg( H )
+			"bound %10 red %11 ms %12 quality %13" ).arg( QString::fromLatin1( wwAoMethodName( method ) ) ).arg( W ).arg( H )
 			.arg( double( kAoxRadius ), 0, 'f', 2 ).arg( double( kAoxFalloff ), 0, 'f', 3 ).arg( double( kAoxIntensity ), 0, 'f', 2 )
-			.arg( double( kAoxPower ), 0, 'f', 2 ).arg( kAoxSlices ).arg( kAoxSteps )
+			.arg( double( kAoxPower ), 0, 'f', 2 ).arg( aoxSl ).arg( aoxSt )
 			.arg( aoxRefused ? QString::fromLatin1( aoxRefused ) : g.aoTex == g.fin.tex ? QStringLiteral( "vanilla(red)" )
-				: QStringLiteral( "aox" ) ).arg( a.methodRed ).arg( timer.elapsed() );
+				: QStringLiteral( "aox" ) ).arg( a.methodRed ).arg( timer.elapsed() ).arg( a.quality );
 	} else {
 		a.last = QStringLiteral( "on %1x%2 half %3x%4 radius %5 bias %6 intensity %7 angles %8 p00 %9 p11 %10 p20 %11 p21 %12 "
-			"unit %13 red %14 ms %15" ).arg( W ).arg( H ).arg( hw ).arg( hh ).arg( double( radius ), 0, 'f', 2 )
-			.arg( double( kAoBias ), 0, 'f', 2 ).arg( double( kAoIntensity ), 0, 'f', 2 ).arg( kAoAngles )
+			"unit %13 red %14 ms %15 quality %16" ).arg( W ).arg( H ).arg( hw ).arg( hh ).arg( double( radius ), 0, 'f', 2 )
+			.arg( double( kAoBias ), 0, 'f', 2 ).arg( double( kAoIntensity ), 0, 'f', 2 ).arg( angles )
 			.arg( double( p00 ), 0, 'f', 6 ).arg( double( p11 ), 0, 'f', 6 ).arg( double( pm[2][0] ), 0, 'f', 6 )
-			.arg( double( pm[2][1] ), 0, 'f', 6 ).arg( g.unit ).arg( a.red ).arg( timer.elapsed() );
+			.arg( double( pm[2][1] ), 0, 'f', 6 ).arg( g.unit ).arg( a.red ).arg( timer.elapsed() ).arg( a.quality );
 	}
 
 	// WW_CELL_AO_DUMP=<file>: int32 W H hw hh, the opaque pass (W x H RGBA float, bottom row first), the raw
@@ -4904,7 +5084,7 @@ void wwCellAoDraw( Scene * scene, bool cellProgram )
 	if ( prog->uniLocation( "cellGiHalfOn" ) >= 0 ) {
 		// a probe picture (WW_CELL_LIT_PROBE) reads the volumes' mask at its own pixel instead: the screen pass's read
 		const bool probePic = ( st().measuring ? 6 : st().probe ) != 0;
-		const bool giOn = g.giReady && g.doc == scene->nifModel && ( wwCellGiRate() == 0 || wwCellGiRate() == 1 ) && wwCellGiVis() == 0
+		const bool giOn = g.giReady && g.doc == scene->nifModel && ( wwCellGiRate() == 0 || wwCellGiRate() == 1 || wwCellGiRate() == 4 ) && wwCellGiVis() == 0
 			&& ( !wwDrawBlend() || decalProg ) && ( !probePic || g.volOn );
 		if ( g.giUnits ) {
 			u.bind( WwCellUnit::GiHalf, GL_TEXTURE_2D, giOn ? ( probePic ? g.volMask.tex : g.giHalf.tex ) : 0 );

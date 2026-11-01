@@ -18,6 +18,200 @@ src/gamemanager.cpp adds release/Data as the LAST, lowest-priority source of the
 copy of the same name still wins. Only its data folders are read (Textures; Plugins is not one). Red:
 `WW_OWNDATA_RED=1` (launch key: the folder is not added). Gate: tests/owndata1 (the shipped maps + the release copies;
 a release without them fails) and the sky notes' `moon:` part. Our sun disc needs no texture (`discs=ours`).
+## PERFFIX2 a item 6 (2026-11-01): the light cluster build on one thread, its boxes from the tile edges (same lists)
+
+The cluster lists (LIGHTSYS2 / LIGHTCLUSTER1) are rebuilt on every frame the camera moves, once per kept grid. The live
+build cost 1.6-4.9 ms at Goodneighbor 5x5 (149 lights; merge1029c cost2 notes, `build N ms` echoes) and 0.03-0.62 ms
+at Concord (40 lights). Most of it was not the work: from 128 lights the build started up to 8 threads per call, and a
+thread start costs more than the whole build at these light counts; a fresh box set called MinGW's nextafterf 6 times a
+cluster. Now the build runs on the calling thread (the merge kept each list in ascending light order either way, so the
+lists are the same), each box's x range comes from its tile column and slice and its y range from its row and slice (the
+same unproject calls, so the same doubles), and the outward float rounding is done by the bits.
+- Offline (tests/clusterexact bench, 1920x1026, MEASURED on this machine): build median Goodneighbor-like 149 lights
+  1.315 -> 0.110 ms, Concord-like 40 lights 0.077 -> 0.072 ms, 1024 lights 1.979 -> 0.810 ms; a fresh box set
+  0.75-3.0 -> 0.24-0.96 ms.
+- Code: src/gl/cellcluster.{h,cpp} (no switch read: pure C++ now), src/gl/cellclustergl.cpp.
+- Red: WW_CELL_CLUSTER_RED=oldbuild (live): LIGHTSYS2's threads from 128 lights and its corner-by-corner boxes.
+  WW_CELL_CLUSTER_THREADS_FROM=<n> splits again from n lights. WW_CELL_CLUSTER_THREADS1 is gone (one thread is the rule).
+- Check key: WW_CELL_CLUSTER_DUMP=<file> (live) writes the first 48 builds' camera and view-space lights (hex floats),
+  the recorded sets tests/clusterexact replays.
+- Unit: tests/clusterexact (g++, no Qt): the old and the new build give the same cells, index and boxes, int for int
+  and float for float, on every recorded set and on synthetic 16..1024-light sets, under a forced split and fresh too; a
+  control (the midslice refuter) must differ; the new build's median <= 0.2 ms on each recorded set. `-DCLUSTER_RED`
+  times the old build and fails.
+- Default: unchanged (clusters ship on under Cell lights; the lists are the same).
+
+## PERFFIX2 a item 4 (2026-11-01): the reflection probes' camera probe is drawn and relit only when something changed
+
+REFLPROBE1's camera probe (slot 0, RDR2-style, snapped to 128 u) drew one face of its G-buffer cube every frame forever
+and relit the probe after each, although the cube is light-free and drawn from the statics alone. With the camera still
+and nothing changed, every frame drew the same face again (every caster in a 12288 u reach, one draw each) and relit
+the same light: the steady-state cost of the pass (PERFRES-A gap 5: Concord 5x5 9.6-10.4 ms CPU, 0.56-0.67 ms GPU).
+Now each face keeps the key it was drawn under and only a face whose key moved is drawn again, in the old cycle's
+order (so after a move the cube is rebuilt exactly as before, one face a frame); the probe is relit when a face came in
+or what its relight reads moved.
+- Capture key: the scene key (casters, alpha rules), every caster's world place (a moved door / animated copy), the
+  document's lights version (the process-wide publish counter, never repeated by a rebuilt document), the texture
+  cache's upload count, the probe's snapped place and box.
+- Relight key: the placed probes' light hash (unchanged) plus the view and projection (the sun cascades take view space
+  and are fitted to the frustum), the light buffer, its shadow slots, strengths and every cube face written
+  (wwCellLightsStateKey, celllights.cpp: a time-sliced lamp cache filling in counts), the lights' and GI's versions, and
+  4 ticks a second while the world clock runs (a live window: cloud shadows, movers' shadows). While the relight reads
+  the ray-traced GI volume (outdoors with RTXGI on: the sky share), the volume refines between frames with no stamp of
+  its own, so the camera probe is still relit every frame there (its capture is still kept).
+- Code: src/gl/cellreflcam.h (new, pure: the face and relight schedule), src/gl/cellreflprobe.cpp, src/gl/celllights.{h,cpp}
+  (wwCellLightsVersion, wwCellLightsStateKey, the shadow cube write count).
+- Red: WW_CELL_REFLPROBE_RED=perframe (live): REFLPROBE1's endless cycle, relit every frame.
+- Check key: WW_CELL_REFLPROBE_DUMP=<file> (live) writes the atlas's top level (raw R11G11B10F, 512 x 320) every frame;
+  WW_CELL_REFLPROBE_TIME=1 now also prints `camera-still=<frames the camera probe needed nothing>`.
+- Unit: tests/reflcam (g++, no Qt): 6 checks; `-DREFL_RED` fails 3.
+- Default: unchanged (Reflection probes ships OFF; any built-in preset turns it on).
+
+## PERFFIX2 a item 6 (2026-11-01): light flicker on the world clock, so two rows at one time repeat
+
+The Light flicker row (LIGHTFLICKER1) moved each light's phase by the wall-clock time between PAINTED frames, and the
+phase lived on across live rows. Two harness rows at the same pinned time therefore drew different lights (RTXGI1 M3:
+1.67 M px around one fire light in a repeat pair), and every picture gate had to pin WW_CELL_FLICKER=0. Now the phase
+is a function of the world clock (wwCellWorldSeconds: the wall clock in a live window, WW_CELL_WORLDANIM_TIME under a
+harness, 0 when unset): fixed 1/60 s steps of the game's own update from t 0, so the same time draws the same lights
+whatever frames came before. At 60 fps a live window draws what the per-frame update drew (same math, same random
+stream; tests/flickclock). A live window left idle catches up at most 0.25 s (the old dt clamp). A frame whose flicker
+values did not change no longer bumps the patch stamp, so the light buffer is not re-uploaded for nothing.
+- Code: src/gl/cellflickclock.h (new, pure: the phase, tables, random, toTime / stepFrame), src/gl/celllights.cpp
+  wwCellFlickerFrame + wwCellFlickerWantsFrames (asks for frames only while the clock runs), src/cellworldanim.{h,cpp}
+  wwCellWorldClockMoves().
+- Red: WW_CELL_FLICKER_CLOCK_RED=1 (live): the old per-painted-frame wall-clock step. WW_CELL_FLICKER_STEP still steps
+  every frame by its pin, as before.
+- Unit: tests/flickclock (g++, no Qt): 6 checks; `-DFLICK_RED` fails 2 (different frame runs to one time; a repeat row).
+- Default: unchanged (the Light flicker row still ships OFF; this changes how it moves, not whether it draws).
+## PERFFIX2 b item 5c (2026-11-01): a shadowed spot draws casters only into the cube faces its cone meets
+
+PERFRES1101 A gap 6.2: 959 of 1445 vanilla shadow lights are spots, and each got a full cube. A spot lights nothing
+outside its cone (cell_lights.glsl: base = 1 - (1 - dot(-L, dir)) / (1 - cosOuter) is 0 there, and cellShadowF is only
+asked where the light is above 0), so a face whose directions all lie outside the cone, widened by the lookup's reach
+(16 / face rad + 0.02: the 3x3 taps, their 2x2 compare, the 1.5-texel normal lift), is read by no lit pixel.
+WwCubeFace::coneMask (src/gl/cubefacecull.h) finds each face's nearest direction to the axis exactly (inside the face, or
+the peak on one of its 4 edges) and celllights.cpp draws no caster into the other faces (they are still cleared): exact
+for every lit pixel, ships ON. A narrow spot aimed along an axis keeps 1 face, one at a cube corner 3; 3.46 of 6 on
+average over half angles 5..90 deg. The brief's "spot as ONE 2D map" (a perspective map instead of a cube) would also
+free the memory, but it changes the sampling (a look change) and the slot format: a LANES row. Debug probe 7 still reads
+the off-cone faces (cleared). Census `coneSkip=`. Red WW_CELL_SHADOW_RED=nocone (allfaces also turns it off). Unit:
+tests/cubefacecull part 2b (20000 spots x 300 directions in the widened cone, none in a dropped face; red: the face axis
+in the cone only, loses 3.2 M directions).
+
+## PERFFIX2 b item 5d (2026-11-01): the stored lamp shadows' first stores spread over frames
+
+PERFRES1101 A gap 6.3: the stored lamp shadows (LAMPSHADOW1) drew every new slot's static map in one frame, so a cell
+open or a big slot change paid the whole first build at once (the 102 ms GPU / 78.6 ms CPU frame of PERF2 T1, Memory
+Den, uncached). Now (src/gl/lampslice.h) a frame spends at most WW_CELL_LAMPSHADOW_SLICE cube faces (default 12, about
+two lamps) on first stores, nearest slots first; the first store of a frame always goes. A slot whose store waits is read
+unshadowed (as a light past the 16-slot budget) until its map is drawn: the light buffer skips it (Gpu::shPend). Restores
+(blits) and movers are not budgeted. The picture after the stores is the old one; during them a lamp's shadow can appear
+up to ceil(faces / 12) frames late (8 frames for 16 omni lamps): a look change on those frames only, shipped ON. The lamp
+census adds `slice= waiting=`. WW_CELL_LAMPSHADOW_SLICE=0: every store in one frame (the old). Tier Off (the plain cubes)
+is not sliced. Unit: tests/lampslice (the budget per frame, every lamp stored within the bound, nearest first, a waiting
+slot never read shadowed; red: no first-store floor, a budget under one lamp never stores).
+
+## PERFFIX2 b item 8a (2026-11-01): a Hit cascade copies back only the dynamic casters' footprint
+
+PERFRES1101 A sun_shadows gap 1: whenever any dynamic caster existed (a skinned actor, a swaying cable, the far sway
+tiles), every Hit cascade copied its whole static layer into the live map each paint (map x map D16: 0.12 ms a cascade at
+4096, 0.35 ms for three, shadowshimmer4/HANDOFF.md:37) before drawing the dynamic casters over it. The live map already
+holds the static layer except where last paint's dynamic casters wrote, so now (src/gl/sunshadowdyn.h) a Hit on the same
+static write (the layer's own write counter, the same cascade key) copies back only last paint's footprint and keeps
+this paint's for the next. The footprint: each set-2 caster's drawn vertices (CPU-skinned, cable sway or its own) as a
+view-space box through the cascade's orthographic rows, a far bucket's tiles (CellFarInst::tileBounds, the spheres
+drawCascade culls with) grown by the sway's largest offset (1.2 x amp), floor / ceil + 1 texel, clamped. Exact (the live
+map is texel for texel the whole-copy one), ships ON. The brief proposed a separate dynamic map with a min at the
+receiver; that is not exact under the hardware 2x2 compare (the min of two filtered taps is not the filter of the min
+depth) and doubles the receivers' taps in programs with 8.7 % instruction headroom, so the cut restore takes the same
+saving without a shader change. Census (WW_SHADOWCACHE_CENSUS=1): `copy <c0>,<c1>,<c2> cut <texels>` (whole / cut / none).
+Red WW_SHADOWCACHE_RED=fullcopy: every Hit copies the whole layer again. Gate WW_SHADOWCACHE_CHECK=1: each paint also
+builds the old way in the scratch layer and prints `shadowcache check: ... mism=N` (texels that differ). Unit:
+tests/sunshadowdyn (every covered texel of 3000 random casters inside its footprint; 600 paints of a walking caster: the
+cut live map equals the whole-copy one every paint; reds: a truncated footprint and no copy-back must fail).
+
+## PERFFIX2 b item 8b (2026-11-01): Cascade Quality Low draws 2 sun cascades
+
+PERFRES1101 A sun_shadows missing 1: the cascade count was 3 at every tier (sunshadow.cpp kCascades). Now
+gl/sunshadowfit.h cascadesForTier: Low 2, Medium / High / Ultra 3, the Off tier (CSM1) 3. With 2 the second slice
+reaches the shadow distance (Low: 900..4000 units at the same 2048 map, so the 900..2600 band gets coarser texels) and
+cascade 2 is neither drawn nor read: the receivers' second boundary (csmSplitOffset.y) moves past the reach + band, so
+ww_sunshadow.glsl csmSelect keeps the pair (0, 1) out to the fade (no shader change). Ultra stays 3: a 4th cascade needs
+the shader's mat4[3] / split layout to grow (a LANES row). The echo adds `cascades=`. Red WW_SHADOW_CASCADES_RED=1: 3 at
+every tier (today's). A look change at Low only (a FULL-SIZE pair in notes/perffix2/b). Unit: tests/cascadecount (the
+tier table; the receivers never select the undrawn cascade and every depth lies in its slices; reds: today's count, and
+the receivers left on the old boundary, must fail).
+
+## PERFFIX2 b item 8 (2026-11-01): the sun-cascades pass timer split into its four parts
+
+PERFRES1101 A sun_shadows broken 3: the PassTime "sun-cascades" zone (wwSunShadowPass) also holds the terrain sweep's
+step, the clouds' shadow map and the far ground's pages, so its ms could not be read as the cascades' cost. Each part now
+has a GPU sub-timer and a CPU sub of the same name: `| sub sun-casters` (the cascade casters, cache, blits),
+`sun-terrstep`, `cloud-shadow`, `far-ground-pass` (and `| cpu ...` with the same names). The zone itself is unchanged.
+Unit: tests/suntimersplit (enum and name tables agree, each call bracketed; red: a doctored table must fail).
+
+## PERFFIX2 b item 5b (2026-11-01): a light-cube caster draws only into the faces it can reach
+
+PERFRES1101 A gap 6.1: every caster whose bounding sphere touched a shadow light's sphere was drawn into all six cube
+faces (celllights.cpp wwCellShadowPass, and the stored lamp shadows' drawFace). A face's projection is 90 degrees about
+its axis (clip x = u.r, y = v.r, w = m.r), so a sphere wholly outside one of its four side planes (m -+ u, m -+ v, through
+the light) puts no fragment into it. New src/gl/cubefacecull.h (WwCubeFace::touches, a pad of 1 unit + 1e-3 of the
+distance for the GPU's float transform) skips those draws in both paths: the depth texels are the same ones (depth only,
+LEQUAL, any order), so this is exact and ships ON. The census adds `faceSkip=` (draws saved since the start) to the
+shadow echo and the lamp census. Red WW_CELL_SHADOW_RED=allfaces: every caster into every face again (a live set redraws
+every held cube and stores every lamp map again). WW_CELL_SHADOW_HASH=<token> (gates only): every 8th pass a 64-bit hash
+of the held cubes' depth texels on stderr ("shadow cube hash ..."), so a row and its red can be compared texel for texel.
+Unit: tests/cubefacecull (40000 spheres x 400 points through the face's clip rows: no point lands in a dropped face; the
+red, a centre-only test, loses 1.5 M points; 1.63 faces kept a caster on that population; the face table is
+celllights.cpp's).
+## PERFFIX2 c (2026-11-01): SSGI cost by stage and per preset, AO quality tiers, contact shadows on compute
+
+bungo 11-01 "close the gaps for everything" (PERFRES1101 A gaps 4 SSGI, AO tiers, contact shadows). Numbers and pictures:
+notes/perffix2/c/RESULTS.md.
+
+- SSGI SUB-TIMERS (item 3a): the ssgi pass's stages are timed in groups, logged after the passes as `| sub ssgi-hiz`,
+  `ssgi-mips`, `ssgi-ecast`, `ssgi-echain`, `ssgi-cast`, `ssgi-temporal`, `ssgi-denoise` (src/gl/cellssgiplan.h maps
+  each stage to its group; tests/ssgiplan). Timestamps only: no picture changes.
+- AO QUALITY TIERS (item 9): a new choice `Ambient Occlusion quality` Low / Medium / High / Ultra (WW/CellAoQuality, pin
+  WW_CELL_AO_QUALITY=low|medium|high|ultra, live), a row under Ambient Occlusion that the built-in presets step. The
+  method stays the user's; the tier scales its samples (src/gl/cellaomethod.h): vanilla (the game's SAO, half size) 1 / 3
+  / 6 / 8 still-view angles, the ported methods 2x2 / 2x3 / 3x3 / 4x3 slices x steps. Ultra is the default: vanilla Ultra
+  is the picture before (8 angles); a ported method's Ultra was FO4CS's 9x3 (now 4x3, mean |d| 0.0007 offline).
+  Offline 1080p RTX 5070 Ti (tools aox_offline): vanilla 0.08 / 0.14 / 0.24 / 0.30 ms. Red WW_CELL_AO_QUALITY_RED=old:
+  every tier as before (8 angles, 9x3). Unit tests/aomethod (-DAOTIER_RED fails).
+- SSGI EMISSIVE FOLD (item 3b): the emitters reach the bounce through the ordinary march (its donor, the scene colour,
+  holds the emission) at SSGI3's fill law like any radiance: one cast, one temporal, one denoise, and the scene pass
+  writes no emission target any more. Offline (synthetic room with a big and a small emitter, 1080p): Low 3.41 -> 1.88 ms,
+  Ultra 12.0 -> 6.39 ms; the emitters' share of the bounce 0.94 of the separate chain's (FO4CS's importance-sampled cast
+  with its facing law and small-emitter boost), their brightest 1 % nearer the emitter 1.9x. This is the path red
+  `noemissive` drew (byte-identical). Red WW_CELL_SSGI_RED=emitchain: SSGI2's stage-8 chain as before.
+- SSGI WITHOUT THE FULL-SIZE PYRAMID (item 3c): the interval pyramid (stages 10/11, built over the FULL-size depth at
+  every tier) is no longer built: offline its skip cost more than it saved at every tier (Low 1.84 -> 1.48 ms, Ultra
+  6.39 -> 5.19 ms with 3b; SSGI2's own live bar "nohiz >= ultra" failed the same way), and dropping it is exact (a
+  skipped tap is one `len > radius` drops anyway): pictures byte-identical offline. The full-mask early out stays
+  (shader uniform fullBreak). The per-frame donor mips measured 0.02 ms offline: kept. Red WW_CELL_SSGI_RED=hiz: the
+  pyramid again; `nohiz` keeps SSGI2's meaning (no pyramid, no early out).
+- SSGI TIERS THAT STEP THE COST (item 3d): FO4CS's four tiers cost about the same (offline Low 3.45 vs Ultra 12.0 ms
+  before this lane, and the live rows read flat) and none came near PERFRES's targets. The tiers are now (work size,
+  slices x steps a side, the robust denoise's Poisson taps; src/gl/cellssgiplan.h): Low quarter 2x12 / 8, Medium quarter
+  3x12 / 16, High quarter 6x12 / 16, Ultra half 4x12 / 12. Twelve steps everywhere: offline 8 steps under-count the bounce
+  (0.79 of a full-size 8x16 march, 12 steps 0.92). Offline 1080p RTX 5070 Ti (synthetic room, all of 3b-3d): 0.44 / 0.61 /
+  0.87 / 1.75 ms against the targets 0.44 / 0.62 / 0.88 / 1.76 (before: 3.45 / 4.25 / 4.97 / 12.02). The default tier
+  (Ultra) is no longer full size; SSGI itself still ships OFF. Red WW_CELL_SSGI_RED=oldtiers: FO4CS's tiers.
+- CONTACT SHADOWS ON COMPUTE, BEND'S LINE LAYOUT (item 7): the near march (non-SHADOWPAR1 tiers) runs as a GL compute
+  pass, one 64-lane workgroup per light-space line, the line's depths read once into shared memory and every sample
+  "two shared reads, a min, a multiply-add and an abs" (res/shaders/ww_contact.comp; the dispatch and the one-lane-
+  per-pixel owner rule src/gl/contactlines.h, tests/contactlines). The app's context reports GL 4.6 on NVIDIA (it asks
+  4.2 core); below 4.3 or on a compile failure the fragment pass runs and the echo says why (`path=frag(...)`).
+  As in Bend's, a pixel's ray is its line's (within half a pixel) and its receiver depth the line's own sample: off the
+  depth edges the mask matches the fragment pass at full size (> 2 levels on 0.003-0.05 % of pixels), and at half size
+  it drops the fragment pass's false floor darkening (a mask-pixel bilinear weight over texels two rows apart).
+  Offline 1080p RTX 5070 Ti (synthetic yard, 4 suns, reach on/off): fragment Low/Med/High/Ultra 0.14 / 0.22 / 0.54 /
+  0.77 ms -> line 0.06-0.10 / 0.10 / 0.17 / 0.21 ms. Half-size masks (Low, Medium, SHADOWPAR1) now reach the receivers
+  through a depth-aware upsample to full size (ww_contact_up, 0.016 ms): fewer halos at silhouettes. FIX1101A's reach
+  (CONTACTREACH1, cherry-picked from fx1101a-20261101) holds on the compute march. Echo `path=line|frag up=depth|full|
+  bilinear gl=M.m`. Reds WW_SHADOW_RED=contactfrag (the fragment march), contactbilinear (no upsample).
 
 ## CONTACTREACH1 (FIX1101A, 2026-11-01): no dashed bands from thin casters (bungo's "banding on shadows")
 
@@ -63,6 +257,34 @@ bungo 11-01 (FIX1101A brief, LATE ITEMs 17c, 27e-27g, 29, 30-30e). NifSkope read
   tests/preciproof (green + 1 red). Spec: FO4-Extension-Formats branch location-recx-20261101 (joins 1.2) +
   F4FS_HANDOFF section 27.
 - Switch stage table regenerated (WW_INTSKY_RED, WW_LOCATION_RED live; the rest line numbers).
+## PERFFIX2 items 1 + 2 (2026-11-01): the ray-traced GI read once a screen texel; spec occlusion from it; no AO decals under RTXGI
+
+PERFRES1101 A gaps 2 and 10. Without the old baked GI (PRTOFF1) the PRT era's screen GI pass (celllights.cpp giHalfPass,
+cell_gihalf.frag) never ran, and every opaque fragment read the ray-traced GI volume itself (three cascades: up to 24
+atlas taps a fragment, with overdraw). The pass now runs the volume's read once a texel of the shared opaque g-buffer
+(its normal is the shading normal, fo4_default.frag cellAoPassOut) whenever a volume is up; the surfaces take the texel
+through the one upsample (cellGiHalfAt, now res/shaders/cell_gihalfat.glsl for both paths) and read the volume
+themselves only on a miss (an edge, a blended draw, a probe picture).
+- Rate: FULL by default (the inline picture: tests/ddgiscreen rel err <= 1.1e-3). WW_CELL_GI_RATE=half is opt-in
+  (p99 0.12 on bumpy normals: not the default); WW_CELL_GI_RATE=inline is the red (the old per-fragment read).
+- Specular occlusion (gap 10, RTXGI-only hole): the texel also carries the volume's sky visibility at the normal, half
+  way and at the mirror direction (one read: cellDdgiTwo + a new cellDdgiThree tap; 8 bits each in the irradiance
+  channels' low mantissa bits); cellSpecSky takes the three-point read at its lobe's bend instead of the removed PRT
+  grid. Smooth tiles |screen - lobe read| p99 0.027 (bar 0.05); random normal tiles p99 0.104 (that worst case fails
+  the bar; WW_CELL_SPECOCC=0 turns it off).
+- AO decals (gap 10): the baked decals scale only the PRT's sky term, so under RTXGI no pixel read them while a ticked
+  row still built and drew them; and on the volume's term they would darken the soup copies the volume already traces.
+  aoDecalWorks() = the row on and the PRT drawn (src/cellaodecalrule.h). Red WW_CELL_AODECAL_RTX_RED=1 (cell open).
+- Offline cost (MEASURED, synthetic Concord-shaped atlas, RTX 5070 Ti, 1920x1026): the read in a screen pass 0.22 ms
+  one volume / 0.61 ms three cascades (0.06 / 0.17 half rate). A half-float atlas reads the same (0.216 vs 0.217 ms):
+  the read is not bandwidth bound, so the compact RGB10A2/RG16F atlas the brief named is not built.
+- Debug (LATE ITEM 1b, the brown shade): WW_CELL_RTDDGI_SPEC tokens nosky=1 / nosun=1 / onebounce=1 rebuild the volume
+  with one light term removed, to measure which term turns outdoor shade brown. Debug only; default unchanged.
+- Tests: tests/ddgiscreen/ddgiscreen_gl.py (the real cell_gihalf.prog + cell_gihalfat.glsl; reds shift, nokey, visn
+  fail), tests/rtddgi_math (check lobe3, red LOBE3), tests/aodecalrtx (red: the old rule). Link sweeps: base 408/408
+  identical code to b0e5e9a3, RTDDGI 272/272, RTDDGI + cascades 272/272, PRT 408/408.
+- Default: the screen-pass read is ON wherever the volume is on (RTXGI itself still ships as before). Live cost rows and
+  the GI default-on proof: DEFAULT-ON OWED until notes/perffix2 hold 1 lands.
 
 ## FOAMOFF2 (FIX1101A, 2026-11-01): River foam and Contact foam stay OFF
 

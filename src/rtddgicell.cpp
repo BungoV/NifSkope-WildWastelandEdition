@@ -70,6 +70,11 @@ struct CellSpec
 	int every = 4;            // RTXCASCADE1: cascade L updates every every^L frames (rtddgimath.h cascadeDue)
 	int crays = 0;            // RTXCASCADE2 cost lever: a coarse cascade's rays (0 = `rays`, RTXCASCADE1's; rtddgimath.h cascadeRays)
 	int cskip = 0;            // RTXCASCADE2 cost lever: 1 = a coarse cascade skips the probes the finer one covers whole (cascadeCovered)
+	/* PERFFIX2 (LATE ITEM 1/1b, debug only): the volume's light split per pixel. Bits 1 nosky (misses black, the ground
+	 * model too: the volume holds the sun's bounce + the lights), 2 nosun (no sun ray lights a hit: the sky + its
+	 * bounces + the lights), 4 onebounce (the hits take no irradiance from the volume). Tokens nosky=1 nosun=1
+	 * onebounce=1; in the spec text, so in the build key: a live set rebuilds the volume */
+	int terms = 0;
 	QString text;
 };
 
@@ -100,6 +105,9 @@ CellSpec cellSpecNow()
 		else if ( k == QLatin1String( "cevery" ) && v >= 1.0 ) s.every = int( std::min( v, 64.0 ) );
 		else if ( k == QLatin1String( "crays" ) && v >= 0.0 ) s.crays = int( std::min( v, 256.0 ) );   // RTXCASCADE2
 		else if ( k == QLatin1String( "cskip" ) && v >= 0.0 ) s.cskip = v > 0.5 ? 1 : 0;              // RTXCASCADE2
+		else if ( k == QLatin1String( "nosky" ) && v > 0.5 ) s.terms |= 1;                          // PERFFIX2 (debug)
+		else if ( k == QLatin1String( "nosun" ) && v > 0.5 ) s.terms |= 2;
+		else if ( k == QLatin1String( "onebounce" ) && v > 0.5 ) s.terms |= 4;
 	}
 	/* FIX1031B (RECESSRES1): Ultra halves cascade 0's reach (its spacing then 140 u, the asked one, not the cap's 273.8)
 	 * and its 4th cascade keeps the far reach (1024 x 2^3 = High's 2048 x 2^2). Measured offline at 137 u (notes/fix1031b/
@@ -781,6 +789,13 @@ void startBuild( Cell & c, const ProbeSoup & soup, const WwCellLighting & lights
 		spec.red = QStringLiteral( "skybelow" );   // lane SKYBELOW1: the red, today's main miss and visibility
 	if ( rtddgiBounceRed() )   // FIX1101A: the red, today's main bounce read (renormalised, black past the usable probes)
 		spec.red += spec.red.isEmpty() ? QStringLiteral( "bouncenocover" ) : QStringLiteral( ",bouncenocover" );
+	spec.noSky = ( sp.terms & 1 ) != 0;	// PERFFIX2: the debug split (CellSpec terms)
+	spec.oneBounce = ( sp.terms & 4 ) != 0;
+	ProbeSkyLight skyUsed = sky;
+	if ( sp.terms & 2 ) {
+		for ( int k = 0; k < 3; k++ )
+			skyUsed.sun[k] = 0.0f;
+	}
 	if ( !boxFor( G, soup, eye, sp, spec.box, *b ) ) {
 		std::lock_guard<std::mutex> lk( b->m );
 		b->done = true;
@@ -794,7 +809,7 @@ void startBuild( Cell & c, const ProbeSoup & soup, const WwCellLighting & lights
 	auto soupCopy = std::make_shared<ProbeSoup>( soup );   // the kept soup may be replaced while the worker reads
 	b->msCopy = double( t.nsecsElapsed() ) / 1e6;
 	c.pending = b;
-	std::thread( [b, soupCopy, lights, sky, spec, share, from]() {
+	std::thread( [b, soupCopy, lights, sky = skyUsed, spec, share, from]() {
 		QElapsedTimer tm;
 		tm.start();
 		const bool ok = b->live.open( *soupCopy, lights, sky, spec, share, from ? &from->live : nullptr );
@@ -2032,6 +2047,21 @@ void rtddgiCellUniforms( Scene * scene )
 		return;
 	}
 	bindOne( scene, r, prog, locOn, c );
+}
+
+bool rtddgiCellReadUp( Scene * scene )
+{
+	Renderer * r = scene ? scene->renderer : nullptr;
+	if ( !r || !rtddgiCellShaderDefine() )
+		return false;
+	Cell & c = cell();
+	if ( c.nif != scene->nifModel )
+		return false;
+	// the uniforms' two tests (the cascades' one buffer, else bindOne's volume): either up = some program reads a volume
+	Combined & K = combined();
+	if ( K.count > 0 && cascCell( 0 ).live && K.owner == r && K.tex )
+		return true;
+	return c.live && c.uploaded && c.tex && c.glOwner == r;
 }
 
 /* FIX1101A (LATE ITEM 9, bungo 10-31 "and for GI, the pic of it covering further areas?"): WW_CELL_RTDDGI_VIEW_BOXES=1,

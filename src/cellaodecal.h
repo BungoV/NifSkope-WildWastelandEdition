@@ -89,6 +89,8 @@ struct AoDecalSet
 };
 
 bool aoDecalOn();
+//! PERFFIX2: aoDecalOn() and something reads the decals (the old PRT; red WW_CELL_AODECAL_RTX_RED=1 builds them anyway)
+bool aoDecalWorks();
 void aoDecalSetOn( bool on );
 	//! "car", "dumpster", "furniture", "crate" or empty (not a decal kind)
 QString aoDecalKind( const QString & model );
