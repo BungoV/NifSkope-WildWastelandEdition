@@ -46,6 +46,8 @@ struct Switches
 {
 	// lane SIGNDROP1: atocc = an alpha-testing draw may stand in the prepass again (the old gate)
 	bool on = true, cone = true, occ = true, frustum = true, hard = false, nocull = false, atocc = false;
+	// lane PERFFIX4: timer = the census read back BEFORE the closing timestamp, in the same frame (the old order)
+	bool timer = false;
 	Switches()
 	{
 		on = qEnvironmentVariable( "WW_GPUDRIVEN_B", QStringLiteral( "1" ) ).trimmed() != QLatin1String( "0" );
@@ -57,6 +59,7 @@ struct Switches
 			hard = hard || r.trimmed() == QLatin1String( "hard" );
 			nocull = nocull || r.trimmed() == QLatin1String( "nocull" );
 			atocc = atocc || r.trimmed() == QLatin1String( "atocc" );
+			timer = timer || r.trimmed() == QLatin1String( "timer" );
 		}
 	}
 };
@@ -189,6 +192,7 @@ struct Gpu
 	QHash<const Shape *, Cluster> clusters;
 	GLuint q[4] = {};
 	bool qPending = false;
+	bool censusPending = false;	// lane PERFFIX4: last frame's census counts wait in `census` (read before it is zeroed)
 	qint64 builds = 0, compactions = 0;
 };
 
@@ -1038,6 +1042,14 @@ void prepare( Scene * scene )
 	if ( timed )
 		g->glQueryCounter( G.q[2], GL_TIMESTAMP );
 
+	/* lane PERFFIX4: the census of the LAST frame's cull, read now (a frame late) so that no readback waits on this
+	 * frame's dispatch, and the closing timestamp brackets only the GPU work. */
+	if ( G.censusPending && G.census ) {
+		g->glBindBuffer( GL_SHADER_STORAGE_BUFFER, G.census );
+		g->glGetBufferSubData( GL_SHADER_STORAGE_BUFFER, 0, 32, f.counts );
+		g->glBindBuffer( GL_SHADER_STORAGE_BUFFER, 0 );
+	}
+	G.censusPending = false;
 	// 3. the cull: one command per cluster, in the shapes' order
 	if ( !items.empty() ) {
 		stream( g, G.jobs, G.jobsBytes, jobs.size() * sizeof( JobGpu ), jobs.data() );
@@ -1095,10 +1107,12 @@ void prepare( Scene * scene )
 		for ( GLuint b = 0; b < 6; b++ )
 			g->glBindBufferBase( GL_SHADER_STORAGE_BUFFER, b, 0 );
 		g->glUseProgram( 0 );
-		if ( GpuDriven::census() ) {
+		if ( GpuDriven::census() && sw().timer ) {	// the red: read now, before the closing stamp (a CPU round trip)
 			g->glBindBuffer( GL_SHADER_STORAGE_BUFFER, G.census );
 			g->glGetBufferSubData( GL_SHADER_STORAGE_BUFFER, 0, 32, f.counts );
 			g->glBindBuffer( GL_SHADER_STORAGE_BUFFER, 0 );
+		} else if ( GpuDriven::census() ) {
+			G.censusPending = true;	// read at the next frame's cull, before the buffer is zeroed
 		}
 	} else {
 		std::fill( std::begin( f.counts ), std::end( f.counts ), 0u );
@@ -1254,8 +1268,9 @@ void finish()
 				.arg( gp->clusters.size() ).arg( gp->mUsed ).arg( gp->mCap ).arg( gp->mGarbage ).arg( gp->builds )
 				.arg( gp->compactions ).arg( sw().hard ? QStringLiteral( " RED hard" ) : sw().nocull ? QStringLiteral( " RED nocull" )
 				: sw().atocc ? QStringLiteral( " RED atocc" ) : QString() ) );
-		std::fprintf( stderr, "gpudriven b time: cpu %.3f ms gpu prepass %.3f hiz %.3f cull %.3f ms\n", f.cpuMs, f.gpuMs[0],
-			f.gpuMs[1], f.gpuMs[2] );
+		std::fprintf( stderr, "gpudriven b time: cpu %.3f ms gpu prepass %.3f hiz %.3f cull %.3f ms%s\n", f.cpuMs, f.gpuMs[0],
+			f.gpuMs[1], f.gpuMs[2], sw().timer ? " RED timer (census read before the closing stamp)"
+			: " (census a frame late)" );
 	}
 	f.flushing = false;
 	f.notes.clear();
