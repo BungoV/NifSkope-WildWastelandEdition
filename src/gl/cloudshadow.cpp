@@ -352,7 +352,8 @@ void wwCloudShadowPass( Scene * scene )
 	if ( !wwLookdevActive() )
 		return off( QStringLiteral( "refused(no weather-lit view)" ) );
 	const WwCellLighting * cl = wwCellLightsFor( scene->nifModel );
-	if ( cl && cl->interior )
+	// lane INTSKY1: a sunlit interior with the live weather takes the clouds' shadows through its openings
+	if ( cl && cl->interior && !( wwCellSunlitNow( cl ) && wwCellSkyLitNow( cl ) ) )
 		return off( QStringLiteral( "refused(interior)" ) );
 	float sunTo[3], disc[3];
 	wwLookdevShadowLight( sunTo, disc );

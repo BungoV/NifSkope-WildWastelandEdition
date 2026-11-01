@@ -25,6 +25,7 @@ BSD License - see nifskope.h
 #include "gl/cloudlightning.h"	// lane CLOUD6f: the storm share of the lightning
 #include "gl/atmomath.h"	// lane SKYA (ATMOCHECK1): the weather tint table
 #include "gl/skyephem.h"	// lane EPHEM1: the real moon's phase texture
+#include "gl/skyplacerun.h"	// lane INTSKY1: the worldspace's place
 #include "gl/skydisc.h"	// lane SKYDISC1: our moon globe's math
 #include "gl/moonlight.h"	// lane FIX1101A (moon): the one key light round the clock
 #include "gl/celllooks.h"	// lane SKYDISC1: the real-sky look decides the moon's frame
@@ -814,8 +815,8 @@ MoonGeo moonGeo( const LdState & s, const float gamePos[3] )
 		for ( int k = 0; k < 3; k++ )
 			g.D[k] = len > 1e-9 ? gamePos[k] / len : ( k == 2 ? 1.0 : 0.0 );
 		g.P[0] = 0.0;
-		g.P[1] = std::cos( wwephem::kBostonLat * wwskydisc::kRad );
-		g.P[2] = std::sin( wwephem::kBostonLat * wwskydisc::kRad );
+		g.P[1] = std::cos( wwSkyPlaceNow().latDeg * wwskydisc::kRad );	// lane INTSKY1: the place's latitude
+		g.P[2] = std::sin( wwSkyPlaceNow().latDeg * wwskydisc::kRad );
 		const int p = std::max( 0, wwMoonPhase( s.gameDay, s.clim.tnam[5] ) );
 		double elong = 180.0 + 45.0 * p;
 		if ( !wwMoonRed( "phase8" ) ) {
@@ -859,7 +860,18 @@ float moonAlphaNow( const LdState & s )
 //! the moon's light against the full moon's: our globe's phase angle with the Physical Sky on, else the engine's phase
 float moonLightFactor( const LdState & s )
 {
-	return wwAtmoDiscs() ? wwAtmoMoonFactorDeg( moonAlphaNow( s ) ) : wwAtmoMoonFactor( wwMoonPhase( s.gameDay, s.clim.tnam[5] ) );
+	const float phase = wwAtmoDiscs() ? wwAtmoMoonFactorDeg( moonAlphaNow( s ) ) : wwAtmoMoonFactor( wwMoonPhase( s.gameDay, s.clim.tnam[5] ) );
+	/* lane INTSKY1 (LATE ITEM 27f): with the real moon (its place and date, gl/skyplacerun.h) a moon under the horizon
+	 * lights nothing: its light fades over its last 3.5 degrees (refraction and the disc's half width at -0.5); the
+	 * air on its way (its elevation) is wwAtmoKeyLight's, which reads the light's direction, now the moon's. Red
+	 * WW_MOONLIGHT_RED=engine: the phase alone, as before */
+	double m[3];
+	if ( wwAtmoNightOn() && wwEnvStr( "WW_MOONLIGHT_RED" ).trimmed() != QLatin1String( "engine" )
+		&& wwSkyMoonReal( s.hour, s.gameDay, m, nullptr, nullptr ) ) {
+		const double el = std::asin( std::clamp( m[2], -1.0, 1.0 ) ) * 180.0 / 3.14159265358979323846;
+		return phase * float( std::clamp( ( el + 0.5 ) / 3.5, 0.0, 1.0 ) );
+	}
+	return phase;
 }
 
 /* lane PERF1: every shape's program setup asks for the light several times a frame; it is a pure function of
@@ -2972,6 +2984,8 @@ bool wwLookdevDrawBackground( Scene * scene )
 	LdState & sx = st();
 	const WwCellLighting * icl = scene->nifModel ? wwCellLightsFor( scene->nifModel ) : nullptr;
 	sx.interior = icl && icl->interior;	// lane WEATHERBLEND2: the next pick snaps in an interior (the game's sky mode)
+	if ( sx.interior && wwCellSkyLitNow( icl ) && !( wwIntSkyRed() & 1 ) )
+		sx.interior = false;	// lane INTSKY1: a live-weather interior runs the full sky mode: its weather changes blend
 	if ( scene->nifModel != sx.lastDoc ) {	// lane WEATHERBLEND3: another cell is a teleport (PositionPlayer: PassTime)
 		if ( sx.lastDoc ) {
 			sx.snapFlags |= WwSnapPassTime;
@@ -2990,7 +3004,8 @@ bool wwLookdevDrawBackground( Scene * scene )
 		// lane SKYFULL1: the game draws no sky in an interior unless its cell has Show Sky (DATA bit 7); with the
 		// Sky row on, such an interior gets the black clear and no pass at all (red "interiorsky": the sky leaks in)
 		const WwCellLighting * cl = scene->nifModel ? wwCellLightsFor( scene->nifModel ) : nullptr;
-		if ( sx.sky && cl && cl->interior && !cl->showSky && !wwLookdevRed( "interiorsky" ) ) {
+		// lane INTSKY1: a sunlit interior (a .recx Cells `sunlight` on a cell without Show Sky) draws the real sky too
+		if ( sx.sky && cl && cl->interior && !cl->showSky && !wwCellSunlitNow( cl ) && !wwLookdevRed( "interiorsky" ) ) {
 			GLfloat was[4];
 			glGetFloatv( GL_COLOR_CLEAR_VALUE, was );
 			glClearColor( 0.0f, 0.0f, 0.0f, 1.0f );

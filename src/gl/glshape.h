@@ -140,6 +140,10 @@ public:
 	//! lane CSM1: an opaque, depth-writing, non-effect shape goes into the sun's shadow map
 	bool wwCastsSunShadow() const { return !drawInSecondPass && !translucent && depthWrite && !bsesp; }
 	bool wwDoubleSided() const { return isDoubleSided; }
+	//! lane INTSKY1: a lighting-shader decal (flags or material); a sunlit interior's sun passes through it
+	bool wwSurfaceDecal() const { return surfaceDecal; }
+	//! lane INTSKY1: a shape that stops rain from above (glass too); effect shaders (cards, particles) never do
+	bool wwBlocksRain() const { return !bsesp; }
 	//! lane SHADOWSHIMMER3 (FARSWAYLEGACY): the tree flag every pass sways by (TREECROWN1's FarLOD Tree_Anim rule included)
 	bool wwTreeAnim() const { return isVertexAlphaAnimation; }
 	//! lane FXD1: with Cell lights on, a second-pass decal of the lighting shader draws before the blended shapes

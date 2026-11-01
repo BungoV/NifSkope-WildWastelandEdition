@@ -10,6 +10,8 @@
 #include "gl/glscene.h"
 #include "gl/lookdevstage.h"
 #include "gl/precipmath.h"
+#include "gl/preciproof.h"	// lane INTSKY1: rain only under open sky in a sunlit interior
+#include "gl/glshape.h"
 #include "gl/precipspec.h"
 #include "gl/renderer.h"
 #include "gl/sunshadow.h"
@@ -222,6 +224,72 @@ bool wwCellPrecipWantsFrames( Scene * scene )
 	return scene && wwLookOn( WwLook::Precip ) && s.lastDrawn > 0 && !s.timePinned;
 }
 
+namespace
+{
+/* lane INTSKY1: the roof map of the open interior, built once per document (its shapes do not move); the shape count
+ * keys it too (a live rebuild of the cell) */
+struct PcRoof
+{
+	const void * nif = nullptr;
+	int shapes = -1;
+	WwRoofMap map;
+	QString note;
+};
+
+PcRoof & pcRoof()
+{
+	static PcRoof r;
+	return r;
+}
+
+const WwRoofMap & pcRoofFor( Scene * scene )
+{
+	PcRoof & R = pcRoof();
+	int shapes = 0;
+	for ( Node * node : scene->nodes.list() )
+		if ( const Shape * sh = dynamic_cast<const Shape *>( node ); sh && sh->isVisible() && sh->wwBlocksRain() && !sh->wwFarInstData() )
+			shapes++;
+	if ( R.nif == scene->nifModel && R.shapes == shapes )
+		return R.map;
+	R = PcRoof();
+	R.nif = scene->nifModel;
+	R.shapes = shapes;
+	QElapsedTimer t;
+	t.start();
+	float lo[2] = { INFINITY, INFINITY }, hi[2] = { -INFINITY, -INFINITY };
+	std::vector<float> tri;
+	for ( Node * node : scene->nodes.list() ) {
+		const Shape * sh = dynamic_cast<const Shape *>( node );
+		if ( !sh || !sh->isVisible() || !sh->wwBlocksRain() || sh->wwFarInstData() )
+			continue;
+		const Transform & T = sh->worldTrans();
+		for ( const Triangle & f : sh->triangles ) {
+			if ( f[0] >= sh->verts.size() || f[1] >= sh->verts.size() || f[2] >= sh->verts.size() )
+				continue;
+			for ( int k = 0; k < 3; k++ ) {
+				const Vector3 w = T * sh->verts.at( f[k] );
+				tri.insert( tri.end(), { w[0], w[1], w[2] } );
+				lo[0] = std::min( lo[0], w[0] );
+				lo[1] = std::min( lo[1], w[1] );
+				hi[0] = std::max( hi[0], w[0] );
+				hi[1] = std::max( hi[1], w[1] );
+			}
+		}
+	}
+	if ( tri.empty() ) {
+		R.note = QStringLiteral( "no shapes" );
+		return R.map;
+	}
+	R.map.reset( lo[0], lo[1], hi[0], hi[1] );
+	for ( size_t i = 0; i + 8 < tri.size(); i += 9 )
+		R.map.addTri( &tri[i], &tri[i + 3], &tri[i + 6] );
+	R.note = QStringLiteral( "roof map %1 x %2 texels of %3 u from %4 shapes, %5 triangles, %6 ms" ).arg( R.map.nx ).arg( R.map.ny )
+		.arg( double( R.map.cell ), 0, 'f', 1 ).arg( shapes ).arg( tri.size() / 9 ).arg( t.elapsed() );
+	std::fprintf( stderr, "precip: %s\n", qPrintable( R.note ) );
+	return R.map;
+}
+}	// namespace
+
 int wwCellPrecipDraw( Scene * scene )
 {
 	PcState & s = st();
@@ -233,10 +301,14 @@ int wwCellPrecipDraw( Scene * scene )
 	if ( !scene || !scene->renderer || !wwCellLightsWanted( scene ) || !wwCellHdrActive() )
 		return 0;
 	const WwCellLighting * CL = wwCellLightsFor( scene->nifModel );
-	if ( CL && CL->interior ) {
+	// lane INTSKY1: an interior with the live weather (wwCellSunlit().weather) gets its rain, only under open sky
+	if ( CL && CL->interior && !wwCellSkyLitNow( CL ) ) {
 		s.echo = QStringLiteral( "precip: none (interior)" );
 		return 0;
 	}
+	const bool roofTest = CL && CL->interior && !( wwIntSkyRed() & 16 );
+	const WwRoofMap * roof = roofTest ? &pcRoofFor( scene ) : nullptr;
+	long roofDropped = 0;
 	redBits() = redFromEnv();
 
 	// the weathers: the current one at pct, the one left behind at 1 - pct
@@ -362,6 +434,10 @@ int wwCellPrecipDraw( Scene * scene )
 				const Particle p = particleAt( field, b, i, tier != 0, t, cam, wv );
 				if ( p.inside )
 					continue;
+				if ( roof && !roof->open( p.pos ) ) {	// lane INTSKY1: under a roof
+					roofDropped++;
+					continue;
+				}
 				const int cell = p.variant % cells;
 				const float v[kFloats] = { float( p.pos[0] ), float( p.pos[1] ), float( p.pos[2] ), 1.0f, 1.0f, 1.0f, alpha,
 					float( cell % std::max( 1, L.spec.cols ) ) * cu, float( cell / std::max( 1, L.spec.cols ) ) * cv,
@@ -380,7 +456,9 @@ int wwCellPrecipDraw( Scene * scene )
 			.arg( L.spec.texture );
 	}
 	const QString echo = QStringLiteral( "precip: on, wind %1 u/s, red %2: %3" ).arg( std::hypot( wv[0], wv[1] ), 0, 'f', 1 )
-		.arg( redBits() ).arg( census.join( QStringLiteral( "; " ) ) );
+		.arg( redBits() ).arg( census.join( QStringLiteral( "; " ) ) )
+		+ ( roof ? QStringLiteral( "; interior under open sky only (%1)" ).arg( pcRoof().note )
+			: CL && CL->interior ? QStringLiteral( "; interior, RED WW_INTSKY_RED=rain (no roof test)" ) : QString() );
 	s.echo = echo;
 	if ( echo != s.said ) {
 		s.said = echo;

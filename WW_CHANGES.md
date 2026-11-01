@@ -31,6 +31,38 @@ and the far tier keeps its own fade. Real contact (a caster within 48 u) keeps i
 part prints `reach=48`. Red: `WW_SHADOW_RED=contactreach` (the whole march, as before; live). Gate: tests/contactreach1
 (the twin on a wire 85 u off a wall at ~2700 u: composed stair 1.30 -> 0.20 px, darkness CV 0.155 -> 0.024; a wire 6 u
 off keeps 95.8 % of its contact line; the red fails). Link sweeps 408 / 272 / 408 LINK OK.
+## INTSKY1 (2026-11-01): sunlit interiors (real sky, sun and live weather) and every worldspace's own sun place
+
+bungo 11-01 (FIX1101A brief, LATE ITEMs 17c, 27e-27g, 29, 30-30e). NifSkope reads what the game and our files give.
+
+- **The sun's place (`location`), no file needed.** The real sun and moon (Sun Path Real + Real sun and moon) are now
+  computed where each worldspace is: the climate's `.recx` `location` > a built-in table by worldspace > the parent
+  worldspace's answer > the table by climate > Boston (src/gl/skyplace.h, the runtime src/gl/skyplacerun.cpp). The
+  table is F4FS's own Places numbers: Commonwealth = Boston 42.36 / -71.06, Far Harbor = Bar Harbor 44.39 / -68.20,
+  Nuka-World 42.45 / -71.85; all local mean time, start 2287-10-23. An interior takes the worldspace on its location
+  chain (LCTN PNAM), else its plugin's placed worldspace, else the Commonwealth. src/gl/skyephem.h takes a time zone
+  (NaN = local mean time, the EPHEM1 numbers bit for bit) and a start date. Noon 2287-10-23: Commonwealth 36.04 deg,
+  Far Harbor 34.02 deg; day 10.58 h vs 10.48 h. Census `sky place: ...` once per change; CLI `-no-gui skyplace
+  --plugins <list> [--interior <EDID>|*]`. Red WW_LOCATION_RED=table|noparent|norecx (live). Unit tests/skyplace
+  (green + 6 reds). The moon's phase and position follow the place too, and (Real sun and moon) the night light comes
+  FROM the real moon while it is up and fades out over its last 3.5 deg under the horizon (shadowset.cpp
+  wwSunPathApply, lookdevstage.cpp moonLightFactor; red WW_MOONLIGHT_RED=engine). Its brightness stays the weather's
+  night key x Krisciunas & Schaefer x the air at the moon's elevation (the FO4CS MOON2 rule); absolute lux is LATE
+  ITEM 24c's (FIX1101A).
+- **Sunlit interiors.** An interior whose WINNING CELL record has DATA 0x100 (Use Sky Lighting), or a `.recx` Cells
+  `sunlight` {enabled, weather} on it, is lit as outdoors, as the game's full sky mode is (gl/cellsunlit.h decides,
+  celllights.cpp wwCellSunlit): the weather's sun x Sunlight Scale from the real sun direction, the weather's DALC, the
+  shaders' cellInterior false; its imagespace, placed lights and fog distances stay. The sun cascades run there
+  whatever the Shadows row, and every caster draws both faces (one-sided walls are solid from behind); decals pass the
+  sun, as glass and effect cards already did (sunshadow.cpp). The GI volume takes the weather's sky and sun there
+  (rtddgicell.cpp; back faces stay hits, below the horizon 0), so sky and sun come in only through the openings. The
+  weather change blends (no interior snap), cloud shadows run, and rain falls only under open sky (a top-down roof
+  height map of the cell, gl/preciproof.h). Unflagged interiors take every interior path as before. Census lines
+  `cell sunlit: ...`, `sun cascades: sunlit interior ...` (the rare-mesh list by material), `precip: roof map ...`.
+  Reds WW_INTSKY_RED=off|norecx|onesided|decals|rain (live). Units tests/cellsunlit (green + 4 reds),
+  tests/preciproof (green + 1 red). Spec: FO4-Extension-Formats branch location-recx-20261101 (joins 1.2) +
+  F4FS_HANDOFF section 27.
+- Switch stage table regenerated (WW_INTSKY_RED, WW_LOCATION_RED live; the rest line numbers).
 
 ## FOAMOFF2 (FIX1101A, 2026-11-01): River foam and Contact foam stay OFF
 

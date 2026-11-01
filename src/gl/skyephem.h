@@ -36,10 +36,14 @@ struct Body
 };
 
 // Fallout's calendar has no leap years (FO4CS SolarPosition.h, the calendar mapping); the game starts 2287-10-23
-inline Date dateFromGameDay( double gameDay, double hour )
+// lane INTSKY1: a `location` startDate moves day 0 (skyplace.h); the default start is the game's
+inline Date dateFromGameDay( double gameDay, double hour, int startYear = 2287, int startMonth = 10, int startDay = 23 )
 {
 	static const int dim[13] = { 0, 31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31 };
 	Date d;
+	d.year = startYear;
+	d.month = startMonth >= 1 && startMonth <= 12 ? startMonth : 10;
+	d.day = startDay >= 1 && startDay <= dim[d.month] ? startDay : 1;
 	long long n = (long long) std::floor( gameDay > 0.0 ? gameDay : 0.0 );
 	while ( n > 0 ) {
 		const int left = dim[d.month] - d.day;	// days to the month's last day
@@ -122,17 +126,19 @@ inline void horizontal( double latDeg, double declDeg, double haDeg, Body & b )
 	b.valid = std::isfinite( b.dir[0] ) && std::isfinite( b.dir[1] ) && std::isfinite( b.dir[2] );
 }
 
-// UT Julian day of a local-mean-time date at a longitude
-inline double julianDayLmt( const Date & d, double lonDeg )
+/* UT Julian day of a local-mean-time date at a longitude; lane INTSKY1: tzHours finite = the clock reads that zone's
+ * standard time instead (a `location` timeZone, skyplace.h), NaN = local mean time (lon / 15), as before */
+inline double julianDayLmt( const Date & d, double lonDeg, double tzHours = NAN )
 {
-	return julianDay( d.year, d.month, d.day + ( d.hour - lonDeg / 15.0 ) / 24.0 );
+	const double tz = std::isfinite( tzHours ) ? tzHours : lonDeg / 15.0;
+	return julianDay( d.year, d.month, d.day + ( d.hour - tz ) / 24.0 );
 }
 
-inline Body sun( const Date & d, double latDeg = kBostonLat, double lonDeg = kBostonLon )
+inline Body sun( const Date & d, double latDeg = kBostonLat, double lonDeg = kBostonLon, double tzHours = NAN )
 {
 	Body b;
-	const double tz = lonDeg / 15.0;
-	b.julianDay = julianDayLmt( d, lonDeg );
+	const double tz = std::isfinite( tzHours ) ? tzHours : lonDeg / 15.0;
+	b.julianDay = julianDayLmt( d, lonDeg, tzHours );
 	const double t = centuries( b.julianDay );
 	double sdecl = std::sin( obliquityDeg( t ) * kRad ) * std::sin( sunApparentLonDeg( t ) * kRad );
 	sdecl = sdecl < -1.0 ? -1.0 : ( sdecl > 1.0 ? 1.0 : sdecl );
@@ -175,10 +181,10 @@ inline double elongationDeg( double jd )
 	return e < 0.0 ? e + 360.0 : e;
 }
 
-inline Body moon( const Date & d, double latDeg = kBostonLat, double lonDeg = kBostonLon )
+inline Body moon( const Date & d, double latDeg = kBostonLat, double lonDeg = kBostonLon, double tzHours = NAN )
 {
 	Body b;
-	b.julianDay = julianDayLmt( d, lonDeg );
+	b.julianDay = julianDayLmt( d, lonDeg, tzHours );
 	double lon, lat;
 	moonEcliptic( b.julianDay, lon, lat );
 	const double obl = obliquityDeg( centuries( b.julianDay ) );

@@ -231,6 +231,10 @@ HEADERS += \
 	src/gl/sunshadow.h \
 	src/gl/shadowset.h \
 	src/gl/skyephem.h \
+	src/gl/skyplace.h \
+	src/gl/skyplacerun.h \
+	src/gl/cellsunlit.h \
+	src/gl/preciproof.h \
 	src/gl/skydisc.h \
 	src/gl/fxparity.h \
 	src/gl/fxparityrules.h \
@@ -595,6 +599,7 @@ SOURCES += \
 	src/gl/atmosphere.cpp \
 	src/gl/cloudmap.cpp \
 	src/gl/weatherrecx.cpp \
+	src/gl/skyplacerun.cpp \
 	src/gl/cloudvol.cpp \
 	src/gl/cloudshadow.cpp \
 	src/gl/cloudfly.cpp \

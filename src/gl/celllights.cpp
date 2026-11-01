@@ -42,8 +42,11 @@ BSD License - see nifskope.h
 #include "gl/cloudvol.h"	// lane LIGHTNING2: a storm's flash on the exterior ambient (wwLightningGround)
 #include "cellworldanim.h"	// lane NIFXLIGHT3: the world clock a .nifx light's dimmer follows
 #include "gl/atmosphere.h"	// lane FIX1101A (atmo): wwAtmoWbGain, the test white balance
+#include "gl/cellsunlit.h"	// lane INTSKY1: the sunlit interior rule
 
 #include <QDateTime>
+#include <QDir>	// lane INTSKY1: the Cells file in the census
+#include <QJsonValue>
 #include <QElapsedTimer>
 #include <QFile>
 #include <QFileInfo>
@@ -2035,7 +2038,7 @@ void wwCellLightsUniforms( Scene * scene )
 	prog->uni1b( "cellGiOn", giDraw );
 	rtddgiCellUniforms( scene );	// lane RTXGI1 M2: the ray-traced GI volume (src/rtddgicell.h); no-op in an off program
 	// lane PRTOFF1: without the PRT a weather-lit exterior's sky is the ray-traced volume's (its misses: cell_lights.glsl CELL_GI_UP)
-	const bool ddgiSky = !wwCellPrtOn() && L && !L->interior && wwLookdevActive();
+	const bool ddgiSky = !wwCellPrtOn() && L && wwCellAsOutdoor( L ) && wwLookdevActive();	// lane INTSKY1: + sunlit interiors
 	prog->uni1b( "cellGiSky", ( giDraw && !skyDraw && G->skyLit ) || ddgiSky );	// lane SKY1 (never on the sky-share grid)
 	prog->uni1f( "cellSkyVis", wwCellSkyVis() );	// lane SKYSTR1: the Sky visibility row, for the AO decals
 	// lane SPECOCC1: the sky grid's slabs start after the GI's own (6, or 12 with the rooms' second slot)
@@ -2256,17 +2259,21 @@ void wwCellLightsUniforms( Scene * scene )
 	}
 	/* An exterior's directional is the weather's sun (or moon): Lookdev's light, TO it, world, linear.
 	 * Only the cell programs take it; Lookdev off (no weather) = the old path. */
+	/* lane INTSKY1: a sunlit interior is lit as outdoors (the game's full sky mode): the weather's sun x Sunlight Scale with
+	 * its shadows, the weather's DALC, the exterior lit-effect base; the cell's own lights, imagespace and fog distances
+	 * stay. Unflagged interiors take every interior path as before */
+	const bool outdoor = wwCellAsOutdoor( L );
 	bool hasDir = L->hasDirectional;
 	float dirTo[3] = { L->dirTo[0], L->dirTo[1], L->dirTo[2] }, dirColor[3] = { L->dirColor[0], L->dirColor[1], L->dirColor[2] };
 	/* The game's lit surfaces take the sun x the imagespace Sunlight Scale, so the sun-to-ambient ratio (and the
 	 * bounce the probes carry) matches the game. 1 indoors. */
-	const float sunScale = ( !L->interior && wwLookdevActive() ) ? wwLookdevSunlightScale() : 1.0f;
+	const float sunScale = ( outdoor && wwLookdevActive() ) ? wwLookdevSunlightScale() : 1.0f;
 	prog->uni1f( "cellSunScale", sunScale );
 	/* lane VOLAIR1 (LAMPAIR1): the air takes the surfaces' exterior sun and sky (the weather's light x Sunlight Scale,
 	 * its DALC) so it is lit by the light the records give, not the fog-sun glare colour; red WW_CELL_AIR_RED=oldsun */
 	WW_SWITCH_STATIC( bool, airOldSun, wwEnvStr( "WW_CELL_AIR_RED" ).split( ',' ).contains( QStringLiteral( "oldsun" ) ) );
 	const bool extProg = wwIsCellProgramName( prog->name ) || wwIsCellDecalProgramName( prog->name ) || ( prog->name == "cell_volair.prog" && !airOldSun );
-	if ( !L->interior && wwLookdevActive() && extProg ) {
+	if ( outdoor && wwLookdevActive() && extProg ) {
 		float dalc[6][3], dif[4] = {}, amb[4] = {};
 		if ( wwLookdevDalc( dalc ) ) {
 			wwLookdevLight( dirTo, dif, amb );
@@ -2280,10 +2287,11 @@ void wwCellLightsUniforms( Scene * scene )
 		const float sunKey[9] = { hasDir ? 1.0f : 0.0f, dirTo[0], dirTo[1], dirTo[2], dirColor[0], dirColor[1], dirColor[2],
 			prog->uniLocation( "csmMap" ) >= 0 ? 1.0f : 0.0f, sunScale };
 		const QString line = !sunIn.changed( sunKey, sizeof( sunKey ) ) ? sunLast : hasDir
-			? QStringLiteral( "cell sun: exterior directional=weather to=%1,%2,%3 color=%4,%5,%6 (linear) shadows=%7 sunlight scale=%8" )
+			? QStringLiteral( "cell sun: %9 directional=weather to=%1,%2,%3 color=%4,%5,%6 (linear) shadows=%7 sunlight scale=%8" )
 				.arg( double( dirTo[0] ), 0, 'f', 5 ).arg( double( dirTo[1] ), 0, 'f', 5 ).arg( double( dirTo[2] ), 0, 'f', 5 )
 				.arg( double( dirColor[0] ), 0, 'f', 5 ).arg( double( dirColor[1] ), 0, 'f', 5 ).arg( double( dirColor[2] ), 0, 'f', 5 )
 				.arg( prog->uniLocation( "csmMap" ) >= 0 ? 1 : 0 ).arg( double( sunScale ), 0, 'f', 3 )
+				.arg( L->interior ? QStringLiteral( "sunlit interior" ) : QStringLiteral( "exterior" ) )
 			: QStringLiteral( "cell sun: exterior refused (no weather loaded, or a black sun)" );
 		if ( line != sunLast ) {
 			fprintf( stderr, "%s\n", qPrintable( line ) );
@@ -2314,7 +2322,7 @@ void wwCellLightsUniforms( Scene * scene )
 		// the decal programs keep the surfaces' sun and take the lit-effect base as cellFxBase (fxRoomLit)
 		const bool roomProg = wwIsCellDecalProgramName( prog->name );
 		float dalc[6][3];
-		if ( !L->interior && roomProg ) {
+		if ( outdoor && roomProg ) {
 			float base[3] = { 0.0f, 0.0f, 0.0f };
 			if ( wwLookdevActive() && wwLookdevDalc( dalc ) ) {
 				float dif[4] = {}, amb[4] = {};
@@ -2329,7 +2337,7 @@ void wwCellLightsUniforms( Scene * scene )
 			}
 			prog->uni3f( "cellFxBase", base[0], base[1], base[2] );
 		}
-		if ( !L->interior && fxProg && wwLookdevActive() && wwLookdevDalc( dalc ) ) {
+		if ( outdoor && fxProg && wwLookdevActive() && wwLookdevDalc( dalc ) ) {
 			float dif[4] = {}, amb[4] = {};
 			wwLookdevLight( dirTo, dif, amb );
 			float fxCol[3] = { dif[0], dif[1], dif[2] };
@@ -2359,7 +2367,7 @@ void wwCellLightsUniforms( Scene * scene )
 				fprintf( stderr, "%s\n", qPrintable( line ) );
 				fxSunLast = line;
 			}
-		} else if ( !L->interior && fxProg ) {
+		} else if ( outdoor && fxProg ) {
 			static bool fxSunSaid = false;
 			if ( !fxSunSaid ) {
 				fprintf( stderr, "cell fx sun: exterior lit effects take no sun (no weather loaded)\n" );
@@ -2369,7 +2377,7 @@ void wwCellLightsUniforms( Scene * scene )
 		/* Indoors the game's lit-effect setup also multiplies in the cell imagespace's Sunlight Scale (HNAM[6]);
 		 * here only under the scale red, since the surfaces take scale 1. */
 		WW_SWITCH_STATIC( bool, fxIntRed, wwEnv( "WW_CELL_FXLIT_INT_RED" ).trimmed() == "noscale" );
-		if ( L->interior && fxProg ) {
+		if ( !outdoor && fxProg ) {
 			const bool scaled = fxScaleRed && !fxIntRed && L->hasImageSpace;
 			if ( scaled )
 				for ( int c = 0; c < 3; c++ )
@@ -2391,7 +2399,7 @@ void wwCellLightsUniforms( Scene * scene )
 	 * indoors and out. The axis is the light's TRAVEL direction (Z- lights an up-facing normal). */
 	bool extDalc = false;
 	float ambLum = -1.0f;	// lane SHADOWPAR1: the DALC's mean luminance (linear) for the air tail's ambient share
-	if ( !L->interior && hasDir && wwLookdevActive() && extProg ) {
+	if ( outdoor && hasDir && wwLookdevActive() && extProg ) {
 		WW_SWITCH_STATIC( QByteArray, extRed, wwEnv( "WW_CELL_EXTAMB_RED" ).trimmed() );
 		float w[6][3];
 		if ( extRed != "flat" && wwLookdevDalc( w ) ) {
@@ -2450,7 +2458,7 @@ void wwCellLightsUniforms( Scene * scene )
 		const float sunLum = 0.2126f * dirColor[0] + 0.7152f * dirColor[1] + 0.0722f * dirColor[2];
 		wwShadowSetAirAmbientShare( ambLum / std::max( ambLum + 0.25f * sunLum, 1e-6f ) );
 	}
-	prog->uni1b( "cellInterior", L->interior );
+	prog->uni1b( "cellInterior", !outdoor );	// lane INTSKY1: a sunlit interior shades as outdoors
 	prog->uni3f( "cellCenter", L->center[0], L->center[1], L->center[2] );
 	prog->uni1i( "cellProbe", s.measuring ? 6 : s.probe );
 	// a harness reads a dark linear frame through 8 bits; the imagespace's own measure stays x 1
@@ -2512,7 +2520,119 @@ int wwCellSkyLitRed()
 
 bool wwCellSkyLitNow( const WwCellLighting * L )
 {
-	return L && L->interior && L->skyLighting && wwLookdevActive() && !( wwCellSkyLitRed() & 1 );
+	// lane INTSKY1: the interior takes the live weather (its sun or not); SKYINT1's rule (bits 7 + 8) without a file
+	return L && L->interior && wwCellSunlit( L ).weather && wwLookdevActive() && !( wwCellSkyLitRed() & 1 );
+}
+
+int wwIntSkyRed()
+{
+	WW_SWITCH_STATIC( int, red, [] {
+		int bits = 0;	// a comma list
+		for ( const QString & v : wwEnvStr( "WW_INTSKY_RED" ).trimmed().toLower().split( QLatin1Char( ',' ), Qt::SkipEmptyParts ) )
+			bits |= v == QLatin1String( "off" ) ? 1 : v == QLatin1String( "norecx" ) ? 2 : v == QLatin1String( "onesided" ) ? 4
+				: v == QLatin1String( "decals" ) ? 8 : v == QLatin1String( "rain" ) ? 16 : 0;
+		return bits;
+	}() );
+	return red;
+}
+
+/* lane INTSKY1: the decision, memoised per lighting and re-made when the Cells files or the red move (wwRecxScan is
+ * rate-limited to half a second inside). Census on stderr once per change. */
+WwCellSunlit wwCellSunlit( const WwCellLighting * L )
+{
+	WwCellSunlit r;
+	if ( !L )
+		return r;
+	if ( !L->interior ) {
+		r.on = r.weather = true;
+		r.why = QStringLiteral( "exterior" );
+		return r;
+	}
+	struct Memo
+	{
+		const WwCellLighting * L = nullptr;
+		quint64 gen = ~0ULL;
+		int red = -1;
+		QString edid;	// a republish can reuse the address: the cell and its flag key the memo too
+		bool flag = false;
+		WwCellSunlit r;
+		QString said;
+	};
+	static Memo m;
+	/* every program setup asks: the roots are made once per cell and the Cells files' generation is asked at most
+	 * every half second (wwRecxScan's own rate), so an interior pays a compare per call */
+	static QStringList roots;
+	static const WwCellLighting * rootsOf = nullptr;
+	static QString rootsEdid;
+	static QElapsedTimer scanClock;
+	static quint64 gen = 0;
+	const int red = wwIntSkyRed();
+	const bool same = m.L == L && m.edid == L->cellEdid && m.flag == L->useSkyLighting;
+	if ( rootsOf != L || rootsEdid != L->cellEdid ) {
+		rootsOf = L;
+		rootsEdid = L->cellEdid;
+		roots = L->cellPlugin.isEmpty() ? QStringList() : wwRecxRoots( L->recxPlugins, L->recxData );
+		scanClock.invalidate();
+	}
+	if ( !( red & 2 ) && !roots.isEmpty() && ( !scanClock.isValid() || scanClock.elapsed() >= 500 ) ) {
+		gen = wwRecxScan( roots, QStringLiteral( "Cells" ) );
+		scanClock.start();
+	}
+	const quint64 g = ( red & 2 ) || roots.isEmpty() ? 0ULL : gen;
+	if ( same && m.gen == g && m.red == red )
+		return m.r;
+	m.L = L;
+	m.edid = L->cellEdid;
+	m.flag = L->useSkyLighting;
+	m.gen = g;
+	m.red = red;
+	// the rule (gl/cellsunlit.h, tests/cellsunlit): the block's keys over the winning record's flag, weather = enabled
+	r.why = QStringLiteral( "flag 0x%1 Use Sky Lighting %2" ).arg( L->useSkyLighting ? QStringLiteral( "100" ) : QStringLiteral( "0" ) )
+		.arg( L->useSkyLighting ? QStringLiteral( "on" ) : QStringLiteral( "off" ) );
+	bool haveBlock = false;
+	int enabled = wwsunlit::Absent, weather = wwsunlit::Absent;
+	if ( !( red & 2 ) && !roots.isEmpty() ) {
+		const WwRecxHit h = wwRecxFind( roots, L->recxPlugins, QStringLiteral( "Cells" ), QStringLiteral( "cell" ), L->cellPlugin,
+			L->cellLocal, L->cellEdid, QStringLiteral( "sunlight" ), true );
+		if ( h.ok ) {
+			haveBlock = true;
+			const QJsonValue en = wwRecxBlockValue( h.block, QStringLiteral( "enabled" ), true );
+			const QJsonValue we = wwRecxBlockValue( h.block, QStringLiteral( "weather" ), true );
+			QString warn;
+			if ( en.isBool() )
+				enabled = en.toBool() ? wwsunlit::True : wwsunlit::False;
+			else if ( !en.isUndefined() )
+				warn += QStringLiteral( " (enabled not a bool: the flag's)" );
+			if ( we.isBool() )
+				weather = we.toBool() ? wwsunlit::True : wwsunlit::False;
+			else if ( !we.isUndefined() )
+				warn += QStringLiteral( " (weather not a bool: = enabled)" );
+			r.why = QStringLiteral( "recx %1 (%2)%3" ).arg( QDir::toNativeSeparators( h.file ), h.rung, warn );
+		}
+	}
+	const wwsunlit::Decision dd = wwsunlit::decide( L->useSkyLighting, haveBlock, enabled, weather, ( red & 1 ) != 0 );
+	r.on = dd.on;
+	r.weather = dd.weather;
+	if ( red & 1 )
+		r.why += QStringLiteral( ", RED WW_INTSKY_RED=off" );
+	m.r = r;
+	const QString line = QStringLiteral( "cell sunlit: %1 sun+sky %2, live weather %3 by %4" ).arg( L->cellEdid.isEmpty() ? QStringLiteral( "?" ) : L->cellEdid )
+		.arg( r.on ? QStringLiteral( "on" ) : QStringLiteral( "off" ) ).arg( r.weather ? QStringLiteral( "on" ) : QStringLiteral( "off" ) ).arg( r.why );
+	if ( line != m.said ) {
+		std::fprintf( stderr, "%s\n", qPrintable( line ) );
+		m.said = line;
+	}
+	return r;
+}
+
+bool wwCellSunlitNow( const WwCellLighting * L )
+{
+	return L && L->interior && wwLookdevActive() && wwCellSunlit( L ).on;
+}
+
+bool wwCellAsOutdoor( const WwCellLighting * L )
+{
+	return L && ( !L->interior || wwCellSunlitNow( L ) );
 }
 
 bool wwCellShadowOn()
