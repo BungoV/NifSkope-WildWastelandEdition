@@ -1,3 +1,11 @@
+## CLOUDSTEPS2 (SKYCLOUD1101, 2026-11-01): Ultra volume clouds march 128 steps at the old cost
+
+CLOUD7's read-free top light already paid for more steps on Medium (60) and High (80). Ultra now gets the same: 96 -> 128
+steps, and every view still reads fewer cloud densities per ray than Ultra did with the old taps (up18 211.8 vs 229.6,
+low5 139.0 vs 151.5, from 4 km up 337.8 vs 364.7). Cloud edges come out closer to a 16x-steps reference: 1.59 -> 0.93 and
+2.19 -> 1.32 display levels. 136 steps also fit, but only by 2 %, so 128 keeps a margin for views the gate does not hold.
+Red: WW_CLOUDVOL_RED=ultra96 (96 steps; the notes say `,RED=ultra96`). Test: tests/cloudsteps/run.sh.
+
 ## FOAMOFF2 (FIX1101A, 2026-11-01): River foam and Contact foam stay OFF
 
 The water lane's foam fixes land: lace streaks instead of solid patches, and no foam on a dry bank. Its two rows still

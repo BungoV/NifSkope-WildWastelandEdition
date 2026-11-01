@@ -574,6 +574,7 @@ struct CvRedo
 	bool litClamp = false;	// lane CLOUD6h: cvLitReset = kLitReset
 	bool topColumn = false;	// lane CLOUDLIGHT1: cvTopOn 2
 	bool moreSteps = false;	// lane CLOUDSTEPS1: cloudvolmath.h marchSteps
+	bool ultraSteps = false;	// lane CLOUDSTEPS2: Ultra 128 (RED=ultra96 = 96)
 	double secs = 0.0;
 	bool histOn = false;
 	float prevCam[9] = {}, prevProj[4] = {}, prevKm[3] = {};
@@ -627,7 +628,7 @@ bool marchPass( Renderer * r, CvGpu & g, const CvRedo & d, const WwAtmoFrame & f
 	p->uni2f( "cvHistSize", float( d.hw ), float( d.hh ) );
 	p->uni1f( "cvStride", float( d.stride ) );
 	p->uni2f( "cvPhase", d.phase[0], d.phase[1] );
-	p->uni1i( "cvSteps", V::marchSteps( d.tier, pr.steps, d.moreSteps ) );	// lane CLOUDSTEPS1
+	p->uni1i( "cvSteps", V::marchSteps( d.tier, pr.steps, d.moreSteps, d.ultraSteps ) );	// lane CLOUDSTEPS1 + 2
 	p->uni1i( "cvTaps", pr.taps );
 	p->uni1i( "cvOctaves", noOct ? 1 : 4 );
 	p->uni1f( "cvLightKm", var ? varLightKm( d.b, pr ) : pr.lightKm );
@@ -1379,6 +1380,7 @@ bool wwCloudVolDraw( Scene * scene, const WwCloudVolView & view, QStringList & d
 	d.litClamp = s.litClamp != 0 && !red( "litblind" );
 	d.topColumn = s.topColumn != 0 && !red( "toptaps" );	// lane CLOUDLIGHT1
 	d.moreSteps = s.moreSteps != 0 && d.topColumn && !red( "oldsteps" );	// lane CLOUDSTEPS1: only with the column (its cost)
+	d.ultraSteps = d.moreSteps && !red( "ultra96" );	// lane CLOUDSTEPS2: Ultra 96 -> 128 at main's reads
 	if ( !histOn )
 		g.accFrom = g.frame;
 	d.accAlpha = everyPixel ? 1.0f : V::accumAlpha( static_cast<long long>( ( g.frame - g.accFrom ) / 16 ) );
@@ -1518,8 +1520,10 @@ bool wwCloudVolDraw( Scene * scene, const WwCloudVolView & view, QStringList & d
 			: QStringLiteral( ",RED=litblind" );
 	}
 	reds += d.topColumn ? QStringLiteral( ",topcolumn=on" ) : QStringLiteral( ",RED=toptaps" );	// lane CLOUDLIGHT1
-	if ( !d.moreSteps && ( s.tier == 2 || s.tier == 3 ) )	// lane CLOUDSTEPS1: the step count is in steps=; the red named
+	if ( !d.moreSteps && ( s.tier == 2 || s.tier == 3 || s.tier == 4 ) )	// lane CLOUDSTEPS1: the step count is in steps=; the red named
 		reds += QStringLiteral( ",RED=oldsteps" );
+	else if ( d.moreSteps && !d.ultraSteps && s.tier == 4 )	// lane CLOUDSTEPS2
+		reds += QStringLiteral( ",RED=ultra96" );
 	if ( d.ambDark )	// lane CLOUDBAND1 (b): the echo a row's notes need
 		reds += red( "flatamb" ) ? QStringLiteral( ",RED=flatamb" ) : QStringLiteral( ",ambdark=column" );
 	else
@@ -1540,7 +1544,7 @@ bool wwCloudVolDraw( Scene * scene, const WwCloudVolView & view, QStringList & d
 	const QString clip = sceneOn ? QStringLiteral( "last" ) : g.redo ? QStringLiteral( "this" ) : QStringLiteral( "none" );
 	s.last = ok ? QStringLiteral( "volclouds:%1(hist=%2x%3,march=%4x%5,steps=%6,taps=%7,key=%8,map=%9,mem=%10MB,clip=%11,"
 								  "wind=%12km/s%13)" )
-			.arg( QLatin1StringView( tierName( s.tier ) ) ).arg( hw ).arg( hh ).arg( mw ).arg( mh ).arg( V::marchSteps( s.tier, pr.steps, d.moreSteps ) ).arg( pr.taps )
+			.arg( QLatin1StringView( tierName( s.tier ) ) ).arg( hw ).arg( hh ).arg( mw ).arg( mh ).arg( V::marchSteps( s.tier, pr.steps, d.moreSteps, d.ultraSteps ) ).arg( pr.taps )
 			.arg( keyK == f.sunK ? QStringLiteral( "sun" ) : QStringLiteral( "moon" ) )
 			.arg( m.stub ? QStringLiteral( "stub" ) : QString::number( m.size ) ).arg( mb, 0, 'f', 1 ).arg( clip )
 			.arg( double( V::kWindKmS ), 0, 'g', 3 ).arg( reds )
