@@ -250,6 +250,8 @@ struct LodlFarRing
 	qint64 seamSamples = 0;
 	double seamBeforeMax = 0, seamBeforeMean = 0, seamAfterMax = 0, seamAfterMean = 0;
 	qint64 snappedAll = 0;                    //!< lane CELLSTREAM1: vertices snapAll moved onto the LAND
+	qint64 aoVerts = 0;                       //!< lane FIX1101A lodch: vertices given the mask sheet's B (the bake's AO)
+	double aoMean = 255.0;                    //!< their mean byte
 	std::vector<std::array<int, 3>> cellBlocks;   //!< lane CELLSTREAM1: each shape's block, south-west cell x, y
 	QStringList notes;
 };

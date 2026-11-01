@@ -4,6 +4,7 @@
 #include "cellmesh.h"
 #include "wwswitch.h"
 #include "gl/cellpasstime.h"
+#include "gl/cellunits.h"	// lane FIX1101A lodch: the far stream's unit
 #include "gl/glscene.h"
 #include "gl/renderer.h"
 
@@ -27,6 +28,7 @@ using MultiDrawIndirect = void ( QOPENGLF_APIENTRYP )( GLenum mode, GLenum type,
 struct Copy
 {
 	GLuint vao = 0, vbo = 0, ebo = 0, rows = 0, ind = 0;
+	GLuint stream = 0, streamTex = 0;	// lane FIX1101A lodch: the rows' per-vertex bake channels (RG8 buffer texture)
 	qint64 lastUse = 0;
 	std::size_t indBytes = 0;
 };
@@ -99,8 +101,10 @@ Copy * copyOf( GLFunctions * fn, Ctx & c, const CellMeshInst & d )
 		for ( auto it = c.copies.begin(); it != c.copies.end(); ) {
 			if ( now - it->lastUse > 10000 ) {
 				fn->glDeleteVertexArrays( 1, &it->vao );
-				GLuint b[4] = { it->vbo, it->ebo, it->rows, it->ind };
-				fn->glDeleteBuffers( 4, b );
+				GLuint b[5] = { it->vbo, it->ebo, it->rows, it->ind, it->stream };
+				fn->glDeleteBuffers( it->stream ? 5 : 4, b );
+				if ( it->streamTex )
+					fn->glDeleteTextures( 1, &it->streamTex );
 				c.gpuBytes -= qint64( it->indBytes );
 				it = c.copies.erase( it );
 			} else {
@@ -147,7 +151,21 @@ Copy * copyOf( GLFunctions * fn, Ctx & c, const CellMeshInst & d )
 	fn->glBindVertexArray( 0 );
 	fn->glBindBuffer( GL_ARRAY_BUFFER, 0 );
 	fn->glGenBuffers( 1, &k.ind );
-	k.indBytes = std::size_t( d.vbo.size() ) + std::size_t( d.ebo.size() ) * 2 + std::size_t( d.inst.size() ) * 4;
+	if ( !d.vstream.isEmpty() ) {	// lane FIX1101A lodch: read by fo4_default.vert at the row's texel + gl_VertexID
+		fn->glGenBuffers( 1, &k.stream );
+		fn->glBindBuffer( GL_TEXTURE_BUFFER, k.stream );
+		fn->glBufferData( GL_TEXTURE_BUFFER, GLsizeiptr( d.vstream.size() ), d.vstream.constData(), GL_STATIC_DRAW );
+		fn->glBindBuffer( GL_TEXTURE_BUFFER, 0 );
+		GLint was = 0;
+		fn->glGetIntegerv( GL_ACTIVE_TEXTURE, &was );
+		fn->glActiveTexture( GLenum( GL_TEXTURE0 + WwCellUnit::FarStream ) );
+		fn->glGenTextures( 1, &k.streamTex );
+		fn->glBindTexture( GL_TEXTURE_BUFFER, k.streamTex );
+		fn->glTexBuffer( GL_TEXTURE_BUFFER, GL_RG8, k.stream );
+		fn->glActiveTexture( GLenum( was ) );
+	}
+	k.indBytes = std::size_t( d.vbo.size() ) + std::size_t( d.ebo.size() ) * 2 + std::size_t( d.inst.size() ) * 4
+		+ std::size_t( d.vstream.size() );
 	c.gpuBytes += qint64( k.indBytes );
 	return &*c.copies.insert( d.id, k );
 }
@@ -270,7 +288,17 @@ bool draw( NifSkopeOpenGLContext * r, Scene * scene, const CellMeshInst & d, Nif
 		}
 	}
 	prog->uni1i( "farInst", 1 );
+	GLint was = 0;
+	if ( k->streamTex ) {	// lane FIX1101A lodch: the rows' AO + sky (the sampler's unit is set at link, gl/glcontext.cpp)
+		r->fn->glGetIntegerv( GL_ACTIVE_TEXTURE, &was );
+		r->fn->glActiveTexture( GLenum( GL_TEXTURE0 + WwCellUnit::FarStream ) );
+		r->fn->glBindTexture( GL_TEXTURE_BUFFER, k->streamTex );
+		r->fn->glActiveTexture( GLenum( was ) );
+		prog->uni1i( "farStreamOn", 1 );
+	}
 	submit( r, *cp, *k, cmds );
+	if ( k->streamTex )
+		prog->uni1i( "farStreamOn", 0 );
 	prog->uni1i( "farInst", 0 );
 	return true;
 }

@@ -2739,7 +2739,8 @@ bool nifCreateLodtTerrainScene( NifModel * nif, const QString & lodtPath,
 				.arg( tiles ).arg( texels ).arg( per.join( QStringLiteral( ", " ) ) );
 		}
 	}
-	const bool wantAoT = wwEnvInt( "WW_LODL_AO" ) != 0
+	// lane FIX1101A lodch: on by default (the row "Far LOD baked AO"); a channel view keeps the rule it had
+	const bool wantAoT = ( sheetChan == LodlChannel::None ? lodlAoOn() : wwEnvInt( "WW_LODL_AO" ) != 0 )
 		|| sheetChan == LodlChannel::Ao;
 	int maskCh = -1;
 	switch ( sheetChan ) {
@@ -3084,6 +3085,14 @@ bool nifAppendLodlFarRings( NifModel * nif, const QModelIndex & parent, const QS
 	qint64 runningVerts = 0;
 	bool havePrev = false;
 	int px0 = 0, py0 = 0, px1 = -1, py1 = -1;
+	const bool aoT = lodlAoOn();	// lane FIX1101A lodch: the mask sheet's B (terrain + object AO, sky AO) into the lit ground
+	/* lane FIX1101A lodch (LATE ITEM 22 (4)): the WW_LODL_CHANNEL mask views reach the far ground too (debug parity with
+	 * the .lodl view): mask-r / -g / -b / -a draw that channel of the same sheet, `ao` the B; any other channel name
+	 * (an object view) leaves the ground lit without the AO, as that view draws the objects alone */
+	const LodlChannel ringChan = lodlChannelFromEnv();
+	const int ringMaskCh = ringChan == LodlChannel::MaskR ? 0 : ringChan == LodlChannel::MaskG ? 1
+		: ringChan == LodlChannel::MaskA ? 3 : ( ringChan == LodlChannel::MaskB || ringChan == LodlChannel::Ao ) ? 2
+		: ( ringChan == LodlChannel::None && aoT ) ? 2 : -1;
 	for ( size_t ri = 0; ri < rings.size(); ri++ ) {
 		LodlFarRing & r = rings[ri];
 		r.built = false;
@@ -3381,6 +3390,69 @@ bool nifAppendLodlFarRings( NifModel * nif, const QModelIndex & parent, const QS
 				}
 			}
 			r.sheetFile = QFileInfo( sheets->containerPath() ).fileName();
+			/* lane FIX1101A lodch (LATE ITEM 20 (2)): the VT mask sheet's B -- the bake's terrain + placed-object AO and
+			 * sky AO -- into the far ground's lit view as a per-vertex grey, sampled bilinearly as the .lodl view's
+			 * WW_LODL_AO does (nifCreateLodtTerrainScene). Before, the far rings never bound it. Red WW_LODL_AO_RED=off */
+			if ( ringMaskCh >= 0 && s.rgba.empty() ) {
+				QHash<int, std::vector<quint8>> maskTiles;
+				const int tdim = sheets->storedTexels();
+				const float bias = sheets->uvBias() * float( tdim ), scale = sheets->uvScale() * float( tdim );
+				std::vector<quint32> rgba( s.z.size(), packRgba( 1.0f, 1.0f, 1.0f ) );
+				qint64 got = 0, missing = 0;
+				double sum = 0.0;
+				for ( int j = 0; j < gridH; j++ ) {
+					const int cellY = qMin( y0 + j / n, y1 );
+					const float fy = ( y0 + j / n > y1 ) ? 1.0f : float( j % n ) / float( n );
+					for ( int i = 0; i < gridW; i++ ) {
+						const int cellX = qMin( x0 + i / n, x1 );
+						const float fx = ( x0 + i / n > x1 ) ? 1.0f : float( i % n ) / float( n );
+						int tx = 0, ty = 0;
+						if ( !sheets->tileOfCell( cellX, cellY, &tx, &ty ) ) {
+							missing++;
+							continue;
+						}
+						const int key = ty * 65536 + tx;
+						auto it = maskTiles.find( key );
+						if ( it == maskTiles.end() ) {
+							std::vector<quint8> bytes;
+							QString mwhy;
+							sheets->sheetChannel( LODV_ROLE_MASK, tx, ty, ringMaskCh, bytes, &mwhy );
+							it = maskTiles.insert( key, bytes );
+						}
+						const std::vector<quint8> & m = it.value();
+						if ( m.size() < size_t( tdim ) * size_t( tdim ) ) {
+							missing++;
+							continue;
+						}
+						// the same content-square mapping the mesh builder gives the colour sheet
+						const int westCell = sheets->west() + tx * dim;
+						const int southCell = sheets->north() - ( ty + 1 ) * dim + 1;
+						const float u = ( float( cellX - westCell ) + fx ) / float( dim );
+						const float v = ( float( dim ) - float( cellY - southCell ) - fy ) / float( dim );
+						const float px = bias + u * scale - 0.5f, py = bias + v * scale - 0.5f;
+						const int ix0 = qBound( 0, int( std::floor( px ) ), tdim - 1 ), iy0 = qBound( 0, int( std::floor( py ) ), tdim - 1 );
+						const int ix1 = qMin( ix0 + 1, tdim - 1 ), iy1 = qMin( iy0 + 1, tdim - 1 );
+						const float ax = qBound( 0.0f, px - float( ix0 ), 1.0f ), ay = qBound( 0.0f, py - float( iy0 ), 1.0f );
+						const float top = float( m[size_t( iy0 ) * tdim + ix0] ) * ( 1.0f - ax ) + float( m[size_t( iy0 ) * tdim + ix1] ) * ax;
+						const float bot = float( m[size_t( iy1 ) * tdim + ix0] ) * ( 1.0f - ax ) + float( m[size_t( iy1 ) * tdim + ix1] ) * ax;
+						const float val = top * ( 1.0f - ay ) + bot * ay;
+						const float g = val / 255.0f;
+						rgba[size_t( j ) * gridW + i] = packRgba( g, g, g );
+						sum += val;
+						got++;
+					}
+				}
+				if ( got > 0 ) {
+					s.rgba.swap( rgba );
+					r.aoVerts = got;
+					r.aoMean = sum / double( got );
+				}
+				r.notes << QString( "terrain %1 (the mask sheet's %2) on %L3 vertices, mean %4, %L5 without a tile (drawn open)" )
+					.arg( ringChan == LodlChannel::None ? QStringLiteral( "AO" )
+						: QStringLiteral( "WW_LODL_CHANNEL=%1" ).arg( lodlChannelName( ringChan ) ) )
+					.arg( QChar( QLatin1Char( "RGBA"[ringMaskCh] ) ) )
+					.arg( got ).arg( got ? sum / double( got ) : 255.0, 0, 'f', 1 ).arg( missing );
+			}
 		}
 		QString berr;
 		if ( !buildTerrainSurface( nif, s, &berr ) )

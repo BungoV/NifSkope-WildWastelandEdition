@@ -25,6 +25,10 @@ struct CellMeshInst
 	QByteArray vbo;          //!< 36 B a vertex: pos 3f, colour RGBA8, normal/tangent/bitangent 2_10_10_10, uv 2f
 	QVector<quint16> ebo;    //!< mesh-local indices; each sub-mesh adds its base vertex in its command
 	QVector<float> inst;     //!< 16 floats a placement: rows 0-2 of (scale*R | t), then (uMid, r, g, b + 2 if mirrored)
+	/*! lane FIX1101A lodch: the placements' per-vertex bake channels, one RG8 texel a (placement, vertex): R the AO, G
+	 *  the ambient's sky factor. Empty = none; else every row's (uMid, r, g, b) is (uMid, int bits of its first texel
+	 *  minus its sub's base vertex, 1, 1 + 2 if mirrored) and fo4_default.vert reads farStream at that + gl_VertexID */
+	QByteArray vstream;
 	QVector<Cmd> cmds;       //!< by tile, then sub-mesh; baseInstance points into `inst`
 	QVector<Tile> tiles;     //!< 4x4-cell groups, culled against the camera as a whole
 	quint64 id = 0;          //!< the GPU copy's key (unique per build)

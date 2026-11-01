@@ -14,6 +14,8 @@ BSD License - see nifskope.h
 #include "cellmesh.h"
 #include "esmdata.h"
 #include "gl/cellfarinst.h"	// lane SKYSHARDS3: the rows an instanced ring's commands read (farobjcensus)
+#include "gl/celllooks.h"	// lane FIX1101A lodch: the Far LOD baked AO / sky rows
+#include "lodchsky.h"	// lane FIX1101A lodch: the baked sky byte as the GI's share
 #include "model/nifmodel.h"
 #include "spells/blocks.h"
 
@@ -634,6 +636,23 @@ QString lodlChannelNames()
 	return all.join( QStringLiteral( ", " ) );
 }
 
+bool lodlAoOn()
+{
+	// lane FIX1101A lodch: the red is the rule before (the AO only with WW_LODL_AO=1); re-read on a live set
+	WW_SWITCH_STATIC( bool, red, wwEnv( "WW_LODL_AO_RED" ).trimmed() == "off" );
+	if ( red )
+		return wwEnvInt( "WW_LODL_AO" ) != 0;
+	return wwLookOn( WwLook::FarLodAo );
+}
+
+int lodlSkyMode()
+{
+	WW_SWITCH_STATIC( QByteArray, red, wwEnv( "WW_LODL_SKY_RED" ).trimmed() );
+	if ( red == "off" || !wwLookOn( WwLook::FarLodSky ) )
+		return 0;
+	return red == "raw" ? 2 : 1;
+}
+
 
 bool nifAppendLodiObjects( NifModel * nif, const QModelIndex & iRoot,
 	const QString & lodiPath, const LodiSceneSpec & specIn,
@@ -747,8 +766,14 @@ bool nifAppendLodiObjects( NifModel * nif, const QModelIndex & iRoot,
 	QString channelGiven;
 	int channelBin = 0;
 	const LodlChannel channel = lodlChannelFromEnv( &channelGiven, &channelBin );
-	const bool wantAo = wwEnvInt( "WW_LODL_AO" ) != 0
-		|| channel == LodlChannel::Ao;
+	/* lane FIX1101A lodch: ON by default (the row "Far LOD baked AO", pin WW_LODL_AO, red WW_LODL_AO_RED=off); a channel
+	 * view keeps the rule it had (WW_LODL_AO=1 or `ao`) so every view draws what it drew */
+	const bool wantAo = channel == LodlChannel::None ? lodlAoOn()
+		: ( wwEnvInt( "WW_LODL_AO" ) != 0 || channel == LodlChannel::Ao );
+	/* lane FIX1101A lodch: the far objects' ambient takes the bake's per-vertex sky (src/lodchsky.h), on the instanced
+	 * ring (the flat copy has no channel for it: owed); 0 off, 1 the law, 2 the raw byte (red) */
+	const int skyMode = channel == LodlChannel::None ? lodlSkyMode() : 0;
+	const bool wantSky = skyMode != 0 && !table.vertexSkyFirst.empty() && !table.vertexSky.empty();
 	//! true for the names this builder draws on the PLACEMENTS (the terrain names
 	//! are btdterrain's, and leave the objects at their default look)
 	/* v7: `sky` is a PER-VERTEX channel when the file carries the stream and a
@@ -944,9 +969,22 @@ bool nifAppendLodiObjects( NifModel * nif, const QModelIndex & iRoot,
 	/* lane FARDRAW1: the instanced far ring. Buckets key as mergeBases has them; each (mesh, part) is copied into its
 	 * bucket ONCE in mesh-local space and each placement adds one 64-byte row. A view that stores a value per vertex
 	 * per placement (vertex AO stream, sky/ground streams) stays flat. */
-	const bool instMode = spec.instanced && spec.sideMesh && spec.mergeBases && cellMeshOn() && !streamPerVertex
-		&& !( wantAo && !table.vertexAoFirst.empty() );
+	/* lane FIX1101A lodch: the per-vertex AO and sky ride the instanced ring too. Each row carries the first texel of its
+	 * own (placement, vertex) bytes in the ring's RG8 stream (gl/cellfarinst.cpp, fo4_default.vert farStream); before,
+	 * a ring asked for the AO stream fell back to the flat copy and its budget refusals. */
+	const bool instMode = spec.instanced && spec.sideMesh && spec.mergeBases && cellMeshOn() && !streamPerVertex;
+	//! the rows read their AO and sky from the stream (a channel view keeps its own colours)
+	const bool instStream = instMode && !objectChannel && ( ( wantAo && !table.vertexAoFirst.empty() ) || wantSky );
 	cnt.instanced = instMode;
+	//! lane FIX1101A lodch: one placement's per-vertex channel bytes for the instanced stream
+	struct PlaceStream
+	{
+		const quint8 * ao = nullptr;	//!< the .lodi v6 slice (library vertex order); null = self x placement AO
+		quint32 aoFirst = 0;
+		const quint8 * sky = nullptr;	//!< the .lodi v7 slice; null = no sky factor (1)
+		quint32 skyFirst = 0;
+		float placementAo = 1.0f;
+	};
 	struct InstSub
 	{
 		int firstIndex = 0, indexCount = 0, baseVertex = 0, vertCount = 0;
@@ -983,7 +1021,7 @@ bool nifAppendLodiObjects( NifModel * nif, const QModelIndex & iRoot,
 	auto unorm8 = []( float f ) { return quint8( std::lround( qBound( 0.0f, f, 1.0f ) * 255.0f ) ); };
 	auto placeInst = [&]( quint16 baseId, const LodoBase & base, quint16 meshId, const std::vector<MeshPart> & parts,
 		const Vector3 & pos, const float m[9], float scale, bool mirrorU, const float rgb[3], int cellX, int cellY,
-		quint32 ref ) {
+		quint32 ref, const PlaceStream & ps ) {
 		const LodoMesh & meshRow = lib.meshes[meshId];
 		const quint32 tile = ( quint32( ( cellX >> 2 ) + 32768 ) << 16 ) | quint32( ( cellY >> 2 ) + 32768 );
 		for ( int pi = 0; pi < int( parts.size() ); pi++ ) {
@@ -1028,8 +1066,8 @@ bool nifAppendLodiObjects( NifModel * nif, const QModelIndex & iRoot,
 						lc = sv.sway;
 					else if ( channel == LodlChannel::SelfAo )
 						lc = sv.selfAo;
-					else if ( !objectChannel && wantAo )
-						lc = sv.selfAo;   // times the placement's AO, in the row
+					else if ( !objectChannel && wantAo && !instStream )
+						lc = sv.selfAo;   // times the placement's AO, in the row (with the stream: all of it there)
 					if ( channel == LodlChannel::Sway || channel == LodlChannel::SelfAo ) {
 						const int cv = int( lc * 255.0f + 0.5f );
 						sub.chanLo = qMin( sub.chanLo, cv );
@@ -1076,6 +1114,50 @@ bool nifAppendLodiObjects( NifModel * nif, const QModelIndex & iRoot,
 			r.row[13] = rgb[0];
 			r.row[14] = rgb[1];
 			r.row[15] = rgb[2] + ( mirrorU ? 2.0f : 0.0f );
+			if ( instStream ) {
+				/* lane FIX1101A lodch: this placement's bytes, one RG8 texel a vertex of the sub in its vertex order
+				 * (R the AO, G the ambient's sky factor); the row's .y holds the int bits of (first texel - the sub's
+				 * base vertex), so + gl_VertexID is the vertex's texel. .z and .w's colour go to 1 */
+				CellMeshInst & d = *ib.d;
+				const qint32 first = qint32( d.vstream.size() / 2 );
+				const qint32 sbase = first - qint32( sub.baseVertex );
+				std::memcpy( &r.row[13], &sbase, 4 );
+				r.row[14] = 1.0f;
+				r.row[15] = 1.0f + ( mirrorU ? 2.0f : 0.0f );
+				d.vstream.resize( d.vstream.size() + 2 * qsizetype( p.verts.size() ) );
+				quint8 * w = reinterpret_cast<quint8 *>( d.vstream.data() ) + 2 * qsizetype( first );
+				for ( const OutVert & sv : p.verts ) {
+					float a = 1.0f;
+					if ( wantAo ) {
+						if ( ps.ao ) {
+							const quint8 ab = ps.ao[sv.libIndex - ps.aoFirst];
+							a = float( ab ) / 255.0f;
+							vaoSum += ab;
+						} else {
+							a = sv.selfAo * ps.placementAo;
+						}
+					}
+					float g = 1.0f;
+					if ( ps.sky ) {
+						const int sb = ps.sky[sv.libIndex - ps.skyFirst];
+						g = skyMode == 2 ? float( sb ) / 255.0f : LodchSky::giFactorByte( sb, rotate( m, sv.nrm )[2] );
+						cnt.skyBytes++;
+						cnt.skySum += g;
+						cnt.skyRawSum += sb;
+					}
+					/* the ambient takes the stronger of the two occlusions, never their product: the AO already
+					 * multiplies the albedo (every light), so the sky factor carries only what is left of it */
+					const float k = ( wantAo && a > 1.0e-3f ) ? std::min( 1.0f, g / a ) : g;
+					w[0] = unorm8( a );
+					w[1] = unorm8( k );
+					if ( wantAo ) {
+						cnt.aoBytes++;
+						cnt.aoSum += w[0];
+					}
+					w += 2;
+				}
+				cnt.streamTexels += qint64( p.verts.size() );
+			}
 			r.c = pos + rotate( m, sub.centre * scale );
 			r.r = sub.radius * scale;
 			r.cell = CellFarHide::cellKey( cellX, cellY );
@@ -1347,6 +1429,34 @@ bool nifAppendLodiObjects( NifModel * nif, const QModelIndex & iRoot,
 			const LodoMesh & meshRow = lib.meshes[meshId];
 			const float uMidMesh = 2.0f * meshRow.uvMin[0] + meshRow.uvExtent[0];
 
+			/* lane FIX1101A lodch: the sky slice the instanced stream draws, gated as the AO slice is (its length must be
+			 * the drawn mesh's) */
+			const quint8 * skySlice = nullptr;
+			quint32 skyFirstVertex = 0;
+			if ( instStream && wantSky && ii + 1 < table.vertexSkyFirst.size() ) {
+				const quint32 f = table.vertexSkyFirst[ii], l = table.vertexSkyFirst[ii + 1];
+				if ( l > f && l <= table.vertexSky.size() ) {
+					auto rit = meshRange.find( meshId );
+					if ( rit == meshRange.end() ) {
+						quint32 lo = 0xFFFFFFFFu, hi = 0;
+						const LodoMesh & mr = lib.meshes[meshId];
+						for ( quint32 c = mr.clusterFirst; c < mr.clusterFirst + mr.clusterCount && c < lib.clusters.size(); c++ ) {
+							lo = qMin( lo, lib.clusters[c].vertexBase );
+							hi = qMax( hi, lib.clusters[c].vertexBase + quint32( lib.clusters[c].vertexCount ) );
+						}
+						rit = meshRange.insert( meshId, qMakePair( lo, hi > lo ? hi - lo : 0u ) );
+					}
+					if ( rit.value().second == l - f ) {
+						skySlice = table.vertexSky.data() + f;
+						skyFirstVertex = rit.value().first;
+					}
+				}
+			}
+			if ( wantAo && !objectChannel )
+				( vaoSlice ? cnt.aoStreamPlacements : cnt.aoFallbackPlacements )++;
+			if ( skySlice )
+				cnt.skyPlacements++;
+
 			if ( instMode ) {
 				// lane FARDRAW1: one row a part; the colour a placement adds is the flat path's per-placement factor
 				float rgb[3] = { 1.0f, 1.0f, 1.0f };
@@ -1357,8 +1467,14 @@ bool nifAppendLodiObjects( NifModel * nif, const QModelIndex & iRoot,
 				} else if ( wantAo ) {
 					rgb[0] = rgb[1] = rgb[2] = placementAo;
 				}
+				PlaceStream ps;
+				ps.ao = vaoSlice;
+				ps.aoFirst = vaoFirstVertex;
+				ps.sky = skySlice;
+				ps.skyFirst = skyFirstVertex;
+				ps.placementAo = placementAo;
 				placeInst( inst.baseId, base, meshId, parts, pos, m, scale, mirrorU, rgb, cellX, cellY,
-					ii < table.cold.size() ? table.cold[ii].refFormId : 0u );
+					ii < table.cold.size() ? table.cold[ii].refFormId : 0u, ps );
 			} else
 			for ( const MeshPart & p : parts ) {
 				/* The mirror is about THIS part's own U range, as the chunk builder
@@ -1561,7 +1677,7 @@ bool nifAppendLodiObjects( NifModel * nif, const QModelIndex & iRoot,
 			cnt.geoBytes += qint64( d.vbo.size() ) + qint64( d.ebo.size() ) * 2;
 			cnt.instBytes += qint64( d.inst.size() ) * 4 + qint64( d.cmds.size() ) * qint64( sizeof( CellMeshInst::Cmd ) )
 				+ qint64( d.tiles.size() ) * qint64( sizeof( CellMeshInst::Tile ) )
-				+ qint64( d.rowCell.size() ) * 12;
+				+ qint64( d.rowCell.size() ) * 12 + qint64( d.vstream.size() );
 		}
 		kept += cnt.geoBytes + cnt.instBytes;
 		instBuckets.clear();
@@ -1746,6 +1862,15 @@ bool nifAppendLodiObjects( NifModel * nif, const QModelIndex & iRoot,
 				"%4 slices did not match the drawn mesh" )
 			.arg( vaoUsed ).arg( vaoBytes ).arg( vaoBytes ? vaoSum / double( vaoBytes ) : 255.0, 0, 'f', 1 )
 			.arg( vaoMismatch );
+	if ( skyMode != 0 )
+		note << QString( "WW_LODL_SKY: the bake's per-vertex sky %1 on %2 placements (%L3 vertices, factor mean %4, "
+				"raw byte mean %5)%6" )
+			.arg( skyMode == 2 ? QStringLiteral( "as the raw byte (red WW_LODL_SKY_RED=raw)" )
+				: QStringLiteral( "as the GI's share (src/lodchsky.h)" ) )
+			.arg( cnt.skyPlacements ).arg( cnt.skyBytes )
+			.arg( cnt.skyBytes ? cnt.skySum / double( cnt.skyBytes ) : 1.0, 0, 'f', 3 )
+			.arg( cnt.skyBytes ? cnt.skyRawSum / double( cnt.skyBytes ) : 255.0, 0, 'f', 1 )
+			.arg( instMode ? QString() : QStringLiteral( "; this build is flat: no sky channel there" ) );
 	if ( wantAo )
 		note << QString( "WW_LODL_AO: self-AO x placement AO as vertex colour; %1 placements measured "
 				"(mean %2), %3 unmeasured (drawn open)" )
@@ -2037,6 +2162,19 @@ int lodiFarObjCensusCli( const QStringList & args, QTextStream & out )
 			.arg( pa, 0, 'f', 0 ).arg( pb, 0, 'f', 0 ).arg( pb - pa, 0, 'f', 0 )
 			.arg( c.tris > 0 ? ( pb - pa ) * 1024.0 * 1024.0 / double( c.tris ) : 0.0, 0, 'f', 0 )
 			.arg( kb, 0, 'f', 0 ).arg( t.elapsed() );
+		// lane FIX1101A lodch: the bake's channels the ring USED (the far lod line of the same name)
+		out << QString( "farobjcensus ring %1 channels: AO %2 (%3 placements from the per-vertex stream, %4 from self x "
+			"placement AO, stream mean %5), sky %6 (%7 placements, %8 vertices, factor mean %9, raw byte mean %10); %11 stream "
+			"texels\n" ).arg( i )
+			.arg( lodlAoOn() ? QStringLiteral( "on" ) : QStringLiteral( "off" ) )
+			.arg( c.aoStreamPlacements ).arg( c.aoFallbackPlacements )
+			.arg( c.aoBytes ? c.aoSum / double( c.aoBytes ) : 255.0, 0, 'f', 1 )
+			.arg( lodlSkyMode() == 0 ? QStringLiteral( "off" ) : lodlSkyMode() == 2 ? QStringLiteral( "raw (red)" )
+				: QStringLiteral( "on" ) )
+			.arg( c.skyPlacements ).arg( c.skyBytes )
+			.arg( c.skyBytes ? c.skySum / double( c.skyBytes ) : 1.0, 0, 'f', 3 )
+			.arg( c.skyBytes ? c.skyRawSum / double( c.skyBytes ) : 255.0, 0, 'f', 1 )
+			.arg( c.streamTexels );
 		if ( c.instanced )
 			out << QString( "farobjcensus ring %1 instanced: %2 placements, %3 rows drawn, %4 tris drawn; unique copy %5 verts "
 				"%6 tris; geometry %7 MB + placement rows %8 MB\n" )
