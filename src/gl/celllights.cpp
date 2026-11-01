@@ -380,6 +380,7 @@ struct Gpu
 	// lane LIGHTFLICKER1: the buffer before the flicker (base) and as patched (live); the flicker stamp last patched
 	std::vector<float> flickBase, flickLive;
 	std::uint64_t flickStamp = 0;
+	std::uint64_t shWrites = 0;	// lane PERFFIX2 a: shadow cube faces written (drawn or blitted), ever
 	bool flickOn = false;
 	bool dimOn = false;	// lane NIFXLIGHT3: .nifx lights follow their dimmer on the world clock (the bulbs patched too)
 	Gpu()
@@ -641,6 +642,36 @@ void wwCellGiRgbaEdited( const void * nif )
 int wwCellGiVersion( const void * nif )
 {
 	return st().giVersion.value( nif, 0 );
+}
+
+int wwCellLightsVersion( const void * nif )
+{
+	return st().version.value( nif, 0 );
+}
+
+quint64 wwCellLightsStateKey( Scene * scene )
+{
+	if ( !scene || !scene->renderer )
+		return 0;
+	const auto it = gpus().constFind( scene->renderer );
+	if ( it == gpus().constEnd() )
+		return 0;
+	const Gpu & g = *it;
+	quint64 h = 0xcbf29ce484222325ULL;
+	auto mix = [&h]( quint64 v ) { h ^= v + 0x9e3779b97f4a7c15ULL + ( h << 6 ) + ( h >> 2 ); };
+	mix( quint64( reinterpret_cast<std::uintptr_t>( g.doc ) ) );
+	mix( quint64( g.version ) );
+	mix( g.texelStamp );
+	mix( g.flickStamp );
+	mix( quint64( g.shStamp ) );
+	mix( g.shWrites );
+	for ( int k = 0; k < kShadowSlots; k++ ) {
+		std::uint32_t u;
+		std::memcpy( &u, &g.shFade[k], 4 );
+		mix( u );
+		mix( quint64( std::int64_t( g.shSlot[k] ) ) );
+	}
+	return h;
 }
 
 bool wwCellGiOn()
@@ -3234,6 +3265,8 @@ static void lampShadowPass( Scene * scene, Gpu & g, const WwCellLighting & L, st
 			complete = false;
 			return 0;
 		}
+		if ( t.tex == g.shTex )
+			g.shWrites++;	// lane PERFFIX2 a: wwCellLightsStateKey
 		fn->glViewport( t.vx, t.vy, S, S );
 		fn->glEnable( GL_SCISSOR_TEST );
 		fn->glScissor( t.cut.x, t.cut.y, t.cut.w, t.cut.h );
@@ -3270,6 +3303,7 @@ static void lampShadowPass( Scene * scene, Gpu & g, const WwCellLighting & L, st
 	auto blit = [&]( int srcLayer, const LsRect & a, int slotLayer, const LsRect & b ) {
 		fn->glFramebufferTextureLayer( GL_READ_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, g.lsTex, 0, srcLayer );
 		fn->glFramebufferTextureLayer( GL_DRAW_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, g.shTex, 0, slotLayer );
+		g.shWrites++;	// lane PERFFIX2 a: wwCellLightsStateKey
 		if ( fn->glCheckFramebufferStatus( GL_READ_FRAMEBUFFER ) != GL_FRAMEBUFFER_COMPLETE
 			|| fn->glCheckFramebufferStatus( GL_DRAW_FRAMEBUFFER ) != GL_FRAMEBUFFER_COMPLETE ) {
 			complete = false;
@@ -3757,6 +3791,7 @@ void wwCellShadowPass( Scene * scene )
 				complete = false;
 				break;
 			}
+			g.shWrites++;	// lane PERFFIX2 a: wwCellLightsStateKey
 			fn->glClearDepth( 1.0 );
 			fn->glClear( GL_DEPTH_BUFFER_BIT );
 			float clip[16];

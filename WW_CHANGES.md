@@ -1,3 +1,29 @@
+## PERFFIX2 a item 4 (2026-11-01): the reflection probes' camera probe is drawn and relit only when something changed
+
+REFLPROBE1's camera probe (slot 0, RDR2-style, snapped to 128 u) drew one face of its G-buffer cube every frame forever
+and relit the probe after each, although the cube is light-free and drawn from the statics alone. With the camera still
+and nothing changed, every frame drew the same face again (every caster in a 12288 u reach, one draw each) and relit
+the same light: the steady-state cost of the pass (PERFRES-A gap 5: Concord 5x5 9.6-10.4 ms CPU, 0.56-0.67 ms GPU).
+Now each face keeps the key it was drawn under and only a face whose key moved is drawn again, in the old cycle's
+order (so after a move the cube is rebuilt exactly as before, one face a frame); the probe is relit when a face came in
+or what its relight reads moved.
+- Capture key: the scene key (casters, alpha rules), every caster's world place (a moved door / animated copy), the
+  document's lights version (the process-wide publish counter, never repeated by a rebuilt document), the texture
+  cache's upload count, the probe's snapped place and box.
+- Relight key: the placed probes' light hash (unchanged) plus the view and projection (the sun cascades take view space
+  and are fitted to the frustum), the light buffer, its shadow slots, strengths and every cube face written
+  (wwCellLightsStateKey, celllights.cpp: a time-sliced lamp cache filling in counts), the lights' and GI's versions, and
+  4 ticks a second while the world clock runs (a live window: cloud shadows, movers' shadows). While the relight reads
+  the ray-traced GI volume (outdoors with RTXGI on: the sky share), the volume refines between frames with no stamp of
+  its own, so the camera probe is still relit every frame there (its capture is still kept).
+- Code: src/gl/cellreflcam.h (new, pure: the face and relight schedule), src/gl/cellreflprobe.cpp, src/gl/celllights.{h,cpp}
+  (wwCellLightsVersion, wwCellLightsStateKey, the shadow cube write count).
+- Red: WW_CELL_REFLPROBE_RED=perframe (live): REFLPROBE1's endless cycle, relit every frame.
+- Check key: WW_CELL_REFLPROBE_DUMP=<file> (live) writes the atlas's top level (raw R11G11B10F, 512 x 320) every frame;
+  WW_CELL_REFLPROBE_TIME=1 now also prints `camera-still=<frames the camera probe needed nothing>`.
+- Unit: tests/reflcam (g++, no Qt): 6 checks; `-DREFL_RED` fails 3.
+- Default: unchanged (Reflection probes ships OFF; any built-in preset turns it on).
+
 ## PERFFIX2 a item 6 (2026-11-01): light flicker on the world clock, so two rows at one time repeat
 
 The Light flicker row (LIGHTFLICKER1) moved each light's phase by the wall-clock time between PAINTED frames, and the
