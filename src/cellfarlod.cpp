@@ -25,6 +25,7 @@ BSD License - see nifskope.h
 #endif
 #include "gl/cellwater.h"
 #include "gl/cellbindless.h"	// lane BINDLESS2FIX: the sway reaches the bindless twins
+#include "gl/cellfarinst.h"	// lane FARLOOK1101: and the far splat twins
 #include "gl/cellfarground.h"	// lane FARDRAW1: the far ring 0's live ground
 #include "gl/glscene.h"
 #include "gl/renderer.h"
@@ -1440,6 +1441,10 @@ void wwCellFarLodFrame( Scene * scene )
 	if ( WwBl::on() && WwBl::red() != 4 ) {	// lane BINDLESS2FIX: the twins draw the cell while Bindless draws is on
 		swayProgs.push_back( "fo4_cellbl.prog" );
 		swayProgs.push_back( "fo4_cellcsmbl.prog" );
+	}
+	if ( CellFarInst::splatPx() > 0.0f ) {	// lane FARLOOK1101: the far splat twins draw the far rings
+		swayProgs.push_back( "fo4_cellfs.prog" );
+		swayProgs.push_back( "fo4_cellcsmfs.prog" );
 	}
 	for ( const char * name : swayProgs ) {
 		if ( auto prog = r->useProgram( name ) ) {

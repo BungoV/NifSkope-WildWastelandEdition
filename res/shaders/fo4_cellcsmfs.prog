@@ -1,0 +1,4 @@
+# fo4_cellcsm with the far rows' blended splat (lane FARLOOK1101, FARSHIMMER2; src/gl/cellfarinst.h). No conditions:
+# Renderer::setupProgram swaps it in by name for fo4_cellcsm.prog on the instanced far rings while WW_CELL_FARSPLAT is set.
+
+shaders fo4_defaultfs.vert fo4_cellcsmfs.frag

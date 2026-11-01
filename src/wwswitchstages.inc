@@ -287,6 +287,8 @@
 { "WW_CELL_FARLOD_TREE_DIST", 0, "- | hand: rebuilt in place (live section)" },
 { "WW_CELL_FARLOD_TYPE", 0, "src/cellfarlod.cpp:179 farlod1TypeFor | hand: far section rebuilt in place (LIVESET4); a changed near stack owes a reopen, named in the reply" },
 { "WW_CELL_FARLOD_VANBUDGET_RED", 1, "src/cellfarlod.cpp:617 cellFarLodAppend | read while the cell document is built" },
+{ "WW_CELL_FARSPLAT", 0, "src/gl/cellfarinst.cpp:359 splatPx | re-read per frame or per call (a)" },
+{ "WW_CELL_FARSPLAT_RED", 0, "src/gl/cellfarinst.cpp:371 splatRedNoAlpha | re-read per frame or per call (a)" },
 { "WW_CELL_FARWATER_RED", 0, "src/gl/cellwater.cpp:300 wwCellWaterHeld | re-read per frame or per call (a)" },
 { "WW_CELL_FAR_BAND", 1, "src/cellview.cpp:2654 cellFarLightPublish | read while the cell document is built" },
 { "WW_CELL_FAR_LOD", 1, "src/cellview.cpp:1680 cellFarLodl | read while the cell document is built" },

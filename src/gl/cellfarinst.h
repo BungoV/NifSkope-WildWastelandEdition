@@ -18,8 +18,19 @@ class Transform;
 namespace CellFarInst
 {
 //! The main pass: binds the copy, sets `farInst` on prog, draws, clears it. False = nothing drawn.
+//! lane FARLOOK1101: splatPass 0 = every row as before, 1 = the opaque pass of a splat twin (rows at or over S),
+//! 2 = the blended splat pass (rows under S, drawn widened at alpha 1 / (kx * ky), no depth write).
 bool draw( NifSkopeOpenGLContext * r, Scene * scene, const CellMeshInst & d, NifSkopeOpenGLContext::Program * prog,
-	const Transform & viewTrans );
+	const Transform & viewTrans, int splatPass = 0 );
+
+/* lane FARLOOK1101 (FARSHIMMER2 = FARSPLAT1 + FARTHIN1, 2026-11-01): with the TAA off a far row under ~1/8 px^2 blinks
+ * on a moving camera (FARTOGGLE4: 548 of 14,573 Concord rows). WW_CELL_FARSPLAT=<S px> (1/on = 2.0, the census pick,
+ * tests/farshimmer/splat_rule.py) draws every row whose projected box is under S px on an axis in the second pass,
+ * widened to S about its centre at alpha 1 / (kx * ky): ink-true by construction, 0 blinkers in the census. Programs
+ * fo4_cellfs / fo4_cellcsmfs (twins: the default binaries stay). Unset/0 = off (default: waits on bungo's eye) = the
+ * old rule. Red WW_CELL_FARSPLAT_RED=noalpha: the splat drawn opaque (alpha 1, the census red: ink x3.8). */
+float splatPx();
+bool splatRedNoAlpha();
 //! A shadow cascade: clipFromModel (column-major) culls the tiles by the cascade's box; prog's modelViewMatrix is set
 //! by the caller.
 //! lane SHADOWSHIMMER4: with `slice` (+ modelView, column-major) only the tiles of `part` (gl/farswayslice.h: Still =

@@ -35,7 +35,8 @@ inline bool wwIsCellProgramName( std::string_view n )
 	return n == "fo4_cell.prog" || n == "pbrm_cell.prog" || n == "fo4_cellcsm.prog" || n == "pbrm_cellcsm.prog"
 		|| ( ( n == "fo4_cellbl.prog" || n == "fo4_cellcsmbl.prog" ) && !wwBlCellNameRed() )
 		|| n == "fo4_cellfgl.prog" || n == "fo4_cellfgc.prog" || n == "fo4_cellcsmfgl.prog" || n == "fo4_cellcsmfgc.prog"	// lane FARDRAW1
-		|| n == "fo4_cellfgp.prog" || n == "fo4_cellcsmfgp.prog";	// lane FARPAGES1
+		|| n == "fo4_cellfgp.prog" || n == "fo4_cellcsmfgp.prog"	// lane FARPAGES1
+		|| n == "fo4_cellfs.prog" || n == "fo4_cellcsmfs.prog";	// lane FARLOOK1101: the far splat twins
 }
 
 /*! An effect decal's program by name. The game draws Decal-flagged effects into the surface under them,

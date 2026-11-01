@@ -121,6 +121,9 @@ flat in vec4 A;
 in vec4 C;
 flat in vec4 D;
 in float rawVertexAlpha;	// the vertex colour's own alpha (channel 11 G only)
+#ifdef WW_FAR_SPLAT	// lane FARLOOK1101 (FARSHIMMER2): the far splat's coverage, 1 / (kx * ky) (fo4_default.vert)
+flat in float farSplatA;
+#endif
 
 in mat3 btnMatrix;
 flat in mat3 reflMatrix;
@@ -1053,4 +1056,8 @@ void main()
 		else
 			fragColor = vec4( fragColor.rgb * clamp( rawVertexAlpha, 0.0, 1.0 ), 1.0 );
 	}
+#ifdef WW_FAR_SPLAT	// lane FARLOOK1101: the splat pass blends at the row's true coverage (glBlendFuncSeparate keeps dst alpha)
+	fragColor.a = farSplatA;
+	cellEmitOut.a *= farSplatA;
+#endif
 }

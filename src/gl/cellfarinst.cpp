@@ -14,6 +14,7 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdio>
+#include <cstring>
 #include <string>
 #include <vector>
 
@@ -27,6 +28,7 @@ using MultiDrawIndirect = void ( QOPENGLF_APIENTRYP )( GLenum mode, GLenum type,
 struct Copy
 {
 	GLuint vao = 0, vbo = 0, ebo = 0, rows = 0, ind = 0;
+	GLuint box = 0;	// lane FARLOOK1101: per row its mesh box (centre, half extent), made on the first splat draw
 	qint64 lastUse = 0;
 	std::size_t indBytes = 0;
 };
@@ -101,6 +103,8 @@ Copy * copyOf( GLFunctions * fn, Ctx & c, const CellMeshInst & d )
 				fn->glDeleteVertexArrays( 1, &it->vao );
 				GLuint b[4] = { it->vbo, it->ebo, it->rows, it->ind };
 				fn->glDeleteBuffers( 4, b );
+				if ( it->box )
+					fn->glDeleteBuffers( 1, &it->box );
 				c.gpuBytes -= qint64( it->indBytes );
 				it = c.copies.erase( it );
 			} else {
@@ -150,6 +154,61 @@ Copy * copyOf( GLFunctions * fn, Ctx & c, const CellMeshInst & d )
 	k.indBytes = std::size_t( d.vbo.size() ) + std::size_t( d.ebo.size() ) * 2 + std::size_t( d.inst.size() ) * 4;
 	c.gpuBytes += qint64( k.indBytes );
 	return &*c.copies.insert( d.id, k );
+}
+
+/* lane FARLOOK1101: the rows' mesh boxes (attributes 14/15, one a row): each command's vertices (its indices +
+ * base vertex) bound the box of every row it draws. Made once a copy, only when a splat pass first needs it, so the
+ * splat off makes no GL call more. */
+void ensureBox( GLFunctions * fn, Ctx & c, Copy & k, const CellMeshInst & d )
+{
+	if ( k.box )
+		return;
+	const qsizetype nRows = d.inst.size() / 16;
+	std::vector<float> box( std::size_t( nRows ) * 8, 0.0f );
+	const char * vb = d.vbo.constData();
+	const qsizetype nVerts = d.vbo.size() / 36;
+	for ( const CellMeshInst::Cmd & m : d.cmds ) {
+		float lo[3] = { 1e30f, 1e30f, 1e30f }, hi[3] = { -1e30f, -1e30f, -1e30f };
+		for ( quint32 i = 0; i < m.count; i++ ) {
+			const qsizetype ii = qsizetype( m.firstIndex ) + qsizetype( i );
+			if ( ii >= d.ebo.size() )
+				break;
+			const qsizetype v = qsizetype( d.ebo[ii] ) + m.baseVertex;
+			if ( v < 0 || v >= nVerts )
+				continue;
+			float p[3];
+			std::memcpy( p, vb + v * 36, 12 );
+			for ( int a = 0; a < 3; a++ ) {
+				lo[a] = std::min( lo[a], p[a] );
+				hi[a] = std::max( hi[a], p[a] );
+			}
+		}
+		if ( lo[0] > hi[0] )
+			continue;
+		for ( quint32 j = 0; j < m.instanceCount; j++ ) {
+			const qsizetype row = qsizetype( m.baseInstance ) + qsizetype( j );
+			if ( row >= nRows )
+				break;
+			float * b = &box[std::size_t( row ) * 8];
+			for ( int a = 0; a < 3; a++ ) {
+				b[a] = 0.5f * ( lo[a] + hi[a] );
+				b[4 + a] = std::max( 0.5f * ( hi[a] - lo[a] ), 1e-3f );
+			}
+		}
+	}
+	fn->glBindVertexArray( k.vao );
+	fn->glGenBuffers( 1, &k.box );
+	fn->glBindBuffer( GL_ARRAY_BUFFER, k.box );
+	fn->glBufferData( GL_ARRAY_BUFFER, GLsizeiptr( box.size() * sizeof( float ) ), box.data(), GL_STATIC_DRAW );
+	for ( int a = 0; a < 2; a++ ) {
+		fn->glEnableVertexAttribArray( GLuint( 14 + a ) );
+		fn->glVertexAttribPointer( GLuint( 14 + a ), 4, GL_FLOAT, GL_FALSE, 32, (const void *) std::size_t( 16 * a ) );
+		fn->glVertexAttribDivisor( GLuint( 14 + a ), 1 );
+	}
+	fn->glBindVertexArray( 0 );
+	fn->glBindBuffer( GL_ARRAY_BUFFER, 0 );
+	k.indBytes += box.size() * sizeof( float );
+	c.gpuBytes += qint64( box.size() * sizeof( float ) );
 }
 
 // the camera's four side planes in view space (gl/cellcull.cpp's Gribb-Hartmann, copied: it is file-local there)
@@ -212,7 +271,7 @@ namespace CellFarInst
 {
 
 bool draw( NifSkopeOpenGLContext * r, Scene * scene, const CellMeshInst & d, NifSkopeOpenGLContext::Program * prog,
-	const Transform & viewTrans )
+	const Transform & viewTrans, int splatPass )
 {
 	Ctx * cp = ctxOf();
 	if ( !r || !prog || !cp )
@@ -269,10 +328,48 @@ bool draw( NifSkopeOpenGLContext * r, Scene * scene, const CellMeshInst & d, Nif
 			std::fflush( stderr );
 		}
 	}
+	if ( splatPass > 0 ) {	// lane FARLOOK1101: a splat twin (fo4_cellfs / fo4_cellcsmfs)
+		ensureBox( r->fn, *cp, *k, d );
+		prog->uni2f( "farSplat", splatPx(), float( splatPass ) );
+		if ( splatPass == 2 ) {
+			if ( !splatRedNoAlpha() ) {
+				r->fn->glEnable( GL_BLEND );
+				r->fn->glBlendFuncSeparate( GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA, GL_ZERO, GL_ONE );
+			} else {
+				r->fn->glDisable( GL_BLEND );
+			}
+			r->fn->glDepthMask( GL_FALSE );
+		}
+	} else if ( prog->uniLocation( "farSplat" ) >= 0 ) {
+		prog->uni2f( "farSplat", 0.0f, 0.0f );	// a twin drawn without a second pass (no blending): every row, as before
+	}
 	prog->uni1i( "farInst", 1 );
 	submit( r, *cp, *k, cmds );
 	prog->uni1i( "farInst", 0 );
+	if ( splatPass == 2 ) {	// the far rings' own state (opaque, depth written) for whatever draws next
+		r->fn->glDisable( GL_BLEND );
+		r->fn->glDepthMask( GL_TRUE );
+	}
 	return true;
+}
+
+float splatPx()
+{
+	WW_SWITCH_STATIC( float, s, [] {
+		const QString v = wwEnvStr( "WW_CELL_FARSPLAT" ).trimmed().toLower();
+		if ( v == QLatin1String( "1" ) || v == QLatin1String( "on" ) )
+			return 2.0f;
+		bool ok = false;
+		const float f = v.toFloat( &ok );
+		return ok && f > 0.0f ? std::min( f, 16.0f ) : 0.0f;
+	}() );
+	return s;
+}
+
+bool splatRedNoAlpha()
+{
+	WW_SWITCH_STATIC( bool, red, wwEnv( "WW_CELL_FARSPLAT_RED" ) == "noalpha" );
+	return red;
 }
 
 bool bindlessTwinAllowed()

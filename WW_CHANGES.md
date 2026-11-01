@@ -1,3 +1,22 @@
+## FARSHIMMER2 (FARLOOK1101, 2026-11-01): far rows under 2 px drawn as a blended splat at their true weight (OFF)
+
+FARTOGGLE4 showed that with the TAA off, 548 of the 14,573 far rows at Concord blink on a moving camera. No opaque
+rule can fix that without at least 2x the ink. `WW_CELL_FARSPLAT=<S px>` (1 or on means S = 2) takes another route.
+Every instanced far row whose projected mesh box is under S px on an axis is drawn in the second pass instead. It is
+widened about its projected centre to S on that axis, at alpha 1 / (kx * ky). The area grows by kx * ky, so the ink is
+exact by construction. Thin poles and beams (FARTHIN1) get widened on their thin axis only. The twins
+fo4_cellfs / fo4_cellcsmfs are fo4_defaultfs.vert plus a 4-line .frag, so every default binary stays as it was. The
+per-row mesh box (attributes 14/15) is made only on the first splat draw. Off (the default, waiting on bungo's eye) is
+the old rule. Red `WW_CELL_FARSPLAT_RED=noalpha` draws the splat opaque.
+
+Gate (tests/farshimmer/run.sh, splat_rule.py models the shader's own rule on the real Concord rows of the c3 move
+row): today 548 rows blink, ink 1.004, per-row weight spread over frames median 0.22 / p90 2.24. Splat S 0.75 / 0.8
+/ 1.0 / 1.25 / 1.5 / 2.0: 20 / 14 / 8 / 4 / 2 / 0 rows blink, ink 1.000 / 0.999 / 1.000 / 1.000 / 0.999 / 1.001.
+At S 2.0 the spread is median 0.09 / p90 0.13. Pick S = 2.0 (0 blinkers, ink within 1 +- 0.10). The noalpha red at
+S 2.0 has ink 3.774, which FAILS the bar. Not covered: PBR-mode far rows (pbrm_cell keeps the opaque rule), the far
+shadow cascades, and diagonal thin lines (they still widen along the box axes, so the ink stays exact but they look
+fatter).
+
 ## FOAMOFF2 (FIX1101A, 2026-11-01): River foam and Contact foam stay OFF
 
 The water lane's foam fixes land: lace streaks instead of solid patches, and no foam on a dry bank. Its two rows still
