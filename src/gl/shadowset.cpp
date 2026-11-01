@@ -24,6 +24,7 @@ BSD License - see nifskope.h
 #include "impostorchunk.h"	// lane FAR5: the far cards as terrain-shadow casters
 #include "gl/cellwater.h"	// lane FOGTERRAIN3: the water shapes the ground fog stands on
 #include "gl/fogterrain.h"	// lane FOGTERRAIN1: the ground fog's low-pass terrain (FOGTERRAIN2: its own job here)
+#include "gl/cellpasstime.h"	// lane PERFFIX2: the contact sub-timer
 #include "gl/contactlines.h"	// lane PERFFIX2: the contact march's line layout (ww_contact.comp)
 
 #include <QCoreApplication>
@@ -2233,6 +2234,7 @@ void wwContactShadowPass( Scene * scene )
 		return;
 	}
 	timerBegin( fn, s.tmContact );
+	PassTime::subBegin( PassTime::ContactMarch );	// lane PERFFIX2: "| sub contact" each frame
 	const bool wasDepth = fn->glIsEnabled( GL_DEPTH_TEST ), wasBlend = fn->glIsEnabled( GL_BLEND );
 	const bool wasCull = fn->glIsEnabled( GL_CULL_FACE ), wasScissor = fn->glIsEnabled( GL_SCISSOR_TEST );
 	GLboolean depthMask = GL_TRUE, colorMask[4];
@@ -2361,6 +2363,7 @@ void wwContactShadowPass( Scene * scene )
 			upWord = QStringLiteral( "refused(ww_contact_up.prog)" );
 		}
 	}
+	PassTime::subEnd( PassTime::ContactMarch );
 	timerEnd( fn, s.tmContact );
 	/* lane SHADOWBAND1: WW_SHADOW_CONTACT_DUMP=<ABSOLUTE dir> (gates only): the frame's opaque pass (gbuf.bin, RGBA32F view
 	 * normal + linear depth, bottom row first), the composed mask (mask.bin, R8) and the march's inputs (contact.txt),
