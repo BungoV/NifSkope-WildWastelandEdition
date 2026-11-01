@@ -7,6 +7,7 @@
 #include "gl/lookdevstage.h"
 #include "gl/renderer.h"
 #include "harnesswindow.h"
+#include "cellmodsource.h"	// lane PERFFIX4: the grass fade from the game's inis
 
 #include <QDebug>
 #include <QElapsedTimer>
@@ -801,14 +802,43 @@ void wwCellGrassUniforms( Scene * scene, int block )
 			prog->uni4f( "wwGrassWind2", FloatVector4( 0.0f ) );
 		return;
 	}
-	// fGrassStartFadeDistance 3500, fGrassFadeRange 1000 (the INI defaults), in view units
+	/* lane PERFFIX4: fGrassStartFadeDistance / fGrassFadeRange from the game's inis (Fallout4Prefs.ini [Grass], set by
+	 * the player's preset: Low 1000, Medium 2300, High 4000, Ultra 7000), read once (again after a live set); unset =
+	 * the engine defaults 3500 / 1000 as before. Pin WW_CELL_GRASS_FADE=<start>[,<range>]; red WW_CELL_GRASS_FADE_RED=1
+	 * = 3500 / 1000 whatever the inis say. In view units. */
+	struct GrassFade
+	{
+		float start = 3500.0f, range = 1000.0f;
+		QString from;
+	};
+	WW_SWITCH_STATIC( GrassFade, fade, [] {
+		GrassFade f;
+		const QByteArray pin = wwEnv( "WW_CELL_GRASS_FADE" ).trimmed();
+		if ( wwEnv( "WW_CELL_GRASS_FADE_RED" ).trimmed() == "1" ) {
+			f.from = QStringLiteral( "RED: the engine defaults" );
+		} else if ( !pin.isEmpty() ) {
+			const QList<QByteArray> p = pin.split( ',' );
+			f.start = p.value( 0 ).toFloat();
+			if ( p.size() > 1 )
+				f.range = p.value( 1 ).toFloat();
+			f.from = QStringLiteral( "pinned WW_CELL_GRASS_FADE" );
+		} else {
+			QString a, b;
+			f.start = cellGameIniFloat( "[Grass]", "fGrassStartFadeDistance", 3500.0f, &a );
+			f.range = cellGameIniFloat( "[Grass]", "fGrassFadeRange", 1000.0f, &b );
+			f.from = a.isEmpty() ? QStringLiteral( "the engine default (no ini sets it)" ) : a;
+		}
+		qInfo().noquote() << QStringLiteral( "cell grass fade: start %1 range %2 (%3)" ).arg( double( f.start ) )
+			.arg( double( f.range ) ).arg( f.from );
+		return f;
+	}() );
 	const float k = scene->view.scale;
 	// lane CABLES1: a swaying cable keeps the grass path (z = 1: its vertex alpha is the wind's weight) and no fade
 	const auto nf = s.noFade.constFind( scene->nifModel );
 	if ( nf != s.noFade.constEnd() && nf->contains( block ) )
 		prog->uni3f( "wwGrassFade", 1.0e30f, 1.0f, 1.0f );
 	else
-		prog->uni3f( "wwGrassFade", 3500.0f * k, 1000.0f * k, 1.0f );
+		prog->uni3f( "wwGrassFade", fade.start * k, fade.range * k, 1.0f );
 	// the wind, as the game's grass vertex shader: cb2[11] = (angle, 0, prev phase, phase), cb2[12] = (min * 300,
 	// max * 300, frequency); .w = 1 marks a grass shape; no weather loaded = no wind
 	float wind[4] = { 0, 0, 0, 0 }, wind2[4] = { 0, 0, 0, 1 };

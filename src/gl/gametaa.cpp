@@ -270,7 +270,12 @@ TaaState & ts()
 			| ( red2.contains( QLatin1StringView( "wrongjitter" ) ) ? 4 : 0 ) | ( red2.contains( QLatin1StringView( "nolock" ) ) ? 8 : 0 )
 			| ( red2.contains( QLatin1StringView( "noinputs" ) ) ? 16 : 0 )
 			| ( red2.contains( QLatin1StringView( "oldmotion" ) ) ? 32 : 0 ) | ( red2.contains( QLatin1StringView( "oldfilter" ) ) ? 64 : 0 )
-			| ( red2.contains( QLatin1StringView( "oldlock" ) ) ? 128 : 0 );	// lane FARTOGGLE3
+			| ( red2.contains( QLatin1StringView( "oldlock" ) ) ? 128 : 0 )	// lane FARTOGGLE3
+			// lane PERFFIX4: ultrainputs = velocity + reactive mask at Ultra only (the old rule); oldtimer = the timer
+			// starts at the resolve again (leaves out the frame's blits and the vector pass)
+			| ( red2.contains( QLatin1StringView( "ultrainputs" ) ) ? 256 : 0 )
+			| ( red2.contains( QLatin1StringView( "oldtimer" ) ) ? 512 : 0 )
+			| ( red2.contains( QLatin1StringView( "nomipbias" ) ) ? 1024 : 0 );	// lane PERFFIX4: no LOD bias under jitter
 		s.taa2Dump = wwEnvStr( "WW_TAA2_DUMP" ).trimmed();
 		if ( s.taa2 != was2 )
 			s.taa2Fresh = true;
@@ -394,6 +399,15 @@ bool wwGameTaaRowOn()
 int wwTaa2Tier()
 {
 	return ts().taa2;
+}
+
+float wwTaa2MipBias()
+{
+	static const float kBias[5] = { 0.0f, 0.0f, -0.25f, -0.5f, -1.0f };	// lane PERFFIX4: Off, Low, Medium, High, Ultra
+	const TaaState & s = ts();
+	if ( !wwGameTaaOn() || ( s.taa2Red & 1024 ) )
+		return 0.0f;
+	return kBias[std::clamp( s.taa2, 0, 4 )];
 }
 
 bool wwTaa2Pinned()
@@ -732,6 +746,17 @@ bool taaResolveImpl( Scene * scene )
 	wasCull = fn->glIsEnabled( GL_CULL_FACE ), wasStencil = fn->glIsEnabled( GL_STENCIL_TEST );
 	wasScissor = fn->glIsEnabled( GL_SCISSOR_TEST );
 
+	/* lane PERFFIX4: the Modern resolve's GPU timer starts here, so it covers what TAA2 costs: the frame's colour and
+	 * depth blits, the camera vector pass, the resolve and the copy back (red WW_TAA2_RED=oldtimer: the resolve only) */
+	const bool taa2TimeAll = s.taa2 > 0 && !( s.taa2Red & 512 );
+	if ( taa2TimeAll ) {
+		if ( !g.q[0] )
+			fn->glGenQueries( 4, g.q );
+		taa2TimeRead( fn, g, s, 1 - g.qCur, false );
+		taa2TimeRead( fn, g, s, g.qCur, true );
+		fn->glQueryCounter( g.q[g.qCur * 2], kTimestamp );
+	}
+
 	// 1. the frame (resolved when multisampled) into t0 and t3
 	fn->glBindFramebuffer( GL_READ_FRAMEBUFFER, GLuint( prevDraw ) );
 	// lane MSAABLACK1: a pass that set the view's read buffer to GL_NONE makes this colour blit a silent no-op
@@ -908,11 +933,13 @@ bool taaResolveImpl( Scene * scene )
 			}
 			s.taa2Fresh = true;
 		}
-		if ( !g.q[0] )
-			fn->glGenQueries( 4, g.q );
-		taa2TimeRead( fn, g, s, 1 - g.qCur, false );
-		taa2TimeRead( fn, g, s, g.qCur, true );
-		fn->glQueryCounter( g.q[g.qCur * 2], kTimestamp );
+		if ( !taa2TimeAll ) {	// lane PERFFIX4: the red's start, at the resolve
+			if ( !g.q[0] )
+				fn->glGenQueries( 4, g.q );
+			taa2TimeRead( fn, g, s, 1 - g.qCur, false );
+			taa2TimeRead( fn, g, s, g.qCur, true );
+			fn->glQueryCounter( g.q[g.qCur * 2], kTimestamp );
+		}
 		noHist2 = reset || s.taa2Fresh;
 		fn->glBindFramebuffer( GL_FRAMEBUFFER, g.outFbo );
 		if ( noHist2 ) {	// lane TAA3: no lock survives a history reset (a repeated frame reads the other slot)
@@ -929,10 +956,12 @@ bool taaResolveImpl( Scene * scene )
 		fn->glFramebufferTexture2D( GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT2, GL_TEXTURE_2D, g.lock[wr], 0 );
 		const GLenum three[3] = { GL_COLOR_ATTACHMENT0, GL_COLOR_ATTACHMENT1, GL_COLOR_ATTACHMENT2 };
 		fn->glDrawBuffers( 3, three );
-		// lane TAA3: Ultra reads TAAINPUTS1's velocity and mask when this frame drew them (asked one frame ahead)
+		/* lane TAA3: Ultra reads TAAINPUTS1's velocity and mask when this frame drew them (asked one frame ahead).
+		 * lane PERFFIX4: High too (the default tier): per-object vectors and the reactive mask are not an Ultra
+		 * extra; red WW_TAA2_RED=ultrainputs = Ultra only. */
 		int inputs = 0;
 		GLuint velTex = 0, maskTex = 0;
-		if ( s.taa2 >= 4 && !( s.taa2Red & 16 ) ) {
+		if ( s.taa2 >= ( ( s.taa2Red & 256 ) ? 4 : 3 ) && !( s.taa2Red & 16 ) ) {
 			wwTaaInputsRequest();
 			int vw = 0, vh = 0, mw = 0, mh = 0;
 			velTex = wwTaaInputsVelocityTex( scene, vw, vh );

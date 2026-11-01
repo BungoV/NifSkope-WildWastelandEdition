@@ -62,6 +62,10 @@ uniform bool      cardZcull;
 uniform bool      cardZcullRed;         // gates only: the bound takes the card's far end (the picture must change)
 uniform sampler2D cardSceneDepth;
 #endif
+#ifdef WW_CARD_EARLYZ
+// lane PERFFIX4: impostor_instez.vert put the quad in front of every depth written below (hardware early depth)
+layout ( depth_greater ) out float gl_FragDepth;
+#endif
 
 // --- the four sheets of spec 42..48 -----------------------------------------
 uniform sampler2D ColourSheet;     // _d / _bc : RGB colour (unlit), A coverage

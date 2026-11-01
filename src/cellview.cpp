@@ -73,6 +73,7 @@ BSD License - see nifskope.h
 #include "gl/cellwater.h"	// lane WATER1
 #include "gl/cellwaterinfo.h"	// lane WATERDATA1
 #include "gl/cellcull.h"	// lane SUNCELL1: the per-placement culling runs
+#include "gl/cellprevisrule.h"	// lane PERFFIX4: the tome's staleness
 #include "gl/glproperty.h"	// lane FIXPACK1: the renderer's .pbrm resolve (pbrmResolveForMaterial)
 #include "gl/cellgrass.h"
 #include "gl/cellpost.h"
@@ -3482,6 +3483,8 @@ static bool cellBuild( NifModel * nif, const CellSceneSpec & specAsked, CellChun
 	std::vector<ProbeVolumeMarker> volMarkers;   // lane VOLFIT1: rooms and portals, evidence for the Space stage
 	if ( !chunk ) {   // lane CELLSTREAM1: previs for streamed cells is an open item
 		WwPrevisScene pv;
+		pv.interior = spec.interior;	// lane PERFFIX4: interiors take previs whatever the row
+		std::map<std::pair<int, int>, std::array<int, 3>> markerCells;	// lane PERFFIX4: rooms, portals, occluders a cell
 		int planes = 0, boxes = 0, linked = 0, toOutside = 0, prevDisabled = 0;
 		QList<quint32> primKeys = primRefs.keys();
 		std::sort( primKeys.begin(), primKeys.end() );
@@ -3521,6 +3524,12 @@ static bool cellBuild( NifModel * nif, const CellSceneSpec & specAsked, CellChun
 				vm.to = x.to;
 				volMarkers.push_back( vm );
 			}
+			{
+				const std::pair<int, int> mc = spec.interior ? std::make_pair( 0, 0 )
+					: std::make_pair( int( std::floor( r.pos[0] / CELL_UNITS ) ), int( std::floor( r.pos[1] / CELL_UNITS ) ) );
+				auto & mk = markerCells.try_emplace( mc, std::array<int, 3>{ 0, 0, 0 } ).first->second;
+				mk[room ? 0 : portal ? 1 : 2]++;
+			}
 			if ( occ ) {
 				( r.primType == 3 ? planes : boxes )++;
 				pv.occluders.push_back( std::move( x ) );
@@ -3545,10 +3554,45 @@ static bool cellBuild( NifModel * nif, const CellSceneSpec & specAsked, CellChun
 		std::vector<WwUmbraBlockIn> umbraIn;
 		int cellsRead = 0, cellsRvis = 0, cellsVisi = 0, cellsPcmb = 0;
 		quint64 combRefs = 0, combMeshes = 0, previsRefs = 0;
+		/* lane PERFFIX4: per cell, is the tome its refs were baked against still true? (src/gl/cellprevisrule.h) The
+		 * writer = the winning CELL record's plugin when it carries XPRI / VISI; any ref whose winning version comes
+		 * from a later plugin makes the block's tome stale. */
+		struct PrevisCensus
+		{
+			quint32 form = 0, owner = 0, writer = 0, tomePlugin = 0xFFFFFFFFu;
+			int cx = 0, cy = 0, refs = 0;
+			bool fields = false;
+			std::vector<WwPrevisRule::RefSrc> refsv;
+			WwPrevisRule::Stale st;
+		};
+		std::vector<PrevisCensus> census;
+		std::map<quint32, bool> blockStale;
+		// lane PERFFIX4 (PREVISSTALE2): WW_CELL_UMBRA_RED=anyedit = every later add / override makes the tome stale
+		const bool staleAnyEdit = wwEnv( "WW_CELL_UMBRA_RED" ).trimmed() == "anyedit";
+		std::map<quint32, QString> tomeStatus;
 		auto readCell = [&]( quint32 form, int cx, int cy ) {
 			const EsmCellPrevis c = world.cellPrevis( form );
 			if ( !c.exists )
 				return;
+			{
+				const QVector<quint32> groups = spec.interior ? world.interiorChildGroups() : world.cellChildGroups( cx, cy );
+				const QVector<EsmRefSource> rs = world.refSources( groups );
+				std::vector<WwPrevisRule::RefSrc> refs;
+				refs.reserve( size_t( rs.size() ) );
+				for ( const EsmRefSource & r : rs )
+					refs.push_back( { r.owner, r.src, r.deleted, r.disabled, r.settled } );
+				PrevisCensus pc;
+				pc.form = form;
+				pc.cx = cx;
+				pc.cy = cy;
+				pc.owner = c.rvis ? c.rvis : ( spec.interior ? form : 0U );
+				pc.writer = c.srcFile;
+				pc.fields = c.hasPrevisFields;
+				pc.refs = int( refs.size() );
+				pc.st = WwPrevisRule::tomeStale( c.hasPrevisFields, c.srcFile, refs, false, staleAnyEdit );	// until the tome's plugin is known
+				pc.refsv = std::move( refs );
+				census.push_back( std::move( pc ) );
+			}
 			cellsRead++;
 			cellsVisi += c.hasVisi ? 1 : 0;
 			cellsPcmb += c.hasPcmb ? 1 : 0;
@@ -3589,17 +3633,49 @@ static bool cellBuild( NifModel * nif, const CellSceneSpec & specAsked, CellChun
 				: QStringLiteral( "Fallout4.esm" );
 			QByteArray u;
 			QString path;
-			for ( const quint32 name : { f, ESMFile::getFormIDLocal( f ) } ) {
-				path = QStringLiteral( "vis/%1/%2.uvd" ).arg( plugin ).arg( name, 8, 16, QLatin1Char( '0' ) );
-				if ( lodgenReadVisFile( dataRoot, path, u ) && u.size() >= 44 )
+			/* lane PERFFIX4: the tome is looked for in the vis folder of the plugin that wrote the cells' winning
+			 * XPRI / VISI first (a patch that baked its own previs ships it there), then the owner's; its staleness is
+			 * judged against the plugin whose file was found (a plugin that copied the fields without a tome leaves the
+			 * owner's tome, which knows nothing of that plugin's refs). */
+			std::vector<quint32> tryPlugins;
+			for ( const PrevisCensus & pc : census )
+				if ( pc.owner == f && pc.fields && pc.writer != idx
+					&& std::find( tryPlugins.begin(), tryPlugins.end(), pc.writer ) == tryPlugins.end() )
+					tryPlugins.push_back( pc.writer );
+			std::sort( tryPlugins.begin(), tryPlugins.end(), std::greater<quint32>() );
+			tryPlugins.push_back( idx );
+			quint32 tomePlugin = idx;
+			for ( const quint32 tp : tryPlugins ) {
+				const QString pn = tp < quint32( plugs.size() ) ? QFileInfo( plugs.at( int( tp ) ).trimmed() ).fileName() : plugin;
+				for ( const quint32 name : { f, ESMFile::getFormIDLocal( f ) } ) {
+					path = QStringLiteral( "vis/%1/%2.uvd" ).arg( pn ).arg( name, 8, 16, QLatin1Char( '0' ) );
+					if ( lodgenReadVisFile( dataRoot, path, u ) && u.size() >= 44 )
+						break;
+					u.clear();
+				}
+				if ( !u.isEmpty() ) {
+					tomePlugin = tp;
 					break;
-				u.clear();
+				}
+			}
+			if ( !u.isEmpty() ) {
+				for ( PrevisCensus & pc : census ) {
+					if ( pc.owner != f )
+						continue;
+					pc.tomePlugin = tomePlugin;
+					pc.st = WwPrevisRule::tomeStale( pc.fields, tomePlugin, pc.refsv, false, staleAnyEdit );
+					if ( pc.st.stale )
+						blockStale[f] = true;
+				}
 			}
 			if ( u.isEmpty() ) {
 				fprintf( stderr, "cell previs block %08X: %d loaded cells; file %s not found\n", f, int( b.second.size() ),
 					qPrintable( path ) );
+				tomeStatus[f] = QStringLiteral( "%1 not found" ).arg( path );
 				continue;
 			}
+			tomeStatus[f] = blockStale[f] ? QStringLiteral( "%1 STALE: refused (WW_CELL_UMBRA_RED=stale uses it)" ).arg( path )
+				: QStringLiteral( "%1 fresh: used" ).arg( path );
 			float bb[6];
 			for ( int k = 0; k < 6; k++ ) {
 				const quint32 w = cellLe32( u, 20 + 4 * k );
@@ -3653,6 +3729,7 @@ static bool cellBuild( NifModel * nif, const CellSceneSpec & specAsked, CellChun
 				WwUmbraBlockIn ui;
 				ui.block = f;
 				ui.tome = u;
+				ui.stale = blockStale[f];	// lane PERFFIX4
 				auto bc = blockComb.find( f );
 				if ( bc != blockComb.end() )
 					ui.combined = std::move( bc->second );
@@ -3661,6 +3738,30 @@ static bool cellBuild( NifModel * nif, const CellSceneSpec & specAsked, CellChun
 		}
 		if ( !umbraIn.empty() )
 			wwCellUmbraSet( nif, std::move( umbraIn ) );
+		// lane PERFFIX4: one census line per cell
+		const bool previsNow = wwCellPrevisFor( spec.interior );
+		auto pluginName = [&plugs]( quint32 idx ) {
+			return idx < quint32( plugs.size() ) ? QFileInfo( plugs.at( int( idx ) ).trimmed() ).fileName()
+				: QStringLiteral( "#%1" ).arg( idx );
+		};
+		for ( const PrevisCensus & pc : census ) {
+			const auto mk = markerCells.find( spec.interior ? std::make_pair( 0, 0 ) : std::make_pair( pc.cx, pc.cy ) );
+			const std::array<int, 3> m = mk != markerCells.end() ? mk->second : std::array<int, 3>{ 0, 0, 0 };
+			const QString name = spec.interior ? world.interior().edid : world.cellEditorId( pc.cx, pc.cy );
+			const auto ts = tomeStatus.find( pc.owner );
+			const QString tome = !pc.owner ? QStringLiteral( "none (no RVIS)" )
+				: ts != tomeStatus.end() ? ts->second : QStringLiteral( "block %1 not read" ).arg( pc.owner, 8, 16, QLatin1Char( '0' ) );
+			fprintf( stderr, "cell previs census: %s %08X %s: rooms %d portals %d occluders %d, previs %s; XPRI/VISI on the "
+				"winning CELL %s (%s); tome plugin %s; refs %d, after it: added %d overridden %d placement moved %d (deleted %d disabled %d)%s; tome %s\n",
+				qPrintable( name.isEmpty() ? QStringLiteral( "-" ) : name ), unsigned( pc.form ),
+				spec.interior ? "interior" : qPrintable( QStringLiteral( "%1,%2" ).arg( pc.cx ).arg( pc.cy ) ), m[0], m[1], m[2],
+				previsNow ? ( spec.interior ? "ON (interior rule)" : "ON (row)" ) : ( spec.interior ? "off (pinned)" : "off (exterior: Hi-Z only)" ),
+				pc.fields ? "yes" : "NO", qPrintable( pluginName( pc.writer ) ),
+				pc.tomePlugin != 0xFFFFFFFFu ? qPrintable( pluginName( pc.tomePlugin ) ) : "none", pc.refs, pc.st.added, pc.st.overridden, pc.st.moved,
+				pc.st.deleted, pc.st.disabled,
+				pc.st.firstLater != 0xFFFFFFFFu ? qPrintable( QStringLiteral( ", first by %1" ).arg( pluginName( pc.st.firstLater ) ) ) : "",
+				qPrintable( tome ) );
+		}
 	}
 	if ( !chunk ) {
 		wwCellWaterBegin( nif );   // lane WATER1: forget the last cell's water shapes

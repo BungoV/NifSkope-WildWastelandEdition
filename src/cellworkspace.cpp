@@ -1328,6 +1328,7 @@ void CellWorkspacePanel::buildUi()
 		// LATE ITEM 25 (bungo 11-01): no menu row for the bake's channels: our LOD rendering always draws them
 		// (WwLook::FarLodAo / FarLodSky stay in the table only for the debug pins WW_LODL_AO=0 / WW_LODL_SKY=0)
 		head( F, "", "CellWorkspaceModernTaa", 0, true );
+		look( WwLook::Vrs, tr( "Variable rate shading" ) );	// lane PERFFIX4
 		head( F, "", "CellWorkspaceBloom", 0 );
 		look( WwLook::BloomMip, tr( "Width in fog" ) );
 		master( F, WwGroup::Camera );

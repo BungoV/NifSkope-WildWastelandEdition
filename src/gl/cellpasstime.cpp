@@ -814,6 +814,13 @@ void texResidentSet( unsigned int id, qint64 bytes )
 	cc.texResidentBytes += bytes;
 }
 
+qint64 texResidentBytesOf( unsigned int id )
+{
+	const auto & m = texResidentMap();
+	const auto it = m.find( id );
+	return it == m.end() ? 0 : it->second;
+}
+
 void texResidentDrop( unsigned int id )
 {
 	auto & m = texResidentMap();

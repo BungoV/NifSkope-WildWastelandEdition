@@ -10,6 +10,7 @@ BSD License - see nifskope.h
 #include "gamemanager.h"
 #include "lodgenloadorder.h"
 #include "landlodspec.h"	// lane LANDSPEC8: gridsLine
+#include "gameinikey.h"	// lane PERFFIX4: one float key of the game's inis
 
 #include <QDir>
 #include <QFile>
@@ -367,6 +368,35 @@ int cellGameGrids( QString * from, QString * read )
 		}
 	}
 	return g;
+}
+
+float cellGameIniFloat( const char * section, const char * key, float fallback, QString * from )
+{
+	QString gameFrom;
+	const QString game = gameFolder( &gameFrom );
+	QString profile;
+	if ( wwEnv( "WW_LANDSPEC_RED" ) != "mygames" ) {
+		const CellModSource src = cellModSource();
+		if ( src.kind == QLatin1String( "mo2" ) )
+			profile = src.from;
+	}
+	bool local = false;
+	const QString dir = iniFolder( profile, &local );
+	QStringList inis{ dir + QStringLiteral( "/Fallout4.ini" ), dir + QStringLiteral( "/Fallout4Prefs.ini" ),
+		dir + QStringLiteral( "/Fallout4Custom.ini" ) };
+	if ( !game.isEmpty() && ( local || wwEnv( "WW_MODPICK_MYGAMES" ).isEmpty() ) )
+		inis.prepend( game + QStringLiteral( "/Fallout4_Default.ini" ) );
+	const std::string want = QString::fromLatin1( section ).toLower().toStdString();
+	const std::string k = QString::fromLatin1( key ).toLower().toStdString();
+	float v = fallback;
+	for ( const QString & ini : inis ) {
+		std::string sec;
+		for ( const QString & l : readLines( ini ) ) {
+			if ( GameIniKey::floatLine( l.toStdString(), want.c_str(), k.c_str(), sec, v ) && from )
+				*from = QDir::toNativeSeparators( clean( ini ) );
+		}
+	}
+	return v;
 }
 
 int cellGameGridHalf( QString * note )

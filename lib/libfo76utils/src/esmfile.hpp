@@ -5,6 +5,8 @@
 #include "common.hpp"
 #include "filebuf.hpp"
 
+#include <unordered_map>
+
 class ESMFile
 {
  public:
@@ -105,6 +107,17 @@ class ESMFile
   std::vector< std::vector< std::uint32_t > > masterMaps;
   // light slot -> input file index (light plugins live at FE + slot)
   std::vector< std::uint32_t > lightFiles;
+ public:
+  // lane PERFFIX4 (PREVISSTALE2): an earlier version of an overridden REFR,
+  // kept so a previs check can compare it with the winning version
+  struct PriorVersion
+  {
+    unsigned int  srcFile;
+    unsigned int  flags;
+    const unsigned char *fileData;
+  };
+ protected:
+  std::unordered_map< unsigned int, std::vector< PriorVersion > > priorRefs;
   inline ESMRecord& insertFormID(unsigned int formID);
   const unsigned char *uncompressRecord(ESMRecord& r);
   ESMFile(const char *fileNames, bool enableZLibCache,
@@ -154,6 +167,14 @@ class ESMFile
   inline const ESMRecord *getRecordPtr(unsigned int formID) const
   {
     return findRecord(formID);
+  }
+  // lane PERFFIX4: the versions of an overridden REFR that lost, in load
+  // order (NULL if it was never overridden)
+  inline const std::vector< PriorVersion > *getPriorVersions(
+      unsigned int formID) const
+  {
+    auto  i = priorRefs.find(formID);
+    return (i == priorRefs.end() ? nullptr : &(i->second));
   }
   // encoding is (year - 2000) * 512 + (month * 32) + day for FO4 and newer
   unsigned short getRecordTimestamp(unsigned int formID) const;

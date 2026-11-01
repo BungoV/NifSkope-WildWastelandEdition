@@ -24,6 +24,9 @@ uniform int   cardBase;          // this draw's first card in cardData
 uniform int   frameTableBase;    // this set's first texel in cardFrames
 uniform vec3  cardEyeModel;      // the camera's position in model space
 uniform bool  cardOrtho;         // true: no eye point, the ray is cardFwd
+#ifdef WW_CARD_EARLYZ
+uniform bool  useDepthOffset;    // lane PERFFIX4: the fragment's pixel depth offset (impostor_oct.frag), read here too
+#endif
 
 layout ( location = 0 ) in vec3 vertexPosition;   // the unit quad, -1..1 in xy
 layout ( location = 7 ) in vec2 multiTexCoord0;   // 0..1 across the quad
@@ -93,4 +96,17 @@ void main()
 	cardViewRay = orthoCam ? -inFwd : normalize( p - cardEyeModel );
 
 	gl_Position = projectionMatrix * ( modelViewMatrix * vec4( p, 1.0 ) );
+#ifdef WW_CARD_EARLYZ
+	/* lane PERFFIX4: the fragment writes cardPosModel + ray * (height - 0.5) * span, up to half the span TOWARD the
+	 * eye. Pull the vertex that far along its own eye ray (+5 % for the angle between a vertex ray and a pixel ray,
+	 * + 4 units for rounding): the same screen position, and every depth the fragment writes lies behind the quad,
+	 * so impostor_cellinstez.frag may declare depth_greater and the hardware tests depth before the march. */
+	if ( !orthoCam && useDepthOffset ) {
+		vec4 e = modelViewMatrix * vec4( p, 1.0 );
+		float dist = length( e.xyz );
+		float s = length( vec3( modelViewMatrix[0] ) );
+		float pull = min( s * cardDepthSpan * 0.5 * 1.05 + 4.0, dist * 0.5 );
+		gl_Position = projectionMatrix * vec4( e.xyz * ( 1.0 - pull / dist ), 1.0 );
+	}
+#endif
 }

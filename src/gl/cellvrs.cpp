@@ -2,6 +2,7 @@
 #include "wwswitch.h"	// lane LIVESET1: the configuration follows a live set
 
 #include "gl/cellhdr.h"
+#include "gl/celllooks.h"	// lane PERFFIX4: the "Variable rate shading" row (pin WW_CELL_VRS)
 #include "gl/cellpasstime.h"
 #include "gl/cellunits.h"	// lane WATERFIX7: the passes' named units
 #include "gl/gametaa.h"
@@ -60,7 +61,7 @@ const VrsCfg & cfg()
 {
 	WW_SWITCH_STATIC( VrsCfg, c, [] {	// lane LIVESET1: re-read on a live set (the rate images are built each frame)
 		VrsCfg v;
-		v.on = qEnvironmentVariableIntValue( "WW_CELL_VRS" ) == 1;
+		v.on = false;	// lane PERFFIX4: read per frame from the row (wwLookOn), not here
 		const QByteArray red = qgetenv( "WW_CELL_VRS_RED" ).trimmed().toLower();
 		v.red = red == "1x1" ? Red1x1 : red == "4x4" ? Red4x4 : red == "noalpha" ? RedNoAlpha : RedNone;
 		bool ok = false;
@@ -261,7 +262,7 @@ void census( Renderer * r, VrsGpu & g )
 
 bool wwCellVrsWanted()
 {
-	return cfg().on;
+	return wwLookOn( WwLook::Vrs );	// lane PERFFIX4: the row, pinned by WW_CELL_VRS as before
 }
 
 bool wwCellVrsActive()
@@ -277,7 +278,7 @@ QString wwCellVrsEcho()
 void wwCellVrsBuild( Scene * scene, int prevDraw, int prevRead, int W, int H, const int vp[4] )
 {
 	const VrsCfg & c = cfg();
-	if ( !c.on ) {
+	if ( !wwLookOn( WwLook::Vrs ) ) {
 		static bool said = false;
 		if ( !said ) {
 			said = true;
@@ -369,7 +370,7 @@ void wwCellVrsBuild( Scene * scene, int prevDraw, int prevRead, int W, int H, co
 void wwCellVrsPass( Scene * scene, bool sorted, bool on )
 {
 	const VrsCfg & c = cfg();
-	if ( !c.on )
+	if ( !wwLookOn( WwLook::Vrs ) )
 		return;
 	VrsState & s = vst();
 	if ( !on ) {

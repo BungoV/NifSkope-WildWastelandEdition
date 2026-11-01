@@ -997,7 +997,24 @@ bool ImpostorDraw::drawCardsInstanced( Scene * scene, const QVector< InstCard > 
 			qInfo().noquote() << line;
 		}
 	}
-	NifSkopeOpenGLContext::Program * prog = r->useProgram( "impostor_cellinst.prog" );
+	/* lane PERFFIX4: the early-depth twin. impostor_instez.vert pulls each quad in front of every depth its fragments
+	 * write and impostor_cellinstez.frag declares gl_FragDepth depth_greater (the driver clamps the written depth to
+	 * the quad's, so the layout holds by construction), so the hardware tests depth BEFORE the sheets are marched.
+	 * WW_FARCARD_EARLYZ_RED=1: impostor_cellinst.prog again. A twin that does not link falls back to it. */
+	WW_SWITCH_STATIC( bool, earlyZRed, wwEnv( "WW_FARCARD_EARLYZ_RED" ) == "1" );
+	NifSkopeOpenGLContext::Program * prog = earlyZRed ? nullptr : r->useProgram( "impostor_cellinstez.prog" );
+	{
+		static int said = -1;
+		const int now = earlyZRed ? 2 : prog ? 1 : 0;
+		if ( now != said ) {
+			said = now;
+			qInfo().noquote() << ( now == 1 ? QStringLiteral( "far cards: early depth (impostor_cellinstez.prog)" )
+				: now == 2 ? QStringLiteral( "far cards: no early depth (RED WW_FARCARD_EARLYZ_RED=1)" )
+				: QStringLiteral( "far cards: early-depth twin did not link; impostor_cellinst.prog" ) );
+		}
+	}
+	if ( !prog )
+		prog = r->useProgram( "impostor_cellinst.prog" );
 	if ( !prog )
 		return false;
 

@@ -37,6 +37,7 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include "cellpasstime.h"	// lane STREAM1
 #include "celldrawpacket.h"	// lane GAPPERF-BINDLESS
 #include "cellbindless.h"	// lane BINDLESS2
+#include "texpool.h"	// lane PERFFIX4: the streaming pool
 
 #include "message.h"
 #include "gl/glscene.h"
@@ -680,6 +681,35 @@ int TexCache::evictUnused( std::uint32_t tick, QStringList * names )
 		n++;
 	}
 	return n;
+}
+
+int TexCache::evictPool( std::int64_t budgetBytes, std::uint32_t protectTick, QStringList * names )
+{
+	std::vector<WwTexPool::Entry> e;
+	for ( size_t i = 0; i <= textureHashMask; i++ ) {
+		const Tex & tx = textures[i];
+		if ( !tx.nameLen || !tx.isLoaded() || !tx.mipmaps )
+			continue;
+		e.push_back( { int( i ), tx.useTick, PassTime::texResidentBytesOf( tx.id[0] ) } );
+	}
+	const std::vector<int> pick = WwTexPool::pick( std::move( e ), PassTime::cacheCounts().texResidentBytes, budgetBytes,
+		protectTick );
+	for ( const int i : pick ) {
+		Tex &	tx = textures[size_t( i )];
+		PassTime::texResidentDrop( tx.id[0] );	// lane STREAM1
+		paramForget( tx.id[0] );	// lane PERF5
+		paramForget( tx.id[1] );	// lane CELLUNI4
+		WwDp::invalidate();	// lane GAPPERF-BINDLESS
+		WwBl::forget( tx.id[0] );	// lane BINDLESS2
+		WwBl::forget( tx.id[1] );
+		glDeleteTextures( ( !tx.id[1] ? 1 : 2 ), tx.id );
+		tx.id[0] = tx.id[1] = 0;
+		tx.mipmaps = 0;
+		tx.target = 0;
+		if ( names )
+			names->append( tx.filename().toString() );
+	}
+	return int( pick.size() );
 }
 
 int TexCache::wwPump( const NifModel * nif, qint64 budgetBytes )

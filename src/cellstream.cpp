@@ -17,6 +17,8 @@
 #include "gl/glproperty.h"
 #include "gl/glscene.h"
 #include "gl/glshape.h"
+#include "gl/texpool.h"	// lane PERFFIX4: the streaming texture pool's budgets
+#include <QSettings>
 #include "data/nifitemcache.h"
 #include "model/nifmodel.h"
 #include "spells/blocks.h"
@@ -1295,6 +1297,54 @@ int cellStreamTexKeepSec()
 {
 	WW_SWITCH_STATIC( int, keep, wwEnvIsSet( "WW_CELL_STREAM_TEXKEEP" ) ? wwEnvInt( "WW_CELL_STREAM_TEXKEEP" ) : 5 );
 	return std::max( keep, 0 );
+}
+
+namespace
+{
+struct TexPoolCfg
+{
+	int preset = 3, mb = 0;
+	bool pinned = false;
+};
+TexPoolCfg texPoolCfg()
+{
+	TexPoolCfg c;
+	const QByteArray v = wwEnv( "WW_CELL_STREAM_TEXPOOL" ).trimmed().toLower();
+	static const char * names[4] = { "low", "medium", "high", "ultra" };
+	if ( !v.isEmpty() ) {
+		c.pinned = true;
+		for ( int k = 0; k < 4; k++ )
+			if ( v == names[k] )
+				c.preset = k;
+		bool ok = false;
+		const int mb = v.toInt( &ok );
+		if ( ok && mb > 3 ) {
+			c.preset = -1;
+			c.mb = mb;
+		}
+		return c;
+	}
+	c.preset = std::clamp( QSettings().value( QStringLiteral( "WW/CellTexPool" ), 3 ).toInt(), 0, 3 );
+	return c;
+}
+} // namespace
+
+qint64 cellStreamTexPoolBytes()
+{
+	const TexPoolCfg c = texPoolCfg();	// read each call (every 2 s): a live set or the menu takes at once
+	return WwTexPool::budgetBytes( c.preset >= 0 ? c.preset : c.mb );
+}
+
+int cellStreamTexPoolPreset()
+{
+	return texPoolCfg().preset;
+}
+
+void cellStreamTexPoolSetPreset( int preset )
+{
+	if ( texPoolCfg().pinned )
+		return;
+	QSettings().setValue( QStringLiteral( "WW/CellTexPool" ), std::clamp( preset, 0, 3 ) );
 }
 
 int cellStreamGeoKeepSec()

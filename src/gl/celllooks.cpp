@@ -83,6 +83,7 @@ const LookRow kRows[] = {
 	// FIX1101A lodch (LATE ITEMs 11 + 16 + 20): the LOD bake's channels drawn by default
 	{ "Far LOD baked AO", "WW/FarLodBakedAo", true },
 	{ "Far LOD baked sky light", "WW/FarLodBakedSky", true },
+	{ "Variable rate shading", "WW/CellVrs" },	// lane PERFFIX4: a menu row at last; ships off until its pair is judged
 };
 static_assert( sizeof( kRows ) / sizeof( kRows[0] ) == size_t( WwLook::Count ), "a row per look" );
 
@@ -340,6 +341,10 @@ QByteArray pinOf( WwLook l )
 		WW_SWITCH_STATIC( QByteArray, p, wwEnv( "WW_LODL_SKY" ).trimmed() );
 		return p;
 	}
+	case WwLook::Vrs: {
+		WW_SWITCH_STATIC( QByteArray, p, wwEnv( "WW_CELL_VRS" ).trimmed() );
+		return p;
+	}
 	default:
 		return QByteArray();
 	}
@@ -414,6 +419,7 @@ const char * wwLookPinName( WwLook l )
 	case WwLook::Precip: return "WW_CELL_PRECIP";
 	case WwLook::FarLodAo: return "WW_LODL_AO";
 	case WwLook::FarLodSky: return "WW_LODL_SKY";
+	case WwLook::Vrs: return "WW_CELL_VRS";
 	default: return "";
 	}
 }

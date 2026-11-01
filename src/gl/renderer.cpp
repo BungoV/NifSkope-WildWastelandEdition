@@ -64,6 +64,7 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include "gl/cellssr.h"
 #include "gl/cellreflprobe.h"	// lane REFLPROBE1
 #include "gl/cellssgi.h"
+#include "gl/gametaa.h"	// lane PERFFIX4: the material maps' mip bias under the TAA2 jitter
 #include "esmweather.h"
 #include "io/material.h"
 #include "model/nifmodel.h"
@@ -2911,6 +2912,7 @@ bool Renderer::setupProgramCE1( const NifModel * nif, Program * prog, Shape * me
 	prog->uni1i( "lodTreeAnim", ( ( wwSunShadowStableRed() & 128 ) ? bsprop->isVertexAlphaAnimation : mesh->isVertexAlphaAnimation ) ? 1 : 0 );
 	prog->uni1i( "lodMaskByTree", wwLodMaskByTree );
 	prog->uni1f( "lodSpecStrength", lsp ? lsp->specularStrength : 1.0f );
+	prog->uni1f( "wwMipBias", wwTaa2MipBias() );	// lane PERFFIX4: sharper material maps under the TAA2 jitter
 
 	if ( mesh->isDoubleSided ) {
 		glDisable( GL_CULL_FACE );

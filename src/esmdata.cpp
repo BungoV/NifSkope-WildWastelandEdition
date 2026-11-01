@@ -792,6 +792,7 @@ EsmCellPrevis EsmWorld::cellPrevis( quint32 cellForm ) const
 	if ( !cr || cr->type == GRUP || !( *cr == "CELL" ) )
 		return out;
 	out.exists = true;
+	out.srcFile = cr->srcFile;	// lane PERFFIX4: the plugin whose CELL version wins
 	ESMFile::ESMField f( *esm, *cr );
 	while ( f.next() ) {
 		if ( f == "RVIS" && f.size() >= 4 ) {
@@ -799,6 +800,7 @@ EsmCellPrevis EsmWorld::cellPrevis( quint32 cellForm ) const
 		} else if ( f == "VISI" && f.size() >= 2 ) {
 			out.visi = f.readUInt16();
 			out.hasVisi = true;
+			out.hasPrevisFields = true;
 		} else if ( f == "PCMB" && f.size() >= 2 ) {
 			out.pcmb = f.readUInt16();
 			out.hasPcmb = true;
@@ -818,7 +820,104 @@ EsmCellPrevis EsmWorld::cellPrevis( quint32 cellForm ) const
 			}
 		} else if ( f == "XPRI" ) {
 			out.previsRefs = quint32( f.size() / 4 );
+			out.hasPrevisFields = true;
 		}
+	}
+	return out;
+}
+
+/* Lane PERFFIX4 (PREVISSTALE2): one REFR version's placement, for the previs tome's stale rule: the deleted and
+ * disabled flags, DATA (position + rotation), XSCL (1 when absent) and XESP (mapped enable parent + its flags). False
+ * for a compressed version (not compared: the caller counts it as changed). */
+namespace
+{
+struct RefPlace
+{
+	quint32 flags = 0, data[6] = {}, scale = 0x3F800000u, xespParent = 0, xespFlags = 0;
+	bool hasData = false;
+	bool operator==( const RefPlace & o ) const
+	{
+		if ( flags != o.flags || hasData != o.hasData || scale != o.scale || xespParent != o.xespParent || xespFlags != o.xespFlags )
+			return false;
+		for ( int k = 0; k < 6; k++ ) {
+			if ( data[k] != o.data[k] )
+				return false;
+		}
+		return true;
+	}
+};
+
+bool refPlace( const ESMFile & esm, const ESMFile::ESMRecord & r, RefPlace & out )
+{
+	if ( r.flags & 0x00040000 )
+		return false;
+	out.flags = r.flags & ( 0x00000800 | 0x00000020 );
+	ESMFile::ESMField f( r, esm );
+	while ( f.next() ) {
+		if ( f == "DATA" && f.size() >= 24 ) {
+			for ( int k = 0; k < 6; k++ )
+				out.data[k] = f.readUInt32();
+			out.hasData = true;
+		} else if ( f == "XSCL" && f.size() >= 4 ) {
+			out.scale = f.readUInt32();
+		} else if ( f == "XESP" && f.size() >= 5 ) {
+			out.xespParent = esm.mapFormID( r, f.readUInt32() );
+			out.xespFlags = f.readUInt8();
+		}
+	}
+	return true;
+}
+} // namespace
+
+QVector<EsmRefSource> EsmWorld::refSources( const QVector<quint32> & groups ) const
+{
+	QVector<EsmRefSource> out;
+	if ( !esm )
+		return out;
+	QSet<quint32> seen;	// an override can sit in its own group and in the later plugin's group
+	std::function<void( unsigned int )> walk = [&]( unsigned int id ) {
+		while ( id ) {
+			const ESMFile::ESMRecord * r = esm->findRecord( id );
+			if ( !r )
+				return;
+			if ( r->type != GRUP && *r == "REFR" && !seen.contains( r->formID ) ) {
+				seen.insert( r->formID );
+				EsmRefSource s;
+				s.owner = esm->getFormIDFile( r->formID );
+				s.src = r->srcFile;
+				s.disabled = ( r->flags & 0x00000800 ) != 0;
+				s.deleted = ( r->flags & 0x00000020 ) != 0;
+				// lane PERFFIX4 (PREVISSTALE2): the trailing run of versions placed as the winner is
+				s.settled = r->srcFile;
+				RefPlace win;
+				const std::vector<ESMFile::PriorVersion> * pv = esm->getPriorVersions( r->formID );
+				if ( pv && refPlace( *esm, *r, win ) ) {
+					for ( auto it = pv->rbegin(); it != pv->rend(); ++it ) {
+						ESMFile::ESMRecord old;
+						old.type = r->type;
+						old.flags = it->flags;
+						old.formID = r->formID;
+						old.srcFile = it->srcFile;
+						old.fileData = it->fileData;
+						RefPlace p;
+						if ( !refPlace( *esm, old, p ) || !( p == win ) )
+							break;
+						s.settled = it->srcFile;
+					}
+				} else if ( !pv ) {
+					s.settled = s.src;	// never overridden: only its own plugin's version
+				}
+				out.append( s );
+			}
+			if ( r->children )
+				walk( r->children );
+			id = r->next;
+		}
+	};
+	for ( const quint32 g : groups ) {
+		const ESMFile::ESMRecord * gr = g ? esm->findRecord( g ) : nullptr;
+		if ( gr )
+			walk( gr->children );
 	}
 	return out;
 }

@@ -124,6 +124,14 @@ unsigned int ESMFile::loadRecords(
       if (!r)
         r = n;
     }
+    if (n != 0U && esmRecord.fileData &&
+        FileBuffer::checkType(recordType, "REFR") &&
+        FileBuffer::checkType(esmRecord.type, "REFR"))
+    {
+      // lane PERFFIX4: keep the losing version of an overridden ref
+      priorRefs[n].push_back(
+          { esmRecord.srcFile, esmRecord.flags, esmRecord.fileData });
+    }
     if (n != 0U || !esmRecord.fileData) [[likely]]
     {
       esmRecord.type = recordType;
