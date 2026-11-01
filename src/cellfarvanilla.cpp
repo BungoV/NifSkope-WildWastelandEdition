@@ -7,6 +7,7 @@ BSD License - see nifskope.h
 #include "cellfarvanilla.h"
 #include "wwswitch.h"	// lane TESTDRIVER1: the WW_* switch store
 #include "gl/celllooks.h"	// lane FAR5: Game LOD trees sway
+#include "cellmesh.h"	// lane FIX1101A lodch r2: the game's chunks' arrays beside the document
 
 #include "gamemanager.h"
 #include "lodgen.h"
@@ -555,6 +556,74 @@ void fvShape( NifModel & src, const QModelIndex & iS, FvKind kind, const FvRect 
 	}
 }
 
+/* lane FIX1101A lodch r2 (LATE ITEM 23): one moved shape's rows into a CellMesh beside the document (src/cellmesh.h), the
+ * values BSShape's row path reads (gl/bsshape.cpp: Vertex, Bitangent X/Y/Z, UV, Normal, Tangent, Vertex Colors), then
+ * the rows dropped; the document keeps its counts, so cellMeshFor hands the arrays out and any reader that asks for the
+ * rows by name gets them written back (cellMeshRowsAsked). Rows cost ~2.4 KB a triangle (FINALFIX g3), the arrays
+ * 106-147 B (the game's .bto, 4 chunks, 1.4-2.0 vertices a triangle). Returns the triangles moved, 0 = left as rows. */
+qint64 fvToSide( NifModel * nif, const QModelIndex & iS )
+{
+	if ( !nif->isNiBlock( iS, "BSTriShape" ) && !nif->isNiBlock( iS, "BSMeshLODTriShape" )
+		&& !nif->isNiBlock( iS, "BSSubIndexTriShape" ) )
+		return 0;
+	if ( nif->get<quint32>( iS, "Flags" ) & 1u )
+		return 0;   // hidden (dropped whole): nothing draws it
+	const quint16 flags = quint16( ( nif->get<BSVertexDesc>( iS, "Vertex Desc" ).Value() >> 44 ) & 0xFFFF );
+	if ( flags & ( VF_SKINNED | VF_EYEDATA | VF_UV_2 ) )
+		return 0;
+	const QModelIndex iVD = nif->getIndex( iS, "Vertex Data" );
+	const QModelIndex iTri = nif->getIndex( iS, "Triangles" );
+	if ( !iVD.isValid() || !iTri.isValid() )
+		return 0;
+	const int nv = nif->rowCount( iVD );
+	const QVector<Triangle> tris = nif->getArray<Triangle>( iTri );
+	if ( nv <= 0 || tris.isEmpty() || quint32( nv ) != nif->get<quint32>( iS, "Num Vertices" )
+		|| quint32( tris.size() ) != nif->get<quint32>( iS, "Num Triangles" ) )
+		return 0;
+	static const char * const names[8] = {
+		"Vertex", "Bitangent X", "Bitangent Y", "Bitangent Z", "UV", "Normal", "Tangent", "Vertex Colors"
+	};
+	int at[8];
+	const QModelIndex v0 = nif->index( 0, 0, iVD );
+	for ( int i = 0; i < 8; i++ ) {
+		const QModelIndex j = nif->getIndex( v0, names[i] );
+		at[i] = j.isValid() ? j.row() : -1;
+	}
+	QSharedPointer<CellMesh> m( new CellMesh );
+	m->withColour = ( flags & VF_COLORS ) != 0;
+	m->verts.resize( nv );
+	m->norms.resize( nv );
+	m->tangents.resize( nv );
+	m->bitangents.resize( nv );
+	m->coords.resize( nv );
+	m->colors.fill( Color4( 0.0f, 0.0f, 0.0f, 1.0f ), nv );
+	for ( int v = 0; v < nv; v++ ) {
+		const QModelIndex row = nif->index( v, 0, iVD );
+		if ( at[0] >= 0 )
+			m->verts[v] = nif->get<Vector3>( row, at[0] );
+		m->bitangents[v] = Vector3( at[1] >= 0 ? nif->get<float>( row, at[1] ) : 0.0f,
+			at[2] >= 0 ? nif->get<float>( row, at[2] ) : 0.0f, at[3] >= 0 ? nif->get<float>( row, at[3] ) : 0.0f );
+		if ( at[4] >= 0 )
+			m->coords[v] = Vector2( nif->get<HalfVector2>( row, at[4] ) );
+		if ( at[5] >= 0 )
+			m->norms[v] = nif->get<ByteVector3>( row, at[5] );
+		if ( at[6] >= 0 )
+			m->tangents[v] = nif->get<ByteVector3>( row, at[6] );
+		if ( at[7] >= 0 )
+			m->colors[v] = nif->get<ByteColor4>( row, at[7] );
+	}
+	m->triangles = tris;
+	// the rows go; the counts stay what the document states (cellMeshFor compares them)
+	nif->set<quint32>( iS, "Num Vertices", 0 );
+	nif->set<quint32>( iS, "Num Triangles", 0 );
+	nif->updateArraySize( iVD );
+	nif->updateArraySize( iTri );
+	nif->set<quint32>( iS, "Num Vertices", quint32( nv ) );
+	nif->set<quint32>( iS, "Num Triangles", quint32( tris.size() ) );
+	cellMeshPut( nif, iS, m );
+	return tris.size();
+}
+
 } // namespace
 
 /* lane FAR5: the game's LOD trees sway (a look, ours: FO4's .bto trees are still and it has no .btt). A tree = a
@@ -684,6 +753,8 @@ bool wwFarVanAppend( NifModel * nif, const QModelIndex & parent, const QString &
 	}
 	const QString wsl = ws.toLower();
 	const Vector3 shiftV( shift[0], shift[1], shift[2] );
+	//! lane FIX1101A lodch r2 (LATE ITEM 23): the chunks' arrays beside the document; red WW_CELL_FARLOD_RED=vanrows
+	const bool sideOn = cellMeshOn() && wwEnv( "WW_CELL_FARLOD_RED" ) != "vanrows";
 	/* two passes: the terrain (.btr) of every ring first, then the objects (.bto) ring by ring under the
 	 * budget, so inner objects cannot starve the outer rings' ground. "any" is its .btr. */
 	for ( int pass = 0; pass < 2; pass++ )
@@ -860,6 +931,17 @@ bool wwFarVanAppend( NifModel * nif, const QModelIndex & parent, const QString &
 						}
 						nif->set<QString>( nif->getBlockIndex( b ), "Name", name );
 						r.shapes++;
+					}
+					/* lane FIX1101A lodch r2 (LATE ITEM 23): the chunk's land and objects keep their arrays beside the
+					 * document, as ours do: as rows (~2.4 KB a triangle) the c3 rings' terrain + ring 0's objects alone
+					 * passed the 2048 MB budget and every object chunk past ring 0 was refused ("objects NOT BUILT past
+					 * chunk -32,0"). The water stays rows (the cell's water reads them). */
+					for ( int k = 0; sideOn && k < shapes.size(); k++ ) {
+						const int b = map.value( shapes[k], -1 );
+						if ( b < 0 || water[size_t( k )] )
+							continue;
+						const qint64 t = fvToSide( nif, nif->getBlockIndex( b ) );
+						( kind == 0 ? r.sideTerrainTris : r.sideObjectTris ) += t;
 					}
 				}
 				if ( pass == 1 )

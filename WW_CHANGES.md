@@ -1,3 +1,41 @@
+## LODCH r2 (FIX1101A, 2026-11-01): far ground contact drawn; the vanilla far LOD builds its object rings
+
+- **Far objects, ground contact (LATE ITEM 25 lists it among the channels that must draw; it was never read).** The
+  .lodi v12 per-vertex ground-contact ramp (255 at the terrain, 0 by 256 u above it) now darkens the far objects' AO,
+  folded into the AO byte the instanced rows already carry, so it costs no byte: `min(AO, 1 - 0.35 x ramp)`
+  (`src/lodchsky.h` contactAo). The bake's 8 AO rays never aim lower than ~8 deg over the tangent plane, so a wall
+  foot in the ground read open; the min never darkens a foot twice where the AO already holds the contact, and nothing
+  goes below 0.65 from it. The flat copy (red `WW_CELL_FARLOD_RED=flat`) takes it too. Red `WW_LODL_AO_RED=noground`
+  (live: the key is already in liveFarKey). Census: "far lod: objects ring N channels: ... stream texels (X MB, 2 B a
+  vertex a copy), ground contact on (P placements, V vertices)" and the same on `farobjcensus`.
+- **LATE ITEM 25b, measured (no code change to the stream):** the per-copy stream is one RG8 texel a (placement,
+  vertex): at most 19.15 MB for what c3 draws (every placement in rings 0-2's rects, 10,038,615 placement-vertices; the
+  census line gives the exact count), 25.04 MB for the whole Commonwealth (13,129,195), against +440 MB for the old
+  fat-vertex route. The split bungo described (self-AO in the shared mesh's colour, one AO value a copy, sky 1 B a vertex
+  a copy) would save 9.57 MB on c3 and draw the AO 25.7 levels off on average (28.4 % of vertices more than 32 levels
+  off; the sky as one value a copy: 28.7 levels): the .lodi scene AO already holds the self-AO (doc 4.8: use the
+  byte alone, multiplying self-AO in darkens twice), and the occlusion between neighbours varies across a copy. The
+  shared meshes stay shared (never de-instanced); the stream stays.
+- **Vanilla far LOD, rings 1-4 drew 0 object triangles (LATE ITEM 23).** Cause, measured from SHOTS1101's c3 notes: the
+  game's chunks were appended as document rows, charged 2.4 KB a triangle; the rings' terrain + skirts (506,874 tris)
+  and ring 0's objects (386,920) passed the 2048 MB budget, so every object chunk past ring 0 was refused ("objects NOT
+  BUILT past chunk -32,0: the far field's budget"). Now the chunks' land and objects keep their arrays beside the
+  document (`src/cellmesh.h`, as ours do; `cellfarvanilla.cpp` fvToSide, water stays rows) and are charged 256 B a
+  triangle (`cellfarvanilla.h` wwFarVanChargeMB; the game's .bto measure 106-147 B a triangle as arrays). The
+  double-ground / plan readback reads the arrays where they wait. Rings 3-4 stay at 0 object triangles because the
+  game ships none there (the c3 census: level 16, 0 chunks in the ring; level 32, 3 chunks, 0 triangles in the
+  region). Red `WW_CELL_FARLOD_RED=vanrows` (live): rows, as before. The source line adds ", arrays beside the
+  document: T terrain + O object tris".
+- **Vanilla far LOD "terrain ribbons in the sky": geometry measured right, cause not found offline.** Every .btr vertex
+  placed the code's way lies inside its .lodl cell's height range (37 chunks, levels 4-32; level vs level dz median 0),
+  and an offline twin of all 136 c3 chunks at c3van_s3's camera puts the upper ribbon exactly on the ring-4 border hills
+  (z to 43,264 at cells -64..-32) and the lower one on ring 1: real terrain at its real place, drawn dark and unhazed
+  while the low ground around it is hazed white. Owed: the pair in rows2.txt (fog/haze off) to tell shading from
+  placement.
+- **Gates:** `tests/lodchground` (green PASS; red today FAIL foot 1.000, red product FAIL nodouble 0.260),
+  `tests/vanbudget` (green: rings 0-2 objects built, 996 MB; red rows: no chunk of ring 1, 2064 MB),
+  `tests/lodchused` now also wants the ground contact used and a `noground` red.
+
 ## LODCH (FIX1101A, 2026-11-01): the LOD bake's channels draw by default (far AO, far sky light, far ground AO)
 
 bungo asked whether the LOD bakes' sky visibility is used, and for proof that the LOD bakes work (LATE ITEMs 11, 16 and

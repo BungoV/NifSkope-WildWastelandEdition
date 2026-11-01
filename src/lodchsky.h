@@ -134,6 +134,25 @@ inline float giFactorByte( int s, float nz )
 	return giTable()[size_t( std::clamp( s, 0, 255 ) ) * 129 + size_t( n )];
 }
 
+/*! lane FIX1101A lodch r2 (LATE ITEM 25): the .lodi v12 ground-contact ramp (255 at the terrain surface, 0 by 256 u
+ *  above it; docs/LODGEN_NATIVE_LODO_LODI.md 4.16) drawn as contact darkening, folded into the AO byte the far rows
+ *  already carry (no extra byte): min(AO, 1 - kContactK x ramp). The bake's 8 AO rays never aim lower than ~8 deg over
+ *  the tangent plane, so a wall foot in the ground reads open (4.8 "Known"); the min never darkens twice where the AO
+ *  already holds the contact. The darkest a foot gets from it is 1 - kContactK (0.65). Red WW_LODL_AO_RED=noground. */
+constexpr float kContactK = 0.35f;
+
+inline float contactAo( float ao, int ramp )
+{
+#if defined( LODCH_GROUND_RED ) && LODCH_GROUND_RED == 1
+	( void ) ramp;
+	return ao;	// today: the ramp is not drawn
+#elif defined( LODCH_GROUND_RED ) && LODCH_GROUND_RED == 2
+	return ao * ( 1.0f - kContactK * float( std::clamp( ramp, 0, 255 ) ) / 255.0f );	// the product: darkens twice
+#else
+	return std::min( ao, 1.0f - kContactK * float( std::clamp( ramp, 0, 255 ) ) / 255.0f );
+#endif
+}
+
 }
 
 #endif
