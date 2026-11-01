@@ -21,6 +21,13 @@ enum Pass
 {
 	SunShadows, CellShadows, Background, Obscurance, Reflections, Air, Measure, UmbraDepth, Impostors,
 	Opaque, Sorted, Effects, FarCards, ToneMap, Post, Overlays, Ssgi, ReflProbes,	// lane REFLPROBE1: the placed reflection probes
+	/* lane TIMING1 (11-01): the costs no zone held. Water = the wind's waves + the water's draws in the sorted pass
+	 * (refraction copies included); SsrWater = the SSR pass's water rays (step 1b); SsrDonor = the SSR pass's second
+	 * opaque scene pass (the SSGI donor, or the colour when the previous frame cannot stand in); Contact = the contact
+	 * mask (was inside "reflections"); CloudShadows, FarGround = cut out of "sun-cascades"; Precip, Underwater,
+	 * Clouds = passes outside every zone before; Taa = the temporal AA's blits, vectors, resolve and copy-back (and
+	 * TAAINPUTS1's object vectors), cut out of "post" */
+	Water, SsrWater, SsrDonor, Contact, CloudShadows, FarGround, Precip, Underwater, Clouds, Taa,
 	CullCamera, CullCascades,	// CPU only: the run culling inside the passes above
 	ShapeSetup,	// CPU only: the shapes' program and uniform setup inside the passes above
 	Count
@@ -82,6 +89,28 @@ private:
 	int p_;
 	Q_DISABLE_COPY( Scope )
 };
+
+//! lane TIMING1: the GPU pass open at the top of the stack (-1: none, or the timers off)
+int openPass();
+/*! lane TIMING1: a part of a pass timed as a pass of its own. Only when `from` is the open pass: it closes, `to`
+ *  opens, and at the scope's end `to` closes and `from` opens again (its CPU, GPU and draws then sum both pieces).
+ *  Anywhere else (another pass open, the timers off) it does nothing, so a shared draw path called from another pass
+ *  stays in that pass. */
+class Swap
+{
+public:
+	Swap( int from, int to ) : from_( openPass() == from ? from : -1 ), to_( to ) { if ( from_ >= 0 ) { end( from_ ); begin( to_ ); } }
+	~Swap() { if ( from_ >= 0 ) { end( to_ ); begin( from_ ); } }
+private:
+	int from_, to_;
+	Q_DISABLE_COPY( Swap )
+};
+
+/*! lane TIMING1: WW_CELL_PASSTIME_LIGHTLOOP=1 (timing rows only; the picture flickers): every odd timed frame the
+ *  cell-lit draws get 0 lights (celllights.cpp), and every 60 frames read back stderr gets
+ *  "pass time: light loop ..." with the opaque / sorted / water / ssr-donor / frame GPU means of the lit frames, the
+ *  unlit ones and the difference (the light loop's GPU ms). Each "pass time:" line ends "| lights 1|0". */
+bool lightLoopOff();
 
 class CpuScope
 {

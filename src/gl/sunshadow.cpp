@@ -811,8 +811,14 @@ void wwSunShadowPass( Scene * scene )
 		return;
 	sunShadowPassImpl( scene );
 	wwShadowSetFrame( scene );	// lane TERRSHADOW1: the terrain sweep's step, whatever the Shadows row says
-	wwCloudShadowPass( scene );	// lane CLOUD3: the clouds' shadow map rows, whatever the Shadows row says
-	CellFarGround::pass( scene );	// lane FARDRAW1: the far ring 0's live ground (uploads, page stamps, frees)
+	{
+		PassTime::Swap pt( PassTime::SunShadows, PassTime::CloudShadows );	// lane TIMING1: out of "sun-cascades"
+		wwCloudShadowPass( scene );	// lane CLOUD3: the clouds' shadow map rows, whatever the Shadows row says
+	}
+	{
+		PassTime::Swap pt( PassTime::SunShadows, PassTime::FarGround );	// lane TIMING1: out of "sun-cascades"
+		CellFarGround::pass( scene );	// lane FARDRAW1: the far ring 0's live ground (uploads, page stamps, frees)
+	}
 	csmEchoFrame();
 }
 

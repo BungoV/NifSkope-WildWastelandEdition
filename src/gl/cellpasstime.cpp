@@ -188,6 +188,9 @@ struct State
 	quint64 liveGen = 0;	// lane TESTDRIVER1: the switch generation last read
 	bool sync = false;	// WW_CELL_PASSTIME_SYNC=1: a glFinish at each pass edge, so the timestamps hold that pass's work only
 	bool census = false;	// WW_CELL_PASSTIME_CENSUS=1: each pass's samples passed (overdraw) and primitives, in the log line
+	bool lightLoop = false;	// lane TIMING1: WW_CELL_PASSTIME_LIGHTLOOP=1, odd frames unlit (cellpasstime.h lightLoopOff)
+	double llSum[2][5] = {};	// [unlit, lit] x opaque, sorted, water, ssr-donor, frame GPU ms
+	int llN[2] = {};
 	QOpenGLContext * ctx = nullptr;
 	QOpenGLFunctions_3_3_Core * gl = nullptr;
 	std::vector<GLuint> pool;
@@ -234,6 +237,12 @@ State & st()
 		s.log = wwEnvInt( "WW_CELL_PASSTIME_LOG" ) == 1;
 		s.sync = wwEnvInt( "WW_CELL_PASSTIME_SYNC" ) == 1;
 		s.census = wwEnvInt( "WW_CELL_PASSTIME_CENSUS" ) == 1;
+		s.lightLoop = wwEnvInt( "WW_CELL_PASSTIME_LIGHTLOOP" ) == 1;
+		for ( int k = 0; k < 2; k++ ) {
+			s.llN[k] = 0;
+			for ( double & v : s.llSum[k] )
+				v = 0.0;
+		}
 		for ( int & m : s.openMark )
 			m = -1;
 		for ( int & m : s.openSub )
@@ -310,6 +319,33 @@ void collect( Slot & sl )
 	const double gpuFrame = gpuMs( sl.f0, sl.f1 );
 	s.pool.push_back( sl.f0 );
 	s.pool.push_back( sl.f1 );
+	if ( s.lightLoop ) {	// lane TIMING1: the light loop's GPU ms = the lit frames' mean minus the unlit ones'
+		const int k = ( sl.frame & 1 ) ? 0 : 1;
+		const double v[5] = { gpu[Opaque], gpu[Sorted], gpu[Water], gpu[SsrDonor], gpuFrame };
+		for ( int i = 0; i < 5; i++ )
+			s.llSum[k][i] += v[i];
+		s.llN[k]++;
+		if ( s.llN[0] + s.llN[1] >= 60 && s.llN[0] > 0 && s.llN[1] > 0 ) {
+			static const char * const llName[5] = { "opaque", "sorted", "water", "ssr-donor", "frame" };
+			QByteArray ll = QByteArray( "pass time: light loop lit " ) + QByteArray::number( s.llN[1] ) + " unlit "
+				+ QByteArray::number( s.llN[0] );
+			double lit[5], unlit[5];
+			for ( int i = 0; i < 5; i++ ) {
+				lit[i] = s.llSum[1][i] / double( s.llN[1] );
+				unlit[i] = s.llSum[0][i] / double( s.llN[0] );
+				ll += QByteArray( " | " ) + llName[i] + " " + QByteArray::number( lit[i], 'f', 2 ) + "/"
+					+ QByteArray::number( unlit[i], 'f', 2 );
+			}
+			const double loop = ( lit[0] - unlit[0] ) + ( lit[1] - unlit[1] ) + ( lit[2] - unlit[2] ) + ( lit[3] - unlit[3] );
+			ll += QByteArray( " | loop " ) + QByteArray::number( loop, 'f', 2 ) + " ms (opaque+sorted+water+ssr-donor, lit-unlit)";
+			std::fprintf( stderr, "%s\n", ll.constData() );
+			for ( int j = 0; j < 2; j++ ) {
+				s.llN[j] = 0;
+				for ( double & x : s.llSum[j] )
+					x = 0.0;
+			}
+		}
+	}
 	if ( s.log ) {
 		QByteArray line = QByteArray( "pass time: t=" ) + QByteArray::number( processSeconds(), 'f', 1 ) + " frame="
 			+ QByteArray::number( sl.frame ) + " cpu="
@@ -347,6 +383,8 @@ void collect( Slot & sl )
 			if ( sl.cpuSubN[k] > 0 )
 				line += QByteArray( " | cpu " ) + cpuSubName[k] + " " + QByteArray::number( sl.cpuSub[k], 'f', 2 ) + " n="
 					+ QByteArray::number( sl.cpuSubN[k] );
+		if ( s.lightLoop )
+			line += ( sl.frame & 1 ) ? " | lights 0" : " | lights 1";
 		std::fprintf( stderr, "%s\n", line.constData() );
 	}
 	s.winGpuFrames++;
@@ -369,8 +407,21 @@ const char * name( int pass )
 {
 	static const char * const k[Count] = { "sun-cascades", "light-cubes", "sky", "obscurance", "reflections", "air",
 		"measure", "umbra-depth", "impostors", "opaque", "sorted", "effects", "far-cards", "tone-map", "post",
-		"overlays", "ssgi", "refl-probes", "cull-camera", "cull-cascades", "shape-setup" };
+		"overlays", "ssgi", "refl-probes", "water", "ssr-water", "ssr-donor", "contact", "cloud-shadows", "far-ground",
+		"precip", "underwater", "clouds", "taa", "cull-camera", "cull-cascades", "shape-setup" };	// lane TIMING1: water .. taa
 	return pass >= 0 && pass < Count ? k[pass] : "?";
+}
+
+int openPass()
+{
+	const State & s = st();
+	return s.on && s.inFrame && !s.stack.empty() ? s.stack.back() : -1;
+}
+
+bool lightLoopOff()
+{
+	const State & s = st();
+	return s.on && s.lightLoop && s.inFrame && ( s.frame & 1 ) != 0;
 }
 
 bool on()

@@ -74,7 +74,7 @@ struct WwDisplayRow
 	 * (live, its value kept). overriddenBy: that row's tick, or its submenu (on = any item but overriddenOff). */
 	QString overriddenBy;
 	int overriddenOff = 0;
-	bool heavy = false;            //!< built-in preset Low turns this Fusion Shaders row off (its GPU cost)
+	bool heavy = false;            //!< the old preset rule's flag; lane TIMING1: src/ui/cellpresettable.h decides now
 };
 
 QStringList wwDisplayGroups();   //!< Editor, Vanilla, Fusion Shaders
@@ -101,6 +101,10 @@ QVariantMap wwDisplayState( const QWidget * panel );
 void wwDisplaySetState( QWidget * panel, const QVariantMap & state );
 QStringList wwDisplayPresetNames();      //!< his own, sorted
 QStringList wwDisplayPresetBuiltins();   //!< Low, Medium, High, Ultra: the Fusion Shaders rows only; never renamed or deleted
+//! lane TIMING1: the code a built-in preset sets for a row (key = its tick's objectName, else its choices'; preset
+//! 0 Low .. 3 Ultra): '0' off, '1' on, 'L' 'M' 'H' 'U' that item, '-' left. nullptr = src/ui/cellpresettable.h (tests only).
+using WwPresetCodeFn = char ( * )( const char * key, int preset );
+void wwDisplayPresetCodes( WwPresetCodeFn fn );
 QString wwDisplayPresetCurrent();
 bool wwDisplayPresetSave( QWidget * panel, const QString & name );   //!< a new name, or overwrite one
 bool wwDisplayPresetApply( QWidget * panel, const QString & name );

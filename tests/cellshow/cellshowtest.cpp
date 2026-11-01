@@ -33,6 +33,7 @@
 #include <QWidgetAction>
 
 #include <cstdio>
+#include <cstring>
 
 namespace {
 
@@ -272,6 +273,15 @@ struct DisplayMenu
 void displayChecks( const WwMenuPanelStyle & style )
 {
 	std::printf( "the Display tab: a tick per row, quality dropdowns, three groups\n" );
+	/* lane TIMING1: the built-in presets read src/ui/cellpresettable.h (tests/presettable checks that table); these
+	 * rows are this test's own, so the step mechanics run on the old rule's codes: every row on at the preset's
+	 * level, the heavy SSGI row off at Low */
+	wwDisplayPresetCodes( []( const char * key, int p ) -> char {
+		static const char kLvl[4] = { 'L', 'M', 'H', 'U' };
+		if ( std::strcmp( key, "Ssgi" ) == 0 )
+			return p == 0 ? '0' : kLvl[p];
+		return std::strcmp( key, "LampShadows" ) == 0 ? kLvl[p] : '1';
+	} );
 	QSettings().remove( QStringLiteral( "CellEditor/DisplayPresets" ) );	// before the panel: its preset strip reads them
 	QSettings().remove( QStringLiteral( "CellEditor/DisplayPreset" ) );
 	DisplayMenu m;

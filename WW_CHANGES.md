@@ -1,3 +1,30 @@
+## TIMING1 (2026-11-01): the timers that were missing, and presets decided per feature
+
+**Frame Timers (no look change).** New zones in the `pass time:` line and the Frame Timers row:
+- `water`: the wind's waves pass + the water's own draws in the sorted pass (its refraction copies included).
+- `ssr-water`: the SSR pass's water rays (step 1b). `ssr-donor`: the SSR pass's second opaque scene pass (SSGI's donor,
+  or the colour when the previous frame cannot stand in). `contact`: the contact mask. `reflections` is now the SSR
+  quads alone (it held all four before).
+- `cloud-shadows` and `far-ground`: cut out of `sun-cascades`, which is now the cascades alone.
+- `precip` (rain / snow), `underwater`, `clouds` (the volume clouds' depth copy and front pass): outside every zone before.
+- `taa`: the temporal AA's colour and depth blits, motion vectors, resolve and copy-back, plus TAAINPUTS1's object
+  vectors, cut out of `post`. The resolve-only `modern temporal aa: gpu` line is unchanged.
+- `WW_CELL_PASSTIME_LIGHTLOOP=1` (live, timing rows only: the picture flickers): every odd timed frame the cell-lit draws
+  get 0 lights; every 60 frames `pass time: light loop lit N unlit M | opaque a/b | ... | loop X ms` gives the light
+  loop's GPU ms (lit minus unlit over opaque + sorted + water + ssr-donor), and each `pass time:` line ends `| lights 1|0`.
+- How: `PassTime::Swap( from, to )` (cellpasstime.h) times a part of the open pass as its own pass and does nothing when
+  another pass is open, so a shared draw path stays in its caller's zone.
+
+**Presets (bungo 11-01, "each feature per preset").** The built-in Low / Medium / High / Ultra no longer turn every
+Fusion Shaders row on (and the heavy ones off at Low). Each row sets what `src/ui/cellpresettable.h` says for that
+preset. A feature enters a column only when its measured GPU ms there meets its PERFRES target. LOD is on at every
+preset. Group masters stay on. Ship-on rows keep their ship value (AO on, Modern TAA High, cached lamp shadows Medium).
+Rows with a method, a source or a curve are left as they are. The table holds the manager's 11-01 plan beside each row,
+and the measured ms and targets with their sources. `cell presets:` in the notes counts rows the table lacks.
+tests/presettable: every row x preset against those rules (red: the old rule, it must fail), plus a coverage check
+that every Fusion Shaders panel row has a table row (red: a row dropped). tests/cellshow keeps testing the step
+mechanics on its own synthetic codes (`wwDisplayPresetCodes`).
+
 ## FOAMOFF2 (FIX1101A, 2026-11-01): River foam and Contact foam stay OFF
 
 The water lane's foam fixes land: lace streaks instead of solid patches, and no foam on a dry bank. Its two rows still
