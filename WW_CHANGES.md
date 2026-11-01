@@ -145,6 +145,66 @@ of the held cubes' depth texels on stderr ("shadow cube hash ..."), so a row and
 Unit: tests/cubefacecull (40000 spheres x 400 points through the face's clip rows: no point lands in a dropped face; the
 red, a centre-only test, loses 1.5 M points; 1.63 faces kept a caster on that population; the face table is
 celllights.cpp's).
+## PERFFIX2 c (2026-11-01): SSGI cost by stage and per preset, AO quality tiers, contact shadows on compute
+
+bungo 11-01 "close the gaps for everything" (PERFRES1101 A gaps 4 SSGI, AO tiers, contact shadows). Numbers and pictures:
+notes/perffix2/c/RESULTS.md.
+
+- SSGI SUB-TIMERS (item 3a): the ssgi pass's stages are timed in groups, logged after the passes as `| sub ssgi-hiz`,
+  `ssgi-mips`, `ssgi-ecast`, `ssgi-echain`, `ssgi-cast`, `ssgi-temporal`, `ssgi-denoise` (src/gl/cellssgiplan.h maps
+  each stage to its group; tests/ssgiplan). Timestamps only: no picture changes.
+- AO QUALITY TIERS (item 9): a new choice `Ambient Occlusion quality` Low / Medium / High / Ultra (WW/CellAoQuality, pin
+  WW_CELL_AO_QUALITY=low|medium|high|ultra, live), a row under Ambient Occlusion that the built-in presets step. The
+  method stays the user's; the tier scales its samples (src/gl/cellaomethod.h): vanilla (the game's SAO, half size) 1 / 3
+  / 6 / 8 still-view angles, the ported methods 2x2 / 2x3 / 3x3 / 4x3 slices x steps. Ultra is the default: vanilla Ultra
+  is the picture before (8 angles); a ported method's Ultra was FO4CS's 9x3 (now 4x3, mean |d| 0.0007 offline).
+  Offline 1080p RTX 5070 Ti (tools aox_offline): vanilla 0.08 / 0.14 / 0.24 / 0.30 ms. Red WW_CELL_AO_QUALITY_RED=old:
+  every tier as before (8 angles, 9x3). Unit tests/aomethod (-DAOTIER_RED fails).
+- SSGI EMISSIVE FOLD (item 3b): the emitters reach the bounce through the ordinary march (its donor, the scene colour,
+  holds the emission) at SSGI3's fill law like any radiance: one cast, one temporal, one denoise, and the scene pass
+  writes no emission target any more. Offline (synthetic room with a big and a small emitter, 1080p): Low 3.41 -> 1.88 ms,
+  Ultra 12.0 -> 6.39 ms; the emitters' share of the bounce 0.94 of the separate chain's (FO4CS's importance-sampled cast
+  with its facing law and small-emitter boost), their brightest 1 % nearer the emitter 1.9x. This is the path red
+  `noemissive` drew (byte-identical). Red WW_CELL_SSGI_RED=emitchain: SSGI2's stage-8 chain as before.
+- SSGI WITHOUT THE FULL-SIZE PYRAMID (item 3c): the interval pyramid (stages 10/11, built over the FULL-size depth at
+  every tier) is no longer built: offline its skip cost more than it saved at every tier (Low 1.84 -> 1.48 ms, Ultra
+  6.39 -> 5.19 ms with 3b; SSGI2's own live bar "nohiz >= ultra" failed the same way), and dropping it is exact (a
+  skipped tap is one `len > radius` drops anyway): pictures byte-identical offline. The full-mask early out stays
+  (shader uniform fullBreak). The per-frame donor mips measured 0.02 ms offline: kept. Red WW_CELL_SSGI_RED=hiz: the
+  pyramid again; `nohiz` keeps SSGI2's meaning (no pyramid, no early out).
+- SSGI TIERS THAT STEP THE COST (item 3d): FO4CS's four tiers cost about the same (offline Low 3.45 vs Ultra 12.0 ms
+  before this lane, and the live rows read flat) and none came near PERFRES's targets. The tiers are now (work size,
+  slices x steps a side, the robust denoise's Poisson taps; src/gl/cellssgiplan.h): Low quarter 2x12 / 8, Medium quarter
+  3x12 / 16, High quarter 6x12 / 16, Ultra half 4x12 / 12. Twelve steps everywhere: offline 8 steps under-count the bounce
+  (0.79 of a full-size 8x16 march, 12 steps 0.92). Offline 1080p RTX 5070 Ti (synthetic room, all of 3b-3d): 0.44 / 0.61 /
+  0.87 / 1.75 ms against the targets 0.44 / 0.62 / 0.88 / 1.76 (before: 3.45 / 4.25 / 4.97 / 12.02). The default tier
+  (Ultra) is no longer full size; SSGI itself still ships OFF. Red WW_CELL_SSGI_RED=oldtiers: FO4CS's tiers.
+- CONTACT SHADOWS ON COMPUTE, BEND'S LINE LAYOUT (item 7): the near march (non-SHADOWPAR1 tiers) runs as a GL compute
+  pass, one 64-lane workgroup per light-space line, the line's depths read once into shared memory and every sample
+  "two shared reads, a min, a multiply-add and an abs" (res/shaders/ww_contact.comp; the dispatch and the one-lane-
+  per-pixel owner rule src/gl/contactlines.h, tests/contactlines). The app's context reports GL 4.6 on NVIDIA (it asks
+  4.2 core); below 4.3 or on a compile failure the fragment pass runs and the echo says why (`path=frag(...)`).
+  As in Bend's, a pixel's ray is its line's (within half a pixel) and its receiver depth the line's own sample: off the
+  depth edges the mask matches the fragment pass at full size (> 2 levels on 0.003-0.05 % of pixels), and at half size
+  it drops the fragment pass's false floor darkening (a mask-pixel bilinear weight over texels two rows apart).
+  Offline 1080p RTX 5070 Ti (synthetic yard, 4 suns, reach on/off): fragment Low/Med/High/Ultra 0.14 / 0.22 / 0.54 /
+  0.77 ms -> line 0.06-0.10 / 0.10 / 0.17 / 0.21 ms. Half-size masks (Low, Medium, SHADOWPAR1) now reach the receivers
+  through a depth-aware upsample to full size (ww_contact_up, 0.016 ms): fewer halos at silhouettes. FIX1101A's reach
+  (CONTACTREACH1, cherry-picked from fx1101a-20261101) holds on the compute march. Echo `path=line|frag up=depth|full|
+  bilinear gl=M.m`. Reds WW_SHADOW_RED=contactfrag (the fragment march), contactbilinear (no upsample).
+
+## CONTACTREACH1 (FIX1101A, 2026-11-01): no dashed bands from thin casters (bungo's "banding on shadows")
+
+bungo's crop of his Concord porch frame showed the shadow of power lines on a facade as a row of short parallel dashes
+beside a soft line. The cascades were not the cause: an offline twin of the cascade filter (Ultra + PAR, texel 1.24 /
+3.56 u, Vogel radius 2.8 / 10.5 u) draws a 2-2.8 u cable as a smooth soft line and a thick edge within 0.6 px. The near
+contact march (screen space, half-res, 4 lanes) hit a thin caster 85 u off the wall in only one or two samples, so the
+shadow came out as dashes. Inside the cascades' reach the near march now stops 48 game units from the receiver
+(src/gl/shadowset.cpp kContactReach, res/shaders/ww_contact.frag sssReach); the reach opens up as the cascades fade out,
+and the far tier keeps its own fade. Real contact (a caster within 48 u) keeps its contact shadow. The echo's contact
+part prints `reach=48`. Red: `WW_SHADOW_RED=contactreach` (the whole march, as before; live). Gate: tests/contactreach1
+(the twin on a wire 85 u off a wall at ~2700 u: composed stair 1.30 -> 0.20 px, darkness CV 0.155 -> 0.024; a wire 6 u
+off keeps 95.8 % of its contact line; the red fails). Link sweeps 408 / 272 / 408 LINK OK.
 
 ## FOAMOFF2 (FIX1101A, 2026-11-01): River foam and Contact foam stay OFF
 

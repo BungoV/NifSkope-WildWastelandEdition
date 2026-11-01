@@ -4041,6 +4041,9 @@ struct AoState
 	bool methodPinned = false;
 	int methodRed = 0;		// WW_CELL_AO_METHOD_RED: 1 vanilla (the method runs, vanilla's term bound), 2 raw (no denoise)
 	bool ssrRedOld = false;	// WW_CELL_AO_SSR_RED=old: AO off leaves the reflections no opaque pass (the old coupling)
+	int quality = WwAoTierUltra;	// lane PERFFIX2 (item 9): WW_CELL_AO_QUALITY (pin) or WW/CellAoQuality, the presets' tier
+	bool qualityPinned = false;
+	bool qualityRedOld = false;	// WW_CELL_AO_QUALITY_RED=old: every tier draws as before the tiers (8 angles, 9 x 3)
 	bool pass = false;		// the opaque pass is drawing
 	QString last = QStringLiteral( "none yet" );
 };
@@ -4066,6 +4069,12 @@ AoState & ao()
 		const QByteArray mRed = wwEnv( "WW_CELL_AO_METHOD_RED" ).trimmed();
 		a.methodRed = mRed == "vanilla" ? 1 : mRed == "raw" ? 2 : 0;
 		a.ssrRedOld = wwEnv( "WW_CELL_AO_SSR_RED" ).trimmed() == "old";
+		const QByteArray qPin = wwEnv( "WW_CELL_AO_QUALITY" ).trimmed().toLower();
+		const int qp = wwAoTierParse( qPin.constData() );
+		a.qualityPinned = qp >= 0;
+		a.quality = qp >= 0 ? qp : std::clamp( QSettings().value( QStringLiteral( "WW/CellAoQuality" ), int( WwAoTierUltra ) ).toInt(),
+			0, WwAoTierCount - 1 );
+		a.qualityRedOld = wwEnv( "WW_CELL_AO_QUALITY_RED" ).trimmed() == "old";
 	}
 	return a;
 }
@@ -4395,7 +4404,9 @@ const char * aoxPasses( Renderer * r, AoGpu & g, int method, int red, int W, int
 	// view space x right, y up, z forward; uv top row first (FO4CS's NDCToViewMul / NDCToViewAdd)
 	prog->uni4f( "ndcToView", FloatVector4( 2.0f / p00, -2.0f / p11, -1.0f / p00, 1.0f / p11 ) );
 	prog->uni4f( "aoxParams", FloatVector4( kAoxRadius, kAoxFalloff, kAoxIntensity, kAoxPower ) );
-	prog->uni2f( "aoxCounts", float( kAoxSlices ), float( kAoxSteps ) );
+	int slices = kAoxSlices, steps = kAoxSteps;
+	wwAoTierCounts( ao().quality, ao().qualityRedOld, slices, steps );	// lane PERFFIX2 (item 9): the tier's taps
+	prog->uni2f( "aoxCounts", float( slices ), float( steps ) );
 	prog->uni3f( "aoxDenoise", kAoxDenoiseRadius, kAoxDenoiseSigma, kAoxBlurBeta );
 	static const float quad[12] = { -1, -1, 0, 1, -1, 0, -1, 1, 0, 1, 1, 0 };
 	static const std::uint16_t idx[6] = { 0, 1, 2, 2, 1, 3 };
@@ -4468,6 +4479,25 @@ void wwCellAoSetMethod( int method )
 bool wwCellAoMethodPinned()
 {
 	return ao().methodPinned;
+}
+
+int wwCellAoQuality()
+{
+	return ao().quality;
+}
+
+void wwCellAoSetQuality( int tier )
+{
+	AoState & a = ao();
+	if ( a.qualityPinned || tier < 0 || tier >= WwAoTierCount )
+		return;
+	a.quality = tier;
+	QSettings().setValue( QStringLiteral( "WW/CellAoQuality" ), tier );
+}
+
+bool wwCellAoQualityPinned()
+{
+	return ao().qualityPinned;
 }
 
 void wwCellAoPass( Scene * scene, bool run )
@@ -4659,7 +4689,8 @@ void wwCellAoPass( Scene * scene, bool run )
 	const float radius = kAoRadius * ( ( a.red & 2 ) ? 0.5f : 1.0f );
 	prog->uni2f( "proj", p00, p11 );
 	prog->uni3f( "aoParams", radius, kAoBias, kAoIntensity );
-	prog->uni1i( "aoAngles", kAoAngles );
+	const int angles = wwAoTierAngles( a.quality, a.qualityRedOld );	// lane PERFFIX2 (item 9): the tier's angles
+	prog->uni1i( "aoAngles", angles );
 	prog->uni1b( "aoNoBlur", ( a.red & 4 ) != 0 );
 	prog->uni1b( "aoNoReset", ( a.red & 8 ) != 0 );
 	static const float quad[12] = { -1, -1, 0, 1, -1, 0, -1, 1, 0, 1, 1, 0 };
@@ -4702,21 +4733,23 @@ void wwCellAoPass( Scene * scene, bool run )
 	g.ready = true;
 	g.aoReady = a.on && g.aoTex;
 	g.doc = scene->nifModel;
+	int aoxSl = 0, aoxSt = 0;
+	wwAoTierCounts( a.quality, a.qualityRedOld, aoxSl, aoxSt );
 	if ( !a.on ) {
 		a.last = QStringLiteral( "off (opaque pass %1x%2 kept, ms %3)" ).arg( W ).arg( H ).arg( timer.elapsed() );
 	} else if ( method != WwAoVanilla ) {
 		a.last = QStringLiteral( "on method %1 full %2x%3 radius %4 falloff %5 intensity %6 power %7 slices %8 steps %9 "
-			"bound %10 red %11 ms %12" ).arg( QString::fromLatin1( wwAoMethodName( method ) ) ).arg( W ).arg( H )
+			"bound %10 red %11 ms %12 quality %13" ).arg( QString::fromLatin1( wwAoMethodName( method ) ) ).arg( W ).arg( H )
 			.arg( double( kAoxRadius ), 0, 'f', 2 ).arg( double( kAoxFalloff ), 0, 'f', 3 ).arg( double( kAoxIntensity ), 0, 'f', 2 )
-			.arg( double( kAoxPower ), 0, 'f', 2 ).arg( kAoxSlices ).arg( kAoxSteps )
+			.arg( double( kAoxPower ), 0, 'f', 2 ).arg( aoxSl ).arg( aoxSt )
 			.arg( aoxRefused ? QString::fromLatin1( aoxRefused ) : g.aoTex == g.fin.tex ? QStringLiteral( "vanilla(red)" )
-				: QStringLiteral( "aox" ) ).arg( a.methodRed ).arg( timer.elapsed() );
+				: QStringLiteral( "aox" ) ).arg( a.methodRed ).arg( timer.elapsed() ).arg( a.quality );
 	} else {
 		a.last = QStringLiteral( "on %1x%2 half %3x%4 radius %5 bias %6 intensity %7 angles %8 p00 %9 p11 %10 p20 %11 p21 %12 "
-			"unit %13 red %14 ms %15" ).arg( W ).arg( H ).arg( hw ).arg( hh ).arg( double( radius ), 0, 'f', 2 )
-			.arg( double( kAoBias ), 0, 'f', 2 ).arg( double( kAoIntensity ), 0, 'f', 2 ).arg( kAoAngles )
+			"unit %13 red %14 ms %15 quality %16" ).arg( W ).arg( H ).arg( hw ).arg( hh ).arg( double( radius ), 0, 'f', 2 )
+			.arg( double( kAoBias ), 0, 'f', 2 ).arg( double( kAoIntensity ), 0, 'f', 2 ).arg( angles )
 			.arg( double( p00 ), 0, 'f', 6 ).arg( double( p11 ), 0, 'f', 6 ).arg( double( pm[2][0] ), 0, 'f', 6 )
-			.arg( double( pm[2][1] ), 0, 'f', 6 ).arg( g.unit ).arg( a.red ).arg( timer.elapsed() );
+			.arg( double( pm[2][1] ), 0, 'f', 6 ).arg( g.unit ).arg( a.red ).arg( timer.elapsed() ).arg( a.quality );
 	}
 
 	// WW_CELL_AO_DUMP=<file>: int32 W H hw hh, the opaque pass (W x H RGBA float, bottom row first), the raw

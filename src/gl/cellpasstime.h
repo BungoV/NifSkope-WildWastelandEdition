@@ -51,6 +51,10 @@ enum Sub { AirTile, AirInject, AirIntegrate, AoGeometry, AoStages, AoGi, ToneBli
 	AirPre, AirFar, AirPost,
 	FarGroundPaint, FarGroundDraw,	// lane FARPAGES1: the far ground's page paint + BC1, ring 0's ground draws
 	SunCasters, SunTerrStep, CloudShadow, FarGroundPass,	// lane PERFFIX2 b: the four parts of the sun-cascades zone
+	// lane PERFFIX2 (item 3a): the ssgi pass's stages (cellssgi.cpp): the interval pyramid, the donor's mips, the
+	// emissive cast and its own temporal + denoise chain, the ordinary cast, its temporal, its denoise (robust + pyramid)
+	SsgiHiz, SsgiMips, SsgiEcast, SsgiEchain, SsgiCast, SsgiTemporal, SsgiDenoise,
+	ContactMarch,	// lane PERFFIX2 (item 7): the contact pass (near march, far tier, upsample) inside reflections
 	SubCount };	// lane FOGPERF1: the air before stage 0 (depth blit), its far grid, after it
 void subBegin( int sub );
 //! lane PERF2: CPU time inside the per-draw setup (setupProgram and the cell's uniform calls), summed per frame

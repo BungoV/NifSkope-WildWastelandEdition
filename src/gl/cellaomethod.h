@@ -41,6 +41,48 @@ inline const int * wwAoMethodStages( int m )
 	return m == WwAoGtao ? gtao : m == WwAoXeGtao ? xe : m == WwAoHbao ? hbao : none;
 }
 
+/*! lane PERFFIX2 (item 9): the AO quality tier (WW_CELL_AO_QUALITY / WW/CellAoQuality; the built-in presets pick it
+ *  by name): 0 Low, 1 Medium, 2 High, 3 Ultra (the default). The method stays the user's (presets leave methods
+ *  alone); the tier scales its sample count. Vanilla (half resolution, the game's SAO): the still view's angles
+ *  1 / 3 / 6 / 8 (8 = AO1's, the default picture; 1 = the game's own single frame). The ported methods (full
+ *  resolution): slices x steps 2x2 / 2x3 / 3x3 / 4x3 (FO4CS's 9x3 is the red `old`, every tier). Offline cost
+ *  (notes/perffix2/c/RESULTS.md, 1080p 5070 Ti): vanilla 0.08 / 0.14 / 0.24 / 0.30 ms. redOld: every tier as before. */
+enum { WwAoTierLow = 0, WwAoTierMedium = 1, WwAoTierHigh = 2, WwAoTierUltra = 3, WwAoTierCount = 4 };
+
+//! WW_CELL_AO_QUALITY value -> tier: low|medium|high|ultra or 0..3; anything else -> -1
+inline int wwAoTierParse( const char * v )
+{
+	if ( !v || !*v )
+		return -1;
+	static const char * const names[WwAoTierCount] = { "low", "medium", "high", "ultra" };
+	for ( int i = 0; i < WwAoTierCount; i++ )
+		if ( std::strcmp( v, names[i] ) == 0 )
+			return i;
+	if ( v[0] >= '0' && v[0] <= '3' && v[1] == 0 )
+		return v[0] - '0';
+	return -1;
+}
+
+//! vanilla: the still view's angle count at a tier
+inline int wwAoTierAngles( int tier, bool redOld )
+{
+	static const int angles[WwAoTierCount] = { 1, 3, 6, 8 };
+	return redOld || tier < 0 || tier >= WwAoTierCount ? 8 : angles[tier];
+}
+
+//! a ported method's slices and steps per slice at a tier
+inline void wwAoTierCounts( int tier, bool redOld, int & slices, int & steps )
+{
+	static const int s[WwAoTierCount][2] = { { 2, 2 }, { 2, 3 }, { 3, 3 }, { 4, 3 } };
+	if ( redOld || tier < 0 || tier >= WwAoTierCount ) {
+		slices = 9;
+		steps = 3;
+		return;
+	}
+	slices = s[tier][0];
+	steps = s[tier][1];
+}
+
 /*! Whether the frame's shared opaque pass (g-buffer + depth pyramid) runs. The AO row drops only the AO term:
  *  SSR, the AO decal, contact shadows and the screen GI keep the pass. redOld (WW_CELL_AO_SSR_RED=old) puts back
  *  the coupling cellssr.h used to describe: with AO off the reflections get no pass. */
