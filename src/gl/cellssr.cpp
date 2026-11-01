@@ -17,7 +17,9 @@ BSD License - see nifskope.h
 #include "gl/cellwater.h"
 #include "gl/celllooks.h"	// lane WATERREFL1: the Water reflections row picks the water march's twin
 #include "gl/glnode.h"
+#include "gl/glparticles.h"	// lane PERFFIX1: the water ray walk skips particles after the masks shut
 #include "gl/glscene.h"
+#include "gl/cellfxres.h"	// lane PERFFIX1: the soft-effect layer keeps the sorted list in the water rays
 #include "gl/glshape.h"
 #include "gl/renderer.h"
 
@@ -50,6 +52,7 @@ struct SsrState
 	QString dump;			// WW_CELL_SSR_DUMP
 	bool pass = false;		// the scene pass is drawing
 	bool waterRay = false;	// the water ray pass is drawing
+	bool waterRayShut = false;	// lane PERFFIX1: in it, a draw that is not water shut the masks (wwCellSsrDraw)
 	unsigned int gbuf = 0;
 	bool flagged = false;	// the draw being set up carries the flag
 	int zreuse = 0;			// lane PERF4: the scene pass tests against the obscurance pass's depth (1; 2 = its red)
@@ -126,6 +129,13 @@ struct SsrGpu
 	float prevRot[9] = {}, prevT[3] = {}, prevSc = 1.0f, prevP00 = 1.0f, prevP11 = 1.0f;
 	int lastPrev = -1;			// the telemetry line prints when the verdict changes
 };
+
+// lane PERFFIX1: the bounce's donor and the water's rays from the previous frame too; =1 the scene pass as before (live)
+bool wwCellReflPrevRed()
+{
+	WW_SWITCH_STATIC( bool, red, wwEnvInt( "WW_CELL_REFL_PREV_RED" ) == 1 );
+	return red;
+}
 
 bool ssrPrevOn()
 {
@@ -269,7 +279,8 @@ void wwCellSsrKeepFrame( Scene * scene, unsigned int hdrFbo, int w, int h )
 	Renderer * r = scene->renderer;
 	SsrGpu & g = ssrGpus()[r];
 	// lane FIX1101A: kept for the SSR row (as before) or for a frame whose pass ran for the water alone
-	if ( !ssr().on && !g.waterPart )
+	// lane PERFFIX1: or for the bounce's donor (stage 5), unless WW_CELL_REFL_PREV_RED=1
+	if ( !ssr().on && !g.waterPart && !( !wwCellReflPrevRed() && wwCellSsgiWantsScene( scene ) ) )
 		return;
 	auto fn = r->fn;
 	GLint prevDraw = 0, prevRead = 0;
@@ -384,9 +395,15 @@ void wwCellSsrPass( Scene * scene, bool run )
 	/* lane PERF3 (cellssr.h): the flag from the obscurance pass's stencil and the color from the previous frame, when
 	 * this frame can use them; else the scene pass as before */
 	int prevWhy = 0;
-	if ( ssrPrevOn() && ( s.on || g.waterPart ) ) {	// lane FIX1101A: the water-only pass reuses the previous frame too
+	/* lane PERFFIX1 (bungo 11-01, "Last frame"): the bounce's donor is the previous frame too (its colour at each pixel's
+	 * place in it, stage 5; no emissive share then) and the water's rays march it with or without the Water reflections
+	 * row: no second scene pass while a previous frame is usable. WW_CELL_REFL_PREV_RED=1: the scene pass for both. */
+	const bool reflPrevRed = wwCellReflPrevRed();
+	const bool bounce = wwCellSsgiWantsScene( scene );
+	if ( ssrPrevOn() && ( s.on || g.waterPart || ( sceneOnly && !reflPrevRed ) ) ) {	// lane FIX1101A: the water-only pass reuses the previous frame too
 		// lane WATERREFL1: with the Water reflections row the water's rays march the previous frame too (no second scene)
-		prevWhy = sceneOnly || wwCellSsgiWantsScene( scene ) ? 2 : waterSsr && !wwLookOn( WwLook::WaterRefl ) && !wwCellSsrWaterAll() ? 3 : !g.prevValid ? 4
+		prevWhy = reflPrevRed && ( sceneOnly || bounce ) ? 2
+			: reflPrevRed && waterSsr && !wwLookOn( WwLook::WaterRefl ) && !wwCellSsrWaterAll() ? 3 : !g.prevValid ? 4
 			: g.prevDoc != scene->nifModel ? 5 : ( g.prev.w != W || g.prev.h != H ) ? 6 : 1;
 		if ( prevWhy != g.lastPrev ) {
 			static const char * const words[7] = { "", "on", "scene pass (the bounce reads it)", "scene pass (water rays)",
@@ -396,12 +413,13 @@ void wwCellSsrPass( Scene * scene, bool run )
 		}
 	}
 	const bool usePrev = prevWhy == 1;
+	const bool prevBounce = usePrev && bounce;	// lane PERFFIX1: stage 5 makes the bounce's donor
 	g.prevValid = false;	// used once: the end of this frame keeps the next
 	static const float quad[12] = { -1, -1, 0, 1, -1, 0, -1, 1, 0, 1, 1, 0 };
 	static const std::uint16_t idx[6] = { 0, 1, 2, 2, 1, 3 };
 	const float * attrs = quad;
 	// lane SSGI2: the emitted share beside it (FO4CS's emission source), only while the bounce's emissive cast wants it
-	const bool wantEmit = wwCellSsgiWantsEmission( scene );
+	const bool wantEmit = wwCellSsgiWantsEmission( scene ) && !usePrev;	// lane PERFFIX1: no emissive share from the previous frame
 	g.emitReady = false;
 	if ( wantEmit && ( !g.emission.tex || g.emission.w != W || g.emission.h != H ) ) {
 		if ( !g.emission.tex )
@@ -524,7 +542,7 @@ void wwCellSsrPass( Scene * scene, bool run )
 		fn->glBindTexture( GL_TEXTURE_2D, 0 );
 		g.emitReady = true;
 	}
-	if ( sceneOnly ) {
+	if ( sceneOnly && !prevBounce ) {
 		restore();
 		return;
 	}
@@ -577,8 +595,63 @@ void wwCellSsrPass( Scene * scene, bool run )
 					oldWalk();
 				} else {
 					fn->glDepthMask( GL_FALSE );	// as the old walk's opaque draws left it
-					if ( reflRed != 2 )
+					/* lane PERFFIX1: drawDeferredShapes' order is decals, water, the other sorted draws, the soft-effect
+					 * layer, the particles; only the water opens the colour mask here, and a sorted draw that reaches its
+					 * setup with another program shuts both (wwCellSsrDraw, s.waterRayShut). So: the water in its order, then
+					 * the other sorted draws only until one has shut the masks; every draw after it (the rest, the
+					 * particles: they inherit the masks) writes nothing here. None shut them (all returned before their
+					 * setup), or the soft-effect layer on: the sorted list as before. Offline model with its reds:
+					 * tests/ssrwaterpart. Red WW_CELL_SSR_WATERPART_RED=1: the sorted list always. */
+					WW_SWITCH_STATIC( bool, partRed, wwEnvInt( "WW_CELL_SSR_WATERPART_RED" ) == 1 );
+					int how = partRed ? 2 : 0;	// 0 the list, 1 the lean walk, 2 the list (red)
+					if ( reflRed != 2 && !partRed ) {
+						sceneSecond.alphaSort();
+						if ( wwCellFxResSplit( sceneSecond.list() ).isEmpty() ) {
+							auto isDecal = []( Node * node ) {
+								Shape * sh = dynamic_cast<Shape *>( node );
+								return sh && sh->wwDecalDrawsFirst();
+							};
+							auto isWater = [&isDecal]( Node * node ) {
+								Shape * sh = dynamic_cast<Shape *>( node );
+								return sh && !isDecal( node ) && sh->wwWaterDraws();
+							};
+							++Scene::fxDepthPassNow;	// as drawDeferredShapes
+							bool waterDrew = false;
+							for ( Node * node : sceneSecond.list() ) {
+								if ( isWater( node ) ) {
+									node->drawShapes();
+									waterDrew = true;
+								}
+							}
+							if ( waterDrew && !( wwCellFxRed() & 16 ) )
+								++Scene::fxDepthPassNow;
+							s.waterRayShut = false;
+							for ( Node * node : sceneSecond.list() ) {
+								if ( s.waterRayShut )
+									break;
+								if ( !dynamic_cast<Particles *>( node ) && !isDecal( node ) && !isWater( node ) )
+									node->drawShapes();
+							}
+							how = s.waterRayShut ? 1 : 0;
+							if ( !s.waterRayShut ) {	// nothing shut the masks: the particles write, as in the list
+								for ( Node * node : sceneSecond.list() )
+									if ( dynamic_cast<Particles *>( node ) )
+										node->drawShapes();
+							}
+						} else {
+							Scene::drawDeferredShapes( sceneSecond );
+						}
+					} else if ( reflRed != 2 ) {
 						Scene::drawDeferredShapes( sceneSecond );
+					}
+					{
+						static int said = -1;
+						if ( how != said ) {
+							said = how;
+							std::fprintf( stderr, "cell ssr water rays with particles: %s\n", how == 2 ? "the sorted list (RED=1)"
+								: how == 1 ? "the water, then the sorted draws until one shut the masks" : "the sorted list" );
+						}
+					}
 					if ( reflCheck )
 						ssrWaterRayCheck( fn, g.wray.fbo, W, H, oldWalk );
 				}
@@ -659,6 +732,33 @@ void wwCellSsrPass( Scene * scene, bool run )
 		prog->uni3f( "ssrPrevT", T[0], T[1], T[2] );
 		prog->uni2f( "ssrPrevProj", g.prevP00, g.prevP11 );
 		prog->uni1i( "prevScene", 8 );
+	}
+	if ( prevBounce ) {	// lane PERFFIX1: the bounce's donor, the previous frame's colour where each pixel was (full size)
+		fn->glActiveTexture( GL_TEXTURE5 );
+		fn->glBindTexture( GL_TEXTURE_2D, 0 );	// the target stage 5 writes
+		fn->glBindFramebuffer( GL_FRAMEBUFFER, g.scene.fbo );
+		fn->glViewport( 0, 0, W, H );
+		fn->glColorMask( GL_TRUE, GL_TRUE, GL_TRUE, GL_FALSE );	// alpha keeps stage 0's flag
+		prog->uni1i( "ssrStage", 5 );
+		r->drawShape( 4, 3, 6, GL_TRIANGLES, GL_UNSIGNED_SHORT, &attrs, idx );
+		fn->glColorMask( GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE );
+		fn->glBindTexture( GL_TEXTURE_2D, g.scene.tex );
+		g.sceneReady = true;
+		static bool said = false;
+		if ( !said ) {
+			said = true;
+			std::fprintf( stderr, "cell ssr prev: the bounce's donor reprojected from the previous frame (no scene pass, no emissive share)\n" );
+		}
+	}
+	if ( sceneOnly ) {	// lane PERFFIX1: the bounce alone (the reflections are off): nothing marched
+		r->stopProgram();
+		for ( int u = 0; u < nBound; u++ ) {
+			fn->glActiveTexture( GLenum( GL_TEXTURE0 + u ) );
+			fn->glBindTexture( GL_TEXTURE_2D, 0 );
+		}
+		fn->glActiveTexture( GLenum( prevActive ) );
+		restore();
+		return;
 	}
 	auto pass = [&]( int stage, const SsrTarget & out, const SsrTarget * in ) {
 		fn->glActiveTexture( GL_TEXTURE6 );
@@ -750,6 +850,7 @@ void wwCellSsrDraw( Scene * scene, bool cellProgram )
 		const bool water = prog && wwIsCellWaterProgramName( prog->name );
 		glColorMask( water, water, water, water );
 		glDepthMask( GL_FALSE );
+		s.waterRayShut = !water;	// lane PERFFIX1: the lean water ray walk stops after such a draw
 		if ( water ) {
 			glDisable( GL_BLEND );
 			wwDrawGlCacheBlend( false );	// lane PERF3; CELLUNI4: known off, no ask
@@ -772,6 +873,10 @@ void wwCellSsrDraw( Scene * scene, bool cellProgram )
 			prog->uni1b( "cellAoOn", false );
 			prog->uni1b( "cellSsrOn", false );
 			prog->uni1b( "cellSsrMat", s.flagged );
+			if ( !wwCellReflPrevRed() ) {	// lane PERFFIX1: the donor (a frame with no usable previous one) reads no GI
+				prog->uni1b( "cellGiOn", false );
+				prog->uni1b( "cellDdgiOn", false );
+			}
 		}
 		return;
 	}

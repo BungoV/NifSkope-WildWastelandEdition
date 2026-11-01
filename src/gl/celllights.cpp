@@ -39,6 +39,7 @@ BSD License - see nifskope.h
 #include "recx.h"	// lane LIGHTS5 (FOGSCALE1): fog.scale
 #include "gl/cellnifxlights.h"	// lane NIFXLIGHT1: a fixture mesh's .nifx lights
 #include "rtddgicell.h"	// lane RTXGI1 M2: the ray-traced GI volume's read (rtddgiCellUniforms)
+#include "gl/celluniprof.h"	// lane PERFFIX1: WW_CELL_UNI_PROF
 #include "gl/cloudvol.h"	// lane LIGHTNING2: a storm's flash on the exterior ambient (wwLightningGround)
 #include "cellworldanim.h"	// lane NIFXLIGHT3: the world clock a .nifx light's dimmer follows
 
@@ -105,6 +106,7 @@ struct ClBloom
 	int version = 0;
 	double peak = 0.0;      // the brightest bloom texel's max channel (the echo)
 	int lit = 0;            // texels the bright pass passed (the echo)
+	unsigned gpuTex = 0;    // lane PERFFIX1: blurred on the GPU (cellhdr.cpp bloomBlur): sampled as is, rgb not used
 };
 
 //! lane NIFXLIGHT1: a document with .nifx fixtures: its lights as built, and whether the shown copy has them applied
@@ -1448,7 +1450,10 @@ bool wwCellUni6Red( const char * name )
 // lane CELLUNI2: totals, then per site (lights = this file's scope, draw = the per-draw setters, globals = fog + sun)
 void wwCellUniFrame()
 {
-	if ( !WwCellUni::frameTick( wwGlPaintCount(), 60 ) || !wwFrameLog() )
+	if ( !WwCellUni::frameTick( wwGlPaintCount(), 60 ) )
+		return;
+	WwUniProf::print();	// lane PERFFIX1
+	if ( !wwFrameLog() )
 		return;
 	const WwCellUni::State & cs = WwCellUni::state();
 	const WwCellUni::Dsa * dsa = wwCellUniDsa();
@@ -1464,6 +1469,40 @@ void wwCellUniFrame()
 			+ QByteArray::number( c.uploads ) + " kept=" + QByteArray::number( c.kept ) + " queries=" + QByteArray::number( c.queries );
 	}
 	std::fprintf( stderr, "%s%s\n", line.constData(), cs.red ? " RED" : "" );
+}
+
+// lane PERFFIX1 (celluniprof.h): the parts' sums, one line per site every 60 painted frames
+WwUniProf::Table & WwUniProf::table( int site )
+{
+	static Table t[kSites];
+	return t[site < 0 || site >= kSites ? 0 : site];
+}
+
+bool WwUniProf::on()
+{
+	WW_SWITCH_STATIC( bool, v, wwEnvInt( "WW_CELL_UNI_PROF" ) == 1 );
+	return v;
+}
+
+void WwUniProf::print()
+{
+	static const char * const sites[kSites] = { "cell-uni", "fog-uni" };
+	for ( int s = 0; s < kSites; s++ ) {
+		Table & T = table( s );
+		if ( T.calls <= 0 )
+			continue;
+		double total = 0.0;
+		for ( int k = 0; k < kParts; k++ )
+			total += T.us[k];
+		QByteArray line = QByteArray( "uni prof: " ) + sites[s] + " calls=" + QByteArray::number( T.calls ) + " programs="
+			+ QByteArray::number( T.nProgs ) + " us/call=" + QByteArray::number( total / double( T.calls ), 'f', 2 );
+		for ( int k = 0; k < kParts; k++ )
+			if ( T.name[k] )
+				line += QByteArray( " | " ) + T.name[k] + " " + QByteArray::number( T.us[k] / double( T.calls ), 'f', 2 ) + " ("
+					+ QByteArray::number( total > 0.0 ? 100.0 * T.us[k] / total : 0.0, 'f', 1 ) + "%)";
+		std::fprintf( stderr, "%s\n", line.constData() );
+		T = Table();
+	}
 }
 
 const WwCellUni::Dsa * wwCellUniDsa()
@@ -1487,6 +1526,7 @@ const WwCellUni::Dsa * wwCellUniDsa()
 void wwCellLightsUniforms( Scene * scene )
 {
 	PassTime::DrawCpuScope cpuT( PassTime::CpuCellUni );	// lane PERF2
+	WwUniProf::Marks prof( 0 );	// lane PERFFIX1: WW_CELL_UNI_PROF=1, where this call's CPU goes
 	if ( !scene || !scene->renderer )
 		return;
 	Renderer * r = scene->renderer;
@@ -1498,6 +1538,7 @@ void wwCellLightsUniforms( Scene * scene )
 	const WwCellUni::Scope uniScope;
 	const bool on = wwCellLightsWanted( scene );
 	prog->uni1b( "cellOn", on );
+	prof.prog( prog );
 	auto fn = r->fn;
 	ClState & s = st();
 	Gpu & g = gpus()[r];
@@ -1511,6 +1552,7 @@ void wwCellLightsUniforms( Scene * scene )
 	const int goboOn = wwLookOn( WwLook::LightPatterns ) ? 1 : 0;	// lane LIGHTS5 (GOBO1)
 	if ( L )
 		fogScaleTick( g, scene->nifModel, s.version.value( scene->nifModel ), *L );	// lane LIGHTS5 (FOGSCALE1)
+	prof.at( 1, "head" );
 	if ( L && ( g.doc != scene->nifModel || g.version != s.version.value( scene->nifModel ) || g.bufShStamp != g.shStamp
 	            || g.bufLiveGen != wwSwitchGen() || g.flickOn != flick || g.dimOn != dimAnim || g.bufXemiStamp != xemiStampOf( scene->nifModel )
 	            || g.bufCurve != phys.curve || g.bufCurveRed != ( phys.red & 8 )
@@ -1731,6 +1773,7 @@ void wwCellLightsUniforms( Scene * scene )
 		g.texels = std::move( t );
 		g.texelStamp++;
 	}
+	prof.at( 2, "lightbuf" );
 	/* lane LIGHTFLICKER1: this frame's flicker (wwCellFlickerFrame) patched into the buffer once, as the range of the
 	 * flickering lights: the surfaces, the effects and the air read the same texels */
 	if ( L && ( g.flickOn || g.dimOn ) && g.doc == scene->nifModel && !g.flickBase.empty() ) {
@@ -1773,6 +1816,7 @@ void wwCellLightsUniforms( Scene * scene )
 			}
 		}
 	}
+	prof.at( 3, "flicker" );
 	/* The sampler is bound whether or not this draw lights: a samplerBuffer left on unit 0
 	 * beside BaseMap's sampler2D is a draw-time INVALID_OPERATION. */
 	// lane CELLUNI1: bound by DSA, the active unit untouched (and never asked for); uploads move it and put it back
@@ -1787,6 +1831,7 @@ void wwCellLightsUniforms( Scene * scene )
 	} else {
 		u.bind( kTextureUnit, GL_TEXTURE_BUFFER, 0 );
 	}
+	prof.at( 4, "lightbind" );
 	// the bounce grid, bound (like the buffer above) whether or not this draw uses it; a Pass reads it with the
 	// GI row off too, and Sky visibility binds the sky grid in its place
 	const int pass = wwCellPassFor( scene->nifModel );
@@ -1861,6 +1906,7 @@ void wwCellLightsUniforms( Scene * scene )
 	const bool skyDraw = G && pass == 2 && g.skyTex && g.skyDoc == scene->nifModel;
 	const bool giDraw = skyDraw || ( G && pass != 2 && g.giTex && g.giDoc == scene->nifModel );
 	u.bind( kGiUnit, GL_TEXTURE_3D, skyDraw ? g.skyTex : giDraw ? g.giTex : 0 );
+	prof.at( 5, "gi" );
 	{	// SKY2 FOGSLICE1: the air volume (the deck's D2 s55), read by the air pass only (cell_airmed.glsl volCubeAll)
 		const bool airUp = giDraw && !skyDraw && G->skyLit && !G->air.empty();
 		if ( airUp && ( g.airDoc != scene->nifModel || g.airVersion != s.giVersion.value( scene->nifModel ) ) ) {
@@ -1889,6 +1935,7 @@ void wwCellLightsUniforms( Scene * scene )
 			prog->uni3f( "cellGiAirDims", float( G->airDims[0] ), float( G->airDims[1] ), float( G->airDims[2] ) );
 		}
 	}
+	prof.at( 6, "air" );
 	// the rooms (src/proberooms.h): the grid's slot rooms and the fine rooms, nearest, R32F
 	if ( g.units < 0 ) {
 		GLint units = 0;
@@ -1952,6 +1999,7 @@ void wwCellLightsUniforms( Scene * scene )
 		prog->uni1f( "cellRoomsCell", G->roomsCell );
 		prog->uni3f( "cellRoomsDims", float( G->roomsDims[0] ), float( G->roomsDims[1] ), float( G->roomsDims[2] ) );
 	}
+	prof.at( 7, "rooms" );
 	/* the far tables and the GI grid's placed share, bound (the sampler types fixed) whether or not
 	 * this draw uses them; a GPU with fewer than 23 units never draws far light */
 	const WwCellFar * Fr = on && s.farOn && pass == 0 && g.units > kFarPlacedUnit ? wwCellFarFor( scene->nifModel ) : nullptr;
@@ -2022,9 +2070,11 @@ void wwCellLightsUniforms( Scene * scene )
 		prog->uni3f( "cellFarPlacedDims", float( Fr->placedDims[0] ), float( Fr->placedDims[1] ), float( Fr->placedDims[2] ) );
 	}
 	u.done();
+	prof.at( 8, "far" );
 	prog->uni1i( "cellGi", kGiUnit );
 	prog->uni1b( "cellGiOn", giDraw );
 	rtddgiCellUniforms( scene );	// lane RTXGI1 M2: the ray-traced GI volume (src/rtddgicell.h); no-op in an off program
+	prof.at( 9, "rtddgi" );
 	// lane PRTOFF1: without the PRT a weather-lit exterior's sky is the ray-traced volume's (its misses: cell_lights.glsl CELL_GI_UP)
 	const bool ddgiSky = !wwCellPrtOn() && L && !L->interior && wwLookdevActive();
 	prog->uni1b( "cellGiSky", ( giDraw && !skyDraw && G->skyLit ) || ddgiSky );	// lane SKY1 (never on the sky-share grid)
@@ -2065,6 +2115,7 @@ void wwCellLightsUniforms( Scene * scene )
 		}
 	}
 	waterGi().passSet( prog );	// lane PRTP6: the values just set are the ones a water draw gives back
+	prof.at( 10, "gitail" );
 	// the imagespace, once this document has a measure; its LUT bound like the grid above
 	const float adapted = s.adapted.value( scene->nifModel, -1.0f );
 	int isStamp = 0;	// an exterior's imagespace is the weather's (isLighting)
@@ -2092,6 +2143,7 @@ void wwCellLightsUniforms( Scene * scene )
 	u.section();
 	u.bind( kLutUnit, GL_TEXTURE_3D, lutDraw ? g.lutTex : 0 );
 	u.done();
+	prof.at( 11, "islut" );
 	// the measure's bloom, a quarter of the view, sampled at the fragment's place in the view
 	const ClBloom * B = nullptr;
 	if ( isDraw ) {
@@ -2099,7 +2151,7 @@ void wwCellLightsUniforms( Scene * scene )
 		if ( it != s.bloom.constEnd() )
 			B = &*it;
 	}
-	if ( B && B->w > 0 && ( g.bloomDoc != scene->nifModel || g.bloomVersion != B->version ) ) {
+	if ( B && B->w > 0 && !B->gpuTex && ( g.bloomDoc != scene->nifModel || g.bloomVersion != B->version ) ) {
 		if ( !g.bloomTex )
 			fn->glGenTextures( 1, &g.bloomTex );
 		u.raw( kBloomUnit );
@@ -2114,8 +2166,11 @@ void wwCellLightsUniforms( Scene * scene )
 		g.bloomVersion = B->version;
 	}
 	// the FO4CS bloom stands in for it this frame (FO4CS suppresses the engine bloom the same way)
-	const bool bloomDraw = B && B->w > 0 && g.bloomTex && g.bloomDoc == scene->nifModel && !( s.isRed & 8 ) && !wwCellBloomReplacing();
-	u.bind( kBloomUnit, GL_TEXTURE_2D, bloomDraw ? g.bloomTex : 0 );
+	// lane PERFFIX1: or the GPU's blur of it (cellhdr.cpp), nothing uploaded
+	const GLuint bloomTex = B && B->gpuTex ? GLuint( B->gpuTex ) : g.bloomTex;
+	const bool bloomDraw = B && B->w > 0 && bloomTex && ( B->gpuTex || g.bloomDoc == scene->nifModel ) && !( s.isRed & 8 )
+		&& !wwCellBloomReplacing();
+	u.bind( kBloomUnit, GL_TEXTURE_2D, bloomDraw ? bloomTex : 0 );
 	u.done();
 	prog->uni1i( "cellIsBloom", kBloomUnit );
 	prog->uni1b( "cellIsBloomOn", bloomDraw );
@@ -2125,6 +2180,7 @@ void wwCellLightsUniforms( Scene * scene )
 		prog->uni4f_l( prog->uniLocation( "cellIsBloomRect" ), FloatVector4( float( vp[0] ), float( vp[1] ),
 			1.0f / float( std::max( vp[2], 1 ) ), 1.0f / float( std::max( vp[3], 1 ) ) ) );
 	}
+	prof.at( 12, "bloom" );
 	// the depth cubes, bound (a sampler left on unit 0 beside BaseMap would be a type clash)
 	const bool shadowDraw = L && s.shadowOn && !s.shadowRed && g.shTex && g.shDoc == scene->nifModel;
 	u.bind( kShadowUnit, GL_TEXTURE_CUBE_MAP_ARRAY, shadowDraw ? g.shTex : 0 );
@@ -2154,9 +2210,11 @@ void wwCellLightsUniforms( Scene * scene )
 		prog->uni4f_l( prog->uniLocation( "cellIsTint" ), FloatVector4( LI->isTint[0], LI->isTint[1], LI->isTint[2], LI->isTint[3] ) );
 		prog->uni1i( "cellIsRed", s.isRed );
 	}
+	prof.at( 13, "shadow+is" );
 	prog->uni1i( "cellLights", kTextureUnit );
 	// the cluster lists: their sampler bound on every draw, the lists only on a lit one
 	wwCellClusterUniforms( scene, L ? &g.texels : nullptr, L ? g.count : 0, g.texelStamp );
+	prof.at( 14, "cluster" );
 	if ( !L )
 		return;
 	prog->uni1i( "cellLightCount", g.count );
@@ -2188,6 +2246,7 @@ void wwCellLightsUniforms( Scene * scene )
 		prog->uni4f_l( prog->uniLocation( "cellRow[%d]", k ), FloatVector4( vt.rotation( 0, k ) / sc,
 			vt.rotation( 1, k ) / sc, vt.rotation( 2, k ) / sc, w / sc ) );
 	}
+	prof.at( 15, "gobo+row" );
 	// PRTP2 section 4: per channel, ((p - n) / 2 per axis, mean of the six), gamma; the shader powers it
 	/* lane SKYINT1 (10-29): a Use Sky Lighting interior takes the CURRENT weather's DALC at the hour, as the game's
 	 * full-mode sky does there (the cell's XCLL DALC is not read); the same six as the exterior sky (probesky.cpp's
@@ -2241,6 +2300,7 @@ void wwCellLightsUniforms( Scene * scene )
 			prog->uni4f_l( prog->uniLocation( "cellAmboBox[%d]", i * 3 + k ),
 				FloatVector4( a.box[k][0], a.box[k][1], a.box[k][2], a.box[k][3] ) );
 	}
+	prof.at( 16, "dalc+ambo" );
 	/* An exterior's directional is the weather's sun (or moon): Lookdev's light, TO it, world, linear.
 	 * Only the cell programs take it; Lookdev off (no weather) = the old path. */
 	bool hasDir = L->hasDirectional;
@@ -2277,6 +2337,7 @@ void wwCellLightsUniforms( Scene * scene )
 			sunLast = line;
 		}
 	}
+	prof.at( 17, "sun" );
 	/* lane SUNCELL1 final: a lit effect or lit particle outdoors (fo4_effectcell / particles_cell) takes the game's
 	 * base term: the game's lit-effect setup puts pow(directional colour, 2.2) x the light's fade x
 	 * the imagespace Sunlight Scale (the imagespace HDR data's 7th float, HNAM's 7th float) in
@@ -2374,6 +2435,7 @@ void wwCellLightsUniforms( Scene * scene )
 			}
 		}
 	}
+	prof.at( 18, "fxsun" );
 	/* An exterior's ambient is the weather's DALC, uploaded in the interior's form so cellAmbient is one law
 	 * indoors and out. The axis is the light's TRAVEL direction (Z- lights an up-facing normal). */
 	bool extDalc = false;
@@ -2428,6 +2490,7 @@ void wwCellLightsUniforms( Scene * scene )
 			}
 		}
 	}
+	prof.at( 19, "extamb" );
 	prog->uni1b( "cellExtDalc", extDalc );
 	prog->uni1b( "cellHasDir", hasDir );
 	prog->uni3f( "cellDirColor", dirColor[0], dirColor[1], dirColor[2] );
@@ -2478,6 +2541,7 @@ void wwCellLightsUniforms( Scene * scene )
 		prog->uni4f( "fogProbe", FloatVector4( 0.0f, 0.0f, float( s.fogProbe ), 0.0f ) );
 		prog->uni1i( "fogRed", 0 );
 	}
+	prof.at( 20, "tail" );
 }
 
 bool wwCellImageSpaceOn()
@@ -2765,6 +2829,32 @@ void wwCellImageSpaceSetBloom( Scene * scene, const float * rgba, int w, int h, 
 			}
 	B.w = bw;
 	B.h = bh;
+	B.gpuTex = 0;	// lane PERFFIX1: this blur is the one shown (the red, or the echo before the GPU's replaces it)
+	B.version = s.nextBloomVersion++;
+}
+
+// lane PERFFIX1: the bloom's threshold and scale, as wwCellImageSpaceSetBloom reads them (false: the cell has no imagespace)
+bool wwCellImageSpaceBloomParams( Scene * scene, float & thresh, float & scale )
+{
+	const WwCellLighting * L = scene && scene->nifModel ? isLighting( scene->nifModel ) : nullptr;
+	if ( !L || !L->hasImageSpace )
+		return false;
+	thresh = L->isHdr[2];
+	scale = L->isHdr[3];
+	return true;
+}
+
+// lane PERFFIX1: the GPU's blur (cellhdr.cpp bloomBlur) stands for the bloom from now on; the echo's lit/peak stay the CPU's
+void wwCellImageSpaceSetBloomGpu( Scene * scene, unsigned tex, int w, int h )
+{
+	float thresh = 0.0f, scale = 0.0f;
+	if ( !tex || w <= 0 || h <= 0 || !wwCellImageSpaceBloomParams( scene, thresh, scale ) )
+		return;
+	ClState & s = st();
+	ClBloom & B = s.bloom[scene->nifModel];
+	B.w = w;
+	B.h = h;
+	B.gpuTex = tex;
 	B.version = s.nextBloomVersion++;
 }
 

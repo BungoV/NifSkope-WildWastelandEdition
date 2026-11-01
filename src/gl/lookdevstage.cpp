@@ -6,6 +6,7 @@ BSD License - see nifskope.h
 
 #include "lookdevstage.h"
 #include "gl/cellpasstime.h"	// lane PERF2: the draws' CPU setup time
+#include "gl/celluniprof.h"	// lane PERFFIX1: WW_CELL_UNI_PROF
 #include "wwswitch.h"	// lane TESTDRIVER1: the WW_* switch store
 
 #include "esmweather.h"
@@ -1074,23 +1075,32 @@ bool wwLookdevFogWanted( Scene * scene )
 void wwLookdevFogUniforms( Scene * scene )
 {
 	PassTime::DrawCpuScope cpuT( PassTime::CpuFogUni );	// lane PERF2
+	WwUniProf::Marks prof( 1 );	// lane PERFFIX1: WW_CELL_UNI_PROF=1, where this call's CPU goes
 	if ( !scene || !scene->renderer )
 		return;
 	Renderer * r = scene->renderer;
 	NifSkopeOpenGLContext::Program * prog = r->getCurrentProgram();
 	if ( !prog || prog->uniLocation( "fogOn" ) < 0 )
 		return;
+	prof.prog( prog );
+	prof.at( 0, "head" );
 	wwVolAirUniforms( scene );	// lane VOLAIR1: every program that holds the fog holds the air's sampler
+	prof.at( 1, "volair" );
 	wwAtmoApUniforms( scene );	// lane SKYA: and the sky's aerial perspective (read with the fog row off too)
+	prof.at( 2, "atmoap" );
 	LdState & s = st();
 	const bool on = wwLookdevFogWanted( scene );
 	prog->uni1b( "fogOn", on );
+	prof.at( 3, "wanted" );
 	if ( !on )
 		return;
 	updateGroundFrame( scene );
+	prof.at( 4, "ground" );
 	const WwFog f = currentFog();
+	prof.at( 5, "currentfog" );
 	for ( int k = 0; k < 6; k++ )
 		prog->uni4f_l( prog->uniLocation( "fogK[%d]", k ), FloatVector4( f.K[k][0], f.K[k][1], f.K[k][2], f.K[k][3] ) );
+	prof.at( 6, "fogk" );
 	// the view: posView = R (sc p) + t, so p = R^T (posView - t) / sc; the z row, measured from the ground
 	const Transform & vt = scene->view;
 	const float sc = vt.scale != 0.0f ? vt.scale : 1.0f;
@@ -1104,6 +1114,7 @@ void wwLookdevFogUniforms( Scene * scene )
 	prog->uni1f( "fogDistScale", 1.0f / sc );
 	// the fog sun (INFERRED, spec_fog.md 2.5): the lookdev light's direction and Sunlight colour, intensity 1
 	const LdLight L = currentLight();
+	prof.at( 7, "currentlight" );
 	float v[3];
 	for ( int i = 0; i < 3; i++ )
 		v[i] = vt.rotation( i, 0 ) * L.sunDir[0] + vt.rotation( i, 1 ) * L.sunDir[1] + vt.rotation( i, 2 ) * L.sunDir[2];
@@ -1115,6 +1126,7 @@ void wwLookdevFogUniforms( Scene * scene )
 	prog->uni4f( "fogProbe", FloatVector4( s.fogProbe[0], s.fogProbe[1], s.fogProbe[2], 0.0f ) );
 	prog->uni1i( "fogRed", ( wwLookdevRed( "fogmaxclamp" ) ? 1 : 0 ) | ( wwLookdevRed( "fognoescape" ) ? 2 : 0 )
 		| ( wwLookdevRed( "fogheight0" ) ? 4 : 0 ) );
+	prof.at( 8, "sun+reds" );
 	static float lastZ = 0.0f, lastSc = 0.0f;	// lane PERF1: the echo string rebuilt only when it changes
 	static bool lastLeak = false, lastOn = false;
 	if ( !lastOn || lastZ != s.groundZ || lastSc != sc || lastLeak != !s.fog || !s.fogLast.startsWith( QLatin1StringView( "on(" ) ) ) {
@@ -1125,6 +1137,7 @@ void wwLookdevFogUniforms( Scene * scene )
 		lastSc = sc;
 		lastLeak = !s.fog;
 	}
+	prof.at( 9, "echo" );
 }
 
 bool wwLookdevActive()

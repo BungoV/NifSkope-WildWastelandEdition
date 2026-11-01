@@ -309,6 +309,10 @@ struct IsMeasureGpu
 {
 	GLuint fbo = 0, tex = 0, ds = 0, pbo = 0;
 	int w = 0, h = 0;
+	// lane PERFFIX1: the vanilla bloom's blur on the GPU: two finals (one shown, one made) and the column pass between
+	GLuint bfbo = 0, btex[3] = { 0, 0, 0 };
+	int bw = 0, bh = 0;
+	int bmade = -1;	// the final the last measure blurred into (shown at the next frame, as the CPU bloom was)
 	GLenum dsFormat = 0;
 	GLsync fence = nullptr;	// frame mode: the readback in flight
 	bool trusted = false;	// lane SYNC1: a measure on this target raised no GL error
@@ -328,6 +332,80 @@ QHash<const void *, bool> & isServed()	// the document's last linear frame was m
 	return s;
 }
 
+/* lane PERFFIX1: the vanilla bloom's blur on the GPU (cell_bloomblur.frag) instead of the CPU blur of the read-back
+ * measure and its upload; the red WW_CELL_BLOOM_GPU_RED=1 is the CPU blur (celllights.cpp wwCellImageSpaceSetBloom,
+ * also the twin of the numpy gate notes/perffix1/bloom). Live. */
+bool bloomGpuOn()
+{
+	WW_SWITCH_STATIC( bool, red, wwEnvInt( "WW_CELL_BLOOM_GPU_RED" ) == 1 );
+	return !red;
+}
+
+// the measure's quarter-size level (m.tex level 2) blurred into m.btex[slot]; false = none (no imagespace, no program)
+bool bloomBlur( Scene * scene, IsMeasureGpu & m, int qw, int qh, int slot )
+{
+	float thresh = 0.0f, scale = 0.0f;
+	if ( !wwCellImageSpaceBloomParams( scene, thresh, scale ) )
+		return false;
+	Renderer * r = scene->renderer;
+	auto fn = r->fn;
+	auto prog = r->useProgram( "cell_bloomblur.prog" );
+	if ( !prog )
+		return false;
+	if ( !m.bfbo || m.bw != qw || m.bh != qh ) {
+		if ( !m.bfbo )
+			fn->glGenFramebuffers( 1, &m.bfbo );
+		for ( GLuint & t : m.btex ) {
+			if ( !t )
+				fn->glGenTextures( 1, &t );
+			fn->glBindTexture( GL_TEXTURE_2D, t );
+			fn->glTexImage2D( GL_TEXTURE_2D, 0, GL_RGBA32F, qw, qh, 0, GL_RGBA, GL_FLOAT, nullptr );
+			fn->glTexParameteri( GL_TEXTURE_2D, GL_TEXTURE_MAX_LEVEL, 0 );
+			fn->glTexParameteri( GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR );	// as the CPU bloom's upload
+			fn->glTexParameteri( GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR );
+			fn->glTexParameteri( GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE );
+			fn->glTexParameteri( GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE );
+		}
+		m.bw = qw;
+		m.bh = qh;
+		m.bmade = -1;
+	}
+	// the CPU bloom's weights, in the same floats (celllights.cpp wwCellImageSpaceSetBloom)
+	constexpr int rr = 7;
+	float wt[2 * rr + 1];
+	float wsum = 0.0f;
+	for ( int x = -rr; x <= rr; x++ )
+		wsum += ( wt[x + rr] = std::exp( -2.0f * float( x * x ) / float( rr * rr ) ) );
+	for ( float & v : wt )
+		v /= wsum;
+	for ( int k = 0; k < 2 * rr + 1; k++ )
+		prog->uni1f_l( prog->uniLocation( "bloomW[%d]", k ), wt[k] );
+	prog->uni2f( "bloomPass", thresh, scale );
+	prog->uni1i( "bloomSrc", kSrcUnit );
+	static const float quad[12] = { -1, -1, 0, 1, -1, 0, -1, 1, 0, 1, 1, 0 };
+	static const std::uint16_t idx[6] = { 0, 1, 2, 2, 1, 3 };
+	const float * attrs = quad;
+	fn->glDisable( GL_STENCIL_TEST );
+	fn->glViewport( 0, 0, qw, qh );
+	fn->glBindFramebuffer( GL_DRAW_FRAMEBUFFER, m.bfbo );
+	fn->glActiveTexture( GLenum( GL_TEXTURE0 + kSrcUnit ) );
+	// 1. the bright pass and the column, from the measure's quarter size
+	fn->glFramebufferTexture2D( GL_DRAW_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, m.btex[2], 0 );
+	fn->glBindTexture( GL_TEXTURE_2D, m.tex );
+	prog->uni1i( "bloomLod", 2 );
+	prog->uni1i( "bloomVertical", 1 );
+	r->drawShape( 4, 3, 6, GL_TRIANGLES, GL_UNSIGNED_SHORT, &attrs, idx );
+	// 2. the row, into the final
+	fn->glFramebufferTexture2D( GL_DRAW_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, m.btex[slot], 0 );
+	fn->glBindTexture( GL_TEXTURE_2D, m.btex[2] );
+	prog->uni1i( "bloomLod", 0 );
+	prog->uni1i( "bloomVertical", 0 );
+	r->drawShape( 4, 3, 6, GL_TRIANGLES, GL_UNSIGNED_SHORT, &attrs, idx );
+	fn->glFramebufferTexture2D( GL_DRAW_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, 0, 0 );
+	m.bmade = slot;
+	return true;
+}
+
 // the measure's quarter-size mip: rgb = the mean of the light over the linear pixels, a = their share of the texel
 void isApply( Scene * scene, const float * px, int qw, int qh )
 {
@@ -345,8 +423,9 @@ void isApply( Scene * scene, const float * px, int qw, int qh )
 	// SKY2B (EXPO2): the sky pixels in view, each along its own ray
 	wwCellImageSpaceSetAdapted( scene, wwAtmoAdaptedInView( scene, cover > 0.0 ? float( sum / cover ) : 0.0f, px, qw, qh ),
 		int( std::lround( cover ) ) );
-	wwCellImageSpaceSetBloom( scene, px, qw, qh, 1 );
 	WW_SWITCH_STATIC( bool, echo, wwEnvInt( "WW_IS_MEASURE_ECHO" ) == 1 );
+	if ( !bloomGpuOn() || echo )	// lane PERFFIX1: with the GPU blur the CPU one runs only for the echo's lit/peak
+		wwCellImageSpaceSetBloom( scene, px, qw, qh, 1 );
 	static QString said;
 	if ( echo ) {
 		const QString e = wwCellImageSpaceEcho( scene );
@@ -386,6 +465,9 @@ void isMeasureFrame( Scene * scene, HdrGpu & g, int W, int H, int S, GLint prevD
 				isApply( scene, px, m.qw, m.qh );
 			fn->glUnmapBuffer( GL_PIXEL_PACK_BUFFER );
 			fn->glBindBuffer( GL_PIXEL_PACK_BUFFER, 0 );
+			// lane PERFFIX1: the bloom blurred from that same measure, shown from now on (as the CPU bloom was)
+			if ( px && bloomGpuOn() && m.bmade >= 0 )
+				wwCellImageSpaceSetBloomGpu( scene, m.btex[m.bmade], m.bw, m.bh );
 		}
 	}
 	isServed().insert( doc, false );
@@ -466,6 +548,9 @@ void isMeasureFrame( Scene * scene, HdrGpu & g, int W, int H, int S, GLint prevD
 			std::vector<float> px( size_t( qw ) * size_t( qh ) * 4 );
 			fn->glGetTexImage( GL_TEXTURE_2D, 2, GL_RGBA, GL_FLOAT, px.data() );
 			isApply( scene, px.data(), qw, qh );
+			// lane PERFFIX1: the same frame's bloom, blurred on the GPU
+			if ( bloomGpuOn() && bloomBlur( scene, m, qw, qh, 0 ) )
+				wwCellImageSpaceSetBloomGpu( scene, m.btex[0], qw, qh );
 		} else {
 			fn->glBindBuffer( GL_PIXEL_PACK_BUFFER, m.pbo );
 			fn->glBufferData( GL_PIXEL_PACK_BUFFER, GLsizeiptr( size_t( qw ) * size_t( qh ) * 4 * sizeof( float ) ), nullptr, GL_STREAM_READ );
@@ -475,6 +560,9 @@ void isMeasureFrame( Scene * scene, HdrGpu & g, int W, int H, int S, GLint prevD
 			m.doc = doc;
 			m.qw = qw;
 			m.qh = qh;
+			// lane PERFFIX1: blurred now on the GPU, shown when this measure is applied (the next frame); the other final
+			if ( bloomGpuOn() && !bloomBlur( scene, m, qw, qh, m.bmade == 0 ? 1 : 0 ) )
+				m.bmade = -1;
 		}
 		fn->glBindTexture( GL_TEXTURE_2D, GLuint( prevTex ) );
 		ok = !check || fn->glGetError() == GL_NO_ERROR;
