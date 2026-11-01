@@ -471,6 +471,10 @@ float wwCellImageSpaceAdapted( Scene * scene );
 /*! Bloom from the measure's float RGBA: HNAM scale * max(0, c - threshold), blurred 15 taps each way; the
  *  shader adds it to the HDR before the exposure */
 void wwCellImageSpaceSetBloom( Scene * scene, const float * rgba, int w, int h, int step );
+//! lane PERFFIX1: the bloom's threshold and scale (the imagespace HDR data's 3rd, 4th floats); false = no imagespace
+bool wwCellImageSpaceBloomParams( Scene * scene, float & thresh, float & scale );
+//! lane PERFFIX1: the vanilla bloom blurred on the GPU (cellhdr.cpp), w x h RGBA32F, sampled in place of the CPU's
+void wwCellImageSpaceSetBloomGpu( Scene * scene, unsigned tex, int w, int h );
 QString wwCellImageSpaceEcho( Scene * scene );
 
 /*! Shadows: each shadow-casting light near the camera (up to kShadowSlots) gets a depth cube rendered from the

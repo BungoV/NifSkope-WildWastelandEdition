@@ -1,0 +1,4 @@
+# lane PERFFIX1 (src/gl/cellhdr.cpp): the vanilla bloom's blur on the GPU, from the exposure measure's quarter-size mip.
+# No conditions: never picked for a shape; cellhdr.cpp selects it by name.
+
+shaders cell_ao.vert cell_bloomblur.frag

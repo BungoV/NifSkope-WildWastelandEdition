@@ -284,6 +284,13 @@ bool wwSetupMemoChecking()
 	return setupMemo().check;
 }
 
+// lane PERFFIX1: the armed pass's epoch (one pass, one view: the cell-uniform class record lives that long); 0 outside one
+quint64 wwSetupMemoEpochArmed()
+{
+	const SetupMemo & m = setupMemo();
+	return m.armed ? m.epoch : 0;
+}
+
 void wwSetupMemoArm( bool on, const char * passOwned )
 {
 	SetupMemo & m = setupMemo();

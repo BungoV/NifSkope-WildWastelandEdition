@@ -93,6 +93,18 @@ void main()
 		return;
 	}
 
+	if ( ssrStage == 5 ) {	// lane PERFFIX1: the bounce's donor (full size, bottom row first): the previous frame's colour
+		ivec2 t = ivec2( gl_FragCoord.xy );	// where this pixel's surface was in it (the background: its direction)
+		float z = texelFetch( gbuf, t, 0 ).a;
+		vec2 u = ( vec2( t ) + 0.5 ) / vec2( fullSize );
+		vec3 P = vec3( ( 2.0 * u.x - 1.0 ) * z / proj.x, ( 2.0 * u.y - 1.0 ) * z / proj.y, -z );
+		vec3 Pp = ssrPrevRot * P + ssrPrevT;
+		float zp = max( -Pp.z, ssrClip.x );
+		vec2 up = vec2( 0.5 + 0.5 * ssrPrevProj.x * Pp.x / zp, 0.5 + 0.5 * ssrPrevProj.y * Pp.y / zp );
+		fragColor = vec4( textureLod( prevScene, clamp( up, vec2( 0.0 ), vec2( 1.0 ) ), 0.0 ).rgb, 0.0 );
+		return;
+	}
+
 	if ( ssrStage == 1 ) {
 		ivec2 t = min( ( ( 2 * q + 1 ) * fullSize ) / ( 2 * halfSize ), fullSize - 1 );
 		t.y = fullSize.y - 1 - t.y;

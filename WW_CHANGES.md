@@ -285,6 +285,38 @@ themselves only on a miss (an edge, a blended draw, a probe picture).
   identical code to b0e5e9a3, RTDDGI 272/272, RTDDGI + cascades 272/272, PRT 408/408.
 - Default: the screen-pass read is ON wherever the volume is on (RTXGI itself still ships as before). Live cost rows and
   the GI default-on proof: DEFAULT-ON OWED until notes/perffix2 hold 1 lands.
+## PERFFIX1 (2026-11-01): five frame-time wins from PERFRES1101, each ON with its old path as a red
+
+bungo 11-01: the biggest frame-time wins from the PERFRES1101 research; reflections from last frame (ruled "Last frame").
+Live before/after ms are owed to hold 1 (queued; rows rvc6 / sea5 / mem / c3 / c3s); the unit tests below are green.
+
+- CELL UNIFORMS ONCE PER CLASS (src/gl/cellunirec.h, celllights.cpp wwCellLightsUniforms): the cell lighting setter
+  worked every per-frame value out again for every program in every pass (~96 us a call, ~675 calls a Concord all-on
+  frame). What it sets depends on the scene, the pass and a few facts of the program (its class: the program names and
+  locations the setter tests). Inside an armed pass (the setup memo's epoch) the first call of a class records every set
+  and bind in order; a later call of that class replays the record onto its own program through the same setters (the
+  per-program value cache and the draw packets see the same calls), with the program-specific setters (the ray-traced
+  volume, the water's GI hand-back, the shadow fades, the clusters) run live at their places. RTXGI's unit binds go
+  through the CELLUNI DSA kit (no GL_ACTIVE_TEXTURE ask per call). Red WW_CELL_UNI_CLASS_RED=1 (every call works it all
+  out); check WW_CELL_UNI_CLASS_CHECK=1 (a replayed call works it out too and counts the ops that differ). Telemetry
+  WW_CELL_UNI_PROF=1: the setter's and the fog setter's CPU per part. Unit tests/cellunirec (a fake program and binder;
+  reds nobind / byloc / oneclass).
+- WATER RAYS WITH PARTICLES (cellssr.cpp step 1b): with a particle system in the sorted list the water ray pass drew the
+  whole sorted list again. Now the water in its order, then the other sorted draws only until one has shut the masks
+  (wwCellSsrDraw: s.waterRayShut); every draw after it, the particles included, writes nothing there and is skipped. None
+  shut them, or the soft-effect layer on: the list as before. Red WW_CELL_SSR_WATERPART_RED=1; the in-frame check
+  WW_CELL_REFLDRAWS_CHECK=1 compares against the old walk. Unit tests/ssrwaterpart (mask model; reds anyshape, wateronly).
+- REFLECTIONS AND THE BOUNCE FROM THE PREVIOUS FRAME (cellssr.cpp, cell_ssr.frag stage 5): the SSGI bounce's donor is the
+  previous frame's linear colour at each pixel's place in it (one full-screen pass) instead of a second scene pass, and
+  the water's rays march the previous frame with or without the Water reflections row. The emissive share is not
+  separated in that mode (the previous frame's colour holds the glow already). A frame with no usable previous one (the
+  first, a resize, another document) still draws the donor, now without GI. Red WW_CELL_REFL_PREV_RED=1. Unit
+  tests/reflprev (stage 5 on the driver vs an analytic twin; reds noflip, transpose, notrans).
+- VANILLA BLOOM BLUR ON THE GPU (cell_bloomblur.frag, cellhdr.cpp bloomBlur): the 15-tap bright-pass blur of the exposure
+  measure's quarter size runs as two quarter-size passes; two finals keep it shown a frame late, as the CPU bloom was;
+  nothing is read back for it or uploaded. Red WW_CELL_BLOOM_GPU_RED=1 (the CPU blur). With WW_IS_MEASURE_ECHO=1 the CPU
+  blur still runs for the echo's lit/peak numbers. Unit tests/bloomgpu (the driver vs a numpy twin of the CPU blur;
+  reds after, wrap, noclamp).
 
 ## FOAMOFF2 (FIX1101A, 2026-11-01): River foam and Contact foam stay OFF
 
