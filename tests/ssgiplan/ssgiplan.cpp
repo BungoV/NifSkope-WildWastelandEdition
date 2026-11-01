@@ -52,6 +52,15 @@ static bool hizBuilt( int red )
 #endif
 }
 
+static WwSsgiTier tierOf( int q, int red )
+{
+#if defined( SSGIPLAN_RED ) && SSGIPLAN_RED == 6
+	return wwSsgiTier( q, red | 4096 );	// before 3d: FO4CS's tiers at every setting
+#else
+	return wwSsgiTier( q, red );
+#endif
+}
+
 int main()
 {
 	std::setvbuf( stdout, nullptr, _IONBF, 0 );
@@ -88,6 +97,28 @@ int main()
 	check( !hizBuilt( 0 ) && wwSsgiFullBreak( 0 ), "3c: default: no interval pyramid, full-mask early out on" );
 	check( hizBuilt( 2048 ), "3c: red hiz: the pyramid again" );
 	check( !hizBuilt( 32 ) && !hizBuilt( 32 | 2048 ) && !wwSsgiFullBreak( 32 ), "3c: nohiz: no pyramid, no early out" );
+	// 3d: the tiers step the cost (taps per frame pixel rise), 12 steps each (the bounce's energy), no full-size
+	// tier (its robust denoise alone, 1.9 ms offline, is over Ultra's 1.76 target), FO4CS's set under `oldtiers`
+	bool steps12 = true, notFull = true, taps = true, rising = true;
+	double prev = 0.0;
+	for ( int q = 0; q < 4; q++ ) {
+		const WwSsgiTier t = tierOf( q, 0 );
+		steps12 = steps12 && t.steps == 12;
+		notFull = notFull && t.div >= 2;
+		taps = taps && t.robustTaps >= 1 && t.robustTaps <= 16 && t.slices >= 2;
+		const double perPx = double( t.slices * t.steps ) / double( t.div * t.div ) + double( t.robustTaps ) / double( t.div * t.div ) * 0.25;
+		rising = rising && perPx > prev;
+		prev = perPx;
+	}
+	check( steps12, "3d: 12 steps a side on every tier" );
+	check( notFull, "3d: no full-size tier" );
+	check( taps, "3d: 2+ slices, 1..16 robust taps" );
+	check( rising, "3d: each tier costs more per frame pixel than the one below" );
+	const WwSsgiTier o = wwSsgiTier( 3, 4096 );
+	check( o.div == 1 && o.slices == 4 && o.steps == 8 && o.robustTaps == 16, "3d: red oldtiers: FO4CS's Ultra (full 4x8)" );
+	check( wwSsgiTier( -3, 0 ).div == wwSsgiTier( 0, 0 ).div && wwSsgiTier( 9, 0 ).div == wwSsgiTier( 3, 0 ).div, "3d: clamped quality" );
+	check( wwSsgiWorkDim( 1920, 4 ) == 480 && wwSsgiWorkDim( 1027, 4 ) == 257 && wwSsgiWorkDim( 1027, 2 ) == 514
+		&& wwSsgiWorkDim( 1027, 1 ) == 1027, "3d: work size rounds up" );
 	std::printf( "SSGIPLAN %s %d failed\n", fails ? "FAIL" : "PASS", fails );
 	return fails ? 1 : 0;
 }

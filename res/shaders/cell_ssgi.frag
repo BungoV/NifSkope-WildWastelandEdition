@@ -61,6 +61,7 @@ uniform bool fullBreak;			// lane PERFFIX2 (3c): the full-mask early out also wi
 uniform sampler2D tstate;		// stage 2: last frame's moments; stages 4, 7: this frame's
 uniform bool wantState;
 uniform float robustRadius;		// stage 4, work pixels (FO4CS fBlurRadius)
+uniform int robustTaps;			// lane PERFFIX2 (3d): stage 4's Poisson taps, the tier's (FO4CS: all 16)
 uniform ivec2 quarterSize;
 uniform sampler2D qraw;			// stages 6, 7: the quarter downsample
 uniform sampler2D qguide;		// its guide: normal, linear depth
@@ -339,7 +340,8 @@ vec4 robustBlur( ivec2 wp )
 	float ls = cl, ls2 = cl * cl, lw = 1.0;
 	ivec2 qs[16];
 	float ws[16];
-	for ( int i = 0; i < 16; i++ ) {
+	int nTaps = clamp( robustTaps, 1, 16 );
+	for ( int i = 0; i < nTaps; i++ ) {
 		ws[i] = tapWeight( i, P, N, T, B, halfAngle, tol, qs[i] );
 		if ( ws[i] <= 1.0e-4 )
 			continue;
@@ -360,7 +362,7 @@ vec4 robustBlur( ivec2 wp )
 	vec3 sum = c0.rgb * ( logScale( c0.rgb, clamp( cl, lo, hi ) ) * cRel );
 	float sumA = c0.a * cRel;
 	float wsum = cRel;
-	for ( int i = 0; i < 16; i++ ) {
+	for ( int i = 0; i < nTaps; i++ ) {
 		if ( ws[i] <= 1.0e-4 )
 			continue;
 		vec4 cq = texelFetch( src, qs[i], 0 );

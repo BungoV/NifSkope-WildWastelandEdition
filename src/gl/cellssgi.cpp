@@ -38,10 +38,8 @@ constexpr int kSsgiUnit = WwCellUnit::Ssgi;
 static_assert( PassTime::SsgiDenoise - PassTime::SsgiHiz == WwSsgiSubDenoise && WwSsgiSubCount == 7,
 	"cellssgiplan.h's groups follow cellpasstime.h's Ssgi* subs" );
 
-// FO4CS's tiers (ScreenSpaceGI.h ApplyScreenSpaceGIQualityPreset): Low = its Standard, Medium = High, High = Ultra,
-// Ultra = Extreme (full resolution); the menu's four rows map to the same ordinals there
-struct Tier { bool full; int slices, steps; };
-constexpr Tier kTiers[4] = { { false, 4, 8 }, { false, 4, 12 }, { false, 6, 12 }, { true, 4, 8 } };
+// lane PERFFIX2 (3d): the tiers are cellssgiplan.h wwSsgiTier (FO4CS's own are its red `oldtiers`: ScreenSpaceGI.h
+// ApplyScreenSpaceGIQualityPreset, Low = its Standard, Medium = High, High = Ultra, Ultra = Extreme)
 
 // FO4CS's live defaults (notes/ssgi1/FO4CS_METHOD.md section 7): fRadius 8 x 32 view units, thickness 32,
 // fHistoryBlend 0.9 (rest ceiling 10 frames), fBlurRadius 3, fSaturation 0.8, fAoAmount 1, fIndirectAmount 1
@@ -59,7 +57,7 @@ struct SsgiState
 	int red = 0;	// 1 off, 2 stack, 4 notemporal, 8 noblur; lane SSGI2: 16 ign, 32 nohiz, 64 oldblur, 128 noemissive;
 					// lane SSGI3: 256 oldlaw (SSGI1's fill law); lane SSGI2FRAMES: 512 oldframes;
 					// lane PERFFIX2: 1024 emitchain (3b: the emissive cast's own chain, cellssgiplan.h), 2048 hiz
-					// (3c: the interval pyramid built again)
+					// (3c: the interval pyramid built again), 4096 oldtiers (3d: FO4CS's four tiers)
 	int pathFrame = -1;	// lane SSGI2FRAMES: the camera path's frame (wwCellSsgiSetPath), -1 a still view
 	int lastVerdict = -1;
 	char echo[240] = {};
@@ -86,7 +84,7 @@ SsgiState & st()
 		for ( const QByteArray & w : red.split( ',' ) )
 			s.red |= w == "off" ? 1 : w == "stack" ? 2 : w == "notemporal" ? 4 : w == "noblur" ? 8 : w == "ign" ? 16
 				: w == "nohiz" ? 32 : w == "oldblur" ? 64 : w == "noemissive" ? 128 : w == "oldlaw" ? 256
-				: w == "oldframes" ? 512 : w == "emitchain" ? 1024 : w == "hiz" ? 2048 : 0;
+				: w == "oldframes" ? 512 : w == "emitchain" ? 1024 : w == "hiz" ? 2048 : w == "oldtiers" ? 4096 : 0;
 	}
 	return s;
 }
@@ -252,11 +250,12 @@ void wwCellSsgiPass( Scene * scene, bool run )
 	if ( verdict != s.lastVerdict && ( verdict != 0 || s.lastVerdict > 0 ) ) {
 		static const char * const words[4] = { "off", "off (no obscurance pass)", "off (no scene pass)", "on" };
 		std::snprintf( s.echo, sizeof( s.echo ),
-			"cell ssgi: %s quality %d red %d noise %s hiz %s denoise %s emissive %s law %s frames %s",
+			"cell ssgi: %s quality %d red %d noise %s hiz %s denoise %s emissive %s law %s frames %s tiers %s",
 			words[verdict], s.quality, s.red, ( s.red & 16 ) ? "ign" : "fast",
 			wwSsgiHizBuilt( s.red ) ? "on" : wwSsgiFullBreak( s.red ) ? "break" : "off",
 			( s.red & 8 ) ? "none" : ( s.red & 64 ) ? "5x5" : "robust+quarter", ( s.red & 128 ) ? "off" : wwSsgiEmissive( s.red ) == WwSsgiEmitChain ? "chain" : "folded",
-			( s.red & 256 ) ? "old" : "fill", !wwHarnessRun() ? "live" : ( s.red & 512 ) ? "per-paint" : "pinned" );
+			( s.red & 256 ) ? "old" : "fill", !wwHarnessRun() ? "live" : ( s.red & 512 ) ? "per-paint" : "pinned",
+			( s.red & 4096 ) ? "fo4cs" : "perffix2" );
 		std::fprintf( stderr, "%s\n", s.echo );
 		s.lastVerdict = verdict;
 	}
@@ -275,9 +274,9 @@ void wwCellSsgiPass( Scene * scene, bool run )
 	}
 	if ( g.unit <= 0 )
 		return;
-	const Tier tier = kTiers[s.quality];
+	const WwSsgiTier tier = wwSsgiTier( s.quality, s.red );	// lane PERFFIX2 (3d)
 	const int W = ao.w, H = ao.h;
-	const int ww = tier.full ? W : ( W + 1 ) / 2, wh = tier.full ? H : ( H + 1 ) / 2;
+	const int ww = wwSsgiWorkDim( W, tier.div ), wh = wwSsgiWorkDim( H, tier.div );
 	GLint prevFbo = 0, prevRead = 0, vp[4] = { 0, 0, 1, 1 }, prevActive = 0;
 	fn->glGetIntegerv( GL_DRAW_FRAMEBUFFER_BINDING, &prevFbo );
 	fn->glGetIntegerv( GL_READ_FRAMEBUFFER_BINDING, &prevRead );
@@ -450,7 +449,8 @@ void wwCellSsgiPass( Scene * scene, bool run )
 	prog->uni1f( "saturation", kSaturation );
 	prog->uni1f( "historyBlend", kHistoryBlend );
 	prog->uni1f( "maxAccum", 1.0f / ( 1.0f - kHistoryBlend ) );
-	prog->uni1f( "blurRadius", ( s.red & 8 ) ? 0.0f : kBlurPx * ( tier.full ? 1.0f : 0.5f ) );
+	prog->uni1f( "blurRadius", ( s.red & 8 ) ? 0.0f : kBlurPx / float( std::max( tier.div, 1 ) ) );
+	prog->uni1i( "robustTaps", tier.robustTaps );
 	prog->uni1f( "normalWeight", kNormalWeight );
 	prog->uni1f( "motionAccum", kMotionAccum );
 	static const float quad[12] = { -1, -1, 0, 1, -1, 0, -1, 1, 0, 1, 1, 0 };

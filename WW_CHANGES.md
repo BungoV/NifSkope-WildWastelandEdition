@@ -25,6 +25,13 @@ notes/perffix2/c/RESULTS.md.
   skipped tap is one `len > radius` drops anyway): pictures byte-identical offline. The full-mask early out stays
   (shader uniform fullBreak). The per-frame donor mips measured 0.02 ms offline: kept. Red WW_CELL_SSGI_RED=hiz: the
   pyramid again; `nohiz` keeps SSGI2's meaning (no pyramid, no early out).
+- SSGI TIERS THAT STEP THE COST (item 3d): FO4CS's four tiers cost about the same (offline Low 3.45 vs Ultra 12.0 ms
+  before this lane, and the live rows read flat) and none came near PERFRES's targets. The tiers are now (work size,
+  slices x steps a side, the robust denoise's Poisson taps; src/gl/cellssgiplan.h): Low quarter 2x12 / 8, Medium quarter
+  3x12 / 16, High quarter 6x12 / 16, Ultra half 4x12 / 12. Twelve steps everywhere: offline 8 steps under-count the bounce
+  (0.79 of a full-size 8x16 march, 12 steps 0.92). Offline 1080p RTX 5070 Ti (synthetic room, all of 3b-3d): 0.44 / 0.61 /
+  0.87 / 1.75 ms against the targets 0.44 / 0.62 / 0.88 / 1.76 (before: 3.45 / 4.25 / 4.97 / 12.02). The default tier
+  (Ultra) is no longer full size; SSGI itself still ships OFF. Red WW_CELL_SSGI_RED=oldtiers: FO4CS's tiers.
 
 ## FOAMOFF2 (FIX1101A, 2026-11-01): River foam and Contact foam stay OFF
 

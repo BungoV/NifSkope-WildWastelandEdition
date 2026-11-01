@@ -71,4 +71,28 @@ inline bool wwSsgiFullBreak( int red )
 	return !( red & 32 );
 }
 
+/*! 3d: the four tiers (WW/CellSsgiQuality, the presets pick them by name), each a real step in cost: the work size
+ *  (full / div), slices x steps per side, and the robust denoise's Poisson taps (FO4CS: 16). Twelve steps on every
+ *  tier: offline 8 steps under-count the bounce (0.79 of a full-size 8 x 16 march, 12 steps 0.92). Offline
+ *  1080p 5070 Ti, the synthetic room (notes/perffix2/c/RESULTS.md): 0.44 / 0.61 / 0.87 / 1.74 ms against the targets
+ *  0.44 / 0.62 / 0.88 / 1.76. Red `oldtiers` (4096): FO4CS's (half 4x8, half 4x12, half 6x12, full 4x8; 16 taps). */
+struct WwSsgiTier
+{
+	int div, slices, steps, robustTaps;
+};
+
+inline WwSsgiTier wwSsgiTier( int quality, int red )
+{
+	static const WwSsgiTier now[4] = { { 4, 2, 12, 8 }, { 4, 3, 12, 16 }, { 4, 6, 12, 16 }, { 2, 4, 12, 12 } };
+	static const WwSsgiTier old[4] = { { 2, 4, 8, 16 }, { 2, 4, 12, 16 }, { 2, 6, 12, 16 }, { 1, 4, 8, 16 } };
+	const int q = quality < 0 ? 0 : quality > 3 ? 3 : quality;
+	return ( red & 4096 ) ? old[q] : now[q];
+}
+
+//! the work size of a tier over a W x H frame (rounded up)
+inline int wwSsgiWorkDim( int full, int div )
+{
+	return div <= 1 ? full : ( full + div - 1 ) / div;
+}
+
 #endif // CELLSSGIPLAN_H
