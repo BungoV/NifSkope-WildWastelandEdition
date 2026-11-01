@@ -103,6 +103,7 @@ uniform vec3 cellIsWbD;
 uniform bool cellIsLutOn;
 uniform sampler3D cellIsLut;
 uniform int cellIsRed;				// 1 nolut, 2 noexp, 4 nograde, 8 nobloom (the CPU drops cellIsBloomOn)
+uniform bool cellIsVanCurve;		// lane FIX1101A T: WW_TONEMAP_RED=vanilla, the game's filmic curve (else Physical)
 // the measure's blurred bright pass, a quarter of the view; rect = viewport origin, 1 / size
 uniform bool cellIsBloomOn;
 uniform sampler2D cellIsBloom;
@@ -149,7 +150,11 @@ uniform sampler2DMS cellFogBloom;
 float cellBloomGain = 1.0;
 #endif
 
+#include "cell_tonemap.glsl"
+
 // sqrt-of-linear in (this program's convention), display out. Shaders011.fxp, the tonemap PS and the LUT PS.
+// lane FIX1101A T (LATE ITEM 26): the curve is Fusion Shaders' Physical (cell_tonemap.glsl) on the exposed light; the
+// bloom, the exposure, the grade, the 1 / 2.2 and the LUT are the game's, in the same order. Red: cellIsVanCurve.
 vec3 cellImageSpace( vec3 sqrtColor )
 {
 	vec3 x = max( sqrtColor, vec3( 0.0 ) );
@@ -169,9 +174,13 @@ vec3 cellImageSpace( vec3 sqrtColor )
 	if ( cellIsFoBloomOn )	// FO4CS adds its bloom to the exposed light, before the curve (x 2: the curve's input)
 		x += 2.0 * cellBloomGain * cellFoBloomHere;
 #endif
-	float E = cellIsE;
-	vec3 c = ( x * ( 0.15 * x + 0.05 ) + 0.2 * E ) / ( x * ( 0.15 * x + 0.5 ) + 0.06 ) - E / 0.3;
-	c /= ( 0.2 * E + 19.376 ) * 0.040856 - E / 0.3;		// the curve at W 11.2
+	vec3 c;
+	if ( cellIsVanCurve ) {
+		float E = cellIsE;
+		c = ( x * ( 0.15 * x + 0.05 ) + 0.2 * E ) / ( x * ( 0.15 * x + 0.5 ) + 0.06 ) - E / 0.3;
+		c /= ( 0.2 * E + 19.376 ) * 0.040856 - E / 0.3;		// the curve at W 11.2
+	} else
+		c = wwTonemapPhysical( 0.5 * x );	// x is 2 x the exposed light: the filmic curve's own input bias
 	if ( ( cellIsRed & 4 ) == 0 ) {
 		float luma = dot( c, vec3( 0.2125, 0.7154, 0.0721 ) );
 		c = mix( vec3( luma ), c, cellIsCine.x );

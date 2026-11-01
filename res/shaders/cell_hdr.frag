@@ -32,9 +32,12 @@ uniform bool hdrBackdropOn;	// false: the glow as before (red WW_CELL_BLOOM_SKY_
 out vec4 fragColor;
 
 /* lane GLAREBLOW2: cellImageSpace's curve (its input: 2 x the exposed light; out: display-linear, before the
- * 1 / 2.2) and the curve's inverse, closed form (y' (0.15 x^2 + 0.5 x + 0.06) = 0.15 x^2 + 0.05 x + 0.2 E). */
+ * 1 / 2.2) and the curve's inverse, closed form (y' (0.15 x^2 + 0.5 x + 0.06) = 0.15 x^2 + 0.05 x + 0.2 E).
+ * lane FIX1101A T: the Physical curve's grey axis and its inverse (cell_tonemap.glsl); the filmic one is the red. */
 float cellCurveW( float x )
 {
+	if ( !cellIsVanCurve )
+		return wwTmGrey( 0.5 * x );
 	float E = cellIsE;
 	float c = ( x * ( 0.15 * x + 0.05 ) + 0.2 * E ) / ( x * ( 0.15 * x + 0.5 ) + 0.06 ) - E / 0.3;
 	return c / ( ( 0.2 * E + 19.376 ) * 0.040856 - E / 0.3 );
@@ -42,6 +45,8 @@ float cellCurveW( float x )
 
 float cellCurveInv( float y )
 {
+	if ( !cellIsVanCurve )
+		return 2.0 * wwTmGreyInv( y );
 	float E = cellIsE;
 	float yp = y * ( ( 0.2 * E + 19.376 ) * 0.040856 - E / 0.3 ) + E / 0.3;
 	float a = 0.15 * ( yp - 1.0 ), b = 0.5 * yp - 0.05, c = 0.06 * yp - 0.2 * E;
