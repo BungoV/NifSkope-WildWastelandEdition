@@ -764,13 +764,16 @@ void Scene::drawDeferredShapes( NodeList & secondPass )
 		return s && !isDecal( node ) && s->wwWaterDraws();
 	};
 	bool waterDrew = false;
-	for ( Node * node : secondPass.list() ) {
-		if ( isWater( node ) ) {
-			PassTime::DrawCpuScope cpu( PassTime::CpuWater );	// lane PERFFIX3: the water's own timers
-			PassTime::subBegin( PassTime::WaterDraw );
-			node->drawShapes();
-			PassTime::subEnd( PassTime::WaterDraw );
-			waterDrew = true;
+	{
+		PassTime::Swap waterT( PassTime::Sorted, PassTime::Water );	// lane TIMING1: the sorted pass's water is the water zone's
+		for ( Node * node : secondPass.list() ) {
+			if ( isWater( node ) ) {
+				PassTime::DrawCpuScope cpu( PassTime::CpuWater );	// lane PERFFIX3: the water's own timers
+				PassTime::subBegin( PassTime::WaterDraw );
+				node->drawShapes();
+				PassTime::subEnd( PassTime::WaterDraw );
+				waterDrew = true;
+			}
 		}
 	}
 	/* lane GLOWHAZE1: the water writes depth, and the soft fade of every effect after it must see that surface (a mist

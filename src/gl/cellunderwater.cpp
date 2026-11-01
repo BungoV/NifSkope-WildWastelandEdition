@@ -257,8 +257,8 @@ void wwCellUnderwaterPass( Scene * scene )
 		return;
 	}
 	// lane PERFFIX3: the pass's GPU time in the pass table (`sub underwater`), from here to every return below
-	PassTime::subBegin( PassTime::Underwater );
-	struct SubEnd { ~SubEnd() { PassTime::subEnd( PassTime::Underwater ); } } subEnd;
+	PassTime::subBegin( PassTime::UnderwaterSub );
+	struct SubEnd { ~SubEnd() { PassTime::subEnd( PassTime::UnderwaterSub ); } } subEnd;
 
 	const unsigned int depthTex = wwCellHdrDepthMax( scene );
 	auto prog = depthTex ? r->useProgram( "cell_underwater.prog" ) : nullptr;

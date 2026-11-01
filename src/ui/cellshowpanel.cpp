@@ -8,6 +8,7 @@ BSD License - see nifskope.h
 #include "wwswitch.h"
 #include "wwredtwin.h"	// lane REDRETIRE1: OPENCELLFIX2's retired reds, tests/cellshow's red build only
 #include "widgets/wwdropdown.h"	// lane OPENCELLFIX2: the dock's one dropdown
+#include "cellpresettable.h"	// lane TIMING1: what each built-in preset sets, row by row
 
 #include <QAction>
 #include <QActionGroup>
@@ -37,6 +38,7 @@ BSD License - see nifskope.h
 #include <QWidgetAction>
 
 #include <algorithm>
+#include <cstdio>
 
 
 namespace {
@@ -473,7 +475,14 @@ struct PresetSteps final : public QObject
 {
 	using QObject::QObject;	// found by name: a .cpp-local class has no Q_OBJECT
 	QList<std::function<void( int )>> steps;
+	QStringList missing;	// lane TIMING1: Fusion Shaders rows the preset table lacks (left as they are)
 };
+
+WwPresetCodeFn & presetCodes()
+{
+	static WwPresetCodeFn fn = nullptr;
+	return fn;
+}
 
 PresetSteps * presetSteps( const QWidget * panel )
 {
@@ -970,7 +979,7 @@ struct DisplayBuilder
 		}
 
 		if ( steps && inFusion && !custom )
-			addStep( t, list, items.value( off ), r.heavy );
+			addStep( t, list, items.value( off ), key );
 
 		if ( folds ) {
 			QAction * enabler = c ? c->menuAction() : nullptr;
@@ -1008,19 +1017,28 @@ struct DisplayBuilder
 		}
 	}
 
-	/* Built-in presets (bungo 10-27; memory: four steps Low / Medium / High / Ultra): every Fusion Shaders row on at
-	 * the preset's level; Low turns the heavy rows off. A level is the item named Low..Ultra; a choice with an off
-	 * item and no level that is a plain two-way switch (Bloom's Vanilla | FO4CS) takes its other item when on. Other
-	 * choices (look curves such as Lamp brightness contrast, methods, sources) are left as they are. */
-	void addStep( QAction * t, const QList<QAction *> & list, QAction * offAct, bool heavy )
+	/* Built-in presets (bungo 10-27; memory: four steps Low / Medium / High / Ultra). lane TIMING1 (bungo 11-01, "each
+	 * feature per preset"): each row sets what src/ui/cellpresettable.h says for the preset: off, on, or on at a named
+	 * quality item ('L' 'M' 'H' 'U'); '-' (and a row the table lacks) leaves the row as it is. A row turned on with
+	 * no level named that is a plain two-way switch (Bloom's Vanilla | FO4CS) takes its other item. */
+	void addStep( QAction * t, const QList<QAction *> & list, QAction * offAct, const QString & key )
 	{
 		QPointer<QAction> pt( t ), po( offAct );
-		steps->steps.append( [pt, po, list, heavy]( int p ) {
+		const QByteArray k = key.toLatin1();
+		if ( !presetCodes() && !wwPresetRow( k.constData() ) )
+			steps->missing << key;
+		steps->steps.append( [pt, po, list, k]( int p ) {
 			static const char * const kLevel[] = { "Low", "Medium", "High", "Ultra" };
-			const bool on = !( heavy && p == 0 );
+			const int pc = std::clamp( p, 0, 3 );
+			const char code = presetCodes() ? presetCodes()( k.constData(), pc ) : wwPresetCode( k.constData(), pc );
+			if ( code == '-' )
+				return;
+			const bool on = code != '0';
+			const char * const want = code == 'L' ? kLevel[0] : code == 'M' ? kLevel[1] : code == 'H' ? kLevel[2]
+				: code == 'U' ? kLevel[3] : nullptr;
 			QAction * level = nullptr;
 			for ( QAction * a : list )
-				if ( a->text() == QLatin1String( kLevel[std::clamp( p, 0, 3 )] ) )
+				if ( want && a->text() == QLatin1String( want ) )
 					level = a;
 			if ( pt && pt->isChecked() != on && actionReachable( pt ) )
 				pt->trigger();
@@ -1092,11 +1110,23 @@ QWidget * wwMenuAsDisplay( QMenu * menu, const QList<WwDisplayRow> & rows, QWidg
 	if ( menu )
 		d.leftover( menu );
 	panel->setProperty( "wwDisplayLeftovers", d.leftovers );
+	if ( !presetCodes() ) {	// lane TIMING1: the table's coverage, once per panel
+		int n = 0;
+		wwPresetTable( &n );
+		std::fprintf( stderr, "cell presets: %d Fusion Shaders rows stepped, table %d rows, %d not in it (left as they are)%s%s\n",
+			int( steps->steps.size() ), n, int( steps->missing.size() ), steps->missing.isEmpty() ? "" : ": ",
+			steps->missing.join( QLatin1Char( ' ' ) ).toLatin1().constData() );
+	}
 	top->addStretch( 1 );
 	if ( menu )
 		watchForCustom( panel, menu );
 	refreshPresetBar( panel );
 	return panel;
+}
+
+void wwDisplayPresetCodes( WwPresetCodeFn fn )
+{
+	presetCodes() = fn;
 }
 
 int wwDisplayLeftovers( const QWidget * panel )

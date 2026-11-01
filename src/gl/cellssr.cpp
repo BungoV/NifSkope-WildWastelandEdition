@@ -483,6 +483,7 @@ void wwCellSsrPass( Scene * scene, bool run )
 		fn->glStencilFunc( GL_ALWAYS, 0, 0xFF );
 		fn->glDepthMask( GL_TRUE );
 	} else {
+	PassTime::Swap donorT( PassTime::Reflections, PassTime::SsrDonor );	// lane TIMING1: the scene pass (SSGI's donor) alone
 	// 1. the opaque cell-lit fragments once more: the lit color the game marches (probe 60)
 	fn->glViewport( 0, 0, W, H );
 	fn->glDisable( GL_SCISSOR_TEST );
@@ -549,6 +550,7 @@ void wwCellSsrPass( Scene * scene, bool run )
 
 	// 1b. the water's rays, depth-tested against the opaque depth just drawn
 	if ( waterSsr ) {
+		PassTime::Swap waterT( PassTime::Reflections, PassTime::SsrWater );	// lane TIMING1: the water's rays alone
 		ssrAlloc( fn, g.wray, W, H, false );
 		fn->glBindFramebuffer( GL_FRAMEBUFFER, g.wray.fbo );
 		fn->glFramebufferRenderbuffer( GL_FRAMEBUFFER, GL_DEPTH_STENCIL_ATTACHMENT, GL_RENDERBUFFER, ao.depthRb );

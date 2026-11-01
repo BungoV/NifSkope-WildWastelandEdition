@@ -2374,6 +2374,7 @@ void wwCellLightsUniforms( Scene * scene )
 		rec.f3( prog, "cellIsWbD", wb[0] - 1.0f, wb[1] - 1.0f, wb[2] - 1.0f );
 		rec.b( prog, "cellIsVanCurve", wwTonemapVanilla() );	// lane FIX1101A T: the red, the game's filmic curve
 	}
+<<<<<<< HEAD
 	prof.at( 13, "shadow+is" );
 	rec.i( prog, "cellLights", kTextureUnit );
 	// the cluster lists: their sampler bound on every draw, the lists only on a lit one
@@ -2384,6 +2385,18 @@ void wwCellLightsUniforms( Scene * scene )
 	rec.i( prog, "cellLightCount", g.count );
 	rec.i( prog, "cellBulbBase", g.bulbBase );	// lane NIFXLIGHT2: the air's bulb-tier lights
 	rec.i( prog, "cellBulbCount", g.bulbs );
+=======
+	prog->uni1i( "cellLights", kTextureUnit );
+	// lane TIMING1: WW_CELL_PASSTIME_LIGHTLOOP=1's unlit frames walk no light (the light loop's GPU timer)
+	const int loopCount = PassTime::lightLoopOff() ? 0 : g.count;
+	// the cluster lists: their sampler bound on every draw, the lists only on a lit one
+	wwCellClusterUniforms( scene, L ? &g.texels : nullptr, L ? loopCount : 0, g.texelStamp );
+	if ( !L )
+		return;
+	prog->uni1i( "cellLightCount", loopCount );
+	prog->uni1i( "cellBulbBase", g.bulbBase );	// lane NIFXLIGHT2: the air's bulb-tier lights
+	prog->uni1i( "cellBulbCount", g.bulbs );
+>>>>>>> origin/timing1-20261101
 	{	// lane LIGHTS5: GOBO1's pattern (pin WW_CELL_GOBO_ROT turns it, red WW_CELL_GOBO_RED=flat its mean) and FOGSCALE1
 		WW_SWITCH_STATIC( int, goboRot, wwEnvInt( "WW_CELL_GOBO_ROT" ) & 7 );
 		WW_SWITCH_STATIC( bool, goboFlat, wwEnvStr( "WW_CELL_GOBO_RED" ) == QLatin1String( "flat" ) );

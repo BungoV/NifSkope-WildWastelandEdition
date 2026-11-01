@@ -367,6 +367,7 @@ HEADERS += \
 	src/ui/opencelldialog.h \
 	src/ui/opencellmenu.h \
 	src/ui/cellshowpanel.h \
+	src/ui/cellpresettable.h \
 	src/ui/widgets/wwdropdown.h \
 	src/ui/checkablemessagebox.h \
 	src/ui/settingsdialog.h \

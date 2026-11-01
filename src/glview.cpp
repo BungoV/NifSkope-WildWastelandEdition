@@ -4258,11 +4258,15 @@ void GLView::paintGL()
 	wwCellAoPass( scene, cellPasses );
 	PassTime::end( PassTime::Obscurance );
 	rtddgiRestirPass( scene );	// lane RESTIRDI1: the RT quality preset's ReSTIR DI on that pass's g-buffer (Low: nothing)
+	PassTime::begin( PassTime::Water );	// lane TIMING1: the water zone (its draws in the sorted pass join it)
 	wwCellOceanPass( scene, cellPasses );	// lane WATERLOOK1: the wind's waves, before any pass that draws water
+	PassTime::end( PassTime::Water );
 	PassTime::begin( PassTime::Reflections );
 	wwCellSsrPass( scene, cellPasses );	// lane SSR1: needs that pass's depth
-	wwContactShadowPass( scene );	// lane TERRSHADOW1: the contact mask from that pass's depth (fails open without it)
 	PassTime::end( PassTime::Reflections );
+	PassTime::begin( PassTime::Contact );	// lane TIMING1: was inside "reflections"
+	wwContactShadowPass( scene );	// lane TERRSHADOW1: the contact mask from that pass's depth (fails open without it)
+	PassTime::end( PassTime::Contact );
 	PassTime::begin( PassTime::Ssgi );
 	wwCellSsgiPass( scene, cellPasses );	// lane SSGI1: reads that pass's scene colour
 	PassTime::end( PassTime::Ssgi );
@@ -4320,14 +4324,22 @@ void GLView::paintGL()
 				wwCellFarLodCards( scene, true, true );	// lane FARLOD1: the far tree cards, lit, into the linear frame
 				PassTime::subEnd( PassTime::FarCardsLit );
 				PassTime::end( PassTime::FarCards );
+				PassTime::begin( PassTime::Precip );	// lane TIMING1
 				wwCellPrecipDraw( scene );	// lane WEATHERLOOK1 B: rain / snow from the weather, into the linear frame (row off: no GL call)
+				PassTime::end( PassTime::Precip );
 				wwCellLensFlareGrab( scene );	// lane LIGHTS3: the opaque depth for the flares' occlusion test
+				PassTime::begin( PassTime::Clouds );	// lane TIMING1: the clouds' depth copy and front pass
 				wwCloudVolSceneDepth( scene );	// lane CLOUD2B: the depth the volume clouds test against
+				PassTime::end( PassTime::Clouds );
+				PassTime::begin( PassTime::Underwater );	// lane TIMING1
 				wwCellUnderwaterPass( scene );	// lane WATERUNDER1: the camera under water (no GL call off or above it)
+				PassTime::end( PassTime::Underwater );
 				PassTime::begin( PassTime::ToneMap );
 				wwCellHdrEnd( scene );
 				PassTime::end( PassTime::ToneMap );
+				PassTime::begin( PassTime::Clouds );
 				wwCloudVolFront( scene );	// lane CLOUD2B: clouds in front of the scene (a ridge behind them)
+				PassTime::end( PassTime::Clouds );
 			}
 			// lane FARLOD1: the cards when the frame is not HDR (lit and toned by their own program), then the
 			// census a gate reads
@@ -4340,10 +4352,16 @@ void GLView::paintGL()
 				// lane GRASSMB1: the game's depth of field + motion blur BEFORE the temporal AA, as the engine's image-space pass
 				// runs them (3 HDR/tone map, 6 DoF, 10 motion blur, then 17/18 FXAA/TAA); inert when off
 				PassTime::Scope pt( PassTime::Post );	// lane PERF1
-				wwTaaInputsPass( scene );	// lane TAAINPUTS1: inert unless asked for (gl/taainputs.h)
+				{
+					PassTime::Swap taaT( PassTime::Post, PassTime::Taa );	// lane TIMING1: the AA's own vectors count as the AA
+					wwTaaInputsPass( scene );	// lane TAAINPUTS1: inert unless asked for (gl/taainputs.h)
+				}
 				wwCellPostApply( scene );
 				wwCellLensFlareDraw( scene );	// lane LIGHTS3 (LENSFLARE1): the lights' flares, a screen pass; inert when off
-				wwGameTaaResolve( scene );
+				{
+					PassTime::Swap taaT( PassTime::Post, PassTime::Taa );	// lane TIMING1: blits + vectors + resolve + copy-back
+					wwGameTaaResolve( scene );
+				}
 				wwTaaInputsView( scene );	// lane TAAINPUTS1: the inputs' debug view (WW_TAAINPUTS_VIEW)
 				wwCellGrassFrameEnd();	// lane GRASSMB1: the grass wind's clock steps once per frame
 			}
