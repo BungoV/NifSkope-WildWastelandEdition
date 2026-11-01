@@ -1459,6 +1459,25 @@ bool PSysSimController::update( const NifModel * nif, const QModelIndex & index 
 	return true;
 }
 
+//! lane FXPALETTE1: the red of the simple colour ramp (today's chain), and of the bolt palette
+static bool wwFxPaletteRedAll()
+{
+	WW_SWITCH_STATIC( bool, red, wwEnv( "WW_FXPALETTE_RED" ).trimmed() == "1" );
+	return red;
+}
+
+static bool wwFxSimpleColorRed()
+{
+	WW_SWITCH_STATIC( bool, red, wwEnv( "WW_FX_SIMPLECOLOR_RED" ).trimmed() == "1" );
+	return red || wwFxPaletteRedAll();
+}
+
+static bool wwFxBoltPaletteRed()
+{
+	WW_SWITCH_STATIC( bool, red, wwEnv( "WW_FX_BOLTPALETTE_RED" ).trimmed() == "1" );
+	return red || wwFxPaletteRedAll();
+}
+
 Color4 PSysSimController::particleColor( const Emitter & e, float u ) const
 {
 	Color4 c = e.color;
@@ -1477,6 +1496,24 @@ Color4 PSysSimController::particleColor( const Emitter & e, float u ) const
 				col[k][j] = modColors[k][j];
 		FxRules::simpleColor( f, col, u, o );
 		return Color4( o[0], o[1], o[2], std::max( o[3], 0.0f ) );
+	} else if ( hasColorMod && !wwFxSimpleColorRed() ) {
+		/* lane FXPALETTE1: the game's branch order (fxparityrules.h simpleColor) for the colour ramp, alpha included.
+		 * The chain below treated a zero-length first ramp (Color 1 Start <= Color 1 End) as "colour 1 for ever"; the
+		 * game skips straight to colour 2 there. MPSMuzSparksLaser02.nif (all four percents 0 / 0 / 0 / 1, colour 1
+		 * transparent black) drew every spark at alpha 0. Same picture as the chain for every ordered ramp.
+		 * Red WW_FX_SIMPLECOLOR_RED=1 (or WW_FXPALETTE_RED=1): the chain below. */
+		if ( c2Start - c1End == 0.0f || u >= c2Start ) {
+			if ( c3Start - c2End == 0.0f || u <= c2End )
+				c = modColors[1];
+			else if ( u <= c3Start )
+				c = tlLerpColor( modColors[1], modColors[2], ( u - c2End ) / ( c3Start - c2End ) );
+			else
+				c = modColors[2];
+		} else if ( u < c1End ) {
+			c = modColors[0];
+		} else {
+			c = tlLerpColor( modColors[0], modColors[1], ( u - c1End ) / ( c2Start - c1End ) );
+		}
 	} else if ( hasColorMod ) {
 		if ( u < c1End || c2Start <= c1End )
 			c = modColors[0];
@@ -2897,6 +2934,26 @@ void ProcLightningController::drawPreview()
 		static const QString defaultTexture = QStringLiteral( "#FFFFFFFF" );
 		sc->textures->bind( defaultTexture, sc->nifModel );
 	}
+
+	/* lane FXPALETTE1: the beam's greyscale-to-palette colour, as fo4_effectshader.frag draws its effect shapes: rgb =
+	 * palette( base texture G, base colour R ), alpha from the palette's alpha when Greyscale To Palette Alpha is set.
+	 * The strip drew the grey base texture x the clamped emissive, so LaserRifleBeamRed.nif came out white. Gated by
+	 * the Tint / Greyscale contribution like the effect shapes (renderer.cpp). Red WW_FX_BOLTPALETTE_RED=1 (or
+	 * WW_FXPALETTE_RED=1): the plain strip. */
+	bool palColor = false, palAlpha = false;
+	auto * boltEsp = dynamic_cast<BSEffectShaderProperty *>( shaderProp );
+	if ( !wwFxBoltPaletteRed() && texOk && boltEsp && boltEsp->hasGreyscaleMap && sc->hasOption( Scene::DoMaterialTint )
+		&& ( boltEsp->greyscaleColor || boltEsp->greyscaleAlpha ) && !boltEsp->fileName( 1 ).isEmpty() ) {
+		int texunit = 1;
+		if ( prog->uniSampler( shaderProp, "GreyscaleMap", 1, texunit, QString(), TexClampMode::CLAMP_S_CLAMP_T ) ) {
+			palColor = boltEsp->greyscaleColor;
+			palAlpha = boltEsp->greyscaleAlpha;
+		}
+		sc->textures->activateTextureUnit( 0 );
+	}
+	prog->uni1i( "greyscaleColor", palColor );
+	prog->uni1i( "greyscaleAlpha", palAlpha );
+	prog->uni1f( "paletteRow", boltEsp ? boltEsp->emissiveColor[0] : 1.0f );
 
 	// lightning beams are additive
 	glEnable( GL_BLEND );
