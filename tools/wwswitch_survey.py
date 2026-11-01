@@ -24,6 +24,7 @@ OVERRIDES = {
     'WW_SETTINGS_SCOPE': ('relaunch', 'QSettings scope chosen in main() before any window'),
     'WW_NIFX_ROOT': ('live', 'celllights.cpp nifxTick re-reads it every tick; a moved root makes the live scan look at every folder (NIFXLIGHT3)'),
     'WW_STDERR_BUFFER': ('relaunch', 'stderr buffering set once in main()'),
+    'WW_OWNDATA_RED': ('relaunch', 'gamemanager.cpp init_archives reads it when the FO4 resource index is built (once a launch, or a resource-path change) (FIX1101A OWNDATA1)'),
     'WW_WINDOW_VISIBLE': ('relaunch', 'window placement (opacity, z-order) when each window is first shown (FLYFIX1)'),
     'WW_RENDER_SHOT': ('live', 'the steps verb "shot <out>" names the file; the launch value only arms the handler'),
     'WW_RENDER_PATH': ('live', 'the steps verb "path <file> <out>" takes it as an argument'),
