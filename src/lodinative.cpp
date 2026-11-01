@@ -2048,6 +2048,7 @@ int lodiFarObjCensusCli( const QStringList & args, QTextStream & out )
 			 * draws row on, by the program the renderer gives the ring now (its own, or the twin under the red
 			 * WW_CELL_FARINST_RED=blrow). foreign > 0 = a command reads another draw's matrices and texture handles */
 			const bool twin = CellFarInst::bindlessTwinAllowed();
+			const bool uniRow = CellFarInst::bindlessUniformRow();	// lane FARLOOK1101 (FARINSTBL1)
 			CellFarInst::RowAudit ra, rt;
 			qint64 rings = 0;
 			for ( int b = blocks0; b < nif.getBlockCount(); b++ ) {
@@ -2055,7 +2056,7 @@ int lodiFarObjCensusCli( const QStringList & args, QTextStream & out )
 				if ( !cm || !cm->inst )
 					continue;
 				rings++;
-				const CellFarInst::RowAudit a = CellFarInst::rowAudit( *cm->inst, twin );
+				const CellFarInst::RowAudit a = CellFarInst::rowAudit( *cm->inst, twin, 65536, uniRow );
 				const CellFarInst::RowAudit t = CellFarInst::rowAudit( *cm->inst, true );
 				ra.cmds += a.cmds;
 				ra.foreign += a.foreign;
@@ -2068,7 +2069,8 @@ int lodiFarObjCensusCli( const QStringList & args, QTextStream & out )
 			out << QString( "farobjcensus ring %1 bindless rows: %2 shapes, %3 commands, drawn with %4; %5 read another "
 				"draw's row, %6 past the 65536-row ring, max row offset %7 (under the twin: %8 foreign, %9 past, max %10)\n" )
 				.arg( i ).arg( rings ).arg( ra.cmds )
-				.arg( twin ? QStringLiteral( "the bindless twin [red blrow]" ) : QStringLiteral( "its own program" ) )
+				.arg( !twin ? QStringLiteral( "its own program" ) : uniRow ? QStringLiteral( "the bindless twin, uniform row" )
+					: QStringLiteral( "the bindless twin [red blrow]" ) )
 				.arg( ra.foreign ).arg( ra.pastRing ).arg( ra.maxOffset ).arg( rt.foreign ).arg( rt.pastRing ).arg( rt.maxOffset );
 		}
 		/* lane SHADOWSHIMMER3 (FARSWAYCOST): the tree buckets the sun casters sway (gl/sunshadow.cpp c.sway: a far ring

@@ -1,3 +1,14 @@
+## FARINSTBL1 (FARLOOK1101, 2026-11-01): far rings may take the bindless twin again, with the row in the uniform (OFF)
+
+SKYSHARDS3 kept the instanced far rings off the bindless twin. The twin reads its row at wwDrawBase + gl_BaseInstance,
+and a far command's base instance is a placement row. `WW_CELL_FARINST_BL=1` lets the twin back. While a far ring
+draws, `wwBlUniformRow` is set, so ww_bindless.glsl reads wwDrawBase alone, which is the shape's own committed row,
+for every command. Every other bindless draw (plain and multi-draw) leaves the uniform at 0 and reads as before. Off
+(the default, the SKYSHARDS3 rule: own program) waits on a GPU ms that asks for it. The red
+`WW_CELL_FARINST_RED=blrow` wins over the switch (the old twin at the base instance). Gate: tests/farinstrow/run.sh
+gets a BL arm (every ring on the twin, 0 commands read another draw's row) and a BL + blrow arm (must read foreign
+rows).
+
 ## FARSHIMMER2 (FARLOOK1101, 2026-11-01): far rows under 2 px drawn as a blended splat at their true weight (OFF)
 
 FARTOGGLE4 showed that with the TAA off, 548 of the 14,573 far rows at Concord blink on a moving camera. No opaque

@@ -255,6 +255,7 @@
 { "WW_CELL_FARGROUND_QUALITY", 0, "src/gl/cellfarground.cpp:58 st | re-read per frame or per call (a)" },
 { "WW_CELL_FARGROUND_RED", 0, "src/gl/cellfarground.cpp:59 st | re-read per frame or per call (a)" },
 { "WW_CELL_FARHIDE_RED", 0, "src/cellfarhide.cpp:45 mode | re-read per frame or per call (a)" },
+{ "WW_CELL_FARINST_BL", 0, "src/gl/cellfarinst.cpp:390 bindlessUniformRow | re-read per frame or per call (a)" },
 { "WW_CELL_FARINST_CENSUS", 0, "src/gl/cellfarinst.cpp:65 census | re-read per frame or per call (a)" },
 { "WW_CELL_FARINST_RED", 0, "src/gl/cellfarinst.cpp:59 redNoCull | re-read per frame or per call (a)" },
 { "WW_CELL_FARLIGHT", 1, "src/cellview.cpp:6498 cellBuild | read while the cell document is built" },

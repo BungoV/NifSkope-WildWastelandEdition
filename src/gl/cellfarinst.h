@@ -46,8 +46,12 @@ int sliceTiles( const CellMeshInst & d, const float modelView[16], const WwFarSw
  * command's base instance is its first PLACEMENT row: every command past row 0 read another draw's row, rewritten as
  * the ring advances (Concord's faceted, ground-textured shards in the sky, a new shape every frame), or a row past the
  * ring's end, or a handle a reopen had made non-resident. The plain fo4_cell / fo4_cellcsm program binds its own.
- * Red WW_CELL_FARINST_RED=blrow: the twin as before (live). */
+ * Red WW_CELL_FARINST_RED=blrow: the twin as before (live).
+ * lane FARLOOK1101 (FARINSTBL1): WW_CELL_FARINST_BL=1 lets the twin back with the row in the uniform alone
+ * (ww_bindless.glsl wwBlUniformRow: wwDrawIdx = wwDrawBase, the shape's own committed row, for every command). Off
+ * by default (the old rule: own program); the red wins over it. */
 bool bindlessTwinAllowed();
+bool bindlessUniformRow();
 //! The rows a ring's commands read under a program (twin of ww_bindless.glsl's wwDrawIdx for an instanced draw)
 struct RowAudit
 {
@@ -56,7 +60,7 @@ struct RowAudit
 	qint64 pastRing = 0;    //!< of those, past the ring's last row from any draw's row
 	quint32 maxOffset = 0;  //!< the largest row offset read
 };
-RowAudit rowAudit( const CellMeshInst & d, bool bindlessProgram, quint32 ringRows = 65536 );
+RowAudit rowAudit( const CellMeshInst & d, bool bindlessProgram, quint32 ringRows = 65536, bool uniformRow = false );
 }
 
 #endif

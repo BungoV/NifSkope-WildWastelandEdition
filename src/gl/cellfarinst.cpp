@@ -324,7 +324,8 @@ bool draw( NifSkopeOpenGLContext * r, Scene * scene, const CellMeshInst & d, Nif
 		if ( std::string( prog->name ) != lastProg ) {
 			lastProg = std::string( prog->name );
 			std::fprintf( stderr, "farinst: far rings drawn with %s%s\n", lastProg.c_str(),
-				prog->wwBindless ? " (bindless twin: rows read at the base instance, red WW_CELL_FARINST_RED=blrow)" : "" );
+				!prog->wwBindless ? "" : bindlessUniformRow() ? " (bindless twin: the row in the uniform alone, WW_CELL_FARINST_BL)"
+				: " (bindless twin: rows read at the base instance, red WW_CELL_FARINST_RED=blrow)" );
 			std::fflush( stderr );
 		}
 	}
@@ -343,9 +344,14 @@ bool draw( NifSkopeOpenGLContext * r, Scene * scene, const CellMeshInst & d, Nif
 	} else if ( prog->uniLocation( "farSplat" ) >= 0 ) {
 		prog->uni2f( "farSplat", 0.0f, 0.0f );	// a twin drawn without a second pass (no blending): every row, as before
 	}
+	const bool uniRow = prog->wwBindless && bindlessUniformRow();	// FARINSTBL1: the shape's own row for every command
+	if ( uniRow )
+		prog->uni1i( "wwBlUniformRow", 1 );
 	prog->uni1i( "farInst", 1 );
 	submit( r, *cp, *k, cmds );
 	prog->uni1i( "farInst", 0 );
+	if ( uniRow )
+		prog->uni1i( "wwBlUniformRow", 0 );
 	if ( splatPass == 2 ) {	// the far rings' own state (opaque, depth written) for whatever draws next
 		r->fn->glDisable( GL_BLEND );
 		r->fn->glDepthMask( GL_TRUE );
@@ -372,18 +378,32 @@ bool splatRedNoAlpha()
 	return red;
 }
 
-bool bindlessTwinAllowed()
+static bool redBlRow()
 {
 	WW_SWITCH_STATIC( bool, red, wwEnv( "WW_CELL_FARINST_RED" ) == "blrow" );
 	return red;
 }
 
-RowAudit rowAudit( const CellMeshInst & d, bool bindlessProgram, quint32 ringRows )
+bool bindlessUniformRow()
+{
+	WW_SWITCH_STATIC( bool, on, [] {
+		const QString v = wwEnvStr( "WW_CELL_FARINST_BL" ).trimmed().toLower();
+		return v == QLatin1String( "1" ) || v == QLatin1String( "on" );
+	}() );
+	return on && !redBlRow();
+}
+
+bool bindlessTwinAllowed()
+{
+	return redBlRow() || bindlessUniformRow();
+}
+
+RowAudit rowAudit( const CellMeshInst & d, bool bindlessProgram, quint32 ringRows, bool uniformRow )
 {
 	RowAudit a;
 	for ( const CellMeshInst::Cmd & m : d.cmds ) {
 		a.cmds++;
-		const quint32 off = bindlessProgram ? m.baseInstance : 0u;	// wwDrawIdx - wwDrawBase
+		const quint32 off = bindlessProgram && !uniformRow ? m.baseInstance : 0u;	// wwDrawIdx - wwDrawBase
 		if ( off == 0 )
 			continue;
 		a.foreign++;
