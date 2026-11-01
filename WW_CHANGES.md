@@ -1,3 +1,11 @@
+## PERFFIX2 b item 8 (2026-11-01): the sun-cascades pass timer split into its four parts
+
+PERFRES1101 A sun_shadows broken 3: the PassTime "sun-cascades" zone (wwSunShadowPass) also holds the terrain sweep's
+step, the clouds' shadow map and the far ground's pages, so its ms could not be read as the cascades' cost. Each part now
+has a GPU sub-timer and a CPU sub of the same name: `| sub sun-casters` (the cascade casters, cache, blits),
+`sun-terrstep`, `cloud-shadow`, `far-ground-pass` (and `| cpu ...` with the same names). The zone itself is unchanged.
+Unit: tests/suntimersplit (enum and name tables agree, each call bracketed; red: a doctored table must fail).
+
 ## PERFFIX2 b item 5b (2026-11-01): a light-cube caster draws only into the faces it can reach
 
 PERFRES1101 A gap 6.1: every caster whose bounding sphere touched a shadow light's sphere was drawn into all six cube

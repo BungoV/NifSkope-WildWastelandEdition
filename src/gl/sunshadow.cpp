@@ -809,10 +809,19 @@ void wwSunShadowPass( Scene * scene )
 {
 	if ( scene && scene->selecting )
 		return;
-	sunShadowPassImpl( scene );
-	wwShadowSetFrame( scene );	// lane TERRSHADOW1: the terrain sweep's step, whatever the Shadows row says
-	wwCloudShadowPass( scene );	// lane CLOUD3: the clouds' shadow map rows, whatever the Shadows row says
-	CellFarGround::pass( scene );	// lane FARDRAW1: the far ring 0's live ground (uploads, page stamps, frees)
+	/* lane PERFFIX2 b: the PassTime "sun-cascades" zone holds four things; each gets a GPU sub-timer and a CPU sub
+	 * ("| sub sun-casters", "| cpu sun-casters" ...), so the cascades' own ms is read apart from the clouds' map and the
+	 * far ground's pages (the zone itself is unchanged). */
+	auto part = [scene]( int gpu, int cpu, void ( *f )( Scene * ) ) {
+		PassTime::DrawCpuScope t( cpu );
+		PassTime::subBegin( gpu );
+		f( scene );
+		PassTime::subEnd( gpu );
+	};
+	part( PassTime::SunCasters, PassTime::CpuSunCasters, sunShadowPassImpl );
+	part( PassTime::SunTerrStep, PassTime::CpuSunTerrStep, wwShadowSetFrame );	// lane TERRSHADOW1: the terrain sweep's step, whatever the Shadows row says
+	part( PassTime::CloudShadow, PassTime::CpuCloudShadow, wwCloudShadowPass );	// lane CLOUD3: the clouds' shadow map rows, whatever the Shadows row says
+	part( PassTime::FarGroundPass, PassTime::CpuFarGroundPass, []( Scene * sc ) { CellFarGround::pass( sc ); } );	// lane FARDRAW1: the far ring 0's live ground (uploads, page stamps, frees)
 	csmEchoFrame();
 }
 
