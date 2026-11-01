@@ -1,3 +1,10 @@
+## FOAMOFF2 (FIX1101A, 2026-11-01): River foam and Contact foam stay OFF
+
+The water lane's foam fixes land: lace streaks instead of solid patches, and no foam on a dry bank. Its two rows still
+ship off, under the new keys WW/CellWaterContact3 and WW/CellWaterRiverFoam3. On the spot 6 river frame (CommonwealthClear
+12:00) the streaks at 1:1 still read as flat light-grey darts with hard tips, not river foam. The rows go on when a foam
+look gate measured on the frame holds. Everything else in the water section below ships as written.
+
 ## FOAMOFF (FIX1101A, 2026-10-31): River foam and Contact foam ship OFF again
 
 The batch that landed WATERFOAM2 (main 9b443dcf) turned both rows on. The first pictures on that build (spot 6 river,

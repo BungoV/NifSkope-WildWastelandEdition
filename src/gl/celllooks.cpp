@@ -74,10 +74,10 @@ const LookRow kRows[] = {
 	{ "Water clear colour", "WW/CellWaterClear2", true },
 	{ "Water sky visibility", "WW/CellWaterSkyVis" },
 	{ "Surf", "WW/CellWaterSurf" },
-	{ "Contact foam", "WW/CellWaterContact3", true },	// FIX1101A P0: ON again with the lace + wet cut (tests/waterfoam2); new key over FOAMOFF (FIX1031B LATE ITEM 8: current-made foam)
+	{ "Contact foam", "WW/CellWaterContact3" },	// FIX1101A 11-01: OFF (h2 rvc6_on 1:1: still flat grey darts, not foam; lace + wet cut kept, tests/waterfoam2); new key over FOAMOFF (FIX1031B LATE ITEM 8: current-made foam)
 	{ "Wet shore", "WW/CellLandWet" },
 	{ "Wave run-up", "WW/CellLandSwash" },
-	{ "River foam", "WW/CellWaterRiverFoam3", true },	// FIX1101A P0: ON again with the lace + wet cut (tests/waterfoam2); new key over FOAMOFF (FIX1031B LATE ITEM 8: m/s flow, shallows + shoals)
+	{ "River foam", "WW/CellWaterRiverFoam3" },	// FIX1101A 11-01: OFF (h2 rvc6_on 1:1: still flat grey darts, not foam; lace + wet cut kept, tests/waterfoam2); new key over FOAMOFF (FIX1031B LATE ITEM 8: m/s flow, shallows + shoals)
 	{ "Underwater light", "WW/CellWaterUnderLight" },
 	{ "Precipitation", "WW/CellPrecip" },	// lane WEATHERLOOK1 B: ships off until bungo sees it
 };

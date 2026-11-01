@@ -24,9 +24,9 @@ OLD = {'Water clear colour': 'WW/CellWaterClear', 'Water reflections': 'WW/CellW
        'Water sun glare': 'WW/CellWaterGlint', 'Ocean waves': 'WW/CellWaterOcean', 'Water soft edge': 'WW/CellWaterEdge',
        'Shore foam': 'WW/CellWaterFoam', 'Contact foam': 'WW/CellWaterContact', 'River foam': 'WW/CellWaterRiverFoam'}
 # FIX1101A (10-31 22:2x): the two foam rows shipped OFF (FOAMOFF: flat grey patches on the river, one on a dry bank at
-# spot 6). 11-01: back ON with the lace + dry-bank cut (tests/waterfoam2) under NEW keys ...3, so FOAMOFF's ...2 (and any
-# Off stored under it) does not stick either.
-OFFNOW = set()
+# spot 6). 11-01: the lace + dry-bank cut (tests/waterfoam2) landed under NEW keys ...3, but the rows stay OFF: at 1:1
+# the streaks still read as flat grey darts. They go ON when a foam look gate on the frame holds.
+OFFNOW = {'Contact foam', 'River foam'}   # 11-01 h2: the lace streaks still read as grey darts at 1:1 (notes/fix1101a/tmp/rvc_m3_paint_crop.png)
 OLD2 = {'Contact foam': 'WW/CellWaterContact2', 'River foam': 'WW/CellWaterRiverFoam2'}
 ok = True
 for label, enum in ROWS.items():
