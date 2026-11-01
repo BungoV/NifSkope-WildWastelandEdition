@@ -1,3 +1,27 @@
+## OWNDATA1 (FIX1101A, 2026-11-01): our moon draws with no mod folder
+
+Our sky's moon globe (SKYDISC1) needs two loose textures that lived only in the FO4CS mod folder, so any window or
+harness without that folder in its resource list drew the vanilla moon (`moon:refused(textures/sky/moon/moon_d.dds not
+found ...)`, hold 4's notes). NifSkope now ships them: res/Data/Textures/Sky/Moon/Moon_d.dds + Moon_n.dds (2.0 MB, the
+same bytes, NASA SVS CGI Moon Kit, credit in NOTICE.txt beside them), copied to release/Data at link time, and
+src/gamemanager.cpp adds release/Data as the LAST, lowest-priority source of the Fallout 4 resources, so a game or mod
+copy of the same name still wins. Only its data folders are read (Textures; Plugins is not one). Red:
+`WW_OWNDATA_RED=1` (launch key: the folder is not added). Gate: tests/owndata1 (the shipped maps + the release copies;
+a release without them fails) and the sky notes' `moon:` part. Our sun disc needs no texture (`discs=ours`).
+
+## CONTACTREACH1 (FIX1101A, 2026-11-01): no dashed bands from thin casters (bungo's "banding on shadows")
+
+bungo's crop of his Concord porch frame showed the shadow of power lines on a facade as a row of short parallel dashes
+beside a soft line. The cascades were not the cause: an offline twin of the cascade filter (Ultra + PAR, texel 1.24 /
+3.56 u, Vogel radius 2.8 / 10.5 u) draws a 2-2.8 u cable as a smooth soft line and a thick edge within 0.6 px. The near
+contact march (screen space, half-res, 4 lanes) hit a thin caster 85 u off the wall in only one or two samples, so the
+shadow came out as dashes. Inside the cascades' reach the near march now stops 48 game units from the receiver
+(src/gl/shadowset.cpp kContactReach, res/shaders/ww_contact.frag sssReach); the reach opens up as the cascades fade out,
+and the far tier keeps its own fade. Real contact (a caster within 48 u) keeps its contact shadow. The echo's contact
+part prints `reach=48`. Red: `WW_SHADOW_RED=contactreach` (the whole march, as before; live). Gate: tests/contactreach1
+(the twin on a wire 85 u off a wall at ~2700 u: composed stair 1.30 -> 0.20 px, darkness CV 0.155 -> 0.024; a wire 6 u
+off keeps 95.8 % of its contact line; the red fails). Link sweeps 408 / 272 / 408 LINK OK.
+
 ## FOAMOFF2 (FIX1101A, 2026-11-01): River foam and Contact foam stay OFF
 
 The water lane's foam fixes land: lace streaks instead of solid patches, and no foam on a dry bank. Its two rows still

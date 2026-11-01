@@ -11,6 +11,7 @@
 #include <QCoreApplication>
 #include <QProgressDialog>
 #include <QDir>
+#include <QFileInfo>
 #include <QMap>
 #include <QMessageBox>
 #include <QStringBuilder>
@@ -205,6 +206,24 @@ void GameManager::GameResources::init_archives()
 			if ( !ignoreArchiveErrors ) {
 				Message::append( QString( "Error opening resource path(s)" ),
 									QString( "'%1': %2" ).arg( i ).arg( e.what() ), QMessageBox::Critical );
+			}
+		}
+	}
+	/* lane FIX1101A (LATE ITEM 28b): NifSkope's own shipped data (release/Data: our sky's moon maps) is the LAST source
+	 * of a Fallout 4 root, so it has the lowest priority (the first archive or folder holding a name wins): our sky draws
+	 * with no mod folder in the list, and a game or mod copy of the same name still overrides it. Only the data folders
+	 * under it are read (Textures; Plugins is not a data folder). Red WW_OWNDATA_RED=1: not added (read at the
+	 * archive init, a launch key). */
+	if ( !parent && game == FALLOUT_4 && qEnvironmentVariableIntValue( "WW_OWNDATA_RED" ) != 1 ) {
+		const QString own = QCoreApplication::applicationDirPath() + QStringLiteral( "/Data" );
+		if ( QFileInfo( own + QStringLiteral( "/Textures" ) ).isDir() && !tmp.contains( own, Qt::CaseInsensitive ) ) {
+			try {
+#ifdef Q_OS_WIN32
+				ba2File->loadArchivePath( own.toLocal8Bit().constData(), archiveFilterFuncTable[game] );
+#else
+				ba2File->loadArchivePath( own.toStdString().c_str(), archiveFilterFuncTable[game] );
+#endif
+			} catch ( NifSkopeError & ) {
 			}
 		}
 	}
