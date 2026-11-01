@@ -1,3 +1,23 @@
+## TMAP1101A (FIX1101A area T, 2026-11-01): the cell view's tone curve is Fusion Shaders' Physical operator
+
+- bungo 11-01: "Fusion Shaders has the physical tonemapper, do we have it? ... if not, add it and use it". The cell view's
+  one tone map (cell_lights.glsl cellImageSpace, the HDR pass and the per-fragment fallback alike) now runs FO4CS's
+  Physical curve (res/shaders/cell_tonemap.glsl, ported from FO4CS res/Post/TonemapCS.hlsl: F4FX_PhysicalCurve, the
+  ICtCp chroma fade, F4FX_TonemapPhysical in its SDR output mode; GT7 sample by Polyphony Digital, MIT, notice in
+  LICENSE.md) with FO4CS's defaults: paper white 250 nits, blend 0.60, chroma fade 0.98..1.16, reference 100 nits,
+  curve alpha 0.25 / mid point 0.538 / linear section 0.444 / toe 1.280. Ships ON. Only the curve changed: the bloom
+  add, the exposure / eye adaptation, the weather's grade (cine / tint), the 1 / 2.2 and the LUT are the game's, in the
+  same order. The curve takes the exposed light (the filmic curve's own 2 x input bias is not applied to it). The glow's
+  place on the curve (cell_hdr.frag cellCurveW / cellCurveInv, GLAREBLOW2) follows: the Physical grey axis and its inverse.
+- Red WW_TONEMAP_RED=vanilla: the game's filmic curve (HNAM E at W 11.2) as before. Read per draw (live, stage 0 in
+  src/wwswitchstages.inc); `switch: tonemap red vanilla on|off` echo, and the imagespace echo ends `curve=physical|vanilla`.
+  No menu row, not a Show toggle.
+- Unit tests/tonemap1101a (run.sh): the real cell_tonemap.glsl + cellImageSpace + cellCurveW/Inv through the driver vs a
+  numpy port of the HLSL (physical.py) over a grey ramp 0..64 x paper white, 24 Macbeth-ish patches at 1/16..64 x and six
+  saturated ramps (3800 inputs): green display max error 0.461 / 255 (bar 1 / 255), exposure-0.37 case the same, grey axis
+  0.002 / 255, inverse round trip 5.4e-5 rel; reds FAIL: --red vanilla (255 / 255 on saturated highlights, grey 46 / 255)
+  and the base c0a30fab's shader files. Link sweeps 405 / 270 / 405 LINK OK.
+
 ## GI1101A (FIX1101A area G, 2026-10-31): the bounce read hands over like the surfaces, the albedo rebuilds the volume, the cascades' boxes
 
 - Bounce read (leftover of FIX1031B's cover rule; ships ON): a probe ray's hit takes the volume's irradiance by the same

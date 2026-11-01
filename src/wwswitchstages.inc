@@ -1203,6 +1203,7 @@
 { "WW_TEX_DRAIN_RED", 1, "src/gl/gltex.cpp:552 TexCache::loadTex | read when the renderer is handed the cell (publish/load/build)" },
 { "WW_TEX_PUMP_MB", 0, "src/glview.cpp:3803 GLView::paintGL | re-read per frame or per call (a)" },
 { "WW_TONEMAP1_RED", 0, "src/gl/cellhdr.cpp:43 stexOn | re-read per frame or per call (a)" },
+{ "WW_TONEMAP_RED", 0, "src/gl/celllights.cpp:1491 wwTonemapVanilla | re-read per frame or per call (a)" },
 { "WW_TOPBAR_TEST", 2, "src/nifskope_ui.cpp:9233 NifSkope::createWindow | createWindow: picks which harness the window runs" },
 { "WW_TREELEAF_RED", 0, "src/gl/glshape.cpp:271 Shape::wwDrawAlphaGen | re-read per frame or per call (a)" },
 { "WW_UIALIGN_DUMP", 3, "src/uialigntest.cpp:121 wwUiAlignHarness | bake/CLI/test path" },

@@ -65,6 +65,30 @@ The screen-space GI's blue noise sheet (res/ssgi/fast_2uges.rg8) is from
 [FastNoise](https://github.com/electronicarts/fastnoise), copyright (c) 2023 Electronic Arts Inc.,
 BSD 3-Clause License (res/ssgi/FASTNOISE_LICENSE.txt).
 
+The cell view's Physical tone map (res/shaders/cell_tonemap.glsl, by way of Fusion Shaders' res/Post/TonemapCS.hlsl) is
+adapted from Polyphony Digital's GT7 Tone Mapping sample
+(https://blog.selfshadow.com/publications/s2025-shading-course/pdi/supplemental/gt7_tone_mapping.cpp), MIT License:
+
+    Copyright (c) 2025 Polyphony Digital Inc.
+
+    Permission is hereby granted, free of charge, to any person obtaining a copy of
+    this software and associated documentation files (the "Software"), to deal in
+    the Software without restriction, including without limitation the rights to
+    use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies
+    of the Software, and to permit persons to whom the Software is furnished to do
+    so, subject to the following conditions:
+
+    The above copyright notice and this permission notice shall be included in all
+    copies or substantial portions of the Software.
+
+    THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+    IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+    FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+    AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+    LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+    OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+    SOFTWARE.
+
 NOTICE
 
 Parts of NifSkope (i.e. included libraries) might be subject to

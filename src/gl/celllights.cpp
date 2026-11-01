@@ -1484,6 +1484,14 @@ const WwCellUni::Dsa * wwCellUniDsa()
 	return &d;
 }
 
+/* lane FIX1101A T (LATE ITEM 26): the cell view's tone curve is Fusion Shaders' Physical (res/shaders/cell_tonemap.glsl);
+ * WW_TONEMAP_RED=vanilla keeps the game's filmic curve. Read per draw (live), echoed once per change. */
+static bool wwTonemapVanilla()
+{
+	WW_SWITCH_STATIC( bool, van, wwSwitchEcho( "tonemap red vanilla", wwEnv( "WW_TONEMAP_RED" ).trimmed() == "vanilla" ) );
+	return van;
+}
+
 void wwCellLightsUniforms( Scene * scene )
 {
 	PassTime::DrawCpuScope cpuT( PassTime::CpuCellUni );	// lane PERF2
@@ -2153,6 +2161,7 @@ void wwCellLightsUniforms( Scene * scene )
 		prog->uni3f( "cellIsCine", LI->isCine[0], LI->isCine[1], LI->isCine[2] );
 		prog->uni4f_l( prog->uniLocation( "cellIsTint" ), FloatVector4( LI->isTint[0], LI->isTint[1], LI->isTint[2], LI->isTint[3] ) );
 		prog->uni1i( "cellIsRed", s.isRed );
+		prog->uni1b( "cellIsVanCurve", wwTonemapVanilla() );	// lane FIX1101A T: the red, the game's filmic curve
 	}
 	prog->uni1i( "cellLights", kTextureUnit );
 	// the cluster lists: their sampler bound on every draw, the lists only on a lit one
@@ -2786,6 +2795,7 @@ QString wwCellImageSpaceEcho( Scene * scene )
 		.arg( double( h[2] ), 0, 'g', 7 ).arg( double( h[3] ), 0, 'g', 7 ).arg( bl.lit ).arg( bl.peak, 0, 'g', 6 );
 	if ( s.isRed )
 		o += QStringLiteral( " red=%1" ).arg( s.isRed );
+	o += wwTonemapVanilla() ? QStringLiteral( " curve=vanilla" ) : QStringLiteral( " curve=physical" );
 	return o;
 }
 
