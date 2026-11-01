@@ -21,7 +21,8 @@ class Vector3;
 
 /* The cell view's far field: appends the worldspace's LOD (terrain rings, objects, tree cards)
  * under one "FarLOD" node of the cell document, so it draws with the cell's own programs.
- * Master: QSettings CellView/FarLod (ships OFF); WW_CELL_FARLOD=1/0 overrides. Read at cell open. */
+ * Master: QSettings CellView/FarLod2 (ships ON since PERFFIX4; red WW_CELL_FARLOD_DEFRED=1 = the old OFF key);
+ * WW_CELL_FARLOD=1/0 overrides. Read at cell open. */
 
 bool cellFarLodWanted();
 void cellFarLodSetWanted( bool on );

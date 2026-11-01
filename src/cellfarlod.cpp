@@ -152,17 +152,22 @@ const FarDoc * farFor( const Scene * scene )
 
 } // namespace
 
+/* lane PERFFIX4 (11-01): the far field ships ON (bungo: "Off by default is NOT fixed"). A new key, so the old
+ * shipped-off value saved by an earlier build does not stick (the BINDLESSPERF1 precedent). The red
+ * WW_CELL_FARLOD_DEFRED=1 reads the old key with the old default. */
 bool cellFarLodWanted()
 {
 	// the environment wins, and only for a measuring run (a harness never writes the user's settings)
 	if ( wwEnvIsSet( "WW_CELL_FARLOD" ) )
 		return wwEnvInt( "WW_CELL_FARLOD" ) != 0;
-	return QSettings().value( QStringLiteral( "CellView/FarLod" ), false ).toBool();
+	if ( wwEnvInt( "WW_CELL_FARLOD_DEFRED" ) == 1 )
+		return QSettings().value( QStringLiteral( "CellView/FarLod" ), false ).toBool();
+	return QSettings().value( QStringLiteral( "CellView/FarLod2" ), true ).toBool();
 }
 
 void cellFarLodSetWanted( bool on )
 {
-	QSettings().setValue( QStringLiteral( "CellView/FarLod" ), on );
+	QSettings().setValue( QStringLiteral( "CellView/FarLod2" ), on );
 }
 
 namespace

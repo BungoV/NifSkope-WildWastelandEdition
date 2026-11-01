@@ -1,0 +1,5 @@
+# lane PERFFIX4: impostor_cellinst.prog with hardware early depth (impostor_instez.vert pulls the quad in front of every
+# depth the card writes; impostor_cellinstez.frag declares gl_FragDepth depth_greater). Selected BY NAME in
+# ImpostorDraw::drawCardsInstanced; WW_FARCARD_EARLYZ_RED=1 draws with impostor_cellinst.prog again.
+
+shaders impostor_instez.vert impostor_cellinstez.frag
