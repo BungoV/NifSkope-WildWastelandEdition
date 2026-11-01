@@ -298,7 +298,7 @@ int	wwShadersLoaded = 0;
 }
 
 // compiles the waiting shaders attached to program prog; false (err set) when one fails to compile
-static bool wwCompileDeferred( GLFunctions * f, unsigned int prog, QString & err )
+static bool wwCompileDeferred( NifSkopeOpenGLContext::GLFunctions * f, unsigned int prog, QString & err )
 {
 	auto &	h = wwDeferredShaders();
 	if ( h.isEmpty() || !prog )
