@@ -336,13 +336,13 @@ void collect( Slot & sl )
 		static const char * const subName[SubCount] = { "air-tile", "air-inject", "air-integrate", "ao-geometry",
 			"ao-stages", "ao-gi", "tone-blit", "tone-measure", "tone-bloom", "tone-quads", "far-dots",
 			"far-cards-lit", "tone-vrs", "fxres-down", "fxres-layer", "fxres-comp", "air-pre", "air-far", "air-post", "far-ground-paint",
-			"far-ground-draw" };
+			"far-ground-draw", "sun-casters", "sun-terrstep", "cloud-shadow", "far-ground-pass" };	// lane PERFFIX2 b
 		for ( int k = 0; k < SubCount; k++ )
 			if ( subSeen[k] )
 				line += QByteArray( " | sub " ) + subName[k] + " " + QByteArray::number( sub[k], 'f', 2 );
 		static const char * const cpuSubName[CpuSubCount] = { "setup", "cell-uni", "sun-uni", "fog-uni", "ao-draw", "ssr-draw",
 			"air-state", "air-setup", "air-clusters", "air-tile", "air-inject", "air-integrate", "air-far", "air-tail", "air-echo",
-			"bl-geo", "bl-row" };
+			"bl-geo", "bl-row", "sun-casters", "sun-terrstep", "cloud-shadow", "far-ground-pass" };	// lane PERFFIX2 b
 		for ( int k = 0; k < CpuSubCount; k++ )
 			if ( sl.cpuSubN[k] > 0 )
 				line += QByteArray( " | cpu " ) + cpuSubName[k] + " " + QByteArray::number( sl.cpuSub[k], 'f', 2 ) + " n="

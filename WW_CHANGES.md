@@ -64,6 +64,87 @@ values did not change no longer bumps the patch stamp, so the light buffer is no
   every frame by its pin, as before.
 - Unit: tests/flickclock (g++, no Qt): 6 checks; `-DFLICK_RED` fails 2 (different frame runs to one time; a repeat row).
 - Default: unchanged (the Light flicker row still ships OFF; this changes how it moves, not whether it draws).
+## PERFFIX2 b item 5c (2026-11-01): a shadowed spot draws casters only into the cube faces its cone meets
+
+PERFRES1101 A gap 6.2: 959 of 1445 vanilla shadow lights are spots, and each got a full cube. A spot lights nothing
+outside its cone (cell_lights.glsl: base = 1 - (1 - dot(-L, dir)) / (1 - cosOuter) is 0 there, and cellShadowF is only
+asked where the light is above 0), so a face whose directions all lie outside the cone, widened by the lookup's reach
+(16 / face rad + 0.02: the 3x3 taps, their 2x2 compare, the 1.5-texel normal lift), is read by no lit pixel.
+WwCubeFace::coneMask (src/gl/cubefacecull.h) finds each face's nearest direction to the axis exactly (inside the face, or
+the peak on one of its 4 edges) and celllights.cpp draws no caster into the other faces (they are still cleared): exact
+for every lit pixel, ships ON. A narrow spot aimed along an axis keeps 1 face, one at a cube corner 3; 3.46 of 6 on
+average over half angles 5..90 deg. The brief's "spot as ONE 2D map" (a perspective map instead of a cube) would also
+free the memory, but it changes the sampling (a look change) and the slot format: a LANES row. Debug probe 7 still reads
+the off-cone faces (cleared). Census `coneSkip=`. Red WW_CELL_SHADOW_RED=nocone (allfaces also turns it off). Unit:
+tests/cubefacecull part 2b (20000 spots x 300 directions in the widened cone, none in a dropped face; red: the face axis
+in the cone only, loses 3.2 M directions).
+
+## PERFFIX2 b item 5d (2026-11-01): the stored lamp shadows' first stores spread over frames
+
+PERFRES1101 A gap 6.3: the stored lamp shadows (LAMPSHADOW1) drew every new slot's static map in one frame, so a cell
+open or a big slot change paid the whole first build at once (the 102 ms GPU / 78.6 ms CPU frame of PERF2 T1, Memory
+Den, uncached). Now (src/gl/lampslice.h) a frame spends at most WW_CELL_LAMPSHADOW_SLICE cube faces (default 12, about
+two lamps) on first stores, nearest slots first; the first store of a frame always goes. A slot whose store waits is read
+unshadowed (as a light past the 16-slot budget) until its map is drawn: the light buffer skips it (Gpu::shPend). Restores
+(blits) and movers are not budgeted. The picture after the stores is the old one; during them a lamp's shadow can appear
+up to ceil(faces / 12) frames late (8 frames for 16 omni lamps): a look change on those frames only, shipped ON. The lamp
+census adds `slice= waiting=`. WW_CELL_LAMPSHADOW_SLICE=0: every store in one frame (the old). Tier Off (the plain cubes)
+is not sliced. Unit: tests/lampslice (the budget per frame, every lamp stored within the bound, nearest first, a waiting
+slot never read shadowed; red: no first-store floor, a budget under one lamp never stores).
+
+## PERFFIX2 b item 8a (2026-11-01): a Hit cascade copies back only the dynamic casters' footprint
+
+PERFRES1101 A sun_shadows gap 1: whenever any dynamic caster existed (a skinned actor, a swaying cable, the far sway
+tiles), every Hit cascade copied its whole static layer into the live map each paint (map x map D16: 0.12 ms a cascade at
+4096, 0.35 ms for three, shadowshimmer4/HANDOFF.md:37) before drawing the dynamic casters over it. The live map already
+holds the static layer except where last paint's dynamic casters wrote, so now (src/gl/sunshadowdyn.h) a Hit on the same
+static write (the layer's own write counter, the same cascade key) copies back only last paint's footprint and keeps
+this paint's for the next. The footprint: each set-2 caster's drawn vertices (CPU-skinned, cable sway or its own) as a
+view-space box through the cascade's orthographic rows, a far bucket's tiles (CellFarInst::tileBounds, the spheres
+drawCascade culls with) grown by the sway's largest offset (1.2 x amp), floor / ceil + 1 texel, clamped. Exact (the live
+map is texel for texel the whole-copy one), ships ON. The brief proposed a separate dynamic map with a min at the
+receiver; that is not exact under the hardware 2x2 compare (the min of two filtered taps is not the filter of the min
+depth) and doubles the receivers' taps in programs with 8.7 % instruction headroom, so the cut restore takes the same
+saving without a shader change. Census (WW_SHADOWCACHE_CENSUS=1): `copy <c0>,<c1>,<c2> cut <texels>` (whole / cut / none).
+Red WW_SHADOWCACHE_RED=fullcopy: every Hit copies the whole layer again. Gate WW_SHADOWCACHE_CHECK=1: each paint also
+builds the old way in the scratch layer and prints `shadowcache check: ... mism=N` (texels that differ). Unit:
+tests/sunshadowdyn (every covered texel of 3000 random casters inside its footprint; 600 paints of a walking caster: the
+cut live map equals the whole-copy one every paint; reds: a truncated footprint and no copy-back must fail).
+
+## PERFFIX2 b item 8b (2026-11-01): Cascade Quality Low draws 2 sun cascades
+
+PERFRES1101 A sun_shadows missing 1: the cascade count was 3 at every tier (sunshadow.cpp kCascades). Now
+gl/sunshadowfit.h cascadesForTier: Low 2, Medium / High / Ultra 3, the Off tier (CSM1) 3. With 2 the second slice
+reaches the shadow distance (Low: 900..4000 units at the same 2048 map, so the 900..2600 band gets coarser texels) and
+cascade 2 is neither drawn nor read: the receivers' second boundary (csmSplitOffset.y) moves past the reach + band, so
+ww_sunshadow.glsl csmSelect keeps the pair (0, 1) out to the fade (no shader change). Ultra stays 3: a 4th cascade needs
+the shader's mat4[3] / split layout to grow (a LANES row). The echo adds `cascades=`. Red WW_SHADOW_CASCADES_RED=1: 3 at
+every tier (today's). A look change at Low only (a FULL-SIZE pair in notes/perffix2/b). Unit: tests/cascadecount (the
+tier table; the receivers never select the undrawn cascade and every depth lies in its slices; reds: today's count, and
+the receivers left on the old boundary, must fail).
+
+## PERFFIX2 b item 8 (2026-11-01): the sun-cascades pass timer split into its four parts
+
+PERFRES1101 A sun_shadows broken 3: the PassTime "sun-cascades" zone (wwSunShadowPass) also holds the terrain sweep's
+step, the clouds' shadow map and the far ground's pages, so its ms could not be read as the cascades' cost. Each part now
+has a GPU sub-timer and a CPU sub of the same name: `| sub sun-casters` (the cascade casters, cache, blits),
+`sun-terrstep`, `cloud-shadow`, `far-ground-pass` (and `| cpu ...` with the same names). The zone itself is unchanged.
+Unit: tests/suntimersplit (enum and name tables agree, each call bracketed; red: a doctored table must fail).
+
+## PERFFIX2 b item 5b (2026-11-01): a light-cube caster draws only into the faces it can reach
+
+PERFRES1101 A gap 6.1: every caster whose bounding sphere touched a shadow light's sphere was drawn into all six cube
+faces (celllights.cpp wwCellShadowPass, and the stored lamp shadows' drawFace). A face's projection is 90 degrees about
+its axis (clip x = u.r, y = v.r, w = m.r), so a sphere wholly outside one of its four side planes (m -+ u, m -+ v, through
+the light) puts no fragment into it. New src/gl/cubefacecull.h (WwCubeFace::touches, a pad of 1 unit + 1e-3 of the
+distance for the GPU's float transform) skips those draws in both paths: the depth texels are the same ones (depth only,
+LEQUAL, any order), so this is exact and ships ON. The census adds `faceSkip=` (draws saved since the start) to the
+shadow echo and the lamp census. Red WW_CELL_SHADOW_RED=allfaces: every caster into every face again (a live set redraws
+every held cube and stores every lamp map again). WW_CELL_SHADOW_HASH=<token> (gates only): every 8th pass a 64-bit hash
+of the held cubes' depth texels on stderr ("shadow cube hash ..."), so a row and its red can be compared texel for texel.
+Unit: tests/cubefacecull (40000 spheres x 400 points through the face's clip rows: no point lands in a dropped face; the
+red, a centre-only test, loses 1.5 M points; 1.63 faces kept a caster on that population; the face table is
+celllights.cpp's).
 
 ## FOAMOFF2 (FIX1101A, 2026-11-01): River foam and Contact foam stay OFF
 

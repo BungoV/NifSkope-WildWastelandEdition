@@ -29,6 +29,11 @@ bool drawCascade( NifSkopeOpenGLContext * r, const CellMeshInst & d, NifSkopeOpe
 	int part = 3 );
 //! lane SHADOWSHIMMER4: the tiles (of those a streamed near cell leaves drawn) meeting the slice; their indices into `hash`
 int sliceTiles( const CellMeshInst & d, const float modelView[16], const WwFarSwaySlice::Slice & slice, quint64 & hash );
+/*! lane PERFFIX2 b (gl/sunshadowdyn.h): the clip x / y bounds (x0, y0, x1, y1) of the tiles drawCascade draws with
+ *  clipFromModel (slice + modelView: only those meeting the slice; null: every tile), each tile's sphere grown by `grow`
+ *  model units (the far sway's largest offset). The tile sphere is the one drawCascade culls with. False: no tile. */
+bool tileBounds( const CellMeshInst & d, const float clipFromModel[16], const float * modelView,
+	const WwFarSwaySlice::Slice * slice, float grow, float out[4] );
 
 /* lane SKYSHARDS3 (2026-10-30): the far ring never draws with a bindless twin (fo4_cellbl / fo4_cellcsmbl). The twin
  * reads its per-draw row (matrices + texture handles) at wwDrawBase + gl_BaseInstance (ww_bindless.glsl), and a far

@@ -14,6 +14,7 @@ BSD License - see nifskope.h
 #include "gl/skyephem.h"	// lane EPHEM1: FO4CS Solar's sun + moon arithmetic
 #include "gl/gametaa.h"
 #include "gl/sunshadow.h"	// lane SHADOWSHIMMER1: the stable shadows' red
+#include "gl/sunshadowfit.h"	// lane PERFFIX2 b: the cascade count per tier
 #include "gl/cellssr.h"		// the cell view's shared opaque pass (contact shadows read its depth)
 #include "gl/glnode.h"
 #include "gl/glscene.h"
@@ -1855,6 +1856,9 @@ bool wwShadowCascadePreset( WwCascadePreset & p )
 	}
 	// a low sun reaches far: the light's origin sits behind the camera by twice the reach (never under CSM1's)
 	p.lightBack = std::max( 15000.0, 2.0 * p.D );
+	// lane PERFFIX2 b (item 8b): Low draws 2 cascades; red WW_SHADOW_CASCADES_RED=1 keeps 3 at every tier (today's)
+	WW_SWITCH_STATIC( bool, countRed, wwEnvInt( "WW_SHADOW_CASCADES_RED" ) == 1 );
+	p.cascades = WwCsmFit::cascadesForTier( ss().cascade, countRed );
 	p.taps = std::clamp( int( std::lround( 32.0 * ( p.radius / 3.0 ) * ( p.radius / 3.0 ) ) ), 8, 48 );
 	p.biasTexels = 1.5f;
 	p.slopeBias = 6.0f;
