@@ -46,6 +46,9 @@ QStringList cellModPluginArchives( const QString & pluginPath );
  *  0 = unset (the game's 5); `from` the ini that set it; `read` the folder read ("the MO2 profile's own inis in
  *  <dir>" or "My Games <dir>"). */
 int cellGameGrids( QString * from = nullptr, QString * read = nullptr );
+/*! lane PERFFIX4: one float key of the same inis in the same order (a later file wins; src/gameinikey.h), `fallback` when
+ *  none sets it; `from` the ini that set it. `section` with brackets, e.g. "[Grass]". */
+float cellGameIniFloat( const char * section, const char * key, float fallback, QString * from = nullptr );
 
 //! the loaded block's half width from cellGameGrids (LandLodSpec::gridHalf); red WW_LANDSPEC_RED=grids5: 5's 2
 int cellGameGridHalf( QString * note = nullptr );
