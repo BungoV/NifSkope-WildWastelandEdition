@@ -68,6 +68,9 @@ void wwGameTaaSetOn( bool on );
 
 //! lane TAA2: the "Modern temporal AA" tier, 0 Off .. 4 Ultra; the setter saves it unless WW_TAA2 pins it.
 int wwTaa2Tier();
+/*! lane PERFFIX4: the material maps' mip bias while the Modern TAA jitters: Low 0, Medium -0.25, High -0.5, Ultra -1.0
+ *  (FSR 2's native figure at the top tier); 0 when TAA2 is off. Red WW_TAA2_RED=nomipbias: 0 at every tier. */
+float wwTaa2MipBias();
 void wwTaa2SetTier( int tier );
 bool wwTaa2Pinned();
 

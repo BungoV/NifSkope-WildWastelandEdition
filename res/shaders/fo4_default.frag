@@ -84,6 +84,7 @@ uniform bool hasTintColor;
 uniform bool hasCubeMap;
 uniform bool hasEnvMask;
 uniform bool hasSpecularMap;
+uniform float wwMipBias;	// lane PERFFIX4: the material maps' LOD bias under the Modern TAA's jitter (0 = none)
 uniform bool greyscaleColor;
 
 // Shader Flags 1 bit 12 (SLSF1_Model_Space_Normals): the bound normal map is an
@@ -448,7 +449,7 @@ void main()
 #endif
 #endif
 
-	vec4 baseMap = texture( BaseMap, offset );
+	vec4 baseMap = texture( BaseMap, offset, wwMipBias );
 #ifdef WW_FARGROUND
 	baseMap.rgb = fgGround( cellWorldPos( -ViewDir ), baseMap.rgb );
 #endif
@@ -568,12 +569,12 @@ void main()
 			 * lit path composes it: R gloss = smoothness x the specular map's
 			 * G, G specular = the map's R (the normal's alpha without a map)
 			 * x the specular strength. */
-			vec4 sm = texture( SpecularMap, offset );
+			vec4 sm = texture( SpecularMap, offset, wwMipBias );
 			if ( lodMaskRaw ) {
 				v = sm.rgb;
 			} else {
 				float gl = clamp( specGlossiness, 0.0, 1.0 ) * ( hasSpecularMap ? sm.g : 1.0 );
-				float sp = ( hasSpecularMap ? sm.r : texture( NormalMap, offset ).a )
+				float sp = ( hasSpecularMap ? sm.r : texture( NormalMap, offset, wwMipBias ).a )
 					* ( lodSpecStrength > 0.0 ? lodSpecStrength : 1.0 );
 				v = vec3( gl, clamp( sp, 0.0, 1.0 ), 1.0 );	// B: neutral AO, one per-pixel law for mixed shapes
 			}
@@ -615,7 +616,7 @@ void main()
 			 * bits - and rides in the set's .lodm as `emissiveScale`. A retargeted
 			 * glow slot stays RAW: a source .lodm's emissive is its own picture. */
 			if ( lodEmissiveRaw )
-				v = texture( GlowMap, offset ).rgb;
+				v = texture( GlowMap, offset, wwMipBias ).rgb;
 			else
 				v = ( alphaFlags == 0 ) ? baseMap.rgb * baseMap.a * lodEmissiveColor : vec3( 0.0 );
 		} else {
@@ -625,9 +626,9 @@ void main()
 		return;
 	}
 
-	vec4 normalMap = texture( NormalMap, offset );
-	vec4 specMap = texture( SpecularMap, offset );
-	vec4 glowMap = texture( GlowMap, offset );
+	vec4 normalMap = texture( NormalMap, offset, wwMipBias );
+	vec4 specMap = texture( SpecularMap, offset, wwMipBias );
+	vec4 glowMap = texture( GlowMap, offset, wwMipBias );
 
 	vec3 normal;
 	if ( hasModelSpaceNormals ) {
