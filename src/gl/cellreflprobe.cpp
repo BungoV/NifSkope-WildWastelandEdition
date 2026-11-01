@@ -11,6 +11,10 @@ BSD License - see nifskope.h
 #include "gl/celldrawstate.h"
 #include "wwswitch.h"	// fix TDFIX2: a live set re-reads the switches
 #include "gl/celllooks.h"	// lane OPENCELLFIX2: the Reflections master
+#include "gl/cellpasstime.h"	// lane PERFFIX2 a: the texture cache's upload count (a capture key)
+#include "cellworldanim.h"	// lane PERFFIX2 a: the world clock (a live window's relight tick)
+#include "rtddgicell.h"	// lane PERFFIX2 a: the ray-traced GI volume on (its updates relight the camera probe)
+#include "gl/cellreflcam.h"	// lane PERFFIX2 a: the camera probe's schedule
 
 #include "gl/celllights.h"
 #include "gl/cellssr.h"
@@ -52,7 +56,8 @@ struct RpState
 {
 	bool loaded = false;
 	bool on = false, pinOn = false;
-	int red = 0;		// 1 fixed (the material cube returned); relight reds 2 nosun, 4 nolights, 8 nogi, 16 white
+	int red = 0;		// 1 fixed (the material cube returned); relight reds 2 nosun, 4 nolights, 8 nogi, 16 white;
+						// lane PERFFIX2 a: 32 perframe (the camera probe recaptured + relit every frame, as before)
 	int probe = 0;		// WW_CELL_LIT_PROBE
 	bool all = false;	// WW_CELL_REFLPROBE_ALL: capture and relight every probe at once
 	bool greyscale = false;	// the draw being set up reads the greyscale palette
@@ -72,7 +77,8 @@ RpState & rps()
 		s.on = s.pinOn ? pin != "0" : QSettings().value( QStringLiteral( "WW/CellReflProbe" ), false ).toBool();
 		for ( const QByteArray & w : qgetenv( "WW_CELL_REFLPROBE_RED" ).trimmed().split( ',' ) ) {
 			const QByteArray t = w.trimmed();
-			s.red |= t == "fixed" ? 1 : t == "nosun" ? 2 : t == "nolights" ? 4 : t == "nogi" ? 8 : t == "white" ? 16 : 0;
+			s.red |= t == "fixed" ? 1 : t == "nosun" ? 2 : t == "nolights" ? 4 : t == "nogi" ? 8 : t == "white" ? 16
+			: t == "perframe" ? 32 : 0;
 		}
 		s.probe = qEnvironmentVariableIntValue( "WW_CELL_LIT_PROBE" );
 		s.all = qEnvironmentVariableIntValue( "WW_CELL_REFLPROBE_ALL" ) != 0;
@@ -107,6 +113,12 @@ struct RpGpu
 	std::vector<Candidate> rooms;	// per room (or room part): its probe and box
 	Probe slot[kSlots];
 	int camFace = 0;				// the camera probe's next face
+	/* lane PERFFIX2 a: the camera probe's capture key per face (what the face was drawn from) and its relight key
+	 * (what the relight read): a face is captured again only when its key moved, the probe relit only when either did */
+	quint64 camFaceKey[6] = {};
+	quint64 camLitKey = 0;
+	qint64 camSkipped = 0;			// frames the camera probe needed nothing (the TIME line)
+	quint64 frameNo = 0;
 	quint64 stamp = 1;				// bumps when the arrays the surfaces read change
 	QHash<GLuint, quint64> progStamp;
 	std::vector<float> uPos, uMin, uMax;
@@ -366,6 +378,7 @@ void wwCellReflProbePass( Scene * scene, bool run )
 	std::vector<Caster> casters;
 	AlphaBgsmTally atTally;	// lane ALPHABGSM1: the census (gl/alphabgsm.h)
 	quint64 sceneKey = mix64( 0, quint64( reinterpret_cast<std::uintptr_t>( scene->nifModel ) ) );
+	quint64 moverKey = 0;	// lane PERFFIX2 a: every caster's world place (a moved door or animated copy recaptures)
 	for ( Node * node : scene->nodes.list() ) {
 		const Shape * sh = dynamic_cast<const Shape *>( node );
 		if ( !sh || !sh->isVisible() || !sh->wwCastsSunShadow() || sh->wwGpuSkinned() )
@@ -385,7 +398,15 @@ void wwCellReflProbePass( Scene * scene, bool run )
 		sceneKey = mix64( sceneKey, quint64( sh->id() ) );
 		sceneKey = mix64( sceneKey, quint64( sh->wwLeafCovRef( "refl" ) ) );	// lane TREELEAF2: a live red re-captures
 		sceneKey = mix64( sceneKey, quint64( c.alphaTested ? 1 : 0 ) );	// lane ALPHABGSM1: a live red re-captures
+		const Transform & wt = sh->worldTrans();
+		for ( int i = 0; i < 3; i++ ) {
+			for ( int j = 0; j < 3; j++ )
+				moverKey = mixF( moverKey, wt.rotation( i, j ) );
+			moverKey = mixF( moverKey, wt.translation[i] );
+		}
+		moverKey = mixF( moverKey, wt.scale );
 	}
+	g.frameNo++;
 	AlphaBgsmTally::report( atTally, "reflection probes", qint64( casters.size() ) );
 	if ( g.doc != scene->nifModel || g.sceneKey != sceneKey ) {
 		for ( Probe & p : g.slot )
@@ -497,6 +518,23 @@ void wwCellReflProbePass( Scene * scene, bool run )
 		}
 	}
 
+	/* lane PERFFIX2 a: the camera probe's G-buffer is light-free and drawn from the statics alone, so a face is drawn
+	 * again only when what it was drawn from moved: the casters (the scene key, every caster's world place, the
+	 * document's version from the global counter, textures uploaded since), the probe's snapped place and box. The
+	 * red WW_CELL_REFLPROBE_RED=perframe keeps REFLPROBE1's endless cycle (one face a frame, relit every frame). */
+	const bool perFrame = ( s.red & 32 ) != 0;
+	quint64 camCapKey = mix64( mix64( sceneKey, moverKey ), quint64( std::uint32_t( wwCellLightsVersion( scene->nifModel ) ) ) );
+	camCapKey = mix64( camCapKey, quint64( PassTime::cacheCounts().texMade + PassTime::cacheCounts().texPumped ) );
+	for ( int a = 0; a < 3; a++ ) {
+		camCapKey = mixF( camCapKey, g.slot[0].pos[a] );
+		camCapKey = mixF( camCapKey, g.slot[0].bmin[a] );
+		camCapKey = mixF( camCapKey, g.slot[0].bmax[a] );
+	}
+	if ( camCapKey == 0 )
+		camCapKey = 1;	// 0 = never captured
+	// the camera probe's next face to draw (the cycle's order), -1: none (gl/cellreflcam.h)
+	const int camStale = WwReflCam::nextFace( g.slot[0].faces, g.camFace, g.camFaceKey, camCapKey, perFrame );
+
 	// the capture: the camera probe's next face, the nearest unfinished placed probe's next face (all: every face)
 	std::vector<std::pair<int, int>> jobs;	// slot, face
 	if ( s.all ) {
@@ -506,9 +544,11 @@ void wwCellReflProbePass( Scene * scene, bool run )
 					jobs.emplace_back( k, f );
 		if ( g.slot[0].faces >= 6 )
 			for ( int f = 0; f < 6; f++ )
-				jobs.emplace_back( 0, f );
+				if ( perFrame || g.camFaceKey[f] != camCapKey )
+					jobs.emplace_back( 0, f );
 	} else {
-		jobs.emplace_back( 0, g.slot[0].faces < 6 ? g.slot[0].faces : g.camFace );
+		if ( camStale >= 0 )
+			jobs.emplace_back( 0, camStale );
 		int best = -1;
 		float bestD = 1e30f;
 		for ( int k = 1; k < kSlots; k++ ) {
@@ -670,6 +710,8 @@ void wwCellReflProbePass( Scene * scene, bool run )
 					GL_TRIANGLES, GL_UNSIGNED_SHORT, attrv, c.sh->triangles.constData() );
 				draws++;
 			}
+			if ( job.first == 0 )
+				g.camFaceKey[face] = camCapKey;	// lane PERFFIX2 a
 			if ( job.first == 0 && p.faces >= 6 ) {
 				g.camFace = ( face + 1 ) % 6;
 				p.lit = false;	// a recaptured face: relight the camera probe
@@ -748,9 +790,42 @@ void wwCellReflProbePass( Scene * scene, bool run )
 		h = mix64( h, quint64( reinterpret_cast<std::uintptr_t>( G ) ) );
 		h = mix64( h, G ? quint64( G->rgba.size() ) : 0 );
 		h = mix64( h, skyBelowRed ? 0x5b2u : 0x5b1u );	// lane SKYBELOW2: a set relights every probe
+		/* lane PERFFIX2 a: the camera probe's relight key, the hash above and what else the relight reads: the view and
+		 * projection (the cascades take view space and are fitted to the frustum), the light buffer, its shadow cubes
+		 * and strengths (wwCellLightsStateKey), the lights' and GI's versions (the global counter); a running world
+		 * clock (a live window) ticks it 4 times a second for what drifts with it (cloud shadows, movers' shadows).
+		 * The ray-traced GI volume refines between frames with no stamp of its own, so while the relight reads it
+		 * (outdoors: the sky share, cellGiSkyK) the camera probe is relit every frame as before. */
+		quint64 hc = h;
+		for ( int i = 0; i < 3; i++ ) {
+			for ( int j = 0; j < 3; j++ )
+				hc = mixF( hc, vt.rotation( i, j ) );
+			hc = mixF( hc, vt.translation[i] );
+		}
+		hc = mixF( hc, vt.scale );
+		for ( int i = 0; i < 4; i++ )
+			for ( int j = 0; j < 4; j++ )
+				hc = mixF( hc, r->globalUniforms->projectionMatrix[i][j] );
+		hc = mix64( hc, wwCellLightsStateKey( scene ) );
+		hc = mix64( hc, quint64( std::uint32_t( wwCellLightsVersion( scene->nifModel ) ) ) );
+		hc = mix64( hc, quint64( std::uint32_t( wwCellGiVersion( scene->nifModel ) ) ) );
+		if ( wwCellWorldClockMoves() )
+			hc = mix64( hc, quint64( std::int64_t( std::floor( wwCellWorldSeconds() * 4.0 ) ) ) );
+		const int lDdgi = prog->uniLocation( "cellDdgiOn" );
+		GLint ddgiOn = 0, giSky = 0;
+		if ( lDdgi >= 0 && rtddgiCellOn() && !L->interior ) {
+			fn->glGetUniformiv( prog->id, lDdgi, &ddgiOn );
+			const int lSky = prog->uniLocation( "cellGiSky" );
+			if ( ddgiOn && lSky >= 0 )
+				fn->glGetUniformiv( prog->id, lSky, &giSky );
+		}
+		if ( ddgiOn && giSky )
+			hc = mix64( hc, g.frameNo );
 		std::vector<int> todo;
-		if ( g.slot[0].faces >= 6 && ( !g.slot[0].lit || g.slot[0].litHash != h ) )
+		if ( WwReflCam::relight( g.slot[0].faces, g.slot[0].lit, g.slot[0].litHash, h, g.camLitKey, hc, perFrame ) )
 			todo.push_back( 0 );
+		else if ( !perFrame && g.slot[0].faces >= 6 && camStale < 0 )
+			g.camSkipped++;
 		int best = -1;
 		float bestD = 1e30f;
 		for ( int k = 1; k < kSlots; k++ ) {
@@ -801,6 +876,8 @@ void wwCellReflProbePass( Scene * scene, bool run )
 					r->drawShape( 4, 3, 6, GL_TRIANGLES, GL_UNSIGNED_SHORT, &attrs, idx );
 					p.lit = true;
 					p.litHash = h;
+					if ( k == 0 )
+						g.camLitKey = hc;	// lane PERFFIX2 a
 					relit++;
 				}
 				fn->glActiveTexture( GLenum( GL_TEXTURE0 + WwCellUnit::ReflProbe ) );
@@ -814,6 +891,28 @@ void wwCellReflProbePass( Scene * scene, bool run )
 			fn->glBindTexture( GL_TEXTURE_CUBE_MAP_ARRAY, 0 );
 		}
 		r->stopProgram();
+	}
+	/* lane PERFFIX2 a: WW_CELL_REFLPROBE_DUMP=<file> (live): the atlas's top level as the surfaces read it, the raw
+	 * R11G11B10F texels (512 x 320 x 4 B), written every frame while set, so a row leaves its last frame's: the
+	 * exactness gate compares the green against WW_CELL_REFLPROBE_RED=perframe. Unit and binding put back. */
+	{
+		const QByteArray dumpTo = qgetenv( "WW_CELL_REFLPROBE_DUMP" );
+		if ( !dumpTo.isEmpty() && g.atlas ) {
+			std::vector<std::uint32_t> px( size_t( kCols * kFace ) * size_t( kRows * kFace ) );
+			GLint pack = 4, bound = 0;
+			fn->glGetIntegerv( GL_PACK_ALIGNMENT, &pack );
+			fn->glPixelStorei( GL_PACK_ALIGNMENT, 4 );
+			fn->glActiveTexture( GLenum( GL_TEXTURE0 + WwCellUnit::ReflProbe ) );
+			fn->glGetIntegerv( GL_TEXTURE_BINDING_2D, &bound );
+			fn->glBindTexture( GL_TEXTURE_2D, g.atlas );
+			fn->glGetTexImage( GL_TEXTURE_2D, 0, GL_RGB, GL_UNSIGNED_INT_10F_11F_11F_REV, px.data() );
+			fn->glBindTexture( GL_TEXTURE_2D, GLuint( bound ) );
+			fn->glPixelStorei( GL_PACK_ALIGNMENT, pack );
+			if ( FILE * f = std::fopen( dumpTo.constData(), "wb" ) ) {
+				std::fwrite( px.data(), sizeof( std::uint32_t ), px.size(), f );
+				std::fclose( f );
+			}
+		}
 	}
 	restore();
 
@@ -852,8 +951,9 @@ void wwCellReflProbePass( Scene * scene, bool run )
 		+ ( rtddgiSkyBelowRedNow() ? QStringLiteral( " below-horizon miss=sky (WW_SKYBELOW_RED)" )	// lane SKYBELOW2
 			: QStringLiteral( " below-horizon miss=ground" ) ) );
 	if ( qEnvironmentVariableIsSet( "WW_CELL_REFLPROBE_TIME" ) && ( captured || relit ) )
-		std::fprintf( stderr, "reflprobe frame: captured=%d draws=%lld relit=%d cpu-ms=%lld\n", captured,
-			(long long) draws, relit, (long long) timer.elapsed() );
+		std::fprintf( stderr, "reflprobe frame: captured=%d draws=%lld relit=%d cpu-ms=%lld camera-still=%lld%s\n", captured,
+			(long long) draws, relit, (long long) timer.elapsed(), (long long) g.camSkipped,
+			perFrame ? " (RED=perframe)" : "" );
 }
 
 void wwCellReflProbeDraw( Scene * scene, bool cellProgram )

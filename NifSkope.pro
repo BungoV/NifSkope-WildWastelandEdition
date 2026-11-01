@@ -239,6 +239,7 @@ HEADERS += \
 	src/gl/campath.h \
 	src/gl/celllights.h \
 	src/gl/cellcluster.h \
+	src/gl/cellflickclock.h \
 	src/gl/cellclustergl.h \
 	src/gl/cellfxlit.h \
 	src/gl/celllensflare.h \
@@ -276,6 +277,7 @@ HEADERS += \
 	src/gl/cellvolumeview.h \
 	src/gl/cellssr.h \
 	src/gl/cellreflprobe.h \
+	src/gl/cellreflcam.h \
 	src/gl/cellssgi.h \
 	src/gl/celllampshadow.h \
 	src/gl/celllooks.h \

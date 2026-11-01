@@ -23,6 +23,10 @@ bool wwCellWorldAnimFrame( Scene * scene, float & time );
 //! the clock moves in this view: it wants a frame every tick
 bool wwCellWorldAnimWantsFrames( Scene * scene );
 
+//! lane PERFFIX2 a: the world clock runs (a live window's wall clock), whatever the World animation row: false under
+//! any harness (it stands at the pinned WW_CELL_WORLDANIM_TIME) and with WW_CELL_WORLDANIM_RED=still
+bool wwCellWorldClockMoves();
+
 //! an animated object copied in whole: its root block and the looping sequence it plays (empty: free controllers only)
 struct WwAnimObjRoot
 {

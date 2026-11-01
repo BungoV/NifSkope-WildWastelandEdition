@@ -260,6 +260,13 @@ void wwCellGiPublish( const void * nif, const WwCellGi & gi );
 std::vector<float> * wwCellGiRgbaEdit( const void * nif );
 void wwCellGiRgbaEdited( const void * nif );
 int wwCellGiVersion( const void * nif );   //!< bumped by every publish (0: none)
+//! lane PERFFIX2 a: moves on each wwCellLightsPublish (and nifx / edit republish) of the document, from the one
+//! process-wide counter the GI versions share, so a rebuilt document never repeats an old value (0: none)
+int wwCellLightsVersion( const void * nif );
+/*! lane PERFFIX2 a: what a relight of the cell's lights reads beside its uniforms, as one key: the light buffer as
+ *  uploaded and as patched (flicker, .nifx dimmers), the light shadow slots, their strengths and every cube face
+ *  written since the start (a time-sliced cache filling in counts), the document. 0 before the first upload. */
+quint64 wwCellLightsStateKey( Scene * scene );
 /*! lane EMISSIVEGRID1: the Emissive GI grid row (ships off): WW/CellEmissiveGrid, pin WW_CELL_EMISSIVEGRID (read when a
  *  cell opens: the row reopens it). Red WW_CELL_EMISSIVEGRID_RED=1|old: nothing built or drawn (the old path and cost);
  *  =noseen|nosub: the shader's refuters (no seen test; no coarse share taken out). */

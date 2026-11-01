@@ -1,3 +1,70 @@
+## PERFFIX2 a item 6 (2026-11-01): the light cluster build on one thread, its boxes from the tile edges (same lists)
+
+The cluster lists (LIGHTSYS2 / LIGHTCLUSTER1) are rebuilt on every frame the camera moves, once per kept grid. The live
+build cost 1.6-4.9 ms at Goodneighbor 5x5 (149 lights; merge1029c cost2 notes, `build N ms` echoes) and 0.03-0.62 ms
+at Concord (40 lights). Most of it was not the work: from 128 lights the build started up to 8 threads per call, and a
+thread start costs more than the whole build at these light counts; a fresh box set called MinGW's nextafterf 6 times a
+cluster. Now the build runs on the calling thread (the merge kept each list in ascending light order either way, so the
+lists are the same), each box's x range comes from its tile column and slice and its y range from its row and slice (the
+same unproject calls, so the same doubles), and the outward float rounding is done by the bits.
+- Offline (tests/clusterexact bench, 1920x1026, MEASURED on this machine): build median Goodneighbor-like 149 lights
+  1.315 -> 0.110 ms, Concord-like 40 lights 0.077 -> 0.072 ms, 1024 lights 1.979 -> 0.810 ms; a fresh box set
+  0.75-3.0 -> 0.24-0.96 ms.
+- Code: src/gl/cellcluster.{h,cpp} (no switch read: pure C++ now), src/gl/cellclustergl.cpp.
+- Red: WW_CELL_CLUSTER_RED=oldbuild (live): LIGHTSYS2's threads from 128 lights and its corner-by-corner boxes.
+  WW_CELL_CLUSTER_THREADS_FROM=<n> splits again from n lights. WW_CELL_CLUSTER_THREADS1 is gone (one thread is the rule).
+- Check key: WW_CELL_CLUSTER_DUMP=<file> (live) writes the first 48 builds' camera and view-space lights (hex floats),
+  the recorded sets tests/clusterexact replays.
+- Unit: tests/clusterexact (g++, no Qt): the old and the new build give the same cells, index and boxes, int for int
+  and float for float, on every recorded set and on synthetic 16..1024-light sets, under a forced split and fresh too; a
+  control (the midslice refuter) must differ; the new build's median <= 0.2 ms on each recorded set. `-DCLUSTER_RED`
+  times the old build and fails.
+- Default: unchanged (clusters ship on under Cell lights; the lists are the same).
+
+## PERFFIX2 a item 4 (2026-11-01): the reflection probes' camera probe is drawn and relit only when something changed
+
+REFLPROBE1's camera probe (slot 0, RDR2-style, snapped to 128 u) drew one face of its G-buffer cube every frame forever
+and relit the probe after each, although the cube is light-free and drawn from the statics alone. With the camera still
+and nothing changed, every frame drew the same face again (every caster in a 12288 u reach, one draw each) and relit
+the same light: the steady-state cost of the pass (PERFRES-A gap 5: Concord 5x5 9.6-10.4 ms CPU, 0.56-0.67 ms GPU).
+Now each face keeps the key it was drawn under and only a face whose key moved is drawn again, in the old cycle's
+order (so after a move the cube is rebuilt exactly as before, one face a frame); the probe is relit when a face came in
+or what its relight reads moved.
+- Capture key: the scene key (casters, alpha rules), every caster's world place (a moved door / animated copy), the
+  document's lights version (the process-wide publish counter, never repeated by a rebuilt document), the texture
+  cache's upload count, the probe's snapped place and box.
+- Relight key: the placed probes' light hash (unchanged) plus the view and projection (the sun cascades take view space
+  and are fitted to the frustum), the light buffer, its shadow slots, strengths and every cube face written
+  (wwCellLightsStateKey, celllights.cpp: a time-sliced lamp cache filling in counts), the lights' and GI's versions, and
+  4 ticks a second while the world clock runs (a live window: cloud shadows, movers' shadows). While the relight reads
+  the ray-traced GI volume (outdoors with RTXGI on: the sky share), the volume refines between frames with no stamp of
+  its own, so the camera probe is still relit every frame there (its capture is still kept).
+- Code: src/gl/cellreflcam.h (new, pure: the face and relight schedule), src/gl/cellreflprobe.cpp, src/gl/celllights.{h,cpp}
+  (wwCellLightsVersion, wwCellLightsStateKey, the shadow cube write count).
+- Red: WW_CELL_REFLPROBE_RED=perframe (live): REFLPROBE1's endless cycle, relit every frame.
+- Check key: WW_CELL_REFLPROBE_DUMP=<file> (live) writes the atlas's top level (raw R11G11B10F, 512 x 320) every frame;
+  WW_CELL_REFLPROBE_TIME=1 now also prints `camera-still=<frames the camera probe needed nothing>`.
+- Unit: tests/reflcam (g++, no Qt): 6 checks; `-DREFL_RED` fails 3.
+- Default: unchanged (Reflection probes ships OFF; any built-in preset turns it on).
+
+## PERFFIX2 a item 6 (2026-11-01): light flicker on the world clock, so two rows at one time repeat
+
+The Light flicker row (LIGHTFLICKER1) moved each light's phase by the wall-clock time between PAINTED frames, and the
+phase lived on across live rows. Two harness rows at the same pinned time therefore drew different lights (RTXGI1 M3:
+1.67 M px around one fire light in a repeat pair), and every picture gate had to pin WW_CELL_FLICKER=0. Now the phase
+is a function of the world clock (wwCellWorldSeconds: the wall clock in a live window, WW_CELL_WORLDANIM_TIME under a
+harness, 0 when unset): fixed 1/60 s steps of the game's own update from t 0, so the same time draws the same lights
+whatever frames came before. At 60 fps a live window draws what the per-frame update drew (same math, same random
+stream; tests/flickclock). A live window left idle catches up at most 0.25 s (the old dt clamp). A frame whose flicker
+values did not change no longer bumps the patch stamp, so the light buffer is not re-uploaded for nothing.
+- Code: src/gl/cellflickclock.h (new, pure: the phase, tables, random, toTime / stepFrame), src/gl/celllights.cpp
+  wwCellFlickerFrame + wwCellFlickerWantsFrames (asks for frames only while the clock runs), src/cellworldanim.{h,cpp}
+  wwCellWorldClockMoves().
+- Red: WW_CELL_FLICKER_CLOCK_RED=1 (live): the old per-painted-frame wall-clock step. WW_CELL_FLICKER_STEP still steps
+  every frame by its pin, as before.
+- Unit: tests/flickclock (g++, no Qt): 6 checks; `-DFLICK_RED` fails 2 (different frame runs to one time; a repeat row).
+- Default: unchanged (the Light flicker row still ships OFF; this changes how it moves, not whether it draws).
+
 ## FOAMOFF2 (FIX1101A, 2026-11-01): River foam and Contact foam stay OFF
 
 The water lane's foam fixes land: lace streaks instead of solid patches, and no foam on a dry bank. Its two rows still

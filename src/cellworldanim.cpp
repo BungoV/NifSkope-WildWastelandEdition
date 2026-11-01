@@ -143,6 +143,11 @@ bool wwCellWorldAnimWantsFrames( Scene * scene )
 	return isCell( scene ) && wwCellWorldAnimOn() && wwWorldClockLive() && pinnedSeconds() < 0.0 && !redStill();
 }
 
+bool wwCellWorldClockMoves()
+{
+	return wwWorldClockLive() && pinnedSeconds() < 0.0 && !redStill();
+}
+
 void wwCellAnimObjSet( const NifModel * nif, const QVector<WwAnimObjRoot> & roots )
 {
 	Doc d;
