@@ -7,7 +7,17 @@
 
 using namespace WwPrevisRule;
 
-#ifdef PREVISRULE_RED
+#if defined( PREVISRULE_RED_ANYEDIT )
+// PREVISSTALE2's red (WW_CELL_UMBRA_RED=anyedit): every later add or override is stale
+static Stale ruleStale( bool hasFields, std::uint32_t writer, const std::vector<RefSrc> & refs )
+{
+	return tomeStale( hasFields, writer, refs, false, true );
+}
+static bool rulePrevis( bool rowOn, bool pinnedOff, bool interior )
+{
+	return previsFor( rowOn, pinnedOff, interior, true );
+}
+#elif defined( PREVISRULE_RED )
 static Stale ruleStale( bool hasFields, std::uint32_t writer, const std::vector<RefSrc> & refs )
 {
 	return tomeStale( hasFields, writer, refs, true );	// the old code used every tome
@@ -62,7 +72,38 @@ int main()
 		for ( int k = 0; k < 40; k++ )
 			r.push_back( { 5, 5, false, false } );
 		const Stale s = ruleStale( true, 0, r );
-		check( s.stale && s.added == 40 && s.firstLater == 5, "ELFX-style later plugin adds refs: STALE, 40 added, plugin 5" );
+		check( !s.stale && s.added == 40 && s.moved == 0, "PREVISSTALE2: a later plugin only ADDS refs: fresh, 40 added" );
+	}
+	// PREVISSTALE2: an override that edits a light radius only (placement equal to Fallout4.esm's: settled 0)
+	{
+		std::vector<RefSrc> r = vanilla;
+		r[9] = { 0, 5, false, false, 0 };
+		r.push_back( { 5, 5, false, false } );
+		const Stale s = ruleStale( true, 0, r );
+		check( !s.stale && s.overridden == 1 && s.moved == 0, "PREVISSTALE2: override with the same placement + an add: fresh" );
+	}
+	// PREVISSTALE2: placement equal from plugin 2 on, the writer is 3 (it saw plugin 2's version): fresh
+	{
+		std::vector<RefSrc> r = vanilla;
+		r[11] = { 0, 6, false, false, 2 };
+		const Stale s = ruleStale( true, 3, r );
+		check( !s.stale && s.moved == 0, "PREVISSTALE2: placement settled before the writer, later edit elsewhere: fresh" );
+	}
+	// PREVISSTALE2: placement changed by plugin 5 after the writer 0: stale, named plugin 5
+	{
+		std::vector<RefSrc> r = vanilla;
+		r[12] = { 0, 5, false, false, 5 };
+		for ( int k = 0; k < 4; k++ )
+			r.push_back( { 5, 5, false, false } );
+		const Stale s = ruleStale( true, 0, r );
+		check( s.stale && s.moved == 1 && s.firstLater == 5, "PREVISSTALE2: an override moves a ref: STALE, moved 1, plugin 5" );
+	}
+	// PREVISSTALE2: a later plugin disables a ref (enable state differs: settled = its plugin)
+	{
+		std::vector<RefSrc> r = vanilla;
+		r[13] = { 0, 4, false, true, 4 };
+		const Stale s = ruleStale( true, 0, r );
+		check( s.stale && s.disabled == 1, "PREVISSTALE2: a later plugin disables a ref: STALE" );
 	}
 	// a later plugin moves one ref (an override)
 	{

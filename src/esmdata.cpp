@@ -826,6 +826,49 @@ EsmCellPrevis EsmWorld::cellPrevis( quint32 cellForm ) const
 	return out;
 }
 
+/* Lane PERFFIX4 (PREVISSTALE2): one REFR version's placement, for the previs tome's stale rule: the deleted and
+ * disabled flags, DATA (position + rotation), XSCL (1 when absent) and XESP (mapped enable parent + its flags). False
+ * for a compressed version (not compared: the caller counts it as changed). */
+namespace
+{
+struct RefPlace
+{
+	quint32 flags = 0, data[6] = {}, scale = 0x3F800000u, xespParent = 0, xespFlags = 0;
+	bool hasData = false;
+	bool operator==( const RefPlace & o ) const
+	{
+		if ( flags != o.flags || hasData != o.hasData || scale != o.scale || xespParent != o.xespParent || xespFlags != o.xespFlags )
+			return false;
+		for ( int k = 0; k < 6; k++ ) {
+			if ( data[k] != o.data[k] )
+				return false;
+		}
+		return true;
+	}
+};
+
+bool refPlace( const ESMFile & esm, const ESMFile::ESMRecord & r, RefPlace & out )
+{
+	if ( r.flags & 0x00040000 )
+		return false;
+	out.flags = r.flags & ( 0x00000800 | 0x00000020 );
+	ESMFile::ESMField f( r, esm );
+	while ( f.next() ) {
+		if ( f == "DATA" && f.size() >= 24 ) {
+			for ( int k = 0; k < 6; k++ )
+				out.data[k] = f.readUInt32();
+			out.hasData = true;
+		} else if ( f == "XSCL" && f.size() >= 4 ) {
+			out.scale = f.readUInt32();
+		} else if ( f == "XESP" && f.size() >= 5 ) {
+			out.xespParent = esm.mapFormID( r, f.readUInt32() );
+			out.xespFlags = f.readUInt8();
+		}
+	}
+	return true;
+}
+} // namespace
+
 QVector<EsmRefSource> EsmWorld::refSources( const QVector<quint32> & groups ) const
 {
 	QVector<EsmRefSource> out;
@@ -844,6 +887,26 @@ QVector<EsmRefSource> EsmWorld::refSources( const QVector<quint32> & groups ) co
 				s.src = r->srcFile;
 				s.disabled = ( r->flags & 0x00000800 ) != 0;
 				s.deleted = ( r->flags & 0x00000020 ) != 0;
+				// lane PERFFIX4 (PREVISSTALE2): the trailing run of versions placed as the winner is
+				s.settled = r->srcFile;
+				RefPlace win;
+				const std::vector<ESMFile::PriorVersion> * pv = esm->getPriorVersions( r->formID );
+				if ( pv && refPlace( *esm, *r, win ) ) {
+					for ( auto it = pv->rbegin(); it != pv->rend(); ++it ) {
+						ESMFile::ESMRecord old;
+						old.type = r->type;
+						old.flags = it->flags;
+						old.formID = r->formID;
+						old.srcFile = it->srcFile;
+						old.fileData = it->fileData;
+						RefPlace p;
+						if ( !refPlace( *esm, old, p ) || !( p == win ) )
+							break;
+						s.settled = it->srcFile;
+					}
+				} else if ( !pv ) {
+					s.settled = s.src;	// never overridden: only its own plugin's version
+				}
 				out.append( s );
 			}
 			if ( r->children )

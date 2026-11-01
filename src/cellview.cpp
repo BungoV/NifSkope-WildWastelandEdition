@@ -3553,6 +3553,8 @@ static bool cellBuild( NifModel * nif, const CellSceneSpec & specAsked, CellChun
 		};
 		std::vector<PrevisCensus> census;
 		std::map<quint32, bool> blockStale;
+		// lane PERFFIX4 (PREVISSTALE2): WW_CELL_UMBRA_RED=anyedit = every later add / override makes the tome stale
+		const bool staleAnyEdit = wwEnv( "WW_CELL_UMBRA_RED" ).trimmed() == "anyedit";
 		std::map<quint32, QString> tomeStatus;
 		auto readCell = [&]( quint32 form, int cx, int cy ) {
 			const EsmCellPrevis c = world.cellPrevis( form );
@@ -3564,7 +3566,7 @@ static bool cellBuild( NifModel * nif, const CellSceneSpec & specAsked, CellChun
 				std::vector<WwPrevisRule::RefSrc> refs;
 				refs.reserve( size_t( rs.size() ) );
 				for ( const EsmRefSource & r : rs )
-					refs.push_back( { r.owner, r.src, r.deleted, r.disabled } );
+					refs.push_back( { r.owner, r.src, r.deleted, r.disabled, r.settled } );
 				PrevisCensus pc;
 				pc.form = form;
 				pc.cx = cx;
@@ -3573,7 +3575,7 @@ static bool cellBuild( NifModel * nif, const CellSceneSpec & specAsked, CellChun
 				pc.writer = c.srcFile;
 				pc.fields = c.hasPrevisFields;
 				pc.refs = int( refs.size() );
-				pc.st = WwPrevisRule::tomeStale( c.hasPrevisFields, c.srcFile, refs );	// until the tome's plugin is known
+				pc.st = WwPrevisRule::tomeStale( c.hasPrevisFields, c.srcFile, refs, false, staleAnyEdit );	// until the tome's plugin is known
 				pc.refsv = std::move( refs );
 				census.push_back( std::move( pc ) );
 			}
@@ -3647,7 +3649,7 @@ static bool cellBuild( NifModel * nif, const CellSceneSpec & specAsked, CellChun
 					if ( pc.owner != f )
 						continue;
 					pc.tomePlugin = tomePlugin;
-					pc.st = WwPrevisRule::tomeStale( pc.fields, tomePlugin, pc.refsv );
+					pc.st = WwPrevisRule::tomeStale( pc.fields, tomePlugin, pc.refsv, false, staleAnyEdit );
 					if ( pc.st.stale )
 						blockStale[f] = true;
 				}
@@ -3736,12 +3738,12 @@ static bool cellBuild( NifModel * nif, const CellSceneSpec & specAsked, CellChun
 			const QString tome = !pc.owner ? QStringLiteral( "none (no RVIS)" )
 				: ts != tomeStatus.end() ? ts->second : QStringLiteral( "block %1 not read" ).arg( pc.owner, 8, 16, QLatin1Char( '0' ) );
 			fprintf( stderr, "cell previs census: %s %08X %s: rooms %d portals %d occluders %d, previs %s; XPRI/VISI on the "
-				"winning CELL %s (%s); tome plugin %s; refs %d, after it: added %d moved %d (deleted %d disabled %d)%s; tome %s\n",
+				"winning CELL %s (%s); tome plugin %s; refs %d, after it: added %d overridden %d placement moved %d (deleted %d disabled %d)%s; tome %s\n",
 				qPrintable( name.isEmpty() ? QStringLiteral( "-" ) : name ), unsigned( pc.form ),
 				spec.interior ? "interior" : qPrintable( QStringLiteral( "%1,%2" ).arg( pc.cx ).arg( pc.cy ) ), m[0], m[1], m[2],
 				previsNow ? ( spec.interior ? "ON (interior rule)" : "ON (row)" ) : ( spec.interior ? "off (pinned)" : "off (exterior: Hi-Z only)" ),
 				pc.fields ? "yes" : "NO", qPrintable( pluginName( pc.writer ) ),
-				pc.tomePlugin != 0xFFFFFFFFu ? qPrintable( pluginName( pc.tomePlugin ) ) : "none", pc.refs, pc.st.added, pc.st.overridden,
+				pc.tomePlugin != 0xFFFFFFFFu ? qPrintable( pluginName( pc.tomePlugin ) ) : "none", pc.refs, pc.st.added, pc.st.overridden, pc.st.moved,
 				pc.st.deleted, pc.st.disabled,
 				pc.st.firstLater != 0xFFFFFFFFu ? qPrintable( QStringLiteral( ", first by %1" ).arg( pluginName( pc.st.firstLater ) ) ) : "",
 				qPrintable( tome ) );

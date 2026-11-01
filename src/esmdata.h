@@ -136,6 +136,9 @@ struct EsmRefSource
 {
 	quint32 owner = 0, src = 0;
 	bool deleted = false, disabled = false;
+	//! lane PERFFIX4 (PREVISSTALE2): the plugin of the first version in the trailing run of versions whose placement
+	//! (DATA, XSCL, deleted/disabled, XESP) equals the winner's (WwPrevisRule::RefSrc::settled)
+	quint32 settled = 0xFFFFFFFFu;
 };
 
 /* Lane PRTP1: one LIGH record (wbDefinitionsFO4 LIGH DATA + FNAM). The
