@@ -1,3 +1,21 @@
+## PERFFIX2 a item 6 (2026-11-01): light flicker on the world clock, so two rows at one time repeat
+
+The Light flicker row (LIGHTFLICKER1) moved each light's phase by the wall-clock time between PAINTED frames, and the
+phase lived on across live rows. Two harness rows at the same pinned time therefore drew different lights (RTXGI1 M3:
+1.67 M px around one fire light in a repeat pair), and every picture gate had to pin WW_CELL_FLICKER=0. Now the phase
+is a function of the world clock (wwCellWorldSeconds: the wall clock in a live window, WW_CELL_WORLDANIM_TIME under a
+harness, 0 when unset): fixed 1/60 s steps of the game's own update from t 0, so the same time draws the same lights
+whatever frames came before. At 60 fps a live window draws what the per-frame update drew (same math, same random
+stream; tests/flickclock). A live window left idle catches up at most 0.25 s (the old dt clamp). A frame whose flicker
+values did not change no longer bumps the patch stamp, so the light buffer is not re-uploaded for nothing.
+- Code: src/gl/cellflickclock.h (new, pure: the phase, tables, random, toTime / stepFrame), src/gl/celllights.cpp
+  wwCellFlickerFrame + wwCellFlickerWantsFrames (asks for frames only while the clock runs), src/cellworldanim.{h,cpp}
+  wwCellWorldClockMoves().
+- Red: WW_CELL_FLICKER_CLOCK_RED=1 (live): the old per-painted-frame wall-clock step. WW_CELL_FLICKER_STEP still steps
+  every frame by its pin, as before.
+- Unit: tests/flickclock (g++, no Qt): 6 checks; `-DFLICK_RED` fails 2 (different frame runs to one time; a repeat row).
+- Default: unchanged (the Light flicker row still ships OFF; this changes how it moves, not whether it draws).
+
 ## FOAMOFF2 (FIX1101A, 2026-11-01): River foam and Contact foam stay OFF
 
 The water lane's foam fixes land: lace streaks instead of solid patches, and no foam on a dry bank. Its two rows still
