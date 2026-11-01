@@ -6,13 +6,16 @@ visibility unless WW_LODL_AO=1 was set. With it set, an instanced ring that carr
 copy and its budget refusals. The far ground never bound the VT mask sheet's B (terrain + object AO, sky AO): only the
 .lodl viewer read it, and only with WW_LODL_AO=1.
 
-- **Far objects, AO (ships ON, row "Far LOD baked AO", pin WW_LODL_AO).** The .lodi v6 per-vertex scene AO multiplies
+- **No switch (bungo 11-01, LATE ITEM 25: "if you enable our new lod rendering, they need to be used").** No menu
+  row: whenever our LOD rendering draws, every baked channel below is read and drawn. WW_LODL_AO=0 / WW_LODL_SKY=0 stay
+  only as debug pins that turn them off (and the reds below).
+- **Far objects, AO (ships ON, debug pin WW_LODL_AO=0 turns it off).** The .lodi v6 per-vertex scene AO multiplies
   the albedo, exactly as WW_LODL_AO=1 drew it (lane AO2's look). The stream already holds the self-AO and the placement
   AO, so it is used alone; self x placement AO is the fallback for a placement with no slice. It now works on the
   instanced rings too. Each row carries the first texel of its own (placement, vertex) bytes in a per-ring RG8 buffer
   texture (CellMeshInst::vstream; gl/cellfarinst.cpp; fo4_default.vert farStream, unit WwCellUnit::FarStream, set at
   link in gl/glcontext.cpp). The flat copy keeps its vertex-colour route.
-- **Far objects, sky light (ships ON, row "Far LOD baked sky light", pin WW_LODL_SKY).** The .lodi v7 per-vertex sky
+- **Far objects, sky light (ships ON, debug pin WW_LODL_SKY=0 turns it off).** The .lodi v7 per-vertex sky
   byte scales the ambient the GI volume did not replace (fo4_default.frag, the exterior sun branch: color and
   cellExtAmb x wwFarSkyVis). Shapes other than far placements carry exactly 1, so nothing changes there. The byte is
   read as the GI's share through src/lodchsky.h: f = s / skyRef(nz) removes the surface's own half-space (an open wall
@@ -39,7 +42,7 @@ copy and its budget refusals. The far ground never bound the VT mask sheet's B (
   LOD material) plus a rebake: owed.
 - **Far ground channel views (LATE ITEM 22 (4)).** WW_LODL_CHANNEL=mask-r/-g/-b/-a and `ao` now reach the cell view's
   far ground too, through the same sampler. An object view leaves the ground lit without its AO.
-- **Live.** All four keys sit in liveFarKey (src/cellview.cpp). A live set or a menu tick rebuilds the far tail in
+- **Live.** All four keys sit in liveFarKey (src/cellview.cpp). A live set of a pin rebuilds the far tail in
   place. The stage table rows are at 0 (tools/wwswitch_survey.py OVERRIDES, FIX1101A lodch).
 - **Reds.** WW_LODL_AO_RED=off: the AO rule before this change (objects and ground, only with WW_LODL_AO=1).
   WW_LODL_SKY_RED=off: no sky term (today). WW_LODL_SKY_RED=raw: the raw byte as the factor (the twin's second red).

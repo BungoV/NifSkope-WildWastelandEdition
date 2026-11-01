@@ -1289,8 +1289,8 @@ void CellWorkspacePanel::buildUi()
 		kid( "", tr( "Terrain" ), "CellWorkspaceFarGround" );
 		kid( "", tr( "Terrain pages" ), "CellWorkspaceFarGroundPages" );
 		look( WwLook::BtoSway, tr( "Game trees sway" ) );
-		look( WwLook::FarLodAo, tr( "Baked AO" ) );	// lane FIX1101A lodch: the bake's channels, on by default
-		look( WwLook::FarLodSky, tr( "Baked sky light" ) );
+		// LATE ITEM 25 (bungo 11-01): no menu row for the bake's channels: our LOD rendering always draws them
+		// (WwLook::FarLodAo / FarLodSky stay in the table only for the debug pins WW_LODL_AO=0 / WW_LODL_SKY=0)
 		head( F, "", "CellWorkspaceModernTaa", 0, true );
 		head( F, "", "CellWorkspaceBloom", 0 );
 		look( WwLook::BloomMip, tr( "Width in fog" ) );

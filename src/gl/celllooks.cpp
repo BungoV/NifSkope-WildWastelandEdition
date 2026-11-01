@@ -434,7 +434,8 @@ bool wwLookReopens( WwLook l )
 
 bool wwLookHasRow( WwLook l )
 {
-	return l != WwLook::AirClusters;
+	// LATE ITEM 25 (bungo 11-01): the LOD bake's channels have no row (always drawn; only the debug pins turn them off)
+	return l != WwLook::AirClusters && l != WwLook::FarLodAo && l != WwLook::FarLodSky;
 }
 
 bool wwLookBounceEmitRedStale()
