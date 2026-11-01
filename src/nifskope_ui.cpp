@@ -37,6 +37,8 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include "celldoorlive.h"	// lane DOORLIVE1: a path frame poses the live door
 #include "probesky.h"	// fix 10-22: the live driver waits for a pending sky relight
 #include "rtddgicell.h"	// lane RTXGI1 M2: and for the ray-traced GI volume (rtddgiCellPending)
+#include "gl/cloudvol.h"	// lane PERFFIX3: and for the clouds' coverage tables (built on workers)
+#include "gl/cloudshadow.h"	// lane PERFFIX3: and for the cloud shadow map's sliced rebuild
 #include "gl/shadowset.h"	// fix 10-22: ... and for the terrain shadow sweep
 #include "lodgen.h"
 #include "lodgengpu.h"
@@ -2408,6 +2410,21 @@ static void wwRenderPathRun( GLView * ogl, const QString & pathFile, const QStri
 			log << "rtddgi settled at the first key in " << n << " frames " << rt.elapsed() << " ms"
 				<< ( rtddgiCellPending() ? " TIMED OUT" : "" ) << "\n";
 	}
+	/* lane PERFFIX3: the clouds' coverage tables (a worker builds them after a band move, the old ones drawn meanwhile)
+	 * and the cloud shadow map (a moved fit's map built size/16 rows a frame) at the first key; a picture waits for
+	 * both. Nothing pending (clouds off, a still camera): no paint, the frames as before */
+	{
+		QElapsedTimer ct;
+		ct.start();
+		int n = 0;
+		while ( ( wwCloudVolTablesPending() || wwCloudShadowPending() ) && ct.elapsed() < 20000 ) {
+			ogl->wwPaintNow();
+			n++;
+		}
+		if ( n > 0 && sideOk )
+			log << "clouds settled at the first key in " << n << " frames " << ct.elapsed() << " ms"
+				<< ( wwCloudVolTablesPending() || wwCloudShadowPending() ? " TIMED OUT" : "" ) << "\n";
+	}
 	for ( int k = 0; k < preroll; k++ ) {
 		wwGameTaaSetFrame( k );
 		wwCellPostSetPath( k, float( path.fps() ) );	// lane GRASSMB1: the motion blur's frame and frame time
@@ -2543,7 +2560,8 @@ QString wwLiveSettleBackground( GLView * ogl )
 			probeSkyRelightNow();
 			relit = true;
 		}
-		if ( !wwTerrainShadowPending() && !probeSkyRelightPending() && !rtddgiCellPending() )
+		if ( !wwTerrainShadowPending() && !probeSkyRelightPending() && !rtddgiCellPending() && !wwCloudVolTablesPending()
+			&& !wwCloudShadowPending() )	// lane PERFFIX3: the clouds' tables and shadow map built over frames
 			break;
 		wwLivePump( ogl, 1 );
 		frames++;

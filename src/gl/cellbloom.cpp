@@ -1,6 +1,8 @@
 #include "cellbloom.h"
 #include "wwswitch.h"	// lane TESTDRIVER1: the WW_* switch store
 
+#include "gl/cellfogbloom.h"	// lane PERFFIX3: the per-pixel combine stands down when the fog's gain picks the lod per sample
+#include "gl/cellunits.h"	// lane PERFFIX3: WwPassUnit::HdrBloomComb
 #include "gl/celllights.h"
 #include "gl/celllooks.h"
 #include "gl/celluniform.h"	// lane CELLUNI4: the tone map's known state
@@ -54,6 +56,8 @@ constexpr int kFieldCount = int( sizeof( kFields ) / sizeof( kFields[0] ) );
 struct BloomGpu
 {
 	GLuint srcFbo = 0, resFbo = 0, fbo = 0;
+	GLuint comb = 0;	// lane PERFFIX3: the final tent once per pixel (RGBA32F, the frame's size)
+	int combW = 0, combH = 0;
 	GLuint msColor = 0, src = 0, finalTex = 0;
 	GLuint mip[kMaxMips] = {}, up[kMaxMips] = {};
 	int dims[kMaxMips][2] = {};
@@ -75,7 +79,10 @@ struct BloomState
 	// this frame
 	bool replacing = false;
 	GLuint top = 0;
-	bool topMips = false;	// lane GAPLOOK1: Final grew the top's mips this frame
+	bool topMips = false;	// lane GAPLOOK1: the top's mips grew this frame (in Run since PERFFIX3)
+	float perPixel = 0.0f;	// lane GAPLOOK1: cell_hdr.frag's Bloom Mip mode (cellIsFoBloomParams.w)
+	bool combRed = false;	// lane PERFFIX3: WW_CELL_BLOOM_COMB_RED=1, the tent per sample as before
+	GLuint combTex = 0;	// lane PERFFIX3: this frame's per-pixel tent, 0 = the tone map runs its own taps
 	int w = 0, h = 0;
 	float finalWeight = 0.0f, radius = 1.0f, dispersion = 0.0f;
 	QString last = QStringLiteral( "vanilla" ), said;
@@ -183,6 +190,7 @@ BloomState & bs()
 	s.red = wwEnvStr( "WW_CELL_BLOOM_RED" ).contains( QLatin1StringView( "nokaris" ) ) ? 1 : 0;
 	s.impulse = wwEnvStr( "WW_CELL_BLOOM_IMPULSE" ).toFloat();
 	s.dumpDir = wwEnvStr( "WW_CELL_BLOOM_DUMP" ).trimmed();
+	s.combRed = wwEnvStr( "WW_CELL_BLOOM_COMB_RED" ).trimmed() == QLatin1String( "1" );
 	if ( !again ) {
 		s.selfTest = wwCellBloomSelfTest();
 		qInfo().noquote() << "cell bloom: FO4CS checks" << s.selfTest;
@@ -219,7 +227,9 @@ GLuint makeTex( Renderer * r, int w, int h )
 void freeGpu( Renderer * r, BloomGpu & g )
 {
 	auto fn = r->fn;
-	std::vector<GLuint> t = { g.msColor, g.src, g.finalTex };
+	std::vector<GLuint> t = { g.msColor, g.src, g.finalTex, g.comb };
+	g.comb = 0;
+	g.combW = g.combH = 0;
 	for ( int i = 0; i < kMaxMips; i++ ) {
 		t.push_back( g.mip[i] );
 		t.push_back( g.up[i] );
@@ -731,6 +741,53 @@ bool wwCellBloomRun( Scene * scene, unsigned hdrColor, unsigned ds, int W, int H
 		}
 	}
 
+	/* lane PERFFIX3 (item 8): Bloom Mip's top mips (moved here from Final: the combine reads them), then the final tent
+	 * once per PIXEL into a full-size RGBA32F target that the tone map fetches per sample (cell_bloom_comb.frag): the
+	 * tent's uv is the pixel's centre for every sample, so its 9-27 bilinear taps ran 4x at 4x MSAA for one value. Only
+	 * while the tent's lod is one value over the frame: with Bloom Mip and Fog Bloom Boost both on, the fog's gain picks
+	 * the lod per sample and the tone map keeps its own taps. And only with the glare's dispersion (27 taps): measured
+	 * offline at 1080p 4x (tests/bloomcomb, 5070 Ti) the 9-tap tent per sample costs about what one RGBA32F fetch per
+	 * sample does (0.053 vs 0.055 ms), so the combine pass (0.048 ms) would be a loss there; with dispersion the tent
+	 * costs 0.228 ms against 0.095 + 0.055. Red WW_CELL_BLOOM_COMB_RED=1: no combine (as before). */
+	s.perPixel = 0.0f;
+	s.topMips = false;
+	s.combTex = 0;
+	if ( ok && accumulated && wwLookOn( WwLook::BloomMip ) ) {
+		bind( kUnitA, GL_TEXTURE_2D, accumulated );
+		fn->glTexParameteri( GL_TEXTURE_2D, GL_TEXTURE_MAX_LEVEL, 3 );
+		fn->glTexParameteri( GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR_MIPMAP_LINEAR );
+		fn->glGenerateMipmap( GL_TEXTURE_2D );
+		s.topMips = true;
+		s.perPixel = wwEnvStr( "WW_CELL_BLOOM_PERPIX_RED" ) == QLatin1String( "wide" ) ? -1.0f : 1.0f;
+	}
+	if ( ok && accumulated && !s.combRed && dispersion > 0.0f && !( s.perPixel > 0.0f && wwCellFogBloomOn() ) ) {
+		if ( !g.comb || g.combW != W || g.combH != H ) {
+			if ( g.comb )
+				fn->glDeleteTextures( 1, &g.comb );
+			fn->glGenTextures( 1, &g.comb );
+			fn->glBindTexture( GL_TEXTURE_2D, g.comb );
+			fn->glTexImage2D( GL_TEXTURE_2D, 0, GL_RGBA32F, W, H, 0, GL_RGBA, GL_FLOAT, nullptr );
+			fn->glTexParameteri( GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST );
+			fn->glTexParameteri( GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST );
+			fn->glTexParameteri( GL_TEXTURE_2D, GL_TEXTURE_MAX_LEVEL, 0 );
+			fn->glBindTexture( GL_TEXTURE_2D, 0 );
+			g.combW = W;
+			g.combH = H;
+		}
+		target( g.comb, W, H );
+		if ( auto prog = r->useProgram( "cell_bloom_comb.prog" ) ) {
+			bind( kUnitA, GL_TEXTURE_2D, accumulated );
+			prog->uni1i( "cellIsFoBloom", kUnitA );
+			prog->uni4f( "cellIsFoBloomParams", FloatVector4( radius, finalWeight, dispersion, s.perPixel ) );
+			prog->uni2f( "cellIsFoBloomFrame", float( W ), float( H ) );
+			r->drawShape( 4, 3, 6, GL_TRIANGLES, GL_UNSIGNED_SHORT, &attrs, idx );
+			r->stopProgram();
+			const GLenum err = check ? fn->glGetError() : GLenum( GL_NO_ERROR );
+			if ( err == GL_NO_ERROR )
+				s.combTex = g.comb;
+		}
+	}
+
 	// restore
 	bind( kUnitA, GL_TEXTURE_2D, 0 );
 	bind( kUnitB, GL_TEXTURE_2D, 0 );
@@ -786,24 +843,23 @@ void wwCellBloomFinal( Renderer * r, int unit, int knownActive )
 		return;
 	prog->uni1i( "cellIsFoBloom", unit );	// always its own unit: a sampler2D, never left on 0 beside another type
 	prog->uni1b( "cellIsFoBloomOn", s.replacing );
+	prog->uni1i( "cellIsFoBloomComb", WwPassUnit::HdrBloomComb );	// lane PERFFIX3: its own unit too
+	prog->uni1b( "cellIsFoBloomCombOn", s.replacing && s.combTex != 0 );
 	if ( !s.replacing )
 		return;
 	auto fn = r->fn;
 	const GLint prevActive = WwCellUni::activeUnit( fn, knownActive );	// lane CELLUNI5: the tone quads' unit, or asked
 	fn->glActiveTexture( GLenum( GL_TEXTURE0 + unit ) );
 	fn->glBindTexture( GL_TEXTURE_2D, s.top );
-	/* lane GAPLOOK1 (BLOOMMIP): the top's own mips, so the composite picks a wider blur per pixel; w = 1 the fog's
-	 * gain picks it, -1 the red (lod 2 everywhere), 0 off (the base level only, today's bits) */
-	float perPixel = 0.0f;
-	if ( wwLookOn( WwLook::BloomMip ) ) {
-		fn->glTexParameteri( GL_TEXTURE_2D, GL_TEXTURE_MAX_LEVEL, 3 );
-		fn->glTexParameteri( GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR_MIPMAP_LINEAR );
-		fn->glGenerateMipmap( GL_TEXTURE_2D );
-		s.topMips = true;
-		perPixel = wwEnvStr( "WW_CELL_BLOOM_PERPIX_RED" ) == QLatin1String( "wide" ) ? -1.0f : 1.0f;
+	if ( s.combTex ) {
+		fn->glActiveTexture( GLenum( GL_TEXTURE0 + WwPassUnit::HdrBloomComb ) );
+		fn->glBindTexture( GL_TEXTURE_2D, s.combTex );
 	}
+	/* lane GAPLOOK1 (BLOOMMIP): the top's own mips, so the composite picks a wider blur per pixel; w = 1 the fog's
+	 * gain picks it, -1 the red (lod 2 everywhere), 0 off (the base level only, today's bits). Lane PERFFIX3: the
+	 * mips grow in Run (the per-pixel combine reads them first) */
 	fn->glActiveTexture( GLenum( prevActive ) );
-	prog->uni4f( "cellIsFoBloomParams", FloatVector4( s.radius, s.finalWeight, s.dispersion, perPixel ) );
+	prog->uni4f( "cellIsFoBloomParams", FloatVector4( s.radius, s.finalWeight, s.dispersion, s.perPixel ) );
 	prog->uni2f( "cellIsFoBloomFrame", float( s.w ), float( s.h ) );
 }
 
@@ -821,9 +877,14 @@ void wwCellBloomDone( Renderer * r, int unit, int knownActive )
 			fn->glTexParameteri( GL_TEXTURE_2D, GL_TEXTURE_MAX_LEVEL, 0 );
 		}
 		fn->glBindTexture( GL_TEXTURE_2D, 0 );
+		if ( s.combTex ) {	// lane PERFFIX3
+			fn->glActiveTexture( GLenum( GL_TEXTURE0 + WwPassUnit::HdrBloomComb ) );
+			fn->glBindTexture( GL_TEXTURE_2D, 0 );
+		}
 		fn->glActiveTexture( GLenum( prevActive ) );
 	}
 	s.topMips = false;
 	s.replacing = false;
 	s.top = 0;
+	s.combTex = 0;
 }

@@ -21,6 +21,8 @@
 #include <cstdio>
 #include <cstring>
 
+#include "gl/cloudshadowslice.h"	// lane PERFFIX3: the time-sliced rebuild
+
 // lane CLOUD3: the clouds' Beer shadow map (cloudshadow.h). The build is res/shaders/cloud_shadowmap.frag.
 
 namespace
@@ -100,6 +102,13 @@ bool red( const char * word )
 struct CsGpu
 {
 	GLuint fbo = 0, tex = 0;
+	// lane PERFFIX3: the back map, built size/16 rows a frame under a moved fit, then swapped in (cloudshadowslice.h)
+	GLuint fbo2 = 0, tex2 = 0;
+	WwCloudShadowSlice::State sl;
+	M::Basis backBasis{};
+	M::Fit backFit{};
+	double backLightFromWorld[16] = {};
+	quint64 swaps = 0;
 	int size = 0;
 	bool valid = false;	// every row built under the fit below
 	int mode = 0;	// 1 volume, 2 map
@@ -108,7 +117,6 @@ struct CsGpu
 	M::Basis basis{};
 	M::Fit fit{};
 	double lightFromWorld[16] = {};
-	int cursor = 0;	// the next refresh row
 	quint64 builds = 0;
 	float far[3] = { 1, 0.1f, 0 };
 	// timing
@@ -135,29 +143,36 @@ QHash<Renderer *, CsGpu> & gpus()
 
 Renderer * g_last = nullptr;	// the renderer of the last pass (wwCloudShadowValid)
 
-bool ensure( NifSkopeOpenGLContext::GLFunctions * fn, CsGpu & g, int n )
+bool ensureOne( NifSkopeOpenGLContext::GLFunctions * fn, GLuint & fbo, GLuint & tex, int n )
 {
-	if ( g.fbo && g.size == n )
-		return true;
-	if ( !g.fbo )
-		fn->glGenFramebuffers( 1, &g.fbo );
-	if ( g.tex )
-		fn->glDeleteTextures( 1, &g.tex );
-	fn->glGenTextures( 1, &g.tex );
-	fn->glBindTexture( GL_TEXTURE_2D, g.tex );
+	if ( !fbo )
+		fn->glGenFramebuffers( 1, &fbo );
+	if ( tex )
+		fn->glDeleteTextures( 1, &tex );
+	fn->glGenTextures( 1, &tex );
+	fn->glBindTexture( GL_TEXTURE_2D, tex );
 	fn->glTexImage2D( GL_TEXTURE_2D, 0, GL_RGBA16F, n, n, 0, GL_RGBA, GL_FLOAT, nullptr );
 	fn->glTexParameteri( GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR );
 	fn->glTexParameteri( GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR );
 	fn->glTexParameteri( GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE );
 	fn->glTexParameteri( GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE );
 	fn->glBindTexture( GL_TEXTURE_2D, 0 );
-	fn->glBindFramebuffer( GL_FRAMEBUFFER, g.fbo );
-	fn->glFramebufferTexture2D( GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, g.tex, 0 );
+	fn->glBindFramebuffer( GL_FRAMEBUFFER, fbo );
+	fn->glFramebufferTexture2D( GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, tex, 0 );
 	const GLenum one = GL_COLOR_ATTACHMENT0;
 	fn->glDrawBuffers( 1, &one );
+	return fn->glCheckFramebufferStatus( GL_FRAMEBUFFER ) == GL_FRAMEBUFFER_COMPLETE;
+}
+
+bool ensure( NifSkopeOpenGLContext::GLFunctions * fn, CsGpu & g, int n )
+{
+	if ( g.fbo && g.fbo2 && g.size == n )
+		return true;
+	// lane PERFFIX3: the front and the back map (a new size: both made again, the front rebuilt whole)
+	const bool ok = ensureOne( fn, g.fbo, g.tex, n ) && ensureOne( fn, g.fbo2, g.tex2, n );
 	g.size = n;
 	g.valid = false;
-	return fn->glCheckFramebufferStatus( GL_FRAMEBUFFER ) == GL_FRAMEBUFFER_COMPLETE;
+	return ok;
 }
 
 void quad( Renderer * r )
@@ -334,6 +349,16 @@ QString wwCloudShadowSummary()
 	return cs().last;
 }
 
+bool wwCloudShadowPending()
+{
+	if ( cs().tier <= 0 )
+		return false;
+	for ( const CsGpu & g : gpus() )
+		if ( g.valid && g.sl.backActive )
+			return true;
+	return false;
+}
+
 void wwCloudShadowPass( Scene * scene )
 {
 	CsState & s = cs();
@@ -439,23 +464,35 @@ void wwCloudShadowPass( Scene * scene )
 		mode = 1;
 	else
 		mapUniforms( r, p, m );
-	const bool full = every || !g.valid || g.mode != mode || g.redVertical != redV || f.a0 != g.fit.a0 || f.b0 != g.fit.b0
-		|| f.extentKm != g.fit.extentKm || M::angleDeg( b.s, g.basis.s ) > 0.25 || g.variety != variety;
+	/* lane PERFFIX3: a hard change rebuilds the front whole (as before); a moved fit or sun builds the back size/16
+	 * rows a frame under the new fit while the receivers keep the front, then swaps (cloudshadowslice.h). Red
+	 * WW_CLOUDSHADOW_RED=fullmove: a move rebuilds the front whole at once (CLOUD3) */
+	namespace SL = WwCloudShadowSlice;
+	const bool hard = every || !g.valid || g.mode != mode || g.redVertical != redV || g.variety != variety;
+	const bool moved = f.a0 != g.fit.a0 || f.b0 != g.fit.b0 || f.extentKm != g.fit.extentKm || M::angleDeg( b.s, g.basis.s ) > 0.25;
+	if ( !g.valid )
+		g.sl.frontValid = false;
+	const int n = g.size;
+	const SL::Step st = SL::plan( g.sl, hard, moved, n, std::max( 1, n / kAmortize ), red( "fullmove" ) );
+	const bool full = st.fullNow;
 	if ( full ) {
 		g.basis = b;
 		g.fit = f;
 		g.mode = mode;
 		g.redVertical = redV;
 		g.variety = variety;
-		g.cursor = 0;
 		M::lightFromWorld( b, f, unitKm, g.lightFromWorld );
 	}
-	const int n = g.size;
-	const int rows = full ? n : std::max( 1, n / kAmortize );
-	const int row0 = full ? 0 : g.cursor;
-	const int rowN = std::min( rows, n - row0 );
+	if ( st.startBack ) {
+		g.backBasis = b;
+		g.backFit = f;
+		M::lightFromWorld( b, f, unitKm, g.backLightFromWorld );
+	}
+	const bool intoBack = st.into == SL::Into::Back;
+	const int row0 = st.row0;
+	const int rowN = st.rows;
 
-	fn->glBindFramebuffer( GL_DRAW_FRAMEBUFFER, g.fbo );
+	fn->glBindFramebuffer( GL_DRAW_FRAMEBUFFER, intoBack ? g.fbo2 : g.fbo );
 	fn->glViewport( 0, 0, n, n );
 	fn->glDisable( GL_DEPTH_TEST );
 	fn->glDisable( GL_BLEND );
@@ -465,11 +502,12 @@ void wwCloudShadowPass( Scene * scene )
 	fn->glColorMask( GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE );
 	fn->glEnable( GL_SCISSOR_TEST );
 	fn->glScissor( 0, row0, n, rowN );
-	const M::Basis & cb = g.basis;
-	p->uni3f( "csE1", float( cb.e1[0] ), float( cb.e1[1] ), float( cb.e1[2] ) );
-	p->uni3f( "csE2", float( cb.e2[0] ), float( cb.e2[1] ), float( cb.e2[2] ) );
-	p->uni3f( "csS", float( cb.s[0] ), float( cb.s[1] ), float( cb.s[2] ) );
-	p->uni4f( "csFit", FloatVector4( float( g.fit.a0 ), float( g.fit.b0 ), float( g.fit.extentKm ), float( g.fit.texelKm() ) ) );
+	const M::Basis & bb = intoBack ? g.backBasis : g.basis;
+	const M::Fit & bf = intoBack ? g.backFit : g.fit;
+	p->uni3f( "csE1", float( bb.e1[0] ), float( bb.e1[1] ), float( bb.e1[2] ) );
+	p->uni3f( "csE2", float( bb.e2[0] ), float( bb.e2[1] ), float( bb.e2[2] ) );
+	p->uni3f( "csS", float( bb.s[0] ), float( bb.s[1] ), float( bb.s[2] ) );
+	p->uni4f( "csFit", FloatVector4( float( bf.a0 ), float( bf.b0 ), float( bf.extentKm ), float( bf.texelKm() ) ) );
 	p->uni2f( "csSize", float( n ), float( n ) );
 	p->uni1i( "csMode", mode );
 	p->uni1i( "csSteps", std::max( pr.steps, 1 ) );
@@ -485,10 +523,19 @@ void wwCloudShadowPass( Scene * scene )
 		g.qcur = 1 - g.qcur;
 	}
 	r->stopProgram();
-	g.cursor = full ? 0 : ( row0 + rowN >= n ? 0 : row0 + rowN );
+	if ( st.swap ) {	// lane PERFFIX3: the back is whole: the receivers take it (and its fit) from now
+		std::swap( g.fbo, g.fbo2 );
+		std::swap( g.tex, g.tex2 );
+		g.basis = g.backBasis;
+		g.fit = g.backFit;
+		std::copy( g.backLightFromWorld, g.backLightFromWorld + 16, g.lightFromWorld );
+		g.swaps++;
+		g.builds++;
+	}
 	g.valid = true;
 	if ( full )
 		g.builds++;
+	const M::Basis & cb = g.basis;
 	if ( !red( "nogi" ) && !g.fence && g.frame % kGiEvery == 0 )
 		giIssue( fn, g, eyeW );
 	restore();
@@ -501,12 +548,13 @@ void wwCloudShadowPass( Scene * scene )
 	g.far[0] = float( M::bandFarT( cov, thick, dens, cb.s[2], kSigma ) );
 	g.far[1] = 0.1f;
 	g.far[2] = pr.tail ? 1.0f : 0.0f;
-	status( s, QStringLiteral( "on tier=%1 mode=%2 size=%3 side_km=%4 texel_m=%5 sun=%6,%7,%8 far_t=%9 gi=%10 mem_mb=%11%12" )
+	status( s, QStringLiteral( "on tier=%1 mode=%2 size=%3 side_km=%4 texel_m=%5 sun=%6,%7,%8 far_t=%9 gi=%10 mem_mb=%11%12%13" )
 		.arg( QLatin1StringView( tierName( s.tier ) ) ).arg( mode == 1 ? QStringLiteral( "volume" ) : QStringLiteral( "map" ) )
 		.arg( n ).arg( g.fit.extentKm, 0, 'f', 1 ).arg( g.fit.texelKm() * 1000.0, 0, 'f', 1 )
 		.arg( cb.s[0], 0, 'f', 3 ).arg( cb.s[1], 0, 'f', 3 ).arg( cb.s[2], 0, 'f', 3 ).arg( double( g.far[0] ), 0, 'f', 3 )
-		.arg( double( s.gi.load() ), 0, 'f', 4 ).arg( double( n ) * n * 8.0 / ( 1024.0 * 1024.0 ), 0, 'f', 1 )
-		.arg( redV ? QStringLiteral( " red=vertical" ) : QString() ) );
+		.arg( double( s.gi.load() ), 0, 'f', 4 ).arg( double( n ) * n * 16.0 / ( 1024.0 * 1024.0 ), 0, 'f', 1 )
+		.arg( redV ? QStringLiteral( " red=vertical" ) : QString() )
+		.arg( red( "fullmove" ) ? QStringLiteral( " red=fullmove" ) : QStringLiteral( " sliced=%1" ).arg( g.swaps ) ) );
 }
 
 void wwCloudShadowUniforms( Scene * scene, NifSkopeOpenGLContext::Program * prog, bool volume, float airAmb )
