@@ -721,7 +721,7 @@ void main()
 				so[q] = vec4( h[q].rgb, 1.0 );
 			}
 			if ( wq[q] > 0.0 )
-				acc += Tq[q] * wq[q] * airEnvColour( Jenv, t, zt, dirView ) AZ_TINT( q );
+				acc += Tq[q] * wq[q] * airEnvColourEnv( Jenv, t, zt, dirView ) AZ_TINT( q );	// lane FIX1101A: the env share without the sun glare
 			acc += Cq;
 		}
 		volMrt[0] = so[0];
@@ -746,7 +746,8 @@ void main()
 		if ( w > 0.0 ) {
 			float t = 0.5 * ( ta + tb );
 			float zt = zc + dzdt * t;
-			acc += T * w * ( Jrest + airEnvColour( Jenv + airSun( dirView * ( t / fogDistScale ), dirView, zt ), t, zt, dirView ) ) AZ_TINT( q );
+			// lane FIX1101A: the sun's share (shadowed) keeps the records' glare hue, the env share takes the fog colour only
+			acc += T * w * ( Jrest + airEnvColourEnv( Jenv, t, zt, dirView ) + airEnvColour( airSun( dirView * ( t / fogDistScale ), dirView, zt ), t, zt, dirView ) ) AZ_TINT( q );
 		}
 		T *= exp( -tau );
 	}

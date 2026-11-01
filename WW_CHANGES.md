@@ -1,3 +1,13 @@
+## FIX1101A (2026-11-01, bungo): the fog in a building's shadow no longer glows orange
+
+Looking toward the sun in Foggy weather, the air in front of a shadowed facade (Concord's church, the shop fronts) glowed
+the warm fog-sun colour. The air does sample the sun's shadow per step; the fault was the colour: the records' haze hue
+(the fog colour mixed toward the fog-sun colour by the view's angle to the sun) painted ALL the air's in-scatter, also
+the sky / GI / ambient share that the shadow never touches. Now the sun-glare hue goes on the sun's share only (which
+carries the shadow); the env share takes the records' fog colour without the glare (res/shaders/cell_airmed.glsl
+airEnvColourEnv, cell_volair.frag). Red: `WW_CELL_AIR_RED=envhue` (the old hue on the whole in-scatter; physcol as
+before). Offline link sweeps base 408 / RTDDGI none,ubo 272 / PRT 408, not ok 0. Not yet measured live (hold 6 rows).
+
 ## OWNDATA1 (FIX1101A, 2026-11-01): our moon draws with no mod folder
 
 Our sky's moon globe (SKYDISC1) needs two loose textures that lived only in the FO4CS mod folder, so any window or

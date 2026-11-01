@@ -299,3 +299,21 @@ vec3 airEnvColour( vec3 J, float t, float z, vec3 dirView )
 	vec3 c = wwAirRecordColour( t, z, dirView, ok );	// lookdev_fog.glsl, at unit luminance
 	return ok ? dot( J, vec3( 0.2126, 0.7152, 0.0722 ) ) * c : J;
 }
+
+/* lane FIX1101A (bungo 11-01, fog not shadowed by buildings): the air's ENV share (sky, GI, ambient: unshadowed by
+ * design) takes the records' fog colour only, without the fog-sun glare; the glare hue stays on the sun's share,
+ * which carries the shadow (airSun x vis). Before, every sample looking toward the sun took the glare hue whether or
+ * not the sun reached it: shadowed air in front of a facade glowed orange. airEnvFogHue is set by cellvolair.cpp
+ * (shipped on); red WW_CELL_AIR_RED=envhue (or physcol) brings the old hue on the env share. */
+uniform bool airEnvFogHue;
+vec3 airEnvColourEnv( vec3 J, float t, float z, vec3 dirView )
+{
+	if ( !airEnvFogHue || ( volRed & 256 ) != 0 )
+		return airEnvColour( J, t, z, dirView );
+	float hb;
+	vec3 fc;
+	wwFogEval( t, z, hb, fc );
+	fc = max( fc, vec3( 0.0 ) );
+	float lc = dot( fc, vec3( 0.2126, 0.7152, 0.0722 ) );
+	return lc > 1e-8 ? ( dot( J, vec3( 0.2126, 0.7152, 0.0722 ) ) / lc ) * fc : J;
+}

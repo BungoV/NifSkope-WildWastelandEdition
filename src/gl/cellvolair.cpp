@@ -80,6 +80,9 @@ struct VaState
 	 * column to the scene's top (FOGSUN1 as it was): Foggy noon at c3 Ts 0.026, no shafts, the ground's sun erased. Off
 	 * (shipped): only the derived ground layer dims the sun (the band IS the records' fog, whose sun the record's colour is) */
 	bool sunColumn = false;
+	// lane FIX1101A (bungo 11-01, fog not shadowed): red WW_CELL_AIR_RED=envhue = the env share (sky, GI, ambient) painted
+	// with the fog-sun glare hue too, as before (cell_airmed.glsl airEnvColourEnv); shipped: the glare hue on the sun's share only
+	bool envHue = false;
 	int terms = 15;
 	int probe = 0;
 	int fogBlend = 0;	// WW_CELL_VOLAIR_FOGBLEND=1 (option B, test only): the game's fog drawn over the lit air
@@ -111,6 +114,7 @@ VaState & vs()
 			s.noAirVol = d.noAirVol;
 			s.sphereTop = d.sphereTop;
 			s.sunColumn = d.sunColumn;
+			s.envHue = d.envHue;
 			s.terms = d.terms;
 			s.opt = d.opt;
 		}
@@ -127,6 +131,7 @@ VaState & vs()
 			s.noAirVol = s.noAirVol || r == "noairvol";
 			s.sphereTop = s.sphereTop || r == "spheretop";
 			s.sunColumn = s.sunColumn || r == "suncolumn";	// lane FIX1101A
+			s.envHue = s.envHue || r == "envhue";	// lane FIX1101A
 			s.red |= r == "off" ? 1 : r == "gioff" ? 2 : r == "flat" ? 4 : r == "noshadow" ? 8 : r == "nolights" ? 16
 				: r == "wrongmed" ? 32 : r == "blendnear" ? 64 : r == "farfit" ? 128 : r == "physcol" ? 256 : r == "nosunt" ? 512 : r == "froxonly" ? 1024 : r == "oldsun" ? 2048
 				: r == "dropcluster" ? 4096 : r == "nearskip" ? 8192 : r == "noground" ? 16384 : r == "nosidecar" ? 32768 : r == "nosky" ? 65536 : r == "fxfog" ? 131072 : r == "lightmid" ? 262144 : r == "bluescatter" ? 524288 : r == "zcolour" ? 1048576 : r == "nofarclamp" ? 2097152 : r == "roomstep" ? 4194304
@@ -1572,6 +1577,7 @@ static void vaPassInner( Scene * scene, bool run )
 	prog->uni4f( "airLayer", FloatVector4( G.w, G.zn, G.invHn, G.s ) );
 	prog->uni4f( "airGround", FloatVector4( G.zg, G.invHg, 0.0f, 0.0f ) );
 	prog->uni1b( "airSunLayer", !s.sunColumn );	// lane FIX1101A: the sun dimmed by the ground layer only (cell_airmed.glsl airTupSun)
+	prog->uni1b( "airEnvFogHue", !s.envHue );	// lane FIX1101A: the env share without the sun glare hue (airEnvColourEnv)
 	if ( !( s.red & 65536 ) ) {	// lane FIX1101A (moon): the medium the sky's disc gain reads (none under the red nosky)
 		VaPub & pub = vaPub();
 		const float m4[4] = { M.sigma0, M.zb, M.invH, zTop }, l4[4] = { G.w, G.zn, G.invHn, G.s };
@@ -2615,6 +2621,7 @@ void wwVolPartMediumUniforms( Scene * scene )
 	prog->uni4f( "airLayer", air ? FloatVector4( g.layer[0], g.layer[1], g.layer[2], g.layer[3] ) : FloatVector4( 0.0f, 0.0f, 0.0f, 0.0f ) );
 	prog->uni4f( "airGround", air ? FloatVector4( g.ground[0], g.ground[1], g.ground[2], g.ground[3] ) : FloatVector4( 0.0f, 0.0f, 0.0f, 0.0f ) );
 	prog->uni1b( "airSunLayer", !vs().sunColumn );	// lane FIX1101A: the puffs' sun as the air's (cell_airmed.glsl airTupSun)
+	prog->uni1b( "airEnvFogHue", !vs().envHue );	// lane FIX1101A (unused by the puffs today; airEnvColourEnv)
 	// lane FOGTERRAIN2: the ground layer stands on the pass's terrain grid (cell_volpart.glsl vpLight airGroundAt)
 	const bool terr = air && g.terrOn && g.terr;
 	const int terrLoc = prog->uniLocation( "airTerr" );
