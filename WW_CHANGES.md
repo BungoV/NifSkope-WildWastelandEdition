@@ -1,3 +1,12 @@
+## PBRMCSMHEADROOM (SKYCLOUD1101, 2026-11-01): the .pbrm cell programs read the old GI's march once a pixel
+
+With the old baked GI (WW_CELL_PRT_RED=1) and its march (WW_CELL_GI_VIS=march), every GI read in pbrm_default.frag
+(the bounce, the sky share, the ambient rule, the probe views) inlined the whole march again, so pbrm_cellcsm used
+59847 of the driver's 65536 fragment instructions (8.7 % left: the tightest program). It now runs the march once per
+pixel, as fo4_default.frag has since GIBLACKLINK1 (every caller reads the same point and normal). Every other mode
+compiles the same machine code. Red: the define WW_CELL_GI_MARCH_COPIES (the old shader). Test:
+tests/spells/pbrm_headroom.sh.
+
 ## CLOUDTYPE3 (SKYCLOUD1101, 2026-11-01): a "rainy" weather that never rains gets overcast clouds
 
 Four vanilla weathers carry the Rainy flag but have no precipitation (no MNAM) and no thunder: DiamondWeather,
