@@ -32,6 +32,7 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 #include "glcontext.hpp"
 #include "wwswitch.h"	// lane TESTDRIVER1: the WW_* switch store
+#include "cellunits.h"	// lane FIX1101A lodch: the far stream's unit
 #include "ddstxt16.hpp"
 #include "libfo76utils/src/filebuf.hpp"
 #include "model/nifmodel.h"
@@ -694,6 +695,10 @@ bool NifSkopeOpenGLContext::Program::finishLink( NifSkopeOpenGLContext * context
 				f->glUniformBlockBinding( id, l, 2 );
 				wwShadowFrame = true;
 			}
+			/* lane FIX1101A lodch: fo4_default.vert's far stream (samplerBuffer) sits on its own unit in every program
+			 * that has it: left on unit 0 beside the material's sampler2D, every draw of the program would be invalid */
+			if ( GLint l = f->glGetUniformLocation( id, "farStream" ); l >= 0 )
+				f->glProgramUniform1i( id, l, WwCellUnit::FarStream );
 			if ( linkFrom == 2 ) {
 				context->programCacheHits++;
 			} else if ( !cacheFile.isEmpty() ) {

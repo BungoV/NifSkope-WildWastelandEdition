@@ -2,6 +2,8 @@
 #include "atmomath.h"
 #include "gl/weatherrecx.h"	// lane WX1: the weather .recx atmosphere block
 #include "skydisc.h"
+#include "moonlight.h"	// lane FIX1101A (moon): the disc's gain through the air
+#include "gl/cellvolair.h"	// lane FIX1101A (moon): the air's medium for that gain
 #include "wwswitch.h"
 #include "gl/cellunits.h"
 #include "gl/celluniform.h"	// lane CELLUNI3: the units bound without a unit ask
@@ -47,6 +49,7 @@ struct AtState
 	int tier = 0;
 	bool pinned = false;
 	float haze[3] = { 0.0f, 1.0f, 0.0f };	// last drawn: ground extinction /km, scale height km, plateau top km
+	float discAirLast[2] = { 1.0f, 1.0f };	// lane FIX1101A (moon): the sun disc's and our globe's gain through the air
 	QString last = QStringLiteral( "off" );
 	int ap = 0;	// lane SKYA (ATMO2): the Aerial Perspective row, 0 Off / 1 On (pin WW_ATMO_AP)
 	bool apPinned = false;
@@ -250,6 +253,13 @@ void medium( NifSkopeOpenGLContext::Program * p, const float haze[3], bool noOzo
 	else
 		p->uni3f( "atOzone", kOzone[0] * g_ozone, kOzone[1] * g_ozone, kOzone[2] * g_ozone );
 	p->uni3f( "atHaze", haze[0], haze[1], haze[2] );
+	// lane FIX1101A (atmo): the MS LUT's sqrt height rows + 40 packed steps (red msold: linear rows, 20 uniform), read
+	// and written by every pass that takes this medium; the night floor (red nofloor: none), read by atmo_sky only
+	p->uni1f( "atMsOld", red( "msold" ) ? 1.0f : 0.0f );
+	if ( red( "nofloor" ) )
+		p->uni3f( "atFloor", 0.0f, 0.0f, 0.0f );
+	else
+		p->uni3f( "atFloor", kNightFloor[0], kNightFloor[1], kNightFloor[2] );
 }
 
 void bindTex( NifSkopeOpenGLContext::GLFunctions * fn, NifSkopeOpenGLContext::Program * p, int unit, const char * name, GLuint tex )
@@ -486,7 +496,8 @@ bool wwAtmoDrawSky( Scene * scene, const WwAtmoInputs & in, QString * line )
 		why = QStringLiteral( "a LUT target is incomplete" );
 	const QString hazeKey = QString( "%1,%2,%3,%4" ).arg( double( s.haze[0] ), 0, 'g', 6 ).arg( double( s.haze[1] ), 0, 'g', 6 )
 		.arg( double( s.haze[2] ), 0, 'g', 6 ).arg( noOzone )
-		+ ( g_ozone != 1.0f ? QStringLiteral( ",oz%1" ).arg( double( g_ozone ) ) : QString() );
+		+ ( g_ozone != 1.0f ? QStringLiteral( ",oz%1" ).arg( double( g_ozone ) ) : QString() )
+		+ ( red( "msold" ) ? QStringLiteral( ",msold" ) : QString() );	// lane FIX1101A (atmo): the red's LUT is another table
 	// 1. transmittance and multiple scattering: only when the medium moves (weather, hour through the fog keys)
 	if ( ok && g.transKey != hazeKey ) {
 		auto p = r->useProgram( "atmo_transmittance.prog" );
@@ -615,6 +626,24 @@ bool wwAtmoDrawSky( Scene * scene, const WwAtmoInputs & in, QString * line )
 	fn->glBindFramebuffer( GL_DRAW_FRAMEBUFFER, GLuint( prevDraw ) );
 	fn->glBindFramebuffer( GL_READ_FRAMEBUFFER, GLuint( prevRead ) );
 	glViewport( vp[0], vp[1], vp[2], vp[3] );
+	/* lane FIX1101A (moon, LATE ITEM 24d(2)): the sun disc and our moon globe end, under the air's composite, dimmed as
+	 * their light is (the sky's own air x the ground layer), not by the bands on top (gl/moonlight.h discAirGain).
+	 * Red WW_ATMO_DISC_RED=airband: gain 1 (the bands dim the disc again, as before). A capture has no air over it. */
+	float discAir[2] = { 1.0f, 1.0f };
+	{
+		float med[4], layer[4], ground[2];
+		if ( !in.capture && !wwAtmoDiscRed( "airband" ) && wwVolAirMediumNow( med, layer, ground ) ) {
+			const float * lights[2] = { sunW, moonW };
+			for ( int b = 0; b < 2; b++ ) {
+				float t[3];
+				cpuTrans( hKm, lights[b][2], s.haze, noOzone, t, g_ozone );
+				const float tSky = ( t[0] + t[1] + t[2] ) / 3.0f;	// cell_volsky.frag's tSky
+				discAir[b] = wwmoon::discAirGain( in.camFogZ, lights[b][2], tSky, med, layer, ground );
+			}
+		}
+		s.discAirLast[0] = discAir[0];
+		s.discAirLast[1] = discAir[1];
+	}
 	// 3. the sky's pixels
 	if ( ok ) {
 		auto p = r->useProgram( "atmo_sky.prog" );
@@ -639,6 +668,7 @@ bool wwAtmoDrawSky( Scene * scene, const WwAtmoInputs & in, QString * line )
 			p->uni1f( "atLimb", ( s.tier >= 3 || in.discs ) ? 1.0f : 0.0f );
 			p->uni1f( "atDiscCap", in.disc ? kDiscCap : 0.0f );
 			p->uni1f( "atDiscHue", in.discs ? 1.0f : 0.0f );	// SKYDISC1: 0 = the per-channel min() as before
+			p->uni1f( "atDiscAir", discAir[0] );	// lane FIX1101A (moon): the disc's gain through the air
 			p->uni1f( "sceneExposure", in.exposure );
 			p->uni1i( "viewTransform", in.viewTransform );
 			// lane SKYA (ATMOCHECK1): the Sky Color row's Weather Tint (atWeatherTint); 0 = the physical color, as before
@@ -692,6 +722,7 @@ bool wwAtmoDrawSky( Scene * scene, const WwAtmoInputs & in, QString * line )
 		f.viewW = vw;
 		f.viewH = vh;
 		f.frame = s.frame;
+		f.moonDiscAir = discAir[1];	// lane FIX1101A (moon): our globe's gain through the air
 		f.tintOn = s.tintDrawn && ok;
 		if ( f.tintOn )
 			std::copy( &in.tint[0][0], &in.tint[0][0] + kTintN * 3, &f.tint[0][0] );
@@ -699,7 +730,7 @@ bool wwAtmoDrawSky( Scene * scene, const WwAtmoInputs & in, QString * line )
 
 	const float sunEl = std::asin( std::clamp( sunW[2], -1.0f, 1.0f ) ) * 180.0f / kPi;
 	QString reds;
-	for ( const char * w : { "noozone", "noms", "nohaze" } )
+	for ( const char * w : { "noozone", "noms", "nohaze", "msold", "nofloor" } )	// FIX1101A (atmo): msold, nofloor
 		if ( red( w ) )
 			reds = QStringLiteral( ",RED=%1" ).arg( QLatin1StringView( w ) );
 	for ( const char * w : { "nosunt", "double", "skyclamp" } )
@@ -707,6 +738,9 @@ bool wwAtmoDrawSky( Scene * scene, const WwAtmoInputs & in, QString * line )
 			reds += QStringLiteral( ",AP_RED=%1" ).arg( QLatin1StringView( w ) );
 	if ( in.discs )
 		reds += wwAtmoDiscRed( "nophase" ) ? QStringLiteral( ",discs=ours,DISC_RED=nophase" ) : QStringLiteral( ",discs=ours" );
+	// lane FIX1101A (moon): the sun disc's / our globe's gain through the air (1 = none: no air, or the red airband)
+	reds += QStringLiteral( ",disc_air=%1/%2%3" ).arg( double( discAir[0] ), 0, 'f', 3 ).arg( double( discAir[1] ), 0, 'f', 3 )
+		.arg( wwAtmoDiscRed( "airband" ) ? QStringLiteral( ",DISC_RED=airband" ) : QString() );
 	if ( s.tint > 0 )	// lane SKYA (ATMOCHECK1)
 		reds += in.tintOk ? ( wwAtmoTintRedFlat() ? QStringLiteral( ",tint=weather,TINT_RED=flat" )
 			: wwAtmoTintRedPhysical() ? QStringLiteral( ",tint=weather,TINT_RED=physical" ) : QStringLiteral( ",tint=weather(ap,amb)" ) )
@@ -896,6 +930,35 @@ bool wwAtmoKeyLight( float muLight, const float fog[4], float keyLum45, float su
 	return true;
 }
 
+void wwAtmoWbGain( float out[3] )
+{
+	out[0] = out[1] = out[2] = 1.0f;
+	const QString e = wwEnvStr( "WW_CELL_WB" ).trimmed().toLower();
+	if ( e.isEmpty() || e == QLatin1StringView( "off" ) || e == QLatin1StringView( "0" ) )
+		return;
+	QString how;
+	if ( e == QLatin1StringView( "day45" ) ) {
+		const AtState & s = as();
+		float t45[3];
+		cpuTrans( 0.0f, 0.70710678f, s.haze, false, t45, g_ozone );	// the last drawn sky's air (clear air before one)
+		const float l = lum( t45 );
+		for ( int c = 0; c < 3; c++ )
+			out[c] = t45[c] > 1e-6f ? l / t45[c] : 1.0f;
+		how = QStringLiteral( "day45(haze=%1/km@%2km)" ).arg( double( s.haze[0] ), 0, 'f', 3 ).arg( double( s.haze[1] ), 0, 'f', 3 );
+	} else {
+		const QStringList p = e.split( QChar( ',' ) );
+		if ( p.size() == 3 )
+			for ( int c = 0; c < 3; c++ )
+				out[c] = std::clamp( p.at( c ).toFloat(), 0.05f, 20.0f );
+		how = QStringLiteral( "explicit" );
+	}
+	static float last[3] = { -1.0f, -1.0f, -1.0f };
+	if ( !std::equal( out, out + 3, last ) ) {
+		std::copy( out, out + 3, last );
+		fprintf( stderr, "cell wb: %s gain=%.4f,%.4f,%.4f\n", qPrintable( how ), double( out[0] ), double( out[1] ), double( out[2] ) );
+	}
+}
+
 void wwAtmoApFrame()
 {
 	for ( AtGpu & g : gpus() )
@@ -927,6 +990,27 @@ bool wwAtmoGiActive()
 {
 	const AtState & s = as();
 	return s.gi > 0 && s.tier > 0;
+}
+
+/* FIX1101A (LATE ITEM 15d): the physical sky's irradiance on the six world axes for the ray-traced GI's sky (sun toward
+ * sunTo, sun irradiance 1, the last drawn haze; atmomath skyIrradianceAxes, ~6 ms, kept while sun and haze stand).
+ * False while Physical Sky is off or the sun is under the horizon (the weather's ambient stays the GI's sky then). */
+bool wwAtmoGiSkyAxes( const float sunTo[3], float out[6][3] )
+{
+	const AtState & s = as();
+	if ( s.tier <= 0 || sunTo[2] <= 0.0f )
+		return false;
+	static float key[6] = { -9.0f, -9.0f, -9.0f, -9.0f, -9.0f, -9.0f };
+	static float memo[6][3];
+	const float now[6] = { sunTo[0], sunTo[1], sunTo[2], s.haze[0], s.haze[1], s.haze[2] };
+	if ( !std::equal( now, now + 6, key ) ) {
+		std::copy( now, now + 6, key );
+		skyIrradianceAxes( sunTo, s.haze, memo );
+	}
+	for ( int a = 0; a < 6; a++ )
+		for ( int c = 0; c < 3; c++ )
+			out[a][c] = memo[a][c];
+	return true;
 }
 
 bool wwAtmoGiRedDome()
@@ -1103,7 +1187,9 @@ void wwAtmoApUniforms( Scene * scene )
 		prog->uni1i( "atSkyTransTex", WwCellUnit::AtmoTrans );
 		prog->uni1f( "atSkyCamR", on ? v->camR : 0.0f );
 		// lane HORIZONBAND1: the sky's horizon band (atmo_skyband.glsl); the red skyclamp = the clamp before it (live)
-		prog->uni1i( "atApSkyRule", apRed( "skyclamp" ) ? 0 : 1 );
+		// lane FIX1101A (atmo, the night horizon stripe): rule 2 (shipped) colours the band with what a black surface at
+		// the far plane gets through the surfaces' own fog path; red apband = rule 1 (the aerial perspective's colour alone)
+		prog->uni1i( "atApSkyRule", apRed( "skyclamp" ) ? 0 : apRed( "apband" ) ? 1 : 2 );
 	}
 	if ( !on )
 		return;

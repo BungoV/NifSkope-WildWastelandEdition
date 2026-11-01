@@ -106,7 +106,31 @@ struct LodiAppendCounts
 	//! lane SHADOWSHIMMER3 (FARSWAYCOST): the tree (sway) buckets -- shapes and triangles drawn; the sun casters draw
 	//! these every pass as dynamic (gl/sunshadow.cpp c.sway), not from the shadow cache
 	qint64 swayShapes = 0, swayTris = 0;
+	/*! lane FIX1101A lodch: the bake's channels the build USED (the census line "far lod: objects ring N channels"):
+	 *  placements whose AO came from the per-vertex stream / from self x placement AO, the AO bytes written and their
+	 *  sum; placements given a per-vertex sky factor, the sky factors written, their sum and the raw bytes' sum;
+	 *  stream = the instanced rows' per-vertex RG8 texels (0 when no channel is on or the ring is flat) */
+	qint64 aoStreamPlacements = 0, aoFallbackPlacements = 0, aoBytes = 0;
+	double aoSum = 0.0;
+	qint64 skyPlacements = 0, skyBytes = 0;
+	double skySum = 0.0, skyRawSum = 0.0;
+	qint64 streamTexels = 0;
+	//! lane FIX1101A lodch r2 (LATE ITEM 25): placements whose AO took the v12 ground-contact ramp, vertices darkened
+	//! through it on the instanced stream (src/lodchsky.h contactAo; no extra byte)
+	qint64 groundPlacements = 0, groundBytes = 0;
 };
+
+/*! lane FIX1101A lodch (LATE ITEMs 11 + 16 + 20, "LOD channels on by default"): the far LOD draws the bake's AO
+ *  (objects: the .lodi per-vertex scene AO, else self x placement AO; terrain: the VT mask sheet's B) by default.
+ *  The row "Far LOD baked AO" (pin WW_LODL_AO). Red WW_LODL_AO_RED=off: the old rule, only with WW_LODL_AO=1. */
+bool lodlAoOn();
+/*! The far objects' ambient takes the bake's per-vertex sky visibility through src/lodchsky.h. The row "Far LOD
+ *  baked sky light" (pin WW_LODL_SKY). 0 off, 1 the law, 2 the raw byte. Red WW_LODL_SKY_RED=off (today: no sky
+ *  term), =raw (the byte as the factor, the twin's second red). */
+int lodlSkyMode();
+/*! lane FIX1101A lodch r2 (LATE ITEM 25): the far AO takes the .lodi v12 ground-contact ramp, min(AO, 1 - 0.35 ramp)
+ *  (src/lodchsky.h contactAo), on whenever the AO is. Red WW_LODL_AO_RED=noground. */
+bool lodlGroundOn();
 
 /*! lane FAR3: `NifSkope -no-gui farobjcensus <ws.lodi> --ring x0,y0,x1,y1,hx0,hy0,hx1,hy1,slot ...` builds the far
  *  object rings into one headless document, the cell view's way, and prints per ring what it kept and what the

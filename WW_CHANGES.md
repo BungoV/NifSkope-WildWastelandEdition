@@ -1,9 +1,136 @@
+## FIX1101A (2026-11-01, bungo): the fog in a building's shadow no longer glows orange
+
+Looking toward the sun in Foggy weather, the air in front of a shadowed facade (Concord's church, the shop fronts) glowed
+the warm fog-sun colour. The air does sample the sun's shadow per step; the fault was the colour: the records' haze hue
+(the fog colour mixed toward the fog-sun colour by the view's angle to the sun) painted ALL the air's in-scatter, also
+the sky / GI / ambient share that the shadow never touches. Now the sun-glare hue goes on the sun's share only (which
+carries the shadow); the env share takes the records' fog colour without the glare (res/shaders/cell_airmed.glsl
+airEnvColourEnv, cell_volair.frag). Red: `WW_CELL_AIR_RED=envhue` (the old hue on the whole in-scatter; physcol as
+before). Offline link sweeps base 408 / RTDDGI none,ubo 272 / PRT 408, not ok 0. Not yet measured live (hold 6 rows).
+
+## OWNDATA1 (FIX1101A, 2026-11-01): our moon draws with no mod folder
+
+Our sky's moon globe (SKYDISC1) needs two loose textures that lived only in the FO4CS mod folder, so any window or
+harness without that folder in its resource list drew the vanilla moon (`moon:refused(textures/sky/moon/moon_d.dds not
+found ...)`, hold 4's notes). NifSkope now ships them: res/Data/Textures/Sky/Moon/Moon_d.dds + Moon_n.dds (2.0 MB, the
+same bytes, NASA SVS CGI Moon Kit, credit in NOTICE.txt beside them), copied to release/Data at link time, and
+src/gamemanager.cpp adds release/Data as the LAST, lowest-priority source of the Fallout 4 resources, so a game or mod
+copy of the same name still wins. Only its data folders are read (Textures; Plugins is not one). Red:
+`WW_OWNDATA_RED=1` (launch key: the folder is not added). Gate: tests/owndata1 (the shipped maps + the release copies;
+a release without them fails) and the sky notes' `moon:` part. Our sun disc needs no texture (`discs=ours`).
+
+## CONTACTREACH1 (FIX1101A, 2026-11-01): no dashed bands from thin casters (bungo's "banding on shadows")
+
+bungo's crop of his Concord porch frame showed the shadow of power lines on a facade as a row of short parallel dashes
+beside a soft line. The cascades were not the cause: an offline twin of the cascade filter (Ultra + PAR, texel 1.24 /
+3.56 u, Vogel radius 2.8 / 10.5 u) draws a 2-2.8 u cable as a smooth soft line and a thick edge within 0.6 px. The near
+contact march (screen space, half-res, 4 lanes) hit a thin caster 85 u off the wall in only one or two samples, so the
+shadow came out as dashes. Inside the cascades' reach the near march now stops 48 game units from the receiver
+(src/gl/shadowset.cpp kContactReach, res/shaders/ww_contact.frag sssReach); the reach opens up as the cascades fade out,
+and the far tier keeps its own fade. Real contact (a caster within 48 u) keeps its contact shadow. The echo's contact
+part prints `reach=48`. Red: `WW_SHADOW_RED=contactreach` (the whole march, as before; live). Gate: tests/contactreach1
+(the twin on a wire 85 u off a wall at ~2700 u: composed stair 1.30 -> 0.20 px, darkness CV 0.155 -> 0.024; a wire 6 u
+off keeps 95.8 % of its contact line; the red fails). Link sweeps 408 / 272 / 408 LINK OK.
+
 ## FOAMOFF2 (FIX1101A, 2026-11-01): River foam and Contact foam stay OFF
 
 The water lane's foam fixes land: lace streaks instead of solid patches, and no foam on a dry bank. Its two rows still
 ship off, under the new keys WW/CellWaterContact3 and WW/CellWaterRiverFoam3. On the spot 6 river frame (CommonwealthClear
 12:00) the streaks at 1:1 still read as flat light-grey darts with hard tips, not river foam. The rows go on when a foam
 look gate measured on the frame holds. Everything else in the water section below ships as written.
+## LODCH r2 (FIX1101A, 2026-11-01): far ground contact drawn; the vanilla far LOD builds its object rings
+
+- **Far objects, ground contact (LATE ITEM 25 lists it among the channels that must draw; it was never read).** The
+  .lodi v12 per-vertex ground-contact ramp (255 at the terrain, 0 by 256 u above it) now darkens the far objects' AO,
+  folded into the AO byte the instanced rows already carry, so it costs no byte: `min(AO, 1 - 0.35 x ramp)`
+  (`src/lodchsky.h` contactAo). The bake's 8 AO rays never aim lower than ~8 deg over the tangent plane, so a wall
+  foot in the ground read open; the min never darkens a foot twice where the AO already holds the contact, and nothing
+  goes below 0.65 from it. The flat copy (red `WW_CELL_FARLOD_RED=flat`) takes it too. Red `WW_LODL_AO_RED=noground`
+  (live: the key is already in liveFarKey). Census: "far lod: objects ring N channels: ... stream texels (X MB, 2 B a
+  vertex a copy), ground contact on (P placements, V vertices)" and the same on `farobjcensus`.
+- **LATE ITEM 25b, measured (no code change to the stream):** the per-copy stream is one RG8 texel a (placement,
+  vertex): 12.69 MB for what c3 draws (hold 4 on batch 4, the census lines: 6,651,994 texels over rings 0-2; the whole
+  far field's working set +943 MB), 25.04 MB if every Commonwealth placement were drawn (13,129,195), against +440 MB
+  for the old fat-vertex route. Of c3's texels, 668,022 (1.27 MB, ring 2's 18,038 placements whose slice was cast for
+  another slot's mesh) hold only self-AO x placement AO: those are the split's case and could ride the shared colour
+  (leftover: it needs a no-stream row flag in fo4_default.vert). The split bungo described (self-AO in the shared mesh's colour, one AO value a copy, sky 1 B a vertex
+  a copy) would save 9.57 MB on c3 and draw the AO 25.7 levels off on average (28.4 % of vertices more than 32 levels
+  off; the sky as one value a copy: 28.7 levels): the .lodi scene AO already holds the self-AO (doc 4.8: use the
+  byte alone, multiplying self-AO in darkens twice), and the occlusion between neighbours varies across a copy. The
+  shared meshes stay shared (never de-instanced); the stream stays.
+- **Vanilla far LOD, rings 1-4 drew 0 object triangles (LATE ITEM 23).** Cause, measured from SHOTS1101's c3 notes: the
+  game's chunks were appended as document rows, charged 2.4 KB a triangle; the rings' terrain + skirts (506,874 tris)
+  and ring 0's objects (386,920) passed the 2048 MB budget, so every object chunk past ring 0 was refused ("objects NOT
+  BUILT past chunk -32,0: the far field's budget"). Now the chunks' land and objects keep their arrays beside the
+  document (`src/cellmesh.h`, as ours do; `cellfarvanilla.cpp` fvToSide, water stays rows) and are charged 256 B a
+  triangle (`cellfarvanilla.h` wwFarVanChargeMB; the game's .bto measure 106-147 B a triangle as arrays). The
+  double-ground / plan readback reads the arrays where they wait. Rings 3-4 stay at 0 object triangles because the
+  game ships none there (the c3 census: level 16, 0 chunks in the ring; level 32, 3 chunks, 0 triangles in the
+  region). Red `WW_CELL_FARLOD_RED=vanrows` (live): rows, as before. The source line adds ", arrays beside the
+  document: T terrain + O object tris".
+- **Vanilla far LOD "terrain ribbons in the sky": geometry measured right, cause not found offline.** Every .btr vertex
+  placed the code's way lies inside its .lodl cell's height range (37 chunks, levels 4-32; level vs level dz median 0),
+  and an offline twin of all 136 c3 chunks at c3van_s3's camera puts the upper ribbon exactly on the ring-4 border hills
+  (z to 43,264 at cells -64..-32) and the lower one on ring 1: real terrain at its real place, drawn dark and unhazed
+  while the low ground around it is hazed white. Owed: the pair in rows2.txt (fog/haze off) to tell shading from
+  placement.
+- **Gates:** `tests/lodchground` (green PASS; red today FAIL foot 1.000, red product FAIL nodouble 0.260),
+  `tests/vanbudget` (green: rings 0-2 objects built, 996 MB; red rows: no chunk of ring 1, 2064 MB),
+  `tests/lodchused` now also wants the ground contact used and a `noground` red.
+
+## LODCH (FIX1101A, 2026-11-01): the LOD bake's channels draw by default (far AO, far sky light, far ground AO)
+
+bungo asked whether the LOD bakes' sky visibility is used, and for proof that the LOD bakes work (LATE ITEMs 11, 16 and
+20). They were mostly not used. On main d78ec45b the far objects drew no baked vertex AO, placement AO, self-AO or sky
+visibility unless WW_LODL_AO=1 was set. With it set, an instanced ring that carried the AO stream fell back to the flat
+copy and its budget refusals. The far ground never bound the VT mask sheet's B (terrain + object AO, sky AO): only the
+.lodl viewer read it, and only with WW_LODL_AO=1.
+
+- **No switch (bungo 11-01, LATE ITEM 25: "if you enable our new lod rendering, they need to be used").** No menu
+  row: whenever our LOD rendering draws, every baked channel below is read and drawn. WW_LODL_AO=0 / WW_LODL_SKY=0 stay
+  only as debug pins that turn them off (and the reds below).
+- **Far objects, AO (ships ON, debug pin WW_LODL_AO=0 turns it off).** The .lodi v6 per-vertex scene AO multiplies
+  the albedo, exactly as WW_LODL_AO=1 drew it (lane AO2's look). The stream already holds the self-AO and the placement
+  AO, so it is used alone; self x placement AO is the fallback for a placement with no slice. It now works on the
+  instanced rings too. Each row carries the first texel of its own (placement, vertex) bytes in a per-ring RG8 buffer
+  texture (CellMeshInst::vstream; gl/cellfarinst.cpp; fo4_default.vert farStream, unit WwCellUnit::FarStream, set at
+  link in gl/glcontext.cpp). The flat copy keeps its vertex-colour route.
+- **Far objects, sky light (ships ON, debug pin WW_LODL_SKY=0 turns it off).** The .lodi v7 per-vertex sky
+  byte scales the ambient the GI volume did not replace (fo4_default.frag, the exterior sun branch: color and
+  cellExtAmb x wwFarSkyVis). Shapes other than far placements carry exactly 1, so nothing changes there. The byte is
+  read as the GI's share through src/lodchsky.h: f = s / skyRef(nz) removes the surface's own half-space (an open wall
+  reads 0.56 raw). That is then mapped through the uniform horizon the bake's 56-ray set would see it under, to the
+  normal-weighted share the GI computes. Near (GI) and far (bake) therefore agree at the last cascade edge. The ambient
+  takes min(AO, sky), never their product: the AO already darkens the albedo, so the stream's G byte is min(1, sky / AO).
+- **Far ground AO (ships ON, same row).** nifAppendLodlFarRings samples the VT mask sheet's B bilinearly per ring
+  vertex into the ring's vertex colour, the same mapping the .lodl viewer's WW_LODL_AO uses. The far lod terrain line
+  prints "terrain AO (the mask sheet's B) on N vertices, mean M". The .lodl viewer now draws its AO by default too.
+- **Ground contact.** No second darkening. MEASURED on the installed bake: the AO stream already darkens the base
+  (walls at the terrain, ground ramp >= 250: AO mean 137.7, against 158.2 at 256 u up). The ground ramp is a terrain
+  blend weight, and drawing it as darkening as well would count the contact twice. It stays the WW_LODL_CHANNEL=ground
+  view.
+- **Ground cover (VT mask A).** It stays a debug view (WW_LODL_CHANNEL=mask-a). It is a cover density for a consumer
+  that grows cover. The colour sheet already carries the grass tint the bake mixed in (docs/LODGEN_TERRAIN_VT.md 1), so
+  drawing it lit would tint the ground twice. Nothing in the cell view grows far cover.
+- **Far lights: owed.** They need a whole-map far-light bake (WW_CELL_FARLIGHT=<dir>; none exists). That is a rebake.
+- **Cost (LATE ITEM 22 (1)).** Before, WW_LODL_AO=1 dropped the ring to the flat copy: 143 B a triangle against 16,
+  +440 MB, and SHOTS1101's lit launch was killed by the memory guard at 19 GB. Now the AO and the sky add 2 bytes a
+  (placement, vertex) to the instanced ring, and no geometry is copied.
+- **Far emissive at night (LATE ITEM 22 (2)): a bake gap, not a draw bug.** MEASURED (tools/emitmats.py, notes): the
+  installed Commonwealth.lodo has 1 emitting material of 204, BNS AspenAtlas01LOD.BGSM at scale 0.05. The LOD materials
+  carry no window or lamp emissive, so nothing far can glow. The fix is in lodgen (carry the full model's glow into the
+  LOD material) plus a rebake: owed.
+- **Far ground channel views (LATE ITEM 22 (4)).** WW_LODL_CHANNEL=mask-r/-g/-b/-a and `ao` now reach the cell view's
+  far ground too, through the same sampler. An object view leaves the ground lit without its AO.
+- **Live.** All four keys sit in liveFarKey (src/cellview.cpp). A live set of a pin rebuilds the far tail in
+  place. The stage table rows are at 0 (tools/wwswitch_survey.py OVERRIDES, FIX1101A lodch).
+- **Reds.** WW_LODL_AO_RED=off: the AO rule before this change (objects and ground, only with WW_LODL_AO=1).
+  WW_LODL_SKY_RED=off: no sky term (today). WW_LODL_SKY_RED=raw: the raw byte as the factor (the twin's second red).
+- **Census lines.** "far lod: objects ring N channels: AO on (P placements from the per-vertex stream, F from self x
+  placement AO, stream mean M), sky on (P placements, V vertices, factor mean G, raw byte mean S); T stream texels". The
+  same line is printed by `-no-gui farobjcensus`.
+- **Gates.** See the lane's hand-back for the numbers: tests/lodchsky and tests/lodchused, three shader sweeps, and
+  the build.
 
 ## FOAMOFF (FIX1101A, 2026-10-31): River foam and Contact foam ship OFF again
 
@@ -55,6 +182,173 @@ spot 6). Every change ships ON; the old path is a red. Gates offline through the
   (river, contact, whitecaps) only on water: x the soft edge's water share, nothing over a column under 4 u (0 samples on
   the dry bank vs 73921). Rows ON under new keys WW/CellWaterContact3, WW/CellWaterRiverFoam3. Red
   WW_CELL_WATER_RIVERFOAM_RED=paint. tests/waterfoam2; tests/waterlook2's river foam cover band 0.03 -> 0.015 (lace).
+## FIX1101A moon (2026-11-01): the moon lit like the sun, no step at dusk, no ghost sun, the phase from the ephemeris
+
+- bungo 11-01: "make sure it works well with the moon too", "moon would provide pretty dim light, so make sure its
+  accurate", "why is moon separate from the sun?". The night light IS the cell view's one key light (lookdevstage.cpp
+  computeLight -> fogSunColour / cellDirColor): the moon already took the fog-sun rule of 30dfaadd (only the derived
+  ground layer dims it; the air, the surfaces, the puffs and the WEATHERLOOK1 rain / snow particles through vpLight).
+  Three faults on top, measured on a twin of computeLight (tests/moonlight1101a, DefaultClimate TNAM 30,54,102,126,
+  fSunAlphaTransTime 0.15, fSunShadowMinAngle 30, CommonwealthClear, game day 0, the look env: Sunlight From Sky Full,
+  Moon Phase and Stars on, Sun Path Real):
+  1. the ghost sun: under Sun Path Real the light slerped after the real sunset (17:12) toward the ENGINE's light, which
+     is still its day sun (>= 27.6 deg, the fSunShadowMinAngle floor) at the Day key until the engine's D (19:04:30):
+     the ground lit at 0.656 (86 % of 16:00's) under a dark twilight sky, 17:25-19:04;
+  2. a x14 drop at D (the key switched Day -> Night key, and the phase factor), and at A in the morning;
+  3. the game-clock moon's phase was the vanilla 8-step one (45 degree steps at midnight every 4 game days).
+- Fix (ships ON, gl/moonlight.h): sun part = the Day key through the air toward the REAL sun (0 under the horizon); moon
+  part = the Night key (the record = the full moon at 45 degrees as the night-adapted eye sees it) x Krisciunas &
+  Schaefer at OUR GLOBE's phase angle x the air toward our globe (no more the engine's floored arc) x a night weight
+  (0 at the horizon, 1 by -6 degrees); the light = their sum, its direction their luminance-weighted slerp. Our globe's
+  phase comes from the ephemeris elongation on the game's date and hour (skyephem.h), continuous; its light and its
+  drawn phase are one number (moonAlphaNow). Off Sun Path Real (or off Full) the keys crossfade geometrically over the
+  engine's own 9-minute sun-disc fade (x1.34 a minute) instead of switching at D.
+  A census line per change: `moon light: rule=physical sun_elev= night_w= moon=up|down moon_elev= alpha= ks= sun_lum=
+  moon_lum= light_elev=`.
+- Moonlight vs the sun (cited, notes/fix1101a/moon/MOON_TABLE.md): full moon 0.313 lx above the air (K&S 1991 eqs. 8-9),
+  sun 125.9 klx (V -26.74, NASA), ratio 2.49e-6 (albedo check 0.12 (R/d)^2 = 2.45e-6); quarter x0.091, crescent (135)
+  x0.012. Kyba et al. 2017 measured 0.26 lx at 55.5 deg. The record's Night key is 1/13.8 of its Day key: it bakes ~14.8 EV
+  of night eye adaptation in; the moon is never brighter than its record (gate anchor), the phase and elevation follow
+  the physics.
+- 24d(2), the drawn sun disc and our moon globe through the fog: the Volumetric Air's sky composite (cell_volsky.frag)
+  keeps clamp(T_air / T_sky) of the sky behind it, the bands included, while the light (30dfaadd) takes only the
+  ground layer: Foggy noon at c3 the seen disc was x0.274 of its light's dimming (the moon at 00:00 x0.422; Clear 1.00).
+  Fix (ships ON): the disc and the globe take a gain before the composite, gl/moonlight.h discAirGain =
+  max(T_layer, T_sky / T_band), from the last air pass's medium (cellvolair.cpp wwVolAirMediumNow) at the camera's
+  fog-frame height: they end dimmed as their light. atmo_sky.frag atDiscAir (unset = 1), the globe's sunTerm /
+  earthTerm x WwAtmoFrame.moonDiscAir. Sky line: `,disc_air=<sun>/<moon>`. Red (live): WW_ATMO_DISC_RED=airband (gain 1).
+- Red (live): WW_MOON_RED=handover (the old switch at D + the ghost sun), phase8 (the vanilla 8-step phase), vanilla
+  (both). Stage table: WW_MOON_RED stage 0.
+- Unit tests/moonlight1101a/run.sh: green handover 0.00736 a minute = the real sun's own (red 0.604 at 19:04), ghost 0
+  (red 0.657 at 17:46), anchor 1.000, phase step 0.096 deg / 10 min (red phase8 45), engine path x1.415 a minute (red
+  x13.8), Foggy 00:00 moon 33.7 % of the record (red suncolumn 8.7 %), disc-fog 1.000 (red airband 0.274), header dump
+  vs twin 3e-6 (relative). The rain / snow particles (WEATHERLOOK1 cell_precip.frag) are lit by vpLight with the air's
+  medium uniforms (airSunLayer): the same sun / moon through the same rule (code read, no change). Sweeps base 405 /
+  RTDDGI 270 / PRT 405, not ok 0.
+
+## FIX1101A atmo (2026-11-01): the night horizon stripe
+
+- SHOTS1101's spot 3 at 22:00 (sheet_lod_proof.png): a flat dark band (18,19,21) between the night sky's horizon glow
+  (25,40,60) and the far land (36,59,90), hard edges. Owner: HORIZONBAND1's band (cell_volsky.frag) coloured the sky
+  pixels under the horizon with the aerial perspective's far-end colour alone, while the clipped far terrain under it
+  fades through the surfaces' whole fog path (the aerial perspective then the Volumetric Air's residual). By day the
+  aerial perspective leads there and the two meet; at night the air carries the weather's night ambient and the
+  aerial perspective (sun / moon scattering only) does not, so the band was nearly black.
+- Fix (ships ON, rule 2): the band's colour = what a black surface at the far plane gets through wwFog (the surfaces'
+  own path), the colour the far terrain under it fades to, day or night. Red (live): WW_ATMO_AP_RED=apband (rule 1);
+  skyclamp (rule 0) as before.
+- Unit tests/nightband1101a/run.sh (display-space twin of the band on the 22:00 frame's own column, HORIZONBAND1's
+  method; the far-plane colour taken from the far land at the silhouette, a proxy): green step 6.4 levels, the band 2.8
+  over its darker neighbour; red apband 15.7 / 15.3 under: FAIL. Sweeps base 405 / RTDDGI 270 / PRT 405, not ok 0.
+
+## FIX1101A atmo (2026-11-01): the sun through the fog (shafts in thick fog), and a test white balance
+
+- The fog-sun fault (bungo's thick-fog midday picture, hold h2 c3 CommonwealthFoggy 12:00: no shafts, the ground's sun/
+  shade contrast 1.59 vs Clear's 5.48). FOGSUN1 dimmed the sun by the air's WHOLE fitted column up to the scene's top
+  (its tallest shape) in the air (cell_airmed.glsl airTup), on the surfaces (lookdev_fog.glsl wwVolAirSunT) and on the
+  puffs (cell_volpart.glsl): with the frame's medium Ts 0.026 at the street, on top of a weather Sunlight colour that is
+  already the sun that weather gives the ground. Now (ships ON) only the derived ground layer (the .recx groundFog /
+  FOGHEIGHT1 layer) dims the sun: the bands ARE the records' fog. Twin on the frame's own numbers (tests/fogsun1101a):
+  Foggy noon Ts 0.026 -> 0.197, lit / shadowed air column 1.08 -> 1.62 (bar 1.25), ground sun 2.6 % -> 19.7 % of the
+  record (bar 10 %); Clear noon Ts 0.674 -> 0.999 (FOGSUN1 had dimmed Clear's ground sun to 67 % in the look env too).
+  Red (live): WW_CELL_AIR_RED=suncolumn (cellvolair.cpp sunColumn: uniform airSunLayer false, volAirFlags bit 128 off).
+- The froxels themselves keep shafts (notes/fix1101a/atmo/tools/shafts.py: froxels vs a brute-force march with the
+  shadow geometry at true 1080p: shadow deficit kept 1.00, shape 0.998-0.999, mean error 0.1-0.4 %).
+- WW_CELL_WB (commit dc19aa02, a TEST key for bungo's tan-cast three-way sheet, not a default): day45 balances the frame to
+  the 45-degree sun's daylight through the drawn sky's air; off = x 1 exactly. notes/fix1101a/atmo/TAN_TRACE.md.
+- Gates: link sweeps base 405, RTDDGI none,ubo 270, PRT 405 (not ok 0); unit tests/fogsun1101a/run.sh green + red;
+  stage table regenerated (line numbers; WW_CELL_WB live, WW_CELL_AIR_RED live as before).
+
+## FIX1101A atmo (2026-10-31): the physical sky's multiple scattering at the horizon, and a night sky floor
+
+The full-day audit (notes/fix1101a/atmo/ATMO_TABLE.md): the physical sky drawn by the real shaders against an
+independent Monte Carlo of the same medium (all orders, the Earth's shadow exact) at sun -18..+60 deg, and against
+published clear-sky values. The sun (illuminance 103.7 klx at 60 deg, CCT 5665 / 3847 / 2013 K at 60 / 10 / 2 deg),
+the zenith (-12..+20 %), the Belt of Venus and the twilight darkening are in tolerance. Two faults are fixed here:
+
+- F1, the multiple-scattering LUT's rows (ships ON): the 3-degree horizon read 20-37 % under the Monte Carlo at sun 0..35
+  because the MS LUT's first row above the ground sat at 3.2 km and its 20 uniform steps put the first sample 25 km
+  out, so the weather's 0.1-1 km haze layer had no row. res/shaders/atmo_common.glsl (atMsUv, atMsRowToH): rows at
+  sqrt(height / 100 km); atmo_ms.frag: 40 steps packed toward the texel. Horizon mean error 24.8 -> 18.0 %, worst
+  -33.5 -> -26.4 %. Red (live): WW_ATMO_RED=msold (atmosphere.cpp medium() sets atMsOld for every atmo pass; the LUT
+  key carries msold so a live set rebuilds the table; the sky line echoes RED=msold).
+- F2, the night sky's own light (ships ON): at sun -18 the moonless sky read 6.3e-6 cd/m2 at the zenith, 30-160x under
+  the natural night sky (airglow, zodiacal light, unresolved stars: 1.7e-4..4.3e-4 cd/m2, Leinert et al. 1998).
+  atmo_sky.frag adds atFloor = gl/atmomath.h kNightFloor (zenith 3.8e-4 cd/m2), van Rhijn's slant factor for a 90 km
+  shell, times the view ray's transmittance (0 into the ground: no horizon edge). ~1e-7 of the day zenith: no daytime
+  change (4.4e-7 of the zenith at sun 10). Red (live): WW_ATMO_RED=nofloor.
+- Not fixed (leftovers in ATMO_TABLE.md sec. 8): the Earth's shadow at civil twilight (anti-sun sky 1.4-2.8x at sun
+  -3..-6, Hillaire's isotropic MS inside the shadow), the remaining -18..-27 % horizon at sun 2-10, a spectral sky.
+- Volumetric air (LATE ITEM 14), no code change: the froxels against a brute-force march with the shadow geometry keep
+  the shafts (shadow deficit 1.00, shape 0.998-0.999, mean error 0.1-0.4 %, no slice staircase); strength per weather
+  (Foggy 06:00 V 0.24 km glows, Clear noon V 7.4 km faint) from the records (notes/fix1101a/atmo/tools/shafts.py,
+  fogstrength.py).
+- Unit: tests/atmofix1101a/run.sh (real shaders in the hidden GL context, Monte Carlo fixture mc_ref.tsv): green GATE OK;
+  red msold fails ms-horizon-mean / -worst; red nofloor fails floor-zenith / floor-anti30.
+- Gates: build rc 0 (exe literals atMsOld, atFloor, nofloor, ",msold" UTF-16 present); link sweeps base 405, RTDDGI none,ubo 270, PRT 405 (not ok 0). src/wwswitchstages.inc
+  regenerated (line numbers only; WW_ATMO_RED stays live).
+## TMAP1101A (FIX1101A area T, 2026-11-01): the cell view's tone curve is Fusion Shaders' Physical operator
+
+- bungo 11-01: "Fusion Shaders has the physical tonemapper, do we have it? ... if not, add it and use it". The cell view's
+  one tone map (cell_lights.glsl cellImageSpace, the HDR pass and the per-fragment fallback alike) now runs FO4CS's
+  Physical curve (res/shaders/cell_tonemap.glsl, ported from FO4CS res/Post/TonemapCS.hlsl: F4FX_PhysicalCurve, the
+  ICtCp chroma fade, F4FX_TonemapPhysical in its SDR output mode; GT7 sample by Polyphony Digital, MIT, notice in
+  LICENSE.md) with FO4CS's defaults: paper white 250 nits, blend 0.60, chroma fade 0.98..1.16, reference 100 nits,
+  curve alpha 0.25 / mid point 0.538 / linear section 0.444 / toe 1.280. Ships ON. Only the curve changed: the bloom
+  add, the exposure / eye adaptation, the weather's grade (cine / tint), the 1 / 2.2 and the LUT are the game's, in the
+  same order. The curve takes the exposed light (the filmic curve's own 2 x input bias is not applied to it). The glow's
+  place on the curve (cell_hdr.frag cellCurveW / cellCurveInv, GLAREBLOW2) follows: the Physical grey axis and its inverse.
+- Red WW_TONEMAP_RED=vanilla: the game's filmic curve (HNAM E at W 11.2) as before. Read per draw (live, stage 0 in
+  src/wwswitchstages.inc); `switch: tonemap red vanilla on|off` echo, and the imagespace echo ends `curve=physical|vanilla`.
+  No menu row, not a Show toggle.
+- Unit tests/tonemap1101a (run.sh): the real cell_tonemap.glsl + cellImageSpace + cellCurveW/Inv through the driver vs a
+  numpy port of the HLSL (physical.py) over a grey ramp 0..64 x paper white, 24 Macbeth-ish patches at 1/16..64 x and six
+  saturated ramps (3800 inputs): green display max error 0.461 / 255 (bar 1 / 255), exposure-0.37 case the same, grey axis
+  0.002 / 255, inverse round trip 5.4e-5 rel; reds FAIL: --red vanilla (255 / 255 on saturated highlights, grey 46 / 255)
+  and the base c0a30fab's shader files. Link sweeps 405 / 270 / 405 LINK OK.
+
+## GI1101A (FIX1101A area G, 2026-10-31): the bounce read hands over like the surfaces, the albedo rebuilds the volume, the cascades' boxes
+
+- Bounce read (leftover of FIX1031B's cover rule; ships ON): a probe ray's hit takes the volume's irradiance by the same
+  fade x cover the surfaces take, the flat ambient for the rest (src/rtddgimath.h flatAmbient + bounceIrradiance, the twin
+  src/rtddgi.cpp, src/rtddgi/trace.comp ddgiIrradianceAt + trace.spv.h). Before, the bounce renormalised over the usable
+  corners and fell to BLACK where none was usable: the trunks' hard plane, one bounce on. flatAmbient = the sky cube's own
+  axis irradiance x n^2 (0 without a sky: an interior volume's void is never sky). Red WW_CELL_RTDDGI_BOUNCE_RED=1 (live:
+  in the build key, a set rebuilds the volume; CLI --red bouncenocover). Unit tests/rtddgi_math check `bounce` (green 27
+  + 27 reds): walking up a trunk past the top usable layer the bounce's largest step is 0.0025 of the gap (bar 0.01), past
+  it the flat ambient 0.15708 = 0.15708; red RTDDGI_RED_BOUNCE / the runtime red: step 1.4738 of the gap, black past it;
+  flat ambient vs the cube's integral on the 6 axes worst rel 2.7e-06. tests/spvsync PASS 8.
+- Build key holds the soup's albedo (ships ON): manager hold h1 (10-31) showed a WW_SOUPALB_RED reopen rebuilt the soup
+  grey but NOT the volume (no "rebuilding" line: the same soup slot and triangles gave the same key), so SOUPALB1's
+  after / grey pair compared one volume with itself (240 px). The key now mixes the albedo's size and ~1024 sampled
+  triangles. Red WW_CELL_RTDDGI_RED=noalbkey. Unit tests/rtddgikey (source rule) green; red = main 9b443dcf's file FAIL.
+- WW_CELL_RTDDGI_VIEW_BOXES=1 (debug, live, off by default; LATE ITEM 9 "the pic of it covering further areas"): every
+  cascade's probe box drawn as its 12 edges over the frame (0 white, 1 yellow, 2 orange, 3 red; no depth test), census
+  line `rtddgi cell: boxes` with each box in metres. The probe dots of a coarse cascade (WW_CELL_RTDDGI_VIEW_CASCADE)
+  now reach 3000 u x 2^cascade (was 3000 u for all).
+- The surfaces' read costs less, bit for bit (ships ON; manager hold 1 part C, c3 still_close5: the opaque pass 12.4 ms
+  GI off, 54.7 one volume, 110.9 cascades): cell_lights.glsl cellGiSample keeps a per-fragment memo (the programs asked
+  for the same (P, N) 2-3 times: cellGiSkyK and cellLit's cellGiE / the PBR ambient now share one read), and a cascade
+  outside its tight box returns before its probes' fetches (cell_ddgi.glsl cellDdgiReadOne, MIRROR rtddgimath.h
+  sampleVolume), and the specular occlusion's lobe visibility rides the surfaces' read (cellDdgiTwo / vis2: the same
+  8 probes and weights, 4 fetches a probe for the lobe instead of a second read; cellSpecSky fills the memo). Red
+  WW_CELL_RTDDGI_RED=slowread (every call reads in full). Unit checks (green 29 + 29 reds): `readonce` 0 of 8000 answers
+  differ, the GLSL read's texel fetches 188.0 -> 10.3 (uniform points), 153.6 -> 83.0 (near-weighted); `lobe` the lobe
+  visibility equals a separate read (worst 0), the two reads' fetches 156.6 -> 111.3. A fragment's reads: 3 -> 1.
+  Live ms owed (notes/fix1101a/gi/cost_rows.txt). Link sweeps: base 405/405, +RTDDGI 270/270, +RTDDGI+CASCADES 270/270,
+  +PRT 405/405.
+- Interiors (LATE ITEM 17, bungo 11-01 "they have a sky, but it's fake ... only the fake lights do"): an interior's volume
+  takes no sky and no sun (misses 0, no sun ray), whatever its Show Sky / Use Sky Lighting flags; the placed lights and
+  the cell's directional stay. Red WW_CELL_RTDDGI_INTSKY_RED=1 (SKYINT1's weather sky + sun). Census line `rtddgi cell:
+  interior (...)`. One-sided back faces were already hits in the trace (radiance 0, distance -0.2 t). The surfaces'
+  weather DALC / fog in Use Sky Lighting interiors (SKYINT1, celllights.cpp) is unchanged here.
+- GI sky from the physical sky (LATE ITEM 15d), SHIPS OFF: WW_CELL_RTDDGI_SKY=physical (live: in the build key via the
+  sky) gives an exterior volume the physical sky's irradiance on the six axes (src/gl/atmomath.h skyRadianceSingle /
+  skyIrradianceAxes, single scattering, the sky above the horizon; src/gl/atmosphere.cpp wwAtmoGiSkyAxes, memo on sun +
+  haze), +Z scaled to the weather's luminance, -Z the weather's. Off by default because the measure argues against it
+  for bungo's tan: at CommonwealthClear's DALC and a 30 deg sun the physical sides are LESS blue (R/B 0.41-0.48) than the
+  weather's (0.34; zenith 0.33 both), the sun side 1.47x the anti-sun side. Unit tests/gisky (green 3; red = the weather's
+  DALC fails `sunside`).
 
 ## HORIZONBAND1 (FIX1031B area A, 2026-10-31): the horizon blends - no cyan strip with a hard top edge
 

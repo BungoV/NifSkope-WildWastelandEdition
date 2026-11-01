@@ -14,10 +14,13 @@ void main()
 {
 	vec2 uv = gl_FragCoord.xy / atMsSize;
 	float mus = atSubToUnit( uv.x, atMsSize.x ) * 2.0 - 1.0;
-	float r = kRb + max( 0.01, atSubToUnit( uv.y, atMsSize.y ) * ( kRt - kRb ) );
+	float r = kRb + max( 0.01, atMsRowToH( atSubToUnit( uv.y, atMsSize.y ) ) * ( kRt - kRb ) );
 	vec3 s = vec3( sqrt( max( 0.0, 1.0 - mus * mus ) ), 0.0, mus );
 	const int K = 8;
-	const int N = 20;
+	/* lane FIX1101A (atmo): 40 steps packed toward the texel's point (t = d (i / N)^2): the haze layer sits in the first
+	 * km of a ray up to 1000 km long, where 20 uniform steps put their first sample 25 km out. Red msold: 20 uniform. */
+	bool old = atMsOld > 0.5;
+	int N = old ? 20 : 40;
 	vec3 L2 = vec3( 0.0 ), F = vec3( 0.0 );
 	for ( int a = 0; a < K; a++ ) {
 		for ( int b = 0; b < K; b++ ) {
@@ -30,6 +33,11 @@ void main()
 			vec3 thr = vec3( 1.0 ), L = vec3( 0.0 ), f = vec3( 0.0 );
 			for ( int i = 0; i < N; i++ ) {
 				float t = ( float( i ) + 0.5 ) * dt;
+				if ( !old ) {
+					float a0 = float( i ) / float( N ), a1 = float( i + 1 ) / float( N );
+					dt = d * ( a1 * a1 - a0 * a0 );
+					t = d * 0.5 * ( a0 * a0 + a1 * a1 );
+				}
 				vec3 p = vec3( v.xy * t, r + v.z * t );
 				float rp = length( p );
 				vec3 rs, ms, e;

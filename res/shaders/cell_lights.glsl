@@ -96,9 +96,14 @@ uniform float cellIsE;				// HNAM Tonemap E: the curve's toe numerator
 uniform float cellIsAdapted;		// the frame's mean luminance, the contrast pivot
 uniform vec3 cellIsCine;			// CNAM saturation, brightness, contrast
 uniform vec4 cellIsTint;			// TNAM amount, r, g, b
+// lane FIX1101A (atmo, LATE ITEM 15c cause 10): a camera white balance on the linear light, gain - 1 per channel; 0
+// (unset, WW_CELL_WB off: the shipped default) multiplies by exactly 1. WW_CELL_WB=day45 balances to the 45-degree sun's
+// daylight through the frame's air (atmosphere.cpp wwAtmoWbGain); a test key for bungo's three-way sheet, not a default.
+uniform vec3 cellIsWbD;
 uniform bool cellIsLutOn;
 uniform sampler3D cellIsLut;
 uniform int cellIsRed;				// 1 nolut, 2 noexp, 4 nograde, 8 nobloom (the CPU drops cellIsBloomOn)
+uniform bool cellIsVanCurve;		// lane FIX1101A T: WW_TONEMAP_RED=vanilla, the game's filmic curve (else Physical)
 // the measure's blurred bright pass, a quarter of the view; rect = viewport origin, 1 / size
 uniform bool cellIsBloomOn;
 uniform sampler2D cellIsBloom;
@@ -145,7 +150,11 @@ uniform sampler2DMS cellFogBloom;
 float cellBloomGain = 1.0;
 #endif
 
+#include "cell_tonemap.glsl"
+
 // sqrt-of-linear in (this program's convention), display out. Shaders011.fxp, the tonemap PS and the LUT PS.
+// lane FIX1101A T (LATE ITEM 26): the curve is Fusion Shaders' Physical (cell_tonemap.glsl) on the exposed light; the
+// bloom, the exposure, the grade, the 1 / 2.2 and the LUT are the game's, in the same order. Red: cellIsVanCurve.
 vec3 cellImageSpace( vec3 sqrtColor )
 {
 	vec3 x = max( sqrtColor, vec3( 0.0 ) );
@@ -160,13 +169,18 @@ vec3 cellImageSpace( vec3 sqrtColor )
 #endif
 #endif
 	x = x * ( ( cellIsRed & 2 ) != 0 ? 1.0 : cellIsExposure ) * 2.0;
+	x *= vec3( 1.0 ) + cellIsWbD;	// lane FIX1101A: the white balance (x 1 exactly by default)
 #if defined( WW_CELL_HDR )
 	if ( cellIsFoBloomOn )	// FO4CS adds its bloom to the exposed light, before the curve (x 2: the curve's input)
 		x += 2.0 * cellBloomGain * cellFoBloomHere;
 #endif
-	float E = cellIsE;
-	vec3 c = ( x * ( 0.15 * x + 0.05 ) + 0.2 * E ) / ( x * ( 0.15 * x + 0.5 ) + 0.06 ) - E / 0.3;
-	c /= ( 0.2 * E + 19.376 ) * 0.040856 - E / 0.3;		// the curve at W 11.2
+	vec3 c;
+	if ( cellIsVanCurve ) {
+		float E = cellIsE;
+		c = ( x * ( 0.15 * x + 0.05 ) + 0.2 * E ) / ( x * ( 0.15 * x + 0.5 ) + 0.06 ) - E / 0.3;
+		c /= ( 0.2 * E + 19.376 ) * 0.040856 - E / 0.3;		// the curve at W 11.2
+	} else
+		c = wwTonemapPhysical( 0.5 * x );	// x is 2 x the exposed light: the filmic curve's own input bias
 	if ( ( cellIsRed & 4 ) == 0 ) {
 		float luma = dot( c, vec3( 0.2125, 0.7154, 0.0721 ) );
 		c = mix( vec3( luma ), c, cellIsCine.x );
@@ -1243,16 +1257,37 @@ vec4 cellGiSample( vec3 P, vec3 N )
  * branches below and in the programs (the PBR ambient, cellGiSkyK) stay the no-GI ones before the volume is up or with
  * it off. Defined here, after cellDdgiOn: the grid's helpers above never run without the PRT. */
 #define cellGiSky ( cellGiSky && CELL_GI_UP )
+#ifdef WW_CELL_RTDDGI
+/* FIX1101A (manager hold 1 part C, c3 still_close5: the opaque pass 12.4 ms GI off, 54.7 one volume, 110.9 cascades): one
+ * read a fragment. A program asks for the sample at the same (P, N) two or three times (cellGiSkyK, cellLit's cellGiE,
+ * the PBR ambient); the first call keeps its answer and a later call at the same point returns it, bit for bit (same
+ * inputs, same value). Red WW_CELL_RTDDGI_RED=slowread (cellDdgiRed & 16): every call reads (today's main) */
+bool cellGiMemoOk = false;
+vec3 cellGiMemoP = vec3( 0.0 );
+vec3 cellGiMemoN = vec3( 0.0 );
+vec4 cellGiMemoS = vec4( 0.0 );
+#endif
 vec4 cellGiSample( vec3 P, vec3 N )
 {
 #ifdef WW_CELL_RTDDGI
 	if ( !cellDdgiOn )
 		return vec4( 0.0 );
+	if ( cellGiMemoOk && ( cellDdgiRed & 16 ) == 0 && P == cellGiMemoP && N == cellGiMemoN ) {
+		if ( cellGiMemoS.a > 0.0 )
+			cellGiPath = 12;
+		return cellGiMemoS;
+	}
 	CellDdgiOut d = cellDdgiRead( P, N, normalize( vec3( cellRow[0].w, cellRow[1].w, cellRow[2].w ) - P ), N );
-	if ( !( d.w > 0.0 && d.fade > 0.0 ) )
-		return vec4( 0.0 );
-	cellGiPath = 12;
-	return d.fade * ( cellPass == 2 ? vec4( vec3( d.vis ), 1.0 ) : vec4( d.E, 1.0 ) );
+	vec4 s = vec4( 0.0 );
+	if ( d.w > 0.0 && d.fade > 0.0 ) {
+		cellGiPath = 12;
+		s = d.fade * ( cellPass == 2 ? vec4( vec3( d.vis ), 1.0 ) : vec4( d.E, 1.0 ) );
+	}
+	cellGiMemoOk = true;
+	cellGiMemoP = P;
+	cellGiMemoN = N;
+	cellGiMemoS = s;
+	return s;
 #else
 	return vec4( 0.0 );
 #endif
@@ -1413,10 +1448,25 @@ float cellSpecSky( vec3 P, vec3 N, vec3 R, float rough )
 	float v = 1.0 + ( f < 1.0 ? f * cellSkyVis : cellSkyVis ) * ( clamp( a.x / a.y, 0.0, 1.0 ) - 1.0 );
 #elif defined( WW_CELL_RTDDGI )
 	// lane PRTOFF1: the volume's sky visibility on the lobe's direction (RTXGI1 M2's read with no grid under it: 1 past the box)
-	CellDdgiOut dv = cellDdgiRead( P, N, normalize( vec3( cellRow[0].w, cellRow[1].w, cellRow[2].w ) - P ), D );
-	if ( !( dv.w > 0.0 && dv.fade > 0.0 ) )
+	/* FIX1101A (the read's cost): one read at the normal also takes the lobe's visibility with the same weights (vis2),
+	 * and leaves its answer for cellGiSample at this (P, N) (the memo): the surfaces' sample costs no second read. Red
+	 * WW_CELL_RTDDGI_RED=slowread: the lobe's own read, as before */
+	vec3 oSky = normalize( vec3( cellRow[0].w, cellRow[1].w, cellRow[2].w ) - P );
+	bool fast = ( cellDdgiRed & 16 ) == 0;
+	cellDdgiTwo = fast;
+	cellDdgiD2 = D;
+	CellDdgiOut dv = cellDdgiRead( P, N, oSky, fast ? N : D );
+	cellDdgiTwo = false;
+	bool ownSky = dv.w > 0.0 && dv.fade > 0.0;
+	if ( fast ) {
+		cellGiMemoOk = true;
+		cellGiMemoP = P;
+		cellGiMemoN = N;
+		cellGiMemoS = ownSky ? dv.fade * ( cellPass == 2 ? vec4( vec3( dv.vis ), 1.0 ) : vec4( dv.E, 1.0 ) ) : vec4( 0.0 );
+	}
+	if ( !ownSky )
 		return 1.0;
-	float v = 1.0 + dv.fade * cellSkyVis * ( clamp( dv.vis, 0.0, 1.0 ) - 1.0 );
+	float v = 1.0 + dv.fade * cellSkyVis * ( clamp( fast ? dv.vis2 : dv.vis, 0.0, 1.0 ) - 1.0 );
 #else
 	float v = 1.0;
 #endif

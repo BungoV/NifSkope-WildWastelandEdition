@@ -103,6 +103,20 @@ float airTup( float z, float mu )
 	return exp( -airMed.x * airCol( z, airMed.w ) / mu );
 }
 
+/* lane FIX1101A (atmo, the fog-sun fault): the SUN's transmittance to height z. airSunLayer (shipped; set by
+ * cellvolair.cpp, false under the red WW_CELL_AIR_RED=suncolumn) = only the derived ground layer dims it: the bands are
+ * the records' fog and the weather's Sunlight colour is already the sun it gives the ground. The whole column to the scene
+ * top (airTup) took Foggy noon at c3 to 0.026: no shafts. lookdev_fog.glsl wwVolAirSunT (flag 128) is the surfaces' twin. */
+uniform bool airSunLayer;
+float airTupSun( float z, float mu )
+{
+	if ( !airSunLayer )
+		return airTup( z, mu );
+	if ( z >= airMed.w || airLayer.w <= 0.0 )
+		return 1.0;
+	return exp( -airMed.x * airLayer.w * wwAirColOne( z, airMed.w, airGround.x + airGz, airGround.y ) / max( mu, 0.02 ) );
+}
+
 /* the six-axis cube at P, axis a = +X -X +Y -Y +Z -Z, in the surfaces' GI unit (lane VOLFOG1b): a froxel is a point in
  * the air, not a surface; the voxels of P's room only, an axis with no weight takes the grid's plain trilinear.
  * share[a] = the grid's valid share there (the ambient's replace rule).
@@ -284,4 +298,22 @@ vec3 airEnvColour( vec3 J, float t, float z, vec3 dirView )
 	bool ok;
 	vec3 c = wwAirRecordColour( t, z, dirView, ok );	// lookdev_fog.glsl, at unit luminance
 	return ok ? dot( J, vec3( 0.2126, 0.7152, 0.0722 ) ) * c : J;
+}
+
+/* lane FIX1101A (bungo 11-01, fog not shadowed by buildings): the air's ENV share (sky, GI, ambient: unshadowed by
+ * design) takes the records' fog colour only, without the fog-sun glare; the glare hue stays on the sun's share,
+ * which carries the shadow (airSun x vis). Before, every sample looking toward the sun took the glare hue whether or
+ * not the sun reached it: shadowed air in front of a facade glowed orange. airEnvFogHue is set by cellvolair.cpp
+ * (shipped on); red WW_CELL_AIR_RED=envhue (or physcol) brings the old hue on the env share. */
+uniform bool airEnvFogHue;
+vec3 airEnvColourEnv( vec3 J, float t, float z, vec3 dirView )
+{
+	if ( !airEnvFogHue || ( volRed & 256 ) != 0 )
+		return airEnvColour( J, t, z, dirView );
+	float hb;
+	vec3 fc;
+	wwFogEval( t, z, hb, fc );
+	fc = max( fc, vec3( 0.0 ) );
+	float lc = dot( fc, vec3( 0.2126, 0.7152, 0.0722 ) );
+	return lc > 1e-8 ? ( dot( J, vec3( 0.2126, 0.7152, 0.0722 ) ) / lc ) * fc : J;
 }

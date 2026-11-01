@@ -540,7 +540,15 @@ float wwVolAirSunT( vec3 posView )
 	if ( lo >= volAirMed.w )
 		return 1.0;
 	float mu = max( dot( fogView.xyz, fogSun.xyz ) / max( length( fogView.xyz ), 1e-12 ), 0.02 );
-	return exp( -volAirMed.x * wwAirCol( lo, volAirMed.w, wwAirGroundAt( posView ) ) * wwAirDriftSunK( posView, lo, mu, volAirMed.w ) / mu );
+	vec4 g = wwAirGroundAt( posView );
+	/* lane FIX1101A (atmo, the fog-sun fault): flag 128 (shipped) = only the derived ground layer dims the sun. The far and
+	 * near bands ARE the records' fog, and the weather's Sunlight colour is already the sun that weather gives the ground;
+	 * their column to the scene's top (its tallest shape) took Foggy noon at c3 to Ts 0.026 (no shadows, no shafts).
+	 * Red WW_CELL_AIR_RED=suncolumn clears the flag: the whole column, as before. cell_airmed.glsl airTupSun is the twin. */
+	float c = ( volAirFlags & 128 ) != 0
+		? ( volAirLayer.w > 0.0 ? volAirLayer.w * wwAirColOne( lo, volAirMed.w, g.x, g.y ) : 0.0 )
+		: wwAirCol( lo, volAirMed.w, g );
+	return exp( -volAirMed.x * c * wwAirDriftSunK( posView, lo, mu, volAirMed.w ) / mu );
 }
 
 vec3 wwFogBase( vec3 preFog, vec3 posView, float tAp, bool apOn );

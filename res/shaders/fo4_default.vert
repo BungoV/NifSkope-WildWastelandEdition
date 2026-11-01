@@ -59,6 +59,13 @@ layout ( location = 10 ) in vec4	farInstRow0;
 layout ( location = 11 ) in vec4	farInstRow1;
 layout ( location = 12 ) in vec4	farInstRow2;
 layout ( location = 13 ) in vec4	farInstExtra;
+/* lane FIX1101A lodch: the ring's per-vertex bake channels (gl/cellfarinst.cpp; src/cellmesh.h CellMeshInst::vstream).
+ * On, the row's .y holds the int bits of its first texel minus the sub's base vertex: + gl_VertexID = this vertex's
+ * RG8 texel, R the AO (into the colour, as the flat copy has it), G the ambient's sky factor (wwFarSkyVis). The
+ * sampler's unit is set at link (gl/glcontext.cpp). Off (every other draw): wwFarSkyVis 1, nothing read. */
+uniform bool farStreamOn;
+uniform samplerBuffer farStream;
+out float wwFarSkyVis;
 
 #include "bonetransform.glsl"
 
@@ -75,6 +82,7 @@ void main()
 	vec4 vc = vertexColor;
 	vec2 uv0 = multiTexCoord0;
 	vec2 farXY = vertexPosition.xy;
+	wwFarSkyVis = 1.0;
 	if ( farInst ) {
 		mat3 Mt = mat3( farInstRow0.xyz, farInstRow1.xyz, farInstRow2.xyz );	// n * Mt = M n
 		v.xyz = vec3( dot( farInstRow0, v ), dot( farInstRow1, v ), dot( farInstRow2, v ) );
@@ -87,6 +95,11 @@ void main()
 			uv0.x = farInstExtra.x - uv0.x;
 			e -= 2.0;
 		}
+		if ( farStreamOn ) {
+			vec2 ch = texelFetch( farStream, floatBitsToInt( farInstExtra.y ) + gl_VertexID ).rg;
+			vc.rgb *= ch.r * e;
+			wwFarSkyVis = ch.g;
+		} else
 		vc.rgb *= vec3( farInstExtra.yz, e );
 	}
 	if ( wwGrassWind2.w > 0.5 ) {

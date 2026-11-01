@@ -287,7 +287,7 @@ vec3 airSun( vec3 posView, vec3 dirView, float z )
 		float hard = airSunGate( cellWorldPos( posView ), to );
 		if ( hard > 0.0 )
 			vis = mix( vis, min( vis, airSunMapVis( posView ) ), hard );
-		float Ts = airTup( z, to.z );
+		float Ts = airTupSun( z, to.z );	// lane FIX1101A: the ground layer only (red suncolumn: the whole column)
 		if ( volDriftSun && volDrift.x > 0.0 )	// lane WEATHERBLEND4: the sun's light through the drifting air
 			Ts = pow( Ts, airDriftSunK( posView, z, to.z ) );
 		if ( volMs.x > 0.0 )
@@ -300,8 +300,8 @@ vec3 airSun( vec3 posView, vec3 dirView, float z )
 			: volCsm ? wwSunShadow( posView ) : airCloudShadow( posView );
 		float mu = dot( fogView.xyz, fogSun.xyz ) / length( fogView.xyz );
 		if ( volMs.x > 0.0 )
-			return fogSunColour.rgb * fogSun.w * airMsSum( vis, airTup( z, mu ), dot( dirView, fogSun.xyz ), 0.0, airMsA( z ) );
-		return fogSunColour.rgb * fogSun.w * vis * airTup( z, mu ) * volPhasePi( dot( dirView, fogSun.xyz ) );
+			return fogSunColour.rgb * fogSun.w * airMsSum( vis, airTupSun( z, mu ), dot( dirView, fogSun.xyz ), 0.0, airMsA( z ) );
+		return fogSunColour.rgb * fogSun.w * vis * airTupSun( z, mu ) * volPhasePi( dot( dirView, fogSun.xyz ) );
 	}
 	return vec3( 0.0 );
 }
@@ -721,7 +721,7 @@ void main()
 				so[q] = vec4( h[q].rgb, 1.0 );
 			}
 			if ( wq[q] > 0.0 )
-				acc += Tq[q] * wq[q] * airEnvColour( Jenv, t, zt, dirView ) AZ_TINT( q );
+				acc += Tq[q] * wq[q] * airEnvColourEnv( Jenv, t, zt, dirView ) AZ_TINT( q );	// lane FIX1101A: the env share without the sun glare
 			acc += Cq;
 		}
 		volMrt[0] = so[0];
@@ -746,7 +746,8 @@ void main()
 		if ( w > 0.0 ) {
 			float t = 0.5 * ( ta + tb );
 			float zt = zc + dzdt * t;
-			acc += T * w * ( Jrest + airEnvColour( Jenv + airSun( dirView * ( t / fogDistScale ), dirView, zt ), t, zt, dirView ) ) AZ_TINT( q );
+			// lane FIX1101A: the sun's share (shadowed) keeps the records' glare hue, the env share takes the fog colour only
+			acc += T * w * ( Jrest + airEnvColourEnv( Jenv, t, zt, dirView ) + airEnvColour( airSun( dirView * ( t / fogDistScale ), dirView, zt ), t, zt, dirView ) ) AZ_TINT( q );
 		}
 		T *= exp( -tau );
 	}

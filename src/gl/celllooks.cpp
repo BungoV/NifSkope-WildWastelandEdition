@@ -80,6 +80,9 @@ const LookRow kRows[] = {
 	{ "River foam", "WW/CellWaterRiverFoam3" },	// FIX1101A 11-01: OFF (h2 rvc6_on 1:1: still flat grey darts, not foam; lace + wet cut kept, tests/waterfoam2); new key over FOAMOFF (FIX1031B LATE ITEM 8: m/s flow, shallows + shoals)
 	{ "Underwater light", "WW/CellWaterUnderLight" },
 	{ "Precipitation", "WW/CellPrecip" },	// lane WEATHERLOOK1 B: ships off until bungo sees it
+	// FIX1101A lodch (LATE ITEMs 11 + 16 + 20): the LOD bake's channels drawn by default
+	{ "Far LOD baked AO", "WW/FarLodBakedAo", true },
+	{ "Far LOD baked sky light", "WW/FarLodBakedSky", true },
 };
 static_assert( sizeof( kRows ) / sizeof( kRows[0] ) == size_t( WwLook::Count ), "a row per look" );
 
@@ -329,6 +332,14 @@ QByteArray pinOf( WwLook l )
 		WW_SWITCH_STATIC( QByteArray, p, wwEnv( "WW_CELL_PRECIP" ).trimmed() );
 		return p;
 	}
+	case WwLook::FarLodAo: {
+		WW_SWITCH_STATIC( QByteArray, p, wwEnv( "WW_LODL_AO" ).trimmed() );
+		return p;
+	}
+	case WwLook::FarLodSky: {
+		WW_SWITCH_STATIC( QByteArray, p, wwEnv( "WW_LODL_SKY" ).trimmed() );
+		return p;
+	}
 	default:
 		return QByteArray();
 	}
@@ -401,6 +412,8 @@ const char * wwLookPinName( WwLook l )
 	case WwLook::WaterRiverFoam: return "WW_CELL_WATER_RIVERFOAM";
 	case WwLook::WaterUnderLight: return "WW_CELL_WATER_UNDERLIGHT";
 	case WwLook::Precip: return "WW_CELL_PRECIP";
+	case WwLook::FarLodAo: return "WW_LODL_AO";
+	case WwLook::FarLodSky: return "WW_LODL_SKY";
 	default: return "";
 	}
 }
@@ -416,13 +429,15 @@ bool wwLookReopens( WwLook l )
 	// ProbeClear moves probes at bake time: the cell's own bake runs again when it reopens
 	// lane LIGHTS4: the placement, region and particle emittance rows are read at draw time (live)
 	// lane LIGHTS5: the bounce emittance row relights from the bake's kept other state (probesky.cpp)
+	// FIX1101A lodch: the far LOD's baked AO and sky are written into its vertices and rows while it is built
 	return l == WwLook::ActorsOutdoors || l == WwLook::WeaponParts || l == WwLook::AnimObjects || l == WwLook::BtoSway
-		|| l == WwLook::ProbeClear;
+		|| l == WwLook::ProbeClear || l == WwLook::FarLodAo || l == WwLook::FarLodSky;
 }
 
 bool wwLookHasRow( WwLook l )
 {
-	return l != WwLook::AirClusters;
+	// LATE ITEM 25 (bungo 11-01): the LOD bake's channels have no row (always drawn; only the debug pins turn them off)
+	return l != WwLook::AirClusters && l != WwLook::FarLodAo && l != WwLook::FarLodSky;
 }
 
 bool wwLookBounceEmitRedStale()

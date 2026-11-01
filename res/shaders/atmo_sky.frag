@@ -20,6 +20,10 @@ uniform float atMoonK;	// pi * k for the moon; 0 = no moon term
 uniform float atLimb;	// 1 = limb darkening (High+)
 uniform float atDiscCap;	// the disc's display cap (scene units)
 uniform float atDiscHue;	// lane SKYDISC1: 1 = one scale for the whole disc (its centre to the cap): hue and limb kept
+/* lane FIX1101A (moon, LATE ITEM 24d(2)): the disc's gain through the Volumetric Air (gl/moonlight.h discAirGain): the
+ * air's composite keeps T_air / T_sky of the sky, the bands included, while the sun's light takes only the ground layer;
+ * the disc (and its cap) takes this gain first so that it ends dimmed as its light. <= 0 or unset = 1 */
+uniform float atDiscAir;
 uniform float sceneExposure;
 uniform int viewTransform;
 uniform float atTintOn;	// lane SKYA (ATMOCHECK1): 1 = the Sky Color row's Weather Tint
@@ -29,6 +33,10 @@ uniform vec2 atMsSize;
 uniform float atMsOn;
 uniform float atGround;
 uniform float atPerPixel;	// 1 = march per pixel instead of the sky-view LUT (the LUT's resolution measured against it)
+/* lane FIX1101A (atmo): the moonless night sky's own light (airglow + zodiacal light + unresolved starlight), per unit
+ * sun irradiance at the top like the LUTs, zenith ~4e-4 cd/m2 (natural dark sky 21-22 V mag / arcsec2, Leinert et al.
+ * 1998); 0 = the red WW_ATMO_RED=nofloor (the sky fell 30-160x under that at sun -18). gl/atmomath.h kNightFloor. */
+uniform vec3 atFloor;
 
 out vec4 fragColor;
 
@@ -72,6 +80,13 @@ void main()
 		if ( atMoonK > 0.0 )
 			c += atMoonK * atLookup( atMoonView, d, atMoonW );
 	}
+	if ( atFloor.g > 0.0 ) {
+		// the emitting shell at ~90 km seen slant (van Rhijn 1921): brighter toward the horizon, then dimmed by the air
+		// below it (the view ray's transmittance: 0 where the ray meets the ground, so no edge at the horizon)
+		float sz2 = 1.0 - d.z * d.z;
+		float vr = inversesqrt( max( 1.0 - 0.97226 * sz2, 0.02 ) );	// (6360 / 6450)^2
+		c += atSunK * atFloor * vr * atTrans( atTransTex, atCamR, d.z );
+	}
 	if ( atTintOn > 0.5 )	// the disc below keeps the physical color
 		c = atWeatherTint( c, degrees( asin( clamp( d.z, -1.0, 1.0 ) ) ) );
 	float cs = dot( d, atSunW );
@@ -83,13 +98,14 @@ void main()
 			limb = pow( vec3( sqrt( max( 0.0, 1.0 - x ) ) ), a ) * ( a + 2.0 ) * 0.5;
 		}
 		vec3 disc = atSunK * atTrans( atTransTex, atCamR, d.z ) * limb / kSunSolid;
+		float ga = atDiscAir > 0.0 ? atDiscAir : 1.0;	// lane FIX1101A: the air's gain (the cap capped first, as before)
 		if ( atDiscHue > 0.5 ) {
 			vec3 a = vec3( 0.397, 0.503, 0.652 );
 			vec3 centre = atSunK * atTrans( atTransTex, atCamR, atSunW.z ) * ( a + 2.0 ) * 0.5 / kSunSolid;
 			float m = max( centre.r, max( centre.g, centre.b ) );
-			c += disc * ( m > atDiscCap ? atDiscCap / m : 1.0 );
+			c += disc * ( m > atDiscCap ? atDiscCap / m : 1.0 ) * ga;
 		} else {
-			c += min( disc, vec3( atDiscCap ) );
+			c += min( disc, vec3( atDiscCap ) ) * ga;
 		}
 	}
 	fragColor = vec4( studioOutput( c ), 1.0 );

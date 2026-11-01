@@ -36,11 +36,24 @@ struct WwFarVanRing
 	qint64 terrainTris = 0, objectTris = 0, clipTris = 0, droppedTris = 0, shapes = 0;
 	qint64 snapped = 0, landRetyped = 0, skirtTris = 0;          //!< landRetyped: .btr LOD-landscape shaders drawn as the default type
 	qint64 btoSwayShapes = -1, btoSwayTrees = 0, btoSwayShared = 0;  //!< lane FAR5: Game LOD trees sway (-1: off)
+	//! lane FIX1101A lodch r2 (LATE ITEM 23): triangles whose arrays wait beside the document (src/cellmesh.h), charged
+	//! at the arrays' rate, not the rows' (red WW_CELL_FARLOD_RED=vanrows: 0, all rows)
+	qint64 sideTerrainTris = 0, sideObjectTris = 0;
 	double snapMax = 0.0;
 	std::vector<int> waterBlocks;                 //!< document blocks of water shapes (BSWaterShaderProperty)
 	bool stopped = false;                         //!< the budget stopped it
 	QStringList notes;
 };
+
+/*! lane FIX1101A lodch r2 (LATE ITEM 23): the far field's budget charge for the game's chunks, in MB: triangles still
+ *  held as document rows at 2560 B (FINALFIX g3: ~2.4 KB a triangle), triangles whose arrays wait beside the document
+ *  (src/cellmesh.h) at 256 B, the rate ours are charged at (cellfarlod.cpp kMergedBytesPerTri); the game's .bto chunks
+ *  measure 106-147 B a triangle as arrays (4 chunks, 126,116 triangles). Before r2 every triangle was a row. */
+inline double wwFarVanChargeMB( qint64 tris, qint64 sideTris )
+{
+	const qint64 side = sideTris < tris ? sideTris : tris;
+	return ( double( tris - side ) * 2560.0 + double( side ) * 256.0 ) / ( 1024.0 * 1024.0 );
+}
 
 /*! Appends each ring's vanilla chunks under `parent` (the caller holds updates and runs updateModel).
  *  `shift` is subtracted from every chunk root's translation. `landZ(wx, wy, &z)` gives the LAND's height

@@ -25,6 +25,7 @@ struct WwAtmoInputs
 	float moonLum = 0.0f;	//!< the Night sunlight luminance (the engine's night key light is the moon's)
 	float fogFar = 0.0f, fogMax = 0.0f, fogMid = 0.0f, fogRange = 10000.0f;	//!< game units; fogFar 0 = no haze
 	float camZ = 0.0f;	//!< game units
+	float camFogZ = 0.0f;	//!< lane FIX1101A (moon): the camera's height in the fog frame (over the lookdev ground), game units
 	bool disc = true;	//!< the sun disc (the Sun row)
 	float exposure = 1.0f;
 	int viewTransform = 0;
@@ -53,6 +54,7 @@ struct WwAtmoFrame
 	unsigned trans = 0, sunView = 0, moonView = 0;
 	int viewW = 0, viewH = 0;
 	unsigned long long frame = 0;	//!< wwAtmoApFrame's count when drawn
+	float moonDiscAir = 1.0f;	//!< lane FIX1101A (moon): our globe's gain through the air (gl/moonlight.h discAirGain)
 	bool tintOn = false;	//!< lane SKYDISC1: the Weather Tint drawn, with its table (the moon redraws the sky behind it)
 	float tint[17][3] = {};
 };
@@ -143,5 +145,12 @@ bool wwAtmoGiRedDome();
 bool wwAtmoGiRedCamZ();	//!< SKY3 red: the capture from the view camera's height, not the probes'
 
 QString wwAtmoSummary();
+
+/* lane FIX1101A (atmo, LATE ITEM 15c cause 10): a test camera white balance for bungo's three-way sheet (not a default).
+ * WW_CELL_WB (read per call, live): empty / off = 1, 1, 1 (the shipped picture, the shader multiplies by exactly 1);
+ * day45 = balanced to the 45-degree sun's daylight through the last drawn sky's air, gain = lum(T45) / T45 per channel
+ * (the weather's neutral Day key is that sun: a 45-degree sun then lights a white wall white); "r,g,b" = explicit gains.
+ * cell_lights.glsl cellImageSpace multiplies the exposed linear light by it (uniform cellIsWbD = gain - 1). */
+void wwAtmoWbGain( float out[3] );
 
 #endif
