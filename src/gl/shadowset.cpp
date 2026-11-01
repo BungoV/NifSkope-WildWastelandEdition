@@ -1764,6 +1764,16 @@ bool wwSunPathApply( double hour, double gameDay, float sunDir[3], float disc[3]
 	s.lastElevReal = e;
 	double night[3] = { sunDir[0], sunDir[1], sunDir[2] };
 	norm3( night );
+	/* lane INTSKY1 (bungo 11-01, LATE ITEM 27f: the moon's light computed like the sun's, from the place and date): with
+	 * the real moon (Real sun and moon), the night light comes FROM the moon while it is above the horizon (FO4CS
+	 * MOON2's one seat: the shading, the cascades and the air follow it); below the horizon the engine's night
+	 * direction stays and its light fades out (lookdevstage.cpp moonLightFactor). Red WW_MOONLIGHT_RED=engine */
+	double mr[3];
+	if ( e < 0.0 && wwEnvStr( "WW_MOONLIGHT_RED" ).trimmed() != QLatin1String( "engine" )
+		&& wwSkyMoonReal( hour, gameDay, mr, nullptr, nullptr ) && mr[2] > 0.0 ) {
+		std::copy( mr, mr + 3, night );
+		norm3( night );
+	}
 	double o[3];
 	if ( e >= 0.0 ) {
 		std::copy( r, r + 3, o );

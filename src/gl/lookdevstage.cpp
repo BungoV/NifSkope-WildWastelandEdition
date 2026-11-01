@@ -842,7 +842,18 @@ float moonAlphaNow( const LdState & s )
 //! the moon's light against the full moon's: our globe's phase angle with the Physical Sky on, else the engine's phase
 float moonLightFactor( const LdState & s )
 {
-	return wwAtmoDiscs() ? wwAtmoMoonFactorDeg( moonAlphaNow( s ) ) : wwAtmoMoonFactor( wwMoonPhase( s.gameDay, s.clim.tnam[5] ) );
+	const float phase = wwAtmoDiscs() ? wwAtmoMoonFactorDeg( moonAlphaNow( s ) ) : wwAtmoMoonFactor( wwMoonPhase( s.gameDay, s.clim.tnam[5] ) );
+	/* lane INTSKY1 (LATE ITEM 27f): with the real moon (its place and date, gl/skyplacerun.h) a moon under the horizon
+	 * lights nothing: its light fades over its last 3.5 degrees (refraction and the disc's half width at -0.5); the
+	 * air on its way (its elevation) is wwAtmoKeyLight's, which reads the light's direction, now the moon's. Red
+	 * WW_MOONLIGHT_RED=engine: the phase alone, as before */
+	double m[3];
+	if ( wwAtmoNightOn() && wwEnvStr( "WW_MOONLIGHT_RED" ).trimmed() != QLatin1String( "engine" )
+		&& wwSkyMoonReal( s.hour, s.gameDay, m, nullptr, nullptr ) ) {
+		const double el = std::asin( std::clamp( m[2], -1.0, 1.0 ) ) * 180.0 / 3.14159265358979323846;
+		return phase * float( std::clamp( ( el + 0.5 ) / 3.5, 0.0, 1.0 ) );
+	}
+	return phase;
 }
 
 /* lane PERF1: every shape's program setup asks for the light several times a frame; it is a pure function of
