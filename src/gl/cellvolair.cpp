@@ -76,6 +76,10 @@ struct VaState
 	bool shellStep = false;	// SKY2 red WW_CELL_AIR_RED=shellstep: the old law (no air volume, the GI shell's edge one voxel wide)
 	bool noAirVol = false;	// SKY2 red WW_CELL_AIR_RED=noairvol: no air volume, the shell read over the probes' reach (the stopgap)
 	bool sphereTop = false;	// lane CLOUDLOOK1 red WW_CELL_AIR_RED=spheretop: the air's top at the scene sphere's (the veil)
+	/* lane FIX1101A (atmo, LATE ITEM 14/18 fog-sun fault): red WW_CELL_AIR_RED=suncolumn = the sun through the WHOLE fitted
+	 * column to the scene's top (FOGSUN1 as it was): Foggy noon at c3 Ts 0.026, no shafts, the ground's sun erased. Off
+	 * (shipped): only the derived ground layer dims the sun (the band IS the records' fog, whose sun the record's colour is) */
+	bool sunColumn = false;
 	int terms = 15;
 	int probe = 0;
 	int fogBlend = 0;	// WW_CELL_VOLAIR_FOGBLEND=1 (option B, test only): the game's fog drawn over the lit air
@@ -106,6 +110,7 @@ VaState & vs()
 			s.shellStep = d.shellStep;
 			s.noAirVol = d.noAirVol;
 			s.sphereTop = d.sphereTop;
+			s.sunColumn = d.sunColumn;
 			s.terms = d.terms;
 			s.opt = d.opt;
 		}
@@ -121,6 +126,7 @@ VaState & vs()
 			s.shellStep = s.shellStep || r == "shellstep";
 			s.noAirVol = s.noAirVol || r == "noairvol";
 			s.sphereTop = s.sphereTop || r == "spheretop";
+			s.sunColumn = s.sunColumn || r == "suncolumn";	// lane FIX1101A
 			s.red |= r == "off" ? 1 : r == "gioff" ? 2 : r == "flat" ? 4 : r == "noshadow" ? 8 : r == "nolights" ? 16
 				: r == "wrongmed" ? 32 : r == "blendnear" ? 64 : r == "farfit" ? 128 : r == "physcol" ? 256 : r == "nosunt" ? 512 : r == "froxonly" ? 1024 : r == "oldsun" ? 2048
 				: r == "dropcluster" ? 4096 : r == "nearskip" ? 8192 : r == "noground" ? 16384 : r == "nosidecar" ? 32768 : r == "nosky" ? 65536 : r == "fxfog" ? 131072 : r == "lightmid" ? 262144 : r == "bluescatter" ? 524288 : r == "zcolour" ? 1048576 : r == "nofarclamp" ? 2097152 : r == "roomstep" ? 4194304
@@ -1540,6 +1546,7 @@ static void vaPassInner( Scene * scene, bool run )
 	prog->uni4f( "airMed", FloatVector4( M.sigma0, M.zb, M.invH, zTop ) );
 	prog->uni4f( "airLayer", FloatVector4( G.w, G.zn, G.invHn, G.s ) );
 	prog->uni4f( "airGround", FloatVector4( G.zg, G.invHg, 0.0f, 0.0f ) );
+	prog->uni1b( "airSunLayer", !s.sunColumn );	// lane FIX1101A: the sun dimmed by the ground layer only (cell_airmed.glsl airTupSun)
 	{
 		/* lane FOGTERRAIN1: the ground layer stands on the low-pass terrain (cell_airmed.glsl airGroundAt): its anchor
 		 * rises by the local ground over the fog frame's ground. Exteriors with a layer and a published grid only;
@@ -2350,7 +2357,8 @@ void wwVolAirUniforms( Scene * scene )
 	const int fl = prog->uniLocation( "volAirFlags" );
 	if ( fl >= 0 )
 		prog->uni1i_l( fl, ( ( s.red & 512 ) ? 0 : 1 ) | ( ( s.red & 1024 ) ? 0 : 2 ) | ( ( s.red & 256 ) ? 0 : 4 )
-			| ( ( s.red & 65536 ) ? 0 : 8 ) | ( ( s.red & 131072 ) ? 0 : 16 ) | ( s.tricubic ? 32 : 0 ) | ( terr ? 64 : 0 ) );
+			| ( ( s.red & 65536 ) ? 0 : 8 ) | ( ( s.red & 131072 ) ? 0 : 16 ) | ( s.tricubic ? 32 : 0 ) | ( terr ? 64 : 0 )
+			| ( s.sunColumn ? 0 : 128 ) );	// lane FIX1101A: 128 = the surfaces' sun dimmed by the ground layer only
 }
 
 /* lane VOLAIR1 (bungo 10-14, cellvolair.h): the sky through the air. The far tower stood out against a sky the air never
@@ -2572,6 +2580,7 @@ void wwVolPartMediumUniforms( Scene * scene )
 	// the landed air's layered law (its near band, its ground layer) and its GPU reds (roomstep, physcol), as the pass
 	prog->uni4f( "airLayer", air ? FloatVector4( g.layer[0], g.layer[1], g.layer[2], g.layer[3] ) : FloatVector4( 0.0f, 0.0f, 0.0f, 0.0f ) );
 	prog->uni4f( "airGround", air ? FloatVector4( g.ground[0], g.ground[1], g.ground[2], g.ground[3] ) : FloatVector4( 0.0f, 0.0f, 0.0f, 0.0f ) );
+	prog->uni1b( "airSunLayer", !vs().sunColumn );	// lane FIX1101A: the puffs' sun as the air's (cell_airmed.glsl airTupSun)
 	// lane FOGTERRAIN2: the ground layer stands on the pass's terrain grid (cell_volpart.glsl vpLight airGroundAt)
 	const bool terr = air && g.terrOn && g.terr;
 	const int terrLoc = prog->uniLocation( "airTerr" );

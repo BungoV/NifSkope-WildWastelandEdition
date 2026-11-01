@@ -144,4 +144,11 @@ bool wwAtmoGiRedCamZ();	//!< SKY3 red: the capture from the view camera's height
 
 QString wwAtmoSummary();
 
+/* lane FIX1101A (atmo, LATE ITEM 15c cause 10): a test camera white balance for bungo's three-way sheet (not a default).
+ * WW_CELL_WB (read per call, live): empty / off = 1, 1, 1 (the shipped picture, the shader multiplies by exactly 1);
+ * day45 = balanced to the 45-degree sun's daylight through the last drawn sky's air, gain = lum(T45) / T45 per channel
+ * (the weather's neutral Day key is that sun: a 45-degree sun then lights a white wall white); "r,g,b" = explicit gains.
+ * cell_lights.glsl cellImageSpace multiplies the exposed linear light by it (uniform cellIsWbD = gain - 1). */
+void wwAtmoWbGain( float out[3] );
+
 #endif

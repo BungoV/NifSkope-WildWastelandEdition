@@ -18,6 +18,12 @@ constexpr float kRay[3] = { 5.802e-3f, 13.558e-3f, 33.1e-3f };
 constexpr float kMieS = 3.996e-3f, kMieE = 4.40e-3f, kMieG = 0.8f;
 constexpr float kOzone[3] = { 0.650e-3f, 1.881e-3f, 0.085e-3f };
 constexpr float kPi = 3.14159265f;
+/* lane FIX1101A (atmo): the moonless night sky's own radiance (airglow, zodiacal light, unresolved stars) at the zenith
+ * above the air, per unit sun irradiance at the top (the LUTs' unit): 4e-4 cd/m2 / 128 klx / T(zenith, clear) 0.88,
+ * colour B - V ~ 0.9 (redder than the sun) as linear sRGB with luminance 1. Leinert et al. 1998 (A&AS 127): the natural
+ * dark sky reads 21-22 V mag / arcsec2 = 1.7e-4 .. 4.3e-4 cd/m2 at the zenith. atmo_sky.frag atFloor; red nofloor = 0. */
+constexpr float kNightFloorLum = 4.0e-4f / 128000.0f / 0.88f;
+constexpr float kNightFloor[3] = { kNightFloorLum * 1.0964f, kNightFloorLum * 0.9967f, kNightFloorLum * 0.7475f };
 
 inline float lum( const float c[3] )
 {

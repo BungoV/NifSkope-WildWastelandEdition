@@ -52,9 +52,22 @@ void main()
 		float muH = -sqrt( max( 0.0, 1.0 - kRb * kRb / ( atSkyCamR * atSkyCamR ) ) );
 		vec3 ts = atTrans( atSkyTransTex, atSkyCamR, max( mu, muH + 1e-4 ) );	// below the horizon: the horizon's
 		float tSky = dot( ts, vec3( 1.0 / 3.0 ) );
-		if ( atApSkyRule == 1 && atApDouble <= 0.5 && volSkyOn ) {
-			// lane HORIZONBAND1: the horizon band, coloured by the aerial perspective's far end along this ray
-			vec4 ap = wwAtmoApAt( vr * ( atAp.y / max( atAp.z, 1e-12 ) ) );
+		if ( atApSkyRule >= 1 && atApDouble <= 0.5 && volSkyOn ) {
+			// lane HORIZONBAND1: the horizon band, coloured by the aerial perspective's far end along this ray (rule 1, now
+			// the red WW_ATMO_AP_RED=apband). Lane FIX1101A (rule 2, shipped): by what a BLACK surface at the far plane
+			// gets through the surfaces' own fog path (wwFog: the aerial perspective then the air's residual), the colour
+			// the clipped far terrain under the band fades to. By day the two agree; at night the air carries the weather's
+			// night ambient and the aerial perspective does not: rule 1 drew a dark flat stripe (spot 3 22:00, 18,19,21
+			// between a 25,40,60 sky and a 36,59,90 far land, hard edges).
+			vec4 ap = vec4( 0.0 );	// unused where the band's weight is 0 (wwSkyBandL mixes it by w)
+			if ( atApSkyRule == 2 ) {
+				if ( wwSkyBandW( tSky ) > 0.0 ) {	// the fog path only in the band (~2 deg above the horizon and under it)
+					float farV = projectionMatrix[3][2] / min( projectionMatrix[2][2] + 1.0, -1e-6 );	// the far plane (view units)
+					ap = vec4( wwFog( vec3( 0.0 ), vr * abs( farV ) ), 0.0 );
+				}
+			} else {
+				ap = wwAtmoApAt( vr * ( atAp.y / max( atAp.z, 1e-12 ) ) );
+			}
 			float tb = wwSkyBandT( a.a, tSky, 1 );
 			a = vec4( wwSkyBandL( a.rgb, a.a, ap.rgb, ap.a, tSky, tb, 1 ), tb );
 		} else {

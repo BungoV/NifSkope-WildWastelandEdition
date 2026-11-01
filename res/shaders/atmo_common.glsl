@@ -77,11 +77,21 @@ vec3 atTrans( sampler2D T, float r, float mu )
 	return texture( T, atTransUv( r, mu ) ).rgb;
 }
 
-// the multiple-scattering LUT: x = cos sun zenith, y = height
+/* the multiple-scattering LUT: x = cos sun zenith, y = height. lane FIX1101A (atmo): y = sqrt(height / 100 km), rows
+ * at 0.01, 0.10, 0.42, 0.94 .. km instead of 0.01, 3.2, 6.5 .. km, so the weather's haze layer (0.1-1 km) has its own
+ * rows; with the old linear rows the first row above the ground sat at 3.2 km and the 3-degree horizon read 20-37 %
+ * under a Monte Carlo of the same medium (notes/fix1101a/atmo/ATMO_TABLE.md). atMsOld 1 = the red WW_ATMO_RED=msold
+ * (linear rows, 20 uniform steps in atmo_ms.frag); every pass that reads or writes the LUT takes it from medium(). */
+uniform float atMsOld;
+float atMsRowToH( float u )
+{
+	return atMsOld > 0.5 ? u : u * u;
+}
 vec2 atMsUv( float r, float mus, vec2 n )
 {
+	float hu = clamp( ( r - kRb ) / ( kRt - kRb ), 0.0, 1.0 );
 	return vec2( atUnitToSub( clamp( mus * 0.5 + 0.5, 0.0, 1.0 ), n.x ),
-		atUnitToSub( clamp( ( r - kRb ) / ( kRt - kRb ), 0.0, 1.0 ), n.y ) );
+		atUnitToSub( atMsOld > 0.5 ? hu : sqrt( hu ), n.y ) );
 }
 
 float atPhaseR( float c ) { return 3.0 / ( 16.0 * kPi ) * ( 1.0 + c * c ); }

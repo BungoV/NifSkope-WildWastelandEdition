@@ -96,6 +96,10 @@ uniform float cellIsE;				// HNAM Tonemap E: the curve's toe numerator
 uniform float cellIsAdapted;		// the frame's mean luminance, the contrast pivot
 uniform vec3 cellIsCine;			// CNAM saturation, brightness, contrast
 uniform vec4 cellIsTint;			// TNAM amount, r, g, b
+// lane FIX1101A (atmo, LATE ITEM 15c cause 10): a camera white balance on the linear light, gain - 1 per channel; 0
+// (unset, WW_CELL_WB off: the shipped default) multiplies by exactly 1. WW_CELL_WB=day45 balances to the 45-degree sun's
+// daylight through the frame's air (atmosphere.cpp wwAtmoWbGain); a test key for bungo's three-way sheet, not a default.
+uniform vec3 cellIsWbD;
 uniform bool cellIsLutOn;
 uniform sampler3D cellIsLut;
 uniform int cellIsRed;				// 1 nolut, 2 noexp, 4 nograde, 8 nobloom (the CPU drops cellIsBloomOn)
@@ -160,6 +164,7 @@ vec3 cellImageSpace( vec3 sqrtColor )
 #endif
 #endif
 	x = x * ( ( cellIsRed & 2 ) != 0 ? 1.0 : cellIsExposure ) * 2.0;
+	x *= vec3( 1.0 ) + cellIsWbD;	// lane FIX1101A: the white balance (x 1 exactly by default)
 #if defined( WW_CELL_HDR )
 	if ( cellIsFoBloomOn )	// FO4CS adds its bloom to the exposed light, before the curve (x 2: the curve's input)
 		x += 2.0 * cellBloomGain * cellFoBloomHere;

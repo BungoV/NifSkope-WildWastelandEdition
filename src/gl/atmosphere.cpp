@@ -250,6 +250,13 @@ void medium( NifSkopeOpenGLContext::Program * p, const float haze[3], bool noOzo
 	else
 		p->uni3f( "atOzone", kOzone[0] * g_ozone, kOzone[1] * g_ozone, kOzone[2] * g_ozone );
 	p->uni3f( "atHaze", haze[0], haze[1], haze[2] );
+	// lane FIX1101A (atmo): the MS LUT's sqrt height rows + 40 packed steps (red msold: linear rows, 20 uniform), read
+	// and written by every pass that takes this medium; the night floor (red nofloor: none), read by atmo_sky only
+	p->uni1f( "atMsOld", red( "msold" ) ? 1.0f : 0.0f );
+	if ( red( "nofloor" ) )
+		p->uni3f( "atFloor", 0.0f, 0.0f, 0.0f );
+	else
+		p->uni3f( "atFloor", kNightFloor[0], kNightFloor[1], kNightFloor[2] );
 }
 
 void bindTex( NifSkopeOpenGLContext::GLFunctions * fn, NifSkopeOpenGLContext::Program * p, int unit, const char * name, GLuint tex )
@@ -486,7 +493,8 @@ bool wwAtmoDrawSky( Scene * scene, const WwAtmoInputs & in, QString * line )
 		why = QStringLiteral( "a LUT target is incomplete" );
 	const QString hazeKey = QString( "%1,%2,%3,%4" ).arg( double( s.haze[0] ), 0, 'g', 6 ).arg( double( s.haze[1] ), 0, 'g', 6 )
 		.arg( double( s.haze[2] ), 0, 'g', 6 ).arg( noOzone )
-		+ ( g_ozone != 1.0f ? QStringLiteral( ",oz%1" ).arg( double( g_ozone ) ) : QString() );
+		+ ( g_ozone != 1.0f ? QStringLiteral( ",oz%1" ).arg( double( g_ozone ) ) : QString() )
+		+ ( red( "msold" ) ? QStringLiteral( ",msold" ) : QString() );	// lane FIX1101A (atmo): the red's LUT is another table
 	// 1. transmittance and multiple scattering: only when the medium moves (weather, hour through the fog keys)
 	if ( ok && g.transKey != hazeKey ) {
 		auto p = r->useProgram( "atmo_transmittance.prog" );
@@ -699,7 +707,7 @@ bool wwAtmoDrawSky( Scene * scene, const WwAtmoInputs & in, QString * line )
 
 	const float sunEl = std::asin( std::clamp( sunW[2], -1.0f, 1.0f ) ) * 180.0f / kPi;
 	QString reds;
-	for ( const char * w : { "noozone", "noms", "nohaze" } )
+	for ( const char * w : { "noozone", "noms", "nohaze", "msold", "nofloor" } )	// FIX1101A (atmo): msold, nofloor
 		if ( red( w ) )
 			reds = QStringLiteral( ",RED=%1" ).arg( QLatin1StringView( w ) );
 	for ( const char * w : { "nosunt", "double", "skyclamp" } )
@@ -894,6 +902,35 @@ bool wwAtmoKeyLight( float muLight, const float fog[4], float keyLum45, float su
 			double( amb[2] ) );
 	}
 	return true;
+}
+
+void wwAtmoWbGain( float out[3] )
+{
+	out[0] = out[1] = out[2] = 1.0f;
+	const QString e = wwEnvStr( "WW_CELL_WB" ).trimmed().toLower();
+	if ( e.isEmpty() || e == QLatin1StringView( "off" ) || e == QLatin1StringView( "0" ) )
+		return;
+	QString how;
+	if ( e == QLatin1StringView( "day45" ) ) {
+		const AtState & s = as();
+		float t45[3];
+		cpuTrans( 0.0f, 0.70710678f, s.haze, false, t45, g_ozone );	// the last drawn sky's air (clear air before one)
+		const float l = lum( t45 );
+		for ( int c = 0; c < 3; c++ )
+			out[c] = t45[c] > 1e-6f ? l / t45[c] : 1.0f;
+		how = QStringLiteral( "day45(haze=%1/km@%2km)" ).arg( double( s.haze[0] ), 0, 'f', 3 ).arg( double( s.haze[1] ), 0, 'f', 3 );
+	} else {
+		const QStringList p = e.split( QChar( ',' ) );
+		if ( p.size() == 3 )
+			for ( int c = 0; c < 3; c++ )
+				out[c] = std::clamp( p.at( c ).toFloat(), 0.05f, 20.0f );
+		how = QStringLiteral( "explicit" );
+	}
+	static float last[3] = { -1.0f, -1.0f, -1.0f };
+	if ( !std::equal( out, out + 3, last ) ) {
+		std::copy( out, out + 3, last );
+		fprintf( stderr, "cell wb: %s gain=%.4f,%.4f,%.4f\n", qPrintable( how ), double( out[0] ), double( out[1] ), double( out[2] ) );
+	}
 }
 
 void wwAtmoApFrame()
@@ -1103,7 +1140,9 @@ void wwAtmoApUniforms( Scene * scene )
 		prog->uni1i( "atSkyTransTex", WwCellUnit::AtmoTrans );
 		prog->uni1f( "atSkyCamR", on ? v->camR : 0.0f );
 		// lane HORIZONBAND1: the sky's horizon band (atmo_skyband.glsl); the red skyclamp = the clamp before it (live)
-		prog->uni1i( "atApSkyRule", apRed( "skyclamp" ) ? 0 : 1 );
+		// lane FIX1101A (atmo, the night horizon stripe): rule 2 (shipped) colours the band with what a black surface at
+		// the far plane gets through the surfaces' own fog path; red apband = rule 1 (the aerial perspective's colour alone)
+		prog->uni1i( "atApSkyRule", apRed( "skyclamp" ) ? 0 : apRed( "apband" ) ? 1 : 2 );
 	}
 	if ( !on )
 		return;

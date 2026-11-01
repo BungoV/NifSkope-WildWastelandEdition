@@ -55,6 +55,67 @@ spot 6). Every change ships ON; the old path is a red. Gates offline through the
   (river, contact, whitecaps) only on water: x the soft edge's water share, nothing over a column under 4 u (0 samples on
   the dry bank vs 73921). Rows ON under new keys WW/CellWaterContact3, WW/CellWaterRiverFoam3. Red
   WW_CELL_WATER_RIVERFOAM_RED=paint. tests/waterfoam2; tests/waterlook2's river foam cover band 0.03 -> 0.015 (lace).
+## FIX1101A atmo (2026-11-01): the night horizon stripe
+
+- SHOTS1101's spot 3 at 22:00 (sheet_lod_proof.png): a flat dark band (18,19,21) between the night sky's horizon glow
+  (25,40,60) and the far land (36,59,90), hard edges. Owner: HORIZONBAND1's band (cell_volsky.frag) coloured the sky
+  pixels under the horizon with the aerial perspective's far-end colour alone, while the clipped far terrain under it
+  fades through the surfaces' whole fog path (the aerial perspective then the Volumetric Air's residual). By day the
+  aerial perspective leads there and the two meet; at night the air carries the weather's night ambient and the
+  aerial perspective (sun / moon scattering only) does not, so the band was nearly black.
+- Fix (ships ON, rule 2): the band's colour = what a black surface at the far plane gets through wwFog (the surfaces'
+  own path), the colour the far terrain under it fades to, day or night. Red (live): WW_ATMO_AP_RED=apband (rule 1);
+  skyclamp (rule 0) as before.
+- Unit tests/nightband1101a/run.sh (display-space twin of the band on the 22:00 frame's own column, HORIZONBAND1's
+  method; the far-plane colour taken from the far land at the silhouette, a proxy): green step 6.4 levels, the band 2.8
+  over its darker neighbour; red apband 15.7 / 15.3 under: FAIL. Sweeps base 405 / RTDDGI 270 / PRT 405, not ok 0.
+
+## FIX1101A atmo (2026-11-01): the sun through the fog (shafts in thick fog), and a test white balance
+
+- The fog-sun fault (bungo's thick-fog midday picture, hold h2 c3 CommonwealthFoggy 12:00: no shafts, the ground's sun/
+  shade contrast 1.59 vs Clear's 5.48). FOGSUN1 dimmed the sun by the air's WHOLE fitted column up to the scene's top
+  (its tallest shape) in the air (cell_airmed.glsl airTup), on the surfaces (lookdev_fog.glsl wwVolAirSunT) and on the
+  puffs (cell_volpart.glsl): with the frame's medium Ts 0.026 at the street, on top of a weather Sunlight colour that is
+  already the sun that weather gives the ground. Now (ships ON) only the derived ground layer (the .recx groundFog /
+  FOGHEIGHT1 layer) dims the sun: the bands ARE the records' fog. Twin on the frame's own numbers (tests/fogsun1101a):
+  Foggy noon Ts 0.026 -> 0.197, lit / shadowed air column 1.08 -> 1.62 (bar 1.25), ground sun 2.6 % -> 19.7 % of the
+  record (bar 10 %); Clear noon Ts 0.674 -> 0.999 (FOGSUN1 had dimmed Clear's ground sun to 67 % in the look env too).
+  Red (live): WW_CELL_AIR_RED=suncolumn (cellvolair.cpp sunColumn: uniform airSunLayer false, volAirFlags bit 128 off).
+- The froxels themselves keep shafts (notes/fix1101a/atmo/tools/shafts.py: froxels vs a brute-force march with the
+  shadow geometry at true 1080p: shadow deficit kept 1.00, shape 0.998-0.999, mean error 0.1-0.4 %).
+- WW_CELL_WB (commit dc19aa02, a TEST key for bungo's tan-cast three-way sheet, not a default): day45 balances the frame to
+  the 45-degree sun's daylight through the drawn sky's air; off = x 1 exactly. notes/fix1101a/atmo/TAN_TRACE.md.
+- Gates: link sweeps base 405, RTDDGI none,ubo 270, PRT 405 (not ok 0); unit tests/fogsun1101a/run.sh green + red;
+  stage table regenerated (line numbers; WW_CELL_WB live, WW_CELL_AIR_RED live as before).
+
+## FIX1101A atmo (2026-10-31): the physical sky's multiple scattering at the horizon, and a night sky floor
+
+The full-day audit (notes/fix1101a/atmo/ATMO_TABLE.md): the physical sky drawn by the real shaders against an
+independent Monte Carlo of the same medium (all orders, the Earth's shadow exact) at sun -18..+60 deg, and against
+published clear-sky values. The sun (illuminance 103.7 klx at 60 deg, CCT 5665 / 3847 / 2013 K at 60 / 10 / 2 deg),
+the zenith (-12..+20 %), the Belt of Venus and the twilight darkening are in tolerance. Two faults are fixed here:
+
+- F1, the multiple-scattering LUT's rows (ships ON): the 3-degree horizon read 20-37 % under the Monte Carlo at sun 0..35
+  because the MS LUT's first row above the ground sat at 3.2 km and its 20 uniform steps put the first sample 25 km
+  out, so the weather's 0.1-1 km haze layer had no row. res/shaders/atmo_common.glsl (atMsUv, atMsRowToH): rows at
+  sqrt(height / 100 km); atmo_ms.frag: 40 steps packed toward the texel. Horizon mean error 24.8 -> 18.0 %, worst
+  -33.5 -> -26.4 %. Red (live): WW_ATMO_RED=msold (atmosphere.cpp medium() sets atMsOld for every atmo pass; the LUT
+  key carries msold so a live set rebuilds the table; the sky line echoes RED=msold).
+- F2, the night sky's own light (ships ON): at sun -18 the moonless sky read 6.3e-6 cd/m2 at the zenith, 30-160x under
+  the natural night sky (airglow, zodiacal light, unresolved stars: 1.7e-4..4.3e-4 cd/m2, Leinert et al. 1998).
+  atmo_sky.frag adds atFloor = gl/atmomath.h kNightFloor (zenith 3.8e-4 cd/m2), van Rhijn's slant factor for a 90 km
+  shell, times the view ray's transmittance (0 into the ground: no horizon edge). ~1e-7 of the day zenith: no daytime
+  change (4.4e-7 of the zenith at sun 10). Red (live): WW_ATMO_RED=nofloor.
+- Not fixed (leftovers in ATMO_TABLE.md sec. 8): the Earth's shadow at civil twilight (anti-sun sky 1.4-2.8x at sun
+  -3..-6, Hillaire's isotropic MS inside the shadow), the remaining -18..-27 % horizon at sun 2-10, a spectral sky.
+- Volumetric air (LATE ITEM 14), no code change: the froxels against a brute-force march with the shadow geometry keep
+  the shafts (shadow deficit 1.00, shape 0.998-0.999, mean error 0.1-0.4 %, no slice staircase); strength per weather
+  (Foggy 06:00 V 0.24 km glows, Clear noon V 7.4 km faint) from the records (notes/fix1101a/atmo/tools/shafts.py,
+  fogstrength.py).
+- Unit: tests/atmofix1101a/run.sh (real shaders in the hidden GL context, Monte Carlo fixture mc_ref.tsv): green GATE OK;
+  red msold fails ms-horizon-mean / -worst; red nofloor fails floor-zenith / floor-anti30.
+- Gates: build rc 0 (exe literals atMsOld, atFloor, nofloor, ",msold" UTF-16 present); link sweeps base 405, RTDDGI none,ubo 270, PRT 405 (not ok 0). src/wwswitchstages.inc
+  regenerated (line numbers only; WW_ATMO_RED stays live).
 
 ## HORIZONBAND1 (FIX1031B area A, 2026-10-31): the horizon blends - no cyan strip with a hard top edge
 
