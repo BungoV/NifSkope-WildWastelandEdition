@@ -287,7 +287,7 @@ vec3 airSun( vec3 posView, vec3 dirView, float z )
 		float hard = airSunGate( cellWorldPos( posView ), to );
 		if ( hard > 0.0 )
 			vis = mix( vis, min( vis, airSunMapVis( posView ) ), hard );
-		float Ts = airTup( z, to.z );
+		float Ts = airTupSun( z, to.z );	// lane FIX1101A: the ground layer only (red suncolumn: the whole column)
 		if ( volDriftSun && volDrift.x > 0.0 )	// lane WEATHERBLEND4: the sun's light through the drifting air
 			Ts = pow( Ts, airDriftSunK( posView, z, to.z ) );
 		if ( volMs.x > 0.0 )
@@ -300,8 +300,8 @@ vec3 airSun( vec3 posView, vec3 dirView, float z )
 			: volCsm ? wwSunShadow( posView ) : airCloudShadow( posView );
 		float mu = dot( fogView.xyz, fogSun.xyz ) / length( fogView.xyz );
 		if ( volMs.x > 0.0 )
-			return fogSunColour.rgb * fogSun.w * airMsSum( vis, airTup( z, mu ), dot( dirView, fogSun.xyz ), 0.0, airMsA( z ) );
-		return fogSunColour.rgb * fogSun.w * vis * airTup( z, mu ) * volPhasePi( dot( dirView, fogSun.xyz ) );
+			return fogSunColour.rgb * fogSun.w * airMsSum( vis, airTupSun( z, mu ), dot( dirView, fogSun.xyz ), 0.0, airMsA( z ) );
+		return fogSunColour.rgb * fogSun.w * vis * airTupSun( z, mu ) * volPhasePi( dot( dirView, fogSun.xyz ) );
 	}
 	return vec3( 0.0 );
 }

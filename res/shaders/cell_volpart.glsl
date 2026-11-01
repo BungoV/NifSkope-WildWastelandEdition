@@ -118,7 +118,7 @@ void vpLight( vec3 posView, vec3 P, vec3 dW, float z, vec3 N, float w, out vec3 
 		vec3 to = normalize( cellDirTo );
 		float vis = ( !cellInterior && volCsm && ( volPartRed & 64 ) == 0 ) ? wwSunShadow( posView ) : 1.0;
 		// lane WEATHERBLEND4: the sun's column through the drifting air (lookdev_fog.glsl wwAirDriftSunK)
-		vec3 e = vpTint( cellDirColor ) * vis * pow( airTup( z, to.z ), wwAirDriftSunK( posView, z, to.z, airMed.w ) );
+		vec3 e = vpTint( cellDirColor ) * vis * pow( airTupSun( z, to.z ), wwAirDriftSunK( posView, z, to.z, airMed.w ) );	// FIX1101A: airTupSun
 		skyThin += e * vpPhase( dot( to, dW ) );
 		skyThick += e * vpWrap( dot( N, to ), w ) * vpPhaseN( dot( to, dW ) );
 	}

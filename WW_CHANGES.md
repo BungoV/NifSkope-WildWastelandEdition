@@ -1,3 +1,21 @@
+## FIX1101A atmo (2026-11-01): the sun through the fog (shafts in thick fog), and a test white balance
+
+- The fog-sun fault (bungo's thick-fog midday picture, hold h2 c3 CommonwealthFoggy 12:00: no shafts, the ground's sun/
+  shade contrast 1.59 vs Clear's 5.48). FOGSUN1 dimmed the sun by the air's WHOLE fitted column up to the scene's top
+  (its tallest shape) in the air (cell_airmed.glsl airTup), on the surfaces (lookdev_fog.glsl wwVolAirSunT) and on the
+  puffs (cell_volpart.glsl): with the frame's medium Ts 0.026 at the street, on top of a weather Sunlight colour that is
+  already the sun that weather gives the ground. Now (ships ON) only the derived ground layer (the .recx groundFog /
+  FOGHEIGHT1 layer) dims the sun: the bands ARE the records' fog. Twin on the frame's own numbers (tests/fogsun1101a):
+  Foggy noon Ts 0.026 -> 0.197, lit / shadowed air column 1.08 -> 1.62 (bar 1.25), ground sun 2.6 % -> 19.7 % of the
+  record (bar 10 %); Clear noon Ts 0.674 -> 0.999 (FOGSUN1 had dimmed Clear's ground sun to 67 % in the look env too).
+  Red (live): WW_CELL_AIR_RED=suncolumn (cellvolair.cpp sunColumn: uniform airSunLayer false, volAirFlags bit 128 off).
+- The froxels themselves keep shafts (notes/fix1101a/atmo/tools/shafts.py: froxels vs a brute-force march with the
+  shadow geometry at true 1080p: shadow deficit kept 1.00, shape 0.998-0.999, mean error 0.1-0.4 %).
+- WW_CELL_WB (commit dc19aa02, a TEST key for bungo's tan-cast three-way sheet, not a default): day45 balances the frame to
+  the 45-degree sun's daylight through the drawn sky's air; off = x 1 exactly. notes/fix1101a/atmo/TAN_TRACE.md.
+- Gates: link sweeps base 405, RTDDGI none,ubo 270, PRT 405 (not ok 0); unit tests/fogsun1101a/run.sh green + red;
+  stage table regenerated (line numbers; WW_CELL_WB live, WW_CELL_AIR_RED live as before).
+
 ## FIX1101A atmo (2026-10-31): the physical sky's multiple scattering at the horizon, and a night sky floor
 
 The full-day audit (notes/fix1101a/atmo/ATMO_TABLE.md): the physical sky drawn by the real shaders against an
