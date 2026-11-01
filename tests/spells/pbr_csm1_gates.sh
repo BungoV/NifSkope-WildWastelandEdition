@@ -53,7 +53,7 @@ while [ $# -gt 0 ]; do
 		*) echo "unknown argument $1"; exit 2 ;;
 	esac
 done
-DATA="/e/Tools/Fallout 4/DataUnpacked/Data"
+DATA="${PBR_CSM1_DATA:-/e/Tools/Fallout 4/DataUnpacked/Data}"  # SKYCLOUD1101: a folder holding the cube (no unpacked Data here)
 GAME="${PBR_CSM1_GAME:-/x/Programs/Steam/steamapps/common/Fallout 4/Data}"
 PBRDATA="$ROOT/tests/fixtures/pbr_r2a_data"
 CUBE="$DATA/Meshes/Architecture/Quarry/QryCube01.nif"
