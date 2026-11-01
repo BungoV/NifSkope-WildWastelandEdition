@@ -1,0 +1,3 @@
+# lane PERFFIX2 (item 7): the half-size contact mask upsampled to full size by depth (shadowset.cpp selects it by name).
+
+shaders cell_ao.vert ww_contact_up.frag

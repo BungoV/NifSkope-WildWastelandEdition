@@ -24,11 +24,16 @@ BSD License - see nifskope.h
 #include "impostorchunk.h"	// lane FAR5: the far cards as terrain-shadow casters
 #include "gl/cellwater.h"	// lane FOGTERRAIN3: the water shapes the ground fog stands on
 #include "gl/fogterrain.h"	// lane FOGTERRAIN1: the ground fog's low-pass terrain (FOGTERRAIN2: its own job here)
+#include "gl/contactlines.h"	// lane PERFFIX2: the contact march's line layout (ww_contact.comp)
 
+#include <QCoreApplication>
 #include <QDir>
 #include <QElapsedTimer>
 #include <QFile>
 #include <QOpenGLContext>
+#include <QOpenGLFunctions_4_3_Core>
+#include <QOpenGLVersionFunctionsFactory>
+#include <QSurfaceFormat>
 #include <QSettings>
 #include <QStringList>
 
@@ -218,6 +223,10 @@ struct Contact
 	unsigned int farDepth = 0, farDepthFbo = 0, farMask = 0, farMaskFbo = 0;
 	int fw = 0, fh = 0;
 	float reach = 0.0f;	// lane FIX1101A: the near march's world reach inside the cascades (0 = the whole march)
+	// lane PERFFIX2 (item 7): the half-size mask upsampled to full size by depth (R8), when it is valid this frame
+	unsigned int up = 0, upFbo = 0;
+	int upW = 0, upH = 0;
+	bool upValid = false;
 };
 
 struct SetState
@@ -1897,6 +1906,143 @@ bool wwContactShadowWantsTargets( Scene * scene )
 	return scene && ss().contact > 0 && wwLookdevActive() && !scene->selecting;
 }
 
+/* lane PERFFIX2 (item 7): the near march on GL compute in Bend Studio's own layout, one 64-lane workgroup per
+ * light-space line with the line's depths read once into shared memory (res/shaders/ww_contact.comp; the dispatch is
+ * src/gl/contactlines.h). The app asks GL 4.2 core and the driver gives its newest core (4.6 on NVIDIA); compute needs
+ * 4.3, else the fragment pass runs and the echo says why. SHADOWPAR1's tiers keep the fragment pass (their fades and
+ * rejects are not in the compute march). Red WW_SHADOW_RED=contactfrag: the fragment pass. */
+namespace {
+
+static_assert( sizeof( WwContactBand ) == 16, "std430 ivec4" );
+
+struct ContactLine
+{
+	const void * ctx = nullptr;
+	bool tried = false;
+	QOpenGLFunctions_4_3_Core * g = nullptr;
+	GLuint prog = 0, ssbo = 0;
+	GLint loc[12] = {};
+	QString why = QStringLiteral( "not tried" );
+	int major = 0, minor = 0;
+};
+
+ContactLine & contactLine()
+{
+	static ContactLine l;
+	return l;
+}
+
+bool contactLineReady()
+{
+	ContactLine & L = contactLine();
+	QOpenGLContext * ctx = QOpenGLContext::currentContext();
+	if ( L.ctx != ctx ) {
+		L = ContactLine();
+		L.ctx = ctx;
+	}
+	if ( L.tried )
+		return L.prog != 0;
+	L.tried = true;
+	if ( !ctx ) {
+		L.why = QStringLiteral( "no context" );
+		return false;
+	}
+	const QSurfaceFormat f = ctx->format();
+	L.major = f.majorVersion();
+	L.minor = f.minorVersion();
+	if ( L.major * 10 + L.minor < 43 ) {
+		L.why = QStringLiteral( "GL %1.%2 has no compute" ).arg( L.major ).arg( L.minor );
+		return false;
+	}
+	L.g = QOpenGLVersionFunctionsFactory::get<QOpenGLFunctions_4_3_Core>( ctx );
+	if ( !L.g || !L.g->initializeOpenGLFunctions() ) {
+		L.g = nullptr;
+		L.why = QStringLiteral( "no GL 4.3 functions" );
+		return false;
+	}
+	QFile file( QCoreApplication::applicationDirPath() + QStringLiteral( "/shaders/ww_contact.comp" ) );
+	if ( !file.open( QIODevice::ReadOnly ) ) {
+		L.why = QStringLiteral( "no shaders/ww_contact.comp" );
+		return false;
+	}
+	const QByteArray src = file.readAll();
+	const char * s = src.constData();
+	auto * g = L.g;
+	const GLuint sh = g->glCreateShader( GL_COMPUTE_SHADER );
+	g->glShaderSource( sh, 1, &s, nullptr );
+	g->glCompileShader( sh );
+	GLint ok = 0;
+	g->glGetShaderiv( sh, GL_COMPILE_STATUS, &ok );
+	if ( !ok ) {
+		char log[1024] = {};
+		g->glGetShaderInfoLog( sh, sizeof( log ) - 1, nullptr, log );
+		g->glDeleteShader( sh );
+		L.why = QStringLiteral( "ww_contact.comp did not compile: %1" ).arg( QString::fromLatin1( log ).left( 300 ).simplified() );
+		return false;
+	}
+	const GLuint p = g->glCreateProgram();
+	g->glAttachShader( p, sh );
+	g->glLinkProgram( p );
+	g->glDeleteShader( sh );
+	g->glGetProgramiv( p, GL_LINK_STATUS, &ok );
+	if ( !ok ) {
+		char log[1024] = {};
+		g->glGetProgramInfoLog( p, sizeof( log ) - 1, nullptr, log );
+		g->glDeleteProgram( p );
+		L.why = QStringLiteral( "ww_contact.comp did not link: %1" ).arg( QString::fromLatin1( log ).left( 300 ).simplified() );
+		return false;
+	}
+	static const char * const names[12] = { "gbuf", "fullSize", "maskSize", "maskScale", "lightCoord", "sssParams",
+		"sssFloor", "sssReach", "sssTan", "bandCount", "waveCount", "sideFirst" };
+	for ( int i = 0; i < 12; i++ )
+		L.loc[i] = g->glGetUniformLocation( p, names[i] );
+	g->glGenBuffers( 1, &L.ssbo );
+	L.prog = p;
+	L.why.clear();
+	return true;
+}
+
+/* one near march into `mask` (R8, mw x mh, its fbo bound with the viewport): cleared to lit first (the light's own
+ * pixel has no line), then the line dispatch. The same uniforms as ww_contact.frag's non-SHADOWPAR1 march. */
+void contactLineRun( GLuint gbuf, GLuint mask, int W, int H, int mw, int mh, int scale, const float light[4],
+	const float params[4], float floorU, const float reach[4], const float tanXY[2] )
+{
+	ContactLine & L = contactLine();
+	auto * g = L.g;
+	const GLfloat lit[4] = { 1.0f, 1.0f, 1.0f, 1.0f };
+	g->glClearBufferfv( GL_COLOR, 0, lit );
+	const WwContactBands B = wwContactBands( light[0], light[1], mw, mh );
+	if ( B.waves <= 0 )
+		return;
+	g->glBindBuffer( GL_SHADER_STORAGE_BUFFER, L.ssbo );
+	g->glBufferData( GL_SHADER_STORAGE_BUFFER, GLsizeiptr( B.bands.size() * sizeof( WwContactBand ) ), B.bands.data(), GL_STREAM_DRAW );
+	g->glBindBufferBase( GL_SHADER_STORAGE_BUFFER, 1, L.ssbo );
+	g->glUseProgram( L.prog );
+	g->glUniform1i( L.loc[0], 0 );
+	g->glUniform2i( L.loc[1], W, H );
+	g->glUniform2i( L.loc[2], mw, mh );
+	g->glUniform1f( L.loc[3], float( scale ) );
+	g->glUniform4f( L.loc[4], light[0], light[1], light[2], light[3] );
+	g->glUniform4f( L.loc[5], params[0], params[1], params[2], params[3] );
+	g->glUniform1f( L.loc[6], floorU );
+	g->glUniform4f( L.loc[7], reach[0], reach[1], reach[2], reach[3] );
+	g->glUniform2f( L.loc[8], tanXY[0], tanXY[1] );
+	g->glUniform1i( L.loc[9], int( B.bands.size() ) );
+	g->glUniform1i( L.loc[10], B.waves );
+	g->glUniform4i( L.loc[11], B.first[0], B.first[1], B.first[2], B.first[3] );
+	g->glActiveTexture( GL_TEXTURE0 );
+	g->glBindTexture( GL_TEXTURE_2D, gbuf );
+	g->glBindImageTexture( 0, mask, 0, GL_FALSE, 0, GL_WRITE_ONLY, GL_R8 );
+	g->glDispatchCompute( GLuint( std::min( B.waves, 32768 ) ), GLuint( ( B.waves + 32767 ) / 32768 ), 1 );
+	g->glMemoryBarrier( GL_ALL_BARRIER_BITS );	// the far tier blends into it, the receivers sample it
+	g->glBindImageTexture( 0, 0, 0, GL_FALSE, 0, GL_WRITE_ONLY, GL_R8 );
+	g->glBindBufferBase( GL_SHADER_STORAGE_BUFFER, 1, 0 );
+	g->glBindBuffer( GL_SHADER_STORAGE_BUFFER, 0 );
+	g->glUseProgram( 0 );
+}
+
+}	// namespace
+
 /* lane GAPLOOK1 (C7): FO4CS's far tier (res/Effects/ScreenSpaceShadows/Far*.hlsl): the depth min-reduced by 4, the
  * same march over it (96 samples = 384 full pixels further, a 250-unit thickness floor for crowns), composed into
  * the near mask by min through a depth-aware upsample (2 % of the view depth). Returns the echo part. */
@@ -2050,6 +2196,8 @@ void wwContactShadowPass( Scene * scene )
 		c.ctx = ctx;
 		c.tex = c.fbo = 0;
 		c.w = c.h = 0;
+		c.up = c.upFbo = 0;	// lane PERFFIX2
+		c.upW = c.upH = 0;
 	}
 	const int W = g.w, H = g.h, mw = ( W + p.scale - 1 ) / p.scale, mh = ( H + p.scale - 1 ) / p.scale;
 	if ( !c.tex ) {
@@ -2135,21 +2283,84 @@ void wwContactShadowPass( Scene * scene )
 	 * cascade map's. Offline twin notes/fix1101a/fx/tools/wiretwin.py: a wire 85 u in front of a wall at 2700 u drew a row
 	 * of dashes (stair 1.30 px composed); with the reach the cascade line alone (0.20 px); a wire 6 u off keeps its contact.
 	 * Red WW_SHADOW_RED=contactreach: the march's whole reach, as before (live). */
+	float lineReach[4] = { 0.0f, 0.0f, 0.0f, 0.0f };	// lane PERFFIX2: the same reach for the compute march
 	{
 		WwCascadePreset cp;
 		const bool reach = s.csmSeen && wwShadowCascadePreset( cp ) && !wwShadowRed( "contactreach" );
 		prog->uni4f( "sssReach", FloatVector4( reach ? kContactReach : 0.0f, 0.0f, reach ? float( cp.D ) : 0.0f, 0.0f ) );
 		prog->uni2f( "sssTan", pm[0][0] != 0.0f ? 1.0f / pm[0][0] : 1.0f, pm[1][1] != 0.0f ? 1.0f / pm[1][1] : 1.0f );
 		c.reach = reach ? kContactReach : 0.0f;
+		lineReach[0] = c.reach;
+		lineReach[2] = reach ? float( cp.D ) : 0.0f;
 	}
 	static const float quad[12] = { -1, -1, 0, 1, -1, 0, -1, 1, 0, 1, 1, 0 };
 	static const std::uint16_t idx[6] = { 0, 1, 2, 2, 1, 3 };
 	const float * attrs = quad;
-	r->drawShape( 4, 3, 6, GL_TRIANGLES, GL_UNSIGNED_SHORT, &attrs, idx );
-	r->stopProgram();
+	// lane PERFFIX2 (item 7): the line-layout compute march where it can run (not SHADOWPAR1's tiers, not the red)
+	const bool lineAsked = !par && !wwShadowRed( "contactfrag" );
+	const bool line = lineAsked && contactLineReady();
+	if ( line ) {
+		r->stopProgram();
+		const float light[4] = { float( lx ), float( ly ), float( lz ), cw > 0 ? 1.0f : -1.0f };
+		const float params[4] = { 0.02f, 0.02f, 4.0f, float( p.samples ) };
+		const float tanXY[2] = { pm[0][0] != 0.0f ? 1.0f / pm[0][0] : 1.0f, pm[1][1] != 0.0f ? 1.0f / pm[1][1] : 1.0f };
+		contactLineRun( g.gbuf, c.tex, W, H, mw, mh, p.scale, light, params, 1.5f, lineReach, tanXY );
+	} else {
+		r->drawShape( 4, 3, 6, GL_TRIANGLES, GL_UNSIGNED_SHORT, &attrs, idx );
+		r->stopProgram();
+	}
 	fn->glBindTexture( GL_TEXTURE_2D, 0 );
 	const QString far = wwLookOn( WwLook::ContactFar )
 		? contactFarPass( r, c, g.gbuf, W, H, mw, mh, p.scale, cx / cw, cy / cw, lz, cw, lv, par, earlyExit ) : QStringLiteral( "far=off" );
+	/* lane PERFFIX2 (item 7): a half-size mask comes back to full size through a depth-aware bilinear upsample
+	 * (ww_contact_up.frag, 2 % of the depth), so a silhouette's contact does not bleed onto what lies behind it; the
+	 * receivers then read the full-size mask. Red WW_SHADOW_RED=contactbilinear: the half-size mask, bilinear, as before */
+	c.upValid = false;
+	QString upWord = p.scale == 1 ? QStringLiteral( "full" ) : QStringLiteral( "bilinear" );
+	if ( p.scale == 2 && !wwShadowRed( "contactbilinear" ) ) {
+		if ( !c.up ) {
+			fn->glGenTextures( 1, &c.up );
+			fn->glGenFramebuffers( 1, &c.upFbo );
+		}
+		if ( c.upW != W || c.upH != H ) {
+			fn->glBindTexture( GL_TEXTURE_2D, c.up );
+			fn->glTexImage2D( GL_TEXTURE_2D, 0, GL_R8, W, H, 0, GL_RED, GL_UNSIGNED_BYTE, nullptr );
+			fn->glTexParameteri( GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR );
+			fn->glTexParameteri( GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR );
+			fn->glTexParameteri( GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE );
+			fn->glTexParameteri( GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE );
+			fn->glBindTexture( GL_TEXTURE_2D, 0 );
+			fn->glBindFramebuffer( GL_FRAMEBUFFER, c.upFbo );
+			fn->glFramebufferTexture2D( GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, c.up, 0 );
+			c.upW = W;
+			c.upH = H;
+		}
+		fn->glBindFramebuffer( GL_FRAMEBUFFER, c.upFbo );
+		NifSkopeOpenGLContext::Program * up = fn->glCheckFramebufferStatus( GL_FRAMEBUFFER ) == GL_FRAMEBUFFER_COMPLETE
+			? r->useProgram( "ww_contact_up.prog" ) : nullptr;
+		if ( up ) {
+			fn->glViewport( 0, 0, W, H );
+			fn->glActiveTexture( GL_TEXTURE0 );
+			fn->glBindTexture( GL_TEXTURE_2D, g.gbuf );
+			fn->glActiveTexture( GL_TEXTURE1 );
+			fn->glBindTexture( GL_TEXTURE_2D, c.tex );
+			up->uni1i( "gbuf", 0 );
+			up->uni1i( "mask", 1 );
+			fn->glUniform2i( up->uniLocation( "fullSize" ), W, H );
+			fn->glUniform2i( up->uniLocation( "maskSize" ), mw, mh );
+			up->uni1f( "maskScale", float( p.scale ) );
+			up->uni1f( "tolerance", 0.02f );
+			r->drawShape( 4, 3, 6, GL_TRIANGLES, GL_UNSIGNED_SHORT, &attrs, idx );
+			r->stopProgram();
+			fn->glBindTexture( GL_TEXTURE_2D, 0 );
+			fn->glActiveTexture( GL_TEXTURE0 );
+			fn->glBindTexture( GL_TEXTURE_2D, 0 );
+			c.upValid = true;
+			upWord = QStringLiteral( "depth" );
+		} else {
+			upWord = QStringLiteral( "refused(ww_contact_up.prog)" );
+		}
+	}
 	timerEnd( fn, s.tmContact );
 	/* lane SHADOWBAND1: WW_SHADOW_CONTACT_DUMP=<ABSOLUTE dir> (gates only): the frame's opaque pass (gbuf.bin, RGBA32F view
 	 * normal + linear depth, bottom row first), the composed mask (mask.bin, R8) and the march's inputs (contact.txt),
@@ -2204,6 +2415,10 @@ void wwContactShadowPass( Scene * scene )
 		.arg( W ).arg( H ).arg( p.samples ).arg( lx, 0, 'f', 1 ).arg( ly, 0, 'f', 1 ).arg( lz, 0, 'f', 6 ).arg( cw > 0 ? 1 : -1 )
 		.arg( s.tmContact.ms, 0, 'f', 4 ).arg( double( mw ) * mh / ( 1024.0 * 1024.0 ), 0, 'f', 2 ).arg( par ? 1 : 0 ).arg( earlyExit ? 1 : 0 )
 		+ QStringLiteral( " reach=%1" ).arg( c.reach, 0, 'f', 0 )	// lane FIX1101A: 0 = the whole march (red / no cascades)
+		// lane PERFFIX2 (item 7): which march ran (line = the compute pass; frag(why)) and how the receivers read it
+		+ QStringLiteral( " path=%1 up=%2 gl=%3.%4" ).arg( line ? QStringLiteral( "line" ) : !lineAsked
+			? QStringLiteral( "frag" ) : QStringLiteral( "frag(%1)" ).arg( contactLine().why ) ).arg( upWord )
+			.arg( contactLine().major ).arg( contactLine().minor )
 		+ QStringLiteral( " " ) + far;
 }
 
@@ -2244,7 +2459,8 @@ void wwShadowSetUniforms( Scene * scene, NifSkopeOpenGLContext::Program * prog, 
 	if ( units ) {
 		WwCellUni::Units<std::remove_pointer_t<decltype( fn )>> u( fn, wwCellUniDsa() );	// lane CELLUNI2: no query with DSA
 		u.bind( WwCellUnit::TerrShadow, GL_TEXTURE_2D, terr ? s.t.tex[s.t.front] : 0 );
-		u.bind( WwCellUnit::ContactShadow, GL_TEXTURE_2D, contact ? s.c.tex : 0 );
+		// lane PERFFIX2 (item 7): the depth-aware full-size mask when this frame made one
+		u.bind( WwCellUnit::ContactShadow, GL_TEXTURE_2D, contact ? ( s.c.upValid ? s.c.up : s.c.tex ) : 0 );
 		u.done();
 		prog->uni1i( "ussTerrMap", WwCellUnit::TerrShadow );
 		prog->uni1i( "ussContactMap", WwCellUnit::ContactShadow );

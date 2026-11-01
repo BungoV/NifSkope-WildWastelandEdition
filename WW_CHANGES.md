@@ -32,6 +32,20 @@ notes/perffix2/c/RESULTS.md.
   (0.79 of a full-size 8x16 march, 12 steps 0.92). Offline 1080p RTX 5070 Ti (synthetic room, all of 3b-3d): 0.44 / 0.61 /
   0.87 / 1.75 ms against the targets 0.44 / 0.62 / 0.88 / 1.76 (before: 3.45 / 4.25 / 4.97 / 12.02). The default tier
   (Ultra) is no longer full size; SSGI itself still ships OFF. Red WW_CELL_SSGI_RED=oldtiers: FO4CS's tiers.
+- CONTACT SHADOWS ON COMPUTE, BEND'S LINE LAYOUT (item 7): the near march (non-SHADOWPAR1 tiers) runs as a GL compute
+  pass, one 64-lane workgroup per light-space line, the line's depths read once into shared memory and every sample
+  "two shared reads, a min, a multiply-add and an abs" (res/shaders/ww_contact.comp; the dispatch and the one-lane-
+  per-pixel owner rule src/gl/contactlines.h, tests/contactlines). The app's context reports GL 4.6 on NVIDIA (it asks
+  4.2 core); below 4.3 or on a compile failure the fragment pass runs and the echo says why (`path=frag(...)`).
+  As in Bend's, a pixel's ray is its line's (within half a pixel) and its receiver depth the line's own sample: off the
+  depth edges the mask matches the fragment pass at full size (> 2 levels on 0.003-0.05 % of pixels), and at half size
+  it drops the fragment pass's false floor darkening (a mask-pixel bilinear weight over texels two rows apart).
+  Offline 1080p RTX 5070 Ti (synthetic yard, 4 suns, reach on/off): fragment Low/Med/High/Ultra 0.14 / 0.22 / 0.54 /
+  0.77 ms -> line 0.06-0.10 / 0.10 / 0.17 / 0.21 ms. Half-size masks (Low, Medium, SHADOWPAR1) now reach the receivers
+  through a depth-aware upsample to full size (ww_contact_up, 0.016 ms): fewer halos at silhouettes. FIX1101A's reach
+  (CONTACTREACH1, cherry-picked from fx1101a-20261101) holds on the compute march. Echo `path=line|frag up=depth|full|
+  bilinear gl=M.m`. Reds WW_SHADOW_RED=contactfrag (the fragment march), contactbilinear (no upsample).
+
 ## CONTACTREACH1 (FIX1101A, 2026-11-01): no dashed bands from thin casters (bungo's "banding on shadows")
 
 bungo's crop of his Concord porch frame showed the shadow of power lines on a facade as a row of short parallel dashes
