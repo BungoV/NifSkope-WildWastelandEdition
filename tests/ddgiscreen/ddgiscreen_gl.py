@@ -12,6 +12,8 @@ No NifSkope. A hidden 4.1 core context (tests/spells/shader_link_check.py's) dra
 Atlas: Concord-shaped cascades (16^3 probes, cascade 0 step 273.8 u), random encoded tiles, every probe usable.
 Bars (set before the first run): full: upsampled >= 99.5 % of surface pixels, rel err max <= 2e-3; half: upsampled
 >= 97 %, rel err median <= 0.01, p99 <= 0.08, edge pixels (a depth jump > 5 % within 2 px) p99 <= 0.10.
+GIFIX1101: --red lobe3 (cellDdgiRed 32, WW_CELL_RTDDGI_RED=lobe3) = PERFFIX2's three-point lobe read; with --tiles random
+it must FAIL the full spec vis bar the five-point read meets.
 Reds (doctored copies of the real files, must FAIL): nokey (the upsample's plane + normal keys dropped: bleeds across
 edges), shift (the screen pass reads the g-buffer one pixel off). Prints the screen pass's GPU ms (median of 30).
 Exit 0 = PASS.
@@ -41,7 +43,7 @@ def doctor(name, old, new):
 if RED == 'nokey':
     doctor('cell_gihalfat.glsl', 'float w = wb * smoothstep(', 'float w = wb; float wUnused = wb * smoothstep(')
 elif RED == 'visn':   # the mirror direction's visibility replaced by the normal's: a mirror's lobe reads the wrong way
-    doctor('cell_gihalf.frag', 'cellGiHalfBits( e.b, d.vis3 )', 'cellGiHalfBits( e.b, d.vis )')
+    doctor('cell_gihalf.frag', 'd.vis5, d.vis3 )', 'd.vis5, d.vis )')
 elif RED == 'shift':
     doctor('cell_gihalf.frag', 'ivec2 f = min( giStep * ivec2( gl_FragCoord.xy ), giFull - 1 );',
            'ivec2 f = min( giStep * ivec2( gl_FragCoord.xy ) + 1, giFull - 1 );')
@@ -223,7 +225,7 @@ void main()
 	spec = vec4( dv.vis, -1.0, dv.w > 0.0 && dv.fade > 0.0 ? 1.0 : 0.0, 0.0 );
 	vec4 s;
 	if ( !inlineOnly && cellGiHalfAt( P, N, s ) ) {
-		spec.y = cellGiHalfLobeVis( kk );	// cellSpecSky's call (cell_lights.glsl)
+		spec.y = cellGiHalfLobe( kk, N, reflect( -V, N ) );	// cellSpecSky's call (cell_lights.glsl)
 		col = s; flag = vec4( 1.0, 0.0, 0.0, 1.0 ); return;
 	}
 	col = inlineRead( P, N ); flag = vec4( 0.5, 0.0, 0.0, 1.0 );
@@ -275,7 +277,7 @@ def set_common(prog):
     L = lambda n: uloc(prog, n.encode())
     rr = (GLf * 12)(*[x for r in rows for x in r])
     u4fv(L('cellRow'), 3, rr)
-    u1i(L('cellOn'), 1); u1i(L('cellDdgiOn'), 1); u1i(L('cellGiLoop8'), 8); u1i(L('cellDdgiRed'), 0)
+    u1i(L('cellOn'), 1); u1i(L('cellDdgiOn'), 1); u1i(L('cellGiLoop8'), 8); u1i(L('cellDdgiRed'), 32 if RED == 'lobe3' else 0)
     u1i(L('cellPass'), 0); u1i(L('cellProbe'), 0)
     u1i(L('cellDdgiAtlas'), 3)
     if K > 1:

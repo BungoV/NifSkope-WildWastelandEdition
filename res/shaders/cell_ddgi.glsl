@@ -41,7 +41,7 @@ int cellDdgiC = 0;					// the cascade cellDdgiReadOne reads
 #define CELL_DDGI_TIGHT - 1.0
 #define cellDdgiRead cellDdgiReadOne
 #endif
-uniform int cellDdgiRed;			// rtddgimath.h kSample*: 1 trilinear (WW_CELL_RTDDGI_RED), 2 nocheb, 4 nobias, 8 nocover, 16 slowread
+uniform int cellDdgiRed;			// rtddgimath.h kSample*: 1 trilinear (WW_CELL_RTDDGI_RED), 2 nocheb, 4 nobias, 8 nocover, 16 slowread, 32 lobe3
 
 struct CellDdgiOut
 {
@@ -51,6 +51,10 @@ struct CellDdgiOut
 	float fade;	// 1 a cell inside the probe box, 0 at its faces and past them
 	float vis2;	// FIX1101A: the sky visibility at cellDdgiD2 with the same weights (only while cellDdgiTwo), else 0
 	float vis3;	// PERFFIX2: the same at cellDdgiD3 (only while cellDdgiThree), else 0
+#ifdef CELL_DDGI_FIVE
+	float vis4;	// GIFIX1101 SO: the same at cellDdgiD4 / cellDdgiD5 (the screen pass only, while cellDdgiFive), else 0
+	float vis5;
+#endif
 };
 /* FIX1101A (the read's cost): the specular occlusion wants the sky visibility at the reflection lobe and the surfaces the
  * irradiance at the normal, both from the same 8 probes with the same weights. With cellDdgiTwo set, one read also
@@ -61,6 +65,13 @@ vec3 cellDdgiD2 = vec3( 0.0, 0.0, 1.0 );
  * half way to the mirror direction and at it, for the specular occlusion's three-point read, cell_gihalfat.glsl) */
 bool cellDdgiThree = false;
 vec3 cellDdgiD3 = vec3( 0.0, 0.0, 1.0 );
+#ifdef CELL_DDGI_FIVE
+/* GIFIX1101 SO: two more on the lobe's arc (a quarter and three quarters of the way from the normal to the mirror
+ * direction): the screen pass's five-point lobe (cell_gihalfat.glsl cellGiHalfLobeVis5). Only cell_gihalf.frag defines it */
+bool cellDdgiFive = false;
+vec3 cellDdgiD4 = vec3( 0.0, 0.0, 1.0 );
+vec3 cellDdgiD5 = vec3( 0.0, 0.0, 1.0 );
+#endif
 
 int cellDdgiIMin( int a, int b ) { return a < b ? a : b; }
 int cellDdgiIMax( int a, int b ) { return a > b ? a : b; }
@@ -123,6 +134,12 @@ CellDdgiOut cellDdgiRead( vec3 P, vec3 n, vec3 o, vec3 d )
 	r.fade = 0.0;
 	r.vis2 = 0.0;
 	r.vis3 = 0.0;
+#ifdef CELL_DDGI_FIVE
+	r.vis4 = 0.0;
+	r.vis5 = 0.0;
+	float v4sum = 0.0;
+	float v5sum = 0.0;
+#endif
 	vec3 Pb = P;
 	if ( ( cellDdgiRed & 4 ) == 0 )
 		Pb = Pb + ( n * 0.2 + o * 0.8 ) * ( 0.75 * cellDdgiOrigin.w * cellDdgiStep.w );
@@ -195,6 +212,12 @@ CellDdgiOut cellDdgiRead( vec3 P, vec3 n, vec3 o, vec3 d )
 			vec4 e3 = cellDdgiTile( p, cellDdgiD3, 8 );
 			v3sum += w * e3.w;
 		}
+#ifdef CELL_DDGI_FIVE
+		if ( cellDdgiFive ) {
+			v4sum += w * cellDdgiTile( p, cellDdgiD4, 8 ).w;
+			v5sum += w * cellDdgiTile( p, cellDdgiD5, 8 ).w;
+		}
+#endif
 		wsum += w;
 	}
 	if ( ( cellDdgiRed & 8 ) == 0 )	// rtddgimath.h kSampleNoCover (WW_CELL_RTDDGI_RED=nocover: today's main, the hard line)
@@ -206,6 +229,10 @@ CellDdgiOut cellDdgiRead( vec3 P, vec3 n, vec3 o, vec3 d )
 	r.vis = vsum / wsum;
 	r.vis2 = v2sum / wsum;
 	r.vis3 = v3sum / wsum;
+#ifdef CELL_DDGI_FIVE
+	r.vis4 = v4sum / wsum;
+	r.vis5 = v5sum / wsum;
+#endif
 	r.w = wsum;
 	return r;
 }
@@ -224,6 +251,10 @@ CellDdgiOut cellDdgiRead( vec3 P, vec3 n, vec3 o, vec3 d )
 	r.fade = 0.0;
 	r.vis2 = 0.0;
 	r.vis3 = 0.0;
+#ifdef CELL_DDGI_FIVE
+	r.vis4 = 0.0;
+	r.vis5 = 0.0;
+#endif
 	float left = 1.0;
 	for ( int c = 0; c < cellDdgiCount; c++ ) {
 		cellDdgiC = c;
@@ -235,6 +266,10 @@ CellDdgiOut cellDdgiRead( vec3 P, vec3 n, vec3 o, vec3 d )
 		r.vis += q.vis * take;
 		r.vis2 += q.vis2 * take;
 		r.vis3 += q.vis3 * take;
+#ifdef CELL_DDGI_FIVE
+		r.vis4 += q.vis4 * take;
+		r.vis5 += q.vis5 * take;
+#endif
 		r.w += q.w;
 		r.fade += take;
 		left -= take;
@@ -246,6 +281,10 @@ CellDdgiOut cellDdgiRead( vec3 P, vec3 n, vec3 o, vec3 d )
 		r.vis = r.vis / r.fade;
 		r.vis2 = r.vis2 / r.fade;
 		r.vis3 = r.vis3 / r.fade;
+#ifdef CELL_DDGI_FIVE
+		r.vis4 = r.vis4 / r.fade;
+		r.vis5 = r.vis5 / r.fade;
+#endif
 	}
 	return r;
 }

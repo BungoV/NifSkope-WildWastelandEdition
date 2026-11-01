@@ -151,6 +151,7 @@ const int * cellRedParts()
 			if ( t == QLatin1String( "nobias" ) ) b.v[0] |= int( rtddgi::kSampleNoBias );
 			if ( t == QLatin1String( "nocover" ) ) b.v[0] |= int( rtddgi::kSampleNoCover );   // FIX1031B: the old fade (hard line)
 			if ( t == QLatin1String( "slowread" ) ) b.v[0] |= int( rtddgi::kSampleSlowRead );   // FIX1101A: every call reads in full
+			if ( t == QLatin1String( "lobe3" ) ) b.v[0] |= int( rtddgi::kSampleLobe3 );   // GIFIX1101 SO: the three-point lobe read
 			if ( t == QLatin1String( "readback" ) ) b.v[1] |= kPathReadback;
 			if ( t == QLatin1String( "rebuild" ) ) b.v[1] |= kPathRebuild;
 			if ( t == QLatin1String( "nowait" ) ) b.v[1] |= kPathNoWait;   // lane RTXFIX1

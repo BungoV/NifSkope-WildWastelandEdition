@@ -7,6 +7,7 @@
  * Red WW_CELL_GI_VIS=march: the old chain (the pass does not run then; it still compiles). */
 
 #define WW_CELL_FX 1
+#define CELL_DDGI_FIVE 1	// GIFIX1101 SO: the lobe's five-point read (cell_ddgi.glsl, cell_gihalfat.glsl)
 #include "lookdev_fog.glsl"
 #include "ww_sunshadow.glsl"
 #include "cell_lights.glsl"
@@ -50,12 +51,15 @@ void main()
 	cellDdgiD2 = normalize( N + R );	// half way: cellSpecSky's bend at k 0.5
 	cellDdgiThree = true;
 	cellDdgiD3 = R;
+	cellDdgiFive = true;	// GIFIX1101 SO: a quarter and three quarters of the way
+	cellDdgiD4 = normalize( N + cellDdgiD2 );
+	cellDdgiD5 = normalize( cellDdgiD2 + R );
 	CellDdgiOut d = cellDdgiRead( P, N, V, N );
 	cellDdgiTwo = false;
 	cellDdgiThree = false;
+	cellDdgiFive = false;
 	vec3 e = d.fade * d.E;
-	giOut = d.w > 0.0 && d.fade > 0.0 ? vec4( cellGiHalfBits( e.r, d.vis ), cellGiHalfBits( e.g, d.vis2 ), cellGiHalfBits( e.b, d.vis3 ),
-		d.fade ) : vec4( 0.0 );
+	giOut = d.w > 0.0 && d.fade > 0.0 ? cellGiHalfPack5( e, d.fade, d.vis, d.vis4, d.vis2, d.vis5, d.vis3 ) : vec4( 0.0 );
 #elif defined( WW_CELL_GI_MARCH )
 	giOut = cellGiSampleFull( P, N );
 #else

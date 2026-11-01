@@ -462,6 +462,7 @@ constexpr unsigned kSampleNoCheb = 2u;      // no Chebyshev factor
 constexpr unsigned kSampleNoBias = 4u;      // no self-shadow bias
 constexpr unsigned kSampleNoCover = 8u;     // FIX1031B: WW_CELL_RTDDGI_RED=nocover, the fade ignores the missing probes (today's main)
 constexpr unsigned kSampleSlowRead = 16u;   // FIX1101A: WW_CELL_RTDDGI_RED=slowread, no early out, no per-fragment memo (today's main)
+constexpr unsigned kSampleLobe3 = 32u;      // GIFIX1101 SO: WW_CELL_RTDDGI_RED=lobe3, the screen texel's three-point lobe read (PERFFIX2's)
 //! a probe the read takes: Vigilant and blended at least once (Asleep probes are not traced, Off ones sit in walls)
 inline bool probeUsable( int state, uint32_t age )
 {

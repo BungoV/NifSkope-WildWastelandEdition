@@ -1416,7 +1416,7 @@ float cellSpecSky( vec3 P, vec3 N, vec3 R, float rough )
 	if ( cellGiHalfOn && cellPass == 0 && cellProbe == 0 && cellGiHalfAt( P, N, hs ) ) {
 		if ( hs.a <= 0.0 )
 			return 1.0;
-		float vl = cellSpecOcc == 2 ? cellGiHalfVis.x : cellGiHalfLobeVis( ( 1.0 - r ) * ( sqrt( 1.0 - r ) + r ) );
+		float vl = cellSpecOcc == 2 ? cellGiHalfVis.x : cellGiHalfLobe( ( 1.0 - r ) * ( sqrt( 1.0 - r ) + r ), N, R );	// GIFIX1101 SO
 		float vh = 1.0 + hs.a * cellSkyVis * ( clamp( vl, 0.0, 1.0 ) - 1.0 );
 		return cellSpecOcc == 2 ? mix( 1.0, vh, r ) : vh;
 	}
