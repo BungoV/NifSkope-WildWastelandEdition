@@ -21,8 +21,11 @@
   GI off, 54.7 one volume, 110.9 cascades): cell_lights.glsl cellGiSample keeps a per-fragment memo (the programs asked
   for the same (P, N) 2-3 times: cellGiSkyK and cellLit's cellGiE / the PBR ambient now share one read), and a cascade
   outside its tight box returns before its probes' fetches (cell_ddgi.glsl cellDdgiReadOne, MIRROR rtddgimath.h
-  sampleVolume). Red WW_CELL_RTDDGI_RED=slowread (every call reads in full). Unit check `readonce` (green 28 + 28 reds):
-  0 of 8000 answers differ; the GLSL read's texel fetches 188.0 -> 10.3 (uniform points), 153.6 -> 83.0 (near-weighted).
+  sampleVolume), and the specular occlusion's lobe visibility rides the surfaces' read (cellDdgiTwo / vis2: the same
+  8 probes and weights, 4 fetches a probe for the lobe instead of a second read; cellSpecSky fills the memo). Red
+  WW_CELL_RTDDGI_RED=slowread (every call reads in full). Unit checks (green 29 + 29 reds): `readonce` 0 of 8000 answers
+  differ, the GLSL read's texel fetches 188.0 -> 10.3 (uniform points), 153.6 -> 83.0 (near-weighted); `lobe` the lobe
+  visibility equals a separate read (worst 0), the two reads' fetches 156.6 -> 111.3. A fragment's reads: 3 -> 1.
   Live ms owed (notes/fix1101a/gi/cost_rows.txt). Link sweeps: base 405/405, +RTDDGI 270/270, +RTDDGI+CASCADES 270/270,
   +PRT 405/405.
 - Interiors (LATE ITEM 17, bungo 11-01 "they have a sky, but it's fake ... only the fake lights do"): an interior's volume
@@ -30,6 +33,13 @@
   the cell's directional stay. Red WW_CELL_RTDDGI_INTSKY_RED=1 (SKYINT1's weather sky + sun). Census line `rtddgi cell:
   interior (...)`. One-sided back faces were already hits in the trace (radiance 0, distance -0.2 t). The surfaces'
   weather DALC / fog in Use Sky Lighting interiors (SKYINT1, celllights.cpp) is unchanged here.
+- GI sky from the physical sky (LATE ITEM 15d), SHIPS OFF: WW_CELL_RTDDGI_SKY=physical (live: in the build key via the
+  sky) gives an exterior volume the physical sky's irradiance on the six axes (src/gl/atmomath.h skyRadianceSingle /
+  skyIrradianceAxes, single scattering, the sky above the horizon; src/gl/atmosphere.cpp wwAtmoGiSkyAxes, memo on sun +
+  haze), +Z scaled to the weather's luminance, -Z the weather's. Off by default because the measure argues against it
+  for bungo's tan: at CommonwealthClear's DALC and a 30 deg sun the physical sides are LESS blue (R/B 0.41-0.48) than the
+  weather's (0.34; zenith 0.33 both), the sun side 1.47x the anti-sun side. Unit tests/gisky (green 3; red = the weather's
+  DALC fails `sunside`).
 
 ## HORIZONBAND1 (FIX1031B area A, 2026-10-31): the horizon blends - no cyan strip with a hard top edge
 

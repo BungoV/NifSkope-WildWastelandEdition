@@ -1434,10 +1434,25 @@ float cellSpecSky( vec3 P, vec3 N, vec3 R, float rough )
 	float v = 1.0 + ( f < 1.0 ? f * cellSkyVis : cellSkyVis ) * ( clamp( a.x / a.y, 0.0, 1.0 ) - 1.0 );
 #elif defined( WW_CELL_RTDDGI )
 	// lane PRTOFF1: the volume's sky visibility on the lobe's direction (RTXGI1 M2's read with no grid under it: 1 past the box)
-	CellDdgiOut dv = cellDdgiRead( P, N, normalize( vec3( cellRow[0].w, cellRow[1].w, cellRow[2].w ) - P ), D );
-	if ( !( dv.w > 0.0 && dv.fade > 0.0 ) )
+	/* FIX1101A (the read's cost): one read at the normal also takes the lobe's visibility with the same weights (vis2),
+	 * and leaves its answer for cellGiSample at this (P, N) (the memo): the surfaces' sample costs no second read. Red
+	 * WW_CELL_RTDDGI_RED=slowread: the lobe's own read, as before */
+	vec3 oSky = normalize( vec3( cellRow[0].w, cellRow[1].w, cellRow[2].w ) - P );
+	bool fast = ( cellDdgiRed & 16 ) == 0;
+	cellDdgiTwo = fast;
+	cellDdgiD2 = D;
+	CellDdgiOut dv = cellDdgiRead( P, N, oSky, fast ? N : D );
+	cellDdgiTwo = false;
+	bool ownSky = dv.w > 0.0 && dv.fade > 0.0;
+	if ( fast ) {
+		cellGiMemoOk = true;
+		cellGiMemoP = P;
+		cellGiMemoN = N;
+		cellGiMemoS = ownSky ? dv.fade * ( cellPass == 2 ? vec4( vec3( dv.vis ), 1.0 ) : vec4( dv.E, 1.0 ) ) : vec4( 0.0 );
+	}
+	if ( !ownSky )
 		return 1.0;
-	float v = 1.0 + dv.fade * cellSkyVis * ( clamp( dv.vis, 0.0, 1.0 ) - 1.0 );
+	float v = 1.0 + dv.fade * cellSkyVis * ( clamp( fast ? dv.vis2 : dv.vis, 0.0, 1.0 ) - 1.0 );
 #else
 	float v = 1.0;
 #endif

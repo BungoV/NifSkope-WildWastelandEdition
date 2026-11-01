@@ -49,7 +49,13 @@ struct CellDdgiOut
 	float vis;	// sky visibility
 	float w;	// the weights' sum: 0 = no usable probe
 	float fade;	// 1 a cell inside the probe box, 0 at its faces and past them
+	float vis2;	// FIX1101A: the sky visibility at cellDdgiD2 with the same weights (only while cellDdgiTwo), else 0
 };
+/* FIX1101A (the read's cost): the specular occlusion wants the sky visibility at the reflection lobe and the surfaces the
+ * irradiance at the normal, both from the same 8 probes with the same weights. With cellDdgiTwo set, one read also
+ * takes each probe's tile at cellDdgiD2 (4 fetches a probe instead of a second read's 9) into vis2 */
+bool cellDdgiTwo = false;
+vec3 cellDdgiD2 = vec3( 0.0, 0.0, 1.0 );
 
 int cellDdgiIMin( int a, int b ) { return a < b ? a : b; }
 int cellDdgiIMax( int a, int b ) { return a > b ? a : b; }
@@ -110,6 +116,7 @@ CellDdgiOut cellDdgiRead( vec3 P, vec3 n, vec3 o, vec3 d )
 	r.vis = 0.0;
 	r.w = 0.0;
 	r.fade = 0.0;
+	r.vis2 = 0.0;
 	vec3 Pb = P;
 	if ( ( cellDdgiRed & 4 ) == 0 )
 		Pb = Pb + ( n * 0.2 + o * 0.8 ) * ( 0.75 * cellDdgiOrigin.w * cellDdgiStep.w );
@@ -135,6 +142,7 @@ CellDdgiOut cellDdgiRead( vec3 P, vec3 n, vec3 o, vec3 d )
 #endif
 	vec3 sum = vec3( 0.0 );
 	float vsum = 0.0;
+	float v2sum = 0.0;	// FIX1101A: vis at cellDdgiD2
 	float wsum = 0.0;
 	float cover = 0.0;	// FIX1031B: rtddgimath.h sampleVolume's cover (the corners that are not missing)
 	for ( int c = 0; c < cellGiLoop8; c++ ) {	// cell_lights.glsl's uniform bound: one body, never unrolled
@@ -172,6 +180,10 @@ CellDdgiOut cellDdgiRead( vec3 P, vec3 n, vec3 o, vec3 d )
 		vec4 e = cellDdgiTile( p, d, 8 );
 		sum = sum + vec3( pow( max( e.x, 0.0 ), 2.5 ), pow( max( e.y, 0.0 ), 2.5 ), pow( max( e.z, 0.0 ), 2.5 ) ) * w;
 		vsum += w * e.w;
+		if ( cellDdgiTwo ) {
+			vec4 e2 = cellDdgiTile( p, cellDdgiD2, 8 );
+			v2sum += w * e2.w;
+		}
 		wsum += w;
 	}
 	if ( ( cellDdgiRed & 8 ) == 0 )	// rtddgimath.h kSampleNoCover (WW_CELL_RTDDGI_RED=nocover: today's main, the hard line)
@@ -181,6 +193,7 @@ CellDdgiOut cellDdgiRead( vec3 P, vec3 n, vec3 o, vec3 d )
 	vec3 m = sum * ( 1.0 / wsum );
 	r.E = m * m * 6.28318530717958647692;
 	r.vis = vsum / wsum;
+	r.vis2 = v2sum / wsum;
 	r.w = wsum;
 	return r;
 }
@@ -197,6 +210,7 @@ CellDdgiOut cellDdgiRead( vec3 P, vec3 n, vec3 o, vec3 d )
 	r.vis = 0.0;
 	r.w = 0.0;
 	r.fade = 0.0;
+	r.vis2 = 0.0;
 	float left = 1.0;
 	for ( int c = 0; c < cellDdgiCount; c++ ) {
 		cellDdgiC = c;
@@ -206,6 +220,7 @@ CellDdgiOut cellDdgiRead( vec3 P, vec3 n, vec3 o, vec3 d )
 		float take = q.fade * left;
 		r.E = r.E + q.E * take;
 		r.vis += q.vis * take;
+		r.vis2 += q.vis2 * take;
 		r.w += q.w;
 		r.fade += take;
 		left -= take;
@@ -215,6 +230,7 @@ CellDdgiOut cellDdgiRead( vec3 P, vec3 n, vec3 o, vec3 d )
 	if ( r.fade > 0.0 ) {
 		r.E = r.E * ( 1.0 / r.fade );
 		r.vis = r.vis / r.fade;
+		r.vis2 = r.vis2 / r.fade;
 	}
 	return r;
 }

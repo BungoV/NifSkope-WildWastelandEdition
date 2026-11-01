@@ -1056,6 +1056,54 @@ void checkReadOnce()
 		double( fSlow[0] ) / 4000.0, double( fFast[0] ) / 4000.0, double( fSlow[1] ) / 4000.0, double( fFast[1] ) / 4000.0 );
 }
 
+/* FIX1101A: the specular occlusion's lobe visibility taken in the surfaces' read (cell_ddgi.glsl cellDdgiTwo / vis2,
+ * cell_lights.glsl cellSpecSky): with the same weights it equals a separate read at the lobe's direction, the read's
+ * own answers are unchanged, and the two reads' fetches fall. Cascades (glslc) and one volume (glsl). Red
+ * RTDDGI_RED_LOBE: the combined read never takes the second direction (vis2 stays 0). */
+void checkLobe()
+{
+	uint64_t s = 0x10be10beULL;
+	CascTest R;
+	const int dr[3] = { 9, 8, 7 };
+	for ( int c = 0; c < 3; c++ )
+		R.make( c, dr, V3( 300.0f, -200.0f, 80.0f ), V3( 140.0f, 140.0f, 105.0f ), s, -1.0f );
+	R.pack( 3 );
+	R.toGlsl( 3, 0u );
+	const SampleVolume & C = R.v[2].v;
+	const V3 mid( C.origin.x + 4.0f * C.step.x, C.origin.y + 3.5f * C.step.y, C.origin.z + 3.0f * C.step.z );
+	double worstV2 = 0;
+	int diff = 0, points = 0;
+	long long fTwo = 0, fSep = 0;
+	for ( int i = 0; i < 4000; i++ ) {
+		const float u = unit01( s );
+		const V3 P = mid + randUnit( s ) * ( u * u * 4.5f * C.step.x );
+		const V3 n = randUnit( s ), o = randUnit( s ), d2 = normalize( n + randUnit( s ) * 0.7f );
+		const glslc::vec3 gP( P.x, P.y, P.z ), gn( n.x, n.y, n.z ), go( o.x, o.y, o.z ), gd2( d2.x, d2.y, d2.z );
+		glslc::cellDdgiAtlas.fetches = 0;
+		const glslc::CellDdgiOut a = glslc::cellDdgiRead( gP, gn, go, gn );
+		const glslc::CellDdgiOut b = glslc::cellDdgiRead( gP, gn, go, gd2 );
+		fSep += glslc::cellDdgiAtlas.fetches;
+		glslc::cellDdgiAtlas.fetches = 0;
+#ifndef RTDDGI_RED_LOBE
+		glslc::cellDdgiTwo = true;
+#endif
+		glslc::cellDdgiD2 = gd2;
+		const glslc::CellDdgiOut t = glslc::cellDdgiRead( gP, gn, go, gn );
+		glslc::cellDdgiTwo = false;
+		fTwo += glslc::cellDdgiAtlas.fetches;
+		glslc::cellDdgiAtlas.fetches = 0;
+		points++;
+		const bool own = b.w > 0.0 && b.fade > 0.0;
+		diff += ( t.E.x == a.E.x && t.E.y == a.E.y && t.E.z == a.E.z && t.vis == a.vis && t.w == a.w && t.fade == a.fade ) ? 0 : 1;
+		if ( own )
+			worstV2 = std::max( worstV2, double( std::fabs( t.vis2 - b.vis ) ) );
+	}
+	const double r = double( fTwo ) / double( std::max( 1LL, fSep ) );
+	report( "lobe", diff == 0 && worstV2 < 1e-6 && r < 0.8, "%g points (cascades): the combined read's lobe visibility vs a separate read worst "
+		"%.2g (bar 1e-6), its own answers differing %g (bar 0)", points, worstV2, diff );
+	std::printf( "        fetches combined / two reads %.3f (bar 0.8): %.1f -> %.1f a point\n", r, double( fSep ) / points, double( fTwo ) / points );
+}
+
 void checkCascTight()
 {
 	// a camera-locked volume: fade 0 over its outer cell (g 0.5), 0.5 at g 1.5, 1 from g 2; M2's untightened 0.5 at 0.5
@@ -1234,6 +1282,7 @@ int main()
 	checkScroll();
 	checkCascade();
 	checkReadOnce();
+	checkLobe();
 	checkCascTight();
 	checkCascScale();
 	checkCascDue();

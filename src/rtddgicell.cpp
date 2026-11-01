@@ -13,6 +13,7 @@
 #include "rtddgi/rtddgi_gpu.h"
 #include "version.h"
 #include "wwswitch.h"
+#include "gl/atmomath.h"    // FIX1101A: giSkyFromPhysical
 #include "gl/celllights.h"
 #include "gl/cellunits.h"
 #include "gl/cellssr.h"      // lane RESTIRDI1: wwCellAoTargets (the shared opaque pass ReSTIR reads)
@@ -38,9 +39,11 @@
 #include <thread>
 #include <vector>
 
+bool wwAtmoGiSkyAxes( const float sunTo[3], float out[6][3] );   // FIX1101A: src/gl/atmosphere.cpp (the physical sky's six axes)
+
 namespace {
 
-constexpr int kAtlasTexels = 193;           // a probe's texels in the texture buffer: 64 irradiance + 128 distance + 1 probe
+constexpr int kAtlasTexels = 193;          // a probe's texels in the texture buffer: 64 irradiance + 128 distance + 1 probe
 constexpr double kViewReach = 3000.0;       // the debug view draws the probes within this of the camera (the PRTP view's)
 constexpr size_t kViewMaxProbes = 20000;    // and at most this many spheres
 constexpr int kScrollEcho = 16;             // the census prints the first scrolls, then every 64th
@@ -314,6 +317,15 @@ bool rtddgiBounceRed()
 		return false;
 	const QByteArray v = wwEnv( "WW_CELL_RTDDGI_BOUNCE_RED" ).trimmed();
 	return !v.isEmpty() && v != "0";
+}
+
+//! FIX1101A LATE ITEM 15d: WW_CELL_RTDDGI_SKY=physical (live, ships off): the volume's sky from the physical sky
+bool rtddgiGiSkyPhysical()
+{
+	if ( !wwEnvIsSet( "WW_CELL_RTDDGI_SKY" ) )
+		return false;
+	const QByteArray v = wwEnv( "WW_CELL_RTDDGI_SKY" ).trimmed().toLower();
+	return v == "physical" || v == "1";
 }
 
 //! FIX1101A LATE ITEM 17: WW_CELL_RTDDGI_INTSKY_RED=1 = today's main (an interior's volume may take the weather's sky and sun)
@@ -1505,6 +1517,35 @@ static void volumeFrame( Scene * scene, Cell & c, const CellSpec * spIn, bool du
 					.arg( lights.skyLighting ? QStringLiteral( "Use Sky Lighting" ) : QStringLiteral( "no sky flags" ) )
 				: QStringLiteral( "interior (%1): no sky, no sun in the volume, misses 0 (FIX1101A)" )
 					.arg( lights.skyLighting ? QStringLiteral( "Use Sky Lighting" ) : QStringLiteral( "no sky flags" ) ) ) );
+		}
+	}
+	/* FIX1101A LATE ITEM 15d (bungo 11-01 "does our GI not take sky into consideration?"): with Physical Sky on, an
+	 * exterior volume's sky is the physical sky's irradiance on the six axes (its colour and its sun-side / anti-sun /
+	 * zenith shares, src/gl/atmomath.h skyIrradianceAxes), scaled so +Z keeps the weather's own luminance; -Z (the
+	 * ground's light) stays the weather's. Physical Sky off or the sun down: the weather's ambient as before. SHIPS OFF:
+	 * WW_CELL_RTDDGI_SKY=physical turns it on. Measured (tests/gisky, CommonwealthClear's DALC, sun 30 deg): the physical
+	 * sides are LESS blue than the weather's (R/B 0.41-0.48 vs 0.34; zenith 0.33 both) and the sun side 1.47x the
+	 * anti-sun side, so it would warm the shade bungo calls tan (LATE ITEM 15): his call. In the build key via sky.amb */
+	if ( sky.on && !lights.interior && rtddgiGiSkyPhysical() ) {
+		float phys[6][3], mixed[6][3];
+		if ( wwAtmoGiSkyAxes( sky.sunTo, phys ) ) {
+			WwAtmoMath::giSkyFromPhysical( phys, sky.amb, mixed );
+			std::memcpy( sky.amb, mixed, sizeof mixed );
+			static float said = -1.0f;
+			if ( std::fabs( mixed[4][2] - said ) > 1e-6f ) {
+				said = mixed[4][2];
+				auto rb = []( const float * c ) { return double( c[0] / std::max( c[2], 1e-9f ) ); };
+				say( c.tag + QStringLiteral( "sky from the physical sky (FIX1101A): +X %1 %2 %3, -X %4 %5 %6, +Y %7 %8 %9, -Y %10 %11 %12, "
+					"+Z %13 %14 %15 (R/B +Z %16, sides %17..%18)" )
+					.arg( double( mixed[0][0] ), 0, 'f', 4 ).arg( double( mixed[0][1] ), 0, 'f', 4 ).arg( double( mixed[0][2] ), 0, 'f', 4 )
+					.arg( double( mixed[1][0] ), 0, 'f', 4 ).arg( double( mixed[1][1] ), 0, 'f', 4 ).arg( double( mixed[1][2] ), 0, 'f', 4 )
+					.arg( double( mixed[2][0] ), 0, 'f', 4 ).arg( double( mixed[2][1] ), 0, 'f', 4 ).arg( double( mixed[2][2] ), 0, 'f', 4 )
+					.arg( double( mixed[3][0] ), 0, 'f', 4 ).arg( double( mixed[3][1] ), 0, 'f', 4 ).arg( double( mixed[3][2] ), 0, 'f', 4 )
+					.arg( double( mixed[4][0] ), 0, 'f', 4 ).arg( double( mixed[4][1] ), 0, 'f', 4 ).arg( double( mixed[4][2] ), 0, 'f', 4 )
+					.arg( rb( mixed[4] ), 0, 'f', 2 )
+					.arg( std::min( std::min( rb( mixed[0] ), rb( mixed[1] ) ), std::min( rb( mixed[2] ), rb( mixed[3] ) ) ), 0, 'f', 2 )
+					.arg( std::max( std::max( rb( mixed[0] ), rb( mixed[1] ) ), std::max( rb( mixed[2] ), rb( mixed[3] ) ) ), 0, 'f', 2 ) );
+			}
 		}
 	}
 	const WwCellGi * G = wwCellGiFor( nif );
