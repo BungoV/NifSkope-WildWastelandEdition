@@ -1131,6 +1131,26 @@ void CellWorkspacePanel::buildUi()
 		&wwShadowSetContactTier );
 	liveTier( "CellWorkspaceTerrainShadows", tr( "Terrain shadows" ), "terrainShadows", &wwShadowTerrainTier,
 		&wwShadowSetTerrainTier );
+	{	// lane PERFFIX2 (item 9): the AO quality tier (src/gl/cellaomethod.h); the built-in presets pick it by name; live
+		QMenu * m = groupsMenu->addMenu( tr( "Ambient Occlusion quality" ) );
+		m->setObjectName( QStringLiteral( "CellWorkspaceAoQuality" ) );
+		auto * grp = new QActionGroup( m );
+		grp->setExclusive( true );
+		const QStringList names = { tr( "Low" ), tr( "Medium" ), tr( "High" ), tr( "Ultra" ) };
+		for ( int k = 0; k < names.size(); k++ ) {
+			QAction * a = m->addAction( names.at( k ) );
+			a->setCheckable( true );
+			a->setData( k );
+			a->setChecked( k == wwCellAoQuality() );
+			grp->addAction( a );
+		}
+		m->menuAction()->setEnabled( !wwCellAoQualityPinned() );
+		connect( grp, &QActionGroup::triggered, this, [this]( QAction * a ) {
+			wwCellAoSetQuality( a->data().toInt() );	// WW/CellAoQuality
+			if ( glView )
+				glView->update();
+		} );
+	}
 	liveTick( "CellWorkspaceShadowRules", tr( "Fusion Shaders shadow rules" ), "shadowPar",
 		[]() { return wwShadowParMask() != 0; }, []( bool on ) { wwShadowSetParMask( on ? WwParAll : 0 ); } );
 	if ( showButton )
@@ -1271,6 +1291,7 @@ void CellWorkspacePanel::buildUi()
 		look( WwLook::FarCardShadows, tr( "Far tree card shadows" ) );
 		look( WwLook::TerrPbrDim, tr( "PBR ambient in terrain shadow" ) );
 		head( F, "CellWorkspaceAo", "CellWorkspaceAoMethod" );	// item 27 + round 4: the method first in its fold
+		kid( "", tr( "Quality" ), "CellWorkspaceAoQuality", -1, true );	// lane PERFFIX2 (item 9): the presets step it
 		head( F, "CellWorkspaceSsgi", "CellWorkspaceSsgiQuality", -1, true );
 		rows.last().heavy = true;
 		master( F, WwGroup::Reflections );

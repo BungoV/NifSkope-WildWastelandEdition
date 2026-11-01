@@ -307,6 +307,11 @@ bool wwCellAoPinned();	// lane GAPTOOL1: the Scene window's SSAO row greys on th
 int wwCellAoMethod();
 void wwCellAoSetMethod( int method );
 bool wwCellAoMethodPinned();
+/*! lane PERFFIX2 (item 9): the AO quality tier 0 Low .. 3 Ultra (cellaomethod.h WwAoTier*; the default Ultra is the
+ *  picture before the tiers): WW/CellAoQuality, pin WW_CELL_AO_QUALITY=low|medium|high|ultra; live */
+int wwCellAoQuality();
+void wwCellAoSetQuality( int tier );
+bool wwCellAoQualityPinned();
 bool wwCellShadowOn();
 void wwCellShadowSetOn( bool on );
 bool wwCellGiGpuOn();

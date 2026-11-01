@@ -6,6 +6,13 @@ notes/perffix2/c/RESULTS.md.
 - SSGI SUB-TIMERS (item 3a): the ssgi pass's stages are timed in groups, logged after the passes as `| sub ssgi-hiz`,
   `ssgi-mips`, `ssgi-ecast`, `ssgi-echain`, `ssgi-cast`, `ssgi-temporal`, `ssgi-denoise` (src/gl/cellssgiplan.h maps
   each stage to its group; tests/ssgiplan). Timestamps only: no picture changes.
+- AO QUALITY TIERS (item 9): a new choice `Ambient Occlusion quality` Low / Medium / High / Ultra (WW/CellAoQuality, pin
+  WW_CELL_AO_QUALITY=low|medium|high|ultra, live), a row under Ambient Occlusion that the built-in presets step. The
+  method stays the user's; the tier scales its samples (src/gl/cellaomethod.h): vanilla (the game's SAO, half size) 1 / 3
+  / 6 / 8 still-view angles, the ported methods 2x2 / 2x3 / 3x3 / 4x3 slices x steps. Ultra is the default: vanilla Ultra
+  is the picture before (8 angles); a ported method's Ultra was FO4CS's 9x3 (now 4x3, mean |d| 0.0007 offline).
+  Offline 1080p RTX 5070 Ti (tools aox_offline): vanilla 0.08 / 0.14 / 0.24 / 0.30 ms. Red WW_CELL_AO_QUALITY_RED=old:
+  every tier as before (8 angles, 9x3). Unit tests/aomethod (-DAOTIER_RED fails).
 
 ## FOAMOFF2 (FIX1101A, 2026-11-01): River foam and Contact foam stay OFF
 
