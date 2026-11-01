@@ -9,9 +9,11 @@
   (live: the key is already in liveFarKey). Census: "far lod: objects ring N channels: ... stream texels (X MB, 2 B a
   vertex a copy), ground contact on (P placements, V vertices)" and the same on `farobjcensus`.
 - **LATE ITEM 25b, measured (no code change to the stream):** the per-copy stream is one RG8 texel a (placement,
-  vertex): at most 19.15 MB for what c3 draws (every placement in rings 0-2's rects, 10,038,615 placement-vertices; the
-  census line gives the exact count), 25.04 MB for the whole Commonwealth (13,129,195), against +440 MB for the old
-  fat-vertex route. The split bungo described (self-AO in the shared mesh's colour, one AO value a copy, sky 1 B a vertex
+  vertex): 12.69 MB for what c3 draws (hold 4 on batch 4, the census lines: 6,651,994 texels over rings 0-2; the whole
+  far field's working set +943 MB), 25.04 MB if every Commonwealth placement were drawn (13,129,195), against +440 MB
+  for the old fat-vertex route. Of c3's texels, 668,022 (1.27 MB, ring 2's 18,038 placements whose slice was cast for
+  another slot's mesh) hold only self-AO x placement AO: those are the split's case and could ride the shared colour
+  (leftover: it needs a no-stream row flag in fo4_default.vert). The split bungo described (self-AO in the shared mesh's colour, one AO value a copy, sky 1 B a vertex
   a copy) would save 9.57 MB on c3 and draw the AO 25.7 levels off on average (28.4 % of vertices more than 32 levels
   off; the sky as one value a copy: 28.7 levels): the .lodi scene AO already holds the self-AO (doc 4.8: use the
   byte alone, multiplying self-AO in darkens twice), and the occlusion between neighbours varies across a copy. The
