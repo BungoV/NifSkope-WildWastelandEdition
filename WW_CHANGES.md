@@ -1,3 +1,16 @@
+## CONTACTREACH1 (FIX1101A, 2026-11-01): no dashed bands from thin casters (bungo's "banding on shadows")
+
+bungo's crop of his Concord porch frame showed the shadow of power lines on a facade as a row of short parallel dashes
+beside a soft line. The cascades were not the cause: an offline twin of the cascade filter (Ultra + PAR, texel 1.24 /
+3.56 u, Vogel radius 2.8 / 10.5 u) draws a 2-2.8 u cable as a smooth soft line and a thick edge within 0.6 px. The near
+contact march (screen space, half-res, 4 lanes) hit a thin caster 85 u off the wall in only one or two samples, so the
+shadow came out as dashes. Inside the cascades' reach the near march now stops 48 game units from the receiver
+(src/gl/shadowset.cpp kContactReach, res/shaders/ww_contact.frag sssReach); the reach opens up as the cascades fade out,
+and the far tier keeps its own fade. Real contact (a caster within 48 u) keeps its contact shadow. The echo's contact
+part prints `reach=48`. Red: `WW_SHADOW_RED=contactreach` (the whole march, as before; live). Gate: tests/contactreach1
+(the twin on a wire 85 u off a wall at ~2700 u: composed stair 1.30 -> 0.20 px, darkness CV 0.155 -> 0.024; a wire 6 u
+off keeps 95.8 % of its contact line; the red fails). Link sweeps 408 / 272 / 408 LINK OK.
+
 ## FOAMOFF2 (FIX1101A, 2026-11-01): River foam and Contact foam stay OFF
 
 The water lane's foam fixes land: lace streaks instead of solid patches, and no foam on a dry bank. Its two rows still

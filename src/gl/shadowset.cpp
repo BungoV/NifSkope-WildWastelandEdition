@@ -57,6 +57,7 @@ constexpr double kSunRadius = 0.265;	// degrees: the penumbra's half-angle
 constexpr double kRelatch = 0.25;	// degrees: the sun moved this far -> a new sweep
 constexpr int kUploadBytes = 512 * 1024;	// the finished map goes up this much a frame
 constexpr double kLatitude = 42.36;	// Boston
+constexpr float kContactReach = 48.0f;	// lane FIX1101A: the near contact march's reach inside the cascades (game units)
 
 const char * const kCascadeKey = "Settings/Render/Scene/Shadow Cascade Quality";
 const char * const kContactKey = "Settings/Render/Scene/Contact Shadows";
@@ -216,6 +217,7 @@ struct Contact
 	// lane GAPLOOK1 (C7): the far tier's coarse depth (RGBA32F) and coarse mask (R8)
 	unsigned int farDepth = 0, farDepthFbo = 0, farMask = 0, farMaskFbo = 0;
 	int fw = 0, fh = 0;
+	float reach = 0.0f;	// lane FIX1101A: the near march's world reach inside the cascades (0 = the whole march)
 };
 
 struct SetState
@@ -1955,6 +1957,7 @@ QString contactFarPass( Renderer * r, Contact & c, unsigned int gbuf, int W, int
 	prog->uni1i( "sssPar", par ? 1 : 0 );
 	prog->uni1i( "sssExit", earlyExit ? 1 : 0 );
 	prog->uni3f( "sssLightView", float( lv[0] ), float( lv[1] ), float( lv[2] ) );
+	prog->uni4f( "sssReach", FloatVector4( 0.0f, 0.0f, 0.0f, 0.0f ) );	// lane FIX1101A: the far tier's own cascade fade (farFade)
 	r->drawShape( 4, 3, 6, GL_TRIANGLES, GL_UNSIGNED_SHORT, &attrs, idx );
 	r->stopProgram();
 	// 3: the depth-aware resolve into the near mask, by min. Red WW_CELL_CONTACT_FAR_RED=halo: no depth agreement
@@ -2127,6 +2130,18 @@ void wwContactShadowPass( Scene * scene )
 	prog->uni1i( "sssPar", par ? 1 : 0 );
 	prog->uni1i( "sssExit", earlyExit ? 1 : 0 );
 	prog->uni3f( "sssLightView", float( lv[0] ), float( lv[1] ), float( lv[2] ) );
+	/* lane FIX1101A (LATE ITEM 14, bungo's "banding on shadows"): inside the cascades' reach the near march stops
+	 * kContactReach game units from the receiver (opening up as the cascades fade out); a thin caster further off is the
+	 * cascade map's. Offline twin notes/fix1101a/fx/tools/wiretwin.py: a wire 85 u in front of a wall at 2700 u drew a row
+	 * of dashes (stair 1.30 px composed); with the reach the cascade line alone (0.20 px); a wire 6 u off keeps its contact.
+	 * Red WW_SHADOW_RED=contactreach: the march's whole reach, as before (live). */
+	{
+		WwCascadePreset cp;
+		const bool reach = s.csmSeen && wwShadowCascadePreset( cp ) && !wwShadowRed( "contactreach" );
+		prog->uni4f( "sssReach", FloatVector4( reach ? kContactReach : 0.0f, 0.0f, reach ? float( cp.D ) : 0.0f, 0.0f ) );
+		prog->uni2f( "sssTan", pm[0][0] != 0.0f ? 1.0f / pm[0][0] : 1.0f, pm[1][1] != 0.0f ? 1.0f / pm[1][1] : 1.0f );
+		c.reach = reach ? kContactReach : 0.0f;
+	}
 	static const float quad[12] = { -1, -1, 0, 1, -1, 0, -1, 1, 0, 1, 1, 0 };
 	static const std::uint16_t idx[6] = { 0, 1, 2, 2, 1, 3 };
 	const float * attrs = quad;
@@ -2188,6 +2203,7 @@ void wwContactShadowPass( Scene * scene )
 	c.last = QStringLiteral( "on mask=%1x%2 full=%3x%4 samples=%5 light=%6,%7,%8,%9 gpu_ms=%10 mem_mb=%11 par=%12 exit=%13" ).arg( mw ).arg( mh )
 		.arg( W ).arg( H ).arg( p.samples ).arg( lx, 0, 'f', 1 ).arg( ly, 0, 'f', 1 ).arg( lz, 0, 'f', 6 ).arg( cw > 0 ? 1 : -1 )
 		.arg( s.tmContact.ms, 0, 'f', 4 ).arg( double( mw ) * mh / ( 1024.0 * 1024.0 ), 0, 'f', 2 ).arg( par ? 1 : 0 ).arg( earlyExit ? 1 : 0 )
+		+ QStringLiteral( " reach=%1" ).arg( c.reach, 0, 'f', 0 )	// lane FIX1101A: 0 = the whole march (red / no cascades)
 		+ QStringLiteral( " " ) + far;
 }
 

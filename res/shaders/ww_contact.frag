@@ -18,6 +18,11 @@ uniform float sssFloor;		// the thickness floor, game units
 uniform int sssPar;		// lane SHADOWPAR1: FO4CS's evidence, completion and edge fades, plane and normal rejects
 uniform vec3 sssLightView;	// the direction TO the light, view space (the normal reject)
 uniform int sssExit;		// lane SHADOWPAR1FIX: stop once every lane is at the contrast floor (the output cannot change)
+// lane FIX1101A (LATE ITEM 14): the march's world reach inside the cascades' reach. x the reach (game units; 0 = none:
+// the far tier, the red), y + this share of the receiver's view depth, z the cascades' reach D (the reach opens up as
+// their fade weight 1 - s^4, s = (|P| / D)^2, drops), w unused. sssTan: the projection's tan(half fov) x, y.
+uniform vec4 sssReach;
+uniform vec2 sssTan;
 
 out float fragMask;
 
@@ -31,6 +36,13 @@ vec3 normalAt( vec2 maskPx )
 {
 	ivec2 q = clamp( ivec2( floor( maskPx * maskScale ) ), ivec2( 0 ), fullSize - 1 );
 	return texelFetch( gbuf, q, 0 ).rgb;
+}
+
+//! lane FIX1101A: a mask pixel at linear depth z -> view position (game units), for the reach
+vec3 sssViewPos( vec2 maskPx, float z )
+{
+	vec2 ndc = maskPx * maskScale / vec2( fullSize ) * 2.0 - 1.0;
+	return vec3( ndc.x * sssTan.x * z, ndc.y * sssTan.y * z, z );
 }
 
 float linAt( vec2 maskPx, out bool valid )
@@ -72,6 +84,20 @@ void main()
 	float invSlope = plane ? ( 1.0 / lf - 1.0 / lr ) / 8.0 : 0.0;
 	float hard = 1.0, support = 0.0;
 	int exitK = n;
+	/* lane FIX1101A (LATE ITEM 14): inside the cascades' reach the march stops past sssReach.x + sssReach.y x depth game
+	 * units from the receiver: a thin caster further off (a power line 85 u in front of a wall) hit only a sample or two
+	 * of the 4 lanes, so its shadow came out as a row of dashes beside the cascades' own soft line (bungo's "banding");
+	 * the cascade map holds such casters. Past the reach it opens up as the cascades fade out. */
+	float reachEff = 1e30;
+	vec3 pv0 = vec3( 0.0 );
+	if ( sssReach.x > 0.0 ) {
+		pv0 = sssViewPos( p, lin0 );
+		float s = clamp( dot( pv0, pv0 ) / max( sssReach.z * sssReach.z, 1.0 ), 0.0, 1.0 );
+		float s2 = s * s;
+		float wgt = 1.0 - s2 * s2;
+		if ( wgt > 0.0 )
+			reachEff = ( sssReach.x + sssReach.y * lin0 ) / wgt;
+	}
 	for ( int k = 1; k <= 384; k++ ) {
 		if ( k > n )
 			break;
@@ -79,6 +105,8 @@ void main()
 		if ( dist < 1.0 )
 			break;
 		vec2 q = p + stepXY * float( k );
+		if ( sssReach.x > 0.0 && distance( sssViewPos( q, lin0 * dist0 / dist ), pv0 ) > reachEff )
+			break;
 		if ( par && exitK == n && ( any( lessThan( q * maskScale, vec2( 0.0 ) ) ) || any( greaterThanEqual( q * maskScale, vec2( fullSize ) ) ) ) )
 			exitK = k;
 		// Bend's minor-axis bilinear pair: the nearer neighbour across the line, point-filtered at an edge
