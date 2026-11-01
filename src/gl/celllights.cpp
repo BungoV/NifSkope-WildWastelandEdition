@@ -1075,14 +1075,14 @@ int wwCellGiVis()
 }
 
 /* lane PERF1: the GI's rate (WW_CELL_GI_RATE, read once): 0 half (the default: the screen GI at half resolution,
- * upsampled by depth and normal), 1 full (the screen GI at full resolution), 2 inline (no screen pass: every surface
+ * upsampled by depth and normal; PERFFIX2: full for the ray-traced volume's read), 4 half (`half`: half for both), 1 full (the screen GI at full resolution), 2 inline (no screen pass: every surface
  * reads the volumes itself), 3 red (the screen pass runs, the surfaces read inline: the inline picture at its cost plus
  * the pass) */
 int wwCellGiRate()
 {
 	WW_SWITCH_STATIC( int, mode, [] {
 		const QByteArray v = wwEnv( "WW_CELL_GI_RATE" ).trimmed().toLower();
-		return v == "full" ? 1 : v == "inline" || v == "old" || v == "0" ? 2 : v == "red" ? 3 : 0;
+		return v == "full" ? 1 : v == "inline" || v == "old" || v == "0" ? 2 : v == "red" ? 3 : v == "half" ? 4 : 0;
 	}() );
 	return mode;
 }
@@ -4139,7 +4139,10 @@ void giHalfPass( Scene * scene, AoGpu & g, int W, int H, float p00, float p11 )
 	const WwCellGi * G = wwCellGiFor( scene->nifModel );
 	const bool volOn = giVolMaskPass( scene, g, G, W, H, p00, p11 );
 	g.volOn = volOn;
-	g.giStep = wwCellGiRate() == 1 ? 1 : 2;
+	/* PERFFIX2: the ray-traced volume's read is FULL rate unless WW_CELL_GI_RATE=half (4): full is the inline picture
+	 * (tests/ddgiscreen: rel err <= 1e-3), half bilinears across texels with other normals (p99 0.11 there) */
+	const int rate = wwCellGiRate();
+	g.giStep = rate == 1 || ( rate == 0 && !wwCellPrtOn() ) ? 1 : 2;
 	const int hw = ( W + g.giStep - 1 ) / g.giStep, hh = ( H + g.giStep - 1 ) / g.giStep;
 	aoAlloc( fn, g.giHalf, hw, hh, GL_RGBA32F, GL_RGBA, false );
 	if ( !g.giKey )
@@ -4202,10 +4205,11 @@ void giHalfPass( Scene * scene, AoGpu & g, int W, int H, float p00, float p11 )
 	const GLenum one = GL_COLOR_ATTACHMENT0;
 	fn->glDrawBuffers( 1, &one );
 	g.giReady = true;
-	giEcho( QStringLiteral( "%1 %2x%3 screen %4x%5; volumes: mask %6 (%7 shapes)" ).arg( wwCellGiRate() == 3
+	giEcho( QStringLiteral( "%1 %2x%3 screen %4x%5; volumes: mask %6 (%7 shapes)%8" ).arg( wwCellGiRate() == 3
 		? QStringLiteral( "red (the screen pass runs, the surfaces read inline)" ) : g.giStep == 1 ? QStringLiteral( "full" )
 		: QStringLiteral( "half" ) ).arg( W ).arg( H ).arg( hw ).arg( hh ).arg( volOn ? QStringLiteral( "on" ) : QStringLiteral( "off" ) )
-		.arg( G ? qint64( G->volShapes.size() / 12 ) : 0 ) );
+		.arg( G ? qint64( G->volShapes.size() / 12 ) : 0 )
+		.arg( wwCellPrtOn() ? QString() : QStringLiteral( "; the ray-traced volume's read (PERFFIX2)" ) ) );
 }
 
 //! the telemetry line, printed when it changes
@@ -4350,7 +4354,10 @@ void wwCellAoPass( Scene * scene, bool run )
 	const bool forDecalAngle = wwCellDecalMappedHas( scene->nifModel );	// lane DECALANGLE2: placed decals read its normal
 	// lane PERF1: the half-res GI reads it too (the GI row on, no probe pass, a GPU with the units)
 	const int giRate = wwCellGiRate();
-	const bool forGi = giRate != 2 && wwCellGiVis() == 0 && g.giUnits && wwCellGiOn() && wwCellPassFor( scene->nifModel ) == 0;
+	/* PERFFIX2 (PERFRES1101 A gap 2): without the PRT (PRTOFF1) the pass runs for the ray-traced volume's read instead,
+	 * once a screen texel (cell_gihalf.frag), when a volume is up; the stored GI row means nothing there */
+	const bool forGi = giRate != 2 && wwCellGiVis() == 0 && g.giUnits
+		&& ( wwCellPrtOn() ? wwCellGiOn() : rtddgiCellReadUp( scene ) ) && wwCellPassFor( scene->nifModel ) == 0;
 	if ( wwCellGiVis() == 1 )
 		giEcho( QStringLiteral( "march (red WW_CELL_GI_VIS or a march-only WW_CELL_PV_RED: the per-pixel chain every call, no screen pass)" ) );
 	else if ( giRate == 2 )
@@ -4770,7 +4777,7 @@ void wwCellAoDraw( Scene * scene, bool cellProgram )
 	if ( prog->uniLocation( "cellGiHalfOn" ) >= 0 ) {
 		// a probe picture (WW_CELL_LIT_PROBE) reads the volumes' mask at its own pixel instead: the screen pass's read
 		const bool probePic = ( st().measuring ? 6 : st().probe ) != 0;
-		const bool giOn = g.giReady && g.doc == scene->nifModel && ( wwCellGiRate() == 0 || wwCellGiRate() == 1 ) && wwCellGiVis() == 0
+		const bool giOn = g.giReady && g.doc == scene->nifModel && ( wwCellGiRate() == 0 || wwCellGiRate() == 1 || wwCellGiRate() == 4 ) && wwCellGiVis() == 0
 			&& ( !wwDrawBlend() || decalProg ) && ( !probePic || g.volOn );
 		if ( g.giUnits ) {
 			u.bind( WwCellUnit::GiHalf, GL_TEXTURE_2D, giOn ? ( probePic ? g.volMask.tex : g.giHalf.tex ) : 0 );

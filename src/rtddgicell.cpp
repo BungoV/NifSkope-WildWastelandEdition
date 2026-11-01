@@ -2024,6 +2024,21 @@ void rtddgiCellUniforms( Scene * scene )
 	bindOne( scene, r, prog, locOn, c );
 }
 
+bool rtddgiCellReadUp( Scene * scene )
+{
+	Renderer * r = scene ? scene->renderer : nullptr;
+	if ( !r || !rtddgiCellShaderDefine() )
+		return false;
+	Cell & c = cell();
+	if ( c.nif != scene->nifModel )
+		return false;
+	// the uniforms' two tests (the cascades' one buffer, else bindOne's volume): either up = some program reads a volume
+	Combined & K = combined();
+	if ( K.count > 0 && cascCell( 0 ).live && K.owner == r && K.tex )
+		return true;
+	return c.live && c.uploaded && c.tex && c.glOwner == r;
+}
+
 /* FIX1101A (LATE ITEM 9, bungo 10-31 "and for GI, the pic of it covering further areas?"): WW_CELL_RTDDGI_VIEW_BOXES=1,
  * live, a debug view: every cascade's probe box (first probe to last, the window round the camera after its scrolls)
  * drawn as its 12 edges over the frame, no depth test (the reach shows through the buildings), each cascade its own
