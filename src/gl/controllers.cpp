@@ -1478,6 +1478,14 @@ static bool wwFxBoltPaletteRed()
 	return red || wwFxPaletteRedAll();
 }
 
+// BEAMDRAW1: WW_FX_LIGHTNING_RED=old keeps the old ribbon UV (V tiled by arc length / texture aspect)
+// and the old linear fade without zero end rings.
+static bool wwFxLightningRed()
+{
+	WW_SWITCH_STATIC( bool, red, wwEnv( "WW_FX_LIGHTNING_RED" ).trimmed() == "old" );
+	return red;
+}
+
 Color4 PSysSimController::particleColor( const Emitter & e, float u ) const
 {
 	Color4 c = e.color;
@@ -2791,8 +2799,9 @@ bool ProcLightningController::buildRibbon( const Vector3 & viewAxis, QVector<Vec
 	// segments connect geometrically instead of leaving notches at bends
 	// No t parameter: V follows ARC LENGTH along the drawn ribbon, so how far
 	// along its own axis a point sits stopped mattering when the jag got deep.
+	const bool oldRibbon = wwFxLightningRed();
 	auto addBolt = [&]( const QVector<Vector3> & wpts,
-	                    float halfWidth, float bLen, const Color4 & col, bool fade ) {
+	                    float halfWidth, float bLen, const Color4 & col, bool fade, bool trunk ) {
 		int n = wpts.size();
 		if ( n < 2 )
 			return;
@@ -2858,6 +2867,22 @@ bool ProcLightningController::buildRibbon( const Vector3 & viewAxis, QVector<Vec
 			float a1 = fade ? ( 1.0f - s1 ) : 1.0f;
 			float v0 = uvOffV + uvSclV * ( s0 * vTiles );
 			float v1 = uvOffV + uvSclV * ( s1 * vTiles );
+			if ( !oldRibbon ) {
+				// The game's rule (BEAMDRAW1, read from Todd's treat 1.10.155): ring k of a branch with
+				// segs rings-1 takes V = k / segs, ONE span over the whole branch, so the shader's UV
+				// scale/offset pick a thin V band and the beam is one continuous streak. Alpha: the
+				// trunk's first ring and every branch's last ring are 0; with fade on, 1 - (k/segs)^2.
+				const float segs = float( n - 1 );
+				const float k0 = float( i ) / segs, k1 = float( i + 1 ) / segs;
+				v0 = uvOffV + uvSclV * k0;
+				v1 = uvOffV + uvSclV * k1;
+				a0 = fade ? ( 1.0f - k0 * k0 ) : 1.0f;
+				a1 = fade ? ( 1.0f - k1 * k1 ) : 1.0f;
+				if ( i == 0 && trunk )
+					a0 = 0.0f;
+				if ( i + 2 == n )
+					a1 = 0.0f;
+			}
 			FloatVector4 c0( col[0], col[1], col[2], col[3] * a0 );
 			FloatVector4 c1( col[0], col[1], col[2], col[3] * a1 );
 			tris << ( p0 + q0 ) << ( p0 - q0 ) << ( p1 + q1 );
@@ -2889,7 +2914,7 @@ bool ProcLightningController::buildRibbon( const Vector3 & viewAxis, QVector<Vec
 		 */
 		const float hw = std::max(
 			effWidth * std::pow( childWidthMult, float( b.gen ) ) * 0.5f, 0.1f );
-		addBolt( wpts, hw, b.length, tint, ( b.parent < 0 ) ? fadeMain : fadeChild );
+		addBolt( wpts, hw, b.length, tint, ( b.parent < 0 ) ? fadeMain : fadeChild, b.parent < 0 );
 	}
 
 	return !tris.isEmpty();

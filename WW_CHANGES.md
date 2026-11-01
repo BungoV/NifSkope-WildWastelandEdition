@@ -1,3 +1,12 @@
+## BEAMDRAW1 (2026-11-01): a laser beam draws as one continuous streak
+
+LaserRifleBeamRed.nif drew as about 8 short dashes instead of one beam. The lightning preview tiled the texture along
+the bolt every (width x texture aspect) units; GlowSpotLaserNoise.dds is a square glow spot, black at its V ends, so
+each tile was one dash. The game lays ring k of a branch at V = k / segs (one span over the whole branch) and lets the
+shader's animated UV scale/offset pick a thin V band, which gives one streak. The ribbon now does the same, and takes
+the game's alpha: the trunk's first ring and every branch's last ring are 0, and the fade is 1 - (k/segs)^2 instead of
+linear. Red: WW_FX_LIGHTNING_RED=old (the old tiling and fade).
+
 ## FOAMOFF2 (FIX1101A, 2026-11-01): River foam and Contact foam stay OFF
 
 The water lane's foam fixes land: lace streaks instead of solid patches, and no foam on a dry bank. Its two rows still
