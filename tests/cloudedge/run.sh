@@ -8,6 +8,9 @@
 #   red:   --red off (the candidates = the old march) must exit 1 (X fails: the edge measure separates).
 #   bash tests/cloudedge/run.sh <scratch dir>     (from the tree root; GPU driver, MSYS2 UCRT64 g++ for the helpers'
 #   dumps, and a python WITH numpy: PY=<python> overrides, as tests/cloudband/run.sh)
+# lane CLOUDEDGE2 (SKYCLOUD1101, 11-01) ruling: KEEP this refusal test (offline, no shipped code, guards the question).
+#   Re-run after CLOUDLIGHT1's column and CLOUDSTEPS2's Ultra 128: REFUSAL HOLDS; the uniform march wins Q 2x..7x (e.g.
+#   Ultra up18 rdr2 0.55 levels at 874.6 reads vs uniform 0.10 at 631.7). Its overlay is not a WW_*_RED: nothing to retire.
 set -u
 S=${1:-../cloudedge_scratch}
 PY="${PY:-python}"
