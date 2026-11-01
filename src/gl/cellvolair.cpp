@@ -98,6 +98,11 @@ struct VaState
 	// lane FIX1101A (bungo 11-01, fog not shadowed): red WW_CELL_AIR_RED=envhue = the env share (sky, GI, ambient) painted
 	// with the fog-sun glare hue too, as before (cell_airmed.glsl airEnvColourEnv); shipped: the glare hue on the sun's share only
 	bool envHue = false;
+	/* lane FOGLEAK1 (fog lit where no light reaches; only under the loader's WW_CELL_FOGLEAK, cell_volair.frag
+	 * WW_AIR_LEAK): reds WW_CELL_AIR_RED= 1 dalcenv (the env share the flat weather ambient), 2 nosungate (the sun past
+	 * the cascades unshadowed), 4 lightleak (unshadowed lights / the pixel ReSTIR ratio in the air), 8 nofartailshadow
+	 * (the far grid's tail without the sun's shadow) */
+	int leakRed = 0;
 	// lane PERFFIX3 reds (WW_CELL_AIR_RED=ask / sunpcf / f32): the uniforms and the GL state asked from the driver, the
 	// sun's shadow in the air through the surfaces' filter, the volumes RGBA32F; each the pass as before
 	bool askRed = false, sunPcf = false, f32 = false;
@@ -137,6 +142,7 @@ VaState & vs()
 			s.sphereTop = d.sphereTop;
 			s.sunColumn = d.sunColumn;
 			s.envHue = d.envHue;
+			s.leakRed = d.leakRed;
 			s.askRed = d.askRed;
 			s.sunPcf = d.sunPcf;
 			s.f32 = d.f32;
@@ -157,6 +163,7 @@ VaState & vs()
 			s.sphereTop = s.sphereTop || r == "spheretop";
 			s.sunColumn = s.sunColumn || r == "suncolumn";	// lane FIX1101A
 			s.envHue = s.envHue || r == "envhue";	// lane FIX1101A
+			s.leakRed |= r == "dalcenv" ? 1 : r == "nosungate" ? 2 : r == "lightleak" ? 4 : r == "nofartailshadow" ? 8 : 0;	// lane FOGLEAK1
 			s.askRed = s.askRed || r == "ask";
 			s.sunPcf = s.sunPcf || r == "sunpcf";
 			s.f32 = s.f32 || r == "f32";
@@ -1001,6 +1008,15 @@ void vaGround( const float K[6][4], const VaMedium & M, bool interior, bool igno
 
 }	// namespace
 
+/* lane FOGLEAK1: WW_CELL_FOGLEAK=1 compiles the leak fix into the programs (glcontext.cpp Shader::load injects the
+ * define): the air's env share from the ray-traced volume, its sun gated by the volume's sky visibility past the
+ * cascades, the placed lights through the volume's depth, the far grid's tail shadowed. Off (the default until bungo
+ * looks): not a line of it compiled. Read at each shader load: a launch key (a set needs a shader reload) */
+bool wwFogLeakShaderDefine()
+{
+	return wwEnv( "WW_CELL_FOGLEAK" ).trimmed() == "1";
+}
+
 bool wwVolAirWantsSettle()
 {
 	VaState & s = vs();
@@ -1772,6 +1788,7 @@ static void vaPassInner( Scene * scene, bool run )
 	prog->uni1b( "volCsm", csm );
 	prog->uni1b( "volSunAir", !s.sunPcf );	// lane PERFFIX3: the air's own sun read (cell_volair.frag airSunVis); red sunpcf
 	prog->uni1i( "volRed", s.red & ~1 );
+	prog->uni1i( "volLeakRed", s.leakRed );	// lane FOGLEAK1 (only a WW_CELL_FOGLEAK program holds it)
 	prog->uni1f( "volShell", s.shellStep ? 0.0f : 1.0f );
 	if ( s.shellStep || s.noAirVol )
 		prog->uni1b( "cellGiAirOn", false );	// wwCellLightsUniforms turned it on
@@ -2341,6 +2358,7 @@ static void vaPassInner( Scene * scene, bool run )
 	s.last += QStringLiteral( " " ) + optNote + QStringLiteral( " " ) + groundNote + ( s.farTier > 0 ? QStringLiteral( " " ) + farNote : QString() )
 		+ ( dr.on ? QStringLiteral( " drift=" ) + dr.note : QString() ) + QStringLiteral( " sungate=" ) + sunGateNote
 		+ QStringLiteral( " rainfog=" ) + g.rfNote
+		+ QStringLiteral( " fogleak=%1(red=%2)" ).arg( wwFogLeakShaderDefine() ? "on" : "off" ).arg( s.leakRed )	// lane FOGLEAK1
 		// lane PERFFIX3: the grid preset, the integrated volume's format, the sun's read in the air, the uniform reads
 		// (from the mirror / asked / mirror stale under WW_SETUP_MEMO_CHECK=1) and the entry state (noted / asked, stale)
 		+ QStringLiteral( " grid=%1 vol=%2 sunread=%3 reads=%4/%5/%6 state=%7%8" ).arg( s.grid ).arg( g.half ? "16f" : "32f" )
@@ -2548,7 +2566,8 @@ void wwVolAirUniforms( Scene * scene )
 	if ( fl >= 0 )
 		prog->uni1i_l( fl, ( ( s.red & 512 ) ? 0 : 1 ) | ( ( s.red & 1024 ) ? 0 : 2 ) | ( ( s.red & 256 ) ? 0 : 4 )
 			| ( ( s.red & 65536 ) ? 0 : 8 ) | ( ( s.red & 131072 ) ? 0 : 16 ) | ( s.tricubic ? 32 : 0 ) | ( terr ? 64 : 0 )
-			| ( s.sunColumn ? 0 : 128 ) );	// lane FIX1101A: 128 = the surfaces' sun dimmed by the ground layer only
+			| ( s.sunColumn ? 0 : 128 )	// lane FIX1101A: 128 = the surfaces' sun dimmed by the ground layer only
+			| ( ( s.leakRed & 8 ) ? 0 : 256 ) );	// lane FOGLEAK1: 256 = the far grid's tail takes the sun's shadow (WW_CELL_FOGLEAK only)
 }
 
 /* lane VOLAIR1 (bungo 10-14, cellvolair.h): the sky through the air. The far tower stood out against a sky the air never

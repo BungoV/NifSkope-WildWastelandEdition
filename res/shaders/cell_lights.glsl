@@ -270,6 +270,10 @@ float cellShadowF( int i, vec3 P, vec3 N )
 	 * not drawn). A fragment that is not the surface the opaque pass saw (blended, an effect, water) is unshadowed, as a
 	 * light past the slot budget was */
 	if ( cellRestirOn ) {
+#ifdef WW_AIR_LEAK
+		if ( ( volLeakRed & 4 ) == 0 )
+			return 1.0;	// lane FOGLEAK1 fix 3: a froxel is no pixel; the air's lights go through the volume (cell_volair.frag airLeakLightK)
+#endif
 		ivec2 q = ivec2( gl_FragCoord.xy );
 		int W = int( cellRestirSize.x + 0.5 ), H = int( cellRestirSize.y + 0.5 );
 		if ( q.x < 0 || q.y < 0 || q.x >= W || q.y >= H )

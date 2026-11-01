@@ -52,6 +52,7 @@ bool rtddgiCellShaderDefine();	// lane RTXGI1 M2: src/rtddgicell.cpp (the Ray-tr
 int rtddgiCellCascades();	// lane RTXCASCADE1: src/rtddgicell.h (WW_CELL_RTDDGI_CASCADES)
 bool rtddgiRestirShaderDefine();	// lane RESTIRDI1: src/rtddgicell.cpp (the RT quality row Medium+ / WW_CELL_RT_PRESET)
 bool wwAirZoneShaderDefine();	// lane AIRZONE1: src/gl/cellairzone.cpp (the Air zones row / WW_CELL_AIRZONE)
+bool wwFogLeakShaderDefine();	// lane FOGLEAK1: src/gl/cellvolair.cpp (WW_CELL_FOGLEAK, the fog leak fix; off by default)
 int wwCellGiVis();	// lane PERF1: src/gl/celllights.cpp (1: the march, WW_CELL_GI_MARCH)
 bool wwCellPrtOn();	// lane PRTOFF1: src/gl/celllights.cpp (the old baked probe GI, only under its red)
 
@@ -446,6 +447,9 @@ bool NifSkopeOpenGLContext::Shader::load( const QString & filepath )
 		// the row's tick reloads the shaders
 		if ( wwAirZoneShaderDefine() && data.startsWith( "#version" ) && data.contains( "_CELL_AIRZONE" ) )
 			data.insert( data.indexOf( '\n' ) + 1, "#define WW_CELL_AIRZONE 1\n" );
+		// lane FOGLEAK1: the fog leak fix (cell_volair.frag WW_AIR_LEAK, lookdev_fog.glsl's far tail); not static: read per load
+		if ( wwFogLeakShaderDefine() && data.startsWith( "#version" ) && data.contains( "_CELL_FOGLEAK" ) )
+			data.insert( data.indexOf( '\n' ) + 1, "#define WW_CELL_FOGLEAK 1\n" );
 		// lane PERF3: the cascades from one per-frame block, in the sources that ask for it (WW_FRAME_UBO_RED=1: plain uniforms)
 		static const bool frameUbo = qgetenv( "WW_FRAME_UBO" ).trimmed() != "0" && qgetenv( "WW_FRAME_UBO_RED" ).trimmed() != "1"
 			&& qgetenv( "WW_PERF3_RED" ).trimmed() != "1";
