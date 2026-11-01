@@ -28,6 +28,7 @@ struct samplerBuffer
 	const float * data = nullptr;   // RGBA32F texels
 	int texels = 0;
 	mutable int outside = 0;        // reads past the end (a layout bug: the check fails on any)
+	mutable long long fetches = 0;  // FIX1101A: every texelFetch (the read's cost proxy, check "readonce")
 };
 
 inline vec3 operator+( vec3 a, vec3 b ) { return vec3( a.x + b.x, a.y + b.y, a.z + b.z ); }
@@ -52,6 +53,7 @@ inline float length( vec3 a ) { return std::sqrt( dot( a, a ) ); }
 inline vec3 normalize( vec3 a ) { return a * ( 1.0 / double( length( a ) ) ); }
 inline vec4 texelFetch( const samplerBuffer & s, int i )
 {
+	s.fetches++;
 	if ( i < 0 || i >= s.texels ) {
 		s.outside++;
 		return vec4( 0.0 );
