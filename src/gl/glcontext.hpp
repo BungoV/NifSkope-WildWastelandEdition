@@ -151,6 +151,7 @@ public:
 		int wwDrawIdLoc = -1;	// its wwDrawIdx uniform
 		Program * wwTwin = nullptr;	// the program it stands in for (its sampler locations decide which maps bind)
 		WwCellUni::Cache wwUni;	// lane CELLUNI1: what the cell scope last wrote per location (reset at every link)
+		WwCellUni::Mirror wwMirror;	// lane PERFFIX3: every setter's value per location once on (the air reads it, no glGetUniform)
 		bool patches = false;	// lane WATERLOOK1 step 2: has a tessellation stage, so it draws GL_PATCHES (triMode)
 
 		ConditionGroup conditions;

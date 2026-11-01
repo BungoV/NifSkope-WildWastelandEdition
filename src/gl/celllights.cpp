@@ -4388,6 +4388,21 @@ void wwCellAoPass( Scene * scene, bool run )
 	const bool wasDepth = fn->glIsEnabled( GL_DEPTH_TEST ), wasCull = fn->glIsEnabled( GL_CULL_FACE );
 	const bool wasBlend = fn->glIsEnabled( GL_BLEND ), wasScissor = fn->glIsEnabled( GL_SCISSOR_TEST );
 	const bool wasStencil = fn->glIsEnabled( GL_STENCIL_TEST );
+	{	// lane PERFFIX3: the air pass after SSR / contact / SSGI takes this state instead of asking (celluniform.h EntryNote)
+		WwCellUni::EntryNote & en = WwCellUni::entryNote();
+		en.frame = wwGlPaintCount();
+		en.draw = prevFbo;
+		en.read = prevRead;
+		std::copy( vp, vp + 4, en.vp );
+		en.active = prevActive;
+		en.depthMask = depthMask;
+		std::copy( colorMask, colorMask + 4, en.colorMask );
+		en.depth = wasDepth;
+		en.cull = wasCull;
+		en.blend = wasBlend;
+		en.scissor = wasScissor;
+		en.stencil = wasStencil;
+	}
 	const int W = std::max( vp[2], 1 ), H = std::max( vp[3], 1 );
 	const int hw = ( W + 1 ) / 2, hh = ( H + 1 ) / 2;
 	int ms[5][2] = { { W, H } };

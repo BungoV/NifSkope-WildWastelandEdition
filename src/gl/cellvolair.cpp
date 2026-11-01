@@ -45,6 +45,8 @@ BSD License - see nifskope.h
 #include <limits>
 #include <vector>
 
+quint64 wwGlPaintCount();	// glview.cpp (lane PERFFIX3: the entry note's paint)
+
 /* ---- lane VOLAIR1: the air (cellvolair.h, res/shaders/cell_volair.frag) ---- */
 namespace
 {
@@ -56,8 +58,21 @@ constexpr int kGbufUnit = WwCellUnit::AirGbuf;		// lane AO1's g-buffer (stage 0 
 constexpr int kTileUnit = WwCellUnit::AirTile;		// and stage 0's per-column ray distances (stage 1 reads them); off below AirTile + 1 units
 constexpr int kClusterCols = 8;		// a light cluster: 8 x 8 froxel columns x 8 slices
 constexpr int kClusterSlices = 8;
-constexpr int kColumnPx = 12;		// a froxel column: 12 x 12 pixels
+constexpr int kColumnPx = 12;		// a froxel column: 12 x 12 pixels (the default grid; lane PERFFIX3: vaGridOf)
 constexpr int kSlices = 64;
+
+/* lane PERFFIX3: the near grid's quality preset (WW_CELL_AIR_GRID / QSettings WW/VolAirGrid, live): 0 the grid as before
+ * (12 px columns, 64 slices = Low), 1 Low, 2 Medium 8 px x 64, 3 High 8 px x 128, 4 Ultra 8 px x 128 (Ultra's plan adds
+ * the temporal reuse, WW_CELL_VOLAIR_TEMPORAL, off until bungo rules). At 1080p: 160x90x64, 240x135x64, 240x135x128
+ * (the F4FS plan's Low/Med/High; perfres1101/B/fog.md section 4). */
+struct VaGrid
+{
+	int px, slices;
+};
+constexpr VaGrid vaGridOf( int preset )
+{
+	return preset == 2 ? VaGrid { 8, 64 } : preset >= 3 ? VaGrid { 8, 128 } : VaGrid { kColumnPx, kSlices };
+}
 constexpr float kNearMin = 16.0f;	// game units
 
 // the reds (gates only): 1 off (computed, not applied), 2 gioff, 4 flat, 8 noshadow, 16 nolights, 32 wrongmed,
@@ -76,6 +91,13 @@ struct VaState
 	bool shellStep = false;	// SKY2 red WW_CELL_AIR_RED=shellstep: the old law (no air volume, the GI shell's edge one voxel wide)
 	bool noAirVol = false;	// SKY2 red WW_CELL_AIR_RED=noairvol: no air volume, the shell read over the probes' reach (the stopgap)
 	bool sphereTop = false;	// lane CLOUDLOOK1 red WW_CELL_AIR_RED=spheretop: the air's top at the scene sphere's (the veil)
+	// lane PERFFIX3 reds (WW_CELL_AIR_RED=ask / sunpcf / f32): the uniforms and the GL state asked from the driver, the
+	// sun's shadow in the air through the surfaces' filter, the volumes RGBA32F; each the pass as before
+	bool askRed = false, sunPcf = false, f32 = false;
+	int grid = 0;	// lane PERFFIX3: the near grid preset (vaGridOf)
+	// lane PERFFIX3: this pass's uniform reads from the mirror / asked from GL / mirror != GL (WW_SETUP_MEMO_CHECK=1);
+	// state: 1 the entry state from the frame's note, 0 asked
+	int mirrorKept = 0, mirrorAsked = 0, mirrorStale = 0, stateNoted = 0, stateStale = 0;
 	int terms = 15;
 	int probe = 0;
 	int fogBlend = 0;	// WW_CELL_VOLAIR_FOGBLEND=1 (option B, test only): the game's fog drawn over the lit air
@@ -106,6 +128,9 @@ VaState & vs()
 			s.shellStep = d.shellStep;
 			s.noAirVol = d.noAirVol;
 			s.sphereTop = d.sphereTop;
+			s.askRed = d.askRed;
+			s.sunPcf = d.sunPcf;
+			s.f32 = d.f32;
 			s.terms = d.terms;
 			s.opt = d.opt;
 		}
@@ -121,6 +146,9 @@ VaState & vs()
 			s.shellStep = s.shellStep || r == "shellstep";
 			s.noAirVol = s.noAirVol || r == "noairvol";
 			s.sphereTop = s.sphereTop || r == "spheretop";
+			s.askRed = s.askRed || r == "ask";
+			s.sunPcf = s.sunPcf || r == "sunpcf";
+			s.f32 = s.f32 || r == "f32";
 			s.red |= r == "off" ? 1 : r == "gioff" ? 2 : r == "flat" ? 4 : r == "noshadow" ? 8 : r == "nolights" ? 16
 				: r == "wrongmed" ? 32 : r == "blendnear" ? 64 : r == "farfit" ? 128 : r == "physcol" ? 256 : r == "nosunt" ? 512 : r == "froxonly" ? 1024 : r == "oldsun" ? 2048
 				: r == "dropcluster" ? 4096 : r == "nearskip" ? 8192 : r == "noground" ? 16384 : r == "nosidecar" ? 32768 : r == "nosky" ? 65536 : r == "fxfog" ? 131072 : r == "lightmid" ? 262144 : r == "bluescatter" ? 524288 : r == "zcolour" ? 1048576 : r == "nofarclamp" ? 2097152 : r == "roomstep" ? 4194304
@@ -160,6 +188,11 @@ VaState & vs()
 			s.farTier = std::clamp( farPin.toInt(), 0, 4 );
 		}
 		s.dump = QString::fromLocal8Bit( wwEnv( "WW_CELL_AIR_DUMP" ) );
+		s.grid = std::clamp( QSettings().value( QStringLiteral( "WW/VolAirGrid" ), 0 ).toInt(), 0, 4 );	// lane PERFFIX3
+		const QByteArray gridPin = wwEnv( "WW_CELL_AIR_GRID" ).trimmed().toLower();
+		if ( !gridPin.isEmpty() )
+			s.grid = gridPin == "low" ? 1 : gridPin == "medium" ? 2 : gridPin == "high" ? 3 : gridPin == "ultra" ? 4
+				: std::clamp( gridPin.toInt(), 0, 4 );
 	}
 	return s;
 }
@@ -392,7 +425,11 @@ struct VaGpu
 	// lane PERF2, temporal: the strata (cols x rows x 4 slices, stratum p at layers p x slices ..), ping-pong; the
 	// last pass's view (posView = sc R world + t: rows sc R | t) and grid
 	GLuint hist[2] = { 0, 0 };
-	int histCur = 0, histCols = 0, histRows = 0;
+	int histCur = 0, histCols = 0, histRows = 0, histSlices = 0;
+	bool half = false;	// lane PERFFIX3: the volumes are RGBA16F (WW_CELL_AIR_RED=f32: RGBA32F, as before)
+	// lane PERFFIX3: the stages whose framebuffer was found complete for this layout of targets (bit per site; asked once)
+	int fbOk = 0;
+	std::uint64_t fbLayout = 0;
 	bool histOk = false;
 	double prevV[3][4] = {};
 	float prevGrid[4] = { 0, 0, 0, 0 }, prevScale = 0.0f;
@@ -455,7 +492,7 @@ struct VaClusters
 };
 
 bool vaBuildClusters( VaClusters & out, const std::vector<float> & spheres, const float rowV[3][4], float distScale,
-	int cols, int rows, float nearD, float logRatio, float p00, float p11, bool dropRed )
+	int cols, int rows, float nearD, float logRatio, float p00, float p11, bool dropRed, int kSlices )
 {
 	const int n = int( spheres.size() / 4 );
 	double R[3][3], T[3];
@@ -570,12 +607,12 @@ QHash<const void *, VaGpu> & vaGpus()
 	return g;
 }
 
-void vaAlloc3D( NifSkopeOpenGLContext::GLFunctions * fn, GLuint & tex, int w, int h, int d, bool linear )
+void vaAlloc3D( NifSkopeOpenGLContext::GLFunctions * fn, GLuint & tex, int w, int h, int d, bool linear, bool half )
 {
 	if ( !tex )
 		fn->glGenTextures( 1, &tex );
 	fn->glBindTexture( GL_TEXTURE_3D, tex );
-	fn->glTexImage3D( GL_TEXTURE_3D, 0, GL_RGBA32F, w, h, d, 0, GL_RGBA, GL_FLOAT, nullptr );
+	fn->glTexImage3D( GL_TEXTURE_3D, 0, half ? GL_RGBA16F : GL_RGBA32F, w, h, d, 0, GL_RGBA, GL_FLOAT, nullptr );
 	fn->glTexParameteri( GL_TEXTURE_3D, GL_TEXTURE_MIN_FILTER, linear ? GL_LINEAR : GL_NEAREST );
 	fn->glTexParameteri( GL_TEXTURE_3D, GL_TEXTURE_MAG_FILTER, linear ? GL_LINEAR : GL_NEAREST );
 	fn->glTexParameteri( GL_TEXTURE_3D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE );
@@ -1313,15 +1350,53 @@ static void vaPassInner( Scene * scene, bool run )
 
 	GLint prevFbo = 0, prevRead = 0, vp[4] = { 0, 0, 1, 1 }, prevActive = 0;
 	GLboolean depthMask = GL_TRUE, colorMask[4] = { GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE };
-	fn->glGetIntegerv( GL_DRAW_FRAMEBUFFER_BINDING, &prevFbo );
-	fn->glGetIntegerv( GL_READ_FRAMEBUFFER_BINDING, &prevRead );
-	fn->glGetIntegerv( GL_VIEWPORT, vp );
-	fn->glGetIntegerv( GL_ACTIVE_TEXTURE, &prevActive );
-	fn->glGetBooleanv( GL_DEPTH_WRITEMASK, &depthMask );
-	fn->glGetBooleanv( GL_COLOR_WRITEMASK, colorMask );
-	const bool wasDepth = fn->glIsEnabled( GL_DEPTH_TEST ), wasCull = fn->glIsEnabled( GL_CULL_FACE );
-	const bool wasBlend = fn->glIsEnabled( GL_BLEND ), wasScissor = fn->glIsEnabled( GL_SCISSOR_TEST );
-	const bool wasStencil = fn->glIsEnabled( GL_STENCIL_TEST );
+	bool wasDepth = false, wasCull = false, wasBlend = false, wasScissor = false, wasStencil = false;
+	s.mirrorKept = s.mirrorAsked = s.mirrorStale = s.stateNoted = s.stateStale = 0;
+	// lane PERFFIX3: the state the obscurance pass asked this paint (SSR, contact and SSGI restore it), else asked
+	const WwCellUni::EntryNote & en = WwCellUni::entryNote();
+	const bool noted = !s.askRed && en.frame != 0 && en.frame == wwGlPaintCount();
+	if ( noted ) {
+		s.stateNoted = 1;
+		prevFbo = en.draw;
+		prevRead = en.read;
+		std::copy( en.vp, en.vp + 4, vp );
+		prevActive = en.active;
+		depthMask = en.depthMask;
+		std::copy( en.colorMask, en.colorMask + 4, colorMask );
+		wasDepth = en.depth;
+		wasCull = en.cull;
+		wasBlend = en.blend;
+		wasScissor = en.scissor;
+		wasStencil = en.stencil;
+	}
+	if ( !noted || wwSetupMemoChecking() ) {
+		GLint aFbo = 0, aRead = 0, aVp[4] = { 0, 0, 1, 1 }, aActive = 0;
+		GLboolean aDepthMask = GL_TRUE, aColorMask[4] = { GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE };
+		fn->glGetIntegerv( GL_DRAW_FRAMEBUFFER_BINDING, &aFbo );
+		fn->glGetIntegerv( GL_READ_FRAMEBUFFER_BINDING, &aRead );
+		fn->glGetIntegerv( GL_VIEWPORT, aVp );
+		fn->glGetIntegerv( GL_ACTIVE_TEXTURE, &aActive );
+		fn->glGetBooleanv( GL_DEPTH_WRITEMASK, &aDepthMask );
+		fn->glGetBooleanv( GL_COLOR_WRITEMASK, aColorMask );
+		const bool aDepth = fn->glIsEnabled( GL_DEPTH_TEST ), aCull = fn->glIsEnabled( GL_CULL_FACE );
+		const bool aBlend = fn->glIsEnabled( GL_BLEND ), aScissor = fn->glIsEnabled( GL_SCISSOR_TEST );
+		const bool aStencil = fn->glIsEnabled( GL_STENCIL_TEST );
+		if ( noted )	// WW_SETUP_MEMO_CHECK=1: the note against the driver (the driver's state is used)
+			s.stateStale = ( aFbo != prevFbo || aRead != prevRead || std::memcmp( aVp, vp, sizeof aVp ) != 0 || aActive != prevActive
+				|| aDepthMask != depthMask || std::memcmp( aColorMask, colorMask, 4 ) != 0 || aDepth != wasDepth || aCull != wasCull
+				|| aBlend != wasBlend || aScissor != wasScissor || aStencil != wasStencil ) ? 1 : 0;
+		prevFbo = aFbo;
+		prevRead = aRead;
+		std::copy( aVp, aVp + 4, vp );
+		prevActive = aActive;
+		depthMask = aDepthMask;
+		std::copy( aColorMask, aColorMask + 4, colorMask );
+		wasDepth = aDepth;
+		wasCull = aCull;
+		wasBlend = aBlend;
+		wasScissor = aScissor;
+		wasStencil = aStencil;
+	}
 	auto restore = [&]() {
 		fn->glBindFramebuffer( GL_DRAW_FRAMEBUFFER, GLuint( prevFbo ) );
 		fn->glBindFramebuffer( GL_READ_FRAMEBUFFER, GLuint( prevRead ) );
@@ -1344,17 +1419,54 @@ static void vaPassInner( Scene * scene, bool run )
 	}
 	// the setters the surfaces get, on this program: the fog records (weather or, indoors, the cell's), the cascades,
 	// the cell's lights, its GI and its ambient
+	/* lane PERFFIX3: the setters' values from the program's CPU mirror (celluniform.h Mirror), never glGetUniform*: each
+	 * ask was a driver round trip, the first one draining the threaded driver's queue (Memory Den air-state 21-205 ms CPU,
+	 * a 5-7 ms GPU gap in air-post; perfres1101/B/fog.md 2.1). A location the mirror has not seen (the first frame, a raw
+	 * write) is asked, as before; WW_SETUP_MEMO_CHECK=1 asks every one and counts a mirror that differs (mirrorStale).
+	 * Red WW_CELL_AIR_RED=ask: every value asked, as before. */
+	prog->wwMirror.on = !s.askRed;
 	s.inPass = true;
 	wwLookdevFogUniforms( scene );
 	wwSunShadowUniforms( scene );
 	wwCellLightsUniforms( scene );
 	s.inPass = false;
-	auto uniI = [&]( const char * n ) { GLint v = 0; const int l = prog->uniLocation( n ); if ( l >= 0 ) fn->glGetUniformiv( prog->id, l, &v ); return v; };
+	const bool memoCheck = wwSetupMemoChecking();
+	auto uniI = [&]( const char * n ) {
+		GLint v = 0;
+		const int l = prog->uniLocation( n );
+		if ( l < 0 )
+			return v;
+		if ( !s.askRed && prog->wwMirror.get( l, WwCellUni::K1i, &v, 1 ) ) {
+			s.mirrorKept++;
+			if ( memoCheck ) {
+				GLint a = 0;
+				fn->glGetUniformiv( prog->id, l, &a );
+				s.mirrorStale += a != v ? 1 : 0;
+				v = a;
+			}
+			return v;
+		}
+		s.mirrorAsked++;
+		fn->glGetUniformiv( prog->id, l, &v );
+		return v;
+	};
 	auto uniF = [&]( const char * n, int i, float * o, int cnt ) {
 		std::fill( o, o + cnt, 0.0f );
 		const int l = i < 0 ? prog->uniLocation( n ) : prog->uniLocation( n, i );
-		if ( l >= 0 )
-			fn->glGetUniformfv( prog->id, l, o );
+		if ( l < 0 )
+			return;
+		if ( !s.askRed && prog->wwMirror.get( l, WwCellUni::K4f, o, cnt ) ) {
+			s.mirrorKept++;
+			if ( memoCheck ) {
+				float a[16] = {};
+				fn->glGetUniformfv( prog->id, l, a );
+				s.mirrorStale += std::memcmp( a, o, size_t( std::min( cnt, 4 ) ) * 4 ) != 0 ? 1 : 0;
+				std::copy( a, a + std::min( cnt, 4 ), o );
+			}
+			return;
+		}
+		s.mirrorAsked++;
+		fn->glGetUniformfv( prog->id, l, o );
 	};
 	QString sunGateNote = QStringLiteral( "off" );	// lane FOGGI1: the sun gate's echo
 	if ( !uniI( "fogOn" ) ) {
@@ -1452,13 +1564,19 @@ static void vaPassInner( Scene * scene, bool run )
 	}
 
 	const int W = std::max( vp[2], 1 ), H = std::max( vp[3], 1 );
+	// lane PERFFIX3: the near grid's preset (0 / Low = the grid as before: 12 px, 64 slices)
+	const VaGrid grid = vaGridOf( s.grid );
+	const int kColumnPx = grid.px, kSlices = grid.slices;
 	const int cols = ( W + kColumnPx - 1 ) / kColumnPx, rows = ( H + kColumnPx - 1 ) / kColumnPx;
 	// lane FARGRID1: one volume, the far grid's layers after the near grid's (no new sampler on the surfaces)
 	const int texW = farOn ? std::max( cols, fp.cols ) : cols, texH = farOn ? std::max( rows, fp.rows ) : rows;
 	const int texD = kSlices + ( farOn ? fp.slices : 0 );
-	if ( g.cols != cols || g.rows != rows || g.slices != kSlices || !g.inject || g.texW != texW || g.texH != texH || g.texD != texD ) {
-		vaAlloc3D( fn, g.inject, texW, texH, texD, false );
-		vaAlloc3D( fn, g.integ, texW, texH, texD, true );
+	const bool half = !s.f32;	// lane PERFFIX3: RGBA16F volumes (red f32: RGBA32F, as before)
+	if ( g.cols != cols || g.rows != rows || g.slices != kSlices || !g.inject || g.texW != texW || g.texH != texH || g.texD != texD
+		|| g.half != half ) {
+		vaAlloc3D( fn, g.inject, texW, texH, texD, false, false );	// the slices' transmittance needs float32 (16F: 5e-4 a step near 1)
+		vaAlloc3D( fn, g.integ, texW, texH, texD, true, half );
+		g.half = half;
 		if ( !g.fbo )
 			fn->glGenFramebuffers( 1, &g.fbo );
 		for ( GLuint & c : g.carry ) {
@@ -1487,11 +1605,12 @@ static void vaPassInner( Scene * scene, bool run )
 	}
 	// lane PERF2, temporal: not with red lightmid (its single light sample has no strata)
 	const bool temporal = s.temporal && g.mrtOk == 1 && !( s.red & 262144 );
-	if ( temporal && ( !g.hist[0] || g.histCols != cols || g.histRows != rows ) ) {
+	if ( temporal && ( !g.hist[0] || g.histCols != cols || g.histRows != rows || g.histSlices != kSlices ) ) {
 		for ( GLuint & h : g.hist )
-			vaAlloc3D( fn, h, cols, rows, 4 * kSlices, true );
+			vaAlloc3D( fn, h, cols, rows, 4 * kSlices, true, false );
 		g.histCols = cols;
 		g.histRows = rows;
+		g.histSlices = kSlices;
 		g.histOk = false;
 	}
 	if ( !temporal || g.doc != scene->nifModel )
@@ -1602,6 +1721,7 @@ static void vaPassInner( Scene * scene, bool run )
 	}
 	g.rfNote = vaRainFog( scene, prog, L && L->interior, g.rfKey, g.rfTail );	// lane CLOUD6e: the rain fog (both grids; RAINFOG2: and the tails)
 	prog->uni1b( "volCsm", csm );
+	prog->uni1b( "volSunAir", !s.sunPcf );	// lane PERFFIX3: the air's own sun read (cell_volair.frag airSunVis); red sunpcf
 	prog->uni1i( "volRed", s.red & ~1 );
 	prog->uni1f( "volShell", s.shellStep ? 0.0f : 1.0f );
 	if ( s.shellStep || s.noAirVol )
@@ -1774,7 +1894,7 @@ static void vaPassInner( Scene * scene, bool run )
 		QElapsedTimer ct;
 		ct.start();
 		if ( sp && nL > 0 && int( sp->size() / 4 ) == nL
-			&& vaBuildClusters( cl, *sp, rowV, distScale, cols, rows, nearD, logRatio, p00, p11, ( s.red & 4096 ) != 0 ) ) {
+			&& vaBuildClusters( cl, *sp, rowV, distScale, cols, rows, nearD, logRatio, p00, p11, ( s.red & 4096 ) != 0, kSlices ) ) {
 			if ( !g.clBuf ) {
 				fn->glGenBuffers( 1, &g.clBuf );
 				fn->glGenTextures( 1, &g.clTex );
@@ -1867,13 +1987,35 @@ static void vaPassInner( Scene * scene, bool run )
 	fn->glBindFramebuffer( GL_FRAMEBUFFER, g.fbo );
 	fn->glViewport( 0, 0, cols, rows );
 	bool complete = true;
+	/* lane PERFFIX3: each stage's glCheckFramebufferStatus is a driver round trip, every frame. Completeness follows the
+	 * targets' formats and sizes alone, so a site is asked once per layout (red ask, WW_SETUP_MEMO_CHECK=1: every frame) */
+	{
+		std::uint64_t lay = 1469598103934665603ull;
+		for ( std::uint64_t v : { std::uint64_t( g.texW ), std::uint64_t( g.texH ), std::uint64_t( g.texD ), std::uint64_t( g.half ),
+				std::uint64_t( g.tileCols ), std::uint64_t( g.tileRows ), std::uint64_t( g.histCols ), std::uint64_t( g.histRows ),
+				std::uint64_t( g.histSlices ), std::uint64_t( temporal ), std::uint64_t( g.mrtOk ), std::uint64_t( g.inject ),
+				std::uint64_t( g.integ ), std::uint64_t( g.tile ), std::uint64_t( g.hist[0] ), std::uint64_t( g.hist[1] ) } )
+			lay = ( lay ^ v ) * 1099511628211ull;
+		if ( lay != g.fbLayout ) {
+			g.fbLayout = lay;
+			g.fbOk = 0;
+		}
+	}
+	const bool fbAsk = s.askRed || wwSetupMemoChecking();
+	auto fbComplete = [&]( int site ) {
+		if ( !fbAsk && ( g.fbOk & ( 1 << site ) ) )
+			return true;
+		const bool ok = fn->glCheckFramebufferStatus( GL_FRAMEBUFFER ) == GL_FRAMEBUFFER_COMPLETE;
+		g.fbOk = ok ? ( g.fbOk | ( 1 << site ) ) : ( g.fbOk & ~( 1 << site ) );
+		return ok;
+	};
 	PassTime::subEnd( PassTime::AirPre );
 	if ( tileOn ) {
 		// stage 0: the columns' opaque distances (the tile off its unit while it is the target)
 		fn->glActiveTexture( GLenum( GL_TEXTURE0 + kTileUnit ) );
 		fn->glBindTexture( GL_TEXTURE_2D, 0 );
 		fn->glFramebufferTexture2D( GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, g.tile, 0 );
-		if ( fn->glCheckFramebufferStatus( GL_FRAMEBUFFER ) != GL_FRAMEBUFFER_COMPLETE ) {
+		if ( !fbComplete( 0 ) ) {
 			complete = false;
 		} else {
 			prog->uni1i( "volStage", 0 );
@@ -1904,7 +2046,7 @@ static void vaPassInner( Scene * scene, bool run )
 				fn->glFramebufferTextureLayer( GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, g.inject, 0, k );
 				for ( int p = 0; p < 4; p++ )
 					fn->glFramebufferTextureLayer( GL_FRAMEBUFFER, GLenum( GL_COLOR_ATTACHMENT1 + p ), out, 0, p * kSlices + k );
-				if ( k == 0 && fn->glCheckFramebufferStatus( GL_FRAMEBUFFER ) != GL_FRAMEBUFFER_COMPLETE ) {
+				if ( k == 0 && !fbComplete( 1 ) ) {
 					complete = false;
 					break;
 				}
@@ -1929,7 +2071,7 @@ static void vaPassInner( Scene * scene, bool run )
 				bufs[7] = GL_COLOR_ATTACHMENT7;
 				fn->glDrawBuffers( 8, bufs );
 				fn->glBindTexture( GL_TEXTURE_2D, g.carry[c & 1] );
-				if ( k == 0 && fn->glCheckFramebufferStatus( GL_FRAMEBUFFER ) != GL_FRAMEBUFFER_COMPLETE ) {
+				if ( k == 0 && !fbComplete( 2 ) ) {
 					complete = false;
 					break;
 				}
@@ -1945,7 +2087,7 @@ static void vaPassInner( Scene * scene, bool run )
 		} else {
 			for ( int k = 0; k < kSlices; k++ ) {
 				fn->glFramebufferTextureLayer( GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, stage == 1 ? g.inject : g.integ, 0, k );
-				if ( k == 0 && fn->glCheckFramebufferStatus( GL_FRAMEBUFFER ) != GL_FRAMEBUFFER_COMPLETE ) {
+				if ( k == 0 && !fbComplete( stage == 1 ? 3 : 4 ) ) {
 					complete = false;
 					break;
 				}
@@ -2021,7 +2163,7 @@ static void vaPassInner( Scene * scene, bool run )
 				fn->glBindTexture( GL_TEXTURE_3D, stage == 2 ? g.inject : 0 );
 				for ( int k = 0; k < fp.slices; k++ ) {
 					fn->glFramebufferTextureLayer( GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, stage == 1 ? g.inject : g.integ, 0, kSlices + k );
-					if ( k == 0 && fn->glCheckFramebufferStatus( GL_FRAMEBUFFER ) != GL_FRAMEBUFFER_COMPLETE ) {
+					if ( k == 0 && !fbComplete( stage == 1 ? 5 : 6 ) ) {
 						farOk = false;
 						break;
 					}
@@ -2149,7 +2291,13 @@ static void vaPassInner( Scene * scene, bool run )
 	s.last.chop( 1 );
 	s.last += QStringLiteral( " " ) + optNote + QStringLiteral( " " ) + groundNote + ( s.farTier > 0 ? QStringLiteral( " " ) + farNote : QString() )
 		+ ( dr.on ? QStringLiteral( " drift=" ) + dr.note : QString() ) + QStringLiteral( " sungate=" ) + sunGateNote
-		+ QStringLiteral( " rainfog=" ) + g.rfNote + QStringLiteral( ")" );
+		+ QStringLiteral( " rainfog=" ) + g.rfNote
+		// lane PERFFIX3: the grid preset, the integrated volume's format, the sun's read in the air, the uniform reads
+		// (from the mirror / asked / mirror stale under WW_SETUP_MEMO_CHECK=1) and the entry state (noted / asked, stale)
+		+ QStringLiteral( " grid=%1 vol=%2 sunread=%3 reads=%4/%5/%6 state=%7%8" ).arg( s.grid ).arg( g.half ? "16f" : "32f" )
+			.arg( s.sunPcf ? "pcf(red)" : "air" ).arg( s.mirrorKept ).arg( s.mirrorAsked ).arg( s.mirrorStale )
+			.arg( s.stateNoted ? "noted" : "asked" ).arg( s.stateStale ? QStringLiteral( "(stale)" ) : QString() )
+		+ QStringLiteral( ")" );
 
 	/* WW_CELL_AIR_DUMP=<file>: int32 cols rows slices; the injected and the integrated volumes (cols x rows RGBA float
 	 * per layer, layer 0 first, bottom row first); <file>.txt the numbers an independent rebuild needs */
