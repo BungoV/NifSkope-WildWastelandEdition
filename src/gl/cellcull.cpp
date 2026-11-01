@@ -4,6 +4,7 @@
 
 #include "gl/cellpasstime.h"	// lane PERF1
 #include "gl/cellumbra.h"
+#include "gl/cellprevisrule.h"	// lane PERFFIX4: previs per document, the tome's staleness
 #include "gl/glscene.h"
 #include "gl/glshape.h"
 #include "gl/renderer.h"
@@ -119,6 +120,7 @@ struct UmbraDoc
 	bool camValid = false;
 	std::uint64_t frame = ~std::uint64_t( 0 );
 	int queried = 0, noStart = 0, cells = 0, visible = 0, objects = 0, govUid = 0, govComb = 0, decoded = 0;
+	bool stale = false;	// lane PERFFIX4: any block's tome is stale (src/gl/cellprevisrule.h)
 };
 
 //! lane PERF5: one shape's camera cull this frame, replayed by a later pass with the same camera and switches
@@ -146,6 +148,15 @@ struct CullState
 	bool any = false, printed = false;
 	// the Previs row
 	bool previsOn = false, previsPinned = false;
+	bool previsIntRule = true, umbraStaleRed = false;	// lane PERFFIX4: WW_CELL_PREVIS_INT, WW_CELL_UMBRA_RED=stale
+	bool docPrevis = false, docTome = false;		// lane PERFFIX4: the last camera pass's decision, for the lines
+	/* lane PERFFIX4: the frame's camera view. previsBuild caches the occluders and rooms in the view space of the
+	 * FIRST pass of a frame; a pass with another eye then culled against boxes seen from the wrong eye (lamp cube
+	 * faces lost casters: Vault111Cryo floor light moved 55-61k px with rooms on and the tome off). Red
+	 * WW_CELL_PREVIS_RED=anyview: previs in every pass again. */
+	Transform camView;
+	bool camViewValid = false, previsAnyView = false;
+	std::int64_t otherViewPasses = 0;
 	int previsRed = 0;
 	QHash<const void *, WwPrevisScene> previs;
 	PrevisCache pc;
@@ -174,7 +185,8 @@ CullState & st()
 {
 	static CullState s;
 	// lane TESTDRIVER1: a live set of these switches re-reads them (pins and or-ed reds back to their defaults first)
-	if ( !s.loaded || wwSwitchMovedFor( s.liveGen, { "WW_CELL_CULL", "WW_CELL_PREVIS", "WW_CELL_UMBRA" } ) ) {
+	if ( !s.loaded || wwSwitchMovedFor( s.liveGen, { "WW_CELL_CULL", "WW_CELL_PREVIS", "WW_CELL_UMBRA", "WW_CELL_PREVIS_INT",
+			"WW_CELL_UMBRA_RED" } ) ) {
 		s.loaded = true;
 		s.liveGen = wwSwitchGen();
 		{
@@ -198,12 +210,28 @@ CullState & st()
 			s.previsOn = QSettings().value( QStringLiteral( "WW/CellPrevis" ), false ).toBool();
 		}
 		s.previsRed = wwEnv( "WW_CELL_PREVIS_RED" ).trimmed() == "casters" ? 1 : 0;
+		s.previsAnyView = wwEnv( "WW_CELL_PREVIS_RED" ).trimmed() == "anyview";	// lane PERFFIX4
 		s.umbraOn = wwEnv( "WW_CELL_UMBRA" ).trimmed() != "0";
 		s.umbraRed = wwEnv( "WW_CELL_UMBRA_RED" ).trimmed() == "casters" ? 1 : 0;
+		s.umbraStaleRed = wwEnv( "WW_CELL_UMBRA_RED" ).trimmed() == "stale";	// lane PERFFIX4: use stale tomes too
+		s.previsIntRule = wwEnv( "WW_CELL_PREVIS_INT" ).trimmed() != "0";	// lane PERFFIX4: "0" = interiors follow the row
 		s.umbraDump = QString::fromLocal8Bit( wwEnv( "WW_CELL_UMBRA_DUMP" ) ).trimmed();
 		s.umbraDepth = !s.umbraDump.isEmpty() && wwEnv( "WW_CELL_UMBRA_DEPTH" ).trimmed() == "1";
 	}
 	return s;
+}
+
+//! lane PERFFIX4: two views the same to float rounding (the AO / SSR / opaque walks share the frame's camera)
+bool wwSameView( const Transform & a, const Transform & b )
+{
+	for ( int r = 0; r < 3; r++ )
+		for ( int c = 0; c < 3; c++ )
+			if ( std::abs( a.rotation( r, c ) - b.rotation( r, c ) ) > 1e-5f )
+				return false;
+	for ( int i = 0; i < 3; i++ )
+		if ( std::abs( a.translation[i] - b.translation[i] ) > 1e-2f )
+			return false;
+	return std::abs( a.scale - b.scale ) <= 1e-6f;
 }
 
 ViewBox toView( const Transform & view, const WwPrevisBox & b )
@@ -783,6 +811,7 @@ void wwCellUmbraSet( const void * nif, std::vector<WwUmbraBlockIn> && blocks )
 	for ( WwUmbraBlockIn & in : blocks ) {
 		UmbraBlock b;
 		b.block = in.block;
+		doc->stale = doc->stale || in.stale;	// lane PERFFIX4
 		const int bi = int( doc->blocks.size() );
 		if ( !b.tome.load( in.tome ) ) {
 			std::fprintf( stderr, "cell umbra tome %08X: FAILED (%s); its refs keep the occluder path\n",
@@ -921,6 +950,19 @@ void wwCellPrevisSet( const void * nif, WwPrevisScene && sc )
 bool wwCellPrevisOn()
 {
 	return st().previsOn;
+}
+
+void wwCellCullCameraView( const Transform & view )
+{
+	CullState & s = st();
+	s.camView = view;
+	s.camViewValid = true;
+}
+
+bool wwCellPrevisFor( bool interior )
+{
+	const CullState & s = st();
+	return WwPrevisRule::previsFor( s.previsOn, s.previsPinned && !s.previsOn, interior, s.previsIntRule );
 }
 
 void wwCellPrevisSetOn( bool on )
@@ -1136,21 +1178,35 @@ bool wwCellCullCamera( Scene * scene, const Shape * sh, int block, std::int64_t 
 	CullState & s = st();
 	if ( !scene || !sh || !scene->renderer || numTris <= 0 || s.docs.isEmpty() || s.probing )
 		return false;	// the depth probe draws everything and counts nothing
+	/* lane PERFFIX4: previs per document (src/gl/cellprevisrule.h): an interior always, an exterior by the row; the
+	 * tome only when fresh. */
+	const auto pvIt = s.previs.constFind( scene->nifModel );
+	const bool interiorDoc = pvIt != s.previs.constEnd() && pvIt->interior;
+	// lane PERFFIX4: previs only through the frame's camera (wwCellCullCameraView)
+	const bool cameraEye = s.previsAnyView || !s.camViewValid || wwSameView( scene->view, s.camView );
+	if ( !cameraEye )
+		s.otherViewPasses++;
+	const bool previsDoc = cameraEye && WwPrevisRule::previsFor( s.previsOn, s.previsPinned && !s.previsOn, interiorDoc,
+		s.previsIntRule );
 	// the tome's query, once a frame (also with the row off when dumping)
 	UmbraDoc * ud = nullptr;
+	bool tomeDoc = false;
 	{
 		auto it = s.umbra.find( scene->nifModel );
 		if ( it != s.umbra.end() && it.value() ) {
 			ud = it.value().get();
-			if ( ( s.previsOn && s.umbraOn ) || !s.umbraDump.isEmpty() )
+			tomeDoc = WwPrevisRule::tomeFor( previsDoc, s.umbraOn, ud->stale, s.umbraStaleRed );
+			if ( tomeDoc || !s.umbraDump.isEmpty() )
 				umbraFrame( s, scene, *ud );
 		}
 	}
+	s.docPrevis = previsDoc;
+	s.docTome = tomeDoc;
 	const std::vector<WwCullRun> * runs = wwCellCullRuns( scene->nifModel, block );
 	if ( !runs )
 		return false;
-	const bool umbra = ud && s.previsOn && s.umbraOn;	// rides the Previs row
-	const bool previs = s.previsOn && ( s.previs.contains( scene->nifModel ) || umbra );
+	const bool umbra = ud && tomeDoc;	// rides the Previs rule
+	const bool previs = previsDoc && ( pvIt != s.previs.constEnd() || umbra );
 	if ( !s.on && !previs ) {	// counted all the same, so the off frame's draw calls stand beside the on frame's
 		s.any = true;
 		s.cur.shapes++;
@@ -1390,9 +1446,11 @@ void wwCellCullFrame()
 			s.lastSeen = pc.roomsSeen;
 			s.lastPortals = pc.portalsPassed;
 			std::fprintf( stderr, "cell previs cull: %s occluders=%d rooms=%d roomsSeen=%d portalsPassed=%d occluded=%lld "
-				"roomCulled=%lld casterHidden=%lld%s\n", s.previsOn ? "on" : "off", occ, rooms, pc.roomsSeen,
+				"roomCulled=%lld casterHidden=%lld otherEyePasses=%lld%s\n",
+				s.docPrevis ? ( s.previsOn ? "on" : "on (interior rule)" ) : "off",
+				occ, rooms, pc.roomsSeen,
 				pc.portalsPassed, (long long)s.cur.occluded, (long long)s.cur.roomCulled, (long long)s.cur.casterHidden,
-				s.previsRed == 1 ? " RED=casters" : "" );
+				(long long)s.otherViewPasses, s.previsRed == 1 ? " RED=casters" : s.previsAnyView ? " RED=anyview" : "" );
 			// where the camera stood and which occluder hid how many runs
 			QString hits;
 			for ( size_t i = 0; i < pc.occHits.size(); i++ )
@@ -1407,7 +1465,8 @@ void wwCellCullFrame()
 		const QString line = QStringLiteral( "cell umbra: %1 blocks=%2 decoded=%3 queried=%4 noStart=%5 cells=%6 "
 			"visible=%7/%8 governed=%9 (uid %10, combined %11) tomeDrawn=%12 tomeCulled=%13 ungoverned=%14 "
 			"casterHidden=%15%16" )
-			.arg( s.previsOn && s.umbraOn ? QStringLiteral( "on" ) : QStringLiteral( "off" ) ).arg( int( d.blocks.size() ) )
+			.arg( s.docTome ? QStringLiteral( "on" ) : d.stale && !s.umbraStaleRed ? QStringLiteral( "off (stale tome)" )
+				: QStringLiteral( "off" ) ).arg( int( d.blocks.size() ) )
 			.arg( d.decoded ).arg( d.queried ).arg( d.noStart ).arg( d.cells ).arg( d.visible ).arg( d.objects )
 			.arg( d.govUid + d.govComb ).arg( d.govUid ).arg( d.govComb ).arg( qint64( s.cur.tomeDrawn ) )
 			.arg( qint64( s.cur.tomeCulled ) ).arg( qint64( s.cur.ungoverned ) ).arg( qint64( s.cur.tomeCasterHidden ) )

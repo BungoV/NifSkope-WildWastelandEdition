@@ -39,6 +39,7 @@ struct WwPrevisBox
 struct WwPrevisScene
 {
 	std::vector<WwPrevisBox> occluders, rooms, portals;
+	bool interior = false;	//!< lane PERFFIX4: an interior takes previs whatever the row (src/gl/cellprevisrule.h)
 };
 //! The document's previs scene (replaced whole; wwCellCullBegin forgets it).
 void wwCellPrevisSet( const void * nif, WwPrevisScene && sc );
@@ -50,6 +51,7 @@ struct WwUmbraBlockIn
 {
 	std::uint32_t block = 0;	//!< the RVIS form
 	QByteArray tome;		//!< the .uvd file
+	bool stale = false;		//!< lane PERFFIX4: a later plugin touched its cells' refs (refused unless WW_CELL_UMBRA_RED=stale)
 	std::vector<std::pair<std::uint32_t, std::uint32_t>> combined;	//!< (XCRI ref form id, 0xFD cell code)
 };
 void wwCellUmbraSet( const void * nif, std::vector<WwUmbraBlockIn> && blocks );
@@ -61,6 +63,8 @@ void wwCellUmbraProbing( bool on );
 void wwCellUmbraDepthWrite( Scene * scene, const float * depth, int w, int h );
 bool wwCellPrevisOn();
 void wwCellPrevisSetOn( bool on );
+//! lane PERFFIX4: whether previs applies to a document of this kind now (an interior always; src/gl/cellprevisrule.h)
+bool wwCellPrevisFor( bool interior );
 //! 1 = the red control `casters`
 int wwCellPrevisRed();
 
@@ -118,6 +122,10 @@ bool wwCellCullCaster( Scene * scene, const Shape * sh, int block, int cascade, 
 
 //! Once per frame, before the passes: prints the last frame's counts when they changed.
 void wwCellCullFrame();
+/*! lane PERFFIX4: the frame's camera view (glview, right after wwCellCullFrame). Previs (occluders, rooms, the tome)
+ *  culls only in passes that look through it (the obscurance, reflections and opaque walks); a pass with another eye
+ *  (a lamp's cube face, a probe capture) draws every run, so no caster and no captured object is lost. */
+void wwCellCullCameraView( const Transform & view );
 //! The last frame's counts, one line.
 QString wwCellCullSummary();
 

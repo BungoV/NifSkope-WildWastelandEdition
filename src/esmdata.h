@@ -125,6 +125,17 @@ struct EsmCellPrevis
 	quint32 combinedMeshes = 0, combinedRefs = 0, previsRefs = 0;
 	//! lane UMBRA1: XCRI's refs (each pair's first word, mapped to the load order): the refs a precombined mesh replaced
 	QVector<quint32> combinedRefIds;
+	//! lane PERFFIX4: the winning CELL record's plugin (load-order index) and whether it carries XPRI / VISI
+	quint32 srcFile = 0;
+	bool hasPrevisFields = false;
+};
+
+/* Lane PERFFIX4: one REFR's plugins, for the previs staleness rule (src/gl/cellprevisrule.h): the plugin that owns
+ * its form id, the plugin of its winning version, and its record flags. */
+struct EsmRefSource
+{
+	quint32 owner = 0, src = 0;
+	bool deleted = false, disabled = false;
 };
 
 /* Lane PRTP1: one LIGH record (wbDefinitionsFO4 LIGH DATA + FNAM). The
@@ -652,6 +663,8 @@ public:
 	QVector<quint32> cellChildGroups( int cx, int cy ) const;
 	//! lane GAPLOOK2: the worldspace's persistent-cell groups (its own + later plugins')
 	QVector<quint32> persistentChildGroups() const;
+	//! lane PERFFIX4: every REFR in these groups (nested groups walked) once, with its owner and winning plugins
+	QVector<EsmRefSource> refSources( const QVector<quint32> & groups ) const;
 
 private:
 	std::unique_ptr<ESMFile> esm;

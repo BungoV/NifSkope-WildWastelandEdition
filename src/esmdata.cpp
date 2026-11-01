@@ -792,6 +792,7 @@ EsmCellPrevis EsmWorld::cellPrevis( quint32 cellForm ) const
 	if ( !cr || cr->type == GRUP || !( *cr == "CELL" ) )
 		return out;
 	out.exists = true;
+	out.srcFile = cr->srcFile;	// lane PERFFIX4: the plugin whose CELL version wins
 	ESMFile::ESMField f( *esm, *cr );
 	while ( f.next() ) {
 		if ( f == "RVIS" && f.size() >= 4 ) {
@@ -799,6 +800,7 @@ EsmCellPrevis EsmWorld::cellPrevis( quint32 cellForm ) const
 		} else if ( f == "VISI" && f.size() >= 2 ) {
 			out.visi = f.readUInt16();
 			out.hasVisi = true;
+			out.hasPrevisFields = true;
 		} else if ( f == "PCMB" && f.size() >= 2 ) {
 			out.pcmb = f.readUInt16();
 			out.hasPcmb = true;
@@ -818,7 +820,41 @@ EsmCellPrevis EsmWorld::cellPrevis( quint32 cellForm ) const
 			}
 		} else if ( f == "XPRI" ) {
 			out.previsRefs = quint32( f.size() / 4 );
+			out.hasPrevisFields = true;
 		}
+	}
+	return out;
+}
+
+QVector<EsmRefSource> EsmWorld::refSources( const QVector<quint32> & groups ) const
+{
+	QVector<EsmRefSource> out;
+	if ( !esm )
+		return out;
+	QSet<quint32> seen;	// an override can sit in its own group and in the later plugin's group
+	std::function<void( unsigned int )> walk = [&]( unsigned int id ) {
+		while ( id ) {
+			const ESMFile::ESMRecord * r = esm->findRecord( id );
+			if ( !r )
+				return;
+			if ( r->type != GRUP && *r == "REFR" && !seen.contains( r->formID ) ) {
+				seen.insert( r->formID );
+				EsmRefSource s;
+				s.owner = esm->getFormIDFile( r->formID );
+				s.src = r->srcFile;
+				s.disabled = ( r->flags & 0x00000800 ) != 0;
+				s.deleted = ( r->flags & 0x00000020 ) != 0;
+				out.append( s );
+			}
+			if ( r->children )
+				walk( r->children );
+			id = r->next;
+		}
+	};
+	for ( const quint32 g : groups ) {
+		const ESMFile::ESMRecord * gr = g ? esm->findRecord( g ) : nullptr;
+		if ( gr )
+			walk( gr->children );
 	}
 	return out;
 }
