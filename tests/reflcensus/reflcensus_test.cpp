@@ -1,0 +1,168 @@
+// Lane TOOLS1101 (REFLPROBECLI1): src/reflcensus.h against an analytic count. A square floor (z = 0, half 20000)
+// through the bake's own tracer (probebvh::Bvh) vs ray-plane arithmetic per texel, for three cameras:
+//   A outdoors over the floor, B outdoors past its edge (the ground taps all miss: "tapless"), C the same camera as
+//   A indoors (the camera probe's smaller box). Placement is checked against hand-written positions.
+//   reflcensus_test.exe            green: prints "REFLCENSUS PASS <n>" and exits 0
+//   reflcensus_test.exe lift       the census runs the red horizon d.z < 0.1: must print "FAIL below:" and exit 1
+//   reflcensus_test.exe noreach    the census runs with no far plane: must print "FAIL hits:" and exit 1
+#include <cmath>
+#include <cstdio>
+#include <cstring>
+#include <vector>
+
+#include "reflcensus.h"
+
+using namespace reflcensus;
+
+static const double H = 20000.0;
+static int fails = 0, checks = 0;
+
+static void check( bool ok, const char * name, const char * fmt, long a, long b, const char * scen, int probe )
+{
+	checks++;
+	if ( !ok ) {
+		fails++;
+		std::printf( "FAIL %s: %s probe %d: census %ld vs analytic %ld (%s)\n", name, scen, probe, a, b, fmt );
+	}
+}
+
+// the floor's arithmetic: does a probe's capture draw the floor in unit direction d?
+static bool floorSees( const Probe & p, const double d[3], double reach )
+{
+	if ( d[2] >= 0.0 )
+		return false;
+	const double m = std::max( { std::fabs( d[0] ), std::fabs( d[1] ), std::fabs( d[2] ) } );
+	const double t = p.pos[2] / -d[2];
+	if ( t < kNear / m || t > reach / m )
+		return false;
+	return std::fabs( p.pos[0] + t * d[0] ) <= H && std::fabs( p.pos[1] + t * d[1] ) <= H;
+}
+
+static Count analytic( const Probe & p )
+{
+	Count c;
+	c.reach = reachOf( p );
+	double d[3];
+	for ( int k = 0; k < 9; k++ ) {
+		tap( k, d );
+		const double l = std::sqrt( d[0] * d[0] + d[1] * d[1] + d[2] * d[2] );
+		for ( int a = 0; a < 3; a++ )
+			d[a] /= l;
+		c.tapsHit += floorSees( p, d, c.reach ) ? 1 : 0;
+	}
+	for ( int y = 0; y < kFace; y++ )
+		for ( int x = 0; x < kFace; x++ ) {
+			octDecode( ( x + 0.5 ) / kFace, ( y + 0.5 ) / kFace, d );
+			c.texels++;
+			if ( floorSees( p, d, c.reach ) ) {
+				c.hits++;
+				continue;
+			}
+			c.misses++;
+			if ( d[2] < 0.0 ) {
+				c.below++;
+				c.belowTapless += c.tapsHit == 0 ? 1 : 0;
+			} else {
+				c.above++;
+			}
+		}
+	return c;
+}
+
+int main( int argc, char ** argv )
+{
+	std::setvbuf( stdout, nullptr, _IONBF, 0 );
+	int red = RedNone;
+	if ( argc > 1 && !std::strcmp( argv[1], "lift" ) )
+		red = RedLift;
+	if ( argc > 1 && !std::strcmp( argv[1], "noreach" ) )
+		red = RedNoReach;
+
+	probebvh::Bvh bvh;
+	// the square as a fan of 4 round an off-lattice point: the tracer is not watertight on a shared edge, and a
+	// two-triangle split along x = y runs through the grid probes' own xy (2 texels a probe fell through it)
+	const float cx = 1234.567f, cy = -987.654f, h = float( H );
+	const float corner[5][2] = { { -h, -h }, { h, -h }, { h, h }, { -h, h }, { -h, -h } };
+	for ( int k = 0; k < 4; k++ ) {
+		const float tri[9] = { cx, cy, 0, corner[k][0], corner[k][1], 0, corner[k + 1][0], corner[k + 1][1], 0 };
+		bvh.t.insert( bvh.t.end(), tri, tri + 9 );
+	}
+	bvh.build();
+	const double O[2] = { 0.0, 0.0 };
+
+	// placement, by hand: camera (100, 50, 400): camera probe at (128, 0, 384); grid boxes round (0, 0) at z 512
+	std::vector<Probe> P;
+	const double camA[3] = { 100.0, 50.0, 400.0 };
+	place( camA, false, P );
+	checks++;
+	bool okPlace = P.size() == 10 && P[0].kind == 0 && P[0].pos[0] == 128.0 && P[0].pos[1] == 0.0 && P[0].pos[2] == 384.0
+		&& P[0].bmax[0] - P[0].bmin[0] == 8192.0 && P[0].bmax[2] - P[0].bmin[2] == 4096.0;
+	for ( int j = -1, n = 1; j <= 1; j++ )
+		for ( int i = -1; i <= 1; i++, n++ )
+			okPlace = okPlace && P[size_t( n )].pos[0] == 1024.0 + 2048.0 * i && P[size_t( n )].pos[1] == 1024.0 + 2048.0 * j
+				&& P[size_t( n )].pos[2] == 512.0 && P[size_t( n )].bmin[2] == -512.0 && P[size_t( n )].bmax[2] == 1536.0;
+	if ( !okPlace ) {
+		fails++;
+		std::printf( "FAIL place: camera A's probes are not the hand-written ones\n" );
+	}
+	std::vector<Probe> PC;
+	place( camA, true, PC );
+	checks++;
+	if ( PC.size() != 10 || PC[0].bmax[0] - PC[0].bmin[0] != 2048.0 || PC[0].bmax[2] - PC[0].bmin[2] != 1024.0
+		|| reachOf( PC[0] ) != 4096.0 || std::fabs( reachOf( P[0] ) - 12288.0 ) > 1e-9 || std::fabs( reachOf( P[1] ) - 4096.0 ) > 1e-9 ) {
+		fails++;
+		std::printf( "FAIL place: interior box or reach (camera %g, grid %g, interior camera %g)\n", reachOf( P[0] ), reachOf( P[1] ),
+			reachOf( PC[0] ) );
+	}
+
+	const double camB[3] = { 30000.0, 0.0, 400.0 };
+	struct Scen { const char * name; const double * cam; bool interior; } scen[3] = {
+		{ "A", camA, false }, { "B", camB, false }, { "C", camA, true } };
+	long tot[3][3] = {};
+	for ( int s = 0; s < 3; s++ ) {
+		std::vector<Probe> ps;
+		place( scen[s].cam, scen[s].interior, ps );
+		for ( size_t i = 0; i < ps.size(); i++ ) {
+			const double xy[4] = { -H, -H, H, H };
+			const Count a = census( bvh, O, ps[i], red, xy ), b = analytic( ps[i] );
+			const int pi = int( i );
+			check( a.texels == b.texels, "texels", "64x64", a.texels, b.texels, scen[s].name, pi );
+			check( a.hits == b.hits, "hits", "drawn texels", a.hits, b.hits, scen[s].name, pi );
+			check( a.below == b.below, "below", "below-horizon misses", a.below, b.below, scen[s].name, pi );
+			check( a.above == b.above, "above", "sky misses", a.above, b.above, scen[s].name, pi );
+			check( a.tapsHit == b.tapsHit, "taps", "ground taps that hit", a.tapsHit, b.tapsHit, scen[s].name, pi );
+			check( a.belowTapless == b.belowTapless, "tapless", "below misses with no tap", a.belowTapless, b.belowTapless,
+				scen[s].name, pi );
+			std::printf( "%s probe %d kind %d pos %.0f,%.0f,%.0f reach %.0f: hits %ld below %ld above %ld taps %d tapless %ld\n",
+				scen[s].name, pi, ps[i].kind, ps[i].pos[0], ps[i].pos[1], ps[i].pos[2], a.reach, a.hits, a.below, a.above,
+				a.tapsHit, a.belowTapless );
+			tot[s][0] += a.below;
+			tot[s][1] += a.belowTapless;
+			tot[s][2] += a.hits;
+			// belowEdge: over the floor no below miss runs off it (they stop at the reach); past it every one does
+			if ( red == RedNone ) {
+				checks++;
+				// (B's camera probe reaches 12288 back over the floor: some of its shallow misses end above it)
+				const bool edgeOk = s != 1 ? a.belowEdge == 0
+					: ps[i].kind == 1 ? a.belowEdge == a.below : a.belowEdge > 0 && a.belowEdge < a.below;
+				if ( !edgeOk ) {
+					fails++;
+					std::printf( "FAIL edge: %s probe %d: belowEdge %ld of below %ld\n", scen[s].name, pi, a.belowEdge, a.below );
+				}
+			}
+		}
+	}
+	// the fields must MOVE between the scenes, or the census could be printing a constant
+	checks++;
+	if ( !( tot[0][1] == 0 && tot[1][1] > 0 && tot[0][2] > tot[1][2] && tot[0][0] > 0 ) ) {
+		fails++;
+		std::printf( "FAIL moves: A tapless %ld (want 0), B tapless %ld (want > 0), hits A %ld > B %ld, below A %ld > 0\n",
+			tot[0][1], tot[1][1], tot[0][2], tot[1][2], tot[0][0] );
+	}
+	if ( fails ) {
+		std::printf( "REFLCENSUS FAIL %d of %d\n", fails, checks );
+		return 1;
+	}
+	std::printf( "REFLCENSUS PASS %d\n", checks );
+	return 0;
+}

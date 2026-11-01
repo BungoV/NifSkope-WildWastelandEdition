@@ -19,6 +19,7 @@ See the LICENSE.md file for the full license text.
 #include "probefar.h"		// lane PRTPFAR
 #include "probegi.h"		// lane ROOMCLAMP1: probegi
 #include "rtddgi.h"		// lane RTXGI1: rtddgi
+#include "reflcensuscli.h"	// lane TOOLS1101: reflcensus
 #include "farlightmap.h"	// lane FARLIGHTMAP1: farlightmap
 #include "proberelight.h"	// lane GPURELIGHT1: gpurelight
 #include "probevolumes.h"	// lane VOLFIT1: volumes
@@ -8210,6 +8211,14 @@ int nifskopeCliMain( const QStringList & args )
 	if ( cmd == QLatin1String( "rtddgi" ) ) {
 		const int rc = rtddgiCli( a );
 		out().flush();
+		err().flush();
+		return rc;
+	}
+	// `reflcensus` counts the reflection probes' below-horizon misses through a bake's soup (lane TOOLS1101 REFLPROBECLI1)
+	if ( cmd == QLatin1String( "reflcensus" ) ) {
+		out().flush();
+		const int rc = reflCensusCli( a );
+		std::fflush( stdout );
 		err().flush();
 		return rc;
 	}

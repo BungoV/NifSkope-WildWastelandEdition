@@ -430,6 +430,8 @@ HEADERS += \
 	src/probebvh.h \
 	src/bakert.h \
 	src/rtddgi.h \
+	src/reflcensus.h \
+	src/reflcensuscli.h \
 	src/rtddgimath.h \
 	src/rtddgi/rtddgi_gpu.h \
 	src/rtddgicell.h \
@@ -777,6 +779,7 @@ SOURCES += \
 	src/pgiwrite.cpp \
 	src/bakert.cpp \
 	src/rtddgi.cpp \
+	src/reflcensuscli.cpp \
 	src/rtddgicell.cpp \
 	src/airzone.cpp \
 	src/airzonepanel.cpp \
