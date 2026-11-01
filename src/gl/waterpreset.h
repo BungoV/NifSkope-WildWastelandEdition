@@ -23,7 +23,9 @@ namespace WwWaterPreset
 {
 enum Step { Low = 0, Medium = 1, High = 2, Ultra = 3 };
 //! the water looks the preset steps through (celllooks.h WwLook water rows, by their meaning)
-enum Term { Clear, Refl, SoftEdge, ShoreFoam, RiverFoam, Ocean, Glint, Contact, OffRow, NotWater };
+//! lane PERFFIX3: UnderFog = the Underwater fog row, at every step (the game always fogs under water: its WATR INAM
+//! imagespace's depth-of-field fog, WATERUNDER3), no longer an Ultra-only OffRow
+enum Term { Clear, Refl, SoftEdge, ShoreFoam, RiverFoam, Ocean, Glint, Contact, OffRow, NotWater, UnderFog };
 
 //! the lowest step a term draws at
 inline int minStep( Term t )
@@ -35,7 +37,7 @@ inline int minStep( Term t )
 		return High;
 	case Glint: case Contact: case OffRow:
 		return Ultra;
-	case NotWater:
+	case NotWater: case UnderFog:
 		return Low;
 	}
 	return Ultra;
@@ -44,6 +46,14 @@ inline int minStep( Term t )
 inline bool lets( int step, Term t )
 {
 	return step >= minStep( t );
+}
+
+/*! lane PERFFIX3 (PERFRES1101 B underwater BROKEN 1): the Underwater fog row's verdict, unpinned. `row` = its value
+ *  (key WW/CellUnderwater2, shipped ON), drawn at every step. Red WW_CELL_UNDERWATER_RED=ultraonly = as it shipped
+ *  before: `oldRow` (key WW/CellUnderwater, shipped OFF), and only at Ultra (an OffRow). */
+inline bool underFogOn( int step, bool row, bool oldRow, bool redUltraOnly )
+{
+	return redUltraOnly ? oldRow && lets( step, OffRow ) : row && lets( step, UnderFog );
 }
 
 //! "low", "Medium", "2" ... -> the step; anything else -> -1 (not set)

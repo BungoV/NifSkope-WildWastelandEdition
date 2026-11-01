@@ -3,6 +3,7 @@
 
 #include "cellunits.h"
 #include "gl/cellhdr.h"
+#include "gl/cellpasstime.h"
 #include "gl/celllights.h"
 #include "gl/celllooks.h"
 #include "gl/cellwater.h"
@@ -147,6 +148,7 @@ QByteArray lightRed()
 
 void wwCellUnderwaterFrame( Scene * scene )
 {
+	PassTime::DrawCpuScope cpu( PassTime::CpuUnder );	// lane PERFFIX3: the fog ships ON, so this runs every frame
 	UnderState & s = ust();
 	s.frameDoc = nullptr;
 	s.cloudsHidden = false;
@@ -210,6 +212,7 @@ bool wwCellUnderwaterSun( Scene * scene, float to[3], float col[3] )
 
 void wwCellUnderwaterPass( Scene * scene )
 {
+	PassTime::DrawCpuScope cpu( PassTime::CpuUnder );	// lane PERFFIX3: `cpu underwater` (with the frame's decision)
 	const bool light = wwLookOn( WwLook::WaterUnderLight );	// lane WATERLOOK1 step 16: the Underwater light row
 	if ( !wwLookOn( WwLook::Underwater ) && !light ) {
 		ust().echo = QStringLiteral( "underwater: off" );
@@ -253,6 +256,9 @@ void wwCellUnderwaterPass( Scene * scene )
 		note( via.isEmpty() ? QStringLiteral( "underwater: above water" ) : QStringLiteral( "underwater: above water (%1)" ).arg( via ) );
 		return;
 	}
+	// lane PERFFIX3: the pass's GPU time in the pass table (`sub underwater`), from here to every return below
+	PassTime::subBegin( PassTime::Underwater );
+	struct SubEnd { ~SubEnd() { PassTime::subEnd( PassTime::Underwater ); } } subEnd;
 
 	const unsigned int depthTex = wwCellHdrDepthMax( scene );
 	auto prog = depthTex ? r->useProgram( "cell_underwater.prog" ) : nullptr;

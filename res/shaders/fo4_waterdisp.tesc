@@ -31,6 +31,7 @@ flat out mat3 tcRefl[];
 
 uniform bool waterOceanOn;
 uniform vec4 waterOceanDisp;	// full out to (u), none past (u), the target edge (px), the most a GPU splits an edge
+uniform int waterOceanRed;	// lane PERFFIX3: 8192 densetess = every edge up to waterOceanDisp.w splits (before)
 
 // the level of the edge a - b (view space)
 float wwDispLevel( vec3 a, vec3 b )
@@ -42,7 +43,13 @@ float wwDispLevel( vec3 a, vec3 b )
 		return 1.0;
 	float pxu = projectionMatrix[1][1] * 0.5 * float( viewportDimensions.w ) / max( dm, 1.0 );	// pixels a unit there
 	float lv = max( L * pxu / waterOceanDisp.z, L * ( 1.0 / 256.0 ) );	// and never coarser than 256 u where it moves
-	return clamp( lv, 1.0, waterOceanDisp.w );
+	/* lane PERFFIX3 (PERFRES1101 B water OPT 2): no vertex step finer than the heights' own filter (fo4_waterdisp.tese:
+	 * step >= 4096 / waterOceanDisp.w = 64 u): the pre-split 1024 u quads (src/cellview.cpp) split to 16 u and sampled
+	 * a field already smoothed over 64 u four times over, ~1 M triangles near the camera (+1.4 ms at 1080p 4x MSAA,
+	 * tests/watertess). An edge's own length bounds it, so two triangles sharing the edge still split it alike. */
+	float cap = ( waterOceanRed & 8192 ) != 0 ? waterOceanDisp.w
+		: clamp( L * waterOceanDisp.w * ( 1.0 / 4096.0 ), 1.0, waterOceanDisp.w );
+	return clamp( lv, 1.0, cap );
 }
 
 void main()

@@ -4,6 +4,8 @@
 //  3 the expensive terms sit high: the ocean spectrum from High, the glare facets and the contact foam at Ultra
 //  4 parse: low|medium|high|ultra|0..3, any case; anything else = not set
 // -DWATERPRESET_RED: today's code (no preset: every step lets every term) must FAIL rules 1 and 3.
+//  5-6 (lane PERFFIX3) the Underwater fog at every step by default; red ultraonly = the rule before. -DUNDERFOG_RED
+//      (the OffRow rule it shipped with) must FAIL rule 5.
 #include "waterpreset.h"
 
 #include <cstdio>
@@ -19,6 +21,19 @@ static bool letsT( int step, Term t )
 	return true;
 #else
 	return lets( step, t );
+#endif
+}
+
+// lane PERFFIX3: the Underwater fog row's verdict (waterpreset.h underFogOn); -DUNDERFOG_RED = the rule it shipped
+// with before (an OffRow: its row, shipped OFF, at Ultra only) and must FAIL rule 5
+static bool underT( int step, bool row, bool oldRow, bool red )
+{
+#ifdef UNDERFOG_RED
+	( void ) oldRow;
+	( void ) red;
+	return row && lets( step, OffRow );
+#else
+	return underFogOn( step, row, oldRow, red );
 #endif
 }
 
@@ -45,6 +60,19 @@ int main()
 		&& letsT( Medium, Clear ) && letsT( Medium, Refl ), "rule 3: ocean from High, glare + contact at Ultra, colour + reflections from Medium" );
 	check( parse( "low" ) == Low && parse( "Medium" ) == Medium && parse( "2" ) == High && parse( "ULTRA" ) == Ultra
 		&& parse( "" ) == -1 && parse( "max" ) == -1, "rule 4: parse" );
+#ifndef WATERPRESET_RED
+	// rules 5-6 (PERFFIX3): the shipped values, kRows WW/CellUnderwater2 true (run.sh greps it) and the old key's OFF
+	const bool rowShipped = true, oldShipped = false;
+	bool every = true, redNone = true, redUltra = true;
+	for ( int s = Low; s <= Ultra; s++ ) {
+		every = every && underT( s, rowShipped, oldShipped, false );
+		redNone = redNone && !underT( s, rowShipped, oldShipped, true );
+		redUltra = redUltra && underT( s, rowShipped, true, true ) == ( s == Ultra );
+	}
+	check( every, "rule 5: the Underwater fog draws by default at Low, Medium, High and Ultra (the game always fogs)" );
+	check( redNone && redUltra && !underT( Ultra, false, false, false ),
+		"rule 6: red ultraonly = before (off by default; the old row ticked: Ultra only); the row unticked = off" );
+#endif
 	std::printf( "WATERPRESET TABLE %s%s (%d failed)\n", fails ? "FAIL" : "PASS",
 #ifdef WATERPRESET_RED
 		" [red]",
