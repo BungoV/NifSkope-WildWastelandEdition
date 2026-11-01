@@ -1,3 +1,32 @@
+## PERFFIX2 items 1 + 2 (2026-11-01): the ray-traced GI read once a screen texel; spec occlusion from it; no AO decals under RTXGI
+
+PERFRES1101 A gaps 2 and 10. Without the old baked GI (PRTOFF1) the PRT era's screen GI pass (celllights.cpp giHalfPass,
+cell_gihalf.frag) never ran, and every opaque fragment read the ray-traced GI volume itself (three cascades: up to 24
+atlas taps a fragment, with overdraw). The pass now runs the volume's read once a texel of the shared opaque g-buffer
+(its normal is the shading normal, fo4_default.frag cellAoPassOut) whenever a volume is up; the surfaces take the texel
+through the one upsample (cellGiHalfAt, now res/shaders/cell_gihalfat.glsl for both paths) and read the volume
+themselves only on a miss (an edge, a blended draw, a probe picture).
+- Rate: FULL by default (the inline picture: tests/ddgiscreen rel err <= 1.1e-3). WW_CELL_GI_RATE=half is opt-in
+  (p99 0.12 on bumpy normals: not the default); WW_CELL_GI_RATE=inline is the red (the old per-fragment read).
+- Specular occlusion (gap 10, RTXGI-only hole): the texel also carries the volume's sky visibility at the normal, half
+  way and at the mirror direction (one read: cellDdgiTwo + a new cellDdgiThree tap; 8 bits each in the irradiance
+  channels' low mantissa bits); cellSpecSky takes the three-point read at its lobe's bend instead of the removed PRT
+  grid. Smooth tiles |screen - lobe read| p99 0.027 (bar 0.05); random normal tiles p99 0.104 (that worst case fails
+  the bar; WW_CELL_SPECOCC=0 turns it off).
+- AO decals (gap 10): the baked decals scale only the PRT's sky term, so under RTXGI no pixel read them while a ticked
+  row still built and drew them; and on the volume's term they would darken the soup copies the volume already traces.
+  aoDecalWorks() = the row on and the PRT drawn (src/cellaodecalrule.h). Red WW_CELL_AODECAL_RTX_RED=1 (cell open).
+- Offline cost (MEASURED, synthetic Concord-shaped atlas, RTX 5070 Ti, 1920x1026): the read in a screen pass 0.22 ms
+  one volume / 0.61 ms three cascades (0.06 / 0.17 half rate). A half-float atlas reads the same (0.216 vs 0.217 ms):
+  the read is not bandwidth bound, so the compact RGB10A2/RG16F atlas the brief named is not built.
+- Debug (LATE ITEM 1b, the brown shade): WW_CELL_RTDDGI_SPEC tokens nosky=1 / nosun=1 / onebounce=1 rebuild the volume
+  with one light term removed, to measure which term turns outdoor shade brown. Debug only; default unchanged.
+- Tests: tests/ddgiscreen/ddgiscreen_gl.py (the real cell_gihalf.prog + cell_gihalfat.glsl; reds shift, nokey, visn
+  fail), tests/rtddgi_math (check lobe3, red LOBE3), tests/aodecalrtx (red: the old rule). Link sweeps: base 408/408
+  identical code to b0e5e9a3, RTDDGI 272/272, RTDDGI + cascades 272/272, PRT 408/408.
+- Default: the screen-pass read is ON wherever the volume is on (RTXGI itself still ships as before). Live cost rows and
+  the GI default-on proof: DEFAULT-ON OWED until notes/perffix2 hold 1 lands.
+
 ## FOAMOFF2 (FIX1101A, 2026-11-01): River foam and Contact foam stay OFF
 
 The water lane's foam fixes land: lace streaks instead of solid patches, and no foam on a dry bank. Its two rows still
