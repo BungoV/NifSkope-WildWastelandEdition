@@ -115,6 +115,7 @@ struct CsmState
 	int slopeClamp = 0;	// lane SHADOWPAR1: 1 the caster bias clamped (FO4CS's slope 4), -1 no glPolygonOffsetClamp
 	// lane TERRSHADOW1: the fit's numbers, CSM1's constants unless Cascade Quality picks a preset
 	double baseD = kDefaultDistance, split0 = kSplit0, split1 = kSplit1, blend = kBlend, lightBack = kLightBack;
+	int nCasc = kCascades;	// lane PERFFIX2 b: the cascades drawn this pass (the tier's count; 2 at Low)
 	int baseMap = kDefaultMap;
 	float slopeBias = kSlopeBias, unitBias = kUnitBias;
 	bool groundCast = false;
@@ -265,7 +266,10 @@ void fitCascades( CsmState & s, const Transform & vt )
 	const bool one = red( "onecascade" );
 	s.split[0] = red( "wrongsplit" ) ? 400.0 : s.split0;
 	s.split[1] = red( "wrongsplit" ) ? 1500.0 : s.split1;
-	const double far[kCascades] = { s.split[0], s.split[1], s.D };	// the last is overridden by D
+	/* lane PERFFIX2 b (item 8b, gl/sunshadowfit.h): with 2 cascades the second slice reaches D and the receivers' second
+	 * boundary moves past the reach + band (cascade 2 is neither drawn nor read) */
+	double far[kCascades];
+	WwCsmFit::sliceFars( s.nCasc, s.split[0], s.split[1], s.D, s.blend, far, s.split[1] );
 	double * rc = s.rc, * uc = s.uc;
 	for ( int j = 0; j < 3; j++ ) {
 		rc[j] = vt.rotation( 0, j );
@@ -908,7 +912,9 @@ static void sunShadowPassImpl( Scene * scene )
 		s.lightBack = cp.lightBack;
 		s.slopeBias = cp.slopeBias;
 		s.unitBias = cp.unitBias;
+		s.nCasc = std::clamp( cp.cascades, 2, kCascades );	// lane PERFFIX2 b
 	} else {
+		s.nCasc = kCascades;
 		s.D = s.baseD;
 		s.map = s.baseMap;
 		s.split0 = kSplit0;
@@ -1278,6 +1284,8 @@ static void sunShadowPassImpl( Scene * scene )
 	std::vector<Job> jobs;
 	std::vector<int> jobsOf[kCascades][3];
 	for ( int i = 0; i < kCascades; i++ ) {
+		if ( i >= s.nCasc )
+			continue;	// lane PERFFIX2 b: a cascade the tier does not draw (the receivers never select it)
 		const Cascade & c = s.c[i];
 		auto add = [&]( int set, const int * rc ) {
 			Job j;
@@ -1612,6 +1620,8 @@ static void sunShadowPassImpl( Scene * scene )
 	};
 
 	for ( int i = 0; i < kCascades && complete; i++ ) {
+		if ( i >= s.nCasc )
+			continue;	// lane PERFFIX2 b: not drawn, not read
 		const Cascade & c = s.c[i];
 		ShadowCache::Layer & L = cst.c[i];
 		switch ( mode[i] ) {
@@ -1899,7 +1909,7 @@ QString wwSunShadowSummary()
 	// lane SHADOWSHIMMER4: the split far sway buckets and their tiles swaying in each cascade
 	o += QString( " swaysplit=%1 swaytiles=%2,%3,%4 swaystep=%5" ).arg( s.swaySplit ).arg( s.swayTiles[0] ).arg( s.swayTiles[1] )
 		.arg( s.swayTiles[2] ).arg( s.swayStep );
-	o += QString( " csmat=%1 slopeclamp=%2" ).arg( s.atCasters ).arg( s.slopeClamp );	// lane VOLAIR1: -1 = no program (they cast solid)
+	o += QString( " csmat=%1 slopeclamp=%2 cascades=%3" ).arg( s.atCasters ).arg( s.slopeClamp ).arg( s.nCasc );	// lane PERFFIX2 b	// lane VOLAIR1: -1 = no program (they cast solid)
 	if ( s.swayCables >= 0 )
 		o += QString( " cablesway=%1" ).arg( s.swayCables );	// lane FAR5: the wind cables cast where they sway
 	// lane VOLAIR1: the receiver constants a judge needs to predict the factor from WW_CSM_DUMP's map

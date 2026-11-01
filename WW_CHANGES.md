@@ -1,3 +1,15 @@
+## PERFFIX2 b item 8b (2026-11-01): Cascade Quality Low draws 2 sun cascades
+
+PERFRES1101 A sun_shadows missing 1: the cascade count was 3 at every tier (sunshadow.cpp kCascades). Now
+gl/sunshadowfit.h cascadesForTier: Low 2, Medium / High / Ultra 3, the Off tier (CSM1) 3. With 2 the second slice
+reaches the shadow distance (Low: 900..4000 units at the same 2048 map, so the 900..2600 band gets coarser texels) and
+cascade 2 is neither drawn nor read: the receivers' second boundary (csmSplitOffset.y) moves past the reach + band, so
+ww_sunshadow.glsl csmSelect keeps the pair (0, 1) out to the fade (no shader change). Ultra stays 3: a 4th cascade needs
+the shader's mat4[3] / split layout to grow (a LANES row). The echo adds `cascades=`. Red WW_SHADOW_CASCADES_RED=1: 3 at
+every tier (today's). A look change at Low only (a FULL-SIZE pair in notes/perffix2/b). Unit: tests/cascadecount (the
+tier table; the receivers never select the undrawn cascade and every depth lies in its slices; reds: today's count, and
+the receivers left on the old boundary, must fail).
+
 ## PERFFIX2 b item 8 (2026-11-01): the sun-cascades pass timer split into its four parts
 
 PERFRES1101 A sun_shadows broken 3: the PassTime "sun-cascades" zone (wwSunShadowPass) also holds the terrain sweep's
