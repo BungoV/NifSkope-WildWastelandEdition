@@ -3541,6 +3541,8 @@ void GLView::updateAnimationState( bool checked )
  *  OpenGL
  */
 
+void wwStartupMark( const char * stage );	// main.cpp (lane STARTSPEED1)
+
 void GLView::initializeGL()
 {
 	auto	cx = context();
@@ -3554,7 +3556,9 @@ void GLView::initializeGL()
 	scene->setOpenGLContext( cx );
 	glContext = scene->renderer;
 	textures->setOpenGLContext( glContext );
+	wwStartupMark( "gl context" );
 	updateShaders();		// should be called after TexCache is initialized
+	wwStartupMark( "shaders" );
 	glClearColor( cfg.background.red(), cfg.background.green(), cfg.background.blue(), cfg.background.alpha() );
 
 	// Initial viewport values
@@ -3792,6 +3796,10 @@ void GLView::paintGL()
 	CellSpeed::Acc speedAcc( "frames painted (paintGL, with first-use uploads)" );   // lane SPEED1
 	CellTexAhead::Frame texAheadFrame;   // lane SPEED1: a frame that loads no texture ends the read-ahead
 	wwPaintCounter++;
+	struct WwFirstFrame {	// lane STARTSPEED1: the start's last mark, when the first paint returns
+		bool first;
+		~WwFirstFrame() { if ( first ) wwStartupMark( "first frame" ); }
+	} wwFirstFrame{ wwPaintCounter == 1 };
 	QElapsedTimer wwStream1Clock;	// lane STREAM1: the whole paint, for the hitch figures
 	wwStream1Clock.start();
 	wwCellStreamEvict();

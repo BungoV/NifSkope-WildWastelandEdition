@@ -3035,6 +3035,8 @@ static void wwCardBakeFinished( NifSkope * skope )
 	QTimer::singleShot( 0, qApp, &wwCardBatchNext );
 }
 
+void wwStartupMark( const char * stage );	// main.cpp (lane STARTSPEED1)
+
 NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 {
 	NifSkope * primary = nullptr;
@@ -3044,11 +3046,14 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 			if ( document->isActiveWindow() ) break;
 		}
 	wwCardStamp( QStringLiteral( "cw" ) );
+	wwStartupMark( "window create" );
 	NifSkope * skope = new NifSkope( background );
 	wwCardStamp( QStringLiteral( "ctor" ) );
+	wwStartupMark( "window built" );
 	skope->setAttribute( Qt::WA_DeleteOnClose );
 	skope->loadTheme();
 	wwCardStamp( QStringLiteral( "theme" ) );
+	wwStartupMark( "theme" );
 	skope->workspaceRoot = background && primary
 		? ( primary->workspaceRoot ? primary->workspaceRoot : primary ) : skope;
 	if ( !background ) {
@@ -3179,6 +3184,7 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 		wwHarnessRecordViewport( skope, skope->getGLView(), "shown" );
 	}
 	wwCardStamp( QStringLiteral( "shown" ) );
+	wwStartupMark( "window shown" );
 
 	// TEMP DIAGNOSTIC (WW_EXTRUDE_TEST=1, remove when the append-row condition
 	// bug is fixed): after the file loads, grow "Vertex Data" on the first

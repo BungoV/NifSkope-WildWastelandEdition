@@ -65,6 +65,9 @@ bool wwCellPrtOn();	// lane PRTOFF1: src/gl/celllights.cpp (the old baked probe 
 #include <QFileInfo>
 #include <QOpenGLContext>
 #include <QTextStream>
+#include <QHash>
+#include <functional>
+#include <vector>
 #if QT_VERSION >= QT_VERSION_CHECK(6, 0, 0)
 #  include <QOpenGLVersionFunctionsFactory>
 #endif
@@ -268,6 +271,72 @@ void NifSkopeOpenGLContext::ConditionGroup::addCondition( Condition * c )
 	conditions.append( c );
 }
 
+/* lane STARTSPEED1: a shader's compile waits until a program links from it. The program binary cache key needs only
+ * the source hash, so with every program's binary in shadercache/ no shader is compiled at start; a cache miss, or a
+ * binary the driver refuses, compiles that program's attached shaders first (wwCompileDeferred). The prepared source
+ * waits here, by GL shader id; updateShaders() drops what no link asked for. Red: WW_STARTUP_EAGER=1, every shader
+ * compiles at load, as before. */
+bool wwStartupEager()
+{
+	static const bool eager = qgetenv( "WW_STARTUP_EAGER" ).trimmed() == "1";
+	return eager;
+}
+
+namespace {
+struct WwDeferredShader {
+	std::string	name;
+	QByteArray	src;
+	std::function< void( const QString & ) >	onError;
+};
+QHash< unsigned int, WwDeferredShader > &	wwDeferredShaders()
+{
+	static QHash< unsigned int, WwDeferredShader >	h;
+	return h;
+}
+int	wwShadersCompiled = 0;
+int	wwShadersLoaded = 0;
+}
+
+// compiles the waiting shaders attached to program prog; false (err set) when one fails to compile
+static bool wwCompileDeferred( GLFunctions * f, unsigned int prog, QString & err )
+{
+	auto &	h = wwDeferredShaders();
+	if ( h.isEmpty() || !prog )
+		return true;
+	GLint	n = 0;
+	f->glGetProgramiv( prog, GL_ATTACHED_SHADERS, &n );
+	if ( n <= 0 )
+		return true;
+	std::vector< GLuint >	ids( size_t( n ), 0 );
+	GLsizei	got = 0;
+	f->glGetAttachedShaders( prog, GLsizei( n ), &got, ids.data() );
+	bool	ok = true;
+	for ( GLsizei i = 0; i < got; i++ ) {
+		auto	it = h.find( ids[i] );
+		if ( it == h.end() )
+			continue;
+		WwDeferredShader	d = it.value();
+		h.erase( it );
+		const char *	src = d.src.constData();
+		f->glShaderSource( ids[i], 1, &src, (GLint *) 0 );
+		f->glCompileShader( ids[i] );
+		wwShadersCompiled++;
+		GLint	result = GL_FALSE;
+		f->glGetShaderiv( ids[i], GL_COMPILE_STATUS, &result );
+		if ( result != GL_TRUE ) {
+			GLint	logLen = 0;
+			f->glGetShaderiv( ids[i], GL_INFO_LOG_LENGTH, &logLen );
+			QByteArray	log( qMax( logLen, 1 ), '\0' );
+			f->glGetShaderInfoLog( ids[i], logLen, 0, log.data() );
+			if ( d.onError )
+				d.onError( QString::fromLatin1( log.constData() ) );
+			err = QString( "depends on shader %1 which was not compiled successful" ).arg( QString::fromStdString( d.name ) );
+			ok = false;
+		}
+	}
+	return ok;
+}
+
 NifSkopeOpenGLContext::Shader::Shader( const std::string_view & n, unsigned int t, GLFunctions * fn )
 	: f( fn ), name( n ), id( 0 ), status( false ), isProgram( !t )
 {
@@ -288,6 +357,7 @@ void NifSkopeOpenGLContext::Shader::clear()
 		return;
 	}
 	if ( id ) {
+		wwDeferredShaders().remove( id );
 		f->glDeleteShader( id );
 		id = 0;
 	}
@@ -462,6 +532,13 @@ bool NifSkopeOpenGLContext::Shader::load( const QString & filepath )
 		for ( char c : std::string( name ) + '\n' + data.toStdString() )
 			srcHash = ( srcHash ^ (unsigned char) c ) * 0x100000001B3ULL;
 
+		wwShadersLoaded++;
+		if ( !wwStartupEager() ) {
+			wwDeferredShaders().insert( id, WwDeferredShader{ std::string( name ), data, [this]( const QString & e ) { printCompileError( e ); } } );
+			status = true;
+			return true;
+		}
+		wwShadersCompiled++;
 		f->glShaderSource( id, 1, &src, (GLint *) 0 );
 		f->glCompileShader( id );
 
@@ -636,6 +713,8 @@ bool NifSkopeOpenGLContext::Program::load( const QString & filepath, NifSkopeOpe
 			}
 			f->glProgramParameteri( id, GL_PROGRAM_BINARY_RETRIEVABLE_HINT, GL_TRUE );
 		}
+		if ( QString err; !wwCompileDeferred( f, id, err ) )
+			throw err;
 		f->glLinkProgram( id );
 		linkFrom = 1;
 	}
@@ -660,6 +739,11 @@ bool NifSkopeOpenGLContext::Program::finishLink( NifSkopeOpenGLContext * context
 			// the driver refused the cached binary (another driver, or damaged): link from the attached sources
 			context->programCacheRejected++;
 			f->glProgramParameteri( id, GL_PROGRAM_BINARY_RETRIEVABLE_HINT, GL_TRUE );
+			if ( QString err; !wwCompileDeferred( f, id, err ) ) {
+				f->glDeleteProgram( id );
+				id = 0;
+				throw err;
+			}
 			f->glLinkProgram( id );
 			linkFrom = 1;
 			f->glGetProgramiv( id, GL_LINK_STATUS, &result );
@@ -1273,6 +1357,7 @@ void NifSkopeOpenGLContext::updateShaders()
 
 	QStringList	entryList = dir.entryList();
 	QVector< Program * >	started;
+	wwShadersCompiled = wwShadersLoaded = 0;
 	for ( int i = 0; i < 2; i++ ) {
 		for ( const QString & name : entryList ) {
 			bool	isProgram = name.endsWith( QLatin1StringView( ".prog" ), Qt::CaseInsensitive );
@@ -1295,6 +1380,10 @@ void NifSkopeOpenGLContext::updateShaders()
 	std::fprintf( stderr, "shader programs: %d of %d linked (cache: %d loaded, %d refused, %d written; %s) parallel=%s issue %lld ms total %lld ms\n",
 		ok, int( started.size() ), programCacheHits, programCacheRejected, programCacheWritten,
 		programCacheDir.isEmpty() ? "off" : "on", threads, (long long) issued, (long long) clock.elapsed() );
+	// lane STARTSPEED1: what the deferred compile saved (the waiting sources no link asked for go now)
+	std::fprintf( stderr, "shader sources: %d of %d compiled (%s)\n", wwShadersCompiled, wwShadersLoaded,
+		wwStartupEager() ? "eager, WW_STARTUP_EAGER=1" : "on demand" );
+	wwDeferredShaders().clear();
 }
 
 void NifSkopeOpenGLContext::releaseShaders()

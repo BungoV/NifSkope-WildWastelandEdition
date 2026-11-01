@@ -1572,6 +1572,8 @@ QString NifSkope::fileFilters( bool allFiles )
  * main GUI window
  */
 
+void wwStartupMark( const char * stage );	// main.cpp (lane STARTSPEED1)
+
 NifSkope::NifSkope( bool background )
 	: QMainWindow(), ui( new Ui::MainWindow )
 {
@@ -2832,11 +2834,14 @@ NifSkope::NifSkope( bool background )
 
 	setContextMenuPolicy( Qt::NoContextMenu );
 
+	wwStartupMark( "window widgets" );
 	// Set Actions
 	initActions();
+	wwStartupMark( "window actions" );
 
 	// Dock Widgets
 	initDockWidgets();
+	wwStartupMark( "window docks" );
 
 	// Toolbars
 	initToolBars();
@@ -2846,6 +2851,7 @@ NifSkope::NifSkope( bool background )
 
 	// Connections (that are required to load after all other inits)
 	initConnections();
+	wwStartupMark( "window toolbars + menus" );
 
 	/* The Water Marking dock (src/watermarkpanel.cpp): marking water
 	 * direction by hand on a .lodl, which bungo asked for on 2026-09-09.
