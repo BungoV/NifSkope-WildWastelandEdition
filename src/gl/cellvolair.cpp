@@ -1424,6 +1424,8 @@ static void vaPassInner( Scene * scene, bool run )
 	 * a 5-7 ms GPU gap in air-post; perfres1101/B/fog.md 2.1). A location the mirror has not seen (the first frame, a raw
 	 * write) is asked, as before; WW_SETUP_MEMO_CHECK=1 asks every one and counts a mirror that differs (mirrorStale).
 	 * Red WW_CELL_AIR_RED=ask: every value asked, as before. */
+	if ( s.askRed && prog->wwMirror.on )
+		prog->wwMirror.reset();	// off, it records nothing: a later on must not read values from before
 	prog->wwMirror.on = !s.askRed;
 	s.inPass = true;
 	wwLookdevFogUniforms( scene );

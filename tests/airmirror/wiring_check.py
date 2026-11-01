@@ -47,7 +47,7 @@ cv = src('src/gl/cellvolair.cpp')
 cl = src('src/gl/celllights.cpp')
 m = re.search(r'auto uniI = \[&\].*?\n\t\};\n\tauto uniF = \[&\].*?\n\t\};', cv, re.S)
 outside = len(re.findall(r'glGetUniform[if]v', cv)) - (len(re.findall(r'glGetUniform[if]v', m.group(0))) if m else 0)
-p1 = 'prog->wwMirror.on = !s.askRed;' in cv
+p1 = 'prog->wwMirror.on = !s.askRed;' in cv and 'if ( s.askRed && prog->wwMirror.on )' in cv
 p2 = bool(m) and 'wwMirror.get(' in m.group(0)
 p3 = 'WwCellUni::entryNote()' in cv and 'WwCellUni::EntryNote & en = WwCellUni::entryNote();' in cl
 p4 = 'reads=%4/%5/%6 state=%7%8' in cv
