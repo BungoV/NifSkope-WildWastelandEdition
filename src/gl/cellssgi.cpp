@@ -10,6 +10,8 @@ BSD License - see nifskope.h
 #include "cellunits.h"
 #include "celluniform.h"	// lane CELLUNI2
 #include "gl/celldrawstate.h"	// lane PERF3
+#include "gl/cellpasstime.h"	// lane PERFFIX2: the stages' GPU sub-timers
+#include "gl/cellssgiplan.h"	// lane PERFFIX2: the pass's pure decisions
 
 #include "gl/celllights.h"
 #include "gl/glnode.h"
@@ -33,6 +35,8 @@ namespace
 {
 
 constexpr int kSsgiUnit = WwCellUnit::Ssgi;
+static_assert( PassTime::SsgiDenoise - PassTime::SsgiHiz == WwSsgiSubDenoise && WwSsgiSubCount == 7,
+	"cellssgiplan.h's groups follow cellpasstime.h's Ssgi* subs" );
 
 // FO4CS's tiers (ScreenSpaceGI.h ApplyScreenSpaceGIQualityPreset): Low = its Standard, Medium = High, High = Ultra,
 // Ultra = Extreme (full resolution); the menu's four rows map to the same ordinals there
@@ -451,7 +455,21 @@ void wwCellSsgiPass( Scene * scene, bool run )
 		fn->glBindTexture( GL_TEXTURE_2D, t );
 	};
 	const GLenum bufs[3] = { GL_COLOR_ATTACHMENT0, GL_COLOR_ATTACHMENT1, GL_COLOR_ATTACHMENT2 };
+	/* lane PERFFIX2 (3a): each stage's pass is timed in its group (cellssgiplan.h wwSsgiStageSub), two timestamps a
+	 * group change, logged as "| sub ssgi-<group> <ms>" (summed over a harness pre-roll's frames) */
+	int curSub = -1;
+	bool inEmissive = false;
+	auto group = [&]( int sb ) {
+		if ( sb == curSub )
+			return;
+		if ( curSub >= 0 )
+			PassTime::subEnd( PassTime::SsgiHiz + curSub );
+		if ( sb >= 0 )
+			PassTime::subBegin( PassTime::SsgiHiz + sb );
+		curSub = sb;
+	};
 	auto pass = [&]( int stage, const Target & out, GLuint in, int nDraw ) {
+		group( wwSsgiStageSub( stage, inEmissive ) );
 		bind( 2, in );
 		prog->uni1i( "ssgiStage", stage );
 		fn->glBindFramebuffer( GL_FRAMEBUFFER, out.fbo );
@@ -471,6 +489,7 @@ void wwCellSsgiPass( Scene * scene, bool run )
 			}
 			fn->glFramebufferTexture2D( GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, g.hizTex, i );
 			fn->glDrawBuffers( 1, bufs );
+			group( wwSsgiStageSub( i == 0 ? 10 : 11, false ) );
 			prog->uni1i( "ssgiStage", i == 0 ? 10 : 11 );
 			fn->glViewport( 0, 0, std::max( W >> ( i + 1 ), 1 ), std::max( H >> ( i + 1 ), 1 ) );
 			r->drawShape( 4, 3, 6, GL_TRIANGLES, GL_UNSIGNED_SHORT, &attrs, idx );
@@ -481,6 +500,7 @@ void wwCellSsgiPass( Scene * scene, bool run )
 	bind( 5, blue ? g.noiseTex : 0 );
 	bind( 1, sceneTex );
 	// the donor's mips for the far taps; lane SSR1 reads level 0 alone, so its filter is put back below
+	group( WwSsgiSubMips );
 	fn->glTexParameteri( GL_TEXTURE_2D, GL_TEXTURE_MAX_LEVEL, 4 );
 	fn->glGenerateMipmap( GL_TEXTURE_2D );
 	fn->glTexParameteri( GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR_MIPMAP_NEAREST );
@@ -545,7 +565,9 @@ void wwCellSsgiPass( Scene * scene, bool run )
 			// FO4CS: the emitters' own cast, history and denoise; the ordinary result adds it at the end
 			prog->uni1b( "emissivePass", true );
 			prog->uni1b( "historyValid", g.eHistory && !( s.red & 4 ) );
+			inEmissive = true;
 			chain( 8, g.ecast, g.eacc[g.cur ^ 1], g.eacc[g.cur], g.efin );
+			inEmissive = false;
 			prog->uni1b( "emissivePass", false );
 		}
 		// the ordinary cast reads the emission (unit 9) to take it off its donor; its last stage reads efin there
@@ -558,6 +580,7 @@ void wwCellSsgiPass( Scene * scene, bool run )
 		g.eHistory = emis;
 		g.frame++;
 	}
+	group( -1 );
 	prog->uni1b( "emitAdd", false );
 	r->stopProgram();
 	bind( 1, sceneTex );

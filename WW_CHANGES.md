@@ -1,3 +1,12 @@
+## PERFFIX2 c (2026-11-01): SSGI cost by stage and per preset, AO quality tiers, contact shadows on compute
+
+bungo 11-01 "close the gaps for everything" (PERFRES1101 A gaps 4 SSGI, AO tiers, contact shadows). Numbers and pictures:
+notes/perffix2/c/RESULTS.md.
+
+- SSGI SUB-TIMERS (item 3a): the ssgi pass's stages are timed in groups, logged after the passes as `| sub ssgi-hiz`,
+  `ssgi-mips`, `ssgi-ecast`, `ssgi-echain`, `ssgi-cast`, `ssgi-temporal`, `ssgi-denoise` (src/gl/cellssgiplan.h maps
+  each stage to its group; tests/ssgiplan). Timestamps only: no picture changes.
+
 ## FOAMOFF2 (FIX1101A, 2026-11-01): River foam and Contact foam stay OFF
 
 The water lane's foam fixes land: lace streaks instead of solid patches, and no foam on a dry bank. Its two rows still

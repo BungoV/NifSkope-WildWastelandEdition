@@ -1,0 +1,55 @@
+// lane PERFFIX2 (item 3): src/gl/cellssgiplan.h alone (no Qt, no GL).
+// g++ -std=c++17 -I<tree>/src tests/ssgiplan/ssgiplan.cpp; -DSSGIPLAN_RED=3a tests the pass before the sub-timers
+// (one zone, no stage groups): must fail.
+#include "gl/cellssgiplan.h"
+
+#include <cstdio>
+#include <cstring>
+
+static int fails = 0;
+
+static void check( bool ok, const char * what )
+{
+	std::printf( "%s %s\n", ok ? "ok  " : "FAIL", what );
+	if ( !ok )
+		fails++;
+}
+
+static int subOf( int stage, bool emissive )
+{
+#if defined( SSGIPLAN_RED ) && SSGIPLAN_RED == 3
+	( void ) stage; ( void ) emissive;
+	return -1;	// before 3a: the ssgi zone alone, no stage is timed apart
+#else
+	return wwSsgiStageSub( stage, emissive );
+#endif
+}
+
+int main()
+{
+	std::setvbuf( stdout, nullptr, _IONBF, 0 );
+	// 3a: every stage the pass draws lands in one named group; the groups split the cast from its denoise
+	const int stages[] = { 1, 2, 3, 4, 5, 6, 7, 8, 10, 11 };
+	bool all = true;
+	for ( int s : stages )
+		for ( int e = 0; e < 2; e++ ) {
+			if ( s == 8 && !e )
+				continue;
+			const int g = subOf( s, e != 0 );
+			all = all && g >= 0 && g < WwSsgiSubCount && std::strncmp( wwSsgiSubName( g ), "ssgi-", 5 ) == 0;
+		}
+	check( all, "3a: every drawn stage has a sub-timer group with an ssgi- name" );
+	check( subOf( 1, false ) == WwSsgiSubCast && subOf( 2, false ) == WwSsgiSubTemporal, "3a: cast and temporal apart" );
+	check( subOf( 4, false ) == WwSsgiSubDenoise && subOf( 7, false ) == WwSsgiSubDenoise, "3a: robust + pyramid = denoise" );
+	check( subOf( 8, true ) == WwSsgiSubEcast && subOf( 2, true ) == WwSsgiSubEchain && subOf( 7, true ) == WwSsgiSubEchain,
+		"3a: the emissive cast and its chain apart from the ordinary ones" );
+	check( subOf( 10, false ) == WwSsgiSubHiz && subOf( 11, false ) == WwSsgiSubHiz, "3a: the interval pyramid" );
+	check( subOf( 0, false ) == -1 && subOf( 9, false ) == -1, "3a: no stage 0 / 9" );
+	int names = 0;
+	for ( int g = 0; g < WwSsgiSubCount; g++ )
+		for ( int h = g + 1; h < WwSsgiSubCount; h++ )
+			names += std::strcmp( wwSsgiSubName( g ), wwSsgiSubName( h ) ) == 0;
+	check( names == 0, "3a: the group names are distinct" );
+	std::printf( "SSGIPLAN %s %d failed\n", fails ? "FAIL" : "PASS", fails );
+	return fails ? 1 : 0;
+}

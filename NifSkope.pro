@@ -277,6 +277,7 @@ HEADERS += \
 	src/gl/cellssr.h \
 	src/gl/cellreflprobe.h \
 	src/gl/cellssgi.h \
+	src/gl/cellssgiplan.h \
 	src/gl/celllampshadow.h \
 	src/gl/celllooks.h \
 	src/gl/cellnifxlights.h \
