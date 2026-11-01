@@ -16,9 +16,13 @@ Gates (stated before the twin ran):
   moon-fog   24b: Foggy 00:00, the moon through the frame's medium (h4p `cell air:` census: sigma0 3.88757e-05 /u, ground
              x5.667 over 4195.8 u): only the derived ground layer dims it (30dfaadd): the ground's direct moon >= 10 % of
              the record's. Red suncolumn: the whole column to the scene top (FOGSUN1).
+  disc-fog   24d(2): the drawn sun disc (and our globe) after the air's sky composite (cell_volsky.frag: clamp(T_band
+             T_layer / T_sky)) ends dimmed as its light (T_layer on top of the sky's own air), 1 %; Foggy noon, Clear noon,
+             Foggy 00:00 moon. Red airband (WW_ATMO_DISC_RED=airband, gain 1): the bands dim the disc again.
   code       lookdevstage.cpp carries the rule the twin computes (wwmoon::combine, nightWeight, the elongation phase, the
-             engine fade 1 - sunAlpha) and moonlight.h the same weights.
-usage: python -I moon_check.py [--red handover|phase8|suncolumn] [--tables]   (exit 0 = all gates pass)"""
+             engine fade 1 - sunAlpha) and moonlight.h the same weights; code-disc: atmo_sky.frag / atmosphere.cpp too.
+  header     (--dump <exe>) gl/moonlight.h compiled (moonlight_dump.cpp) against this twin.
+usage: python -I moon_check.py [--red handover|phase8|suncolumn|airband] [--tables] [--dump exe]   (exit 0 = all pass)"""
 import sys, os, math
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
@@ -152,7 +156,31 @@ tf, tc = Ts(FOG, mu00, col), Ts(CLR, mu00, col)
 gate('moon-fog', tf >= 0.10 and tf <= 1.0 and tc <= 1.0,
      'Foggy 00:00: the ground\'s direct moon %.1f %% of the record\'s (bar 10), Clear %.1f %% (moon elev %.1f deg)' % (100 * tf, 100 * tc, math.degrees(math.asin(mu00))))
 
+# 24d(2): the drawn sun disc through the air's sky composite vs its light (Foggy noon at c3, the fogsun1101a medium; the
+# Foggy haze 1.749 /km over 0.143 km of the h4p `atmo` line; the camera at the street eye 183 u in the fog frame)
+FOGNOON = dict(med=(3.88757e-05, -9936.0, 1 / 789958.6, 29811.8), layer=(0.0, 0.0, 0.0, 5.667), ground=(64.0, 1 / 4195.8),
+               mu=0.55249, haze=(1.749, 0.143, 0.0))
+CLRNOON = dict(med=(0.531 * U_KM, -9936.0, 1 / 789958.6, 29811.8), layer=(0.0, 0.0, 0.0, 0.25), ground=(64.0, 1 / 300.0),
+               mu=0.57, haze=HAZE)
+worst_disc = []
+for name, c in (('Foggy noon', FOGNOON), ('Clear noon', CLRNOON), ('Foggy 00:00 moon', dict(FOGNOON, mu=mu00))):
+    t = M.cpu_trans(c['mu'], c['haze'])
+    t_sky = sum(t) / 3.0
+    zc = 183.0
+    tb = M.air_band_t(zc, c['mu'], c['med'], c['layer'])
+    tl = M.air_layer_t(zc, c['mu'], c['med'], c['layer'], c['ground'])
+    g = 1.0 if RED == 'airband' else M.disc_air_gain(zc, c['mu'], t_sky, c['med'], c['layer'], c['ground'])
+    seen = g * min(max(tb * tl / t_sky, 0.0), 1.0)   # cell_volsky.frag wwSkyBandT over the drawn disc x the gain
+    worst_disc.append((abs(seen / tl - 1.0), name, seen / tl, tb, tl, t_sky, g))
+w = max(worst_disc)
+gate('disc-fog', w[0] < 0.01, '; '.join('%s: seen disc / its light\'s dimming %.3f (T_band %.3f T_layer %.3f T_sky %.3f gain %.3f)'
+                                           % (x[1], x[2], x[3], x[4], x[5], x[6]) for x in worst_disc))
+
 lk = open(os.path.join(TREE, 'src/gl/lookdevstage.cpp'), encoding='latin-1').read()
+sk = open(os.path.join(TREE, 'res/shaders/atmo_sky.frag'), encoding='latin-1').read()
+ac = open(os.path.join(TREE, 'src/gl/atmosphere.cpp'), encoding='latin-1').read()
+gate('code-disc', sk.count(') * ga;') == 2 and 'wwmoon::discAirGain( in.camFogZ, lights[b][2], tSky, med, layer, ground )' in ac
+     and 'float( t.sunTerm ) * af.moonDiscAir' in lk, 'atmo_sky.frag disc x the gain (both cap rules), atmosphere.cpp computes it, the globe takes it')
 mh = open(os.path.join(TREE, 'src/gl/moonlight.h'), encoding='latin-1').read()
 gate('code', all(k in lk for k in ('wwmoon::combine( sun, sd, moon, md, wN, L.sun, dir )', 'wwmoon::nightWeight( float( eSun ) )',
                                    'elong = wwephem::elongationDeg(', '1.0f - raw.sunAlpha', 'moon[c] *= moonK * wN',
@@ -181,6 +209,14 @@ if '--dump' in sys.argv:
     for e in (0.0, 45.0, 90.0, 160.0, 180.0, 200.0, 300.0):
         err = max(err, abs(M.alpha_from_elong(e) - float(out[k].split()[2])))
         k += 1
+    med = (3.88757e-05, -9936.0, 1 / 789958.6, 29811.8)
+    l1, l2, gr = (0.0, 0.0, 0.0, 5.667), (0.3, 50.0, 1 / 900.0, 5.667), (64.0, 1 / 4195.8)
+    for mu in (0.55249, 0.2, 0.9):
+        for ts in (0.484, 0.95):
+            got = [float(x) for x in out[k].split()[1:]]
+            want = [M.disc_air_gain(183.0, mu, ts, med, l1, gr), M.disc_air_gain(183.0, mu, ts, med, l2, gr), M.air_band_t(183.0, mu, med, l2)]
+            err = max(err, max(abs(a - b) / max(abs(b), 1e-6) for a, b in zip(got, want)))
+            k += 1
     gate('header', err < 2e-5, 'gl/moonlight.h (C++ dump) vs the twin: max abs diff %.2e' % err)
 
 if TABLES:

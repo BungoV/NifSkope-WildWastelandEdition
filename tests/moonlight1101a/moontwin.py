@@ -270,6 +270,44 @@ def light_after(hour, day, weather, haze, red=None):
     return rgb, d, dict(e_sun=e, alpha=alpha, wN=wN, up=up, sun=sun, moon=moon)
 
 
+def air_col_one(lo, hi, z0, invH):
+    """lookdev_fog.glsl wwAirColOne / moonlight.h airColOne"""
+    if hi <= lo:
+        return 0.0
+    if invH <= 0:
+        return hi - lo
+    below = max(min(hi, z0) - lo, 0.0)
+    a = max(lo, z0)
+    if hi <= a:
+        return below
+    w = hi - a
+    u = w * invH
+    e1 = (1 - math.exp(-u)) / u if u > 1e-3 else 1 - u * (0.5 - u / 6)
+    return below + math.exp(-(a - z0) * invH) * w * e1
+
+
+def air_band_t(zc, mu, med, layer):
+    c = air_col_one(zc, med[3], med[1], med[2])
+    if layer[0] > 0:
+        c = (1 - layer[0]) * c + layer[0] * air_col_one(zc, med[3], layer[1], layer[2])
+    return math.exp(-med[0] * c / max(mu, 0.02))
+
+
+def air_layer_t(zc, mu, med, layer, ground):
+    if zc >= med[3] or layer[3] <= 0:
+        return 1.0
+    return math.exp(-med[0] * layer[3] * air_col_one(zc, med[3], ground[0], ground[1]) / max(mu, 0.02))
+
+
+def disc_air_gain(zc, mu, t_sky, med, layer, ground):
+    """moonlight.h discAirGain: the disc's gain so that, after the air's composite clamp(T_band T_layer / T_sky), it
+    ends at T_layer of its drawn value, as its light"""
+    if not med[0] > 0 or mu <= 0:
+        return 1.0
+    tb, tl = air_band_t(zc, mu, med, layer), air_layer_t(zc, mu, med, layer, ground)
+    return min(max(max(tl, t_sky / max(tb, 1e-6)), 0.0), 1e4)
+
+
 def combine(sun, sdir, moon, mdir, wN):
     ls, lm = lum(sun), lum(moon)
     rgb = [a + b for a, b in zip(sun, moon)]

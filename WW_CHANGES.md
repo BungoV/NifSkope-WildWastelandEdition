@@ -26,11 +26,21 @@
   x0.012. Kyba et al. 2017 measured 0.26 lx at 55.5 deg. The record's Night key is 1/13.8 of its Day key: it bakes ~14.8 EV
   of night eye adaptation in; the moon is never brighter than its record (gate anchor), the phase and elevation follow
   the physics.
+- 24d(2), the drawn sun disc and our moon globe through the fog: the Volumetric Air's sky composite (cell_volsky.frag)
+  keeps clamp(T_air / T_sky) of the sky behind it, the bands included, while the light (30dfaadd) takes only the
+  ground layer: Foggy noon at c3 the seen disc was x0.274 of its light's dimming (the moon at 00:00 x0.422; Clear 1.00).
+  Fix (ships ON): the disc and the globe take a gain before the composite, gl/moonlight.h discAirGain =
+  max(T_layer, T_sky / T_band), from the last air pass's medium (cellvolair.cpp wwVolAirMediumNow) at the camera's
+  fog-frame height: they end dimmed as their light. atmo_sky.frag atDiscAir (unset = 1), the globe's sunTerm /
+  earthTerm x WwAtmoFrame.moonDiscAir. Sky line: `,disc_air=<sun>/<moon>`. Red (live): WW_ATMO_DISC_RED=airband (gain 1).
 - Red (live): WW_MOON_RED=handover (the old switch at D + the ghost sun), phase8 (the vanilla 8-step phase), vanilla
   (both). Stage table: WW_MOON_RED stage 0.
 - Unit tests/moonlight1101a/run.sh: green handover 0.00736 a minute = the real sun's own (red 0.604 at 19:04), ghost 0
   (red 0.657 at 17:46), anchor 1.000, phase step 0.096 deg / 10 min (red phase8 45), engine path x1.415 a minute (red
-  x13.8), Foggy 00:00 moon 33.7 % of the record (red suncolumn 8.7 %), header dump vs twin 7e-8.
+  x13.8), Foggy 00:00 moon 33.7 % of the record (red suncolumn 8.7 %), disc-fog 1.000 (red airband 0.274), header dump
+  vs twin 3e-6 (relative). The rain / snow particles (WEATHERLOOK1 cell_precip.frag) are lit by vpLight with the air's
+  medium uniforms (airSunLayer): the same sun / moon through the same rule (code read, no change). Sweeps base 405 /
+  RTDDGI 270 / PRT 405, not ok 0.
 
 ## FIX1101A atmo (2026-11-01): the night horizon stripe
 

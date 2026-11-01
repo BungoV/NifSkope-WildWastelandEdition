@@ -1057,6 +1057,31 @@ static void vaEcho()
 
 static void vaPassInner( Scene * scene, bool run );
 
+/* lane FIX1101A (moon, LATE ITEM 24d(2)): the medium the last air pass drew with, for the sky's disc gain
+ * (gl/moonlight.h discAirGain): stale after a second without a pass (the air off) */
+struct VaPub
+{
+	float med[4] = {}, layer[4] = {}, ground[2] = {};
+	QElapsedTimer t;
+};
+
+static VaPub & vaPub()
+{
+	static VaPub p;
+	return p;
+}
+
+bool wwVolAirMediumNow( float med[4], float layer[4], float ground[2] )
+{
+	const VaPub & p = vaPub();
+	if ( !p.t.isValid() || p.t.elapsed() > 1000 || !( p.med[0] > 0.0f ) )
+		return false;
+	std::copy( p.med, p.med + 4, med );
+	std::copy( p.layer, p.layer + 4, layer );
+	std::copy( p.ground, p.ground + 2, ground );
+	return true;
+}
+
 static int vaFrameSerial = 0;
 
 // lane FOGPERF1: the pass's CPU stage by stage; a mark adds the time since the previous mark to its stage
@@ -1547,6 +1572,15 @@ static void vaPassInner( Scene * scene, bool run )
 	prog->uni4f( "airLayer", FloatVector4( G.w, G.zn, G.invHn, G.s ) );
 	prog->uni4f( "airGround", FloatVector4( G.zg, G.invHg, 0.0f, 0.0f ) );
 	prog->uni1b( "airSunLayer", !s.sunColumn );	// lane FIX1101A: the sun dimmed by the ground layer only (cell_airmed.glsl airTupSun)
+	if ( !( s.red & 65536 ) ) {	// lane FIX1101A (moon): the medium the sky's disc gain reads (none under the red nosky)
+		VaPub & pub = vaPub();
+		const float m4[4] = { M.sigma0, M.zb, M.invH, zTop }, l4[4] = { G.w, G.zn, G.invHn, G.s };
+		std::copy( m4, m4 + 4, pub.med );
+		std::copy( l4, l4 + 4, pub.layer );
+		pub.ground[0] = G.zg;
+		pub.ground[1] = G.invHg;
+		pub.t.start();
+	}
 	{
 		/* lane FOGTERRAIN1: the ground layer stands on the low-pass terrain (cell_airmed.glsl airGroundAt): its anchor
 		 * rises by the local ground over the fog frame's ground. Exteriors with a layer and a published grid only;

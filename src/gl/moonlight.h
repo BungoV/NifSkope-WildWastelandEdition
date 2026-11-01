@@ -96,6 +96,56 @@ inline void combine( const float sun[3], const float sunDir[3], const float moon
 		dir[c] = float( o[c] );
 }
 
+/* LATE ITEM 24d(2): the drawn sun disc (and our moon globe) through the Volumetric Air. The sky pass draws the disc
+ * through the physical sky's own air (T_sky toward it); the air's composite then keeps clamp(T_air / T_sky) of it
+ * (cell_volsky.frag wwSkyBandT), T_air = the bands x the ground layer along the view. The light (30dfaadd) is dimmed by
+ * T_sky's twin and the ground layer only: the bands ARE the records' fog, already in the weather's colours. So the disc
+ * was dimmed by the bands on top (Foggy noon at c3: the seen disc x0.27 of the light's own dimming). The gain the disc
+ * takes before the composite so that it ends at T_sky x T_layer like its light: max(T_layer, T_sky / T_band).
+ * med = (sigma0 per unit, band base zb, band 1/H, top), layer = (near band weight, zn, 1/Hn, ground strength s),
+ * ground = (zg, 1/Hg); zc = the camera's height in the fog frame (lookdev_fog.glsl wwAirColLaw's terms). */
+inline float airColOne( float lo, float hi, float z0, float invH )	// lookdev_fog.glsl wwAirColOne
+{
+	if ( hi <= lo )
+		return 0.0f;
+	if ( invH <= 0.0f )
+		return hi - lo;
+	const float below = std::max( std::min( hi, z0 ) - lo, 0.0f );
+	const float a = std::max( lo, z0 );
+	if ( hi <= a )
+		return below;
+	const float w = hi - a, u = w * invH;
+	const float e1 = u > 1e-3f ? ( 1.0f - std::exp( -u ) ) / u : 1.0f - u * ( 0.5f - u / 6.0f );
+	return below + std::exp( -( a - z0 ) * invH ) * w * e1;
+}
+
+//! the bands' transmittance (no ground layer) from height zc to the air's top along cos zenith mu
+inline float airBandT( float zc, float mu, const float med[4], const float layer[4] )
+{
+	const float top = med[3];
+	float c = airColOne( zc, top, med[1], med[2] );
+	if ( layer[0] > 0.0f )
+		c = ( 1.0f - layer[0] ) * c + layer[0] * airColOne( zc, top, layer[1], layer[2] );
+	return std::exp( -med[0] * c / std::max( mu, 0.02f ) );
+}
+
+//! the ground layer's transmittance from zc along mu (cell_airmed.glsl airTupSun's law)
+inline float airLayerT( float zc, float mu, const float med[4], const float layer[4], const float ground[2] )
+{
+	if ( zc >= med[3] || layer[3] <= 0.0f )
+		return 1.0f;
+	return std::exp( -med[0] * layer[3] * airColOne( zc, med[3], ground[0], ground[1] ) / std::max( mu, 0.02f ) );
+}
+
+//! the disc's gain (>= T_layer; 1 with no air, or the body under the horizon)
+inline float discAirGain( float zc, float mu, float tSky, const float med[4], const float layer[4], const float ground[2] )
+{
+	if ( !( med[0] > 0.0f ) || mu <= 0.0f )
+		return 1.0f;
+	const float tb = airBandT( zc, mu, med, layer ), tl = airLayerT( zc, mu, med, layer, ground );
+	return std::clamp( std::max( tl, tSky / std::max( tb, 1e-6f ) ), 0.0f, 1e4f );
+}
+
 }	// namespace wwmoon
 
 #endif

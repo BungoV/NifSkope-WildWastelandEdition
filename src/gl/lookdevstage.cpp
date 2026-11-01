@@ -2487,8 +2487,9 @@ bool drawMoonGlobe( Scene * scene, const SkyFrame & f, float mul, QStringList & 
 	prog->uni1f( "sinR", float( sinR ) );
 	prog->uni1f( "pxAng", float( pxAng ) );
 	prog->uni1f( "albedoInv", float( 1.0 / wwskydisc::kAlbedoMean ) );
-	prog->uni1f( "sunTerm", float( t.sunTerm ) );
-	prog->uni1f( "earthTerm", float( t.earthTerm ) );
+	// lane FIX1101A (moon, 24d(2)): the globe through the air as its light (gl/moonlight.h discAirGain; 1 = none)
+	prog->uni1f( "sunTerm", float( t.sunTerm ) * af.moonDiscAir );
+	prog->uni1f( "earthTerm", float( t.earthTerm ) * af.moonDiscAir );
 	prog->uni1f( "alpha", alpha );
 	prog->uni1f( "sceneExposure", exposure );
 	prog->uni1i( "viewTransform", skyViewTransform() );
@@ -2920,6 +2921,7 @@ bool drawAtmo( Scene * scene, QStringList & drew, bool capture = false )
 		in.camZ -= vt.rotation( j, 2 ) * vt.translation[j] / sc;
 	if ( capture && std::isfinite( g_skyCaptureZ ) )
 		in.camZ = g_skyCaptureZ;	// SKY3: the probes see the sky from where they stand, not from the view camera
+	in.camFogZ = in.camZ - s.groundZ;	// lane FIX1101A (moon): the air's frame (lookdev_fog.glsl fogView.w)
 	in.disc = s.sun && !capture;	// lane SKYA (SKYGI1): the probes' capture has no disc (the sun is the bake's own term)
 	in.capture = capture;
 	in.discs = wwAtmoDiscs() && !capture;	// lane SKYDISC1: our sun disc

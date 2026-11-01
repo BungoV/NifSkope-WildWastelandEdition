@@ -22,5 +22,11 @@ int main()
 		std::printf( "nw %.1f %.7f\n", e, wwmoon::nightWeight( e ) );
 	for ( double e : { 0.0, 45.0, 90.0, 160.0, 180.0, 200.0, 300.0 } )
 		std::printf( "af %.1f %.7f\n", e, wwmoon::alphaFromElongation( e ) );
+	const float med[4] = { 3.88757e-05f, -9936.0f, 1.0f / 789958.6f, 29811.8f }, layer[4] = { 0.0f, 0.0f, 0.0f, 5.667f };
+	const float layer2[4] = { 0.3f, 50.0f, 1.0f / 900.0f, 5.667f }, ground[2] = { 64.0f, 1.0f / 4195.8f };
+	for ( float mu : { 0.55249f, 0.2f, 0.9f } )
+		for ( float tSky : { 0.484f, 0.95f } )
+			std::printf( "dg %.7g %.7g %.7g\n", wwmoon::discAirGain( 183.0f, mu, tSky, med, layer, ground ),
+				wwmoon::discAirGain( 183.0f, mu, tSky, med, layer2, ground ), wwmoon::airBandT( 183.0f, mu, med, layer2 ) );
 	return 0;
 }
