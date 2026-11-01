@@ -6,6 +6,7 @@
 #include "gl/celllooks.h"
 #include "gl/cellgrass.h"
 #include "gl/cellhdr.h"
+#include "gl/cellpasstime.h"
 #include "gl/cellvolair.h"
 #include "gl/glscene.h"
 #include "gl/lookdevstage.h"
@@ -81,6 +82,7 @@ struct PcState
 	int lastDrawn = 0;
 	bool timePinned = false;
 	GLuint vao = 0, vbo = 0;
+	GLuint vaoGpu = 0;	// lane PERFFIX3 D: the GPU field reads no attribute (core profile still needs a bound VAO)
 	std::vector<float> buf;
 };
 
@@ -102,6 +104,17 @@ int redFromEnv()
 			: w == "nowind" ? RedNoWind : 0;
 	}
 	return bits;
+}
+
+/* lane PERFFIX3 D: WW_CELL_PRECIP_RED=cpufield (a word beside the field reds) = the old CPU field: every particle built
+ * on the CPU each frame, uploaded, lit per fragment (cell_precip.prog). The field red nowrap has no GPU form and takes it too */
+bool cpuFieldFromEnv()
+{
+	WW_SWITCH_STATIC( QByteArray, r, wwEnv( "WW_CELL_PRECIP_RED" ).trimmed().toLower() );
+	for ( const QByteArray & t : r.split( ',' ) )
+		if ( t.trimmed() == "cpufield" )
+			return true;
+	return false;
 }
 
 //! a linked texture (under Textures\) looked up loose in the roots, first root wins
@@ -363,6 +376,9 @@ int wwCellPrecipDraw( Scene * scene )
 		}
 		return 0;
 	}
+	// lane PERFFIX3 D: from here the pass has work: its own Frame Timers zone ("precip", CPU + GPU ms)
+	PassTime::Scope ptPrecip( PassTime::Precip );
+	const bool gpuField = !cpuFieldFromEnv() && !( redBits() & RedNoWrap );
 
 	// the clock: a harness pin, else the wall clock
 	WW_SWITCH_STATIC( QByteArray, timePin, wwEnv( "WW_CELL_PRECIP_TIME" ).trimmed() );
@@ -398,6 +414,7 @@ int wwCellPrecipDraw( Scene * scene )
 		int layer;	// index into all
 		bool farT;
 		int first, count;
+		GpuRun g;	// lane PERFFIX3 D: the GPU field's uniforms (first = 0, count = g.count)
 	};
 	QVector<const PcLayer *> all;
 	QVector<double> weights;
@@ -427,6 +444,14 @@ int wwCellPrecipDraw( Scene * scene )
 			const long n = drawCount( b.count, weights.at( li ) );
 			if ( n <= 0 )
 				continue;
+			drawnL[tier] = b.count;	// the census says the allocated count (the drawn share moves every frame of a change)
+			if ( gpuField ) {
+				// lane PERFFIX3 D: the field is the vertex shader's (cell_precip_field.glsl); the inside-the-near-box
+				// far particles and the off-screen ones are culled there
+				Run run{ li, tier != 0, 0, int( n ), gpuRun( field, b, tier != 0, t, cam, wv, n ) };
+				runs.append( run );
+				continue;
+			}
 			const int first = int( s.buf.size() / kFloats );
 			// one particle stands for `thin` (the geometry shader scales by the area, the fragment clamps at 1)
 			const float alpha = float( b.thin );
@@ -445,9 +470,8 @@ int wwCellPrecipDraw( Scene * scene )
 				s.buf.insert( s.buf.end(), v, v + kFloats );
 			}
 			const int count = int( s.buf.size() / kFloats ) - first;
-			drawnL[tier] = b.count;	// the census says the allocated count (the drawn share moves every frame of a change)
 			if ( count > 0 )
-				runs.append( Run{ li, tier != 0, first, count } );
+				runs.append( Run{ li, tier != 0, first, count, GpuRun() } );
 		}
 		census << QStringLiteral( "%1(%2 from %3, w %4: %5/m3 size %6 mm fall %7 m/s, near %8 u x %9, far %10 u x %11 thin %12, tex %13)" )
 			.arg( QLatin1String( ti.name ), L.weather, L.source ).arg( weights.at( li ), 0, 'f', 1 ).arg( dens, 0, 'g', 4 )
@@ -455,8 +479,9 @@ int wwCellPrecipDraw( Scene * scene )
 			.arg( nb.side, 0, 'f', 0 ).arg( drawnL[0] ).arg( fb.side, 0, 'f', 0 ).arg( drawnL[1] ).arg( fb.thin, 0, 'f', 1 )
 			.arg( L.spec.texture );
 	}
-	const QString echo = QStringLiteral( "precip: on, wind %1 u/s, red %2: %3" ).arg( std::hypot( wv[0], wv[1] ), 0, 'f', 1 )
+	const QString echo = QStringLiteral( "precip: on, field %4, wind %1 u/s, red %2: %3" ).arg( std::hypot( wv[0], wv[1] ), 0, 'f', 1 )
 		.arg( redBits() ).arg( census.join( QStringLiteral( "; " ) ) )
+		.arg( gpuField ? QStringLiteral( "gpu" ) : QStringLiteral( "cpu" ) )
 		+ ( roof ? QStringLiteral( "; interior under open sky only (%1)" ).arg( pcRoof().note )
 			: CL && CL->interior ? QStringLiteral( "; interior, RED WW_INTSKY_RED=rain (no roof test)" ) : QString() );
 	s.echo = echo;
@@ -467,12 +492,12 @@ int wwCellPrecipDraw( Scene * scene )
 	if ( runs.isEmpty() )
 		return 0;
 
-	NifSkopeOpenGLContext::Program * prog = r->useProgram( "cell_precip.prog" );
+	NifSkopeOpenGLContext::Program * prog = r->useProgram( gpuField ? "cell_precip_gpu.prog" : "cell_precip.prog" );
 	if ( !prog ) {
-		static bool saidNo = false;
-		if ( !saidNo ) {
-			saidNo = true;
-			std::fprintf( stderr, "precip: cell_precip.prog not loaded: nothing drawn\n" );
+		static bool saidNo[2] = { false, false };
+		if ( !saidNo[gpuField] ) {
+			saidNo[gpuField] = true;
+			std::fprintf( stderr, "precip: %s not loaded: nothing drawn\n", gpuField ? "cell_precip_gpu.prog" : "cell_precip.prog" );
 		}
 		return 0;
 	}
@@ -495,25 +520,31 @@ int wwCellPrecipDraw( Scene * scene )
 	prog->uni1f( "pcMinPx", 0.75f );
 	prog->uni2f( "pcNear", 8.0f * sc, 40.0f * sc );	// game units: a flake fades out over the last 40 before the eye
 	prog->uni1i( "pcTex", 0 );
-
-	// the buffer: one upload a frame
-	if ( !s.vao ) {
-		fn->glGenVertexArrays( 1, &s.vao );
-		fn->glGenBuffers( 1, &s.vbo );
+	if ( gpuField ) {
+		prog->uni4f( "pcViewport", FloatVector4( float( vp[0] ), float( vp[1] ), float( vp[2] ), float( vp[3] ) ) );
+		if ( !s.vaoGpu )
+			fn->glGenVertexArrays( 1, &s.vaoGpu );
+		fn->glBindVertexArray( s.vaoGpu );
+	} else {
+		// the buffer: one upload a frame
+		if ( !s.vao ) {
+			fn->glGenVertexArrays( 1, &s.vao );
+			fn->glGenBuffers( 1, &s.vbo );
+			fn->glBindVertexArray( s.vao );
+			fn->glBindBuffer( GL_ARRAY_BUFFER, s.vbo );
+			const int comps[6] = { 3, 4, 2, 1, 1, 3 };
+			size_t off = 0;
+			for ( int a = 0; a < 6; a++ ) {
+				fn->glEnableVertexAttribArray( GLuint( a ) );
+				fn->glVertexAttribPointer( GLuint( a ), comps[a], GL_FLOAT, GL_FALSE, GLsizei( kFloats * sizeof( float ) ),
+					reinterpret_cast<const void *>( off * sizeof( float ) ) );
+				off += size_t( comps[a] );
+			}
+		}
 		fn->glBindVertexArray( s.vao );
 		fn->glBindBuffer( GL_ARRAY_BUFFER, s.vbo );
-		const int comps[6] = { 3, 4, 2, 1, 1, 3 };
-		size_t off = 0;
-		for ( int a = 0; a < 6; a++ ) {
-			fn->glEnableVertexAttribArray( GLuint( a ) );
-			fn->glVertexAttribPointer( GLuint( a ), comps[a], GL_FLOAT, GL_FALSE, GLsizei( kFloats * sizeof( float ) ),
-				reinterpret_cast<const void *>( off * sizeof( float ) ) );
-			off += size_t( comps[a] );
-		}
+		fn->glBufferData( GL_ARRAY_BUFFER, GLsizeiptr( s.buf.size() * sizeof( float ) ), s.buf.data(), GL_STREAM_DRAW );
 	}
-	fn->glBindVertexArray( s.vao );
-	fn->glBindBuffer( GL_ARRAY_BUFFER, s.vbo );
-	fn->glBufferData( GL_ARRAY_BUFFER, GLsizeiptr( s.buf.size() * sizeof( float ) ), s.buf.data(), GL_STREAM_DRAW );
 
 	GLboolean depthMask = GL_TRUE;
 	fn->glGetBooleanv( GL_DEPTH_WRITEMASK, &depthMask );
@@ -563,11 +594,40 @@ int wwCellPrecipDraw( Scene * scene )
 		prog->uni1b( "pcHasTex", hasTex );
 		prog->uni1i( "pcFar", run.farT ? 1 : 0 );
 		prog->uni1f( "pcTrans", float( L.spec.translucency ) );
+		if ( gpuField ) {
+			// lane PERFFIX3 D: the run's field (precipmath.h gpuRun; the shader's names in cell_precip_field.glsl)
+			const GpuRun & g = run.g;
+			float offZ[16], fallU[16], halfU[16];
+			for ( int k = 0; k < 16; k++ ) {
+				offZ[k] = float( g.offZ[k] );
+				fallU[k] = float( g.fallU[k] );
+				halfU[k] = float( g.halfU[k] );
+			}
+			fn->glUniform1ui( prog->uniLocation( "pcSeedS" ), GLuint( g.seedS ) );
+			prog->uni1f( "pcL", float( g.L ) );
+			prog->uni1f( "pcInner", float( g.inner ) );
+			prog->uni1f( "pcThin", float( g.thin ) );
+			prog->uni2f( "pcOffXY", float( g.offXY[0] ), float( g.offXY[1] ) );
+			prog->uni1fv_l( prog->uniLocation( "pcOffZ" ), offZ, 16 );
+			prog->uni1i( "pcNCand", g.nCand );
+			prog->uni1i( "pcBest", g.best );
+			prog->uni1iv_l( prog->uniLocation( "pcCand" ), g.cand, 16 );
+			prog->uni1fv_l( prog->uniLocation( "pcFallU" ), fallU, 16 );
+			prog->uni1fv_l( prog->uniLocation( "pcHalfU" ), halfU, 16 );
+			prog->uni2f( "pcWind", float( g.wind[0] ), float( g.wind[1] ) );
+			prog->uni1f( "pcSway", float( g.sway ) );
+			prog->uni1f( "pcSpin", float( g.spin ) );
+			prog->uni1f( "pcT", float( t ) );
+			prog->uni1i( "pcCols", cols );
+			prog->uni1i( "pcCells", std::max( 1, L.spec.cols * L.spec.rows ) );
+			prog->uni2f( "pcCellUv", 1.0f / float( cols ), 1.0f / float( rows ) );
+		}
 		fn->glDrawArrays( GL_POINTS, GLint( run.first ), GLsizei( run.count ) );
 		drawn += run.count;
 	}
 	fn->glBindVertexArray( 0 );
-	fn->glBindBuffer( GL_ARRAY_BUFFER, 0 );
+	if ( !gpuField )
+		fn->glBindBuffer( GL_ARRAY_BUFFER, 0 );
 	fn->glBindTexture( GL_TEXTURE_2D, 0 );
 	r->stopProgram();
 	fn->glDepthMask( depthMask );

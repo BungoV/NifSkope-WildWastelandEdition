@@ -70,7 +70,7 @@ const LookRow kRows[] = {
 	{ "Water reflections", "WW/CellWaterRefl2", true },
 	{ "Water sun glare", "WW/CellWaterGlint2", true },
 	{ "Ocean waves", "WW/CellWaterOcean2", true },
-	{ "Underwater fog", "WW/CellUnderwater" },
+	{ "Underwater fog", "WW/CellUnderwater2", true },	// lane PERFFIX3: ON at every water preset (the game always fogs under water); new key so the old OFF does not stick
 	{ "Water clear colour", "WW/CellWaterClear2", true },
 	{ "Water sky visibility", "WW/CellWaterSkyVis" },
 	{ "Surf", "WW/CellWaterSurf" },
@@ -589,7 +589,8 @@ static WwWaterPreset::Term wwLookWaterTerm( WwLook l )
 	case WwLook::WaterOcean: return Ocean;
 	case WwLook::WaterGlint: return Glint;
 	case WwLook::WaterContact: return Contact;
-	case WwLook::WaterDepth: case WwLook::WaterCaustics: case WwLook::WaterSwell: case WwLook::Underwater:
+	case WwLook::Underwater: return UnderFog;	// lane PERFFIX3: every step (waterpreset.h underFogOn)
+	case WwLook::WaterDepth: case WwLook::WaterCaustics: case WwLook::WaterSwell:
 	case WwLook::WaterSkyVis: case WwLook::WaterSurf: case WwLook::LandWet: case WwLook::LandSwash:
 	case WwLook::WaterUnderLight:
 		return OffRow;
@@ -628,9 +629,24 @@ void wwCellWaterPresetSet( int step )
 	QSettings().setValue( QStringLiteral( "WW/CellWaterPreset" ), waterPresetRow() );
 }
 
+/* lane PERFFIX3: WW_CELL_UNDERWATER_RED=ultraonly = the Underwater fog row as it shipped before (its old key, OFF by
+ * default, and only at the Ultra water preset); cellunderwater.cpp reads the same key for its own reds (unknown there) */
+static bool wwUnderwaterUltraOnlyRed()
+{
+	WW_SWITCH_STATIC( bool, r, wwSwitchEcho( "underwater fog red ultraonly",
+		wwEnv( "WW_CELL_UNDERWATER_RED" ).trimmed() == "ultraonly" ) );
+	return r;
+}
+
 bool wwLookOn( WwLook l )
 {
 	const QByteArray p = pinOf( l );
+	if ( p.isEmpty() && l == WwLook::Underwater ) {
+		const bool red = wwUnderwaterUltraOnlyRed();
+		static const bool oldRow = QSettings().value( QStringLiteral( "WW/CellUnderwater" ), false ).toBool();
+		return wwGroupLets( wwLookGroup( l ) ) && WwWaterPreset::underFogOn( wwCellWaterPreset(), rowVal( l ) != 0,
+			oldRow, red );
+	}
 	if ( p.isEmpty() )
 		return wwLookHasRow( l ) ? rowVal( l ) != 0 && wwGroupLets( wwLookGroup( l ) ) && !wwLookWaterShippedRed( l )
 			&& WwWaterPreset::lets( wwLookWaterTerm( l ) == WwWaterPreset::NotWater ? 3 : wwCellWaterPreset(), wwLookWaterTerm( l ) )

@@ -90,7 +90,7 @@ struct TypeInfo
 };
 
 /* the atlases as phase A made them (meta.json, notes/weatherlook1/airpart_textures). snow_fine is the 1k 4 x 4 atlas
- * (A5); its cells are scaled per shape */
+ * (A6: the round after the rejected A5; PERFFIX3 D measured the shipped DDS = the A6 build); its cells are scaled per shape */
 inline const TypeInfo & typeInfo( int t )
 {
 	static const TypeInfo kTypes[TypeCount] = {
@@ -432,6 +432,54 @@ inline Particle particleAt( const Layer & la, const Box & b, long i, bool farTie
 	p.angle = a0 + spin * t;
 	p.variant = var;
 	return p;
+}
+
+/* lane PERFFIX3 D (2026-11-01): the GPU field (res/shaders/cell_precip_field.glsl) evaluates particleAt per particle from
+ * gl_VertexID. What it cannot do in float the CPU hands it here, in double, once a (layer, tier) a frame: the seed's
+ * hash, the per-variant tables (prepare), and the wrap offsets
+ *   offXY = ( wind x share x t - lo ) mod L,  offZ[v] = ( -fall[v] t - lo ) mod L,  lo = cam - L / 2
+ * so that the shader's  -L/2 + wrap( u L + off + flutter, L )  is particleAt's  pos - cam  (modulo L, in float). The
+ * layer must be prepared (prepare) with today's reds; the nowrap red has no GPU form (the caller takes the CPU field). */
+struct GpuRun
+{
+	std::uint32_t seedS = 0;
+	double L = 0.0, inner = 0.0, thin = 1.0;
+	double offXY[2] = { 0.0, 0.0 };
+	double offZ[16] = {};
+	int nCand = 0, best = 0, cand[16] = {};
+	double fallU[16] = {}, halfU[16] = {};
+	double wind[2] = { 0.0, 0.0 };
+	double sway = 0.0, spin = 0.0;
+	long count = 0;	// the first `count` particles of the tier
+};
+
+inline GpuRun gpuRun( const Layer & la, const Box & b, bool farTier, double t, const double cam[3], const double wv[2], long n )
+{
+	GpuRun g;
+	g.seedS = hash32( la.seed * 0x9E3779B9U + ( farTier ? 0x68E31DA4U : 0U ) );
+	g.L = b.side;
+	g.inner = farTier ? b.inner : 0.0;
+	g.thin = b.thin;
+	g.count = n;
+	g.nCand = la.nCand;
+	g.best = la.best;
+	for ( int k = 0; k < 16; k++ ) {
+		g.cand[k] = la.cand[k];
+		g.fallU[k] = la.fallU[k];
+		g.halfU[k] = la.halfU[k];
+	}
+	g.wind[0] = wv[0] * la.windShare;
+	g.wind[1] = wv[1] * la.windShare;
+	g.sway = la.swayU;
+	g.spin = la.spin;
+	if ( !( b.side > 0.0 ) )
+		return g;
+	const double L = b.side;
+	for ( int k = 0; k < 2; k++ )
+		g.offXY[k] = wrap( g.wind[k] * t - ( cam[k] - 0.5 * L ), L );
+	for ( int v = 0; v < 16; v++ )
+		g.offZ[v] = wrap( -la.fallU[v] * t - ( cam[2] - 0.5 * L ), L );
+	return g;
 }
 
 /* the draw's motion stretch (airpart_data.md "draw-time stretch"): a quad of half size s moving `travel` (same units)

@@ -17,6 +17,11 @@ void wwCellHdrEnd( Scene * scene );
 bool wwCellHdrActive();
 //! lane VRS1: the linear frame's size while it is bound (0 x 0 otherwise)
 void wwCellHdrFrameSize( int & w, int & h );
+/*! lane PERFFIX3 (item 2): the backdrop (sky, stars, moon, clouds) was drawn INTO this frame as cell light (stencil 1,
+ *  scene units): the tone map takes it with the surfaces (no sky split) and the sky's air blends over it */
+void wwCellHdrNoteSkyIn();
+//! lane PERFFIX3 (item 2): this frame holds the backdrop (wwCellHdrNoteSkyIn since wwCellHdrBegin)
+bool wwCellHdrSkyIn();
 //! lane GATEFIX3: the linear frame's depth / stencil format (a GLenum) when `fbo` is its framebuffer, else 0. Its
 //! texture samples stencil (TONEMAP1), so a framebuffer query reads its depth as 0 bits.
 unsigned int wwCellHdrDepthFormat( unsigned int fbo );

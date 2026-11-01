@@ -179,6 +179,7 @@ struct HdrState
 	GLint prevDraw = 0, prevRead = 0;
 	int w = 0, h = 0, samples = 0;
 	std::uint64_t serial = 0;	// lane CELLUNI6: the HDR frames begun (the depth max's once-a-frame key)
+	bool skyIn = false;	// lane PERFFIX3 (item 2): the backdrop drawn into this frame (wwCellHdrNoteSkyIn)
 	bool red = wwEnv( "WW_CELL_HDR_RED" ) == "perfrag";
 	QString last = QStringLiteral( "off" );
 	QString said;
@@ -707,6 +708,19 @@ bool wwCellHdrActive()
 	return hst().active;
 }
 
+void wwCellHdrNoteSkyIn()
+{
+	HdrState & s = hst();
+	if ( s.active )
+		s.skyIn = true;
+}
+
+bool wwCellHdrSkyIn()
+{
+	const HdrState & s = hst();
+	return s.active && s.skyIn;
+}
+
 void wwCellHdrFrameSize( int & w, int & h )
 {
 	const HdrState & s = hst();
@@ -1164,6 +1178,7 @@ bool wwCellHdrBegin( Scene * scene )
 	aaVidmemNote( fn );
 	s.active = true;
 	s.serial++;
+	s.skyIn = false;	// lane PERFFIX3: until the backdrop is drawn into it
 	s.scene = scene;
 	s.w = W;
 	s.h = H;
@@ -1394,7 +1409,16 @@ void wwCellHdrEnd( Scene * scene )
 		qInfo().noquote() << "cell hdr: effects over the sky" << ( skyholeOld
 			? "replace the backdrop (RED=old)" : "composite over the backdrop by their coverage (lane SKYHOLE1)" );
 	}
-	const bool splitSky = sorted && !skyholeOld;
+	/* lane PERFFIX3 (item 2): with the backdrop drawn INTO the frame (WW_SKY_LINEAR) every sky pixel is cell light
+	 * under whatever went over it, so mode 0 takes the far plane too: one tone map, one exposure, the bloom included */
+	const bool skyIn = s.skyIn;
+	static int skyInSaid = -1;
+	if ( skyInSaid != int( skyIn ) ) {
+		skyInSaid = int( skyIn );
+		qInfo().noquote() << "cell hdr: the sky" << ( skyIn
+			? "inside the linear frame (one tone map, one exposure: lane PERFFIX3)" : "in the view under the frame (display space)" );
+	}
+	const bool splitSky = sorted && !skyholeOld && !skyIn;
 	if ( splitSky ) {
 		fn->glEnable( GL_DEPTH_TEST );
 		fn->glDepthFunc( GL_GREATER );	// an opaque draw's depth is nearer than the quad's 1.0

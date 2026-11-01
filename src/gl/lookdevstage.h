@@ -240,6 +240,12 @@ bool wwLookdevWeatherChanging();
 
 //! cube background (replaces drawSkyBox in Lookdev); true = the colour buffer is written
 bool wwLookdevDrawBackground( Scene * scene );
+/*! lane PERFFIX3 (item 2, WW_SKY_LINEAR=1, live): the backdrop is drawn INSIDE the cell's linear frame, in scene units,
+ *  so the cell's one tone map and one exposure take the sky. wwLookdevDrawBackground then only marks it (the view is
+ *  cleared) and glview calls this right after wwCellHdrBegin: into the frame when `hdr`, else into the view as before. */
+void wwLookdevSkyLinearDraw( Scene * scene, bool hdr );
+//! lane PERFFIX3: the WW_SKY_LINEAR switch (default 0: the backdrop in display space before the frame, as before)
+bool wwLookdevSkyLinearOn();
 //! the ground quad at the lowest visible vertex; no-op when the Ground row is off
 void wwLookdevDrawGround( Scene * scene );
 /*! lane LIGHTBOOTH1 (harness pin WW_LOOKDEV_GROUND_CELL=1): the ground again inside the cell's HDR frame, after its sky;

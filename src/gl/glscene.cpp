@@ -67,6 +67,9 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include <QSettings>
 #include <QTextStream>
 
+#include <algorithm>
+#include <cstdio>
+
 
 //! \file glscene.cpp %Scene management
 
@@ -518,6 +521,26 @@ bool Scene::grabRefractionSource()
 	/* lane HDR1: a multisampled source resolves only into its own format, so the copy follows the frame:
 	 * the cell's linear frame is RGBA32F (gl/cellhdr.cpp) */
 	const GLenum fmt = wwCellHdrActive() ? GL_RGBA32F : GL_RGBA8;
+	/* lane PERFFIX3 (PERFRES1101 B water OPT 3): the second pass draws its water shapes one after another with nothing
+	 * between them (drawDeferredShapes: decals, then every water, then the rest), so ONE copy at the first water of the
+	 * pass holds the frame every later water would have copied, except where a later water reads pixels an earlier
+	 * water wrote (a refraction offset across two bodies' edge, or one body seen through another): there it now reads the
+	 * frame behind both. A full-frame 4x RGBA32F resolve each saved (~0.14-0.18 ms at 1920 x 1026). Red
+	 * WW_CELL_WATER_REFR_RED=perdraw: a copy per water draw, as before. */
+	WW_SWITCH_STATIC( bool, refrPerDraw, wwSwitchEcho( "water refraction copy red perdraw",
+		wwEnv( "WW_CELL_WATER_REFR_RED" ).trimmed() == "perdraw" ) );
+	const auto refrCensus = [&]( bool reused ) {
+		( reused ? refrReuses : refrCopies )++;
+		if ( ( refrCopies + refrReuses ) % 600 == 0 )
+			std::fprintf( stderr, "water refraction: %lld copies, %lld reused (one copy a pass%s)\n", refrCopies,
+				refrReuses, refrPerDraw ? "; RED perdraw" : "" );
+	};
+	if ( !refrPerDraw && refractionTexId && refrCopyPass == fxDepthPassNow && refrCopyFbo == prevDraw
+		&& refractionTexW == w && refractionTexH == h && refractionTexFormat == fmt && refrCopyVp[0] == vp[0]
+		&& refrCopyVp[1] == vp[1] && refrCopyVp[2] == vp[2] && refrCopyVp[3] == vp[3] ) {
+		refrCensus( true );
+		return true;
+	}
 	if ( !refractionTexId || refractionTexW != w || refractionTexH != h || refractionTexFormat != fmt ) {
 		if ( !refractionTexId )
 			fn->glGenTextures( 1, &refractionTexId );
@@ -542,8 +565,14 @@ bool Scene::grabRefractionSource()
 
 	// resolve-blit works from both multisampled and plain framebuffers
 	fn->glBindFramebuffer( GL_READ_FRAMEBUFFER, GLuint( prevDraw ) );
+	PassTime::subBegin( PassTime::WaterCopy );	// lane PERFFIX3
 	fn->glBlitFramebuffer( vp[0], vp[1], vp[0] + w, vp[1] + h, 0, 0, w, h,
 	                       GL_COLOR_BUFFER_BIT, GL_NEAREST );
+	PassTime::subEnd( PassTime::WaterCopy );
+	refrCopyPass = fxDepthPassNow;
+	refrCopyFbo = prevDraw;
+	std::copy( vp, vp + 4, refrCopyVp );
+	refrCensus( false );
 
 	fn->glBindFramebuffer( GL_READ_FRAMEBUFFER, GLuint( prevRead ) );
 	fn->glBindFramebuffer( GL_DRAW_FRAMEBUFFER, GLuint( prevDraw ) );
@@ -737,7 +766,10 @@ void Scene::drawDeferredShapes( NodeList & secondPass )
 	bool waterDrew = false;
 	for ( Node * node : secondPass.list() ) {
 		if ( isWater( node ) ) {
+			PassTime::DrawCpuScope cpu( PassTime::CpuWater );	// lane PERFFIX3: the water's own timers
+			PassTime::subBegin( PassTime::WaterDraw );
 			node->drawShapes();
+			PassTime::subEnd( PassTime::WaterDraw );
 			waterDrew = true;
 		}
 	}

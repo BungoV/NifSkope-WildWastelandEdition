@@ -338,13 +338,15 @@ void collect( Slot & sl )
 			"far-cards-lit", "tone-vrs", "fxres-down", "fxres-layer", "fxres-comp", "air-pre", "air-far", "air-post", "far-ground-paint",
 			"far-ground-draw", "sun-casters", "sun-terrstep", "cloud-shadow", "far-ground-pass",	// lane PERFFIX2 b
 			"ssgi-hiz", "ssgi-mips", "ssgi-ecast", "ssgi-echain", "ssgi-cast", "ssgi-temporal",
-			"ssgi-denoise", "contact" };	// lane PERFFIX2 c
+			"ssgi-denoise", "contact",	// lane PERFFIX2 c
+			"water", "water-copy", "underwater" };
 		for ( int k = 0; k < SubCount; k++ )
 			if ( subSeen[k] )
 				line += QByteArray( " | sub " ) + subName[k] + " " + QByteArray::number( sub[k], 'f', 2 );
 		static const char * const cpuSubName[CpuSubCount] = { "setup", "cell-uni", "sun-uni", "fog-uni", "ao-draw", "ssr-draw",
 			"air-state", "air-setup", "air-clusters", "air-tile", "air-inject", "air-integrate", "air-far", "air-tail", "air-echo",
-			"bl-geo", "bl-row", "sun-casters", "sun-terrstep", "cloud-shadow", "far-ground-pass" };	// lane PERFFIX2 b
+			"bl-geo", "bl-row", "sun-casters", "sun-terrstep", "cloud-shadow", "far-ground-pass",	// lane PERFFIX2 b
+			"water", "underwater" };
 		for ( int k = 0; k < CpuSubCount; k++ )
 			if ( sl.cpuSubN[k] > 0 )
 				line += QByteArray( " | cpu " ) + cpuSubName[k] + " " + QByteArray::number( sl.cpuSub[k], 'f', 2 ) + " n="
@@ -371,7 +373,7 @@ const char * name( int pass )
 {
 	static const char * const k[Count] = { "sun-cascades", "light-cubes", "sky", "obscurance", "reflections", "air",
 		"measure", "umbra-depth", "impostors", "opaque", "sorted", "effects", "far-cards", "tone-map", "post",
-		"overlays", "ssgi", "refl-probes", "cull-camera", "cull-cascades", "shape-setup" };
+		"overlays", "ssgi", "refl-probes", "precip", "cull-camera", "cull-cascades", "shape-setup" };
 	return pass >= 0 && pass < Count ? k[pass] : "?";
 }
 

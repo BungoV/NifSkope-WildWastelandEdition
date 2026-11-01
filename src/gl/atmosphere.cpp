@@ -168,6 +168,8 @@ struct Volume	// lane SKYA (ATMO2): the aerial-perspective froxels, RGBA16F 3D, 
 	GLuint tex = 0, fbo = 0;
 	int w = 0, h = 0, n = 0;
 	bool valid = false;	// drawn this frame (wwAtmoApFrame clears it)
+	bool layered = false;	// lane PERFFIX3: the last build was one layered draw (false: a draw a slice)
+	bool layeredRefused = false;	// lane PERFFIX3: the layered target was incomplete once: a draw a slice from then on
 	float view[9] = {};	// the view rotation and projection it was built for: other views (probes) read none
 	float proj[4] = {};	// P00, P11, P20, P21
 	float kmPerView = 0.0f;
@@ -336,9 +338,18 @@ bool buildAp( Scene * scene, AtGpu & g, int msN, float camR, const float sunW[3]
 		v.w = v.h = w;
 		v.n = n;
 	}
-	auto p = r->useProgram( "atmo_ap.prog" );
+	/* lane PERFFIX3 (item 1): every slice in ONE layered draw (atmo_apl.prog: gl_Layer from the geometry shader, the
+	 * whole 3D texture attached layered), not a draw and a glFramebufferTextureLayer re-attach per slice. Same maths per
+	 * froxel (the slice index arrives as a flat input instead of a uniform). Red WW_ATMO_AP_RED=slices: a draw a slice;
+	 * a refused layered program or target falls back to it too. */
+	const bool layeredWanted = !apRed( "slices" ) && !v.layeredRefused;
+	auto p = layeredWanted ? r->useProgram( "atmo_apl.prog" ) : nullptr;
+	const bool layered = p != nullptr;
+	if ( !p )
+		p = r->useProgram( "atmo_ap.prog" );
 	if ( !p )
 		return false;
+	v.layered = layered;
 	// the frustum's world rays (atmo_sky.frag's: view ray ((x + P20) / P00, (y + P21) / P11, -1), world = vr x viewMatrix)
 	const float P00 = gu.projectionMatrix[0][0], P11 = gu.projectionMatrix[1][1];
 	const float P20 = gu.projectionMatrix[2][0], P21 = gu.projectionMatrix[2][1];
@@ -380,7 +391,19 @@ bool buildAp( Scene * scene, AtGpu & g, int msN, float camR, const float sunW[3]
 	bindTex( fn, p, 1, "atMsTex", g.ms.tex );
 	const GLenum one = GL_COLOR_ATTACHMENT0;
 	bool ok = true;
-	for ( int k = 0; k < n && ok; k++ ) {
+	if ( layered ) {
+		fn->glFramebufferTexture( GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, v.tex, 0 );
+		fn->glDrawBuffers( 1, &one );
+		ok = fn->glCheckFramebufferStatus( GL_FRAMEBUFFER ) == GL_FRAMEBUFFER_COMPLETE;
+		if ( ok ) {
+			quad( r );	// atApDims.z slices, one geometry invocation each
+		} else {
+			v.layered = false;
+			v.layeredRefused = true;	// this frame keeps no volume; the next builds a slice a draw
+			fprintf( stderr, "atmo: the layered aerial-perspective target is incomplete; a draw a slice from now on\n" );
+		}
+	}
+	for ( int k = 0; k < n && ok && !layered; k++ ) {
 		fn->glFramebufferTextureLayer( GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, v.tex, 0, k );
 		if ( k == 0 ) {
 			fn->glDrawBuffers( 1, &one );
@@ -620,6 +643,7 @@ bool wwAtmoDrawSky( Scene * scene, const WwAtmoInputs & in, QString * line )
 		const bool tintAp = s.tint > 0 && in.tintOk && !wwAtmoTintRedPhysical();
 		const bool built = buildAp( scene, g, msN, camR, sunW, moonW, sunK, moonK, noOzone, noMs, tintAp ? in.tint : nullptr );
 		apLine = built ? QString( "ap=%1x%2x%3@%4km" ).arg( g.ap.w ).arg( g.ap.h ).arg( g.ap.n ).arg( double( kApMaxKm ), 0, 'f', 0 )
+				+ ( g.ap.layered ? QStringLiteral( "/layered" ) : QStringLiteral( "/slices" ) )	// lane PERFFIX3
 			: QStringLiteral( "ap=refused(atmo_ap.prog or its target)" );
 	}
 

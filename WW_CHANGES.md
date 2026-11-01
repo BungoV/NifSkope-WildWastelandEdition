@@ -317,6 +317,142 @@ Live before/after ms are owed to hold 1 (queued; rows rvc6 / sea5 / mem / c3 / c
   nothing is read back for it or uploaded. Red WW_CELL_BLOOM_GPU_RED=1 (the CPU blur). With WW_IS_MEASURE_ECHO=1 the CPU
   blur still runs for the echo's lit/peak numbers. Unit tests/bloomgpu (the driver vs a numpy twin of the CPU blur;
   reds after, wrap, noclamp).
+## PERFFIX3 A (2026-11-01): the aerial perspective in one draw; the sky inside the linear frame (row off)
+
+Item 1, on by default, picture-exact. The Physical Sky's aerial-perspective volume (Aerial Perspective row) is built in
+ONE layered draw: a geometry shader (res/shaders/atmo_apl.geom, 32 invocations) writes every slice of the 3D target
+through gl_Layer and hands each fragment its slice index; atmo_ap.frag reads it as a flat input instead of the uniform
+(atmo_apl.frag = WW_AP_LAYERED + include). Before: one draw and one glFramebufferTextureLayer re-attach per slice
+(16 or 32 a frame). tests/aplayer: every texel of every tier (Low 16^3 .. Ultra 64x64x32, clear and hazy) bit-identical
+to the slice path (0 of 1.47 M texels differ); offline GPU on this machine Ultra 0.370 -> 0.071 ms, High 0.362 -> 0.028,
+Medium 0.181 -> 0.017, Low 0.178 -> 0.017. atmo_ap.prog's binary is unchanged but its source hash. Red
+WW_ATMO_AP_RED=slices (live) = a draw a slice; the sky line's ap= gains /layered or /slices.
+
+Item 2, row WW_SKY_LINEAR (live, default 0 = as before; DEFAULT-ON OWED: a look change for bungo's pair). With 1, the
+Lookdev backdrop (the physical sky or the vanilla dome, stars, moon, sun, 2D and volume clouds) is not drawn in display
+space before the cell frame: glview calls wwLookdevSkyLinearDraw right after wwCellHdrBegin and the backdrop goes INTO
+the linear frame at exposure 1 / view transform 3 (scene units, the same units the capture path already uses), marked
+stencil 1. The cell's one tone map (cell_hdr mode 0, no sky split while the sky is in) and its one exposure (the measure
+now sees the sky's pixels; Exposure From Sky's estimate then adds nothing) take the sky with the surfaces; the vanilla
+bloom takes it as a source, as the game's HDR pass does. The sky's air (cell_volsky) blends over it in linear light
+(ONE, ONE_MINUS_SRC_ALPHA, ZERO, ONE: sky x T + L) instead of mode 2's tone-mapped fog over a display sky. A frame
+refused late draws the backdrop into the view as before; interiors without Show Sky keep their black clear.
+tests/skylinear: the real atmo_sky.frag + cell_hdr.frag: the built frame tone-maps exactly as sky x T + L (0 levels),
+the sky follows the cell exposure (100 % of sky pixels brighter at 2x), a sky pixel and a surface of the same light
+display the same (0 levels; today's path differs by up to 21 levels); reds noblend, old (today's order) and the base
+C++ fail. Moonlight (~4700x, the vanilla Night Sunlight row) and the twilight Earth shadow (MS model) are not changed
+here: INTSKY1 / FIX1101A own the computed moonlight; with the row on the night frame's brightness comes from the
+exposure, as their plan wants.
+## PERFFIX3 air (2026-11-01): the air pass asks the driver nothing, a cheaper sun read in the air, 16F volume, grid presets
+
+PERFRES1101 group B's air gaps (notes/perfres1101/B/fog.md 5): the inject's sun shadow read, the stalls in air-pre /
+air-post, the RGBA32F volumes, no near-grid preset. Volumetric Air itself still ships Off (unchanged); inside it every
+change below ships ON and has a red that brings the old pass back (WW_CELL_AIR_RED=ask / sunpcf / f32, live).
+
+- NO DRIVER ASKS (exact): the pass read ~25 uniforms back with glGetUniform* (fogK, fogView, cellOn, cellRow...) and asked
+  11 GL states at entry plus glCheckFramebufferStatus at every stage every frame; each is a round trip that waits on the
+  threaded driver's queue (Memory Den air-state 21-205 ms CPU, a 5-7 ms GPU gap in air-post). Now: every Program setter
+  keeps a CPU mirror of its value once the program asks for it (celluniform.h WwCellUni::Mirror, glcontext.cpp WWMI /
+  WWMF; arrays, matrices and samplers forget their locations, a relink resets it), the air reads its values there; the
+  entry state comes from the obscurance pass's own asks of the same paint (WwCellUni::EntryNote: SSR, contact and SSGI
+  restore it); the framebuffer checks run once per layout of targets. A location the mirror has not seen is asked as
+  before. WW_SETUP_MEMO_CHECK=1 asks everything anyway and counts a mirror or note that differs. Census: `cell air:
+  ... reads=<mirror>/<asked>/<stale> state=noted|asked`. Red ask = every value and state asked, as before.
+- SUN READ IN THE AIR: the air took the surfaces' shadow (wwSunShadow: a Vogel disc of 8..48 taps rotated per point with
+  a cos, a sin and a sqrt per tap) four times a froxel. Offline (tests/airsun, the real program) that trigonometry, not
+  the fetches, was most of the inject's sun cost. The air now reads the same disc at 32 taps from literal offsets fixed in
+  the map's texels, same radius and bias, the terrain map and the clouds as before; no receiver plane, normal offset or
+  screen-space contact (a froxel is neither a surface nor a pixel: the contact mask was read at the froxel's own
+  gl_FragCoord, the offset from the froxel grid's derivatives). Offline 160x90x64 sun only: 1.33 -> 0.49 ms (preset
+  disc, 32 taps), 0.72 -> 0.52 ms (FO4CS-level shadows, 8 taps); against the converged disc the integrated light errs
+  as much as today's read (p99 0.0007 of the frame's max) or less (0.0003 vs 0.0011). Red sunpcf = the surfaces' read.
+- RGBA16F INTEGRATED VOLUME (what every surface, particle and the sky reads): 28.8 -> 21.6 MB at 160x88x64 (the inject
+  stays RGBA32F: its per-slice transmittance needs it; the red inject16 of tests/airsun shows the 16F error building up
+  to 1.8e-3). Offline through the real integrate stage: |dT| <= 4.8e-4, |dL| <= 1e-3 L. Red f32.
+- NEAR GRID PRESETS: WW_CELL_AIR_GRID (QSettings WW/VolAirGrid, live; no menu row yet) 0 / low = the grid as before (12 px
+  columns x 64 slices, 160x90x64 at 1080p), medium 8 px x 64 (240x135x64), high / ultra 8 px x 128 (240x135x128; the
+  F4FS plan's Ultra adds the temporal reuse, still off until bungo rules). Default 0: the picture as before.
+- Unit: tests/airmirror/run.sh (the mirror's rows, the setters' wiring, the pass's asks, the grid presets; red = a
+  forget-less mirror + the base sources: FAIL). Gate: tests/airsun/airsun_check.py (Z the red sunpcf == today's program
+  bit for bit, A accuracy vs a converged disc, F 16F vs 32F, C cost; reds noshadow, inject16 FAIL). Sweeps 408 / 272 /
+  408 not ok 0.
+## PERFFIX3 C (2026-11-01): cloud tables off the GL thread, a time-sliced cloud shadow rebuild, the FO4CS bloom tent once per pixel
+
+Three speed changes from PERFRES1101 group B (notes/perfres1101/B/clouds.md gaps 1, 3, 4; bloom.md gap 2).
+
+- **Cloud coverage tables on workers** (src/gl/cloudcaljobs.h, cloudvol.cpp calibrated / calibratedVariety). The Low/Mid
+  band tables (~10 ms a band) and the Cloud Variety set (14 tables, 19-22 ms live) were rebuilt on the GL thread whenever
+  their 20 m key moved. The bands sit at the eye's height plus the type's (cloudmap.cpp), so a camera that climbs, or a
+  live row that settles at the previous row's camera and then shoots at its path's first key, paid it (the "twice in one
+  unchanged row" of merge1030a c3_cv_on2 was exactly that: 3.07..5.07 km at the overview camera, 3.80..5.80 km at the
+  path's). Now the same trigger asks a worker for the table of that frame's exact inputs; the Variety set runs its 14
+  tables on 14 threads (offline 47 -> 8.7 ms wall); jobs are kept by the inputs' bits, so going back to a camera costs
+  nothing; the clouds draw the previous table meanwhile; the first table of a view is still waited for. Same bytes as the
+  old memo for the same inputs (tests/cloudcaljobs). A picture waits for a pending table (render path first key, live
+  settle). Red `WW_CLOUDVOL_RED=gltables`: the old memo on the GL thread. The notes line now says where and what the GL
+  thread waited: `cloudvol: variety tables N ms on workers (GL thread waited W ms, the old tables stood in K frames)`.
+- **Cloud shadow map: the rebuild time-sliced** (src/gl/cloudshadowslice.h, cloudshadow.cpp). A moved fit (a side/8 snap
+  of the eye, a 0.25 deg sun turn) rebuilt the whole map in one frame (0.28 ms at 1024 live, against 0.03-0.04 for the
+  size/16 refresh rows). Now it builds a second map size/16 rows a frame under the new fit while the receivers read the
+  old one (whole, under its own fit), then swaps; a move during a build waits for the swap, so the map is at most 2 x 16
+  frames behind a camera that keeps moving. A still camera builds exactly what CLOUD3 built. Hard changes (first map, size,
+  mode, Variety, reds) still rebuild at once. Memory: two maps (Ultra 8 -> 16 MB, the status line's mem_mb says so).
+  Red `WW_CLOUDSHADOW_RED=fullmove`. Gate tests/cloudshadowslice.
+- **FO4CS bloom: the final tent once per pixel** (res/shaders/cell_bloom_comb.frag/.prog, cell_hdr.frag, cellbloom.cpp).
+  The tone map runs per MSAA sample, but the tent's uv is the pixel's centre for every sample. With the glare's dispersion
+  (27 taps) a pass now writes the tent per pixel into an RGBA32F target and the tone map fetches it once per sample: the
+  same bits (tests/bloomcomb: 0 of 742764 sample channels differ in 16 arms on the real driver; reds RGBA16F target and
+  "ignores the wide lod" fail). Offline 1080p 4x, the tent part: 0.389 -> 0.312 ms. Without dispersion (9 taps, glare off)
+  the per-sample tent costs about one RGBA32F fetch per sample, so the pass would lose 0.05 ms: it stands down. It also
+  stands down when Bloom Mip and Fog Bloom Boost are both on (the fog's gain picks the lod per sample: the edge rule).
+  Bloom Mip's top mips grow in the bloom's run now (the combine reads them first), not in its Final. Red
+  `WW_CELL_BLOOM_COMB_RED=1` (live). Texture unit WwPassUnit::HdrBloomComb = 5.
+- Defaults: Volume Clouds, Cloud Variety, Cloud Shadows and the FO4CS bloom all still ship Off (unchanged); inside them
+  the three changes are on by default.
+## PERFFIX3 D (2026-11-01): precipitation computed on the GPU, culled, lit once a particle; its own timer
+
+Rain and snow no longer build every particle on the CPU and upload it each frame. The vertex shader computes each
+particle from its index (res/shaders/cell_precip_field.glsl, the GPU twin of src/gl/precipmath.h particleAt; the CPU
+hands it the seed hash, the per-variant tables and the wrap offsets in double, precipmath.h gpuRun). The vertex shader
+then culls every particle whose drawn quad cannot touch the view (about 90 % of them: the box is all round the camera);
+the geometry shader lights the kept ones ONCE at their centre (the same vpLight and fog as before, which the fragment
+shader used to run for every pixel of every quad) and the fragment shader only reads the texture. The fog is affine in
+the colour on the default paths, so albedo x A + B per pixel equals the old per-pixel fog.
+- The pass has its own Frame Timers zone, `precip` (CPU and GPU ms), only while the row draws.
+- Red `WW_CELL_PRECIP_RED=cpufield` (live): the old CPU field and per-pixel lighting (cell_precip.prog). The field red
+  `nowrap` has no GPU form and takes the CPU field too.
+- Unit test: `bash tests/precipgpu/run.sh <scratch>` runs the real vertex shader with transform feedback against
+  precipmath.h (rain, snow, hail, big clumps; near and far tiers; up to t = 3600 s; a camera 100 km from the origin):
+  positions within 0.0054 units, nothing visible culled; reds PC_FIELD_RED and PC_CULL_RED fail.
+- The row still ships OFF (DEFAULT-ON OWED: bungo has not seen it live).
+- snow_fine's atlas: the shipped DDS is the A6 build (the round after the rejected A5), measured: alpha within
+  BC7 error of notes/weatherlook1 A6's png. Nothing to swap; A6 is the one owed bungo's eye.
+## PERFFIX3 E (2026-11-01): water timers, the split cut, one refraction copy a pass, underwater fog at every preset
+
+PERFRES1101 group B found three water costs nobody could see and one default below vanilla. This section fixes them.
+- **The water has its own timers.** The pass table (WW_CELL_PASSTIME_LOG) prints `sub water` (every water colour draw,
+  summed), `sub water-copy` (its refraction copies), `sub underwater` (the camera-under-water pass), and `cpu water` /
+  `cpu underwater`. Before this, the water's ms hid inside "sorted", and the underwater pass sat outside every zone.
+- **The split cut (fo4_waterdisp.tesc).** No vertex step is finer than the heights' own 64 u filter. The pre-split
+  1024 u quads used to split down to 16 u, so the GPU sampled a field already smoothed over 64 u four times over: about
+  1 M triangles near the camera. Measured offline with the live frame format (tests/watertess, 1080p 4x MSAA RGBA32F):
+  the split cost +0.56 to +0.75 ms over the flat twin, against +1.39 to +1.52 before; the geometry alone is 0.07-0.09
+  of it (0.12-0.16 before), the rest is the water shader run again on small triangles' edges. 4 std(z) near the camera is 0.887
+  of the sea's Hs (0.882 before), with no cracks. High draws the spectrum's normals on the flat surface, so the
+  displacement is Ultra only. Red WW_CELL_WATER_OCEAN_RED=densetess (live) brings back both the dense splits and the
+  displaced High.
+- **One refraction copy a second pass (Scene::grabRefractionSource).** Before, the water blitted the whole linear frame
+  for EVERY water draw (a 1920 x 1026 4x RGBA32F resolve: 0.05-0.10 ms each offline, 30+ water shapes in a 5x5 water
+  scene). The second
+  pass draws all its water back to back, with nothing else between. One copy at the first water therefore holds what
+  each later copy held, except where a later water body lies over an earlier one. There it now reads the frame behind
+  both, not the first body's colour (tests/waterrefr: 0 px apart for apart and adjacent bodies, only the overlap moves).
+  Red WW_CELL_WATER_REFR_RED=perdraw (live). Census line: `water refraction: N copies, M reused`.
+- **Underwater fog at every water preset, ON by default** (new key WW/CellUnderwater2). The game always fogs under
+  water: its WATR INAM imagespace's depth-of-field fog (WATERUNDER3). The row used to ship OFF, and only Ultra let it
+  draw. Above water the pass makes no GL call, so the default frame above water is unchanged. Red
+  WW_CELL_UNDERWATER_RED=ultraonly (live) restores the old rule: the old key, OFF by default, Ultra only. Test:
+  tests/waterpreset rules 5-6, and -DUNDERFOG_RED fails rule 5.
 
 ## FOAMOFF2 (FIX1101A, 2026-11-01): River foam and Contact foam stay OFF
 

@@ -273,6 +273,84 @@ vec3 airMsSum( float vis, float T, float c, float hard, float a0 )
 	return r;
 }
 
+/* lane PERFFIX3: the sun's visibility for one air sample. The surfaces' read (wwSunShadow) evaluates its Vogel disc
+ * (8..48 taps) with a cos, a sin and a sqrt per tap, rotated per point: offline that trigonometry, not the fetches, was
+ * most of the inject's sun cost (tests/airsun: 32 taps 1.33 ms, the same disc from literal offsets 0.49 ms at 160x90x64).
+ * The air takes the Vogel disc at 32 taps over the same radius (the preset's, or FO4CS's world radius) with the same
+ * bias, its offsets literal and fixed in the map's texels (world-locked as the rotated one); no receiver plane, no normal
+ * offset and no
+ * screen-space contact (a froxel is neither a surface nor a pixel: the contact mask was read at the froxel's own
+ * gl_FragCoord, the offset from the froxel grid's derivatives), min the terrain's map, x the clouds. Anything else
+ * (no composition, the Poisson tier, a forced factor, the reds, a debug view, the Off tier's stable bias) keeps the
+ * surfaces' read. volSunAir false (red WW_CELL_AIR_RED=sunpcf): the surfaces' read, as before. */
+uniform bool volSunAir;
+
+// the Vogel disc at 32 taps (r = sqrt((t + 0.5) / 32), t x 2.39996323 rad): literal offsets, the pattern fixed in the
+// map's texels (so world-locked); 32 = 8..48 of the presets' range, as accurate as the rotated preset disc (tests/airsun A)
+float airCsmVogel( int i, vec3 posView )
+{
+	vec3 q = csmUvd( i, posView );
+	float zRef = q.z - ussCsmBias[i] * csmInvRange[i];
+	float R = ussCsmFilter.y * mix( 0.8, 1.2, clamp( float( i ) * 0.5, 0.0, 1.0 ) );
+	if ( ussCsmWorld.x > 0.5 )
+		R = clamp( ussCsmWorld[i + 1] / max( ussCsmTexel[i], 1e-6 ), 0.5, 16.0 );
+	vec2 k = vec2( R / csmParams.z );
+	float s = 0.0;
+	s += texture( csmMap, vec4( q.xy + vec2( 0.1250000, 0.0000000 ) * k, float( i ), zRef ) );
+	s += texture( csmMap, vec4( q.xy + vec2( -0.1596450, 0.1462479 ) * k, float( i ), zRef ) );
+	s += texture( csmMap, vec4( q.xy + vec2( 0.0244362, -0.2784383 ) * k, float( i ), zRef ) );
+	s += texture( csmMap, vec4( q.xy + vec2( 0.2012222, 0.2624588 ) * k, float( i ), zRef ) );
+	s += texture( csmMap, vec4( q.xy + vec2( -0.3692676, -0.0653182 ) * k, float( i ), zRef ) );
+	s += texture( csmMap, vec4( q.xy + vec2( 0.3498025, -0.2225157 ) * k, float( i ), zRef ) );
+	s += texture( csmMap, vec4( q.xy + vec2( -0.1170021, 0.4352419 ) * k, float( i ), zRef ) );
+	s += texture( csmMap, vec4( q.xy + vec2( -0.2231357, -0.4296341 ) * k, float( i ), zRef ) );
+	s += texture( csmMap, vec4( q.xy + vec2( 0.4841151, 0.1767981 ) * k, float( i ), zRef ) );
+	s += texture( csmMap, vec4( q.xy + vec2( -0.5036411, 0.2078957 ) * k, float( i ), zRef ) );
+	s += texture( csmMap, vec4( q.xy + vec2( 0.2427883, -0.5188245 ) * k, float( i ), zRef ) );
+	s += texture( csmMap, vec4( q.xy + vec2( 0.1794144, 0.5720013 ) * k, float( i ), zRef ) );
+	s += texture( csmMap, vec4( q.xy + vec2( -0.5407570, -0.3133797 ) * k, float( i ), zRef ) );
+	s += texture( csmMap, vec4( q.xy + vec2( 0.6343695, -0.1394644 ) * k, float( i ), zRef ) );
+	s += texture( csmMap, vec4( q.xy + vec2( -0.3871458, 0.5506751 ) * k, float( i ), zRef ) );
+	s += texture( csmMap, vec4( q.xy + vec2( -0.0894397, -0.6901996 ) * k, float( i ), zRef ) );
+	s += texture( csmMap, vec4( q.xy + vec2( 0.5490718, 0.4627583 ) * k, float( i ), zRef ) );
+	s += texture( csmMap, vec4( q.xy + vec2( -0.7388785, 0.0305549 ) * k, float( i ), zRef ) );
+	s += texture( csmMap, vec4( q.xy + vec2( 0.5389551, -0.5363323 ) * k, float( i ), zRef ) );
+	s += texture( csmMap, vec4( q.xy + vec2( -0.0360582, 0.7797915 ) * k, float( i ), zRef ) );
+	s += texture( csmMap, vec4( q.xy + vec2( -0.5128175, -0.6145268 ) * k, float( i ), zRef ) );
+	s += texture( csmMap, vec4( q.xy + vec2( 0.8123596, 0.1093018 ) * k, float( i ), zRef ) );
+	s += texture( csmMap, vec4( q.xy + vec2( -0.6883106, 0.4789086 ) * k, float( i ), zRef ) );
+	s += texture( csmMap, vec4( q.xy + vec2( 0.1880861, -0.8360614 ) * k, float( i ), zRef ) );
+	s += texture( csmMap, vec4( q.xy + vec2( 0.4350333, 0.7591911 ) * k, float( i ), zRef ) );
+	s += texture( csmMap, vec4( q.xy + vec2( -0.8504484, -0.2713162 ) * k, float( i ), zRef ) );
+	s += texture( csmMap, vec4( q.xy + vec2( 0.8261024, -0.3816803 ) * k, float( i ), zRef ) );
+	s += texture( csmMap, vec4( q.xy + vec2( -0.3578882, 0.8551556 ) * k, float( i ), zRef ) );
+	s += texture( csmMap, vec4( q.xy + vec2( -0.3194073, -0.8880338 ) * k, float( i ), zRef ) );
+	s += texture( csmMap, vec4( q.xy + vec2( 0.8499086, 0.4466882 ) * k, float( i ), zRef ) );
+	s += texture( csmMap, vec4( q.xy + vec2( -0.9440346, 0.2488445 ) * k, float( i ), zRef ) );
+	s += texture( csmMap, vec4( q.xy + vec2( 0.5365958, -0.8345298 ) * k, float( i ), zRef ) );
+	return s * ( 1.0 / 32.0 );
+}
+
+float airSunVis( vec3 posView )
+{
+	if ( !volSunAir || ussOn == 0 || ussCsmFilter.x < 0.5 || ussCsmFilter.w > 0.5 || csmForce >= 0.0 || csmRed != 0 || ussView != 0 || ussRed != 0
+		|| ussCsmStable.w > 0.0 )
+		return wwSunShadow( posView );
+	float c = 1.0;
+	if ( ussCsmOn != 0 && -posView.z * csmParams.x <= csmParams.y + csmParams.w ) {
+		int a, b;
+		float t;
+		csmSelect( posView, a, b, t );
+		float sA = t < 1.0 ? airCsmVogel( a, posView ) : 1.0;
+		float sB = t > 0.0 ? airCsmVogel( b, posView ) : 1.0;
+		float f = clamp( dot( posView, posView ) * csmParams.x * csmParams.x / ( csmParams.y * csmParams.y ), 0.0, 1.0 );
+		f *= f;
+		c = mix( 1.0, mix( sA, sB, t ), 1.0 - f * f );
+	}
+	float inMap;
+	return min( c, ussTerrain( posView, inMap, 0.0, true ) ) * ussCloudT( posView );
+}
+
 // the directional light the air at posView (height z) scatters toward the eye
 vec3 airSun( vec3 posView, vec3 dirView, float z )
 {
@@ -282,7 +360,7 @@ vec3 airSun( vec3 posView, vec3 dirView, float z )
 		// the cell's directional light (outdoors the weather's sun, indoors the lighting template's): world space
 		vec3 to = normalize( cellDirTo );
 		float vis = ( volFarMode != 0 && !cellInterior ) ? airFarVis( posView )
-			: ( cellInterior || ( volRed & 8 ) != 0 ) ? 1.0 : volCsm ? wwSunShadow( posView ) : airCloudShadow( posView );
+			: ( cellInterior || ( volRed & 8 ) != 0 ) ? 1.0 : volCsm ? airSunVis( posView ) : airCloudShadow( posView );
 		// lane FOGGI1: indoors with no sky toward the sun, only what the shadow map says is lit
 		float hard = airSunGate( cellWorldPos( posView ), to );
 		if ( hard > 0.0 )
@@ -297,7 +375,7 @@ vec3 airSun( vec3 posView, vec3 dirView, float z )
 	if ( fogSun.w > 0.0 ) {
 		// Lookdev without the cell's lights: its sun (view space)
 		float vis = volFarMode != 0 ? airFarVis( posView ) : ( volRed & 8 ) != 0 ? 1.0
-			: volCsm ? wwSunShadow( posView ) : airCloudShadow( posView );
+			: volCsm ? airSunVis( posView ) : airCloudShadow( posView );
 		float mu = dot( fogView.xyz, fogSun.xyz ) / length( fogView.xyz );
 		if ( volMs.x > 0.0 )
 			return fogSunColour.rgb * fogSun.w * airMsSum( vis, airTupSun( z, mu ), dot( dirView, fogSun.xyz ), 0.0, airMsA( z ) );

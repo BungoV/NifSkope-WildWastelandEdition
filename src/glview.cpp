@@ -4297,6 +4297,7 @@ void GLView::paintGL()
 			// lane HDR1: the cell's draw into one linear frame, tone-mapped once (gl/cellhdr.h)
 			PassTime::begin( PassTime::Background );	// lane PERF1: the sky through the air counts as the sky
 			const bool hdr = ( workspaceDrawScenes.isEmpty() || cellFirst ) && wwCellHdrBegin( scene );	// lane CELLALL1
+			wwLookdevSkyLinearDraw( scene, hdr );	// lane PERFFIX3: the sky inside the linear frame (WW_SKY_LINEAR; off: no call does anything)
 			wwCellFarLodFrame( scene );	// lane FARLOD1: the far sway's uniforms; no GL call while off
 			if ( hdr ) {
 				wwVolAirSkyDraw( scene, false );	// lane VOLAIR1: the sky through the air, under the scene

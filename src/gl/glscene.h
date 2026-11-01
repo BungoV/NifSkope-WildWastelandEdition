@@ -426,7 +426,13 @@ public:
 	unsigned int refractionTexFormat = 0;	//!< lane HDR1: RGBA8, or RGBA16F while the cell's linear frame draws
 	//! Resolve-blit the current framebuffer into refractionTexId (MSAA-safe).
 	//! Returns false if the copy is not possible.
+	//! lane PERFFIX3: once per second pass (the water draws one after another there, nothing else between them), so a
+	//! later water draw reads the frame before the water, not an earlier water's pixels; red WW_CELL_WATER_REFR_RED=perdraw.
 	bool grabRefractionSource();
+	int refrCopyPass = -1;	//!< lane PERFFIX3: the second pass (fxDepthPassNow) the copy belongs to
+	int refrCopyFbo = -1;	//!< and the framebuffer and viewport it was taken from
+	int refrCopyVp[4] = { 0, 0, 0, 0 };
+	static inline qint64 refrCopies = 0, refrReuses = 0;	//!< lane PERFFIX3: the census (stderr every 600 water draws)
 
 	// --- lane EFX2: the opaque pass's depth, read by a cell-lit Soft effect ---
 	unsigned int fxDepthTexId = 0;

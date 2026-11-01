@@ -21,6 +21,7 @@ enum Pass
 {
 	SunShadows, CellShadows, Background, Obscurance, Reflections, Air, Measure, UmbraDepth, Impostors,
 	Opaque, Sorted, Effects, FarCards, ToneMap, Post, Overlays, Ssgi, ReflProbes,	// lane REFLPROBE1: the placed reflection probes
+	Precip,	// lane PERFFIX3 D: rain / snow (cellprecip.cpp), only while the row draws
 	CullCamera, CullCascades,	// CPU only: the run culling inside the passes above
 	ShapeSetup,	// CPU only: the shapes' program and uniform setup inside the passes above
 	Count
@@ -55,6 +56,7 @@ enum Sub { AirTile, AirInject, AirIntegrate, AoGeometry, AoStages, AoGi, ToneBli
 	// emissive cast and its own temporal + denoise chain, the ordinary cast, its temporal, its denoise (robust + pyramid)
 	SsgiHiz, SsgiMips, SsgiEcast, SsgiEchain, SsgiCast, SsgiTemporal, SsgiDenoise,
 	ContactMarch,	// lane PERFFIX2 (item 7): the contact pass (near march, far tier, upsample) inside reflections
+	WaterDraw, WaterCopy, Underwater,	// lane PERFFIX3: the water's colour draws (each, summed; the copy inside), its refraction copies, the camera-under-water pass
 	SubCount };	// lane FOGPERF1: the air before stage 0 (depth blit), its far grid, after it
 void subBegin( int sub );
 //! lane PERF2: CPU time inside the per-draw setup (setupProgram and the cell's uniform calls), summed per frame
@@ -63,6 +65,7 @@ enum CpuSub { CpuSetup, CpuCellUni, CpuSunUni, CpuFogUni, CpuAoDraw, CpuSsrDraw,
 	CpuAirState, CpuAirSetup, CpuAirClusters, CpuAirTile, CpuAirInject, CpuAirInteg, CpuAirFar, CpuAirTail, CpuAirEcho,
 	CpuBlGeo, CpuBlRow,	// lane BINDLESSPERF1: a bindless draw's pooled geometry bind and its row write
 	CpuSunCasters, CpuSunTerrStep, CpuCloudShadow, CpuFarGroundPass,	// lane PERFFIX2 b: the sun-cascades zone's parts
+	CpuWater, CpuUnder,	// lane PERFFIX3: the water's colour draws (setup + issue), the under-water decision + pass
 	CpuSubCount };
 qint64 nowNs();
 void cpuSubAdd( int sub, qint64 ns );

@@ -7,7 +7,8 @@
  * ussCloudT, multiplied into wwSunShadow (surfaces), the air froxels' sun term (cell_volair airCloudShadow) and, at
  * Ultra, the far air tail; the probe GI's sun is scaled by the clouds over the eye (probesky.cpp).
  * Row Render > Scene > Cloud Shadows: Off / Low / Medium / High / Ultra, ships Off. Needs the Cloud Map row on.
- * Pin WW_CLOUDSHADOW (tier name or 0..4), red WW_CLOUDSHADOW_RED = vertical | noinject | everyframe | nogi. */
+ * Pin WW_CLOUDSHADOW (tier name or 0..4), red WW_CLOUDSHADOW_RED = vertical | noinject | everyframe | nogi | fullmove
+ * (lane PERFFIX3: a moved fit rebuilds the whole map in one frame, not size/16 rows a frame into a back map). */
 
 #include "gl/glcontext.hpp"
 
@@ -31,5 +32,9 @@ void wwCloudShadowUniforms( Scene * scene, NifSkopeOpenGLContext::Program * prog
 float wwCloudShadowGiFactor();
 //! the status line ("off", "refused(...)", "on ...")
 QString wwCloudShadowSummary();
+/*! lane PERFFIX3: a moved fit's map is being built size/16 rows a frame (cloudshadowslice.h) while the receivers read
+ *  the previous one; a picture waits until this is false (nifskope_ui.cpp settle). Red WW_CLOUDSHADOW_RED=fullmove: the
+ *  whole map at once (CLOUD3), never pending. */
+bool wwCloudShadowPending();
 
 #endif
