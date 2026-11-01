@@ -1,3 +1,18 @@
+## PERFFIX2 b item 5b (2026-11-01): a light-cube caster draws only into the faces it can reach
+
+PERFRES1101 A gap 6.1: every caster whose bounding sphere touched a shadow light's sphere was drawn into all six cube
+faces (celllights.cpp wwCellShadowPass, and the stored lamp shadows' drawFace). A face's projection is 90 degrees about
+its axis (clip x = u.r, y = v.r, w = m.r), so a sphere wholly outside one of its four side planes (m -+ u, m -+ v, through
+the light) puts no fragment into it. New src/gl/cubefacecull.h (WwCubeFace::touches, a pad of 1 unit + 1e-3 of the
+distance for the GPU's float transform) skips those draws in both paths: the depth texels are the same ones (depth only,
+LEQUAL, any order), so this is exact and ships ON. The census adds `faceSkip=` (draws saved since the start) to the
+shadow echo and the lamp census. Red WW_CELL_SHADOW_RED=allfaces: every caster into every face again (a live set redraws
+every held cube and stores every lamp map again). WW_CELL_SHADOW_HASH=<token> (gates only): every 8th pass a 64-bit hash
+of the held cubes' depth texels on stderr ("shadow cube hash ..."), so a row and its red can be compared texel for texel.
+Unit: tests/cubefacecull (40000 spheres x 400 points through the face's clip rows: no point lands in a dropped face; the
+red, a centre-only test, loses 1.5 M points; 1.63 faces kept a caster on that population; the face table is
+celllights.cpp's).
+
 ## FOAMOFF2 (FIX1101A, 2026-11-01): River foam and Contact foam stay OFF
 
 The water lane's foam fixes land: lace streaks instead of solid patches, and no foam on a dry bank. Its two rows still
