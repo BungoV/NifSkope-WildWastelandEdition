@@ -1503,17 +1503,27 @@ static void volumeFrame( Scene * scene, Cell & c, const CellSpec * spIn, bool du
 	 * lights a hit; the placed lights and the cell's directional stay. The drawn sky is visual only. Red
 	 * WW_CELL_RTDDGI_INTSKY_RED=1 = today's main (SKYINT1: the current weather's sky and sun in a Use Sky Lighting one).
 	 * In the build key through sky.on: a set rebuilds the volume */
-	if ( lights.interior && !rtddgiIntSkyRed() ) {
+	/* lane INTSKY1 (bungo 11-01, LATE ITEM 30, superseding 17's no-sun part): a SUNLIT interior (wwCellSunlit: the winning
+	 * record's Use Sky Lighting, or a .recx Cells `sunlight`) takes the current weather's sky and sun, as outdoors: a ray
+	 * that leaves through an opening (the museum's open top, a broken wall) is sky, a sun ray reaching a hit lights it;
+	 * back faces stay hits (radiance 0) and the below-horizon void stays 0 (SKYBELOW1), so sky and sun come in only
+	 * through the openings. Every other interior keeps FIX1101A's rule. */
+	const bool sunlit = lights.interior && wwCellSunlitNow( wwCellLightsFor( nif ) );
+	if ( lights.interior && !sunlit && !rtddgiIntSkyRed() ) {
 		sky.on = false;
-	} else if ( lights.interior && lights.skyLighting && sky.on ) {
-		skyLitSky( nif, sky );   // lane SKYINT1: the current weather and hour
+	} else if ( lights.interior && ( sunlit || lights.skyLighting ) ) {
+		if ( sunlit && !sky.on )
+			sky = probeSkyLightNow();	// a .recx-sunlit cell without Show Sky kept no sky: the weather's now
+		if ( sky.on )
+			skyLitSky( nif, sky );   // lane SKYINT1: the current weather and hour
 	}
 	if ( lights.interior ) {   // census once per change: which sky terms the interior's volume takes
 		static int saidInt = -1;
-		const int now = sky.on ? 1 : 0;
+		const int now = ( sky.on ? 1 : 0 ) + ( sunlit ? 2 : 0 );
 		if ( now != saidInt ) {
 			saidInt = now;
-			say( c.tag + ( sky.on ? QStringLiteral( "interior (%1): the weather's sky and sun in the volume (the red WW_CELL_RTDDGI_INTSKY_RED)" )
+			say( c.tag + ( sunlit && sky.on ? QStringLiteral( "interior (sunlit): the weather's sky and sun in the volume through the openings (INTSKY1)" )
+				: sky.on ? QStringLiteral( "interior (%1): the weather's sky and sun in the volume (the red WW_CELL_RTDDGI_INTSKY_RED)" )
 					.arg( lights.skyLighting ? QStringLiteral( "Use Sky Lighting" ) : QStringLiteral( "no sky flags" ) )
 				: QStringLiteral( "interior (%1): no sky, no sun in the volume, misses 0 (FIX1101A)" )
 					.arg( lights.skyLighting ? QStringLiteral( "Use Sky Lighting" ) : QStringLiteral( "no sky flags" ) ) ) );

@@ -64,6 +64,7 @@ BSD License - see nifskope.h
 #include "gl/cellvolumeview.h"	// lane VOLFIT1
 #include "probevolumes.h"	// lane VOLFIT1: the Space stage
 #include "airzone.h"	// lane AIRZONE1: the hand-placed volumes' files (the cells, the GI merge, the converter)
+#include "gl/skyplacerun.h"	// lane INTSKY1: the sun's place for the open cell
 #include "gl/cellairzone.h"	// lane AIRZONE1: the Air zones row
 #include "probevolumesgi.h"	// lane VOLFIT1: its rooms as the GI's volumes
 #include "gl/cellfxlit.h"
@@ -1239,6 +1240,15 @@ static void cellPublishLighting( const NifModel * nif, const EsmWorld & world, c
 	for ( const QString & pl : world.pluginList().split( QLatin1Char( ',' ), Qt::SkipEmptyParts ) )
 		L.recxPlugins << pl.trimmed();
 	L.recxData = EsmWeather::gameDataDir();
+	if ( spec.interior ) {	// lane INTSKY1: Use Sky Lighting alone (the winning record) and the .recx Cells key
+		L.useSkyLighting = ( cellInteriorFlags( world.interior() ) & 0x0100u ) != 0;
+		L.cellEdid = world.interior().edid;
+		if ( const quint32 cf = world.interior().cellForm ) {
+			const quint32 idx = world.plugin() ? world.plugin()->getFormIDFile( cf ) : ( cf >> 24 );
+			L.cellPlugin = idx < quint32( L.recxPlugins.size() ) ? QFileInfo( L.recxPlugins.at( int( idx ) ) ).fileName() : QString();
+			L.cellLocal = ESMFile::getFormIDLocal( cf );
+		}
+	}
 	QHash<quint32, QString> pluginFile;	// lane NIFXLIGHT3: every placed model is a fixture now, so name each plugin once
 	auto recxKey = [&]( quint32 f, QString & plugin, quint32 & local ) {
 		const quint32 idx = world.plugin() ? world.plugin()->getFormIDFile( f ) : ( f >> 24 );
@@ -6967,6 +6977,15 @@ static bool cellBuild( NifModel * nif, const CellSceneSpec & specAsked, CellChun
 	cellPublishLighting( nif, world, spec, lightRefs, primRefs, origin, nullptr, &lightStartOff, &nifxFix,
 		spawnAt ? spawnXY : nullptr );
 	cellAirZonePublish( nif, world, spec );	// lane AIRZONE1: the cells whose hand-placed volumes this view reads
+	{	// lane INTSKY1: the sun's place (the worldspace's climate .recx location, the vanilla table, the parent, Boston)
+		QStringList plugins;
+		for ( const QString & pl : world.pluginList().split( QLatin1Char( ',' ), Qt::SkipEmptyParts ) )
+			plugins << pl.trimmed();
+		const quint32 icf = spec.interior ? world.interior().cellForm : 0u;
+		const quint32 idx = ( icf && world.plugin() ) ? world.plugin()->getFormIDFile( icf ) : 0u;
+		wwSkyPlaceSetCell( world.plugin(), plugins, EsmWeather::gameDataDir(), spec.interior ? 0u : world.worldspace(), icf,
+			icf && idx < quint32( plugins.size() ) ? QFileInfo( plugins.at( int( idx ) ) ).fileName() : QString() );
+	}
 	wwCellFxLitPick( nif );   // each lit effect model's four placed lights
 	if ( streamInit ) {	// lane CELLSTREAM1: the cells themselves come from the streamer, round the camera
 		seed.origin = origin;

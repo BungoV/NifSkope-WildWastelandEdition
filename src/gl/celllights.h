@@ -176,6 +176,12 @@ struct WwCellLighting
 	 *  full (exterior) mode: the weather and the hour move every frame, and the sky's ambient (DALC), fog colours and
 	 *  directional colour stay the CURRENT weather's (the cell's XCLL ones are not taken). wwCellSkyLitNow() */
 	bool skyLighting = false;
+	/*! lane INTSKY1 (bungo 11-01, LATE ITEMs 30-30e): DATA bit 8 (Use Sky Lighting) of the WINNING CELL record alone, and
+	 *  the interior's .recx Cells key (its defining plugin, local id, EditorID) for the `sunlight` override.
+	 *  wwCellSunlit() decides; the flag alone is the vanilla switch */
+	bool useSkyLighting = false;
+	QString cellPlugin, cellEdid;
+	quint32 cellLocal = 0;
 	QVector<WwCellLight> lights;
 	QVector<WwCellAmbientLight> ambientLights;  //!< in plugin order (the first that holds a point wins)
 	/*! Lights that start off, kept only with WW_CELL_GI_GPU so the relight can turn them on live */
@@ -322,7 +328,29 @@ float wwCellSkyVis();
  *  sky from below as the weather's again (default: none from below). A comma list. Bits: 1 xcll, 2 sky, 4 ground. */
 int wwCellSkyLitRed();
 //! true: L is a Use Sky Lighting interior that takes the weather's ambient and fog colours now (Lookdev on, no red)
+//! lane INTSKY1: = the interior takes the live weather (wwCellSunlit().weather), its sun or not
 bool wwCellSkyLitNow( const WwCellLighting * L );
+
+/*! lane INTSKY1 (bungo 11-01, LATE ITEMs 30-30e): a SUNLIT interior gets the real sky and sun through its openings and
+ *  the live exterior weather, as the game's full sky mode runs it ("as outdoors"). The rule (the same in Fusion Shaders):
+ *    .recx Cells `sunlight` { enabled, weather } on the cell (Plugins/<Provider>/Cells/<EditorID>.recx, key `cell`)
+ *    absent: enabled = weather = the WINNING CELL record's DATA bit 8 (Use Sky Lighting); a block's missing `weather` = its
+ *    `enabled`. enabled = the sun + sky light through the openings (shadows from both faces, the GI's sky + sun);
+ *    weather = the live weather inside (ambient, fog colours, clouds, rain under open sky, the weather change blends).
+ *  Exteriors: on = weather = true. WW_INTSKY_RED (live, comma list): off = no sunlit interior (the weather-only SKYINT1
+ *  rule stays: the batch's own look), norecx = the Cells files ignored, onesided = the casters keep their culling,
+ *  decals = decal casters kept, rain = rain falls indoors without the roof test. */
+struct WwCellSunlit
+{
+	bool on = false, weather = false;
+	QString why;	//!< "flag 0x1181", "recx <file> (<rung>)", "red off", "exterior"
+};
+WwCellSunlit wwCellSunlit( const WwCellLighting * L );
+//! sunlit and Lookdev on (a weather to light it): the cell is lit as outdoors now
+bool wwCellSunlitNow( const WwCellLighting * L );
+//! !interior or sunlit now: the exterior sun / sky / weather paths run (the shaders' cellInterior = false)
+bool wwCellAsOutdoor( const WwCellLighting * L );
+int wwIntSkyRed();	//!< bits: 1 off, 2 norecx, 4 onesided, 8 decals, 16 rain
 bool wwCellSkyVisPinned();
 void wwCellSkyVisSetPercent( int pct );
 

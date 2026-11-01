@@ -12,6 +12,7 @@ BSD License - see nifskope.h
 #include "gl/cloudshadow.h"	// lane CLOUD3: the clouds' shadow map joins the composition
 #include "gl/celllooks.h"	// lane GAPLOOK1: the contact far tier's switch
 #include "gl/skyephem.h"	// lane EPHEM1: FO4CS Solar's sun + moon arithmetic
+#include "gl/skyplacerun.h"	// lane INTSKY1: the worldspace's place (location)
 #include "gl/gametaa.h"
 #include "gl/sunshadow.h"	// lane SHADOWSHIMMER1: the stable shadows' red
 #include "gl/cellssr.h"		// the cell view's shared opaque pass (contact shadows read its depth)
@@ -1692,11 +1693,18 @@ WwSunPathKey wwSunPathKey()
 // ---- (D) the sun ----
 
 namespace {
-// lane EPHEM1: the game's date at Boston; red (read per call) june = the date forced to 21 June (a higher sun)
-wwephem::Date ephemDate( double hour, double gameDay, double & lon )
+/* lane EPHEM1: the game's date at Boston; red (read per call) june = the date forced to 21 June (a higher sun).
+ * lane INTSKY1: at the open cell's place (gl/skyplacerun.h: the climate's .recx location, the vanilla table, the parent
+ * worldspace, else Boston); lat and the clock's zone ride out beside the longitude */
+wwephem::Date ephemDate( double hour, double gameDay, double & lon, double * lat = nullptr, double * tz = nullptr )
 {
-	lon = wwephem::kBostonLon;
-	wwephem::Date d = wwephem::dateFromGameDay( gameDay, hour );
+	const wwplace::Place & p = wwSkyPlaceNow();
+	lon = p.lonDeg;
+	if ( lat )
+		*lat = p.latDeg;
+	if ( tz )
+		*tz = p.tzHours;
+	wwephem::Date d = wwephem::dateFromGameDay( gameDay, hour, p.startYear, p.startMonth, p.startDay );
 	if ( wwEnvStr( "WW_SKY_EPHEM_RED" ) == QLatin1String( "june" ) ) {
 		d.month = 6;
 		d.day = 21;
@@ -1717,9 +1725,9 @@ double wwSunPathReal( double hour, double gameDay, double out[3] )
 	}
 	if ( wwLookOn( WwLook::Ephemeris ) ) {
 		// lane EPHEM1: FO4CS Solar's NOAA sun on the game's date
-		double lon;
-		const wwephem::Date d = ephemDate( hour, gameDay, lon );
-		const wwephem::Body b = wwephem::sun( d, wwephem::kBostonLat, lon );
+		double lon, lat, tz;
+		const wwephem::Date d = ephemDate( hour, gameDay, lon, &lat, &tz );
+		const wwephem::Body b = wwephem::sun( d, lat, lon, tz );
 		std::copy( b.dir, b.dir + 3, out );
 		return b.elevDeg;
 	}
@@ -1727,7 +1735,7 @@ double wwSunPathReal( double hour, double gameDay, double out[3] )
 	const double n = std::fmod( 296.0 + std::floor( std::max( gameDay, 0.0 ) ), 365.0 ) + 1.0;
 	const double decl = 23.44 * kDeg * std::sin( 2.0 * kPi * ( 284.0 + n ) / 365.0 );
 	const double H = ( hour - 12.0 ) * 15.0 * kDeg;
-	const double phi = kLatitude * kDeg;
+	const double phi = wwSkyPlaceNow().latDeg * kDeg;	// lane INTSKY1: the place's latitude (kLatitude = Boston, the default)
 	out[0] = -std::cos( decl ) * std::sin( H );
 	out[1] = std::cos( phi ) * std::sin( decl ) - std::sin( phi ) * std::cos( decl ) * std::cos( H );
 	out[2] = std::sin( phi ) * std::sin( decl ) + std::cos( phi ) * std::cos( decl ) * std::cos( H );
@@ -1804,9 +1812,9 @@ bool wwSkyMoonReal( double hour, double gameDay, double dir[3], double * elongDe
 {
 	if ( ss().sunPath != 1 || !wwLookOn( WwLook::Ephemeris ) )
 		return false;
-	double lon;
-	const wwephem::Date d = ephemDate( hour, gameDay, lon );
-	const wwephem::Body b = wwephem::moon( d, wwephem::kBostonLat, lon );
+	double lon, lat, tz;
+	const wwephem::Date d = ephemDate( hour, gameDay, lon, &lat, &tz );
+	const wwephem::Body b = wwephem::moon( d, lat, lon, tz );
 	if ( !b.valid )
 		return false;
 	std::copy( b.dir, b.dir + 3, dir );
@@ -1822,13 +1830,13 @@ bool wwSkyMoonFrame( double hour, double gameDay, double moon[3], double sun[3],
 {
 	if ( !wwSkyMoonReal( hour, gameDay, moon, nullptr, nullptr ) )
 		return false;
-	double lon;
-	const wwephem::Date d = ephemDate( hour, gameDay, lon );
-	const wwephem::Body s = wwephem::sun( d, wwephem::kBostonLat, lon );
+	double lon, lat, tz;
+	const wwephem::Date d = ephemDate( hour, gameDay, lon, &lat, &tz );
+	const wwephem::Body s = wwephem::sun( d, lat, lon, tz );
 	std::copy( s.dir, s.dir + 3, sun );
-	const double jd = wwephem::moon( d, wwephem::kBostonLat, lon ).julianDay;
+	const double jd = wwephem::moon( d, lat, lon, tz ).julianDay;
 	const wwephem::Libration L = wwephem::libration( jd );
-	wwephem::eclipticToHorizontal( jd, L.poleLon, L.poleLat, wwephem::kBostonLat, lon, pole );
+	wwephem::eclipticToHorizontal( jd, L.poleLon, L.poleLat, lat, lon, pole );
 	if ( libLonDeg )
 		*libLonDeg = L.lDeg;
 	return true;
