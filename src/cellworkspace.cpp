@@ -1305,6 +1305,7 @@ void CellWorkspacePanel::buildUi()
 		kid( "", tr( "Terrain pages" ), "CellWorkspaceFarGroundPages" );
 		look( WwLook::BtoSway, tr( "Game trees sway" ) );
 		head( F, "", "CellWorkspaceModernTaa", 0, true );
+		look( WwLook::Vrs, tr( "Variable rate shading" ) );	// lane PERFFIX4
 		head( F, "", "CellWorkspaceBloom", 0 );
 		look( WwLook::BloomMip, tr( "Width in fog" ) );
 		master( F, WwGroup::Camera );

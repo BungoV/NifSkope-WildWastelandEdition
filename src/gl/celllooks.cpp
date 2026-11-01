@@ -80,6 +80,7 @@ const LookRow kRows[] = {
 	{ "River foam", "WW/CellWaterRiverFoam3" },	// FIX1101A 11-01: OFF (h2 rvc6_on 1:1: still flat grey darts, not foam; lace + wet cut kept, tests/waterfoam2); new key over FOAMOFF (FIX1031B LATE ITEM 8: m/s flow, shallows + shoals)
 	{ "Underwater light", "WW/CellWaterUnderLight" },
 	{ "Precipitation", "WW/CellPrecip" },	// lane WEATHERLOOK1 B: ships off until bungo sees it
+	{ "Variable rate shading", "WW/CellVrs" },	// lane PERFFIX4: a menu row at last; ships off until its pair is judged
 };
 static_assert( sizeof( kRows ) / sizeof( kRows[0] ) == size_t( WwLook::Count ), "a row per look" );
 
@@ -329,6 +330,10 @@ QByteArray pinOf( WwLook l )
 		WW_SWITCH_STATIC( QByteArray, p, wwEnv( "WW_CELL_PRECIP" ).trimmed() );
 		return p;
 	}
+	case WwLook::Vrs: {
+		WW_SWITCH_STATIC( QByteArray, p, wwEnv( "WW_CELL_VRS" ).trimmed() );
+		return p;
+	}
 	default:
 		return QByteArray();
 	}
@@ -401,6 +406,7 @@ const char * wwLookPinName( WwLook l )
 	case WwLook::WaterRiverFoam: return "WW_CELL_WATER_RIVERFOAM";
 	case WwLook::WaterUnderLight: return "WW_CELL_WATER_UNDERLIGHT";
 	case WwLook::Precip: return "WW_CELL_PRECIP";
+	case WwLook::Vrs: return "WW_CELL_VRS";
 	default: return "";
 	}
 }
