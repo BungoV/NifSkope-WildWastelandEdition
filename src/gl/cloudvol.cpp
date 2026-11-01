@@ -2,6 +2,7 @@
 #include "cloudmap.h"
 #include "cloudnoise.h"
 #include "cloudvolmath.h"
+#include "cloudcaljobs.h"	// lane PERFFIX3: the coverage tables off the GL thread
 #include "cloudfly.h"
 #include "cloudlightning.h"	// lane CLOUD6f: the storm's lightning inside the clouds
 #include "lookdevstage.h"
@@ -24,6 +25,7 @@
 #include <cstdint>
 #include <cstdio>
 #include <cstring>
+#include <thread>
 #include <vector>
 
 // lane CLOUD2: the volume clouds (cloudvol.h). The march, resolve and composite are res/shaders/cloud_*.frag.
@@ -199,15 +201,9 @@ struct CvGpu
 	int qcur = 0;
 	double ms = -1.0;
 	int frames = 0;
-	// the calibration memo
-	int calKey[2][4] = { { -1, 0, 0, 0 }, { -1, 0, 0, 0 } };
-	bool calRed[2] = { false, false };
-	float cal[2][V::kCalN] = {};
-	// lane CLOUD5: the Cloud Variety tables (the Low band at its 4 type anchors, the Mid band), memoised on their inputs
-	int varKey[12] = { -1 };
-	bool varRed = false;
-	float calT[V::kVarCal][V::kCalN] = {};
-	float calMidV[V::kCalN] = {};
+	/* the calibration memo (lane CLOUD5: + the Cloud Variety tables, the Low band at its type anchors and the Mid band);
+	 * lane PERFFIX3: each a slot whose table a worker builds (cloudcaljobs.h), the old one kept until it is ready */
+	WwCloudCalJobs::Slot calSlot[2], varSlot;
 	GLuint blue = 0;	// lane CLOUD5 round 2: the variety march's step offsets (EA's FAST blue noise sheet), 0 = IGN
 	bool blueTried = false;
 	unsigned long long accFrom = 0;	// lane CLOUDBAND1: g.frame when the history last began (accumAlpha's cycles)
@@ -355,20 +351,43 @@ Bands bandsOf( const WwCloudMap & m )
 	return b;
 }
 
-//! the coverage tables of the Low and Mid bands for these heights, memoised (~10 ms a band on a change)
+/* lane PERFFIX3: the tables' jobs, one store a process (a table is a function of its inputs alone); red
+ * WW_CLOUDVOL_RED=gltables builds them on the GL thread as before */
+WwCloudCalJobs::Jobs & calJobs()
+{
+	static WwCloudCalJobs::Jobs j;
+	return j;
+}
+
+WwCloudCalJobs::Mode calMode()
+{
+	return red( "gltables" ) ? WwCloudCalJobs::Mode::Sync : WwCloudCalJobs::Mode::Async;
+}
+
+//! the coverage tables of the Low and Mid bands for these heights, memoised (~10 ms a band on a change; PERFFIX3: a worker's)
 void calibrated( CvGpu & g, const Bands & b, float out[2 * V::kCalN] )
 {
+	namespace J = WwCloudCalJobs;
 	const bool noCal = red( "nocal" );
 	for ( int band = 0; band < 2; band++ ) {
-		const int key[4] = { int( std::lround( b.baseKm[band] * 50.0f ) ), int( std::lround( b.topKm[band] * 50.0f ) ),
-			int( std::lround( b.density[band] * 100.0f ) ), int( std::lround( ( band == 0 ? b.sheet : 0.0f ) * 32.0f ) ) };
-		if ( std::memcmp( key, g.calKey[band], sizeof( key ) ) || g.calRed[band] != noCal ) {
-			std::memcpy( g.calKey[band], key, sizeof( key ) );
-			g.calRed[band] = noCal;
+		const float base = b.baseKm[band], top = b.topKm[band], dens = b.density[band], sheet = band == 0 ? b.sheet : 0.0f;
+		const J::Bits qkey = { std::uint32_t( std::lround( base * 50.0f ) ), std::uint32_t( std::lround( top * 50.0f ) ),
+			std::uint32_t( std::lround( dens * 100.0f ) ), std::uint32_t( std::lround( sheet * 32.0f ) ), std::uint32_t( noCal ) };
+		J::Bits exact;
+		J::put( exact, band );
+		J::put( exact, base );
+		J::put( exact, top );
+		J::put( exact, dens );
+		J::put( exact, sheet );
+		J::put( exact, int( noCal ) );
+		g.calSlot[band].update( calJobs(), qkey, exact, [band, base, top, dens, sheet, noCal]() {
+			J::Table t( V::kCalN );
 			V::calibrate( noise( false ).data(), WwCloudNoise::kShapeN, noise( true ).data(), WwCloudNoise::kDetailN, band,
-				b.baseKm[band], b.topKm[band], b.density[band], band == 0 ? b.sheet : 0.0f, noCal, g.cal[band] );
-		}
-		std::copy( g.cal[band], g.cal[band] + V::kCalN, out + band * V::kCalN );
+				base, top, dens, sheet, noCal, t.data() );
+			return t;
+		}, calMode() );
+		const J::Table & t = g.calSlot[band].table();
+		std::copy( t.begin(), t.end(), out + band * V::kCalN );
 	}
 }
 
@@ -377,29 +396,46 @@ void calibrated( CvGpu & g, const Bands & b, float out[2 * V::kCalN] )
  * band's heights, density or the reds (the weather's type and swing are not inputs: they pick a blend) */
 void calibratedVariety( CvGpu & g, const Bands & b, float calT[V::kVarCal * V::kCalN], float cal[2 * V::kCalN] )
 {
+	namespace J = WwCloudCalJobs;
 	const bool noCal = red( "nocal" );
-	const int key[12] = { int( std::lround( b.baseKm[0] * 50.0f ) ), int( std::lround( b.var.depthKm * 50.0f ) ),
-		int( std::lround( b.density[0] * 100.0f ) ), int( std::lround( b.baseKm[1] * 50.0f ) ),
-		int( std::lround( b.topKm[1] * 50.0f ) ), int( std::lround( b.density[1] * 100.0f ) ),
-		int( std::lround( b.var.curlKm * 1000.0f ) ), int( std::lround( b.var.erode * 1000.0f ) ),
-		int( std::lround( b.var.anvil * 100.0f ) ), int( std::lround( b.var.towerKm * 50.0f ) ), 1, 0 };
-	if ( std::memcmp( key, g.varKey, sizeof( key ) ) || g.varRed != noCal ) {
-		std::memcpy( g.varKey, key, sizeof( key ) );
-		g.varRed = noCal;
+	const J::Bits qkey = { std::uint32_t( std::lround( b.baseKm[0] * 50.0f ) ), std::uint32_t( std::lround( b.var.depthKm * 50.0f ) ),
+		std::uint32_t( std::lround( b.density[0] * 100.0f ) ), std::uint32_t( std::lround( b.baseKm[1] * 50.0f ) ),
+		std::uint32_t( std::lround( b.topKm[1] * 50.0f ) ), std::uint32_t( std::lround( b.density[1] * 100.0f ) ),
+		std::uint32_t( std::lround( b.var.curlKm * 1000.0f ) ), std::uint32_t( std::lround( b.var.erode * 1000.0f ) ),
+		std::uint32_t( std::lround( b.var.anvil * 100.0f ) ), std::uint32_t( std::lround( b.var.towerKm * 50.0f ) ), 1,
+		std::uint32_t( noCal ) };
+	// the inputs varCalibrate reads (cloudvolmath.h): the variety's depth, tower, erosion, curl, anvil and both bands
+	const V::Variety var = b.var;
+	const float lo[3] = { b.baseKm[0], b.topKm[0], b.density[0] }, mid[3] = { b.baseKm[1], b.topKm[1], b.density[1] };
+	J::Bits exact;
+	for ( float v : { var.depthKm, var.towerKm, var.erode, var.curlKm, var.anvil, lo[0], lo[1], lo[2], mid[0], mid[1], mid[2] } )
+		J::put( exact, v );
+	J::put( exact, int( noCal ) );
+	const J::Got got = g.varSlot.update( calJobs(), qkey, exact, [var, lo0 = lo[0], lo1 = lo[1], lo2 = lo[2], mid0 = mid[0],
+		mid1 = mid[1], mid2 = mid[2], noCal]() {
+		// 14 tables, each on its own thread (each the same function of the same inputs as before, in its own slice)
 		const V::VarVolumes vol{ noise( false ).data(), WwCloudNoise::kShapeN, noise( true ).data(), WwCloudNoise::kDetailN };
-		const auto t0 = std::chrono::steady_clock::now();
-		for ( int k = 0; k < V::kVarCal; k++ )
-			V::varCalibrate( vol, b.var, 0, V::varCalT( k ), b.baseKm[0], b.topKm[0], b.density[0], noCal,
-				g.calT[k] );
-		V::varCalibrate( vol, b.var, 1, 0.0f, b.baseKm[1], b.topKm[1], b.density[1], noCal, g.calMidV );
-		// the CPU cost a weather change pays (on the GL thread): the hold's notes carry it
-		fprintf( stderr, "cloudvol: variety tables %.1f ms (low depth %.2f km, mid %.2f..%.2f km)\n",
-			std::chrono::duration<double, std::milli>( std::chrono::steady_clock::now() - t0 ).count(), double( b.var.depthKm ),
-			double( b.baseKm[1] ), double( b.topKm[1] ) );
-	}
-	for ( int k = 0; k < V::kVarCal; k++ )
-		std::copy( g.calT[k], g.calT[k] + V::kCalN, calT + k * V::kCalN );
-	std::copy( g.calMidV, g.calMidV + V::kCalN, cal + V::kCalN );
+		J::Table t( ( V::kVarCal + 1 ) * V::kCalN );
+		std::vector<std::thread> th;
+		for ( int k = 0; k <= V::kVarCal; k++ )
+			th.emplace_back( [&, k]() {
+				if ( k < V::kVarCal )
+					V::varCalibrate( vol, var, 0, V::varCalT( k ), lo0, lo1, lo2, noCal, t.data() + k * V::kCalN );
+				else
+					V::varCalibrate( vol, var, 1, 0.0f, mid0, mid1, mid2, noCal, t.data() + k * V::kCalN );
+			} );
+		for ( std::thread & x : th )
+			x.join();
+		return t;
+	}, calMode() );
+	if ( got == J::Got::Fresh )	// the CPU cost a weather change or a camera's climb pays, and where: the hold's notes carry it
+		fprintf( stderr, "cloudvol: variety tables %.1f ms %s (GL thread waited %.1f ms, the old tables stood in %d frames) (low depth %.2f km, mid %.2f..%.2f km)\n",
+			g.varSlot.lastMs(), calMode() == J::Mode::Sync ? "on the GL thread (red gltables)" : "on workers",
+			calMode() == J::Mode::Sync ? g.varSlot.lastMs() : g.varSlot.waitedMs(), g.varSlot.keptFrames(),
+			double( var.depthKm ), double( mid[0] ), double( mid[1] ) );
+	const J::Table & t = g.varSlot.table();
+	std::copy( t.begin(), t.begin() + V::kVarCal * V::kCalN, calT );
+	std::copy( t.begin() + V::kVarCal * V::kCalN, t.end(), cal + V::kCalN );
 }
 
 /* lane CLOUD5: the light taps' reach under Cloud Variety: the weather's tallest type sets it (Bauer 2019, RDR2: the
@@ -1104,6 +1140,14 @@ bool wwCloudVolVarietyOn()
 {
 	const CvState & s = cs();
 	return s.variety != 0 && s.tier >= 2;
+}
+
+bool wwCloudVolTablesPending()
+{
+	for ( const CvGpu & g : gpus() )
+		if ( g.calSlot[0].pending() || g.calSlot[1].pending() || g.varSlot.pending() )
+			return true;
+	return false;
 }
 
 bool wwCloudVolProfileSet()

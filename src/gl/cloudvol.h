@@ -29,6 +29,10 @@ void wwCloudVolSetVariety( int on );	//!< refused while WW_CLOUDVOL_VARIETY pins
 bool wwCloudVolVarietyPinned();
 //! the row on and the volume at Medium or up: readers of the density take the *_v.prog twins
 bool wwCloudVolVarietyOn();
+/*! lane PERFFIX3: a coverage table (Low/Mid band, or the Variety set) is being built on a worker (cloudcaljobs.h) and the
+ *  clouds draw the previous one meanwhile; a picture waits until this is false (nifskope_ui.cpp settle). Red
+ *  WW_CLOUDVOL_RED=gltables: built on the GL thread as before (never pending). */
+bool wwCloudVolTablesPending();
 /*! lane CLOUD6d: one cloud profile set per weather (cloudmath.h lowTypeOf oneSet: the weather's type everywhere, no
  *  towers beside puffs), WW_CLOUDVOL_PROFILESET, ON BY DEFAULT, live; =0 / off or WW_CLOUDVOL_RED=typemix = CLOUD5's
  *  type swing (the red). Gate tests/spells/cloudprofile_check.py. */

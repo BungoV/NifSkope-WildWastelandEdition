@@ -28,6 +28,10 @@ uniform int hdrStencilTest;	// 0 the GL stencil test picked, 1 keep stencil & 3 
 uniform int hdrStencilRef;
 uniform sampler2D hdrBackdrop;	// lane GLAREBLOW2: the view as mode 3 finds it, resolved (cellhdr.cpp backdropCopy)
 uniform bool hdrBackdropOn;	// false: the glow as before (red WW_CELL_BLOOM_SKY_RED=add, or the copy refused)
+/* lane PERFFIX3 (item 8): the FO4CS bloom's tent once per pixel (cell_bloom_comb.frag, written while its lod is the same
+ * at every sample); on: one texelFetch per sample instead of 9-27 bilinear taps. Red WW_CELL_BLOOM_COMB_RED=1: off */
+uniform bool cellIsFoBloomCombOn;
+uniform sampler2D cellIsFoBloomComb;
 
 out vec4 fragColor;
 
@@ -87,7 +91,9 @@ void main()
 	/* lane GAPLOOK1 (BLOOMMIP): through fog the glow spreads wider (an atmospheric PSF), so the fog's receiver gain
 	 * picks how far down the top's mips the tent reads: log2(gain) levels (w = 1; 0 in clear air: the same bits) */
 	float bloomLod = cellIsFoBloomParams.w < 0.0 ? 2.0 : cellIsFoBloomParams.w * log2( max( cellBloomGain, 1.0 ) );
-	if ( cellIsFoBloomOn && bloomLod > 0.0 )
+	if ( cellIsFoBloomOn && cellIsFoBloomCombOn )
+		foBloom = texelFetch( cellIsFoBloomComb, ivec2( gl_FragCoord.xy ), 0 ).rgb * cellIsFoBloomParams.y;
+	else if ( cellIsFoBloomOn && bloomLod > 0.0 )
 		foBloom = bloomTentDispersedLod( cellIsFoBloom, ( floor( gl_FragCoord.xy ) + 0.5 ) / cellIsFoBloomFrame,
 			cellIsFoBloomParams.x, cellIsFoBloomParams.z, bloomLod ) * cellIsFoBloomParams.y;
 	else if ( cellIsFoBloomOn )

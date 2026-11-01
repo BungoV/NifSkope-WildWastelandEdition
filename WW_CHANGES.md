@@ -1,3 +1,37 @@
+## PERFFIX3 C (2026-11-01): cloud tables off the GL thread, a time-sliced cloud shadow rebuild, the FO4CS bloom tent once per pixel
+
+Three speed changes from PERFRES1101 group B (notes/perfres1101/B/clouds.md gaps 1, 3, 4; bloom.md gap 2).
+
+- **Cloud coverage tables on workers** (src/gl/cloudcaljobs.h, cloudvol.cpp calibrated / calibratedVariety). The Low/Mid
+  band tables (~10 ms a band) and the Cloud Variety set (14 tables, 19-22 ms live) were rebuilt on the GL thread whenever
+  their 20 m key moved. The bands sit at the eye's height plus the type's (cloudmap.cpp), so a camera that climbs, or a
+  live row that settles at the previous row's camera and then shoots at its path's first key, paid it (the "twice in one
+  unchanged row" of merge1030a c3_cv_on2 was exactly that: 3.07..5.07 km at the overview camera, 3.80..5.80 km at the
+  path's). Now the same trigger asks a worker for the table of that frame's exact inputs; the Variety set runs its 14
+  tables on 14 threads (offline 47 -> 8.7 ms wall); jobs are kept by the inputs' bits, so going back to a camera costs
+  nothing; the clouds draw the previous table meanwhile; the first table of a view is still waited for. Same bytes as the
+  old memo for the same inputs (tests/cloudcaljobs). A picture waits for a pending table (render path first key, live
+  settle). Red `WW_CLOUDVOL_RED=gltables`: the old memo on the GL thread. The notes line now says where and what the GL
+  thread waited: `cloudvol: variety tables N ms on workers (GL thread waited W ms, the old tables stood in K frames)`.
+- **Cloud shadow map: the rebuild time-sliced** (src/gl/cloudshadowslice.h, cloudshadow.cpp). A moved fit (a side/8 snap
+  of the eye, a 0.25 deg sun turn) rebuilt the whole map in one frame (0.28 ms at 1024 live, against 0.03-0.04 for the
+  size/16 refresh rows). Now it builds a second map size/16 rows a frame under the new fit while the receivers read the
+  old one (whole, under its own fit), then swaps; a move during a build waits for the swap, so the map is at most 2 x 16
+  frames behind a camera that keeps moving. A still camera builds exactly what CLOUD3 built. Hard changes (first map, size,
+  mode, Variety, reds) still rebuild at once. Memory: two maps (Ultra 8 -> 16 MB, the status line's mem_mb says so).
+  Red `WW_CLOUDSHADOW_RED=fullmove`. Gate tests/cloudshadowslice.
+- **FO4CS bloom: the final tent once per pixel** (res/shaders/cell_bloom_comb.frag/.prog, cell_hdr.frag, cellbloom.cpp).
+  The tone map runs per MSAA sample, but the tent's uv is the pixel's centre for every sample. With the glare's dispersion
+  (27 taps) a pass now writes the tent per pixel into an RGBA32F target and the tone map fetches it once per sample: the
+  same bits (tests/bloomcomb: 0 of 742764 sample channels differ in 16 arms on the real driver; reds RGBA16F target and
+  "ignores the wide lod" fail). Offline 1080p 4x, the tent part: 0.389 -> 0.312 ms. Without dispersion (9 taps, glare off)
+  the per-sample tent costs about one RGBA32F fetch per sample, so the pass would lose 0.05 ms: it stands down. It also
+  stands down when Bloom Mip and Fog Bloom Boost are both on (the fog's gain picks the lod per sample: the edge rule).
+  Bloom Mip's top mips grow in the bloom's run now (the combine reads them first), not in its Final. Red
+  `WW_CELL_BLOOM_COMB_RED=1` (live). Texture unit WwPassUnit::HdrBloomComb = 5.
+- Defaults: Volume Clouds, Cloud Variety, Cloud Shadows and the FO4CS bloom all still ship Off (unchanged); inside them
+  the three changes are on by default.
+
 ## FOAMOFF2 (FIX1101A, 2026-11-01): River foam and Contact foam stay OFF
 
 The water lane's foam fixes land: lace streaks instead of solid patches, and no foam on a dry bank. Its two rows still
