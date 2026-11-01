@@ -130,6 +130,8 @@ void stream1Hitch( double * maxMs, int * over, int * frames, bool reset );
 //! lane STREAM1: a file texture `id` now holds `bytes` on the card / was deleted (the resident texture figures)
 void texResidentSet( unsigned int id, qint64 bytes );
 void texResidentDrop( unsigned int id );
+//! lane PERFFIX4: the bytes texResidentSet recorded for `id` (0 = none)
+qint64 texResidentBytesOf( unsigned int id );
 
 //! The overlay's lines (averages of the last second), empty while off.
 QStringList overlay();

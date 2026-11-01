@@ -249,6 +249,9 @@ public:
 	void setUseTick( std::uint32_t t ) { useTick = t; }
 	//! lane CELLSTREAM1: frees the GL textures of files last bound before tick (they load again when next bound)
 	int evictUnused( std::uint32_t tick, QStringList * names = nullptr );
+	/*! lane PERFFIX4: the streaming pool (src/gl/texpool.h): while the resident file textures pass `budgetBytes`, frees
+	 *  the least recently bound ones last bound before `protectTick`, down to 90 % of the budget */
+	int evictPool( std::int64_t budgetBytes, std::uint32_t protectTick, QStringList * names = nullptr );
 	/*! lane PERF5: BSShaderLightingProperty::bind sets the same wrap, filter and anisotropy on a texture every draw;
 	 *  false = this frame already set them on the texture its bind just bound (WW_DRAW_TEXSHADOW_RED=1: always true) */
 	bool wwParamsNeeded( int wrapS, int wrapT, int minFilter, float aniso );

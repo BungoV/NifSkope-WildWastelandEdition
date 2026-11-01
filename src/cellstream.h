@@ -149,6 +149,12 @@ bool cellStreamBusy( const NifModel * nif );
 bool cellStreamOn( const NifModel * nif );
 //! lane CELLSTREAM1: seconds a file texture stays loaded unbound while streaming (WW_CELL_STREAM_TEXKEEP, 0 = kept)
 int cellStreamTexKeepSec();
+/*! lane PERFFIX4: the streaming texture pool's budget in bytes (src/gl/texpool.h): WW_CELL_STREAM_TEXPOOL =
+ *  low|medium|high|ultra or a MB count, else QSettings WW/CellTexPool 0..3 (default 3, Ultra: 6144 MB) */
+qint64 cellStreamTexPoolBytes();
+//! lane PERFFIX4: the pool's preset 0..3 (-1: an explicit MB pin), for the menu
+int cellStreamTexPoolPreset();
+void cellStreamTexPoolSetPreset( int preset );
 //! lane STREAMMEM1: seconds a cached mesh stays undrawn while streaming (WW_CELL_STREAM_GEOKEEP, default the texture
 //! keep, 0 = the cache's own rule, at most 60)
 int cellStreamGeoKeepSec();

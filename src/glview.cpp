@@ -4108,6 +4108,7 @@ void GLView::paintGL()
 	 * anything else this frame so the ground and the PBR shapes can receive.
 	 * A no-op with the Shadows row off (the default): no map, no program swap. */
 	wwCellCullFrame();	// lane SUNCELL1: the last frame's culling counts, printed when they change
+	wwCellCullCameraView( scene->view );	// lane PERFFIX4: previs culls only through this eye
 	wwCellUnderwaterFrame( scene );	// lane WATERUNDER3: the eye under water, decided before anything draws
 	if ( wwLookdevActive() ) {
 		PassTime::Scope pt( PassTime::SunShadows );	// lane PERF1
@@ -7289,6 +7290,23 @@ void GLView::wwCellStreamEvict()
 			cellStreamCountGeoEvicted( model, cx->evictUndrawnSince( since ) );
 	}
 	paintSec[paints++ & 3U] = sec;
+	/* lane PERFFIX4: THE POOL (src/gl/texpool.h). Textures stay until the resident bytes pass the preset's budget, then
+	 * the least recently bound go first; never what the last 3 paints bound. The 5 s timer below freed everything
+	 * unbound for 5 s and read 1456 of them again on a walk (driver pools x1.275). Red WW_STREAM1_RED=texpool: the
+	 * timer. WW_CELL_STREAM_TEXKEEP=0 still keeps everything. */
+	static const bool poolRed = PassTime::stream1Red( "texpool" );
+	if ( !poolRed ) {
+		if ( !keep || paints < 4 || sec < nextEvict )
+			return;
+		nextEvict = sec + 2U;
+		static const bool redoRedP = PassTime::stream1Red( "texredo" );
+		QStringList freedP;
+		cellStreamCountEvicted( model, textures->evictPool( cellStreamTexPoolBytes(), paintSec[paints & 3U],
+			redoRedP ? nullptr : &freedP ) );
+		for ( const QString & n : freedP )
+			CellTexAhead::forget( model, n );
+		return;
+	}
 	if ( !keep || paints < 4 || sec < nextEvict || sec <= keep )
 		return;
 	nextEvict = sec + 2U;
