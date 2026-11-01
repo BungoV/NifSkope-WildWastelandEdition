@@ -39,4 +39,22 @@ inline const char * wwSsgiSubName( int sub )
 	return sub >= 0 && sub < WwSsgiSubCount ? n[sub] : "";
 }
 
+/*! 3b: how the emitters reach the bounce. The reds are cellssgi.cpp's bits: 128 `noemissive`, 1024 `emitchain`.
+ *  Folded (the default): the ordinary march gathers them from its donor (the scene colour holds the emission), at
+ *  SSGI3's fill law like any other radiance: one cast, one temporal, one denoise, and the scene pass writes no
+ *  emission target. Chain (red `emitchain`, lane SSGI2's FO4CS row 16): stage 8's importance-sampled cast with its
+ *  own chain, the ordinary donor less the emission. None: no emission target (`noemissive`; draws as the fold). */
+enum WwSsgiEmissive { WwSsgiEmitFolded = 0, WwSsgiEmitChain = 1 };
+
+inline int wwSsgiEmissive( int red )
+{
+	return ( red & 1024 ) && !( red & 128 ) ? WwSsgiEmitChain : WwSsgiEmitFolded;
+}
+
+//! whether the scene pass writes the emission target (only the chain reads it)
+inline bool wwSsgiWantsEmissionTarget( int red )
+{
+	return wwSsgiEmissive( red ) == WwSsgiEmitChain;
+}
+
 #endif // CELLSSGIPLAN_H

@@ -25,6 +25,24 @@ static int subOf( int stage, bool emissive )
 #endif
 }
 
+static int emissiveOf( int red )
+{
+#if defined( SSGIPLAN_RED ) && SSGIPLAN_RED == 4
+	return ( red & 128 ) ? WwSsgiEmitFolded : WwSsgiEmitChain;	// before 3b: the emissive chain whenever not `noemissive`
+#else
+	return wwSsgiEmissive( red );
+#endif
+}
+
+static bool wantsTarget( int red )
+{
+#if defined( SSGIPLAN_RED ) && SSGIPLAN_RED == 4
+	return !( red & 128 );
+#else
+	return wwSsgiWantsEmissionTarget( red );
+#endif
+}
+
 int main()
 {
 	std::setvbuf( stdout, nullptr, _IONBF, 0 );
@@ -50,6 +68,13 @@ int main()
 		for ( int h = g + 1; h < WwSsgiSubCount; h++ )
 			names += std::strcmp( wwSsgiSubName( g ), wwSsgiSubName( h ) ) == 0;
 	check( names == 0, "3a: the group names are distinct" );
+	// 3b: the emitters fold into the ordinary march by default; the separate chain is the red
+	check( emissiveOf( 0 ) == WwSsgiEmitFolded, "3b: default: folded (one cast, one denoise)" );
+	check( !wantsTarget( 0 ), "3b: default: the scene pass writes no emission target" );
+	check( emissiveOf( 1024 ) == WwSsgiEmitChain && wantsTarget( 1024 ), "3b: red emitchain: stage 8's chain + its target" );
+	check( emissiveOf( 128 ) == WwSsgiEmitFolded && !wantsTarget( 128 ) && emissiveOf( 128 | 1024 ) == WwSsgiEmitFolded,
+		"3b: noemissive wins over emitchain (no target)" );
+	check( emissiveOf( 32 | 64 ) == WwSsgiEmitFolded, "3b: other reds keep the fold" );
 	std::printf( "SSGIPLAN %s %d failed\n", fails ? "FAIL" : "PASS", fails );
 	return fails ? 1 : 0;
 }

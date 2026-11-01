@@ -57,7 +57,8 @@ struct SsgiState
 	bool on = false, pinOn = false, pinQ = false;
 	int quality = 3;
 	int red = 0;	// 1 off, 2 stack, 4 notemporal, 8 noblur; lane SSGI2: 16 ign, 32 nohiz, 64 oldblur, 128 noemissive;
-					// lane SSGI3: 256 oldlaw (SSGI1's fill law); lane SSGI2FRAMES: 512 oldframes
+					// lane SSGI3: 256 oldlaw (SSGI1's fill law); lane SSGI2FRAMES: 512 oldframes;
+					// lane PERFFIX2: 1024 emitchain (3b: the emissive cast's own chain, cellssgiplan.h)
 	int pathFrame = -1;	// lane SSGI2FRAMES: the camera path's frame (wwCellSsgiSetPath), -1 a still view
 	int lastVerdict = -1;
 	char echo[240] = {};
@@ -84,7 +85,7 @@ SsgiState & st()
 		for ( const QByteArray & w : red.split( ',' ) )
 			s.red |= w == "off" ? 1 : w == "stack" ? 2 : w == "notemporal" ? 4 : w == "noblur" ? 8 : w == "ign" ? 16
 				: w == "nohiz" ? 32 : w == "oldblur" ? 64 : w == "noemissive" ? 128 : w == "oldlaw" ? 256
-				: w == "oldframes" ? 512 : 0;
+				: w == "oldframes" ? 512 : w == "emitchain" ? 1024 : 0;
 	}
 	return s;
 }
@@ -227,7 +228,7 @@ bool wwCellSsgiWantsScene( Scene * scene )
 
 bool wwCellSsgiWantsEmission( Scene * scene )
 {
-	return wwCellSsgiWantsScene( scene ) && !( st().red & 128 );
+	return wwCellSsgiWantsScene( scene ) && wwSsgiWantsEmissionTarget( st().red );	// lane PERFFIX2 (3b)
 }
 
 const char * wwCellSsgiEcho()
@@ -252,7 +253,7 @@ void wwCellSsgiPass( Scene * scene, bool run )
 		std::snprintf( s.echo, sizeof( s.echo ),
 			"cell ssgi: %s quality %d red %d noise %s hiz %s denoise %s emissive %s law %s frames %s",
 			words[verdict], s.quality, s.red, ( s.red & 16 ) ? "ign" : "fast", ( s.red & 32 ) ? "off" : "on",
-			( s.red & 8 ) ? "none" : ( s.red & 64 ) ? "5x5" : "robust+quarter", ( s.red & 128 ) ? "off" : "on",
+			( s.red & 8 ) ? "none" : ( s.red & 64 ) ? "5x5" : "robust+quarter", ( s.red & 128 ) ? "off" : wwSsgiEmissive( s.red ) == WwSsgiEmitChain ? "chain" : "folded",
 			( s.red & 256 ) ? "old" : "fill", !wwHarnessRun() ? "live" : ( s.red & 512 ) ? "per-paint" : "pinned" );
 		std::fprintf( stderr, "%s\n", s.echo );
 		s.lastVerdict = verdict;
@@ -262,7 +263,8 @@ void wwCellSsgiPass( Scene * scene, bool run )
 		g.eHistory = false;
 		return;
 	}
-	const bool emis = !( s.red & 128 ) && wwCellSsrEmissionTexture( scene, emitTex );
+	// lane PERFFIX2 (3b): the emitters ride the ordinary march (folded); red `emitchain`: the emissive cast's own chain
+	const bool emis = wwSsgiEmissive( s.red ) == WwSsgiEmitChain && wwCellSsrEmissionTexture( scene, emitTex );
 	auto fn = r->fn;
 	if ( g.unit < 0 ) {
 		GLint units = 0;

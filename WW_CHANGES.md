@@ -13,6 +13,12 @@ notes/perffix2/c/RESULTS.md.
   is the picture before (8 angles); a ported method's Ultra was FO4CS's 9x3 (now 4x3, mean |d| 0.0007 offline).
   Offline 1080p RTX 5070 Ti (tools aox_offline): vanilla 0.08 / 0.14 / 0.24 / 0.30 ms. Red WW_CELL_AO_QUALITY_RED=old:
   every tier as before (8 angles, 9x3). Unit tests/aomethod (-DAOTIER_RED fails).
+- SSGI EMISSIVE FOLD (item 3b): the emitters reach the bounce through the ordinary march (its donor, the scene colour,
+  holds the emission) at SSGI3's fill law like any radiance: one cast, one temporal, one denoise, and the scene pass
+  writes no emission target any more. Offline (synthetic room with a big and a small emitter, 1080p): Low 3.41 -> 1.88 ms,
+  Ultra 12.0 -> 6.39 ms; the emitters' share of the bounce 0.94 of the separate chain's (FO4CS's importance-sampled cast
+  with its facing law and small-emitter boost), their brightest 1 % nearer the emitter 1.9x. This is the path red
+  `noemissive` drew (byte-identical). Red WW_CELL_SSGI_RED=emitchain: SSGI2's stage-8 chain as before.
 
 ## FOAMOFF2 (FIX1101A, 2026-11-01): River foam and Contact foam stay OFF
 
