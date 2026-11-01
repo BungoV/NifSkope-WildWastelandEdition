@@ -21,6 +21,7 @@ enum Pass
 {
 	SunShadows, CellShadows, Background, Obscurance, Reflections, Air, Measure, UmbraDepth, Impostors,
 	Opaque, Sorted, Effects, FarCards, ToneMap, Post, Overlays, Ssgi, ReflProbes,	// lane REFLPROBE1: the placed reflection probes
+	Precip,	// lane PERFFIX3 D: rain / snow (cellprecip.cpp), only while the row draws
 	CullCamera, CullCascades,	// CPU only: the run culling inside the passes above
 	ShapeSetup,	// CPU only: the shapes' program and uniform setup inside the passes above
 	Count

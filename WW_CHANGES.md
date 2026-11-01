@@ -1,3 +1,22 @@
+## PERFFIX3 D (2026-11-01): precipitation computed on the GPU, culled, lit once a particle; its own timer
+
+Rain and snow no longer build every particle on the CPU and upload it each frame. The vertex shader computes each
+particle from its index (res/shaders/cell_precip_field.glsl, the GPU twin of src/gl/precipmath.h particleAt; the CPU
+hands it the seed hash, the per-variant tables and the wrap offsets in double, precipmath.h gpuRun). The vertex shader
+then culls every particle whose drawn quad cannot touch the view (about 90 % of them: the box is all round the camera);
+the geometry shader lights the kept ones ONCE at their centre (the same vpLight and fog as before, which the fragment
+shader used to run for every pixel of every quad) and the fragment shader only reads the texture. The fog is affine in
+the colour on the default paths, so albedo x A + B per pixel equals the old per-pixel fog.
+- The pass has its own Frame Timers zone, `precip` (CPU and GPU ms), only while the row draws.
+- Red `WW_CELL_PRECIP_RED=cpufield` (live): the old CPU field and per-pixel lighting (cell_precip.prog). The field red
+  `nowrap` has no GPU form and takes the CPU field too.
+- Unit test: `bash tests/precipgpu/run.sh <scratch>` runs the real vertex shader with transform feedback against
+  precipmath.h (rain, snow, hail, big clumps; near and far tiers; up to t = 3600 s; a camera 100 km from the origin):
+  positions within 0.0054 units, nothing visible culled; reds PC_FIELD_RED and PC_CULL_RED fail.
+- The row still ships OFF (DEFAULT-ON OWED: bungo has not seen it live).
+- snow_fine's atlas: the shipped DDS is the A6 build (the round after the rejected A5), measured: alpha within
+  BC7 error of notes/weatherlook1 A6's png. Nothing to swap; A6 is the one owed bungo's eye.
+
 ## FOAMOFF2 (FIX1101A, 2026-11-01): River foam and Contact foam stay OFF
 
 The water lane's foam fixes land: lace streaks instead of solid patches, and no foam on a dry bank. Its two rows still
