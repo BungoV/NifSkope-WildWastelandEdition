@@ -124,14 +124,21 @@ def main():
             rel = sum(num(cen[j], 'texReleasedMb') for j in (k - 1, k - 2) if j in cen)
             room = max(0.0, rel - num(cen[k], 'texBudgetMb'))
             if num(cen[k], 'texReloadedMb') > room + 0.05:
-                over.append('%d: %.1f MB > %.1f' % (k, num(cen[k], 'texReloadedMb'), room))
+                # lane STREAMTEX2: the reloads the pool's own frees caused, and what this crossing itself released
+                over.append('%d: %.1f MB > %.1f (pool frees %.1f, released here %.1f)'
+                            % (k, num(cen[k], 'texReloadedMb'), room, num(cen[k], 'texReloadedPoolMb', -1.0),
+                               num(cen[k], 'texReleasedMb')))
         kf = sum(int(num(r, 'texKeepFreed')) for r in cen.values())
         rl = sum(num(r, 'texReloadedMb') for r in cen.values())
+        # lane STREAMTEX2: of it, textures the pool's plan freed (the rest the keep timer's); n/a = an exe before it
+        hasp = all('texReloadedPoolMb' in r for r in cen.values())
+        rlp = '%.1f MB' % sum(num(r, 'texReloadedPoolMb') for r in cen.values()) if hasp else 'n/a'
         kept = max(num(r, 'texKeptMb') for r in cen.values())
         gate('(e) texture pool: no loaded cell\'s texture freed, no reload past the budget%s' % (' (RED off)' if red else ''),
              red or (kf == 0 and not over),
-             '%d crossings, keep-freed %d, reloaded %.1f MB, pool peak %.1f MB of %.0f, crossings past the bar %s'
-             % (len(keys), kf, rl, kept, num(cen[keys[0]], 'texBudgetMb'), over or 'none'))
+             '%d crossings, keep-freed %d, reloaded %.1f MB (the pool\'s own frees %s), pool peak %.1f MB of %.0f, '
+             'crossings past the bar %s'
+             % (len(keys), kf, rl, rlp, kept, num(cen[keys[0]], 'texBudgetMb'), over or 'none'))
     else:
         print('  SKIP  (e) texture pool: the dump has no texCrossing (an exe before STREAMTEX1)')
 

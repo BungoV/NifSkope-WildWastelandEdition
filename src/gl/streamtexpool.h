@@ -20,7 +20,13 @@
  *  the sky) keep the timer rule they had. A texture freed and loaded again within `reloadN` crossings is a reload.
  *
  *  Red (WW_CELL_STREAMTEX_RED=off): rule() is Timer for every texture and plan() names none, so the view frees what it
- *  freed before this lane; the counting still runs, so the census shows the old path's churn. */
+ *  freed before this lane; the counting still runs, so the census shows the old path's churn.
+ *
+ *  lane STREAMTEX2: while the stream still writes the cells a crossing wants, plan( busy, true ) trims only past twice
+ *  the budget: the row coming in has not noted its names yet, and a texture the row going out released is often one it
+ *  names (the live walk's (e) failed at crossing 2: 18.7 MB reloaded past the bar). Once written they are Keep, and the
+ *  settled view trims to the budget. The census splits the reloads by who freed them (the pool's plan or the timer).
+ *  Red WW_CELL_STREAMTEX_RED=busytrim: plan( busy, false ) always (cellstream.cpp). */
 template< class Key, class Hash = std::hash<Key> >
 class StreamTexPool
 {
@@ -37,6 +43,8 @@ public:
 		int released = 0;	//!< resident textures whose last loaded cell left in this crossing (they entered the pool)
 		std::uint64_t releasedBytes = 0;
 		int keepEvicted = 0;	//!< frees of a texture a loaded cell names (the timer's churn; 0 with the pool on)
+		int reloadedPool = 0;	//!< lane STREAMTEX2: of the reloads, textures the pool's plan freed (the rest: the timer's)
+		std::uint64_t reloadedPoolBytes = 0;
 	};
 
 	StreamTexPool( std::uint64_t budgetBytes, int reloadCrossings, bool red )
@@ -95,12 +103,16 @@ public:
 		if ( e.freedAt >= 0 && crossing - e.freedAt <= reloadN ) {
 			cur.reloaded++;
 			cur.reloadedBytes += bytes;
+			if ( e.poolFreed ) {	// lane STREAMTEX2
+				cur.reloadedPool++;
+				cur.reloadedPoolBytes += bytes;
+			}
 		}
 		e.freedAt = -1;
 	}
 
-	//! `k` was freed (by the timer, or by the view after plan() named it)
-	void freed( const Key & k )
+	//! `k` was freed (by the timer, or by the view after plan() named it: `byPool`, lane STREAMTEX2)
+	void freed( const Key & k, bool byPool = false )
 	{
 		auto it = entries.find( k );
 		if ( it == entries.end() || !it->second.resident )
@@ -109,6 +121,7 @@ public:
 		e.resident = false;
 		resident -= e.bytes;
 		e.freedAt = crossing;
+		e.poolFreed = byPool;
 		cur.evicted++;
 		cur.evictedBytes += e.bytes;
 		if ( e.refs > 0 )
@@ -140,12 +153,14 @@ public:
 	}
 
 	/*! the pool's textures to free now, oldest released first, until what is left fits the budget.
-	 *  `busy(k)` true = bound by a recent paint: kept this time (it still counts against the budget) */
-	std::vector<Key> plan( const std::function<bool( const Key & )> & busy = nullptr ) const
+	 *  `busy(k)` true = bound by a recent paint: kept this time (it still counts against the budget).
+	 *  lane STREAMTEX2: `writing` = the stream still writes a crossing's cells: trim only past twice the budget */
+	std::vector<Key> plan( const std::function<bool( const Key & )> & busy = nullptr, bool writing = false ) const
 	{
 		std::vector<Key> out;
 		if ( redOff )
 			return out;
+		const std::uint64_t line = writing ? budget * 2 : budget;
 		std::vector<std::pair<std::uint64_t, const Key *>> pool;
 		std::uint64_t held = 0;
 		for ( const auto & kv : entries ) {
@@ -155,11 +170,11 @@ public:
 				pool.emplace_back( e.released, &kv.first );
 			}
 		}
-		if ( held <= budget )
+		if ( held <= line )
 			return out;
 		std::sort( pool.begin(), pool.end(), []( const auto & a, const auto & b ) { return a.first < b.first; } );
 		for ( const auto & p : pool ) {
-			if ( held <= budget )
+			if ( held <= line )
 				break;
 			if ( busy && busy( *p.second ) )
 				continue;
@@ -213,6 +228,7 @@ private:
 		bool noted = false, base = false, resident = false;
 		std::uint64_t bytes = 0, released = 0;
 		int freedAt = -1;	//!< the crossing it was freed in (-1: loaded, or never freed)
+		bool poolFreed = false;	//!< lane STREAMTEX2: that free was the pool's plan (not the keep timer)
 	};
 	std::unordered_map<Key, Entry, Hash> entries;
 	std::unordered_map<Cell, std::unordered_set<Key, Hash>> cells;

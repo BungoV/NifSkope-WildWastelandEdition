@@ -11,6 +11,12 @@
  *
  *   WW_CELL_STREAMTEX_MB=<MB>     the pool's budget (default 256; 0 = keep none past their last cell)
  *   WW_CELL_STREAMTEX_RED=off     the keep timer frees every file texture, as before this lane (census still printed)
+ *
+ * lane STREAMTEX2: the pool's frees wait behind a GPU fence (src/gl/texgrave.h): a queued frame's rows may still name
+ * the freed textures' bindless handles. While the stream still writes a crossing's cells the pool trims only past twice
+ * its budget. The walk dump's texReloadedPoolMb = the reloads of textures the pool itself freed.
+ *   WW_CELL_STREAMTEX_RED=nofence  the pool's frees go at once (names and handles), as c289adbf did
+ *   WW_CELL_STREAMTEX_RED=busytrim the pool trims to its budget while a crossing's cells are still written
  */
 
 #include <QString>
@@ -23,6 +29,8 @@ class NifModel;
 
 //! WW_CELL_STREAMTEX_RED=off
 bool cellStreamTexRed();
+//! lane STREAMTEX2: WW_CELL_STREAMTEX_RED is exactly `name` (off, nofence, busytrim)
+bool cellStreamTexRedIs( const char * name );
 //! WW_CELL_STREAMTEX_MB in bytes
 qint64 cellStreamTexBudgetBytes();
 //! this document streams its cells (the names below are counted)
@@ -31,11 +39,12 @@ bool cellStreamTexCounting( const NifModel * nif );
 void cellStreamTexNote( const NifModel * nif, int block, const QStringList & names );
 //! the texture cache uploaded `name` (`bytes` of it)
 void cellStreamTexLoaded( const NifModel * nif, const QString & name, qint64 bytes );
-//! the view freed `name` (`counted` false: it was not loaded any more, a flush took it)
-void cellStreamTexFreed( const NifModel * nif, const QString & name, bool counted = true );
+//! the view freed `name` (`counted` false: it was not loaded any more, a flush took it; `byPool`: the pool's plan did)
+void cellStreamTexFreed( const NifModel * nif, const QString & name, bool counted = true, bool byPool = false );
 //! false = a loaded cell names it or the pool owns it: the keep timer leaves it alone
 bool cellStreamTexTimerMayFree( const NifModel * nif, QStringView name );
 //! the pool's textures to free now; busy(name) true = bound by one of the last 3 paints, kept this time
+//! (lane STREAMTEX2: past twice the budget only while the stream still writes a crossing's cells; red busytrim)
 QStringList cellStreamTexPlan( const NifModel * nif, const std::function<bool( const QString & )> & busy );
 
 #endif

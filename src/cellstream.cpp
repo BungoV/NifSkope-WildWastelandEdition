@@ -1222,9 +1222,9 @@ void Stream::texCensus()
 	st.texPairs = QStringLiteral( "texCrossing %1 texKept %2 texKeptMb %3 texRefd %4 texRefdMb %5 texFreed %6 texFreedMb %7 " )
 		.arg( c.crossing ).arg( c.kept ).arg( mb( c.keptBytes ) ).arg( c.refd ).arg( mb( c.refdBytes ) ).arg( c.evicted )
 		.arg( mb( c.evictedBytes ) )
-		+ QStringLiteral( "texReloadedN %1 texReloadedMb %2 texReleasedMb %3 texLoadsMb %4 texKeepFreed %5 texBudgetMb %6 texRed %7" )
+		+ QStringLiteral( "texReloadedN %1 texReloadedMb %2 texReleasedMb %3 texLoadsMb %4 texKeepFreed %5 texBudgetMb %6 texRed %7 texReloadedPoolMb %8" )
 		.arg( c.reloaded ).arg( mb( c.reloadedBytes ) ).arg( mb( c.releasedBytes ) ).arg( mb( c.loadBytes ) ).arg( c.keepEvicted )
-		.arg( mb( texPool.budgetBytes() ) ).arg( texPool.red() ? 1 : 0 );
+		.arg( mb( texPool.budgetBytes() ) ).arg( texPool.red() ? 1 : 0 ).arg( mb( c.reloadedPoolBytes ) );	// lane STREAMTEX2
 	st.texReloaded += c.reloaded;
 	st.texKeepEvicted += c.keepEvicted;
 	texCentre = Key( ccx, ccy );
@@ -1372,6 +1372,13 @@ bool cellStreamTexRed()
 	return red;
 }
 
+bool cellStreamTexRedIs( const char * name )
+{
+	// lane STREAMTEX2: off (STREAMTEX1), nofence (the pool frees at once), busytrim (the budget mid-write); cellstreamtex.h
+	WW_SWITCH_STATIC( QString, red, wwEnvStr( "WW_CELL_STREAMTEX_RED" ).trimmed() );
+	return red == QLatin1String( name );
+}
+
 /* lane STREAMTEX1: 256 MB. The walk's bar is 1.05 x the fresh open's private memory; STREAMMEM1's walk opened at
  * 11788 MB, so the bar leaves 589 MB for everything the walk adds. Half of that is the geometry cache's own floor
  * (STREAM1: VRAM/8, never under 256 MB), the other half this pool: a walk back finds the row it left loaded when
@@ -1405,11 +1412,11 @@ void cellStreamTexLoaded( const NifModel * nif, const QString & name, qint64 byt
 		s->texPool.loaded( name, std::uint64_t( std::max<qint64>( bytes, 0 ) ) );
 }
 
-void cellStreamTexFreed( const NifModel * nif, const QString & name, bool counted )
+void cellStreamTexFreed( const NifModel * nif, const QString & name, bool counted, bool byPool )
 {
 	if ( Stream * s = streamFor( nif ) ) {
 		if ( counted )
-			s->texPool.freed( name );
+			s->texPool.freed( name, byPool );	// lane STREAMTEX2: the census splits the reloads by who freed them
 		else
 			s->texPool.gone( name );
 	}
@@ -1425,7 +1432,8 @@ QStringList cellStreamTexPlan( const NifModel * nif, const std::function<bool( c
 {
 	QStringList out;
 	if ( const Stream * s = streamFor( nif ) )
-		for ( QString & n : s->texPool.plan( busy ) )
+		// lane STREAMTEX2: a crossing's cells not all written yet = their names not noted: trim past twice the budget only
+		for ( QString & n : s->texPool.plan( busy, s->busy() && !cellStreamTexRedIs( "busytrim" ) ) )
 			out.append( std::move( n ) );
 	return out;
 }

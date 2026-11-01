@@ -279,6 +279,7 @@ HEADERS += \
 	src/gl/cellpasstime.h \
 	src/gl/geokeepclock.h \
 	src/gl/streamtexpool.h \
+	src/gl/texgrave.h \
 	src/gl/cellqueue.h \
 	src/gl/celldrawpacket.h \
 	src/gl/cellbindless.h \

@@ -34,6 +34,7 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #define GLTEX_H_INCLUDED
 
 #include "gl/glcontext.hpp"
+#include "gl/texgrave.h"	// lane STREAMTEX2: the pool's fenced frees
 
 #include <QObject> // Inherited
 #include <QByteArray>
@@ -213,7 +214,9 @@ protected:
 	//! lane STREAMTEX1: the entry for `file` if the cache has one (no insert)
 	Tex * findTex( QStringView file ) const;
 	//! lane STREAMTEX1: deletes a loaded file texture's GL names (evictUnused's free, shared with evictNamed)
-	void freeLoaded( Tex & tx );
+	void freeLoaded( Tex & tx, bool fenced = false );
+	//! lane STREAMTEX2: `fenced` (freeLoaded, evictNamed) = names buried here, released by wwGraveSweep (fence = a GLsync)
+	TexGrave<void *> grave;
 	//! Load the texture
 	std::uint16_t loadTex( Tex & tx, const NifModel * nif );
 	bool draining = false;	// lane PERF1: loadTex is uploading the read-ahead's ready files
@@ -256,7 +259,13 @@ public:
 	//! lane STREAMTEX1: `mayFree` (set) false = left loaded (the stream's pool: a loaded cell names it)
 	int evictUnused( std::uint32_t tick, QStringList * names = nullptr, const std::function<bool( QStringView )> & mayFree = nullptr );
 	//! lane STREAMTEX1: frees these files' textures (the stream pool's plan); names not loaded go to `missing`
-	int evictNamed( const QStringList & names, QStringList * freed = nullptr, QStringList * missing = nullptr );
+	int evictNamed( const QStringList & names, QStringList * freed = nullptr, QStringList * missing = nullptr, bool fenced = false );
+	/*! lane STREAMTEX2: `fenced` = the GL names and their bindless handles go behind one fence taken after the frees
+	 *  (a queued frame's rows may still name the handles); the entries forget the names at once, so a bind loads the
+	 *  file into new ones. wwGraveSweep (each streamed paint) releases what the GPU is past: non-resident, then deleted */
+	int wwGraveSweep();
+	//! lane STREAMTEX2: textures freed behind a fence the GPU has not passed yet
+	int wwGraveCount() const { return int( grave.size() ); }
 	//! lane STREAMTEX1: the use clock `file` was last bound at (0: not in the cache)
 	std::uint32_t wwUseTick( QStringView file ) const;
 	/*! lane PERF5: BSShaderLightingProperty::bind sets the same wrap, filter and anisotropy on a texture every draw;

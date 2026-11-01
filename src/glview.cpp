@@ -7253,6 +7253,8 @@ void GLView::wwCellStreamEvict()
 	// lane CELLSTREAM1: file textures no paint has bound for a while (a cell that left, mostly) are freed every
 	// few seconds, in a paint (the context is current). What the last 3 paints bound stays however slow they were:
 	// a wall clock alone freed the textures of a paint longer than the keep, which loaded them all again
+	if ( textures )	// lane STREAMTEX2: the pool's fenced frees the GPU is past (also after the stream stopped)
+		textures->wwGraveSweep();
 	if ( !textures || !model || !cellStreamOn( model ) )
 		return;
 	static QElapsedTimer clock;
@@ -7281,6 +7283,12 @@ void GLView::wwCellStreamEvict()
 	 * budget (WW_CELL_STREAMTEX_MB); what the last 3 paints bound stays. Red WW_CELL_STREAMTEX_RED=off: none here,
 	 * and the keep timer below frees every file texture as before */
 	static const bool texRed = cellStreamTexRed();
+	/* lane STREAMTEX2: the plan's textures go behind a GPU fence. The plan frees what 4 paints ago drew (the keep timer
+	 * waits 5 s), and rows of frames still queued on the GPU may name those textures' bindless handles: the names and
+	 * handles are released at the top of a later paint, once the GPU passed the fence (wwGraveSweep above). Red
+	 * WW_CELL_STREAMTEX_RED=nofence: freed at once, as c289adbf did (its Concord walk died at crossing ~12, rc 127,
+	 * with bindless draws on; 22 steps with WW_BINDLESS=0) */
+	static const bool texNoFence = cellStreamTexRedIs( "nofence" );
 	static std::uint32_t nextPool = 0;
 	if ( !texRed && paints >= 4 && sec >= nextPool ) {
 		nextPool = sec + 2U;
@@ -7289,9 +7297,9 @@ void GLView::wwCellStreamEvict()
 		const QStringList plan = cellStreamTexPlan( model, [tc, recent]( const QString & n ) { return tc->wwUseTick( n ) >= recent; } );
 		if ( !plan.isEmpty() ) {
 			QStringList gone, missing;
-			cellStreamCountEvicted( model, textures->evictNamed( plan, &gone, &missing ) );
+			cellStreamCountEvicted( model, textures->evictNamed( plan, &gone, &missing, !texNoFence ) );
 			for ( const QString & n : gone ) {
-				cellStreamTexFreed( model, n );
+				cellStreamTexFreed( model, n, true, true );	// lane STREAMTEX2: the pool's free (its reload is the pool's)
 				if ( !redoRed )
 					CellTexAhead::forget( model, n );
 			}
