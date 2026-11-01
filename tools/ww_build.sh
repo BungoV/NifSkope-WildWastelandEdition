@@ -85,13 +85,13 @@ fi
 # tools/ww_build_times.py). The build's wall time is printed either way.
 JOBS="${WW_BUILD_JOBS:-2}"
 case "$JOBS" in ''|*[!0-9]*) JOBS=2 ;; esac
-CXXOVR=""
+CXXOVR=""; CTLOG=""
 if [ -n "${WW_BUILD_TIMES:-}" ]; then
-	export WW_CTIME_LOG="$(cygpath -u "$WW_BUILD_TIMES" 2>/dev/null || echo "$WW_BUILD_TIMES")"
+	CTLOG="$(cygpath -u "$WW_BUILD_TIMES" 2>/dev/null || echo "$WW_BUILD_TIMES")"	# the MSYS2 login shell drops exported vars: passed as $3
 	CXXOVR="CXX=$ROOT/tools/ww_ctime.sh g++"
 fi
 bt0=$(date +%s)
-MSYSTEM=UCRT64 CHERE_INVOKING=1 /c/msys64/usr/bin/bash -lc 'export PATH="$PATH:/e/Tools/GIT/cmd"; cd "$1" || exit 2; j="$2"; shift 2; make -j"$j" "$@" > release/ww_build.log 2>&1; rc=$?; grep -E "error:|Error [0-9]" release/ww_build.log | head -20; echo BUILD-RC=$rc; exit $rc' _ "$ROOT" "$JOBS" ${CXXOVR:+"$CXXOVR"}
+MSYSTEM=UCRT64 CHERE_INVOKING=1 /c/msys64/usr/bin/bash -lc 'export PATH="$PATH:/e/Tools/GIT/cmd"; cd "$1" || exit 2; j="$2"; [ -n "$3" ] && export WW_CTIME_LOG="$3"; shift 3; make -j"$j" "$@" > release/ww_build.log 2>&1; rc=$?; grep -E "error:|Error [0-9]" release/ww_build.log | head -20; echo BUILD-RC=$rc; exit $rc' _ "$ROOT" "$JOBS" "$CTLOG" ${CXXOVR:+"$CXXOVR"}
 rc=$?
 echo "build wall $(( $(date +%s) - bt0 )) s (make -j$JOBS)"
 ls -l --time-style=+%H:%M:%S release/NifSkope.exe
