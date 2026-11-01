@@ -34,6 +34,14 @@ struct WwClusterParams
 	int maxPerCluster = 512;
 	bool redMidSlice = false;   //!< the refuter: each slice culled as its middle depth only (lights at its edges get dropped)
 	double jitterPadPx = 0.0;   //!< LIGHTCLUSTER1: extra tile slack, so lists built under one TAA jitter serve another this far off
+	/*! lane PERFFIX2 a: the build runs on the calling thread. LIGHTSYS2 split it over up to 8 threads from 128 lights;
+	 *  a thread start costs more than the whole build at the cell's light counts (Goodneighbor 149 lights: 1.3 ms
+	 *  threaded, 0.13 one thread; 1024 lights: 2.0 vs 0.9), and the merge keeps each list in ascending light order
+	 *  either way, so the lists are the same. threadsFrom > 0 brings the split back from that many lights. */
+	int threadsFrom = 0;
+	/*! lane PERFFIX2 a: the red (WW_CELL_CLUSTER_RED=oldbuild): LIGHTSYS2's threads (from 128 lights) and its box loop
+	 *  (8 corners unprojected per cluster; the green unprojects each tile edge once a slice, the same doubles) */
+	bool redOldBuild = false;
 };
 
 //! LIGHTCLUSTER1: a cluster's view-space box, as the culling tests it (float, corners rounded outward).
@@ -50,6 +58,7 @@ struct WwClusterScratch
 	int vp[4] = {}, tilePx = 0, slices = 0;
 	double padPx = -1.0;
 	bool redMidSlice = false;
+	bool redOldBuild = false;	// lane PERFFIX2 a: the boxes as the red built them (the same values; kept apart for its cost)
 	std::vector<WwClusterBox> boxes;
 	std::vector<double> sliceLo, sliceHi;
 	int hits = 0, misses = 0;

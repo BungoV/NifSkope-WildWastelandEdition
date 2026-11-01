@@ -1,3 +1,26 @@
+## PERFFIX2 a item 6 (2026-11-01): the light cluster build on one thread, its boxes from the tile edges (same lists)
+
+The cluster lists (LIGHTSYS2 / LIGHTCLUSTER1) are rebuilt on every frame the camera moves, once per kept grid. The live
+build cost 1.6-4.9 ms at Goodneighbor 5x5 (149 lights; merge1029c cost2 notes, `build N ms` echoes) and 0.03-0.62 ms
+at Concord (40 lights). Most of it was not the work: from 128 lights the build started up to 8 threads per call, and a
+thread start costs more than the whole build at these light counts; a fresh box set called MinGW's nextafterf 6 times a
+cluster. Now the build runs on the calling thread (the merge kept each list in ascending light order either way, so the
+lists are the same), each box's x range comes from its tile column and slice and its y range from its row and slice (the
+same unproject calls, so the same doubles), and the outward float rounding is done by the bits.
+- Offline (tests/clusterexact bench, 1920x1026, MEASURED on this machine): build median Goodneighbor-like 149 lights
+  1.315 -> 0.110 ms, Concord-like 40 lights 0.077 -> 0.072 ms, 1024 lights 1.979 -> 0.810 ms; a fresh box set
+  0.75-3.0 -> 0.24-0.96 ms.
+- Code: src/gl/cellcluster.{h,cpp} (no switch read: pure C++ now), src/gl/cellclustergl.cpp.
+- Red: WW_CELL_CLUSTER_RED=oldbuild (live): LIGHTSYS2's threads from 128 lights and its corner-by-corner boxes.
+  WW_CELL_CLUSTER_THREADS_FROM=<n> splits again from n lights. WW_CELL_CLUSTER_THREADS1 is gone (one thread is the rule).
+- Check key: WW_CELL_CLUSTER_DUMP=<file> (live) writes the first 48 builds' camera and view-space lights (hex floats),
+  the recorded sets tests/clusterexact replays.
+- Unit: tests/clusterexact (g++, no Qt): the old and the new build give the same cells, index and boxes, int for int
+  and float for float, on every recorded set and on synthetic 16..1024-light sets, under a forced split and fresh too; a
+  control (the midslice refuter) must differ; the new build's median <= 0.2 ms on each recorded set. `-DCLUSTER_RED`
+  times the old build and fails.
+- Default: unchanged (clusters ship on under Cell lights; the lists are the same).
+
 ## PERFFIX2 a item 4 (2026-11-01): the reflection probes' camera probe is drawn and relit only when something changed
 
 REFLPROBE1's camera probe (slot 0, RDR2-style, snapped to 128 u) drew one face of its G-buffer cube every frame forever

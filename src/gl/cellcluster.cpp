@@ -4,13 +4,15 @@ BSD License - see nifskope.h
 
 ***** END LICENCE BLOCK *****/
 
-#include "cellcluster.h"
-#include "wwswitch.h"	// lane TESTDRIVER1: the WW_* switch store
+#include "cellcluster.h"	// lane PERFFIX2 a: no switch read here any more (WW_CELL_CLUSTER_THREADS1 is a param): pure C++
 
 #include <algorithm>
 #include <chrono>
 #include <cmath>
+#include <cstdint>
 #include <cstdlib>
+#include <cstring>
+#include <limits>
 #include <thread>
 
 namespace {
@@ -80,6 +82,25 @@ struct Box
 
 // The tests run in float: the pads above dwarf its rounding.
 using FBox = WwClusterBox;
+
+/* lane PERFFIX2 a: std::nextafter( x, -+HUGE_VALF ) by the bits (MinGW's libm call was most of a fresh box build):
+ * the next float down (toward -inf) / up (toward +inf); tests/clusterexact checks it equals std::nextafter */
+inline float floatDown( float x )
+{
+	if ( x != x || x == -HUGE_VALF )
+		return x;
+	if ( x == 0.0f )
+		return -std::numeric_limits<float>::denorm_min();
+	std::uint32_t u;
+	std::memcpy( &u, &x, 4 );
+	u = x > 0.0f ? u - 1u : u + 1u;
+	std::memcpy( &x, &u, 4 );
+	return x;
+}
+inline float floatUp( float x )
+{
+	return -floatDown( -x );
+}
 
 struct FLight
 {
@@ -190,7 +211,8 @@ bool wwClusterBuild( const float proj[16], const int vp[4], const std::vector<Ww
 	WwClusterScratch local;
 	WwClusterScratch & sc = scratch ? *scratch : local;
 	const bool same = !sc.boxes.empty() && std::equal( proj, proj + 16, sc.proj ) && std::equal( vp, vp + 4, sc.vp )
-		&& sc.tilePx == g.tilePx && sc.slices == g.slices && sc.padPx == padPx && sc.redMidSlice == params.redMidSlice;
+		&& sc.tilePx == g.tilePx && sc.slices == g.slices && sc.padPx == padPx && sc.redMidSlice == params.redMidSlice
+		&& sc.redOldBuild == params.redOldBuild;
 	if ( same ) {
 		sc.hits++;
 	} else {
@@ -198,6 +220,7 @@ bool wwClusterBuild( const float proj[16], const int vp[4], const std::vector<Ww
 		std::copy( proj, proj + 16, sc.proj );
 		std::copy( vp, vp + 4, sc.vp );
 		sc.tilePx = g.tilePx, sc.slices = g.slices, sc.padPx = padPx, sc.redMidSlice = params.redMidSlice;
+		sc.redOldBuild = params.redOldBuild;
 		std::vector<double> & sliceLo = sc.sliceLo, & sliceHi = sc.sliceHi;
 		sliceLo.assign( size_t( g.slices ), 0.0 );
 		sliceHi.assign( size_t( g.slices ), 0.0 );
@@ -236,21 +259,59 @@ bool wwClusterBuild( const float proj[16], const int vp[4], const std::vector<Ww
 		};
 		std::vector<FBox> & boxes = sc.boxes;
 		boxes.assign( size_t( g.clusterCount() ), FBox() );
-		for ( int sz = 0; sz < g.slices; sz++ )
+		/* lane PERFFIX2 a: a corner's view x depends on its NDC x and depth only, y on its NDC y and depth (unproject),
+		 * so a box's x range is its tile column's and its slice's, the same for every row: each column edge and each row
+		 * edge is unprojected once a slice (the same calls, so the same doubles), and the boxes take min / max of them */
+		std::vector<double> xLo, xHi, yLo, yHi;	// per slice: per column, per row
+		if ( !params.redOldBuild ) {
+			xLo.resize( size_t( g.tilesX ) ), xHi.resize( size_t( g.tilesX ) );
+			yLo.resize( size_t( g.tilesY ) ), yHi.resize( size_t( g.tilesY ) );
+		}
+		for ( int sz = 0; sz < g.slices; sz++ ) {
+			if ( !params.redOldBuild ) {
+				const double d[2] = { sliceLo[size_t( sz )], sliceHi[size_t( sz )] };
+				for ( int tx = 0; tx < g.tilesX; tx++ ) {
+					const double nx[2] = { ndcX( tx * g.tilePx - padPx ), ndcX( ( tx + 1 ) * g.tilePx + padPx ) };
+					double lo = 1e300, hi = -1e300;
+					for ( double dd : d )
+						for ( double xx : nx ) {
+							double x, y;
+							P.unproject( xx, 0.0, dd, x, y );
+							lo = std::min( lo, x );
+							hi = std::max( hi, x );
+						}
+					xLo[size_t( tx )] = lo, xHi[size_t( tx )] = hi;
+				}
+				for ( int ty = 0; ty < g.tilesY; ty++ ) {
+					const double ny[2] = { ndcY( ty * g.tilePx - padPx ), ndcY( ( ty + 1 ) * g.tilePx + padPx ) };
+					double lo = 1e300, hi = -1e300;
+					for ( double dd : d )
+						for ( double yy : ny ) {
+							double x, y;
+							P.unproject( 0.0, yy, dd, x, y );
+							lo = std::min( lo, y );
+							hi = std::max( hi, y );
+						}
+					yLo[size_t( ty )] = lo, yHi[size_t( ty )] = hi;
+				}
+			}
 			for ( int ty = 0; ty < g.tilesY; ty++ )
 				for ( int tx = 0; tx < g.tilesX; tx++ ) {
-					const Box b = clusterBox( tx, ty, sz );
+					const Box b = params.redOldBuild ? clusterBox( tx, ty, sz )
+						: Box { { xLo[size_t( tx )], yLo[size_t( ty )], std::min( -sliceLo[size_t( sz )], -sliceHi[size_t( sz )] ) },
+							{ xHi[size_t( tx )], yHi[size_t( ty )], std::max( -sliceLo[size_t( sz )], -sliceHi[size_t( sz )] ) } };
 					FBox & f = boxes[size_t( ( sz * g.tilesY + ty ) * g.tilesX + tx )];
 					double rad2 = 0.0;
 					for ( int k = 0; k < 3; k++ ) {
 						// float rounding of the corners goes outward
-						f.lo[k] = std::nextafter( float( b.lo[k] ), -HUGE_VALF );
-						f.hi[k] = std::nextafter( float( b.hi[k] ), HUGE_VALF );
+						f.lo[k] = params.redOldBuild ? std::nextafter( float( b.lo[k] ), -HUGE_VALF ) : floatDown( float( b.lo[k] ) );
+						f.hi[k] = params.redOldBuild ? std::nextafter( float( b.hi[k] ), HUGE_VALF ) : floatUp( float( b.hi[k] ) );
 						f.c[k] = float( 0.5 * ( b.lo[k] + b.hi[k] ) );
 						rad2 += 0.25 * ( b.hi[k] - b.lo[k] ) * ( b.hi[k] - b.lo[k] );
 					}
 					f.rad = float( std::sqrt( rad2 ) * ( 1.0 + kPadRadius ) );
 				}
+		}
 	}
 	const std::vector<double> & sliceLo = sc.sliceLo, & sliceHi = sc.sliceHi;
 	const std::vector<FBox> & boxes = sc.boxes;
@@ -267,8 +328,9 @@ bool wwClusterBuild( const float proj[16], const int vp[4], const std::vector<Ww
 		std::vector<std::int32_t> cluster, light;
 		int offscreen = 0;
 	};
-	const int threads = lights.size() < 128 || wwEnvIsSet( "WW_CELL_CLUSTER_THREADS1" ) ? 1
-		: int( std::clamp( std::thread::hardware_concurrency(), 1u, 8u ) );
+	// lane PERFFIX2 a: one thread (threadsFrom, the red: LIGHTSYS2's split from 128 lights)
+	const size_t from = params.redOldBuild ? 128u : params.threadsFrom > 0 ? size_t( params.threadsFrom ) : ~size_t( 0 );
+	const int threads = lights.size() < from ? 1 : int( std::clamp( std::thread::hardware_concurrency(), 1u, 8u ) );
 	std::vector<Chunk> chunks( static_cast<size_t>( threads ) );
 	auto work = [&]( int t ) {
 		Chunk & ch = chunks[size_t( t )];
