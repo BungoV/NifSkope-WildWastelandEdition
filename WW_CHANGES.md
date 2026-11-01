@@ -1,3 +1,28 @@
+## PERFFIX3 E (2026-11-01): water timers, the split cut, one refraction copy a pass, underwater fog at every preset
+
+PERFRES1101 group B found three water costs nobody could see and one default below vanilla. This section fixes them.
+- **The water has its own timers.** The pass table (WW_CELL_PASSTIME_LOG) prints `sub water` (every water colour draw,
+  summed), `sub water-copy` (its refraction copies), `sub underwater` (the camera-under-water pass), and `cpu water` /
+  `cpu underwater`. Before this, the water's ms hid inside "sorted", and the underwater pass sat outside every zone.
+- **The split cut (fo4_waterdisp.tesc).** No vertex step is finer than the heights' own 64 u filter. The pre-split
+  1024 u quads used to split down to 16 u, so the GPU sampled a field already smoothed over 64 u four times over: about
+  1 M triangles near the camera. Measured offline with the live frame format (tests/watertess, 1080p 4x MSAA RGBA32F):
+  the split cost +0.56 to +0.75 ms over the flat twin, against +1.39 to +1.52 before. 4 std(z) near the camera is 0.887
+  of the sea's Hs (0.882 before), with no cracks. High draws the spectrum's normals on the flat surface, so the
+  displacement is Ultra only. Red WW_CELL_WATER_OCEAN_RED=densetess (live) brings back both the dense splits and the
+  displaced High.
+- **One refraction copy a second pass (Scene::grabRefractionSource).** Before, the water blitted the whole linear frame
+  for EVERY water draw (a 4x RGBA32F resolve, ~0.14-0.18 ms each, 30+ water shapes in a 5x5 water scene). The second
+  pass draws all its water back to back, with nothing else between. One copy at the first water therefore holds what
+  each later copy held, except where a later water body lies over an earlier one. There it now reads the frame behind
+  both, not the first body's colour (tests/waterrefr: 0 px apart for apart and adjacent bodies, only the overlap moves).
+  Red WW_CELL_WATER_REFR_RED=perdraw (live). Census line: `water refraction: N copies, M reused`.
+- **Underwater fog at every water preset, ON by default** (new key WW/CellUnderwater2). The game always fogs under
+  water: its WATR INAM imagespace's depth-of-field fog (WATERUNDER3). The row used to ship OFF, and only Ultra let it
+  draw. Above water the pass makes no GL call, so the default frame above water is unchanged. Red
+  WW_CELL_UNDERWATER_RED=ultraonly (live) restores the old rule: the old key, OFF by default, Ultra only. Test:
+  tests/waterpreset rules 5-6, and -DUNDERFOG_RED fails rule 5.
+
 ## FOAMOFF2 (FIX1101A, 2026-11-01): River foam and Contact foam stay OFF
 
 The water lane's foam fixes land: lace streaks instead of solid patches, and no foam on a dry bank. Its two rows still

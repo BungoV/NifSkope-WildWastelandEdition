@@ -50,6 +50,7 @@ enum Sub { AirTile, AirInject, AirIntegrate, AoGeometry, AoStages, AoGi, ToneBli
 	FxResDown, FxResLayer, FxResComp,	// lane FXRES1: the soft-effect layer's depth, draws and composite
 	AirPre, AirFar, AirPost,
 	FarGroundPaint, FarGroundDraw,	// lane FARPAGES1: the far ground's page paint + BC1, ring 0's ground draws
+	WaterDraw, WaterCopy, Underwater,	// lane PERFFIX3: the water's colour draws (each, summed; the copy inside), its refraction copies, the camera-under-water pass
 	SubCount };	// lane FOGPERF1: the air before stage 0 (depth blit), its far grid, after it
 void subBegin( int sub );
 //! lane PERF2: CPU time inside the per-draw setup (setupProgram and the cell's uniform calls), summed per frame
@@ -57,6 +58,7 @@ enum CpuSub { CpuSetup, CpuCellUni, CpuSunUni, CpuFogUni, CpuAoDraw, CpuSsrDraw,
 	// lane FOGPERF1: the air pass's CPU, stage by stage (they sum to the air zone's CPU)
 	CpuAirState, CpuAirSetup, CpuAirClusters, CpuAirTile, CpuAirInject, CpuAirInteg, CpuAirFar, CpuAirTail, CpuAirEcho,
 	CpuBlGeo, CpuBlRow,	// lane BINDLESSPERF1: a bindless draw's pooled geometry bind and its row write
+	CpuWater, CpuUnder,	// lane PERFFIX3: the water's colour draws (setup + issue), the under-water decision + pass
 	CpuSubCount };
 qint64 nowNs();
 void cpuSubAdd( int sub, qint64 ns );
