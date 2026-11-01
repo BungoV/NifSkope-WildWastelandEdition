@@ -41,6 +41,7 @@ BSD License - see nifskope.h
 #include "rtddgicell.h"	// lane RTXGI1 M2: the ray-traced GI volume's read (rtddgiCellUniforms)
 #include "gl/cloudvol.h"	// lane LIGHTNING2: a storm's flash on the exterior ambient (wwLightningGround)
 #include "cellworldanim.h"	// lane NIFXLIGHT3: the world clock a .nifx light's dimmer follows
+#include "gl/atmosphere.h"	// lane FIX1101A (atmo): wwAtmoWbGain, the test white balance
 
 #include <QDateTime>
 #include <QElapsedTimer>
@@ -2153,6 +2154,9 @@ void wwCellLightsUniforms( Scene * scene )
 		prog->uni3f( "cellIsCine", LI->isCine[0], LI->isCine[1], LI->isCine[2] );
 		prog->uni4f_l( prog->uniLocation( "cellIsTint" ), FloatVector4( LI->isTint[0], LI->isTint[1], LI->isTint[2], LI->isTint[3] ) );
 		prog->uni1i( "cellIsRed", s.isRed );
+		float wb[3];	// lane FIX1101A (atmo): WW_CELL_WB (off = 1, 1, 1: the uniform 0, the shader x 1 exactly)
+		wwAtmoWbGain( wb );
+		prog->uni3f( "cellIsWbD", wb[0] - 1.0f, wb[1] - 1.0f, wb[2] - 1.0f );
 	}
 	prog->uni1i( "cellLights", kTextureUnit );
 	// the cluster lists: their sampler bound on every draw, the lists only on a lit one

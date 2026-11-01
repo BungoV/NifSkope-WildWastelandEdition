@@ -904,6 +904,35 @@ bool wwAtmoKeyLight( float muLight, const float fog[4], float keyLum45, float su
 	return true;
 }
 
+void wwAtmoWbGain( float out[3] )
+{
+	out[0] = out[1] = out[2] = 1.0f;
+	const QString e = wwEnvStr( "WW_CELL_WB" ).trimmed().toLower();
+	if ( e.isEmpty() || e == QLatin1StringView( "off" ) || e == QLatin1StringView( "0" ) )
+		return;
+	QString how;
+	if ( e == QLatin1StringView( "day45" ) ) {
+		const AtState & s = as();
+		float t45[3];
+		cpuTrans( 0.0f, 0.70710678f, s.haze, false, t45, g_ozone );	// the last drawn sky's air (clear air before one)
+		const float l = lum( t45 );
+		for ( int c = 0; c < 3; c++ )
+			out[c] = t45[c] > 1e-6f ? l / t45[c] : 1.0f;
+		how = QStringLiteral( "day45(haze=%1/km@%2km)" ).arg( double( s.haze[0] ), 0, 'f', 3 ).arg( double( s.haze[1] ), 0, 'f', 3 );
+	} else {
+		const QStringList p = e.split( QChar( ',' ) );
+		if ( p.size() == 3 )
+			for ( int c = 0; c < 3; c++ )
+				out[c] = std::clamp( p.at( c ).toFloat(), 0.05f, 20.0f );
+		how = QStringLiteral( "explicit" );
+	}
+	static float last[3] = { -1.0f, -1.0f, -1.0f };
+	if ( !std::equal( out, out + 3, last ) ) {
+		std::copy( out, out + 3, last );
+		fprintf( stderr, "cell wb: %s gain=%.4f,%.4f,%.4f\n", qPrintable( how ), double( out[0] ), double( out[1] ), double( out[2] ) );
+	}
+}
+
 void wwAtmoApFrame()
 {
 	for ( AtGpu & g : gpus() )
