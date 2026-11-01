@@ -440,6 +440,20 @@ inline float crushWeight( float w )
 {
 	return w < kCrush ? w * w * w / ( kCrush * kCrush ) : w;
 }
+/*! GIFIX1101 1B: the bounce's albedo with its chroma scaled by s about its luminance (Rec.709, linear), luminance kept,
+ *  each channel clamped 0..1: a' = L + s (a - L). s = 1 = the albedo as read (today's); 0 = grey bounce. Only the light
+ *  a probe ray's hit sends on takes it; the drawn surfaces keep their texture */
+inline void bounceAlbedo( float a[3], float s )
+{
+#ifdef RTDDGI_RED_BOUNCESAT
+	s = 1.0f;   // red: the albedo as read whatever s asks
+#endif
+	if ( s == 1.0f )
+		return;
+	const float L = 0.2126f * a[0] + 0.7152f * a[1] + 0.0722f * a[2];
+	for ( int c = 0; c < 3; c++ )
+		a[c] = clampf( L + s * ( a[c] - L ), 0.0f, 1.0f );
+}
 
 // ------------------------------------------------------------------ the 8-probe read (M2: the bounce and the surfaces)
 //! the read's red bits: the twin's (src/rtddgi.cpp kRedNoCheb / kRedNoBias, ddgi_common.glsl DDGI_RED_*) and the cell's

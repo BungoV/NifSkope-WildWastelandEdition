@@ -327,6 +327,18 @@ bool rtddgiBounceRed()
 	return !v.isEmpty() && v != "0";
 }
 
+/* GIFIX1101 1B (the brown under RTXGI): WW_CELL_RTDDGI_BOUNCE_SAT=<0..1> scales the chroma of the albedo a probe ray's
+ * hit bounces (luminance kept; src/rtddgimath.h bounceAlbedo). Ships 1 = the albedo as read (today's), since the look
+ * waits on bungo's eye; 0.5 is the measured opt-in (notes/gifix1101/RESULTS.md). Read every frame: it is in the build key */
+float rtddgiBounceSat()
+{
+	if ( !wwEnvIsSet( "WW_CELL_RTDDGI_BOUNCE_SAT" ) )
+		return 1.0f;
+	bool ok = false;
+	const float s = wwEnv( "WW_CELL_RTDDGI_BOUNCE_SAT" ).trimmed().toFloat( &ok );
+	return ok ? std::clamp( s, 0.0f, 1.0f ) : 1.0f;
+}
+
 //! FIX1101A LATE ITEM 15d: WW_CELL_RTDDGI_SKY=physical (live, ships off): the volume's sky from the physical sky
 bool rtddgiGiSkyPhysical()
 {
@@ -789,6 +801,9 @@ void startBuild( Cell & c, const ProbeSoup & soup, const WwCellLighting & lights
 		spec.red = QStringLiteral( "skybelow" );   // lane SKYBELOW1: the red, today's main miss and visibility
 	if ( rtddgiBounceRed() )   // FIX1101A: the red, today's main bounce read (renormalised, black past the usable probes)
 		spec.red += spec.red.isEmpty() ? QStringLiteral( "bouncenocover" ) : QStringLiteral( ",bouncenocover" );
+	spec.bounceSat = rtddgiBounceSat();   // GIFIX1101 1B
+	if ( spec.bounceSat != 1.0f )
+		b->skyLabel += QStringLiteral( "; bounce albedo saturation %1" ).arg( double( spec.bounceSat ), 0, 'f', 2 );
 	spec.noSky = ( sp.terms & 1 ) != 0;	// PERFFIX2: the debug split (CellSpec terms)
 	spec.oneBounce = ( sp.terms & 4 ) != 0;
 	ProbeSkyLight skyUsed = sky;
@@ -1603,6 +1618,8 @@ static void volumeFrame( Scene * scene, Cell & c, const CellSpec * spIn, bool du
 	key = fnv( key, &skyBelowRed, sizeof skyBelowRed );
 	const int bounceRed = rtddgiBounceRed() ? 1 : 0;   // FIX1101A: a set rebuilds (the volume re-converges)
 	key = fnv( key, &bounceRed, sizeof bounceRed );
+	const float bounceSat = rtddgiBounceSat();   // GIFIX1101 1B: a set rebuilds (the volume re-converges)
+	key = fnv( key, &bounceSat, sizeof bounceSat );
 	if ( G ) {
 		key = fnv( key, G->origin, sizeof G->origin );
 		key = fnv( key, G->dims, sizeof G->dims );
