@@ -1,3 +1,14 @@
+## OWNDATA1 (FIX1101A, 2026-11-01): our moon draws with no mod folder
+
+Our sky's moon globe (SKYDISC1) needs two loose textures that lived only in the FO4CS mod folder, so any window or
+harness without that folder in its resource list drew the vanilla moon (`moon:refused(textures/sky/moon/moon_d.dds not
+found ...)`, hold 4's notes). NifSkope now ships them: res/Data/Textures/Sky/Moon/Moon_d.dds + Moon_n.dds (2.0 MB, the
+same bytes, NASA SVS CGI Moon Kit, credit in NOTICE.txt beside them), copied to release/Data at link time, and
+src/gamemanager.cpp adds release/Data as the LAST, lowest-priority source of the Fallout 4 resources, so a game or mod
+copy of the same name still wins. Only its data folders are read (Textures; Plugins is not one). Red:
+`WW_OWNDATA_RED=1` (launch key: the folder is not added). Gate: tests/owndata1 (the shipped maps + the release copies;
+a release without them fails) and the sky notes' `moon:` part. Our sun disc needs no texture (`discs=ours`).
+
 ## CONTACTREACH1 (FIX1101A, 2026-11-01): no dashed bands from thin casters (bungo's "banding on shadows")
 
 bungo's crop of his Concord porch frame showed the shadow of power lines on a facade as a row of short parallel dashes

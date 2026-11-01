@@ -1,0 +1,13 @@
+Moon_d.dds and Moon_n.dds: the cell view's moon globe (lane SKYDISC1, shipped with NifSkope by FIX1101A LATE ITEM 28b).
+
+Made by tools/moon_texture.py from the NASA Scientific Visualization Studio "CGI Moon Kit" (SVS 4720,
+https://svs.gsfc.nasa.gov/4720): lroc_color_poles_2k.tif (LRO LROC WAC colour mosaic) and ldem_4.tif (LRO LOLA
+elevation).
+
+Credit: NASA's Scientific Visualization Studio; the LRO LROC and LOLA teams.
+NASA imagery is generally not subject to copyright in the United States; NASA asks to be credited as the source and
+that its material is not used to imply endorsement (NASA Images and Media Usage Guidelines,
+https://www.nasa.gov/nasa-brand-center/images-and-media/).
+
+NifSkope reads these files as the LOWEST-priority Fallout 4 data (release/Data after every game/mod path), so a mod or
+the game folder holding Textures\Sky\Moon\Moon_d.dds / Moon_n.dds overrides them.

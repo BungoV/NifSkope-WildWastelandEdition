@@ -2363,7 +2363,7 @@ bool drawMoonGlobe( Scene * scene, const SkyFrame & f, float mul, QStringList & 
 		if ( scene->bindTexture( QStringView( u ? texN : texD ), true ) <= 0 ) {
 			r->stopProgram();
 			r->fn->glActiveTexture( GL_TEXTURE0 );
-			drew << QString( "moon:refused(%1 not found: the loose files of mods\\FO4CS\\Textures\\Sky\\Moon) vanilla moon" ).arg( u ? texN : texD );
+			drew << QString( "moon:refused(%1 not found: NifSkope's own Data\\Textures\\Sky\\Moon, or a mod's) vanilla moon" ).arg( u ? texN : texD );
 			return false;
 		}
 		glTexParameteri( GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_REPEAT );
