@@ -1216,6 +1216,10 @@ bool cellGiMemoOk = false;
 vec3 cellGiMemoP = vec3( 0.0 );
 vec3 cellGiMemoN = vec3( 0.0 );
 vec4 cellGiMemoS = vec4( 0.0 );
+vec2 cellGiMemoV = vec2( 1.0, 0.0 );
+/* GIFIX1101 HO: the last cellGiSample's sky visibility at the normal and its fade (1, 0 = no volume read): cellSsgiE's
+ * hand-over takes the volume's own occlusion out of the screen's */
+vec2 cellGiVisN = vec2( 1.0, 0.0 );
 #endif
 vec4 cellGiSample( vec3 P, vec3 N )
 {
@@ -1229,11 +1233,13 @@ vec4 cellGiSample( vec3 P, vec3 N )
 	if ( cellGiHalfOn && cellPass == 0 && cellProbe == 0 && cellGiHalfAt( P, N, hs ) ) {
 		if ( hs.a > 0.0 )
 			cellGiPath = 12;
+		cellGiVisN = hs.a > 0.0 ? vec2( cellGiHalfVis.x, hs.a ) : vec2( 1.0, 0.0 );
 		return hs;
 	}
 	if ( cellGiMemoOk && ( cellDdgiRed & 16 ) == 0 && P == cellGiMemoP && N == cellGiMemoN ) {
 		if ( cellGiMemoS.a > 0.0 )
 			cellGiPath = 12;
+		cellGiVisN = cellGiMemoV;
 		return cellGiMemoS;
 	}
 	CellDdgiOut d = cellDdgiRead( P, N, normalize( vec3( cellRow[0].w, cellRow[1].w, cellRow[2].w ) - P ), N );
@@ -1246,6 +1252,8 @@ vec4 cellGiSample( vec3 P, vec3 N )
 	cellGiMemoP = P;
 	cellGiMemoN = N;
 	cellGiMemoS = s;
+	cellGiMemoV = s.a > 0.0 ? vec2( d.vis, d.fade ) : vec2( 1.0, 0.0 );
+	cellGiVisN = cellGiMemoV;
 	return s;
 #else
 	return vec4( 0.0 );
@@ -1432,6 +1440,7 @@ float cellSpecSky( vec3 P, vec3 N, vec3 R, float rough )
 		cellGiMemoP = P;
 		cellGiMemoN = N;
 		cellGiMemoS = ownSky ? dv.fade * ( cellPass == 2 ? vec4( vec3( dv.vis ), 1.0 ) : vec4( dv.E, 1.0 ) ) : vec4( 0.0 );
+		cellGiMemoV = ownSky ? vec2( dv.vis, dv.fade ) : vec2( 1.0, 0.0 );
 	}
 	if ( !ownSky )
 		return 1.0;
@@ -2016,6 +2025,18 @@ vec3 cellSsgiE( vec3 eProbe )
 		return eProbe;
 	vec4 s = texture( cellSsgi, ( gl_FragCoord.xy - cellSsgiRect.xy ) * cellSsgiRect.zw );
 	float keep = ( cellSsgiRed & 2 ) != 0 ? 1.0 : mix( 1.0, clamp( s.a, 0.0, 1.0 ), cellSsgiK.x );
+#ifdef WW_CELL_RTDDGI
+	/* GIFIX1101 HO (PERFFIX2 2c): the hand-over to the traced volume. Its E already holds the occlusion and the bounce of
+	 * what its probes see (1 - vis at the normal, by its fade); the screen keeps only the occluded share beyond that
+	 * (the contact scale under the probe spacing), and adds that share of its bounce. An occluder both see darkens
+	 * once. Sky-lit exteriors only (interiors: today's law, a LANES row). Red WW_CELL_SSGI_RED=nohandover (8192) */
+	if ( cellDdgiOn && cellGiSky && !cellInterior && ( cellSsgiRed & ( 2 | 8192 ) ) == 0 && cellGiVisN.y > 0.0 ) {
+		float oS = 1.0 - clamp( s.a, 0.0, 1.0 );
+		float oP = ( 1.0 - clamp( cellGiVisN.x, 0.0, 1.0 ) ) * clamp( cellGiVisN.y, 0.0, 1.0 );
+		float n = max( oS - oP, 0.0 );
+		return eProbe * ( 1.0 - cellSsgiK.x * n ) + max( s.rgb, vec3( 0.0 ) ) * ( cellSsgiK.y * ( oS > 1e-4 ? n / oS : 0.0 ) );
+	}
+#endif
 	return eProbe * keep + max( s.rgb, vec3( 0.0 ) ) * cellSsgiK.y;
 }
 
