@@ -31,6 +31,7 @@ BSD License - see nifskope.h
 #include "gl/cellwatergi.h"	// lane PRTP6: water reads no probe GI
 #include "gl/celllampshadow.h"	// lane LAMPSHADOW1
 #include "gl/cubefacecull.h"	// lane PERFFIX2 b: a caster draws only into the cube faces it can reach
+#include "gl/lampslice.h"	// lane PERFFIX2 b: the lamp store's first stores spread over frames
 #include "gl/celllooks.h"	// lane GAPLOOK1
 #include "gl/celllensflare.h"	// lane LIGHTS3 (LENSFLARE1): its echo
 #include "gl/cellfxlit.h"	// lane LIGHTS4: a placement's emittance colour
@@ -153,6 +154,7 @@ struct ClState
 	bool shadowRed = false; // WW_CELL_SHADOW_RED=noshadow: the maps rendered, every factor read as 1
 	QString shadowLast = QStringLiteral( "none yet" );
 	QString lampLast = QStringLiteral( "off" );	// lane LAMPSHADOW1: the stored lamp shadows' last frame
+	int lampSliced = 0;	// lane PERFFIX2 b: slots whose first store waits (the last frame)
 	int fogProbe = 0;       // WW_CELL_FOG_PROBE=6 (alpha, height blend) | 7 (fog color ^ 1/2.2) | 8 (its d, z)
 	int pass = 0;           // the PRTP band's Pass (WwCellPass); WW_CELL_PASS pins it
 	bool passPinned = false;
@@ -343,6 +345,7 @@ struct Gpu
 	int shSlot[kShadowSlots];
 	int shStamp = 1, bufShStamp = 0;
 	int shKick = 0;	// lane DOORLIVE1: a moving caster (a live door) re-renders every held slot
+	int shPend[kShadowSlots];	// lane PERFFIX2 b: the light a slot holds whose first store waits for a later frame (-1 none)
 	int shFace = 0;	// lane LAMPSHADOW1: the face edge shTex was made at (the tier's)
 	float shFade[kShadowSlots];	// lane GAPLOOK1: each slot's shadow strength under the budget (1 without it)
 	int shBudget = 0;
@@ -384,6 +387,7 @@ struct Gpu
 	{
 		std::fill( shSlot, shSlot + kShadowSlots, -1 );
 		std::fill( shFade, shFade + kShadowSlots, 1.0f );
+		std::fill( shPend, shPend + kShadowSlots, -1 );
 	}
 };
 QHash<const void *, Gpu> & gpus()
@@ -1530,7 +1534,7 @@ void wwCellLightsUniforms( Scene * scene )
 		std::vector<float> slotOf( size_t( L->lights.size() ), -1.0f );
 		if ( g.shDoc == scene->nifModel && g.shVersion == s.version.value( scene->nifModel ) )
 			for ( int k = 0; k < kShadowSlots; k++ )
-				if ( g.shSlot[k] >= 0 && g.shSlot[k] < L->lights.size() )
+				if ( g.shSlot[k] >= 0 && g.shSlot[k] < L->lights.size() && g.shPend[k] != g.shSlot[k] )	// lane PERFFIX2 b: a waiting store reads unshadowed
 					slotOf[size_t( g.shSlot[k] )] = float( k );
 		std::vector<float> t;
 		t.reserve( size_t( L->lights.size() ) * kTexelsPerLight * 4 + 20 );
@@ -3228,7 +3232,7 @@ static void lampShadowPass( Scene * scene, Gpu & g, const WwCellLighting & L, st
 			}
 		}
 		const bool isDirty = std::find( dirty.begin(), dirty.end(), k ) != dirty.end();
-		if ( red == 1 || isDirty || anyMoved || j.in != g.lsSlotMovers[k] )
+		if ( red == 1 || isDirty || anyMoved || j.in != g.lsSlotMovers[k] || g.shPend[k] == li )	// lane PERFFIX2 b: a waiting store
 			jobs.push_back( std::move( j ) );
 	}
 	auto census = [&]( int stored, int restored, int direct, int moverDraws ) {
@@ -3239,7 +3243,7 @@ static void lampShadowPass( Scene * scene, Gpu & g, const WwCellLighting & L, st
 			walls += e.back >= 0 ? 1 : 0;
 		const double mb = 1.0 / 1048576.0;
 		s.lampLast = QStringLiteral( "%1 face=%2 store=%3(wall %4) storeMB=%5/%6 slotsMB=%7 slotsDrawn=%8 stored=%9 restored=%10"
-			" direct=%11 movers=%12(new %13) moverDraws=%14 ms=%15%16 faceSkip=%17" )
+			" direct=%11 movers=%12(new %13) moverDraws=%14 ms=%15%16 faceSkip=%17 slice=%18 waiting=%19" )
 			.arg( wwCellLampShadowTierName( wwCellLampShadowTier() ) ).arg( S )
 			.arg( g.lsStore.size() ).arg( walls )
 			.arg( double( used ) * double( blockBytes ) * mb, 0, 'f', 1 ).arg( double( g.lsBlocks ) * double( blockBytes ) * mb, 0, 'f', 1 )
@@ -3247,9 +3251,11 @@ static void lampShadowPass( Scene * scene, Gpu & g, const WwCellLighting & L, st
 			.arg( jobs.size() ).arg( stored ).arg( restored ).arg( direct ).arg( movers.size() ).arg( newMovers ).arg( moverDraws )
 			.arg( timer.elapsed() )
 			.arg( red == 1 ? QStringLiteral( " red=live" ) : red == 2 ? QStringLiteral( " red=cube" ) : QString() )
-			.arg( g_cubeFaceSkip );	// lane PERFFIX2 b: draws the per-face cull saved, since the start
+			.arg( g_cubeFaceSkip )	// lane PERFFIX2 b: draws the per-face cull saved, since the start
+			.arg( wwCellLampShadowSlice() ).arg( s.lampSliced );	// lane PERFFIX2 b: the first-store budget, slots waiting
 	};
 	if ( jobs.empty() ) {
+		s.lampSliced = 0;	// lane PERFFIX2 b
 		census( 0, 0, 0, 0 );
 		return;
 	}
@@ -3382,6 +3388,13 @@ static void lampShadowPass( Scene * scene, Gpu & g, const WwCellLighting & L, st
 
 	int nStored = 0, nRestored = 0, nDirect = 0;
 	qint64 moverDraws = 0;
+	/* lane PERFFIX2 b (item 5d, gl/lampslice.h): the first stores of this frame spend at most `slice` cube faces, nearest
+	 * slots first (the dirty list's order); one store always goes. A slot that waits reads unshadowed (its light as past
+	 * the slot budget) until its map is drawn: the light buffer skips it (shPend) */
+	WwLampSlice::Budget budgetF;
+	budgetF.slice = red == 1 ? 0 : wwCellLampShadowSlice();
+	int nWait = 0;
+	bool pendMoved = false;
 	for ( Job & j : jobs ) {
 		if ( !complete )
 			break;
@@ -3424,6 +3437,14 @@ static void lampShadowPass( Scene * scene, Gpu & g, const WwCellLighting & L, st
 				g.lsWall.insert( li, w );
 			}
 			const WwLampWall w = g.lsWall.value( li );
+			if ( !budgetF.spend( w.back >= 0 ? 5 : 6 ) ) {
+				if ( g.shPend[k] != li ) {	// lane PERFFIX2 b: waits for a later frame's budget
+					g.shPend[k] = li;
+					pendMoved = true;
+				}
+				nWait++;
+				continue;
+			}
 			const int need = w.back >= 0 ? 1 : 2;
 			std::vector<int> blocks;
 			for ( int pass = 0; pass < 2 && int( blocks.size() ) < need; pass++ ) {
@@ -3511,6 +3532,10 @@ static void lampShadowPass( Scene * scene, Gpu & g, const WwCellLighting & L, st
 			}
 			nRestored++;
 		}
+		if ( g.shPend[k] >= 0 ) {	// lane PERFFIX2 b: drawn now
+			g.shPend[k] = -1;
+			pendMoved = true;
+		}
 		// the movers in this light's volume, over the static map
 		if ( !mov.empty() )
 			for ( int f = 0; f < 6 && complete; f++ )
@@ -3533,6 +3558,9 @@ static void lampShadowPass( Scene * scene, Gpu & g, const WwCellLighting & L, st
 	wasScissor ? fn->glEnable( GL_SCISSOR_TEST ) : fn->glDisable( GL_SCISSOR_TEST );
 	wasBlend ? fn->glEnable( GL_BLEND ) : fn->glDisable( GL_BLEND );
 
+	if ( pendMoved )
+		g.shStamp++;	// lane PERFFIX2 b: the light buffer reads the slots that wait / are drawn now
+	s.lampSliced = nWait;
 	if ( !complete ) {
 		for ( int k = 0; k < kShadowSlots; k++ )
 			g.shSlot[k] = -1;
@@ -3731,6 +3759,14 @@ void wwCellShadowPass( Scene * scene )
 		s.shadowLast = QStringLiteral( "on shadowLights=%1 face=%2 (lamp)" ).arg( cand.size() ).arg( face );
 		lampShadowPass( scene, g, *L, dirty, cam );	// lane LAMPSHADOW1: stored maps, movers redrawn on top
 		return;
+	}
+	for ( int k = 0; k < kShadowSlots; k++ ) {	// lane PERFFIX2 b: the plain cubes draw a slot that waited at once
+		if ( g.shPend[k] >= 0 ) {
+			if ( g.shSlot[k] == g.shPend[k] && std::find( dirty.begin(), dirty.end(), k ) == dirty.end() )
+				dirty.push_back( k );
+			g.shPend[k] = -1;
+			g.shStamp++;
+		}
 	}
 	if ( g.lsTex ) {	// the row turned Off: the store's memory goes back
 		r->fn->glDeleteTextures( 1, &g.lsTex );

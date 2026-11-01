@@ -27,6 +27,8 @@ int wwCellLampShadowFace();
 int wwCellLampShadowBudgetMB();
 //! 1 live (redraw every frame), 2 cube (no wall half), 0 none
 int wwCellLampShadowRed();
+//! lane PERFFIX2 b: the first-store budget, cube faces a frame (WW_CELL_LAMPSHADOW_SLICE, 12; 0 = all in one frame)
+int wwCellLampShadowSlice();
 QString wwCellLampShadowTierName( int tier );
 
 //! a wall behind a lamp: the cube face (0 +X, 1 -X, 2 +Y, 3 -Y, 4 +Z, 5 -Z) that looks into it, its distance

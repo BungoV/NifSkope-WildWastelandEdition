@@ -1,3 +1,16 @@
+## PERFFIX2 b item 5d (2026-11-01): the stored lamp shadows' first stores spread over frames
+
+PERFRES1101 A gap 6.3: the stored lamp shadows (LAMPSHADOW1) drew every new slot's static map in one frame, so a cell
+open or a big slot change paid the whole first build at once (the 102 ms GPU / 78.6 ms CPU frame of PERF2 T1, Memory
+Den, uncached). Now (src/gl/lampslice.h) a frame spends at most WW_CELL_LAMPSHADOW_SLICE cube faces (default 12, about
+two lamps) on first stores, nearest slots first; the first store of a frame always goes. A slot whose store waits is read
+unshadowed (as a light past the 16-slot budget) until its map is drawn: the light buffer skips it (Gpu::shPend). Restores
+(blits) and movers are not budgeted. The picture after the stores is the old one; during them a lamp's shadow can appear
+up to ceil(faces / 12) frames late (8 frames for 16 omni lamps): a look change on those frames only, shipped ON. The lamp
+census adds `slice= waiting=`. WW_CELL_LAMPSHADOW_SLICE=0: every store in one frame (the old). Tier Off (the plain cubes)
+is not sliced. Unit: tests/lampslice (the budget per frame, every lamp stored within the bound, nearest first, a waiting
+slot never read shadowed; red: no first-store floor, a budget under one lamp never stores).
+
 ## PERFFIX2 b item 8a (2026-11-01): a Hit cascade copies back only the dynamic casters' footprint
 
 PERFRES1101 A sun_shadows gap 1: whenever any dynamic caster existed (a skinned actor, a swaying cable, the far sway

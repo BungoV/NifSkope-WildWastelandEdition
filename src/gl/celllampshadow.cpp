@@ -17,6 +17,7 @@ struct LsState
 	bool pinned = false;
 	int tier = -1;
 	int red = 0;
+	int slice = 12;	// lane PERFFIX2 b: faces a frame for first stores (0 = all at once)
 };
 
 int tierFromText( const QByteArray & t )
@@ -49,6 +50,11 @@ LsState & st()
 			: std::clamp( QSettings().value( QStringLiteral( "WW/CellLampShadow" ), 1 ).toInt(), -1, 3 );
 		const QByteArray red = qgetenv( "WW_CELL_LAMPSHADOW_RED" ).trimmed();
 		s.red = red == "live" ? 1 : red == "cube" ? 2 : 0;
+		/* lane PERFFIX2 b (item 5d): WW_CELL_LAMPSHADOW_SLICE=<faces a frame> spreads the first stores of a slot set (the
+		 * hitch on a cell open or a big slot change) over frames, nearest lamps first; 0 = every store in one frame */
+		bool ok = false;
+		const int sl = qEnvironmentVariable( "WW_CELL_LAMPSHADOW_SLICE" ).trimmed().toInt( &ok );
+		s.slice = ok ? std::clamp( sl, 0, 96 ) : 12;
 	}
 	return s;
 }
@@ -113,6 +119,11 @@ int wwCellLampShadowBudgetMB()
 int wwCellLampShadowRed()
 {
 	return st().red;
+}
+
+int wwCellLampShadowSlice()
+{
+	return st().slice;
 }
 
 QString wwCellLampShadowTierName( int tier )
