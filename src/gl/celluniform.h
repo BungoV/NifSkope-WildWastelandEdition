@@ -44,6 +44,45 @@ struct Cache
 	}
 };
 
+/* lane PERFFIX3 (air readbacks): what each location of a program holds, kept on the CPU by every scalar/vector setter
+ * (uni1i .. uni4c) once `on`; an array or matrix write forgets its locations. A pass that wants a value another setter
+ * wrote (the air's fogK, cellOn, cellRow...) reads it here instead of glGetUniform* (a driver round trip that drains
+ * the threaded driver's queue). Not seen = never written while on, or written raw: the reader asks GL, as before. */
+struct Mirror
+{
+	bool on = false;
+	std::vector<Slot> s;
+	void reset() { s.clear(); }
+	void put( int l, Kind k, const void * v, int words )
+	{
+		if ( l < 0 )
+			return;
+		if ( size_t( l ) >= s.size() )
+			s.resize( size_t( l ) + 1 );
+		Slot & sl = s[size_t( l )];
+		sl.kind = k;
+		std::memset( sl.v, 0, sizeof sl.v );
+		std::memcpy( sl.v, v, size_t( words ) * 4 );
+	}
+	void forget( int l, int n )
+	{
+		for ( int i = 0; i < n; i++ )
+			if ( l + i >= 0 && size_t( l + i ) < s.size() )
+				s[size_t( l + i )].kind = None;
+	}
+	//! the value at l as `want` (K1i: ints, else floats; cnt words), false = not known
+	bool get( int l, Kind want, void * out, int cnt ) const
+	{
+		if ( l < 0 || size_t( l ) >= s.size() )
+			return false;
+		const Slot & sl = s[size_t( l )];
+		if ( sl.kind == None || ( sl.kind == K1i ) != ( want == K1i ) )
+			return false;
+		std::memcpy( out, sl.v, size_t( cnt < 4 ? cnt : 4 ) * 4 );
+		return true;
+	}
+};
+
 struct Counts
 {
 	std::uint64_t calls = 0, uploads = 0, kept = 0, unused = 0, queries = 0;
@@ -504,6 +543,23 @@ struct TargetNote
 inline TargetNote & frameTarget()
 {
 	static TargetNote n;
+	return n;
+}
+
+/* lane PERFFIX3 (air readbacks): the whole state the cell passes save and restore (targets, viewport, active unit, masks,
+ * the five enables), as the obscurance pass (wwCellAoPass) asked it at its start. SSR, the contact mask and SSGI each
+ * restore what they change, so the air pass that follows them reads the same state from here instead of asking
+ * (peek: the HDR frame's Begin still takes frameTarget). Same paint only. */
+struct EntryNote
+{
+	std::uint64_t frame = 0;
+	int draw = 0, read = 0, vp[4] = {}, active = 0x84C0;
+	unsigned char depthMask = 1, colorMask[4] = { 1, 1, 1, 1 };
+	bool depth = false, cull = false, blend = false, scissor = false, stencil = false;
+};
+inline EntryNote & entryNote()
+{
+	static EntryNote n;
 	return n;
 }
 //! the note's target, else asked (viewport, draw, read: Begin's order). WW_SETUP_MEMO_CHECK=1 asks anyway, counts a

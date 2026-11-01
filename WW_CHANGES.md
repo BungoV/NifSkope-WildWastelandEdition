@@ -24,6 +24,39 @@ display the same (0 levels; today's path differs by up to 21 levels); reds noble
 C++ fail. Moonlight (~4700x, the vanilla Night Sunlight row) and the twilight Earth shadow (MS model) are not changed
 here: INTSKY1 / FIX1101A own the computed moonlight; with the row on the night frame's brightness comes from the
 exposure, as their plan wants.
+## PERFFIX3 air (2026-11-01): the air pass asks the driver nothing, a cheaper sun read in the air, 16F volume, grid presets
+
+PERFRES1101 group B's air gaps (notes/perfres1101/B/fog.md 5): the inject's sun shadow read, the stalls in air-pre /
+air-post, the RGBA32F volumes, no near-grid preset. Volumetric Air itself still ships Off (unchanged); inside it every
+change below ships ON and has a red that brings the old pass back (WW_CELL_AIR_RED=ask / sunpcf / f32, live).
+
+- NO DRIVER ASKS (exact): the pass read ~25 uniforms back with glGetUniform* (fogK, fogView, cellOn, cellRow...) and asked
+  11 GL states at entry plus glCheckFramebufferStatus at every stage every frame; each is a round trip that waits on the
+  threaded driver's queue (Memory Den air-state 21-205 ms CPU, a 5-7 ms GPU gap in air-post). Now: every Program setter
+  keeps a CPU mirror of its value once the program asks for it (celluniform.h WwCellUni::Mirror, glcontext.cpp WWMI /
+  WWMF; arrays, matrices and samplers forget their locations, a relink resets it), the air reads its values there; the
+  entry state comes from the obscurance pass's own asks of the same paint (WwCellUni::EntryNote: SSR, contact and SSGI
+  restore it); the framebuffer checks run once per layout of targets. A location the mirror has not seen is asked as
+  before. WW_SETUP_MEMO_CHECK=1 asks everything anyway and counts a mirror or note that differs. Census: `cell air:
+  ... reads=<mirror>/<asked>/<stale> state=noted|asked`. Red ask = every value and state asked, as before.
+- SUN READ IN THE AIR: the air took the surfaces' shadow (wwSunShadow: a Vogel disc of 8..48 taps rotated per point with
+  a cos, a sin and a sqrt per tap) four times a froxel. Offline (tests/airsun, the real program) that trigonometry, not
+  the fetches, was most of the inject's sun cost. The air now reads the same disc at 32 taps from literal offsets fixed in
+  the map's texels, same radius and bias, the terrain map and the clouds as before; no receiver plane, normal offset or
+  screen-space contact (a froxel is neither a surface nor a pixel: the contact mask was read at the froxel's own
+  gl_FragCoord, the offset from the froxel grid's derivatives). Offline 160x90x64 sun only: 1.33 -> 0.49 ms (preset
+  disc, 32 taps), 0.72 -> 0.52 ms (FO4CS-level shadows, 8 taps); against the converged disc the integrated light errs
+  as much as today's read (p99 0.0007 of the frame's max) or less (0.0003 vs 0.0011). Red sunpcf = the surfaces' read.
+- RGBA16F INTEGRATED VOLUME (what every surface, particle and the sky reads): 28.8 -> 21.6 MB at 160x88x64 (the inject
+  stays RGBA32F: its per-slice transmittance needs it; the red inject16 of tests/airsun shows the 16F error building up
+  to 1.8e-3). Offline through the real integrate stage: |dT| <= 4.8e-4, |dL| <= 1e-3 L. Red f32.
+- NEAR GRID PRESETS: WW_CELL_AIR_GRID (QSettings WW/VolAirGrid, live; no menu row yet) 0 / low = the grid as before (12 px
+  columns x 64 slices, 160x90x64 at 1080p), medium 8 px x 64 (240x135x64), high / ultra 8 px x 128 (240x135x128; the
+  F4FS plan's Ultra adds the temporal reuse, still off until bungo rules). Default 0: the picture as before.
+- Unit: tests/airmirror/run.sh (the mirror's rows, the setters' wiring, the pass's asks, the grid presets; red = a
+  forget-less mirror + the base sources: FAIL). Gate: tests/airsun/airsun_check.py (Z the red sunpcf == today's program
+  bit for bit, A accuracy vs a converged disc, F 16F vs 32F, C cost; reds noshadow, inject16 FAIL). Sweeps 408 / 272 /
+  408 not ok 0.
 
 ## FOAMOFF2 (FIX1101A, 2026-11-01): River foam and Contact foam stay OFF
 
