@@ -1,5 +1,5 @@
 /* The EDITABLE animation clip: sparse keys over a dense per-frame clip.
-   Lane HKXEDIT2, 2026-09-10. bungo, verbatim: "Just make hkx fully editable in
+ bungo, verbatim: "Just make hkx fully editable in
    our nifskope".
 
    THE KEY MODEL, stated once. A Fallout 4 clip on disk is DENSE: one transform
@@ -24,8 +24,8 @@
 
    Annotations (hkaAnnotationTrack::Annotation) stay per track as the file
    keeps them, in SECONDS; the dope sheet shows them on one marker row. Float
-   tracks are rows of this document only: lane HKX1's reader does not decode
-   the four shipped float tracks and lane HKX5's writer refuses them by name,
+   tracks are rows of this document only: the reader does not decode
+   the four shipped float tracks and the writer refuses them by name,
    so a document that carries one cannot be saved yet -- save() refuses in
    words, and CHANGE_NEEDED.md beside the lane names the two edits.
 
@@ -79,16 +79,9 @@ struct HkxKeyRef
 	bool operator==( const HkxKeyRef & o ) const { return track == o.track && frame == o.frame; }
 };
 
-/* WHICH COMPONENTS OF A TRANSFORM AN AXIS STRIP TOUCHES -- bungo's ruling 3 of
-   2026-09-12, verbatim: "Add an option here, under remove track, to remove all
-   transforms in specific directions, so x, y, z or a combination of them. Same
-   goes for rotation direction. That way, I can make it so that the slide stays
-   in the center, but the COM still moves downward when the player crouches."
-
-   The rotation axes are the Euler triple of NifSkope's own Matrix::toEuler /
-   Matrix::fromEuler -- the same three numbers the Blocks tab shows in a
-   rotation row -- taken about the bone's LOCAL axes, because that is what a
-   track's transform is. The dialog says so where the hand can read it. */
+// WHICH COMPONENTS OF A TRANSFORM AN AXIS STRIP TOUCHES -- bungo's ruling 3 of 2026-09-12, verbatim: "Add an
+// option here, under remove track, to remove all transforms in specific directions, so x, y, z or a
+// combination of them.
 struct HkxAxisMask
 {
 	bool tx = false, ty = false, tz = false;
@@ -113,18 +106,8 @@ public:
 	QStringList trackNames;            //!< per track, the bone name ("" when no skeleton names it)
 	QVector<HkxFloatTrackDoc> floatTracks;
 	QString sourcePath;                //!< the file the clip came from ("" when built in memory)
-	/* THE PLAY RANGE, bungo's rulings 8 and 9 of 2026-09-12: "Allow me to drag
-	   the starting and ending frame" and "Areas inside of an animation should
-	   be as they are, outside like in Blender, darkened".
-
-	   It is a range OVER the clip, not a cut of it: the frames outside stay in
-	   the document, so a drag is reversible and undoable, the sheet darkens
-	   them, the viewport plays only the range -- and a SAVE writes the range
-	   alone, so the .hkx duration is what the grips show. "Trim to range" is
-	   the same cut made immediately and destructively.
-
-	   rangeLast < 0 means the clip's last frame, so a document nobody has
-	   touched has the whole clip in range and nothing is darkened. */
+	// THE PLAY RANGE, bungo's rulings 8 and 9 of 2026-09-12: "Allow me to drag the starting and ending frame"
+	// and "Areas inside of an animation should be as they are, outside like in Blender, darkened".
 	int rangeFirst = 0;
 	int rangeLast = -1;
 
@@ -196,12 +179,8 @@ public:
 	//! Keys are rebuilt at every frame (a reduction does not survive a retime).
 	HkxEditResult retime( float newFps );
 	HkxEditResult removeTrack( int track );
-	/* Hold the ticked components of one track STILL, at their frame-0 value,
-	   on every key of that track (ruling 3). Not zero: frame 0, so the bone
-	   does not jump to the origin -- a COM stripped of X and Y keeps standing
-	   where it stood and still dips in Z. Untricked components are not
-	   touched at all: when no rotation axis is ticked the quaternions are not
-	   even round-tripped through Euler, so they stay byte-identical. */
+	// Hold the ticked components of one track STILL, at their frame-0 value, on every key of that track
+	// (ruling 3).
 	HkxEditResult removeTransformAxes( int track, const HkxAxisMask & mask );
 	//! Rename a track (its bone). With a skeleton the binding index follows;
 	//! without one the index is kept and the message says so.

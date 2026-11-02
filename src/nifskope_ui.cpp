@@ -33,36 +33,36 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 #include "ui/widgets/wwdropdown.h"
 #include "gamemanager.h"
-#include "wwswitch.h"	// lane TESTDRIVER1: the WW_* switch store
-#include "celldoorlive.h"	// lane DOORLIVE1: a path frame poses the live door
-#include "probesky.h"	// fix 10-22: the live driver waits for a pending sky relight
-#include "rtddgicell.h"	// lane RTXGI1 M2: and for the ray-traced GI volume (rtddgiCellPending)
-#include "gl/cloudvol.h"	// lane PERFFIX3: and for the clouds' coverage tables (built on workers)
-#include "gl/cloudshadow.h"	// lane PERFFIX3: and for the cloud shadow map's sliced rebuild
-#include "gl/shadowset.h"	// fix 10-22: ... and for the terrain shadow sweep
+#include "wwswitch.h"	// the WW_* switch store
+#include "celldoorlive.h"	// a path frame poses the live door
+#include "probesky.h"	// the live driver waits for a pending sky relight
+#include "rtddgicell.h"	// and for the ray-traced GI volume (rtddgiCellPending)
+#include "gl/cloudvol.h"	// and for the clouds' coverage tables (built on workers)
+#include "gl/cloudshadow.h"	// and for the cloud shadow map's sliced rebuild
+#include "gl/shadowset.h"	// ... and for the terrain shadow sweep
 #include "lodgen.h"
 #include "lodgengpu.h"
 #include "lodgenlayout.h"
 #include "esmdata.h"
-#include "cellclick.h"		// lane CELLVIEW2
-#include "cellpanel.h"		// lane CELLVIEW2
-#include "cellpicktest.h"	// lane CELLVIEW2
-#include "cellrefs.h"		// lane CELLWORK1
-#include "cellstream.h"		// lane CELLSTREAM1
-#include "cellworkspace.h"	// lane CELLWORK1
-#include "cellview.h"		// lane LIVESET1: the far LOD and the probe markers in place
-#include "cellspawn.h"		// lane CELLSPAWN1: where a cell's camera starts
+#include "cellclick.h"
+#include "cellpanel.h"
+#include "cellpicktest.h"
+#include "cellrefs.h"
+#include "cellstream.h"
+#include "cellworkspace.h"
+#include "cellview.h"		// the far LOD and the probe markers in place
+#include "cellspawn.h"		// where a cell's camera starts
 #include "cellmodpick.h"
 #include "nifskope.h"
 #include "starterscene.h"
 #include "harnesswindow.h"
-#include "gl/campath.h"		// lane MOTION1: WW_RENDER_PATH
-#include "gl/lookdevstage.h"	// lane SHADOWCACHE1: the path's hour step
+#include "gl/campath.h"		// WW_RENDER_PATH
+#include "gl/lookdevstage.h"	// the path's hour step
 #include "gl/gametaa.h"
-#include "gl/cellpost.h"	// lane GRASSMB1
-#include "gl/cellssgi.h"	// lane SSGI2FRAMES
-#include "gl/cellbloom.h"	// lane BLOOM1b
-#include "gl/celllensflare.h"	// lane REDFIX1: the lens flare echo per path frame
+#include "gl/cellpost.h"
+#include "gl/cellssgi.h"
+#include "gl/cellbloom.h"
+#include "gl/celllensflare.h"	// the lens flare echo per path frame
 #include "gl/celllooks.h"
 #include "gl/sunshadow.h"
 #include "ui_nifskope.h"
@@ -85,7 +85,7 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include "spells/blocks.h"
 #include "spells/normaltransfer.h"
 #include "wwskin.h"
-#include "wwsharedread.h"		// lane FRAMESPEED1
+#include "wwsharedread.h"
 #include "skeletontools.h"
 
 #include <functional>
@@ -106,10 +106,10 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include "gl/glparticles.h"
 #include "gl/glscene.h"
 #include "hkxplayback.h"
-#include "hkxanimui.h"		// lane HKX3
-#include "animworkspace.h"		// lane HKXEDIT2
-#include "bodybuildpanel.h"		// lane GLTFEXPORT1
-#include "hkxmodel.h"		// (lane BUILD11) the WW_ANIMWS_HKXMODEL branch reads hkx->undoStack
+#include "hkxanimui.h"
+#include "animworkspace.h"
+#include "bodybuildpanel.h"
+#include "hkxmodel.h"		// the WW_ANIMWS_HKXMODEL branch reads hkx->undoStack
 #include "filestab.h"
 #include "gl/glproperty.h"
 #include "gl/scenelighting.h"
@@ -203,7 +203,7 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include <QTabBar>
 #include <QTabWidget>
 #include <QUndoStack>
-#include <QUndoGroup>	// (lane BUILD11) HKXEDIT2 creates the Undo/Redo actions from wwAnimUndoGroup()
+#include <QUndoGroup>	// HKXEDIT2 creates the Undo/Redo actions from wwAnimUndoGroup
 #include <QVBoxLayout>
 #include <QHBoxLayout>
 #include <QSettings>
@@ -233,9 +233,9 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include <functional>
 #include <QtEndian>
 #include "ui/opencellmenu.h"
-#include "ui/opencelldialog.h"	// lane CELLSPAWN1: the WW_OPENCELL_SHOT harness
-#include "gl/cellpasstime.h"	// lane STREAM1
-#include "celltexahead.h"		// lane GAPFIX1
+#include "ui/opencelldialog.h"	// the WW_OPENCELL_SHOT harness
+#include "gl/cellpasstime.h"
+#include "celltexahead.h"
 #include <vector>
 
 namespace {
@@ -273,13 +273,9 @@ protected:
 	}
 };
 
-/* The Blender number field lived here, as WwNumberField.
- *
- * It is now ui/widgets/wwnumberfield.h. It was the ORIGINAL and the best of
- * the five copies, and it was copied four times for one reason: it sat in the
- * anonymous namespace above, so no other panel could reach it. Moving it out
- * is the whole fix; everything else is deleting the copies.
- */
+// The Blender number field lived here, as WwNumberField:
+// It is now ui/widgets/wwnumberfield.h. It was the ORIGINAL and the best of the five copies, and it was copied
+// four times for one reason: it sat in the anonymous namespace above, so no other panel could reach it.
 
 //! Set a redo panel's title, keeping the ˅ / ˃ collapse marker in sync
 static void tlSetPanelTitle( QFrame * panel, QToolButton * title, const QString & text )
@@ -318,10 +314,8 @@ using namespace nstypes;
 using namespace nstheme;
 
 
-// The dark palette is the PBR Material Editor's (PBRMaterialEditorQt,
-// resources/style.qss) so the two tools read as one product. Bump
-// themePaletteVersion in loadTheme() when these change, or existing installs
-// keep the colours already written to their settings.
+// The dark palette is the PBR Material Editor's (PBRMaterialEditorQt, resources/style.qss) so the two tools
+// read as one product.
 QColor NifSkope::defaultsDark[6] = {
 	QColor( 0x30, 0x32, 0x36 ), /// nstheme::Base
 	QColor( 0x2d, 0x30, 0x34 ), /// nstheme::BaseAlt
@@ -341,17 +335,8 @@ QColor NifSkope::defaultsLight[6] = {
 };
 
 
-/*! Skin surfaces — the single source for every colour in `res/style.qss` (as
- * `${name}`) AND for the per-widget stylesheets in the docks (via
- * wwSkinColor(), declared in wwskin.h).
- *
- * The dark column is the PBR Material Editor's palette, so the two tools read
- * as one product ahead of the merge. Both columns exist because ONE stylesheet
- * serves both themes: hardcoding the dark values would leave the light theme as
- * dark widgets on a light window.
- *
- * Add a colour here rather than writing a literal anywhere else.
- */
+//! Skin surfaces — the single source for every colour in `res/style.qss` (as `${name}`) AND for the per-widget
+//! stylesheets in the docks (via wwSkinColor(), declared in wwskin.h).
 static const struct WwSkinVar { const char * name; const char * dark; const char * light; } skinVars[] = {
 	{ "bg",           "#303236", "#f0f0f0" },  // content background
 	{ "bgWin",        "#292b2f", "#e4e4e4" },  // window / dialog plate
@@ -376,88 +361,24 @@ static const struct WwSkinVar { const char * name; const char * dark; const char
 	{ "accent",       "#f0a54a", "#c07000" },  // selection accent, active toggles
 	{ "accentText",   "#ffb54a", "#a05a00" },  // text on an accented toggle
 	{ "accentBg",     "#40331f", "#f6e6c8" },  // amber toggle plate
-	/* DISABLED is not the same register as OFF, and the Loaded-NIFs strip is where
-	 * that stopped being a matter of taste.
-	 *
-	 * A glyph drawn in `textMuted` means "off — click me"; the primary row's
-	 * glyphs are drawn but cannot be clicked at all, and reusing `textMuted` for
-	 * them would have said the opposite of the truth at full strength. So there is
-	 * a second, dimmer grey for ink that is inert, and an amber to match it for a
-	 * mark an inert row does carry — desaturated to roughly the same distance from
-	 * the background as `textDisabled`, so the pair reads as one faded register
-	 * rather than one faded glyph beside one lit one.
-	 */
+	// DISABLED is not the same register as OFF, and the Loaded-NIFs strip is where that stopped being a matter
+	// of taste.
 	{ "textDisabled", "#6b7076", "#a2a6ab" },  // inert glyph / label ink
 	{ "accentDisabled", "#8a6a3f", "#d6ab6e" },  // a set mark on an inert control
-	/* A ticked check box or radio: Blender's wcol_option inner-selected blue,
-	 * with its white mark from an image resource (:/wnd/check.png, radio.png).
-	 * bungo's call, 2026-09-06, over the accent orange the first cut used: a
-	 * tick is a state, not a selection, and Blender is the reference for
-	 * anything this fork has no language of its own for. Same blue on both
-	 * columns, as Blender's themes keep it; the disabled tint sits at
-	 * textDisabled's distance from the ground. */
+	// A ticked check box or radio: Blender's wcol_option inner-selected blue, with its white mark from an
+	// image resource (:/wnd/check.png, radio.png).
 	{ "toggle",       "#4772b3", "#4772b3" },  // ticked box field
 	{ "toggleDisabled", "#3b4d68", "#9fb1cb" },  // ticked, on an inert control
 	{ "danger",       "#ff8484", "#c0392b" },  // invalid / error text
 	{ "viewport",     "#2b2d31", "#c8ccd0" },  // GL clear colour (Render settings default)
-	/* Tree/list selection, shared by every view that highlights rows.
-	 *
-	 * These four values were hardcoded identically in six files -- the Block
-	 * List model, the Loaded NIFs delegate, the Collision and Materials tree
-	 * sheets, the Materials recolor pass and the Rigging bone delegate -- with
-	 * zero drift between them, which is what made them worth naming rather than
-	 * reconciling. Two more views had already drifted: Pose to #2b3b5c, and
-	 * Skeleton to wwSkinColor("danger"), so a multi-selected bone rendered in
-	 * the same red that means "missing texture" elsewhere.
-	 *
-	 * "Active" is the primary of a multi-selection, not Qt window focus.
-	 */
+	// Tree/list selection, shared by every view that highlights rows.
 	{ "selBgActive",   "#4a7ab0", "#4a7ab0" },  // primary selected row
 	{ "selBgInactive", "#2b425f", "#b9cbe0" },  // other selected rows
 	{ "selTextActive", "#ff9d00", "#a05a00" },  // text on the primary row
 	{ "selTextInactive", "#ff7200", "#8a4a00" },  // text on the others
-	/* THE ANIMATION SHEET'S OWN SIX (lane UINOTES1, 2026-09-12), from bungo's
-	 * rulings 2, 7b, 8: a selected key must stay VISIBLE and be orange, the
-	 * other selected ones orange-red, the playhead BLUE, and everything
-	 * outside the clip's range darkened like Blender's.
-	 *
-	 * WHY THEY ARE NEEDED AND NOT JUST THE OLD NAMES. The sheet painted a
-	 * selected key in `toggle` (#4772b3) and the CURRENT ROW's background in
-	 * `selBgActive` (#4a7ab0). Those two differ by 3/8/3 in R/G/B -- a
-	 * selected key on the row you had just clicked was blue ink on a blue
-	 * plate, which is exactly the "they go invisible" bungo saw on the COM
-	 * row. The playhead was `accent`, the same orange selection is supposed
-	 * to own.
-	 *
-	 * EVERY VALUE IS READ OUT OF THE INSTALLED BLENDER 4.5, not remembered:
-	 * `blender.exe -b --factory-startup --python-expr` printing
-	 * `bpy.context.preferences.themes[0].dopesheet_editor.*`
-	 * (E:/Tools/3D/Blender 4.5, run 2026-09-12 02:0x), cross-checked against
-	 * 4.5/scripts/presets/interface_theme/Blender_Light.xml for the light
-	 * column:
-	 *
-	 *   keyframe_selected  #FFBE33 dark, #FFBE33 light   -> animKeySel
-	 *   long_key_selected  #FF8C00 both (alpha dropped)  -> animKeySelOther
-	 *   keyframe           #BFBFBF dark, #E8E8E8 light   -> animKey
-	 *   frame_current      #4772B3 dark, #5680C2 light   -> animPlayhead
-	 *
-	 * TWO DIVERGENCES, both stated rather than hidden:
-	 *   - the LIGHT unselected key. Blender's light theme paints the dope
-	 *     sheet on a DARK ground (its `space.back` is #6B6B6B light), so its
-	 *     #E8E8E8 key reads. Our light panel ground is #E8E8E8 itself, so
-	 *     that value would be the invisibility bug again with the colours
-	 *     swapped; the light column carries #3C3C3C, the same distance from
-	 *     our ground that #BFBFBF is from the dark one.
-	 *   - animOutOfRange is NOT a theme entry at all. Blender darkens the
-	 *     out-of-frame-range columns in code (`ANIM_draw_framerange`:
-	 *     TH_BACK shaded -25, alpha -100), so the value here is that
-	 *     arithmetic applied to OUR ground -- #303236 shaded -25 = #171d1d,
-	 *     rounded to the neutral #17191c, and #e8e8e8 -> #cfcfcf -- and the
-	 *     painter applies Blender's own alpha (155/255) over it. Source
-	 *     named as Blender's C function, not as a file we can read here.
-	 *
-	 * animPlayheadText is the ink of the frame number inside the blue box;
-	 * Blender draws it white on both themes. */
+	// THE ANIMATION SHEET'S OWN SIX, from bungo's rulings 2, 7b, 8: a selected key must stay VISIBLE and be
+	// orange, the other selected ones orange-red, the playhead BLUE, and everything outside the clip's range
+	// darkened like Blender's.
 	{ "animKey",          "#bfbfbf", "#3c3c3c" },  // unselected key diamond / marker
 	{ "animKeySel",       "#ffbe33", "#ffbe33" },  // the ACTIVE selected key or annotation
 	{ "animKeySelOther",  "#ff8c00", "#ff8c00" },  // the other members of the selection
@@ -481,20 +402,7 @@ QString wwSkinColor( const char * name )
 	return QString();
 }
 
-/*! The shared selection look for a QTreeWidget / QTreeView / QListWidget.
- *
- *  Two views wrote this sheet out byte-for-byte identically (Collision and
- *  Materials); four more wrote the same four colours as C++ brushes.
- *
- *  A NOTE ON WHAT ":!active" MEANS HERE, because it is not what the C++ sites
- *  mean. Qt's `:!active` is "this view does not have window focus". The C++
- *  sites use the same two colours for something different -- "this row is
- *  selected but is not the ACTIVE object of a multi-selection". A stylesheet
- *  cannot express that second idea, so those sites read the four variables
- *  directly rather than taking this sheet. Both readings share one palette; only
- *  the trigger differs, and conflating them is part of why the values ended up
- *  repeated by hand in six files.
- */
+//! The shared selection look for a QTreeWidget / QTreeView / QListWidget.
 QString wwSelectionTreeQss()
 {
 	return QStringLiteral(
@@ -513,36 +421,9 @@ QLabel * wwHeading( const QString & text, QWidget * parent )
 	return l;
 }
 
-/*! The toolbar-selector look: the viewport mode dropdown, the mode row's menu
- * buttons, and the Panels / Workspaces selectors. One definition so the sites
- * cannot drift apart — they were three copies of the same greys.
- *
- * FLAT, in the style of Blender's header: no border and no background plate
- * until the pointer is on it. A top bar with ~15 controls, each drawn in its own
- * bordered box, spends most of its width on chrome and reads as fifteen separate
- * things competing for attention; without the boxes the glyphs and labels carry
- * it, and the row shrinks by roughly a third. Hover and checked still give plain
- * feedback, which is all the boxes were really providing.
- *
- * Not weight 600 either — bold labels on every control is the same problem in
- * type.
- */
-/*! Desaturate a resource icon onto the toolbar's grey.
- *
- *  The drawn icons (tlMakeIcon) are already one greyscale family; the ones that
- *  come out of res/ are not, so a handful of full-colour PNGs sit among them
- *  looking like the only things worth clicking. This is luminance followed by a
- *  lift toward the bar's light-grey tone, so the result matches the drawn glyphs
- *  rather than merely being colourless - a straight qGray leaves the darker art
- *  almost invisible on a dark toolbar.
- *
- *  Was a lambda inside the shading-contributions menu, which is where the
- *  approach was proven. Promoted to file scope so the Render menu can use the
- *  same pass rather than a second one that drifts from it.
- *
- *  Kept at 22 px because that is the size the menus ask for; a QIcon built from
- *  one pixmap scales down cleanly and these are never drawn larger.
- */
+//! The toolbar-selector look: the viewport mode dropdown, the mode row's menu buttons, and the Panels /
+//! Workspaces selectors. One definition so the sites cannot drift apart — they were three copies of the same
+//! greys.
 QIcon wwGreyscaleIcon( const QIcon & icon )
 {
 	QPixmap pm = icon.pixmap( 22, 22 );
@@ -563,20 +444,7 @@ QIcon wwGreyscaleIcon( const QIcon & icon )
 	return QIcon( QPixmap::fromImage( img ) );
 }
 
-/*! A group boundary on the top row, spaced the way Blender spaces one.
- *
- *  Blender's header separates groups with WHITESPACE and no rule at all; this
- *  fork keeps the rule, so the job here is to give it the room Blender gives a
- *  gap. A bare addSeparator() draws a hairline hard against the button on either
- *  side, which reads as a divider between two adjacent things rather than the
- *  edge of a group - and with eight of them in a row the effect is a picket
- *  fence, where every boundary looks equally important.
- *
- *  Padding on both sides, symmetric, one number everywhere. The rule then has to
- *  be earned: it goes only where a genuine group ends, which is why the trailing
- *  Animation / Collision / Panels run has none inside it - those three are one
- *  group, and ruling between them said they were three.
- */
+//! A group boundary on the top row, spaced the way Blender spaces one.
 void wwGroupBreak( QToolBar * bar )
 {
 	if ( !bar )
@@ -595,21 +463,9 @@ void wwGroupBreak( QToolBar * bar )
 	pad();
 }
 
-/*! Show a checkable menu item's state as a filled row.
- *
- *  QMenu paints the icon and the check indicator in the SAME column, so a
- *  checkable item that HAS an icon silently loses its checkmark - which was
- *  every toggle in the Overlays menu. You could see the glyph and not whether
- *  the thing was on.
- *
- *  A tick in the label was tried and dropped: it competes with the icon for the
- *  eye and needs the unchecked rows padded to keep the column straight. A filled
- *  row says "on" at a glance without adding anything to read, and it reuses the
- *  same two colours the rest of the program already means "active" with -
- *  bgBtnDown behind, accent in front.
- *
- *  Applied to the MENU rather than per action, so it cannot drift item by item.
- */
+//! Show a checkable menu item's state as a filled row:
+//! QMenu paints the icon and the check indicator in the SAME column, so a checkable item that HAS an icon
+//! silently loses its checkmark - which was every toggle in the Overlays menu.
 static void wwStyleCheckedRows( QMenu * m )
 {
 	if ( !m )
@@ -639,10 +495,8 @@ QString wwBoxedButtonQss( const QString & padding )
 
 int wwSegmentedStripAir()
 {
-	/* THE WAY BACK, exact at its off value (CONSTITUTION 7): 0 puts the
-	 * segments back flush against the row's edges and against one another,
-	 * which is the 18:25:20 strip to the pixel. ONE reader, so the sheet, the
-	 * call site and the gate can never disagree about the number. */
+	// THE WAY BACK, exact at its off value (CONSTITUTION 7): 0 puts the segments back flush against the row's
+	// edges and against one another, which is the 18:25:20 strip to the pixel.
 	const int air = QSettings().value( QStringLiteral( "UI/SegmentedStripAir" ), 4 ).toInt();
 	return qBound( 0, air, 12 );
 }
@@ -652,64 +506,17 @@ namespace
 QString wwSegmentedQss( const QString & base, const QString & first,
 	const QString & last, int rowHeight = 0, int neighbourGap = 0 )
 {
-	/* FOUR PIXELS FROM EVERY NEIGHBOUR (bungo, 2026-09-10, on a screenshot of
-	 * the top rows, verbatim: "just do what is on my screenshot, 4 pixels from
-	 * each nearby element of separation for the header / blocks / files").
-	 *
-	 * The air is MARGIN, and nothing else moves: wwAlignBarRow still pins the
-	 * strip to the shared row (35 px, measured), so the row's own top and
-	 * bottom edges, the toolbars, their buttons and the search row underneath
-	 * stay exactly where lane UI3 left them. The SEGMENTS get shorter by twice
-	 * the air inside the same row.
-	 *
-	 * MEASURED, NOT REASONED -- scratchpad/ui4_20260910/probe.cpp builds this
-	 * strip in a QMainWindow of its own and reproduced the shipped 18:25:20
-	 * geometry exactly (segments 128/127/128 filling a 383x35 bar, 3 px to the
-	 * toolbar beside it) before anything here changed. Three things it settled,
-	 * none of which reading Qt's documentation would have given:
-	 *
-	 *   1. QSS margins on QTabBar::tab ARE honoured, but tabRect() RETURNS THE
-	 *      RECT INCLUDING THE MARGIN. Rect arithmetic cannot see this air at
-	 *      all, which is why the gate reads the PAINTED box out of a grab.
-	 *   2. the segment's box is min-height + 3+3 padding + 1+1 border, so a
-	 *      segment sitting in a row of H with A px of air is min-height
-	 *      H - 8 - 2A: 35 - 8 - 8 = 19 puts its painted box at y 4, 27 px
-	 *      tall, 4 px clear of the row's bottom. One either way moves that
-	 *      bottom edge by one, so it is arithmetic here and never a constant.
-	 *   3. what stands to the RIGHT of the strip is not the toolbar but
-	 *      QMainWindow::separator (res/style.qss:66, 3 px, painted), so the
-	 *      last segment adds only the air the separator does not already give
-	 *      -- `neighbourGap`, which the caller reads off the style because
-	 *      that metric only answers correctly for a widget.
-	 *
-	 * THE SEGMENTS TOUCH (bungo, 2026-09-10 21:0x, over a zoomed screenshot of
-	 * the strip lane UI4 had just gapped, verbatim: "Why are they separated?").
-	 * A segmented control is ONE element, so the air is measured from its OUTER
-	 * box and nowhere else: four pixels from the row's top and bottom, from the
-	 * window's left edge and from the toolbar beside it, and NOTHING between the
-	 * segments. They share one seam again (`border-left: 0` on every segment,
-	 * the first putting its own back), their inner corners are square and the
-	 * two outer corners stay rounded as UI4 left them.
-	 *
-	 * Measured before it was written, scratchpad/ui6_20260910/probe.cpp:
-	 *   case 0  (shipped)  top 4 bottom 4 left 4 right 4 between 4 / 4, h 27
-	 *   case J4 (this)     top 4 bottom 4 left 4 right 4 between 0 / 0, h 27
-	 *   case J0 == case 1  -- the way back at air 0 is the 18:25:20 sheet, and
-	 *                         the two strings are byte-identical, not merely
-	 *                         equivalent.
-	 */
+	// FOUR PIXELS FROM EVERY NEIGHBOUR:
+	// The air is MARGIN, and nothing else moves: wwAlignBarRow still pins the strip to the shared row (35 px,
+	// measured), so the row's own top and bottom edges, the toolbars, their buttons and the search row
+	// underneath stay exactly where they were.
 	const int air = rowHeight > 0 ? wwSegmentedStripAir() : 0;
-	/* The segment's own box is min-height + 3+3 padding + 1+1 border, so a
-	 * segment asked to fill a bar row of H is min-height H-8, less the air
-	 * above and below it. Kept as the ONE piece of arithmetic that knows this
-	 * sheet's padding, rather than a second number typed at the call site that
-	 * would drift from it. */
+	// The segment's own box is min-height + 3+3 padding + 1+1 border, so a segment asked to fill a bar row of
+	// H is min-height H-8, less the air above and below it.
 	const int minH = rowHeight > 0 ? qMax( 10, rowHeight - 8 - 2 * air ) : 18;
 	const int rightAir = qMax( 0, air - neighbourGap );
-	/* MINH is a token, not a numbered arg: "%10" would be read by QString::arg
-	 * as marker ten, not as marker one followed by a zero, and this sheet
-	 * already uses %1 to %9. SEAM, BRAD and the two MARGIN tokens are tokens
-	 * for the same reason. */
+	// MINH is a token, not a numbered arg: "%10" would be read by QString::arg as marker ten, not as marker
+	// one followed by a zero, and this sheet already uses %1 to %9.
 	QString sheet = QStringLiteral(
 		"%1 { min-height: MINHpx; padding: 3px 10px; color: %4; background: %5;"
 		" border: 1px solid %6; border-left: 0; border-radius: 0px; MARGINALL }"
@@ -747,11 +554,9 @@ QString wwSegmentedToolButtonQss()
 
 QString wwSegmentedTabBarQss( int rowHeight, const QWidget * inWindow )
 {
-	/* The dock separator is the only part of the air that already exists, and
-	 * it is a STYLE METRIC: asked with the window it answers res/style.qss's
-	 * 3 px, asked with nullptr it answers the base style's 6 -- measured, both
-	 * of them, in scratchpad/ui4_20260910/probe.cpp. No widget means no claim,
-	 * and the last segment then takes the full air on that side. */
+	// The dock separator is the only part of the air that already exists, and it is a STYLE METRIC: asked with
+	// the window it answers res/style.qss's 3 px, asked with nullptr it answers the base style's 6 --
+	// measured, both of them, in scratchpad/ui4_20260910/probe.cpp.
 	const int gap = inWindow
 		? inWindow->style()->pixelMetric( QStyle::PM_DockWidgetSeparatorExtent,
 			nullptr, inWindow )
@@ -761,24 +566,8 @@ QString wwSegmentedTabBarQss( int rowHeight, const QWidget * inWindow )
 		QStringLiteral( "QTabBar::tab:last" ), rowHeight, gap );
 }
 
-/* ONE BAR HEIGHT AND ONE TOP EDGE ACROSS THE WIDTH.
- *
- * bungo, 2026-09-10, on a screenshot: "See the issue with alignment here?".
- * Measured the same day, before this: the main toolbars 35 px, the viewport's
- * own toolbar 33, the left dock's tab strip 26 -- three bars meeting along one
- * line, at three heights, so there was a 7 px step at the dock/viewport seam
- * and the dock's search row started 3 px above the viewport's content.
- *
- * They are in three different parents (the QMainWindow toolbar area, the
- * central column, the dock), so no layout could ever have made them agree;
- * something has to state the rule. This is that statement, and it lives beside
- * the other shared skin helpers rather than as three setFixedHeight calls at
- * three call sites, which is how they came to disagree in the first place.
- *
- * The row is the TALLEST natural height among the bars, never a typed
- * constant: growing a bar is safe, and shrinking a QToolBar is not -- it does
- * not clip, it hides controls behind an extension chevron.
- */
+// ONE BAR HEIGHT AND ONE TOP EDGE ACROSS THE WIDTH:
+// bungo, 2026-09-10, on a screenshot: "See the issue with alignment here?".
 static int wwBarRow = 0;
 
 int wwBarRowHeight()
@@ -786,53 +575,9 @@ int wwBarRowHeight()
 	return wwBarRow;
 }
 
-/* ...AND THE BUTTONS IN THE ROW ARE THE ROW (lane WATER7, corrected by lane
- * UI3; bungo, 2026-09-10, on a screenshot of the aligned strip: "compact these
- * vertically like this, the top bar and the buttons").
- *
- * WATER7 stated the rule and missed it by four pixels: BUILD12 measured the
- * row at 35 px and the buttons inside it at 39, and its gate passed only
- * because it allowed 8 px where its own header promised 1.
- *
- * Lane UI3 measured WHY outside the application -- scratchpad/ui3_20260910/
- * probe.cpp and probe2.cpp, a QToolBar carrying the same four QToolButtons
- * with the same res/style.qss and the same appended sheet -- and reproduced
- * 39 exactly. Three things made it, and none of them was the row height:
- *
- *   1. A WIDGET'S OWN STYLESHEET OUTRANKS EVERY ANCESTOR'S, whatever the
- *      selectors say. These buttons carry one: wwBoxedButtonQss above, set on
- *      the Workspaces button and on the LOD / Animation / Collision group, so
- *      its `padding: 3px 6px` beat the row's padding before the row ever saw
- *      the button. A rule appended to the BAR can only reach a property the
- *      button's own sheet does not mention -- which is why WATER7's
- *      `min-height` did arrive and its `padding` did not.
- *   2. QSS `min-height` ON A QToolButton IS A MINIMUM ON THE CONTENTS, not on
- *      the widget. Qt expands the contents to it, adds 3 px of its own for
- *      CT_ToolButton, then the padding and the border: 31 + 3 + (3 + 3) + 2 =
- *      42 asked for, 39 laid out. `max-height` is not consulted on this path
- *      at all -- measured, not read: the probe set it and nothing moved.
- *   3. THE BAR'S OWN LAYOUT MARGIN. A QToolBar starts its items
- *      PM_ToolBarItemMargin + PM_ToolBarFrameWidth = 2 + 2 = 4 px below its
- *      top, so even a button of exactly the row's height would hang 4 px past
- *      the bottom of a bar of exactly the row's height, and be clipped there.
- *
- * So the row STATES three things and MEASURES the fourth:
- *
- *   - wwBarRowBoxQss() takes the bar's own box away, which puts its items at
- *     y = 0 with the whole row to sit in. With that gone the layout CLAMPS a
- *     button to the bar instead of letting it overflow, so any hint from the
- *     row's height up to 3 px over lands on exactly the row -- a basin, not a
- *     knife edge (probe2.cpp: content 26..29 all measured 35 px at y 0).
- *   - wwBarRowButtonQss( content ) states the glyph line and the air above and
- *     below it, and nothing horizontal, so the row has ONE vertical box and
- *     every button keeps its own width.
- *   - wwAlignBarRow appends them to the bars AND to every tool button in them,
- *     because of (1).
- *   - and it CALIBRATES `content` rather than typing Qt's 3: it asks for a
- *     content height certainly taller than any glyph line in the row, reads
- *     what the style added to it, and takes that much back out of the row. No
- *     number here moves with a Qt version.
- */
+// ...AND THE BUTTONS IN THE ROW ARE THE ROW:
+// WATER7 stated the rule and missed it by four pixels: BUILD12 measured the row at 35 px and the buttons
+// inside it at 39, and its gate passed only because it allowed 8 px where its own header promised 1.
 bool wwCompactTopBars()
 {
 	/* THE WAY BACK, exact at its off value (CONSTITUTION 7). ONE reader, so
@@ -843,29 +588,9 @@ bool wwCompactTopBars()
 
 //! The air above and below the glyph line, the same for every button in the row.
 static const int wwBarRowPad = 2;
-/*! THE MENU ARROW GETS ITS OWN COLUMN (bungo, 2026-09-11 05:4x, over
- *  scratchpad/ui3_20260910/images/cmp_zoom.png, verbatim: "That's fine, as long
- *  as the dropdown arrows do not intersect with the text / icons like on the
- *  screenshots you showed me").
- *
- *  Lane UI3 made the row's buttons the row's height, which finally SHOWED the
- *  dropdown arrow they had always had -- and on the two narrow icon-only
- *  buttons of the viewport header it was drawn on top of the glyph.
- *
- *  Measured, scratchpad/ui6_20260910/probe.cpp, from two renders of the same
- *  button (one with its menu taken away, so the columns that differ ARE the
- *  arrow):
- *
- *    padding-right   4 (res/style.qss's own)   6    8    10
- *    pivot dot                        gap 3    5    7     9
- *    grid / snap                      gap 0    2    4     6
- *
- *  The arrow is 9 columns wide and sits against the padding box's right edge,
- *  so every pixel of padding-right above res/style.qss's 4 is a pixel of clear
- *  background between the glyph and the arrow. 8 leaves FOUR on the tightest
- *  button in the row, which is the middle of the usable range rather than the
- *  2 the gate demands. The button grows by the same 4 px and the row does not
- *  move: this is horizontal, and nothing here touches a height. */
+//! THE MENU ARROW GETS ITS OWN COLUMN:
+//! With the row's buttons the row's height, which finally SHOWED the dropdown arrow they had always
+//! had -- and on the two narrow icon-only buttons of the viewport header it was drawn on top of the glyph.
 static const int wwBarRowArrowAir = 8;
 //! What wwAlignBarRow calibrated, so a gate reads back the numbers it used.
 static int wwBarRowContent = 0;
@@ -885,21 +610,7 @@ QString wwBarRowButtonQss( int contentHeight )
 {
 	if ( contentHeight <= 0 || !wwCompactTopBars() )
 		return QString();
-	/* The menu arrow comes with the height. A QToolButton's default
-	 * menu-indicator sits in the BOTTOM-RIGHT corner of the button, which is
-	 * invisible while the button is only as tall as its own text and obvious
-	 * the moment it is the row's height: the first build of this lane put the
-	 * arrows of the viewport header's Global / snap / grid buttons a row-height
-	 * below their glyphs. wwBoxedButtonQss already centres it, which is why the
-	 * four boxed buttons in the top row never showed it; stating the same rule
-	 * here means the row does not depend on which sheet a button happens to
-	 * carry. Identical to the boxed rule, so appending it to a boxed button
-	 * changes nothing. */
-	/* The LAST rule is the only horizontal one in this sheet, and it is stated
-	 * for the buttons that HAVE a menu and no others. `wwHasMenu` is a property
-	 * wwAlignBarRow stamps after LOOKING -- popupMode is not the test, because a
-	 * QToolButton's default mode is DelayedPopup and every button in the row
-	 * carries it whether it has a menu or not. */
+	// The menu arrow comes with the height.
 	return QStringLiteral(
 		"QMenuBar::item { min-height: %1px; padding-top: %2px; padding-bottom: %2px; }"
 		"QToolButton { min-height: %1px; padding-top: %2px; padding-bottom: %2px; }"
@@ -919,11 +630,7 @@ int wwBarRowButtonOverhead()
 	return wwBarRowOverhead;
 }
 
-/* THE TITLES IN THE MENU BAR, lane UI5. The measurement this rests on is in
- * wwskin.h; the short of it is that the menu-item `min-height` the row has
- * stated since lane WATER7 is not consulted at all, and the two vertical
- * paddings are. Stated from the row's own height and the item's own content, so
- * the only literal here is the even split itself. */
+// THE TITLES IN THE MENU BAR.
 static int wwBarRowMenuContent = 0;
 static int wwBarRowMenuPadTop = -1;
 static int wwBarRowMenuPadBottom = -1;
@@ -968,15 +675,8 @@ void wwAlignBarRow( const QList<QWidget *> & bars )
 		return;
 	wwBarRow = h;
 
-	/* Everything the row's sheet has to reach: the bars, and every tool button
-	 * inside them -- a button carrying its own stylesheet cannot be reached
-	 * from its bar's, see (1) above. Qt's extension chevron is not one of ours.
-	 *
-	 * The sheets are saved BEFORE anything is appended, because the row's sheet
-	 * is applied TWICE (once to measure, once for real) and appending twice
-	 * would state the rule twice. Appended, never assigned: a bar or a button
-	 * may already carry a per-widget sheet, and replacing it would take that
-	 * look away while fixing the height. */
+	// Everything the row's sheet has to reach: the bars, and every tool button inside them -- a button
+	// carrying its own stylesheet cannot be reached from its bar's, see (1) above.
 	QList<QWidget *> barTargets;
 	QStringList barSaved;
 	QList<QToolButton *> buttons;
@@ -995,11 +695,8 @@ void wwAlignBarRow( const QList<QWidget *> & bars )
 			if ( b->objectName() == QLatin1String( "qt_toolbar_ext_button" ) )
 				continue;
 			buttons.append( b );
-			/* MEASURED, never assumed: whether this button has a menu decides
-			 * whether it needs the arrow's column (wwBarRowArrowAir). Set
-			 * before the sheet is applied, so the first polish already sees
-			 * it. A default action's menu counts -- that is how the render
-			 * toolbar's display-toggles button carries one. */
+			// MEASURED, never assumed: whether this button has a menu decides whether it needs the arrow's
+			// column (wwBarRowArrowAir). Set before the sheet is applied, so the first polish already sees it.
 			b->setProperty( "wwHasMenu",
 				b->menu() != nullptr
 					|| ( b->defaultAction() && b->defaultAction()->menu() != nullptr ) );
@@ -1015,10 +712,8 @@ void wwAlignBarRow( const QList<QWidget *> & bars )
 		return;
 	}
 
-	/* `menuItem` is appended LAST so it outranks the menu-item rule
-	 * wwBarRowButtonQss states: same selector, same specificity, and the later
-	 * declaration is the one Qt keeps. Empty by default, which is what lets the
-	 * calibrating pass below measure an item with no vertical padding at all. */
+	// `menuItem` is appended LAST so it outranks the menu-item rule wwBarRowButtonQss states: same selector,
+	// same specificity, and the later declaration is the one Qt keeps.
 	auto applyRow = [&]( int content, const QString & menuItem = QString() ) {
 		const QString btn = wwBarRowButtonQss( content );
 		const QString bar = wwBarRowBoxQss() + btn + menuItem;
@@ -1039,29 +734,17 @@ void wwAlignBarRow( const QList<QWidget *> & bars )
 		overhead = qMax( overhead, b->sizeHint().height() - h );
 	}
 	wwBarRowOverhead = overhead;
-	/* FALLBACK, named in the output (CONSTITUTION 10): with no button to
-	 * measure, or a measurement that would leave no room for a glyph, the row
-	 * keeps the arithmetic the probe measured on this Qt -- 3 for CT_ToolButton,
-	 * two paddings, two borders -- rather than shipping no rule at all. */
+	// FALLBACK, named in the output (CONSTITUTION 10): with no button to measure, or a measurement that would
+	// leave no room for a glyph, the row keeps the arithmetic the probe measured on this Qt -- 3 for
+	// CT_ToolButton, two paddings, two borders -- rather than shipping no rule at all.
 	const int fallback = qMax( 8, h - ( 3 + 2 * wwBarRowPad + 2 ) );
 	wwBarRowContent = ( overhead >= 0 && h - overhead >= 8 ) ? h - overhead : fallback;
 	applyRow( wwBarRowContent );
 
-	/* AND THE TITLES IN THE MENU BAR SIT ON THE ROW'S CENTRE LINE (lane UI5;
-	 * bungo, 2026-09-10: "Also, please center file / view / spells / options /
-	 * help buttons, top left").
-	 *
-	 * The sheet above already reaches QMenuBar::item, but what it states there
-	 * is a min-height, and a min-height is not consulted on that path at all --
-	 * fifteen probe cases from 22 to 36 px leave the item 20 px tall -- so the
-	 * titles stayed at the top of a 35 px row. The two vertical paddings are
-	 * consulted, and unlike a margin they leave actionGeometry() honest.
-	 *
-	 * The item's own content height is MEASURED, never typed: the row's sheet is
-	 * applied once more with both vertical paddings taken away and the item's
-	 * height read back. ensurePolished() is enough and no event loop is needed
-	 * (probe case E), which is what makes this possible here at all -- the row
-	 * is aligned during construction, where nothing can be pumped. */
+	// AND THE TITLES IN THE MENU BAR SIT ON THE ROW'S CENTRE LINE:
+	// The sheet above already reaches QMenuBar::item, but what it states there is a min-height, and a
+	// min-height is not consulted on that path at all fifteen probe cases from 22 to 36 px leave the item 20
+	// px tall -- so the titles stayed at the top of a 35 px row.
 	wwBarRowMenuContent = 0;
 	wwBarRowMenuPadTop = -1;
 	wwBarRowMenuPadBottom = -1;
@@ -1079,10 +762,9 @@ void wwAlignBarRow( const QList<QWidget *> & bars )
 		int itemContent = 0;
 		for ( QAction * a : rowMenu->actions() )
 			itemContent = qMax( itemContent, rowMenu->actionGeometry( a ).height() );
-		/* FALLBACK, and it is named by the number it lands on (CONSTITUTION 10):
-		 * a menu bar with no titles to measure, or one whose items read back
-		 * taller than the row itself, takes the font's own line height rather
-		 * than shipping no rule and leaving the titles at the top. */
+		// FALLBACK, and it is named by the number it lands on (CONSTITUTION 10): a menu bar with no titles to
+		// measure, or one whose items read back taller than the row itself, takes the font's own line height
+		// rather than shipping no rule and leaving the titles at the top.
 		if ( itemContent < 8 || itemContent > h )
 			itemContent = qBound( 8, rowMenu->fontMetrics().height(), h );
 		wwBarRowMenuContent = itemContent;
@@ -1105,26 +787,14 @@ void wwStartContentBelowBar( QWidget * page )
 
 //! @file nifskope_ui.cpp UI logic for %NifSkope's main window.
 
-/* The starter document used to be a cube behind a preference
- * (Settings/Nif/Startup Defaults/New Document Cube) and an environment gate that
- * switched it off under every WW_* harness, because a cube renumbers blocks
- * beneath tests written against an empty document. Both are gone with it: the
- * starter is now a Fallout 4 header and one empty root NiNode, which perturbs
- * nothing, so every window — a user's and a harness's — starts on the same
- * document. See starterscene.h.
- */
+// The starter document used to be a cube behind a preference (Settings/Nif/Startup Defaults/New Document Cube)
+// and an environment gate that switched it off under every WW_* harness, because a cube renumbers blocks
+// beneath tests written against an empty document.
 
-/*! The weapon mark on a Loaded NIFs row, addressed by position.
- *
- *  Defined here rather than beside the other row helpers in nifskope.cpp for one
- *  practical reason: that file is a mixed-line-ending source and every edit to it
- *  is a hand splice, so anything that does not HAVE to live there does not.
- *
- *  The mark itself is not stored on the row at all — it is a set of models held
- *  in nifmerge, because the merge is the only thing that reads it and a document
- *  can be a weapon part whether it has a row, a window, or both. These two just
- *  translate a row index into the model the registry keys on.
- */
+//! The weapon mark on a Loaded NIFs row, addressed by position:
+//! Defined here rather than beside the other row helpers in nifskope.cpp for one practical reason: that file is
+//! a mixed-line-ending source and every edit to it is a hand splice, so anything that does not HAVE to live
+//! there does not.
 bool NifSkope::markWorkspaceWeaponRow( int backgroundIndex, bool marked )
 {
 	// workspaceDocumentModel(), not the document object: BackgroundNifDocument is
@@ -1201,11 +871,9 @@ int NifSkope::flattenWorkspaceToDocument( bool bakePose, QString * note )
 		return -1;
 	};
 
-	/* THE BASE IS THE SKELETON, because everything else is described relative to
-	 * it: the followers' bones are matched into it by name and the weapon parts'
-	 * connect points are resolved against what it already carries. The skull mark
-	 * names it; failing that the primary, and only when the primary really is a
-	 * skeleton rather than a flat pile of bone references. */
+	// THE BASE IS THE SKELETON, because everything else is described relative to it: the followers' bones are
+	// matched into it by name and the weapon parts' connect points are resolved against what it already
+	// carries.
 	NifModel * base = ogl ? ogl->workspaceSkeleton() : nullptr;
 	QString baseName;
 	if ( base ) {
@@ -1253,12 +921,7 @@ int NifSkope::flattenWorkspaceToDocument( bool bakePose, QString * note )
 			return fail( tr( "Could not copy %1 to flatten into." ).arg( baseName ) );
 	}
 
-	/* THE POSE DECISION, applied to the copy BEFORE anything merges into it.
-	 *
-	 * The bones the followers bind to are the ones in this copy, so writing rest
-	 * here is what makes the output a rig at rest with its geometry attached —
-	 * doing it afterwards would fight the merge's own rebasing of adopted nodes.
-	 */
+	// THE POSE DECISION, applied to the copy BEFORE anything merges into it.
 	const QHash<QString, Transform> rest =
 		( ogl && base == nif ) ? ogl->poseRestByName() : QHash<QString, Transform>();
 	int restored = 0;
@@ -1299,12 +962,9 @@ int NifSkope::flattenWorkspaceToDocument( bool bakePose, QString * note )
 			if ( spliced )
 				weapons++;
 		} else {
-			/* Followers and plain documents take the SAME call, and that is the
-			 * point rather than an oversight: de-duplicating NiNodes by name is
-			 * exactly what binds a follower's skin to the base's bones, and it is
-			 * also what an ordinary merge has always done. The mark decides how the
-			 * document is DRAWN; here it only decides which line of the summary it
-			 * is counted on. */
+			// Followers and plain documents take the SAME call, and that is the point rather than an
+			// oversight: de-duplicating NiNodes by name is exactly what binds a follower's skin to the base's
+			// bones, and it is also what an ordinary merge has always done.
 			spliced = nifMergeData( &out, bytes, piece.name, true, result );
 			if ( spliced ) {
 				if ( ogl && ogl->isWorkspaceFollower( piece.model ) )
@@ -1342,13 +1002,9 @@ int NifSkope::flattenWorkspaceToDocument( bool bakePose, QString * note )
 	return workspaceDocumentCount() - 1;
 }
 
-/*! The dialog over flattenWorkspaceToDocument.
- *
- *  Asks the one question the flatten has to ask and asks it ONLY when it means
- *  something: with no captured rest pose the two answers produce the same bytes,
- *  so offering a choice between them would be theatre. Everything else the
- *  operation decides, it decides from the marks.
- */
+//! The dialog over flattenWorkspaceToDocument:
+//! Asks the one question the flatten has to ask and asks it ONLY when it means something: with no captured rest
+//! pose the two answers produce the same bytes, so offering a choice between them would be theatre.
 bool NifSkope::flattenWorkspaceDialog()
 {
 	const bool haveRest = ogl && !ogl->poseRestByName().isEmpty();
@@ -1417,36 +1073,7 @@ static QString & wwHeadlessPlacementArm()
 	return arm;
 }
 
-/*! Where a headless window goes: ON a screen, and NEVER the primary one.
- *
- *  The 2026-09-09 attempt put it below the union of every screen instead. That
- *  really does take it off the desktop, and then NOTHING RENDERS: GLView is a
- *  QOpenGLWindow, so a surface that is never exposed never gets a context, and
- *  grabFramebuffer() returns a null image while the run still exits 0. Measured
- *  by lane BUILD2 -- no PNG from WW_RENDER_SHOT, no card image from
- *  WW_IMPOSTOR_BAKE. A bake that writes EMPTY cards and reports success is a
- *  worse failure than the hazard it was meant to cure.
- *
- *  So the window stays exposed, and the two things bungo asked for are bought
- *  separately: it is placed on a NON-PRIMARY screen ("Agent is launching
- *  nifskope on my main monitor, which is a no no"), and it is shown at window
- *  opacity 0 so nothing of it reaches an eye ("the screen is flashing white and
- *  black, that's a view hazard for epileptics").
- *
- *  \param arm  filled with the name of the arm that served the position, so a
- *              fallback is never silent (CONSTITUTION 10).
- *
- *  Arms, in order:
- *    WW_WINDOW_AT      the coordinates a harness asked for, IF the point is not
- *                      on the primary screen;
- *    non-primary       the top-left of the first screen that is not primary,
- *                      +8,+8 so a window's own frame cannot sit on the seam;
- *    1920,0            no screens reported at all -- the machine's usual second
- *                      monitor origin, which is what the brief names;
- *    primary-opaque-0  ONE screen and it is the primary. There is nowhere else
- *                      to put it; opacity 0 is then the whole of the guarantee,
- *                      and the log line says so.
- */
+//! Where a headless window goes: ON a screen, and NEVER the primary one.
 static QPoint wwHeadlessWindowOrigin( QString * arm = nullptr )
 {
 	QString refusal;
@@ -1490,34 +1117,7 @@ static QPoint wwHeadlessWindowOrigin( QString * arm = nullptr )
 	return primaryGeom.topLeft() + QPoint( 8, 8 );
 }
 
-/*! What top-level windows this process has, and whether any is on a screen.
- *
- *  The gate for bungo's flashing report (2026-09-09) has to be able to FAIL, and
- *  "no window appeared" is hard to falsify from outside a run that lasts five
- *  seconds. This writes what the process itself sees, at the moments that matter
- *  -- when the window is shown, and at every grab -- to
- *  release/ww_headless_windows.log, one line per window:
- *
- *      <when> <class> geom=<x>,<y>,<w>x<h> visible=<0|1> onscreen=<0|1>
- *              onprimary=<0|1> opacity=<0.00..1.00> maximised=<0|1>
- *
- *  The 2026-09-09 rewrite (lane OFFSCREEN2) splits the one number this used to
- *  carry into the two things bungo actually asked for, because after that day's
- *  measurements they are NOT the same question:
- *
- *    onprimary   pixels on HIS MAIN MONITOR. Must be 0 in every headless run.
- *    opacity     whether an eye can see the window at all. Must be 0.00 in
- *                every headless run.
- *
- *  `onscreen` stays, and in a headless run it is now expected to be 1: a window
- *  outside every screen is never exposed, and then GLView -- a QOpenGLWindow --
- *  never gets a context and photographs nothing. On-screen-and-transparent is
- *  the only combination that both renders and shows nothing.
- *
- *  Headless runs only, so an interactive session writes nothing.
- */
-/* CARDBAKE2: WW_CARDBAKE_TIMES=<file> appends where a card bake's time goes, measurement only (the pixels
- * do not move; a glFinish brackets each render so GPU time lands in the render bucket, not the readback). */
+//! What top-level windows this process has, and whether any is on a screen.
 struct WwCardTimes {
 	bool on = false;
 	QElapsedTimer clock;		// since main()
@@ -1528,7 +1128,7 @@ struct WwCardTimes {
 	void reset() { render = readback = encode = write = winpaint = setup = 0; renders = 0; renderNs = readNs = convNs = offNs = 0; }	// per base in a batch
 };
 /* QImage::pixel() through a row pointer: the same QRgb on an ARGB32 image of the expected size (CARDBAKE2: the
- * card encode reads ~150 samples per texel), pixel() itself on anything else, so a null or odd image reads as before. */
+ * card encode reads ~150 samples per texel), pixel itself on anything else, so a null or odd image reads as before. */
 struct WwPx {
 	const QImage * img = nullptr;
 	const uchar * bits = nullptr;
@@ -1574,7 +1174,7 @@ static void wwCardLap( qint64 & bucket, QElapsedTimer & since )
 		bucket += since.restart();
 }
 
-// lane FLYFIX1: a headless window is at opacity 0 only when WW_WINDOW_VISIBLE=0 (it opens behind his windows instead)
+// a headless window is at opacity 0 only when WW_WINDOW_VISIBLE=0 (it opens behind his windows instead)
 static bool wwHeadlessOpacity0()
 {
 	bool ok = false;
@@ -1602,10 +1202,7 @@ static void wwLogTopLevelWindows( const char * when )
 			for ( const QScreen * s : QGuiApplication::screens() )
 				if ( s->geometry().intersects( g ) )
 					onScreen = true;
-			/* Opacity does NOT excuse a window from this. A fully transparent
-			 * window over his main monitor still owns those pixels, still takes
-			 * the clicks, and is one setWindowOpacity away from being the thing
-			 * he reported. The two guarantees are measured separately. */
+			// Opacity does NOT excuse a window from this.
 			if ( primary && primary->geometry().intersects( g ) )
 				onPrimary = true;
 		}
@@ -1623,25 +1220,16 @@ static void wwLogTopLevelWindows( const char * when )
 	}
 }
 
-/*! Put one top-level window where a headless run's windows go.
- *
- *  Un-maximised (move() on a maximised window is a no-op on Windows), on a
- *  non-primary screen, shown without activating, and at opacity 0 unless
- *  WW_WINDOW_VISIBLE=1 asks for it back. Does nothing at all in an interactive
- *  session, so restart-free normal use is untouched.
- */
+//! Put one top-level window where a headless run's windows go:
+//! Un-maximised (move() on a maximised window is a no-op on Windows), on a non-primary screen, shown without
+//! activating, and at opacity 0 unless WW_WINDOW_VISIBLE=1 asks for it back.
 void NifSkope::wwPlaceHeadlessWindow( QWidget * w )
 {
 	if ( !w || !NifSkope::wwHeadlessRun() )
 		return;
 	w->setWindowState( w->windowState() & ~( Qt::WindowMaximized | Qt::WindowFullScreen ) );
-	/* A WINDOW THAT REMEMBERS ITS OWN GEOMETRY KEEPS IT when that geometry lies
-	 * wholly on a screen that is not the primary one (lane PBRR2A, 2026-09-24).
-	 * The Scene window's gate is "it reopens where it was": forcing it to the
-	 * harness origin and WW_RENDER_SIZE here made that gate measure this
-	 * backstop instead. The backstop's reason -- never on his main monitor,
-	 * never visible, never activating -- still holds: the primary screen is
-	 * refused, and the opacity and no-activate rules below still apply. */
+	// A WINDOW THAT REMEMBERS ITS OWN GEOMETRY KEEPS IT when that geometry lies wholly on a screen that is not
+	// the primary one.
 	if ( w->property( "wwOwnGeometry" ).toBool() ) {
 		const QRect g = w->geometry();
 		const QScreen * s = QGuiApplication::screenAt( g.center() );
@@ -1657,36 +1245,19 @@ void NifSkope::wwPlaceHeadlessWindow( QWidget * w )
 	}
 	QString arm;
 	w->move( wwHeadlessWindowOrigin( &arm ) );
-	/* THE SIZE IS FORCED TOO, NOT ONLY THE PLACE (lane HARNESSWIN1,
-	 * 2026-09-19).  A harness run that inherits bungo's window measures
-	 * his last session: a persisted MAXIMIZED geometry swallows the
-	 * resize() that WW_RENDER_SIZE asks for without a word, which is the
-	 * standing native_open.sh (c) red -- asked 1024x1024, got 1822x989.
-	 * After the move(), so the default size is derived from the screen
-	 * this window was just placed on.  See src/harnesswindow.cpp. */
+	// THE SIZE IS FORCED TOO, NOT ONLY THE PLACE.
 	wwApplyHarnessWindow( w );
 	w->setAttribute( Qt::WA_ShowWithoutActivating, true );
 	if ( wwHeadlessOpacity0() )
 		w->setWindowOpacity( 0.0 );
-	if ( w->windowHandle() )	// lane FLYFIX1: only a window that exists natively; the constructor's call must not create one
+	if ( w->windowHandle() )	// only a window that exists natively; the constructor's call must not create one
 		NifSkope::wwHeadlessWindowBehind( w );
 	w->setProperty( "wwHeadlessPlaced", true );
 	wwHeadlessPlacementArm() = arm;
 }
 
-/* IMPOSTORPBRM1 (lane CARDFIX1 step 7, 2026-09-25): a card baked from a model whose materials are
- * .pbrm files carries the .pbrm's quantities (docs/LODGEN_IMPOSTOR_SPEC.md "Ours, for LOD").
- *
- * The bake photographs data channels through the LEGACY program (channel views never take the PBRM
- * program, src/gl/renderer.cpp:271-278), so the .pbrm law is evaluated HERE, on the CPU, in texture
- * space, and handed to that program as ordinary textures through the retarget hook:
- *   slot 0  sRGB( decode(map) x colour x tintMix ), A = the map's A (overrideOpacity off) or the constant
- *   slot 7  R roughness, G metallic, B AO -- a map channel while its override is off, else the constant
- *   slot 2  sRGB( colour x mask ) when the emissive is on, else empty (black); the multiple = luminance/100
- *   spec    RGB = sqrt(F0'), F0' = clamp( w x decode(tint) x min(((ior-1)/(ior+1))^2, 1) )
- *   weight  RGB = w, the specular weight
- * The law is NifSkope's viewport law (renderer.cpp:1056-1095, pbrm_default.frag), which is the PBRM
- * editor's; the gate's Python evaluation (tests/spells/impostor_pbrm.py) is written from the contract. */
+// IMPOSTORPBRM1: a card baked from a model whose materials are .pbrm files carries the .pbrm's quantities
+// (docs/LODGEN_IMPOSTOR_SPEC.md "Ours, for LOD").
 namespace {
 
 int wwPbrmBakeSerial = 0;
@@ -2080,10 +1651,9 @@ bool wwPbrmResolveShape( Scene * sc, const QString & looseRoot, int b, const QMo
 
 }    // namespace
 
-/*! HARNESS ONLY (impostorpreviewtest.cpp, WW_IMPOSTOR_MESH_PBRM=1): the bake's .pbrm retarget on the preview's
- *  mesh, so LOD channel 10 shows each .pbrm shape's own roughness / metallic / AO -- the "3D model" column of
- *  IMPOSTORPBRM1's pictures. Every shape that resolves one is retargeted, mixed models included. One line per
- *  shape for the harness log. The sources' folder lives until the next call. */
+//! HARNESS ONLY (impostorpreviewtest.cpp, WW_IMPOSTOR_MESH_PBRM=1): the bake's .pbrm retarget on the preview's
+//! mesh, so LOD channel 10 shows each .pbrm shape's own roughness / metallic / AO -- the "3D model" column of
+//! IMPOSTORPBRM1's pictures.
 QStringList wwPbrmRetargetScene( Scene * sc, const QString & looseRoot )
 {
 	static std::unique_ptr<QTemporaryDir> tmp;
@@ -2133,7 +1703,7 @@ QStringList wwPbrmRetargetScene( Scene * sc, const QString & looseRoot )
 }
 
 
-/* lane CELLSTREAM1: a streamed view's frames until its cells are in (or `waitMs` runs out); at least `minFrames`.
+/* a streamed view's frames until its cells are in (or `waitMs` runs out); at least `minFrames`.
  * The ms waited. A tick is one frame's streaming work; the 5x5 draws in seconds here, so the view paints every 250 ms. */
 static qint64 wwCellStreamSettle( GLView * ogl, int minFrames, qint64 waitMs )
 {
@@ -2153,10 +1723,7 @@ static qint64 wwCellStreamSettle( GLView * ogl, int minFrames, qint64 waitMs )
 	return t.elapsed();
 }
 
-/* lane CELLSTREAM1: WW_CELL_STREAM_PATH=<file>: lines "ex ey ez ax ay az [fov]". The camera goes to each step and
- * the view runs until its cells are in; then one line goes to WW_CELL_STREAM_DUMP (else <out>_stream.txt): the
- * block's centre, the cells expected and loaded, the step's worst frame and write slice, the private bytes with
- * the texture and GPU caches dropped, and the far-LOD coverage at the loaded border. The last step is the shot. */
+// WW_CELL_STREAM_PATH=<file>: lines "ex ey ez ax ay az [fov]".
 static void wwCellStreamPathRun( GLView * ogl, const QString & pathFile, const QString & out )
 {
 	QString dumpPath = wwEnvStr( "WW_CELL_STREAM_DUMP" );
@@ -2165,7 +1732,7 @@ static void wwCellStreamPathRun( GLView * ogl, const QString & pathFile, const Q
 	QFile dump( dumpPath );
 	const bool dumpOk = dump.open( QIODevice::WriteOnly | QIODevice::Text | QIODevice::Truncate );
 	QTextStream log( &dump );
-	// lane FRAMESPEED1 (CONCORDQUIT1): Concord's path file was named con.fly.path, and "con" is a Windows device name,
+	// Concord's path file was named con.fly.path, and "con" is a Windows device name,
 	// so QFile opened the console instead; the reader retries through the \\?\ form and says why
 	bool readOk = false;
 	QString why;
@@ -2195,7 +1762,7 @@ static void wwCellStreamPathRun( GLView * ogl, const QString & pathFile, const Q
 	}
 	const qint64 waitMs = wwEnvIsSet( "WW_CELL_STREAM_WAIT" ) ? wwEnvInt( "WW_CELL_STREAM_WAIT" ) : 600000;
 	const bool shots = wwEnvInt( "WW_CELL_STREAM_SHOTS" ) != 0;
-	const bool snap = wwEnvInt( "WW_CELL_STREAM_SNAP" ) == 1;	// lane SHORE2: the block a launch's history picked
+	const bool snap = wwEnvInt( "WW_CELL_STREAM_SNAP" ) == 1;	// the block a launch's history picked
 	const CellStreamStats s0 = cellStreamStats( nullptr, true );
 	if ( dumpOk )
 		log << "stream " << ( s0.on ? "on" : "off" ) << " steps " << steps.size() << " path " << pathFile << "\n";
@@ -2204,11 +1771,11 @@ static void wwCellStreamPathRun( GLView * ogl, const QString & pathFile, const Q
 		if ( snap )
 			cellStreamSnapCentre( steps[i].eye );
 		cellStreamStats( nullptr, true );
-		PassTime::stream1Hitch( nullptr, nullptr, nullptr, true );	// lane STREAM1: this step's paints only
+		PassTime::stream1Hitch( nullptr, nullptr, nullptr, true );	// this step's paints only
 		const qint64 waited = wwCellStreamSettle( ogl, 10, waitMs );
 		wwCellStreamSettle( ogl, 4, waitMs );   // transforms and the far tiles' data, drawn once
-		// lane CELLSTREAM1: and long enough for the textures of the cells that left to be freed (the view's rule)
-		const int lingerSec = std::max( cellStreamTexKeepSec(), cellStreamGeoKeepSec() );   // lane STREAMMEM1: meshes too
+		// and long enough for the textures of the cells that left to be freed (the view's rule)
+		const int lingerSec = std::max( cellStreamTexKeepSec(), cellStreamGeoKeepSec() );   // meshes too
 		if ( lingerSec > 0 ) {
 			QElapsedTimer linger;
 			linger.start();
@@ -2222,10 +1789,10 @@ static void wwCellStreamPathRun( GLView * ogl, const QString & pathFile, const Q
 		const CellStreamStats s = cellStreamStats( nullptr, false );
 		int holes = 0, doubles = 0, samples = 0;
 		const QString cov = cellStreamCoverage( nullptr, &holes, &doubles, &samples );
-		// lane CELLSTREAM1: memory as it stands (textures the view freed included); WW_CELL_STREAM_FLUSH=1 also reads it
+		// memory as it stands (textures the view freed included); WW_CELL_STREAM_FLUSH=1 also reads it
 		// after dropping every texture and cached mesh
 		const qint64 privLive = cellStreamPrivateBytes();
-		// lane STREAM1: the step's worst paint, paints over 33.3 ms, and the memory line (before any flush)
+		// the step's worst paint, paints over 33.3 ms, and the memory line (before any flush)
 		double hitchMs = 0.0;
 		int hitchOver = 0, hitchFrames = 0;
 		PassTime::stream1Hitch( &hitchMs, &hitchOver, &hitchFrames, false );
@@ -2237,7 +1804,7 @@ static void wwCellStreamPathRun( GLView * ogl, const QString & pathFile, const Q
 		if ( wwEnvInt( "WW_CELL_STREAM_FLUSH" ) > 0 )
 			ogl->wwCellStreamFlush();
 		const qint64 priv = cellStreamPrivateBytes();
-		qint64 heapBusy = 0, heapHeld = 0;   // lane CELLSTREAM1: a real leak grows busy; held free pages grow held
+		qint64 heapBusy = 0, heapHeld = 0;   // a real leak grows busy; held free pages grow held
 		cellStreamHeapBytes( &heapBusy, &heapHeld );
 		qint64 regions[3];
 		cellStreamRegionBytes( regions );
@@ -2257,7 +1824,7 @@ static void wwCellStreamPathRun( GLView * ogl, const QString & pathFile, const Q
 				<< " | private " << priv << " live " << privLive << " heapBusy " << heapBusy << " heapHeld " << heapHeld
 				<< " regions " << regions[0] << "/" << regions[1] << "/" << regions[2] << " texEvicted " << s.texEvicted << " geoEvicted " << s.geoEvicted
 				<< " quietResets " << s.quietResets << " loudResets " << s.loudResets
-				<< " texAheadAgain " << texAgain << " texDrawRead " << texDrawRead	// lane GAPFIX1
+				<< " texAheadAgain " << texAgain << " texDrawRead " << texDrawRead
 				<< " | persistent " << s.persistent << " nodes " << s.sceneNodes << " props " << s.sceneProps
 				<< " shapes " << s.sceneShapes << " top " << s.persistentTop
 				<< " | holes " << holes << " doubles " << doubles << " samples " << samples
@@ -2265,8 +1832,8 @@ static void wwCellStreamPathRun( GLView * ogl, const QString & pathFile, const Q
 				<< " | expected " << s.expected << " | loaded " << s.loaded
 				<< " | hitchMaxMs " << QString::asprintf( "%.1f", hitchMs ) << " over33 " << hitchOver
 				<< " hitchFrames " << hitchFrames << " | " << s1mem
-				<< " | " << s.worstTick << " | " << s.worstUnload << " scannedNodes " << s.scannedNodes	// lane CELLSPIKE2: key-value pairs only
-				<< " | cpuMaxMs " << QString::asprintf( "%.3f", s.cpuMaxMs );	// lane FRAMESPEED2 (D2): the step's dearest on-processor frame
+				<< " | " << s.worstTick << " | " << s.worstUnload << " scannedNodes " << s.scannedNodes	// key-value pairs only
+				<< " | cpuMaxMs " << QString::asprintf( "%.3f", s.cpuMaxMs );	// the step's dearest on-processor frame
 			if ( !s.lastError.isEmpty() )
 				log << " | error " << s.lastError;
 			if ( snap )
@@ -2281,7 +1848,7 @@ static void wwCellStreamPathRun( GLView * ogl, const QString & pathFile, const Q
 		}
 	}
 	wwCellStreamSettle( ogl, 16, waitMs );   // the caches dropped above come back before the shot
-	// lane RTXGI1 M3: the ray-traced GI volume scrolled with the walk; the shot waits until it stood still for its spec's
+	// the ray-traced GI volume scrolled with the walk; the shot waits until it stood still for its spec's
 	// max updates at the last camera (only while its define is on: an off walk shoots what it shot before)
 	if ( rtddgiCellShaderDefine() ) {
 		QElapsedTimer rt;
@@ -2302,16 +1869,10 @@ static void wwCellStreamPathRun( GLView * ogl, const QString & pathFile, const Q
 	ogl->wwSetPathCamera( false );
 }
 
-/* lane MOTION1: WW_RENDER_PATH=<file> (main.cpp maps --path <file> to it). The camera follows the path file
- * (gl/campath.h) one fixed step a frame; the scene's own time is held where WW_RENDER_TIME put it, so only the
- * camera moves (the temporal AA's motion vectors are the camera's alone). Frames go to <out>_000.<ext> ..;
- * an out ending .mp4/.webm/.gif renders PNG frames and hands them to ffmpeg ($WW_FFMPEG, else ffmpeg on PATH).
- * <out>_path.txt holds, per frame, the camera as drawn, the temporal AA's echo and the sun cascades' echo.
- * With the temporal AA on, 16 still frames at the path's first camera run first so frame 0 is converged, and
- * the TAA frame index is pinned (pre-roll + k), so frame k is the same picture on every run. */
+// WW_RENDER_PATH=<file> (main.cpp maps --path <file> to it).
 bool wwCellParticlesOn();	// src/cellview.cpp
 
-/* lane FXCHECK1: a held still shot starts its emitters cold; run them WW_CELL_PARTICLES_PREROLL (5) s first, as the
+/* a held still shot starts its emitters cold; run them WW_CELL_PARTICLES_PREROLL (5) s first, as the
  * game's are already burning. Particles row only; red WW_CELL_PARTICLES_RED=nopreroll. */
 static QString wwParticlePreroll( GLView * ogl, float shotT )
 {
@@ -2383,7 +1944,7 @@ static void wwRenderPathRun( GLView * ogl, const QString & pathFile, const QStri
 		if ( sideOk )
 			log << pre << "\n";
 	}
-	int unpainted = 0;	// lane HOLDFIX1: frames whose pumps painted nothing (the side file says how many)
+	int unpainted = 0;	// frames whose pumps painted nothing (the side file says how many)
 	auto pump = [ogl, &unpainted]() {
 		bool painted = false;
 		for ( int i = 0; i < 2; i++ )
@@ -2394,8 +1955,8 @@ static void wwRenderPathRun( GLView * ogl, const QString & pathFile, const QStri
 	float fov = 70.0f;
 	path.sample( 0, eye, at, fov );
 	ogl->wwSetPathCamera( true, eye, at, fov );
-	wwDoorLiveStep( ogl->getScene(), 0.0 );	// lane DOORLIVE1: the preroll sees the door at its first frame
-	/* lane RTXGI1 M3: the ray-traced GI volume follows the camera (it scrolls to the path's first key here, or builds
+	wwDoorLiveStep( ogl->getScene(), 0.0 );	// the preroll sees the door at its first frame
+	/* the ray-traced GI volume follows the camera (it scrolls to the path's first key here, or builds
 	 * there); a picture waits until it has stood still for its spec's max updates, as the live settle does before the
 	 * path. Only while the volume's define is on: an off row paints exactly what it painted before */
 	if ( rtddgiCellShaderDefine() ) {
@@ -2410,7 +1971,7 @@ static void wwRenderPathRun( GLView * ogl, const QString & pathFile, const QStri
 			log << "rtddgi settled at the first key in " << n << " frames " << rt.elapsed() << " ms"
 				<< ( rtddgiCellPending() ? " TIMED OUT" : "" ) << "\n";
 	}
-	/* lane PERFFIX3: the clouds' coverage tables (a worker builds them after a band move, the old ones drawn meanwhile)
+	/* the clouds' coverage tables (a worker builds them after a band move, the old ones drawn meanwhile)
 	 * and the cloud shadow map (a moved fit's map built size/16 rows a frame) at the first key; a picture waits for
 	 * both. Nothing pending (clouds off, a still camera): no paint, the frames as before */
 	{
@@ -2427,11 +1988,11 @@ static void wwRenderPathRun( GLView * ogl, const QString & pathFile, const QStri
 	}
 	for ( int k = 0; k < preroll; k++ ) {
 		wwGameTaaSetFrame( k );
-		wwCellPostSetPath( k, float( path.fps() ) );	// lane GRASSMB1: the motion blur's frame and frame time
-		wwCellSsgiSetPath( k );	// lane SSGI2FRAMES: the bounce's temporal state follows the path frame
+		wwCellPostSetPath( k, float( path.fps() ) );	// the motion blur's frame and frame time
+		wwCellSsgiSetPath( k );	// the bounce's temporal state follows the path frame
 		pump();
 	}
-	/* lane SHADOWCACHE1: WW_RENDER_PATH_HOURSTEP=<hours a frame> moves the sun along the path too (frame k at the
+	/* WW_RENDER_PATH_HOURSTEP=<hours a frame> moves the sun along the path too (frame k at the
 	 * pinned hour + k * step); only with WW_LOOKDEV_HOUR set, so the stepped hour is never saved */
 	const double hourStep = qEnvironmentVariable( "WW_RENDER_PATH_HOURSTEP" ).toDouble();
 	const bool stepHour = hourStep != 0.0 && qEnvironmentVariableIsSet( "WW_LOOKDEV_HOUR" );
@@ -2446,7 +2007,7 @@ static void wwRenderPathRun( GLView * ogl, const QString & pathFile, const QStri
 		wwGameTaaSetFrame( preroll + k );
 		wwCellPostSetPath( preroll + k, float( path.fps() ) );
 		wwCellSsgiSetPath( preroll + k );
-		// lane DOORLIVE1: the live door at this frame's time (posed and relit before the frame draws)
+		// the live door at this frame's time (posed and relit before the frame draws)
 		const QString door = wwDoorLiveStep( ogl->getScene(), path.fps() > 0 ? double( k ) / double( path.fps() ) : 0.0 );
 		pump();
 		const QImage img = ss > 0 ? ogl->grabSupersampled( ss ) : ogl->grabFramebuffer();
@@ -2458,19 +2019,19 @@ static void wwRenderPathRun( GLView * ogl, const QString & pathFile, const QStri
 				<< " at " << QString::asprintf( "%.6f %.6f %.6f", at[0], at[1], at[2] )
 				<< " fov " << QString::asprintf( "%.6f", fov ) << " | taa " << wwGameTaaEcho()
 				<< " | " << wwSunShadowSummary() << " | " << wwCellPostEcho() << " | " << wwCellBloomEcho()
-				// lane REDFIX1: the switch is live (read per draw) but its echo had no caller; print it per frame
+				// the switch is live (read per draw) but its echo had no caller; print it per frame
 				<< ( wwLookOn( WwLook::LensFlares ) ? QStringLiteral( " | " ) + wwCellLensFlareEcho( ogl->getScene() ) : QString() )
-				// lane CAMGATE1: the bounds gate's word on this frame's view (the runner refuses a row with a refused frame)
+				// the bounds gate's word on this frame's view (the runner refuses a row with a refused frame)
 				<< [ogl]() { const QString b = ogl->wwCameraBoundsEcho(); return b.isEmpty() ? b : QStringLiteral( " | " ) + b; }()
 				<< "\n";
 	}
-	// lane PERF1: WW_RENDER_GPUMS=<frames> times that many repaints at the path's last camera (as the still shot does)
+	// WW_RENDER_GPUMS=<frames> times that many repaints at the path's last camera (as the still shot does)
 	if ( const int gpuFrames = wwEnvInt( "WW_RENDER_GPUMS" ); gpuFrames > 0 && frames > 0 ) {
 		QFile gf( out + QStringLiteral( ".gpums.txt" ) );
 		if ( gf.open( QIODevice::WriteOnly | QIODevice::Text ) )
 			QTextStream( &gf ) << ogl->wwGpuMs( gpuFrames ) << "\n";
 	}
-	// lane HOLDFIX1: the stepped hour went on into every later row of the launch; put the pinned hour back
+	// the stepped hour went on into every later row of the launch; put the pinned hour back
 	if ( stepHour )
 		wwLookdevSetHour( hour0 );
 	if ( sideOk )
@@ -2496,7 +2057,7 @@ static void wwRenderPathRun( GLView * ogl, const QString & pathFile, const QStri
 	}
 }
 
-/* lane TESTDRIVER1 (2026-10-22): THE LIVE DRIVER. bungo 10-22: "by relaunching nifskope, you introduce a significant
+/* THE LIVE DRIVER. bungo 10-22: "by relaunching nifskope, you introduce a significant
  * delay by loading everything again". One loaded scene, many rows: a step sets or unsets a WW_* switch (the store,
  * wwswitch.h) and the stage that switch owes runs before the next picture: the shader programs reload, or the cell
  * document re-opens in this window (the shot handler runs again: window, camera, options, the cells settled). A
@@ -2515,11 +2076,11 @@ struct WwLiveState
 	bool reopening = false, reopenDone = false;
 	bool stepsRunning = false;	// fix TDFIX2: a reopen's late completeLoading must not start the steps again
 	bool rowRefused = false;	// a set of this row was refused: its pictures are not taken
-	QString shaderRefused;		// fix 10-22: a program the last reload refused; pictures wait for a clean reload
+	QString shaderRefused;		// a program the last reload refused; pictures wait for a clean reload
 	QString reopenRefused;		// fix TDFIX2: a reopen over the 3 min limit (or never done); the row takes no picture
 };
 
-//! fix 10-22: the visible chrome around the viewport, "name WxH" each, to say what a reopen changed
+//! the visible chrome around the viewport, "name WxH" each, to say what a reopen changed
 QStringList wwLiveChrome( NifSkope * skope )
 {
 	QStringList r;
@@ -2542,10 +2103,10 @@ WwLiveState & wwLive()
 void wwLivePump( GLView * ogl, int frames )
 {
 	for ( int i = 0; i < frames; i++ )
-		ogl->wwPaintNow();	// lane HOLDFIX1: a pumped frame must really paint (see GLView::wwPaintNow)
+		ogl->wwPaintNow();	// a pumped frame must really paint (see GLView::wwPaintNow)
 }
 
-/* fix 10-22: a live hour set starts time-of-day work in the background that a launch finished while loading: the probe
+/* a live hour set starts time-of-day work in the background that a launch finished while loading: the probe
  * sky relight (a 0.4 s timer) and the terrain shadow sweep (a worker, then a band-a-frame upload). A picture waits for
  * both, so it draws what a launch at that hour draws (the hour row was brighter where the far terrain shadow was due). */
 QString wwLiveSettleBackground( GLView * ogl )
@@ -2561,7 +2122,7 @@ QString wwLiveSettleBackground( GLView * ogl )
 			relit = true;
 		}
 		if ( !wwTerrainShadowPending() && !probeSkyRelightPending() && !rtddgiCellPending() && !wwCloudVolTablesPending()
-			&& !wwCloudShadowPending() )	// lane PERFFIX3: the clouds' tables and shadow map built over frames
+			&& !wwCloudShadowPending() )	// the clouds' tables and shadow map built over frames
 			break;
 		wwLivePump( ogl, 1 );
 		frames++;
@@ -2577,10 +2138,10 @@ QString wwLiveSettleBackground( GLView * ogl )
 QString wwLiveApply( NifSkope * skope )
 {
 	WwLiveState & L = wwLive();
-	// lane LIVESET1: the far LOD and the probe markers rebuild in place; the reopen only when they cannot
+	// the far LOD and the probe markers rebuild in place; the reopen only when they cannot
 	QString liveWhy;
 	const int liveSec = ( L.owed & 2 ) ? 0 : cellLiveSections( skope->getNifModel(), &liveWhy );
-	if ( liveSec == 1 ) {	// lane DUNESAND3: the legend names the value set now, not the open's
+	if ( liveSec == 1 ) {	// the legend names the value set now, not the open's
 		const QString legend = cellWorkspaceNotesLive();
 		if ( !legend.isEmpty() )
 			liveWhy += QStringLiteral( "; " ) + legend;
@@ -2654,7 +2215,7 @@ QString wwLiveApply( NifSkope * skope )
 			L.reopenRefused = QStringLiteral( "reopen %1 in %2 ms (limit 180000)" )
 				.arg( L.reopenDone ? QStringLiteral( "too slow" ) : QStringLiteral( "TIMED OUT" ) ).arg( reopenMs );
 		did << ( L.reopenDone ? QStringLiteral( "reopen %1 ms" ).arg( reopenMs ) : QStringLiteral( "reopen TIMED OUT" ) );
-		/* fix 10-22: the reopen must hand back the viewport the rows before it drew in (port run: 1920x1026 became
+		/* the reopen must hand back the viewport the rows before it drew in (port run: 1920x1026 became
 		 * 1920x1045, the handler's window pin lands on other chrome the second time). The window takes the difference. */
 		ogl = skope->getGLView();
 		const QSize viewAfter( ogl->width(), ogl->height() );
@@ -2718,7 +2279,7 @@ QString wwLiveCommand( NifSkope * skope, const QString & line )
 	GLView * ogl = skope ? skope->getGLView() : nullptr;
 	if ( !ogl )
 		return QStringLiteral( "refused no view" );
-	wwLiveSessionStart();	// fix 10-22: from here a refused shader refuses its row, not the process
+	wwLiveSessionStart();	// from here a refused shader refuses its row, not the process
 	if ( verb == QLatin1StringView( "row" ) ) {
 		L.rowRefused = false;
 		L.reopenRefused.clear();
@@ -2774,14 +2335,14 @@ QString wwLiveCommand( NifSkope * skope, const QString & line )
 		const qint64 ms = cellStreamBusy( nullptr ) ? wwCellStreamSettle( ogl, 16, 600000 ) : 0;
 		return QStringLiteral( "%1; settled in %2 ms%3" ).arg( applied ).arg( ms ).arg( wwLiveSettleBackground( ogl ) );
 	}
-	if ( verb == QLatin1StringView( "flycheck" ) ) {	// lane FLYFIX1: the free camera's refocus gate, "flycheck [OUT]"
+	if ( verb == QLatin1StringView( "flycheck" ) ) {	// the free camera's refocus gate, "flycheck [OUT]"
 		const QString r = ogl->wwFlyRefocusCheck();
 		QFile ff( rest );
 		if ( !rest.isEmpty() && ff.open( QIODevice::WriteOnly | QIODevice::Text ) )
 			QTextStream( &ff ) << r << "\n";
 		return r;
 	}
-	if ( verb == QLatin1StringView( "camera" ) ) {	// lane FLYFIX1: "camera PATHFILE", the view at the path's first key for good
+	if ( verb == QLatin1StringView( "camera" ) ) {	// "camera PATHFILE", the view at the path's first key for good
 		WwCamPath cp;
 		QString err;
 		if ( !cp.load( rest, &err ) )
@@ -2820,7 +2381,7 @@ QString wwLiveCommand( NifSkope * skope, const QString & line )
 		QTextStream( &gf ) << ogl->wwGpuMs( frames ) << "\n";
 		return QStringLiteral( "%1%2; gpums %3 frames -> %4" ).arg( applied, bg ).arg( frames ).arg( out );
 	};
-	// fix 10-22: a program refused under this row's switches: no picture (the guard's rule), the session goes on
+	// a program refused under this row's switches: no picture (the guard's rule), the session goes on
 	if ( !L.shaderRefused.isEmpty() )
 		return QStringLiteral( "refused shader %1 (%2; the row's pictures are skipped)" ).arg( L.shaderRefused, applied );
 	if ( !L.reopenRefused.isEmpty() )
@@ -2890,11 +2451,7 @@ static void wwLiveStepsRun( NifSkope * skope, const QString & stepsFile )
 		log << "end ms " << all.elapsed() << "\n";
 }
 
-/* CARDBAKE2 step 1: ONE PROCESS FOR EVERY BASE (WW_IMPOSTOR_BATCH=<cands list>). Archives, the resource stack,
- * XML and the process itself are paid once; each base still gets a FRESH window (new GLView, new scene), so its
- * bake runs exactly the code a per-base launch ran. Outputs are renamed to <formid>_* with the .txt LAST, the
- * skip-done marker of the per-base driver, so a run stopped mid-list resumes. WW_CARDBAKE_RED=1 in the driver is
- * the per-base path. */
+// CARDBAKE2 step 1: ONE PROCESS FOR EVERY BASE (WW_IMPOSTOR_BATCH=<cands list>).
 struct WwCardBatch {
 	QStringList lines;
 	int next = 0, n = 0, baked = 0, failed = 0, cached = 0, missing = 0;
@@ -3072,7 +2629,6 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 	if ( !background ) {
 		skope->restoreUi();
 		/* A HEADLESS RUN IS NEVER ON HIS MAIN MONITOR, AND IS NEVER VISIBLE
-		 * (bungo 2026-09-09, two requirements, both verbatim):
 		 *
 		 *   "Agent is launching nifskope on my main monitor, which is a no no"
 		 *   "the screen is flashing white and black, that's a view hazard for
@@ -3134,15 +2690,9 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 		const bool headlessHidden = headlessRun && wwHeadlessOpacity0();
 
 		if ( headlessRun ) {
-			/* AGAIN, because restoreUi() above just overwrote both: its
-			 * restoreGeometry() restores the position AND the maximised state
-			 * the person last left, and move() on a maximised window is a
-			 * no-op on Windows except for choosing the monitor. The 2026-09-09
-			 * attempt that omitted the un-maximise changed nothing measurable.
-			 *
-			 * INVISIBLE, NOT ABSENT: a layered window at alpha 0 is still
-			 * exposed, still gets paint events and still has a GL context --
-			 * which is exactly what an off-screen window does not. */
+			// AGAIN, because restoreUi() above just overwrote both: its restoreGeometry() restores the
+			// position AND the maximised state the person last left, and move() on a maximised window is a
+			// no-op on Windows except for choosing the monitor.
 			NifSkope::wwPlaceHeadlessWindow( skope );
 			const QPoint origin = skope->pos();
 			skope->show();
@@ -3150,38 +2700,20 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 			 * when move() was called can be placed by the window manager
 			 * instead. Cheap, and the log below reads back what actually took. */
 			skope->move( origin );
-			NifSkope::wwHeadlessWindowBehind( skope );	// lane FLYFIX1: show() put it on top; back behind his windows
+			NifSkope::wwHeadlessWindowBehind( skope );	// show put it on top; back behind his windows
 			QTimer::singleShot( 2000, skope, []() { wwLogTopLevelWindows( "settled" ); } );
 			(void) headlessHidden;
 		} else {
-			/* WW_WINDOW_AT=x,y: place the window BEFORE showing it, and do not raise.
-			 *
-			 * For running a GUI harness on a second monitor while someone is working on
-			 * the first. Moving it after show() is not the same thing -- the window
-			 * appears on the primary monitor for a frame and then jumps, which is
-			 * exactly the interruption this exists to avoid -- and raise() would take
-			 * focus even once it is out of the way.
-			 *
-			 * Interactive only now: every WW_* run is placed by the branch above.
-			 */
+			// WW_WINDOW_AT=x,y: place the window BEFORE showing it, and do not raise.
 			const QString at = wwEnvStr( "WW_WINDOW_AT" );
 			const QStringList xy = at.split( QLatin1Char( ',' ) );
 			if ( xy.size() == 2 ) {
 				skope->move( xy.at( 0 ).toInt(), xy.at( 1 ).toInt() );
 				skope->show();
 			} else {
-				/* Maximised, always.
-				 *
-				 * This window is a viewport, a block list, a details tree and two or
-				 * three docks; at any size a default geometry picks it is cramped, and
-				 * the first thing anyone does is maximise it. restoreGeometry above
-				 * still runs, so un-maximising gives back the size that was last used
-				 * rather than a default one.
-				 *
-				 * Not applied on the WW_WINDOW_AT path: that exists to put a harness
-				 * window on a second monitor without disturbing whoever is working on
-				 * the first, and maximising would undo the placement it just made.
-				 */
+				// Maximised, always:
+				// This window is a viewport, a block list, a details tree and two or three docks; at any size
+				// a default geometry picks it is cramped, and the first thing anyone does is maximise it.
 				skope->showMaximized();
 				skope->raise();
 			}
@@ -3190,18 +2722,15 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 		 * (WW_WINDOW_VISIBLE=1) has to be able to produce an opacity=1.00
 		 * record, or the gate's floor cannot fire. */
 		wwLogTopLevelWindows( "shown" );
-		/* AND THE SIZE IT GOT, beside the placement (lane HARNESSWIN1,
-		 * 2026-09-19).  Installs the resize watcher too, so the LAST
-		 * line of release/ww_harness_window.log is the settled window
-		 * rather than the one first shown. */
+		// AND THE SIZE IT GOT, beside the placement. Installs the resize watcher too, so the LAST line of
+		// release/ww_harness_window.log is the settled window rather than the one first shown.
 		wwHarnessRecordViewport( skope, skope->getGLView(), "shown" );
 	}
 	wwCardStamp( QStringLiteral( "shown" ) );
 
-	// TEMP DIAGNOSTIC (WW_EXTRUDE_TEST=1, remove when the append-row condition
-	// bug is fixed): after the file loads, grow "Vertex Data" on the first
-	// skinned BSTriShape by one row, probe the new row's structure/conditions,
-	// dump to ww_extrude_test.log next to the exe, then quit.
+	// TEMP DIAGNOSTIC (WW_EXTRUDE_TEST=1, remove when the append-row condition bug is fixed): after the file
+	// loads, grow "Vertex Data" on the first skinned BSTriShape by one row, probe the new row's
+	// structure/conditions, dump to ww_extrude_test.log next to the exe, then quit.
 	if ( !fname.isEmpty() && wwEnvIsSet( "WW_EXTRUDE_TEST" ) ) {
 		QObject::connect( skope, &NifSkope::completeLoading, skope, [skope]( bool ok, QString & ) {
 			QFile logf( QApplication::applicationDirPath() + "/ww_extrude_test.log" );
@@ -3452,26 +2981,9 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 		} );
 	}
 
-	/* TEST HARNESS (WW_FACEBONES_TEST=1): cast the real
-	 * "Rigging/Create faceBones NIF..." spell through NifSkope::castSpell, with
-	 * WW_TEST_DONOR supplying the faceBones donor (a native dialog no timer can
-	 * drive) and WW_TEST_FACEBONES_OUT naming where THIS FILE saves the result.
-	 *
-	 * The spell writes nothing: it puts the mesh in Loaded NIFs, unsaved, and
-	 * saving it is the user's move. So this drives the same two steps — cast,
-	 * then Save As on the row it made — and everything below reads the file that
-	 * produced. That the row appears, and appears unsaved, is checked before it
-	 * is written, because those are now the spell's actual output.
-	 *
-	 * The rest asserts on that file and on the source document being untouched -
-	 * which is the whole claim of this spell over running the transfer in place.
-	 * The load-bearing one is the last: the RemapData in the output must equal
-	 * the SOURCE's packed standard-skeleton skinning, not the sculpt weights the
-	 * output now carries. Get that backwards and the file still looks
-	 * structurally perfect while being exactly wrong.
-	 *
-	 * Writes ww_facebones_test.log next to the exe and quits.
-	 */
+	// TEST HARNESS (WW_FACEBONES_TEST=1): cast the real "Rigging/Create faceBones NIF..." spell through
+	// NifSkope::castSpell, with WW_TEST_DONOR supplying the faceBones donor (a native dialog no timer can
+	// drive) and WW_TEST_FACEBONES_OUT naming where THIS FILE saves the result.
 	if ( !fname.isEmpty() && wwEnvIsSet( "WW_FACEBONES_TEST" ) ) {
 		QObject::connect( skope, &NifSkope::completeLoading, skope, [skope, fname]( bool ok, QString & ) {
 			QTimer::singleShot( 500, skope, [skope, ok, fname]() {
@@ -3487,29 +2999,13 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 				};
 				NifModel * nif = skope->getNifModel();
 
-				/* EVERY DIALOG PHOTOGRAPHED, AND QUOTED WHOLE.
-				 *
-				 * The driver answers each dialog the spell puts up, which is what
-				 * lets this run unattended — and also exactly how a warning goes
-				 * unread. The log line was one sentence truncated at 240 characters,
-				 * informativeText and detailedText were never written down at all,
-				 * and nothing recorded whether the icon was a question or a warning.
-				 * A run could report 14 of 14 with a warning clicked through in the
-				 * middle of it and no trace left.
-				 *
-				 * So: a PNG of each dialog before the button is pressed, the full
-				 * text, and the severity — with warnings and criticals collected for
-				 * a check of their own, because "no warnings appeared" is a claim
-				 * worth making explicitly rather than inferring from silence.
-				 */
+				// EVERY DIALOG PHOTOGRAPHED, AND QUOTED WHOLE:
+				// The driver answers each dialog the spell puts up, which is what lets this run unattended —
+				// and also exactly how a warning goes unread.
 				int dialogShots = 0;
 				QStringList alarming, provoked;
-				/* One step here PROVOKES a warning on purpose — M, the refusal with
-				 * no face donor marked — so the run arms this around that cast and
-				 * the driver files those separately. Without it the check reads
-				 * "a warning appeared" and is right for the wrong reason, every run,
-				 * which is the same as not having it.
-				 */
+				// One step here PROVOKES a warning on purpose — M, the refusal with no face donor marked — so
+				// the run arms this around that cast and the driver files those separately.
 				bool warningExpected = false;
 				const QString shotDir = QApplication::applicationDirPath();
 				QTimer driver;
@@ -3651,14 +3147,9 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 					cfg.setValue( "Rigging/MappingMode", 1 );	// Nearest Vertex, deterministic
 					cfg.setValue( "Rigging/MaxInfluences", 4 );
 
-					/* THE WINDOW, BEFORE AND AFTER, and the written file opened.
-					 *
-					 * Everything else here is bytes: blob sizes, bone counts, a
-					 * comparison against a packing this file derives itself. All of
-					 * that can be right while the mesh renders as a shredded mess,
-					 * and none of it would say so. Three pictures cost nothing and
-					 * are the only part of this that a person can check.
-					 */
+					// THE WINDOW, BEFORE AND AFTER, and the written file opened:
+					// Everything else here is bytes: blob sizes, bone counts, a comparison against a packing
+					// this file derives itself.
 					auto stageShot = [skope]( const char * what ) {
 						skope->select( QModelIndex() );
 						qApp->processEvents();
@@ -3670,15 +3161,10 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 							}
 						}
 						QPixmap pm = skope->grab();
-						/* THE VIEWPORT PAINTED BACK IN.
-						 *
-						 * QWidget::grab() walks the widget tree, and the viewport is
-						 * not in it — GLView is a QOpenGLWindow embedded through
-						 * createWindowContainer, so its native surface is simply
-						 * absent and the middle of the picture comes out black. The
-						 * first run of this looked exactly like a mesh that failed to
-						 * render, which is the wrong thing to spend an hour on.
-						 */
+						// THE VIEWPORT PAINTED BACK IN:
+						// QWidget::grab() walks the widget tree, and the viewport is not in it — GLView is a
+						// QOpenGLWindow embedded through createWindowContainer, so its native surface is
+						// simply absent and the middle of the picture comes out black.
 						if ( skope->ogl && skope->graphicsView ) {
 							const QImage fb = skope->ogl->grabFramebuffer();
 							QPainter p( &pm );
@@ -3695,15 +3181,10 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 					skope->castSpell( QLatin1String( "Rigging/Create faceBones NIF..." ), pShape );
 					stageShot( "2_after_spell" );
 
-					/* THE RESULT IS A ROW, AND THEN A FILE.
-					 *
-					 * The spell hands the mesh to Loaded NIFs and writes nothing,
-					 * so the row IS the output and is checked as one - it has to
-					 * exist, and it has to be marked unsaved, which is what keeps
-					 * the close path from dropping the only copy without asking.
-					 * Saving it is the second half of the same user action, and
-					 * gives B..N below a file to go on reading.
-					 */
+					// THE RESULT IS A ROW, AND THEN A FILE:
+					// The spell hands the mesh to Loaded NIFs and writes nothing, so the row IS the output and
+					// is checked as one - it has to exist, and it has to be marked unsaved, which is what
+					// keeps the close path from dropping the only copy without asking.
 					const int made = skope->workspaceDocumentCount() - 1;
 					check( "B0: the result arrived in Loaded NIFs",
 						made == rowsBefore );
@@ -3857,20 +3338,9 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 					check( "J: every remap index resolves, so no NewBonesData is needed",
 						outHi >= 0 && outHi < outBones.size() );
 
-					/* WHICH BONES THE BLOB ACTUALLY NAMES, spelled out.
-					 *
-					 * G and H say the blob is the source's skinning and not the
-					 * output's, which is the same claim in the language of byte
-					 * comparisons. This is that claim in the language of the format:
-					 * CustomizationRemapData is how the sculpt-rigged mesh maps BACK
-					 * to the animation skeleton, so every bone it names must be a
-					 * standard one. A skin_bone_* in here would mean the file
-					 * remembers its own face rig as its skeleton binding — valid
-					 * bytes, ruinous meaning, and invisible in every view.
-					 *
-					 * Named rather than counted, because "which bones" is the
-					 * question anyone actually asks of this blob.
-					 */
+					// WHICH BONES THE BLOB ACTUALLY NAMES, spelled out:
+					// G and H say the blob is the source's skinning and not the output's, which is the same
+					// claim in the language of byte comparisons.
 					QSet<int> usedIdx;
 					for ( int off = 0; off + 12 <= outRemap.size(); off += 12 )
 						for ( int s = 0; s < 4; s++ ) {
@@ -3897,11 +3367,8 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 					check( "P: the remap blob names no face-sculpt bone — it is the "
 						"standard-skeleton binding", sculptInRemap == 0 );
 
-					/* The donor is a vanilla faceBones mesh whose bone list
-					 * REPLACES the standard bones, so its blob must overrun.
-					 * Without this, J passes on any file at all and proves
-					 * nothing about the append-only pipeline.
-					 */
+					// The donor is a vanilla faceBones mesh whose bone list REPLACES the standard bones, so
+					// its blob must overrun.
 					NifModel don;
 					const QString donorPath = QString::fromLocal8Bit( wwEnv( "WW_TEST_DONOR" ) );
 					if ( don.loadFromFile( donorPath ) ) {
@@ -3974,13 +3441,8 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 						check( "K: the donor reloaded for comparison", false );
 					}
 
-					/* AND THE WRITTEN FILE, OPENED IN THE WINDOW.
-					 *
-					 * Last, because it replaces the document every check above was
-					 * about. This is the picture that answers "did it come out
-					 * looking like a hat" — the one question the byte comparisons
-					 * cannot be asked.
-					 */
+					// AND THE WRITTEN FILE, OPENED IN THE WINDOW:
+					// Last, because it replaces the document every check above was about.
 					skope->loadFile( outPath );
 					for ( int i = 0; i < 40 && skope->getNifModel()
 						&& skope->getNifModel()->getBlockCount() == 0; i++ )
@@ -4007,14 +3469,9 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 				driver.stop();
 				logf.close();
 
-				/* The scoped driver above dies with this lambda, and the
-				 * save-on-quit prompt appears AFTER it — so quit() opens a modal
-				 * with nobody left to answer it and the process hangs until it is
-				 * killed. (Which is what happened: 9/9 in the log, exit 124 from
-				 * timeout.) Hand over to an app-owned answerer that outlives this
-				 * scope. It deliberately does not touch `log`: that stream and its
-				 * QFile are both gone by the time it fires.
-				 */
+				// The scoped driver above dies with this lambda, and the save-on-quit prompt appears AFTER it
+				// — so quit() opens a modal with nobody left to answer it and the process hangs until it is
+				// killed.
 				auto * closer = new QTimer( qApp );
 				QObject::connect( closer, &QTimer::timeout, qApp, []() {
 					QWidget * w = QApplication::activeModalWidget();
@@ -4235,14 +3692,10 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 		} );
 	}
 
-	// TEST HARNESS (WW_DUPFREEZE_TEST=1 edit-mode / =2 object-mode): reproduce
-	// "duplicate most of a high-poly mesh" headlessly and TIME it — regression
-	// guard for the tlCloneBlock freeze (loadIndex populated a 38k-vert clone
-	// without Loading state, so every write emitted a signal the live scene
-	// reacted to → quadratic). =1 enters edit mode, selects all faces (forces
-	// the over-cap new-shape path, confirm auto-answered Yes), times
-	// duplicateElements(); =2 times object-mode duplicateSelection(). Logs
-	// block-count delta + elapsed to ww_dupfreeze_test.log, quits.
+	// TEST HARNESS (WW_DUPFREEZE_TEST=1 edit-mode / =2 object-mode): reproduce "duplicate most of a high-poly
+	// mesh" headlessly and TIME it — regression guard for the tlCloneBlock freeze (loadIndex populated a
+	// 38k-vert clone without Loading state, so every write emitted a signal the live scene reacted to →
+	// quadratic).
 	if ( !fname.isEmpty() && wwEnvIsSet( "WW_DUPFREEZE_TEST" ) ) {
 		QObject::connect( skope, &NifSkope::completeLoading, skope, [skope]( bool ok, QString & ) {
 			QTimer::singleShot( 800, skope, [skope, ok]() {
@@ -4329,11 +3782,7 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 		} );
 	}
 
-	// TEST HARNESS (WW_DELETE_TEST=1): exercise object-mode multi-delete
-	// headlessly. Object-selects the two smallest BSTriShapes plus (if present)
-	// one whole NiNode branch, runs deleteBlocks with the confirm
-	// auto-clicked, verifies the branch closure was removed and no dangling -1
-	// child link remains, saves (WW_TEST_SAVE) and quits.
+	// TEST HARNESS (WW_DELETE_TEST=1): exercise object-mode multi-delete headlessly.
 	if ( !fname.isEmpty() && wwEnvIsSet( "WW_DELETE_TEST" ) ) {
 		QObject::connect( skope, &NifSkope::completeLoading, skope, [skope]( bool ok, QString & ) {
 			QTimer::singleShot( 600, skope, [skope, ok]() {
@@ -4578,17 +4027,7 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 		} );
 	}
 
-	// TEST HARNESS (WW_JOIN_TEST=1): exercise rigging-aware Ctrl+J on FO4 skinned
-	// segmented meshes. Object-selects the largest BSSubIndexTriShape plus every
-	// other BSSubIndexTriShape sharing its vertex desc, runs GLView::
-	// joinSelectedObjects(), and verifies on the merged shape:
-	//   - Num Vertices / Num Triangles == the sums of the participants,
-	//   - the skin bone list == the UNION of the participants' bone NiNodes
-	//     (Num Bones consistent across Instance/Bones/BoneData),
-	//   - every per-vertex Bone Index < merged Num Bones (indices were remapped,
-	//     not left pointing into a source's old shorter list),
-	//   - segments cover [0, Num Triangles) with Sum(Num Primitives) == tris.
-	// Saves (WW_TEST_SAVE) and quits. Log: release/ww_join_test.log.
+	// TEST HARNESS (WW_JOIN_TEST=1): exercise rigging-aware Ctrl+J on FO4 skinned segmented meshes.
 	if ( !fname.isEmpty() && wwEnvIsSet( "WW_JOIN_TEST" ) ) {
 		QObject::connect( skope, &NifSkope::completeLoading, skope, [skope]( bool ok, QString & ) {
 			QTimer::singleShot( 800, skope, [skope, ok]() {
@@ -4874,11 +4313,8 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 					const VertexAttribute att = fullPrec ? VertexAttribute( 10 ) : VA_COLOR;
 					const char * probe = fullPrec ? "Vertex" : "Vertex Colors";
 
-					// Reading the row layout back is itself subject to the hazard
-					// this harness exists to check: "Vertex" names BOTH precision
-					// variants, so mere existence proves nothing. For Colors the
-					// name is unique and existence is the answer; for Full
-					// Precision we have to ask the LIVE item for its value type.
+					// Reading the row layout back is itself subject to the hazard this harness exists to
+					// check: "Vertex" names BOTH precision variants, so mere existence proves nothing.
 					auto rowMatchesDesc = [nif, fullPrec]( const QModelIndex & iArr, bool want ) {
 						const NifItem * row0 = nif->getItem( iArr, 0, false );
 						if ( !row0 )
@@ -4988,12 +4424,7 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 		} );
 	}
 
-	// TEST HARNESS (WW_POSEDOCK_TEST=1): the Pose Manager dock is wired to the
-	// shared pose API. Finds the dock, shows it, checks the bone list populated,
-	// drives Save current (auto-answering the name dialog) and confirms a pose
-	// sequence appeared, then drives Apply and confirms it ran. UI over the API
-	// that WW_POSE_TEST / the CLI already prove numerically.
-	// Log: release/ww_posedock_test.log.
+	// TEST HARNESS (WW_POSEDOCK_TEST=1): the Pose Manager dock is wired to the shared pose API.
 	if ( !fname.isEmpty() && wwEnvIsSet( "WW_POSEDOCK_TEST" ) ) {
 		QObject::connect( skope, &NifSkope::completeLoading, skope, [skope]( bool ok, QString & ) {
 			QTimer::singleShot( 1000, skope, [skope, ok]() {
@@ -5083,13 +4514,7 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 		} );
 	}
 
-	// TEST HARNESS (WW_SKELETON_TEST=1): the Skeleton Manager dock renders what
-	// skeletonAnalyse() reports. The numbers themselves are proven separately and
-	// independently by the CLI (`skeleton <file>`), whose summed weight matches the
-	// vertex count to rounding; this checks the UI layer on top of them - that the
-	// tree populates, that each filter narrows the way its tooltip claims, and that
-	// search filters. Read-only, so it cannot damage the file it opens.
-	// Log: release/ww_skeleton_test.log.
+	// TEST HARNESS (WW_SKELETON_TEST=1): the Skeleton Manager dock renders what skeletonAnalyse() reports.
 	if ( !fname.isEmpty() && wwEnvIsSet( "WW_SKELETON_TEST" ) ) {
 		QObject::connect( skope, &NifSkope::completeLoading, skope, [skope]( bool ok, QString & ) {
 			QTimer::singleShot( 800, skope, [skope, ok]() {
@@ -5189,11 +4614,8 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 						qApp->processEvents();
 					}
 
-					// Screenshot of the armature itself. The render-regression harness
-					// cannot serve here: it hides every dock, which switches the skeleton
-					// view back off. WW_SKELETON_SHOT=<png> grabs the viewport with the
-					// dock up, so the octahedral bones, the names and the relationship
-					// lines can actually be looked at rather than assumed.
+					// Screenshot of the armature itself. The render-regression harness cannot serve here: it
+					// hides every dock, which switches the skeleton view back off.
 					const QString shot = wwEnvStr( "WW_SKELETON_SHOT" );
 					if ( !shot.isEmpty() && skope->ogl ) {
 						skope->ogl->setSkeletonView( true );
@@ -5201,11 +4623,9 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 						if ( viewIdx <= 0 || viewIdx > int( GLView::ViewWalk ) )
 							viewIdx = int( GLView::ViewFront );
 						skope->ogl->setOrientation( GLView::ViewState( viewIdx ), true );
-						// Warm up the line path: before the first pick render, streaming
-						// line geometry draws nothing (the open 07-17 defect) while points
-						// still render, so the bones would be missing and only their joint
-						// dots would show. indexAt() runs the pick render, which is what
-						// heals it. Harness-only: this is not a fix for that bug.
+						// Warm up the line path: before the first pick render, streaming line geometry draws
+						// nothing (the open 07-17 defect) while points still render, so the bones would be
+						// missing and only their joint dots would show.
 						skope->ogl->indexAt( QPointF( skope->ogl->width() * 0.5,
 													   skope->ogl->height() * 0.5 ) );
 						qApp->processEvents();
@@ -5234,12 +4654,7 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 		} );
 	}
 
-	// TEST HARNESS (WW_POSEDRAW_TEST=1): Pose Mode draws the skeleton and picks
-	// bones. grab() can't see the native GL child (airspace), so this uses
-	// grabFramebuffer + a pixel diff to confirm the skeleton overlay appears,
-	// checks the bone list built, and confirms poseBoneAt() resolves a bone at
-	// a drawn bone's screen position.
-	// Log: release/ww_posedraw_test.log.
+	// TEST HARNESS (WW_POSEDRAW_TEST=1): Pose Mode draws the skeleton and picks bones.
 	if ( !fname.isEmpty() && wwEnvIsSet( "WW_POSEDRAW_TEST" ) ) {
 		QObject::connect( skope, &NifSkope::completeLoading, skope, [skope]( bool ok, QString & ) {
 			QTimer::singleShot( 1200, skope, [skope, ok]() {
@@ -5420,12 +4835,8 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 		} );
 	}
 
-	// TEST HARNESS (WW_POSEEXTRAS_TEST=1): weight-influence overlay + proportional
-	// editing. (1) select a skinned bone, turn Weights on, confirm the overlay
-	// found vertices it drives. (2) proportional self-test: pick a central vertex,
-	// enable proportional editing, begin a move, confirm neighbours were gathered
-	// with a distance-decreasing falloff.
-	// Log: release/ww_poseextras_test.log.
+	// TEST HARNESS (WW_POSEEXTRAS_TEST=1): weight-influence overlay + proportional editing. (1) select a
+	// skinned bone, turn Weights on, confirm the overlay found vertices it drives.
 	if ( !fname.isEmpty() && wwEnvIsSet( "WW_POSEEXTRAS_TEST" ) ) {
 		QObject::connect( skope, &NifSkope::completeLoading, skope, [skope]( bool ok, QString & ) {
 			QTimer::singleShot( 1000, skope, [skope, ok]() {
@@ -5490,11 +4901,6 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 	}
 
 	// TEST HARNESS (WW_OSPOSE_TEST=1): Outfit Studio pose XML round-trip.
-	// Enters pose mode (captures rest), poses a bone by a known Euler delta,
-	// exports an OS pose XML, resets the bone, re-imports, and checks the bone
-	// returns to the posed orientation — proving export/import are exact
-	// inverses. Also parse-imports a real PA pose file if WW_OSPOSE_FILE is set.
-	// Log: release/ww_ospose_test.log.
 	if ( !fname.isEmpty() && wwEnvIsSet( "WW_OSPOSE_TEST" ) ) {
 		QObject::connect( skope, &NifSkope::completeLoading, skope, [skope]( bool ok, QString & ) {
 			QTimer::singleShot( 1000, skope, [skope, ok]() {
@@ -5577,39 +4983,7 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 		} );
 	}
 
-	/* TEST HARNESS (WW_SAMPOSE_TEST=1): Screen Archer Menu pose JSON import.
-	 *
-	 * SAM poses are ABSOLUTE local transforms, so unlike the OS pose there is no
-	 * export to round-trip against — a round-trip would only prove the importer
-	 * agrees with itself. What is measured instead is the convention itself:
-	 *
-	 *   1. a bone given yaw=90 / pitch=30 / roll=-45 lands on a rotation matrix
-	 *      hard-coded NUMERICALLY here (computed by hand from Rx(yaw)·Ry(pitch)·
-	 *      Rz(roll)). A wrong axis mapping or composition order fails this even
-	 *      though Matrix::fromEuler would happily agree with itself;
-	 *   2. ...and separately equals Matrix::fromEuler(yaw,pitch,roll), which is
-	 *      what pins the claim "SAM's MatrixFromEulerYPR == fromEuler";
-	 *   3. translation and scale arrive verbatim, and the values actually CHANGED
-	 *      from what the bones held before the import (a no-op importer fails);
-	 *   4. all seven channels parse from JSON STRINGS, which is how SAM writes;
-	 *   5. a bone name the file does not have is counted missing, not fatal;
-	 *   6. ONE undo step restores every touched bone;
-	 *   7. blend 0.5 lands exactly halfway between the bone's current translation
-	 *      and the pose's.
-	 *
-	 * Optionally applies a real SAM pose named by WW_SAMPOSE_FILE and checks two
-	 * values known from the format study; skipped when absent.
-	 * Pose mode is deliberately NOT entered: SAM needs no rest base, and the
-	 * import must work on a plain skeleton.nif with no skinned shape.
-	 *
-	 * WW_SAMPOSE_MODE selects one run per process:
-	 *   (unset)  the convention checks above, on the bones-only skeleton;
-	 *   refuse   a flat bone-reference NIF (Frame.nif) must be REFUSED;
-	 *   merge    the supported path — skeleton.nif primary, WW_SAMPOSE_FRAME
-	 *            merged onto it, then the pose, checked by WORLD transform
-	 *            against an independent accumulation and photographed.
-	 * Log: release/ww_sampose_test.log.
-	 */
+	// TEST HARNESS (WW_SAMPOSE_TEST=1): Screen Archer Menu pose JSON import.
 	if ( !fname.isEmpty() && wwEnvIsSet( "WW_SAMPOSE_TEST" ) ) {
 		QObject::connect( skope, &NifSkope::completeLoading, skope, [skope, fname]( bool ok, QString & ) {
 			QTimer::singleShot( 1000, skope, [skope, ok, fname]() {
@@ -5682,16 +5056,7 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 						return parented;
 					};
 
-					/* PHASE 2a (WW_SAMPOSE_MODE=refuse): a flat bone-reference NIF
-					 * must be REFUSED, not posed.
-					 *
-					 * This is the check the shipped harness did not have. Frame.nif
-					 * carries dozens of NiNodes named after skeleton bones, every
-					 * one of them hanging off the file root, so SAM's absolute
-					 * PARENT-space values land in world space and the mesh crumples.
-					 * The shipped phase 2 photographed exactly that and called it a
-					 * pass, because a pixel delta cannot tell a pose from a crumple.
-					 */
+					// PHASE 2a (WW_SAMPOSE_MODE=refuse): a flat bone-reference NIF must be REFUSED, not posed.
 					if ( mode == QLatin1String( "refuse" ) ) {
 						const QString real = QString::fromLocal8Bit( wwEnv( "WW_SAMPOSE_FILE" ) );
 						if ( real.isEmpty() || !QFile::exists( real ) ) {
@@ -5748,30 +5113,8 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 						break;
 					}
 
-					/* PHASE 2b (WW_SAMPOSE_MODE=merge): the SUPPORTED path, and the
-					 * one the pictures come from.
-					 *
-					 * skeleton.nif is the primary — a real parent hierarchy —
-					 * WW_SAMPOSE_FRAME joins Loaded NIFs and is spliced onto it
-					 * through mergeIntoLoadedDocument, the same call
-					 * NifSkope::mergeWorkspaceDocumentsInto makes once its skull
-					 * policy has picked a target (that policy is what
-					 * tests/merge/workspace_skeleton_target.sh drives; here the
-					 * skeleton IS the requested target, so what is reused is the
-					 * splice). Only then is the pose imported.
-					 *
-					 * WHAT PROVES IT IS A POSE AND NOT A CRUMPLE
-					 *
-					 * Not the pixels. The WORLD transform. For bones at three
-					 * different depths the transform composed by walking the NIF's
-					 * Parent links AFTER the import is compared against one the
-					 * harness accumulates down the same chain from the JSON, with
-					 * its own Rx(yaw)*Ry(pitch)*Rz(roll) built here from degrees and
-					 * doubles — never Matrix::fromEuler, never the importer's own
-					 * arithmetic. Same file, two independent routes. A pose applied
-					 * to the wrong node, composed as a delta, or landed on a flat
-					 * node list misses this by whole limb lengths.
-					 */
+					// PHASE 2b (WW_SAMPOSE_MODE=merge): the SUPPORTED path, and the one the pictures come
+					// from.
 					if ( mode == QLatin1String( "merge" ) ) {
 						const QString real = QString::fromLocal8Bit( wwEnv( "WW_SAMPOSE_FILE" ) );
 						const QString frame = QString::fromLocal8Bit( wwEnv( "WW_SAMPOSE_FRAME" ) );
@@ -5835,10 +5178,7 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 						skope->setWorkspaceDisplayMode( 0, 0 );
 						settle( 400 );
 
-						/* Every local transform as it stands BEFORE the import.
-						 * Ancestors the pose does not name keep these, so the
-						 * harness's own chain never has to read a value the
-						 * importer wrote. */
+						// Every local transform as it stands BEFORE the import.
 						QHash<int, Transform> preLocal;
 						QHash<QString, int> blockOfName;
 						for ( int b = 0; b < nif->getBlockCount(); b++ ) {
@@ -5940,10 +5280,7 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 							fails << QStringLiteral( "local transform disagrees by %1 at %2" )
 								.arg( worstLocal ).arg( worstLocalName );
 
-						/* (ii) the WORLD invariant. expectedLocal is the harness's
-						 * value for a posed bone and the PRE-import value for
-						 * anything else, so the expected chain never reads a byte
-						 * the importer wrote. */
+						// (ii) the WORLD invariant.
 						auto expectedLocal = [&]( int block ) {
 							const QString nm = nif->resolveString( nif->getBlockIndex( block ), "Name" );
 							auto w = want.constFind( nm );
@@ -5993,12 +5330,7 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 							const Transform exp = worldExpected( block );
 							const float dr = matMax( got.rotation, exp.rotation );
 							const float dt = ( got.translation - exp.translation ).length();
-							/* How far the parent chain actually CARRIED this bone.
-							 * Agreement between two routes proves nothing if both
-							 * routes are trivial — a bone whose ancestors are all
-							 * identity agrees with itself even when the chain is
-							 * ignored entirely (measured: the shallow probe scores 0
-							 * either way). The deepest probe has to have moved. */
+							// How far the parent chain actually CARRIED this bone.
 							const float lift = ( got.translation
 								- Transform( nif, nif->getBlockIndex( block ) ).translation ).length();
 							deepestLift = lift;
@@ -6039,39 +5371,7 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 							fails << "the pose changed no pixels on the merged geometry";
 						log << "captures: ww_sampose_before.png ww_sampose_after.png\n";
 
-						/* WEAPON ATTACHMENT (WW_SAMPOSE_WEAPON): a gun in the posed hand.
-						 *
-						 * The pose moves WEAPON — a leaf under RArm_Hand — like any other
-						 * bone, but an empty bone shows nothing, so the one thing a viewer
-						 * actually wants from a posed rig (the prop it is holding) had never
-						 * been under test. This step merges real weapon NIFs onto that node
-						 * through nifMergeFile, the SAME entry point the CLI's
-						 * `merge --attach NODE --add FILE` uses, and then measures where the
-						 * gun landed.
-						 *
-						 * WW_SAMPOSE_WEAPON is a SEMICOLON-separated list, merged in order,
-						 * because a Fallout 4 weapon is not one file. 10MMPistol.nif is the
-						 * RECEIVER GROUP alone — bolt, hammer, trigger, bolt release, mag
-						 * release and the receiver itself, with the stock barrel and iron
-						 * sights baked into the receiver mesh. Its WeaponMagazine,
-						 * WeaponOptics and grip nodes are EMPTY attach points; the grip,
-						 * magazine and sights live in separate OMOD part NIFs beside it, and
-						 * without them the picture is a gun missing its handle and mag.
-						 *
-						 * ON THE TWO "WEAPON"s. A Fallout 4 weapon's root node is itself named
-						 * "WEAPON", which looks like it must produce WEAPON under WEAPON. It
-						 * does not: mergeDonor's donorTops are the donor root's CHILDREN and
-						 * the root block is never imported (it is a per-file wrapper), so the
-						 * pistol's hierarchy becomes the skeleton WEAPON node's children,
-						 * carrying the local transforms the weapon file authored against its
-						 * own root — the grip frame. The part files are authored in that same
-						 * frame with identity roots (measured: 10mmGrip.nif and 10mmMag01.nif
-						 * both put their shape at (0,0,0)), so they SELF-ASSEMBLE under WEAPON
-						 * with no transform work here. Nothing to rename, nothing to offset.
-						 *
-						 * WHAT IS MEASURED. Not the pixels. Distances and a scale, all read
-						 * off world transforms walked up the Parent links.
-						 */
+						// WEAPON ATTACHMENT (WW_SAMPOSE_WEAPON): a gun in the posed hand.
 						const QString weaponList = QString::fromLocal8Bit( wwEnv( "WW_SAMPOSE_WEAPON" ) );
 						QStringList parts;
 						for ( const QString & p : weaponList.split( QLatin1Char( ';' ), Qt::SkipEmptyParts ) ) {
@@ -6091,10 +5391,8 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 								return nif->blockInherits( i, "BSTriShape" )
 									|| nif->blockInherits( i, "NiTriBasedGeom" );
 							};
-							/* Weapon-sourced shapes are told apart by NAME, not by "block
-							 * number >= the count before". The merge runs inside nifSnapshotOp,
-							 * and this harness already knows block numbers move under a
-							 * snapshot (see blockFor). */
+							// Weapon-sourced shapes are told apart by NAME, not by "block number >= the count
+							// before".
 							QStringList shapesBefore;
 							for ( int b = 0; b < nif->getBlockCount(); b++ ) {
 								const QModelIndex i = nif->getBlockIndex( b );
@@ -6102,12 +5400,8 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 									shapesBefore << nif->resolveString( i, "Name" );
 							}
 
-							/* What each corpus file is expected to bring, counted out of the
-							 * files themselves (`NifSkope -no-gui list`). The base NIF's SIX are
-							 * the receiver group described above — not a whole gun — and each
-							 * furniture part carries exactly one shape, so the default list
-							 * assembles to 6 + 1 + 1 = 8. An override the harness has no count
-							 * for is merged and measured but not counted against. */
+							// What each corpus file is expected to bring, counted out of the files themselves
+							// (`NifSkope -no-gui list`).
 							auto expectedShapes = []( const QString & file ) -> int {
 								const QString b = QFileInfo( file ).fileName().toLower();
 								if ( b == QLatin1String( "10mmpistol.nif" ) )  return 6;
@@ -6190,15 +5484,7 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 									const Transform handT = worldActual( weaponBlock );
 									const Vector3 hand = handT.translation;
 
-									/* THE POSE SCALES THE WEAPON BONE, AND A RENDER MUST NOT.
-									 * sam_pa_pose1.json gives WEAPON scale 1.750013 — a value the
-									 * pose's author left on the bone, and at 1.75x a pistol
-									 * renders at forearm length (shipped that way once; the user
-									 * caught it on sight). The import stays faithful — the bone
-									 * carries what the pose says — but the WEAPON step here
-									 * measures that inherited scale against the harness's own
-									 * parse of the JSON, then RESETS the bone to unit scale so
-									 * the attached gun renders at its authored size. */
+									// THE POSE SCALES THE WEAPON BONE, AND A RENDER MUST NOT.
 									const float poseScale = want.contains( QStringLiteral( "WEAPON" ) )
 										? want.value( QStringLiteral( "WEAPON" ) ).scale : -1.0f;
 									log << "WEAPON accumulated world scale: " << handT.scale
@@ -6239,16 +5525,8 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 										<< " at " << best << ", farthest " << worstName << " at " << worst << "\n";
 									log << "closest weapon shape to the document origin: "
 										<< nearestOriginName << " at " << nearestOrigin << "\n";
-									/* These are SHAPE PIVOTS, not mesh extents, and the parts
-									 * pivot on the gun frame's origin. 40 units held the pistol
-									 * (farthest pivot 15.8 at unit scale) but a minigun is a
-									 * two-handed gun ~50 units long whose muzzle helpers pivot
-									 * at 47 — so the piece bound is 80, still a fraction of the
-									 * 114+ a root-level mis-attach measures. The FARTHEST is
-									 * checked as well as the nearest, because the nearest is
-									 * nearly free — receiver/grip/mag have identity locals and
-									 * sit ON the grip by construction, scoring ~0 even if the
-									 * rest flew off. */
+									// These are SHAPE PIVOTS, not mesh extents, and the parts pivot on the gun
+									// frame's origin.
 									if ( best > 40.0f )
 										fails << QStringLiteral( "the nearest weapon shape is %1 unit(s) "
 											"from the WEAPON node — not in the hand" ).arg( best );
@@ -6455,10 +5733,7 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 						log << "no real SAM pose (WW_SAMPOSE_FILE) — skipped\n";
 						break;
 					}
-					// Screenshot proof: the same import, photographed. On a
-					// geometry-bearing fixture (Frame.nif) the pose must move
-					// pixels; the bones-only skeleton.nif draws nothing, so the
-					// delta is enforced only when WW_SAMPOSE_SHOT is set.
+					// Screenshot proof: the same import, photographed.
 					auto pump = [skope]() {
 						skope->ogl->update(); qApp->processEvents();
 						skope->ogl->update(); qApp->processEvents();
@@ -6506,10 +5781,8 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 					const Vector3 wantBA( 25.413561f, 0.004556f, 0.199359f );
 					const float dtBA = ( tBA - wantBA ).length();
 					log << "real pose Back_Armor: rot diff " << dBA << ", trans diff " << dtBA << "\n";
-					// 2e-3, not 1e-4: half the pose corpus stores angles at two
-					// decimals ("%.02f"), worth ~1e-3 of matrix error at
-					// Back_Armor's pitch=90 gimbal point. A wrong convention
-					// misses by order 1, so the check still bites.
+					// 2e-3, not 1e-4: half the pose corpus stores angles at two decimals ("%.02f"), worth
+					// ~1e-3 of matrix error at Back_Armor's pitch=90 gimbal point.
 					if ( dBA > 2e-3f )
 						fails << QStringLiteral( "real pose Back_Armor rotation wrong (%1)" ).arg( dBA );
 					if ( dtBA > 2e-3f )
@@ -6535,16 +5808,7 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 		} );
 	}
 
-	// TEST HARNESS (WW_POSELIB_TEST=1): the folder-based pose library, driven
-	// through the actual dock. Points the library at a throwaway folder using
-	// the same QSettings key poseLibraryFolder() reads (proving the override
-	// persists), poses a bone, saves a pose file into the folder the way "Save
-	// current" does, nudges the dock's bone-search box so refresh() re-lists the
-	// folder, confirms the saved pose shows up in the library list, then selects
-	// it and clicks the dock's real Apply button — proving the list->select->
-	// apply path is wired, not just the underlying OS import/export. Finally
-	// clicks Delete (auto-answering the confirm) and checks the file is gone.
-	// Log: release/ww_poselib_test.log.
+	// TEST HARNESS (WW_POSELIB_TEST=1): the folder-based pose library, driven through the actual dock.
 	if ( !fname.isEmpty() && wwEnvIsSet( "WW_POSELIB_TEST" ) ) {
 		// A persistent modal answerer: Delete pops a Yes/No confirm and any error
 		// pops a warning; keep one running so a click that spins a nested event
@@ -6623,20 +5887,8 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 					search->clear(); qApp->processEvents();
 					log << "folder label = '" << ( folderLbl ? folderLbl->text() : QString() ) << "'\n";
 					log << "pose list count after refresh = " << poseList->count() << "\n";
-					// re-find the list item on demand: every model edit fires a
-					// queued refresh() that CLEARS and rebuilds the list, so any
-					// cached QListWidgetItem* is dangling after processEvents.
-					//
-					// MATCH ON THE PATH IN Qt::UserRole, NOT ON THE ROW TEXT. The path
-					// is what Apply and Delete themselves read; the text is not the same
-					// string twice. refresh() draws the ACTIVE pose as a bullet plus the
-					// base name, so the instant Apply makes this pose active the row
-					// reads "* HarnessPose" and a text match returns null. That was the
-					// whole of the old "Delete precondition missing" failure: the dock
-					// was right and the harness was measuring the decoration. Proven by
-					// suppressing the cleanup -- the pose file was still on disk after
-					// the run, and refresh() lists every *.xml in the folder
-					// unconditionally, so the row had been there the whole time.
+					// re-find the list item on demand: every model edit fires a queued refresh() that CLEARS
+					// and rebuilds the list, so any cached QListWidgetItem* is dangling after processEvents.
 					auto findPose = [&]() -> QListWidgetItem * {
 						const QString want = QFileInfo( saved ).absoluteFilePath();
 						for ( int r = 0; r < poseList->count(); r++ ) {
@@ -6656,10 +5908,7 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 						return d;
 					};
 
-					// (a) isolate the core: reset, then import the saved file
-					// DIRECTLY at full strength. This is exactly what WW_OSPOSE
-					// proves; if it fails HERE the harness state differs, if only
-					// the button fails it's the dock wiring.
+					// (a) isolate the core: reset, then import the saved file DIRECTLY at full strength.
 					skope->ogl->poseResetBone( b, 7 );
 					qApp->processEvents();
 					const Matrix atRest = nif->get<Matrix>( nif->getBlockIndex( b ), "Rotation" );
@@ -6724,14 +5973,6 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 	}
 
 	// TEST HARNESS (WW_POSESETTINGS_TEST=1): the General -> Poses settings tab.
-	// Opens the Settings dialog (loadSettings populates the field), types a test
-	// folder into the pose-library line edit, marks the pane modified, and hits
-	// Apply (saveSettings). Then it (1) confirms the value persisted to EXACTLY
-	// the key the dock reads — Settings/Poses/Pose Library Folder, the humanized
-	// form of the "poseLibraryFolder" object name — and (2) shows the Pose
-	// Manager dock and checks its folder label updates to the same folder,
-	// proving the settings tab and the dock's Folder... button share one key.
-	// Log: release/ww_posesettings_test.log.
 	if ( !fname.isEmpty() && wwEnvIsSet( "WW_POSESETTINGS_TEST" ) ) {
 		QObject::connect( skope, &NifSkope::completeLoading, skope, [skope]( bool ok, QString & ) {
 			QTimer::singleShot( 800, skope, [skope, ok]() {
@@ -6812,12 +6053,7 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 		} );
 	}
 
-	// TEST HARNESS (WW_USEGPU_TEST=1, lane GPU1): the Settings > NIF > LOD bake >
-	// Use GPU row. Run it under WW_SETTINGS_SCOPE with the key PLANTED (the
-	// gate plants "false"): the row must open showing the planted value, write
-	// exactly the key the bake reads (lodgenGpuSettingEnabled), and round-trip
-	// on -> off. Pictures of the NIF tab in both states beside the exe.
-	// Log: <exe dir>/ww_usegpu_test.log.
+	// TEST HARNESS (WW_USEGPU_TEST=1): the Settings > NIF > LOD bake > Use GPU row.
 	if ( !fname.isEmpty() && wwEnvIsSet( "WW_USEGPU_TEST" ) ) {
 		QObject::connect( skope, &NifSkope::completeLoading, skope, [skope]( bool ok, QString & ) {
 			QTimer::singleShot( 800, skope, [skope, ok]() {
@@ -6892,13 +6128,6 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 	}
 
 	// TEST HARNESS (WW_MERGEARCH_TEST=1): load-skeleton-from-archive plumbing.
-	// (1) the dock's "From game archive..." menu action exists; (2) the new
-	// in-memory merge nifMergeData() produces the SAME result as nifMergeFile()
-	// — merge the current NIF into itself both ways, undoing between, and compare
-	// the block/node counts; (3) pickNifFromBrowser() opens and cancels cleanly
-	// (a timer rejects whatever modal it shows). The archive EXTRACTION itself is
-	// the NIF Browser's own proven path (extractConfiguredNifBytes), and needs
-	// configured game archives to exercise for real. Log: ww_mergearch_test.log.
 	if ( !fname.isEmpty() && wwEnvIsSet( "WW_MERGEARCH_TEST" ) ) {
 		// auto-answer any modal the picker raises (its QDialog, or a "no archives"
 		// info box), and decline the save-on-quit prompt so nothing hangs
@@ -7040,11 +6269,8 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 					for ( int r = 0; r < nif->rowCount( iBones ); r++ )
 						skinBones.insert( nif->getLink( nif->getIndex( iBones, r ) ) );
 
-					// Hierarchy: rotating a bone's ANCESTOR must carry the bone
-					// (and the armour weighted to it) along — the shoulder→arm→
-					// hand behaviour. Prefer an ancestor that is itself a skin
-					// bone (a true "pose the shoulder" case); fall back to any
-					// non-root ancestor node, which still proves propagation.
+					// Hierarchy: rotating a bone's ANCESTOR must carry the bone (and the armour weighted to
+					// it) along — the shoulder→arm→ hand behaviour.
 					int parent = -1, child = -1;
 					QList<int> sortedBones = skinBones.values();
 					std::sort( sortedBones.begin(), sortedBones.end() );
@@ -7128,18 +6354,7 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 		} );
 	}
 
-	// TEST HARNESS (WW_POSE_TEST=1): does moving a bone NiNode actually pose a
-	// skinned mesh? Shape::updateBoneTransforms() derives each bone matrix from
-	// bone->localTrans(skeletonRoot) — the LIVE node transform — so posing
-	// should already work with no new feature. This proves it, or disproves it.
-	//
-	// Rotates the first bone that some shape is skinned to, then checks:
-	//   - the shape's CPU-side boneTransforms changed (the skinning maths saw it),
-	//   - its bounding sphere moved (the deformation is geometric, not cosmetic),
-	//   - the rendered framebuffer changed (it reaches the screen).
-	// Restores the bone afterwards and re-checks, so a false positive from some
-	// unrelated per-frame jitter is caught.
-	// Log: release/ww_pose_test.log.
+	// TEST HARNESS (WW_POSE_TEST=1): does moving a bone NiNode actually pose a skinned mesh?
 	if ( !fname.isEmpty() && wwEnvIsSet( "WW_POSE_TEST" ) ) {
 		QObject::connect( skope, &NifSkope::completeLoading, skope, [skope]( bool ok, QString & ) {
 			QTimer::singleShot( 1200, skope, [skope, ok]() {
@@ -7241,10 +6456,8 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 					if ( dBounds <= 1e-4f )
 						fails << "skinned bounds unchanged — the mesh does NOT follow the bone";
 
-					// The real claim for a merged armour set: EVERY piece whose
-					// skin references the posed bone must follow it. If merge's
-					// node de-duplication failed, some piece would be bound to a
-					// private copy of the bone and would stay put.
+					// The real claim for a merged armour set: EVERY piece whose skin references the posed bone
+					// must follow it.
 					int followed = 0, shouldFollow = 0;
 					for ( Shape * s : skinned ) {
 						QModelIndex iS = nif->getBlockIndex( s->id() );
@@ -7312,13 +6525,7 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 		} );
 	}
 
-	// TEST HARNESS (WW_PINNED_TEST=1): Block Details pinned fields. Pins a field
-	// on one block, then checks the pin follows to ANOTHER block of the same
-	// type (the whole point — pins are per block TYPE, stored as a field path,
-	// not as an item pointer or row number), that the star reaches the Name
-	// column's display text, that the ★ pinned-only filter hides exactly the
-	// unpinned rows, and that unpinning undoes all of it.
-	// Log: release/ww_pinned_test.log.
+	// TEST HARNESS (WW_PINNED_TEST=1): Block Details pinned fields.
 	if ( !fname.isEmpty() && wwEnvIsSet( "WW_PINNED_TEST" ) ) {
 		QObject::connect( skope, &NifSkope::completeLoading, skope, [skope]( bool ok, QString & ) {
 			QTimer::singleShot( 800, skope, [skope, ok]() {
@@ -7386,11 +6593,8 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 					log << "pin followed to block B: "
 						<< ( nif->pinnedItems.contains( itemB ) ? "yes" : "NO" ) << "\n";
 
-					// --- pinned-only filter hides exactly the unpinned rows ---
-					// NOTE: read the visibility the view ACTUALLY applied, via
-					// QTreeView. NifTreeView's same-named overload marks its row
-					// argument [[maybe_unused]] and reads index.internalPointer(),
-					// so passing (row, parent) asks about the PARENT row instead.
+					// pinned-only filter hides exactly the unpinned rows NOTE: read the visibility the view
+					// ACTUALLY applied, via QTreeView.
 					QModelIndex rootB = nif->getBlockIndex( blockB );
 					int visibleBefore = 0;
 					for ( int r = 0; r < nif->rowCount( rootB ); r++ )
@@ -7460,13 +6664,7 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 		} );
 	}
 
-	/* TEST HARNESS (WW_WORKSPACE_TEST=a.nif;b.nif): the Loaded NIFs display
-	 * toggles. Adds the given files as workspace documents, sets the first solid
-	 * and the second semi-transparent, and saves two pictures: the list (do the
-	 * row buttons draw, and does the lit one match the state?) and the viewport
-	 * (does the ghost actually render translucent?).
-	 * Log: release/ww_workspace_test.log, ww_workspace_list.png / _view.png.
-	 */
+	// TEST HARNESS (WW_WORKSPACE_TEST=a.nif;b.nif): the Loaded NIFs display toggles.
 	if ( !fname.isEmpty() && wwEnvIsSet( "WW_WORKSPACE_TEST" ) ) {
 		QObject::connect( skope, &NifSkope::completeLoading, skope, [skope]( bool ok, QString & ) {
 			QTimer::singleShot( 1200, skope, [skope, ok]() {
@@ -7501,12 +6699,9 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 					check( "...and the workspace counts them",
 						skope->workspaceDocumentCount() == added );
 
-					/* A document that has just joined must be VISIBLE.
-					 *
-					 * It used to depend on the tree selection, so a file added
-					 * without being clicked was invisible and looked like it had
-					 * failed to load.
-					 */
+					// A document that has just joined must be VISIBLE:
+					// It used to depend on the tree selection, so a file added without being clicked was
+					// invisible and looked like it had failed to load.
 					{
 						int hidden = 0;
 						for ( int i = 0; i < added; i++ )
@@ -7604,18 +6799,8 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 							view->selectionModel()->selectedRows().size() == 2 );
 					}
 
-					/* WW_WORKSPACE_MERGE=1: "Merge Into", the in-place path.
-					 *
-					 * The other merge writes a new file and leaves every loaded
-					 * document alone. This one changes a document you have open, so
-					 * what needs proving is that the target GREW by the donor and the
-					 * donor was left untouched — a merge that silently emptied the
-					 * donor, or edited the wrong one of the two, would look the same
-					 * from the dialog.
-					 *
-					 * It ends in a modal summary, so a driver dismisses it; that also
-					 * means the real code path runs, dialog included.
-					 */
+					// WW_WORKSPACE_MERGE=1: "Merge Into", the in-place path:
+					// The other merge writes a new file and leaves every loaded document alone.
 					if ( added >= 2 && wwEnvIsSet( "WW_WORKSPACE_MERGE" ) ) {
 						auto * dismiss = new QTimer( skope );
 						QObject::connect( dismiss, &QTimer::timeout, skope, []() {
@@ -7726,12 +6911,8 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 					check( "the viewport renders", skope->ogl->grabFramebuffer().save( viewShot ) );
 					log << "  " << listShot << "\n  " << viewShot << "\n";
 
-					/* Removal, last because it empties the workspace.
-					 *
-					 * Same call the X key makes. Selecting every row and removing must
-					 * take the count to zero; a per-row implementation would leave the
-					 * unclicked ones behind, which is what this catches.
-					 */
+					// Removal, last because it empties the workspace:
+					// Same call the X key makes.
 					if ( view && view->selectionModel() ) {
 						view->selectAll();
 						settle( 150 );
@@ -7756,20 +6937,8 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 		} );
 	}
 
-	/* TEST HARNESS (WW_REVERT_TEST=<donor.nif>): can a loaded NIF be modified and
-	 * put back exactly, without saving?
-	 *
-	 * This gates the whole workspace idea: if several loaded documents are to be
-	 * posed, synced and frozen as a scratch space, then "undo everything" has to
-	 * mean the bytes are what they were, not merely that the model looks right.
-	 * So every check here compares the SERIALIZED file, not the model state — a
-	 * revert that leaves an extra header string or a grown array is not a revert.
-	 *
-	 * Three edit paths, because they do not share a mechanism: a pose import (the
-	 * thing the user will actually do), a merge (which routes through
-	 * nifSnapshotOp), and a direct set<> (which does not).
-	 * Log: release/ww_revert_test.log.
-	 */
+	// TEST HARNESS (WW_REVERT_TEST=<donor.nif>): can a loaded NIF be modified and put back exactly, without
+	// saving?
 	if ( !fname.isEmpty() && wwEnvIsSet( "WW_REVERT_TEST" ) ) {
 		QObject::connect( skope, &NifSkope::completeLoading, skope, [skope]( bool ok, QString & ) {
 			QTimer::singleShot( 900, skope, [skope, ok]() {
@@ -7842,14 +7011,7 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 						log << "direct set<>: changed=" << changed << " restoredByUndo=" << restored << "\n";
 						check( "a direct set<> is NOT undoable — it needs a command",
 							changed && !restored );
-						/* And putting the value back by hand does NOT restore the
-						 * file. Setting a name allocates a string in the header
-						 * table, and that table only ever GROWS — writing the old
-						 * name back reuses its entry and leaves the new one behind
-						 * as an orphan, so the bytes differ even though every
-						 * value is correct. Revert therefore means undo, never
-						 * manual re-entry; that is the rule this workspace needs.
-						 */
+						// And putting the value back by hand does NOT restore the file.
 						nif->set<QString>( iRoot, "Name", was );
 						const bool handRestored = ( bytes() == loaded );
 						log << "     re-entering the old value by hand restored the bytes: "
@@ -7873,12 +7035,7 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 		} );
 	}
 
-	/* TEST HARNESS (WW_SHOT=<out.png>): load, let the scene settle, save the
-	 * viewport, quit. No assertions — some things are only checkable by looking,
-	 * and grabFramebuffer renders offscreen, so this costs no focus and can run
-	 * while someone else is using the machine. WW_SHOT_VIEW=front|left|top picks
-	 * the camera; the default is whatever the file opens with.
-	 */
+	// TEST HARNESS (WW_SHOT=<out.png>): load, let the scene settle, save the viewport, quit.
 	if ( !fname.isEmpty() && wwEnvIsSet( "WW_SHOT" ) ) {
 		QObject::connect( skope, &NifSkope::completeLoading, skope, [skope]( bool ok, QString & ) {
 			QTimer::singleShot( 1500, skope, [skope, ok]() {
@@ -7893,14 +7050,7 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 					QEventLoop loop;
 					QTimer::singleShot( 700, &loop, &QEventLoop::quit );
 					loop.exec();
-					/* WW_SHOT_TIME=<seconds>: park the scene clock before grabbing.
-					 * Effects open over time — a Fallout 4 ArtObject at t=0 is
-					 * usually scaled or faded to nothing, so a screenshot of the
-					 * first frame is a screenshot of an empty effect. Stepped in
-					 * small increments rather than jumped, because particle systems
-					 * integrate frame to frame and cannot be evaluated at an
-					 * arbitrary t the way a keyframe controller can.
-					 */
+					// WW_SHOT_TIME=<seconds>: park the scene clock before grabbing.
 					if ( wwEnvIsSet( "WW_SHOT_TIME" ) ) {
 						const float want = wwEnvStr( "WW_SHOT_TIME" ).toFloat();
 						const float step = 1.0f / 30.0f;
@@ -7919,17 +7069,9 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 		} );
 	}
 
-	/* TEST HARNESS (WW_BOLTBAKE_TEST=1, WW_BOLTBAKE_TIME=<seconds>): does
-	 * snapshotting the procedural-lightning arc produce real geometry, in a
-	 * sensible place, and the SAME geometry twice for one instant?
-	 *
-	 * The arcs are the visual signature of the Tesla armour, and 0 of the 173
-	 * vanilla loading screens contain a BSProceduralLightningController — a bake
-	 * is the only way to keep them. What makes it possible is that regenerate() is
-	 * seeded from quantised time; but "the generator is deterministic" and "the
-	 * bake reproduces it" are different claims, and this checks the second.
-	 * Log: release/ww_boltbake_test.log
-	 */
+	// TEST HARNESS (WW_BOLTBAKE_TEST=1, WW_BOLTBAKE_TIME=<seconds>): does snapshotting the
+	// procedural-lightning arc produce real geometry, in a sensible place, and the SAME geometry twice for one
+	// instant?
 	if ( !fname.isEmpty() && wwEnvIsSet( "WW_BOLTBAKE_TEST" ) ) {
 		QObject::connect( skope, &NifSkope::completeLoading, skope, [skope]( bool ok, QString & ) {
 			QTimer::singleShot( 1500, skope, [skope, ok]() {
@@ -8015,28 +7157,8 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 		} );
 	}
 
-	/* TEST HARNESS (WW_EFFECTBAKE_TEST=<out.nif>, WW_EFFECTBAKE_TIME=<seconds>):
-	 * does a captured effect survive being written into a NIF and read back?
-	 *
-	 * Capture was proved separately (WW_BOLTBAKE_TEST). This is the other half,
-	 * and it is where the interesting failures live, because writing FO4 geometry
-	 * has three ways to look successful and be wrong:
-	 *
-	 *   1. Vertex Desc says half precision while the writer sets Vector3. nif.xml
-	 *      names both variants "Vertex", so set<Vector3> does nothing and returns
-	 *      false. The loading-screen converter shipped with exactly this and wrote
-	 *      a file with no vertices in it.
-	 *   2. Data Size and the desc disagree. The model holds the arrays in memory
-	 *      either way, so everything looks right until the file is re-read.
-	 *   3. The arrays never get sized, because a conditional array has no children
-	 *      until the deferred cascade runs.
-	 *
-	 * All three are invisible in the live model and all three are caught by the
-	 * same invariant: SAVE, re-read from disk into a fresh model, and check that
-	 * translation + vertex reproduces the world position that was captured. That
-	 * is the only claim that matters — "the effect is where it looked".
-	 * Log: release/ww_effectbake_test.log
-	 */
+	// TEST HARNESS (WW_EFFECTBAKE_TEST=<out.nif>, WW_EFFECTBAKE_TIME=<seconds>): does a captured effect
+	// survive being written into a NIF and read back?
 	if ( !fname.isEmpty() && wwEnvIsSet( "WW_EFFECTBAKE_TEST" ) ) {
 		QObject::connect( skope, &NifSkope::completeLoading, skope, [skope]( bool ok, QString & ) {
 			QTimer::singleShot( 1500, skope, [skope, ok]() {
@@ -8053,13 +7175,8 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 				do {
 					if ( !ok ) { log << "load failed\n"; break; }
 
-					/* Animation is a PERSISTED user setting, and with it off no
-					 * controller ever updates: there are no bolts and no live
-					 * sprites, so a capture correctly returns nothing. This suite
-					 * went from green to "captured 0" with no code change at all,
-					 * because a GUI session had left GLView/Enable Animations at
-					 * false in the registry. A harness that inherits the user's
-					 * settings is not measuring the code. */
+					// Animation is a PERSISTED user setting, and with it off no controller ever updates: there
+					// are no bolts and no live sprites, so a capture correctly returns nothing.
 					skope->ogl->setAnimationEnabled( true );
 					QApplication::processEvents();
 
@@ -8128,15 +7245,10 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 					NifModel back;
 					check( "the saved file re-reads", back.loadFromFile( out ) );
 
-					/* Matched by INDEX, through the names write() reports back.
-					 *
-					 * Matching on the capture's own name silently compared the wrong
-					 * pair on an assembled rig, which has four nodes called
-					 * BoltGeo_01 and six called LightningArcs_VFX: it reported a
-					 * 115-unit round-trip error that was really a helmet arc being
-					 * measured against a leg arc. write() uniquifies and tells the
-					 * caller what each capture ended up called.
-					 */
+					// Matched by INDEX, through the names write() reports back:
+					// Matching on the capture's own name silently compared the wrong pair on an assembled rig,
+					// which has four nodes called BoltGeo_01 and six called LightningArcs_VFX: it reported a
+					// 115-unit round-trip error that was really a helmet arc being measured against a leg arc.
 					QHash<QString, QModelIndex> byName;
 					for ( int b = 0; b < back.getBlockCount(); b++ ) {
 						const QModelIndex idx = back.getBlockIndex( b );
@@ -8155,13 +7267,7 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 					check( QStringLiteral( "all %1 baked shape(s) are in the re-read file" )
 						.arg( caps.size() ), baked.size() == caps.size() );
 
-					/* Distinct names, because a rig's effect files share a template.
-					 * An assembled X-01 has four BoltGeo_01 and six
-					 * LightningArcs_VFX; writing four shapes under one name made
-					 * this very suite compare a helmet arc against a leg arc and
-					 * report a 115-unit error that did not exist. Uniqueness is
-					 * what makes matching by name safe at all.
-					 */
+					// Distinct names, because a rig's effect files share a template.
 					QSet<QString> distinct;
 					for ( const QString & nm : r.shapeNames )
 						if ( !nm.isEmpty() )
@@ -8224,22 +7330,7 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 		} );
 	}
 
-	/* TEST HARNESS (WW_NORMALS_TEST=1): does Ctrl+N actually turn the faces the
-	 * right way round?
-	 *
-	 * The question has an exact answer, so the test does not look at anything.
-	 * A closed mesh whose faces all wind counter-clockwise seen from outside has
-	 * POSITIVE signed volume; wind them the other way and the same number comes
-	 * out negative. So: vandalise a known fraction of the triangles, run the
-	 * operator, and require the volume to come back positive for Outside and
-	 * negative for Inside — with the mesh otherwise untouched, which the vertex
-	 * count and the triangle multiset check for separately.
-	 *
-	 * "It renders correctly now" would not do: a mesh with every face flipped
-	 * renders perfectly from the inside, and a partially flipped one looks wrong
-	 * only from the angles you did not check.
-	 * Log: release/ww_normals_test.log
-	 */
+	// TEST HARNESS (WW_NORMALS_TEST=1): does Ctrl+N actually turn the faces the right way round?
 	if ( !fname.isEmpty() && wwEnvIsSet( "WW_NORMALS_TEST" ) ) {
 		QObject::connect( skope, &NifSkope::completeLoading, skope, [skope]( bool ok, QString & ) {
 			QTimer::singleShot( 1200, skope, [skope, ok]() {
@@ -8254,10 +7345,8 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 					log << ( pass ? "  ok   " : "  FAIL " ) << what << "\n";
 				};
 				NifModel * nif = skope->getNifModel();
-				/* Every operator here reports what it did — or why it declined —
-				 * through gizmoStatus, which a harness cannot see. Without this
-				 * the first run of this suite said "nothing changed" four times
-				 * and gave no hint that the operator had refused the selection. */
+				// Every operator here reports what it did — or why it declined — through gizmoStatus, which a
+				// harness cannot see.
 				QStringList said;
 				QObject::connect( skope->ogl, &GLView::gizmoStatus, skope,
 					[&said]( const QString & s ) { said << s; } );
@@ -8331,11 +7420,9 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 					check( "the vandalised mesh really is inconsistent",
 						std::fabs( volBad ) < std::fabs( vol0 ) * 0.9 );
 
-					// --- Recalculate Outside ----------------------------------
-					// The scene has to exist and the shape has to be the current
-					// block before edit mode will take: without this the operator
-					// declines every call with "needs a selection in edit mode",
-					// which is a refusal, not a result.
+					// Recalculate Outside The scene has to exist and the shape has to be the current block
+					// before edit mode will take: without this the operator declines every call with "needs a
+					// selection in edit mode", which is a refusal, not a result.
 					skope->ogl->grabFramebuffer();
 					skope->ogl->getScene()->currentBlock = iShape;
 					skope->ogl->syncObjectSelection( sb );
@@ -8344,21 +7431,7 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 					skope->ogl->selectAll( 1 );
 					log << "edit mode: " << skope->ogl->pickedElems.size() << " element(s) picked\n";
 
-					/* Control: the SHIPPED Flip, through the same write path. If
-					 * this does not move the volume either, the fault is in the
-					 * shared idiom or in this harness, not in the new operator —
-					 * a distinction worth one call to find out. */
-					/* The trap this suite exists to catch, asserted directly.
-					 *
-					 * getIndex(parent, row) hands back a COLUMN 0 index, and
-					 * NifModel::setData switches on the column: on the name column it
-					 * renames the item, RETURNS TRUE, and leaves the value alone. So a
-					 * ChangeValueCommand built that way pushes, undoes and redoes
-					 * perfectly while writing nothing — which is how Flip Normals and
-					 * every post-edit normal recompute came to be silently dead.
-					 * If this ever starts writing, the ValueCol dance below is
-					 * unnecessary and someone should be told rather than left guessing.
-					 */
+					// Control: the SHIPPED Flip, through the same write path.
 					{
 						QModelIndex probe = nif->getIndex( iTris, 0 );
 						log << "index column for a triangle row: " << probe.column()
@@ -8458,20 +7531,7 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 		} );
 	}
 
-	/* TEST HARNESS (WW_SHOT_UI=<out.png>): photograph the CHROME, not the scene.
-	 *
-	 * grabFramebuffer returns the GL viewport alone, so it cannot show a toolbar,
-	 * a menu or a panel — the things a UI change is actually about. QWidget::grab
-	 * renders any widget's own tree, whether or not it is on screen or focused,
-	 * which is what makes this usable while someone else is working on the machine.
-	 *
-	 * Writes three files: <out> for the popup of the named button (WW_SHOT_UI_BTN,
-	 * default ViewAnimationButton), <out>.toolbar.png for the strip it lives on,
-	 * and nothing at all if the button is not found — which is itself the failure
-	 * this is here to catch.
-	 */
-	// lane CELLSPAWN1 (WW_OPENCELL_SHOT=<out.png>): File > Open Cell's dialog and its Filters menu, grabbed after the
-	// file loads (src/ui/opencelldialog.h openCellShot; WW_OPENCELL_SHOT_DATA/_PLUGINS/_WORLD/_SEARCH fill it).
+	// TEST HARNESS (WW_SHOT_UI=<out.png>): photograph the CHROME, not the scene.
 	if ( !fname.isEmpty() && wwEnvIsSet( "WW_OPENCELL_SHOT" ) ) {
 		QObject::connect( skope, &NifSkope::completeLoading, skope, [skope]( bool, QString & ) {
 			QTimer::singleShot( 1200, skope, [skope]() {
@@ -8568,13 +7628,7 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 					skope->ogl->setOrientation( vs, true );
 					QApplication::processEvents();
 
-					/* Framing, because scale decides what is legible. A bolt is 4
-					 * units wide; on a 160-unit figure that is a hairline, and the
-					 * same effect photographed in its own file — where the camera
-					 * frames 40 units — looks ten times thicker. Two shots of the
-					 * same geometry can therefore disagree about whether anything is
-					 * there. WW_SHOT_AT=x,y,z centres, WW_SHOT_DIST=<units> zooms.
-					 */
+					// Framing, because scale decides what is legible.
 					if ( wwEnvIsSet( "WW_SHOT_AT" ) ) {
 						const QStringList xyz = wwEnvStr( "WW_SHOT_AT" ).split( QLatin1Char( ',' ) );
 						if ( xyz.size() == 3 )
@@ -8621,23 +7675,8 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 		} );
 	}
 
-	/* TEST HARNESS (WW_LIVEFX_TEST=1, WW_LIVEFX_TIME=<seconds>): does a loading
-	 * screen converted with --keep-effects still RUN, and in the right place?
-	 *
-	 * Every other check on that conversion reads the file: block counts, palette
-	 * entries, world transforms. All of them can be perfect on a file that draws
-	 * nothing, because a particle system's geometry and a procedural arc's are not
-	 * in the file at all — they exist only once something steps the controllers.
-	 * So this one loads the converted screen, steps time, and asks the RENDERER
-	 * what it produced.
-	 *
-	 * Placement is checked in the same breath, because the failure it guards is
-	 * silent: the convert deletes the skeleton, and an effect branch whose attach
-	 * bone was not carried over collapses to the origin — geometry still generates,
-	 * still has extent, and sits in a heap at the actor's feet. Chest-height and
-	 * leg-height captures in the same file is what says the per-limb stubs worked.
-	 * Log: release/ww_livefx_test.log
-	 */
+	// TEST HARNESS (WW_LIVEFX_TEST=1, WW_LIVEFX_TIME=<seconds>): does a loading screen converted with
+	// --keep-effects still RUN, and in the right place?
 	if ( !fname.isEmpty() && wwEnvIsSet( "WW_LIVEFX_TEST" ) ) {
 		QObject::connect( skope, &NifSkope::completeLoading, skope, [skope]( bool ok, QString & ) {
 			QTimer::singleShot( 1500, skope, [skope, ok]() {
@@ -8678,10 +7717,9 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 					// effects must not smuggle it back in.
 					check( "no skin survived the convert", bones == 0 );
 
-					/* Animation is a persisted user setting and the capture reads the
-					 * rendered scene: with it off there are no bolts and no live
-					 * sprites, and every check below would fail for a reason that has
-					 * nothing to do with the code. */
+					// Animation is a persisted user setting and the capture reads the rendered scene: with it
+					// off there are no bolts and no live sprites, and every check below would fail for a
+					// reason that has nothing to do with the code.
 					skope->ogl->setAnimationEnabled( true );
 					QApplication::processEvents();
 
@@ -8702,12 +7740,7 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 					int arcs = 0, sprites = 0;
 					float loZ = 0.0f, hiZ = 0.0f, maxX = 0.0f;
 					bool haveZ = false;
-					/* Per effect, not just in aggregate. Overall bounds are a weak
-					 * witness: a leg effect emitting from the wrong node still lands
-					 * inside the figure's bounding box, and the first version of this
-					 * harness passed on a file whose leg particles were visibly wrong.
-					 * WW_LIVEFX_DUMP writes these to a file so the SAME scene can be
-					 * captured before and after the convert and compared per effect. */
+					// Per effect, not just in aggregate.
 					QStringList fx;
 					for ( const auto & e : caught ) {
 						( e.fromParticles ? sprites : arcs )++;
@@ -8768,14 +7801,10 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 					check( "the chest and helmet effects are up the body", haveZ && hiZ > 100.0f );
 					check( "nothing was flung sideways", haveZ && maxX < 60.0f );
 
-					/* "(no sequence)" has to still ANIMATE.
-					 *
-					 * It is not a stop button: it drops the sequence's bindings and
-					 * plays what the file does on its own, which for these effects
-					 * is where the particles and arcs live in the first place. A
-					 * version of it that quietly froze everything would look like a
-					 * working feature right up until someone used it.
-					 */
+					// "(no sequence)" has to still ANIMATE:
+					// It is not a stop button: it drops the sequence's bindings and plays what the file does
+					// on its own, which for these effects is where the particles and arcs live in the first
+					// place.
 					skope->ogl->clearSceneSequence();
 					QApplication::processEvents();
 					for ( float t = 0.0f; t < want; t += 1.0f / 30.0f ) {
@@ -8804,21 +7833,8 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 		} );
 	}
 
-	/* TEST HARNESS (WW_WSFIX_TEST=1): does the Skeleton Manager keep its hands to
-	 * itself while its dock is hidden — and still do its job when shown?
-	 *
-	 * Its selection handler redirects: select a collision object and it follows
-	 * the Target link to the bone that owns it, so the two docks track each
-	 * other. With no visibility guard that ran in EVERY workspace, so clicking a
-	 * body in the Collision Manager was yanked away to a bone, and a full
-	 * skeletonAnalyse() walked the file on every block-list click app-wide.
-	 *
-	 * Both directions have to hold, which is why this does not simply assert
-	 * "nothing happened". A guard that is really a removal would pass the first
-	 * half and silently break the feature; the second half is what tells them
-	 * apart.
-	 * Log: release/ww_wsfix_test.log
-	 */
+	// TEST HARNESS (WW_WSFIX_TEST=1): does the Skeleton Manager keep its hands to itself while its dock is
+	// hidden — and still do its job when shown?
 	if ( !fname.isEmpty() && wwEnvIsSet( "WW_WSFIX_TEST" ) ) {
 		QObject::connect( skope, &NifSkope::completeLoading, skope, [skope]( bool ok, QString & ) {
 			QTimer::singleShot( 1200, skope, [skope, ok]() {
@@ -8891,17 +7907,8 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 		} );
 	}
 
-	/* TEST HARNESS (WW_UNFUCKPANEL_TEST=1): does the Unfuck workspace actually
-	 * find, colour and locate the problems in a file?
-	 *
-	 * Four things can each be quietly wrong and none is visible from a
-	 * screenshot: the scan may find nothing, the severity may be flattened (it
-	 * WAS -- BaseModel::testMsg discarded the level until this change, so
-	 * everything would arrive as a warning), the block number may not be parsed
-	 * out of the message, and Go to may not move the selection. All four are
-	 * checked here against a file with a deliberately broken texture path.
-	 * Log: release/ww_unfuckpanel_test.log
-	 */
+	// TEST HARNESS (WW_UNFUCKPANEL_TEST=1): does the Unfuck workspace actually find, colour and locate the
+	// problems in a file?
 	if ( !fname.isEmpty() && wwEnvIsSet( "WW_UNFUCKPANEL_TEST" ) ) {
 		QObject::connect( skope, &NifSkope::completeLoading, skope, [skope]( bool ok, QString & ) {
 			QTimer::singleShot( 1200, skope, [skope, ok]() {
@@ -8991,15 +7998,10 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 								continue;
 							NifModel * m = skope->getNifModel();
 							before = m->getBlockNumber( m->getBlockIndex( skope->currentNifIndex() ) );
-							/* Double-click, not the action column.
-							 *
-							 * A row whose action column offers a fix has no "Go to"
-							 * cell to click -- one column, one primary action -- so
-							 * Go to has to remain reachable some other way, and
-							 * double-click anywhere on the row is that way. Testing
-							 * the cell would have quietly stopped covering exactly
-							 * the rows that gained a fix.
-							 */
+							// Double-click, not the action column:
+							// A row whose action column offers a fix has no "Go to" cell to click -- one
+							// column, one primary action -- so Go to has to remain reachable some other way,
+							// and double-click anywhere on the row is that way.
 							emit tree->itemDoubleClicked( it, 0 );
 							QApplication::processEvents();
 							after = m->getBlockNumber( m->getBlockIndex( skope->currentNifIndex() ) );
@@ -9009,13 +8011,9 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 							break;
 						}
 					}
-					/* The per-row fix, end to end.
-					 *
-					 * This is the one action in the panel that claims to repair a
-					 * single finding, so "it is offered" is not the question --
-					 * "does the finding go away" is. Click it, then re-read the
-					 * tree the re-scan rebuilt and confirm that exact row is gone.
-					 */
+					// The per-row fix, end to end:
+					// This is the one action in the panel that claims to repair a single finding, so "it is
+					// offered" is not the question "does the finding go away" is.
 					int fixable = 0;
 					QTreeWidgetItem * target = nullptr;
 					QString targetText;
@@ -9046,25 +8044,12 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 						log << "no per-row-fixable finding in this file\n";
 					}
 
-					/* SEVERAL REPAIRS, ONE UNDO STEP.
-					 *
-					 * The retired dialog ran its whole selection inside a single
-					 * snapshot; the panel ran runFix in a loop, so five ticked
-					 * boxes left five undo commands and Ctrl+Z walked back through
-					 * half-repaired intermediate states one at a time. Deleting
-					 * the dialog is only safe if that property came across with
-					 * it, and "there is now exactly one command" is not something
-					 * the UI can show.
-					 */
+					// SEVERAL REPAIRS, ONE UNDO STEP:
+					// The retired dialog ran its whole selection inside a single snapshot; the panel ran
+					// runFix in a loop, so five ticked boxes left five undo commands and Ctrl+Z walked back
+					// through half-repaired intermediate states one at a time.
 					if ( NifModel * m = skope->getNifModel(); m && m->undoStack ) {
-						/* Arm everything applicable EXCEPT the one that stops for
-						 * input. `Fill Blank NiControllerSequence Types` opens a
-						 * QInputDialog inside the run, with nobody to answer it —
-						 * the first version of this block ticked it and hung the
-						 * whole harness until it was killed. Its own hint() says
-						 * "it stops and waits for input", which is exactly why it
-						 * is offered unticked to real users too.
-						 */
+						// Arm everything applicable EXCEPT the one that stops for input.
 						static const char * const stopsForInput[] = {
 							"Fill Blank NiControllerSequence Types",
 						};
@@ -9117,13 +8102,9 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 				log << checks << " checks, " << fails << " failures\n";
 				log << ( fails == 0 ? "PASS" : "FAIL" ) << "\ndone\n";
 				logf.close();
-				/* Mark the document clean before quitting.
-				 *
-				 * This harness now RUNS a repair, so the model really is modified
-				 * and quitting really does raise the unsaved-changes prompt -- with
-				 * nobody to answer it, which hung the run. That prompt is correct
-				 * behaviour; it is the harness that has to decline it.
-				 */
+				// Mark the document clean before quitting:
+				// This harness now RUNS a repair, so the model really is modified and quitting really does
+				// raise the unsaved-changes prompt -- with nobody to answer it, which hung the run.
 				if ( NifModel * n = skope->getNifModel(); n && n->undoStack )
 					n->undoStack->setClean();
 				skope->setWindowModified( false );
@@ -9132,22 +8113,7 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 		} );
 	}
 
-	/* TEST HARNESS (WW_ANIMPLAY_TEST=1): does the Animation dock's Play actually
-	 * animate the viewport?
-	 *
-	 * The dock ran a private 16 ms QTimer that advanced its own playhead and
-	 * emitted timeChanged -> GLView::setSceneTime. setSceneTime never touches
-	 * scene->animate, and IControllable::transform() skips controller evaluation
-	 * when !scene->animate -- so with View > Animations OFF, Play scrubbed the
-	 * playhead across a frozen viewport. The signal added to fix exactly that,
-	 * playPauseRequested, was declared AND connected, and nothing emitted it.
-	 *
-	 * THE DISCRIMINATING CHECK is scene->animate, not the playhead. The playhead
-	 * moved on the broken code too -- that was the whole illusion. So the test
-	 * turns animation OFF first, presses the dock's Play, and requires that the
-	 * renderer is now actually animating.
-	 * Log: release/ww_animplay_test.log
-	 */
+	// TEST HARNESS (WW_ANIMPLAY_TEST=1): does the Animation dock's Play actually animate the viewport?
 	if ( !fname.isEmpty() && wwEnvIsSet( "WW_ANIMPLAY_TEST" ) ) {
 		QObject::connect( skope, &NifSkope::completeLoading, skope, [skope]( bool ok, QString & ) {
 			QTimer::singleShot( 1800, skope, [skope, ok]() {
@@ -9166,7 +8132,7 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 					GLView * ogl = skope->getGLView();
 					TimelineWidget * tl = skope->timeline;
 					if ( !ogl || !tl || !ogl->getScene() ) {
-						// lane UI6 retired the Animation Manager dock this harness drove
+						// the Animation Manager dock this harness drove is retired
 						log << "WW_ANIMPLAY_TEST pressed the Animation MANAGER dock's Play; "
 							   "lane UI6 retired that dock on 2026-09-11. The same question "
 							   "for the Animation dock is animws.sh's transport. RETIRED.\n";
@@ -9229,25 +8195,7 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 		} );
 	}
 
-	/* TEST HARNESS (WW_TOPBAR_TEST=1): the top bar after the View menu was folded
-	 * into the Panels button.
-	 *
-	 * The dangerous part of that merge is not the duplicate. `View > Show` listed
-	 * the same seven dock toggles the Panels button already had, so dropping it
-	 * costs nothing. The other three submenus had no home anywhere else, and one
-	 * of them - Toolbars - is the ONLY way to bring back a hidden toolbar, because
-	 * QMainWindow's built-in toggle popup is unreachable here (nifskope.cpp sets
-	 * Qt::NoContextMenu and nothing overrides createPopupMenu). Lose it and hiding
-	 * a toolbar is permanent, with no error and nothing to discover.
-	 *
-	 * The last check is unrelated to the merge and guards the bug this pass
-	 * started from: three of the seven viewport modes were drawing the SAME icon,
-	 * because Pose and Physics Sim had no glyph and were handed Object Mode's. It
-	 * compares the rendered pixels, not the icon names - two QIcons built from
-	 * different names still collide if the drawings are the same, which is exactly
-	 * how `mode_weightpaint` came to be byte-identical to `brush`.
-	 * Log: release/ww_topbar_test.log
-	 */
+	// TEST HARNESS (WW_TOPBAR_TEST=1): the top bar after the View menu was folded into the Panels button.
 	if ( wwEnvIsSet( "WW_TOPBAR_TEST" ) ) {
 		QObject::connect( skope, &NifSkope::completeLoading, skope, [skope]( bool, QString & ) {
 			QTimer::singleShot( 1500, skope, [skope]() {
@@ -9270,17 +8218,9 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 					return out;
 				};
 				do {
-										// --- LOD is a dropdown, always there, greyed when unusable --
-					/* bungo: "LOD will function as a dropdown menu button, just
-					 * like animation and collision buttons function. It will be
-					 * visible all the time, but greyed out if there's no LODs in
-					 * a nif file."
-					 *
-					 * The old slider hid its own value behind a handle position
-					 * and disappeared entirely on a file without LOD meshes - a
-					 * control that is absent reads as a missing feature, not as
-					 * "not applicable here".
-					 */
+										// LOD is a dropdown, always there, greyed when unusable bungo: "LOD
+										// will function as a dropdown menu button, just like animation and
+										// collision buttons function.
 					{
 						auto * lodBtn = skope->findChild<QToolButton *>(
 							QStringLiteral( "ViewLodButton" ) );
@@ -9311,51 +8251,25 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 					}
 
 
-					// --- the View menu is gone from the menu bar ----------------
-					/* ui->menubar, NOT QMainWindow::menuBar().
-					 *
-					 * This fork moves the QMenuBar into the first toolbar so the
-					 * menus share the top row, and calls setMenuWidget() with an
-					 * empty placeholder. QMainWindow::menuBar() therefore builds a
-					 * brand-new EMPTY menu bar and hands that back - against which
-					 * "the View menu is gone" passes for the wrong reason. That is
-					 * what the File check below is guarding, and it is the reason
-					 * it exists.
-					 */
+					// the View menu is gone from the menu bar ui->menubar, NOT QMainWindow::menuBar().
 					QStringList bar;
 					for ( const QAction * a : skope->ui->menubar->actions() )
 						if ( !a->isSeparator() )
 							bar << a->text().remove( QLatin1Char( '&' ) );
 					log << "menu bar: " << bar.join( QStringLiteral( ", " ) ) << "\n";
 					check( "the menu bar still has File", bar.contains( QStringLiteral( "File" ) ) );
-					/* There IS a View menu again, and it is a different animal.
-					 *
-					 * The old one held four submenus of dock and display toggles
-					 * and is gone into the Panels button. The Render menu was then
-					 * renamed View, because that is what it always was - Top,
-					 * Front, Left, Flip, Perspective, Walk, Frame Selected, and
-					 * nothing that renders anything.
-					 *
-					 * So a name check alone would pass on either menu. This looks
-					 * at the CONTENTS: the viewport one has the view directions,
-					 * the retired one had Toolbars and Show.
-					 */
+					// There IS a View menu again, and it is a different animal:
+					// The old one held four submenus of dock and display toggles and is gone into the Panels
+					// button.
 					check( "the menu bar has a View menu", bar.contains( QStringLiteral( "View" ) ) );
 					QStringList viewItems;
 					for ( const QAction * a : skope->ui->mRender->actions() )
 						if ( !a->isSeparator() )
 							viewItems << a->text().remove( QLatin1Char( '&' ) );
 					log << "View menu: " << viewItems.join( QStringLiteral( ", " ) ) << "\n";
-					/* It is BOTH now, and that is the point.
-					 *
-					 * The discriminator used to be "View does not contain
-					 * Toolbars", which separated the viewport menu from the
-					 * retired dock menu. Then the Panels dropdown was folded in
-					 * here, so View legitimately holds Toolbars and the negative
-					 * became false for the right reason. Asserting both halves
-					 * instead: the view directions it was renamed for, and the
-					 * panel toggles it absorbed.
-					 */
+					// It is BOTH now, and that is the point:
+					// The discriminator used to be "View does not contain Toolbars", which separated the
+					// viewport menu from the retired dock menu.
 					check( "and it holds the view directions",
 						viewItems.contains( QStringLiteral( "Top" ) )
 						&& viewItems.contains( QStringLiteral( "Front" ) ) );
@@ -9366,15 +8280,10 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 						std::any_of( viewItems.cbegin(), viewItems.cend(),
 							[]( const QString & t ) { return t.startsWith( QStringLiteral( "Frame Selected" ) ); } ) );
 
-					/* --- the panel toggles live in the View menu ---------------
-					 *
-					 * The Panels dropdown is gone: panel toggles are a View-menu
-					 * subject, which is where Blender keeps Sidebar and Tool
-					 * Settings, and a dedicated button for them was one more
-					 * label on a row that had just been trimmed. Everything it
-					 * carried has to still be reachable, which is what the rest
-					 * of this section checks.
-					 */
+					// the panel toggles live in the View menu:
+					// The Panels dropdown is gone: panel toggles are a View-menu subject, which is where
+					// Blender keeps Sidebar and Tool Settings, and a dedicated button for them was one more
+					// label on a row that had just been trimmed.
 					check( "the Panels button is gone from the row",
 						skope->findChild<QToolButton *>(
 							QStringLiteral( "ViewPanelsButton" ) ) == nullptr );
@@ -9424,15 +8333,9 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 					check( "the block-view display options came across",
 						textsOf( blockList ).size() >= 2 && textsOf( blockDetails ).size() >= 2 );
 
-						/* --- the Render menu is greyscale, in BOTH icon states -----
-					 *
-					 * Measured on the pixels, because "I called the conversion"
-					 * is not evidence that the conversion reached the icon the
-					 * menu draws. It checks the On state too: aViewUser and
-					 * aViewPerspective carry a second, more saturated pixmap, and
-					 * converting only the default state leaves the colour to come
-					 * back the moment the toggle is used.
-					 */
+						// the Render menu is greyscale, in BOTH icon states:
+						// Measured on the pixels, because "I called the conversion" is not evidence that the
+						// conversion reached the icon the menu draws.
 					int coloured = 0, examined = 0;
 					QStringList colouredNames;
 					for ( QAction * a : skope->ui->mRender->actions() ) {
@@ -9471,13 +8374,8 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 					check( "the Render menu actually has icons to check", examined >= 10 );
 					check( "every Render menu icon is greyscale", coloured == 0 );
 
-					/* --- lighting moved into Viewport Shading -----------------
-					 *
-					 * Both halves are asserted. The bulb is off the toolbar AND
-					 * the sliders are reachable somewhere else - checking only
-					 * the removal would pass just as well if the lighting
-					 * controls had been deleted outright.
-					 */
+					// lighting moved into Viewport Shading:
+					// Both halves are asserted.
 					bool bulbOnBar = false;
 					for ( const QAction * a : skope->ui->tRender->actions() )
 						if ( a == skope->ui->aLightMenu )
@@ -9499,35 +8397,15 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 							!dup || dup->isHidden() );
 					}
 
-					/* --- no double rules anywhere on the row -------------------
-					 *
-					 * wwGroupBreak wraps each rule in two spacer widgets, and
-					 * that silently defeated the duplicate-separator cleanup: it
-					 * only ever saw two rules as adjacent when NOTHING sat between
-					 * them, and now a pad always does. Two groups meeting each
-					 * contributed a boundary, and the row drew a double bar
-					 * between Object and Global.
-					 *
-					 * Checked across the WHOLE ROW rather than per toolbar,
-					 * because that is the unit anyone looks at - and because the
-					 * first fix over-corrected, stripping both sides of the
-					 * tMode/tRender boundary and leaving no rule there at all.
-					 * Leading and trailing are properties of the row.
-					 */
+					// no double rules anywhere on the row:
+					// wwGroupBreak wraps each rule in two spacer widgets, and that silently defeated the
+					// duplicate-separator cleanup: it only ever saw two rules as adjacent when NOTHING sat
+					// between them, and now a pad always does.
 					{
 						QStringList rowMarks;
-						/* PER ROW, and there are two rows now.
-						 *
-						 * This used to concatenate five toolbars into one shape
-						 * string, on the belief that they were a single row. The
-						 * viewport toolbars moved into the footer under the 3D
-						 * view, so that belief is false and the concatenation
-						 * would be nonsense: a legitimate rule at the right end
-						 * of the footer would read as interior, and a legitimate
-						 * boundary at the true end of a row would trip the
-						 * ends-with check. It would have gone green or red for
-						 * reasons unrelated to what it measures.
-						 */
+						// PER ROW, and there are two rows now:
+						// This used to concatenate five toolbars into one shape string, on the belief that
+						// they were a single row.
 						for ( QToolBar * tb : { skope->ui->tFile, skope->ui->tLOD,
 												skope->ui->tView } ) {
 							if ( !tb || !tb->isVisible() )
@@ -9617,28 +8495,7 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 		} );
 	}
 
-	/* TEST HARNESS (WW_SUBTEX_TEST=1): does a texture-atlas flipbook actually
-	 * play?
-	 *
-	 * BSPSysSubTexModifier — "similar to a Flip Controller, this handles particle
-	 * texture animation on a single texture atlas" — was not implemented at all.
-	 * Every particle picked ONE random cell of the sheet at birth and kept it for
-	 * life, so all 302 stock Fallout 4 meshes carrying the modifier showed a
-	 * frozen frame of an animation. A 64-cell explosion sheet exists to be played.
-	 *
-	 * THE DISCRIMINATING MEASUREMENT is how many sprites change cell at once.
-	 * Cells changed on the old code too — particles die and are reborn with a new
-	 * random cell — so "the cells changed" proves nothing. What cannot happen
-	 * without a flipbook is MOST OF THE POPULATION changing cell between two
-	 * samples 20 ms apart while the population size holds steady: that needs half
-	 * the sprites replaced in 20 ms. With the modifier running it happens on
-	 * essentially every sample, because every sprite advances its own playhead.
-	 *
-	 * Cells are compared as a SORTED multiset, not index by index: a particle
-	 * dying removes its slot and shifts every later one, so index-wise comparison
-	 * would report a change for the whole tail on any death.
-	 * Log: release/ww_subtex_test.log
-	 */
+	// TEST HARNESS (WW_SUBTEX_TEST=1): does a texture-atlas flipbook actually play?
 	if ( !fname.isEmpty() && wwEnvIsSet( "WW_SUBTEX_TEST" ) ) {
 		QObject::connect( skope, &NifSkope::completeLoading, skope, [skope]( bool ok, QString & ) {
 			QTimer::singleShot( 1800, skope, [skope, ok]() {
@@ -9731,23 +8588,8 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 		} );
 	}
 
-	/* TEST HARNESS (WW_PARTICLECAP_TEST=1): does a particle system simulate the
-	 * number of particles the FILE says it may?
-	 *
-	 * PSysSimController asked the NiParticleSystem for "Num Vertices", and no
-	 * version of that block has ever had one — the count is a NiGeometryData row
-	 * and lives on the DATA block, renamed "BS Max Vertices" for NiPSysData on
-	 * Bethesda 20.2. So the read returned 0 on every file in every game and the
-	 * 512 fallback always won. Measured over the stock Fallout 4 mesh tree, 1,345
-	 * NiPSysData blocks: NOT ONE is 512. 1,287 authorise fewer, 58 more, and the
-	 * smallest is 3.
-	 *
-	 * WHAT MAKES THIS DISCRIMINATING is saturation, not the bound. "Live <= cap"
-	 * would pass on the old code too whenever the emitter is quiet. So the check
-	 * is that the population sits exactly ON the cap: below means the emitter is
-	 * too slow to prove anything, above means the cap is not being read.
-	 * Log: release/ww_particlecap_test.log
-	 */
+	// TEST HARNESS (WW_PARTICLECAP_TEST=1): does a particle system simulate the number of particles the FILE
+	// says it may?
 	if ( !fname.isEmpty() && wwEnvIsSet( "WW_PARTICLECAP_TEST" ) ) {
 		QObject::connect( skope, &NifSkope::completeLoading, skope, [skope]( bool ok, QString & ) {
 			QTimer::singleShot( 1800, skope, [skope, ok]() {
@@ -9839,22 +8681,22 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 		} );
 	}
 
-	// TEST HARNESS (WW_HKXANIM_TEST=1): lane HKX2's playback and mapping gates.
+	// TEST HARNESS (WW_HKXANIM_TEST=1): the playback and mapping gates.
 	// The whole harness is src/hkxplaybacktest.cpp; this is its only line here.
 	wwHkxAnimHarness( skope );
 
-	// TEST HARNESS (WW_SKELOVERLAY_TEST=1): lane SKELOVERLAY's gates for
+	// TEST HARNESS (WW_SKELOVERLAY_TEST=1): the gates for
 	// Overlays > Show Skeleton. The whole harness is src/skeloverlaytest.cpp;
 	// this is its only line here.
 	{
 		extern void wwSkelOverlayHarness( NifSkope * );
 		wwSkelOverlayHarness( skope );
 	}
-	// WW_HKXANIM_UI_TEST: lane HKX3's gates, src/hkxanimuitest.cpp.
+	// WW_HKXANIM_UI_TEST: the gates, src/hkxanimuitest.cpp.
 	wwHkxAnimUiHarness( skope );
-	wwAnimWorkspaceHarness( skope );	// (lane HKXEDIT2) WW_ANIMWS_TEST
+	wwAnimWorkspaceHarness( skope );	// WW_ANIMWS_TEST
 	{
-		// lane GLTFEXPORT1: WW_BODY_BUILD (the build triangle) and
+		// WW_BODY_BUILD (the build triangle) and
 		// WW_GLTF_EXPORT_DIALOG (the export options dialog).
 		extern void wwBodyBuildHarness( NifSkope * );
 		extern void wwGltfExportDialogHarness( NifSkope * );
@@ -9862,84 +8704,60 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 		wwGltfExportDialogHarness( skope );
 	}
 	{
-		// lane MORPHCYC1: WW_MORPHCYC_TEST, src/morphcyctest.cpp
+		// WW_MORPHCYC_TEST, src/morphcyctest.cpp
 		extern void wwMorphCycleHarness( NifSkope * );
 		wwMorphCycleHarness( skope );
 	}
 
-	// TEST HARNESS (WW_UIALIGN_TEST=1): lane BUILD9's bar-alignment gate --
-	// the dock's tab strip and the viewport toolbar are ONE row, and the dock's
-	// search row starts where the viewport's content starts. The whole harness
-	// is src/uialigntest.cpp; this is its only line here.
+	// TEST HARNESS (WW_UIALIGN_TEST=1): the bar-alignment gate the dock's tab strip and the viewport
+	// toolbar are ONE row, and the dock's search row starts where the viewport's content starts.
 	{
 		extern void wwUiAlignHarness( NifSkope * );
 		wwUiAlignHarness( skope );
 	}
 	{
-		// lane WATER7: the Water tab and the compact bar row
+		// the Water tab and the compact bar row
 		extern void wwWaterUiHarness( NifSkope * );
 		wwWaterUiHarness( skope );
 	}
 
 	{
-		// lane VIEWFULL1: the full-screen viewport's gate (WW_VIEWFULL_TEST=1), src/viewfulltest.cpp
+		// the full-screen viewport's gate (WW_VIEWFULL_TEST=1), src/viewfulltest.cpp
 		extern void wwViewFullHarness( NifSkope * );
 		wwViewFullHarness( skope );
 	}
 
-	// TEST HARNESS (WW_FILESTAB_TEST=1): lane FILESTAB's Files-tab gates.
+	// TEST HARNESS (WW_FILESTAB_TEST=1): the Files-tab gates.
 	// The whole harness is src/filestabtest.cpp; this is its only line here.
 	wwFilesTabHarness( skope );
 	{
-		// TEST HARNESS (WW_ARCHLOCK_TEST=1): lane ARCHLOCK1's refuter for the
+		// TEST HARNESS (WW_ARCHLOCK_TEST=1): the refuter for the
 		// archive-lock self-deadlock. The whole harness is src/archlocktest.cpp;
 		// this is its only line here.
 		extern void wwArchLockHarness( NifSkope * );
 		wwArchLockHarness( skope );
 	}
 	{
-		extern void wwHkxModelHarness( NifSkope * );	// (lane HKXEDIT1) WW_HKXMODEL_TEST
+		extern void wwHkxModelHarness( NifSkope * );	// WW_HKXMODEL_TEST
 		wwHkxModelHarness( skope );
 	}
 	{
-		// lane LIGHTANGLES1: WW_LIGHTANGLES_TEST, src/lightanglestest.cpp
+		// WW_LIGHTANGLES_TEST, src/lightanglestest.cpp
 		extern void wwLightAnglesHarness( NifSkope * );
 		wwLightAnglesHarness( skope );
 	}
 	{
-		// lane PRTP5: WW_CELL_CENSUS_TEST (the cell-by-cell walk), src/cellcensustest.cpp
+		// WW_CELL_CENSUS_TEST (the cell-by-cell walk), src/cellcensustest.cpp
 		extern void wwCellCensusHarness( NifSkope * );
 		wwCellCensusHarness( skope );
 	}
 	{
-		// lane PBRR2A: WW_SCENE_TEST, src/scenetest.cpp
+		// WW_SCENE_TEST, src/scenetest.cpp
 		extern void wwSceneHarness( NifSkope * );
 		wwSceneHarness( skope );
 	}
 
-	/* TEST HARNESS (WW_CYCLETYPE_TEST=1): does the preview do what the SEQUENCE
-	 * says it does at its end?
-	 *
-	 * NiControllerSequence carries a Cycle Type — CYCLE_LOOP, CYCLE_REVERSE or
-	 * CYCLE_CLAMP — and nothing read it. One session-wide Loop checkbox decided
-	 * for every sequence in every file, it starts unchecked, and saveUi/restoreUi
-	 * have the line that would persist it commented out. So the default preview
-	 * played every clip exactly once whatever it was authored to do, and
-	 * CYCLE_REVERSE had no implementation at all.
-	 *
-	 * THE FIXTURE IS THE POINT. Bloatfly.nif carries CharFXOn (CYCLE_CLAMP) and
-	 * CharFXOnLoop (CYCLE_LOOP) side by side, so one file distinguishes "reads
-	 * the field" from "has a new default": no single setting of one checkbox is
-	 * right for both, and the first two checks below fail on the old code in
-	 * OPPOSITE directions.
-	 *
-	 * CYCLE_REVERSE is injected into Scene::animCycle rather than edited into the
-	 * model, because no stock Fallout 4 mesh uses it and a fixture nobody ships is
-	 * not worth manufacturing when the map IS the interface the transport reads.
-	 * That the map gets its values from the file is what the two checks above it
-	 * measure, on real authored data.
-	 * Log: release/ww_cycletype_test.log
-	 */
+	// TEST HARNESS (WW_CYCLETYPE_TEST=1): does the preview do what the SEQUENCE says it does at its end?
 	if ( !fname.isEmpty() && wwEnvIsSet( "WW_CYCLETYPE_TEST" ) ) {
 		QObject::connect( skope, &NifSkope::completeLoading, skope, [skope]( bool ok, QString & ) {
 			QTimer::singleShot( 1800, skope, [skope, ok]() {
@@ -10083,22 +8901,7 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 		} );
 	}
 
-	/* TEST HARNESS (WW_SELCOLOUR_TEST=1): do the views agree on what a selected
-	 * row looks like?
-	 *
-	 * Audit item 5. Four colours were hardcoded identically in six files, and two
-	 * more views had drifted off them -- Pose to #2b3b5c, and Skeleton to
-	 * wwSkinColor("danger"), the app's ERROR colour, so a multi-selected bone
-	 * rendered in the same red that means "missing texture" in Materials and "key
-	 * out of range" in the Timeline.
-	 *
-	 * The check is not "the literals are gone" -- a grep does that, and would pass
-	 * on a conversion that resolved to the wrong colour. It is that the sheet the
-	 * shared helper emits actually CONTAINS the four skin values, and that the
-	 * error colour is not among them. That last clause is what fails if anyone
-	 * points a selection colour back at "danger".
-	 * Log: release/ww_selcolour_test.log
-	 */
+	// TEST HARNESS (WW_SELCOLOUR_TEST=1): do the views agree on what a selected row looks like?
 	if ( wwEnvIsSet( "WW_SELCOLOUR_TEST" ) ) {
 		QTimer::singleShot( 1200, skope, [skope]() {
 			QFile logf( QApplication::applicationDirPath() + "/ww_selcolour_test.log" );
@@ -10154,18 +8957,8 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 		} );
 	}
 
-	/* TEST HARNESS (WW_DOCKS_TEST=1): does every manager dock start docked and
-	 * hidden, and does choosing a workspace still open the right one?
-	 *
-	 * Seven of the eight ended with addDockWidget + hide(). The Animation Manager
-	 * had NEITHER, so a fresh profile opened with it already spread across the
-	 * bottom before any workspace was chosen; the Pose Manager never called
-	 * addDockWidget at all and was returned floating. Both are now like their
-	 * siblings -- and hiding a dock that used to show itself is exactly the kind
-	 * of change that could quietly make a workspace unreachable, which is the
-	 * second half of this test.
-	 * Log: release/ww_docks_test.log
-	 */
+	// TEST HARNESS (WW_DOCKS_TEST=1): does every manager dock start docked and hidden, and does choosing a
+	// workspace still open the right one?
 	if ( wwEnvIsSet( "WW_DOCKS_TEST" ) ) {
 		QTimer::singleShot( 1500, skope, [skope]() {
 			QFile logf( QApplication::applicationDirPath() + "/ww_docks_test.log" );
@@ -10194,22 +8987,8 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 			log << found << " manager dock(s); " << visible << " visible, "
 				<< floatingOrOrphan << " floating/undocked\n";
 			check( "the manager docks were found", found >= 6 );
-			/* Visibility at startup is NOT this fix's to assert.
-			 *
-			 * Two versions of this check were wrong before that was clear. The
-			 * defect being fixed is at CONSTRUCTION -- a dock that never calls
-			 * addDockWidget or hide() and so arrives floating or already open.
-			 * What the user sees on the next launch is then decided by
-			 * QMainWindow::restoreState replaying the saved window layout, which
-			 * is correct behaviour and will legitimately reopen whatever was open
-			 * last time. Asserting "nothing is visible" fails on a perfectly good
-			 * build the moment someone leaves a panel open.
-			 *
-			 * So the count is logged, and what is CHECKED is the pair of
-			 * properties the constructors actually own: every dock is parented
-			 * into the main window rather than floating, and a hidden one can
-			 * still be opened.
-			 */
+			// Visibility at startup is NOT this fix's to assert:
+			// Two versions of this check were wrong before that was clear.
 			log << "saved workspace: "
 				<< QSettings().value( QStringLiteral( "UI/Workspace" ), 0 ).toInt() << "\n";
 			check( "all of them are docked, not floating", floatingOrOrphan == 0 );
@@ -10326,21 +9105,8 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 		} );
 	}
 
-	/* TEST HARNESS (WW_MULTISEL_TEST=1): do the branch spells honour a
-	 * multi-selection, or only the one block they were handed?
-	 *
-	 * A spell receives ONE index from the menu, so a multi-selection reaches it
-	 * only through blockListSelection. Copy Branch consulted it; Remove Branch
-	 * and Duplicate Branch did not -- so selecting five nodes and pressing
-	 * Ctrl+Delete removed one and left the other four selected and untouched,
-	 * under a menu entry that said "Remove Branch" either way.
-	 *
-	 * Two halves, and the second is what stops the fix being a one-way ratchet:
-	 * a multi-selection removes every branch in it, AND a click outside the
-	 * selection still removes only the block clicked. An implementation that
-	 * always used the selection passes the first and destroys work on the second.
-	 * Log: release/ww_multisel_test.log
-	 */
+	// TEST HARNESS (WW_MULTISEL_TEST=1): do the branch spells honour a multi-selection, or only the one block
+	// they were handed?
 	if ( !fname.isEmpty() && wwEnvIsSet( "WW_MULTISEL_TEST" ) ) {
 		QObject::connect( skope, &NifSkope::completeLoading, skope, [skope]( bool ok, QString & ) {
 			QTimer::singleShot( 1200, skope, [skope, ok]() {
@@ -10412,27 +9178,8 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 		} );
 	}
 
-	/* TEST HARNESS (WW_MENUTREE_TEST=1): dump the spell menu a block row builds,
-	 * and hold the new taxonomy to what it claims.
-	 *
-	 * Submenus are created the first time a spell on that group registers, so
-	 * before this the top-level order was an artefact of the order object files
-	 * appear in NifSkope.pro -- and the CONTENTS were an artefact of page(),
-	 * which is also the CLI namespace, the Unfuck membership test and the
-	 * batch() model-signal switch. Reading the diff cannot tell you whether 106
-	 * group() overrides landed on the right spells; only building the menu can.
-	 *
-	 * The three things a reviewer cannot see by reading:
-	 *   - the declared order actually holds (link order no longer decides)
-	 *   - the retired page names are GONE as submenu titles, and the whole-file
-	 *     pages that legitimately survive are HIDDEN on a block row rather than
-	 *     merely inapplicable
-	 *   - no submenu shows two enabled entries with the same label, which is the
-	 *     failure mode of merging pages: four spells are called "Choose" and
-	 *     three "Update", and until now they were kept apart only by living on
-	 *     different pages
-	 * Log: release/ww_menutree_test.log
-	 */
+	// TEST HARNESS (WW_MENUTREE_TEST=1): dump the spell menu a block row builds, and hold the new taxonomy to
+	// what it claims.
 	if ( !fname.isEmpty() && wwEnvIsSet( "WW_MENUTREE_TEST" ) ) {
 		QObject::connect( skope, &NifSkope::completeLoading, skope, [skope]( bool ok, QString & ) {
 			QTimer::singleShot( 1200, skope, [skope, ok]() {
@@ -10475,12 +9222,8 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 							for ( QAction * a : m->actions() ) {
 								const QString pad( depth * 2, QLatin1Char( ' ' ) );
 								if ( a->menu() ) {
-									/* SpellBook doubles '&' so Qt renders the character
-									 * instead of eating it as a mnemonic marker. Undo
-									 * that here, or every comparison below is against a
-									 * string no spell ever declared -- which is how
-									 * "Import & Export" first went unnoticed.
-									 */
+									// SpellBook doubles '&' so Qt renders the character instead of eating it
+									// as a mnemonic marker.
 									QString title = a->menu()->title();
 									title.replace( QLatin1String( "&&" ), QLatin1String( "&" ) );
 									log << pad << "[" << title << "]"
@@ -10541,13 +9284,8 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 						<< ( survivors.isEmpty() ? QStringLiteral( "(none)" ) : survivors.join( ", " ) ) << "\n";
 					check( "no retired page name is still a submenu", survivors.isEmpty() );
 
-					/* '/' is the group PATH separator, so a group whose own name
-					 * contains one is silently split in two. "Import / Export"
-					 * built a submenu called "Import " holding a submenu called
-					 * " Export", and every check above still passed, because a
-					 * title nobody is looking for is a title nobody notices.
-					 * A stray space at either end is the visible symptom.
-					 */
+					// '/' is the group PATH separator, so a group whose own name contains one is silently
+					// split in two.
 					QStringList ragged;
 					for ( const QString & t : topOrder )
 						if ( t != t.trimmed() )
@@ -10607,11 +9345,7 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 						check( QStringLiteral( "%1 offers itself on no block row" ).arg( QLatin1String( n ) ),
 							stillOffers == 0 );
 					}
-					/* Not checked here: that they still fire from the Spells menu
-					 * with an invalid index. tests/spells/unfuck_panel.sh already
-					 * casts both that way and asserts they change the file, which
-					 * is the half a misplaced guard would break.
-					 */
+					// Not checked here: that they still fire from the Spells menu with an invalid index.
 
 					// ---- 7. Material nests its legacy texture spells --------
 					check( "Material has a nested Textures submenu", sawTexturesUnderMaterial );
@@ -10773,19 +9507,10 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 		} );
 	}
 
-	/* TEST HARNESS (WW_SPELLSEARCH_TEST=1): the command palette.
-	 *
-	 * Its whole justification over a filtered menu is that it can show what is
-	 * NOT available — Batch, Sanitize, Optimize and Error Checking vanish on a
-	 * block row BY DESIGN, and "Update All Tangent Spaces — Batch — not
-	 * applicable here" answers the question a "no results" row cannot. That, and
-	 * the rule that two keystrokes and Return must never reach Crop To Branch,
-	 * are behaviours no diff can show.
-	 *
-	 * Driven from inside its own modal loop: the driver is scheduled BEFORE
-	 * wwSpellPalette is called, so it fires once exec() is already running.
-	 * Log: release/ww_spellsearch_test.log
-	 */
+	// TEST HARNESS (WW_SPELLSEARCH_TEST=1): the command palette:
+	// Its whole justification over a filtered menu is that it can show what is NOT available — Batch,
+	// Sanitize, Optimize and Error Checking vanish on a block row BY DESIGN, and "Update All Tangent Spaces —
+	// Batch — not applicable here" answers the question a "no results" row cannot.
 	if ( !fname.isEmpty() && wwEnvIsSet( "WW_SPELLSEARCH_TEST" ) ) {
 		QObject::connect( skope, &NifSkope::completeLoading, skope, [skope]( bool ok, QString & ) {
 			QTimer::singleShot( 1200, skope, [skope, ok]() {
@@ -10987,22 +9712,7 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 		} );
 	}
 
-	/* TEST HARNESS (WW_COLLCOMPILED_TEST=1): editing a COMPILED body in place.
-	 *
-	 * hknpEncodeSystem reproduces 810 of 822 stock FO4 packfiles byte for byte
-	 * and was reachable only from the CLI's own round-trip self-test. The one
-	 * production write went through hknpEncodeCompressedMesh, which flattens a
-	 * system to a single static body with one triangle mesh — so changing a
-	 * compiled body's friction meant Decompile, edit, Compile, and losing the
-	 * other bodies, the compounds, the primitives, the constraints and the
-	 * ragdoll skeleton on the way.
-	 *
-	 * The check that matters is the LAST one: one Ctrl+Z has to give back a
-	 * byte-identical packfile. Anything less means the edit path is rewriting
-	 * more than it was asked to, which is exactly the failure that cannot be
-	 * seen by looking at the file in the viewport.
-	 * Log: release/ww_collcompiled_test.log
-	 */
+	// TEST HARNESS (WW_COLLCOMPILED_TEST=1): editing a COMPILED body in place.
 	if ( !fname.isEmpty() && wwEnvIsSet( "WW_COLLCOMPILED_TEST" ) ) {
 		QObject::connect( skope, &NifSkope::completeLoading, skope, [skope]( bool ok, QString & ) {
 			QTimer::singleShot( 1500, skope, [skope, ok]() {
@@ -11043,11 +9753,9 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 						log << "panel widgets not found\n"; fails++; checks++; break;
 					}
 
-					/* A compiled row is the one where friction is editable and
-					 * mass is not — mass lives in the motion/inertia arrays and
-					 * is not offered, so that pair identifies it without reading
-					 * the panel's private item roles.
-					 */
+					// A compiled row is the one where friction is editable and mass is not — mass lives in the
+					// motion/inertia arrays and is not offered, so that pair identifies it without reading the
+					// panel's private item roles.
 					bool found = false;
 					QList<QTreeWidgetItem *> stack;
 					for ( int i = 0; i < tree->topLevelItemCount(); i++ )
@@ -11116,32 +9824,8 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 		} );
 	}
 
-	/* TEST HARNESS (WW_COLLUNDO_TEST=1): does one edit in the Collision Manager
-	 * make exactly one undo step, and does one Ctrl+Z take it back?
-	 *
-	 * applyPhysics, applyLayerSelection and applyMaterialSelection were fixed in
-	 * 2ff7457 to write through nifSnapshotOp, and shipped verified only by reading
-	 * the diff. NifModel::set pushes no undo command by itself, so before that fix
-	 * these live editors wrote straight through the model while Compile and Apply
-	 * Safe Fixes in the same panel went through nifSnapshotOp -- undo appeared to
-	 * work and silently reverted whichever of THOSE ran last, keeping the edit
-	 * made here. That is invisible in a diff and invisible on screen.
-	 *
-	 * THE FIXTURE PROBLEM, AND WHY IT IS GONE.  A previous attempt was abandoned
-	 * with the note that this needs "a fixture from a game that authors editable
-	 * rigid bodies -- Skyrim or Oblivion". FO4 ships compiled collision
-	 * (bhkNPCollisionObject) throughout; ~300 meshes were sampled without finding
-	 * one editable bhkRigidBody, and manufacturing one via Create Box Collision
-	 * needs the GL scene graph and blocks on a modal.
-	 *
-	 * But the file already contains the body -- compiled. Decompile Compiled
-	 * Collision is a pure data transform over the hknp packfile, it needs no
-	 * scene, and it runs headless: one CLI cast turns block [2] bhkNPCollisionObject
-	 * into a real bhkRigidBody + bhkCollisionObject. tests/spells/collision_undo.sh
-	 * builds the fixture that way. No second game required.
-	 *
-	 * Log: release/ww_collundo_test.log
-	 */
+	// TEST HARNESS (WW_COLLUNDO_TEST=1): does one edit in the Collision Manager make exactly one undo step,
+	// and does one Ctrl+Z take it back?
 	if ( !fname.isEmpty() && wwEnvIsSet( "WW_COLLUNDO_TEST" ) ) {
 		QObject::connect( skope, &NifSkope::completeLoading, skope, [skope]( bool ok, QString & ) {
 			QTimer::singleShot( 1500, skope, [skope, ok]() {
@@ -11189,13 +9873,8 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 						log << "panel widgets not found (tree/layer/mass)\n"; fails++; checks++; break;
 					}
 
-					/* Select the row that drives this body, and be able to do it
-					 * again: an undo resets the model, the panel rebuilds its tree
-					 * from scratch, and the selection does not survive. The panel's
-					 * item roles are private to collisiontools.cpp, so the row is
-					 * identified by what it DOES — after selecting it, the physics
-					 * editor becomes live.
-					 */
+					// Select the row that drives this body, and be able to do it again: an undo resets the
+					// model, the panel rebuilds its tree from scratch, and the selection does not survive.
 					auto selectLive = [&]() -> bool {
 						QList<QTreeWidgetItem *> stack;
 						for ( int i = 0; i < tree->topLevelItemCount(); i++ )
@@ -11218,24 +9897,12 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 					check( "an inventory row makes the physics editor live", live );
 					if ( !live ) break;
 
-					/* Depth is undoStack->index(), NOT count(). A push after an undo
-					 * TRUNCATES the redo tail before adding, so count() can stay the
-					 * same across a push that really happened — which is how the
-					 * first version of this harness reported a failure on working
-					 * code. index() is the position, and one edit must advance it by
-					 * exactly one.
-					 */
+					// Depth is undoStack->index(), NOT count().
 					auto depth = [&]() { return nif->undoStack->index(); };
 
 					// --- 1. the layer combo ----------------------------------
 					const quint32 layerBefore = readLayer();
-					/* Pick a row that is not the one already showing. The combo does
-					 * not display the stored layer when it is Unidentified — the
-					 * panel substitutes a guess — so choosing by the MODEL's value
-					 * can land on the row already current, and setCurrentIndex then
-					 * emits nothing and writes nothing. That is what this harness
-					 * first measured, and it looked exactly like a broken editor.
-					 */
+					// Pick a row that is not the one already showing.
 					int wantRow = -1;
 					for ( int r = 0; r < layerCombo->count(); r++ )
 						if ( r != layerCombo->currentIndex() && layerCombo->itemData( r ).isValid()
@@ -11315,24 +9982,7 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 	extern QModelIndex tlCommitCollisionPreview( NifModel * nif, const QModelIndex & index, int kind,
 		float ratio, bool decomposition, float precision, float threshold, int maxHulls );
 
-	/* TEST HARNESS (WW_QUICKFAV_TEST=1): Blender's Quick Favourites.
-	 *
-	 * Every part of this is behaviour and none of it is visible in a diff: what
-	 * a favourite is stored AS, whether the store survives, whether Q resolves
-	 * it back to something runnable, and whether an entry that does not apply is
-	 * left out. The last is a choice -- hidden, not greyed -- and check 6 is the
-	 * only thing that says so.
-	 *
-	 * IT FORCES ITS OWN STORE. Favourites live in QSettings, so a run that
-	 * inherited the developer's list would measure that list; every run starts
-	 * from empty and puts back what it found.
-	 *
-	 * The keys are asserted with their CONTEXT, not just their sequence. A bare
-	 * Space or Q on a WindowShortcut is matched before the key reaches the focus
-	 * widget, which would eat the space bar in every line edit in the program --
-	 * so "Space opens search" is only right if it is also scoped to the viewport.
-	 * Log: release/ww_quickfav_test.log
-	 */
+	// TEST HARNESS (WW_QUICKFAV_TEST=1): Blender's Quick Favourites.
 	if ( !fname.isEmpty() && wwEnvIsSet( "WW_QUICKFAV_TEST" ) ) {
 		QObject::connect( skope, &NifSkope::completeLoading, skope, [skope]( bool ok, QString & ) {
 			QTimer::singleShot( 1200, skope, [skope, ok]() {
@@ -11558,25 +10208,7 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 		} );
 	}
 
-	/* TEST HARNESS (WW_NAVKEYS_TEST=1): zooming and rotating are rebindable.
-	 *
-	 * They were the last hard-coded keys in the viewport — convertKeyCode was a
-	 * switch on the raw key — so the two things someone arriving from another
-	 * program most wants to change were the only ones Options ▸ Shortcuts could
-	 * not offer.
-	 *
-	 * CHECK 3 IS THE ONE THAT MATTERS. These bindings latch a bit on key press
-	 * and clear it on release, and once a binding can be a COMBINATION the
-	 * release can arrive with the modifier already let go — release Shift before
-	 * Up and an exact match never fires, the bit is never cleared, and the view
-	 * rotates by itself until something else happens to clear it. A press-only
-	 * test passes on that bug; this presses, releases the modifier first, and
-	 * then measures whether the camera is still moving.
-	 *
-	 * It forces its own bindings and puts back what it found: overrides persist
-	 * in QSettings, so a run that inherited real ones would measure those.
-	 * Log: release/ww_navkeys_test.log
-	 */
+	// TEST HARNESS (WW_NAVKEYS_TEST=1): zooming and rotating are rebindable.
 	if ( !fname.isEmpty() && wwEnvIsSet( "WW_NAVKEYS_TEST" ) ) {
 		QObject::connect( skope, &NifSkope::completeLoading, skope, [skope]( bool ok, QString & ) {
 			QTimer::singleShot( 1500, skope, [skope, ok]() {
@@ -11614,14 +10246,10 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 					check( "...and zoom still defaults to where it was",
 						keys.seq( QStringLiteral( "viewport.nav.zoom_in" ) ) == QKeySequence( Qt::Key_PageUp ) );
 
-					/* Drive the camera and watch the distance.
-					 *
-					 * The keys latch a bit that advanceGears consumes off a
-					 * QTimer, and its step is REAL ELAPSED TIME — spinning
-					 * processEvents takes microseconds, the timer never fires,
-					 * and nothing moves however many times it is called. So the
-					 * pump burns actual wall clock.
-					 */
+					// Drive the camera and watch the distance:
+					// The keys latch a bit that advanceGears consumes off a QTimer, and its step is REAL
+					// ELAPSED TIME — spinning processEvents takes microseconds, the timer never fires, and
+					// nothing moves however many times it is called.
 					auto pump = []( int ms ) {
 						QElapsedTimer clock;
 						clock.start();
@@ -11643,11 +10271,8 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 						return std::fabs( to - from );
 					};
 
-					/* --- CONTROL, and it is not optional ---------------------
-					 * "The old key stopped zooming" passes trivially if nothing
-					 * in this harness can move the camera at all. Prove the
-					 * default binding moves it BEFORE rebinding anything.
-					 */
+					// CONTROL, and it is not optional "The old key stopped zooming" passes trivially if
+					// nothing in this harness can move the camera at all.
 					const float byDefault = travelled( Qt::Key_PageUp, Qt::NoModifier );
 					log << "CONTROL: PageUp on the default binding moved " << byDefault << "\n";
 					check( "CONTROL: the default zoom key moves the camera", byDefault > 0.01f );
@@ -11720,20 +10345,7 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 		} );
 	}
 
-	/* TEST HARNESS (WW_COLLPANEL_TEST=1): the Collision Manager's declutter.
-	 *
-	 * Eleven controls in the creation group became one split button, six display
-	 * controls moved to the viewport's Overlays menu, and three row operations
-	 * moved to the row's own right-click menu. A refactor that only MOVES things
-	 * has exactly one way to go wrong that a build cannot catch: a control lands
-	 * somewhere that no longer writes what the old one wrote, and the settings
-	 * the spells read quietly stop changing.
-	 *
-	 * So the checks come in pairs. The old widget is gone AND the new route
-	 * still writes the same QSettings key — "gone" on its own would pass on a
-	 * control that was simply deleted, which is the failure this is for.
-	 * Log: release/ww_collpanel_test.log
-	 */
+	// TEST HARNESS (WW_COLLPANEL_TEST=1): the Collision Manager's declutter.
 	if ( !fname.isEmpty() && wwEnvIsSet( "WW_COLLPANEL_TEST" ) ) {
 		QObject::connect( skope, &NifSkope::completeLoading, skope, [skope]( bool ok, QString & ) {
 			QTimer::singleShot( 1500, skope, [skope, ok]() {
@@ -11764,12 +10376,8 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 					const QString libraryKey = QStringLiteral( "Settings/Library/Library Folder" );
 					const bool hadLibrary = librarySettings.contains( libraryKey );
 					const QVariant oldLibrary = librarySettings.value( libraryKey );
-					/* Beside the binary, not in QDir::temp(): on this machine a harness
-					 * launched from a shell without TMP resolves Qt's temp to C:\Windows,
-					 * where every write is refused. The Loaded-NIFs suite learned that
-					 * the loud way (a blocking "could not write" box); this one would
-					 * simply have failed two checks for a reason nowhere near them. The
-					 * directory is removed at both ends and release/ is gitignored. */
+					// Beside the binary, not in QDir::temp(): on this machine a harness launched from a shell
+					// without TMP resolves Qt's temp to C:\Windows, where every write is refused.
 					const QString collisionLibrary = QDir( QApplication::applicationDirPath() )
 						.filePath( QStringLiteral( "ww-collision-library-%1" )
 							.arg( QCoreApplication::applicationPid() ) );
@@ -11804,10 +10412,9 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 					// Left-column mode is persisted now, so do not inherit NIF/Header
 					// mode and then wait forever on the legitimate no-selection modal.
 					skope->setLeftColumnMode( NifSkope::LeftBlocks );
-					// Picking a shape from the menu CREATES one, so the harness has
-					// to be pointing at something it can be created from -- with
-					// nothing selected the spell says so on a modal and the run stops
-					// dead here.
+					// Picking a shape from the menu CREATES one, so the harness has to be pointing at
+					// something it can be created from -- with nothing selected the spell says so on a modal
+					// and the run stops dead here.
 					if ( nif )
 						for ( int b = 0; b < nif->getBlockCount(); b++ )
 							if ( nif->blockInherits( nif->getBlockIndex( b ),
@@ -11823,20 +10430,11 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 					dock->show();
 					QApplication::processEvents();
 
-					/* --- the Creation / Simulation switch, in selection colours ---
-					 *
-					 * It says which half of the panel you are on, and it used to say
-					 * it in the amber plate with orange text — the same orange this
-					 * skin spends on invalid material paths and missing textures, so
-					 * a tab that only means "you are here" was wearing the warning
-					 * colour. Checked is the selection blue with white on it now.
-					 *
-					 * Measured off the PIXELS. A stylesheet that fails to apply —
-					 * which is how this switch lost its fill once already, when the
-					 * group that carried the sheet stopped existing — leaves a widget
-					 * that looks exactly like one nobody ever styled, and no amount
-					 * of asking the button about itself would notice.
-					 */
+					// the Creation / Simulation switch, in selection colours:
+					// It says which half of the panel you are on, and it used to say it in the amber plate
+					// with orange text — the same orange this skin spends on invalid material paths and
+					// missing textures, so a tab that only means "you are here" was wearing the warning
+					// colour.
 					QToolButton * creationTab = nullptr;
 					QToolButton * simulationTab = nullptr;
 					for ( QToolButton * b : dock->findChildren<QToolButton *>() )
@@ -11878,11 +10476,8 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 						}
 					}
 
-					/* --- two buttons, in the order the blocks nest -----------
-					 * The body holds all the physics; a shape holds its material
-					 * and its geometry. One button doing both had to pretend the
-					 * body settings belonged to the shape being made.
-					 */
+					// two buttons, in the order the blocks nest The body holds all the physics; a shape holds
+					// its material and its geometry.
 					auto * create = dock->findChild<QToolButton *>(
 						QStringLiteral( "CollisionCreateBodyButton" ) );
 					auto * shapeBtn = dock->findChild<QToolButton *>(
@@ -11896,11 +10491,9 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 					check( "neither is a dropdown",
 						!create->menu() && !shapeBtn->menu() );
 
-					/* The shape button is dead until there is a body to give the
-					 * shape to, and the explanation is on the WRAPPER — a disabled
-					 * widget gets no mouse events, so a tooltip on the button
-					 * itself would never be shown.
-					 */
+					// The shape button is dead until there is a body to give the shape to, and the explanation
+					// is on the WRAPPER — a disabled widget gets no mouse events, so a tooltip on the button
+					// itself would never be shown.
 					log << "shape button enabled with no body: " << shapeBtn->isEnabled() << "\n";
 					check( "Create Collision Shape is disabled without a body",
 						!shapeBtn->isEnabled() );
@@ -11927,13 +10520,8 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 					log << "shape popup shapes: " << names.join( QLatin1String( " | " ) ) << "\n";
 					check( "all five shapes are in the shape popup", shapes == 5 );
 
-					/* THE SPLIT, MEASURED. Everything a shape holds is in the
-					 * shape popup and nothing else is; everything a body holds is
-					 * in the body popup. bhkSphereRepShape carries Material and
-					 * geometry, bhkRigidBodyCInfo carries the physics — so a
-					 * material found on the body side, or a mass on the shape
-					 * side, is the split having quietly come undone.
-					 */
+					// THE SPLIT, MEASURED. Everything a shape holds is in the shape popup and nothing else is;
+					// everything a body holds is in the body popup.
 					const int bodyCombos = popup->findChildren<QComboBox *>().size();
 					const int bodyNumbers = popup->findChildren<QAbstractSpinBox *>().size();
 					const int shapeCombos = shapePop->findChildren<QComboBox *>().size();
@@ -11944,14 +10532,7 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 					// preset, layer, motion, quality, solver, deactivator; and mass,
 					// friction, restitution, two dampings, two velocities, penetration
 					check( "the body popup holds the physics", bodyCombos == 6 && bodyNumbers == 8 );
-					// material, and Replace; no numbers at all
-					/* NAMED, not counted. This asserted "exactly one checkbox",
-					 * which a body property arriving as a checkbox would also
-					 * have satisfied the moment Replace was moved or renamed.
-					 * The two that belong here are both create-time behaviour,
-					 * not shape data — Material is the only shape property in
-					 * the popup, and that is what shapeCombos == 1 pins.
-					 */
+					// material, and Replace; no numbers at all NAMED, not counted.
 					QStringList shapeChecks;
 					for ( QCheckBox * c : shapePop->findChildren<QCheckBox *>() )
 						shapeChecks << c->text();
@@ -11964,29 +10545,13 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 						&& shapeChecks.at( 0 ).contains( QLatin1String( "Keep" ) )
 						&& shapeChecks.at( 1 ).contains( QLatin1String( "Replace" ) ) );
 
-					/* --- the material drop-down ------------------------------
-					 * Search box, an "add a custom one" row, and the vanilla
-					 * list. This has to open the thing and look inside it: the
-					 * previous check asked whether the field was EDITABLE and
-					 * passed for a whole build on a leftover setEditable(true) —
-					 * which was itself the bug, because a click on an editable
-					 * combo puts a cursor in the text and opens nothing at all.
-					 */
+					// the material drop-down Search box, an "add a custom one" row, and the vanilla list.
 					auto * mat = shapePop->findChild<QComboBox *>(
 						QStringLiteral( "CollisionCreateMaterial" ) );
 					if ( !mat ) { log << "no material combo\n"; fails++; checks++; break; }
 					check( "the material field is not a text box", !mat->isEditable() );
-					/* Fallout 4's list, not whichever game's list was current when
-					 * the panel happened to be built.
-					 *
-					 * materialEnumType() reads getBSVersion(), which is 0 before a
-					 * file is opened — and the panel exists first. Filling the
-					 * combo at construction got Oblivion's 32 materials
-					 * permanently, on a Fallout 4 file that has 157. "More than
-					 * 20" passed on exactly that, so the count is checked against
-					 * the OTHER combo, which is refilled on load and is the one
-					 * the editor below has always used.
-					 */
+					// Fallout 4's list, not whichever game's list was current when the panel happened to be
+					// built.
 					auto * editorMaterial = dock->findChild<QComboBox *>(
 						QStringLiteral( "CollisionMaterialCombo" ) );
 					log << "material rows: create " << mat->count()
@@ -11995,12 +10560,8 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 						editorMaterial && mat->count() >= editorMaterial->count()
 						&& mat->count() > 100 );
 
-					/* Named, not just counted. The count check would pass on any
-					 * long list; these are Fallout 4 materials that exist in no
-					 * other game's table, so the list can only be FO4's. The bug
-					 * this catches showed Oblivion's 32 — Stone, Metal, Water,
-					 * all plausible words, with only a tooltip saying OB_HAV_MAT_.
-					 */
+					// Named, not just counted. The count check would pass on any long list; these are Fallout
+					// 4 materials that exist in no other game's table, so the list can only be FO4's.
 					int fo4Only = 0;
 					for ( const char * name : { "MaterialActorMetalArmoredPower",
 							"MaterialMetalBarrelTrashCanOffice", "MaterialCeramicCoffeeMug" } )
@@ -12033,12 +10594,8 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 					mat->hidePopup();
 					QApplication::processEvents();
 
-					/* Optimize Source Mesh was a second name for the mesh create,
-					 * so the popup has one button and it says Create. Buttons
-					 * inside a drop-down do not count — the material list carries
-					 * an "add a custom one" row, which is a QPushButton in a
-					 * child popup and has nothing to do with this.
-					 */
+					// Optimize Source Mesh was a second name for the mesh create, so the popup has one button
+					// and it says Create.
 					int panelButtons = 0;
 					for ( QPushButton * b : popup->findChildren<QPushButton *>() ) {
 						bool insideACombo = false;
@@ -12051,11 +10608,7 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 					log << "buttons on the popup itself: " << panelButtons << "\n";
 					check( "Optimize Source Mesh is not a separate button", panelButtons == 1 );
 
-					/* Every number is the fork's scrub field.
-					 * wwMakeScrubField stamps "wwScrubbed" on what it converts,
-					 * so a field that was left as a plain spin box — Qt stepper
-					 * arrows, no drag — is countable rather than only visible.
-					 */
+					// Every number is the fork's scrub field.
 					int plain = 0;
 					for ( QDoubleSpinBox * s : popup->findChildren<QDoubleSpinBox *>() )
 						if ( !s->property( "wwScrubbed" ).toBool() )
@@ -12064,11 +10617,7 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 					check( "the numbers are scrub fields, like every other number",
 						plain == 0 );
 
-					/* The three enums that came back Invalid (0).
-					 * Zero is the INVALID member of all three tables, so it can
-					 * only have come from a read of an empty combo — it is never
-					 * something anyone picked.
-					 */
+					// The three enums that came back Invalid (0).
 					int invalidEnums = 0;
 					for ( const char * named : { "CollisionCreateMotion" } )
 						if ( auto * c = popup->findChild<QComboBox *>( QLatin1String( named ) ) )
@@ -12103,17 +10652,8 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 					log << "combos with a search box: " << searchable << "\n";
 					check( "layer, preset and material are searchable", searchable >= 3 );
 
-					/* Picking a shape has to WRITE it. The spells read
-					 * CollisionManager/Create/Shape, so a popup that only ticked
-					 * its own button would look right and make the wrong shape.
-					 */
-					/* Click something ELSE first. The shape is restored from
-					 * QSettings when the panel is built, so on the second run of
-					 * this harness Box was already the checked button — and
-					 * clicking the checked member of an exclusive group emits
-					 * nothing, writes nothing, and fails a check that passed the
-					 * time before. Force the state being measured.
-					 */
+					// Picking a shape has to WRITE it. The spells read CollisionManager/Create/Shape, so a
+					// popup that only ticked its own button would look right and make the wrong shape.
 					for ( QToolButton * b : shapeButtons )
 						if ( b->isCheckable() && b->text() == QLatin1String( "Mesh" ) ) { b->click(); break; }
 					QApplication::processEvents();
@@ -12125,16 +10665,7 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 					log << "picking Box wrote Shape=" << wrote << "\n";
 					check( "picking a shape writes the key the spells read", wrote == 0 );
 
-					/* --- the fields reach the body ---------------------------
-					 * The point of putting them here. Before, the preset was the
-					 * only thing consulted and every other value came from the
-					 * block template, so a body could not be authored with a
-					 * chosen mass — you made it wrong and fixed it afterwards.
-					 *
-					 * 7.5 is deliberately a mass no preset produces: Prop gives
-					 * 10 and everything else gives 0, so a body that comes out at
-					 * either of those is one that ignored the field.
-					 */
+					// the fields reach the body The point of putting them here.
 					QDoubleSpinBox * massField = nullptr;
 					for ( QDoubleSpinBox * s : popup->findChildren<QDoubleSpinBox *>() )
 						if ( s->maximum() > 100000.0 && s->decimals() == 3 ) { massField = s; break; }
@@ -12145,11 +10676,7 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 					}
 					massField->setValue( 7.5 );
 					emit massField->editingFinished();
-					/* Set the layer through the FIELD, not by writing the setting.
-					 * A stored value is exactly what this run must not trust: an
-					 * earlier build wrote Layer=0 into QSettings, and a harness
-					 * that reads it back would agree with the bug and pass.
-					 */
+					// Set the layer through the FIELD, not by writing the setting.
 					const int propRow = layerField->findData( 10u );
 					check( "the create layer list has real layers in it", propRow >= 0 );
 					if ( propRow >= 0 )
@@ -12190,25 +10717,15 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 					log << "created body: mass " << bodyMass << ", layer " << bodyLayer << "\n";
 					check( "the mass typed in the popup is the mass the body gets",
 						std::fabs( bodyMass - 7.5f ) < 1.0e-3f );
-					/* The layer PICKED, not whatever was stored. Comparing the body
-					 * against the setting passes when both are 0, and 0 is
-					 * Unidentified — which is what came out while the create combos
-					 * were being read before they had any rows in them.
-					 */
+					// The layer PICKED, not whatever was stored.
 					check( "...and the layer picked in the popup is the body's layer",
 						bodyLayer == 10u );
 
 					popup->hide();
 					QApplication::processEvents();
 
-					/* --- nothing was left behind unplaced -------------------
-					 * The failure this is for: a widget whose row was deleted
-					 * but which is still parented to the group. Qt does not
-					 * complain — it puts it at 0,0, on top of whatever is
-					 * already there, which is how a leftover save button came to
-					 * be drawn over the group's own title. Every visible child of
-					 * the group has to occupy a cell in the group's layout.
-					 */
+					// nothing was left behind unplaced The failure this is for: a widget whose row was deleted
+					// but which is still parented to the group.
 					QWidget * group = create->parentWidget();
 					auto countUnplaced = [&]( QStringList & named ) {
 						int n = 0;
@@ -12248,12 +10765,9 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 						<< unplaced << " " << strays.join( QLatin1Char( ',' ) ) << "\n";
 					check( "nothing is left parented to the group but unplaced", unplaced == 0 );
 
-					// --- the old controls are gone ----------------------------
-					/* Buttons ON THE PANEL, so children of the popup do not count:
-					 * Optimize Source Mesh is supposed to be in there now, and
-					 * findChildren walks into it because the popup is parented to
-					 * the panel that owns it.
-					 */
+					// the old controls are gone Buttons ON THE PANEL, so children of the popup do not count:
+					// Optimize Source Mesh is supposed to be in there now, and findChildren walks into it
+					// because the popup is parented to the panel that owns it.
 					int oldButtons = 0;
 					for ( QPushButton * b : dock->findChildren<QPushButton *>() ) {
 						if ( popup->isAncestorOf( b ) )
@@ -12304,20 +10818,9 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 					check( "the inventory tree still offers a row menu",
 						tree && tree->contextMenuPolicy() == Qt::CustomContextMenu );
 
-					/* --- LAST: the document that provoked all of this ---------
-					 * The material list was Oblivion's on the program's own new
-					 * file, so the check has to reach that file and not only the
-					 * stock mesh this harness opens. Build the starter document
-					 * into this model and ask the same combo again — the list is
-					 * decided by the header's game, so an empty scene asks it just
-					 * as well as a cube did.
-					 *
-					 * At the END, and that is not tidiness: this REPLACES the
-					 * model. Run in the middle it took the loaded mesh out from
-					 * under every check after it, and the create test came back
-					 * with no rigid body at all — two failures that looked like
-					 * the product and were the harness eating its own fixture.
-					 */
+					// LAST: the document that provoked all of this The material list was Oblivion's on the
+					// program's own new file, so the check has to reach that file and not only the stock mesh
+					// this harness opens.
 					QString starterError;
 					if ( !nifCreateStarterScene( nif, &starterError ) ) {
 						log << "starter scene failed: " << starterError << "\n";
@@ -12345,39 +10848,7 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 		} );
 	}
 
-	/* TEST HARNESS (WW_COLLPERSHAPE_TEST=1): three shapes selected, three bodies?
-	 *
-	 * Create Collision is handed ONE index by the menu and by the Collision
-	 * Manager's button, so selecting three shapes and pressing it made a single
-	 * body out of whichever of them happened to be current and ignored the other
-	 * two. Nothing said so: the panel reported "1 body" afterwards and that is
-	 * what the file had.
-	 *
-	 * THE DISCRIMINATING NUMBER IS THE COUNT. Three selected shapes must leave
-	 * three bhkCollisionObjects. The old code leaves one, so check 2 fails on it
-	 * outright rather than passing for the wrong reason -- and it cannot be
-	 * satisfied by a bhkListShape either, which is one body wearing three shapes
-	 * and is what "Replace" off would have produced.
-	 *
-	 * WHY EACH BODY NEEDS ITS OWN NODE. A NiAVObject holds exactly one Collision
-	 * Object, so three shapes under one root cannot carry three bodies there. A
-	 * BSTriShape has the field and is never where stock puts one: over 489
-	 * sampled FO4 meshes, 625 of 625 bodies target a NiNode. So each shape is
-	 * wrapped in a NiNode, which is what NCA1x1StairsCorner01 and
-	 * BunIntElevatorOut01 do. Checks 3-5 hold that shape.
-	 *
-	 * Check 6 is the one that catches the easy mistake in the wrap: hand the new
-	 * node the shape's transform and leave the shape's own alone, and it applies
-	 * twice -- every wrapped shape silently doubles its offset from the root. The
-	 * world transform is recomputed from the model rather than read off the
-	 * Scene, whose node ids are assigned at construction and do not survive the
-	 * renumbering an insert causes.
-	 *
-	 * FIXTURE: any mesh whose root NiNode has three BSTriShape children, which is
-	 * the case the user hits. tests/spells/collision_per_shape.sh passes one.
-	 * Box collision, because it is the create path with no modal on it.
-	 * Log: release/ww_collpershape_test.log
-	 */
+	// TEST HARNESS (WW_COLLPERSHAPE_TEST=1): three shapes selected, three bodies?
 	if ( !fname.isEmpty() && wwEnvIsSet( "WW_COLLPERSHAPE_TEST" ) ) {
 		QObject::connect( skope, &NifSkope::completeLoading, skope, [skope]( bool ok, QString & ) {
 			QTimer::singleShot( 1500, skope, [skope, ok]() {
@@ -12421,23 +10892,7 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 						worldWas.append( worldOf( shape ).translation );
 					}
 
-					/* What the block list publishes when three rows are selected.
-					 * The cast index has to be one of them -- a click outside the
-					 * selection is a fresh target, which is spellSelectionRoots' rule.
-					 */
-					/* WW_COLLPERSHAPE_TEST=control is the same binary with the
-					 * selection never published, which is the path the old code
-					 * took for every run: one index in, one body out. It exists so
-					 * that "three bodies" is shown to be discriminating rather than
-					 * assumed to be -- the control must come back with one.
-					 *
-					 * =mesh goes in through the Collision Manager's preview commit
-					 * instead of a menu spell, because that is a different entry
-					 * point into the same loop and it is the one the Mesh button
-					 * uses -- which is the mode this was reported from. Box is the
-					 * menu-spell path, and is also the only create with no modal on
-					 * it, which is what makes it usable with nobody at the keyboard.
-					 */
+					// What the block list publishes when three rows are selected.
 					const QString mode = wwEnvStr( "WW_COLLPERSHAPE_TEST" );
 					const bool control = ( mode == QLatin1String( "control" ) );
 					if ( !control )
@@ -12493,12 +10948,7 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 					log << "source meshes still in the file: " << survivors << "\n";
 					check( "the meshes that became collision are gone", survivors == 0 );
 
-					/* Each body's node is the shape it replaced: named after it and
-					 * standing where it stood. The position is the check that the
-					 * transform MOVED rather than being copied or dropped -- a node
-					 * left at the origin passes every structural check above and puts
-					 * the collision somewhere the mesh never was.
-					 */
+					// Each body's node is the shape it replaced: named after it and standing where it stood.
 					bool named = targets.size() == 3;
 					bool placed = true;
 					int dangling = 0;
@@ -12552,67 +11002,11 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 	extern quint64 wwGlPaintCount();
 	extern qint64 wwGlPaintNanos();
 
-	/*! The two item roles the drop harness reads off an inventory row.
-	 *
-	 *  By number, because CollisionRoles is private to collisiontools.cpp's
-	 *  anonymous namespace: it counts up from Qt::UserRole + 1 as Object, Node,
-	 *  System, Body, Shape. If a role is ever inserted ahead of these, the checks
-	 *  that read them fail rather than quietly measuring the wrong field — they
-	 *  assert the values name a shape and a body before using either.
-	 */
+	//! The two item roles the drop harness reads off an inventory row.
 	static constexpr int BodyBlockRoleForTest = Qt::UserRole + 4;
 	static constexpr int ShapeBlockRoleForTest = Qt::UserRole + 5;
 
-	/* TEST HARNESS (WW_COLLDROP_TEST=1): drag a mesh onto the Collision Manager.
-	 *
-	 * The dock is a drop target now: a mesh dragged out of the Block List and
-	 * dropped on it gets collision, at the shape type the panel is showing, one
-	 * body per mesh. This drives the same payload the block list builds.
-	 *
-	 * SHAPE TYPE IS SEEDED TO BOX by the script, and that matters twice: Box is
-	 * the only create with no popup or preview on it, so it is the one usable
-	 * with nobody at the keyboard — and because the drop is supposed to honour
-	 * the panel's own setting rather than a type of its own, "the shape that came
-	 * out is a bhkBoxShape" is what says it did.
-	 *
-	 * WHAT IS MEASURED
-	 *
-	 *   1. the fixture has four meshes                           <- not vacuous
-	 *   2. the panel is accepting drops at all -- the flag Qt gates on before any
-	 *      handler runs, and the one thing delivering an event steps over
-	 *   3. a mesh payload is taken, with the copy action
-	 *   4. a payload with no mesh in it is refused by ACTION, not by ignoring the
-	 *      event: ignoring ends the drag over the widget and no further move
-	 *      arrives, which is the trap the block list documents
-	 *   5. dropping one mesh makes one body
-	 *   6. ...and the shape is the type the panel was set to
-	 *   7. dropping two makes two, one each
-	 *   8. dropping one ON A BODY makes no new body, and that body -- the one
-	 *      aimed at, not merely some body -- holds one more shape than it did
-	 *   9. a shape dragged from one body onto another moves there, into a list
-	 *      beside what was already in it, and the body it is already in refuses it
-	 *  10. and the loop closes: that shape dragged back into the Block List is a
-	 *      BSTriShape again
-	 *
-	 * Log: release/ww_colldrop_test.log
-	 */
-	/* AUDIT (WW_DROPAUDIT=<report path>): every block type against every other.
-	 *
-	 * The drop table checked in block_dragdrop.sh is six pairs over four types,
-	 * out of 563 in nif.xml. The rule it exercises is general — the format is
-	 * asked what each link field accepts — but "general" is the word the `Skin`
-	 * bug hid behind: that field looked reasonable and offered a BSShaderTextureSet
-	 * a home inside a mesh, and it surfaced only because a check happened to cover
-	 * it. This covers all of them.
-	 *
-	 * One instance of every insertable type goes into a scratch model, then every
-	 * (dragged, target) pair is put through wwCanTakeTypedChild — the same call
-	 * the Block List makes while a drag is in flight, not a copy of its reasoning,
-	 * which would only agree with itself.
-	 *
-	 * FOR THIS FILE'S VERSION. Fields come and go between game versions, so the
-	 * report is true of the NIF it was run on and says which that was.
-	 */
+	// TEST HARNESS (WW_COLLDROP_TEST=1): drag a mesh onto the Collision Manager.
 	if ( !fname.isEmpty() && wwEnvIsSet( "WW_DROPAUDIT" ) ) {
 		QObject::connect( skope, &NifSkope::completeLoading, skope, [skope]( bool ok, QString & ) {
 			QTimer::singleShot( 800, skope, [skope, ok]() {
@@ -12687,30 +11081,7 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 		} );
 	}
 
-	/* TEST HARNESS (WW_LOADEDNIFS_TEST=<a nif to add>): the Loaded NIFs panel.
-	 *
-	 * Everything here shipped on a reading of the code and on the other suites not
-	 * regressing, which is not the same as verified — and three features this same
-	 * night shipped green and were broken. These are the two that moved data.
-	 *
-	 * WHAT IS MEASURED
-	 *
-	 *   1. a NIF can be added to the panel from a path             <- not vacuous
-	 *   2. a freshly opened one is NOT marked modified. The workspace POSES loaded
-	 *      documents, so the bytes stop matching the file with nobody having
-	 *      edited anything, and reading that as "modified" painted every row red
-	 *   3. it has a Scene
-	 *   4. GHOSTING KEEPS THE SCENE. Ghosting used to take the document out of the
-	 *      render list, which deleted its Scene, which dropped any mesh posed
-	 *      against it back to bind pose — a display toggle moving geometry in
-	 *      another file. This is the check for that
-	 *   5. opening a row here SWAPS: the list keeps its size, because the document
-	 *      leaving the window takes the place of the one that entered it
-	 *   6. ...and the row that was opened is gone from the list
-	 *   7. ...and the one that left the window is in it, by name
-	 *
-	 * Log: release/ww_loadednifs_test.log
-	 */
+	// TEST HARNESS (WW_LOADEDNIFS_TEST=<a nif to add>): the Loaded NIFs panel.
 	if ( !fname.isEmpty() && wwEnvIsSet( "WW_LOADEDNIFS_TEST" ) ) {
 		QObject::connect( skope, &NifSkope::completeLoading, skope, [skope, fname]( bool ok, QString & ) {
 			QTimer::singleShot( 1200, skope, [skope, ok, fname]() {
@@ -12725,25 +11096,9 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 					log.flush();
 				};
 
-				/* A STANDING ANSWERER FOR MODALS NOBODY CLAIMED.
-				 *
-				 * A blocking dialog inside a harness does not fail the run — it stops
-				 * it, on the user's screen, until the shell's deadline kills the
-				 * process. That happened: a scratch NIF written to the machine's temp
-				 * resolved to C:\Windows, the refused write raised "Could not write
-				 * ...", and the box sat there with an OK button and nobody to press it.
-				 *
-				 * The write is fixed at its source (scratch NIFs live beside the binary
-				 * now — see draggedSave below), and this is the belt to that pair of
-				 * braces: nothing this suite does may strand a modal on a real screen.
-				 *
-				 * It waits ~1.5 seconds of the SAME dialog before acting, because every
-				 * check that deliberately raises a modal answers it from its own
-				 * singleShot(0) the instant it appears. Only a dialog nobody claimed
-				 * survives long enough to be seen here. Discard and No come first, so a
-				 * close-a-modified-document prompt is never answered with Save; an error
-				 * box carries nothing but Ok, which has to be CLICKED, not waited out.
-				 */
+				// A STANDING ANSWERER FOR MODALS NOBODY CLAIMED:
+				// A blocking dialog inside a harness does not fail the run — it stops it, on the user's
+				// screen, until the shell's deadline kills the process.
 				auto * strayModals = new QTimer( qApp );
 				QObject::connect( strayModals, &QTimer::timeout, qApp, []() {
 					static QWidget * watched = nullptr;
@@ -12886,10 +11241,8 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 					check( "inactive left-editor pages cannot paint through",
 						modePagesExclusive );
 
-					/* ADVANCED BLOCK SEARCH. The menu is deliberately one compact
-					 * container, but its controls must alter the real row matcher rather
-					 * than merely mirror UI state. Exercise known blocks in the starter
-					 * document through the actual search box and QAction signals. */
+					// ADVANCED BLOCK SEARCH. The menu is deliberately one compact container, but its controls
+					// must alter the real row matcher rather than merely mirror UI state.
 					skope->setLeftColumnMode( NifSkope::LeftBlocks );
 					QApplication::processEvents();
 					QList<QAction *> searchScopes;
@@ -13205,10 +11558,7 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 							&& skope->leftColumnStack->widget( NifSkope::LeftHeader )
 								->isAncestorOf( skope->header ) );
 
-					/* REFRESHING THE BROWSER MUST NOT REFRESH THE WORKSPACE. Keep exact
-					 * model/name identity across the real toolbar action; this is the
-					 * regression boundary for the reported "browser reset emptied Loaded
-					 * NIFs" failure. */
+					// REFRESHING THE BROWSER MUST NOT REFRESH THE WORKSPACE.
 					QStringList loadedNamesBeforeRefresh;
 					QList<NifModel *> loadedModelsBeforeRefresh;
 					for ( int i = 0; i < skope->workspaceDocumentCount(); i++ ) {
@@ -13404,32 +11754,8 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 						skope->markWorkspaceFollowerRow( row, false );
 					}
 
-					/* THE PRIMARY ROW: half of it describes the document, half of it
-					 * drives the viewport, and the arrow is a control.
-					 *
-					 * The split is the whole design and each half fails differently.
-					 *
-					 * The ROLE marks and the arrow say what the document already IS to
-					 * this workspace. On the row that IS the primary there is nothing to
-					 * change, so they are drawn in the inert register and are dead to the
-					 * mouse. "They are drawn" would pass on a strip that also worked;
-					 * "they do nothing" would pass on the older code that drew nothing at
-					 * all. Neither is worth anything without the other.
-					 *
-					 * The DISPLAY pair is a real control on every row including this one,
-					 * and the only honest test of it is the FRAMEBUFFER. A check that the
-					 * flag flipped would pass on a version that changed nothing on screen
-					 * — which is exactly what shipped first, on the reasoning that a
-					 * primary could never be hidden.
-					 *
-					 * The ARROW promotes. Asserted through the same object identities the
-					 * Make Primary route is already held to, because the risk is not that
-					 * nothing happens, it is that a second window happens.
-					 */
-					/* THE PIXEL AND GESTURE HELPERS, hoisted so the arrow-promotion
-					 * checks at the END of this suite can use the same ones. They are
-					 * run last because promotion rewrites the workspace and the checks
-					 * in between read it. */
+					// THE PRIMARY ROW: half of it describes the document, half of it drives the viewport, and
+					// the arrow is a control.
 					auto sendTo = [skope]( QEvent::Type type, const QPoint & p,
 							Qt::MouseButton b, Qt::MouseButtons held ) {
 						QMouseEvent e( type, QPointF( p ),
@@ -13468,13 +11794,8 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 							if ( it.value() > bestN ) { bestN = it.value(); best = it.key(); }
 						return QColor( best );
 					};
-					/* A glyph's INK is the pixel FURTHEST from that backdrop, plus how many
-					 * pixels are ink at all.
-					 *
-					 * Furthest, never averaged: an averaged glyph is mostly its own
-					 * antialiasing blended back toward the row, which drags every
-					 * measurement toward the background and would happily let an accent
-					 * arrow and a grey one land within tolerance of each other. */
+					// A glyph's INK is the pixel FURTHEST from that backdrop, plus how many pixels are ink at
+					// all.
 					auto glyphInk = []( const QImage & img, const QRect & r, qreal dpr,
 							const QColor & bg, int * painted ) {
 						QColor best = bg;
@@ -13672,16 +11993,9 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 								QCoreApplication::processEvents( QEventLoop::AllEvents, 250 );
 								return skope->ogl->grabFramebuffer();
 							};
-							// how much of the frame is not the viewport's flat background
-							/* The documents' pixels are the ones that DIFFER FROM THE EMPTY
-							 * FRAME, not the ones that differ from the modal colour.
-							 *
-							 * The first version counted the latter and measured the viewport
-							 * GRID: 12548 lit pixels with both documents hidden, against
-							 * 75157 with the primary drawn, and the threshold that was
-							 * supposed to say "nothing is drawn" failed on scenery. Diffing
-							 * against the both-hidden frame subtracts the grid, the gizmo and
-							 * anything else that is not a document, exactly. */
+							// how much of the frame is not the viewport's flat background The documents'
+							// pixels are the ones that DIFFER FROM THE EMPTY FRAME, not the ones that differ
+							// from the modal colour.
 							auto differingPixels = []( const QImage & a, const QImage & b ) {
 								if ( a.size() != b.size() ) return -1;
 								int d = 0;
@@ -13752,10 +12066,8 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 								differingPixels( ghostedAgain, ghosted ) == 0
 									&& differingPixels( solidAgain, solid ) == 0 );
 
-							/* HIDING THE PRIMARY IS A VIEWPORT OVERLAY, NOT AN EDIT.
-							 * The Block List goes on working on it: same model, same block
-							 * count, same selectable rows. A hidden document that could not be
-							 * edited would be a worse control than no control. */
+							// HIDING THE PRIMARY IS A VIEWPORT OVERLAY, NOT AN EDIT. The Block List goes on
+							// working on it: same model, same block count, same selectable rows.
 							setPrimaryDisplay( false, false );
 							const int blocksWhileHidden = skope->nif ? skope->nif->getBlockCount() : 0;
 							skope->list->setCurrentIndex( skope->nif->getBlockIndex( 0 ) );
@@ -13901,7 +12213,7 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 
 							/* ...AND THE HOVER ACTUALLY REACHES IT. A mapping nothing consults
 							 * is a mapping no user ever sees, which is the same failure class as
-							 * the drag that shipped with 26 green checks and no startDrag(). */
+							 * the drag that shipped with 26 green checks and no startDrag. */
 							const int shownBefore = skope->loadedNifsTooltipsShown();
 							{
 								const QPoint at = skope->loadedNifsGlyphRect( otherRow, 4 ).center();
@@ -13923,11 +12235,7 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 								shownBefore >= 0 && shownAfterGlyph == shownBefore + 1
 									&& skope->loadedNifsTooltipsShown() == shownAfterGlyph );
 
-							/* ONE VOCABULARY ACROSS TWO PANELS. The Block List's column draws
-							 * the same eye over the same kind of state; if either surface ever
-							 * grows a private wording, these stop matching. Compared rather than
-							 * asserted against a literal, because the literal is above and what
-							 * is in question here is whether the two AGREE. */
+							// ONE VOCABULARY ACROSS TWO PANELS.
 							skope->setLeftColumnMode( NifSkope::LeftBlocks );
 							QApplication::processEvents();
 							QString blockEyeTip, blockDiscTip;
@@ -13958,10 +12266,7 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 								!blockEyeTip.isEmpty() && blockEyeTip == eyeOnTip
 									&& blockDiscTip == discOffTip );
 
-							/* THE TABLE ITSELF, into the log. The checks above prove
-							 * the sentences are what they should be; this is so they
-							 * can be READ and approved without a build, the way the
-							 * icon sheet exists for the glyphs they explain. */
+							// THE TABLE ITSELF, into the log.
 							static const char * const slotNames[] = {
 								"face  ", "skull ", "pistol", "bone  ", "eye   ", "disc  " };
 							log << "  tooltips — primary row | live row\n";
@@ -14170,19 +12475,7 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 							break;
 						}
 					}
-					/* SCRATCH NIFS GO BESIDE THE BINARY, NEVER IN THE MACHINE'S TEMP.
-					 *
-					 * This was QDir::tempPath(), and on this machine Qt resolves that to
-					 * C:\Windows whenever the launching shell has no TMP — the same
-					 * broken-TMP fallback that sends g++ hunting there for its
-					 * intermediates. The write is refused, and the refusal is a BLOCKING
-					 * message box, so a harness run left "Could not write
-					 * C:/Windows/ww_browser_dragged.nif" sitting on the user's screen
-					 * until its own deadline killed the process. No check may depend on
-					 * the machine's temp being sane: release/ already holds every ww_*
-					 * log and capture, is beside the binary by construction, and is
-					 * gitignored.
-					 */
+					// SCRATCH NIFS GO BESIDE THE BINARY, NEVER IN THE MACHINE'S TEMP.
 					const QString draggedSave = QApplication::applicationDirPath()
 						+ QStringLiteral( "/ww_browser_dragged.nif" );
 					QFile::remove( draggedSave );
@@ -14192,13 +12485,9 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 						draggedLoadedRow, draggedSave );
 					check( "Loaded NIFs -> browser writes the dragged in-memory NIF",
 						draggedSaved && QFileInfo( draggedSave ).size() > 0 );
-					/* ...INTO release/, and this is asserted rather than assumed.
-					 *
-					 * The check above is happy with a byte-count anywhere on the disk, and
-					 * "anywhere" was the machine's temp, which is C:\Windows here. The
-					 * write failed, the failure was a modal, and the run stopped dead with
-					 * the box on the user's screen. So the location is now part of the
-					 * contract, not an implementation detail of the path expression. */
+					// ...INTO release/, and this is asserted rather than assumed:
+					// The check above is happy with a byte-count anywhere on the disk, and "anywhere" was the
+					// machine's temp, which is C:\Windows here.
 					check( "...beside the binary, never in the machine's temp",
 						QFileInfo( draggedSave ).exists()
 							&& QDir( QFileInfo( draggedSave ).absolutePath() )
@@ -14229,7 +12518,7 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 					QFile::remove( draggedSave );
 
 					/* THE USER-FACING RELOAD IS DESTRUCTIVE AND CANCELLABLE. Programmatic
-					 * reload() below remains available to harnesses/internal refreshes. */
+					 * reload below remains available to harnesses/internal refreshes. */
 					const bool suppressedReloadPrompt = skope->cfg.suppressSaveConfirm;
 					skope->cfg.suppressSaveConfirm = false;
 					skope->setWindowModified( true );
@@ -14293,12 +12582,7 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 					if ( GLView * view = skope->getGLView() ) {
 						for ( int i = 0; i < 2; i++ ) { view->update(); QApplication::processEvents(); }
 					}
-					/* BUILDS, NOT "has one". Asking for a Scene builds one when it is
-					 * missing, so "does it have a Scene" is answered yes whether the
-					 * old one survived or was destroyed a moment ago — the first
-					 * version of this check passed against the broken code, which is
-					 * how that was found out. A REBUILD is what destruction looks like.
-					 */
+					// BUILDS, NOT "has one".
 					const int builtBefore = skope->workspaceDocumentSceneBuilds( row );
 					check( "...and it has a Scene", builtBefore >= 1 );
 
@@ -14313,15 +12597,10 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 					skope->setWorkspaceDisplayMode( row, 1 );
 					QApplication::processEvents();
 
-					/* SAVE AS, minus the dialog.
-					 *
-					 * The file dialog is the one part of this a harness cannot drive
-					 * and the least interesting part of it: what matters is that the
-					 * bytes reach the file, that the row stops being unsaved, and that
-					 * it knows where it lives afterwards. The row is made unsaved
-					 * first — otherwise "it is not unsaved after saving" is true
-					 * before the save as well, and proves nothing.
-					 */
+					// SAVE AS, minus the dialog:
+					// The file dialog is the one part of this a harness cannot drive and the least interesting
+					// part of it: what matters is that the bytes reach the file, that the row stops being
+					// unsaved, and that it knows where it lives afterwards.
 					{
 						// beside the binary, not in the machine's temp — see the note on
 						// draggedSave above: a failed temp write is a blocking modal
@@ -14348,14 +12627,8 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 						QFile::remove( to );
 					}
 
-					/* GENERATE FACEBONES FROM A ROW, refused without a donor.
-					 *
-					 * The generation itself is covered end to end by facebones.sh on
-					 * real heads. What is checked here is the row-menu route into it:
-					 * that it refuses with a reason when no donor is marked, and that
-					 * marking the row ITSELF is refused too — a file cannot be its own
-					 * face donor, and the message has to say which mistake was made.
-					 */
+					// GENERATE FACEBONES FROM A ROW, refused without a donor:
+					// The generation itself is covered end to end by facebones.sh on real heads.
 					{
 						NifSkope::setWorkspaceFaceDonor( nullptr, QString() );
 						const QString noDonor = skope->generateFaceBonesFromRow( row );
@@ -14419,17 +12692,10 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 					NifSkope::setWorkspaceFaceDonor( nullptr, QString() );
 					skope->setWorkspaceSkeletonDocument( -1 );
 
-					/* THE ARROW PROMOTES — LAST, because it rewrites the workspace.
-					 *
-					 * It ran in the middle at first, and "a freshly opened NIF is not
-					 * marked modified" twenty checks later went red: that check reads the
-					 * LAST workspace index, and promotion had made it a different
-					 * document. The check was right and the placement was wrong. */
+					// THE ARROW PROMOTES — LAST, because it rewrites the workspace.
 					{
-						/* Its own row resolution: the block that used to hold these ran
-						 * two hundred lines above, and the model has been rebuilt several
-						 * times since. A stale QModelIndex would have made every check
-						 * below pass or fail for a reason unrelated to the arrow. */
+						// Its own row resolution: the block that used to hold these ran two hundred lines
+						// above, and the model has been rebuilt several times since.
 						QModelIndex primaryRow, otherRow;
 						for ( int r = 0; r < skope->loadedNifsModel->rowCount(); r++ ) {
 							const QModelIndex idx = skope->loadedNifsModel->index( r, 0 );
@@ -14483,10 +12749,9 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 							newPrimaryRow.isValid() && demotedRow.isValid()
 								&& sameInk( newPrimaryArrow, accentInk, 26 )
 								&& sameInk( demotedArrow, textInk, 26 ) );
-						/* The outgoing primary is an ordinary row now, toggles and all
-						 * — driven through the public workspace index rather than the
-						 * document pointer, because BackgroundNifDocument is only
-						 * forward-declared in this file. */
+						// The outgoing primary is an ordinary row now, toggles and all — driven through the
+						// public workspace index rather than the document pointer, because
+						// BackgroundNifDocument is only forward-declared in this file.
 						bool demotedEyeWorks = false;
 						int demotedIndex = -1;
 						for ( int i = 0; i < skope->workspaceDocumentCount(); i++ )
@@ -14530,102 +12795,7 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 		}, Qt::SingleShotConnection );
 	}
 
-	/* TEST HARNESS (WW_WEAPONMARK_TEST=1): the Loaded NIFs WEAPON MARK.
-	 *
-	 * The third row mark, beside the skeleton skull and the face donor: a row
-	 * marked as a weapon part is merged onto the target's WEAPON bone instead of
-	 * its root, so a gun lands in a posed hand instead of at the actor's feet.
-	 * Unlike the other two the mark is a SET — a Fallout 4 gun is a base NIF plus
-	 * separate OMOD part files, and all of them are parts at once.
-	 *
-	 * WHAT IS MEASURED
-	 *
-	 *   1. THE MARK ITSELF, as state and not as a repaint: it lands on the MODEL
-	 *      the merge keys on, several rows hold it at once, unmarking one leaves
-	 *      the others, and it is independent of the skull and the face donor in
-	 *      both directions. The row menu is opened and its item read, because a
-	 *      mark with no way to set it is not a feature.
-	 *   2. THE ASSEMBLY. Base + grip + magazine, all three marked, merged onto a
-	 *      real skeleton. Eight shapes arrive, and — the part that cannot be
-	 *      faked — every one of them lands NEAR THE WEAPON BONE and FAR FROM THE
-	 *      DOCUMENT ORIGIN, measured off world transforms walked up the Parent
-	 *      links. Near-the-bone alone also holds for a rig collapsed at the
-	 *      origin; far-from-the-origin alone holds for a gun flung anywhere. The
-	 *      thresholds are WW_SAMPOSE_TEST's, for the same reasons.
-	 *   3. THE TWO NOTICES, which are what "connect automatically if the
-	 *      combination is right" actually amounts to. Neither refuses anything:
-	 *        - a part whose shape names the target already carries is reported as
-	 *          possibly redundant, by file and by name (two minigun barrels);
-	 *        - a part that declares a connect-point slot the target does not
-	 *          offer at the attach node is reported as needing a slot node that
-	 *          automatic placement does not provide yet (a suppressor, which is
-	 *          authored around its own origin and otherwise sits at the grip).
-	 *      And the counter-check: a correctly assembling gun draws NEITHER.
-	 *   4. NO WEAPON BONE IN THE TARGET is a fallback, not a failure: the merge
-	 *      happens at the root and the summary says so.
-	 *   5. AN UNMARKED DONOR IS UNTOUCHED by any of it — one guard assertion, not
-	 *      a second copy of tests/merge/workspace_skeleton_target.sh.
-	 *
-	 *   6. PLACEMENT, which is what the mark actually does now. A part declares
-	 *      the connect point it plugs into ("C-Muzzle" in
-	 *      BSConnectPoint::Children) and a placed part publishes the matching
-	 *      "P-Muzzle" with the node it rides and a full local transform; the
-	 *      merge composes it. Three things are asserted, all in the GUN'S OWN
-	 *      FRAME (through the WEAPON bone's inverse) against figures taken from
-	 *      the connect-point research rather than from this build:
-	 *        - a suppressor resolved over TWO hops (receiver P-Barrel -> long
-	 *          barrel P-Muzzle) lands on the bore, y 23.6..43.2 and z 4.85 +- 1,
-	 *          somewhere the unplaced control measured in step 3 is not;
-	 *        - every reflex-sight shape grips the slide top, z 7.5..10.5;
-	 *        - the magazine carries P-Mag's 26.52 degree cant. Only 17 of 386
-	 *          vanilla connect points are rotated at all, so a translation-only
-	 *          implementation passes everything else here and fails this by
-	 *          exactly 26.5 degrees.
-	 *   7. THE MUZZLE IS NOT ALWAYS THE BARREL'S. On the hunting rifle the STOCK
-	 *      publishes P-Muzzle and no barrel does, so a silencer must resolve
-	 *      across to it — at the stock's own y 30.543.
-	 *   8. A MUZZLE FLASH GOES AT THE END OF THE BARREL. A flash mesh declares no
-	 *      connect points at all, so there is nothing to match on and the fallback
-	 *      would leave the fireball on the WEAPON bone. It is placed one rung past
-	 *      everything else on the barrel line instead, and three shapes that line
-	 *      takes are asserted: on a BARE minigun (no muzzle point, three P-Flash
-	 *      stations for three barrel lengths) it takes the first station PAST the
-	 *      gun's own geometry — P-FlashShort, because the bare gun's meshes stop
-	 *      at 50.1 along the bore, FlashShort is at 70.1 and FlashFar at 106.8;
-	 *      with a LONG BARREL merged on first it goes further still, onto that
-	 *      barrel's own P-Muzzle; and on a kitted 10mm it takes the SUPPRESSOR's
-	 *      projectile node, past the receiver's and the barrel's.
-	 *   9. WHAT THIS MUST NOT TOUCH. A real animated effect goes through the
-	 *      weapon path and every controller, interpolator, float track and shader
-	 *      block is counted into the target one for one, with exactly ONE node
-	 *      added that the donor did not bring.
-	 *  10. THE POSE-FOLLOW MARK (no merge at all). skeleton.nif is the primary,
-	 *      Frame.nif is a separate row, the row is marked, and a real SAM pose goes
-	 *      onto the skeleton. What is asserted is not that the picture changed —
-	 *      a crumple changes the picture — but that a follower vertex chosen for
-	 *      SITTING ON a bone before the pose is still sitting on it after, while
-	 *      that bone travelled 76 units; that the follower's FILE is byte-identical
-	 *      throughout; and that unmarking puts every vertex back within 0.5. All of
-	 *      it read through the follower's own Scene, which is the route to the
-	 *      screen and the one thing the file cannot answer. An unmarked effect
-	 *      document is captured either side of the whole pose and must differ by
-	 *      ZERO pixels.
-	 *
-	 * WW_WEAPONMARK_FILES is a SEMICOLON-separated list in a fixed order, built
-	 * by tests/spells/weapon_mark.sh out of the game corpus:
-	 *    0 rig target (a skeleton with a WEAPON bone)  10 a barrel that publishes a muzzle
-	 *    1 weapon base                                 11 a scope
-	 *    2 grip             3 magazine                 12 a clean rig for the kitted gun
-	 *    4 a part whose slot nothing publishes yet     13 rifle receiver  14 rifle stock
-	 *    5 a gun whose own root is WEAPON              15 rifle barrel    16 rifle silencer
-	 *    6 a part for it    7 a second one of it       17 a clean rig for the rifle
-	 *    8 an ordinary unmarked donor                  18 a muzzle flash
-	 *    9 a target with no WEAPON bone                19 a bare gun with flash points
-	 *                                                  20 a second one of it, for the
-	 *                                                     barrel-then-flash case
-	 * Log: release/ww_weaponmark_test.log; pictures: release/ww_weaponmark_list.png
-	 * (the marked rows) and release/ww_weaponmark_kit.png (the assembled gun).
-	 */
+	// TEST HARNESS (WW_WEAPONMARK_TEST=1): the Loaded NIFs WEAPON MARK.
 	if ( !fname.isEmpty() && wwEnvIsSet( "WW_WEAPONMARK_TEST" ) ) {
 		QObject::connect( skope, &NifSkope::completeLoading, skope, [skope, fname]( bool ok, QString & ) {
 			QTimer::singleShot( 1200, skope, [skope, ok, fname]() {
@@ -14644,10 +12814,7 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 					QTimer::singleShot( ms, &loop, &QEventLoop::quit );
 					loop.exec();
 				};
-				/* Every merge ends in a modal summary. The REAL path runs, dialog
-				 * included, and a driver dismisses it — which is also why the
-				 * summary text is read back through nifLastMergeSummary() rather
-				 * than off the box nobody can see. */
+				// Every merge ends in a modal summary.
 				auto * dismiss = new QTimer( skope );
 				QObject::connect( dismiss, &QTimer::timeout, skope, []() {
 					if ( auto * mb = qobject_cast<QMessageBox *>( QApplication::activeModalWidget() ) )
@@ -14766,13 +12933,10 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 					{
 						QStringList menuTexts;
 						bool weaponItemLive = false;
-						/* POLL for the popup rather than aiming one timer at it.
-						 *
-						 * menu.exec() blocks, so the reader has to run from the event
-						 * loop while it does — and a single shot at 150 ms is a race
-						 * this suite lost once, reporting an EMPTY menu and failing an
-						 * assertion about code that was fine. A repeating tick costs
-						 * nothing and cannot miss. */
+						// POLL for the popup rather than aiming one timer at it:
+						// menu.exec() blocks, so the reader has to run from the event loop while it does — and
+						// a single shot at 150 ms is a race this suite lost once, reporting an EMPTY menu and
+						// failing an assertion about code that was fine.
 						auto * readMenu = new QTimer( skope );
 						QObject::connect( readMenu, &QTimer::timeout, skope, [&]() {
 							auto * menu = qobject_cast<QMenu *>( QApplication::activePopupWidget() );
@@ -14832,13 +12996,7 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 							w = Transform( n, n->getBlockIndex( p ) ) * w;
 						return w;
 					};
-					/* GUN FRAME, not world. Every number the connect-point research
-					 * quotes is in the weapon's own space — the 10mm is about 22.6
-					 * units long, Y forward, Z up — and the rig puts that space
-					 * wherever the WEAPON bone happens to be (83 units up, turned).
-					 * Measuring through the bone's inverse is what lets the harness
-					 * assert the research's figures directly instead of restating
-					 * them for one pose. */
+					// GUN FRAME, not world.
 					auto gunFrame = [&worldOf]( NifModel * n, int weapon, int block ) {
 						return worldOf( n, weapon ).inverted() * worldOf( n, block );
 					};
@@ -14919,13 +13077,9 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 
 					const QString assembly = nifLastMergeSummary();
 					log << "--- assembly summary ---\n" << assembly << "\n--- end ---\n";
-					/* The base lands ON the bone; the furniture lands on the base.
-					 *
-					 * This assertion used to read "all three attached to WEAPON",
-					 * which was the whole truth while the mark could only parent.
-					 * It is now the wrong question: only the part that declares no
-					 * publisher of its own goes on the bone, and a grip that still
-					 * did would be the bug. */
+					// The base lands ON the bone; the furniture lands on the base:
+					// This assertion used to read "all three attached to WEAPON", which was the whole truth
+					// while the mark could only parent.
 					check( "the base part goes on the WEAPON bone",
 						assembly.count( QStringLiteral( "attached to WEAPON" ) ) == 1 );
 					check( "...and the grip and magazine go on the base's own connect points",
@@ -14953,16 +13107,10 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 					check( "...as a note and not a refusal — the part is in the file all the same",
 						shapeBlocks( rig ).size() > beforeSlot );
 
-					/* THE CONTROL for the placement bands below.
-					 *
-					 * This is the same suppressor, on the same kind of rig, with no
-					 * barrel in front of it — so it is exactly what the previous
-					 * increment produced for every part: hung on the bone, sitting
-					 * at the weapon's origin. Its gun-frame position is measured
-					 * here and asserted to be OUTSIDE the band the placed one has to
-					 * land in, which is what stops that band from being a number
-					 * that was always true.
-					 */
+					// THE CONTROL for the placement bands below:
+					// This is the same suppressor, on the same kind of rig, with no barrel in front of it — so
+					// it is exactly what the previous increment produced for every part: hung on the bone,
+					// sitting at the weapon's origin.
 					float controlY = 0, controlZ = 0;
 					{
 						const int weaponBone = blockNamed( rig, QStringLiteral( "WEAPON" ) );
@@ -15046,11 +13194,7 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 					check( "the kit rig has a WEAPON bone to measure the gun frame from",
 						kitWeapon >= 0 );
 					if ( kitWeapon >= 0 ) {
-						/* THE SUPPRESSOR, TWO HOPS OUT.
-						 * Research: the receiver's P-Barrel at y 18.515 places the
-						 * long barrel, whose own P-Muzzle at y 5.594 puts the
-						 * suppressor's root on the bore at y 24.108, z 4.850, and
-						 * its body runs y 23.59..43.21. */
+						// THE SUPPRESSOR, TWO HOPS OUT.
 						const int sup = shapeNamed( kit, QStringLiteral( "10mmSuppressor:0" ) );
 						check( "the suppressor is in the kitted gun", sup >= 0 );
 						if ( sup >= 0 ) {
@@ -15069,12 +13213,7 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 						check( "the summary credits the barrel, not the receiver, for the muzzle point",
 							kitSummary.contains( QStringLiteral( "placed on P-Muzzle from 10mmLongBarrel" ) ) );
 
-						/* THE REFLEX SIGHT, gripping the slide.
-						 * Research: P-Scope sits at z 7.797 on the receiver and the
-						 * placed sight occupies z 7.52..10.49 — the receiver's slide
-						 * top is 8.52, so its foot grips and the glass stands proud.
-						 * Every one of its shapes is checked, by the donor's own
-						 * list of them rather than by names typed in here. */
+						// THE REFLEX SIGHT, gripping the slide.
 						NifModel * sight = skope->workspaceDocumentModel( ReflexSight );
 						int sightShapes = 0;
 						float lowZ = 1e9f, highZ = -1e9f;
@@ -15126,16 +13265,10 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 						}
 					}
 
-					/* THE PICTURE, taken here rather than at the end of the list.
-					 *
-					 * Step 9's effect donor is a muzzle FLASH, and merging it into
-					 * this same rig fills the frame with a billboard fireball that
-					 * hides the gun the shot exists to show — measured, on the first
-					 * run. So the capture is taken while the assembly is still the
-					 * six parts, with every other row hidden and the camera put on
-					 * the WEAPON bone rather than on the workspace origin, which is
-					 * 83 units away and renders the gun four pixels wide.
-					 */
+					// THE PICTURE, taken here rather than at the end of the list:
+					// Step 9's effect donor is a muzzle FLASH, and merging it into this same rig fills the
+					// frame with a billboard fireball that hides the gun the shot exists to show — measured,
+					// on the first run.
 					{
 						for ( int i = 0; i < skope->workspaceDocumentCount(); i++ )
 							skope->setWorkspaceDisplayMode( i, i == KitTarget ? 1 : 0 );
@@ -15247,13 +13380,7 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 							flashShape >= 0 && flashY > ownReach + 20.0f );
 						check( "...and nowhere near the bone the gun hangs from",
 							flashReach > 40.0f );
-						/* ...AND IT IS NOT A CAP. The extent rule can only pull the
-						 * flash IN toward a gun that has not been extended: put a
-						 * long barrel on first and the flash goes FURTHER, because
-						 * every minigun barrel in the corpus publishes P-Muzzle,
-						 * which is a higher rung than the flash family entirely.
-						 * A rule that clamped the flash to the gun's own geometry
-						 * would fail this while passing everything above. */
+						// ...AND IT IS NOT A CAP.
 						NifModel * barrelRig = skope->workspaceDocumentModel( BarrelFlashTarget );
 						if ( barrelRig ) {
 							skope->markWorkspaceWeaponRow( Barrel, true );
@@ -15349,10 +13476,7 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 						check( "...and the weapon path added exactly one node of its own",
 							nodesNow == nodesBefore + 1 );
 
-						/* ...and it was PLACED while it did that. Before the flash
-						 * rule this donor hung on the WEAPON bone, so this used to
-						 * be a merge that happened to be harmless; now it has to be
-						 * harmless AND correct. */
+						// ...and it was PLACED while it did that.
 						const QString fxSummary = nifLastMergeSummary();
 						log << "--- muzzle flash on the kitted 10mm ---\n" << fxSummary
 							<< "\n--- end ---\n";
@@ -15416,12 +13540,8 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 						check( "...counted across every row, not just the two touched", held == 1 );
 					}
 					
-					/* AND THE MERGE TARGET POLICY READS THE ROW THAT HOLDS IT NOW.
-					 * The mark is on the rifle rig; a merge is asked for with the minigun
-					 * as target and the rifle rig as the donor. A valid marked skeleton
-					 * in the selection overrides the requested target, so the RIFLE rig
-					 * must be what grew. Had the policy still been reading the rig the
-					 * mark left, the minigun would have absorbed it instead. */
+					// AND THE MERGE TARGET POLICY READS THE ROW THAT HOLDS IT NOW. The mark is on the rifle
+					// rig; a merge is asked for with the minigun as target and the rifle rig as the donor.
 					{
 						auto * dismiss = new QTimer( skope );
 						QObject::connect( dismiss, &QTimer::timeout, skope, []() {
@@ -15527,15 +13647,9 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 							return Vector3( -9999, -9999, -9999 );
 						};
 
-						/* THE HARD REGRESSION GATE, first half.
-						 *
-						 * An effect document that is NOT following anything must render
-						 * EXACTLY as it did, while a sibling document is re-anchored to a
-						 * posed skeleton. The two captures bracket the entire pose, and
-						 * animation is forced off for them: a particle system left running
-						 * differs from itself frame to frame and would make this a coin
-						 * toss rather than a gate.
-						 */
+						// THE HARD REGRESSION GATE, first half:
+						// An effect document that is NOT following anything must render EXACTLY as it did,
+						// while a sibling document is re-anchored to a posed skeleton.
 						skope->ogl->setAnimationEnabled( false );
 						QApplication::processEvents();
 						auto showOnly = [skope]( int keep ) {
@@ -15557,15 +13671,9 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 									&& skope->workspaceDocumentFollows( PlainDonor ) );
 							repaint();
 
-							/* PICK A VERTEX THAT IS SITTING ON A BONE.
-							 *
-							 * A vertex evaluated to within a whisker of a bone is,
-							 * by construction, driven by that bone — no weight table
-							 * needed, and no guessing which name matters. Candidates
-							 * are chosen BEFORE the pose, and the one whose bone the
-							 * pose then moves furthest is the one measured, so the
-							 * assertion is never made about a bone that stood still.
-							 */
+							// PICK A VERTEX THAT IS SITTING ON A BONE:
+							// A vertex evaluated to within a whisker of a bone is, by construction, driven by
+							// that bone — no weight table needed, and no guessing which name matters.
 							const QVector<Vector3> before = evaluated( fs );
 							check( "the follower's skin can be evaluated through its scene",
 								before.size() > 0 );
@@ -15655,15 +13763,8 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 							check( "the follower's FILE is byte-identical — nothing was written into it",
 								!fileBefore.isEmpty() && fileAfter == fileBefore );
 
-							/* THE FOLLOWER TRACKS WHICHEVER ROW HOLDS THE MARK.
-							 *
-							 * Until now the skeleton has been the primary by default. Marking a
-							 * DIFFERENT row — the kit rig, which is a copy of the same skeleton
-							 * still in its bind pose — has to move the follower onto that one, so
-							 * the geometry snaps back to rest without the pose being touched. Then
-							 * clearing the mark hands it back to the primary and the pose returns.
-							 * Two states, one click apart, measured through the scene.
-							 */
+							// THE FOLLOWER TRACKS WHICHEVER ROW HOLDS THE MARK:
+							// Until now the skeleton has been the primary by default.
 							skope->setWorkspaceSkeletonDocument( KitTarget );
 							repaint();
 							fs = followerShape();
@@ -15700,10 +13801,8 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 							check( "unmarking renders it at rest again, at once",
 								rest.size() == before.size() && worst < 0.5f );
 
-							/* THE HARD REGRESSION GATE, second half: the effect document,
-							 * alone on screen again, with the skeleton still posed and a
-							 * sibling still marked as following it. Not "roughly the same"
-							 * picture — the same picture, pixel for pixel. */
+							// THE HARD REGRESSION GATE, second half: the effect document, alone on screen
+							// again, with the skeleton still posed and a sibling still marked as following it.
 							skope->markWorkspaceFollowerRow( PlainDonor, true );
 							showOnly( EffectDonor );
 							repaint();
@@ -15745,40 +13844,7 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 		}, Qt::SingleShotConnection );
 	}
 
-	/* TEST HARNESS (WW_FLATTEN_TEST=1): the composed workspace becomes ONE NIF.
-	 *
-	 * The last step of the pipeline the row marks build: a skeleton, a mesh
-	 * following its pose, and a gun assembled on its connect points are three live
-	 * documents until this turns them into a file. What has to be true is that the
-	 * file equals the picture — and the one decision that is the user's, whether
-	 * the pose goes into the bones, has to be a real decision rather than a
-	 * dialog.
-	 *
-	 * WHAT IS MEASURED
-	 *
-	 *   1. BAKED. Three bones of the output — WEAPON and the two the pose moves
-	 *      furthest — carry the transforms the posed skeleton has, to 1e-4. The
-	 *      follower's geometry is in the file, the gun is on the WEAPON bone, and
-	 *      the block accounting adds up.
-	 *   2. THROUGH THE BYTES. The same three bones and the same geometry, after
-	 *      the result has been written to disk and parsed back. A live model that
-	 *      agrees with itself proves nothing about the file.
-	 *   3. AT REST. Flattened again with bakePose false, the same three bones
-	 *      carry the REST transforms the Pose Manager captured — and the geometry
-	 *      is otherwise identical, shape for shape, so the flag moves the rig and
-	 *      nothing else.
-	 *   4. THE CHOICE DEGENERATES when it is meaningless. With no rest capture
-	 *      there is no honest rest to write, and the two answers must produce the
-	 *      same BYTES — which is why the dialog does not offer the choice at all
-	 *      in that state.
-	 *   5. THE OLD WAY STILL WORKS: an ordinary two-document merge with no marks
-	 *      anywhere behaves as it always did.
-	 *
-	 * WW_FLATTEN_FILES is a SEMICOLON-separated list: 0 the pose follower,
-	 * 1 the weapon base, 2 and 3 its furniture. The primary is the skeleton.
-	 * WW_FLATTEN_POSE names a SAM pose. Log: release/ww_flatten_test.log;
-	 * pictures: release/ww_flatten_baked.png and release/ww_flatten_rest.png.
-	 */
+	// TEST HARNESS (WW_FLATTEN_TEST=1): the composed workspace becomes ONE NIF.
 	if ( !fname.isEmpty() && wwEnvIsSet( "WW_FLATTEN_TEST" ) ) {
 		QObject::connect( skope, &NifSkope::completeLoading, skope, [skope, fname]( bool ok, QString & ) {
 			QTimer::singleShot( 1200, skope, [skope, ok, fname]() {
@@ -15863,10 +13929,8 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 						return out;
 					};
 
-					/* THE REST CAPTURE, taken the way the Pose Manager takes it —
-					 * entering pose mode IS the capture. Skeleton view first, because
-					 * refreshPoseBones builds its bone list out of skinned shapes and
-					 * a skeleton.nif has none: it is nothing but bones. */
+					// THE REST CAPTURE, taken the way the Pose Manager takes it — entering pose mode IS the
+					// capture.
 					skope->ogl->setSkeletonView( true );
 					skope->ogl->setPoseMode( true );
 					settle( 300 );
@@ -15882,10 +13946,9 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 					log << "posed the skeleton: " << posed << " bone(s)\n";
 					check( "the skeleton took the pose", posed > 0 );
 
-					/* THE THREE PROBES: the weapon bone, plus the two the pose moved
-					 * furthest from their rest — chosen from the data rather than
-					 * typed in, so the check cannot quietly land on a bone that did
-					 * not move. */
+					// THE THREE PROBES: the weapon bone, plus the two the pose moved furthest from their rest
+					// — chosen from the data rather than typed in, so the check cannot quietly land on a bone
+					// that did not move.
 					QStringList probes{ QStringLiteral( "WEAPON" ) };
 					{
 						QVector<QPair<float, QString>> moved;
@@ -16007,11 +14070,7 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 							std::fabs( gunReach( &reloaded ) - bakedGun ) < 1e-3f );
 					}
 
-					/* Skeleton view goes off for the pictures. It was only ever on so
-					 * refreshPoseBones could find the bones of a file that is nothing
-					 * BUT bones, and its node labels bury the thing the capture
-					 * exists to show. Pose mode stays on — leaving it restores the
-					 * bones, which is the opposite of what is being photographed. */
+					// Skeleton view goes off for the pictures.
 					skope->ogl->setSkeletonView( false );
 					for ( int i = 0; i < skope->workspaceDocumentCount(); i++ )
 						skope->setWorkspaceDisplayMode( i, i == bakedRow ? 1 : 0 );
@@ -16200,14 +14259,7 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 						else if ( nif->blockInherits( idx, "BSLightingShaderProperty" ) )
 							others.append( b );
 					}
-					/* THE SCENE HAS TO BE BUILT. The create spell's isApplicable asks
-					 * the Scene whether the block actually has vertices and
-					 * triangles, not merely whether its class is right — so with no
-					 * frame drawn it answers no to everything, and every check below
-					 * would pass for the wrong reason. Pump twice: an update on its
-					 * own does not repaint, which this file already knows about
-					 * grabFramebuffer.
-					 */
+					// THE SCENE HAS TO BE BUILT.
 					if ( GLView * view = skope->getGLView() ) {
 						for ( int i = 0; i < 2; i++ ) {
 							view->update();
@@ -16219,12 +14271,7 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 					check( "the fixture has four meshes: the create consumes one per body", meshes.size() >= 4 );
 					if ( meshes.size() < 4 ) break;
 
-					// how many shapes each body holds, smallest first. Every check
-					// about where a shape ended up is asked of this rather than of a
-					// block number: the create consumes its source mesh, removing a
-					// block renumbers every block after it, and a check that tracked
-					// a body by number would be measuring whatever slid into its
-					// place while still reading like a pass.
+					// how many shapes each body holds, smallest first.
 					auto shapesOf = [&]( qint32 body ) {
 						const qint32 held = nif->getLink( nif->getBlockIndex( body ), "Shape" );
 						if ( held < 0 )
@@ -16248,18 +14295,8 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 						return out.join( QLatin1Char( ',' ) );
 					};
 
-					/* THE FOURTH MESH GETS A PARENT OF ITS OWN, and this is a finding
-					 * in its own right rather than fixture housekeeping.
-					 *
-					 * Create attaches to the mesh's parent NODE, and a node holds one
-					 * collision object — so a fourth mesh sharing the root with the
-					 * first three has its new collision REPLACE what is already on
-					 * that root, dropping the old shape as it goes. Mesh consumed, no
-					 * new body, no new shape, every total unchanged. That is what this
-					 * check measured first time out, and it is not what it is for; it
-					 * is filed in docs/TO_BE_IMPLEMENTED.md as its own thing, since
-					 * the Create button reaches it too.
-					 */
+					// THE FOURTH MESH GETS A PARENT OF ITS OWN, and this is a finding in its own right rather
+					// than fixture housekeeping.
 					{
 						const QModelIndex home = nif->insertNiBlock( QStringLiteral( "NiNode" ) );
 						nif->assignString( home, "Name", QStringLiteral( "FourthHome" ) );
@@ -16274,15 +14311,10 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 							nif->getParent( meshes.last() ) == homeBlock );
 					}
 
-					/* A DRIVER, because a drop onto a file with no body now ASKS.
-					 *
-					 * Dropping meshes used to make a body silently with whatever the
-					 * panel was set to; on an empty file that is a decision worth
-					 * making on purpose, so it prompts and then opens the body popup.
-					 * This suite delivers events directly and has no one at the
-					 * keyboard, so it answers both the way a user would — and that
-					 * makes the new path covered rather than stepped over.
-					 */
+					// A DRIVER, because a drop onto a file with no body now ASKS:
+					// Dropping meshes used to make a body silently with whatever the panel was set to; on an
+					// empty file that is a decision worth making on purpose, so it prompts and then opens the
+					// body popup.
 					auto * driver = new QTimer( skope );
 					QObject::connect( driver, &QTimer::timeout, skope, [dock]() {
 						if ( auto * box = qobject_cast<QMessageBox *>( QApplication::activeModalWidget() ) ) {
@@ -16305,11 +14337,8 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 
 					check( "the Collision Manager is accepting drops",
 						wwDeliverCollisionDrop( skope, nullptr ) );
-					/* AND ITS CREATE HOOK IS WIRED. A null hook makes the drop accept
-					 * the payload, say nothing and do nothing — which reads exactly
-					 * like a create that ran and produced no collision. Asked
-					 * separately so the log can tell those two apart on sight.
-					 */
+					// AND ITS CREATE HOOK IS WIRED. A null hook makes the drop accept the payload, say nothing
+					// and do nothing — which reads exactly like a create that ran and produced no collision.
 					check( "...and its create hook is wired", wwCollisionCreateWired( skope ) );
 
 					// what the block list would hand over for those rows
@@ -16363,12 +14392,7 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 					// drop never reached the create at all
 					log << "the panel's own account of the first drop: \""
 						<< skope->transientMessage() << "\"\n";
-					/* DID ANYTHING HAPPEN AT ALL? The block count and the undo depth
-					 * separate "the create ran and made nothing" from "the create never
-					 * ran": every create here goes through nifSnapshotOp, which pushes
-					 * one undo command, so a depth that has not moved means no create
-					 * reached the model.
-					 */
+					// DID ANYTHING HAPPEN AT ALL?
 					log << "blocks " << nif->getBlockCount() << ", undo depth "
 						<< ( nif->undoStack ? nif->undoStack->count() : -1 )
 						<< ", collision objects " << shapesOfType( "bhkCollisionObject" )
@@ -16380,14 +14404,7 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 					check( "...and the shape is the type the panel was set to",
 						shapesOfType( "bhkBoxShape" ) == boxesWas + 1 );
 
-					/* TWO AT ONCE MAKE TWO. Two DIFFERENT meshes is what one-body-each
-					 * means — a second body on the same mesh is refused by the create
-					 * path, so it has to be two of the ones still standing.
-					 *
-					 * EXACTLY two, not every mesh left: the fourth is kept back for
-					 * the body-targeted drop below, which needs a mesh AND somewhere
-					 * to aim it.
-					 */
+					// TWO AT ONCE MAKE TWO.
 					const int beforePair = bodies();
 					{
 						// re-read: creating a body inserts blocks and renumbers
@@ -16412,21 +14429,10 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 					inv->expandAll();
 					QApplication::processEvents();
 
-					/* AND A MESH DROPPED ON A BODY JOINS THAT BODY.
-					 *
-					 * Create makes a body of its own wherever a mesh lands, so joining
-					 * an existing one is that plus a move — and "plus a move" is the
-					 * kind of addition that can quietly do nothing while every total
-					 * still looks right, because the shapes are identical either way.
-					 * Only where they hang tells the two apart.
-					 *
-					 * So what is asked is the SHAPE OF THE WHOLE ARRANGEMENT: three
-					 * bodies holding one shape each become three bodies where the one
-					 * under the pointer holds two. A drop that made its own body reads
-					 * as four holding one each; a drop that did nothing reads as three;
-					 * a drop that joined the WRONG body reads as three-with-a-two in
-					 * the wrong place. None of those can pass.
-					 */
+					// AND A MESH DROPPED ON A BODY JOINS THAT BODY:
+					// Create makes a body of its own wherever a mesh lands, so joining an existing one is that
+					// plus a move — and "plus a move" is the kind of addition that can quietly do nothing
+					// while every total still looks right, because the shapes are identical either way.
 					{
 						QTreeWidgetItem * hostRow = nullptr;
 						for ( int i = 0; i < inv->topLevelItemCount() && !hostRow; i++ )
@@ -16442,12 +14448,7 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 							spare >= 0 && hostRow );
 						if ( spare < 0 || !hostRow ) break;
 
-						/* PROVE THE AIM BEFORE MEASURING WHAT IT MOVED. The drop reads
-						 * the pointer in the PANEL's coordinates and maps it into the
-						 * tree itself, so that mapping is the thing under test, and a
-						 * point that misses every row would silently make a new body
-						 * — which is the old behaviour, passing as the new one.
-						 */
+						// PROVE THE AIM BEFORE MEASURING WHAT IT MOVED.
 						QWidget * panel = dock->widget();
 						const QPoint onPanel = panel->mapFromGlobal(
 							inv->viewport()->mapToGlobal( inv->visualItemRect( hostRow ).center() ) );
@@ -16473,17 +14474,8 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 							delete mime;
 						}
 
-						/* THE SCENE AGAIN, and this is why the check is here at all.
-						 *
-						 * Whether a mesh may be DROPPED is asked of the file, and that
-						 * is settled. What the drop then runs is the Create path, and
-						 * that still asks the Scene whether the block has vertices —
-						 * so after three creates have rewritten the file out from under
-						 * it, the fourth mesh is a block the renderer has never seen
-						 * and Create quietly does nothing. In the app a frame is drawn
-						 * between one drag and the next; here nothing draws unless it
-						 * is asked to.
-						 */
+						// THE SCENE AGAIN, and this is why the check is here at all:
+						// Whether a mesh may be DROPPED is asked of the file, and that is settled.
 						if ( GLView * view = skope->getGLView() ) {
 							for ( int i = 0; i < 2; i++ ) {
 								view->update();
@@ -16539,13 +14531,10 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 							heldNow == expect );
 					}
 
-					/* AND NOW MOVE A SHAPE FROM ONE BODY TO ANOTHER.
-					 *
-					 * Four drops have left three bodies, one of them holding a pair,
-					 * which is the arrangement this is about: until now the only way to
-					 * get a shape out of one body and into another was to delete it and
-					 * build a fresh one somewhere else.
-					 */
+					// AND NOW MOVE A SHAPE FROM ONE BODY TO ANOTHER:
+					// Four drops have left three bodies, one of them holding a pair, which is the arrangement
+					// this is about: until now the only way to get a shape out of one body and into another
+					// was to delete it and build a fresh one somewhere else.
 					inv->expandAll();
 					QApplication::processEvents();
 
@@ -16562,13 +14551,7 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 					QTreeWidgetItem * shapeRow = bodyRows.at( 0 )->child( 0 );
 					QTreeWidgetItem * targetRow = bodyRows.at( 1 );
 
-					/* THE FLAG QT GATES ON. QAbstractItemView will not enter
-					 * DraggingState without Qt::ItemIsDragEnabled on the pressed
-					 * item, so startDrag is never called and the gesture does
-					 * nothing at all — which is how the Block List's drag first
-					 * shipped, with a green harness over it. Delivering events
-					 * directly steps over exactly this, so it is asked separately.
-					 */
+					// THE FLAG QT GATES ON.
 					check( "a shape row is draggable",
 						shapeRow && ( shapeRow->flags() & Qt::ItemIsDragEnabled ) );
 					check( "...and a body row is not, since a body is what you drop ON",
@@ -16618,13 +14601,9 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 							through >= 0 );
 					}
 
-					/* AND THE TWO IN THAT BODY MERGE INTO ONE MESH.
-					 *
-					 * The move above has left one body holding a pair, which is the
-					 * arrangement merging is for. What must come out is ONE shape, and
-					 * it must be a mesh — a merge that quietly kept the list, or threw
-					 * one of the two away, satisfies "one shape" on its own.
-					 */
+					// AND THE TWO IN THAT BODY MERGE INTO ONE MESH:
+					// The move above has left one body holding a pair, which is the arrangement merging is
+					// for.
 					{
 						qint32 through = -1;
 						const qint32 holder = tlBodyHoldingShape( nif, movingShape, &through );
@@ -16632,12 +14611,7 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 							holder >= 0 && through >= 0 );
 						if ( holder >= 0 && through >= 0 ) {
 							check( "...and it is offered", tlMergeBodyShapesRefusal( nif, holder ).isEmpty() );
-							/* THE BODY, HELD ACROSS THE MERGE. It inserts two blocks and
-							 * removes a branch, so a plain number names something else
-							 * afterwards — and reading the wrong body's Shape is how
-							 * this check first reported the feature broken when what
-							 * was broken was the check.
-							 */
+							// THE BODY, HELD ACROSS THE MERGE.
 							const QPersistentModelIndex pHolder = nif->getBlockIndex( holder );
 							int verts = 0, was = 0;
 							const QString trouble = tlMergeBodyShapes( nif, holder, &verts, &was );
@@ -16667,14 +14641,8 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 						delete mime;
 					}
 
-					/* AND THE LOOP CLOSES: that same shape dragged back into the
-					 * Block List becomes geometry again.
-					 *
-					 * The count of BSTriShapes is the measurement and it has to go
-					 * UP — the first drop in this harness consumed a mesh to make
-					 * collision, so a conversion back that produced nothing would
-					 * leave a file that had quietly lost one.
-					 */
+					// AND THE LOOP CLOSES: that same shape dragged back into the Block List becomes geometry
+					// again.
 					{
 						NifTreeView * blockList = skope->list;
 						auto meshCount = [&]() {
@@ -16735,35 +14703,10 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 		} );
 	}
 
-	/* TEST HARNESS (WW_BLOCKDND_TEST=1): block-list drag-and-drop.
-	 *
-	 * Drives REAL drag events at the block list's viewport rather than calling
-	 * wwReparentBlocks directly, so what is measured includes the parts that only
-	 * exist in the view: the proxy index mapping, the modifier reading, the
-	 * highlight, and the refusals a drag has to answer before the drop.
-	 *
-	 * THE DISCRIMINATING PAIR is scenarios 1 and 2, on the SAME two blocks. Plain
-	 * drop must leave the block where it is in the world; Shift drop must move it
-	 * by exactly the new parent's world offset. One implementation cannot satisfy
-	 * both, so neither check can pass by accident — and the pair is only
-	 * meaningful if the target's transform is not identity, which is why the
-	 * fixture check on that comes first and the harness sets the offset itself
-	 * rather than hoping a file has one.
-	 *
-	 * The fixture is BUILT here, from two NiNodes inserted into whatever file was
-	 * opened. Stock FO4 statics are almost all a single root NiNode with shape
-	 * children — there is no second node to drop onto — and a test that depends on
-	 * finding a game file with the right shape is a test that stops running.
-	 * tests/spells/block_dragdrop.sh passes the starter document, so the harness
-	 * needs no game corpus at all.
-	 *
-	 * "Prove the control moves before asserting that a change moved it": every
-	 * scenario first resolves its drop point back through the view and refuses to
-	 * measure anything if that does not name the row it aimed at. A visualRect on
-	 * a collapsed or scrolled-away row is empty, and dropping at (0,0) would
-	 * target whatever is at the top of the list while still looking like a pass.
-	 * Log: release/ww_blockdnd_test.log
-	 */
+	// TEST HARNESS (WW_BLOCKDND_TEST=1): block-list drag-and-drop:
+	// Drives REAL drag events at the block list's viewport rather than calling wwReparentBlocks directly, so
+	// what is measured includes the parts that only exist in the view: the proxy index mapping, the modifier
+	// reading, the highlight, and the refusals a drag has to answer before the drop.
 	if ( !fname.isEmpty() && wwEnvIsSet( "WW_BLOCKDND_TEST" ) ) {
 		QObject::connect( skope, &NifSkope::completeLoading, skope, [skope]( bool ok, QString & ) {
 			QTimer::singleShot( 1500, skope, [skope, ok]() {
@@ -16794,17 +14737,10 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 						return nif->getLinkArray( nif->getBlockIndex( block ), "Children" );
 					};
 
-					/* HIERARCHY, OR MEASURE NOTHING.
-					 *
-					 * Reordering, the gap bands and drag-out are hierarchy-only by
-					 * design — the flat list is the file's block order, not anyone's
-					 * children — so in list mode a third of this suite fails for a
-					 * reason that has nothing to do with the code under test. This
-					 * harness seeds no mode, and `List Mode` is persisted: another
-					 * harness that seeds it and is interrupted, or simply a user who
-					 * left the block list in list mode, is enough. It cost two
-					 * separate readings of "5 failures" before this said so out loud.
-					 */
+					// HIERARCHY, OR MEASURE NOTHING:
+					// Reordering, the gap bands and drag-out are hierarchy-only by design — the flat list is
+					// the file's block order, not anyone's children — so in list mode a third of this suite
+					// fails for a reason that has nothing to do with the code under test.
 					if ( list->model() != skope->proxy ) {
 						log << "the block list is in LIST mode; this suite needs hierarchy.\n"
 							<< "Set HKCU\\Software\\NifTools\\NifSkope 2.0\\UI\\List Mode to "
@@ -16812,27 +14748,9 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 						fails++; checks++; break;
 					}
 
-					/* THE VIEWPORT HAS TO BE TALL ENOUGH TO HAVE EMPTY SPACE IN IT.
-					 *
-					 * Several scenarios aim at the blank area below the last row, which
-					 * is what "drag it out of its parent" means. The block list's height
-					 * comes from the SAVED window layout, so a session that left the dock
-					 * small puts a row under that point instead — measured at a 96-pixel
-					 * viewport, where two checks failed twice running for a reason that
-					 * had nothing to do with dragging and looked exactly like a
-					 * regression. It cost a bisect to find that out.
-					 *
-					 * A harness must force the state it measures rather than inherit it.
-					 * Forced, then ASSERTED, so if the forcing stops working this says so
-					 * instead of the drag checks failing sideways.
-					 */
+					// THE VIEWPORT HAS TO BE TALL ENOUGH TO HAVE EMPTY SPACE IN IT.
 					if ( list->viewport()->height() < 240 ) {
-						/* A MINIMUM, not resizeDocks. resizeDocks is a request the
-						 * layout weighs against every other dock in the column, and
-						 * with the saved layout in play it was simply declined —
-						 * measured, at 97 pixels before and 97 after. A minimum height
-						 * the layout has to satisfy is not negotiable.
-						 */
+						// A MINIMUM, not resizeDocks.
 						skope->resize( qMax( skope->width(), 1280 ), qMax( skope->height(), 900 ) );
 						skope->setLeftColumnMode( NifSkope::LeftBlocks );
 						if ( skope->dLeft ) skope->dLeft->show();
@@ -16898,16 +14816,7 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 						QModelIndex idx = rowFor( block );
 						if ( !idx.isValid() ) return QPoint( -1, -1 );
 						list->expandAll();
-						/* PositionAtTop, and the result is checked against the
-						 * viewport. visualRect() answers from the layout whether or
-						 * not the row is on screen, while indexAt() answers only
-						 * inside the viewport — so a row laid out below a short dock
-						 * produced a perfectly plausible rect at y=149 that resolved
-						 * to no index at all. Scrolling it to the top is what makes
-						 * the two agree regardless of how tall the dock is. A deliberately
-						 * folded dock may clip the row horizontally, so aim at the centre of
-						 * the visible intersection rather than requiring its full width.
-						 */
+						// PositionAtTop, and the result is checked against the viewport.
 						list->scrollTo( idx, QAbstractItemView::PositionAtTop );
 						QApplication::processEvents();
 						const QRect r = list->visualRect( idx );
@@ -16951,14 +14860,7 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 						}
 						drops++;
 						const QMimeData * mime = forged ? forged : skope->blockListDragMimeData( blocks );
-						/* NOT QApplication::sendEvent. Drag events are routed by
-						 * QApplication::notify through the drag manager, so a
-						 * synthetic one reaches neither the widget's event() nor any
-						 * event filter — measured at zero, to the view and to the
-						 * viewport both. wwDeliverDragEvent starts where Qt's
-						 * routing ends, and the override count below proves the
-						 * override ran rather than the hook being poked directly.
-						 */
+						// NOT QApplication::sendEvent.
 						const int seenWas = list->wwDragEventsSeen;
 						QDragMoveEvent moveEv( pos, Qt::MoveAction, mime, Qt::LeftButton, mods );
 						list->wwDeliverDragEvent( &moveEv );
@@ -16977,13 +14879,7 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 						QApplication::processEvents();
 					};
 
-					/* The same thing aimed at the GAP between two rows, which is
-					 * what reorders. The expected parent and position are passed in
-					 * and checked BEFORE the drop: a reorder that resolved to the
-					 * wrong slot would still produce a legal-looking array, so
-					 * "where did the window think this was going" has to be part of
-					 * the measurement rather than inferred from the result.
-					 */
+					// The same thing aimed at the GAP between two rows, which is what reorders.
 					int lastLineY = -1, lastLinePixels = 0;
 					QString lastCard;
 					bool lastCardIcon = false;
@@ -17008,13 +14904,7 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 						list->wwDeliverDragEvent( &moveEv );
 						lastLineY = list->wwDropLineY;
 
-						/* IS THE LINE ACTUALLY DRAWN? wwDropLineY only says the view
-						 * was told to draw one. grab() renders the viewport
-						 * synchronously through the same paintEvent, so counting
-						 * accent-coloured pixels along that row measures the paint
-						 * rather than the intent — the difference between a marker
-						 * the user can see and a variable that got set.
-						 */
+						// IS THE LINE ACTUALLY DRAWN? wwDropLineY only says the view was told to draw one.
 						lastLinePixels = 0;
 						if ( lastLineY >= 0 ) {
 							const QImage shot = list->viewport()->grab().toImage();
@@ -17048,12 +14938,9 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 						return true;
 					};
 
-					/* Kept, not scaffolding: when a check below fails these two say
-					 * WHICH half is wrong -- the primitive's verdict on a move it
-					 * should allow, and whether the payload survives a round trip.
-					 * Both are silent from the outside, and chasing the difference
-					 * between them without these cost two builds.
-					 */
+					// Kept, not scaffolding: when a check below fails these two say WHICH half is wrong -- the
+					// primitive's verdict on a move it should allow, and whether the payload survives a round
+					// trip.
 					{
 						const QMimeData * probe = skope->blockListDragMimeData( { leaf } );
 						log << "refusal(leaf -> nodeB): '"
@@ -17207,19 +15094,11 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 					refuses( QStringLiteral( "a block dropped on itself is refused" ), { nodeB }, nodeB );
 					refuses( QStringLiteral( "a node dropped on its own descendant is refused" ), { root }, nodeB );
 
-					/* A ROW THAT CANNOT TAKE CHILDREN IS ALL GAP, and the primitive
-					 * still refuses parenting into one. Those are not in tension:
-					 * there is nothing to drop INSIDE a BSTriShape, so aiming at one
-					 * can only sensibly mean "next to it". Its middle band used to
-					 * spend itself saying "BSTriShape cannot take children", which
-					 * in a list of meshes left reorder slots at the two ends only —
-					 * the whole row reorders now.
-					 */
+					// A ROW THAT CANNOT TAKE CHILDREN IS ALL GAP, and the primitive still refuses parenting
+					// into one.
 					{
-						// the WHOLE height, not just the edges: sampling the edges
-						// passed before this change too, because the top and bottom
-						// thirds were always gaps. The middle third is what used to
-						// refuse and what the complaint was about.
+						// the WHOLE height, not just the edges: sampling the edges passed before this change
+						// too, because the top and bottom thirds were always gaps.
 						const QPoint anchor = rowPos( leaf );
 						const QRect lr = list->visualRect( rowFor( leaf ) );
 						int samples = 0, gaps = 0;
@@ -17240,13 +15119,9 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 							!wwReparentRefusal( nif, nodeA, leaf, WwReparentMode::PreserveWorld ).isEmpty() );
 					}
 
-					/* EVERY GAP THE FIRST CHILD IS NOT ALREADY IN MUST BE LEGAL.
-					 *
-					 * Reported: with a root full of meshes, the first child could not
-					 * be moved into the gaps further down the list. Enumerating the
-					 * refusal for every position is what says whether the verdict or
-					 * the aiming is at fault, so the whole ladder is logged.
-					 */
+					// EVERY GAP THE FIRST CHILD IS NOT ALREADY IN MUST BE LEGAL:
+					// Reported: with a root full of meshes, the first child could not be moved into the gaps
+					// further down the list.
 					{
 						const QVector<qint32> kids = childrenOf( root );
 						const int was = int( kids.indexOf( leaf ) );
@@ -17266,12 +15141,8 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 						check( "every gap the block is not already in accepts it", wrongly == 0 );
 					}
 
-					/* DRAGGING A BLOCK OUT. The blank space below the rows, and the
-					 * gap beside a TOP-LEVEL row, mean no parent at all — there is
-					 * nowhere higher than a root to go. Before, both resolved to
-					 * somewhere inside the root, so a block could never be lifted
-					 * out of its parent by any gesture.
-					 */
+					// DRAGGING A BLOCK OUT. The blank space below the rows, and the gap beside a TOP-LEVEL
+					// row, mean no parent at all — there is nowhere higher than a root to go.
 					{
 						const QRect vp = list->viewport()->rect();
 						const QPoint empty( vp.center().x(), vp.bottom() - 2 );
@@ -17304,11 +15175,7 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 							( worldOf( leaf ).translation - worldWas2 ).length() < 1.0e-3f );
 						check( "...and is refused a second time, being already a root",
 							!wwReparentRefusal( nif, leaf, -1, WwReparentMode::PreserveWorld ).isEmpty() );
-						/* AND THE FILE KNOWS IT IS A ROOT. Losing every parent makes
-						 * a block reachable only through the footer's Roots array;
-						 * if that is not updated the block is referenced by nothing
-						 * at all and does not survive a save.
-						 */
+						// AND THE FILE KNOWS IT IS A ROOT.
 						{
 							const QList<int> roots = nif->getRootLinks();
 							QStringList rs;
@@ -17321,12 +15188,7 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 						check( "undo puts it back under the root", childrenOf( root ).contains( leaf ) );
 					}
 
-					/* EVERY GAP REACHABLE. Weaker than the check above — the row
-					 * edges produced gaps before this change too — but it is the one
-					 * that states the property the feature is for: three children
-					 * make four gaps and none of them may be unreachable, whatever
-					 * the banding is changed to next.
-					 */
+					// EVERY GAP REACHABLE.
 					{
 						QSet<int> reachable;
 						for ( const qint32 row : { leaf, nodeA, nodeB } ) {
@@ -17444,12 +15306,7 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 							&& nif->undoStack && nif->undoStack->index() == undoBefore );
 					}
 
-					/* A MOVE UNLINKS EVERY OLD PARENT. Ctrl gives a block two
-					 * parents on purpose, and getParent() stops at the lowest-
-					 * numbered one — so a later plain drag unlinked that one, added
-					 * the new one, and left the block parented in two places while
-					 * reporting a move.
-					 */
+					// A MOVE UNLINKS EVERY OLD PARENT.
 					{
 						// Ctrl first, so the leaf really has two parents
 						if ( !drop( { leaf }, nodeB, Qt::ControlModifier ) ) {
@@ -17471,12 +15328,7 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 							childrenOf( root ).contains( leaf ) && !childrenOf( nodeB ).contains( leaf ) );
 					}
 
-					/* SIBLING ORDER, NOT SELECTION ORDER. A multi-block drop lands
-					 * in the order it is handed, and the block list gathers from
-					 * selectedIndexes(), which reports the order the selection was
-					 * BUILT in. Handing them over backwards must still land them in
-					 * the order they sit.
-					 */
+					// SIBLING ORDER, NOT SELECTION ORDER.
 					{
 						const QVector<qint32> before = childrenOf( root );
 						// deliberately reversed: leaf sits before nodeA
@@ -17492,13 +15344,7 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 						check( "and undoes cleanly", childrenOf( root ) == before );
 					}
 
-					/* A DROP MUST NOT SHUT THE TREE. A QTreeView keeps expansion
-					 * against model indices and the proxy rebuilds wholesale on a
-					 * link change, so every structural edit closed the whole tree —
-					 * including the node just dropped into, which put the block
-					 * exactly where it could not be seen. Landing somewhere
-					 * invisible is indistinguishable from not landing.
-					 */
+					// A DROP MUST NOT SHUT THE TREE.
 					{
 						list->expandAll();
 						QApplication::processEvents();
@@ -17520,15 +15366,7 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 						QApplication::processEvents();
 					}
 
-					/* CLICKING BLANK SPACE DESELECTS, and a paste follows the POINTER.
-					 *
-					 * QTreeView leaves the previous row selected when you click past
-					 * the end of the list, so there was no way to have no primary
-					 * selection — and Ctrl+V parented into whatever happened to be
-					 * selected, wherever you were looking. Over blank space a paste
-					 * now lands with NO parent, as a second root, to be dragged into
-					 * place.
-					 */
+					// CLICKING BLANK SPACE DESELECTS, and a paste follows the POINTER.
 					{
 						const QRect vp = list->viewport()->rect();
 						const QPoint blank( vp.center().x(), vp.bottom() - 3 );
@@ -17551,21 +15389,15 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 							list->selectionModel()->selectedIndexes().isEmpty() );
 						check( "...and the current block with it",
 							!list->selectionModel()->currentIndex().isValid() );
-						/* The row COLOUR comes from selHighlight, mirrored from the
-						 * 3D view's object selection — not from Qt's selection. It
-						 * was left behind, so the row stayed exactly as orange as
-						 * before while the status bar underneath read "No block
-						 * selected".
-						 */
+						// The row COLOUR comes from selHighlight, mirrored from the 3D view's object selection
+						// — not from Qt's selection.
 						check( "...and the row stops being coloured",
 							nif->selHighlight.isEmpty() && nif->selHighlightActive < 0 );
 						check( "...and nothing is published to spells",
 							blockListSelectionForSpells().isEmpty() );
-						/* Block Details showed the WHOLE FILE: a QTreeView reads an
-						 * invalid root index as "show the whole model", which is
-						 * literally what a root of nothing asks for and nothing like
-						 * what it means.
-						 */
+						// Block Details showed the WHOLE FILE: a QTreeView reads an invalid root index as
+						// "show the whole model", which is literally what a root of nothing asks for and
+						// nothing like what it means.
 						{
 							QAbstractItemModel * dm = skope->tree->model();
 							const int rows = dm->rowCount( skope->tree->rootIndex() );
@@ -17625,13 +15457,8 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 						copy->cast( nif, nif->getBlockIndex( leaf ) );
 						check( "paste is offered with nothing selected",
 							paste->isApplicable( nif, QModelIndex() ) );
-						/* Cast with nodeB as the index — i.e. AS IF it were still
-						 * selected — while the pointer says blank space. That is the
-						 * case reported: something is selected, the pointer is over
-						 * nothing, and the paste must not go into the selection.
-						 * Casting with an invalid index instead would pass on the old
-						 * code too, for the wrong reason.
-						 */
+						// Cast with nodeB as the index — i.e. AS IF it were still selected — while the pointer
+						// says blank space.
 						const QModelIndex pastedAt = paste->cast( nif, nif->getBlockIndex( nodeB ) );
 						QApplication::processEvents();
 						check( "pasting over blank space adds blocks",
@@ -17659,12 +15486,7 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 						NifSkope::installBlockListHoverProbe();
 					}
 
-					/* WHAT THE HOVER OPENED, FOLDS BACK. Auto-expand opens a branch
-					 * when the pointer rests on it, so a drop can reach inside
-					 * something that was folded — but a drag that merely passed over
-					 * a node left it unfolded for good, and crossing a file left the
-					 * whole file open.
-					 */
+					// WHAT THE HOVER OPENED, FOLDS BACK.
 					{
 						list->collapse( rowFor( leaf ) );
 						QApplication::processEvents();
@@ -17685,13 +15507,7 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 							list->isExpanded( rowFor( leaf ) ) );
 						list->collapse( rowFor( leaf ) );
 
-						/* AND THE RESTORE MUST REACH IT. The walk descends only into
-						 * branches it is re-opening, so a landed node whose ancestor
-						 * was NOT in the set could not be reached — and an ancestor
-						 * that the hover auto-opened is exactly one that gets folded
-						 * back and so is not in the set. The block landed correctly
-						 * and was invisible.
-						 */
+						// AND THE RESTORE MUST REACH IT.
 						list->collapse( rowFor( root ) );
 						QApplication::processEvents();
 						check( "the ancestor is shut to begin with", !list->isExpanded( rowFor( root ) ) );
@@ -17702,21 +15518,10 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 							&& !list->visualRect( rowFor( leaf ) ).isEmpty() );
 					}
 
-					/* UNFOLD ONLY WHERE THE BLOCK COULD GO. Hovering a node that
-					 * would refuse the drop shows you the inside of somewhere you
-					 * cannot put it, and a mesh row — which takes no children at
-					 * all — opened every time the pointer crossed it.
-					 *
-					 * Driven through a real drag event so the payload is set the way
-					 * the tick reads it, then the hover timer is waited out.
-					 */
+					// UNFOLD ONLY WHERE THE BLOCK COULD GO.
 					{
 						auto hoverFor = [&]( qint32 overRow, const QList<qint32> & carried ) {
-							/* The point FIRST, then collapse. rowPos() expands the
-							 * tree to find a row, so collapsing before it just gets
-							 * undone — and both checks below would then be reading a
-							 * row that was open before the hover ever ran.
-							 */
+							// The point FIRST, then collapse.
 							const QPoint p = rowPos( overRow );
 							if ( p.x() < 0 )
 								return false;
@@ -17746,12 +15551,7 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 							list->isExpanded( rowFor( nodeB ) ) );
 					}
 
-					/* THE DRAG LOG MUST NOT TOUCH THE TREE. It dumps every on-screen
-					 * row at the start of every drag, and it used to expandAll()
-					 * first so the live-drag script could aim at rows — which
-					 * unfolded the user's whole file the instant they picked
-					 * anything up. A logger that changes what it measures.
-					 */
+					// THE DRAG LOG MUST NOT TOUCH THE TREE.
 					{
 						list->collapse( rowFor( leaf ) );
 						QApplication::processEvents();
@@ -17761,21 +15561,9 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 						check( "the drag log does not unfold the tree", !list->isExpanded( rowFor( leaf ) ) );
 					}
 
-					/* A CYCLE THROUGH THE OTHER PARENT.
-					 *
-					 * A block may legally have more than one parent — Ctrl-drop makes
-					 * exactly that, and it is a real NIF capability rather than a
-					 * corruption. NifModel::getParent answers with the LOWEST-numbered
-					 * one, so a cycle check that walks up through it climbs one chain
-					 * and never sees the other: give a child a second parent whose
-					 * number is lower than its first, and dropping the first onto the
-					 * child walks child -> low -> nothing, finds no cycle, and writes
-					 * one into the file.
-					 *
-					 * Built here rather than reusing the fixture, because the trap is
-					 * entirely in the block NUMBERS: the second parent has to sort
-					 * before the one being dropped.
-					 */
+					// A CYCLE THROUGH THE OTHER PARENT:
+					// A block may legally have more than one parent — Ctrl-drop makes exactly that, and it is
+					// a real NIF capability rather than a corruption.
 					{
 						const qint32 owner = nif->getBlockNumber(
 							nif->insertNiBlock( QStringLiteral( "NiNode" ) ) );
@@ -17805,18 +15593,10 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 						check( "a cycle through the other parent is refused too",
 							!refusal.isEmpty() );
 
-						/* ONE INSTANCE MOVES, THE OTHERS STAY.
-						 *
-						 * A block under two parents is in the tree twice, and dragging
-						 * one of those rows is about THAT row: the other placing is a
-						 * separate thing the gesture said nothing about. The row's own
-						 * parent rides along in the drag payload, since the block
-						 * number cannot say which of them was picked up.
-						 *
-						 * The pair below is discriminating: the same block, the same
-						 * destination, and the only difference is which parent the row
-						 * was dragged out of. One implementation cannot satisfy both.
-						 */
+						// ONE INSTANCE MOVES, THE OTHERS STAY:
+						// A block under two parents is in the tree twice, and dragging one of those rows is
+						// about THAT row: the other placing is a separate thing the gesture said nothing
+						// about.
 						QStringList said;
 						wwReparentBlocks( nif, { shared }, nodeB, WwReparentMode::PreserveWorld,
 							&said, -1, { owner } );
@@ -17844,11 +15624,7 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 						nif->undoStack->undo();
 						QApplication::processEvents();
 
-						/* AND A CALLER WITH NO ROW STILL MEANS THE BLOCK ITSELF.
-						 * Set Parent in the Collision Manager, and every spell, come
-						 * through here without an instance to name — for them the
-						 * block is the subject, so it leaves every parent it sat in.
-						 */
+						// AND A CALLER WITH NO ROW STILL MEANS THE BLOCK ITSELF.
 						wwReparentBlocks( nif, { shared }, nodeB, WwReparentMode::PreserveWorld, &said );
 						QApplication::processEvents();
 						check( "a caller that names no instance still takes it out of both",
@@ -17861,15 +15637,10 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 							childrenOf( owner ).contains( shared )
 							&& childrenOf( root ).contains( shared ) );
 
-						/* AND THE ROW SAYS WHICH PLACING IT IS.
-						 *
-						 * Both rows of a two-parent block carry the same number and
-						 * the same name, so nothing on screen said which one had the
-						 * selection — and after a drag "moved it", which one moved was
-						 * a guess. The CURRENT row reads "1 of 2"; the other one, and
-						 * every block that sits in only one place, reads what it
-						 * always did.
-						 */
+						// AND THE ROW SAYS WHICH PLACING IT IS:
+						// Both rows of a two-parent block carry the same number and the same name, so nothing
+						// on screen said which one had the selection — and after a drag "moved it", which one
+						// moved was a guess.
 						if ( list->model() == skope->proxy ) {
 							QList<QModelIndex> rows;
 							for ( const QModelIndex & r : { skope->proxy->mapFromPrimary(
@@ -17911,16 +15682,10 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 							skope->proxy->wwSetCurrentRow( QModelIndex() );
 						}
 
-						/* MANY CHILDREN, WITH THE BLOCK NUMBERS ALL OVER THE PLACE.
-						 *
-						 * A node's Children array is in link order, which has nothing
-						 * to do with block numbering — any file that has been edited
-						 * for a while has both, in no relation to each other.
-						 * Reordering reads a row's position out of that array rather
-						 * than off its proxy row for exactly this reason, so the check
-						 * is a parent whose children ascend and descend, asked for the
-						 * two ends.
-						 */
+						// MANY CHILDREN, WITH THE BLOCK NUMBERS ALL OVER THE PLACE:
+						// A node's Children array is in link order, which has nothing to do with block
+						// numbering — any file that has been edited for a while has both, in no relation to
+						// each other.
 						QVector<qint32> many;
 						for ( int i = 0; i < 6; i++ )
 							many << nif->getBlockNumber( nif->insertNiBlock( QStringLiteral( "NiNode" ) ) );
@@ -17959,26 +15724,7 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 							childrenOf( owner ) == scattered );
 					}
 
-					/* PASTE FOLLOWS THE POINTER IN EVERY WINDOW, not only the last
-					 * one opened.
-					 *
-					 * There is ONE probe slot for the whole application, and every
-					 * document window used to register its own `this` into it. The
-					 * last window opened therefore owned the slot, its probe
-					 * declined whenever that window was not the active one, and
-					 * paste in any other document silently fell back to the
-					 * selection — the failure looks exactly like the feature not
-					 * existing. Closing that window left a dead `this` behind.
-					 *
-					 * WHAT THIS STEPS OVER, and it is one step: the cursor read.
-					 * The pointer cannot be moved from inside the process, which is
-					 * the whole reason block_drag_live.ps1 exists, so the probe is
-					 * asked from a fabricated global point. Everything else is the
-					 * production path — the registered slot, both windows' real
-					 * geometry, and the same index lookup a real hover makes.
-					 *
-					 * Last in the harness because it moves and resizes the window.
-					 */
+					// PASTE FOLLOWS THE POINTER IN EVERY WINDOW, not only the last one opened.
 					{
 						NifSkope * second = NifSkope::createWindow();
 						// The active left-editor mode is now persisted per window. This
@@ -17991,11 +15737,8 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 							log << "could not open a second document\n"; fails++; checks++; break;
 						}
 
-						/* Side by side on whatever screen this window is on, so the
-						 * two block lists are in DIFFERENT places and a point can
-						 * name one of them. WW_WINDOW_AT puts every window at the
-						 * same spot, which would stack them exactly.
-						 */
+						// Side by side on whatever screen this window is on, so the two block lists are in
+						// DIFFERENT places and a point can name one of them.
 						QScreen * screen = skope->screen();
 						const QRect avail = screen ? screen->availableGeometry()
 							: QRect( 0, 0, 1280, 800 );
@@ -18055,13 +15798,7 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 						check( "...and declines where neither window is",
 							!blockListHoverTarget( hovered ) && hovered == -1 );
 
-						/* AND IT SURVIVES THAT WINDOW CLOSING. A probe that captured
-						 * the second window's `this` is a dangling pointer the
-						 * moment it goes, and the next paste anywhere calls through
-						 * it.
-						 */
-						// clean first: closeEvent asks saveConfirm(), and a modal
-						// question with nobody to answer it hangs the whole harness
+						// AND IT SURVIVES THAT WINDOW CLOSING.
 						if ( NifModel * n2 = second->getNifModel(); n2 && n2->undoStack )
 							n2->undoStack->setClean();
 						second->setWindowModified( false );
@@ -18077,17 +15814,9 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 						NifSkope::wwSetHoverProbePos( QPoint(), false );
 					}
 
-					/* WHAT IT COSTS ON A BIG FILE (WW_BLOCKDND_BENCH=<blocks>).
-					 *
-					 * wwParentsOf walks every block in the file looking for the ones
-					 * whose Children hold this one, once per block moved, and the
-					 * multi-block sort calls getParent per comparison. Both are
-					 * O(blocks) inside something that is already a loop, and the
-					 * question is whether that is worth caching a parent map for.
-					 *
-					 * Off by default: it builds thousands of blocks, which is not
-					 * what the rest of this harness is for.
-					 */
+					// WHAT IT COSTS ON A BIG FILE (WW_BLOCKDND_BENCH=<blocks>):
+					// wwParentsOf walks every block in the file looking for the ones whose Children hold this
+					// one, once per block moved, and the multi-block sort calls getParent per comparison.
 					if ( wwEnvIsSet( "WW_BLOCKDND_BENCH" ) ) {
 						const int n = qMax( 100,
 							wwEnvStr( "WW_BLOCKDND_BENCH" ).toInt() );
@@ -18114,13 +15843,7 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 						wwReparentBlocks( nif, fifty, nodeB, WwReparentMode::PreserveWorld );
 						const qint64 many = t.elapsed();
 
-						/* AND THE SAME MOVE OUT OF A SMALL PARENT, on the same file.
-						 * Moving out of the 2000-child node also REBUILDS that
-						 * array, which is the operation's own cost and not the
-						 * walk's; a block whose old parent has three children pays
-						 * the walk and nothing else. The difference is what caching
-						 * a parent map could actually buy.
-						 */
+						// AND THE SAME MOVE OUT OF A SMALL PARENT, on the same file.
 						const qint32 lone = nif->getBlockNumber(
 							nif->insertNiBlock( QStringLiteral( "NiNode" ) ) );
 						addLink( nif, nif->getBlockIndex( root ), "Children", lone );
@@ -18135,30 +15858,16 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 						log.flush();
 					}
 
-					/* Everything above went through the view's own drag overrides,
-					 * two events per drop. If a future change routes the hook some
-					 * other way, or drops one of the four overrides, this is what
-					 * notices -- otherwise every check above would keep passing off
-					 * a handler the harness had called directly.
-					 */
+					// Everything above went through the view's own drag overrides, two events per drop.
 					log << "drag events delivered to the view: " << deliveries
 						<< " over " << drops << " drops\n";
 					check( "every drop went through the view's drag overrides",
 						drops > 0 && deliveries == drops * 2 );
 
-					/* WHAT MAY GO INTO WHAT: the whole table, not one case.
-					 *
-					 * Asked of blockListDropSpot's own question — does this row have
-					 * an INSIDE to aim at while this block is being carried — because
-					 * that is the layer a real drag meets first and the layer the
-					 * typed-link work did not reach. A property dropped on its shape
-					 * resolved to the gap beside the mesh, so the re-parent that had
-					 * understood typed links since the morning was never asked.
-					 *
-					 * Both directions matter. A table that only said yes would be
-					 * satisfied by "everything accepts everything", which is a worse
-					 * bug than the one being fixed.
-					 */
+					// WHAT MAY GO INTO WHAT: the whole table, not one case:
+					// Asked of blockListDropSpot's own question — does this row have an INSIDE to aim at while
+					// this block is being carried — because that is the layer a real drag meets first and the
+					// layer the typed-link work did not reach.
 					{
 						auto typeOf = [&]( qint32 b ) {
 							return b >= 0 ? nif->itemName( nif->getBlockIndex( b ) ) : QStringLiteral( "-" );
@@ -18196,15 +15905,8 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 									<< ") via " << wwFieldAcceptingName( nif, rule.into, rule.what ) << "\n";
 								check( QString::fromLatin1( rule.why ), offered == rule.allowed );
 							}
-							/* And a NiNode still takes a scene object the ordinary way,
-							 * which none of this may have quietly replaced.
-							 *
-							 * A node the shape is NOT already under: the first node and
-							 * the first shape in this file are parent and child, so
-							 * asking about those two answers "already a child of block
-							 * 0" — correct, and no evidence either way about whether
-							 * Children still works.
-							 */
+							// And a NiNode still takes a scene object the ordinary way, which none of this may
+							// have quietly replaced.
 							qint32 elsewhere = -1;
 							for ( int b = 0; b < nif->getBlockCount() && elsewhere < 0; b++ )
 								if ( nif->blockInherits( nif->getBlockIndex( b ), "NiNode" )
@@ -18220,20 +15922,9 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 						}
 					}
 
-					/* A PROPERTY AND A TEXTURE SET CAN BE MOVED.
-					 *
-					 * Neither is an NiAVObject, so neither is in anybody's Children —
-					 * their owners point at them through `Shader Property` and
-					 * `Texture Set`. The drag only understood Children, so both were
-					 * immovable, and dragging one to blank space answered "already a
-					 * root", which was false.
-					 *
-					 * Two directions here, and the second is the one that matters: OUT
-					 * (the owner's field is cleared and it really is a root) and ONTO
-					 * ANOTHER SHAPE (the field is written, replacing what was there).
-					 * A drag that only detached would pass a check that just counted
-					 * roots.
-					 */
+					// A PROPERTY AND A TEXTURE SET CAN BE MOVED:
+					// Neither is an NiAVObject, so neither is in anybody's Children — their owners point at
+					// them through `Shader Property` and `Texture Set`.
 					{
 						qint32 texSet = -1, property = -1, otherShape = -1;
 						for ( int b = 0; b < nif->getBlockCount(); b++ ) {
@@ -18287,20 +15978,9 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 						}
 					}
 
-					/* CLICKING A CHILD BLOCK SELECTS THAT BLOCK.
-					 *
-					 * The viewport can only draw an NiAVObject, so a click on a
-					 * property or a texture set is walked up to the shape that owns
-					 * it before it goes to the 3D view. That promotion used to come
-					 * back round and repaint the LIST with it: click a
-					 * BSShaderTextureSet and its whole shape branch lit up with the
-					 * BSTriShape as primary.
-					 *
-					 * The starter document is the exact case — NiNode, BSTriShape,
-					 * BSLightingShaderProperty, BSShaderTextureSet, each the child of
-					 * the last — so the deepest one is what to click, and what must
-					 * come back is IT, not the shape three rows above it.
-					 */
+					// CLICKING A CHILD BLOCK SELECTS THAT BLOCK:
+					// The viewport can only draw an NiAVObject, so a click on a property or a texture set is
+					// walked up to the shape that owns it before it goes to the 3D view.
 					{
 						qint32 deepest = -1;
 						for ( int b = 0; b < nif->getBlockCount(); b++ )
@@ -18330,21 +16010,8 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 						}
 					}
 
-					/* UNDO, THEN REDO, AND THE FILE COMES BACK BYTE FOR BYTE.
-					 *
-					 * The redo snapshot is no longer taken when the edit happens. It
-					 * is taken at the FIRST UNDO, because the undo stack is LIFO and
-					 * by then the model is holding exactly the state redo has to
-					 * restore — which halves the cost of every structural edit in the
-					 * program, measured at 88 ms a time on a 512-block file and 160 on
-					 * 2012.
-					 *
-					 * That is the kind of saving nothing notices until a redo comes
-					 * back subtly wrong, so this compares the SAVED BYTES of the whole
-					 * model, not the one link that moved. A redo that restored the
-					 * right parent and lost a transform, a name or a block ordering
-					 * would pass the obvious check and fail this one.
-					 */
+					// UNDO, THEN REDO, AND THE FILE COMES BACK BYTE FOR BYTE:
+					// The redo snapshot is no longer taken when the edit happens.
 					{
 						auto bytes = [&]() {
 							QByteArray out;
@@ -18383,18 +16050,9 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 						check( "...and again, on a second round trip", bytes() == wasAfter );
 					}
 
-					/* THE DELETE CONFIRMATION, MEASURED WHERE IT ACTUALLY APPEARS.
-					 *
-					 * "Compact, like Blender's" is a size and a position, and both were
-					 * tuned by eye against screenshots — badly, twice. The other
-					 * confirmation check measures Crop To Branch, whose text is a full
-					 * sentence, so it says nothing about this one: four words, two
-					 * buttons, and the popup a user meets most often.
-					 *
-					 * The pointer is read, never moved. Placing it would make the
-					 * position check tidier and would also yank the mouse out of the
-					 * user's hand mid-session, which is not a trade a test gets to make.
-					 */
+					// THE DELETE CONFIRMATION, MEASURED WHERE IT ACTUALLY APPEARS:
+					// "Compact, like Blender's" is a size and a position, and both were tuned by eye against
+					// screenshots — badly, twice.
 					if ( GLView * view = skope->getGLView() ) {
 						const QPoint pointer = QCursor::pos();
 						QSize confirmSize;
@@ -18457,35 +16115,20 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 						check( "X asks before deleting", sawConfirm );
 						check( "...and cancelling it changes nothing",
 							nif->getBlockCount() == blocksWere );
-						/* COMPACT: four words over two buttons, at Blender's size.
-						 *
-						 * Blender's own is 192x56 for this very question, measured off
-						 * the screenshot the ask came with. The Crop confirmation is
-						 * 500x93 because its text is a paragraph; this one has no such
-						 * excuse, so it gets held to roughly what Blender spends.
-						 */
+						// COMPACT: four words over two buttons, at Blender's size:
+						// Blender's own is 192x56 for this very question, measured off the screenshot the ask
+						// came with.
 						check( "...and is compact — four words do not need a dialog",
 							sawConfirm && confirmSize.width() <= 240
 								&& confirmSize.height() <= 70 );
-						/* AND LANDS ON THE POINTER: the default button under the mouse,
-						 * which is what tlPlacePopupAtCursor promises and what makes the
-						 * popup answerable without moving the hand. Frameless windows
-						 * have no frame margin to compensate for, and that arithmetic is
-						 * exactly the kind that drifts unwatched.
-						 *
-						 * Not asserted when the popup had to be clamped to a screen edge
-						 * — the pointer is wherever the user left it, and against a
-						 * corner the promise is unkeepable rather than broken.
-						 */
+						// AND LANDS ON THE POINTER: the default button under the mouse, which is what
+						// tlPlacePopupAtCursor promises and what makes the popup answerable without moving the
+						// hand.
 						const QScreen * scr = QGuiApplication::screenAt( pointer );
 						const QRect avail = scr ? scr->availableGeometry() : QRect();
 						const bool clamped = !avail.isNull()
 							&& !avail.adjusted( 1, 1, -1, -1 ).contains( confirmFrame );
-						// ...and the pointer is the USER'S pointer, on a machine
-						// they are working on. If it moved between the placement
-						// reading it and this reading it, the two disagree about
-						// where "under the cursor" was and the miss is the test's,
-						// not the code's.
+						// ...and the pointer is the USER'S pointer, on a machine they are working on.
 						const bool moved = QCursor::pos() != pointer;
 						if ( clamped )
 							log << "  (popup clamped to a screen edge; placement not asserted)\n";
@@ -18495,15 +16138,9 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 							check( "...and lands under the pointer, not offset from it",
 								sawConfirm && defaultBtn.contains( pointer ) );
 
-						/* AND THE DELETE KEY DOES NOT ASK.
-						 *
-						 * Blender's split: X is the careful one, Delete is the fast
-						 * one, and both are one keystroke away from an undo. The
-						 * watcher stays armed and would cancel anything modal that
-						 * appeared — so "no popup" here is a measurement rather than
-						 * an absence of evidence, and a build that asked twice would
-						 * fail on the block count instead.
-						 */
+						// AND THE DELETE KEY DOES NOT ASK:
+						// Blender's split: X is the careful one, Delete is the fast one, and both are one
+						// keystroke away from an undo.
 						bool askedAgain = false;
 						auto * watch = new QTimer( skope );
 						watch->setInterval( 20 );
@@ -18532,15 +16169,10 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 						check( "...as one undo step, which puts the block back",
 							nif->getBlockCount() == blocksWere );
 
-						/* AND THE BLOCK LIST SPLITS THEM THE SAME WAY.
-						 *
-						 * It is the same gesture on the same blocks — the only
-						 * difference is which half of the window you are looking at,
-						 * and a delete that asks in one place and not the other is
-						 * worse than either rule on its own. Its handler is a
-						 * separate event filter, so it can drift independently and
-						 * has to be measured independently.
-						 */
+						// AND THE BLOCK LIST SPLITS THEM THE SAME WAY:
+						// It is the same gesture on the same blocks — the only difference is which half of the
+						// window you are looking at, and a delete that asks in one place and not the other is
+						// worse than either rule on its own.
 						list->setCurrentIndex( rowFor( leaf ) );
 						list->selectionModel()->select( rowFor( leaf ),
 							QItemSelectionModel::ClearAndSelect | QItemSelectionModel::Rows );
@@ -18581,14 +16213,9 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 					 * away, and the whole point was scrubbing the number afterwards.
 					 */
 					{
-						/* A SPHERE, NOT THE FIXTURE'S CUBE.
-						 *
-						 * A 12-triangle cube has nothing redundant in it — every edge
-						 * collapse changes the silhouette, so a simplifier correctly
-						 * refuses and returns all 12. Measured, twice, while it looked
-						 * like the operator was doing nothing. Decimation needs a mesh
-						 * with something to spare, and the viewport can make one.
-						 */
+						// A SPHERE, NOT THE FIXTURE'S CUBE:
+						// A 12-triangle cube has nothing redundant in it — every edge collapse changes the
+						// silhouette, so a simplifier correctly refuses and returns all 12.
 						qint32 mesh = -1;
 						if ( GLView * maker = skope->getGLView() ) {
 							maker->addPrimitive( 3 );	// UV sphere
@@ -18628,19 +16255,10 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 						}
 					}
 
-					/* JOIN TWO MESHES FROM THE BLOCK LIST.
-					 *
-					 * Ctrl+J in the viewport has done this for a while; what is new
-					 * is reaching it from the block list, and the whole point of that
-					 * change is that it is the SAME call rather than a second one. So
-					 * what is measured is the join itself running when driven that
-					 * way: one mesh fewer in the file, and the target carrying both
-					 * meshes' vertices.
-					 *
-					 * Both counts, not either: a join that removed the source without
-					 * appending it satisfies the first on its own, and that is the
-					 * failure worth catching — it silently deletes geometry.
-					 */
+					// JOIN TWO MESHES FROM THE BLOCK LIST:
+					// Ctrl+J in the viewport has done this for a while; what is new is reaching it from the
+					// block list, and the whole point of that change is that it is the SAME call rather than a
+					// second one.
 					{
 						qint32 cube = -1;
 						for ( int b = 0; b < nif->getBlockCount() && cube < 0; b++ )
@@ -18692,28 +16310,7 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 		} );
 	}
 
-	/* TEST HARNESS (WW_BLOCKRENAME_TEST=1): the block list's inline rename.
-	 *
-	 * This shipped in d5765c4 and had no coverage, which is how it came to be
-	 * filed in the backlog as not started — the entry even said "try it before
-	 * building anything". It is the half of the Outliner spec that already
-	 * existed, so it gets a harness now rather than a second implementation.
-	 *
-	 * THE CHECK THAT MATTERS is the palette one. A scene object's name is not a
-	 * label: NiDefaultAVObjectPalette entries and NiControllerSequence controlled
-	 * blocks address nodes BY STRING, so renaming the node alone silently stops
-	 * the animation binding to it, with nothing in the file to show for it. The
-	 * fixture builds a palette entry pointing at the node precisely so that a
-	 * rename which forgets wwPropagateNodeName fails here.
-	 *
-	 * Both entry points are fired the way the application wires them — the F2
-	 * QShortcut's own activated signal, and the view's doubleClicked signal —
-	 * rather than by calling renameBlockListIndex directly, so the wiring is part
-	 * of what is measured. The column asymmetry is deliberate and is checked:
-	 * double-click renames from the Value column only, because the Name column is
-	 * the block type and double-clicking it means "expand".
-	 * Log: release/ww_blockrename_test.log
-	 */
+	// TEST HARNESS (WW_BLOCKRENAME_TEST=1): the block list's inline rename.
 	if ( !fname.isEmpty() && wwEnvIsSet( "WW_BLOCKRENAME_TEST" ) ) {
 		QObject::connect( skope, &NifSkope::completeLoading, skope, [skope]( bool ok, QString & ) {
 			QTimer::singleShot( 1500, skope, [skope, ok]() {
@@ -18778,12 +16375,7 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 						QApplication::processEvents();
 					};
 
-					/* F2, through the shortcut the window actually installs. PARENTED
-					 * TO THE LIST, which is not a detail: the Rigging dock's bone
-					 * tree installs an F2 of its own, and taking whichever came last
-					 * out of findChildren fired that one instead — a green-looking
-					 * search that drove the wrong widget.
-					 */
+					// F2, through the shortcut the window actually installs.
 					QShortcut * f2 = nullptr;
 					for ( QShortcut * sc : skope->findChildren<QShortcut *>() )
 						if ( sc->key() == QKeySequence( Qt::Key_F2 ) && sc->parent() == list )
@@ -18791,24 +16383,9 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 					check( "an F2 shortcut is installed on the block list", f2 != nullptr );
 					if ( !f2 ) break;
 
-					/* ONE MODE PER PROCESS, chosen by WW_BLOCKRENAME_TEST=hierarchy|list
-					 * and seeded into QSettings by the script BEFORE the window is
-					 * built -- so the app STARTS in the mode under test and this
-					 * harness never switches.
-					 *
-					 * It used to run both modes in one process, and that was flaky
-					 * in a way that had nothing to do with rename: switching the
-					 * block list's model corrupts the heap intermittently (4 of 5
-					 * runs, and with this feature's drag-and-drop wiring disabled
-					 * as well, so it is neither this feature's doing nor the
-					 * rename's -- running the flat list FIRST dies on the switch
-					 * before a rename has happened at all). Filed in the backlog.
-					 * A harness that fails intermittently teaches you to re-run
-					 * rather than to look, so it does not do the thing that breaks.
-					 *
-					 * The mode is ASSERTED, not assumed: if the seed did not take,
-					 * this fails instead of quietly measuring the other mode.
-					 */
+					// ONE MODE PER PROCESS, chosen by WW_BLOCKRENAME_TEST=hierarchy|list and seeded into
+					// QSettings by the script BEFORE the window is built -- so the app STARTS in the mode
+					// under test and this harness never switches.
 					{
 						const bool wantHierarchy =
 							wwEnvStr( "WW_BLOCKRENAME_TEST" ) != QLatin1String( "list" );
@@ -18823,21 +16400,8 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 						check( "the app started in the mode under test", isHierarchy == wantHierarchy );
 						if ( isHierarchy != wantHierarchy ) break;
 
-						/* ANIMATIONS OFF, which is right on its own merits and is NOT
-						 * the fix it was once written up as.
-						 *
-						 * A harness must force the state it measures rather than
-						 * inherit it, and `GLView/Enable Animations` was indeed left
-						 * true in the registry. But forcing it off changed nothing:
-						 * measured again on the current binary, 4 runs in 6 still did
-						 * not finish, at 64 seconds against 4 for the ones that did.
-						 * The claim that this was the cause is withdrawn; the trail is
-						 * in the backlog under "block_rename.sh in list mode HANGS".
-						 *
-						 * List mode only because select() runs its whole body for a
-						 * NifModel index and returns early for a proxy one, so only
-						 * the flat list reaches the viewport from here at all.
-						 */
+						// ANIMATIONS OFF, which is right on its own merits and is NOT the fix it was once
+						// written up as.
 						if ( skope->ui->aAnimate->isChecked() )
 							skope->ui->aAnimate->trigger();
 						QApplication::processEvents();
@@ -18901,13 +16465,7 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 						} );
 						watchdog->start();
 
-						/* AND IT IS PROVEN TO BARK BEFORE ITS SILENCE IS READ AS
-						 * EVIDENCE. An instrument that never fires is silent for the
-						 * same reason a stuck program is, and reading the first as the
-						 * second is how this investigation went wrong twice already.
-						 * So: spin a real event loop for longer than one interval and
-						 * require a line out of it.
-						 */
+						// AND IT IS PROVEN TO BARK BEFORE ITS SILENCE IS READ AS EVIDENCE.
 						{
 							QFile::remove( QApplication::applicationDirPath()
 								+ "/ww_blockrename_watchdog.log" );
@@ -18942,18 +16500,8 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 
 						const QString before = nif->resolveString( nif->getBlockIndex( node ), "Name" );
 
-						/* HOW BIG expandAll LEAVES THE VIEW, which is the difference
-						 * between the two modes and the first thing to rule in or out.
-						 *
-						 * The flat list is only flat at the top: every block still has
-						 * its whole field tree under it, so expandAll opens far more
-						 * rows here than the hierarchy of blocks ever does — and
-						 * anything the view then does per visible row (scrolling to
-						 * one, for a start) is paid over all of them.
-						 *
-						 * The count is capped, because a diagnostic that can itself
-						 * take minutes is the mistake this whole trail is made of.
-						 */
+						// HOW BIG expandAll LEAVES THE VIEW, which is the difference between the two modes and
+						// the first thing to rule in or out.
 						QElapsedTimer expandClock;
 						expandClock.start();
 						list->expandAll();
@@ -18971,14 +16519,9 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 						log.flush();
 						bool drained = pump( "after expandAll" );
 
-						/* SPLIT, BECAUSE THE PUMP CLEARED setCurrentIndex OF IT.
-						 *
-						 * With the pumps in, a hung run logs "after expandAll" and then
-						 * nothing — so it is not the processEvents afterwards, which
-						 * would have returned at its deadline and said so. It is this
-						 * statement, or the row lookup in front of it, and those are
-						 * different answers: one is the view, the other is the model.
-						 */
+						// SPLIT, BECAUSE THE PUMP CLEARED setCurrentIndex OF IT:
+						// With the pumps in, a hung run logs "after expandAll" and then nothing — so it is not
+						// the processEvents afterwards, which would have returned at its deadline and said so.
 						log << "   resolving the row\n";
 						log.flush();
 						const QModelIndex wantRow = rowFor( node, 0 );
@@ -19036,12 +16579,9 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 						check( mode + ": ...because the block list has no edit triggers",
 							list->editTriggers() == QAbstractItemView::NoEditTriggers );
 
-						/* The txt icon: spEditStringIndex is instant and applicable
-						 * to every tStringIndex, and a block row's Value cell buddies
-						 * to that block's Name -- so it drew down the whole column.
-						 * Block Details keeps it, which is why this is checked on
-						 * both delegates and not just one.
-						 */
+						// The txt icon: spEditStringIndex is instant and applicable to every tStringIndex, and
+						// a block row's Value cell buddies to that block's Name -- so it drew down the whole
+						// column.
 						check( mode + ": the block list's delegate draws no instant-spell icons",
 							list->itemDelegate()
 							&& list->itemDelegate()->property( "wwNoInstantIcons" ).toBool() );
@@ -19049,16 +16589,7 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 							skope->tree && skope->tree->itemDelegate()
 							&& !skope->tree->itemDelegate()->property( "wwNoInstantIcons" ).toBool() );
 
-						/* THE STRING-TABLE INDEX IS NOT DRAWN in the Block List. The
-						 * model renders a tStringIndex as "Cube [1]" — the 1 being
-						 * the header string index, which every block sharing that
-						 * name also shows, so it reads as an id that never updates.
-						 *
-						 * Measured on the PIXELS, by painting the same cell with two
-						 * delegates that differ in nothing but this flag. Asserting
-						 * the flag alone would be asserting that a bool was set; the
-						 * question is whether the cell comes out different.
-						 */
+						// THE STRING-TABLE INDEX IS NOT DRAWN in the Block List.
 						const QModelIndex valueIdx = rowFor( node, nameCol );
 						const QString modelText = valueIdx.data( NifSkopeDisplayRole ).toString();
 						check( mode + ": the model still renders the string-table index",
@@ -19106,17 +16637,7 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 						check( mode + ": a block with no scene-object name opens no editor",
 							editor() == nullptr );
 
-						/* Starting a rename must not scroll the list SIDEWAYS.
-						 * scrollTo() ensures visibility on both axes and the name is
-						 * in the right-hand column, so opening the editor dragged the
-						 * whole list across and pushed the block type off the left
-						 * edge — the one thing you need to still see while renaming.
-						 *
-						 * The Name column is widened first so the list genuinely has
-						 * somewhere to scroll: with both columns fitting there is
-						 * nothing to get wrong and this would pass on the broken code.
-						 * That is what the maximum() check is for.
-						 */
+						// Starting a rename must not scroll the list SIDEWAYS.
 						QScrollBar * hbar = list->horizontalScrollBar();
 						list->header()->resizeSection( 0, list->viewport()->width() );
 						QApplication::processEvents();
@@ -19145,28 +16666,8 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 		} );
 	}
 
-	/* MEASUREMENT HARNESS (WW_FLATLIST_TEST=<cycles>): what the flat Block List
-	 * does that the hierarchy one does not.
-	 *
-	 * Two faults are filed against list mode: a block inserted while it is
-	 * showing is not addressable, and switching into it corrupts the heap in
-	 * about four runs of five. This measures both, and it is deliberately a
-	 * MEASUREMENT rather than a pass/fail suite — it reports numbers and lets the
-	 * reading of them be done outside.
-	 *
-	 * The addressability claim is measured TWICE, scrolled and unscrolled,
-	 * because the way it was originally taken cannot tell the fault from the
-	 * documented trap: visualRect() answers from the layout whether or not the
-	 * row is on screen, indexAt() answers only inside the viewport, and a row
-	 * below a short dock produces a plausible rect that resolves to nothing. In
-	 * flat mode every block is a top-level row, so a new one lands further down
-	 * than the same block does in a tree — which is exactly what would make an
-	 * artifact look mode-specific.
-	 *
-	 * Every line is flushed. The point of the switching loop is to take the
-	 * process down, and a buffered log of a crashed process says nothing.
-	 * Log: release/ww_flatlist_test.log
-	 */
+	// MEASUREMENT HARNESS (WW_FLATLIST_TEST=<cycles>): what the flat Block List does that the hierarchy one
+	// does not.
 	if ( !fname.isEmpty() && wwEnvIsSet( "WW_FLATLIST_TEST" ) ) {
 		QObject::connect( skope, &NifSkope::completeLoading, skope, [skope]( bool ok, QString & ) {
 			QTimer::singleShot( 1500, skope, [skope, ok]() {
@@ -19249,14 +16750,7 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 				check( "the app started in the mode under test",
 					( modeName() == QLatin1String( "list" ) ) == wantList );
 
-				/* THE HEADER TOTALS ITS OWN SECTIONS. QHeaderView keeps `length` as
-				 * a running total maintained by deltas, and a model change hands a
-				 * hidden section its width back without adding it in — so hiding it
-				 * again subtracts it twice. With 9 of 12 columns hidden that total
-				 * went NEGATIVE, and visualIndexAt() answers -1 for every position
-				 * past it. This is the invariant; the row check below is what it
-				 * costs the person using the program.
-				 */
+				// THE HEADER TOTALS ITS OWN SECTIONS.
 				auto headerTotal = [&]() {
 					QHeaderView * head = list->header();
 					int sum = 0, hidden = 0;
@@ -19270,17 +16764,7 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 					return head->length() == sum;
 				};
 
-				/* EVERY ROW, not just the one just inserted. "The inserted row is
-				 * unaddressable" and "no row is addressable" look identical when the
-				 * only row you ask about is the one you inserted — and it was the
-				 * second of those, all along.
-				 *
-				 * Each row is scrolled to the top before being asked about:
-				 * visualRect() answers from the layout whether or not the row is on
-				 * screen while indexAt() answers only inside the viewport, so a row
-				 * below a short dock gives a plausible rect that resolves to nothing
-				 * for a reason that has nothing to do with this.
-				 */
+				// EVERY ROW, not just the one just inserted.
 				auto rowsThatDoNotResolve = [&]( const QString & label ) -> int {
 					say( QStringLiteral( "-- rows, %1 (%2 mode)" ).arg( label, modeName() ) );
 					const QModelIndex viewRoot = list->rootIndex();
@@ -19310,12 +16794,7 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 				check( "every row in the block list resolves back to itself",
 					rowsThatDoNotResolve( QStringLiteral( "as the app started" ) ) == 0 );
 
-				/* AND A BLOCK INSERTED NOW — how the fault was first reported. It is
-				 * worth its own check because an insert changes the view's layout
-				 * without any of the above happening again, and it asks BY BLOCK
-				 * NUMBER through the same call the drop handlers make, so a row that
-				 * resolves to the wrong block fails here rather than in a drop.
-				 */
+				// AND A BLOCK INSERTED NOW — how the fault was first reported.
 				{
 					const QModelIndex made = nif->insertNiBlock( QStringLiteral( "NiNode" ) );
 					const qint32 madeNumber = nif->getBlockNumber( made );
@@ -19334,13 +16813,7 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 						madeNumber >= 0 && hit == madeNumber );
 				}
 
-				/* THEN SWITCH MODES AND COME BACK. Nothing re-derives the header's
-				 * total on a switch, so a mode that breaks it leaves the other one
-				 * broken too — which would make this flat mode's fault only in where
-				 * it starts. Paint for real between the steps: the flat list is the
-				 * only mode that shows the summary column, so data() runs code there
-				 * that the tree never reaches.
-				 */
+				// THEN SWITCH MODES AND COME BACK.
 				const int cycles = qMax( 2, wwEnvStr( "WW_FLATLIST_TEST" ).toInt() );
 				say( QStringLiteral( "-- %1 switch cycles" ).arg( cycles ) );
 				for ( int c = 0; c < cycles; c++ ) {
@@ -19381,20 +16854,7 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 		} );
 	}
 
-	/* WW_DRAGFIXTURE=<path>: write the scene block_drag_live.ps1 drags around in.
-	 *
-	 * It needs several nodes at root level, nodes nested two deep so a drop has
-	 * something to unfold on the way in, more than one ROOT so a block can be
-	 * dragged out of one and into another, and a mesh to be refused by. None of
-	 * that can be built from the CLI: Node/Attach Node and Node/Attach Parent Node
-	 * both want a QWidget and die headless, and Block/Duplicate Branch can only
-	 * copy what is already there — it does give a second root when applied to one,
-	 * which is the only piece of this the CLI can do.
-	 *
-	 * The live script used to open a file somebody had built by hand at
-	 * E:\dragfx.nif. The next session to reach for it found the file gone and the
-	 * run dead before it started.
-	 */
+	// WW_DRAGFIXTURE=<path>: write the scene block_drag_live.ps1 drags around in.
 	if ( !fname.isEmpty() && wwEnvIsSet( "WW_DRAGFIXTURE" ) ) {
 		QObject::connect( skope, &NifSkope::completeLoading, skope, [skope]( bool ok, QString & ) {
 			QTimer::singleShot( 800, skope, [skope, ok]() {
@@ -19448,13 +16908,7 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 		} );
 	}
 
-	/* WW_DRAG_LOG: dump every row's GLOBAL rectangle once the file is open.
-	 *
-	 * A native drag is the one path no harness can enter — QApplication::notify
-	 * routes drag and drop through the drag manager, so nothing synthetic reaches
-	 * the loop. Driving a REAL mouse from outside the process does reach it, and
-	 * to do that something has to say where the rows are on screen.
-	 */
+	// WW_DRAG_LOG: dump every row's GLOBAL rectangle once the file is open.
 	if ( !fname.isEmpty() && !wwEnvStr( "WW_DRAG_LOG" ).isEmpty() ) {
 		QObject::connect( skope, &NifSkope::completeLoading, skope, [skope]( bool ok, QString & ) {
 			if ( !ok )
@@ -19465,25 +16919,7 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 		} );
 	}
 
-	/* TEST HARNESS (WW_ROTKEY_TEST=1): can a key be inserted on a rotation lane?
-	 *
-	 * One of the two fixes in 2ff7457 that shipped verified only by reading the
-	 * diff, and the changelog said so at the time: "the rotation fix compiles and
-	 * the sampler is straightforward, but nothing has yet inserted a rotation key
-	 * and read it back."
-	 *
-	 * insertKeyAtTime used to skip QuatVal outright, because Controller::interpolate
-	 * has no Quat specialisation — so I or a double-click on a rotation lane
-	 * produced no key and no message, on the most-keyed channel there is. The fix
-	 * SLERPs between the bracketing keys off the list the function already reads.
-	 *
-	 * The discriminating assertion is the key COUNT: the old code silently did
-	 * nothing, so "one more key exists afterwards" fails on it. The value check is
-	 * secondary and deliberately loose — a SLERP result between two keys must be a
-	 * unit quaternion, which catches an uninitialised or zeroed sample without
-	 * pinning the interpolation to one implementation.
-	 * Log: release/ww_rotkey_test.log
-	 */
+	// TEST HARNESS (WW_ROTKEY_TEST=1): can a key be inserted on a rotation lane?
 	if ( !fname.isEmpty() && wwEnvIsSet( "WW_ROTKEY_TEST" ) ) {
 		QObject::connect( skope, &NifSkope::completeLoading, skope, [skope]( bool ok, QString & ) {
 			QTimer::singleShot( 1800, skope, [skope, ok]() {
@@ -19502,7 +16938,7 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 					NifModel * nif = skope->getNifModel();
 					TimelineWidget * tl = skope->timeline;
 					if ( !nif || !tl ) {
-						// lane UI6 retired the Animation Manager dock this harness drove
+						// the Animation Manager dock this harness drove is retired
 						log << "WW_ROTKEY_TEST measured the Animation Manager dock's key "
 							   "lanes; lane UI6 retired that dock on 2026-09-11, so there "
 							   "is no timeline widget to insert a key on. RETIRED.\n";
@@ -19581,41 +17017,7 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 		} );
 	}
 
-	/* TEST HARNESS (WW_SCRUB_TEST=1): do all number fields scrub the same way?
-	 *
-	 * bungo asked for the Move field's behaviour -- hover arrows, press-drag the
-	 * number -- on every type-in field in the program. An audit found FIVE
-	 * separate implementations of that gesture, none reachable from the others
-	 * because the original lives in an anonymous namespace:
-	 *
-	 *   WwNumberField           nifskope_ui.cpp:183      the reference (Move X/Y/Z)
-	 *   UVWwNumberField         uvtools.cpp:96
-	 *   CollisionWwNumberField  spells/collisiontools.cpp:345
-	 *   ColorWwNumberField      ui/widgets/colorwheel.cpp:105
-	 *   WwScrubFilter         ui/widgets/valueedit.cpp:72
-	 *
-	 * THIS FILE IS WRITTEN BEFORE THE FIX, DELIBERATELY. Every check below was
-	 * run against the unfixed binary first and its failure recorded, because a
-	 * consistency harness written after the fact cannot tell you it would have
-	 * caught anything. The recorded "before" numbers are in the commit message.
-	 *
-	 * The widgets are constructed here rather than driven through their real
-	 * dialogs on purpose: Transform Edit and Light are modal (exec() blocks the
-	 * harness), and what is being measured is the WIDGET's behaviour, which is
-	 * the same object either way. The two construction paths below are exactly
-	 * the two the app uses -- ui/widgets/nifeditors.cpp:311 builds a bare
-	 * VectorEdit, ui/widgets/valueedit.cpp:489 builds one and then attaches the
-	 * scrub filter -- so the divergence they expose is the real one.
-	 *
-	 * MOUSE EVENTS GO THROUGH QApplication::sendEvent TO THE LINE EDIT, with
-	 * globalPosition set. The gesture is implemented as an event filter on the
-	 * spin box's internal QLineEdit (nifskope_ui.cpp:196) and reads only
-	 * globalPosition (:249), so synthetic globals are sufficient and no real
-	 * pointer is moved -- this must never take the cursor away from whoever is
-	 * working. Never QTest::mouseMove, never QCursor::setPos.
-	 *
-	 * Log: release/ww_scrub_test.log
-	 */
+	// TEST HARNESS (WW_SCRUB_TEST=1): do all number fields scrub the same way?
 	if ( wwEnvIsSet( "WW_SCRUB_TEST" ) ) {
 		QTimer::singleShot( 1200, skope, [skope]() {
 			QFile logf( QApplication::applicationDirPath() + "/ww_scrub_test.log" );
@@ -19628,13 +17030,10 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 				log << ( pass ? "  ok   " : "  FAIL " ) << what << "\n";
 			};
 
-			/* One scrub gesture on a widget's internal line edit.
-			 *
-			 * Returns false if the widget had no line edit to drive, so a check
-			 * can tell "the gesture did nothing" from "there was nothing to
-			 * drive" -- the precondition that stops a missing widget reading as
-			 * a passing test.
-			 */
+			// One scrub gesture on a widget's internal line edit:
+			// Returns false if the widget had no line edit to drive, so a check can tell "the gesture did
+			// nothing" from "there was nothing to drive" -- the precondition that stops a missing widget
+			// reading as a passing test.
 			auto scrub = []( QWidget * host, int dx, Qt::KeyboardModifiers mods = Qt::NoModifier ) -> bool {
 				QLineEdit * le = host ? host->findChild<QLineEdit *>() : nullptr;
 				if ( !le )
@@ -19779,9 +17178,6 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 				check( "E: ...and of the right one", g.width() == nf->width() - 32 );
 
 				// and the functional half: a gutter click must STEP, not scrub.
-				// Range and start value are set deliberately: a default
-				// QDoubleSpinBox starts at 0 with minimum 0, so a step DOWN
-				// clamps and the check would fail on correct code.
 				nf->setRange( -100.0, 100.0 );
 				nf->setValue( 10.0 );
 				const double before = nf->value();
@@ -19789,12 +17185,8 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 					Qt::LeftButton, Qt::LeftButton, Qt::NoModifier );
 				QApplication::sendEvent( nf, &gp );
 				log << "E: left-gutter click " << before << " -> " << nf->value() << "\n";
-				/* Weaker than it looks, and worth saying so: the event is sent
-				 * straight to the field, so this proves mousePressEvent's
-				 * arithmetic, not that a real click REACHES it. What guarantees
-				 * that is the inset asserted above - without it the line edit
-				 * covers the gutters and swallows the press.
-				 */
+				// Weaker than it looks, and worth saying so: the event is sent straight to the field, so this
+				// proves mousePressEvent's arithmetic, not that a real click REACHES it.
 				check( "E: a click in the gutter steps the value down",
 					nf->value() == before - nf->singleStep() );
 				nf->deleteLater();
@@ -20063,23 +17455,7 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 		} );
 	}
 
-	/* TEST HARNESS (WW_GIZMONUM_TEST=1): can a decimal point be typed into a
-	 * modal transform?
-	 *
-	 * bungo: "Cannot type in 11.25 in transform, move, rotate or scale, instead
-	 * 1125 gets typed in." The digits arrived and the '.' did not, because THREE
-	 * separate handlers upstream of GLView's numeric buffer claim a bare period:
-	 * the app-wide filter's frame_selection branch, the same filter's numpad
-	 * branch via handleBlenderNumpad, and physicsKeyPress inside GLView itself.
-	 *
-	 * THE KEYS MUST GO THROUGH QApplication::sendEvent, NOT ogl->keyPressEvent.
-	 * Calling the handler directly skips the application event filter, which is
-	 * where two of the three thefts happen — a harness written that way passes
-	 * on the broken code and proves nothing. That is the single thing this test
-	 * depends on getting right.
-	 *
-	 * Log: release/ww_gizmonum_test.log
-	 */
+	// TEST HARNESS (WW_GIZMONUM_TEST=1): can a decimal point be typed into a modal transform?
 	if ( !fname.isEmpty() && wwEnvIsSet( "WW_GIZMONUM_TEST" ) ) {
 		QObject::connect( skope, &NifSkope::completeLoading, skope, [skope]( bool ok, QString & ) {
 			QTimer::singleShot( 1500, skope, [skope, ok]() {
@@ -20119,39 +17495,14 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 					 */
 					QWidget * vp = ogl->graphicsView;
 					if ( !vp ) { log << "no viewport container\n"; break; }
-					/* Retry, and FAIL if it never lands.
-					 *
-					 * A single setPos is not reliable: under load the window may
-					 * not be laid out yet, so mapToGlobal returns a position that
-					 * is not actually over the widget. When that happened the four
-					 * checks below still passed — because with the pointer outside,
-					 * the branch that steals '.' never fires, so even the BROKEN
-					 * build looks fixed. Caught by the shell script's precondition
-					 * grep, which is exactly the kind of green-for-the-wrong-reason
-					 * this run has produced twice now, so the harness asserts it
-					 * itself rather than leaving it to the caller.
-					 */
-					// the window has to be on screen before its coordinates mean
-					// anything: a hidden or unmapped widget maps to a point setPos
-					// then clamps away, and the check silently reads false
+					// Retry, and FAIL if it never lands:
+					// A single setPos is not reliable: under load the window may not be laid out yet, so
+					// mapToGlobal returns a position that is not actually over the widget.
 					skope->show();
 					skope->raise();
 					QApplication::processEvents();
 
-					/* MOVE THE WINDOW TO THE POINTER, not the pointer to the window.
-					 *
-					 * QCursor::setPos is a no-op on Windows when the calling
-					 * process is not the foreground window, and a headless test run
-					 * never is. Measured: setPos(2719,536) left the cursor at
-					 * (611,707) on all ten attempts, so the harness reported
-					 * "pointer over viewport: 0" and — before the check above
-					 * existed — passed all four of its real assertions anyway,
-					 * because with the pointer outside, the branch that steals '.'
-					 * never fires and even a broken build looks fixed.
-					 *
-					 * Repositioning the window needs no foreground rights and is
-					 * exact.
-					 */
+					// MOVE THE WINDOW TO THE POINTER, not the pointer to the window.
 					bool overViewport = false;
 					for ( int attempt = 0; attempt < 10 && !overViewport; attempt++ ) {
 						const QPoint cursor = QCursor::pos();
@@ -20219,31 +17570,8 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 		} );
 	}
 
-	/* TEST HARNESS (WW_DESTRUCTIVE_TEST=1): is the confirmation on the right
-	 * spells, does it say what is lost, and can it still be turned off?
-	 *
-	 * The prompt this replaces fired for nearly every write and carried a "Do not
-	 * ask me again" box, so one tick disarmed it for Crop To Branch too. Reading
-	 * the code cannot tell you the new one is any better -- a `destructive()` that
-	 * returns true but is never consulted, or a dialog whose Cancel still lets the
-	 * cast through, both look correct on the page. So all four properties are
-	 * measured against a real cast:
-	 *
-	 *   1. Cancel means cancel        the file is unchanged afterwards
-	 *   2. it names the loss          the text carries the actual block counts,
-	 *                                 which is the whole difference from
-	 *                                 "this action cannot currently be undone"
-	 *   3. it cannot be suppressed    set the old suppression key and it still asks
-	 *   4. and it is not on everything  Move Up, non-destructive, is not to ask at
-	 *                                 all -- the old code prompted for it, so this
-	 *                                 check is what fails on the previous version
-	 *
-	 * The dialog is modal and exec() blocks, so it is answered by a timer started
-	 * before the cast: it polls for the active modal window from inside the nested
-	 * loop, records the text and clicks a button. `sawDialog` staying false is a
-	 * real result, not an absence of evidence -- check 4 depends on it.
-	 * Log: release/ww_destructive_test.log
-	 */
+	// TEST HARNESS (WW_DESTRUCTIVE_TEST=1): is the confirmation on the right spells, does it say what is lost,
+	// and can it still be turned off?
 	if ( !fname.isEmpty() && wwEnvIsSet( "WW_DESTRUCTIVE_TEST" ) ) {
 		QObject::connect( skope, &NifSkope::completeLoading, skope, [skope]( bool ok, QString & ) {
 			QTimer::singleShot( 1200, skope, [skope, ok]() {
@@ -20278,21 +17606,8 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 					log << "target: block " << target << " "
 						<< nif->itemName( nif->getBlockIndex( target ) ) << "\n";
 
-					/* Answer whatever modal appears while a cast runs.
-					 *
-					 * Deliberately ANY modal dialog, not just a QMessageBox. The
-					 * prompt this change removes was a CheckableMessageBox, which
-					 * is a plain QDialog — a poller that only recognised
-					 * QMessageBox would leave it unanswered, so the old code would
-					 * hang here instead of failing, and "a non-destructive spell
-					 * runs without a prompt" would read as passing right up until
-					 * the run timed out. A check that cannot fail cleanly on the
-					 * code it exists to reject is not a check.
-					 *
-					 * `accept` picks the button by role rather than by text: the
-					 * go-ahead is labelled with the operation ("Crop To Branch"),
-					 * deliberately, so there is no fixed string to match on.
-					 */
+					// Answer whatever modal appears while a cast runs:
+					// Deliberately ANY modal dialog, not just a QMessageBox.
 					QString seen, seenClass;
 					bool sawDialog = false;
 					// measured, not eyeballed: "compact, like Blender's" is a size,
@@ -20349,15 +17664,10 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 						return poll;
 					};
 
-					/* Move Up FIRST, because it renumbers.
-					 *
-					 * It ran last in the first version of this harness and shifted
-					 * the block the crop checks had already chosen, so the final
-					 * cast cropped to a different, childless block and deleted 267
-					 * where the dialog had said 0. Both numbers were right about
-					 * the block they were describing; they were describing
-					 * different blocks.
-					 */
+					// Move Up FIRST, because it renumbers:
+					// It ran last in the first version of this harness and shifted the block the crop checks
+					// had already chosen, so the final cast cropped to a different, childless block and
+					// deleted 267 where the dialog had said 0.
 					int mover = -1;
 					for ( int b = nif->getBlockCount() - 1; b > target && mover < 0; b-- )
 						if ( nif->isNiBlock( nif->getBlockIndex( b ) ) )
@@ -20394,16 +17704,9 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 					log << "  size: " << seenSize.width() << "x" << seenSize.height()
 						<< ", class " << seenClass << "\n";
 					check( "Crop To Branch asks before it runs", sawDialog );
-					/* FRAMELESS AND SHORT, which is what was changed — not narrow.
-					 *
-					 * Width follows the TEXT, and this confirmation's text names block
-					 * counts in a full sentence, so Qt lays it out at 500 px and is
-					 * right to. Asserting a narrow box here would be asserting that
-					 * nobody writes a long question. What the Blender-style chrome
-					 * actually removes is the title bar, the icon and the padding
-					 * around them: no frame, and a height that fits a line of text
-					 * over a row of buttons.
-					 */
+					// FRAMELESS AND SHORT, which is what was changed — not narrow:
+					// Width follows the TEXT, and this confirmation's text names block counts in a full
+					// sentence, so Qt lays it out at 500 px and is right to.
 					check( "...and the confirmation is frameless, with no title bar",
 						sawDialogFrameless );
 					check( "...and no taller than text over buttons",
@@ -20437,14 +17740,8 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 						cfg.remove( QStringLiteral( "Settings/Suppress Undoable Confirmation" ) );
 					}
 
-					/* The go-ahead, and the strongest check here: the file must
-					 * lose EXACTLY the number the dialog quoted.
-					 *
-					 * "it deleted something" would pass on a warning whose counts
-					 * are off by any amount, and a count that is merely plausible
-					 * is worse than none — it is the number the user weighed the
-					 * decision on.
-					 */
+					// The go-ahead, and the strongest check here: the file must lose EXACTLY the number the
+					// dialog quoted.
 					seen.clear(); sawDialog = false;
 					const int wasCount = nif->getBlockCount();
 					QTimer * p4 = answerNextDialog( true );
@@ -20473,26 +17770,8 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 		} );
 	}
 
-	/* TEST HARNESS (WW_SEQBIND_TEST=1): does a sequence bind through the file's
-	 * object palette, and does that ever differ from a name search?
-	 *
-	 * The engine resolves every Controlled Block through
-	 * `NiDefaultAVObjectPalette::GetAVObject` on the palette the FILE supplies.
-	 * NifSkope used to search the scene graph by name and take the first hit.
-	 * On a file with unique node names the two agree and there is nothing to see,
-	 * which is exactly why this has to run on a MERGED file: merging is what
-	 * produces two nodes with one name, and a name search cannot tell them apart.
-	 *
-	 * `differs` is the measurement. It is the count of rows where the palette and
-	 * `findChild` pick different nodes — so it is zero for the old behaviour by
-	 * construction, and a non-zero reading is proof the palette decided something
-	 * the search would have got wrong. Nothing else here would fail if the palette
-	 * were ignored: the same blocks bind, the same animations play, just onto the
-	 * wrong limb.
-	 *
-	 * Log: release/ww_seqbind_test.log, plus release/ww_seqbind_debug.log with
-	 * WW_SEQBIND_DEBUG=1 for the per-row detail.
-	 */
+	// TEST HARNESS (WW_SEQBIND_TEST=1): does a sequence bind through the file's object palette, and does that
+	// ever differ from a name search?
 	if ( !fname.isEmpty() && wwEnvIsSet( "WW_SEQBIND_TEST" ) ) {
 		QObject::connect( skope, &NifSkope::completeLoading, skope, [skope]( bool ok, QString & ) {
 			QTimer::singleShot( 1200, skope, [skope, ok]() {
@@ -20532,12 +17811,9 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 						QApplication::processEvents();
 					}
 					const SeqBind::Stats s = SeqBind::stats();
-					/* Machine-readable, because what counts as a pass is a property
-					 * of the FILE, not of the code: a file with unique node names
-					 * must read differs=0 and a file whose palette points somewhere
-					 * else must read differs>0, and only the caller knows which it
-					 * handed over. tests/anim/sequence_binding.sh asserts both.
-					 */
+					// Machine-readable, because what counts as a pass is a property of the FILE, not of the
+					// code: a file with unique node names must read differs=0 and a file whose palette points
+					// somewhere else must read differs>0, and only the caller knows which it handed over.
 					log << "stats rows=" << s.rows << " palette=" << s.viaPalette
 						<< " differs=" << s.differs << " unresolved=" << s.unresolved << "\n";
 
@@ -20559,24 +17835,8 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 		} );
 	}
 
-	/* TEST HARNESS (WW_GROUPSKEL_TEST=<skeleton.nif>): marking one loaded NIF as
-	 * THE skeleton makes the others snap to it — and marking nothing changes nothing.
-	 *
-	 * The measurement is the evaluated skin, Shape::skinVertex for every vertex of
-	 * the primary's largest shape, which is what the viewport actually draws. Block
-	 * counts and transforms would not do: bones are addressed by block number inside
-	 * each file, so "snapping" is entirely a question of what the skin evaluates to.
-	 *
-	 * Marking a skeleton that is in the same bind pose as the armour legitimately
-	 * moves almost nothing, so a "did it move" check against a bind-pose skeleton
-	 * would prove nothing either way. The skeleton is therefore POSED — every
-	 * non-root node translated — and the question becomes whether the armour follows.
-	 *
-	 * Both halves matter, and the second is the one the user asked for explicitly:
-	 * with no skeleton marked, a loaded file that happens to contain a skeleton must
-	 * have no effect at all, even while it is being posed.
-	 * Log: release/ww_groupskel_test.log
-	 */
+	// TEST HARNESS (WW_GROUPSKEL_TEST=<skeleton.nif>): marking one loaded NIF as THE skeleton makes the others
+	// snap to it — and marking nothing changes nothing.
 	if ( !fname.isEmpty() && wwEnvIsSet( "WW_GROUPSKEL_TEST" ) ) {
 		QObject::connect( skope, &NifSkope::completeLoading, skope, [skope]( bool ok, QString & ) {
 			QTimer::singleShot( 1200, skope, [skope, ok]() {
@@ -20682,10 +17942,9 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 					log << "measuring " << before.size() << " evaluated vertices\n";
 					check( "the primary has evaluated skin to measure", before.size() > 0 );
 
-					// Mark the skeleton while it is still in its own bind pose. This
-					// SHOULD move almost nothing — the armour's bones and a bind-pose
-					// skeleton agree — so it is logged, not asserted. Asserting
-					// movement here would be asserting that two identical poses differ.
+					// Mark the skeleton while it is still in its own bind pose. This SHOULD move almost
+					// nothing — the armour's bones and a bind-pose skeleton agree — so it is logged, not
+					// asserted.
 					check( "the skeleton can be marked", skope->setWorkspaceSkeletonDocument( 0 ) );
 					repaint();
 					const QVector<Vector3> markedBind = skinned();
@@ -20707,22 +17966,8 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 							miss.isEmpty() && !hit.isEmpty() );
 					}
 
-					/* Now POSE the marked skeleton. This is the real question: does the
-					 * armour follow a skeleton that moves? A bind-pose comparison
-					 * cannot answer it, because bind and bind are the same.
-					 */
-					/* Timed, because posing a MARKED skeleton is a continuous-edit
-					 * workflow and the secondary-scene refresh sits on that path.
-					 * Ten separate edit-and-repaint cycles, which is what dragging a
-					 * bone looks like to the refresh code.
-					 */
-					/* No settle() in the timed loop.
-					 *
-					 * repaint() sleeps 120 ms to let things quiesce, so timing it
-					 * measured that sleep and nothing else — the first attempt read
-					 * "123 ms per edit" of which ~120 was the harness. An edit cycle
-					 * is: change the model, let the deferred refresh run, paint.
-					 */
+					// Now POSE the marked skeleton. This is the real question: does the armour follow a
+					// skeleton that moves?
 					auto editCycle = [skope, &poseSkeleton]() {
 						poseSkeleton( 3.0f );
 						QApplication::processEvents();	// runs the coalesced flush
@@ -20738,13 +17983,9 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 					repaint();
 					log << "10 pose+repaint cycles: " << tenCycles << " ms ("
 						<< ( tenCycles / 10 ) << " ms each)\n";
-					/* 25 ms, not "generous".
-					 *
-					 * Rebuilding the secondary Scene on every edit measured 54 ms here
-					 * and refreshing it in place measures 7. A loose threshold would
-					 * pass both, so it would not be guarding anything — this one fails
-					 * if the structural/value split is ever lost.
-					 */
+					// 25 ms, not "generous":
+					// Rebuilding the secondary Scene on every edit measured 54 ms here and refreshing it in
+					// place measures 7.
 					check( "posing a marked skeleton keeps up (< 25 ms per edit)",
 						tenCycles / 10 < 25 );
 					const QVector<Vector3> markedPosed = skinned();
@@ -20793,23 +18034,8 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 		} );
 	}
 
-	/* TEST HARNESS (WW_SKELMERGE_TEST=<donor.nif>): does Load skeleton break the
-	 * mesh, or only the posing that follows it?
-	 *
-	 * The string-index fix (07-30f) proved the merge was renaming imported bones.
-	 * What it did NOT establish is which half of the reported symptom that caused,
-	 * and a byte-diff argument ("existing blocks are untouched, so the skin cannot
-	 * move") is a proof about the FILE, not about what NifSkope evaluates. This
-	 * measures the evaluated skin instead: Shape::skinVertex for every vertex,
-	 * before and after the merge, which is the thing the user actually looks at.
-	 *
-	 * Then it poses. A bone is resolved by name exactly as the Pose Manager's
-	 * blockForName does — first NiAVObject with that name — rotated, and the set
-	 * of vertices that moved is compared with the same rotation performed before
-	 * the merge. Duplicate bone names would send the rotation elsewhere, so the
-	 * two sets would differ; that is the failure this is looking for.
-	 * Log: release/ww_skelmerge_test.log, screenshot ww_skelmerge_test.png.
-	 */
+	// TEST HARNESS (WW_SKELMERGE_TEST=<donor.nif>): does Load skeleton break the mesh, or only the posing that
+	// follows it?
 	if ( !fname.isEmpty() && wwEnvIsSet( "WW_SKELMERGE_TEST" ) ) {
 		QObject::connect( skope, &NifSkope::completeLoading, skope, [skope]( bool ok, QString & ) {
 			QTimer::singleShot( 1200, skope, [skope, ok]() {
@@ -20922,13 +18148,8 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 						break;
 					check( "the merge introduces no duplicate bone names", r.duplicateNames.isEmpty() );
 
-					/* Let the viewport actually rebuild before measuring. A merge is
-					 * a model edit; GLView reacts to it through queued signals and
-					 * GLView::update() only schedules a repaint. Measuring straight
-					 * after the call reads a Shape whose bone list belongs to the
-					 * PREVIOUS scene, which moves vertices for a reason that has
-					 * nothing to do with the merge. Pump until the scene settles.
-					 */
+					// Let the viewport actually rebuild before measuring. A merge is a model edit; GLView
+					// reacts to it through queued signals and GLView::update() only schedules a repaint.
 					auto settle = []( int ms ) {
 						QEventLoop loop;
 						QTimer::singleShot( ms, &loop, &QEventLoop::quit );
@@ -20951,14 +18172,8 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 						log << "  post-merge " << b << ": " << m.size() << " verts move, max "
 							<< QString::number( d, 'f', 3 ) << " (was " << movedBefore.value( b ).size()
 							<< ", max " << QString::number( distBefore.value( b ), 'f', 3 ) << ")\n";
-						/* A SUPERSET, not the same set. Before the merge every bone is
-						 * a flat root child, so rotating one moves only the vertices
-						 * weighted to it. After it, the bone has the skeleton's
-						 * children, and rotating it drags the rest of the limb — which
-						 * is the entire reason for loading a skeleton. What must still
-						 * hold is that the bone drives its OWN vertices, and that it
-						 * has not turned into a transform on the whole mesh.
-						 */
+						// A SUPERSET, not the same set. Before the merge every bone is a flat root child, so
+						// rotating one moves only the vertices weighted to it.
 						check( QStringLiteral( "posing %1 still drives its own vertices" ).arg( b ),
 							m.contains( movedBefore.value( b ) ) );
 						check( QStringLiteral( "...and not the entire mesh" ).arg( b ),
@@ -20983,45 +18198,8 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 		} );
 	}
 
-	/* TEST HARNESS (WW_BLOCKVIS_TEST=hierarchy|list): the Block List's
-	 * visibility — H / Alt+H, and the eye / see-through column that replaced
-	 * Summary.
-	 *
-	 * WHAT IT HAS TO PROVE, and why each piece is separate.
-	 *
-	 * 1. ONE STATE. The key and the glyph must be two doors into the same room.
-	 *    Both are measured by what lands in Scene::hiddenNodes, and the glyph
-	 *    path is compared against the set the KEY produced rather than against a
-	 *    hard-coded expectation, so "they agree" is the assertion.
-	 *
-	 * 2. IT ACTUALLY RENDERS. hiddenNodes is a set; a set changing proves
-	 *    bookkeeping, not drawing. Every visibility claim is backed by a
-	 *    framebuffer delta, and see-through is checked against BOTH the solid
-	 *    frame and the hidden one — a translucent shape is neither, and a
-	 *    one-sided check would pass on a disc that simply hid the shape.
-	 *
-	 * 3. THE GESTURE. A press on a glyph must not select the row and must not
-	 *    start a re-parent drag, and sliding off before releasing must cancel.
-	 *    Real QMouseEvents at real glyph coordinates, because the whole point of
-	 *    the gesture lives in the view's press/move/release, not in the toggle.
-	 *
-	 * 4. APPLICABILITY. A row the scene cannot resolve to a drawable — a shader
-	 *    property, a texture set, the Header row — must expose NOTHING. Checked
-	 *    by asking the model AND by clicking where the glyph would have been.
-	 *
-	 * 5. THE COLUMN SHAPE. Summary is gone and the visibility column is in its
-	 *    slot, in both list modes, with QHeaderView's total still honest and
-	 *    every row still resolving through indexAt — the negative-length landmine
-	 *    block_list_modes.sh exists for. Column 11 was REUSED rather than added
-	 *    for exactly that reason, and this asserts the reuse.
-	 *
-	 * 6. F2 STILL TYPES AN 'h'. A bare letter as a view shortcut is one rename
-	 *    away from being unusable.
-	 *
-	 * FIXTURE: the CLI cube (`new --cube`) — NiNode 'Scene Root', BSTriShape
-	 * 'Cube', a shader property and a texture set. No game corpus.
-	 * Log: release/ww_blockvis_test.log.
-	 */
+	// TEST HARNESS (WW_BLOCKVIS_TEST=hierarchy|list): the Block List's visibility — H / Alt+H, and the eye /
+	// see-through column that replaced Summary.
 	if ( !fname.isEmpty() && wwEnvIsSet( "WW_BLOCKVIS_TEST" ) ) {
 		QObject::connect( skope, &NifSkope::completeLoading, skope, [skope]( bool ok, QString & ) {
 			QTimer::singleShot( 900, skope, [skope, ok]() {
@@ -21082,13 +18260,7 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 						return c.isValid() ? c.data( WwVisFlagsRole ).toInt() : -99;
 					};
 
-					/* EXPAND IN HIERARCHY, COLLAPSE IN FLAT — they are not the
-					 * same tree. In hierarchy mode the children ARE blocks and
-					 * have to be open to be clicked; in flat mode every block
-					 * carries its whole field tree, so expandAll opened ~2000 px
-					 * of vertex arrays and pushed every block row off the top of
-					 * the viewport. That is how the row-click check first failed:
-					 * it was clicking on nothing. */
+					// EXPAND IN HIERARCHY, COLLAPSE IN FLAT — they are not the same tree.
 					if ( isHierarchy )
 						list->expandAll();
 					else
@@ -21124,11 +18296,7 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 						skip( "the proxy's third column maps to WwVisCol", "flat list mode" );
 					}
 					{
-						// THE NEGATIVE-LENGTH LANDMINE. QHeaderView keeps its
-						// total by deltas; changing the model hands hidden
-						// sections their widths back without adding them, and
-						// past `length` visualIndexAt answers -1, so indexAt
-						// finds no column and no row in the view can be clicked.
+						// THE NEGATIVE-LENGTH LANDMINE.
 						QHeaderView * h = list->header();
 						int total = 0;
 						for ( int s = 0; s < h->count(); s++ )
@@ -21144,10 +18312,9 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 							if ( !r.isValid() )
 								continue;
 							const QRect vr = list->visualRect( r );
-							// ON SCREEN, not merely laid out: visualRect answers
-							// for a scrolled-away row with a negative y, and a
-							// point nothing can be clicked at resolves to nothing
-							// for reasons that have nothing to do with the header.
+							// ON SCREEN, not merely laid out: visualRect answers for a scrolled-away row with
+							// a negative y, and a point nothing can be clicked at resolves to nothing for
+							// reasons that have nothing to do with the header.
 							if ( vr.isEmpty() || !list->viewport()->rect().contains( vr.center() ) )
 								continue;
 							rows++;
@@ -21338,19 +18505,9 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 					check( mode + ": clicking it again reveals",
 						ogl->getScene()->hiddenNodes.isEmpty() && ( visFlags( shape ) & 0x1 ) );
 
-					/* THE GLYPHS EXPLAIN THEMSELVES, in the strip's own words.
-					 *
-					 * The eye and the disc are one drawing shared with the Loaded-NIFs
-					 * row strip, and now one vocabulary too. Asserted against the
-					 * shared function rather than against a literal, because what is
-					 * in question is not the sentence — it is whether the two surfaces
-					 * still agree; a private wording inlined into either one is exactly
-					 * what this catches, and a literal here would pass through it.
-					 *
-					 * The state is moved between samples, because a tooltip that
-					 * ignored state would read correctly in whichever state you
-					 * happened to look at first.
-					 */
+					// THE GLYPHS EXPLAIN THEMSELVES, in the strip's own words:
+					// The eye and the disc are one drawing shared with the Loaded-NIFs row strip, and now one
+					// vocabulary too.
 					{
 						const QRect cell = rowRectOnScreen( visCell( shape ) );
 						auto tipAt = [&]( int slot ) {
@@ -21374,10 +18531,7 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 								&& eyeWhenHidden == WwGlyphs::visibleTip( false )
 								&& eyeWhenHidden != eyeWhenShown
 								&& discWhenHidden == WwGlyphs::seeThroughTip( false, false ) );
-						/* Outside the glyphs the ROW still answers. The block row's
-						 * tooltip is the per-type summary this column replaced, and a
-						 * glyph sentence that covered the whole row would have deleted
-						 * it without anyone noticing. */
+						// Outside the glyphs the ROW still answers.
 						check( mode + ": the rest of the row explains nothing about glyphs",
 							skope->blockListVisTooltip( rowFor( shape ),
 								QPoint( cell.left() - 40, cell.center().y() ) ).isEmpty()
@@ -21504,15 +18658,10 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 						}
 					}
 
-					/* ---- the summary did not vanish, it moved ---------------
-					 *
-					 * Two halves, and they landed in different places, so both
-					 * are asked for through the VIEW'S OWN model — the tooltip a
-					 * user gets, not the one the source model would have given.
-					 * Hierarchy mode serves its own richer per-block tooltip
-					 * (NifProxyModel::blockListSummary) and would otherwise never
-					 * show the defect marker at all.
-					 */
+					// the summary did not vanish, it moved:
+					// Two halves, and they landed in different places, so both are asked for through the
+					// VIEW'S OWN model — the tooltip a user gets, not the one the source model would have
+					// given.
 					{
 						const QModelIndex r = nif->getBlockIndex( shape );
 						const QString tip = nif->data( r.sibling( r.row(), NifModel::NameCol ),
@@ -21559,17 +18708,9 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 						}
 					}
 
-					/* THE PICTURE, at a width the column is legible at.
-					 *
-					 * The first version grabbed the list as the harness window
-					 * happened to lay it out — 90 px wide, three pixels of
-					 * content, a screenshot that proves nothing and reads as
-					 * proof. The dock is widened first and the grab is asserted
-					 * to be big enough to contain the glyph strip.
-					 */
-					// A harness forces the state it measures: the left column's
-					// mode is persisted, and on a profile left on Header or NIFs
-					// the Block List is a hidden QStackedWidget page 90 px wide.
+					// THE PICTURE, at a width the column is legible at:
+					// The first version grabbed the list as the harness window happened to lay it out — 90 px
+					// wide, three pixels of content, a screenshot that proves nothing and reads as proof.
 					skope->setLeftColumnMode( NifSkope::LeftBlocks );
 					skope->resizeDocks( { skope->dLeft }, { 460 }, Qt::Horizontal );
 					list->collapseAll();
@@ -21601,23 +18742,7 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 		} );
 	}
 
-	/* TEST HARNESS (WW_TEXCOLOR_TEST=1): the two Block Details typed editors.
-	 *
-	 * Texture paths: NifModel::texturePathInfo drives both the Value column's
-	 * colour and its tooltip, so the two cannot disagree — the harness reads them
-	 * back through data() exactly as the delegate does, rather than calling the
-	 * helper directly. A path is then MANGLED in place: whatever the machine's
-	 * configured resources happen to contain, a garbage path must resolve nowhere
-	 * and must go red, which makes the negative case machine-independent. Whether
-	 * the ORIGINAL paths resolve depends on whether FO4's data is configured here,
-	 * so that check reports a skip rather than a failure when nothing resolves.
-	 *
-	 * Colour: a real ColorEdit is built and driven. The swatch's job is to open
-	 * the picker, so the click is made with a timer waiting to dismiss the modal
-	 * dialog — that proves the wiring end to end. What it cannot prove is the HDR
-	 * scale round trip, which needs a colour CHANGED inside the dialog.
-	 * Log: release/ww_texcolor_test.log.
-	 */
+	// TEST HARNESS (WW_TEXCOLOR_TEST=1): the two Block Details typed editors.
 	if ( !fname.isEmpty() && wwEnvIsSet( "WW_TEXCOLOR_TEST" ) ) {
 		QObject::connect( skope, &NifSkope::completeLoading, skope, [skope]( bool ok, QString & ) {
 			QTimer::singleShot( 800, skope, [skope, ok]() {
@@ -21712,12 +18837,8 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 							check( "...and the tooltip", nif->data( iVal, Qt::ToolTipRole ).toString() == origTip );
 						}
 					}
-					// a plain string field must NOT be treated as a texture path —
-					// and, retyped as one, must read its value out of the HEADER
-					// STRING TABLE rather than off the item. That second branch is
-					// what a Fallout 3 / Skyrim NiSourceTexture "File Name" takes,
-					// and no file on this machine has one, so it is reached here by
-					// retyping a NiFixedString field in place and putting it back.
+					// a plain string field must NOT be treated as a texture path — and, retyped as one, must
+					// read its value out of the HEADER STRING TABLE rather than off the item.
 					{
 						QModelIndex iNode;
 						for ( int b = 0; b < nif->getBlockCount() && !iNode.isValid(); b++ )
@@ -21816,18 +18937,7 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 		} );
 	}
 
-	// TEST HARNESS (WW_SEP_TEST=1): exercise skin/segment-aware Separate (P) on an
-	// FO4 skinned segmented mesh. Edit-selects the first half of the largest
-	// BSSubIndexTriShape's faces, runs GLView::separateSelection(), and verifies on
-	// BOTH resulting shapes:
-	//   - they reference DIFFERENT BSSkin::Instance and BoneData blocks (the clone
-	//     was given its OWN skin, not left sharing the original's), while the source
-	//     keeps its original skin,
-	//   - each shape's segments cover [0, Num Triangles) with Sum(Num Primitives)
-	//     == its Num Triangles (ranges rebuilt for the new subset),
-	//   - source tris + new tris == the original triangle count (nothing lost),
-	//   - all verts retained on both, no per-vertex weight zeroed.
-	// Saves (WW_SEP_SAVE) and quits. Log: release/ww_sep_test.log.
+	// TEST HARNESS (WW_SEP_TEST=1): exercise skin/segment-aware Separate (P) on an FO4 skinned segmented mesh.
 	if ( !fname.isEmpty() && wwEnvIsSet( "WW_SEP_TEST" ) ) {
 		QObject::connect( skope, &NifSkope::completeLoading, skope, [skope]( bool ok, QString & ) {
 			QTimer::singleShot( 800, skope, [skope, ok]() {
@@ -21879,12 +18989,8 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 				};
 				do {
 					if ( !ok || !nif ) { log << "load failed\n"; break; }
-					// WW_SEP_BLOCK targets a specific shape (e.g. a coloured one to
-					// exercise the vertex-colour path); otherwise the largest.
-					// WW_SEP_ANY widens the search from skinned/segmented FO4 meshes to
-					// any BSTriShape — most files people run Separate on are plain ones,
-					// and the skin and segment checks below now skip themselves rather
-					// than failing when the structures are absent.
+					// WW_SEP_BLOCK targets a specific shape (e.g. a coloured one to exercise the vertex-colour
+					// path); otherwise the largest.
 					const char * wantType = wwEnvIsSet( "WW_SEP_ANY" )
 						? "BSTriShape" : "BSSubIndexTriShape";
 					int sb = -1, sbVerts = -1;
@@ -22152,11 +19258,7 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 		} );
 	}
 
-	// TEST HARNESS (WW_WP_TEST=1): verify the viewport Weight Paint selector
-	// auto-acquires a target. Loads with NOTHING selected, triggers the
-	// ViewportWeightPaintAction, and checks the paint mode actually engaged (the
-	// old handler silently reverted to Object Mode when no mesh was pre-selected).
-	// Log: release/ww_wp_test.log.
+	// TEST HARNESS (WW_WP_TEST=1): verify the viewport Weight Paint selector auto-acquires a target.
 	if ( !fname.isEmpty() && wwEnvIsSet( "WW_WP_TEST" ) ) {
 		QObject::connect( skope, &NifSkope::completeLoading, skope, [skope]( bool ok, QString & ) {
 			QTimer::singleShot( 800, skope, [skope, ok]() {
@@ -22183,13 +19285,9 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 		} );
 	}
 
-	// TEMP DIAGNOSTIC (WW_UI_SHOT=1): after the file loads and layout settles,
-	// grab the whole main window (toolbars + docks) to ww_ui_shot.png and quit
-	// — used to eyeball toolbar/menu changes offscreen (run with
+	// TEMP DIAGNOSTIC (WW_UI_SHOT=1): after the file loads and layout settles, grab the whole main window
+	// (toolbars + docks) to ww_ui_shot.png and quit — used to eyeball toolbar/menu changes offscreen (run with
 	// -platform offscreen so nothing pops onto the desktop).
-	// No fname requirement: the starter document emits completeLoading too, so
-	// this now works on the startup scene, which is the only way to eyeball the
-	// docks in that state.
 	if ( wwEnvIsSet( "WW_UI_SHOT" ) ) {
 		QObject::connect( skope, &NifSkope::completeLoading, skope, [skope]( bool, QString & ) {
 			QTimer::singleShot( 2500, skope, [skope]() {
@@ -22202,7 +19300,7 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 						qApp->processEvents();
 					}
 				}
-				// lane MAGDROP1: WW_RENDER_SELECT=<block> selects that block first, so
+				// WW_RENDER_SELECT=<block> selects that block first, so
 				// Block Details and the Collision panel show it.
 				if ( wwEnvIsSet( "WW_RENDER_SELECT" ) && skope->nif ) {
 					const int sb = wwEnvInt( "WW_RENDER_SELECT" );
@@ -22232,10 +19330,7 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 					skope->ogl->update();
 					qApp->processEvents();
 				}
-				/* lane MAGDROP1: the viewport is a native window, so the widget grab
-				 * leaves it black. Draw the GL framebuffer over that rectangle, and
-				 * honour WW_RENDER_COLLISION / WW_RENDER_BG first, so a block-view
-				 * capture shows the model and its collision next to the details. */
+				// the viewport is a native window, so the widget grab leaves it black.
 				if ( Scene * sc = skope->ogl ? skope->ogl->getScene() : nullptr ) {
 					if ( wwEnvIsSet( "WW_RENDER_COLLISION" ) && wwEnvInt( "WW_RENDER_COLLISION" ) != 0 ) {
 						sc->options |= Scene::ShowCollision;
@@ -22263,21 +19358,9 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 		} );
 	}
 
-	/* PHYSICS SIM HARNESS (WW_PHYSICS_TEST=<report.txt>): drive the viewport's
-	 * Physics Sim mode through synthesized mouse and key events and report what
-	 * happened, so the mode is verified rather than eyeballed.
-	 *
-	 * It posts REAL QMouseEvents at the GLView rather than calling the preview
-	 * directly. The controller underneath is already covered headlessly by
-	 * `simulate --drag-spring` and the pick self-test; what only a window can
-	 * exercise is the event plumbing -- that a press reaches the picker, that a
-	 * move reaches the drag, that Space and R are not swallowed by another
-	 * binding first. Calling the controller would test the part that is already
-	 * tested and skip the part that is not.
-	 *
-	 * WW_WINDOW_AT=x,y places the window before it is shown, so a run can be put
-	 * on a second monitor and never take focus from what the user is doing.
-	 */
+	// PHYSICS SIM HARNESS (WW_PHYSICS_TEST=<report.txt>): drive the viewport's Physics Sim mode through
+	// synthesized mouse and key events and report what happened, so the mode is verified rather than
+	// eyeballed.
 	if ( !fname.isEmpty() && wwEnvIsSet( "WW_PHYSICS_TEST" ) ) {
 		QObject::connect( skope, &NifSkope::completeLoading, skope, [skope]( bool, QString & ) {
 			QTimer::singleShot( 2000, skope, [skope]() {
@@ -22295,11 +19378,9 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 				GLView * gl = skope->getGLView();
 				PhysicsPreview & pv = gl->physicsSim();
 
-				/* The Collision dropdown, checked BEFORE the sim is entered so a
-				 * file with nothing to simulate still exercises it -- that is the
-				 * case where the button has to be GREY, and skipping out early
-				 * would have left the disabled path untested.
-				 */
+				// The Collision dropdown, checked BEFORE the sim is entered so a file with nothing to simulate
+				// still exercises it -- that is the case where the button has to be GREY, and skipping out
+				// early would have left the disabled path untested.
 				bool haveCollision = false;
 				if ( NifModel * m = skope->nif ) {
 					for ( qint32 b = 0; b < m->getBlockCount() && !haveCollision; b++ ) {
@@ -22316,12 +19397,7 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 						QStringLiteral( "Collision button %1 (file %2 collision)" )
 							.arg( cb->isEnabled() ? QStringLiteral( "enabled" ) : QStringLiteral( "greyed" ) )
 							.arg( haveCollision ? QStringLiteral( "has" ) : QStringLiteral( "has no" ) ) );
-					/* The toolbar itself, photographed. Icons are drawn in code and
-					 * nothing else here looks at one -- the previous collision icon
-					 * was a wireframe cube indistinguishable at 16 px from the x-ray
-					 * icon beside it, and that survived because no test ever saw them
-					 * next to each other.
-					 */
+					// The toolbar itself, photographed.
 					if ( QWidget * bar = cb->parentWidget() )
 						bar->grab().save( outPath + QStringLiteral( ".toolbar.png" ) );
 					/* popup(), not showMenu(): showMenu spins its own event loop and
@@ -22359,13 +19435,9 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 				}
 
 
-				/* A file with no jointed collision is a SKIP, not a failure.
-				 *
-				 * Refusing is the correct behaviour there -- most NIFs are not ragdolls,
-				 * and CreateABot's skeleton carries two single-body systems and no
-				 * constraints at all. Counting it as failed cascaded one honest refusal
-				 * into nine red lines and would have made a corpus run unreadable.
-				 */
+				// A file with no jointed collision is a SKIP, not a failure:
+				// Refusing is the correct behaviour there -- most NIFs are not ragdolls, and CreateABot's
+				// skeleton carries two single-body systems and no constraints at all.
 				if ( !gl->setPhysicsSimMode( true ) ) {
 					log << QStringLiteral( "skip  nothing to simulate in this file" );
 					QFile sf( outPath );
@@ -22380,24 +19452,15 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 				const QVector<Vector3> atEntry = pv.soup();
 				check( !atEntry.isEmpty(), QStringLiteral( "geometry: %1 triangles" ).arg( atEntry.size() / 3 ) );
 
-				/* Grab FIRST, in the authored pose.
-				 *
-				 * Testing the grab after letting it fall meant clicking at where the
-				 * bodies used to be: a brahmin drops 4.5 m in the first second, which
-				 * put every one of them out of frame and failed the check for a reason
-				 * that had nothing to do with picking.
-				 */
+				// Grab FIRST, in the authored pose:
+				// Testing the grab after letting it fall meant clicking at where the bodies used to be: a
+				// brahmin drops 4.5 m in the first second, which put every one of them out of frame and failed
+				// the check for a reason that had nothing to do with picking.
 				gl->setOrientation( GLView::ViewFront, true );
 				QApplication::processEvents();
 
-				/* Grab a body through the real event path. The target is a body's
-				 * own centre projected to screen, so the click lands on something
-				 * whatever the camera happens to be framing.
-				 */
-				/* Counted in its own pass. Counting inside the grab loop stops at the
-				 * first success, so it reported "1 body on screen" for a ragdoll filling
-				 * the viewport -- a diagnostic that misleads is worse than none.
-				 */
+				// Grab a body through the real event path. The target is a body's own centre projected to
+				// screen, so the click lands on something whatever the camera happens to be framing.
 				int onScreen = 0, rayHits = 0;
 				for ( int b = 0; b < pv.sim().bodies().size(); b++ ) {
 					QPointF sp;
@@ -22413,11 +19476,8 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 				log << QStringLiteral( "      %1 of %2 body centres on screen, the picker hits %3" )
 					.arg( onScreen ).arg( pv.sim().bodies().size() ).arg( rayHits );
 
-				/* Aim at a point that is definitely ON the drawn surface -- the
-				 * centroid of one of the body's own triangles -- and see whether the
-				 * picker returns that body. This is what a user does: they click the
-				 * shape they can see.
-				 */
+				// Aim at a point that is definitely ON the drawn surface -- the centroid of one of the body's
+				// own triangles -- and see whether the picker returns that body.
 				{
 					int aimed = 0, correct = 0, wrongBody = 0, missed = 0, degenerate = 0;
 					for ( int b = 0; b < pv.sim().bodies().size(); b++ ) {
@@ -22459,26 +19519,9 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 								wrongBody++;
 						}
 					}
-					/* "Aimed at body b, got body c" cannot be the measure: a rig's
-					 * shapes overlap heavily, so a neighbour genuinely in front is
-					 * the RIGHT answer, and counting it as wrong made both pickers
-					 * look equally bad and hid the difference between them.
-					 *
-					 * The property that was actually broken is agreement with what
-					 * is DRAWN: whatever body comes back, the point reported must
-					 * lie on that body's surface. The sphere set cannot promise it,
-					 * since its hit is a point on a capsule end-cap that may be
-					 * nowhere near the shape; a triangle pick gives it by
-					 * construction. Both are measured so the difference is shown
-					 * rather than asserted.
-					 */
-					/* Distance to the triangle ITSELF, not to its centroid.
-					 *
-					 * Measuring to centroids was a third failed attempt: collision
-					 * hulls have large triangles, so a point exactly on one sits
-					 * several units from its middle, and the metric reported
-					 * triangle size rather than picker accuracy.
-					 */
+					// "Aimed at body b, got body c" cannot be the measure: a rig's shapes overlap heavily, so
+					// a neighbour genuinely in front is the RIGHT answer, and counting it as wrong made both
+					// pickers look equally bad and hid the difference between them.
 					auto pointToTri = []( const Vector3 & p, const Vector3 & a,
 						const Vector3 & b, const Vector3 & c ) -> float {
 						const Vector3 ab = b - a, ac = c - a, ap = p - a;
@@ -22633,14 +19676,8 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 					check( !pv.grabbing(), QStringLiteral( "release let go" ) );
 				}
 
-				/* A second of simulated time through the REAL per-frame path.
-				 *
-				 * The measurement is on what the viewport DRAWS, not on the solver's
-				 * own pose. Stepping the solver directly, which is what this did at
-				 * first, passed every check while the drawn geometry never moved -- the
-				 * preview was pushed once at mode entry and never again, and only
-				 * looking at two identical screenshots caught it.
-				 */
+				// A second of simulated time through the REAL per-frame path:
+				// The measurement is on what the viewport DRAWS, not on the solver's own pose.
 				const QVector<Vector3> drawnBefore = gl->collisionPreview();
 				for ( int i = 0; i < 60; i++ )
 					gl->physicsTick( 1.0f / 60.0f );
@@ -22669,19 +19706,9 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 				QApplication::sendEvent( gl, &space );
 				check( !pv.paused(), QStringLiteral( "Space resumed it" ) );
 
-				/* Every tool, through the real event path.
-				 *
-				 * Each is checked by its EFFECT, not by whether the call returned
-				 * true: a tool that consumed the click and did nothing is exactly
-				 * the failure worth catching.
-				 */
-				/* Returns the body the PICKER lands on, not the one aimed at.
-				 *
-				 * A ray toward body b's centre often hits a different body first --
-				 * limbs overlap. Returning b meant the Pin test clicked one body and
-				 * then asserted about another, and reported a toggle that had genuinely
-				 * happened as a failure.
-				 */
+				// Every tool, through the real event path:
+				// Each is checked by its EFFECT, not by whether the call returned true: a tool that consumed
+				// the click and did nothing is exactly the failure worth catching.
 				auto aimAtSomething = [&]( QPointF & sp ) -> int {
 					for ( int b = 0; b < pv.sim().bodies().size(); b++ ) {
 						QPointF p;
@@ -22734,13 +19761,10 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 						.arg( QLatin1String( tc.name ) ).arg( double( moved ), 0, 'f', 4 ) );
 				}
 
-				/* Shooting, both kinds.
-				 *
-				 * The hitscan shot has to leave a visible trace and the physical
-				 * one has to actually travel: a projectile that teleported to its
-				 * target would pass every impulse check while being the thing the
-				 * feature exists to avoid.
-				 */
+				// Shooting, both kinds:
+				// The hitscan shot has to leave a visible trace and the physical one has to actually travel: a
+				// projectile that teleported to its target would pass every impulse check while being the
+				// thing the feature exists to avoid.
 				{
 					pv.reset();
 					pv.freeze();
@@ -22806,14 +19830,7 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 				check( pv.highlightLimits(), QStringLiteral( "limit highlight can be turned on" ) );
 				pv.setHighlightLimits( false );
 
-				/* The physics gun: push/pull, turn, and the beam that shows both.
-				 *
-				 * Driven through the real event path -- a synthesized wheel event on
-				 * the widget -- because what was missing was never the arithmetic but
-				 * the WIRING: the depth existed as a member and nothing ever changed
-				 * it, so a test that called adjustGrabDepth directly would have passed
-				 * against the broken build.
-				 */
+				// The physics gun: push/pull, turn, and the beam that shows both.
 				{
 					pv.reset();
 					pv.freeze();
@@ -22841,16 +19858,8 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 						QApplication::sendEvent( gl, &out );
 						const float pushed = pv.grabDepth();
 
-						/* The hand's TARGET has to follow the depth with the mouse
-						 * standing still, or the wheel appears to do nothing until the
-						 * cursor twitches.
-						 *
-						 * Sampled HERE, between the push and the pull-back. Sampled after
-						 * both, as the first version did, it compares the hand with where
-						 * it started -- and a notch out followed by a notch in is a round
-						 * trip that lands exactly there, so a working push/pull failed the
-						 * check for being reversible.
-						 */
+						// The hand's TARGET has to follow the depth with the mouse standing still, or the
+						// wheel appears to do nothing until the cursor twitches.
 						Vector3 g2, h2;
 						pv.grabBeam( g2, h2 );
 						check( ( h2 - hand ).length() > 0.5f,
@@ -22930,14 +19939,7 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 					pv.reset();
 				}
 
-				/* The file's own friction and bounce, now that the solver reads them.
-				 *
-				 * Checked as a RANGE, not a value: the point is that the bodies
-				 * differ from each other, which a single global could never produce.
-				 * The corpus authors friction at 0.30 through 3.00 and restitution
-				 * from 0 to 0.80, so a rig whose bodies all report 0.5 and 0.4 is one
-				 * where build() quietly fell back on the struct defaults.
-				 */
+				// The file's own friction and bounce, now that the solver reads them.
 				{
 					float fLo = 1.0e9f, fHi = -1.0e9f, rLo = 1.0e9f, rHi = -1.0e9f;
 					for ( const SimBody & b : pv.sim().bodies() ) {
@@ -22985,13 +19987,8 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 					check( pv.pinnedCount() == 0, QStringLiteral( "unpin all releases them" ) );
 				}
 
-				/* Balls: thrown, simulated, drawn, picked and cleared.
-				 *
-				 * The last two matter as much as the physics. A prop joins the same
-				 * body list the rig uses precisely so drawing, picking, grabbing and
-				 * pinning need no special case, and a ball that could not be clicked
-				 * would mean that had not actually happened.
-				 */
+				// Balls: thrown, simulated, drawn, picked and cleared:
+				// The last two matter as much as the physics.
 				{
 					pv.reset();
 					pv.setTool( PhysicsPreview::Tool::Prop );
@@ -23040,13 +20037,9 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 					pv.reset();
 				}
 
-				/* Bounce, measured as a rebound height.
-				 *
-				 * Placed by hand rather than thrown, because the question is whether
-				 * restitution does anything and that needs a known drop. Dead and
-				 * lively are compared with each other rather than with an absolute, so
-				 * the test does not depend on the drop height or on the rig.
-				 */
+				// Bounce, measured as a rebound height:
+				// Placed by hand rather than thrown, because the question is whether restitution does anything
+				// and that needs a known drop.
 				{
 					auto dropFrom = [&]( float e ) {
 						pv.reset();
@@ -23129,12 +20122,9 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 					pv.reset();
 				}
 
-				/* Record and scrub.
-				 *
-				 * Checked by POSE, not by frame count: a recording that stored the
-				 * right number of empty frames would pass a count check and be
-				 * useless. Seeking back to frame 0 has to put the rig where it was.
-				 */
+				// Record and scrub:
+				// Checked by POSE, not by frame count: a recording that stored the right number of empty
+				// frames would pass a count check and be useless.
 				{
 					pv.reset();
 					pv.setPaused( false );
@@ -23152,13 +20142,10 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 						QStringLiteral( "the rig moved while recording (%1 units)" )
 							.arg( double( drift ), 0, 'f', 3 ) );
 
-					/* The TIMELINE scrubs it, not a slider of the panel's own.
-					 *
-					 * Driven through GLView::setSceneTime, which is the slot the
-					 * timeline dock's playhead is connected to -- so this exercises
-					 * the same path a drag on the ruler takes, rather than calling
-					 * seek() and hoping the two are wired together.
-					 */
+					// The TIMELINE scrubs it, not a slider of the panel's own:
+					// Driven through GLView::setSceneTime, which is the slot the timeline dock's playhead is
+					// connected to -- so this exercises the same path a drag on the ruler takes, rather than
+					// calling seek() and hoping the two are wired together.
 					const float span = gl->physicsRecordingRange();
 					log << QStringLiteral( "      the recording offers the timeline %1 s" )
 						.arg( double( span ), 0, 'f', 2 );
@@ -23201,12 +20188,9 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 					pv.reset();
 				}
 
-				/* Capture pose: the one control here that writes to the file.
-				 *
-				 * Checked by reading the node back rather than by trusting the return
-				 * count, since a function that wrote nothing and returned a number
-				 * would pass the weaker test.
-				 */
+				// Capture pose: the one control here that writes to the file:
+				// Checked by reading the node back rather than by trusting the return count, since a function
+				// that wrote nothing and returned a number would pass the weaker test.
 				{
 					pv.reset();
 					int probeBlock = -1;
@@ -23229,14 +20213,9 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 						check( ( nowAt - wasAt ).length() > 1.0e-4f,
 							QStringLiteral( "and the node really moved" ) );
 
-						/* Undone again, which is both a check and a necessity.
-						 *
-						 * A check because the button's tooltip promises the capture is
-						 * undoable and nothing else here confirms it. A necessity because
-						 * the harness quits when it is done, and a MODIFIED file makes
-						 * that quit raise a save prompt -- a modal dialog with nobody to
-						 * answer it, which hangs the run and leaves an empty report.
-						 */
+						// Undone again, which is both a check and a necessity:
+						// A check because the button's tooltip promises the capture is undoable and nothing
+						// else here confirms it.
 						if ( skope->nif->undoStack ) {
 							skope->nif->undoStack->undo();
 							const Vector3 undone = skope->nif->get<Vector3>(
@@ -23259,16 +20238,9 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 					pv.reset();
 				}
 
-				/* Pull against a pin and see whether the chain goes TAUT.
-				 *
-				 * This is the complaint: pin one bone, drag another away, and the
-				 * joints stretch instead of the rig reaching the end of its chain
-				 * and following. The measurement is the worst ball-socket
-				 * separation while the drag is at full stretch -- a joint is a
-				 * point constraint, so any separation at all is the rig coming
-				 * apart, and it should stay at solver noise rather than growing
-				 * with how hard you pull.
-				 */
+				// Pull against a pin and see whether the chain goes TAUT:
+				// This is the complaint: pin one bone, drag another away, and the joints stretch instead of
+				// the rig reaching the end of its chain and following.
 				{
 					pv.reset();
 					pv.setTool( PhysicsPreview::Tool::Grab );
@@ -23310,11 +20282,7 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 					QPointF sp;
 					const int target = aimAtSomething( sp );
 					if ( target >= 0 ) {
-						/* Asserted as a TOGGLE, not as "becomes pinned". The first body
-						 * a ray finds is often the root, which build() has already
-						 * pinned, so clicking it correctly UNpins it -- and a test that
-						 * demanded `pinned == true` failed the tool for behaving right.
-						 */
+						// Asserted as a TOGGLE, not as "becomes pinned".
 						const bool was = pv.sim().bodies().at( target ).pinned;
 						auto rightClick = [&]() {
 							QMouseEvent pr( QEvent::MouseButtonPress, sp, gl->mapToGlobal( sp ),
@@ -23370,13 +20338,10 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 					check( pv.wind().length() == 0.0f, QStringLiteral( "Wind stops on release" ) );
 				}
 
-				/* Throw against Drag on the identical motion.
-				 *
-				 * Comparing the two is the only way to show the throw does
-				 * something a plain release does not: a dragged body is already
-				 * moving at the hand's speed when it is let go, and what Throw
-				 * adds is that the velocity survives the next constraint solve.
-				 */
+				// Throw against Drag on the identical motion:
+				// Comparing the two is the only way to show the throw does something a plain release does not:
+				// a dragged body is already moving at the hand's speed when it is let go, and what Throw adds
+				// is that the velocity survives the next constraint solve.
 				auto dragAndCoast = [&]( PhysicsPreview::Tool t, bool movingAtRelease ) -> float {
 					pv.reset();
 					pv.setTool( t );
@@ -23408,22 +20373,10 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 					QMouseEvent rel( QEvent::MouseButtonRelease, sp, gl->mapToGlobal( sp ),
 						gl->selectMouseButton(), Qt::NoButton, Qt::NoModifier );
 					QApplication::sendEvent( gl, &rel );
-					/* The speed handed over AT the moment of release.
-					 *
-					 * Measuring how far it then coasts conflates the throw with gravity:
-					 * on the feral ghoul the still-release case travelled further,
-					 * because the bone was left swinging and kept falling. What the tool
-					 * promises is that the hand's velocity survives the release, so that
-					 * is what is measured, before a single step can muddy it.
-					 */
-					/* Along the DRAG axis, not the total speed.
-					 *
-					 * Holding still for 20 frames lets the rig fall, so the "still"
-					 * case leaves the bone at 1 m/s of honest gravity -- on the feral
-					 * ghoul that was most of the thrown speed and the comparison said
-					 * nothing. Gravity contributes nothing along the hand's direction
-					 * of travel, so that component isolates what the throw added.
-					 */
+					// The speed handed over AT the moment of release:
+					// Measuring how far it then coasts conflates the throw with gravity: on the feral ghoul
+					// the still-release case travelled further, because the bone was left swinging and kept
+					// falling.
 					return Vector3::dotproduct( pv.sim().bodies().at( target ).v, axis );
 				};
 				/* A release while MOVING carries; the same tool released while still
@@ -23439,20 +20392,8 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 
 				// Options
 				pv.setTool( PhysicsPreview::Tool::Grab );
-				/* Gravity measured as FALL, not as total movement.
-				 *
-				 * Two wrong versions came before this one. "With gravity off it barely
-				 * moves" is false because the authored pose has bodies overlapping --
-				 * the brahmin has 18 pairs touching at rest -- and the contact solve
-				 * pushes them apart regardless. Comparing total drift is also false:
-				 * power armour drifts MORE with gravity off (193 against 149), because
-				 * gravity holds it against the floor while the push-apart has nothing
-				 * to settle it.
-				 *
-				 * What the option actually promises is that nothing accelerates
-				 * downward, so the measurement is the drop in mean height and nothing
-				 * else.
-				 */
+				// Gravity measured as FALL, not as total movement:
+				// Two wrong versions came before this one.
 				auto dropOverASecond = [&]() -> float {
 					pv.reset();
 					pv.freeze();
@@ -23554,13 +20495,10 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 				}
 
 
-				/* Every other mode has to be able to take over.
-				 *
-				 * This is the bug bungo hit: Physics Sim was added without the
-				 * change signal every other mode has, so Pose and the paint modes
-				 * never left it and Object/Edit left it without the button noticing.
-				 * Each one is entered from a RUNNING sim, which is the case that broke.
-				 */
+				// Every other mode has to be able to take over:
+				// This is the bug bungo hit: Physics Sim was added without the change signal every other mode
+				// has, so Pose and the paint modes never left it and Object/Edit left it without the button
+				// noticing.
 				struct ModeCase { const char * name; std::function<void()> enter; };
 				const ModeCase modes[] = {
 					{ "Edit", [gl]() { gl->setEditMode( true ); } },
@@ -23591,14 +20529,9 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 					check( fired == 2, QStringLiteral( "entering and leaving each announce it" ) );
 				}
 
-				/* Two homes for one panel, and the split between them.
-				 *
-				 * The dropdown must stay SHORT -- that is the whole reason the rest
-				 * moved out, so a check that both panels merely exist would miss the
-				 * regression that matters. The manager's copy must carry the controls
-				 * the dropdown dropped, and its Create/Test switch must show exactly
-				 * one of the two at a time.
-				 */
+				// Two homes for one panel, and the split between them:
+				// The dropdown must stay SHORT -- that is the whole reason the rest moved out, so a check that
+				// both panels merely exist would miss the regression that matters.
 				{
 					// the mode-signal block above left the sim stopped, and a panel
 					// syncing against nothing exercises none of what it does
@@ -23610,19 +20543,15 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 					check( quick && full,
 						QStringLiteral( "the toolbar and the manager each have a panel" ) );
 					if ( quick && full ) {
-						/* Counted by what is actually SHOWN, not by what exists: the
-						 * essentials panel builds every control so one sync path can
-						 * refresh them all, and hides the ones it does not offer. A
-						 * count of children would report the two as identical.
-						 */
+						// Counted by what is actually SHOWN, not by what exists: the essentials panel builds
+						// every control so one sync path can refresh them all, and hides the ones it does not
+						// offer.
 						auto shown = []( QWidget * root ) {
 							int n = 0;
 							for ( QWidget * c : root->findChildren<QWidget *>() ) {
-								/* Walk UP to the panel: isHidden() is per-widget, so the
-								 * children of a hidden row still report themselves visible
-								 * and the two panels came out 93 against 97 -- a metric
-								 * that would have passed whatever the split did.
-								 */
+								// Walk UP to the panel: isHidden() is per-widget, so the children of a hidden
+								// row still report themselves visible and the two panels came out 93 against
+								// 97 -- a metric that would have passed whatever the split did.
 								bool visible = true;
 								for ( QWidget * p = c; p && p != root; p = p->parentWidget() )
 									if ( p->isHidden() ) {
@@ -23638,14 +20567,10 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 						log << QStringLiteral( "      dropdown offers %1 controls, the manager %2" )
 							.arg( q ).arg( f );
 
-						/* Checked by WHICH sections each carries, not by a ratio.
-						 *
-						 * A ratio was the first attempt and it stopped meaning anything
-						 * the moment World moved into the dropdown and the body list
-						 * left the manager: the two counts converged to 43 against 50
-						 * while the split itself was working exactly as intended. The
-						 * invariant is that each panel carries the sections it is for.
-						 */
+						// Checked by WHICH sections each carries, not by a ratio:
+						// A ratio was the first attempt and it stopped meaning anything the moment World moved
+						// into the dropdown and the body list left the manager: the two counts converged to 43
+						// against 50 while the split itself was working exactly as intended.
 						auto carries = []( QWidget * root, const QString & label ) {
 							for ( QWidget * c : root->findChildren<QWidget *>() ) {
 								const QLabel * l = qobject_cast<QLabel *>( c );
@@ -23747,29 +20672,8 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 		} );
 	}
 
-	// RENDER REGRESSION BASELINE (WW_RENDER_SHOT=<out.png>): grab the GL
-	// framebuffer for one NIF and quit, so a driver script can walk a corpus and
-	// pixel-diff before/after a shader change. This is the guard for the particle
-	// simulation and screen-space refraction — both are easy to break from the
-	// lighting path and neither has any other automated check.
-	//
-	// Determinism is the whole point, so two things are pinned rather than left
-	// to whatever was persisted or to wall-clock:
-	//   * camera — setOrientation( recenter ) instead of the per-file stored
-	//     camera, or every baseline is framed differently;
-	//   * scene time — the particle sim is time-driven (CPU NiPSysUpdateCtlr),
-	//     so a wall-clock grab can never reproduce the same pixels.
-	// WW_RENDER_TIME (seconds, default 1.0) and WW_RENDER_VIEW (ViewState index,
-	// default ViewFront) override them.
-	//
-	// Uses ogl->grabFramebuffer(), NOT skope->grab(): the viewport is a native
-	// window, so the widget grab returns white where the 3D content should be.
-	// WW_IMPOSTOR_PREVIEW (lane IMPOSTORSHOW, 2026-09-19): the octahedral
-	// impostor preview and its harness. Returns false and costs one
-	// environment read when the variable is unset, which is every ordinary
-	// session. It forces its own window size and prints the size it GOT --
-	// the native_open.sh lesson, where a maximized persisted geometry
-	// floored WW_RENDER_SIZE and the harness measured the machine.
+	// RENDER REGRESSION BASELINE (WW_RENDER_SHOT=<out.png>): grab the GL framebuffer for one NIF and quit, so
+	// a driver script can walk a corpus and pixel-diff before/after a shader change.
 	wwImpostorPreviewStart( skope, skope->ogl, skope->viewportHeader );
 
 	if ( !fname.isEmpty() && wwEnvIsSet( "WW_RENDER_SHOT" ) ) {
@@ -23779,10 +20683,7 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 				if ( out.isEmpty() || out == QStringLiteral( "1" ) )
 					out = QApplication::applicationDirPath() + "/ww_render_shot.png";
 
-				// Pin the window size. The framebuffer follows the restored
-				// window geometry, so baselines captured in one session compared
-				// as "size mismatch" against another — the guard silently
-				// stopped guarding. WW_RENDER_SIZE=WxH overrides.
+				// Pin the window size.
 				{
 					int rw = 1280, rh = 800;
 					const QString szEnv = wwEnvStr( "WW_RENDER_SIZE" );
@@ -23794,35 +20695,9 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 						}
 					}
 					skope->showNormal();
-					/* THE DOCKS COME DOWN BEFORE THE RESIZE (lane HARNESSWIN2, 2026-09-19).
-					 *
-					 * Qt will not make a window narrower than its layout's minimum, and
-					 * the docks are part of that layout until they are hidden. Hiding
-					 * them AFTER the resize -- which is what this did -- meant the
-					 * resize below was measured against a minimum that the shot itself
-					 * then removed, and the window was never resized again: a request
-					 * for 1024x1024 came out 1822x1024 and the viewport 1822x989, so
-					 * `upp` read 8.99 where the spell asked for 16.0. That is
-					 * tests/spells/native_open.sh row (c) at covered 0.8978, and it is
-					 * NOT the maximized persisted geometry it was blamed on -- that was
-					 * a second, real defect, repaired separately in src/harnesswindow.cpp.
-					 * The two were indistinguishable from outside because a maximized
-					 * window and the dock minimum both land on 1822 px on a 1920-wide
-					 * screen (lane HARNESSWIN1, 2026-09-19, measured row (a) against row
-					 * (d) on one binary: the same request obtained exactly with a small
-					 * fixture, floored with a .lodi scene whose docks raise the minimum).
-					 *
-					 * processEvents() is needed between the hide and the resize because
-					 * the layout minimum is recomputed lazily; without it the resize is
-					 * still measured against the docks that are already hidden. It is
-					 * safe here and only here: this lambda runs only when WW_RENDER_SHOT
-					 * is set, so it is always a harness run, never a restore path (see
-					 * the both-maximized crash table in NifSkope::restoreUi()).
-					 *
-					 * The hide loop further down is left exactly where it is and runs a
-					 * second time. Hiding a hidden dock costs nothing, and leaving it
-					 * there keeps this edit purely additive.
-					 */
+					// THE DOCKS COME DOWN BEFORE THE RESIZE:
+					// Qt will not make a window narrower than its layout's minimum, and the docks are part of
+					// that layout until they are hidden.
 					for ( QDockWidget * dw : skope->findChildren<QDockWidget *>() )
 						dw->hide();
 					if ( skope->viewportHeader )
@@ -23838,72 +20713,40 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 					// whole window for scene pixels.
 					for ( QDockWidget * dw : skope->findChildren<QDockWidget *>() )
 						dw->hide();
-					/* And the viewport header, which is NOT a dock.
-					 *
-					 * It sits inside the central widget, directly under the GL
-					 * surface, so it takes its height out of the framebuffer for
-					 * the same reason the docks do - and the loop above cannot
-					 * see it. Left visible it shifts every baseline by the bar's
-					 * height and all seven turn into "size mismatch", which reads
-					 * as a rendering regression rather than a layout change.
-					 */
+					// And the viewport header, which is NOT a dock:
+					// It sits inside the central widget, directly under the GL surface, so it takes its height
+					// out of the framebuffer for the same reason the docks do - and the loop above cannot see
+					// it.
 					if ( skope->viewportHeader )
 						skope->viewportHeader->hide();
 					qApp->processEvents();
 				}
 
 				if ( skope->ogl ) {
-					/* THE CAMERA -- pinned, or left exactly where it was.
-					 *
-					 * WW_RENDER_VIEW on its own keeps the old auto-fit framing,
-					 * so every baseline taken that way is unchanged. The moment
-					 * WW_RENDER_CENTER, _DIST, _FOV or _ORTHO appears the whole
-					 * camera -- view, look-at, eye distance, projection -- is
-					 * PINNED by GLView and re-asserted on every later paint.
-					 *
-					 * What this replaces could not work, and the reason was not
-					 * in it: setOrientation( view, true ) ends in center(), and
-					 * center() only sets a flag, so the auto-fit ran in the NEXT
-					 * paintGL and overwrote the look-at and the distance that had
-					 * just been set. Measured 2026-09-09 on the 512-unit cube
-					 * fixture: two look-ats 400 units apart gave BYTE-IDENTICAL
-					 * PNGs, and the distance read-back turned a 1/D law into
-					 * 1/D^2 -- 539 px at DIST 400 down to 11 px at 2000, which is
-					 * want^2 / 532 within 1%, 532 being that fixture's own
-					 * auto-fit distance. See GLView::WwCameraPin. */
+					// THE CAMERA -- pinned, or left exactly where it was:
+					// WW_RENDER_VIEW on its own keeps the old auto-fit framing, so every baseline taken that
+					// way is unchanged.
 					const GLView::WwCameraPin pin = GLView::wwCameraPinFromEnvironment();
 					if ( pin.active ) {
 						skope->ogl->wwApplyCameraPin( pin );
 					} else {
 						int	viewIdx = wwEnvInt( "WW_RENDER_VIEW" );
-						// ViewUser (the Blender-style startup view) sits past
-						// ViewWalk, so the old bound silently rewrote it to Front:
-						// a capture that looked like a passing test of a view it
+						// ViewUser (the Blender-style startup view) sits past ViewWalk, so the old bound
+						// silently rewrote it to Front: a capture that looked like a passing test of a view it
 						// had never actually used.
-						//
-						// NEGATIVE leaves the camera exactly as startup left it,
-						// which is the only way to photograph the startup view
-						// itself — every other value overrides the thing under
-						// test. Unset is still 0 and still means Front, so the
-						// existing baselines are unaffected.
 						if ( viewIdx >= 0 ) {
 							if ( viewIdx == 0 || viewIdx > int( GLView::ViewUser ) )
 								viewIdx = int( GLView::ViewFront );
 							skope->ogl->setOrientation( GLView::ViewState( viewIdx ), true );
 						}
-						/* lane CELLSPAWN2: say which camera the shot took. An unset WW_RENDER_VIEW refits Front over the
+						/* say which camera the shot took. An unset WW_RENDER_VIEW refits Front over the
 						 * cell's spawn (the CELLSPAWN1 hold was blind for it); a cell's first-open view needs -1. */
 						qInfo().noquote() << ( viewIdx >= 0
 							? QStringLiteral( "render shot camera: view %1 refit to the scene" ).arg( viewIdx )
 							: QStringLiteral( "render shot camera: kept as the open left it (WW_RENDER_VIEW < 0)" ) );
 					}
 
-					// Force the two Viewport Effects toggles ON. They default to
-					// true in Scene but are overwritten from the persisted menu
-					// state at startup, so with them unchecked the refraction and
-					// particle cases render identically to a plain mesh and the
-					// regression set silently guards nothing. A harness must
-					// exercise the code path, not the user's preferences.
+					// Force the two Viewport Effects toggles ON.
 					if ( Scene * sc = skope->ogl->getScene() ) {
 						// Refraction defaults ON so the established regression cases
 						// cannot inherit a disabled user preference. An explicit 0 is
@@ -23913,31 +20756,17 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 						// WW_RENDER_PARTICLES=0 turns them off for a paired capture (lane
 						// PBRR0); unset keeps the old forced-on.
 						sc->showParticles = wwRenderParticlesPin();
-						// lane VANILLADEF1: a harness forces the BRDF it measures; unset = off (vanilla)
+						// a harness forces the BRDF it measures; unset = off (vanilla)
 						sc->editorBrdf = wwEnvIsSet( "WW_EDITOR_BRDF" ) && wwEnvInt( "WW_EDITOR_BRDF" ) != 0;
 
-						/* WW_RENDER_CLEAN=1: the MODEL and nothing else -- no viewport
-						 * grid, no axis lines, no node markers. A script that measures
-						 * a silhouette off the picture cannot tell a grid line from a
-						 * twig, and the grid alone put the measured bounding box at
-						 * the full width of the window (2026-09-09). It changes only
-						 * these three overlays; lighting, texturing and the camera are
-						 * untouched, so a CLEAN render and a normal one differ by
-						 * exactly the overlays.
-						 *
-						 * AND THE 3D CURSOR, which is not in Scene::options and
-						 * was therefore still in every CLEAN picture: measured
-						 * 2026-09-09, the cursor gizmo is 27 px wide whatever the
-						 * camera does, so a silhouette box taken off a small
-						 * object read 27 px when the object itself was 11, and a
-						 * span sweep looked as if it saturated. The bake has
-						 * always turned it off; a clean render now does too. */
+						// WW_RENDER_CLEAN=1: the MODEL and nothing else -- no viewport grid, no axis lines, no
+						// node markers.
 						if ( wwEnvInt( "WW_RENDER_CLEAN" ) != 0 ) {
 							sc->options &= ~( Scene::ShowGrid | Scene::ShowAxes | Scene::ShowNodes );
 							skope->ogl->showCursor = false;
 						}
 
-						/* lane MAGDROP1: a picture that must show collision forces it,
+						/* a picture that must show collision forces it,
 						 * rather than inheriting the person's View > Collision toggle;
 						 * WW_RENDER_COLLISION=1 also turns "collision only" off so the
 						 * mesh is drawn under it. Scene::options directly, not the menu
@@ -23964,22 +20793,8 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 								skope->select( skope->nif->getBlockIndex( sb ) );
 						}
 
-						/* WW_RENDER_FLAT=1: photograph the VERTEX COLOURS and nothing
-						 * else. Texturing, lighting and every map that modulates them
-						 * off, vertex colours on.
-						 *
-						 * A per-vertex payload is invisible in a normal capture -- LOD
-						 * identity (R+G object index, B baked AO), a wind-sway weight,
-						 * an authored blend mask are all buried under the diffuse map
-						 * and then shaded on top. Turning the scene flat is the only
-						 * way to see the numbers that are actually in the file, and
-						 * doing it through the menu is not reproducible: the options
-						 * mask is restored from the user's persisted preferences at
-						 * startup, so a capture would carry whatever was last ticked.
-						 */
-						/* WW_LOD_CHANNEL=<1..7> drives the same channel preview the
-						 * World LOD Generator's Preview box sets, so the shader path
-						 * has a headless test rather than only a GUI one. */
+						// WW_RENDER_FLAT=1: photograph the VERTEX COLOURS and nothing else. Texturing,
+						// lighting and every map that modulates them off, vertex colours on.
 						if ( wwEnvIsSet( "WW_LOD_CHANNEL" ) )
 							wwLodChannelView = wwEnvInt( "WW_LOD_CHANNEL" );
 						if ( wwEnvInt( "WW_RENDER_FLAT" ) != 0 ) {
@@ -23997,22 +20812,15 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 						 * user's last tick, so the switch forces it. */
 						if ( wwEnvInt( "WW_LODL_AO" ) != 0 )
 							sc->options |= Scene::DoVertexColors;
-						/* WW_LODL_CHANNEL=<name> is the same picture of a vertex
-						 * payload, one baked channel at a time (lane CHANVIEW1), so
-						 * it forces the same persisted option. Without this, the
-						 * channel is in the document and invisible, which is the
-						 * shape of "a dial whose two settings render identically"
-						 * (root MISTAKES 05:1x) with nothing wrong in the builder. */
+						// WW_LODL_CHANNEL=<name> is the same picture of a vertex payload, one baked channel at
+						// a time, so it forces the same persisted option.
 						if ( !wwEnvStr( "WW_LODL_CHANNEL" ).trimmed().isEmpty() )
 							sc->options |= Scene::DoVertexColors;
 					}
 
-					/* WW_HKXANIM_CLIP=<file.hkx>: load a Havok animation into the
-				 * scene's playback BEFORE the sequence is chosen, so a picture
-				 * of a loaded clip is WW_RENDER_SEQ naming it and WW_RENDER_TIME
-				 * picking the frame. Lane HKX2's gate (e) is three of these.
-				 * WW_HKXANIM_ROOTMOTION=1 turns the root motion on for the shot.
-				 */
+					// WW_HKXANIM_CLIP=<file.hkx>: load a Havok animation into the scene's playback BEFORE the
+					// sequence is chosen, so a picture of a loaded clip is WW_RENDER_SEQ naming it and
+					// WW_RENDER_TIME picking the frame.
 				if ( Scene * hsc = skope->ogl->getScene(); hsc && hsc->hkx ) {
 					const QString hkxPath = wwEnvStr( "WW_HKXANIM_CLIP" );
 					if ( !hkxPath.isEmpty() ) {
@@ -24025,16 +20833,11 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 					}
 				}
 
-					/* WW_SKELETON_OVERLAY=1: draw Overlays > Show Skeleton in this
-					 * capture (lane SKELOVERLAY). It is a viewport toggle, not a
-					 * Scene::option, so WW_RENDER_CLEAN cannot reach it and a
-					 * picture of the armature would otherwise depend on whatever
-					 * the user last ticked -- which is not reproducible.
-					 */
+					// WW_SKELETON_OVERLAY=1: draw Overlays > Show Skeleton in this capture.
 					if ( wwEnvInt( "WW_SKELETON_OVERLAY" ) != 0 )
 						skope->ogl->setSkeletonOverlay( true );
 
-					// lane VIEWFULL1: Clean View, the crosshair and flight pinned for a capture (never saved)
+					// Clean View, the crosshair and flight pinned for a capture (never saved)
 					if ( wwEnvIsSet( "WW_CLEAN_VIEW" ) )
 						skope->ogl->cleanView = wwEnvInt( "WW_CLEAN_VIEW" ) != 0;
 					if ( wwEnvIsSet( "WW_CROSSHAIR" ) )
@@ -24042,13 +20845,9 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 					if ( wwEnvInt( "WW_RENDER_FREECAM" ) != 0 )
 						skope->ogl->freeCamera = true;
 
-					/* lane SKEL2: the armature's own switches, on the same
-					 * grounds -- a picture of a display mode, an X-ray state or
-					 * a Skeleton Manager chip has to be reproducible, and a
-					 * QSettings value the user last ticked is not.
-					 * WW_SKELOVERLAY_DUMP (read in GLView::drawSkeletonOverlay)
-					 * writes every drawn node's screen position for THIS frame.
-					 */
+					// the armature's own switches, on the same grounds -- a picture of a display mode, an
+					// X-ray state or a Skeleton Manager chip has to be reproducible, and a QSettings value the
+					// user last ticked is not.
 					if ( wwEnvIsSet( "WW_SKELETON_DISPLAY" ) )
 						skope->ogl->setArmatureDisplay(
 							wwEnvInt( "WW_SKELETON_DISPLAY" ) );
@@ -24065,10 +20864,7 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 							wwEnvStr( "WW_SKELETON_SEARCH" ) );
 
 
-				// WW_RENDER_SEQ=<name> selects a sequence. Without it the
-					// scene takes animGroups.first(), which on FO4 VFX files is
-					// the one-shot "autoPlay" — sequence-gated effects (the
-					// procedural lightning's Generation keys) never fire there.
+				// WW_RENDER_SEQ=<name> selects a sequence.
 					const QString seq = wwEnvStr( "WW_RENDER_SEQ" );
 					if ( !seq.isEmpty() )
 						skope->ogl->setSceneSequence( seq );
@@ -24077,19 +20873,7 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 					float	t = wwEnvStr( "WW_RENDER_TIME" ).toFloat( &timeOk );
 					const float shotT = timeOk ? t : 1.0f;
 
-					/* WW_RENDER_FRAMES=<n> [WW_RENDER_FPS=<f>, default 30]: an
-					 * animated series, out_000.png .. out_<n-1>.png, 1/f s apart
-					 * from WW_RENDER_TIME (2026-09-30, BoSInfantry jetpack preview).
-					 *
-					 * The CPU particle sim advances by the time DIFFERENCE between
-					 * paints, capped at 0.25 s, and restarts on any backward jump.
-					 * The single jump to WW_RENDER_TIME therefore leaves an FO4
-					 * emitter with nothing alive: census "0 live particles" on
-					 * vanilla JetpackFX.nif CharFXOnLoop at 1.5 s and at 20 s. With
-					 * frames asked, playback is stopped (wall-clock time would
-					 * otherwise move the sim between steps) and the sim is pre-rolled
-					 * from 0 in 1/f steps. Unset keeps the one-jump shot, so no
-					 * existing baseline changes. */
+					// WW_RENDER_FRAMES=<n> [WW_RENDER_FPS=<f>, default 30]: an animated series, out_000.png ..
 					const int renderFrames = wwEnvInt( "WW_RENDER_FRAMES" );
 					float renderFps = wwEnvStr( "WW_RENDER_FPS" ).toFloat();
 					if ( !( renderFps > 0.0f ) )
@@ -24108,14 +20892,8 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 					if ( const QString pre = wwParticlePreroll( skope->ogl, shotT ); !pre.isEmpty() )
 						fprintf( stderr, "%s\n", qPrintable( pre ) );
 
-					// grabFramebuffer() reads the CURRENT buffer without
-					// repainting — pump twice or the grab is a stale frame.
-					// Warm the line path. Streaming LINE geometry (grid, origin axes, 3D
-					// cursor) draws nothing until a pick render has run - the open 07-17
-					// defect. Whether that had happened varied per run, so the grid was in
-					// some captures and absent from others and the guard could not be
-					// trusted. indexAt() runs the pick render, making it deterministically
-					// on. A workaround for that defect, not a fix - remove when it is solved.
+					// grabFramebuffer() reads the CURRENT buffer without repainting — pump twice or the grab
+					// is a stale frame. Warm the line path.
 					skope->ogl->indexAt( QPointF( skope->ogl->width() * 0.5,
 												  skope->ogl->height() * 0.5 ) );
 					qApp->processEvents();
@@ -24123,21 +20901,12 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 						skope->ogl->update();
 						qApp->processEvents();
 					}
-					/* WW_RENDER_SS=<0..3> supersamples through an offscreen FBO,
-					 * which is the only way past the desktop's clamp on window
-					 * height: WW_RENDER_SIZE alone tops out at one screen however
-					 * wide the window is allowed to get, and returns a squashed
-					 * capture rather than an error. 1400x900 at SS=2 is 5600x3364.
-					 */
-					// What the window is doing at the moment the picture is taken
-					// -- the honest record for the no-visible-window gate.
+					// WW_RENDER_SS=<0..3> supersamples through an offscreen FBO, which is the only way past
+					// the desktop's clamp on window height: WW_RENDER_SIZE alone tops out at one screen
+					// however wide the window is allowed to get, and returns a squashed capture rather than an
+					// error.
 					wwLogTopLevelWindows( "grab" );
-					/* WW_PBRM_CENSUS rows for particle systems (lane PBRR0).
-					 * docs/NIFSKOPE_PBR_RENDERER.md s8 forbids edits to
-					 * glparticles.cpp, so particles are censused here, at the
-					 * grab, off the scene's own nodes: drawn or not is what
-					 * Particles::drawShapes' early-outs read (particles shown,
-					 * node visible, live count). They never reach the PBR route. */
+					// WW_PBRM_CENSUS rows for particle systems.
 					if ( wwPbrmCensusArmed() ) {
 						if ( Scene * psc = skope->ogl->getScene() ) {
 							for ( Node * pn : psc->nodes.list() ) {
@@ -24154,15 +20923,10 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 							}
 						}
 					}
-					/* And what the CAMERA is doing, read off the live members
-					 * rather than off what was asked for. release/ww_camera_pin.log
-					 * (or $WW_CAMERA_CENSUS) is what turns a picture into a
-					 * measurement: `upp` is the units per pixel at the look-at
-					 * plane, so an extent of E world units spans E / upp pixels.
-					 * Logged at the grab, which is the only moment that can be
-					 * quoted -- anything logged earlier is a claim about intent. */
+					// And what the CAMERA is doing, read off the live members rather than off what was asked
+					// for.
 					skope->ogl->wwLogCameraCensus( "grab" );
-					// lane CELLSTREAM1: a stepped path through the streamed cells, else the shot waits for them
+					// a stepped path through the streamed cells, else the shot waits for them
 					const QString streamPath = wwEnvStr( "WW_CELL_STREAM_PATH" );
 					if ( !streamPath.isEmpty() ) {
 						wwCellStreamPathRun( skope->ogl, streamPath, out );
@@ -24171,10 +20935,10 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 					}
 					if ( cellStreamBusy( nullptr ) )
 						wwCellStreamSettle( skope->ogl, 16, 600000 );
-					// lane TESTDRIVER1: a live reopen ends here (window, camera and options applied again, the cells in)
+					// a live reopen ends here (window, camera and options applied again, the cells in)
 					if ( wwLiveReopenHook( shotT ) )
 						return;
-					// lane TESTDRIVER1: WW_LIVE_STEPS=<file>: the scene loaded once, each row sets switches then shoots;
+					// WW_LIVE_STEPS=<file>: the scene loaded once, each row sets switches then shoots;
 					// WW_LIVE_SERVE=1 keeps the window up for "NifSkope::live <step>" on the --port
 					if ( const QString steps = wwEnvStr( "WW_LIVE_STEPS" ); !steps.isEmpty() || wwEnvStr( "WW_LIVE_SERVE" ) == QLatin1StringView( "1" ) ) {
 						if ( !steps.isEmpty() )
@@ -24183,7 +20947,7 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 							qApp->quit();
 						return;
 					}
-					// lane MOTION1: a camera path renders its own frames (wwRenderPathRun above)
+					// a camera path renders its own frames (wwRenderPathRun above)
 					const QString renderPath = wwEnvStr( "WW_RENDER_PATH" );
 					if ( !renderPath.isEmpty() ) {
 						wwRenderPathRun( skope->ogl, renderPath, out, shotT );
@@ -24213,7 +20977,7 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 					} else {
 						shotImage.save( out );
 					}
-					// lane FARVIEW1: WW_RENDER_GPUMS=<frames> times that many repaints of the view just grabbed
+					// WW_RENDER_GPUMS=<frames> times that many repaints of the view just grabbed
 					if ( const int gpuFrames = wwEnvInt( "WW_RENDER_GPUMS" ); gpuFrames > 0 ) {
 						QFile gf( out + QStringLiteral( ".gpums.txt" ) );
 						if ( gf.open( QIODevice::WriteOnly | QIODevice::Text ) )
@@ -24248,7 +21012,7 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 		wwCardStamp( QStringLiteral( "window" ) );
 		QObject::connect( skope, &NifSkope::completeLoading, skope, [skope, fname]( bool ok, QString & ) {
 			wwCardStamp( QStringLiteral( "loaded" ) );
-			// lane BAKESPEED3: WW_IMPOSTOR_SETTLE_MS, a measuring knob for the fixed settle before the bake
+			// WW_IMPOSTOR_SETTLE_MS, a measuring knob for the fixed settle before the bake
 			static const int settleMs = qEnvironmentVariableIsSet( "WW_IMPOSTOR_SETTLE_MS" )
 				? qBound( 0, qEnvironmentVariableIntValue( "WW_IMPOSTOR_SETTLE_MS" ), 5000 ) : 1200;
 			QTimer::singleShot( settleMs, skope, [skope, fname, ok]() {
@@ -24263,10 +21027,7 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 					QDir().mkpath( outDir );
 					skope->showNormal();
 					{
-						/* WW_IMPOSTOR_WINDOW=WxH (lane IMPOSTORAA1): the bake window's
-						 * size, a TEST KNOB. Under the 2x offscreen bake (the default)
-						 * nothing the sheets hold depends on it, and the gate proves
-						 * that by baking at two sizes and comparing the bytes. */
+						// WW_IMPOSTOR_WINDOW=WxH: the bake window's size, a TEST KNOB.
 						int bw = 560, bh = 560;
 						const QStringList ws = wwEnvStr( "WW_IMPOSTOR_WINDOW" ).split( QLatin1Char( 'x' ) );
 						if ( ws.size() == 2 && ws[0].toInt() >= 320 && ws[1].toInt() >= 240 ) {
@@ -24283,59 +21044,19 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 						sc->options = Scene::SceneOptions(
 							sc->options & ~( Scene::ShowAxes | Scene::ShowGrid ) );
 					skope->ogl->showCursor = false;
-					/* THE PROJECTION, ASSERTED (lane CARDORTHO, 2026-09-10).
-					 *
-					 * Everything below sizes its frames with
-					 * `orthographicHalfHeight()` -- `Dist / Zoom` -- and reads a
-					 * silhouette's world extent back out of viewport pixels with
-					 * a single units-per-pixel constant. Both are statements about
-					 * an ORTHOGRAPHIC camera, and until now nothing headless ever
-					 * set one: `restoreUi()` hard-codes `isPersp = true` and the
-					 * only other callers of `setProjection` are the View menu and
-					 * Numpad-5, so every card ever baked was photographed through
-					 * a 60-degree PERSPECTIVE frustum while being measured as if
-					 * it were not (lane HOOKCAM measured it, 2026-09-09; see
-					 * MISTAKES.md). `orthographicHalfHeight()` returns `Dist/Zoom`
-					 * whatever the projection is -- the NAME is not a measurement,
-					 * which is why the read-back beside the fit below never caught
-					 * it.
-					 *
-					 * What that cost, and what asserting it buys:
-					 *   - the SCALE. A perspective frame magnifies by
-					 *     `eye / (eye - d)` for a point `d` in front of the card
-					 *     plane; over a tree's own depth that is tens of per cent,
-					 *     so the recorded half-extents did not describe the
-					 *     picture and a reader's quad could not match the mesh.
-					 *   - the SHAPE. The same magnification varies across the
-					 *     frame, so a silhouette was foreshortened -- wider at the
-					 *     near edge than the far one -- and an octahedral set's
-					 *     frames disagreed with each other.
-					 *   - the HEIGHT sheet. The bake puts near and far symmetric
-					 *     about the bound centre and calls window z 0.5 the card
-					 *     plane; that is exactly true in an orthographic
-					 *     projection and false in a perspective one, where the
-					 *     window z of the midpoint is not 0.5.
-					 *
-					 * MODULE AND FALLBACK (CONSTITUTION 10): `WW_IMPOSTOR_PERSP=1`
-					 * restores the old perspective camera exactly, and the sidecar
-					 * NAMES the arm that served, so a set is never silently one or
-					 * the other. It is the control the gates fail against. */
+					// THE PROJECTION, ASSERTED:
+					// Everything below sizes its frames with `orthographicHalfHeight` -- `Dist / Zoom` -- and
+					// reads a silhouette's world extent back out of viewport pixels with a single
+					// units-per-pixel constant.
 					const bool bakePersp = wwEnvInt( "WW_IMPOSTOR_PERSP" ) == 1;
 					skope->ogl->setProjection( bakePersp );
-					/* The matte's two clears are the hook's, not the settings':
-					 * without the lock every paint put the viewport grey back and
-					 * both passes came out identical - cards opaque, alpha 255
-					 * everywhere, since the theme work. Found by the octahedral
-					 * sheets reporting full coverage on every view. */
+					// The matte's two clears are the hook's, not the settings': without the lock every paint
+					// put the viewport grey back and both passes came out identical - cards opaque, alpha 255
+					// everywhere, since the theme work.
 					skope->ogl->wwLockBackground = true;
 					qApp->processEvents();
-					/* The two-pass matte below alternates a BLACK and a WHITE
-					 * clear for every view, which is what bungo saw strobing on
-					 * his second monitor. The strobe still happens -- it is how
-					 * the alpha is measured -- but the window carrying it is at
-					 * opacity 0 and off his primary monitor. Record where the
-					 * window actually is, and how transparent, at the moment
-					 * the matte starts. */
+					// The two-pass matte below alternates a BLACK and a WHITE clear for every view, which is
+					// what bungo saw strobing on his second monitor.
 					wwLogTopLevelWindows( "bake" );
 
 					const QString base = QFileInfo( fname ).completeBaseName().toLower();
@@ -24343,27 +21064,16 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 					meta.open( QIODevice::WriteOnly | QIODevice::Text );
 					QTextStream ms( &meta );
 					ms << "model " << QFileInfo( fname ).fileName() << "\n";
-					/* THE ARM THAT SERVED, read back off the live GLView rather
-					 * than off what was asked for (CONSTITUTION 4, telemetry
-					 * echoes truth): `projection ortho` or `projection persp`.
-					 * Every extent this sidecar records is measured through it,
-					 * so a reader can tell a metric set from a pre-2026-09-10
-					 * one without guessing at the exe that made it. An unknown
-					 * line is ignored by every reader of this file, so old
-					 * sidecars keep working and this one does not move any
-					 * existing line's shape. */
+					// THE ARM THAT SERVED, read back off the live GLView rather than off what was asked for
+					// (CONSTITUTION 4, telemetry echoes truth): `projection ortho` or `projection persp`.
 					ms << "projection "
 					   << ( skope->ogl->isPerspectiveProjection() ? "persp" : "ortho" ) << "\n";
 
-					/* The engine's own in-cell detail steps: shapes named `_L1`,
-					 * `_L2`... beside the full shape (the maple's near mesh: 28
-					 * and 16 vertices of branch cards beside the 78). The engine
-					 * draws one of them; a bake would draw them all, on top of
-					 * each other. Hidden through the model's own flag, which
-					 * every render of the bake honours. */
+					// The engine's own in-cell detail steps: shapes named `_L1`, `_L2`... beside the full
+					// shape (the maple's near mesh: 28 and 16 vertices of branch cards beside the 78).
 					if ( NifModel * mnif = skope->getNifModel() ) {
 						/* THE MESH-LOD LEVEL THE BAKE PHOTOGRAPHS, one for the whole
-						 * model (lane IMPOSTORSHRUB1, 2026-09-23): the lowest slot that
+						 * model: the lowest slot that
 						 * ANY BSMeshLODTriShape fills. See the slot rule below. */
 						int keptLevel = -1;
 						for ( int b = 0; b < mnif->getBlockCount(); b++ ) {
@@ -24386,34 +21096,9 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 								continue;
 							const QString name = mnif->get<QString>( iB, "Name" );
 							if ( mnif->isNiBlock( iB, "BSMeshLODTriShape" ) ) {
-								/* The in-mesh steps: the triangle list is [full][L1][L2]
-								 * (the maple: 71 + 23 + 8), the engine draws one range and
-								 * the viewer draws every range at its default level
-								 * (BSShape::updateLodLevel: the first LOD0+LOD1+LOD2 triangles).
-								 *
-								 * ONE LEVEL FOR THE WHOLE MODEL, the lowest slot any shape
-								 * fills (lane IMPOSTORSHRUB1, 2026-09-23). The shape names say
-								 * what the slots hold: the exporter merges a full part (no
-								 * prefix) into LOD0, its `L1_` copy into LOD1 and its `L2_`
-								 * copy into LOD2 (HollyShrub01 `L1_HollyShrubSmall01` 0/302/0,
-								 * DeadShrub04 `L2_DeadShrub04` 0/0/158, FoothillsShrubLarge01
-								 * full + `L1_` 672/546/0). 27 of the 54 vanilla shrub, bush,
-								 * sapling, hedge and undergrowth models ship NO full part at
-								 * all - every shape's LOD0 slot is empty - so keeping LOD0
-								 * left 0 triangles and every one of them baked an EMPTY card
-								 * (halfW 1.077, 0 covered texels). Those now bake their
-								 * lowest filled level (DeadShrub01 0/123/198 keeps the `L1_`
-								 * 123, which has the larger box and 2.6x the triangle area of
-								 * the `L2_` 198: scratchpad/impostorshrub1_20260923/ranges.py).
-								 * The level is chosen per MODEL, not per shape: the maple
-								 * TreeMapleblasted05 has its full tree in one shape (141/0/42)
-								 * and its `L1_` copy alone in another (0/75/5); a per-shape
-								 * rule would draw both, one over the other. Every slot below
-								 * the kept level is empty in every shape, so the kept range
-								 * starts at triangle 0 and `LOD0 Size` triangles draw exactly
-								 * it; a shape that does not fill the kept level draws nothing,
-								 * as the engine's level does. A model with any LOD0 part
-								 * (keptLevel 0) bakes byte for byte as before. */
+								// The in-mesh steps: the triangle list is [full][L1][L2] (the maple: 71 + 23 +
+								// 8), the engine draws one range and the viewer draws every range at its
+								// default level (BSShape::updateLodLevel: the first LOD0+LOD1+LOD2 triangles).
 								const uint l1 = mnif->get<uint>( iB, "LOD1 Size" ), l2 = mnif->get<uint>( iB, "LOD2 Size" );
 								if ( l1 || l2 ) {
 									if ( keptLevel > 0 )
@@ -24431,26 +21116,17 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 						}
 					}
 
-					/* SOURCE .lodm (docs/LODGEN_IMPOSTOR_SPEC.md): a LOD material beside
-					 * the shape's material, or under materials\ at the diffuse's path,
-					 * retargets the shape's diffuse, normal and specular slots to the
-					 * textures it names, and its family decides the set's. A set is
-					 * PBR only when EVERY textured shape carries a pbr .lodm; otherwise
-					 * legacy, and a legacy .lodm still retargets. WW_LODGEN_DATA_ROOT
-					 * is a loose Data folder searched before the game's resources, so
-					 * a harness can supply one without touching a corpus. The meta
-					 * says what was found, one `lodm` line per shape. */
+					// SOURCE .lodm (docs/LODGEN_IMPOSTOR_SPEC.md): a LOD material beside the shape's material,
+					// or under materials\ at the diffuse's path, retargets the shape's diffuse, normal and
+					// specular slots to the textures it names, and its family decides the set's.
 					bool familyPbr = false;
 					int lodmShapes = 0;
-					/* Which shapes take their emissive multiple from a source .lodm
-					 * rather than from the vanilla own-emit rule: the block number ->
-					 * that file's `emissiveScale`. Whichever law composed a shape's
-					 * emissive picture owns the multiple that goes with it. */
+					// Which shapes take their emissive multiple from a source .lodm rather than from the
+					// vanilla own-emit rule: the block number -> that file's `emissiveScale`.
 					QHash<int, float> lodmEmissiveScale;
-					/* IMPOSTORPBRM1: the per-bake folder holding the .pbrm law's sources
-					 * (alive until the bake ends), each pbr shape's slot 7 for the specular
-					 * passes, and whether a `_s` sheet is owed (a shape departs from the
-					 * default specular: weight 1, white, IOR 1.5). */
+					// the per-bake folder holding the .pbrm law's sources (alive until the bake ends), each
+					// pbr shape's slot 7 for the specular passes, and whether a `_s` sheet is owed (a shape
+					// departs from the default specular: weight 1, white, IOR 1.5).
 					std::unique_ptr<QTemporaryDir> pbrmTmp;
 					std::vector<WwPbrmSpecSlot> pbrmSpecSlots;
 					bool pbrmSpec = false;
@@ -24474,7 +21150,7 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 								nif->getResourceFile( out, candidate, "materials", ".lodm" );
 							return !out.isEmpty();
 						};
-						/* THE .pbrm ROUTE (IMPOSTORPBRM1): a shape with no usable .lodm that
+						/* THE .pbrm ROUTE: a shape with no usable .lodm that
 						 * resolves a .pbrm through the viewport's one resolver (io/pbrmresolve:
 						 * the direct name, the same-name sibling, the diffuse stem), read from
 						 * the loose root first and then the stack -- the mesh-LOD mask path's
@@ -24531,14 +21207,8 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 								bsp->wwTextureOverride.insert( 1, lm.normal );
 							// slot 7 always marked: the raw material channel keys on it
 							bsp->wwTextureOverride.insert( 7, lm.mask.isEmpty() ? bsp->fileName( 7 ) : lm.mask );
-							/* The GLOW slot (2), which shader channel 13 keys on the
-							 * same way: a named emissive is photographed RAW. A pbr
-							 * set that names none marks the slot EMPTY, which binds
-							 * the black texture - a pbr set's emissive is its
-							 * .lodm's or nothing. A legacy .lodm that names none
-							 * leaves the slot alone, so its shape keeps the vanilla
-							 * glow rule (the diffuse times its alpha, on the shapes
-							 * that are not alpha-tested). */
+							// The GLOW slot (2), which shader channel 13 keys on the same way: a named
+							// emissive is photographed RAW.
 							if ( !lm.emissive.isEmpty() )
 								bsp->wwTextureOverride.insert( 2, lm.emissive );
 							else if ( lm.pbr )
@@ -24626,26 +21296,13 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 						}
 						wwLodMaskByTree = anyTree ? 1 : 0;
 						ms << "mask " << ( anyTree ? "tree" : "alpha" ) << "\n";
-						/* THE SWAY SOURCE (IMPOSTORWIND1 sway A, bungo 2026-09-24 21:1x): a
-						 * model with a tree-animation shape sways by its OWN wind weight, read
-						 * off channel 11 G; one without keeps the synthetic law. The same test
-						 * the mask rule uses, so the two can never disagree about a model. */
+						// THE SWAY SOURCE (IMPOSTORWIND1 sway A, bungo 2026-09-24 21:1x): a model with a
+						// tree-animation shape sways by its OWN wind weight, read off channel 11 G; one
+						// without keeps the synthetic law.
 						ms << "sway " << ( anyTree ? "model" : "synthetic" ) << "\n";
 					}
 
-					/* THE SET'S EMISSIVE MULTIPLE (docs/LODGEN_IMPOSTOR_SPEC.md).
-					 * The emissive sheet carries the COLOUR - channel 13 multiplies
-					 * the legacy glow rule by the shape's emissive colour - but not
-					 * the MULTIPLE, which may exceed 1 where the sheet is eight bits.
-					 * bungo, 2026-09-06: "carry the multiplier in lodm". Per shape:
-					 * a source .lodm's own `emissiveScale` where that file supplied
-					 * the picture, else the vanilla rule - the emissive multiple
-					 * where the shape OWN-EMITS with a colour that is not black, and
-					 * 0 where it does not. The set takes the LARGEST, because one
-					 * sheet serves every shape of the model and a scale that dimmed
-					 * the brightest of them would lose light no other number can put
-					 * back. 0 is the honest answer for vanilla: every measured LOD
-					 * chunk shape own-emits with a BLACK colour. */
+					// THE SET'S EMISSIVE MULTIPLE (docs/LODGEN_IMPOSTOR_SPEC.md).
 					{
 						Scene * sc = skope->ogl->getScene();
 						const NifModel * nif = sc ? sc->nifModel : nullptr;
@@ -24749,7 +21406,7 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 					 * alpha test still cuts. Near and far sit symmetric about the
 					 * bound centre, so window z 0.5 is the card plane. */
 					const int octN = wwEnvInt( "WW_IMPOSTOR_OCT" );
-					/* THE HORIZON RING (lane CARDFIX1 step 5 = IMPOSTORRING1; bungo 2026-09-23
+					/* THE HORIZON RING (bungo 2026-09-23
 					 * 04:4x, RULED: "for fo4cs use the convention was 22.5 degrees per take").
 					 * WW_IMPOSTOR_RING=V photographs V azimuths at elevation 0, frame v at
 					 * 360*v/V, in ONE row: the aggregate's ring layout (docs/LODGEN_LODM_FORMAT.md
@@ -24762,24 +21419,18 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 					if ( ringOn || ( octN >= 2 && octN <= 16 ) ) {
 						int tile = wwEnvInt( "WW_IMPOSTOR_TILE" );
 						if ( tile < 32 || tile > 512 )
-							tile = 256;	// 8 x 8 at 2k (bungo 2026-09-23, lane DEFAULTS2); was 128
+							tile = 256;	// 8 x 8 at 2k; was 128
 						/* To a multiple of 32: the size ladder below halves this up
 						 * to three times, and block compression needs a multiple of
 						 * 4 at the bottom of that. */
 						tile = tile / 32 * 32;
-						/* The run's LARGEST base, in world units - the size ladder's
-						 * reference. The hook photographs one model per process, so
-						 * it cannot know this; the candidate listing reports every
-						 * base's extent and the driver hands down the maximum.
-						 * Unset means no size ladder: every base at full size. */
+						// The run's LARGEST base, in world units - the size ladder's reference.
 						const float refExtent = wwEnvIsSet( "WW_IMPOSTOR_REF" )
 							? wwEnvStr( "WW_IMPOSTOR_REF" ).toFloat() : 0.0f;
 						skope->ogl->setOrientation( GLView::ViewFront, true );	// fit Dist to the bound once
 						qApp->processEvents();
-						/* The sheet is OCT*OCT views, each drawn twice for the
-						 * matte: 128 alternating black/white repaints at OCT=8,
-						 * the strobe bungo reported. Record where the window is
-						 * before the loop that produces it. */
+						// The sheet is OCT*OCT views, each drawn twice for the matte: 128 alternating
+						// black/white repaints at OCT=8, the strobe bungo reported.
 						wwLogTopLevelWindows( "sheet" );
 						lap.restart();
 						wwCardStamp( QStringLiteral( "octstart winpaint_so_far %1" ).arg( ct.winpaint ) );
@@ -24811,32 +21462,16 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 							dx /= len; dy /= len; dz /= len;
 							const float elev = std::asin( qBound( -1.0f, dz, 1.0f ) ) * 180.0f / 3.14159265f;
 							const float azim = std::atan2( dy, dx ) * 180.0f / 3.14159265f;
-							/* WW: the camera for the frame whose spec direction is
-							 * d = ( cos(elev)cos(azim), cos(elev)sin(azim), sin(elev) ).
-							 * Matrix::fromEuler is row-major and its ROWS are the camera's
-							 * axes in world space (measured against all six of
-							 * GLView::viewRotations), so the camera SITS at
-							 *     row2 = ( sinX sinZ, sinX cosZ, cosX ).
-							 * rx = -90 + elev gives cosX = sin(elev) -- the elevation was
-							 * always right -- and sinX = -cos(elev). Wanting row2 = d then
-							 * requires sinZ = -cos(azim) and cosZ = -sin(azim), which
-							 * Z = 270 - azim satisfies exactly. The old Z = 90 - azim gives
-							 * sinZ = +cos(azim), cosZ = +sin(azim), i.e. row2 =
-							 * ( -d.x, -d.y, +d.z ): the azimuth turned by 180 degrees, which
-							 * is what every set baked before this exe holds.
-							 * Repair ruled by bungo 2026-09-19 ("fix the 180 issue"); the
-							 * sheet block below stamps `conv spec1` so a reader can tell the
-							 * two apart. EVERY OLDER SET MUST BE RE-BAKED. */
+							// WW: the camera for the frame whose spec direction is d = ( cos(elev)cos(azim),
+							// cos(elev)sin(azim), sin(elev) ).
 							rx = -90.0f + elev;
 							rz = 270.0f - azim;
 						};
 						const Color4 bgs[2] = { Color4( 0, 0, 0, 1 ), Color4( 1, 1, 1, 1 ) };
 						Scene * bakeScene = skope->ogl->getScene();
 						const Scene::SceneOptions litOptions = bakeScene ? bakeScene->options : Scene::SceneOptions();
-						/* The matte: the scene over black and over white; the per-pixel
-						 * difference is 1 - alpha, and the colour is un-premultiplied
-						 * against the black pass. Lighting off: the consumer lights the
-						 * card through the normal sheet. */
+						// The matte: the scene over black and over white; the per-pixel difference is 1 -
+						// alpha, and the colour is un-premultiplied against the black pass.
 						auto matte = [&]() {
 							QImage pass[2];
 							if ( bakeScene )
@@ -24872,7 +21507,7 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 							return img;
 						};
 
-						/* THE 2x OFFSCREEN BAKE (lane IMPOSTORAA1, 2026-09-23; bungo
+						/* THE 2x OFFSCREEN BAKE (bungo
 						 * 2026-09-22: "Preferable solution would be a 2x render then
 						 * downscale to achieve AA").
 						 *
@@ -24903,7 +21538,7 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 						 * MODULE AND FALLBACK (CONSTITUTION 10): `WW_IMPOSTOR_AA=0`
 						 * restores the window photograph exactly, and the sidecar's
 						 * `aa` line names the arm that served. */
-						/* THE FACTOR (lane IMPOSTORTEAR1, 2026-09-23): 4 x 4 samples a texel,
+						/* THE FACTOR: 4 x 4 samples a texel,
 						 * raised from IMPOSTORAA1's 2 x 2. Measured on the 512-unit cube
 						 * (tests/spells/lodgen_octahedral.sh F1, N 8, tile 64): the 2x
 						 * bake reproduces its own ideal 2x2 estimator exactly and that
@@ -25015,7 +21650,7 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 							cov.fill( 0 );
 							if ( pass[0].isNull() || pass[1].isNull() )
 								return cov;
-							// row pointers: all three are ARGB32 w x h, where pixel()/setPixel() are the raw QRgb (CARDBAKE2)
+							// row pointers: all three are ARGB32 w x h, where pixel/setPixel are the raw QRgb
 							for ( int y = 0; y < h; y++ ) {
 								const QRgb * rb = reinterpret_cast<const QRgb *>( pass[0].constScanLine( y ) );
 								const QRgb * rw = reinterpret_cast<const QRgb *>( pass[1].constScanLine( y ) );
@@ -25036,43 +21671,16 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 							return img;
 						};
 
-						/* PASS ONE: the silhouette's own BOX, per view, in units, signed
-						 * about the camera centre -- and from those, TWO different things.
-						 *
-						 * PER-FRAME POSITIONING (bungo, 2026-09-09: "each frame shifts its
-						 * own silhouette to its own centre for minimal waste, with the
-						 * per-frame offset written into the .lodm"). At one scale and one
-						 * fixed centre a frame had to hold the UNION of every view's box,
-						 * and the union is wider than any single view because the views'
-						 * boxes sit at DIFFERENT offsets -- a tree leans one way from the
-						 * front and the other from the side, and the frame paid for both.
-						 * Centre each view's own box in its own frame and the frame has to
-						 * hold only the WIDEST SINGLE VIEW.
-						 *
-						 * What does NOT change is the SCALE: `halfW`/`halfH` are still one
-						 * pair for the whole card, so the tree is the same size in every
-						 * frame (his rule, 2026-09-09: "the tree is equal in size on each
-						 * one"), and the quad is still the whole frame, so a reader still
-						 * blends three neighbouring frames of one shape. What moves is
-						 * WHERE the quad sits: `frameOffX/Y[v]` per view, written to the
-						 * sidecar and to the `.lodm`, added to `center` along that view's
-						 * own right and up axes. Without them the tree would jump sideways
-						 * at the transition by exactly the shift, which is why the offset
-						 * is part of the format and not an internal detail. */
+						// PASS ONE: the silhouette's own BOX, per view, in units, signed about the camera
+						// centre -- and from those, TWO different things.
 						const float halfH0 = skope->ogl->orthographicHalfHeight();
 						QVector<float> frameOffX( gCols * gRows, 0.0f ), frameOffY( gCols * gRows, 0.0f );
 						// the ring's camera echo: what the renderer held for each frame, in degrees
 						QVector<float> echoAz( gCols * gRows, -999.0f ), echoEl( gCols * gRows, -999.0f );
 						float maxDx = 1.0f, maxDy = 1.0f;			// the widest SINGLE view's half box
 						float maxOffX = 0.0f, maxOffY = 0.0f;		// how far a view's centre sits from the camera's
-						/* The UNION half-extent about the camera centre -- what the frame
-						 * had to hold before per-frame positioning. It is kept because the
-						 * SIZE LADDER measures this base's world size against the run's
-						 * largest, and the reference it is compared with is a MODEL extent
-						 * from `--list-impostor-candidates`, not a per-view box. Feeding
-						 * the ladder the smaller number would drop trees a rung for a
-						 * reason that has nothing to do with how big they are. It is also
-						 * the denominator of the fill gain this law is measured by. */
+						// The UNION half-extent about the camera centre -- what the frame had to hold before
+						// per-frame positioning.
 						float unionDx = 1.0f, unionDy = 1.0f;
 						for ( int j = 0; j < gRows; j++ ) {
 							for ( int i = 0; i < gCols; i++ ) {
@@ -25115,37 +21723,9 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 								unionDy = qMax( unionDy, qMax( std::fabs( y0 ), std::fabs( y1 ) ) );
 							}
 						}
-						/* THE MEASUREMENT MARGIN. Pass one reads the silhouette in VIEWPORT
-						 * pixels at the bound-sphere fit, so its error is about one viewport
-						 * pixel -- 0.24% of a half-extent on an 841-pixel window. The old 4%
-						 * margin was seventeen times that and it came straight off the tree's
-						 * size in every frame; the DILATED PADDING below is the real margin. */
+						// THE MEASUREMENT MARGIN.
 						float halfW = maxDx * 1.01f, halfH = maxDy * 1.01f;
-						/* THE FRAME, ON A HALVING LADDER, FROM TWO MEASUREMENTS
-						 * (bungo, 2026-09-06). The chosen resolution is what the
-						 * run's LARGEST base gets; two independent steps take this
-						 * base down from it, each nearest-in-log:
-						 *
-						 *   SIZE, against WW_IMPOSTOR_REF: half the size takes half
-						 *   the long side, a quarter a quarter, at most three steps.
-						 *   Texel density then stays roughly constant across the
-						 *   library, which is the whole point - a small tree covers
-						 *   proportionally fewer screen pixels at the same distance,
-						 *   so it earns proportionally fewer texels. Ratios above 1
-						 *   are clamped: there is no rung above the chosen size.
-						 *
-						 *   ASPECT, from the silhouette this bake just measured: a
-						 *   2:1 tree gets a half-width frame and a 4:1 one a
-						 *   quarter, at most two steps.
-						 *
-						 * The short side used to quantise UP to a multiple of 16,
-						 * which gave a worldspace a dozen frame shapes; a card ARRAY
-						 * holds only sets that share a grid AND a frame, so every
-						 * extra shape is another array and another bind. Nearest-in-
-						 * log bounds the mismatch to a factor of root two either
-						 * way, and the fit below GROWS whichever extent is loose
-						 * rather than cropping, so a coarse ladder buys its arrays
-						 * with air in the frame, never with a cut silhouette. */
+						// THE FRAME, ON A HALVING LADDER, FROM TWO MEASUREMENTS.
 						auto sizeRung = []( int from, float ratio ) {
 							int steps = 0;
 							if ( ratio > 0.0f && ratio < 1.0f )
@@ -25202,22 +21782,9 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 							return g + ( g & 1 );		// even, so the gap splits into two whole texels
 						};
 						auto padOf = [gapOf]( int side ) { return gapOf( side ) / 2; };
-						/* THE ASPECT: the short side is the SMALLEST MULTIPLE OF 16 texels whose
-						 * inner rect is not narrower than the silhouette pass one measured, never
-						 * below 16 and never above the long side.
-						 *
-						 * It replaces the five-rung ratio ladder of 2026-09-06q, whose floor
-						 * (max(32, 2G+4)) forced a SQUARE frame on a needle-shaped tree:
-						 * TreeBlasted05's silhouette filled 4 texels of a 32-texel frame, 12.5%,
-						 * because there was no rung below a quarter and no frame below 32.
-						 *
-						 * Quantising to 16 keeps the number of frame SHAPES small, which is what
-						 * card arrays need -- an array holds only sets sharing a grid AND a frame.
-						 * Over the 19-tree library it is seven shapes against four, and the sheets
-						 * come out 2.5% SMALLER while the silhouette grows.
-						 *
-						 * The loop GROWS the frame until the silhouette fits, so the loose axis
-						 * gets air and the binding one is never cropped. */
+						// THE ASPECT: the short side is the SMALLEST MULTIPLE OF 16 texels whose inner rect is
+						// not narrower than the silhouette pass one measured, never below 16 and never above
+						// the long side.
 						const int padLong = padOf( tileLong );
 						const float aspLo = qMin( halfW, halfH ), aspHi = qMax( halfW, halfH );
 						const float wantRatio = ( aspHi > 0.0f && aspLo > 0.0f ) ? ( aspLo / aspHi ) : 1.0f;
@@ -25238,15 +21805,7 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 						// the gap the sidecar records: what a mip cap and a reader are told
 						const int gapX = gapOf( tw ), gapY = gapOf( th );
 						const int iw = tw - 2 * padX, ih = th - 2 * padY;
-						/* Quantising up made the frame a different shape from the
-						 * silhouette. WIDEN THE EXTENTS to the frame's, rather than
-						 * stretch the picture into it: the silhouette maps to the
-						 * INNER rect, so the extents take the inner rect's aspect,
-						 * and the object simply gets a little more air on one axis.
-						 * Whichever extent is the binding one is left alone and the
-						 * other GROWS - solving for the aspect in the other
-						 * direction would shrink a side and crop the silhouette
-						 * (at a 2:1 silhouette in a 64/32 frame, by 14%). */
+						// Quantising up made the frame a different shape from the silhouette.
 						if ( halfW * float( ih ) > halfH * float( iw ) )
 							halfH = halfW * float( ih ) / float( iw );
 						else
@@ -25262,16 +21821,7 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 						 * widen the recorded extents. */
 						const float viewW = float( qMax( 1, skope->ogl->width() ) );
 						const float viewH = float( qMax( 1, skope->ogl->height() ) );
-						/* PER-FRAME POSITIONING WIDENS THE FIT, and it has to. The crop
-						 * below is no longer centred on the camera: it is the frame's
-						 * extents taken around THAT VIEW'S OWN CENTRE, so the viewport
-						 * must hold `maxOff + half` on each axis, not `half`. Fitting to
-						 * `half` alone would let the crop rectangle run off the edge of
-						 * the photograph on the views whose silhouette leans furthest,
-						 * and a crop can only take what was photographed. The cost is
-						 * that the model is drawn a little smaller in the viewport, so
-						 * the downsample into the frame starts from marginally fewer
-						 * pixels; over the 19 trees `maxOff` is a few per cent of `half`. */
+						// PER-FRAME POSITIONING WIDENS THE FIT, and it has to.
 						const float fitH = qMax( maxOffY + halfH, ( maxOffX + halfW ) * viewH / viewW );
 						skope->ogl->setDistance( fitH );
 						qApp->processEvents();
@@ -25280,16 +21830,8 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 							if ( std::fabs( got - fitH ) > 1.0e-3f * fitH && got > 0.0f )
 								skope->ogl->setDistance( fitH * fitH / got );
 						}
-						/* THE FIT, READ BACK, AND THE PROJECTION IT WAS READ
-						 * THROUGH. `orthofit <asked> <achieved> <persp 0|1>`.
-						 * The read-back above compares two numbers that are both
-						 * `Dist / Zoom`, so it is true in either projection and
-						 * cannot see a perspective frustum -- which is how a
-						 * whole day's cards were fitted orthographically and
-						 * drawn perspectively without a single check going red.
-						 * The third field is what makes this line an instrument
-						 * rather than a restatement: it MOVES with
-						 * WW_IMPOSTOR_PERSP while the first two do not. */
+						// THE FIT, READ BACK, AND THE PROJECTION IT WAS READ THROUGH. `orthofit <asked>
+						// <achieved> <persp 0|1>`.
 						const float orthoFitGot = skope->ogl->orthographicHalfHeight();
 						const bool orthoFitPersp = skope->ogl->isPerspectiveProjection();
 						/* A GUTTER inside every frame: a few transparent texels of margin,
@@ -25307,11 +21849,8 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 						normal.fill( qRgba( 128, 128, 128, 0 ) );		// X, Y neutral; height at the card plane; no sway
 						rmaos.fill( qRgba( 128, 0, 255, 0 ) );			// the mask sheet (GSAOS or RMAOS): mid, none, open, no subsurface
 						emissive.fill( qRgba( 0, 0, 0, 255 ) );			// the emissive sheet: black, and opaque - it ships as BC1
-						/* THE SPECULAR SHEET `_s` (IMPOSTORPBRM1), only when a shape departs
-						 * from the default: RGB sqrt(F0'), A the specular weight; the empty texel
-						 * is the default, sqrt(0.04) = 51 and weight 1. Slot 7 is pointed at
-						 * each shape's spec source, then its weight source, for one channel-10
-						 * pass each, and restored. */
+						// THE SPECULAR SHEET `_s`, only when a shape departs from the default: RGB sqrt(F0'),
+						// A the specular weight; the empty texel is the default, sqrt(0.04) = 51 and weight 1.
 						QImage specS;
 						if ( pbrmSpec ) {
 							specS = QImage( S_W, S_H, QImage::Format_ARGB32 );
@@ -25322,13 +21861,8 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 								p.bsp->wwTextureOverride.insert( 7, which == 0 ? p.spec : which == 1 ? p.weight : p.restore );
 						};
 
-						/* The crop: the frame's extents out of the viewport's, around THIS
-						 * VIEW'S OWN silhouette centre (`ox`, `oy` in units, the pair pass
-						 * one measured). The crop's SIZE is the card's one scale, so the
-						 * tree is the same size in every frame; only the window moves. The
-						 * offset is clamped so the rectangle stays inside the photograph --
-						 * the fit above is sized to make that clamp a no-op, and `clamped`
-						 * counts the times it was not, so a silent crop cannot happen. */
+						// The crop: the frame's extents out of the viewport's, around THIS VIEW'S OWN
+						// silhouette centre (`ox`, `oy` in units, the pair pass one measured).
 						int clamped = 0;
 						auto frameOf = [&]( const QImage & img, float ox, float oy ) {
 							const float viewHalfW = fitH * float( img.width() ) / float( img.height() );
@@ -25353,69 +21887,9 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 							return frame;
 						};
 
-						/* THE COVERAGE, WRITTEN THE WAY THE READER TESTS IT (lane
-						 * CARDWIDTH, 2026-09-10).
-						 *
-						 * The bake defines coverage at a FLOOR of 16/255 and every
-						 * extent it writes -- `half`, and every `frameoff` -- is the
-						 * box of that silhouette. Both specs then tell the consumer to
-						 * alpha-test at 0.5. Those are two different silhouettes, and
-						 * the gap between them is the tree changing size at the
-						 * transition: over the library's three measured subjects the
-						 * set a consumer draws at 0.5 is up to 5.41 texels of
-						 * half-width short of the extents the `.lodm` declares --
-						 * TreeHero01 hands over to a card 9.1% narrower and 3.2%
-						 * shorter than its own mesh.
-						 *
-						 * WHICH OF THE TWO IS RIGHT was decided inside the source
-						 * render alone, with no bake in the comparison: the 941-px
-						 * silhouette box-filtered to the card's own texel pitch --
-						 * exactly what the downsample above computes -- reproduces its
-						 * own bounding box to 0.63 texels worst of twelve half-extents
-						 * at 16/255, and to 2.07 at 0.5. The FLOOR is right; the TEST
-						 * is what has to be made to agree with it.
-						 *
-						 * So the coverage is re-encoded on the way into the sheet:
-						 *
-						 *   a' = 0                                              a < floor
-						 *   a' = base + round( (a-floor) * (255-base) / (255-floor) )
-						 *
-						 * and then `{ a' >= test } == { a >= floor }` by construction
-						 * (measured: 0 disagreeing texels of 209,793 / 64,709 / 13,510
-						 * on the three sheets). 255 stays 255, so a solid silhouette --
-						 * the cube fixture -- cannot be fattened by a texel; an empty
-						 * texel becomes a clean 0 rather than a 1..15 no consumer can
-						 * use, so the sheet's coverage set and the dilation's `filled`
-						 * set become the same set; and the FRACTION survives, monotone
-						 * and invertible,
-						 *
-						 *   a = floor + (a'-base) * (255-floor) / (255-base)
-						 *
-						 * to a maximum error of one alpha step, so a consumer that
-						 * blends a bare crown instead of testing it loses nothing.
-						 *
-						 * WHY THE BASE IS 160 AND NOT THE TEST ITSELF. The sheet ships
-						 * as BC3 and `lodgenWriteDds`'s alpha block is endpoints
-						 * max/min with an eight-step ramp and nearest-palette indices,
-						 * so a texel's alpha can move by half a step, at most
-						 * (aMax-aMin)/14 <= 255/14 = 18.2. Written at 128 a covered
-						 * texel can round BELOW the test -- measured, 5,250 texels of
-						 * one sheet -- and written at 160 it cannot, because
-						 * 160 - 18.2 = 141.8. That leaves 96 of the 256 levels for the
-						 * fraction, against the eight a BC3 block resolves anyway.
-						 *
-						 * A LAW TRIED AND REFUSED, so it is not tried again: the
-						 * alpha-coverage-preserving downsample (scale each frame's
-						 * alpha until the area drawn at 0.5 equals the frame's own
-						 * alpha integral, which a box filter conserves). It left the
-						 * worst silhouette at -9.1%, because the outermost twigs carry
-						 * almost no AREA, and it fattened a solid rectangle by a whole
-						 * texel -- the cube fixture's own condition.
-						 *
-						 * The rest of the bake keeps reading the RAW matte alpha: the
-						 * un-premultiply divides by the coverage that was MEASURED, not
-						 * by the coverage that is written, and the AO and sway laws take
-						 * their neighbourhoods off the same raw frames. */
+						// THE COVERAGE, WRITTEN THE WAY THE READER TESTS IT:
+						// The bake defines coverage at a FLOOR of 16/255 and every extent it writes -- `half`,
+						// and every `frameoff` -- is the box of that silhouette.
 						const int covFloor = 16;		// the spec's coverage floor
 						const int covTest = 128;		// the alpha test both specs give a consumer, 0.5
 						const int covBase = 160;		// where the floor is written, so BC3 cannot round under the test
@@ -25434,10 +21908,8 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 								// this view's own silhouette centre: every channel is cropped around the same point
 								const float ox = frameOffX[j * gCols + i], oy = frameOffY[j * gCols + i];
 								if ( ringOn ) {
-									/* THE ECHO: the camera paintGL will use, read back from the view, not
-									 * the angle asked for. Its rotation's ROW 2 is where the camera sits
-									 * (the derivation at viewDir above), so azimuth and elevation are that
-									 * vector's own. A wrong rz law shows here as a wrong azimuth. */
+									// THE ECHO: the camera paintGL will use, read back from the view, not the
+									// angle asked for.
 									const Transform vt = skope->ogl->viewTransform();
 									const float ex = vt.rotation( 2, 0 ), ey = vt.rotation( 2, 1 ), ez = vt.rotation( 2, 2 );
 									float az = std::atan2( ey, ex ) * 180.0f / 3.14159265f;
@@ -25604,11 +22076,7 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 													occl++;
 											}
 										const int ao = tested ? 255 - 255 * occl / tested : 255;
-										/* sway, h up from the coverage's bottom row. SWAY A (IMPOSTORWIND1): a
-										 * model with a tree-animation shape writes W x h, W its own vertex-alpha
-										 * wind weight (channel 11 G, un-premultiplied like the mask; 0 on a shape
-										 * the game never moves). Else the synthetic h^2 * (0.35 + 0.65 r), unchanged
-										 * to the byte. */
+										// sway, h up from the coverage's bottom row.
 										const float h = float( bottom - y ) / rows;
 										int sway;
 										if ( wwLodMaskByTree ) {
@@ -25659,77 +22127,22 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 							specS.save( outDir + "/" + base + QStringLiteral( "_oct_s.png" ) );
 						if ( ct.on )
 							ct.write += st.elapsed();
-						/* The frame's SIZE CLASS, on a line of its own. It is the
-						 * frame size the `oct` line already carries, said once in
-						 * the meta's own words: the `oct` line's shape does not
-						 * move, because every reader of it splits on spaces and
-						 * indexes by position (docs/MISTAKES.md, the family token
-						 * that carried a newline). */
+						// The frame's SIZE CLASS, on a line of its own.
 						ms << "class " << tw << " " << th << "\n";
 						ms << "specular " << ( pbrmSpec ? "_s" : "none" ) << "\n";
-						/* THE GAP, on a line of its own, because the mip cap is DERIVED from it
-						 * and a reader must not have to re-guess the law that produced the sheet.
-						 * `gap <x> <y>`, in texels, is the distance between two neighbouring
-						 * SILHOUETTES across a frame border -- bungo's own quantity -- and the
-						 * margin on each side of a frame is half of it.
-						 *
-						 * Two older sidecars still read: one with a `pad <x> <y>` line (2026-09-09,
-						 * lane CARDFIT3) carries a PER-SIDE number written under the law
-						 * mips = 1 + log2(pad), and one with neither line falls back to
-						 * max(4, longSide/16) per side under that same older law. lodgenCard keeps
-						 * both paths so those sheets still convert to exactly the chains they were
-						 * built for. */
+						// THE GAP, on a line of its own, because the mip cap is DERIVED from it and a reader
+						// must not have to re-guess the law that produced the sheet.
 						ms << "gap " << gapX << " " << gapY << "\n";
-						/* THE COVERAGE CONTRACT, in the bake's own words (lane CARDWIDTH,
-						 * 2026-09-10): `coverage <floor> <test> <base>`. The base-colour
-						 * sheet's alpha is written so that a consumer testing at `test`
-						 * selects exactly the texels whose measured coverage reached
-						 * `floor`, with `base` the alpha the floor was written at; the
-						 * fraction is recovered by
-						 * floor + (a-base)*(255-floor)/(255-base).
-						 *
-						 * A sidecar WITHOUT this line is a sheet whose alpha is the raw
-						 * fraction and whose extents therefore describe the `floor`
-						 * silhouette while a consumer testing at 0.5 draws a smaller one
-						 * -- so absence is not "unknown", it is the older vintage, and
-						 * lodgenCard passes the absence through to the `.lodm` rather
-						 * than inventing a contract the bytes do not have. */
+						// THE COVERAGE CONTRACT, in the bake's own words: `coverage <floor> <test> <base>`.
 						ms << "coverage " << covFloor << " " << covTest << " " << covBase << "\n";
-						/* oct N frameW frameH halfW halfH cx cy cz depthspan family base conv
-						 * `base` is the RUN's chosen resolution, which frameW/frameH
-						 * may sit BELOW: a smaller frame is this base's rung on the
-						 * size ladder, not a differently-configured bake. Nothing
-						 * downstream could tell those apart without it, and the panel
-						 * refuses a directory whose base disagrees with its rows.
-						 *
-						 * `conv` is the VIEW CONVENTION TOKEN (2026-09-19). `spec1`
-						 * says frame (i,j) really is the view from direction (i,j),
-						 * which is what the camera above now produces. It goes LAST so
-						 * every reader that indexes by position and stops at `base` is
-						 * untouched, and its ABSENCE is the statement that the set came
-						 * from the bake whose azimuth was turned by 180 degrees.
-						 * EVERY SET WITHOUT IT MUST BE RE-BAKED. */
+						// oct N frameW frameH halfW halfH cx cy cz depthspan family base conv `base` is the
+						// RUN's chosen resolution, which frameW/frameH may sit BELOW: a smaller frame is this
+						// base's rung on the size ladder, not a differently-configured bake.
 						ms << ( ringOn ? "ring " : "oct " ) << ( ringOn ? ringV : octN ) << " " << tw << " " << th << " " << fullHalfW << " " << fullHalfH << " "
 						   << bs.center[0] << " " << bs.center[1] << " " << bs.center[2] << " " << depthSpan << " "
 						   << ( familyPbr ? "pbr" : "legacy" ) << " " << tile << " spec1" << "\n";
-						/* PER-FRAME POSITIONING, one line per frame: `frameoff i j ox oy`,
-						 * the offset in MODEL UNITS from the card's centre along that
-						 * view's own RIGHT and UP axes. Pass one measured `oy` in the
-						 * image's own downward sense, so it is negated here: everything
-						 * else this sidecar records about the vertical is up-positive.
-						 *
-						 * A reader places frame (i,j)'s quad at `center + ox*right +
-						 * oy*up` with the card's one pair of half extents; ignoring the
-						 * lines puts every quad at `center`, which is what a set from
-						 * before the law carries and is a tree that steps sideways when
-						 * the mesh hands over to the card. One line per frame, not one
-						 * long line, because every reader of this file splits on spaces
-						 * and indexes by position.
-						 *
-						 * `clamped` is the count of frames whose crop rectangle had to be
-						 * pulled back inside the photograph. The fit is sized so it is
-						 * zero; it is written out rather than asserted so a bake that hit
-						 * it says so instead of silently cropping a silhouette. */
+						// PER-FRAME POSITIONING, one line per frame: `frameoff i j ox oy`, the offset in MODEL
+						// UNITS from the card's centre along that view's own RIGHT and UP axes.
 						for ( int j = 0; j < gRows; j++ )
 							for ( int i = 0; i < gCols; i++ )
 								ms << "frameoff " << i << " " << j << " "
@@ -25742,12 +22155,9 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 						if ( ringOn )
 							for ( int v = 0; v < gCols; v++ )
 								ms << "ringview " << v << " " << echoAz[v] << " " << echoEl[v] << "\n";
-						/* THE PHOTOGRAPH'S ARM (lane IMPOSTORAA1): `aa 2 <pass-one size>
-						 * <worst centre miss in texels>` for the 2x offscreen bake (`aa 4 ...`
-						 * since IMPOSTORTEAR1: the first number is the factor K), `aa 0
-						 * <window WxH>` for the window photograph (WW_IMPOSTOR_AA=0).
-						 * Unknown to every older reader, which skips lines it does not
-						 * name; the sheet bytes keep their meaning either way. */
+						// THE PHOTOGRAPH'S ARM: `aa 2 <pass-one size> <worst centre miss in texels>` for the
+						// 2x offscreen bake (`aa 4 ...` since IMPOSTORTEAR1: the first number is the factor
+						// K), `aa 0 <window WxH>` for the window photograph (WW_IMPOSTOR_AA=0).
 						if ( aaOn )
 							ms << "aa " << aaK << " " << p1Size << " " << aaCentreErr << "\n";
 						else
@@ -25755,14 +22165,9 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 							   << skope->ogl->getSizeInPixels().height() << " crop "
 							   << int( float( skope->ogl->getSizeInPixels().height() ) * halfH / fitH + 0.5f )
 							   << " rows into " << ih << "\n";
-						/* What per-frame positioning bought, in the bake's own units and
-						 * before the 1.01 measurement margin: the widest SINGLE view's
-						 * half box, then the UNION half-extent about the camera centre
-						 * that a fixed-centre frame had to hold. The frame is sized from
-						 * the first and used to be sized from the second, so
-						 * `1 - single/union` is the waste this law removed on that axis.
-						 * Written so the gain is readable from the bake itself and not
-						 * only by differencing two libraries. */
+						// What per-frame positioning bought, in the bake's own units and before the 1.01
+						// measurement margin: the widest SINGLE view's half box, then the UNION half-extent
+						// about the camera centre that a fixed-centre frame had to hold.
 						ms << "framefit " << maxDx << " " << maxDy << " " << unionDx << " " << unionDy << "\n";
 						ms << "orthofit " << fitH << " " << orthoFitGot << " "
 						   << ( orthoFitPersp ? 1 : 0 ) << "\n";
@@ -25780,42 +22185,14 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 		} );
 	}
 
-	/* FIRST-FRAME GATE (WW_FIRSTFRAME_TEST=1, with WW_FRAME_SHOTS=<prefix>):
-	 * does the first frame the user is shown match the frame he gets after
-	 * interacting with the viewport?
-	 *
-	 * WW_RENDER_SHOT above cannot ask this. Before it grabs, it waits 2.5 s,
-	 * resizes the window, hides every dock, runs a pick render and pumps two
-	 * updates — and both a resize and a pick render repair exactly the startup
-	 * state a first-frame defect lives in. That is why the refraction viewport
-	 * bug (WW_CHANGES 2026-08-11) rendered perfectly in all seven regression
-	 * cases while being plainly wrong on screen every time a file was opened.
-	 *
-	 * So this run changes NOTHING that could heal it. No resize, no dock
-	 * layout, no camera, no scene time. It only:
-	 *   frames 1..n   whatever the document's own first paints produce
-	 *   pump          two ordinary repaints  -> "settled, never touched"
-	 *   indexAt()     one pick render, i.e. bungo's click in the viewport
-	 *   pump          two more               -> "settled after the click"
-	 * GLView writes every one of those frames through the same readback, so
-	 * comparing frame 1 with the last frame compares like with like and the
-	 * only variable left is first-frame state.
-	 *
-	 * showRefraction is forced here rather than inside the timer because the
-	 * timer fires long after frame 1: a persisted "Viewport Effects off" would
-	 * otherwise make frame 1 and the settled frame agree by both being empty of
-	 * the effect under test.
-	 */
+	// FIRST-FRAME GATE (WW_FIRSTFRAME_TEST=1, with WW_FRAME_SHOTS=<prefix>): does the first frame the user is
+	// shown match the frame he gets after interacting with the viewport?
 	if ( wwEnvIsSet( "WW_FIRSTFRAME_TEST" ) ) {
 		QObject::connect( skope, &NifSkope::completeLoading, skope, [skope]( bool, QString & ) {
 			if ( skope->ogl ) {
 				if ( Scene * sc = skope->ogl->getScene() ) {
-					// Same override as WW_RENDER_SHOT, and for the same reason:
-					// ON unless explicitly asked for 0, so a persisted user
-					// preference cannot silently empty the gate. The explicit 0
-					// is what lets a driver render the paired
-					// refraction-on/refraction-off FIRST frames and prove the
-					// effect was in frame 1 at all.
+					// Same override as WW_RENDER_SHOT, and for the same reason: ON unless explicitly asked for
+					// 0, so a persisted user preference cannot silently empty the gate.
 					sc->showRefraction = !wwEnvIsSet( "WW_RENDER_REFRACTION" )
 						|| wwEnvInt( "WW_RENDER_REFRACTION" ) != 0;
 					sc->showParticles = true;
@@ -25844,28 +22221,7 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 		} );
 	}
 
-	/* TEST HARNESS (WW_ARCHIVEBROWSE_TEST=<folder>): does loading a nif destroy a
-	 * browsed archive tree?
-	 *
-	 * bungo: "Loading any nif from the nif browser resets the NIF folder tree."
-	 *
-	 * WW_BROWSER_TEST below already covers the CONFIGURED tree, and it passes:
-	 * an unchanged (game, resource paths) signature takes a fast path that reuses
-	 * the tree entirely. That is why this needed a second harness rather than an
-	 * extra assertion — the reported symptom lives in the other mode, which the
-	 * first one never enters.
-	 *
-	 * Browse mode sets currentArchivePath, which makes `configuredIndexLive`
-	 * false forever, so the fast path can never be taken and every load fell
-	 * through to the full teardown. Two things are asserted, and the second is
-	 * the one that matters more: the tree survives, AND currentArchiveNames is
-	 * still populated. The teardown cleared that too, and
-	 * openArchiveFileString() returns immediately when it is empty — so the
-	 * first load from a browsed archive also made every later file in it
-	 * unopenable, which no amount of looking at the tree would have shown.
-	 *
-	 * Log: release/ww_archivebrowse_test.log
-	 */
+	// TEST HARNESS (WW_ARCHIVEBROWSE_TEST=<folder>): does loading a nif destroy a browsed archive tree?
 	if ( wwEnvIsSet( "WW_ARCHIVEBROWSE_TEST" ) ) {
 		const QString browseTarget = wwEnvStr( "WW_ARCHIVEBROWSE_TEST" );
 		QTimer::singleShot( 1500, skope, [skope, browseTarget]() {
@@ -25894,11 +22250,7 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 				log << "archive path set: " << !skope->currentArchivePath.isEmpty()
 					<< ", top-level rows " << rowsBefore
 					<< ", archive names " << namesBefore << "\n";
-				/* A run that never entered browse mode proves nothing, so it is a
-				 * FAILURE and not a skip. The first version of this harness
-				 * `break`-ed here and reported "0 checks, 0 failures / PASS" --
-				 * a green result from a test that had not run.
-				 */
+				// A run that never entered browse mode proves nothing, so it is a FAILURE and not a skip.
 				check( "the browse target opened in archive mode",
 					!skope->currentArchivePath.isEmpty() && rowsBefore > 0 );
 				if ( skope->currentArchivePath.isEmpty() || rowsBefore == 0 ) {
@@ -25933,12 +22285,8 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 					skope->currentArchiveNames.size() == namesBefore
 					&& !skope->currentArchiveNames.isEmpty() );
 
-				/* WW_ARCHIVEBROWSE_EXPECT=bto[,btr,...]: extensions that MUST
-				 * appear as file rows in the tree the user actually sees (the
-				 * proxy, so a filtering bug counts too). Added for the FO76
-				 * GeneratedMeshes report — 1,007 .bto indexed, none reportedly
-				 * shown — so that class of loss has a check that can fail.
-				 */
+				// WW_ARCHIVEBROWSE_EXPECT=bto[,btr,...]: extensions that MUST appear as file rows in the tree
+				// the user actually sees (the proxy, so a filtering bug counts too).
 				const QString expectList = wwEnvStr( "WW_ARCHIVEBROWSE_EXPECT" );
 				if ( !expectList.isEmpty() ) {
 					for ( const QString & ext : expectList.split( QLatin1Char( ',' ), Qt::SkipEmptyParts ) ) {
@@ -25971,10 +22319,8 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 		} );
 	}
 
-	// TEMP DIAGNOSTIC (WW_BROWSER_TEST=1): confirm the Available-NIFs tree keeps
-	// its expanded folders across the load-triggered repopulate. Expands the first
-	// folder, repopulates (exactly what completeLoading does), and checks the
-	// folder is still open. -> ww_browser_test.log, quit.
+	// TEMP DIAGNOSTIC (WW_BROWSER_TEST=1): confirm the Available-NIFs tree keeps its expanded folders across
+	// the load-triggered repopulate.
 	if ( !fname.isEmpty() && wwEnvIsSet( "WW_BROWSER_TEST" ) ) {
 		QObject::connect( skope, &NifSkope::completeLoading, skope, [skope]( bool, QString & ) {
 			QTimer::singleShot( 2500, skope, [skope]() {
@@ -26259,24 +22605,11 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 	if ( !fname.isEmpty() ) {
 		skope->loadFile( fname );
 	} else if ( !background ) {
-		// A window with no file still gets a DOCUMENT: the Fallout 4 header and a
-		// root NiNode to hang work off. Unconditional — there is no preference and
-		// no harness exception, because an empty root node changes nothing anyone
-		// was measuring.
+		// A window with no file still gets a DOCUMENT: the Fallout 4 header and a root NiNode to hang work
+		// off.
 		NifModel * nif = skope->getNifModel();
 		QString error;
-		/* Bracket the build in beginLoading/completeLoading, exactly as loadFile()
-		 * does, and in that order.
-		 *
-		 * Everything that reacts to a document arriving hangs off these, and
-		 * building the model directly skips all of it. But they MUST be paired:
-		 * onLoadBegin() and onLoadComplete() each call swapModels(), which TOGGLES
-		 * the views between the real models and the empty ones used to keep them
-		 * quiet during a load. Emitting only completeLoading — which is what this
-		 * did at first — runs that toggle an odd number of times and leaves the
-		 * views bound to nifEmpty, so Block Details showed a header with
-		 * "Num Blocks 0" and a stale version instead of the selected block.
-		 */
+		// Bracket the build in beginLoading/completeLoading, exactly as loadFile() does, and in that order.
 		QString noFile;
 		emit skope->beginLoading();
 		const bool built = nif && nifCreateStarterScene( nif, &error );
@@ -26323,34 +22656,9 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 					}
 					skope->ogl->grabFramebuffer().save( starterShot );
 
-					/* AND SELECTING A BLOCK FILLS BLOCK DETAILS.
-					 *
-					 * Reported empty on this exact document: the block selected in
-					 * the Block List, the panel showing its two column headers and
-					 * nothing under them. Everything the panel needs is decided in
-					 * NifSkope::select — which model the tree is on, which block is
-					 * its root, and whether a filter is hiding what is there — so
-					 * all four are logged rather than just the row count, because
-					 * "empty" has four different causes and they need telling apart.
-					 *
-					 * The starter is ONE root node now, and the filter checks below
-					 * need a second block to switch away to. A scratch node is added
-					 * for exactly that and removed again before the reload check, so
-					 * that one still starts from the untouched starter count.
-					 *
-					 * THE LEFT COLUMN IS FORCED INTO BLOCKS MODE FIRST, and that
-					 * is not tidiness. select() roots Block Details at the
-					 * selected block only in that mode; in the other two it hands
-					 * the view an invalid root, which a QTreeView reads as "show
-					 * the whole model" — and refreshRowHiding() returns early on
-					 * an invalid root, so the search box appears not to filter at
-					 * all. The mode is persisted in QSettings, so whichever one
-					 * the profile happened to be left in decided the result of
-					 * this measurement. Measured with the column elsewhere: the
-					 * panel reported 4 rows — header, two blocks, footer — and 4
-					 * of 4 "matching", which is the whole file and no filter,
-					 * dressed up as a number.
-					 */
+					// AND SELECTING A BLOCK FILLS BLOCK DETAILS:
+					// Reported empty on this exact document: the block selected in the Block List, the panel
+					// showing its two column headers and nothing under them.
 					{
 						skope->setLeftColumnMode( NifSkope::LeftBlocks );
 						QApplication::processEvents();
@@ -26361,18 +22669,7 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 						NifTreeView * t = skope->tree;
 						const QModelIndex droot = t->rootIndex();
 						const int rows = t->model() ? t->model()->rowCount( droot ) : -1;
-						/* COUNTED BY WHAT IS LAID OUT, not by asking the view which
-						 * rows it hides.
-						 *
-						 * NifTreeView::isRowHidden( r, index ) ignores r and answers
-						 * for the INDEX it was handed — so the obvious
-						 * isRowHidden( r, root ) asks "is the block itself hidden"
-						 * thirty-seven times. It happened to agree with the defect
-						 * here, which is exactly how a proxy metric earns trust it
-						 * has not got. A hidden row has an empty visualRect, and
-						 * that is the same thing the user is reporting: nothing
-						 * painted under the column headers.
-						 */
+						// COUNTED BY WHAT IS LAID OUT, not by asking the view which rows it hides.
 						auto painted = [t, nif]() {
 							const QModelIndex root = t->rootIndex();
 							int n = 0;
@@ -26397,15 +22694,10 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 								<< "', Blocks mode active "
 								<< int( skope->leftColumnIs( NifSkope::LeftBlocks ) ) << "\n";
 
-							/* AND THE SEARCH BOX STILL FILTERS.
-							 *
-							 * Blanking the panel and searching it use the SAME
-							 * filter on the same view, for different owners, so
-							 * the one way to get "selecting a block lifts the
-							 * blank filter" wrong is to lift the search box's
-							 * with it. Measured on both sides of a block switch,
-							 * because the keep set is built per block.
-							 */
+							// AND THE SEARCH BOX STILL FILTERS:
+							// Blanking the panel and searching it use the SAME filter on the same view, for
+							// different owners, so the one way to get "selecting a block lifts the blank
+							// filter" wrong is to lift the search box's with it.
 							skope->blockDetailsSearch->setText( QStringLiteral( "Rotation" ) );
 							qApp->processEvents();
 							const int filtered = painted();
@@ -26427,14 +22719,10 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 						qApp->processEvents();
 					}
 
-					/* AND RELOAD GIVES THE STARTER BACK.
-					 *
-					 * An untitled document has no file behind it, so Reload used to
-					 * go looking for one named "" and leave a blank window — the one
-					 * command that could destroy the starter scene without touching
-					 * anything on disk. The document is edited first, because a
-					 * reload that did nothing at all would otherwise pass.
-					 */
+					// AND RELOAD GIVES THE STARTER BACK:
+					// An untitled document has no file behind it, so Reload used to go looking for one named
+					// "" and leave a blank window — the one command that could destroy the starter scene
+					// without touching anything on disk.
 					QFile logf2( QApplication::applicationDirPath() + "/ww_starter_test.log" );
 					if ( logf2.open( QIODevice::Append | QIODevice::Text ) ) {
 						QTextStream log( &logf2 );
@@ -26456,14 +22744,8 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 				} );
 			}
 
-			/* TEST HARNESS (WW_EXTERNAL_DROP_TEST=a.nif;b.nif;c.nif): external
-			 * file URLs cross the native createWindowContainer boundary, then obey
-			 * the three-choice policy without replacing real work.
-			 *
-			 * A synthetic event cannot enter Qt's native drag manager. Calling the
-			 * application filter directly begins immediately below that boundary;
-			 * acceptDrops on the main/container widgets is checked separately.
-			 */
+			// TEST HARNESS (WW_EXTERNAL_DROP_TEST=a.nif;b.nif;c.nif): external file URLs cross the native
+			// createWindowContainer boundary, then obey the three-choice policy without replacing real work.
 			if ( wwEnvIsSet( "WW_EXTERNAL_DROP_TEST" ) ) {
 				QTimer::singleShot( 300, skope, [skope]() {
 					QFile logf( QApplication::applicationDirPath()
@@ -26577,7 +22859,7 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 						// count windows only after it has actually gone
 						settle( 300 );
 
-						/* OPENHERE1: the drop REPLACES the window. Floor: two Loaded
+						/* the drop REPLACES the window. Floor: two Loaded
 						 * files and a different primary exist before it, so a route
 						 * that merely added would fail the count and the name. */
 						check( "floor: two Loaded files and primary = first before Open Here",
@@ -26655,24 +22937,20 @@ void NifSkope::initActions()
 		allActions.insert( i );
 
 	// Undo/Redo
-	undoAction = wwAnimUndoGroup()->createUndoAction( this, tr( "&Undo" ) );	// (lane HKXEDIT2) one group: the NIF's stack, the .hkx document's, the workspace's
+	undoAction = wwAnimUndoGroup()->createUndoAction( this, tr( "&Undo" ) );	// one group: the NIF's stack, the .hkx document's, the workspace's
 	undoAction->setShortcut( QKeySequence::Undo );
 	undoAction->setObjectName( "aUndo" );
 	undoAction->setIcon( QIcon( ":btn/undo" ) );
 	allActions << undoAction;
-	redoAction = wwAnimUndoGroup()->createRedoAction( this, tr( "&Redo" ) );	// (lane HKXEDIT2)
+	redoAction = wwAnimUndoGroup()->createRedoAction( this, tr( "&Redo" ) );
 	redoAction->setShortcut( QKeySequence::Redo );
 	redoAction->setObjectName( "aRedo" );
 	redoAction->setIcon( QIcon( ":btn/redo" ) );
 	allActions << redoAction;
 
-	/* Ctrl+Shift+P anywhere in the window.
-	 *
-	 * The menu's own Search… row is discoverability; THIS is the speed win — no
-	 * right-click at all, against whichever block the list is on. It builds its
-	 * own SpellBook rather than borrowing the context menu's, because there is no
-	 * context menu open when this fires.
-	 */
+	// Ctrl+Shift+P anywhere in the window:
+	// The menu's own Search… row is discoverability; THIS is the speed win — no right-click at all, against
+	// whichever block the list is on.
 	QAction * paletteAction = new QAction( tr( "Search Spells…" ), this );
 	paletteAction->setObjectName( QStringLiteral( "aSpellPalette" ) );
 	paletteAction->setShortcut( QKeySequence( QStringLiteral( "Ctrl+Shift+P" ) ) );
@@ -26694,18 +22972,8 @@ void NifSkope::initActions()
 	addAction( paletteAction );
 	allActions << paletteAction;
 
-	/* Space in the viewport, which is Blender's Search.
-	 *
-	 * SCOPED TO THE VIEWPORT, and it has to be. A bare Space on a WindowShortcut
-	 * is matched before the key reaches whatever has focus, so it would eat the
-	 * space bar in every line edit in the window -- the material search, the
-	 * block filter, a rename. Blender's Space is per-editor for the same reason.
-	 * Ctrl+Shift+P stays window-wide for the times focus is elsewhere.
-	 *
-	 * Both are named QActions, so Options ▸ Shortcuts lists them and either can
-	 * be rebound; the pane finds every named action of the window that carries a
-	 * sequence.
-	 */
+	// Space in the viewport, which is Blender's Search:
+	// SCOPED TO THE VIEWPORT, and it has to be.
 	QAction * paletteSpace = new QAction( tr( "Search Menu (viewport)" ), this );
 	paletteSpace->setObjectName( QStringLiteral( "aSpellPaletteSpace" ) );
 	paletteSpace->setShortcut( QKeySequence( Qt::Key_Space ) );
@@ -26732,17 +23000,9 @@ void NifSkope::initActions()
 	//idxForwardAction = indexStack->createRedoAction( this );
 	//idxBackAction = indexStack->createUndoAction( this );
 
-	/* Undo and Redo go in a MENU, not on the bar.
-	 *
-	 * Blender has no undo buttons in any header - it is Edit > Undo and Ctrl+Z -
-	 * and these two were holding the most valuable spot on the row, immediately
-	 * right of the menus, for a pair nobody clicks twice. The shortcuts are
-	 * unchanged and are how anyone actually undoes anything.
-	 *
-	 * Options is where they go because Options is this program's Edit menu:
-	 * Settings, Theme, Font. Put at the TOP, above a separator, which is where
-	 * Blender's Edit menu keeps them.
-	 */
+	// Undo and Redo go in a MENU, not on the bar:
+	// Blender has no undo buttons in any header - it is Edit > Undo and Ctrl+Z - and these two were holding
+	// the most valuable spot on the row, immediately right of the menus, for a pair nobody clicks twice.
 	if ( ui->mOptions ) {
 		QAction * first = ui->mOptions->actions().value( 0 );
 		ui->mOptions->insertAction( first, undoAction );
@@ -26960,15 +23220,9 @@ void NifSkope::initActions()
 		auto perfGuard = qScopeGuard( perfMark );
 		if ( !nif )
 			return;
-		/* NOT WHILE THE LIST IS THE ONE TALKING.
-		 *
-		 * A click on a property or a texture set is promoted to the NiAVObject
-		 * that owns it before it reaches the viewport, because that is the only
-		 * thing the viewport can draw. Repainting the list from that promotion
-		 * sent it straight back: the shape branch lit up and the BSTriShape
-		 * became primary, whichever child had actually been clicked. The list
-		 * has already set its own highlight from what was clicked.
-		 */
+		// NOT WHILE THE LIST IS THE ONE TALKING:
+		// A click on a property or a texture set is promoted to the NiAVObject that owns it before it reaches
+		// the viewport, because that is the only thing the viewport can draw.
 		if ( !updatingObjFromList ) {
 			nif->selHighlight = ogl->objSelection;
 			// the active node must always be highlighted, even if a selection-path
@@ -26980,11 +23234,8 @@ void NifSkope::initActions()
 		list->viewport()->update();
 		tree->viewport()->update();
 
-		// Mirror the object selection into the block list so the coloured rows
-		// are actually visible (and the list tracks viewport clicks the way
-		// Blender's outliner tracks the 3D view). Skip when the change already
-		// came from the list (the list is correct, and re-driving it would jump
-		// the current index to the block's palette copy and break Ctrl+click).
+		// Mirror the object selection into the block list so the coloured rows are actually visible (and the
+		// list tracks viewport clicks the way Blender's outliner tracks the 3D view).
 		if ( ogl->editMode || syncingObjToList || updatingObjFromList )
 			return;
 		syncingObjToList = true;
@@ -27033,7 +23284,7 @@ void NifSkope::initActions()
 
 void NifSkope::setLeftColumnMode( LeftColumnMode mode )
 {
-	/* lane WATER8: back to LeftHeader. WATER7 raised this clamp to LeftWater
+	/* back to LeftHeader. WATER7 raised this clamp to LeftWater
 	 * so a fourth page of this stack could be reached; bungo's "What? I
 	 * wanted it in that right panel though" retired that page, and a clamp
 	 * that still admitted 3 would let a stale saved mode select a page this
@@ -27067,20 +23318,9 @@ void NifSkope::initDockWidgets()
 	dInsp = ui->InspectDock;
 	dKfm = ui->KfmDock;
 
-	/* ONE PERMANENT LEFT EDITOR, THREE MODES.
-	 *
-	 * setupUi() still constructs the four upstream docks so their mature panel
-	 * contents do not have to be duplicated. Before restoreUi() can put any of
-	 * them into QMainWindow's saved dock graph, take those plain content widgets,
-	 * delete the empty legacy docks, and place the contents in one stable host:
-	 *
-	 *   Blocks      Block List / Block Details
-	 *   NIFs        NIF Browser / Loaded NIFs
-	 *   Header      Header alone
-	 *
-	 * From this point onward switching is only QStackedWidget::setCurrentIndex.
-	 * No live view, model or unsaved document is ever reparented again.
-	 */
+	// ONE PERMANENT LEFT EDITOR, THREE MODES:
+	// setupUi() still constructs the four upstream docks so their mature panel contents do not have to be
+	// duplicated.
 	QDockWidget * legacyList = ui->ListDock;
 	QDockWidget * legacyTree = ui->TreeDock;
 	QDockWidget * legacyHeader = ui->HeaderDock;
@@ -27095,10 +23335,8 @@ void NifSkope::initDockWidgets()
 	QWidget * treeContents = takeContents( legacyTree );
 	QWidget * headerContents = takeContents( legacyHeader );
 	QWidget * browserContents = takeContents( legacyBrowser );
-	// QDockWidget::setWidget(nullptr) leaves its former contents explicitly
-	// hidden. Clear that legacy state BEFORE the widgets enter their permanent
-	// splitters/stack. Showing a page after QStackedWidget owns it overrides the
-	// stack's hidden state and lets that inactive page paint through at an edge.
+	// QDockWidget::setWidget(nullptr) leaves its former contents explicitly hidden. Clear that legacy state
+	// BEFORE the widgets enter their permanent splitters/stack.
 	for ( QWidget * pageContents : { listContents, treeContents, browserContents,
 		headerContents, loadedNifsPane } )
 		pageContents->show();
@@ -27134,14 +23372,9 @@ void NifSkope::initDockWidgets()
 	leftColumnSelector->setExpanding( true );
 	leftColumnSelector->setUsesScrollButtons( false );
 	leftColumnSelector->setStyleSheet( wwSegmentedTabBarQss() );
-	/* Header, Blocks, NIFs -- the strip order only.
-	 *
-	 * The tab INDEX means nothing outside this widget: every caller asks for a
-	 * LeftColumnMode and the selector maps between the two through tabData, in
-	 * both directions. That is what makes reordering the strip a one-line-each
-	 * change rather than a renumbering, and the harness check below is what
-	 * keeps it that way.
-	 */
+	// Header, Blocks, NIFs -- the strip order only:
+	// The tab INDEX means nothing outside this widget: every caller asks for a LeftColumnMode and the selector
+	// maps between the two through tabData, in both directions.
 	leftColumnSelector->addTab( tr( "Header" ) );
 	leftColumnSelector->setTabData( 0, int( LeftHeader ) );
 	leftColumnSelector->setTabToolTip( 0, tr( "NIF Header" ) );
@@ -27201,7 +23434,7 @@ void NifSkope::initDockWidgets()
 			QTimer::singleShot( 0, this, &NifSkope::populateConfiguredNifBrowser );
 	} );
 
-	/* THE ANIMATION MANAGER DOCK IS GONE (lane UI6, 2026-09-11).
+	/* THE ANIMATION MANAGER DOCK IS GONE.
 	 *
 	 * bungo had already called it "old and outdated"; on 2026-09-10 21:1x he
 	 * sent three screenshots of it -- two spin boxes with their steppers
@@ -27220,13 +23453,8 @@ void NifSkope::initDockWidgets()
 	 * set (tlMakeIcon / tlIconNames / tlWriteIconSheet) the whole window uses.
 	 */
 
-	/* THE BODY BUILD dock (lane GLTFEXPORT1, bungo 2026-09-19 05:0x: "Fallout 4
-	 * has 'skin' bones, those are not used for animations, but only for the
-	 * character's build?"). A PREVIEW: it scales the loaded character's *_skin
-	 * nodes from the RACE record's own Bone Scale Data and writes nothing.
-	 * The dock is a local -- the harness finds the panel by object name, and
-	 * nothing else in the window addresses it -- so nifskope.h gains no member
-	 * while another lane is holding that file. */
+	// THE BODY BUILD dock. A PREVIEW: it scales the loaded character's *_skin nodes from the RACE record's own
+	// Bone Scale Data and writes nothing.
 	{
 		QDockWidget * dBodyBuild = new QDockWidget( tr( "Body Build" ), this );
 		dBodyBuild->setObjectName( "BodyBuildDock" );
@@ -27246,12 +23474,9 @@ void NifSkope::initDockWidgets()
 				 [bodyBuild]( bool, QString & ) { bodyBuild->onSceneRebuilt(); } );
 	}
 
-	/* THE CELL PICK dock and its master (lane CELLVIEW2). Flat Name|Value rows
-	 * for the reference under the cursor in a `.wwcell` scene, straight out of
-	 * CellPickTable::rowsFor() so the dock and the harness read the same
-	 * function. A LOCAL, exactly like the Body Build dock above: the harness
-	 * finds the panel by object name and nothing else in the window addresses
-	 * it, so nifskope.h gains no member while another lane holds that file. */
+	// THE CELL PICK dock and its master. Flat Name|Value rows for the reference under the cursor in a
+	// `.wwcell` scene, straight out of CellPickTable::rowsFor so the dock and the harness read the same
+	// function.
 	{
 		QDockWidget * dCellPick = new QDockWidget( tr( "Reference" ), this );
 		dCellPick->setObjectName( "CellPickDock" );
@@ -27262,12 +23487,8 @@ void NifSkope::initDockWidgets()
 		addDockWidget( Qt::RightDockWidgetArea, dCellPick );
 		dCellPick->hide();
 
-		/* THE MASTER SHIPS OFF, WITH A ROW (bungo's standing rule: every feature
-		 * master ships off, and nothing exists without a row to reach it).
-		 * While it is unticked cellPickClick() returns false, the viewport's
-		 * click falls through to the ordinary block selection and this lane
-		 * changes nothing. The colour overlays INSIDE the cell view are not
-		 * masters and get no row -- they are one view's display setting. */
+		// THE MASTER SHIPS OFF, WITH A ROW. While it is unticked cellPickClick returns false, the viewport's
+		// click falls through to the ordinary block selection and this lane changes nothing.
 		QAction * aCellPick = new QAction( tr( "Cell Pick Panel" ), this );
 		aCellPick->setCheckable( true );
 		aCellPick->setChecked( false );
@@ -27279,14 +23500,7 @@ void NifSkope::initDockWidgets()
 		} );
 		ui->mRender->addAction( aCellPick );
 
-		/* THE SELF-TEST (WW_CELLPICK_TEST=<report path>, src/cellpicktest.h).
-		 * The click path starts in the viewport and ends in this dock, so it
-		 * is measured INSIDE the running window and the answers are written
-		 * to a file tests/spells/cell_pick.sh greps -- never judged from a
-		 * screenshot. It runs after completeLoading because the cell scene
-		 * the placement table describes is built by that load, and it ticks
-		 * the master itself: a harness forces the state it measures rather
-		 * than inheriting it from QSettings. */
+		// THE SELF-TEST (WW_CELLPICK_TEST=<report path>, src/cellpicktest.h).
 		if ( !wwEnv( "WW_CELLPICK_TEST" ).isEmpty() ) {
 			aCellPick->setChecked( true );
 			connect( this, &NifSkope::completeLoading, this,
@@ -27297,15 +23511,7 @@ void NifSkope::initDockWidgets()
 		}
 	}
 
-	/* THE ANIMATION WORKSPACE (lane HKXEDIT2, bungo 2026-09-10: "Just make hkx
-	 * fully editable in our nifskope"; "Animation manager was one of the
-	 * first features for nifskope, and it's pretty old and outdated btw").
-	 * One dock: the NIF's sequences and the loaded .hkx clips in one list,
-	 * Blender's dope sheet with keys per bone track, annotations as markers,
-	 * float tracks, one transport row, the old manager's sequence controls as
-	 * rows, and the clip fully editable (keys, annotations, trim, retime,
-	 * root-motion bake, Save as .hkx). The Animation Manager dock above stays
-	 * until this one is proven in the app; a follow-up retires it. */
+	// THE ANIMATION WORKSPACE.
 	dAnimWs = new QDockWidget( tr( "Animation" ), this );
 	dAnimWs->setObjectName( "AnimWorkspaceDock" );
 	animws = new AnimWorkspace( dAnimWs );
@@ -27346,21 +23552,10 @@ void NifSkope::initDockWidgets()
 		}
 	} );
 
-	// Re-dock at the bottom when reopened from the menu: a floating dock that
-	// was closed can come back with its title bar off screen and become unmovable.
-	// Only on the menu action's triggered — toggled also fires during the
-	// drag-to-float transition and would make the dock impossible to detach.
+	// Re-dock at the bottom when reopened from the menu: a floating dock that was closed can come back with
+	// its title bar off screen and become unmovable.
 
-	/* The Animation dock's transport, routed into the ONE playback engine.
-	 *
-	 * No aAnimate gate: it made the dock's play button do nothing, silently,
-	 * whenever View > Animations was off. aAnimPlay enables it itself.
-	 *
-	 * Direction is the SIGN OF THE ANIMATION SPEED, which is what GLView's loop
-	 * already understands -- it wraps at whichever end the sign heads for, so Loop
-	 * and Switch behave identically forwards and backwards. The dock used to keep
-	 * a private playDir the renderer never saw.
-	 */
+	// The Animation dock's transport, routed into the ONE playback engine.
 	connect( animws, &AnimWorkspace::playPauseRequested, this, [this]( int dir ) {
 		if ( dir == 0 ) {
 			if ( ui->aAnimPlay->isChecked() )
@@ -27374,12 +23569,7 @@ void NifSkope::initDockWidgets()
 		animws->setPlayingState( true, dir < 0 );
 	} );
 
-	/* ...and the buttons follow the APPLICATION, not their own clicks.
-	 *
-	 * Space, the menubar's Play, and a sequence ending without Loop all change
-	 * playback without going through this dock. btnPlay's checked state used to
-	 * track only its own clicks, so it drifted out of step with everything else.
-	 */
+	// ...and the buttons follow the APPLICATION, not their own clicks.
 
 	// Solo / preview-only rendering of the selected node
 	QAction * aSolo = new QAction( tr( "Solo Selected" ), this );
@@ -27433,9 +23623,6 @@ void NifSkope::initDockWidgets()
 			  wwSkinColor( "bgBtnDown" ), wwSkinColor( "bgPanel" ) );
 
 	// Blender-style redo panel: tweak the parameters of the last transform.
-	// The GL viewport is a native window (createWindowContainer) that paints
-	// over any child-widget overlay, so the panel must be a floating frameless
-	// tool window positioned over the viewport instead of a child widget.
 	{
 		QFrame * rp = new QFrame( this, Qt::Tool | Qt::FramelessWindowHint );
 		rp->setObjectName( QStringLiteral( "GizmoRedoPanel" ) );
@@ -27785,10 +23972,9 @@ void NifSkope::initDockWidgets()
 		connect( this, &NifSkope::completeLoading, bp, &QWidget::hide );
 	}
 
-	// Generalized operator redo panel (Redo Panel v2, MODELING_TOOLS_PLAN
-	// F0.a): a typed parameter list — floats/ints as WwNumberFieldes, bools as
-	// checkboxes, enums as dropdowns — driving GLView::reapplyOperatorEx.
-	// First consumer: Extrude Region and Move.
+	// Generalized operator redo panel (Redo Panel v2, MODELING_TOOLS_PLAN F0.a): a typed parameter list —
+	// floats/ints as WwNumberFieldes, bools as checkboxes, enums as dropdowns — driving
+	// GLView::reapplyOperatorEx.
 	{
 		constexpr int MAXP = 8;
 		QFrame * xp = new QFrame( this, Qt::Tool | Qt::FramelessWindowHint );
@@ -27944,7 +24130,7 @@ void NifSkope::initDockWidgets()
 		connect( this, &NifSkope::completeLoading, xp, &QWidget::hide );
 	}
 
-	// F9 (Blender): move the visible adjust panel next to the mouse cursor
+	// move the visible adjust panel next to the mouse cursor
 	connect( ogl, &GLView::redoPanelToCursor, this, [this]() {
 		for ( QFrame * p : { gizmoRedoPanel, operatorRedoPanel, boxRedoPanel, operatorExRedoPanel } ) {
 			if ( !p || !p->isVisible() )
@@ -27961,10 +24147,6 @@ void NifSkope::initDockWidgets()
 	} );
 
 	// per-object edit-mode selections are remembered only until a new file loads.
-	// The hide state and quad-diagonal marks are keyed by block number, so they
-	// MUST go too: a shape in the next file can land on the same block number
-	// (hiddenTris is consulted by the normal render — stale entries silently
-	// punched holes in freshly loaded meshes).
 	connect( this, &NifSkope::completeLoading, [this]() {
 		ogl->savedElemSelections.clear();
 		ogl->editHiddenTris.clear();
@@ -27976,10 +24158,9 @@ void NifSkope::initDockWidgets()
 			ogl->scene->hiddenTris.clear();
 	} );
 
-	// A selection restored while the file was still parsing bails out of the
-	// row-hiding pass (model state != Default) and a later select() of the
-	// same block skips setRootIndex — re-apply once the load has completed so
-	// version-mismatched rows (Skyrim fields on FO4 NIFs) never stay stranded.
+	// A selection restored while the file was still parsing bails out of the row-hiding pass (model state !=
+	// Default) and a later select() of the same block skips setRootIndex — re-apply once the load has
+	// completed so version-mismatched rows (Skyrim fields on FO4 NIFs) never stay stranded.
 	connect( this, &NifSkope::completeLoading, [this]() {
 		// Hidden views can skip this: NifTreeView::doItemsLayout re-derives the
 		// row hiding before the first layout when the dock is next shown.
@@ -28121,27 +24302,17 @@ void NifSkope::initDockWidgets()
 		// the operator redo panel that pops up lets you readjust the angle live
 		ogl->selectLinked( true, ( ogl->lastOpKind == 2 ) ? ogl->lastOpParam : 30.0f );
 	} );
-	// deliberately NOT added to the Render menu: every entry here is also in
-	// the viewport right-click menus (snap/select-linked) or the display
-	// dropdown (Show 3D Cursor), and the duplication confused more than it
-	// helped. The menu object stays alive as the owner of its actions.
+	// deliberately NOT added to the Render menu: every entry here is also in the viewport right-click menus
+	// (snap/select-linked) or the display dropdown (Show 3D Cursor), and the duplication confused more than it
+	// helped.
 
 
-	/* The viewport's own keys: Search on Space, Quick Favourites on Q.
-	 *
-	 * Built in initActions so they are named children of the window and the
-	 * Shortcuts pane can rebind them; added here because this is where the
-	 * widget they are scoped to exists.
-	 */
+	// The viewport's own keys: Search on Space, Quick Favourites on Q.
 	for ( const char * named : { "aSpellPaletteSpace", "aQuickFavourites" } )
 		if ( QAction * a = findChild<QAction *>( QLatin1String( named ) ) )
 			graphicsView->addAction( a );
 
-	/* Animation playback moves off Space, which Search now has, to Shift+Space.
-	 * Blender does the same thing when its Spacebar Action is set to anything
-	 * other than Play -- the transport keeps a Space-shaped binding rather than
-	 * being scattered to an unrelated key.
-	 */
+	// Animation playback moves off Space, which Search now has, to Shift+Space.
 	QAction * aPlaySpace = new QAction( tr( "Play/Pause Animation (viewport)" ), this );
 	aPlaySpace->setObjectName( QStringLiteral( "aAnimPlaySpace" ) );
 	aPlaySpace->setShortcut( QKeySequence( QStringLiteral( "Shift+Space" ) ) );
@@ -28172,19 +24343,7 @@ void NifSkope::initDockWidgets()
 	dInsp->setVisible( false );
 	dKfm->setVisible( false );
 
-	/* The View menu is gone; the Panels button is where all of it lives now.
-	 *
-	 * `View > Show` listed these same seven dock toggles - the SAME QAction
-	 * objects the Panels menu adds below, not equivalents - so the two could not
-	 * disagree, and neither could tell you which one you were supposed to use.
-	 * Populating it here as well would only rebuild the door that was removed.
-	 *
-	 * The actions themselves are untouched: each belongs to its dock, so nothing
-	 * is lost by one menu no longer listing them.
-	 *
-	 * Manager docks are selected from the Workspaces button, not the generic
-	 * panel list.
-	 */
+	// The View menu is gone; the Panels button is where all of it lives now.
 	ui->menubar->removeAction( ui->mView->menuAction() );
 
 	// ---- main toolbar overhaul: smaller icons, merged dropdowns, transform header ----
@@ -28221,7 +24380,7 @@ void NifSkope::initDockWidgets()
 		const QIcon physicsIcon = tlMakeIcon( QStringLiteral( "mode_physics" ), iconColor );
 		QToolButton * modeButton = new QToolButton( this );
 		modeButton->setObjectName( QStringLiteral( "ViewportModeButton" ) );
-		WwDropdown::applyStyle( modeButton );	// lane OPENCELLFIX2: THE dropdown look; the dock's dropdowns share it
+		WwDropdown::applyStyle( modeButton );	// THE dropdown look; the dock's dropdowns share it
 		modeButton->setToolButtonStyle( Qt::ToolButtonTextBesideIcon );
 		modeButton->setToolTip( tr( "Viewport interaction mode. Tab toggles Object Mode and the last non-object mode." ) );
 
@@ -28256,15 +24415,10 @@ void NifSkope::initDockWidgets()
 		// constant width across every mode label, so the toolbar row doesn't
 		// shift when the mode changes
 		{
-			/* Wide enough for the longest label and not a pixel more.
-			 *
-			 * The old form measured the TEXT with QFontMetrics and then added a
-			 * hand-tuned 46 px for icon, padding, border and the menu
-			 * indicator - which overshot, leaving a visible gap between the end
-			 * of the text and the arrow. Setting each label in turn and asking
-			 * the button for its own sizeHint gets the real figure from the
-			 * style, including the indicator, with no magic number to drift.
-			 */
+			// Wide enough for the longest label and not a pixel more:
+			// The old form measured the TEXT with QFontMetrics and then added a hand-tuned 46 px for icon,
+			// padding, border and the menu indicator - which overshot, leaving a visible gap between the end
+			// of the text and the arrow.
 			const QString saved = modeButton->text();
 			modeButton->ensurePolished();
 			const QFontMetrics fm( modeButton->font() );
@@ -28276,19 +24430,9 @@ void NifSkope::initDockWidgets()
 				wText = std::max( wText, fm.horizontalAdvance( s ) );
 			}
 			modeButton->setText( saved );
-			/* The LARGER of the two estimates.
-			 *
-			 * sizeHint alone elided the label to "Obje...Mode": QToolButton does
-			 * not fold stylesheet padding into its hint, so on a QSS-styled
-			 * button it under-reports. Font metrics alone was the old form and
-			 * over-reported, leaving a gap before the arrow. Taking the max
-			 * cannot clip, and lands on the tighter number wherever the hint is
-			 * honest.
-			 *
-			 * The 32 covers what the text measurement leaves out: 12 px of QSS
-			 * padding, ~4 px icon-to-text spacing, the 2 px border and the menu
-			 * indicator.
-			 */
+			// The LARGER of the two estimates:
+			// sizeHint alone elided the label to "Obje...Mode": QToolButton does not fold stylesheet padding
+			// into its hint, so on a QSS-styled button it under-reports.
 			modeButton->setFixedWidth( std::max( wHint,
 				wText + modeButton->iconSize().width() + 32 ) );
 		}
@@ -28323,15 +24467,9 @@ void NifSkope::initDockWidgets()
 				: paintingSegments ? QObject::tr( "Segment Paint" )
 				: posing ? QObject::tr( "Pose Mode" )
 				: ( editing ? QObject::tr( "Edit Mode" ) : QObject::tr( "Object Mode" ) ) );
-			/* The same ladder as the label above, in the same order.
-			 *
-			 * It was missing the simulating and posing rungs, so the button said
-			 * "Pose Mode" or "Physics Sim" beside the Object Mode cube. That was
-			 * invisible while Pose and Physics had no glyph of their own and the
-			 * menu handed them the cube as well - three of the seven entries were
-			 * the same picture, so the button was never wrong in a way anyone
-			 * could see.
-			 */
+			// The same ladder as the label above, in the same order:
+			// It was missing the simulating and posing rungs, so the button said "Pose Mode" or "Physics Sim"
+			// beside the Object Mode cube.
 			modeButton->setIcon( simulating ? physicsIcon
 				: paintingWeights ? weightPaintIcon
 				: paintingVertices ? vertexPaintIcon
@@ -28415,30 +24553,12 @@ void NifSkope::initDockWidgets()
 		// GLView always starts in object mode; subsequent changes arrive through
 		// the mode signals (including Tab, Esc, RMB, and manager-button changes).
 		syncModeButton();
-		/* The mode selector heads the MODE toolbar, and that toolbar comes first.
-		 *
-		 * Blender's viewport header is mode selector, then the header menus that
-		 * the mode governs - View, Select, Add, Object - and ours had the mode at
-		 * one end of the row and Select/Add/Object at the other, with every
-		 * transform widget in between. The position is what teaches you the verbs
-		 * follow the mode, and it was saying the opposite.
-		 *
-		 * insertToolBar moves tMode ahead of tRender in the row; the mode button
-		 * then leads tMode, and the separator that tMode adds next divides it
-		 * from the verbs.
-		 */
+		// The mode selector heads the MODE toolbar, and that toolbar comes first.
 		ui->tMode->addWidget( modeButton );
 		insertToolBar( ui->tRender, ui->tMode );
 
-		// Blender-style viewport header menus: Select · Add · Object in object
-		// mode, Select · Mesh · Vertex · Edge · Face in edit mode, Select ·
-		// Weights/Paint/Segments while painting. These now live in a docked
-		// toolbar (tMode) in the top toolbar row, in place of the old animation
-		// bar, rather than a floating overlay — as ordinary window chrome they
-		// need none of the overlay's focus/positioning workarounds. The menus
-		// rebuild on aboutToShow from GLView's populate functions (shared with
-		// the W quick menu), so enabled states are always current and the entry
-		// points cannot drift apart.
+		// Blender-style viewport header menus: Select · Add · Object in object mode, Select · Mesh · Vertex ·
+		// Edge · Face in edit mode, Select · Weights/Paint/Segments while painting.
 		QToolBar * modeBar = ui->tMode;
 		// thin line where the drag grip used to sit, delimiting the mode menus
 		// from the previous toolbar group
@@ -28477,18 +24597,10 @@ void NifSkope::initDockWidgets()
 		makeMenuButton( tr( "Add" ), &GLView::populateAddMenu, &aAdd );
 		QToolButton * mbObject = makeMenuButton( tr( "Object" ), &GLView::populateObjectMenu, &aObject );
 
-		/* Show/Hide joins the Object menu, as it does in Blender.
-		 *
-		 * Connected SECOND, after makeMenuButton's own aboutToShow: Qt runs slots
-		 * in connection order, and the first one clears the menu and repopulates
-		 * it, so anything appended earlier would be wiped before it was drawn.
-		 *
-		 * mViewportVisibility->aboutToShow() is emitted by hand because that is
-		 * what retexts these entries for the current mode and selection count -
-		 * "Isolate Selected Objects" against "Isolate Selected Geometry", and the
-		 * live count in "Hide Secondary Selected Objects (3)". Borrowing the
-		 * actions without firing it would show whatever the last mode left.
-		 */
+		// Show/Hide joins the Object menu, as it does in Blender:
+		// Connected SECOND, after makeMenuButton's own aboutToShow: Qt runs slots in connection order, and the
+		// first one clears the menu and repopulates it, so anything appended earlier would be wiped before it
+		// was drawn.
 		if ( mbObject && mbObject->menu() ) {
 			connect( mbObject->menu(), &QMenu::aboutToShow, this, [this, mbObject]() {
 				if ( !mViewportVisibility )
@@ -28533,10 +24645,7 @@ void NifSkope::initDockWidgets()
 		ui->tRender->removeAction( ui->aSelectVertex );
 	}
 
-	// Universal visibility controls. These intentionally live in the viewport
-	// header rather than a workspace panel: object isolation is useful in every
-	// workspace, while the same command becomes geometry isolation in Edit and
-	// Weight Paint modes.
+	// Universal visibility controls.
 	{
 		QToolButton * visibilityButton = new QToolButton( this );
 		visibilityButton->setObjectName( QStringLiteral( "ViewportVisibilityButton" ) );
@@ -28588,18 +24697,7 @@ void NifSkope::initDockWidgets()
 			aSolo->setChecked( false );
 			ogl->restoreAllVisibility();
 		} );
-		/* Isolate/Hide/Restore live in the OBJECT menu, not on a glyph.
-		 *
-		 * Blender has no header button for this: it is Object > Show/Hide, on H
-		 * and Alt+H. Ours was an unlabelled struck-through eye - and it was
-		 * already behaving like an Object-menu entry, retexting itself between
-		 * "Objects" and "Geometry" with the mode. It just was not in the menu.
-		 *
-		 * Appended after the menu's own populate step. The verb buttons rebuild
-		 * their menus on aboutToShow, and Qt runs slots in connection order, so
-		 * connecting second is what puts these at the bottom rather than having
-		 * them wiped by the clear().
-		 */
+		// Isolate/Hide/Restore live in the OBJECT menu, not on a glyph.
 		visibilityButton->hide();
 		mViewportVisibility = visibilityMenu;
 	}
@@ -28620,14 +24718,9 @@ void NifSkope::initDockWidgets()
 		QToolButton * btn = new QToolButton( this );
 		btn->setObjectName( QStringLiteral( "ViewportOverlaysButton" ) );
 		btn->setPopupMode( QToolButton::InstantPopup );
-		/* "Overlays", which is what Blender calls this exact dropdown.
-		 *
-		 * Its contents are nearly Blender's list already - grid, axes, nodes,
-		 * markers, origins, 3D cursor, gizmo - so "Display options" was a vaguer
-		 * word for a thing that has an established name. Labelled as well as
-		 * drawn: it is one of the two dropdowns that belong at the right-hand end
-		 * beside Shading, and that end is where a name is affordable.
-		 */
+		// "Overlays", which is what Blender calls this exact dropdown:
+		// Its contents are nearly Blender's list already - grid, axes, nodes, markers, origins, 3D cursor,
+		// gizmo - so "Display options" was a vaguer word for a thing that has an established name.
 		btn->setText( tr( "Overlays" ) );
 		btn->setToolButtonStyle( Qt::ToolButtonTextBesideIcon );
 		btn->setStyleSheet( wwBoxedButtonQss( QStringLiteral( "3px 6px" ) ) );
@@ -28639,7 +24732,7 @@ void NifSkope::initDockWidgets()
 		for ( QAction * a : ds )
 			m->addAction( a );
 
-		/* Show Skeleton (lane SKELOVERLAY). bungo 2026-09-10, verbatim:
+		/* Show Skeleton. bungo 2026-09-10, verbatim:
 		 * "Add to the overlays: View skeleton, shows you the bones, basically
 		 * the same view as in the skeleton manager".
 		 *
@@ -28663,10 +24756,8 @@ void NifSkope::initDockWidgets()
 		connect( aShowSkeleton, &QAction::toggled, this, [this, aShowSkeleton, skelTipBase]( bool on ) {
 			if ( ogl ) {
 				ogl->setSkeletonOverlay( on );
-				// The measured sentence for the file that is open NOW: which
-				// node the armature is rooted at, and how many nodes are
-				// marker-only. Built by setSkeletonOverlay(), so it is there
-				// by the time this line runs (lane SKELFIX).
+				// The measured sentence for the file that is open NOW: which node the armature is rooted at,
+				// and how many nodes are marker-only.
 				const QString rule = on ? ogl->skeletonOverlayRule() : QString();
 				aShowSkeleton->setToolTip( rule.isEmpty() ? skelTipBase
 					: ( skelTipBase + QStringLiteral( "\n\n" ) + rule ) );
@@ -28675,23 +24766,10 @@ void NifSkope::initDockWidgets()
 		} );
 		m->addAction( aShowSkeleton );
 
-		/* Overlays > Bone Display (lane SKEL2, bungo 2026-09-11).
-		 *
-		 * His words: "what about the bone shape? Shouldn't it be something like
-		 * in Blender?", over a screenshot of Blender 4.5.3's default armature
-		 * bone -- and then "Just keep the color of the bones blue".
-		 *
-		 * This is Blender's Armature > Viewport Display > Display As, with its
-		 * own X-ray and Names beside it. ROWS ONLY, no descriptions: his rule
-		 * for the END menu, which is the rule for every menu in the fork.
-		 *
-		 * B-Bone and Envelope are the two Blender modes that are NOT here, and
-		 * the reason is the zero-authoring rule rather than effort: a B-Bone
-		 * needs a per-bone segment count and two handle bones, an Envelope
-		 * needs a head radius, a tail radius and a distance, and a NIF NiNode
-		 * carries none of the five. Inventing them would be hand-authored data
-		 * coupled to one rig.
-		 */
+		// Overlays > Bone Display:
+		// His words: "what about the bone shape? Shouldn't it be something like in Blender?", over a
+		// screenshot of Blender 4.5.3's default armature bone -- and then "Just keep the color of the bones
+		// blue".
 		{
 			QMenu * bm = m->addMenu( tr( "Bone Display" ) );
 			bm->setToolTipsVisible( true );
@@ -28741,15 +24819,7 @@ void NifSkope::initDockWidgets()
 			}
 		}
 
-		/* How collision is drawn, beside the toggle for whether it is drawn.
-		 *
-		 * These six were a row across the top of the Collision Manager, which is
-		 * a panel for authoring collision — and not one of them changes the file.
-		 * Show collision there was a second face for ui->aShowCollision, the row
-		 * directly above this one, so the dock carried a duplicate of a toggle it
-		 * could not itself keep in sync. Same QSettings keys, so the drawing code
-		 * reads exactly what it read before.
-		 */
+		// How collision is drawn, beside the toggle for whether it is drawn.
 		{
 			QMenu * cm = m->addMenu( tr( "Collision Display" ) );
 			cm->setToolTipsVisible( true );
@@ -28838,7 +24908,7 @@ void NifSkope::initDockWidgets()
 			ogl->update();
 		} );
 		m->addAction( aOrigins );
-		// lane VIEWFULL1: the fly-mode crosshair, and Clean View (Blender's Overlays switch: the world only)
+		// the fly-mode crosshair, and Clean View (Blender's Overlays switch: the world only)
 		QAction * aCrosshair = new QAction( tr( "Crosshair" ), this );
 		aCrosshair->setObjectName( QStringLiteral( "aCrosshair" ) );
 		aCrosshair->setCheckable( true );
@@ -28881,20 +24951,15 @@ void NifSkope::initDockWidgets()
 			persist( aOrigins,      QStringLiteral( "GLView/Display/ShowOrigins" ) );
 			persist( aBillboard,    QStringLiteral( "GLView/Display/Billboards" ) );
 			persist( aOrbitSel,     QStringLiteral( "GLView/Display/OrbitSelection" ) );
-			persist( aShowSkeleton, QStringLiteral( "GLView/Display/ShowSkeleton" ) );	// lane SKELOVERLAY
-			persist( aCrosshair,    QStringLiteral( "GLView/Display/Crosshair" ) );	// lane VIEWFULL1
-			persist( aCleanView,    QStringLiteral( "GLView/Display/CleanView" ) );	// lane VIEWFULL1
+			persist( aShowSkeleton, QStringLiteral( "GLView/Display/ShowSkeleton" ) );
+			persist( aCrosshair,    QStringLiteral( "GLView/Display/Crosshair" ) );
+			persist( aCleanView,    QStringLiteral( "GLView/Display/CleanView" ) );
 		}
 
-		/* Everything else in here loses its colour.
-		 *
-		 * The .ui contributes resource icons to the Show Collision / Axes /
-		 * Nodes / Markers entries, and colour in an icon is a claim that the
-		 * thing matters more than its neighbours - a menu where several make
-		 * that claim makes none. The drawn glyphs above keep ONE red element
-		 * each, the one the glyph is actually about, which is the treatment
-		 * cursor3d already had and the only exception the set allows.
-		 */
+		// Everything else in here loses its colour:
+		// The .ui contributes resource icons to the Show Collision / Axes / Nodes / Markers entries, and
+		// colour in an icon is a claim that the thing matters more than its neighbours - a menu where several
+		// make that claim makes none.
 		for ( QAction * a : m->actions() ) {
 			if ( a->isSeparator() || a->icon().isNull() )
 				continue;
@@ -28904,14 +24969,9 @@ void NifSkope::initDockWidgets()
 		}
 
 		btn->setMenu( m );
-		/* NOT added to the row here.
-		 *
-		 * It belongs at the right-hand end beside Shading - Blender puts
-		 * Overlays, X-ray and Shading together as the last group of the header -
-		 * and that group is built further down. It is picked up there by
-		 * objectName rather than threaded through as a variable, because these
-		 * two blocks are separate scopes and a member would outlive the need.
-		 */
+		// NOT added to the row here:
+		// It belongs at the right-hand end beside Shading - Blender puts Overlays, X-ray and Shading together
+		// as the last group of the header - and that group is built further down.
 		for ( QAction * a : ds )
 			ui->tRender->removeAction( a );
 		ui->tRender->removeAction( aSolo );
@@ -28921,15 +24981,8 @@ void NifSkope::initDockWidgets()
 	// display menu and transform controls: Center Viewpoint resets the orbit
 	// pivot, while Frame Selected also fits the active selection in the view.
 	{
-		/* Removing the legacy viewpoint actions can leave their old separator
-		 * stranded at the end of the toolbar, so it goes — and then one is added
-		 * back deliberately.
-		 *
-		 * This used to run the display menu and this focus control together on
-		 * the grounds that they are related. bungo wants them divided, and he is
-		 * right: everything else on this row is spaced in equal groups, so one
-		 * pair sitting flush was the odd one out whatever the reasoning.
-		 */
+		// Removing the legacy viewpoint actions can leave their old separator stranded at the end of the
+		// toolbar, so it goes — and then one is added back deliberately.
 		while ( !ui->tRender->actions().isEmpty()
 			&& ui->tRender->actions().last()->isSeparator() )
 			ui->tRender->removeAction( ui->tRender->actions().last() );
@@ -28949,14 +25002,9 @@ void NifSkope::initDockWidgets()
 		frameSelectedAction->setToolTip( tr( "Center and zoom the view to fit the active selection" ) );
 		focusButton->setMenu( focusMenu );
 
-		/* Center and Frame belong in the VIEW menu, not on a glyph.
-		 *
-		 * Blender puts them there - View > Frame Selected / Frame All - and this
-		 * menu is already Blender's View menu in everything but name: Top, Front,
-		 * Left, Flip, Perspective, Walk, Load View, Save View. Nothing in it
-		 * renders anything, so it is renamed to match what it holds; "Render"
-		 * described this menu before the view directions moved into it.
-		 */
+		// Center and Frame belong in the VIEW menu, not on a glyph:
+		// Blender puts them there - View > Frame Selected / Frame All - and this menu is already Blender's
+		// View menu in everything but name: Top, Front, Left, Flip, Perspective, Walk, Load View, Save View.
 		focusButton->hide();
 		if ( ui->mRender ) {
 			ui->mRender->setTitle( tr( "&View" ) );
@@ -29252,10 +25300,9 @@ void NifSkope::initDockWidgets()
 			// slip into the toolbar overflow.
 			QAction * weightBrushAction = ui->tRender->insertWidget( deformedCageAction, bWeightBrush );
 			weightBrushAction->setVisible( false );
-			// The brush toggle should be present whenever the user is in a paint
-			// context — either a paint mode is active, or the Vertex Paint /
-			// Rigging (weight/segment) manager workspace is open — so it doesn't
-			// vanish just because painting hasn't been started yet.
+			// The brush toggle should be present whenever the user is in a paint context — either a paint mode
+			// is active, or the Vertex Paint / Rigging (weight/segment) manager workspace is open — so it
+			// doesn't vanish just because painting hasn't been started yet.
 			auto refreshBrushVisible = [this, weightBrushAction]() {
 				bool active = ogl->riggingWeightPaintModeActive() || ogl->vertexPaintModeActive()
 					|| ogl->segmentPaintModeActive();
@@ -29351,22 +25398,12 @@ void NifSkope::initDockWidgets()
 				} );
 		}
 
-		/* THE DISPLAY GROUP, at the right-hand end: Overlays, X-ray, Wire,
-		 * Shading - Blender's trailing header group, in Blender's order.
-		 *
-		 * Blender right-aligns this group against the far edge of the header, and
-		 * an expanding spacer here does NOT achieve that: these controls are
-		 * spread over five sibling QToolBars in one QMainWindow row, and the
-		 * main-window layout hands each toolbar its size hint rather than
-		 * distributing the slack, so an Expanding widget inside one of them
-		 * collapses to nothing. Tried, photographed, removed - it was dead weight
-		 * that read as intent. Real right-alignment would mean merging all five
-		 * toolbars into one, which is a bigger change than this ordering pass.
-		 */
+		// THE DISPLAY GROUP, at the right-hand end: Overlays, X-ray, Wire, Shading - Blender's trailing header
+		// group, in Blender's order.
 		wwGroupBreak( ui->tRender );
 		if ( auto * overlays = findChild<QToolButton *>( QStringLiteral( "ViewportOverlaysButton" ) ) )
 			ui->tRender->addWidget( overlays );
-		if ( auto * aClean = findChild<QAction *>( QStringLiteral( "aCleanView" ) ) ) {	// lane VIEWFULL1
+		if ( auto * aClean = findChild<QAction *>( QStringLiteral( "aCleanView" ) ) ) {
 			QToolButton * cleanButton = new QToolButton( this );
 			cleanButton->setObjectName( QStringLiteral( "ViewportCleanViewButton" ) );
 			cleanButton->setDefaultAction( aClean );
@@ -29451,10 +25488,8 @@ void NifSkope::initDockWidgets()
 			  tr( "Render both: PBR wherever a .pbrm is available, spec/gloss everywhere else. "
 			      "PBR always overrides a legacy material when one is available." ) },
 		};
-		// Q9 (lane PBRR3, the R3 gates passed): the DISPLAY DEFAULT is Legacy and
-		// PBR -- a shape a .pbrm serves renders PBR, every other shape spec/gloss.
-		// Legacy stays selectable here; every launch starts in Legacy and PBR, a
-		// stored choice is not restored (as in R1).
+		// Q9: the DISPLAY DEFAULT is Legacy and PBR -- a shape a .pbrm serves renders PBR, every other shape
+		// spec/gloss.
 		const int activeMode = PbrmModeLegacyAndPBR;
 		setPbrmMode( activeMode );
 		for ( const LightingModeDef & def : lightingModes ) {
@@ -29498,10 +25533,8 @@ void NifSkope::initDockWidgets()
 			}
 		} );
 
-		// PBR route view (R1): a data view that tints every lighting-shader shape
-		// by the route its material resolved through. R1 put it in the Render
-		// menu; R2a (lane PBRR2A) moved it into the Scene window's Mode section.
-		// Never persisted, so every launch starts with it off.
+		// PBR route view: a data view that tints every lighting-shader shape by the route its material
+		// resolved through. R1 put it in the Render menu; R2a moved it into the Scene window's Mode section.
 
 		shadeMenu->addSeparator();
 		shadeMenu->addSection( tr( "Material Contributions" ) );
@@ -29625,7 +25658,7 @@ void NifSkope::initDockWidgets()
 			ogl->update();
 		} );
 
-		/* lane VANILLADEF1 (bungo 10-22, vanilla by default): the material editor's GGX lobe on fo4_default
+		/* the material editor's GGX lobe on fo4_default
 		 * (F0 0.04, 1 - F on the diffuse, specular without a specular map). Off = the upstream law, the game's own.
 		 * WW_EDITOR_BRDF pins it (0 = off). */
 		QAction * editorBrdfAction = new QAction( tr( "Editor BRDF" ), shadeMenu );
@@ -29662,28 +25695,10 @@ void NifSkope::initDockWidgets()
 		effectsWidgetAction->setDefaultWidget( effectsPanel );
 		shadeMenu->addAction( effectsWidgetAction );
 
-		/* LIGHTING MOVES IN HERE, AND THE BULB BUTTON GOES.
-		 *
-		 * The bulb was the one control on the whole top row with no label AND no
-		 * tooltip - the .ui sets both to empty strings and leaves only a
-		 * status-bar tip nobody reads - so the way to find the lighting sliders
-		 * was to click an unexplained glyph and see what happened. It also sat
-		 * next to a Shading dropdown that already owned half the same subject.
-		 *
-		 * The WIDGET is moved rather than rebuilt. LightingWidget is already
-		 * built, already wired to GLView's setters, and already persists every
-		 * slider under Settings/Render/Lighting/*; re-authoring seven sliders
-		 * here would mean re-authoring those keys too, and any drift between the
-		 * two would silently lose someone's saved lighting. This popup already
-		 * hosts two arbitrary QWidgets through QWidgetActions, and mLight was
-		 * itself a plain QMenu hosting this exact widget, so nothing new is being
-		 * asked of either side.
-		 *
-		 * "Do Lighting" is NOT carried across: it is the same bit as this menu's
-		 * own Unlit-vs-Shaded choice - applyShadeMode writes Scene::DoLighting
-		 * and force-syncs ui->aLighting - so keeping both would put two controls
-		 * on one state, in one popup, a few rows apart.
-		 */
+		// LIGHTING MOVES IN HERE, AND THE BULB BUTTON GOES:
+		// The bulb was the one control on the whole top row with no label AND no tooltip - the .ui sets both
+		// to empty strings and leaves only a status-bar tip nobody reads - so the way to find the lighting
+		// sliders was to click an unexplained glyph and see what happened.
 		shadeMenu->addSection( tr( "Lighting" ) );
 		{
 			auto * lightPanel = new LightingWidget( ogl, shadeMenu );
@@ -29703,7 +25718,7 @@ void NifSkope::initDockWidgets()
 		shadeButton->setMenu( shadeMenu );
 		ui->tRender->addWidget( shadeButton );
 
-		/* The Scene window (lane PBRR2A; bungo's UI ruling 2026-09-24): one
+		/* The Scene window: one
 		 * non-modal tool window above NifSkope only, opened from View > Scene and
 		 * from this toolbar button, remembering its size and position. */
 		{
@@ -29735,7 +25750,7 @@ void NifSkope::initDockWidgets()
 			sceneButton->setAutoRaise( true );
 			ui->tRender->addWidget( sceneButton );
 		}
-		// lane VIEWFULL1: the viewport fills the screen; F11 or Esc leaves
+		// the viewport fills the screen; F11 or Esc leaves
 		{
 			QAction * aFull = new QAction( tlMakeIcon( QStringLiteral( "fullscreen" ), icoColHdr ), tr( "Full Screen" ), this );
 			aFull->setObjectName( QStringLiteral( "aViewportFullScreen" ) );
@@ -29885,11 +25900,7 @@ void NifSkope::initDockWidgets()
 				settings.remove( QStringLiteral( "GLView/Display/Contributions" ) );
 				settings.setValue( QStringLiteral( "GLView/Display/ContributionsVersion" ), 2 );
 			}
-			/* lane FXPALETTE1: masks saved before 2026-11-01 are dropped once, back to every contribution on. A
-			 * profile held Shaded = 0x00184b00 (Tint / Greyscale, Vertex Color, Vertex Alpha, Parallax, Detail and
-			 * Gloss off) with nothing on screen saying so: every FO4 effect lost its greyscale palette and its vertex
-			 * alpha (MuzLaserRifle01.nif's ring: grey rays over a dark disc where stock NifSkope draws them red).
-			 * Red WW_FX_MASKRESET_RED=1 (or WW_FXPALETTE_RED=1): the saved masks are kept, the version stays. */
+			// masks saved before 2026-11-01 are dropped once, back to every contribution on.
 			if ( settings.value( QStringLiteral( "GLView/Display/ContributionsVersion" ), 1 ).toInt() < 3
 				&& wwEnv( "WW_FX_MASKRESET_RED" ).trimmed() != "1" && wwEnv( "WW_FXPALETTE_RED" ).trimmed() != "1" ) {
 				settings.remove( QStringLiteral( "GLView/Display/Contributions" ) );
@@ -29954,51 +25965,28 @@ void NifSkope::initDockWidgets()
 	QDockWidget * dPoseMgr = tlCreatePoseManagerDock( nif, this, ogl );
 	dPoseMgr->toggleViewAction()->setText( tr( "Pose Manager" ) );
 
-	// Skeleton Manager: the skeleton tree, which nodes are actually bones, how
-	// much of the skin each one drives, and the rest-pose toggle. Read-only —
-	// phase 1 of SKELETON_AND_POSE_PLAN.md §A.7. Appended LAST on purpose: the
-	// persisted UI/Workspace index maps positionally onto the managers list, so
-	// inserting anywhere else would silently reopen a different workspace for
-	// every existing user.
+	// Skeleton Manager: the skeleton tree, which nodes are actually bones, how much of the skin each one
+	// drives, and the rest-pose toggle. Read-only — phase 1 of SKELETON_AND_POSE_PLAN.md §A.7.
 	extern QDockWidget * tlCreateSkeletonManagerDock( NifModel * nif, QMainWindow * mw, GLView * ogl );
 	QDockWidget * dSkeletonMgr = tlCreateSkeletonManagerDock( nif, this, ogl );
 	dSkeletonMgr->toggleViewAction()->setText( tr( "Skeleton Manager" ) );
 
-	// These docks occupy one manager/workspace slot. Keep the policy on
-	// the docks themselves so the planned Blender-style workspace selector can
-	// later activate a role instead of knowing about each concrete manager.
-	/* Unfuck is a workspace, not a dialog.
-	 *
-	 * It began as a menu of checkboxes and then a modal dialog, and both had the
-	 * same fault: they asked which repairs to run before saying what was wrong.
-	 * A panel can stay open while you work, which is what makes "go to the block"
-	 * worth having at all — click a finding, look at it, fix it, watch the list
-	 * shrink. Appended last so the stored workspace index of every existing user
-	 * keeps pointing at the same workspace it did before.
-	 */
+	// These docks occupy one manager/workspace slot. Keep the policy on the docks themselves so the planned
+	// Blender-style workspace selector can later activate a role instead of knowing about each concrete
+	// manager.
 	extern QDockWidget * tlCreateUnfuckManagerDock( NifModel * nif, QMainWindow * mw, GLView * ogl );
 	QDockWidget * dUnfuckMgr = tlCreateUnfuckManagerDock( nif, this, ogl );
-	/* The workspace is called Issue Manager; "unfuck" stays a VERB.
-	 *
-	 * It is a list of everything wrong with the file, so the noun should say what
-	 * it holds - and it sits in a dropdown beside Animation, Collision and
-	 * Rigging, which all name their subject. The button inside it still reads
-	 * "Unfuck checked", because that is the action, and no QSettings key anywhere
-	 * in src/ contains the old word, so nothing saved is disturbed by the change.
-	 */
+	// The workspace is called Issue Manager; "unfuck" stays a VERB.
 	dUnfuckMgr->toggleViewAction()->setText( tr( "Issue Manager" ) );
 
-	/* LOD Generation: the World LOD Generator dialog, turned into a workspace.
-	 * A dialog was the wrong shape for a job that runs for minutes and wants a
-	 * map of itself filling in beside the viewport. Appended last, so stored
-	 * workspace indices keep pointing where they did. */
+	// LOD Generation: the World LOD Generator dialog, turned into a workspace. A dialog was the wrong shape
+	// for a job that runs for minutes and wants a map of itself filling in beside the viewport.
 	extern QDockWidget * tlCreateLodGenerationDock( NifModel * nif, QMainWindow * mw, GLView * ogl );
 	QDockWidget * dLodGen = tlCreateLodGenerationDock( nif, this, ogl );
 
-	/* lane UI6: the Animation Manager dock that used to be first in this list
-	 * is gone, and the Animation WORKSPACE takes its place -- the same position,
-	 * so every stored workspace index still points where it did, and the dock
-	 * that had no Workspaces entry of its own now has the one that matters. */
+	// the Animation Manager dock that used to be first in this list is gone, and the Animation WORKSPACE takes
+	// its place -- the same position, so every stored workspace index still points where it did, and the dock
+	// that had no Workspaces entry of its own now has the one that matters.
 	const QList<QDockWidget *> workspaceManagers = {
 		dAnimWs, dMatMgr, dCollisionMgr, dRiggingMgr, dVertexPaintMgr, dUVMgr, dPoseMgr,
 		dSkeletonMgr, dUnfuckMgr, dLodGen
@@ -30017,25 +26005,9 @@ void NifSkope::initDockWidgets()
 		} );
 	}
 
-	/* Animation: one button, everything inside it.
-	 *
-	 * This was five widgets in a row — play, sequence, loop, settings, scrub —
-	 * plus View ▸ Animations in the menu bar, which is six places to look for one
-	 * subject and four of them icon-only. They are one panel now, behind one
-	 * labelled button, in the same shape as the Collision button beside it: a
-	 * QToolButton that unfolds a widget, not a stack of glyphs.
-	 *
-	 * It drives the EXISTING actions (aAnimate / aAnimPlay / aAnimLoop /
-	 * aAnimSwitch) and Scene::animGroups rather than keeping its own state, so
-	 * this, the Timeline dock's transport and Space in the viewport can never
-	 * disagree. Everything is re-read on aboutToShow for the same reason: the
-	 * keyboard changes the same state behind the panel's back.
-	 *
-	 * Always present, disabled when the file has nothing to animate. A control
-	 * that vanishes between files is worse than one that is visibly unavailable:
-	 * you cannot learn where it lives, and its absence is indistinguishable from
-	 * not having found it yet.
-	 */
+	// Animation: one button, everything inside it:
+	// This was five widgets in a row — play, sequence, loop, settings, scrub — plus View ▸ Animations in the
+	// menu bar, which is six places to look for one subject and four of them icon-only.
 	{
 		const QColor icoCol( wwSkinColor( "text" ) );
 		const QColor icoColOff( wwSkinColor( "textMuted" ) );
@@ -30043,36 +26015,15 @@ void NifSkope::initDockWidgets()
 			+ QStringLiteral( "QToolButton:disabled { color:%1; border-color:%2; }" )
 				.arg( wwSkinColor( "textMuted" ), wwSkinColor( "borderDim" ) );
 
-		/* LOD: a dropdown beside Animation and Collision, not a slider.
-		 *
-		 * The slider was the wrong control twice over. It hid its own value -
-		 * you read a handle position and guessed - and it vanished entirely on a
-		 * file with no LOD meshes, so the control you were looking for was not
-		 * missing, it was absent, which is worse. It also sat in the Workspaces
-		 * group, among the application menus, when it is a viewport display
-		 * setting like the two buttons it now stands beside.
-		 *
-		 * Always present, greyed when the file has nothing to switch between,
-		 * and the button itself says which level you are on.
-		 */
+		// LOD: a dropdown beside Animation and Collision, not a slider.
 		QToolButton * lodBtn = new QToolButton( this );
 		lodBtn->setPopupMode( QToolButton::InstantPopup );
 		lodBtn->setText( tr( "LOD 0" ) );
 		lodBtn->setToolButtonStyle( Qt::ToolButtonTextBesideIcon );
 		lodBtn->setAutoRaise( false );
-		/* wwBoxedButtonQss alone, NOT boxQss.
-		 *
-		 * boxQss appends "QToolButton:disabled { border-color: ... }" on top of a
-		 * base rule of "border: 1px solid transparent" - so a DISABLED button
-		 * grows a visible box. LOD is disabled whenever the file has no LODs,
-		 * which is exactly when bungo saw one; Animation and Collision are
-		 * enabled, so theirs never showed. The plain sheet greys the text and
-		 * leaves the border transparent.
-		 *
-		 * Extra right padding: the others carry an icon, which pushes their text
-		 * left and leaves the menu indicator room. A text-only button has the
-		 * arrow sitting against the last character.
-		 */
+		// wwBoxedButtonQss alone, NOT boxQss:
+		// boxQss appends "QToolButton:disabled { border-color: ... }" on top of a base rule of "border: 1px
+		// solid transparent" - so a DISABLED button grows a visible box.
 		lodBtn->setStyleSheet( wwBoxedButtonQss( QStringLiteral( "3px 18px 3px 8px" ) ) );
 		lodBtn->setObjectName( QStringLiteral( "ViewLodButton" ) );
 		lodBtn->setEnabled( false );		// until a file with LOD meshes loads
@@ -30083,12 +26034,9 @@ void NifSkope::initDockWidgets()
 
 		auto * lodGroup = new QActionGroup( lodMenu );
 		lodGroup->setExclusive( true );
-		/* Four entries, but level 3 only means anything in Starfield:
-		 * Scene::updateLodLevel clamps to 2 for every other game, so on a
-		 * Fallout 4 file a level-3 row would look like a choice and silently do
-		 * what level 2 does. It is listed and disabled instead of hidden, so the
-		 * ceiling is visible rather than mysterious.
-		 */
+		// Four entries, but level 3 only means anything in Starfield: Scene::updateLodLevel clamps to 2 for
+		// every other game, so on a Fallout 4 file a level-3 row would look like a choice and silently do what
+		// level 2 does.
 		for ( int lvl = 0; lvl <= 3; lvl++ ) {
 			QAction * a = lodMenu->addAction( tr( "LOD %1" ).arg( lvl ) );
 			a->setCheckable( true );
@@ -30105,20 +26053,8 @@ void NifSkope::initDockWidgets()
 		QAction * lodNote = lodMenu->addAction( tr( "Level 3 is Starfield only" ) );
 		lodNote->setEnabled( false );
 
-		/* OCTAHEDRAL IMPOSTOR CARDS (lane IMPOSTORSHOW, 2026-09-19).
-		 *
-		 * A FEATURE MASTER, SHIPPED OFF, which is the standing rule for every
-		 * one of them. It belongs in this menu because it is the same question
-		 * the rows above it ask -- which level of detail the viewport draws --
-		 * and the answer it adds is "the baked card, where the chunk's manifest
-		 * puts one".
-		 *
-		 * It only ever does anything for a file that has a lodgen
-		 * `<name>.manifest.txt` beside it with `C` lines in it. The row is left
-		 * enabled for every file even so: greying it out on an ordinary NIF
-		 * would make a switch that is merely inapplicable look broken, and the
-		 * application log already says how many placements were read.
-		 */
+		// OCTAHEDRAL IMPOSTOR CARDS:
+		// A FEATURE MASTER, SHIPPED OFF, which is the standing rule for every one of them.
 		QAction * aOctCards = lodMenu->addAction( tr( "Octahedral Impostor Cards" ) );
 		aOctCards->setCheckable( true );
 		aOctCards->setChecked( ImpostorChunk::enabled() );
@@ -30130,11 +26066,8 @@ void NifSkope::initDockWidgets()
 				ogl->update();
 		} );
 
-		/* The enable signal fires from the shape classes as they build, once per
-		 * LOD shape found, so it arrives repeatedly and only ever with true. The
-		 * false case has to come from somewhere else - a fresh load - which is
-		 * why the button is reset in enableUi rather than trusted to a signal.
-		 */
+		// The enable signal fires from the shape classes as they build, once per LOD shape found, so it
+		// arrives repeatedly and only ever with true.
 		connect( nif, &NifModel::lodSliderChanged, lodBtn, [this, lodBtn, lodMenu]( bool enabled ) {
 			lodBtn->setEnabled( enabled );
 			lodBtn->setToolTip( enabled
@@ -30269,18 +26202,10 @@ void NifSkope::initDockWidgets()
 		} );
 		grid->addWidget( timelineBtn, 7, 0, 1, 2 );
 
-		/* LOAD ANIMATION (.hkx) -- bungo 2026-09-10, lane HKX2/HKX3.
-		 *
-		 * His words: "in animation workspace, add an option to load a hkx file
-		 * with animation, then they get added to the animations list, and if
-		 * there's rigged geometry with nodes / bone names that match, they play".
-		 *
-		 * The loaded clip goes into Scene::animGroups and Scene::animTags, so the
-		 * Sequence row above, the scrub bar, Loop, Speed and Cycle are already
-		 * its transport and nothing else here changes. The label under the button
-		 * is the summary line: how many bones play, which ones do not, and where
-		 * the bone names came from.
-		 */
+		// LOAD ANIMATION (.hkx) -- bungo 2026-09-10:
+		// His words: "in animation workspace, add an option to load a hkx file with animation, then they get
+		// added to the animations list, and if there's rigged geometry with nodes / bone names that match,
+		// they play".
 		auto * hkxBtn = new QPushButton( tr( "Load Animation (.hkx)…" ), animPanel );
 		hkxBtn->setStyleSheet( boxQss );
 		hkxBtn->setToolTip( tr( "Load a Havok animation and add it to the animations "
@@ -30298,20 +26223,18 @@ void NifSkope::initDockWidgets()
 			if ( f.isEmpty() )
 				return;
 			// ONE loader for the button, the Animation Manager dock and a
-			// dropped file (lane HKX3). It loads, activates, MEASURES
+			// dropped file. It loads, activates, MEASURES
 			// whether the clip actually bound, and returns the sentence.
 			hkxNote->setText(
 				WwHkxAnimHub::instance()->loadFiles( ogl, { f }, true ) );
-			// The panel re-reads the animations list from this signal, which is
-			// also what the rest of the program listens to. Calling
-			// refreshAnimPanel directly is not possible here: it is declared
-			// further down this same block.
+			// The panel re-reads the animations list from this signal, which is also what the rest of the
+			// program listens to.
 			emit ogl->sequencesUpdated();
 		} );
 		grid->addWidget( hkxBtn, 8, 0, 1, 2 );
 		grid->addWidget( hkxNote, 9, 0, 1, 2 );
 
-		// Root motion is a switch of its own and starts OFF (bungo's ruling): a
+		// Root motion is a switch of its own and starts OFF: a
 		// clip that walks forward would otherwise carry the rig out of frame the
 		// moment it is selected.
 		auto * rootChk = new QCheckBox( tr( "Root motion" ), animPanel );
@@ -30322,7 +26245,7 @@ void NifSkope::initDockWidgets()
 			if ( !sc || !sc->hkx )
 				return;
 			// through the hub so the dock's own Root motion button follows
-			// this one (lane HKX3)
+			// this one
 			WwHkxAnimHub::instance()->setRootMotion( ogl, on );
 			if ( !sc->hkx->activeName().isEmpty() )
 				hkxNote->setText( sc->hkx->summary() );
@@ -30366,31 +26289,17 @@ void NifSkope::initDockWidgets()
 								 icoCol, icoColOff, boxQss]() {
 			Scene * sc = ogl->getScene();
 			const QStringList groups = sc ? sc->animGroups : QStringList();
-			/* Animatable is a TIME RANGE, not a sequence list.
-			 *
-			 * Plenty of files animate through standalone controllers with no named
-			 * NiControllerSequence at all - every NiPSys effect in Meshes/Effects is
-			 * like this, and they are exactly what someone opens to watch something
-			 * move. Gating on animGroups greyed the transport out on all of them.
-			 * The sequence PICKER still needs a non-empty list, since with nothing
-			 * to choose from there is nothing to pick.
-			 */
+			// Animatable is a TIME RANGE, not a sequence list:
+			// Plenty of files animate through standalone controllers with no named NiControllerSequence at all
+			// - every NiPSys effect in Meshes/Effects is like this, and they are exactly what someone opens to
+			// watch something move.
 			const bool have = sc && sc->timeMax() > sc->timeMin();
 			const bool haveGroups = !groups.isEmpty();
 
-			/* "No sequence" is a choice, not an absence.
-			 *
-			 * Plenty of files animate entirely through controllers that no
-			 * NiControllerSequence names — every NiPSys effect in Meshes/Effects
-			 * is like that — and a file can have both, where picking a sequence
-			 * binds its interpolators over the top and hides what the file does on
-			 * its own. So it is the first entry, always, and it is what a file
-			 * with no named sequences offers instead of a greyed-out label.
-			 *
-			 * Carried as an INT, not an empty string: a sequence is allowed to
-			 * have an empty name (the "(unnamed)" rows below), so an empty string
-			 * cannot mean "none" without also meaning one of those.
-			 */
+			// "No sequence" is a choice, not an absence:
+			// Plenty of files animate entirely through controllers that no NiControllerSequence names — every
+			// NiPSys effect in Meshes/Effects is like that — and a file can have both, where picking a
+			// sequence binds its interpolators over the top and hides what the file does on its own.
 			*seqGuard = true;
 			seqCombo->clear();
 			seqCombo->addItem( tr( "(no sequence)" ), -1 );
@@ -30429,19 +26338,8 @@ void NifSkope::initDockWidgets()
 												have ? icoCol : icoColOff ) );
 			loopBtn->setToolTip( ui->aAnimLoop->toolTip() );
 
-			/* The BUTTON stays enabled even with nothing to animate, and only the
-			 * per-file controls inside go grey.
-			 *
-			 * Disabling it disabled the whole popup with it — including two things
-			 * that are not about this file at all: "Animations", which is a stored
-			 * preference (`GLView/Enable Animations`), and the Timeline dock. A
-			 * harness once went from green to "captured 0 arcs" with no code change
-			 * because that preference had been left off; a version of this panel you
-			 * cannot open to look at it would make that worse, not better.
-			 */
-			// "play", not "playback" — that glyph is the Timeline dock's PLAY
-			// BACKWARD button and points left on purpose, which on a button that
-			// just means "animation" reads as rewind.
+			// The BUTTON stays enabled even with nothing to animate, and only the per-file controls inside go
+			// grey.
 			animBtn->setIcon( tlMakeIcon( playing ? QStringLiteral( "pause" )
 													: QStringLiteral( "play" ),
 										  have ? icoCol : icoColOff ) );
@@ -30453,17 +26351,10 @@ void NifSkope::initDockWidgets()
 			animBtn->setToolTip( have ? tr( "Animation — %1%2" )
 											.arg( label, playing ? tr( ", playing" ) : QString() )
 									  : tr( "This file has nothing to animate" ) );
-			/* Grey the TEXT too, not just the glyph.
-			 *
-			 * The button deliberately stays ENABLED with nothing to animate,
-			 * because its popup holds two things that are not about this file -
-			 * the stored "Animations" preference and the Timeline dock - and
-			 * disabling the button would take those with it. But it was still
-			 * painting its label at full strength beside a greyed-out LOD and
-			 * Collision, so it read as the one live control in the group.
-			 * Matching their colour costs nothing and the tooltip already says
-			 * why it is dim.
-			 */
+			// Grey the TEXT too, not just the glyph:
+			// The button deliberately stays ENABLED with nothing to animate, because its popup holds two
+			// things that are not about this file - the stored "Animations" preference and the Timeline dock -
+			// and disabling the button would take those with it.
 			animBtn->setStyleSheet( have ? boxQss
 				: boxQss + QStringLiteral( "QToolButton { color:%1; }" )
 					.arg( wwSkinColor( "textMuted" ) ) );
@@ -30496,22 +26387,7 @@ void NifSkope::initDockWidgets()
 		ui->tView->addWidget( animBtn );
 	}
 
-	/* Collision: the essentials, in the toolbar. The rest is in the manager.
-	 *
-	 * This used to be everything -- world settings, solver knobs, the body list,
-	 * recording, capture -- and grew past what a dropdown can hold: forty controls
-	 * behind a scrollbar, in a popup that closes the moment you click the viewport
-	 * you are trying to adjust. Two homes now, split by how often a thing is
-	 * touched. Run, tool and playback are used every few seconds and stay here;
-	 * everything set once per file lives in the Collision Manager's Test section,
-	 * which is a dock and stays open while you work.
-	 *
-	 * Both are the same PhysicsSimPanel class in two modes, so the two cannot
-	 * drift apart the way a second implementation would.
-	 *
-	 * Greyed out when the file has no collision, because a panel of controls that
-	 * cannot do anything is worse than one that is plainly unavailable.
-	 */
+	// Collision: the essentials, in the toolbar. The rest is in the manager.
 	{
 		/* A GAP, not a rule. Animation, Collision and Panels are one group -
 		 * the controls with no Blender counterpart, gathered at the trailing
@@ -30531,15 +26407,9 @@ void NifSkope::initDockWidgets()
 		PhysicsSimPanel * quick = new PhysicsSimPanel( ogl, nif,
 			PhysicsSimPanel::Mode::Essentials, ui->aShowCollision, colMenu );
 		quick->setObjectName( QStringLiteral( "CollisionQuickPanel" ) );
-		/* In a scroll area, with a floor under it.
-		 *
-		 * A QMenu measures a widget action once and recomputes its own size after
-		 * aboutToShow, so a panel that resizes itself in response to a tool change
-		 * loses the argument and gets drawn a row short. A scroll area with a
-		 * minimum height settles it: the popup is that tall whatever happens, and
-		 * a tool whose parameters need more than that scrolls instead of being
-		 * quietly cut off at the bottom.
-		 */
+		// In a scroll area, with a floor under it:
+		// A QMenu measures a widget action once and recomputes its own size after aboutToShow, so a panel that
+		// resizes itself in response to a tool change loses the argument and gets drawn a row short.
 		QScrollArea * quickScroll = new QScrollArea( colMenu );
 		quickScroll->setWidget( quick );
 		quickScroll->setWidgetResizable( true );
@@ -30568,12 +26438,9 @@ void NifSkope::initDockWidgets()
 		// every time it is opened rather than trusting what it last wrote
 		connect( colMenu, &QMenu::aboutToShow, quick, &PhysicsSimPanel::sync );
 
-		/* Enabled only when the file HAS collision.
-		 *
-		 * Any bhk collision object counts, not only a jointed one: the button is
-		 * about the file having collision at all, and Run explains for itself
-		 * when there is nothing to simulate.
-		 */
+		// Enabled only when the file HAS collision:
+		// Any bhk collision object counts, not only a jointed one: the button is about the file having
+		// collision at all, and Run explains for itself when there is nothing to simulate.
 		auto refreshCollisionBar = [this, colBtn, quick]() {
 			bool have = false;
 			if ( nif ) {
@@ -30604,21 +26471,7 @@ void NifSkope::initDockWidgets()
 	// Regular dock toggles collapse into one dropdown on the View toolbar.
 	// Manager docks live in the adjacent Workspaces menu instead.
 	{
-		// thin line where this toolbar's drag grip used to sit
-		/* A GAP, not a rule. Animation, Collision and Panels are one group -
-		 * the controls with no Blender counterpart, gathered at the trailing
-		 * end - and ruling between them said they were three separate things.
-		 */
-		/* THE PANELS BUTTON IS GONE; all of it is in the View menu.
-		 *
-		 * Panel toggles are a View-menu subject - Blender keeps Sidebar, Tool
-		 * Settings and Adjust Last Operation there - and a dedicated dropdown for
-		 * them was one more labelled button on a row that had just been trimmed
-		 * to the things a viewport actually needs.
-		 *
-		 * The menu it filled is now the View menu itself, so `m` is that menu and
-		 * everything below adds to it unchanged.
-		 */
+		// thin line where this toolbar's drag grip used to sit A GAP, not a rule.
 		QMenu * m = ui->mRender;
 		m->addSeparator();
 		for ( QDockWidget * dw : { dLeft, dInsp, dKfm, dRefr } ) {
@@ -30626,43 +26479,14 @@ void NifSkope::initDockWidgets()
 			ui->tView->removeAction( dw->toggleViewAction() );
 		}
 
-		/* THE VIEW MENU MOVES IN HERE, AND THEN THE VIEW MENU GOES.
-		 *
-		 * View held four submenus and nothing else. `Show` was the same seven
-		 * dock toggles this button already lists - not equivalent actions, the
-		 * SAME QAction objects - so it was a second door onto one room. The other
-		 * three had no home anywhere else, which is why View could not simply be
-		 * deleted:
-		 *
-		 *   Toolbars       the ONLY way to bring back a hidden toolbar.
-		 *                  QMainWindow's built-in toggle popup is unreachable -
-		 *                  nifskope.cpp sets Qt::NoContextMenu on the window and
-		 *                  nothing overrides createPopupMenu() - so losing this
-		 *                  makes hiding a toolbar permanent.
-		 *   Block List     tree-vs-list display mode for that dock.
-		 *   Block Details  non-applicable rows, and jump to Header.
-		 *
-		 * All three are settings that belong TO a panel, which is what makes this
-		 * button their natural owner rather than a menu-bar entry of their own.
-		 *
-		 * Added as the existing QMenu objects, not copies: a QMenu's menuAction()
-		 * is an ordinary QAction and may appear in more than one menu, so these
-		 * keep working and keep filling themselves wherever else they are
-		 * referenced. It also sidesteps an ordering problem - mToolbars is not
-		 * populated until initMenu() runs, which is after this - because the
-		 * submenu shows whatever it holds at the moment it is opened.
-		 */
+		// THE VIEW MENU MOVES IN HERE, AND THEN THE VIEW MENU GOES:
+		// View held four submenus and nothing else. `Show` was the same seven dock toggles this button already
+		// lists - not equivalent actions, the SAME QAction objects - so it was a second door onto one room.
 		m->addSeparator();
 		m->addMenu( ui->mToolbars );
 		m->addSeparator();
-		/* Retitled, because in THIS menu the old names are ambiguous.
-		 *
-		 * Under View they read fine - the menu held nothing else. Here they sit
-		 * directly beneath the dock toggles called "Block List" and "Block
-		 * Details", so the same two words appear twice in one popup meaning two
-		 * different things: once "show me that panel", once "how that panel
-		 * displays". The suffix is the smallest thing that separates them.
-		 */
+		// Retitled, because in THIS menu the old names are ambiguous:
+		// Under View they read fine - the menu held nothing else.
 		ui->menuBlock_List->setTitle( tr( "Block List Display" ) );
 		ui->menuBlock_Details->setTitle( tr( "Block Details Display" ) );
 		m->addMenu( ui->menuBlock_List );
@@ -30683,13 +26507,11 @@ void NifSkope::initDockWidgets()
 		workspaceMenu->setObjectName( QStringLiteral( "ViewWorkspacesMenu" ) );
 		QActionGroup * workspaceGroup = new QActionGroup( workspaceMenu );
 		workspaceGroup->setExclusive( true );
-		// The "Skeleton Manager (Planned)" placeholder that used to sit below a
-		// separator here is gone: the workspace exists now (read-only phase 1 of
-		// SKELETON_AND_POSE_PLAN.md A.7). No planned entries remain, so the
-		// separator went with it.
+		// The "Skeleton Manager (Planned)" placeholder that used to sit below a separator here is gone: the
+		// workspace exists now (read-only phase 1 of SKELETON_AND_POSE_PLAN.md A.7).
 		const QList<QDockWidget *> managers = {
 			dAnimWs, dMatMgr, dCollisionMgr, dRiggingMgr, dVertexPaintMgr, dUVMgr, dPoseMgr,
-			dSkeletonMgr, dUnfuckMgr, dLodGen	// lane UI6: index 0 is the Animation dock
+			dSkeletonMgr, dUnfuckMgr, dLodGen	// index 0 is the Animation dock
 		};
 		QStringList workspaceNames = {
 			tr( "Default" ), tr( "Animation" ), tr( "Materials" ), tr( "Collision" ),
@@ -30697,22 +26519,10 @@ void NifSkope::initDockWidgets()
 			tr( "Skeleton" ), tr( "Issue Manager" ), tr( "LOD Generation" )
 		};
 
-		/* ---- THE WORKSPACE TABLE (lane CELLWORK1, 2026-09-19) --------------
-		 *
-		 * The same switch, moved out of a lambda and into a table with a member
-		 * function over it (NifSkope::setWorkspace). Nothing about what a
-		 * workspace IS changed: one dock, one area, hide the rest. What changed
-		 * is that the switch is now REACHABLE -- by the `.wwcell` open path, by
-		 * the harness and by the gate -- instead of only by the lambdas that
-		 * captured it. That was the whole reason every earlier harness poked a
-		 * dock by object name rather than opening a workspace.
-		 *
-		 * The `managers` list stays the source of truth for the ten manager
-		 * workspaces, so index 0 = Default with no dock and index i+1 = the i-th
-		 * manager, exactly as the old `workspace > 0 ? managers.at(workspace-1)`
-		 * arithmetic said. The persisted `UI/Workspace` index is POSITIONAL, so
-		 * this table is appended to and never inserted into.
-		 * -------------------------------------------------------------------- */
+		// THE WORKSPACE TABLE:
+		// The same switch, moved out of a lambda and into a table with a member function over it
+		// (NifSkope::setWorkspace). Nothing about what a workspace IS changed: one dock, one area, hide the
+		// rest.
 		workspaceDefs.clear();
 		workspaceDefs.append( WorkspaceDef() );		// Default: no manager dock
 		for ( int i = 0; i < managers.size(); i++ ) {
@@ -30724,18 +26534,9 @@ void NifSkope::initDockWidgets()
 			workspaceDefs.append( d );
 		}
 
-		/* THE CELL WORKSPACE, APPENDED LAST (bungo 2026-09-19 20:40: "Cell
-		 * viewing will be a new workspace btw").
-		 *
-		 * It is the first workspace that REPLACES the NIF editor column rather
-		 * than sitting beside it: a cell has no block list, no block details and
-		 * no header, so leaving them on screen is three empty panels. That is
-		 * the one capability the table gained (`hideNifDocks`), and the way back
-		 * is the BYTES -- see NifSkope::setWorkspace.
-		 *
-		 * Its reference inspector is the CellPickDock that already exists: a
-		 * companion, not a copy. One panel, one set of rows, one place a
-		 * reference is described. */
+		// THE CELL WORKSPACE, APPENDED LAST:
+		// It is the first workspace that REPLACES the NIF editor column rather than sitting beside it: a cell
+		// has no block list, no block details and no header, so leaving them on screen is three empty panels.
 		{
 			QDockWidget * dCellWs = new QDockWidget( tr( "Cell" ), this );
 			dCellWs->setObjectName( QStringLiteral( "CellWorkspaceDock" ) );
@@ -30747,12 +26548,8 @@ void NifSkope::initDockWidgets()
 				| Qt::BottomDockWidgetArea );
 			addDockWidget( Qt::LeftDockWidgetArea, dCellWs );
 			dCellWs->hide();
-			/* A view row that changes the BAKED colours re-opens the same
-			 * `.wwcell` through the proven open path. It does not repaint: the
-			 * overlay colours are welded into vertex colours when the scene is
-			 * built, so there is nothing in the document to recolour. */
-			/* lane LIVESET3 (FARSTACK): a switch that moves the near cells' load order (far LOD on/off, its TYPE, the
-			 * stack reds) welds every cell again; the reopen keeps the view where the person left it. */
+			// A view row that changes the BAKED colours re-opens the same `.wwcell` through the proven open
+			// path.
 			connect( cellWs, &CellWorkspacePanel::reopenRequested, this, [this]( const QString & path ) {
 				if ( ogl ) {
 					const GLView::CameraKeep keep = ogl->keepCamera();
@@ -30765,7 +26562,7 @@ void NifSkope::initDockWidgets()
 				}
 				loadFile( path );
 			} );
-			/* lane OPENCELLFIX1: the Cells tab's Open, and File > Open Cell... (no separate window: it brings this
+			/* the Cells tab's Open, and File > Open Cell... (no separate window: it brings this
 			 * dock's Cells tab forward). */
 			connect( cellWs, &CellWorkspacePanel::openCellRequested, this, [this]( const QString & path ) {
 				QString f = path;
@@ -30803,24 +26600,14 @@ void NifSkope::initDockWidgets()
 		for ( int i = 0; i < workspaceActions.size(); i++ )
 			connect( workspaceActions.at( i ), &QAction::triggered, this,
 				[this, i]( bool ) { setWorkspace( i ); } );
-		// Weight Paint is already implemented by the Rigging Manager. Entering it
-		// from the viewport selector opens that workspace, chooses the first bone
-		// when necessary, and delegates to the same Start Painting button so there
-		// remains one source of truth for target/bone validation and brush settings.
+		// Weight Paint is already implemented by the Rigging Manager.
 		QAction * weightPaintMode = findChild<QAction *>( QStringLiteral( "ViewportWeightPaintAction" ) );
 		QAction * vertexPaintMode = findChild<QAction *>( QStringLiteral( "ViewportVertexPaintAction" ) );
 		QAction * segmentPaintMode = findChild<QAction *>( QStringLiteral( "ViewportSegmentPaintAction" ) );
 		QAction * objectMode = findChild<QAction *>( QStringLiteral( "ViewportObjectModeAction" ) );
 		QAction * editMode = findChild<QAction *>( QStringLiteral( "ViewportEditModeAction" ) );
-		// Auto-acquire a paint target so entering a paint mode from the viewport
-		// selector works even when nothing is selected yet (e.g. right after a
-		// Join clears the selection). Prefers the object the user is looking at
-		// (the active object); otherwise the file's sole qualifying shape — it
-		// never guesses between several. requireSkin gates Weight / Segment paint
-		// (which need a skin) against Vertex paint (any tri-shape). Selecting the
-		// block drives NifSkope::select(), whose synchronous currentNifIndexChanged
-		// repopulates the manager before the caller re-checks it. Returns the
-		// acquired block, or AcquireNone / AcquireAmbiguous for the caller's hint.
+		// Auto-acquire a paint target so entering a paint mode from the viewport selector works even when
+		// nothing is selected yet (e.g. right after a Join clears the selection).
 		enum { AcquireNone = -1, AcquireAmbiguous = -2 };
 		auto acquirePaintTarget = [this]( bool requireSkin ) -> int {
 			NifModel * nif = getNifModel();
@@ -30924,31 +26711,18 @@ void NifSkope::initDockWidgets()
 				}
 				} );
 		workspaces->setMenu( workspaceMenu );
-		/* Workspaces joins the MENUS; Panels stays with the trailing group.
-		 *
-		 * Blender keeps its workspace tabs in the app-level topbar beside File
-		 * and Edit, not in the viewport header, and the reason is what they do:
-		 * a workspace switches the whole window layout, so it is not a viewport
-		 * control and should not sit among viewport controls.
-		 *
-		 * Panels is not the same kind of thing - it toggles individual docks -
-		 * so it stays at the trailing end with Animation and Collision, which is
-		 * where the controls with no Blender counterpart are gathered.
-		 */
+		// Workspaces joins the MENUS; Panels stays with the trailing group.
 		ui->tFile->addWidget( workspaces );
 
 
-		// Keep the menu's active-workspace marker truthful: derive it from which
-		// manager dock is actually visible (a dock closed via its own X, or the
-		// exclusive-visibility logic, would otherwise leave a stale radio dot on
-		// the wrong entry). The active entry is also bolded for a clearer
-		// highlight than the small radio dot alone.
+		// Keep the menu's active-workspace marker truthful: derive it from which manager dock is actually
+		// visible (a dock closed via its own X, or the exclusive-visibility logic, would otherwise leave a
+		// stale radio dot on the wrong entry).
 		auto syncWorkspaceIndicators = [this]() {
 			int active = 0;
-			// Index 0 (Default) owns no dock, so the walk starts at 1 and the
-			// fallback IS Default -- the same answer the old managers-only walk
-			// gave, now taken from the table so a workspace cannot be added to
-			// one and forgotten in the other.
+			// Index 0 (Default) owns no dock, so the walk starts at 1 and the fallback IS Default -- the same
+			// answer the old managers-only walk gave, now taken from the table so a workspace cannot be added
+			// to one and forgotten in the other.
 			for ( int i = 1; i < workspaceDefs.size(); i++ ) {
 				QDockWidget * d = workspaceDefs.at( i ).dock;
 				if ( d && d->isVisible() ) { active = i; break; }
@@ -30969,13 +26743,13 @@ void NifSkope::initDockWidgets()
 		setWorkspace( 0 );
 		syncWorkspaceIndicators();
 
-		// lane CELLWORK1: the workspace self-test (WW_CELLWS_TEST), which drives
+		// the workspace self-test (WW_CELLWS_TEST), which drives
 		// the switch, the dock hiding and the layout round trip from inside the
 		// running window. It forces every state it measures.
 		wwCellWorkspaceHarness( this );
-		// lane MODPICK1: the Mods band gate (WW_MODPICK_TEST).
+		// the Mods band gate (WW_MODPICK_TEST).
 		wwCellModPickHarness( this );
-		// lane WSRESTORE1: switch, close, relaunch -- the left column after a close.
+		// switch, close, relaunch -- the left column after a close.
 		wwWorkspaceRestoreHarness( this );
 	}
 
@@ -30989,86 +26763,29 @@ void NifSkope::initMenu()
 	// Disable without NIF loaded
 	ui->mRender->setEnabled( false );
 
-	/* Populate Toolbars with every toolbar, WHEREVER IT LIVES.
-	 *
-	 * findChildren, not children(): the latter walks direct children of the main
-	 * window only, and the mode and render toolbars are reparented into the
-	 * viewport footer, so they would silently drop off this list. That matters
-	 * more than it sounds - this submenu is the only way to bring a hidden
-	 * toolbar back, because QMainWindow's own toggle popup is unreachable here
-	 * (nifskope.cpp sets Qt::NoContextMenu and nothing overrides
-	 * createPopupMenu). Losing the entry makes hiding that bar permanent.
-	 */
+	// Populate Toolbars with every toolbar, WHEREVER IT LIVES:
+	// findChildren, not children(): the latter walks direct children of the main window only, and the mode and
+	// render toolbars are reparented into the viewport footer, so they would silently drop off this list.
 	for ( QToolBar * tb : findChildren<QToolBar *>() ) {
 		if ( tb->objectName() != "tFile" )		// tFile is the menu row itself
 			ui->mToolbars->addAction( tb->toggleViewAction() );
 	}
 
-	/* The Spells menu, kept — with Unfuck at the top of it.
-	 *
-	 * bungo, in two passes: "remove from it whatever is in the select / add /
-	 * object or other top bar buttons, or anything in the right click menu",
-	 * then "keep the spells menu as it was ... with only stuff that's unique to
-	 * the spell menu".
-	 *
-	 * What is unique turns out to be a sharp line rather than a judgement call.
-	 * Right-clicking a block in the Block List or Block Details opens a full
-	 * SpellBook AT THAT INDEX, so every spell that applies to a block is already
-	 * one click away there. The spells that right-click can never reach are the
-	 * ones that answer `isApplicable` only for an INVALID index, because they act
-	 * on the whole file — and those are exactly the ones the menubar copy used to
-	 * hide the moment you selected anything, since `SpellBook::checkActions`
-	 * drops whatever does not apply to the current selection.
-	 *
-	 * So this menu is built by hand from the whole-file spells and never filtered
-	 * against the selection. Everything else stays on right-click, where it was.
-	 */
+	// The Spells menu, kept — with Unfuck at the top of it:
+	// bungo, in two passes: "remove from it whatever is in the select / add / object or other top bar buttons,
+	// or anything in the right click menu", then "keep the spells menu as it was ...
 	{
 		QMenu * spellsMenu = new QMenu( tr( "Spells" ), this );
 		spellsMenu->setToolTipsVisible( true );
-		/* Before Options, by POINTER rather than by index 3.
-		 *
-		 * The index was an artefact of how many menus happened to precede it, so
-		 * removing the old View menu silently slid Spells to the far side of
-		 * Options and the bar read File, View, Options, Spells, Help. Options is
-		 * this program's Edit menu - settings, theme, font, and now undo - and
-		 * belongs next to Help at the end, with the subject menus before it.
-		 */
+		// Before Options, by POINTER rather than by index 3:
+		// The index was an artefact of how many menus happened to precede it, so removing the old View menu
+		// silently slid Spells to the far side of Options and the bar read File, View, Options, Spells, Help.
 		ui->menubar->insertMenu( ui->mOptions ? ui->mOptions->menuAction()
 											  : ui->menubar->actions().value( 2 ), spellsMenu );
 
-		/* Unfuck is NOT in this menu. It is a workspace.
-		 *
-		 * It was a bolded entry at the top here, from when it was a modal dialog
-		 * this menu owned. It stopped being a dialog and became the Issue Manager
-		 * workspace, reachable from the Workspaces dropdown beside Animation,
-		 * Collision and Rigging - so a menu entry that opens a workspace is the
-		 * same duplication this menu was rebuilt to remove, just pointing the
-		 * other way.
-		 *
-		 * Nothing is lost with it: the workspace is the only Unfuck, and the
-		 * dialog's assets were folded into it long before this - the curated run
-		 * order (repairOrder in unfucktools.cpp), the single-snapshot undo across
-		 * a whole run, the four Batch/Optimize repairs the panel's sanity() rule
-		 * could not see, the per-spell blurbs as Spell::hint(), and the "why is
-		 * this row greyed" text as whyNotApplicable().
-		 */
+		// Unfuck is NOT in this menu. It is a workspace.
 
-		/* TEST HARNESS (WW_UNFUCK_TEST=1): is the Spells menu what it claims, and
-		 * does the dialog open?
-		 *
-		 * Two things can go wrong here and neither is visible from the code. The
-		 * menu can be structurally right and still EMPTY, because the spells it
-		 * lists are filtered by applicability; and it can quietly fill up with
-		 * block spells again, which is the duplication this was meant to remove.
-		 * So it opens the menu with a BLOCK SELECTED — the state that used to
-		 * empty it — and checks both directions: something is listed, and nothing
-		 * listed wants an index.
-		 *
-		 * The dialog is grabbed rather than driven. It is modal, so exec() would
-		 * block the harness; a timer takes the picture and closes it.
-		 * Log: release/ww_unfuck_test.log, shot: release/ww_unfuck_dialog.png
-		 */
+		// TEST HARNESS (WW_UNFUCK_TEST=1): is the Spells menu what it claims, and does the dialog open?
 		if ( wwEnvIsSet( "WW_LODGEN_TEST" ) ) {
 			QObject::connect( this, &NifSkope::completeLoading, this,
 				[this]( bool ok, QString & ) {
@@ -31134,7 +26851,7 @@ void NifSkope::initMenu()
 							auto * cr2 = findChild<QComboBox *>( QStringLiteral( "LodgenCardResBox" ) );
 							auto * ha = findChild<QCheckBox *>( QStringLiteral( "LodgenCardHalfAuxCheck" ) );
 							auto * cl = findChild<QLabel *>( QStringLiteral( "LodgenCardCostLabel" ) );
-							// 512 added by lane LODUI1 (bungo 2026-09-11 07:3x: "Add it, why not")
+							// 512 added
 							check( "the card rows offer 4, 6 and 8 frames and 64, 128, 256 and 512 px",
 								cf && cr2 && cf->count() == 3 && cr2->count() == 4
 								&& cf->itemData( 0 ).toInt() == 4 && cf->itemData( 2 ).toInt() == 8
@@ -31190,17 +26907,9 @@ void NifSkope::initMenu()
 						auto * west = findChild<QSpinBox *>( QStringLiteral( "LodgenWestSpin" ) );
 						auto * east = findChild<QSpinBox *>( QStringLiteral( "LodgenEastSpin" ) );
 						auto * objects = findChild<QCheckBox *>( QStringLiteral( "LodgenObjectsCheck" ) );
-						/* The range group is greyed until a chunk output is ticked - the
-						 * range means nothing for a whole-worldspace file - and click()
-						 * on a disabled button does nothing, by Qt's contract. The first
-						 * run of this check clicked a greyed button and called the panel
-						 * broken. */
-						/* RE-AIMED by lane LODUI1 (2026-09-11). The object pass has two heads
-						 * now and the FO4CS one is ticked by default, so "no chunk output is
-						 * selected" is no longer the state the panel opens in -- the check was
-						 * reading the default rather than the rule. Every head is unticked
-						 * first, and the head the TARGET offers is the one driven, so a target
-						 * that offered neither would fail here. */
+						// The range group is greyed until a chunk output is ticked - the range means nothing
+						// for a whole-worldspace file - and click on a disabled button does nothing, by Qt's
+						// contract.
 						{
 							auto * nativeHead = findChild<QCheckBox *>( QStringLiteral( "LodgenNativeCheck" ) );
 							auto * btrHead = findChild<QCheckBox *>( QStringLiteral( "LodgenBtrCheck" ) );
@@ -31259,15 +26968,7 @@ void NifSkope::initMenu()
 						check( "the progress map shows the worldspace before a run",
 							mapW && mapW->toolTip().contains( QLatin1String( "north up" ) ) );
 
-						/* The house style, counted. Each of these is a thing the
-						 * first build of this panel got wrong and a screenshot
-						 * caught (WW_CHANGES 2026-09-06a): plain Qt spin boxes
-						 * where the fork has one number field, group-box titles
-						 * where the docks use wwHeading, selectors in default
-						 * chrome beside matched number fields, the explanation
-						 * after a dash in the label, and two settings to a row.
-						 * Every count has a floor on the other side, so an empty
-						 * panel cannot pass. */
+						// The house style, counted.
 						QWidget * panel = findChild<QWidget *>( QStringLiteral( "LodgenPanel" ) );
 						check( "the panel widget is found", panel != nullptr );
 						int numbers = 0, plain = 0;
@@ -31278,10 +26979,9 @@ void NifSkope::initMenu()
 									plain++;
 							}
 						log << "number fields: " << numbers << ", left as plain spin boxes: " << plain << "\n";
-						/* The floor rises with every number added, or the count stops
-						 * being a floor: 8 before the far-ring rows, 12 with their four,
-						 * 13 with the grass tint, and 45 after lane PANEL1 put a row on
-						 * every bake number the command line has (measured 49). */
+						// The floor rises with every number added, or the count stops being a floor: 8 before
+						// the far-ring rows, 12 with their four, 13 with the grass tint, and 45 after lane
+						// PANEL1 put a row on every bake number the command line has (measured 49).
 						check( "the numbers are scrub fields, like every other number", numbers >= 45 && plain == 0 );
 						int groups = -1, headings = 0;
 						if ( panel ) {
@@ -31291,7 +26991,7 @@ void NifSkope::initMenu()
 									headings++;
 						}
 						log << "group boxes: " << groups << ", headings: " << headings << "\n";
-						// 4 before lane PANEL1's seven new families, 11 after
+						// 4 before the seven new families, 11 after
 						check( "sections are headings, not group-box frames", groups == 0 && headings >= 10 );
 						int combos = 0, unmatched = 0;
 						if ( panel )
@@ -31302,7 +27002,7 @@ void NifSkope::initMenu()
 							}
 						log << "selectors: " << combos << ", in default chrome: " << unmatched << "\n";
 						// 5 before the pyramid's finest-level row, 6 with it, 14 after
-						// lane PANEL1's eight new selectors (measured 15)
+						// the eight new selectors (measured 15)
 						check( "every selector takes the matched field chrome", combos >= 14 && unmatched == 0 );
 						int boxes = 0, dashed = 0, untipped = 0;
 						if ( panel )
@@ -31337,11 +27037,9 @@ void NifSkope::initMenu()
 						log << "range cells on distinct rows: " << distinctRows << "\n";
 						check( "range cells sit one to a row", distinctRows == 4 );
 
-						/* 2026-09-06b: the action never scrolls away, one target
-						 * choice drives the outputs, sub-panels fold, the panel
-						 * says what it will write or why it will not, and an
-						 * unticked box can be seen. Each is the thing the second
-						 * grab showed, counted. */
+						// 2026-09-06b: the action never scrolls away, one target choice drives the outputs,
+						// sub-panels fold, the panel says what it will write or why it will not, and an
+						// unticked box can be seen.
 						auto * scrollA = findChild<QScrollArea *>( QStringLiteral( "LodgenSettingsScroll" ) );
 						auto * gen = findChild<QPushButton *>( QStringLiteral( "LodgenGenerateButton" ) );
 						check( "Generate sits outside the scrolling settings",
@@ -31349,46 +27047,10 @@ void NifSkope::initMenu()
 						check( "the map sits outside the scrolling settings",
 							scrollA && mapW && !scrollA->isAncestorOf( mapW ) );
 						check( "the settings themselves do scroll", scrollA && ws && scrollA->isAncestorOf( ws ) );
-						/* ================= LANE PANEL1, 2026-09-12 =================
-						 *
-						 * bungo, 15:4x: "Erosion is a knob in the menu, corret?" --
-						 * it was not -- then "They should all be configurable in the
-						 * gen menu, anything else we're missing in that menu?".
-						 *
-						 * Every bake setting the `lodgen` command line has and the
-						 * panel did not now has a row. The floors above rose with
-						 * them; these checks are the PER-ROW ones, and each is a way
-						 * the row could be there and still be useless: not in the
-						 * scrolling settings (so it cannot be reached at 1080p),
-						 * eating the wheel while the mouse only passes over it, or
-						 * not written to its settings key (so it forgets itself).
-						 *
-						 * The list is the rows the lane added, by object name and by
-						 * the settings key each one owns. A row deleted or renamed
-						 * fails here by name, not by a count nobody can place. */
-						/* obj = the widget, key = its settings key, dep = the row this one only
-						 * means something under (the gate turns THAT on and bakes a local
-						 * baseline before moving this one), why = this bake cannot reach the row
-						 * at all, in plain language. A row with a why is a NAMED SKIP: never
-						 * baked, never counted as a pass. Lane PANEL1, 2026-09-12. */
-						/* depVal = the value the dependency must TAKE, not merely "on": the land
-						 * guide read as a selector steps to `drag`, and drag does not read the
-						 * slope reference at all, so the slope row can only be asked under a rule
-						 * that does (measured on the command line, 2026-09-12). bump = the value
-						 * THIS row is moved to instead of one step, for the rows that are a
-						 * threshold rather than a dial: the water drainage radius at 64 -> 65 asks
-						 * whether two bodies sit exactly 65 texels apart, which is not the question
-						 * anybody means. Both are written as text and parsed into the widget. */
-						/* dep2 / depVal2: a row can hang off TWO rows. The guide slope reference
-						 * needs the land warp to have an amplitude at all AND the guide to be on a
-						 * rule that reads it -- slope warp multiplies the one by the other, and the
-						 * amplitude default is 0.
-						 * dflt: the row's own default, FORCED before the base bake. A panel loads
-						 * what this machine last saved, so "every row at its default" has to be made
-						 * true rather than assumed -- on this machine Water subdivision was saved at
-						 * 4 against a code default of 3, and that alone was the whole of the
-						 * panel-versus-command-line disagreement. nullptr = leave it alone (a path).
-						 * Ticks are "1"/"0", selectors carry the item DATA, not its position. */
+						// LANE PANEL1, 2026-09-12:
+						// bungo, 15:4x: "Erosion is a knob in the menu, corret?" it was not -- then "They
+						// should all be configurable in the gen menu, anything else we're missing in that
+						// menu?".
 						static const struct { const char * obj; const char * key;
 								const char * dep; const char * why;
 								const char * depVal; const char * bump;
@@ -31411,7 +27073,7 @@ void NifSkope::initMenu()
 							{ "LodgenLandShadeSpin", "landShade", nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, "-3.242" },
 							{ "LodgenLandGradeSpin", "landGrade", nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, "1.0" },
 							{ "LodgenBlendEdgesBox", "blendEdges", nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, "1" },
-							/* depVal "1": the edge blend is ON by default since 2026-09-23 (lane DEFAULTS2), and a
+							/* depVal "1": the edge blend is ON by default since 2026-09-23, and a
 							 * bumped combo flips 1 -> 0, which measured the margin with the blend OFF. */
 							{ "LodgenBlendMarginSpin", "blendMargin", "LodgenBlendEdgesBox", nullptr, "1", nullptr, nullptr, nullptr, "128.0" },
 							{ "LodgenErosionSpin", "erosion", nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, "0.0" },
@@ -31607,7 +27269,7 @@ void NifSkope::initMenu()
 							QApplication::processEvents();
 							check( "FO4 Community Shaders brings them back, ticked, and drops the legacy chunks",
 								!lodtSec->isHidden() && lodtChk->isChecked() && !btrChk->isChecked() );
-							/* THE ROOT LABEL (lane LAYOUT1, 2026-09-16). One line under the
+							/* THE ROOT LABEL. One line under the
 							 * output field saying where this bake lands inside the mod
 							 * folder, and hidden under the stock engine, whose files did not
 							 * move. Both sides are counted: a label that is always there and
@@ -31615,10 +27277,9 @@ void NifSkope::initMenu()
 							if ( auto * rootL = findChild<QLabel *>( QStringLiteral( "LodgenOutputRootLabel" ) ) ) {
 								check( "the FO4CS target shows the LOD root under the output field",
 									!rootL->isHidden() && rootL->text().startsWith( lodgenFo4csFolderName() ) );
-								/* the NAME is spelled once, in lodgenlayout.cpp, and the
-								 * layout gate's leg (e) is what holds it to one file --
-								 * so this test asks the composer rather than adding a
-								 * second literal for the gate to trip over. */
+								// the NAME is spelled once, in lodgenlayout.cpp, and the layout gate's leg (e)
+								// is what holds it to one file so this test asks the composer rather than
+								// adding a second literal for the gate to trip over.
 								log << "  root label: '" << rootL->text() << "'" << QLatin1Char( 10 );
 								target->setCurrentIndex( 1 );
 								QApplication::processEvents();
@@ -31687,13 +27348,7 @@ void NifSkope::initMenu()
 								check( "FO4 Community Shaders hides all four legacy object rows",
 									legacyHidden == 4 );
 								check( "and shows the native .lodo/.lodi row instead", !nativeChk->isHidden() );
-								/* THE WAY BACK FROM THE DROP (lane BTOFREE1, 2026-09-16).
-								 * From today the FO4CS target builds its .BTO chunks in a
-								 * scratch folder and removes them, so the mod folder gets
-								 * our five types and nothing else. That is a default, and
-								 * a default needs a door: the row is offered here, it
-								 * ships OFF, and under the stock engine -- which never
-								 * drops a chunk -- it is not offered at all. */
+								// THE WAY BACK FROM THE DROP.
 								auto * keepBtoChk = findChild<QCheckBox *>( QStringLiteral( "LodgenKeepBtoCheck" ) );
 								log << "  FO4CS: Keep legacy .BTO chunks hidden: "
 									<< ( !keepBtoChk || keepBtoChk->isHidden() ? "yes" : "no" )
@@ -31701,10 +27356,7 @@ void NifSkope::initMenu()
 									<< ( keepBtoChk && keepBtoChk->isChecked() ? "yes" : "no" ) << "\n";
 								check( "FO4 Community Shaders offers 'Keep legacy .BTO chunks' and ships it OFF",
 									keepBtoChk && !keepBtoChk->isHidden() && !keepBtoChk->isChecked() );
-								/* The pyramid is ticked for this reading. It is an OUTPUT, off by
-								 * default, and the summary names only what the run will write -- so
-								 * asking the default panel for all five extensions asks it to name a
-								 * file nobody ticked. Put back straight after. */
+								// The pyramid is ticked for this reading.
 								auto * vtHead = findChild<QCheckBox *>( QStringLiteral( "LodgenVtCheck" ) );
 								const bool keepVt = vtHead && vtHead->isChecked();
 								if ( vtHead )
@@ -31725,11 +27377,7 @@ void NifSkope::initMenu()
 								check( "and says the object chunks are built in a scratch folder and dropped",
 									sumCs.contains( QLatin1String( "scratch" ) )
 									&& sumCs.contains( QLatin1String( "dropped" ) ) );
-								/* AND IT SAYS WHERE THEY LAND (lane LAYOUT1, 2026-09-16).
-								 * The sidecar moved under the one root with the files it
-								 * describes; the sentence used to name the folder it was
-								 * in before, which is a path nothing writes.  Asked of the
-								 * composer so the name is still spelled once in the tree. */
+								// AND IT SAYS WHERE THEY LAND.
 								check( "and names the root those sidecars land under",
 									sumCs.contains( lodgenFo4csGameWorldPath( QStringLiteral( "Commonwealth" ) ) ) );
 
@@ -31763,11 +27411,8 @@ void NifSkope::initMenu()
 									&& !sumStock.contains( QLatin1String( ".lodo" ) )
 									&& !sumStock.contains( QLatin1String( ".lodi" ) ) );
 
-								/* THE SAVED-TICK LAW this lane had to keep: restoring a
-								 * target only HIDES; a tick under a hidden row is a
-								 * saved setting, never a request. Ticked here while the
-								 * stock engine owns the panel, and the run must not see
-								 * it. */
+								// THE SAVED-TICK LAW this lane had to keep: restoring a target only HIDES; a
+								// tick under a hidden row is a saved setting, never a request.
 								nativeChk->setChecked( true );
 								QApplication::processEvents();
 								check( "a native tick under the stock target does not reach the run",
@@ -31846,16 +27491,7 @@ void NifSkope::initMenu()
 									check( QString( "LODUI1 row missing: %1" ).arg( QLatin1String( w ) ), false );
 							}
 						}
-						/* 2026-09-06 TERRAIN1: the ground-cover rows and the terrain
-						 * virtual texture. Each is measured against its OPPOSITE
-						 * state, so a row that is always enabled, always hidden or
-						 * always says the same thing cannot pass.
-						 *
-						 * The pyramid's summary is the sharpest of them: it must
-						 * MOVE when the finest level moves, because one cell a tile
-						 * is four times the tiles of two. A hard-coded sentence, or
-						 * an estimator that never got the worldspace's bounds,
-						 * would print the same string twice and fail here. */
+						// 2026-09-06 TERRAIN1: the ground-cover rows and the terrain virtual texture.
 						{
 							auto * texChk = findChild<QCheckBox *>( QStringLiteral( "LodgenTexCheck" ) );
 							auto * covChk = findChild<QCheckBox *>( QStringLiteral( "LodgenCoverCheck" ) );
@@ -31897,7 +27533,7 @@ void NifSkope::initMenu()
 								check( "the pyramid's rows grey with its own box", vtRowsOff && vtRowsOn );
 								const QString sum2 = vtSum->text();
 								// another density than the one showing (the default is 16 u,
-								// the middle entry since lane VTNORMAL1), then back
+								// the middle entry), then back
 								const int vtWas = vtFin->currentIndex();
 								const QString den2 = vtFin->currentText();
 								vtFin->setCurrentIndex( ( vtWas + 1 ) % qMax( 1, vtFin->count() ) );
@@ -31910,12 +27546,9 @@ void NifSkope::initMenu()
 								log << "pyramid summary at " << den1 << ": " << sum1 << "\n";
 								check( "the pyramid's summary is computed, not a fixed sentence",
 									!sum2.isEmpty() && !sum1.isEmpty() && sum1 != sum2 );
-								/* Lane FIX1 (2026-09-26): ground cover under the FO4CS
-								 * target, measured against its opposite state through the
-								 * request the run reads (wwCoverRequested on the summary
-								 * label = coverOptions().cover). The stock rows are ticked
-								 * above, so they are unticked here: with them the request
-								 * is true whatever this row says. */
+								// ground cover under the FO4CS target, measured against its opposite state
+								// through the request the run reads (wwCoverRequested on the summary label =
+								// coverOptions.cover).
 								{
 									auto * vtCov = findChild<QCheckBox *>( QStringLiteral( "LodgenVtCoverCheck" ) );
 									auto * sumL = findChild<QLabel *>( QStringLiteral( "LodgenSummaryLabel" ) );
@@ -31958,13 +27591,7 @@ void NifSkope::initMenu()
 								check( "the ground-cover and pyramid rows exist", false );
 							}
 						}
-						/* 2026-09-06n: the far-ring proxy rows. Four numbers, one
-						 * box, and two things a screenshot would not show: the
-						 * ratios grey with the box that owns them, and the rows
-						 * survive the STOCK target, because a smaller mesh is a
-						 * smaller mesh for both readers. Each is measured
-						 * against its opposite state, so a row that is always
-						 * enabled or always hidden cannot pass. */
+						// 2026-09-06n: the far-ring proxy rows.
 						{
 							auto * simp = findChild<QCheckBox *>( QStringLiteral( "LodgenSimplifyCheck" ) );
 							auto * r16 = findChild<QDoubleSpinBox *>( QStringLiteral( "LodgenSimplify16Spin" ) );
@@ -31997,18 +27624,13 @@ void NifSkope::initMenu()
 								check( "the far-ring rows exist", false );
 							}
 						}
-						/* 2026-09-06k: the SOURCE. Specified is your own ordered
-						 * lists; Mod Organizer 2 is MO2's, and off MO2 there is
-						 * nothing to read, so the panel says the one sentence
-						 * that tells you what to do and Generate refuses. Both
-						 * halves are counted, and the refusal is proved to be
-						 * this refusal and not the panel's other ones. */
+						// 2026-09-06k: the SOURCE.
 						auto * source = findChild<QComboBox *>( QStringLiteral( "LodgenSourceBox" ) );
 						auto * resList = findChild<QWidget *>( QStringLiteral( "LodgenResourceList" ) );
 						auto * srcStatus = findChild<QLabel *>( QStringLiteral( "LodgenSourceStatus" ) );
 						auto * genBtn = findChild<QPushButton *>( QStringLiteral( "LodgenGenerateButton" ) );
 						auto * sumLbl = findChild<QLabel *>( QStringLiteral( "LodgenSummaryLabel" ) );
-						// three since lane LOADORDER1 (2026-09-24): the profile read off disk
+						// three: the profile read off disk
 						check( "a source selector offers Specified, Mod Organizer 2 and a Mod Organizer 2 profile",
 							source && source->count() == 3
 							&& source->itemText( 1 ).contains( QLatin1String( "Mod Organizer" ) )
@@ -32085,21 +27707,8 @@ void NifSkope::initMenu()
 						} else {
 							check( "the panel says what it will write", false );
 						}
-						/* An unticked box can be seen. Fusion draws the box from
-						 * palette(base) with an outline of window-darker(140); this
-						 * theme sets Base equal to Window, so the box vanished. The
-						 * measure is the largest channel difference between any
-						 * pixel of the indicator and the ground beside it, on the
-						 * settings page's own render - not the check box's grab,
-						 * which is transparent and would read as black. */
-						/* LANE PANEL1, 2026-09-12: this read LodgenAtlasCheck, which the
-						 * FO4 Community Shaders target HIDES -- the same run says so three
-						 * lines above ("FO4CS: the object atlas hidden: yes"). A hidden
-						 * widget keeps its last geometry, so the grab was of whatever was
-						 * painted at those coordinates: with four rows above it that was
-						 * another row's box and the check read 32 levels and passed; with
-						 * sixty-one rows above it, it is empty ground and reads 0. Measure
-						 * a box that is ON SCREEN, and name it in the log. */
+						// An unticked box can be seen. Fusion draws the box from palette(base) with an outline
+						// of window-darker(140); this theme sets Base equal to Window, so the box vanished.
 						QCheckBox * atlas = nullptr;
 						QWidget * pageW = scrollA ? scrollA->widget() : nullptr;
 						if ( panel && scrollA )
@@ -32133,16 +27742,7 @@ void NifSkope::initMenu()
 						}
 						check( "an unticked box can be seen (24+ levels against the ground)", contrast >= 24 );
 
-						/* A ticked box is Blender's: a blue field with a white mark
-						 * from an image resource. Counted on the page's own render
-						 * - white pixels inside the box prove the image loaded (a
-						 * missing resource draws a plain blue square), blue-over-red
-						 * pixels prove the field is the toggle blue, not the accent. */
-						/* The identity box is UNTICKED by default since 2026-09-12 (bungo's
-						 * ruling, lane DEFAULTS1) and the FO4CS target no longer ticks it, so
-						 * this check can no longer BORROW a ticked box from the rows above:
-						 * it ticks the box itself, grabs, and puts the box back the way it
-						 * found it. A harness forces the state it measures. */
+						// A ticked box is Blender's: a blue field with a white mark from an image resource.
 						auto * ident = findChild<QCheckBox *>( QStringLiteral( "LodgenIdentityCheck" ) );
 						int whitePx = 0, bluePx = 0;
 						const bool identWasTicked = ident && ident->isChecked();
@@ -32174,19 +27774,8 @@ void NifSkope::initMenu()
 						check( "a ticked box is a white mark on Blender's blue", whitePx >= 4 && bluePx >= 20 );
 
 
-						/* Meshes and textures come from the game's own folders and
-						 * archives now (Settings > Resources), not an unpacked copy,
-						 * and the "Game data" row is gone. Proof: the same far chunk
-						 * built from the unpacked folder and from the archives, byte
-						 * for byte. Not a count of loaded models - a wrong path loads
-						 * nothing, and a chunk of nothing is still a chunk.
-						 *
-						 * The NEAR chunk at dim 4, not the far one the impostor
-						 * harness builds: an empty MNAM slot drops a ref at that
-						 * ring (vanilla parity), and at dim 16 the far chunk holds
-						 * nothing without cards - the first cut of this check read
-						 * "no LOD-bearing refs" from both sources and blamed the
-						 * loader for an hour. */
+						// Meshes and textures come from the game's own folders and archives now (Settings >
+						// Resources), not an unpacked copy, and the "Game data" row is gone.
 						check( "the unpacked Game data row is gone",
 							findChild<QLineEdit *>( QStringLiteral( "LodgenDataRootEdit" ) ) == nullptr );
 						{
@@ -32196,12 +27785,7 @@ void NifSkope::initMenu()
 							EsmWorld w;
 							QString werr;
 							QByteArray blobs[2];
-							/* And the price of the archives: each pass is timed. The
-							 * archive pass pays for its index once per process (the
-							 * first pass through it builds it) and for inflating
-							 * every distinct model; the folder pass reads files.
-							 * Run twice so the second archive pass shows the cost
-							 * without the index build. */
+							// And the price of the archives: each pass is timed.
 							qint64 msPass[3] = { 0, 0, 0 };
 							if ( QFile::exists( esm ) && QDir( unpacked ).exists() && w.load( esm, 0x3C, &werr ) ) {
 								for ( int pass = 0; pass < 3; pass++ ) {
@@ -32238,12 +27822,8 @@ void NifSkope::initMenu()
 								blobs[0].size() > 4096 && blobs[0] == blobs[1] );
 						}
 
-						/* The wheel scrolls the panel, not a value. Scrolling the
-						 * settings past a number changed it - bungo: "a real risk
-						 * with these rows". Proved both ways: a wheel over the
-						 * unfocused field leaves it, the same wheel steps it once
-						 * the field has focus, so the guard is a guard and not a
-						 * field that ignores wheels altogether. */
+						// The wheel scrolls the panel, not a value. Scrolling the settings past a number
+						// changed it - bungo: "a real risk with these rows".
 						{
 							if ( auto * full = findChild<QRadioButton *>( QStringLiteral( "LodgenLodtFullRadio" ) ) )
 								full->setChecked( true );
@@ -32276,35 +27856,8 @@ void NifSkope::initMenu()
 							check( "and still steps it once the field has focus", hadFocus && afterFocused == before + 1 );
 						}
 
-						/* WW_LODGEN_SHOT=<png>: the dock as a person would see it,
-						 * grabbed from inside the app at 640 px wide. The state is
-						 * the one this test leaves - a chunk output ticked so the
-						 * range is live - with the .lodt radio put back to full. */
-						/* ===== LANE LODUI1: THE PANEL ACTUALLY RUNS (WW_LODGEN_RUN=1) =====
-						 *
-						 * The structural checks above read widgets. These two drive the
-						 * panel the way a person does -- set the rows, press Generate,
-						 * wait for it -- because two of bungo's asks cannot be answered
-						 * by reading a widget:
-						 *
-						 *   * the native row must WIRE the emitter, not merely exist:
-						 *     the `.lodo`/`.lodi` pair has to be on disk after a
-						 *     GUI-driven region run;
-						 *   * the four stage times have to be WRITTEN and to MOVE. Run 1
-						 *     is meshes-and-textures with no landscape file, run 2 is the
-						 *     shadow heightmap and nothing else, so each of the two
-						 *     stages is seen at zero in one run and above zero in the
-						 *     other. That pairing is the floor.
-						 *
-						 * It is opt-in because it writes files and takes seconds, and
-						 * `lod_generation.sh` says in its own header that it is structure
-						 * only. `tests/spells/lodgen_panel_run.sh` is the spell for it.
-						 *
-						 * THE PANEL'S SETTINGS ARE PUT BACK. Pressing Generate calls
-						 * saveSettings(), which writes the whole LodGeneration group --
-						 * so the group is snapshotted here and restored at the end,
-						 * keys that did not exist removed. A harness forces the state it
-						 * measures and leaves nobody's panel rearranged. */
+						// WW_LODGEN_SHOT=<png>: the dock as a person would see it, grabbed from inside the app
+						// at 640 px wide.
 						if ( wwEnvInt( "WW_LODGEN_RUN" ) == 1 ) {
 							QMap<QString, QVariant> savedGroup;
 							{
@@ -32340,11 +27893,7 @@ void NifSkope::initMenu()
 								for ( QComboBox * c : panel->findChildren<QComboBox *>() )
 									if ( c->count() == 5 && c->itemText( 1 ) == QLatin1String( "4" ) )
 										dimBox2 = c;
-							/* Pump the event loop until the run is over. The chunk loop
-							 * is driven by QTimer::singleShot( 0 ), so processEvents()
-							 * is what advances it; Cancel is enabled for exactly as long
-							 * as a run is live, which is the only public "still running"
-							 * this panel has. */
+							// Pump the event loop until the run is over.
 							auto waitForRun = [&]( int budgetMs ) {
 								QElapsedTimer t;
 								t.start();
@@ -32376,10 +27925,8 @@ void NifSkope::initMenu()
 								w2->setValue( -20 ); e2->setValue( -20 );
 								s2->setValue( 24 ); n2->setValue( 24 );
 								dimBox2->setCurrentIndex( 1 );		// dim 4
-								/* The viewport preview off: it splices every finished
-								 * chunk into the workspace and reframes, which is a
-								 * person's feature and a harness's noise. Found by its
-								 * text -- it carries no object name. */
+								// The viewport preview off: it splices every finished chunk into the workspace
+								// and reframes, which is a person's feature and a harness's noise.
 								if ( panel )
 									for ( QCheckBox * c : panel->findChildren<QCheckBox *>() )
 										if ( c->text().startsWith( QLatin1String( "Show chunks" ) ) )
@@ -32393,7 +27940,7 @@ void NifSkope::initMenu()
 								const QString line1 = resL2->text();
 								log << "  run 1 finished in " << ms1 << " ms\n";
 								log << "  run 1 result line: '" << line1 << "'\n";
-								// the pair moved to FO4CSLOD/<ws>/ (lane LAYOUT1, 2026-09-16)
+								// the pair moved to FO4CSLOD/<ws>/
 								const QString nativeOut = lodgenFo4csWorldDir( runOut, QStringLiteral( "Commonwealth" ) );
 								const QString lodo = nativeOut + QStringLiteral( "/Commonwealth.lodo" );
 								const QString lodi = nativeOut + QStringLiteral( "/Commonwealth.lodi" );
@@ -32666,35 +28213,9 @@ void NifSkope::initMenu()
 								s.sync();
 							}
 						}
-						/* ===== LANE PANEL1: THE BYTE GATE (WW_LODGEN_GATE=1) =====
-						 *
-						 * A row that exists, scrolls, keeps its value and names its
-						 * switch can still be wired to nothing. The only thing that
-						 * settles it is the BAKE: move one row, bake the same chunk
-						 * again, and see whether a byte moved.
-						 *
-						 * The chunk is Sanctuary, (-20,24), dim 4 -- one chunk, the
-						 * cheapest input that still runs the terrain pass, the sheets,
-						 * the ground cover, the object pass and the landscape file.
-						 *
-						 *   base  = every new row at its default. Its digest is the
-						 *           rung's: `release/NifSkope.before_panel1.exe` run
-						 *           through the same harness leg writes the same files,
-						 *           which is gate (a) and is compared in the spell,
-						 *           across the two exes, not here.
-						 *   row i = that row alone moved off its default. Different
-						 *           digest = the row reaches the bake. Same digest =
-						 *           the row reaches NOTHING at this module set, and it
-						 *           is named, not counted.
-						 *
-						 * Three rows carry a PATH and are not bumped: a made-up path is
-						 * not a setting, it is a typo. They are named as skipped.
-						 * `threads` and `chunk threads` are bumped and must NOT move a
-						 * byte -- a bake that depends on how many cores ran it is a bug,
-						 * not a setting -- so they are the gate's own control.
-						 *
-						 * Opt-in: this is 50-odd bakes. `tests/spells/lodgen_byte_gate.sh`
-						 * is the spell, and it carries the budget. */
+						// LANE PANEL1: THE BYTE GATE (WW_LODGEN_GATE=1):
+						// A row that exists, scrolls, keeps its value and names its switch can still be wired
+						// to nothing.
 						if ( wwEnvInt( "WW_LODGEN_GATE" ) == 1 ) {
 							QMap<QString, QVariant> savedGate;
 							{
@@ -32782,11 +28303,8 @@ void NifSkope::initMenu()
 								w3->setValue( -20 ); e3->setValue( -20 );
 								s3->setValue( 24 ); n3->setValue( 24 );
 								dimBox3->setCurrentIndex( 1 );			// dim 4
-								/* The module set: the terrain pass and its sheets, the
-								 * ground cover, the object pass, the landscape file and
-								 * the native pair. NOT the pyramid -- a .lodt pyramid is
-								 * built for the whole worldspace and is 1.59 GB, which is
-								 * not a one-chunk gate. */
+								// The module set: the terrain pass and its sheets, the ground cover, the
+								// object pass, the landscape file and the native pair.
 								tick( "LodgenBtrCheck", true );
 								tick( "LodgenTexCheck", true );
 								tick( "LodgenCoverCheck", true );
@@ -32801,11 +28319,7 @@ void NifSkope::initMenu()
 									for ( QCheckBox * c : panel->findChildren<QCheckBox *>() )
 										if ( c->text().startsWith( QLatin1String( "Show chunks" ) ) )
 											c->setChecked( false );
-								/* A row moved to a NAMED value rather than by one step. Text, because
-								 * the table is a plain C array: a number for a spin box, the item DATA
-								 * for a selector (not its position), 1/0 for a tick. Returns false when
-								 * the widget did not actually move, which the caller reports rather
-								 * than swallowing. */
+								// A row moved to a NAMED value rather than by one step.
 								auto putText = []( QWidget * w, const char * text ) -> bool {
 									const QString s = QLatin1String( text );
 									if ( auto * dd = qobject_cast<QDoubleSpinBox *>( w ) ) {
@@ -32833,13 +28347,7 @@ void NifSkope::initMenu()
 									}
 									return false;
 								};
-								/* EVERY ROW AT ITS DEFAULT, MADE TRUE RATHER THAN ASSUMED. The panel
-								 * loads what this machine last saved, so without this the base bake is
-								 * "whatever is in the registry" and every row after it is measured
-								 * against that. The rows this machine had saved differently are NAMED,
-								 * because that difference is also the answer to "why does the command
-								 * line disagree with the panel". The saved group is put back wholesale
-								 * at the end of the gate, so nothing of the operator's is changed. */
+								// EVERY ROW AT ITS DEFAULT, MADE TRUE RATHER THAN ASSUMED.
 								QStringList forcedRows;
 								for ( int i = 0; i < wwNewRowCount; i++ ) {
 									if ( !wwNewRows[i].dflt || !panel )
@@ -32864,10 +28372,8 @@ void NifSkope::initMenu()
 								log << "gate base bake: " << baseFiles << " files, " << baseBytes
 									<< " bytes, " << baseMs << " ms, digest " << base << "\n";
 								log << "gate base result line: '" << resL3->text() << "'\n";
-								/* The base tree is KEPT beside the gate folder, because the
-								 * per-row loop wipes the output before every bake. The spell
-								 * compares it with the command line's own bake of the same
-								 * chunk, which is the half of the gate a GUI cannot do. */
+								// The base tree is KEPT beside the gate folder, because the per-row loop wipes
+								// the output before every bake.
 								const QString baseKeep = QDir::tempPath() + QStringLiteral( "/Lodgen_PANEL1_base" );
 								QDir( baseKeep ).removeRecursively();
 								{
@@ -32967,12 +28473,7 @@ void NifSkope::initMenu()
 									putRow( w, was );
 									QApplication::processEvents();
 								}
-								/* PASS 2: the rows that only mean something while another row
-								 * is on. Bumping one of these against the BASE bake is a rigged
-								 * question -- erosion rounds cannot move a bake whose erosion
-								 * strength is 0 -- so the gate turns the row it hangs off on,
-								 * bakes THAT as a local baseline, and only then moves the row.
-								 * Two bakes each, and the answer means something. */
+								// PASS 2: the rows that only mean something while another row is on.
 								for ( int i = 0; i < wwNewRowCount && base != QLatin1String( "REFUSED" ); i++ ) {
 									if ( !wwNewRows[i].dep || wwNewRows[i].why )
 										continue;
@@ -32994,10 +28495,8 @@ void NifSkope::initMenu()
 									if ( !w || !dw )
 										continue;
 									const QVariant depWas = rowValue( dw );
-									/* "on" is not always enough: a selector has to land on the RULE that
-									 * reads this row, which is what depVal names. */
-									/* A dependency ALREADY at its named value is on, not stuck (lane
-									 * DEFAULTS2, 2026-09-23: the edge blend became a default-on dependency). */
+									// "on" is not always enough: a selector has to land on the RULE that reads
+									// this row, which is what depVal names.
 									auto atText = []( QWidget * w, const char * text ) -> bool {
 										if ( auto * bb = qobject_cast<QComboBox *>( w ) )
 											return bb->currentIndex() >= 0
@@ -33136,23 +28635,13 @@ void NifSkope::initMenu()
 								s.sync();
 							}
 						}
-						/* THE DOCK, ARRANGED SO THE GRAB SHOWS THE OUTPUT ROWS (lane
-						 * LODUI1). Left alone, the grab opens on the settings scrolled to
-						 * the top and the splitter giving the progress map most of the
-						 * height, so a picture of the panel showed Source, Plugins and an
-						 * empty map and none of the rows under test. Stated once and used by
-						 * both grabs. */
+						// THE DOCK, ARRANGED SO THE GRAB SHOWS THE OUTPUT ROWS.
 						QWidget * grabHiddenPane = nullptr;
 						auto arrangeDockForGrab = [this, dock, &grabHiddenPane, &log]() {
 							if ( !dock )
 								return;
-							/* THE GRAB WIDTH IS A KNOB (lane PANEL1, 2026-09-12). The brief asks
-							 * for a picture at the panel MINIMUM width as well as at a comfortable
-							 * one. WW_LODGEN_SHOT_W=min asks the dock what it will not go under, a
-							 * number asks for that many pixels, and unset is the 640 every earlier
-							 * picture used, so no existing grab moves. The width the dock ACTUALLY
-							 * took is logged either way: resizeDocks() is advisory, and the main
-							 * window own width has been clamping it to 497. */
+							// THE GRAB WIDTH IS A KNOB. The brief asks for a picture at the panel MINIMUM
+							// width as well as at a comfortable one.
 							const QByteArray wEnv = wwEnv( "WW_LODGEN_SHOT_W" );
 							int want = 640;
 							if ( wEnv == QByteArray( "min" ) )
@@ -33160,13 +28649,7 @@ void NifSkope::initMenu()
 							else if ( !wEnv.isEmpty() && wEnv.toInt() > 0 )
 								want = wEnv.toInt();
 							resizeDocks( { dock }, { want }, Qt::Horizontal );
-							/* THE PROGRESS PANE IS HIDDEN FOR THE GRAB. Asking the splitter for
-							 * the height does not work: the map alone has a 160 px minimum and
-							 * the pane around it another ~140, so the settings never get past
-							 * about 270 px of a 741 px dock and a picture of the panel shows
-							 * four rows. Hidden, the settings get the whole dock. Put back by
-							 * restoreDockAfterGrab() so nothing the harness measures afterwards
-							 * sees a panel with no progress pane. */
+							// THE PROGRESS PANE IS HIDDEN FOR THE GRAB.
 							if ( auto * sp = findChild<QSplitter *>( QStringLiteral( "LodgenSplitter" ) ) ) {
 								if ( sp->count() > 1 && sp->widget( 1 ) ) {
 									grabHiddenPane = sp->widget( 1 );
@@ -33207,21 +28690,7 @@ void NifSkope::initMenu()
 							restoreDockAfterGrab();
 							log << "screenshot " << ( saved ? "saved: " : "NOT saved: " ) << QString::fromLocal8Bit( shot ) << "\n";
 						}
-						/* THE WHOLE SETTINGS COLUMN IN ONE PICTURE (lane PANEL1, second pass,
-						 * 2026-09-12). dock->grab() photographs the scroll area's VIEWPORT, so a
-						 * panel with fifty-seven new rows still comes out as the top twenty and
-						 * the change is below the frame -- which is what happened to the first
-						 * three pictures this lane took. This grabs the scroll area's INNER
-						 * widget, whose height is the whole column, and opens every folding
-						 * section first so nothing is hidden behind an arrow.
-						 *
-						 * The fold state is the OPERATOR'S and it persists
-						 * (LodGeneration/expanded/<key>), so each section that had to be opened
-						 * is clicked shut again after the grab: the click is what writes the
-						 * setting, so clicking twice restores the stored value as well as the
-						 * widget. An expander is named Lodgen<key>Expander and its body
-						 * Lodgen<key>Body, which is how one is matched to the other without
-						 * LodgenSection being visible from this file. */
+						// THE WHOLE SETTINGS COLUMN IN ONE PICTURE.
 						const QByteArray shotFull = wwEnv( "WW_LODGEN_SHOT_FULL" );
 						if ( !shotFull.isEmpty() && dock ) {
 							if ( auto * full = findChild<QRadioButton *>( QStringLiteral( "LodgenLodtFullRadio" ) ) )
@@ -33259,10 +28728,7 @@ void NifSkope::initMenu()
 							QApplication::processEvents();
 							restoreDockAfterGrab();
 						}
-						/* THE STOCK TARGET'S OWN GRAB (lane LODUI1). The row list
-						 * differs by target now, so one picture cannot show both; this
-						 * switches, grabs, and switches back so the panel is left where
-						 * it was found. */
+						// THE STOCK TARGET'S OWN GRAB.
 						const QByteArray shotStock = wwEnv( "WW_LODGEN_SHOT_STOCK" );
 						if ( !shotStock.isEmpty() && dock ) {
 							if ( auto * tb = findChild<QComboBox *>( QStringLiteral( "LodgenTargetBox" ) ) ) {
@@ -33312,12 +28778,7 @@ void NifSkope::initMenu()
 
 						emit spellsMenu->aboutToShow();
 						const QList<QAction *> acts = spellsMenu->actions();
-						/* Unfuck used to be the bolded first entry here. It is the
-						 * Issue Manager workspace now, and a menu entry that opens
-						 * a workspace is the same duplication this menu exists to
-						 * avoid. Paired with a not-empty check so the assertion
-						 * cannot pass by the menu having nothing in it at all.
-						 */
+						// Unfuck used to be the bolded first entry here.
 						bool hasUnfuck = false;
 						for ( const QAction * a : acts )
 							if ( a->text().remove( QLatin1Char( '&' ) ) == QLatin1String( "Unfuck" ) )
@@ -33334,16 +28795,8 @@ void NifSkope::initMenu()
 							for ( QAction * sa : a->menu()->actions() ) {
 								log << " " << sa->text();
 								listed++;
-								/* Nothing here may be a block spell: those are on
-								 * right-click, which is why they were taken out.
-								 *
-								 * The SpellPtr comes off the action's data, not
-								 * from SpellBook::lookup( sa->text() ). That call
-								 * returned NULL for every entry - a bare name has
-								 * no "/", so lookup wants a spell whose page() is
-								 * empty, and every spell here has one - which made
-								 * this check incapable of failing.
-								 */
+								// Nothing here may be a block spell: those are on right-click, which is why
+								// they were taken out.
 								const SpellPtr sp = sa->data().value<SpellPtr>();
 								if ( !sp )
 									unresolved++;
@@ -33356,25 +28809,14 @@ void NifSkope::initMenu()
 
 						log << "unresolved actions: " << unresolved << "\n";
 						check( "the menu still lists whole-file spells", listed > 0 );
-						/* Not vacuous any more. Every action must carry its
-						 * SpellPtr, or the applicability check below is measuring
-						 * an empty set - which is exactly what it did while the
-						 * pointer was recovered by name.
-						 */
+						// Not vacuous any more.
 						check( "every entry resolves to a real spell", unresolved == 0 );
 						check( "none of them needs a block selected", wantsIndex == 0 );
 
 
-						/* Spell::hint() reaches a real menu action.
-						 *
-						 * hint() had zero overrides tree-wide and nothing read it,
-						 * while the same sentences sat in a private table in this
-						 * file. Two things can now break independently: a spell can
-						 * lose its hint, or SpellBook can stop copying it onto the
-						 * QAction — and the second is invisible, because a missing
-						 * tooltip looks exactly like a tooltip nobody hovered. So
-						 * this checks the wiring, not only the data.
-						 */
+						// Spell::hint() reaches a real menu action:
+						// hint() had zero overrides tree-wide and nothing read it, while the same sentences
+						// sat in a private table in this file.
 						int withHints = 0;
 						for ( SpellPtr sp : SpellBook::spells() )
 							if ( sp && !sp->hint().isEmpty() )
@@ -33398,15 +28840,7 @@ void NifSkope::initMenu()
 						check( "SpellBook puts the hint on the menu action",
 							collapse && !wired.isEmpty() && wired == collapse->hint() );
 
-						/* The submenu order is DECLARED, not inherited from link order.
-						 *
-						 * A page's submenu is created the first time a spell on it
-						 * registers, so this menu's top-level order used to be an
-						 * artefact of the order object files appear in NifSkope.pro:
-						 * reordering SOURCES silently reordered the user's context
-						 * menu. Asserting the declared sequence is what stops that
-						 * being reintroduced without a red test.
-						 */
+						// The submenu order is DECLARED, not inherited from link order.
 						QStringList pageTitles;
 						for ( QAction * a : probe.actions() )
 							if ( a->menu() )
@@ -33417,23 +28851,7 @@ void NifSkope::initMenu()
 							const int j = pageTitles.indexOf( QLatin1String( y ) );
 							return i >= 0 && j >= 0 && i < j;
 						};
-						/* STALE ASSERTIONS, CORRECTED - these named groups that no
-						 * longer exist.
-						 *
-						 * They were written against the page taxonomy and never
-						 * updated when Spell::group() replaced it: "Node" was
-						 * folded away and "Mesh" became "Geometry", so both
-						 * ordered() calls were comparing against an index of -1
-						 * and failing for a reason that had nothing to do with
-						 * ordering. Two permanently-red checks nobody could act
-						 * on, which is worse than no check - a suite with known
-						 * failures in it stops being read.
-						 *
-						 * Mirrors groupOrder[] in SpellBook::orderGroups. The last
-						 * check is the one with teeth: Error Checking must be the
-						 * final entry, which fails if anything is appended after
-						 * the declared run rather than merely reordered inside it.
-						 */
+						// STALE ASSERTIONS, CORRECTED - these named groups that no longer exist.
 						check( "the structural groups lead, in declared order",
 							ordered( "Block", "Add" ) && ordered( "Add", "Transform" )
 							&& ordered( "Transform", "Geometry" ) );
@@ -33444,15 +28862,9 @@ void NifSkope::initMenu()
 							!pageTitles.isEmpty()
 							&& pageTitles.last() == QLatin1String( "Error Checking" ) );
 
-						/* It is reached from WORKSPACES now, as "Issue Manager".
-						 *
-						 * This used to trigger the Spells menu's bolded Unfuck entry and
-						 * assert the dock appeared. That entry is gone - it opened a
-						 * workspace from a spell menu, which is the duplication this menu
-						 * exists to avoid - so the assertion moves to the door that is left.
-						 * Removing one door without checking the remaining one is how a
-						 * feature becomes unreachable in silence.
-						 */
+						// It is reached from WORKSPACES now, as "Issue Manager":
+						// This used to trigger the Spells menu's bolded Unfuck entry and assert the dock
+						// appeared.
 						QDockWidget * udock =
 							findChild<QDockWidget *>( QStringLiteral( "UnfuckManagerDock" ) );
 						if ( udock )
@@ -33487,41 +28899,20 @@ void NifSkope::initMenu()
 			} );
 		}
 
-		/* ...and the rest of the menu: the whole-file spells, by page.
-		 *
-		 * Rebuilt every time the menu opens rather than filled once, because
-		 * which spells qualify depends on the FILE — a spell offers itself for an
-		 * invalid index or it does not, and that answer changes with the version
-		 * and the contents of whatever is loaded. Rebuilding is also what keeps
-		 * this menu from being filtered against the current selection, which is
-		 * the behaviour that used to empty it.
-		 *
-		 * The repair spells are skipped: they are the Issue Manager workspace's
-		 * content, and listing them twice is the duplication this was meant to
-		 * remove.
-		 */
+		// ...and the rest of the menu: the whole-file spells, by page:
+		// Rebuilt every time the menu opens rather than filled once, because which spells qualify depends on
+		// the FILE — a spell offers itself for an invalid index or it does not, and that answer changes with
+		// the version and the contents of whatever is loaded.
 		connect( spellsMenu, &QMenu::aboutToShow, this,
 			[this, spellsMenu]() {
-			/* Clear the whole menu, not "everything after the Unfuck entry".
-			 *
-			 * That anchor was the bolded Unfuck action; with it gone the menu has
-			 * no permanent head, so every rebuild starts from empty. Written as a
-			 * plain clear rather than a search that can no longer find anything -
-			 * a stale anchor search would have quietly kept the first rebuild's
-			 * contents forever.
-			 */
+			// Clear the whole menu, not "everything after the Unfuck entry".
 			for ( QAction * a : spellsMenu->actions() )
 				spellsMenu->removeAction( a );
 			if ( !nif )
 				return;
 
-			/* The repair and check spells are skipped: they are the Unfuck
-			 * workspace's content, and listing them twice is the duplication this
-			 * menu was rebuilt to remove. The rule matches the panel's own -- see
-			 * rebuildRepairs and checkSpells in unfucktools.cpp -- rather than a
-			 * captured copy of a list the dialog used to build, so the two cannot
-			 * drift apart.
-			 */
+			// The repair and check spells are skipped: they are the Unfuck workspace's content, and listing
+			// them twice is the duplication this menu was rebuilt to remove.
 			static const char * const unfuckExtras[] = {
 				"Update All Bounds", "Update All Tangent Spaces",
 				"Remove Unused Strings", "Make All Skin Partitions",
@@ -33538,21 +28929,9 @@ void NifSkope::initMenu()
 			for ( SpellPtr s : SpellBook::spells() ) {
 				if ( !s || belongsToUnfuck( s ) )
 					continue;
-				/* Which heading it files under.
-				 *
-				 * page() first, because that is the frozen id the CLI's -s,
-				 * SpellBook::lookup and the QSettings keys all use, and it must
-				 * not be changed to fix a menu. group() is the newer, purely
-				 * presentational axis, so it is the right fallback for a spell
-				 * whose page() is empty.
-				 *
-				 * Without the fallback, Extract Resource Files was invisible
-				 * here: a whole-file, no-selection export - exactly the profile
-				 * this menu was rebuilt to gather - dropped for no reason beyond
-				 * an empty page() string, and reachable only by right-clicking
-				 * the blank space BELOW the last row of the Block List, which is
-				 * not a discoverable place for a feature to live.
-				 */
+				// Which heading it files under:
+				// page() first, because that is the frozen id the CLI's -s, SpellBook::lookup and the
+				// QSettings keys all use, and it must not be changed to fix a menu.
 				const QString heading = !s->page().isEmpty() ? s->page() : s->group();
 				if ( heading.isEmpty() )
 					continue;
@@ -33580,16 +28959,10 @@ void NifSkope::initMenu()
 					a->setShortcut( sp->hotkey() );
 					if ( !sp->hint().isEmpty() )
 						a->setToolTip( sp->hint() );
-					/* The SpellPtr, carried on the action.
-					 *
-					 * The harness used to recover it with SpellBook::lookup on the
-					 * action's text, which cannot work: a bare name has no "/", so
-					 * lookup searches for a spell whose page() is EMPTY, and every
-					 * spell in this menu has a page. It returned null every time,
-					 * so the "none of them needs a block selected" assertion could
-					 * never fail - a green check measuring nothing. Attaching the
-					 * pointer removes the string round-trip entirely.
-					 */
+					// The SpellPtr, carried on the action:
+					// The harness used to recover it with SpellBook::lookup on the action's text, which cannot
+					// work: a bare name has no "/", so lookup searches for a spell whose page() is EMPTY, and
+					// every spell in this menu has a page.
 					a->setData( QVariant::fromValue( sp ) );
 					connect( a, &QAction::triggered, this, [this, sp]() {
 						if ( nif && book )
@@ -33667,45 +29040,19 @@ void NifSkope::initMenu()
 	updateRecentArchiveActions();
 	updateRecentArchiveFileActions();
 
-	/* The Lighting Options bulb is gone from the toolbar.
-	 *
-	 * Its sliders live in the Viewport Shading dropdown now, under a "Lighting"
-	 * section - see the block in initDockWidgets that hosts a LightingWidget
-	 * there. The bulb was the only control on the row carrying no label and no
-	 * tooltip at all, and it duplicated the shading dropdown's subject.
-	 *
-	 * Removed from the toolbar rather than hidden, so the separators either side
-	 * of it collapse with it and the row does not draw a double rule. aLightMenu
-	 * itself is left in the .ui and simply unused: it is a designer object and
-	 * deleting it would churn a generated file for nothing.
-	 */
+	// The Lighting Options bulb is gone from the toolbar:
+	// Its sliders live in the Viewport Shading dropdown now, under a "Lighting" section - see the block in
+	// initDockWidgets that hosts a LightingWidget there.
 	ui->tRender->removeAction( ui->aLightMenu );
 
-	/* Screenshot / Save View, off the bar.
-	 *
-	 * bungo: "we won't use that feature, so hide it from the top bar." Hidden,
-	 * not deleted — `GLView::saveImage` and the Render menu entry both still
-	 * work, so putting it back is one line rather than a resurrection.
-	 */
+	// Screenshot / Save View, off the bar:
+	// bungo: "we won't use that feature, so hide it from the top bar." Hidden, not deleted —
+	// `GLView::saveImage` and the Render menu entry both still work, so putting it back is one line rather
+	// than a resurrection.
 	ui->tRender->removeAction( ui->aPrintView );
 
-	/* Menu bar and tool bar share one row.
-	 *
-	 * bungo wants the vertical space back at the top: three stacked rows (title,
-	 * menus, tools) become two. The menu bar is reparented INTO the first
-	 * toolbar as an ordinary widget, so the top toolbar area lays it out on the
-	 * same line as everything else — those toolbars already share a row with
-	 * each other, this just adds one more member to it.
-	 *
-	 * Order matters. The bar is put into the toolbar first, so it belongs to the
-	 * toolbar before the main window is told to stop reserving a row for it;
-	 * doing it the other way round hands QMainWindow a widget it still owns and
-	 * is about to replace, which is how you get a double free.
-	 *
-	 * setMenuWidget takes an empty placeholder rather than nullptr: nullptr
-	 * leaves the previous menu widget in place on some styles, while a widget
-	 * whose sizeHint is zero collapses the row outright.
-	 */
+	// Menu bar and tool bar share one row:
+	// bungo wants the vertical space back at the top: three stacked rows (title, menus, tools) become two.
 	if ( ui->menubar ) {
 		QMenuBar * mb = ui->menubar;
 		mb->setSizePolicy( QSizePolicy::Minimum, QSizePolicy::Preferred );
@@ -33725,50 +29072,23 @@ void NifSkope::initMenu()
 			ui->tFile->insertSeparator( before );
 	}
 
-	/* One bar between groups, not two.
-	 *
-	 * Every toolbar here is assembled by deleting actions out of the designer
-	 * file and inserting widgets between what is left, so removing the last
-	 * button of a group strands that group's separator against the next one and
-	 * the row draws a double rule with no space in it. Taking Screenshot out,
-	 * just above, is exactly that case. Collapse runs of separators and drop any
-	 * that end up at either end, on every toolbar, so no future removal has to
-	 * remember to tidy up after itself.
-	 */
+	// One bar between groups, not two:
+	// Every toolbar here is assembled by deleting actions out of the designer file and inserting widgets
+	// between what is left, so removing the last button of a group strands that group's separator against the
+	// next one and the row draws a double rule with no space in it.
 	for ( QToolBar * tb : { ui->tFile, ui->tRender, ui->tMode, ui->tView, ui->tLOD } ) {
 		if ( !tb )
 			continue;
-		/* The group-break PADDING is transparent to this.
-		 *
-		 * wwGroupBreak wraps every rule in two spacer widgets, and that broke
-		 * this cleanup the moment it was introduced: the loop only ever saw two
-		 * separators as adjacent when nothing sat between them, and now a pad
-		 * always does. The result was a visible double rule between Object and
-		 * Global - two groups meeting, each contributing its own boundary, with
-		 * nothing left to collapse them. Photographed, not deduced.
-		 *
-		 * So padding is skipped when deciding adjacency, and removed along with
-		 * the separator it belonged to; otherwise deleting the rule would leave
-		 * its two gaps behind as an unexplained hole.
-		 */
+		// The group-break PADDING is transparent to this:
+		// wwGroupBreak wraps every rule in two spacer widgets, and that broke this cleanup the moment it was
+		// introduced: the loop only ever saw two separators as adjacent when nothing sat between them, and now
+		// a pad always does.
 		auto isPad = []( const QAction * a ) {
 			const QWidget * w = qobject_cast<const QWidgetAction *>( a )
 				? static_cast<const QWidgetAction *>( a )->defaultWidget() : nullptr;
 			return w && w->objectName() == QLatin1String( "wwGroupPad" );
 		};
-		/* Leading and trailing rules are only stripped at the ENDS OF THE ROW.
-		 *
-		 * These five toolbars sit side by side in one row, so "leading" and
-		 * "trailing" are properties of the row, not of each toolbar. Stripping
-		 * them per-toolbar deleted the boundary between tMode and tRender
-		 * entirely - Object and Global ended up with no rule between them at all,
-		 * because tMode's trailing one and tRender's leading one are the SAME
-		 * boundary and both were treated as an edge.
-		 *
-		 * tFile is first in the row and tView last; only those two have real
-		 * edges. Hardcoded because the row order is set deliberately (see the
-		 * insertToolBar in restoreUi) rather than discovered.
-		 */
+		// Leading and trailing rules are only stripped at the ENDS OF THE ROW.
 		const bool rowStart = ( tb == ui->tFile );
 		const bool rowEnd = ( tb == ui->tView );
 
@@ -33857,31 +29177,10 @@ void NifSkope::initMenu()
 		grpTheme->addAction( a );
 	}
 
-	/* GREYSCALE THE RENDER MENU.
-	 *
-	 * Every drawn icon in this application is one greyscale family, and the
-	 * Render menu was the last place still showing full-colour resource PNGs -
-	 * the orange/blue view cubes, the perspective toggle, the active Load View
-	 * marker, Save View, Lighting Only. Sat in a list beside a dozen grey glyphs
-	 * they read as the important entries, which is a claim about them that
-	 * nothing in the menu intends.
-	 *
-	 * Done here because initMenu() runs LAST of the four init passes
-	 * (initActions -> initDockWidgets -> initToolBars -> initMenu, nifskope.cpp),
-	 * so every icon these actions will ever carry is already set - including
-	 * aViewCenter's, which is assigned from tlMakeIcon during the toolbar pass.
-	 * It is also where the precedent sits: the bulb above is greyscaled in this
-	 * same function for the same reason.
-	 *
-	 * Both icon STATES are converted where an action has two. aViewUser and
-	 * aViewPerspective carry separate Off and On pixmaps, and the On ones are the
-	 * most saturated art in the set - converting only the default state would
-	 * have left the colour to reappear the moment the toggle was used, which is
-	 * the sort of thing that survives review and then shows up in a screenshot.
-	 *
-	 * Actions with no icon are skipped by isNull() rather than listed, so this
-	 * does not have to be kept in step with the menu's contents.
-	 */
+	// GREYSCALE THE RENDER MENU:
+	// Every drawn icon in this application is one greyscale family, and the Render menu was the last place
+	// still showing full-colour resource PNGs - the orange/blue view cubes, the perspective toggle, the active
+	// Load View marker, Save View, Lighting Only.
 	if ( ui->mRender ) {
 		for ( QAction * a : ui->mRender->actions() ) {
 			if ( a->isSeparator() || a->icon().isNull() )
@@ -33911,14 +29210,14 @@ void NifSkope::initToolBars()
 	ui->tRender->setEnabled( false );
 	ui->tRender->setContextMenuPolicy( Qt::ActionsContextMenu );
 
-	/* NO STATUS BAR (lane UINOTES1, 2026-09-12, bungo's ruling 1: "that entire
+	/* NO STATUS BAR (bungo's ruling 1: "that entire
 	 * bottom bar that shows you the loaded nif, waste of space"). The
 	 * QStatusBar is gone from src/ui/nifskope.ui, so nothing may call
 	 * QMainWindow::statusBar() -- that accessor CREATES one on demand and
 	 * would silently put the 24 px back. The loaded-file path display
 	 * (filePathWidget) is retired with the bar; the progress bar and every
 	 * transient sentence moved to showTransientMessage's viewport line, which
-	 * ensureTransientLine() re-parents `progress` into on first use. */
+	 * ensureTransientLine re-parents `progress` into on first use. */
 	ensureTransientLine();
 
 
@@ -33952,13 +29251,7 @@ void NifSkope::initToolBars()
 
 	connect( ui->aAnimate, &QAction::toggled, ogl, &GLView::updateAnimationState );
 
-	// Play implies animation enabled. advanceGears() requires BOTH AnimEnabled
-	// and AnimPlay, and View > Animations is persisted ("GLView/Enable
-	// Animations"), so one stray click there disabled playback permanently and
-	// every play path — this action, the Timeline dock's transport, Space in the
-	// viewport — became a silent no-op. That reads exactly like "animation is
-	// broken" with nothing to discover. Connected BEFORE the state slot below so
-	// AnimEnabled is already set when AnimPlay arrives.
+	// Play implies animation enabled.
 	connect( ui->aAnimPlay, &QAction::triggered, this, [this]( bool checked ) {
 		if ( checked && !ui->aAnimate->isChecked() )
 			ui->aAnimate->setChecked( true );	// emits toggled -> sets AnimEnabled
@@ -33967,31 +29260,15 @@ void NifSkope::initToolBars()
 	connect( ui->aAnimLoop, &QAction::toggled, ogl, &GLView::updateAnimationState );
 	connect( ui->aAnimSwitch, &QAction::toggled, ogl, &GLView::updateAnimationState );
 
-	// The timeline slider and animation-group combo formerly shown here have
-	// moved to the animation workspace (Timeline dock: playhead scrub +
-	// sequence selector). Only the wiring the dock and state machine rely on
-	// remains: aAnimPlay's pressed state tracks playback, and aAnimSwitch — a
-	// toggle the dock exposes — is only meaningful with more than one sequence.
+	// The timeline slider and animation-group combo formerly shown here have moved to the animation workspace
+	// (Timeline dock: playhead scrub + sequence selector).
 	connect( ogl, &GLView::sequenceStopped, ui->aAnimPlay, &QAction::toggle );
 	connect( ogl, &GLView::sequencesUpdated, [this]() {
 		ui->aAnimSwitch->setVisible( ogl->getScene()->animGroups.count() > 1 );
 	} );
 
-	/* The Loop toggle starts from what the sequence says it does.
-	 *
-	 * NiControllerSequence carries a Cycle Type — LOOP, REVERSE or CLAMP — and
-	 * nothing read it. One session-wide checkbox decided for every sequence in
-	 * every file instead, and it starts UNCHECKED and is not persisted (see
-	 * saveUi/restoreUi, where the line is commented out), so the default preview
-	 * played everything exactly once. Measured over the stock Fallout 4 mesh
-	 * tree — 1,124 files, 3,337 sequences — 2,664 are CYCLE_CLAMP and 673 are
-	 * CYCLE_LOOP, so that default was wrong for 673 of them and right for the
-	 * rest by accident. (None are CYCLE_REVERSE, and none predate the field.)
-	 *
-	 * Set on sequence CHANGE only, never on a refresh, so it follows the file
-	 * without fighting a deliberate tick: override it and the override stands
-	 * for as long as you stay on that sequence.
-	 */
+	// The Loop toggle starts from what the sequence says it does:
+	// NiControllerSequence carries a Cycle Type — LOOP, REVERSE or CLAMP — and nothing read it.
 	connect( ogl, &GLView::sequenceCycleChanged, this, [this]( int cycleType, bool repeats ) {
 		ui->aAnimLoop->setChecked( repeats );		// -> updateAnimationState
 		static const char * const names[] = { "CYCLE_LOOP", "CYCLE_REVERSE", "CYCLE_CLAMP" };
@@ -34006,24 +29283,13 @@ void NifSkope::initToolBars()
 		ui->aReload->setDisabled(true);
 	} );
 
-	/* LOD toolbar.
-	 *
-	 * It used to sit inside the Workspaces group, before the row's separator,
-	 * which grouped it with the application menus it has nothing to do with -
-	 * LOD is a viewport display control, so it belongs with Animation and
-	 * Collision on the other side of the rule. And its label read a bare "LOD"
-	 * whatever the slider was set to, so the one thing you wanted from it - the
-	 * level you are looking at - was the one thing it did not say.
-	 */
+	// LOD toolbar:
+	// It used to sit inside the Workspaces group, before the row's separator, which grouped it with the
+	// application menus it has nothing to do with - LOD is a viewport display control, so it belongs with
+	// Animation and Collision on the other side of the rule.
 	QToolBar * tLOD = ui->tLOD;
-	/* The old LOD slider lived here.
-	 *
-	 * It is now a dropdown button beside Animation and Collision, built in
-	 * initViewMenus with them. The toolbar itself is kept but emptied and
-	 * hidden: it is named in four other places (the toolbar loops, the
-	 * visibility menu, restoreUi) and removing it would touch all of them for
-	 * no gain.
-	 */
+	// The old LOD slider lived here:
+	// It is now a dropdown button beside Animation and Collision, built in initViewMenus with them.
 	ui->aLODDummy->setVisible( false );
 	tLOD->setVisible( false );
 	tLOD->setEnabled( false );
@@ -34041,14 +29307,8 @@ void NifSkope::initConnections()
 }
 
 
-/* NifSkope::lightingWidget() is gone.
- *
- * It built a QMenu wrapping a LightingWidget for the toolbar bulb. The bulb has
- * been removed and the widget is now hosted directly in the Viewport Shading
- * popup, so this was a second construction path for the same panel - and two
- * LightingWidgets would mean two sets of sliders writing the same
- * Settings/Render/Lighting/* keys, disagreeing whenever one was moved.
- */
+// NifSkope::lightingWidget() is gone:
+// It built a QMenu wrapping a LightingWidget for the toolbar bulb.
 
 
 QWidget * NifSkope::filePathWidget( QWidget * parent )
@@ -34231,13 +29491,13 @@ void NifSkope::onLoadComplete( bool success, QString & fname )
 	// A new tab gets a useful initial framing. Reloading/replacing a document in
 	// an existing tab preserves that tab's live camera for the current session.
 	if ( !hasLoadedDocument ) {
-		/* lane CELLSPAWN1 (bungo 10-26): a cell opens standing on its ground, not framed from above
+		/* a cell opens standing on its ground, not framed from above
 		 * (src/cellspawn.h). A pinned harness camera keeps the old path, so its pictures do not move. */
 		CellSpawn spawn;
 		const bool tookSpawn = cellSpawnTake( nif, spawn );
 		if ( success && tookSpawn && spawn.valid && fname.endsWith( QLatin1String( ".wwcell" ), Qt::CaseInsensitive )
 			&& !GLView::wwCameraPinFromEnvironment().active ) {
-			if ( spawn.favorite ) {	// lane FAVCAM1: the start favorite, with its pitch and field of view
+			if ( spawn.favorite ) {	// the start favorite, with its pitch and field of view
 				const float rot[3] = { spawn.pitchDeg - 90.0f, spawn.rollDeg, spawn.yawDeg };
 				qInfo().noquote() << ogl->wwCameraGoTo( spawn.eye, rot, spawn.fovDeg, spawn.dist ) << "|" << spawn.rule;
 			} else {
@@ -34335,20 +29595,9 @@ void NifSkope::enableUi()
 
 void NifSkope::saveUi() const
 {
-	// Never persist the layout from a harness run.
-	//
-	// The WW_RENDER_SHOT harness hides every dock so the framebuffer size depends
-	// only on WW_RENDER_SIZE (07-27j). It then quit, saveUi() ran, and that
-	// hidden-dock layout BECAME the user's saved layout — NifSkope started with
-	// Block List, Block Details, Header and NIF Browser all gone. Reported
-	// 2026-07-27.
-	//
-	// The guard is deliberately generic rather than a test for that one variable:
-	// this session alone made roughly thirty harness launches across a dozen WW_*
-	// harnesses, several of which hide docks, switch modes or resize the window.
-	// None of them should ever leave a trace in the user's UI settings.
-	// lane WSRESTORE1: the one exception is its own close/relaunch gate, which
-	// may only ever write into a scratch WW_SETTINGS_SCOPE key.
+	// Never persist the layout from a harness run:
+	// The WW_RENDER_SHOT harness hides every dock so the framebuffer size depends only on WW_RENDER_SIZE
+	// (07-27j).
 	const QStringList envKeys = QProcessEnvironment::systemEnvironment().keys();
 	for ( const QString & key : envKeys ) {
 		if ( key.startsWith( QLatin1String( "WW_" ) ) && !wwWorkspaceRestoreSavesUi() )
@@ -34356,13 +29605,8 @@ void NifSkope::saveUi() const
 	}
 
 	QSettings settings;
-	// 0x074 replaces four tabified core docks with one permanent three-mode
-	// left editor. The schema key lets restoreUi migrate one old 0x073 layout.
-	/* lane WSRESTORE1: closed inside a workspace that hides the NIF column
-	 * (Cell), save the layout from BEFORE it -- the bytes setWorkspace keeps for
-	 * the way back. Saving the Cell layout left the next launch, which always
-	 * opens Default, with no block list and nothing to bring it back (bungo
-	 * 2026-10-03). WW_CELL_WSRESTORE_RED is the gate's red control only. */
+	// 0x074 replaces four tabified core docks with one permanent three-mode left editor. The schema key lets
+	// restoreUi migrate one old 0x073 layout.
 	const bool wsRed = wwEnvIsSet( "WW_CELL_WSRESTORE_RED" );
 	settings.setValue( "Window State"_uip, ( workspaceLayoutSaved && !wsRed )
 		? workspaceLayoutBefore : saveState( 0x074 ) );
@@ -34383,16 +29627,7 @@ void NifSkope::saveUi() const
 	settings.setValue( "List Mode"_uip, (gListMode->checkedAction() == aList ? "list" : "hierarchy") );
 	settings.setValue( "Show Non-applicable Rows"_uip, aCondition->isChecked() );
 
-	/* A HEADER BLOB BELONGS TO A MODEL SHAPE. The Block List runs on the proxy in
-	 * hierarchy mode (3 columns) and on the NifModel in list mode (12), and
-	 * QHeaderView::restoreState given a blob of the wrong shape appends the
-	 * missing sections WITHOUT adding their widths to the `length` it restored
-	 * from the blob. The header's running total then reads smaller than the
-	 * sections it totals — negative, with 9 columns hidden — and since
-	 * visualIndexAt() answers -1 for any position past `length`, indexAt() found
-	 * no column and no row: nothing in the flat list could be clicked at all. So
-	 * each mode keeps its own blob, and neither is ever read into the other.
-	 */
+	// A HEADER BLOB BELONGS TO A MODEL SHAPE.
 	settings.setValue( gListMode->checkedAction() == aList
 		? "List Header/list"_uip : "List Header/hierarchy"_uip,
 		list->header()->saveState() );
@@ -34416,68 +29651,19 @@ void NifSkope::restoreUi()
 {
 	uiRestored = true;
 	QSettings settings;
-	/* STATE FIRST, THEN GEOMETRY — and no processEvents() between them.
-	 *
-	 * Upstream has these the other way round, with
-	 * `if ( isMaximized() ) QApplication::processEvents();` in between. That
-	 * ordering is the "unexplained" startup crash this file has been blamed
-	 * for three times: 0xC0000005 inside Qt6Widgets at launch, cured by
-	 * clearing UI/Window State — which made the saved blob look guilty when it
-	 * never was.
-	 *
-	 * Measured, four ways, holding one variable at a time:
-	 *
-	 *   saved blob   restored geometry   result
-	 *   maximised    maximised           CRASH
-	 *   maximised    normal              fine
-	 *   normal       maximised           fine
-	 *   normal       normal              fine
-	 *
-	 * Only the both-maximised cell dies, and the two blobs are the same 2090
-	 * bytes differing in seven rows of dock sizes — same items, same
-	 * structure. So nothing is corrupt. restoreGeometry() applies the
-	 * maximised flag to a window that has not been shown yet, and
-	 * restoreState() then replays a maximised-sized dock layout against it and
-	 * faults in QLayout::addChildWidget (gdb, symbols resolved off the export
-	 * table).
-	 *
-	 * Doing state first means restoreState() always runs against a plain,
-	 * freshly constructed window — the two cells above that are provably safe
-	 * — and the geometry is applied afterwards, which is the same resize path
-	 * as maximising by hand. Qt's docs suggest geometry first; this is a
-	 * deliberate divergence and the reason is the table.
-	 *
-	 * The processEvents() is dropped rather than moved: createWindow() calls
-	 * restoreUi() before show(), so there was no window for the WM to maximise
-	 * and nothing for the pump to settle.
-	 *
-	 * Why it surfaced now. saveUi() writes whatever state the window is in, so
-	 * the poison needs a maximised window at CLOSE. Before this fork opened
-	 * maximised that took a user maximising by hand — intermittent, and twice
-	 * unreproducible. Since 648cfa2 every clean close armed the next launch,
-	 * which is what made it finally catchable.
-	 *
-	 * Covered by tests/spells/window_state_roundtrip.sh.
-	 */
+	// STATE FIRST, THEN GEOMETRY — and no processEvents() between them.
 	const int leftColumnSchema = settings.value(
 		"LeftColumn/LayoutSchema"_uip, 0 ).toInt();
 	const bool hasLeftColumnLayout = leftColumnSchema >= 1;
 	const QByteArray windowState = settings.value( "Window State"_uip ).toByteArray();
-	// Existing users get one 0x073 replay so all unrelated manager docks and
-	// toolbars retain their positions. The four obsolete core docks no longer
-	// exist, so their entries are ignored; LeftColumnDock stays at its designed
-	// left position. The next normal close writes a clean 0x074 graph.
+	// Existing users get one 0x073 replay so all unrelated manager docks and toolbars retain their positions.
 	restoreState( windowState, hasLeftColumnLayout ? 0x074 : 0x073 );
 	if ( !hasLeftColumnLayout && dLeft ) {
 		if ( dockWidgetArea( dLeft ) == Qt::NoDockWidgetArea )
 			addDockWidget( Qt::LeftDockWidgetArea, dLeft );
 		dLeft->show();
 	}
-	/* lane WSRESTORE1: THE LEFT COLUMN HAS NO CLOSE BUTTON, so outside a
-	 * workspace that hides it, it is always up. A layout saved by a close in
-	 * the Cell workspace (every build before this lane) replays it hidden, with
-	 * the Cell dock up, into a window that opens in Default; put both right so
-	 * such a saved layout heals on its own. */
+	// THE LEFT COLUMN HAS NO CLOSE BUTTON, so outside a workspace that hides it, it is always up.
 	if ( dLeft && !wwEnvIsSet( "WW_CELL_WSRESTORE_RED" ) ) {
 		const bool hiding = workspaceIndex >= 0 && workspaceIndex < workspaceDefs.size()
 			&& workspaceDefs.at( workspaceIndex ).hideNifDocks;
@@ -34490,26 +29676,11 @@ void NifSkope::restoreUi()
 			dLeft->show();
 		}
 	}
-	/* A HARNESS RUN DOES NOT INHERIT A WINDOW (lane HARNESSWIN1,
-	 * 2026-09-19).  saveUi() has refused to PERSIST from a WW_* run
-	 * since 2026-07-27; the read half never got the same guard, so
-	 * every harness still replayed the position, the size and the
-	 * MAXIMIZED BIT of whatever window was last closed by hand.  A
-	 * maximized window discards resize(), so WW_RENDER_SIZE was
-	 * silently floored and the gate measured the machine.  Same
-	 * predicate on both sides, or the two can disagree. */
+	// A HARNESS RUN DOES NOT INHERIT A WINDOW.
 	if ( !wwHarnessGeometryRestoreSuppressed() )
 		restoreGeometry( settings.value( "Window Geometry"_uip ).toByteArray() );
-	/* Schema 1 saved the new dock at whatever width Qt assigned while replacing
-	 * the four legacy docks — commonly its ~260 px size hint. Because that state
-	 * already contained LeftColumnDock, the fresh/migration 400 px request above
-	 * never ran again and the accidental compact width became the "default".
-	 *
-	 * Schema 2 is a one-shot width migration. Apply it AFTER geometry/state have
-	 * both replayed so neither can overwrite it, then save schema 2 on a normal
-	 * close. From that point on there is no clamp: a width the user deliberately
-	 * chooses, narrow or wide, is restored exactly.
-	 */
+	// Schema 1 saved the new dock at whatever width Qt assigned while replacing the four legacy docks —
+	// commonly its ~260 px size hint.
 	if ( leftColumnSchema < 2 && dLeft ) {
 		dLeft->show();
 		resizeDocks( { dLeft }, { 400 }, Qt::Horizontal );
@@ -34540,36 +29711,9 @@ void NifSkope::restoreUi()
 			int( LeftBlocks ) ).toInt() )
 		: LeftBlocks );
 
-	/* Re-assert the header order AFTER restoreState.
-	 *
-	 * The mode toolbar is put ahead of the render toolbar during construction,
-	 * so the row reads mode, then the verbs the mode governs, then the transform
-	 * widgets - Blender's header order. restoreState replays a layout saved by an
-	 * older build and silently undoes it, which is why the reorder appeared to do
-	 * nothing: the constructor was right and the restore overwrote it a moment
-	 * later, with no error and nothing in the diff to look at.
-	 *
-	 * Applied here rather than bumping the state version, because the version is
-	 * also what preserves everyone's dock arrangement; throwing that away to fix
-	 * the order of two toolbars is the wrong trade.
-	 */
-	/* MOVE THE VIEWPORT TOOLBARS INTO THE FOOTER, under the 3D view.
-	 *
-	 * Done here, after restoreState, and not at construction: restoreState
-	 * replays a layout saved by an older build and would drag these two straight
-	 * back into the toolbar area. That is not a hypothesis - the toolbar REORDER
-	 * that used to live on this line failed silently for exactly that reason, the
-	 * constructor being right and the restore overwriting it a moment later.
-	 *
-	 * The QToolBar objects themselves are reused rather than replaced, so every
-	 * addWidget/addAction call site that built them stays valid and, more
-	 * importantly, so does syncViewportMenus - the mode-contextual show/hide
-	 * table works on the QActions those addWidget calls returned, and rebuilding
-	 * the bars would have invalidated all of them.
-	 *
-	 * removeToolBar first: it detaches from the toolbar area AND hides, so the
-	 * show() afterwards is required, not decorative.
-	 */
+	// Re-assert the header order AFTER restoreState:
+	// The mode toolbar is put ahead of the render toolbar during construction, so the row reads mode, then the
+	// verbs the mode governs, then the transform widgets - Blender's header order.
 	if ( viewportHeader && ui->tMode && ui->tRender ) {
 		auto * headerRow = qobject_cast<QHBoxLayout *>( viewportHeader->layout() );
 		if ( headerRow ) {
@@ -34578,30 +29722,12 @@ void NifSkope::restoreUi()
 				tb->setMovable( false );
 				tb->setFloatable( false );
 				tb->setIconSize( QSize( 16, 16 ) );
-				/* A QToolBar reports a tiny minimum because it is BUILT to
-				 * overflow into an extension menu, so a layout will happily
-				 * squeeze it and hide half its buttons behind a chevron. That is
-				 * exactly what happened on the first attempt: Add and Object
-				 * vanished off the end of the mode bar and the whole display
-				 * group off the render bar, silently, with the buttons still
-				 * "there" as far as any code could tell.
-				 *
-				 * Minimum = sizeHint stops the squeeze. Recomputed whenever the
-				 * mode changes the button set, below, because these bars grow and
-				 * shrink by design.
-				 */
+				// A QToolBar reports a tiny minimum because it is BUILT to overflow into an extension menu, so
+				// a layout will happily squeeze it and hide half its buttons behind a chevron.
 				tb->setSizePolicy( QSizePolicy::Minimum, QSizePolicy::Fixed );
 				tb->show();
 			}
-			/* The mode bar takes its natural width; the render bar takes the
-			 * slack. A stretch ITEM after both was the first attempt and it is
-			 * what caused the squeeze - it claimed all the spare width, leaving
-			 * the toolbars on their minimum, which for a QToolBar is "as small as
-			 * you like, I have a chevron". Giving the slack to a real widget
-			 * instead means neither is starved, and the render bar's own trailing
-			 * space is where the display group would sit if it were right
-			 * aligned.
-			 */
+			// The mode bar takes its natural width; the render bar takes the slack.
 			headerRow->addWidget( ui->tMode, 0 );
 			headerRow->addWidget( ui->tRender, 1 );
 		}
@@ -34622,7 +29748,7 @@ void NifSkope::restoreUi()
 	 * the SAME shared sheet so its tabs fill the row rather than sitting in the
 	 * top 26 px of it with a gap underneath. WW_UIALIGN_TEST is the gate.
 	 */
-	/* THE MENU BAR IS PART OF THE ROW (lane WATER7).
+	/* THE MENU BAR IS PART OF THE ROW.
 	 *
 	 * bungo, 2026-09-10, on a screenshot of the aligned strip beside the
 	 * Object Mode row: "compact these vertically like this, the top bar and
@@ -34639,48 +29765,23 @@ void NifSkope::restoreUi()
 		{ ui->tFile, ui->tLOD, ui->tView, viewportHeader, leftColumnSelector };
 	if ( wwCompactTopBars() )
 		wwBarRowBars.prepend( ui->menubar );
-	/* THE LOD GENERATION PANEL'S STRIP IS THE SAME ROW (lane WATER8).
-	 *
-	 * bungo's correction of 2026-09-10, verbatim: "What? I wanted it in that
-	 * right panel though" -- the water tool is a tab of the LOD Generation
-	 * panel, and that panel's strip has to be the same 35 px row and the same
-	 * skin as Header | Blocks | Files or the two segmented strips in one
-	 * window would be two different controls. It is built in
-	 * src/lodgenmanager.cpp and found here by object name, because the rule
-	 * about the row lives ONCE, here, for every bar at once -- three
-	 * setFixedHeight calls at three call sites is how the bars came to
-	 * disagree in the first place.
-	 *
-	 * It is APPENDED, so the row is still whatever the tallest bar needs: a
-	 * 2-tab QTabBar's natural height is about 26 and cannot be the tallest,
-	 * and gate L4 prints the number so a strip that DID grow the row is read
-	 * as a number rather than seen as a taller window.
-	 *
-	 * FALLBACK (CONSTITUTION 10): no LOD dock in this window -- a build with
-	 * the generator absent -- and nothing is appended; every other bar is
-	 * unaffected and the strip, if it appears later, keeps the compact
-	 * default it was built with. */
+	// THE LOD GENERATION PANEL'S STRIP IS THE SAME ROW:
+	// bungo's correction of 2026-09-10, verbatim: "What?
 	QTabBar * lodPanelSelector =
 		findChild<QTabBar *>( QStringLiteral( "LodPanelModeSelector" ) );
 	if ( lodPanelSelector )
 		wwBarRowBars.append( lodPanelSelector );
 	wwAlignBarRow( wwBarRowBars );
 	if ( leftColumnSelector && wwBarRowHeight() > 0 )
-		/* `this` is the QMainWindow, and the strip needs it: the RIGHT hand
-		 * air is the full air less the dock separator's width, and that style
-		 * metric only answers res/style.qss's 3 px when it is asked WITH a
-		 * widget (lane UI4, measured). */
+		// `this` is the QMainWindow, and the strip needs it: the RIGHT hand air is the full air less the dock
+		// separator's width, and that style metric only answers res/style.qss's 3 px when it is asked WITH a
+		// widget.
 		leftColumnSelector->setStyleSheet( wwSegmentedTabBarQss( wwBarRowHeight(), this ) );
 	if ( lodPanelSelector && wwBarRowHeight() > 0 )
-		/* lane WATER8: THE SAME CALL, with the same two arguments, so the two
-		 * strips cannot carry different sheets. Gate L5 compares them byte for
-		 * byte and hashes both into the log, which is the only way a drift
-		 * between two call sites is ever noticed. */
+		// THE SAME CALL, with the same two arguments, so the two strips cannot carry different sheets.
 		lodPanelSelector->setStyleSheet( wwSegmentedTabBarQss( wwBarRowHeight(), this ) );
-	/* The second half of the same complaint: the dock's search row still began
-	 * 4 px below the line the viewport's content begins on, because the file
-	 * browser page's Designer layout carries topMargin 4. Only the top margin
-	 * is the shared grid's business; the page keeps its own left and right. */
+	// The second half of the same complaint: the dock's search row still began 4 px below the line the
+	// viewport's content begins on, because the file browser page's Designer layout carries topMargin 4.
 	wwStartContentBelowBar( ui->dockWidgetContents_7 );
 
 	aSanitize->setChecked( settings.value( "File/Auto Sanitize", true ).toBool() );
@@ -34694,24 +29795,10 @@ void NifSkope::restoreUi()
 
 	aCondition->setChecked( settings.value( "Show Non-applicable Rows"_uip, false ).toBool() );
 
-	/* THE BLOB FOR THIS MODE, and nothing if there is not one yet. See the note
-	 * in saveUi: a header blob saved against 3 columns, restored onto 12, leaves
-	 * QHeaderView's `length` smaller than the sections it totals — and a Block
-	 * List whose every point belongs to no column answers no index anywhere, so
-	 * not one row in it can be clicked, dropped on or right-clicked.
-	 *
-	 * The pre-split "List Header" key is deliberately not read: it is the blob of
-	 * whichever mode happened to be showing when the app last closed, which is
-	 * the thing that was wrong. Losing one session's column widths is the whole
-	 * cost of that.
-	 */
+	// THE BLOB FOR THIS MODE, and nothing if there is not one yet.
 	list->header()->restoreState( settings.value( gListMode->checkedAction() == aList
 		? "List Header/list"_uip : "List Header/hierarchy"_uip ).toByteArray() );
-	// Old header blobs remember the former 100px section floor and whether the
-	// last section stretched. Keep the user's widths, but not those obsolete
-	// layout constraints: the Block List now folds with the rest of the column.
-	// 48: the visibility column is the last section and must keep both glyphs
-	// whole at the narrowest fold (same value the constructor sets).
+	// Old header blobs remember the former 100px section floor and whether the last section stretched.
 	list->header()->setMinimumSectionSize( WwGlyphs::stripWidth( WwGlyphs::VisSlotCount ) );
 	list->header()->setStretchLastSection( true );
 	// and what the blob does not know: this mode's columns, whatever it restored
@@ -34737,11 +29824,9 @@ void NifSkope::restoreUi()
 	tree->setColumnHidden( NifModel::WwRefCol, true );
 	header->setColumnHidden( NifModel::WwRefCol, true );
 	kfmtree->setColumnHidden( NifModel::WwRefCol, true );
-	// Same for Summary, in the other direction: a restored pre-Summary layout
-	// leaves it visible in the field views, where a per-BLOCK line has nothing to
-	// say, and hidden in the Block List, where it is the entire point. Set after
-	// restoreState (and after setListMode above) because restoreState carries its
-	// own visibility and wins over anything set before it.
+	// Same for Summary, in the other direction: a restored pre-Summary layout leaves it visible in the field
+	// views, where a per-BLOCK line has nothing to say, and hidden in the Block List, where it is the entire
+	// point.
 	tree->setColumnHidden( NifModel::WwVisCol, true );
 	header->setColumnHidden( NifModel::WwVisCol, true );
 	kfmtree->setColumnHidden( NifModel::WwVisCol, true );
@@ -34776,12 +29861,7 @@ void NifSkope::restoreUi()
 
 	const bool isPersp = true;
 	ui->aViewPerspective->setChecked( isPersp );
-	// A SECOND COPY of the startup-direction logic, and it must not disagree
-	// with GLView's. Same key, so the default has to match too — left at 1 it
-	// ticked Front in the View menu on a fresh profile while the camera was
-	// somewhere else entirely. It knows only the three axis directions; User
-	// Perspective ticks nothing, which is honest, because the camera is then
-	// not on an axis at all.
+	// A SECOND COPY of the startup-direction logic, and it must not disagree with GLView's.
 	int viewDir = settings.value( "Settings/Render/General/Camera/Startup Direction", 6 ).toInt();
 	if ( viewDir == 0 )
 		ui->aViewLeft->setChecked( true );
@@ -34821,12 +29901,8 @@ void NifSkope::reloadTheme()
 		NifSkope * win = qobject_cast<NifSkope *>(widget);
 		if ( win ) {
 			win->loadTheme();
-			/* Number fields and the selectors beside them carry their own
-			 * stylesheet, built from wwSkinColor at construction - which is
-			 * BEFORE loadTheme runs. Without this they keep whichever theme they
-			 * were born under while the rest of the window switches, so a light
-			 * theme comes up with dark wells in every panel.
-			 */
+			// Number fields and the selectors beside them carry their own stylesheet, built from wwSkinColor
+			// at construction - which is BEFORE loadTheme runs.
 			wwRestyleScrubFields( win );
 		}
 	}
@@ -34873,10 +29949,9 @@ void NifSkope::loadTheme()
 		break;
 	}
 
-	// The six colour keys below are persisted (setTheme writes them, and the
-	// General settings pane round-trips them), so they OUTRANK defaultsDark[]
-	// on any install that has run before — a new default palette would never
-	// show up. Refresh them once per palette revision instead.
+	// The six colour keys below are persisted (setTheme writes them, and the General settings pane round-trips
+	// them), so they OUTRANK defaultsDark[] on any install that has run before — a new default palette would
+	// never show up.
 	constexpr int themePaletteVersion = 3;	// 3: viewport clear colour joined the skin
 	if ( settings.value( "Settings/Theme/Palette Version", 1 ).toInt() != themePaletteVersion ) {
 		const QColor * defaults = ( theme == ThemeLight ) ? defaultsLight : defaultsDark;
@@ -34886,10 +29961,8 @@ void NifSkope::loadTheme()
 		settings.setValue( "Settings/Theme/Highlight", defaults[Highlight] );
 		settings.setValue( "Settings/Theme/Highlight Text", defaults[HighlightText] );
 		settings.setValue( "Settings/Theme/Bright Text", defaults[BrightText] );
-		// The viewport clear colour is a Render setting with its own stored key,
-		// so it survives a palette change too and leaves the largest surface in
-		// the window off-skin. Drop the override and let GLView's default (the
-		// "viewport" skin colour) apply.
+		// The viewport clear colour is a Render setting with its own stored key, so it survives a palette
+		// change too and leaves the largest surface in the window off-skin.
 		settings.remove( "Settings/Render/Colors/Background" );
 		settings.setValue( "Settings/Theme/Palette Version", themePaletteVersion );
 	}
@@ -35007,15 +30080,10 @@ void NifSkope::setThemeActions()
 
 void NifSkope::setToolbarSize()
 {
-	/* One size: 16px, matching Blender's header.
-	 *
-	 * There used to be a "large" alternative at 36px, and it was the default,
-	 * which is why flattening the buttons barely changed how big the top bar
-	 * looked - the chrome went but the glyphs stayed more than twice Blender's
-	 * size. The option is gone rather than merely re-defaulted: its Settings
-	 * checkbox was never wired to anything (nothing read or wrote `largeIcons`),
-	 * so it was a control that appeared to offer a choice and did not.
-	 */
+	// One size: 16px, matching Blender's header:
+	// There used to be a "large" alternative at 36px, and it was the default, which is why flattening the
+	// buttons barely changed how big the top bar looked - the chrome went but the glyphs stayed more than
+	// twice Blender's size.
 	const QSize size = {16, 16};
 
 	// findChildren for the same reason as the Toolbars menu above: the viewport
@@ -35077,7 +30145,7 @@ void NifSkope::positionRedoPanel()
 
 /*
  *  THE TRANSIENT MESSAGE LINE -- what the deleted status bar used to say
- *  (lane UINOTES1, 2026-09-12; the rationale is in nifskope.h above
+ *  (the rationale is in nifskope.h above
  *  showTransientMessage).
  */
 
@@ -35210,19 +30278,10 @@ void NifSkope::toggleViewportFullScreen()
 
 bool NifSkope::eventFilter( QObject * o, QEvent * e )
 {
-	/* EVERY top-level window of a headless run, not just the main one
-	 * (bungo 2026-09-09, "Agent is launching nifskope on my main monitor").
-	 *
-	 * createWindow places the document window and the constructor places it
-	 * earlier still, but a headless route can raise a dialog, a floating dock
-	 * or a tool window, and each of those is a top-level window of its own that
-	 * neither of those two places ever sees. This clamps them all at the moment
-	 * they are shown: same origin, same opacity, same rule. It is a BACKSTOP,
-	 * not the mechanism -- a window clamped here has already been created, so
-	 * anything that must never be created wrong is placed at its source. */
+	// EVERY top-level window of a headless run, not just the main one.
 	if ( e->type() == QEvent::Show && NifSkope::wwHeadlessRun() ) {
 		if ( QWidget * w = qobject_cast<QWidget *>( o ) ) {
-			// lane FLYFIX1: once per window, so a window he restores or maximises from the taskbar stays his
+			// once per window, so a window he restores or maximises from the taskbar stays his
 			if ( w->isWindow() && !w->property( "wwHeadlessPlaced" ).toBool() )
 				NifSkope::wwPlaceHeadlessWindow( w );
 		}
@@ -35233,20 +30292,8 @@ bool NifSkope::eventFilter( QObject * o, QEvent * e )
 	//	QTimer::singleShot( 0, this, SLOT( overrideViewFont() ) );
 	//}
 
-	/* Operating-system .nif drops belong to the WINDOW, not to whichever child
-	 * happened to be under the pointer.
-	 *
-	 * The viewport is a QWindow embedded in a native createWindowContainer. The
-	 * old filter listened only for `o == ogl`, while Windows delivered the drop to
-	 * that container QWidget; the GL handler was correct but never entered. Tree
-	 * views add the inverse problem: they accept internal block/browser drags and
-	 * therefore stop an external URL before it can bubble to QMainWindow.
-	 *
-	 * The application filter sees both boundaries. Restrict this interception to
-	 * real local .nif URLs owned by THIS window, leaving every internal MIME drag
-	 * with its specialist view. The choice menu is queued until after Drop returns
-	 * so the native drag loop releases the pointer before a modal menu opens.
-	 */
+	// Operating-system .nif drops belong to the WINDOW, not to whichever child happened to be under the
+	// pointer.
 	if ( e->type() == QEvent::DragEnter || e->type() == QEvent::DragMove
 		|| e->type() == QEvent::Drop ) {
 		auto * drop = static_cast<QDropEvent *>( e );
@@ -35255,10 +30302,8 @@ bool NifSkope::eventFilter( QObject * o, QEvent * e )
 			for ( const QUrl & url : drop->mimeData()->urls() ) {
 				if ( !url.isLocalFile() ) continue;
 				QFileInfo info( url.toLocalFile() );
-				// Every extension File > Open accepts, from the same table it
-				// builds its filter from -- .btr/.bto LOD chunks included. This
-				// is the gate a real Explorer drop passes, so a hardcoded "nif"
-				// here refused them on hover with no feedback at all.
+				// Every extension File > Open accepts, from the same table it builds its filter from --
+				// .btr/.bto LOD chunks included.
 				if ( info.exists() && info.isFile()
 					&& NifSkope::fileExtensions().contains( info.suffix(),
 						Qt::CaseInsensitive ) )
@@ -35269,17 +30314,8 @@ bool NifSkope::eventFilter( QObject * o, QEvent * e )
 		const bool belongsHere = o == this || o == ogl || o == graphicsView
 			|| ( eventWidget && isAncestorOf( eventWidget ) );
 
-		/* A DROPPED .hkx IS AN ANIMATION, NOT A DOCUMENT (lane HKX3).
-		 *
-		 * bungo, 2026-09-10: "So either win exporer pick or drag and drop".
-		 * .hkx is deliberately NOT one of NifSkope::fileExtensions() -- it is
-		 * not a thing this program opens as a file -- so the loop above never
-		 * collects it and the drop was ignored with no feedback at all. It
-		 * goes to the same loader the two Load buttons use, onto the model
-		 * that is already open, and the loader's sentence (the summary, or
-		 * the refusal when nothing is open to animate) goes to the status bar
-		 * as well as to the Animation Manager's own line.
-		 */
+		// A DROPPED .hkx IS AN ANIMATION, NOT A DOCUMENT:
+		// bungo, 2026-09-10: "So either win exporer pick or drag and drop".
 		QStringList hkxUrls;
 		if ( drop->mimeData() && drop->mimeData()->hasUrls() ) {
 			for ( const QUrl & url : drop->mimeData()->urls() ) {
@@ -35317,10 +30353,9 @@ bool NifSkope::eventFilter( QObject * o, QEvent * e )
 
 	switch ( e->type() ) {
 	case QEvent::Enter:
-		// Focus-follows-mouse: hovering the 3D viewport gives its embedded GL
-		// window keyboard focus, so A / G / R / S and other keyPressEvent-based
-		// shortcuts work without a prior click (the UV editor does the same in
-		// its own enterEvent). Skipped while a text field is being edited.
+		// Focus-follows-mouse: hovering the 3D viewport gives its embedded GL window keyboard focus, so A / G
+		// / R / S and other keyPressEvent-based shortcuts work without a prior click (the UV editor does the
+		// same in its own enterEvent).
 		if ( ogl && graphicsView && ( o == ogl || o == graphicsView ) && isActiveWindow() ) {
 			QWidget * fw = QApplication::focusWidget();
 			const bool editingText = fw && ( fw->inherits( "QLineEdit" )
@@ -35357,18 +30392,11 @@ bool NifSkope::eventFilter( QObject * o, QEvent * e )
 
 	case QEvent::ShortcutOverride:
 	case QEvent::KeyPress: {
-		// Shift+F toggles the free camera whenever the pointer is over the
-		// viewport, no matter which widget currently has key focus. Handle both
-		// entry and exit here: a QOpenGLWindow embedded through
-		// createWindowContainer cannot be relied on as the sole recipient of the
-		// second shortcut. Text-input widgets keep their keystrokes.
+		// Shift+F toggles the free camera whenever the pointer is over the viewport, no matter which widget
+		// currently has key focus.
 		auto ke = static_cast<QKeyEvent *>( e );
-		/* Block List: X or Delete removes the selected block(s) and their
-		 * branches, on a multi-selection, exactly as the viewport does — and
-		 * with the viewport's split between the two keys. X puts up "Delete
-		 * selected objects?"; Delete deletes. Same gesture, same undo step,
-		 * whichever half of the window you are looking at.
-		 */
+		// Block List: X or Delete removes the selected block(s) and their branches, on a multi-selection,
+		// exactly as the viewport does — and with the viewport's split between the two keys.
 		if ( o == list && ogl && nif
 			&& ( ke->key() == Qt::Key_X || ke->key() == Qt::Key_Delete )
 			&& !( ke->modifiers() & ( Qt::ControlModifier | Qt::AltModifier | Qt::ShiftModifier ) ) ) {
@@ -35390,12 +30418,9 @@ bool NifSkope::eventFilter( QObject * o, QEvent * e )
 			}
 			return true;
 		}
-		/* Loaded NIFs: X or Delete removes the selected documents.
-		 *
-		 * Same key as the Block List, on a list that behaves like it — multi-select,
-		 * same highlight colours, right-click acting on the selection. Removing a row
-		 * used to be buried in a per-row menu.
-		 */
+		// Loaded NIFs: X or Delete removes the selected documents:
+		// Same key as the Block List, on a list that behaves like it — multi-select, same highlight colours,
+		// right-click acting on the selection. Removing a row used to be buried in a per-row menu.
 		if ( o == loadedNifsView
 			&& ( ke->key() == Qt::Key_X || ke->key() == Qt::Key_Delete )
 			&& !( ke->modifiers() & ( Qt::ControlModifier | Qt::AltModifier | Qt::ShiftModifier ) ) ) {
@@ -35403,47 +30428,25 @@ bool NifSkope::eventFilter( QObject * o, QEvent * e )
 				removeSelectedWorkspaceDocuments();
 			return true;
 		}
-		// Block List Ctrl+C / Ctrl+V are the Copy Branch / Paste Branch spells
-		// (QKeySequence::Copy/Paste hotkeys). They are multi-selection aware in
-		// the spells themselves — Copy Branch unions every selected block's
-		// branch (via the published block-list selection), Paste Branch slots
-		// each pasted root back in — so no dedicated event-filter handler here.
+		// Block List Ctrl+C / Ctrl+V are the Copy Branch / Paste Branch spells (QKeySequence::Copy/Paste
+		// hotkeys).
 		const bool pointerOverViewport = ogl && graphicsView && isActiveWindow()
 			&& graphicsView->rect().contains( graphicsView->mapFromGlobal( QCursor::pos() ) );
 		QWidget * keyFocus = QApplication::focusWidget();
 		const bool keyFocusIsTextInput = keyFocus && ( keyFocus->inherits( "QLineEdit" )
 			|| keyFocus->inherits( "QTextEdit" ) || keyFocus->inherits( "QPlainTextEdit" )
 			|| keyFocus->inherits( "QAbstractSpinBox" ) || keyFocus->inherits( "QComboBox" ) );
-		/* Give Space and Q back to a viewport mode that owns them.
-		 *
-		 * Both carry a window binding now — Search and Quick Favourites — and a
-		 * QAction shortcut is matched before the key reaches any widget, so the
-		 * physics sim's pause and the walk camera's descend key would go quiet
-		 * with nothing on screen to say why. Reserving the key during
-		 * ShortcutOverride hands it to the mode as an ordinary keystroke. Only
-		 * ShortcutOverride: consuming the KeyPress too would swallow the very
-		 * keystroke this exists to protect.
-		 */
+		// Give Space and Q back to a viewport mode that owns them:
+		// Both carry a window binding now — Search and Quick Favourites — and a QAction shortcut is matched
+		// before the key reaches any widget, so the physics sim's pause and the walk camera's descend key
+		// would go quiet with nothing on screen to say why.
 		if ( e->type() == QEvent::ShortcutOverride && ogl && pointerOverViewport
 			&& !keyFocusIsTextInput && ogl->viewportClaimsKey( ke->key() ) ) {
 			e->accept();
 			return true;
 		}
-		/* Blender's Ctrl+V / Ctrl+E / Ctrl+F open the Vertex, Edge and Face
-		 * menus. Same three menus sit in the viewport header here, so bind them.
-		 *
-		 * ShortcutOverride is the part that matters. Ctrl+V is already Paste
-		 * Branch, a WindowShortcut QAction, and Qt resolves those in
-		 * QApplication::notify BEFORE any widget filter sees a KeyPress - so a
-		 * KeyPress-only handler would never run for it. Accepting the
-		 * ShortcutOverride tells Qt to deliver the keystroke as an ordinary key
-		 * event instead of firing the action; the KeyPress branch below then
-		 * gets it.
-		 *
-		 * Guarded on edit mode AND the pointer being over the viewport, so
-		 * Ctrl+V keeps pasting a branch everywhere else - including in edit mode
-		 * with the pointer over the block list.
-		 */
+		// Blender's Ctrl+V / Ctrl+E / Ctrl+F open the Vertex, Edge and Face menus. Same three menus sit in the
+		// viewport header here, so bind them.
 		if ( ogl && ogl->editModeActive() && pointerOverViewport && !keyFocusIsTextInput
 			&& ke->modifiers() == Qt::ControlModifier ) {
 			const char * want = nullptr;
@@ -35453,10 +30456,7 @@ bool NifSkope::eventFilter( QObject * o, QEvent * e )
 			case Qt::Key_F: want = "Face";   break;
 			default: break;
 			}
-			// Resolve the button FIRST and only claim the key if there is a menu
-			// to open. Claiming it unconditionally would swallow Ctrl+F (and
-			// Paste Branch) in a mode where that menu is not offered, leaving a
-			// keystroke that does nothing at all.
+			// Resolve the button FIRST and only claim the key if there is a menu to open.
 			auto * btn = want ? findChild<QToolButton *>(
 				QStringLiteral( "ViewportMenu" ) + QLatin1String( want ) ) : nullptr;
 			if ( btn && btn->isVisibleTo( this ) && btn->isEnabled() ) {
@@ -35465,15 +30465,7 @@ bool NifSkope::eventFilter( QObject * o, QEvent * e )
 					return true;
 				}
 				if ( !ke->isAutoRepeat() ) {
-					/* At the POINTER, as a free-floating menu - not dropped down
-					 * from the header button.
-					 *
-					 * Blender pops these where your hand already is; dropping
-					 * them from the toolbar means looking away from the geometry
-					 * you are working on and travelling back. The button still
-					 * owns the menu (and its aboutToShow still repopulates it),
-					 * this just opens it somewhere else.
-					 */
+					// At the POINTER, as a free-floating menu - not dropped down from the header button.
 					if ( QMenu * menu = btn->menu() )
 						menu->popup( QCursor::pos() );
 					return true;
@@ -35483,23 +30475,9 @@ bool NifSkope::eventFilter( QObject * o, QEvent * e )
 
 		// rebindable viewport shortcuts (see tlRegisterViewportShortcuts)
 		const auto & vpKeys = ShortcutRegistry::get();
-		/* A modal transform is TYPING, and this filter must not eat its keys.
-		 *
-		 * G/R/S start a Blender-style transform whose numeric entry collects
-		 * digits and a decimal point into GLView's gizmoNum buffer. That buffer
-		 * is behind `if ( gizmoMode )` in GLView::keyPressEvent, which is
-		 * downstream of this application-wide filter — so any branch here that
-		 * claims a bare key claims it first.
-		 *
-		 * "viewport.frame_selection" is bound to a bare period. During a
-		 * transform the pointer is over the viewport by definition and focus is
-		 * not a text widget, so both of its guards pass and '.' was consumed as
-		 * Frame Selection: typing 11.25 produced 1125, with the decimal point and
-		 * nothing else silently dropped. Digits were unaffected, which is exactly
-		 * why it read as "the decimal key does not work".
-		 */
+		// A modal transform is TYPING, and this filter must not eat its keys.
 		const bool modalTransform = ogl && ( ogl->gizmoMode || ogl->elemTransform );
-		// lane VIEWFULL1: Esc leaves the full-screen viewport unless a viewport mode owns Esc (flight exits first)
+		// Esc leaves the full-screen viewport unless a viewport mode owns Esc (flight exits first)
 		const bool keyIsMine = o == ogl || o == windowHandle()
 			|| ( o->isWidgetType() && static_cast<QWidget *>( o )->window() == this );
 		if ( ke->key() == Qt::Key_Escape && ke->modifiers() == Qt::NoModifier && viewFull.active() && keyIsMine
@@ -35555,16 +30533,7 @@ bool NifSkope::eventFilter( QObject * o, QEvent * e )
 				return true;
 			}
 		}
-		// Blender numpad navigation is viewport-scoped. Reserve recognized keys
-		// during ShortcutOverride so the legacy QAction shortcuts cannot recenter
-		// the model before the viewport-preserving handler sees the KeyPress.
-		/* Also skipped during a modal transform. ShortcutRegistry::matches masks
-		 * KeypadModifier off, so the numpad decimal key reaches the same
-		 * frame_selection binding as the main-row one — and handleBlenderNumpad
-		 * maps keypad Period/Comma to frameSelected() on its own account. Without
-		 * this guard the numpad decimal is eaten twice over, and the numpad digits
-		 * go to view navigation instead of the number being typed.
-		 */
+		// Blender numpad navigation is viewport-scoped.
 		if ( pointerOverViewport && !keyFocusIsTextInput && !modalTransform
 			&& ogl->handleBlenderNumpad( ke->key(), ke->modifiers(), e->type() == QEvent::KeyPress ) ) {
 			if ( e->type() == QEvent::KeyPress ) {
@@ -35574,10 +30543,8 @@ bool NifSkope::eventFilter( QObject * o, QEvent * e )
 			e->accept();
 			return true;
 		}
-		// Tab toggles Object Mode against the last non-object mode. The mode
-		// memory is shared with selector-driven changes, so Object <-> Edit and
-		// Object <-> Weight Paint behave consistently. Future paint modes can
-		// join by enabling their existing selector actions.
+		// Tab toggles Object Mode against the last non-object mode. The mode memory is shared with
+		// selector-driven changes, so Object <-> Edit and Object <-> Weight Paint behave consistently.
 		if ( pointerOverViewport && !keyFocusIsTextInput
 			&& vpKeys.matches( "viewport.toggle_edit_mode", ke->key(), ke->modifiers() ) ) {
 			if ( e->type() == QEvent::KeyPress && !ke->isAutoRepeat() ) {
@@ -35847,10 +30814,8 @@ bool NifSkope::eventFilter( QObject * o, QEvent * e )
 				return true;
 			}
 		}
-		// Ctrl+Z / Ctrl+Shift+Z / Ctrl+Y step through the SELECTION history first
-		// (Blender: selections are undoable) when the pointer is over the viewport.
-		// If there is no selection change to revert, fall through to the global
-		// model undo/redo so mesh edits still undo normally.
+		// Ctrl+Z / Ctrl+Shift+Z / Ctrl+Y step through the SELECTION history first (Blender: selections are
+		// undoable) when the pointer is over the viewport.
 		if ( ogl && graphicsView && isActiveWindow()
 			&& ( ke->modifiers() & Qt::ControlModifier ) && !( ke->modifiers() & Qt::AltModifier )
 			&& ( ke->key() == Qt::Key_Z || ke->key() == Qt::Key_Y )
@@ -35865,10 +30830,8 @@ bool NifSkope::eventFilter( QObject * o, QEvent * e )
 			}
 			// nothing selection-wise to undo: let the global undo/redo run
 		}
-		// G / R / S start a modal transform when the pointer is over the viewport,
-		// so an object/node picked in the block list (which keeps key focus) can be
-		// moved/rotated/scaled. Only starts when no gesture is running - during a
-		// gesture the viewport keeps in-gesture mode switching.
+		// G / R / S start a modal transform when the pointer is over the viewport, so an object/node picked in
+		// the block list (which keeps key focus) can be moved/rotated/scaled.
 		if ( pointerOverViewport && !ogl->freeCamera && !ogl->riggingWeightPaintModeActive()
 			&& !ogl->vertexPaintModeActive()
 			&& e->type() == QEvent::KeyPress && !keyFocusIsTextInput ) {
@@ -35884,11 +30847,9 @@ bool NifSkope::eventFilter( QObject * o, QEvent * e )
 				return true;
 			}
 		}
-		// A / Alt+A = select all / deselect all when the pointer is over the
-		// viewport, routed by pointer position (like G/R/S) rather than keyboard
-		// focus — focus-follows-mouse alone is unreliable when focus is taken
-		// while the pointer is already inside the viewport, so A "sometimes"
-		// missed. This makes it work every time the cursor is over the viewport.
+		// A / Alt+A = select all / deselect all when the pointer is over the viewport, routed by pointer
+		// position (like G/R/S) rather than keyboard focus — focus-follows-mouse alone is unreliable when
+		// focus is taken while the pointer is already inside the viewport, so A "sometimes" missed.
 		if ( pointerOverViewport && !ogl->freeCamera && e->type() == QEvent::KeyPress
 			&& !ke->isAutoRepeat() && !keyFocusIsTextInput && nif ) {
 			const bool selAll = vpKeys.matches( "viewport.select.all", ke->key(), ke->modifiers() );
@@ -36107,26 +31068,9 @@ void NifSkope::transferNormalsFromSelection( int target, const QVector<int> & so
 			.arg( worst, 0, 'f', 2 ) );
 }
 
-/*! Everything in the Block List's menu that is not a spell.
- *
- *  Split out of contextMenu so it can be built without a right-click: the verb
- *  row and the trailing group are the parts a reader cannot check by eye, and
- *  contextMenu ends in exec(), which blocks. See WW_MENUTREE_TEST.
- *
- *  \param book a SpellBook already built against  idx
- */
-/*! Select & View — the six entries that work on the scene, not on the file.
- *
- *  Built here rather than as spells because five of the six are private members
- *  of GLView, and glview.h grants friendship to NifSkope only. A spell can reach
- *  the GLView pointer but not isolateSelected, restoreAllVisibility or
- *  joinSelectedObjects.
- *
- *  Two entries had to be written from scratch: Select Branch and Select Same
- *  Type do not exist anywhere in the tree. They are the reason the rest of this
- *  submenu is worth having — three entries in this menu consume a
- *  multi-selection and, until now, nothing in it could build one.
- */
+//! Everything in the Block List's menu that is not a spell:
+//! Split out of contextMenu so it can be built without a right-click: the verb row and the trailing group are
+//! the parts a reader cannot check by eye, and contextMenu ends in exec(), which blocks. See WW_MENUTREE_TEST.
 void NifSkope::buildBlockListSelectAndView( SpellBook & contextBook, const QModelIndex & idx )
 {
 	if ( !nif || !ogl || ogl->editMode )
@@ -36191,12 +31135,9 @@ void NifSkope::buildBlockListSelectAndView( SpellBook & contextBook, const QMode
 	QAction * aFrame = view->addAction( tr( "Frame in Viewport\tNum ." ) );
 	connect( aFrame, &QAction::triggered, this, [this]() { ogl->frameSelected(); } );
 
-	/* Hide reads objSelection now — the Block List publishes its rows into it,
-	 * promoted to the nearest NiAVObject, so the menu, the H key over either
-	 * surface and the row's own eye glyph all act on the same set. It used to
-	 * hide the current block alone and the label said "This" to be honest about
-	 * that; Blender's H hides everything selected, and so does this.
-	 */
+	// Hide reads objSelection now — the Block List publishes its rows into it, promoted to the nearest
+	// NiAVObject, so the menu, the H key over either surface and the row's own eye glyph all act on the same
+	// set.
 	QAction * aHide = view->addAction( tr( "Hide Selected\tH" ) );
 	connect( aHide, &QAction::triggered, this, [this]() { ogl->hideSelected(); } );
 
@@ -36245,18 +31186,7 @@ void NifSkope::buildBlockListMenuExtras( SpellBook & contextBook, const QModelIn
 		return;
 	buildBlockListSelectAndView( contextBook, idx );
 
-	/* Open in <Manager> — ONE row, titled from the clicked block's type.
-	 *
-	 * Navigation between the Block List and the manager docks was one-directional:
-	 * both the Collision and Material managers offer "select this in the Block
-	 * List", and nothing went the other way. Three fixed rows would have been the
-	 * obvious shape and the wrong one — two of them would always be inapplicable,
-	 * and the menu is already too long.
-	 *
-	 * show() BEFORE select(): the collision dock's currentNifIndexChanged handler
-	 * returns early while the dock is hidden, so selecting first leaves it open on
-	 * the wrong row.
-	 */
+	// Open in <Manager> — ONE row, titled from the clicked block's type.
 	if ( const int bn = nif->getBlockNumber( idx ); bn >= 0 ) {
 		struct DockFor { const char * type; const char * objectName; const char * title; };
 		static const DockFor dockFor[] = {
@@ -36363,18 +31293,7 @@ void NifSkope::buildBlockListMenuExtras( SpellBook & contextBook, const QModelIn
 	if ( acts.size() > wasCount && wasCount > 0 )
 		contextBook.insertSeparator( acts.at( wasCount ) );
 
-	/* THE VERB ROW: the five things done most often, flat and first.
-	 *
-	 * These are the author's own frequency signal — they are where the
-	 * hotkeys are — and every one of them was two levels deep, or in Delete's
-	 * case not on this widget at all. Copy/Paste/Duplicate Branch are HOISTED
-	 * rather than duplicated: the same QAction is moved out of the Block
-	 * submenu, so it keeps its spell, its shortcut and its enabled state, and
-	 * there is still exactly one of each in the menu.
-	 *
-	 * Built last, and inserted at the front, so the trailing separator above
-	 * still lands on the index it was measured against.
-	 */
+	// THE VERB ROW: the five things done most often, flat and first.
 	if ( bn >= 0 ) {
 		QList<QAction *> verbs;
 		for ( const char * spellName : { "Copy Branch", "Paste Branch", "Duplicate Branch" } ) {
@@ -36403,14 +31322,8 @@ void NifSkope::buildBlockListMenuExtras( SpellBook & contextBook, const QModelIn
 		if ( !selBlocks.contains( bn ) )
 			selBlocks = QList<qint32>{ bn };
 
-		/* Deleting blocks was reachable only from the viewport's Object ▸
-		 * Delete or the X key — so the one widget that can build a
-		 * multi-selection of blocks had no way to delete it.
-		 * deleteBlocks closes the branch, prunes dangling parents, confirms
-		 * once and pushes ONE undo step, which is what makes it worth routing
-		 * here rather than casting Remove Branch per row. From a menu it always
-		 * asks — the Delete KEY is the one that skips the question.
-		 */
+		// Deleting blocks was reachable only from the viewport's Object ▸ Delete or the X key — so the one
+		// widget that can build a multi-selection of blocks had no way to delete it.
 		QAction * aDel = new QAction(
 			tr( "Delete %n Block(s)", "", int( selBlocks.size() ) ), &contextBook );
 		aDel->setToolTip( tr( "Delete the selected blocks and everything under them, "
@@ -36491,20 +31404,10 @@ void NifSkope::contextMenu( const QPoint & pos )
 		clearParent->setEnabled( hasSceneSelection );
 		clearParent->setToolTip( tr( "Remove the selected scene blocks from their NiNode parents" ) );
 
-		/* JOIN, AND IT IS THE VIEWPORT'S OWN JOIN.
-		 *
-		 * Ctrl+J in the 3D view has merged compatible BSTriShapes into the active
-		 * object for a while; there was simply no way to reach it from the Block
-		 * List, which is where you are when you are looking at blocks. The same
-		 * call, told what to join instead of reading the viewport's selection — so
-		 * the vertex-format rules, the 65,535-vertex and 256-bone caps and the
-		 * rigging-aware bone remap are the ones already there, not a second opinion
-		 * about any of it.
-		 *
-		 * THE ROW YOU RIGHT-CLICKED IS THE TARGET. That is Blender's rule for the
-		 * active object and the one the viewport already follows: everything else
-		 * merges INTO it and takes its vertex format.
-		 */
+		// JOIN, AND IT IS THE VIEWPORT'S OWN JOIN:
+		// Ctrl+J in the 3D view has merged compatible BSTriShapes into the active object for a while; there
+		// was simply no way to reach it from the Block List, which is where you are when you are looking at
+		// blocks.
 		QList<int> joinable;
 		for ( const QModelIndex & pidx : list->selectionModel()->selectedIndexes() ) {
 			if ( pidx.column() != 0 )
@@ -36547,19 +31450,9 @@ void NifSkope::contextMenu( const QPoint & pos )
 		else
 			contextBook.addMenu( hierarchy );
 
-		/* Transfer Normals, off the Block List selection.
-		 *
-		 * The spell of that name asks which mesh to take from, because a spell is
-		 * handed one block and nothing else. Here the selection already says it:
-		 * the SECONDARIES are the source and the PRIMARY — the current, clicked
-		 * row — is what gets written, which is the direction bungo asked for and
-		 * the one the highlight already communicates.
-		 *
-		 * Several sources are combined rather than applied in turn: every mapping
-		 * asks which source vertex or face is nearest, and over a set of meshes
-		 * that is the union of them. Five armour pieces then behave as the one
-		 * surface they visually are.
-		 */
+		// Transfer Normals, off the Block List selection:
+		// The spell of that name asks which mesh to take from, because a spell is handed one block and nothing
+		// else.
 		QVector<int> selMeshes;
 		int primaryMesh = -1;
 		if ( list->selectionModel() ) {
@@ -36736,7 +31629,7 @@ void NifSkope::on_aSelectFont_triggered()
 }
 
 /* ---------------------------------------------------------------------------
- * THE WORKSPACE SWITCH (lane CELLWORK1, 2026-09-19)
+ * THE WORKSPACE SWITCH
  *
  * One door. The Workspaces menu, the `.wwcell` open path, the three viewport
  * paint modes, the harness and the gate all arrive here, so a workspace cannot
@@ -36776,10 +31669,7 @@ void NifSkope::setWorkspace( int index )
 	}
 
 	if ( restoredExact ) {
-		/* The restored bytes ARE the layout, including which manager dock was
-		 * up. The only thing they cannot answer for is a dock that must not
-		 * come back with them, so those are hidden explicitly -- hiding an
-		 * already-hidden dock changes no state and no bytes. */
+		// The restored bytes ARE the layout, including which manager dock was up.
 		for ( const WorkspaceDef & d : workspaceDefs ) {
 			if ( !d.hideNifDocks )
 				continue;
@@ -36816,12 +31706,7 @@ void NifSkope::setWorkspace( int index )
 	if ( def.hideNifDocks && dLeft )
 		dLeft->hide();
 
-	/* CELL PICKING FOLLOWS THE CELL WORKSPACE, AND ONLY THE CELL WORKSPACE.
-	 * Its master ships off and keeps its menu row (bungo's standing rule); what
-	 * happens here is not a second master but the workspace doing what a
-	 * workspace does -- while you are in it, clicking the viewport picks a
-	 * reference. The state it found is put back on the way out, so a person who
-	 * had it on stays on and a person who had it off goes back to off. */
+	// CELL PICKING FOLLOWS THE CELL WORKSPACE, AND ONLY THE CELL WORKSPACE.
 	if ( index == wsCellIndex ) {
 		if ( !cellPickBeforeWorkspaceValid ) {
 			cellPickBeforeWorkspace = cellPickEnabled();

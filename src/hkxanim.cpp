@@ -1,6 +1,6 @@
 /* FO4 Havok animation reader + spline decompressor. The law it implements is
    docs/HKX_ANIMATION_FORMAT.md; section numbers in the comments refer to it.
-   Lane HKX1, 2026-09-10. */
+   2026-09-10. */
 
 #include "hkxanim.h"
 
@@ -59,10 +59,8 @@ struct RawAnim
 	QByteArray data;
 	int endian = 0;
 	QVector<QVector<HkxAnnotation>> annotations;
-	//! hkaInterleavedUncompressedAnimation ONLY (lane BUILD8): the whole
-	//! hkArray<hkQsTransform> as 12 floats per element, frame-major --
-	//! 12 * numTransformTracks * numFrames entries.  Empty for a spline clip,
-	//! and that emptiness is what selects the decoder arm.
+	//! hkaInterleavedUncompressedAnimation ONLY: the whole hkArray<hkQsTransform> as 12 floats per element,
+	//! frame-major 12 * numTransformTracks * numFrames entries.
 	QVector<float> interleaved;
 	bool hasMotion = false;
 	RawMotion motion;
@@ -399,11 +397,7 @@ void validate( const Raw & r )
 	if ( r.anims.isEmpty() && r.skeletons.isEmpty() )
 		refuse( "the container holds no animation and no skeleton" );
 	for ( const RawAnim & a : r.anims ) {
-		/* THE INTERLEAVED ARM (lane BUILD8).  An
-		 * hkaInterleavedUncompressedAnimation has no blocks, no quantization
-		 * mask and no stored frame count, so none of the spline rules below
-		 * apply to it and every one of them would refuse a well-formed file.
-		 * What CAN be checked is checked here. */
+		// THE INTERLEAVED ARM.
 		if ( !a.interleaved.isEmpty() ) {
 			if ( a.type != 1 )
 				refuse( QString( "hkaAnimation::type is %1; HK_INTERLEAVED_ANIMATION is 1" ).arg( a.type ) );
@@ -453,22 +447,7 @@ void validate( const Raw & r )
 				anim = &a;
 		if ( !anim )
 			refuse( QString( "binding refers to animation %1 which is not in the container" ).arg( b.animationRef ) );
-		/* AN EMPTY transformTrackToBoneIndices IS THE IDENTITY MAP, not a
-		 * missing one (lane FIXTURE, 2026-09-10, measured on the Mixamo
-		 * Collection clip Running_To_Slide_And_Back_To_Running.hkx: 95
-		 * tracks, binding count 0 with no local fixup -- the array really is
-		 * absent, it is not a parse failure). The engine's own consumers read
-		 * track i as bone i in that case, and frame 0's per-track translation
-		 * against skeleton.hkx's reference pose confirms it: 75 of 95 within
-		 * 1e-3 at shift 0, only 18 at any other shift.
-		 *
-		 * The reader therefore ACCEPTS an empty vector and fills the identity
-		 * map in decodeClip(), flagging HkxAnimClip::trackToBoneIsIdentity so
-		 * the derived map is never reported as a stored one. A non-empty
-		 * vector of the wrong length is still refused by name. Whether the
-		 * skeleton is big enough for an identity map -- at least numTracks
-		 * bones -- is the CONSUMER's gate (HkxPlayback::bind), because a clip
-		 * file usually carries no skeleton at all. */
+		// AN EMPTY transformTrackToBoneIndices IS THE IDENTITY MAP, not a missing one.
 		if ( !b.trackToBone.isEmpty() && b.trackToBone.size() != anim->numTransformTracks )
 			refuse( QString( "binding maps %1 tracks, the animation has %2" ).arg( b.trackToBone.size() ).arg( anim->numTransformTracks ) );
 	}
@@ -519,10 +498,7 @@ HkxAnimClip decodeClip( const RawAnim & a, const RawBinding * b, const QString &
 		}
 	}
 
-	/* THE INTERLEAVED ARM (lane BUILD8): the frames ARE the file.  Nothing
-	 * is evaluated, so worstQuatLengthDeviation and the block-overlap
-	 * diagnostics stay at their zero defaults -- there are no blocks and no
-	 * spline to be off unit. */
+	// THE INTERLEAVED ARM: the frames ARE the file.
 	if ( !a.interleaved.isEmpty() ) {
 		clip.frames.resize( a.numFrames );
 		for ( int f = 0; f < a.numFrames; f++ ) {
@@ -1056,29 +1032,23 @@ HkxAnimFile hkxAnimLoadPackfile( const QByteArray & blob, const QString & name )
 			if ( ao < 0 )
 				refuse( QString( "animation %1 has no object" ).arg( i ) );
 			const QString cls = pf.classOf.value( ao );
-			// lane BUILD8: the reader now serves BOTH classes FO4 uses. Every
+			// the reader now serves BOTH classes FO4 uses. Every
 			// other class is refused with exactly the sentence it was before.
 			const bool isInterleaved = ( cls == QLatin1String( "hkaInterleavedUncompressedAnimation" ) );
 			if ( cls != QLatin1String( "hkaSplineCompressedAnimation" ) && !isInterleaved )
 				refuse( QString( "animation %1 is a %2, not decoded by this reader" ).arg( i ).arg( cls ) );
 			RawAnim a;
 			a.ref = QString( "#%1" ).arg( ao - pf.base );
-			// hkaAnimation's OWN members, shared by both subclasses: type +0x10,
-			// duration +0x14, numberOfTransformTracks +0x18, numberOfFloatTracks
-			// +0x1c, extractedMotion +0x20, annotationTracks +0x28. Only +0x38
-			// onward is subclass territory.
+			// hkaAnimation's OWN members, shared by both subclasses: type +0x10, duration +0x14,
+			// numberOfTransformTracks +0x18, numberOfFloatTracks +0x1c, extractedMotion +0x20,
+			// annotationTracks +0x28.
 			a.type = pf.b.i32( ao + 0x10 );
 			a.duration = pf.b.f32( ao + 0x14 );
 			a.numTransformTracks = pf.b.i32( ao + 0x18 );
 			a.numFloatTracks = pf.b.i32( ao + 0x1c );
 			if ( isInterleaved ) {
-				/* +0x38 hkArray<hkQsTransform>, 48 bytes each, FRAME-MAJOR:
-				 * element = data + 48 * (frame * numberOfTransformTracks + track).
-				 * The object states its frame count NOWHERE -- the engine
-				 * divides transforms.size by numberOfTransformTracks
-				 * (its interleaved-track sampler, checked in Todd's treat;
-				 * docs/HKX_WRITE_FORMAT.md section 3.1), and so
-				 * does this. */
+				// +0x38 hkArray<hkQsTransform>, 48 bytes each, FRAME-MAJOR: element = data + 48 * (frame *
+				// numberOfTransformTracks + track).
 				if ( a.numTransformTracks < 1 )
 					refuse( QString( "animation %1 has %2 transform tracks" ).arg( i ).arg( a.numTransformTracks ) );
 				int xn = 0;

@@ -1,5 +1,5 @@
 #include "lodgenloadorder.h"
-#include "wwswitch.h"	// lane TESTDRIVER1: the WW_* switch store
+#include "wwswitch.h"	// the WW_* switch store
 
 #include <QDir>
 #include <QFile>
@@ -7,7 +7,7 @@
 #include <QSet>
 #include <QTextStream>
 
-/* See lodgenloadorder.h. Lane LOADORDER1, 2026-09-24. Read only: nothing in
+/* See lodgenloadorder.h. Read only: nothing in
  * this file opens anything for writing. */
 
 namespace

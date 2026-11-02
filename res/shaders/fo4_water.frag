@@ -1,61 +1,10 @@
 #version 410 core
 
-/* lane WATER1 (src/gl/cellwater.h): the game's near-water pixel shader in the cell view, term for term.
- * World space throughout (z up), linear light; V runs from the eye to the pixel, as the game's ray does.
- *   d       = |P - eye|;  dfade = saturate( (d - 8192) / (P1.x - 8192) )            (1 near, 0 past 8192)
- *   depth   vertical = |P.z - S.z|, along the ray = |S - P|, S the opaque scene point behind the pixel;
- *           rz = saturate( 1 - vertical / P1.w ), rw = saturate( 1 - along / P1.w )
- *   alpha   x = saturate( (rw - P3.y) / (P3.x - P3.y) ); a = (1 - (3 - 2x) x^2)^0.33 (P3.w - P3.z) + P3.z
- *   shore   smoothstep( saturate( (rz - P2.x) / (1 - P2.x) ) )
- *   flatten (1 - smoothstep( saturate( (rz - P2.w) / (P2.z - P2.w) ) )) x P2.y
- *   normals n_k = ( 2 t.xy - 1, sqrt( 1 - min( |2 t.xy - 1|^2, 1 ) ) ), t the noise texel at world xy / uv scale;
- *           N = normalize( (n1 - (0,0,1)) Amp.x + (0,0,1) + (n2 Amp.y + n3 Amp.z) dfade ),
- *           N = normalize( flatten (N - up) + up )
- *   Fresnel F = P4.z + (1 - P4.z)(1 - saturate( -V.N ))^5
- *   sky     Rz = reflect( V, N ).z; mix( mix( horizon, lower, sat( Rz + 0.75 ) ), upper, sat( 1.9 Rz + 0.35 ) )
- *   silt    refr + LightSilt.w (1 - a) ( mix( DarkSilt, LightSilt, refr ) - refr )
- *   spec    sun pow( sat( reflect( V, N ).L ), Var.x ) Deep.w + sun pow( sat( N.(-0.099, -0.099, 0.99) ), Shallow.w ) P1.z
- *   colour  mix( mix( Reflection.rgb, mix( silted, sky, F Var.y ), dfade ) + spec, offset refraction, shore ), fog
- * Lane WATER2 (the game's asm, entries 02102 / 02146 / 02100):
- *   SSR     sky = mix( sky, s.rgb, s.a ), s = mix( march, blurred march, fWaterBlurRatio 0.9 ) at this pixel, before
- *           the reflection weight and the far colour read it (tech 0x21c; without SSR, tech 0x1c: the sky alone)
- *   depth   the game's depth-colour pass (02146, tech 0x18010, alpha blend 1) is drawn in the deferred composite,
- *           BEFORE the water itself; the water's refraction copy (t1) therefore holds the scene already murked:
- *           t = mix( t, mix( Deep, Shallow, smooth( sat( (rz - P4.y) / (P4.x - P4.y) ) ) ), a ), a the alpha above,
- *           rz and a taken at the pixel the texel came from (the offset tap: its own ray to the water plane)
- *   rays    waterSslr: the game's water reflection-ray pass instead of the colour: N flattened by HALF the shore
- *           factor, R = reflect( V, N ) into the view, kept when it points more than 0.2 into the view;
- *           out (R in the view, the view depth) for src/gl/cellssr.cpp's ray stage
- * The sun is the frame's light 0 (its direction and colour, the one the cell's surfaces take).
- *
- * Probes (WW_CELL_WATER_PROBE, opaque, raw; "hi/lo" = a 16-bit value's high and low byte):
- *   1/2 N x 0.5 + 0.5   3/4 V x 0.5 + 0.5   5/6 (rz, rw, dfade)   7 the scene texel behind   8 the offset texel
- *   9/10 the frame constants by column (x mod 4): 0 sun colour / 4, 1 sun direction x 0.5 + 0.5, 2 (A.a / 8, D.a / 8,
- *   under the surface), 3 (cellIsOn, cellIsLinear, fogOn)
- *   11/12 the noise taps (t0.x, t0.y, t1.x)  13/14 (t1.y, t2.x, t2.y)  15/16 the SSR read (rgb)  17/18 (a, 0, 0)
- *   19/20/21 the three bytes (high first) of 24-bit fixed ( dist / 16384, along / 4096, vertical / 4096 )
- *   22/23/24 likewise ( the offset texel's along / 4096, vertical / 4096, 1 where the depth pass covered it )
- *   25/26 (WATERHDR1) the linear light the water writes ( lin / 4 )  27 the water's pixels, magenta
- *   WATERDATA1, only in the WW_WATER_INFO_PROBE build (launch WW_CELL_WATER_INFO_PROBE=1), water_info.glsl:
- *   28 (shore steps, depth code, lookup on) as bytes  29 (body id high byte, low byte, class + 1)
- *   30 cyan where the lookup finds water, red where it finds none  31 depth / 1024 as grey
- *   WATERCOMBINE1: every water look below compiles into ONE twin, fo4_waterlook (all four defines), and each look
- *   is switched by its own uniform (waterDepthOn, waterCauOn, waterShoreOn bits, waterWavesOn), so any set of ticks
- *   draws together; fo4_water.prog (no define) keeps its machine code. Probes of the looks (fo4_waterlook only):
- *   WATERDEPTH1 (Water depth colour row), water_depth.glsl: 32 the depth used / 1024 as grey, 33 cyan where the bake
- *   wins, green where the scene does, red where no depth is known
- *   WATERWAVES1 (Water swell row), water_waves.glsl: 34 (0.5 + 4 x the swell's slope x, y; its weight)
- *   WATERCAUSTICS1 (Water caustics row), water_caustics.glsl: 35 the factor on the bed / 2 as grey,
- *   36 (focus I / 8, depth envelope, sun share); CAUSTICPATTERN1: green channel, I = the net's light factor E
- *   WATERSHORE1 (Water soft edge, Shore foam rows), water_shore.glsl: 37 (edge, foam, shore distance / 1024);
- *   WATERFOAMDETAIL1 (the foam's wave-energy law): 38 (Hs / 64 u, energy amount, water column / 64 u)
- *   (was 32 in the shore lane's own twin, which clashed with the depth probe)
- *   WATERREFL1 (Water reflections, Water sun glare rows), water_refl.glsl: 44 (F, sqrt( alpha ) / 0.5, SSR confidence)
- *   45/46 the glare alone ( lin / 16 )
- *   WATERSKYVISFAR2 (Water sky visibility), water_skyfar.glsl: 47 (sky visibility, sun spec luminance / 16, 0)
- *   WATERFLOWBAKE1, same build: 41 the baked flow (was 32 in its lane: WATERDEPTH1 holds 32) ( vx / 4 x 0.5 + 0.5, vy / 4 x 0.5 + 0.5, flow lookup on )
- *   WATERLOOK1 (Ocean waves row), water_ocean.glsl: 39 (0.5 + 4 x the spectrum's slope x, y; its weight),
- *   40 (whitecap cover, sqrt( lost slope variance ) / 0.5, the caustic net's path factor / 3) */
+/* The game's near-water pixel shader in the cell view, term for term (src/gl/cellwater.h). World space (z up),
+ * linear light; V runs from the eye to the pixel. The sun is the frame's light 0. waterSslr = 1 instead writes the
+ * reflection ray for cellssr.cpp. The water looks (depth colour, swell, caustics, shore, reflections, sky
+ * visibility, flow, ocean) compile into one twin, fo4_waterlook, each switched by its own uniform.
+ * Probes (WW_CELL_WATER_PROBE, WW_CELL_WATER_INFO_PROBE): raw debug values, hi/lo bytes of 16-bit values. */
 
 #define WW_FOG 1
 #define WW_CELLLIGHTS 1

@@ -30,10 +30,10 @@
 namespace {
 
 constexpr int kSrcUnit = 8;		// the linear frame (sampler2DMS) in cell_hdr.prog; the cell units are 10..16
-constexpr int kFogBloomUnit = 7;	// lane FOGBLOOM1: the bloom-intensity target (sampler2DMS); no TexCache map in this pass (9 in the lane: TONEMAP1's stencil holds it)
-constexpr int kFoBloomUnit = WwCellUnit::Bloom;	// lane BLOOM1b: the FO4CS chain's top (sampler2D), on the vanilla bloom's unit (same type)
+constexpr int kFogBloomUnit = 7;	// the bloom-intensity target (sampler2DMS); no TexCache map in this pass (9 holds the stencil)
+constexpr int kFoBloomUnit = WwCellUnit::Bloom;	// the FO4CS chain's top (sampler2D), on the vanilla bloom's unit (same type)
 
-constexpr int kStencilUnit = WwPassUnit::HdrStencil;	// lane TONEMAP1: the frame's stencil (usampler2DMS) in cell_hdr.prog, always assigned
+constexpr int kStencilUnit = WwPassUnit::HdrStencil;	// the frame's stencil (usampler2DMS) in cell_hdr.prog, always assigned
 constexpr int kBackdropUnit = WwPassUnit::HdrBackdrop;	// lane GLAREBLOW2: the view under mode 3 (sampler2D) in cell_hdr.prog, always assigned
 
 // lane TONEMAP1: the depth / stencil is a texture and the tone map tests the stencil in its shader, so only the depth
@@ -48,7 +48,7 @@ bool stexOn()
 
 /* lane AAFORMAT1 (study): WW_CELL_HDR_FORMAT=rgba32f | rgba16f | r11g11b10f picks the linear frame's format.
  * r11g11b10f has no alpha (the effects over the sky lose their coverage): a cost arm, never a default.
- * lane FRAMEFMT1: the default is RGBA16F (gl/cellhdrformat.h); WW_FRAMEFMT1_RED=1 / WW_CELL_HDR_FORMAT_RED=1 /
+ * The default is RGBA16F (gl/cellhdrformat.h); WW_FRAMEFMT1_RED=1 / WW_CELL_HDR_FORMAT_RED=1 /
  * WW_AAFORMAT1_RED=1: RGBA32F whatever was asked (the frame and every copy that follows it, as before). */
 using HdrFormat = WwHdrFormatRule;
 static_assert( GL_RGBA16F == 0x881A && GL_RGBA32F == 0x8814 && GL_R11F_G11F_B10F == 0x8C3A, "cellhdrformat.h's GL enums" );
@@ -1100,8 +1100,7 @@ bool wwCellHdrBegin( Scene * scene )
 			fn->glDeleteTextures( 1, &g.color );
 		fn->glGenTextures( 1, &g.color );
 		fn->glBindTexture( GL_TEXTURE_2D_MULTISAMPLE, g.color );
-		/* lane FRAMEFMT1: RGBA16F by default (was RGBA32F: SUNCELL1 had seen fp16 additive MSAA blends not repeat run to
-		 * run; the FRAMEFMT1 hold measures f16 against f16 again in one launch). Red WW_FRAMEFMT1_RED=1: RGBA32F. */
+		/* RGBA16F by default (gl/cellhdrformat.h); WW_FRAMEFMT1_RED=1: RGBA32F. */
 		const HdrFormat & hf = hdrFormat();
 		fn->glTexImage2DMultisample( GL_TEXTURE_2D_MULTISAMPLE, S, hf.gl, W, H, GL_TRUE );
 		g.colorFormat = hf.gl;
@@ -1388,7 +1387,7 @@ void wwCellHdrEnd( Scene * scene )
 	static_assert( WwPassUnit::VrsSrc == kSrcUnit, "the VRS build must end on the tone map's source unit" );
 	const int quadsActive = sync && !wwCellUniRed() ? int( GL_TEXTURE0 + kSrcUnit ) : -1;
 	wwCellFogBloomFinal( r, kFogBloomUnit, fogBloom, quadsActive );
-	wwCellBloomFinal( r, kFoBloomUnit, quadsActive );	// lane BLOOM1b: the final combine's uniforms (off: cellIsFoBloomOn false)
+	wwCellBloomFinal( r, kFoBloomUnit, quadsActive );	// the final combine's uniforms (off: cellIsFoBloomOn false)
 
 	static const float quad[12] = { -1, -1, 0, 1, -1, 0, -1, 1, 0, 1, 1, 0 };
 	static const std::uint16_t idx[6] = { 0, 1, 2, 2, 1, 3 };

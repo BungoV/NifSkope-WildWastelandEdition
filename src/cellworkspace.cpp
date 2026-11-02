@@ -27,19 +27,19 @@ BSD License - see nifskope.h
 #include "gl/cellcull.h"	// lane SUNCELL1: the Culling row
 #include "gl/cellssr.h"	// lane CELLALL1: the SSR rows
 #include "gl/cellreflprobe.h"	// lane REFLPROBE1: the Reflection probes row
-#include "gl/cellssgi.h"	// lane SSGI1
-#include "gl/cellfarground.h"	// lane FARDRAW1: the Far ground rows
-#include "gl/celllampshadow.h"	// lane LAMPSHADOW1
-#include "gl/celllooks.h"	// lane GAPLOOK1
-#include "gl/cellwater.h"	// lane CELLALL1: the Water row
-#include "cellaodecal.h"	// lane CELLALL1: the AO decals row
+#include "gl/cellssgi.h"
+#include "gl/cellfarground.h"	// the Far ground rows
+#include "gl/celllampshadow.h"
+#include "gl/celllooks.h"
+#include "gl/cellwater.h"	// the Water row
+#include "cellaodecal.h"	// the AO decals row
 #include "gl/gametaa.h"
-#include "gl/cellgrass.h"	// lane GRASSMB1
-#include "gl/cellpost.h"	// lane GRASSMB1
-#include "gl/cellbloom.h"	// lane BLOOM1b
+#include "gl/cellgrass.h"
+#include "gl/cellpost.h"
+#include "gl/cellbloom.h"
 #include "gl/cellfogbloom.h"
-#include "ui/widgets/wwnumberfield.h"	// lane BLOOM1b: the Bloom rows
-#include "ui/opencelldialog.h"	// lane OPENCELLFIX1: the Load order and Cells tabs
+#include "ui/widgets/wwnumberfield.h"	// the Bloom rows
+#include "ui/opencelldialog.h"	// the Load order and Cells tabs
 #include "ui/cellshowpanel.h"	// lane OPENCELLFIX1: the Show tab, the Show menu stays open
 #include "ui/widgets/wwdropdown.h"	// lane OPENCELLFIX2: the dock's one dropdown
 #include "gl/cellvolair.h"	// lane OPENCELLFIX2: the fog group's rows (notes 22)
@@ -450,7 +450,7 @@ void CellWorkspacePanel::buildUi()
 		overlayBox->addItem( name, name );
 	}
 
-	/* THE SHOW MENU -- a child of this panel, so it lives only in the Cell workspace. Since OPENCELLFIX2 nothing pops
+	/* THE SHOW MENU -- a child of this panel, so it lives only in the Cell workspace. Nothing pops
 	 * it: the Display tab is built from it and its actions stay the one truth. */
 	QToolButton * showButton = wwCellShowButton( this );	// nullptr outside tests/cellshow's red build
 	if ( showButton )
@@ -1135,7 +1135,7 @@ void CellWorkspacePanel::buildUi()
 		&wwShadowSetContactTier );
 	liveTier( "CellWorkspaceTerrainShadows", tr( "Terrain shadows" ), "terrainShadows", &wwShadowTerrainTier,
 		&wwShadowSetTerrainTier );
-	{	// lane PERFFIX2 (item 9): the AO quality tier (src/gl/cellaomethod.h); the built-in presets pick it by name; live
+	{	// the AO quality tier (src/gl/cellaomethod.h); the built-in presets pick it by name; live
 		QMenu * m = groupsMenu->addMenu( tr( "Ambient Occlusion quality" ) );
 		m->setObjectName( QStringLiteral( "CellWorkspaceAoQuality" ) );
 		auto * grp = new QActionGroup( m );
@@ -1298,7 +1298,7 @@ void CellWorkspacePanel::buildUi()
 		look( WwLook::FarCardShadows, tr( "Far tree card shadows" ) );
 		look( WwLook::TerrPbrDim, tr( "PBR ambient in terrain shadow" ) );
 		head( F, "CellWorkspaceAo", "CellWorkspaceAoMethod" );	// item 27 + round 4: the method first in its fold
-		kid( "", tr( "Quality" ), "CellWorkspaceAoQuality", -1, true );	// lane PERFFIX2 (item 9): the presets step it
+		kid( "", tr( "Quality" ), "CellWorkspaceAoQuality", -1, true );	// the presets step it (src/ui/cellpresettable.h)
 		head( F, "CellWorkspaceSsgi", "CellWorkspaceSsgiQuality", -1, true );
 		rows.last().heavy = true;
 		master( F, WwGroup::Reflections );

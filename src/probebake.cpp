@@ -33,7 +33,7 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include "probebake.h"
 #include "probealbedo.h"
 #include "probebvh.h"
-#include "bakert.h"	// lane RTBAKE1: the bake pools' worker count, the GPU ray back end
+#include "bakert.h"	// the bake pools' worker count, the GPU ray back end
 
 #include <QDir>
 #include <QElapsedTimer>
@@ -100,15 +100,8 @@ struct TbkProbe
 };
 static_assert( sizeof( TbkProbe ) == 144, "tbk probe" );
 
-/* ---- lane BAKE4: the `.tbk` v4 tail, after the v3 body (header version 4; reserved[0] =
- * back surfels, reserved[1] = room boxes, reserved[2] = what was modelled: 1 sides,
- * 2 rooms, 4 doors, 8 glass). Order: back surfels, one ext per link, one ext per probe,
- * the room boxes.
- * Lane SIDES6: v5 = v4's tail exactly, but a cell keeps up to SIX surfels, one per facing bin
- * (bin = axis * 2 + negative: 0 +X, 1 -X, 2 +Y, 3 -Y, 4 +Z, 5 -Z, of the hit face's normal turned
- * toward the probe), all in the one surfel table, ordered by cell (z, y, x) then bin; a surfel's
- * pad0 is its bin; reserved[0] (back surfels) is 0; a link's ext side is the bin it links;
- * reserved[2] adds 16 (six sides); an emissive index is a plain index into the one table. */
+// the `.tbk` v4 tail, after the v3 body (header version 4; reserved[0] = back surfels, reserved[1] = room
+// boxes, reserved[2] = what was modelled: 1 sides, 2 rooms, 4 doors, 8 glass).
 struct TbkLinkExt
 {
 	quint8 side;        // 0 = the cell's surfel, 1 = its back surfel
@@ -185,20 +178,17 @@ void packDir( const double d[3], qint16 out[2] )
 	out[1] = qint16( std::lround( std::clamp( py, -1.0f, 1.0f ) * 32767.0f ) );
 }
 
-/*! One surfel cell's samples, split by the side they face: bin = the dominant axis of
- *  the normal (turned toward the probe that saw it) and its sign. A thin wall puts
- *  both of its faces in one 70-unit cell; averaging them cancels the normal and a
- *  probe indoors would gather the sunlit outside (a light leak). The cell keeps the
- *  side most rays saw, plus every face not opposed to it (a corner's floor and wall). */
+//! One surfel cell's samples, split by the side they face: bin = the dominant axis of the normal (turned toward
+//! the probe that saw it) and its sign.
 struct Bin
 {
 	double pos[3] = { 0, 0, 0 }, nrm[3] = { 0, 0, 0 }, alb[3] = { 0, 0, 0 };
 	quint32 n = 0;
-	double alb2[3] = { 0, 0, 0 }, nrm2[3] = { 0, 0, 0 };   // lane CAPTURE1: the hit way's samples
+	double alb2[3] = { 0, 0, 0 }, nrm2[3] = { 0, 0, 0 };   // the hit way's samples
 	quint32 n2 = 0;
-	double le[3] = { 0, 0, 0 };   // lane EMISSIVEGI1: the summed emitted light (linear) of the hits that glowed
-	double nrmS[3] = { 0, 0, 0 };   // lane SMOOTHN1: the smooth normal at each hit (the tri way's stored normal)
-	double leAlt[3] = { 0, 0, 0 };   // lane LIGHTS5: le under the other emittance state (summed only when the soup has one)
+	double le[3] = { 0, 0, 0 };   // the summed emitted light (linear) of the hits that glowed
+	double nrmS[3] = { 0, 0, 0 };   // the smooth normal at each hit (the tri way's stored normal)
+	double leAlt[3] = { 0, 0, 0 };   // le under the other emittance state (summed only when the soup has one)
 	void add( const Bin & o )
 	{
 		for ( int k = 0; k < 3; k++ ) {
@@ -218,7 +208,7 @@ struct Bin
 struct SurfelBins
 {
 	Bin b[6];
-	// lane GAPBAKE1: the room split -- b is room `room`'s sides, other rooms' in `more` (both unused when off)
+	// the room split -- b is room `room`'s sides, other rooms' in `more` (both unused when off)
 	struct More { quint32 room; Bin b[6]; };
 	quint32 room = kProbeRoomNone;
 	std::vector<More> more;
@@ -249,12 +239,12 @@ struct SurfelBins
 	}
 };
 typedef std::unordered_map<Key, SurfelBins, KeyHash> SurfelMap;
-//! lane RTGI2: a chunk's samples per (cell, bin), so only the bins hit take memory
+//! a chunk's samples per (cell, bin), so only the bins hit take memory
 struct KeyB
 {
 	Key k;
 	int bin;
-	quint32 room = 0;   // MERGE1023: GAPBAKE1's probe room (0 = split off)
+	quint32 room = 0;   // GAPBAKE1's probe room (0 = split off)
 	bool operator==( const KeyB & o ) const { return k == o.k && bin == o.bin && room == o.room; }
 };
 struct KeyBHash
@@ -267,13 +257,13 @@ struct Final
 {
 	TbkSurfel rec;
 	double n[3];    //!< the stored (quantized) normal, what the facing rule tests
-	bool emits = false;               //!< lane EMISSIVEGI1: some hit in the cell's side glowed
+	bool emits = false;               //!< some hit in the cell's side glowed
 	float le[3] = { 0, 0, 0 };        //!< the mean emitted light over the side's hits (linear)
-	bool emitsAlt = false;            //!< lane LIGHTS5: the same two under the other emittance state
+	bool emitsAlt = false;            //!< the same two under the other emittance state
 	float leAlt[3] = { 0, 0, 0 };
 };
 
-/* lane EMISSIVEGI1: the `.tbk` v4 emissive tail, after the room boxes, only when a surfel glows (header
+/* the `.tbk` v4 emissive tail, after the room boxes, only when a surfel glows (header
  * reserved[3] = its count; reserved[2] already holds what was modelled): the surfel's index in its list
  * (top bit = the back surfels' list) and its mean emitted light, linear. */
 struct TbkEmit
@@ -338,24 +328,24 @@ struct Chunk
 {
 	int first = 0, count = 0;
 	BinMap surfels;
-	std::unordered_map<Key, quint32, KeyHash> firstRoom;   // MERGE1023: room split on: a cell's first hit room in this chunk
+	std::unordered_map<Key, quint32, KeyHash> firstRoom;   // room split on: a cell's first hit room in this chunk
 	std::vector<ProbeOut> probes;
 	qint64 hits = 0, misses = 0;
 	qint64 spilled = 0;         // links sent to a second side instead of refused
 	qint64 turned = 0;          // links refused by the facing rule
 	qint64 back = 0, door = 0, tinted = 0;   // v4 links: to a back surfel, through a door, through glass
-	qint64 decal = 0, surfHits = 0;          // lane GICAL1: surfel hits under a decal; all surfel hits
-	qint64 emitHits = 0;        // lane EMISSIVEGI1: pass-1 hits on a glowing triangle
-	qint64 veilHits = 0, veilBack = 0, veilFar = 0;   // lane NEONGI1: pass-1 crossings of a glowing effect surface
-	qint64 smoothHits = 0, nmapHits = 0;     // lane SMOOTHN1: hits given a smooth normal; bent by a normal map
-	qint64 rays = 0;                         // lane SMOOTHN1: rays cast in pass 2 (the base set plus the extra batches)
-	int raised = 0, multMax = 1;             // lane SMOOTHN1: probes given extra batches; the largest multiple
-	double hitW = 0, offW = 0, cornerW = 0;   // lane SIDES6 measure: ray weight on a surfel; > 45 deg off it; on a corner
-	qint64 waterRays = 0, waterMirrorHits = 0, waterMirrorSky = 0;   // lane WATER1: rays split; their mirror legs
-	int waterUnder = 0;                      // lane WATER1: probes under the water
-	double waterReflW = 0;                   // lane WATER1: the sphere the mirror legs took
-	QString waterDump;                       // lane WATER1: the gate's rays (spec.waterDumpProbes)
-	qint64 pf[11] = {};                      // lane RTGI2: WW_BAKE_PROF section ns
+	qint64 decal = 0, surfHits = 0;          // surfel hits under a decal; all surfel hits
+	qint64 emitHits = 0;        // pass-1 hits on a glowing triangle
+	qint64 veilHits = 0, veilBack = 0, veilFar = 0;   // pass-1 crossings of a glowing effect surface
+	qint64 smoothHits = 0, nmapHits = 0;     // hits given a smooth normal; bent by a normal map
+	qint64 rays = 0;                         // rays cast in pass 2 (the base set plus the extra batches)
+	int raised = 0, multMax = 1;             // probes given extra batches; the largest multiple
+	double hitW = 0, offW = 0, cornerW = 0;   // measure: ray weight on a surfel; > 45 deg off it; on a corner
+	qint64 waterRays = 0, waterMirrorHits = 0, waterMirrorSky = 0;   // rays split; their mirror legs
+	int waterUnder = 0;                      // probes under the water
+	double waterReflW = 0;                   // the sphere the mirror legs took
+	QString waterDump;                       // the gate's rays (spec.waterDumpProbes)
+	qint64 pf[11] = {};                      // WW_BAKE_PROF section ns
 };
 
 } // namespace
@@ -365,7 +355,7 @@ bool probeBake( const ProbeSoup & soup, const std::vector<ProbePoint> & probesIn
 {
 	ProbeBakeResult & R = *out;
 	R = ProbeBakeResult();
-	// lane ROOMCLAMP1: the probes the bake traces (a probe outside the shell is moved or dropped below)
+	// the probes the bake traces (a probe outside the shell is moved or dropped below)
 	std::vector<ProbePoint> probesOwn( probesIn );
 	const std::vector<ProbePoint> & probes = probesOwn;
 	std::vector<int> cubeDumpProbes = spec.cubeDumpProbes;
@@ -379,14 +369,14 @@ bool probeBake( const ProbeSoup & soup, const std::vector<ProbePoint> & probesIn
 	R.albedoKnown = albKnown ? 1 : 0;
 	const bool redOct = spec.red == QLatin1String( "octant" );
 	const bool redNrm = spec.red == QLatin1String( "normal" );
-	// lane BAKE4: v4 = both sides of a cell, rooms, doors, glass; v3 = FO4CS's file exactly
+	// v4 = both sides of a cell, rooms, doors, glass; v3 = FO4CS's file exactly
 	const bool v4 = spec.tbkVersion >= 4;
-	// lane SIDES6: v5 = v4 with up to six surfels a cell, one per facing bin (the deck's s24 key)
+	// v5 = v4 with up to six surfels a cell, one per facing bin (the deck's s24 key)
 	const bool v5 = spec.tbkVersion >= 5;
 	R.version = v5 ? 5 : v4 ? 4 : 3;
 	const bool redOneSide = spec.red == QLatin1String( "oneside" );
 	const bool redRooms = spec.red == QLatin1String( "rooms" );
-	/* lane GAPBAKE1: v5 surfel cells split by the room of the probe whose ray found the sample (pass 1 and 2 cast the
+	/* v5 surfel cells split by the room of the probe whose ray found the sample (pass 1 and 2 cast the
 	 * same rays, so a link finds its own room's slot); side id = bin + 6 x slot, noSide = a face with no bin */
 	const bool roomSplit = spec.roomSplit && v5 && !redRooms;
 	constexpr int kSides = 6 * kTbkRoomSlots;
@@ -396,13 +386,13 @@ bool probeBake( const ProbeSoup & soup, const std::vector<ProbePoint> & probesIn
 	const bool redGlass = spec.red == QLatin1String( "glass" );
 	const bool glassOn = v4 && !redGlass && !soup.glass.empty() && soup.glassT.size() * 3 == soup.glass.size();
 	R.glassTris = int( soup.glass.size() / 9 );
-	// lane GICAL1: decals folded into the albedo (the tri way's)
+	// decals folded into the albedo (the tri way's)
 	const bool decalOn = albKnown && !soup.decal.empty() && soup.decalA.size() * 9 == soup.decal.size() * 4;
 	R.decalTris = decalOn ? int( soup.decal.size() / 9 ) : 0;
-	const bool glowOn = !soup.glow.empty();   // lane EMISSIVEGI1: no glowing triangle = every byte as before
+	const bool glowOn = !soup.glow.empty();   // no glowing triangle = every byte as before
 	R.emitTris = int( soup.glow.tris.size() );
-	const bool glowAlt = glowOn && soup.glow.hasAlt();   // lane LIGHTS5: also sum the other state's Le
-	/* lane WATER1: the water surfaces (v4 only: v3 is FO4CS's file exactly). Reds: "water" bakes as if no water,
+	const bool glowAlt = glowOn && soup.glow.hasAlt();   // also sum the other state's Le
+	/* the water surfaces (v4 only: v3 is FO4CS's file exactly). Reds: "water" bakes as if no water,
 	 * "waterfog" drops the underwater fog, "waterfresnel" keeps F at F0 (no angle) */
 	bool waterOn = v4 && spec.red != QLatin1String( "water" ) && !soup.water.empty()
 		&& soup.waterKind.size() * 9 == soup.water.size() && !soup.waterTypes.empty();
@@ -413,14 +403,14 @@ bool probeBake( const ProbeSoup & soup, const std::vector<ProbePoint> & probesIn
 	R.waterTris = waterOn ? int( soup.water.size() / 9 ) : 0;
 	R.waterTypes = waterOn ? int( soup.waterTypes.size() ) : 0;
 	R.doors = int( soup.doors.size() );
-	// lane CAPTURE1: the albedo way (tri = today; hit and cube need the soup's per-triangle material)
+	// the albedo way (tri = today; hit and cube need the soup's per-triangle material)
 	const bool matOk = albKnown && qint64( soup.mat.size() ) == soup.triCount();
 	const bool wayHit = matOk && spec.albedoWay == QLatin1String( "hit" );
 	const bool wayCube = matOk && spec.albedoWay == QLatin1String( "cube" );
 	const bool redCentroid = spec.albedoRed == QLatin1String( "centroid" );
 	const bool redNoFilter = spec.albedoRed == QLatin1String( "nofilter" );
 	R.albedoWay = wayHit ? QStringLiteral( "hit" ) : wayCube ? QStringLiteral( "cube" ) : QStringLiteral( "tri" );
-	/* lane SMOOTHN1: the soup's vertex normals (NIF normals, the ground's VNML): a hit's normal is their blend at
+	/* the soup's vertex normals (NIF normals, the ground's VNML): a hit's normal is their blend at
 	 * the hit, in every way; the hit and cube ways also bend it by the shape's normal map */
 	const bool smoothOn = !soup.vn.empty();
 	for ( size_t i = 0; smoothOn && i < size_t( soup.triCount() ); i++ )
@@ -428,7 +418,7 @@ bool probeBake( const ProbeSoup & soup, const std::vector<ProbePoint> & probesIn
 	if ( matOk )
 		for ( const ProbeSoup::TriMat & m : soup.mat )
 			R.nmapTris += m.ntex >= 0 ? 1 : 0;
-	/* lane SMOOTHN1: noise-driven ray counts. Every probe casts today's set (N Fibonacci rays); a probe whose
+	/* noise-driven ray counts. Every probe casts today's set (N Fibonacci rays); a probe whose
 	 * light-free estimate is still noisy after it gets more batches of N (the same set, turned at random,
 	 * seeded by the probe and the batch) up to adaptMax x N. Never fewer rays than the base set. */
 	const int adaptMax = qBound( 1, spec.adaptMax, 64 );
@@ -457,8 +447,8 @@ bool probeBake( const ProbeSoup & soup, const std::vector<ProbePoint> & probesIn
 		bvh.t[i + 2] = soup.tris[i + 2];
 	}
 	bvh.build();
-	bvh.mask = &soup.amask;   // lane ALPHATEST1: a ray through an alpha-test hole passes on (no surfel there)
-	// lane BAKE4: the glass in its own tree (it holds no surfel and stops no ray), the doors local
+	bvh.mask = &soup.amask;   // a ray through an alpha-test hole passes on (no surfel there)
+	// the glass in its own tree (it holds no surfel and stops no ray), the doors local
 	probebvh::Bvh gbvh;
 	if ( glassOn ) {
 		gbvh.t.resize( soup.glass.size() );
@@ -469,7 +459,7 @@ bool probeBake( const ProbeSoup & soup, const std::vector<ProbePoint> & probesIn
 		}
 		gbvh.build();
 	}
-	probebvh::Bvh wbvh;   // lane WATER1: the water in its own tree
+	probebvh::Bvh wbvh;   // the water in its own tree
 	if ( waterOn ) {
 		wbvh.t.resize( soup.water.size() );
 		for ( size_t i = 0; i < soup.water.size(); i += 3 ) {
@@ -479,7 +469,7 @@ bool probeBake( const ProbeSoup & soup, const std::vector<ProbePoint> & probesIn
 		}
 		wbvh.build();
 	}
-	/* lane NEONGI1: the glowing effect surfaces (neon) in their own tree. They have no face in the soup (a ray goes
+	/* the glowing effect surfaces (neon) in their own tree. They have no face in the soup (a ray goes
 	 * through), so a ray that crosses one adds its Le to the surface it meets behind it, when that is within a surfel
 	 * cell: the cell's mean then carries the tube's light (its share of the cell, as seen from the probes). */
 	const bool veilOn = !soup.veil.empty();
@@ -494,7 +484,7 @@ bool probeBake( const ProbeSoup & soup, const std::vector<ProbePoint> & probesIn
 		}
 		vbvh.build();
 	}
-	probebvh::Bvh dbvh;   // lane GICAL1: the decals in their own tree
+	probebvh::Bvh dbvh;   // the decals in their own tree
 	if ( decalOn ) {
 		dbvh.t.resize( soup.decal.size() );
 		for ( size_t i = 0; i < soup.decal.size(); i += 3 ) {
@@ -519,11 +509,8 @@ bool probeBake( const ProbeSoup & soup, const std::vector<ProbePoint> & probesIn
 			doorBoxes.push_back( b );
 		}
 
-	/* ---- lane ROOMCLAMP1: PROBES OUTSIDE THE SHELL (the DDGI / APV practice). An interior's shell is one-sided:
-	 * seen from outside the building (standing on its roof) a probe's rays meet the BACKS of faces (n . d > 0
-	 * by the stored winding; a two-sided face has no back). A probe whose back-face share of the sphere is over
-	 * spec.backMax moves to the nearest point of a 35-unit lattice (within 280) under it, 16 units clear of any
-	 * surface; none: it is dropped. backMax >= 1 or red "backface": every probe stays (the old bake). */
+	// PROBES OUTSIDE THE SHELL (the DDGI / APV practice). An interior's shell is one-sided: seen from outside
+	// the building (standing on its roof) a probe's rays meet the BACKS of faces (n .
 	R.msPart[0] = double( tm.nsecsElapsed() ) / 1e6;
 	{
 		const int NB = 256, NQ = 32;
@@ -558,7 +545,7 @@ bool probeBake( const ProbeSoup & soup, const std::vector<ProbePoint> & probesIn
 			}
 			return double( back ) / double( ( NB + stride - 1 ) / stride );
 		};
-		// lane ROOMCLAMP1: a roof top (nothing straight above, the back of a one-sided face straight below) is
+		// a roof top (nothing straight above, the back of a one-sided face straight below) is
 		// never a move's target: a point on a roof can sit just under the bar (Museum, 2 such moves at 0.23)
 		auto roofTop = [&]( const double c[3] ) -> bool {
 			const double up[3] = { 0, 0, 1 }, dn[3] = { 0, 0, -1 };
@@ -616,7 +603,7 @@ bool probeBake( const ProbeSoup & soup, const std::vector<ProbePoint> & probesIn
 					fate[pi] = 2;
 			}
 		} );
-		/* lane RTGI2: the over-bar probes' lattice search in blocks of 64 candidates over every worker (block 0 of each
+		/* the over-bar probes' lattice search in blocks of 64 candidates over every worker (block 0 of each
 		 * probe first, so one dropped probe no longer runs alone at the end). A probe takes its lowest passing
 		 * candidate: the serial loop's first success, so the same move. */
 		std::vector<size_t> over;
@@ -709,10 +696,7 @@ bool probeBake( const ProbeSoup & soup, const std::vector<ProbePoint> & probesIn
 			return false;
 		}
 
-		/* lane GIPROBE2: PROBES OUT OF WALLS (DDGI probe relocation, Majercik et al. 2019 / RTXGI). A probe whose nearest
-		 * front-facing hit is closer than spec.probeClear is pushed away from the close faces (the sum of their ray
-		 * directions, each by how far inside the clearance), up to 4 steps and kClearMove in all. A step is kept only if
-		 * its segment is clear, the nearest hit grows, the room box stays and the back-face share stays under the bar. */
+		// PROBES OUT OF WALLS (DDGI probe relocation, Majercik et al. 2019 / RTXGI).
 		const bool clearOn = spec.probeClear > 0;
 		const bool clearRed = spec.red == QLatin1String( "clear" );   // red: pushed TOWARD the faces (the gate must fail)
 		const double clearMin = spec.probeClear, kClearMove = 140.0;
@@ -833,7 +817,7 @@ bool probeBake( const ProbeSoup & soup, const std::vector<ProbePoint> & probesIn
 		}
 	}
 
-	/* lane GAPBAKE1: a probe's room for the split: the soup's rooms grid when given (its cell, else the nearest air
+	/* a probe's room for the split: the soup's rooms grid when given (its cell, else the nearest air
 	 * cell within two, probegi's rule; grid ids + 1, 0 = none), else the placer's room */
 	if ( roomSplit ) {
 		roomOfProbe.assign( probes.size(), 0u );
@@ -880,7 +864,7 @@ bool probeBake( const ProbeSoup & soup, const std::vector<ProbePoint> & probesIn
 		dirs[size_t( i ) * 3 + 2] = z;
 	}
 	const double omega = kFourPi / N;
-	/* lane SMOOTHN1: batch b of probe pi: b = 0 is the set above; b > 0 the same set under a random rotation
+	/* batch b of probe pi: b = 0 is the set above; b > 0 the same set under a random rotation
 	 * (Shoemake's uniform quaternion), seeded by (pi, b) alone -- the same rays whatever thread runs it */
 	auto batchDirs = [&]( int pi, int b, std::vector<double> & buf ) -> const double * {
 		if ( b == 0 )
@@ -906,10 +890,7 @@ bool probeBake( const ProbeSoup & soup, const std::vector<ProbePoint> & probesIn
 				buf[i + size_t( r )] = M[r * 3] * dirs[i] + M[r * 3 + 1] * dirs[i + 1] + M[r * 3 + 2] * dirs[i + 2];
 		return buf.data();
 	};
-	/* lane SMOOTHN1: the noise test after each batch. The light-free estimate per octant (a ray's value: 1 for sky,
-	 * the hit triangle's albedo luma, 0 for the void) is split into 8 interleaved subsets (ray index mod 8); the
-	 * standard error of the octant mean from the subsets' spread must fall under max(rel x mean, abs) in every
-	 * octant, or the probe takes another batch (up to adaptMax batches). */
+	// the noise test after each batch.
 	std::vector<int> multOf( probes.size(), 1 );
 	auto noisy = [&]( const double ps[8][8], const double pc[8][8] ) {
 		for ( int oc = 0; oc < 8; oc++ ) {
@@ -930,7 +911,7 @@ bool probeBake( const ProbeSoup & soup, const std::vector<ProbePoint> & probesIn
 		}
 		return false;
 	};
-	/* lane SMOOTHN1: the smooth normal at local point p of soup triangle tri (its vertex normals blended by the
+	/* the smooth normal at local point p of soup triangle tri (its vertex normals blended by the
 	 * barycentric weights, renormalized), on fn's side; false when the soup has none for it */
 	auto smoothAt = [&]( int tri, const double p[3], const double fn[3], double out[3] ) -> bool {
 		if ( !smoothOn || !soup.hasNormals( size_t( tri ) ) )
@@ -974,7 +955,7 @@ bool probeBake( const ProbeSoup & soup, const std::vector<ProbePoint> & probesIn
 		chunks[size_t( c )].first = int( qint64( probes.size() ) * c / nChunks );
 		chunks[size_t( c )].count = int( qint64( probes.size() ) * ( c + 1 ) / nChunks ) - chunks[size_t( c )].first;
 	}
-	// lane RTGI2: WW_BAKE_PROF=1 times the sections of pass 1 and pass 2 per chunk (census "bake profile")
+	// WW_BAKE_PROF=1 times the sections of pass 1 and pass 2 per chunk (census "bake profile")
 	static const bool prof = [] { const char * e = std::getenv( "WW_BAKE_PROF" ); return e && *e == '1'; }();
 	using PClock = std::chrono::steady_clock;
 	auto pnow = []() { return prof ? PClock::now() : PClock::time_point(); };
@@ -991,7 +972,7 @@ bool probeBake( const ProbeSoup & soup, const std::vector<ProbePoint> & probesIn
 		*tri = -1;
 		return bvh.ray( o, d, spec.rayMax, t, tri ) && *tri >= 0;
 	};
-	/* lane RTBAKE1: ray i of batch b of probe pi -- the GPU's answer (re-tested in double) when the primary rays went
+	/* ray i of batch b of probe pi -- the GPU's answer (re-tested in double) when the primary rays went
 	 * to the GPU, else the cast above. A miss leaves *t as the cast does. */
 	struct RHit { double t; int tri; };
 	std::vector<std::vector<RHit>> rcache;
@@ -1031,12 +1012,8 @@ bool probeBake( const ProbeSoup & soup, const std::vector<ProbePoint> & probesIn
 				ax = k;
 		return ax * 2 + ( n[ax] < 0 ? 1 : 0 );
 	};
-	/* lane CAPTURE1: the material at a point of a triangle (T: its 9 local floats, m its material,
-	 * a3 its tri-way albedo bytes), for the hit and cube ways. p = the local hit point, dist and
-	 * omegaS = the sample's distance and solid angle (its footprint picks the mip), fn = the face
-	 * normal turned toward the probe. Albedo linear 0..1; the normal is the interpolated vertex
-	 * normal on fn's side (fn when the mesh has none). Lane SMOOTHN1: returns bit 0 = the soup's smooth
-	 * normal was used, bit 1 = a normal map bent it. */
+	// the material at a point of a triangle (T: its 9 local floats, m its material, a3 its tri-way albedo
+	// bytes), for the hit and cube ways.
 	auto matAt = [&]( const float * T, const ProbeSoup::TriMat & m, const quint8 * a3, const double p[3],
 		double dist, double omegaS, const double fn[3], const double * d, double alb[3], double nrm[3], int vt ) -> int {
 		int used = 0;
@@ -1058,7 +1035,7 @@ bool probeBake( const ProbeSoup & soup, const std::vector<ProbePoint> & probesIn
 		w1 = std::clamp( w1, 0.0, 1.0 );
 		w2 = std::clamp( w2, 0.0, 1.0 - w1 );
 		const double w[3] = { 1.0 - w1 - w2, w1, w2 };
-		/* lane SMOOTHN1: the soup's vertex normals (vt: the soup triangle; -1 = a left-out shape) when it carries
+		/* the soup's vertex normals (vt: the soup triangle; -1 = a left-out shape) when it carries
 		 * them -- the ground's VNML too -- else the material's (the models', as before) */
 		const bool fromVn = vt >= 0 && soup.hasNormals( size_t( vt ) );
 		double sn[3] = { 0, 0, 0 };
@@ -1097,7 +1074,7 @@ bool probeBake( const ProbeSoup & soup, const std::vector<ProbePoint> & probesIn
 			const double texels = aw > 0 ? dist * dist * omegaS / cosI * auv * tw * th / aw : 0.0;
 			return texels > 1.0 ? float( 0.5 * std::log2( texels ) ) : 0.0f;
 		};
-		/* lane SMOOTHN1: the normal map at the hit, in the frame the cell view draws with (normal n, the NIF's
+		/* the normal map at the hit, in the frame the cell view draws with (normal n, the NIF's
 		 * tangent t made square to n, n x t): x (n x t) + y t + z n, then on the side the probe sees */
 		if ( nx ) {
 			double un[3], tb[3] = { 0, 0, 0 };
@@ -1138,10 +1115,8 @@ bool probeBake( const ProbeSoup & soup, const std::vector<ProbePoint> & probesIn
 			alb[k] = out[k];
 		return used;
 	};
-	/* lane BAKE4: what the glass between the probe and tEnd lets through, per channel: the
-	 * product over every pane crossed. A pane is crossed once (the next search starts a
-	 * hundredth of a unit past it, so a two-sided pane's twin faces count once); glass on
-	 * the hit surface itself (within a hundredth) is not crossed. */
+	// what the glass between the probe and tEnd lets through, per channel: the product over every pane
+	// crossed.
 	auto transmit = [&]( const double o[3], const double * d, double tEnd, double T[3] ) -> bool {
 		T[0] = T[1] = T[2] = 1.0;
 		bool any = false;
@@ -1162,7 +1137,7 @@ bool probeBake( const ProbeSoup & soup, const std::vector<ProbePoint> & probesIn
 		}
 		return any;
 	};
-	// lane BAKE4: the door the segment o + d [0, t] passes through first (0 = none)
+	// the door the segment o + d [0, t] passes through first (0 = none)
 	auto doorOn = [&]( const double o[3], const double * d, double t ) -> quint32 {
 		quint32 best = 0;
 		double bestT = 1e300;
@@ -1189,7 +1164,7 @@ bool probeBake( const ProbeSoup & soup, const std::vector<ProbePoint> & probesIn
 		return best;
 	};
 
-	/* lane WATER1: THE WATER SPLIT. A ray that crosses a water surface (soup.water, its own tree: it stops no
+	/* THE WATER SPLIT. A ray that crosses a water surface (soup.water, its own tree: it stops no
 	 * ray and holds no surfel) splits there. The Fresnel share F = F0 + (1 - F0)(1 - |cos|)^5 -- times the
 	 * record's Reflectivity from above, as the draw weighs its reflection by F x Reflectivity; from below the
 	 * draw mixes by F alone -- goes on along the mirror direction; the rest goes on to whatever the ray meets.
@@ -1271,7 +1246,7 @@ bool probeBake( const ProbeSoup & soup, const std::vector<ProbePoint> & probesIn
 				double t = 0;
 				int tri;
 				const bool hitAny = castP( pi, b, i, o, d, &t, &tri );
-				if ( adaptMax > 1 ) {   // lane SMOOTHN1: the light-free estimate the noise test reads
+				if ( adaptMax > 1 ) {   // the light-free estimate the noise test reads
 					const quint8 * a = hitAny && albKnown ? &soup.alb[size_t( tri ) * 3] : nullptr;
 					const double val = hitAny ? ( a ? ( 0.2126 * a[0] + 0.7152 * a[1] + 0.0722 * a[2] ) / 255.0 : 0.5 )
 						: ( spec.noSky ? 0.0 : 1.0 );
@@ -1280,7 +1255,7 @@ bool probeBake( const ProbeSoup & soup, const std::vector<ProbePoint> & probesIn
 					pc[i & 7][oc] += 1.0;
 				}
 				lap( tp, ch.pf[0] );
-				/* lane WATER1 (ported onto the land6 bake, water2fix): a ray that crosses the water also leaves a surfel
+				/* a ray that crosses the water also leaves a surfel
 				 * where its mirror leg lands. Leg 0 is the ray itself, exactly as without water. */
 				double ro[3], rd[3];
 				bool mirror = false;
@@ -1306,12 +1281,12 @@ bool probeBake( const ProbeSoup & soup, const std::vector<ProbePoint> & probesIn
 					const int bin = binOf( triL, dL, n );
 					if ( bin < 0 )
 						continue;
-					// lane GAPBAKE1 (MERGE1023: carried into RTGI2's per-(cell, bin) map): the probe's room, 0 when the split is off
+					// (MERGE1023: carried into RTGI2's per-(cell, bin) map): the probe's room, 0 when the split is off
 					const quint32 room = probeRoom( pp );
 					if ( roomSplit )
 						ch.firstRoom.emplace( keyFor( hw, cellS ), room );
 					Bin & s = ch.surfels[KeyB{ keyFor( hw, cellS ), bin, room }];
-					{   // lane SMOOTHN1: the smooth normal at the hit (the face normal where the soup has none)
+					{   // the smooth normal at the hit (the face normal where the soup has none)
 						const double p[3] = { oL[0] + dL[0] * tL, oL[1] + dL[1] * tL, oL[2] + dL[2] * tL };
 						double ns[3];
 						const bool sm = smoothAt( triL, p, n, ns );
@@ -1320,7 +1295,7 @@ bool probeBake( const ProbeSoup & soup, const std::vector<ProbePoint> & probesIn
 							s.nrmS[k] += sm ? ns[k] : n[k];
 					}
 					lap( tp, ch.pf[2] );
-					/* lane GICAL1: a decal lying on the hit surface (within 2 units in front of it, 0.25 behind) covers it
+					/* a decal lying on the hit surface (within 2 units in front of it, 0.25 behind) covers it
 					 * by its mean coverage, over its own albedo (the game blends it over the surface) */
 					double dA = 0;
 					int dt = -1;
@@ -1340,7 +1315,7 @@ bool probeBake( const ProbeSoup & soup, const std::vector<ProbePoint> & probesIn
 					}
 					s.n++;
 					lap( tp, ch.pf[3] );
-					if ( glowOn && soup.glow.emits( triL ) ) {   // lane EMISSIVEGI1: the hit's own emitted light
+					if ( glowOn && soup.glow.emits( triL ) ) {   // the hit's own emitted light
 						const float * T = &bvh.t[size_t( triL ) * 9];
 						const double e1[3] = { double( T[3] ) - T[0], double( T[4] ) - T[1], double( T[5] ) - T[2] };
 						const double e2[3] = { double( T[6] ) - T[0], double( T[7] ) - T[1], double( T[8] ) - T[2] };
@@ -1368,7 +1343,7 @@ bool probeBake( const ProbeSoup & soup, const std::vector<ProbePoint> & probesIn
 						ch.emitHits++;
 					}
 					lap( tp, ch.pf[4] );
-					if ( veilOn ) {   // lane NEONGI1: the glowing effect surfaces this leg crossed, front first (additive: each adds)
+					if ( veilOn ) {   // the glowing effect surfaces this leg crossed, front first (additive: each adds)
 						double s0 = 0;
 						for ( int it = 0; it < 16 && s0 < tL; it++ ) {
 							const double o3[3] = { oL[0] + dL[0] * s0, oL[1] + dL[1] * s0, oL[2] + dL[2] * s0 };
@@ -1398,7 +1373,7 @@ bool probeBake( const ProbeSoup & soup, const std::vector<ProbePoint> & probesIn
 						}
 					}
 					lap( tp, ch.pf[5] );
-					if ( wayHit ) {   // lane CAPTURE1: the hit's own point
+					if ( wayHit ) {   // the hit's own point
 						const double p[3] = { oL[0] + dL[0] * tL, oL[1] + dL[1] * tL, oL[2] + dL[2] * tL };
 						double a2[3], n2[3];
 						const int used = matAt( &bvh.t[size_t( triL ) * 9], soup.mat[size_t( triL )], &soup.alb[size_t( triL ) * 3], p, tL,
@@ -1413,7 +1388,7 @@ bool probeBake( const ProbeSoup & soup, const std::vector<ProbePoint> & probesIn
 					lap( tp, ch.pf[6] );
 				}
 			}
-			// lane SMOOTHN1: still noisy after this batch: one more (never fewer than the base set)
+			// still noisy after this batch: one more (never fewer than the base set)
 			if ( b + 1 == mult && mult < adaptMax && noisy( ps, pc ) )
 				mult++;
 			}
@@ -1424,15 +1399,15 @@ bool probeBake( const ProbeSoup & soup, const std::vector<ProbePoint> & probesIn
 		}
 	};
 
-	/* lane SIDES6: a cell's surfels by side. v3/v4: [0] the front (fin), [1] v4's back (backFin);
+	/* a cell's surfels by side. v3/v4: [0] the front (fin), [1] v4's back (backFin);
 	 * v5: [bin], one per facing bin (axis * 2 + negative; pad0 of the record says which) */
 	FinalMap sideFin[kSides];
 	FinalMap & fin = sideFin[0];
-	std::unordered_map<Key, std::vector<std::pair<quint32, int>>, KeyHash> roomSlotOf;   // lane GAPBAKE1: split cells' room -> slot
+	std::unordered_map<Key, std::vector<std::pair<quint32, int>>, KeyHash> roomSlotOf;   // split cells' room -> slot
 	std::unordered_map<Key, Key, KeyHash> alt;   // a two-sided cell -> the neighbour holding its second side
 	FinalMap & backFin = sideFin[1];             // v4: a two-sided cell's second side, in the cell itself
 	std::unordered_map<Key, quint8, KeyHash> backMask;   // v4: the facing bins that make up that side
-	// lane SIDES6: the side a ray's face bin lands on in cell k (v5: the bin; v4: back mask; v3: 0; 6 = none)
+	// the side a ray's face bin lands on in cell k (v5: the bin; v4: back mask; v3: 0; 6 = none)
 	auto slotOf = [&]( const Key & k, int bin, quint32 room ) -> int {
 		if ( v5 ) {
 			if ( bin < 0 )
@@ -1451,7 +1426,7 @@ bool probeBake( const ProbeSoup & soup, const std::vector<ProbePoint> & probesIn
 		const auto bm = backMask.find( k );
 		return bm != backMask.end() && bin >= 0 && ( ( bm->second >> bin ) & 1 ) ? 1 : 0;
 	};
-	// lane SIDES6 measure: cells whose kept front merges unopposed faces > 45 degrees apart (a corner)
+	// measure: cells whose kept front merges unopposed faces > 45 degrees apart (a corner)
 	std::unordered_map<Key, quint8, KeyHash> cornerKeys;
 
 	// pass 2: the probe records, linking only surfels that face the probe
@@ -1464,13 +1439,13 @@ bool probeBake( const ProbeSoup & soup, const std::vector<ProbePoint> & probesIn
 			cells.clear();
 			double oSky[8] = {}, oSurf[8] = {}, oD[8] = {}, oD2[8] = {}, total = 0, voidW = 0;
 			double skyT[8][3] = {}, glassW = 0;
-			// lane WATER1: a probe under the water sees its legs up to the surface through the fog
+			// a probe under the water sees its legs up to the surface through the fog
 			int underKind = 0;
 			const bool under = probeUnder( o, &underKind );
 			ch.waterUnder += under ? 1 : 0;
 			const bool dumpThis = !spec.waterDump.isEmpty()
 				&& std::find( spec.waterDumpProbes.begin(), spec.waterDumpProbes.end(), pi ) != spec.waterDumpProbes.end();
-			// lane SMOOTHN1: the probe's batches (pass 1 chose how many), each ray 4 pi / (N x batches)
+			// the probe's batches (pass 1 chose how many), each ray 4 pi / (N x batches)
 			const int mult = multOf[size_t( pi )];
 			const double om = kFourPi / ( double( N ) * mult );
 			std::vector<double> rbuf;
@@ -1492,7 +1467,7 @@ bool probeBake( const ProbeSoup & soup, const std::vector<ProbePoint> & probesIn
 					ch.hits++;
 				else
 					ch.misses++;
-				/* lane WATER1 (ported onto the land6 bake, water2fix): the ray's legs. Without water there is one, the
+				/* the ray's legs. Without water there is one, the
 				 * ray itself, weighed and summed exactly as before; a crossing weighs it by 1 - R and adds the mirror leg
 				 * at R (arriving from the ray's own direction: the octant, the link direction and the distance are the
 				 * probe's) */
@@ -1568,14 +1543,14 @@ bool probeBake( const ProbeSoup & soup, const std::vector<ProbePoint> & probesIn
 					hitPoint( L.lo, L.ld, L.t, hw );
 					LKey lk{ keyFor( hw, cellS ), 0u, quint8( 0 ) };
 					if ( v4 ) {
-						// the side this leg sees: its face's bin, as pass 1 sorted it (lane SIDES6: v5 = the bin itself)
+						// the side this leg sees: its face's bin, as pass 1 sorted it
 						double n[3];
 						const int bin = binOf( L.tri, L.ld, n );
 						const int slot = slotOf( lk.k, bin, probeRoom( pp ) );
 						lk.side = quint8( slot );
 						if ( !doorBoxes.empty() )
 							lk.door = doorOn( o, d, L.doorT );
-						/* lane SIDES6 measure: the ray weight whose surfel's normal is over 45 degrees off the face
+						/* measure: the ray weight whose surfel's normal is over 45 degrees off the face
 						 * it hit (a corner's blend), and the weight landing on a corner cell (counters only) */
 						if ( bin >= 0 && slot != noSide ) {
 							ch.hitW += omega;
@@ -1644,7 +1619,7 @@ bool probeBake( const ProbeSoup & soup, const std::vector<ProbePoint> & probesIn
 				if ( v4 ) {
 					// v4: the side the rays saw, in the cell itself; refused only when that side
 					// is missing (the oneside red) or still faces away
-					if ( cd.side == noSide ) {   // lane SIDES6: a degenerate face (no bin, no surfel)
+					if ( cd.side == noSide ) {   // a degenerate face (no bin, no surfel)
 						turned += e.second.w;
 						ch.turned++;
 						continue;
@@ -1752,7 +1727,7 @@ bool probeBake( const ProbeSoup & soup, const std::vector<ProbePoint> & probesIn
 		for ( std::thread & t : pool )
 			t.join();
 	};
-	auto parFor = [&]( int n, const std::function<void( int )> & fn ) {   // lane RTGI2: runAll over any index
+	auto parFor = [&]( int n, const std::function<void( int )> & fn ) {   // runAll over any index
 		std::atomic<int> next( 0 );
 		std::vector<std::thread> pool;
 		for ( int t = 0; t < qMin( nThreads, n ); t++ )
@@ -1764,11 +1739,8 @@ bool probeBake( const ProbeSoup & soup, const std::vector<ProbePoint> & probesIn
 			t.join();
 	};
 
-	/* lane RTBAKE1: the primary rays on the GPU (bakert.h; WW_BAKE_RT_RED=cpu keeps the loops' own casts). Batch
-	 * rounds over the probes still taking batches: round b traces batch b of each, re-tests every hit in double and
-	 * runs SMOOTHN1's noise test on the same light-free estimate pass 1 reads, so the batch counts come out as pass 1's
-	 * own (checked below). Passes 1 and 2 then read the cached answers. Secondary legs stay on the CPU. */
-	QElapsedTimer tmGpu;	// lane RTGI1: the GPU batches' share of the rays time
+	// the primary rays on the GPU (bakert.h; WW_BAKE_RT_RED=cpu keeps the loops' own casts).
+	QElapsedTimer tmGpu;	// the GPU batches' share of the rays time
 	tmGpu.start();
 	std::vector<int> rtMult;
 	std::unique_ptr<bakert::Scene> rtScene;
@@ -1780,7 +1752,7 @@ bool probeBake( const ProbeSoup & soup, const std::vector<ProbePoint> & probesIn
 		R.msPart[2] = double( tmGpu.nsecsElapsed() ) / 1e6;
 		R.msPart[3] = R.msPart[4] = R.msPart[5] = 0;
 	}
-	QElapsedTimer tmPart;   // lane RTGI2
+	QElapsedTimer tmPart;
 	if ( rtScene && rtScene->path() != bakert::Path::Cpu ) {
 		rcache.resize( probes.size() );
 		rtMult.assign( probes.size(), 1 );
@@ -1792,7 +1764,7 @@ bool probeBake( const ProbeSoup & soup, const std::vector<ProbePoint> & probesIn
 		std::vector<int> active( probes.size() );
 		for ( size_t p = 0; p < probes.size(); p++ )
 			active[p] = int( p );
-		// lane RTGI1: whole rays (bakert::Scene::cast): the GPU answers each ray as the CPU walk would, or says it is unsure
+		// whole rays (bakert::Scene::cast): the GPU answers each ray as the CPU walk would, or says it is unsure
 		std::vector<bakert::XRay> rays;
 		std::vector<bakert::XHit> hits;
 		for ( int b = 0; !active.empty(); b++ ) {
@@ -1877,7 +1849,7 @@ bool probeBake( const ProbeSoup & soup, const std::vector<ProbePoint> & probesIn
 			+ QStringLiteral( ", batch counts unlike pass 1's %1" ).arg( off );
 	}
 	tmPart.start();
-	/* merge in chunk order (the same sums whatever ran where), then settle each cell's side. Lane RTGI2: the cells
+	/* merge in chunk order (the same sums whatever ran where), then settle each cell's side. The cells
 	 * go to shards by key hash and the shards merge in parallel; each (cell, bin) still sums its chunks in chunk order */
 	constexpr int nShard = 64;
 	auto shardOf = []( const Key & k ) { return size_t( ( quint64( KeyHash()( k ) ) >> 40 ) % quint64( nShard ) ); };
@@ -1895,7 +1867,7 @@ bool probeBake( const ProbeSoup & soup, const std::vector<ProbePoint> & probesIn
 		SurfelMap & m = all[size_t( s )];
 		for ( int i = 0; i < nChunks; i++ )
 			for ( const BinMap::value_type * e : part[size_t( redOrder ? nChunks - 1 - i : i )][size_t( s )] )
-				if ( roomSplit ) {   // MERGE1023: GAPBAKE1's room split; the cell's own room = its first chunk's first hit room
+				if ( roomSplit ) {   // GAPBAKE1's room split; the cell's own room = its first chunk's first hit room
 					const int ci = redOrder ? nChunks - 1 - i : i;
 					SurfelBins & sb = m[e->first.k];
 					if ( sb.room == kProbeRoomNone )
@@ -1934,12 +1906,12 @@ bool probeBake( const ProbeSoup & soup, const std::vector<ProbePoint> & probesIn
 			sr.albedo[c] = quint8( std::lround( std::clamp( a.alb[c] / a.n, 0.0, 1.0 ) * 255.0 ) );
 		}
 		sr.samples = a.n;
-		if ( a.le[0] > 0 || a.le[1] > 0 || a.le[2] > 0 ) {   // lane EMISSIVEGI1
+		if ( a.le[0] > 0 || a.le[1] > 0 || a.le[2] > 0 ) {
 			f.emits = true;
 			for ( int c = 0; c < 3; c++ )
 				f.le[c] = float( a.le[c] / a.n );
 		}
-		if ( a.leAlt[0] > 0 || a.leAlt[1] > 0 || a.leAlt[2] > 0 ) {   // lane LIGHTS5: the same rule
+		if ( a.leAlt[0] > 0 || a.leAlt[1] > 0 || a.leAlt[2] > 0 ) {   // the same rule
 			f.emitsAlt = true;
 			for ( int c = 0; c < 3; c++ )
 				f.leAlt[c] = float( a.leAlt[c] / a.n );
@@ -1948,7 +1920,7 @@ bool probeBake( const ProbeSoup & soup, const std::vector<ProbePoint> & probesIn
 			+ double( sr.normal[2] ) * sr.normal[2] );
 		for ( int c = 0; c < 3; c++ )
 			f.n[c] = ql > 0 ? sr.normal[c] / ql : 0.0;
-		/* lane SMOOTHN1: the tri way stores the mean smooth normal (f.n, the facing rule's, stays the face
+		/* the tri way stores the mean smooth normal (f.n, the facing rule's, stays the face
 		 * normal's, as the hit way's does; the lean below keeps every link facing) */
 		if ( smoothOn && !wayHit ) {
 			const double ls = std::sqrt( a.nrmS[0] * a.nrmS[0] + a.nrmS[1] * a.nrmS[1] + a.nrmS[2] * a.nrmS[2] );
@@ -1956,7 +1928,7 @@ bool probeBake( const ProbeSoup & soup, const std::vector<ProbePoint> & probesIn
 				for ( int c = 0; c < 3; c++ )
 					sr.normal[c] = qint16( std::lround( std::clamp( a.nrmS[c] / ls, -1.0, 1.0 ) * 32767.0 ) );
 		}
-		/* lane CAPTURE1: the hit way rewrites the stored albedo and normal only; f.n (the facing
+		/* the hit way rewrites the stored albedo and normal only; f.n (the facing
 		 * rule's) stays the face normal's, so the links are the tri way's */
 		if ( wayHit && a.n2 ) {
 			R.albSurfels++;
@@ -1971,7 +1943,7 @@ bool probeBake( const ProbeSoup & soup, const std::vector<ProbePoint> & probesIn
 		return f;
 	};
 	std::vector<std::pair<Key, Bin>> backs;   // the second sides, housed below in key order
-	for ( const SurfelMap & shard : all )   // lane RTGI2: shard order; the results do not depend on it
+	for ( const SurfelMap & shard : all )   // shard order; the results do not depend on it
 	for ( const auto & e : shard ) {
 		const SurfelBins & sb = e.second;
 		int w = 0;
@@ -1980,7 +1952,7 @@ bool probeBake( const ProbeSoup & soup, const std::vector<ProbePoint> & probesIn
 				w = i;
 		if ( !sb.b[w].n )
 			continue;
-		{	// lane SIDES6 measure (every version): does the front the v3/v4 rule keeps merge faces > 45 deg apart?
+		{	// measure (every version): does the front the v3/v4 rule keeps merge faces > 45 deg apart?
 			int sides = 0;
 			bool corner = false;
 			for ( int i = 0; i < 6; i++ ) {
@@ -2009,10 +1981,10 @@ bool probeBake( const ProbeSoup & soup, const std::vector<ProbePoint> & probesIn
 			}
 		}
 		if ( v5 ) {
-			// lane SIDES6: every facing bin its own surfel in the cell (the oneside red keeps the most-seen one)
+			// every facing bin its own surfel in the cell (the oneside red keeps the most-seen one)
 			int kept = 0;
 			if ( roomSplit && !sb.more.empty() ) {
-				// lane GAPBAKE1: each room's sides apart, rooms by id; rooms past the last slot merge into it
+				// each room's sides apart, rooms by id; rooms past the last slot merge into it
 				std::vector<std::pair<quint32, const Bin *>> rooms( 1, { sb.room, &sb.b[0] } );
 				for ( const auto & m : sb.more )
 					rooms.push_back( { m.room, &m.b[0] } );
@@ -2067,7 +2039,7 @@ bool probeBake( const ProbeSoup & soup, const std::vector<ProbePoint> & probesIn
 		}
 		R.twoSided += split ? 1 : 0;
 		if ( split && v4 ) {
-			// lane BAKE4: v4 keeps the second side in its own cell (the oneside red drops it)
+			// v4 keeps the second side in its own cell (the oneside red drops it)
 			backMask.emplace( e.first, mask );
 			if ( !redOneSide ) {
 				backFin.emplace( e.first, makeFinal( back, e.first ) );
@@ -2077,12 +2049,8 @@ bool probeBake( const ProbeSoup & soup, const std::vector<ProbePoint> & probesIn
 			backs.emplace_back( e.first, back );
 		fin.emplace( e.first, makeFinal( a, e.first ) );
 	}
-	/* THE SECOND SIDE'S HOME: a neighbour on the side the back face looks into --
-	 * the 26 around the cell, tried from the one most along the back normal (the
-	 * face neighbour first) down to 45 degrees off it. Only a cell nothing was ever
-	 * hit in (no surfel of its own) and that no earlier back side took; key order,
-	 * so the claim does not depend on hash order. Otherwise the old refusal stands
-	 * for that cell. */
+	// THE SECOND SIDE'S HOME: a neighbour on the side the back face looks into the 26 around the cell, tried
+	// from the one most along the back normal (the face neighbour first) down to 45 degrees off it.
 	std::sort( backs.begin(), backs.end(), []( const std::pair<Key, Bin> & x, const std::pair<Key, Bin> & y ) {
 		return x.first < y.first;
 	} );
@@ -2144,22 +2112,22 @@ bool probeBake( const ProbeSoup & soup, const std::vector<ProbePoint> & probesIn
 		R.linksTinted += ch.tinted;
 		R.decalHits += ch.decal;
 		R.surfelHits += ch.surfHits;
-		R.smoothHits += ch.smoothHits;   // lane SMOOTHN1
+		R.smoothHits += ch.smoothHits;
 		R.nmapHits += ch.nmapHits;
 		R.raysCast += ch.rays;
 		R.probesRaised += ch.raised;
 		R.multMax = std::max( R.multMax, ch.multMax );
-		R.hitW += ch.hitW;   // lane SIDES6 measure
+		R.hitW += ch.hitW;   // measure
 		R.offW += ch.offW;
 		R.cornerW += ch.cornerW;
-		R.waterRays += ch.waterRays;   // lane WATER1
+		R.waterRays += ch.waterRays;
 		R.waterMirrorHits += ch.waterMirrorHits;
 		R.waterMirrorSky += ch.waterMirrorSky;
 		R.waterUnder += ch.waterUnder;
 		R.waterReflMean += ch.waterReflW;
 	}
 	R.waterReflMean /= kFourPi * double( qMax<size_t>( 1, probes.size() ) );
-	if ( !spec.waterDump.isEmpty() ) {   // lane WATER1: the gate's rays, in probe order
+	if ( !spec.waterDump.isEmpty() ) {   // the gate's rays, in probe order
 		QFile wf( spec.waterDump );
 		if ( wf.open( QIODevice::WriteOnly ) ) {
 			for ( size_t k = 0; k < soup.waterTypes.size(); k++ )   // which record each kind is (the checker reads it)
@@ -2172,12 +2140,7 @@ bool probeBake( const ProbeSoup & soup, const std::vector<ProbePoint> & probesIn
 	R.msRays = double( tm.nsecsElapsed() ) / 1e6;
 	tm.restart();
 
-	/* lane CAPTURE1: THE CUBE WAY (the deck's G-buffer capture). Every probe traces six F x F faces
-	 * through the same soup (the notes tracer's face layout: +X -Y -X +Y, then +Z, -Z); each pixel's
-	 * hit lands in a surfel cell and side by the bake's own rules (keyFor, the face bin, the v4 back
-	 * mask) and adds its albedo (the map at the pixel's footprint) and vertex normal there. A surfel
-	 * then stores the mean of its pixels; one no pixel reached keeps its tri value. The surfel set,
-	 * the links, sky and glass are untouched. */
+	// THE CUBE WAY (the deck's G-buffer capture).
 	if ( wayCube ) {
 		const int F = qBound( 8, spec.cubeFace, 1024 );
 		const size_t NP = size_t( 6 ) * size_t( F ) * size_t( F );
@@ -2238,9 +2201,9 @@ bool probeBake( const ProbeSoup & soup, const std::vector<ProbePoint> & probesIn
 		};
 		struct Acc { double alb[3] = { 0, 0, 0 }, nrm[3] = { 0, 0, 0 }; quint32 n = 0; };
 		typedef std::unordered_map<Key, Acc, KeyHash> AccMap;
-		std::vector<std::vector<AccMap>> accS( kSides, std::vector<AccMap>( chunks.size() ) );   // lane SIDES6: per side
+		std::vector<std::vector<AccMap>> accS( kSides, std::vector<AccMap>( chunks.size() ) );   // per side
 		std::vector<qint64> cSamp( chunks.size(), 0 ), cDrop( chunks.size(), 0 ), cExtra( chunks.size(), 0 );
-		std::vector<qint64> cNmap( chunks.size(), 0 );   // lane SMOOTHN1: pixels a normal map bent
+		std::vector<qint64> cNmap( chunks.size(), 0 );   // pixels a normal map bent
 		std::vector<std::vector<char>> dumps( cubeDumpProbes.size() );
 		auto cubeChunk = [&]( Chunk & ch ) {
 			const size_t ci = size_t( &ch - chunks.data() );
@@ -2302,7 +2265,7 @@ bool probeBake( const ProbeSoup & soup, const std::vector<ProbePoint> & probesIn
 					float hw[3];
 					hitPoint( o, d, t, hw );
 					const Key k = keyFor( hw, cellS );
-					const int slot = slotOf( k, bin, probeRoom( pp ) );   // lane SIDES6: v4 back = 1, v5 = the bin
+					const int slot = slotOf( k, bin, probeRoom( pp ) );   // v4 back = 1, v5 = the bin
 					if ( slot == noSide ) {
 						cDrop[ci]++;
 						continue;
@@ -2379,7 +2342,7 @@ bool probeBake( const ProbeSoup & soup, const std::vector<ProbePoint> & probesIn
 			QFile tf( spec.cubeDump + QStringLiteral( ".txt" ) );
 			if ( tf.open( QIODevice::WriteOnly | QIODevice::Text ) ) {
 				QTextStream ts( &tf );
-				/* lane EDGEGAP1: 9 significant digits = the float itself. At the default 6 a probe at z 6302.564 read
+				/* 9 significant digits = the float itself. At the default 6 a probe at z 6302.564 read
 				 * back as 6302.56 and the gate's re-trace crossed the triangle next to the one the bake's ray met */
 				ts.setRealNumberPrecision( 9 );
 				for ( const int pi : cubeDumpProbes )
@@ -2391,13 +2354,11 @@ bool probeBake( const ProbeSoup & soup, const std::vector<ProbePoint> & probesIn
 		R.msAlbedo = double( tm.nsecsElapsed() ) / 1e6;
 		tm.restart();
 	}
-	/* lane CAPTURE1: a way's own normal (smooth, or a cube mean) can turn a hair away from a probe
-	 * the face normal linked (a curved edge seen at a grazing angle). Such a surfel's normal leans
-	 * toward its face normal just far enough to face every probe that links it (bisection; the
-	 * face normal itself always does), so the links stay the tri way's and every link faces. */
-	if ( wayHit || wayCube || smoothOn ) {   // lane SMOOTHN1: the tri way's smooth normal too
+	// a way's own normal (smooth, or a cube mean) can turn a hair away from a probe the face normal linked (a
+	// curved edge seen at a grazing angle).
+	if ( wayHit || wayCube || smoothOn ) {   // the tri way's smooth normal too
 		typedef std::unordered_map<Key, std::vector<std::array<double, 3>>, KeyHash> DirMap;
-		DirMap dS[kSides];   // lane SIDES6: per side (v3 0; v4 0/1; v5 the bin; GAPBAKE1: + 6 x room slot)
+		DirMap dS[kSides];   // per side (v3 0; v4 0/1; v5 the bin; GAPBAKE1: + 6 x room slot)
 		for ( const Chunk & ch : chunks )
 			for ( const ProbeOut & po : ch.probes )
 				for ( size_t i = 0; i < po.links.size(); i++ ) {
@@ -2453,7 +2414,7 @@ bool probeBake( const ProbeSoup & soup, const std::vector<ProbePoint> & probesIn
 
 	// group by sector: each file = its probes, their links, and every surfel they link
 	std::map<std::pair<int, int>, std::vector<const ProbeOut *>> sectors;
-	// lane BAKENEIGH1: only the asked cells' files; a probe over their edge belongs to its own cell's bake
+	// only the asked cells' files; a probe over their edge belongs to its own cell's bake
 	const bool ownSet = spec.ownX1 >= spec.ownX0 && spec.ownY1 >= spec.ownY0;
 	std::map<std::pair<int, int>, int> outside;
 	R.ownSet = ownSet;
@@ -2482,7 +2443,7 @@ bool probeBake( const ProbeSoup & soup, const std::vector<ProbePoint> & probesIn
 	R.turnedMean /= qMax( 1, R.probes );
 	R.voidMean /= qMax( 1, R.probes );
 	R.noSky = spec.noSky;
-	R.rays = R.raysCast;   // lane SMOOTHN1: the base set plus every extra batch
+	R.rays = R.raysCast;   // the base set plus every extra batch
 
 	if ( !QDir().mkpath( outDir ) ) {
 		R.error = QStringLiteral( "cannot create %1" ).arg( outDir );
@@ -2494,7 +2455,7 @@ bool probeBake( const ProbeSoup & soup, const std::vector<ProbePoint> & probesIn
 		std::vector<TbkLinkExt> lex;
 		std::vector<TbkProbeExt> pex;
 		std::map<Key, int> used, usedBack;
-		std::map<std::pair<Key, int>, int> usedSide;   // lane SIDES6: v5, (cell, bin)
+		std::map<std::pair<Key, int>, int> usedSide;   // v5, (cell, bin)
 		std::map<quint32, int> roomsHere;
 		for ( const ProbeOut * po : sec.second ) {
 			TbkProbe r = po->rec;
@@ -2515,8 +2476,8 @@ bool probeBake( const ProbeSoup & soup, const std::vector<ProbePoint> & probesIn
 			}
 		}
 		std::vector<TbkSurfel> sfs, bks;
-		std::vector<TbkEmit> ems;   // lane EMISSIVEGI1
-		std::vector<TbkEmit> alts;  // lane LIGHTS5: surfels whose Le differs under the other emittance state
+		std::vector<TbkEmit> ems;
+		std::vector<TbkEmit> alts;  // surfels whose Le differs under the other emittance state
 		auto emitOf = [&]( const Final & fl, quint32 idx ) {
 			if ( glowAlt && ( fl.emitsAlt != fl.emits || fl.le[0] != fl.leAlt[0] || fl.le[1] != fl.leAlt[1] || fl.le[2] != fl.leAlt[2] ) ) {
 				TbkEmit a;
@@ -2549,7 +2510,7 @@ bool probeBake( const ProbeSoup & soup, const std::vector<ProbePoint> & probesIn
 				bks.push_back( it->second.rec );
 			}
 		}
-		// lane SIDES6: v5 = one table, cell order (z, y, x) then bin; the record's pad0 names the bin
+		// v5 = one table, cell order (z, y, x) then bin; the record's pad0 names the bin
 		for ( const auto & u : usedSide ) {
 			const auto it = sideFin[u.first.second].find( u.first.first );
 			if ( it != sideFin[u.first.second].end() ) {
@@ -2581,9 +2542,9 @@ bool probeBake( const ProbeSoup & soup, const std::vector<ProbePoint> & probesIn
 			h.reserved[0] = quint32( bks.size() );   // v5: 0 (every side is in the one table)
 			h.reserved[1] = quint32( bxs.size() );
 			h.reserved[2] = ( redOneSide ? 0u : 1u ) | ( roomBoxes && !redRooms ? 2u : 0u ) | ( doorBoxes.empty() ? 0u : 4u )
-				| ( glassOn ? 8u : 0u ) | ( v5 && !redOneSide ? 16u : 0u )   // lane SIDES6: 16 = six sides
-				| ( roomSplit ? 32u : 0u );   // lane GAPBAKE1: 32 = sides past 5 are room slots (bin + 6 x slot)
-			h.reserved[3] = quint32( ems.size() );   // lane EMISSIVEGI1 (0: no tail)
+				| ( glassOn ? 8u : 0u ) | ( v5 && !redOneSide ? 16u : 0u )   // 16 = six sides
+				| ( roomSplit ? 32u : 0u );   // 32 = sides past 5 are room slots (bin + 6 x slot)
+			h.reserved[3] = quint32( ems.size() );   // 0: no tail
 		}
 		h.cellX = sec.first.first;
 		h.cellY = sec.first.second;
@@ -2609,12 +2570,12 @@ bool probeBake( const ProbeSoup & soup, const std::vector<ProbePoint> & probesIn
 			f.write( reinterpret_cast<const char *>( lex.data() ), qint64( lex.size() * sizeof( TbkLinkExt ) ) );
 			f.write( reinterpret_cast<const char *>( pex.data() ), qint64( pex.size() * sizeof( TbkProbeExt ) ) );
 			f.write( reinterpret_cast<const char *>( bxs.data() ), qint64( bxs.size() * sizeof( TbkRoomBox ) ) );
-			if ( !ems.empty() )   // lane EMISSIVEGI1
+			if ( !ems.empty() )
 				f.write( reinterpret_cast<const char *>( ems.data() ), qint64( ems.size() * sizeof( TbkEmit ) ) );
 		}
 		R.emitSurfels += int( ems.size() );
 		f.close();
-		{   // lane LIGHTS5: the other state's Le beside the tbk ("EMALT1", surfel + back counts, 16-byte entries)
+		{   // the other state's Le beside the tbk ("EMALT1", surfel + back counts, 16-byte entries)
 			char an[64];
 			std::snprintf( an, sizeof an, "emitalt_%+05d_%+05d.bin", h.cellX, h.cellY );
 			const QString ap = QDir( outDir ).filePath( QString::fromLatin1( an ) );
@@ -2674,14 +2635,14 @@ QString probeBakeCensusText( const ProbeBakeResult & r )
 	t << "\n";
 	t << "bake: surfels " << r.surfels << ", links " << r.links << ", probes over the link cap " << r.probesCapped
 	  << ", unlinked mean " << QString::number( r.unlinkedMean, 'f', 4 ) << ", sectors " << r.sectors << "\n";
-	if ( r.ownSet )   // lane BAKENEIGH1
+	if ( r.ownSet )
 		t << "bake: own cells " << r.ownCells << ": files written only for them; probes over their edge left to the "
 		  << "neighbour's own bake " << r.outsideProbes << " (in " << r.outsideSectors << " neighbour cells, no file written)\n";
 	t << "bake: two-sided cells " << r.twoSided << " (second side housed next door " << r.spilled
 	  << ", links to it " << r.linksSpilled << "), links refused as turned away " << r.linksTurned
 	  << " (mean " << QString::number( r.turnedMean, 'f', 4 ) << " of the sphere)"
 	  << ", albedo " << ( r.albedoKnown ? "from the textures" : "GREY (the soup carried none)" ) << "\n";
-	if ( r.version >= 4 )   // lane BAKE4
+	if ( r.version >= 4 )
 		t << "bake: .tbk v4: second sides kept in their own cell " << r.backSurfels << " (written " << r.backWritten
 		  << ", links to them " << r.linksBack << "); doors " << r.doors << " (links through one " << r.linksDoor
 		  << "); glass " << r.glassTris << " triangles (links tinted " << r.linksTinted << ", sphere seen through glass mean "
@@ -2689,13 +2650,13 @@ QString probeBakeCensusText( const ProbeBakeResult & r )
 		  << r.boxesWritten << "\n";
 	else
 		t << "bake: .tbk v3 (FO4CS's own format; no back sides, rooms, doors or glass)\n";
-	if ( r.version >= 5 )   // lane SIDES6
+	if ( r.version >= 5 )
 		t << "bake: .tbk v5: six sides a cell, surfels beyond a cell's first " << r.sideSurfels << "\n";
-	if ( r.roomSplitCells )   // lane GAPBAKE1
+	if ( r.roomSplitCells )
 		t << "bake: room split: cells split by room " << r.roomSplitCells << ", their surfels past the first room "
 		  << r.roomSplitSurfels << ", rooms merged into the last slot " << r.roomSlotsMerged << ", probe rooms "
 		  << r.roomSplitRooms << "\n";
-	if ( r.cellsSampled > 0 ) {   // lane SIDES6 measure
+	if ( r.cellsSampled > 0 ) {   // measure
 		t << "bake: sides: cells " << r.cellsSampled << ", by faces seen (1..6)";
 		for ( size_t i = 1; i < r.sideHist.size(); i++ )
 			t << " " << r.sideHist[i];
@@ -2705,15 +2666,15 @@ QString probeBakeCensusText( const ProbeBakeResult & r )
 			  << ", on a surfel over 45 deg off its face " << QString::number( r.offW / r.hitW, 'f', 4 );
 		t << "\n";
 	}
-	if ( r.waterTris > 0 )   // lane WATER1
+	if ( r.waterTris > 0 )
 		t << "bake: water " << r.waterTris << " triangles of " << r.waterTypes << " records; rays split at the surface "
 		  << r.waterRays << " (mirror legs to a surface " << r.waterMirrorHits << ", to the sky " << r.waterMirrorSky
 		  << "), mirror share mean " << QString::number( r.waterReflMean, 'f', 4 ) << " of the sphere, probes under the water "
 		  << r.waterUnder << "\n";
-	if ( r.decalTris > 0 )   // lane GICAL1
+	if ( r.decalTris > 0 )
 		t << "bake: decals folded into the albedo: " << r.decalTris << " triangles, " << r.decalHits << " of " << r.surfelHits
 		  << " surfel hits under one\n";
-	if ( r.emitTris || r.veilTris )   // lane EMISSIVEGI1 (NEONGI1: or effect surfaces)
+	if ( r.emitTris || r.veilTris )   // NEONGI1: or effect surfaces
 		t << "bake: emissive: glowing triangles " << r.emitTris << ", pass-1 hits on them " << r.emitHits
 		  << ", surfels that glow (written) " << r.emitSurfels << ", their Le summed (linear) "
 		  << QString::number( r.emitLeSum[0], 'g', 6 ) << "," << QString::number( r.emitLeSum[1], 'g', 6 ) << ","
@@ -2721,18 +2682,18 @@ QString probeBakeCensusText( const ProbeBakeResult & r )
 		  << ( r.emitDropped ? QString::number( r.emitDropped ) : QString() )
 		  << ( r.emitAltSurfels ? ", other emittance state differs on " : "" )
 		  << ( r.emitAltSurfels ? QString::number( r.emitAltSurfels ) : QString() ) << "\n";
-	if ( r.veilTris )   // lane NEONGI1
+	if ( r.veilTris )
 		t << "bake: emissive effects (neon): triangles " << r.veilTris << ", pass-1 crossings added to the surface behind "
 		  << r.veilHits << ", crossed from behind (one-sided, not drawn) " << r.veilBack
 		  << ", crossed over a surfel cell in front of the surface (left out) " << r.veilFar << "\n";
-	// lane ROOMCLAMP1: probes outside the shell
+	// probes outside the shell
 	t << "bake: outside the shell (back-face share over " << QString::number( r.backMax, 'f', 2 )
 	  << ( r.backRule ? "" : ", RULE OFF" ) << "): moved " << r.backMoved << ", dropped " << r.backDropped
 	  << ", largest share " << QString::number( r.backShareMax, 'f', 3 ) << "; share histogram (0.05 steps)";
 	for ( int h : r.backHist )
 		t << " " << h;
 	t << "\n";
-	if ( r.clearRule )   // lane GIPROBE2: probes out of walls (off: no line, the census as before)
+	if ( r.clearRule )   // probes out of walls (off: no line, the census as before)
 		t << "bake: out of walls (nearest front face under " << QString::number( r.clearMin, 'f', 0 ) << " u): " << r.clearShort
 		  << " of " << r.clearTested << " probes too close, moved " << r.clearMoved << " (furthest " << QString::number( r.clearMoveMax, 'f', 1 )
 		  << " u), still too close after " << r.clearStill << "\n";
@@ -2741,7 +2702,7 @@ QString probeBakeCensusText( const ProbeBakeResult & r )
 		t << " (of the rays, the GPU batches " << qRound( r.msGpuRays ) << ")";
 	t << " (surfel pass " << qRound( r.msSurfelPass ) << ")";
 	t << "\n";
-	{   // lane RTGI2: where the rays time goes
+	{   // where the rays time goes
 		static const char * const pn[10] = { "trees", "shell", "gpu scene", "ray build", "cast", "read back", "", "merge",
 			"sides", "links" };
 		t << "bake split ms:";
@@ -2758,14 +2719,13 @@ QString probeBakeCensusText( const ProbeBakeResult & r )
 			t << "\n";
 		}
 	}
-	t << "bake rays: " << ( r.rtNote.isEmpty() ? QStringLiteral( "cpu" ) : r.rtNote ) << "\n";   // lane RTBAKE1
-	// lane SMOOTHN1
+	t << "bake rays: " << ( r.rtNote.isEmpty() ? QStringLiteral( "cpu" ) : r.rtNote ) << "\n";
 	t << "bake smooth normals: soup triangles with vertex normals " << r.smoothTris << ", surfel hits given one "
 	  << r.smoothHits << " of " << r.surfelHits << "; normal-mapped triangles " << r.nmapTris << ", samples a normal map bent "
 	  << r.nmapHits << "\n";
 	t << "bake ray counts: base " << r.baseRays << " a probe, up to " << r.adaptMax << "x; probes given extra batches " << r.probesRaised << " of " << r.probes
 	  << ", most " << r.multMax << "x, rays cast " << r.raysCast << " (base set alone " << qint64( r.probes ) * r.baseRays << ")\n";
-	if ( r.albedoWay != QLatin1String( "tri" ) && !r.albedoWay.isEmpty() )   // lane CAPTURE1
+	if ( r.albedoWay != QLatin1String( "tri" ) && !r.albedoWay.isEmpty() )
 		t << "bake albedo way: " << r.albedoWay << "; samples " << r.albSamples << ", pixels dropped " << r.albDropped
 		  << ", on left-out shapes " << r.albExtra << "; surfels rewritten " << r.albSurfels << ", kept tri "
 		  << r.albKept << "; normals leaned to face their links " << r.albLeaned << "; ms " << qRound( r.msAlbedo ) << "\n";
@@ -2785,7 +2745,7 @@ int probeBakeCli( const QStringList & args )
 		else if ( a == QLatin1String( "--rect" ) ) { rect = nx; i++; }
 		else if ( a == QLatin1String( "--spacing" ) ) { ps.spacing = nx.toFloat(); i++; }
 		else if ( a == QLatin1String( "--rays" ) ) { bs.rays = nx.toInt(); i++; }
-		// lane SMOOTHN1: the noise-driven extra batches, at most n x the base set (1 = the base set alone, the old bake)
+		// the noise-driven extra batches, at most n x the base set (1 = the base set alone, the old bake)
 		else if ( a == QLatin1String( "--adapt" ) ) { bs.adaptMax = nx.toInt(); i++; }
 		else if ( a == QLatin1String( "--threads" ) ) { bs.threads = nx.toInt(); i++; }
 		else if ( a == QLatin1String( "--red" ) ) { bs.red = nx; i++; }
@@ -2795,14 +2755,14 @@ int probeBakeCli( const QStringList & args )
 		else if ( a == QLatin1String( "--max-links" ) ) { bs.maxLinks = quint32( qBound( 8, nx.toInt(), 4096 ) ); i++; }
 		else if ( a == QLatin1String( "--no-openings" ) ) { ps.apertures = false; }
 		else if ( a == QLatin1String( "--no-rooms" ) ) { ps.coverage = false; }
-		// lane ROOMCLAMP1: the back-face rule's threshold and list, the placer's red (floor)
+		// the back-face rule's threshold and list, the placer's red (floor)
 		else if ( a == QLatin1String( "--back-max" ) ) { bs.backMax = nx.toFloat(); i++; }
 		else if ( a == QLatin1String( "--back-dump" ) ) { bs.backDump = nx; i++; }
-		// lane GIPROBE2: probes out of walls (clearance in units, 0 = off) and its list
+		// probes out of walls (clearance in units, 0 = off) and its list
 		else if ( a == QLatin1String( "--clear" ) ) { bs.probeClear = nx.toFloat(); i++; }
 		else if ( a == QLatin1String( "--clear-dump" ) ) { bs.clearDump = nx; i++; }
 		else if ( a == QLatin1String( "--place-red" ) ) { ps.red = nx; i++; }
-		else if ( a == QLatin1String( "--room-split" ) ) { bs.roomSplit = nx.toInt() != 0; i++; }   // lane GAPBAKE1
+		else if ( a == QLatin1String( "--room-split" ) ) { bs.roomSplit = nx.toInt() != 0; i++; }
 	}
 	const QStringList rc = rect.split( ',' );
 	if ( soupPath.isEmpty() || outDir.isEmpty() || rc.size() != 4 ) {
@@ -2827,7 +2787,7 @@ int probeBakeCli( const QStringList & args )
 		return 1;
 	}
 	ProbeBakeResult br;
-	ProbeRooms splitRooms;   // lane GAPBAKE1: the room split's rooms, from the soup before the bake
+	ProbeRooms splitRooms;   // the room split's rooms, from the soup before the bake
 	if ( bs.roomSplit && probeBakeRoomGrid( soup, pr.probes, ProbeRoomSpec(), &splitRooms ) )
 		bs.roomGrid = &splitRooms;
 	if ( !probeBake( soup, pr.probes, bs, outDir, &br, &pr.roomBoxes ) ) {

@@ -1,69 +1,9 @@
 #ifndef CELLACTOR_H
 #define CELLACTOR_H
 
-/* lane PLACED1: PLACED ACTORS in the cell view.
- *
- * A cell places an actor as its own reference record type; the cell view read
- * only the ordinary references, so no actor, living or dead, was in it. This
- * reads them and builds each one AT REST: the race's skeleton, the skin's
- * armor addons, the outfit's armor addons, the pre-built face mesh, all posed
- * on the skeleton's own bind pose and handed to the cell view as ordinary
- * welded shapes at the placed transform. No animation, no ragdoll.
- *
- * WHY ON THE CPU, NOT AS RIGS. The cell view is one welded document. Its
- * shadow pass does not skin, and merging a rig per actor rescans the whole
- * document per merge. So each part is skinned once here, with the same rule
- * the character merge uses: A BONE THE SKELETON NAMES TAKES THE SKELETON'S
- * REST TRANSFORM; a bone only the part has keeps the part's own.
- *   v' = sum_k w_k * ( W_k * B_k ) * v      W_k the bone's rest transform in
- *   actor space, B_k the part's skin-to-bone transform for that bone.
- *
- * THE CHAIN (published record layouts, the xEdit definitions):
- *   looks   = the actor record its Traits come from (template chain; a leveled
- *             list on the way is a dice roll unless it holds exactly one entry
- *             that always spawns)
- *   race    -> skeleton by sex, skin, height by sex, "has a face mesh" flag
- *   skin    = the actor's own, else the race's; each of its addons made for
- *             the race is drawn UNLESS the outfit wears one of its body slots
- *   outfit  = the default outfit of the record the Inventory comes from; each
- *             armor's addons made for the race; a leveled item is taken when it
- *             is not a dice roll (use-all, or one entry), else left out, counted
- *   head    = the pre-built face mesh of the looks record, when the race has
- *             the flag and the file exists; its gore caps are never drawn, its
- *             hair not under headgear
- *   scale   = the reference's scale * the race's height for the sex * the
- *             actor's own height
- *
- * THE POSE (lane ACTORPOSE1). The skeleton's bind pose is arms out: every
- * actor drawn on it stood in a T pose. Now the skeleton is posed first:
- *   dead on start, with ragdoll data (the reference's XRGD: one entry per
- *             ragdoll body, in a depth-first walk of skeleton.hkx's ragdoll
- *             skeleton; each body is the animation bone at its bind position;
- *             the rotation is the bone's local one, in the reference rotation's
- *             own convention, entry 0 places the root): lying where the game
- *             left its ragdoll. Refused, by name, when the entries' lengths do
- *             not fit the skeleton's bones, or when 4 or more bodies sit at
- *             their bind rotation (a ragdoll the Creation Kit never settled).
- *   dead on start otherwise: frame 0 of the race's death pose
- *             (animations\deathpose1.hkx), flat on the reference's heading, its
- *             tilt taken out: the game drops such a body as a ragdoll.
- *   otherwise  frame 0 of the race's idle clip, the first that exists of
- *             <actor folder>\animations: mt\neutral\posea_idle1.hkx (human),
- *             idle.hkx, idle_mt.hkx, mt\idle.hkx, <folder>_idle.hkx; tracks
- *             named through <actor folder>\characterassets\skeleton.hkx.
- *   neither    the bind pose, counted with its reason.
- * A bone only a part has (hair cloth bones) rides its nearest ancestor the
- * skeleton names, by that ancestor's move from the part's own node.
- *
- * NAMED DIFFERENCES from the game: no package idle (furniture, a leaning
- * marker: the actor stands in its race's idle instead), frame 0 of the idle,
- * not a moment of it; a dead-on-start actor without usable ragdoll data lies
- * in one fixed death pose (the game simulates its fall); no body
- * weight morph, no face tint, no hair color, no weapons; a creature's gore
- * caps are drawn (they sit inside the whole body); an actor with a height
- * range stands at the middle of it (the game rolls it); interiors only.
- * Actors are not REFRs: they stay out of the reference list, the REFR counts
- * and the placement dump, and have their own census line and dump. */
+/* Placed actors in the cell view: each one is built from its race skeleton, skin and outfit addons and face mesh,
+ * posed (ragdoll data or a death pose when dead on start, else frame 0 of the race's idle) and skinned once on the
+ * CPU into welded shapes, since the cell view's shadow pass does not skin. Interiors only. */
 
 #include "esmdata.h"
 #include "nativeemit.h"

@@ -7,11 +7,9 @@ BSD License - see nifskope.h
 #ifndef LODGENAO_H
 #define LODGENAO_H
 
-/* The chunk bake's CPU ambient-occlusion caster, in a header of its own since
- * 2026-09-18 so the `.lodo` writer (src/lodofile.cpp) can cast a model's own
- * self-AO with the SAME rays the chunk vertices get theirs from -- one law for
- * the stock `.BTO` colour B and the native library's selfAO byte. Moved from
- * src/lodgen.cpp verbatim; nothing about the rays changed. */
+// The chunk bake's CPU ambient-occlusion caster, in a header of its own since 2026-09-18 so the `.lodo` writer
+// (src/lodofile.cpp) can cast a model's own self-AO with the SAME rays the chunk vertices get theirs from --
+// one law for the stock `.BTO` colour B and the native library's selfAO byte.
 
 #include "data/niftypes.h"
 
@@ -22,13 +20,7 @@ BSD License - see nifskope.h
 
 #include <QtGlobal>
 
-/* Lane AO2 (overlay casters, 2026-09-26): the alpha of a see-through material.
- * bungo on the round tower: "why are these faces on the tower darkened? Is it
- * because there's a decal in front of them?" -- a stain sheet 5 u in front of a
- * wall, drawn alpha-blended and alpha-tested, blocked every ray as if solid. A
- * triangle that carries one of these blocks a ray only where the texture is
- * opaque at the hit: alpha >= `ref` (the material's own test cutoff, or 128 for
- * a blend without a test). Level 0 of the diffuse, nearest texel, UV wrapped. */
+// the alpha of a see-through material. bungo on the round tower: "why are these faces on the tower darkened?
 struct LodgenAoAlpha
 {
 	int w = 0, h = 0;
@@ -45,19 +37,13 @@ struct LodgenAoAlpha
 	}
 };
 
-/* CPU ambient-occlusion over the assembled chunk: a uniform XY grid of
- * triangle bins plus the terrain heightfield. Per vertex, a fixed cosine
- * hemisphere (rotated to the vertex normal) is sampled; ray hits against
- * nearby chunk geometry or the ground darken the vertex. This is the
- * per-PLACEMENT data no shared texture can carry — the reason the B channel
- * exists (docs/TO_BE_IMPLEMENTED.md). */
+// CPU ambient-occlusion over the assembled chunk: a uniform XY grid of triangle bins plus the terrain
+// heightfield.
 struct LodgenAoScene
 {
 	static constexpr int BINS = 64;
-	/* The binned area and the heightfield may reach BEYOND the chunk, so the
-	 * origin is explicit rather than assumed to be zero. With a bake skirt the
-	 * chunk's own geometry sits in the middle of a larger field and skirt
-	 * coordinates are negative on two sides. */
+	// The binned area and the heightfield may reach BEYOND the chunk, so the origin is explicit rather than
+	// assumed to be zero.
 	float ox = 0.0f, oy = 0.0f;         // miniature position of the field origin
 	float span = 4096.0f;               // miniature span of the BINNED area
 	std::vector<float> tri;             // 9 floats per triangle
@@ -66,12 +52,12 @@ struct LodgenAoScene
 	int hn = 0;
 	float hSpacing = 1.0f;
 	std::vector<float> hgt;
-	// lane AO2: z bounds for the face caster (rayHitFace). Filled by addTriangle and
+	// z bounds for the face caster (rayHitFace). Filled by addTriangle and
 	// prepareGround; the three stock casters (rayHit and its two callers) never read them.
 	std::vector<float> binZ;            // 2 a bin: lowest, highest z of the triangles listed in it
 	float triZMin = 3.4e38f, triZMax = -3.4e38f;
 	float groundZMax = 3.4e38f;         // +inf until prepareGround(): no early out
-	// lane AO2 (overlay casters): per triangle, its alpha (null = solid) and 6 UV floats.
+	// per triangle, its alpha (null = solid) and 6 UV floats.
 	// EMPTY until the first triangle with an alpha is added, so a scene without one casts as before.
 	std::vector<const LodgenAoAlpha *> triAlpha;
 	std::vector<float> triUv;
@@ -195,7 +181,7 @@ struct LodgenAoScene
 				if ( vv < 0.0f || u + vv > 1.0f )
 					continue;
 				const float hitT = Vector3::dotproduct( e2, qv ) * inv;
-				// the stock caster: no scene it serves carries an alpha (lane AO2 keeps it byte for byte)
+				// the stock caster: no scene it serves carries an alpha
 				if ( hitT > 1.0f && hitT < maxT )
 					return true;
 			}
@@ -207,14 +193,10 @@ struct LodgenAoScene
 		return false;
 	}
 
-	/*! Fraction of the UPPER hemisphere that reaches open sky.
-	 *
-	 *  Not ambient occlusion with a different name: AO is cosine-weighted about
-	 *  the surface normal and answers "how enclosed is this point", while this
-	 *  is normal-independent and answers "can weather and skylight land here".
-	 *  A vertical wall face has low AO and high sky visibility; the floor of a
-	 *  narrow gully has the reverse.
-	 */
+	//! Fraction of the UPPER hemisphere that reaches open sky:
+	//! Not ambient occlusion with a different name: AO is cosine-weighted about the surface normal and answers
+	//! "how enclosed is this point", while this is normal-independent and answers "can weather and skylight
+	//! land here".
 	float skyVisibility( const Vector3 & p, float maxT ) const
 	{
 		static const float dirs[9][3] = {
@@ -256,27 +238,8 @@ struct LodgenAoScene
 		return 1.0f - 0.85f * float( hits ) / 8.0f;
 	}
 
-	/* ==== THE FACE CASTER (lane AO2, 2026-09-26) ================================
-	 * bungo on the Boston oblique: "isn't the vertex AO kind of strong and placed
-	 * not in the right places?". Used by the native `.lodi` v6 vertex-AO and v7
-	 * vertex-sky streams (src/nativeemit.cpp) and, since the split-line round
-	 * (AO2, 2026-09-26), the `.lodo` selfAO (src/lodofile.cpp; WW_SELFAO_FACE=0
-	 * restores its old cast at the vertex). The `.BTO` colour B and the v5
-	 * placement byte keep rayHit / ambientOcclusion / skyVisibility above, byte
-	 * for byte.
-	 *
-	 * What differs from rayHit, and why:
-	 *  - the bins are walked cell by cell (Amanatides-Woo). rayHit steps one bin
-	 *    length along the ray from t = 0 and can step over the corner of a bin a
-	 *    diagonal ray only clips, so it misses hits a brute-force cast finds
-	 *    (measured: 2 of 59 vertices on the Trinity Church tower);
-	 *  - a bin whose triangles all lie above or below the ray's z over that bin is
-	 *    skipped, and an upward ray stops once it is above every triangle and the
-	 *    whole heightfield. Exact, not a sampling change: any hit lies in the bin
-	 *    that holds its own point, at a z inside that bin's bounds;
-	 *  - with `hit` it returns the NEAREST hit (t, triangle, facing), which the
-	 *    buried-sample census and the sky reach census read.
-	 * The terrain march is rayHit's (t from 8, step 24, rays with d.z < 0.9). */
+	// THE FACE CASTER bungo on the Boston oblique: "isn't the vertex AO kind of strong and placed not in the
+	// right places?".
 	struct FaceHit
 	{
 		float t = 0.0f;
@@ -390,10 +353,8 @@ struct LodgenAoScene
 		return any;
 	}
 
-	/*! The vertex-AO law of the stock caster -- the same 8 directions blended 0.6
-	 *  toward the normal, the same 2-unit origin offset, the same 1 - 0.85 x
-	 *  hits / 8 -- cast through rayHitFace. `buried` is set when every cast ray's
-	 *  nearest hit is a BACK face: the point is inside closed geometry. */
+	//! The vertex-AO law of the stock caster -- the same 8 directions blended 0.6 toward the normal, the same
+	//! 2-unit origin offset, the same 1 - 0.85 x hits / 8 -- cast through rayHitFace.
 	float ambientOcclusionFace( const Vector3 & p, const Vector3 & n, float maxT, bool * buried = nullptr,
 		bool fixedSum = false ) const
 	{
@@ -408,7 +369,7 @@ struct LodgenAoScene
 			Vector3 d( dv[0], dv[1], dv[2] );
 			d = d + n * 0.6f;
 			if ( fixedSum ) {
-				// lane BAKESPEED2: the length summed y, x, z in a fixed order, as the serial cast compiled it;
+				// the length summed y, x, z in a fixed order, as the serial cast compiled it;
 				// left to the compiler, an inlining can pick x, y, z and flip ties at the ULP
 				const float m = std::sqrt( std::fma( d[2], d[2], std::fma( d[0], d[0], d[1] * d[1] ) ) );
 				if ( m > 0.0f )
@@ -431,25 +392,7 @@ struct LodgenAoScene
 		return 1.0f - 0.85f * float( hits ) / 8.0f;
 	}
 
-	/*! THE HORIZON-AWARE SKY LAW (bungo 2026-09-26: "Yes, horizon aware would be
-	 *  preferable"). The fraction of the sky's IRRADIANCE on a horizontal receiver
-	 *  at p that arrives unblocked -- cosine-weighted about world +Z, the FO4CS
-	 *  Skylighting convention (its directions are r = sqrt(u), z = sqrt(1 - r^2)).
-	 *  Still normal-independent in its directions ("can skylight and weather land
-	 *  here"); the normal only moves the origin off the surface, as the AO does.
-	 *
-	 *  Seven elevation bands 0-10-20-30-45-60-75-90 deg. A band [a, b] carries
-	 *  sin^2 b - sin^2 a of the irradiance (the integral of sin e cos e de,
-	 *  normalised), so 0-10 = 0.030, 10-20 = 0.087, 20-30 = 0.133, 30-45 = 0.25,
-	 *  45-60 = 0.25, 60-75 = 0.183, 75-90 = 0.067. Each band is cast as one ring at
-	 *  its irradiance-median elevation, sin^2 e = (sin^2 a + sin^2 b) / 2, with
-	 *  RING_AZ azimuths, odd rings turned half a step. 56 fixed rays, no RNG. The
-	 *  stock skyVisibility cast 9 rays all within 45 deg of the zenith, so a street
-	 *  canyon's walls (below 45 deg elevation seen from the street) never counted.
-	 *
-	 *  `hist` (optional, 8 counters) takes each blocked ray's nearest-hit distance
-	 *  in WORLD units (t x worldPerUnit): < 250, 500, 1000, 2000, 4000, 8000,
-	 *  16000, beyond. */
+	//! THE HORIZON-AWARE SKY LAW.
 	static constexpr int SKY_RINGS = 7, RING_AZ = 8;
 	struct SkyDir { float d[3]; float w; };
 	static const SkyDir * skyDirs()
@@ -499,19 +442,8 @@ struct LodgenAoScene
 		return float( open );
 	}
 
-	/*! Across-the-face sample points of one triangle (bungo 2026-09-26: "Sample
-	 *  across the face sounds good"). The triangle is cut into k x k equal
-	 *  sub-triangles and each one's centroid is a sample, so every sample stands
-	 *  for the same area. Returns barycentric weights (a, b, c), 3 floats a sample,
-	 *  k^2 samples. A fixed pattern: no RNG, no seed. */
-	/*! ONE VALUE PER SURFACE POINT (lane AO2, bungo 2026-09-26: "These split
-	 *  lines"). A mesh splits a corner into copies for its UVs or its smoothing;
-	 *  the across-face mean gave each copy the mean of ITS OWN triangles, so two
-	 *  copies at one point of one flat face drew two values and the rasteriser a
-	 *  hard step between their triangles. node[v] = the first copy (lowest index)
-	 *  at v's position -- positions rounded to 1/quant -- whose normal lies within
-	 *  acos(cosWeld) of v's; the callers pool the samples of a node's copies.
-	 *  Deterministic: sorted by (position, index). Returns the copies pooled. */
+	//! Across-the-face sample points of one triangle. The triangle is cut into k x k equal sub-triangles and
+	//! each one's centroid is a sample, so every sample stands for the same area.
 	static quint64 weldNodes( const std::vector<Vector3> & p, const std::vector<Vector3> & n, double quant, float cosWeld,
 		std::vector<quint32> & node )
 	{
