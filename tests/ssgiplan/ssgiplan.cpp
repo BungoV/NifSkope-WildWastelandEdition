@@ -1,6 +1,6 @@
 // lane PERFFIX2 (item 3): src/gl/cellssgiplan.h alone (no Qt, no GL).
 // g++ -std=c++17 -I<tree>/src tests/ssgiplan/ssgiplan.cpp; -DSSGIPLAN_RED=3a tests the pass before the sub-timers
-// (one zone, no stage groups): must fail.
+// (one zone, no stage groups): must fail. -DSSGIPLAN_RED=7: the interior march radius before lane INTGI1 (256).
 #include "gl/cellssgiplan.h"
 
 #include <cstdio>
@@ -58,6 +58,15 @@ static WwSsgiTier tierOf( int q, int red )
 	return wwSsgiTier( q, red | 4096 );	// before 3d: FO4CS's tiers at every setting
 #else
 	return wwSsgiTier( q, red );
+#endif
+}
+
+static float radiusOf( float base, bool interior, float spacing, int red )
+{
+#if defined( SSGIPLAN_RED ) && SSGIPLAN_RED == 7
+	return wwSsgiRadius( base, interior, spacing, red | 16384 );	// before INTGI1: 256 indoors too
+#else
+	return wwSsgiRadius( base, interior, spacing, red );
 #endif
 }
 
@@ -119,6 +128,13 @@ int main()
 	check( wwSsgiTier( -3, 0 ).div == wwSsgiTier( 0, 0 ).div && wwSsgiTier( 9, 0 ).div == wwSsgiTier( 3, 0 ).div, "3d: clamped quality" );
 	check( wwSsgiWorkDim( 1920, 4 ) == 480 && wwSsgiWorkDim( 1027, 4 ) == 257 && wwSsgiWorkDim( 1027, 2 ) == 514
 		&& wwSsgiWorkDim( 1027, 1 ) == 1027, "3d: work size rounds up" );
+	// lane INTGI1 (SSGIHO-INT): an interior under the traced volume marches to its spacing; everything else keeps 256
+	check( radiusOf( 256.0f, true, 140.0f, 0 ) == 140.0f, "int: interior + volume (140 u): the march stops at the spacing" );
+	check( radiusOf( 256.0f, true, 300.0f, 0 ) == 256.0f, "int: a spacing past the radius keeps the radius" );
+	check( wwSsgiRadius( 256.0f, false, 140.0f, 0 ) == 256.0f, "int: exterior / sunlit interior: 256 (the sky hand-over)" );
+	check( wwSsgiRadius( 256.0f, true, 0.0f, 0 ) == 256.0f && wwSsgiRadius( 256.0f, true, -1.0f, 0 ) == 256.0f,
+		"int: no volume up: 256" );
+	check( wwSsgiRadius( 256.0f, true, 140.0f, 16384 ) == 256.0f, "int: red nointradius: 256" );
 	std::printf( "SSGIPLAN %s %d failed\n", fails ? "FAIL" : "PASS", fails );
 	return fails ? 1 : 0;
 }

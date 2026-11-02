@@ -33,6 +33,7 @@ enum Red : int {
 	RedNone = 0,
 	RedLift = 1,      // the horizon at d.z < 0.1 (cell_skybelow.glsl's SKYBELOW2_RED_LIFT): below counts move
 	RedNoReach = 2,   // no far plane: every ray runs to the soup's end (hits rise where the reach cut them)
+	RedRoof = 4,      // lane INTGI1: --auto --interior puts the cameras on the topmost surface again (the roof)
 };
 
 struct Probe
@@ -182,5 +183,42 @@ inline Count census( const probebvh::Bvh & bvh, const double O[2], const Probe &
 			}
 		}
 	return c;
+}
+
+/* lane INTGI1 (REFLPROBECLI2): --auto in an interior. The topmost surface over an interior soup is usually its roof,
+ * whose probes look out into the void; the cameras stand in the rooms instead. zs = the surfaces under one column,
+ * top down (columnHits). A camera stands eye over each surface that has something above it (not the topmost) with at
+ * least eye + kHeadroom free up to that next surface (a floor under a ceiling; a slab's own two faces are too close).
+ * Several storeys give several cameras. Red RedRoof: the topmost surface, as REFLPROBECLI1 did. */
+constexpr double kHeadroom = 32.0;
+
+inline void floorsOf( const std::vector<double> & zs, double eye, int red, std::vector<double> & camZ )
+{
+	if ( zs.empty() )
+		return;
+	if ( red & RedRoof ) {
+		camZ.push_back( zs[0] + eye );
+		return;
+	}
+	for ( size_t k = 1; k < zs.size(); k++ )
+		if ( zs[k - 1] - zs[k] >= eye + kHeadroom )
+			camZ.push_back( zs[k] + eye );
+}
+
+// the successive surfaces a downward ray from (x, y, z0) meets within len (local tracer coordinates), top down;
+// each ray starts just under the last hit, 64 at most
+inline void columnHits( const probebvh::Bvh & bvh, double x, double y, double z0, double len, std::vector<double> & zs )
+{
+	zs.clear();
+	double z = z0, left = len;
+	for ( int k = 0; k < 64 && left > 0.0; k++ ) {
+		const double o[3] = { x, y, z }, d[3] = { 0.0, 0.0, -1.0 };
+		double th = 0.0;
+		if ( !bvh.ray( o, d, left, &th ) )
+			break;
+		zs.push_back( z - th );
+		z -= th + 0.5;
+		left -= th + 0.5;
+	}
 }
 }   // namespace reflcensus

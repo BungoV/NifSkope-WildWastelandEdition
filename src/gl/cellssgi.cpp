@@ -19,6 +19,7 @@ BSD License - see nifskope.h
 #include "gl/glshape.h"
 #include "gl/renderer.h"
 #include "harnesswindow.h"	// lane SSGI2FRAMES
+#include "rtddgicell.h"	// lane INTGI1: the traced volume's spacing (the interior march radius)
 
 #include <QFile>
 #include <QHash>
@@ -57,9 +58,11 @@ struct SsgiState
 	int red = 0;	// 1 off, 2 stack, 4 notemporal, 8 noblur; lane SSGI2: 16 ign, 32 nohiz, 64 oldblur, 128 noemissive;
 					// lane SSGI3: 256 oldlaw (SSGI1's fill law); lane SSGI2FRAMES: 512 oldframes;
 					// lane PERFFIX2: 1024 emitchain (3b: the emissive cast's own chain, cellssgiplan.h), 2048 hiz
-					// (3c: the interval pyramid built again), 4096 oldtiers (3d: FO4CS's four tiers)
+					// (3c: the interval pyramid built again), 4096 oldtiers (3d: FO4CS's four tiers); GIFIX1101 HO: 8192
+				// nohandover; lane INTGI1: 16384 nointradius (cellssgiplan.h wwSsgiRadius)
 	int pathFrame = -1;	// lane SSGI2FRAMES: the camera path's frame (wwCellSsgiSetPath), -1 a still view
 	int lastVerdict = -1;
+	float lastRadius = -1.0f;	// lane INTGI1: the echo again when the march radius moves
 	char echo[240] = {};
 };
 
@@ -85,7 +88,7 @@ SsgiState & st()
 			s.red |= w == "off" ? 1 : w == "stack" ? 2 : w == "notemporal" ? 4 : w == "noblur" ? 8 : w == "ign" ? 16
 				: w == "nohiz" ? 32 : w == "oldblur" ? 64 : w == "noemissive" ? 128 : w == "oldlaw" ? 256
 				: w == "oldframes" ? 512 : w == "emitchain" ? 1024 : w == "hiz" ? 2048 : w == "oldtiers" ? 4096
-				: w == "nohandover" ? 8192 : 0;	// GIFIX1101 HO: the probe-fill law under the traced volume too
+				: w == "nohandover" ? 8192 : w == "nointradius" ? 16384 : 0;	// GIFIX1101 HO; lane INTGI1
 	}
 	return s;
 }
@@ -248,15 +251,19 @@ void wwCellSsgiPass( Scene * scene, bool run )
 	unsigned int sceneTex = 0, emitTex = 0;
 	const int verdict = !run || !wwCellSsgiWantsScene( scene ) ? 0 : !wwCellAoTargets( scene, ao ) ? 1
 		: !wwCellSsrSceneTexture( scene, sceneTex ) ? 2 : 3;
-	if ( verdict != s.lastVerdict && ( verdict != 0 || s.lastVerdict > 0 ) ) {
+	// lane INTGI1 (SSGIHO-INT): an interior under the traced volume marches to the probe spacing (cellssgiplan.h)
+	const WwCellLighting * cellL = scene->nifModel ? wwCellLightsFor( scene->nifModel ) : nullptr;
+	const float radius = wwSsgiRadius( kRadius, cellL && !wwCellAsOutdoor( cellL ), rtddgiCellReadSpacing( scene ), s.red );
+	if ( ( verdict != s.lastVerdict || ( verdict == 3 && radius != s.lastRadius ) ) && ( verdict != 0 || s.lastVerdict > 0 ) ) {
 		static const char * const words[4] = { "off", "off (no obscurance pass)", "off (no scene pass)", "on" };
+		s.lastRadius = radius;
 		std::snprintf( s.echo, sizeof( s.echo ),
-			"cell ssgi: %s quality %d red %d noise %s hiz %s denoise %s emissive %s law %s frames %s tiers %s handover %s",
+			"cell ssgi: %s quality %d red %d noise %s hiz %s denoise %s emissive %s law %s frames %s tiers %s handover %s radius %.0f",
 			words[verdict], s.quality, s.red, ( s.red & 16 ) ? "ign" : "fast",
 			wwSsgiHizBuilt( s.red ) ? "on" : wwSsgiFullBreak( s.red ) ? "break" : "off",
 			( s.red & 8 ) ? "none" : ( s.red & 64 ) ? "5x5" : "robust+quarter", ( s.red & 128 ) ? "off" : wwSsgiEmissive( s.red ) == WwSsgiEmitChain ? "chain" : "folded",
 			( s.red & 256 ) ? "old" : "fill", !wwHarnessRun() ? "live" : ( s.red & 512 ) ? "per-paint" : "pinned",
-			( s.red & 4096 ) ? "fo4cs" : "perffix2", ( s.red & 8192 ) ? "off" : "volume" );
+			( s.red & 4096 ) ? "fo4cs" : "perffix2", ( s.red & 8192 ) ? "off" : "volume", double( radius ) );
 		std::fprintf( stderr, "%s\n", s.echo );
 		s.lastVerdict = verdict;
 	}
@@ -443,7 +450,7 @@ void wwCellSsgiPass( Scene * scene, bool run )
 	prog->uni2f( "proj", pm[0][0], pm[1][1] );
 	prog->uni1i( "slices", tier.slices );
 	prog->uni1i( "steps", tier.steps );
-	prog->uni1f( "radius", kRadius );
+	prog->uni1f( "radius", radius );	// lane INTGI1: kRadius, or the interior's probe spacing
 	prog->uni1f( "thickness", kThickness );
 	prog->uni1f( "sourceBrightness", kSource );
 	prog->uni1b( "oldLaw", ( s.red & 256 ) != 0 );

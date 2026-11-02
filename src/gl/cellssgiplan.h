@@ -95,4 +95,16 @@ inline int wwSsgiWorkDim( int full, int div )
 	return div <= 1 ? full : ( full + div - 1 ) / div;
 }
 
+/*! lane INTGI1 (SSGIHO-INT, a ruling): the march radius. In an interior (not sunlit) under the traced volume there is
+ *  no sky visibility for cellSsgiE's hand-over to subtract (every probe ray hits), so the hand-over is by scale: the
+ *  probes already hold the occlusion and the bounce of what lies a probe spacing or more away, and the screen keeps
+ *  the contact scale under it. The march stops at the volume's smallest spacing (never past `base`); the combine stays
+ *  the probe-fill law, which then darkens and adds only that share. Red `nointradius` (16384): `base` everywhere. */
+inline float wwSsgiRadius( float base, bool interior, float ddgiSpacing, int red )
+{
+	if ( ( red & 16384 ) || !interior || !( ddgiSpacing > 0.0f ) )
+		return base;
+	return ddgiSpacing < base ? ddgiSpacing : base;
+}
+
 #endif // CELLSSGIPLAN_H
