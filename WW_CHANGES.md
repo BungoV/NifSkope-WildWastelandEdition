@@ -1,3 +1,16 @@
+## FRAMESCHED1 (2026-11-02): one reflection-probe capture a frame, none on a coarse DDGI cascade's frame
+
+The reflection probes drew the camera probe's next face and the nearest unfinished placed probe's next face in the same
+frame (two caster walks), and on the frames a coarse DDGI cascade steps (cascade L at frame % every^L == L) a capture
+landed on top of that step. New pure rule src/gl/wwframesched.h: one capture a frame; the camera face and the placed
+face take turns when both wait; no capture on a frame a coarse cascade stepped on its own period (a picture spec's
+every-frame step and WW_CELL_REFLPROBE_ALL are not touched), waiting at most 3 frames in a row. rtddgicell.cpp reports
+the step (rtddgiCellCoarseStepped). Lamp shadow cubes (event-driven, already sliced by WwLampSlice) and the exposure
+measure (every frame) have no period to move. The reflection probes ship off, so the default picture is unchanged.
+Red WW_FRAMESCHED_RED=1 (live) = the old schedule; =0 = the new one. Unset = the old schedule until the spike hold
+(notes/framesched1/hold) says ON. The `reflprobe frame:` line (WW_CELL_REFLPROBE_TIME=1) prints
+`sched deferred= alternated=`. Gate: tests/framesched (g++; -DFRAMESCHED_RED fails "no frame carries two").
+
 ## DDGIREADPERF2 (2026-11-02): the screen texel's upsample at one site too
 
 After DDGIREADPERF1 every cellGiSample site and cellSpecSky still inlined cellGiHalfAt, the screen GI pass's upsample (4
@@ -288,18 +301,6 @@ and the WW_CELL_HDR_DUMP gate target. The rule is a pure header (src/gl/cellhdrf
 passes, the old rule as red fails). `WW_CELL_HDR_FORMAT=rgba32f` asks for the old frame; the reds `WW_FRAMEFMT1_RED=1`,
 `WW_CELL_HDR_FORMAT_RED=1` and `WW_AAFORMAT1_RED=1` force RGBA32F everywhere, as before. The air volumes were already
 RGBA16F (PERFFIX3); their slices and the running integrate stay RGBA32F (transmittance precision).
-## FRAMESCHED1 (2026-11-02): one reflection-probe capture a frame, none on a coarse DDGI cascade's frame
-
-The reflection probes drew the camera probe's next face and the nearest unfinished placed probe's next face in the same
-frame (two caster walks), and on the frames a coarse DDGI cascade steps (cascade L at frame % every^L == L) a capture
-landed on top of that step. New pure rule src/gl/wwframesched.h: one capture a frame; the camera face and the placed
-face take turns when both wait; no capture on a frame a coarse cascade stepped on its own period (a picture spec's
-every-frame step and WW_CELL_REFLPROBE_ALL are not touched), waiting at most 3 frames in a row. rtddgicell.cpp reports
-the step (rtddgiCellCoarseStepped). Lamp shadow cubes (event-driven, already sliced by WwLampSlice) and the exposure
-measure (every frame) have no period to move. The reflection probes ship off, so the default picture is unchanged.
-Red WW_FRAMESCHED_RED=1 (live) = the old schedule; =0 = the new one. Unset = the old schedule until the spike hold
-(notes/framesched1/hold) says ON. The `reflprobe frame:` line (WW_CELL_REFLPROBE_TIME=1) prints
-`sched deferred= alternated=`. Gate: tests/framesched (g++; -DFRAMESCHED_RED fails "no frame carries two").
 
 ## REFLPROBECLI1 (TOOLS1101, 2026-11-01): count the reflection probes' below-horizon misses without a window
 
