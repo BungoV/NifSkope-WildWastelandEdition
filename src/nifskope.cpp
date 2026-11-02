@@ -1604,6 +1604,7 @@ NifSkope::NifSkope( bool background )
 
 	// Init UI
 	ui->setupUi( this );
+	wwStartupMark( "widgets: setupUi" );
 	// The native GL container and the specialist tree views accept their own
 	// drops, but blank chrome/toolbar areas otherwise have no accepting ancestor.
 	// The application event filter resolves an external .nif back to this window.
@@ -2760,9 +2761,11 @@ NifSkope::NifSkope( bool background )
 	// Create GLView
 	/* ********************** */
 
+	wwStartupMark( "widgets: models + block lists" );
 	ogl = new GLView( nullptr );
 	ogl->setObjectName( "OGL1" );
 	ogl->setNif( nif );
+	wwStartupMark( "widgets: gl view" );
 
 	// Create InspectView
 	/* ********************** */

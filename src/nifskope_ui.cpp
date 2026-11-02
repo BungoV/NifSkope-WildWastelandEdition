@@ -27216,6 +27216,7 @@ void NifSkope::initDockWidgets()
 	 * nothing else in the window addresses it -- so nifskope.h gains no member
 	 * while another lane is holding that file. */
 	{
+		wwStartupMark( "docks: left editor" );
 		QDockWidget * dBodyBuild = new QDockWidget( tr( "Body Build" ), this );
 		dBodyBuild->setObjectName( "BodyBuildDock" );
 		BodyBuildPanel * bodyBuild = new BodyBuildPanel( dBodyBuild );
@@ -27241,6 +27242,7 @@ void NifSkope::initDockWidgets()
 	 * finds the panel by object name and nothing else in the window addresses
 	 * it, so nifskope.h gains no member while another lane holds that file. */
 	{
+		wwStartupMark( "docks: body build" );
 		QDockWidget * dCellPick = new QDockWidget( tr( "Reference" ), this );
 		dCellPick->setObjectName( "CellPickDock" );
 		CellPickPanel * cellPick = new CellPickPanel( dCellPick );
@@ -27294,6 +27296,7 @@ void NifSkope::initDockWidgets()
 	 * rows, and the clip fully editable (keys, annotations, trim, retime,
 	 * root-motion bake, Save as .hkx). The Animation Manager dock above stays
 	 * until this one is proven in the app; a follow-up retires it. */
+	wwStartupMark( "docks: reference" );
 	dAnimWs = new QDockWidget( tr( "Animation" ), this );
 	dAnimWs->setObjectName( "AnimWorkspaceDock" );
 	animws = new AnimWorkspace( dAnimWs );
@@ -29527,6 +29530,7 @@ void NifSkope::initDockWidgets()
 			"QToolButton:disabled { color: %4; }" )
 			.arg( wwSkinColor( "bgBtnHover" ), wwSkinColor( "bgBtnDown" ),
 				  wwSkinColor( "accentText" ), wwSkinColor( "textMuted" ) );
+		wwStartupMark( "docks: animation + view menus" );
 		QWidget * contributionPanel = new QWidget( shadeMenu );
 		contributionPanel->setObjectName( QStringLiteral( "ShadingChannelMixer" ) );
 		QGridLayout * contributionLayout = new QGridLayout( contributionPanel );
@@ -29699,6 +29703,7 @@ void NifSkope::initDockWidgets()
 			QAction * aScene = new QAction( tlMakeIcon( QStringLiteral( "bulb" ), icoColHdr ), tr( "Scene" ), this );
 			aScene->setObjectName( QStringLiteral( "aSceneWindow" ) );
 			aScene->setCheckable( true );
+			wwStartupMark( "docks: shade menu" );
 			auto * sceneWin = new SceneWindow( this,
 				[this]() {
 					if ( ogl )
@@ -30143,6 +30148,7 @@ void NifSkope::initDockWidgets()
 		QMenu * animMenu = new QMenu( animBtn );
 		animBtn->setMenu( animMenu );
 
+		wwStartupMark( "docks: scene window" );
 		QWidget * animPanel = new QWidget( animMenu );
 		animPanel->setObjectName( QStringLiteral( "AnimationQuickPanel" ) );
 		auto * grid = new QGridLayout( animPanel );
@@ -30506,6 +30512,7 @@ void NifSkope::initDockWidgets()
 		colBtn->setObjectName( QStringLiteral( "ViewCollisionButton" ) );
 
 		QMenu * colMenu = new QMenu( colBtn );
+		wwStartupMark( "docks: anim menu" );
 		PhysicsSimPanel * quick = new PhysicsSimPanel( ogl, nif,
 			PhysicsSimPanel::Mode::Essentials, ui->aShowCollision, colMenu );
 		quick->setObjectName( QStringLiteral( "CollisionQuickPanel" ) );
@@ -30715,6 +30722,7 @@ void NifSkope::initDockWidgets()
 		 * companion, not a copy. One panel, one set of rows, one place a
 		 * reference is described. */
 		{
+			wwStartupMark( "docks: physics panel" );
 			QDockWidget * dCellWs = new QDockWidget( tr( "Cell" ), this );
 			dCellWs->setObjectName( QStringLiteral( "CellWorkspaceDock" ) );
 			CellWorkspacePanel * cellWs = new CellWorkspacePanel( dCellWs );
@@ -30959,7 +30967,7 @@ void NifSkope::initDockWidgets()
 
 	// Set Inspect widget
 	dInsp->setWidget( inspect );
-
+	wwStartupMark( "docks: cell workspace + inspector" );
 }
 
 void NifSkope::initMenu()
