@@ -6,6 +6,16 @@
   MiltonGeneral01 185 of 185.
 - Red `WW_DECALCHECK_RED=loose` (loose files only, the old rule): 0 triangles, and the walk now FAILS (rc 1) when ray
   decals have no triangles to meet.
+## HAZECARD1 (2026-11-02): lamp-lit haze cards outdoors take the game's lit-effect base (default ON)
+- Cause: since GIDARK1 every exterior lit effect drew with fxRoomLit, so its base (the weather's Effect Lighting x fade
+  x Sunlight Scale) was scaled by the room share (sun x visibility + ambient + RTDDGI over the open-air level, 0..4).
+  The game scales that base by nothing outdoors. The soft haze cards (GlowFill / Mist / Steam: soft depth > 0) also
+  lost their FXRES soft layer that way.
+- Now: a soft lit card outdoors takes the game's base again (src/gl/fxroomrule.h wwFxRoomLitRule, read by
+  wwCellFxRoomLit in src/gl/cellfxlit.cpp; Shape::wwFxSoftCard). The lens/glass in an open shop keeps the room share.
+- Red `WW_CELL_HAZECARD_RED=room`: soft cards room-lit as before. `WW_CELL_FXROOM_RED=game` (unchanged): every
+  effect takes the game's base. Telemetry once per state: `hazecard: soft lit cards outdoors take ...`.
+- Unit tests/hazecard1/hazecard_rule_test.cpp (g++ -std=c++17 -Isrc; 8 cases); `-DHC_RED` (the old rule) must fail (the haze card case).
 
 ## FARCITYWASH1 (2026-11-02, landed in LAND6): the air's sky-lit veil at most the records' fog colour (default ON)
 - cell_volair.frag airVeilK: per froxel, the open air's mean in-scatter (the sun's share + the env share) brought DOWN to
