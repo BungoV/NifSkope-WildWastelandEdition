@@ -55,6 +55,37 @@ static int self()
 		worstLin > lim ? "FAILS the bar" : "PASSES (red not red)" );
 	if ( !( worstLin > lim ) )
 		bad++;
+	// lane FARWATER6 (FARWATER5 L4): lodtFlowSpeedReference() == lodgen's old inline median (positives only, the
+	// upper median) on 2000 pseudo-random pieces with still texels in them, and code 8 lands on that median
+	unsigned seed = 12345u;
+	auto rnd = [&]() { seed = seed * 1664525u + 1013904223u; return double( seed >> 8 ) / 16777216.0; };
+	int refBad = 0, med8 = 0;
+	for ( int t = 0; t < 2000; t++ ) {
+		std::vector<double> sp( size_t( 1 + int( rnd() * 300.0 ) ) );
+		for ( double & s : sp )
+			s = rnd() < 0.2 ? 0.0 : std::exp2( rnd() * 6.0 - 3.0 );
+		std::vector<double> pos;
+		for ( double s : sp )
+			if ( s > 0.0 )
+				pos.push_back( s );
+		double old = 0.0;
+		if ( !pos.empty() ) {
+			std::nth_element( pos.begin(), pos.begin() + std::ptrdiff_t( pos.size() / 2 ), pos.end() );
+			old = pos[pos.size() / 2];
+		}
+		const double ref = lodtFlowSpeedReference( sp );
+		if ( std::memcmp( &ref, &old, sizeof ref ) )
+			refBad++;
+		if ( ref > 0.0 && lodtFlowSpeedCode( kLodlFlowEncLinear, ref / ref ) == 8
+			&& lodtFlowSpeedCode( kLodlFlowEncLog, ref / ref ) == 8 )
+			med8++;
+		else if ( ref > 0.0 )
+			refBad++;
+	}
+	std::printf( "speed reference: %d of 2000 pieces differ from the old lodgen median; code 8 at the median %d\n",
+		refBad, med8 );
+	if ( refBad )
+		bad++;
 	std::printf( "FLOWCODE SELF %s\n", bad ? "FAIL" : "PASS" );
 	return bad ? 1 : 0;
 }

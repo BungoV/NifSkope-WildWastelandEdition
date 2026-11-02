@@ -218,6 +218,28 @@ steps, and every view still reads fewer cloud densities per ray than Ultra did w
 low5 139.0 vs 151.5, from 4 km up 337.8 vs 364.7). Cloud edges come out closer to a 16x-steps reference: 1.59 -> 0.93 and
 2.19 -> 1.32 display levels. 136 steps also fit, but only by 2 %, so 128 keeps a margin for views the gate does not hold.
 Red: WW_CLOUDVOL_RED=ultra96 (96 steps; the notes say `,RED=ultra96`). Test: tests/cloudsteps/run.sh.
+## FARWATER5 L4 (FARWATER6, 2026-11-02): one speed reference for both flow writers; the marking tool marks a log-nibble file
+
+The far river flow word stores speed as a 4-bit code where code 8 means the reference speed. The two writers used
+different references. lodgen's river bake used the median moving speed of the river piece. The marking tool used the
+body's mean. So when a body was re-marked in the tool, it decoded at mean / median times the baked speed. Both now
+take `lodtFlowSpeedReference()` (src/lodtflowcode.h): the upper median of the moving speeds. lodgen's bytes do not
+change, because this is the same median it already computed. The tool's code also follows the file's own encoding:
+linear for encoding 0, the WW_LODL_FLOW_LOG half-octave log for encoding 1. The tool now opens and marks an
+encoding-1 file and keeps the file's encoding on save. Before, it refused the file and wrote 0 into the header on save.
+Words the tool does not re-solve (other bodies, raster layers) are written back verbatim. The slack line, the
+moving-water floor and the unquantised speedRel still use the mean, so X1/X4 read as before.
+Red: `WW_WATER_SPEED_REF_RED=mean` gives the mean reference with the linear code, byte for byte the old tool, and
+refuses encoding 1 again.
+
+Gate: tests/farwater5/flowcode_unit.cpp `--self` (the reference equals lodgen's old inline median on 2000 random
+pieces, 0 differ). The selftest check `L4` (the median written code of the selftest river is 8) and
+tests/farwater6/run.sh (the lodgen bake is byte-equal to the base exe in both encodings; selftest green on an
+encoding-0 and an encoding-1 copy; the red FAILS L4 and refuses encoding 1).
+
+FARWATER5-REBAKE: the Commonwealth .lodl baked at 58324523 with `--water-report` (the "speed 15 on N" line is only
+in the report): linear "speed 15 on 41313" of 138499 river texels (29.8 %), WW_LODL_FLOW_LOG=1 "speed 15 on 7981"
+(5.8 %). 111 rivers, speed 0 on 19496 (1165 lifted by the floor) in both.
 
 ## FARWATER5 L3 (FARLOOK1101, 2026-11-02): a log speed nibble for the far river bake (flow encoding 1, OFF)
 
