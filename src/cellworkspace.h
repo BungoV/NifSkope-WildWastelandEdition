@@ -206,6 +206,7 @@ private:
 	QAction * cellGrass = nullptr;    // the game's grass (placed at cell open)
 	QAction * cellDof = nullptr;      // the game's depth of field
 	QAction * cellMblur = nullptr;    // the game's motion blur
+	QAction * cellObjBlur = nullptr;  // lane POSTFX1: per-object motion blur (never the camera)
 	QMenu * cellBloom = nullptr;      // Vanilla | FO4CS, FO4CS's rows and its physical glare
 	QActionGroup * cellBloomGroup = nullptr;
 	QAction * cellBloomGlare = nullptr;

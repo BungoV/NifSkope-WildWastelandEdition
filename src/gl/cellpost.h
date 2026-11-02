@@ -16,6 +16,14 @@ bool wwCellDofOn();
 void wwCellDofSetOn( bool on );
 bool wwCellMotionBlurOn();
 void wwCellMotionBlurSetOn( bool on );
+/*! lane POSTFX1: per-object motion blur (bungo: objects blur, the camera never does). The things that moved on their
+ *  own (TAAINPUTS1's object vectors, the camera taken out) blur over half the frame (a 180 degree shutter); a still
+ *  world under a turning camera stays the input frame bit for bit. Shaders cell_objblur_vec / _tile / cell_objblur
+ *  (tile max, neighbour max, a depth-compared gather). WW_CELL_OBJBLUR=0|1 pins it (default OFF, waits on bungo's
+ *  eye); WW_CELL_OBJBLUR_RED=camera keeps the camera's vectors (the old full-frame blur, the gate's red). Runs
+ *  after the game's depth of field / motion blur, before the temporal AA. */
+bool wwCellObjectBlurOn();
+void wwCellObjectBlurSetOn( bool on );
 
 //! The cell view, at cell open: indoors the cell's XCIM record's DNAM (read here, 16 bytes as stored), outdoors the weather.
 void wwCellPostSetCell( const EsmWorld & world, bool interior );

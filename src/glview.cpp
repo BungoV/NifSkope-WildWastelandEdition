@@ -4361,7 +4361,9 @@ void GLView::paintGL()
 					wwTaaInputsPass( scene );	// lane TAAINPUTS1: inert unless asked for (gl/taainputs.h)
 				}
 				wwCellPostApply( scene );
+				PassTime::subBegin( PassTime::PostFlare );	// lane POSTFX1: the post zone's parts
 				wwCellLensFlareDraw( scene );	// lane LIGHTS3 (LENSFLARE1): the lights' flares, a screen pass; inert when off
+				PassTime::subEnd( PassTime::PostFlare );
 				{
 					PassTime::Swap taaT( PassTime::Post, PassTime::Taa );	// lane TIMING1: blits + vectors + resolve + copy-back
 					wwGameTaaResolve( scene );

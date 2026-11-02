@@ -63,6 +63,7 @@ enum Sub { AirTile, AirInject, AirIntegrate, AoGeometry, AoStages, AoGi, ToneBli
 	SsgiHiz, SsgiMips, SsgiEcast, SsgiEchain, SsgiCast, SsgiTemporal, SsgiDenoise,
 	ContactMarch,	// lane PERFFIX2 (item 7): the contact pass (near march, far tier, upsample) inside reflections
 	WaterDraw, WaterCopy, UnderwaterSub,	// lane PERFFIX3: the water's colour draws (each, summed; the copy inside), its refraction copies, the camera-under-water pass
+	PostDof, PostMblur, PostObjBlur, PostFlare,	// lane POSTFX1: the post zone's parts (cellpost.cpp, the lens flares)
 	SubCount };	// lane FOGPERF1: the air before stage 0 (depth blit), its far grid, after it
 void subBegin( int sub );
 //! lane PERF2: CPU time inside the per-draw setup (setupProgram and the cell's uniform calls), summed per frame
