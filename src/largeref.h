@@ -9,9 +9,12 @@
 #include <algorithm>
 #include <cstddef>
 #include <cstdint>
+#include <cmath>
+#include <cstdlib>
 #include <cstring>
 #include <map>
 #include <set>
+#include <string>
 #include <vector>
 
 namespace LargeRef
@@ -154,6 +157,87 @@ inline bool fixedFull( bool placed, const FarMap * map, int ownX, int ownY, bool
  * mode alone, as before. */
 inline bool fixedPlaced( Far mode, bool byMode, bool flatDouble ) { return byMode ? fullOutside( mode, flatDouble ) : true; }
 
+/* lane LARGEREF6 (LARGEREF-FLATMASK-FIX): the flat cell mask (cellfarhide.cpp) degenerates far triangles centred in a
+ * loaded cell, so a wide ref standing one cell out loses the part of its far copy that reaches in (median 18 %, up to
+ * 97 %, notes/largeref4/tmp/flatmask_3C.txt). Three answers, WW_CELL_LARGEREFS_FLATMASK: accept (the cut stays),
+ * keepbox (the mask keeps the triangles inside the far copy's footprint), promote[:share] (a listed ref whose
+ * footprint share over the loaded cells reaches `share` joins the layer: drawn full, its far copy's rest beside it).
+ * Footprint: the REFR's position + scale * OBND turned by its Z rotation (the game's z turns clockwise seen from above,
+ * as notes/largeref4/tools/flatmask_census.py measured it): a turned rectangle in world units, with its bound. */
+enum class FlatMask { Accept = 0, KeepBox = 1, Promote = 2 };
+struct Box
+{
+	float x0 = 1, y0 = 1, x1 = 0, y1 = 0;   //!< the bound; empty (x0 > x1): no footprint known
+	float cx = 0, cy = 0, hx = 0, hy = 0;   //!< the rectangle's centre and half sizes
+	float c = 1, s = 0;                     //!< cos / sin of the turn
+	bool valid() const { return x1 >= x0 && y1 >= y0 && hx > 0 && hy > 0; }
+	//! world -> the rectangle's own axes
+	void local( float x, float y, float & lx, float & ly ) const
+	{
+		const float dx = x - cx, dy = y - cy;
+		lx = dx * c - dy * s;
+		ly = dx * s + dy * c;
+	}
+	//! the rectangle's axes -> world
+	void world( float lx, float ly, float & x, float & y ) const
+	{
+		x = cx + lx * c + ly * s;
+		y = cy - lx * s + ly * c;
+	}
+	bool holds( float x, float y ) const
+	{
+		if ( !valid() || x < x0 || x > x1 || y < y0 || y > y1 )
+			return false;
+		float lx = 0, ly = 0;
+		local( x, y, lx, ly );
+		return std::fabs( lx ) <= hx && std::fabs( ly ) <= hy;
+	}
+	bool operator==( const Box & o ) const
+	{
+		return cx == o.cx && cy == o.cy && hx == o.hx && hy == o.hy && c == o.c && s == o.s && x0 == o.x0 && y0 == o.y0;
+	}
+};
+inline Box footprint( const float pos[3], float rz, float scale, const float lo[3], const float hi[3] )
+{
+	Box b;
+	b.c = std::cos( rz );
+	b.s = std::sin( rz );
+	b.hx = ( hi[0] - lo[0] ) * 0.5f * scale;
+	b.hy = ( hi[1] - lo[1] ) * 0.5f * scale;
+	if ( b.hx <= 0 || b.hy <= 0 )
+		return Box();
+	const float mx = ( lo[0] + hi[0] ) * 0.5f * scale, my = ( lo[1] + hi[1] ) * 0.5f * scale;
+	b.cx = pos[0] + mx * b.c + my * b.s;
+	b.cy = pos[1] - mx * b.s + my * b.c;
+	const float ex = std::fabs( b.hx * b.c ) + std::fabs( b.hy * b.s ), ey = std::fabs( b.hx * b.s ) + std::fabs( b.hy * b.c );
+	b.x0 = b.cx - ex;
+	b.x1 = b.cx + ex;
+	b.y0 = b.cy - ey;
+	b.y1 = b.cy + ey;
+	return b;
+}
+//! The point lies in one of the boxes (the mask keeps that triangle)
+inline bool inBox( float x, float y, const std::vector<Box> & boxes )
+{
+	for ( const Box & b : boxes )
+		if ( b.holds( x, y ) )
+			return true;
+	return false;
+}
+//! The mode an env value names; `share` = promote's threshold (0.25, or `promote:<share>`)
+inline FlatMask flatMaskOf( const std::string & v, float & share )
+{
+	share = 0.25f;
+	if ( v == "keepbox" )
+		return FlatMask::KeepBox;
+	if ( v.compare( 0, 7, "promote" ) == 0 ) {
+		if ( v.size() > 8 && v[7] == ':' )
+			share = std::max( 0.0f, std::min( 1.0f, float( std::atof( v.c_str() + 8 ) ) ) );
+		return FlatMask::Promote;
+	}
+	return FlatMask::Accept;
+}
+
 /* lane LARGEREF2 (LARGEREF-STREAM): per-document ownership counts for the streamed view. A large ref is drawn by exactly
  * one owner: its own cell while that cell is loaded (the cell's own refs place it), else the large-ref layer while any
  * loaded cell lists it (counts[ref] = loaded listing cells). So a ref is never drawn by two listing cells, nor by a
@@ -225,17 +309,12 @@ public:
 		auto st = standing_.find( k );   // the refs standing in this cell change owner
 		if ( st != standing_.end() )
 			touched.insert( touched.end(), st->second.begin(), st->second.end() );
+		auto bc = boxCells_.find( k );   // lane LARGEREF6: the refs whose footprint reaches this cell (their cut share moved)
+		if ( bc != boxCells_.end() )
+			touched.insert( touched.end(), bc->second.begin(), bc->second.end() );
 		bool changed = false;
-		for ( uint32_t r : touched ) {
-			const bool want = inLayer( r );
-			if ( want == ( layer_.count( r ) > 0 ) )
-				continue;
-			if ( want )
-				layer_.insert( r );
-			else
-				layer_.erase( r );
-			changed = true;
-		}
+		for ( uint32_t r : touched )
+			changed = settle( r ) || changed;
 		return changed;
 	}
 
@@ -278,13 +357,158 @@ public:
 	}
 	size_t refs() const { return own_.size(); }
 
+	/* lane LARGEREF6 (LARGEREF-FLATMASK-FIX): the flat mask's answer. A candidate is a listed ref drawn by its far copy
+	 * alone (a flat far kind at its own cell, that cell not loaded); its footprint comes from the caller (pending ->
+	 * setFootprint, the REFR and OBND read lazily), then reeval() decides. */
+	void setFlatMask( FlatMask m, float share )
+	{
+		mask_ = m;
+		share_ = share;
+	}
+	FlatMask flatMask() const { return mask_; }
+	float promoteShare() const { return share_; }
+	//! The ref's far copy is a flat field's (masked where a loaded cell lies, never hidden by ref)
+	bool flatFar( uint32_t r ) const { return mapOn_ ? farAt( r, Far::None ) == Far::Flat : !full_; }
+	//! A listed ref seen by its flat far copy alone: the mask cuts what reaches into the loaded cells
+	bool candidate( uint32_t r ) const { return flatFar( r ) && listers( r ) > 0 && !ownLoaded( r ); }
+	//! Candidates whose footprint was never given (empty once every one was); cleared by setFootprint
+	const std::set<uint32_t> & pending() const { return pending_; }
+	//! The footprint (an empty Box when the REFR has none): the ref leaves pending
+	void setFootprint( uint32_t r, const Box & b )
+	{
+		pending_.erase( r );
+		if ( boxes_.count( r ) )
+			return;
+		boxes_[r] = b;
+		dirty_.insert( r );
+		if ( !b.valid() )
+			return;
+		for ( int y = cellOf( b.y0 ); y <= cellOf( b.y1 ); y++ )
+			for ( int x = cellOf( b.x0 ); x <= cellOf( b.x1 ); x++ )
+				boxCells_[key( x, y )].push_back( r );
+	}
+	bool hasFootprint( uint32_t r ) const { return boxes_.count( r ) > 0; }
+	//! Share of the footprint's area over the loaded cells (0 without a footprint)
+	float cutShare( uint32_t r ) const
+	{
+		auto it = boxes_.find( r );
+		return it == boxes_.end() ? 0.0f : cutShare( it->second );
+	}
+	//! Exact: the turned rectangle's area inside the loaded cells (each cell's square clips it) over its own area
+	float cutShare( const Box & b ) const
+	{
+		if ( !b.valid() || loaded_.empty() )
+			return 0.0f;
+		float in = 0.0f;
+		for ( int y = cellOf( b.y0 ); y <= cellOf( b.y1 ); y++ )
+			for ( int x = cellOf( b.x0 ); x <= cellOf( b.x1 ); x++ )
+				if ( loaded_.count( key( x, y ) ) )
+					in += clipArea( b, x, y );
+		return std::min( 1.0f, in / ( 4.0f * b.hx * b.hy ) );
+	}
+	//! The turned rectangle's area inside cell (x, y): its corners clipped to the square, then the shoelace sum
+	static float clipArea( const Box & b, int x, int y )
+	{
+		float ax[10], ay[10], bx[10], by[10];
+		int n = 4;
+		b.world( -b.hx, -b.hy, ax[0], ay[0] );
+		b.world( b.hx, -b.hy, ax[1], ay[1] );
+		b.world( b.hx, b.hy, ax[2], ay[2] );
+		b.world( -b.hx, b.hy, ax[3], ay[3] );
+		n = clipHalf( ax, ay, n, bx, by, 0, x * 4096.0f, true );
+		n = clipHalf( bx, by, n, ax, ay, 0, ( x + 1 ) * 4096.0f, false );
+		n = clipHalf( ax, ay, n, bx, by, 1, y * 4096.0f, true );
+		n = clipHalf( bx, by, n, ax, ay, 1, ( y + 1 ) * 4096.0f, false );
+		if ( n < 3 )
+			return 0.0f;
+		float a = 0.0f;
+		for ( int i = 0; i < n; i++ ) {
+			const int j = ( i + 1 ) % n;
+			a += ax[i] * ay[j] - ax[j] * ay[i];
+		}
+		return std::fabs( a ) * 0.5f;
+	}
+	//! One Sutherland-Hodgman step: the polygon's part on the kept side of axis = v (0: x, 1: y)
+	static int clipHalf( const float * ix, const float * iy, int n, float * ox, float * oy, int axis, float v, bool keepGreater )
+	{
+		int m = 0;
+		for ( int i = 0; i < n; i++ ) {
+			const int j = ( i + 1 ) % n;
+			const float a = axis ? iy[i] : ix[i], bq = axis ? iy[j] : ix[j];
+			const bool ina = keepGreater ? a >= v : a <= v, inb = keepGreater ? bq >= v : bq <= v;
+			if ( ina ) {
+				ox[m] = ix[i];
+				oy[m] = iy[i];
+				m++;
+			}
+			if ( ina != inb ) {
+				const float t = ( v - a ) / ( bq - a );
+				ox[m] = ix[i] + ( ix[j] - ix[i] ) * t;
+				oy[m] = iy[i] + ( iy[j] - iy[i] ) * t;
+				m++;
+			}
+		}
+		return m;
+	}
+	//! promote: the candidate's cut share reaches the threshold, so the layer draws it full
+	bool promoted( uint32_t r ) const { return mask_ == FlatMask::Promote && candidate( r ) && cutShare( r ) >= share_; }
+	//! Refs the layer settles once their footprints arrived (setFootprint); true when the layer changed
+	bool reeval()
+	{
+		bool changed = false;
+		for ( uint32_t r : dirty_ )
+			changed = settle( r ) || changed;
+		dirty_.clear();
+		return changed;
+	}
+	//! keepbox: the footprints the mask keeps now (candidates whose box reaches a loaded cell), sorted by ref
+	std::vector<Box> keepBoxes() const
+	{
+		std::vector<Box> out;
+		if ( mask_ != FlatMask::KeepBox )
+			return out;
+		for ( const auto & kv : boxes_ )
+			if ( kv.second.valid() && candidate( kv.first ) && cutShare( kv.second ) > 0.0f )
+				out.push_back( kv.second );
+		return out;
+	}
+	//! Candidates the mask cuts now, and of them the promoted ones (the stream's line)
+	void maskCounts( int & cut, int & promotedN ) const
+	{
+		cut = promotedN = 0;
+		for ( const auto & kv : boxes_ ) {
+			if ( !kv.second.valid() || !candidate( kv.first ) || cutShare( kv.second ) <= 0.0f )
+				continue;
+			cut++;
+			promotedN += promoted( kv.first ) ? 1 : 0;
+		}
+	}
+
 private:
 	static int64_t key( int x, int y ) { return int64_t( ( uint64_t( uint32_t( x ) ) << 32 ) | uint64_t( uint32_t( y ) ) ); }
+	static int cellOf( float w ) { return int( std::floor( w / 4096.0f ) ); }
 	bool fullFor( uint32_t r ) const
 	{
 		return mapOn_ ? LargeRef::fullOutside( farAt( r, Far::None ), flatDouble_ ) : full_;	// lane LARGEREF4
 	}
-	bool inLayer( uint32_t r ) const { return fullFor( r ) && listers( r ) > 0 && ( red_ || !ownLoaded( r ) ); }
+	// lane LARGEREF6: a promoted candidate joins the layer too
+	bool inLayer( uint32_t r ) const { return ( fullFor( r ) || promoted( r ) ) && listers( r ) > 0 && ( red_ || !ownLoaded( r ) ); }
+	//! The layer takes or lets go of the ref as inLayer says; a candidate without a footprint joins pending
+	bool settle( uint32_t r )
+	{
+		if ( mask_ != FlatMask::Accept && candidate( r ) && !boxes_.count( r ) )
+			pending_.insert( r );
+		else
+			pending_.erase( r );
+		const bool want = inLayer( r );
+		if ( want == ( layer_.count( r ) > 0 ) )
+			return false;
+		if ( want )
+			layer_.insert( r );
+		else
+			layer_.erase( r );
+		return true;
+	}
 
 	bool red_ = false;
 	bool full_ = true;	// lane LARGEREF3
@@ -296,6 +520,11 @@ private:
 	std::map<uint32_t, int> count_;                       //!< ref -> loaded listing cells
 	std::set<int64_t> loaded_;
 	std::set<uint32_t> layer_;
+	FlatMask mask_ = FlatMask::Accept;	// lane LARGEREF6
+	float share_ = 0.25f;
+	std::map<uint32_t, Box> boxes_;                       //!< ref -> its footprint (empty: none known)
+	std::map<int64_t, std::vector<uint32_t>> boxCells_;   //!< cell -> refs whose footprint reaches it
+	std::set<uint32_t> pending_, dirty_;
 };
 
 }

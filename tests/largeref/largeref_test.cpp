@@ -5,6 +5,7 @@
 
 #include <cstdio>
 #include <cstring>
+#include <map>
 #include <set>
 #include <utility>
 
@@ -42,6 +43,11 @@ static const bool FIXEDRED = false;
 static const bool FLATNONERED = true;
 #else
 static const bool FLATNONERED = false;
+#endif
+#ifdef LARGEREF_FLATMASK_RED	// lane LARGEREF6 (FLATMASK-FIX): the flat mask's cut stays whatever the env picks (accept)
+static const bool FLATMASKRED = true;
+#else
+static const bool FLATMASKRED = false;
 #endif
 
 /* lane LARGEREF5: a flat far field round a fixed open at cx,cy as cellFarLodAppend maps it (a fixed open's hole is the
@@ -314,6 +320,124 @@ static int fixedCensus( const char * path, int mapMode )
 	return pass ? 0 : 1;
 }
 
+/* lane LARGEREF6 (LARGEREF-FLATMASK-FIX): the walk over a flat far field with every ref's footprint (a text table:
+ * form x y z rx ry rz scale lo[3] hi[3]; notes/largeref6/tools/extent_txt.py from largeref4's lr_extent.py). promote:
+ * a listed ref whose far copy the loaded cells cut by >= 0.25 joins the layer; keepbox: one box per cut far copy, the
+ * layer stays empty. The python census (notes/largeref4/tmp/flatmask_3C.txt) read 2288 listed step-refs cut and 821
+ * step-refs at >= 0.25 (20 of them unlisted), so the walk must land near those. */
+struct Extent
+{
+	float pos[3], rot[3], scale, lo[3], hi[3];
+};
+static bool readExtent( const char * path, std::map<uint32_t, Extent> & out )
+{
+	std::FILE * f = std::fopen( path, "r" );
+	if ( !f ) {
+		std::printf( "flatmask census: cannot read %s\n", path );
+		return false;
+	}
+	char line[512];
+	while ( std::fgets( line, sizeof( line ), f ) ) {
+		unsigned form = 0;
+		Extent e;
+		if ( std::sscanf( line, "%x %f %f %f %f %f %f %f %f %f %f %f %f %f", &form, &e.pos[0], &e.pos[1], &e.pos[2], &e.rot[0],
+				&e.rot[1], &e.rot[2], &e.scale, &e.lo[0], &e.lo[1], &e.lo[2], &e.hi[0], &e.hi[1], &e.hi[2] ) == 14 )
+			out[form] = e;
+	}
+	std::fclose( f );
+	return !out.empty();
+}
+static int flatMaskCensus( const char * path, const char * extentPath )
+{
+	std::vector<LargeRef::Row> rows;
+	int subs = 0, refused = 0;
+	std::map<uint32_t, Extent> ext;
+	if ( !readRnam( path, rows, subs, refused ) || !readExtent( extentPath, ext ) )
+		return 2;
+	// the test's own share, as the python census took it: points 64 units apart over the turned rectangle
+	auto shareOf = [&]( const Extent & e, const std::set<std::pair<int, int>> & loaded ) {
+		const float c = std::cos( e.rot[2] ), s = std::sin( e.rot[2] );
+		const int nx = std::max( 1, int( ( e.hi[0] - e.lo[0] ) * e.scale / 64.0f ) ), ny = std::max( 1, int( ( e.hi[1] - e.lo[1] ) * e.scale / 64.0f ) );
+		int in = 0;
+		for ( int i = 0; i < nx; i++ )
+			for ( int j = 0; j < ny; j++ ) {
+				const float lx = ( e.lo[0] + ( i + 0.5f ) * ( e.hi[0] - e.lo[0] ) / nx ) * e.scale;
+				const float ly = ( e.lo[1] + ( j + 0.5f ) * ( e.hi[1] - e.lo[1] ) / ny ) * e.scale;
+				const float wx = e.pos[0] + lx * c + ly * s, wy = e.pos[1] - lx * s + ly * c;
+				in += loaded.count( { int( std::floor( wx / 4096.0f ) ), int( std::floor( wy / 4096.0f ) ) } ) ? 1 : 0;
+			}
+		return float( in ) / float( nx * ny );
+	};
+	long cutN[2] = { 0, 0 }, promN[2] = { 0, 0 }, boxN[2] = { 0, 0 }, badLayer[2] = { 0, 0 }, lowShare = 0, noFoot = 0, steps = 0;
+	for ( int mi = 0; mi < 2; mi++ ) {
+		const LargeRef::FlatMask mode = mi == 0 ? LargeRef::FlatMask::Promote : LargeRef::FlatMask::KeepBox;
+		LargeRef::Owners o( false );
+		o.setFullOutside( LargeRef::fullOutside( LargeRef::Far::Flat, false ) );
+		o.setFlatMask( FLATMASKRED ? LargeRef::FlatMask::Accept : mode, 0.25f );
+		o.setRows( rows );
+		std::set<std::pair<int, int>> loaded;
+		for ( int ri = 0; ri < 4; ri++ ) {
+			const int * rt = routes[ri];
+			int x = rt[0], y = rt[1];
+			for ( ;; ) {
+				std::set<std::pair<int, int>> next;
+				for ( int dy = -2; dy <= 2; dy++ )
+					for ( int dx = -2; dx <= 2; dx++ )
+						next.insert( { x + dx, y + dy } );
+				for ( const auto & k : next )
+					if ( !loaded.count( k ) )
+						o.cell( k.first, k.second, true );
+				for ( const auto & k : loaded )
+					if ( !next.count( k ) )
+						o.cell( k.first, k.second, false );
+				loaded = next;
+				// the stream's part: the pending candidates get their footprints, then the owners settle
+				const std::vector<uint32_t> need( o.pending().begin(), o.pending().end() );
+				for ( uint32_t r : need ) {
+					LargeRef::Box b;
+					auto it = ext.find( r );
+					if ( it != ext.end() )
+						b = LargeRef::footprint( it->second.pos, it->second.rot[2], it->second.scale, it->second.lo, it->second.hi );
+					else
+						noFoot++;
+					o.setFootprint( r, b );
+				}
+				o.reeval();
+				int cut = 0, prom = 0;
+				o.maskCounts( cut, prom );
+				cutN[mi] += cut;
+				promN[mi] += prom;
+				boxN[mi] += long( o.keepBoxes().size() );
+				for ( uint32_t r : o.layer() ) {
+					if ( mode == LargeRef::FlatMask::KeepBox || !o.promoted( r ) ) {
+						badLayer[mi]++;
+						continue;
+					}
+					auto it = ext.find( r );
+					lowShare += it == ext.end() || shareOf( it->second, loaded ) < 0.22f ? 1 : 0;   // 16 x 16 samples vs 64-unit steps
+				}
+				if ( mi == 0 )
+					steps++;
+				if ( x == rt[2] && y == rt[3] )
+					break;
+				x += ( rt[2] > x ) - ( rt[2] < x );
+				y += ( rt[3] > y ) - ( rt[3] < y );
+			}
+		}
+	}
+	std::printf( "flatmask census: %d rows, %d footprints; %ld steps; %ld candidates without a footprint\n", int( rows.size() ),
+		int( ext.size() ), steps, noFoot );
+	std::printf( "flatmask census: promote: %ld step-refs cut, %ld promoted (cut share >= 0.25), %ld layer refs not promoted, "
+		"%ld promoted under the share by the test's own area\n", cutN[0], promN[0], badLayer[0], lowShare );
+	std::printf( "flatmask census: keepbox: %ld step-refs cut, %ld boxes kept, %ld refs in the layer\n", cutN[1], boxN[1], badLayer[1] );
+	check( cutN[0] >= 2150 && cutN[0] <= 2450, "flatmask: listed far copies cut near the python census (2288)" );
+	check( promN[0] >= 700 && promN[0] <= 900, "flatmask promote: the refs at >= 0.25 join the layer (python: 821 incl. 20 unlisted)" );
+	check( badLayer[0] == 0 && lowShare == 0, "flatmask promote: every layer ref is a promoted candidate at the share" );
+	check( cutN[1] == cutN[0] && boxN[1] == cutN[1] && badLayer[1] == 0, "flatmask keepbox: one box per cut far copy, no layer" );
+	std::printf( "largeref: %d failed -- %s\n", fails, fails ? "FAIL" : "PASS" );
+	return fails ? 1 : 0;
+}
+
 int main( int argc, char ** argv )
 {
 	std::setvbuf( stdout, nullptr, _IONBF, 0 );
@@ -329,6 +453,8 @@ int main( int argc, char ** argv )
 			if ( std::strncmp( argv[4], "fixed", 5 ) == 0 )
 				return fixedCensus( argv[2], std::strcmp( argv[4], "fixedbudget" ) == 0 ? 2
 					: std::strcmp( argv[4], "fixedflat" ) == 0 ? 3 : 1 );	// lane LARGEREF5: fixedflat
+			if ( std::strcmp( argv[4], "flatmask" ) == 0 )	// lane LARGEREF6: --far flatmask <extent table>
+				return flatMaskCensus( argv[2], argc > 5 ? argv[5] : "" );
 		}
 		return census( argv[2], far, mapMode );
 	}
@@ -470,6 +596,61 @@ int main( int argc, char ** argv )
 		check( !LargeRef::fixedFull( true, nullptr, 12, -3, false, false, Far::Flat ), "fixed flat mode: no map -> the mode (hidden)" );
 		check( !LargeRef::fixedPlaced( Far::Flat, true, false ) && LargeRef::fixedPlaced( Far::ByRef, true, false ),
 			"fixed: by the mode (fixedpermode, the stream's open) -> flat places none, byref all" );
+	}
+	// lane LARGEREF6 (LARGEREF-FLATMASK-FIX): footprints, the mask's keep test, promote by cut share, keepbox's boxes
+	{
+		using LargeRef::Far;
+		// a wide ref (6000 x 1000) at cell (12,-3), 100 units in from its west edge: the footprint reaches into (11,-3)
+		const float pos[3] = { 4096.0f * 12 + 100, -4096.0f * 3 + 2048, 0 }, lo[3] = { -3000, -500, 0 }, hi[3] = { 3000, 500, 100 };
+		const LargeRef::Box b = LargeRef::footprint( pos, 0.0f, 1.0f, lo, hi );
+		check( b.valid() && b.x0 < 4096.0f * 12 && b.x1 > 4096.0f * 12 + 100, "footprint: a wide ref at (12,-3) reaches west into (11,-3)" );
+		const LargeRef::Box r = LargeRef::footprint( pos, 1.5707964f, 1.0f, lo, hi );
+		check( r.x1 - r.x0 < 1100 && r.y1 - r.y0 > 5900, "footprint: turned by the ref's Z rotation" );
+		const LargeRef::Box s = LargeRef::footprint( pos, 0.0f, 2.0f, lo, hi );
+		check( s.x1 - s.x0 > 11900, "footprint: scaled" );
+		check( !LargeRef::Box().valid(), "footprint: none known -> an empty box" );
+		check( LargeRef::inBox( pos[0], pos[1], { b } ) && !LargeRef::inBox( pos[0], pos[1] + 5000, { b } ), "inBox: inside / outside" );
+		float share = 0;
+		check( LargeRef::flatMaskOf( "keepbox", share ) == LargeRef::FlatMask::KeepBox
+				&& LargeRef::flatMaskOf( "promote", share ) == LargeRef::FlatMask::Promote && share == 0.25f,
+			"env: keepbox, promote (share 0.25)" );
+		check( LargeRef::flatMaskOf( "promote:0.5", share ) == LargeRef::FlatMask::Promote && share == 0.5f
+				&& LargeRef::flatMaskOf( "", share ) == LargeRef::FlatMask::Accept, "env: promote:0.5, unset -> accept" );
+		// the tower 0x100 at (12,-3), listed by (10,-2), over a flat far field: the far copy alone until the mask cuts it
+		std::vector<LargeRef::Row> own = rows;
+		const auto c = rnam( -3, 12, { ref( 0x100, 12, -3 ) } );
+		LargeRef::decode( c.data(), c.size(), true, own );
+		LargeRef::Owners p( false );
+		p.setFullOutside( LargeRef::fullOutside( Far::Flat, false ) );
+		p.setFlatMask( FLATMASKRED ? LargeRef::FlatMask::Accept : LargeRef::FlatMask::Promote, 0.25f );
+		p.setRows( own );
+		p.cell( 10, -2, true );
+		check( p.candidate( 0x100 ) && p.pending().count( 0x100 ) == 1, "promote: a listed ref over flat -> a candidate, footprint wanted" );
+		p.setFootprint( 0x100, b );
+		check( p.pending().empty() && !p.reeval() && p.copies( 0x100 ) == 0, "promote: no loaded cell under the footprint -> far copy alone" );
+		p.cell( 11, -3, true );   // the cell the footprint reaches loads: near half the box is cut
+		check( p.cutShare( 0x100 ) > 0.4f && p.cutShare( 0x100 ) < 0.6f, "promote: the share of the footprint over the loaded cells" );
+		check( p.promoted( 0x100 ) && p.layer().count( 0x100 ) == 1 && p.copies( 0x100 ) == 1,
+			"promote: cut share >= 0.25 -> the layer draws it full" );
+		p.cell( 11, -3, false );
+		check( !p.layer().count( 0x100 ), "promote: the cell leaves -> share 0, the layer lets go" );
+		p.cell( 12, -3, true );
+		p.cell( 11, -3, true );
+		check( !p.candidate( 0x100 ) && !p.layer().count( 0x100 ) && p.copies( 0x100 ) == 1,
+			"promote: its own cell loaded -> the cell draws it, never the layer" );
+		LargeRef::Owners k( false );
+		k.setFullOutside( LargeRef::fullOutside( Far::Flat, false ) );
+		k.setFlatMask( FLATMASKRED ? LargeRef::FlatMask::Accept : LargeRef::FlatMask::KeepBox, 0.25f );
+		k.setRows( own );
+		k.cell( 10, -2, true );
+		k.cell( 11, -3, true );
+		const std::vector<uint32_t> need( k.pending().begin(), k.pending().end() );
+		for ( uint32_t f : need )
+			k.setFootprint( f, f == 0x100 ? b : LargeRef::Box() );
+		check( !k.reeval() && k.layer().empty() && k.keepBoxes().size() == 1 && k.keepBoxes()[0] == b,
+			"keepbox: the layer stays empty, the mask keeps the cut footprint" );
+		k.cell( 11, -3, false );
+		check( k.keepBoxes().empty(), "keepbox: no loaded cell under the footprint -> no box" );
 	}
 	// lane LARGEREF2 (LARGEREF-INI): the ini line largeRefsWanted reads, through the same reader and arguments
 	{

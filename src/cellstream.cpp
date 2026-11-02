@@ -224,6 +224,11 @@ public:
 	bool lrOn = false;
 	LargeRef::Owners lr;
 	std::set<Key> lrWanted;	//!< the units the layer draws now
+	// lane LARGEREF6 (LARGEREF-FLATMASK-FIX): the flat mask's answer, the keep boxes published last, the line's last counts
+	LargeRef::FlatMask lrMask = LargeRef::FlatMask::Accept;
+	std::vector<LargeRef::Box> lrBoxes;
+	int lrCutLast = -1, lrPromLast = -1;
+	bool lrFlatMask();
 	bool want( const Key & k ) const { return wanted.count( k ) > 0 || lrWanted.count( k ) > 0; }
 
 	void texCensus();
@@ -577,7 +582,10 @@ void Stream::registerMasks( Scene * sc )
 			x1 = cellOf( hi[0] );
 			y1 = cellOf( hi[1] );
 		}
-		CellFarHide::registerMask( nif, b, x0, y0, x1, y1 );
+		// lane LARGEREF6: the keep boxes apply to far objects only (terrain and water under a box must still give way)
+		const QString bn = sh->getName();
+		CellFarHide::registerMask( nif, b, x0, y0, x1, y1,
+			!bn.startsWith( QLatin1String( "FarLOD terrain" ) ) && !bn.startsWith( QLatin1String( "FarLOD water" ) ) );
 		maskShapes.insert( b, sh );
 		sh->wwRefreshData();   // a scene made again: its arrays are whole until the mask applies
 	}
@@ -632,7 +640,11 @@ void Stream::farHideForget()
  * same step as the cell that now draws its ref (no frame with two copies); the far rows follow the attached units. */
 void Stream::lrCell( const StreamCell & c, bool on )
 {
-	if ( !lrOn || c.lref || !lr.cell( c.x, c.y, on ) )
+	if ( !lrOn || c.lref )
+		return;
+	bool changed = lr.cell( c.x, c.y, on );
+	changed = lrFlatMask() || changed;	// lane LARGEREF6: the flat mask's answer moves the layer (promote) or the boxes
+	if ( !changed )
 		return;
 	bool gone = false;
 	for ( auto it = cells.begin(); it != cells.end(); ) {
@@ -650,6 +662,56 @@ void Stream::lrCell( const StreamCell & c, bool on )
 	}
 	if ( gone )
 		lrPublish();
+}
+
+/* lane LARGEREF6 (LARGEREF-FLATMASK-FIX): after the owners moved. A candidate (a listed ref seen by its flat far copy
+ * alone) gets its footprint once: the REFR's position, rotation and scale with the base's OBND. promote settles the
+ * layer by the cut share; keepbox hands the mask the footprints over the loaded cells and refreshes the blocks there.
+ * The line prints when the counts move. */
+bool Stream::lrFlatMask()
+{
+	if ( lrMask == LargeRef::FlatMask::Accept || !seed || !seed->world )
+		return false;
+	const std::set<uint32_t> need = lr.pending();
+	for ( uint32_t r : need ) {
+		LargeRef::Box b;
+		int x = 0, y = 0;
+		EsmRefr e;
+		float lo[3] = { 0, 0, 0 }, hi[3] = { 0, 0, 0 };
+		if ( lr.ownCell( r, x, y ) && seed->world->refrByForm( r, x, y, e ) && seed->world->objectBounds( e.base, lo, hi ) )
+			b = LargeRef::footprint( e.pos, e.rot[2], e.scale, lo, hi );
+		lr.setFootprint( r, b );
+	}
+	const bool changed = lr.reeval();
+	if ( lrMask == LargeRef::FlatMask::KeepBox && nif ) {
+		std::vector<LargeRef::Box> boxes = lr.keepBoxes();
+		if ( boxes != lrBoxes ) {
+			const QSet<qint64> cells = CellFarHide::setKeepBoxes( nif, boxes );
+			lrBoxes = std::move( boxes );
+			QSet<int> blocks;
+			for ( qint64 k : cells )
+				for ( int b : CellFarHide::maskBlocks( nif, int( k >> 32 ), int( qint32( quint32( k & 0xFFFFFFFFu ) ) ) ) )
+					blocks.insert( b );
+			for ( int b : blocks )
+				if ( Shape * sh = static_cast<Shape *>( maskShapes.value( b ).data() ) )
+					sh->wwRefreshData();
+			if ( scene && root )
+				scene->transformDirty = true;
+		}
+	}
+	int cut = 0, prom = 0;
+	lr.maskCounts( cut, prom );
+	if ( cut != lrCutLast || prom != lrPromLast ) {
+		lrCutLast = cut;
+		lrPromLast = prom;
+		if ( lrMask == LargeRef::FlatMask::KeepBox )
+			std::fprintf( stderr, "cell stream: large refs flat mask keepbox: %d far copies reach the loaded cells, %d boxes kept\n",
+				cut, int( lrBoxes.size() ) );
+		else
+			std::fprintf( stderr, "cell stream: large refs flat mask promote: %d far copies reach the loaded cells, %d promoted "
+				"(cut share >= %.2f)\n", cut, prom, double( lr.promoteShare() ) );
+	}
+	return changed;
 }
 
 //! lane LARGEREF2: the attached units' refs: their far rows hide (CellFarHide::setExtraRefs, red nohide)
@@ -1386,6 +1448,16 @@ void cellStreamStart( NifModel * nif, std::shared_ptr<CellStreamSeed> seed )
 		if ( haveMap && !perMode )
 			s->lr.setFarMap( farMap, flatDouble );
 		s->lr.setRows( seed->world->largeRefRows() );
+		/* lane LARGEREF6 (LARGEREF-FLATMASK-FIX): WW_CELL_LARGEREFS_FLATMASK=accept|keepbox|promote[:share] (launch key);
+		 * accept (today's cut) until the hold's pictures pick one */
+		{
+			float share = 0.25f;
+			s->lrMask = LargeRef::flatMaskOf( wwEnvStr( "WW_CELL_LARGEREFS_FLATMASK" ).toLower().toStdString(), share );
+			s->lr.setFlatMask( s->lrMask, share );
+			if ( s->lrMask != LargeRef::FlatMask::Accept )
+				std::fprintf( stderr, "cell stream: large refs flat mask: %s (promote share %.2f)\n",
+					s->lrMask == LargeRef::FlatMask::KeepBox ? "keepbox" : "promote", double( share ) );
+		}
 		if ( haveMap ) {
 			int byRef = 0, flat = 0, none = 0;
 			for ( const LargeRef::Row & r : seed->world->largeRefRows() ) {

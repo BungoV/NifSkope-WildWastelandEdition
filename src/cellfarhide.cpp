@@ -15,6 +15,7 @@ struct MaskInfo
 {
 	int cx0 = 0, cy0 = 0, cx1 = -1, cy1 = -1;
 	qint64 hidden = 0;
+	bool objects = true;   //!< lane LARGEREF6: a far objects shape (the keep boxes apply)
 };
 
 struct Doc
@@ -22,7 +23,20 @@ struct Doc
 	CellFarHide::Hidden h;
 	QHash<int, MaskInfo> masks;
 	QVector<quint32> extra;   //!< lane GEOLOD1: setExtraRefs' list, counted in h.refs
+	std::vector<LargeRef::Box> keep;   //!< lane LARGEREF6: setKeepBoxes' boxes
 };
+
+//! lane LARGEREF6: the cells a box reaches
+void boxCells( const LargeRef::Box & b, QSet<qint64> & out )
+{
+	if ( !b.valid() )
+		return;
+	const int x0 = int( std::floor( b.x0 / 4096.0f ) ), x1 = int( std::floor( b.x1 / 4096.0f ) );
+	const int y0 = int( std::floor( b.y0 / 4096.0f ) ), y1 = int( std::floor( b.y1 / 4096.0f ) );
+	for ( int y = y0; y <= y1; y++ )
+		for ( int x = x0; x <= x1; x++ )
+			out.insert( CellFarHide::cellKey( x, y ) );
+}
 
 // one counter for every document and clear(): a set made again must never repeat a key the row caches hold
 quint64 nextGen()
@@ -219,13 +233,35 @@ View view( const CellMeshInst & d )
 	return v;
 }
 
-void registerMask( const void * doc, int block, int cx0, int cy0, int cx1, int cy1 )
+void registerMask( const void * doc, int block, int cx0, int cy0, int cx1, int cy1, bool objects )
 {
 	MaskInfo & mi = docs()[doc].masks[block];
 	mi.cx0 = cx0;
 	mi.cy0 = cy0;
 	mi.cx1 = cx1;
 	mi.cy1 = cy1;
+	mi.objects = objects;
+}
+
+QSet<qint64> setKeepBoxes( const void * doc, const std::vector<LargeRef::Box> & boxes )
+{
+	QSet<qint64> cells;
+	if ( !doc )
+		return cells;
+	Doc & d = docs()[doc];
+	for ( const LargeRef::Box & b : d.keep )
+		boxCells( b, cells );
+	for ( const LargeRef::Box & b : boxes )
+		boxCells( b, cells );
+	d.keep = boxes;
+	d.h.gen = nextGen();
+	return cells;
+}
+
+int keepBoxCount( const void * doc )
+{
+	const Doc * d = docOf( doc );
+	return d ? int( d->keep.size() ) : 0;
 }
 
 bool maskRegistered( const void * doc, int block )
@@ -251,6 +287,12 @@ QList<int> maskBlocks( const void * doc, int x, int y )
 int maskPure( const Transform & world, const QVector<Vector3> & verts, QVector<Triangle> & tris,
 	const QSet<qint64> & cells )
 {
+	return maskPure( world, verts, tris, cells, std::vector<LargeRef::Box>() );
+}
+
+int maskPure( const Transform & world, const QVector<Vector3> & verts, QVector<Triangle> & tris,
+	const QSet<qint64> & cells, const std::vector<LargeRef::Box> & keep )
+{
 	if ( cells.isEmpty() || tris.isEmpty() )
 		return 0;
 	int n = 0;
@@ -261,6 +303,8 @@ int maskPure( const Transform & world, const QVector<Vector3> & verts, QVector<T
 			continue;
 		const Vector3 c = world * ( ( verts.at( t[0] ) + verts.at( t[1] ) + verts.at( t[2] ) ) / 3.0f );
 		if ( !cells.contains( cellKey( int( std::floor( c[0] / 4096.0f ) ), int( std::floor( c[1] / 4096.0f ) ) ) ) )
+			continue;
+		if ( !keep.empty() && LargeRef::inBox( c[0], c[1], keep ) )   // lane LARGEREF6: inside a large ref's far footprint
 			continue;
 		const quint16 v = t[0];
 		tris[i] = Triangle( v, v, v );
@@ -288,7 +332,7 @@ int applyMask( const void * doc, int block, const Transform & world, const QVect
 		if ( x >= m.cx0 && x <= m.cx1 && y >= m.cy0 && y <= m.cy1 )
 			mine.insert( k );
 	}
-	m.hidden = maskPure( world, verts, tris, mine );
+	m.hidden = maskPure( world, verts, tris, mine, m.objects ? d->keep : std::vector<LargeRef::Box>() );
 	return int( m.hidden );
 }
 
