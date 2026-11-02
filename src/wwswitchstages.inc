@@ -596,7 +596,7 @@
 { "WW_CELL_VOLAIR_TRICUBIC", 0, "src/gl/cellvolair.cpp:192 vs | init-once state, re-read when a live set moves its prefix (b)" },
 { "WW_CELL_VOLPART", 0, "src/gl/cellvolair.cpp:2689 vps | re-read per frame or per call (a)" },
 { "WW_CELL_VOLPART_DUMP", 0, "src/gl/glparticles.cpp:234 wwVolPartFxDump | re-read per frame or per call (a)" },
-{ "WW_CELL_VOLPART_HIDE", 0, "src/gl/cellvolair.cpp:2728 wwVolPartHidden | re-read per frame or per call (a)" },
+{ "WW_CELL_VOLPART_HIDE", 0, "src/gl/cellvolair.cpp:2729 wwVolPartHidden | re-read per frame or per call (a)" },
 { "WW_CELL_VOLPART_RED", 0, "src/gl/cellvolair.cpp:2696 vps | re-read per frame or per call (a)" },
 { "WW_CELL_VOLUMES", 1, "src/cellview.cpp:6269 cellBuild | read while the cell document is built" },
 { "WW_CELL_VOLUMES_DASHRED", 0, "src/gl/cellvolumeview.cpp:248 buildFixed | hand: wwCellVolumeViewDraw re-reads it per frame and rebuilds the fixed lines (lane VOLPLACE2)" },
