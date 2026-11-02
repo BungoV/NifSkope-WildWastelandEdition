@@ -904,6 +904,8 @@ void run( NifSkope * skope, WwScState * st )
 		say( *st, QStringLiteral( "  REFUSED: no scratch scope, nothing read or written" ) );
 		return;
 	}
+	// lane STARTSPEED1: the Scene window is built on its first show; the legs below find it by name
+	wwSceneWindowEnsure( skope );
 	cubeLeg( skope, *st );
 	if ( wwEnvStr( "WW_SCENE_TEST_WINDOW" ) == QLatin1StringView( "1" ) )
 		windowLeg( skope, *st );

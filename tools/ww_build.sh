@@ -80,8 +80,20 @@ if [ -n "$HEADREV" ] && [ -f Makefile.Release ]; then
 		echo "revision: $HEADREV (Makefiles on HEAD)"
 	fi
 fi
-MSYSTEM=UCRT64 CHERE_INVOKING=1 /c/msys64/usr/bin/bash -lc 'export PATH="$PATH:/e/Tools/GIT/cmd"; cd "$1" || exit 2; make -j2 > release/ww_build.log 2>&1; rc=$?; grep -E "error:|Error [0-9]" release/ww_build.log | head -20; echo BUILD-RC=$rc; exit $rc' _ "$ROOT"
+# lane STARTSPEED1: WW_BUILD_JOBS=<n> sets make's -j (default 2: up to 2 builds share the machine under withlock);
+# WW_BUILD_TIMES=<log> puts tools/ww_ctime.sh before the compiler (one line per object, ranked by
+# tools/ww_build_times.py). The build's wall time is printed either way.
+JOBS="${WW_BUILD_JOBS:-2}"
+case "$JOBS" in ''|*[!0-9]*) JOBS=2 ;; esac
+CXXOVR=""; CTLOG=""
+if [ -n "${WW_BUILD_TIMES:-}" ]; then
+	CTLOG="$(cygpath -u "$WW_BUILD_TIMES" 2>/dev/null || echo "$WW_BUILD_TIMES")"	# the MSYS2 login shell drops exported vars: passed as $3
+	CXXOVR="CXX=$ROOT/tools/ww_ctime.sh g++"
+fi
+bt0=$(date +%s)
+MSYSTEM=UCRT64 CHERE_INVOKING=1 /c/msys64/usr/bin/bash -lc 'export PATH="$PATH:/e/Tools/GIT/cmd"; cd "$1" || exit 2; j="$2"; [ -n "$3" ] && export WW_CTIME_LOG="$3"; shift 3; make -j"$j" "$@" > release/ww_build.log 2>&1; rc=$?; grep -E "error:|Error [0-9]" release/ww_build.log | head -20; echo BUILD-RC=$rc; exit $rc' _ "$ROOT" "$JOBS" "$CTLOG" ${CXXOVR:+"$CXXOVR"}
 rc=$?
+echo "build wall $(( $(date +%s) - bt0 )) s (make -j$JOBS)"
 ls -l --time-style=+%H:%M:%S release/NifSkope.exe
 [ $rc -eq 0 ] || { echo "BUILD FAILED"; exit $rc; }
 
@@ -99,4 +111,39 @@ for f in res/shaders/*; do
 	[ -f "release/shaders/$(basename "$f")" ] && ! cmp -s "$f" "release/shaders/$(basename "$f")" && { echo "shader copy out of step: $f"; exit 5; }
 done
 echo "copies in step"
+
+# lane STARTSPEED1: the shader-cache warm start. When the shaders changed since the last warm start (or there
+# was none), the new exe starts once, headless, and quits at its first frame (WW_STARTUP_QUIT=1), so the next
+# start loads every program binary from release/shadercache instead of linking them all (minutes cold).
+# WW_BUILD_WARM=0 skips it, =1 forces it. NifSkope starts one at a time: the warm start goes through
+# WW_BUILD_WARM_RUNNER (default: the lanes' withlock runner when present, else none) and is skipped, never
+# queued, while that lock is taken or has waiters (WW_BUILD_WARM_LOCK). It never fails the build.
+WARM="${WW_BUILD_WARM:-auto}"
+STAMP=release/shadercache/.ww_warm
+if [ "$WARM" != 0 ]; then
+	need=$([ "$WARM" = 1 ] && echo 1 || echo 0)
+	[ -f "$STAMP" ] || need=1
+	[ "$need" = 1 ] || [ -z "$(find release/shaders -newer "$STAMP" -type f | head -1)" ] || need=1
+	WRUN="${WW_BUILD_WARM_RUNNER-/e/Projects/Claude/notes/merge1030a/tools/withlock_m.sh}"
+	[ -n "$WRUN" ] && [ ! -f "$WRUN" ] && WRUN=""
+	WLOCK="${WW_BUILD_WARM_LOCK:-/e/Projects/NifskopeWildWastelandEdition/.lanes_nifskope.lock}"
+	if [ "$need" = 0 ]; then
+		echo "warm: the cache is in step with the shaders, skipped"
+	elif [ -n "$WRUN" ] && { [ -d "$WLOCK" ] || [ -n "$(ls -A "$WLOCK.q" 2>/dev/null)" ]; }; then
+		echo "warm: the NifSkope lock is taken or has waiters, skipped (the next start links cold)"
+	else
+		wt0=$(date +%s)
+		wcmd="cd '$ROOT' && WW_STARTUP_QUIT=1 WW_SETTINGS_SCOPE=ww_warm timeout 900 release/NifSkope.exe > release/ww_warm.log 2>&1"
+		if [ -n "$WRUN" ]; then
+			MEMCAP=8 bash "$WRUN" nifskope bash -c "$wcmd" < /dev/null > /dev/null 2>&1
+		else
+			bash -c "$wcmd" < /dev/null
+		fi
+		line="$(grep -a "shader programs:" release/ww_warm.log 2>/dev/null | tail -1 | tr -d '\r')"
+		echo "warm: $(( $(date +%s) - wt0 )) s; ${line:-no shader programs line (release/ww_warm.log)}"
+		if echo "$line" | grep -qE "programs: ([0-9]+) of \1 linked"; then
+			touch "$STAMP"
+		fi
+	fi
+fi
 exit 0

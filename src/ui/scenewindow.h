@@ -119,4 +119,11 @@ private:
 	bool m_placed = false;
 };
 
+/* lane STARTSPEED1: the Scene window is built on its first show (red WW_STARTUP_EAGER=1 builds it at start).
+ * The main window registers how to build it; a harness that needs it calls wwSceneWindowEnsure(). */
+void wwSceneWindowSetMaker( QObject * owner, std::function<QWidget *()> make );
+QWidget * wwSceneWindowEnsure( QObject * owner );
+//! the cloud scroll's test (Lookdev, Clouds, a live clock), for the main window's timer while none is built
+bool wwSceneCloudsAnimate();
+
 #endif

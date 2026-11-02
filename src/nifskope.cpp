@@ -1572,6 +1572,8 @@ QString NifSkope::fileFilters( bool allFiles )
  * main GUI window
  */
 
+void wwStartupMark( const char * stage );	// main.cpp (lane STARTSPEED1)
+
 NifSkope::NifSkope( bool background )
 	: QMainWindow(), ui( new Ui::MainWindow )
 {
@@ -1602,6 +1604,7 @@ NifSkope::NifSkope( bool background )
 
 	// Init UI
 	ui->setupUi( this );
+	wwStartupMark( "widgets: setupUi" );
 	// The native GL container and the specialist tree views accept their own
 	// drops, but blank chrome/toolbar areas otherwise have no accepting ancestor.
 	// The application event filter resolves an external .nif back to this window.
@@ -2758,9 +2761,11 @@ NifSkope::NifSkope( bool background )
 	// Create GLView
 	/* ********************** */
 
+	wwStartupMark( "widgets: models + block lists" );
 	ogl = new GLView( nullptr );
 	ogl->setObjectName( "OGL1" );
 	ogl->setNif( nif );
+	wwStartupMark( "widgets: gl view setNif" );	// the construct's sub-stages are the "gl view:" marks
 
 	// Create InspectView
 	/* ********************** */
@@ -2832,11 +2837,14 @@ NifSkope::NifSkope( bool background )
 
 	setContextMenuPolicy( Qt::NoContextMenu );
 
+	wwStartupMark( "window widgets" );
 	// Set Actions
 	initActions();
+	wwStartupMark( "window actions" );
 
 	// Dock Widgets
 	initDockWidgets();
+	wwStartupMark( "window docks" );
 
 	// Toolbars
 	initToolBars();
@@ -2846,6 +2854,7 @@ NifSkope::NifSkope( bool background )
 
 	// Connections (that are required to load after all other inits)
 	initConnections();
+	wwStartupMark( "window toolbars + menus" );
 
 	/* The Water Marking dock (src/watermarkpanel.cpp): marking water
 	 * direction by hand on a .lodl, which bungo asked for on 2026-09-09.

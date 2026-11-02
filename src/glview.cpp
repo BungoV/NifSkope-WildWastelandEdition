@@ -356,10 +356,13 @@ static void tlRegisterViewportShortcuts()
 		QKeySequence() );
 }
 
+void wwStartupMark( const char * stage );	// main.cpp (lane STARTSPEED1)
+
 GLView::GLView( QWindow * p )
 	: QOpenGLWindow( QOpenGLWindow::NoPartialUpdate, p )
 {
 	tlRegisterViewportShortcuts();
+	wwStartupMark( "gl view: window + shortcuts" );	// lane STARTSPEED1: the GL view's sub-stages
 	QSettings settings;
 	int	aa = settings.value( "Settings/Render/General/Msaa Samples", 2 ).toInt();
 	editDeformedCage = settings.value( "GLView/Edit/DeformedCage", true ).toBool();
@@ -399,6 +402,7 @@ GLView::GLView( QWindow * p )
 	fmt.setSamples( msaa );
 
 	GpuDriven::requestContext( fmt );	// lane GPUDRIVEN1: 4.6 core when the driver makes one (WW_GPUDRIVEN=0: 4.2)
+	wwStartupMark( "gl view: context probe" );
 
 	setFormat( fmt );
 
@@ -419,8 +423,10 @@ GLView::GLView( QWindow * p )
 	lastTime = std::chrono::steady_clock::now();
 
 	textures = new TexCache( this );
+	wwStartupMark( "gl view: texture cache" );
 
 	updateSettings();
+	wwStartupMark( "gl view: settings" );
 	view = cfg.startupDirection;
 	if ( int i = int( view ) - int( ViewTop ); i >= 0 && i <= 5 )
 		Rot = viewRotations[i];
@@ -429,6 +435,7 @@ GLView::GLView( QWindow * p )
 	wwCameraLog( "ctor", Rot, int( view ) );
 
 	scene = new Scene( textures );
+	wwStartupMark( "gl view: scene" );
 	connect( textures, &TexCache::sigRefresh, this, static_cast<void (GLView::*)()>(&GLView::update) );
 	connect( scene, &Scene::sceneUpdated, this, static_cast<void (GLView::*)()>(&GLView::update) );
 
@@ -446,6 +453,7 @@ GLView::GLView( QWindow * p )
 	connect( NifSkope::getOptions(), &SettingsDialog::update3D, this, &GLView::update3D );
 
 	setMinimumSize( QSize( 50, 50 ) );
+	wwStartupMark( "gl view: timers" );
 }
 
 GLView::~GLView()
@@ -3544,6 +3552,8 @@ void GLView::updateAnimationState( bool checked )
  *  OpenGL
  */
 
+void wwStartupMark( const char * stage );	// main.cpp (lane STARTSPEED1)
+
 void GLView::initializeGL()
 {
 	auto	cx = context();
@@ -3557,7 +3567,9 @@ void GLView::initializeGL()
 	scene->setOpenGLContext( cx );
 	glContext = scene->renderer;
 	textures->setOpenGLContext( glContext );
+	wwStartupMark( "gl context" );
 	updateShaders();		// should be called after TexCache is initialized
+	wwStartupMark( "shaders" );
 	glClearColor( cfg.background.red(), cfg.background.green(), cfg.background.blue(), cfg.background.alpha() );
 
 	// Initial viewport values
@@ -3797,6 +3809,10 @@ void GLView::paintGL()
 	CellSpeed::Acc speedAcc( "frames painted (paintGL, with first-use uploads)" );   // lane SPEED1
 	CellTexAhead::Frame texAheadFrame;   // lane SPEED1: a frame that loads no texture ends the read-ahead
 	wwPaintCounter++;
+	struct WwFirstFrame {	// lane STARTSPEED1: the start's last mark, when the first paint returns
+		bool first;
+		~WwFirstFrame() { if ( first ) wwStartupMark( "first frame" ); }
+	} wwFirstFrame{ wwPaintCounter == 1 };
 	QElapsedTimer wwStream1Clock;	// lane STREAM1: the whole paint, for the hitch figures
 	wwStream1Clock.start();
 	wwCellStreamEvict();
