@@ -94,6 +94,14 @@ int wwCellDitherSeed();
 
 //! After the scene's draw (and the cell view's one tone map): the vectors, the resolve, the frame back.
 void wwGameTaaResolve( Scene * scene );
+/*! lane POSTFX3: WW_TAA2_LINEAR=1 (default 0, env only) with a Modern tier: the resolve runs on the cell's linear frame
+ *  at the tone map's start (after the linear post, before the tone map). Its multisamples are averaged as the tone map
+ *  will show them (c / (1 + max c) at about display level, taa2_msresolve.frag); red WW_TAA2_LINEAR_RED=blit takes
+ *  them by a plain blit (TAA3's input, which lost TAAHDRPICK1). The later wwGameTaaResolve then only ends the frame. */
+bool wwGameTaaLinearOn();
+void wwGameTaaResolveLinear( Scene * scene, unsigned fbo, unsigned format, unsigned msTex, int samples, float expose );
+//! lane POSTFX3: true (once) when the linear resolve already ran this frame's TAAINPUTS1 pass.
+bool wwGameTaaInputsRan();
 //! True when the view moved recently: an interactive window paints a few more frames to settle.
 bool wwGameTaaWantsSettle();
 

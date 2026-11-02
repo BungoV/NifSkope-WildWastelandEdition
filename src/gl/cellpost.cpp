@@ -176,6 +176,9 @@ struct PostState
 	bool redFuse = false;	// lane POSTFX2: WW_CELL_POSTFUSE_RED=1 keeps the depth of field and motion blur two passes
 	bool lin = false, linPinned = false;	// lane POSTFX2: the depth of field and motion blur in the linear frame
 	bool linRan = false;	// the linear stage ran them this frame (the display stage then skips them)
+	/* lane POSTFX3: WW_CELL_POST_MSAALIN_RED=1 writes the linear stage's picture into every multisample alike (POSTFX2's
+	 * copy: the tone map then maps one value per pixel and a still edge loses its anti-aliasing) */
+	bool redMsLin = false;
 	int curFrame = 0;	// this frame's index and time, taken by the frame's first stage
 	double curDt = 0.0;
 	QString dumpDir;
@@ -236,6 +239,7 @@ PostState & ps()
 		s.redFuse = wwEnvStr( "WW_CELL_POSTFUSE_RED" ).trimmed() == QLatin1StringView( "1" );
 		s.ob = readPin( "WW_CELL_OBJBLUR", kObKey, s.obPinned );
 		s.lin = readPin( "WW_CELL_POST_LINEAR", kLinKey, s.linPinned );
+		s.redMsLin = wwEnvStr( "WW_CELL_POST_MSAALIN_RED" ).trimmed() == QLatin1StringView( "1" );
 		s.redObCamera = wwEnvStr( "WW_CELL_OBJBLUR_RED" ).contains( QLatin1StringView( "camera" ) );
 		s.dumpDir = wwEnvStr( "WW_CELL_POST_DUMP" ).trimmed();
 		bool ok = false;
@@ -709,11 +713,13 @@ void postApply( Scene * scene, bool linear )
 	PostGpu & g = postGpus( linear )[r];
 	// lane POSTFX2: the linear frame's own precision (RGBA32F by default): its values pass through unclamped
 	GLenum colFormat = GL_RGBA16F;
+	GLint frameSamples = 0;	// lane POSTFX3: the linear frame's multisamples (the bound draw framebuffer)
 	if ( linear && prevDraw ) {
 		GLint redBits = 0;
 		fn->glGetFramebufferAttachmentParameteriv( GL_DRAW_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_FRAMEBUFFER_ATTACHMENT_RED_SIZE, &redBits );
 		if ( redBits >= 32 )
 			colFormat = GL_RGBA32F;
+		fn->glGetIntegerv( GL_SAMPLES, &frameSamples );
 	}
 	// lane POSTFX1: the camera vectors in RG16F (the inputs' format; the game's motion blur reads them within 0.5 of an
 	// 8-bit step on 99.99% of pixels, tests/postfx/postfx_gates.py); red WW_CELL_MBLUR_RED=rg32 keeps RG32F
@@ -816,6 +822,11 @@ void postApply( Scene * scene, bool linear )
 	// lane POSTFX2: with both on, the composite runs inside the motion blur's pass (game_dofmblur.frag): no composite
 	// target, no copy back (within 0.25 of an 8-bit step of the two passes, less GPU time, tests/postfx/postfx_fuse.py)
 	const bool fuse = runDof && runMb && !s.redFuse;
+	/* lane POSTFX3: in a multisampled linear frame the copy back keeps every sample's own value where the blur left the
+	 * pixel alone (cell_post_mscopy.frag), so the tone map still maps each sample. It needs the frame's own resolve (cur)
+	 * beside the picture: the depth of field alone composites into out and skips its copy to cur; the two-pass red
+	 * (WW_CELL_POSTFUSE_RED) overwrites cur and takes the plain copy. */
+	const bool msKeep = linear && frameSamples > 1 && !s.redMsLin && !( runDof && runMb && !fuse );
 	if ( ok && runDof ) {
 		PassTime::subBegin( PassTime::PostDof );
 		target( g.blur[0] );
@@ -895,7 +906,7 @@ void postApply( Scene * scene, bool linear )
 			if ( !fuse )
 				dumpFloat( dd + "dof_out.bin", W, H, 4, readTex( r, g.fbo, g.out, false, GL_RGBA, 4, W, H ) );
 		}
-		if ( ok && !fuse ) {	// the motion blur reads the depth of field's picture
+		if ( ok && !fuse && !( msKeep && !runMb ) ) {	// the motion blur reads the depth of field's picture
 			fn->glBindFramebuffer( GL_READ_FRAMEBUFFER, g.fbo );
 			fn->glFramebufferTexture2D( GL_READ_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, g.out, 0 );
 			fn->glReadBuffer( GL_COLOR_ATTACHMENT0 );
@@ -981,7 +992,7 @@ void postApply( Scene * scene, bool linear )
 
 	// 3b. lane POSTFX1: the object blur on the picture so far (out after the motion blur, else cur): the pixel
 	// vectors without the camera, the tile max and the neighbour max, then the gather into the other texture
-	GLuint picture = runMb ? g.out : g.cur;
+	GLuint picture = runMb || ( msKeep && runDof ) ? g.out : g.cur;
 	if ( ok && runOb ) {
 		PassTime::subBegin( PassTime::PostObjBlur );
 		const GLuint dst = runMb ? g.cur : g.out;
@@ -1065,7 +1076,7 @@ void postApply( Scene * scene, bool linear )
 	}
 
 	// 4. the picture back into the frame (every sample of a multisampled frame the same value)
-	if ( ok ) {
+	if ( ok && !msKeep ) {
 		fn->glBindFramebuffer( GL_DRAW_FRAMEBUFFER, GLuint( prevDraw ) );
 		auto prog = r->useProgram( "game_taa_copy.prog" );
 		if ( !prog ) {
@@ -1075,6 +1086,35 @@ void postApply( Scene * scene, bool linear )
 			prog->uni1i( "srcTex", kUnitCur );
 			r->drawShape( 4, 3, 6, GL_TRIANGLES, GL_UNSIGNED_SHORT, &attrs, idx );
 			r->stopProgram();
+		}
+	}
+	/* 4b. lane POSTFX3: each sample s becomes s * w + (B - w * R) by a dual-source blend (R = cur, the frame's resolve,
+	 * B = the picture, w = min(1, B / R)): the samples' mean is B, none goes negative, a pixel the blur left alone keeps
+	 * its samples bit for bit, and the alpha (dst) stays the sample's own */
+	if ( ok && msKeep ) {
+		GLint bEq = 0, bEqA = 0, bSrc = 0, bDst = 0, bSrcA = 0, bDstA = 0;
+		fn->glGetIntegerv( GL_BLEND_EQUATION_RGB, &bEq );
+		fn->glGetIntegerv( GL_BLEND_EQUATION_ALPHA, &bEqA );
+		fn->glGetIntegerv( GL_BLEND_SRC_RGB, &bSrc );
+		fn->glGetIntegerv( GL_BLEND_DST_RGB, &bDst );
+		fn->glGetIntegerv( GL_BLEND_SRC_ALPHA, &bSrcA );
+		fn->glGetIntegerv( GL_BLEND_DST_ALPHA, &bDstA );
+		fn->glBindFramebuffer( GL_DRAW_FRAMEBUFFER, GLuint( prevDraw ) );
+		auto prog = r->useProgram( "cell_post_mscopy.prog" );
+		if ( !prog ) {
+			ok = false;
+		} else {
+			bind( kUnitCur, picture );
+			bind( kUnitBlur, g.cur );
+			prog->uni1i( "srcTex", kUnitCur );
+			prog->uni1i( "refTex", kUnitBlur );
+			fn->glEnable( GL_BLEND );
+			fn->glBlendEquationSeparate( GL_FUNC_ADD, GL_FUNC_ADD );
+			fn->glBlendFuncSeparate( GL_ONE, GL_SRC1_COLOR, GL_ZERO, GL_ONE );
+			r->drawShape( 4, 3, 6, GL_TRIANGLES, GL_UNSIGNED_SHORT, &attrs, idx );
+			r->stopProgram();
+			fn->glBlendEquationSeparate( GLenum( bEq ), GLenum( bEqA ) );
+			fn->glBlendFuncSeparate( GLenum( bSrc ), GLenum( bDst ), GLenum( bSrcA ), GLenum( bDstA ) );
 		}
 	}
 
