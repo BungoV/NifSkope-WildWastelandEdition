@@ -436,6 +436,10 @@ HEADERS += \
 	src/airzone.h \
 	src/airzonemath.h \
 	src/airzonepanel.h \
+	src/io/espwrite.h \
+	src/cellsurface.h \
+	src/celledit.h \
+	src/celleditpanel.h \
 	src/gl/cellairzone.h \
 	src/probemask.h \
 	src/probeemit.h \
@@ -780,6 +784,13 @@ SOURCES += \
 	src/rtddgicell.cpp \
 	src/airzone.cpp \
 	src/airzonepanel.cpp \
+	src/io/espwrite.cpp \
+	src/cellsurface.cpp \
+	src/celledit.cpp \
+	src/celleditpanel.cpp \
+	src/io/espwritecli.cpp \
+	src/io/espwritegates.cpp \
+	src/io/espwriteroundtrip.cpp \
 	src/gl/cellairzone.cpp \
 	src/probegi.cpp \
 	src/probegifine.cpp \

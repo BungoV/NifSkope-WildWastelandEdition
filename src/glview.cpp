@@ -71,6 +71,8 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include "nifsnapshot.h"
 #include "probesky.h"	// lane SKY1: one call a frame
 #include "gl/cellairzone.h"	// lane AIRZONE1: the hand-placed volumes' overlay
+#include "celledit.h"	// lane ESPWRITE2: the cell view's place mode
+#include "cellsurface.h"	// lane ESPWRITE2: the surface pick's planes
 #include "rtddgicell.h"	// lane RTXGI1 M2: the ray-traced GI volume, one call a frame
 #include "celldoorlive.h"	// lane DOORLIVE1: one call a frame
 #include "cellworldanim.h"	// lane FXPARITY2: the cell's world clock
@@ -3632,6 +3634,7 @@ void GLView::glProjection( [[maybe_unused]] int x, [[maybe_unused]] int y )
 		GLdouble h2 = std::tan( fovDeg / 360 * M_PI ) * nr;
 		GLdouble w2 = h2 * aspect;
 		Matrix4 P = Matrix4::fromFrustum( -w2, +w2, -h2, +h2, nr, fr );
+		cellSurfaceNotePlanes( nr, fr, true );	// lane ESPWRITE2: the depth probe's planes
 		wwGameTaaJitterProjection( scene, P );	// lane MOTION1: inert unless the TAA row is on and paintGL armed it
 		scene->renderer->setProjectionMatrix( P );
 	} else {
@@ -3639,6 +3642,7 @@ void GLView::glProjection( [[maybe_unused]] int x, [[maybe_unused]] int y )
 		GLdouble h2 = Dist / Zoom;
 		GLdouble w2 = h2 * aspect;
 		Matrix4 P = Matrix4::fromOrtho( -w2, +w2, -h2, +h2, nr, fr );
+		cellSurfaceNotePlanes( nr, fr, false );	// lane ESPWRITE2
 		wwGameTaaJitterProjection( scene, P );
 		scene->renderer->setProjectionMatrix( P );
 	}
@@ -4377,6 +4381,7 @@ void GLView::paintGL()
 	wwCellProbeViewDraw( scene, viewTrans );
 	wwCellVolumeViewDraw( scene, viewTrans );   // lane VOLFIT1: rooms, shapes, thresholds; VOLVIEW2: in the PRTP Debug View
 	wwAirZoneViewDraw( scene, viewTrans );	// lane AIRZONE1: the hand-placed volumes while the panel shows them
+	cellEditFrame( this, scene, viewTrans );	// lane ESPWRITE2: the place mode's probe, ghost and placed edits
 	rtddgiCellViewDraw( scene, viewTrans );	// lane RTXGI1 M2: the Ray-traced GI probes row (states / irradiance)
 
 	if ( !cleanView ) {	// lane VIEWFULL1: Clean View hides the paint helpers (block kept at its old indent)
@@ -7406,7 +7411,7 @@ float GLView::selLineWidth = 2.0f;
 
 bool GLView::escapeHasUse() const
 {
-	return freeCamera || gizmoMode != 0 || elemTransform || boxSelecting || circleSelecting || knifeActive
+	return cellEditActive() || freeCamera || gizmoMode != 0 || elemTransform || boxSelecting || circleSelecting || knifeActive
 		|| loopCutActive || riggingWeightPaintMode || vertexPaintMode || segmentPaintMode || physicsPreview.active()
 		|| ( editMode && !pickedElems.isEmpty() );
 }
@@ -23586,6 +23591,10 @@ int GLView::convertKeyCode( int n, Qt::KeyboardModifiers mods, bool anyModifiers
 
 void GLView::keyPressEvent( QKeyEvent * event )
 {
+	if ( cellEditKey( this, event->key(), int( event->modifiers() ) ) ) {	// lane ESPWRITE2: Shift+A, the place mode's keys
+		event->accept();
+		return;
+	}
 	/* Physics Sim owns Space, R and Escape while it is running, ahead of every
 	 * other binding: they are the whole control surface of the mode.
 	 *
@@ -24165,6 +24174,14 @@ void GLView::mouseDoubleClickEvent( QMouseEvent * )
 
 void GLView::mouseMoveEvent( QMouseEvent * event )
 {
+	{	// lane ESPWRITE2: the place mode's hover (the camera keeps the move) and its yaw drag
+		const QPointF cp = getQMouseEventPosition( event );
+		if ( cellEditMouse( this, CellEditMouse::Move, cp.x(), cp.y(), ( event->buttons() & Qt::LeftButton ) != 0,
+			int( event->modifiers() ) ) ) {
+			event->accept();
+			return;
+		}
+	}
 	// a live grab takes the drag; without a grab the mode is transparent, so the
 	// camera still orbits and the viewport behaves normally
 	if ( physicsMouseMove( event ) ) {
@@ -24413,6 +24430,14 @@ void GLView::mouseMoveEvent( QMouseEvent * event )
 
 void GLView::mousePressEvent( QMouseEvent * event )
 {
+	{	// lane ESPWRITE2: the place mode's drop
+		const QPointF cp = getQMouseEventPosition( event );
+		if ( cellEditMouse( this, CellEditMouse::Press, cp.x(), cp.y(), event->button() == Qt::LeftButton,
+			int( event->modifiers() ) ) ) {
+			event->accept();
+			return;
+		}
+	}
 	if ( physicsMousePress( event ) ) {
 		event->accept();
 		return;
@@ -24660,6 +24685,14 @@ void GLView::mousePressEvent( QMouseEvent * event )
 
 void GLView::mouseReleaseEvent( QMouseEvent * event )
 {
+	{	// lane ESPWRITE2: the place mode's commit
+		const QPointF cp = getQMouseEventPosition( event );
+		if ( cellEditMouse( this, CellEditMouse::Release, cp.x(), cp.y(), event->button() == Qt::LeftButton,
+			int( event->modifiers() ) ) ) {
+			event->accept();
+			return;
+		}
+	}
 	if ( physicsMouseRelease( event ) ) {
 		event->accept();
 		return;
@@ -24939,6 +24972,11 @@ void GLView::mouseReleaseEvent( QMouseEvent * event )
 
 void GLView::wheelEvent( QWheelEvent * event )
 {
+	if ( cellEditMouse( this, CellEditMouse::Wheel, event->position().x(), event->position().y(), false,
+		int( event->modifiers() ), event->angleDelta().y() ) ) {	// lane ESPWRITE2: R + wheel turns the ghost
+		event->accept();
+		return;
+	}
 	// Fly mode owns the wheel even if a paint/selection tool remains active.
 	if ( freeCamera ) {
 		freeCamSpeed *= ( event->angleDelta().y() > 0 ) ? 1.25f : 0.8f;

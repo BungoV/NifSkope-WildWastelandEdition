@@ -19,9 +19,9 @@
  * The Python reference (tools/espwrite_ref.py) builds the same plan independently; tests/espwrite gates the two
  * byte for byte, walks the result, round-trips it through EsmWorld and re-emits three CC files' cell trees.
  *
- * Red WW_ESPWRITE_RED (read on every call, live) = xy | temp | count | onam | yaw: the old/wrong rule each gate
+ * Red WW_ESPWRITE_RED (read on every call, live) = xy | temp | count | onam | yaw | renumber: the old/wrong rule each gate
  * must refuse (exterior labels x first; persistent refs into group 9; HEDR count + 1; ONAM left out; yaw sign
- * flipped).
+ * flipped; ESPWRITE2: append renumbers the kept refs).
  */
 
 #include <QByteArray>
@@ -151,6 +151,7 @@ struct Copied
 	QStringList sourceMasters;
 	bool sourceLocalized = false;
 	QString full;               //!< the display name to inline when a localised FULL must leave (empty = drop it)
+	bool ours = false;          //!< ESPWRITE2 append: already in the written file's numbering (no source check)
 };
 
 struct RefAdd
@@ -162,6 +163,7 @@ struct RefAdd
 	bool persistent = false;
 	bool disabled = false;
 	quint32 formOut = 0;        //!< filled by build()
+	quint32 keepForm = 0;       //!< ESPWRITE2 append: the id this ref already has in the file (0 = a new id)
 };
 
 struct RefOverride
@@ -186,6 +188,7 @@ struct Plan
 	bool light = false;
 	QString author = QStringLiteral( "NifSkope WW" );
 	QString target;             //!< the file name we write (refused when it is a master)
+	quint32 nextFloor = 0;      //!< ESPWRITE2 append: the old file's HEDR next id; new ids never go below it
 	QVector<CellEdit> cells;
 };
 

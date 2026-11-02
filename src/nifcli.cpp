@@ -13,6 +13,8 @@ See the LICENSE.md file for the full license text.
 #include "wwswitch.h"	// lane TESTDRIVER1: the WW_* switch store
 #include "probeplace.h"
 #include "probealbedo.h"	// lane REDFIX1: gobocensus
+
+int cmdEspWrite( const QStringList & args );	// lane ESPWRITE2: src/io/espwritecli.cpp
 #include "cellaodecal.h"	// lane AODECAL1: aobake
 #include "probebake.h"
 #include "pgiwrite.h"
@@ -8125,6 +8127,13 @@ int nifskopeCliMain( const QStringList & args )
 	if ( cmd == QLatin1String( "convex" ) ) {	// lane MAGDROP1
 		if ( !initModelLayer() ) { err().flush(); return 1; }
 		const int rc = cmdConvex( a );
+		out().flush();
+		err().flush();
+		return rc;
+	}
+	if ( cmd == QLatin1String( "espwrite" ) ) {	// lane ESPWRITE2: the plugin writer's gates; no NIF, no model layer
+		out().flush();
+		const int rc = cmdEspWrite( a );
 		out().flush();
 		err().flush();
 		return rc;
