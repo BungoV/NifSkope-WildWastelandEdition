@@ -165,7 +165,7 @@ void vpDumpWrite( Scene * scene, NifSkopeOpenGLContext::Program * prog, const QS
 	for ( const char * u : { "fogDistScale", "fxDistScale", "lightingInfluence" } )
 		o += uni( QString::fromLatin1( u ), 1 );
 	for ( const char * u : { "cellLightCount", "volTerms", "volPartRed", "volCsm", "cellShadowOn", "cellHasDir", "cellInterior",
-			"cellGiOn", "fxLitMode", "fxAdditive", "fxSoft", "volOn", "fogOn", "cellRed", "volRed" } )
+			"cellGiOn", "fxLitMode", "fxAdditive", "fxSoft", "volOn", "fogOn", "cellRed", "volRed", "volVeil" } )
 		o += uniI( u );
 	for ( int i = 0; i < n; i++ ) {
 		QStringList l;

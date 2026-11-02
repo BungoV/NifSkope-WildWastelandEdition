@@ -1,3 +1,12 @@
+## FARCITYWASH1-PART (FOGENV1, 2026-11-02): the volume particles take the air's veil
+- cell_volpart.glsl vpVeilK (airVeilK's law and guards, on the puff's own GI + ambient scatter) scales the puff's
+  sky-lit share (sun, GI, ambient; thin and thick); lamps keep their level. Before, a daytime puff read ~1/k (about 3x
+  at Overcast noon) over the capped air around it. Uniform `volVeil` set in wwVolPartMediumUniforms (air drawn and not
+  veilphys); the particle dump lists it.
+- Red: the same `WW_CELL_AIR_RED=veilphys` (both physical).
+- Gate tests/farcitywash/volpart_veil_check.py (V1 law in tree, V2 puff = air at the froxel, V3 night bit-equal,
+  V4 veilphys); `--red` (the old puff) fails V2 (old puff / air up to 4.77).
+
 ## FOGLEAK1-COST (FOGENV1, 2026-11-02): the fog's sun gate reads one tile, not eight
 - FOGLEAK1 fix 2 (the volume's gate on the sun in the air, `WW_CELL_FOGLEAK`, still default OFF) read the sun's tile at
   all 8 probes of the walk: +0.46 ms on the 3-cascade inject (budget 0.10). Now one read at the walk's heaviest probe,
