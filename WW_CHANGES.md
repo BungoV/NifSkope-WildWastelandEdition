@@ -1,3 +1,12 @@
+## DECALWALK1 (2026-11-02): the decal checker reads receiver meshes from the game archives (test only)
+- tests/spells/cell_decal_check.py: a mesh or material missing under <data root> is read from the plugin's own
+  `<stem> - *.ba2` GNRL archives (in <data root>, then beside the plugin). An unpacked Data whose Meshes holds folders
+  only read 0 triangles, and every ray decal said "no surface".
+- Vault111Cryo `--walk`: 540 read, 513 drawn, 26 dice, 1 no surface (0023b8c6), 1,440,732 opaque triangles;
+  MiltonGeneral01 185 of 185.
+- Red `WW_DECALCHECK_RED=loose` (loose files only, the old rule): 0 triangles, and the walk now FAILS (rc 1) when ray
+  decals have no triangles to meet.
+
 ## FARCITYWASH1 (2026-11-02, landed in LAND6): the air's sky-lit veil at most the records' fog colour (default ON)
 - cell_volair.frag airVeilK: per froxel, the open air's mean in-scatter (the sun's share + the env share) brought DOWN to
   the records' fog colour at that distance and height, never up (lamps, night unchanged), the same scale on lit and

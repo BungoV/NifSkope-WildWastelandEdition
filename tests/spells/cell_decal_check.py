@@ -27,7 +27,9 @@ Everything else is this file's OWN read of the plugin and the loose meshes (noth
     not a box an XPRM of another kind ("primitive is not a box")
     no surface the ray meets nothing, or no triangle in the box passes the rule
   THE RECEIVERS  every shown REFR whose base names a model (collections through their parts), the loose mesh
-              under <data root>/Meshes, every triangle shape with a lighting shader that is neither blended
+              under <data root>/Meshes (else the same name in the plugin's own "<stem> - *.ba2" archives, in <data
+              root> or beside the plugin; red WW_DECALCHECK_RED=loose: loose only; 0 triangles for ray decals is a
+              walk FAIL, rc 1), every triangle shape with a lighting shader that is neither blended
               nor cut out (its material file when one is on disk, else its alpha property), editor markers
               skipped.
 Stages:
@@ -49,6 +51,7 @@ import os
 import re
 import struct
 import sys
+import zlib
 
 import numpy as np
 
@@ -118,6 +121,61 @@ def av_object(b, off, strings):
     return (strings[name_i] if 0 <= name_i < len(strings) else ''), flags, (r, t, s), off
 
 
+# ---- game files: the loose file under <data root> first, else the plugin's own GNRL archives (lane DECALWALK1,
+# 2026-11-02: an unpacked Data whose Meshes holds folders only read 0 triangles and every ray decal "no surface").
+# The archives are "<plugin stem> - *.ba2" in <data root> and in the plugin's folder. Red WW_DECALCHECK_RED=loose
+# reads loose files only (the old rule).
+BA2_DIRS = []
+_ba2 = None
+
+
+def _ba2_index():
+    global _ba2
+    if _ba2 is not None:
+        return _ba2
+    _ba2 = {}
+    if os.environ.get('WW_DECALCHECK_RED', '') == 'loose':
+        return _ba2
+    seen = set()
+    for d, stem in BA2_DIRS:
+        if not os.path.isdir(d):
+            continue
+        for fn in sorted(os.listdir(d)):
+            p = os.path.normcase(os.path.abspath(os.path.join(d, fn)))
+            if p in seen or not fn.lower().endswith('.ba2') or not fn.lower().startswith(stem.lower() + ' - '):
+                continue
+            seen.add(p)
+            with open(p, 'rb') as fh:
+                head = fh.read(24)
+                if len(head) < 24:
+                    continue
+                magic, _ver, kind, num, nto = struct.unpack('<4sI4sIQ', head)
+                if magic != b'BTDX' or kind != b'GNRL':
+                    continue
+                recs = [struct.unpack('<IIIIQIII', fh.read(36)) for _ in range(num)]
+                fh.seek(nto)
+                for r in recs:
+                    n, = struct.unpack('<H', fh.read(2))
+                    key = fh.read(n).decode('latin1').replace('/', '\\').lower()
+                    _ba2.setdefault(key, (p, r[4], r[5], r[6]))
+    return _ba2
+
+
+def game_file(data, rel):
+    """Bytes of a game file (rel under the data root, any slashes), or None."""
+    p = os.path.join(data, rel.replace('\\', '/'))
+    if os.path.isfile(p):
+        return open(p, 'rb').read()
+    hit = _ba2_index().get(rel.replace('/', '\\').lower())
+    if hit is None:
+        return None
+    arc, off, packed, size = hit
+    with open(arc, 'rb') as fh:
+        fh.seek(off)
+        b = fh.read(packed if packed else size)
+    return zlib.decompress(b) if packed else b
+
+
 def material_alpha(data, name):
     """(blend, test) from the material file a shader names, or None when there is none on disk."""
     n = name.replace('\\', '/').lower()
@@ -125,10 +183,10 @@ def material_alpha(data, name):
         return None
     if not n.startswith('materials/'):
         n = 'materials/' + (n.split('/materials/', 1)[1] if '/materials/' in n else n)
-    p = os.path.join(data, n)
-    if not os.path.isfile(p):
+    m = game_file(data, n)
+    if m is None:
         return None
-    m = open(p, 'rb').read(64)
+    m = m[:64]
     if m[:4] != b'BGSM' or len(m) < 43:
         return None
     return m[32] != 0, m[42] != 0
@@ -144,10 +202,9 @@ def model_shapes(data, model):
         return _models[key]
     out = []
     _models[key] = out
-    p = os.path.join(data, 'Meshes', model.replace('\\', '/'))
-    if not os.path.isfile(p):
+    b = game_file(data, 'meshes/' + model.replace('\\', '/'))
+    if b is None:
         return out
-    b = open(p, 'rb').read()
     try:
         blocks, strings = nif_blocks(b)
     except (struct.error, IndexError, ValueError):
@@ -492,12 +549,18 @@ def clip_near(poly, near):
 
 def main():
     esm, data, cell = sys.argv[1:4]
+    stem = os.path.splitext(os.path.basename(esm))[0]
+    BA2_DIRS[:] = [(data, stem), (os.path.dirname(os.path.abspath(esm)), stem)]
     decals, soup = decals_of(esm, data, cell)
     ntris = len(soup.p)
     want = {k: [d for d in decals if d['fate'] == k] for k in ('drawn', 'dice', 'notbox', 'nosurface')}
     print(f"walk: {len(decals)} placed decals ({sum(d['box'] for d in decals)} with a box), expected drawn "
           f"{len(want['drawn'])}; named exceptions: dice {len(want['dice'])}, not a box {len(want['notbox'])}, "
           f"no surface {len(want['nosurface'])}; {ntris} opaque triangles read")
+    if ntris == 0 and any(not d['box'] for d in decals):
+        print('walk FAIL: 0 opaque triangles read for the ray decals (no receiver mesh found loose or in the '
+              f'"{stem} - *.ba2" archives)')
+        return 1
     if sys.argv[4] == '--walk':
         dist = np.array([d['dist'] for d in want['drawn'] if d.get('dist', -1.0) >= 0.0])
         if len(dist):
