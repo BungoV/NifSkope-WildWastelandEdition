@@ -1,3 +1,9 @@
+## AIRMS1 (2026-11-02, landed in LAND6): the placed lamps' multiple scattering in the cell air (switch, off by default)
+- `WW_CELL_AIR_MS_LAMPS=1`: cell_volair.frag adds airLampMs (orders >= 2 of a point lamp, a fit to a backward Monte
+  Carlo: pi M = (1.9 - 0.75 gbar) od exp(-0.4 od) pi P2(c), P2 the phase with its HG lobes' g x 0.8) at both lamp
+  sites. Off (unset): the term is skipped. Red `WW_CELL_AIR_MS_LAMPS_RED=off`: the term 0. Census line: `lampms=`.
+- CPU twin src/gl/airmslamp.h; unit tests/airmslamp (g++, MC fixture; -DAIRMSLAMP_RED must fail).
+
 ## BUGS1102F (2026-11-02): the shader cache keeps the most recently USED binaries
 
 - **Shader cache (SHOTCAPS-MTIME):** the prune keeps the newest binaries of a program by file time, but a cache hit
@@ -186,6 +192,7 @@ The shader is res/shaders/cell_transl.glsl, its C++ twin is src/gl/wwtransl.h, a
 values (wwTrCol, wwTrFlags) and binds the lighting map (WwTrLightMap, white when absent). `tests/translucency/translucency.sh`
 checks the twin against an independent reading of the law (6.97 M cases, worst 4.8e-7) and pins the shader's text;
 its red (WWTRANSL_RED, the upstream FO76 term) fails. With the switch off every program's machine code equals main's.
+
 ## FARWATER7-SAT (2026-11-02): flow encoding 2, a three-quarter-octave log speed nibble
 
 - `WW_LODL_FLOW_LOG=2` bakes the .lodl river speed nibble as code = round(8 + log2(r) / 0.75), r = speed over the

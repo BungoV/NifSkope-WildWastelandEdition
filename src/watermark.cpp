@@ -449,8 +449,9 @@ bool WaterMarkDoc::readTail( QString * error )
 	 * lane FARWATER7: encoding 2 (WW_LODL_FLOW_LOG=2, the three-quarter-octave log) the same way. */
 	const bool encRed = wwEnv( "WW_WATER_SPEED_REF_RED" ).trimmed() == "mean";
 	if ( flowEnc != kLodlFlowEncLinear && ( encRed || !lodtFlowEncodingKnown( flowEnc ) ) )
-		return fail( QStringLiteral( "the flow plane uses encoding %1; this tool knows 0, 1 and 2 "
-			"(direction 8 / speed 4 linear, half-octave or three-quarter-octave log / confidence 4)" ).arg( flowEnc ) );
+		return fail( QStringLiteral( "the flow plane uses encoding %1; this tool knows %2 "
+			"(direction 8 / speed 4 linear, half-octave or three-quarter-octave log / confidence 4)" ).arg( flowEnc )
+			.arg( encRed ? QStringLiteral( "0 only (red WW_WATER_SPEED_REF_RED=mean)" ) : QStringLiteral( "0, 1 and 2" ) ) );	// LAND6
 	const quint64 tableEnd = oBody + quint64( lodl->bodyCount() ) * bodyStride;
 	if ( oName && oName != tableEnd )
 		return fail( QStringLiteral( "the body name blob is at 0x%1, not immediately after the "
