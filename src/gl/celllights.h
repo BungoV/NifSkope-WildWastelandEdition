@@ -22,6 +22,7 @@ BSD License - see nifskope.h
 #include <vector>
 
 class Scene;
+class NodeList;
 
 //! lane BINDLESS2FIX (gl/cellbindless.cpp): WW_BINDLESS_RED=cellname, the bindless twins not taken as cell programs
 bool wwBlCellNameRed();
@@ -480,6 +481,10 @@ QString wwCellShadowEcho( Scene * scene );
 /*! Ambient obscurance: the game's screen-space AO (INI settings, not the cell's) computed from a pass of the
  *  opaque cell-lit fragments by res/shaders/cell_ao.frag; it multiplies the lit color before the fog. WW_CELL_AO=0 skips it. */
 void wwCellAoPass( Scene * scene, bool run );
+/*! lane PERFHUNT2: the sorted list this paint's obscurance walk collected, appended to out in its collected order (the
+ *  same walk, same camera, same paint: what another collectShapes would add). false (out untouched): no walk this paint
+ *  for that scene. Taken once; the next obscurance pass forgets it. */
+bool wwCellAoSortedTake( Scene * scene, NodeList & out );
 //! called with every program setupProgram binds: the opaque pass's masks, and the obscurance a cell-lit draw reads
 void wwCellAoDraw( Scene * scene, bool cellProgram );
 //! lane PERF3: the opaque pass is drawing

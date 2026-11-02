@@ -14,6 +14,7 @@ BSD License - see nifskope.h
 #include "celluniform.h"	// lane CELLUNI2
 
 #include "gl/celllights.h"
+#include "gl/cellfarinst.h"
 #include "gl/cellhdr.h"	// lane FRAMEFMT1: the frame's colour format for the previous-frame copy
 #include "gl/cellwater.h"
 #include "gl/celllooks.h"	// lane WATERREFL1: the Water reflections row picks the water march's twin
@@ -565,8 +566,31 @@ void wwCellSsrPass( Scene * scene, bool run )
 			s.pass = true;
 			s.waterRay = true;
 			s.gbuf = ao.gbuf;
-			if ( usePrev )	// lane WATERREFL1: the previous frame stood in for step 1, so nothing was collected
-				scene->collectShapes( sceneSecond );
+			if ( usePrev ) {	// lane WATERREFL1: the previous frame stood in for step 1, so nothing was collected
+				/* lane PERFHUNT2: that walk drew the whole opaque scene here with both masks shut (no water is opaque;
+				 * wwCellSsrDraw) only to fill the sorted list, and the obscurance walk of this paint already collected the
+				 * same list (same scene, camera and add rules). Take that list; no walk. The far splat queues from its
+				 * walk (a flag the draws read): then walk. WW_CELL_SSR_AOLIST_RED=1: the walk always; =2 (check gate only,
+				 * with WW_CELL_REFLDRAWS_CHECK=1): an empty list, the water rays must differ. */
+				WW_SWITCH_STATIC( int, aoListRed, wwEnvInt( "WW_CELL_SSR_AOLIST_RED" ) );
+				bool took = false;
+				if ( aoListRed == 2 ) {
+					NodeList dropped;
+					took = wwCellAoSortedTake( scene, dropped );
+				} else if ( aoListRed != 1 && CellFarInst::splatPx() <= 0.0f ) {
+					took = wwCellAoSortedTake( scene, sceneSecond );
+				}
+				if ( !took )
+					scene->collectShapes( sceneSecond );
+				static int said = -1;
+				const int how = took ? ( aoListRed == 2 ? 3 : 0 ) : aoListRed == 1 ? 2 : 1;
+				if ( how != said ) {
+					said = how;
+					std::fprintf( stderr, "cell ssr water rays list: %s\n", how == 0 ? "the obscurance walk's, no opaque walk"
+						: how == 2 ? "walked (WW_CELL_SSR_AOLIST_RED=1)" : how == 3 ? "dropped (WW_CELL_SSR_AOLIST_RED=2, check gate only)"
+						: "walked (no obscurance list this paint, or far splat on)" );
+				}
+			}
 			// a particle inherits the masks of the draw before it (it may follow the water): then the whole old pass
 			bool waterAlone = opaqueOnly;
 			for ( Node * node : sceneSecond.list() )
