@@ -249,4 +249,10 @@ int rtddgiCli( const QStringList & args );
  *  --gpu 1, the GPU (src/rtddgi/restir.comp) run the same frames; prints their differences, writes restir_frame.tsv */
 int restirCli( const QStringList & args );
 
+/*! lane RTREFL1: `nifskope -no-gui rtrefl --soup <f> --rect minX,minY,maxX,maxY --out <dir> --cam ex,ey,ez,tx,ty,tz --water z
+ *  --light x,y,z,radius,r,g,b [...] [--lights <file>] [--size W,H] [--fov deg] [--steps n] [--bias u]`: the water's
+ *  reflection rays (a plane at z) traced by the GPU kernel (src/rtddgi/refl.comp) and its CPU twin on the same volume;
+ *  prints hit and colour agreement for the kernel and for the red (no traced hit), writes rtrefl.tsv */
+int rtreflCli( const QStringList & args );
+
 #endif // RTDDGI_H

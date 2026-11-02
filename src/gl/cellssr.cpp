@@ -970,3 +970,18 @@ bool wwCellSsrWaterTextures( Scene * scene, unsigned int & raw, unsigned int & f
 	fin = it->fin.tex;
 	return raw && fin;
 }
+
+bool wwCellSsrWaterRay( Scene * scene, unsigned int & tex, int & w, int & h )
+{
+	tex = 0;
+	w = h = 0;
+	if ( !scene || !scene->renderer )
+		return false;
+	const auto it = ssrGpus().constFind( scene->renderer );
+	if ( it == ssrGpus().constEnd() || !it->ready || !it->haveWater || it->doc != scene->nifModel )
+		return false;
+	tex = it->wray.tex;
+	w = it->wray.w;
+	h = it->wray.h;
+	return tex != 0;
+}

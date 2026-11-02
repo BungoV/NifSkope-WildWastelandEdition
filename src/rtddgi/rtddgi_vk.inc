@@ -109,6 +109,18 @@ bool restirGpuShare( DdgiGpuSession *, int, int, RestirGpuShare * out )
 	out->why = kDdgiNoKernels;
 	return false;
 }
+bool reflGpuStep( DdgiGpuSession *, const ReflGpuIn &, ReflGpuOut * out )   // lane RTREFL1: no kernels, no reflections
+{
+	*out = ReflGpuOut();
+	out->why = kDdgiNoKernels;
+	return false;
+}
+bool reflGpuShare( DdgiGpuSession *, int, int, ReflGpuShare * out )
+{
+	*out = ReflGpuShare();
+	out->why = kDdgiNoKernels;
+	return false;
+}
 
 #else
 
@@ -502,6 +514,7 @@ struct DdgiGpuSession
 namespace {
 
 void restirFreeFor( Dev & D, DdgiGpuSession * s );   // lane RESTIRDI1: restir_vk.inc (its set reads this session's TLAS)
+void reflFreeFor( Dev & D, DdgiGpuSession * s );     // lane RTREFL1: refl_vk.inc (the same)
 
 void ddgiFree( Dev & D, DdgiGpuSession * s )
 {
@@ -509,6 +522,7 @@ void ddgiFree( Dev & D, DdgiGpuSession * s )
 	if ( s->inFlight && s->inFence )
 		vk.vkWaitForFences( D.dev, 1, &s->inFence, VK_TRUE, UINT64_MAX );
 	restirFreeFor( D, s );
+	reflFreeFor( D, s );
 	if ( s->set )
 		vk.vkFreeDescriptorSets( D.dev, D.dpool, 1, &s->set );
 	DdgiTimer & T = ddgiTimer( D );
@@ -1328,6 +1342,7 @@ bool ddgiGpuRun( const DdgiGpuJob & job, DdgiGpuOut * out )
 }
 
 #include "restir_vk.inc"   // lane RESTIRDI1: ReSTIR DI on this device and BVH
+#include "refl_vk.inc"     // lane RTREFL1: reflection rays on this device and BVH
 
 #endif // RTDDGI_HAVE_SPIRV
 

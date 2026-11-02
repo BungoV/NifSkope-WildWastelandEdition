@@ -9,7 +9,8 @@ ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 G="${GLSLANG:-/e/Tools/RenderDoc/RenderDoc_1.45_64/plugins/spirv/glslangValidator.exe}"
 cd "$ROOT/src/rtddgi"
 # lane RESTIRDI1: restir (ReSTIR DI on the volume's BVH, src/rtddgi/restir_vk.inc; it includes restir_common.glsl)
-for k in trace blend border reloc restir; do
+# lane RTREFL1: refl (reflection rays, src/rtddgi/refl_vk.inc; its functions are trace.comp's, copied)
+for k in trace blend border reloc restir refl; do
 	"$G" --target-env vulkan1.2 -V --vn "rtddgi_${k}_spv" -o "${k}.spv.h" "${k}.comp"
 done
-ls -la trace.spv.h blend.spv.h border.spv.h reloc.spv.h restir.spv.h
+ls -la trace.spv.h blend.spv.h border.spv.h reloc.spv.h restir.spv.h refl.spv.h

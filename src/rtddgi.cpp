@@ -1873,3 +1873,284 @@ int restirCli( const QStringList & args )
 	}
 	return 0;
 }
+
+/* lane RTREFL1: the reflection rays' CLI gate. A water plane z = --water under the camera; the CPU writes the water's ray
+ * target the way fo4_water.frag's ray pass does (view reflection ray about +z, kept when -Rv.z > 0.2; view depth), the GPU
+ * kernel (refl.comp) traces it on the volume's session, the CPU twin (reflTexel) on the soup's BVH with the GPU's own
+ * tiles copied in; prints hit agreement and colour agreement on the twin's hits, and the same for the red (the old path:
+ * no traced hit, the sky everywhere), writes rtrefl.tsv */
+namespace {
+// MIRROR refl.comp main (one half-size texel; false = no ray there)
+bool reflTexel( const Twin & T, const std::vector<float> & rays, int W, int H, int hx, int hy, const float rows[12], const float proj[4],
+	float bias, float tmax, float out[4] )
+{
+	out[0] = out[1] = out[2] = out[3] = 0.0f;
+	int px = -1, py = -1;
+	const float * w = nullptr;
+	for ( int k = 0; k < 4 && !w; k++ ) {
+		const int x = 2 * hx + ( k & 1 ), y = 2 * hy + ( k >> 1 );
+		if ( x >= W || y >= H )
+			continue;
+		const float * r = &rays[( size_t( y ) * size_t( W ) + size_t( x ) ) * 4];
+		if ( r[0] * r[0] + r[1] * r[1] + r[2] * r[2] > 0.25f && r[3] > 0.0f ) {
+			w = r;
+			px = x;
+			py = y;
+		}
+	}
+	if ( !w )
+		return false;
+	const float nx = ( float( px ) + 0.5f ) / float( W ) * 2.0f - 1.0f, ny = ( float( py ) + 0.5f ) / float( H ) * 2.0f - 1.0f;
+	const V3 pv( w[3] * ( nx + proj[2] ) / proj[0], w[3] * ( ny + proj[3] ) / proj[1], -w[3] );
+	const V3 Pw( rows[0] * pv.x + rows[1] * pv.y + rows[2] * pv.z + rows[3], rows[4] * pv.x + rows[5] * pv.y + rows[6] * pv.z + rows[7],
+		rows[8] * pv.x + rows[9] * pv.y + rows[10] * pv.z + rows[11] );
+	const V3 d = normalize( V3( rows[0] * w[0] + rows[1] * w[1] + rows[2] * w[2], rows[4] * w[0] + rows[5] * w[1] + rows[6] * w[2],
+		rows[8] * w[0] + rows[9] * w[1] + rows[10] * w[2] ) );
+	const V3 o = Pw + d * bias;
+	const auto & P = T.S.prm;
+	double t = 0.0;
+	int tri = -1;
+	if ( !T.nearest( o, d, tmax > 0.0f ? tmax : P.sun[3], &t, &tri ) )
+		return true;
+	const float tf = float( t );
+	const float * v = &T.S.bvh.t[size_t( tri ) * 9];
+	const V3 v0( v[0], v[1], v[2] );
+	const V3 nf = normalize( cross( V3( v[3], v[4], v[5] ) - v0, V3( v[6], v[7], v[8] ) - v0 ) );
+	const float * a0 = &T.S.triAttr[size_t( tri ) * kAttr];
+	const float tOut = std::max( tf + bias, 1e-3f );
+	out[3] = tOut;
+	if ( a0[3] < 0.5f && dot( nf, d ) > 0.0f && !( T.red & kRedNoBack ) )
+		return true;
+	const V3 n = dot( nf, d ) > 0.0f ? -nf : nf;
+	const V3 Ph = o + d * tf;
+	V3 E = T.direct( Ph, n );
+	if ( !P.flags[0] )
+		E = E + T.sampleVolume( Ph, n, -d );
+	for ( int c = 0; c < 3; c++ )
+		out[c] = a0[c] * E[c] / kPi + a0[4 + c];
+	return true;
+}
+} // namespace
+
+int rtreflCli( const QStringList & args )
+{
+	QString soupPath, outDir, rect, lightsFile;
+	RtDdgiSpec spec;
+	spec.gpu = 1;
+	spec.place = false;
+	spec.fitProbes = true;
+	spec.maxProbes = 4096;
+	spec.rays = 64;
+	spec.relocate = false;   // every probe Vigilant at its lattice point on both sides (the twin starts so)
+	spec.classify = false;
+	WwCellLighting L;
+	L.interior = true;
+	ProbeSkyLight sky;
+	float cam[6] = { 0, 0, 0, 0, 1, 0 };
+	bool haveCam = false, haveWater = false;
+	int W = 320, H = 192, steps = 8;
+	float fov = 60.0f, zW = 0.0f, bias = 1.0f;
+	auto addLight = [&L]( const QStringList & v ) {
+		WwCellLight l;
+		for ( int c = 0; c < 3; c++ ) {
+			l.pos[c] = v[c].toFloat();
+			l.color[c] = v[4 + c].toFloat();
+		}
+		l.radius = v[3].toFloat();
+		l.shadow = 3;
+		L.lights.push_back( l );
+	};
+	for ( int i = 0; i < args.size(); i++ ) {
+		const QString & a = args[i];
+		const QString nx = i + 1 < args.size() ? args[i + 1] : QString();
+		if ( a == QLatin1String( "--soup" ) ) { soupPath = nx; i++; }
+		else if ( a == QLatin1String( "--out" ) ) { outDir = nx; i++; }
+		else if ( a == QLatin1String( "--rect" ) ) { rect = nx; i++; }
+		else if ( a == QLatin1String( "--lights" ) ) { lightsFile = nx; i++; }
+		else if ( a == QLatin1String( "--steps" ) ) { steps = std::clamp( nx.toInt(), 1, 64 ); i++; }
+		else if ( a == QLatin1String( "--fov" ) ) { fov = nx.toFloat(); i++; }
+		else if ( a == QLatin1String( "--bias" ) ) { bias = nx.toFloat(); i++; }
+		else if ( a == QLatin1String( "--water" ) ) { zW = nx.toFloat(); haveWater = true; i++; }
+		else if ( a == QLatin1String( "--size" ) ) {
+			const QStringList v = nx.split( ',' );
+			if ( v.size() == 2 ) {
+				W = std::max( 8, v[0].toInt() );
+				H = std::max( 8, v[1].toInt() );
+			}
+			i++;
+		} else if ( a == QLatin1String( "--cam" ) ) {
+			const QStringList v = nx.split( ',' );
+			if ( v.size() == 6 ) {
+				for ( int k = 0; k < 6; k++ )
+					cam[k] = v[k].toFloat();
+				haveCam = true;
+			}
+			i++;
+		} else if ( a == QLatin1String( "--light" ) ) {
+			const QStringList v = nx.split( ',' );
+			if ( v.size() == 7 )
+				addLight( v );
+			i++;
+		}
+	}
+	if ( !lightsFile.isEmpty() ) {
+		QFile lf( lightsFile );
+		if ( lf.open( QIODevice::ReadOnly | QIODevice::Text ) )
+			while ( !lf.atEnd() ) {
+				const QStringList v = QString::fromLatin1( lf.readLine() ).simplified().split( ' ', Qt::SkipEmptyParts );
+				if ( v.size() == 7 && !v[0].startsWith( '#' ) )
+					addLight( v );
+			}
+	}
+	const QStringList rc = rect.split( ',' );
+	if ( soupPath.isEmpty() || outDir.isEmpty() || rc.size() != 4 || L.lights.isEmpty() || !haveCam || !haveWater ) {
+		std::fprintf( stderr, "usage: rtrefl --soup <file> --rect minX,minY,maxX,maxY --out <dir> --cam ex,ey,ez,tx,ty,tz --water z "
+			"--light x,y,z,radius,r,g,b [...] [--lights <file>] [--size W,H] [--fov deg] [--steps n] [--bias u]\n" );
+		return 2;
+	}
+	for ( int k = 0; k < 4; k++ )
+		spec.rect[k] = rc[k].toFloat();
+	ProbeSoup soup;
+	QString err;
+	if ( !probeSoupRead( soupPath, &soup, &err ) ) {
+		std::fprintf( stderr, "rtrefl: %s\n", qPrintable( err ) );
+		return 1;
+	}
+	RtDdgiVolume vol;
+	Packed S;
+	if ( !packVolume( soup, L, sky, spec, &vol, S ) ) {
+		std::fprintf( stderr, "rtrefl: %s\n", qPrintable( vol.error ) );
+		return 1;
+	}
+	const V3 eye( float( cam[0] - S.O[0] ), float( cam[1] - S.O[1] ), cam[2] );
+	const V3 at( float( cam[3] - S.O[0] ), float( cam[4] - S.O[1] ), cam[5] );
+	const V3 f = normalize( at - eye );
+	const V3 rt = normalize( cross( f, std::fabs( f.z ) > 0.99f ? V3( 0, 1, 0 ) : V3( 0, 0, 1 ) ) );
+	const V3 up = cross( rt, f );
+	const float rows[12] = { rt.x, up.x, -f.x, eye.x, rt.y, up.y, -f.y, eye.y, rt.z, up.z, -f.z, eye.z };
+	const float fy = 1.0f / std::tan( 0.5f * fov * kPi / 180.0f );
+	const float proj[4] = { fy * float( H ) / float( W ), fy, 0.0f, 0.0f };
+	// the water's ray target (fo4_water.frag's ray pass; bottom row first): the plane where the camera sees it first
+	const size_t n = size_t( W ) * size_t( H );
+	std::vector<float> rays( n * 4, 0.0f );
+	int water = 0, kept = 0;
+	for ( int y = 0; y < H; y++ )
+		for ( int x = 0; x < W; x++ ) {
+			const float nxv = ( float( x ) + 0.5f ) / float( W ) * 2.0f - 1.0f, nyv = ( float( y ) + 0.5f ) / float( H ) * 2.0f - 1.0f;
+			const V3 dv( nxv / proj[0], nyv / proj[1], -1.0f );
+			const V3 dw( rows[0] * dv.x + rows[1] * dv.y + rows[2] * dv.z, rows[4] * dv.x + rows[5] * dv.y + rows[6] * dv.z,
+				rows[8] * dv.x + rows[9] * dv.y + rows[10] * dv.z );
+			if ( !( dw.z < 0.0f ) || !( eye.z > zW ) )
+				continue;
+			const float tw = ( zW - eye.z ) / dw.z;   // view depth of the plane (dv.z = -1)
+			const float len = length( dw );
+			const double od[3] = { eye.x, eye.y, eye.z }, dd[3] = { dw.x / len, dw.y / len, dw.z / len };
+			double tg = 0.0;
+			int tri = -1;
+			if ( S.bvh.ray( od, dd, double( tw * len ), &tg, &tri ) && tri >= 0 )
+				continue;   // the scene in front of the water
+			water++;
+			const V3 Rw = normalize( V3( dw.x, dw.y, -dw.z ) );
+			const V3 Rv( dot( Rw, rt ), dot( Rw, up ), -dot( Rw, f ) );
+			if ( !( -Rv.z > 0.2f ) )
+				continue;
+			float * r = &rays[( size_t( y ) * size_t( W ) + size_t( x ) ) * 4];
+			r[0] = Rv.x;
+			r[1] = Rv.y;
+			r[2] = Rv.z;
+			r[3] = std::max( tw, 1e-3f );
+			kept++;
+		}
+	RtDdgiLive live;
+	if ( !live.open( soup, L, sky, spec, false ) ) {
+		std::printf( "rtrefl: no gpu (%s)\n", qPrintable( live.why() ) );
+		return 1;
+	}
+	for ( int s = 0; s < steps; s++ )
+		if ( !live.step( 16 ) ) {
+			std::printf( "rtrefl: a volume step failed (%s)\n", qPrintable( live.why() ) );
+			return 1;
+		}
+	Twin T( S );
+	const int nP = T.nP;
+	if ( !live.irr() || !live.dist() || !live.age() || live.volume().probeCount() != nP ) {
+		std::printf( "rtrefl: the volume's tiles are not on the host (probes %d vs %d)\n", live.volume().probeCount(), nP );
+		return 1;
+	}
+	T.irr.assign( live.irr(), live.irr() + size_t( nP ) * 256 );
+	T.dist.assign( live.dist(), live.dist() + size_t( nP ) * 512 );
+	T.age.assign( live.age(), live.age() + size_t( nP ) );
+	bakert::ReflGpuIn in;
+	in.W = W;
+	in.H = H;
+	in.bias = bias;
+	std::copy( rows, rows + 12, in.rows );
+	std::copy( proj, proj + 4, in.proj );
+	in.rays = rays.data();
+	in.readBack = true;
+	bakert::ReflGpuOut go;
+	if ( !bakert::reflGpuStep( live.session(), in, &go ) ) {
+		std::printf( "rtrefl: the GPU refused (%s)\n", go.why.c_str() );
+		return 1;
+	}
+	const int Wh = bakert::reflHalf( W ), Hh = bakert::reflHalf( H );
+	if ( go.refl.size() != size_t( Wh ) * size_t( Hh ) * 4 ) {
+		std::printf( "rtrefl: the read-back holds %d floats\n", int( go.refl.size() ) );
+		return 1;
+	}
+	QDir().mkpath( outDir );
+	QFile o( outDir + QStringLiteral( "/rtrefl.tsv" ) );
+	const bool tsv = o.open( QIODevice::WriteOnly | QIODevice::Text );
+	if ( tsv )
+		o.write( "hx\thy\ttwin_r\ttwin_g\ttwin_b\ttwin_t\tgpu_r\tgpu_g\tgpu_b\tgpu_t\n" );
+	// arm 0 = the kernel (green), arm 1 = the red (the old path: no traced hit, the sky everywhere)
+	int texRays = 0, twinHits = 0, gpuHits = 0;
+	int agree[2] = { 0, 0 }, within[2] = { 0, 0 };
+	double dmax = 0, dsum = 0, lumT = 0, lumG = 0;
+	QElapsedTimer tm;
+	tm.start();
+	for ( int hy = 0; hy < Hh; hy++ )
+		for ( int hx = 0; hx < Wh; hx++ ) {
+			float tw[4];
+			if ( !reflTexel( T, rays, W, H, hx, hy, rows, proj, bias, in.tmax, tw ) )
+				continue;
+			texRays++;
+			const float * g = &go.refl[( size_t( hy ) * size_t( Wh ) + size_t( hx ) ) * 4];
+			const float red[4] = { 0, 0, 0, 0 };
+			const bool th = tw[3] > 0.0f;
+			twinHits += th ? 1 : 0;
+			gpuHits += g[3] > 0.0f ? 1 : 0;
+			for ( int arm = 0; arm < 2; arm++ ) {
+				const float * a = arm ? red : g;
+				const bool ah = a[3] > 0.0f;
+				agree[arm] += ah == th ? 1 : 0;
+				if ( !th || !ah )
+					continue;
+				float d = 0.0f, m = 0.0f;
+				for ( int c = 0; c < 3; c++ ) {
+					d = std::max( d, std::fabs( a[c] - tw[c] ) );
+					m = std::max( m, tw[c] );
+				}
+				within[arm] += d <= 0.05f * m + 1e-4f ? 1 : 0;
+				if ( !arm ) {
+					dmax = std::max( dmax, double( d ) );
+					dsum += d;
+					lumT += m;
+					lumG += std::max( a[0], std::max( a[1], a[2] ) );
+				}
+			}
+			if ( tsv )
+				o.write( QStringLiteral( "%1\t%2\t%3\t%4\t%5\t%6\t%7\t%8\t%9\t%10\n" ).arg( hx ).arg( hy ).arg( tw[0] ).arg( tw[1] ).arg( tw[2] )
+					.arg( tw[3] ).arg( g[0] ).arg( g[1] ).arg( g[2] ).arg( g[3] ).toLatin1() );
+		}
+	const double cpuMs = double( tm.nsecsElapsed() ) / 1e6;
+	const double nr = std::max( texRays, 1 ), nh = std::max( twinHits, 1 );
+	std::printf( "rtrefl: %d x %d, water %d pixels, rays kept %d; half %d x %d, texels with a ray %d, twin hits %d, gpu hits %d; "
+		"volume %d probes, %d updates\n", W, H, water, kept, Wh, Hh, texRays, twinHits, gpuHits, nP, live.updates() );
+	std::printf( "rtrefl green: hit agree %.3f %%, colour within 5 %% on the twin's hits %.3f %% (|d| mean %.5f max %.5f, mean max-channel twin "
+		"%.5f gpu %.5f); gpu wall %.2f ms, twin %.1f ms\n", 100.0 * agree[0] / nr, 100.0 * within[0] / nh, dsum / nh, dmax, lumT / nh, lumG / nh,
+		go.msWall, cpuMs );
+	std::printf( "rtrefl red: hit agree %.3f %%, colour within 5 %% on the twin's hits %.3f %%\n", 100.0 * agree[1] / nr, 100.0 * within[1] / nh );
+	std::fflush( stdout );
+	return 0;
+}

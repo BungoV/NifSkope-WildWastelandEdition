@@ -12,6 +12,7 @@
 #include "sunshadow.h"	// lane WATERCAUSTICS1: the caustics read the sun's cascades when they are built
 #include "cellworldanim.h"	// lane FXPARITY2: the world clock
 #include "cellunits.h"	// lane WATERREFL1: the noise layers' moment textures
+#include "rtddgicell.h"	// lane RTREFL1: the ray-traced reflection hits
 #include "cloudmap.h"	// lane WATERREFL1: the weather's clouds in the reflected sky
 #include "cellocean.h"	// lane WATERLOOK1: the wind's wave spectrum
 #include "cellunderwater.h"	// lane WATERUNDER3: the sun under water
@@ -539,6 +540,16 @@ bool wwCellWaterUniforms( Scene * scene, int block, int unit )
 	fn->glBindTexture( GL_TEXTURE_2D, ssrOn ? ssrFin : 0 );
 	prog->uni1i_l( prog->uniLocation( "waterSsrFin" ), unit++ );
 	prog->uni1b( "waterSsrOn", ssrOn );
+	if ( prog->uniLocation( "waterRtOn" ) >= 0 ) {	// lane RTREFL1: a program compiled under WW_CELL_RTREFL
+		unsigned int rtTex = 0;
+		int rtW = 0, rtH = 0;
+		const bool rtOn = !inSsr && !rayPass && s.linear && rtddgiReflTexture( scene, rtTex, rtW, rtH );
+		fn->glActiveTexture( GLenum( GL_TEXTURE0 + WwCellUnit::RtRefl ) );
+		fn->glBindTexture( GL_TEXTURE_BUFFER, rtOn ? rtTex : 0 );
+		prog->uni1i( "waterRt", WwCellUnit::RtRefl );
+		prog->uni1b( "waterRtOn", rtOn );
+		prog->uni4f( "waterRtSize", FloatVector4( float( rtW ), float( rtH ), 0.0f, 0.0f ) );
+	}
 	unit += wwCellWaterInfoUniforms( scene, unit );	// lane WATERDATA1: units 7..9 when the program reads them (WATERFLOWBAKE1's flow: cell units 66/67)
 	{	// lane SHORE2: per draw; the red keeps SHORE1's quads whole
 		WW_SWITCH_STATIC( bool, maskRed, wwSwitchEcho( "far water dry mask red", wwEnv( "WW_CELL_FARWATER_RED" ).trimmed() == "nomask" ) );
