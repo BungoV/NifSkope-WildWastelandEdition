@@ -155,6 +155,23 @@ steps, and every view still reads fewer cloud densities per ray than Ultra did w
 low5 139.0 vs 151.5, from 4 km up 337.8 vs 364.7). Cloud edges come out closer to a 16x-steps reference: 1.59 -> 0.93 and
 2.19 -> 1.32 display levels. 136 steps also fit, but only by 2 %, so 128 keeps a margin for views the gate does not hold.
 Red: WW_CLOUDVOL_RED=ultra96 (96 steps; the notes say `,RED=ultra96`). Test: tests/cloudsteps/run.sh.
+## PRESETPERF1 (2026-11-02): Medium+ programs drop the dead lamp-cube taps; the measure copy's format as a switch
+
+PRESETPERM1. Under the RT quality preset Medium and up (the loader define WW_CELL_RESTIR) no lamp cube is drawn and
+every slot is let go, so cellShadowF's 9 cube taps never run. They were still compiled into every program that lights.
+Now they are cut under WW_CELL_RESTIR (cell_lights.glsl). Low (no ReSTIR) keeps them, since there the cubes are drawn.
+Offline (the real driver, skill ww-program-bloat-bench): fo4_cell restir fp 32188 -> 31573 instructions, pbrm_cell
+26338 -> 25963, the cube sampler goes. Every other define set's binaries are identical but the stamp and the source
+hash (bincmp, 288 none/ubo). Red: `WW_PRESETPERM1_RED=1` (read at each shader load) injects WW_CELL_RESTIR_CUBES_RED,
+which keeps the taps.
+
+FRAMEFMT1-B. The exposure measure's linear copy (full size, mips to the quarter) and the GPU bloom's quarter finals
+are written by shaders, not resolved from the multisampled frame, so their format is free. `WW_CELL_POST_FORMAT=rgba16f`
+(live; a change remakes both) halves their bytes. The default stays RGBA32F, as before, until a hold shows the same
+picture in less time. Red `WW_FRAMEFMT1B_RED=1` keeps RGBA32F whatever was asked. Rule: gl/cellhdrformat.h
+wwPostFormatOf. Unit: tests/framefmt/run_post.sh (green 7/7, red -DPOSTFMT_RED fails 2).
+
+Link sweeps: 144 programs, base 432 / RTDDGI 288 / PRT 432 / RTDDGI+cascades+ReSTIR 288 rows, all LINK OK.
 
 ## FARWATER5 L3 (FARLOOK1101, 2026-11-02): a log speed nibble for the far river bake (flow encoding 1, OFF)
 
