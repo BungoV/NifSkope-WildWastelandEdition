@@ -1,3 +1,24 @@
+## MATLOOK3 (2026-11-02): hair Kajiya-Kay lobe and eye cornea coat (two rows, both ship OFF)
+
+- **Hair specular (HAIRKK1)**, Show-menu row "Hair specular" (`WW/CellHairSpecular`, pin `WW_CELL_HAIRKK`): on a hair
+  material (BGSM bHair, or a NIF Hair Tint shader) the spec lobe becomes a double-shifted Kajiya-Kay (Scheuermann's
+  form, as in SkyrimCS Hair Specular): the strand is the UV bitangent made normal to N, the exponent is the game's
+  2^(gloss x 10 + 1), the primary is shifted by tan 6 deg toward the root, the secondary (exponent / 2) by tan 9 deg
+  toward the tip and tinted by sqrt(albedo), Schlick F at IOR 1.55, clamped at 15 x pi as the game's lobe. The diffuse
+  stays the game's. FO4 and FO4CS draw hair with the plain lobe.
+- **Eye cornea (EYECORNEA1)**, row "Eye cornea" (`WW/CellEyeCornea`, pin `WW_CELL_CORNEA`): on an opaque eye material
+  (eye environment mapping; the blended eyewet and lashes are left alone) a smooth dielectric coat on the geometric
+  normal: GGX at roughness 0.05, F0 of IOR 1.376 (0.025), height-correlated Smith visibility, added per light white and
+  unmasked; the iris spec under it takes (1 - F(N.V)). The diffuse stays the game's. Iris refraction and parallax are
+  not in it.
+- Both cover the viewport (NIF view) lobe and the cell lights + cell sun. A tick reloads the shaders (the define is
+  read at shader load). Bindless twins keep the old path (ruling). Effect and PBR programs are unchanged.
+- Reds: `WW_CELL_HAIRKK_RED=1` (unshifted lobes), `WW_CELL_CORNEA_RED=1` (a rough coat, alpha 0.25).
+- Ship OFF, not in any preset ('0' in every column) until a hold proves them. Unit: tests/haireye (twin vs an
+  independent reading, highlight angles -6.0 / +9.0 deg, coat sharpness, F0 values, text pins; red build must fail).
+- Code: res/shaders/ww_hair_eye.glsl (new), cell_lights.glsl, fo4_default.frag, src/gl/wwhaireye.h (C++ twin),
+  src/gl/celllooks.*, glcontext.cpp, renderer.cpp, src/cellworkspace.cpp, src/ui/cellpresettable.h.
+
 ## GISKYTWIN-FLIP (LAND5, 2026-11-02): the GI volume's sky ships at the physical level
 
 - `WW_CELL_RTDDGI_SKY` unset (or empty) is now `level` (GITRUTH1's giSkyLevel: the weather's sky colour at the

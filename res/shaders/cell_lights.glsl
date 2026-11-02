@@ -2031,8 +2031,26 @@ void cellSumLights( vec3 P, vec3 N, vec3 Vw, float gloss, out vec3 diff, out vec
 #endif
 		cellRimSum += E * rim;
 		// Non Specular (1) has no specular in the game's light shaders either
+#if defined( WW_HAIRKK ) || defined( WW_CORNEA )
+		// lane MATLOOK3 (ww_hair_eye.glsl): hair takes the shifted Kajiya-Kay lobe; an eye's coat goes beside its spec
+		if ( ( fl & 1 ) == 0 || ( cellRed & 65536 ) != 0 ) {	// WW_CELL_SPEC_RED=nonspec
+			vec3 sL = vec3( cellSpecGame( N, L, Vw, gloss ) );
+#ifdef WW_HAIRKK
+			if ( wwHairLive )
+				sL = wwHairSpec( wwHairT, N, L, Vw, gloss, wwHairAlb );
+#endif
+#ifdef WW_CORNEA
+			if ( wwEyeLive ) {
+				sL *= 1.0 - wwEyeFv( wwEyeN, Vw );
+				wwEyeAdd += t1.rgb * g * a * max( dot( wwEyeN, L ), 0.0 ) * wwEyeCoat( wwEyeN, L, Vw );
+			}
+#endif
+			spec += E * sL;
+		}
+#else
 		if ( ( fl & 1 ) == 0 || ( cellRed & 65536 ) != 0 )	// WW_CELL_SPEC_RED=nonspec
 			spec += E * cellSpecGame( N, L, Vw, gloss );
+#endif
 	}
 	if ( fw > 0.0 ) {
 		diff *= 1.0 - fw;
@@ -2041,6 +2059,9 @@ void cellSumLights( vec3 P, vec3 N, vec3 Vw, float gloss, out vec3 diff, out vec
 		spec *= 1.0 - fw;
 #ifdef WW_TR
 		wwTrAdd *= 1.0 - fw;
+#endif
+#ifdef WW_CORNEA
+		wwEyeAdd *= 1.0 - fw;
 #endif
 	}
 }
@@ -2185,6 +2206,9 @@ vec3 cellLit( vec3 color, vec3 albedo, vec3 normalView, vec3 posView, vec3 Vview
 	wwTrAlb = albedo * albedo;
 	wwTrLive = wwTrKind > 0.5 && wwTrKind < 1.5;	// thin only: a thick object takes no local light (FO4CS)
 #endif
+#ifdef WW_CORNEA
+	wwEyeAdd = vec3( 0.0 );
+#endif
 	cellSumLights( P, N, Vw, gloss, diff, diffOn, spec );
 #ifdef WW_TR
 	wwTrLive = false;
@@ -2201,6 +2225,9 @@ vec3 cellLit( vec3 color, vec3 albedo, vec3 normalView, vec3 posView, vec3 Vview
 	vec3 add = alb * ( diffOn + gi ) + spec * specMask * specCol;	// albedo x the game's diffuse; the GI stays Lambert
 #ifdef WW_TR
 	add += wwTrAdd;
+#endif
+#ifdef WW_CORNEA
+	add += wwEyeAdd;	// MATLOOK3: the cornea's coat, white and unmasked
 #endif
 	/* an exterior with the weather's sun takes the game's terms: the sun through Oren-Nayar + rim, shadowed by the
 	 * cascades (cellDirVis), and the cube at the game's strength; color is then the viewport's ambient alone.
@@ -2224,6 +2251,9 @@ vec3 cellLit( vec3 color, vec3 albedo, vec3 normalView, vec3 posView, vec3 Vview
 		// FO4CS's sun share: the excess over the unshadowed diffuse, under the cascades' shadow
 		linx += wwTrAdd + cellDirVis * wwTrExcess( N, Ld, Vw, cellDirColor, nl > 0.0
 		      ? alb * cellDirColor * nl * ( cellOren( N, Ld, Vw, nl, gloss ) + cellRim( N, Ld, Vw, gloss ) ) : vec3( 0.0 ) );
+#endif
+#ifdef WW_CORNEA
+		linx += wwEyeAdd;
 #endif
 		return sqrt( max( linx, vec3( 0.0 ) ) ) + emissive;
 	}
@@ -2255,6 +2285,9 @@ vec3 cellLit( vec3 color, vec3 albedo, vec3 normalView, vec3 posView, vec3 Vview
 		lin += wwTrExcess( N, Ld, Vw, cellDirColor, nl > 0.0
 		     ? alb * cellDirColor * nl * ( cellOren( N, Ld, Vw, nl, gloss ) + cellRim( N, Ld, Vw, gloss ) ) : vec3( 0.0 ) );
 	}
+#endif
+#ifdef WW_CORNEA
+	lin += wwEyeAdd;
 #endif
 	return sqrt( max( lin, vec3( 0.0 ) ) ) + emissive;
 }

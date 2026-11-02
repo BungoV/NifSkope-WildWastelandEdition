@@ -71,6 +71,8 @@ enum class WwLook : int
 	FarLodSky,			// FIX1101A lodch: far objects' ambient takes the bake's per-vertex sky, ships ON (WW_LODL_SKY; red WW_LODL_SKY_RED)
 	Vrs,				// PERFFIX4: variable rate shading of the opaque + sorted passes from last frame's picture (WW_CELL_VRS)
 	ObjectFade,			// OBJFADE1: placed refs fade out per class (objects, items, actors), the game's LOD rule (WW_CELL_OBJFADE)
+	HairSpecular,		// MATLOOK3 HAIRKK1: hair's light specular is a shifted Kajiya-Kay lobe (WW_CELL_HAIRKK; ww_hair_eye.glsl)
+	EyeCornea,			// MATLOOK3 EYECORNEA1: an opaque eye takes a smooth cornea coat per light (WW_CELL_CORNEA)
 	Count
 };
 
@@ -84,6 +86,8 @@ bool wwLookPinned( WwLook l );
 bool wwLookHasRow( WwLook l );
 //! true when the look is read while the cell is built: the menu row reopens the cell
 bool wwLookReopens( WwLook l );
+//! lane MATLOOK3: the look is a shader define (glcontext.cpp's loader): the menu row reloads the shaders
+bool wwLookReloadsShaders( WwLook l );
 void wwLookSet( WwLook l, bool on );
 //! lane LIGHTS5: red WW_CELL_XEMI_GI_RED=stale, the bounce emittance row's live flip keeps the baked Le
 bool wwLookBounceEmitRedStale();

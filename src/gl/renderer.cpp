@@ -2617,6 +2617,16 @@ bool Renderer::setupProgramCE1( const NifModel * nif, Program * prog, Shape * me
 					prog->uni4f( "wwTrFlags", trFlags );
 					prog->uniSampler( bsprop, "WwTrLightMap", 9, texunit, white, clamp );
 				}
+				// lane MATLOOK3: hair and eye draws (res/shaders/ww_hair_eye.glsl, rows Hair specular / Eye cornea)
+				if ( prog->uniLocation( "wwHairOn" ) >= 0 || prog->uniLocation( "wwEyeOn" ) >= 0 ) {
+					const ShaderMaterial *	bgsm = ( mat && mat->isShaderMaterial() ) ? static_cast< ShaderMaterial * >( mat ) : nullptr;
+					const bool	hair = ( bgsm && bgsm->bHair ) || lsp->isST( ShaderFlags::ST_HairTint );
+					const bool	eye = ( bgsm && bgsm->bEnvironmentMappingEye ) || lsp->isST( ShaderFlags::ST_EyeEnvmap );
+					if ( prog->uniLocation( "wwHairOn" ) >= 0 )
+						prog->uni1b( "wwHairOn", hair );
+					if ( prog->uniLocation( "wwEyeOn" ) >= 0 )
+						prog->uni1b( "wwEyeOn", eye );
+				}
 			} else {
 				FloatVector4	translucencyColorAndScale( 1.0f, 1.0f, 1.0f, -1.0f );
 				if ( mat && mat->isShaderMaterial() ) {

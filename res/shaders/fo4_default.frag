@@ -298,6 +298,10 @@ vec3 tonemap(vec3 x)
 }
 
 
+// lane MATLOOK3: the hair and cornea lobes (rows Hair specular / Eye cornea); the bindless twins keep the old path
+#if ( defined( WW_CELL_HAIRKK ) || defined( WW_CELL_CORNEA ) ) && !defined( WW_BINDLESS )
+#include "ww_hair_eye.glsl"
+#endif
 #ifdef WW_CELLLIGHTS
 #ifndef WW_CELL_GI_MARCH_COPIES	// red (tests/spells/cell_giblack_link.sh): a march copy per call site, over the link limit
 #define WW_CELL_GI_MARCH_ONCE 1	// lane GIBLACKLINK1: the march red runs once (cellGiMarchPrime in main)
@@ -788,6 +792,19 @@ void main()
 		else
 			ambMask = 1.0;
 	}
+#ifdef WW_HAIRKK
+	// lane MATLOOK3: hair's lobe for the viewport light and the cell sun (the game's law path, as the cell lights)
+	if ( wwHairOn && !editorBrdf && hasSpecularMap )
+		spec = wwHairSpec( wwHairStrand( btnMatrix_norm[1], normal ), normal, L, V, smoothness, albedo * albedo )
+		       * specMask * NdotL0 * D.rgb * specColor;
+#endif
+#ifdef WW_CORNEA
+	// lane MATLOOK3: the cornea's coat on the geometric normal; the iris spec under it takes 1 - F
+	if ( wwEyeOn && ( alphaFlags & 8 ) == 0 ) {
+		vec3 ngV = normalize( btnMatrix_norm[2] );
+		spec = spec * ( 1.0 - wwEyeFv( ngV, V ) ) + wwEyeCoat( ngV, L, V ) * max( dot( ngV, L ), 0.0 ) * D.rgb;
+	}
+#endif
 	vec3 specSun = spec;	// lane SUNCELL1: the sun's specular before the cube (the exterior cell sun keeps it)
 
 	// Environment
@@ -941,9 +958,27 @@ void main()
 		            wwTrFlags.x > 0.5 );
 	}
 #endif
+#ifdef WW_HAIRKK
+	wwHairLive = cellOn && wwHairOn;	// lane MATLOOK3: read by cellLit's lights (cell_lights.glsl)
+	if ( wwHairLive ) {
+		wwHairT = cellWorldDir( wwHairStrand( btnMatrix_norm[1], normal ) );
+		wwHairAlb = albedo * albedo;
+	}
+#endif
+#ifdef WW_CORNEA
+	wwEyeLive = cellOn && wwEyeOn && ( alphaFlags & 8 ) == 0;
+	if ( wwEyeLive )
+		wwEyeN = cellWorldDir( normalize( btnMatrix_norm[2] ) );
+#endif
 	if ( cellOn )
 		color.rgb = cellLit( color.rgb, albedo, normal, -ViewDir, V, specMask, cellSpecTint, alphaR, kSmith,
 		                     emissive * glowScaleSRGB, cubeK );
+#ifdef WW_HAIRKK
+	wwHairLive = false;
+#endif
+#ifdef WW_CORNEA
+	wwEyeLive = false;
+#endif
 	vec3 cellSsrScene = color.rgb * color.rgb;	// lane SSR1: what the reflections' march samples (probe 60)
 	if ( cellOn && cellProbe == 60 ) {
 		// lane SSGI2: the glow's share of that (cellLit adds it after the root; c^2 - (c - e)^2), coverage in a

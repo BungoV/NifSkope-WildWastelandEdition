@@ -54,6 +54,8 @@ bool rtddgiRestirShaderDefine();	// lane RESTIRDI1: src/rtddgicell.cpp (the RT q
 bool wwAirZoneShaderDefine();	// lane AIRZONE1: src/gl/cellairzone.cpp (the Air zones row / WW_CELL_AIRZONE)
 // lane MATLOOK1 (TRANSLUC1): WW_CELL_TRANSL=1, a v8+ material's translucency (res/shaders/cell_transl.glsl); off by default
 static bool wwTranslShaderDefine() { return wwEnv( "WW_CELL_TRANSL" ).trimmed() == "1"; }
+bool wwHairShaderDefine();	// lane MATLOOK3: src/gl/celllooks.cpp (the Hair specular row / WW_CELL_HAIRKK)
+bool wwCorneaShaderDefine();	// lane MATLOOK3: the Eye cornea row / WW_CELL_CORNEA
 bool wwFogLeakShaderDefine();	// lane FOGLEAK1: src/gl/cellvolair.cpp (WW_CELL_FOGLEAK, the fog leak fix; off by default)
 int wwCellGiVis();	// lane PERF1: src/gl/celllights.cpp (1: the march, WW_CELL_GI_MARCH)
 bool wwCellPrtOn();	// lane PRTOFF1: src/gl/celllights.cpp (the old baked probe GI, only under its red)
@@ -467,6 +469,17 @@ bool NifSkopeOpenGLContext::Shader::load( const QString & filepath )
 		// lane MATLOOK1 (TRANSLUC1): a v8+ material's thin translucency (cell_transl.glsl); not static: read per load
 		if ( wwTranslShaderDefine() && data.startsWith( "#version" ) && data.contains( "_CELL_TRANSL" ) )
 			data.insert( data.indexOf( '\n' ) + 1, "#define WW_CELL_TRANSL 1\n" );
+		// lane MATLOOK3: hair's Kajiya-Kay lobe and the eye's cornea coat (ww_hair_eye.glsl); not static: the rows reload
+		if ( wwHairShaderDefine() && data.startsWith( "#version" ) && data.contains( "_CELL_HAIRKK" ) ) {
+			data.insert( data.indexOf( '\n' ) + 1, "#define WW_CELL_HAIRKK 1\n" );
+			if ( wwEnv( "WW_CELL_HAIRKK_RED" ).trimmed() == "1" )	// red: unshifted lobes
+				data.insert( data.indexOf( '\n' ) + 1, "#define WW_HAIRKK_RED 1\n" );
+		}
+		if ( wwCorneaShaderDefine() && data.startsWith( "#version" ) && data.contains( "_CELL_CORNEA" ) ) {
+			data.insert( data.indexOf( '\n' ) + 1, "#define WW_CELL_CORNEA 1\n" );
+			if ( wwEnv( "WW_CELL_CORNEA_RED" ).trimmed() == "1" )	// red: a rough coat
+				data.insert( data.indexOf( '\n' ) + 1, "#define WW_CORNEA_RED 1\n" );
+		}
 		// lane PERF3: the cascades from one per-frame block, in the sources that ask for it (WW_FRAME_UBO_RED=1: plain uniforms)
 		static const bool frameUbo = qgetenv( "WW_FRAME_UBO" ).trimmed() != "0" && qgetenv( "WW_FRAME_UBO_RED" ).trimmed() != "1"
 			&& qgetenv( "WW_PERF3_RED" ).trimmed() != "1";
