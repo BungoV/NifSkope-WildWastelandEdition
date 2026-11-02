@@ -70,7 +70,10 @@ case "$OUT" in /[a-z]/*) ;; *) echo "REFUSED: --out must resolve to a drive path
 [ -f "$OLD/NifSkope.exe" ] || { echo "REFUSED: no rung $OLD/NifSkope.exe"; exit 2; }
 [ -f "$GAME/Fallout4.esm" ] || { echo "REFUSED: no Fallout4.esm in $GAME"; exit 2; }
 [ -f "$CUBE" ] || { echo "REFUSED: no known-answer caster $CUBE"; exit 2; }
-python "$HERE/pbr_r2a_fixtures.py" > /dev/null || exit 2
+# SKYCLOUD1101: only the duct parts need the duct fixture (it reads the unpacked Data's duct mesh + texture)
+if [ -z "$ONLY" ] || [[ "$ONLY" =~ ,(place|off|live|pics), ]]; then
+	python "$HERE/pbr_r2a_fixtures.py" > /dev/null || exit 2
+fi
 
 REDPIN=""
 KERNEL="$ARM/shaders/ww_sunshadow.glsl"
