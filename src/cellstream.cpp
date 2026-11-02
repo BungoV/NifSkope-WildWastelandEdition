@@ -1210,6 +1210,8 @@ bool Stream::tick( Scene * sc, const Vector3 & eye )
 	return changed;
 }
 
+namespace WwBl { extern long long freedLiveAll, staleAll; }	// lane STREAMTEX4: gl/cellbindless.cpp
+
 void Stream::texCensus()
 {
 	const auto c = texPool.cross();
@@ -1227,7 +1229,14 @@ void Stream::texCensus()
 		.arg( mb( c.evictedBytes ) )
 		+ QStringLiteral( "texReloadedN %1 texReloadedMb %2 texReleasedMb %3 texLoadsMb %4 texKeepFreed %5 texBudgetMb %6 texRed %7" )
 		.arg( c.reloaded ).arg( mb( c.reloadedBytes ) ).arg( mb( c.releasedBytes ) ).arg( mb( c.loadBytes ) ).arg( c.keepEvicted )
-		.arg( mb( texPool.budgetBytes() ) ).arg( texPool.red() ? 1 : 0 );
+		.arg( mb( texPool.budgetBytes() ) ).arg( texPool.red() ? 1 : 0 )
+		// lane STREAMTEX4 (STREAMTEX2's census, gl/cellbindless.cpp; row (f)): since launch, bindless handles dropped
+		// while a frame naming them may still be queued, and handles found cached under a new texture's name
+		+ QStringLiteral( " texFreedLive %1 texStaleNames %2 texUnfenced %3" )
+		.arg( WwBl::freedLiveAll ).arg( WwBl::staleAll ).arg( cellStreamTexUnfenced() ? 1 : 0 )
+		// lane STREAMTEX4 (OPENCELLS): what tier 1 holds resident, by why (streamtexpool.h Census)
+		+ QStringLiteral( " texBaseOnly %1 texBaseOnlyMb %2 texUnnoted %3 texUnnotedMb %4" )
+		.arg( c.baseOnly ).arg( mb( c.baseOnlyBytes ) ).arg( c.unnoted ).arg( mb( c.unnotedBytes ) );
 	st.texReloaded += c.reloaded;
 	st.texKeepEvicted += c.keepEvicted;
 	texCentre = Key( ccx, ccy );
@@ -1415,6 +1424,13 @@ void cellStreamCountEvicted( const NifModel * nif, int n )
 {
 	if ( Stream * s = streamFor( nif ) )
 		s->st.texEvicted += n;
+}
+
+bool cellStreamTexUnfenced()
+{
+	WW_SWITCH_STATIC( bool, red, wwEnvStr( "WW_CELL_STREAMTEX_RED" ) == QLatin1String( "unfenced" )
+		|| wwEnvStr( "WW_CELL_STREAMTEX_RED" ) == QLatin1String( "nofence" ) );
+	return red;
 }
 
 bool cellStreamTexRed()

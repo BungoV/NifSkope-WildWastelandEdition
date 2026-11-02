@@ -1,3 +1,19 @@
+## STREAMTEX4 (2026-11-02): the streamed cell view's texture frees wait for the GPU (STREAMTEX2's fences, ported)
+- A texture the pool (or the keep timer) frees is no longer deleted at once: its GL names go into a grave
+  (src/gl/texgrave.h) behind one GLsync taken after the frees, and TexCache::wwGraveSweep (top of each stream paint)
+  makes its bindless handles non-resident and deletes the names only once the GPU passed that fence. Before, a frame
+  still queued could sample a dropped handle, and glGenTextures could hand the freed name to another file.
+- Census (gl/cellbindless.cpp): `freedlive` = handles dropped while a frame naming them may still be queued (a ring
+  of 8 census fences, never waited on), `stale` = a deleted texture's handle still cached under a reused name. On the
+  bindless line, and as texFreedLive / texStaleNames / texUnfenced in the walk dump; tests/spells/cell_stream.sh
+  row (f): both 0.
+- Red `WW_CELL_STREAMTEX_RED=unfenced` (also `nofence`): free at once, as before.
+- Unit tests/texgrave/run.sh: a mock driver 4 frames behind; fenced 0 handles dropped / 0 names reused under a queued
+  frame (1339 frees), unfenced 824 / 273 (FAIL).
+- Tier 1's resident stock by why (OPENCELLS): texBaseOnly / texBaseOnlyMb (named only by blocks no streamed cell wrote)
+  and texUnnoted / texUnnotedMb (loaded, never named by a property the stream saw), printed by cell_stream_check.py.
+  The open's first cells are streamed cells (the open welds an empty rectangle), so they already count per cell.
+
 ## DECALWALK1 (2026-11-02): the decal checker reads receiver meshes from the game archives (test only)
 - tests/spells/cell_decal_check.py: a mesh or material missing under <data root> is read from the plugin's own
   `<stem> - *.ba2` GNRL archives (in <data root>, then beside the plugin). An unpacked Data whose Meshes holds folders
