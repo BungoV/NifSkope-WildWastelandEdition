@@ -83,6 +83,9 @@ inline const WwPresetRow * wwPresetTable( int * count )
 		{ "CellWorkspaceLook_WW_SHADOW_PBRDIM", '0', "1111", "0000", 'M', false, WW_PR_NONE, WW_PR_NONE, "terrain shadow rule; no ms" },
 		{ "CellWorkspaceAo", '1', "1111", "1111", 'M', false, { 0.10f, 0.15f, 0.25f, 0.35f }, { 19.4f, 19.4f, 19.4f, 19.4f },
 			"ships on (the vanilla method): the preset holds it; obscurance 19.4 of which the scene walk 16.4 (perf2/STATUS.md:21)" },
+		{ "CellWorkspaceAoQuality", 'U', "LMHU", "LMHU", 'M', false, { 0.10f, 0.15f, 0.25f, 0.35f }, { 0.08f, 0.14f, 0.24f, 0.30f },
+			"PERFFIX2 item 9: the presets step the AO tier (ships Ultra = the picture before); vanilla SAO offline 1080p "
+			"(notes/perffix2 aox_offline). BUGS1102: the row was missing, so the presets left the tier as it was" },
 		{ "CellWorkspaceSsgi", '0', "000U", "0000", 'M', true, { 0.44f, 0.62f, 0.88f, 1.76f }, { 15.7f, 17.0f, 17.9f, 17.8f },
 			"PERFRES-A ssgi: Vault L/M/H/U (batch1/RESULTS.md:181)" },
 		{ "CellWorkspaceGroup_REFLECTIONS", '1', "1111", "1111", 'G', false, WW_PR_NONE, WW_PR_NONE, "a master" },
@@ -126,6 +129,8 @@ inline const WwPresetRow * wwPresetTable( int * count )
 		{ "CellWorkspaceLook_WW_CELL_BLOOM_PERPIX", '0', "1111", "0000", 'M', false, WW_PR_NONE, WW_PR_NONE, "under the bloom; no ms" },
 		{ "CellWorkspaceGroup_CAMERA", '1', "1111", "1111", 'G', false, WW_PR_NONE, WW_PR_NONE, "a master" },
 		{ "CellWorkspaceLook_WW_CELL_EXPOSURE_WIDE", '0', "1111", "0000", 'M', false, WW_PR_NONE, WW_PR_NONE, "an exposure range rule; no ms" },
+		{ "CellWorkspaceLook_WW_CELL_VRS", '0', "0000", "0000", 'M', false, WW_PR_NONE, WW_PR_NONE,
+			"PERFFIX4 coarse shading: changes the picture, off until bungo has seen it (BUGS1102)" },
 	};
 	if ( count )
 		*count = int( sizeof( t ) / sizeof( t[0] ) );
