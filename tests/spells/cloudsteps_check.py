@@ -14,6 +14,10 @@ The rule (bars written 10-31 after notes/fix1031a/cloud7/tmp/steps1.log measured
              interior error <= main, up18 and low5. The red oldsteps (the dump's preset steps) FAILS (ratio ~1.0).
   W wiring   cloudvol.cpp hands cvSteps V::marchSteps( tier, preset, d.moreSteps ), moreSteps needs the column and honours
              RED=oldsteps, cs() reads WW_CLOUDVOL_MORESTEPS through defaultOnSwitch. Red: the base sources (563dcf97).
+Lane CLOUDSTEPS2 (SKYCLOUD1101, 11-01): Ultra joins (main = taps at 96, default = the column at the dump's steps, 128).
+Bars unchanged and written before the run (R: reads <= main in all 3 views; E: edge <= 0.8 x main, interior <= main);
+the candidates 96..144 measured first by notes/skycloud1101/tools/steps2_sweep.py. W also needs d.ultraSteps (red:
+the 4c9ea88e sources). Red ultra96 (WW_CLOUDVOL_RED=ultra96 to the dump) FAILS E on Ultra.
 Exit 0 only when every gate run passes.
 """
 import ctypes, os, re, runpy, subprocess, sys
@@ -36,8 +40,9 @@ def gate(name, ok, msg):
 
 if 'W' in only:
     cv = open(os.path.join(src, 'cloudvol.cpp'), encoding='latin1').read()
-    w1 = re.search(r'p->uni1i\( "cvSteps", V::marchSteps\( d\.tier, pr\.steps, d\.moreSteps \) \);', cv) is not None
+    w1 = re.search(r'p->uni1i\( "cvSteps", V::marchSteps\( d\.tier, pr\.steps, d\.moreSteps, d\.ultraSteps \) \);', cv) is not None
     w2 = re.search(r'd\.moreSteps = s\.moreSteps != 0 && d\.topColumn && !red\( "oldsteps" \);', cv) is not None
+    w2 = w2 and re.search(r'd\.ultraSteps = d\.moreSteps && !red\( "ultra96" \);', cv) is not None
     m = re.search(r'CvState & cs\(\)\s*\{(.*?)\n\}', cv, re.S)
     w3 = bool(m) and '"WW_CLOUDVOL_MORESTEPS"' in m.group(1) and 's.moreSteps = V::defaultOnSwitch' in m.group(1)
     gate('W wiring', w1 and w2 and w3, 'cvSteps via marchSteps %s; moreSteps needs the column + RED=oldsteps %s; cs() reads '
@@ -54,12 +59,15 @@ r = subprocess.run(['C:/msys64/ucrt64/bin/g++.exe', '-O2', '-std=c++17', '-I', o
 if r.returncode:
     raise SystemExit('BUILD FAIL ' + r.stderr[-2000:])
 DENV = dict(ENV, WW_CLOUDVOL_MORESTEPS='0') if red == 'oldsteps' else ENV
-PRESET = {'medium': (2, 48), 'high': (3, 64)}
+if red == 'ultra96':
+    DENV = dict(ENV, WW_CLOUDVOL_RED='ultra96')
+PRESET = {'medium': (2, 48), 'high': (3, 64), 'ultra': (4, 96)}
 STEPS = {}
 for tier, (ti, ps) in PRESET.items():
     w = subprocess.run([DUMP, str(ti), str(ps)], env=DENV, capture_output=True, text=True, check=True).stdout.split()
     STEPS[tier] = int(w[1])
-print('DEFAULT      INFO  steps: medium %d (preset 48), high %d (preset 64)' % (STEPS['medium'], STEPS['high']), flush=True)
+print('DEFAULT      INFO  steps: medium %d (preset 48), high %d (preset 64), ultra %d (preset 96)' % (
+    STEPS['medium'], STEPS['high'], STEPS['ultra']), flush=True)
 
 sys.argv = [os.path.join(HERE, 'cloudedge_check.py'), scratch, '--only', 'Z']
 E = runpy.run_path(os.path.join(HERE, 'cloudedge_check.py'), run_name='cloudsteps_helpers')

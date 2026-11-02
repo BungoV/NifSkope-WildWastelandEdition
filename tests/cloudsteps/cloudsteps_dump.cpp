@@ -30,7 +30,9 @@ int main( int argc, char ** argv )
 		return 2;
 	const std::string m = norm( "WW_CLOUDVOL_MORESTEPS" ), t = norm( "WW_CLOUDVOL_TOPCOLUMN" );
 	const bool more = WwCloudVolMath::defaultOnSwitch( m.c_str() ) && WwCloudVolMath::defaultOnSwitch( t.c_str() );
-	std::printf( "steps %d more %d\n", WwCloudVolMath::marchSteps( std::atoi( argv[1] ), std::atoi( argv[2] ), more ),
+	// lane CLOUDSTEPS2: cloudvol.cpp d.ultraSteps = moreSteps && !red( "ultra96" )
+	const bool ultra = norm( "WW_CLOUDVOL_RED" ).find( "ultra96" ) == std::string::npos;
+	std::printf( "steps %d more %d\n", WwCloudVolMath::marchSteps( std::atoi( argv[1] ), std::atoi( argv[2] ), more, ultra ),
 				 more ? 1 : 0 );
 	return 0;
 }

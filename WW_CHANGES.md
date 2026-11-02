@@ -535,6 +535,31 @@ and the measured ms and targets with their sources. `cell presets:` in the notes
 tests/presettable: every row x preset against those rules (red: the old rule, it must fail), plus a coverage check
 that every Fusion Shaders panel row has a table row (red: a row dropped). tests/cellshow keeps testing the step
 mechanics on its own synthetic codes (`wwDisplayPresetCodes`).
+## PBRMCSMHEADROOM (SKYCLOUD1101, 2026-11-01): the .pbrm cell programs read the old GI's march once a pixel
+
+With the old baked GI (WW_CELL_PRT_RED=1) and its march (WW_CELL_GI_VIS=march), every GI read in pbrm_default.frag
+(the bounce, the sky share, the ambient rule, the probe views) inlined the whole march again, so pbrm_cellcsm used
+59847 of the driver's 65536 fragment instructions (8.7 % left: the tightest program). It now runs the march once per
+pixel, as fo4_default.frag has since GIBLACKLINK1 (every caller reads the same point and normal). Every other mode
+compiles the same machine code. Red: the define WW_CELL_GI_MARCH_COPIES (the old shader). Test:
+tests/spells/pbrm_headroom.sh.
+
+## CLOUDTYPE3 (SKYCLOUD1101, 2026-11-01): a "rainy" weather that never rains gets overcast clouds
+
+Four vanilla weathers carry the Rainy flag but have no precipitation (no MNAM) and no thunder: DiamondWeather,
+DiamondWeatherPastel, TCommonwealthMarshOvercast and CommonwealthGSRadstormOld. They were typed as rain clouds (0.75); they
+now get the Cloudy type (0.45). Every other weather keeps its type (the gate checks all 107). The type only shows with
+Cloud Variety on, which ships Off, so the default sky does not change. Red: WW_CLOUDVOL_RED=rainflag (the notes say
+`,RED=rainflag`; the green says `,precip=mnam`). Test: tests/cloudtype/run.sh (new gate P).
+
+## CLOUDSTEPS2 (SKYCLOUD1101, 2026-11-01): Ultra volume clouds march 128 steps at the old cost
+
+CLOUD7's read-free top light already paid for more steps on Medium (60) and High (80). Ultra now gets the same: 96 -> 128
+steps, and every view still reads fewer cloud densities per ray than Ultra did with the old taps (up18 211.8 vs 229.6,
+low5 139.0 vs 151.5, from 4 km up 337.8 vs 364.7). Cloud edges come out closer to a 16x-steps reference: 1.59 -> 0.93 and
+2.19 -> 1.32 display levels. 136 steps also fit, but only by 2 %, so 128 keeps a margin for views the gate does not hold.
+Red: WW_CLOUDVOL_RED=ultra96 (96 steps; the notes say `,RED=ultra96`). Test: tests/cloudsteps/run.sh.
+
 ## FOAMOFF2 (FIX1101A, 2026-11-01): River foam and Contact foam stay OFF
 
 The water lane's foam fixes land: lace streaks instead of solid patches, and no foam on a dry bank. Its two rows still

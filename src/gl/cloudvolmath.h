@@ -302,11 +302,17 @@ constexpr float kLitFloor = 0.02f;
  * (136.0 / 90.2 vs 157.5 / 104.9; 96 reads 162.8 > 157.5). Edge error (display levels vs a 16x-steps reference):
  * Medium 4.91 -> 3.65 / 6.13 -> 4.54, High 2.85 -> 1.97 / 3.74 -> 2.58 (notes/fix1031a/cloud7/tmp/steps1.log).
  * more = WW_CLOUDVOL_MORESTEPS (the default) AND the top column on (the cost holds only with it); else the preset's. */
-inline int marchSteps( int tier, int presetSteps, bool more )
+/* lane CLOUDSTEPS2 (SKYCLOUD1101, CLOUD7's leftover): Ultra the same way. Ultra (1/2 res, 6 taps, 100 km) at 96 steps
+ * with the taps reads 229.6 / 151.5 / 364.7 per ray (up18 / low5 / above); with the column 112 / 120 / 128 / 136 / 140 /
+ * 144 steps read 185.5-238.0 up18, 121.9-156.2 low5, 295.8-379.8 above (notes/skycloud1101/tmp/steps2.log). 136 fits
+ * by 2 % (224.8 / 147.6 / 358.8), 128 by >= 7.4 % in every view (211.8 / 139.0 / 337.8): 128, so a view the gate does
+ * not hold still stays at main's cost. Edge error 1.59 -> 0.93 (up18), 2.19 -> 1.32 (low5).
+ * ultra = false (WW_CLOUDVOL_RED=ultra96) keeps CLOUDSTEPS1's 96. */
+inline int marchSteps( int tier, int presetSteps, bool more, bool ultra = true )
 {
 	if ( !more )
 		return presetSteps;
-	return tier == 2 ? 60 : tier == 3 ? 80 : presetSteps;
+	return tier == 2 ? 60 : tier == 3 ? 80 : ( tier == 4 && ultra ) ? 128 : presetSteps;
 }
 
 /* lane CLOUDBAND2 (manager 10-30: bungo's rule, a code choice is never handed to him): Cloud Accumulation

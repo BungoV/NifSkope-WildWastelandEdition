@@ -105,9 +105,13 @@ constexpr unsigned kWxPleasant = 1, kWxCloudy = 2, kWxRainy = 4, kWxSnow = 8;
  * in one (a never-false `thunder > 0`), 137 in 65 quiet weathers and 2 thundering ones; 15 weathers thunder (7 rains,
  * the 5 radstorms + GSRadstormBackup, the 2 Glowing Sea fogs), exactly CLOUD6f's lightning set. Before, the 6 radstorms
  * carried the Snow flag (24 / 8) and got stratus 0.3, and 7 Rainy-flag weathers that never thunder got 0.9.
- * thunderSounds < 0 = CLOUD5's rule (Snow first, `thunder > 0` on the byte): WW_CLOUDVOL_TYPERULE=0 / RED=thunderbyte. */
+ * thunderSounds < 0 = CLOUD5's rule (Snow first, `thunder > 0` on the byte): WW_CLOUDVOL_TYPERULE=0 / RED=thunderbyte.
+ * lane CLOUDTYPE3 (SKYCLOUD1101): precip = the weather has a precipitation form (WTHR MNAM != 0), -1 = not read. A
+ * Rainy-flag weather that neither rains (MNAM 0) nor thunders is an overcast: Cloudy 0.45, not rain cloud 0.75. Census
+ * (tests/cloudtype/weathers.tsv): 4 of the 107 (DiamondWeather, DiamondWeatherPastel, TCommonwealthMarshOvercast,
+ * CommonwealthGSRadstormOld); every other Rainy-flag weather has MNAM. precip -1 (WW_CLOUDVOL_RED=rainflag) = CLOUDTYPE2. */
 inline void lowTypeOf( unsigned flags, unsigned thunder, float recxType, float & type, float & spread, bool oneSet = false,
-	int thunderSounds = -1 )
+	int thunderSounds = -1, int precip = -1 )
 {
 	type = 0.6f;
 	spread = 0.2f;
@@ -117,6 +121,8 @@ inline void lowTypeOf( unsigned flags, unsigned thunder, float recxType, float &
 	} else if ( flags & kWxSnow ) {
 		type = 0.3f;
 		spread = 0.15f;
+	} else if ( ( flags & kWxRainy ) && precip == 0 && thunderSounds == 0 ) {	// lane CLOUDTYPE3: dry overcast
+		type = 0.45f;
 	} else if ( flags & kWxRainy ) {
 		const bool storm = thunderSounds < 0 && thunder > 0;	// CLOUD5's byte test, the red only
 		type = storm ? 0.9f : 0.75f;
