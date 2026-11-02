@@ -8,6 +8,11 @@
   bindless line, and as texFreedLive / texStaleNames / texUnfenced in the walk dump; tests/spells/cell_stream.sh
   row (f): both 0.
 - Red `WW_CELL_STREAMTEX_RED=unfenced` (also `nofence`): free at once, as before.
+- Unit tests/texgrave/run.sh: a mock driver 4 frames behind; fenced 0 handles dropped / 0 names reused under a queued
+  frame (1339 frees), unfenced 824 / 273 (FAIL).
+- Tier 1's resident stock by why (OPENCELLS): texBaseOnly / texBaseOnlyMb (named only by blocks no streamed cell wrote)
+  and texUnnoted / texUnnotedMb (loaded, never named by a property the stream saw), printed by cell_stream_check.py.
+  The open's first cells are streamed cells (the open welds an empty rectangle), so they already count per cell.
 
 ## STREAMTEX3 (2026-11-02): the streamed cell view's texture pool frees by cell count first, then by last bind
 - The PERFFIX4 pool (src/gl/texpool.h, budget `WW_CELL_STREAM_TEXPOOL`) now sorts what it may free by tier, then by

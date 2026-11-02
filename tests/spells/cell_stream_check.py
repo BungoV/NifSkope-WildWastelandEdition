@@ -139,6 +139,13 @@ def main():
                  'dropped live %d, stale names %d (all crossings)' % (live, stale))
         else:
             print('  SKIP  (f) bindless handles: the dump has no texFreedLive (an exe before STREAMTEX4)')
+        # lane STREAMTEX4 (OPENCELLS): what tier 1 holds resident (printed, not gated): named only by the open's own
+        # blocks, or never named by a property the stream saw; a loaded cell's texture there is not kept by its cell
+        if all('texBaseOnly' in r for r in cen.values()):
+            print('  INFO  tier 1 resident: base-only peak %.1f MB (%d), unnoted peak %.1f MB (%d), crossing 0 %.1f / %.1f MB'
+                  % (max(num(r, 'texBaseOnlyMb') for r in cen.values()), max(int(num(r, 'texBaseOnly')) for r in cen.values()),
+                     max(num(r, 'texUnnotedMb') for r in cen.values()), max(int(num(r, 'texUnnoted')) for r in cen.values()),
+                     num(cen[min(cen)], 'texBaseOnlyMb'), num(cen[min(cen)], 'texUnnotedMb')))
     else:
         print('  SKIP  (e) texture pool: the dump has no texCrossing (an exe before STREAMTEX1)')
 

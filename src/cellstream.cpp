@@ -1233,7 +1233,10 @@ void Stream::texCensus()
 		// lane STREAMTEX4 (STREAMTEX2's census, gl/cellbindless.cpp; row (f)): since launch, bindless handles dropped
 		// while a frame naming them may still be queued, and handles found cached under a new texture's name
 		+ QStringLiteral( " texFreedLive %1 texStaleNames %2 texUnfenced %3" )
-		.arg( WwBl::freedLiveAll ).arg( WwBl::staleAll ).arg( cellStreamTexUnfenced() ? 1 : 0 );
+		.arg( WwBl::freedLiveAll ).arg( WwBl::staleAll ).arg( cellStreamTexUnfenced() ? 1 : 0 )
+		// lane STREAMTEX4 (OPENCELLS): what tier 1 holds resident, by why (streamtexpool.h Census)
+		+ QStringLiteral( " texBaseOnly %1 texBaseOnlyMb %2 texUnnoted %3 texUnnotedMb %4" )
+		.arg( c.baseOnly ).arg( mb( c.baseOnlyBytes ) ).arg( c.unnoted ).arg( mb( c.unnotedBytes ) );
 	st.texReloaded += c.reloaded;
 	st.texKeepEvicted += c.keepEvicted;
 	texCentre = Key( ccx, ccy );
