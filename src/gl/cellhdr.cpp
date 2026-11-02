@@ -63,6 +63,17 @@ const HdrFormat & hdrFormat()
 	return f;
 }
 
+// lane PRESETPERF1 (FRAMEFMT1-B): the measure copy + bloom quarter format (gl/cellhdrformat.h wwPostFormatOf); live
+unsigned postFormat()
+{
+	WW_SWITCH_STATIC( unsigned, f, [] {
+		const QByteArray v = qgetenv( "WW_CELL_POST_FORMAT" ).trimmed().toLower();
+		const bool red = qEnvironmentVariableIntValue( "WW_FRAMEFMT1B_RED" ) != 0;
+		return wwPostFormatOf( v.isEmpty() ? nullptr : v.constData(), red ).gl;
+	}() );
+	return f;
+}
+
 // lane AAFORMAT1 (gates only): WW_CELL_AA_MEM=1 logs the card's used video memory (GL_NVX_gpu_memory_info) when it moves
 template <typename F> void aaVidmemNote( F * fn )
 {
@@ -305,6 +316,7 @@ struct IsMeasureGpu
 	int bw = 0, bh = 0;
 	int bmade = -1;	// the final the last measure blurred into (shown at the next frame, as the CPU bloom was)
 	GLenum dsFormat = 0;
+	GLenum fmt = 0, bfmt = 0;	// lane PRESETPERF1: tex / btex colour formats (postFormat; a change remakes them)
 	GLsync fence = nullptr;	// frame mode: the readback in flight
 	bool trusted = false;	// lane SYNC1: a measure on this target raised no GL error
 	int qw = 0, qh = 0;
@@ -343,14 +355,14 @@ bool bloomBlur( Scene * scene, IsMeasureGpu & m, int qw, int qh, int slot )
 	auto prog = r->useProgram( "cell_bloomblur.prog" );
 	if ( !prog )
 		return false;
-	if ( !m.bfbo || m.bw != qw || m.bh != qh ) {
+	if ( !m.bfbo || m.bw != qw || m.bh != qh || m.bfmt != postFormat() ) {
 		if ( !m.bfbo )
 			fn->glGenFramebuffers( 1, &m.bfbo );
 		for ( GLuint & t : m.btex ) {
 			if ( !t )
 				fn->glGenTextures( 1, &t );
 			fn->glBindTexture( GL_TEXTURE_2D, t );
-			fn->glTexImage2D( GL_TEXTURE_2D, 0, GL_RGBA32F, qw, qh, 0, GL_RGBA, GL_FLOAT, nullptr );
+			fn->glTexImage2D( GL_TEXTURE_2D, 0, GLint( postFormat() ), qw, qh, 0, GL_RGBA, GL_FLOAT, nullptr );
 			fn->glTexParameteri( GL_TEXTURE_2D, GL_TEXTURE_MAX_LEVEL, 0 );
 			fn->glTexParameteri( GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR );	// as the CPU bloom's upload
 			fn->glTexParameteri( GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR );
@@ -359,6 +371,7 @@ bool bloomBlur( Scene * scene, IsMeasureGpu & m, int qw, int qh, int slot )
 		}
 		m.bw = qw;
 		m.bh = qh;
+		m.bfmt = postFormat();
 		m.bmade = -1;
 	}
 	// the CPU bloom's weights, in the same floats (celllights.cpp wwCellImageSpaceSetBloom)
@@ -475,7 +488,7 @@ void isMeasureFrame( Scene * scene, HdrGpu & g, int W, int H, int S, GLint prevD
 		while ( fn->glGetError() != GL_NO_ERROR ) {
 		}
 	}
-	if ( !m.fbo || m.w != W || m.h != H || m.dsFormat != g.dsFormat ) {
+	if ( !m.fbo || m.w != W || m.h != H || m.dsFormat != g.dsFormat || m.fmt != postFormat() ) {
 		m.trusted = false;
 		if ( !m.fbo )
 			fn->glGenFramebuffers( 1, &m.fbo );
@@ -485,7 +498,7 @@ void isMeasureFrame( Scene * scene, HdrGpu & g, int W, int H, int S, GLint prevD
 		fn->glActiveTexture( GLenum( GL_TEXTURE0 + kSrcUnit ) );
 		fn->glGetIntegerv( GL_TEXTURE_BINDING_2D, &prevTex );
 		fn->glBindTexture( GL_TEXTURE_2D, m.tex );
-		fn->glTexImage2D( GL_TEXTURE_2D, 0, GL_RGBA32F, W, H, 0, GL_RGBA, GL_FLOAT, nullptr );
+		fn->glTexImage2D( GL_TEXTURE_2D, 0, GLint( postFormat() ), W, H, 0, GL_RGBA, GL_FLOAT, nullptr );
 		fn->glTexParameteri( GL_TEXTURE_2D, GL_TEXTURE_MAX_LEVEL, 2 );	// the mips stop at the quarter size
 		fn->glTexParameteri( GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR_MIPMAP_NEAREST );
 		fn->glTexParameteri( GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR );
@@ -501,6 +514,7 @@ void isMeasureFrame( Scene * scene, HdrGpu & g, int W, int H, int S, GLint prevD
 		m.w = W;
 		m.h = H;
 		m.dsFormat = g.dsFormat;
+		m.fmt = postFormat();
 		if ( !m.pbo )
 			fn->glGenBuffers( 1, &m.pbo );
 	}

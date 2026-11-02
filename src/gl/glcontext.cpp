@@ -441,8 +441,12 @@ bool NifSkopeOpenGLContext::Shader::load( const QString & filepath )
 				data.insert( data.indexOf( '\n' ) + 1, "#define WW_CELL_RTDDGI_CASCADES 1\n" );
 		}
 		// lane RESTIRDI1: the RT quality preset's ray-traced shadow ratio (cell_lights.glsl cellShadowF); not static: the row reloads
-		if ( !giMarch && rtddgiRestirShaderDefine() && data.startsWith( "#version" ) && data.contains( "_CELL_RESTIR" ) )
+		if ( !giMarch && rtddgiRestirShaderDefine() && data.startsWith( "#version" ) && data.contains( "_CELL_RESTIR" ) ) {
 			data.insert( data.indexOf( '\n' ) + 1, "#define WW_CELL_RESTIR 1\n" );
+			// lane PRESETPERF1 (PRESETPERM1): the red keeps the dead cube taps in the Medium+ programs (cellShadowF); per load
+			if ( qEnvironmentVariableIntValue( "WW_PRESETPERM1_RED" ) != 0 )
+				data.insert( data.indexOf( '\n' ) + 1, "#define WW_CELL_RESTIR_CUBES_RED 1\n" );
+		}
 		// lane AIRZONE1: the hand-placed volumes' read (cell_airzone.glsl, via cell_volair.frag and cell_volpart.glsl); not static:
 		// the row's tick reloads the shaders
 		if ( wwAirZoneShaderDefine() && data.startsWith( "#version" ) && data.contains( "_CELL_AIRZONE" ) )

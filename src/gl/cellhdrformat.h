@@ -35,4 +35,23 @@ inline WwHdrFormatRule wwHdrFormatOf( const char * v, bool red )
 	return h;
 }
 
+/* lane PRESETPERF1 (FRAMEFMT1-B): the two shader-written copies of the frame that FRAMEFMT1 left at RGBA32F, the
+ * exposure measure's linear copy (cellhdr.cpp IsMeasureGpu::tex, full size + mips to the quarter) and the GPU bloom's
+ * quarter finals (btex). Neither is resolved from the multisampled frame, so either format is legal. Default RGBA32F
+ * (today); WW_CELL_POST_FORMAT=rgba16f halves their bytes (a cost arm until a hold proves "same picture, less time").
+ * Red WW_FRAMEFMT1B_RED=1: RGBA32F whatever was asked. */
+inline WwHdrFormatRule wwPostFormatOf( const char * v, bool red )
+{
+	WwHdrFormatRule h;
+	h.gl = 0x8814; h.bytes = 16; h.name = "rgba32f";	// GL_RGBA32F
+	if ( red ) {
+		h.red = true;
+		return h;
+	}
+	if ( v && std::strcmp( v, "rgba16f" ) == 0 ) {
+		h.gl = 0x881A; h.bytes = 8; h.name = "rgba16f";	// GL_RGBA16F
+	}
+	return h;
+}
+
 #endif

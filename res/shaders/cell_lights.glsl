@@ -285,6 +285,12 @@ float cellShadowF( int i, vec3 P, vec3 N )
 		float D = -s2 * ( cellRow[0].z * w.x + cellRow[1].z * w.y + cellRow[2].z * w.z );
 		return abs( D - rr.y ) <= 0.02 * rr.y + 2.0 ? rr.x : 1.0;
 	}
+#ifndef WW_CELL_RESTIR_CUBES_RED
+	/* lane PRESETPERF1 (PRESETPERM1): under WW_CELL_RESTIR no cube is drawn and every slot is let go (celllights.cpp, the
+	 * cube pass), so t4.x < 0 and the taps below never run: the Medium+ programs need not carry them. Red (the loader's
+	 * WW_CELL_RESTIR_CUBES_RED for WW_PRESETPERM1_RED=1): the taps compiled in, as before. */
+	return 1.0;
+#endif
 #endif
 	if ( t4.x < -0.5 )
 		return 1.0;	// a shadow light beyond the slot budget: unshadowed (the game's budget is unread)
