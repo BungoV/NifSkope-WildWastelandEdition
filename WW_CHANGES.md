@@ -1,3 +1,16 @@
+## BUGS1102 (2026-11-02): rain stays out from under a sunlit interior's roof; preset rows and numbers
+
+- **Rain under the roof (PRECIPROOF-GPU):** the GPU precipitation field builds its particles in the vertex shader and
+  has no roof map, so in a sunlit interior it rained under the roof (only the CPU field had INTSKY1's roof test).
+  A roofed interior now draws the CPU field and its per-particle roof test; exteriors keep the GPU field
+  (`wwPrecipGpuField` in src/gl/preciproof.h). Red: `WW_CELL_PRECIP_RED=gpuroof` (the old pick; the census line says
+  so). tests/preciproof checks both fields under the roof and under open sky, with two reds.
+- **Presets and the AO tier:** the preset table lacked rows for the AO quality tier and the VRS look switch, so a preset
+  left the AO tier where it was. Both rows are in src/ui/cellpresettable.h; tests/presettable's coverage check has no
+  exemptions left.
+- **Preset table numbers:** the measured GPU ms of contact shadows, AO, SSGI and air now come from TIMING1's Concord
+  hold (Museum numbers beside them). No preset column changed.
+
 ## FRAMESCHED1 (2026-11-02): one reflection-probe capture a frame, none on a coarse DDGI cascade's frame
 
 The reflection probes drew the camera probe's next face and the nearest unfinished placed probe's next face in the same
@@ -301,18 +314,6 @@ and the WW_CELL_HDR_DUMP gate target. The rule is a pure header (src/gl/cellhdrf
 passes, the old rule as red fails). `WW_CELL_HDR_FORMAT=rgba32f` asks for the old frame; the reds `WW_FRAMEFMT1_RED=1`,
 `WW_CELL_HDR_FORMAT_RED=1` and `WW_AAFORMAT1_RED=1` force RGBA32F everywhere, as before. The air volumes were already
 RGBA16F (PERFFIX3); their slices and the running integrate stay RGBA32F (transmittance precision).
-## BUGS1102 (2026-11-02): rain stays out from under a sunlit interior's roof; preset rows and numbers
-
-- **Rain under the roof (PRECIPROOF-GPU):** the GPU precipitation field builds its particles in the vertex shader and
-  has no roof map, so in a sunlit interior it rained under the roof (only the CPU field had INTSKY1's roof test).
-  A roofed interior now draws the CPU field and its per-particle roof test; exteriors keep the GPU field
-  (`wwPrecipGpuField` in src/gl/preciproof.h). Red: `WW_CELL_PRECIP_RED=gpuroof` (the old pick; the census line says
-  so). tests/preciproof checks both fields under the roof and under open sky, with two reds.
-- **Presets and the AO tier:** the preset table lacked rows for the AO quality tier and the VRS look switch, so a preset
-  left the AO tier where it was. Both rows are in src/ui/cellpresettable.h; tests/presettable's coverage check has no
-  exemptions left.
-- **Preset table numbers:** the measured GPU ms of contact shadows, AO, SSGI and air now come from TIMING1's Concord
-  hold (Museum numbers beside them). No preset column changed.
 
 ## REFLPROBECLI1 (TOOLS1101, 2026-11-01): count the reflection probes' below-horizon misses without a window
 
