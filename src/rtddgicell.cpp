@@ -2293,6 +2293,34 @@ bool rtddgiCellPending()
 
 /* the one-volume read's uniforms and texture buffer from volume `c` (M3's; RTXCASCADE2: the probes view passes the
  * picked cascade's own volume, in M3's layout) */
+/* lane FOGENV1: the volume's open-field irradiance per axis (rtddgimath.h openIrradiance) for the air's env
+ * (cell_volair.frag airLeakEnv: the read / this x the flat ambient). Only a WW_CELL_FOGLEAK air program holds it.
+ * No sky (an interior, the sky off): zeros, and the shader keeps the read's own E / pi scale */
+static void openEUniform( Renderer * r, NifSkopeOpenGLContext::Program * prog, const RtDdgiVolume & v )
+{
+	const int loc = prog->uniLocation( "cellDdgiOpenE" );
+	if ( loc < 0 )
+		return;
+	struct Memo { float R[6][3]; float g[3]; bool rule, on, ok; float E[6][3]; };
+	static Memo m = {};
+	if ( !m.ok || std::memcmp( m.R, v.skyR, sizeof m.R ) || std::memcmp( m.g, v.ground, sizeof m.g )
+		|| m.rule != v.skyBelowRule || m.on != v.skyOn ) {
+		std::memcpy( m.R, v.skyR, sizeof m.R );
+		std::memcpy( m.g, v.ground, sizeof m.g );
+		m.rule = v.skyBelowRule;
+		m.on = v.skyOn;
+		m.ok = true;
+		if ( v.skyOn )
+			rtddgi::openIrradiance( v.skyR, v.ground, v.skyBelowRule, m.E );
+		else
+			std::memset( m.E, 0, sizeof m.E );
+		qInfo( "rtddgi air: open-field E +X %.4g -X %.4g +Y %.4g -Y %.4g +Z %.4g -Z %.4g (green; FOGENV1)",
+			double( m.E[0][1] ), double( m.E[1][1] ), double( m.E[2][1] ), double( m.E[3][1] ), double( m.E[4][1] ),
+			double( m.E[5][1] ) );
+	}
+	r->fn->glUniform3fv( loc, 6, &m.E[0][0] );
+}
+
 static void bindOne( Scene * scene, Renderer * r, NifSkopeOpenGLContext::Program * prog, int locOn, Cell & c )
 {
 	const bool ready = c.live && c.uploaded && c.tex && c.glOwner == r && c.nif == scene->nifModel;
@@ -2318,6 +2346,7 @@ static void bindOne( Scene * scene, Renderer * r, NifSkopeOpenGLContext::Program
 	const int locDims = prog->uniLocation( "cellDdgiDims" );
 	if ( locDims >= 0 )
 		fn->glUniform4i( locDims, v.dims[0], v.dims[1], v.dims[2], v.probeCount() );
+	openEUniform( r, prog, v );
 	prog->uni1i( "cellDdgiRed", cellRedBits() );
 }
 
@@ -2380,6 +2409,7 @@ void rtddgiCellUniforms( Scene * scene )
 			fn->glUniform4iv( locD, cnt, dims );
 		if ( locB >= 0 )
 			fn->glUniform1iv( locB, cnt, base );
+		openEUniform( r, prog, cascCell( 0 ).live->live.volume() );
 		prog->uni1i( "cellDdgiRed", cellRedBits() );
 		return;
 	}

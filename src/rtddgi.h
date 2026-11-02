@@ -98,6 +98,8 @@ struct RtDdgiVolume
 	 * the above-horizon misses' radiance bytes (the rule leaves them byte-equal to the red) */
 	float ground[3] = { 0, 0, 0 }, groundAlbedo[3] = { 0, 0, 0 };
 	bool skyBelowRule = true;
+	float skyR[6][3] = {};          //!< lane FOGENV1: the sky cube the misses took (skyRadianceCube), for openIrradiance
+	bool skyOn = false;             //!< the misses took a sky (an exterior with the weather's sky)
 	qint64 missBelow = -1, missBelowSky = 0, missBelowGround = 0, missAbove = 0, missAboveSky = 0;
 	quint64 aboveHash = 0;
 	int probeCount() const { return dims[0] * dims[1] * dims[2]; }
