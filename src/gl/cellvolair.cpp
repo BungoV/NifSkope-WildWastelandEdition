@@ -111,6 +111,9 @@ struct VaState
 	 * not the flat ambient x the read over the volume's open field), 64 sun8 (FOGLEAK1-COST: the sun's sky visibility
 	 * from all 8 probes of the walk, not the heaviest one's tile) */
 	int leakRed = 0;
+	// lane DARKAIR1 red WW_CELL_AIR_RED=openenv: outdoors the air's ambient share unoccluded (the flat weather ambient),
+	// as before; shipped: x the sky the ray-traced volume sees up from the froxel (cell_volair.frag airSkyView)
+	bool openEnv = false;
 	// lane PERFFIX3 reds (WW_CELL_AIR_RED=ask / sunpcf / f32): the uniforms and the GL state asked from the driver, the
 	// sun's shadow in the air through the surfaces' filter, the volumes RGBA32F; each the pass as before
 	bool askRed = false, sunPcf = false, f32 = false;
@@ -159,6 +162,7 @@ VaState & vs()
 			s.envHue = d.envHue;
 			s.veilPhys = d.veilPhys;
 			s.leakRed = d.leakRed;
+			s.openEnv = d.openEnv;
 			s.askRed = d.askRed;
 			s.sunPcf = d.sunPcf;
 			s.f32 = d.f32;
@@ -184,6 +188,7 @@ VaState & vs()
 			s.sunColumn = s.sunColumn || r == "suncolumn";	// lane FIX1101A
 			s.envHue = s.envHue || r == "envhue";	// lane FIX1101A
 			s.veilPhys = s.veilPhys || r == "veilphys";	// lane FARCITYWASH1
+			s.openEnv = s.openEnv || r == "openenv";	// lane DARKAIR1
 			s.leakRed |= r == "dalcenv" ? 1 : r == "nosungate" ? 2 : r == "lightleak" ? 4 : r == "nofartailshadow" ? 8
 				: r == "nointsungate" ? 16 : r == "envscale" ? 32 : r == "sun8" ? 64 : r == "intratio" ? 128 : 0;	// lane FOGLEAK1, INTGI1, FOGENV1
 			s.askRed = s.askRed || r == "ask";
@@ -1082,6 +1087,13 @@ bool wwAirBounceShaderDefine()
 	return wwEnv( "WW_CELL_AIR_BOUNCE_LAMPS" ).trimmed() == "1";
 }
 
+/* lane DARKAIR1: WW_CELL_AIR_SKYVIEW=1 compiles the air's sky visibility (cell_volair.frag airSkyView) into the program;
+ * off (the default until a hold): not a line of it compiled. Read at each shader load, like WW_CELL_FOGLEAK */
+bool wwAirSkyViewShaderDefine()
+{
+	return wwEnv( "WW_CELL_AIR_SKYVIEW" ).trimmed() == "1";
+}
+
 bool wwVolAirWantsSettle()
 {
 	VaState & s = vs();
@@ -1864,6 +1876,7 @@ static void vaPassInner( Scene * scene, bool run )
 	 * WW_CELL_AIR_RED=intratio (bit 128) keeps FOGENV1's ratio indoors */
 	const bool intDirect = L && L->interior && wwCellAsOutdoor( L ) && ( s.leakRed & 128 ) == 0;
 	prog->uni1i( "volLeakRed", ( s.leakRed & ~128 ) | ( intDirect ? 32 : 0 ) );	// lane FOGLEAK1 (only a WW_CELL_FOGLEAK program holds it)
+	prog->uni1i( "volEnvOccRed", s.openEnv ? 1 : 0 );	// lane DARKAIR1 (only a WW_CELL_RTDDGI program without FOGLEAK holds it)
 	prog->uni1f( "volShell", s.shellStep ? 0.0f : 1.0f );
 	if ( s.shellStep || s.noAirVol )
 		prog->uni1b( "cellGiAirOn", false );	// wwCellLightsUniforms turned it on
@@ -2449,6 +2462,8 @@ static void vaPassInner( Scene * scene, bool run )
 		+ QStringLiteral( " rainfog=" ) + g.rfNote
 		+ QStringLiteral( " fogleak=%1(red=%2)" ).arg( wwFogLeakShaderDefine() ? "on" : "off" ).arg( s.leakRed ) + QStringLiteral( " intenv=%1" ).arg( L && L->interior && wwCellAsOutdoor( L ) ? ( ( s.leakRed & 128 ) ? "ratio(red)" : "direct" ) : "n/a" )	// lane FOGLEAK1
 		+ QStringLiteral( " veil=%1" ).arg( s.veilPhys ? "phys" : "record" )	// lane FARCITYWASH1
+		+ QStringLiteral( " fogleak=%1(red=%2)" ).arg( wwFogLeakShaderDefine() ? "on" : "off" ).arg( s.leakRed )	// lane FOGLEAK1
+		+ QStringLiteral( " envocc=%1" ).arg( !wwAirSkyViewShaderDefine() ? "off" : s.openEnv ? "red(open)" : "sky" )	// lane DARKAIR1
 		// lane PERFFIX3: the grid preset, the integrated volume's format, the sun's read in the air, the uniform reads
 		// (from the mirror / asked / mirror stale under WW_SETUP_MEMO_CHECK=1) and the entry state (noted / asked, stale)
 		+ QStringLiteral( " grid=%1 vol=%2 sunread=%3 reads=%4/%5/%6 state=%7%8" ).arg( s.grid ).arg( g.half ? "16f" : "32f" )

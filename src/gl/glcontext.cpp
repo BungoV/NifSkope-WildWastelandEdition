@@ -64,6 +64,7 @@ bool wwIrisShaderDefine();	// lane SKINSSS2: the Eye iris refraction row / WW_CE
 bool wwCellViewsShaderDefine();	// lane FO4CELLGI1: src/gl/celllights.cpp (WW_CELL_VIEWS, the probe and pass views)
 bool wwFogLeakShaderDefine();	// lane FOGLEAK1: src/gl/cellvolair.cpp (WW_CELL_FOGLEAK, the fog leak fix; off by default)
 bool wwAirBounceShaderDefine();	// lane AIRBOUNCE1: src/gl/cellvolair.cpp (WW_CELL_AIR_BOUNCE_LAMPS, the lamps' floor bounce; off by default)
+bool wwAirSkyViewShaderDefine();	// lane DARKAIR1: src/gl/cellvolair.cpp (WW_CELL_AIR_SKYVIEW, the air's sky visibility; off by default)
 int wwCellGiVis();	// lane PERF1: src/gl/celllights.cpp (1: the march, WW_CELL_GI_MARCH)
 bool wwCellPrtOn();	// lane PRTOFF1: src/gl/celllights.cpp (the old baked probe GI, only under its red)
 
@@ -601,6 +602,9 @@ bool NifSkopeOpenGLContext::Shader::load( const QString & filepath )
 		// lane AIRBOUNCE1: the lamps' floor bounce in the air (cell_volair.frag); not static: read per load
 		if ( wwAirBounceShaderDefine() && data.startsWith( "#version" ) && data.contains( "_CELL_AIR_BOUNCE" ) )
 			data.insert( data.indexOf( '\n' ) + 1, "#define WW_CELL_AIR_BOUNCE 1\n" );
+		// lane DARKAIR1: the air's ambient takes the volume's sky visibility (cell_volair.frag airSkyView); read per load
+		if ( wwAirSkyViewShaderDefine() && data.startsWith( "#version" ) && data.contains( "_CELL_AIR_SKYVIEW" ) )
+			data.insert( data.indexOf( '\n' ) + 1, "#define WW_CELL_AIR_SKYVIEW 1\n" );
 		// lane PERF3: the cascades from one per-frame block, in the sources that ask for it (WW_FRAME_UBO_RED=1: plain uniforms)
 		static const bool frameUbo = qgetenv( "WW_FRAME_UBO" ).trimmed() != "0" && qgetenv( "WW_FRAME_UBO_RED" ).trimmed() != "1"
 			&& qgetenv( "WW_PERF3_RED" ).trimmed() != "1";
