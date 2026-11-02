@@ -20,6 +20,7 @@
 #include <QSettings>
 
 #include <algorithm>
+#include <chrono>
 #include <cmath>
 #include <cstdio>
 #include <cstring>
@@ -38,13 +39,15 @@ struct Counts
 	std::int64_t cDrawn[3] = { 0, 0, 0 }, cCulled[3] = { 0, 0, 0 };
 	// lane OBJFADE1: the camera passes' fade (runs with a class; of them hidden), all / items / actors
 	std::int64_t fadeRuns = 0, faded = 0, itemRuns = 0, itemFaded = 0, actorRuns = 0, actorFaded = 0;
+	std::int64_t rampPartial = 0, casterFaded = 0;	// the late items: runs part way through the ramp, casters dropped
 	bool operator==( const Counts & o ) const
 	{
 		for ( int i = 0; i < 3; i++ )
 			if ( cDrawn[i] != o.cDrawn[i] || cCulled[i] != o.cCulled[i] )
 				return false;
 		if ( fadeRuns != o.fadeRuns || faded != o.faded || itemRuns != o.itemRuns || itemFaded != o.itemFaded
-			|| actorRuns != o.actorRuns || actorFaded != o.actorFaded )
+			|| actorRuns != o.actorRuns || actorFaded != o.actorFaded || rampPartial != o.rampPartial
+			|| casterFaded != o.casterFaded )
 			return false;
 		return shapes == o.shapes && runs == o.runs && drawn == o.drawn && culled == o.culled && calls == o.calls
 			&& tris == o.tris && trisAll == o.trisAll && occluded == o.occluded && roomCulled == o.roomCulled
@@ -190,6 +193,18 @@ struct CullState
 	// lane OBJFADE1: a shape of ONE run (not in `docs`: nothing to cull inside it) whose run has a fade class
 	QHash<const void *, QHash<int, WwCullRun>> fadeOne;
 	QString lastFadeLine;
+	// lane OBJFADE1 late items: each ref's ramp (stamped with the frame it stepped in), the frame time, the location's
+	// Actor Fade Mult per document, the last camera pass's FOV (the casters' rule without the ramp)
+	struct FadeMem
+	{
+		WwObjFade::Ramp r;
+		std::uint64_t frame = ~std::uint64_t( 0 );
+	};
+	QHash<std::uint32_t, FadeMem> fadeMem;
+	std::chrono::steady_clock::time_point fadeClock;
+	bool fadeClockValid = false;
+	float fadeDt = 0.0f, fadeFov = 80.0f;
+	QHash<const void *, float> fadeLoc;
 };
 
 CullState & st()
@@ -436,6 +451,8 @@ void countsAdd( Counts & a, const Counts & b, std::int64_t sg )
 	a.itemFaded += sg * b.itemFaded;
 	a.actorRuns += sg * b.actorRuns;
 	a.actorFaded += sg * b.actorFaded;
+	a.rampPartial += sg * b.rampPartial;
+	a.casterFaded += sg * b.casterFaded;
 	for ( int i = 0; i < 3; i++ ) {
 		a.cDrawn[i] += sg * b.cDrawn[i];
 		a.cCulled[i] += sg * b.cCulled[i];
@@ -818,6 +835,8 @@ void wwCellCullBegin( const void * nif )
 	st().decalPom.remove( nif );
 	st().decalAngle.remove( nif );	// lane DECALANGLE
 	st().fadeOne.remove( nif );	// lane OBJFADE1
+	st().fadeLoc.remove( nif );
+	st().fadeMem.clear();	// keyed by form id alone: a new document starts every ref fresh
 	st().depthKeyValid = false;
 }
 
@@ -1071,6 +1090,13 @@ static const ObjFadeCfg & objFadeCfg()
 		if ( ang > 0.0f )
 			o.c.minAngle = ang;
 		o.c.band = wwEnv( "WW_CELL_OBJFADE_BAND" ).trimmed() == "1";
+		// the late items, each off by default (off = its red: the lane's first rule)
+		o.c.ramp = wwEnv( "WW_CELL_OBJFADE_RAMP" ).trimmed() == "1";
+		o.c.rampDt = wwEnv( "WW_CELL_OBJFADE_RAMP_DT" ).trimmed().toFloat();
+		o.c.locMult = wwEnv( "WW_CELL_OBJFADE_LOCMULT" ).trimmed() == "1";
+		o.c.vwd = wwEnv( "WW_CELL_OBJFADE_VWD" ).trimmed() == "1";
+		o.c.ligh = wwEnv( "WW_CELL_OBJFADE_LIGH" ).trimmed() == "1";
+		o.c.casters = wwEnv( "WW_CELL_OBJFADE_CASTERS" ).trimmed() == "1";
 		const int g = cellGameGrids();
 		o.c.grids = g > 0 ? g : 5;
 		return o;
@@ -1086,6 +1112,27 @@ bool wwCellObjFadeOn()
 const WwObjFade::Config & wwCellObjFadeConfig()
 {
 	return objFadeCfg().c;
+}
+
+void wwCellObjFadeSetLocation( const void * nif, float actorFadeMult )
+{
+	if ( actorFadeMult != 0.0f )
+		st().fadeLoc.insert( nif, actorFadeMult );
+	else
+		st().fadeLoc.remove( nif );
+}
+
+//! the config a document's fade runs with: the location's Actor Fade Mult on the actors (LOCMULT)
+static WwObjFade::Config objFadeCfgFor( const void * nif, float fovDeg )
+{
+	WwObjFade::Config c = wwCellObjFadeConfig();
+	c.fovDeg = fovDeg;
+	if ( c.locMult ) {
+		auto l = st().fadeLoc.constFind( nif );
+		if ( l != st().fadeLoc.constEnd() )
+			c.mults = WwObjFade::withLocation( c.mults, *l );
+	}
+	return c;
 }
 
 void wwCellDecalFadeShape( const void * nif, int block, const std::vector<WwCullRun> & runs )
@@ -1142,8 +1189,9 @@ bool wwCellDecalFadeRanges( Scene * scene, const Shape * sh, int block, std::int
 		if ( s.on && !insidePlanes( pl, v, r.radius * vs ) )
 			continue;
 		float k = k0;
-		if ( perClass && r.fadeType != WwObjFade::None ) {
-			const float m = r.fadeType == WwObjFade::Items ? cm.items : r.fadeType == WwObjFade::Actors ? cm.actors : cm.objects;
+		const std::uint8_t fcls = WwObjFade::classOf( r.fadeType );
+		if ( perClass && fcls != WwObjFade::None ) {
+			const float m = fcls == WwObjFade::Items ? cm.items : fcls == WwObjFade::Actors ? cm.actors : cm.objects;
 			k = m > 0.0f ? ( fov / 80.0f ) / ( m * 7200.0f ) : 0.2f / 7200.0f;
 		}
 		const float x = v.length() / vs * k;	// the placement's centre stands in for its fade node's
@@ -1306,23 +1354,45 @@ bool wwCellCullCamera( Scene * scene, const Shape * sh, int block, std::int64_t 
 		const auto & pmx = scene->renderer->globalUniforms->projectionMatrix;	// the decal fade's FOV (horizontal)
 		fadeFov = pmx[0][0] > 0.0f ? 2.0f * std::atan( 1.0f / pmx[0][0] ) * 57.29578f : 80.0f;
 	}
-	WwObjFade::Config fadeCfg = wwCellObjFadeConfig();
-	fadeCfg.fovDeg = fadeFov;
+	const WwObjFade::Config fadeCfg = objFadeCfgFor( scene->nifModel, fadeFov );
+	if ( fade )
+		s.fadeFov = fadeFov;	// the casters' rule (no ramp) judges from this camera
+	const bool fadeRamp = fadeCfg.ramp && fadeCfg.law == WwObjFade::Game;
 	const Transform & fvt = sh->viewTrans();
 	const float fvs = std::fabs( fvt.scale ) > 0.0f ? std::fabs( fvt.scale ) : 1.0f;
 	// counts one run of a class and says whether the fade hides it
 	auto fadeHides = [&]( const WwCullRun & r, Counts & c ) -> bool {
 		if ( !fade || r.fadeType == WwObjFade::None )
 			return false;
+		std::uint8_t cls = WwObjFade::classOf( r.fadeType );
+		if ( fadeCfg.ligh && ( r.fadeType & WwObjFade::CarriedLight ) && cls == WwObjFade::Objects )
+			cls = WwObjFade::Items;
 		c.fadeRuns++;
-		c.itemRuns += r.fadeType == WwObjFade::Items ? 1 : 0;
-		c.actorRuns += r.fadeType == WwObjFade::Actors ? 1 : 0;
+		c.itemRuns += cls == WwObjFade::Items ? 1 : 0;
+		c.actorRuns += cls == WwObjFade::Actors ? 1 : 0;
 		const float dist = ( fvt * r.fadeCenter ).length() / fvs;	// the placement's bound centre, world units
-		if ( !WwObjFade::hidden( dist, r.fadeRadius, r.fadeType, r.ref, interiorDoc, fadeCfg ) )
+		bool hid;
+		if ( fadeRamp && r.ref ) {	// RAMP: the ref's memory steps once a frame; new or unseen 20 frames = shown at 1
+			CullState::FadeMem & m = s.fadeMem[r.ref];
+			if ( m.frame == ~std::uint64_t( 0 ) || m.frame > s.frame || s.frame - m.frame > 20 ) {
+				m.r = WwObjFade::Ramp();
+				m.frame = s.frame - 1;
+			}
+			if ( m.frame != s.frame ) {
+				WwObjFade::rampStep( m.r, WwObjFade::alphaOf( dist, r.fadeRadius, r.fadeType, interiorDoc, fadeCfg ), s.fadeDt,
+					fadeCfg );
+				m.frame = s.frame;
+			}
+			hid = !WwObjFade::rampDrawn( m.r, r.ref );
+			c.rampPartial += m.r.a > 0.0f && m.r.a < 1.0f ? 1 : 0;
+		} else {
+			hid = WwObjFade::hidden( dist, r.fadeRadius, r.fadeType, r.ref, interiorDoc, fadeCfg );
+		}
+		if ( !hid )
 			return false;
 		c.faded++;
-		c.itemFaded += r.fadeType == WwObjFade::Items ? 1 : 0;
-		c.actorFaded += r.fadeType == WwObjFade::Actors ? 1 : 0;
+		c.itemFaded += cls == WwObjFade::Items ? 1 : 0;
+		c.actorFaded += cls == WwObjFade::Actors ? 1 : 0;
 		return true;
 	};
 	const std::vector<WwCullRun> * runs = wwCellCullRuns( scene->nifModel, block );
@@ -1492,11 +1562,54 @@ bool wwCellCullCaster( Scene * scene, const Shape * sh, int block, int cascade, 
 		ud = it == s.umbra.end() ? nullptr : it.value().get();
 	}
 	const bool umbraRed = ud != nullptr;
-	if ( ( !s.on && !previsRed && !umbraRed ) || !scene || !sh || !scene->renderer || !m )
+	/* lane OBJFADE1 CASTERS (WW_CELL_OBJFADE_CASTERS=1; red = off, casters always cast): the game recomputes the fade
+	 * only for the main camera; every other culler skips a node whose drawn alpha is 0. So a ref the camera faded
+	 * out casts no shadow (ramp: its alpha is 0; no ramp: hidden at the last camera eye), one still ramping casts. */
+	const bool casterFade = scene && sh && scene->renderer && m && !s.probing && wwCellObjFadeOn()
+		&& wwCellObjFadeConfig().casters && ( wwCellObjFadeConfig().ramp || s.camViewValid );
+	WwObjFade::Config ccfg;
+	bool cInterior = false;
+	if ( casterFade ) {
+		ccfg = objFadeCfgFor( scene->nifModel, s.fadeFov );
+		const auto pv = s.previs.constFind( scene->nifModel );
+		cInterior = pv != s.previs.constEnd() && pv->interior;
+	}
+	auto fadeDrops = [&]( const WwCullRun & r ) -> bool {
+		if ( !casterFade || r.fadeType == WwObjFade::None )
+			return false;
+		const WwObjFade::Ramp * rs = nullptr;
+		bool hid = false;
+		if ( ccfg.ramp && ccfg.law == WwObjFade::Game && r.ref ) {
+			auto it = s.fadeMem.constFind( r.ref );
+			if ( it == s.fadeMem.constEnd() )
+				return false;	// the camera has not judged it yet: shown
+			rs = &it->r;
+		} else {
+			const Transform cam = s.camView * sh->worldTrans();
+			const float cs = std::fabs( cam.scale ) > 0.0f ? std::fabs( cam.scale ) : 1.0f;
+			hid = WwObjFade::hidden( ( cam * r.fadeCenter ).length() / cs, r.fadeRadius, r.fadeType, r.ref, cInterior, ccfg );
+		}
+		if ( WwObjFade::casterCasts( rs, hid ) )
+			return false;
+		s.cur.casterFaded++;
+		return true;
+	};
+	if ( ( !s.on && !previsRed && !umbraRed && !casterFade ) || !scene || !sh || !scene->renderer || !m )
 		return false;
 	const std::vector<WwCullRun> * runs = wwCellCullRuns( scene->nifModel, block );
-	if ( !runs )
-		return false;
+	if ( !runs ) {
+		if ( !casterFade )
+			return false;
+		auto fd = s.fadeOne.constFind( scene->nifModel );
+		if ( fd == s.fadeOne.constEnd() )
+			return false;
+		auto f1 = fd->constFind( block );
+		if ( f1 == fd->constEnd() || !fadeDrops( *f1 ) )
+			return false;
+		s.any = true;
+		out.clear();	// the one placement is faded out for the camera: it casts nothing
+		return true;
+	}
 	const std::vector<UmbraGov> * gov = umbraRed ? &umbraGovFor( *ud, sh, block, *runs ) : nullptr;
 	auto tomeHides = [&]( const WwCullRun & r ) {	// RED only
 		if ( !gov || umbraRun( *ud, *gov, size_t( &r - runs->data() ) ) != 2 )
@@ -1512,14 +1625,14 @@ bool wwCellCullCaster( Scene * scene, const Shape * sh, int block, int cascade, 
 		culled = collect( *runs, std::int64_t( sh->triangles.size() ), [&]( const WwCullRun & r ) {
 			const bool h = previsRed && previsHidden( s.pc, cam * r.center, r.radius * std::fabs( cam.scale ) ) != 0;
 			hidden += h ? 1 : 0;
-			return !h && !tomeHides( r );
+			return !h && !tomeHides( r ) && !fadeDrops( r );
 		}, out, drawnTris );
 		s.cur.casterHidden += hidden;
 	} else if ( s.red == 1 ) {	// RED: the camera's frustum decides which casters the cascade gets
 		float pl[4][4];
 		cameraPlanes( scene, pl );
 		culled = collect( *runs, std::int64_t( sh->triangles.size() ), [&]( const WwCullRun & r ) {
-			return insidePlanes( pl, vt * r.center, r.radius * std::fabs( vt.scale ) );
+			return insidePlanes( pl, vt * r.center, r.radius * std::fabs( vt.scale ) ) && !fadeDrops( r );
 		}, out, drawnTris );
 	} else {
 		// the cascade's own window: light-space x and y in [-1, 1] (no depth test: a caster toward the sun still casts)
@@ -1531,6 +1644,8 @@ bool wwCellCullCaster( Scene * scene, const Shape * sh, int block, int cascade, 
 		lx = std::sqrt( lx );
 		ly = std::sqrt( ly );
 		culled = collect( *runs, std::int64_t( sh->triangles.size() ), [&]( const WwCullRun & r ) {
+			if ( fadeDrops( r ) )
+				return false;
 			const Vector3 v = vt * r.center;
 			const float rv = r.radius * std::fabs( vt.scale );
 			const float x = m[0] * v[0] + m[4] * v[1] + m[8] * v[2] + m[12];
@@ -1578,6 +1693,14 @@ void wwCellCullFrame()
 {
 	CullState & s = st();
 	s.frame++;	// the previs scene is rebuilt in the next camera pass
+	{	// lane OBJFADE1 RAMP: the frame time (WW_CELL_OBJFADE_RAMP_DT > 0 pins it, for the harness)
+		const auto now = std::chrono::steady_clock::now();
+		const float dt = s.fadeClockValid ? std::chrono::duration<float>( now - s.fadeClock ).count() : 0.0f;
+		s.fadeClock = now;
+		s.fadeClockValid = true;
+		const float pin = wwCellObjFadeConfig().rampDt;
+		s.fadeDt = pin > 0.0f ? pin : std::min( std::max( dt, 0.0f ), 1.0f );
+	}
 	if ( !s.previs.isEmpty() ) {
 		const PrevisCache & pc = s.pc;
 		const int occ = int( pc.occ.size() ), rooms = int( pc.rooms.size() );
@@ -1630,14 +1753,29 @@ void wwCellCullFrame()
 	s.memoHits = s.memoMisses = s.memoBad = 0;
 	if ( s.any && wwCellObjFadeOn() ) {	// lane OBJFADE1: printed when it changes
 		const ObjFadeCfg & fc = objFadeCfg();
+		QString late;	// the late items that are on
+		if ( fc.c.ramp )
+			late += QStringLiteral( "; ramp partial %1 dt %2" ).arg( qint64( s.cur.rampPartial ) ).arg( double( s.fadeDt ), 0, 'f', 3 );
+		if ( fc.c.casters )
+			late += QStringLiteral( "; casters faded %1" ).arg( qint64( s.cur.casterFaded ) );
+		if ( fc.c.locMult ) {
+			QString locs;
+			for ( auto l = s.fadeLoc.constBegin(); l != s.fadeLoc.constEnd(); ++l )
+				locs += QStringLiteral( " x%1" ).arg( double( l.value() ) );
+			late += QStringLiteral( "; locmult" ) + ( locs.isEmpty() ? QStringLiteral( " none" ) : locs );
+		}
+		if ( fc.c.vwd )
+			late += QStringLiteral( "; vwd" );
+		if ( fc.c.ligh )
+			late += QStringLiteral( "; ligh" );
 		const QString line = QStringLiteral( "cell fade: runs faded %1 / items %2 / actors %3 (of runs %4 / items %5 / "
-			"actors %6; law %7%8, mults %9/%10/%11 %12)" )
+			"actors %6; law %7%8, mults %9/%10/%11 %12%13)" )
 			.arg( qint64( s.cur.faded ) ).arg( qint64( s.cur.itemFaded ) ).arg( qint64( s.cur.actorFaded ) )
 			.arg( qint64( s.cur.fadeRuns ) ).arg( qint64( s.cur.itemRuns ) ).arg( qint64( s.cur.actorRuns ) )
 			.arg( fc.c.law == WwObjFade::Angular ? QStringLiteral( "angular" ) : QStringLiteral( "game" ) )
 			.arg( fc.c.band ? QStringLiteral( " band" ) : QString() )
 			.arg( double( fc.c.mults.objects ) ).arg( double( fc.c.mults.items ) ).arg( double( fc.c.mults.actors ) )
-			.arg( fc.from );
+			.arg( fc.from ).arg( late );
 		if ( line != s.lastFadeLine && wwFrameLog() ) {
 			s.lastFadeLine = line;
 			std::fprintf( stderr, "%s\n", line.toLocal8Bit().constData() );
