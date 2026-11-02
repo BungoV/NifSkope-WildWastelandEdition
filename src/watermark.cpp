@@ -445,11 +445,12 @@ bool WaterMarkDoc::readTail( QString * error )
 		return fail( QStringLiteral( "the body table's records are %1 bytes; this tool writes %2" )
 			.arg( bodyStride ).arg( kBodyRecord ) );
 	/* lane FARWATER6 (FARWATER5 L4): encoding 1 (the WW_LODL_FLOW_LOG log nibble) is marked too; words the tool does
-	 * not re-solve stay verbatim and the header keeps the file's encoding. Red WW_WATER_SPEED_REF_RED=mean refuses it. */
+	 * not re-solve stay verbatim and the header keeps the file's encoding. Red WW_WATER_SPEED_REF_RED=mean refuses it.
+	 * lane FARWATER7: encoding 2 (WW_LODL_FLOW_LOG=2, the three-quarter-octave log) the same way. */
 	const bool encRed = wwEnv( "WW_WATER_SPEED_REF_RED" ).trimmed() == "mean";
-	if ( flowEnc != kLodlFlowEncLinear && ( encRed || flowEnc != kLodlFlowEncLog ) )
-		return fail( QStringLiteral( "the flow plane uses encoding %1; this tool knows 0 and 1 "
-			"(direction 8 / speed 4 linear or half-octave log / confidence 4)" ).arg( flowEnc ) );
+	if ( flowEnc != kLodlFlowEncLinear && ( encRed || !lodtFlowEncodingKnown( flowEnc ) ) )
+		return fail( QStringLiteral( "the flow plane uses encoding %1; this tool knows 0, 1 and 2 "
+			"(direction 8 / speed 4 linear, half-octave or three-quarter-octave log / confidence 4)" ).arg( flowEnc ) );
 	const quint64 tableEnd = oBody + quint64( lodl->bodyCount() ) * bodyStride;
 	if ( oName && oName != tableEnd )
 		return fail( QStringLiteral( "the body name blob is at 0x%1, not immediately after the "
@@ -2232,7 +2233,8 @@ bool WaterMarkDoc::solveBody( int id, WaterMarkSolve & st, QString * note )
 	waterFieldDump( "body", id, W, H, F->px0, F->py0, usedStrokeEnds, meanSpeed,
 		agreeN ? agreeSum / agreeN : 0.0, F->mask, G, rhs, ux, uy, F->vx, F->vy, wgt );
 	/* Lane FARWATER6 (FARWATER5 L4): code 8 is lodtFlowSpeedReference(), the median lodgen's river bake uses, and the
-	 * code follows the file's own encoding (0 linear, 1 the WW_LODL_FLOW_LOG half-octave log). Red
+	 * code follows the file's own encoding (0 linear, 1 the WW_LODL_FLOW_LOG half-octave log, 2 FARWATER7's
+	 * three-quarter-octave log). Red
 	 * WW_WATER_SPEED_REF_RED=mean: the body's mean, linear, the old bytes. The slack line and speedRel stay on the mean. */
 	const bool refRed = wwEnv( "WW_WATER_SPEED_REF_RED" ).trimmed() == "mean";
 	double ref = meanSpeed;
@@ -2250,7 +2252,7 @@ bool WaterMarkDoc::solveBody( int id, WaterMarkSolve & st, QString * note )
 		const double sp = std::hypot( ux[size_t( i )], uy[size_t( i )] ) * double( wgt[at] );
 		mx += F->vx[at];
 		my += F->vy[at];
-		/* The speed nibble: 8 is the reference, 15 is 1.9x it linear (11.3x log), so a narrows that doubles the speed
+		/* The speed nibble: 8 is the reference, 15 is 1.9x it linear (11.3x encoding 1, 38.1x encoding 2), so a narrows that doubles the speed
 		 * saturates at 15 rather than wrapping. */
 		const double q = meanSpeed > 0.0 ? 8.0 * sp / meanSpeed : 8.0;
 		const int code = refRed ? std::max( 0, std::min( 15, int( q + 0.5 ) ) )

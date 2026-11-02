@@ -186,6 +186,15 @@ The shader is res/shaders/cell_transl.glsl, its C++ twin is src/gl/wwtransl.h, a
 values (wwTrCol, wwTrFlags) and binds the lighting map (WwTrLightMap, white when absent). `tests/translucency/translucency.sh`
 checks the twin against an independent reading of the law (6.97 M cases, worst 4.8e-7) and pins the shader's text;
 its red (WWTRANSL_RED, the upstream FO76 term) fails. With the switch off every program's machine code equals main's.
+## FARWATER7-SAT (2026-11-02): flow encoding 2, a three-quarter-octave log speed nibble
+
+- `WW_LODL_FLOW_LOG=2` bakes the .lodl river speed nibble as code = round(8 + log2(r) / 0.75), r = speed over the
+  bake's median (code 1 = 0.026 x, 8 = 1 x, 15 = 38 x; 0 = still), header word 0xCC = 2. Encoding 1 (`=1`, half-octave,
+  15 = 11.3 x) clipped 5.47 % of moving river texels on the Commonwealth (FARWATER4's 111 dumps); encoding 2 clips
+  0.76 %, and the p99 decode error falls from 1.85 to 0.37 octave. The price is a coarser step (worst 0.375 octave in range).
+- Readers (cell water, the marking tool) decode encoding 2; `WW_LODL_FLOW_LOG=1` (the red) and the linear default
+  write the same bytes as before. The bake census adds "over the code range on N". Default unchanged.
+- Code: src/lodtflowcode.h, src/lodtfile.cpp, src/watermark.cpp. Gate: tests/farwater7/run.sh.
 
 ## GISKYTWIN-FLIP (LAND5, 2026-11-02): the GI volume's sky ships at the physical level
 
