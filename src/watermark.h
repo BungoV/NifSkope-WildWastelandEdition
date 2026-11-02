@@ -285,6 +285,8 @@ public:
 	const LodtFile * file() const { return lodl; }
 	//! Samples per cell of the flow plane; see setFlowRate().
 	int flowSamples() const { return int( flowRate ); }
+	//! lane FARWATER6: the flow plane's speed encoding (lodtflowcode.h), kept on save
+	quint32 flowEncoding() const { return flowEnc; }
 	/*! Re-derive the flow plane at another rate. The strokes are WORLD
 	 *  coordinates, so this is the property gate P4 tests: mark at 32, write at
 	 *  8, and the same body still points the same way. Refuses a rate that does

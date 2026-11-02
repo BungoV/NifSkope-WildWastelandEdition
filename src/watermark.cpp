@@ -444,9 +444,12 @@ bool WaterMarkDoc::readTail( QString * error )
 	if ( bodyStride != kBodyRecord )
 		return fail( QStringLiteral( "the body table's records are %1 bytes; this tool writes %2" )
 			.arg( bodyStride ).arg( kBodyRecord ) );
-	if ( flowEnc != 0 )
-		return fail( QStringLiteral( "the flow plane uses encoding %1; this tool knows 0 "
-			"(direction 8 / speed 4 / confidence 4); a WW_LODL_FLOW_LOG bake is marked after FARWATER5 L4" ).arg( flowEnc ) );
+	/* lane FARWATER6 (FARWATER5 L4): encoding 1 (the WW_LODL_FLOW_LOG log nibble) is marked too; words the tool does
+	 * not re-solve stay verbatim and the header keeps the file's encoding. Red WW_WATER_SPEED_REF_RED=mean refuses it. */
+	const bool encRed = wwEnv( "WW_WATER_SPEED_REF_RED" ).trimmed() == "mean";
+	if ( flowEnc != kLodlFlowEncLinear && ( encRed || flowEnc != kLodlFlowEncLog ) )
+		return fail( QStringLiteral( "the flow plane uses encoding %1; this tool knows 0 and 1 "
+			"(direction 8 / speed 4 linear or half-octave log / confidence 4)" ).arg( flowEnc ) );
 	const quint64 tableEnd = oBody + quint64( lodl->bodyCount() ) * bodyStride;
 	if ( oName && oName != tableEnd )
 		return fail( QStringLiteral( "the body name blob is at 0x%1, not immediately after the "
@@ -2228,18 +2231,31 @@ bool WaterMarkDoc::solveBody( int id, WaterMarkSolve & st, QString * note )
 	const bool floorRed = waterSpeedFloorRed();
 	waterFieldDump( "body", id, W, H, F->px0, F->py0, usedStrokeEnds, meanSpeed,
 		agreeN ? agreeSum / agreeN : 0.0, F->mask, G, rhs, ux, uy, F->vx, F->vy, wgt );
+	/* Lane FARWATER6 (FARWATER5 L4): code 8 is lodtFlowSpeedReference(), the median lodgen's river bake uses, and the
+	 * code follows the file's own encoding (0 linear, 1 the WW_LODL_FLOW_LOG half-octave log). Red
+	 * WW_WATER_SPEED_REF_RED=mean: the body's mean, linear, the old bytes. The slack line and speedRel stay on the mean. */
+	const bool refRed = wwEnv( "WW_WATER_SPEED_REF_RED" ).trimmed() == "mean";
+	double ref = meanSpeed;
+	if ( !refRed ) {
+		std::vector<double> all( size_t( G.n ) );
+		for ( int i = 0; i < G.n; i++ ) {
+			const size_t at = size_t( G.cy[size_t( i )] ) * size_t( W ) + size_t( G.cx[size_t( i )] );
+			all[size_t( i )] = std::hypot( ux[size_t( i )], uy[size_t( i )] ) * double( wgt[at] );
+		}
+		ref = lodtFlowSpeedReference( std::move( all ) );
+	}
 	double mx = 0.0, my = 0.0;
 	for ( int i = 0; i < G.n; i++ ) {
 		const size_t at = size_t( G.cy[size_t( i )] ) * size_t( W ) + size_t( G.cx[size_t( i )] );
 		const double sp = std::hypot( ux[size_t( i )], uy[size_t( i )] ) * double( wgt[at] );
 		mx += F->vx[at];
 		my += F->vy[at];
-		/* The speed nibble: 8 is the body's mean, 15 is 1.9x it (the format's
-		 * own quantum), so a narrows that doubles the speed saturates at 15
-		 * and says so here rather than wrapping. */
+		/* The speed nibble: 8 is the reference, 15 is 1.9x it linear (11.3x log), so a narrows that doubles the speed
+		 * saturates at 15 rather than wrapping. */
 		const double q = meanSpeed > 0.0 ? 8.0 * sp / meanSpeed : 8.0;
-		F->speed[at] = quint8( waterSpeedFloor( std::max( 0, std::min( 15, int( q + 0.5 ) ) ), sp, meanSpeed,
-			floorRed ) );
+		const int code = refRed ? std::max( 0, std::min( 15, int( q + 0.5 ) ) )
+			: lodtFlowSpeedCode( flowEnc, ref > 0.0 ? sp / ref : 1.0 );
+		F->speed[at] = quint8( waterSpeedFloor( code, sp, meanSpeed, floorRed ) );
 		if ( F->speedRel.empty() )
 			F->speedRel.assign( n, 0.0f );
 		F->speedRel[at] = float( q / 8.0 );
@@ -3317,7 +3333,7 @@ bool WaterMarkDoc::save( QString * error )
 		if ( out.write( plane ) != plane.size() )
 			return fail( QStringLiteral( "could not write the flow plane" ) );
 		patch32( hdr, kOffFlowRt, flowRate );
-		patch32( hdr, kOffFlowEnc, 0 );
+		patch32( hdr, kOffFlowEnc, flowEnc );	// lane FARWATER6: the file's own encoding (0 before encoding 1 was read)
 		patch64( hdr, kOffFlow, pos );
 		pos += quint64( plane.size() );
 	}
@@ -5623,6 +5639,36 @@ bool lodtWaterMarkSelfTest( const QString & path, QString * text, QString * erro
 			st2.solveSeconds < 1.0 && st2.residual < 1e-8 );
 		check( QStringLiteral( "the stroke and the solved flow under it agree (mean cosine %1, "
 			"needs > 0.5)" ).arg( st2.strokeAgreement, 0, 'f', 3 ), st2.strokeAgreement > 0.5 );
+		/* lane FARWATER6 (FARWATER5 L4): L4, ONE REFERENCE. lodgen's river bake writes code 8 at the median moving
+		 * speed of the piece; the tool's words must too, so a re-marked body decodes at the baked speed. The median
+		 * written code over the moving texels of the solved field is exactly 8 (red WW_WATER_SPEED_REF_RED=mean: the
+		 * body mean, 8 x median / mean). */
+		{
+			LodtWaterBody rb;
+			doc.body( river, rb );
+			int px0 = 0, py0 = 0, px1 = 0, py1 = 0;
+			doc.worldToTexel( double( rb.x0 ) * kCellUnits, double( rb.y0 ) * kCellUnits, px0, py0 );
+			doc.worldToTexel( ( double( rb.x1 ) + 1.0 ) * kCellUnits, ( double( rb.y1 ) + 1.0 ) * kCellUnits, px1, py1 );
+			std::vector<int> codes;
+			qint64 sat = 0;
+			for ( int py = std::min( py0, py1 ); py <= std::max( py0, py1 ); py++ )
+				for ( int px = std::min( px0, px1 ); px <= std::max( px0, px1 ); px++ ) {
+					if ( !( doc.solvedSpeedAt( px, py ) > 0.0 ) )
+						continue;
+					const int c = ( doc.flowWordAt( px, py ) >> 8 ) & 0xF;
+					codes.push_back( c );
+					sat += c == 15;
+				}
+			int med = -1;
+			if ( !codes.empty() ) {
+				std::nth_element( codes.begin(), codes.begin() + std::ptrdiff_t( codes.size() / 2 ), codes.end() );
+				med = codes[codes.size() / 2];
+			}
+			check( QStringLiteral( "L4 one speed reference: the median written speed code of body %1's %2 moving "
+				"texels is %3 (needs 8, the lodgen bake's median); %4 at 15; flow encoding %5" ).arg( river )
+				.arg( qint64( codes.size() ) ).arg( med ).arg( sat ).arg( doc.flowEncoding() ),
+				med == 8 );
+		}
 	}
 
 	/* ---- 5b. P4: the stroke survives a re-derivation at another rate ------

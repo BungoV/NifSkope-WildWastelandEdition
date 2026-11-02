@@ -1247,6 +1247,7 @@
 { "WW_WATER_MARK_TEST", 0, "src/watermarkpanel.cpp:1451 waterMarkInstall | re-read per frame or per call (a)" },
 { "WW_WATER_REBAKE_NOTE_RED", 0, "src/watermark.cpp:3700 waterMarkRebakeNote | re-read per frame or per call (a)" },
 { "WW_WATER_SPEED_FLOOR_RED", 0, "src/watermark.cpp:1470 waterSpeedFloorRed | re-read per frame or per call (a)" },
+{ "WW_WATER_SPEED_REF_RED", 0, "src/watermark.cpp:2232 WaterMarkDoc::solveBody | re-read per frame or per call (a)" },
 { "WW_WATER_STROKE_WINS_RED", 0, "src/watermark.cpp:2177 WaterMarkDoc::solveBody | re-read per frame or per call (a)" },
 { "WW_WATER_WINDOW_FILE", 0, "src/waterwindow.cpp:2216 runWindowSelfTest | re-read per frame or per call (a)" },
 { "WW_WATER_WINDOW_FILE2", 0, "src/waterwindow.cpp:2417 runWindowSelfTest | re-read per frame or per call (a)" },

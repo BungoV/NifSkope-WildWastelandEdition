@@ -1672,14 +1672,9 @@ static bool lodtBuildWater( const WaterInput & in, quint64 baseOffset,
 					if ( G.comp[size_t( c )] != piece )
 						continue;
 					proj += ux[size_t( c )] * W.flowX + uy[size_t( c )] * W.flowY;
-					const double s = std::sqrt( ux[size_t( c )] * ux[size_t( c )] + uy[size_t( c )] * uy[size_t( c )] );
-					if ( s > 0.0 )
-						sp.push_back( s );
+					sp.push_back( std::sqrt( ux[size_t( c )] * ux[size_t( c )] + uy[size_t( c )] * uy[size_t( c )] ) );
 				}
-				if ( !sp.empty() ) {
-					std::nth_element( sp.begin(), sp.begin() + std::ptrdiff_t( sp.size() / 2 ), sp.end() );
-					median = sp[sp.size() / 2];
-				}
+				median = lodtFlowSpeedReference( std::move( sp ) );	// lane FARWATER6: the one reference (lodtflowcode.h)
 				ok = proj > 0.0 && median > 0.0;
 			}
 			if ( !ok ) {
