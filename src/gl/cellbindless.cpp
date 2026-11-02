@@ -132,6 +132,7 @@ struct Ctx
 	std::deque<std::pair<std::uint64_t, GLsync>> frameFences;
 	std::uint64_t doneEpoch = 0;
 	long long shrinks = 0, reopens = 0;
+	long long capped = 0, cappedAll = 0;	// lane STREAMTEX5: placements the pool's budget refused (drawn unpooled)
 };
 
 std::unordered_map<const QOpenGLContext *, Ctx> & ctxs()
@@ -205,9 +206,21 @@ int red()
 	WW_SWITCH_STATIC( int, r, [] {
 		const QByteArray v = wwEnv( "WW_BINDLESS_RED" ).trimmed();
 		return v == "sampler" ? 1 : v == "pooloff1" ? 2 : v == "nopool" ? 3 : v == "cellname" ? 4 : v == "slow" ? 5
-			: v == "poolgrow" ? 6 : v == "reopenraw" ? 7 : 0;	// lane BINDREOPEN1: 6, 7
+			: v == "poolgrow" ? 6 : v == "reopenraw" ? 7 : v == "poolnocap" ? 8 : 0;	// lane BINDREOPEN1: 6, 7; STREAMTEX5: 8
 	}() );
 	return r;
+}
+
+//! lane STREAMTEX5: the geometry pool's cap in MB (WW_BINDLESS_POOL_MB, default 1536); 0 under red poolnocap / poolgrow
+double poolBudgetMB()
+{
+	WW_SWITCH_STATIC( double, mb, [] {
+		bool ok = false;
+		const double v = wwEnv( "WW_BINDLESS_POOL_MB" ).trimmed().toDouble( &ok );
+		return ok && v > 0.0 ? v : 1536.0;
+	}() );
+	const int r = red();
+	return r == 6 || r == 8 ? 0.0 : mb;
 }
 
 bool on()
@@ -237,8 +250,8 @@ bool mdiOn()
 		const QByteArray v = wwEnv( "WW_BINDLESS_MDI" ).trimmed();
 		return v.isEmpty() ? kMdiDefault : v != "0";
 	}() );
-	const int r = red();	// lane BINDREOPEN1: the pool and reopen reds keep the multi-draw
-	return want && ( r == 0 || r == 6 || r == 7 ) && on() && cx().mdi;
+	const int r = red();	// lane BINDREOPEN1: the pool and reopen reds keep the multi-draw (STREAMTEX5: and poolnocap)
+	return want && ( r == 0 || r == 6 || r == 7 || r == 8 ) && on() && cx().mdi;
 }
 
 bool frozenSkip( GLuint tex, int wrapS, int wrapT, int minFilter, float aniso )
@@ -887,6 +900,17 @@ bool poolBind( const Shape * sh, NifSkopeOpenGLContext::GLFunctions * f, unsigne
 		}
 		WwBlPool::Span sp;
 		if ( !k.a.alloc( verts, idx, sp ) ) {
+			// lane STREAMTEX5: a rebuild past the budget is refused; the shape draws from its own buffers (unpooled)
+			const double budget = poolBudgetMB();
+			if ( budget > 0.0 ) {
+				const double fpv = double( k.floatsPerVert ) * 4.0;
+				const double other = poolMB( c ) * 1048576.0 - ( double( k.a.vertCap ) * fpv + double( k.a.idxCap ) * 2.0 );
+				if ( WwBlPool::overBudget( other, k.a, verts, idx, k.floatsPerVert, budget ) ) {
+					c.capped++;
+					c.cappedAll++;
+					return false;
+				}
+			}
 			rebuild( c, f, k, verts, idx );
 			if ( !k.a.alloc( verts, idx, sp ) )
 				return false;
@@ -1062,7 +1086,7 @@ void frame()
 			.arg( red() == 1 ? QStringLiteral( " RED sampler" ) : red() == 2 ? QStringLiteral( " RED pooloff1" )
 				: red() == 3 ? QStringLiteral( " RED nopool" ) : red() == 4 ? QStringLiteral( " RED cellname" )
 				: red() == 5 ? QStringLiteral( " RED slow" ) : red() == 6 ? QStringLiteral( " RED poolgrow" )
-				: red() == 7 ? QStringLiteral( " RED reopenraw" ) : QString() )
+				: red() == 7 ? QStringLiteral( " RED reopenraw" ) : red() == 8 ? QStringLiteral( " RED poolnocap" ) : QString() )
 			// lane BINDLESSMDI1: runs = multi-draws of more than one shape, merged = the shapes that joined a leader
 			+ ( mdiOn() ? QStringLiteral( " mdi: runs=%1 merged=%2 calls=%3 longest=%4 cmds=%5MB%6" ).arg( c.runs ).arg( c.merged )
 				.arg( c.mdiCalls ).arg( c.longest ).arg( double( kCmds ) * kCmdBytes / 1048576.0, 0, 'f', 2 )
@@ -1074,7 +1098,10 @@ void frame()
 				.arg( [&c] { unsigned long long n = 0; for ( auto & k : c.classes ) n += k.second.a.graves.size(); return n; }() )
 			// lane STREAMTEX4: handles dropped while a frame naming them may still run; deleted textures' handles on a new name
 			+ QStringLiteral( " freedlive=%1 stale=%2 (all frames %3 %4)" ).arg( c.freedLive ).arg( c.stale ).arg( freedLiveAll )
-				.arg( staleAll );
+				.arg( staleAll )
+			// lane STREAMTEX5: placements refused by the pool's budget (drawn unpooled), and the budget (0 = no cap)
+			+ QStringLiteral( " poolCapped=%1 (all frames %2) budget=%3MB" ).arg( c.capped ).arg( c.cappedAll )
+				.arg( poolBudgetMB(), 0, 'f', 0 );
 		if ( line != c.line && wwFrameLog() ) {
 			c.line = line;
 			std::fprintf( stderr, "%s\n", line.toLocal8Bit().constData() );
@@ -1083,6 +1110,7 @@ void frame()
 	c.draws = c.pooled = c.uploads = c.waits = c.conflicts = c.fallbacks = c.rebuilds = 0;
 	c.runs = c.merged = c.mdiCalls = c.longest = 0;
 	c.freedLive = c.stale = 0;
+	c.capped = 0;
 }
 }
 

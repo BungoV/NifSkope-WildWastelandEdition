@@ -58,6 +58,7 @@
 { "WW_BINDLESS", 0, "src/gl/celllooks.cpp:255 pinOf | re-read per frame or per call (a)" },
 { "WW_BINDLESS_MDI", 0, "src/gl/cellbindless.cpp:223 mdiOn | re-read per frame or per call (a)" },
 { "WW_BINDLESS_MDI_RED", 0, "src/gl/cellbindless.cpp:215 mdiRed | re-read per frame or per call (a)" },
+{ "WW_BINDLESS_POOL_MB", 0, "src/gl/cellbindless.cpp:219 poolBudgetMB | re-read per frame or per call (a)" },
 { "WW_BINDLESS_RED", 0, "src/gl/cellbindless.cpp:192 red | re-read per frame or per call (a)" },
 { "WW_BLEND_DUMP", 0, "src/terrainpreview.cpp:1011 buildBlend | re-read per frame or per call (a)" },
 { "WW_BLOCKDND_BENCH", 2, "src/nifskope_ui.cpp:18091 NifSkope::createWindow | createWindow: picks which harness the window runs" },

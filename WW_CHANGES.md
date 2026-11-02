@@ -1,3 +1,19 @@
+## STREAMTEX5 (2026-11-02): the bindless geometry pool has a budget (the walk crash's suspect, bounded)
+- Every stream walk that died in the driver (STREAMTEX2 R1/R2, 10-29: 0xc0000409 in the driver's worker thread) ran
+  the old append-only pool, which doubled to 2.4-2.5 GB of vertex/index buffers on top of ~6 GB of textures; the only
+  full walk that day was the nopool one, and the 11-02 walk on an exe with BINDREOPEN1's reusing arena peaked at
+  781 MB and finished. BINDREOPEN1 already cut Concord's pool; a denser 5x5 can still take the 1.5x-live arena past
+  2 GB, so the pool now has a cap.
+- gl/cellbindlesspool.h `overBudget` / `plannedBytes`: a rebuild that would take all classes past the budget is
+  refused; poolBind returns false and the shape draws from its own vertex array (a pooled draw is a copy of the
+  shape's buffers, so nothing is lost but the multi-draw merge). WW_BINDLESS_POOL_MB (default 1536). Frame line:
+  ` poolCapped=N (all frames M) budget=BMB`.
+- Red WW_BINDLESS_RED=poolnocap (8): no cap (the multi-draw stays on, as for poolgrow; poolgrow also has no cap).
+- Unit: `bash tests/poolcap/run.sh <out>` (g++ only, 3 s): a Concord-like walk 586 MB, 0 refused; a 3x denser walk
+  stops at 1504 MB (3336 of 1.18 M draws unpooled); the red reaches 1794 MB -> CAP FAIL.
+- Walk gate: tests/spells/cell_stream_check.py (g) = the walk.notes `bindless:` pool peak <= the budget. Offline:
+  STREAMTEX2 R1's pool walk FAILs at 2400 MB, its nopool walk and TOOLS1101's 11-02 green walk (781 MB) pass.
+
 ## STREAMTEX4 (2026-11-02): the streamed cell view's texture frees wait for the GPU (STREAMTEX2's fences, ported)
 - A texture the pool (or the keep timer) frees is no longer deleted at once: its GL names go into a grave
   (src/gl/texgrave.h) behind one GLsync taken after the frees, and TexCache::wwGraveSweep (top of each stream paint)
