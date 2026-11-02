@@ -1,3 +1,21 @@
+## REFLPLACE1 (2026-11-02): interior grid reflection probes stand in the rooms (switch, default off)
+
+- REFLPROBEPLACE-INT: indoors without PRT rooms (RTXGI interiors) the reflection pass placed its 3x3 grid of 2048 boxes
+  round the camera with every probe at its box's centre and the camera's height, so most of them stood outside the
+  walls or under the floor (BUGS1102E: 95 % of the Museum's misses past the soup).
+- `WW_CELL_REFLPLACE=1` fits each interior grid probe into the cell's own geometry, the soup the GI already keeps (no
+  new bake): from it a top-down footprint (lowest and topmost surface per 32-unit column, src/reflplace.h). A probe
+  with a floor under it and a ceiling over it stays; else it moves to the nearest room column inside its box (a floor
+  and a ceiling at least 128 apart, its height clamped 64 inside them); a box with no room drops its probe. The boxes,
+  the camera probe, the rooms placement and every exterior are unchanged. The status line says
+  `fit=kept N moved N dropped N`; with no kept soup it says so and keeps the old placement.
+- Red `WW_CELL_REFLPLACE_RED=1`: the old placement. `reflcensus --fit` runs the same fit (`--red place`: the old),
+  prints `reflcensus fit: ... kept, moved, dropped` and writes a `fit` tsv column (last).
+- Gates: tests/reflcensus/run.sh PASS 225 (+ red place fails 2 `fit` checks, 17 mirrored literals). Museum soup,
+  offline, 6x6 interior cameras: the outside + void share of the misses past the soup drops from 95.6 % to 0.6 %
+  (roof cameras: 99.3 % to 9.4 %, all of it camera probes over the roof); 138 of 459 grid probes dropped; the red
+  reads the old numbers exactly.
+
 ## WINDTREE1 (2026-11-02): loaded-cell Tree_Anim trees sway in the weather's wind, shadows too (WW_CELL_TREEWIND=1)
 
 The game's tree wind (Todd's treat) on every Tree_Anim shape of a loaded cell: a leaf flutter along the normal (the

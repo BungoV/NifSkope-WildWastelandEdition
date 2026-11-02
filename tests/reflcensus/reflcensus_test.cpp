@@ -7,6 +7,7 @@
 //   reflcensus_test.exe noreach    the census runs with no far plane: must print "FAIL hits:" and exit 1
 //   reflcensus_test.exe roof       lane INTGI1: the interior --auto cameras on the topmost surface: must print "FAIL floors:"
 //   reflcensus_test.exe stand      every probe stands in the geometry (no split): must print "FAIL stand:"
+//   reflcensus_test.exe place      lane REFLPLACE1: the old interior grid placement under --fit: must print "FAIL fit:"
 #include <cmath>
 #include <cstdio>
 #include <cstring>
@@ -83,6 +84,8 @@ int main( int argc, char ** argv )
 		red = RedRoof;
 	if ( argc > 1 && !std::strcmp( argv[1], "stand" ) )
 		red = RedStand;
+	if ( argc > 1 && !std::strcmp( argv[1], "place" ) )
+		red = RedPlace;	// lane REFLPLACE1
 
 	{	// lane INTGI1 (REFLPROBECLI2): the interior --auto cameras. A two-storey box (half 3000): a roof slab 1000/990, a
 		// floor slab 500/490, the ground at 0 under it and past it (half 20000)
@@ -163,6 +166,44 @@ int main( int argc, char ** argv )
 			}
 		}
 		std::printf( "stand: %d of %d probes placed right (geometry, outside, void)\n", stOk, int( sizeof st / sizeof st[0] ) );
+
+		/* lane REFLPLACE1: the interior grid fitted into the rooms (reflplace.h). Camera (2900, 100, -200) under the
+		 * ground at the building's east wall: camZ -256, boxes x 0..6144, y -2048..4096. The x 4096..6144 column holds
+		 * open ground only (one surface): 3 dropped; the rest stand in the building's air (z 64 .. 936), in their box */
+		reflplace::Footprint F;
+		reflplace::build( b2.t.data(), b2.t.size() / 9, F );
+		const double camF[3] = { 2900.0, 100.0, -200.0 };
+		std::vector<Probe> PF;
+		place( camF, true, PF, &F, red );
+		int grid = 0, inGeo = 0, inBox = 0, moved = 0;
+		for ( const Probe & p : PF ) {
+			if ( p.kind != 1 )
+				continue;
+			grid++;
+			moved += p.fit == reflplace::Moved ? 1 : 0;
+			inGeo += standOf( b2, O2, p, box2, 1016.0, 1048.0, true, RedNone ) == StandGeometry ? 1 : 0;
+			bool in = true;
+			for ( int a = 0; a < 3; a++ )
+				in = in && p.pos[a] >= p.bmin[a] && p.pos[a] <= p.bmax[a];
+			inBox += in ? 1 : 0;
+		}
+		checks++;
+		if ( !( F.ok() && grid == 6 && inGeo == 6 && inBox == 6 && moved == 6 ) ) {
+			fails++;
+			std::printf( "FAIL fit: %d grid probes placed (want 6), %d in the geometry (want 6), %d in their box, %d moved\n",
+				grid, inGeo, inBox, moved );
+		}
+		std::printf( "fit: footprint %d x %d of %.0f u; %d grid probes placed, %d in the geometry, %d moved\n", F.nx, F.ny, F.cell,
+			grid, inGeo, moved );
+		// a probe already in a room stays where it is
+		const double camK[3] = { 100.0, 100.0, 200.0 };
+		place( camK, true, PF, &F, red );
+		checks++;
+		if ( !( PF.size() == 10 && PF[5].fit == reflplace::Kept && PF[5].pos[0] == 1024.0 && PF[5].pos[2] == 256.0 ) ) {
+			fails++;
+			std::printf( "FAIL fit: the probe in the room at 1024,1024,256 did not stay (%d probes, fit %d)\n", int( PF.size() ),
+				PF.size() > 5 ? PF[5].fit : -9 );
+		}
 	}
 
 	probebvh::Bvh bvh;
