@@ -25,12 +25,16 @@ Bars (written before the first run):
             median <= 0.10 and p95 <= 0.25; far side (cell probes x >= 3000) median >= 0.95 and p5 >= 0.80.
   R restir  L again with WW_CELL_RESTIR, the light a shadow caster under ReSTIR (cellRestirOn): the same bars. And a
             cubed light (cellShadowOn, a slot, ReSTIR off, a lit cube map): on == off (its map stays the verdict).
+  I int     lane INTGI1 (FOGLEAK1-INT): an unlit interior (cellInterior 1: no shadow map, the directional's air vis 1
+            today), volume A, the directional only (volTerms 1). Sky visibility 0.05 (a closed room): inside, on / off
+            max <= 0.01 at every depth (no cascade cover indoors); outside on == off. Visibility 0.6 (an opening): on == off
+            on every froxel. Red nointsungate (16) fails the closed row only.
   C cost    INFO: GPU ms of the 64 inject draws, every term (sun + light + ambient), on vs off (median of 9).
 Amended after the first run, before any red run: A's reference reads the synthetic tile as the shader does (tile_E,
 the octahedral interpolation of the 8 x 8 tile), not the analytic E(d): the analytic one read 0 - 8.8 % high, one-signed,
 the same in every slice. Measured 11-02 (this GPU): two cellDdgiRead calls cost +2.3 ms on all three terms; the one
 probe walk (airLeakEnv) +1.04 ms (off 0.601, on 1.645).
-Reds (each must FAIL its rows): dalcenv (A, E), nosungate (B), lightleak (L, R).
+Reds (each must FAIL its rows): dalcenv (A, E), nosungate (B, I), lightleak (L, R), nointsungate (I closed only).
 Exit 0 only when every gate run passes.
 """
 import ctypes, math, os, sys
@@ -42,8 +46,8 @@ TREE = os.path.dirname(os.path.dirname(HERE))
 sys.path.insert(0, os.path.join(TREE, 'tests', 'spells'))
 args = sys.argv[1:]
 red = args[args.index('--red') + 1] if '--red' in args else ''
-only = set(args[args.index('--only') + 1]) if '--only' in args else set('AEBLRC')
-REDBIT = {'': 0, 'dalcenv': 1, 'nosungate': 2, 'lightleak': 4}[red]
+only = set(args[args.index('--only') + 1]) if '--only' in args else set('AEBILRC')
+REDBIT = {'': 0, 'dalcenv': 1, 'nosungate': 2, 'lightleak': 4, 'nointsungate': 16}[red]
 SDIR = os.path.join(TREE, 'res', 'shaders')
 
 import shader_link_check as S   # noqa: E402
@@ -308,7 +312,7 @@ DALC_M = 0.5
 A_FLAT = DALC_M ** 2.2
 
 
-def uniforms(p, units, vol, terms, leakred=0, light=None, shadow=False, restir=False):
+def uniforms(p, units, vol, terms, leakred=0, light=None, shadow=False, restir=False, interior=False):
     G.use(p)
     setu(p, 'volStage', 1)
     f_u3i(G.loc(p, b'volDims'), COLS, ROWS, SL)
@@ -337,6 +341,7 @@ def uniforms(p, units, vol, terms, leakred=0, light=None, shadow=False, restir=F
     setu(p, 'volJitter', 0.0)
     setu(p, 'volLeakRed', leakred)
     setu(p, 'cellOn', 1)
+    setu(p, 'cellInterior', int(interior))   # lane INTGI1: an unlit interior (after the zero list above)
     setu(p, 'cellHasDir', 1)
     setu(p, 'cellDirTo', tuple(Lv))
     setu(p, 'cellDirColor', (1.0, 1.0, 1.0))
@@ -523,6 +528,34 @@ if only & set('AEB'):
                 nbad, dmax = same(on, off, every)
                 gate('B open', nbad == 0, 'open ground (sky vis 0.6): %d of %d froxels differ (max |d| %.2e of max)%s'
                      % (nbad, every.sum(), dmax, tag))
+
+# ---- I: an unlit interior (lane INTGI1, FOGLEAK1-INT), volume A, the directional only ----------------------------------
+if 'I' in only:
+    for alpha in (0.05, 0.6):
+        VI = Volume((-4000.0, -24000.0, -36000.0), 4000.0, (19, 13, 12), lambda d: 0.1 + 0.0 * d[:, 2], alpha)
+        lo, hi = VI.lo_hi_fade1()
+        inside = all_in(lo, hi, 1100.0)
+        outside = all_where(lambda P: P[..., 0] <= -5100.0)
+        uniforms(P_OFF, U_OFF, VI, 1, 0, interior=True)
+        off = inject(P_OFF)
+        uniforms(P_ON, U_ON, VI, 1, REDBIT, interior=True)
+        on = inject(P_ON)
+        lo_ = lum(off[..., :3])
+        r = lum(on[..., :3]) / np.maximum(lo_, 1e-30)
+        if alpha == 0.05:
+            near = inside & all_where(lambda P: np.linalg.norm(P, axis=-1) < 3000.0)
+            nbad, dmax = same(on, off, outside)
+            ok = inside.sum() > 100 and near.sum() > 10 and float(lo_[inside].min()) > 0.0 \
+                and float(r[inside].max()) <= 0.01 and nbad == 0 and outside.sum() > 100
+            gate('I closed', ok, 'unlit interior, closed (sky vis 0.05): inside %d froxels on/off max %.4f (bar <= 0.01; '
+                 'near %d froxels max %.4f); outside %d froxels: %d differ (max |d| %.2e)%s'
+                 % (inside.sum(), float(r[inside].max()) if inside.any() else -1, near.sum(),
+                    float(r[near].max()) if near.any() else -1, outside.sum(), nbad, dmax, tag))
+        else:
+            every = np.ones(r.shape, bool)
+            nbad, dmax = same(on, off, every)
+            gate('I open', nbad == 0 and float(lo_.max()) > 0.0, 'unlit interior, an opening (sky vis 0.6): %d of %d '
+                 'froxels differ (max |d| %.2e of max)%s' % (nbad, every.sum(), dmax, tag))
 
 # ---- L / R: volume C (step 1000), a wall x = 2500 between the light and the near air ----------------------------------
 if only & set('LR'):

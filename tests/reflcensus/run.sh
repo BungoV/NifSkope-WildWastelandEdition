@@ -15,7 +15,7 @@ bad=0
 timeout 60 "$OUT/reflcensus_test.exe" > "$OUT/green.txt"; rc=$?
 tail -n 1 "$OUT/green.txt"
 if [ $rc -ne 0 ] || ! grep -q '^REFLCENSUS PASS [0-9]*$' "$OUT/green.txt"; then echo "GREEN FAILED (rc $rc)"; bad=1; fi
-for pair in lift:below noreach:hits; do
+for pair in lift:below noreach:hits roof:floors; do	# roof: lane INTGI1, the interior --auto cameras
 	red="${pair%%:*}"; check="${pair##*:}"
 	timeout 60 "$OUT/reflcensus_test.exe" "$red" > "$OUT/red_$red.txt"; rc=$?
 	if [ $rc -eq 1 ] && grep -q "^FAIL $check:" "$OUT/red_$red.txt"; then
@@ -61,5 +61,5 @@ sed 's/\* 2\.0f, 4096\.0f );/* 2.0f, 8192.0f );/' src/gl/cellreflprobe.cpp > "$O
 drift "$OUT/floor" > "$OUT/drift_floor.txt"; nf=$?
 if [ $nf -eq 1 ]; then echo "drift floor: a copy with the reach minimum 8192 is refused as it must"; else echo "DRIFT FLOOR DID NOT FIRE ($nf)"; bad=1; fi
 rm -rf "$OUT/floor"
-[ $bad -eq 0 ] && echo "REFLCENSUS GATE OK (green + 2 reds + ${#LIT[@]} literals + drift floor)" || echo "REFLCENSUS GATE FAILED"
+[ $bad -eq 0 ] && echo "REFLCENSUS GATE OK (green + 3 reds + ${#LIT[@]} literals + drift floor)" || echo "REFLCENSUS GATE FAILED"
 exit $bad

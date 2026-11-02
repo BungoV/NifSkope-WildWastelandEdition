@@ -20,11 +20,12 @@ namespace
 {
 const char * kUsage =
 	"usage: nifskope -no-gui reflcensus --soup <soup.psp> (--camera x,y,z ... | --auto N) [--interior] [--eye 128]\n"
-	"         [--red lift|noreach] [--out <probes.tsv>]\n"
+	"         [--red lift|noreach|roof] [--out <probes.tsv>]\n"
 	"  the probes the reflection pass places round each camera (the camera probe + the 3x3 grid of 2048 boxes),\n"
 	"  each one's 64x64 oct tile traced through the soup: hits, misses above (sky) and below the horizon (ground\n"
 	"  since SKYBELOW2), below misses with no ground tap hit (albedo 0.5) and below misses that run past the soup.\n"
-	"  --auto N: an N x N grid of cameras over the soup's middle 80 %, each at the ground under it + eye (128).\n";
+	"  --auto N: an N x N grid of cameras over the soup's middle 80 %, each at the ground under it + eye (128);\n"
+	"  with --interior eye over every floor under a ceiling (red roof: the topmost surface, often the roof).\n";
 
 void line( const QString & s )
 {
@@ -51,7 +52,8 @@ int reflCensusCli( const QStringList & args )
 			for ( const QString & r : nx.split( ',' ) ) {
 				if ( r == QLatin1String( "lift" ) ) red |= reflcensus::RedLift;
 				else if ( r == QLatin1String( "noreach" ) ) red |= reflcensus::RedNoReach;
-				else { std::fprintf( stderr, "reflcensus: REFUSED: unknown red '%s' (lift, noreach)\n", qPrintable( r ) ); return 2; }
+				else if ( r == QLatin1String( "roof" ) ) red |= reflcensus::RedRoof;	// lane INTGI1
+				else { std::fprintf( stderr, "reflcensus: REFUSED: unknown red '%s' (lift, noreach, roof)\n", qPrintable( r ) ); return 2; }
 			}
 			i++;
 		}
@@ -110,11 +112,24 @@ int reflCensusCli( const QStringList & args )
 		"the rooms placement (old PRT GI interiors): the grid is placed, as RTXGI cells get" ) );
 
 	if ( autoN > 0 ) {   // cameras on the ground under an N x N grid over the soup's middle 80 %
+		// lane INTGI1 (REFLPROBECLI2): indoors eye over every floor under a ceiling (reflcensus.h floorsOf), not on
+		// the roof; red `roof` (and every exterior) the topmost surface as before
+		const bool rooms = interior && !( red & reflcensus::RedRoof );
 		int noGround = 0;
+		std::vector<double> zs, camZ;
 		for ( int j = 0; j < autoN; j++ )
 			for ( int i = 0; i < autoN; i++ ) {
 				const double x = mn[0] + ( mx[0] - mn[0] ) * ( 0.1 + 0.8 * ( i + 0.5 ) / autoN );
 				const double y = mn[1] + ( mx[1] - mn[1] ) * ( 0.1 + 0.8 * ( j + 0.5 ) / autoN );
+				if ( rooms ) {
+					reflcensus::columnHits( bvh, x - O[0], y - O[1], mx[2] + 16.0, mx[2] - mn[2] + 32.0, zs );
+					camZ.clear();
+					reflcensus::floorsOf( zs, eye, red, camZ );
+					noGround += camZ.empty() ? 1 : 0;
+					for ( double z : camZ )
+						cams.push_back( { x, y, z } );
+					continue;
+				}
 				const double o[3] = { x - O[0], y - O[1], mx[2] + 16.0 }, d[3] = { 0.0, 0.0, -1.0 };
 				double th = 0.0;
 				if ( !bvh.ray( o, d, mx[2] - mn[2] + 32.0, &th ) ) {
@@ -123,8 +138,14 @@ int reflCensusCli( const QStringList & args )
 				}
 				cams.push_back( { x, y, mx[2] + 16.0 - th + eye } );
 			}
-		line( QStringLiteral( "reflcensus: auto %1x%1: %2 cameras on the ground + %3, %4 refused (no ground under them)" )
-			.arg( autoN ).arg( int( cams.size() ) ).arg( eye, 0, 'f', 0 ).arg( noGround ) );
+		if ( rooms )
+			line( QStringLiteral( "reflcensus: auto %1x%1 rooms: %2 cameras at eye %3 over each floor under a ceiling (headroom eye + %4), "
+				"%5 columns refused (no such floor)" ).arg( autoN ).arg( int( cams.size() ) ).arg( eye, 0, 'f', 0 )
+				.arg( reflcensus::kHeadroom, 0, 'f', 0 ).arg( noGround ) );
+		else
+			line( QStringLiteral( "reflcensus: auto %1x%1: %2 cameras on the ground + %3, %4 refused (no ground under them)%5" )
+				.arg( autoN ).arg( int( cams.size() ) ).arg( eye, 0, 'f', 0 ).arg( noGround )
+				.arg( interior ? QStringLiteral( " (RED roof: the topmost surface indoors)" ) : QString() ) );
 		if ( cams.empty() ) {
 			std::fprintf( stderr, "reflcensus: REFUSED: no auto camera found ground\n" );
 			return 1;

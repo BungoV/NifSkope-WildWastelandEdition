@@ -72,6 +72,8 @@ void rtddgiCellUniforms( Scene * scene );
 //! PERFFIX2 (2026-11-01): a volume's read is up for this scene's document this frame (the read compiled in and its
 //! atlas live on this renderer). The screen GI pass (gl/celllights.cpp giHalfPass) runs the read once a texel when true
 bool rtddgiCellReadUp( Scene * scene );
+//! lane INTGI1: the read volume's smallest probe spacing (game units; cascade 0 under the cascades), 0 when none is up
+float rtddgiCellReadSpacing( Scene * scene );
 //! the debug view over the frame (glview.cpp, beside the PRTP views): since RTXFIX1 only with WW_CELL_RTDDGI_VIEW_FOG=0,
 //! or on a frame the view did not draw inside (no linear frame)
 void rtddgiCellViewDraw( Scene * scene, const Transform & viewTrans );

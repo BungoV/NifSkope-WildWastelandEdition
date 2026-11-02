@@ -5,6 +5,7 @@
 //   reflcensus_test.exe            green: prints "REFLCENSUS PASS <n>" and exits 0
 //   reflcensus_test.exe lift       the census runs the red horizon d.z < 0.1: must print "FAIL below:" and exit 1
 //   reflcensus_test.exe noreach    the census runs with no far plane: must print "FAIL hits:" and exit 1
+//   reflcensus_test.exe roof       lane INTGI1: the interior --auto cameras on the topmost surface: must print "FAIL floors:"
 #include <cmath>
 #include <cstdio>
 #include <cstring>
@@ -77,6 +78,62 @@ int main( int argc, char ** argv )
 		red = RedLift;
 	if ( argc > 1 && !std::strcmp( argv[1], "noreach" ) )
 		red = RedNoReach;
+	if ( argc > 1 && !std::strcmp( argv[1], "roof" ) )
+		red = RedRoof;
+
+	{	// lane INTGI1 (REFLPROBECLI2): the interior --auto cameras. A two-storey box (half 3000): a roof slab 1000/990, a
+		// floor slab 500/490, the ground at 0 under it and past it (half 20000)
+		probebvh::Bvh b2;
+		auto slab = [&b2]( float z, float hh ) {
+			const float cx = 123.4f, cy = -98.7f;
+			const float c[5][2] = { { -hh, -hh }, { hh, -hh }, { hh, hh }, { -hh, hh }, { -hh, -hh } };
+			for ( int k = 0; k < 4; k++ ) {
+				const float tri[9] = { cx, cy, z, c[k][0], c[k][1], z, c[k + 1][0], c[k + 1][1], z };
+				b2.t.insert( b2.t.end(), tri, tri + 9 );
+			}
+		};
+		slab( 1000.0f, 3000.0f );
+		slab( 990.0f, 3000.0f );
+		slab( 500.0f, 3000.0f );
+		slab( 490.0f, 3000.0f );
+		slab( 0.0f, 20000.0f );
+		b2.build();
+		std::vector<double> zs, cz, out;
+		columnHits( b2, 777.0, 333.0, 1016.0, 1048.0, zs );
+		checks++;
+		const bool hitsOk = zs.size() == 5 && std::fabs( zs[0] - 1000.0 ) < 1e-3 && std::fabs( zs[1] - 990.0 ) < 1e-3
+			&& std::fabs( zs[2] - 500.0 ) < 1e-3 && std::fabs( zs[3] - 490.0 ) < 1e-3 && std::fabs( zs[4] ) < 1e-3;
+		if ( !hitsOk ) {
+			fails++;
+			std::printf( "FAIL column: %d surfaces under the box (want 1000 990 500 490 0)\n", int( zs.size() ) );
+		}
+		floorsOf( zs, 128.0, red, cz );
+		checks++;
+		if ( !( cz.size() == 2 && std::fabs( cz[0] - 628.0 ) < 1e-3 && std::fabs( cz[1] - 128.0 ) < 1e-3 ) ) {
+			fails++;
+			std::printf( "FAIL floors: %d cameras in the box, first %.1f (want 628 and 128: each storey, never the roof)\n",
+				int( cz.size() ), cz.empty() ? -1.0 : cz[0] );
+		}
+		std::vector<double> open;
+		columnHits( b2, 9000.0, 333.0, 1016.0, 1048.0, open );
+		floorsOf( open, 128.0, red, out );
+		checks++;
+		if ( !( open.size() == 1 && out.empty() ) ) {
+			fails++;
+			std::printf( "FAIL floors: past the box %d surfaces, %d cameras (want 1, 0: open ground has no ceiling)\n",
+				int( open.size() ), int( out.size() ) );
+		}
+		std::vector<double> lowCams;
+		const std::vector<double> low = { 300.0, 150.0, 0.0 };	// 150 u storeys: under eye 128 + headroom 32
+		floorsOf( low, 128.0, red, lowCams );
+		checks++;
+		if ( !lowCams.empty() ) {
+			fails++;
+			std::printf( "FAIL floors: %d cameras in 150 u storeys (want 0: under eye + headroom)\n", int( lowCams.size() ) );
+		}
+		std::printf( "interior auto: box column %d surfaces -> %d cameras; open ground %d surface(s) -> %d\n", int( zs.size() ),
+			int( cz.size() ), int( open.size() ), int( out.size() ) );
+	}
 
 	probebvh::Bvh bvh;
 	// the square as a fan of 4 round an off-lattice point: the tracer is not watertight on a shared edge, and a

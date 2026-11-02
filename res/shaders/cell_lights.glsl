@@ -2047,7 +2047,8 @@ vec3 cellSsgiE( vec3 eProbe )
 	/* GIFIX1101 HO (PERFFIX2 2c): the hand-over to the traced volume. Its E already holds the occlusion and the bounce of
 	 * what its probes see (1 - vis at the normal, by its fade); the screen keeps only the occluded share beyond that
 	 * (the contact scale under the probe spacing), and adds that share of its bounce. An occluder both see darkens
-	 * once. Sky-lit exteriors only (interiors: today's law, a LANES row). Red WW_CELL_SSGI_RED=nohandover (8192) */
+	 * once. Sky-lit exteriors only; interiors keep this fill law, handed over by scale instead: the march stops at the
+	 * volume's probe spacing (lane INTGI1, cellssgiplan.h wwSsgiRadius). Red WW_CELL_SSGI_RED=nohandover (8192) */
 	if ( cellDdgiOn && cellGiSky && !cellInterior && ( cellSsgiRed & ( 2 | 8192 ) ) == 0 && cellGiVisN.y > 0.0 ) {
 		float oS = 1.0 - clamp( s.a, 0.0, 1.0 );
 		float oP = ( 1.0 - clamp( cellGiVisN.x, 0.0, 1.0 ) ) * clamp( cellGiVisN.y, 0.0, 1.0 );

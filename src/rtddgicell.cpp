@@ -2150,6 +2150,17 @@ bool rtddgiCellReadUp( Scene * scene )
 	return c.live && c.uploaded && c.tex && c.glOwner == r;
 }
 
+// lane INTGI1 (SSGIHO-INT): the densest read volume's smallest spacing (cascade 0 under the cascades), 0 when none is up
+float rtddgiCellReadSpacing( Scene * scene )
+{
+	if ( !rtddgiCellReadUp( scene ) )
+		return 0.0f;
+	Combined & K = combined();
+	const RtDdgiVolume & v = K.count > 0 && cascCell( 0 ).live && K.owner == scene->renderer && K.tex
+		? cascCell( 0 ).live->live.volume() : cell().live->live.volume();
+	return std::min( v.step[0], std::min( v.step[1], v.step[2] ) );
+}
+
 /* FIX1101A (LATE ITEM 9, bungo 10-31 "and for GI, the pic of it covering further areas?"): WW_CELL_RTDDGI_VIEW_BOXES=1,
  * live, a debug view: every cascade's probe box (first probe to last, the window round the camera after its scrolls)
  * drawn as its 12 edges over the frame, no depth test (the reach shows through the buildings), each cascade its own
