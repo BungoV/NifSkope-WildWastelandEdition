@@ -874,6 +874,7 @@ void CellWorkspacePanel::buildUi()
 	cellMblur = tick( showMenu, tr( "Motion blur" ), "CellWorkspaceCellMotionBlur", wwCellMotionBlurOn() );
 	cellObjBlur = tick( showMenu, tr( "Object motion blur" ), "CellWorkspaceCellObjectBlur", wwCellObjectBlurOn() );	// lane POSTFX1
 	cellPostLinear = tick( showMenu, tr( "Blur before tone map" ), "CellWorkspaceCellPostLinear", wwCellPostLinearOn() );	// lane POSTFX2
+	cellDofLens = tick( showMenu, tr( "Lens depth of field" ), "CellWorkspaceCellDofLens", wwCellDofLensOn() );	// lane DOFLENS1
 	// the bloom: Vanilla (the imagespace's own, the default) | FO4CS with its settings and physical glare.
 	// Every change applies on the next paint (gl/cellbloom.h)
 	cellBloom = showMenu->addMenu( tr( "Bloom" ) );
@@ -1238,6 +1239,7 @@ void CellWorkspacePanel::buildUi()
 		kid( "CellWorkspaceCellMotionBlur", tr( "Motion blur" ) );
 		kid( "CellWorkspaceCellObjectBlur", tr( "Object motion blur" ) );
 		kid( "CellWorkspaceCellPostLinear", tr( "Blur before tone map" ) );
+		kid( "CellWorkspaceCellDofLens", tr( "Lens depth of field" ) );
 		master( V, WwGroup::Decals );
 		look( WwLook::DecalFade, tr( "Distance fade" ) );
 		look( WwLook::DecalParallax, tr( "Parallax" ) );
@@ -1563,6 +1565,11 @@ void CellWorkspacePanel::buildUi()
 	} );
 	connect( cellPostLinear, &QAction::toggled, this, [this]( bool on ) {	// lane POSTFX2
 		wwCellPostLinearSetOn( on );
+		if ( glView )
+			glView->update();
+	} );
+	connect( cellDofLens, &QAction::toggled, this, [this]( bool on ) {	// lane DOFLENS1
+		wwCellDofLensSetOn( on );
 		if ( glView )
 			glView->update();
 	} );

@@ -1,3 +1,24 @@
+## DOFLENS1 (2026-11-02): a thin-lens depth of field (bokeh, near / far), the gameplay states
+
+New row "Lens depth of field" (cell Show menu, under the vanilla camera master; switch WW_CELL_DOF_LENS, key
+WW/CellDofLens, default OFF because it changes the picture; it needs "Depth of field" on). It replaces the game's
+quarter-size Gaussian with a lens: the circle of confusion comes from the thin-lens law, c = A f (z - S) / (z (S - f)),
+with the focal length from the field of view (24 mm sensor), the focus distance S from the image space's DoF record
+and an aperture A chosen so that the record's own blur (strength x 8 x radius px) is reached at S + range. A quarter-
+size prep stores the signed circle (near negative, far positive, nearest depth of the four texels), a 32-tap Vogel
+disk gathers the far layer (a tap counts only as far as its own circle reaches; a sharp subject is never smeared by
+the background) and the near layer (scattered as a gather, premultiplied) in one MRT pass, and the composite lays the
+far layer under the sharp frame and the near layer over it; in-focus pixels are the input bit for bit. The record's
+near-off flag and sky flag are kept. WW_CELL_DOF_STATE=menu runs the Pip-Boy / dialogue lens (f/2.8, autofocus on the
+screen centre, far only, sky blurred) whatever the record says. It runs inside the fused depth of field + motion blur
+pass when both are on (program game_doflensmblur), and on the linear frame when "Blur before tone map" is on.
+Gate tests/postfx/postfx_lens.py (the real shaders, hidden GL 4.1): the circle against a numpy thin-lens reference
+0.031 px, a 16 / 40 px bokeh disk reads 18.0 / 41.1 px with the light kept (1.000), no background leak onto a sharp
+subject (0.0002), focus plane bit-exact, the near layer's share over a sharp edge 0.222 (0.196 physical), fused = two
+passes within 0.25 of an 8-bit step; one red each. 1080p GPU time 0.048 ms (near on; 0.044 off), 0.090 fused with the
+motion blur (the game's chain 0.040, fused 0.069). Red WW_CELL_DOF_LENS_RED=1 runs the game's passes. The default
+programs game_dof / game_dofmblur are unchanged but the source hash.
+
 ## POSTFX2 (2026-11-02): the game's depth of field and motion blur fused into one pass
 
 With both the depth of field and the motion blur on, the depth of field's composite now runs inside the motion
