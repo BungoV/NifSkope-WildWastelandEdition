@@ -1,3 +1,12 @@
+## BUGS1102D (2026-11-02): red onetype retired; a gate for a stale switch table
+
+- **REDRETIRE-ONETYPE:** `WW_CLOUDVOL_RED=onetype` (one cumulus profile, no type swing) is gone. It was the red of
+  cloudvar_check V1, which CLOUDVAR2 retired to INFO; on land5 both arms passed V (tile std 0.184 / 0.183, 6 km corr
+  0.594 / 0.678). cloudvar_check now refuses an unknown `--red` instead of running it green.
+- **FRAMEFMT1-SURVEY:** the switch table already holds `WW_FRAMEFMT1_RED` on this base (the survey's output equals
+  src/wwswitchstages.inc, 1352 switches). New gate tests/switchsurvey/run.sh: the committed table must equal a fresh
+  `tools/wwswitch_survey.py --inc`; its red (the table minus the FRAMEFMT1 row) fails.
+
 ## GISKYTWIN-FLIP (LAND5, 2026-11-02): the GI volume's sky ships at the physical level
 
 - `WW_CELL_RTDDGI_SKY` unset (or empty) is now `level` (GITRUTH1's giSkyLevel: the weather's sky colour at the

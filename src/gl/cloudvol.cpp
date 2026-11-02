@@ -322,13 +322,12 @@ struct Bands
 Bands bandsOf( const WwCloudMap & m )
 {
 	Bands b{};
-	/* lane CLOUD5: Cloud Variety from the map (the type per weather; the map raised the Low top already). Red onetype:
-	 * one cumulus profile everywhere (CLOUD2's), no swing of the type; red nocurl: the detail read not displaced */
+	/* lane CLOUD5: Cloud Variety from the map (the type per weather; the map raised the Low top already). Red nocurl:
+	 * the detail read not displaced */
 	b.variety = wwCloudVolVarietyOn() && m.variety;
 	if ( b.variety ) {
-		const bool one = red( "onetype" );
-		b.var.type = one ? 2.0f / 3.0f : std::clamp( m.band[0].type, 0.0f, 1.0f );
-		b.var.spread = one ? 0.0f : std::max( m.band[0].typeSpread, 0.0f );
+		b.var.type = std::clamp( m.band[0].type, 0.0f, 1.0f );
+		b.var.spread = std::max( m.band[0].typeSpread, 0.0f );
 		b.var.depthKm = std::max( m.band[0].depthZ * kUnitKm, 0.05f );
 		b.var.curlKm = red( "nocurl" ) ? 0.0f : V::kVarCurlKm;
 		b.typeMax = std::min( 1.0f, b.var.type + b.var.spread );
@@ -1542,7 +1541,7 @@ bool wwCloudVolDraw( Scene * scene, const WwCloudVolView & view, QStringList & d
 		if ( red( w ) )
 			reds += QStringLiteral( ",RED=%1" ).arg( QLatin1StringView( w ) );
 	if ( b.variety ) {	// lane CLOUD5: the echo a row's notes need to prove the twins drew (absent when Off)
-		for ( const char * w : { "onetype", "nocurl", "shortlight", "ign" } )
+		for ( const char * w : { "nocurl", "shortlight", "ign" } )
 			if ( red( w ) )
 				reds += QStringLiteral( ",RED=%1" ).arg( QLatin1StringView( w ) );
 		reds += QStringLiteral( ",variety=type %1+-%2 lowtop %3km light %4km" ).arg( double( b.var.type ), 0, 'f', 3 )
