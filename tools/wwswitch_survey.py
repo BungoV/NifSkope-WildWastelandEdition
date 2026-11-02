@@ -57,6 +57,7 @@ OVERRIDES = {
     'WW_SETUP_MEMO': ('live', 'setupMemo() re-reads it on any live set (and voids its stamps)'),
     'WW_SETUP_MEMO_CHECK': ('live', 'setupMemo() re-reads it on any live set'),
     'WW_CELL_HDR_RED': ('live', 'a member default; hst() re-reads it on a live set'),
+    'WW_CELL_OBJBLUR': ('live', 'cellpost.cpp ps() re-reads it when a live set moves it; the blur textures are made at the first frame it is on (POSTFX1)'),
     # lane LIVESET1: cellLiveSections rebuilds the far LOD / the probe markers in place (the document's tail);
     # lane LIVESET4: on/off, TYPE and the stack reds too, while the near cells' stack stays the one they loaded
     'WW_CELL_FARLOD': ('live', 'far section added/cut in place (LIVESET4); a changed near stack owes a reopen, named in the reply'),

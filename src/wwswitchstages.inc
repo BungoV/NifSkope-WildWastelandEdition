@@ -433,7 +433,7 @@
 { "WW_CELL_NOGRID", 1, "src/cellview.cpp:908 cellApplyEnvModifiers | read while the cell document is built" },
 { "WW_CELL_NOTERRAIN", 1, "src/cellview.cpp:904 cellApplyEnvModifiers | read while the cell document is built" },
 { "WW_CELL_NOWATER", 1, "src/cellview.cpp:906 cellApplyEnvModifiers | read while the cell document is built" },
-{ "WW_CELL_OBJBLUR", 1, "- | name passed through a variable: conservative" },
+{ "WW_CELL_OBJBLUR", 0, "- | hand: cellpost.cpp ps() re-reads it when a live set moves it; the blur textures are made at the first frame it is on (POSTFX1)" },
 { "WW_CELL_OBJBLUR_RED", 0, "src/gl/cellpost.cpp:230 ps | init-once state, re-read when a live set moves its prefix (b)" },
 { "WW_CELL_OPAQUE_CUT_CHECK", 0, "src/gl/renderer.cpp:236 wwOpaqueCutChecking | re-read per frame or per call (a)" },
 { "WW_CELL_OPEN", 1, "src/cellstream.cpp:1205 cellStreamWanted | hand: the cell spec: the reopen builds the new rectangle in the same window" },
