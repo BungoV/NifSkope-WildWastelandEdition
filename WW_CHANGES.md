@@ -1,3 +1,9 @@
+## BUGS1102B round 2 (2026-11-02): preset table row for Rain wetness
+
+- src/ui/cellpresettable.h gains CellWorkspaceLook_WW_CELL_RAINWET (off at every preset, no ms): FO76WEATHER1's
+  Rain wetness row had no preset-table row, so tests/presettable coverage read "panel rows 74, table rows 73" and
+  FAILED on the base. The red is the base itself (coverage FAIL) and coverage.py --red (a row dropped).
+
 ## LARGEREF5 (2026-11-02): a flat-mode fixed open places its large refs too (LARGEREF-FIXEDOPEN-FLATMODE)
 - A fixed open (WW_CELL_OPEN) over a flat far field (the vanilla type's .bto, or our rings flattened) placed no large ref
   full, so a ref whose own cell the far build's map calls None (a ring the budget refused, a chunk with no .bto) showed
