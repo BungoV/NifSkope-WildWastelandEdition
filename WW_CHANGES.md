@@ -1,3 +1,46 @@
+## LARGEREF5 (2026-11-02): a flat-mode fixed open places its large refs too (LARGEREF-FIXEDOPEN-FLATMODE)
+- A fixed open (WW_CELL_OPEN) over a flat far field (the vanilla type's .bto, or our rings flattened) placed no large ref
+  full, so a ref whose own cell the far build's map calls None (a ring the budget refused, a chunk with no .bto) showed
+  nothing outside its own cell.
+- `LargeRef::fixedPlaced` (src/largeref.h): a fixed open now places every outside large ref in buckets of its own,
+  flat mode too; after the far build `LargeRef::fixedFull` hides the ones whose own cell the map calls flat (their far
+  copy alone there). With no map it falls back to the open's kind (flat = hidden), never to full. The stream's own open
+  and the `fixedpermode` red keep the mode's answer. Red `WW_CELL_LARGEREFS_RED=fixedflatnone`: flat mode places none.
+- tests/largeref/run.sh: unit checks + red `-DLARGEREF_FIXEDFLAT_RED`; census `--far fixedflat` (a flat field round each
+  step's open, a .bto-less chunk and a refused ring None): Commonwealth green 0 two copies, 0 none (21 kept full, 3381
+  hidden step-refs); red 21 none. Earlier walks unchanged.
+- src/wwswitchstages.inc regenerated (cellview.cpp line numbers only).
+
+## LARGEREF4 (2026-11-02): the streamed view reads the far kind per large ref, cell by cell (LARGEREF-FLAT-MIXED, LARGEREF-BUDGET)
+- The FO4CS type lets the game's .bto fill the chunks our .lodl lacks (`WW_CELL_FARLOD_OURS`, a .lodl smaller than the
+  reach, a terrain ring the budget stopped), and an object ring the budget refuses leaves its cells with no far objects.
+  One kind per mode (LARGEREF3) then drew a large ref full beside its .bto copy there.
+- `LargeRef::FarMap` (src/largeref.h): rectangles of cells with a kind, the first that holds a cell wins, none outside.
+  `cellFarLodAppend` fills it as it built the field (the hole round the open; per ring ours as built -- instanced = by
+  ref, flattened = flat, refused or not reached = none; the game's chunks that loaded a .bto = flat; the rest of the
+  ring's footprint = none), prints `far lod: large-ref map N rectangles: ...` and keeps it per document
+  (`cellFarLodLargeRefMap`). `WwFarVanRing::objectChunks` records the .bto chunks that loaded.
+- The stream's `Owners::setFarMap` decides per ref at its own cell (`Owners::farAt`); it prints `cell stream: large refs
+  far map ...` with the RNAM rows by kind. Red `WW_CELL_LARGEREFS_RED=permode`: one kind per mode, as before.
+- tests/largeref/run.sh: map unit checks + red `-DLARGEREF_PERMODE_RED`; the census walk adds `--far mixed` (ours by ref
+  to +-12, the game's .bto past it) and `--far budget` (ours to +-8, refused to +-16, the .bto past it): green 0 double
+  (549 / 633 refs by a unit, 2202 / 2068 step-refs by the far copy alone); red 27882 / 25338 double.
+- LARGEREF-MAP-LIVE: a live far rebuild suspends the stream, rebuilds the far LOD (and its map) and starts the stream
+  again; `cellStreamStart` reads the map now (`LargeRef::streamMap`) and keeps it in the seed
+  (`CellStreamSeed::largeRefMap`). A far LOD removed live leaves no far copy: the restarted stream draws the large refs
+  full (`LargeRef::liveFar`; before, the open's flat kind stayed and they were drawn by nothing). Red
+  `WW_CELL_LARGEREFS_RED=stalemap`: the map and kind read before the rebuild. Census `--far live` (budget rebuilt to
+  mixed before route 3) green 0 / red 916 double; `--far liveoff` (far LOD removed) green 0 / red 69 wrong steps.
+- LARGEREF-FIXEDOPEN-MIXED: a fixed open (no stream) places the large refs outside its block before the far build, each
+  in buckets of its own; after the build it reads the map (`LargeRef::fixedFull`) and hides (Flags bit 0) the blocks of
+  those whose own cell is flat, and hands the far hide only the ones kept full (`cell large refs: far map ...` line).
+  Red `WW_CELL_LARGEREFS_RED=fixedpermode`: the mode alone, shared buckets. Census `--far fixedmixed` / `fixedbudget`:
+  green 0 double (2202 / 2068 step-refs hidden, 1200 / 1334 kept full); red 2202 / 2068 double.
+- Not changed: a fixed open whose mode is flat (the game's .bto) places no large ref full, so one whose own cell the map
+  calls none (a refused ring) shows nothing outside its own cell there.
+- LARGEREF-FLATMASK measured offline (Commonwealth, the census routes): the flat cell mask cuts part of a large ref's
+  far copy over a loaded cell for 2308 step-refs (1246 refs); share cut median 0.18, p90 0.45, max 0.97. Not fixed.
+
 ## STREAMTEX5 (2026-11-02): the bindless geometry pool has a budget (the walk crash's suspect, bounded)
 - Every stream walk that died in the driver (STREAMTEX2 R1/R2, 10-29: 0xc0000409 in the driver's worker thread) ran
   the old append-only pool, which doubled to 2.4-2.5 GB of vertex/index buffers on top of ~6 GB of textures; the only

@@ -2453,6 +2453,10 @@ int liveFar( NifModel * nif, LiveDoc & d, QString * why )
 	nif->updateModel();
 	if ( seed ) {
 		auto next = std::make_shared<CellStreamSeed>( *seed );
+		/* lane LARGEREF4 (LARGEREF-MAP-LIVE): the restarted stream reads the rebuilt far map (cellStreamStart); a far LOD
+		 * removed live leaves no far copy, so the large refs go full. Red WW_CELL_LARGEREFS_RED=stalemap: the open's kind */
+		next->largeRefFar = int( LargeRef::liveFar( wanted, LargeRef::Far( seed->largeRefFar ),
+			wwEnv( "WW_CELL_LARGEREFS_RED" ) == "stalemap" ) );
 		next->farHand = fs.handBlocks;
 		next->farLand = fs.landBlocks;
 		cellStreamStart( nif, next );
@@ -2974,10 +2978,9 @@ static bool cellBuild( NifModel * nif, const CellSceneSpec & specAsked, CellChun
 		fprintf( stderr, "cell large refs: far objects %s: %s\n", qPrintable( lrWhy ),
 			largeRefFar != int( LargeRef::Far::Flat ) ? "drawn full outside the block"
 				: wwEnv( "WW_CELL_LARGEREFS_RED" ) == "flatdouble" ? "drawn full beside their far copies (RED flatdouble)"
-				: "the far copy alone outside their own cells" );
+				: wwEnv( "WW_CELL_LARGEREFS_RED" ) == "fixedflatnone" ? "the far copy alone outside their own cells (RED fixedflatnone)"
+				: "placed, hidden after the far build where its map is flat (the far copy alone there)" );
 	}
-	const bool largeRefFull = LargeRef::fullOutside( LargeRef::Far( largeRefFar ),
-		wwEnv( "WW_CELL_LARGEREFS_RED" ) == "flatdouble" );
 
 	int x0, y0, x1, y1;
 	spec.rect( x0, y0, x1, y1 );
@@ -3036,6 +3039,18 @@ static bool cellBuild( NifModel * nif, const CellSceneSpec & specAsked, CellChun
 	// lane CABLES1: references carrying XBSD, on a BNDS base, placed as cables, detached, XBSD on another base
 	int cableXbsd = 0, cableBnds = 0, cablePlaced = 0, cableDetached = 0, cableOtherBase = 0;
 	QSet<quint32> seenRefs;
+	/* lane LARGEREF4 (LARGEREF-FIXEDOPEN-MIXED): a fixed open's large refs outside the block (ref -> its own cell), each
+	 * in buckets of its own (ref -> the blocks they wrote), hidden after the far build where the build's map says flat.
+	 * Red WW_CELL_LARGEREFS_RED=fixedpermode: the mode alone, shared buckets. */
+	QHash<quint32, QPair<int, int>> largeFixedCell;
+	QHash<quint32, QVector<qint32>> largeFixedBlocks;
+	const bool largeFixedPerMode = wwEnv( "WW_CELL_LARGEREFS_RED" ) == "fixedpermode";
+	/* lane LARGEREF5 (LARGEREF-FIXEDOPEN-FLATMODE): a fixed open places every outside large ref, flat mode too; the far
+	 * map then hides the flat ones, so a ref whose own cell the map calls None still shows. Red
+	 * WW_CELL_LARGEREFS_RED=fixedflatnone: the mode alone (flat mode places none). */
+	const bool largePlace = LargeRef::fixedPlaced( LargeRef::Far( largeRefFar ),
+		streamInit || largeFixedPerMode || wwEnv( "WW_CELL_LARGEREFS_RED" ) == "fixedflatnone",
+		wwEnv( "WW_CELL_LARGEREFS_RED" ) == "flatdouble" );
 
 	/* The reference model is emptied here, right before the reads that fill it: the REFR loop runs before
 	 * the pick table's clear further down. */
@@ -3438,7 +3453,7 @@ static bool cellBuild( NifModel * nif, const CellSceneSpec & specAsked, CellChun
 					pushRefr( r, int( std::floor( r.pos[0] / CELL_UNITS ) ), int( std::floor( r.pos[1] / CELL_UNITS ) ), pers );
 				}
 			}
-			if ( !chunk && CellFarHide::largeRefsWanted() && largeRefFull ) {	// lane LARGEREF3: not over a flat far field
+			if ( !chunk && CellFarHide::largeRefsWanted() && largePlace ) {	// lane LARGEREF3/5: the far map decides after
 				int missing = 0, persist = 0, farthest = 0;
 				for ( const LargeRef::Row & lr : LargeRef::outside( world.largeRefRows(), x0, y0, x1, y1 ) ) {
 					EsmRefr r;
@@ -3460,6 +3475,8 @@ static bool cellBuild( NifModel * nif, const CellSceneSpec & specAsked, CellChun
 					persist += pers ? 1 : 0;
 					pushRefr( r, cx, cy, pers );
 					large << r.formID;
+					if ( !streamInit && !largeFixedPerMode )	// lane LARGEREF4 (LARGEREF-FIXEDOPEN-MIXED)
+						largeFixedCell.insert( r.formID, qMakePair( lr.rx, lr.ry ) );
 				}
 				fprintf( stderr, "cell large refs: %d drawn full outside the block (%d persistent), farthest %d cells; "
 					"%d listed refs not found; %d RNAM rows in the world\n", int( large.size() ), persist, farthest, missing,
@@ -5255,6 +5272,8 @@ static bool cellBuild( NifModel * nif, const CellSceneSpec & specAsked, CellChun
 				bbInvScale = s.bbScale > 1.0e-6f ? 1.0f / s.bbScale : 1.0f;
 				bbOwn = QStringLiteral( "|BB|%1" ).arg( billboardShapes++ );
 			}
+			if ( !largeFixedCell.isEmpty() && largeFixedCell.contains( p.ref ) )	// lane LARGEREF4: buckets of its own
+				bbOwn += QStringLiteral( "|\x03LR%1" ).arg( p.ref, 8, 16, QLatin1Char( '0' ) );
 			/* A lit effect shape joins its placement's own bucket. The model's bound is the
 			 * merge of its shapes' spheres, as a scene node merges its children's, placed by the reference. */
 			if ( fxLitOn && s.effectLit && s.nearFacts.effectShader && !p.disabled
@@ -6895,10 +6914,27 @@ static bool cellBuild( NifModel * nif, const CellSceneSpec & specAsked, CellChun
 		bucketMaxVerts = qMax( bucketMaxVerts, nvb );
 	}
 	QPersistentModelIndex iGround;
+	// lane LARGEREF4 (LARGEREF-FIXEDOPEN-MIXED): the blocks a fixed-open large ref's own buckets write
+	quint32 lrKeyRef = 0;
+	int lrKeyAt = -1;
+	auto lrKeyClose = [&]() {
+		if ( lrKeyRef )
+			for ( int bl = lrKeyAt; bl < nif->getBlockCount(); bl++ )
+				largeFixedBlocks[lrKeyRef].push_back( bl );
+		lrKeyRef = 0;
+	};
 	// lane LIVESET3: where the probe markers' buckets go (shown or not), so a live Show probes puts them there
 	int liveMarkersAt = -1, liveMarkersEnd = -1;
 	for ( const QString & k : keys ) {
 		const bool markerKey = k.startsWith( QLatin1String( "\x01probes" ) );
+		lrKeyClose();
+		if ( !largeFixedCell.isEmpty() ) {
+			const int lrAt = k.indexOf( QLatin1String( "|\x03LR" ) );
+			if ( lrAt >= 0 ) {
+				lrKeyRef = k.mid( lrAt + 4, 8 ).toUInt( nullptr, 16 );
+				lrKeyAt = nif->getBlockCount();
+			}
+		}
 		if ( liveMarkersAt < 0 && ( markerKey || k.compare( QLatin1String( "\x01probes" ) ) > 0 ) )
 			liveMarkersAt = nif->getBlockCount();
 		if ( liveMarkersAt >= 0 && liveMarkersEnd < 0 && !markerKey )
@@ -6936,6 +6972,7 @@ static bool cellBuild( NifModel * nif, const CellSceneSpec & specAsked, CellChun
 			break;
 		}
 	}
+	lrKeyClose();
 	if ( liveMarkersAt < 0 )
 		liveMarkersAt = nif->getBlockCount();
 	if ( liveMarkersEnd < 0 )
@@ -7211,6 +7248,34 @@ static bool cellBuild( NifModel * nif, const CellSceneSpec & specAsked, CellChun
 		farLodNotes = farStackNote + cellFarLodAppend( nif, iRoot, world, lodWs, spec.cx, spec.cy, spec.n, farLodl, origin,
 			streamInit ? &farStream : nullptr );
 		CellSpeed::mark( "far LOD appended" );
+		if ( !largeFixedCell.isEmpty() ) {	// lane LARGEREF4 (LARGEREF-FIXEDOPEN-MIXED): the build's map, per placed large ref
+			LargeRef::FarMap lrMap;
+			const bool lrHave = cellFarLodLargeRefMap( nif, lrMap );
+			const bool lrFlatDouble = wwEnv( "WW_CELL_LARGEREFS_RED" ) == "flatdouble";
+			QVector<quint32> lrKept;
+			int lrHidden = 0, lrHiddenBlocks = 0, lrBare = 0;
+			for ( auto it = largeFixedCell.constBegin(); it != largeFixedCell.constEnd(); ++it ) {
+				if ( LargeRef::fixedFull( true, lrHave ? &lrMap : nullptr, it.value().first, it.value().second, lrFlatDouble,
+						false, LargeRef::Far( largeRefFar ) ) ) {
+					lrKept << it.key();
+					continue;
+				}
+				lrHidden++;
+				const QVector<qint32> bl = largeFixedBlocks.value( it.key() );
+				lrBare += bl.isEmpty() ? 1 : 0;
+				for ( const qint32 b : bl ) {
+					const QModelIndex ib = nif->getBlockIndex( b );
+					if ( ib.isValid() && nif->blockInherits( ib, "NiAVObject" ) ) {
+						nif->set<quint32>( ib, "Flags", nif->get<quint32>( ib, "Flags" ) | 1u );
+						lrHiddenBlocks++;
+					}
+				}
+			}
+			CellFarHide::setExtraRefs( nif, lrKept );
+			fprintf( stderr, "cell large refs: far map %s: %d kept full, %d hidden over a flat far field (%d blocks; %d with "
+				"no blocks of their own)\n", lrHave ? "read after the far build" : "absent, the mode decides",
+				int( lrKept.size() ), lrHidden, lrHiddenBlocks, lrBare );
+		}
 	}
 	if ( !chunk ) {	// lane WATERDATA1: the worldspace's baked water planes, far LOD on or off ("" = interior)
 		QStringList infoSearched;

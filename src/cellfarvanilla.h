@@ -16,6 +16,7 @@ BSD License - see nifskope.h
 #include <QString>
 #include <QStringList>
 
+#include <array>
 #include <functional>
 #include <vector>
 
@@ -43,6 +44,8 @@ struct WwFarVanRing
 	std::vector<int> waterBlocks;                 //!< document blocks of water shapes (BSWaterShaderProperty)
 	bool stopped = false;                         //!< the budget stopped it
 	QStringList notes;
+	//! lane LARGEREF4: the chunks whose .bto loaded (inclusive cells, the chunk's whole square): the large refs' far map
+	std::vector<std::array<int, 4>> objectChunks;
 };
 
 /*! lane FIX1101A lodch r2 (LATE ITEM 23): the far field's budget charge for the game's chunks, in MB: triangles still
