@@ -59,7 +59,7 @@ inline float step( float wet, float target, float dt )
 	return std::max( wet - kDrySpeed * dt, target );
 }
 
-/* lane WETSNAP1: Fallout 4's Precipitation::Update ends each step with a snap: the wetness is 0 at once indoors, or
+/* lane WETSNAP1: Fallout 4's wetness update ends each step with a snap: the wetness is 0 at once indoors, or
  * outdoors when neither weather of the change (the current one, and the leaving one while a change runs) is rain. So a
  * rain -> clear change dries at fDrySpeed only while it runs and ends dry. snapOn false = the old slow dry
  * (WW_CELL_RAINWET_RED=nosnap). */
