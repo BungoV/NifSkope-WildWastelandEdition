@@ -51,6 +51,7 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 bool rtddgiCellShaderDefine();	// lane RTXGI1 M2: src/rtddgicell.cpp (the Ray-traced GI row / WW_CELL_RTDDGI)
 int rtddgiCellCascades();	// lane RTXCASCADE1: src/rtddgicell.h (WW_CELL_RTDDGI_CASCADES)
 bool rtddgiRestirShaderDefine();	// lane RESTIRDI1: src/rtddgicell.cpp (the RT quality row Medium+ / WW_CELL_RT_PRESET)
+bool rtddgiReflShaderDefine();	// lane RTREFL1: src/rtddgicell.cpp (WW_CELL_RTREFL at the RT quality Ultra)
 bool wwAirZoneShaderDefine();	// lane AIRZONE1: src/gl/cellairzone.cpp (the Air zones row / WW_CELL_AIRZONE)
 bool wwFogLeakShaderDefine();	// lane FOGLEAK1: src/gl/cellvolair.cpp (WW_CELL_FOGLEAK, the fog leak fix; off by default)
 int wwCellGiVis();	// lane PERF1: src/gl/celllights.cpp (1: the march, WW_CELL_GI_MARCH)
@@ -443,6 +444,9 @@ bool NifSkopeOpenGLContext::Shader::load( const QString & filepath )
 		// lane RESTIRDI1: the RT quality preset's ray-traced shadow ratio (cell_lights.glsl cellShadowF); not static: the row reloads
 		if ( !giMarch && rtddgiRestirShaderDefine() && data.startsWith( "#version" ) && data.contains( "_CELL_RESTIR" ) )
 			data.insert( data.indexOf( '\n' ) + 1, "#define WW_CELL_RESTIR 1\n" );
+		// lane RTREFL1: the water's ray-traced reflection hits (fo4_water.frag); not static: a set reloads the shaders
+		if ( !giMarch && rtddgiReflShaderDefine() && data.startsWith( "#version" ) && data.contains( "_CELL_RTREFL" ) )
+			data.insert( data.indexOf( '\n' ) + 1, "#define WW_CELL_RTREFL 1\n" );
 		// lane AIRZONE1: the hand-placed volumes' read (cell_airzone.glsl, via cell_volair.frag and cell_volpart.glsl); not static:
 		// the row's tick reloads the shaders
 		if ( wwAirZoneShaderDefine() && data.startsWith( "#version" ) && data.contains( "_CELL_AIRZONE" ) )

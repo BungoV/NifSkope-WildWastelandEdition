@@ -94,5 +94,12 @@ bool rtddgiRestirShaderDefine();
 //! one call a frame after the shared opaque pass (glview.cpp, after wwCellAoPass): the g-buffer to the device, the four
 //! ReSTIR passes on the volume's BVH, the ratio back in place for the opaque pass (no-op while the preset is Low)
 void rtddgiRestirPass( Scene * scene );
+/* lane RTREFL1 (2026-11-02): ray-traced reflections for the water where its screen-space march finds nothing, on the
+ * volume's BVH. WW_CELL_RTREFL=1 (default off) at the RT quality Ultra; WW_CELL_RTREFL_RED=1 = the march and the sky
+ * only. The loader's define WW_CELL_RTREFL (fo4_water.frag); the pass runs after wwCellSsrPass on its water ray target. */
+bool rtddgiReflShaderDefine();
+void rtddgiReflPass( Scene * scene );
+//! this frame's hits (a texture buffer, half size, bottom row first: rgb, a the hit distance, 0 none) for the water
+bool rtddgiReflTexture( Scene * scene, unsigned int & tex, int & w, int & h );
 
 #endif // RTDDGICELL_H

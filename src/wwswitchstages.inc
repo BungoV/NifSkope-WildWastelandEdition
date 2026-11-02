@@ -512,6 +512,8 @@
 { "WW_CELL_RTDDGI_VIEW_BOXES", 0, "src/rtddgicell.cpp:2096 cascadeBoxesDraw | re-read per frame or per call (a)" },
 { "WW_CELL_RTDDGI_VIEW_CASCADE", 0, "src/rtddgicell.cpp:1782 rtddgiCellViewCascade | re-read per frame or per call (a)" },
 { "WW_CELL_RTDDGI_VIEW_FOG", 0, "src/rtddgicell.cpp:941 viewFogMode | re-read per frame or per call (a)" },
+{ "WW_CELL_RTREFL", 4, "src/rtddgicell.cpp rtddgiReflOn | hand: the loader define WW_CELL_RTREFL (Shader::load via rtddgiReflShaderDefine, at the RT quality Ultra); rtddgiReflPass reads it every frame (RTREFL1)" },
+{ "WW_CELL_RTREFL_RED", 4, "src/rtddgicell.cpp rtddgiReflRed | hand: the red drops the define and the pass (the water's march and sky only); read like WW_CELL_RTREFL (RTREFL1)" },
 { "WW_CELL_RT_PRESET", 4, "src/rtddgicell.cpp:1168 rtddgiRtPresetPinned | hand: the RT quality preset: Medium+ is the loader define WW_CELL_RESTIR (Shader::load via rtddgiRestirShaderDefine) and turns the volume on; rtddgiRestirPass and the cube pass read it every frame (RESTIRDI1)" },
 { "WW_CELL_SHADOW", 0, "src/gl/celllights.cpp:240 st | init-once state, re-read when a live set moves its prefix (b)" },
 { "WW_CELL_SHADOWBUDGET", 0, "src/gl/celllooks.cpp:688 wwCellShadowBudgetPinned | re-read per frame or per call (a)" },

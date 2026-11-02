@@ -114,6 +114,11 @@ uniform int waterRed;		// debug: 1 norefl, 2 nofresnel, 4 nosilt, 8 nospec, 16 n
 uniform bool waterSsrOn;	// this frame's reflections are bound (half the view, top row first)
 uniform sampler2D waterSsrRaw;	// the march
 uniform sampler2D waterSsrFin;	// the march blurred
+#ifdef WW_CELL_RTREFL	// lane RTREFL1: the ray-traced hits (half the view, bottom row first: rgb, a the distance, 0 none)
+uniform bool waterRtOn;
+uniform samplerBuffer waterRt;
+uniform vec4 waterRtSize;
+#endif
 uniform int waterSslr;		// 1: the reflection-ray pass (waterDepth is then the obscurance pass's linear depth)
 uniform int waterProbe;
 #ifdef WW_WATER_WAVES	// lane WATERWAVES1: fo4_waterlook.prog only (fo4_water.prog keeps its machine code)
@@ -462,6 +467,25 @@ void main()
 	float skyVis = under ? 1.0 : wwWaterSkyVis( P, Ns, R, 0.0, skyFarV );
 #endif
 	sky *= skyVis;
+#endif
+#ifdef WW_CELL_RTREFL	// lane RTREFL1: a traced hit takes the sky's place (sky visibility stays on the sky share); the march over it
+	if ( waterRtOn && !under ) {
+		vec2 rv = clamp( ( gl_FragCoord.xy - vec2( viewportDimensions.xy ) ) / vec2( viewportDimensions.zw ), 0.0, 1.0 );
+#ifdef WW_WATER_REFL
+		if ( waterSsrFlat ) {
+			vec2 bend = wwWaterSsrBend( R, vec3( V.xy, -V.z ) );
+			rv = clamp( rv + vec2( bend.x, -bend.y ), 0.0, 1.0 );
+		}
+#endif
+		ivec2 rs = max( ivec2( waterRtSize.xy ), ivec2( 1 ) );
+		ivec2 rp = clamp( ivec2( rv * vec2( rs ) ), ivec2( 0 ), rs - 1 );
+		vec4 rt = texelFetch( waterRt, rp.y * rs.x + rp.x );
+		float rtHit = rt.a > 0.0 ? 1.0 : 0.0;
+		sky = mix( sky, rt.rgb, rtHit );
+#ifdef WW_WATER_REFL
+		reflSky = mix( reflSky, rt.rgb, rtHit );
+#endif
+	}
 #endif
 	// the game's screen-space reflection over the sky
 	vec4 ssr = vec4( 0.0 );

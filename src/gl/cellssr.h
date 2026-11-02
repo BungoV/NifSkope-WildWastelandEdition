@@ -80,6 +80,8 @@ bool wwCellSsrSceneTexture( Scene * scene, unsigned int & tex );
 bool wwCellSsrEmissionTexture( Scene * scene, unsigned int & tex );
 //! this frame's march and its blurred result for the water (half the view, top row first, bilinear)
 bool wwCellSsrWaterTextures( Scene * scene, unsigned int & raw, unsigned int & fin );
+//! lane RTREFL1: this frame's water ray target (full size RGBA32F, bottom row first: the view ray xyz, 0 none; view depth)
+bool wwCellSsrWaterRay( Scene * scene, unsigned int & tex, int & w, int & h );
 
 //! the AO pass's targets of this frame (src/gl/celllights.cpp); false unless its opaque pass ran for this scene
 struct WwCellAoTargets

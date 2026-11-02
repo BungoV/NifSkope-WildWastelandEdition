@@ -1161,6 +1161,112 @@ void restirUniforms( Renderer * r, NifSkopeOpenGLContext::Program * prog )
 	prog->uni4f( "cellRestirSize", FloatVector4( float( G.W ), float( G.H ), 0.0f, 0.0f ) );
 }
 
+/* lane RTREFL1: the reflection rays' GL side: the water's ray target copied into the shared input (a pixel-pack buffer),
+ * the half-size hits read back by the water as a texture buffer (RGBA32F) */
+struct ReflGl
+{
+	const void * owner = nullptr;
+	const bakert::DdgiGpuSession * session = nullptr;
+	int W = 0, H = 0;
+	GLuint mem[2] = { 0, 0 }, buf[2] = { 0, 0 }, tex = 0, semVk = 0, semGl = 0;
+	bool ready = false;
+	qint64 runs = 0, busy = 0;
+	QString last;
+};
+
+ReflGl & reflGl()
+{
+	static ReflGl * g = new ReflGl;   // never destroyed (as cell())
+	return *g;
+}
+
+void reflSay( ReflGl & G, const QString & line )
+{
+	if ( line == G.last )
+		return;
+	G.last = line;
+	std::fprintf( stderr, "rtrefl cell: %s\n", qPrintable( line ) );
+	std::fflush( stderr );
+}
+
+void reflDropGl( ReflGl & G, Renderer * r )
+{
+	if ( r && G.owner == r ) {
+		auto fn = r->fn;
+		GlShare & sh = glShare();
+		if ( G.tex )
+			fn->glDeleteTextures( 1, &G.tex );
+		for ( GLuint & b : G.buf )
+			if ( b )
+				fn->glDeleteBuffers( 1, &b );
+		if ( sh.ok ) {
+			for ( GLuint & m : G.mem )
+				if ( m )
+					sh.deleteMem( 1, &m );
+			for ( GLuint * s : { &G.semVk, &G.semGl } )
+				if ( *s )
+					sh.deleteSem( 1, s );
+		}
+	}
+	const QString last = G.last;
+	G = ReflGl();
+	G.last = last;
+}
+
+bool reflImport( ReflGl & G, Renderer * r, bakert::DdgiGpuSession * s, int W, int H, QString * why )
+{
+	GlShare & g = glShare();
+	if ( !g.ok ) {
+		*why = g.why;
+		return false;
+	}
+	bakert::ReflGpuShare sh;
+	if ( !bakert::reflGpuShare( s, W, H, &sh ) ) {
+		*why = QString::fromStdString( sh.why );
+		return false;
+	}
+	auto fn = r->fn;
+	for ( int i = 0; i < 16 && fn->glGetError() != GL_NO_ERROR; i++ ) {}
+	G.owner = r;
+	const GLint dedicated = 1;
+	void * mems[2] = { sh.raysMemory, sh.outMemory };
+	const quint64 sizes[2] = { sh.raysSize, sh.outSize };
+	const GLsizeiptr bytes[2] = { GLsizeiptr( W ) * H * 16, GLsizeiptr( bakert::reflHalf( W ) ) * bakert::reflHalf( H ) * 16 };
+	const GLenum targets[2] = { GL_PIXEL_PACK_BUFFER, GL_TEXTURE_BUFFER };
+	for ( int k = 0; k < 2; k++ ) {
+		g.createMem( 1, &G.mem[k] );
+		g.memParam( G.mem[k], kGlDedicatedMemoryObject, &dedicated );
+		g.importMem( G.mem[k], sizes[k], kGlHandleOpaqueWin32, mems[k] );
+		fn->glGenBuffers( 1, &G.buf[k] );
+		fn->glBindBuffer( targets[k], G.buf[k] );
+		g.bufferStorageMem( targets[k], bytes[k], G.mem[k], 0 );
+		fn->glBindBuffer( targets[k], 0 );
+	}
+	g.genSem( 1, &G.semVk );
+	g.importSem( G.semVk, kGlHandleOpaqueWin32, sh.vkDone );
+	g.genSem( 1, &G.semGl );
+	g.importSem( G.semGl, kGlHandleOpaqueWin32, sh.glDone );
+	GLint prevActive = 0;
+	fn->glGetIntegerv( GL_ACTIVE_TEXTURE, &prevActive );
+	fn->glActiveTexture( GLenum( GL_TEXTURE0 + WwCellUnit::RtRefl ) );
+	fn->glGenTextures( 1, &G.tex );
+	fn->glBindTexture( GL_TEXTURE_BUFFER, G.tex );
+	fn->glTexBuffer( GL_TEXTURE_BUFFER, GL_RGBA32F, G.buf[1] );
+	fn->glBindTexture( GL_TEXTURE_BUFFER, 0 );
+	fn->glActiveTexture( GLenum( prevActive ) );
+	const GLenum err = fn->glGetError();
+	for ( void * h : { sh.raysMemory, sh.outMemory, sh.vkDone, sh.glDone } )
+		bakert::ddgiGpuCloseHandle( h );
+	if ( err != GL_NO_ERROR ) {
+		*why = QStringLiteral( "the GL import failed (GL error 0x%1)" ).arg( qulonglong( err ), 0, 16 );
+		return false;
+	}
+	G.session = s;
+	G.W = W;
+	G.H = H;
+	return true;
+}
+
 } // namespace
 
 bool rtddgiRtPresetPinned()
@@ -1291,6 +1397,133 @@ void rtddgiRestirPass( Scene * scene )
 		restirSay( G, QStringLiteral( "on %1 x %2, %3 shadow lights of %4 (candidates %5, neighbours %6), frame %7, device wall %8 ms, red %9" )
 			.arg( t.w ).arg( t.h ).arg( in.cand.size() ).arg( pl.size() / 32 ).arg( in.candidates ).arg( in.spatial ).arg( in.frame )
 			.arg( out.msWall, 0, 'f', 3 ).arg( in.red ) );
+}
+
+bool rtddgiReflOn()
+{
+	const QByteArray v = wwEnv( "WW_CELL_RTREFL" ).trimmed();
+	return !v.isEmpty() && v != "0";
+}
+
+bool rtddgiReflRed()
+{
+	const QByteArray v = wwEnv( "WW_CELL_RTREFL_RED" ).trimmed();
+	return !v.isEmpty() && v != "0";
+}
+
+bool rtddgiReflShaderDefine()
+{
+	return rtddgiReflOn() && !rtddgiReflRed() && rtddgiRtPreset() >= 3 && rtddgiCellShaderDefine();
+}
+
+void rtddgiReflPass( Scene * scene )
+{
+	ReflGl & G = reflGl();
+	G.ready = false;
+	Renderer * r = scene ? scene->renderer : nullptr;
+	if ( !r || scene->selecting || !scene->nifModel )
+		return;
+	if ( !rtddgiReflShaderDefine() ) {
+		if ( G.owner ) {
+			reflDropGl( G, r );
+			reflSay( G, rtddgiReflRed() ? QStringLiteral( "freed (the red: the screen-space march and the sky only)" )
+				: QStringLiteral( "freed (off, or the RT quality is below Ultra)" ) );
+		}
+		return;
+	}
+	Cell & c = cell();
+	if ( !c.live || !c.live->live.isOpen() || c.nif != scene->nifModel || c.glOwner != r ) {
+		reflSay( G, QStringLiteral( "waiting for the ray-traced GI volume (the reflection rays trace its BVH)" ) );
+		return;
+	}
+	if ( !c.interop ) {
+		reflSay( G, QStringLiteral( "refused(the volume has no GL interop: %1)" ).arg( c.interopWhy ) );
+		return;
+	}
+	unsigned int wtex = 0;
+	int W = 0, H = 0;
+	if ( !wwCellSsrWaterRay( scene, wtex, W, H ) || !wtex || W <= 0 || H <= 0 ) {
+		reflSay( G, QStringLiteral( "idle (no water ray pass this frame)" ) );
+		return;
+	}
+	bakert::DdgiGpuSession * s = c.live->live.session();
+	if ( G.owner != r || G.session != s || G.W != W || G.H != H ) {
+		reflDropGl( G, r );
+		QString why;
+		if ( !reflImport( G, r, s, W, H, &why ) ) {
+			reflDropGl( G, r );
+			reflSay( G, QStringLiteral( "refused(%1)" ).arg( why ) );
+			return;
+		}
+	}
+	auto fn = r->fn;
+	GlShare & sh = glShare();
+	GLint prevActive = 0, prevPack = 0;
+	fn->glGetIntegerv( GL_ACTIVE_TEXTURE, &prevActive );
+	fn->glGetIntegerv( GL_PIXEL_PACK_BUFFER_BINDING, &prevPack );
+	fn->glActiveTexture( GLenum( GL_TEXTURE0 + WwCellUnit::RtRefl ) );
+	fn->glBindTexture( GL_TEXTURE_2D, wtex );
+	fn->glBindBuffer( GL_PIXEL_PACK_BUFFER, G.buf[0] );
+	fn->glPixelStorei( GL_PACK_ALIGNMENT, 4 );
+	fn->glGetTexImage( GL_TEXTURE_2D, 0, GL_RGBA, GL_FLOAT, nullptr );
+	fn->glBindBuffer( GL_PIXEL_PACK_BUFFER, GLuint( prevPack ) );
+	fn->glBindTexture( GL_TEXTURE_2D, 0 );
+	fn->glActiveTexture( GLenum( prevActive ) );
+	bakert::ReflGpuIn in;
+	const Transform & vt = scene->view;
+	const float sc = vt.scale != 0.0f ? vt.scale : 1.0f;
+	for ( int k = 0; k < 3; k++ ) {
+		float w = 0.0f;
+		for ( int j = 0; j < 3; j++ )
+			w -= vt.rotation( j, k ) * vt.translation[j];
+		for ( int j = 0; j < 3; j++ )
+			in.rows[k * 4 + j] = vt.rotation( j, k ) / sc;
+		in.rows[k * 4 + 3] = w / sc;
+	}
+	in.rows[3] = float( double( in.rows[3] ) - c.live->live.localX() );
+	in.rows[7] = float( double( in.rows[7] ) - c.live->live.localY() );
+	const auto & pm = r->globalUniforms->projectionMatrix;
+	in.proj[0] = pm[0][0];
+	in.proj[1] = pm[1][1];
+	in.proj[2] = pm[2][0];
+	in.proj[3] = pm[2][1];
+	in.W = W;
+	in.H = H;
+	in.readBack = ( G.runs % 64 ) == 0;   // the census's hit count, one frame in 64
+	in.beforeSubmit = [&G, &sh, fn]() {
+		sh.signalSem( G.semGl, 2, G.buf, 0, nullptr, nullptr );
+		fn->glFlush();
+		return true;
+	};
+	bakert::ReflGpuOut out;
+	if ( !bakert::reflGpuStep( s, in, &out ) ) {
+		G.busy += out.busy ? 1 : 0;
+		reflSay( G, out.busy ? QStringLiteral( "busy (a bake holds the device): this frame the sky" )
+			: QStringLiteral( "refused(%1)" ).arg( QString::fromStdString( out.why ) ) );
+		return;
+	}
+	sh.waitSem( G.semVk, 2, G.buf, 0, nullptr, nullptr );
+	G.ready = true;
+	if ( ( G.runs++ % 64 ) == 0 ) {
+		qint64 hits = 0;
+		for ( size_t i = 3; i < out.refl.size(); i += 4 )
+			hits += out.refl[i] > 0.0f ? 1 : 0;
+		reflSay( G, QStringLiteral( "on %1 x %2 (half %3 x %4), hits %5, device wall %6 ms, busy %7" ).arg( W ).arg( H )
+			.arg( bakert::reflHalf( W ) ).arg( bakert::reflHalf( H ) ).arg( hits ).arg( out.msWall, 0, 'f', 3 ).arg( G.busy ) );
+	}
+}
+
+bool rtddgiReflTexture( Scene * scene, unsigned int & tex, int & w, int & h )
+{
+	const ReflGl & G = reflGl();
+	tex = 0;
+	w = h = 0;
+	if ( !scene || !G.ready || G.owner != scene->renderer || !G.tex )
+		return false;
+	tex = G.tex;
+	w = bakert::reflHalf( G.W );
+	h = bakert::reflHalf( G.H );
+	return true;
 }
 
 bool rtddgiCellPinned()

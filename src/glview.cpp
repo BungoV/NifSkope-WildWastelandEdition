@@ -4263,6 +4263,7 @@ void GLView::paintGL()
 	PassTime::end( PassTime::Water );
 	PassTime::begin( PassTime::Reflections );
 	wwCellSsrPass( scene, cellPasses );	// lane SSR1: needs that pass's depth
+	rtddgiReflPass( scene );	// lane RTREFL1: the water's reflection rays on the RT volume's BVH (off: nothing)
 	PassTime::end( PassTime::Reflections );
 	PassTime::begin( PassTime::Contact );	// lane TIMING1: was inside "reflections"
 	wwContactShadowPass( scene );	// lane TERRSHADOW1: the contact mask from that pass's depth (fails open without it)
