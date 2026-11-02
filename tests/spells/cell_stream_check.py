@@ -109,6 +109,26 @@ def main():
     else:
         gate('(d) memory flat', False, 'the walk dump has no step 0 or step 20')
 
+    # (e) lane STREAMTEX3: the texture census, one per crossing (deduped by texCrossing). The PERFFIX4 pool never frees
+    # a texture a loaded cell names (texKeepFreed 0; tests/texpool tiers_test); reloads and the released stock are
+    # printed for the A/B against the red (WW_CELL_STREAMTEX_RED=off, which passes as RED)
+    cen = {}
+    for r in walk:
+        if 'texCrossing' in r:
+            cen[int(num(r, 'texCrossing'))] = r
+    if cen:
+        red = any(num(r, 'texRed') > 0 for r in cen.values())
+        kf = sum(int(num(r, 'texKeepFreed')) for r in cen.values())
+        rl = sum(num(r, 'texReloadedMb') for r in cen.values())
+        rn = sum(int(num(r, 'texReloadedN')) for r in cen.values())
+        kept = max(num(r, 'texKeptMb') for r in cen.values())
+        gate('(e) texture pool: no loaded cell\'s texture freed%s' % (' (RED off)' if red else ''),
+             red or kf == 0,
+             '%d crossings, keep-freed %d, reloaded %d (%.1f MB), released stock peak %.1f MB, pool %.0f MB'
+             % (len(cen), kf, rn, rl, kept, num(cen[min(cen)], 'texBudgetMb')))
+    else:
+        print('  SKIP  (e) texture pool: the dump has no texCrossing (an exe before STREAMTEX1)')
+
     # reds
     nu = steps(os.path.join(out, 'red_nounload.stream.txt'))
     if len(nu) >= 2:
