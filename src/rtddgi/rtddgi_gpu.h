@@ -266,6 +266,44 @@ struct ReflGpuShare
 };
 bool reflGpuShare( DdgiGpuSession * s, int W, int H, ReflGpuShare * out );
 
+/* Lane RTAO1 (2026-11-02): ray-traced ambient occlusion on the volume's BVH, past the screen-space obscurance's reach
+ * (src/rtddgi/ao.comp; the CPU twin is src/rtddgi.cpp aoTexel). One step traces up to 16 cosine rays a half-size texel
+ * from the first of its 2 x 2 pixels in the W x H g-buffer (view normal xyz, linear depth w; bottom row first).
+ * Output: Wh x Hh x vec4 (visibility, hits, rays, 1; a = 0: no surface there, visibility 1). */
+inline int aoHalf( int n ) { return ( n + 1 ) / 2; }
+struct AoGpuIn
+{
+	int W = 0, H = 0;
+	int red = 0;                          // ao.comp opts.x: 1 = no rays (visibility 1)
+	int rays = 8;                         // rays a texel, 1..16
+	float bias = 1.0f;                    // the origin's push along the normal (game units)
+	float range = 350.0f, nearCut = 70.0f, strength = 1.0f;   // hits in [nearCut, range] from the surface occlude
+	float rows[12] = { 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0 };   // view -> the soup's local frame
+	float proj[4] = { 1, 1, 0, 0 };                            // P00, P11, P20, P21
+	const float * gbuf = nullptr;         // host g-buffer W x H x 4 (the CLI); nullptr: GL wrote the shared one
+	bool readBack = false;                // copy the output to the host
+	std::function<bool()> beforeSubmit;   // interop (aoGpuShare): GL signalled glDone; the submit waits on it
+};
+struct AoGpuOut
+{
+	bool ok = false, busy = false;
+	std::string why;
+	double msWall = 0;
+	std::vector<float> ao;                // readBack: Wh x Hh x 4
+};
+//! false + busy when the device's lock is taken; waits for its own submit
+bool aoGpuStep( DdgiGpuSession * s, const AoGpuIn & in, AoGpuOut * out );
+//! interop: the g-buffer copy (W x H x 16 bytes) and the output (Wh x Hh x 16 bytes) exported to GL, with two semaphores
+struct AoGpuShare
+{
+	bool ok = false;
+	std::string why;
+	void * gbufMemory = nullptr, * outMemory = nullptr;
+	uint64_t gbufSize = 0, outSize = 0;
+	void * vkDone = nullptr, * glDone = nullptr;
+};
+bool aoGpuShare( DdgiGpuSession * s, int W, int H, AoGpuShare * out );
+
 } // namespace bakert
 
 #endif // RTDDGI_GPU_H

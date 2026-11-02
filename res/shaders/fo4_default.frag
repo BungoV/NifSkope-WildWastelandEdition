@@ -875,6 +875,9 @@ void main()
 	if ( cellOn && hasCubeMap && ( cellRed & 512 ) == 0 )
 		cubeK *= cellReflProbe( GreyscaleMap, -ViewDir, R, cellCubeMat.y * ( hasSpecularMap ? specMap.g : 1.0 ),
 		                        cellCubeMat.x * ( hasSpecularMap ? specMap.r : 1.0 ), envReflection );
+#ifdef WW_CELL_RTAO
+	cubeK *= cellRtAoSpec();	// lane RTAO1: the ray-traced occlusion on the cube share only
+#endif
 	// lane SSR1: the screen-space reflection over the cube term, by the march's confidence (cell_ssr.glsl)
 	if ( cellOn )
 		cubeK = cellSsrMix( cubeK, mix( cellCubeMat.y * ( hasSpecularMap ? specMap.g : 1.0 ), landLodK.x, landLodV ),

@@ -256,5 +256,7 @@ int restirCli( const QStringList & args );
  *  reflection rays (a plane at z) traced by the GPU kernel (src/rtddgi/refl.comp) and its CPU twin on the same volume;
  *  prints hit and colour agreement for the kernel and for the red (no traced hit), writes rtrefl.tsv */
 int rtreflCli( const QStringList & args );
+//! lane RTAO1: `-no-gui rtao`, the occlusion rays (ao.comp) against their CPU twin on a soup
+int rtaoCli( const QStringList & args );
 
 #endif // RTDDGI_H

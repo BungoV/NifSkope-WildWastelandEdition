@@ -53,6 +53,7 @@ bool rtddgiCellShaderDefine();	// lane RTXGI1 M2: src/rtddgicell.cpp (the Ray-tr
 int rtddgiCellCascades();	// lane RTXCASCADE1: src/rtddgicell.h (WW_CELL_RTDDGI_CASCADES)
 bool rtddgiRestirShaderDefine();	// lane RESTIRDI1: src/rtddgicell.cpp (the RT quality row Medium+ / WW_CELL_RT_PRESET)
 bool rtddgiReflShaderDefine();	// lane RTREFL1: src/rtddgicell.cpp (WW_CELL_RTREFL at the RT quality Ultra)
+bool rtddgiAoShaderDefine();	// lane RTAO1: src/rtddgicell.cpp (WW_CELL_RTAO at the RT quality Ultra)
 bool wwAirZoneShaderDefine();	// lane AIRZONE1: src/gl/cellairzone.cpp (the Air zones row / WW_CELL_AIRZONE)
 // lane MATLOOK1 (TRANSLUC1): WW_CELL_TRANSL=1, a v8+ material's translucency (res/shaders/cell_transl.glsl); off by default
 static bool wwTranslShaderDefine() { return wwEnv( "WW_CELL_TRANSL" ).trimmed() == "1"; }
@@ -466,6 +467,9 @@ bool NifSkopeOpenGLContext::Shader::load( const QString & filepath )
 		// lane RTREFL1: the water's ray-traced reflection hits (fo4_water.frag); not static: a set reloads the shaders
 		if ( !giMarch && rtddgiReflShaderDefine() && data.startsWith( "#version" ) && data.contains( "_CELL_RTREFL" ) )
 			data.insert( data.indexOf( '\n' ) + 1, "#define WW_CELL_RTREFL 1\n" );
+		// lane RTAO1: the ray-traced occlusion past the screen-space one's reach (cell_ao.glsl); not static: a set reloads the shaders
+		if ( !giMarch && rtddgiAoShaderDefine() && data.startsWith( "#version" ) && data.contains( "_CELL_RTAO" ) )
+			data.insert( data.indexOf( '\n' ) + 1, "#define WW_CELL_RTAO 1\n" );
 		// lane AIRZONE1: the hand-placed volumes' read (cell_airzone.glsl, via cell_volair.frag and cell_volpart.glsl); not static:
 		// the row's tick reloads the shaders
 		if ( wwAirZoneShaderDefine() && data.startsWith( "#version" ) && data.contains( "_CELL_AIRZONE" ) )

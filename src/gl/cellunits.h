@@ -79,6 +79,7 @@ constexpr int UnderDepthMs = 82;	// lane WATERUNDER4: the underwater pass reads 
 constexpr int DdgiAtlas = 84;	// lane RTXGI1 M2: the ray-traced GI volume's tiles and probes (samplerBuffer, RGBA32F; src/rtddgicell.cpp)
 constexpr int Restir = 85;	// lane RESTIRDI1: ReSTIR DI's shadow ratio a pixel (samplerBuffer, RG32F; src/rtddgicell.cpp), WW_CELL_RESTIR programs only
 constexpr int RtRefl = 89;	// lane RTREFL1 (87 in the lane; LAND6: 87/88 = PrecipRoof/RainCover): the water's ray-traced reflection hits (samplerBuffer, RGBA32F; src/rtddgicell.cpp), WW_CELL_RTREFL programs only
+constexpr int RtAo = 90;	// lane RTAO1 (88 in the lane; LAND1102: 87-89 taken): the ray-traced occlusion a half-size texel (samplerBuffer, RGBA32F; src/rtddgicell.cpp), WW_CELL_RTAO programs only
 constexpr int FarStream = 86;	// lane FIX1101A lodch: the instanced far ring's per-vertex bake channels (samplerBuffer RG8, vertex stage; set at link)
 constexpr int PrecipRoof = 87;	// lane BUGS1102B: the GPU precipitation field's roof map (sampler2D R32F, vertex stage; cellprecip.cpp)
 constexpr int RainCover = 88;	// lane FO76WEATHER2: the rain wetness's cover map, the same roof map for the surfaces (sampler2D R32F; cellprecip.cpp)
@@ -93,7 +94,7 @@ constexpr int kAll[] = { Shadow, Bloom, Lut, Gi, Lights, Csm, Ao, Ssr, GiSlot, R
 	WaterMoment0, WaterMoment1, WaterMoment2, WaterCloudMap,
 	LandShoreIndex, LandShoreAtlas, WaterFlowIndex, WaterFlowAtlas, WaterOceanB, WaterOceanC, WaterSkyIndex, WaterSkyAtlas, AirTerrain,
 	LandLodDiff, LandLodOuter, LandLodNoise, LandLodDetail, WaterOceanD,
-	LandWaterInfo, LandWaterInfo + 1, LandWaterInfo + 2, UnderDepthMs, FxDepth, DdgiAtlas, Restir, FarStream, PrecipRoof, RainCover, RtRefl };
+	LandWaterInfo, LandWaterInfo + 1, LandWaterInfo + 2, UnderDepthMs, FxDepth, DdgiAtlas, Restir, FarStream, PrecipRoof, RainCover, RtRefl, RtAo };
 
 constexpr bool distinct()
 {

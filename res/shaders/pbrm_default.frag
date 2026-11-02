@@ -712,6 +712,9 @@ void main()
 					cubeK = cube * cube * envReflection * Espec * s.ao;
 				}
 			}
+#ifdef WW_CELL_RTAO
+			cubeK *= cellRtAoSpec();	// lane RTAO1: the ray-traced occlusion on the cube share only
+#endif
 			// the screen-space reflection over the cube term, by the march's confidence (cell_ssr.glsl)
 			if ( cellSsrOn || cellProbe == 60 ) {
 				vec2 sg = texture( CellSpecMap, offset ).rg;
