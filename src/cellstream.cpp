@@ -54,6 +54,8 @@
 #endif
 
 extern std::vector<NifItem *> * g_nifResetGrave;   // lane CELLSPIKE3: nifmodel.cpp resetNiBlock
+// lane STREAMTEX4 (gl/cellbindless.cpp): declared outside the anonymous namespace below, or the link misses them
+namespace WwBl { extern long long freedLiveAll, staleAll; }
 
 namespace {
 
@@ -1293,8 +1295,6 @@ bool Stream::tick( Scene * sc, const Vector3 & eye )
 	st.tickMaxMs = std::max( st.tickMaxMs, msOf( t ) );
 	return changed;
 }
-
-namespace WwBl { extern long long freedLiveAll, staleAll; }	// lane STREAMTEX4: gl/cellbindless.cpp
 
 void Stream::texCensus()
 {
