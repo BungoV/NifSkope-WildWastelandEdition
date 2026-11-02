@@ -2,7 +2,7 @@
 row WW_CELL_DOF_LENS). The REAL shaders of the tree through the real driver in a hidden GL 4.1 context; no NifSkope
 window. Reference: the thin-lens circle of confusion c = A f (z - S1) / (z (S1 - f)) computed here in float64.
 
-    python -I tests/postfx/postfx_lens.py [--red ramp|game|noclamp|nonear|blurall|plain] [--ms]
+    python -I tests/postfx/postfx_lens.py [--red ramp|game|noclamp|nonear|neartile|blurall|plain] [--ms]
 
 Gates (exit 0 only when every gate passes; each red must fail its gate):
   coc       the prep pass's circle (quarter size, the nearest of four depths) == the reference, |err| <= 0.002 |c| + 0.02 px
@@ -11,14 +11,18 @@ Gates (exit 0 only when every gate passes; each red must fail its gate):
             the reference circle +-20 %, and keeps its light +-15 %. Red game: the game's chain (downsample, Gaussian,
             composite) at the same record cannot match both circles.
   noleak    a mid-distance block (circle 8 px) in front of a bright far wall (circle 48 px): its inside (8 px in from the
-            edge) keeps its colour within 0.02. Red noclamp: a tap behind the centre spreads at its own circle.
+            edge) keeps its colour within 0.02; also the far layer with near specks every 64 px (the near reach 32 px,
+            wider than the block's circle). Red noclamp: a tap behind the centre spreads at its own circle.
   focus     a frame all at the focus distance, near layer on: the output equals the input bit for bit. Red blurall: the
             composite takes the far layer everywhere.
   near      an out-of-focus near block (circle -24 px) over a focused wall: the near layer covers the scattered disk's
             share (0.196) +-0.08 at 6 px outside its edge, and the wall 24 px away is untouched. Red nonear: near off.
+  neartile  the near kernel reaches the true near circle (the tile max, game_doflens_tile): with no near surface,
+            near on == near off bit for bit; a near circle of 16 px == an oracle whose fixed reach is that circle (1e-3).
+            Red neartile: the fixed largest reach (32 px).
   fused     the lens composite inside the motion blur's pass (game_doflensmblur) == lens composite -> copy -> game_mblur,
             max 1/255, still and moving. Red plain: the fused pass without the lens (game_dofmblur).
-  --ms      1080p GPU ms (median of 32 after 2 warm-ups, uploads outside the timed loop): prep + gather + composite
+  --ms      1080p GPU ms (median of 32 after 2 warm-ups, uploads outside the timed loop): prep + tile max + gather + composite
             must be < 0.15 ms; also printed: the game's chain, and the fused pass with and without the lens.
 """
 import ctypes, os, re, shutil, sys, tempfile
@@ -44,7 +48,8 @@ S1 = 200.0                      # the focus distance
 CINF = 48.0                     # the circle at infinity (px)
 A_PX = CINF * (S1 - F) / F      # the aperture in sensor px
 MAXC = 64.0
-PROGS = ('game_doflens_prep', 'game_doflens_gather', 'game_doflens', 'game_doflensmblur', 'game_dofmblur',
+R16F = 0x822D
+PROGS = ('game_doflens_prep', 'game_doflens_tile', 'game_doflens_gather','game_doflens', 'game_doflensmblur', 'game_dofmblur',
          'game_mblur', 'game_dof_down', 'game_dof_blur', 'game_dof')
 
 
@@ -152,14 +157,21 @@ class Lens(P.Rig):
             ns = ctypes.c_uint64(); self.gq(self.q, 0x8866, ctypes.byref(ns)); times.append(ns.value / 1e6)
         return float(np.median(times[2:]))
 
-    def lens(self, w, h, col, depth, lq=(MAXC, 1.0, 1.0, 0.0), lp=(S1, A_PX, F, 0.0), mode='two', mv=None, mb=None,
+    def lens(self, w, h, col, depth, lq=(MAXC, 1.0, 1.0, 1.0), lp=(S1, A_PX, F, 0.0), mode='two', mv=None, mb=None,
              timed=False, layers=False):
-        """prep -> gather -> composite (mode 'two': game_doflens; 'fused': game_doflensmblur; 'mb': game_doflens, copy,
-        game_mblur; 'plain': game_dofmblur with the lens layers). Returns the output (or ms, or the layers)"""
+        """prep -> [tile max, dilate] -> gather -> composite (mode 'two': game_doflens; 'fused': game_doflensmblur; 'mb':
+        game_doflens, copy, game_mblur; 'plain': game_dofmblur with the lens layers). lq.w = the near reach from the tile
+        max (red neartile: always the fixed largest radius). Returns the output (or ms, or the layers)"""
+        if RED == 'neartile':
+            lq = tuple(lq[:3]) + (0.0,)
         qw, qh = (w + 3) // 4, (h + 3) // 4
+        tw, th = (qw + 7) // 8, (qh + 7) // 8
         tc = self.tex(w, h, RGBA16F, LINEAR, col)
         td = self.tex(w, h, R32F, NEAREST, depth[..., None])
         tp = self.tex(qw, qh, RGBA16F, LINEAR)
+        tt0 = self.tex(tw, th, R16F, NEAREST)
+        tt1 = self.tex(tw, th, R16F, NEAREST)
+        tile = lq[1] != 0.0 and lq[3] > 0.5
         tf = self.tex(qw, qh, RGBA16F, LINEAR)
         tn = self.tex(qw, qh, RGBA16F, LINEAR)
         out = self.tex(w, h, RGBA16F, LINEAR)
@@ -172,7 +184,10 @@ class Lens(P.Rig):
 
         def run():
             self.pass2('game_doflens_prep', [tp], qw, qh, (('t0', tc), ('t1', td)), lu)
-            self.pass2('game_doflens_gather', [tf, tn], qw, qh, (('t0', tp),), lu)
+            if tile:
+                self.pass2('game_doflens_tile', [tt0], tw, th, (('t0', tp),), {'dilate': 0})
+                self.pass2('game_doflens_tile', [tt1], tw, th, (('t0', tt0),), {'dilate': 1})
+            self.pass2('game_doflens_gather', [tf, tn], qw, qh, (('t0', tp), ('t1', tt1)), lu)
             if mode == 'two':
                 self.pass2('game_doflens', [out], w, h, (('t0', tc), ('t1', tf), ('t2', td), ('lensNear', tn)), lu)
             elif mode == 'mb':
@@ -283,7 +298,21 @@ def main():
     o = R.lens(w, h, col, d)
     inside = o[72:184, 72:184, :3]
     lk = np.abs(inside - 0.2).max()
-    gate('noleak', lk <= 0.02, 'the block 8 px in: max |out - 0.2| = %.4f (bar 0.02); wall circle %.1f px' % (lk, ref_coc(1e5)))
+    # the same behind 4x4 near specks (circle -64) every 64 px: every tile's near reach is 32 px, so the gather's
+    # kernel is wider than the block's own circle (the case the clamp guards); the far layer inside, specks masked
+    zs = window_depth(z_of_coc(-64.0))
+    for y in range(32, h, 64):
+        for x in range(32, w, 64):
+            d[y:y + 4, x:x + 4] = zs
+    _, fl_, _ = R.lens(w, h, col, d, layers=True)
+    m = np.ones(fl_.shape[:2], bool)
+    for y in range(32, h, 64):
+        for x in range(32, w, 64):
+            m[y // 4 - 1:y // 4 + 2, x // 4 - 1:x // 4 + 2] = False
+    m2 = np.zeros_like(m); m2[18:46, 18:46] = True
+    lk2 = np.abs(fl_[..., :3] - 0.2).max(axis=2)[m & m2].max()
+    gate('noleak', lk <= 0.02 and lk2 <= 0.02, 'the block 8 px in: max |out - 0.2| = %.4f, far layer with the near reach at '
+         '32 px %.4f (bar 0.02); wall circle %.1f px' % (lk, lk2, ref_coc(1e5)))
 
     # focus: everything at the focus distance, near on
     rng = np.random.default_rng(7)
@@ -298,7 +327,7 @@ def main():
     zn = z_of_coc(-24.0)
     col[96:160, 96:160, :3] = 3.0
     d[96:160, 96:160] = window_depth(zn)
-    lq = (MAXC, 0.0 if RED == 'nonear' else 1.0, 1.0, 0.0)
+    lq = (MAXC, 0.0 if RED == 'nonear' else 1.0, 1.0, 1.0)
     o = R.lens(w, h, col, d, lq=lq)
     _, _, nl = R.lens(w, h, col, d, lq=lq, layers=True)
     a6 = nl[(96 - 6) // 4, 128 // 4, 3]   # 6 px outside the top edge (quarter texel), mid column
@@ -307,6 +336,27 @@ def main():
     far24 = np.abs(o[:96 - 24, :, :3] - 0.25).max()
     gate('near', abs(a6 - seg) <= 0.08 and far24 == 0.0, 'near cover 6 px outside %.3f (scatter %.3f +-0.08); wall 24 px '
          'away max diff %.3g (bar 0)' % (a6, seg, far24))
+
+    # neartile: the near kernel's reach is the true near circle, not the fixed largest one.
+    # (a) no near surface (a 4x4 light behind the focus, circle 16, on black), near on == near off, layers bit for bit:
+    # the fixed reach spreads the 32 taps over 32 px and only ~2 land in the 8 px disk.
+    # (b) a small near block (circle -16) over a focused wall: the layers == an oracle whose fixed reach is exactly that
+    # circle (lensQ.x = 16, tile off), max 1e-3.
+    w = h = 192
+    col, d = flat(w, h, z_of_coc(16.0))
+    col[96:100, 96:100, :3] = 100.0
+    _, f_on, n_on = R.lens(w, h, col, d, lq=(MAXC, 1.0, 1.0, 1.0), layers=True)
+    _, f_off, n_off = R.lens(w, h, col, d, lq=(MAXC, 0.0, 1.0, 1.0), layers=True)
+    ea = max(np.abs(f_on - f_off).max(), np.abs(n_on - n_off).max())
+    col, d = flat(w, h, S1, 0.25)
+    col[64:128, 64:128, :3] = 3.0
+    d[64:128, 64:128] = window_depth(z_of_coc(-16.0))
+    p_t, f_t, n_t = R.lens(w, h, col, d, lq=(MAXC, 1.0, 1.0, 1.0), layers=True)
+    cn = float(-p_t[..., 3].min())     # the prep's own near circle (half float), so the oracle's clamp never binds
+    _, f_o, n_o = R.lens(w, h, col, d, lq=(cn, 1.0, 1.0, 0.0), layers=True)
+    eb = max(np.abs(f_t - f_o).max(), np.abs(n_t - n_o).max())
+    gate('neartile', ea == 0.0 and eb <= 1e-3, 'no near surface: near on vs off max %.3g (bar 0); near circle %.2f px vs '
+         'the exact-reach oracle max %.3g (bar 1e-3)' % (ea, cn, eb))
 
     # fused: the lens in the motion blur's pass vs the two passes
     for w, h in ((320, 180), (1920, 1080)):
@@ -335,10 +385,10 @@ def main():
         mv = np.dstack([-0.008 * (1 + 0.5 * np.sin(7 * xx + 3 * yy)), 0.003 * np.cos(5 * yy)])
         mb = ((50 * 0.001 * 60.0, 0.01, 70.0, 0.0), (1.0, 1.0, (w - 1.0) / w, (h - 1.0) / h))
         for nearOn in (1.0, 0.0):
-            lq = (MAXC, nearOn, 1.0, 0.0)
+            lq = (MAXC, nearOn, 1.0, 1.0)
             t = R.lens(w, h, col, d, lq=lq, timed=True)
             tf = R.lens(w, h, col, d, lq=lq, mode='fused', mv=mv, mb=mb, timed=True)
-            gate('ms', t < 0.15, 'near %s: lens prep + gather + composite %.3f ms (bar 0.15); fused lens + blur %.3f ms'
+            gate('ms', t < 0.15, 'near %s: lens prep + tile + gather + composite %.3f ms (bar 0.15); fused lens + blur %.3f ms'
                  % ('on' if nearOn else 'off', t, tf))
         tp = R.lens(w, h, col, d, mode='plain', mv=mv, mb=mb, timed=True)
         tg = R.game(w, h, col, d, (1.0, S1, 100.0), timed=True)

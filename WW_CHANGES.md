@@ -19,6 +19,25 @@ passes within 0.25 of an 8-bit step; one red each. 1080p GPU time 0.048 ms (near
 motion blur (the game's chain 0.040, fused 0.069). Red WW_CELL_DOF_LENS_RED=1 runs the game's passes. The default
 programs game_dof / game_dofmblur are unchanged but the source hash.
 
+DOFLENS1-CENSUS: the depth of field of every IMAD in Fallout4.esm and the six DLCs, read offline (notes/doflens1/
+census, tool notes/doflens1/tools/imad_dof_census.py): 269 IMADs, 184 with a DoF strength curve; their users from ZOOM
+GNAM, DOBJ, DFOB and CAMS MNAM. Dialogue's IMAD (DialogueImod, DOBJ IMDI) holds no depth of field, so dialogue keeps
+the menu state's lens. WW_CELL_DOF_STATE takes the states the data holds: pipboy (PipboyMenuImod), pipboypa
+(PipboyPowerArmorImod), scope (zd_ScopeTargetingRecon, the recon and night-vision scopes), vats (VATSScanImod),
+inventory (VATSPlaybackDesatBlurImod), inspect (InspectImod), killcam (VATSPlaybackDOFImod), vatsdialogue
+(VATSDialogueImodClose). Each reads its IMAD from the loaded plugins at the cell's load (strength, distance, range =
+the curves' largest keys; DNAM flags in the IMGS packing; use-target = autofocus on the frame's centre) and drives the
+game's passes, or the lens when its row is on; a state whose IMAD is not loaded is refused in the telemetry. play and
+menu are unchanged.
+
+DOFLENS1-NEARTILE: the near layer's reach is the true near circle, not a fixed 32 px. A tile pass
+(game_doflens_tile, two draws over 8 x 8 quarter-texel tiles: the largest near radius per tile, then over the 3 x 3
+tiles around) gives the gather its near kernel radius, so far-only and small-near regions keep all 32 taps inside
+their own disk. Gate neartile: with no near surface, near on == near off bit for bit (the fixed reach: 42 off); a
+16 px near circle == an oracle with exactly that reach (0; fixed: 1.35). Noleak now also holds with the near reach at
+32 px around a sharp block. 1080p total 0.058 ms near on (prep + tile + gather + composite; bar 0.15), 0.044 off. Red
+WW_CELL_DOF_LENS_NEARTILE_RED=1 keeps the fixed reach. Default programs unchanged.
+
 ## POSTFX2 (2026-11-02): the game's depth of field and motion blur fused into one pass
 
 With both the depth of field and the motion blur on, the depth of field's composite now runs inside the motion

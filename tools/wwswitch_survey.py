@@ -61,7 +61,8 @@ OVERRIDES = {
     'WW_CELL_POST_LINEAR': ('live', 'cellpost.cpp ps() re-reads it when a live set moves it (prefix WW_CELL_POST); the linear stage keeps its own targets (POSTFX2)'),
     'WW_CELL_DOF_LENS': ('live', 'cellpost.cpp ps() re-reads it when a live set moves it (prefix WW_CELL_DOF); the lens layers are made at the first frame it runs (DOFLENS1)'),
     'WW_CELL_DOF_LENS_RED': ('live', 'cellpost.cpp ps() re-reads it when a live set moves it (prefix WW_CELL_DOF) (DOFLENS1)'),
-    'WW_CELL_DOF_STATE': ('live', 'cellpost.cpp ps() re-reads it when a live set moves it (prefix WW_CELL_DOF): play | menu (DOFLENS1)'),
+    'WW_CELL_DOF_STATE': ('live', 'cellpost.cpp ps() re-reads it when a live set moves it (prefix WW_CELL_DOF): play | menu | pipboy | pipboypa | scope | vats | inventory | inspect | killcam | vatsdialogue; the IMADs of the states are read at the cell load, so a live set takes effect at once (DOFLENS1)'),
+    'WW_CELL_DOF_LENS_NEARTILE_RED': ('live', 'cellpost.cpp ps() re-reads it when a live set moves it (prefix WW_CELL_DOF) (DOFLENS1-NEARTILE)'),
     # lane LIVESET1: cellLiveSections rebuilds the far LOD / the probe markers in place (the document's tail);
     # lane LIVESET4: on/off, TYPE and the stack reds too, while the near cells' stack stays the one they loaded
     'WW_CELL_FARLOD': ('live', 'far section added/cut in place (LIVESET4); a changed near stack owes a reopen, named in the reply'),

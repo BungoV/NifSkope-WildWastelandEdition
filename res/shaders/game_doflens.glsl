@@ -2,7 +2,7 @@
  * and the composites (game_doflens.frag, game_doflensmblur.frag).
  * lz = (near, far - near, far * near, sky sharp): the view distance from the GL window depth as game_dof.frag reads it.
  * lensP = (focus distance S1, <= 0 = the depth at the frame's centre; aperture A in sensor px; focal length f; -),
- * S1 and f in game units. lensQ = (max circle of confusion in px, near on, far on, -).
+ * S1 and f in game units. lensQ = (max circle of confusion in px, near on, far on, near reach from the tile max (gather only)).
  * The circle of confusion (diameter, px) of a point at distance z: c = A f (z - S1) / (z (S1 - f)), > 0 behind the
  * focus (the far layer), < 0 in front (the near layer). The composite needs LENS_FRAME, LENS_FAR, LENS_DEPTH. */
 

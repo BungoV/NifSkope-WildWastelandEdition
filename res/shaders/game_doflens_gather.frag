@@ -7,9 +7,11 @@
  * spreads no wider than the centre's own disk, so a sharp or nearer surface is never blurred by what is behind it.
  * Near (out 1, premultiplied): each tap's colour spread over its disk (area pi rho^2) against the tap's share of the
  * kernel (pi Rk^2 / N); a = the covered share, rgb = its mean colour times a.
- * lensQ.x = the largest circle (px), .y = near on. */
+ * lensQ.x = the largest circle (px), .y = near on, .w = near reach from t1 (the tile max, game_doflens_tile.frag:
+ * the largest near radius whose disk can reach this texel) instead of the fixed largest radius. */
 
 uniform sampler2D t0;
+uniform sampler2D t1;
 uniform vec4 lensQ;
 
 layout( location = 0 ) out vec4 farOut;
@@ -29,7 +31,7 @@ void main()
 	vec4 c0 = texelFetch( t0, q, 0 );
 	float cc = c0.a;
 	float rc = max( cc, 0.0 ) * 0.5;
-	float rn = lensQ.y != 0.0 ? lensQ.x * 0.5 : 0.0;
+	float rn = lensQ.y == 0.0 ? 0.0 : lensQ.w > 0.5 ? texelFetch( t1, q / 8, 0 ).r : lensQ.x * 0.5;
 	float rk = max( rc, rn );
 	if ( rk < 0.5 ) {
 		farOut = vec4( c0.rgb, 1.0 );
