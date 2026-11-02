@@ -2765,7 +2765,7 @@ NifSkope::NifSkope( bool background )
 	ogl = new GLView( nullptr );
 	ogl->setObjectName( "OGL1" );
 	ogl->setNif( nif );
-	wwStartupMark( "widgets: gl view" );
+	wwStartupMark( "widgets: gl view setNif" );	// the construct's sub-stages are the "gl view:" marks
 
 	// Create InspectView
 	/* ********************** */

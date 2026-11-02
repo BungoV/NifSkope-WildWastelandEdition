@@ -3036,6 +3036,7 @@ static void wwCardBakeFinished( NifSkope * skope )
 }
 
 void wwStartupMark( const char * stage );	// main.cpp (lane STARTSPEED1)
+bool wwStartupEager();	// gl/glcontext.cpp (lane STARTSPEED1): red WW_STARTUP_EAGER=1
 
 NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 {
@@ -29700,25 +29701,56 @@ void NifSkope::initDockWidgets()
 		 * from this toolbar button, remembering its size and position. */
 		{
 			wwSceneLoadSettings();
+			// the stored lookdev plugin/weather/hour/ground (pins win), whether or not the Scene window is built
+			wwLookdevLoadSettings();
 			QAction * aScene = new QAction( tlMakeIcon( QStringLiteral( "bulb" ), icoColHdr ), tr( "Scene" ), this );
 			aScene->setObjectName( QStringLiteral( "aSceneWindow" ) );
 			aScene->setCheckable( true );
 			wwStartupMark( "docks: shade menu" );
-			auto * sceneWin = new SceneWindow( this,
-				[this]() {
-					if ( ogl )
+			/* lane STARTSPEED1: the window is built on its first show (about 0.3 s of rows at start);
+			 * red WW_STARTUP_EAGER=1 builds it here as before */
+			auto sceneWin = std::make_shared< QPointer<SceneWindow> >();
+			auto makeScene = [this, aScene, sceneWin]() -> QWidget * {
+				if ( !*sceneWin ) {
+					QElapsedTimer t;
+					t.start();
+					*sceneWin = new SceneWindow( this,
+						[this]() {
+							if ( ogl )
+								ogl->update();
+						},
+						[aScene]( bool shown ) {
+							const QSignalBlocker block( aScene );
+							aScene->setChecked( shown );
+						} );
+					std::fprintf( stderr, "scene window: built %lld ms (%s)\n", (long long) t.elapsed(),
+						wwStartupEager() ? "at start, WW_STARTUP_EAGER=1" : "on first show" );
+				}
+				return sceneWin->data();
+			};
+			wwSceneWindowSetMaker( this, makeScene );
+			if ( wwStartupEager() ) {
+				makeScene();
+			} else {
+				// the cloud scroll (SceneWindow::syncCloudTimer) until the window exists
+				QTimer * clouds = new QTimer( this );
+				clouds->setInterval( 100 );
+				connect( clouds, &QTimer::timeout, this, [this, sceneWin, clouds]() {
+					if ( *sceneWin )
+						clouds->stop();
+					else if ( ogl && wwSceneCloudsAnimate() )
 						ogl->update();
-				},
-				[aScene]( bool shown ) {
-					const QSignalBlocker block( aScene );
-					aScene->setChecked( shown );
 				} );
-			connect( aScene, &QAction::toggled, sceneWin, [sceneWin]( bool on ) {
+				clouds->start();
+			}
+			connect( aScene, &QAction::toggled, this, [sceneWin, makeScene]( bool on ) {
 				if ( on ) {
-					sceneWin->show();
-					sceneWin->raise();
-				} else {
-					sceneWin->hide();
+					if ( QWidget * w = makeScene() ) {
+						w->show();
+						w->raise();
+					}
+				} else if ( *sceneWin ) {
+					( *sceneWin )->hide();
 				}
 			} );
 			if ( ui->mView )

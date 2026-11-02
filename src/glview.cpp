@@ -353,10 +353,13 @@ static void tlRegisterViewportShortcuts()
 		QKeySequence() );
 }
 
+void wwStartupMark( const char * stage );	// main.cpp (lane STARTSPEED1)
+
 GLView::GLView( QWindow * p )
 	: QOpenGLWindow( QOpenGLWindow::NoPartialUpdate, p )
 {
 	tlRegisterViewportShortcuts();
+	wwStartupMark( "gl view: window + shortcuts" );	// lane STARTSPEED1: the GL view's sub-stages
 	QSettings settings;
 	int	aa = settings.value( "Settings/Render/General/Msaa Samples", 2 ).toInt();
 	editDeformedCage = settings.value( "GLView/Edit/DeformedCage", true ).toBool();
@@ -396,6 +399,7 @@ GLView::GLView( QWindow * p )
 	fmt.setSamples( msaa );
 
 	GpuDriven::requestContext( fmt );	// lane GPUDRIVEN1: 4.6 core when the driver makes one (WW_GPUDRIVEN=0: 4.2)
+	wwStartupMark( "gl view: context probe" );
 
 	setFormat( fmt );
 
@@ -416,8 +420,10 @@ GLView::GLView( QWindow * p )
 	lastTime = std::chrono::steady_clock::now();
 
 	textures = new TexCache( this );
+	wwStartupMark( "gl view: texture cache" );
 
 	updateSettings();
+	wwStartupMark( "gl view: settings" );
 	view = cfg.startupDirection;
 	if ( int i = int( view ) - int( ViewTop ); i >= 0 && i <= 5 )
 		Rot = viewRotations[i];
@@ -426,6 +432,7 @@ GLView::GLView( QWindow * p )
 	wwCameraLog( "ctor", Rot, int( view ) );
 
 	scene = new Scene( textures );
+	wwStartupMark( "gl view: scene" );
 	connect( textures, &TexCache::sigRefresh, this, static_cast<void (GLView::*)()>(&GLView::update) );
 	connect( scene, &Scene::sceneUpdated, this, static_cast<void (GLView::*)()>(&GLView::update) );
 
@@ -443,6 +450,7 @@ GLView::GLView( QWindow * p )
 	connect( NifSkope::getOptions(), &SettingsDialog::update3D, this, &GLView::update3D );
 
 	setMinimumSize( QSize( 50, 50 ) );
+	wwStartupMark( "gl view: timers" );
 }
 
 GLView::~GLView()

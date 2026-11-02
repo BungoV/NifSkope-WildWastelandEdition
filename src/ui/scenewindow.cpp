@@ -33,6 +33,7 @@ BSD License - see nifskope.h
 #include <QDoubleSpinBox>
 #include <QFileDialog>
 #include <QFileInfo>
+#include <QHash>
 #include <QLabel>
 #include <QHeaderView>
 #include <QScreen>
@@ -58,8 +59,8 @@ SceneWindow::SceneWindow( QWidget * mainWindow, std::function<void()> repaint, s
 	// the headless backstop keeps a remembered geometry off the primary screen
 	// (NifSkope::wwPlaceHeadlessWindow)
 	setProperty( "wwOwnGeometry", true );
-	// the stored lookdev plugin/weather/hour/ground (pins win), before the rows read them
-	wwLookdevLoadSettings();
+	// the stored lookdev plugin/weather/hour/ground are read at start by the main window (lane STARTSPEED1),
+	// before this window is built, so a late build reads them and never reloads them
 
 	auto * page = new QVBoxLayout( this );
 	page->setContentsMargins( 6, 6, 6, 6 );
@@ -700,4 +701,31 @@ void SceneWindow::resizeEvent( QResizeEvent * e )
 	QWidget::resizeEvent( e );
 	if ( isVisible() && m_saveTimer )
 		m_saveTimer->start();
+}
+
+static QHash< QObject *, std::function<QWidget *()> > & wwSceneMakers()
+{
+	static QHash< QObject *, std::function<QWidget *()> > m;
+	return m;
+}
+
+void wwSceneWindowSetMaker( QObject * owner, std::function<QWidget *()> make )
+{
+	if ( !owner )
+		return;
+	const bool fresh = !wwSceneMakers().contains( owner );
+	wwSceneMakers().insert( owner, std::move( make ) );
+	if ( fresh )
+		QObject::connect( owner, &QObject::destroyed, [owner]() { wwSceneMakers().remove( owner ); } );
+}
+
+QWidget * wwSceneWindowEnsure( QObject * owner )
+{
+	const auto it = wwSceneMakers().constFind( owner );
+	return it != wwSceneMakers().constEnd() && *it ? ( *it )() : nullptr;
+}
+
+bool wwSceneCloudsAnimate()
+{
+	return wwSceneMode() == WwSceneLookdev && wwLookdevClouds() && wwWorldClockLive();
 }
