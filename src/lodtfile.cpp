@@ -1487,10 +1487,13 @@ static bool lodtBuildWater( const WaterInput & in, quint64 baseOffset,
 	const bool floorRed = waterSpeedFloorRed();
 	qint64 riverSmoothed = 0, riverLifted = 0, riverDead = 0;
 	/* lane FARLOOK1101 (FARWATER5 L3): WW_LODL_FLOW_LOG=1 writes the speed nibble as a half-octave log of the body's
-	 * median (flow encoding 1, lodtflowcode.h). Off (the default) = the linear nibble, byte for byte the old file. */
-	const bool flowLog = wwEnv( "WW_LODL_FLOW_LOG" ).trimmed() == "1";
-	out.flowEncoding = flowLog ? kLodlFlowEncLog : kLodlFlowEncLinear;
-	qint64 riverSat = 0;
+	 * median (flow encoding 1, lodtflowcode.h). Off (the default) = the linear nibble, byte for byte the old file.
+	 * lane FARWATER7: =2 writes the three-quarter-octave log (flow encoding 2: 0.026 .. 38.1 x the median; encoding 1
+	 * stops at 11.3 x and clipped 4.48 % of the moving river texels). =1 stays encoding 1 (the red of the wider range). */
+	const QString flowLogKey = wwEnv( "WW_LODL_FLOW_LOG" ).trimmed();
+	const bool flowLog = flowLogKey == "1" || flowLogKey == "2";
+	out.flowEncoding = flowLogKey == "2" ? kLodlFlowEncLog34 : flowLog ? kLodlFlowEncLog : kLodlFlowEncLinear;
+	qint64 riverSat = 0, riverOver = 0;
 	if ( in.opt.flowField ) {
 		QElapsedTimer riverClock;
 		riverClock.start();
@@ -1737,8 +1740,9 @@ static bool lodtBuildWater( const WaterInput & in, quint64 baseOffset,
 					a += kTwoPi;
 				const int dir = int( a / kTwoPi * 256.0 + 0.5 ) & 0xFF;
 				const double s = std::sqrt( vx * vx + vy * vy );
-				int spd = flowLog ? lodtFlowSpeedCode( kLodlFlowEncLog, s / median )
+				int spd = flowLog ? lodtFlowSpeedCode( out.flowEncoding, s / median )
 					: qBound( 0, int( std::floor( 8.0 * s / median + 0.5 ) ), 15 );
+				riverOver += s > 0.0 && lodtFlowSpeedCodeExact( out.flowEncoding, s / median ) > 15.5;
 				/* Lane FARWATER4 (L4): water that moves never reads 0 (watermark.h
 				 * waterSpeedFloor; red WW_WATER_SPEED_FLOOR_RED=round) */
 				const int spd0 = spd;
@@ -2343,8 +2347,11 @@ static bool lodtBuildWater( const WaterInput & in, quint64 baseOffset,
 				.arg( riverDead ).arg( riverLifted )
 				.arg( floorRed ? QStringLiteral( " (WW_WATER_SPEED_FLOOR_RED=round)" ) : QString() )
 				+ QString( "; speed 15 on %1 (%2 nibble, flow encoding %3)" ).arg( riverSat )
-				.arg( flowLog ? QStringLiteral( "half-octave log, WW_LODL_FLOW_LOG" ) : QStringLiteral( "linear" ) )
+				.arg( out.flowEncoding == kLodlFlowEncLog34 ? QStringLiteral( "three-quarter-octave log, WW_LODL_FLOW_LOG=2" )
+					: flowLog ? QStringLiteral( "half-octave log, WW_LODL_FLOW_LOG" ) : QStringLiteral( "linear" ) )
 				.arg( out.flowEncoding )
+				// lane FARWATER7: texels whose speed is past the top code's half step (the nibble cannot carry it)
+				+ QString( "; over the code range on %1" ).arg( riverOver )
 			: QStringLiteral( "  flow field: off (--water-flow-constant), every body carries its constant word" ) );
 		L << QString();
 		L << QStringLiteral( "== THE 20 BIGGEST BODIES ==" );
