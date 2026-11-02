@@ -7,6 +7,10 @@
  *       the Edits panel's save without a window (src/celledit.h): resolve each EditorID in the cell's load order,
  *       write the plugin, write the reopen .wwcell, read the cell back through EsmWorld on the NEW load order and
  *       print each item's ghost line (gate 5), its saved form and the read-back pose.
+ *   edit <cell.wwcell> <out.esp> [--append] [--full] [--specdir <dir>] <ref hex> [move x y z] [turn <yaw deg>] [disable] ...
+ *       ESPWRITE3: override references already in an interior cell (the winner's record, DATA / 0x800 changed), save,
+ *       read back on the new load order: each changed ref once, won by the new plugin, at the new pose, and every
+ *       other ref of the cell unchanged. Reds WW_ESPWRITE_RED=editkeep | editflag.
  */
 
 #include "celledit.h"
@@ -151,6 +155,165 @@ int cmdPlace( const QStringList & a )
 	return bad ? 1 : 0;
 }
 
+// ESPWRITE3: the refs of an interior cell through EsmWorld
+bool interiorRefs( const QString & plugins, const QString & cell, EsmWorld & w, QVector<EsmRefr> & refs, QString * e )
+{
+	if ( !w.loadInterior( plugins, cell, e ) )
+		return false;
+	refs = w.interiorRefrs();
+	return true;
+}
+
+const EsmRefr * refOf( const QVector<EsmRefr> & refs, quint32 form, int * count = nullptr )
+{
+	const EsmRefr * hit = nullptr;
+	int n = 0;
+	for ( const EsmRefr & r : refs )
+		if ( r.formID == form ) {
+			hit = &r;
+			n++;
+		}
+	if ( count )
+		*count = n;
+	return hit;
+}
+
+int cmdEdit( const QStringList & a )
+{
+	if ( a.size() < 3 ) {
+		std::printf( "espwrite edit: needs <cell.wwcell> <out.esp> [--append] [--full] [--specdir D] <ref hex> "
+			"[move x y z] [turn yawDeg] [disable] ...\n" );
+		return 2;
+	}
+	CellSceneSpec spec;
+	QString e;
+	if ( !cellSpecFromFile( a[0], spec, &e ) || !spec.interior ) {
+		std::printf( "espwrite edit: %s: %s\n", qPrintable( a[0] ), e.isEmpty() ? "not an interior cell" : qPrintable( e ) );
+		return 2;
+	}
+	QVector<EsmRefr> refs0;
+	{	// closed before the save: an open EsmWorld maps the plugins, and "Add to existing" rewrites one of them
+		EsmWorld before;
+		if ( !interiorRefs( spec.plugins, spec.interiorCell, before, refs0, &e ) ) {
+			std::printf( "espwrite edit: %s\n", qPrintable( e ) );
+			return 2;
+		}
+	}
+	CellEditTarget target;
+	target.path = a[1];
+	QString specDir = QFileInfo( a[1] ).absolutePath();
+	QVector<CellEditChange> changes;
+	for ( int i = 2; i < a.size(); i++ ) {
+		const QString t = a[i];
+		auto need = [&]( int n ) {
+			if ( changes.isEmpty() || i + n >= a.size() ) {
+				std::printf( "espwrite edit: %s needs a ref before it and %d number(s) after it\n", qPrintable( t ), n );
+				return false;
+			}
+			return true;
+		};
+		if ( t == QLatin1String( "--append" ) )
+			target.append = true;
+		else if ( t == QLatin1String( "--full" ) )
+			target.light = false;
+		else if ( t == QLatin1String( "--specdir" ) && i + 1 < a.size() )
+			specDir = a[++i];
+		else if ( t == QLatin1String( "move" ) ) {
+			if ( !need( 3 ) )
+				return 2;
+			changes.last().move = true;
+			for ( int k = 0; k < 3; k++ )
+				changes.last().pos[k] = a[++i].toFloat();
+		} else if ( t == QLatin1String( "turn" ) ) {
+			if ( !need( 1 ) )
+				return 2;
+			changes.last().turn = true;
+			changes.last().rot[2] = a[++i].toFloat() * 3.14159265358979323846f / 180.0f;
+		} else if ( t == QLatin1String( "disable" ) ) {
+			if ( changes.isEmpty() ) {
+				std::printf( "espwrite edit: disable needs a ref before it\n" );
+				return 2;
+			}
+			changes.last().disable = true;
+		} else {
+			bool ok = false;
+			CellEditChange c;
+			c.ref = t.toUInt( &ok, 16 );
+			const EsmRefr * r = ok ? refOf( refs0, c.ref ) : nullptr;
+			if ( !r ) {
+				std::printf( "espwrite edit: REFUSED %s is not a reference of %s; its first refs:\n", qPrintable( t ),
+					qPrintable( spec.interiorCell ) );
+				for ( int k = 0; k < std::min<int>( 12, refs0.size() ); k++ )
+					std::printf( "  %08X base %08X pos %.3f %.3f %.3f disabled %d\n", refs0[k].formID, refs0[k].base,
+						refs0[k].pos[0], refs0[k].pos[1], refs0[k].pos[2], int( refs0[k].initiallyDisabled ) );
+				return 1;
+			}
+			for ( int k = 0; k < 3; k++ ) {
+				c.pos[k] = r->pos[k];
+				c.rot[k] = r->rot[k];
+			}
+			changes.append( c );
+		}
+	}
+	QVector<CellEditItem> items;
+	QString reopen, line;
+	if ( !cellEditSave( spec, items, changes, target, specDir, &reopen, &line, &e ) ) {
+		std::printf( "espwrite edit: REFUSED %s\n", qPrintable( e ) );
+		return 1;
+	}
+	std::printf( "saved %s\n", qPrintable( line ) );
+	std::printf( "reopen %s\n", qPrintable( reopen ) );
+
+	CellSceneSpec back;
+	EsmWorld w;
+	QVector<EsmRefr> refs1;
+	if ( !cellSpecFromFile( reopen, back, &e ) || !interiorRefs( back.plugins, back.interiorCell, w, refs1, &e ) ) {
+		std::printf( "readback FAIL %s\n", qPrintable( e ) );
+		return 1;
+	}
+	const QString tname = QFileInfo( target.path ).fileName();
+	int ok = 0, bad = 0;
+	QSet<quint32> changedRefs;
+	for ( const CellEditChange & c : std::as_const( changes ) ) {
+		changedRefs.insert( c.ref );
+		int n = 0;
+		const EsmRefr * r0 = refOf( refs0, c.ref );
+		const EsmRefr * r = refOf( refs1, c.ref, &n );
+		if ( !r ) {
+			bad++;
+			std::printf( "readback MISSING %08X\n", c.ref );
+			continue;
+		}
+		float dp = 0.0f, dr = 0.0f;
+		for ( int k = 0; k < 3; k++ ) {
+			dp = std::max( dp, std::fabs( r->pos[k] - c.pos[k] ) );
+			dr = std::max( dr, std::fabs( r->rot[k] - c.rot[k] ) );
+		}
+		const QString wn = w.recordPlugin( c.ref );
+		const bool wins = wn.compare( tname, Qt::CaseInsensitive ) == 0;
+		const bool dis = r->initiallyDisabled == ( c.disable || r0->initiallyDisabled );
+		const bool good = n == 1 && wins && dp < 0.01f && dr < 1.0e-6f && dis && r->base == r0->base;
+		( good ? ok : bad )++;
+		std::printf( "readback %s ref %08X copies %d plugin %s pos %.3f %.3f %.3f rot %.6f %.6f %.6f dpos %.3g drot %.3g "
+			"disabled %d (was %d) persistent %d base %08X\n", good ? "ok" : "MISMATCH", c.ref, n, qPrintable( wn ),
+			r->pos[0], r->pos[1], r->pos[2], r->rot[0], r->rot[1], r->rot[2], dp, dr, int( r->initiallyDisabled ),
+			int( r0->initiallyDisabled ), int( c.persistent ), r->base );
+	}
+	// nothing else in the cell changed, and no ref was added
+	int others = 0;
+	for ( const EsmRefr & r0 : std::as_const( refs0 ) ) {
+		if ( changedRefs.contains( r0.formID ) )
+			continue;
+		const EsmRefr * r = refOf( refs1, r0.formID );
+		if ( !r || r->initiallyDisabled != r0.initiallyDisabled || r->pos[0] != r0.pos[0] || r->pos[1] != r0.pos[1]
+			|| r->pos[2] != r0.pos[2] || r->rot[2] != r0.rot[2] )
+			others++;
+	}
+	std::printf( "readback summary %d ok %d bad of %lld; refs %lld -> %lld; others changed %d\n", ok, bad,
+		(long long)changes.size(), (long long)refs0.size(), (long long)refs1.size(), others );
+	return ( bad || others || refs0.size() != refs1.size() ) ? 1 : 0;
+}
+
 } // namespace
 
 int cmdEspWrite( const QStringList & args )
@@ -168,8 +331,10 @@ int cmdEspWrite( const QStringList & args )
 		rc = espwriteRoundtripMain( a );
 	} else if ( mode == QLatin1String( "place" ) ) {
 		rc = cmdPlace( args.mid( 1 ) );
+	} else if ( mode == QLatin1String( "edit" ) ) {
+		rc = cmdEdit( args.mid( 1 ) );
 	} else {
-		std::printf( "espwrite: build|yaw|reemit|roundtrip|place (src/io/espwritecli.cpp)\n" );
+		std::printf( "espwrite: build|yaw|reemit|roundtrip|place|edit (src/io/espwritecli.cpp)\n" );
 	}
 	std::fflush( stdout );
 	return rc;

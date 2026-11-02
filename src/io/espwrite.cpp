@@ -230,6 +230,45 @@ QByteArray joinSubs( const QVector<Sub> & subs )
 	return b;
 }
 
+bool changeRef( const QByteArray & rec, const float * pos, const float * rot, bool disable, QByteArray & out,
+	QString * error )
+{
+	const QByteArray sig = recordSig( rec );
+	if ( sig != "REFR" && sig != "ACHR" ) {
+		fail( error, QStringLiteral( "%1 is a %2, not a REFR / ACHR" ).arg( hex8( recordForm( rec ) ), QString::fromLatin1( sig ) ) );
+		return false;
+	}
+	QByteArray payload;
+	QVector<Sub> subs;
+	if ( !recordPayload( rec, payload, error ) || !splitSubs( payload, subs, error ) )
+		return false;
+	int di = -1;
+	for ( int i = 0; i < subs.size(); i++ )
+		if ( subs[i].tag == "DATA" )
+			di = i;
+	if ( di < 0 || subs[di].data.size() != 24 ) {
+		fail( error, QStringLiteral( "ref %1 has no 24-byte DATA" ).arg( hex8( recordForm( rec ) ) ) );
+		return false;
+	}
+	const QString r = red();
+	if ( r != QLatin1String( "editkeep" ) ) {
+		QByteArray d;
+		for ( int k = 0; k < 6; k++ ) {
+			const float * src = k < 3 ? pos : rot;
+			if ( src )
+				putF32( d, src[k % 3] );
+			else
+				d.append( subs[di].data.mid( 4 * k, 4 ) );
+		}
+		subs[di].data = d;
+	}
+	quint32 fl = recordFlags( rec ) & ~kRecCompressed;
+	if ( disable && r != QLatin1String( "editflag" ) )
+		fl |= kRefDisabled;
+	out = record( sig.constData(), fl, recordForm( rec ), joinSubs( subs ), rec.mid( 16, 8 ) );
+	return true;
+}
+
 // ------------------------------------------------------------------ label rules
 quint32 interiorBlockLabel( quint32 cellForm )
 {

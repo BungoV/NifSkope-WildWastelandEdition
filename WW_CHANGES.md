@@ -1,3 +1,14 @@
+## ESPWRITE3 (2026-11-02): move, turn or disable a reference already in an interior cell
+
+- `NifSkope -no-gui espwrite edit <cell.wwcell> <out.esp> [--append] <ref> [move x y z] [turn deg] [disable] ...`
+  writes an override of each ref's winning record: DATA or the 0x800 flag changed, every other subrecord kept, the
+  record written uncompressed. Temporary refs are listed in ONAM. With --append, a ref the file already holds (its
+  own, or an earlier override) is changed in place. It never truly deletes anything.
+- It reads the cell back on the new load order. Each changed ref must appear once, won by the new plugin, at its new
+  pose. Every other ref in the cell must be unchanged.
+- Interior cells only; an exterior cell is refused by name. The cell view has no buttons for it yet.
+- Reds: WW_ESPWRITE_RED=editkeep leaves DATA unchanged, editflag skips 0x800.
+
 ## ESPWRITE2 (2026-11-02): place a reference in the cell view and save it as a plugin
 
 The Cell panel gains an "Edits" section (switch WW_CELL_EDIT=0 hides it). Nothing changes until you place something.

@@ -598,6 +598,13 @@ bool readCarry( const QString & path, Carry & c, QString * error )
 bool cellEditMakePlan( const CellSceneSpec & spec, QVector<CellEditItem> & items, const CellEditTarget & target,
 	EspWrite::Plan & plan, QString * summary, QString * error )
 {
+	QVector<CellEditChange> none;
+	return cellEditMakePlan( spec, items, none, target, plan, summary, error );
+}
+
+bool cellEditMakePlan( const CellSceneSpec & spec, QVector<CellEditItem> & items, QVector<CellEditChange> & changes,
+	const CellEditTarget & target, EspWrite::Plan & plan, QString * summary, QString * error )
+{
 	plan = Plan();
 	if ( target.path.trimmed().isEmpty() )
 		return fail( error, QStringLiteral( "no plugin file named" ) );
@@ -605,8 +612,10 @@ bool cellEditMakePlan( const CellSceneSpec & spec, QVector<CellEditItem> & items
 	if ( !tname.endsWith( QLatin1String( ".esp" ), Qt::CaseInsensitive )
 		&& !tname.endsWith( QLatin1String( ".esl" ), Qt::CaseInsensitive ) )
 		return fail( error, QStringLiteral( "%1: the plugin must be an .esp or an .esl" ).arg( tname ) );
-	if ( items.isEmpty() )
+	if ( items.isEmpty() && changes.isEmpty() )
 		return fail( error, QStringLiteral( "nothing to save: place a reference first" ) );
+	if ( !changes.isEmpty() && !spec.interior )
+		return fail( error, QStringLiteral( "changing existing references works in interior cells only (ESPWRITE3)" ) );
 	if ( !spec.valid && spec.plugins.isEmpty() )
 		return fail( error, QStringLiteral( "no cell open" ) );
 	const QStringList order = orderOf( spec.plugins );
@@ -704,6 +713,25 @@ bool cellEditMakePlan( const CellSceneSpec & spec, QVector<CellEditItem> & items
 
 	// the new references, one CellEdit per cell (build() merges them with the carried ones by form)
 	QHash<quint32, int> at;
+	auto interiorEdit = [&]( quint32 cellLo, int & ci ) -> bool {
+		ci = at.value( cellLo, -1 );
+		if ( ci >= 0 )
+			return true;
+		CellEdit ce;
+		QString wn;
+		if ( !copyOf( cellLo, ce.cell, &wn ) )
+			return false;
+		if ( ce.cell.raw.isEmpty() ) {	// the target wins: its carried copy
+			quint32 ff = 0;
+			if ( !fileForm( esm, order, cellLo, tname, carry.masters, ff, nullptr ) || !carry.interiorAt.contains( ff ) )
+				return fail( error, QStringLiteral( "%1 wins cell %2 but does not hold it" ).arg( tname, hex8( cellLo ) ) );
+			ce.cell = carry.cells[carry.interiorAt.value( ff )].cell;
+		}
+		ci = plan.cells.size();
+		at.insert( cellLo, ci );
+		plan.cells.append( ce );
+		return true;
+	};
 	for ( CellEditItem & it : items ) {
 		QString bp;
 		const unsigned int fi = esm->getFormIDFile( it.base );
@@ -726,19 +754,12 @@ bool cellEditMakePlan( const CellSceneSpec & spec, QVector<CellEditItem> & items
 				return fail( error, QStringLiteral( "no cell at %1,%2 in %3" ).arg( cx ).arg( cy ).arg( spec.world ) );
 		}
 		int ci = at.value( cellLo, -1 );
-		if ( ci < 0 ) {
+		if ( spec.interior ) {
+			if ( !interiorEdit( cellLo, ci ) )
+				return false;
+		} else if ( ci < 0 ) {
 			CellEdit ce;
-			if ( spec.interior ) {
-				QString wn;
-				if ( !copyOf( cellLo, ce.cell, &wn ) )
-					return false;
-				if ( ce.cell.raw.isEmpty() ) {	// the target wins: its carried copy
-					quint32 ff = 0;
-					if ( !fileForm( esm, order, cellLo, tname, carry.masters, ff, nullptr ) || !carry.interiorAt.contains( ff ) )
-						return fail( error, QStringLiteral( "%1 wins cell %2 but does not hold it" ).arg( tname, hex8( cellLo ) ) );
-					ce.cell = carry.cells[carry.interiorAt.value( ff )].cell;
-				}
-			} else {
+			{
 				const quint32 wsLo = w.worldspace();
 				QString wn;
 				if ( !copyOf( wsLo, ce.worldRec, &wn ) )
@@ -802,6 +823,78 @@ bool cellEditMakePlan( const CellSceneSpec & spec, QVector<CellEditItem> & items
 		a.persistent = it.persistent;
 		plan.cells[ci].adds.append( a );
 	}
+
+	// ESPWRITE3: changes to references already in the open (interior) cell, as overrides of their winners
+	QSet<quint32> changed;
+	for ( CellEditChange & ch : changes ) {
+		if ( changed.contains( ch.ref ) )
+			return fail( error, QStringLiteral( "reference %1 is changed twice" ).arg( hex8( ch.ref ) ) );
+		changed.insert( ch.ref );
+		const float * np = ch.move ? ch.pos : nullptr;
+		const float * nr = ch.turn ? ch.rot : nullptr;
+		const QString wn = w.recordPlugin( ch.ref );
+		if ( wn.isEmpty() )
+			return fail( error, QStringLiteral( "reference %1 is not in the load order" ).arg( hex8( ch.ref ) ) );
+		quint32 ffT = 0;
+		if ( target.append && fileForm( esm, order, ch.ref, tname, carry.masters, ffT, nullptr ) ) {
+			// the file being extended already holds this ref (its own, or an override): change that copy in place
+			const quint32 ff = ffT;
+			bool found = false;
+			for ( CellEdit & c : plan.cells ) {
+				for ( RefAdd & a : c.adds )
+					if ( a.keepForm == ff ) {
+						for ( int k = 0; k < 3; k++ ) {
+							if ( np )
+								a.pos[k] = np[k];
+							if ( nr )
+								a.rot[k] = nr[k];
+						}
+						if ( ch.disable && red() != QLatin1String( "editflag" ) )
+							a.disabled = true;
+						ch.persistent = a.persistent;
+						found = true;
+					}
+				for ( RefOverride & o : c.overrides )
+					if ( recordForm( o.rec.raw ) == ff ) {
+						QByteArray raw;
+						if ( !changeRef( o.rec.raw, np, nr, ch.disable, raw, error ) )
+							return false;
+						o.rec.raw = raw;
+						ch.persistent = o.persistent;
+						found = true;
+					}
+			}
+			if ( found )
+				continue;
+		}
+		if ( wn.compare( tname, Qt::CaseInsensitive ) == 0 )
+			return fail( error, QStringLiteral( "%1 wins reference %2 but does not hold it" ).arg( tname, hex8( ch.ref ) ) );
+		PluginIndex * p = src.get( wn, error );
+		if ( !p )
+			return false;
+		quint32 ff = 0, cellFf = 0;
+		if ( !fileForm( esm, order, ch.ref, wn, p->masters(), ff, nullptr ) || !p->has( ff ) )
+			return fail( error, QStringLiteral( "reference %1 is not in its winner %2" ).arg( hex8( ch.ref ), wn ) );
+		const QVector<PluginIndex::Group> chain = p->chain( ff );
+		if ( chain.isEmpty() || ( chain[0].type != 8 && chain[0].type != 9 )
+			|| !fileForm( esm, order, openCell, wn, p->masters(), cellFf, nullptr ) || chain[0].label != cellFf )
+			return fail( error, QStringLiteral( "reference %1 is not in the open cell %2" ).arg( hex8( ch.ref ), spec.interiorCell ) );
+		RefOverride o;
+		o.rec.raw = p->recordBytes( ff );
+		o.rec.source = wn;
+		o.rec.sourceMasters = p->masters();
+		o.rec.sourceLocalized = ( p->tes4Flags() & kTes4Localized ) != 0;
+		QByteArray raw;
+		if ( !changeRef( o.rec.raw, np, nr, ch.disable, raw, error ) )
+			return false;
+		o.rec.raw = raw;
+		o.persistent = chain[0].type == 8;
+		ch.persistent = o.persistent;
+		int ci = -1;
+		if ( !interiorEdit( openCell, ci ) )
+			return false;
+		plan.cells[ci].overrides.append( o );
+	}
 	if ( nm > 0xFE )
 		return fail( error, QStringLiteral( "too many masters" ) );
 	if ( summary ) {
@@ -813,6 +906,8 @@ bool cellEditMakePlan( const CellSceneSpec & spec, QVector<CellEditItem> & items
 			: QStringLiteral( "Writes %1 reference(s) in %2 to a new %3 %4; masters %5" )
 				.arg( items.size() ).arg( where, plan.light ? QStringLiteral( "light" ) : QStringLiteral( "full" ), tname,
 					plan.masters.join( QStringLiteral( ", " ) ) );
+		if ( !changes.isEmpty() )
+			*summary += QStringLiteral( "; changes %1 existing reference(s)" ).arg( changes.size() );
 	}
 	return true;
 }
@@ -832,9 +927,16 @@ QString cellEditReopenText( const CellSceneSpec & spec, const QString & target )
 bool cellEditSave( const CellSceneSpec & spec, QVector<CellEditItem> & items, const CellEditTarget & target,
 	const QString & specDir, QString * reopenPath, QString * line, QString * error )
 {
+	QVector<CellEditChange> none;
+	return cellEditSave( spec, items, none, target, specDir, reopenPath, line, error );
+}
+
+bool cellEditSave( const CellSceneSpec & spec, QVector<CellEditItem> & items, QVector<CellEditChange> & changes,
+	const CellEditTarget & target, const QString & specDir, QString * reopenPath, QString * line, QString * error )
+{
 	Plan plan;
 	QString summary;
-	if ( !cellEditMakePlan( spec, items, target, plan, &summary, error ) )
+	if ( !cellEditMakePlan( spec, items, changes, target, plan, &summary, error ) )
 		return false;
 	Report rep;
 	if ( !write( target.path, plan, &rep, error ) )

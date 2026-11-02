@@ -21,7 +21,7 @@
  *
  * Red WW_ESPWRITE_RED (read on every call, live) = xy | temp | count | onam | yaw | renumber: the old/wrong rule each gate
  * must refuse (exterior labels x first; persistent refs into group 9; HEDR count + 1; ONAM left out; yaw sign
- * flipped; ESPWRITE2: append renumbers the kept refs).
+ * flipped; ESPWRITE2: append renumbers the kept refs; ESPWRITE3: editkeep | editflag, see changeRef).
  */
 
 #include <QByteArray>
@@ -74,6 +74,11 @@ quint32 recordForm( const QByteArray & rec );
 QByteArray recordSig( const QByteArray & rec );
 //! A copy of a raw record with header flag bits set / cleared (the payload is untouched, compressed or not).
 QByteArray withFlags( const QByteArray & rec, quint32 set, quint32 clear = 0 );
+/*! ESPWRITE3: an existing REFR / ACHR changed for an override. The payload is read decompressed and written plain;
+ *  DATA takes `pos` / `rot` (radians) when given (nullptr keeps that half); `disable` sets 0x800; every other
+ *  subrecord, the form id and the 8-byte header tail are kept. Reds: editkeep (DATA unchanged), editflag (no 0x800). */
+bool changeRef( const QByteArray & rec, const float * pos, const float * rot, bool disable, QByteArray & out,
+	QString * error );
 
 // ------------------------------------------------------------------ label rules
 quint32 interiorBlockLabel( quint32 cellForm );

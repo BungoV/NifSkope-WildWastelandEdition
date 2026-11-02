@@ -82,6 +82,22 @@ bool cellEditMakePlan( const CellSceneSpec & spec, QVector<CellEditItem> & items
  *  openCellSpecDir()) and return it in `reopenPath`. `line` = the status line. */
 bool cellEditSave( const CellSceneSpec & spec, QVector<CellEditItem> & items, const CellEditTarget & target,
 	const QString & specDir, QString * reopenPath, QString * line, QString * error );
+/*! ESPWRITE3: a change to a reference already in the open cell (an override of its winning record). Interior cells
+ *  only; an exterior cell is refused by name. `ref` is the LOAD-ORDER id. */
+struct CellEditChange
+{
+	quint32 ref = 0;
+	bool move = false;          //!< pos replaces DATA's position
+	float pos[3] = { 0, 0, 0 };
+	bool turn = false;          //!< rot replaces DATA's rotation (radians)
+	float rot[3] = { 0, 0, 0 };
+	bool disable = false;       //!< 0x800 (never a true delete)
+	bool persistent = false;    //!< filled by the plan: the group its original sits in
+};
+bool cellEditMakePlan( const CellSceneSpec & spec, QVector<CellEditItem> & items, QVector<CellEditChange> & changes,
+	const CellEditTarget & target, EspWrite::Plan & plan, QString * summary, QString * error );
+bool cellEditSave( const CellSceneSpec & spec, QVector<CellEditItem> & items, QVector<CellEditChange> & changes,
+	const CellEditTarget & target, const QString & specDir, QString * reopenPath, QString * line, QString * error );
 //! The .wwcell text of `spec` with `target` added to its load order (when it is not in it).
 QString cellEditReopenText( const CellSceneSpec & spec, const QString & target );
 
