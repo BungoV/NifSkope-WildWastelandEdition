@@ -58,7 +58,7 @@ GAME="${PBR_CSM1_GAME:-/x/Programs/Steam/steamapps/common/Fallout 4/Data}"
 PBRDATA="$ROOT/tests/fixtures/pbr_r2a_data"
 CUBE="$DATA/Meshes/Architecture/Quarry/QryCube01.nif"
 DUCT="$PBRDATA/Meshes/WWPbrTest02/studio.nif"
-ARM="$ROOT/release"
+ARM="${PBR_CSM1_ARM:-$ROOT/release}"  # SKYCLOUD1102: a built exe in another tree (this tree's spells, its fixtures)
 OLD="${PBR_CSM1_OLD:-$ROOT/release/before_csm1}"
 PORT="${PBR_CSM1_PORT:-43271}"
 SCOPE=pbrcsm1gates
@@ -72,6 +72,8 @@ case "$OUT" in /[a-z]/*) ;; *) echo "REFUSED: --out must resolve to a drive path
 [ -f "$CUBE" ] || { echo "REFUSED: no known-answer caster $CUBE"; exit 2; }
 # SKYCLOUD1101: only the duct parts need the duct fixture (it reads the unpacked Data's duct mesh + texture)
 if [ -z "$ONLY" ] || [[ "$ONLY" =~ ,(place|off|live|pics), ]]; then
+	# SKYCLOUD1102: the fixtures read the duct from the same data folder as the cube (no unpacked Data here)
+	[ -n "${PBR_CSM1_DATA:-}" ] && export PBR_R1_DATA="$(winpath "$DATA")"
 	python "$HERE/pbr_r2a_fixtures.py" > /dev/null || exit 2
 fi
 
