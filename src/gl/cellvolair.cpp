@@ -98,6 +98,9 @@ struct VaState
 	// lane FIX1101A (bungo 11-01, fog not shadowed): red WW_CELL_AIR_RED=envhue = the env share (sky, GI, ambient) painted
 	// with the fog-sun glare hue too, as before (cell_airmed.glsl airEnvColourEnv); shipped: the glare hue on the sun's share only
 	bool envHue = false;
+	// lane FARCITYWASH1 (bungo 11-02, far city washed out): red WW_CELL_AIR_RED=veilphys = the sky-lit share of the air at
+	// its physical level, as before; shipped: brought down to the records' fog colour where brighter (cell_volair.frag airVeilK)
+	bool veilPhys = false;
 	/* lane FOGLEAK1 (fog lit where no light reaches; only under the loader's WW_CELL_FOGLEAK, cell_volair.frag
 	 * WW_AIR_LEAK): reds WW_CELL_AIR_RED= 1 dalcenv (the env share the flat weather ambient), 2 nosungate (the sun past
 	 * the cascades unshadowed), 4 lightleak (unshadowed lights / the pixel ReSTIR ratio in the air), 8 nofartailshadow
@@ -143,6 +146,7 @@ VaState & vs()
 			s.sphereTop = d.sphereTop;
 			s.sunColumn = d.sunColumn;
 			s.envHue = d.envHue;
+			s.veilPhys = d.veilPhys;
 			s.leakRed = d.leakRed;
 			s.askRed = d.askRed;
 			s.sunPcf = d.sunPcf;
@@ -164,6 +168,7 @@ VaState & vs()
 			s.sphereTop = s.sphereTop || r == "spheretop";
 			s.sunColumn = s.sunColumn || r == "suncolumn";	// lane FIX1101A
 			s.envHue = s.envHue || r == "envhue";	// lane FIX1101A
+			s.veilPhys = s.veilPhys || r == "veilphys";	// lane FARCITYWASH1
 			s.leakRed |= r == "dalcenv" ? 1 : r == "nosungate" ? 2 : r == "lightleak" ? 4 : r == "nofartailshadow" ? 8
 				: r == "nointsungate" ? 16 : 0;	// lane FOGLEAK1, INTGI1
 			s.askRed = s.askRed || r == "ask";
@@ -1756,6 +1761,7 @@ static void vaPassInner( Scene * scene, bool run )
 	prog->uni4f( "airGround", FloatVector4( G.zg, G.invHg, 0.0f, 0.0f ) );
 	prog->uni1b( "airSunLayer", !s.sunColumn );	// lane FIX1101A: the sun dimmed by the ground layer only (cell_airmed.glsl airTupSun)
 	prog->uni1b( "airEnvFogHue", !s.envHue );	// lane FIX1101A: the env share without the sun glare hue (airEnvColourEnv)
+	prog->uni1b( "volVeil", !s.veilPhys );	// lane FARCITYWASH1: the sky-lit share at most the records' fog (airVeilK)
 	if ( !( s.red & 65536 ) ) {	// lane FIX1101A (moon): the medium the sky's disc gain reads (none under the red nosky)
 		VaPub & pub = vaPub();
 		const float m4[4] = { M.sigma0, M.zb, M.invH, zTop }, l4[4] = { G.w, G.zn, G.invHn, G.s };
@@ -2400,6 +2406,7 @@ static void vaPassInner( Scene * scene, bool run )
 		+ ( dr.on ? QStringLiteral( " drift=" ) + dr.note : QString() ) + QStringLiteral( " sungate=" ) + sunGateNote
 		+ QStringLiteral( " rainfog=" ) + g.rfNote
 		+ QStringLiteral( " fogleak=%1(red=%2)" ).arg( wwFogLeakShaderDefine() ? "on" : "off" ).arg( s.leakRed )	// lane FOGLEAK1
+		+ QStringLiteral( " veil=%1" ).arg( s.veilPhys ? "phys" : "record" )	// lane FARCITYWASH1
 		// lane PERFFIX3: the grid preset, the integrated volume's format, the sun's read in the air, the uniform reads
 		// (from the mirror / asked / mirror stale under WW_SETUP_MEMO_CHECK=1) and the entry state (noted / asked, stale)
 		+ QStringLiteral( " grid=%1 vol=%2 sunread=%3 reads=%4/%5/%6 state=%7%8" ).arg( s.grid ).arg( g.half ? "16f" : "32f" )
