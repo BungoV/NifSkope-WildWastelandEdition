@@ -1,3 +1,15 @@
+## RTREFL1 (2026-11-02, landed in LAND6): ray-traced water reflection hits (switch, off by default)
+- `WW_CELL_RTREFL=1` at the RT quality Ultra (and the ray-traced GI on): after the screen-space reflection pass,
+  rtddgiReflPass traces the water's ray target on the GI volume's BVH (src/rtddgi/refl.comp, refl_vk.inc) and hands
+  the half-size hits to fo4_water.frag as a texture buffer. Under the loader define `WW_CELL_RTREFL` a hit replaces
+  the sky (sky visibility stays on the sky share), then the screen-space march mixes over it by its confidence.
+- Red `WW_CELL_RTREFL_RED=1`: the march and the sky only. Off (unset): nothing is defined, the water programs are
+  the old ones.
+- Texture unit: 89 (`WwCellUnit::RtRefl`). The lane used 87, which BUGS1102B's PrecipRoof holds (88 = FO76WEATHER2's
+  RainCover); LAND6 moved it at the merge.
+- CLI gate: `-no-gui rtrefl` (the kernel against its CPU twin on a synthetic room), tests/rtrefl/cli_gate.sh +
+  judge.py; spvsync guards refl.spv.h.
+
 ## BUGS1102D (2026-11-02): red onetype retired; a gate for a stale switch table
 
 - **REDRETIRE-ONETYPE:** `WW_CLOUDVOL_RED=onetype` (one cumulus profile, no type swing) is gone. It was the red of
@@ -6,6 +18,7 @@
 - **FRAMEFMT1-SURVEY:** the switch table already holds `WW_FRAMEFMT1_RED` on this base (the survey's output equals
   src/wwswitchstages.inc, 1352 switches). New gate tests/switchsurvey/run.sh: the committed table must equal a fresh
   `tools/wwswitch_survey.py --inc`; its red (the table minus the FRAMEFMT1 row) fails.
+
 ## BUGS1102E (2026-11-02): reflcensus tells a probe in the void from a soup that stops short
 
 - MUSEUMSOUP1: the Museum census (REFLPROBECLI2) counted 452630 below-horizon misses "past the soup" and they were read
@@ -19,6 +32,7 @@
   no split (every probe in the geometry).
 - Gate: tests/reflcensus/run.sh, REFLCENSUS PASS 223; red stand fails 4 `stand` checks (six fixture probes: between
   two storeys, under the ground, over the roof indoors and outdoors, an empty column, past the box).
+
 ## FOGMATCH1 (2026-11-02): a fog-droplet phase for the cell air (off by default)
 
 - `WW_CELL_AIR_PHASE=mie` replaces the fog records' GDRY lobes in the cell air with a two-lobe droplet phase: forward
@@ -50,6 +64,7 @@
   twin_ref.py with MSN=16 writes tests/gisky/twin_ref_low.h (30 cases).
 - Gate: gisky check 6 `twinlow`, bar 0.02: green 0.0064 relative (0.0047 R/B); red `GISKY_RED_TWINLOW` (the 32-wide
   table at Low) 0.0495 FAILS. run.sh: green 7 checks; red twin fails twin and twinlow, red twinlow fails twinlow only.
+
 ## FO76WEATHER2 (2026-11-02): rain wetness stays dry under roofs and bridges
 
 - With `WW_CELL_RAINWET` on, an exterior builds a top-down cover map (PRECIPROOF's WwRoofMap: eye +-8192 u, 16 u
@@ -58,6 +73,7 @@
 - Way back: `WW_CELL_RAINWET_RED=nocover` (every surface exposed, the FO76WEATHER1 path). Default stays OFF.
 - Code: src/gl/cellprecip.cpp, src/gl/rainwetlaw.h (CPU twin, now in NifSkope.pro), res/shaders/rain_wet.glsl.
   New unit tests/raincover: CPU checks plus GPU-vs-CPU parity on the real driver.
+
 ## POSTFX3 (2026-11-02): Modern TAA before the tone map; the linear post keeps the multisamples (both default OFF)
 
 - **Modern temporal AA before the tone map (`WW_TAA2_LINEAR=1`, POSTFX2-TAALINEAR):** the resolve runs on the linear
@@ -77,6 +93,77 @@
   into every sample.
 - Code: src/gl/gametaa.cpp (wwGameTaaResolveLinear, wwGameTaaLinearOn, wwGameTaaInputsRan), src/gl/cellhdr.cpp,
   src/gl/cellpost.cpp (step 4b), src/glview.cpp, src/wwswitchstages.inc.
+
+## BUGS1102D (2026-11-02): the append red renumber runs where it can fail
+
+- **ESPWRITE2-RENUMBER-RED:** the exe gates ran `WW_ESPWRITE_RED=renumber` on a file whose own ids run from 0x800 with
+  HEDR next right after them; the old rule hands out the very same ids there, so the red read rc 0 on every run.
+  `celledit_gates.py append --red` now refuses such a file as VACUOUS (rc 2), and tests/espwrite/append_gate.sh
+  (`<exe> <wwcell> <scratch>`) runs green on both fixtures and the red on the gap fixture: on 864e90d8's exe green
+  rc 0 / 0, red renumber rc 1 (3 failures: old ref not kept, next 900 -> 802, new ids below next), contiguous red rc 2.
+  No writer change.
+
+## ESPWRITE3B (2026-11-02): scale, exterior refs, cell lighting, buttons, keep the whole file on Add to existing
+
+- Edits panel: click a reference in the view, then Move (x y z, prefilled), Turn -15 / +15 deg, Scale (Set) or
+  Disable. Each change joins the edit list, one row per ref, and Save writes it with the placed refs. Disable sets
+  Initially Disabled only; there is no delete (xEdit's Undelete and Disable rule is in the lane notes).
+- Exterior cells: a ref of a grid cell or of the world's persistent cell is overridden in its own group, under the
+  WRLD record and the persistent cell copied from the winner.
+- Scale: XSCL is set, replaced or removed (1.0 = none).
+- Cell lighting: `light <field> <value>` sets XCLL fields of an interior (colours as RRGGBB hex) and clears each
+  field's Inherits bit, so the cell's value counts over its lighting template.
+- Warnings in the action bar and the log: a precombined ref changed (needs a precombine / previs rebuild), a plugin
+  later in the load order that overrides the cell or the ref (the edit will not show), a lighting template set.
+  The copy and the masters come from the last plugin up to the target that holds the record, not a later one.
+- Add to existing keeps the whole file: every top group (KYWD, ..., CELL, WRLD) and header field (CNAM, SNAM, INTV)
+  is carried byte for byte, in Fallout4.esm's group order. Foreign refs and overrides are carried as they are.
+- A plugin the open cell maps can now be rewritten: the old file is renamed aside before the new one is committed
+  (libfo76utils opens plugins with FILE_SHARE_DELETE), and is put back if the write fails.
+- Script verbs (WW_CELL_EDIT_SCRIPT): pickref, move, turn, scale, disable, light.
+- `espwrite edit` takes exterior specs, `scale s`, `light f v`, `--hold`, and prints `warning ...` lines.
+- Reds: WW_ESPWRITE_RED=editscale, xcllinherit, nowarn, mapped (no rename aside), mergedrop (other groups dropped).
+
+## FO76WEATHER1 (2026-11-02): rain wets every material, Fallout 76's law
+
+Show > Improved Sky > Rain wetness (WW/CellRainWet, ships off; pin `WW_CELL_RAINWET=0|1`, live). While the Lookdev
+weather rains, every cell material wets by Fallout 76's porosity law (src/gl/rainwetlaw.h, res/shaders/rain_wet.glsl):
+porosity = 1.1666 - 1.666 x smoothness (or the BGSM's custom porosity), metals never wet; albedo x (1 - 0.8 w) and
+smoothness 1 - (1 - 0.4 w)(1 - smoothness); normal and F0 unchanged. The amount runs on Fallout 4's wet clock (+0.03 a
+second while it rains, -0.02 dry) toward the rain's share of the weather, so a weather change wets and dries slowly;
+it starts settled when a cell opens. Interiors stay dry. Wet ground keeps the game's wet reflection (SSR) flag, and a
+material whose BGSM sets the wetness SSR switch takes the flag while wet (puddle reflections on the WEATHERLOOK rules).
+Harness pin `WW_CELL_RAINWET_AMOUNT=<0..1>`; red `WW_CELL_RAINWET_RED=shore` (the old path: shore wetness only).
+Census on stderr: "rain wet: ...". Unit: `bash tests/rainwet/run.sh <out>` (green 0 of 20, red 4 of 20).
+Not yet: Fallout 76's top-down cover map (dry under roofs and bridges), ripples and puddles.
+
+## MATLOOK2 TRANSLUC1-BINDLESS + TRANSLUC1-VIEWPORT (2026-11-02): the translucency in the bindless twins and the NIF view
+
+Under `WW_CELL_TRANSL=1` the bindless twins (fo4_cellbl, fo4_cellcsmbl) now draw MATLOOK1's thin translucency too. The
+lighting map is read from the draw's row through slot 7 (cellbindless.h TrLightMap; the slot was free).
+The programs without the cell's lights (fo4_default for the NIF view's headlight, fo4_fog, fo4_csm, fo4_fogcsm) also
+take the same law for their one light D. That colour is the root of linear light, so the law runs on squares there:
+albedo squared, D squared, and the diffuse just drawn squared. The excess joins the square, and the root is taken back.
+Reds: `WW_CELL_TRANSL_RED=nobl` (the twins keep the old path), `noview` (the view programs keep it). With the switch
+off nothing is defined, and the programs compile as before. tests/translucency pins the new text, and the base's text
+must fail.
+
+## MATLOOK1 TRANSLUC1 (2026-11-02): a v8+ material's thin translucency, FO4CS's law (switch, off by default)
+
+`WW_CELL_TRANSL=1` makes the shader loader define WW_CELL_TRANSL, and the cell lights then give a pixel whose BGSM
+(version 8 or later) sets bTranslucency what FO4CS's AdvancedLighting port gives it. The amount is the lighting map's
+blue channel times fTranslucencyTransmissiveScale. Nothing is drawn at or under 0.001, or where the map's glow mask
+lights. The tint is the subsurface colour, times the albedo when bTranslucencyMixAlbedoWithSubsurfaceCol is set. Per
+light the pixel takes max( T, D ): T = tint x amount x the light's colour (every factor of its diffuse but N.L) x the
+view lobe, and D = albedo x that light's diffuse. The lobe is max( mix( dot( L, -N ) x max( dot( V, -L ), 0 )^2,
+0.5, turbulence quantised to 1/127 ), 0 ). The excess over D is added beside the diffuse, for the placed lights and the
+cell's sun; under the cascades it takes the sun's shadow. Lights behind the surface are kept for such a pixel, and the
+back of a thin surface takes its front's shadow. A thick object (bTranslucencyThickObject) takes nothing: FO4CS lights
+it only through the sun's thickness shadow map, which is not drawn yet. The bindless twin programs keep the old path.
+The shader is res/shaders/cell_transl.glsl, its C++ twin is src/gl/wwtransl.h, and renderer.cpp uploads the material's
+values (wwTrCol, wwTrFlags) and binds the lighting map (WwTrLightMap, white when absent). `tests/translucency/translucency.sh`
+checks the twin against an independent reading of the law (6.97 M cases, worst 4.8e-7) and pins the shader's text;
+its red (WWTRANSL_RED, the upstream FO76 term) fails. With the switch off every program's machine code equals main's.
 
 ## GISKYTWIN-FLIP (LAND5, 2026-11-02): the GI volume's sky ships at the physical level
 
@@ -272,35 +359,6 @@ Behind `WW_CELL_PRECIP_LOOK` (off by default; `rain`, `snow`, `clump`, `hail`, o
 - The shipped atlases moved to `Textures/FO4CS/Precip/`; a path under the old `Textures/WW/Precip/` is still found.
 - tests/precip: rule 6 (the coverage integral, the drawn sizes, the clump fit, the flicker and oscillation) with red 16
   (the old path); rule 7 (the shader's phase table against its Monte Carlo fixture).
-## BUGS1102D (2026-11-02): the append red renumber runs where it can fail
-
-- **ESPWRITE2-RENUMBER-RED:** the exe gates ran `WW_ESPWRITE_RED=renumber` on a file whose own ids run from 0x800 with
-  HEDR next right after them; the old rule hands out the very same ids there, so the red read rc 0 on every run.
-  `celledit_gates.py append --red` now refuses such a file as VACUOUS (rc 2), and tests/espwrite/append_gate.sh
-  (`<exe> <wwcell> <scratch>`) runs green on both fixtures and the red on the gap fixture: on 864e90d8's exe green
-  rc 0 / 0, red renumber rc 1 (3 failures: old ref not kept, next 900 -> 802, new ids below next), contiguous red rc 2.
-  No writer change.
-
-## ESPWRITE3B (2026-11-02): scale, exterior refs, cell lighting, buttons, keep the whole file on Add to existing
-
-- Edits panel: click a reference in the view, then Move (x y z, prefilled), Turn -15 / +15 deg, Scale (Set) or
-  Disable. Each change joins the edit list, one row per ref, and Save writes it with the placed refs. Disable sets
-  Initially Disabled only; there is no delete (xEdit's Undelete and Disable rule is in the lane notes).
-- Exterior cells: a ref of a grid cell or of the world's persistent cell is overridden in its own group, under the
-  WRLD record and the persistent cell copied from the winner.
-- Scale: XSCL is set, replaced or removed (1.0 = none).
-- Cell lighting: `light <field> <value>` sets XCLL fields of an interior (colours as RRGGBB hex) and clears each
-  field's Inherits bit, so the cell's value counts over its lighting template.
-- Warnings in the action bar and the log: a precombined ref changed (needs a precombine / previs rebuild), a plugin
-  later in the load order that overrides the cell or the ref (the edit will not show), a lighting template set.
-  The copy and the masters come from the last plugin up to the target that holds the record, not a later one.
-- Add to existing keeps the whole file: every top group (KYWD, ..., CELL, WRLD) and header field (CNAM, SNAM, INTV)
-  is carried byte for byte, in Fallout4.esm's group order. Foreign refs and overrides are carried as they are.
-- A plugin the open cell maps can now be rewritten: the old file is renamed aside before the new one is committed
-  (libfo76utils opens plugins with FILE_SHARE_DELETE), and is put back if the write fails.
-- Script verbs (WW_CELL_EDIT_SCRIPT): pickref, move, turn, scale, disable, light.
-- `espwrite edit` takes exterior specs, `scale s`, `light f v`, `--hold`, and prints `warning ...` lines.
-- Reds: WW_ESPWRITE_RED=editscale, xcllinherit, nowarn, mapped (no rename aside), mergedrop (other groups dropped).
 
 ## ESPWRITE3 (2026-11-02): move, turn or disable a reference already in an interior cell
 
@@ -310,7 +368,7 @@ Behind `WW_CELL_PRECIP_LOOK` (off by default; `rain`, `snow`, `clump`, `hail`, o
   own, or an earlier override) is changed in place. It never truly deletes anything.
 - It reads the cell back on the new load order. Each changed ref must appear once, won by the new plugin, at its new
   pose. Every other ref in the cell must be unchanged.
-- Interior cells only at first (ESPWRITE3B adds exterior cells and the panel buttons).
+- Interior cells only; an exterior cell is refused by name. The cell view has no buttons for it yet.
 - Reds: WW_ESPWRITE_RED=editkeep leaves DATA unchanged, editflag skips 0x800.
 
 ## ESPWRITE2 (2026-11-02): place a reference in the cell view and save it as a plugin
@@ -485,45 +543,6 @@ and the WW_CELL_HDR_DUMP gate target. The rule is a pure header (src/gl/cellhdrf
 passes, the old rule as red fails). `WW_CELL_HDR_FORMAT=rgba32f` asks for the old frame; the reds `WW_FRAMEFMT1_RED=1`,
 `WW_CELL_HDR_FORMAT_RED=1` and `WW_AAFORMAT1_RED=1` force RGBA32F everywhere, as before. The air volumes were already
 RGBA16F (PERFFIX3); their slices and the running integrate stay RGBA32F (transmittance precision).
-## FO76WEATHER1 (2026-11-02): rain wets every material, Fallout 76's law
-
-Show > Improved Sky > Rain wetness (WW/CellRainWet, ships off; pin `WW_CELL_RAINWET=0|1`, live). While the Lookdev
-weather rains, every cell material wets by Fallout 76's porosity law (src/gl/rainwetlaw.h, res/shaders/rain_wet.glsl):
-porosity = 1.1666 - 1.666 x smoothness (or the BGSM's custom porosity), metals never wet; albedo x (1 - 0.8 w) and
-smoothness 1 - (1 - 0.4 w)(1 - smoothness); normal and F0 unchanged. The amount runs on Fallout 4's wet clock (+0.03 a
-second while it rains, -0.02 dry) toward the rain's share of the weather, so a weather change wets and dries slowly;
-it starts settled when a cell opens. Interiors stay dry. Wet ground keeps the game's wet reflection (SSR) flag, and a
-material whose BGSM sets the wetness SSR switch takes the flag while wet (puddle reflections on the WEATHERLOOK rules).
-Harness pin `WW_CELL_RAINWET_AMOUNT=<0..1>`; red `WW_CELL_RAINWET_RED=shore` (the old path: shore wetness only).
-Census on stderr: "rain wet: ...". Unit: `bash tests/rainwet/run.sh <out>` (green 0 of 20, red 4 of 20).
-Not yet: Fallout 76's top-down cover map (dry under roofs and bridges), ripples and puddles.
-## MATLOOK2 TRANSLUC1-BINDLESS + TRANSLUC1-VIEWPORT (2026-11-02): the translucency in the bindless twins and the NIF view
-
-Under `WW_CELL_TRANSL=1` the bindless twins (fo4_cellbl, fo4_cellcsmbl) now draw MATLOOK1's thin translucency too. The
-lighting map is read from the draw's row through slot 7 (cellbindless.h TrLightMap; the slot was free).
-The programs without the cell's lights (fo4_default for the NIF view's headlight, fo4_fog, fo4_csm, fo4_fogcsm) also
-take the same law for their one light D. That colour is the root of linear light, so the law runs on squares there:
-albedo squared, D squared, and the diffuse just drawn squared. The excess joins the square, and the root is taken back.
-Reds: `WW_CELL_TRANSL_RED=nobl` (the twins keep the old path), `noview` (the view programs keep it). With the switch
-off nothing is defined, and the programs compile as before. tests/translucency pins the new text, and the base's text
-must fail.
-
-## MATLOOK1 TRANSLUC1 (2026-11-02): a v8+ material's thin translucency, FO4CS's law (switch, off by default)
-
-`WW_CELL_TRANSL=1` makes the shader loader define WW_CELL_TRANSL, and the cell lights then give a pixel whose BGSM
-(version 8 or later) sets bTranslucency what FO4CS's AdvancedLighting port gives it. The amount is the lighting map's
-blue channel times fTranslucencyTransmissiveScale. Nothing is drawn at or under 0.001, or where the map's glow mask
-lights. The tint is the subsurface colour, times the albedo when bTranslucencyMixAlbedoWithSubsurfaceCol is set. Per
-light the pixel takes max( T, D ): T = tint x amount x the light's colour (every factor of its diffuse but N.L) x the
-view lobe, and D = albedo x that light's diffuse. The lobe is max( mix( dot( L, -N ) x max( dot( V, -L ), 0 )^2,
-0.5, turbulence quantised to 1/127 ), 0 ). The excess over D is added beside the diffuse, for the placed lights and the
-cell's sun; under the cascades it takes the sun's shadow. Lights behind the surface are kept for such a pixel, and the
-back of a thin surface takes its front's shadow. A thick object (bTranslucencyThickObject) takes nothing: FO4CS lights
-it only through the sun's thickness shadow map, which is not drawn yet. The bindless twin programs keep the old path.
-The shader is res/shaders/cell_transl.glsl, its C++ twin is src/gl/wwtransl.h, and renderer.cpp uploads the material's
-values (wwTrCol, wwTrFlags) and binds the lighting map (WwTrLightMap, white when absent). `tests/translucency/translucency.sh`
-checks the twin against an independent reading of the law (6.97 M cases, worst 4.8e-7) and pins the shader's text;
-its red (WWTRANSL_RED, the upstream FO76 term) fails. With the switch off every program's machine code equals main's.
 
 ## REFLPROBECLI1 (TOOLS1101, 2026-11-01): count the reflection probes' below-horizon misses without a window
 
