@@ -1,5 +1,6 @@
 #include "cellfarhide.h"
 
+#include "cellmodsource.h"	// lane LARGEREF2: the game's inis (bDisableLargeRefs)
 #include "wwswitch.h"
 #include "data/niftypes.h"
 
@@ -126,7 +127,12 @@ void setExtraRefs( const void * doc, const QVector<quint32> & refs )
 
 bool largeRefsWanted()
 {
-	WW_SWITCH_STATIC( bool, on, wwEnvInt( "WW_CELL_LARGEREFS" ) != 0 );
+	/* lane LARGEREF2 (LARGEREF-INI): WW_CELL_LARGEREFS pins it; unset, the game's inis decide as the game does:
+	 * [General] bDisableLargeRefs=0 turns large refs on (the exe default is 1, off). Red WW_CELL_LARGEREFS_RED=noini:
+	 * the inis are not read (LARGEREF1: off unless pinned). */
+	WW_SWITCH_STATIC( bool, on, wwEnvIsSet( "WW_CELL_LARGEREFS" ) ? wwEnvInt( "WW_CELL_LARGEREFS" ) != 0
+		: wwEnv( "WW_CELL_LARGEREFS_RED" ) != "noini"
+			&& cellGameIniFloat( "[General]", "bDisableLargeRefs", 1.0f ) == 0.0f );
 	return on;
 }
 

@@ -1,6 +1,7 @@
 // lane GEOLOD1 (LARGEREF1): the RNAM decode + the large-ref rule of src/largeref.h.
 // g++ -std=c++17 -I<tree>/src tests/largeref/largeref_test.cpp; -DLARGEREF_RED reads X,Y (the red) and must fail.
 #include "largeref.h"
+#include "gameinikey.h"
 
 #include <cstdio>
 #include <cstring>
@@ -127,6 +128,21 @@ int main()
 		}
 		std::printf( "stream walk: %d steps, %d wrong copy counts\n", steps, bad );
 		check( bad == 0, "stream walk: every wanted ref drawn once, never twice" );
+	}
+	// lane LARGEREF2 (LARGEREF-INI): the ini line largeRefsWanted reads, through the same reader and arguments
+	{
+		auto ini = []( const std::vector<std::string> & lines ) {
+			std::string sec;
+			float v = 1.0f;   // the exe default: off
+			for ( const std::string & l : lines )
+				GameIniKey::floatLine( l, "[general]", "bdisablelargerefs", sec, v );
+			return v;
+		};
+		check( ini( { "[General]", "bDisableLargeRefs=0" } ) == 0.0f, "ini: [General] bDisableLargeRefs=0 -> on" );
+		check( ini( { "[Display]", "bDisableLargeRefs=0" } ) == 1.0f, "ini: another section -> the default (off)" );
+		check( ini( { "[General]", "bDisableLargeRefs=0", "[General]", "  bdisablelargerefs = 1\r" } ) == 1.0f,
+			"ini: a later line wins" );
+		check( ini( {} ) == 1.0f, "ini: no line -> off" );
 	}
 	std::printf( "largeref: %d failed -- %s\n", fails, fails ? "FAIL" : "PASS" );
 	return fails ? 1 : 0;
