@@ -82,6 +82,10 @@ void rtddgiCellViewDrawLinear( Scene * scene, const Transform & viewTrans );
 //! reached since the build or the last scroll
 bool rtddgiCellPending();
 
+//! lane FRAMESCHED1: a coarse cascade (1..n-1) stepped in this frame's rtddgiCellFrame on its own period (not a picture
+//! spec's every-frame step); the reflection probes keep their capture off such a frame (gl/wwframesched.h)
+bool rtddgiCellCoarseStepped();
+
 /* lane RESTIRDI1 (2026-10-30): the RT quality preset (bungo 10-29: Low = the volume only, Medium = + ReSTIR DI, High =
  * + ReSTIR GI, Ultra = + ReSTIR PT; High and Ultra are Medium for now). WW_CELL_RT_PRESET pins it, else the Show row.
  * Medium and up turn the volume on (its BVH is what ReSTIR traces) and the loader's WW_CELL_RESTIR define: the

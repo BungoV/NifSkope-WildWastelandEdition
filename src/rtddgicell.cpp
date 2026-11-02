@@ -1359,6 +1359,7 @@ struct Deferred
 };
 static quint64 s_cellFrame = 0;   // RTXCASCADE2: rtddgiCellFrame's count (the skip range reads the finer cascade's order of this frame)
 static bool s_jump = false;       // RTXCASCADE2: cascade 0 jumped this frame (rtddgimath.h cascadeJump)
+static bool s_coarseStep = false; // lane FRAMESCHED1: a coarse cascade stepped this frame on its period (gl/wwframesched.h)
 
 //! RTXCASCADE2: the cascade the debug views draw (the row's pick, within the cascades there are)
 static int viewLevel()
@@ -1927,6 +1928,8 @@ static void cascadesFrame( Scene * scene, std::vector<Deferred> * defer )
 		 * this frame and resets every plane (rtddgimath.h cascadeStepPlan) */
 		bool due = false, resetAll = false;
 		rtddgi::cascadeStepPlan( l, frame, sp.every, s_jump, due, resetAll );
+		if ( due && sp.max <= 0 )
+			s_coarseStep = true;   // lane FRAMESCHED1: a picture spec's every-frame step does not count
 		due = due || sp.max > 0;
 		// the census prefix carries the period: device ms a frame = sum over cascades of a set's ms / its period
 		c.tag = QStringLiteral( "cascade %1 (every %2 frames): " ).arg( l ).arg( qlonglong( std::llround( std::pow( double( std::max( sp.every, 1 ) ), l ) ) ) );
@@ -1945,6 +1948,7 @@ void rtddgiCellFrame( Scene * scene )
 {
 	s_cellFrame++;
 	s_jump = false;
+	s_coarseStep = false;
 	/* RTXCASCADE2: with cascades (and not the perblas red) the cascades' steps are collected and go in one submit at the
 	 * end of cascadesFrame; one volume (WW_CELL_RTDDGI_CASCADES 1, the default) steps at once as M3's did */
 	const int n = rtddgiCellShaderDefine() ? rtddgiCellCascades() : 1;
@@ -1954,6 +1958,11 @@ void rtddgiCellFrame( Scene * scene )
 	cascadesFrame( scene, defer );                               // RTXCASCADE1: nothing while WW_CELL_RTDDGI_CASCADES is 1
 	if ( !jobs.empty() && scene && scene->renderer )
 		groupStep( scene->renderer, jobs );   // cascade 0's, when cascadesFrame left early
+}
+
+bool rtddgiCellCoarseStepped()
+{
+	return s_coarseStep;
 }
 
 bool rtddgiCellPending()

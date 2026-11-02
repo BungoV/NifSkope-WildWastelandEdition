@@ -1,3 +1,15 @@
+## FRAMESCHED1 (2026-11-02): one reflection-probe capture a frame, none on a coarse DDGI cascade's frame
+
+The reflection probes drew the camera probe's next face and the nearest unfinished placed probe's next face in the same
+frame (two caster walks), and on the frames a coarse DDGI cascade steps (cascade L at frame % every^L == L) a capture
+landed on top of that step. New pure rule src/gl/wwframesched.h: one capture a frame; the camera face and the placed
+face take turns when both wait; no capture on a frame a coarse cascade stepped on its own period (a picture spec's
+every-frame step and WW_CELL_REFLPROBE_ALL are not touched), waiting at most 3 frames in a row. rtddgicell.cpp reports
+the step (rtddgiCellCoarseStepped). Lamp shadow cubes (event-driven, already sliced by WwLampSlice) and the exposure
+measure (every frame) have no period to move. The reflection probes ship off, so the default picture is unchanged.
+Red WW_FRAMESCHED_RED=1 (live) = the old schedule. The `reflprobe frame:` line (WW_CELL_REFLPROBE_TIME=1) prints
+`sched deferred= alternated=`. Gate: tests/framesched (g++; -DFRAMESCHED_RED fails "no frame carries two").
+
 ## REFLPROBECLI1 (TOOLS1101, 2026-11-01): count the reflection probes' below-horizon misses without a window
 
 `nifskope -no-gui reflcensus --soup <soup.psp> (--camera x,y,z ... | --auto N) [--interior] [--out probes.tsv]` places

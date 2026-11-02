@@ -15,6 +15,7 @@ BSD License - see nifskope.h
 #include "cellworldanim.h"	// lane PERFFIX2 a: the world clock (a live window's relight tick)
 #include "rtddgicell.h"	// lane PERFFIX2 a: the ray-traced GI volume on (its updates relight the camera probe)
 #include "gl/cellreflcam.h"	// lane PERFFIX2 a: the camera probe's schedule
+#include "gl/wwframesched.h"	// lane FRAMESCHED1: one capture a frame, none on a coarse DDGI cascade's frame
 
 #include "gl/celllights.h"
 #include "gl/cellssr.h"
@@ -40,6 +41,16 @@ BSD License - see nifskope.h
 
 /* ---- lane REFLPROBE1: the placed reflection probes (cellreflprobe.h, res/shaders/cell_refl*.{frag,glsl}) ---- */
 bool rtddgiSkyBelowRedNow();	// lane SKYBELOW2: SKYBELOW1's red (src/rtddgicell.cpp), read every frame (live)
+
+/* lane FRAMESCHED1: WW_FRAMESCHED_RED=1 keeps today's schedule (the camera face and the placed face in one frame, on
+ * the coarse cascades' frames too). Read every frame (live) */
+static bool frameSchedRed()
+{
+	if ( !wwEnvIsSet( "WW_FRAMESCHED_RED" ) )
+		return false;
+	const QByteArray v = wwEnv( "WW_FRAMESCHED_RED" ).trimmed();
+	return !v.isEmpty() && v != "0";
+}
 
 namespace
 {
@@ -118,6 +129,7 @@ struct RpGpu
 	quint64 camFaceKey[6] = {};
 	quint64 camLitKey = 0;
 	qint64 camSkipped = 0;			// frames the camera probe needed nothing (the TIME line)
+	WwFrameSched::State sched;		// lane FRAMESCHED1: whose turn, the census (the TIME line)
 	quint64 frameNo = 0;
 	quint64 stamp = 1;				// bumps when the arrays the surfaces read change
 	QHash<GLuint, quint64> progStamp;
@@ -523,6 +535,7 @@ void wwCellReflProbePass( Scene * scene, bool run )
 	 * document's version from the global counter, textures uploaded since), the probe's snapped place and box. The
 	 * red WW_CELL_REFLPROBE_RED=perframe keeps REFLPROBE1's endless cycle (one face a frame, relit every frame). */
 	const bool perFrame = ( s.red & 32 ) != 0;
+	const bool schedRed = frameSchedRed();
 	quint64 camCapKey = mix64( mix64( sceneKey, moverKey ), quint64( std::uint32_t( wwCellLightsVersion( scene->nifModel ) ) ) );
 	camCapKey = mix64( camCapKey, quint64( PassTime::cacheCounts().texMade + PassTime::cacheCounts().texPumped ) );
 	for ( int a = 0; a < 3; a++ ) {
@@ -547,8 +560,6 @@ void wwCellReflProbePass( Scene * scene, bool run )
 				if ( perFrame || g.camFaceKey[f] != camCapKey )
 					jobs.emplace_back( 0, f );
 	} else {
-		if ( camStale >= 0 )
-			jobs.emplace_back( 0, camStale );
 		int best = -1;
 		float bestD = 1e30f;
 		for ( int k = 1; k < kSlots; k++ ) {
@@ -564,7 +575,16 @@ void wwCellReflProbePass( Scene * scene, bool run )
 				best = k;
 			}
 		}
-		if ( best > 0 )
+		/* lane FRAMESCHED1 (gl/wwframesched.h): the two faces take turns, and wait (at most 3 frames) while a coarse DDGI
+		 * cascade steps; the red takes both every frame, as before */
+		WwFrameSched::Want want;
+		want.cam = camStale >= 0;
+		want.placed = best > 0;
+		want.ddgiCoarse = rtddgiCellCoarseStepped();
+		const WwFrameSched::Pick pick = WwFrameSched::pick( want, g.sched, schedRed );
+		if ( pick.cam )
+			jobs.emplace_back( 0, camStale );
+		if ( pick.placed )
 			jobs.emplace_back( best, g.slot[best].faces );
 	}
 
@@ -947,13 +967,13 @@ void wwCellReflProbePass( Scene * scene, bool run )
 		.arg( ( s.red & 1 ) ? QStringLiteral( "(RED=fixed: material cube returned)" ) : QString() )
 		.arg( byRooms ? QStringLiteral( "rooms" ) : QStringLiteral( "grid" ) ).arg( cand.size() ).arg( resident ).arg( kPlaced )
 		.arg( placedLit ).arg( g.slot[0].lit ? QStringLiteral( "lit" ) : QStringLiteral( "capturing" ) )
-		.arg( s.all ? QStringLiteral( "all" ) : QStringLiteral( "2" ) ).arg( g.kb )
+		.arg( s.all ? QStringLiteral( "all" ) : schedRed ? QStringLiteral( "2 (WW_FRAMESCHED_RED)" ) : QStringLiteral( "1 (framesched)" ) ).arg( g.kb )
 		+ ( rtddgiSkyBelowRedNow() ? QStringLiteral( " below-horizon miss=sky (WW_SKYBELOW_RED)" )	// lane SKYBELOW2
 			: QStringLiteral( " below-horizon miss=ground" ) ) );
 	if ( qEnvironmentVariableIsSet( "WW_CELL_REFLPROBE_TIME" ) && ( captured || relit ) )
-		std::fprintf( stderr, "reflprobe frame: captured=%d draws=%lld relit=%d cpu-ms=%lld camera-still=%lld%s\n", captured,
-			(long long) draws, relit, (long long) timer.elapsed(), (long long) g.camSkipped,
-			perFrame ? " (RED=perframe)" : "" );
+		std::fprintf( stderr, "reflprobe frame: captured=%d draws=%lld relit=%d cpu-ms=%lld camera-still=%lld%s sched deferred=%llu alternated=%llu%s\n",
+			captured, (long long) draws, relit, (long long) timer.elapsed(), (long long) g.camSkipped,
+			perFrame ? " (RED=perframe)" : "", g.sched.deferred, g.sched.alternated, schedRed ? " (WW_FRAMESCHED_RED)" : "" );
 }
 
 void wwCellReflProbeDraw( Scene * scene, bool cellProgram )
