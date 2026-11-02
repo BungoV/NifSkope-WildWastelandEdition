@@ -135,6 +135,10 @@ layout ( location = 0 ) out vec4 fragColor;
 // lane SSGI2: the scene pass's second target, the emitted share alone (the bounce's emissive cast; 0 elsewhere)
 layout ( location = 1 ) out vec4 cellEmitOut;
 #endif
+#if defined( WW_CELL_SKINSSS ) && defined( WW_CELLLIGHTS ) && !defined( WW_BINDLESS )
+#define WW_SKINSSS_TAG 1
+uniform bool wwSkinOn;	// lane SKINSSS1: the draw is skin (src/gl/renderer.cpp); the opaque pass writes it to its skin tag
+#endif
 
 vec3 ViewDir_norm = normalize( ViewDir );
 mat3 btnMatrix_norm = mat3( normalize( btnMatrix[0] ), normalize( btnMatrix[1] ), normalize( btnMatrix[2] ) );
@@ -688,6 +692,9 @@ void main()
 #ifdef WW_CELLLIGHTS
 	if ( cellOn && cellProbe == 20 && cellAoEarly == 1 ) {	// lane PERF1: the obscurance pass reads the normal and depth only
 		fragColor = cellAoPassOut( normal, -ViewDir );
+#ifdef WW_SKINSSS_TAG
+		cellEmitOut = vec4( wwSkinOn ? 1.0 : 0.0 );	// lane SKINSSS1: attachment 1 of the opaque pass (celllights.cpp)
+#endif
 		return;
 	}
 #endif
@@ -1100,6 +1107,9 @@ void main()
 #ifdef WW_CELLLIGHTS
 	if ( cellOn && cellProbe == 20 ) {
 		fragColor = cellAoPassOut( normal, -ViewDir );	// lane AO1
+#ifdef WW_SKINSSS_TAG
+		cellEmitOut = vec4( wwSkinOn ? 1.0 : 0.0 );
+#endif
 		if ( cellAoEarly == 2 )
 			fragColor.w *= 1.001;	// lane PERF1 red: full shading runs (the old cost), and the gate must see the mark
 	}

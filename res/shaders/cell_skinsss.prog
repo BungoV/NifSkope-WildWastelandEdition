@@ -1,0 +1,4 @@
+# lane SKINSSS1: skin subsurface scattering's extract / blur / composite (src/gl/cellskinsss.cpp).
+# No conditions: never picked for a shape; cellskinsss.cpp selects it by name.
+
+shaders cell_ao.vert cell_skinsss.frag

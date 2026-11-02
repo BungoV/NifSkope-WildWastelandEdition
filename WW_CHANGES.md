@@ -1,3 +1,18 @@
+## SKINSSS1 (2026-11-02): skin subsurface scattering in the cell view (row Skin subsurface, ships off)
+
+A new look row, Skin subsurface (`WW_CELL_SKINSSS`, QSettings WW/CellSkinSubsurface, off), ports FO4CS's separable
+screen-space subsurface scattering with its skin profile: extract (coverage 0.65, saturation 1.08), blur along x, blur
+along y with the Jimenez / d'Eon 5-Gaussian kernel (red falloff widest, so red bleeds furthest) and a depth rejection
+of 0.003 in window depth, then the composite. Skin is a draw whose BGSM has bSkinTint or bFacegen, or whose NIF shader
+type is SkinTint or FaceGen (the game's material code 5: faces and first-person hands). The cell's shared opaque pass
+gets an R8 attachment 1 for the skin tag while the row is on; only the programs that write it (fo4_default's cell
+programs; the bindless twins keep the old path, tag 0) open its mask. The pass (src/gl/cellskinsss.cpp,
+res/shaders/cell_skinsss.frag) runs in the linear frame before the depth of field. It runs at full resolution, so the
+kernel radius is 6 pixels (FO4CS: 3 at half resolution). A forward frame holds lit light, not irradiance, so the
+blurred light includes the specular (a known error). Red `WW_CELL_SKINSSS_RED=1`: the passes run and the frame is kept.
+The NIF view (no opaque pass of its own) is not covered. tests/skinsss checks the twin against FO4CS's law; its
+WWSKINSSS_RED and the base text must fail.
+
 ## MATLOOK3 TRANSLUC1-THICK (2026-11-02): a thick translucent object takes the sun through its thickness
 
 Under `WW_CELL_TRANSL=1` a v8+ material with bTranslucencyThickObject now takes FO4CS's sun share in the exterior cell:

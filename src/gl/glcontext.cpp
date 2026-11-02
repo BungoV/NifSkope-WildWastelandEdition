@@ -56,6 +56,7 @@ bool wwAirZoneShaderDefine();	// lane AIRZONE1: src/gl/cellairzone.cpp (the Air 
 static bool wwTranslShaderDefine() { return wwEnv( "WW_CELL_TRANSL" ).trimmed() == "1"; }
 bool wwHairShaderDefine();	// lane MATLOOK3: src/gl/celllooks.cpp (the Hair specular row / WW_CELL_HAIRKK)
 bool wwCorneaShaderDefine();	// lane MATLOOK3: the Eye cornea row / WW_CELL_CORNEA
+bool wwSkinSssShaderDefine();	// lane SKINSSS1: the Skin subsurface row / WW_CELL_SKINSSS
 bool wwFogLeakShaderDefine();	// lane FOGLEAK1: src/gl/cellvolair.cpp (WW_CELL_FOGLEAK, the fog leak fix; off by default)
 int wwCellGiVis();	// lane PERF1: src/gl/celllights.cpp (1: the march, WW_CELL_GI_MARCH)
 bool wwCellPrtOn();	// lane PRTOFF1: src/gl/celllights.cpp (the old baked probe GI, only under its red)
@@ -489,6 +490,9 @@ bool NifSkopeOpenGLContext::Shader::load( const QString & filepath )
 			if ( wwEnv( "WW_CELL_CORNEA_RED" ).trimmed() == "1" )	// red: a rough coat
 				data.insert( data.indexOf( '\n' ) + 1, "#define WW_CORNEA_RED 1\n" );
 		}
+		// lane SKINSSS1: the opaque pass's skin tag (fo4_default.frag); not static: the row reloads
+		if ( wwSkinSssShaderDefine() && data.startsWith( "#version" ) && data.contains( "_CELL_SKINSSS" ) )
+			data.insert( data.indexOf( '\n' ) + 1, "#define WW_CELL_SKINSSS 1\n" );
 		// lane PERF3: the cascades from one per-frame block, in the sources that ask for it (WW_FRAME_UBO_RED=1: plain uniforms)
 		static const bool frameUbo = qgetenv( "WW_FRAME_UBO" ).trimmed() != "0" && qgetenv( "WW_FRAME_UBO_RED" ).trimmed() != "1"
 			&& qgetenv( "WW_PERF3_RED" ).trimmed() != "1";

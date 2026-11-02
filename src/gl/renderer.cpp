@@ -2627,6 +2627,12 @@ bool Renderer::setupProgramCE1( const NifModel * nif, Program * prog, Shape * me
 					if ( prog->uniLocation( "wwEyeOn" ) >= 0 )
 						prog->uni1b( "wwEyeOn", eye );
 				}
+				// lane SKINSSS1: skin draws (face and skin tint: the game's material code 5) tag the opaque pass
+				if ( prog->uniLocation( "wwSkinOn" ) >= 0 ) {
+					const ShaderMaterial *	bgsm = ( mat && mat->isShaderMaterial() ) ? static_cast< ShaderMaterial * >( mat ) : nullptr;
+					prog->uni1b( "wwSkinOn", ( bgsm && ( bgsm->bSkinTint || bgsm->bFacegen ) )
+						|| lsp->isST( ShaderFlags::ST_SkinTint ) || lsp->isST( ShaderFlags::ST_Facegen ) );
+				}
 			} else {
 				FloatVector4	translucencyColorAndScale( 1.0f, 1.0f, 1.0f, -1.0f );
 				if ( mat && mat->isShaderMaterial() ) {

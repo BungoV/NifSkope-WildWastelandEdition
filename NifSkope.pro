@@ -287,6 +287,8 @@ HEADERS += \
 	src/gl/contactlines.h \
 	src/gl/celllampshadow.h \
 	src/gl/celllooks.h \
+	src/gl/cellskinsss.h \
+	src/gl/wwskinsss.h \
 	src/gl/cellnifxlights.h \
 	src/gl/cellaodecalgl.h \
 	src/gl/cellvolair.h \
@@ -621,6 +623,7 @@ SOURCES += \
 	src/gl/cellssgi.cpp \
 	src/gl/celllampshadow.cpp \
 	src/gl/celllooks.cpp \
+	src/gl/cellskinsss.cpp \
 	src/gl/cellnifxlights.cpp \
 	src/gl/cellaodecalgl.cpp \
 	src/gl/cellvolair.cpp \

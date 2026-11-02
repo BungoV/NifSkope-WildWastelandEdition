@@ -73,6 +73,7 @@ enum class WwLook : int
 	ObjectFade,			// OBJFADE1: placed refs fade out per class (objects, items, actors), the game's LOD rule (WW_CELL_OBJFADE)
 	HairSpecular,		// MATLOOK3 HAIRKK1: hair's light specular is a shifted Kajiya-Kay lobe (WW_CELL_HAIRKK; ww_hair_eye.glsl)
 	EyeCornea,			// MATLOOK3 EYECORNEA1: an opaque eye takes a smooth cornea coat per light (WW_CELL_CORNEA)
+	SkinSubsurface,		// SKINSSS1: skin's light blurred by FO4CS's separable 5-Gaussian profile, cell view (WW_CELL_SKINSSS)
 	Count
 };
 

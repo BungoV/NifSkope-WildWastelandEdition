@@ -87,6 +87,7 @@ const LookRow kRows[] = {
 	{ "Object distance fade", "WW/CellObjectFade" },	// lane OBJFADE1: ships off until bungo sees it
 	{ "Hair specular", "WW/CellHairSpecular" },	// lane MATLOOK3: ships off until a hold proves it
 	{ "Eye cornea", "WW/CellEyeCornea" },	// lane MATLOOK3: ships off until a hold proves it
+	{ "Skin subsurface", "WW/CellSkinSubsurface" },	// lane SKINSSS1: ships off until a hold proves it
 };
 static_assert( sizeof( kRows ) / sizeof( kRows[0] ) == size_t( WwLook::Count ), "a row per look" );
 
@@ -360,6 +361,10 @@ QByteArray pinOf( WwLook l )
 		WW_SWITCH_STATIC( QByteArray, p, wwEnv( "WW_CELL_CORNEA" ).trimmed() );
 		return p;
 	}
+	case WwLook::SkinSubsurface: {
+		WW_SWITCH_STATIC( QByteArray, p, wwEnv( "WW_CELL_SKINSSS" ).trimmed() );
+		return p;
+	}
 	default:
 		return QByteArray();
 	}
@@ -438,6 +443,7 @@ const char * wwLookPinName( WwLook l )
 	case WwLook::ObjectFade: return "WW_CELL_OBJFADE";
 	case WwLook::HairSpecular: return "WW_CELL_HAIRKK";
 	case WwLook::EyeCornea: return "WW_CELL_CORNEA";
+	case WwLook::SkinSubsurface: return "WW_CELL_SKINSSS";
 	default: return "";
 	}
 }
@@ -460,7 +466,7 @@ bool wwLookReopens( WwLook l )
 
 bool wwLookReloadsShaders( WwLook l )
 {
-	return l == WwLook::HairSpecular || l == WwLook::EyeCornea;
+	return l == WwLook::HairSpecular || l == WwLook::EyeCornea || l == WwLook::SkinSubsurface;
 }
 
 // lane MATLOOK3: the loader's defines (src/gl/glcontext.cpp), read per shader load; reds swap the lobe's constants
@@ -472,6 +478,12 @@ bool wwHairShaderDefine()
 bool wwCorneaShaderDefine()
 {
 	return wwLookOn( WwLook::EyeCornea );
+}
+
+// lane SKINSSS1: the opaque pass's skin tag (fo4_default.frag) and the screen pass (src/gl/cellskinsss.cpp)
+bool wwSkinSssShaderDefine()
+{
+	return wwLookOn( WwLook::SkinSubsurface );
 }
 
 bool wwLookHasRow( WwLook l )
