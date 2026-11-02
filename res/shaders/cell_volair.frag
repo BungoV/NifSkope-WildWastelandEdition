@@ -784,6 +784,27 @@ vec3 airRest( vec3 posView, vec3 dirView, float z, float sA, float sB, out vec3 
 	return J;
 }
 
+/* lane FARCITYWASH1 (bungo 11-02, the far Boston skyline washed out next to vanilla's haze): the sky-lit share of the
+ * air (the sun x the record phase + the env cube) saturates far geometry to its J, ~2.9x the game's own fog colour at
+ * Overcast noon (notes/farcitywash1/RESULTS.md), while the density matches the game's curve. The scale that brings the
+ * open air's mean J (the sun at an isotropic share, 1/4, plus the env share) down to the records' fog colour at this
+ * distance and height; never up (1 where the physical light is dimmer: lamps, night), so the phase's shape and the
+ * shadows stay. Placed lights keep their own level. Exteriors with the cell's sun only. volVeil off (red
+ * WW_CELL_AIR_RED=veilphys): the physical level, as before. */
+uniform bool volVeil;
+float airVeilK( vec3 Jenv, float t, float z )
+{
+	if ( !volVeil || cellInterior || !( cellOn && cellHasDir ) || ( volTerms & 1 ) == 0 )
+		return 1.0;
+	float hb;
+	vec3 fc;
+	wwFogEval( t, z, hb, fc );
+	const vec3 lumK = vec3( 0.2126, 0.7152, 0.0722 );
+	float rec = dot( max( fc, vec3( 0.0 ) ), lumK );
+	float open = 0.25 * dot( cellDirColor, lumK ) + dot( Jenv, lumK );
+	return open > rec && open > 1e-8 ? rec / open : 1.0;
+}
+
 // lane PERF2 (temporal): airRest's four light samples one by one (the strata in `need` only), each x the stretch's
 // share of the slice; airRest's light term = 0.25 x their sum
 void airLightsQ( vec3 posView, vec3 dirView, float z, float sA, float sB, int need, out vec3 Jq[4] )
@@ -1028,6 +1049,7 @@ void main()
 		}
 		vec3 Jenv = vec3( 0.0 );
 		airRest( posM, dirView, zc + dzdt * tm, t0 - tm, t1 - tm, Jenv, false );
+		float vk = airVeilK( Jenv, tm, zc + dzdt * tm );	// lane FARCITYWASH1
 		vec3 Jq[4];
 		airLightsQ( posM, dirView, zc + dzdt * tm, t0 - tm, t1 - tm, need, Jq );
 		vec3 acc = vec3( 0.0 );
@@ -1039,14 +1061,14 @@ void main()
 			if ( ( need & ( 1 << q ) ) != 0 ) {
 				Cq = 0.25 * W * Jq[q] AZ_TINT( q );
 				if ( wq[q] > 0.0 )
-					Cq += Tq[q] * wq[q] * airEnvColour( airSun( dirView * ( t / fogDistScale ), dirView, zt ), t, zt, dirView ) AZ_TINT( q );
+					Cq += Tq[q] * wq[q] * vk * airEnvColour( airSun( dirView * ( t / fogDistScale ), dirView, zt ), t, zt, dirView ) AZ_TINT( q );
 				so[q] = vec4( Cq / W, 1.0 );
 			} else {
 				Cq = h[q].rgb * W;
 				so[q] = vec4( h[q].rgb, 1.0 );
 			}
 			if ( wq[q] > 0.0 )
-				acc += Tq[q] * wq[q] * airEnvColourEnv( Jenv, t, zt, dirView ) AZ_TINT( q );	// lane FIX1101A: the env share without the sun glare
+				acc += Tq[q] * wq[q] * vk * airEnvColourEnv( Jenv, t, zt, dirView ) AZ_TINT( q );	// lane FIX1101A: the env share without the sun glare
 			acc += Cq;
 		}
 		volMrt[0] = so[0];
@@ -1062,6 +1084,7 @@ void main()
 	vec3 Jrest = vec3( 0.0 );
 	if ( scatters )
 		Jrest = airRest( dirView * ( tm / fogDistScale ), dirView, zc + dzdt * tm, t0 - tm, t1 - tm, Jenv, true );
+	float vk = airVeilK( Jenv, tm, zc + dzdt * tm );	// lane FARCITYWASH1
 	vec3 acc = vec3( 0.0 );
 	float T = 1.0;
 	for ( int q = 0; q < 4; q++ ) {
@@ -1072,7 +1095,7 @@ void main()
 			float t = 0.5 * ( ta + tb );
 			float zt = zc + dzdt * t;
 			// lane FIX1101A: the sun's share (shadowed) keeps the records' glare hue, the env share takes the fog colour only
-			acc += T * w * ( Jrest + airEnvColourEnv( Jenv, t, zt, dirView ) + airEnvColour( airSun( dirView * ( t / fogDistScale ), dirView, zt ), t, zt, dirView ) ) AZ_TINT( q );
+			acc += T * w * ( Jrest + vk * ( airEnvColourEnv( Jenv, t, zt, dirView ) + airEnvColour( airSun( dirView * ( t / fogDistScale ), dirView, zt ), t, zt, dirView ) ) ) AZ_TINT( q );
 		}
 		T *= exp( -tau );
 	}
