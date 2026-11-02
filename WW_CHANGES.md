@@ -1,3 +1,109 @@
+## INTGI1 (2026-11-02): the air's sun gate indoors (FOGLEAK1-INT)
+
+Under WW_CELL_FOGLEAK + WW_CELL_RTDDGI (both off by default), FOGLEAK1's fix 2 now runs in an interior that is not
+sunlit too. Such a cell has no shadow map for its lighting template's directional, so its share in the air takes the
+traced volume's gate alone (the miss share toward it): an opening (the museum's open top) keeps the beam, a closed room's
+air loses it; the walls' bounce of it still reaches the air through fix 1's env share. The surfaces keep the directional
+unshadowed, as vanilla. Red `WW_CELL_AIR_RED=nointsungate` (bit 16) gives indoors as before; `nosungate` now drops
+the gate indoors and outdoors. tests/fogleak/fogleak_check.py gains gate I (closed room: air sun 0 inside; open room:
+unchanged). With the switches off the shader binaries are identical.
+
+SSGIHO-INT: in such an interior under the traced volume the screen-space bounce now marches only to the volume's
+smallest probe spacing (140 u by default, never past its 256): the probes hold the occlusion and the bounce of what lies
+farther, the screen keeps the contact scale, and the fill law then darkens and adds only that share. Offline (the SSGI
+bench's room, Ultra) the occluded share falls from 0.090 to 0.061 and the bounce's mean from 0.111 to 0.078, at the same
+cost. The census line `cell ssgi:` ends `radius <n>`. Red `WW_CELL_SSGI_RED=nointradius`; volume off (the default):
+unchanged.
+
+REFLPROBECLI2: `reflcensus --auto N --interior` puts its cameras eye over every floor that has a ceiling over it (each
+storey of a column, eye + 32 of headroom at least) instead of on the topmost surface, which indoors is mostly the roof.
+`--red roof` gives the old cameras. tests/reflcensus/run.sh gains a two-storey box and that red. Museum (`--auto 6`):
+49 cameras instead of 29; hits 44.4 % (was 33.1 %), sky misses 26.1 % (was 42.4 %), below-horizon misses 29.5 % (was
+24.5 %, of them past the soup 452630, was 244631); the red reproduces the old run to the texel.
+
+## DDGIREADPERF1 (2026-11-02): the cell programs read the GI volume at one site
+
+The Museum of Freedom interior at Medium spent ~102 ms in the opaque pass with the ray-traced GI volume on and ~12 with
+it off, while the screen pass that reads the volume (PERFFIX2) costs under 1 ms. The cost was the read's CODE, not its
+work: fo4_cell inlined the read at each of its cellGiSample sites (cellGiSkyK, cellLit's cellGiE, the probe and pass
+views) and its light loop ran 1.8x slower with no read executed (offline, 300 lights at 1920x1045: 40 ms off, 72 ms
+with the volume compiled in). Now fo4_default.frag and pbrm_default.frag define CELL_GI_ONEREAD and call cellGiFirst
+once in main: it reads the volume at the P and N every later site asks for, takes cellSpecSky's lobe visibility in the
+same read (FIX1101A's two-direction read), and leaves the memo; after it the sites compile to the memo alone. Same
+call, same arguments: the values are the ones the old sites read. Offline bench (fo4_cell, 300 lights): ReSTIR preset
+(Medium+) 72.6 -> 50.4 ms, cascades only (Low) 72.7 -> 50.1; pbrm_cell ReSTIR 59.6 -> 38.2 (Low unchanged, 56.2).
+Red `WW_CELL_RTDDGI_ONEREAD=0` (the loader's `WW_CELL_GI_ONEREAD_RED`): a read at every site, main's machine code
+(binaries identical but the hash, 47 programs x 3 RT sets). The FIX1101A slowread red now needs the red too. With the
+volume off every program is main's (141 binaries identical).
+
+## PRECIPLOOK1 (2026-11-02): rain as a water lens, lit snow flakes, one clump atlas, 3D hail; sleet removed
+
+Behind `WW_CELL_PRECIP_LOOK` (off by default; `rain`, `snow`, `clump`, `hail`, or `1`/`on`/`all`; GPU field only), with
+`WW_CELL_PRECIP_LOOK_RED=1` drawing the old path. The census line adds `look <parts> (shutter 1/120 s)` while it is on.
+- Rain: the drop is a clear water lens, not a grey card. Each streak is the drop's disc swept over the 1/120 s shutter
+  (a 2 mm drop at about 6.5 m/s covers 5.4 cm, a 9 m/s one 7.5 cm): a pixel's coverage is the share of the shutter the
+  disc sits on it, so coverage x area stays pi r^2 (Garg & Nayar 2006; Tariq 2007; Tatarchuk 2006). Its light is the
+  lamps and sky through a water sphere's phase function (Fresnel + refraction, 64-bin table from a ray trace, g 0.767)
+  and the env cube; its brightness flickers along the streak with the drop's n = 2 oscillation. The quad is the drop's
+  own size (Marshall-Palmer sizes, Beard-Chuang shapes, Gunn-Kinzer speeds as before).
+- Snow: snow_fine and snow_far_dot gain normal maps (`*_n.dds`, DirectX green). Their translucency splits into a thin
+  part (the light through the flake, which a backlit flake glows with) and a thick part shaded by the normal (a flake
+  facing a lamp is lit, with a small facet glint).
+- Clumps: snow_wet_clump and snow_big_clump draw from one density atlas (`snow_clump_d.dds` + `_n`); a threshold
+  picks the look (dry, loose: 0.1 over 1.0; wet, compact: 0.05 over 0.5) and the colour (0.95, 0.82) and
+  translucency (0.6, 0.3) stay the type's. The two old atlases are the red.
+- Hail: rebuilt from a 3D shape (`hail3d_d.dds` + `_n`): lumpy ice with a clear shell and a milky core.
+- Sleet is no longer a type: its atlas, its rows and its tests are gone, and a `.recx` layer naming it is dropped
+  with a note (use rain or hail). The other types' field seeds are unchanged.
+- The shipped atlases moved to `Textures/FO4CS/Precip/`; a path under the old `Textures/WW/Precip/` is still found.
+- tests/precip: rule 6 (the coverage integral, the drawn sizes, the clump fit, the flicker and oscillation) with red 16
+  (the old path); rule 7 (the shader's phase table against its Monte Carlo fixture).
+
+## ESPWRITE3 (2026-11-02): move, turn or disable a reference already in an interior cell
+
+- `NifSkope -no-gui espwrite edit <cell.wwcell> <out.esp> [--append] <ref> [move x y z] [turn deg] [disable] ...`
+  writes an override of each ref's winning record: DATA or the 0x800 flag changed, every other subrecord kept, the
+  record written uncompressed. Temporary refs are listed in ONAM. With --append, a ref the file already holds (its
+  own, or an earlier override) is changed in place. It never truly deletes anything.
+- It reads the cell back on the new load order. Each changed ref must appear once, won by the new plugin, at its new
+  pose. Every other ref in the cell must be unchanged.
+- Interior cells only; an exterior cell is refused by name. The cell view has no buttons for it yet.
+- Reds: WW_ESPWRITE_RED=editkeep leaves DATA unchanged, editflag skips 0x800.
+
+## ESPWRITE2 (2026-11-02): place a reference in the cell view and save it as a plugin
+
+The Cell panel gains an "Edits" section (switch WW_CELL_EDIT=0 hides it). Nothing changes until you place something.
+- Place: the button, or Shift+A in the view. A ghost box with a heading line follows the surface under the cursor:
+  depth readback, then a ray-triangle refine on the shapes near the hit (src/cellsurface).
+- Base: XMarkerHeading first, then XMarker, or any EditorID typed in the box. The ID is resolved in the cell's own
+  load order.
+- Turning:
+  - press-drag sets the yaw;
+  - T then a click faces a second point;
+  - the wheel turns 15 degrees, Ctrl+wheel 1;
+  - Yaw is a number field.
+- Align is "Z up" (yaw only) or "Flat on the surface" (up along the hit normal). Ground snap (G) drops a point on a wall
+or ceiling to the floor below.
+- Esc cancels the drop, then leaves Place.
+- Edit list: each placed ref is listed and can be removed.
+- Plugin: a path plus New file / Add to existing, and ESL.
+- Save: Save writes the plugin with src/io/espwrite.
+  - Add to existing keeps every ref already there, with its form id. New ids start past the file's HEDR next id.
+  - The cell then re-opens on the new load order.
+  - The saved .wwcell names the plugin last.
+
+`NifSkope -no-gui espwrite build|yaw|reemit|roundtrip|place` runs the ESPWRITE1 gates and the save on the built exe.
+Reds:
+- WW_CELLSURF_RED=lin reads the depth as linear.
+- WW_CELLEDIT_RED=ghost draws the un-negated euler.
+- WW_ESPWRITE_RED=renumber gives every ref a fresh id on append.
+
+Tests:
+- tests/cellsurface: the unit test.
+- tests/espwrite/celledit_gates.py:
+  - ghost recomputes the AABB and heading tip from the written REFR and the master's OBND;
+  - gap/append checks the "Add to existing" ids.
+
 ## FARWATER5 L3 (FARLOOK1101, 2026-11-02): a log speed nibble for the far river bake (flow encoding 1, OFF)
 
 The lodgen river bake writes speed as code = round(8 r), where r = the texel speed / the body's median. Code 15 is
@@ -111,64 +217,6 @@ and the WW_CELL_HDR_DUMP gate target. The rule is a pure header (src/gl/cellhdrf
 passes, the old rule as red fails). `WW_CELL_HDR_FORMAT=rgba32f` asks for the old frame; the reds `WW_FRAMEFMT1_RED=1`,
 `WW_CELL_HDR_FORMAT_RED=1` and `WW_AAFORMAT1_RED=1` force RGBA32F everywhere, as before. The air volumes were already
 RGBA16F (PERFFIX3); their slices and the running integrate stay RGBA32F (transmittance precision).
-## INTGI1 (2026-11-02): the air's sun gate indoors (FOGLEAK1-INT)
-
-Under WW_CELL_FOGLEAK + WW_CELL_RTDDGI (both off by default), FOGLEAK1's fix 2 now runs in an interior that is not
-sunlit too. Such a cell has no shadow map for its lighting template's directional, so its share in the air takes the
-traced volume's gate alone (the miss share toward it): an opening (the museum's open top) keeps the beam, a closed room's
-air loses it; the walls' bounce of it still reaches the air through fix 1's env share. The surfaces keep the directional
-unshadowed, as vanilla. Red `WW_CELL_AIR_RED=nointsungate` (bit 16) gives indoors as before; `nosungate` now drops
-the gate indoors and outdoors. tests/fogleak/fogleak_check.py gains gate I (closed room: air sun 0 inside; open room:
-unchanged). With the switches off the shader binaries are identical.
-
-SSGIHO-INT: in such an interior under the traced volume the screen-space bounce now marches only to the volume's
-smallest probe spacing (140 u by default, never past its 256): the probes hold the occlusion and the bounce of what lies
-farther, the screen keeps the contact scale, and the fill law then darkens and adds only that share. Offline (the SSGI
-bench's room, Ultra) the occluded share falls from 0.090 to 0.061 and the bounce's mean from 0.111 to 0.078, at the same
-cost. The census line `cell ssgi:` ends `radius <n>`. Red `WW_CELL_SSGI_RED=nointradius`; volume off (the default):
-unchanged.
-
-REFLPROBECLI2: `reflcensus --auto N --interior` puts its cameras eye over every floor that has a ceiling over it (each
-storey of a column, eye + 32 of headroom at least) instead of on the topmost surface, which indoors is mostly the roof.
-`--red roof` gives the old cameras. tests/reflcensus/run.sh gains a two-storey box and that red. Museum (`--auto 6`):
-49 cameras instead of 29; hits 44.4 % (was 33.1 %), sky misses 26.1 % (was 42.4 %), below-horizon misses 29.5 % (was
-24.5 %, of them past the soup 452630, was 244631); the red reproduces the old run to the texel.
-## DDGIREADPERF1 (2026-11-02): the cell programs read the GI volume at one site
-
-The Museum of Freedom interior at Medium spent ~102 ms in the opaque pass with the ray-traced GI volume on and ~12 with
-it off, while the screen pass that reads the volume (PERFFIX2) costs under 1 ms. The cost was the read's CODE, not its
-work: fo4_cell inlined the read at each of its cellGiSample sites (cellGiSkyK, cellLit's cellGiE, the probe and pass
-views) and its light loop ran 1.8x slower with no read executed (offline, 300 lights at 1920x1045: 40 ms off, 72 ms
-with the volume compiled in). Now fo4_default.frag and pbrm_default.frag define CELL_GI_ONEREAD and call cellGiFirst
-once in main: it reads the volume at the P and N every later site asks for, takes cellSpecSky's lobe visibility in the
-same read (FIX1101A's two-direction read), and leaves the memo; after it the sites compile to the memo alone. Same
-call, same arguments: the values are the ones the old sites read. Offline bench (fo4_cell, 300 lights): ReSTIR preset
-(Medium+) 72.6 -> 50.4 ms, cascades only (Low) 72.7 -> 50.1; pbrm_cell ReSTIR 59.6 -> 38.2 (Low unchanged, 56.2).
-Red `WW_CELL_RTDDGI_ONEREAD=0` (the loader's `WW_CELL_GI_ONEREAD_RED`): a read at every site, main's machine code
-(binaries identical but the hash, 47 programs x 3 RT sets). The FIX1101A slowread red now needs the red too. With the
-volume off every program is main's (141 binaries identical).
-## PRECIPLOOK1 (2026-11-02): rain as a water lens, lit snow flakes, one clump atlas, 3D hail; sleet removed
-
-Behind `WW_CELL_PRECIP_LOOK` (off by default; `rain`, `snow`, `clump`, `hail`, or `1`/`on`/`all`; GPU field only), with
-`WW_CELL_PRECIP_LOOK_RED=1` drawing the old path. The census line adds `look <parts> (shutter 1/120 s)` while it is on.
-- Rain: the drop is a clear water lens, not a grey card. Each streak is the drop's disc swept over the 1/120 s shutter
-  (a 2 mm drop at about 6.5 m/s covers 5.4 cm, a 9 m/s one 7.5 cm): a pixel's coverage is the share of the shutter the
-  disc sits on it, so coverage x area stays pi r^2 (Garg & Nayar 2006; Tariq 2007; Tatarchuk 2006). Its light is the
-  lamps and sky through a water sphere's phase function (Fresnel + refraction, 64-bin table from a ray trace, g 0.767)
-  and the env cube; its brightness flickers along the streak with the drop's n = 2 oscillation. The quad is the drop's
-  own size (Marshall-Palmer sizes, Beard-Chuang shapes, Gunn-Kinzer speeds as before).
-- Snow: snow_fine and snow_far_dot gain normal maps (`*_n.dds`, DirectX green). Their translucency splits into a thin
-  part (the light through the flake, which a backlit flake glows with) and a thick part shaded by the normal (a flake
-  facing a lamp is lit, with a small facet glint).
-- Clumps: snow_wet_clump and snow_big_clump draw from one density atlas (`snow_clump_d.dds` + `_n`); a threshold
-  picks the look (dry, loose: 0.1 over 1.0; wet, compact: 0.05 over 0.5) and the colour (0.95, 0.82) and
-  translucency (0.6, 0.3) stay the type's. The two old atlases are the red.
-- Hail: rebuilt from a 3D shape (`hail3d_d.dds` + `_n`): lumpy ice with a clear shell and a milky core.
-- Sleet is no longer a type: its atlas, its rows and its tests are gone, and a `.recx` layer naming it is dropped
-  with a note (use rain or hail). The other types' field seeds are unchanged.
-- The shipped atlases moved to `Textures/FO4CS/Precip/`; a path under the old `Textures/WW/Precip/` is still found.
-- tests/precip: rule 6 (the coverage integral, the drawn sizes, the clump fit, the flicker and oscillation) with red 16
-  (the old path); rule 7 (the shader's phase table against its Monte Carlo fixture).
 
 ## REFLPROBECLI1 (TOOLS1101, 2026-11-01): count the reflection probes' below-horizon misses without a window
 
@@ -181,50 +229,6 @@ ray runs past the soup's edge. The rule it mirrors is in src/reflcensus.h; tests
 ray-plane arithmetic on a square floor, with two reds (`--red lift`: the horizon at d.z < 0.1; `--red noreach`: no far
 plane) and a check that every mirrored literal is still in cellreflprobe.cpp and its two shaders. Nothing in the
 viewer changes.
-## ESPWRITE3 (2026-11-02): move, turn or disable a reference already in an interior cell
-
-- `NifSkope -no-gui espwrite edit <cell.wwcell> <out.esp> [--append] <ref> [move x y z] [turn deg] [disable] ...`
-  writes an override of each ref's winning record: DATA or the 0x800 flag changed, every other subrecord kept, the
-  record written uncompressed. Temporary refs are listed in ONAM. With --append, a ref the file already holds (its
-  own, or an earlier override) is changed in place. It never truly deletes anything.
-- It reads the cell back on the new load order. Each changed ref must appear once, won by the new plugin, at its new
-  pose. Every other ref in the cell must be unchanged.
-- Interior cells only; an exterior cell is refused by name. The cell view has no buttons for it yet.
-- Reds: WW_ESPWRITE_RED=editkeep leaves DATA unchanged, editflag skips 0x800.
-
-## ESPWRITE2 (2026-11-02): place a reference in the cell view and save it as a plugin
-
-The Cell panel gains an "Edits" section (switch WW_CELL_EDIT=0 hides it). Nothing changes until you place something.
-- Place: the button, or Shift+A in the view. A ghost box with a heading line follows the surface under the cursor:
-  depth readback, then a ray-triangle refine on the shapes near the hit (src/cellsurface).
-- Base: XMarkerHeading first, then XMarker, or any EditorID typed in the box. The ID is resolved in the cell's own
-  load order.
-- Turning:
-  - press-drag sets the yaw;
-  - T then a click faces a second point;
-  - the wheel turns 15 degrees, Ctrl+wheel 1;
-  - Yaw is a number field.
-- Align is "Z up" (yaw only) or "Flat on the surface" (up along the hit normal). Ground snap (G) drops a point on a wall
-or ceiling to the floor below.
-- Esc cancels the drop, then leaves Place.
-- Edit list: each placed ref is listed and can be removed.
-- Plugin: a path plus New file / Add to existing, and ESL.
-- Save: Save writes the plugin with src/io/espwrite.
-  - Add to existing keeps every ref already there, with its form id. New ids start past the file's HEDR next id.
-  - The cell then re-opens on the new load order.
-  - The saved .wwcell names the plugin last.
-
-`NifSkope -no-gui espwrite build|yaw|reemit|roundtrip|place` runs the ESPWRITE1 gates and the save on the built exe.
-Reds:
-- WW_CELLSURF_RED=lin reads the depth as linear.
-- WW_CELLEDIT_RED=ghost draws the un-negated euler.
-- WW_ESPWRITE_RED=renumber gives every ref a fresh id on append.
-
-Tests:
-- tests/cellsurface: the unit test.
-- tests/espwrite/celledit_gates.py:
-  - ghost recomputes the AABB and heading tip from the written REFR and the master's OBND;
-  - gap/append checks the "Add to existing" ids.
 
 ## ESPWRITE1 (2026-11-02): the plugin writer for cell edits (no UI yet)
 
