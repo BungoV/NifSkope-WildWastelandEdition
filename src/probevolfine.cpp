@@ -21,7 +21,7 @@
 namespace {
 
 constexpr double kFinePi = 3.14159265358979323846;
-// ROOMFIT10: the slack of a threshold box's world bounds in the quick rejects (units; the box tests round at ~1e-10)
+// the slack of a threshold box's world bounds in the quick rejects (units; the box tests round at ~1e-10)
 constexpr double kTBoxPad = 1e-3;
 
 //! volcheck's lattice jitter (src/probevolcheck.cpp), so a room square to the world classes the very points volcheck will
@@ -36,7 +36,7 @@ double fineJitter( int x, int y, int z, int axis )
 	return double( v & 0xFFFF ) / 65535.0 - 0.5;
 }
 
-//! VOLFIT5: how many big rooms share the machine; a big room's own fan-outs take their share of the threads
+//! how many big rooms share the machine; a big room's own fan-outs take their share of the threads
 thread_local int tlFineShare = 1;
 
 //! n jobs over the machine's threads, or on this thread (a room small enough to run whole on one worker)
@@ -209,7 +209,7 @@ std::vector<std::vector<ProbeVolumeShape>> probeVolumesFineFit( const probebvh::
 	{
 		double c[3], h[3], r[3][3], lo[3], hi[3];
 		bool seg( const double a[3], const double b[3] ) const { return enter( a, b ) >= 0; }
-		//! ROOMFIT10: the world box lo..hi, grown by m, meets the axis box lo2..hi2
+		//! the world box lo..hi, grown by m, meets the axis box lo2..hi2
 		bool meets( const double lo2[3], const double hi2[3], double m ) const
 		{
 			return hi[0] + m >= lo2[0] && lo[0] - m <= hi2[0] && hi[1] + m >= lo2[1] && lo[1] - m <= hi2[1] && hi[2] + m >= lo2[2]
@@ -218,7 +218,7 @@ std::vector<std::vector<ProbeVolumeShape>> probeVolumesFineFit( const probebvh::
 		//! where segment a..b enters the box, as a fraction of it (0 when a is inside); -1 when it misses
 		double enter( const double a[3], const double b[3] ) const
 		{
-			// ROOMFIT10: a segment whose own box stays clear of the world box (by far more than the rounding below) misses
+			// a segment whose own box stays clear of the world box (by far more than the rounding below) misses
 			{
 				const double sl[3] = { std::min( a[0], b[0] ), std::min( a[1], b[1] ), std::min( a[2], b[2] ) };
 				const double sh[3] = { std::max( a[0], b[0] ), std::max( a[1], b[1] ), std::max( a[2], b[2] ) };
@@ -283,7 +283,7 @@ std::vector<std::vector<ProbeVolumeShape>> probeVolumesFineFit( const probebvh::
 		upper += z > 0;
 	}
 	const double skyLim = spec.skyMax * upper, openLim = spec.openMax * double( sdirs.size() );
-	// lane HALLINDOOR1: rays through a room's opening to the outside stay indoor (volcheck's rule; none = VOLRAY1's)
+	// rays through a room's opening to the outside stay indoor (volcheck's rule; none = VOLRAY1's)
 	ProbeVolOpenings openings;
 	if ( g.openings ) {
 		for ( const ProbeVolumeShape & s : *g.openings ) {
@@ -332,10 +332,10 @@ std::vector<std::vector<ProbeVolumeShape>> probeVolumesFineFit( const probebvh::
 
 	std::atomic<qint64> nRays( 0 ), nFree( 0 ), nSnap( 0 ), nPts( 0 ), nRoom( 0 ), nCov( 0 ), nForeign( 0 ), nEdgeCast( 0 );
 	std::atomic<qint64> nsRays( 0 ), nsCover( 0 ), nsClass( 0 ), nsGreedy( 0 ), nsMoves( 0 );
-	// VOLFIT6: the edge stage's profile (thread-summed over rooms; each part is the room's own wall)
+	// the edge stage's profile (thread-summed over rooms; each part is the room's own wall)
 	std::atomic<qint64> nsEFl( 0 ), nsESeg( 0 ), nsEBuild( 0 ), nsECast( 0 ), nsEScat( 0 ), nsELock( 0 ), nsEGpu( 0 ), nsEPost( 0 );
 	std::atomic<qint64> nECalls( 0 ), nERecast( 0 ), nsSmallMax( 0 ), nsCLock( 0 ), nsCGpu( 0 ), nsCPost( 0 ), nCRays( 0 ), nCRecast( 0 );
-	// VOLFIT3: per room the grid fit's score and the moved set's (u3 of uncovered room air + badW x foreign air held),
+	// per room the grid fit's score and the moved set's (u3 of uncovered room air + badW x foreign air held),
 	// and its extra lattice boxes with what each cuts
 	struct V3Room
 	{
@@ -346,7 +346,7 @@ std::vector<std::vector<ProbeVolumeShape>> probeVolumesFineFit( const probebvh::
 		std::vector<double> gain;
 	};
 	std::vector<V3Room> v3r( static_cast<size_t>( rooms ) );
-	/* ROOMFIT11: while the small rooms run, their casts go through one batcher (many rooms' rays in one scene cast);
+	/* while the small rooms run, their casts go through one batcher (many rooms' rays in one scene cast);
 	 * null = each room casts alone (the big rooms, and red WW_CELL_ROOMFIT_RED=serial: ROOMFIT10's path) */
 	RoomCastBatcher<bakert::XRay, bakert::XHit> * smallBatch = nullptr;
 	auto sceneCast = [&]( const bakert::XRay * rays, size_t n, bakert::XHit * hits, bool anyHit, bool par ) {
@@ -450,7 +450,7 @@ std::vector<std::vector<ProbeVolumeShape>> probeVolumesFineFit( const probebvh::
 		const bakert::CastTimes ct0 = bakert::castTimes();
 		QElapsedTimer te;
 		// segments to the +u +v +z neighbour: cut when a triangle lies on them (only where the room owns an end).
-		// VOLFIT5: with a scene, a slab of slices gathers its rays and casts them as one batch (any-hit on the whole-ray
+		// with a scene, a slab of slices gathers its rays and casts them as one batch (any-hit on the whole-ray
 		// tracer, whose answer is the CPU tree's); the cut bits come out the same
 		const bool edgeCast = g.scene && spec.edgeGpu;
 		const size_t slab = edgeCast ? std::max<size_t>( 1, size_t( par ? 4000000 / std::max( 1, tlFineShare ) : 500000 ) / ( 3 * sk ) )
@@ -463,7 +463,7 @@ std::vector<std::vector<ProbeVolumeShape>> probeVolumesFineFit( const probebvh::
 			fineFor( k1 - k0, par, [&]( size_t ks ) {
 				const int k = int( k0 + ks );
 				qint64 nr = 0, nf = 0;
-				/* ROOMFIT10: only the thresholds whose world box meets this row's segments (lattice i 0..nx + 1, j..j + 2,
+				/* only the thresholds whose world box meets this row's segments (lattice i 0..nx + 1, j..j + 2,
 				 * k..k + 2 hold every point of the row and its +u +v +z neighbours, jitter included) can cut one; the
 				 * row keeps thrNear's order, so the cut bits are the same (Concord's segment tests: 54 s summed) */
 				std::vector<const TBox *> thrRow;
@@ -1375,10 +1375,9 @@ std::vector<std::vector<ProbeVolumeShape>> probeVolumesFineFit( const probebvh::
 			nsMoves += t0.nsecsElapsed();
 			return;
 		}
-		// faces onto the triangles: when every room point on a face meets a triangle (or a threshold) within a step,
-		// the face stands at the nearest of them, at most `poke` past a triangle: the lattice stops up to a step short
-		// of a wall and volcheck reads that sliver as a gap. Otherwise it sits half a step past its outer points
-		// (open air or another box's points) unless a triangle is nearer.
+		// faces onto the triangles: when every room point on a face meets a triangle (or a threshold) within a
+		// step, the face stands at the nearest of them, at most `poke` past a triangle: the lattice stops up
+		// to a step short of a wall and volcheck reads that sliver as a gap.
 		std::vector<ProbeVolumeShape> shapes( boxes.size() );
 		std::vector<std::array<double, 6>> ext( boxes.size() );   // the snapped box in lattice units (one frame per room)
 		fineFor( boxes.size(), par, [&]( size_t bi ) {
@@ -1532,7 +1531,7 @@ std::vector<std::vector<ProbeVolumeShape>> probeVolumesFineFit( const probebvh::
 	}
 	S.msBig = tb.nsecsElapsed() / 1e6;
 	tb.start();
-	// ROOMFIT11: the small rooms' casts merged across rooms (a ray's hit depends on the ray alone, so no byte moves)
+	// the small rooms' casts merged across rooms (a ray's hit depends on the ray alone, so no byte moves)
 	static const bool smallSerial = qEnvironmentVariable( "WW_CELL_ROOMFIT_RED" ) == QLatin1String( "serial" );
 	RoomCastBatcher<bakert::XRay, bakert::XHit> batcher( [&]( const bakert::XRay * rays, size_t n, bakert::XHit * hits, bool anyHit ) {
 		g.scene->cast( rays, n, hits, anyHit );
@@ -1552,7 +1551,7 @@ std::vector<std::vector<ProbeVolumeShape>> probeVolumesFineFit( const probebvh::
 	smallBatch = nullptr;
 	S.msSmall = tb.nsecsElapsed() / 1e6;
 	if ( !spec.legacy && g.grid ) {
-		// VOLFIT3: each room the best of its grid fit and its moved set within the grid fit's count; then the extra boxes
+		// each room the best of its grid fit and its moved set within the grid fit's count; then the extra boxes
 		// that cut the most score per shape, over all rooms, until the budget (budget x the grid fit's shapes)
 		std::vector<int> cur( static_cast<size_t>( rooms ), -1 );
 		auto nOf = [&]( const V3Room & V, int k ) { return k < 0 ? V.nA : int( V.base.size() ) + k; };
@@ -1670,7 +1669,7 @@ std::vector<std::vector<ProbeVolumeShape>> probeVolumesFineFit( const probebvh::
 		.arg( qRound( double( nsEPost ) / 1e6 ) ).arg( nECalls.load() ).arg( nERecast.load() ).arg( qRound( double( nsEScat ) / 1e6 ) )
 		.arg( qRound( double( nsCLock ) / 1e6 ) ).arg( qRound( double( nsCGpu ) / 1e6 ) ).arg( qRound( double( nsCPost ) / 1e6 ) )
 		.arg( nCRays.load() ).arg( nCRecast.load() );
-	// ROOMFIT11: the small rooms' split (rooms done, slowest room ms) and how many room casts each scene cast carried
+	// the small rooms' split (rooms done, slowest room ms) and how many room casts each scene cast carried
 	S.prof += QStringLiteral( "; small rooms done %1 of %2 slowest %3 ms, casts %4 (room casts %5 most rooms %6)" )
 		.arg( nSmallDone.load() ).arg( small.size() ).arg( qRound( double( nsSmallMax ) / 1e6 ) )
 		.arg( smallSerial || !g.scene || small.size() < 2 ? QStringLiteral( "serial" ) : QStringLiteral( "batched %1" ).arg( batcher.calls() ) )

@@ -41,7 +41,7 @@ inline const int * wwAoMethodStages( int m )
 	return m == WwAoGtao ? gtao : m == WwAoXeGtao ? xe : m == WwAoHbao ? hbao : none;
 }
 
-/*! lane PERFFIX2 (item 9): the AO quality tier (WW_CELL_AO_QUALITY / WW/CellAoQuality; the built-in presets pick it
+/*! The AO quality tier (WW_CELL_AO_QUALITY / WW/CellAoQuality; the built-in presets pick it
  *  by name): 0 Low, 1 Medium, 2 High, 3 Ultra (the default). The method stays the user's (presets leave methods
  *  alone); the tier scales its sample count. Vanilla (half resolution, the game's SAO): the still view's angles
  *  1 / 3 / 6 / 8 (8 = AO1's, the default picture; 1 = the game's own single frame). The ported methods (full

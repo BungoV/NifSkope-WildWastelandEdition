@@ -1,36 +1,9 @@
 #ifndef PROBERELIGHT_H
 #define PROBERELIGHT_H
 
-/*! RELIGHT THE BAKE WITHOUT REBAKING, ON THE GPU (lane GPURELIGHT1, 2026-10-04; docs/cloud/GPURELIGHT1_DESIGN.md,
- *  docs/PRTP_PLAN.md 2aq).
- *
- *  probeGiRelight (src/probegi.h) lights the bake's surfels, gathers the probes, runs the bounce passes and blends
- *  the grid, tracing every shadow and visibility ray each time. After the rays, every step is LINEAR in the lights
- *  and every operator depends on geometry only. So the relight records its operators once (ProbeRelightOps, filled
- *  by probeGiRelight when ProbeGiSpec::record is set) and a light change re-runs only the arithmetic:
- *    1. direct: each surfel sums its PAIRS (the lights its shadow rays reached: distance, N.L, the spot's cosine),
- *       with the light's live color, radius (at most the baked one) and curve; plus the sun and the interior
- *       directional; B1 = albedo x E
- *    2. gather: each probe sums its LINKS (omega x glass tint x the six axis cosines) x B, x the unlinked
- *       renormalization, + its sky part
- *    3. feed: each surfel reads its probes (BOUNCE2's lists): B = B1 + albedo x E_probes / pi; 2-3 repeat
- *    4. grid: each voxel slot blends its probes (ROOMCLAMP1's lists); grown slots take their neighbours' mean
- *  probeRelightCpu runs it in double (the gate's reference: the same sums in the same order as probeGiRelight);
- *  ProbeRelightGpu runs it in GL 4.3 compute (float32, a thread per row; the only atomic is the settle test's max).
- *
- *  DOORS (bungo 2026-10-03: "a closed door blocks light fully, unless the door itself has a hole or glass pane"). The
- *  bake is made with the doors open (they only tag the openings). Every recorded ray that crosses a door's box is
- *  re-traced against THAT door's real triangles (ProbeSoup::DoorGeom: the placed door's mesh as it stands, closed,
- *  with its ALPHATEST1 alpha-test mask and its blended glass): a solid face stops it (0), a hole lets it pass (1), a
- *  pane tints it (the bake's glass rule, 1 - a (1 - c)). Links are aggregates over a surfel's cell, so a link's
- *  transmittance is the mean over 16 points spread over the surfel's cell. A closed door then multiplies each entry
- *  that crosses it by that transmittance (visibility entries of the feed and the grid: 0 or 1, renormalized).
- *  The light a closed door's own face would bounce back is not added (it has no surfels): the closed share is dark.
- *
- *  THE LIGHT RECORD shared with FARVIEW1 (docs/cloud/FARVIEW1b_DESIGN.md 3.3): lights_X_Y.wlt (the light table,
- *  FARVIEW1b's byte layout) and relight_X_Y.wlp (this lane: per light, its pairs keyed by surfel id = the index in
- *  that sector's .tbk surfel order). Lights that a switch (enable parent) or a script turns on and off are their
- *  own entries with their own group key; the live state picks them. Layouts: probeRelightWriteRecords. */
+//! RELIGHT THE BAKE WITHOUT REBAKING, ON THE GPU:
+//! probeGiRelight (src/probegi.h) lights the bake's surfels, gathers the probes, runs the bounce passes and
+//! blends the grid, tracing every shadow and visibility ray each time.
 
 #include <QString>
 #include <QStringList>
@@ -45,11 +18,9 @@
 
 struct WwCellLight;
 
-/*! The doors' real geometry as a tracer (ProbeSoup::DoorGeom), local to the relight's tracer origin O (x, y), the
- *  bake tracer's float conversion, so a ray meets a door's triangle here exactly where the soup's own BVH would.
- *  crossed(): the door boxes a segment crosses (at most two kept, nearest first, `over` counts the rest) and each
- *  one's transmittance when closed: rgb (0 at a solid face, the alpha-test holes pass, the panes tint 1 - a (1 - c))
- *  and the same with the panes opaque (the "glassopaque" red). clearEnd: the last units before q are not tested. */
+//! The doors' real geometry as a tracer (ProbeSoup::DoorGeom), local to the relight's tracer origin O (x, y),
+//! the bake tracer's float conversion, so a ray meets a door's triangle here exactly where the soup's own BVH
+//! would.
 class ProbeDoorTracer
 {
 public:
@@ -101,7 +72,7 @@ struct ProbeRelightOps
 		quint32 ref = 0;                    //!< the placed reference (0: a synthetic light)
 		quint64 groupKey = 0;               //!< FARVIEW1b 3.2: kind (62-63) | parity (40) | plugin (24-39) | local form (0-23)
 		quint16 flags = 0;                  //!< FARVIEW1b light flags: 1 spot, 4 negative, 8 flicker, 16 ambient only, 32 has a dot
-		float dot[3] = { 0, 0, 0 };         //!< lane FARVIEW1: the bulb dot's intensity I_dot (FARVIEW1b 5.1), linear; 0 = no dot
+		float dot[3] = { 0, 0, 0 };         //!< the bulb dot's intensity I_dot (FARVIEW1b 5.1), linear; 0 = no dot
 	};
 	std::vector<Light> lights;
 	// ---- 1. direct: the pairs, by surfel
@@ -115,7 +86,7 @@ struct ProbeRelightOps
 	std::vector<double> dirK;               //!< per surfel: N . dirTo / |dirTo| when > 0, else 0 (interior directional)
 	std::vector<double> sunK;               //!< per surfel: N . sunTo where the sun ray passed, else 0
 	bool sunOn = false;
-	std::vector<double> le;                 //!< 3 a surfel: its own glow (EMISSIVEGI1), added once to B1
+	std::vector<double> le;                 //!< 3 a surfel: its own glow, added once to B1
 	double sun[3] = { 0, 0, 0 };
 	// ---- 2. gather: the links, by probe
 	std::vector<int> linkStart;
@@ -150,13 +121,13 @@ struct ProbeRelightOps
 	std::vector<int> growSlot;              //!< grown slots in their order (ring 1, then ring 2)
 	std::vector<int> growStart, growSrc;    //!< per grown slot: the neighbour slots averaged
 	int growRing0 = 0;                      //!< growSlot[0 .. growRing0) = ring 1, the rest ring 2
-	/* lane GPURELIGHT1 (10-23) Probe sharing (probeShareNu, probegi.h ProbeGiSpec::share): per probe its neighbours
+	/* Probe sharing (probeShareNu, probegi.h ProbeGiSpec::share): per probe its neighbours
 	 * (same room, a clear segment), the spatial weight and the door crossings (visibility rule); empty = not recorded */
 	std::vector<int> shareStart, shareProbe;
 	std::vector<double> shareG;
 	std::vector<int> shareDoor;             //!< 2 an entry
 	std::vector<float> shareT;              //!< 8 an entry
-	/*! SKY3: the air volume (WwCellGi::air) as the probes it blends, kAirTaps a voxel (the heaviest, weights summing
+	/*! the air volume (WwCellGi::air) as the probes it blends, kAirTaps a voxel (the heaviest, weights summing
 	 *  to 1; probe -1 = none). A door's live relight moves the air by these x the probes' change. Empty: no air. */
 	static constexpr int kAirTaps = 8;
 	std::vector<int> airProbe;
@@ -170,7 +141,7 @@ struct ProbeRelightOps
 	qint64 doorOver2 = 0;                   //!< entries crossing more than two door boxes (the third on is ignored)
 	bool doorGeometry = false;              //!< the soup carried the doors' real geometry (else a closed door = a blanket cut)
 	double msRecord = 0;
-	bool interior = true;                   //!< lane FARVIEW1: the .wlt's flag bit 0 (the cell view sets it; the gate scenes are interiors)
+	bool interior = true;                   //!< the .wlt's flag bit 0 (the cell view sets it; the gate scenes are interiors)
 };
 
 //! The live state of one relight
@@ -179,9 +150,9 @@ struct ProbeRelightState
 	std::vector<float> color;               //!< 3 a light: the live color x dimmer (0: off); empty = as baked
 	std::vector<float> radius;              //!< per light; empty = as baked; > baked is clamped (census)
 	std::vector<quint8> doorClosed;         //!< per door slot; empty = all open (the bake)
-	std::vector<float> doorShut;            //!< lane DOORLIVE1: per slot shut fraction 0..1 (< 0 or absent: doorClosed)
+	std::vector<float> doorShut;            //!< per slot shut fraction 0..1 (< 0 or absent: doorClosed)
 	float sun[3] = { -1, -1, -1 };
-//! lane DOORLIVE1: each door slot's shut fraction (doorShut over doorClosed)
+//! each door slot's shut fraction (doorShut over doorClosed)
 std::vector<float> probeRelightShut( const ProbeRelightState & st, size_t nDoors );
           //!< < 0 = as baked
 	int passes = 0;                         //!< 0 = until settled (the ops' rule), n = exactly n
@@ -189,13 +160,13 @@ std::vector<float> probeRelightShut( const ProbeRelightState & st, size_t nDoors
 	 *  that crosses its box (its holes and panes ignored), "glassopaque" a pane stops light like wood, "dooropen" a
 	 *  closed door is ignored */
 	QString red;
-	/*! lane FARVIEW1: the placed lights alone -- no sun, no interior directional, no glow (Le), no sky. The far term's
+	/*! the placed lights alone -- no sun, no interior directional, no glow (Le), no sky. The far term's
 	 *  layers (src/farlight.h) are linear in the placed lights only with these out; false = as before */
 	bool placedOnly = false;
-	bool wantE = false;                     //!< lane FARVIEW1: fill ProbeRelightOut::Es
-	bool share = false;                     //!< lane GPURELIGHT1 (10-23): Probe sharing after the last gather (needs ops.shareStart)
-	int sharePasses = 1;                    //!< lane GIPROBE2: Wide probe sharing, the share step this many times (nu kept)
-	wwlp::Params lightPhys;                 //!< lane LIGHTPHYS2: the falloff and intensity curve (default: the game's)
+	bool wantE = false;                     //!< fill ProbeRelightOut::Es
+	bool share = false;                     //!< Probe sharing after the last gather (needs ops.shareStart)
+	int sharePasses = 1;                    //!< Wide probe sharing, the share step this many times (nu kept)
+	wwlp::Params lightPhys;                 //!< the falloff and intensity curve (default: the game's)
 };
 
 struct ProbeRelightOut
@@ -206,18 +177,18 @@ struct ProbeRelightOut
 	int passes = 0;
 	bool settled = false;
 	std::vector<double> passLog;            //!< per pass: change, sum B, max B
-	/*! lane FARVIEW1 (wantE): 3 a surfel, the surfel's irradiance E = E_direct + E_feed / pi of the last pass
+	/*! 3 a surfel, the surfel's irradiance E = E_direct + E_feed / pi of the last pass
 	 *  (FARVIEW1 design section 3: E, not B = albedo x E, so a far texture's own albedo multiplies it) */
 	std::vector<double> Es;
 	int slotsEmptied = 0;                   //!< slots a closed door left with no visible probe (valid 0)
 	int radiusClamped = 0;
 	double ms = 0;                          //!< wall time of the run
 	double msKernel[5] = { 0, 0, 0, 0, 0 }; //!< GPU: direct, gather (all), feed (all), grid, readback
-	double msShare = 0;                     //!< lane GPURELIGHT1 (10-23): Probe sharing (GPU: its two kernels)
+	double msShare = 0;                     //!< Probe sharing (GPU: its two kernels)
 	double shareNuMean = 0, shareMoved = 0; //!< mean weight of the probes' own noise; sum |E' - E| / sum E
 };
 
-/* lane GPURELIGHT1 (10-23) Probe sharing: a probe gathered from few bright links is noisy (its estimate's relative
+/* Probe sharing: a probe gathered from few bright links is noisy (its estimate's relative
  * error ~ sqrt(sum L^2) / sum L, the SVGF variance guide); it takes nu x its clear same-room neighbours' light in one
  * normalized step: E' = (E + sum nu g E_j) / (1 + sum nu g). Sky-lit probes (m1 holds the sky) keep nu near 0. */
 constexpr double kProbeShareReach = 1.5;   // x the median probe spacing: the 6 face neighbours of a lattice, not the 12 edge ones
@@ -232,7 +203,7 @@ inline double probeShareNu( double sum, double sq, double kUnl, double skyLum )
 	return nu < 1.0 ? nu : 1.0;
 }
 
-/* lane GIPROBE2: DDGI depth visibility (Majercik et al. 2019, JCGT 8(2)): per probe an 8x8 octahedral map of the mean
+/* DDGI depth visibility (Majercik et al. 2019, JCGT 8(2)): per probe an 8x8 octahedral map of the mean
  * and mean square distance to what it sees; a point past the mean gets the Chebyshev bound var / (var + (d - mean)^2) */
 constexpr int kDepthVisN = 8;
 constexpr double kDepthVisFloor = 0.05;   // our floor: a probe never drops out entirely (the binary wall test does that)
@@ -265,7 +236,7 @@ private:
 	Impl * d;
 };
 
-//! lane FARVIEW1: RGB9E5 pack / unpack (EXT_texture_shared_exponent's rounding; negative = 0)
+//! RGB9E5 pack / unpack (EXT_texture_shared_exponent's rounding; negative = 0)
 quint32 probeRgb9e5( const float c[3] );
 void probeRgb9e5Decode( quint32 packed, float c[3] );
 
@@ -288,10 +259,7 @@ QString probeRelightCensusText( const ProbeRelightOps & ops );
 bool probeRelightWriteRecords( const ProbeRelightOps & ops, const QString & dir, const QStringList & plugins,
 	QString * err, QString * census );
 
-/*! `gpurelight --soup <f> --bake <dir> --out <dir> --light x,y,z,radius,r,g,b[,group] ... [--state <file>]
- *  [--passes n] [--red r] [--gpu-red r]`: relight the given bake (an interior), record the operators, then for each
- *  state line run the reference (probeGiRelight with the state's lights, and the closed doors' real triangles merged
- *  into the soup), the CPU relight and the GPU relight, and dump all three for tests/spells/gpurelight1_cells.py. */
+//! `gpurelight --soup <f> --bake <dir> --out <dir> --light x,y,z,radius,r,g,b[,group] ...
 int probeRelightCli( const QStringList & args );
 
 //! main(): `-no-gui gpurelight` wants a QGuiApplication for the GPU (only when the platform plugin is beside the exe)

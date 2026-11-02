@@ -454,9 +454,8 @@ QString cellFarLodAppend( NifModel * nif, const QModelIndex & iRoot, const EsmWo
 		return L.join( QLatin1Char( '\n' ) ) + QLatin1Char( '\n' );
 	}
 
-	/* The game's distances: fBlockLevel0/1/2Distance, fBlockMaximumDistance of the player's preset (lane FARPRESET1;
-	 * before: Ultra's 60000 / 90000 / 110000 / 250000 on every preset). Each ring reaches its level's distance in
-	 * cells from the block center. */
+	/* The game's distances: fBlockLevel0/1/2Distance, fBlockMaximumDistance of the player's preset. Each ring reaches
+	 * its level's distance in cells from the block center. */
 	const FarRingCfg ringCfg = farRingCfg();
 	const float d0 = ringCfg.d.l0;
 	const float d1 = ringCfg.d.l1;

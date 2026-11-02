@@ -49,7 +49,7 @@ struct GrassState
 	QString dump;
 	QHash<const void *, QSet<int>> shapes;
 	QHash<const void *, QHash<int, float>> wave;	// block -> its GRAS wave period (the property's +0xf4)
-	QHash<const void *, QSet<int>> noFade;	// lane CABLES1: blocks that sway but never fade (cables)
+	QHash<const void *, QSet<int>> noFade;	// blocks that sway but never fade (cables)
 	// the wind's clock: the game's accumulated frame seconds (St+0x3c), here the time since the first grass frame;
 	// cur at this frame, prev at the last (the vertex shader's two phases)
 	QElapsedTimer clock;

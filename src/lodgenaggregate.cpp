@@ -18,14 +18,9 @@ BSD License - see nifskope.h
 #include <cmath>
 #include <vector>
 
-/* THE AGGREGATE COMPOSITE.
- *
- * Every geometric law here is the CARD contract's, applied to a cell instead of
- * a model, and the header says why the photograph is a composite rather than a
- * viewport render. What is new is only this: the thing being photographed is a
- * cluster of quads whose pictures we already hold, and an orthographic camera
- * makes that a resample rather than a render.
- */
+// THE AGGREGATE COMPOSITE:
+// Every geometric law here is the CARD contract's, applied to a cell instead of a model, and the header says
+// why the photograph is a composite rather than a viewport render.
 
 namespace
 {
@@ -80,11 +75,8 @@ float dot( const Vec3 & a, const Vec3 & b )
 	return a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
 }
 
-/*! The card grid's own mapping (docs/LODGEN_CARD_SHEETS.md 2, and the bake's
- *  `viewDir` lambda at nifskope_ui.cpp:22657): frame (i, j) looks from this
- *  direction, model space, Z up. It is the direction from the MODEL toward the
- *  CAMERA -- the bake turns it into an elevation and an azimuth and places the
- *  camera there. */
+//! The card grid's own mapping (docs/LODGEN_CARD_SHEETS.md 2, and the bake's `viewDir` lambda at
+//! nifskope_ui.cpp:22657): frame (i, j) looks from this direction, model space, Z up.
 Vec3 cardFrameDir( int oct, int i, int j )
 {
 	const float u = float( i ) / float( oct - 1 ) * 2.0f - 1.0f;
@@ -99,12 +91,8 @@ Vec3 cardFrameDir( int oct, int i, int j )
 	return d;
 }
 
-/*! Decode the colour sheet's alpha into the COVERAGE fraction, under whichever
- *  vintage the set is (docs/LODGEN_CARD_SHEETS.md 4). A set that states the
- *  contract wrote its floor at `base`, so the fraction is recovered exactly;
- *  one that states nothing carries the raw fraction and is tested at its floor
- *  of 16/255. Getting this wrong is not subtle -- reading a contract sheet as a
- *  raw one makes every partly covered twig four times too opaque. */
+//! Decode the colour sheet's alpha into the COVERAGE fraction, under whichever vintage the set is
+//! (docs/LODGEN_CARD_SHEETS.md 4).
 float coverageOf( const LodgenAggCard & c, int a )
 {
 	if ( c.covBase > c.covTest && c.covTest > c.covFloor ) {
@@ -176,7 +164,7 @@ struct Accum
 
 QString lodgenAggregateStem( const QString & worldspace, int cellX, int cellY )
 {
-	/* ONE ROOT (lane LAYOUT1, 2026-09-16, bungo 19:3x). The aggregate sheets
+	/* ONE ROOT. The aggregate sheets
 	 * are a FO4CS-target output, so they live with the rest of them:
 	 * Data\FO4CSLOD\<ws>\Aggregate\. ONE function composes that
 	 * prefix (src/lodgenlayout.cpp) and this is the only place the game
@@ -223,10 +211,7 @@ bool lodgenAggregateBuild( const QVector<LodgenAggTree> & trees,
 		const int cellX = int( k >> 32 );
 		const int cellY = int( qint32( quint32( k & 0xFFFFFFFFU ) ) );
 
-		/* Which trees this cell can actually photograph. A base with no card,
-		 * or a card from before the orthographic camera, is REFUSED IN WORDS
-		 * and its tree stays per-tree: the aggregate's fallback floor is the
-		 * behaviour that already ships (CONSTITUTION 10), never a silent drop. */
+		// Which trees this cell can actually photograph.
 		struct Member
 		{
 			int treeIndex;
@@ -282,21 +267,13 @@ bool lodgenAggregateBuild( const QVector<LodgenAggTree> & trees,
 		for ( int v = 0; v < V; v++ ) {
 			const float phi = 6.28318530717958647692f * float( v ) / float( V );
 			eye[v][0] = std::cos( phi ); eye[v][1] = std::sin( phi ); eye[v][2] = 0.0f;
-			/* right = up x eye, with up = +Z: the basis a look-at with forward
-			 * = -eye and up = +Z produces, which is the basis the card frames
-			 * were photographed in. If it were the other handedness the
-			 * one-tree control (the aggregate of a single tree must reproduce
-			 * that tree's own frame) would come out mirrored, which is exactly
-			 * what that control is for. */
+			// right = up x eye, with up = +Z: the basis a look-at with forward = -eye and up = +Z produces,
+			// which is the basis the card frames were photographed in.
 			right[v][0] = -eye[v][1]; right[v][1] = eye[v][0]; right[v][2] = 0.0f;
 		}
 
-		/* --- pass 1, ANALYTIC: where every tree's quad lands, per view.
-		 *
-		 * Nothing is drawn here. Each tree's quad is a rectangle of known world
-		 * size at a known place, so the silhouette box of a view is the union
-		 * of those rectangles -- exact, and without the render the card bake
-		 * needs for the same number. */
+		// pass 1, ANALYTIC: where every tree's quad lands, per view:
+		// Nothing is drawn here.
 		struct Quad
 		{
 			int mem;
@@ -362,10 +339,8 @@ bool lodgenAggregateBuild( const QVector<LodgenAggTree> & trees,
 		 * silhouette to its own centre -- docs/LODGEN_CARD_SHEETS.md 3.6, the
 		 * same law and the same `frameOffset` key. */
 		const float centreZ = 0.5f * ( zLo + zHi );
-		/* Pass 1 measured the vertical in ABSOLUTE world Z, because the cluster
-		 * centre is only known once every quad is placed. Re-base now, so every
-		 * number below this line is relative to the card's own centre exactly
-		 * as `frameOffset` and `half` are. */
+		// Pass 1 measured the vertical in ABSOLUTE world Z, because the cluster centre is only known once
+		// every quad is placed.
 		for ( int v = 0; v < V; v++ ) {
 			vMinU[v] -= centreZ;
 			vMaxU[v] -= centreZ;
@@ -388,11 +363,8 @@ bool lodgenAggregateBuild( const QVector<LodgenAggTree> & trees,
 			continue;
 		}
 
-		/* The frame's two sides: the LONG one is the tile rung, the SHORT one
-		 * the smallest multiple of 16 whose INNER rect is not narrower than the
-		 * measured silhouette (3.2). A cell is wider than it is tall in every
-		 * case the census measured, but the rule is written both ways so a
-		 * narrow gorge does not get a cropped frame. */
+		// The frame's two sides: the LONG one is the tile rung, the SHORT one the smallest multiple of 16
+		// whose INNER rect is not narrower than the measured silhouette (3.2).
 		const bool wideFrame = measHalfW >= measHalfH;
 		const int longSide = opts.tile;
 		const float measLong = wideFrame ? measHalfW : measHalfH;
@@ -451,24 +423,13 @@ bool lodgenAggregateBuild( const QVector<LodgenAggTree> & trees,
 				const LodgenAggTree & t = trees[mem[q.mem].treeIndex];
 				const int fi = q.frame % c.oct, fj = q.frame / c.oct;
 				const int sx0 = fi * c.frameW, sy0 = fj * c.frameH;
-				/* Source samples per target texel. Under 2 the splat would
-				 * leave holes, so the source is supersampled until it cannot --
-				 * the aggregate is always a heavy DOWNsample in practice, and
-				 * this is the guard that says so rather than assuming it. */
+				// Source samples per target texel.
 				const float txPerSrcX = ( 2.0f * q.hw / float( c.frameW ) ) / unitsPerTexel;
 				const float txPerSrcY = ( 2.0f * q.hh / float( c.frameH ) ) / unitsPerTexel;
 				const int ssx = std::clamp( int( std::ceil( txPerSrcX * 2.0f ) ), 1, 8 );
 				const int ssy = std::clamp( int( std::ceil( txPerSrcY * 2.0f ) ), 1, 8 );
-				/* THE AREA WEIGHT, and the defect gate A3's own ceiling found
-				 * (2026-09-11). A sample's contribution to a target texel is the share
-				 * of the TEXEL'S AREA it stands for, not one vote. The first run
-				 * normalised each tree's layer by the NUMBER of samples that landed in
-				 * the texel, so a tree covering a tenth of a coarse texel composited as
-				 * if it covered all of it: the aggregate carried 94 percent MORE
-				 * coverage mass than the same cluster composited finely, against a
-				 * measured ceiling of 1.4 percent. The weight is sampleArea/texelArea
-				 * and the layer's alpha is its sum, clamped -- exact when a tree covers
-				 * the whole texel, proportional when it does not. */
+				// THE AREA WEIGHT, and the defect gate A3's own ceiling found. A sample's contribution to a
+				// target texel is the share of the TEXEL'S AREA it stands for, not one vote.
 				const float sampleArea = ( 2.0f * q.hw / float( c.frameW ) / float( ssx ) )
 					* ( 2.0f * q.hh / float( c.frameH ) / float( ssy ) );
 				const float texelArea = unitsPerTexel * unitsPerTexel;
@@ -669,7 +630,7 @@ QByteArray lodgenAggregateLodm( const QString & worldspace, const LodgenAggSet &
 	a.insert( QStringLiteral( "boundRadius" ), double( set.boundRadius ) );
 	a.insert( QStringLiteral( "trees" ), int( set.covered.size() ) );
 	/* The identity law, in words so a reader cannot mistake a constant for a
-	 * missing feature (bungo 2026-09-11 08:4x). */
+	 * missing feature. */
 	a.insert( QStringLiteral( "identity" ), QStringLiteral( "per-aggregate" ) );
 	a.insert( QStringLiteral( "projection" ), QStringLiteral( "ortho" ) );
 	a.insert( QStringLiteral( "coverage" ), QJsonObject{

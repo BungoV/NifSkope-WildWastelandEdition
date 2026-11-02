@@ -33,11 +33,7 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #ifndef PROBEBVH_H
 #define PROBEBVH_H
 
-/* THE PROBE RAY TRACER (lane PRTPPLACE's BVH, moved here by lane PRTPBAKE so the
- * bake casts the same rays the placer does). Header-only; every file that
- * includes it gets the FMA contraction off below, which the placer's gate needs:
- * a ray that grazes a triangle edge must land on the same side on every CPU and
- * in the gate's Python re-trace (tests/spells/probe_place.py). */
+// THE PROBE RAY TRACER.
 #if defined( __GNUC__ ) && !defined( __clang__ )
 #pragma GCC optimize( "fp-contract=off" )
 #endif
@@ -47,16 +43,11 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include <cstring>
 #include <vector>
 
-#include "probemask.h"   // lane ALPHATEST1: the alpha-test masks (their own pushed pragma; the soup includes them too)
+#include "probemask.h"   // the alpha-test masks (their own pushed pragma; the soup includes them too)
 
 namespace probebvh {
 
-// ------------------------------------------------------------------ the BVH
-/* Median split on the longest centroid axis, 4 triangles a leaf. The soup is
- * stored relative to a local origin (the rect's center) so float precision
- * does not depend on how far from the world origin the block is; the ray test
- * itself runs in double. Double-sided: the game's physics pick hits a face
- * from either side, and so must this. */
+// the BVH Median split on the longest centroid axis, 4 triangles a leaf.
 struct Bvh
 {
 	std::vector<float> t;      // 9 floats a triangle, local
@@ -69,7 +60,7 @@ struct Bvh
 	std::vector<Node> nodes;
 	std::vector<int> idx;
 	std::vector<float> cen;
-	//! lane ALPHATEST1: the soup's masks (triangle numbers = this tree's); null or empty = every face solid
+	//! the soup's masks (triangle numbers = this tree's); null or empty = every face solid
 	const AlphaMask * mask = nullptr;
 
 	void bounds( int b, int e, float lo[3], float hi[3] ) const
@@ -144,10 +135,7 @@ struct Bvh
 		double t0 = 0.0, t1 = tmax;
 		for ( int k = 0; k < 3; k++ ) {
 			if ( inv[k] == 0.0 ) {
-				/* The ray runs flat in this axis: the box holds it or not. (Scaling
-				 * by a huge inverse instead turns a ray lying ON the box face --
-				 * a probe at z 120 beside trim that tops out at 120 -- into
-				 * 0 * 1e300 = 0 and closes the interval.) */
+				// The ray runs flat in this axis: the box holds it or not.
 				if ( o[k] < double( nd.lo[k] ) || o[k] > double( nd.hi[k] ) )
 					return false;
 				continue;
@@ -234,10 +222,8 @@ struct Bvh
 		return hit;
 	}
 
-	/* lane WALLSTACK1: is any triangle hit at a distance in [tLo, tHi] along the unit direction (alpha-test holes
-	 * pass, as in ray) one that `pick` accepts? ray() keeps one of several faces at the same distance (back to back
-	 * walls: a shell's back and a room's face on one plane), whichever the tree visits last; a rule that reads the
-	 * face's side asks this instead. */
+	// is any triangle hit at a distance in [tLo, tHi] along the unit direction (alpha-test holes pass, as in
+	// ray) one that `pick` accepts?
 	template<class Pick> bool anyHitIn( const double o[3], const double d[3], double tLo, double tHi, Pick pick ) const
 	{
 		if ( nodes.empty() )

@@ -5,10 +5,8 @@
 #include <QSet>
 
 
-/* THE FOLDER NAME EXISTS ONCE, HERE. Everything else in this file is composed
- * from it, and every writer in the generator composes its directory from one of
- * the four functions below. `tests/spells/lodgen_layout.sh` leg (e) greps
- * `src/` for a second spelling and fails on one. */
+// THE FOLDER NAME EXISTS ONCE, HERE. Everything else in this file is composed from it, and every writer in the
+// generator composes its directory from one of the four functions below.
 static const char * const FO4CSLOD = "FO4CSLOD";
 
 QString lodgenFo4csFolderName()
@@ -49,14 +47,7 @@ static QString g_layoutSecond;      // a SECOND root, if two ever appear
 static QString g_layoutStray;       // the first noted file that is not under one
 static int     g_layoutUnder  = 0;
 static int     g_layoutOutside = 0;
-/* ONE ENTRY PER FILE, not per note (lane LAYOUT1, 2026-09-16). Two passes write
- * into the same `Objects/` folder -- the texture arrays and, later, the impostor
- * card arrays -- and each notes the folder when it finishes, so the array sheets
- * were noted twice and the clause read six higher than the tree. A census field
- * states what is on disk or it states nothing (CONSTITUTION 4), so the notes are
- * a SET, keyed on the absolute path folded to lower case because Windows will
- * hand back both spellings of the same file. Gate: leg (f) of
- * tests/spells/lodgen_layout.sh counts the tree and requires the two to agree. */
+// ONE ENTRY PER FILE, not per note.
 static QSet<QString> g_layoutSeen;
 
 void lodgenClearLayoutCensus()

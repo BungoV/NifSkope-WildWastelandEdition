@@ -1,16 +1,12 @@
 #version 410 core
 
 /* The cell view's tone map (src/gl/cellhdr.h): draws the linear float frame back into the view, per sample.
- * The stencil picks the mode per pixel:
+ * The stencil picks the mode per pixel (copied back, or read here through hdrStencilTest):
  *   hdrMode 0  pixels a cell program or effect wrote last: the cell's imagespace on the summed linear light
  *   hdrMode 1  the pixels any other program wrote last: the value as it was written
- *   hdrMode 2  (lane SKYHOLE1) the pixels of mode 0 no opaque draw reached (depth at the far plane): a cell
- *              effect over the sky, composited over the backdrop by its coverage instead of replacing it
- *   hdrMode 3  (lane BLOOM1b, the FO4CS bloom only) every pixel mode 0 does not take: the glow the bloom spreads
- *              there, added in display space (blend ONE, ONE) as the tone-mapped difference it makes; lane
- *              GLAREBLOW2: the difference at the backdrop's own place on the curve (cellGlowShoulder)
- * The stencil (copied back before this pass) picks the pixels for each mode; lane TONEMAP1: or this shader reads it
- * (hdrStencilTest), so only the depth is copied back. */
+ *   hdrMode 2  mode-0 pixels no opaque draw reached: a cell effect composited over the sky by its coverage
+ *   hdrMode 3  (FO4CS bloom only) every pixel mode 0 does not take: the bloom's glow added in display space,
+ *              at the backdrop's own place on the curve (cellGlowShoulder) */
 
 #define WW_CELLLIGHTS 1
 #define WW_CELL_FX 1
@@ -85,9 +81,9 @@ void main()
 			discard;
 	}
 	vec4 x = texelFetch( hdrSrc, ivec2( gl_FragCoord.xy ), gl_SampleID );
-	/* lane SKYHOLE1: the passes sort the pixels by depth too (the far plane = no opaque draw reached them); lane PERF2:
+	/* the passes sort the pixels by depth too (the far plane = no opaque draw reached them);
 	 * the quad sits at the far plane (cell_hdr.vert), not gl_FragDepth, so the stencil and depth reject before shading */
-	// lane FOGBLOOM1 (cellfogbloom.h): the bloom this pixel receives, raised where its view ray crosses fog
+	// the bloom this pixel receives, raised where its view ray crosses fog
 	if ( cellFogBloomOn )
 		cellBloomGain = 1.0 + 4.0 * texelFetch( cellFogBloom, ivec2( gl_FragCoord.xy ), gl_SampleID ).r;
 	/* the FO4CS bloom at this pixel (cell_bloom.glsl), times the bloom weight; cellImageSpace adds it before

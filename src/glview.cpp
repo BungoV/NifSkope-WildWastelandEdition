@@ -31,11 +31,11 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 ***** END LICENCE BLOCK *****/
 
 #include "glview.h"
-#include "wwswitch.h"	// lane TESTDRIVER1: the WW_* switch store
-#include "wwflyfix.h"	// lane REDRETIRE2: FLYFIX1's free-camera rules (their old way is a test twin now)
+#include "wwswitch.h"	// the WW_* switch store
+#include "wwflyfix.h"	// FLYFIX1's free-camera rules (their old way is a test twin now)
 #include "cellspeed.h"
-#include "cellcambounds.h"	// lane CAMGATE1: the camera never shows an out-of-bounds or under-terrain view
-#include "cellstream.h"		// lane CELLSTREAM1: the cells round the camera
+#include "cellcambounds.h"	// the camera never shows an out-of-bounds or under-terrain view
+#include "cellstream.h"		// the cells round the camera
 #include "celltexahead.h"
 #include "cellstreamtex.h"	// lane STREAMTEX1: the stream texture pool
 
@@ -43,12 +43,12 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 #include "message.h"
 #include "nifskope.h"
-#include "cellclick.h"		// lane CELLVIEW2: one call, in mouseReleaseEvent
+#include "cellclick.h"		// one call, in mouseReleaseEvent
 #include "gl/controllers.h"
 #include "gl/lookdevstage.h"
 #include "gl/sunshadow.h"
-#include "gl/shadowset.h"	// lane TERRSHADOW1: contact shadows
-#include "gl/cellcull.h"	// lane SUNCELL1
+#include "gl/shadowset.h"	// contact shadows
+#include "gl/cellcull.h"
 #include "gl/glparticles.h"
 #include "gl/renderer.h"
 #include "gl/cellhdr.h"
@@ -60,10 +60,10 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include "gl/cellskinsss.h"	// lane SKINSSS1: skin subsurface scattering
 #include "gl/cellgrass.h"	// lane GRASSMB1: the grass wind's clock
 #include "impostorchunk.h"
-#include "cellfarlod.h"		// lane FARLOD1: the far field's planes, sway and cards
-#include "gl/cellwater.h"	// lane FARWATER1: far water held until its dry mask's lookup lands
-#include "landlodspec.h"		// lane LANDSPEC2: the land-LOD blend centre's glide
-#include "cellmodpick.h"	// lane MODPICK1: "Mods differ from the far LOD bake" over the view
+#include "cellfarlod.h"		// the far field's planes, sway and cards
+#include "gl/cellwater.h"	// far water held until its dry mask's lookup lands
+#include "landlodspec.h"		// the land-LOD blend centre's glide
+#include "cellmodpick.h"	// "Mods differ from the far LOD bake" over the view
 #include "impostorpreviewtest.h"
 #include "gl/glshape.h"
 #include "gl/gltex.h"
@@ -71,16 +71,16 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include "model/undocommands.h"
 #include "data/nifitem.h"
 #include "nifsnapshot.h"
-#include "probesky.h"	// lane SKY1: one call a frame
-#include "gl/cellairzone.h"	// lane AIRZONE1: the hand-placed volumes' overlay
-#include "celledit.h"	// lane ESPWRITE2: the cell view's place mode
-#include "cellsurface.h"	// lane ESPWRITE2: the surface pick's planes
-#include "rtddgicell.h"	// lane RTXGI1 M2: the ray-traced GI volume, one call a frame
-#include "celldoorlive.h"	// lane DOORLIVE1: one call a frame
-#include "cellworldanim.h"	// lane FXPARITY2: the cell's world clock
+#include "probesky.h"	// one call a frame
+#include "gl/cellairzone.h"	// the hand-placed volumes' overlay
+#include "celledit.h"	// the cell view's place mode
+#include "cellsurface.h"	// the surface pick's planes
+#include "rtddgicell.h"	// the ray-traced GI volume, one call a frame
+#include "celldoorlive.h"	// one call a frame
+#include "cellworldanim.h"	// the cell's world clock
 #include "shortcutregistry.h"
 #include "wwskin.h"
-#include "gl/cellqueue.h"	// lane GPUDRIVEN1
+#include "gl/cellqueue.h"
 #include "spells/animationsetup.h"
 #include "skeletontools.h"	// skeletonAnalyse: the Skeleton Manager's own classes
 #include "ui/settingsdialog.h"
@@ -118,11 +118,8 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include <QElapsedTimer>
 
 namespace {
-//! A QMenu that cancels itself once the pointer moves well clear of it, so the
-//! small operator pop-ups (Delete / Merge / Separate / Snap / Set Origin) close
-//! on hover-out, Blender-style. A grabbed menu does not reliably get mouseMove
-//! events off itself, so it polls the global cursor against its screen geometry.
-//! The main right-click context menu keeps normal click-to-dismiss (unaffected).
+//! A QMenu that cancels itself once the pointer moves well clear of it, so the small operator pop-ups (Delete /
+//! Merge / Separate / Snap / Set Origin) close on hover-out, Blender-style.
 class AutoCloseMenu final : public QMenu
 {
 public:
@@ -159,21 +156,21 @@ private:
 #include <QOpenGLContext>
 #include <QOpenGLFunctions>
 #include <QOpenGLFramebufferObject>
-#include <QOpenGLExtraFunctions>	// lane FARVIEW1: the GPU timer
-#include "gl/celllights.h"	// lane IMGS1: the imagespace measure
-#include "gl/atmosphere.h"	// lane SKYA (EXPO1): the sky in the exposure's mean
-#include "gl/cellprobeview.h"	// lane PROBEVIEW1: the Pass overlays
-#include "gl/cellvolumeview.h"	// lane VOLFIT1: the Space stage's view
+#include <QOpenGLExtraFunctions>	// the GPU timer
+#include "gl/celllights.h"	// the imagespace measure
+#include "gl/atmosphere.h"	// the sky in the exposure's mean
+#include "gl/cellprobeview.h"	// the Pass overlays
+#include "gl/cellvolumeview.h"	// the Space stage's view
 #include "gl/cellssr.h"
 #include "gl/cellssgi.h"
-#include "gl/cellvolair.h"	// lane VOLAIR1
-#include "gl/cellreflprobe.h"	// lane REFLPROBE1
-#include "gl/cellpasstime.h"	// lane PERF1
-#include "gl/geokeepclock.h"	// lane STREAMMEM1
-#include "gl/cellfarground.h"	// lane FARPAGES1
-#include "gl/cellocean.h"	// lane WATERLOOK1
-#include "gl/cellunderwater.h"	// lane WATERUNDER1
-#include "gl/cloudvol.h"	// lane CLOUD2B: the volume clouds' depth test
+#include "gl/cellvolair.h"
+#include "gl/cellreflprobe.h"
+#include "gl/cellpasstime.h"
+#include "gl/geokeepclock.h"
+#include "gl/cellfarground.h"
+#include "gl/cellocean.h"
+#include "gl/cellunderwater.h"
+#include "gl/cloudvol.h"	// the volume clouds' depth test
 
 // NOTE: The FPS define is a frame limiter,
 //	NOT the guaranteed FPS in the viewport.
@@ -190,37 +187,10 @@ private:
 //! @file glview.cpp GLView implementation
 
 
-/*! Blender's default user perspective, in this program's Euler convention.
- *
- *  Blender starts every scene on the same three-quarter view rather than on an
- *  axis — you see three faces of a cube and can tell depth from the first
- *  frame, where Front shows a square that could be anything. Loading a nif
- *  straight into Front was the same flat square, and the first thing anyone did
- *  was orbit off it.
- *
- *  Blender's own numbers are Euler X 63.5593°, Z 46.6919°. Neither transfers
- *  as written, and the table below is what says so rather than any guess:
- *
- *    X — Top is 0 in both, but this program's Front is -90 where Blender's is
- *        +90, so the tilt off Top is negated: -63.5593.
- *
- *    Z — Blender measures its 46.6919° from ITS front, which is Z 0. Here the
- *        azimuth ring is Back 0, Right 90, Front 180, Left 270. Blender's
- *        default looks at the front, right and top faces, so the same view is
- *        46.6919° round from Front TOWARDS Right: 180 - 46.6919 = 133.3081.
- *
- *  Taking Blender's 46.6919 across unaltered lands between Back and Right and
- *  shows the back of the model, which is what the first attempt at this did.
- */
+//! Blender's default user perspective, in this program's Euler convention.
 static const Vector3 wwBlenderStartupRotation = { -63.5593f, 0.0f, 133.3081f };
 
-/*! WW_CAMERA_LOG=<file>: append every camera reorientation and who asked.
- *
- *  The startup view was being overwritten somewhere between the GLView
- *  constructor and the first frame, and reading did not find the writer —
- *  three plausible candidates each turned out not to emit anything. This
- *  records the fact instead of inferring it.
- */
+//! WW_CAMERA_LOG=<file>: append every camera reorientation and who asked.
 static void wwCameraLog( const char * where, const Vector3 & rot, int state )
 {
 	WW_SWITCH_STATIC( QString, path, wwEnvStr( "WW_CAMERA_LOG" ) );
@@ -243,11 +213,8 @@ const Vector3 GLView::viewRotations[6] = {
 	{ -90.0f, 0.0f, 0.0f }		// Back
 };
 
-//! Register the 3D viewport's rebindable shortcuts (once per process).
-//! Every id here has at least one matches() call in GLView::keyPressEvent or
-//! NifSkope::eventFilter; the settings Shortcuts page edits them. The modal
-//! gesture grammar (X/Y/Z axis locks, numeric entry, Esc/Enter) and the
-//! Blender numpad view block stay fixed.
+//! Register the 3D viewport's rebindable shortcuts (once per process). Every id here has at least one matches()
+//! call in GLView::keyPressEvent or NifSkope::eventFilter; the settings Shortcuts page edits them.
 static void tlRegisterViewportShortcuts()
 {
 	static bool done = false;
@@ -332,10 +299,7 @@ static void tlRegisterViewportShortcuts()
 	r.reg( "viewport.merge", QObject::tr( "Merge Menu" ), catEdit, QKeySequence( Qt::Key_M ) );
 	r.reg( "viewport.separate", QObject::tr( "Separate Menu" ), catEdit, QKeySequence( Qt::Key_P ) );
 	r.reg( "viewport.delete", QObject::tr( "Delete Menu" ), catEdit, QKeySequence( Qt::Key_X ) );
-	// Blender's other delete key: no menu in edit mode, no confirmation in object
-	// mode. Registered rather than hardcoded so it shows on the Shortcuts page
-	// beside the one that asks -- two keys doing deliberately different things is
-	// only useful if both are visible.
+	// Blender's other delete key: no menu in edit mode, no confirmation in object mode.
 	r.reg( "viewport.delete_now", QObject::tr( "Delete Without Asking" ), catEdit,
 		QKeySequence( Qt::Key_Delete ) );
 	r.reg( "viewport.repeat_last", QObject::tr( "Repeat Last Operator" ), catEdit,
@@ -391,7 +355,7 @@ GLView::GLView( QWindow * p )
 	fmt.setDepthBufferSize( 24 );
 	fmt.setStencilBufferSize( 8 );
 	int msaa = 1 << aa;
-	// lane AAFORMAT1 (study only): WW_MSAA=<1|2|4|8|16> overrides the saved MSAA (1 = off); WW_MSAA_RED=1 ignores it
+	// WW_MSAA=<1|2|4|8|16> overrides the saved MSAA (1 = off); WW_MSAA_RED=1 ignores it
 	if ( !qEnvironmentVariableIsEmpty( "WW_MSAA" ) && qEnvironmentVariableIntValue( "WW_MSAA_RED" ) == 0 ) {
 		const int want = qEnvironmentVariableIntValue( "WW_MSAA" );
 		if ( want == 0 || want == 1 || want == 2 || want == 4 || want == 8 || want == 16 )
@@ -482,13 +446,9 @@ QWidget * GLView::createWindowContainer( QWidget * parent )
 	return graphicsView;
 }
 
-/*! Enter or leave Physics Sim mode.
- *
- * The simulated pose is pushed through setCollisionPreview, the same channel the
- * collision tools already draw through, so nothing in the render path had to
- * learn about ragdolls. Leaving clears it, which puts the viewport back exactly
- * as it was -- the mode never touches the model.
- */
+//! Enter or leave Physics Sim mode:
+//! The simulated pose is pushed through setCollisionPreview, the same channel the collision tools already draw
+//! through, so nothing in the render path had to learn about ragdolls.
 bool GLView::setPhysicsSimMode( bool on, int systemBlock )
 {
 	if ( !on ) {
@@ -547,14 +507,10 @@ bool GLView::physicsMousePress( QMouseEvent * event )
 		return false;
 	Vector3 ro, rd;
 	if ( event->button() == cursorPlaceButton() ) {
-		/* In this mode the secondary button does ONE thing: pin.
-		 *
-		 * Consumed whether or not it hits, because everything else that button
-		 * normally does fights with pinning -- a right-drag zooms the camera, and
-		 * a right-click release drops the 3D cursor, so a successful pin also
-		 * moved the cursor and a missed one moved the cursor AND the camera.
-		 * Orbiting is still on the middle button and zooming on the wheel.
-		 */
+		// In this mode the secondary button does ONE thing: pin:
+		// Consumed whether or not it hits, because everything else that button normally does fights with
+		// pinning -- a right-drag zooms the camera, and a right-click release drops the 3D cursor, so a
+		// successful pin also moved the cursor and a missed one moved the cursor AND the camera.
 		mouseRayWorld( event->position(), ro, rd );
 		physicsPreview.togglePin( ro, rd );
 		return true;
@@ -574,16 +530,9 @@ bool GLView::physicsMouseMove( QMouseEvent * event )
 	if ( event->buttons() & cursorPlaceButton() )
 		return true;
 
-	/* Ctrl turns what the hand is holding instead of moving it.
-	 *
-	 * The physics gun's other gesture, and it needs a modifier rather than a mode
-	 * because the two are used together -- you drag a limb roughly into place, turn
-	 * it, and nudge it again, all inside one grab. Holding Shift as well snaps to
-	 * 15 degrees.
-	 *
-	 * Ctrl and not Alt: Alt-drag is claimed by the window manager on most desktops
-	 * and never reaches the widget.
-	 */
+	// Ctrl turns what the hand is holding instead of moving it:
+	// The physics gun's other gesture, and it needs a modifier rather than a mode because the two are used
+	// together -- you drag a limb roughly into place, turn it, and nudge it again, all inside one grab.
 	if ( physicsPreview.grabbing() && ( event->modifiers() & Qt::ControlModifier ) ) {
 		const QPointF d = event->position() - physicsRotateLast;
 		physicsRotateLast = event->position();
@@ -610,12 +559,7 @@ bool GLView::physicsMouseMove( QMouseEvent * event )
 	return physicsPreview.move( ro, rd );
 }
 
-/*! The wheel reels the held body in and out, and rolls it with Ctrl.
- *
- * Returns false when nothing is held, so the wheel still zooms the camera the
- * rest of the time -- taking it away entirely would leave the mode without its
- * most-used camera control.
- */
+//! The wheel reels the held body in and out, and rolls it with Ctrl.
 bool GLView::physicsWheel( QWheelEvent * event )
 {
 	if ( !physicsPreview.active() || !physicsPreview.grabbing() )
@@ -714,25 +658,7 @@ bool GLView::physicsKeyPress( QKeyEvent * event )
 	return false;
 }
 
-/*! Write the simulated pose back to the nodes the bodies are bound to.
- *
- * The one thing in this mode that touches the file, and the reason the mode is
- * more than a toy: dropping a rig, letting it settle and keeping the result is a
- * pose nobody has to key by hand.
- *
- * Each node is moved by the RIGID DIFFERENCE its body underwent since the rest
- * pose, not set to the body's absolute transform. A body sits at its centre of
- * mass and a node at its origin, so the two frames differ by a constant offset --
- * and in a difference that offset cancels, which makes this correct without
- * having to first establish what the offset is.
- *
- * Worlds are read BEFORE anything is written. Node transforms are stored as
- * locals, so writing a parent changes where its children are; reading every world
- * up front means each node is placed against the hierarchy as it was, not as the
- * loop has left it half-way through.
- *
- * Returns how many nodes were moved.
- */
+//! Write the simulated pose back to the nodes the bodies are bound to.
 int GLView::physicsCapturePose()
 {
 	if ( !physicsPreview.active() || !model || !scene )
@@ -862,19 +788,9 @@ void GLView::setSessionDocumentPreview( const QVector<Vector3> & triangleSoup,
 	update();
 }
 
-/*! The PRIMARY document's own eye and see-through disc.
- *
- *  The other rows in Loaded NIFs are hidden by being left out of the render list
- *  and ghosted by being drawn as a translucent soup. The primary is drawn by this
- *  view's own Scene and has to stay pickable-in-the-Block-List and editable while
- *  it is hidden, so its pair goes through Scene::hideAll / Scene::ghostAll: the
- *  per-block hide and see-through this program already has, asked for the whole
- *  scene rather than one subtree. No second hide, no second blend.
- *
- *  Kept on the VIEW and pushed onto the Scene each frame (paintGL), because a
- *  Scene is torn down and rebuilt whenever the primary document changes and the
- *  row's toggles must survive that.
- */
+//! The PRIMARY document's own eye and see-through disc:
+//! The other rows in Loaded NIFs are hidden by being left out of the render list and ghosted by being drawn as
+//! a translucent soup.
 void GLView::setPrimaryDisplayMode( bool visible, bool ghost )
 {
 	if ( primaryHidden == !visible && primaryGhosted == ghost )
@@ -888,18 +804,7 @@ void GLView::setPrimaryDisplayMode( bool visible, bool ghost )
 	update();
 }
 
-/*! A name that says WHICH one, when a rig carries several of the same effect.
- *
- * An assembled X-01 has FOUR nodes called BoltGeo_01 and SIX called
- * LightningArcs_VFX, because the effect files are authored from a shared
- * template — that name reuse is the same thing that made the merge fuse the two
- * arms. If the bake writes four shapes with one name, nothing downstream can
- * tell them apart: not the block list, not a test matching by name.
- *
- * Walking up to a distinguishing ancestor beats a numeric suffix, because on a
- * merged rig that ancestor is the LIMB — 'LArm_ForeArm_Armor_BoltGeo_01' says
- * where it belongs, 'BoltGeo_01_3' says nothing.
- */
+//! A name that says WHICH one, when a rig carries several of the same effect.
 static QString qualifiedEffectName( Node * node, QSet<QString> & used )
 {
 	QString name = node->getName();
@@ -981,46 +886,28 @@ QVector<GLView::BakedEffect> GLView::bakeParticles( const Vector3 & viewAxis )
 	return bakeSceneEffects( scene, viewAxis, false, true );
 }
 
-/*! The Scene that draws one workspace document, made on first use.
- *
- * Lifted out of paintGL's draw loop because a marked skeleton has to be POSED
- * before any other scene can snap to it, and that means reaching its Scene before
- * the drawing starts. Both callers share this so the borrow-the-renderer rule
- * cannot be forgotten in one of them.
- */
+//! The Scene that draws one workspace document, made on first use.
 Scene * GLView::workspaceSceneFor( NifModel * model )
 {
 	if ( !model || model->getBlockCount() == 0 || !scene )
 		return nullptr;
 	Scene *& ws = workspaceScenes[model];
 	if ( !ws ) {
-		/* Counted, because "does this document have a Scene" cannot answer the
-		 * question anyone actually has: this function BUILDS one when it is
-		 * missing, so the answer is always yes and a check asking it passes over
-		 * the bug as happily as over the fix. What matters is whether the Scene
-		 * SURVIVED — and a rebuild is exactly what a destroyed one looks like.
-		 */
+		// Counted, because "does this document have a Scene" cannot answer the question anyone actually has:
+		// this function BUILDS one when it is missing, so the answer is always yes and a check asking it
+		// passes over the bug as happily as over the fix.
 		workspaceSceneBuilds[model]++;
-		/* A secondary's Scene had NO connection to its own model.
-		 *
-		 * The primary is kept current by GLView::dataChanged calling
-		 * Scene::update; a workspace preview was built once by Scene::make and
-		 * never told anything again, so editing a secondary file left its preview
-		 * showing the bytes it was loaded from. Invisible until a marked skeleton
-		 * was posed and 0 of 2863 vertices followed it, because the pose being read
-		 * was the load-time one.
-		 */
+		// A secondary's Scene had NO connection to its own model:
+		// The primary is kept current by GLView::dataChanged calling Scene::update; a workspace preview was
+		// built once by Scene::make and never told anything again, so editing a secondary file left its
+		// preview showing the bytes it was loaded from.
 		connect( model, &QAbstractItemModel::dataChanged, this,
 			[this, model]( const QModelIndex &, const QModelIndex & ) {
 				workspaceScenesStale.insert( model );
-				/* Deferred, and never from the draw path.
-				 *
-				 * Rebuilding a secondary Scene from inside paintGL killed the
-				 * process outright — the workspace-merge harness went from 18 green
-				 * checks to a 0-byte log, because the crash happened before
-				 * QTextStream flushed. Coalesced too: a merge emits dataChanged
-				 * hundreds of times and each one would otherwise rebuild the scene.
-				 */
+				// Deferred, and never from the draw path:
+				// Rebuilding a secondary Scene from inside paintGL killed the process outright — the
+				// workspace-merge harness went from 18 green checks to a 0-byte log, because the crash
+				// happened before QTextStream flushed.
 				if ( !workspaceStaleFlushQueued ) {
 					workspaceStaleFlushQueued = true;
 					QTimer::singleShot( 0, this, &GLView::flushStaleWorkspaceScenes );
@@ -1032,10 +919,8 @@ Scene * GLView::workspaceSceneFor( NifModel * model )
 				setWorkspaceSkeleton( nullptr );
 		} );
 		ws = new Scene( textures );
-		// borrow, never construct: a second Renderer on this context has its own
-		// idea of which shader program is bound, and the two caches disagreeing
-		// empties the WHOLE frame — primary and grid included. Measured, not
-		// theorised.
+		// borrow, never construct: a second Renderer on this context has its own idea of which shader program
+		// is bound, and the two caches disagreeing empties the WHOLE frame — primary and grid included.
 		ws->borrowRenderer( scene->renderer );
 		QSettings settings;
 		ws->updateSettings( settings );
@@ -1053,13 +938,7 @@ Scene * GLView::workspaceSceneFor( NifModel * model )
 	return ws;
 }
 
-/*! Re-read the secondaries whose files were edited, outside the draw path.
- *
- * A workspace Scene is built once by Scene::make and, unlike the primary, had
- * nothing telling it the file had changed — so editing a secondary left its preview
- * showing the bytes it was loaded from. Invisible until a marked skeleton was posed
- * and 0 of 2863 vertices followed it, because the pose being read was load-time.
- */
+//! Re-read the secondaries whose files were edited, outside the draw path.
 void GLView::flushStaleWorkspaceScenes()
 {
 	workspaceStaleFlushQueued = false;
@@ -1072,22 +951,8 @@ void GLView::flushStaleWorkspaceScenes()
 		if ( !ws )
 			continue;		// no Scene yet: make() will read the current state
 
-		/* Two kinds of change, two costs.
-		 *
-		 * Scene::update refreshes the nodes a Scene ALREADY has. It cannot create
-		 * nodes for blocks that did not exist when make() ran, and calling it on a
-		 * model that has just had blocks spliced into it crashed the process — so a
-		 * STRUCTURAL change has to drop the Scene and rebuild.
-		 *
-		 * A value change moves no blocks, which is the case the primary handles with
-		 * Scene::update on every edit. Rebuilding for those too cost 54 ms per edit
-		 * on the FO4 power-armour skeleton, and posing a MARKED skeleton is a
-		 * continuous-edit workflow, so that lands on exactly what the feature invites.
-		 *
-		 * Block count is the discriminator: it catches adding and removing, which is
-		 * every structural edit these previews see. A reorder that preserves the
-		 * count would slip through, so it is not a general-purpose test.
-		 */
+		// Two kinds of change, two costs:
+		// Scene::update refreshes the nodes a Scene ALREADY has.
 		const int was = workspaceSceneBlockCount.value( model, -1 );
 		const int now = model->getBlockCount();
 		if ( was != now ) {
@@ -1104,10 +969,8 @@ void GLView::flushStaleWorkspaceScenes()
 	update();
 }
 
-//! Every named node's transform, relative to the skeleton's own root.
-/*! Root-relative rather than world, so a marked file whose root carries an offset
- *  does not shift everything that snaps to it. First name wins, which is the same
- *  rule the Pose Manager uses to resolve a bone. */
+//! Every named node's transform, relative to the skeleton's own root. Root-relative rather than world, so a
+//! marked file whose root carries an offset does not shift everything that snaps to it.
 static QHash<QString, Transform> skeletonPoseOf( Scene * sc )
 {
 	QHash<QString, Transform> out;
@@ -1129,12 +992,9 @@ static QHash<QString, Transform> skeletonPoseOf( Scene * sc )
 	return out;
 }
 
-/*! Cheap "has the pose moved" signature.
- *
- * Without this, marking a skeleton would force a full transform propagation of
- * every workspace scene on every frame. Summed rather than ordered, so QHash
- * iteration order cannot affect it.
- */
+//! Cheap "has the pose moved" signature:
+//! Without this, marking a skeleton would force a full transform propagation of every workspace scene on every
+//! frame. Summed rather than ordered, so QHash iteration order cannot affect it.
 static double skeletonPoseFingerprint( const QHash<QString, Transform> & pose )
 {
 	double f = double( pose.size() );
@@ -1173,10 +1033,7 @@ void GLView::setWorkspaceFollower( NifModel * model, bool follow )
 			if ( workspaceFollowerModels.at( i ).data() == model )
 				workspaceFollowerModels.removeAt( i );
 	}
-	/* Both fingerprints, because the follower set is what decides WHICH path
-	 * runs. Unmarking the last one has to fall back through the skull's own
-	 * clear-once branch, and that branch is the thing that puts the document back
-	 * on its own bones. */
+	// Both fingerprints, because the follower set is what decides WHICH path runs.
 	workspaceFollowFingerprint = std::numeric_limits<double>::quiet_NaN();
 	workspaceSkeletonFingerprint = std::numeric_limits<double>::quiet_NaN();
 	update();
@@ -1207,18 +1064,7 @@ int GLView::workspaceFollowerCount()
 	return int( workspaceFollowerModels.size() );
 }
 
-/*! The per-document half of the snap: only the documents that asked for it move.
- *
- *  Returns false when nothing is marked, and the caller then runs exactly the code
- *  it always ran. That is the whole compatibility story — the skull's
- *  everything-snaps behaviour is not modified, it is simply not reached while a
- *  follower set exists.
- *
- *  WHICH SKELETON. The skull-marked document when there is one; otherwise the
- *  PRIMARY, and only if the primary has a real bone-to-bone hierarchy. A flat
- *  armour file is not a skeleton — the same test the rig merge refuses on — and
- *  taking a pose from one would hand followers a heap of world transforms.
- */
+//! The per-document half of the snap: only the documents that asked for it move.
 bool GLView::applyPoseFollowers( const Transform & viewTrans )
 {
 	if ( workspaceFollowerCount() == 0 )
@@ -1242,10 +1088,8 @@ bool GLView::applyPoseFollowers( const Transform & viewTrans )
 		pose = skeletonPoseOf( src );
 	}
 
-	/* The signature covers the pose AND the follower set, because either can move
-	 * without the other: dragging a bone changes the pose, ticking a row changes
-	 * who gets it. Summed the same way skeletonPoseFingerprint is, so hash order
-	 * cannot enter into it. */
+	// The signature covers the pose AND the follower set, because either can move without the other: dragging
+	// a bone changes the pose, ticking a row changes who gets it.
 	double signature = skeletonPoseFingerprint( pose );
 	for ( const QPointer<NifModel> & p : workspaceFollowerModels )
 		signature += double( quintptr( p.data() ) % 1000003u ) * 23.0;
@@ -1529,12 +1373,7 @@ void GLView::setSkeletonView( bool on )
 {
 	const bool changed = ( skeletonView != on );
 	skeletonView = on;
-	// Deliberately NOT a changed-only guard. addDockWidget() briefly marks the
-	// dock visible during construction, before any file is loaded, so the flag can
-	// already be true by the time the user actually opens the workspace — and a
-	// changed-only guard then skipped the rebuild and the armature drew nothing
-	// (drawnBones=0 with skeletonView=1). Turning the view ON always rebuilds,
-	// because the model may have loaded since the flag was last touched.
+	// Deliberately NOT a changed-only guard.
 	if ( changed || on ) {
 		// The bone set differs between the two modes (skin bones vs every node),
 		// so it is rebuilt on the way in AND on the way out.
@@ -1550,11 +1389,8 @@ void GLView::refreshPoseBones()
 	if ( !model )
 		return;
 
-	// A skeleton.nif has no skinned shape at all, so the union below comes back
-	// empty and nothing would draw — on a file that is nothing BUT bones. In
-	// skeleton view, fall back to the node hierarchy itself: every NiNode that is
-	// not geometry is a bone as far as display is concerned. (The Skeleton
-	// Manager's own classification does the equivalent — see SkeletonReport.)
+	// A skeleton.nif has no skinned shape at all, so the union below comes back empty and nothing would draw —
+	// on a file that is nothing BUT bones.
 	if ( skeletonView ) {
 		QSet<int> nodes;
 		for ( int b = 0; b < model->getBlockCount(); b++ ) {
@@ -1626,14 +1462,8 @@ void GLView::refreshPoseBones()
 	refreshPoseBoneSize();
 }
 
-/*! Characteristic bone length = median nearest-neighbour distance among the drawn
- * bones. Facial rigs are a dense cluster of tiny bones; body rigs are spread out.
- * Deriving one length keeps the drawn bones uniform and readable in either case,
- * instead of stubs that scale with a far-off parent.
- *
- * Extracted so the skeleton-view path (which builds poseBones from the node
- * hierarchy and returns early) sizes its bones the same way.
- */
+//! Characteristic bone length = median nearest-neighbour distance among the drawn bones. Facial rigs are a
+//! dense cluster of tiny bones; body rigs are spread out.
 void GLView::refreshPoseBoneSize()
 {
 	const float s = characteristicBoneSize( poseBones );
@@ -1641,15 +1471,9 @@ void GLView::refreshPoseBoneSize()
 		poseBoneSize = s;
 }
 
-/*! The law itself, against an arbitrary drawn set.
- *
- * Extracted from refreshPoseBoneSize() so the Overlays armature sizes its bones
- * by exactly the same rule as the Pose Mode / Skeleton Manager one. Two copies
- * of this would be two armatures that look different on the same rig, which is
- * the one thing bungo's ruling asks not to happen ("basically the same view as
- * in the skeleton manager"). Returns -1 when there is nothing to measure, so
- * the caller keeps whatever size it had rather than collapsing to a default.
- */
+//! The law itself, against an arbitrary drawn set:
+//! Extracted from refreshPoseBoneSize() so the Overlays armature sizes its bones by exactly the same rule as
+//! the Pose Mode / Skeleton Manager one.
 float GLView::characteristicBoneSize( const QVector<int> & drawn ) const
 {
 	if ( !scene || !model || drawn.size() < 2 )
@@ -1684,10 +1508,8 @@ Vector3 GLView::poseBoneTail( int boneBlock ) const
 
 Vector3 GLView::boneTailIn( int boneBlock, const QVector<int> & drawn, float cap ) const
 {
-	// The bone is drawn as a short shape from its head toward its tail, with the
-	// length CAPPED to the characteristic bone size so a bone parented to a
-	// far-off root doesn't stretch across the screen. Direction is toward the
-	// mean of child bones, or the bone's local +Y for a leaf.
+	// The bone is drawn as a short shape from its head toward its tail, with the length CAPPED to the
+	// characteristic bone size so a bone parented to a far-off root doesn't stretch across the screen.
 	Node * n = scene ? scene->getNode( model, model->getBlockIndex( boneBlock ) ) : nullptr;
 	if ( !n )
 		return Vector3();
@@ -1823,13 +1645,7 @@ bool GLView::poseExportOutfitStudio( const QString & path, const QString & name,
 	return AnimSetup::writeOutfitStudioPose( model, path, name, poseRestPose, error );
 }
 
-/*! The SAM export has no rest base and no pose-mode requirement.
- *
- * An Outfit Studio pose is a DELTA from the rest captured on entering pose mode,
- * so its export is only meaningful inside that mode. A SAM entry replaces the
- * node's local transform outright, so the file's current bone transforms ARE the
- * pose and this writes them wherever it is called from.
- */
+//! The SAM export has no rest base and no pose-mode requirement.
 bool GLView::poseExportSam( const QString & path, const QString & name, int * written, QString * error )
 {
 	return AnimSetup::writeSamPose( model, path, name, written, error );
@@ -1861,11 +1677,8 @@ int GLView::poseMirrorBone( int block )
 	if ( restS == poseRestPose.constEnd() || restD == poseRestPose.constEnd() )
 		return -1;
 
-	// Mirror the source's motion RELATIVE TO ITS REST, then apply that mirrored
-	// delta relative to the counterpart's rest. Mirroring relative to rest (not
-	// absolute) is what lets an asymmetric-in-world but symmetric-in-motion rig
-	// mirror correctly. Mx = diag(-1,1,1): translation.x flips; rotation is the
-	// proper rotation Mx * R * Mx (det stays +1).
+	// Mirror the source's motion RELATIVE TO ITS REST, then apply that mirrored delta relative to the
+	// counterpart's rest.
 	Transform curS( model, iSrc );
 	Transform deltaS = restS->inverted() * curS;         // rest-local delta
 
@@ -2087,24 +1900,9 @@ void GLView::drawPoseWeights()
 	glEnable( GL_DEPTH_TEST );
 }
 
-/*! Blender's octahedral bone, as a wireframe from head to tail.
- *
- * This is the shape that makes an armature readable: a square "collar" a short
- * way down from the head, with four edges fanning back to the head and four
- * converging on the tail. Because the wide end is at the head and it tapers to a
- * point at the tail, the bone's DIRECTION is visible at a glance — which a plain
- * head-to-tail line cannot show.
- *
- * \a ringAt is the collar's position along the bone, as a fraction of its
- * length. 0.15 is what both views drew before lane SKEL2 and is what the `Wire`
- * display keeps, byte for byte; 0.10 is Blender's own, and bungo's reference
- * picture (Blender 4.5.3, a default bone in Object Mode) shows the ring "about a
- * tenth of the length from the head", so the solid octahedron uses that.
- *
- * Drawn as 12 line segments rather than solid geometry, so it works through the
- * existing streaming line path and needs no new shader or render state. The
- * SOLID facets are armatureOctahedronFaces() below, which is a different pass.
- */
+//! Blender's octahedral bone, as a wireframe from head to tail:
+//! This is the shape that makes an armature readable: a square "collar" a short way down from the head, with
+//! four edges fanning back to the head and four converging on the tail.
 void GLView::drawOctahedralBone( const Vector3 & head, const Vector3 & tail, float ringAt )
 {
 	const Vector3 axis = tail - head;
@@ -2133,30 +1931,7 @@ void GLView::drawOctahedralBone( const Vector3 & head, const Vector3 & tail, flo
 	}
 }
 
-/*! The SOLID octahedron of bungo's reference picture: eight flat-lit facets.
- *
- * His words, 2026-09-11: "what about the bone shape? Shouldn't it be something
- * like in Blender?", over a screenshot of Blender 4.5.3's default armature bone
- * in Object Mode — a solid-shaded octahedron whose four faces each take a
- * different light, which is what makes the twist of a bone readable and what a
- * wireframe of the same shape cannot show.
- *
- * Two decisions worth stating, because both are measurable rather than taste:
- *
- *  - BACK FACES ARE DROPPED HERE, on the CPU, by the sign of the facet normal in
- *    camera space. The armature draws with the depth test OFF (it is a diagram
- *    read through the mesh), so the GPU cannot resolve which facet is in front
- *    and the far side of each bone would blend over the near side. Four facets
- *    survive per bone, which is exactly what Blender shows;
- *  - the light is FIXED IN CAMERA SPACE, not in the world. A world light makes
- *    the same bone change shade as the user orbits, which reads as the bone
- *    changing colour rather than the camera moving.
- *
- * Appends into a shared triangle soup with per-vertex colours so the whole
- * armature is ONE draw call (`selection.prog` reads attribute 1 as the vertex
- * colour when `vertexColorOverride` is zero, which is what passing a colour
- * array to Scene::drawTriangles does).
- */
+//! The SOLID octahedron of bungo's reference picture: eight flat-lit facets.
 void GLView::armatureOctahedronFaces( const Vector3 & head, const Vector3 & tail, float ringAt,
 	FloatVector4 base, QVector<Vector3> & tri, QVector<FloatVector4> & col ) const
 {
@@ -2185,15 +1960,10 @@ void GLView::armatureOctahedronFaces( const Vector3 & head, const Vector3 & tail
 		if ( n.length() < 1.0e-9f )
 			return;
 		n.normalize();
-		/* Point the normal OUTWARD without trusting the winding.
-		 *
-		 * A cross product only gives an outward normal if the three points are
-		 * wound the right way round, and getting that wrong here does not look
-		 * wrong -- it drops every facet and the bone silently draws as a
-		 * wireframe. The octahedron's own axis settles it instead: the outward
-		 * direction at a facet is the one that leads AWAY from the head->tail
-		 * line, which is true whichever way the triangle was listed.
-		 */
+		// Point the normal OUTWARD without trusting the winding:
+		// A cross product only gives an outward normal if the three points are wound the right way round, and
+		// getting that wrong here does not look wrong -- it drops every facet and the bone silently draws as a
+		// wireframe.
 		const Vector3 cen = ( a + b + c ) / 3.0f;
 		const Vector3 outward = cen - ( head + dir * Vector3::dotproduct( cen - head, dir ) );
 		if ( outward.length() > 1.0e-9f && Vector3::dotproduct( n, outward ) < 0.0f )
@@ -2217,22 +1987,8 @@ void GLView::armatureOctahedronFaces( const Vector3 & head, const Vector3 & tail
 	}
 }
 
-/*! THE ONE ARMATURE RENDERER (lane SKEL2, bungo 2026-09-11).
- *
- * His words: "shouldn't we improve both views (that will now be shared)?".
- * Before this lane there were two routines drawing the same rig --
- * drawPoseSkeleton() for Pose Mode and the Skeleton Manager, and
- * drawSkeletonOverlay() for the Overlays tick -- with two colour laws, two
- * shape rules and two sets of widths. They now both build a list of
- * ArmatureBone and hand it here, which is CONSTITUTION rule 10 taken literally:
- * what is shared lives in the shared code, and a feature owns only its own
- * selection and gating.
- *
- * The passes are in the order the old overlay drew them -- every BODY, then
- * every STUB, then the joint balls -- because the armature draws blended with
- * no depth test, so the order decides which line wins a crossing pixel, and the
- * `Wire` display has to reproduce the old picture.
- */
+//! THE ONE ARMATURE RENDERER:
+//! His words: "shouldn't we improve both views (that will now be shared)?".
 void GLView::drawArmature( const QVector<ArmatureBone> & bones, const ArmatureStyle & style )
 {
 	if ( !scene || bones.isEmpty() )
@@ -2245,12 +2001,9 @@ void GLView::drawArmature( const QVector<ArmatureBone> & bones, const ArmatureSt
 	scene->loadModelViewMatrix( viewTransform() );
 	const float dpr = float( devicePixelRatioF() );
 
-	/* THE COLOUR LAW, once, for both callers.
-	 *
-	 * skeletonKindColor() is the single palette function the Skeleton Manager's
-	 * rows also call, so a bone and its row cannot be two different colours.
-	 * bungo, verbatim: "Just keep the color of the bones blue".
-	 */
+	// THE COLOUR LAW, once, for both callers:
+	// skeletonKindColor() is the single palette function the Skeleton Manager's rows also call, so a bone and
+	// its row cannot be two different colours. bungo, verbatim: "Just keep the color of the bones blue".
 	auto colourOf = [&]( const ArmatureBone & b, float alpha ) {
 		const QColor c = skeletonKindColor( b.kind,
 			b.active ? 2 : ( b.selected ? 1 : ( b.hovered ? 3 : 0 ) ) );
@@ -2361,13 +2114,7 @@ void GLView::setSkeletonOverlayHover( int block )
 	update();
 }
 
-/*! The chip and search text of the Skeleton Manager, mirrored into the overlay.
- *
- * bungo, verbatim: "for that bone view toggle, shouldn't it mirror the skeleton
- * manager view?". The dock pushes its state here at the end of every refresh();
- * the overlay applies the SAME four predicates to the SAME skeletonAnalyse()
- * report, so the two lists are equal by construction rather than by agreement.
- */
+//! The chip and search text of the Skeleton Manager, mirrored into the overlay.
 void GLView::setSkeletonOverlayFilter( int chip, const QString & search )
 {
 	const int c = qBound( 0, chip, 3 );
@@ -2383,13 +2130,7 @@ void GLView::setSkeletonOverlayFilter( int chip, const QString & search )
 	}
 }
 
-/*! The viewport half of the two-way selection: which overlay bone is here?
- *
- * Deliberately NOT poseBoneAt() reached a second way. That one picks over
- * poseBones, which is built from the skinned shapes by a different rule and is
- * empty unless Pose Mode or the Skeleton Manager dock is up; this picks over the
- * list the overlay is actually drawing, under the chip the dock is showing.
- */
+//! The viewport half of the two-way selection: which overlay bone is here?
 int GLView::skeletonOverlayBoneAt( const QPointF & pos ) const
 {
 	if ( !skeletonOverlay || !model || !scene || skelOverlayBones.isEmpty() )
@@ -2423,15 +2164,9 @@ int GLView::skeletonOverlayBoneAt( const QPointF & pos ) const
 	return bestBone;
 }
 
-/*! Pose Mode's armature, and the Skeleton Manager's.
- *
- * Everything that is PER-VIEW stays here -- the relationship lines, the depth
- * ramp, the pins, the hover, the selection -- and nothing that is per-view
- * draws a bone. The drawing itself is drawArmature(), which the Overlays
- * armature also calls, so the two cannot look different on the same rig
- * (bungo 2026-09-11: "shouldn't we improve both views (that will now be
- * shared)?").
- */
+//! Pose Mode's armature, and the Skeleton Manager's:
+//! Everything that is PER-VIEW stays here -- the relationship lines, the depth ramp, the pins, the hover, the
+//! selection -- and nothing that is per-view draws a bone.
 void GLView::drawPoseSkeleton()
 {
 	// Also runs for the Skeleton Manager, which wants the same armature drawing
@@ -2477,15 +2212,9 @@ void GLView::drawPoseSkeleton()
 	}
 	const float dRange = qMax( 1e-3f, dMax - dMin );
 
-	/* The bone list, in the terms the shared renderer understands.
-	 *
-	 * The KIND is the Skeleton Manager's class, exactly as the Overlays armature
-	 * reads it, so a deforming bone is the same blue in both views. Pose Mode
-	 * builds poseBones from the skinned shapes rather than from
-	 * skeletonAnalyse(), so a block it draws may have no class recorded; a
-	 * missing class falls back to `deforming`, which is what every bone in
-	 * poseBones is by that list's own construction.
-	 */
+	// The bone list, in the terms the shared renderer understands:
+	// The KIND is the Skeleton Manager's class, exactly as the Overlays armature reads it, so a deforming bone
+	// is the same blue in both views.
 	QVector<ArmatureBone> list;
 	list.reserve( poseBones.size() );
 	for ( int b : poseBones ) {
@@ -2516,52 +2245,9 @@ void GLView::drawPoseSkeleton()
 	drawArmature( list, style );
 }
 
-/* ===================================================================
- * Overlays > Show Skeleton   (lane SKELOVERLAY, bungo 2026-09-10)
- *
- * His words: "Add to the overlays: View skeleton, shows you the bones,
- * basically the same view as in the skeleton manager".
- *
- * THREE THINGS MAKE THE TWO VIEWS AGREE, and none of them is a coincidence:
- *
- *  1. the bone LIST is skeletonAnalyse()'s -- the same call the Skeleton
- *     Manager dock builds its tree from, and the same call the `skeleton` CLI
- *     prints. Not poseBones, which is built from the skinned shapes' Bones
- *     arrays by a different rule and reaches a different set;
- *  2. the CLASSES are the dock's own three predicates (SkeletonBoneInfo:
- *     verts > 0 = deforming, isUnusedBone() = listed but unused,
- *     isNotABone() = no skin references it), so the dock's Deforming and
- *     Unused filter counts are this overlay's colour counts;
- *  3. the SHAPE is drawOctahedralBone() and the joint dot, which is what
- *     drawPoseSkeleton() draws for the dock.
- *
- * WHAT IS DIFFERENT from drawPoseSkeleton(), deliberately:
- *
- *  - no depth ramp. The pose armature dims far bones so a dense cluster is
- *    pickable; nothing here is pickable, and a colour that also encodes depth
- *    cannot also encode a class;
- *  - a FIXED pixel width, so the line weight is the same at every zoom;
- *  - no selection / hover / pin colours. This is a read-only overlay.
- *
- * BLENDER, the reference (CONSTITUTION rule 10). Blender's Armature "In Front"
- * plus the Viewport Overlays popover is the interaction being copied: one tick
- * draws the whole armature through the mesh, at a constant screen weight, and
- * it follows the animation. DIVERGENCES, stated:
- *
- *  - Blender puts Names, Axes, Shapes, Group Colors and Relationship Lines in
- *    the ARMATURE data tab as five more checkboxes. This is one tick. Bone
- *    names ride on the Overlays menu's existing "Show Nodes" entry instead of
- *    a sixth row of its own -- the same toggle that labels the scene's nodes
- *    now labels the bones (bungo's END-menu rule: rows only when a setting is
- *    really added);
- *  - Blender colours bones by BONE GROUP (an authored property). A NIF has no
- *    bone groups, so the colour carries the only classification this file
- *    actually has, which is the Skeleton Manager's;
- *  - Blender draws the bone from head to tail as authored. A NIF bone has no
- *    tail, so a parent's body is drawn to each child it has (one segment per
- *    parent -> child pair, which is what the ruling asks for) and a leaf gets
- *    a capped stub down its own +Y -- the same rule poseBoneTail() uses.
- * =================================================================== */
+// Overlays > Show Skeleton:
+// His words: "Add to the overlays: View skeleton, shows you the bones, basically the same view as in the
+// skeleton manager".
 
 void GLView::setSkeletonOverlay( bool on )
 {
@@ -2569,19 +2255,11 @@ void GLView::setSkeletonOverlay( bool on )
 		return;
 	skeletonOverlay = on;
 	if ( on ) {
-		// Always rebuild on the way in: the flag is restored from QSettings
-		// during construction, before any file is open, so "it was already on"
-		// is not evidence that the list belongs to the model now loaded. The
-		// Skeleton Manager's own setSkeletonView() carries the same note, and
-		// for the same measured reason.
+		// Always rebuild on the way in: the flag is restored from QSettings during construction, before any
+		// file is open, so "it was already on" is not evidence that the list belongs to the model now loaded.
 		skelOverlayDirty = true;
 		skelOverlayCensus = SkeletonOverlayCensus();
-		/* ...and build it NOW as well (lane SKELFIX). The rebuild is otherwise
-		 * lazy, inside the next draw, so `skeletonOverlayRule()` -- the sentence
-		 * the Overlays entry puts in its tooltip -- would be empty at the exact
-		 * moment the entry is ticked. The dirty flag stays set, so anything that
-		 * renumbers blocks still forces the rebuild it always did.
-		 */
+		// ...and build it NOW as well.
 		if ( model && scene )
 			refreshSkeletonOverlay();
 		skelOverlayDirty = true;
@@ -2591,7 +2269,7 @@ void GLView::setSkeletonOverlay( bool on )
 		skelOverlayDrawnAt.clear();
 		skelOverlayDrawnSegs.clear();
 		skelOverlayCensus = SkeletonOverlayCensus();
-		skelOverlayHover = -1;			// lane SKEL2
+		skelOverlayHover = -1;
 		skelOverlayFiltered = 0;
 	}
 	update();
@@ -2609,17 +2287,9 @@ void GLView::refreshSkeletonOverlay()
 
 	const SkeletonReport report = skeletonAnalyse( model );
 
-	/* THE OVERLAY LISTS EXACTLY WHAT THE SKELETON MANAGER LISTS (lane SKEL2).
-	 *
-	 * bungo, 2026-09-11, verbatim: "for that bone view toggle, shouldn't it
-	 * mirror the skeleton manager view?".
-	 *
-	 * Not "the same numbers, arrived at the same way" -- the SAME FUNCTION.
-	 * skeletonListedBlocks() is the one place the chip's four predicates, the
-	 * search text and the dock's Isolate set are applied, and the dock's tree is
-	 * built from its answer too. Two copies of that rule would be two views that
-	 * agree until somebody edits one of them (CONSTITUTION rule 10).
-	 */
+	// THE OVERLAY LISTS EXACTLY WHAT THE SKELETON MANAGER LISTS:
+	// bungo, 2026-09-11, verbatim: "for that bone view toggle, shouldn't it mirror the skeleton manager
+	// view?".
 	const QList<int> listed = skeletonListedBlocks( report, skelOverlayChip,
 		skelOverlaySearch, skeletonIsolated );
 	const QSet<int> listedSet( listed.begin(), listed.end() );
@@ -2628,11 +2298,7 @@ void GLView::refreshSkeletonOverlay()
 		if ( b.block < 0 )
 			continue;
 		if ( !scene->findNode( model, model->getBlockIndex( b.block ) ) ) {
-			// The analysis reads the FILE; the overlay draws the SCENE. A block
-			// the scene never built has no world transform to draw at, and
-			// silently dropping it would make the overlay's count quietly
-			// smaller than the dock's. Counted instead, and the harness holds
-			// the sum against the dock.
+			// The analysis reads the FILE; the overlay draws the SCENE.
 			skelOverlayMissing++;
 			continue;
 		}
@@ -2649,7 +2315,7 @@ void GLView::refreshSkeletonOverlay()
 	}
 	std::sort( skelOverlayBones.begin(), skelOverlayBones.end() );
 
-	/* THE ARMATURE -- which pairs may be joined by a BODY (lane SKELFIX).
+	/* THE ARMATURE -- which pairs may be joined by a BODY.
 	 *
 	 * The first cut of this overlay drew a body between every parent and child
 	 * in the list, and at frame 46 of a running clip that produced segments
@@ -2684,7 +2350,7 @@ void GLView::refreshSkeletonOverlay()
 	 * is the harness's gate (a).
 	 *
 	 * The closure is computed over the WHOLE file, not over the listed rows
-	 * (lane SKEL2). Under the Bones chip the listed rows are the 93 skin bones
+	 * . Under the Bones chip the listed rows are the 93 skin bones
 	 * and none of the `*_skin` helpers' parents is among them; closing over the
 	 * listing alone would cut the rig into 93 pieces, which is the very defect
 	 * SKELFIX measured. What the chip decides is which nodes are DRAWN; the
@@ -2705,12 +2371,7 @@ void GLView::refreshSkeletonOverlay()
 		const QSet<int> shown( skelOverlayBones.begin(), skelOverlayBones.end() );
 
 		if ( boneRows.isEmpty() ) {
-			/* FALLBACK, named in words (CONSTITUTION rule 10). A file with no
-			 * skin at all -- an exported skeleton.nif -- gives the closure
-			 * nothing to close over, and refusing every body there would leave
-			 * a cloud of dots. Every node keeps its body, and the summary SAYS
-			 * that is the arm that served.
-			 */
+			// FALLBACK, named in words (CONSTITUTION rule 10).
 			skelOverlayArm = shown;
 			skelOverlayRule = tr( "No skin in this file, so there is no bone class to "
 				"close over: every one of the %1 drawn nodes is drawn as a bone." ).arg( shown.count() );
@@ -2738,18 +2399,8 @@ void GLView::refreshSkeletonOverlay()
 				}
 			}
 			for ( int b : skelOverlayBones ) {
-				/* ONLY A NODE ON SOME BONE'S OWN CHAIN (lane SKELFIX's set,
-				 * restored by lane SKEL2 after its own gate caught the widening).
-				 *
-				 * `below` holds every bone and every ancestor of a bone, and
-				 * nothing else. Testing only "is COM an ancestor of this node"
-				 * also takes in the nodes that hang BENEATH a bone without being
-				 * one -- PipboyBone, WEAPON, WeaponLeft, the AnimObject* nodes --
-				 * and gives each of them a body. Measured: armature 111 -> 120,
-				 * marker-only 19 -> 10, and 782 more pixels covered in the `Wire`
-				 * display, which is what gate S2 (the way back covers the same
-				 * pixels) refused. The set is SKELFIX's again.
-				 */
+				// ONLY A NODE ON SOME BONE'S OWN CHAIN:
+				// `below` holds every bone and every ancestor of a bone, and nothing else.
 				if ( !below.contains( b ) )
 					continue;
 				bool inside = false;
@@ -2813,18 +2464,7 @@ void GLView::drawSkeletonOverlay()
 		if ( Node * n = scene->findNode( model, model->getBlockIndex( b ) ) )
 			head.insert( b, n->worldTrans().translation );
 
-	/* THE BODY'S OTHER END is the nearest DRAWN armature ancestor, not simply
-	 * the parent (lane SKEL2).
-	 *
-	 * Under the All chip those are the same node and the picture is the one
-	 * SKELFIX shipped, unchanged. Under Bones, Deforming or a search the chip
-	 * has removed the nodes in between -- FO4 body meshes weight the `*_skin`
-	 * helpers, so a listed bone's parent is very often NOT listed -- and joining
-	 * only listed parents would leave 93 disconnected bones, which is exactly
-	 * the disconnection SKELFIX measured and refused. Reaching to the nearest
-	 * listed ancestor keeps the rig readable while drawing nothing the Skeleton
-	 * Manager is not listing.
-	 */
+	// THE BODY'S OTHER END is the nearest DRAWN armature ancestor, not simply the parent.
 	auto drawnAncestor = [&]( int b ) {
 		int x = model->getParent( b );
 		for ( int guard = 0; x >= 0 && guard <= skelOverlayClass.size() + 2; guard++ ) {
@@ -2898,7 +2538,7 @@ void GLView::drawSkeletonOverlay()
 	}
 	// EVERY listed node gets its joint ball, armature or not: a node outside the
 	// armature is still listed and still visible, it is simply never joined to
-	// anything (lane SKELFIX's rule, unchanged).
+	// anything.
 	for ( int b : skelOverlayBones ) {
 		if ( !head.contains( b ) )
 			continue;
@@ -2934,15 +2574,7 @@ void GLView::drawSkeletonOverlay()
 	c.names = skelOverlayCensus.names;	// written by the QPainter pass below
 	skelOverlayCensus = c;
 
-	/* WW_SKELOVERLAY_DUMP=<file>: every drawn node, with the screen position
-	 * THIS draw put it at (lane SKEL2, brief item 5).
-	 *
-	 * Written here rather than in a harness because the question owed to bungo
-	 * -- which two marker-only nodes are the grey dots above the back at frame
-	 * 46 -- is a question about a PICTURE, and only the frame that produced the
-	 * picture knows its own viewport size and camera. A harness window is a
-	 * different size and would answer about a different projection.
-	 */
+	// WW_SKELOVERLAY_DUMP=<file>: every drawn node, with the screen position THIS draw put it at.
 	WW_SWITCH_STATIC( QString, dumpPath, wwEnvStr( "WW_SKELOVERLAY_DUMP" ) );
 	if ( !dumpPath.isEmpty() ) {
 		QFile f( dumpPath );
@@ -2970,15 +2602,9 @@ void GLView::drawSkeletonOverlay()
 	}
 }
 
-/*! Bone names for the Overlays armature.
- *
- * bungo's screenshot that started this lane had all 130 node names painted at
- * once over the model, and his word for it was clutter. So the default is
- * Blender's: the bone under the cursor and the bones that are selected, and
- * nothing else. Overlays > Bone Display > Names turns every name on, and the
- * Overlays menu's existing Show Nodes still does too, so the picture that
- * shipped is still one tick away.
- */
+//! Bone names for the Overlays armature:
+//! bungo's screenshot that started this lane had all 130 node names painted at once over the model, and his
+//! word for it was clutter.
 void GLView::paintSkeletonOverlayNames( QPainter & painter )
 {
 	skelOverlayCensus.names = 0;
@@ -3256,10 +2882,7 @@ void GLView::fillRiggingWeightSelection()
 {
 	if ( !riggingWeightPaintMode || riggingWeightPaintTarget < 0 )
 		return;
-	// One pending fill at a time. The fill emits a stroke whose commit slot
-	// serializes the whole model into an Undo snapshot; without this guard,
-	// keyboard autorepeat (or a double delivery) stacks dozens of snapshots
-	// synchronously and freezes the UI.
+	// One pending fill at a time.
 	if ( paintFillPending )
 		return;
 	QSet<int> selected = pickedVertexRefs().value( riggingWeightPaintTarget );
@@ -3355,38 +2978,12 @@ void GLView::updateSettings()
 	// never reads QSettings per shader property. Direct .pbrm links are not
 	// affected by this toggle.
 	setPbrmAutoReplace( settings.value( "PBRM Auto Replace", true ).toBool() );
-	// Preserve the Settings defaults on a clean profile. QVariant::toFloat()
-	// returns zero for a missing key, which previously reduced both keyboard
-	// camera transforms and Shift+F fly movement to a no-op until the Render
-	// settings page had been saved at least once.
+	// Preserve the Settings defaults on a clean profile.
 	cfg.fov = std::clamp( settings.value( "General/Camera/Field Of View", 60.0f ).toFloat(), 45.0f, 120.0f );
 	cfg.moveSpd = std::clamp( settings.value( "General/Camera/Movement Speed", 350.0f ).toFloat(), 0.0f, 7000.0f );
 	cfg.rotSpd = std::clamp( settings.value( "General/Camera/Rotation Speed", 45.0f ).toFloat(), 15.0f, 1500.0f );
 	cfg.upAxis = UpAxis(settings.value( "General/Up Axis", ZAxis ).toInt());
-	/* User Perspective is the DEFAULT now, index 6 — Blender's startup view.
-	 *
-	 * The six before it are all axis-aligned, and an axis-aligned start hides
-	 * the one thing you open a nif to see. Front is a flat square until you
-	 * orbit. Anyone who has used Blender expects the three-quarter view and
-	 * gets it here for the same reason: depth in the first frame.
-	 *
-	 * Kept as a seventh entry rather than replacing Front, because the setting
-	 * is written by index and repointing index 1 would silently move everyone
-	 * who had deliberately chosen Front onto something else.
-	 */
-	/* ONE-TIME MOVE OF THE STORED VALUE.
-	 *
-	 * Changing the default above does nothing for anyone who has opened the
-	 * Render settings page even once: that page writes every field, so
-	 * Startup Direction is already on disk as 1 and the default is never
-	 * consulted again. This shipped once in exactly that state — the code was
-	 * right, the stored value won, and the feature looked inert. The camera log
-	 * is what settled it: `ctor Rot=-90,0,180 view=5`, straight from settings.
-	 *
-	 * So move the stored value, once, and only when it is the OLD default.
-	 * The marker makes it a one-shot: choose Front deliberately afterwards and
-	 * it stays Front forever.
-	 */
+	// User Perspective is the DEFAULT now, index 6 — Blender's startup view.
 	if ( !settings.value( "General/Camera/Startup Direction Moved To User", false ).toBool() ) {
 		if ( settings.value( "General/Camera/Startup Direction", 6 ).toInt() == 1 )
 			settings.setValue( "General/Camera/Startup Direction", 6 );
@@ -3622,7 +3219,7 @@ void GLView::glProjection( [[maybe_unused]] int x, [[maybe_unused]] int y )
 		nr = std::max< GLdouble >( nr, scale() );
 		// ensure distance
 		fr = std::max< GLdouble >( fr, nr + scale() );
-		// lane HOLDFIX1: a cell's far plane in whole steps of 8192 units, so a node whose bounds wobble (Memory Den: two
+		// a cell's far plane in whole steps of 8192 units, so a node whose bounds wobble (Memory Den: two
 		// far planes 72 units apart inside one launch) no longer moves the depth of every frame
 		if ( wwCellLightsFor( scene->nifModel ) ) {
 			const GLdouble raw = fr;
@@ -3633,7 +3230,7 @@ void GLView::glProjection( [[maybe_unused]] int x, [[maybe_unused]] int y )
 				qInfo().noquote() << QStringLiteral( "cell projection: far %1 (bounds gave %2)" ).arg( fr, 0, 'f', 0 ).arg( raw, 0, 'f', 1 );
 			}
 		}
-		// lane FARLOD1: the far field is outside the bounds; the far plane reaches it, the near plane
+		// the far field is outside the bounds; the far plane reaches it, the near plane
 		// rises to the game's own order (fNearDistance 15) so the depth holds 250000 units. 0 = no far field.
 		if ( const float farReach = wwCellFarLodReach( scene ); farReach > 0.0f ) {
 			const Vector3 o = scene->view * wwCellFarLodOrigin( scene );	// the reach is measured from the far centre
@@ -3643,45 +3240,33 @@ void GLView::glProjection( [[maybe_unused]] int x, [[maybe_unused]] int y )
 			wwCellFarLodPlanes( nr, fr );	// the near gate reads these
 		}
 
-		// lane MOTION1: the path camera's own fov
+		// the path camera's own fov
 		const GLdouble fovDeg = wwPathActive ? GLdouble( wwPathFov ) : GLdouble( cfg.fov / Zoom );
 		GLdouble h2 = std::tan( fovDeg / 360 * M_PI ) * nr;
 		GLdouble w2 = h2 * aspect;
 		Matrix4 P = Matrix4::fromFrustum( -w2, +w2, -h2, +h2, nr, fr );
-		cellSurfaceNotePlanes( nr, fr, true );	// lane ESPWRITE2: the depth probe's planes
-		wwGameTaaJitterProjection( scene, P );	// lane MOTION1: inert unless the TAA row is on and paintGL armed it
+		cellSurfaceNotePlanes( nr, fr, true );	// the depth probe's planes
+		wwGameTaaJitterProjection( scene, P );	// inert unless the TAA row is on and paintGL armed it
 		scene->renderer->setProjectionMatrix( P );
 	} else {
 		// Orthographic View
 		GLdouble h2 = Dist / Zoom;
 		GLdouble w2 = h2 * aspect;
 		Matrix4 P = Matrix4::fromOrtho( -w2, +w2, -h2, +h2, nr, fr );
-		cellSurfaceNotePlanes( nr, fr, false );	// lane ESPWRITE2
+		cellSurfaceNotePlanes( nr, fr, false );
 		wwGameTaaJitterProjection( scene, P );
 		scene->renderer->setProjectionMatrix( P );
 	}
 }
 
 
-/*! How many frames the viewport has painted, and how long in them.
- *
- *  A COUNTER, DELIBERATELY, and not the per-frame file write the earlier grid
- *  diagnostic used: opening and appending a log line inside every frame makes
- *  painting slow enough to CAUSE the queue-never-drains hang it was brought in to
- *  explain, so what it measured was mostly itself. Two integers cost nothing and
- *  can be read either side of the thing under suspicion.
- */
+//! How many frames the viewport has painted, and how long in them.
 static quint64 wwPaintCounter = 0;
 static qint64 wwPaintNanos = 0;
 quint64 wwGlPaintCount() { return wwPaintCounter; }
 qint64 wwGlPaintNanos() { return wwPaintNanos; }
 
-/* lane IMGS1: the imagespace's measure (src/gl/celllights.h). The frame drawn once more, every cell-lit
- * fragment writing its raw linear colour (probe 6), into a float target a quarter the size; the mean
- * luminance read back is the eye's adapted value (the game's downsample chain is an arithmetic mean,
- * Inf/NaN read as 0, and a still view is its converged value), over the pixels a cell-lit fragment
- * reached. WW_CELL_IS_DUMP=<file> measures at full size and writes the float RGBA (<file>: w h header,
- * the floats, then the w*h stencil bytes) and the echo (<file>.txt) for the gate. */
+// the imagespace's measure (src/gl/celllights.h).
 static void wwCellImageSpaceMeasurePass( Scene * scene )
 {
 	if ( !wwCellImageSpaceWanted( scene ) || !scene->renderer )
@@ -3741,9 +3326,9 @@ static void wwCellImageSpaceMeasurePass( Scene * scene )
 	}
 	wwCellImageSpaceSetAdapted( scene, wwAtmoAdapted( float( sum / double( std::max( counted, 1 ) ) ), counted,
 		int( cover.size() ) ), counted );
-	// lane BLOOM1: the game blooms a quarter-size copy of the HDR; a full-size (dump) measure is averaged 4x4
+	// the game blooms a quarter-size copy of the HDR; a full-size (dump) measure is averaged 4x4
 	wwCellImageSpaceSetBloom( scene, px.data(), w, h, div == 1 ? 4 : 1 );
-	WW_SWITCH_STATIC( bool, echo, wwEnvInt( "WW_IS_MEASURE_ECHO" ) == 1 );	// lane PERF1: set against the frame's
+	WW_SWITCH_STATIC( bool, echo, wwEnvInt( "WW_IS_MEASURE_ECHO" ) == 1 );	// set against the frame's
 	static QString said;
 	if ( echo && wwCellImageSpaceEcho( scene ) != said ) {
 		said = wwCellImageSpaceEcho( scene );
@@ -3763,10 +3348,7 @@ static void wwCellImageSpaceMeasurePass( Scene * scene )
 	}
 }
 
-/*! Lane UMBRA1: the depth probe for the tome's visibility gate (WW_CELL_UMBRA_DUMP=<dir> with WW_CELL_UMBRA_DEPTH=1).
- * When the camera moved, the scene is drawn once more into an offscreen target with no camera culling at all
- * (gl/cellcull counts nothing while probing), its depth is read back, and every 8th pixel's surface point goes,
- * unprojected to the world, to <dir>/depth.txt -- the gate checks each lies in an object box the tome sees. */
+//! the depth probe for the tome's visibility gate (WW_CELL_UMBRA_DUMP=<dir> with WW_CELL_UMBRA_DEPTH=1).
 static void wwCellUmbraDepthPass( Scene * scene )
 {
 	if ( !scene || !scene->renderer || !wwCellUmbraDepthWanted( scene ) )
@@ -3807,8 +3389,8 @@ static void wwCellUmbraDepthPass( Scene * scene )
 
 void GLView::paintGL()
 {
-	CellSpeed::Acc speedAcc( "frames painted (paintGL, with first-use uploads)" );   // lane SPEED1
-	CellTexAhead::Frame texAheadFrame;   // lane SPEED1: a frame that loads no texture ends the read-ahead
+	CellSpeed::Acc speedAcc( "frames painted (paintGL, with first-use uploads)" );
+	CellTexAhead::Frame texAheadFrame;   // a frame that loads no texture ends the read-ahead
 	wwPaintCounter++;
 	struct WwFirstFrame {	// lane STARTSPEED1: the start's last mark, when the first paint returns
 		bool first;
@@ -3817,11 +3399,11 @@ void GLView::paintGL()
 	QElapsedTimer wwStream1Clock;	// lane STREAM1: the whole paint, for the hitch figures
 	wwStream1Clock.start();
 	wwCellStreamEvict();
-	// lane STREAM1 (TEXSTREAM1): the streaming read-ahead's ready files go up before anything draws, a few MB a
+	// the streaming read-ahead's ready files go up before anything draws, a few MB a
 	// paint (WW_TEX_PUMP_MB, default 24), so a cell that comes into view finds them loaded. Red: texpump.
 	static const bool wwPumpRed = PassTime::stream1Red( "texpump" );
 	if ( !wwPumpRed && textures && model && cellStreamOn( model ) ) {
-		WW_SWITCH_STATIC( qint64, wwPumpMb, [] {	// lane LIVESET1: follows a live set
+		WW_SWITCH_STATIC( qint64, wwPumpMb, [] {	// follows a live set
 			const int v = qEnvironmentVariableIntValue( "WW_TEX_PUMP_MB" );
 			return qint64( v > 0 ? v : 24 );
 		}() );
@@ -3849,26 +3431,22 @@ void GLView::paintGL()
 		QElapsedTimer & clock;
 		~WwPaintTime() { wwPaintNanos += clock.nsecsElapsed(); }
 	} wwPaintTime{ wwPaintClock };
-	// lane PERF1: the frame's per-pass timers (one bool test while the Frame Timers row is off)
+	// the frame's per-pass timers (one bool test while the Frame Timers row is off)
 	PassTime::frameBegin();
 	if ( scene && scene->textures )
-		scene->textures->wwParamFrame();	// lane PERF5: the texture parameter shadow trusts nothing from an older frame
+		scene->textures->wwParamFrame();	// the texture parameter shadow trusts nothing from an older frame
 	struct WwPassFrame
 	{
 		~WwPassFrame()
 		{
 			PassTime::frameEnd();
-			extern bool wwStderrFrameFlush;	// lane FLYFIX1 (main.cpp): the frame's log lines in one write
+			extern bool wwStderrFrameFlush;	// the frame's log lines in one write
 			if ( wwStderrFrameFlush )
 				std::fflush( stderr );
 		}
 	} wwPassFrame;
 
-	/* RenderDoc capture of THIS context. Frames are numbered per paintGL so a
-	 * capture can be attributed to a frame: the pick render below bumps the same
-	 * counter, and comparing "paint" before it with "paint" after it is what
-	 * isolates the 07-17 line defect. Costs one branch on a static when disarmed.
-	 */
+	// RenderDoc capture of THIS context.
 	static int wwRdcFrame = 0;
 	const bool wwRdcHere = rdcArmed();
 	if ( wwRdcHere ) [[unlikely]]
@@ -3885,10 +3463,9 @@ void GLView::paintGL()
 
 	updatePending = 0;
 
-	// TEMP DIAGNOSTIC (WW_GRID_PROBE): mark each frame and the framebuffer it
-	// targets, so the drawLines entries in the same log can be attributed to a
-	// frame — and so it is visible whether the frame that actually gets presented
-	// or grabbed contains any grid draw at all. See WW_CHANGES 2026-07-27i.
+	// TEMP DIAGNOSTIC (WW_GRID_PROBE): mark each frame and the framebuffer it targets, so the drawLines
+	// entries in the same log can be attributed to a frame — and so it is visible whether the frame that
+	// actually gets presented or grabbed contains any grid draw at all.
 	{
 		WW_SWITCH_STATIC( bool, wwGridProbe, wwEnvIsSet( "WW_GRID_PROBE" ) );
 		static int wwFrame = 0;
@@ -3914,7 +3491,7 @@ void GLView::paintGL()
 		glClear( GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT | GL_STENCIL_BUFFER_BIT );
 		return;
 	}
-	// lane VIEWFULL1: Clean View masks the overlay options for this frame only (the menus keep theirs), as
+	// Clean View masks the overlay options for this frame only (the menus keep theirs), as
 	// WW_RENDER_CLEAN does for harness shots; the selection goes too (Scene::cleanView)
 	struct CleanViewMask
 	{
@@ -3997,11 +3574,8 @@ void GLView::paintGL()
 		// current block was tried here and reverted: it did not heal the
 		// grid in live use and framing the root broke setCenter()
 		postCompileRepaints = 2;
-		// THIS frame is the first one that presents the newly compiled document,
-		// so it is where the WW_FRAME_SHOTS numbering starts (see the capture
-		// block at the end of paintGL). Arming it here rather than counting
-		// paints from process start is what makes "frame 1" mean the same thing
-		// on every run, whatever the window spent its startup paints on.
+		// THIS frame is the first one that presents the newly compiled document, so it is where the
+		// WW_FRAME_SHOTS numbering starts (see the capture block at the end of paintGL).
 		wwFrameShotsArmed = true;
 	}
 
@@ -4011,13 +3585,7 @@ void GLView::paintGL()
 		doCenter = false;
 	}
 
-	/* AND THEN THE PIN, because the block above is exactly what used to eat an
-	 * explicit camera. center() does not centre: it sets doCenter and asks for
-	 * a repaint, so a caller that set Pos and Dist and then let one frame run
-	 * had both replaced HERE, by a line it never called. Re-asserting the pin
-	 * every paint also makes it survive a generated .lodl / .btd document,
-	 * which builds its scene and reframes long after the render hook ran.
-	 * Nothing happens without an armed pin (WwCameraPin::active). */
+	// AND THEN THE PIN, because the block above is exactly what used to eat an explicit camera.
 	if ( wwPin.active )
 		wwApplyCameraPinNow();
 
@@ -4026,21 +3594,20 @@ void GLView::paintGL()
 	// Transform the scene (viewTransform() must stay identical to this)
 	Transform	viewTrans = viewTransform();
 
-	// Modal gestures and paint strokes preview geometry by writing Shape data
-	// directly — force the full propagation while one is live so nothing
-	// derived from it can go stale mid-gesture (the early-out in
+	// Modal gestures and paint strokes preview geometry by writing Shape data directly — force the full
+	// propagation while one is live so nothing derived from it can go stale mid-gesture (the early-out in
 	// Scene::transform only skips when scene content is untouched).
 	if ( gizmoMode != 0 || elemTransform || riggingWeightPaintMode || vertexPaintMode || segmentPaintMode )
 		scene->transformDirty = true;
 	// Before anything transforms: pose the marked skeleton and hand its pose to
 	// every scene that snaps to it. No-op, and costs one branch, when unmarked.
 	applyWorkspaceSkeleton( viewTrans );
-	wwDoorLiveTick( scene, this );	// lane DOORLIVE1: the live door's pose (a no-op unless WW_CELL_DOOR_ANIM)
-	wwCellWorldAnimFrame( scene, time );	// lane FXPARITY2: a cell's world clock (a no-op unless World animation)
+	wwDoorLiveTick( scene, this );	// the live door's pose (a no-op unless WW_CELL_DOOR_ANIM)
+	wwCellWorldAnimFrame( scene, time );	// a cell's world clock (a no-op unless World animation)
 	scene->transform( viewTrans, time );
-	wwCellCamDump( scene );	// lane CELLSPAWN2: the eye, with or without the Cell lights row (a no-op when unset)
+	wwCellCamDump( scene );	// the eye, with or without the Cell lights row (a no-op when unset)
 
-	// Setup projection mode (lane MOTION1: the one projection a frame the temporal AA jitters)
+	// Setup projection mode
 	wwGameTaaArmJitter( true );
 	glProjection();
 	wwGameTaaArmJitter( false );
@@ -4098,7 +3665,7 @@ void GLView::paintGL()
 		mat_diff = FloatVector4( 0.0f );
 	}
 
-	/* Lookdev (lane PBRR2B, docs s6.2): the weather's sun (vanilla tent arc,
+	/* Lookdev: the weather's sun (vanilla tent arc,
 	 * NAM0 Sunlight, linear) and ambient replace the viewport light. Only in the
 	 * Lookdev scene mode, so every other mode is untouched. */
 	if ( wwLookdevActive() && scene->hasOption(Scene::DoLighting) && !scene->hasVisMode(Scene::VisSilhouette) ) {
@@ -4126,26 +3693,26 @@ void GLView::paintGL()
 	if ( scene->hasOption(Scene::DoMultisampling) )
 		glEnable( GL_MULTISAMPLE );
 
-	/* Lookdev (lane CSM1): the three sun-shadow cascade maps, rendered before
+	/* Lookdev: the three sun-shadow cascade maps, rendered before
 	 * anything else this frame so the ground and the PBR shapes can receive.
 	 * A no-op with the Shadows row off (the default): no map, no program swap. */
-	wwCellCullFrame();	// lane SUNCELL1: the last frame's culling counts, printed when they change
-	wwCellCullCameraView( scene->view );	// lane PERFFIX4: previs culls only through this eye
-	wwCellUnderwaterFrame( scene );	// lane WATERUNDER3: the eye under water, decided before anything draws
+	wwCellCullFrame();	// the last frame's culling counts, printed when they change
+	wwCellCullCameraView( scene->view );	// previs culls only through this eye
+	wwCellUnderwaterFrame( scene );	// the eye under water, decided before anything draws
 	if ( wwLookdevActive() ) {
-		PassTime::Scope pt( PassTime::SunShadows );	// lane PERF1
+		PassTime::Scope pt( PassTime::SunShadows );
 		wwSunShadowPass( scene );
 	}
-	wwCellFlickerFrame( scene );	// lane LIGHTFLICKER1: this frame's flicker, before any pass reads the lights
-	wwCellXemiLightsFrame( scene );	// lane LIGHTS4: placed lights recoloured by their XEMI source, before the lights are read
-	// lane SHADOW1: the cell lights' depth cubes (a no-op unless the document draws cell-lit)
-	PassTime::begin( PassTime::CellShadows );	// lane PERF1
+	wwCellFlickerFrame( scene );	// this frame's flicker, before any pass reads the lights
+	wwCellXemiLightsFrame( scene );	// placed lights recoloured by their XEMI source, before the lights are read
+	// the cell lights' depth cubes (a no-op unless the document draws cell-lit)
+	PassTime::begin( PassTime::CellShadows );
 	wwCellShadowPass( scene );
 	PassTime::end( PassTime::CellShadows );
-	probeSkyTick( scene, scene->nifModel, this );	// lane SKY1: an exterior's bounce follows the weather
-	rtddgiCellFrame( scene );	// lane RTXGI1 M2: the ray-traced GI volume builds, updates and uploads (off: nothing)
+	probeSkyTick( scene, scene->nifModel, this );	// an exterior's bounce follows the weather
+	rtddgiCellFrame( scene );	// the ray-traced GI volume builds, updates and uploads (off: nothing)
 
-	PassTime::begin( PassTime::Background );	// lane PERF1: the sky (or background) and the ground plane
+	PassTime::begin( PassTime::Background );	// the sky (or background) and the ground plane
 	if ( perspectiveMode ) {
 		// Lookdev: the lookdev cube background replaces the (FO76+) skybox
 		bool	colorBufCleared = wwLookdevActive() ? wwLookdevDrawBackground( scene ) : scene->renderer->drawSkyBox( scene );
@@ -4227,20 +3794,8 @@ void GLView::paintGL()
 	scene->hideAll = primaryHidden;
 	scene->ghostAll = primaryGhosted;
 
-	/* Workspace documents rendered for real — their own materials, textures and
-	 * shaders, not the flat soup the preview used to be. One Scene each, built
-	 * the first frame the document appears and kept until it leaves the list,
-	 * because make() compiles geometry and is far too expensive per frame.
-	 *
-	 * Skipped entirely while selecting: these are reference geometry, and a
-	 * click must never land on a document that is not the one being edited.
-	 *
-	 * No per-scene light or uniform setup is needed. Those live on the shared
-	 * NifSkopeOpenGLContext (`scene->renderer`), not on the Scene, so everything
-	 * paintGL uploaded for the primary above — view transform, lighting, tone
-	 * mapping, scene options — is already in place for these too. All a secondary
-	 * needs is the same viewTrans and time.
-	 */
+	// Workspace documents rendered for real — their own materials, textures and shaders, not the flat soup the
+	// preview used to be.
 	QVector<Scene *> workspaceDrawScenes;
 	if ( !workspaceRenderOrder.isEmpty() && !scene->selecting ) {
 		for ( NifModel * wm : std::as_const( workspaceRenderOrder ) ) {
@@ -4258,8 +3813,8 @@ void GLView::paintGL()
 	// that scene-by-scene made a refractive primary copy the framebuffer before
 	// Loaded NIFs behind it had been drawn. In a workspace, collect every opaque
 	// node first and use one globally sorted transparent/refraction pass.
-	// lane AO1: the obscurance first; the measure reads the obscured light, as the game's adaptation does
-	/* lane CELLALL1: Loaded NIFs beside a cell no longer switch the cell's passes off (obscurance, reflections, fog,
+	// the obscurance first; the measure reads the obscured light, as the game's adaptation does
+	/* Loaded NIFs beside a cell no longer switch the cell's passes off (obscurance, reflections, fog,
 	 * the measure, HDR, TAA). A cell primary draws first with all of them, the Loaded NIFs after it into the finished
 	 * frame (depth back from the HDR frame); the globally sorted pass stays for a primary that is not a cell.
 	 * WW_CELL_WSGATE_RED=old: the gate as it was (every pass off while a Loaded NIF draws). */
@@ -4276,7 +3831,7 @@ void GLView::paintGL()
 			lastWs = ws;
 		}
 	}
-	PassTime::begin( PassTime::Obscurance );	// lane PERF1: one bracket per pass
+	PassTime::begin( PassTime::Obscurance );	// one bracket per pass
 	wwCellAoPass( scene, cellPasses );
 	PassTime::end( PassTime::Obscurance );
 	rtddgiRestirPass( scene );	// lane RESTIRDI1: the RT quality preset's ReSTIR DI on that pass's g-buffer (Low: nothing)
@@ -4285,37 +3840,37 @@ void GLView::paintGL()
 	wwCellOceanPass( scene, cellPasses );	// lane WATERLOOK1: the wind's waves, before any pass that draws water
 	PassTime::end( PassTime::Water );
 	PassTime::begin( PassTime::Reflections );
-	wwCellSsrPass( scene, cellPasses );	// lane SSR1: needs that pass's depth
-	rtddgiReflPass( scene );	// lane RTREFL1: the water's reflection rays on the RT volume's BVH (off: nothing)
+	wwCellSsrPass( scene, cellPasses );	// needs that pass's depth
+	rtddgiReflPass( scene );	// the water's reflection rays on the RT volume's BVH (off: nothing)
 	PassTime::end( PassTime::Reflections );
-	PassTime::begin( PassTime::Contact );	// lane TIMING1: was inside "reflections"
-	wwContactShadowPass( scene );	// lane TERRSHADOW1: the contact mask from that pass's depth (fails open without it)
+	PassTime::begin( PassTime::Contact );	// was inside "reflections"
+	wwContactShadowPass( scene );	// the contact mask from that pass's depth (fails open without it)
 	PassTime::end( PassTime::Contact );
 	PassTime::begin( PassTime::Ssgi );
-	wwCellSsgiPass( scene, cellPasses );	// lane SSGI1: reads that pass's scene colour
+	wwCellSsgiPass( scene, cellPasses );	// reads that pass's scene colour
 	PassTime::end( PassTime::Ssgi );
 	PassTime::begin( PassTime::Air );
-	wwVolAirPass( scene, cellPasses );	// lane VOLAIR1: the air's froxels
+	wwVolAirPass( scene, cellPasses );	// the air's froxels
 	PassTime::end( PassTime::Air );
 	PassTime::begin( PassTime::ReflProbes );
-	wwCellReflProbePass( scene, cellPasses );	// lane REFLPROBE1: capture + relight (reads the cell setters, so after the air)
+	wwCellReflProbePass( scene, cellPasses );	// capture + relight (reads the cell setters, so after the air)
 	PassTime::end( PassTime::ReflProbes );
 	PassTime::begin( PassTime::Measure );
-	if ( cellPasses && wwCellImageSpaceMeasureByPass( scene ) )	// lane PERF1: else the linear frame measures it (gl/cellhdr.h)
-		wwCellImageSpaceMeasurePass( scene );	// lane IMGS1
+	if ( cellPasses && wwCellImageSpaceMeasureByPass( scene ) )	// else the linear frame measures it (gl/cellhdr.h)
+		wwCellImageSpaceMeasurePass( scene );
 	PassTime::end( PassTime::Measure );
 	PassTime::begin( PassTime::UmbraDepth );
 	if ( cellPasses )
-		wwCellUmbraDepthPass( scene );	// lane UMBRA1: the tome gate's unculled depth
+		wwCellUmbraDepthPass( scene );	// the tome gate's unculled depth
 	PassTime::end( PassTime::UmbraDepth );
 
 	glDisable( GL_BLEND );
 	const bool collisionOnly = Scene::collisionOnlySetting
 		&& scene->hasOption( Scene::ShowCollision );
 	if ( workspaceDrawScenes.isEmpty() || collisionOnly || cellFirst ) {
-		// lane IMPOSTORSHOW 2026-09-19: the octahedral impostor card, when one
+		// the octahedral impostor card, when one
 		// is armed. Inert in every ordinary session -- see impostorpreviewtest.h.
-		PassTime::begin( PassTime::Impostors );	// lane PERF1
+		PassTime::begin( PassTime::Impostors );
 		wwImpostorPreviewDraw( scene );
 		// ... and the cards a native LOD chunk's manifest places, when the
 		// person has switched that master on. Inert otherwise: it returns 0
@@ -4323,40 +3878,40 @@ void GLView::paintGL()
 		ImpostorChunk::draw( scene, ImpostorDraw::Options() );
 		PassTime::end( PassTime::Impostors );
 		if ( !wwImpostorPreviewSuppressScene() ) {
-			// lane HDR1: the cell's draw into one linear frame, tone-mapped once (gl/cellhdr.h)
-			PassTime::begin( PassTime::Background );	// lane PERF1: the sky through the air counts as the sky
-			const bool hdr = ( workspaceDrawScenes.isEmpty() || cellFirst ) && wwCellHdrBegin( scene );	// lane CELLALL1
-			wwLookdevSkyLinearDraw( scene, hdr );	// lane PERFFIX3: the sky inside the linear frame (WW_SKY_LINEAR; off: no call does anything)
-			wwCellFarLodFrame( scene );	// lane FARLOD1: the far sway's uniforms; no GL call while off
+			// the cell's draw into one linear frame, tone-mapped once (gl/cellhdr.h)
+			PassTime::begin( PassTime::Background );	// the sky through the air counts as the sky
+			const bool hdr = ( workspaceDrawScenes.isEmpty() || cellFirst ) && wwCellHdrBegin( scene );
+			wwLookdevSkyLinearDraw( scene, hdr );	// the sky inside the linear frame (WW_SKY_LINEAR; off: no call does anything)
+			wwCellFarLodFrame( scene );	// the far sway's uniforms; no GL call while off
 			if ( hdr ) {
-				wwVolAirSkyDraw( scene, false );	// lane VOLAIR1: the sky through the air, under the scene
-				wwLookdevDrawGroundCellFrame( scene );	// lane LIGHTBOOTH1: the booth floor (a harness pin; no GL call unset)
+				wwVolAirSkyDraw( scene, false );	// the sky through the air, under the scene
+				wwLookdevDrawGroundCellFrame( scene );	// the booth floor (a harness pin; no GL call unset)
 			}
 			PassTime::end( PassTime::Background );
-			scene->draw();	// lane PERF1: opaque / sorted / effects timed inside (Scene::drawShapes)
-			wwVolAirSkyDraw( scene, true );	// lane VOLAIR1: the sky's air probes (gates only; no GL call otherwise)
+			scene->draw();	// opaque / sorted / effects timed inside (Scene::drawShapes)
+			wwVolAirSkyDraw( scene, true );	// the sky's air probes (gates only; no GL call otherwise)
 			if ( hdr )
-				rtddgiCellViewDrawLinear( scene, viewTrans );	// lane RTXFIX1: the Ray-traced GI probes inside the linear frame (fog, exposure)
+				rtddgiCellViewDrawLinear( scene, viewTrans );	// the Ray-traced GI probes inside the linear frame (fog, exposure)
 			if ( !hdr )
-				wwCloudVolLookdevFront( scene );	// lane CLOUD2C: clouds in front of a single NIF (its opaque depth)
+				wwCloudVolLookdevFront( scene );	// clouds in front of a single NIF (its opaque depth)
 			if ( hdr ) {
 				PassTime::begin( PassTime::FarCards );
-				PassTime::subBegin( PassTime::FarDots );	// lane PERF2: far LOD measured (proposal only)
-				wwCellFarDotsDraw( scene );	// lane FARVIEW1: the far bulbs, into the linear frame
+				PassTime::subBegin( PassTime::FarDots );	// far LOD measured (proposal only)
+				wwCellFarDotsDraw( scene );	// the far bulbs, into the linear frame
 				PassTime::subEnd( PassTime::FarDots );
 				PassTime::subBegin( PassTime::FarCardsLit );
-				wwCellFarLodCards( scene, true, true );	// lane FARLOD1: the far tree cards, lit, into the linear frame
+				wwCellFarLodCards( scene, true, true );	// the far tree cards, lit, into the linear frame
 				PassTime::subEnd( PassTime::FarCardsLit );
 				PassTime::end( PassTime::FarCards );
-				PassTime::begin( PassTime::Precip );	// lane TIMING1
-				wwCellPrecipDraw( scene );	// lane WEATHERLOOK1 B: rain / snow from the weather, into the linear frame (row off: no GL call)
+				PassTime::begin( PassTime::Precip );
+				wwCellPrecipDraw( scene );	// rain / snow from the weather, into the linear frame (row off: no GL call)
 				PassTime::end( PassTime::Precip );
-				wwCellLensFlareGrab( scene );	// lane LIGHTS3: the opaque depth for the flares' occlusion test
-				PassTime::begin( PassTime::Clouds );	// lane TIMING1: the clouds' depth copy and front pass
-				wwCloudVolSceneDepth( scene );	// lane CLOUD2B: the depth the volume clouds test against
+				wwCellLensFlareGrab( scene );	// the opaque depth for the flares' occlusion test
+				PassTime::begin( PassTime::Clouds );	// the clouds' depth copy and front pass
+				wwCloudVolSceneDepth( scene );	// the depth the volume clouds test against
 				PassTime::end( PassTime::Clouds );
-				PassTime::begin( PassTime::Underwater );	// lane TIMING1
-				wwCellUnderwaterPass( scene );	// lane WATERUNDER1: the camera under water (no GL call off or above it)
+				PassTime::begin( PassTime::Underwater );
+				wwCellUnderwaterPass( scene );	// the camera under water (no GL call off or above it)
 				PassTime::end( PassTime::Underwater );
 				{
 					PassTime::Scope pt( PassTime::Post );
@@ -4367,35 +3922,35 @@ void GLView::paintGL()
 				wwCellHdrEnd( scene );
 				PassTime::end( PassTime::ToneMap );
 				PassTime::begin( PassTime::Clouds );
-				wwCloudVolFront( scene );	// lane CLOUD2B: clouds in front of the scene (a ridge behind them)
+				wwCloudVolFront( scene );	// clouds in front of the scene (a ridge behind them)
 				PassTime::end( PassTime::Clouds );
 			}
-			// lane FARLOD1: the cards when the frame is not HDR (lit and toned by their own program), then the
+			// the cards when the frame is not HDR (lit and toned by their own program), then the
 			// census a gate reads
 			PassTime::begin( PassTime::FarCards );
 			wwCellFarLodCards( scene, false, hdr );
 			wwCellFarLodSkyCensus( scene );
 			PassTime::end( PassTime::FarCards );
-			// lane MOTION1: the game's temporal AA on the finished (tone-mapped) frame; inert when the row is off
-			if ( workspaceDrawScenes.isEmpty() || cellFirst ) {	// lane CELLALL1
-				// lane GRASSMB1: the game's depth of field + motion blur BEFORE the temporal AA, as the engine's image-space pass
+			// the game's temporal AA on the finished (tone-mapped) frame; inert when the row is off
+			if ( workspaceDrawScenes.isEmpty() || cellFirst ) {
+				// the game's depth of field + motion blur BEFORE the temporal AA, as the engine's image-space pass
 				// runs them (3 HDR/tone map, 6 DoF, 10 motion blur, then 17/18 FXAA/TAA); inert when off
-				PassTime::Scope pt( PassTime::Post );	// lane PERF1
+				PassTime::Scope pt( PassTime::Post );
 				{
-					PassTime::Swap taaT( PassTime::Post, PassTime::Taa );	// lane TIMING1: the AA's own vectors count as the AA
-					if ( !wwGameTaaInputsRan() )	// lane POSTFX3: the before-tone-map resolve ran it already
-						wwTaaInputsPass( scene );	// lane TAAINPUTS1: inert unless asked for (gl/taainputs.h)
+					PassTime::Swap taaT( PassTime::Post, PassTime::Taa );	// the AA's own vectors count as the AA
+					if ( !wwGameTaaInputsRan() )	// the before-tone-map resolve ran it already
+						wwTaaInputsPass( scene );	// inert unless asked for (gl/taainputs.h)
 				}
 				wwCellPostApply( scene );
-				PassTime::subBegin( PassTime::PostFlare );	// lane POSTFX1: the post zone's parts
-				wwCellLensFlareDraw( scene );	// lane LIGHTS3 (LENSFLARE1): the lights' flares, a screen pass; inert when off
+				PassTime::subBegin( PassTime::PostFlare );	// the post zone's parts
+				wwCellLensFlareDraw( scene );	// the lights' flares, a screen pass; inert when off
 				PassTime::subEnd( PassTime::PostFlare );
 				{
-					PassTime::Swap taaT( PassTime::Post, PassTime::Taa );	// lane TIMING1: blits + vectors + resolve + copy-back
+					PassTime::Swap taaT( PassTime::Post, PassTime::Taa );	// blits + vectors + resolve + copy-back
 					wwGameTaaResolve( scene );
 				}
-				wwTaaInputsView( scene );	// lane TAAINPUTS1: the inputs' debug view (WW_TAAINPUTS_VIEW)
-				wwCellGrassFrameEnd();	// lane GRASSMB1: the grass wind's clock steps once per frame
+				wwTaaInputsView( scene );	// the inputs' debug view (WW_TAAINPUTS_VIEW)
+				wwCellGrassFrameEnd();	// the grass wind's clock steps once per frame
 			}
 			for ( Scene * ws : std::as_const( workspaceDrawScenes ) )
 				ws->draw();
@@ -4424,15 +3979,15 @@ void GLView::paintGL()
 		glDisable( GL_BLEND );
 	}
 
-	PassTime::begin( PassTime::Overlays );	// lane PERF1: everything after the frame (closed by frameEnd)
-	// lane PROBEVIEW1: the PRTP band's Pass overlays (surfel tiles, lit probes, the picked probe's links)
+	PassTime::begin( PassTime::Overlays );	// everything after the frame (closed by frameEnd)
+	// the PRTP band's Pass overlays (surfel tiles, lit probes, the picked probe's links)
 	wwCellProbeViewDraw( scene, viewTrans );
-	wwCellVolumeViewDraw( scene, viewTrans );   // lane VOLFIT1: rooms, shapes, thresholds; VOLVIEW2: in the PRTP Debug View
-	wwAirZoneViewDraw( scene, viewTrans );	// lane AIRZONE1: the hand-placed volumes while the panel shows them
-	cellEditFrame( this, scene, viewTrans );	// lane ESPWRITE2: the place mode's probe, ghost and placed edits
-	rtddgiCellViewDraw( scene, viewTrans );	// lane RTXGI1 M2: the Ray-traced GI probes row (states / irradiance)
+	wwCellVolumeViewDraw( scene, viewTrans );   // rooms, shapes, thresholds; VOLVIEW2: in the PRTP Debug View
+	wwAirZoneViewDraw( scene, viewTrans );	// the hand-placed volumes while the panel shows them
+	cellEditFrame( this, scene, viewTrans );	// the place mode's probe, ghost and placed edits
+	rtddgiCellViewDraw( scene, viewTrans );	// the Ray-traced GI probes row (states / irradiance)
 
-	if ( !cleanView ) {	// lane VIEWFULL1: Clean View hides the paint helpers (block kept at its old indent)
+	if ( !cleanView ) {	// Clean View hides the paint helpers (block kept at its old indent)
 	// Selected-bone weight heatmap. Per-corner colours are supplied by the
 	// Rigging Manager, while the viewport owns only an ephemeral triangle soup.
 	if ( !riggingWeightPreviewSoup.isEmpty()
@@ -4454,11 +4009,8 @@ void GLView::paintGL()
 		glDepthFunc( GL_LESS );
 	}
 
-	// Blender-style Weight Paint selection mask. Unlike Edit Mode, Weight Paint
-	// must not cover the useful heat colours with orange selection fill. The
-	// paintable selection stays at full heatmap colour; protected geometry gets
-	// Blender's neutral-grey veil. Face-mask boundaries and selected vertex/edge
-	// cues are white, while unselected cage elements remain black.
+	// Blender-style Weight Paint selection mask. Unlike Edit Mode, Weight Paint must not cover the useful heat
+	// colours with orange selection fill.
 	const bool elementPaintMode = riggingWeightPaintMode || vertexPaintMode || segmentPaintMode;
 	const int elementPaintTarget = riggingWeightPaintMode ? riggingWeightPaintTarget
 		: vertexPaintMode ? vertexPaintTarget : segmentPaintTarget;
@@ -4626,12 +4178,10 @@ void GLView::paintGL()
 			glDepthFunc( GL_LESS );
 		}
 	}
-	}	// lane VIEWFULL1: end of the Clean View paint helpers
+	}	// end of the Clean View paint helpers
 
-	// Other open NIF documents form a neutral, read-only scene assembly around
-	// the active document. They do not participate in picking or saving. The
-	// preview is fully opaque (alpha comes from the baked per-face colors) and
-	// writes depth so it occludes, and is occluded by, the primary correctly.
+	// Other open NIF documents form a neutral, read-only scene assembly around the active document. They do
+	// not participate in picking or saving.
 	if ( !sessionDocumentPreviewSoup.isEmpty() && !scene->selecting ) {
 		glEnable( GL_DEPTH_TEST );
 		glDepthFunc( GL_LEQUAL );
@@ -4649,13 +4199,7 @@ void GLView::paintGL()
 		glDepthFunc( GL_LESS );
 	}
 
-	/* Ghosted documents, in a second pass after the opaque one. Separate rather
-	 * than one buffer with mixed alpha, because a translucent triangle has to be
-	 * drawn after everything it shows through, and there is no ordering within a
-	 * single soup. Depth WRITES are off so ghosts do not hide each other or the
-	 * primary; depth testing stays on so they are still occluded by solid things
-	 * in front of them.
-	 */
+	// Ghosted documents, in a second pass after the opaque one.
 	if ( !sessionDocumentGhostSoup.isEmpty() && !scene->selecting ) {
 		glEnable( GL_DEPTH_TEST );
 		glDepthFunc( GL_LEQUAL );
@@ -4673,10 +4217,8 @@ void GLView::paintGL()
 		glDepthFunc( GL_LESS );
 	}
 
-	// Rigging donor overlay: copied, read-only donor geometry in target model
-	// space. It is deliberately outside Scene, so it cannot be picked, saved,
-	// skinned, or confused with target blocks. Cyan distinguishes it from the
-	// amber Collision Manager preview and orange target selection.
+	// Rigging donor overlay: copied, read-only donor geometry in target model space. It is deliberately
+	// outside Scene, so it cannot be picked, saved, skinned, or confused with target blocks.
 	if ( !riggingDonorPreviewSoup.isEmpty() && !scene->selecting && !cleanView
 		&& ( riggingDonorPreviewFilled || riggingDonorPreviewWireframe ) ) {
 		glEnable( GL_DEPTH_TEST );
@@ -4714,11 +4256,8 @@ void GLView::paintGL()
 		glBlendFunc( GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA );
 		glDepthMask( GL_FALSE );
 		scene->loadModelViewMatrix( viewTrans );
-		/* While the sim runs the preview is the SCENE, not a proposal, so it is
-		 * drawn like unselected geometry in Edit Mode -- near-black -- and orange is
-		 * reserved for the bone actually being held. Amber everywhere would leave
-		 * nothing to say "this is the one you grabbed".
-		 */
+		// While the sim runs the preview is the SCENE, not a proposal, so it is drawn like unselected geometry
+		// in Edit Mode -- near-black -- and orange is reserved for the bone actually being held.
 		const bool simulating = physicsPreview.active();
 		if ( simulating )
 			scene->setGLColor( 0.09f, 0.09f, 0.10f, 0.55f );
@@ -4738,13 +4277,7 @@ void GLView::paintGL()
 		glDisable( GL_BLEND );
 	}
 
-	/* Physics Sim extras: the floor, and whatever has been shot at it.
-	 *
-	 * Drawn after the preview and with their own colours so they read as separate
-	 * things rather than as more collision. The floor is a plain grey surface --
-	 * an invisible plane that a ragdoll lands on looks like a bug until you can
-	 * see it.
-	 */
+	// Physics Sim extras: the floor, and whatever has been shot at it.
 	if ( physicsPreview.active() && !scene->selecting ) {
 		/* Pinned bodies in a red-orange, the way a secondary selection reads in
 		 * Edit Mode: related to the thing in hand, distinct from it.
@@ -4790,15 +4323,7 @@ void GLView::paintGL()
 			glDisable( GL_BLEND );
 		}
 
-		/* The beam, and the point on the shape the hand actually has hold of.
-		 *
-		 * Without it the two things the wheel does -- reeling the body in and out,
-		 * and rolling it -- are controls with no visible state: you can feel them
-		 * working but cannot see where the hand is, so a body pushed behind the one
-		 * in front of it simply looks like it stopped responding. Drawn with depth
-		 * testing OFF, deliberately: the whole point is to show where the hand is
-		 * when the hand is behind something.
-		 */
+		// The beam, and the point on the shape the hand actually has hold of.
 		Vector3 grip, hand;
 		if ( physicsPreview.grabBeam( grip, hand ) ) {
 			const float pxScale = float( devicePixelRatioF() );
@@ -4813,11 +4338,8 @@ void GLView::paintGL()
 			scene->setGLLineWidth( 1.6f * pxScale );
 			scene->drawLines( beam.constData(), size_t( beam.size() ), nullptr );
 
-			/* A cross at the grip rather than a dot: it is a POINT on a surface, and
-			 * a filled marker large enough to see would hide the very detail you are
-			 * aiming at. Sized from the camera distance so it stays legible at any
-			 * zoom instead of vanishing when you pull back.
-			 */
+			// A cross at the grip rather than a dot: it is a POINT on a surface, and a filled marker large
+			// enough to see would hide the very detail you are aiming at.
 			const float s = std::max( 0.4f, cameraDistance() * 0.012f );
 			QVector<Vector3> mark;
 			mark << grip - Vector3( s, 0, 0 ) << grip + Vector3( s, 0, 0 )
@@ -4954,7 +4476,7 @@ void GLView::paintGL()
 		glDisable( GL_BLEND );
 	}
 
-	if ( !cleanView ) {	// lane VIEWFULL1: Clean View hides outlines, gizmos, wire/edit overlays, skeletons, origins
+	if ( !cleanView ) {	// Clean View hides outlines, gizmos, wire/edit overlays, skeletons, origins
 	// Blender-style selection outlines around the object-mode selection
 	if ( model && !editMode && !objSelection.isEmpty() && !scene->selecting )
 		drawObjectOutlines();
@@ -5013,15 +4535,9 @@ void GLView::paintGL()
 			}
 
 			if ( gizmoHandlesOn ) {
-				// Blender-style handles: arrows with solid cone tips (move),
-				// rings (rotate), solid boxes (scale), center circle (view-
-				// plane move); modelview is already the gizmo basis at the
-				// pivot. Colours match Blender: X #FF3352, Y #8BDC00, Z #2890FF.
-				// During a modal G/R/S only the relevant sub-gizmo is drawn,
-				// and only the constrained axis if one is locked in. When the
-				// Show Gizmo toggle is off nothing is drawn here (not even during
-				// a modal gesture) - only the axis constraint guide lines below
-				// still show, so a G+X/Y/Z move stays readable.
+				// Blender-style handles: arrows with solid cone tips (move), rings (rotate), solid boxes
+				// (scale), center circle (view- plane move); modelview is already the gizmo basis at the
+				// pivot.
 				const float L = gs;
 				const float axR[3][4] = {
 					{ 1.000f, 0.200f, 0.322f, 1.0f },	// X
@@ -5184,10 +4700,8 @@ void GLView::paintGL()
 		}
 	}
 
-	// Blender-style wireframe overlay: a black wireframe drawn on top of the
-	// solid/shaded render, so the texture shows through the faces. Opaque
-	// (depth-tested against the textured geometry) unless X-ray is on, which
-	// makes both the geometry (half-transparent) and every edge show through.
+	// Blender-style wireframe overlay: a black wireframe drawn on top of the solid/shaded render, so the
+	// texture shows through the faces.
 	if ( model && wireframeOverlay && !scene->selecting ) {
 		auto edgeKey = []( int a, int b ) {
 			return ( quint64( std::min( a, b ) ) << 32 ) | quint64( std::max( a, b ) );
@@ -5268,11 +4782,9 @@ void GLView::paintGL()
 	// outline (drawObjectOutlines, right after the scene) - the old coloured
 	// wireframe overlay is gone
 
-	// Blender-style edit-mode overlay: black wireframe + black vertex dots,
-	// selected elements orange (#FF8500), active element white, translucent
-	// orange fill on selected faces, and an orange->black gradient on edges
-	// running into selected vertices (vertex mode only). Depth-tested like
-	// Blender; positions are pulled slightly toward the eye to avoid z-fights.
+	// Blender-style edit-mode overlay: black wireframe + black vertex dots, selected elements orange
+	// (#FF8500), active element white, translucent orange fill on selected faces, and an orange->black
+	// gradient on edges running into selected vertices (vertex mode only).
 	if ( model && editMode && !riggingWeightPaintMode && !vertexPaintMode && !segmentPaintMode && !editShapeBlocks.isEmpty() ) {
 		const float dpr = float( devicePixelRatioF() );
 		const FloatVector4 colWire( 0.0f, 0.0f, 0.0f, 1.0f );
@@ -5331,12 +4843,7 @@ void GLView::paintGL()
 				wv[i] = eye + ( w - eye ) * 0.997f;
 			}
 
-			// unique edge list (hidden triangles excluded, Blender H). Marked
-			// quad diagonals are skipped so a tri pair reads as one quad —
-			// but only while both halves are visible and the edge is still
-			// manifold (otherwise the mark is stale and the edge shows).
-			// All index-space sets are cached across frames (EditOverlaySets);
-			// only positions (camera-dependent) rebuild per repaint.
+			// unique edge list (hidden triangles excluded, Blender H).
 			const QSet<int> hiddenT = editHiddenTris.value( wb );
 			const QSet<quint64> qmarks = quadMarksFor( wb );
 			EditOverlaySets & es = editOverlaySets[wb];
@@ -5395,11 +4902,8 @@ void GLView::paintGL()
 			const QSet<int> & sv = selVerts[wb];
 			const QSet<quint64> & se = selEdges[wb];
 
-			// Faces to fill: a face is filled when it is face-selected, OR (only in
-			// the matching select mode) all of its verts / all of its edges are
-			// selected. Gating the implicit fill on the mode bit keeps face mode
-			// from lighting up a de-selected face just because its verts are still
-			// covered by selected neighbours (the invert-in-face-mode surprise).
+			// Faces to fill: a face is filled when it is face-selected, OR (only in the matching select mode)
+			// all of its verts / all of its edges are selected.
 			if ( es.selHash != selHash || es.pickModeUsed != pickMode ) {
 				const bool fillByVerts = bool( pickMode & 1 ) && !sv.isEmpty();
 				const bool fillByEdges = bool( pickMode & 2 ) && !se.isEmpty();
@@ -5428,32 +4932,14 @@ void GLView::paintGL()
 			const QSet<int> & filledTris = es.filledTris;
 			const QVector<int> & visVerts = es.visVerts;
 
-			// Selection (fills, selected edges/verts, outlines) is drawn with
-			// the depth test OFF so nearby unconnected geometry can never
-			// occlude it - the edit cage stays on top, Blender-style. The plain
-			// black wireframe + unselected dots keep the depth test.
+			// Selection (fills, selected edges/verts, outlines) is drawn with the depth test OFF so nearby
+			// unconnected geometry can never occlude it - the edit cage stays on top, Blender-style.
 			QVector<Vector3> foutline;	// non-active filled faces (orange outline)
 			QVector<Vector3> aoutline;	// the active/primary face (white outline)
 			if ( !filledTris.isEmpty() ) {
-				/* The FILL is depth-tested unless X-ray is on.
-				 *
-				 * 753af78 turned the depth test off for the fills, the selected
-				 * edges/verts and the outlines together, so nearby unconnected
-				 * geometry could not occlude the selection. That is right for a 1-2 px
-				 * line or dot - a marker you must be able to find. It is wrong for a
-				 * filled surface: a triangle drawn with no depth test reads as
-				 * GEOMETRY, so a selected face on the far side of a closed mesh
-				 * appears in front of the solid shading. Backface culling is off here
-				 * too (Scene::draw disables it), so nothing else stops it either.
-				 *
-				 * This mirrors the wireframe overlay above, which already gets it
-				 * right. The 0.997 eye-pull applied to every overlay vertex keeps a
-				 * front-facing selection on top of its own surface without z-fighting.
-				 *
-				 * NOT glEnable( GL_CULL_FACE ): the fill soup is an arbitrary triangle
-				 * list whose winding follows the NIF, so culling would also drop
-				 * legitimately selected front faces on an inverted-normal mesh.
-				 */
+				// The FILL is depth-tested unless X-ray is on:
+				// 753af78 turned the depth test off for the fills, the selected edges/verts and the outlines
+				// together, so nearby unconnected geometry could not occlude the selection.
 				if ( scene->xRay )
 					glDisable( GL_DEPTH_TEST );
 				// the active face's quad partner counts as active too: a marked
@@ -5476,10 +4962,8 @@ void GLView::paintGL()
 					             && ( activeElem->e0 == fi || ( actPartner >= 0 && fi == actPartner ) ) );
 					QVector<Vector3> & dst = act ? atris : ftris;
 					dst << wv[t[0]] << wv[t[1]] << wv[t[2]];
-					// only the active face gets the white outline (Blender); the
-					// rest of the selection stays orange. A marked quad diagonal
-					// is never outlined - otherwise selecting a quad would draw
-					// its hidden diagonal right back on top of the fill
+					// only the active face gets the white outline (Blender); the rest of the selection stays
+					// orange.
 					QVector<Vector3> & odst = act ? aoutline : foutline;
 					for ( int e = 0; e < 3; e++ ) {
 						const int a = t[e], b = t[( e + 1 ) % 3];
@@ -5537,21 +5021,8 @@ void GLView::paintGL()
 				}
 			}
 
-			/* --- selected elements, on top of their own surface ---
-			 *
-			 * Depth-tested unless X-ray is on, same as the fill above. This block
-			 * covers the face outlines, the selected/active edges and the
-			 * selected/active vertex dots; with the test off they were visible
-			 * through solid geometry, so a selection on the far side of a closed
-			 * mesh drew over the front of it. Blender hides occluded edit-mode
-			 * elements too - X-ray is exactly the toggle that reveals them.
-			 *
-			 * 753af78 turned this off so nearby UNCONNECTED geometry could not
-			 * occlude a selection. What actually keeps a selection on top of its
-			 * own surface is the 0.997 eye-pull applied to every overlay vertex,
-			 * not the missing depth test - which is why the base wireframe below
-			 * draws depth-tested at the same offset and does not z-fight.
-			 */
+			// selected elements, on top of their own surface:
+			// Depth-tested unless X-ray is on, same as the fill above.
 			if ( scene->xRay )
 				glDisable( GL_DEPTH_TEST );
 
@@ -5742,7 +5213,7 @@ void GLView::paintGL()
 		glDepthMask( GL_TRUE );
 		glEnable( GL_DEPTH_TEST );
 	}
-	}	// lane VIEWFULL1: end of the Clean View helpers
+	}	// end of the Clean View helpers
 
 	// The old GL corner axes indicator is replaced by the Blender-style
 	// navigation gizmo drawn with QPainter at the end of paintGL().
@@ -5762,22 +5233,17 @@ void GLView::paintGL()
 	// 2D overlays drawn over the GL scene with QPainter: the Blender-style
 	// navigation gizmo and the 3D cursor (constant screen size, like Blender)
 	bool drawSnapMarker = snapIndicator && ( gizmoMode != 0 || elemTransform );
-	// lane PERF1: the Frame Timers overlay (never in a harness grab: WW_RENDER_CLEAN keeps the frame clean)
+	// the Frame Timers overlay (never in a harness grab: WW_RENDER_CLEAN keeps the frame clean)
 	WW_SWITCH_STATIC( bool, passTimeClean, wwEnvInt( "WW_RENDER_CLEAN" ) == 1 );
-	/* lane MODPICK1: the near cells load other mods than the far LOD bake shows -- said in the view, never silent.
-	 * SHOTFIX1 (D4): not in a harness grab either (the log still says it): it was OPENREDS g10's 468 px "blob" */
+	/* the near cells load other mods than the far LOD bake shows -- said in the view, never silent.
+	 * SHOTFIX1: not in a harness grab either (the log still says it): it was OPENREDS g10's 468 px "blob" */
 	const QString modPickNote = ( model && !passTimeClean ) ? cellModPickViewNote( model ) : QString();
 	const QStringList passTimeLines = ( passTimeClean || scene->selecting ) ? QStringList() : PassTime::overlay();
-	// lane VOLVIEW2: the PRTP Debug View's room and threshold labels (empty when the view is off)
+	// the PRTP Debug View's room and threshold labels (empty when the view is off)
 	const std::vector<WwCellVolumeLabel> volLabels = scene->selecting ? std::vector<WwCellVolumeLabel>()
 		: wwCellVolumeViewLabels( scene->nifModel );
 	if ( !cleanView && ( scene->hasOption( Scene::ShowAxes ) || ( model && showCursor ) || freeCamera || drawSnapMarker || boxSelectDrag || circleSelecting || knifeActive || loopCutActive || riggingWeightPaintMode || vertexPaintMode || segmentPaintMode || !modPickNote.isEmpty() || !passTimeLines.isEmpty() || !volLabels.empty() ) ) {
-		// The scene passes (esp. collision wireframe) leave GL state that
-		// QPainter inherits: depth test on (so filled overlay shapes get
-		// depth-rejected against the geometry, while text glyphs survive - the
-		// "gizmo vanishes but XYZ letters stay" bug), a custom blend func, a
-		// bound program/VAO, and a non-fill polygon mode. Reset all of it so
-		// the QPainter overlay renders predictably.
+		// The scene passes (esp.
 		if ( QOpenGLContext * glCtx = QOpenGLContext::currentContext() ) {
 			QOpenGLFunctions * f = glCtx->functions();
 			f->glDisable( GL_DEPTH_TEST );
@@ -5786,19 +5252,16 @@ void GLView::paintGL()
 			f->glDisable( GL_CULL_FACE );
 			f->glDisable( GL_SCISSOR_TEST );
 			f->glUseProgram( 0 );
-			// NOTE: do NOT glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, 0) here - the
-			// element-buffer binding is part of the currently bound VAO's state,
-			// and the renderer caches and reuses that VAO. Clearing it corrupts
-			// the cached shape's index buffer and crashes the next glDrawElements
-			// (seen as a crash when interacting with the collision preview).
+			// NOTE: do NOT glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, 0) here - the element-buffer binding is part
+			// of the currently bound VAO's state, and the renderer caches and reuses that VAO.
 		}
 		glPolygonMode( GL_FRONT_AND_BACK, GL_FILL );
 		QPainter painter( this );
-		if ( !volLabels.empty() ) {	// lane VOLVIEW2: each room's name (and its group) and each threshold's two rooms
+		if ( !volLabels.empty() ) {	// each room's name (and its group) and each threshold's two rooms
 			painter.setRenderHint( QPainter::TextAntialiasing, true );
 			QFont f = painter.font();
 			const qreal base = f.pointSizeF() > 0 ? f.pointSizeF() : 9.0;
-			// lane VOLPLACE1: labels no longer pile up. Nearest first; a label that meets one already drawn moves one
+			// labels no longer pile up. Nearest first; a label that meets one already drawn moves one
 			// line down, then one line up; if both meet, the farther label is hidden. WW_CELL_VOLUMES_LABELRED=1 (read
 			// each frame): every label at its anchor, the old overlap.
 			const bool labelRed = qEnvironmentVariableIntValue( "WW_CELL_VOLUMES_LABELRED" ) != 0;
@@ -5851,7 +5314,7 @@ void GLView::paintGL()
 			f.setPointSizeF( base );
 			painter.setFont( f );
 		}
-		if ( !passTimeLines.isEmpty() ) {	// lane PERF1: top right, one pass a line (CPU / GPU ms)
+		if ( !passTimeLines.isEmpty() ) {	// top right, one pass a line (CPU / GPU ms)
 			QFont f = painter.font();
 			f.setPointSizeF( 8.5 );
 			painter.setFont( f );
@@ -5866,13 +5329,7 @@ void GLView::paintGL()
 				y += 14;
 			}
 		}
-		/* Physics Sim HUD: the active tool, the state, and the solver's own health.
-		 *
-		 * Every number here is already computed by the step -- SimStats is filled
-		 * whether anyone reads it or not -- so the overlay costs a string format.
-		 * It is worth showing because "the ragdoll looks wrong" and "the solver is
-		 * diverging" look identical in a viewport until you can see maxSpeed.
-		 */
+		// Physics Sim HUD: the active tool, the state, and the solver's own health.
 		if ( physicsPreview.active() && physicsShowStats ) {
 			painter.setRenderHint( QPainter::Antialiasing, true );
 			QFont f = painter.font();
@@ -5926,12 +5383,10 @@ void GLView::paintGL()
 				y += 14;
 			}
 		}
-		/* The name of the bone being dragged, at the bone.
-		 *
-		 * The packfile carries no names -- hkaSkeleton's are null on every corpus
-		 * bone -- so this comes from the NIF node the collision object targets, and
-		 * it is the only way to know which limb is in hand on a rig of 39.
-		 */
+		// The name of the bone being dragged, at the bone:
+		// The packfile carries no names -- hkaSkeleton's are null on every corpus bone -- so this comes from
+		// the NIF node the collision object targets, and it is the only way to know which limb is in hand on a
+		// rig of 39.
 		if ( physicsPreview.active() && physicsPreview.grabbing() ) {
 			const int held = physicsPreview.grabbedBody();
 			QString name = physicsPreview.bodyName( held );
@@ -5978,10 +5433,8 @@ void GLView::paintGL()
 				painter.setPen( hot ? QColor( 255, 200, 90 ) : QColor( 200, 216, 255 ) );
 				painter.drawText( sp + off, name );
 			};
-			// Names are always on in the Skeleton Manager: reading the rig is the
-			// entire job there, and an unlabelled armature is a puzzle. Pose Mode
-			// keeps them behind its Names toggle, where they are clutter over a
-			// mesh you are posing.
+			// Names are always on in the Skeleton Manager: reading the rig is the entire job there, and an
+			// unlabelled armature is a puzzle.
 			if ( poseShowBoneNames || skeletonView )
 				for ( int b : poseBones )
 					if ( b != poseHoverBone )
@@ -6042,10 +5495,8 @@ void GLView::paintGL()
 			painter.drawEllipse( circleSelectPos, qreal( circleSelectRadius ), qreal( circleSelectRadius ) );
 		}
 		if ( knifeActive ) {
-			// Blender knife: white cut line, green squares on committed points
-			// (snapped ones filled), dashed rubber band to the hover point.
-			// Points are re-projected every frame so the line stays glued to
-			// the surface while orbiting with MMB.
+			// Blender knife: white cut line, green squares on committed points (snapped ones filled), dashed
+			// rubber band to the hover point.
 			painter.setRenderHint( QPainter::Antialiasing, true );
 			// a point can fail to project after an MMB orbit puts it behind
 			// the camera: segments touching such a point are simply not drawn
@@ -6150,15 +5601,8 @@ void GLView::paintGL()
 		}
 		painter.end();
 
-		// QPainter changes GL state behind the renderer's back (bound program,
-		// blending, scissor); reset everything that would corrupt the next
-		// selection/picking render, which reuses this context.
-		// IMPORTANT: unbind through the renderer, not with a raw
-		// glUseProgram(0) — the raw call desynced the renderer's cached
-		// current program, so the next frame's first draw with the SAME
-		// cached program (typically lines.prog, i.e. the ground grid and
-		// origin axes) skipped the rebind and rendered with program 0:
-		// this was the "no grid until something is clicked" startup bug.
+		// QPainter changes GL state behind the renderer's back (bound program, blending, scissor); reset
+		// everything that would corrupt the next selection/picking render, which reuses this context.
 		if ( scene->haveRenderer() )
 			scene->renderer->stopProgram();
 		if ( QOpenGLContext * glCtx = QOpenGLContext::currentContext() ) {
@@ -6188,10 +5632,8 @@ void GLView::paintGL()
 	std::fprintf( stderr, "Average frame time = %.2f ms\n", avgTime );
 #endif
 
-	// TEMP DIAGNOSTIC (WW_GRID_RED): count forced-red pixels at the very end of the
-	// frame, to pair with the same count taken immediately after each line draw in
-	// Scene::drawLines. red>0 after the draw but 0 here means something later in
-	// the frame overwrites the grid; 0 in both means it never rasterized.
+	// TEMP DIAGNOSTIC (WW_GRID_RED): count forced-red pixels at the very end of the frame, to pair with the
+	// same count taken immediately after each line draw in Scene::drawLines.
 	{
 		WW_SWITCH_STATIC( bool, wwRedCount, wwEnvIsSet( "WW_GRID_RED" ) );
 		static int wwEndFrame = 0;
@@ -6216,25 +5658,8 @@ void GLView::paintGL()
 		}
 	}
 
-	/* FIRST-FRAME CAPTURE (WW_FRAME_SHOTS=<prefix>): save the framebuffer of
-	 * every paintGL from the frame that first presents the document, numbered,
-	 * straight out of the frame that is about to be shown.
-	 *
-	 * WW_RENDER_SHOT cannot answer "what does the user see when the file opens".
-	 * It waits 2.5 s, resizes the window, hides the docks, runs a pick render and
-	 * pumps two more updates before it grabs - and a resize or a pick render
-	 * repairs first-frame state. A defect that only exists until the first
-	 * interaction is invisible to it by construction, which is why the refraction
-	 * viewport bug (WW_CHANGES 2026-08-11) shipped with all seven regression
-	 * cases green.
-	 *
-	 * So this reads the frame in place, at the end of paintGL, before the swap
-	 * and before anything else can touch the window. Compare frame 1 with a later
-	 * frame from the SAME run and the difference is first-frame state and nothing
-	 * else: no resize, no dock layout, no camera, no scene time in the way.
-	 *
-	 * WW_FRAME_SHOTS_MAX (default 16) caps how many are written.
-	 */
+	// FIRST-FRAME CAPTURE (WW_FRAME_SHOTS=<prefix>): save the framebuffer of every paintGL from the frame that
+	// first presents the document, numbered, straight out of the frame that is about to be shown.
 	{
 		WW_SWITCH_STATIC( QString, wwShotPrefix, wwEnvStr( "WW_FRAME_SHOTS" ) );
 		WW_SWITCH_STATIC( int, wwShotMax, ( wwEnvIsSet( "WW_FRAME_SHOTS_MAX" )
@@ -6246,9 +5671,8 @@ void GLView::paintGL()
 			glGetIntegerv( GL_VIEWPORT, vp );
 			const int w = vp[2], h = vp[3];
 			if ( w > 0 && h > 0 ) {
-				// Read back the framebuffer this frame was DRAWN into, not
-				// whatever happens to be the read binding: a grab that silently
-				// read the wrong target would look like a black first frame,
+				// Read back the framebuffer this frame was DRAWN into, not whatever happens to be the read
+				// binding: a grab that silently read the wrong target would look like a black first frame,
 				// i.e. like a defect of its own.
 				GLint	prvRead = 0, drawFbo = 0;
 				glGetIntegerv( GL_READ_FRAMEBUFFER_BINDING, &prvRead );
@@ -6273,22 +5697,22 @@ void GLView::paintGL()
 		postCompileRepaints--;
 		QTimer::singleShot( 16, this, [this]() { update(); } );
 	}
-	// lane MOTION1: the temporal AA converges over a few still frames after the camera moves (never in a harness)
-	if ( wwGameTaaWantsSettle() | wwVolAirWantsSettle() )	// lane PERF2: and the temporal air's strata
+	// the temporal AA converges over a few still frames after the camera moves (never in a harness)
+	if ( wwGameTaaWantsSettle() | wwVolAirWantsSettle() )	// and the temporal air's strata
 		QTimer::singleShot( 16, this, [this]() { update(); } );
-	// lane GRASSMB1: the game's grass waves while the weather blows (never in a harness)
+	// the game's grass waves while the weather blows (never in a harness)
 	else if ( wwCellGrassWantsRepaint() )
 		QTimer::singleShot( 16, this, [this]() { update(); } );
-	// lane FOGDRIFT1: the fog drifts while the weather blows (never in a harness)
+	// the fog drifts while the weather blows (never in a harness)
 	else if ( wwVolAirWantsRepaint() )
 		QTimer::singleShot( 16, this, [this]() { update(); } );
-	// lane GAPFIX1: the far trees sway (never in a harness)
+	// the far trees sway (never in a harness)
 	else if ( wwCellFarLodWantsRepaint() )
 		QTimer::singleShot( 16, this, [this]() { update(); } );
-	// lane LANDSPEC2: the land-LOD blend centre glides after a cell cross (never with its time pinned)
+	// the land-LOD blend centre glides after a cell cross (never with its time pinned)
 	else if ( wwLandLodWantsRepaint() )
 		QTimer::singleShot( 16, this, [this]() { update(); } );
-	// lane FARWATER1: a far water sheet waited for the .lodl lookup this frame: draw again until it lands
+	// a far water sheet waited for the .lodl lookup this frame: draw again until it lands
 	else if ( wwCellWaterWantsRepaint() )
 		QTimer::singleShot( 16, this, [this]() { update(); } );
 
@@ -6314,7 +5738,7 @@ bool GLView::wwPaintNow()
 	QCoreApplication::processEvents();
 	if ( wwPaintCounter != before )
 		return true;
-	/* lane HOLDFIX1: after the hour-step rows a pumped frame painted nothing (rows ran in 6.5 s instead of 15, the
+	/* after the hour-step rows a pumped frame painted nothing (rows ran in 6.5 s instead of 15, the
 	 * TAA note stayed at the first pre-roll frame): a swallowed request leaves updatePending set, so ask Qt itself */
 	updatePending = 0;
 	QOpenGLWindow::update();
@@ -6635,10 +6059,8 @@ void GLView::move( float x, float y, float z )
 
 void GLView::rotate( float x, float y, float z )
 {
-	// Blender's default Auto Perspective behaviour: orbiting away from an
-	// axis-aligned orthographic view returns to perspective. This keeps the
-	// horizontal ground grid visible after MMB or numpad orbit, while a static
-	// arbitrary User Orthographic view (entered with Numpad 5) remains gridless.
+	// Blender's default Auto Perspective behaviour: orbiting away from an axis-aligned orthographic view
+	// returns to perspective.
 	if ( !perspectiveMode && view != ViewWalk )
 		setProjection( true );
 
@@ -6758,14 +6180,10 @@ void GLView::frameSelected()
 			}
 		}
 	}
-	/* A BONE IS NOT A SHAPE (lane SKEL2).
-	 *
-	 * objSelection can hold bone NODES -- a click in Pose Mode, or on the
-	 * Overlays armature, puts one there -- and scene->shapes has nothing with
-	 * that id, so Frame Selected fell through to center() and framed the whole
-	 * model. Double-clicking a row in the Skeleton Manager is supposed to frame
-	 * THAT BONE, so the same selection has to answer for nodes as well.
-	 */
+	// A BONE IS NOT A SHAPE:
+	// objSelection can hold bone NODES -- a click in Pose Mode, or on the Overlays armature, puts one there --
+	// and scene->shapes has nothing with that id, so Frame Selected fell through to center() and framed the
+	// whole model.
 	if ( !have && !editMode && !objSelection.isEmpty() && scene ) {
 		const float cap = ( skeletonOverlay ? skelOverlaySize : poseBoneSize ) * 2.0f;
 		const QVector<int> & drawnSet = skelOverlayArmList.isEmpty() ? poseBones : skelOverlayArmList;
@@ -6990,10 +6408,7 @@ GLView::WwCameraPin GLView::wwCameraPinFromEnvironment()
 			arms << QStringLiteral( "refused-WW_RENDER_CENTER-not-x,y,z" );
 	}
 
-	/* WW_RENDER_DIST is the EYE's distance to the look-at point, in world
-	 * units. It used to mean the orthographic half-height, a meaning that
-	 * never once took effect (see the header), so nothing can have relied
-	 * on it. */
+	// WW_RENDER_DIST is the EYE's distance to the look-at point, in world units.
 	const QString dst = wwEnvStr( "WW_RENDER_DIST" );
 	if ( !dst.isEmpty() ) {
 		bool ok = false;
@@ -7020,10 +6435,7 @@ GLView::WwCameraPin GLView::wwCameraPinFromEnvironment()
 		}
 	}
 
-	/* WW_RENDER_ORTHO=<half-width in world units>: the metric arm. The scale
-	 * is exact and independent of the eye distance, so an object of E units
-	 * spans E * viewportWidth / ( 2 * half-width ) pixels whatever
-	 * WW_RENDER_DIST says. */
+	// WW_RENDER_ORTHO=<half-width in world units>: the metric arm.
 	const QString ort = wwEnvStr( "WW_RENDER_ORTHO" );
 	if ( !ort.isEmpty() ) {
 		bool ok = false;
@@ -7091,7 +6503,7 @@ void GLView::wwApplyCameraPinNow()
 		else if ( wwPin.view == ViewUser )
 			Rot = wwBlenderStartupRotation;
 		view = wwPin.view;
-		// lane SKYFULL1: WW_RENDER_PITCH tilts a pinned side view up by that many degrees (the sky shots)
+		// WW_RENDER_PITCH tilts a pinned side view up by that many degrees (the sky shots)
 		if ( wwEnvIsSet( "WW_RENDER_PITCH" ) )
 			Rot[0] -= wwEnvStr( "WW_RENDER_PITCH" ).toFloat();
 	}
@@ -7104,10 +6516,8 @@ void GLView::wwApplyCameraPinNow()
 	if ( wwPin.haveOrtho ) {
 		perspectiveMode = false;
 		const double halfH = double( wwPin.orthoHalfWidth ) / asp;
-		/* In an orthographic projection the eye distance changes nothing but
-		 * the clip planes, so Dist carries it and Zoom carries the scale:
-		 * glProjection() uses Dist / Zoom as the half-height. An unset
-		 * WW_RENDER_DIST parks the eye four half-heights back. */
+		// In an orthographic projection the eye distance changes nothing but the clip planes, so Dist carries
+		// it and Zoom carries the scale: glProjection() uses Dist / Zoom as the half-height.
 		const double eye = wwPin.haveDist ? double( wwPin.dist ) : ( 4.0 * halfH );
 		Dist = float( eye * 0.5 );
 		Zoom = ( halfH > 1.0e-9 ) ? ( double( Dist ) / halfH ) : 1.0;
@@ -7318,7 +6728,7 @@ bool GLView::wwCellStreamFrame()
 
 void GLView::wwCellStreamEvict()
 {
-	// lane CELLSTREAM1: file textures no paint has bound for a while (a cell that left, mostly) are freed every
+	// file textures no paint has bound for a while (a cell that left, mostly) are freed every
 	// few seconds, in a paint (the context is current). What the last 3 paints bound stays however slow they were:
 	// a wall clock alone freed the textures of a paint longer than the keep, which loaded them all again
 	if ( !textures || !model || !cellStreamOn( model ) )
@@ -7332,7 +6742,7 @@ void GLView::wwCellStreamEvict()
 		clock.start();
 	const std::uint32_t sec = std::uint32_t( clock.elapsed() / 1000 ) + 1U;
 	textures->setUseTick( sec );
-	// lane STREAMMEM1: cached meshes by the same rule (undrawn for the keep and by the last 3 paints), on the
+	// cached meshes by the same rule (undrawn for the keep and by the last 3 paints), on the
 	// cache's paint counter; red WW_STREAM1_RED=geokeep leaves them to the cache's own ~1800 paints
 	static GeoKeepClock geoClock;
 	static const std::uint32_t geoKeep = std::uint32_t( cellStreamGeoKeepSec() );
@@ -7751,16 +7161,14 @@ void GLView::wwSetPathCamera( bool on, const Vector3 & eye, const Vector3 & at, 
 	wwPathFov = fov;
 }
 
-/* lane CAMGATE1 (bungo 10-30: "Stop placing the camera out of bounds anywhere"): every reader of the view (paintGL, the
- * shots, the path frames, the picks, the favorites) takes it through the bounds gate. A view whose eye is outside the
- * loaded cells or under the terrain + 50 is refused: the last in-bounds view stays, or the cell's home before there is
- * one (src/cellcambounds.h). In-bounds views come back unchanged (the same Transform, the same pixels). */
+// every reader of the view (paintGL, the shots, the path frames, the picks, the favorites) takes it through
+// the bounds gate.
 Transform GLView::viewTransform() const
 {
 	return wwCameraBoundsGate( wwViewTransformRaw() );
 }
 
-// lane CAMGATE1: a level look along yawDeg (0 north = +y, 90 east = +x) from eye; rows = right, up, back (as the path's)
+// a level look along yawDeg (0 north = +y, 90 east = +x) from eye; rows = right, up, back (as the path's)
 static Transform wwCamLookYaw( const float eye[3], float yawDeg )
 {
 	const double a = double( yawDeg ) * M_PI / 180.0;
@@ -7792,7 +7200,7 @@ Transform GLView::wwCameraBoundsGate( const Transform & raw ) const
 		wwCamDocGen = gen;
 		wwCamKeep.reset();
 	}
-	/* lane CAMGATE2: the memo, the kept view and the write-back are WwCamBounds::Keeper (src/cellcambounds.h). The
+	/* the memo, the kept view and the write-back are WwCamBounds::Keeper (src/cellcambounds.h). The
 	 * free camera's state is Pos / Rot / Dist (the fly keys, the readouts and the favorites read them); a refusal of a
 	 * view made from it puts the kept pose back there. A path camera or a pinned harness camera is never written. */
 	struct Ops
@@ -7875,7 +7283,7 @@ Transform GLView::wwViewTransformRaw() const
 {
 	Transform vt;
 	if ( wwPathActive ) {
-		// lane MOTION1: look-at from the path's eye to its target, world +Z up, no roll; rows = right, up, back
+		// look-at from the path's eye to its target, world +Z up, no roll; rows = right, up, back
 		const double e[3] = { wwPathEye[0], wwPathEye[1], wwPathEye[2] };
 		double f[3] = { wwPathAt[0] - e[0], wwPathAt[1] - e[1], wwPathAt[2] - e[2] };
 		auto norm = []( double * v ) {
@@ -8091,10 +7499,8 @@ Matrix GLView::gizmoBasisFor( const QModelIndex & iBlock, int orient ) const
 
 float GLView::gizmoScale( const Vector3 & pivot ) const
 {
-	// world size for ~90 logical pixels on screen, regardless of camera
-	// distance, zoom or projection - the same behaviour as the 2D cursor.
-	// In perspective the apparent size depends on the pivot's view-space
-	// depth, not the orbit distance (the pivot can sit well off-center).
+	// world size for ~90 logical pixels on screen, regardless of camera distance, zoom or projection - the
+	// same behaviour as the 2D cursor.
 	float hh = std::max( height(), 1 );
 	float wpp;
 	if ( perspectiveMode || view == ViewWalk ) {
@@ -8466,11 +7872,8 @@ void GLView::gizmoUpdate( const QPoint & pos, Qt::KeyboardModifiers mods )
 			}
 		}
 
-		// grid stepping applies whenever snapping is on and no vertex/edge/face
-		// snap engaged (an unhit element-snap move still grid-steps rather than
-		// doing nothing). Snap the MOVEMENT in the active orientation basis so
-		// an axis-constrained move only steps along that axis (the other delta
-		// components are ~0 and round to 0, leaving those axes untouched).
+		// grid stepping applies whenever snapping is on and no vertex/edge/face snap engaged (an unhit
+		// element-snap move still grid-steps rather than doing nothing).
 		if ( snap && snapTargetMode == 0 && !elemSnapped && gizmoSnapStep > 0 ) {
 			float step = gizmoSnapStep * snapFine;
 			Vector3 deltaBasis = gizmoBasisM.inverted() * deltaWorld;
@@ -8608,14 +8011,7 @@ void GLView::gizmoUpdate( const QPoint & pos, Qt::KeyboardModifiers mods )
 	update();
 }
 
-//! Batches a per-vertex ChangeValueCommand push loop. QUndoStack::push runs
-//! each new command's redo() BEFORE merging it into the transaction, and a
-//! size-1 redo() applies without Processing — so the FIRST application of a
-//! big gesture emitted one dataChanged (plus the dependent-condition sibling
-//! scan) per vertex, a 38k-signal storm; only the undo/redo replay was
-//! batched. Scope one of these around the push loop: per-leaf signals are
-//! suppressed for the scope (the state is a stack, nesting is safe) and one
-//! span per touched shape is emitted at the end.
+//! Batches a per-vertex ChangeValueCommand push loop.
 struct TlCommandBatch {
 	NifModel * nif;
 	QSet<int> shapes;
@@ -8742,13 +8138,8 @@ void GLView::gizmoEnd( bool commit )
 	update();
 }
 
-//! Per-shape resolution cache for tlVertexValueIndex. getIndex(name) is an
-//! uncached linear scan with a string compare per sibling — two of them per
-//! call made the per-vertex loops pay O(fields) name scans per vertex. The
-//! "Vertex Data" array and the row number of the "Vertex" field inside a
-//! vertex row are identical for every vertex of a shape (fixed-compound rows
-//! are structurally identical — the model's own shared-condition-cache
-//! invariant), so resolve them once per shape and index children directly.
+//! Per-shape resolution cache for tlVertexValueIndex. getIndex(name) is an uncached linear scan with a string
+//! compare per sibling — two of them per call made the per-vertex loops pay O(fields) name scans per vertex.
 struct TlVertexFieldCache {
 	QModelIndex iVData;	// BSTriShape "Vertex Data" (invalid on legacy meshes)
 	QModelIndex iVerts;	// legacy NiTriShapeData "Vertices"
@@ -9447,11 +8838,8 @@ float GLView::nearestScreenVertex( const QPointF & pos, float radius,
 {
 	out = PickedElement();
 	float best = radius;
-	// occlusion test: a vertex hidden behind opaque geometry is not pickable
-	// (Blender picks front-most; X-ray mode deliberately picks through). One
-	// raycast at the vertex's own screen position, compared along the view
-	// ray — a vertex ON the hit surface (its own triangles) passes the
-	// tolerance. Only candidates that would become the winner are tested.
+	// occlusion test: a vertex hidden behind opaque geometry is not pickable (Blender picks front-most; X-ray
+	// mode deliberately picks through).
 	auto visible = [this, only]( const Vector3 & wv, const QPointF & sp ) {
 		if ( !scene || scene->xRay )
 			return true;
@@ -9929,10 +9317,9 @@ void GLView::movePickedVertsToCursor()
 	if ( byShape.isEmpty() )
 		return;
 
-	// Value-level undo (merged ChangeValueCommands via tlPushPositionCommands,
-	// which also batches signals and memoizes the field lookups) instead of a
-	// whole-model snapshot — this op only writes vertex positions, and the
-	// snapshot serialized the entire file twice and reloaded it on Ctrl+Z.
+	// Value-level undo (merged ChangeValueCommands via tlPushPositionCommands, which also batches signals and
+	// memoizes the field lookups) instead of a whole-model snapshot — this op only writes vertex positions,
+	// and the snapshot serialized the entire file twice and reloaded it on Ctrl+Z.
 	ChangeValueCommand::createTransaction();
 	model->undoStack->beginMacro( tr( "Move vertices to 3D cursor" ) );
 	for ( auto it = byShape.constBegin(); it != byShape.constEnd(); it++ ) {
@@ -10354,11 +9741,7 @@ void GLView::gizmoUpdateElement( const QPoint & pos, Qt::KeyboardModifiers mods 
 		return wt.rotation.inverted() * ( ( w - wt.translation ) * ( 1.0f / sc ) );
 	};
 
-	// Edit-mode dragging is a renderer preview. Writing every selected packed
-	// vertex into NifModel on every mouse event emitted thousands of model
-	// notifications and made BSSubIndexTriShape transforms progressively slower.
-	// Keep the authored model untouched until release and invalidate each affected
-	// shape's GPU cache once per sample.
+	// Edit-mode dragging is a renderer preview.
 	QSet<Shape *> previewShapes;
 	auto previewVertex = [&]( ElemVert & ev, const Vector3 & cageLocal ) {
 		Shape * shape = shapeForBlock( ev.shape );
@@ -10395,11 +9778,8 @@ void GLView::gizmoUpdateElement( const QPoint & pos, Qt::KeyboardModifiers mods 
 			deltaWorld = u * amount;
 		}
 
-		// element snapping (vertex/edge/face target): the selection median
-		// lands on the geometry under the mouse. The edited mesh itself is a
-		// valid target (Blender snaps to unselected geometry of the same
-		// mesh); only triangles touching the actively dragged vertices are
-		// rejected, so the selection can't chase itself.
+		// element snapping (vertex/edge/face target): the selection median lands on the geometry under the
+		// mouse.
 		bool elemSnapped = false;
 		if ( snap && snapTargetMode > 0 ) {
 			Vector3 target;
@@ -10407,10 +9787,6 @@ void GLView::gizmoUpdateElement( const QPoint & pos, Qt::KeyboardModifiers mods 
 
 			if ( snapTargetMode == 1 ) {
 				// Blender vertex snap: nearest vertex to the cursor in SCREEN space.
-				// A surface raycast only fires when the cursor is exactly over a
-				// triangle, so it missed whenever the pointer sat just beside the
-				// target vertex (over empty space) - that was the "can't snap on an
-				// axis" report. Dragged vertices are skipped so it can't chase itself.
 				float bestD = 24.0f;
 				for ( Shape * s : scene->shapes ) {
 					if ( !s || s->isHidden() || s->verts.isEmpty() )
@@ -10696,10 +10072,7 @@ static void tlPushNormalCommands( NifModel * model, const QModelIndex & iShape, 
 				continue;	// tolerate an incomplete row rather than warn per vertex
 			normalFieldRow = nItem->row();
 		}
-		/* ValueCol, not column 0. NifModel::setData switches on the COLUMN: on
-		 * the name column it renames the item, returns true, and leaves the value
-		 * alone — so a ChangeValueCommand built on a column-0 index pushes, undoes
-		 * and redoes perfectly while writing nothing at all. */
+		// ValueCol, not column 0.
 		QModelIndex nIdx = model->index( normalFieldRow, NifModel::ValueCol, row );
 		const NifItem * item = nIdx.isValid() ? static_cast<const NifItem *>( nIdx.internalPointer() ) : nullptr;
 		if ( !item )
@@ -10726,11 +10099,8 @@ void GLView::gizmoEndElement( bool commit )
 
 	if ( model ) {
 		if ( commit ) {
-			// Undo via per-vertex value commands rather than a whole-model
-			// snapshot: serialising the entire FO4 model on every edit is slow
-			// and was corrupting some files. Each vertex already holds its new
-			// value from the renderer preview; the model still contains the
-			// original, so push one ChangeValueCommand per changed vertex now.
+			// Undo via per-vertex value commands rather than a whole-model snapshot: serialising the entire
+			// FO4 model on every edit is slow and was corrupting some files.
 			ChangeValueCommand::createTransaction();
 			{
 				TlCommandBatch batch( model );
@@ -10799,27 +10169,8 @@ void GLView::gizmoEndElement( bool commit )
 	update();
 }
 
-//! Blender-style popup placement: move a modal dialog so `onCursor` (usually
-//! its primary action button) opens directly under the pointer for an instant
-//! click. Call after the buttons are added, before exec() — adjustSize() lays
-//! the dialog out so the child geometry is valid. Clamped to the cursor's
-//! screen so it never opens partly off-screen. Pass onCursor = nullptr to
-//! centre the whole dialog on the cursor instead.
-/*! Make a confirmation look like Blender's, not like a Windows dialog.
- *
- *  Blender's confirmations are frameless, sit at the pointer, carry no title bar
- *  and no icon, and fill the default button with the accent so the answer you are
- *  about to give is obvious. Ours had a title bar reading "Delete - NifSkope -
- *  …", a system frame, and two identical grey buttons — three lines of chrome
- *  around four words of question, and nothing saying which button Enter presses.
- *
- *  Still a QMessageBox underneath. It carries the modality, the keyboard handling
- *  and the Escape behaviour for free, and every driver that looks for one — the
- *  harnesses included — keeps working. Only the chrome changes.
- *
- *  Colours come from the skin, never literals, so it follows the palette like
- *  everything else.
- */
+//! Blender-style popup placement: move a modal dialog so `onCursor` (usually its primary action button) opens
+//! directly under the pointer for an instant click.
 void tlStyleConfirmPopup( QMessageBox * box, QPushButton * preferred )
 {
 	if ( !box )
@@ -10830,30 +10181,14 @@ void tlStyleConfirmPopup( QMessageBox * box, QPushButton * preferred )
 	// no title text either: the frame is gone, but QMessageBox still reserves
 	// width for a caption nobody can see, which is half of why it was so wide
 	box->setWindowTitle( QString() );
-	/* AND THE LAYOUT'S OWN MARGINS, which the stylesheet cannot reach.
-	 *
-	 * QMessageBox lays itself out for a dialog with an icon, a caption and room
-	 * to breathe. With the frame and the icon gone that is a lot of empty space
-	 * around four words: Blender's equivalent is a line of text and two small
-	 * buttons, and nothing else.
-	 */
+	// AND THE LAYOUT'S OWN MARGINS, which the stylesheet cannot reach.
 	if ( QLayout * lay = box->layout() ) {
 		lay->setContentsMargins( 6, 5, 6, 5 );
 		lay->setSpacing( 4 );
-		/* SHRINK TO WHAT IS IN IT. QMessageBox has a minimum width of its own,
-		 * sized for a dialog with an icon and a caption, and it does not care that
-		 * both are gone: measured at 500 px around a question that needed half
-		 * that. SetFixedSize makes the layout's own size hint the answer.
-		 */
+		// SHRINK TO WHAT IS IN IT.
 		lay->setSizeConstraint( QLayout::SetFixedSize );
 	}
-	/* AND THE BUTTON ROW'S MARGINS, which are a second set inside the first.
-	 *
-	 * QDialogButtonBox is laid out for the bottom of a dialog, where a button
-	 * standing clear of the frame is the point. Inside a popup this size it is
-	 * just the outer margin paid twice, and it was most of the height that made
-	 * the thing look like a dialog rather than a question.
-	 */
+	// AND THE BUTTON ROW'S MARGINS, which are a second set inside the first.
 	if ( QDialogButtonBox * bb = box->findChild<QDialogButtonBox *>() ) {
 		bb->setCenterButtons( true );
 		if ( QLayout * blay = bb->layout() ) {
@@ -10870,20 +10205,9 @@ void tlStyleConfirmPopup( QMessageBox * box, QPushButton * preferred )
 		"QPushButton:pressed { background: %6; }" )
 		.arg( wwSkinColor( "bgCard" ), wwSkinColor( "border" ), wwSkinColor( "text" ),
 			wwSkinColor( "bgBtn" ), wwSkinColor( "bgBtnHover" ), wwSkinColor( "bgBtnDown" ) ) );
-	/* THE DEFAULT BUTTON IS THE SELECTION BLUE WITH WHITE ON IT.
-	 *
-	 * `accent` is this skin's orange — the Collision tabs and the skull glyph use
-	 * it — so accenting the default answer painted Delete orange, which reads as
-	 * a warning rather than "this is what Enter does". Blender highlights the
-	 * default in its selection blue, and `selBgActive` is exactly that colour
-	 * here: the same blue the Block List selects a row with.
-	 *
-	 * The LABEL is `textBright`, not `selTextActive`. That variable is orange —
-	 * it is the colour of text on a selected Block List row, where orange-on-blue
-	 * is how the primary of a multi-selection announces itself — and on a button
-	 * it just looks like a second warning. Blender's is plain white, and the
-	 * blue plate is already saying everything the colour needs to say.
-	 */
+	// THE DEFAULT BUTTON IS THE SELECTION BLUE WITH WHITE ON IT:
+	// `accent` is this skin's orange — the Collision tabs and the skull glyph use it — so accenting the
+	// default answer painted Delete orange, which reads as a warning rather than "this is what Enter does".
 	if ( preferred ) {
 		preferred->setStyleSheet( QStringLiteral(
 			"QPushButton { background: %1; color: %2; border: 1px solid %1;"
@@ -10898,10 +10222,8 @@ static void tlPlacePopupAtCursor( QWidget * box, QWidget * onCursor )
 {
 	if ( !box )
 		return;
-	// show() realizes and lays the dialog out (so the button's real screen
-	// position exists) but does not paint until the event loop starts inside
-	// exec() — so repositioning now is flicker-free. QMessageBox child geometry
-	// is unreliable BEFORE show, hence measuring the button after it.
+	// show() realizes and lays the dialog out (so the button's real screen position exists) but does not paint
+	// until the event loop starts inside exec() — so repositioning now is flicker-free.
 	box->adjustSize();
 	box->show();
 	// the pointer as it was when the popup opened, not wherever it drifts to
@@ -10930,18 +10252,8 @@ static void tlPlacePopupAtCursor( QWidget * box, QWidget * onCursor )
 	};
 
 	place();
-	/* AND AGAIN, ONCE THE EVENT LOOP HAS SEEN IT.
-	 *
-	 * show() is not the end of the layout. The stylesheet is polished and
-	 * QMessageBox re-runs its own sizing on the way to the first paint, both
-	 * after show() returns, so the button measured above is not yet the width it
-	 * will be drawn at — measured 46 px out, almost exactly half a button, with
-	 * the pointer landing on the Delete button's left EDGE instead of its middle.
-	 *
-	 * Placing again from inside exec()'s loop measures the geometry that will
-	 * actually be painted. It costs one deferred call and cannot flicker: the
-	 * move is processed before the first paint event, which is queued behind it.
-	 */
+	// AND AGAIN, ONCE THE EVENT LOOP HAS SEEN IT:
+	// show() is not the end of the layout.
 	QTimer::singleShot( 0, box, place );
 }
 
@@ -10985,11 +10297,9 @@ static QModelIndex tlCloneBlock( NifModel * nif, const QModelIndex & iBlock )
 		buffer.close();
 		if ( buffer.open( QIODevice::ReadOnly ) ) {
 			QModelIndex nb = nif->insertNiBlock( nif->itemName( iBlock ), nif->getBlockCount() );
-			// loadIndex populates every item without setting Loading state (the
-			// full-file loader does), so on a high-poly block each of tens of
-			// thousands of value/array writes emits a change signal and the live
-			// scene reacts per write — quadratic, a multi-second freeze. Mirror
-			// the real loader: suppress signals during the block build.
+			// loadIndex populates every item without setting Loading state (the full-file loader does), so on
+			// a high-poly block each of tens of thousands of value/array writes emits a change signal and the
+			// live scene reacts per write — quadratic, a multi-second freeze.
 			nif->setState( BaseModel::Loading );
 			nif->loadIndex( buffer, nb );
 			nif->restoreState();
@@ -11093,10 +10403,9 @@ void GLView::showSeparateMenu()
 	m.setToolTipsVisible( true );
 	m.addSection( tr( "Separate" ) );
 	QAction * aSel = m.addAction( tr( "Selection" ) );
-	// The count is in the item text because these two act on the WHOLE mesh, not on
-	// the selection: "By Loose Parts" on a seam-heavy mesh can make a lot of objects
-	// and the honest place to say so is before the click, not in the status bar after
-	// it. Zero means the operator would do nothing, so the row is disabled.
+	// The count is in the item text because these two act on the WHOLE mesh, not on the selection: "By Loose
+	// Parts" on a seam-heavy mesh can make a lot of objects and the honest place to say so is before the
+	// click, not in the status bar after it.
 	const int nLoose = separateGroupsPreview( true );
 	const int nSeg = separateGroupsPreview( false );
 	QAction * aLoose = m.addAction( nLoose > 0
@@ -11146,17 +10455,11 @@ static void tlRestoreValues( NifModel * nif, const QModelIndex & idx, const QVec
 	}
 }
 
-//! Follow a triangle-count change through a BSSubIndexTriShape's segment ranges.
-//! Defined further down (it needs blockInherits on the shape); declared here so
-//! the undo commands can call it from redo(). A NO-OP when the count is
-//! unchanged, which is load-bearing - see the definition.
+//! Follow a triangle-count change through a BSSubIndexTriShape's segment ranges. Defined further down (it needs
+//! blockInherits on the shape); declared here so the undo commands can call it from redo().
 static void tlSyncSegments( NifModel * m, const QModelIndex & iShape, int oldNT );
 
 //! Snapshot/restore of a BSSubIndexTriShape's Segment subtree + Num Primitives.
-//! Any command whose redo() re-tiles the segments has to carry one of these, or
-//! undo puts the triangles back and leaves the slots describing the new layout.
-//! The slot COUNT never changes here, so a value round-trip is enough — no array
-//! resize on undo.
 struct TlSegmentSnapshot
 {
 	void capture( NifModel * nif, const QModelIndex & iShape )
@@ -11189,12 +10492,9 @@ struct TlSegmentSnapshot
 	QVector<NifValue> state;
 };
 
-//! In-place undo for arbitrary single-shape topology rewrites (Loop Cut,
-//! Subdivide, Dissolve, Symmetrize — anything that rewrites triangles or
-//! removes verts): the constructor snapshots the shape's counts + the whole
-//! Vertex Data and Triangles subtrees as typed values; undo restores them
-//! exactly. Heavier than the targeted commands (a few MB / ~0.5 s on big
-//! meshes) but still no model reload, no flash.
+//! In-place undo for arbitrary single-shape topology rewrites (Loop Cut, Subdivide, Dissolve, Symmetrize —
+//! anything that rewrites triangles or removes verts): the constructor snapshots the shape's counts + the whole
+//! Vertex Data and Triangles subtrees as typed values; undo restores them exactly.
 class TlShapeStateCommand final : public QUndoCommand
 {
 public:
@@ -11213,10 +10513,8 @@ public:
 		}
 		tlCaptureValues( nif, nif->getIndex( iShape, "Vertex Data" ), vertexState );
 		tlCaptureValues( nif, nif->getIndex( iShape, "Triangles" ), triState );
-		// FO4 sub-index segments: a triangle rewrite (e.g. Separate) also rewrites
-		// each slot's Start Index / Num Primitives, so snapshot the Segment subtree
-		// to restore it. The slot count never changes here, so a value round-trip is
-		// enough (no array resize on undo).
+		// FO4 sub-index segments: a triangle rewrite (e.g. Separate) also rewrites each slot's Start Index /
+		// Num Primitives, so snapshot the Segment subtree to restore it.
 		QModelIndex iSeg = nif->getIndex( iShape, "Segment" );
 		if ( iSeg.isValid() ) {
 			hasSeg = true;
@@ -11230,10 +10528,8 @@ public:
 	{
 		if ( QModelIndex( block ).isValid() && apply ) {
 			apply();
-			// The op just changed Num Triangles and the FO4 segment table indexes
-			// that array by position, so the ranges have to follow. UNLESS the op
-			// already rebuilt them exactly from a keep mask (Delete, Separate) -
-			// the fallback would then run over a correct table and wreck it.
+			// The op just changed Num Triangles and the FO4 segment table indexes that array by position, so
+			// the ranges have to follow.
 			if ( !segExact )
 				tlSyncSegments( nif, QModelIndex( block ), oldNT );
 		}
@@ -11253,11 +10549,9 @@ public:
 		QModelIndex iTris = nif->getIndex( iShape, "Triangles" );
 		nif->set<int>( iShape, "Num Vertices", oldNV );
 		nif->updateArraySize( iVD );
-		// Growing Vertex Data back (undo of a vert-removing op like Separate's
-		// compaction or Dissolve) leaves each restored row's #ARG#-conditional skin
-		// arrays 0-length until a deferred cascade — which would misalign the
-		// positional restore below. Size them first (same landmine as the Join
-		// append); a no-op when nothing grew or on unskinned shapes.
+		// Growing Vertex Data back (undo of a vert-removing op like Separate's compaction or Dissolve) leaves
+		// each restored row's #ARG#-conditional skin arrays 0-length until a deferred cascade — which would
+		// misalign the positional restore below.
 		for ( int v = 0; v < oldNV; v++ ) {
 			QModelIndex row = nif->getIndex( iVD, v );
 			for ( const char * fld : { "Bone Weights", "Bone Indices" } ) {
@@ -11304,11 +10598,8 @@ private:
 	QVector<NifValue> segState;
 };
 
-//! Remove ONE null (-1) entry from a node's Children array, scanning from the
-//! end — removeNiBlock turns our appended child link into a null ref, and
-//! addLink would append another slot on redo instead of reusing it. Returns
-//! true if a null entry was removed (callers deleting several children of one
-//! parent loop until it returns false).
+//! Remove ONE null (-1) entry from a node's Children array, scanning from the end — removeNiBlock turns our
+//! appended child link into a null ref, and addLink would append another slot on redo instead of reusing it.
 static bool tlRemoveNullChildLink( NifModel * nif, int parentBlock )
 {
 	QModelIndex iParent = nif->getBlockIndex( parentBlock );
@@ -11330,12 +10621,9 @@ static bool tlRemoveNullChildLink( NifModel * nif, int parentBlock )
 	return false;
 }
 
-//! In-place undo for operators that only APPEND new blocks (object-mode
-//! Duplicate, Separate's clone, Add Primitive): redo runs the creation
-//! closure and records the appended block range; undo removes those blocks
-//! (highest first) and prunes the null child links the removal leaves in the
-//! recorded parents. NifModel appends blocks deterministically, so a later
-//! redo recreates the same numbers.
+//! In-place undo for operators that only APPEND new blocks (object-mode Duplicate, Separate's clone, Add
+//! Primitive): redo runs the creation closure and records the appended block range; undo removes those blocks
+//! (highest first) and prunes the null child links the removal leaves in the recorded parents.
 class TlBlockAppendCommand final : public QUndoCommand
 {
 public:
@@ -11372,14 +10660,8 @@ private:
 	int base = 0, made = 0;
 };
 
-//! After a Separate splits a BSSubIndexTriShape's triangles (tlKeepTriangles keeps
-//! the subset for which keep(t) is true, preserving original order), rebuild every
-//! segment / subsegment range for the kept subset. FO4 segments are contiguous
-//! ranges in triangle order and the kept triangles stay grouped by slot, so a
-//! range's new position is simply the count of kept triangles before its original
-//! start. The slot COUNT and the shared Segment Data (Per-Segment-Data / SSF) are
-//! left intact: a slot that lost every triangle becomes empty (Num Primitives 0),
-//! which keeps the dismemberment structure and SSF alignment valid.
+//! After a Separate splits a BSSubIndexTriShape's triangles (tlKeepTriangles keeps the subset for which keep(t)
+//! is true, preserving original order), rebuild every segment / subsegment range for the kept subset.
 static void separateBuildSegments( NifModel * m, const QModelIndex & iShape, const QVector<bool> & keep )
 {
 	if ( !m->blockInherits( iShape, "BSSubIndexTriShape" ) )
@@ -11412,37 +10694,6 @@ static void separateBuildSegments( NifModel * m, const QModelIndex & iShape, con
 }
 
 //! Follow a change in triangle count through a BSSubIndexTriShape's segment table.
-//!
-//! FO4 addresses triangles by (Start Index, Num Primitives) ranges in
-//! Segment / Sub Segment, so any op that changes Num Triangles has to touch them
-//! too - otherwise a delete leaves slots indexing past the end of the triangle
-//! buffer, and a growing op leaves the appended faces in no dismemberment slot
-//! at all. Nothing in the file flags either state: the counts still agree with
-//! themselves.
-//!
-//! This is the FALLBACK, for ops that know only the new count. Where the caller
-//! knows WHICH triangles survived, separateBuildSegments above is exact and must
-//! be preferred - and such a caller sets segExact so this never runs over its
-//! result.
-//!
-//! The rule is deliberately minimal: a range whose end sat exactly at the OLD
-//! end of the triangle array follows the new end; every other range is left
-//! alone, then clamped into [0, nt). Appended faces land in whatever slot
-//! covered the tail, removed ones come off it, and NOTHING ELSE MOVES.
-//!
-//! That minimality is the point. The first version laid every range out
-//! sequentially with "the last sub absorbs the remainder", on the assumption
-//! that sub-segments partition their parent. THEY DO NOT: shipped FO4 files
-//! leave parent-only gaps. Clothes/Courser/CourserF.nif block 158 segment 4
-//! spans 668 triangles from index 4443 while its five sub-segments cover 657
-//! starting at 4476 - an 11-triangle gap at the head. The sequential layout
-//! closed that gap even when the triangle count had not changed at all, which
-//! made this destructive to run at all, and made it destroy the exact table
-//! Delete had just built. Being a no-op when nothing changed is a correctness
-//! requirement here, not an optimisation.
-//!
-//! TlShapeStateCommand snapshots the Segment subtree and Num Primitives, so undo
-//! restores whatever this changed.
 static void tlSyncSegments( NifModel * m, const QModelIndex & iShape, int oldNT )
 {
 	if ( !m->blockInherits( iShape, "BSSubIndexTriShape" ) )
@@ -11479,14 +10730,9 @@ static void tlSyncSegments( NifModel * m, const QModelIndex & iShape, int oldNT 
 	m->dataChanged( iShape, iShape );
 }
 
-//! Give a just-cloned shape its OWN skin so a Separate does not leave the two
-//! halves sharing one BSSkin::Instance / BoneData (editing one would silently alter
-//! the other, and a shared skin instance is a malformed NIF). The Skeleton Root and
-//! per-bone node pointers stay shared — those are the common skeleton, correctly
-//! referenced by both halves. Handles FO4 "Skin" (BSSkin::Instance -> "Data"
-//! BSSkin::BoneData) and, best effort, classic "Skin Instance" (-> Data / Skin
-//! Partition). New blocks are appended, so the enclosing TlBlockAppendCommand undoes
-//! them with the clone.
+//! Give a just-cloned shape its OWN skin so a Separate does not leave the two halves sharing one
+//! BSSkin::Instance / BoneData (editing one would silently alter the other, and a shared skin instance is a
+//! malformed NIF).
 static void separateCloneSkin( NifModel * nif, int shapeBlock )
 {
 	QModelIndex iShape = nif->getBlockIndex( shapeBlock );
@@ -11522,20 +10768,8 @@ static int tlUfFind( QVector<int> & uf, int a )
 	return a;
 }
 
-/*! Group a shape's triangles into connected components — Blender's P > By Loose
- *  Parts. Returns the component count, or 0 if there is nothing to split.
- *
- *  Two triangles are connected when they share a vertex POSITION, not merely a
- *  vertex index. A NIF splits vertices at every UV and normal seam, so index
- *  connectivity would shatter one body mesh into dozens of "loose parts" that are
- *  visibly one piece — the operator would be useless on exactly the meshes people
- *  run it on. Positions are compared bit-exactly, which is what an exporter writes
- *  for a seam pair (it duplicates the vertex, it does not recompute it); -0.0 is
- *  folded onto 0.0 so the two spellings of zero land in the same bucket.
- *
- *  Components are numbered in triangle order, so group 0 always contains triangle
- *  0 and is the one the source shape keeps.
- */
+//! Group a shape's triangles into connected components — Blender's P > By Loose Parts. Returns the component
+//! count, or 0 if there is nothing to split.
 static int tlLoosePartGroups( NifModel * nif, const QModelIndex & iShape, QVector<int> & group )
 {
 	QModelIndex iTris = nif->getIndex( iShape, "Triangles" );
@@ -11604,19 +10838,8 @@ static int tlLoosePartGroups( NifModel * nif, const QModelIndex & iShape, QVecto
 	return dense.size();
 }
 
-/*! Group a shape's triangles by FO4 / SSE sub-index SEGMENT. Returns the count of
- *  non-empty segments, or 0 if there is nothing to split.
- *
- *  This is the P menu's third entry, where Blender has "By Material". A NIF shape
- *  carries exactly ONE shader property, and the FO4 segment structures carry no
- *  material field either (BSGeometryPerSegmentSharedData is User Index / Bone ID /
- *  cut offsets), so per-face material does not exist anywhere in the format and a
- *  By Material item could never do anything on any file. The segment array IS the
- *  per-face grouping a NIF has — body parts for a skinned FO4 mesh — so that is
- *  what the entry separates by.
- *
- *  Triangles no segment claims join group 0 and stay with the source.
- */
+//! Group a shape's triangles by FO4 / SSE sub-index SEGMENT. Returns the count of non-empty segments, or 0 if
+//! there is nothing to split.
 static int tlSegmentGroups( NifModel * nif, const QModelIndex & iShape, QVector<int> & group )
 {
 	QModelIndex iTris = nif->getIndex( iShape, "Triangles" );
@@ -11655,10 +10878,9 @@ GLView::SeparateResult GLView::separateShapes( const QVector<int> & shapes,
 	if ( !model )
 		return res;
 
-	// in-place undo per shape: a pure state-capture command (empty apply)
-	// snapshots the source arrays, then the append command runs the actual
-	// separate — undo removes the clones (+ their null child links) and restores
-	// the source. Everything precomputed so redo closures are deterministic.
+	// in-place undo per shape: a pure state-capture command (empty apply) snapshots the source arrays, then
+	// the append command runs the actual separate — undo removes the clones (+ their null child links) and
+	// restores the source.
 	const bool inPlaceU = ( model->undoStack != nullptr );
 	auto lastNew = std::make_shared<int>( -1 );
 	if ( inPlaceU )
@@ -11707,7 +10929,7 @@ GLView::SeparateResult GLView::separateShapes( const QVector<int> & shapes,
 					mine[t] = ( group[t] == g );
 				tlKeepTriangles( model, model->getBlockIndex( nNew ),
 					[&mine]( int t ) { return t < mine.size() && mine[t]; } );
-				// Skinned split (FO4): the clone must not share the original's skin, and
+				// Skinned split: the clone must not share the original's skin, and
 				// both halves' sub-index segment ranges must be rebuilt for their new
 				// triangle subset (tlKeepTriangles leaves the old ranges stale).
 				separateCloneSkin( model, nNew );
@@ -11923,12 +11145,8 @@ void GLView::duplicateSelection()
 static void tlCopyItemValues( NifModel * nif, const QModelIndex & src, const QModelIndex & dst )
 {
 	int rc = nif->rowCount( src );
-	// A freshly grown BSVertexData row leaves its #ARG#-conditional sub-arrays
-	// (Bone Weights/Bone Indices) 0-length until a deferred cascade. Without
-	// this the recursion below sees a length mismatch, gives up, and writes the
-	// array item's own empty value — silently dropping the skin on every vertex
-	// any op appends. Size the destination first; a no-op when it already
-	// matches, on unskinned shapes, and on plain value leaves.
+	// A freshly grown BSVertexData row leaves its #ARG#-conditional sub-arrays (Bone Weights/Bone Indices)
+	// 0-length until a deferred cascade.
 	if ( rc > 0 && rc != nif->rowCount( dst ) && nif->isArray( dst ) )
 		nif->updateArraySize( dst );
 	if ( rc > 0 && rc == nif->rowCount( dst ) ) {
@@ -11982,13 +11200,8 @@ static void tlUpdateBounds( NifModel * nif, const QModelIndex & iShape )
 	nif->set<float>( iBound, "Radius", r );
 }
 
-//! Drop vertices that no triangle references and compact the packed vertex array,
-//! reindexing the triangles — the vertex-optimal finish for a Separate (mirrors the
-//! compaction tlDeleteGeometry does in Faces mode). FO4 skin weights are inline in
-//! each vertex record (moved with it) and there is no NiSkinData / NiSkinPartition
-//! to reindex (see tlSkinResync), so no skin fix-up is needed; sub-index segments
-//! are triangle-indexed and untouched. Shrink-only, so the grown-row conditional-
-//! array landmine never applies.
+//! Drop vertices that no triangle references and compact the packed vertex array, reindexing the triangles —
+//! the vertex-optimal finish for a Separate (mirrors the compaction tlDeleteGeometry does in Faces mode).
 static void tlCompactVertices( NifModel * nif, const QModelIndex & iShape )
 {
 	QModelIndex iVD = nif->getIndex( iShape, "Vertex Data" );
@@ -12037,11 +11250,8 @@ static void tlCompactVertices( NifModel * nif, const QModelIndex & iShape )
 	nif->dataChanged( iShape, iShape );
 }
 
-//! Blender-style delete on one shape. V = selected vertices (edge/face picks
-//! contribute their corners), F = explicitly face-picked triangle indices.
-//! mode: 0 Vertices, 1 Edges, 2 Faces, 3 Only Faces. For a BSTriShape the packed
-//! vertex array is compacted and the triangles reindexed (Faces removes verts
-//! left orphaned, like Blender); legacy NiTriShapeData only drops triangles.
+//! Blender-style delete on one shape. V = selected vertices (edge/face picks contribute their corners), F =
+//! explicitly face-picked triangle indices.
 static void tlDeleteGeometry( NifModel * nif, const QModelIndex & iShape,
                               const QSet<int> & V, const QSet<int> & F, int mode,
                               int & removedTris, int & removedVerts,
@@ -12153,12 +11363,9 @@ static void tlDeleteGeometry( NifModel * nif, const QModelIndex & iShape,
 	}
 }
 
-//! Keep a shape's skin data consistent after a delete (mirrors NifSkope's own
-//! spRemoveWasteVertices): remap NiSkinData bone vertex-weight indices through
-//! the vertex remap, and return the block number of a now-stale NiSkinPartition
-//! for the caller to remove (or -1). FO4 BSSkin::Instance carries neither a
-//! NiSkinData nor a NiSkinPartition (skin weights are inline in the vertex data,
-//! already compacted), so this no-ops there.
+//! Keep a shape's skin data consistent after a delete (mirrors NifSkope's own spRemoveWasteVertices): remap
+//! NiSkinData bone vertex-weight indices through the vertex remap, and return the block number of a now-stale
+//! NiSkinPartition for the caller to remove (or -1).
 static int tlSkinResync( NifModel * nif, const QModelIndex & iShape,
                          const QVector<int> & remap, bool vertsRemoved )
 {
@@ -12278,11 +11485,9 @@ void GLView::deleteGeometry( int mode )
 		removedVerts = *remV;
 	} else
 	nifSnapshotOp( model, tr( "Delete" ), [&]() {
-		// Processing suppresses the per-leaf dataChanged storm: compacting the
-		// packed vertex array is thousands of value writes, and live views
-		// (UV editor reload, Block Details) reacting to EVERY one froze the
-		// app for ~10 s per deleted vertex on a 3k-vert mesh. One dataChanged
-		// per shape at the end tells them everything they need.
+		// Processing suppresses the per-leaf dataChanged storm: compacting the packed vertex array is
+		// thousands of value writes, and live views (UV editor reload, Block Details) reacting to EVERY one
+		// froze the app for ~10 s per deleted vertex on a 3k-vert mesh.
 		model->setState( BaseModel::Processing );
 		for ( int sb : shapes ) {
 			QModelIndex iShape = model->getBlockIndex( sb );
@@ -12605,18 +11810,7 @@ bool GLView::reapplyOperator( float param )
 	return true;
 }
 
-/*! Decimate the selected shapes, with a ratio you can scrub afterwards.
- *
- *  Every other live operator arms a redo panel — Move, Merge by Distance,
- *  Extrude, Fill, Bridge, Edge Slide — so the number can be found by dragging
- *  rather than guessed at in a modal beforehand. Decimation was the one that made
- *  you decide first and look afterwards, which is exactly backwards for an
- *  operation whose right value is "however much still looks like the mesh".
- *
- *  The simplification itself is the Simplify dialog's, driven headlessly. Two
- *  implementations of a decimation would drift apart, and that one is the one
- *  people have been using.
- */
+//! Decimate the selected shapes, with a ratio you can scrub afterwards.
 void GLView::decimateSelectedObjects( float ratio )
 {
 	if ( !model || editMode || objSelection.isEmpty() )
@@ -12736,11 +11930,6 @@ static QModelIndex joinBoneData( NifModel * m, const QModelIndex & iInst )
 }
 
 //! Union a source shape's skin bones into the active's BSSkin::Instance + BoneData.
-//! Bones are matched by their NiNode block number (same file → identity match),
-//! and any bone the active lacks is appended (its Bones Ptr + BoneData transform).
-//! Fills boneMap[sourceBoneIndex] = activeBoneIndex for remapping the source's
-//! per-vertex Bone Indices. Returns false if the merged count would exceed the
-//! uint8 (256) bone limit.
 static bool joinMergeBones( NifModel * m, const QModelIndex & iActiveInst,
 	const QModelIndex & iActiveData, const QModelIndex & iSrcInst,
 	const QModelIndex & iSrcData, QHash<int, int> & boneMap )
@@ -12804,14 +11993,7 @@ static void joinRemapBoneIndices( NifModel * m, const QModelIndex & iShape,
 	}
 }
 
-//! Merge FO4 sub-index segments after a Join. Segments are indexed dismemberment
-//! slots, so each donor's segment i joins the ACTIVE's segment i: the merged
-//! triangle buffer is REORDERED so every slot stays one contiguous range (donor
-//! faces appended right after the receiver's faces for that slot). The active's
-//! shared Segment Data (Per-Segment-Data with body-part Bone IDs / cut offsets,
-//! SSF) and its subsegments are preserved — subsegment triangle ranges are just
-//! repositioned; donor subsegments are flattened into their slot (droppedSubsegs).
-//! `donors` is (source block number, its triangle base in the merged buffer).
+//! Merge FO4 sub-index segments after a Join.
 static void joinMergeSegmentsByIndex( NifModel * m, const QModelIndex & iActive,
 	const QVector<QPair<int, int>> & donors, bool & droppedSubsegs )
 {
@@ -12940,10 +12122,8 @@ static void joinMergeSegmentsByIndex( NifModel * m, const QModelIndex & iActive,
 	}
 	m->set<quint32>( iActive, "Num Primitives", quint32( nTris ) );
 
-	// Shared Segment Data: the active's Per-Segment-Data / Segment Starts / SSF
-	// stay valid as-is when the slot count is unchanged (the common case — donor
-	// slots fit within the active's). Only extend it if new top-level slots were
-	// added by a donor with more segments than the active.
+	// Shared Segment Data: the active's Per-Segment-Data / Segment Starts / SSF stay valid as-is when the slot
+	// count is unchanged (the common case — donor slots fit within the active's).
 	QModelIndex iSD = m->getIndex( iActive, "Segment Data" );
 	if ( iSD.isValid() && outSeg.size() > recvNum ) {
 		int oldNum = m->get<quint32>( iSD, "Num Segments" );
@@ -12969,17 +12149,7 @@ void GLView::joinSelectedObjects()
 	joinObjects( objActive, objSelection );
 }
 
-/*! Join \a selection into \a active, which must be a BSTriShape.
- *
- *  Split out of joinSelectedObjects so the same code can be driven from the
- *  BLOCK LIST as well as from a viewport selection — the gesture is the same
- *  one and there must not be two of it. The viewport's own state is where the
- *  result lands either way: the merged shape becomes the active object, which
- *  is what you want to be looking at next whichever list you started from.
- *
- *  \a selection is taken by value: the tail of this sets the member it is
- *  usually passed from.
- */
+//! Join \a selection into \a active, which must be a BSTriShape.
 void GLView::joinObjects( int active, QSet<int> selection )
 {
 	if ( !model || editMode || active < 0 || selection.size() < 2 )
@@ -12996,10 +12166,7 @@ void GLView::joinObjects( int active, QSet<int> selection )
 	// (position precision, UVs, normals, tangents) must match to merge by field.
 	const quint16 fillable = quint16( VF_COLORS | VF_SKINNED | VF_EYEDATA );
 
-	// compatible sources: same structural vertex format as the active, and no
-	// attribute the active lacks. A source missing a fillable attribute the
-	// active has is promoted with a default (fillMask); a source RICHER than the
-	// active is skipped (the user should make it the active object instead).
+	// compatible sources: same structural vertex format as the active, and no attribute the active lacks.
 	QVector<QPair<int, quint16>> sources;	// (block, fillMask)
 	bool richerSkipped = false;
 	for ( int sb : selection ) {
@@ -13042,11 +12209,9 @@ void GLView::joinObjects( int active, QSet<int> selection )
 	bool capSkipped = false, boneCapSkipped = false, droppedSubsegs = false;
 	QVector<int> merged;
 	QPersistentModelIndex pActive( iActive );
-	// DELIBERATELY snapshot undo (the one remaining topology op with a reload
-	// flash on Ctrl+Z): Join REMOVES the source blocks, which renumbers every
-	// block above them and rewrites links model-wide — restoring that in
-	// place would need exact block re-insertion at original indices with full
-	// link mending. The snapshot is the safe undo here.
+	// DELIBERATELY snapshot undo (the one remaining topology op with a reload flash on Ctrl+Z): Join REMOVES
+	// the source blocks, which renumbers every block above them and rewrites links model-wide — restoring that
+	// in place would need exact block re-insertion at original indices with full link mending.
 	nifSnapshotOp( model, tr( "Join geometry" ), [&]() {
 		Transform activeInv = activeWorld.inverted();
 		// suppress per-write signals during the bulk append: otherwise every live
@@ -13109,10 +12274,8 @@ void GLView::joinObjects( int active, QSet<int> selection )
 			for ( int i = 0; i < addNV; i++ ) {
 				QModelIndex sVert = model->getIndex( iSVD, i );
 				QModelIndex dVert = model->getIndex( iAVD, oldNV + i );
-				// A freshly grown BSVertexData row leaves its #ARG#-conditional
-				// arrays (Bone Weights/Indices) 0-length until a deferred cascade,
-				// so tlCopyItemValues would silently drop the skin. Size them to
-				// match the source first, then the copy fills them.
+				// A freshly grown BSVertexData row leaves its #ARG#-conditional arrays (Bone Weights/Indices)
+				// 0-length until a deferred cascade, so tlCopyItemValues would silently drop the skin.
 				for ( const char * fld : { "Bone Weights", "Bone Indices" } ) {
 					QModelIndex da = model->getIndex( dVert, fld );
 					QModelIndex sa = model->getIndex( sVert, fld );
@@ -13243,15 +12406,8 @@ int GLView::deleteBlocks( const QVector<int> & blocks, bool confirm )
 	if ( roots.isEmpty() )
 		return 0;
 
-	/* ASKING IS THE X KEY'S JOB, not this function's.
-	 *
-	 * Blender splits the two: X puts up "Delete selected objects?" and Delete
-	 * just deletes. Both are one keystroke and both are undoable, so the pair is
-	 * not careless-versus-careful — it is which one you want under your hand.
-	 * Everything that reaches this from a MENU asks, because a menu item that
-	 * looks like every other menu item should not be the one that skips the
-	 * question.
-	 */
+	// ASKING IS THE X KEY'S JOB, not this function's:
+	// Blender splits the two: X puts up "Delete selected objects?" and Delete just deletes.
 	if ( confirm ) {
 		QMessageBox box( QMessageBox::NoIcon, tr( "Delete" ),
 			tr( "Delete selected objects?" ), QMessageBox::NoButton );
@@ -13391,12 +12547,8 @@ void GLView::duplicateElements()
 		}
 		if ( dupVertsSet.isEmpty() )
 			continue;
-		// vertex indices and Num Vertices are uint16 — a duplicate past the
-		// cap wraps every new Triangle write onto unrelated early vertices.
-		// Offer to duplicate into a NEW shape instead (the Separate recipe
-		// minus the source edit: clone with props, keep only the selected
-		// faces, leave the original untouched — the clone keeps the source's
-		// vertex array, so it can never itself exceed the cap).
+		// vertex indices and Num Vertices are uint16 — a duplicate past the cap wraps every new Triangle write
+		// onto unrelated early vertices.
 		if ( oldNV + dupVertsSet.size() > 0xFFFF ) {
 			if ( dupFaces.isEmpty() ) {
 				capSkipped = true;	// loose verts only: no faces to carry over
@@ -13603,10 +12755,7 @@ struct TlExtrudePlan
 	QVector<int> repointFaces;          //!< region faces re-pointed onto the duplicates
 	struct Wall { int a, b; };          //!< boundary edge a->b in cap winding
 	QVector<Wall> walls;
-	//! Blender vertex extrude: verts that extrude to a bare edge. NIF has no
-	//! loose edges, so each becomes a zero-area scaffold triangle (v, v', v')
-	//! — it draws as the edge line in wireframe, a later edge extrude turns it
-	//! into real faces, and a weld drops it as degenerate.
+	//! Blender vertex extrude: verts that extrude to a bare edge.
 	QVector<int> spurVerts;
 	QSet<int> capVerts;                 //!< final indices that move with the extrusion
 	int oldNV = 0, oldNT = 0, stride = 0;
@@ -13853,10 +13002,8 @@ struct TlLoop
 	bool closed = false;
 };
 
-//! Extract ordered rim loops from the selection: explicit edge picks if any,
-//! else the mesh boundary edges (exactly one adjacent non-degenerate face)
-//! whose both endpoints are selected. Returns false with err on non-manifold
-//! chains or when nothing usable is selected.
+//! Extract ordered rim loops from the selection: explicit edge picks if any, else the mesh boundary edges
+//! (exactly one adjacent non-degenerate face) whose both endpoints are selected.
 static bool tlExtractLoops( NifModel * model, const QModelIndex & iShape,
 	const QSet<int> & selVerts, const QVector<QPair<int, int>> & selEdges,
 	QVector<TlLoop> & loops, QString & err )
@@ -14178,9 +13325,8 @@ static void tlWriteBaryVertex( NifModel * model, const QModelIndex & iShape,
 	}
 }
 
-//! In-place undo for operators that only APPEND verts/triangles and refresh
-//! normals of existing verts (Fill, Bridge): redo runs the op's apply
-//! closure, undo shrinks the arrays back and restores the saved normals and
+//! In-place undo for operators that only APPEND verts/triangles and refresh normals of existing verts (Fill,
+//! Bridge): redo runs the op's apply closure, undo shrinks the arrays back and restores the saved normals and
 //! Data Size — instant, no snapshot reload.
 class TlMeshGrowCommand final : public QUndoCommand
 {
@@ -14244,9 +13390,8 @@ private:
 	TlSegmentSnapshot seg;
 };
 
-//! In-place undo for Extrude (no whole-model snapshot, so no reload flash on
-//! Ctrl+Z or redo-panel scrubbing): redo applies the plan, undo shrinks the
-//! arrays back and restores the re-pointed triangles, moved positions,
+//! In-place undo for Extrude (no whole-model snapshot, so no reload flash on Ctrl+Z or redo-panel scrubbing):
+//! redo applies the plan, undo shrinks the arrays back and restores the re-pointed triangles, moved positions,
 //! refreshed normals, Data Size and bounds.
 class TlExtrudeCommand final : public QUndoCommand
 {
@@ -14477,10 +13622,8 @@ void GLView::armExtrudeRedoPanel( const Vector3 & worldDelta )
 	// paths are in-place anyway (no snapshot, no reload flash).
 }
 
-//! Cap one closed rim loop (ear-clip in the loop's best-fit plane). The loop
-//! order follows the hole direction, so loop-order winding faces like the
-//! surrounding surface; flip reverses it. Runs under Processing and emits one
-//! dataChanged (call from TlMeshGrowCommand::redo).
+//! Cap one closed rim loop (ear-clip in the loop's best-fit plane). The loop order follows the hole direction,
+//! so loop-order winding faces like the surrounding surface; flip reverses it.
 static void tlFillApply( NifModel * model, const QModelIndex & iShape,
 	const QVector<int> & loop, bool flipNormals )
 {
@@ -14517,10 +13660,8 @@ static void tlFillApply( NifModel * model, const QModelIndex & iShape,
 	model->dataChanged( QModelIndex( iShape ), QModelIndex( iShape ) );
 }
 
-//! Connect two rim loops with a band of triangles (Blender's Bridge Edge
-//! Loops). Handles unequal vertex counts via an arc-length zip; cuts insert
-//! interpolated rings (equal-count loops only — weights/UVs lerp per pair).
-//! Returns a short status note. Runs under Processing, one dataChanged.
+//! Connect two rim loops with a band of triangles (Blender's Bridge Edge Loops). Handles unequal vertex counts
+//! via an arc-length zip; cuts insert interpolated rings (equal-count loops only — weights/UVs lerp per pair).
 static QString tlBridgeApply( NifModel * model, const QModelIndex & iShape,
 	const TlLoop & loopA, const TlLoop & loopB, int cuts, int twist, bool flipNormals )
 {
@@ -15149,28 +14290,7 @@ void GLView::flipSelectedFaces()
 	emit gizmoStatus( tr( "Flipped %1 face(s)" ).arg( faces.size() ) );
 }
 
-/* Ctrl+N / Shift+Ctrl+N — Recalculate Outside / Inside, as Blender means it.
- *
- * Not the same operation as recalcSelectedNormals() below, which re-derives
- * vertex normals from the winding already there — the thing Blender calls Reset
- * Vectors. This one decides the WINDING: it makes the selected faces agree with
- * each other, then turns each connected island so its faces point out.
- *
- * Two steps, because they answer different questions:
- *
- *   1. CONSISTENCY is local and exact. Two triangles sharing an edge are wound
- *      the same way exactly when they traverse that edge in OPPOSITE directions,
- *      so a flood fill across shared edges settles an island with no geometry
- *      involved at all.
- *
- *   2. WHICH WAY IS OUT is global, and on an open surface not strictly
- *      decidable. For a closed island the signed volume settles it: positive
- *      means the faces wind counter-clockwise seen from outside. A flat or open
- *      patch has no meaningful volume, so it falls back to asking whether the
- *      island's area-weighted normal points away from the mesh's middle. Blender
- *      ray-casts instead; this agrees on everything closed, which is what the
- *      corpus is, and is honest about the rest rather than picking at random.
- */
+// Ctrl+N / Shift+Ctrl+N — Recalculate Outside / Inside, as Blender means it.
 void GLView::recalcNormalsSelection( bool inside, bool armPanel )
 {
 	int sb = -1;
@@ -15361,15 +14481,8 @@ void GLView::recalcNormalsSelection( bool inside, bool armPanel )
 	update();
 }
 
-/* Alt+N — the Normals menu, in Blender's order.
- *
- * Two of Blender's entries are deliberately absent. Face Strength (Select By /
- * Set) is an attribute of the Weighted Normal modifier and has nowhere to live
- * in a NIF; Split is the inverse of Merge and needs vertex duplication, which
- * Rip (V) already does with the selection semantics people expect. Rotate is
- * modal in Blender and is Point to Target here, which reaches the same place
- * with a click instead of a gesture.
- */
+// Alt+N — the Normals menu, in Blender's order:
+// Two of Blender's entries are deliberately absent.
 void GLView::showNormalsMenu()
 {
 	if ( !editMode || pickedElems.isEmpty() ) {
@@ -15412,12 +14525,9 @@ void GLView::showNormalsMenu()
 	else if ( r == aReset )        recalcSelectedNormals();
 }
 
-/*! Write one normal per vertex through the undo stack.
- *
- *  Shared by every Normals-menu operator so they all land as one transaction,
- *  survive undo the same way, and cannot disagree about how a normal reaches the
- *  file — which on a BSTriShape is a ByteVector3, not a Vector3.
- */
+//! Write one normal per vertex through the undo stack:
+//! Shared by every Normals-menu operator so they all land as one transaction, survive undo the same way, and
+//! cannot disagree about how a normal reaches the file — which on a BSTriShape is a ByteVector3, not a Vector3.
 static int tlWriteNormals( NifModel * model, const QModelIndex & iShape,
 	const QHash<int, Vector3> & normals, const QString & opName )
 {
@@ -15607,12 +14717,7 @@ void GLView::normalsAverage( int mode )
 	const char * opName = ( mode == 1 ) ? "Average Corner Angle" : "Average Face Area";
 	if ( !normalsOpContext( sb, sv, faces, tris, pos, opName ) )
 		return;
-	/* Face area vs corner angle is the whole difference between the two entries.
-	 * An unnormalised cross product IS twice the triangle's area, so leaving it
-	 * unnormalised weights by area; normalising it first and scaling by the
-	 * corner's angle weights by angle instead, which is what stops a fan of
-	 * slivers from dominating a vertex.
-	 */
+	// Face area vs corner angle is the whole difference between the two entries.
 	QHash<int, Vector3> acc;
 	for ( int v : std::as_const( sv ) )
 		acc.insert( v, Vector3() );
@@ -16024,11 +15129,9 @@ void GLView::subdivideSelection()
 		model->dataChanged( QModelIndex( iS ), QModelIndex( iS ) );
 	};
 
-	// re-record the quad marks against the new vertex count: surviving old
-	// diagonals keep their indices (vertices are only appended), a cut
-	// diagonal's mark dies with its edge, and each subdivided quad trades its
-	// diagonal for the four sub-quad diagonals. Computed BEFORE the apply so
-	// every input is pre-mutation state.
+	// re-record the quad marks against the new vertex count: surviving old diagonals keep their indices
+	// (vertices are only appended), a cut diagonal's mark dies with its edge, and each subdivided quad trades
+	// its diagonal for the four sub-quad diagonals.
 	QSet<quint64> newMarks = quadMarksFor( sb );
 	const bool marksUpdate = !newMarks.isEmpty() || !quads.isEmpty();
 	if ( marksUpdate ) {
@@ -16398,11 +15501,8 @@ void GLView::makeFace()
 	smartConnect();
 }
 
-//! Edge -> the (up to two) non-degenerate triangles on it; n saturates at 3
-//! so a non-manifold edge is detectable without storing every triangle.
-//! Built once per shape (O(T)) so the batch quad operators can look partners
-//! up in O(1) — quadPartnerTri() scans all triangles per call, which turned
-//! select-all Tris to Quads / Triangulate into an O(T²) freeze.
+//! Edge -> the (up to two) non-degenerate triangles on it; n saturates at 3 so a non-manifold edge is
+//! detectable without storing every triangle.
 struct TlEdgeTris { int t0 = -1, t1 = -1; int n = 0; };
 
 static QHash<quint64, TlEdgeTris> tlBuildEdgeTris( Shape * s )
@@ -17245,13 +16345,8 @@ void GLView::ripSelection()
 
 void GLView::bevelSelection( float width, bool armPanel )
 {
-	// Bevel via rip + offset + bridge: rip the edge path, push both rows
-	// half the width into their own side's surface plane, and bridge the
-	// slit with a marked-quad strip. The path ENDPOINTS stay welded and the
-	// strip tapers closed into them with one triangle each — so the corner
-	// terminations that made bevel a mesh-corrupter risk never arise.
-	// Same input contract as Rip: one mesh, interior manifold path, no
-	// branches, at least two edges (or a closed loop).
+	// Bevel via rip + offset + bridge: rip the edge path, push both rows half the width into their own side's
+	// surface plane, and bridge the slit with a marked-quad strip.
 	if ( !model || !editMode ) {
 		emit gizmoStatus( tr( "Bevel needs edit mode" ) );
 		return;
@@ -18194,10 +17289,8 @@ void GLView::knifeApply()
 // ---------------------------------------------------------------------------
 // Loop Cut (Ctrl+R)
 
-//! Apply a loop cut: `cuts` new verts per ring edge at slide `factor`
-//! (0 = centered; ±1 slides toward the b / a chain), ladder retriangulation
-//! per quad span. New vertex indices are deterministic from the pre-call
-//! vertex count: nv + i*cuts + k, in ring-edge order.
+//! Apply a loop cut: `cuts` new verts per ring edge at slide `factor` (0 = centered; ±1 slides toward the b / a
+//! chain), ladder retriangulation per quad span.
 static void tlApplyLoopCut( NifModel * model, const QPersistentModelIndex & pShape,
 	const QVector<QPair<int, int>> & ringEdges, const QVector<QPair<int, int>> & quadTris,
 	int cuts, float factor, float smooth = 0.0f, int falloff = 0,
@@ -18542,10 +17635,8 @@ void GLView::loopCutProbe( const QPointF & pos )
 		return -1;
 	};
 
-	// ring walk: from oriented edge (a,b) + the walk-side triangle, hop the
-	// tri-pair "quad" to the parallel edge; orientation keeps a on the a-chain.
-	// An explicitly marked quad diagonal (Make Face / Tris to Quads) always
-	// wins over the parallel-direction guess.
+	// ring walk: from oriented edge (a,b) + the walk-side triangle, hop the tri-pair "quad" to the parallel
+	// edge; orientation keeps a on the a-chain.
 	struct RingStep { int a2 = -1, b2 = -1, triA = -1, triB = -1; };
 	auto step = [&]( int a, int b, int triA ) -> RingStep {
 		RingStep r;
@@ -18567,10 +17658,7 @@ void GLView::loopCutProbe( const QPointF & pos )
 			const int y = thirdVert( triB, x, c );
 			if ( y < 0 || y == a || y == b )
 				continue;
-			// Blender: a loop cut runs through QUADS only — plain triangles
-			// stop the loop. Only explicitly marked quad diagonals (Make
-			// Face / Tris to Quads) qualify as a hop; when both edges of the
-			// corner are marked, the better-aligned side wins.
+			// Blender: a loop cut runs through QUADS only — plain triangles stop the loop.
 			if ( !isQuadDiagonal( sb, x, c ) )
 				continue;
 			Vector3 f = readPos( y ) - readPos( c );
@@ -18803,11 +17891,9 @@ void GLView::loopCutConfirmRing()
 	const int sb = loopCutShape;
 	const QSet<quint64> oldMarks = quadMarksFor( sb );
 
-	// cell diagonals of the new ladder, derived the same way tlApplyLoopCut
-	// builds its rows: per span q the rows are (aI,aJ), the cut rungs, then
-	// (bI,bJ); each row pair forms one cell whose hidden diagonal is
-	// (row[k].first, row[k+1].second). Value captures: the panel re-run
-	// closure outlives this call.
+	// cell diagonals of the new ladder, derived the same way tlApplyLoopCut builds its rows: per span q the
+	// rows are (aI,aJ), the cut rungs, then (bI,bJ); each row pair forms one cell whose hidden diagonal is
+	// (row[k].first, row[k+1].second).
 	auto cellDiagonals = [ringEdges, quadTris]( int nCuts, int nv0 ) {
 		QSet<quint64> dg;
 		const int n = ringEdges.size();
@@ -19297,11 +18383,8 @@ static void tlMakePrimitive( int kind, float size, int segs,
 		verts.append( { Vector3( -h, h, 0 ), n, Vector2( 0, 0 ) } );
 		quad( 0, 1, 2, 3 );
 	} else if ( kind == 1 ) {
-		// cube: per-face verts for hard normals
-		// The +-Y pair is { 2, 0 }, not { 0, 2 }: each face winds CCW in its own
-		// (u, v) plane, so u x v must BE the outward normal. X x Z is -Y, which
-		// wound both Y faces inside out - they were backface-culled and the cube
-		// showed its own interior through the gap. Z x X is +Y.
+		// cube: per-face verts for hard normals The +-Y pair is { 2, 0 }, not { 0, 2 }: each face winds CCW in
+		// its own (u, v) plane, so u x v must BE the outward normal.
 		static const int axes[6][2] = { { 0, 1 }, { 0, 1 }, { 2, 0 }, { 2, 0 }, { 1, 2 }, { 1, 2 } };
 		static const int naxis[6] = { 2, 2, 1, 1, 0, 0 };
 		static const float nsign[6] = { 1, -1, 1, -1, 1, -1 };
@@ -20615,10 +19698,7 @@ void GLView::applyBoxSelect( const QRect & rect, Qt::KeyboardModifiers mods )
 	mouseRayWorld( QPointF( r.center() ), rayO, rayD );
 
 	if ( !editMode ) {
-		// object mode: a shape is picked if any of its geometry projects into the
-		// box. Testing the node origin (Blender's rule) is wrong for NIF shapes:
-		// skinned/attached meshes routinely sit at the skeleton root (0,0,0) far
-		// from their visible verts, so an origin test could never catch them.
+		// object mode: a shape is picked if any of its geometry projects into the box.
 		QSet<int> hit;
 		QRectF rF( r );
 		for ( Shape * s : scene->shapes ) {
@@ -21834,10 +20914,8 @@ void GLView::repeatLastOperator()
 	lastOpExRerun( lastOpExParams );
 }
 
-// Selection undo: a small dedicated history so any selection (click, box, invert,
-// select-all) can be reverted with Ctrl+Z. It resets whenever the model itself
-// changes (detected via the undo-stack index) so Ctrl+Z after an edit undoes the
-// edit, not a stale selection - and it never dirties the document.
+// Selection undo: a small dedicated history so any selection (click, box, invert, select-all) can be reverted
+// with Ctrl+Z.
 static void tlSyncSelUndo( NifModel * model, QVector<GLView::SelState> & u,
                            QVector<GLView::SelState> & r, int & syncedIndex )
 {
@@ -21960,18 +21038,8 @@ int GLView::hideTargetBlock( int b ) const
 	return b;
 }
 
-/*! Hide, Blender-style (H). ONE implementation, and the Block List's H, the
- *  Block List's eye glyph, the viewport's H and both context menus all reach the
- *  scene through it.
- *
- *  It used to hide only the current block and say so ("Hide This"), while
- *  Blender's H hides everything selected. The Block List publishes its row
- *  selection into objSelection already (wireBlockListSelection, promoted to
- *  NiAVObject by the same rule as hideTargetBlock), so reading that set is what
- *  makes both surfaces multi-selection aware without either of them owning a
- *  second copy of the state. The current block is the fallback for the case
- *  objSelection cannot describe: a click that never reached the object mirror.
- */
+//! Hide, Blender-style (H). ONE implementation, and the Block List's H, the Block List's eye glyph, the
+//! viewport's H and both context menus all reach the scene through it.
 void GLView::hideSelected()
 {
 	if ( !model )
@@ -22129,10 +21197,7 @@ void GLView::selectLinked( bool flatOnly, float maxAngleDeg )
 	for ( int k : seedVerts.keys() )
 		shapes.insert( k );
 
-	// pickMode is a bitmask (1 vertex, 2 edge, 4 face), while PickedElement
-	// stores element types as 1/2/3. Passing face bit 4 through as an element
-	// type previously fell into the edge branch, making Select Linked appear to
-	// do nothing in face mode.
+	// pickMode is a bitmask (1 vertex, 2 edge, 4 face), while PickedElement stores element types as 1/2/3.
 	int outType = flatOnly ? 3 : ( ( pickMode & 4 ) ? 3 : ( ( pickMode & 2 ) ? 2 : 1 ) );
 
 	for ( int sb : shapes ) {
@@ -22512,7 +21577,7 @@ void GLView::modelChanged()
 	if ( doCompile )
 		return;
 
-	cellStreamTrace( QStringLiteral( "the view makes the scene again (model changed)" ) );   // lane CELLSTREAM1
+	cellStreamTrace( QStringLiteral( "the view makes the scene again (model changed)" ) );
 	doCompile = 1;
 	//doCenter  = true;
 	update();
@@ -22523,7 +21588,7 @@ void GLView::modelLinked()
 	if ( doCompile )
 		return;
 
-	cellStreamTrace( QStringLiteral( "the view makes the scene again (links changed)" ) );   // lane CELLSTREAM1
+	cellStreamTrace( QStringLiteral( "the view makes the scene again (links changed)" ) );
 	doCompile = 1; //scene->update( model, QModelIndex() );
 	update();
 }
@@ -22554,19 +21619,9 @@ void GLView::announceSequenceCycle()
 	emit sequenceCycleChanged( ct, ct != Scene::CycleClamp );
 }
 
-/*! Scrub the scene, or the physics recording when there is one.
- *
- * A physics recording IS a timeline: a run of poses at a fixed rate, scrubbed
- * back and forth to find the frame worth keeping. It had its own slider in the
- * Collision Manager while this application already has a timeline dock with a
- * ruler, a playhead and a keyframe view -- two scrub bars that did not know
- * about each other, in a program whose whole point is that one of them is good.
- *
- * Routed HERE rather than by teaching TimelineWidget about physics. The dock
- * already drives setSceneTime and reads sceneTimeChanged back for its range, so
- * answering on this side gives the timeline the recording with no changes to the
- * widget at all -- and the moment the recording goes, the scene answers again.
- */
+//! Scrub the scene, or the physics recording when there is one:
+//! A physics recording IS a timeline: a run of poses at a fixed rate, scrubbed back and forth to find the frame
+//! worth keeping.
 void GLView::setSceneTime( float t )
 {
 	if ( physicsRecordingRange() > 0.0f ) {
@@ -22630,15 +21685,9 @@ void GLView::clearSceneSequence()
 		return;
 	scene->setSequence( QString() );
 	announceSequenceCycle();
-	/* The rebuild is the whole operation.
-	 *
-	 * A sequence does not "play": selecting one BINDS its interpolators onto the
-	 * controllers its Controlled Blocks name, and those bindings stay bound.
-	 * Asking for a sequence that does not exist therefore changes nothing, which
-	 * is what made "no sequence" impossible to express until now. Updating every
-	 * node from the model runs Controller::update, which re-reads each
-	 * controller's OWN Interpolator link — the file as authored.
-	 */
+	// The rebuild is the whole operation:
+	// A sequence does not "play": selecting one BINDS its interpolators onto the controllers its Controlled
+	// Blocks name, and those bindings stay bound.
 	if ( model )
 		scene->update( model, QModelIndex() );
 	time = scene->timeMin();
@@ -22680,17 +21729,17 @@ void GLView::advanceGears()
 
 	if ( !isVisible() )
 		return;
-	wwCellStreamFrame();   // lane CELLSTREAM1: a few ms of the cells round the camera a frame
+	wwCellStreamFrame();   // a few ms of the cells round the camera a frame
 	if ( wwCellFlickerWantsFrames( scene ) )
-		update();	// lane LIGHTFLICKER1: a flickering lamp needs a frame every tick
+		update();	// a flickering lamp needs a frame every tick
 	if ( wwCellWorldAnimWantsFrames( scene ) )
-		update();	// lane FXPARITY2: the world clock moves the cell
+		update();	// the world clock moves the cell
 	if ( wwLookdevWeatherChanging() )
-		update();	// lane WEATHERBLEND1: a weather change blends a little every frame
+		update();	// a weather change blends a little every frame
 	if ( wwCellPrecipWantsFrames( scene ) )
-		update();	// lane WEATHERLOOK1 B: precipitation falls (never with its clock pinned)
+		update();	// precipitation falls (never with its clock pinned)
 	if ( CellFarGround::wantsFrames( scene ) )
-		update();	// lane FARPAGES1: far ground pages still painting or fading in
+		update();	// far ground pages still painting or fading in
 
 	dT = std::clamp< float >( dT, 0.0f, 1.0f );
 	physicsTick( dT );
@@ -22699,10 +21748,8 @@ void GLView::advanceGears()
 	{
 		time += dT * animSpeed * animDir;
 
-		// Reverse playback is just a negative animSpeed, so BOTH ends need the
-		// wrap logic - a sequence run backwards finishes at timeMin. Written once
-		// and applied to whichever end this direction is heading for, so loop and
-		// cycle cannot behave differently depending on the sign.
+		// Reverse playback is just a negative animSpeed, so BOTH ends need the wrap logic - a sequence run
+		// backwards finishes at timeMin.
 		const bool reverse = ( animSpeed * animDir < 0.0f );
 		const bool finished = reverse ? ( time < scene->timeMin() )
 									  : ( time > scene->timeMax() );
@@ -22718,13 +21765,7 @@ void GLView::advanceGears()
 				setSceneSequence( scene->animGroups.value( ix ) );
 			} else if ( ( animState & AnimLoop )
 						&& scene->cycleType() == Scene::CycleReverse ) {
-				/* CYCLE_REVERSE ping-pongs: it does not restart, it turns round.
-				 *
-				 * Clamped to the end it just passed rather than wrapped, because
-				 * this end is where the next pass begins. Wrapping here would jump
-				 * the animation the whole length of the sequence and then play it
-				 * in the same direction again, which is CYCLE_LOOP.
-				 */
+				// CYCLE_REVERSE ping-pongs: it does not restart, it turns round.
 				time = reverse ? scene->timeMin() : scene->timeMax();
 				animDir = -animDir;
 			} else if ( animState & AnimLoop ) {
@@ -22745,7 +21786,7 @@ void GLView::advanceGears()
 		update();
 	}
 
-	// lane FLYFIX1: the camera moves at most 0.1 s a tick, so a stalled frame or a spell away is never one long jump
+	// the camera moves at most 0.1 s a tick, so a stalled frame or a spell away is never one long jump
 	dT = wwFlyTickSeconds( dT );
 	float	rotateStep = cfg.rotSpd * dT;
 	// Fix movement speed for Starfield scale
@@ -22801,20 +21842,7 @@ void GLView::advanceGears()
 }
 
 
-/*! The scene rendered offscreen at 2^shift times the viewport size.
- *
- *  The window's own framebuffer cannot be grabbed larger than the desktop. A
- *  resize past it is clamped, and the clamp is not symmetric: on a multi-monitor
- *  row the width can span the whole virtual desktop while the height stops at
- *  one screen, so asking for 3840x2400 returns 3840x1067 -- a caller that trusts
- *  the request gets a squashed capture rather than an error.
- *
- *  Save Screenshot already solves this with an FBO and a temporary resizeGL.
- *  This is that path, factored out so the WW_RENDER_SHOT harness can reach it;
- *  the alternative was a second copy, and the copy is the one that drifts.
- */
-/* lane FARVIEW1: the far light's flat-cost gate times the frame on the GPU (the CPU's wall clock would time the
- * driver's queue). Each repaint is bracketed by its own GL_TIME_ELAPSED query and finished before the next. */
+//! The scene rendered offscreen at 2^shift times the viewport size.
 QString GLView::wwGpuMs( int frames )
 {
 	if ( frames <= 0 || !context() )
@@ -22823,7 +21851,7 @@ QString GLView::wwGpuMs( int frames )
 	QOpenGLExtraFunctions * xf = context()->extraFunctions();
 	if ( !xf )
 		return QStringLiteral( "gpums refused: no GL 3 functions" );
-	/* lane TERRSHADOW1: GL_TIMESTAMP pairs, not one GL_TIME_ELAPSED query: elapsed queries cannot nest, so a pass inside
+	/* GL_TIMESTAMP pairs, not one GL_TIME_ELAPSED query: elapsed queries cannot nest, so a pass inside
 	 * paintGL that timed itself with one ended this query early (contact shadows on read 13 ms of a 45 ms frame). */
 	using QueryCounterFn = void ( QOPENGLF_APIENTRYP )( GLuint, GLenum );
 	using QueryU64Fn = void ( QOPENGLF_APIENTRYP )( GLuint, GLenum, GLuint64 * );
@@ -22872,11 +21900,9 @@ QString GLView::wwGpuMs( int frames )
 		.arg( *mm.first, 0, 'f', 3 ).arg( *mm.second, 0, 'f', 3 ).arg( frames ).arg( med( cpu ), 0, 'f', 3 );
 }
 
-/* lane FLYFIX1: the refocus gate, in the free camera without grabbing the cursor or the focus: a plain move must look
- * (control), the first move after FocusIn / WindowActivate / Enter must leave Rot and Pos alone however far the cursor
- * jumped, and one gears tick after a 5 s stall moves the camera at most 0.1 s worth. The view is put back after. */
-/* lane FLYFIX1: the view put at a path key for good (the path camera is an override that ends with its path), so a
- * flight starts there. Pitch and yaw are searched (grid, then finer) to match the look-at's rows; residuals returned. */
+// the refocus gate, in the free camera without grabbing the cursor or the focus: a plain move must look
+// (control), the first move after FocusIn / WindowActivate / Enter must leave Rot and Pos alone however far
+// the cursor jumped, and one gears tick after a 5 s stall moves the camera at most 0.1 s worth.
 QString GLView::wwSpawnAt( const Vector3 & eye, float yawDeg )
 {
 	// a perspective User view at eye height, the orbit pivot 2 x Dist ahead; View > Center still frames the scene
@@ -23398,10 +22424,7 @@ void GLView::dragEnterEvent( QDragEnterEvent * e )
 			if ( url.scheme() == "file" ) {
 				QString fn = url.toLocalFile();
 				QFileInfo finfo( fn );
-				// Every extension the Open dialog accepts, from the same table
-				// it builds its filter from. A hardcoded "nif" here silently
-				// refused the .btr/.bto LOD chunks File > Open loads happily,
-				// and would drift again the next time a type is added.
+				// Every extension the Open dialog accepts, from the same table it builds its filter from.
 				if ( finfo.exists() && finfo.isFile()
 					&& NifSkope::fileExtensions().contains( finfo.suffix(),
 						Qt::CaseInsensitive ) ) {
@@ -23526,7 +22549,7 @@ void GLView::focusOutEvent( QFocusEvent * )
 	mouseButtonState = 0;
 }
 
-/* lane FLYFIX1 (bungo 10-23: the free camera swung to the void on coming back to the window): focus, activation or
+/* focus, activation or
  * the cursor leaving/entering makes the next free-camera move a re-centre, never a look (src/wwflyfix.h; the old way is
  * the red twin REDTWIN=FLYFIX=refocus of tests/flyfix since REDRETIRE2) */
 bool GLView::event( QEvent * e )
@@ -23561,18 +22584,9 @@ bool GLView::viewportClaimsKey( int n ) const
 	}
 }
 
-/*! Which navigation action a keystroke is, if any.
- *
- *  Through the ShortcutRegistry, so every one of these is rebindable from
- *  Options ▸ Shortcuts like the forty-odd operators already there. They were the
- *  last hard-coded keys in the viewport: rotating and zooming, which are the two
- *  things someone coming from another program most wants to change first, were
- *  the only ones a user could not touch.
- *
- *  \a mods matters now. The old switch read the key alone, so it could not tell
- *  Up from Ctrl+Up — fine while the bindings were fixed and bare, wrong the
- *  moment one can be rebound to a combination.
- */
+//! Which navigation action a keystroke is, if any:
+//! Through the ShortcutRegistry, so every one of these is rebindable from Options ▸ Shortcuts like the
+//! forty-odd operators already there.
 int GLView::convertKeyCode( int n, Qt::KeyboardModifiers mods, bool anyModifiers ) const
 {
 	const auto & keys = ShortcutRegistry::get();
@@ -23598,15 +22612,8 @@ int GLView::convertKeyCode( int n, Qt::KeyboardModifiers mods, bool anyModifiers
 		{ "viewport.nav.zoom_in",      Key_ZoomIn },
 		{ "viewport.nav.zoom_out",     Key_ZoomOut },
 	};
-	/* Two passes per table: exact key+modifier first, then -- press only,
-	 * with Shift down -- the same table with the Shift bit stripped. Shift
-	 * is a HELD modifier over these latched keys (fly-speed boost, and
-	 * light-rotate on the arrows), so a key bound bare must still latch
-	 * when the press arrives with Shift already held: pressing Shift
-	 * before W used to lock the free camera out of every direction. Exact
-	 * matches win the first pass, so a key deliberately rebound WITH
-	 * Shift keeps its meaning.
-	 */
+	// Two passes per table: exact key+modifier first, then -- press only, with Shift down -- the same table
+	// with the Shift bit stripped.
 	auto matchTable = [&]( const auto & table ) -> int {
 		for ( const auto & row : table )
 			if ( bound( row.id ) )
@@ -23637,11 +22644,7 @@ int GLView::convertKeyCode( int n, Qt::KeyboardModifiers mods, bool anyModifiers
 			return action;
 	}
 
-	/* Not registered, and deliberately. These are the modal transform's own
-	 * keys, read while a drag is running rather than as bindings — rebinding
-	 * them from the shortcuts page would move them out from under the code that
-	 * reads them here.
-	 */
+	// Not registered, and deliberately.
 	switch ( n ) {
 	case Qt::Key_M:
 		return Key_Update;
@@ -23663,20 +22666,12 @@ int GLView::convertKeyCode( int n, Qt::KeyboardModifiers mods, bool anyModifiers
 
 void GLView::keyPressEvent( QKeyEvent * event )
 {
-	if ( cellEditKey( this, event->key(), int( event->modifiers() ) ) ) {	// lane ESPWRITE2: Shift+A, the place mode's keys
+	if ( cellEditKey( this, event->key(), int( event->modifiers() ) ) ) {	// Shift+A, the place mode's keys
 		event->accept();
 		return;
 	}
-	/* Physics Sim owns Space, R and Escape while it is running, ahead of every
-	 * other binding: they are the whole control surface of the mode.
-	 *
-	 * A modal transform outranks it, and this is the third place a bare '.' was
-	 * taken before the gizmo's numeric buffer could see it: physicsKeyPress
-	 * consumes Key_Period as single-step, and this call sits above the
-	 * `if ( gizmoMode )` block further down. Escape follows the same precedence —
-	 * while G/R/S is collecting a number, Escape cancels the transform, which is
-	 * the more immediate of the two things it could mean.
-	 */
+	// Physics Sim owns Space, R and Escape while it is running, ahead of every other binding: they are the
+	// whole control surface of the mode.
 	if ( !gizmoMode && !elemTransform && physicsKeyPress( event ) ) {
 		event->accept();
 		return;
@@ -24019,18 +23014,9 @@ void GLView::keyPressEvent( QKeyEvent * event )
 				return;
 		}
 
-		/* DELETE, THE TWO BLENDER KEYS.
-		 *
-		 * X asks — the verts/edges/faces menu in edit mode, the confirmation in
-		 * object mode — and Delete does the obvious thing straight away. They
-		 * were the same key here, both going through the question, which made
-		 * the fast one no faster than the careful one.
-		 *
-		 * The obvious thing in edit mode is whatever the pick mode is FOR: in
-		 * face mode Delete removes faces, and asking which of vertices/edges/
-		 * faces you meant when the mode already says so is the question worth
-		 * skipping. Blender resolves it the same way.
-		 */
+		// DELETE, THE TWO BLENDER KEYS:
+		// X asks — the verts/edges/faces menu in edit mode, the confirmation in object mode — and Delete does
+		// the obvious thing straight away.
 		const bool delAsking = shortcuts.matches( "viewport.delete", event->key(), mods );
 		const bool delNow = shortcuts.matches( "viewport.delete_now", event->key(), mods );
 		if ( ( delAsking || delNow )
@@ -24246,7 +23232,7 @@ void GLView::mouseDoubleClickEvent( QMouseEvent * )
 
 void GLView::mouseMoveEvent( QMouseEvent * event )
 {
-	{	// lane ESPWRITE2: the place mode's hover (the camera keeps the move) and its yaw drag
+	{	// the place mode's hover (the camera keeps the move) and its yaw drag
 		const QPointF cp = getQMouseEventPosition( event );
 		if ( cellEditMouse( this, CellEditMouse::Move, cp.x(), cp.y(), ( event->buttons() & Qt::LeftButton ) != 0,
 			int( event->modifiers() ) ) ) {
@@ -24268,11 +23254,7 @@ void GLView::mouseMoveEvent( QMouseEvent * event )
 			update();
 		}
 	}
-	/* The Overlays armature lights the bone under the cursor too, and names it
-	 * (lane SKEL2). Its OWN member, not poseHoverBone: that one also drives the
-	 * weight-influence overlay and Pose Mode's labels, which belong to Pose
-	 * Mode and would start running with the overlay merely ticked.
-	 */
+	// The Overlays armature lights the bone under the cursor too, and names it.
 	if ( skeletonOverlay && !poseMode && !gizmoMode )
 		setSkeletonOverlayHover( skeletonOverlayBoneAt( getQMouseEventPosition( event ) ) );
 
@@ -24289,10 +23271,8 @@ void GLView::mouseMoveEvent( QMouseEvent * event )
 	}
 
 	if ( gizmoMode ) {
-		// Blender: the drag is unbounded — the mouse is grabbed for the whole
-		// gesture, and at a screen edge the cursor wraps to the opposite side.
-		// The teleport jump is accumulated in gizmoWrapOffset so the position
-		// fed to the gesture stays continuous.
+		// Blender: the drag is unbounded — the mouse is grabbed for the whole gesture, and at a screen edge
+		// the cursor wraps to the opposite side.
 		if ( QScreen * scr = screen() ) {
 			QRect sg = scr->geometry();
 			QPoint gl( int( event->globalPosition().x() ), int( event->globalPosition().y() ) );
@@ -24322,7 +23302,7 @@ void GLView::mouseMoveEvent( QMouseEvent * event )
 			requestActivate();	// regain key focus so WASD keeps working
 		QPointF c( width() * 0.5, height() * 0.5 );
 		auto p = getQMouseEventPosition( event );
-		// lane FLYFIX1: the first move after a refocus is where the cursor came back, not a look: re-centre only
+		// the first move after a refocus is where the cursor came back, not a look: re-centre only
 		if ( wwFlyResyncOnly( flyResync ) ) {
 			if ( flyGrab )
 				QCursor::setPos( mapToGlobal( QPoint( int( c.x() ), int( c.y() ) ) ) );
@@ -24465,11 +23445,7 @@ void GLView::mouseMoveEvent( QMouseEvent * event )
 	// camera. Explicit legacy item/light transforms keep their own LMB chords.
 	if ( buttonMask & Qt::MiddleButton ) {
 		if ( event->modifiers() & Qt::ShiftModifier ) {
-			// Convert logical screen pixels to view-plane world units at the
-			// model's current camera depth. The old axis/viewport-size scale was
-			// tied only to mesh bounds and felt increasingly sluggish as the
-			// camera moved away. This matches the projection math, so pan speed
-			// tracks what is visible on screen like Blender's Shift+MMB pan.
+			// Convert logical screen pixels to view-plane world units at the model's current camera depth.
 			float hh = float( std::max( height(), 1 ) );
 			float worldPerPixel;
 			if ( perspectiveMode || view == ViewWalk ) {
@@ -24502,7 +23478,7 @@ void GLView::mouseMoveEvent( QMouseEvent * event )
 
 void GLView::mousePressEvent( QMouseEvent * event )
 {
-	{	// lane ESPWRITE2: the place mode's drop
+	{	// the place mode's drop
 		const QPointF cp = getQMouseEventPosition( event );
 		if ( cellEditMouse( this, CellEditMouse::Press, cp.x(), cp.y(), event->button() == Qt::LeftButton,
 			int( event->modifiers() ) ) ) {
@@ -24715,10 +23691,8 @@ void GLView::mousePressEvent( QMouseEvent * event )
 		}
 	}
 
-	// grabbing a gizmo handle starts a constrained drag; releasing commits.
-	// checked before element picking so the handles stay usable in edit mode.
-	// Ctrl is allowed: holding it from the start means "drag with snapping"
-	// (Blender), and it previously blocked the drag from ever starting.
+	// grabbing a gizmo handle starts a constrained drag; releasing commits. checked before element picking so
+	// the handles stay usable in edit mode.
 	if ( gizmoHandlesOn && !cleanView && event->button() == Qt::LeftButton && view != ViewWalk
 		&& !kbdState && !( event->modifiers() & ( Qt::AltModifier | Qt::ShiftModifier ) ) ) {
 		auto p = getQMouseEventPosition( event );
@@ -24757,7 +23731,7 @@ void GLView::mousePressEvent( QMouseEvent * event )
 
 void GLView::mouseReleaseEvent( QMouseEvent * event )
 {
-	{	// lane ESPWRITE2: the place mode's commit
+	{	// the place mode's commit
 		const QPointF cp = getQMouseEventPosition( event );
 		if ( cellEditMouse( this, CellEditMouse::Release, cp.x(), cp.y(), event->button() == Qt::LeftButton,
 			int( event->modifiers() ) ) ) {
@@ -24887,10 +23861,8 @@ void GLView::mouseReleaseEvent( QMouseEvent * event )
 			return;
 		}
 
-		// Pose Mode: a click picks the nearest bone (not the mesh under it) and
-		// selects that bone node, so the existing G/R/S transform poses it.
-		// Shift/Ctrl+click adds to the selection; G/R/S then poses every selected
-		// bone at once (the object gizmo already transforms all of objSelection).
+		// Pose Mode: a click picks the nearest bone (not the mesh under it) and selects that bone node, so the
+		// existing G/R/S transform poses it.
 		if ( poseMode && event->button() == selectMouseButton() && !isColorPicker ) {
 			int bone = poseBoneAt( evtPos );
 			if ( bone >= 0 ) {
@@ -24907,19 +23879,9 @@ void GLView::mouseReleaseEvent( QMouseEvent * event )
 			return;
 		}
 
-		/* THE OVERLAYS ARMATURE IS CLICKABLE (lane SKEL2).
-		 *
-		 * bungo, 2026-09-11: the bone view is to mirror the Skeleton Manager,
-		 * and "click a bone in the viewport -> its row is current and visible in
-		 * the manager" is half of what mirroring means. `clicked()` is what the
-		 * application's own selection listens to, and the dock's
-		 * currentNifIndexChanged handler is what makes the row current, so this
-		 * adds no second selection path.
-		 *
-		 * It does NOT return when nothing is within the pick radius: a click on
-		 * the mesh then still selects the mesh, so ticking the overlay costs a
-		 * user nothing they had before.
-		 */
+		// THE OVERLAYS ARMATURE IS CLICKABLE:
+		// bungo, 2026-09-11: the bone view is to mirror the Skeleton Manager, and "click a bone in the
+		// viewport -> its row is current and visible in the manager" is half of what mirroring means.
 		if ( skeletonOverlay && !poseMode && !editMode && !riggingWeightPaintMode
 			 && !vertexPaintMode && !segmentPaintMode
 			 && event->button() == selectMouseButton() && !isColorPicker ) {
@@ -24954,21 +23916,13 @@ void GLView::mouseReleaseEvent( QMouseEvent * event )
 			return;
 		}
 
-		/* THE CELL VIEW'S PICK (lane CELLVIEW2). A `.wwcell` scene WELDS every
-		 * placement of a (base, material) bucket into ONE BSTriShape, so the
-		 * ordinary selection below would hand back a shape holding a hundred
-		 * thousand vertices of unrelated references -- the one selection a
-		 * person clicking in a cell view never wants. cellPickClick does the
-		 * ray test against the placement table (src/cellpick.h), moves the
-		 * highlight and tells the dock. It returns false, and touches nothing,
-		 * whenever its master row is unticked or no cell scene is open, so a
-		 * user who never ticks the row loses nothing they had. */
+		// THE CELL VIEW'S PICK.
 		if ( !isColorPicker && event->button() == selectMouseButton() ) {
 			Vector3 cellRayO, cellRayD;
 			mouseRayWorld( QPointF( evtPos ), cellRayO, cellRayD );
 			const float cellO[3] = { cellRayO[0], cellRayO[1], cellRayO[2] };
 			const float cellD[3] = { cellRayD[0], cellRayD[1], cellRayD[2] };
-			if ( wwCellProbeViewPick( scene, cellO, cellD ) ) {	// lane PROBEVIEW1: a probe, in a Pass
+			if ( wwCellProbeViewPick( scene, cellO, cellD ) ) {	// a probe, in a Pass
 				update();
 				return;
 			}
@@ -25045,7 +23999,7 @@ void GLView::mouseReleaseEvent( QMouseEvent * event )
 void GLView::wheelEvent( QWheelEvent * event )
 {
 	if ( cellEditMouse( this, CellEditMouse::Wheel, event->position().x(), event->position().y(), false,
-		int( event->modifiers() ), event->angleDelta().y() ) ) {	// lane ESPWRITE2: R + wheel turns the ghost
+		int( event->modifiers() ), event->angleDelta().y() ) ) {	// R + wheel turns the ghost
 		event->accept();
 		return;
 	}

@@ -1,31 +1,8 @@
 #ifndef PROBEPLACE_H
 #define PROBEPLACE_H
 
-/*! PROBE PLACEMENT FOR THE PRTP BAKE (lane PRTPPLACE, 2026-09-30).
- *
- *  Where the transfer probes go, computed from the cell view's own geometry
- *  instead of the game's physics. Two halves:
- *
- *  1. FO4CS's rules, number for number (its TransportBakeRuntime.cpp B2f/B2n):
- *     a 280-unit lattice on world multiples, a column ray from the top that
- *     pierces every surface (step 4), a first-hit probe at eye height (120),
- *     one probe in every air gap of 140 or more under it (at floor +
- *     min(eye, gap/2), 6 levels), and wall stacks off each of those probes in
- *     the 4 axis directions (search 280, standoff 96, heights 240..960, each
- *     level verified by a vertical ray AND a horizontal ray that still finds
- *     the wall).
- *
- *  2. What FO4CS never built: probes in the OPENINGS between spaces --
- *     doorways, windows and breaches -- found without doors, from the air
- *     itself (the "gap between two volumes" ruling, docs/PRTP_PLAN.md 2b).
- *     The soup is voxelised; an opening is a straight-through passage in a
- *     thin wall that is narrower than the air on both sides of it, bounded on
- *     all four sides (jambs, lintel, sill or floor), with a roof on at least
- *     one side. A door that stands in it only TAGS it (the door's ref), since
- *     doors are baked open.
- *
- *  The soup is statics only (the caller filters: no doors, no clutter, no
- *  effect shaders, no glass). Everything is world units. */
+//! PROBE PLACEMENT FOR THE PRTP BAKE:
+//! Where the transfer probes go, computed from the cell view's own geometry instead of the game's physics.
 
 #include <QString>
 #include <QtGlobal>
@@ -47,7 +24,7 @@ struct ProbeSoup
 		float hi[3] = { 0, 0, 0 };
 	};
 	std::vector<Door> doors;
-	/*! Lane PRTPBAKE: 3 bytes a triangle, LINEAR albedo x 255 (the texture's sRGB decoded,
+	/*! 3 bytes a triangle, LINEAR albedo x 255 (the texture's sRGB decoded,
 	 *  times the vertex color), what the bake's surfels store. Empty = no albedo known
 	 *  (the placer never reads it); the soup file carries it as an optional 'ALB1' tail. */
 	std::vector<quint8> alb;
@@ -69,22 +46,17 @@ struct ProbeSoup
 		alb.insert( alb.end(), rgb, rgb + 3 );
 	}
 	qint64 triCount() const { return qint64( tris.size() / 9 ); }
-	/*! Lane BAKE4: blended glass (BGSM/BGEM bAlphaBlend, NiAlphaProperty blend), 9 floats a
-	 *  triangle, kept apart from `tris`: the placer never sees it and it holds no surfel. The
-	 *  bake tints the light that passes through it by glassT, 3 bytes a triangle, the
-	 *  per-channel transmittance x 255 (1 - a (1 - c): the blend read as a filter). The
-	 *  soup file carries it as an optional 'GLS1' tail after 'ALB1'. */
+	//! blended glass (BGSM/BGEM bAlphaBlend, NiAlphaProperty blend), 9 floats a triangle, kept apart from
+	//! `tris`: the placer never sees it and it holds no surfel.
 	std::vector<float> glass;
 	std::vector<quint8> glassT;
-	/*! Lane GICAL1: the decals and alpha-blended surfaces the soup leaves out (they stop no ray), folded into the
+	/*! the decals and alpha-blended surfaces the soup leaves out (they stop no ray), folded into the
 	 *  albedo of the surface under them: 9 floats a triangle, and its alpha-weighted mean albedo (linear x 255) +
 	 *  its mean coverage (x 255). Bake only, in memory: the soup file does not carry them. */
 	std::vector<float> decal;
 	std::vector<quint8> decalA;
-	/*! Lane WATER1: the water surfaces (the cells' planes; the far ring's water quads when waterApart), 9 floats a
-	 *  triangle, kept apart from `tris`: they stop no ray and hold no surfel. waterKind indexes waterTypes, one a
-	 *  triangle. The bake splits a ray that crosses one (Fresnel share reflected, the rest on to the bed through
-	 *  the record's underwater fog); the placer splits a column at the water line. In memory only. */
+	//! the water surfaces (the cells' planes; the far ring's water quads when waterApart), 9 floats a triangle,
+	//! kept apart from `tris`: they stop no ray and hold no surfel.
 	struct WaterType
 	{
 		quint32 form = 0;
@@ -111,10 +83,8 @@ struct ProbeSoup
 		glass.insert( glass.end(), c, c + 3 );
 		glassT.insert( glassT.end(), t, t + 3 );
 	}
-	/*! Lane CAPTURE1: what the hit and cube albedo ways read at a point of a triangle (the tri way,
-	 *  the default, never fills it). One per triangle of `tris` when filled; tex = -1 (the ground, a
-	 *  shape with no map) keeps `alb` and the face normal. ~70 bytes a triangle. In memory only:
-	 *  the soup file does not carry it. */
+	//! what the hit and cube albedo ways read at a point of a triangle (the tri way, the default, never fills
+	//! it).
 	struct TriMat
 	{
 		qint32 tex = -1;            //!< into matTex
@@ -124,7 +94,7 @@ struct ProbeSoup
 		float uv[6] = { 0, 0, 0, 0, 0, 0 };
 		quint8 vc[9] = { 255, 255, 255, 255, 255, 255, 255, 255, 255 };   //!< vertex colors, gamma
 		qint16 n[9] = { 0, 0, 0, 0, 0, 0, 0, 0, 0 };   //!< world vertex normals, snorm16
-		/*! lane SMOOTHN1: the normal map (_n, into matTex; -1 = none) and the vertices' world tangents
+		/*! the normal map (_n, into matTex; -1 = none) and the vertices' world tangents
 		 *  (snorm16), the frame the cell view draws it in: normal = x (n x t) + y t + z n */
 		qint32 ntex = -1;
 		qint16 t[9] = { 0, 0, 0, 0, 0, 0, 0, 0, 0 };
@@ -132,7 +102,7 @@ struct ProbeSoup
 	std::vector<TriMat> mat;
 	std::vector<QString> matTex;
 	std::vector<const void *> matTexPtr;   //!< the loaded maps (DDSTexture16), resolved before the bake
-	//! Lane CAPTURE1 red "nofilter": the triangles the soup leaves out (effects, decals, blended,
+	//! red "nofilter": the triangles the soup leaves out (effects, decals, blended,
 	//! leaves), seen by the cube way only. Empty in every real run.
 	std::vector<float> cubeExtra;
 	std::vector<TriMat> cubeExtraMat;
@@ -142,7 +112,7 @@ struct ProbeSoup
 		mat.resize( size_t( triCount() ) - 1 );
 		mat.push_back( m );
 	}
-	/*! lane ROOMCLAMP1: 1 = the triangle's material is two-sided (SLSF2 Double_Sided or BGSM bTwoSided): it
+	/*! 1 = the triangle's material is two-sided (SLSF2 Double_Sided or BGSM bTwoSided): it
 	 *  has no back. Shorter than the triangle count = the rest are one-sided (empty: all one-sided; their
 	 *  front is the stored winding). The soup file carries it as an optional 'TWO1' tail after 'GLS1'. */
 	std::vector<quint8> twoSided;
@@ -152,13 +122,10 @@ struct ProbeSoup
 		twoSided.back() = 1;
 	}
 	bool isTwoSided( size_t tri ) const { return tri < twoSided.size() && twoSided[tri]; }
-	/*! lane ALPHATEST1: the alpha-tested triangles' masks (probemask.h): a ray through a texel under the
-	 *  material's threshold passes on. Empty = none (every trace as before). The soup file carries it as an
-	 *  optional 'AMK1' tail after 'TWO1' (the maps as bytes, so a soup read back traces the same).
-	 *  lane LAND5: the tails after TWO1 are SIZED (magic, count, body bytes) in the order AMK1, EMT1, VNM1, DRG1;
-	 *  a reader skips one it does not know by its byte count. */
+	//! the alpha-tested triangles' masks (probemask.h): a ray through a texel under the material's threshold
+	//! passes on. Empty = none (every trace as before).
 	probebvh::AlphaMask amask;
-	//! lane ALPHATEST2: `as` = each corner's vertex alpha x material alpha (null = 1, 1, 1); any != 1 -> 'AMK2'
+	//! `as` = each corner's vertex alpha x material alpha (null = 1, 1, 1); any!= 1 -> 'AMK2'
 	void markLastMasked( int map, quint8 thr, const float uv[6], int model, const float * as = nullptr )
 	{
 		amask.triOf.resize( size_t( triCount() ), -1 );
@@ -174,13 +141,11 @@ struct ProbeSoup
 		amask.triOf.back() = int( amask.tris.size() );
 		amask.tris.push_back( t );
 	}
-	/*! lane EMISSIVEGI1: the triangles that glow (probeemit.h). Written as the optional 'EMT1' tail (only when any
+	/*! the triangles that glow (probeemit.h). Written as the optional 'EMT1' tail (only when any
 	 *  triangle glows), so a soup with nothing glowing stays byte for byte as before. */
 	ProbeEmit glow;   // not "emit": a Qt macro
-	/*! lane NEONGI1: the effect surfaces that glow (neon tubes: an additive BGEM, no face of its own in the soup, so a
-	 *  ray goes through). The bake adds their light to the surface a ray meets just behind one. `tris` 9 floats a
-	 *  triangle (world), `le` 3 floats a triangle (linear, its mean as the renderer draws it, alpha in), `two` 1 = it
-	 *  shows from both sides. Written as the optional 'EMV1' tail after 'DRG1', only when any. */
+	//! the effect surfaces that glow (neon tubes: an additive BGEM, no face of its own in the soup, so a ray
+	//! goes through). The bake adds their light to the surface a ray meets just behind one.
 	struct Veil
 	{
 		std::vector<float> tris;
@@ -190,10 +155,8 @@ struct ProbeSoup
 		size_t count() const { return tris.size() / 9; }
 	};
 	Veil veil;
-	/*! lane SMOOTHN1: the vertex normals, 9 snorm16 a triangle (world, unit), every albedo way's hit normal
-	 *  (the barycentric blend, renormalized, on the face normal's side). Shorter than 9 x the triangle count,
-	 *  or a zero vertex, = the face normal there. Terrain from LAND VNML, models from their NIF normals.
-	 *  The soup file carries it as an optional 'VNM1' tail after 'EMT1'. */
+	//! the vertex normals, 9 snorm16 a triangle (world, unit), every albedo way's hit normal (the barycentric
+	//! blend, renormalized, on the face normal's side).
 	std::vector<qint16> vn;
 	void setLastNormals( const float n[9] )
 	{
@@ -213,11 +176,7 @@ struct ProbeSoup
 				return true;
 		return false;
 	}
-	/*! lane GPURELIGHT1: the doors' real geometry, as placed (closed). The bake never sees it (doors are baked open:
-	 *  `doors` only tags the openings); the GPU relight re-traces the rays that cross a door's box against it, so a
-	 *  closed door stops light by its faces, lets it through its alpha-test holes and tints it through its panes.
-	 *  9 floats a triangle (world), `door` = into `doors`; `amask` numbers these triangles; glass as the soup's
-	 *  (1 - a (1 - c) x 255). Written as the optional 'DRG1' tail after 'VNM1', only when any door has geometry. */
+	//! the doors' real geometry, as placed (closed).
 	struct DoorGeom
 	{
 		std::vector<float> tris;
@@ -231,7 +190,7 @@ struct ProbeSoup
 	DoorGeom doorGeom;
 };
 
-//! Lane BAKE4: one box of an enclosed room's air (world units), what `.tbk` v4 writes for the
+//! one box of an enclosed room's air (world units), what `.tbk` v4 writes for the
 //! point-in-room test. A room is many boxes (merged runs of its air columns).
 struct ProbeRoomBox
 {
@@ -243,7 +202,7 @@ struct ProbeRoomBox
 constexpr quint32 kProbeRoomNone = 0xFFFFFFFFu;
 
 //! Room: the point of an enclosed room farthest from its walls. Cover: a spot no
-//! other probe saw (lane PRTPPLACE's interior rule, bungo 2026-09-30).
+//! other probe saw.
 enum class ProbeClass : int { FirstHit = 0, Interior = 1, Wall = 2, Aperture = 3, Room = 4, Cover = 5 };
 enum class ApertureKind : int { None = 0, Doorway = 1, Window = 2, Breach = 3 };
 
@@ -259,7 +218,7 @@ struct ProbePoint
 	float width = 0, height = 0, sill = 0;
 	quint32 doorRef = 0;        //!< the DOOR ref standing in it, 0 = none
 	bool roomToRoom = false;    //!< both sides roofed: the normal is only the pass axis
-	/*! Lane BAKE4: the enclosed room the probe stands in (0 = none: outdoors, a porch, a
+	/*! the enclosed room the probe stands in (0 = none: outdoors, a porch, a
 	 *  ledge); an opening's probe gets the rooms on both sides (room[1] = kProbeRoomNone
 	 *  for every other probe). Ids are this placement's: (rect hash << 16) | (n + 1). */
 	quint32 room[2] = { 0, kProbeRoomNone };
@@ -273,10 +232,10 @@ struct ProbePlaceSpec
 	float eye = 120.0f;
 	float pierceStep = 4.0f;
 	float minAirGap = 140.0f;
-	int maxLevels = 24;         //!< lane WALLSTACK1: was 6, so a tower's floors hid its basements; red "levels" = 6
+	int maxLevels = 24;         //!< was 6, so a tower's floors hid its basements; red "levels" = 6
 	float wallSearch = 280.0f;
 	float wallStandoff = 96.0f;
-	/*! Lane WALLSTACK1: a wall stack climbs its wall until the wall ends (the path up is blocked, or the wall is
+	/*! a wall stack climbs its wall until the wall ends (the path up is blocked, or the wall is
 	 *  no longer within 2 x wallStandoff): every wallStepNear up to wallNearTop above its origin (the old fixed
 	 *  240/480/720/960, so a stack below there is as before), then every wallStepFar, at most wallMaxSteps
 	 *  levels (64: 960 + 60 x 480 = 29,760 above the origin). Red "wallcap": the old stop at wallNearTop. */
@@ -284,25 +243,16 @@ struct ProbePlaceSpec
 	float wallNearTop = 960.0f;
 	float wallStepFar = 480.0f;
 	int wallMaxSteps = 64;
-	/*! Lane WALLSTACK1: a gap between two column hits is soil, not air, when the face above it is one-sided and
-	 *  faces up (a probe there stands behind it, as under the terrain) AND fewer than 2 of the 4 level rays out
-	 *  to buriedReach meet a face from its front (a room under a one-sided roof still sees its own walls). Such
-	 *  a gap gets no level probe and starts no wall stack. Red "buried": the old rule (every gap is air). */
+	//! a gap between two column hits is soil, not air, when the face above it is one-sided and faces up (a
+	//! probe there stands behind it, as under the terrain) AND fewer than 2 of the 4 level rays out to
+	//! buriedReach meet a face from its front (a room under a one-sided roof still sees its own walls).
 	float buriedReach = 2048.0f;
 	bool apertures = true;
 	float voxel = 35.0f;
 	int maxVoxelLayers = 320;
 	//! Wall angles the openings are searched at (voxel frames rotated about z).
 	std::vector<float> apertureAngles { 0.0f, 22.5f, 45.0f, 67.5f };
-	/*! THE INTERIOR RULE (needs the 0-degree frame above). A room is covered
-	 *  walkable air (floor, minAirGap of headroom, a roof) cut at the openings;
-	 *  one probe at its point farthest from the walls, then every walkable spot
-	 *  must see a probe within coverRadius, hallRadius in a hallway (a room at
-	 *  most hallWidth from wall to middle). A room whose edge is more than
-	 *  roomOpenMax open ground or drop (no floor beyond) is outdoors -- a porch, a
-	 *  strip under the eaves -- and left to the lattice; one whose edge is mostly
-	 *  drop is a furniture top or a ledge; one with no opening, no open edge and
-	 *  no drop is a sealed hollow (a foundation's crawlspace) and gets nothing. */
+	//! THE INTERIOR RULE (needs the 0-degree frame above).
 	bool coverage = true;
 	float coverRadius = 200.0f;
 	float hallRadius = 70.0f;    //!< no hallway spot more than 70 from a probe: they stand at most 140 apart
@@ -312,7 +262,7 @@ struct ProbePlaceSpec
 	/*! A deliberate defect for the gates' refuters: "wall" drops the stack's
 	 *  horizontal re-check, "aperture" drops the thin-jamb and straight-through
 	 *  tests, "frames" searches openings at the first wall angle only,
-	 *  "coverage" places room probes but skips the blind-spot fill; lane WALLSTACK1: "wallcap" stops wall
+	 *  "coverage" places room probes but skips the blind-spot fill; "wallcap" stops wall
 	 *  stacks at wallNearTop, "buried" places a level in every gap, "levels" caps at 6 levels. Empty in
 	 *  every real run. */
 	QString red;
@@ -323,21 +273,21 @@ struct ProbePlaceResult
 	std::vector<ProbePoint> probes;
 	int columns = 0, columnsEmpty = 0;
 	int firstHit = 0, interior = 0, wall = 0;
-	int waterColumns = 0, waterUnder = 0;   //!< lane WATER1: columns split at the water line; probes under it
+	int waterColumns = 0, waterUnder = 0;   //!< columns split at the water line; probes under it
 	int gapsRejected = 0, levelsCapped = 0, wallRefused = 0, wallColumns = 0;
-	int buriedGaps = 0, wallCapped = 0, wallTop = 0;   //!< lane WALLSTACK1: soil gaps refused; stacks at wallMaxSteps; highest stack level
-	int buriedPlaced = 0;       //!< lane WALLSTACK1: room / cover candidates refused by the soil rule (each cell of a void room tries)
+	int buriedGaps = 0, wallCapped = 0, wallTop = 0;   //!< soil gaps refused; stacks at wallMaxSteps; highest stack level
+	int buriedPlaced = 0;       //!< room / cover candidates refused by the soil rule (each cell of a void room tries)
 	int doorway = 0, window = 0, breach = 0, doored = 0, roomToRoom = 0;
 	int apComponents = 0, apRejectedUnroofed = 0, apRejectedShape = 0, apRejectedPocket = 0, apMerged = 0;
 	int gridX = 0, gridY = 0, gridZ = 0;
 	int apFrames = 0;
 	int rooms = 0, roomsOpen = 0, roomsLedge = 0, roomsSealed = 0, roomsTiny = 0, room = 0, cover = 0, roomNear = 0;
 	int walkCells = 0, coverCells = 0, hallCells = 0, cutCells = 0, blindLeft = 0;
-	int backFloors = 0;         //!< lane ROOMCLAMP1: air cells refused as walkable: only the back of one-sided faces below
-	int backColumnHits = 0;     //!< lane ROOMCLAMP1: column levels (first hit or gap) on the back of a one-sided face: no probe
-	int backPlaced = 0;         //!< lane ROOMCLAMP1: room / cover probes refused: the back of a one-sided face within 200 below
+	int backFloors = 0;         //!< air cells refused as walkable: only the back of one-sided faces below
+	int backColumnHits = 0;     //!< column levels (first hit or gap) on the back of a one-sided face: no probe
+	int backPlaced = 0;         //!< room / cover probes refused: the back of a one-sided face within 200 below
 	bool gridClamped = false;
-	//! lane BAKE4: the air of every enclosed room a probe stands in, and the probes given a room
+	//! the air of every enclosed room a probe stands in, and the probes given a room
 	std::vector<ProbeRoomBox> roomBoxes;
 	int roomIds = 0, probesInRoom = 0, apertureRooms = 0;
 	qint64 soupTris = 0;

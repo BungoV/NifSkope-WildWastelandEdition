@@ -1,6 +1,6 @@
 /* Playback and bone mapping for loaded Havok animation clips.
    The design, the ruling it implements and the reasons live in hkxplayback.h.
-   Lane HKX2, 2026-09-10. */
+   2026-09-10. */
 
 #include "hkxplayback.h"
 
@@ -18,19 +18,9 @@
 
 #include <cmath>
 
-/* HOW CLOSE TO A DECODED FRAME COUNTS AS BEING ON IT.
- *
- * Frame times are built by multiplying a frame number by a frame duration that
- * is not representable in binary (1/30 s), so asking for frame 5 of a 30 fps
- * clip and dividing back gives 4.99999952, not 5. Interpolating there would
- * blend 99.99997% of frame 6 into a pose the caller asked for exactly, and gate
- * (a) -- "at frame N the node's local transform EQUALS the decoder's output" --
- * would fail by the whole distance between two frames.
- *
- * 1e-4 of a frame is 3.3 microseconds at 30 fps: below any time the transport
- * or a scrub bar can express, and eleven orders of magnitude above the float
- * error being cancelled.
- */
+// HOW CLOSE TO A DECODED FRAME COUNTS AS BEING ON IT:
+// Frame times are built by multiplying a frame number by a frame duration that is not representable in binary
+// (1/30 s), so asking for frame 5 of a 30 fps clip and dividing back gives 4.99999952, not 5.
 static const float HKX_FRAME_EPSILON = 1.0e-4f;
 
 //! Where in the clip a time falls: the frame at or before it, and how far past
@@ -65,10 +55,7 @@ static void hkxFrameAt( const HkxAnimClip & clip, int numSamples, float time,
 	frac = x - float( i0 );
 }
 
-//! Shortest-arc normalised lerp, the degree-1 spline's own answer between two
-//! control points. NOT Quat::normalize(), which divides by the SQUARED
-//! magnitude (niftypes.h:868) and so only normalises quaternions that are
-//! already unit.
+//! Shortest-arc normalised lerp, the degree-1 spline's own answer between two control points.
 static Quat hkxNlerp( const Quat & a, const Quat & b, float t )
 {
 	float d = a[0] * b[0] + a[1] * b[1] + a[2] * b[2] + a[3] * b[3];
@@ -148,10 +135,8 @@ static bool hkxSampleRootMotion( const HkxAnimClip & clip, float time, HkxRootMo
 
 QString HkxMapping::summaryShort() const
 {
-	/* A FEW WORDS, and both numbers (lane UI6, 2026-09-11; bungo, "look at all
-	 * this text clutter"). The names of the unmatched bones are the whole of
-	 * the length, and they are in summary(), which the label's tooltip carries.
-	 * Kept under 40 characters by construction: two numbers and one word. */
+	// A FEW WORDS, and both numbers. The names of the unmatched bones are the whole of the length, and they
+	// are in summary, which the label's tooltip carries.
 	const int total = matched.count() + unmatched.count() + unnamed.count();
 	if ( total == 0 )
 		return QObject::tr( "no bones named" );
@@ -204,14 +189,8 @@ HkxMapping HkxPlayback::mapNames( const Scene * scene, const QStringList & boneN
 	if ( !scene )
 		return m;
 
-	/* Two tables, because "matched by case" and "matched only after folding
-	 * case" are different answers and the summary line reports both. Head and
-	 * HEAD are the same bone; saying so silently would hide a skeleton mismatch
-	 * that happens to fold onto the right names.
-	 *
-	 * First name wins on a collision, so the mapping is a function of the file
-	 * rather than of hash order.
-	 */
+	// Two tables, because "matched by case" and "matched only after folding case" are different answers and
+	// the summary line reports both.
 	QHash<QString, int> exact;
 	QHash<QString, int> folded;
 	for ( Node * n : scene->getNodes() ) {
@@ -345,17 +324,10 @@ bool HkxPlayback::namesFromSkeletons( HkxClipEntry & e )
 	if ( skeletons.isEmpty() )
 		return false;
 
-	/* AN EMPTY BINDING IS THE IDENTITY MAP, not a missing one.
-	 *
-	 * hkaAnimationBinding::transformTrackToBoneIndices is empty in every clip
-	 * Bethesda ships (HKX1's census: identity in 13,322 of 13,514, a permutation
-	 * in 192) and in third-party clips exported without a binding at all; track
-	 * i then drives bone i. Refusing an empty vector here would have refused
-	 * almost the whole archive. Accepted only when the skeleton has at least
-	 * numTracks bones -- the same rule the fixture lane wrote into the
-	 * ww-hkx-animation skill -- and the loop below reads it as
-	 * trackToBone.value(t, t), so a short vector falls through to identity too.
-	 */
+	// AN EMPTY BINDING IS THE IDENTITY MAP, not a missing one:
+	// hkaAnimationBinding::transformTrackToBoneIndices is empty in every clip Bethesda ships (HKX1's census:
+	// identity in 13,322 of 13,514, a permutation in 192) and in third-party clips exported without a binding
+	// at all; track i then drives bone i.
 	int need = e.clip.numTracks;
 	for ( int b : e.clip.trackToBone )
 		need = qMax( need, b + 1 );
@@ -552,7 +524,7 @@ bool HkxPlayback::unload( const QString & clipName )
 	return true;
 }
 
-/* ---- lane UINOTES1: editing the list itself (bungo's ruling 5, 2026-09-12)
+/* ---- editing the list itself
    "For these animations, I should be able to use a shortcut to delete, copy,
    paste, etc. them, same goes with reordering with a drag and drop, same goes
    with right clicking and selecting each such option."
@@ -725,14 +697,10 @@ bool HkxPlayback::bind( HkxClipEntry & e )
 		e.saved.insert( n->id(), n->local );
 	}
 
-	/* THE ROOT MOTION NODE.
-	 *
-	 * The clip's extracted motion is the character's displacement, not a track,
-	 * so it goes on the skeleton root: the node named by the animation
-	 * skeleton's own root bone when there is one, and otherwise the first bound
-	 * node with no bound ancestor. Named either way, so a picture that moves
-	 * the wrong thing says which thing it moved.
-	 */
+	// THE ROOT MOTION NODE:
+	// The clip's extracted motion is the character's displacement, not a track, so it goes on the skeleton
+	// root: the node named by the animation skeleton's own root bone when there is one, and otherwise the
+	// first bound node with no bound ancestor.
 	if ( !e.clip.rootMotion.isEmpty() ) {
 		for ( const HkxSkeleton & sk : skeletons ) {
 			for ( int b = 0; b < sk.parents.count() && b < sk.boneNames.count(); b++ ) {
@@ -780,14 +748,9 @@ void HkxPlayback::restore( HkxClipEntry & e )
 		e.bound = false;
 		return;
 	}
-	/* BYTE FOR BYTE (gate (b)).
-	 *
-	 * A Transform is nine rotation floats, three translation floats and a
-	 * scale: assigning the saved copy writes back the same bit patterns that
-	 * were read, with no arithmetic anywhere in between. Reconstructing the
-	 * transform from the NIF instead would go through Transform(nif, index) and
-	 * could not promise that.
-	 */
+	// BYTE FOR BYTE (gate (b)):
+	// A Transform is nine rotation floats, three translation floats and a scale: assigning the saved copy
+	// writes back the same bit patterns that were read, with no arithmetic anywhere in between.
 	for ( Node * n : scene->getNodes() ) {
 		if ( !n )
 			continue;
@@ -872,7 +835,7 @@ void HkxPlayback::applyLocal( Node * node ) const
 
 	const int id = node->id();
 	if ( id == heldNode )
-		return;			// lane HKXEDIT2: the gizmo owns this node's pose right now
+		return;			// the gizmo owns this node's pose right now
 	const int track = e.nodeTrack.value( id, -1 );
 	const bool doRoot = ( rootMotion && id == e.rootNode && !e.clip.rootMotion.isEmpty() );
 	if ( track < 0 && !doRoot )
@@ -881,7 +844,7 @@ void HkxPlayback::applyLocal( Node * node ) const
 	const float t = scene->time;
 	Transform out = node->local;
 
-	// lane MORPHCYC1: a generated preview clip plays by its own rule, and has no
+	// a generated preview clip plays by its own rule, and has no
 	// root motion to add
 	if ( e.genMode != HkxClipEntry::GenNone ) {
 		if ( track >= 0 && generatedPose( e, node, track, t, out ) )
@@ -895,10 +858,7 @@ void HkxPlayback::applyLocal( Node * node ) const
 			Transform p;
 			p.rotation.fromQuat( x.rotation );
 			p.translation = x.translation;
-			/* A NifSkope Transform carries ONE scale, a Havok transform three.
-			 * Every FO4 clip measured by lane HKX1 is uniform, so x is taken
-			 * and y/z are dropped; a clip that is not uniform loses the
-			 * difference rather than the pose. */
+			// A NifSkope Transform carries ONE scale, a Havok transform three.
 			p.scale = x.scale[0];
 			if ( e.additive ) {
 				// ADDITIVE_* clips are deltas on the pose the rig was in.
@@ -936,7 +896,7 @@ void HkxPlayback::applyLocal( Node * node ) const
 
 
 /*
- *  lane MORPHCYC1: generated preview clips (the design is in hkxplayback.h,
+ *  generated preview clips (the design is in hkxplayback.h,
  *  beside HkxClipEntry::generated, and in src/morphcycle.h)
  */
 
@@ -1005,10 +965,8 @@ bool HkxPlayback::generatedPose( const HkxClipEntry & e, const Node * node, int 
 	if ( e.genMode == HkxClipEntry::GenSkeletonSpace ) {
 		if ( track >= e.genRestInv.count() )
 			return false;
-		/* posedWorld = restWorld(node) * restGlobal^-1 * posedGlobal: the bone's
-		 * move measured in ITS OWN rest frame of the skeleton, carried onto the
-		 * node wherever the NIF put it. At rest the middle term is the identity
-		 * and this writes back the saved local exactly (up to one inverse). */
+		// posedWorld = restWorld(node) * restGlobal^-1 * posedGlobal: the bone's move measured in ITS OWN rest
+		// frame of the skeleton, carried onto the node wherever the NIF put it.
 		const Transform delta = e.genRestInv.at( track ) * hkxGenGlobal( e, track, t, 0 );
 		const Transform target = hkxRestWorld( e, node, 0 ) * delta;
 		const Node * p = node->parentNode();
@@ -1047,11 +1005,11 @@ void HkxPlayback::registerInScene( const HkxClipEntry & e )
 
 QString HkxPlayback::replaceClip( const QString & clipName, const HkxAnimClip & clip, const QStringList & trackNames )
 {
-	// lane HKXEDIT2: the animation workspace hands back the clip it edited
+	// the animation workspace hands back the clip it edited
 	const int i = indexOf( clipName );
 	if ( i < 0 )
 		return QObject::tr( "%1 is not a loaded clip." ).arg( clipName );
-	// lane MORPHCYC1: a generated preview is not an editable clip -- an edit
+	// a generated preview is not an editable clip -- an edit
 	// would be the first step to saving it as the .hkx it can never be
 	if ( clips.at( i ).isGenerated() )
 		return generatedRefusal( &clips.at( i ) );

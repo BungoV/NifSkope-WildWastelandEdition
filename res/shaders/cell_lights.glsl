@@ -42,12 +42,12 @@ uniform float cellProbeGain;
 uniform int cellAmboCount;
 uniform vec4 cellAmbo[16];
 uniform vec4 cellAmboK[16];
-uniform vec4 cellAmboBox[48];		// lane HEMI1: where cellAmboK[i].w is 1 the volume is a box, rows i * 3 .. i * 3 + 2
-uniform vec4 cellLightPhys;			// lane LIGHTPHYS1 (src/gl/lightphys.h): x falloff 0 game / 1 physical / 2 advanced, y anchor,
+uniform vec4 cellAmboBox[48];		// where cellAmboK[i].w is 1 the volume is a box, rows i * 3 .. i * 3 + 2
+uniform vec4 cellLightPhys;			// x falloff 0 game / 1 physical / 2 advanced, y anchor,
 uniform vec4 cellLightPhysB;		// z source fraction, w advanced numerator; B: x advanced min metres, y area size (0 off), z red bits
 uniform int cellRed;				// 1 linear: the radial curve without its 2.2; 8 lambert, 16 normalised, 32 norim,
-									// 64 rimflags (the lights' rim / roughness flags ignored); 512 cubeold (lane CUBE1)
-// lane PRTPGI: the bake relit by these lights (src/probegi.h), six axis slabs of dims.z each, x fastest;
+									// 64 rimflags (the lights' rim / roughness flags ignored); 512 cubeold
+// the bake relit by these lights (src/probegi.h), six axis slabs of dims.z each, x fastest;
 // rgb = irradiance x valid, a = valid (so a filtered sample divides by its own valid)
 uniform bool cellGiOn;
 uniform sampler3D cellGi;
@@ -75,13 +75,9 @@ uniform vec4 cellGiFineDim[8];		// nx, ny, nz, first layer
 // the PRTP band's Pass (0 Combined, 1 GI, 2 Sky visibility, 3 Surfel color, 4 Surfel light).
 // In the Sky visibility pass the CPU binds the sky grid on cellGi (same layout, rgb = the probes' sky share).
 uniform int cellPass;
-uniform int cellPassRed;			// the gate's reds: 1 direct (the lights leak into GI), 2 nonormal (sampled facing up); 8192 WW_CELL_GIWALL_RED=off (lane GIWALL2)
-/* lane PRTOFF1 (bungo 10-29: "just don't ever render it since it gets removed"): the old baked probe GI (the grid above,
- * the PRT) compiles only under WW_CELL_PRT, the loader's define for the red WW_CELL_PRT_RED=1. Without it cellGiOn (the
- * grid drawn) is false at compile time, so no grid read is left in a program (the air's, the particles', the water's
- * too), the march (the grid's per-pixel chain) is never compiled, and CELL_GI_UP (a surface reads a GI) is the
- * ray-traced volume's cellDdgiOn (cell_ddgi.glsl, included before the first read) or false. With WW_CELL_PRT every
- * CELL_GI_UP is the old cellGiOn token: the old program. */
+uniform int cellPassRed;			// the gate's reds: 1 direct (the lights leak into GI), 2 nonormal (sampled facing up); 8192 WW_CELL_GIWALL_RED=off
+// the old baked probe GI (the grid above, the PRT) compiles only under WW_CELL_PRT, the loader's define for
+// the red WW_CELL_PRT_RED=1.
 #ifdef WW_CELL_PRT
 #define CELL_GI_UP cellGiOn
 #else
@@ -594,11 +590,11 @@ vec4 cellGiRoomSample( vec3 P, vec3 N, vec3 from, bool outdoorsOnly, out ivec2 L
 	return found ? r : vec4( -1.0 );
 }
 
-/* lane GICAL1 (item 5): the gap fill. A surface whose blend has no valid weight (no probe reached the 8 voxels: today
+/* the gap fill. A surface whose blend has no valid weight (no probe reached the 8 voxels: today
  * black, or with rooms the plain trilinear, which ignores walls) takes the weighted mean of the valid voxels within
  * 2 voxels (the 4x4x4 block round the sample), of the surface's own room (L) when the grid has rooms; weight
  * (1 - d / 2.5)^2 in voxels. Returns rgba / the weight (cellGiE divides by .a); .a = 0: nothing in reach.
- * Lane GIWALL2: of a room (not the last fill) only the voxels seen from `from` (cellGiWall): the room's slot is no wall
+ * of a room (not the last fill) only the voxels seen from `from` (cellGiWall): the room's slot is no wall
  * guard where the room is open to the street (a shop is the outdoors' room); none seen, the room's buried voxels
  * (centre in the wall the surface faces), never one behind a wall. Red WW_CELL_GIWALL_RED=off: every one. */
 const ivec2 cellGiAnyRoom = ivec2( -2 );	// lane WALLSTACK1: cellGiFillAt's L for the last fill (every voxel's first slot, as the trilinear reads)
@@ -1673,7 +1669,7 @@ vec3 cellLightE( int i, vec3 P, vec3 N, out vec3 L, out bool noSpec )
 		gAx = t2.xyz;
 	}
 	if ( a > 0.0 )
-		g = cellGobo( i, -Lv, gAx, t1.w > -1.5 );	// GOBO2: one call for every shape
+		g = cellGobo( i, -Lv, gAx, t1.w > -1.5 );	// one call for every shape
 	if ( a > 0.0 )
 		a *= cellShadowF( i, P, N );
 	noSpec = ( int( t3.w + 0.5 ) & 1 ) != 0;

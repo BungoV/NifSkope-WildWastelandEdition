@@ -5,7 +5,7 @@ BSD License - see nifskope.h
 ***** END LICENCE BLOCK *****/
 
 #include "lodgen.h"
-#include "wwswitch.h"	// lane TESTDRIVER1: the WW_* switch store
+#include "wwswitch.h"	// the WW_* switch store
 #include "probeincr.h"
 #include "lodgenparallel.h"
 #include "lodgenbc7.h"
@@ -24,8 +24,8 @@ BSD License - see nifskope.h
 #include "esmdata.h"
 #include "nativeemit.h"
 #include "lodgenlayout.h"
-#include "lodtfile.h"	// lane WATERSKYVISFAR2: LodtStaticTops, the sky plane's static occluders
-#include "data/nifitemcache.h"	// lane WATERSKYVISFAR3: the statics gather's model loads on workers
+#include "lodtfile.h"	// LodtStaticTops, the sky plane's static occluders
+#include "data/nifitemcache.h"	// the statics gather's model loads on workers
 #include "io/material.h"
 #include "io/lodmfile.h"
 #include "io/lodvfile.h"
@@ -69,21 +69,14 @@ BSD License - see nifskope.h
 
 #include "meshoptimizer/src/meshoptimizer.h"
 
-/* Mod Organizer 2 puts its hook DLL in every process it launches, so "am I
- * under MO2, seeing its virtual Data folder?" is one module lookup. Declared by
- * hand rather than pulling in windows.h, whose min/max macros would break
- * std::min/std::max all through this file; the signature is the real one
- * (HMODULE is struct HINSTANCE__ *), so it stays compatible if some future
- * include does bring windows.h in. */
+// Mod Organizer 2 puts its hook DLL in every process it launches, so "am I under MO2, seeing its virtual Data
+// folder?" is one module lookup.
 #ifdef Q_OS_WIN32
 struct HINSTANCE__;
 extern "C" __declspec( dllimport ) struct HINSTANCE__ * __stdcall GetModuleHandleW( const wchar_t * );
 #endif
 
-/* Measured constants from Commonwealth.4.-20.24.BTR — see
- * docs/LODGEN_ESM_LAYOUTS.md and the 2026-08-31 dumps. The Land vertex
- * descriptor is vanilla's: flags VERTEX|UV, 12-byte stride (half3 position,
- * half bitangent X, half2 UV). Water's is position-only, 8 bytes. */
+// Measured constants from Commonwealth.4.-20.24.BTR — see docs/LODGEN_ESM_LAYOUTS.md and the 2026-08-31 dumps.
 namespace
 {
 
@@ -134,16 +127,7 @@ QModelIndex insertMultiBound( NifModel * nif,
 
 namespace
 {
-/*! Triangulate a height grid on the fixed SW-NE diagonal, as vanilla does.
- *
- *  Choosing the diagonal PER QUAD (joining the closer-in-height corners) was
- *  tried and REVERTED: it is the textbook improvement, and it measured no
- *  benefit here -- identical vertex and triangle counts, sliver share 10.7% ->
- *  11.1%, and vanilla's own vertices drifted off our surface (median error
- *  0 -> 16 world units). The simplifier reorganises the mesh enough that the
- *  initial diagonal does not survive to the output. Do not re-add it without
- *  a measurement that shows a win.
- */
+//! Triangulate a height grid on the fixed SW-NE diagonal, as vanilla does.
 static void lodgenTriangulateGrid( const std::vector<float> & grid, int n,
 	std::vector<unsigned int> & idx )
 {
@@ -158,20 +142,7 @@ static void lodgenTriangulateGrid( const std::vector<float> & grid, int n,
 	}
 }
 
-/*! Per-vertex shore weight and waterline lock, for shore-aware decimation.
- *
- *  meshopt_simplify minimises HEIGHT error, and a shoreline is flat -- so
- *  collapsing coastline vertices costs it almost nothing and they go first,
- *  while the budget is spent on inland ridges nobody looks at. The waterline
- *  is the one silhouette in a LOD chunk the eye tracks, and it was the
- *  cheapest thing in the mesh to delete.
- *
- *  A vertex whose 4-neighbourhood holds terrain both above AND below its
- *  cell's water plane IS the waterline: locked, so no collapse can move it.
- *  Everything else carries a falloff so collapses near water stay expensive
- *  without being forbidden. Returns false when the chunk has no water at all,
- *  in which case the caller keeps the plain simplifier.
- */
+//! Per-vertex shore weight and waterline lock, for shore-aware decimation.
 static bool lodgenShoreWeights( const EsmWorld & world, int chunkX, int chunkY,
 	int dim, const std::vector<float> & grid, int n,
 	std::vector<float> & shoreAttr )
@@ -337,12 +308,8 @@ quint8 lodgenMaterialClass( const QString & diffusePath )
 	return 0;   // dirt / unknown
 }
 
-/*! Per-sample terrain channels for the CS profile: dominant material class,
- * flow-accumulation wetness, and heightfield AO — all per PLACEMENT, the
- * things no shared tiling texture can carry. Grid is (dim*32+1)^2.
- * Extended profile (UV2): skyVis = the horizon measure before byte
- * quantization (~11-bit half precision), matClass2 = the second-strongest
- * material class for two-material blending at distance. */
+//! Per-sample terrain channels for the CS profile: dominant material class, flow-accumulation wetness, and
+//! heightfield AO — all per PLACEMENT, the things no shared tiling texture can carry. Grid is (dim*32+1)^2.
 void lodgenTerrainChannels( const EsmWorld & world, int chunkX, int chunkY,
 	int dim, const std::vector<float> & grid,
 	std::vector<quint8> & matClass, std::vector<quint8> & wetness,
@@ -395,12 +362,8 @@ void lodgenTerrainChannels( const EsmWorld & world, int chunkX, int chunkY,
 					const size_t s = size_t( cy * 32 + row ) * n + size_t( cx * 32 + col );
 					matClass[s] = classOf( ltex );
 					matClass2[s] = ltex2 ? classOf( ltex2 ) : matClass[s];
-					/* The BLEND WEIGHT between them -- the share belonging to
-					 * the second material, 0 = pure dominant, 128 = an even
-					 * mix. Both opacities were already computed here and then
-					 * discarded, which left the documented "second-strongest
-					 * class, for two-material blending" unusable: the pair says
-					 * WHICH two materials meet and never in what proportion. */
+					// The BLEND WEIGHT between them -- the share belonging to the second material, 0 = pure
+					// dominant, 128 = an even mix.
 					if ( matBlend ) {
 						const float total = bestA + secondA;
 						( *matBlend )[s] = total > 1.0e-4f
@@ -412,22 +375,8 @@ void lodgenTerrainChannels( const EsmWorld & world, int chunkX, int chunkY,
 		}
 	}
 
-	/* Shore proximity: how close this sample is to standing water, in both
-	 * senses at once -- how far it sits ABOVE the water plane, and how far it
-	 * is FROM any water at all.
-	 *
-	 * It has to live on the terrain's vertices because LOD water cannot carry
-	 * it: the water shapes are position-only, 8 bytes a vertex
-	 * (WATER_VERTEX_DESC), under their own BSEffectShaderProperty. There is
-	 * nowhere to put a channel on them.
-	 *
-	 * Water height is per CELL, but terrain height is per SAMPLE, so the band
-	 * this produces still follows the true shoreline contour rather than a
-	 * 4096-unit staircase -- the contour comes from the terrain, not the water.
-	 * The exposure rule is the water shapes' own (height above the cell's
-	 * terrain minimum), so a shore band never appears around water that was
-	 * culled for being submerged.
-	 */
+	// Shore proximity: how close this sample is to standing water, in both senses at once -- how far it sits
+	// ABOVE the water plane, and how far it is FROM any water at all.
 	{
 		constexpr float HEIGHT_RANGE = 512.0f;   // world units above water -> 0
 		constexpr int MAX_STEPS = 32;            // samples; 32 * 128u = 4096u
@@ -561,13 +510,9 @@ void lodgenTerrainChannels( const EsmWorld & world, int chunkX, int chunkY,
 
 } // namespace
 
-/*! One emitted water leaf, in whole-chunk BLOCK coordinates.
- *
- *  A "block" is the finest cell subdivision in play (1 << subdiv per cell
- *  edge), so every leaf corner AND every hanging midpoint lands on an integer
- *  block coordinate. That is what lets vertices be welded by exact integer
- *  key instead of by comparing floats.
- */
+//! One emitted water leaf, in whole-chunk BLOCK coordinates:
+//! A "block" is the finest cell subdivision in play (1 << subdiv per cell edge), so every leaf corner AND every
+//! hanging midpoint lands on an integer block coordinate.
 struct WaterLeaf
 {
 	int gx, gy;     //!< SW corner, in blocks from the chunk's SW corner
@@ -575,12 +520,7 @@ struct WaterLeaf
 	int level;      //!< subdivision level; size == (1 << subdiv) >> level
 };
 
-/*! Desired refinement level for one block, from the terrain under it.
- *
- *  The waterline crossing a block is what earns the finest level: it is where
- *  foam, shoaling and the land edge all are. Merely shallow water gets one
- *  level less, open water none at all -- so depth costs nothing offshore.
- */
+//! Desired refinement level for one block, from the terrain under it.
 static int waterDesiredLevel( const std::vector<float> & grid, int n,
 	int cx, int cy, int bi, int bj, int blocksPerCell, float waterHWorld, int maxLevel )
 {
@@ -608,30 +548,7 @@ static int waterDesiredLevel( const std::vector<float> & grid, int n,
 	return 0;
 }
 
-/*! Build the leaves of one height layer as a 2:1 RESTRICTED quadtree.
- *
- *  Restriction matters here for a reason that is easy to get wrong. Water is
- *  flat, so an unbalanced tree produces no geometric crack -- neighbouring
- *  leaves at different depths share an exactly coplanar edge. But the moment a
- *  per-vertex CHANNEL rides on these vertices, a hanging node becomes a DATA
- *  seam: the coarse side interpolates linearly between its two edge endpoints
- *  while the fine side passes through the midpoint vertex, and the two agree
- *  only if that midpoint happens to hold the average of its neighbours. It
- *  holds the sampled field instead -- and the field is non-linear exactly
- *  where we chose to refine. So the mismatch would be largest at the
- *  shoreline, which is the one place it would be seen.
- *
- *  Restricting to one level of difference bounds a coarse edge to at most ONE
- *  hanging node, which the caller then stitches into the coarse leaf's own
- *  triangle fan -- making the midpoint a real vertex on both sides, so the
- *  interpolation matches by construction rather than by luck.
- */
-/*! Is every terrain sample under this block above the water plane?
- *
- *  The margin keeps a block whose terrain merely grazes the surface: a
- *  shoreline block must survive, and the decimated Land mesh does not sit
- *  exactly on the heightfield.
- */
+//! Build the leaves of one height layer as a 2:1 RESTRICTED quadtree.
 static bool waterBlockBuried( const std::vector<float> & grid, int n,
 	int cx, int cy, int bi, int bj, int blocksPerCell, float waterHWorld )
 {
@@ -663,17 +580,8 @@ static void waterBuildLeaves( const std::vector<float> & grid, int n, int dim,
 			for ( int bi = 0; bi < blocksPerCell; bi++ ) {
 				const int gx = cell.first * blocksPerCell + bi;
 				const int gy = cell.second * blocksPerCell + bj;
-				/* Buried block: every terrain sample under it stands above the
-				 * water plane by the margin, so no water here is visible.
-				 * Vanilla can only cull at CELL granularity, which leaves the
-				 * part of a 4096-unit cell that sits under a hill drawn,
-				 * blended and then depth-rejected. Marking it not-water here
-				 * removes it from the tree, and the edge walk already treats a
-				 * missing neighbour as "no split", so the hole costs nothing.
-				 *
-				 * Conservative on purpose -- the test is on the leaf's LOWEST
-				 * sample, so a block is dropped only when nothing in it could
-				 * be exposed. */
+				// Buried block: every terrain sample under it stands above the water plane by the margin, so
+				// no water here is visible.
 				if ( cullBuried && maxLevel > 0
 					&& waterBlockBuried( grid, n, cell.first, cell.second,
 						bi, bj, blocksPerCell, waterHWorld ) )
@@ -756,10 +664,7 @@ bool lodgenBuildTerrainChunk( NifModel * nif, const EsmWorld & world,
 		return fail( QString( "chunk (%1,%2) is not aligned to dim %3" )
 			.arg( chunkX ).arg( chunkY ).arg( dim ) );
 
-	/* One height grid for the chunk: dim*32+1 samples per side. Adjacent
-	 * cells duplicate their shared 33rd row/column in the ESM, so plain
-	 * overwrite converges; cells with no LAND fall back to the worldspace
-	 * default height. */
+	// One height grid for the chunk: dim*32+1 samples per side.
 	const int n = dim * 32 + 1;
 	std::vector<float> grid( size_t( n ) * size_t( n ), world.defaultLandHeight() );
 	int landCells = 0;
@@ -793,11 +698,7 @@ bool lodgenBuildTerrainChunk( NifModel * nif, const EsmWorld & world,
 	const float invDim = 1.0f / float( dim );
 	const float spacing = 128.0f * invDim;   // 128 world units between samples
 
-	/* Geometry in plain buffers first, so the simplifier can run before any
-	 * model writes. Vanilla adds a SKIRT: the border ring duplicated exactly
-	 * 1000 world units lower, joined by vertical flaps (measured on
-	 * Commonwealth.4.-20.24.BTR: border positions appear TWICE). The
-	 * simplifier locks the border so the skirt stays exact. */
+	// Geometry in plain buffers first, so the simplifier can run before any model writes.
 	constexpr float SKIRT_DROP = 1000.0f;
 	std::vector<float> pos;
 	pos.reserve( size_t( n ) * n * 3 );
@@ -815,22 +716,14 @@ bool lodgenBuildTerrainChunk( NifModel * nif, const EsmWorld & world,
 		const size_t targetIdx = size_t( opts.targetTrisPerCell ) * 16 * 3;
 		std::vector<unsigned int> simplified( idx.size() );
 		float resultError = 0.0f;
-		/* No border lock: vanilla decimates its border too — cracks between
-		 * neighbouring chunks are exactly what the skirt exists to hide.
-		 *
-		 * The waterline IS locked, though. Same triangle budget, redistributed
-		 * from inland ridges to the coast: the weight is in miniature position
-		 * units (samples sit `spacing` apart), so a full swing of the shore
-		 * attribute costs about half a sample of geometric error -- enough to
-		 * outbid a flat beach's near-zero height error. */
+		// No border lock: vanilla decimates its border too — cracks between neighbouring chunks are exactly
+		// what the skirt exists to hide.
 		std::vector<float> shoreAttr;
 		const bool shoreAware = opts.shoreDenser
 			&& lodgenShoreWeights( world, chunkX, chunkY, dim, grid, n, shoreAttr );
-		/* Weight in miniature position units (samples sit `spacing` apart), so
-		 * density 2 makes a full swing of the shore attribute cost about half a
-		 * sample of geometric error -- already enough to outbid a flat beach's
-		 * near-zero height error. Higher densities approach a hard lock without
-		 * ever becoming one, so the simplifier always converges. */
+		// Weight in miniature position units (samples sit `spacing` apart), so density 2 makes a full swing of
+		// the shore attribute cost about half a sample of geometric error -- already enough to outbid a flat
+		// beach's near-zero height error.
 		const float shoreWeight = spacing * 0.25f
 			* float( qBound( 1, opts.shoreDensity, 10 ) );
 		const size_t count = shoreAware
@@ -858,10 +751,8 @@ bool lodgenBuildTerrainChunk( NifModel * nif, const EsmWorld & world,
 		i = remap[i];
 	}
 
-	/* Skirt: walk the perimeter (CCW from above) keeping only the vertices
-	 * the simplifier retained, duplicate them one SKIRT_DROP lower, and flap
-	 * between consecutive survivors. The flaps span whatever gaps decimation
-	 * opened along the border — the same reason vanilla's skirt exists. */
+	// Skirt: walk the perimeter (CCW from above) keeping only the vertices the simplifier retained, duplicate
+	// them one SKIRT_DROP lower, and flap between consecutive survivors.
 	{
 		QVector<unsigned int> survivors;
 		auto keep = [&]( int row, int col ) {
@@ -894,12 +785,8 @@ bool lodgenBuildTerrainChunk( NifModel * nif, const EsmWorld & world,
 	if ( numVerts > 65535 )
 		return fail( QStringLiteral( "vertex count exceeds the u16 limit" ) );
 
-	/* Geomorph weights (CS profile): per vertex, the WORLD-unit height
-	 * delta to the parent ring's surface (dim*2), stored in Eye Data. A
-	 * shader lerping z toward z+delta as the swap distance approaches makes
-	 * the chunk morph into an exact copy of its parent before the swap --
-	 * the transition neither Bethesda game had. NaN-outside samples and
-	 * dim=32 (no parent) store 0. */
+	// Geomorph weights (CS profile): per vertex, the WORLD-unit height delta to the parent ring's surface
+	// (dim*2), stored in Eye Data.
 	std::vector<float> morph;
 	if ( opts.geomorph && dim < 32 ) {
 		const int pDim = dim * 2;
@@ -1019,11 +906,7 @@ bool lodgenBuildTerrainChunk( NifModel * nif, const EsmWorld & world,
 	int wetCells = 0;
 	QModelIndex iWaterNode;
 	if ( opts.water ) {
-		/* Wet cells whose water is EXPOSED above the cell's terrain minimum.
-		 * Vanilla's rule, measured both ways: the harbor chunk 0,0 (all
-		 * cells sentinel-XCLW at the 450 default, seabed below) gets quads
-		 * at exactly 450, while Sanctuary's default-height cells (terrain
-		 * 3000+) get none — submerged water is culled at generation. */
+		// Wet cells whose water is EXPOSED above the cell's terrain minimum.
 		QMap<float, QVector<QPair<int, int>>> byHeight;
 		for ( int cy = 0; cy < dim; cy++ ) {
 			for ( int cx = 0; cx < dim; cx++ ) {
@@ -1118,27 +1001,17 @@ bool lodgenBuildTerrainChunk( NifModel * nif, const EsmWorld & world,
 				QModelIndex iWater = insertAvObject( nif,
 					QStringLiteral( "BSSubIndexTriShape" ), QString(), float( dim ) );
 				nif->set<BSVertexDesc>( iWater, "Vertex Desc", WATER_VERTEX_DESC );
-				/* Adaptive subdivision toward the shoreline, as a 2:1 RESTRICTED
-				 * quadtree with welded vertices and stitched T-junctions.
-				 *
-				 * waterSubdiv 0 reproduces vanilla exactly -- one quad per wet
-				 * cell, UNWELDED, because vanilla itself is unwelded (48 corners
-				 * for 21 distinct positions on the harbour chunk) and the
-				 * byte-identical fallback is worth more than those vertices.
-				 *
-				 * Triangles are 16-bit indexed, so the level is walked DOWN
-				 * until the layer fits rather than emitting wrapped indices. */
+				// Adaptive subdivision toward the shoreline, as a 2:1 RESTRICTED quadtree with welded vertices
+				// and stitched T-junctions.
 				int subdiv = qBound( 0, opts.waterSubdiv, 5 );   // 32 samples/cell: level 5 is the last that sees new terrain
 				QVector<WaterLeaf> leaves;
 				std::vector<int> leafIdx;
 				int blocksPerCell = 1;
 				QVector<Vector3> wverts;
 				QVector<Triangle> wtris;
-				/* No vertex colours on the water: the depth tint that rode in R
-				 * was dropped 2026-09-27 (bungo: "so we drop the depth bake for
-				 * water from code"); G, B and A only ever held constants, so the
-				 * whole colour attribute went with it and the descriptor is
-				 * vanilla's at every subdivision level. */
+				// No vertex colours on the water: the depth tint that rode in R was dropped 2026-09-27; G, B
+				// and A only ever held constants, so the whole colour attribute went with it and the
+				// descriptor is vanilla's at every subdivision level.
 				QVector<QPair<int, int>> segPrims( dim * dim, qMakePair( 0, 0 ) );
 				float wMinX = 3.4e38f, wMinY = 3.4e38f, wMaxX = -3.4e38f, wMaxY = -3.4e38f;
 				const float cellSpan = 4096.0f * invDim;
@@ -1200,25 +1073,14 @@ bool lodgenBuildTerrainChunk( NifModel * nif, const EsmWorld & world,
 							lastCell = cellId;
 							tStart = wtris.size();
 						}
-						/* Boundary ring: the four corners, plus the midpoint of
-						 * any edge whose neighbour is finer. 2:1 restriction
-						 * bounds that to one midpoint per edge. Fanning from
-						 * ring[0] gives exactly TWO triangles when there are no
-						 * hanging nodes, so an interior leaf is unchanged. */
+						// Boundary ring: the four corners, plus the midpoint of any edge whose neighbour is
+						// finer. 2:1 restriction bounds that to one midpoint per edge.
 						const int s = lf.size, hs = s / 2;
 						QVector<quint16> ring;
 						const int cor[4][2] = { { 0, 0 }, { s, 0 }, { s, s }, { 0, s } };
 						for ( int e = 0; e < 4; e++ ) {
 							ring.append( vertexAt( lf.gx + cor[e][0], lf.gy + cor[e][1] ) );
-							/* WALK the edge instead of probing its midpoint.
-							 * A single probe assumes the neighbouring side
-							 * changes exactly halfway, which is only true when
-							 * that side is uniformly one level finer; anywhere
-							 * else it silently misses the hanging node. Walking
-							 * inserts a vertex wherever the neighbouring LEAF
-							 * actually changes, so it is correct for any
-							 * configuration and does not depend on the 2:1
-							 * restriction holding perfectly. */
+							// WALK the edge instead of probing its midpoint.
 							for ( int t = 1; t < s; t++ ) {
 								int ax, ay, bx, by, vx, vy;
 								switch ( e ) {
@@ -1249,15 +1111,7 @@ bool lodgenBuildTerrainChunk( NifModel * nif, const EsmWorld & world,
 							wtris.append( Triangle( ring[0], ring[1], ring[2] ) );
 							wtris.append( Triangle( ring[0], ring[2], ring[3] ) );
 						} else {
-							/* Stitched leaves fan from the CENTRE, not from a
-							 * corner. A corner fan looks cheaper and is wrong:
-							 * when a midpoint sits next to the pivot, pivot,
-							 * midpoint and next corner are COLLINEAR, so the
-							 * first triangle has zero area and the full-length
-							 * edge survives with the midpoint lying on it --
-							 * reintroducing the exact T-junction being stitched.
-							 * Measured: 63 of them at subdiv 3, every one at
-							 * t=0.5 of its edge. */
+							// Stitched leaves fan from the CENTRE, not from a corner.
 							const quint16 mid = vertexAt( lf.gx + hs, lf.gy + hs );
 							for ( int k = 0; k < ring.size(); k++ )
 								wtris.append( Triangle( mid, ring[k],
@@ -1369,21 +1223,7 @@ constexpr std::uint64_t OBJ_VERTEX_DESC_COLORS = 1037939064898054ULL; // 0x0003B
 //! carry it set with a BLACK colour, which emits nothing.
 constexpr quint32 LOD_OWN_EMIT = 0x400000U;
 
-/*! The emissive MULTIPLE a LOD set carries in its `.lodm` (`emissiveScale`).
- *
- *  The emissive COLOUR is folded into the sheet (a legacy `_g` texel is the
- *  diffuse times its own alpha times the source's emissive colour); the
- *  MULTIPLE cannot be, because it may exceed 1 and the sheet is eight bits a
- *  channel. So it rides in the material - bungo, 2026-09-06: "carry the
- *  multiplier in lodm".
- *
- *  A source that does not OWN-EMIT, or own-emits with a BLACK colour, emits
- *  nothing: 0. That is the answer to the doubt the fourth texture shipped
- *  with - an opaque source whose diffuse alpha is 255 throughout yields a
- *  `_g` sheet equal to the full albedo, and a consumer adding it unscaled
- *  would light every wall. Every measured vanilla LOD chunk shape own-emits
- *  with a black colour, so vanilla's LOD emits nothing and both halves of
- *  this rule say so. */
+//! The emissive MULTIPLE a LOD set carries in its `.lodm` (`emissiveScale`).
 inline float lodgenEmissiveScale( bool ownEmit, const Color3 & colour, float mult )
 {
 	if ( !ownEmit )
@@ -1400,32 +1240,18 @@ struct LodSrcShape
 	QVector<Color4> col;
 	QVector<Triangle> tris;
 	QString tex0, tex1;
-	/* The source's material and what the engine composes from it: the
-	 * specular slot (7), smoothness and specular strength, the BGSM's when
-	 * the shape names one that reads, else the property's own. The arrays
-	 * pass bakes the vanilla `_s` into the legacy GSAOS from these
-	 * (docs/LODGEN_IMPOSTOR_SPEC.md), and the material name is where a
-	 * source .lodm is looked for. */
+	// The source's material and what the engine composes from it: the specular slot (7), smoothness and
+	// specular strength, the BGSM's when the shape names one that reads, else the property's own.
 	QString tex7, matName;
-	/* THE EFFECT MATERIAL'S BASE MAP, AND WHY IT IS NOT `tex0` (lane CELLVIEW3,
-	 * 2026-09-19). A shape under a BSEffectShaderProperty names a `.bgem`, has
-	 * no BSShaderTextureSet at all, and until today nothing here read either --
-	 * so `tex0` stayed empty, and an empty diffuse is the missing-texture
-	 * MAGENTA under Scene::DoErrorColor, which is what the downtown cars' glass
-	 * has been. It goes in its OWN slot because `tex0` feeds the far-LOD bake,
-	 * whose output is pinned byte for byte
-	 * (`tests/spells/lodgen_native_baseline`): the viewer reads this field, the
-	 * bake reads `tex0` and is unchanged BY CONSTRUCTION. Whether the far LOD
-	 * should draw effect shapes textured too is a real question and a separate
-	 * lane's -- it is NOT answered by making this field `tex0`. */
+	// THE EFFECT MATERIAL'S BASE MAP, AND WHY IT IS NOT `tex0`.
 	QString effectTex0;
 	/*! 2026-10-01: the BGEM's own bAlphaBlend and its fAlpha (a BGSM's fAlpha too).
 	 *  Read by the cell view's glass only; nothing gated reads them. */
 	bool effectBlend = false;
 	bool effectMatRead = false;          //!< the BGEM read (cell view effect buckets)
-	bool effectLit = false;              //!< lane FXLIT1: the effect-lighting flag, the BGEM's or the property's (cell view only)
-	bool extEmit = false;                //!< lane LIGHTS2 (XEMI1): External Emittance, the BGSM's or SF1 bit 29 (cell view only)
-	QByteArray effectBlock;              //!< lane EFX1: a BGEM-less effect property, serialized (cell view only)
+	bool effectLit = false;              //!< the effect-lighting flag, the BGEM's or the property's (cell view only)
+	bool extEmit = false;                //!< External Emittance, the BGSM's or SF1 bit 29 (cell view only)
+	QByteArray effectBlock;              //!< a BGEM-less effect property, serialized (cell view only)
 	quint32 shaderSF1 = 0, shaderSF2 = 0; //!< the source shader property's flags
 	quint32 srcShaderType = 0;           //!< lane HAIRDLC04: the lighting property's Shader Type, FO4 only (cell view only)
 	float refractStrength = 0.0f;        //!< lane EFX1: the lighting property's Refraction Strength (cell view only)
@@ -1434,7 +1260,7 @@ struct LodSrcShape
 	Transform bbXf;
 	int bbMode = 0;
 	float matAlpha = 1.0f;
-	/*! Lane BAKE4: blending, its factors, environment mapping and an effect's soft fade, the material's
+	/*! blending, its factors, environment mapping and an effect's soft fade, the material's
 	 *  where one read, else the NIF's own. Read by the cell view's probe bake only (glass panes). */
 	bool bakeBlend = false, bakeEnv = false, bakeSoft = false;
 	quint8 bakeBlendSrc = 0, bakeBlendDst = 0;
@@ -1443,26 +1269,17 @@ struct LodSrcShape
 	 *  set, no BGSM, no BGEM. The viewer draws such a shape neutral and COUNTS
 	 *  it; magenta stays reserved for a genuinely missing file. */
 	bool matUnreadable = false;
-	/* Lane FIX1: SLSF1 Greyscale_To_PaletteColor (bit 4), the BGSM's
-	 * bGrayscaleToPaletteColor when a BGSM parses. The one condition under
-	 * which the game reads an MSWP CNAM (it writes the index to the
-	 * material's fLookupScale only on such a property). Read-only fact. */
+	// SLSF1 Greyscale_To_PaletteColor (bit 4), the BGSM's bGrayscaleToPaletteColor when a BGSM parses.
 	bool g2pFlag = false;
-	float g2pScale = 1.0f;      //!< lane PRTPPLACE: the palette row the material names, which a CNAM replaces
+	float g2pScale = 1.0f;      //!< the palette row the material names, which a CNAM replaces
 	QString g2pTex;             //!< 2026-10-01: the palette map (texture slot 3, BGSM wins), for the probe bake's albedo
 	float smoothness = 1.0f, specMult = 1.0f;
-	/* And what it EMITS: the Own-Emit bit, the emissive colour and the
-	 * emissive multiple, from the same place - the BGSM when the shape names
-	 * one that reads, else the property's own fields. Carried into the chunk
-	 * shape so the arrays pass can read them back off the .BTO, exactly as
-	 * slot 7 and the two constants are. BLACK by default and not Color3()'s
-	 * own white: the renderer's resetParams says black, a BGSM that does not
-	 * enable emit leaves it black, and a shape whose colour we never read
-	 * should emit nothing rather than everything. */
+	// And what it EMITS: the Own-Emit bit, the emissive colour and the emissive multiple, from the same place
+	// - the BGSM when the shape names one that reads, else the property's own fields.
 	Color3 emitColor = Color3( 0.0f, 0.0f, 0.0f );
 	float emitMult = 1.0f;
 	bool ownEmit = false;
-	/* lane EMISSIVEGI1: the glow map, as the renderer picks it (glproperty.cpp "case 2: // Glow"): the BGSM's
+	/* the glow map, as the renderer picks it (glproperty.cpp "case 2: // Glow"): the BGSM's
 	 * bGlowmap and its glow slot, else the NIF's glow shader type + SLSF2 Glow_Map + texture slot 2. Off = the
 	 * whole surface glows; on with an empty path = black. Read by the probe bake only. */
 	bool glowFlag = false;
@@ -1470,29 +1287,23 @@ struct LodSrcShape
 	bool hasAlpha = false;
 	quint16 alphaFlags = 4844;
 	quint8 alphaThreshold = 128;
-	/* What the MATERIAL says about the surface, as opposed to what the
-	 * NiAlphaProperty says about the block. Read only from a BGSM that parses,
-	 * defaulted otherwise, and consumed ONLY by the far-terrain road pass. The
-	 * three fields above are left untouched on purpose: they feed the object
-	 * bakes whose output is pinned by byte identity, and a road decal's
-	 * material must not move them. */
+	// What the MATERIAL says about the surface, as opposed to what the NiAlphaProperty says about the block.
+	// Read only from a BGSM that parses, defaulted otherwise, and consumed ONLY by the far-terrain road pass.
 	bool matDecal = false;
 	bool matAlphaTest = false;
 	bool matAlphaBlend = false;
 	quint8 matAlphaRef = 255;
-	/* `.lodo` v5 (lane SEAM1, W4): whether `col` came from the source's own
-	 * colour channel (vertex descriptor bit 0x20) rather than the white fill, and
-	 * the two shader bits the game reads it by -- SLSF2 Vertex_Colors (bit 5) and
-	 * SLSF1 Vertex_Alpha (bit 3). Read-only facts: the `.BTO` bakes do not look
-	 * at them, so their bytes cannot move. */
+	// `.lodo` v5: whether `col` came from the source's own colour channel (vertex descriptor bit 0x20) rather
+	// than the white fill, and the two shader bits the game reads it by -- SLSF2 Vertex_Colors (bit 5) and
+	// SLSF1 Vertex_Alpha (bit 3).
 	bool colStream = false;
 	bool vcFlag = false;
 	bool vaFlag = false;
-	//! Lane NEAR1: read-only facts for the near-library bake (nativeemit.h); no far pass reads them.
+	//! read-only facts for the near-library bake (nativeemit.h); no far pass reads them.
 	NearShapeFacts nearFacts;
 };
 
-/* lane BAKEMEM1: heap bytes of the geometry arrays, each shared (copy-on-write) array counted once
+/* heap bytes of the geometry arrays, each shared (copy-on-write) array counted once
  * through `seen`, for the WW_LODGEN_MEMLOG lines only. */
 template <typename T>
 static qint64 lodgenMemArr( const QVector<T> & v, QSet<const void *> & seen )
@@ -1520,13 +1331,13 @@ static QString lodgenMemMB( qint64 b )
 {
 	return QString::number( double( b ) / 1048576.0, 'f', 1 ) + QStringLiteral( " MB" );
 }
-//! lane BAKEMEM1's red: WW_LODGEN_BAKEMEM_RED=1 keeps every bake model cache to the end of its owner, as before
+//! the red: WW_LODGEN_BAKEMEM_RED=1 keeps every bake model cache to the end of its owner, as before
 static bool lodgenBakeMemRed()
 {
 	static const bool red = wwEnvInt( "WW_LODGEN_BAKEMEM_RED" ) == 1;
 	return red;
 }
-//! lane BAKEMEM1: what the native loader's per-thread caches took in (WW_LODGEN_MEMLOG only)
+//! what the native loader's per-thread caches took in (WW_LODGEN_MEMLOG only)
 static std::atomic<qint64> gNativeCacheBytes{ 0 }, gNativeCacheModels{ 0 };
 
 //! Compose a block's transform up the parent chain (local -> model space).
@@ -1541,7 +1352,7 @@ Transform lodgenWorldTransform( const NifModel * nif, const QModelIndex & block 
 	return t;
 }
 
-// lane MISS1: the same chain for a PLACED model. The game gives a placed model's root node the reference's
+// the same chain for a PLACED model. The game gives a placed model's root node the reference's
 // own transform, so whatever the file's root carries is never seen; the root is the block with no parent.
 static Transform lodgenPlacedTransform( const NifModel * nif, const QModelIndex & block )
 {
@@ -1557,35 +1368,14 @@ static Transform lodgenPlacedTransform( const NifModel * nif, const QModelIndex 
 	return t;
 }
 
-/*! Read an asset the way the game does: a loose folder first when one was
- *  given (the CLI's --data-root), then the game manager's data folders and
- *  archives (Settings > Resources). The panel passes no loose root - bungo,
- *  2026-09-06: "that means there's no point in that game data thing" - so it
- *  reads the BA2s the game reads. In -no-gui runs the game manager is never
- *  initialised (nifcli.cpp says why), so there --data-root is the only source
- *  and the archive step quietly finds nothing. */
-/*! The generator's own index of the game's meshes.
- *
- *  The game manager's Fallout 4 archive filter drops every .nif at index
- *  time (archiveFilterFunction_2 in gamemanager.cpp - the viewer never needs
- *  a mesh out of a BA2), so its lookup cannot find a LOD model however the
- *  path is spelled. Measured: the near chunk (-20,24) placed all 678 refs
- *  from the unpacked folder and none from the manager. So meshes get an
- *  index of their own over the SAME folders and archives Settings >
- *  Resources lists, in the same order (first wins, as there), .nif only,
- *  built once per process on first use. Empty in -no-gui runs, where the
- *  manager holds no folders; textures and materials still go through the
- *  manager, which does index them. */
+//! Read an asset the way the game does: a loose folder first when one was given (the CLI's --data-root), then
+//! the game manager's data folders and archives (Settings > Resources).
 static bool lodgenMeshFilter( void *, const std::string_view & s )
 {
 	return s.ends_with( ".nif" );
 }
 
-/*! THE RESOURCE STACK (lodgen.h has the contract and why it is two passes).
- *
- *  Empty by default, so a process that never sets one reads exactly what it
- *  read before this existed - which is what keeps the near-chunk byte-identity
- *  gate honest. */
+//! THE RESOURCE STACK (lodgen.h has the contract and why it is two passes).
 QStringList & lodgenStack()
 {
 	static QStringList stack;
@@ -1616,7 +1406,7 @@ int lodgenArchiveRank( const QString & baseName )
 	return 0;
 }
 
-//! lane NEAR2: the active plugins' stems (lower case) -> load-order index; empty = unset
+//! the active plugins' stems (lower case) -> load-order index; empty = unset
 QHash<QString, int> & lodgenPluginRank()
 {
 	static QHash<QString, int> rank;
@@ -1739,10 +1529,7 @@ static unsigned char * lodgenByteArrayAlloc( void * bufPtr, size_t nBytes )
 	return reinterpret_cast<unsigned char *>( p->data() );
 }
 
-/*! Pull one asset out of the resource stack. The stack is consulted before
- *  dataRoot and before the game manager for EVERY kind of asset, because it is
- *  the load order the user (or Mod Organizer) gave and nothing may sit above
- *  it. Returns false, quietly, when no stack is set. */
+//! Pull one asset out of the resource stack.
 bool lodgenReadFromStack( const QString & relPath, const char * archiveFolder,
 	const char * extension, QByteArray & out )
 {
@@ -1764,7 +1551,7 @@ bool lodgenReadFromStack( const QString & relPath, const char * archiveFolder,
 static bool lodgenReadAssetRaw( const QString & dataRoot, const QString & relPath,
 	const char * archiveFolder, const char * extension, QByteArray & out );
 
-/* lane FARLIGHTMAP1: WW_CELL_KEEP_ASSETS_MB=<MB> keeps the bytes of the assets read, so a walk's next cell (most of
+/* WW_CELL_KEEP_ASSETS_MB=<MB> keeps the bytes of the assets read, so a walk's next cell (most of
  * its 5x5 block is the last cell's) reads each file once; a kept read is still noted, so the bake record is the same */
 namespace
 {
@@ -1787,7 +1574,7 @@ qint64 assetKeepCap()
 }
 } // namespace
 
-/* lane BAKEINCR1: every asset read passes here, and while a probe bake records its inputs
+/* every asset read passes here, and while a probe bake records its inputs
  * (src/probeincr.cpp) the read is noted -- data root, path, folder, extension and the
  * bytes' sha1, or "missing" -- so the incremental check can ask the same question later. */
 static bool lodgenReadAsset( const QString & dataRoot, const QString & relPath,
@@ -1869,7 +1656,7 @@ static bool lodgenReadAssetRaw( const QString & dataRoot, const QString & relPat
 
 namespace
 {
-//! Lane NEAR1: format + size out of a DDS header (148 bytes with a DX10 block, 128 without).
+//! format + size out of a DDS header (148 bytes with a DX10 block, 128 without).
 bool lodgenDdsHeaderInfo( const unsigned char * p, size_t n, quint32 * dxgi, quint32 * width, quint32 * height,
 	quint32 * mips, bool * cube = nullptr )
 {
@@ -2016,11 +1803,11 @@ void lodgenAssetKind( const QString & relPath, const char *& folder, const char 
 	} else if ( p.endsWith( QLatin1String( ".bgem" ) ) ) {
 		folder = "materials"; ext = ".bgem";
 	} else if ( p.endsWith( QLatin1String( ".pbrm" ) ) ) {
-		folder = "materials"; ext = ".pbrm";   // lane FIXPACK1 (PBRALBEDO1): the bake resolves .pbrm materials
+		folder = "materials"; ext = ".pbrm";   // the bake resolves .pbrm materials
 	} else if ( p.endsWith( QLatin1String( ".lodm" ) ) ) {
 		folder = "materials"; ext = ".lodm";
 	} else if ( p.endsWith( QLatin1String( ".hkx" ) ) ) {
-		folder = "meshes"; ext = ".hkx";   // lane ACTORPOSE1: skeleton.hkx and the idle clips sit under meshes
+		folder = "meshes"; ext = ".hkx";   // skeleton.hkx and the idle clips sit under meshes
 	} else {
 		folder = "textures"; ext = ".dds";
 	}
@@ -2040,10 +1827,7 @@ bool lodgenProbeAsset( const QString & dataRoot, const QString & relPath,
 	if ( bytes )
 		*bytes = out;
 
-	/* Which entry supplied it. The one index cannot say - it holds no archive
-	 * names - so the stack is walked backwards, one entry at a time, and the
-	 * first that has the path is the winner, by the same two-pass rule: a
-	 * folder's loose files are asked for before anybody's archives. */
+	// Which entry supplied it.
 	const std::string full = Game::GameManager::get_full_path( relPath, folder, ext );
 	const QStringList stack = lodgenStack();
 	auto looseIn = [&]( const QString & e ) -> QString {
@@ -2128,11 +1912,8 @@ void lodgenResolveMaterialMask( const QString & dataRoot, const QString & matNam
 	QString mp = matName;
 	if ( !mp.isEmpty() ) {
 		mp.replace( QChar( '\\' ), QChar( '/' ) );
-		/* A TXST's MNAM is sometimes an ABSOLUTE authoring path -- measured in
-		 * the shipped Commonwealth: `c:/projects/fallout4/build/pc/data/
-		 * materials/landscape/rocks/rockriverstones_wet.bgsm`. Cut to the last
-		 * `materials/` component, or the read is looked for under a folder that
-		 * only ever existed on Bethesda's build machine. */
+		// A TXST's MNAM is sometimes an ABSOLUTE authoring path -- measured in the shipped Commonwealth:
+		// `c:/projects/fallout4/build/pc/data/ materials/landscape/rocks/rockriverstones_wet.bgsm`.
 		const int mi = mp.lastIndexOf( QStringLiteral( "materials/" ), -1, Qt::CaseInsensitive );
 		if ( mi > 0 )
 			mp.remove( 0, mi );
@@ -2140,12 +1921,9 @@ void lodgenResolveMaterialMask( const QString & dataRoot, const QString & matNam
 			mp.prepend( QStringLiteral( "materials/" ) );
 	}
 	{
-		/* The PBRM candidate comes from the ONE resolver the viewport uses
-		 * (io/pbrmresolve, lane PBRR1): direct .pbrm name, else the same-name
-		 * sibling of a .bgsm/.bgem, else -- with no material at all -- the
-		 * diffuse stem (`lodmSourceCandidate`, the convention a source .lodm is
-		 * found by). lodgen has no .nifx, no swap and no FO76 step: a terrain
-		 * TXST has no NIF, and its output stays what it was. */
+		// The PBRM candidate comes from the ONE resolver the viewport uses (io/pbrmresolve):
+		// direct .pbrm name, else the same-name sibling of a .bgsm/.bgem, else -- with no material at all --
+		// the diffuse stem (`lodmSourceCandidate`, the convention a source .lodm is found by).
 		PbrmResolveInput rin;
 		rin.material = matName;
 		rin.cutAuthoringPath = true;
@@ -2190,11 +1968,8 @@ void lodgenResolveMaterialMask( const QString & dataRoot, const QString & matNam
 		}
 	}
 	if ( !matName.isEmpty() ) {
-		/* No PBRM: the legacy material's OWN slots win over whatever the caller
-		 * was handed, which is the renderer's rule and the object bake's. Slot 2
-		 * of a BGSM's texture list is the `_s` map and it counts only while the
-		 * material enables specular; slot 3 is its glow map, which is the
-		 * emissive under the legacy family (`.lodm` 2.1). */
+		// No PBRM: the legacy material's OWN slots win over whatever the caller was handed, which is the
+		// renderer's rule and the object bake's.
 		QByteArray mbytes;
 		if ( lodgenReadAsset( dataRoot, mp, "materials", ".bgsm", mbytes ) ) {
 			const ShaderMaterial sm( mbytes );
@@ -2322,10 +2097,7 @@ QStringList lodgenMo2Stack( const QString & dataDir, const QStringList & pluginN
 	const QString data = QDir::cleanPath( dataDir );
 	if ( QFileInfo( data ).isDir() )
 		stack.append( data );
-	/* The base game's set (sResourceArchiveList): Fallout4 - *.ba2 and the DLC
-	 * ones. They sit under every mod, and the Data entry above them already
-	 * carries them at the very bottom - naming them here only lifts them above
-	 * an unclaimed archive, which is where the engine has them. */
+	// The base game's set (sResourceArchiveList): Fallout4 - *.ba2 and the DLC ones.
 	QDir d( data );
 	QStringList base = d.entryList( QStringList{ QStringLiteral( "Fallout4 - *.ba2" ),
 		QStringLiteral( "DLC*.ba2" ) }, QDir::Files, QDir::Name );
@@ -2361,13 +2133,7 @@ bool lodgenIsTreeModel( const QString & model )
 	const QString modelFile = model.mid( slash + 1 ).toLower();
 	if ( !modelFile.startsWith( QLatin1String( "tree" ) ) )
 		return false;
-	/* THE FILENAME CLAUSE IS SCOPED TO `Landscape\` (lane ROADS2). A name is
-	 * weaker evidence than a folder, and the seven shipped models named
-	 * `Tree...` outside the landscape set are all `SetDressing\` props -- two
-	 * tree swings, a swing rope pile, a grounded swing, a no-swing swing, a
-	 * noose branch and a hanging mannequin -- four of which stand in Sanctuary.
-	 * A leading `meshes` and a leading `lod` are dropped first, because the 167
-	 * far models the clause exists for are `LOD\Landscape\Tree*.nif`. */
+	// THE FILENAME CLAUSE IS SCOPED TO `Landscape\`.
 	QString p = model;
 	p.replace( QChar( '\\' ), QChar( '/' ) );
 	const QStringList c = p.toLower().split( QChar( '/' ), Qt::SkipEmptyParts );
@@ -2379,7 +2145,7 @@ bool lodgenIsTreeModel( const QString & model )
 	return i + 1 < c.size() && c[i] == QLatin1String( "landscape" );
 }
 
-// lane FXREST1: editor-marker shapes the model loader left out, per process (1 by the prefix, 2 inside the name)
+// editor-marker shapes the model loader left out, per process (1 by the prefix, 2 inside the name)
 static QMutex edMarkMutex;
 static QSet<QString> edMarkInsideModels;
 int lodgenEditorMarkerCount( int add, const QString & model )
@@ -2402,7 +2168,7 @@ QStringList lodgenEditorMarkerInsideModels()
 	return l;
 }
 
-// lane SUNCELL1: the models whose one parse found a particle system (the cell view copies those in, cellview.cpp)
+// the models whose one parse found a particle system (the cell view copies those in, cellview.cpp)
 static QMutex particleModelMutex;
 static QSet<QString> particleModels;
 static QString lodgenParticleKey( const QString & model )
@@ -2423,7 +2189,7 @@ static void lodgenNoteParticleModel( const QString & model )
 	QMutexLocker lock( &particleModelMutex );
 	particleModels.insert( lodgenParticleKey( model ) );
 }
-// lane FXPARITY2: the models that move on their own (a looping sequence, or a controller no sequence drives)
+// the models that move on their own (a looping sequence, or a controller no sequence drives)
 static QSet<QString> movingModels;
 bool lodgenModelMoves( const QString & model )
 {
@@ -2468,24 +2234,22 @@ bool lodgenReadModelBytes( const QString & dataRoot, const QString & model, QByt
 namespace
 {
 
-//! lodgenLoadModel's cache key, spelled as it does (lane BAKEMEM1 batches the flat rule by it); keep the two equal.
+//! lodgenLoadModel's cache key, spelled as it does; keep the two equal.
 QString lodgenLoadModelKey( const QString & meshPath, const LodgenMaterialSubst * swap, bool placed = false )
 {
 	if ( swap && swap->isEmpty() )
 		swap = nullptr;
 	QString key = meshPath.toLower();
 	if ( placed )
-		key += QStringLiteral( "|placed" );   // lane MISS1: the root-less load is its own cache entry
+		key += QStringLiteral( "|placed" );   // the root-less load is its own cache entry
 	if ( swap )
 		for ( const auto & sw : *swap )
 			key += QStringLiteral( "|" ) + sw.first + QStringLiteral( ">" ) + sw.second;
 	return key;
 }
 
-//! Load every shape of a per-object LOD model, transforms applied, textures
-//! resolved from its shader property. Results cached per path.
-//! Lane SWAP1: `swap`, when given and not empty, replaces each shape's material
-//! BEFORE it is resolved (lodgenNativeLoadModelSwapped); the cache key carries it.
+//! Load every shape of a per-object LOD model, transforms applied, textures resolved from its shader property.
+//! Results cached per path.
 const QVector<LodSrcShape> & lodgenLoadModel( const QString & dataRoot,
 	const QString & meshPath, QHash<QString, QVector<LodSrcShape>> & cache,
 	const LodgenMaterialSubst * swap = nullptr, bool placed = false )
@@ -2494,7 +2258,7 @@ const QVector<LodSrcShape> & lodgenLoadModel( const QString & dataRoot,
 		swap = nullptr;
 	QString key = meshPath.toLower();
 	if ( placed )
-		key += QStringLiteral( "|placed" );   // lane MISS1: the root-less load is its own cache entry
+		key += QStringLiteral( "|placed" );   // the root-less load is its own cache entry
 	if ( swap )
 		for ( const auto & sw : *swap )
 			key += QStringLiteral( "|" ) + sw.first + QStringLiteral( ">" ) + sw.second;
@@ -2502,22 +2266,10 @@ const QVector<LodSrcShape> & lodgenLoadModel( const QString & dataRoot,
 	if ( it != cache.constEnd() )
 		return *it;
 
-	/* NIF PARSING IS NOT SERIALISED HERE ANY MORE (lane RESUME3, 2026-09-11).
-	 *
-	 * BAKEPERF1 put a process-wide mutex around the whole life of this
-	 * temporary document, on a single stack taken inside a bake where five
-	 * subsystems were live at once, and called it a containment rather than a
-	 * fix. It was containment for a fault that is not in the parser.
-	 *
-	 * The model layer on its own -- `NifSkope -no-gui parsestress`, 16 threads,
-	 * 8 reps, 4 fixtures, 20 consecutive runs -- did 10,240 loads with 0 digest
-	 * mismatches and 0 faults, with both of its sabotage floors seen to go red
-	 * first. The real bake's four symbolised faults were all under
-	 * `cliMessageHandler`, which wrote through an unlocked shared QTextStream
-	 * from every worker at once (src/nifcli.cpp, fixed there). The cache above
-	 * still means each model is parsed once per chunk.
-	 *
-	 * The way back, exact: `--chunk-threads 1`, the shipped default. */
+	// NIF PARSING IS NOT SERIALISED HERE ANY MORE:
+	// BAKEPERF1 put a process-wide mutex around the whole life of this temporary document, on a single stack
+	// taken inside a bake where five subsystems were live at once, and called it a containment rather than a
+	// fix.
 
 	QVector<LodSrcShape> shapes;
 	QString path = meshPath;
@@ -2527,7 +2279,7 @@ const QVector<LodSrcShape> & lodgenLoadModel( const QString & dataRoot,
 	NifModel src;
 	QByteArray bytes;
 	QBuffer dev( &bytes );
-	const qint64 speedT0 = CellSpeed::nowNs();   // lane SPEED1: stage timers, off unless WW_CELL_SPEED_DUMP
+	const qint64 speedT0 = CellSpeed::nowNs();   // stage timers, off unless WW_CELL_SPEED_DUMP
 	const bool found = lodgenReadAsset( dataRoot, path, "meshes", ".nif", bytes );
 	const qint64 speedT1 = CellSpeed::nowNs();
 	const bool loaded = found && dev.open( QIODevice::ReadOnly )
@@ -2535,23 +2287,21 @@ const QVector<LodSrcShape> & lodgenLoadModel( const QString & dataRoot,
 	CellSpeed::add( "model file read", speedT1 - speedT0 );
 	CellSpeed::add( "model parse", CellSpeed::nowNs() - speedT1 );
 	CellSpeed::Acc speedExtract( "model extract (vertices, materials)" );
-	/* load() leaves the model in its Loading state; loadFromFile() clears it
-	 * and this path must too, or index lookups below answer as they do
-	 * mid-load and every model comes back shapeless - seen as "no
-	 * LOD-bearing refs" on the very chunk the impostor harness builds, with
-	 * not one model reported as failing to load. */
+	// load() leaves the model in its Loading state; loadFromFile() clears it and this path must too, or index
+	// lookups below answer as they do mid-load and every model comes back shapeless - seen as "no LOD-bearing
+	// refs" on the very chunk the impostor harness builds, with not one model reported as failing to load.
 	src.resetState();
 	// batch mode routes logMessage nowhere, so a model that will not load says so here
 	if ( !loaded )
 		fprintf( stderr, "lodgen: model %s: %s (%lld bytes)\n", path.toLocal8Bit().constData(),
 			!found ? "not found in the loose folder or the archives" : "read, but did not load",
 			(long long) bytes.size() );
-	/* Lane NEAR1: does the MODEL animate? Any controller or sequence block says
+	/* does the MODEL animate? Any controller or sequence block says
 	 * so; the near bake leaves such a base to the engine. Counted here, on the
 	 * one parse, and read by nobody else. */
 	int modelControllers = 0;
-	bool modelParticles = false;	// lane SUNCELL1: a particle system rides the same scan
-	bool modelMoves = false;		// lane FXPARITY2: a looping sequence, or a free controller (not a particle's)
+	bool modelParticles = false;	// a particle system rides the same scan
+	bool modelMoves = false;		// a looping sequence, or a free controller (not a particle's)
 	if ( loaded )
 		for ( int b = 0; b < src.getBlockCount(); b++ ) {
 			const QModelIndex ib = src.getBlockIndex( b );
@@ -2582,14 +2332,7 @@ const QVector<LodSrcShape> & lodgenLoadModel( const QString & dataRoot,
 			const quint32 numVerts = src.get<quint32>( iShape, "Num Vertices" );
 			if ( !numVerts )
 				continue;
-			/* Editor markers are not the object. The game hides every node named
-			 * EditorMarker*; shack and building kit pieces carry workshop snap
-			 * markers under one, as untextured effect-shader shapes, and they were
-			 * baked into the library with an empty material: the magenta squares on
-			 * the roofs of the urban view (bungo 2026-09-17). */
-			/* lane FXREST1: the game's test is a case-insensitive substring, not a prefix, so
-			 * `VisibilityEditorMarker` (a green effect box in the large shrub groups) goes too.
-			 * WW_CELL_EDMARK_RED=prefix keeps the old prefix rule (the gate's red). */
+			// Editor markers are not the object.
 			{
 				static const bool prefixRed = wwEnv( "WW_CELL_EDMARK_RED" ).trimmed() == "prefix";
 				bool marker = false, prefix = false;
@@ -2612,7 +2355,7 @@ const QVector<LodSrcShape> & lodgenLoadModel( const QString & dataRoot,
 			const Transform xf = placed ? lodgenPlacedTransform( &src, iShape ) : lodgenWorldTransform( &src, iShape );
 			LodSrcShape s;
 			s.colStream = hasColors;
-			// lane GLOW1: the game turns a billboard's subtree to the camera; the geometry stays as authored
+			// the game turns a billboard's subtree to the camera; the geometry stays as authored
 			for ( int blk = src.getParent( b ), hop = 0; blk >= 0 && hop < 64; blk = src.getParent( blk ), hop++ ) {
 				const QModelIndex iUp = src.getBlockIndex( blk );
 				if ( src.blockInherits( iUp, "NiBillboardNode" ) ) {
@@ -2654,28 +2397,22 @@ const QVector<LodSrcShape> & lodgenLoadModel( const QString & dataRoot,
 				s.hasAlpha = true;
 				s.alphaFlags = quint16( src.get<int>( iAlpha, "Flags" ) );
 				nf.alphaBlend = ( s.alphaFlags & 0x0001 ) != 0;
-				s.bakeBlend = nf.alphaBlend;   // lane BAKE4: the NIF's own blend, until a material says otherwise
+				s.bakeBlend = nf.alphaBlend;   // the NIF's own blend, until a material says otherwise
 				s.bakeBlendSrc = quint8( ( s.alphaFlags >> 1 ) & 0xF );
 				s.bakeBlendDst = quint8( ( s.alphaFlags >> 5 ) & 0xF );
 				nf.alphaTest = ( s.alphaFlags & 0x0200 ) != 0;
 				nf.alphaRef = quint8( src.get<int>( iAlpha, "Threshold" ) );
-				/* NOT the source's threshold: near-tree materials test at
-				 * 65-80, which at LOD distance passes far more canopy
-				 * texels than vanilla's chunks do. Vanilla LOD alpha
-				 * properties test at 128 across the board (measured, flags
-				 * 4844 threshold 128) — bungo diagnosed the denser-canopy
-				 * difference as exactly this cutoff. Since 2026-09-18 a BGSM
-				 * that enables its own test overrides this below. */
+				// NOT the source's threshold: near-tree materials test at 65-80, which at LOD distance passes
+				// far more canopy texels than vanilla's chunks do.
 				s.alphaThreshold = 128;
 			}
 			QModelIndex iShader = src.getBlockIndex(
 				src.getLink( iShape, "Shader Property" ) );
 			if ( iShader.isValid() ) {
 				s.matName = src.get<QString>( iShader, "Name" );
-				/* THE MATERIAL SWAP (lane SWAP1, 2026-09-25): the placement's MSWP
-				 * names this shape's material, so the shape is loaded as if the NIF
-				 * named the replacement -- as the Creation Kit does when it bakes
-				 * vanilla's LOD atlas. Everything below resolves it like any other. */
+				// THE MATERIAL SWAP: the placement's MSWP names this shape's material, so the shape is loaded
+				// as if the NIF named the replacement -- as the Creation Kit does when it bakes vanilla's LOD
+				// atlas.
 				if ( swap && !s.matName.isEmpty() ) {
 					const QString mk = lodgenMaterialSwapKey( s.matName );
 					for ( const auto & sw : *swap ) {
@@ -2693,7 +2430,7 @@ const QVector<LodSrcShape> & lodgenLoadModel( const QString & dataRoot,
 				s.smoothness = src.get<float>( iShader, "Smoothness" );
 				s.specMult = src.get<float>( iShader, "Specular Strength" );
 				s.g2pFlag = ( src.get<quint32>( iShader, "Shader Flags 1" ) & ( 1U << 4 ) ) != 0;
-				// lane GLTFCELL1: the texture border rule; a BGSM's tile flags replace it below
+				// the texture border rule; a BGSM's tile flags replace it below
 				if ( src.getIndex( iShader, "Texture Clamp Mode" ).isValid() )
 					nf.tile = quint8( src.get<int>( iShader, "Texture Clamp Mode" ) & 3 );
 				s.g2pScale = src.get<float>( iShader, "Grayscale to Palette Scale" );
@@ -2702,7 +2439,7 @@ const QVector<LodSrcShape> & lodgenLoadModel( const QString & dataRoot,
 				s.ownEmit = ( src.get<quint32>( iShader, "Shader Flags 1" )
 					& LOD_OWN_EMIT ) != 0;
 				if ( src.blockInherits( iShader, "BSLightingShaderProperty" )
-					&& ( src.get<quint32>( iShader, "Shader Flags 2" ) & ( 1U << 6 ) )   // lane EMISSIVEGI1: SLSF2 Glow_Map
+					&& ( src.get<quint32>( iShader, "Shader Flags 2" ) & ( 1U << 6 ) )   // SLSF2 Glow_Map
 					&& src.get<quint32>( iShader, "Shader Type" ) == 2u ) {        // ST_GlowShader
 					QModelIndex iGts = src.getBlockIndex( src.getLink( iShader, "Texture Set" ) );
 					QModelIndex iGa = iGts.isValid() ? src.getIndex( iGts, "Textures" ) : QModelIndex();
@@ -2723,7 +2460,7 @@ const QVector<LodSrcShape> & lodgenLoadModel( const QString & dataRoot,
 						s.srcShaderType = src.get<quint32>( iShader, "Shader Type" );
 					s.extEmit = ( sf1 & ( 1U << 29 ) ) != 0;   // lane LIGHTS2 (XEMI1)
 					nf.effectShader = src.blockInherits( iShader, "BSEffectShaderProperty" );
-					nf.waterShader = src.blockInherits( iShader, "BSWaterShaderProperty" );   // lane WATER1
+					nf.waterShader = src.blockInherits( iShader, "BSWaterShaderProperty" );
 					if ( !nf.effectShader && ( sf1 & ( 1U << 15 ) ) )
 						s.refractStrength = src.get<float>( iShader, "Refraction Strength" );
 					nf.decal = ( sf1 & ( ( 1U << 26 ) | ( 1U << 27 ) ) ) != 0;
@@ -2731,7 +2468,7 @@ const QVector<LodSrcShape> & lodgenLoadModel( const QString & dataRoot,
 					nf.twoSided = ( sf2 & ( 1U << 4 ) ) != 0;
 					nf.parallax = ( sf2 & ( 1U << 24 ) ) != 0;
 					nf.envMap = ( sf1 & ( 1U << 7 ) ) != 0;
-					s.bakeEnv = nf.envMap;   // lane BAKE4
+					s.bakeEnv = nf.envMap;
 					s.bakeSoft = nf.effectShader && ( sf1 & ( 1U << 30 ) ) != 0;
 					nf.greyscale = ( sf1 & ( 1U << 4 ) ) != 0;
 					nf.modelSpaceNormals = ( sf1 & ( 1U << 12 ) ) != 0;
@@ -2765,16 +2502,7 @@ const QVector<LodSrcShape> & lodgenLoadModel( const QString & dataRoot,
 				if ( s.matName.endsWith( QStringLiteral( ".bgsm" ), Qt::CaseInsensitive ) ) {
 					QString mp = s.matName;
 					mp.replace( QChar( '\\' ), QChar( '/' ) );
-					/* AN ABSOLUTE BETHESDA BUILD PATH IS CUT, NOT PREFIXED (lane
-					 * CELLVIEW2). A BSLightingShaderProperty can name its material with
-					 * a path off the build machine; prepending `materials/` to one of
-					 * those produced `materials/c:/.../materials/x.bgsm`, which resolves
-					 * to nothing, leaves the diffuse slot EMPTY, and an empty diffuse
-					 * binds the missing-texture MAGENTA under Scene::DoErrorColor
-					 * (src/gl/renderer.cpp ~951) rather than reading as untextured.
-					 * The right shape is already in this file at lodgenCollectMaterials
-					 * (~1826): cut everything before the LAST `materials/`, and only
-					 * prepend when the path has none at all. */
+					// AN ABSOLUTE BETHESDA BUILD PATH IS CUT, NOT PREFIXED.
 					const int mmi = mp.lastIndexOf( QStringLiteral( "materials/" ), -1,
 						Qt::CaseInsensitive );
 					if ( mmi > 0 )
@@ -2802,8 +2530,8 @@ const QVector<LodSrcShape> & lodgenLoadModel( const QString & dataRoot,
 							s.emitColor = sm.emittanceColor();
 							s.emitMult = sm.emittanceMultiple();
 							s.ownEmit = sm.emitEnabled();
-							s.extEmit = ( sm.shaderFlags2() & 0x400U ) != 0;   // lane LIGHTS2 (XEMI1): bExternalEmittance
-							// lane EMISSIVEGI1: glproperty.cpp's slot rule (9 entries: slot 5; 10: slot 4)
+							s.extEmit = ( sm.shaderFlags2() & 0x400U ) != 0;   // bExternalEmittance
+							// glproperty.cpp's slot rule (9 entries: slot 5; 10: slot 4)
 							s.glowFlag = sm.glowmapEnabled();
 							s.glowTex = t.size() == 9 ? t[5] : t.size() == 10 ? t[4] : QString();
 							/* The road pass's own operands. Nothing else reads
@@ -2813,12 +2541,12 @@ const QVector<LodSrcShape> & lodgenLoadModel( const QString & dataRoot,
 							s.matAlphaBlend = sm.hasAlphaBlend();
 							s.matAlpha = sm.alpha();
 							s.matAlphaRef = sm.alphaTestThreshold();
-							s.bakeBlend = sm.hasAlphaBlend();   // lane BAKE4: the material's blend wins
+							s.bakeBlend = sm.hasAlphaBlend();   // the material's blend wins
 							s.bakeBlendSrc = quint8( sm.alphaSourceBlend() );
 							s.bakeBlendDst = quint8( sm.alphaDestinationBlend() );
 							s.bakeEnv = sm.hasEnvironmentMapping();
 							s.bakeSoft = false;
-							/* Lane NEAR1: the same material's switches, OR'd onto the
+							/* the same material's switches, OR'd onto the
 							 * property's bits; read by the near bake only. */
 							nf.bgsmRead = true;
 							nf.alphaBlend = nf.alphaBlend || sm.hasAlphaBlend();
@@ -2839,15 +2567,7 @@ const QVector<LodSrcShape> & lodgenLoadModel( const QString & dataRoot,
 						}
 					}
 				} else if ( s.matName.endsWith( QStringLiteral( ".bgem" ), Qt::CaseInsensitive ) ) {
-					/* THE EFFECT MATERIAL (lane CELLVIEW3). Measured on one named
-					 * car: `Vehicles\Automotive\Sedan02_Postwar.nif` has 5 shapes,
-					 * 4 BSLightingShaderProperty + BSShaderTextureSet pairs and ONE
-					 * BSEffectShaderProperty naming
-					 * `Materials\Vehicles\Automotive\Car_Glass01.BGEM`, with only 4
-					 * texture sets in the file -- so the glass shape had no texture
-					 * from either source and came back with an EMPTY diffuse, which
-					 * is the magenta. The same cut-or-prepend as the BGSM above,
-					 * then the BGEM's own base map (slot 0). */
+					// THE EFFECT MATERIAL.
 					QString mp = s.matName;
 					mp.replace( QChar( '\\' ), QChar( '/' ) );
 					const int mmi = mp.lastIndexOf( QStringLiteral( "materials/" ), -1,
@@ -2866,9 +2586,9 @@ const QVector<LodSrcShape> & lodgenLoadModel( const QString & dataRoot,
 							s.effectBlend = em.hasAlphaBlend();
 							s.matAlpha = em.alpha();
 							s.effectMatRead = true;
-							// lane FXLIT1: lit by the placed lights in the game (cell view only)
+							// lit by the placed lights in the game (cell view only)
 							s.effectLit = ( em.effectShaderFlags2() & 0x0004U ) && em.lightingInfluence() > 0.0f;
-							s.bakeBlend = em.hasAlphaBlend();   // lane BAKE4: the material's blend wins
+							s.bakeBlend = em.hasAlphaBlend();   // the material's blend wins
 							s.bakeBlendSrc = quint8( em.alphaSourceBlend() );
 							s.bakeBlendDst = quint8( em.alphaDestinationBlend() );
 							s.bakeEnv = em.hasEnvironmentMapping();
@@ -2877,25 +2597,14 @@ const QVector<LodSrcShape> & lodgenLoadModel( const QString & dataRoot,
 								s.bakeColor[k] = em.baseColor()[k] * em.baseColorScale();
 						}
 					}
-					/* The property's own Source Texture is the fallback, exactly as
-					 * the renderer's is: a BGEM that does not read, or names no base
-					 * map, must not cost the shape the texture the NIF already
-					 * carries. */
+					// The property's own Source Texture is the fallback, exactly as the renderer's is: a BGEM
+					// that does not read, or names no base map, must not cost the shape the texture the NIF
+					// already carries.
 					if ( s.effectTex0.isEmpty() )
 						s.effectTex0 = src.get<QString>( iShader, "Source Texture" );
 				} else if ( nf.effectShader ) {
-					/* Lane EFX1: an effect property that names no BGEM carries its whole look
-					 * in the NIF (falloff, base color, greyscale map, soft depth): the Vault's
-					 * ground steam is one. The cell view had only the BGEM path, so these drew
-					 * through the lit program with no texture -- solid grey sheets. The block
-					 * is kept as is and written back into the cell scene. tex0 and effectTex0
-					 * are untouched, so the far-LOD bake is unchanged by construction.
-					 *
-					 * The welded scene holds one frame and drops the controllers, so a looping
-					 * float animation on the property is drawn at its mean over the keys rather
-					 * than at the stored rest value, which can be a fade's fully opaque end the game
-					 * only passes through. UV scrolls are left at rest. Setting a mean is idempotent,
-					 * so a shared block is safe. */
+					// an effect property that names no BGEM carries its whole look in the NIF (falloff, base
+					// color, greyscale map, soft depth): the Vault's ground steam is one.
 					for ( QModelIndex iCtl = src.getBlockIndex( src.getLink( iShader, "Controller" ) ); iCtl.isValid();
 						iCtl = src.getBlockIndex( src.getLink( iCtl, "Next Controller" ) ) ) {
 						if ( !src.blockInherits( iCtl, "BSEffectShaderPropertyFloatController" ) )
@@ -2934,7 +2643,7 @@ const QVector<LodSrcShape> & lodgenLoadModel( const QString & dataRoot,
 					QBuffer eb( &s.effectBlock );
 					if ( !( eb.open( QIODevice::WriteOnly ) && src.saveIndex( eb, iShader ) ) )
 						s.effectBlock.clear();
-					// lane FXLIT1: Shader Flags 2 bit 30, Effect Lighting
+					// Shader Flags 2 bit 30, Effect Lighting
 					s.effectLit = ( src.get<quint32>( iShader, "Shader Flags 2" ) & 0x40000000U )
 						&& src.get<quint8>( iShader, "Lighting Influence" ) > 0;
 				}
@@ -2944,13 +2653,7 @@ const QVector<LodSrcShape> & lodgenLoadModel( const QString & dataRoot,
 				if ( !s.matName.isEmpty() && s.tex0.isEmpty() && s.effectTex0.isEmpty() )
 					s.matUnreadable = true;
 			}
-			/* THE CUTOFF IS THE BGSM'S (bungo 2026-09-18 05:2x, on the 128-vs-80
-			 * tree pictures: "Alpha test 80 looks better"). A shape that carries an
-			 * NiAlphaProperty and names a BGSM that enables its own alpha test is
-			 * cut at that BGSM's ref (the tree LOD sets say 80/82), which is what
-			 * the renderer does with the same shape; the flat 128 above stays for
-			 * every shape without such a material. This is what the .BTO's
-			 * NiAlphaProperty and the .lodo material byte now carry. */
+			// THE CUTOFF IS THE BGSM'S.
 			if ( s.hasAlpha && s.matAlphaTest )
 				s.alphaThreshold = s.matAlphaRef;
 			nf.vertexColour = s.colStream && s.vcFlag;
@@ -3016,14 +2719,14 @@ bool lodgenNativeLoadModel( void * user, const QString & model, std::vector<Nati
 	return nativeLoadModelImpl( user, model, nullptr, out );
 }
 
-// lane MISS1: the load for a placed reference -- the file's root node transform is left out, as in game
+// the load for a placed reference -- the file's root node transform is left out, as in game
 bool lodgenNativeLoadModelPlaced( void * user, const QString & model, const LodgenMaterialSubst * swap,
 	std::vector<NativeSrcShape> * out )
 {
 	return nativeLoadModelImpl( user, model, swap, out, true, true );
 }
 
-// lane SPEED1: the same load with nothing kept in this thread's cache (the cell view's workers, cellmodelahead.h)
+// the same load with nothing kept in this thread's cache (the cell view's workers, cellmodelahead.h)
 bool lodgenNativeLoadModelPlacedOnce( void * user, const QString & model, const LodgenMaterialSubst * swap,
 	std::vector<NativeSrcShape> * out )
 {
@@ -3045,22 +2748,9 @@ bool lodgenNativeLoadModelSwapped( void * user, const QString & model, const Lod
 static bool nativeLoadModelImpl( void * user, const QString & model, const LodgenMaterialSubst * swap,
 	std::vector<NativeSrcShape> * out, bool keepInCache, bool placed )
 {
-	/* PER THREAD, NOT PER PROCESS (lane PERF1, 2026-09-17). lodgenLoadModel
-	 * hands back a REFERENCE INTO this hash, so a `static` here is the exact
-	 * shape ww-parallelise-a-stage refuses: the reference outlives any lock a
-	 * mutex could hold, and one insert rehashing the table under another
-	 * worker's reference is a use-after-free, not a race on a counter. The
-	 * chunk pass never had the problem because lodgenBuildObjectChunk declares
-	 * its cache as a LOCAL (src/lodgen.cpp, `QHash ... modelCache;`), one per
-	 * chunk; this is the same answer, one per thread.
-	 *
-	 * It costs nothing in memory or in loads: lodgenNativeWrite visits each
-	 * folded model path EXACTLY ONCE, so the cache never hit across models even
-	 * when it was shared, and each model is now cached by exactly one worker.
-	 * The way back is unaffected -- at `--threads 1` there is one thread and
-	 * one cache, which is what the static was. */
+	// PER THREAD, NOT PER PROCESS.
 	thread_local QHash<QString, QVector<LodSrcShape>> cache;
-	/* Lane NEAR1: the near bake loads every full-detail model of a worldspace,
+	/* the near bake loads every full-detail model of a worldspace,
 	 * twice, and keeps none of them -- a per-call cache, dropped on return. */
 	QHash<QString, QVector<LodSrcShape>> once;
 	const QString & dataRoot = *static_cast<const QString *>( user );
@@ -3104,16 +2794,16 @@ static bool nativeLoadModelImpl( void * user, const QString & model, const Lodge
 		n.effectTex0 = s.effectTex0; n.matUnreadable = s.matUnreadable;
 		n.effectBlend = s.effectBlend; n.matAlpha = s.matAlpha;
 		n.effectMatRead = s.effectMatRead; n.shaderSF1 = s.shaderSF1; n.shaderSF2 = s.shaderSF2;
-		n.effectLit = s.effectLit;	// lane FXLIT1
-		n.extEmit = s.extEmit;	// lane LIGHTS2 (XEMI1)
-		n.effectBlock = s.effectBlock; n.alphaFlags = s.hasAlpha ? s.alphaFlags : 0;	// lane EFX1
+		n.effectLit = s.effectLit;
+		n.extEmit = s.extEmit;
+		n.effectBlock = s.effectBlock; n.alphaFlags = s.hasAlpha ? s.alphaFlags : 0;
 		n.refractStrength = s.refractStrength;
 		n.srcShaderType = s.srcShaderType;	// lane HAIRDLC04
 		n.bakeBlend = s.bakeBlend; n.bakeBlendSrc = s.bakeBlendSrc; n.bakeBlendDst = s.bakeBlendDst;	// lane BAKE4
 		n.bakeEnv = s.bakeEnv; n.bakeSoft = s.bakeSoft;
 		for ( int k = 0; k < 3; k++ )
 			n.bakeColor[k] = s.bakeColor[k];
-		if ( s.billboard ) {   // lane GLOW1
+		if ( s.billboard ) {
 			n.billboard = true;
 			n.bbMode = s.bbMode;
 			n.bbScale = s.bbXf.scale;
@@ -3129,11 +2819,11 @@ static bool nativeLoadModelImpl( void * user, const QString & model, const Lodge
 		n.smoothness = s.smoothness; n.specMult = s.specMult;
 		n.emitColor[0] = s.emitColor.red(); n.emitColor[1] = s.emitColor.green(); n.emitColor[2] = s.emitColor.blue();
 		n.emitMult = s.emitMult; n.ownEmit = s.ownEmit;
-		n.glowFlag = s.glowFlag; n.glowTex = s.glowTex;   // lane EMISSIVEGI1
+		n.glowFlag = s.glowFlag; n.glowTex = s.glowTex;
 		n.hasAlpha = s.hasAlpha; n.alphaThreshold = s.alphaThreshold;
 		n.nearFacts = s.nearFacts;
 		/* `.lodo` v5: the colour goes in ONLY where the game applies it -- a
-		 * colour channel AND the Vertex_Colors flag (bungo's W4 ruling). RGB and A
+		 * colour channel AND the Vertex_Colors flag. RGB and A
 		 * as the source stores them; A's meaning rides in `vertexAlpha`. */
 		if ( s.colStream && s.vcFlag && s.col.size() == nv ) {
 			n.geom.rgba.resize( size_t( nv ) * 4 );
@@ -3156,7 +2846,7 @@ static bool nativeLoadModelImpl( void * user, const QString & model, const Lodge
 namespace
 {
 
-// LodgenAoScene lives in src/lodgenao.h (2026-09-18): the .lodo writer casts with it too.
+// LodgenAoScene lives in src/lodgenao.h: the .lodo writer casts with it too.
 
 } // namespace
 
@@ -3178,7 +2868,7 @@ struct LodgenCard
 	bool hasSide = false;       // the sheet's right half is a real side view
 	// the octahedral sheets, when the bake made them (0 = none)
 	int oct = 0, octTileW = 0, octTileH = 0;
-	//! THE HORIZON RING (lane CARDFIX1 step 5, IMPOSTORRING1; bungo 2026-09-23: "22.5 degrees
+	//! THE HORIZON RING (bungo 2026-09-23: "22.5 degrees
 	//! per take"). > 0 = the sidecar said `ring V`: the sheet is V frames in ONE row, frame v at
 	//! azimuth 360*v/V and elevation 0 (docs/LODGEN_LODM_FORMAT.md 3a). `oct` then carries V too,
 	//! so every "this base has a sheet" test holds; whatever lays frames out reads octCols() and
@@ -3190,39 +2880,17 @@ struct LodgenCard
 	//! frame is this base's rung on the size ladder (its world size against the
 	//! run's largest), not evidence of a differently-configured bake.
 	int octBase = 0;
-	//! The GAP between two neighbouring silhouettes across a frame border, per
-	//! axis, in texels -- the meta's `gap` line, and bungo's own quantity
-	//! ("8 pixels of distance between two rendered objects", 2026-09-09).
-	//! 0 = a sidecar from before the line.
+	//! The GAP between two neighbouring silhouettes across a frame border, per axis, in texels -- the meta's
+	//! `gap` line, and bungo's own quantity ("8 pixels of distance between two rendered objects", 2026-09-09).
 	int octGapX = 0, octGapY = 0;
 	//! The gutter on EACH side of a frame, per axis, in texels: half the gap on
 	//! a `gap` sidecar, the literal number on an older `pad` one, and
 	//! max(4, longSide/16) on a sidecar with neither.
 	int octPadX = 0, octPadY = 0;
-	//! What the MIP CAP divides, min over the two axes: THE GAP, under every
-	//! vintage. A tap on a frame's UV border reads half of that frame's last
-	//! texel and half of the neighbour's first, so what separates the two
-	//! silhouettes at level k is gap / 2^k -- but the chain now stops one level
-	//! EARLIER than that, at the last level where the MARGIN ON EACH SIDE,
-	//! gap / 2^(k+1), is still a whole texel (bungo, 2026-09-09: ship one mip
-	//! fewer, "128 frame, gap 8 -> 3 levels 128/64/32"). Hence
-	//!
-	//!   mips = log2(octMipUnit)
-	//!
-	//! and the two OLDER sidecars are unmoved by the change, because each wrote
-	//! a PER-SIDE number whose gap is twice it: log2(2*pad) = 1 + log2(pad),
-	//! exactly the count those sheets were built for.
+	//! What the MIP CAP divides, min over the two axes: THE GAP, under every vintage.
 	int octMipUnit = 0;
-	//! PER-FRAME POSITIONING (bungo, 2026-09-09, shipped by lane CARDFINAL).
-	//! Every frame shifts its OWN silhouette to its own centre, so the frame has
-	//! to hold the widest SINGLE VIEW instead of the union of all of them. One
-	//! scale still serves every view -- his "the tree is equal in size on each
-	//! one" -- and the quad is still the whole frame; only WHERE that quad sits
-	//! moves. These are the offsets that put it back: frame (i,j), at sheet
-	//! position (i*frameW, j*frameH), carries `octFrameOff[2*(j*oct+i)]` along
-	//! that view's own RIGHT axis and `[+1]` along its UP axis, in model units,
-	//! added to `octCenter`. Empty = a bake from before the line, which means
-	//! all zeros: every frame was centred on `octCenter`.
+	//! PER-FRAME POSITIONING. Every frame shifts its OWN silhouette to its own centre, so the frame has to hold
+	//! the widest SINGLE VIEW instead of the union of all of them.
 	QVector<float> octFrameOff;
 	float octHalfW = 0, octHalfH = 0, octSpan = 0;
 	Vector3 octCenter;
@@ -3230,45 +2898,16 @@ struct LodgenCard
 	// `emissiveScale`: what a consumer multiplies the emissive sheet by (the
 	// meta's `emissive` line). 1 when a bake from before it says nothing.
 	float octEmissiveScale = 1.0f;
-	//! THE SWAY SOURCE (IMPOSTORWIND1 sway A, CARDFIX1 step 6): the sidecar's `sway model`
-	//! line -- _n.A is the tree's own wind weight x height -- and the base's leaf amplitude
-	//! and frequency for it. `sway synthetic` or no line: the synthetic law, and the .lodm
-	//! stays version 1 byte for byte.
+	//! THE SWAY SOURCE (IMPOSTORWIND1 sway A, CARDFIX1 step 6): the sidecar's `sway model` line -- _n.A is the
+	//! tree's own wind weight x height -- and the base's leaf amplitude and frequency for it.
 	bool swayModel = false;
 	float leafAmplitude = 1.0f, leafFrequency = 1.0f;
-	//! THE CAMERA THE SHEET WAS PHOTOGRAPHED THROUGH -- the meta's `projection`
-	//! line, `ortho` or `persp` (lane CARDORTHO, 2026-09-10). Every extent this
-	//! struct carries -- `octHalfW`, `octHalfH`, `octFrameOff` -- is a world
-	//! measurement taken off viewport pixels through ONE units-per-pixel
-	//! constant, and that is a statement about an ORTHOGRAPHIC camera. Bakes
-	//! before 2026-09-10 drew through a 60-degree perspective frustum while
-	//! measuring as if they had not (lane HOOKCAM measured it), so their
-	//! extents describe no picture and their frames are foreshortened. EMPTY
-	//! means the sidecar does not say, and every sidecar that does not say was
-	//! baked that way: the line arrived in the same change that fixed the
-	//! camera. Carried into the `.lodm` so a consumer can refuse a non-metric
-	//! set by name instead of drawing a quad that cannot fit its own mesh.
+	//! THE CAMERA THE SHEET WAS PHOTOGRAPHED THROUGH -- the meta's `projection` line, `ortho` or `persp`.
 	QString octProjection;
-	//! WHICH VIEW CONVENTION THE FRAMES WERE PHOTOGRAPHED UNDER (2026-09-19,
-	//! bungo's "fix the 180 issue"). `spec1` = frame (i,j) really is the view
-	//! from direction (i,j), which is what docs/LODGEN_IMPOSTOR_SPEC.md always
-	//! said and what the bake does from this exe on. EMPTY means the sidecar
-	//! does not say, and every sidecar that does not say came from a bake whose
-	//! `rz = 90 - azim` turned the AZIMUTH BY 180 DEGREES -- so absence is not
-	//! "unknown", it is the legacy vintage, and such a set must be re-baked.
-	//! Carried into the `.lodm` verbatim; an unrecognised word is carried too,
-	//! because a consumer refusing what it does not know is safer than this
-	//! reader deciding the word meant `spec1`.
+	//! WHICH VIEW CONVENTION THE FRAMES WERE PHOTOGRAPHED UNDER (2026-09-19, bungo's "fix the 180 issue").
 	QString octConv;
-	//! THE COVERAGE CONTRACT of the base-colour sheet: the alpha at which the
-	//! bake counted a texel covered, the alpha a consumer is to TEST at, and the
-	//! alpha the floor was written at (lane CARDWIDTH, 2026-09-10; the bake's
-	//! `coverage <floor> <test> <base>` line). All three ZERO means the sidecar
-	//! did not say, which is the older vintage: its alpha is the raw coverage
-	//! fraction, so a consumer testing at 0.5 draws a silhouette up to 5.41
-	//! texels of half-width smaller than the `half` on the same line describes.
-	//! Absence is passed through as absence -- a `.lodm` written before the key
-	//! stays byte-identical, and no contract is invented for bytes that have none.
+	//! THE COVERAGE CONTRACT of the base-colour sheet: the alpha at which the bake counted a texel covered, the
+	//! alpha a consumer is to TEST at, and the alpha the floor was written at.
 	int octCovFloor = 0;
 	int octCovTest = 0;
 	int octCovBase = 0;
@@ -3276,38 +2915,16 @@ struct LodgenCard
 	QString octPath;            // game path of the set's .lodm (docs/LODGEN_IMPOSTOR_SPEC.md)
 };
 
-/*! Colour under the transparent texels of a sheet of frames.
- *
- *  Filtering and mips blend a texel with its neighbours, so what sits under
- *  a transparent texel next to a leaf edge is what the leaf edge shows: with
- *  black there, every card grew a dark fringe - the atlas's black-fringed mud
- *  (WW_CHANGES 2026-08-05) on the impostor sheets, and on the crossed cards
- *  since they were written. bungo, on the first spec bake: "see the pixels on
- *  the edges, there's no padding".
- *
- *  Every channel is extended outward from the coverage edge, `passes` texels
- *  deep, each pass giving an unfilled texel the average of its filled
- *  8-neighbours; what is still unfilled is flooded with the frame's average
- *  covered value. Coverage itself (the alpha of `coverage`) is never touched,
- *  and nothing crosses a frame border: each frame is dilated on its own, so a
- *  gutter stays a gutter. `img` may be the coverage image itself (the base
- *  colour sheet), in which case only its RGB moves. */
+//! Colour under the transparent texels of a sheet of frames:
+//! Filtering and mips blend a texel with its neighbours, so what sits under a transparent texel next to a leaf
+//! edge is what the leaf edge shows: with black there, every card grew a dark fringe - the atlas's
+//! black-fringed mud (WW_CHANGES 2026-08-05) on the impostor sheets, and on the crossed cards since they were
+//! written.
 static void lodgenDilateFrames( QImage & img, const QImage & coverage, int frameW, int frameH, int passes )
 {
 	if ( img.isNull() || coverage.size() != img.size() || frameW <= 0 || frameH <= 0 )
 		return;
-	/* THE SAME ARITHMETIC, FRAME-LOCAL (lane GPU1, 2026-09-26). The first
-	 * version copied the WHOLE sheet's fill mask once per pass per frame and
-	 * went through QImage::pixel/setPixel per texel: on a 64-frame sheet at 32
-	 * passes that is gigabytes of memcpy per sheet, and the Boston profile had
-	 * the serial chunk pass inside this function most of the time. Now every
-	 * frame works on its own mask and its own texels through the scan lines,
-	 * a pass that fills nothing ends the passes (every later pass would find
-	 * the same nothing), and the frames -- which never read or write outside
-	 * themselves -- run side by side. Byte-identical: the reads of a pass are
-	 * still only the texels filled BEFORE it, the sums and the integer
-	 * divisions are the same, the flood is the same average. Both images are
-	 * ARGB32 at every caller; any other format is converted there and back. */
+	// THE SAME ARITHMETIC, FRAME-LOCAL.
 	const int W = img.width(), H = img.height();
 	const bool isCoverage = ( &img == &coverage );
 	if ( img.format() != QImage::Format_ARGB32 || coverage.format() != QImage::Format_ARGB32 ) {
@@ -3400,95 +3017,7 @@ static void lodgenDilateFrames( QImage & img, const QImage & coverage, int frame
 	lodgenParallelFor( framesX * framesY, one );
 }
 
-/*! THE HEIGHT CHANNEL'S REPAIR, and the one that stops the card coming apart.
- *
- *  THE DEFECT. The `_n` sheet's blue is the frame's height, and the drawer's
- *  parallax step reads it at the UNPARALLAXED uv and then moves the sample by
- *  `(want - d) / dot(ray, frameFwd)` world units sideways. So the height of a
- *  texel the object does not cover decides where a card pixel OUTSIDE the
- *  silhouette goes looking -- and until this function existed that height was
- *  whatever `lodgenDilateFrames` had flooded there: the frame's AVERAGE, which
- *  for a bare tree is nothing like the card plane.
- *
- *  Measured on the blast_n4 fixture's shipped `_oct_n.DDS`: texels under the
- *  coverage floor decode to +264 world units on average and +743 at the 95th
- *  percentile, against a card half-width of 135. Every one of those is a
- *  licence to drag a trunk texel several card-widths sideways into empty sky,
- *  and that is exactly what the picture showed -- with the parallax switched
- *  off the same card at the same directions is a clean trunk, and with it on
- *  it is a spray of detached flakes. (Lane IMPOSTORFIX1, 2026-09-19; the pair
- *  of pictures is scratchpad/impostorfix1_20260919/control/look_blendon.png.)
- *
- *  Partially covered texels are the same fault one step in. The composition
- *  un-premultiplies every channel by the measured coverage, which is right for
- *  colour and normal, but a partial texel's DEPTH is not a weighted average of
- *  anything -- half a texel of twig in front of sky has one depth, not a
- *  blend of the twig's and the sky's -- so the division there manufactures a
- *  number no surface ever had.
- *
- *  THE REPAIR, in the frame's own coordinates and nowhere else:
- *    coverage >= 250   the texel is whole; its height stands.
- *    16 <= cov < 250   partial; take the height of the nearest FULLY covered
- *                      texel, which is a depth some surface actually had.
- *    coverage < 16,    outside the object but WITHIN 8 RINGS of a whole texel:
- *      ring <= 8       the same dilated height. A neighbouring frame's ray
- *                      lands just outside this frame's silhouette constantly,
- *                      and out there the object's own depth is the only honest
- *                      answer; the card plane is a claim that the surface is
- *                      at z = 0, which for a fat solid object is the one place
- *                      it certainly is not.
- *    coverage < 16,    far outside; the card plane, 128, which makes the
- *      ring > 8        parallax step an exact no-op. Nothing samples out
- *                      there, so the plane is harmless.
- *
- *  THE RING METRIC IS CHEBYSHEV, NOT EUCLIDEAN, and that is a divergence from
- *  the simulation this was chosen on: the dilation below grows by 8-connected
- *  passes, so "ring 8" is a square of radius 8, not a disc. The square's
- *  corners reach 11.3 texels. The simulation measured a Euclidean disc of 8
- *  (R2d8) AND one of 16 (R2d16) and both beat the card plane on all five
- *  subjects, so the answer does not turn on which of the two metrics is used;
- *  it is named here so nobody reads "8" as the simulation's 8.
- *
- *  WHY THIS ONE AND NOT THE OTHERS. Four candidates were scored in a numpy
- *  reference card reading these same BC3 bytes, over the 24 orbit views of
- *  blast_n4, against the N=12 set as the stand-in subject:
- *      as shipped                                  0.3585
- *      card plane on every non-full texel          0.4563
- *      dilate from fully covered, nothing else     0.4288
- *      dilate, then card plane OUTSIDE coverage    0.4587
- *      card plane outside coverage only            0.4504
- *
- *  THAT TABLE WAS SCORED ON ONE SUBJECT (blast_n4 against the N=12 set) AND
- *  IT NEVER TESTED A DILATION THAT REACHED OUTSIDE THE COVERAGE FLOOR, which
- *  is why the rule it picked cost the one fat solid subject in the fixture set
- *  2.8 per cent of its silhouette. Lane IMPOSTORFIX2 (2026-09-19) re-scored
- *  six fills on all FIVE subjects, 24 orbit views each, through the real BC3
- *  round trip, with the registration frozen:
- *
- *      fill outside coverage      blast_n4 blast_n8  maple  dead_n4  rock_n4
- *      as baked (frame mean)        0.3599  0.3794  0.3569  0.4187  0.7894
- *      the card plane everywhere    0.4550  0.5943  0.3232  0.5391  0.7596
- *      card plane outside (above)   0.4978  0.6639  0.3609  0.5826  0.7777
- *      DILATE 8, plane beyond       0.5646  0.7200  0.3685  0.6153  0.8331
- *      dilate 16, plane beyond      0.5515  0.7165  0.3690  0.5907  0.8416
- *      dilate to the whole frame    0.5302  0.7163  0.3694  0.5898  0.8380
- *
- *  The 8-ring dilation is better than the card plane on every subject, and on
- *  the rock it also clears the number the regression was measured against
- *  (0.7944 before any of this) by +0.039, so no subject is traded for another.
- *  Dilating to the WHOLE frame is worse than 8 on three of the five: far from
- *  the object the nearest whole texel's height is not that pixel's depth
- *  either, and the plane is the better default there.
- *  The same table re-run with the height channel told a depthSpan fitted to
- *  the object instead of the clip range's 3 x bound tops out at 0.4602 -- but
- *  `depthSpan` is not a free parameter. It is a CLAIM about the projection:
- *  `GLView::glProjection` gives the orthographic bake the clip range
- *  |center.z| +- 1.5 x bound, `gl_FragCoord.z` is linear across exactly that,
- *  and `3 * max(radius, 1024)` is that range written down. Narrowing it means
- *  narrowing the bake's clip range, and 0.0015 of IoU does not buy a change to
- *  the projection. This repair needs no format change, no spec change and no
- *  new clause: it only stops writing numbers that were never depths.
- */
+//! THE HEIGHT CHANNEL'S REPAIR, and the one that stops the card coming apart.
 static void lodgenRepairOctHeight( QImage & nrm, const QImage & alb, int frameW, int frameH, QString * report )
 {
 	if ( nrm.isNull() || alb.size() != nrm.size() || frameW <= 0 || frameH <= 0 )
@@ -3496,11 +3025,8 @@ static void lodgenRepairOctHeight( QImage & nrm, const QImage & alb, int frameW,
 	const int W = nrm.width(), H = nrm.height();
 	const int kFull = 250;		// "the object covers this texel whole"
 	const int kFloor = 16;		// the spec's coverage floor
-	const int kOutRamp = 16;	// IMPOSTORFIX4: the outside fill RAMPS to the card plane over
-								// this many rings instead of snapping at ring 8. A snap is a
-								// cliff, and a cliff inside one 4x4 BC1 block gives the block a
-								// height range its single colour line cannot carry -- which is
-								// what the trunk chips are (IMPOSTORFIX4 s2e/s5).
+	const int kOutRamp = 16;	// the outside fill RAMPS to the card plane over
+								// this many rings instead of snapping at ring 8.
 	qint64 partial = 0, outside = 0, outsideNear = 0, whole = 0, violations = 0;
 	int worst = 0;
 	for ( int fy = 0; fy + frameH <= H; fy += frameH ) {
@@ -3510,10 +3036,8 @@ static void lodgenRepairOctHeight( QImage & nrm, const QImage & alb, int frameW,
 			 * which is what the self-check below is measured against. */
 			std::vector<quint8> have( size_t( frameW ) * frameH, 0 );
 			std::vector<quint8> hgt( size_t( frameW ) * frameH, 128 );
-			/* ring[t] = how many dilation passes it took to reach t, i.e. the
-			 * Chebyshev distance from t to the nearest FULLY covered texel.
-			 * 0 on the seeds themselves. Only the outside-coverage branch
-			 * below reads it; the partial branch is unchanged. */
+			// ring[t] = how many dilation passes it took to reach t, i.e. the Chebyshev distance from t to the
+			// nearest FULLY covered texel. 0 on the seeds themselves.
 			std::vector<quint16> ring( size_t( frameW ) * frameH, 0 );
 			int hMin = 255, hMax = 0, nFull = 0;
 			for ( int y = 0; y < frameH; y++ ) {
@@ -3574,12 +3098,8 @@ static void lodgenRepairOctHeight( QImage & nrm, const QImage & alb, int frameW,
 						b = hgt[size_t( y ) * frameW + x];
 						partial++;
 					} else if ( ring[size_t( y ) * frameW + x] ) {
-						/* just outside the silhouette: a neighbouring frame's ray
-						 * lands here, and the object's own depth is what it should
-						 * read. Carried out from the whole texels, not invented --
-						 * and faded to the card plane over kOutRamp rings rather
-						 * than dropped onto it in one texel. The fade is what keeps
-						 * a 4x4 block's height range inside what BC1 can carry. */
+						// just outside the silhouette: a neighbouring frame's ray lands here, and the object's
+						// own depth is what it should read.
 						const int r = qMin( int( ring[size_t( y ) * frameW + x] ), kOutRamp );
 						const int d = hgt[size_t( y ) * frameW + x];
 						b = ( d * ( kOutRamp - r ) + 128 * r + kOutRamp / 2 ) / kOutRamp;
@@ -3595,11 +3115,8 @@ static void lodgenRepairOctHeight( QImage & nrm, const QImage & alb, int frameW,
 					nrm.setPixel( fx + x, fy + y, qRgba( qRed( p ), qGreen( p ), b, qAlpha( p ) ) );
 				}
 			}
-			/* THE BAKE-TIME SELF-CHECK the repair is allowed to be judged by:
-			 * after it, no texel the object COVERS may decode to a height
-			 * outside the depth band the frame's own whole texels occupy.
-			 * Before it, a partial texel of this fixture reached 255 -- the far
-			 * plane, eleven card half-widths behind the tree. */
+			// THE BAKE-TIME SELF-CHECK the repair is allowed to be judged by: after it, no texel the object
+			// COVERS may decode to a height outside the depth band the frame's own whole texels occupy.
 			for ( int y = 0; y < frameH; y++ )
 				for ( int x = 0; x < frameW; x++ ) {
 					if ( qAlpha( alb.pixel( fx + x, fy + y ) ) < kFloor )
@@ -3655,10 +3172,7 @@ static void lodgenEncodeBC4Block( const std::vector<quint8> & ch, int w, int h, 
 		out[2 + k] = quint8( bits >> ( k * 8 ) );
 }
 
-/*! A two-channel BC5 DDS (DXGI 83, DX10 header): red then green, each a BC4
- *  block, mips by box filter. The impostor's depth (R) and sway (G) sheet:
- *  two independent scalars, which a BC1 would have forced through one
- *  colour palette per block. */
+//! A two-channel BC5 DDS (DXGI 83, DX10 header): red then green, each a BC4 block, mips by box filter.
 bool lodgenWriteDdsBC5( const QString & path, int w, int h,
 	const std::vector<quint8> & r, const std::vector<quint8> & g )
 {
@@ -3747,13 +3261,8 @@ const LodgenCard & lodgenCard( const QString & dir, quint32 formID,
 	QFile meta( metaPath );
 	if ( meta.open( QIODevice::ReadOnly | QIODevice::Text )
 		&& QFile::exists( frontPng ) ) {
-		/* The meta is one line per photograph: `front`, `side`, and since the
-		 * octahedral bake `oct N tile halfW halfH cx cy cz depthspan`. The
-		 * first reader took only the first line; this one takes them all. */
-		/* The per-frame offsets arrive as one `frameoff i j ox oy` line each and
-		 * are indexed by the grid, which the `oct` line carries -- so they are
-		 * collected raw here and placed once the whole meta has been read,
-		 * rather than depending on the order of two kinds of line. */
+		// The meta is one line per photograph: `front`, `side`, and since the octahedral bake `oct N tile
+		// halfW halfH cx cy cz depthspan`. The first reader took only the first line; this one takes them all.
 		QVector<float> rawFrameOff;
 		while ( !meta.atEnd() ) {
 			// trimmed: readLine() keeps the newline, and the last token is a WORD since the family
@@ -3771,7 +3280,7 @@ const LodgenCard & lodgenCard( const QString & dir, quint32 formID,
 			} else if ( ( line[0] == QLatin1String( "oct" ) || line[0] == QLatin1String( "ring" ) )
 				&& line.size() >= 11 ) {
 				// oct N tileW tileH halfW halfH cx cy cz depthspan family [base] [conv]
-				// ring V tileW tileH ... the same fields; V frames in one row (CARDFIX1 step 5)
+				// ring V tileW tileH ... the same fields; V frames in one row
 				card.octPbr = ( line[10] == QLatin1String( "pbr" ) );
 				card.oct = line[1].toInt();
 				card.ringViews = ( line[0] == QLatin1String( "ring" ) ) ? card.oct : 0;
@@ -3782,10 +3291,8 @@ const LodgenCard & lodgenCard( const QString & dir, quint32 formID,
 				 * .lodm still says something true. */
 				card.octBase = line.size() >= 12 ? line[11].toInt()
 					: qMax( card.octTileW, card.octTileH );
-				/* THE VIEW CONVENTION TOKEN, appended after `base` so every older
-				 * reader -- which indexes by position and stops at 11 or 12 -- is
-				 * untouched. Absent = the pre-2026-09-19 bake, whose azimuth was
-				 * turned by 180 degrees. */
+				// THE VIEW CONVENTION TOKEN, appended after `base` so every older reader -- which indexes by
+				// position and stops at 11 or 12 -- is untouched.
 				card.octConv = line.size() >= 13 ? line[12] : QString();
 				card.octHalfW = line[4].toFloat();
 				card.octHalfH = line[5].toFloat();
@@ -3793,7 +3300,7 @@ const LodgenCard & lodgenCard( const QString & dir, quint32 formID,
 				card.octSpan = line[9].toFloat();
 			} else if ( line[0] == QLatin1String( "gap" ) && line.size() >= 3 ) {
 				/* THE GAP between two neighbouring silhouettes across a frame border,
-				 * per axis (bungo, 2026-09-09). The margin on each side is half of it,
+				 * per axis. The margin on each side is half of it,
 				 * and the mip cap divides the gap itself. */
 				card.octGapX = qMax( 2, line[1].toInt() );
 				card.octGapY = qMax( 2, line[2].toInt() );
@@ -3801,10 +3308,8 @@ const LodgenCard & lodgenCard( const QString & dir, quint32 formID,
 				card.octPadY = card.octGapY / 2;
 				card.octMipUnit = qMin( card.octGapX, card.octGapY );
 			} else if ( line[0] == QLatin1String( "pad" ) && line.size() >= 3 ) {
-				/* A sidecar from lane CARDFIT3 (2026-09-09, superseded the same day):
-				 * the number is the PER-SIDE margin and its chain was capped at
-				 * 1 + log2(pad). Read under its own law so it still converts to the
-				 * sheet it was baked for. */
+				// An older sidecar (superseded the same day): the number is the
+				// PER-SIDE margin and its chain was capped at 1 + log2(pad).
 				card.octPadX = line[1].toInt();
 				card.octPadY = line[2].toInt();
 				card.octGapX = 2 * card.octPadX;
@@ -3814,35 +3319,17 @@ const LodgenCard & lodgenCard( const QString & dir, quint32 formID,
 				 * change of the law leaves this vintage's count where it was. */
 				card.octMipUnit = qMin( card.octGapX, card.octGapY );
 			} else if ( line[0] == QLatin1String( "frameoff" ) && line.size() >= 5 ) {
-				/* PER-FRAME POSITIONING: one line per frame, `frameoff i j ox oy`,
-				 * the offset in MODEL UNITS from the card's centre along that view's
-				 * own right and up axes. One line per frame rather than one long
-				 * line of 2*N*N numbers, because every reader of this file splits on
-				 * spaces and indexes by position (docs/MISTAKES.md, the family token
-				 * that carried a newline). */
+				// PER-FRAME POSITIONING: one line per frame, `frameoff i j ox oy`, the offset in MODEL UNITS
+				// from the card's centre along that view's own right and up axes.
 				rawFrameOff.append( float( line[1].toInt() ) );
 				rawFrameOff.append( float( line[2].toInt() ) );
 				rawFrameOff.append( line[3].toFloat() );
 				rawFrameOff.append( line[4].toFloat() );
 			} else if ( line[0] == QLatin1String( "projection" ) && line.size() >= 2 ) {
-				/* THE BAKE'S CAMERA, in the bake's own words: `ortho` or `persp`
-				 * (lane CARDORTHO, 2026-09-10). Nothing here is DERIVED from it --
-				 * the numbers on the other lines are what they are -- but it is the
-				 * only thing that says whether they describe the sheet beside them,
-				 * and a set without the line was photographed through a perspective
-				 * frustum and measured as if it were not. Passed through to the
-				 * .lodm verbatim; an unrecognised word is carried too, because a
-				 * consumer refusing what it does not know is safer than this reader
-				 * silently deciding the word meant `ortho`. */
+				// THE BAKE'S CAMERA, in the bake's own words: `ortho` or `persp`.
 				card.octProjection = line[1];
 			} else if ( line[0] == QLatin1String( "coverage" ) && line.size() >= 4 ) {
-				/* THE COVERAGE CONTRACT (lane CARDWIDTH, 2026-09-10):
-				 * `coverage <floor> <test> <base>`. Read as three numbers and
-				 * carried to the `.lodm` unchanged -- nothing here is derived from
-				 * them and nothing here re-encodes a sheet, because the sheet was
-				 * written under this contract by the bake that also wrote the line.
-				 * A sidecar without the line leaves all three at 0 and the `.lodm`
-				 * without the key, which is exactly what an older set is. */
+				// THE COVERAGE CONTRACT: `coverage <floor> <test> <base>`.
 				card.octCovFloor = qBound( 1, line[1].toInt(), 255 );
 				card.octCovTest = qBound( 1, line[2].toInt(), 255 );
 				card.octCovBase = qBound( 1, line[3].toInt(), 255 );
@@ -3858,10 +3345,7 @@ const LodgenCard & lodgenCard( const QString & dir, quint32 formID,
 					id.toLocal8Bit().constData() );
 			}
 		}
-		/* The per-frame offsets, placed on the grid now that the whole meta has
-		 * been read. A frame the sidecar does not name keeps 0,0 -- the old
-		 * behaviour, centred on the card's centre -- so a partial set degrades
-		 * to the law before it rather than to nothing. */
+		// The per-frame offsets, placed on the grid now that the whole meta has been read.
 		if ( card.oct >= 2 && !rawFrameOff.isEmpty() ) {
 			const int cols = card.octCols(), rows = card.octRows();
 			card.octFrameOff.fill( 0.0f, 2 * cols * rows );
@@ -3874,14 +3358,8 @@ const LodgenCard & lodgenCard( const QString & dir, quint32 formID,
 			}
 		}
 		if ( card.halfH > 0.0f ) {
-			/* ONE sheet, front on the left half and side on the right, so the
-			 * two crossed quads read two different views off one texture.
-			 * The bake hook has always written _side.png; the first card
-			 * builder converted only the front and put it on both quads, so
-			 * an impostor looked the same from every angle. A card with no
-			 * side view repeats the front - the old behaviour, now the
-			 * fallback. Named _fs so a card DDS from before this is not
-			 * reused with the old, front-only layout. */
+			// ONE sheet, front on the left half and side on the right, so the two crossed quads read two
+			// different views off one texture.
 			const QString sidePng = dir + "/" + id + QStringLiteral( "_side.png" );
 			card.hasSide = QFile::exists( sidePng );
 			const QString dds = dir + "/" + id + QStringLiteral( "_fs.DDS" );
@@ -3904,21 +3382,13 @@ const LodgenCard & lodgenCard( const QString & dir, quint32 formID,
 				for ( int y = 0; y < h; y++ )
 					for ( int x = 0; x < 2 * w; x++ )
 						px[size_t( y ) * ( 2 * w ) + x] = sheet.pixel( x, y );
-				/* DXT5, WITH the alpha, because the alpha IS the cut-out. This
-				 * sheet went out as DXT1 with `pfflags 0x4` and no
-				 * DDPF_ALPHAPIXELS, so every card quad in a chunk drew as an
-				 * OPAQUE SQUARE (lane IMAGES5, 2026-09-09,
-				 * handoff_cards_in_chunk.png). Vanilla's own alpha-tested tree
-				 * LOD textures -- Textures/LOD/Trees/MapleBranchesLOD_d.dds and
-				 * ElmBranchesLOD_d.dds -- are DXT5, dwFlags 0x000A1007,
-				 * pfflags 0x4, caps 0x401008, and that is byte for byte the
-				 * header this writer emits with bc3 = true. */
+				// DXT5, WITH the alpha, because the alpha IS the cut-out. This sheet went out as DXT1 with
+				// `pfflags 0x4` and no DDPF_ALPHAPIXELS, so every card quad in a chunk drew as an OPAQUE
+				// SQUARE.
 				lodgenWriteDds( dds, 2 * w, h, px, true );
 			}
-			/* The GAME-RELATIVE card path, moved with the folder (lane LAYOUT1,
-			 * 2026-09-16): `Data\Textures\Lodgen\Cards\` until today,
-			 * `Data\FO4CSLOD\Cards\` now. Cards are per TREE and shared by
-			 * every worldspace, so they sit beside the worldspace folders. */
+			// The GAME-RELATIVE card path, moved with the folder: `Data\Textures\Lodgen\Cards\` until today,
+			// `Data\FO4CSLOD\Cards\` now.
 			card.texPath = QStringLiteral( "Data\\" ) + lodgenFo4csGameCardPath()
 				+ QChar( 92 ) + id + QStringLiteral( "_fs.DDS" );
 			card.valid = true;
@@ -3952,7 +3422,7 @@ const LodgenCard & lodgenCard( const QString & dir, quint32 formID,
 				if ( emi.size() != alb.size() )
 					emi = QImage();
 			}
-			/* The fifth sheet, a pbr set's SPECULAR (IMPOSTORPBRM1): `_s`, RGB sqrt(F0')
+			/* The fifth sheet, a pbr set's SPECULAR: `_s`, RGB sqrt(F0')
 			 * and A the specular weight. Optional twice over: the bake writes it only
 			 * when a shape departs from the default specular, and never on a legacy set. */
 			QImage spc;
@@ -3987,35 +3457,10 @@ const LodgenCard & lodgenCard( const QString & dir, quint32 formID,
 				}
 				const int w = alb.width(), h = alb.height();
 				const QString base = dir + "/" + id + QStringLiteral( "_oct" );
-				/* THE MIP CAP, AND THE ONE LEVEL IT NO LONGER SHIPS (bungo, 2026-09-09
-				 * evening: "SHIP ONE MIP FEWER: mips = log2(gap) so the deepest shipped
-				 * level still has a full texel of margin per side").
-				 *
-				 * A frame's mips never mix ACROSS a border -- the box filter halves an
-				 * even frame into an even frame -- but a reader sampling ON a frame's UV
-				 * border takes half its value from the next frame, so what it picks up
-				 * is decided by the MARGIN INSIDE EACH FRAME, gap/2 at level 0. The
-				 * previous cap shipped while the whole gap was a texel, which is the
-				 * level where each margin is HALF a texel and a border tap therefore
-				 * reaches the neighbour's edge (measured on 13 of 19 trees, worst
-				 * 64/255). Stopping one level earlier -- while gap / 2^(k+1) >= 1 -- is
-				 * zero bleed at the same spacing:
-				 *
-				 *   mips = log2( min( gapX, gapY ) )
-				 *
-				 * so a 128-texel frame at gap 8 ships 128, 64, 32: three levels, which
-				 * is what "8 pixels = 3 clean mips" meant all along.
-				 *
-				 * `octMipUnit` is THE GAP under every vintage -- named outright by a
-				 * 2026-09-09 sidecar, and twice the per-side number the two older kinds
-				 * wrote -- so this change moves the newest sets by one level and leaves
-				 * the older ones exactly where they were: log2(2*pad) = 1 + log2(pad).
-				 * The last fallback -- neither line -- is the pre-2026-09-09 sheets' own
-				 * max(4, longSide/16) per side, i.e. twice that as a gap.
-				 *
-				 * Floored at one level: a 16-texel frame's gap is already on its floor
-				 * of 2, whose margin is a single texel, so its chain is mip 0 alone.
-				 * That is the fallback naming itself rather than a silent bleed. */
+				// THE MIP CAP, AND THE ONE LEVEL IT NO LONGER SHIPS:
+				// A frame's mips never mix ACROSS a border -- the box filter halves an even frame into an even
+				// frame -- but a reader sampling ON a frame's UV border takes half its value from the next
+				// frame, so what it picks up is decided by the MARGIN INSIDE EACH FRAME, gap/2 at level 0.
 				const int padFallback = qMax( 4, qMax( card.octTileW, card.octTileH ) / 16 );
 				const int padX = card.octPadX > 0 ? card.octPadX : padFallback;
 				const int padY = card.octPadY > 0 ? card.octPadY : padFallback;
@@ -4044,12 +3489,8 @@ const LodgenCard & lodgenCard( const QString & dir, quint32 formID,
 				 * border. Frames are multiples of four, so a halved frame is
 				 * still even and its mip cap still lands on a whole texel. */
 				const int aw = qMax( 4, w / auxDiv ), ah = qMax( 4, h / auxDiv );
-				/* The aux sheets' gap came down by auxDiv with everything else, so their
-				 * clean depth does too: log2(gap/auxDiv), under the same law. The bake
-				 * rounds the gap UP TO EVEN, so a halved frame still splits it into two
-				 * whole texels down to gap 2; below that -- the 16- and 32-texel frames
-				 * at --card-half-aux -- the division reaches 1, and the floor of one
-				 * level is the fallback naming itself rather than a silent bleed. */
+				// The aux sheets' gap came down by auxDiv with everything else, so their clean depth does too:
+				// log2(gap/auxDiv), under the same law.
 				int auxMips = 0;
 				for ( int g = mipUnit / auxDiv; g >= 2; g /= 2 )
 					auxMips++;
@@ -4061,10 +3502,8 @@ const LodgenCard & lodgenCard( const QString & dir, quint32 formID,
 				const QImage nrmA = down( nrm ), rmA = down( rm );
 				if ( !QFile::exists( base + colorSfx ) )
 					ok = lodgenWriteDds( base + colorSfx, w, h, pixels( alb ), true, frameMips ) && ok;
-				/* `_n` is BC7 (bungo's ruling, lane IMPOSTORDEPTH2 2026-09-23):
-				 * its B is the card's HEIGHT, which DXT5 carried in the 5:6:5
-				 * colour block and returned 2.81 levels off on average. The
-				 * mask sheet keeps BC3: nothing searches it. */
+				// `_n` is BC7: its B is the card's HEIGHT, which DXT5 carried in the 5:6:5 colour block and
+				// returned 2.81 levels off on average. The mask sheet keeps BC3: nothing searches it.
 				const struct { QString suffix; const QImage * img; bool bc7; } sheets[2] = {
 					{ QStringLiteral( "_n.DDS" ), &nrmA, true }, { maskSfx, &rmA, false } };
 				for ( const auto & s : sheets ) {
@@ -4085,7 +3524,7 @@ const LodgenCard & lodgenCard( const QString & dir, quint32 formID,
 					ok = lodgenWriteDds( base + QStringLiteral( "_s.DDS" ), aw, ah, pixels( spcA ), true, auxMips,
 							false, 0, 0, false, true ) && ok;
 				}
-				// the same move as the crossed-quad path above (lane LAYOUT1)
+				// the same move as the crossed-quad path above
 				const QString game = QStringLiteral( "Data\\" ) + lodgenFo4csGameCardPath()
 					+ QChar( 92 ) + id + QStringLiteral( "_oct" );
 				if ( ok ) {
@@ -4128,36 +3567,16 @@ const LodgenCard & lodgenCard( const QString & dir, quint32 formID,
 					oc.insert( QStringLiteral( "frame" ), QJsonArray{ card.octTileW, card.octTileH } );
 					// the run's resolution: `frame` at or below it, per the size ladder
 					oc.insert( QStringLiteral( "base" ), card.octBase );
-					/* What the three sheets that are not the base colour were
-					 * divided by. A consumer needs it only to size its own
-					 * allocation: sampling is in normalised UV, so a halved
-					 * sheet reads with the same coordinates. */
+					// What the three sheets that are not the base colour were divided by.
 					if ( auxDiv > 1 )
 						oc.insert( QStringLiteral( "auxDiv" ), auxDiv );
-					/* THE PADDING IS THE PER-SIDE NUMBER, and `gap` is the distance
-					 * between two neighbouring silhouettes across a frame border --
-					 * bungo's own quantity, and exactly twice it. A reader needs `pad`
-					 * to know which part of a frame is picture (the silhouette occupies
-					 * the INNER rect, `frame - 2*pad`, while `half` still spans the whole
-					 * frame) and `gap` to know the law the mip count came from,
-					 * log2(min(gap)). A set that carries `pad` and no `gap` is a
-					 * CARDFIT3 set, whose gap is twice its number and whose count under
-					 * the same expression is the 1 + log2(min(pad)) it was built for. */
+					// THE PADDING IS THE PER-SIDE NUMBER, and `gap` is the distance between two neighbouring
+					// silhouettes across a frame border bungo's own quantity, and exactly twice it.
 					oc.insert( QStringLiteral( "pad" ), QJsonArray{ padX, padY } );
 					oc.insert( QStringLiteral( "gap" ), QJsonArray{ gapX, gapY } );
 					oc.insert( QStringLiteral( "half" ), QJsonArray{ double( card.octHalfW ), double( card.octHalfH ) } );
 					oc.insert( QStringLiteral( "center" ), QJsonArray{ double( card.octCenter[0] ), double( card.octCenter[1] ), double( card.octCenter[2] ) } );
-					/* PER-FRAME POSITIONING. `center` is the card's ONE centre and
-					 * `half` its ONE size -- the scale is the same in every view, which
-					 * is bungo's rule -- and this is where each frame's quad sits
-					 * relative to that centre: two numbers per frame, in MODEL UNITS,
-					 * along that view's own right and up axes, in the frames' own sheet
-					 * order (frame (i,j) at index j*oct + i, so element 2*(j*oct+i) is
-					 * its right offset and the next its up offset). Absent = a set from
-					 * before the law, whose frames were all centred on `center`; a
-					 * reader that ignores the key gets exactly that older behaviour and
-					 * a tree that steps sideways at the transition by the offset it
-					 * skipped. */
+					// PER-FRAME POSITIONING.
 					if ( !card.octFrameOff.isEmpty() ) {
 						QJsonArray fo;
 						for ( float v : card.octFrameOff )
@@ -4166,7 +3585,7 @@ const LodgenCard & lodgenCard( const QString & dir, quint32 formID,
 					}
 					oc.insert( QStringLiteral( "depthSpan" ), double( card.octSpan ) );
 					oc.insert( QStringLiteral( "mips" ), frameMips );
-					/* THE CAMERA, NAMED (lane CARDORTHO, 2026-09-10). `half`,
+					/* THE CAMERA, NAMED. `half`,
 					 * `center` and `frameOffset` are world measurements taken off
 					 * viewport pixels through one units-per-pixel constant, which
 					 * only an ORTHOGRAPHIC camera makes true. This says whether the
@@ -4179,30 +3598,11 @@ const LodgenCard & lodgenCard( const QString & dir, quint32 formID,
 					 * still. */
 					if ( !card.octProjection.isEmpty() )
 						oc.insert( QStringLiteral( "projection" ), card.octProjection );
-					/* THE VIEW CONVENTION (2026-09-19). `spec1` = frame (i,j) is the
-					 * view from direction (i,j), the spec's own law. Written only
-					 * when the sidecar states it, so every `.lodm` produced before
-					 * this key is byte-identical still -- and its absence is the
-					 * statement that the set predates the azimuth repair and has to
-					 * be re-baked, which a viewer can say out loud instead of
-					 * drawing the back of a tree at the front. */
+					// THE VIEW CONVENTION. `spec1` = frame (i,j) is the view from direction (i,j), the spec's
+					// own law.
 					if ( !card.octConv.isEmpty() )
 						oc.insert( QStringLiteral( "conv" ), card.octConv );
-					/* THE COVERAGE CONTRACT (lane CARDWIDTH, 2026-09-10). `floor` is
-					 * the coverage at which the bake counted a texel covered and
-					 * measured `half` and every `frameOffset`; `test` is the alpha a
-					 * consumer must test at to select THAT SET and no other; `base` is
-					 * the alpha the floor was written at, so the coverage FRACTION is
-					 *     floor + (a - base) * (255 - floor) / (255 - base)
-					 * for a consumer that blends a bare crown instead of testing it.
-					 *
-					 * ABSENT means the sheet's alpha is the raw fraction and the two
-					 * silhouettes disagree: a consumer testing at 0.5 on such a set
-					 * draws up to 5.41 texels of half-width less than `half` declares,
-					 * which is the tree changing size at the transition. A consumer
-					 * that wants the declared silhouette out of an older set tests at
-					 * 16/255 instead. Written only when the sidecar states it, so every
-					 * `.lodm` produced before this key is byte-identical still. */
+					// THE COVERAGE CONTRACT.
 					if ( card.octCovFloor > 0 && card.octCovTest > 0 && card.octCovBase > 0 ) {
 						QJsonObject cov;
 						cov.insert( QStringLiteral( "floor" ), card.octCovFloor );
@@ -4268,13 +3668,9 @@ LodSrcShape lodgenCardShape( const LodgenCard & card )
 
 } // namespace
 
-/* ----------------------------------------------------------------------------
- * AGGREGATE RING-3 IMPOSTORS -- the two things the compositor cannot do for
- * itself, because both live beside the rest of the texture bake: reading the
- * card library (this file owns the ONE card-sidecar reader, `lodgenCard`) and
- * writing a sheet (this file owns `lodgenWriteDds` and the frame dilation).
- * The composite itself is src/lodgenaggregate.cpp and touches neither.
- * -------------------------------------------------------------------------- */
+// AGGREGATE RING-3 IMPOSTORS -- the two things the compositor cannot do for itself, because both live beside
+// the rest of the texture bake: reading the card library (this file owns the ONE card-sidecar reader,
+// `lodgenCard`) and writing a sheet (this file owns `lodgenWriteDds` and the frame dilation).
 
 QHash<quint32, LodgenAggCard> lodgenAggregateCards( const EsmWorld & world, const int region[4],
 	const QString & cardDir, int auxDiv, QStringList * notes )
@@ -4292,10 +3688,8 @@ QHash<quint32, LodgenAggCard> lodgenAggregateCards( const EsmWorld & world, cons
 		const EsmLodBase & b = world.lodBase( baseId );
 		if ( !b.hasLod )
 			return;
-		/* THE TREE TEST IS THE SHARED ONE, called and not re-typed: the same
-		 * `lodgenIsTreeModel` plus the TREE record type the candidate lister,
-		 * the chunk builder and the repetition breaker all use (bungo's
-		 * 2026-09-11 07:0x ruling, trees only). */
+		// THE TREE TEST IS THE SHARED ONE, called and not re-typed: the same `lodgenIsTreeModel` plus the TREE
+		// record type the candidate lister, the chunk builder and the repetition breaker all use.
 		QString probe = b.model;
 		for ( int l = 0; l < 4 && probe.isEmpty(); l++ )
 			probe = b.models[l];
@@ -4307,7 +3701,7 @@ QHash<quint32, LodgenAggCard> lodgenAggregateCards( const EsmWorld & world, cons
 			noSet++;
 			return;
 		}
-		/* A HORIZON-RING set (CARDFIX1 step 5). The aggregate composites from N x N
+		/* A HORIZON-RING set. The aggregate composites from N x N
 		 * grid frames (lodgenaggregate.cpp, cardFrameDir); reading V ring frames as a
 		 * V x V grid would composite the wrong views. Refused and counted by name;
 		 * teaching the aggregate the ring is owed (not this lane's file). */
@@ -4375,19 +3769,15 @@ bool lodgenAggregateWrite( const QString & outRoot, const QString & worldspace,
 			*error = m;
 		return false;
 	};
-	/* ONE ROOT (lane LAYOUT1, 2026-09-16): `Textures\Lodgen\Aggregate\<ws>`
-	 * until today, `FO4CSLOD\<ws>\Aggregate` now. An aggregate set is per
-	 * worldspace CELL, so it belongs inside the worldspace's folder -- unlike
-	 * the per-tree impostor cards, which sit beside the worldspaces. */
+	// ONE ROOT: `Textures\Lodgen\Aggregate\<ws>` until today, `FO4CSLOD\<ws>\Aggregate` now.
 	const QString dir = lodgenFo4csWorldDir( outRoot, worldspace ) + QStringLiteral( "/Aggregate" );
 	if ( !QDir().mkpath( dir ) )
 		return fail( QString( "cannot create %1" ).arg( dir ) );
 	const QString stem = dir + QChar( '/' ) + QString::number( set.cellX )
 		+ QChar( '_' ) + QString::number( set.cellY ) + QStringLiteral( "_agg" );
-	/* THE SAME DILATION the per-card sheets get, frame by frame, so a coarse
-	 * mip that averages across a frame's margin still averages the forest's own
-	 * colour rather than black (docs/LODGEN_CARD_SHEETS.md 3.1). The frame here
-	 * is the aggregate's, and the sheet is one ROW of them. */
+	// THE SAME DILATION the per-card sheets get, frame by frame, so a coarse mip that averages across a
+	// frame's margin still averages the forest's own colour rather than black (docs/LODGEN_CARD_SHEETS.md
+	// 3.1).
 	QImage colour = set.colour, normal = set.normal, mask = set.mask;
 	const int deep = qMax( 8, qMax( set.frameW, set.frameH ) / 8 );
 	lodgenDilateFrames( colour, colour, set.frameW, set.frameH, deep );
@@ -4444,10 +3834,9 @@ bool lodgenModelExtent( const QString & dataRoot, const QString & meshPath,
 		return false;
 	cx = float( sx / double( n ) );
 	cy = float( sy / double( n ) );
-	/* The horizontal half-extent is the largest RADIUS about the vertical axis,
-	 * not a box half-width: the bake photographs from every azimuth and takes
-	 * the widest silhouette it sees, and that is what a radius converges to.
-	 * A box would under-report a tree whose crown leans off the X and Y axes. */
+	// The horizontal half-extent is the largest RADIUS about the vertical axis, not a box half-width: the bake
+	// photographs from every azimuth and takes the widest silhouette it sees, and that is what a radius
+	// converges to.
 	float r = 0.0f;
 	for ( const LodSrcShape & s : shapes )
 		for ( const Vector3 & p : s.pos )
@@ -4480,15 +3869,8 @@ bool lodgenBuildObjectChunk( NifModel * nif, const EsmWorld & world,
 	const float invDim = 1.0f / float( dim );
 	const float cwX = float( chunkX ) * 4096.0f, cwY = float( chunkY ) * 4096.0f;
 
-	/* The chunk's terrain heightfield, in the same miniature space as the
-	 * placements. Built once here and shared by the buried-geometry cull and
-	 * the AO bake, which used to build its own identical copy. */
-	/* Extended by the AO skirt, so a ray leaving the chunk still meets ground.
-	 * Spacing is a CONSTANT 128 game units per sample (scaled to miniature) --
-	 * deriving it from the field width silently rescales the whole field the
-	 * moment the skirt makes that width bigger than the chunk. */
-	/* Matches the AO block's own condition below, which since 2026-09-12 also
-	 * runs for the NATIVE pair with the identity flag off (lane DEFAULTS1). */
+	// The chunk's terrain heightfield, in the same miniature space as the placements. Built once here and
+	// shared by the buried-geometry cull and the AO bake, which used to build its own identical copy.
 	const int skirt = ( opts.bakeAO && ( opts.identity || lodgenNativeActive() ) )
 		? qMax( 0, opts.aoSkirtCells ) : 0;
 	const int terrainCells = dim + 2 * skirt;
@@ -4508,22 +3890,14 @@ bool lodgenBuildObjectChunk( NifModel * nif, const EsmWorld & world,
 							terrainHgt[size_t( cy * 32 + row ) * size_t( terrainN )
 								+ size_t( cx * 32 + col )] = land.heights[row][col] * invDim;
 	}
-	/* The LOWEST of the four surrounding samples, not a bilinear one.
-	 * Under-reading the ground is the safe direction for a cull: it keeps
-	 * geometry that a dip might expose, where over-reading would quietly eat
-	 * something visible. */
+	// The LOWEST of the four surrounding samples, not a bilinear one.
 	auto terrainFloorAt = [&]( float x, float y ) {
 		const int i0 = int( std::floor( ( x - terrainOx ) / terrainSpacing ) );
 		const int j0 = int( std::floor( ( y - terrainOy ) / terrainSpacing ) );
-		/* The LOWEST sample in a WINDOW, not just the enclosing four.
-		 *
-		 * The reference has to be the terrain as the LOD DRAWS it, and that is a
-		 * decimated mesh -- ~2100 triangles for a whole chunk against this
-		 * field's 33x33 per cell -- so between its vertices it sags below the
-		 * source heightfield and exposes geometry the fine grid says is buried.
-		 * Reading the minimum over a window is a cheap stand-in for that sag: it
-		 * assumes the drawn ground could be as low as anything nearby.
-		 */
+		// The LOWEST sample in a WINDOW, not just the enclosing four:
+		// The reference has to be the terrain as the LOD DRAWS it, and that is a decimated mesh -- ~2100
+		// triangles for a whole chunk against this field's 33x33 per cell -- so between its vertices it sags
+		// below the source heightfield and exposes geometry the fine grid says is buried.
 		const int R = 2;
 		float lo = std::numeric_limits<float>::max();
 		for ( int dj = -R; dj <= 1 + R; dj++ ) {
@@ -4535,17 +3909,8 @@ bool lodgenBuildObjectChunk( NifModel * nif, const EsmWorld & world,
 		}
 		return lo;
 	};
-	/*! Does the TERRAIN alone block this ray?
-	 *
-	 *  The buried cull asks whether the ground hides a triangle, not how deep it
-	 *  is. Depth was the first rule and it removed geometry that was plainly
-	 *  visible: a boulder in a shallow dip has vertices far below the
-	 *  surrounding surface and is still in full view. Only the terrain is
-	 *  consulted -- objects are ignored on purpose, so an object hidden purely
-	 *  behind another object is KEPT. That is the conservative direction, and
-	 *  the cheap one: it needs no assembled scene, so the test can run at
-	 *  placement time where the never-disappear rail lives.
-	 */
+	//! Does the TERRAIN alone block this ray?:
+	//! The buried cull asks whether the ground hides a triangle, not how deep it is.
 	auto terrainBlocks = [&]( const Vector3 & o, const Vector3 & d, float maxT ) {
 		const float step = qMax( terrainSpacing * 0.5f, 1.0f );
 		for ( float t = step; t < maxT; t += step ) {
@@ -4566,15 +3931,9 @@ bool lodgenBuildObjectChunk( NifModel * nif, const EsmWorld & world,
 	 *  unblocked direction keeps the triangle, so the test errs towards keeping.
 	 */
 	auto terrainHides = [&]( const Vector3 & p ) {
-		/* Up, 45 degrees, 20 degrees AND near-horizontal.
-		 *
-		 * The horizontal ring is the one that matters and the one an
-		 * up-facing-only test was missing: LOD is looked at from ground level
-		 * across a valley, not from above. Without these, geometry that a hill
-		 * hides from a bird is culled and then plainly visible to a player
-		 * standing on the far side -- measured at 166,579 pixels of hole from a
-		 * low camera against 11,001 from a high one.
-		 */
+		// Up, 45 degrees, 20 degrees AND near-horizontal:
+		// The horizontal ring is the one that matters and the one an up-facing-only test was missing: LOD is
+		// looked at from ground level across a valley, not from above.
 		static const float dirs[13][3] = {
 			{ 0.0f, 0.0f, 1.0f },
 			{ 0.7f, 0.0f, 0.7f }, { -0.7f, 0.0f, 0.7f },
@@ -4612,17 +3971,8 @@ bool lodgenBuildObjectChunk( NifModel * nif, const EsmWorld & world,
 			if ( cx < 0 || cy < 0 || cx >= dim || cy >= dim )
 				skirtRefs += world.refrs( chunkX + cx, chunkY + cy );
 
-	/* SCOL expansion: a static collection has no LOD models of its own — the
-	 * CK generates its LOD by unpacking the parts back into their source
-	 * bases (xLODGen does the same). Each part placement composes under the
-	 * placing REFR: world = T_ref * T_placement. Everything downstream sees
-	 * one flat placement list, so identity/AO/manifests treat expanded
-	 * copies exactly like first-class refs. */
-	/* The stable key of an object is the placed REFERENCE, not the base (a
-	 * base is shared by every copy of a maple) and not the index (per chunk,
-	 * per ring). A SCOL part has no reference of its own: it carries the SCOL
-	 * reference and its ordinal within it. bungo, 2026-09-06: "stable
-	 * identity sounds good" - matched across rings and bakes by (ref, part). */
+	// SCOL expansion: a static collection has no LOD models of its own — the CK generates its LOD by unpacking
+	// the parts back into their source bases (xLODGen does the same).
 	struct LodPlacement
 	{
 		quint32 base;
@@ -4637,11 +3987,8 @@ bool lodgenBuildObjectChunk( NifModel * nif, const EsmWorld & world,
 	for ( const EsmRefr & r : refs ) {
 		if ( r.initiallyDisabled || r.deleted || !r.base )
 			continue;
-		/* Bethesda's stored euler angles are applied NEGATED relative to
-		 * Matrix::fromEuler: world R = Rx(-x)·Ry(-y)·Rz(-z). Proven against
-		 * vanilla chunks on multi-axis-rotated refs (RockCliff at
-		 * 38°/33°/77°: 62% vertex match under this convention vs 14% under
-		 * fromEuler(+x,+y,+z); pure-Z road pieces confirm too). */
+		// Bethesda's stored euler angles are applied NEGATED relative to Matrix::fromEuler: world R =
+		// Rx(-x)·Ry(-y)·Rz(-z).
 		Matrix rm;
 		rm.fromEuler( -r.rot[0], -r.rot[1], -r.rot[2] );
 		const Vector3 rp( r.pos[0], r.pos[1], r.pos[2] );
@@ -4732,16 +4079,9 @@ bool lodgenBuildObjectChunk( NifModel * nif, const EsmWorld & world,
 			treeProbe = base.models[l];
 		const bool baseIsTree = std::memcmp( &base.type, "TREE", 4 ) == 0
 			|| lodgenIsTreeModel( treeProbe );
-		/* A card stands in where the ring's slot is missing (it beats falling
-		 * back to a heavier near-slot mesh) and, from opts.impostorFromLevel
-		 * on, in place of the slot's mesh too: one quad per tree at the near
-		 * rings, for a consumer that draws the octahedral sheets.
-		 *
-		 * TREES ONLY (bungo 2026-09-11 07:0x/07:1x). `treesOnly` on: nothing
-		 * but a tree may stand on a card at all. Off: the "missing" rule alone
-		 * -- an empty ring slot, any base. The ring override is tree-only in
-		 * both states; a non-tree with an authored mesh is never replaced by a
-		 * quad. */
+		// A card stands in where the ring's slot is missing (it beats falling back to a heavier near-slot
+		// mesh) and, from opts.impostorFromLevel on, in place of the slot's mesh too: one quad per tree at the
+		// near rings, for a consumer that draws the octahedral sheets.
 		const bool cardEligible = !opts.treesOnly || baseIsTree;
 		const bool cardWanted = !opts.impostorDir.isEmpty() && cardEligible
 			&& ( model.isEmpty()
@@ -4758,11 +4098,8 @@ bool lodgenBuildObjectChunk( NifModel * nif, const EsmWorld & world,
 			}
 		}
 		if ( cardShapes.isEmpty() ) {
-			/* Vanilla parity: an empty MNAM slot means the object DROPS OUT
-			 * at that ring — measured Commonwealth.16.-16.16.BTO holds 7k
-			 * verts where slot-substitution produced 244k. Substituting a
-			 * nearer (heavier) model is opt-in, and impostor cards above
-			 * are the sanctioned stand-in. */
+			// Vanilla parity: an empty MNAM slot means the object DROPS OUT at that ring — measured
+			// Commonwealth.16.-16.16.BTO holds 7k verts where slot-substitution produced 244k.
 			if ( model.isEmpty() && opts.slotFallback ) {
 				for ( int l = lodLevel; l >= 0 && model.isEmpty(); l-- )
 					model = base.models[l];
@@ -4787,17 +4124,9 @@ bool lodgenBuildObjectChunk( NifModel * nif, const EsmWorld & world,
 		xf.rotation = r.rot;
 		xf.scale = r.scale * invDim;
 
-		/* Repetition breaking for trees (charter: "mirror half the cards,
-		 * rotate card sets per tree"): a position-stable hash spins each
-		 * tree's card set and mirrors half of them in U, so distant forests
-		 * stop reading as copies. Rotation about the tree's own Z is safe —
-		 * crossed-card LOD models are radially symmetric by construction. */
-		/* NOT a bare substring test: "sTREEt" — the first cut randomly spun
-		 * every street and highway piece downtown. Tree records, the LOD
-		 * trees folder, and tree-prefixed model names only. The three path
-		 * tests live in lodgenIsTreeModel and are called, not re-typed: lane
-		 * LODUI1 needed the same question answered before the card block
-		 * above, and a second copy here is how two answers begin. */
+		// Repetition breaking for trees (charter: "mirror half the cards, rotate card sets per tree"): a
+		// position-stable hash spins each tree's card set and mirrors half of them in U, so distant forests
+		// stop reading as copies.
 		const bool isTree = std::memcmp( &base.type, "TREE", 4 ) == 0
 			|| lodgenIsTreeModel( model );
 		quint32 treeHash = 0;
@@ -4818,24 +4147,12 @@ bool lodgenBuildObjectChunk( NifModel * nif, const EsmWorld & world,
 			const int ly = qBound( 0, int( ( r.pos[1] - cwY ) / 4096.0f ), dim - 1 );
 			cellIdx = ly * dim + lx;
 		}
-		/* Local bounds across ALL of a placement's shapes. Two consumers:
-		 *
-		 *  - the sway weight, measured in the placement's OWN space so a
-		 *    leaning or rotated tree still reads 0 at its own base rather than
-		 *    at whatever happens to be its lowest world point, and normalised
-		 *    across every shape rather than per shape -- a tree is a trunk and
-		 *    a branch card split by texture, and normalising each alone would
-		 *    make the branch card's base read 0 and step at the join;
-		 *  - the manifest's BOUND RADIUS, which is the charter's screen-size
-		 *    fade input and therefore wanted for every placement, not just
-		 *    trees. */
+		// Local bounds across ALL of a placement's shapes.
 		float localZMin = 3.4e38f, localZMax = -3.4e38f;
 		float localRadius = 0.0f, localMaxDist = 0.0f;
-		/* The DRAWN top of this placement, in chunk-miniature units. Taken
-		 * through the placement's own transform rather than from `localZMax`
-		 * times the scale, because an ESM rotation is not always about Z. Only
-		 * computed when the native emitter is armed and AO is being cast --
-		 * it is one transform per source vertex. */
+		// The DRAWN top of this placement, in chunk-miniature units. Taken through the placement's own
+		// transform rather than from `localZMax` times the scale, because an ESM rotation is not always about
+		// Z.
 		const bool wantAoProbe = lodgenNativeActive() && opts.bakeAO;
 		float probeZ = -3.4e38f;
 		for ( const LodSrcShape & s : shapes ) {
@@ -4876,22 +4193,10 @@ bool lodgenBuildObjectChunk( NifModel * nif, const EsmWorld & world,
 				objClass = "building";
 		}
 
-		/* Identity channel: 16-bit per-chunk index in R+G. COMPUTED WHATEVER
-		 * THE FLAG SAYS since 2026-09-12 (lane DEFAULTS1) because the native
-		 * .lodo/.lodi lighting rows are keyed off it further down; with the
-		 * flag off it never reaches the .BTO, the vertex write below being
-		 * gated on the flag, so the legacy file is vanilla's layout exactly. */
+		// Identity channel: 16-bit per-chunk index in R+G.
 		const Color4 idColor( float( objectIndex & 0xFF ) / 255.0f,
 			float( ( objectIndex >> 8 ) & 0xFF ) / 255.0f, 1.0f, 1.0f );
-		/* THE MANIFEST IS A SIDECAR (lane DEFAULTS1, 2026-09-12). It used to be
-		 * written only with the identity flag, which meant that turning the
-		 * flag off -- as bungo's 15:56 ruling does by default -- silently took
-		 * the impostor card arrays and the far-ring cut with it (lane
-		 * SHOWCASE1 found that). The rows are written whatever the flag says;
-		 * only what goes INSIDE the .BTO follows the flag. The index column is
-		 * still the object's per-chunk ordinal, which is exactly what the R+G
-		 * vertex colour WOULD carry, so a manifest written with identity off
-		 * has the same meaning it always had. */
+		// THE MANIFEST IS A SIDECAR.
 		{
 			manifest.append( QString( "%1 %2 %3 %4 %5 %6 %7 %8 %9" )
 				.arg( objectIndex )
@@ -4903,11 +4208,8 @@ bool lodgenBuildObjectChunk( NifModel * nif, const EsmWorld & world,
 				.arg( QLatin1String( objClass ) )
 				.arg( double( localMaxDist * r.scale ) )
 				+ QString( " %1 %2" ).arg( r.ref, 8, 16, QChar( '0' ) ).arg( r.part ) );
-			/* A placement standing on an octahedral card says so: the card's
-			 * centre and half extents in model space, the grid, the depth span
-			 * and the set's .lodm (family, sheets, grid). The crossed quads
-			 * above it are the stock engine's; a consumer reading this line
-			 * draws the card instead. */
+			// A placement standing on an octahedral card says so: the card's centre and half extents in model
+			// space, the grid, the depth span and the set's .lodm (family, sheets, grid).
 			if ( usedCard.valid && usedCard.oct >= 2 )
 				manifest.append( QString( "C %1 %2 %3 %4 %5 %6 %7 %8 %9" ).arg( objectIndex )
 					.arg( double( usedCard.octCenter[0] ) ).arg( double( usedCard.octCenter[1] ) )
@@ -4938,11 +4240,7 @@ bool lodgenBuildObjectChunk( NifModel * nif, const EsmWorld & world,
 			np.objectIndex = objectIndex;
 			np.chunkX = chunkX; np.chunkY = chunkY; np.dim = dim;
 			lodgenNativeAddPlacement( np );
-			/* The probe stands 16 world units (in miniature) ABOVE the drawn
-			 * top, facing up. Above the object's own geometry so its own
-			 * triangles do not darken it -- the card already carries that --
-			 * and facing +Z so what the ray finds is a bridge, a wall or a
-			 * cliff above this spot, which is the thing the card cannot know. */
+			// The probe stands 16 world units (in miniature) ABOVE the drawn top, facing up.
 			if ( wantAoProbe && probeZ > -3.0e38f )
 				aoProbes.append( LodAoProbe{ objectIndex,
 					Vector3( xf.translation[0], xf.translation[1], probeZ + 16.0f * invDim ) } );
@@ -4950,10 +4248,9 @@ bool lodgenBuildObjectChunk( NifModel * nif, const EsmWorld & world,
 		const bool swaying = opts.treeSway && isTree && localSpan > 1.0e-4f;
 
 		for ( const LodSrcShape & s : shapes ) {
-			/* One bucket per distinct material: textures, the specular slot,
-			 * the constants and the source material's name, so two sources
-			 * sharing a diffuse but not a material never merge into one shape
-			 * (they used to: the key was the diffuse and normal alone). */
+			// One bucket per distinct material: textures, the specular slot, the constants and the source
+			// material's name, so two sources sharing a diffuse but not a material never merge into one shape
+			// (they used to: the key was the diffuse and normal alone).
 			ObjBucket & bucket = buckets[s.tex0.toLower() + QChar( '|' ) + s.tex1.toLower() + QChar( '|' )
 				+ s.tex7.toLower() + QChar( '|' ) + s.matName.toLower()
 				+ QString( "|%1|%2" ).arg( double( s.smoothness ) ).arg( double( s.specMult ) )
@@ -4977,11 +4274,7 @@ bool lodgenBuildObjectChunk( NifModel * nif, const EsmWorld & world,
 				bucket.alphaFlags = s.alphaFlags;
 				bucket.alphaThreshold = s.alphaThreshold;
 			}
-			/* Buried-geometry cull. Done HERE, per placement, because both
-			 * safety rails are per placement: the all-three-vertices rule
-			 * needs the source triangles, and the never-disappear rule needs
-			 * to know this object's own total. Once shapes are merged into a
-			 * bucket neither is recoverable. */
+			// Buried-geometry cull.
 			QVector<Triangle> keptTris;
 			QVector<int> remap;
 			bool culled = false;
@@ -4994,10 +4287,8 @@ bool lodgenBuildObjectChunk( NifModel * nif, const EsmWorld & world,
 					buried[v] = ( world[v][2] < terrainFloorAt( world[v][0], world[v][1] ) - margin )
 						? 1 : 0;
 				}
-				/* Two gates, and the second is the one that matters. Being under
-				 * the surface only makes a triangle a CANDIDATE; it goes only if
-				 * the ground actually hides it from every direction. Depth alone
-				 * removed geometry in shallow dips that was in full view. */
+				// Two gates, and the second is the one that matters. Being under the surface only makes a
+				// triangle a CANDIDATE; it goes only if the ground actually hides it from every direction.
 				for ( const Triangle & t : s.tris ) {
 					const bool under = buried[t.v1()] && buried[t.v2()] && buried[t.v3()];
 					if ( under ) {
@@ -5069,10 +4360,9 @@ bool lodgenBuildObjectChunk( NifModel * nif, const EsmWorld & world,
 				Color4 c = idColor;
 				if ( opts.identity ) {
 					if ( swaying ) {
-						/* Height dominates because a trunk is a cantilever --
-						 * deflection grows faster than linearly with height --
-						 * and the radial term separates a branch tip from the
-						 * trunk at the same height. */
+						// Height dominates because a trunk is a cantilever deflection grows faster than
+						// linearly with height and the radial term separates a branch tip from the trunk at
+						// the same height.
 						const Vector3 & lp = s.pos[v];
 						const float hF = qBound( 0.0f,
 							( lp[2] - localZMin ) / localSpan, 1.0f );
@@ -5101,7 +4391,7 @@ bool lodgenBuildObjectChunk( NifModel * nif, const EsmWorld & world,
 					quint16( vBase + a ), quint16( vBase + b ), quint16( vBase + cIdx ) ) );
 			}
 		}
-		/* Manifest data, so not on the identity flag (lane DEFAULTS1). */
+		/* Manifest data, so not on the identity flag. */
 		{
 			auto & group = instanceGroups[r.base];
 			group.first = model;
@@ -5110,11 +4400,8 @@ bool lodgenBuildObjectChunk( NifModel * nif, const EsmWorld & world,
 		objectIndex++;
 		placed++;
 	}
-	/* Instance groups (FO76's BSDistantObjectInstancedNode, ours as manifest
-	 * data): bases repeated >= 8 times in the chunk. The stitched copies stay
-	 * in the mesh for vanilla; a CS consumer can kill those fragments by the
-	 * listed identity indices and draw the model instanced instead.
-	 * Manifest data, so not on the identity flag (lane DEFAULTS1). */
+	// Instance groups (FO76's BSDistantObjectInstancedNode, ours as manifest data): bases repeated >= 8 times
+	// in the chunk.
 	{
 		for ( auto it = instanceGroups.constBegin(); it != instanceGroups.constEnd(); ++it ) {
 			if ( it.value().second.size() < 8 )
@@ -5133,15 +4420,8 @@ bool lodgenBuildObjectChunk( NifModel * nif, const EsmWorld & world,
 		return fail( QString( "no LOD-bearing refs in chunk (%1,%2)x%3 (%4 placed, %5 without a usable LOD model)" )
 			.arg( chunkX ).arg( chunkY ).arg( dim ).arg( placed ).arg( skippedNoLod ) );
 
-	/* Rung 3 bake: per-placement AO into the identity B channel, ray-cast
-	 * against the whole assembled chunk plus the terrain heightfield.
-	 *
-	 * ALSO RUN WITH IDENTITY OFF WHEN THE NATIVE PAIR IS BEING WRITTEN (lane
-	 * DEFAULTS1, 2026-09-12): the .lodo/.lodi lighting rows are fed from this
-	 * loop, and the FO4CS data lives only in the .lod* files now, so it must
-	 * not thin out when the legacy vertex channels go away. With identity off
-	 * the colour this loop writes into `bucket.col` never reaches the .BTO --
-	 * the vertex write below is still gated on the flag. */
+	// Rung 3 bake: per-placement AO into the identity B channel, ray-cast against the whole assembled chunk
+	// plus the terrain heightfield.
 	if ( opts.bakeAO && ( opts.identity || lodgenNativeActive() ) ) {
 		LodgenAoScene scene;
 		scene.hn = terrainN;
@@ -5202,13 +4482,8 @@ bool lodgenBuildObjectChunk( NifModel * nif, const EsmWorld & world,
 			for ( int v = 0; v < bucket.pos.size(); v++ ) {
 				if ( opts.objectChannels ) {
 					bucket.sky[v] = scene.skyVisibility( bucket.pos[v], 300.0f );
-					/* Ground contact: 1 at or below the surface, falling to 0
-					 * over CONTACT_RANGE world units above it. The BILINEAR
-					 * ground, not the conservative windowed minimum the cull
-					 * uses -- the cull wants to under-read the ground so it
-					 * never eats something visible, this wants the surface
-					 * where it actually is so a wall's base blends at its
-					 * base. */
+					// Ground contact: 1 at or below the surface, falling to 0 over CONTACT_RANGE world units
+					// above it.
 					constexpr float CONTACT_RANGE = 256.0f;
 					const Vector3 & p = bucket.pos[v];
 					const float g = scene.groundHeight( p[0], p[1] );
@@ -5249,10 +4524,9 @@ bool lodgenBuildObjectChunk( NifModel * nif, const EsmWorld & world,
 	nif->set<quint32>( iRoot, "Flags", 14 );
 	nif->set<float>( iRoot, "Scale", 1.0f );
 
-	/* Built rather than hardcoded once the extra channels are in play: the
-	 * stride is whatever the flags add up to, and a constant that disagrees
-	 * with the flags writes a file whose Data Size and vertex rows do not
-	 * match -- which reads as corruption, not as a wrong number. */
+	// Built rather than hardcoded once the extra channels are in play: the stride is whatever the flags add up
+	// to, and a constant that disagrees with the flags writes a file whose Data Size and vertex rows do not
+	// match -- which reads as corruption, not as a wrong number.
 	BSVertexDesc objDesc( opts.identity ? OBJ_VERTEX_DESC_COLORS : OBJ_VERTEX_DESC );
 	const bool extraChannels = opts.identity && opts.objectChannels;
 	if ( extraChannels ) {
@@ -5273,12 +4547,9 @@ bool lodgenBuildObjectChunk( NifModel * nif, const EsmWorld & world,
 			QStringLiteral( "BSSubIndexTriShape" ),
 			bucket.hasAlpha ? QStringLiteral( "obj-at" ) : QStringLiteral( "obj" ),
 			float( dim ) );
-		/* Vanilla BTO shapes carry the chunk's WORLD position in their own
-		 * translation (verts stay chunk-relative miniatures) — the engine
-		 * does NOT filename-place object chunks the way it places terrain.
-		 * Measured: Commonwealth.4.-20.24.BTO shape T = (-81920, 98304, 0)
-		 * = chunk * 4096; its .BTR Land sits at T = 0. bungo spotted the
-		 * origin mismatch in the viewer. */
+		// Vanilla BTO shapes carry the chunk's WORLD position in their own translation (verts stay
+		// chunk-relative miniatures) — the engine does NOT filename-place object chunks the way it places
+		// terrain.
 		nif->set<Vector3>( iShape, "Translation",
 			Vector3( cwX, cwY, 0.0f ) );
 
@@ -5347,11 +4618,9 @@ bool lodgenBuildObjectChunk( NifModel * nif, const EsmWorld & world,
 
 		QModelIndex iShader = nif->insertNiBlock( QStringLiteral( "BSLightingShaderProperty" ) );
 		nif->set<quint32>( iShader, "Shader Type", 0 );
-		/* Vanilla's chunk shapes carry Own-Emit set (bit 22) with a BLACK
-		 * emissive colour, which emits nothing; ours carries the SOURCE'S bit,
-		 * colour and multiple, so a source that really does own-emit reaches the
-		 * arrays pass and the engine alike. With a black colour this is vanilla's
-		 * own state exactly. */
+		// Vanilla's chunk shapes carry Own-Emit set (bit 22) with a BLACK emissive colour, which emits
+		// nothing; ours carries the SOURCE'S bit, colour and multiple, so a source that really does own-emit
+		// reaches the arrays pass and the engine alike.
 		nif->set<quint32>( iShader, "Shader Flags 1",
 			bucket.ownEmit ? 2151677953U : ( 2151677953U & ~LOD_OWN_EMIT ) );
 		nif->set<quint32>( iShader, "Shader Flags 2",
@@ -5441,7 +4710,7 @@ bool lodgenBuildObjectChunk( NifModel * nif, const EsmWorld & world,
 namespace
 {
 
-//! BC1 (DXT1) DDS writer with a full box-filtered mip chain — the format
+//! BC1 DDS writer with a full box-filtered mip chain — the format
 //! vanilla's own terrain bakes use (theirs are BC3; BC1 suffices with no
 //! alpha and quarters the size).
 namespace
@@ -5456,13 +4725,9 @@ quint16 lodgenPack565( quint32 bgra )
 void lodgenEncodeBC1Block( const quint32 * img, int w, int h, int bx, int by,
 	quint8 * out, bool allowPunch = true )
 {
-	// endpoints: the block's min/max-luminance colours; blocks holding
-	// transparent pixels (alpha < 128) use BC1's punch-through mode when
-	// allowPunch (a BC3 colour block is always 4-colour — its alpha lives
-	// in the alpha block, and RGB under transparent texels must survive so
-	// filtering doesn't pull edges to black).
-	// Edge blocks of non-multiple-of-4 mips CLAMP their reads — the
-	// unclamped version walked off the last row of a 558-wide mip.
+	// endpoints: the block's min/max-luminance colours; blocks holding transparent pixels (alpha < 128) use
+	// BC1's punch-through mode when allowPunch (a BC3 colour block is always 4-colour — its alpha lives in the
+	// alpha block, and RGB under transparent texels must survive so filtering doesn't pull edges to black).
 	int bestLo = 0, bestHi = 0;
 	float loL = 1e9f, hiL = -1e9f;
 	bool punch = false;
@@ -5560,13 +4825,8 @@ void lodgenEncodeBC1Block( const quint32 * img, int w, int h, int bx, int by,
 	out[6] = quint8( bits >> 16 ); out[7] = quint8( bits >> 24 );
 }
 
-/*! The per-channel error weights (R G B A) the card `_n` sheet is encoded
- *  under: the HEIGHT is B, and the depth search reads it, so it counts 32
- *  times a normal channel. Measured on the n8_2k fixture (1,037,765 covered
- *  texels) against the bake's own PNG: height error mean 0.61 levels, p95 2,
- *  all 59 heights surviving, normals R/G mean 3.6; under DXT5 the same sheet
- *  read 2.81 / 8 / 27 of 59 and R/G 11.3. Weight 64 gave 0.49 but lost a
- *  height; weight 1 gave 1.37 (lane IMPOSTORDEPTH2, 2026-09-23). */
+//! The per-channel error weights (R G B A) the card `_n` sheet is encoded under: the HEIGHT is B, and the depth
+//! search reads it, so it counts 32 times a normal channel.
 static const int kCardNormalBc7Weights[4] = { 1, 1, 32, 1 };
 
 //! One BC7 block of a 0xAARRGGBB image, edge texels clamped as BC1/BC3 do.
@@ -5591,31 +4851,16 @@ bool lodgenWriteDds( const QString & path, int w, int h,
 	const std::vector<quint32> & bgra, bool bc3, int maxMips, bool bc1Alpha,
 	quint32 stamp0, quint32 stamp1, bool mipsToOne, bool bc7 )
 {
-	/* bc7 (lane IMPOSTORDEPTH2, 2026-09-23): the same mip chain with alpha
-	 * kept, every block BC7 (src/lodgenbc7.h, weighted for a card `_n`: see
-	 * kCardNormalBc7Weights), behind a DX10 header with DXGI 98
-	 * (BC7_UNORM) and an array size of 1. Off, every byte is what it was. */
+	// bc7: the same mip chain with alpha kept, every block BC7 (src/lodgenbc7.h, weighted for a card `_n`: see
+	// kCardNormalBc7Weights), behind a DX10 header with DXGI 98 and an array size of 1.
 	if ( bc7 )
 		bc3 = true;
 	QFile f( path );
 	if ( !f.open( QIODevice::WriteOnly ) )
 		return false;
-	// mip chain by box filter, down to 4x4 (block floor); BC3 carries alpha
-	// through the chain, and so does BC1 when bc1Alpha -- a BC1 sheet whose
-	// alpha is a CUT-OUT mask must keep it, or every mip past the top turns
-	// a tree's leaves back into a solid square, which is precisely the
-	// distance an atlas is looked at. Without it BC1 stays opaque, which is
-	// what every all-opaque caller (the terrain bakes, the emissive sheets)
-	// already wrote, byte for byte. maxMips > 0 stops the chain early:
-	// a sheet of frames must not mip past the point where a frame is a few
-	// texels, or neighbouring views blend into one another.
-	// mipsToOne carries the chain past the 4x4 block floor down to 1x1, which
-	// is what every shipped Bethesda terrain sheet does (measured: all 6,120
-	// Commonwealth sheets are 512x512 with 10 mips, i.e. 512..1). It is off by
-	// default, and with the floor at 4x4 the two paths agree level for level,
-	// so every existing caller writes the bytes it wrote before. The per-level
-	// dimensions are the ones the loop actually produced, kept in mipW/mipH,
-	// rather than a second independently halved copy of them further down.
+	// mip chain by box filter, down to 4x4 (block floor); BC3 carries alpha through the chain, and so does BC1
+	// when bc1Alpha -- a BC1 sheet whose alpha is a CUT-OUT mask must keep it, or every mip past the top turns
+	// a tree's leaves back into a solid square, which is precisely the distance an atlas is looked at.
 	std::vector<std::vector<quint32>> mips;
 	std::vector<int> mipW, mipH;
 	mips.push_back( bgra );
@@ -5668,16 +4913,13 @@ bool lodgenWriteDds( const QString & path, int w, int h,
 	hdr[20] = 0x4;                  // fourCC
 	hdr[21] = bc7 ? 0x30315844U : bc3 ? 0x35545844U : 0x31545844U;   // 'DX10' / 'DXT5' / 'DXT1'
 	hdr[27] = 0x401008;             // caps: complex|texture|mipmap
-	/* dwReserved1[11] -- file offsets 32..75, hdr[8]..hdr[18] -- is zero in
-	 * every DDS this tree has ever written and is ignored by every reader in
-	 * it. hdr[8]/hdr[9] carry the ground-cover provenance stamp: 'WWCV' and
-	 * (lawVersion << 24) | round(COVER_FULL). A DXT5 terrain data sheet
-	 * WITHOUT it carries no cover, whatever its alpha decodes to. */
+	// dwReserved1[11] -- file offsets 32..75, hdr[8]..hdr[18] -- is zero in every DDS this tree has ever
+	// written and is ignored by every reader in it.
 	hdr[8] = stamp0;
 	hdr[9] = stamp1;
 	f.write( reinterpret_cast<const char *>( hdr ), 128 );
 	if ( bc7 ) {
-		// DDS_HEADER_DXT10: BC7_UNORM, 2D, no flags, one layer
+		// BC7_UNORM, 2D, no flags, one layer
 		const quint32 dx10[5] = { 98U, 3U, 0U, 1U, 0U };
 		f.write( reinterpret_cast<const char *>( dx10 ), 20 );
 	}
@@ -5754,10 +4996,8 @@ const DDSTexture16 * lodgenLoadTexture( const QString & dataRoot,
 	QString path = texPath;
 	path.replace( QChar( '\\' ), QChar( '/' ) );
 	if ( path.endsWith( QStringLiteral( ".bgsm" ), Qt::CaseInsensitive ) ) {
-		/* THE SAME CUT (lane CELLVIEW2) -- this is the LANDSCAPE texture
-		 * loader, which a material-backed TXST sends through a `.bgsm`, and
-		 * it is the path the cell view's painted ground now takes as well.
-		 * See the note at the model loader above. */
+		// THE SAME CUT -- this is the LANDSCAPE texture loader, which a material-backed TXST sends through a
+		// `.bgsm`, and it is the path the cell view's painted ground now takes as well.
 		const int pmi = path.lastIndexOf( QStringLiteral( "materials/" ), -1,
 			Qt::CaseInsensitive );
 		if ( pmi > 0 )
@@ -5793,7 +5033,7 @@ const DDSTexture16 * lodgenLoadTexture( const QString & dataRoot,
 	return tex;
 }
 
-} // namespace (lane AO2: the alpha map loader below is exported)
+} // namespace
 
 const LodgenAoAlpha * lodgenAoAlphaMap( const QString & dataRoot, const QString & texPath, quint8 ref )
 {
@@ -5828,12 +5068,7 @@ const LodgenAoAlpha * lodgenAoAlphaMap( const QString & dataRoot, const QString 
 namespace
 {
 
-/*! One layer of a DX10 texture array: the full mip chain, BC1 or BC3,
- *  appended to `out`. The mip filter and the block encoders are the ones
- *  lodgenWriteDds uses, in the same order, so a layer is byte for byte what
- *  the single-texture writer would have produced for that image; the loop
- *  is repeated rather than shared because the single writer's output is
- *  gated by harnesses and was not to move. Returns the mip count. */
+//! One layer of a DX10 texture array: the full mip chain, BC1 or BC3, appended to `out`.
 static int lodgenEncodeArrayLayer( const std::vector<quint32> & bgra, int w, int h, bool bc3,
 	std::vector<quint8> & out, int maxMips = 0, bool bc7 = false )
 {
@@ -5955,7 +5190,7 @@ bool lodgenWriteDdsArray( const QString & path, int w, int h,
 	hdr[20] = 0x4;                  // fourCC
 	hdr[21] = 0x30315844U;          // 'DX10'
 	hdr[27] = 0x401008;             // caps: complex|texture|mipmap
-	// DDS_HEADER_DXT10: dxgiFormat, resourceDimension (3 = 2D), miscFlag, arraySize, miscFlags2
+	// dxgiFormat, resourceDimension (3 = 2D), miscFlag, arraySize, miscFlags2
 	const quint32 dx10[5] = { bc7 ? 98U : bc3 ? 77U : 71U, 3U, 0U, quint32( layers.size() ), 0U };
 	f.write( reinterpret_cast<const char *>( hdr ), 128 );
 	f.write( reinterpret_cast<const char *>( dx10 ), 20 );
@@ -5995,7 +5230,7 @@ bool lodgenWriteDdsArray( const QString & path, int w, int h,
  *  2026-10-27 a pbr set was its own `<ws>.LodgenArraysPBR.<WxH>`.
  *  A legacy `.lodm` supplies its own textures, the third and the emissive raw, under
  *  the legacy names. A set whose emissive is black on every layer writes no
- *  `_g`/`_e` and its `.lodm` names no `textures.emissive` (lane TIDY1,
+ *  `_g`/`_e` and its `.lodm` names no `textures.emissive` (
  *  2026-09-27: vanilla LOD has no glow source, so that is every vanilla mesh set).
  *  Layers whose four sheets are identical texel for texel are ONE layer; the
  *  other spellings of its source resolve to it. Run BEFORE the atlas. bungo, 2026-09-06: "keep it
@@ -6004,7 +5239,7 @@ bool lodgenWriteDdsArray( const QString & path, int w, int h,
  */
 /*! True when every texel of every layer is black in RGB (alpha is not
  *  emission). The test a mesh or card array's emissive must pass to be left
- *  unwritten (lane TIDY1, 2026-09-27). */
+ *  unwritten. */
 static bool lodgenLayersBlack( const std::vector<std::vector<quint32>> & layers )
 {
 	for ( const std::vector<quint32> & l : layers )
@@ -6014,13 +5249,8 @@ static bool lodgenLayersBlack( const std::vector<std::vector<quint32>> & layers 
 	return true;
 }
 
-/*! True when the BC1 emissive sheet these layers make DECODES black on every
- *  texel of every mip - the test a sheet must pass to be left unwritten. The
- *  8-bit test above is not enough: the BC1 end points keep 5:6:5 and truncate,
- *  so a texel of 1-7/255 ships as 0. Card set 000a7209 (Boston, legacy 256x512)
- *  has 2575 glow texels of 1-3/255 and its sheet was all-zero bytes, kept
- *  (lane TIDY1, 2026-09-27). Encodes with the writer's own path, so the answer
- *  is about the bytes lodgenWriteDdsArray would write. */
+//! True when the BC1 emissive sheet these layers make DECODES black on every texel of every mip - the test a
+//! sheet must pass to be left unwritten.
 static bool lodgenEmissiveShipsBlack( const std::vector<std::vector<quint32>> & layers, int w, int h, int maxMips = 0 )
 {
 	if ( lodgenLayersBlack( layers ) )
@@ -6130,25 +5360,14 @@ bool lodgenBuildTextureArrays( const QStringList & btoPaths, const QString & dat
 	 * COLOUR texture where the vanilla glow rule composed it (colour x its own
 	 * alpha), and empty where the layer emits nothing. */
 	struct Layer { QString key, color, normal, mask, emissiveFrom, lodm; float emissiveScale = 0.0f; };
-	/* `alias`: a source key whose composed texels are IDENTICAL to a layer
-	 * already in the class (all four sheets, bit for bit, and the same
-	 * emissive multiple) -> that layer. The same material reached under two
-	 * spellings of its path (vanilla chunk shapes name some as
-	 * `c:\projects\fallout4\build\pc\data\materials\lod\X.bgsm`, others as
-	 * `materials\lod\X.bgsm`), or by material on one shape and by diffuse on
-	 * another, was one layer per spelling: 13 such pairs among 114 layers on
-	 * the Boston box, 7 of them identical texels, plus ElmTrunks under two
-	 * texture paths with identical texels: 114 -> 106 (lane TIDY1, 2026-09-27,
-	 * measured on the shipped sheets). Comparing the TEXELS rather than normalising
-	 * the spelling means a merge can never hand a placement different pixels:
-	 * two spellings whose shapes carried different gloss or alpha stay apart
-	 * (5 pairs differ only in the mask sheet's alpha-test byte, Wrhs01 in gloss). */
+	// `alias`: a source key whose composed texels are IDENTICAL to a layer already in the class (all four
+	// sheets, bit for bit, and the same emissive multiple) -> that layer.
 	struct ArrayClass { bool pbr = false; int w = 0, h = 0; QVector<Layer> layers; std::vector<std::vector<quint32>> bc, n, rm, em;
 		QHash<size_t, QVector<int>> byHash; QHash<QString, int> alias; };
 	QMap<QString, ArrayClass> classes;               // "family|WxH" -> class (QMap: stable order)
 	QHash<QString, DDSTexture16 *> texCache;
 	int unreadable = 0, lodmLayers = 0, ownEmitSources = 0, mergedLayers = 0;
-	// gate-only way back: one layer per spelling, as before lane TIDY1
+	// gate-only way back: one layer per spelling, as before
 	const bool dedupeLayers = wwEnv( "WW_LODGEN_NO_LAYER_DEDUPE" ).isEmpty();
 	for ( auto it = sources.constBegin(); it != sources.constEnd(); ++it ) {
 		const ShapeSrc & src = it.value();
@@ -6187,13 +5406,7 @@ bool lodgenBuildTextureArrays( const QStringList & btoPaths, const QString & dat
 		cls.pbr = pbr;
 		cls.w = w;
 		cls.h = h;
-		/* THE EMISSIVE, both halves. The sheet takes the COLOUR: a legacy layer
-		 * is the diffuse times its own alpha times the source's emissive colour,
-		 * which is black on every measured vanilla chunk shape and therefore
-		 * emits nothing. The MULTIPLE rides in the .lodm, and belongs to whichever
-		 * law composed the sheet: a source .lodm's own `emissiveScale` where the
-		 * .lodm supplied the emissive, the vanilla own-emit multiple where the
-		 * glow rule composed it. */
+		// THE EMISSIVE, both halves.
 		const bool lodmEmissive = lm.ok && ( !lm.emissive.isEmpty() || lm.pbr );
 		const bool colorEmits = src.emitColor.red() > 0.0f || src.emitColor.green() > 0.0f
 			|| src.emitColor.blue() > 0.0f;
@@ -6240,13 +5453,7 @@ bool lodgenBuildTextureArrays( const QStringList & btoPaths, const QString & dat
 						const FloatVector4 sv = sp->getPixelT( u, v, mipFor( sp ) );
 						sR = sv[0]; sG = sv[1];
 					}
-					/* THE ONE GLOSS LAW (lodgen.h). The far-terrain mask sheet
-					 * stores `1 - lodgenLegacyGloss(...)` for a legacy layer,
-					 * so the two must be the same expression or the object
-					 * sheets and the terrain sheet disagree about the same
-					 * material. `smooth` is already clamped to 0..1 above and
-					 * the function clamps again, so this is the identical
-					 * number this line produced before it was shared. */
+					// THE ONE GLOSS LAW (lodgen.h).
 					r = b8( lodgenLegacyGloss( smooth, sG ) ); g = b8( qMin( 1.0f, sR * mult ) ); bl = 255U;
 				}
 				rm[size_t( y ) * w + x] = ( mask << 24 ) | ( r << 16 ) | ( g << 8 ) | bl;
@@ -6319,25 +5526,13 @@ bool lodgenBuildTextureArrays( const QStringList & btoPaths, const QString & dat
 	if ( !side.open( QIODevice::WriteOnly | QIODevice::Text ) )
 		return fail( QStringLiteral( "could not write the array sidecar" ) );
 	QTextStream ss( &side );
-	// version 6 (LODMNAME1): `layer` is the slice of the ONE shared `_n` sheet and
+	// version 6: `layer` is the slice of the ONE shared `_n` sheet and
 	// familyLayer, appended on the END, the slice of the family's own colour/mask sheets
 	ss << "# lodgen texture arrays 6: family class layer lodm color normal mask emissive source emissiveScale familyLayer (docs/LODGEN_IMPOSTOR_SPEC.md)\n";
 	int arrays = 0, textures = 0, legacyClasses = 0, pbrClasses = 0, blackEmissiveDropped = 0;
-	/* A BLACK EMISSIVE IS NOT WRITTEN (lane TIDY1, 2026-09-27). Vanilla LOD has
-	 * no glow source (tools/lod_emission_probe.py: 0 of 121 LOD materials, 0 of
-	 * 3430 LOD shader blocks), so every `_g` this pass wrote was black: 6.9 MB
-	 * on the Boston box. The card arrays save 43.2 MB more (2 of 16 card sets
-	 * keep a faint light from the full TreeAspen models). A set whose
-	 * emissive sheet DECODES black on every layer (lodgenEmissiveShipsBlack:
-	 * BC1 turns 1-7/255 into 0) names no `textures.emissive` in
-	 * its .lodm and has no `_g`/`_e` file; absent = emits nothing, as the VT
-	 * sheets already have it. A set with one lit texel ships the sheet whole.
-	 * Gate-only way back: WW_LODGEN_KEEP_BLACK_EMISSIVE=1. */
+	// A BLACK EMISSIVE IS NOT WRITTEN.
 	const bool keepBlackEmissive = !wwEnv( "WW_LODGEN_KEEP_BLACK_EMISSIVE" ).isEmpty();
-	/* ONE SET PER SIZE (lane LODMNAME1, bungo 2026-10-27): `<ws>.LodgenArrays.<WxH>`,
-	 * no family in the name. Both families share the `_n` sheet (legacy layers first,
-	 * so a legacy-only set keeps every index it had); colour and mask stay per family
-	 * and hold only that family's layers. lodm 3, docs/LODGEN_LODM_FORMAT.md 4.1. */
+	// ONE SET PER SIZE: `<ws>.LodgenArrays.<WxH>`, no family in the name.
 	QMap<QString, QPair<ArrayClass *, ArrayClass *>> bySize;	// WxH -> (legacy, pbr)
 	for ( auto it = classes.begin(); it != classes.end(); ++it ) {
 		const QString sizeKey = it.key().mid( it.key().indexOf( QChar( '|' ) ) + 1 );
@@ -6486,7 +5681,7 @@ bool lodgenBuildTextureArrays( const QStringList & btoPaths, const QString & dat
 			.arg( textures ).arg( arrays ).arg( legacyClasses ).arg( pbrClasses ).arg( lodmLayers )
 			.arg( ownEmitSources )
 			.arg( shapesWithLayer ).arg( shapesWithoutUv2 ).arg( unreadable );
-	// lane TIDY1's two clauses, only when they did something (the switches off leave the line as it was)
+	// the two clauses, only when they did something (the switches off leave the line as it was)
 	if ( report && mergedLayers > 0 )
 		*report += QString( "; %1 duplicate layer(s) merged (identical texels)" ).arg( mergedLayers );
 	if ( report && blackEmissiveDropped > 0 )
@@ -6498,16 +5693,9 @@ namespace
 {
 
 } // namespace
-/*! Write a single-channel 16-bit DDS (R16_UNORM, no mips).
- *
- *  A DX10 header rather than a legacy luminance one, because R16_UNORM has no
- *  unambiguous legacy spelling and the consumer names that exact DXGI format.
- */
-/* FO4CS provenance for a heightmap, DDS dwReserved1[11] at file offset 32.
- * Field for field WriteBakeProvenance (FarFieldHeightmapFormat.h:631-659);
- * the block is all-or-nothing: with the magic present the loader arms its
- * version, encoding, extent, corpus-hash and pixel-hash gates, and any
- * mismatch is a named refusal, so it is verified by the CLI after every bake. */
+//! Write a single-channel 16-bit DDS (R16_UNORM, no mips):
+//! A DX10 header rather than a legacy luminance one, because R16_UNORM has no unambiguous legacy spelling and
+//! the consumer names that exact DXGI format.
 struct LodgenHeightmapProvenance
 {
 	quint64 corpusHash = 0;
@@ -6527,10 +5715,8 @@ static bool lodgenWriteR16Dds( const QString & path, int w, int h,
 	QFile f( path );
 	if ( !f.open( QIODevice::WriteOnly ) )
 		return false;
-	/* The pixel hash is FNV-1a 64 over the payload EXACTLY AS WRITTEN: w*h
-	 * little-endian uint16 in row order and nothing else. Hashed from the
-	 * byte pairs the row loop emits rather than the vector's memory, so the
-	 * two cannot drift apart. */
+	// The pixel hash is FNV-1a 64 over the payload EXACTLY AS WRITTEN: w*h little-endian uint16 in row order
+	// and nothing else.
 	quint64 pixelHash = F4FX_FNV_OFFSET;
 	if ( prov ) {
 		for ( size_t i = 0; i < texels.size(); i++ ) {
@@ -6550,12 +5736,7 @@ static bool lodgenWriteR16Dds( const QString & path, int w, int h,
 		hdr[off + 2] = char( ( v >> 16 ) & 0xFF );
 		hdr[off + 3] = char( ( v >> 24 ) & 0xFF );
 	};
-	/* Offsets are FILE offsets: 4 bytes of magic, then DDS_HEADER, whose
-	 * ddspf begins at header+72 -- NOT +76. Getting that wrong puts the
-	 * fourCC in dwRGBBitCount and leaves dwCaps zero, which reads back
-	 * self-consistently through the same wrong offsets and looks fine. It was
-	 * caught only by parsing a shipped map with the same code and seeing
-	 * "DX10" land where the flags were expected. */
+	// Offsets are FILE offsets: 4 bytes of magic, then DDS_HEADER, whose ddspf begins at header+72 -- NOT +76.
 	put( 0, 0x20534444 );                        // "DDS "
 	put( 4 + 0, 124 );                           // dwSize
 	put( 4 + 4, 0x1 | 0x2 | 0x4 | 0x8 | 0x1000 ); // CAPS|HEIGHT|WIDTH|PITCH|PIXELFORMAT
@@ -6589,10 +5770,7 @@ static bool lodgenWriteR16Dds( const QString & path, int w, int h,
 	put( 4 + 124 + 12, 1 );                      // arraySize
 	if ( f.write( hdr ) != hdr.size() )
 		return false;
-	/* Streamed a row at a time. A whole-image QByteArray would double
-	 * peak memory on top of the texel vector, which is the difference
-	 * between comfortable and not on a worldspace several times the
-	 * Commonwealth's: an 8192 map is already 134 MB of payload. */
+	// Streamed a row at a time.
 	QByteArray row( w * 2, '\0' );
 	for ( int y = 0; y < h; y++ ) {
 		for ( int x = 0; x < w; x++ ) {
@@ -6606,24 +5784,7 @@ static bool lodgenWriteR16Dds( const QString & path, int w, int h,
 	return true;
 }
 
-/*! Bake a worldspace height map for the FO4CS terrain shadow caster.
- *
- *  Data/Textures/Terrain/<EDID>/<EDID>.HeightMap.<S>.<W>.<N>.<E>.<B>.<T>.dds
- *
- *  Fields are cell coordinates south, west, north, east, then the bottom and
- *  top height. The cell bounds are load-bearing -- they are what maps texels to
- *  world units -- while B and T are informational and the decode ignores them.
- *
- *  Encoding is fixed and lossless: pixel = height/8 + 32767, so flat zero is
- *  32767 and the quantum is the game's own eight-unit height step.
- *
- *  The FOLDER and the filename stem are the worldspace's EDITOR ID exactly as
- *  the plugin spells it, not the name shown in game -- the loader keys on it.
- *
- *  Resolution is a resample, not the native cells*32: one 4K map per worldspace
- *  regardless of extent, which is what a shadow caster wants and what keeps a
- *  192-cell worldspace from needing a 6144-square texture.
- */
+//! Bake a worldspace height map for the FO4CS terrain shadow caster.
 bool lodgenBakeHeightmap( const EsmWorld & world, const QString & outDir,
 	int resolution, QString * outPath, QString * error )
 {
@@ -6675,10 +5836,9 @@ bool lodgenBakeHeightmap( const EsmWorld & world, const QString & outDir,
 	// world-sample coordinate of texel i is i * step; exactly i at native size
 	const double stepX = double( cellsX ) * 32.0 / double( RX );
 	const double stepY = double( cellsY ) * 32.0 / double( RY );
-	/* HORIZON1: a cell row's LAND records are read serially (the ESM reader's
-	 * zlib buffer is shared), then its cells fill on the pool in two column
-	 * parities: same-parity cells never share a texel, and the seam max is
-	 * order-free, so the map is byte-identical at any thread count. */
+	// a cell row's LAND records are read serially (the ESM reader's zlib buffer is shared), then its cells
+	// fill on the pool in two column parities: same-parity cells never share a texel, and the seam max is
+	// order-free, so the map is byte-identical at any thread count.
 	static const bool horizonRed = wwEnvInt( "WW_LODGEN_HORIZON_RED" ) == 1;
 	std::vector<EsmLand> rowLand( static_cast<size_t>( cellsX ) );
 	std::vector<char> rowHave( size_t( cellsX ), 0 );
@@ -6690,22 +5850,9 @@ bool lodgenBakeHeightmap( const EsmWorld & world, const QString & outDir,
 				return;
 			const EsmLand & land = rowLand[size_t( kx )];
 			const int ky = cy - minY;
-			/* Every texel whose sample coordinate lies in [k*32, (k+1)*32] --
-			 * CLOSED at both ends, so a cell writes its full 33 rows and
-			 * columns and the shared VHGT edge is written by every cell that
-			 * holds it. Where they disagree, the MAXIMUM wins (below).
-			 *
-			 * That is the seam rule, and it was measured, not chosen: VHGT's
-			 * row 32 is the next cell's row 0 and in a well-formed record they
-			 * agree, but 439 Commonwealth cells at the world's edge are flat
-			 * -352 filler whose edges disagree with their neighbours' real
-			 * terrain. Against a full --dump-land of the ESM, over 2,322,432
-			 * edge texels, "maximum of every cell holding the sample" matched
-			 * the reference Commonwealth_fine map with 0 mismatches; "the cell
-			 * owns its own row 0" missed 8,675, "the south/west cell owns the
-			 * edge" 6,981, and last- or first-non-filler thousands each. A
-			 * maximum is also the right answer for a SHADOW map: the higher
-			 * surface is the one that casts. */
+			// Every texel whose sample coordinate lies in [k*32, (k+1)*32] CLOSED at both ends, so a cell
+			// writes its full 33 rows and columns and the shared VHGT edge is written by every cell that holds
+			// it.
 			const int i0 = qMax( 0, int( std::ceil( double( kx ) * 32.0 / stepX - 1e-9 ) ) );
 			const int i1 = qMin( RX - 1, int( std::floor( double( kx + 1 ) * 32.0 / stepX + 1e-9 ) ) );
 			const int j0 = qMax( 0, int( std::ceil( double( ky ) * 32.0 / stepY - 1e-9 ) ) );
@@ -6803,24 +5950,18 @@ bool lodgenBakeHeightmap( const EsmWorld & world, const QString & outDir,
 struct LodgenBakeCaches
 {
 	QHash<QString, DDSTexture16 *> texCache;
-	/*! THE LRU ORDER AS STAMPS (lane GPU1, 2026-09-26): the key's last use.
-	 *  It was a QStringList, least recently used first, and every HIT paid a
-	 *  removeOne() -- a string compare against every cached key -- from inside
-	 *  the pyramid's per-texel loop. The least recently used key is the one with
-	 *  the smallest stamp; stamps are unique, so the victims are the list's
-	 *  first entries in the list's order and the loads (and their census count)
-	 *  are the same. */
+	//! THE LRU ORDER AS STAMPS: the key's last use.
 	QHash<QString, quint64> texStamp;
 	quint64 texClock = 0;
 	qint64 texBudget = qint64( 512 ) << 20;
 	qint64 texBytes = 0;
-	//! Lane TERR1: keys the eviction skips (lower case), set only around the normal stamp's second load
+	//! keys the eviction skips (lower case), set only around the normal stamp's second load
 	QSet<QString> texPinned;
 	//! MODL path -> (resolved, average diffuse colour), for the grass tint
 	QHash<QString, QPair<bool, FloatVector4>> grassTint;
 	int nifReads = 0;                   //!< grass meshes actually loaded
 	int texLoads = 0;                   //!< textures actually decoded
-	/* lane BAKESPEED1: set while tile workers share this LRU. Each worker keeps its last asked textures in a
+	/* set while tile workers share this LRU. Each worker keeps its last asked textures in a
 	 * per-thread memo; texRefs counts the memos holding a key and eviction skips those (a new shareGen voids
 	 * the memos and the counts). */
 	QMutex * shareLock = nullptr;
@@ -6828,11 +5969,11 @@ struct LodgenBakeCaches
 	QHash<QString, int> texRefs;
 	QSet<QString> texLoading;           //!< keys a worker decodes outside the lock
 	QWaitCondition texLoaded;
-	/* lane BAKESPEED1: the decals stage's road set, handed to the pyramid when its gather key matches
+	/* the decals stage's road set, handed to the pyramid when its gather key matches
 	 * (the gather is a function of the key alone); void so this struct needs no LodgenRoadSet. */
 	std::shared_ptr<void> roadSet;
 	QString roadKey;
-	//! lane BAKESPEED3: the pyramid's object height field, handed to the AO map when its gather key matches
+	//! the pyramid's object height field, handed to the AO map when its gather key matches
 	std::shared_ptr<void> objField;
 	QString objKey;
 	~LodgenBakeCaches()
@@ -6855,7 +5996,7 @@ void lodgenDestroyBakeCaches( LodgenBakeCaches * caches )
 	delete caches;
 }
 
-// lane BAKEMEM1: the LRU's budget, in its own units (DDSTexture16::size(), texels: 8 bytes each); returns the old one
+// the LRU's budget, in its own units (DDSTexture16::size, texels: 8 bytes each); returns the old one
 qint64 lodgenBakeCachesSetTextureBudget( LodgenBakeCaches * caches, qint64 units )
 {
 	if ( !caches )
@@ -6865,7 +6006,7 @@ qint64 lodgenBakeCachesSetTextureBudget( LodgenBakeCaches * caches, qint64 units
 	return old;
 }
 
-// lane BAKEMEM1: drop the decoded textures between stages (the next stage reloads what it reads); counters stay
+// drop the decoded textures between stages (the next stage reloads what it reads); counters stay
 void lodgenBakeCachesReleaseTextures( LodgenBakeCaches * caches, const char * phase )
 {
 	if ( caches && qstrcmp( phase, "decals" ) != 0 ) {	// the decals' road set waits for the pyramid
@@ -6927,7 +6068,7 @@ static const DDSTexture16 * lodgenCachedTexture( LodgenBakeCaches & c,
 
 static std::atomic<quint64> g_texShareGen{ 0 };
 
-// lane BAKESPEED1: open (or reopen, voiding every thread's memo) the LRU to tile workers; null closes it
+// open (or reopen, voiding every thread's memo) the LRU to tile workers; null closes it
 static void lodgenTexShare( LodgenBakeCaches & c, QMutex * lock )
 {
 	c.shareLock = lock;
@@ -6935,7 +6076,7 @@ static void lodgenTexShare( LodgenBakeCaches & c, QMutex * lock )
 	c.texRefs.clear();
 }
 
-/*! lane BAKESPEED1: lodgenCachedTexture while workers share the LRU. A worker's last kTexMemo textures stay
+/*! lodgenCachedTexture while workers share the LRU. A worker's last kTexMemo textures stay
  * pinned (a caller holds at most one pointer across its next ask), the rest evict as in the serial path. */
 static const DDSTexture16 * lodgenCachedTextureShared( LodgenBakeCaches & c,
 	const QString & dataRoot, const QString & texPath )
@@ -7014,10 +6155,8 @@ static const DDSTexture16 * lodgenCachedTextureShared( LodgenBakeCaches & c,
 static void lodgenTexEvict( LodgenBakeCaches & c, const QString & key )
 {
 	while ( c.texBytes > c.texBudget && c.texStamp.size() > 1 ) {
-		/* Lane TERR1: a PINNED key is never the victim -- the normal stamp holds
-		 * a shape's diffuse while it loads that shape's normal map, and the
-		 * second load must not free the first. Nothing is pinned outside the
-		 * stamp, so the victims without it are the ones they always were. */
+		// a PINNED key is never the victim -- the normal stamp holds a shape's diffuse while it loads that
+		// shape's normal map, and the second load must not free the first.
 		auto oldest = c.texStamp.constEnd();
 		for ( auto s = c.texStamp.constBegin(); s != c.texStamp.constEnd(); ++s )
 			if ( ( oldest == c.texStamp.constEnd() || s.value() < oldest.value() )
@@ -7039,22 +6178,7 @@ static void lodgenTexEvict( LodgenBakeCaches & c, const QString & key )
 	}
 }
 
-/*! The grass tint's colour source (docs/LODGEN_TERRAIN_VT.md §3.2).
- *
- *  NOT the GRAS record. Its Colour Range is a per-instance random tint SPREAD,
- *  not a colour, and the LTEX's own diffuse is unreliable — 31 of the 105
- *  base-game landscape texture sets have an empty TX00 slot, 17 of them
- *  grass-bearing. The colour lives in the grass MESH's diffuse:
- *
- *    GRAS MODL -> the .nif through lodgenReadAsset (whose .nif-specific path
- *    exists precisely because the Fallout 4 archive filter drops every mesh at
- *    index time) -> the one shape's slot 0, or its .bgsm handed to
- *    lodgenLoadTexture, which already resolves a material to its first slot ->
- *    the ALPHA-WEIGHTED mean of the first mip no longer than 1024.
- *
- *  39 of the 71 shipped grass meshes carry a NiAlphaProperty and their atlases
- *  are mostly gap. Below a mean alpha of 0.05 the grass contributes NO tint,
- *  and it still contributes its density to D. */
+//! The grass tint's colour source (docs/LODGEN_TERRAIN_VT.md §3.2).
 static bool lodgenGrassTintResolve( const QString & model, const QString & dataRoot,
 	void * user, float * rgb )
 {
@@ -7112,17 +6236,7 @@ static bool lodgenGrassTintResolve( const QString & model, const QString & dataR
 		if ( !source.isEmpty() ) {
 			const DDSTexture16 * t = lodgenCachedTexture( c, dataRoot, source );
 			if ( t ) {
-				/* ALPHA-WEIGHTED over a real mip, not the smallest mip divided
-				 * by its alpha (lane SEAM1, GRASSCOL). A DDS mip chain is
-				 * STRAIGHT alpha: every shipped grass atlas averages its RGB
-				 * over the transparent gaps unweighted, so rgb/a of the 1x1
-				 * mip is not the leaves' colour -- at mean alpha 0.07..0.30
-				 * it clamps to (1,1,1) on 9 of the 9 alpha-cut grasses under
-				 * Sanctuary and -24,-8, and the cover tint went WHITE (the
-				 * sandy wash bungo saw). sum(rgb*a)/sum(a) at the first mip no
-				 * longer than 1024 is within 2.5/255 of mip 0 on the measured
-				 * atlases (scratchpad grass_mipcheck.py). The 0.05 floor on the
-				 * MEAN alpha is unchanged. */
+				// ALPHA-WEIGHTED over a real mip, not the smallest mip divided by its alpha.
 				int m = 0;
 				while ( m < t->getMaxMipLevel()
 					&& qMax( t->getWidth() >> m, t->getHeight() >> m ) > 1024 )
@@ -7153,25 +6267,8 @@ static bool lodgenGrassTintResolve( const QString & model, const QString & dataR
 	return true;
 }
 
-/*! ONE HOME for the terrain normal map's height reconstruction, shared by the
- *  per-chunk baker and the virtual-texture tile baker below.
- *
- *  Bilinear over the 128-unit VHGT grid with both blend parameters passed
- *  through the quintic ease `t^3(t(6t-15)+10)`. The full argument is at the
- *  call site in `lodgenBakeTerrainTextures`; in short:
- *
- *   * NEAREST (`int( gx )`) made every texel of a 4x4 block read one grid point,
- *     so a 512 sheet held 129x129 distinct values (2026-09-07);
- *   * the plain bilinear parameter leaves the central difference KINKED at every
- *     height sample, which is a crease every four texels at dim 4 and is the
- *     square lattice bungo saw on the mountain face (2026-09-09);
- *   * the ease reweights the SAME four taps, hits every VHGT sample exactly and
- *     stays between them, so it cannot ring on the 8-unit staircase the way
- *     Catmull-Rom did, and removes nothing (high-frequency energy went UP 25%).
- *
- *  Two callers, one function, because a second copy is exactly how the VT path
- *  kept both 2026-09-07 defects for two days after the chunk path lost them.
- */
+//! ONE HOME for the terrain normal map's height reconstruction, shared by the per-chunk baker and the
+//! virtual-texture tile baker below.
 static float lodgenTerrainHeightAt( const std::vector<float> & hgt, int hn,
 	float gx, float gy )
 {
@@ -7190,18 +6287,7 @@ static float lodgenTerrainHeightAt( const std::vector<float> & hgt, int hn,
 		+ ( h01 * ( 1.0f - tx ) + h11 * tx ) * ty;
 }
 
-/*! The terrain `_msn` byte order, in one place: R = east, G = UP, B = north.
- *
- *  NOT the conventional (X, Y, Z) -> (R, G, B). Measured on vanilla two
- *  independent ways in 2026-09-07 (the up component is the only one recoverable
- *  as +sqrt(1 - x^2 - y^2) and the only one never below 128 - green wins on all
- *  eight sampled tiles; and predicting each cell's normal from VHGT scores a
- *  mean error of 0.0719 against 0.2401 for the next best orientation). Writing
- *  north in green cost 67.7% of the light and 92.0% of the shading variation on
- *  distant terrain, and there is nothing to fall back on: vanilla's terrain LOD
- *  `.BTR` carries no vertex normals at all, so this sheet is the whole surface
- *  orientation. It also puts up in the 6-bit channel of RGB565.
- */
+//! The terrain `_msn` byte order, in one place: R = east, G = UP, B = north.
 static quint32 lodgenTerrainMsnPixel( const Vector3 & nrm )
 {
 	const int nEast = qBound( 0, int( ( nrm[0] * 0.5f + 0.5f ) * 255.0f + 0.5f ), 255 );
@@ -7210,32 +6296,10 @@ static quint32 lodgenTerrainMsnPixel( const Vector3 & nrm )
 	return 0xFF000000U | quint32( nEast << 16 ) | quint32( nUp << 8 ) | quint32( nNorth );
 }
 
-/*! Flat ground in that order: east 0, UP 1, north 0 -> R 128, G 255, B 128.
- *
- *  It was 0xFFFF8080 at all five fill sites, which is the RENDERER's constant
- *  for a flat TANGENT-space normal (`src/gl/renderer.cpp`) - and that buffer is
- *  RGBA-in-a-u32 while these are ARGB, so the value here decoded as east +1,
- *  up 0: a normal pointing sideways, wrong under BOTH channel orders. Every
- *  texel of a baked sheet is overwritten, so it only ever showed where a tile
- *  or a mosaic row was missing.
- */
+//! Flat ground in that order: east 0, UP 1, north 0 -> R 128, G 255, B 128.
 constexpr quint32 LODGEN_MSN_FLAT = 0xFF80FF80U;
 
-/*! ONE HOME for the plain-bilinear tap into a terrain sample grid.
- *
- *  `f` is an (n x n) grid of samples 128 world units apart, `lx`/`ly` are
- *  world units from the GRID'S OWN south-west corner, and the tap clamps at
- *  the grid edge. Five byte-for-byte copies of these seven lines lived in the
- *  two terrain bakers (each one's AO `heightAt` and channel samplers); they
- *  are one function now, which is the only reason the two paths can be ASKED
- *  for byte identity instead of told they agree.
- *
- *  Deliberately NOT the reconstruction `lodgenTerrainHeightAt` above uses:
- *  that one eases the blend parameter because it feeds a NORMAL map, where a
- *  kink at every height sample shows as a square lattice (2026-09-09). This
- *  one feeds the AO march and the byte channels, where the plain blend is what
- *  every shipped sheet was measured with.
- */
+//! ONE HOME for the plain-bilinear tap into a terrain sample grid.
 template <typename T>
 static float lodgenTerrainGridSample( const std::vector<T> & f, int n,
 	float lx, float ly )
@@ -7253,78 +6317,15 @@ static float lodgenTerrainGridSample( const std::vector<T> & f, int n,
 	return top + ( bot - top ) * ty;
 }
 
-/*! The ring the terrain sheets are baked on: the chunk (or the tile) plus ONE
- *  CELL on every side.
- *
- *  4,096 world units covers both neighbourhood operators the sheets use -- the
- *  normal's one-step central difference (128 units) and the AO march (2,048)
- *  -- so no texel of the chunk itself is ever computed against a clamped edge.
- *  The tile baker has had it since the pyramid was written; the chunk baker
- *  got it on 2026-09-10, which is what made the two paths' sheets the same
- *  bytes rather than the same within a bounded band.
- */
+//! The ring the terrain sheets are baked on: the chunk (or the tile) plus ONE CELL on every side.
 constexpr int LODGEN_TERRAIN_RING_CELLS = 1;
 constexpr float LODGEN_TERRAIN_RING_UNITS =
 	float( LODGEN_TERRAIN_RING_CELLS ) * 4096.0f;
 
-/*! ONE HOME for filling that ring's height grid.
- *
- *  `fetch( cx, cy )` is given RING-LOCAL cell coordinates (0..rdim-1) and
- *  returns the LAND record there or null; it is the callers' one difference --
- *  the chunk baker reads the plugin directly and keeps the chunk's own cells,
- *  the tile baker goes through its row cache. Both callers lay the ring out the
- *  same way -- `LODGEN_TERRAIN_RING_CELLS` cells of margin on every side of an
- *  inner unit of `rdim - 2 * LODGEN_TERRAIN_RING_CELLS` cells -- so the inner
- *  unit's grid box is derived here rather than passed, and there is exactly one
- *  description of it.
- *
- *  THE CELL OWNS ITS OWN ROWS (bungo, 2026-09-10, verbatim: "The cell owns it
- *  then"). A RING cell fills ONLY the samples BEYOND the inner unit: it never
- *  writes the inner unit's own boundary row or column, so where a neighbour's
- *  copy of a shared VHGT row disagrees with the cell's own, the cell's copy
- *  stays and Bethesda's hairline disagreement is preserved at the seam instead
- *  of being smeared one row into the chunk.
- *
- *  It is a real disagreement and it was measured, not assumed: over the cells
- *  x = -24..-17 the shared row y=31|32 differs by 2, 1, 4, 6, 9, 8, 7 and 4
- *  VHGT units of 8 (16..72 world units) while y=23|24, y=27|28, y=32|33 and
- *  both east seams differ by 0 (lane BUILD4, 2026-09-10). The old south-to-north
- *  order let the y=32 cell overwrite that row inside the y=28..31 chunk, and a
- *  bilinear tap carried it 7 texels in -- past the 4-texel band the normal's
- *  own central difference can reach.
- *
- *  Inside the inner unit the order is unchanged and still part of the contract:
- *  cells are visited south to north then west to east and a later cell
- *  overwrites the VHGT sample it shares with an earlier one, so both callers
- *  resolve an INTERNAL cell edge the same way and the two grids agree exactly
- *  where they overlap. The same convention as the mesh path's chunk-only grid
- *  (`lodgenWriteLandChunk`), which is why that path needs no change.
- *
- *  A cell with no LAND writes nothing, as before: its samples keep `empty`, and
- *  a neighbour no longer reaches in to fill the shared row of a landless inner
- *  cell. That is the same rule -- the cell owns it -- applied to a cell whose
- *  own answer is the worldspace default.
- */
-/*! The inner unit a ring fill protects, as a CLOSED GRID BOX in the caller's
- *  own grid coordinates, so that it can name a WORLD rectangle instead of
- *  meaning only "this caller's rdim minus its margin".
- *
- *  Left alone it is the derived box -- the caller's own inner unit -- which is
- *  byte for byte the rule as it stood before lane VT1, and what the chunk baker
- *  and the self-test both want.
- *
- *  WHY IT HAS TO BE SAYABLE (lane VT1, 2026-09-16). The ring's OWN samples are
- *  filled later-wins, so a sample OUTSIDE the inner unit is the north (or east)
- *  cell's copy of a shared VHGT row, while the same sample INSIDE it is the
- *  cell's own. Two bakers with different inner units therefore disagree about
- *  the same world sample. The chunk baker protects a dim-D chunk and the tile
- *  baker protected a dim-D/2 tile, so the chunk sheets assembled from the
- *  pyramid differed from a direct bake by 4 and 27 bytes on two of the four
- *  chunks of the Sanctuary probe region -- carried by the macro gradient, which
- *  is a Sobel over exactly those ring samples (+-512 world units). The measured
- *  disagreement was one grid row, up to 64 world units. A texel's value must
- *  depend on its WORLD POSITION ONLY, so the tile baker now names the CHUNK it
- *  will be assembled into rather than itself. */
+//! ONE HOME for filling that ring's height grid:
+//! `fetch( cx, cy )` is given RING-LOCAL cell coordinates (0..rdim-1) and returns the LAND record there or
+//! null; it is the callers' one difference the chunk baker reads the plugin directly and keeps the chunk's own
+//! cells, the tile baker goes through its row cache.
 struct LodgenRingInner
 {
 	bool given = false;                  //!< false == derive the box from rdim
@@ -7355,10 +6356,7 @@ static void lodgenTerrainFillRing( std::vector<float> & hgt, int hn, int rdim,
 			const EsmLand * land = fetch( cx, cy );
 			if ( !land )
 				continue;
-			/* A cell is an INNER cell when its own 33x33 block sits WHOLLY
-			 * inside the box. Under the derived box that is exactly the old
-			 * margin test, cx in [RC, rdim-1-RC], and it is written this one
-			 * way so that there is no second rule to keep in step. */
+			// A cell is an INNER cell when its own 33x33 block sits WHOLLY inside the box.
 			const bool ringCell = haveInner
 				&& !( cx * 32 >= loX && cx * 32 + 32 <= hiX
 					&& cy * 32 >= loY && cy * 32 + 32 <= hiY );
@@ -7377,23 +6375,8 @@ static void lodgenTerrainFillRing( std::vector<float> & hgt, int hn, int rdim,
 	}
 }
 
-/*! The known-answer control under that rule, run once per process when
- *  `WW_TERRAIN_RING_TEST` is set in the environment.
- *
- *  A synthetic pair of cells whose shared VHGT row DISAGREES by a known amount
- *  -- 72 world units, the 9-unit worst case measured on the y=31|32 seam -- is
- *  filled through the shipped `lodgenTerrainFillRing`, and every sample of the
- *  inner unit's boundary row and column is asserted to be the inner cell's own
- *  value, exactly, while the samples one step beyond are asserted to be the
- *  neighbour's (so a filler that simply stopped filling the ring would fail).
- *  The bilinear tap the sheets actually read is asserted at the same place, so
- *  the claim is about a texel's operand and not only about a grid cell.
- *
- *  THE REFUTER: the same synthetic pair filled by the OLD south-to-north order,
- *  reproduced verbatim below as a control. It must give the NEIGHBOUR's value
- *  on the inner boundary row -- that is, it must FAIL the bar above. If it
- *  passes, the bar is not discriminating and the self-test says so and fails.
- */
+//! The known-answer control under that rule, run once per process when `WW_TERRAIN_RING_TEST` is set in the
+//! environment.
 static bool lodgenTerrainRingSelfTest()
 {
 	constexpr int RC = LODGEN_TERRAIN_RING_CELLS;
@@ -7493,20 +6476,7 @@ static bool lodgenTerrainRingSelfTest()
 			" %.3f north and %.3f east on the inner boundary, which the bar above"
 			" REFUSES\n", oldNorth, oldEast );
 	}
-	/* PART TWO (lane VT1, 2026-09-16): the WORLD-ANCHORED inner box, with the
-	 * known-answer control that the box is read at all.
-	 *
-	 * The shape is the real defect at the smallest size that carries it: a 2x2
-	 * "tile" grid whose EAST ring column lies inside the chunk that tile will
-	 * be assembled into. Cell (3,2) is that column's southern cell and holds A;
-	 * cell (3,3) is its northern neighbour and holds B, and the two disagree on
-	 * the row they share exactly as Bethesda's cells do on y=31|32.
-	 *
-	 *   derived box  -> that row is OUTSIDE the inner unit, later-wins, B
-	 *   chunk box    -> that row is INSIDE it, the cell owns it, A
-	 *
-	 * so a build that ignored the box, or clipped it away, answers B twice and
-	 * fails here. */
+	// PART TWO: the WORLD-ANCHORED inner box, with the known-answer control that the box is read at all.
 	{
 		constexpr int trdim = 2 + 2 * RC;
 		constexpr int thn = trdim * 32 + 1;
@@ -7582,11 +6552,8 @@ static void lodgenTerrainRingSelfTestOnce()
 	lodgenTerrainRingSelfTest();
 }
 
-/* The landscape tiling, set once by the CLI before the bake starts and read
- * from every sampling site afterwards. 341.3333 = 128 / 0.375 is the engine's
- * own number (see lodgen.h); 2048 is the pre-2026-09-11 bake, exactly.
- * A non-positive value is refused and leaves the default standing, so a
- * mistyped switch cannot silently flatten the ground to one texel. */
+// The landscape tiling, set once by the CLI before the bake starts and read from every sampling site
+// afterwards.
 static float g_landTiling = 341.3333f;
 
 float lodgenLandTiling()
@@ -7600,14 +6567,14 @@ void lodgenSetLandTiling( float unitsPerRepeat )
 		g_landTiling = unitsPerRepeat;
 }
 
-/* Lane TILING2. Sampling and detail default to the 2026-09-11 bake exactly:
+/* Sampling and detail default to the 2026-09-11 bake exactly:
  * `footprint` sampling, full detail. The EDGE BLEND defaults ON since
- * 2026-09-23 (bungo, "Yes, default on"; lane DEFAULTS2): `quadrant`, and
+ * 2026-09-23: `quadrant`, and
  * `--blend-edges off` is the exact way back. See lodgen.h. */
 static bool  g_landSampleAverage = false;
 static float g_landDetail        = 0.0f;
 static int   g_blendEdges        = 1;
-static float g_blendMargin       = 1024.0f;   // TERRLIVE2: was 128 (one far texel); 1024 = half a quadrant, no hard squares at LOD distance
+static float g_blendMargin       = 1024.0f;   // was 128 (one far texel); 1024 = half a quadrant, no hard squares at LOD distance
 
 bool lodgenLandSampleAverage()
 {
@@ -7652,36 +6619,14 @@ void lodgenSetBlendMargin( float units )
 		g_blendMargin = qMin( units, 1024.0f );  // half a quadrant: two fades never overlap
 }
 
-/* --- THE STOCHASTIC-PHASE LAND SAMPLE (lane TILING3) ------------------------
- *
- * See lodgen.h for what this is for and what it was measured at.
- *
- * THE DEFAULTS MOVED ON 2026-09-12 (lane DEFAULTS1). bungo picked panel (c) of
- * `a_land_guide_*.png` -- "C looks good, it's good if it's configurable in the
- * UI" -- and that panel was baked with
- *   --land-sample stochastic --land-hex 256 --land-mip-bias -0.22
- *   --land-guide flatwarp:1.0 --land-warp 341
- * so the amplitude is 341 and the bias -0.22 here, the hex size is 256 below,
- * and the guide rule is FLATWARP at strength 1. A zero amplitude and a zero
- * bias still leave the warp and the bias expressions unevaluated at both
- * sampling sites, so
- *   --land-hex 0 --land-warp 0 --land-mip-bias 0 --land-guide off
- * is the exact way back to the 2026-09-11 bake, byte for byte.
- *
- * The lattice and the octave count carry the values lane TILING3 picked; they
- * did not move. */
+// THE STOCHASTIC-PHASE LAND SAMPLE:
+// See lodgen.h for what this is for and what it was measured at.
 static float g_landWarpAmp     = 341.0f;      // world units; 0 == off
 static float g_landWarpLattice = 1024.0f;
 static int   g_landWarpOctaves = 1;
 static float g_landMipBias     = -0.22f;      // mips; 0 == off
 
-/*! The integer hash the warp is built on: uint32 in, uint32 out.
- *
- *  It is written as the same five lines as the offline prototype
- *  (scratchpad/tiling3_20260911/a4_warp.py, `_hash01`) so the two can be
- *  compared term by term, and it uses only wrapping unsigned arithmetic, which
- *  is exactly defined in C++ -- no undefined overflow, no compiler freedom, the
- *  same answer on every target. */
+//! The integer hash the warp is built on: uint32 in, uint32 out.
 static inline quint32 lodgenWarpHash( qint32 i, qint32 j, quint32 k )
 {
 	quint32 h = quint32( i ) * 374761393u
@@ -7693,14 +6638,8 @@ static inline quint32 lodgenWarpHash( qint32 i, qint32 j, quint32 k )
 	return h;
 }
 
-/*! One octave of smoothstep-interpolated value noise on a lattice of `lattice`
- *  world units, returning a pair of offsets in [-1,+1].
- *
- *  In double, deliberately: the lattice index comes from a floor of a world
- *  coordinate that reaches +-2,000,000 units, and float carries only 24 bits of
- *  mantissa, so the interpolant `fx` would quantise to visible steps at the far
- *  edge of the worldspace. Nothing here reads any state, so it is a pure
- *  function and thread-count cannot reach it. */
+//! One octave of smoothstep-interpolated value noise on a lattice of `lattice` world units, returning a pair of
+//! offsets in [-1,+1].
 static void lodgenLandWarpOffsets( double wx, double wy, double lattice,
                                    double * ox, double * oy )
 {
@@ -7728,13 +6667,9 @@ static void lodgenLandWarpOffsets( double wx, double wy, double lattice,
 	*oy = out[1];
 }
 
-/*! The warp at an EXPLICIT amplitude.
- *
- *  Lane LAND1 lifted the amplitude out of the global so the terrain-guided
- *  rules below can MODULATE it by the macro slope without a second copy of
- *  the octave loop.  `lodgenLandWarp` is this function at the configured
- *  amplitude, term for term, so the shipped behaviour is unchanged and the
- *  default is still a return. */
+//! The warp at an EXPLICIT amplitude:
+//! The amplitude is out of the global so the terrain-guided rules below can MODULATE it by the
+//! macro slope without a second copy of the octave loop.
 static void lodgenLandWarpAt( float wx, float wy, double amp,
                               float * wxOut, float * wyOut )
 {
@@ -7807,77 +6742,16 @@ void lodgenSetLandWarpOctaves( int octaves )
 		g_landWarpOctaves = octaves;
 }
 
-/* --- TERRAIN-GUIDED LAND SAMPLING (lane LAND1, bungo 2026-09-12) -----------
- *
- * His words: "since we're reusing vanilla terain normals and slope maps, might
- * as well use them to guide this a bit", after asking "what is used for the
- * land sample warp? the normal or slope map?" -- the answer being neither: a
- * hashed value-noise lattice on world X/Y, which knows nothing about the ground
- * it is decorating.
- *
- * THE INPUT IS THE HEIGHTMAP, NOT THE SHEET.  The macro gradient below is a
- * Sobel difference of the SAME ring height grid the `_msn` normal a few lines
- * above the land lookup is built from, at a half-step of `--land-guide-scale`/2
- * world units.  Reading it off the heightmap rather than off vanilla's `_msn`
- * sheet is what makes it continuous across a chunk, a tile and a region border:
- * the grid is filled over a ONE-CELL ring (4,096 units) by the shared filler,
- * the deepest stencil this file asks of it reaches scale/2 + the tile's own
- * border (256 units at the shipped geometry), and nothing inside a tile can
- * therefore reach the grid's clamped edge.  Two adjacent chunks baked apart and
- * baked together are the same bytes because every term is a pure function of
- * WORLD position.
- *
- * FIVE RULES, each a switch, all off by default and all off by RETURN:
- *
- *   drag       the sample slides DOWNHILL by k * the macro normal's xy, so the
- *              texture lags the slope.  A smooth field, so it has strain, and
- *              the strain is what the swirl instrument (lane TILING4) reads.
- *   aspect     the sampling frame is ROTATED by the downhill azimuth, about the
- *              centre of the macro lattice cell the texel is in, blended toward
- *              identity by the macro slope.  A blend of the identity and a
- *              rotation about one anchor is a SIMILARITY -- uniform scale and
- *              rotation, zero shear -- so inside a cell the strain is
- *              isotropic and the orientation instrument cannot see it.  The
- *              price is a discontinuity at the lattice lines, and it is a real
- *              one: it is what the gates have to price.
- *   aspecthex  the same rotation, but carried by the HEX lattice's three taps
- *              instead of a square one: each of `lodgenLandHexTap`'s vertices
- *              rotates the plane about ITSELF by the macro azimuth there, and
- *              the barycentric variance-preserving blend that already joins the
- *              three offsets joins the three rotations.  Seamless AND
- *              shear-free by construction.  Needs `--land-hex`.
- *   slopewarp  TILING3's hash warp with its amplitude scaled by the macro
- *              slope -- weak on the flats, full on the slopes.
- *   flatwarp   the same, the other way round.  Both exist because which
- *              direction helps is a measurement, not an opinion.
- *
- * WHY THE ROTATION IS NOT WEIGHTED ON THE ANGLE.  `atan2` has a branch cut at
- * due west; multiplying the ANGLE by a weight below 1 turns that cut into a
- * visible discontinuity of up to 2*pi*weight.  The weight is applied to the
- * MAP instead -- p + w * ( R(p) - p ) -- which is continuous across the cut
- * because cos and sin are, and which stays shear-free (it is (1-w)I + wR, a
- * complex number times the plane).
- *
- * The rule NUMBERS live in lodgen.h beside the declarations, each with its own
- * one-line description; there is no second copy of them here.
- */
-/* FLATWARP at strength 1 since 2026-09-12 (lane DEFAULTS1): bungo's pick,
- * panel (c) of `a_land_guide_*.png`. `--land-guide off` is the way back, and
- * with it the guide branch is not evaluated at either sampling site. The scale
- * and the slope reference did not move. */
+// TERRAIN-GUIDED LAND SAMPLING:
+// His words: "since we're reusing vanilla terain normals and slope maps, might as well use them to guide this
+// a bit", after asking "what is used for the land sample warp?
 static int   g_landGuideRule     = LODGEN_LANDGUIDE_FLATWARP;
 static float g_landGuideStrength = 1.0f;
 static float g_landGuideScale    = 1024.0f;   // world units
 static float g_landGuideSlopeRef = 0.5f;      // tangent; 0.5 == 26.6 degrees
 
-/*! Everything the guide needs to ask the ring height grid a question at a
- *  WORLD position: the grid, its size, and the affine map from world units
- *  to the grid coordinates both bakers already compute for the normal.
- *
- *  `ngx = wx / 128 + ngOffX`.  The chunk baker's offset is
- *  ( RING_UNITS - chunkWorldX ) / 128 and the tile baker's is -ringWestX /
- *  128; that one line is the whole difference between the two sites, which
- *  is why the rules themselves need no second copy. */
+//! Everything the guide needs to ask the ring height grid a question at a WORLD position: the grid, its size,
+//! and the affine map from world units to the grid coordinates both bakers already compute for the normal.
 struct LodgenLandGuideCtx
 {
 	const std::vector<float> * hgt = nullptr;
@@ -7886,16 +6760,7 @@ struct LodgenLandGuideCtx
 	float ngOffY = 0.0f;
 };
 
-/*! The terrain's LOW-PASS gradient at the guide scale, at a world position.
- *
- *  A Sobel 3x3 over the ring height grid at a half-step of scale/2 world
- *  units: eight taps, and the perpendicular smoothing is what keeps a single
- *  128-unit VHGT step out of the answer.  Returns dz/dx and dz/dy as a
- *  TANGENT -- 1.0 is 45 degrees -- so DOWNHILL is ( -dzdx, -dzdy ), which is
- *  the surface normal's own xy up to its length.
- *
- *  In double for the same reason the warp and the hex lattice are: the grid
- *  coordinate comes from a world coordinate that reaches +-2,000,000 units. */
+//! The terrain's LOW-PASS gradient at the guide scale, at a world position.
 static void lodgenLandMacroGradient( const LodgenLandGuideCtx & ctx,
                                      double wx, double wy,
                                      double * dzdx, double * dzdy )
@@ -7930,11 +6795,9 @@ static inline double lodgenLandGuideWeight( double tangent )
 	return w >= 1.0 ? 1.0 : w;
 }
 
-/*! The guided rotation of one point about one anchor.
- *
- *  `( ax, ay )` is the anchor the rotation is rigid about; the azimuth and
- *  the weight are read at the ANCHOR, not at the point, which is what makes
- *  the map inside one lattice cell a similarity rather than a shear. */
+//! The guided rotation of one point about one anchor:
+//! `( ax, ay )` is the anchor the rotation is rigid about; the azimuth and the weight are read at the ANCHOR,
+//! not at the point, which is what makes the map inside one lattice cell a similarity rather than a shear.
 static void lodgenLandGuideRotate( const LodgenLandGuideCtx & ctx,
                                    double ax, double ay,
                                    double * px, double * py )
@@ -7961,12 +6824,8 @@ static void lodgenLandGuideRotate( const LodgenLandGuideCtx & ctx,
 	*py += w * ( qy - *py );
 }
 
-/*! The land diffuse lookup's coordinate: the terrain-guided rules, then the
- *  hash warp, exactly as the two lines this replaces did.
- *
- *  OFF IS A RETURN twice over: with no rule this is `lodgenLandWarp`, which
- *  at amplitude 0 does not touch the coordinate -- so the default bake at
- *  both sampling sites is the rung's bytes. */
+//! The land diffuse lookup's coordinate: the terrain-guided rules, then the hash warp, exactly as the two lines
+//! this replaces did.
 static void lodgenLandGuidedWarp( const LodgenLandGuideCtx & ctx,
                                   float wx, float wy, float mdzdx, float mdzdy,
                                   float * wxOut, float * wyOut )
@@ -8046,11 +6905,9 @@ float lodgenLandGuideScale()
 
 void lodgenSetLandGuideScale( float units )
 {
-	/* Bounded above by the RING, not by taste: the height grid carries one
-	 * cell (4,096 units) outside the tile and the tile's own border eats 256
-	 * of it at the shipped geometry, so a Sobel half-step past 2,048 units
-	 * would read the grid's clamped edge and the answer would depend on
-	 * which tile asked. Below 128 it is finer than the VHGT grid itself. */
+	// Bounded above by the RING, not by taste: the height grid carries one cell (4,096 units) outside the tile
+	// and the tile's own border eats 256 of it at the shipped geometry, so a Sobel half-step past 2,048 units
+	// would read the grid's clamped edge and the answer would depend on which tile asked.
 	if ( units >= 128.0f && units <= 2048.0f )
 		g_landGuideScale = units;
 }
@@ -8066,39 +6923,9 @@ void lodgenSetLandGuideSlopeRef( float tangent )
 		g_landGuideSlopeRef = tangent;
 }
 
-/* --- THE HISTOGRAM-PRESERVING HEX TILING (lane TILING4) ---------------------
- *
- * See lodgen.h for what this is and what it was measured at.  OFF IS A RETURN:
- * at size 0 `lodgenLandHexTap` evaluates the identical expression the rung
- * compiled, so the default sheet is the same bytes.
- *
- * Heitz & Neyret 2018.  The plane is covered by a triangle lattice of `size`
- * world units; each lattice VERTEX carries one random offset into the texture;
- * a position takes the three offsets of the triangle it falls in and blends
- * them with its barycentric weights, variance-preserved:
- *
- *     result = mean + sum_k w_k (s_k - mean) / sqrt( sum_k w_k^2 )
- *
- * Without that denominator, blending three decorrelated samples of the same
- * texture with weights that sum to one drops the contrast by up to sqrt(1/3) --
- * a soft mottling exactly where the operator is needed.  The offline sweep
- * measured it: the no-varnorm variant reads the swirl instrument HIGHER than
- * the variance-preserved one (2.24 against 1.93 on the worst sheet).
- *
- * WHY THIS RATHER THAN TILING3'S WARP.  A smooth warp removes the repeat only
- * by straining the texture, and the strain IS the swirl bungo saw.  A
- * piecewise-constant offset has a strain of exactly zero away from the lattice
- * edges, so it cannot have that defect by construction -- measured, the swirl
- * gate goes from 2 of 7 sheets (the warp) to 7 of 7 and 7 of 7 (this).
- *
- * THREE PROPERTIES BY CONSTRUCTION, NOT BY TESTING, the same three the warp
- * has: it is a pure function of world position, so there is no seam at any
- * quadrant, cell or chunk line; it reads nothing per-chunk and no evaluation
- * order, so the bake is byte-identical at 1 chunk thread and at 16; and it is a
- * RESAMPLING of the texture, so the grain's spectrum and histogram survive. */
-/* 256 world units since 2026-09-12 (lane DEFAULTS1): part of bungo's pick,
- * panel (c) of `a_land_guide_*.png`. `--land-hex 0` is one quarter of the way
- * back; see the four-switch note at g_landWarpAmp. */
+// THE HISTOGRAM-PRESERVING HEX TILING:
+// See lodgen.h for what this is and what it was measured at. OFF IS A RETURN: at size 0 `lodgenLandHexTap`
+// evaluates the identical expression the rung compiled, so the default sheet is the same bytes.
 static float g_landHexSize = 256.0f;          // world units; 0 == off
 
 /* the skew and scale that turn a unit square lattice into an equilateral
@@ -8107,13 +6934,7 @@ static float g_landHexSize = 256.0f;          // world units; 0 == off
 static const double LODGEN_HEX_SKEW  = 0.57735026918962576;
 static const double LODGEN_HEX_SCALE = 1.15470053837925152;
 
-/*! The triangle a world position falls in: its three lattice vertices and the
- *  three barycentric weights.
- *
- *  In double for the same reason the warp is: the lattice index comes from a
- *  floor of a world coordinate that reaches +-2,000,000 units and float carries
- *  24 bits of mantissa, so the weights would quantise at the far edge of the
- *  worldspace.  Nothing here reads any state. */
+//! The triangle a world position falls in: its three lattice vertices and the three barycentric weights.
 static void lodgenLandHexCell( double wx, double wy, double size,
                                qint32 * vi, qint32 * vj, double * w )
 {
@@ -8145,12 +6966,8 @@ static inline double lodgenLandHexOffset( qint32 i, qint32 j, quint32 k )
 	return double( lodgenWarpHash( i, j, k ) ) / 4294967296.0;
 }
 
-/*! The WORLD position of one lattice vertex -- the inverse of the skew in
- *  `lodgenLandHexCell`, spelled out rather than re-derived at the call site
- *  (lane LAND1 needs it to anchor a per-vertex rotation).
- *
- *      sx = px - SKEW * py,  sy = SCALE * py   =>   py = sy / SCALE,
- *      px = sx + SKEW * sy / SCALE,            and world = ( px, py ) * size. */
+//! The WORLD position of one lattice vertex -- the inverse of the skew in `lodgenLandHexCell`, spelled out
+//! rather than re-derived at the call site.
 static inline void lodgenLandHexVertexPos( qint32 i, qint32 j, double size,
                                            double * wx, double * wy )
 {
@@ -8160,26 +6977,21 @@ static inline void lodgenLandHexVertexPos( qint32 i, qint32 j, double size,
 	*wy = py * size;
 }
 
-/* --- THE LAND TEXTURE'S RELIEF, AND THE HEIGHT-AWARE BLEND (lane TILING5) ---
+/* --- THE LAND TEXTURE'S RELIEF, AND THE HEIGHT-AWARE BLEND ---
  *
  * See lodgen.h.  FO4 land textures ship no height map, so the relief is
  * integrated out of the texture's own normal map, once per texture, and kept
  * as a small float pyramid with zero mean and unit SD on every level, so that
  * ONE sharpness constant means the same thing at every distance.
  *
- * Lane TILING5's measurement (scratchpad/tiling5_20260927/m1_height_source.py,
+ * Measured (m1_height_source.py,
  * coverage-weighted over the Commonwealth's land): diffuse luminance
  * correlates 0.196 with this relief and diffuse alpha 0.314 (and alpha is flat
  * on 20.7 % of the ground), so neither free channel is a height. */
 static bool g_landHeightBlend = false;         // --land-height-blend; off == rung's bytes
 static bool g_landMacro = false;               // --land-macro; off == rung's bytes
 
-/* THE ONE SHARPNESS CONSTANT: the logit shift per unit-SD of relief
- * difference.  Lane TILING5's sweep of the split blend (DONE.md 3h, fourteen
- * frozen chunks): beta 1.0 moved nothing (7 of 14 transition sheets, as today);
- * beta 2.0 brought the transition zones' high-pass SD to vanilla's (5.36 vs
- * 5.39) with TILING4's grain gates still green (G1 +19.9 %, bar 20 %; G2 7/7),
- * so 2.0 is the largest value the grain bar allows. */
+// THE ONE SHARPNESS CONSTANT: the logit shift per unit-SD of relief difference.
 static const float LODGEN_LAND_HEIGHT_BETA = 2.0f;
 
 static inline float lodgenLandHeightBeta()
@@ -8385,11 +7197,8 @@ static LodgenLandHeight * lodgenBuildLandHeight( const DDSTexture16 & t )
 	return hm;
 }
 
-/*! The relief of one land texture set, cached for the process (never freed,
- *  like the AO alpha maps: every bake thread holds pointers into it).  The
- *  normal map is read through a PRIVATE loader cache that is emptied here, not
- *  through the bake's LRU -- loading it there could evict the diffuse the
- *  caller is holding. */
+//! The relief of one land texture set, cached for the process (never freed, like the AO alpha maps: every bake
+//! thread holds pointers into it).
 static const LodgenLandHeight * lodgenLandHeightFor( const QString & dataRoot,
 	const QString & diffuse, const QString & normal )
 {
@@ -8431,20 +7240,9 @@ static const LodgenLandHeight * lodgenLandHeightFor( const QString & dataRoot,
 	return hm;
 }
 
-/* --- THE SELECTION'S MEAN BIAS, AND ITS CORRECTION (lane TILING5) -----------
- *
- * Choosing the texel with the higher relief also chooses the brighter texel:
- * inside a land texture relief and colour correlate (the lit tops of the
- * normal-map relief).  Measured on the first split-blend arm (DONE.md C3): all
- * fourteen frozen sheets brighter, median +2.23 of 255, and the coarsest band
- * of TILING4's G2-band gate gaining power on 12 of 14.
- *
- * The correction is linear regression, per texture and per relief level:
- * G = cov(colour, h) with h at unit SD, so colour = mean + G h + e.  Every
- * height-aware choice then applies the PAINTED weights to the G h part (the
- * part the relief predicts) and the height weights only to the residual e,
- * whose expectation does not depend on the choice.  Under the linear model the
- * mean colour is exactly today's; the grain the relief picks stays. */
+// THE SELECTION'S MEAN BIAS, AND ITS CORRECTION:
+// Choosing the texel with the higher relief also chooses the brighter texel: inside a land texture relief and
+// colour correlate (the lit tops of the normal-map relief).
 struct LodgenLandSlope
 {
 	std::vector<FloatVector4> g;             // per relief level, RGB (alpha 0)
@@ -8518,31 +7316,7 @@ static inline float lodgenLandHeightAlpha( float a, float dh )
 	return float( 1.0 / ( 1.0 + std::exp( -lg ) ) );
 }
 
-/*! One LTEX layer over the composite, height-aware -- and only in its DETAIL.
- *
- *  Each sample splits into its texture's repeat average (the 1x1 mip) and a
- *  detail about it.  The averages crossfade linearly with the painted opacity
- *  `a`, exactly as today; the details take the height opacity
- *  sigma( logit(a) + beta dh ), so the raised texture's features win and the
- *  transition keeps a full texture's grain instead of the average of two.
- *  Splitting is the "controlled contrast": run on the whole colour, the height
- *  opacity also turned the two materials' MEAN difference into a per-texel
- *  dither, and the first arm (beta 2 on the whole colour) doubled the
- *  transition zones' high-pass SD past vanilla's (DONE.md 3e).
- *
- *      m' = m + (ml - m) a,   d' = d + (dl - d) ah,   c = m + d
- *   => c' = c + (lc - c) ah + (ml - m)(a - ah)
- *
- *  ah = a gives today's linear blend.
- *
- *  THE MEAN-BIAS CORRECTION (lodgenLandSlopeFor): the part of each detail the
- *  relief predicts, p = G h, is split off too and crossfaded with the painted
- *  `a` like the mean, so the height opacity moves only the residual:
- *
- *   => c' = c + (lc - c) ah + ((ml - m) + (pl - p))(a - ah)
- *
- *  Updates the composite colour `c`, its mean `m`, its predicted detail `p`
- *  and its relief `h`; returns ah for the mask channels. */
+//! One LTEX layer over the composite, height-aware -- and only in its DETAIL.
 static inline float lodgenLandHeightLayer( FloatVector4 & c, FloatVector4 & m, FloatVector4 & p,
                                            float & h, const FloatVector4 & lc,
                                            const FloatVector4 & ml, const FloatVector4 & pl,
@@ -8566,26 +7340,14 @@ void lodgenSetLandHeightBlend( bool on )
 	g_landHeightBlend = on;
 }
 
-/* --- THE LARGE-SCALE VARIATION (lane TILING5) --------------------------------
- *
- * Three independent smooth fields (brightness, hue, saturation), each value-
- * noise fBm on 4,096 / 16,384 / 65,536-unit lattices (58 m / 234 m / 936 m) with
- * quintic interpolation, from the warp's own integer hash under keys the hex
- * and the warp never use.  Pure functions of world position. */
+// THE LARGE-SCALE VARIATION:
+// Three independent smooth fields (brightness, hue, saturation), each value- noise fBm on 4,096 / 16,384 /
+// 65,536-unit lattices (58 m / 234 m / 936 m) with quintic interpolation, from the warp's own integer hash
+// under keys the hex and the warp never use.
 static const double LODGEN_MACRO_LATTICE[3] = { 4096.0, 16384.0, 65536.0 };
 static const double LODGEN_MACRO_WEIGHT[3]  = { 0.25, 0.5, 1.0 };
-/* THE AMPLITUDES: brightness as a log gain per unit field, hue in radians per
- * unit field, and the saturation boost's ceiling (the boost is always >= 1).
- *
- * All three are ZERO, by measurement.  Lane TILING5 read the licence as what
- * vanilla's own LOD sheets carry at 60-700 m that today's bake does not,
- * sqrt(max(0, vanilla^2 - today^2)), on 12x12-cell mosaics (DONE.md 3g): at
- * Boston today already carries MORE large-scale brightness variation than
- * vanilla (licence 0 in both bands), in the west-central hills more colour
- * variation (licence 0 in both bands).  One world-wide field may not exceed
- * the licence anywhere, so every channel is 0 and `--land-macro on` writes
- * the same colour as off (lodgenLandMacroApply returns its input unchanged).
- * The field is kept for a later bake whose sheets leave room for it. */
+// THE AMPLITUDES: brightness as a log gain per unit field, hue in radians per unit field, and the saturation
+// boost's ceiling (the boost is always >= 1).
 static const float LODGEN_MACRO_AMP[3] = { 0.0f, 0.0f, 0.0f };
 
 //! One octave of quintic value noise in [-1,+1], its own hash key.
@@ -8631,10 +7393,7 @@ static inline float lodgenHsvSat( const FloatVector4 & c )
 	return mx > 1e-6f ? ( mx - mn ) / mx : 0.0f;
 }
 
-/*! The macro variation applied to one land colour (0..1, alpha untouched).
- *  Hue turns about the grey axis, saturation is scaled about the grey level
- *  by k >= 1, brightness is a gain; then, per texel, the saturation is held
- *  at or above the unmodified colour's -- the hard line. */
+//! The macro variation applied to one land colour (0..1, alpha untouched).
 static FloatVector4 lodgenLandMacroApply( const FloatVector4 & cIn, double wx, double wy )
 {
 	const float * amp = LODGEN_MACRO_AMP;
@@ -8711,12 +7470,8 @@ void lodgenSetLandMacro( bool on )
 	g_landMacro = on;
 }
 
-/*! The land diffuse tap: one texel off it when the hex tiling is off, the
- *  three-tap variance-preserving blend when it is on.
- *
- *  `swx`/`swy` are the (possibly warp-offset) world position; `u`/`v` are the
- *  wrapped coordinates the caller already computed from them, so that OFF costs
- *  one branch and returns the caller's own expression unchanged. */
+//! The land diffuse tap: one texel off it when the hex tiling is off, the three-tap variance-preserving blend
+//! when it is on.
 static FloatVector4 lodgenLandHexTap( const DDSTexture16 * tex,
                                       float swx, float swy, float tile,
                                       float u, float v, float mip, float maxMip,
@@ -8726,7 +7481,7 @@ static FloatVector4 lodgenLandHexTap( const DDSTexture16 * tex,
                                       const LodgenLandSlope * sl = nullptr,
                                       FloatVector4 * pOut = nullptr )
 {
-	/* THE HEIGHT-AWARE PATH (lane TILING5) is its own branch, taken only when
+	/* THE HEIGHT-AWARE PATH is its own branch, taken only when
 	 * the caller hands in a relief: without one, every line below is the
 	 * expression the rung compiled. */
 	if ( ht && hOut ) {
@@ -8767,7 +7522,7 @@ static FloatVector4 lodgenLandHexTap( const DDSTexture16 * tex,
 		}
 		/* raised features win at the joins: w_k exp(beta h_k), renormalised.
 		 * A weight that is 0 at a lattice edge stays 0, so no seam. The
-		 * largest relief is subtracted first so exp() cannot overflow. */
+		 * largest relief is subtracted first so exp cannot overflow. */
 		const double beta = double( lodgenLandHeightBeta() );
 		const double hmx = qMax( hk[0], qMax( hk[1], hk[2] ) );
 		double wp[3], wsum = 0.0;
@@ -8829,7 +7584,7 @@ static FloatVector4 lodgenLandHexTap( const DDSTexture16 * tex,
 	for ( int k = 0; k < 3; k++ ) {
 		const double ox = lodgenLandHexOffset( vi[k], vj[k], 0 ) * double( tile );
 		const double oy = lodgenLandHexOffset( vi[k], vj[k], 1 ) * double( tile );
-		/* THE TERRAIN-GUIDED ROTATION (lane LAND1), carried per lattice
+		/* THE TERRAIN-GUIDED ROTATION, carried per lattice
 		 * VERTEX: each tap rotates the plane about its own vertex by the
 		 * macro azimuth measured THERE, so every tap is a similarity and
 		 * the shear is exactly zero, and the barycentric blend below joins
@@ -8860,10 +7615,7 @@ static FloatVector4 lodgenLandHexTap( const DDSTexture16 * tex,
 	if ( wsq > 1e-12 )
 		acc *= float( 1.0 / std::sqrt( wsq ) );
 	FloatVector4 r = mean + acc;
-	/* ALPHA IS NEVER BLENDED.  Weights that sum to one over a variance-
-	 * preserving denominator would push a constant 1.0 alpha to about 1.07, and
-	 * a land diffuse's alpha is not a colour to be decorrelated -- it is taken
-	 * from the tap with the largest weight, which is a tap, not an average. */
+	// ALPHA IS NEVER BLENDED.
 	r[3] = bestA;
 	return r;
 }
@@ -8935,27 +7687,14 @@ void lodgenSetLandMipBias( float bias )
 static QString g_vanillaLodRoot =
 	QStringLiteral( "E:/Tools/Fallout 4/DataUnpacked/Data" );
 static int g_landDetailSource = LODGEN_LANDDETAIL_VANILLA;
-/*! The crevice coefficient, in 8-bit luminance levels per unit of detail-normal
- *  divergence, fitted on seven vanilla sheets by
- *  scratchpad/tiling3_20260911/d3_shade.py: median -3.242, the same sign on 7
- *  of 7 sheets, beating its own phase twin on 7 of 7.  The Lambert form the
- *  ruling named reads ZERO at the twin floor with signs that flip sheet to
- *  sheet, which is why this is a curvature term and not a light. */
+//! The crevice coefficient, in 8-bit luminance levels per unit of detail-normal divergence, fitted on seven
+//! vanilla sheets by scratchpad/tiling3_20260911/d3_shade.py: median -3.242, the same sign on 7 of 7 sheets,
+//! beating its own phase twin on 7 of 7.
 static float g_landShade = -3.242f;
-/*! The colour grade, applied at the per-texel write in BOTH writers. Lane
- *  GRADE1, 2026-09-12: ours -> vanilla is NOT a constant gain, a gamma or an
- *  sRGB slip. The best gain per tile runs 0.615..1.241 over a 25-tile census
- *  (mean 0.892, sd 0.144) and its SIGN flips between the two reference tiles --
- *  (-20,24) wants 0.892, (-20,20) wants 1.118 -- so every k != 1 raises the
- *  error on one of them. 1.0 is therefore the default and the knob exists to
- *  answer "what would k do", not because a k was found. The pooled optimum over
- *  the census is 0.840 (RGB RMS 24.72 -> 19.64, better on 19 of 25 tiles). */
+//! The colour grade, applied at the per-texel write in BOTH writers. Ours -> vanilla
+//! is NOT a constant gain, a gamma or an sRGB slip.
 static float g_landGrade = 1.0f;
-/*! The sheet format, and the cleaned-`_msn` cache directory. Both default to
- *  OFF and both are off by construction, not by argument: at LEGACY the writer
- *  is called with the arguments it was called with before, and with an empty
- *  cache directory no directory is read. See src/lodgen.h for what `vanilla`
- *  means and for the corpus measurement it was taken from. */
+//! The sheet format, and the cleaned-`_msn` cache directory.
 static int g_sheetFormat = LODGEN_SHEETFMT_LEGACY;
 static QString g_msnCacheDir;
 
@@ -8970,11 +7709,11 @@ static std::atomic<int> g_vrLayered( 0 );
 static std::atomic<int> g_vrLayerless( 0 );
 static std::atomic<int> g_vrLayerlessNoVanilla( 0 );
 static std::atomic<int> g_vrShaded( 0 );
-// lane BAKESPEED1: the pyramid's chunk sheets add to these, so its checkpoint carries them
+// the pyramid's chunk sheets add to these, so its checkpoint carries them
 static std::atomic<int> * const g_vrAll[] = { &g_vrMsnCopied, &g_vrMsnOurs, &g_vrMsnCacheHit, &g_vrMsnCacheMiss,
 	&g_vrMsnCacheRenorm, &g_vrColCopied, &g_vrColOurs, &g_vrLayered, &g_vrLayerless, &g_vrLayerlessNoVanilla, &g_vrShaded };
 
-/*! THE EROSION PASS (lane GROUND1 Part B). 0 is off and is the rung's bytes:
+/*! THE EROSION PASS. 0 is off and is the rung's bytes:
  *  at 0 no lattice is built at all, so the two `_msn` writers take the branch
  *  they always took and no arithmetic happens that could round. */
 static float g_erosion = 0.0f;
@@ -9014,11 +7753,7 @@ void lodgenSetErosionSeed( quint32 seed )
 	g_erosionSeed = seed;
 }
 
-/* THE EROSION CENSUS, pooled across every lattice this process builds.
- * Both writers build their lattices per chunk and per tile, on worker
- * threads, and both reports want one set of numbers for the run, so the
- * pooling happens here behind a mutex rather than in either writer. It is
- * reset by the same call that resets the vanilla-reuse counters. */
+// THE EROSION CENSUS, pooled across every lattice this process builds.
 static QMutex g_eroCensusMutex;
 static LodgenErosionCensus g_eroCensusTotal;
 
@@ -9078,26 +7813,9 @@ void lodgenSetVanillaLodRoot( const QString & root )
 		g_vanillaLodRoot.chop( 1 );
 }
 
-/* ==========================================================================
- *  THE LANDLESS-CELL HEIGHT FILL (lane FIX1, 2026-09-26).
- *
- *  A cell with no LAND record has no height of its own, and the terrain we
- *  wrote there was the worldspace's default land height -- flat. Pre-war
- *  Sanctuary (SanctuaryHillsWorld) carries LAND only round the Sanctuary
- *  block, yet 101 LOD placements stand in 15 cells east of it at z 6,400 to
- *  9,200 over our flat 0. The game draws its OWN terrain LOD there: the
- *  shipped SanctuaryHillsWorld .BTR, whose Land in those cells sits at 5,000
- *  to 9,500 (the Commonwealth's hills; near Sanctuary the files equal the
- *  Commonwealth's but for their name strings).
- *
- *  So a landless cell may take its heights from the game's dim-4 terrain LOD,
- *  read as INPUT only (ruling R2: no stock .BTR ships): the chunk's Land
- *  triangles are rasterised onto our 128-unit grid, barycentric, once per
- *  chunk. The chunk grid's phase is the engine's own (LODSettings\<WS>.LOD,
- *  as the colour fill reads it). A cell any of whose 33x33 samples no
- *  triangle covers is not filled at all -- a partial cell would be a cliff.
- *  OFF by default: with the switch off nothing is read and nothing moves.
- * ========================================================================== */
+// THE LANDLESS-CELL HEIGHT FILL:
+// A cell with no LAND record has no height of its own, and the terrain we wrote there was the worldspace's
+// default land height -- flat.
 static std::atomic<bool> g_landFillVanilla( false );
 static std::atomic<qint64> g_landFillAsked( 0 ), g_landFillFilled( 0 ), g_landFillChunksRead( 0 ),
 	g_landFillChunksMissing( 0 );
@@ -9292,11 +8010,9 @@ void lodgenSetSheetFormat( int fmt )
 		? LODGEN_SHEETFMT_VANILLA : LODGEN_SHEETFMT_LEGACY;
 }
 
-/*! The sheet's own file inside a normal-sheets folder (bungo 2026-09-24): the
- *  folder itself first (the rung's only place), then, so a MOD ROOT, a Data
- *  folder or a Textures folder can be named, `Textures/Terrain/<world>/` and
- *  `Terrain/<world>/` under it; <world> is the name up to its first dot. The
- *  first place is returned when none has it, so a miss reads as before. */
+//! The sheet's own file inside a normal-sheets folder: the folder itself first (the rung's only place), then,
+//! so a MOD ROOT, a Data folder or a Textures folder can be named, `Textures/Terrain/<world>/` and
+//! `Terrain/<world>/` under it; <world> is the name up to its first dot.
 static QString lodgenMsnSheetPath( const QString & root, const QString & fileName )
 {
 	const QDir d( root );
@@ -9315,10 +8031,9 @@ static QString lodgenMsnSheetPath( const QString & root, const QString & fileNam
 	return first;
 }
 
-/*! Does this folder hold an UPSCALED dim-4 normal set for some world: a
- *  `Textures/Terrain/<world>/<world>.4.*_msn.DDS` (or the same under
- *  `Terrain/`, or loose in the folder) whose DDS width is above vanilla's 512.
- *  Vanilla's own sheets, loose in an unpacked Data, are 512 and do not count. */
+//! Does this folder hold an UPSCALED dim-4 normal set for some world: a
+//! `Textures/Terrain/<world>/<world>.4.*_msn.DDS` (or the same under `Terrain/`, or loose in the folder) whose
+//! DDS width is above vanilla's 512.
 static bool lodgenMsnFolderHasUpscaledSet( const QString & root )
 {
 	QStringList dirs;
@@ -9458,20 +8173,7 @@ static bool lodgenWriteFileBytes( const QString & path, const QByteArray & bytes
 	return f.write( bytes ) == qint64( bytes.size() ) && f.flush();
 }
 
-/*! An UNCOMPRESSED DDS: B8G8R8A8 through a DX10 header, full mip chain to 1x1.
- *
- *  It exists for one job -- the cleaned `_msn` cache -- and the reason it is
- *  not a block format is measured, not assumed: the cache's whole content is
- *  that the BC1 4x4 block grid is gone from it (block-grid line 1.0259 at
- *  period 16, against 1.3460 for a bicubic upscale that cleans nothing), and a
- *  BC re-encode puts a block grid straight back. (A BC7 encoder exists since
- *  2026-09-23, src/lodgenbc7.h, for the card `_n` sheet; BC7 is still a 4x4
- *  block format and is not used here -- whether its grid shows on this sheet
- *  is unmeasured.) What uncompressed costs is in the lane report, for bungo
- *  to rule on.
- *
- *  The packed quint32 is 0xAARRGGBB, whose little-endian bytes are B, G, R, A,
- *  which is exactly DXGI_FORMAT_B8G8R8A8_UNORM (87) -- no swizzle on write. */
+//! An UNCOMPRESSED DDS: B8G8R8A8 through a DX10 header, full mip chain to 1x1.
 static bool lodgenWriteDdsBgra8( const QString & path, int w, int h,
 	const std::vector<quint32> & bgra )
 {
@@ -9524,7 +8226,7 @@ static bool lodgenWriteDdsBgra8( const QString & path, int w, int h,
 	hdr[20] = 0x4;                  // fourCC
 	hdr[21] = 0x30315844U;          // the DX10 fourCC
 	hdr[27] = 0x401008;             // caps: complex|texture|mipmap
-	// DDS_HEADER_DXT10: dxgiFormat, resourceDimension (3 = 2D), miscFlag, arraySize, miscFlags2
+	// dxgiFormat, resourceDimension (3 = 2D), miscFlag, arraySize, miscFlags2
 	const quint32 dx10[5] = { 87U, 3U, 0U, 1U, 0U };
 	if ( f.write( reinterpret_cast<const char *>( hdr ), 128 ) != 128 )
 		return false;
@@ -9538,22 +8240,7 @@ static bool lodgenWriteDdsBgra8( const QString & path, int w, int h,
 	return f.flush();
 }
 
-/*! One chunk's `_msn` out of the cleaned cache, or false when there is none.
- *
- *  `base` is the sheet path without its suffix, so the cache file is that name
- *  plus `.png` inside the cache directory. The channel law here is the MEASURED
- *  one (src/lodgen.h says what was measured and on how many sheets): cache R is
- *  east, cache G is north, cache B is empty, so UP is recomputed. Where
- *  east^2 + north^2 > 1 the triple is RENORMALISED rather than clamped --
- *  clamping leaves a normal that is not unit length, and a median 0.11% of
- *  texels per sheet are out there (26.28% on the worst sampled chunk). The
- *  count of sheets that needed it is in the census, so a run cannot hide it. */
-/*! bungo's ASSEMBLED sheets (2026-09-18): `<name>_msn.DDS` beside or instead of
- *  the `.png`, uncompressed R8G8B8A8 with a DX10 header, one mip, in VANILLA's
- *  channel order (R east, G up, B north) with G his upscaled slope channel. The
- *  stored G is USED, not recomputed, and the triple is renormalised as a whole.
- *  Anything else in the file (a block-compressed format, mips, a legacy header)
- *  is refused with a reason on stderr and the .png is tried next. */
+//! One chunk's `_msn` out of the cleaned cache, or false when there is none.
 static bool lodgenMsnEncodeAssembled( const QByteArray & px, std::vector<quint32> & out,
 	int w, int h )
 {
@@ -9563,11 +8250,7 @@ static bool lodgenMsnEncodeAssembled( const QByteArray & px, std::vector<quint32
 		float e = float( src[0] ) / 255.0f * 2.0f - 1.0f;   // R east
 		float up = float( src[1] ) / 255.0f * 2.0f - 1.0f;  // G up, his slope
 		float n = float( src[2] ) / 255.0f * 2.0f - 1.0f;   // B north
-		/* The length is spelled as the fused form the rung's compiler chose
-		 * (lane VTNORMAL1, fmaprobe.py: 4194304 of 4194304 texels of a sheet
-		 * agree with it). Written as a plain sum, -O3 -march=haswell is free to
-		 * contract it either way, and a code change elsewhere in this file
-		 * flipped it: 2 texels of a 2048 sheet moved one step. */
+		// The length is spelled as the fused form the rung's compiler chose.
 		const float inv = 1.0f / qMax( std::sqrt( std::fma( up, up, std::fma( n, n, e * e ) ) ), 1e-6f );
 		out[i] = lodgenTerrainMsnPixel( Vector3( e * inv, n * inv, up * inv ) );
 	}
@@ -9605,12 +8288,8 @@ static bool lodgenMsnFromAssembledDds( const QString & path, std::vector<quint32
 	const QByteArray px = f.read( qint64( w ) * qint64( h ) * 4 );
 	if ( px.size() != qint64( w ) * qint64( h ) * 4 )
 		return false;
-	/* `vec` (lane VTNORMAL1): the same unit vectors, east north up, handed back
-	 * as floats for the pyramid, which box-filters them before it encodes. It is
-	 * its OWN loop on purpose: one loop with a branch inside compiled the
-	 * encoded path differently (-march=haswell) and moved 3 bytes of a 22 MB
-	 * chunk sheet by one step, so the chunk-sheet loop below is the rung's,
-	 * character for character. */
+	// `vec`: the same unit vectors, east north up, handed back as floats for the pyramid, which box-filters
+	// them before it encodes.
 	if ( vec ) {
 		vec->assign( size_t( w ) * size_t( h ) * 3, 0.0f );
 		const uchar * vs = reinterpret_cast<const uchar *>( px.constData() );
@@ -9629,11 +8308,8 @@ static bool lodgenMsnFromAssembledDds( const QString & path, std::vector<quint32
 	return lodgenMsnEncodeAssembled( px, *out, w, h );
 }
 
-/*! One cache lookup, `<dir>/<name>_msn.DDS` then `<dir>/<name>.png`, for two
- *  callers: the chunk-sheet writer wants encoded pixels (`out`), the pyramid
- *  wants unit vectors (`vec`, lane VTNORMAL1). Exactly one of the two is set.
- *  The off-circle census belongs to the chunk-sheet writer and only it moves it. */
-/*! The rung's PNG loop, verbatim (the chunk-sheet path; its bytes are gated). */
+//! One cache lookup, `<dir>/<name>_msn.DDS` then `<dir>/<name>.png`, for two callers: the chunk-sheet writer
+//! wants encoded pixels (`out`), the pyramid wants unit vectors (`vec`).
 static bool lodgenMsnEncodePng( const QImage & img, std::vector<quint32> & out, int w, int h )
 {
 	out.assign( size_t( w ) * size_t( h ), LODGEN_MSN_FLAT );
@@ -9685,7 +8361,7 @@ static bool lodgenMsnCacheRead( const QString & base, std::vector<quint32> * out
 	if ( w <= 0 || h <= 0 )
 		return false;
 	if ( vec ) {
-		// the pyramid's vectors (lane VTNORMAL1): its own loop, see the DDS reader
+		// the pyramid's vectors: its own loop, see the DDS reader
 		vec->assign( size_t( w ) * size_t( h ) * 3, 0.0f );
 		for ( int y = 0; y < h; y++ ) {
 			const quint32 * vs = reinterpret_cast<const quint32 *>( img.constScanLine( y ) );
@@ -9712,15 +8388,10 @@ static bool lodgenMsnFromCache( const QString & base, std::vector<quint32> & out
 	return lodgenMsnCacheRead( base, &out, nullptr, w, h );
 }
 
-/*! Does any cell of this chunk carry land-texture paint?
- *
- *  "Paint" is a BTXT base texture or an ATXT/VTXT layer on ANY quadrant of ANY
- *  cell -- the per-chunk rule the coordinator named as the fallback, taken
- *  because the shipping writer assembles a chunk sheet from four VT tiles and
- *  has no per-quadrant seam to split on at that point.  An out-of-bounds cell
- *  has heights and nothing else, so it answers false; a partly painted chunk
- *  answers true and keeps our composite, which is the conservative way round
- *  (it never discards paint that exists). */
+//! Does any cell of this chunk carry land-texture paint?:
+//! "Paint" is a BTXT base texture or an ATXT/VTXT layer on ANY quadrant of ANY cell -- the per-chunk rule the
+//! coordinator named as the fallback, taken because the shipping writer assembles a chunk sheet from four VT
+//! tiles and has no per-quadrant seam to split on at that point.
 bool lodgenChunkHasLandPaint( const EsmWorld & world, int chunkX, int chunkY, int dim )
 {
 	EsmLand land;
@@ -9739,14 +8410,8 @@ bool lodgenChunkHasLandPaint( const EsmWorld & world, int chunkX, int chunkY, in
 	return false;
 }
 
-/*! Vanilla's `_msn` detail field -- the sheet minus its own coarse version --
- *  decoded into east/north at the sheet's own resolution.
- *
- *  COARSE IS MIP 2 and that is not a tunable: four texels is 128 world units,
- *  which is exactly our height grid's step, so "detail" means precisely "the
- *  relief our own normal cannot know about".  Both levels come through the same
- *  trilinear sampler the rest of this file uses (`getPixelT`), because the
- *  coefficient was fitted that way and a blockier coarse is a different field. */
+//! Vanilla's `_msn` detail field -- the sheet minus its own coarse version decoded into east/north at the
+//! sheet's own resolution.
 static bool lodgenVanillaMsnDetail( const QByteArray & bytes, int res,
 	std::vector<float> & dEast, std::vector<float> & dNorth )
 {
@@ -9789,22 +8454,7 @@ static bool lodgenVanillaMsnDetail( const QByteArray & bytes, int res,
 	return true;
 }
 
-/*! THE CREVICE TERM -- the shading the ruling asked for, by the only form of it
- *  that measures.
- *
- *      dL = kDiv * ( d(dEast)/dx + d(dNorth)/dy )
- *
- *  A LAMBERT DOT CANNOT SEE A RILL: the two walls of a rill tilt opposite ways
- *  and their dots cancel, which is why fitting kE/kN/kU against seven vanilla
- *  sheets returns the phase-twin floor with signs that flip sheet to sheet.
- *  The DIVERGENCE of the same field does not cancel -- negative in a channel,
- *  positive on a ridge -- and it reads r = -0.105 median, the same sign on 7 of
- *  7 sheets, over its own twin on 7 of 7.  It recovers about 1 % of the
- *  colour's fine variance, which is written down here so that nobody later
- *  reads this feature as "vanilla's colour".
- *
- *  Central differences, one-sided at the border, in per-texel units -- numpy's
- *  `gradient`, which is what the coefficient was fitted with. */
+//! THE CREVICE TERM -- the shading the ruling asked for, by the only form of it that measures.
 static int lodgenShadeWithCrevice( const QByteArray & msnBytes, int res,
 	std::vector<quint32> & col, float k )
 {
@@ -9839,13 +8489,7 @@ static int lodgenShadeWithCrevice( const QByteArray & msnBytes, int res,
 	return 1;
 }
 
-/*! vanilla's fine detail laid over OUR coarse normal -- `vanilla-blend`, the
- *  SECOND value, never the default.
- *
- *  It exists for reshaped terrain, where vanilla's sheet is the wrong surface
- *  but its fine relief is still the only fine relief anyone has.  East and
- *  north take our coarse plus vanilla's detail; UP IS RECOMPUTED from them so
- *  the stored normal stays unit length, which is the director's item 3. */
+//! vanilla's fine detail laid over OUR coarse normal -- `vanilla-blend`, the SECOND value, never the default.
 static int lodgenBlendVanillaDetail( const QByteArray & msnBytes, int res,
 	std::vector<quint32> & nrm )
 {
@@ -9860,7 +8504,7 @@ static int lodgenBlendVanillaDetail( const QByteArray & msnBytes, int res,
 	for ( size_t i = 0; i < nrm.size(); i++ ) {
 		/* THE PACKING IS lodgenTerrainMsnPixel's, quoted from it:
 		 *     `nEast << 16 | nUp << 8 | nNorth`
-		 * -- bits 16-23 EAST, 8-15 UP, 0-7 NORTH. Until lane VTFIX1 (2026-09-24)
+		 * -- bits 16-23 EAST, 8-15 UP, 0-7 NORTH. Before the fix
 		 * this read east out of bits 0-7 and north out of 16-23 and wrote them
 		 * back into the same slots, so dE was added to the NORTH component and
 		 * dN to the EAST one: nothing looked transposed, the relief just leaned
@@ -9880,13 +8524,7 @@ static int lodgenBlendVanillaDetail( const QByteArray & msnBytes, int res,
 	return 1;
 }
 
-/*! The one place a chunk sheet decides what its `_msn` and its colour are.
- *
- *  Called by BOTH writers -- the stock per-chunk bake and the PYRAMID/VT
- *  assembly -- so the two cannot drift, which is exactly the mistake lane
- *  TILING2 made when it edited one `sampleLtex` and not the other.  Every
- *  outcome is a decision and every decision is counted.  `msnCopy`/`colCopy`
- *  come back empty when this chunk writes its own bake as before. */
+//! The one place a chunk sheet decides what its `_msn` and its colour are.
 void lodgenVanillaChunkSheets( const EsmWorld & world, const QString & ws, int dim,
 	int chunkX, int chunkY, int res, bool hasPaint,
 	std::vector<quint32> & col, std::vector<quint32> & nrm,
@@ -9927,33 +8565,14 @@ void lodgenVanillaChunkSheets( const EsmWorld & world, const QString & ws, int d
 	}
 	g_vrColOurs++;
 
-	/* Under EROSION the colour already carries a crevice term, computed at
-	 * the per-texel write from THIS bake's own relief. Running vanilla's on
-	 * top would shade one sheet twice from two different surfaces, and the
-	 * two surfaces do not agree: vanilla's sheet is the vanilla terrain's
-	 * fine normal, ours is the erosion delta this bake just grew. One
-	 * sheet, one crevice term. */
+	// Under EROSION the colour already carries a crevice term, computed at the per-texel write from THIS
+	// bake's own relief.
 	if ( haveMsn && g_landDetailSource != LODGEN_LANDDETAIL_EROSION )
 		g_vrShaded += lodgenShadeWithCrevice( vmsn, res, col, g_landShade );
 }
 
-/*! Write one chunk's colour and `_msn`, honouring the reuse decision above.
- *  A copied sheet is written with ITS OWN BYTES and never re-encoded:
- *  re-encoding a BC block is precisely what "byte for byte" forbids.
- *
- *  This is also the ONE place the sheet FORMAT and the cleaned `_msn` cache
- *  act, for the same reason the reuse decision lives one function up: both
- *  writers -- the stock per-chunk bake and the pyramid/VT assembly -- come
- *  through here, so the two cannot drift.
- *
- *  Order on the `_msn`, and it is a decision, not an accident:
- *    1. the cleaned cache, when a file for this chunk is in it. It is last in
- *       and it wins, because the whole point of ADDED ITEM 8 is to replace the
- *       byte-for-byte vanilla copy on exactly the chunks that have one.
- *    2. vanilla's own bytes, when the reuse decision copied them.
- *    3. our bake, in the format the switch names.
- *  With both switches at their defaults every branch below is the branch that
- *  ran before, with the arguments it ran with before. */
+//! Write one chunk's colour and `_msn`, honouring the reuse decision above. A copied sheet is written with ITS
+//! OWN BYTES and never re-encoded: re-encoding a BC block is precisely what "byte for byte" forbids.
 bool lodgenWriteChunkSheets( const QString & base, int res,
 	const std::vector<quint32> & col, const std::vector<quint32> & nrm,
 	const QByteArray & colCopy, const QByteArray & msnCopy )
@@ -9961,11 +8580,8 @@ bool lodgenWriteChunkSheets( const QString & base, int res,
 	const QString cp = base + QStringLiteral( ".DDS" );
 	const QString mp = base + QStringLiteral( "_msn.DDS" );
 	const bool vanFmt = g_sheetFormat == LODGEN_SHEETFMT_VANILLA;
-	/* Vanilla's alpha is a measured constant 255 on both families over the
-	 * whole shipped corpus, so `vanilla` writes 255 and nothing else. The
-	 * buffers already carry 0xFF, but forcing it is the cheap way to say that
-	 * the format is the law here and not whatever a caller happened to leave
-	 * in the top byte. */
+	// Vanilla's alpha is a measured constant 255 on both families over the whole shipped corpus, so `vanilla`
+	// writes 255 and nothing else.
 	auto opaque = []( const std::vector<quint32> & in ) {
 		std::vector<quint32> out( in.size() );
 		for ( size_t i = 0; i < in.size(); i++ )
@@ -10003,16 +8619,7 @@ bool lodgenWriteChunkSheets( const QString & base, int res,
 	return true;
 }
 
-/*! Every "once, on first use" index the generator owns, built NOW, on the
- *  calling thread (lane BAKEPERF1, 2026-09-11).
- *
- *  Three of them, and first use is the only moment any of them can race:
- *  `lodgenStackIndex()`'s BA2File over the resource stack, `lodgenMeshArchives()`
- *  over the game manager's folders, and `GameResources::init_archives()`, which
- *  `GameManager::get_file` calls lazily on its first miss. The terrain ring
- *  self-test's one-shot comes along for the ride.
- *
- *  Idempotent: a second call finds all three built and returns. */
+//! Every "once, on first use" index the generator owns, built NOW, on the calling thread.
 void lodgenWarmSharedIndices()
 {
 	lodgenStackIndex();
@@ -10023,11 +8630,7 @@ void lodgenWarmSharedIndices()
 	 * run before any worker asks. */
 	Game::GameManager::find_file( Game::FALLOUT_4,
 		QStringLiteral( "ww_lodgen_warm_up" ), "textures", ".dds" );
-	/* And ONE NifModel, built and thrown away. Its constructor fills the
-	 * array-pseudonym tables, reads QSettings and takes an entry in the game
-	 * manager's resource map -- all "first time only" work, and in a -no-gui
-	 * run the first NifModel of the process would otherwise be one a worker
-	 * builds, sixteen of them at once. */
+	// And ONE NifModel, built and thrown away.
 	{
 		NifModel warmModel;
 		(void) warmModel.getBlockCount();
@@ -10038,7 +8641,7 @@ void lodgenWarmSharedIndices()
  *
  * bungo, 2026-09-11 10:0x, verbatim: "We do the same with roads and decals as
  * vanilla."  What vanilla does was MEASURED before a line of this was written
- * (lane ROADS1, report section 1, on Bethesda's own
+ * (report section 1, on Bethesda's own
  * `Textures\Terrain\Commonwealth\Commonwealth.4.-20.20.DDS`, the Sanctuary
  * loop-road tile):
  *
@@ -10105,11 +8708,9 @@ bool lodgenIsSidewalkModel( const QString & modelPath )
 		&& c[i + 1] == QLatin1String( "sidewalks" );
 }
 
-/*! The effective material swap of one road placement -- lane SWAP1's rule
- *  (nativeemit.cpp `nativeEffectiveSwap`, which lives in that file's anonymous
- *  namespace; nearlib.cpp restates it the same way). First nonzero wins:
- *  the REFR's XMSP; the MODS of the REFR's base (a SCOL part: the SCOL's);
- *  a SCOL part only, the MODS of the part's own base. 0 = no swap. */
+//! The effective material swap of one road placement -- the rule (nativeemit.cpp
+//! `nativeEffectiveSwap`, which lives in that file's anonymous namespace; nearlib.cpp restates it the same
+//! way).
 static quint32 lodgenRoadEffectiveSwap( const EsmWorld & world, quint32 xmsp, quint32 nameBase,
 	quint32 partBase )
 {
@@ -10190,16 +8791,9 @@ void LodgenRoadCensus::add( const LodgenRoadCensus & o )
 			refusals.append( r );
 }
 
-/* ---------------------------------------------------------------------------
- * FLAT GROUND OBJECTS (lane FLAT1, 2026-09-26) -- the override file.
- *
- * Plain text, one rule a line: `bake <path>` or `nobake <path>`, `#` starts a
- * comment. A path ending in `.nif` names one model; anything else is a folder
- * prefix, matched at a folder boundary. Paths are relative to Meshes, either
- * slash, any case. The LONGEST matching path wins, and a later line wins a tie.
- * The bake reads the file every time and never writes it; the DEFAULT file is
- * created, header only, when it is missing.
- * --------------------------------------------------------------------------- */
+// FLAT GROUND OBJECTS -- the override file:
+// Plain text, one rule a line: `bake <path>` or `nobake <path>`, `#` starts a comment. A path ending in `.nif`
+// names one model; anything else is a folder prefix, matched at a folder boundary.
 namespace
 {
 struct LodgenFlatOverride
@@ -10452,7 +9046,7 @@ namespace
 
 /*! The material path a Fallout 4 shape actually names.
  *
- * MEASURED, lane ROADS1's first gate run: every `Landscape\Roads\Country\*` and
+ * MEASURED, the first gate run: every `Landscape\Roads\Country\*` and
  * `Landscape\Roads\Alley\*` piece names its material as an ABSOLUTE BETHESDA
  * BUILD PATH -- `C:\Projects\Fallout4\Build\PC\Data\materials\Landscape\Roads\
  * AsphaltAndSWEdgeDecals01.BGSM` -- and carries an EMPTY texture set, because
@@ -10482,21 +9076,7 @@ QString lodgenRoadMaterialPath( const QString & matName )
 	return p;
 }
 
-/*! Is this material one of the LANDSCAPE'S OWN GROUND materials?
- *
- *  The discriminator is the material's FOLDER, which is data and not a guess:
- *  Bethesda files `materials/Landscape/Ground/*` for the textures the terrain
- *  itself is painted with and `materials/Landscape/Roads/*` for the road
- *  surface, its kerbs and its decals. A name-stem list was tried first and
- *  mis-read two of the biggest winners on chunk (-20,20) -- 7,558 texels of
- *  `CommonwealthDefault01.bgsm` and 5,317 of `SancSW01.BGSM` -- because
- *  neither name carries a stem that says which it is.
- *
- *  The path is normalised by `lodgenRoadMaterialPath` first, so the four
- *  prefixes the shipped NIFs actually carry (a bare `materials/...`, a
- *  `Data/materials/...`, and Bethesda's absolute
- *  `C:/Projects/Fallout4/Build/PC/Data/Materials/...`, in any case) all reduce
- *  to the same test. */
+//! Is this material one of the LANDSCAPE'S OWN GROUND materials?
 bool lodgenRoadMaterialIsGround( const QString & matName )
 {
 	if ( matName.isEmpty() )
@@ -10516,17 +9096,15 @@ struct LodgenRoadMat
 	bool read = false;
 	//! The material lives under materials/Landscape/Ground/: it is terrain.
 	bool ground = false;
-	//! Lane TERR1: the BGSM's normal map, textures()[1]; empty when it names none.
+	//! the BGSM's normal map, textures[1]; empty when it names none.
 	QString tex1;
 };
 
 //! One placed road shape, already in world space, with its world bounds.
 struct LodgenRoadShape
 {
-	/* All four are VALUE copies, never pointers into the model cache: the cache
-	 * is a QHash and an insert may rehash it, so a pointer taken before the
-	 * next model loads is a pointer into a moved bucket. Qt's containers are
-	 * copy-on-write, so the copy is a reference count and not the data. */
+	// All four are VALUE copies, never pointers into the model cache: the cache is a QHash and an insert may
+	// rehash it, so a pointer taken before the next model loads is a pointer into a moved bucket.
 	QVector<Vector3> pos;           //!< world-space vertices
 	QVector<Vector2> uv;
 	QVector<Color4> col;
@@ -10541,20 +9119,17 @@ struct LodgenRoadShape
 	float meanZ = 0.0f;
 	//! The shape's material is one of the LANDSCAPE'S ground materials.
 	bool groundMat = false;
-	//! Lane FLAT1: the shape's model is in a raised road folder (a deck, not ground).
+	//! the shape's model is in a raised road folder (a deck, not ground).
 	bool raisedModel = false;
-	/* Lane TERR1: THE NORMAL STAMP's operands. `nrm` is the vertex normals in
-	 * WORLD space (the placement's rotation applied; empty when the source had
-	 * none), `tex1` the tangent-space normal map. `litNormal` is false for a
-	 * shape the game draws without lighting -- an effect (BGEM) shape -- which
-	 * paints colour and leaves the ground's normal alone. */
+	// THE NORMAL STAMP's operands. `nrm` is the vertex normals in WORLD space (the placement's rotation
+	// applied; empty when the source had none), `tex1` the tangent-space normal map.
 	QVector<Vector3> nrm;
 	QVector<Vector3> tan;           //!< the NIF's Tangent field in world space: only the census's frame check reads it
 	QString tex1;
 	bool litNormal = true;
 };
 
-/*! Lane FLAT1: one flat object's shape, in world space, with what the game's
+/*! one flat object's shape, in world space, with what the game's
  *  material adds on top of a road shape's operands. */
 struct LodgenFlatShape : LodgenRoadShape
 {
@@ -10577,11 +9152,11 @@ static qint64 lodgenMemShape( const LodgenFlatShape & s, QSet<const void *> & se
 	return lodgenMemShape( static_cast<const LodgenRoadShape &>( s ), seen ) + lodgenMemArr( s.rise, seen );
 }
 
-//! Lane FLAT1: what the flat pass reads out of one material (BGSM or BGEM).
+//! what the flat pass reads out of one material (BGSM or BGEM).
 struct LodgenFlatMat
 {
 	QString tex0;
-	QString tex1;                   //!< Lane TERR1: the BGSM's normal map (textures()[1]); a BGEM's is not read
+	QString tex1;                   //!< the BGSM's normal map (textures[1]); a BGEM's is not read
 	bool read = false, effect = false, decal = false, alphaTest = false, alphaBlend = false;
 	bool g2p = false;
 	float alphaRef = 1.0f, alpha = 1.0f;
@@ -10589,7 +9164,7 @@ struct LodgenFlatMat
 	float tint[3] = { 1.0f, 1.0f, 1.0f };
 };
 
-//! Lane FLAT1: one placement the flat rule looked at -- a row of the report.
+//! one placement the flat rule looked at -- a row of the report.
 struct LodgenFlatRec
 {
 	QString model, plugin;
@@ -10601,7 +9176,7 @@ struct LodgenFlatRec
 	const char * why = "";          //!< the rule's refusal reason; empty = the rule paints
 };
 
-//! Lane FLAT1: a non-road STAT placement, kept until the road shapes exist.
+//! a non-road STAT placement, kept until the road shapes exist.
 struct LodgenFlatCand
 {
 	quint32 refr = 0, base = 0, nameBase = 0, mswp = 0;
@@ -10610,16 +9185,10 @@ struct LodgenFlatCand
 	float scale = 1.0f;
 };
 
-/* Lane TERR1: THE NORMAL STAMP, one triangle's frame.
- *
- * The game lights a stamped shape with `n = (2R-1) T_u + (2G-1) T_v + z N`:
- * the NIF's Bitangent field is dP/du and its Tangent field is dP/dv (the
- * renderer's fo4_default.frag reads them in that order, and the census's
- * `nrm_frame_agree / nrm_frame_flip` pair MEASURES the Tangent-vs-dP/dv sign
- * on every stamped triangle). The frame here is solved from the triangle's own
- * world positions and UVs -- with the material's UV scale in, whose sign
- * mirrors the map -- so a shape with no stored tangents stamps the same way.
- * `F` is the face normal turned up (+Z): the stamp looks from above. */
+// THE NORMAL STAMP, one triangle's frame:
+// The game lights a stamped shape with `n = (2R-1) T_u + (2G-1) T_v + z N`: the NIF's Bitangent field is dP/du
+// and its Tangent field is dP/dv (the renderer's fo4_default.frag reads them in that order, and the census's
+// `nrm_frame_agree / nrm_frame_flip` pair MEASURES the Tangent-vs-dP/dv sign on every stamped triangle).
 struct LodgenStampFrame
 {
 	Vector3 U, V, F;
@@ -10661,10 +9230,8 @@ static LodgenStampFrame lodgenStampFrame( const LodgenRoadShape & sh, const Tria
 	return f;
 }
 
-/* One fragment's world normal: the interpolated vertex normal (the face's
- * when the shape has none), turned up, and the normal map's tangent-space
- * sample carried onto it through the Gram-Schmidt'ed UV frame. `nmap` null =
- * the vertex normal alone (a lit shape whose normal map does not read). */
+// One fragment's world normal: the interpolated vertex normal (the face's when the shape has none), turned up,
+// and the normal map's tangent-space sample carried onto it through the Gram-Schmidt'ed UV frame.
 static Vector3 lodgenStampNormal( const LodgenRoadShape & sh, const Triangle & t,
 	const LodgenStampFrame & f, float w0, float w1, float w2,
 	const DDSTexture16 * nmap, float u, float v, float nmip )
@@ -10694,16 +9261,14 @@ static Vector3 lodgenStampNormal( const LodgenRoadShape & sh, const Triangle & t
 	return n.normalize();
 }
 
-/* The shape's normal map, loaded with its diffuse PINNED so the second load
- * cannot evict the first (a 2k DDSTexture16 is 44 MB; a worker's budget can
- * be smaller than two of them). Null when the shape names none or it does not
- * read. */
+// The shape's normal map, loaded with its diffuse PINNED so the second load cannot evict the first (a 2k
+// DDSTexture16 is 44 MB; a worker's budget can be smaller than two of them).
 static const DDSTexture16 * lodgenStampNormalMap( LodgenBakeCaches & bc,
 	const QString & dataRoot, const QString & diffuse, const QString & nmapPath )
 {
 	if ( nmapPath.isEmpty() )
 		return nullptr;
-	if ( bc.shareLock )		// lane BAKESPEED1: a shared LRU's per-thread memo already pins the diffuse
+	if ( bc.shareLock )		// a shared LRU's per-thread memo already pins the diffuse
 		return lodgenCachedTexture( bc, dataRoot, nmapPath );
 	const QString pin = diffuse.toLower();
 	bc.texPinned.insert( pin );
@@ -10712,20 +9277,14 @@ static const DDSTexture16 * lodgenStampNormalMap( LodgenBakeCaches & bc,
 	return n;
 }
 
-/*! Every road placement in a cell rectangle, resolved to world-space shapes
- *  once, so a bake that writes many tiles over the same ground pays for the
- *  ESM walk and the model loads once.
- *
- *  The set is gathered over the rectangle GROWN by two cells, because a road
- *  piece is placed by its own origin and reaches outwards from it; the scan
- *  converter clips, so a piece gathered and then found to miss costs a bounds
- *  test. */
+//! Every road placement in a cell rectangle, resolved to world-space shapes once, so a bake that writes many
+//! tiles over the same ground pays for the ESM walk and the model loads once.
 class LodgenRoadSet
 {
 public:
 	bool empty() const { return shapes.isEmpty(); }
 	const LodgenRoadCensus & census() const { return cen; }
-	//! lane BAKESPEED1, resume: the per-record texel counts the tiles add to, saved with a pyramid checkpoint
+	//! resume: the per-record texel counts the tiles add to, saved with a pyramid checkpoint
 	std::vector<qint64> & flatTexelCounts() const { return flatRecTexels; }
 
 	void gather( const EsmWorld & world, const QString & dataRoot,
@@ -10746,7 +9305,7 @@ public:
 					Matrix rm;
 					rm.fromEuler( -r.rot[0], -r.rot[1], -r.rot[2] );
 					const Vector3 rp( r.pos[0], r.pos[1], r.pos[2] );
-					/* THE MATERIAL SWAP (lane ROADS1, 2026-09-26). The game draws a
+					/* THE MATERIAL SWAP. The game draws a
 					 * placement with its effective MSWP applied -- the REFR's XMSP,
 					 * else the MODS of the REFR's base (the SCOL for a part), else a
 					 * part's own MODS: `lodgenRoadEffectiveSwap`, the far field's rule --
@@ -10782,7 +9341,7 @@ public:
 			evaluateFlat( world, dataRoot );
 	}
 
-	/*! Lane FLAT1: paint flat ground objects too (before `gather`), with the
+	/*! paint flat ground objects too (before `gather`), with the
 	 *  override file `file` (empty = the default beside the executable). */
 	void setFlat( bool on, const QString & file )
 	{
@@ -10790,15 +9349,12 @@ public:
 		flatFile = file;
 	}
 
-	/*! Lane FLAT1: the per-bake report -- one row per base model the flat rule
+	/*! the per-bake report -- one row per base model the flat rule
 	 *  looked at. Written beside the bake output by the caller. */
 	QString flatReport( const QString & title ) const;
 
-	/*! Lane TERRLIVE1: one placement that produced shapes, as the decal
-	 *  library sees it -- its shapes' range in `shapes` (a road) or
-	 *  `flatShapes` (a painted flat object) and the transform that put them in
-	 *  world space. Recorded as the shapes are appended; reading it changes
-	 *  nothing the paint does. */
+	//! one placement that produced shapes, as the decal library sees it -- its shapes' range in `shapes` (a
+	//! road) or `flatShapes` (a painted flat object) and the transform that put them in world space.
 	struct DecalPlacement
 	{
 		int first = 0, count = 0;
@@ -10819,56 +9375,15 @@ public:
 		flatShapes = f;
 	}
 
-	/*! Scan-convert into a grid: `S` texels over [wx0,wy0]..[wx0+S*upt, ...],
-	 *  row 0 NORTH, texel centres at +0.5. `colour` receives 0x00000000 where
-	 *  no road covers and 0xAARRGGBB otherwise, A = coverage.
-	 *
-	 *  TWO RULES, and the caller names which (LodgenCoverOptions::roadComposite):
-	 *
-	 *  `RoadMaxZ` is lane ROADS1's and is left here untouched, line for line: a
-	 *  z buffer holds world Z, the LARGEST wins and the winner OVERWRITES the
-	 *  texel, which is what "seen from above" means -- a driveway laid over a
-	 *  road wins, a road tucked under a bridge deck does not.
-	 *
-	 *  `RoadBlend` COMPOSITES. The shapes are painted in a stated order --
-	 *  ascending mean world Z, a non-decal before a decal at equal height, and
-	 *  gather order at equal both -- and each fragment writes
-	 *
-	 *      dstPre = src * srcAlpha + dstPre * ( 1 - srcAlpha )
-	 *      dstA   =       srcAlpha + dstA   * ( 1 - srcAlpha )
-	 *
-	 *  with `srcAlpha` the material's opacity times the interpolated vertex
-	 *  alpha for an alpha-BLENDED shape, the alpha test's 0 or 1 for an
-	 *  alpha-TESTED one, and 1 for an opaque one. The plane is un-premultiplied
-	 *  at the end, so a texel covered only by a half-transparent skirt carries
-	 *  the skirt's OWN colour at coverage 0.5 and the consumer's
-	 *  `ground + (road-ground)*A` lerp does the rest.
-	 *
-	 *  There is no z buffer under `RoadBlend`: the painting order is the depth
-	 *  order, which is the painter's algorithm and is what makes a feather a
-	 *  feather instead of a winner. Where a shape's mean Z misorders it against
-	 *  a shape it actually passes over -- a long ramp over a flat piece -- the
-	 *  two rules can differ; that difference is measured, not assumed (lane
-	 *  ROADS2, gate S3), and `--road-composite max-z` is the exact way back.
-	 *
-	 *  `detail` lerps the diffuse sample toward the texture's own whole-texture
-	 *  average (LodgenCoverOptions::roadDetail). RGB only: the alpha channel
-	 *  cuts alpha-tested decals out and averaging it would dissolve them.
-	 *
-	 *  `nplane` (lane TERR1, THE NORMAL STAMP), when given, receives 4 floats a
-	 *  texel: the stamped world normal (x east, y north, z up; not normalised
-	 *  where fragments averaged) and its coverage A. It is composited by the
-	 *  SAME rule, order and coverage as `colour`, fragment for fragment, and a
-	 *  texel whose colour A8 is 0 carries A 0, so the normal's mask is the
-	 *  colour's. Null = nothing of the stamp runs and `colour` is the bytes it
-	 *  always was (the stamp only READS the fragments the colour pass makes). */
+	//! Scan-convert into a grid: `S` texels over [wx0,wy0]..[wx0+S*upt, ...], row 0 NORTH, texel centres at
+	//! +0.5. `colour` receives 0x00000000 where no road covers and 0xAARRGGBB otherwise, A = coverage.
 	void rasterise( float wx0, float wyTop, float upt, int S,
 		std::vector<quint32> & colour, LodgenBakeCaches & bc,
 		const QString & dataRoot, LodgenRoadCensus & out,
 		int composite = LodgenCoverOptions::RoadMaxZ, float detail = 1.0f,
 		float groundPaint = 1.0f, int inset = 0, std::vector<float> * nplane = nullptr ) const
 	{
-		static thread_local QSet<size_t> decalHere;	// lane BAKESPEED1: per thread, tiles rasterise at once
+		static thread_local QSet<size_t> decalHere;	// per thread, tiles rasterise at once
 		colour.assign( size_t( S ) * S, 0U );
 		if ( nplane )
 			nplane->assign( size_t( S ) * S * 4, 0.0f );
@@ -10922,10 +9437,8 @@ public:
 			if ( stamp )
 				( nmap ? out.nrmShapes : out.nrmNoMap )++;
 			const int texW = int( tex->getWidth() ), texH = int( tex->getHeight() );
-			/* The texture's own average, read once a shape at its deepest mip --
-			 * the same call the splat path uses for a layer's flat colour. Only
-			 * looked up when a detail lerp is actually asked for, so a full
-			 * detail bake touches no new code path. */
+			// The texture's own average, read once a shape at its deepest mip the same call the splat path
+			// uses for a layer's flat colour.
 			FloatVector4 texAvg( 0.0f );
 			if ( detail < 1.0f )
 				texAvg = tex->getPixelT( 0.5f, 0.5f, float( tex->getMaxMipLevel() ) );
@@ -11030,14 +9543,7 @@ public:
 								cov *= qBound( 0.0f,
 									w0 * ca[3] + w1 * cb[3] + w2 * cc[3], 1.0f );
 						}
-						/* THE GROUND-MATERIAL SHAPES (lane ROADS4). The
-						 * multiply is on COVERAGE, so it moves the paint and
-						 * the cover suppression together, and it is branched
-						 * over at 1.0 so the old default is the old bytes.
-						 * At 0 the fragment falls out at the test below
-						 * WITHOUT touching the z buffer, so a ground shape
-						 * does not occlude the road shape under it either --
-						 * a drop, with no second code path. */
+						// THE GROUND-MATERIAL SHAPES.
 						if ( sh.groundMat ) {
 							if ( groundPaint < 1.0f )
 								cov *= groundPaint;
@@ -11078,7 +9584,7 @@ public:
 							}
 							if ( cov < 1.0f )
 								partial[o] = 1;
-							/* Lane FLAT1: the road's top, so a flat object under
+							/* the road's top, so a flat object under
 							 * a road stays under it. Read by nothing else. */
 							if ( z > zbuf[o] )
 								zbuf[o] = z;
@@ -11137,7 +9643,7 @@ public:
 					( *nplane )[o * 4 + 3] = 0.0f;
 	}
 
-	/*! THE FLAT PASS (lane FLAT1), after the roads, into the same plane.
+	/*! THE FLAT PASS, after the roads, into the same plane.
 	 *
 	 *  THE ORDER, stated: first every OPAQUE flat shape, max-z against the road
 	 *  surface's own z (a slab under a road stays under it) and REPLACING what is
@@ -11185,7 +9691,7 @@ public:
 				return;
 			}
 			out.flatShapes++;
-			/* Lane TERR1: an effect (unlit) shape paints colour and leaves the
+			/* an effect (unlit) shape paints colour and leaves the
 			 * normal plane untouched; a lit one stamps its normal by the colour's
 			 * own rule below. */
 			const bool stamp = nplane && sh.litNormal;
@@ -11295,10 +9801,8 @@ public:
 							continue;
 						float r = qBound( 0.0f, c[0], 1.0f ), g = qBound( 0.0f, c[1], 1.0f ),
 							b = qBound( 0.0f, c[2], 1.0f ), A = 1.0f;
-						/* Lane TERR1: the normal, by the colour's rule -- replace
-						 * (opaque, or an over-shape at full coverage), else
-						 * `n = ( n cov + n0 A0 (1-cov) ) / A`. Written only if the
-						 * colour below is written: the a8 == 0 test repeats it. */
+						// the normal, by the colour's rule -- replace (opaque, or an over-shape at full
+						// coverage), else `n = ( n cov + n0 A0 (1-cov) ) / A`.
 						if ( stamp ) {
 							const Vector3 sn = lodgenStampNormal( sh, t, fr, w0, w1, w2, nmap, u, v, nmip );
 							const float A0c = float( colour[o] >> 24 ) / 255.0f;
@@ -11363,13 +9867,11 @@ public:
 			}
 	}
 
-	/*! What the GATHER found -- placements, distinct models, and the refusals
-	 *  that happened before any tile existed. The caller adds this ONCE per
-	 *  bake; `rasterise` accumulates only the per-tile fields, so a shape that
-	 *  spans four tiles is four `shapes` and one `meshes`. */
+	//! What the GATHER found -- placements, distinct models, and the refusals that happened before any tile
+	//! existed.
 	const LodgenRoadCensus & gatherCensus() const { return cen; }
 
-	//! lane BAKEMEM1: what this set holds, for the WW_LODGEN_MEMLOG lines
+	//! what this set holds, for the WW_LODGEN_MEMLOG lines
 	QString memLine() const
 	{
 		QSet<const void *> seen;
@@ -11387,10 +9889,8 @@ public:
 	}
 
 private:
-	/*! The substitution list of one MSWP form, built once: folded BNAM ->
-	 *  SNAM as stored, the first row per key wins, a row that swaps a material
-	 *  for itself is dropped -- the far field's rule (nativeemit.cpp). Null for
-	 *  no swap, a missing record, or a swap with no usable row. */
+	//! The substitution list of one MSWP form, built once: folded BNAM -> SNAM as stored, the first row per key
+	//! wins, a row that swaps a material for itself is dropped -- the far field's rule (nativeemit.cpp).
 	const LodgenMaterialSubst * swapFor( const EsmWorld & world, quint32 mswp )
 	{
 		if ( !mswp )
@@ -11425,7 +9925,7 @@ private:
 		if ( std::memcmp( &lb.type, "STAT", 4 ) != 0 )
 			return;
 		if ( !lodgenIsRoadModel( lb.model ) ) {
-			/* Lane FLAT1: every other STAT is a flat-object CANDIDATE, measured
+			/* every other STAT is a flat-object CANDIDATE, measured
 			 * once the road shapes (part of the ground it is measured on) exist. */
 			if ( flatOn && !lb.model.isEmpty() ) {
 				LodgenFlatCand c;
@@ -11440,20 +9940,8 @@ private:
 			}
 			return;
 		}
-		/* THE RAISED FAMILIES: the HighwayOverpass and Bridge folders, by
-		 * name. A deck painted into the ground would be drawn twice, once in
-		 * the air where it stands and once flattened on the soil beneath.
-		 *
-		 * Until lane ROADS1 (2026-09-26) any base carrying its own Distant LOD
-		 * (`hasLod`) was refused here too. MEASURED over the whole load order:
-		 * outside those two folders the has-LOD road bases are exactly
-		 * `Roads\River\RRoadCurveCustom01..11` (Storrow Drive along the river,
-		 * 11 placements), `Sidewalks\Park\*` (16 bases, 45 placements) and
-		 * `Sidewalks\Plaza\PlazaSwanPond01` -- all laid ON the ground, none
-		 * raised. Refusing them left the three bare river-bank strips bungo
-		 * circled ("Is there no roads here?"). A flat piece's own LOD mesh
-		 * lies on the same ground the stamp paints, so nothing is drawn twice
-		 * in the air. */
+		// THE RAISED FAMILIES: the HighwayOverpass and Bridge folders, by name. A deck painted into the ground
+		// would be drawn twice, once in the air where it stands and once flattened on the soil beneath.
 		if ( !raised && lodgenIsRaisedRoadModel( lb.model ) ) {
 			cen.refusedRaised++;
 			const QString rk = lb.model.toLower();
@@ -11464,7 +9952,7 @@ private:
 			}
 			return;
 		}
-		/* THE PAVEMENTS. Painted by default since lane ROADS1 (2026-09-26), by
+		/* THE PAVEMENTS. Painted by default, by
 		 * bungo's ruling: the pavement wears its in-game texture on our terrain,
 		 * not Bethesda's darker bake (which read 86.5 luma on chunk (-8,8) where
 		 * the in-game concrete is ~138). `--no-road-sidewalks` is the off
@@ -11509,7 +9997,7 @@ private:
 			out.tris = s.tris;
 			const LodgenRoadMat & m = material( dataRoot, s );
 			out.tex0 = m.read && !m.tex0.isEmpty() ? m.tex0 : s.tex0;
-			/* Lane TERR1: the normal stamp's operands, the same fallback as the
+			/* the normal stamp's operands, the same fallback as the
 			 * diffuse's (the material's slot, else the shape's texture set). */
 			out.tex1 = m.read && !m.tex1.isEmpty() ? m.tex1 : s.tex1;
 			if ( s.nrm.size() == s.pos.size() ) {
@@ -11544,7 +10032,7 @@ private:
 			out.raisedModel = lodgenIsRaisedRoadModel( lb.model );
 			shapes.append( out );
 		}
-		// lane TERRLIVE1: the decal library's record of this placement
+		// the decal library's record of this placement
 		if ( shapes.size() > decalFirst ) {
 			DecalPlacement d;
 			d.first = decalFirst;
@@ -11559,7 +10047,7 @@ private:
 		}
 	}
 
-	/* ---- lane FLAT1: the measurement ------------------------------------ */
+	/* ---- the measurement ------------------------------------ */
 
 	//! LAND, bilinear inside the cell's 33x33 grid; NaN where the cell has none.
 	double landAt( const EsmWorld & world, double x, double y )
@@ -11567,7 +10055,7 @@ private:
 		const int cx = int( std::floor( x / 4096.0 ) ), cy = int( std::floor( y / 4096.0 ) );
 		const qint64 key = ( qint64( cx ) << 32 ) ^ qint64( quint32( cy ) );
 		auto it = landCache.constFind( key );
-		if ( it == landCache.constEnd() && flatShared ) {	// BAKESPEED3: told, loaded after the fan-out
+		if ( it == landCache.constEnd() && flatShared ) {	// told, loaded after the fan-out
 			if ( !flatTl.fm->landMiss.contains( key ) )
 				flatTl.fm->landMiss.append( key );
 			return std::numeric_limits<double>::quiet_NaN();
@@ -11623,7 +10111,7 @@ private:
 		auto it = roadZCache.constFind( key );
 		if ( it != roadZCache.constEnd() )
 			return *it;
-		if ( flatShared ) {	// BAKESPEED3: the shared cache is only read; this candidate's own memo instead
+		if ( flatShared ) {	// the shared cache is only read; this candidate's own memo instead
 			auto m = flatTl.roadMemo.constFind( key );
 			if ( m != flatTl.roadMemo.constEnd() )
 				return *m;
@@ -11693,7 +10181,7 @@ private:
 		}
 	}
 
-	/*! THE RULE (lane FLAT1). Kind-agnostic and path-agnostic: every number is
+	/*! THE RULE. Kind-agnostic and path-agnostic: every number is
 	 *  read off the placed mesh against the ground under it, so a mod's flat
 	 *  object with no entry anywhere is measured like a vanilla one. The
 	 *  thresholds come from the Boston-box census (DONE.md section 2):
@@ -11709,7 +10197,7 @@ private:
 	 *
 	 *  "Ground" is LAND raised to the stamped road surface where a road lies
 	 *  above it (a raised deck is not ground, so a thing on a bridge floats). */
-	/* lane BAKEMEM1: the flat rule in batches of model-cache keys, the decoded models freed after each
+	/* the flat rule in batches of model-cache keys, the decoded models freed after each
 	 * batch (the whole map's would not fit); evaluateFlatBatch is the old evaluateFlat unchanged, the results go back in gather order. */
 	void evaluateFlat( const EsmWorld & world, const QString & dataRoot )
 	{
@@ -11779,7 +10267,7 @@ private:
 					.arg( flatMsLoad ).arg( flatMsMeasure ).arg( flatMsFinish ).arg( flatMeasureAgain ) );
 	}
 
-	/* lane BAKESPEED3: one candidate's measurement, the old loop body from "world space" on, unchanged but for
+	/* one candidate's measurement, the old loop body from "world space" on, unchanged but for
 	 * where its answers go. Pure in the candidate: it reads only LAND, water and the road grid, so the batch runs
 	 * it on all cores while flatShared is set (the caches are then only read; a miss is told, see landAt). */
 	struct FlatMeasure
@@ -11907,7 +10395,7 @@ private:
 		flatProblems.clear();
 		lodgenFlatLoadOverrides( flatFile, flatRules, &flatFileResolved, &flatProblems );
 		buildRoadGrid();
-		/* lane BAKESPEED3: in blocks of candidates -- the models load in turn (the loads contend, BAKESPEED1),
+		/* in blocks of candidates -- the models load in turn (the loads contend, BAKESPEED1),
 		 * the measurements run on all cores, and the records and shapes are made in candidate order as before.
 		 * WW_LODGEN_BAKESPEED_RED=1: one candidate at a time, all three steps, as before BAKESPEED3. */
 		const bool red = lodgenBakeSpeedRed();
@@ -12037,7 +10525,7 @@ private:
 			const LodgenFlatMat & m = flatMaterial( s );
 			fs.tex0 = ( m.read && !m.tex0.isEmpty() ) ? m.tex0
 				: ( m.effect || s.nearFacts.effectShader ) && !s.effectTex0.isEmpty() ? s.effectTex0 : s.tex0;
-			/* Lane TERR1: the normal stamp. An effect shape is not lit in game,
+			/* the normal stamp. An effect shape is not lit in game,
 			 * so it changes no normal; a lit one brings its normal map (the
 			 * material's, else the texture set's) and its world vertex normals. */
 			fs.litNormal = !( m.effect || s.nearFacts.effectShader );
@@ -12082,7 +10570,7 @@ private:
 			fs.meanZ = float( zsum / double( fs.pos.size() ) );
 			flatShapes.append( fs );
 		}
-		// lane TERRLIVE1: the decal library's record of this placement
+		// the decal library's record of this placement
 		if ( cand && flatShapes.size() > decalFirst ) {
 			DecalPlacement d;
 			d.first = decalFirst;
@@ -12195,7 +10683,7 @@ private:
 	//! Include `Landscape\\Sidewalks\\`. True is ROADS1's behaviour and the way back.
 	bool sidewalks = true;
 	QSet<QString> sidewalkSeen;
-	/* Lane FLAT1. */
+	/* */
 	bool flatOn = false;
 	QString flatFile, flatFileResolved, flatDataRoot;
 	QVector<LodgenFlatOverride> flatRules;
@@ -12203,7 +10691,7 @@ private:
 	QVector<LodgenFlatCand> flatCands;
 	QVector<LodgenFlatRec> flatRecs;
 	QVector<LodgenFlatShape> flatShapes;
-	QVector<DecalPlacement> decalPl;        //!< lane TERRLIVE1
+	QVector<DecalPlacement> decalPl;
 	//! texels each report row wrote last, tile content only (the tiles run in turn)
 	mutable std::vector<qint64> flatRecTexels;
 	int flatG2p = 0;
@@ -12211,7 +10699,7 @@ private:
 	QHash<qint64, double> waterCache;
 	QHash<qint64, double> roadZCache;
 	QHash<qint64, QVector<QPair<int, int>>> roadGrid;
-	/* lane BAKESPEED3: while flatShared the measurement runs on all cores and the three caches above are only
+	/* while flatShared the measurement runs on all cores and the three caches above are only
 	 * read; a land / water miss goes to the candidate's FlatMeasure, a road square to its own memo. */
 	bool flatShared = false;
 	struct FlatTl
@@ -12225,7 +10713,7 @@ private:
 	QHash<QString, LodgenFlatMat> flatMatCache;
 };
 
-/*! THE PER-BAKE REPORT (lane FLAT1): one row per base model the flat rule looked
+/*! THE PER-BAKE REPORT: one row per base model the flat rule looked
  *  at, most texels first. Tab-separated so it opens in a spreadsheet. */
 thread_local LodgenRoadSet::FlatTl LodgenRoadSet::flatTl;
 
@@ -12343,30 +10831,8 @@ QString LodgenRoadSet::flatReport( const QString & title ) const
 	return out.join( QChar( '\n' ) ) + QChar( '\n' );
 }
 
-/*! THE OBJECT HEIGHT FIELD (lane GROUND1) -- one float per 128x128 world units,
- *  holding the TOP of the placed geometry over that square, or `NONE`.
- *
- *  THE LATTICE IS WORLD-ALIGNED AND EXACT: the index is
- *  `floor( world / 128 )`, a division by a power of two, with no chunk-relative
- *  origin anywhere. That is what makes one chunk baked alone and the same chunk
- *  baked inside a region put the same triangles in the same squares, which is
- *  the incremental identity gate and the thread-identity gate both.
- *
- *  THE OPERATOR IS max-Z, which is commutative and associative over the
- *  triangles, so gather order and worker count cannot reach a byte. It is the
- *  same argument `LodgenRoadSet`'s `RoadMaxZ` rule stands on.
- *
- *  128 UNITS IS NOT A TUNING KNOB: it is the horizon march's own first step
- *  (`dist = 128.0f`) and it is LAND's own height spacing, so a finer lattice
- *  would buy the march nothing and the object field and the terrain field agree
- *  about what one sample means.
- *
- *  WHAT GOES IN: the base record's level-0 distant-LOD mesh, `models[0]`, the
- *  mesh the far ring actually draws. A base with no MNAM row at all is refused
- *  by name -- it is not on screen at distance, so it must not shadow at
- *  distance. `hasLod` is NOT the test: it is set from the MNAM rows and a base
- *  can carry the flag with an empty slot 0, so the slot itself is read, with
- *  the remaining three slots as the fallback. */
+//! THE OBJECT HEIGHT FIELD -- one float per 128x128 world units, holding the TOP of the placed geometry over
+//! that square, or `NONE`.
 class LodgenObjectHeightField
 {
 public:
@@ -12382,15 +10848,7 @@ public:
 	bool empty() const { return cen.squares == 0; }
 	const LodgenObjectAoCensus & gatherCensus() const { return cen; }
 
-	/*! TEST-ONLY: build a synthetic square lattice, for
-	 *  `lodgenObjectSlabSelfTest` (lane SLAB1, 2026-09-18) and nothing else.
-	 *
-	 *  It exists so the known-answer control can read a field it knows the
-	 *  answer for through the SHIPPED march, and it fills the lattice through
-	 *  the SHIPPED writer `spanInto` rather than touching the planes, so the
-	 *  control exercises the same two planes a triangle fills. The bake never
-	 *  calls it, and it is the only reason any member of this class is reachable
-	 *  from outside it. */
+	//! TEST-ONLY: build a synthetic square lattice, for `lodgenObjectSlabSelfTest` and nothing else.
 	void seedSyntheticForSelfTest( int originX, int originY, int n,
 		float lo, float hi, bool halfPlaneOnly )
 	{
@@ -12422,7 +10880,7 @@ public:
 		int cx0, int cy0, int cx1, int cy1, const std::function<bool( int, int )> & cellWanted = {},
 		bool skipTrees = false, bool parallel = false )
 	{
-		skipTreesM = skipTrees;   // lane WATERSKYVISFAR2: the water sky's walls leave the tree cards out
+		skipTreesM = skipTrees;   // the water sky's walls leave the tree cards out
 		const int margin = 2;
 		gx0 = ( cx0 - margin ) * 32;
 		gy0 = ( cy0 - margin ) * 32;
@@ -12433,7 +10891,7 @@ public:
 		grid.assign( size_t( gw ) * size_t( gh ), NONE );
 		gridMin.assign( size_t( gw ) * size_t( gh ), NONE_LOW );
 		QSet<QString> loaded;
-		// lane WATERSKYVISFAR3: the same planes and census on workers; WW_LODGEN_BAKESPEED_RED=1 = the serial walk
+		// the same planes and census on workers; WW_LODGEN_BAKESPEED_RED=1 = the serial walk
 		const bool par = parallel && !lodgenBakeSpeedRed();
 		if ( par )
 			gatherParallel( world, dataRoot, cx0 - margin, cy0 - margin, cx1 + margin, cy1 + margin, cellWanted );
@@ -12473,7 +10931,7 @@ public:
 				QStringLiteral( "modelCache %1 models %2" ).arg( modelCache.size() )
 					.arg( lodgenMemMB( lodgenMemModels( modelCache, seen ) ) ) );
 		}
-		// lane BAKEMEM1: the lattice is what the field keeps; the LOD models are read once in the walk
+		// the lattice is what the field keeps; the LOD models are read once in the walk
 		if ( !lodgenBakeMemRed() ) {
 			modelCache.clear();
 			modelCache.squeeze();
@@ -12524,12 +10982,8 @@ public:
 		return grid[size_t( gy ) * size_t( gw ) + size_t( gx )];
 	}
 
-	/*! The object surface SPAN over world (wx,wy): the lowest and the highest
-	 *  placed surface of the same square, same nearest-square rule as
-	 *  `topAt`, never interpolated.
-	 *
-	 *  `hi < SENTINEL_TEST` means no object over that square; `lo` is then the
-	 *  NONE_LOW sentinel and means nothing, so the caller tests `hi` first. */
+	//! The object surface SPAN over world (wx,wy): the lowest and the highest placed surface of the same
+	//! square, same nearest-square rule as `topAt`, never interpolated.
 	void spanAt( float wx, float wy, float & lo, float & hi ) const
 	{
 		const int gx = int( std::floor( wx / CELL ) ) - gx0;
@@ -12545,10 +10999,9 @@ public:
 	}
 
 private:
-	/*! One surface height into one square: the MAX plane and the MIN plane in
-	 *  the same call, so both planes are written by exactly the same set of
-	 *  samples and a square can never carry a min from a surface whose max it
-	 *  never saw. (It replaces `maxInto`, which wrote the max alone.) */
+	//! One surface height into one square: the MAX plane and the MIN plane in the same call, so both planes are
+	//! written by exactly the same set of samples and a square can never carry a min from a surface whose max
+	//! it never saw.
 	void spanInto( int gx, int gy, float z )
 	{
 		gx -= gx0;
@@ -12564,7 +11017,7 @@ private:
 			lo = z;
 	}
 
-	/*! spanInto for several workers at once (lane WATERSKYVISFAR3): the same max / min by compare-exchange. A max
+	/*! spanInto for several workers at once: the same max / min by compare-exchange. A max
 	 *  and a min do not depend on the order of their inputs, so the planes are the serial walk's bytes. */
 	void spanIntoAtomic( int gx, int gy, float z )
 	{
@@ -12591,11 +11044,7 @@ private:
 			spanInto( gx, gy, z );
 	}
 
-	/*! Lane WATERSKYVISFAR3: `gather`'s walk over cells [x0, x1] x [y0, y1] (margin included) in three steps.
-	 *  1. this thread walks the refs in the serial order and keeps the census as addPlacement does;
-	 *  2. the distinct LOD models load on workers, one throw-away cache a model (the cell view's read-ahead);
-	 *  3. the placements rasterise on workers through spanIntoAtomic.
-	 *  The would-not-load census is replayed in placement order, so the counts and the refusal list match. */
+	//! `gather`'s walk over cells [x0, x1] x [y0, y1] (margin included) in three steps. 1.
 	void gatherParallel( const EsmWorld & world, const QString & dataRoot, int x0, int y0, int x1, int y1,
 		const std::function<bool( int, int )> & cellWanted )
 	{
@@ -12711,23 +11160,8 @@ private:
 			.arg( lodgenThreadCount() );
 	}
 
-	/*! THE CENSUS WORD `objAoSlabSquares`: occupied squares whose LOWEST object
-	 *  surface stands more than one cell above the ESM terrain under them.
-	 *
-	 *  Counted here, once, against the heightfield itself, and NOT kept as a
-	 *  third plane: the terrain comes one cell at a time and is thrown away. It
-	 *  is 0 on a region with no elevated deck and above 0 wherever the ceiling
-	 *  term can act, which is what makes it a proof that the slab path ran
-	 *  rather than a restatement of `squares`.
-	 *
-	 *  UNITS: `EsmLand::heights` is in GAME units and so is the lattice -- the
-	 *  same units, no conversion (MISTAKES 2026-09-18 05:0x: when you copy a
-	 *  cast, copy its units). A square centre sits between four LAND nodes 128
-	 *  units apart, so the terrain under it is their mean.
-	 *
-	 *  The bar is ONE CELL, 128 units, and it is the march own step: a cover
-	 *  less than one step above the ground cannot be told from the ground by a
-	 *  march that samples at 128 units, so it does not count as a slab. */
+	//! THE CENSUS WORD `objAoSlabSquares`: occupied squares whose LOWEST object surface stands more than one
+	//! cell above the ESM terrain under them.
 	void countSlabSquares( const EsmWorld & world, int cx0, int cy0, int cx1, int cy1 )
 	{
 		if ( grid.empty() || gridMin.empty() )
@@ -12805,7 +11239,7 @@ private:
 		cen.triangles += int( rasterise<false>( src, pos, rot, scale ) );
 	}
 
-	//! The triangles of one placed model into the lattice. Lane WATERSKYVISFAR3: out of addPlacement, so the
+	//! The triangles of one placed model into the lattice. Out of addPlacement, so the
 	//! parallel walk runs the same lines (Atomic = several workers on one lattice).
 	template<bool Atomic>
 	qint64 rasterise( const QVector<LodSrcShape> & src, const Vector3 & pos, const Matrix & rot, float scale )
@@ -12825,12 +11259,7 @@ private:
 				const Vector3 & b = wp[size_t( t.v2() )];
 				const Vector3 & c = wp[size_t( t.v3() )];
 				tris++;
-				/* TWO RULES, both max-Z, and the union is what "top-down" means
-				 * here. The SCAN puts the triangle's own plane height into every
-				 * lattice centre the triangle covers; the VERTEX SEED puts each
-				 * corner's height into the square that corner stands in, so a
-				 * pole or a railing thinner than 128 units cannot vanish between
-				 * two centres and leave a gap in the shadow it should cast. */
+				// TWO RULES, both max-Z, and the union is what "top-down" means here.
 				span<Atomic>( int( std::floor( a[0] / CELL ) ), int( std::floor( a[1] / CELL ) ), a[2] );
 				span<Atomic>( int( std::floor( b[0] / CELL ) ), int( std::floor( b[1] / CELL ) ), b[2] );
 				span<Atomic>( int( std::floor( c[0] / CELL ) ), int( std::floor( c[1] / CELL ) ), c[2] );
@@ -12865,7 +11294,7 @@ private:
 		return tris;
 	}
 
-	/*! Lane WATERFIX7: the sky slabs' z runs of one placement, in a pass of its own: sharing the scan loop let the
+	/*! the sky slabs' z runs of one placement, in a pass of its own: sharing the scan loop let the
 	 *  compiler fuse its height maths differently (-march=haswell FMA), and the tops moved on 3 squares. */
 	__attribute__( ( noinline ) ) void collectRuns( const QVector<LodSrcShape> & src, const Vector3 & pos,
 		const Matrix & rot, float scale )
@@ -12926,7 +11355,7 @@ private:
 		}
 	}
 
-	/*! Lane WATERFIX7: how a triangle enters the sky slabs' z runs. A steep piece whose footprint stays under
+	/*! how a triangle enters the sky slabs' z runs. A steep piece whose footprint stays under
 	 *  kSlabThin (a pile, a post) stays out: 0. A steep wide one (a wall, a cliff face) puts its whole z range into
 	 *  every square along its edges here: 2. Anything flatter gives its corner and scan points (the caller): 1. */
 	static constexpr float kSlabThin = 64.0f;
@@ -13006,7 +11435,7 @@ private:
 	}
 
 public:
-	//! Lane WATERSKYVISFAR2: hand the lattice out (it is moved, the field is empty after).
+	//! hand the lattice out (it is moved, the field is empty after).
 	void takeTops( int & x0, int & y0, int & w, int & h, std::vector<float> & hi, std::vector<float> & lo )
 	{
 		x0 = gx0;
@@ -13016,22 +11445,22 @@ public:
 		hi = std::move( grid );
 		lo = std::move( gridMin );
 	}
-	//! Lane WATERFIX7: hand the z runs out (at most 4 a square), moved like the lattice.
+	//! hand the z runs out (at most 4 a square), moved like the lattice.
 	void takeRuns( std::vector<LodtSlabRun> & out )
 	{
 		runsClose( runRecs, 4 );
 		out = std::move( runRecs );
 	}
-	bool runsOn = false;	//!< lane WATERFIX7: rasterise also collects the sky slabs' z runs (lodgenStaticTops)
+	bool runsOn = false;	//!< rasterise also collects the sky slabs' z runs (lodgenStaticTops)
 	qint64 treesSkipped = 0;
-	QString parallelNote;   //!< lane WATERSKYVISFAR3: what the parallel walk ran on, empty after a serial one
+	QString parallelNote;   //!< what the parallel walk ran on, empty after a serial one
 
 private:
 	bool skipTreesM = false;
 	QHash<QString, QVector<LodSrcShape>> modelCache;
 	std::vector<float> grid;      //!< MAX object surface a square, `NONE` where empty
 	std::vector<float> gridMin;   //!< MIN object surface a square, `NONE_LOW` where empty
-	std::vector<LodtSlabRun> runRecs;	//!< lane WATERFIX7: the z runs so far (gap-closed, not capped)
+	std::vector<LodtSlabRun> runRecs;	//!< the z runs so far (gap-closed, not capped)
 	std::shared_ptr<std::mutex> runMx = std::make_shared<std::mutex>();	// shared: the self-test copies the field
 	size_t runCompactAt = size_t( 1 ) << 22;
 	int gx0 = 0, gy0 = 0, gw = 0, gh = 0;
@@ -13039,34 +11468,8 @@ private:
 	LodgenObjectAoCensus cen;
 };
 
-/*! The object term's sky visibility for one texel, in ONE place, so the stock
- *  composite and the pyramid tile cannot drift apart (the two composites rule,
- *  docs/LODGEN_TERRAIN_VT.md).
- *
- *  The march is the SAME eight directions and the SAME seven steps as the
- *  terrain one beside it -- 128, 192, 288, 432, 648, 972, 1458 -- read against
- *  the object tops instead of the ground, with `h0` left as the TERRAIN height
- *  the texel actually stands on.
- *
- *  THE SLAB LATTICE (lane SLAB1, 2026-09-18; `terrainObjectAoSlab`, default on).
- *  A square is read as a WALL when its lowest object surface reaches down to
- *  `h0` or below, and as a CEILING when its whole span stands above `h0`. A
- *  wall blocks the sweep from the horizon up to its own elevation, as it always
- *  did; a ceiling blocks from the elevation of its nearest escape UP TO THE
- *  ZENITH, which is a smaller set the further up it is -- so the ground under
- *  an overpass deck 1,000 units up is lit from the sides instead of reading as
- *  the inside of a solid block. Measured on chunk 4.4.-12: the mask sheet B
- *  under the elevated highway (world x 19712..20992, y -41856..-40576, 100
- *  lattice squares all holding max Z 2416.0) was 57.3 of 255.
- *
- *  The two laws cross at `sqrt( 128 * 1458 ) = 432` units of clearance: above
- *  it the slab reading is brighter than the max-Z reading, below it darker,
- *  because a cover that low really does shut the sky out and the max-Z reading
- *  was letting it off. That is the law, not a tuning choice.
- *
- *  It returns exactly `1.0f` when nothing occludes, by an early return and not
- *  by arithmetic, so the caller's `vis * 1.0f` is bitwise `vis` and the AO byte
- *  cannot move on a region with no occluder. */
+//! The object term's sky visibility for one texel, in ONE place, so the stock composite and the pyramid tile
+//! cannot drift apart (the two composites rule, docs/LODGEN_TERRAIN_VT.md).
 static float lodgenObjectSkyVis( const LodgenObjectHeightField & f,
 	float wx, float wy, float h0, const float dirs[8][2], float strength,
 	bool slab )
@@ -13079,12 +11482,8 @@ static float lodgenObjectSkyVis( const LodgenObjectHeightField & f,
 		 * elevation, as a tangent, of anything standing on the ground in this
 		 * direction. It blocks the sweep from the horizon UP to itself. */
 		float wall = 0.0f;
-		/* `ceilOpen` is the tangent of the LOWEST escape under a cover that
-		 * passes overhead: the cover blocks from there UP TO THE ZENITH. It is
-		 * only collected while every step from the nearest outward has been a
-		 * ceiling square (`covered`), so a canopy 1,000 units away, which does
-		 * not pass over this sample at all, contributes nothing here and
-		 * shades through its trunk square as a wall exactly as before. */
+		// `ceilOpen` is the tangent of the LOWEST escape under a cover that passes overhead: the cover blocks
+		// from there UP TO THE ZENITH.
 		float ceilOpen = 0.0f;
 		bool haveCeil = false;
 		bool covered = true;
@@ -13096,11 +11495,8 @@ static float lodgenObjectSkyVis( const LodgenObjectHeightField & f,
 				continue;
 			}
 			if ( !slab || lo <= h0 ) {
-				/* A WALL -- its geometry reaches down to the sample own level
-				 * or below: a building side, a rock, a pier pile, a tree
-				 * trunk. This branch IS the whole of the old loop, which is
-				 * why `slab` off is the old bytes and not an approximation of
-				 * them. */
+				// A WALL -- its geometry reaches down to the sample own level or below: a building side, a
+				// rock, a pier pile, a tree trunk.
 				covered = false;
 				const float dh = hi - h0;
 				if ( dh > 0.0f )
@@ -13113,14 +11509,7 @@ static float lodgenObjectSkyVis( const LodgenObjectHeightField & f,
 				}
 			}
 		}
-		/* THE SUM, NOT THE MAX. The two blocked sets are `0 .. F(wall)` from
-		 * the horizon and `F(ceilOpen) .. 1` from the zenith; the measure of
-		 * their union is the sum, capped at 1 where they meet, so a wall
-		 * standing under a ceiling still blocks everything.
-		 *
-		 * When no ceiling was seen the accumulator takes `wall/(1+wall)`
-		 * itself -- no addition, no qMin -- so a direction with no ceiling
-		 * square produces the identical float it produced before. */
+		// THE SUM, NOT THE MAX. The two blocked sets are `0 ..
 		const float wallBlocked = wall / ( 1.0f + wall );
 		if ( !haveCeil ) {
 			occl += wallBlocked;
@@ -13134,7 +11523,7 @@ static float lodgenObjectSkyVis( const LodgenObjectHeightField & f,
 	return qBound( 0.0f, 1.0f - occl / 8.0f * 1.6f * strength, 1.0f );
 }
 
-/*! THE GROUND'S SKY WITH THE OBJECTS IN IT (lane TERR1, 2026-09-27; `skyObjects`,
+/*! THE GROUND'S SKY WITH THE OBJECTS IN IT (`skyObjects`,
  *  default ON, VT sheets only).
  *
  *  One direction of the sky march, terrain and objects together: `maxSlope` is
@@ -13160,7 +11549,7 @@ static float lodgenObjectSkyVis( const LodgenObjectHeightField & f,
  *  morning): `1 - 1.6 * sum F(wu) / 8` with F(t) = t/(1+t) weighs every
  *  elevation alike and then gains it by 1.6 -- tuned for hills, where F is
  *  small. In a street canyon it read the Theater District floor 12-16 against a
- *  physical cosine-weighted ray cast of 84-92 (lane GATES, canyon_check.py; the
+ *  physical cosine-weighted ray cast of 84-92 (canyon_check.py; the
  *  object stream on the same walls' feet reads ~52). Scored against that cast
  *  (terrain + every level-0 LOD triangle of the Boston box, 224 rays a texel,
  *  reach 1,458; TERR1 physlaw.py / lawfit.py, 312 texels): this law canyon mean
@@ -13175,7 +11564,7 @@ static float lodgenObjectSkyVis( const LodgenObjectHeightField & f,
  *  Where no object square rises above the terrain slope and no ceiling is seen,
  *  `extra` is exactly 0.0f (the same float subtracted from itself), so the byte
  *  is the terrain march's own, bit for bit. */
-/*! The height the union marches FROM (lane TERR1): the ground's visible
+/*! The height the union marches FROM: the ground's visible
  *  surface. A LOW cover over the texel's own square -- its top within one cell
  *  (128 units, the slab bar of `countSlabSquares`) of the terrain: a road, a
  *  pavement slab, rubble -- lifts the sample to that top, so the road the
@@ -13228,52 +11617,8 @@ static float lodgenSkyDirBlocked( const LodgenObjectHeightField & f,
 	return qMax( 0.0f, pU - pT );
 }
 
-/*! THE SLAB LAW'S KNOWN-ANSWER CONTROL (lane SLAB1, 2026-09-18), run once per
- *  process when `WW_OBJAO_SLAB_TEST` is set in the environment.
- *
- *  Three synthetic height fields built BY HAND -- no ESM, no mesh, no bake --
- *  and read through the shipped `lodgenObjectSkyVis` itself, so what is pinned
- *  is the function the sheets are written with and not a second copy of the
- *  formula:
- *
- *    PLATE  every square occupied with min == max == H: an infinite ceiling H
- *           units over the sample. All seven steps of all eight directions are
- *           ceilings, the nearest escape is the FURTHEST step (1458), and the
- *           value is  1 - 0.8 * ( 1 - F( H / 1458 ) )  at strength 0.5, where
- *           F(s) = s/(1+s). Under the old law it is 1 - 0.8 * F( H / 128 ),
- *           because the max-Z reading takes the NEAREST step's slope.
- *    WALL   every square occupied with min far below the sample and max = H:
- *           geometry that reaches the ground. Every square takes the wall
- *           branch, so the two laws must return the SAME float, exactly.
- *    EDGE   the plate over the half plane x >= 0 only: five of the eight
- *           directions are covered, three see open sky.
- *
- *  THE BARS, pre-registered in the lane report section 2.5 BEFORE this code was
- *  written, and the brief's own bar among them:
- *
- *    H = 1000  slab centre  0.525468  (old 0.290780)   -- bar > 0.5
- *    H =  200  slab centre  0.296494  (old 0.512195)   -- the brief asked for
- *              > 0.3 here and the law gives 0.296494; the bar is REFUSED WITH
- *              THE NUMBER, because 200 units of clearance is BELOW the
- *              crossover sqrt( 128 * 1458 ) = 432 where the two laws meet, and
- *              below it a cover really does shut the sky out. The test pins the
- *              measured value instead, and pins that it is DARKER than the old
- *              reading, which is the law's other side and must not silently
- *              change.
- *    H =  500  wall         0.363057 under BOTH laws, difference exactly 0
- *    H = 1000  edge         0.703418, strictly between the slab centre and 1
- *
- *  The pre-registered figures were computed at DOUBLE precision (the lane's
- *  Python reimplementation, report section 5.4); the shipped function sums
- *  eight floats and lands on 0.296502 and 0.703417, so every bar above is
- *  checked to 1.0e-5 and not for equality. The one comparison that IS exact is
- *  the `slab = false` control at the end, and it is exact because it is written
- *  as the same eight-float accumulation.
- *
- *  THE REFUTER: every bar is also evaluated with `slab = false`, the old
- *  reading, on the same field. The plate bars must FAIL there -- if they pass,
- *  the bars do not discriminate between the two laws and this test says so and
- *  fails. */
+//! THE SLAB LAW'S KNOWN-ANSWER CONTROL, run once per process when `WW_OBJAO_SLAB_TEST` is set in the
+//! environment.
 static bool lodgenObjectSlabSelfTest()
 {
 	auto build = [] ( float lo, float hi, bool halfPlaneOnly ) {
@@ -13400,13 +11745,9 @@ static bool lodgenObjectSlabSelfTest()
 		int same = 0;
 		for ( const LodgenObjectHeightField * f : { &a, &b, &c } ) {
 			const float off = lodgenObjectSkyVis( *f, SX, SY, H0, dirs, ST, false );
-			/* THE OLD LOOP, WRITTEN OUT A SECOND TIME ON PURPOSE, through
-			 * `topAt` -- the max-plane accessor this lane did not touch -- and
-			 * accumulating the eight directions in the same order and the same
-			 * float precision. A closed form (8 * x, or a double sum) is NOT
-			 * equivalent: it agrees to six decimals and then differs in the
-			 * seventh, which would make an == comparison lie about which of the
-			 * two readings it is testing. */
+			// THE OLD LOOP, WRITTEN OUT A SECOND TIME ON PURPOSE, through `topAt` -- the max-plane accessor
+			// this lane did not touch -- and accumulating the eight directions in the same order and the same
+			// float precision.
 			float occl = 0.0f;
 			for ( int k = 0; k < 8; k++ ) {
 				float mx = 0.0f;
@@ -13453,77 +11794,16 @@ static void lodgenObjectSlabSelfTestOnce()
 	lodgenObjectSlabSelfTest();
 }
 
-/*! THE EROSION LATTICE (lane GROUND1 Part B, 2026-09-12).
- *
- *  bungo, 2026-09-11 over `cmp_msn_2024.png`: "We lose all the fluvial, erosion
- *  features and other topographical features". The LAND record holds one height
- *  per 128 units; everything finer in vanilla's far sheets came from source
- *  terrain Bethesda never shipped. Gate F1 measured what is missing on 22 of
- *  vanilla's own `_msn` sheets: 40.6 % of the gradient field's variance lives
- *  finer than our 128-unit grid, at a fine-gradient SD of 0.276, aligned ACROSS
- *  the local slope by a factor of 1.479 against a phase-twin floor of 1.025,
- *  and growing with the slope at r = +0.500 against a twin floor of -0.014.
- *  This class grows that relief back.
- *
- *  STATIC-PATH DROPLETS, and the textbook loop is deliberately not used. A
- *  droplet that re-reads the surface it is carving depends on every droplet
- *  before it AND on the extent of the array it runs in, which puts thread
- *  identity, single-chunk-versus-region identity and chunk-border seamlessness
- *  out of reach by construction. Here each droplet traces steepest descent on a
- *  STATIC field -- the shared height reconstruction plus world-seeded value
- *  noise -- so its contribution is a pure function of its world start position.
- *  The delta at a world node is then a sum of the same per-droplet terms in the
- *  same relative order whichever lattice computes it, and a lattice with a
- *  wider extent cannot perturb a narrower one's partial sums, because a droplet
- *  that never reaches a node never adds to it at all.
- *
- *  What that costs, and it is a real cost: without the incision feedback the
- *  pass cannot deepen a channel and then re-route into it, so it does not build
- *  a dendritic network the way a feedback loop does. What it does build is
- *  CONVERGENCE -- steepest descent on a noisy slope braids and collects into the
- *  same lines and the cutting concentrates there.
- *
- *  THE LATTICE STEP IS THE SHEET'S OWN TEXEL, not a fixed world size. At dim 4
- *  that is 32 units, which is exactly the resolution gate F1's numbers were
- *  measured at. It bounds the memory at every dim (a dim-32 chunk on a 32-unit
- *  lattice would be 19 million cells) and it keeps the channels the same size on
- *  screen as the LOD coarsens. The price is that the same ground carries
- *  differently scaled channels at different dims, so an LOD change can pop; that
- *  was not measured. The lattice is still world-aligned -- indices come from
- *  `floor( w / step )` on absolute world coordinates, never from an array offset
- *  -- so two chunks at the same dim agree cell for cell where they meet.
- *
- *  The seed noise NEVER reaches the output. It exists only so that steepest
- *  descent on a smooth slope has something to braid around; what leaves this
- *  class is the erosion delta and the two masks the droplets wrote.
- */
+//! THE EROSION LATTICE:
+//! bungo, 2026-09-11 over `cmp_msn_2024.png`: "We lose all the fluvial, erosion features and other
+//! topographical features".
 class LodgenErosionField
 {
 public:
-	//! The droplet's hard step cap. The border below is sized from it: a droplet
-	//! cannot influence anything more than this many cells from where it started,
-	//! so a border of this size means every droplet that can reach the interior
-	//! is present in the interior's own lattice.
+	//! The droplet's hard step cap.
 	static constexpr int MAX_STEPS = 32;
-	/*! The HIGH-PASS RADIUS, in lattice cells. After the droplets have run,
-	 *  the local mean of the delta over a box of this radius is SUBTRACTED
-	 *  from it, so what survives is fine relief with no bulk left in it.
-	 *
-	 *  Two reasons, and the second is the load-bearing one:
-	 *
-	 *  1. The droplets drain into basins and the basins fill. Measured before
-	 *     this filter: a mean |delta| of 26 world units with a single cell
-	 *     taking 2,264 -- eighty-six times the mean, a pile, not a channel.
-	 *  2. THE LOD TERRAIN MUST NOT DRIFT FROM THE LOADED TERRAIN. The full-
-	 *     resolution cells are not eroded and never will be; anything this
-	 *     pass adds at a scale the eye can see across the LOD boundary is a
-	 *     seam. A high pass makes the net height change over any patch wider
-	 *     than 2R+1 cells exactly zero, so the drift is bounded by
-	 *     construction rather than by taste.
-	 *
-	 *  8 cells is 256 world units at dim 4 -- two LAND grid squares, and well
-	 *  above the 3.5-texel channel spacing F1 read off vanilla, so the
-	 *  channels themselves pass through untouched. */
+	//! The HIGH-PASS RADIUS, in lattice cells. After the droplets have run, the local mean of the delta over a
+	//! box of this radius is SUBTRACTED from it, so what survives is fine relief with no bulk left in it.
 	static constexpr int HP_RADIUS = 8;
 	/*! The hard ceiling on one cell's finished delta, in CELL-NORMALISED
 	 *  height: 2 lattice steps, 64 world units at dim 4, against a measured
@@ -13534,15 +11814,7 @@ public:
 	 *  the field around it averaged 25. The high pass below does not touch
 	 *  that, because a one-cell spike is exactly what a high pass keeps. */
 	static constexpr float DELTA_CLAMP = 6.0f;
-	/*! The nucleation noise, in CELL-NORMALISED height. It exists so that
-	 *  steepest descent on a smooth hillside has something to braid around;
-	 *  it must stay well UNDER the terrain's own slope per cell or the
-	 *  droplets follow the noise instead of the hill and the pass stops
-	 *  being fluvial. Measured: at 0.45 the sheets read an across/along
-	 *  anisotropy of 0.99 against vanilla's 1.48 -- the amplitude was right
-	 *  and the ALIGNMENT was gone, because vanilla's own mean gradient is
-	 *  0.396, i.e. 0.396 of a cell of height per cell of ground, and the
-	 *  noise was larger than the hill it sat on. */
+	//! The nucleation noise, in CELL-NORMALISED height.
 	static constexpr float NOISE_AMP = 0.08f;
 	/*! THE FIT. The droplet model above is written in its own units and it
 	 *  has no idea how much relief a Fallout 4 LOD sheet wants; this one
@@ -13565,13 +11837,8 @@ public:
 	 *  the fitted picture and the census numbers are the world units that
 	 *  actually reach the sheets. */
 	static constexpr float FIT = 0.10f;
-	/*! The border carries the WHOLE dependency reach, so an interior cell
-	 *  reads only cells whose own sums are complete.
-	 *
-	 *  It grows with the round count because the rounds feed back. A cell
-	 *  after round r depends on droplets launched up to r * MAX_STEPS cells
-	 *  away -- round 1 cuts the grooves, round 2's droplets choose their
-	 *  path by those grooves, and so on -- plus the filter's own reach. */
+	//! The border carries the WHOLE dependency reach, so an interior cell reads only cells whose own sums are
+	//! complete.
 	static int borderFor( int rounds )
 	{
 		return rounds * MAX_STEPS + HP_RADIUS;
@@ -13581,12 +11848,9 @@ public:
 	float cellSize() const { return cell; }
 	const LodgenErosionCensus & census() const { return cen; }
 
-	/*! `ringW`/`ringS` are the world coordinates of the height grid's own
-	 *  south-west corner, so `( wx - ringW ) / 128` is the grid coordinate the
-	 *  shared reconstruction takes -- the same expression both `_msn` writers
-	 *  already use. `wx0`/`wy0`/`w`/`h` are the sheet's own texel rect; the
-	 *  lattice is grown by `borderFor( rounds )` cells on every side of it.
-	 *  `dropsPerCell` is the ROUND count, clamped to 1..8 here. */
+	//! `ringW`/`ringS` are the world coordinates of the height grid's own south-west corner, so `( wx - ringW )
+	//! / 128` is the grid coordinate the shared reconstruction takes -- the same expression both `_msn` writers
+	//! already use.
 	void build( const std::vector<float> & hgt, int hn,
 		float ringW, float ringS, float step,
 		float wx0, float wy0, int w, int h,
@@ -13606,25 +11870,16 @@ public:
 		delta.assign( n, 0.0f );
 		round.assign( n, 0.0f );
 
-		/* The static field: the surface the `_msn` already encodes, plus the
-		 * nucleation noise. The noise period is 3 cells because F1 read
-		 * vanilla's channel spacing at 3.5 texels -- a number that sits ON its
-		 * own phase-twin floor, so it is used here as a fit target and never as
-		 * evidence that vanilla has channels of that size. */
+		// The static field: the surface the `_msn` already encodes, plus the nucleation noise.
 		for ( int j = 0; j < gh; j++ ) {
 			for ( int i = 0; i < gw; i++ ) {
 				const float wx = ( float( gx0 + i ) + 0.5f ) * cell;
 				const float wy = ( float( gy0 + j ) + 0.5f ) * cell;
 				const float h0 = lodgenTerrainHeightAt( hgt, hn,
 					( wx - ringW ) / 128.0f, ( wy - ringS ) / 128.0f );
-				/* CELL-NORMALISED HEIGHT: world height divided by the lattice step,
-				 * so a difference between two neighbouring cells IS the slope and
-				 * the droplet constants below are the dimensionless numbers they
-				 * were written as. The delta comes back out in world units by the
-				 * one multiplication by `cell` at each splat. Leaving the height
-				 * in world units here is what made the first run of gate F2 read
-				 * a mean |delta| of 13,327 units on ground a few thousand units
-				 * tall: the slope was a height, and the splat scaled it again. */
+				// CELL-NORMALISED HEIGHT: world height divided by the lattice step, so a difference between
+				// two neighbouring cells IS the slope and the droplet constants below are the dimensionless
+				// numbers they were written as.
 				field[size_t( j ) * gw + i] = h0 / cell
 					+ noise( gx0 + i, gy0 + j, seed, 3 ) * NOISE_AMP;
 			}
@@ -13687,14 +11942,8 @@ public:
 	//! The erosion height delta in world units, bilinear, 0 outside the lattice.
 	float deltaAt( float wx, float wy ) const { return tap( delta, wx, wy ); }
 
-	/*! The crevice term's operand, in the SAME form and with the same sign as
-	 *  the one `lodgenShadeWithCrevice` reads off vanilla's detail normal: the
-	 *  divergence of that normal's horizontal components. A detail normal's
-	 *  east component is -d(delta)/dx, so that divergence is minus the
-	 *  Laplacian of the delta, differenced at the step the gradient uses.
-	 *  Keeping the form means the coefficient TILING3 fitted on seven vanilla
-	 *  sheets (-3.242 levels) keeps its meaning here instead of needing its
-	 *  own fit against a corpus that does not contain this pass. */
+	//! The crevice term's operand, in the SAME form and with the same sign as the one `lodgenShadeWithCrevice`
+	//! reads off vanilla's detail normal: the divergence of that normal's horizontal components.
 	float creviceAt( float wx, float wy, float d ) const
 	{
 		const float s = qMax( d, cell );
@@ -13704,13 +11953,8 @@ public:
 		return -lap / ( 2.0f * s );
 	}
 
-	/*! The gradient the `_msn` writers add to their own, as a CENTRAL DIFFERENCE
-	 *  AT `d` WORLD UNITS -- the sheet's own texel size, floored at the lattice
-	 *  step. That one choice anti-aliases the term: at dim 4 a texel is the
-	 *  lattice step and the sheet sees the channels at full amplitude; at dim 16
-	 *  a texel is 128 units and a central difference over 128 units averages
-	 *  112-unit channels away by itself, which is the right answer, because
-	 *  relief finer than a texel cannot be shown on that texel. */
+	//! The gradient the `_msn` writers add to their own, as a CENTRAL DIFFERENCE AT `d` WORLD UNITS -- the
+	//! sheet's own texel size, floored at the lattice step.
 	void gradAt( float wx, float wy, float d, float * dgx, float * dgy ) const
 	{
 		const float s = qMax( d, cell );
@@ -13918,14 +12162,8 @@ private:
 	 * arrives carrying more material than the slope holds: the first
 	 * measured run put 41,385 world units of fill on a single cell. */
 	static constexpr float MAX_SPEED = 4.0f;
-	/* The most one droplet may cut or lay at one step, in CELL-NORMALISED
-	 * height -- 0.125 of the lattice step, 4 world units at dim 4. This is
-	 * the line between a detail pass and a terrain generator. Without it a
-	 * cliff, whose slope is several cells of height per cell of ground,
-	 * hands one droplet a capacity of hundreds of world units and the pass
-	 * reshapes the mountain instead of scoring it: measured max fill 5,020
-	 * world units against a mean |delta| of 44. It is a CONSTANT, applied
-	 * per step, so it changes no identity argument. */
+	// The most one droplet may cut or lay at one step, in CELL-NORMALISED height -- 0.125 of the lattice step,
+	// 4 world units at dim 4. This is the line between a detail pass and a terrain generator.
 	static constexpr float MAX_MOVE = 0.500f;
 	static constexpr float EVAPORATE = 0.02f;
 
@@ -13941,7 +12179,7 @@ bool lodgenStaticTops( const EsmWorld & world, const QString & dataRoot, int cx0
 	const std::function<bool( int, int )> & cellWanted, LodtStaticTops & out )
 {
 	LodgenObjectHeightField f;
-	f.runsOn = out.wantRuns;	// lane WATERFIX7: the sky slabs' z runs
+	f.runsOn = out.wantRuns;	// the sky slabs' z runs
 	QElapsedTimer clock;
 	clock.start();
 	f.gather( world, dataRoot, cx0, cy0, cx1, cy1, cellWanted, true, true );
@@ -13968,47 +12206,19 @@ bool lodgenBakeTerrainTextures( const EsmWorld & world, int chunkX, int chunkY,
 		return false;
 	};
 	constexpr int RES = 512;
-	/* World-space units per repeat of a landscape diffuse. 341.3333 = 128/0.375
-	 * is the engine's own tiling, read out of Fallout4.exe 1.10.155 at
-	 * 0x1403A74C6 / 0x1403A7620 (lane SPLAT1); `--land-tiling 2048` restores the
-	 * pre-2026-09-11 bake byte for byte. Every TILE site below reads this. */
+	// World-space units per repeat of a landscape diffuse.
 	const float TILE = lodgenLandTiling();
 	const float span = float( dim ) * 4096.0f;
 	const float cwX = float( chunkX ) * 4096.0f, cwY = float( chunkY ) * 4096.0f;
 
-	/* Per-cell land data, loaded once -- and the HEIGHTS on the one-cell ring.
-	 *
-	 * The PAINT (`cells`, `haveLand`, `dominantBase`, the quadrant cover
-	 * constants) stays scoped to the chunk: every texel this bake writes lands
-	 * inside it, and widening that scope would move the dominant base. The one
-	 * reader of a neighbour's paint is the quadrant cross-fade, which gets the
-	 * ring's paint in a separate array (`ringPaint`, below) so that nothing
-	 * else can see it. The HEIGHTS are different. Both
-	 * neighbourhood operators below reach outside the chunk, and until
-	 * 2026-09-10 they were served a CLAMP there -- the chunk's own edge sample
-	 * repeated outwards, a plateau that is not the ground. That clamp is what
-	 * made this bake and the pyramid's disagree on the same chunk (V9a: 43
-	 * colour texels and 5,524 msn texels on Commonwealth.4.-24.24, every one of
-	 * them within 4 texels of the chunk edge) and it is what put a 7.312 step
-	 * across a chunk seam where the ringed bake has 4.955. The ring here is the
-	 * tile baker's ring, through the shared filler, not a second copy of it. */
+	// Per-cell land data, loaded once -- and the HEIGHTS on the one-cell ring.
 	const int rdim = dim + 2 * LODGEN_TERRAIN_RING_CELLS;
 	const int rx0 = chunkX - LODGEN_TERRAIN_RING_CELLS;
 	const int ry0 = chunkY - LODGEN_TERRAIN_RING_CELLS;
 	const int hn = rdim * 32 + 1;
 	std::vector<EsmLand> cells( size_t( dim ) * dim );
 	std::vector<bool> haveLand( size_t( dim ) * dim, false );
-	/* THE RING'S PAINT, for the quadrant cross-fade and for nothing else (lane
-	 * BLENDSEAM1, 2026-09-23). A quadrant line on the chunk's own edge is a
-	 * quadrant line like the other seven, and the pyramid -- the writer whose
-	 * sheet ships -- has always blended it, because its tile grid carries the
-	 * same one-cell ring with the paint loaded. This bake fell back to its own
-	 * colour there, so with the blend on the two writers disagreed on every
-	 * texel within the margin of the chunk edge (6,718 texels over the four V9a
-	 * chunks, max 25 levels, every one within 3 px of the edge). Kept apart from
-	 * `cells` so the dominant base, the cover constants and every statistic stay
-	 * chunk-scoped; filled only when the blend is on, so `--blend-edges off`
-	 * does exactly the work it did before. Indexed ring-local, 0..rdim-1. */
+	// THE RING'S PAINT, for the quadrant cross-fade and for nothing else.
 	const bool ringPaintWanted = ( lodgenBlendEdges() == 1 );
 	std::vector<EsmLand> ringPaint( ringPaintWanted ? size_t( rdim ) * rdim : 0 );
 	std::vector<bool> haveRingPaint( ringPaint.size(), false );
@@ -14033,14 +12243,7 @@ bool lodgenBakeTerrainTextures( const EsmWorld & world, int chunkX, int chunkY,
 				return &land;
 			} );
 	}
-	/* The CHUNK'S OWN view of that grid, for the per-sample channels.
-	 *
-	 * They are held to the chunk deliberately and it is not an oversight: the
-	 * wetness channel is a flow accumulation over the WHOLE grid it is handed,
-	 * so widening the grid moves the sheet's interior, not its edge. That is a
-	 * different defect from the clamp, it cannot be gated by byte identity
-	 * against the pyramid (whose tiles accumulate over a tile-sized grid, not a
-	 * chunk-sized one), and it is named as owed rather than changed here. */
+	// The CHUNK'S OWN view of that grid, for the per-sample channels.
 	const int cn = dim * 32 + 1;
 	std::vector<float> chgt( size_t( cn ) * cn );
 	for ( int row = 0; row < cn; row++ )
@@ -14049,10 +12252,8 @@ bool lodgenBakeTerrainTextures( const EsmWorld & world, int chunkX, int chunkY,
 				hgt[size_t( row + 32 * LODGEN_TERRAIN_RING_CELLS ) * hn
 					+ size_t( col + 32 * LODGEN_TERRAIN_RING_CELLS )];
 
-	/* The texture cache belongs to the CALLER when it has one: the pyramid
-	 * bakes four times as many units over the same ground, and a local cache
-	 * would re-decode every landscape diffuse per unit. A null caller owns one
-	 * for this call, which is what the per-chunk path has always done. */
+	// The texture cache belongs to the CALLER when it has one: the pyramid bakes four times as many units over
+	// the same ground, and a local cache would re-decode every landscape diffuse per unit.
 	LodgenBakeCaches * ownCaches = caches ? nullptr : lodgenCreateBakeCaches();
 	struct CacheGuard
 	{
@@ -14087,7 +12288,7 @@ bool lodgenBakeTerrainTextures( const EsmWorld & world, int chunkX, int chunkY,
 			coverOpts.roadGroundPaint );
 	}
 
-	/* THE OBJECT HEIGHT FIELD (lane GROUND1). Gathered over the chunk grown by
+	/* THE OBJECT HEIGHT FIELD. Gathered over the chunk grown by
 	 * the field's own two-cell margin; inert and never allocated while the
 	 * switch is off, so the three sheets are byte for byte what they are today. */
 	std::unique_ptr<LodgenObjectHeightField> objField;
@@ -14101,11 +12302,8 @@ bool lodgenBakeTerrainTextures( const EsmWorld & world, int chunkX, int chunkY,
 			objField->dump( coverOpts.dumpObjectAoPath );
 	}
 
-	/* THE EROSION LATTICE (lane GROUND1 Part B). Built once per chunk over the
-	 * sheet's own texel grid grown by the droplet's step cap, from the SAME
-	 * height reconstruction the `_msn` below encodes. At --erosion 0 nothing
-	 * is allocated and the branch at the normal is never entered, so the
-	 * sheets are byte for byte what they were. */
+	// THE EROSION LATTICE. Built once per chunk over the sheet's own texel grid grown by the droplet's step
+	// cap, from the SAME height reconstruction the `_msn` below encodes.
 	std::unique_ptr<LodgenErosionField> eroField;
 	LodgenErosionCensus eroCensus;
 	if ( lodgenErosion() > 0.0f ) {
@@ -14117,10 +12315,7 @@ bool lodgenBakeTerrainTextures( const EsmWorld & world, int chunkX, int chunkY,
 		lodgenErosionCensusAdd( eroField->census() );
 	}
 
-	/* Ground cover (docs/LODGEN_TERRAIN_VT.md §2). Everything below is inert
-	 * when the feature is off: the plane is never allocated, the GRAS chain is
-	 * never walked and the tint branch is never entered, so the three sheets
-	 * are byte for byte what they are today. */
+	// Ground cover (docs/LODGEN_TERRAIN_VT.md §2).
 	const bool doCover = coverOpts.cover;
 	const float coverFull = qMax( 1.0f, coverOpts.coverFull );
 	std::vector<quint8> coverPlane;
@@ -14136,21 +12331,11 @@ bool lodgenBakeTerrainTextures( const EsmWorld & world, int chunkX, int chunkY,
 		aCover.assign( 64, 0.0f );
 	}
 
-	/* Quadrants painted with no BTXT, and NULL-LTEX layers, paint the ENGINE's
-	 * default land texture -- one set for the whole world (esmdata.h,
-	 * ESM_LTEX_ENGINE_DEFAULT; lane SEAM1). It used to be the chunk's dominant
-	 * base, which changes from chunk to chunk and drew the chunk grid into the
-	 * ground (Sanctuary, chunk (-20,20), 10-13 levels). The name stays so every
-	 * site below reads as it did. */
+	// Quadrants painted with no BTXT, and NULL-LTEX layers, paint the ENGINE's default land texture -- one set
+	// for the whole world (esmdata.h, ESM_LTEX_ENGINE_DEFAULT).
 	const quint32 dominantBase = ESM_LTEX_ENGINE_DEFAULT;
 
-	/* Per-quadrant ground-cover constants, resolved ONCE on the quadrant, not
-	 * once per texel. D, S and T are per-FORM scalars and the layer set is
-	 * constant across a quadrant, so this is at most eight hash lookups per
-	 * quadrant; doing it per texel would add well over a billion of them over
-	 * a worldspace, on top of the per-texel texture lookup sampleLtex already
-	 * performs. The census counts the resolves so that regression fails a
-	 * check rather than hiding inside a 24-second parse. */
+	// Per-quadrant ground-cover constants, resolved ONCE on the quadrant, not once per texel.
 	struct LtexCoverVals
 	{
 		float d = 0.0f, s = 0.0f, tintD = 0.0f;
@@ -14244,96 +12429,14 @@ bool lodgenBakeTerrainTextures( const EsmWorld & world, int chunkX, int chunkY,
 			const int cy = qBound( 0, int( ( wy - cwY ) / 4096.0f ), dim - 1 );
 			const size_t ci = size_t( cy ) * dim + cx;
 
-			/* Model-space normal from the heightfield (central differences),
-			 * hoisted ABOVE the colour composite: the ground-cover slope gate
-			 * needs this same unit normal's Z, and the operand is free exactly
-			 * once, in the iteration that already computed it. Nothing here
-			 * reads the colour, so the msn bytes are unchanged. */
-			/* Grid coordinates on the RING, so the central difference below has
-			 * real ground on both sides at the chunk's own edge. The spacing is
-			 * 128 world units, which is exactly what `span / ( hn - 1 )` used to
-			 * evaluate to -- ( dim * 4096 ) / ( dim * 32 ) -- and both were exact
-			 * powers of two, so nothing in the chunk's interior moves a bit. */
+			// Model-space normal from the heightfield (central differences), hoisted ABOVE the colour
+			// composite: the ground-cover slope gate needs this same unit normal's Z, and the operand is free
+			// exactly once, in the iteration that already computed it.
 			const float ngx = ( wx - cwX + LODGEN_TERRAIN_RING_UNITS ) / 128.0f;
 			const float ngy = ( wy - cwY + LODGEN_TERRAIN_RING_UNITS ) / 128.0f;
 			const float spacing = 128.0f;
-			/* The reconstruction and the channel order are SHARED with the
-			 * virtual-texture tile baker -- lodgenTerrainHeightAt and
-			 * lodgenTerrainMsnPixel at the top of this file. They were twelve
-			 * lines copied into `lodgenBakeVtTile`, and that copy kept BOTH of
-			 * the defects below after this one lost them (nearest sampling and
-			 * up-in-blue), which is the reason there is now one home.
-			 *
-			 * BILINEAR, and deliberately not smoother. `int( ngx )` truncated
-			 * here until 2026-09-07, so every texel in a 4x4 group read the same
-			 * grid point and got the same normal: the sheet carried 129x129
-			 * distinct values magnified into 512x512. Measured against vanilla,
-			 * the fraction of texels differing from their left neighbour by
-			 * x mod 4 was 83.3 / 0.0 / 0.0 / 0.0 for us and 99.8 / 64.4 / 64.7 /
-			 * 64.3 for vanilla - every block of ours was flat.
-			 *
-			 * A Catmull-Rom interpolant was tried next and is WORSE: VHGT stores
-			 * heights as accumulated int8 deltas of 8 units, so the field is a
-			 * staircase, and a C1 spline overshoots at every step and rings the
-			 * grid into the shading across the whole tile. Bilinear turns a step
-			 * into a ramp instead. That still holds for every basis with negative
-			 * weights. The quintic ease at `heightAt` below is not one of those:
-			 * it reweights the SAME four taps, hits every sample exactly and
-			 * stays between them, so it cannot ring on the staircase -- and the
-			 * staircase turned out not to be what made the squares anyway (the
-			 * measurement is at `heightAt`).
-			 *
-			 * None of this adds detail. Vanilla carries 6.6-8.2x our
-			 * high-frequency energy because Bethesda baked from finer terrain
-			 * than the 128-unit VHGT grid the ESM ships; this removes our
-			 * artefacts, not their missing data. */
-			/* THE EASE, and why the plain bilinear blend left a square lattice.
-			 *
-			 * The central difference below spans a FULL grid step either side,
-			 * and for any blend of the four corner samples that is algebraically
-			 * the same blend of the GRID-POINT gradients:
-			 *
-			 *   H(g+1) - H(g-1) = (1-w)(H[i+1]-H[i-1]) + w(H[i+2]-H[i])
-			 *
-			 * With w = t -- the plain bilinear parameter -- the gradient handed
-			 * to the encoder is CONTINUOUS BUT KINKED at every height sample,
-			 * i.e. the sheet is creased on the 129-sample grid, which at 512
-			 * texels over a dim-4 chunk is a crease every 4 texels in both axes.
-			 * bungo, on the peak close-up: "You can see the square pattern on
-			 * the right in the terrain, which is not good."
-			 *
-			 * MEASURED, our own output against vanilla's, tiles 4.-60.36 and
-			 * 4.-12.44, mip 0. Take the slope field the sheet encodes, subtract
-			 * its own 9x9 box mean, and average |second difference| over the
-			 * columns of each residue class of x mod 4; report
-			 * (max - min) / mean. Before the codec: 0.947 and 0.830 with the
-			 * plain blend, 0.209 and 0.197 with the quintic ease below --
-			 * a 78% and 76% fall, and BELOW vanilla's own 0.296 and 0.245. The
-			 * raised classes were exactly the two straddling a sample line.
-			 *
-			 * The ease is quintic, not the cubic smoothstep: the cubic's SECOND
-			 * derivative still steps at each sample, and this sheet is a normal
-			 * map, which is where such a step shows. (Perlin replaced the cubic
-			 * with this quintic in 2002 for that reason. Measured here too: the
-			 * cubic reads 0.717, the quintic 0.630, on the same tile through the
-			 * same codec.)
-			 *
-			 * IT DOES NOT BUY SMOOTHNESS WITH BLUR, which is the trap every
-			 * other candidate fell into. The ease reweights the blend only; it
-			 * still passes through every VHGT sample exactly and, being monotone
-			 * on [0,1], still cannot leave the four values it sits between -- so
-			 * unlike Catmull-Rom (tried and reverted 2026-09-07) it cannot ring
-			 * on the 8-unit staircase, and unlike a B-spline or a pre-blur it
-			 * removes nothing. High-frequency energy went UP 25.5% and 26.5% on
-			 * the two tiles; the B-spline lost 23.5% and the two pre-blurs 24%
-			 * and 57%, which is why they were rejected.
-			 *
-			 * The 8-unit staircase is NOT the cause and dequantising is not the
-			 * fix: on a smooth synthetic field on this same grid, quantising the
-			 * heights to 8 units moved the number by 0.000 (1.254 -> 1.254 with
-			 * the plain blend, 0.217 -> 0.218 with the ease).
-			 *
-			 * Every terrain _msn in every worldspace changes with this line. */
+			// The reconstruction and the channel order are SHARED with the virtual-texture tile baker --
+			// lodgenTerrainHeightAt and lodgenTerrainMsnPixel at the top of this file.
 			float dzdx = ( lodgenTerrainHeightAt( hgt, hn, ngx + 1.0f, ngy )
 				- lodgenTerrainHeightAt( hgt, hn, ngx - 1.0f, ngy ) ) / ( 2.0f * spacing );
 			float dzdy = ( lodgenTerrainHeightAt( hgt, hn, ngx, ngy + 1.0f )
@@ -14352,10 +12455,9 @@ bool lodgenBakeTerrainTextures( const EsmWorld & world, int chunkX, int chunkY,
 			nrm.normalize();
 			msn[size_t( py ) * RES + px] = lodgenTerrainMsnPixel( nrm );
 
-			/* THE MACRO GRADIENT (lane LAND1): the terrain's own low-pass
-			 * slope at --land-guide-scale, measured ONCE a texel on the same
-			 * ring height grid the normal above comes from, and handed to the
-			 * land diffuse lookup below. Off, nothing is computed. */
+			// THE MACRO GRADIENT: the terrain's own low-pass slope at --land-guide-scale, measured ONCE a
+			// texel on the same ring height grid the normal above comes from, and handed to the land diffuse
+			// lookup below.
 			LodgenLandGuideCtx lguide;
 			lguide.hgt = &hgt;
 			lguide.hn = hn;
@@ -14400,10 +12502,10 @@ bool lodgenBakeTerrainTextures( const EsmWorld & world, int chunkX, int chunkY,
 						return FloatVector4( 0.5f, 0.5f, 0.5f, 1.0f );
 					}
 					/* the repeat's average (its 1x1 mip), for the height
-					 * blend's mean/detail split (lane TILING5) */
+					 * blend's mean/detail split */
 					if ( mOut )
 						*mOut = tex->getPixelT( 0.5f, 0.5f, float( tex->getMaxMipLevel() ) );
-					/* THE RELIEF (lane TILING5), only when the height blend
+					/* THE RELIEF, only when the height blend
 					 * asked for it; a set without one reads h = 0. */
 					const LodgenLandHeight * ht = nullptr;
 					if ( hOut ) {
@@ -14413,10 +12515,8 @@ bool lodgenBakeTerrainTextures( const EsmWorld & world, int chunkX, int chunkY,
 					/* its colour's slope on it: the mean-bias correction */
 					const LodgenLandSlope * sl =
 						pOut ? lodgenLandSlopeFor( d, n, tex, ht ) : nullptr;
-					/* THE DOMAIN WARP (lane TILING3), on the land diffuse
-					 * lookup and on nothing else: not the footprint, not the
-					 * quadrant selection above, not `_msn`, not `.lodl`. Off
-					 * by default, and off returns the coordinate untouched. */
+					// THE DOMAIN WARP, on the land diffuse lookup and on nothing else: not the footprint, not
+					// the quadrant selection above, not `_msn`, not `.lodl`.
 					float swx = wx, swy = wy;
 					lodgenLandGuidedWarp( lguide, wx, wy, mgx, mgy, &swx, &swy );
 					// wrap by hand: getPixelB clamps, and the tiling is ours
@@ -14424,14 +12524,11 @@ bool lodgenBakeTerrainTextures( const EsmWorld & world, int chunkX, int chunkY,
 					float v = std::fmod( swy / TILE, 1.0f );
 					if ( u < 0.0f ) u += 1.0f;
 					if ( v < 0.0f ) v += 1.0f;
-					/* getPixelB/T take NORMALIZED 0..1 coordinates. Sample at
-					 * the mip whose texel matches the bake texel's WORLD
-					 * footprint (span/RES units), or the result is tiling
-					 * noise instead of the material's local average. */
+					// getPixelB/T take NORMALIZED 0..1 coordinates.
 					const float texelWorld = TILE / float( tex->getWidth() );
 					const float footprint = span / float( RES );
 					const float maxMip = float( tex->getMaxMipLevel() );
-					/* THE MIP BIAS (lane TILING3). Written as a branch, not as
+					/* THE MIP BIAS. Written as a branch, not as
 					 * an unconditional `+ bias`, so that at the default the
 					 * expression is the one the rung compiled. */
 					float mipRaw = std::log2( qMax( 1.0f, footprint / texelWorld ) );
@@ -14439,25 +12536,13 @@ bool lodgenBakeTerrainTextures( const EsmWorld & world, int chunkX, int chunkY,
 					if ( mipBias != 0.0f )
 						mipRaw += mipBias;
 					const float mip = qBound( 0.0f, mipRaw, maxMip );
-					/* THE HEX TILING (lane TILING4), on the land diffuse
-					 * lookup and on nothing else. ONE call, at BOTH sites:
-					 * off, it evaluates the identical expression this line
-					 * used to hold, so the default is the rung's bytes. It
-					 * takes the WARP-offset coordinate, so setting both
-					 * gives warp-then-hex (measured, and refused as a
-					 * default: it costs the swirl and buys no repeat). */
+					// THE HEX TILING, on the land diffuse lookup and on nothing else.
 					const FloatVector4 fp =
 						lodgenLandHexTap( tex, swx, swy, TILE, u, v, mip, maxMip,
 							&lguide, ht, hOut, sl, pOut );
 					if ( !lodgenLandSampleAverage() )
 						return fp;
-					/* THE REPEAT-AVERAGED SAMPLE (lane TILING2). A landscape
-					 * diffuse ships a full mip chain down to 1x1, and one
-					 * repeat IS the whole texture, so the 1x1 texel is the
-					 * exact average over a repeat and carries no periodic term
-					 * at all. --land-detail adds back a fraction of the
-					 * footprint sample's departure from that average, which
-					 * scales the repeat by exactly the same fraction. */
+					// THE REPEAT-AVERAGED SAMPLE.
 					const FloatVector4 avg = tex->getPixelT( 0.5f, 0.5f, maxMip );
 					const float kDetail = lodgenLandDetail();
 					if ( pOut )   // the predicted detail scales with the detail
@@ -14467,22 +12552,15 @@ bool lodgenBakeTerrainTextures( const EsmWorld & world, int chunkX, int chunkY,
 					return avg + ( fp - avg ) * kDetail;
 				};
 				const bool heightBlend = lodgenLandHeightBlend();
-				/* THE QUADRANT COMPOSITE, lifted out as a function of
-				 * (paint, quadrant, quadrant-local position) -- lane TILING2.
-				 * The arithmetic is exactly what was inline here; the only
-				 * reason it moved is that the edge blend below has to evaluate
-				 * it for a NEIGHBOURING quadrant at this same world point.
-				 * `own` is true exactly once per texel, for the quadrant the
-				 * texel is really in, and only that call touches the cover
-				 * array and the counters -- so --cover, the statistics and the
-				 * default bake are byte-for-byte what they were. */
+				// THE QUADRANT COMPOSITE, lifted out as a function of (paint, quadrant, quadrant-local
+				// position).
 				int nLayers = 0;
 				auto quadComposite = [&]( const EsmLand & pl, int pq,
 						float pqx, float pqy, bool own ) -> FloatVector4 {
 					FloatVector4 c( 0.5f, 0.5f, 0.5f, 1.0f );
-					float hc = 0.0f;           // the composite's relief (TILING5)
-					FloatVector4 mc = c;       // the composite's mean colour (TILING5)
-					FloatVector4 pc( 0.0f, 0.0f, 0.0f, 0.0f );   // its predicted detail (TILING5)
+					float hc = 0.0f;           // the composite's relief
+					FloatVector4 mc = c;       // the composite's mean colour
+					FloatVector4 pc( 0.0f, 0.0f, 0.0f, 0.0f );   // its predicted detail
 					const quint32 bt = pl.baseTex[pq] ? pl.baseTex[pq] : dominantBase;
 					if ( bt )
 						c = sampleLtex( bt, heightBlend ? &hc : nullptr, heightBlend ? &mc : nullptr,
@@ -14507,7 +12585,7 @@ bool lodgenBakeTerrainTextures( const EsmWorld & world, int chunkX, int chunkY,
 						if ( a <= 0.001f )
 							continue;
 						// NULL-texture layers paint the engine's default
-						// ground (ESM_LTEX_ENGINE_DEFAULT, lane SEAM1)
+						// ground (ESM_LTEX_ENGINE_DEFAULT)
 						float hl = 0.0f;
 						FloatVector4 ml, pLay;
 						const FloatVector4 lc = sampleLtex(
@@ -14517,7 +12595,7 @@ bool lodgenBakeTerrainTextures( const EsmWorld & world, int chunkX, int chunkY,
 						if ( !heightBlend ) {
 							c = c + ( lc - c ) * qBound( 0.0f, a, 1.0f );
 						} else {
-							/* THE HEIGHT-AWARE LAYER BLEND (lane TILING5), see
+							/* THE HEIGHT-AWARE LAYER BLEND, see
 							 * lodgenLandHeightLayer */
 							lodgenLandHeightLayer( c, mc, pc, hc, lc, ml, pLay, hl, qBound( 0.0f, a, 1.0f ) );
 						}
@@ -14528,30 +12606,10 @@ bool lodgenBakeTerrainTextures( const EsmWorld & world, int chunkX, int chunkY,
 				};
 				color = quadComposite( land, q, qx, qy, true );
 				if ( lodgenBlendEdges() == 1 ) {
-					/* THE QUADRANT CROSS-FADE (lane TILING2).
-					 *
-					 * Nothing blends across a quadrant line today: the base
-					 * texture and the whole layer SET change at every 2,048
-					 * units and the 17x17 opacities are bilinear only inside
-					 * their own quadrant. Within `margin` units of a line the
-					 * neighbouring quadrant's composite is evaluated AT THIS
-					 * SAME WORLD POINT -- its own layer set, its own opacities
-					 * read past its edge and therefore clamped to its edge row,
-					 * which is what "the painting reaches the border" means --
-					 * and the two are cross-faded with a quintic ease that is
-					 * exactly 0.5 AT the line. Both sides of a line land on the
-					 * same 50/50 mix there, so the composite is continuous
-					 * across it and its derivative is zero at the margin.
-					 *
-					 * The weights are separable, so a corner mixes all four
-					 * quadrants bilinearly. A neighbour outside the chunk is
-					 * read from the one-cell ring's paint (`ringPaint`), exactly
-					 * as the pyramid reads its tile's ring, so the chunk's own
-					 * edge is blended like every other quadrant line and the
-					 * adjacent chunk meets it on the same 50/50 mix (lane
-					 * BLENDSEAM1). Only a cell with no LAND falls back to this
-					 * quadrant's own colour, on both writers.
-					 */
+					// THE QUADRANT CROSS-FADE:
+					// Nothing blends across a quadrant line today: the base texture and the whole layer SET
+					// change at every 2,048 units and the 17x17 opacities are bilinear only inside their own
+					// quadrant.
 					const float margin = lodgenBlendMargin();
 					const float lxq = lx - ( q & 1 ? 2048.0f : 0.0f );
 					const float lyq = ly - ( q & 2 ? 2048.0f : 0.0f );
@@ -14632,12 +12690,7 @@ bool lodgenBakeTerrainTextures( const EsmWorld & world, int chunkX, int chunkY,
 					for ( int i = 0; i < nL; i++ )
 						A += aCover[i];
 					if ( A > 1.0f ) {
-						/* Renormalise -- and ONLY on the cover side. The colour
-						 * composite keeps the opacities it computes today, or
-						 * --cover and --no-cover would paint the handful of
-						 * texels whose layers sum past 1 differently and the
-						 * byte-identity gate would fail for a reason that is not
-						 * a cover bug. */
+						// Renormalise -- and ONLY on the cover side.
 						const float s = 1.0f / A;
 						for ( int i = 0; i < nL; i++ )
 							aCover[i] *= s;
@@ -14663,11 +12716,8 @@ bool lodgenBakeTerrainTextures( const EsmWorld & world, int chunkX, int chunkY,
 					// 57.29577951 = 180/pi; theta is the slope of the SAME unit
 					// normal the msn write above encodes
 					const float theta = std::acos( qBound( 0.0f, nrm[2], 1.0f ) ) * 57.29577951f;
-					/* A hard step at Max Slope would alias against a heightfield
-					 * sampled every 128 units, and the gate's operand is that
-					 * heightfield -- four times coarser than the texel it gates.
-					 * The +-5 degrees is a smoothing constant against a 128-unit
-					 * operand, not a 32-unit precision claim. */
+					// A hard step at Max Slope would alias against a heightfield sampled every 128 units, and
+					// the gate's operand is that heightfield -- four times coarser than the texel it gates.
 					const float gate = qBound( 0.0f, ( sTex + 5.0f - theta ) / 10.0f, 1.0f );
 					const float raw = 255.0f * gate * dTex / coverFull;
 					coverByte = int( qBound( 0.0f, raw + 0.5f, 255.0f ) );
@@ -14705,18 +12755,13 @@ bool lodgenBakeTerrainTextures( const EsmWorld & world, int chunkX, int chunkY,
 						color[k] *= c / 255.0f;
 					}
 				}
-				/* THE ROAD, between the VCLR multiply and the grass tint.
-				 *
-				 * AFTER VCLR because the road lies ON the ground the artist
-				 * shaded and must not be shaded a second time; BEFORE the tint
-				 * because the tint's weight is the cover byte, and a road
-				 * suppresses the cover under it -- grass grows beside a road,
-				 * not through it. The cover PLANE is rewritten with the same
-				 * byte, so a consumer reading the sheet's alpha sees what the
-				 * tint used. */
+				// THE ROAD, between the VCLR multiply and the grass tint:
+				// AFTER VCLR because the road lies ON the ground the artist shaded and must not be shaded a
+				// second time; BEFORE the tint because the tint's weight is the cover byte, and a road
+				// suppresses the cover under it -- grass grows beside a road, not through it.
 				if ( !roadPlane.empty() ) {
 					const quint32 rp = roadPlane[size_t( py ) * RES + px];
-					/* THE ROAD OPACITY (lane ROADS3). Two different things
+					/* THE ROAD OPACITY. Two different things
 					 * come out of the road plane's alpha and they must not be
 					 * confused:
 					 *
@@ -14754,33 +12799,15 @@ bool lodgenBakeTerrainTextures( const EsmWorld & world, int chunkX, int chunkY,
 						}
 					}
 				}
-				/* The grass tint, AFTER the VCLR multiply. VCLR is the artist's
-				 * dirt shading on the GROUND and the grass sits on top of it; a
-				 * tint mixed in before the multiply would be darkened by it.
-				 * The weight uses the QUANTISED cover byte, not the float, so a
-				 * consumer holding the data sheet reproduces this mix exactly
-				 * from the alpha it reads. The branch is not taken at cover 0,
-				 * which is what makes a no-cover texel structurally identical
-				 * rather than identical by IEEE argument. */
+				// The grass tint, AFTER the VCLR multiply. VCLR is the artist's dirt shading on the GROUND and
+				// the grass sits on top of it; a tint mixed in before the multiply would be darkened by it.
 				const float tintW = ( float( coverByte ) / 255.0f ) * coverOpts.tintStrength;
 				if ( tintW > 0.0f && coverTintD > 0.0f ) {
 					for ( int k = 0; k < 3; k++ )
 						color[k] = color[k] + ( coverTint[k] - color[k] ) * tintW;
 				}
 			}
-			/* THE EROSION SHADING (lane GROUND1 Part B). The pass wrote relief
-			 * into the `_msn` sheet above; this is the same relief reaching the
-			 * COLOUR, in the crevice term's own form and with the crevice term's
-			 * own fitted coefficient, so a channel floor darkens and a levee
-			 * lightens by the amount vanilla's residual asked for. It sits
-			 * before the grade for the reason the road does -- the grade is the
-			 * last thing before quantisation -- and it is scaled by the strength
-			 * because the relief it reads is scaled by the strength in the same
-			 * place. No lattice, no branch: --erosion 0 writes the rung's byte.
-			 * WHAT THIS IS NOT: a material tint. TILING3's hypothesis D put an
-			 * R-squared ceiling of 0.018-0.023 on any per-texel law from the
-			 * fine normal to vanilla's fine colour, so a rock/sediment palette
-			 * would be a taste rather than a measurement, and is refused. */
+			// THE EROSION SHADING.
 			if ( eroField && g_landShade != 0.0f ) {
 				const float dL = g_landShade
 					* eroField->creviceAt( wx, wy, span / float( RES ) )
@@ -14788,22 +12815,14 @@ bool lodgenBakeTerrainTextures( const EsmWorld & world, int chunkX, int chunkY,
 				for ( int k = 0; k < 3; k++ )
 					color[k] = qBound( 0.0f, color[k] + dL, 1.0f );
 			}
-			/* THE GRADE, last before quantisation and after the road and the
-			 * tint, so the road is graded with the ground it sits in (lane
-			 * GRADE1). The crevice term runs LATER still, on the finished
-			 * 8-bit sheet, and is deliberately not scaled: -3.242 was fitted
-			 * in levels against vanilla's own residual. At 1.0 this branch is
-			 * not taken at all, which is what makes the off value the previous
-			 * bake's bytes rather than a float argument about 1.0f. */
+			// THE GRADE, last before quantisation and after the road and the tint, so the road is graded with
+			// the ground it sits in.
 			if ( g_landGrade != 1.0f )
 				for ( int k = 0; k < 3; k++ )
 					color[k] *= g_landGrade;
-			/* THE LARGE-SCALE VARIATION (lane TILING5): the LAST colour step
-			 * before quantisation, so its per-texel saturation hold compares
-			 * against the colour this texel would otherwise store -- after VCLR,
-			 * the road, the grass tint, the shading and the grade.  Placed
-			 * before VCLR it lost the hard line on one sheet in fourteen: a
-			 * tinted VCLR multiply does not keep an HSV-saturation order. */
+			// THE LARGE-SCALE VARIATION: the LAST colour step before quantisation, so its per-texel saturation
+			// hold compares against the colour this texel would otherwise store -- after VCLR, the road, the
+			// grass tint, the shading and the grade.
 			if ( lodgenLandMacro() )
 				color = lodgenLandMacroApply( color, double( wx ), double( wy ) );
 			const int r = qBound( 0, int( color[0] * 255.0f + 0.5f ), 255 );
@@ -14814,15 +12833,8 @@ bool lodgenBakeTerrainTextures( const EsmWorld & world, int chunkX, int chunkY,
 		}
 	}
 	if ( doCover ) {
-		/* The self-accusing line, printed UNCONDITIONALLY under --cover so a
-		 * bake with nine thousand dangling GNAMs cannot go silent. ONE physical
-		 * line, every counter a key=value token with no comma inside any value,
-		 * because report lines in this tree are parsed by KEYWORD and never by
-		 * field position (docs/MISTAKES.md). Error counters and informational
-		 * ones are kept apart: 65 of the 128 shipped landscape textures name no
-		 * grass BY DESIGN -- nineteen of them are the artists' own "same
-		 * texture, deliberately no grass" records -- so gating "LTEX with no
-		 * GRAS" at zero would fail every healthy run. */
+		// The self-accusing line, printed UNCONDITIONALLY under --cover so a bake with nine thousand dangling
+		// GNAMs cannot go silent.
 		const EsmCoverCensus & cc = world.coverCensus();
 		int nifReads = 0, texLoads = 0;
 		lodgenBakeCacheCounts( &bc, &nifReads, &texLoads );
@@ -14884,19 +12896,16 @@ bool lodgenBakeTerrainTextures( const EsmWorld & world, int chunkX, int chunkY,
 		fprintf( stderr, "%s\n", line.toLatin1().constData() );
 		fflush( stderr );
 	}
-	/* The road census, printed UNCONDITIONALLY while the feature is on, so a
-	 * chunk that found no roads says so with zeros instead of going silent --
-	 * and so a chunk that DID find them cannot be believed without the numbers
-	 * beside it (the three rules of 2026-09-04 21:33). */
+	// The road census, printed UNCONDITIONALLY while the feature is on, so a chunk that found no roads says so
+	// with zeros instead of going silent and so a chunk that DID find them cannot be believed without the
+	// numbers beside it (the three rules of 2026-09-04 21:33).
 	if ( coverOpts.roads ) {
 		fprintf( stderr, "%s chunk=%d,%d dim=%d\n",
 			roadCensus.line().toLatin1().constData(), chunkX, chunkY, dim );
 		fflush( stderr );
 	}
-	/* The erosion census, on the same terms as the two above: printed
-	 * whenever the pass is on, zeros and all. `erosionMoved 0` on a chunk
-	 * that ran means the droplets found nothing steep enough to cut.
-	 * meanAbs, maxCut and maxFill are WORLD UNITS of height. */
+	// The erosion census, on the same terms as the two above: printed whenever the pass is on, zeros and all.
+	// `erosionMoved 0` on a chunk that ran means the droplets found nothing steep enough to cut.
 	if ( lodgenErosion() > 0.0f ) {
 		fprintf( stderr, "erosion %.3f erosionIterations %d erosionSeed %u "
 			"erosionStep %.1f erosionCells %lld erosionMoved %lld "
@@ -14936,7 +12945,7 @@ bool lodgenBakeTerrainTextures( const EsmWorld & world, int chunkX, int chunkY,
 
 	const QString base = QString( "%1/%2.%3.%4.%5" )
 		.arg( outDir ).arg( world.worldspaceEdid() ).arg( dim ).arg( chunkX ).arg( chunkY );
-	/* VANILLA REUSE (lane TILING3), the same decision function the shipping
+	/* VANILLA REUSE, the same decision function the shipping
 	 * PYRAMID writer calls. The paint test reads the cells THIS bake already
 	 * loaded rather than walking the group tree a second time. */
 	bool hasPaint = false;
@@ -14954,49 +12963,20 @@ bool lodgenBakeTerrainTextures( const EsmWorld & world, int chunkX, int chunkY,
 	if ( !lodgenWriteChunkSheets( base, RES, diffuse, msn, colCopy, msnCopy ) )
 		return fail( QStringLiteral( "could not write the chunk colour/normal sheets" ) );
 
-	/* Ambient occlusion as a TEXTURE, not only as a vertex channel.
-	 *
-	 * The vertex copy is computed on the 129^2 heightfield and then stored on
-	 * the DECIMATED Land mesh -- about 1180 vertices for a whole dim-4 chunk,
-	 * some 480 world units apart -- so everything between them is triangle
-	 * interpolation and it reads as faceted, not as occlusion. The vertex
-	 * channel stays (it is free and fine for coarse shading); this is the
-	 * copy to actually shade from.
-	 *
-	 * Marched in WORLD space with bilinear heightfield samples rather than in
-	 * grid steps, so 512^2 comes out smooth. That does not invent detail --
-	 * the source is still 128-unit samples -- it just stops re-quantising the
-	 * answer onto a coarser lattice than the texture it lands in.
-	 */
+	// Ambient occlusion as a TEXTURE, not only as a vertex channel.
 	{
 		const float texel = float( dim ) * 4096.0f / float( RES );
 		static const float dirs[8][2] = { { 1, 0 }, { -1, 0 }, { 0, 1 }, { 0, -1 },
 			{ 0.7071f, 0.7071f }, { 0.7071f, -0.7071f },
 			{ -0.7071f, 0.7071f }, { -0.7071f, -0.7071f } };
-		/* Bilinear sample of the heightfield in CHUNK-local world units, served
-		 * from the ring. The march below reaches 2,048 units and until
-		 * 2026-09-10 everything past the chunk edge was that edge repeated, so
-		 * every chunk carried a false plateau around itself and its outermost
-		 * 2,048 units of AO were shadowed by nothing. Same tap as the tile
-		 * baker's, same function. */
+		// Bilinear sample of the heightfield in CHUNK-local world units, served from the ring.
 		auto heightAt = [&]( float wx, float wy ) {
 			return lodgenTerrainGridSample( hgt, hn,
 				wx + LODGEN_TERRAIN_RING_UNITS, wy + LODGEN_TERRAIN_RING_UNITS );
 		};
-		/* Channel-packed terrain data map, RGBA.
-		 *
-		 * Every one of these is computed on the 129^2 heightfield and was then
-		 * stored on ~1180 decimated vertices, so all of them had AO's problem,
-		 * not just AO. At 512^2 they get roughly fifteen times the linear
-		 * detail and stop being triangle interpolation.
-		 *
-		 * WHAT IS NOT HERE, and why: the material CLASS ids. R and UV2.y carry
-		 * discrete class numbers, and BC block compression interpolates inside
-		 * each 4x4 block -- which would synthesise class ids that do not exist,
-		 * silently, at every block boundary. Smooth scalar fields tolerate that
-		 * and enumerations do not, so the classes stay per-vertex where they
-		 * are exact. Geomorph weight stays per-vertex too: it is a delta to a
-		 * specific parent MESH, not a property of the ground. */
+		// Channel-packed terrain data map, RGBA:
+		// Every one of these is computed on the 129^2 heightfield and was then stored on ~1180 decimated
+		// vertices, so all of them had AO's problem, not just AO.
 		std::vector<quint8> tMat, tWet, tAo2, tMat2, tShore;
 		std::vector<float> tSky;
 		std::vector<quint8> tBlend;   // computed, not packed: see the note below
@@ -15025,10 +13005,8 @@ bool lodgenBakeTerrainTextures( const EsmWorld & world, int chunkX, int chunkY,
 				}
 				const float vis = qBound( 0.0f, 1.0f - occl / 8.0f * 1.6f, 1.0f );
 				quint32 ao8 = quint32( qBound( 0.0f, vis * 255.0f + 0.5f, 255.0f ) );
-				/* THE OBJECT TERM (lane GROUND1): a second march of the same shape
-				 * over the placed geometry's tops, multiplied in as a second
-				 * visibility fraction. `wx`/`wy` here are CHUNK-local, so the field
-				 * -- which is indexed in world units -- gets the chunk origin back. */
+				// THE OBJECT TERM: a second march of the same shape over the placed geometry's tops,
+				// multiplied in as a second visibility fraction.
 				if ( objField ) {
 					const float vo = lodgenObjectSkyVis( *objField,
 						cwX + wx, cwY + wy, h0, dirs,
@@ -15046,58 +13024,8 @@ bool lodgenBakeTerrainTextures( const EsmWorld & world, int chunkX, int chunkY,
 					sampleU8( tWet, wx, wy ) + 0.5f, 255.0f ) );
 				const quint32 sho8 = quint32( qBound( 0.0f,
 					sampleU8( tShore, wx, wy ) + 0.5f, 255.0f ) );
-					/* R = AO, G = wetness, B = shore proximity, A = GROUND COVER
-					 * where the chunk has any and nothing at all where it has not.
-					 *
-					 * Four candidates were tried for this alpha slot and each
-					 * failed a test worth remembering:
-					 *   sky visibility -- IS AO on a heightfield (r = 0.969):
-					 *                     lodgenTerrainChannels writes skyVis[i] =
-					 *                     vis and ao[i] = vis * 255 from ONE horizon
-					 *                     measure, so storing it stores AO twice;
-					 *   slope          -- recoverable as acos(n.z) from _msn;
-					 *   water depth    -- a runtime subtraction (the .lodl's water
-					 *                     plane minus the ground), and land wants
-					 *                     shore proximity, not depth;
-					 *   material blend -- the diffuse ALREADY composites the layers,
-					 *                     and the class ids it would weight are
-					 *                     per-VERTEX, so a per-texel weight has no
-					 *                     operands at its own resolution.
-					 *
-					 * Ground cover is the fifth candidate and it is the first to
-					 * pass both tests. It is NOT derivable from anything shipped:
-					 * it needs LTEX GNAM and the GRAS DATA block, records nothing
-					 * in this tree had ever read, and it is orthogonal to R by
-					 * construction -- R comes from the heightfield, cover from the
-					 * splat. And every operand of it exists at 512^2 inside the
-					 * paint loop: D is a per-FORM scalar, the opacity it multiplies
-					 * is the 17x17 grid that loop already samples bilinearly per
-					 * texel, and the slope gate reads the normal the same iteration
-					 * computed. Cover CONSUMES slope rather than storing it. It is
-					 * a smooth scalar, so it tolerates BC interpolation inside a
-					 * 4x4 block -- which is precisely why the class IDS above were
-					 * kept per-vertex and a fraction need not be.
-					 *
-					 * The value is ORDINAL in scale and LINEAR in composition:
-					 * 255 * gate * Dtex / COVER_FULL, so 128 does not mean "half
-					 * the ground is grass" -- nothing states what Density counts
-					 * per unit area -- but the mean of four cover bytes IS the
-					 * cover of the union at half the resolution, which is what lets
-					 * a coarser pyramid level box-filter it.
-					 *
-					 * BC1 with alpha 0xFF when coverMax == 0, byte for byte the
-					 * 174,888-byte sheet this generator has always written; BC3
-					 * with A = cover when it is not, 349,648. Writing cover-0 as
-					 * alpha 0 into a BC1 sheet would set punch-through on every
-					 * block and rewrite the whole file for nothing, so the plane is
-					 * OR-ed in after the loop and only when it carries something.
-					 * The fourCC is the switch AND it is qualified: a DXT5
-					 * _data.DDS is a cover sheet only if the header's dwReserved1
-					 * carries 'WWCV'. Without that stamp an xLODGen sheet's
-					 * constant-255 alpha would decode as FULL cover on every texel
-					 * -- grass on rubble and on the ocean floor, and unrepairable,
-					 * because the bytes would contain nothing to repair. */
-					// row 0 is the chunk's NORTH edge, matching the other two bakes
+					// R = AO, G = wetness, B = shore proximity, A = GROUND COVER where the chunk has any and
+					// nothing at all where it has not.
 					aoTex[size_t( RES - 1 - j ) * RES + size_t( i )] =
 						0xFF000000U | ( ao8 << 16 ) | ( wet8 << 8 ) | sho8;
 			}
@@ -15131,73 +13059,30 @@ bool lodgenBakeTerrainTextures( const EsmWorld & world, int chunkX, int chunkY,
 	return true;
 }
 
-/* ============ rung 3b: the terrain virtual texture (.lodt) ============ *
- *
- * The same bake as the per-chunk sheets above, restructured into a pyramid of
- * bordered tiles so a consumer can stream terrain at a fixed memory budget
- * instead of loading whole chunk sheets. The format contract is
- * docs/LODGEN_TERRAIN_VT.md; everything here is the bake.
- *
- * Two things are deliberately NOT shared with lodgenBakeTerrainTextures: its
- * per-texel loop and its DDS writer. Its output is gated by byte identity
- * against files measured before this lane existed, and it was not to move, so
- * the tile baker repeats the arithmetic rather than refactoring the gated path
- * underneath itself -- the same reason lodgenEncodeArrayLayer repeats the mip
- * loop. Where the two must agree, a check measures that they do (V9a), rather
- * than a shared function asserting it. What IS shared, since 2026-09-10, is
- * everything the two paths must not be allowed to drift on: the height
- * reconstruction (lodgenTerrainHeightAt), the msn encoding
- * (lodgenTerrainMsnPixel), the ring fill (lodgenTerrainFillRing) and the
- * bilinear tap (lodgenTerrainGridSample). The per-texel loops stay apart.
- *
- * Three things the tile path does that the chunk path cannot:
- *   - it carries a BORDER on every tile, so a consumer filters and samples one
- *     tile without reaching into its neighbours. The one-cell RING that feeds
- *     the msn's central differences and the 2,048-unit AO march is NO LONGER
- *     one of these: since 2026-09-10 the chunk path bakes on the same ring,
- *     through the same lodgenTerrainFillRing and the same
- *     lodgenTerrainGridSample, which is what lets V9a ask the two paths for
- *     byte identity instead of for a bounded band;
- *   - it carries a HEIGHT sheet, R16 encoded exactly as the shadow heightmap
- *     encodes it (height/8 + 32767), on the same tile grid with the same
- *     border, so a consumer that wants nested grids has the geometry side too;
- *   - it filters coarser levels from the finer level's UNCOMPRESSED staging,
- *     never from decoded BC blocks, because decode-and-re-encode accumulates
- *     error at every level and the staging costs nothing -- the encoder needs
- *     it anyway.
- */
+// rung 3b: the terrain virtual texture (.lodt) ============ *:
+// The same bake as the per-chunk sheets above, restructured into a pyramid of bordered tiles so a consumer can
+// stream terrain at a fixed memory budget instead of loading whole chunk sheets.
 
 namespace
 {
 
-//! One tile's uncompressed staging: what the encoder reads and what the box
-//! filter reads. `data`'s alpha is the cover byte and is 0 -- never 0xFF --
-//! where a tile has no cover, so a parent bordering one grassy child does not
-//! inherit full cover across three quadrants of bare rock. The 0xFF of the
-//! BC1 fallback is applied at ENCODE time and never enters the filter.
+//! One tile's uncompressed staging: what the encoder reads and what the box filter reads.
 struct LodgenVtStage
 {
 	std::vector<quint32> colour;
 	std::vector<quint32> msn;
-	/*! The RETIRED v1 `data` plane -- R AO, G wetness, B shore, A cover. It is
-	 *  NOT written to the container any more (2.2: role 5 `mask` replaced it),
-	 *  but the `.btr` chunk sheets on the stock path are assembled from this
-	 *  staging (2.4) and the stock engine's `_data.DDS` did not change, so the
-	 *  plane is still computed. Dropping it from the container is what bungo
-	 *  ruled; dropping it from the staging would rewrite files the stock path's
-	 *  byte-identity gate pins. */
+	//! The RETIRED v1 `data` plane -- R AO, G wetness, B shore, A cover.
 	std::vector<quint32> data;
 	//! The mask sheet, RMAOS: A ground cover, R roughness, G metallic, B sky AO.
 	std::vector<quint32> mask;
 	//! The emissive sheet, RGB, opaque. Empty when no layer supplies an emissive.
 	std::vector<quint32> emissive;
 	std::vector<quint16> height;
-	/*! The HEIGHTS normal, kept only while bungo's upscaled sheets replace
-	 *  `msn` (lane VTNORMAL1) AND the .btr chunk sheets are assembled from this
-	 *  staging: the chunk-sheet path reads this plane, so its bytes do not move
-	 *  when the pyramid's normal does. Empty otherwise. */
+	//! The HEIGHTS normal, kept only while bungo's upscaled sheets replace `msn` AND the .btr chunk sheets are
+	//! assembled from this staging: the chunk-sheet path reads this plane, so its bytes do not move when the
+	//! pyramid's normal does.
 	std::vector<quint32> msnHeights;
-	/*! Lane TERR1: THE NORMAL STAMP. `stampNormal` is the road/flat scan's
+	/*! THE NORMAL STAMP. `stampNormal` is the road/flat scan's
 	 *  normal plane (4 floats a texel: world east, north, up, lit coverage),
 	 *  `stampW` the per-texel weight the colour lerp itself set (the colour's
 	 *  `ra`, capped by the lit coverage). Both empty when the stamp is off or no
@@ -15205,7 +13090,7 @@ struct LodgenVtStage
 	 *  the driver and freed there. */
 	std::vector<float> stampNormal;
 	std::vector<float> stampW;
-	/*! THE RULE COLOUR (lane TERRLIVE1, `--outside-paint rule`): ARGB per
+	/*! THE RULE COLOUR: ARGB per
 	 *  texel, A 0 = no rule sample here. Empty when the switch is off; the fill
 	 *  reads it in place of vanilla's diffuse and the driver frees it. */
 	std::vector<quint32> rule;
@@ -15276,22 +13161,10 @@ int lodgenVtFloorTo( int v, int m )
 	return v - lodgenVtTrueMod( v, m );
 }
 
-/*! The ladder and every level's rectangle.
- *
- *  The ladder stops at the coarsest dim that BOTH the worldspace's west and
- *  south divide: -96 divides by 1, 2, 4, 8, 16 and 32 and not by 64, which is
- *  why the Commonwealth has no single root tile and why the dim-32 level (36
- *  tiles) IS the root. A worldspace that is not tile-aligned SHORTENS the
- *  ladder and a note says so; it is not refused, because refusing would give
- *  the first non-Commonwealth worldspace anyone tries a coin-flip chance of
- *  failing.
- *
- *  Every level is anchored to ONE north-west origin, aligned to the coarsest
- *  dim and therefore to every finer one. That is what makes a coarse tile
- *  cover exactly four finer ones, at every level, with no resampling -- which
- *  a consumer assembling nested grids from whole tiles depends on, and which
- *  per-level flooring would silently break wherever two levels floored the
- *  same world edge differently. */
+//! The ladder and every level's rectangle:
+//! The ladder stops at the coarsest dim that BOTH the worldspace's west and south divide: -96 divides by 1, 2,
+//! 4, 8, 16 and 32 and not by 64, which is why the Commonwealth has no single root tile and why the dim-32
+//! level (36 tiles) IS the root.
 int lodgenVtLevelsFromBounds( int worldW, int worldS, int worldE, int worldN,
 	const LodgenVtOptions & opts, LodgenVtLevel * levels, int maxLevels, int * coarsestDimOut )
 {
@@ -15352,10 +13225,7 @@ int lodgenVtBuildLevels( const EsmWorld & world, const LodgenVtOptions & opts,
 	return n;
 }
 
-//! BC3's alpha block: two 8-bit endpoints and 3-bit indices over an 8-step
-//! palette. The same code lodgenWriteDds runs inline, repeated here for the
-//! same reason the mip loop is: that writer's bytes are gated and were not to
-//! move.
+//! BC3's alpha block: two 8-bit endpoints and 3-bit indices over an 8-step palette.
 void lodgenVtEncodeBC3Alpha( const quint32 * img, int w, int h, int bx, int by, quint8 * out )
 {
 	quint8 a[16];
@@ -15465,30 +13335,13 @@ void lodgenVtEncodeR16( const std::vector<quint16> & img, QByteArray & out )
 	}
 }
 
-/*! One tile's payload: sheet 0 mip 0, sheet 0 mip 1, sheet 1 mip 0, ... in
- *  that exact order, rows tightly packed at blocksX * blockBytes.
- *
- *  The no-cover data sheet's alpha is forced to 0xFF HERE and only here.
- *  Writing the staging's cover-0 alpha into a BC1 sheet would set
- *  punch-through on every block and turn the sheet -- and its index-3 texels
- *  -- into something new for no reason. */
-/*! One tile's payload, sheet-major and mip-minor, in the SAME order the header
- *  lists the sheets: colour, msn, mask, [height], [emissive].
- *
- *  `coverInColor` moves the ground-cover byte from the mask sheet's alpha to
- *  the colour sheet's -- the object family's `coverage` slot -- which is the
- *  way back to the other half of bungo's open question (the director rules; see
- *  the report's section 2). Exactly one of the two sheets carries it and
- *  exactly that one is the BC3/BC1 switch, which is what the container's
- *  "one cover carrier" rule pins. */
+//! One tile's payload: sheet 0 mip 0, sheet 0 mip 1, sheet 1 mip 0, ... in that exact order, rows tightly
+//! packed at blocksX * blockBytes.
 QByteArray lodgenVtEncodeTile( const LodgenVtStage & st, int stored, int mips, bool withHeight,
 	bool withEmissive, bool coverInColor, bool halfAux = false )
 {
-	/* HALF-RESOLUTION AUX SHEETS (lane VTNORMAL1, `--vt-half-aux`): the msn,
-	 * mask, height and emissive sheets drop their mip 0 and store the rest,
-	 * which is exactly the full sheet's mips 1.. -- the staging and the halving
-	 * are untouched, only the top mip is not written. The colour sheet keeps
-	 * every mip; the header says which sheets skipped one (descriptor byte 6). */
+	// HALF-RESOLUTION AUX SHEETS: the msn, mask, height and emissive sheets drop their mip 0 and store the
+	// rest, which is exactly the full sheet's mips 1..
 	auto skip = [halfAux]( int sheet, int m ) { return halfAux && sheet != 0 && m == 0; };
 	QByteArray out;
 	struct SheetSrc { const std::vector<quint32> * px; bool bc3; bool alpha; };
@@ -15580,13 +13433,7 @@ struct LodgenVtQuadCover
 	QVector<LodgenVtLtexVals> layers;
 };
 
-/*! What one LTEX layer contributes to the MASK sheet, resolved ONCE per form.
- *
- *  The maps themselves are sampled per texel through lodgenCachedTexture, the
- *  same way the diffuse is, because that cache is an LRU and a pointer held
- *  across tiles would dangle. What is cached here is the LAW -- which rule
- *  served, which map and which channel, and the constants that stand in when a
- *  map will not load. */
+//! What one LTEX layer contributes to the MASK sheet, resolved ONCE per form.
 struct LodgenVtLayerMask
 {
 	LodgenMaterialMask mat;
@@ -15611,10 +13458,7 @@ struct LodgenVtMaskCache
 		LodgenVtLayerMask m;
 		if ( form ) {
 			const EsmLtexTextureSet & ts = world.ltexTextureSet( form );
-			/* The layer's material is the TXST's MNAM; its `_s` map is TX07.
-			 * A material-backed TXST names no TX00 either, which is why the
-			 * diffuse loop already hands the material path to the texture
-			 * loader -- the same material is what the mask law reads. */
+			// The layer's material is the TXST's MNAM; its `_s` map is TX07.
 			lodgenResolveMaterialMask( dataRoot, ts.material, ts.specular, 1.0f, &m.mat,
 				ts.diffuse );
 			m.resolved = true;
@@ -15626,35 +13470,16 @@ struct LodgenVtMaskCache
 			if ( m.mat.haveRoughnessMap )
 				withRoughnessMap++;
 		} else {
-			/* FORM 0, THE NULL LTEX (lane VTFIX1, 2026-09-24). A NULL-LTEX layer in
-			 * a chunk with no dominant base paints through here, and what serves its
-			 * mask is the none-default constants: `m.mat` as constructed, rule
-			 * LODGEN_MASK_NONE. It used to be stored and never counted, so
-			 * `distinctLtex` (this hash's size) ran one past the rule sum on the
-			 * whole Commonwealth -- 101 against 100 (lane VTBAKE1). Counted where it
-			 * is served, so pbrm + legacyInverted + noneDefault == distinctLtex. */
+			// FORM 0, THE NULL LTEX.
 			ruleCounts[int( m.mat.rule )]++;
 		}
 		return *byForm.insert( form, m );
 	}
 };
 
-/*! Bake ONE tile of the finest level, from the paint.
- *
- *  (cellX0, cellY0) is the tile's south-west cell; the tile spans dim x dim
- *  cells and stores content + 2*border texels a side. Everything is baked over
- *  a ONE-CELL RING, which is what gives the border, the msn's central
- *  differences and the 2,048-unit AO march real data instead of the per-chunk
- *  path's edge clamp.
- *
- *  `dominantBase` is what NULL-LTEX layers and baseTex == 0 texels paint. It
- *  is the engine's world-wide default land texture (ESM_LTEX_ENGINE_DEFAULT,
- *  lane SEAM1), so a tile, a chunk and the assembled sheet all agree on it
- *  with no scope to get wrong. It was the enclosing dim-4 chunk's dominant
- *  base until 2026-09-25. */
-/* `static` since 2026-09-11: it now takes a `LodgenRoadSet`, which lives in this
- * translation unit's anonymous namespace, and nothing outside this file has ever
- * called it. */
+//! Bake ONE tile of the finest level, from the paint:
+//! (cellX0, cellY0) is the tile's south-west cell; the tile spans dim x dim cells and stores content + 2*border
+//! texels a side.
 static bool lodgenBakeVtTile( const EsmWorld & world, const QString & dataRoot,
 	LodgenBakeCaches & bc, const LodgenCoverOptions & coverOpts,
 	LodgenVtLandCache & landCache, LodgenVtMaskCache & maskCache, bool wantEmissive,
@@ -15672,16 +13497,14 @@ static bool lodgenBakeVtTile( const EsmWorld & world, const QString & dataRoot,
 	if ( rule )
 		out.rule.assign( size_t( S ) * S, 0u );
 
-	/* THE ROAD PLANE for this tile, scan-converted once. The tile's world
-	 * rectangle includes its BORDER, so a road crossing a tile edge is painted
-	 * identically in both tiles' content and in both tiles' borders. Empty when
-	 * the feature is off, and then the per-texel branch below is never taken. */
+	// THE ROAD PLANE for this tile, scan-converted once. The tile's world rectangle includes its BORDER, so a
+	// road crossing a tile edge is painted identically in both tiles' content and in both tiles' borders.
 	std::vector<quint32> roadPlane;
 	if ( roads && coverOpts.roads && !aoOnly ) {
 		const float wx0 = float( cellX0 ) * 4096.0f - float( border ) * upt;
 		const float wyTop = float( cellY0 + dim ) * 4096.0f + float( border ) * upt;
 		LodgenRoadCensus local;
-		/* Lane TERR1: THE NORMAL STAMP's plane comes out of the same scan as
+		/* THE NORMAL STAMP's plane comes out of the same scan as
 		 * the colour; its per-texel weight is set below, by the colour lerp
 		 * itself, and the driver folds it into the msn (lodgenVtStampMsn). */
 		const bool stampN = coverOpts.stampNormals;
@@ -15697,16 +13520,13 @@ static bool lodgenBakeVtTile( const EsmWorld & world, const QString & dataRoot,
 	const int rx0 = cellX0 - LODGEN_TERRAIN_RING_CELLS;
 	const int ry0 = cellY0 - LODGEN_TERRAIN_RING_CELLS;
 	const int hn = rdim * 32 + 1;
-	/* World-space units per repeat of a landscape diffuse. 341.3333 = 128/0.375
-	 * is the engine's own tiling, read out of Fallout4.exe 1.10.155 at
-	 * 0x1403A74C6 / 0x1403A7620 (lane SPLAT1); `--land-tiling 2048` restores the
-	 * pre-2026-09-11 bake byte for byte. Every TILE site below reads this. */
+	// World-space units per repeat of a landscape diffuse.
 	const float TILE = lodgenLandTiling();
 
 	std::vector<EsmLand> cells( size_t( rdim ) * rdim );
 	std::vector<bool> haveLand( size_t( rdim ) * rdim, false );
 	std::vector<float> hgt;
-	/* THE INNER UNIT IS THE CHUNK, NOT THE TILE (lane VT1, 2026-09-16).
+	/* THE INNER UNIT IS THE CHUNK, NOT THE TILE.
 	 *
 	 * A chunk at dim D is the 2x2 content blocks of the level at dim D/2
 	 * (`assembleChunkRow` below), and every level is anchored to one origin
@@ -15744,12 +13564,9 @@ static bool lodgenBakeVtTile( const EsmWorld & world, const QString & dataRoot,
 			haveLand[ci] = true;
 			return &cells[ci];
 		}, inner );
-	/* Lane FIX1: THE LANDLESS-CELL HEIGHT FILL (`--land-fill-vanilla`), the
-	 * VT's half of it: a landless cell's samples take the game's own terrain
-	 * LOD heights, so the normal and height sheets see the same ground as the
-	 * `.lodl`. A sample any cell WITH land also holds stays that cell's (real
-	 * terrain wins, the `.lodl` seam rule). Only the height grid moves: colour,
-	 * cover and mask still read a landless cell as landless. */
+	// THE LANDLESS-CELL HEIGHT FILL (`--land-fill-vanilla`), the VT's half of it: a landless cell's samples
+	// take the game's own terrain LOD heights, so the normal and height sheets see the same ground as the
+	// `.lodl`.
 	if ( lodgenLandFillVanilla() ) {
 		const QString fillWs = world.worldspaceEdid();
 		auto landAt = [&]( int rcx, int rcy ) {
@@ -15775,7 +13592,7 @@ static bool lodgenBakeVtTile( const EsmWorld & world, const QString & dataRoot,
 			}
 	}
 
-	/* The engine's default land texture, world-wide (lane SEAM1; see the chunk
+	/* The engine's default land texture, world-wide (see the chunk
 	 * baker's twin of this line). No longer scoped to the enclosing dim-4 chunk:
 	 * the old per-chunk dominant base is what put the chunk grid into the VT. */
 	const quint32 dominantBase = ESM_LTEX_ENGINE_DEFAULT;
@@ -15837,17 +13654,13 @@ static bool lodgenBakeVtTile( const EsmWorld & world, const QString & dataRoot,
 	static const float dirs[8][2] = { { 1, 0 }, { -1, 0 }, { 0, 1 }, { 0, -1 },
 		{ 0.7071f, 0.7071f }, { 0.7071f, -0.7071f },
 		{ -0.7071f, 0.7071f }, { -0.7071f, -0.7071f } };
-	/* THE SKY AO of one texel (terrain horizon, and the objects' sky union or
-	 * product), one lambda for the tile's mask sheet and the 32-unit AO map
-	 * (lane TERRLIVE2, lodgenBakeAoMap), so the two cannot drift. `inContent`
-	 * gates the census: tiles overlap by `border`. */
+	// THE SKY AO of one texel (terrain horizon, and the objects' sky union or product), one lambda for the
+	// tile's mask sheet and the 32-unit AO map, so the two cannot drift.
 	auto skyAo = [&]( float wx, float wy, float lx, float ly, bool inContent ) -> quint32 {
 		const float h0 = heightAt( lx, ly );
 		float occl = 0.0f;
-		/* `occlU`: the cosine-weighted sky the objects hide beyond the
-		 * terrain horizon, summed over the directions (lodgenSkyDirBlocked,
-		 * lane TERR1). `occl` stays the terrain-only term: the census
-		 * measures the darkening against it. */
+		// `occlU`: the cosine-weighted sky the objects hide beyond the terrain horizon, summed over the
+		// directions (lodgenSkyDirBlocked).
 		const bool skyUnion = objField && coverOpts.skyObjects;
 		const float h0s = skyUnion ? lodgenSkySurface( *objField, wx, wy, h0 ) : h0;
 		float occlU = 0.0f;
@@ -15874,7 +13687,7 @@ static bool lodgenBakeVtTile( const EsmWorld & world, const QString & dataRoot,
 			}
 			ao8 = a2;
 		}
-		/* THE OBJECT TERM (lane GROUND1). `wx`/`wy` on this path are already
+		/* THE OBJECT TERM. `wx`/`wy` on this path are already
 		 * WORLD coordinates, so the field is read with them unchanged. The
 		 * census counts CONTENT texels only: tiles overlap by `border` and a
 		 * texel counted twice is not a texel. Superseded on the VT sheets by
@@ -15911,7 +13724,7 @@ static bool lodgenBakeVtTile( const EsmWorld & world, const QString & dataRoot,
 	const float ringW = float( rx0 ) * 4096.0f;
 	const float ringS = float( ry0 ) * 4096.0f;
 
-	/* AO ONLY (lane TERRLIVE2, the 32-unit AO map): the mask's B and nothing
+	/* AO ONLY: the mask's B and nothing
 	 * else, and only on the quadrants `aoOnly` names (the painted ones); the
 	 * heights above are the tile's own, so the value is the sheet's. */
 	if ( aoOnly ) {
@@ -15926,7 +13739,7 @@ static bool lodgenBakeVtTile( const EsmWorld & world, const QString & dataRoot,
 					i >= border && i < S - border && j >= border && j < S - border );
 			}
 		};
-		// HORIZON1: one row per task (a texel is written by its own row only); a census caller stays serial
+		// one row per task (a texel is written by its own row only); a census caller stays serial
 		static const bool horizonRed = wwEnvInt( "WW_LODGEN_HORIZON_RED" ) == 1;
 		if ( horizonRed || objCensus )
 			for ( int j = 0; j < S; j++ )
@@ -15936,11 +13749,9 @@ static bool lodgenBakeVtTile( const EsmWorld & world, const QString & dataRoot,
 		return true;
 	}
 
-	/* THE EROSION LATTICE (lane GROUND1 Part B), the pyramid's own copy of the
-	 * SAME class the chunk baker builds -- the lattice is world-aligned and
-	 * its step is this tile's own texel, so two tiles agree cell for cell
-	 * where they meet and a tile agrees with the chunk sheet at the same dim.
-	 * The rect is the tile's CONTENT; the class grows its own border. */
+	// THE EROSION LATTICE, the pyramid's own copy of the SAME class the chunk baker builds -- the lattice is
+	// world-aligned and its step is this tile's own texel, so two tiles agree cell for cell where they meet
+	// and a tile agrees with the chunk sheet at the same dim.
 	std::unique_ptr<LodgenErosionField> eroField;
 	if ( lodgenErosion() > 0.0f ) {
 		eroField.reset( new LodgenErosionField );
@@ -15960,23 +13771,8 @@ static bool lodgenBakeVtTile( const EsmWorld & world, const QString & dataRoot,
 			const int cy = qBound( 0, int( std::floor( ly / 4096.0f ) ), rdim - 1 );
 			const size_t ci = size_t( cy ) * rdim + cx;
 
-			/* The normal first: the cover gate reads its Z.
-			 *
-			 * THROUGH THE SHARED RECONSTRUCTION AND THE SHARED ENCODER, both at
-			 * the top of this file. Until 2026-09-09 these lines were their own
-			 * copy and carried both of the defects the chunk path lost on
-			 * 2026-09-07: `int( ngx )` -- NEAREST, so all sixteen texels of a
-			 * 4x4 block read one grid point and got one normal -- and north in
-			 * green with up in blue, the conventional order, which on the chunk
-			 * path cost 67.7% of the light and 92.0% of the shading variation
-			 * when it was measured. That matters here and not only in a future
-			 * consumer: with --vt on, the .btr chunk sheets are ASSEMBLED from
-			 * these tiles (docs/LODGEN_TERRAIN_VT.md 2.4), so a --vt bake was
-			 * shipping the pre-2026-09-07 _msn into the stock engine.
-			 *
-			 * The grid step is 128 world units on both paths, so the central
-			 * difference divides by 2*128 exactly as the chunk path's
-			 * 2*spacing does. */
+			// The normal first: the cover gate reads its Z:
+			// THROUGH THE SHARED RECONSTRUCTION AND THE SHARED ENCODER, both at the top of this file.
 			const float ngx = lx / 128.0f;
 			const float ngy = ly / 128.0f;
 			float dzdx = ( lodgenTerrainHeightAt( hgt, hn, ngx + 1.0f, ngy )
@@ -15993,7 +13789,7 @@ static bool lodgenBakeVtTile( const EsmWorld & world, const QString & dataRoot,
 			nrm.normalize();
 			out.msn[size_t( j ) * S + i] = lodgenTerrainMsnPixel( nrm );
 
-			/* THE MACRO GRADIENT (lane LAND1). THIS is the site that writes
+			/* THE MACRO GRADIENT. THIS is the site that writes
 			 * the shipped sheet with --vt on; the chunk site above carries the
 			 * same five lines, which is why the patch that made them is a
 			 * script. */
@@ -16020,8 +13816,8 @@ static bool lodgenBakeVtTile( const EsmWorld & world, const QString & dataRoot,
 			int coverByte = 0;
 			float coverTintD = 0.0f;
 			float coverTint[3] = { 0.0f, 0.0f, 0.0f };
-			/* Defined here, above the land branch, since lane TERRLIVE1's rule paint
-			 * (2026-09-29) samples it outside the painted ground too; it was moved,
+			/* Defined here, above the land branch, since the rule paint
+			 * samples it outside the painted ground too; it was moved,
 			 * not changed. */
 			auto sampleLtex = [&]( quint32 ltex, float * hOut, FloatVector4 * mOut,
 					FloatVector4 * pOut ) -> FloatVector4 {
@@ -16036,10 +13832,10 @@ static bool lodgenBakeVtTile( const EsmWorld & world, const QString & dataRoot,
 						*mOut = FloatVector4( 0.5f, 0.5f, 0.5f, 1.0f );
 					return FloatVector4( 0.5f, 0.5f, 0.5f, 1.0f );
 				}
-				/* the repeat's average, as the chunk writer's (lane TILING5) */
+				/* the repeat's average, as the chunk writer's */
 				if ( mOut )
 					*mOut = tex->getPixelT( 0.5f, 0.5f, float( tex->getMaxMipLevel() ) );
-				/* THE RELIEF (lane TILING5), only when asked for */
+				/* THE RELIEF, only when asked for */
 				const LodgenLandHeight * ht = nullptr;
 				if ( hOut ) {
 					*hOut = 0.0f;
@@ -16048,9 +13844,9 @@ static bool lodgenBakeVtTile( const EsmWorld & world, const QString & dataRoot,
 				/* its colour's slope on it: the mean-bias correction */
 				const LodgenLandSlope * sl =
 					pOut ? lodgenLandSlopeFor( d, n, tex, ht ) : nullptr;
-				/* THE DOMAIN WARP (lane TILING3). THIS is the site that
+				/* THE DOMAIN WARP. THIS is the site that
 				 * writes the shipped sheet -- the PYRAMID/VT path -- and it
-				 * is the one lane TILING2 missed and lost a relink to.
+				 * is the one a relink was once lost to.
 				 * Land diffuse only: the emissive lambda above, `_msn` and
 				 * `.lodl` are untouched. Off returns the coordinate as it
 				 * came in. */
@@ -16062,32 +13858,20 @@ static bool lodgenBakeVtTile( const EsmWorld & world, const QString & dataRoot,
 				if ( v < 0.0f ) v += 1.0f;
 				const float texelWorld = TILE / float( tex->getWidth() );
 				const float maxMip = float( tex->getMaxMipLevel() );
-				/* THE MIP BIAS (lane TILING3), as a branch so that the
+				/* THE MIP BIAS, as a branch so that the
 				 * default compiles the rung's expression exactly. */
 				float mipRaw = std::log2( qMax( 1.0f, upt / texelWorld ) );
 				const float mipBias = lodgenLandMipBias();
 				if ( mipBias != 0.0f )
 					mipRaw += mipBias;
 				const float mip = qBound( 0.0f, mipRaw, maxMip );
-				/* THE HEX TILING (lane TILING4), on the land diffuse
-				 * lookup and on nothing else. ONE call, at BOTH sites:
-				 * off, it evaluates the identical expression this line
-				 * used to hold, so the default is the rung's bytes. It
-				 * takes the WARP-offset coordinate, so setting both
-				 * gives warp-then-hex (measured, and refused as a
-				 * default: it costs the swirl and buys no repeat). */
+				// THE HEX TILING, on the land diffuse lookup and on nothing else.
 				const FloatVector4 fp =
 					lodgenLandHexTap( tex, swx, swy, TILE, u, v, mip, maxMip,
 						&lguide, ht, hOut, sl, pOut );
 				if ( !lodgenLandSampleAverage() )
 					return fp;
-				/* THE REPEAT-AVERAGED SAMPLE (lane TILING2). A landscape
-				 * diffuse ships a full mip chain down to 1x1, and one
-				 * repeat IS the whole texture, so the 1x1 texel is the
-				 * exact average over a repeat and carries no periodic term
-				 * at all. --land-detail adds back a fraction of the
-				 * footprint sample's departure from that average, which
-				 * scales the repeat by exactly the same fraction. */
+				// THE REPEAT-AVERAGED SAMPLE.
 				const FloatVector4 avg = tex->getPixelT( 0.5f, 0.5f, maxMip );
 				const float kDetail = lodgenLandDetail();
 				if ( pOut )   // the predicted detail scales with the detail
@@ -16103,10 +13887,9 @@ static bool lodgenBakeVtTile( const EsmWorld & world, const QString & dataRoot,
 				const int q = ( cly >= 2048.0f ? 2 : 0 ) + ( clx >= 2048.0f ? 1 : 0 );
 				const float qx = ( clx - ( q & 1 ? 2048.0f : 0.0f ) ) / 2048.0f;
 				const float qy = ( cly - ( q & 2 ? 2048.0f : 0.0f ) ) / 2048.0f;
-				/* The mask maps are sampled at the SAME world point, the same
-				 * 2,048-unit tiling and the same footprint-chosen mip as the
-				 * diffuse, or the roughness would describe a different patch of
-				 * ground from the colour beside it. */
+				// The mask maps are sampled at the SAME world point, the same 2,048-unit tiling and the same
+				// footprint-chosen mip as the diffuse, or the roughness would describe a different patch of
+				// ground from the colour beside it.
 				auto sampleMaskChannel = [&]( const QString & path, int channel,
 					bool * got ) -> float {
 					if ( got )
@@ -16167,9 +13950,9 @@ static bool lodgenBakeVtTile( const EsmWorld & world, const QString & dataRoot,
 						rgb[k] = e[k];
 				};
 				const bool heightBlend = lodgenLandHeightBlend();
-				float hBase = 0.0f;            // the composite's relief (TILING5)
-				FloatVector4 mBase = color;    // the composite's mean colour (TILING5)
-				FloatVector4 pBase( 0.0f, 0.0f, 0.0f, 0.0f );   // its predicted detail (TILING5)
+				float hBase = 0.0f;            // the composite's relief
+				FloatVector4 mBase = color;    // the composite's mean colour
+				FloatVector4 pBase( 0.0f, 0.0f, 0.0f, 0.0f );   // its predicted detail
 				const quint32 baseTex = land.baseTex[q] ? land.baseTex[q] : dominantBase;
 				if ( baseTex ) {
 					color = sampleLtex( baseTex, heightBlend ? &hBase : nullptr,
@@ -16202,19 +13985,15 @@ static bool lodgenBakeVtTile( const EsmWorld & world, const QString & dataRoot,
 						heightBlend ? &ml : nullptr, heightBlend ? &pLay : nullptr );
 					float aw = qBound( 0.0f, a, 1.0f );
 					if ( heightBlend ) {
-						/* THE HEIGHT-AWARE LAYER BLEND (lane TILING5); the
+						/* THE HEIGHT-AWARE LAYER BLEND; the
 						 * mask channels below take the height opacity, so a
 						 * material's roughness stays on its own detail. */
 						aw = lodgenLandHeightLayer( color, mBase, pBase, hBase, lc, ml, pLay, hl, aw );
 					} else {
 						color = color + ( lc - color ) * aw;
 					}
-					/* THE SAME BLEND, on the same operands, in the same order --
-					 * the layer opacities, over the base, un-renormalised. A
-					 * different composite for the mask would put the roughness of
-					 * one material on the colour of another. VCLR is NOT applied
-					 * (it is the artist's shading of the ground's COLOUR) and
-					 * neither is the grass tint. */
+					// THE SAME BLEND, on the same operands, in the same order the layer opacities, over the
+					// base, un-renormalised.
 					const LodgenMaterialMask & lm = maskCache.resolve( world, dataRoot, lform ).mat;
 					rough = rough + ( layerRough( lm ) - rough ) * aw;
 					metal = metal + ( layerMetal( lm ) - metal ) * aw;
@@ -16226,7 +14005,7 @@ static bool lodgenBakeVtTile( const EsmWorld & world, const QString & dataRoot,
 					}
 				}
 				if ( lodgenBlendEdges() == 1 ) {
-					/* THE QUADRANT CROSS-FADE, COLOUR ONLY (lane TILING2).
+					/* THE QUADRANT CROSS-FADE, COLOUR ONLY.
 					 *
 					 * This is the path that writes the sheets a player sees --
 					 * the per-chunk colour DDS comes out of the virtual-texture
@@ -16405,10 +14184,8 @@ static bool lodgenBakeVtTile( const EsmWorld & world, const QString & dataRoot,
 						if ( ra > 0.0f )
 							for ( int k = 0; k < 3; k++ )
 								color[k] = color[k] + ( rc[k] - color[k] ) * ra;
-						/* Lane TERR1: the normal's weight is the colour's `ra`,
-						 * capped by the LIT shapes' own coverage (an unlit effect
-						 * shape paints colour and no normal). Only here, so a
-						 * texel the colour did not lerp stamps no normal. */
+						// the normal's weight is the colour's `ra`, capped by the LIT shapes' own coverage (an
+						// unlit effect shape paints colour and no normal).
 						if ( ra > 0.0f && !out.stampW.empty() ) {
 							const size_t o = size_t( j ) * S + i;
 							const float nA = out.stampNormal[o * 4 + 3];
@@ -16439,18 +14216,16 @@ static bool lodgenBakeVtTile( const EsmWorld & world, const QString & dataRoot,
 			if ( g_landGrade != 1.0f )
 				for ( int k = 0; k < 3; k++ )
 					color[k] *= g_landGrade;
-			// THE LARGE-SCALE VARIATION (lane TILING5) -- last, as the chunk writer's.
+			// THE LARGE-SCALE VARIATION -- last, as the chunk writer's.
 			if ( lodgenLandMacro() )
 				color = lodgenLandMacroApply( color, double( wx ), double( wy ) );
 			out.colour[size_t( j ) * S + i] = 0xFF000000U
 				| ( quint32( qBound( 0, int( color[0] * 255.0f + 0.5f ), 255 ) ) << 16 )
 				| ( quint32( qBound( 0, int( color[1] * 255.0f + 0.5f ), 255 ) ) << 8 )
 				| quint32( qBound( 0, int( color[2] * 255.0f + 0.5f ), 255 ) );
-			/* THE RULE COLOUR (lane TERRLIVE1, `--outside-paint rule`), only where
-			 * the fill will read it: the rule map's textures, mixed by its
-			 * weights, each through the same land lookup as ours (warp, hex,
-			 * mip bias, detail), then the same shading, grade and variation.
-			 * No cover tint and no vertex colour: the ground outside has none. */
+			// THE RULE COLOUR, only where the fill will read it: the rule map's textures, mixed by its
+			// weights, each through the same land lookup as ours (warp, hex, mip bias, detail), then the same
+			// shading, grade and variation.
 			if ( rule && ( !ruleNeed || ( *ruleNeed )( wx, wy ) ) ) {
 				quint8 rIds[8];
 				float rW[8], rGain = 1.0f;
@@ -16490,10 +14265,8 @@ static bool lodgenBakeVtTile( const EsmWorld & world, const QString & dataRoot,
 			out.data[size_t( j ) * S + i] =
 				( quint32( coverByte ) << 24 ) | ( ao8 << 16 ) | ( wet8 << 8 ) | sho8;
 
-			/* THE MASK SHEET: R roughness, G metallic, B the SAME sky AO the
-			 * retired data sheet carried in its R, A ground cover. Wetness and
-			 * shore proximity are gone -- shore is a runtime subtraction from
-			 * the .lodl water planes and wetness is a close-up effect. */
+			// THE MASK SHEET: R roughness, G metallic, B the SAME sky AO the retired data sheet carried in its
+			// R, A ground cover.
 			const quint32 r8 = quint32( qBound( 0.0f, rough * 255.0f + 0.5f, 255.0f ) );
 			const quint32 m8 = quint32( qBound( 0.0f, metal * 255.0f + 0.5f, 255.0f ) );
 			out.mask[size_t( j ) * S + i] =
@@ -16516,23 +14289,14 @@ static bool lodgenBakeVtTile( const EsmWorld & world, const QString & dataRoot,
 	return true;
 }
 
-/*! A parent tile, box-filtered from the finer level's content mosaic.
- *
- *  The mosaic is the DEFINITION and it is what makes a parent's border
- *  correct: a border texel falls outside its own four children's footprint and
- *  must come from a fifth, sixth or seventh child. Defining the filter over
- *  "four tiles" cannot express that. The mosaic is never materialised -- held
- *  whole, level 2's would be 6.75 GiB -- only four child rows are staged. */
+//! A parent tile, box-filtered from the finer level's content mosaic.
 void lodgenVtFilterTile( const QMap<int, std::vector<LodgenVtStage>> & childRows,
 	int childTilesX, int childTilesY, int content, int border, int stored,
 	int tx, int ty, bool wantEmissive, LodgenVtStage & out )
 {
 	const int mosW = childTilesX * content, mosH = childTilesY * content;
-	/* FIVE planes now, not three: colour, msn, the retired-but-still-staged
-	 * data plane (the .btr path reads it), the MASK and the EMISSIVE. Adding
-	 * them to the same accumulator rather than to a second pass is what keeps
-	 * the one rounding law -- (a+b+c+d+2)>>2, round-half-up -- over every
-	 * sheet. */
+	// FIVE planes now, not three: colour, msn, the retired-but-still-staged data plane (the .btr path reads
+	// it), the MASK and the EMISSIVE.
 	auto sample = [&]( int u, int v, quint32 * bgra, quint16 * h16 ) {
 		u = qBound( 0, u, mosW - 1 );
 		v = qBound( 0, v, mosH - 1 );
@@ -16559,7 +14323,7 @@ void lodgenVtFilterTile( const QMap<int, std::vector<LodgenVtStage>> & childRows
 		bgra[5] = idx < st.msnHeights.size() ? st.msnHeights[idx] : st.msn[idx];
 		*h16 = st.height[idx];
 	};
-	/* The heights normal (lane VTNORMAL1) is a SIXTH plane only while the
+	/* The heights normal is a SIXTH plane only while the
 	 * children carry one; it filters by the msn's own law below. */
 	bool withHeights = false;
 	for ( auto it = childRows.constBegin(); it != childRows.constEnd() && !withHeights; ++it )
@@ -16618,11 +14382,7 @@ void lodgenVtFilterTile( const QMap<int, std::vector<LodgenVtStage>> & childRows
 				if ( len > 1e-6f )
 					for ( int k = 0; k < 3; k++ )
 						n[k] /= len;
-				/* n[] is in CHANNEL order, R G B = east, UP, north; the pixel
-				 * function takes east, north, up. Passed straight through, every
-				 * parent level swapped up and north, so alternate levels of the
-				 * ladder stored a sideways normal (measured 2026-09-18: VT.2 up in
-				 * green, VT.4 up in blue) and the land lit in black patches. */
+				// n[] is in CHANNEL order, R G B = east, UP, north; the pixel function takes east, north, up.
 				out.msn[o] = lodgenTerrainMsnPixel( Vector3( n[0], n[2], n[1] ) );
 			}
 			if ( withHeights ) {
@@ -16640,11 +14400,7 @@ void lodgenVtFilterTile( const QMap<int, std::vector<LodgenVtStage>> & childRows
 			const quint32 cov = ( acc[2][3] + 2 ) >> 2;
 			out.data[o] = ( cov << 24 ) | ( ( ( acc[2][0] + 2 ) >> 2 ) << 16 )
 				| ( ( ( acc[2][1] + 2 ) >> 2 ) << 8 ) | ( ( acc[2][2] + 2 ) >> 2 );
-			/* The mask filters plainly on all four channels. Roughness and
-			 * metallic are material constants resampled, so their mean is the
-			 * mean material -- unlike AO, which is a fixed-radius horizon march
-			 * and therefore scale-dependent, exactly as the contract already
-			 * says of the retired data sheet. */
+			// The mask filters plainly on all four channels.
 			out.mask[o] = ( ( ( acc[3][3] + 2 ) >> 2 ) << 24 )
 				| ( ( ( acc[3][0] + 2 ) >> 2 ) << 16 )
 				| ( ( ( acc[3][1] + 2 ) >> 2 ) << 8 ) | ( ( acc[3][2] + 2 ) >> 2 );
@@ -16714,11 +14470,8 @@ bool lodgenVtEstimateBounds( int wW, int wS, int wE, int wN,
 		out->levelDims[i] = levels[i].dim;
 		out->levelTiles[i] = tiles;
 		out->tiles += tiles;
-		/* The expected, not the worst, case: 13,850 of the Commonwealth's
-		 * 147,456 quadrants carry grass (9.393%), and a tile holds 4*dim^2 of
-		 * them, so P(this tile has any) = 1 - (1 - 0.09393)^(4*dim^2). At dim 2
-		 * that is 79.4% and at dim 4 and coarser it is effectively 1 -- which
-		 * is the honest headline: with cover on, nearly every tile is BC3. */
+		// The expected, not the worst, case: 13,850 of the Commonwealth's 147,456 quadrants carry grass
+		// (9.393%), and a tile holds 4*dim^2 of them, so P(this tile has any) = 1 - (1 - 0.09393)^(4*dim^2).
 		double pCover = 0.0;
 		if ( opts.cover.cover ) {
 			const double q = std::pow( 1.0 - 0.09393, double( 4 * levels[i].dim * levels[i].dim ) );
@@ -16735,10 +14488,7 @@ bool lodgenVtEstimateBounds( int wW, int wS, int wE, int wN,
 		out->pyramidBytes += tiles * ( avgRaw + avgPad ) + tiles * 24 + 4096;
 	}
 	if ( alsoBtr ) {
-		/* The chunk sheets do NOT go away: the pyramid supplies their bytes,
-		 * it does not replace the files. Today's three sheets are 174,888 each
-		 * at dim 4..32; under cover the data sheet doubles wherever the chunk
-		 * has grass, which at 64 quadrants a chunk is 99.8% of them. */
+		// The chunk sheets do NOT go away: the pyramid supplies their bytes, it does not replace the files.
 		qint64 chunks = 0;
 		for ( int d : { 4, 8, 16, 32 } ) {
 			const int nx = ( wE - lodgenVtFloorTo( wW, d ) + d ) / d;
@@ -16768,36 +14518,8 @@ bool lodgenVtEstimate( const EsmWorld & world, const LodgenVtOptions & opts,
 	return lodgenVtEstimateBounds( wW, wS, wE, wN, opts, alsoBtr, out );
 }
 
-/*! The whole pass: bake the finest level from the paint, filter every coarser
- *  level from it, and stream both into one container per level.
- *
- *  The traversal is the normative one and it is what bounds the memory. Rows of
- *  the finest level are baked in increasing north-to-south order; a parent row
- *  is assembled the moment its four child rows exist (2p-1, 2p, 2p+1 and
- *  2p+2 -- FOUR, not three: a parent's own border reaches 16 child texels past
- *  its content and 16 > 0, so the row below the obvious three is needed too),
- *  and child rows no future parent can reach are released at once. Nothing
- *  holds a level: level 2's content mosaic alone would be 6.75 GiB and its
- *  staging 7.6 GiB.
- *
- *  Tiles are appended to their container in table-index order, which with the
- *  4,096-aligned offsets and the zero pad is what makes two runs of the same
- *  bake byte-identical. */
-/*! THE PYRAMID'S NORMAL FROM bungo's UPSCALED SHEETS (lane VTNORMAL1,
- *  2026-09-23, his ruling: "use my upscaled normal and slope sheets,
- *  downsampled").
- *
- *  The `--msn-cache` directory (panel: the cleaned-normal folder) holds one
- *  `<ws>.4.<x>.<y>_msn.DDS` per dim-4 chunk -- his are 2048 px, 8 world units a
- *  texel, R east G up B north, row 0 NORTH (measured: flipped, every r against
- *  the heights normal and vanilla's own sheet drops from 0.66-0.97 to 0.13).
- *  Each sheet is read ONCE, reduced to the pyramid's finest density by a box
- *  filter in VECTOR space (decode, sum, renormalise, encode), and kept while a
- *  tile row can still reach it. At 8 units a texel the reduction is a copy.
- *  A texel with no sheet under it keeps the heights normal. Coarser levels
- *  come from the pyramid's own filter, which already averages the msn as a
- *  vector and renormalises it, so every level is his sheet box-filtered to
- *  that level's texel size. */
+//! The whole pass: bake the finest level from the paint, filter every coarser level from it, and stream both
+//! into one container per level.
 struct LodgenVtMsnSheets
 {
 	QString ws;
@@ -16864,16 +14586,7 @@ struct LodgenVtMsnSheets
 	}
 };
 
-/*! Lane TERR1: THE NORMAL STAMP, folded into one finest tile's msn (and the
- *  kept heights normal, when there is one). Runs AFTER the sheet replacement,
- *  so the object normal lands on whichever surface normal the tile ended with:
- *
- *      n = normalize( hN + ( oN - hN ) * w )
- *
- *  hN decoded from the msn texel (R east, G up, B north), oN the stamped
- *  object normal, w the colour lerp's own weight at that texel. A texel with
- *  w == 0 is not touched, byte for byte. Frees the plane. Returns the CONTENT
- *  texels whose msn moved. */
+//! THE NORMAL STAMP, folded into one finest tile's msn (and the kept heights normal, when there is one).
 static qint64 lodgenVtStampMsn( int content, int border, LodgenVtStage & st )
 {
 	qint64 moved = 0;
@@ -16956,60 +14669,14 @@ static qint64 lodgenVtMsnFromSheets( LodgenVtMsnSheets & sh, int cellX0, int cel
 	return fromSheet;
 }
 
-/*! THE VANILLA-COLOUR FILL (lane SEAM1, 2026-09-25; docs/LODGEN_TERRAIN_VT.md §2.6).
- *
- *  bungo, on the whole-map overview: "blend the colors of the terrain not
- *  covered by the in-game terrain blended tiles, to the vanilla color on those
- *  tiles, from the bakes bethesda did" -- and "it needs to be done in a proper
- *  way". Measured on the Commonwealth: 2,023 of its 2,304 dim-4 chunks carry
- *  LAND with no BTXT on any quadrant and no ATXT layer at all. The §2.5 law
- *  paints those with the engine's one default texture; Bethesda's own LOD
- *  diffuse for the same cells carries the region's colour. This stage takes
- *  that colour, at bake time only (the vanilla sheets are READ, never written
- *  or shipped), and blends it in on the UNPAINTED side only:
- *
- *    painted cell   a LAND quadrant with a BTXT or any ATXT layer (a NULL-LTEX
- *                   layer counts: it is paint intent). w = 0, so his MO2 LAND
- *                   layers win and every painted texel is byte-identical.
- *    d              world distance from the texel to the nearest painted cell
- *    w              smoothstep( 0, band, d ); 1 on a cell with NO LAND record
- *                   (lane BAKE2, 2026-09-25): such a cell has no colour of ours,
- *                   only the generator's flat placeholder grey, and blending FROM
- *                   it painted a pale halo 1..3 cells wide round pre-war's
- *                   playable block (+38 luminance over vanilla one cell out).
- *                   Those cells stay out of the band's p95 for the same reason.
- *    colour         colour + ( T( V ) - colour ) * w
- *    V              Bethesda's dim-4 LOD diffuse, a LOOSE file under --vanilla-lod-root,
- *                   Textures\Terrain\<WS>\<WS>.4.<x>.<y>.dds, (x, y) the chunk's
- *                   SW cell, 512 texels = 32 units a texel, row 0 = north;
- *                   read with a Mitchell-Netravali bicubic (B = C = 1/3), which
- *                   neither rings nor blurs a 2x upsample the way bilinear does
- *    T              the tone + saturation match, FITTED once per bake on the
- *                   OVERLAP (painted cells with an unpainted cell within
- *                   LODGEN_VT_FILL_RING cells): luminance offset (gain capped
- *                   at 1 -- the vanilla sheet carries baked relief light and
- *                   a gain above 1 amplifies it past its own steps, measured),
- *                   chroma scaled by the RMS ratio and shifted by the
- *                   mean-chroma difference. Cell means on both sides, because
- *                   one side is a point-sampled texture and the other a 32-unit
- *                   LOD sheet: their per-texel spreads are different quantities.
- *    band           MEASURED: ceil( p95 over the unpainted ring of
- *                   |lum ours - lum T(V)| / bar ) cells, at least 1, at most 8;
- *                   bar = p99 of vanilla's own adjacent cell-mean steps over
- *                   the overlap and the ring.
- *
- *  The fit reads OUR side from a low-resolution bake of the overlap tiles
- *  through lodgenBakeVtTile itself (16 texels a tile side), so the tone it
- *  matches includes everything the composite does -- VCLR, the grass tint,
- *  roads, the grade -- with no second copy of the law to drift.
- *
- *  Applied to every FINEST-level tile after its bake; the coarser levels, their
- *  mips and the assembled chunk sheets inherit it through the existing box
- *  filter. A missing vanilla tile leaves its texels alone (counted). */
+//! THE VANILLA-COLOUR FILL:
+//! bungo, on the whole-map overview: "blend the colors of the terrain not covered by the in-game terrain
+//! blended tiles, to the vanilla color on those tiles, from the bakes bethesda did" -- and "it needs to be done
+//! in a proper way".
 static const int LODGEN_VT_FILL_RING = 3;
 static const int LODGEN_VT_FILL_MAX_BAND = 8;
 
-/* THE ROUNDED OUTLINE (lane TERRLIVE2): see LodgenOutlineField in lodgen.h. */
+/* THE ROUNDED OUTLINE: see LodgenOutlineField in lodgen.h. */
 float lodgenOutlineOffset()
 {
 	// the blur's worst shift (mean of a Rayleigh, sigma sqrt(pi/2)) + two 512-unit half-diagonals
@@ -17171,12 +14838,12 @@ struct LodgenVtFill
 	qint64 overlapCells = 0, ringCells = 0, fitTiles = 0;
 	qint64 tilesTouched = 0, texelsFilled = 0, texelsNoVanilla = 0;
 	qint64 noLandCells = 0, noLandRingCells = 0, texelsNoLand = 0;
-	/* LAW 2 (lane TERRLIVE1, 2026-09-29): painted per QUADRANT, and the band
+	/* LAW 2: painted per QUADRANT, and the band
 	 * runs INSIDE the painted ground; outside it is vanilla's diffuse untouched. */
 	std::vector<quint8> paintedQ;               //!< (2w x 2h) quadrants from (2 x0, 2 y0); 1 = base or a layer
 	qint64 paintedQuads = 0, texelsVanilla = 0;
-	qint64 texelsRule = 0;                      //!< lane TERRLIVE1: texels that blended toward the rule colour
-	LodgenOutlineField outline;                 //!< lane TERRLIVE2: the rounded outline the band reads
+	qint64 texelsRule = 0;                      //!< texels that blended toward the rule colour
+	LodgenOutlineField outline;                 //!< the rounded outline the band reads
 	int gridX = 0, gridY = 0;                   //!< vanilla dim-4 grid phase, cells 0..3 (LODSettings SW cell mod 4)
 	QString gridSource = QStringLiteral( "default" );
 	QSet<qint64> vanillaMissing;
@@ -17226,14 +14893,8 @@ struct LodgenVtFill
 	static int keyX( qint64 k ) { return int( qint32( quint32( quint64( k ) >> 32 ) ) ); }
 	static int keyY( qint64 k ) { return int( qint32( quint32( quint64( k ) & 0xFFFFFFFFu ) ) ); }
 
-	/*! Bethesda's dim-4 sheet for the chunk whose SW cell is (chunkX, chunkY), as
-	 *  RGB8 at 512 x 512, row 0 = north; nullptr when there is none. READ AS A
-	 *  LOOSE FILE under --vanilla-lod-root (lodgenReadVanillaSheet), never
-	 *  through the resource stack, for the reason 2.5b gives: the stack would
-	 *  serve our own previously installed output and the fill would blend toward
-	 *  yesterday's copy of itself. A replacer at 1024 or 2048 is read at the mip
-	 *  that is 512 so the kernel's texel grid stays 32 units; any other size is
-	 *  refused and counted. An LRU of decoded sheets, 786 KB each. */
+	//! Bethesda's dim-4 sheet for the chunk whose SW cell is (chunkX, chunkY), as RGB8 at 512 x 512, row 0 =
+	//! north; nullptr when there is none.
 	const std::vector<quint8> * sheet( int chunkX, int chunkY )
 	{
 		const qint64 k = key( chunkX, chunkY );
@@ -17279,10 +14940,9 @@ struct LodgenVtFill
 		return &sheets.insert( k, std::move( rgb ) ).value();
 	}
 
-	/*! Vanilla texels over the global texel rectangle [gx0, gx1] x [gy0, gy1]
-	 *  (global texel k covers world [32k, 32k + 32) on x; on y the index runs
-	 *  NORTH-down: texel row r covers world y [-(r + 1) * 32, -r * 32)), as RGB
-	 *  floats 0..1; `have` marks the texels whose sheet exists. */
+	//! Vanilla texels over the global texel rectangle [gx0, gx1] x [gy0, gy1] (global texel k covers world
+	//! [32k, 32k + 32) on x; on y the index runs NORTH-down: texel row r covers world y [-(r + 1) * 32, -r *
+	//! 32)), as RGB floats 0..1; `have` marks the texels whose sheet exists.
 	void window( int gx0, int gy0, int gx1, int gy1, std::vector<float> & rgb, std::vector<quint8> & have )
 	{
 		const int ww = gx1 - gx0 + 1, wh = gy1 - gy0 + 1;
@@ -17397,12 +15057,12 @@ static void lodgenVtFillPainted( const EsmWorld & world, LodgenVtFill & F, int w
 			F.painted[size_t( cy - F.y0 ) * F.w + ( cx - F.x0 )] = p ? 1 : 0;
 		}
 	}
-	// the rounded outline (lane TERRLIVE2), once for the whole bake
+	// the rounded outline, once for the whole bake
 	lodgenOutlineBuild( [&F]( int qx, int qy ) { return F.isPaintedQ( qx, qy ); }, 2 * F.x0, 2 * F.y0,
 		2 * ( F.x0 + F.w ) - 1, 2 * ( F.y0 + F.h ) - 1, qMax( F.band, LODGEN_VT_FILL_BAND ), F.outline );  // law 2 sets the band after this
 }
 
-/*! LAW 2 (lane TERRLIVE1, 2026-09-29, bungo: "The blend was meant to be
+/*! LAW 2 (bungo: "The blend was meant to be
  *  between the vanilla diffuse and our baked areas"). Law 1 decided painted
  *  per CELL and ran its band OUTWARD from the painted cells toward a
  *  tone-matched vanilla, so the empty quadrants of an edge cell and the first
@@ -17414,7 +15074,7 @@ static void lodgenVtFillPainted( const EsmWorld & world, LodgenVtFill & F, int w
  *    d       = per texel, the distance INSIDE the painted ground to the nearest
  *              unpainted quadrant square (0 on unpainted ground);
  *    w       = smoothstep( 0, band, d );
- *              (lane TERRLIVE2: d is now the ROUNDED field, LodgenOutlineField,
+ *              (d is the ROUNDED field, LodgenOutlineField,
  *              less its offset, so the band no longer follows the staircase)
  *    colour  = V + ( ours - V ) * w, V = vanilla's diffuse UNTOUCHED.
  *
@@ -17475,13 +15135,13 @@ static void lodgenVtFillTile( LodgenVtFill & F, int cellX0, int cellY0, int dim,
 			if ( qPainted[qo] ) {
 				if ( !qNear[qo] )
 					continue;       // deep in his paint: byte-identical
-				// the rounded outline (lane TERRLIVE2): a smoothed distance, not the staircase's
+				// the rounded outline: a smoothed distance, not the staircase's
 				wgt = F.outline.weight( wx, wy, F.band );
 				if ( wgt >= 1.0f )
 					continue;
 			}
 			float v[3];
-			/* the rule paint (lane TERRLIVE1), when the tile carries it: it takes
+			/* the rule paint, when the tile carries it: it takes
 			 * vanilla's place in the same blend; where it has no sample, vanilla */
 			const quint32 rpx = out.rule.empty() ? 0u : out.rule[size_t( j ) * S + i];
 			if ( rpx >> 24 ) {
@@ -17691,16 +15351,8 @@ static QString lodgenVtFillReport( const LodgenVtFill & F )
 		.arg( double( F.outline.maxUnpainted ), 0, 'f', 0 );
 }
 
-/* ===== THE RULE PAINT OUTSIDE (lane TERRLIVE1, 2026-09-29) =====
- *
- * bungo: "Yes, option 2, make it optional in the baking settings". With
- * `--outside-paint rule` the ground outside our painted quadrants is drawn
- * with the worldspace's own landscape textures instead of vanilla's dim-4
- * diffuse. Which textures, per 512-unit sample: the one or two that best match
- * vanilla's colour there, weighed by how often OUR painted ground uses each
- * texture at that slope and height. The choice is a small id/weight map in a
- * NEW file (`<ws>.lodr`, lodgen.h); the bake and the live draw both read it.
- * docs/LODGEN_TERRAIN_VT.md 2.6c has the calls and their reasons. */
+// THE RULE PAINT OUTSIDE:
+// bungo: "Yes, option 2, make it optional in the baking settings".
 
 int LodgenRuleMap::mixAt( float wx, float wy, quint8 * ids, float * wts, float * gain ) const
 {
@@ -18036,10 +15688,9 @@ static bool lodgenRuleBuild( const EsmWorld & world, const QString & dataRoot, L
 			*why = QStringLiteral( "no painted ground to learn the textures from" );
 		return false;
 	}
-	/* THE PALETTE: the textures with at least 0.5% of our painted area and a
-	 * diffuse that loads; its matching colour is the repeat's average (the
-	 * 1x1 mip) under the land grade, the colour the bake's land lookup
-	 * averages to. */
+	// THE PALETTE: the textures with at least 0.5% of our painted area and a diffuse that loads; its matching
+	// colour is the repeat's average (the 1x1 mip) under the land grade, the colour the bake's land lookup
+	// averages to.
 	double areaTot = 0.0;
 	for ( int t = 0; t < forms.size(); t++ )
 		areaTot += area[size_t( t )];
@@ -18131,10 +15782,8 @@ static bool lodgenRuleBuild( const EsmWorld & world, const QString & dataRoot, L
 			prior[size_t( bin ) * P + p] =
 				float( ( cnt[size_t( bin ) * P + p] + kappa * gshare[size_t( p )] ) / ( tot + kappa ) );
 	}
-	/* THE CHOICE, per sample with a vanilla colour: the 8 likeliest textures
-	 * for its bin, alone and in pairs; a pair's weight is the least-squares
-	 * fit to vanilla's colour, clamped. Score = colour error in 8-bit units
-	 * minus 2 x log prior of the mix. */
+	// THE CHOICE, per sample with a vanilla colour: the 8 likeliest textures for its bin, alone and in pairs;
+	// a pair's weight is the least-squares fit to vanilla's colour, clamped.
 	const int K = qMin( 8, P );
 	const float lambda = 2.0f;
 	m.a.assign( N, 0xFF );
@@ -18183,11 +15832,8 @@ static bool lodgenRuleBuild( const EsmWorld & world, const QString & dataRoot, L
 					}
 					wgt = den > 1e-9f ? qBound( 0.0f, num / den, 1.0f ) : 1.0f;
 				}
-				/* Brightness counts half (TERRLIVE2): vanilla's far diffuse is brighter than
-				 * every palette colour on steep ground, so a full-weight error chose
-				 * yellow dirt over grey-brown rock there. Hue decides; measured on the
-				 * whole-map dump: rock share at 14-22 deg 0.12 -> 0.27, above 45 deg
-				 * 0.01 -> 0.63, hue error down in every slope bin. */
+				// Brightness counts half: vanilla's far diffuse is brighter than every palette colour on steep
+				// ground, so a full-weight error chose yellow dirt over grey-brown rock there.
 				float dc[3];
 				for ( int ch = 0; ch < 3; ch++ )
 					dc[ch] = 255.0f * ( V[ch] - ( cb[ch] + ( ca[ch] - cb[ch] ) * wgt ) );
@@ -18238,10 +15884,9 @@ static bool lodgenRuleBuild( const EsmWorld & world, const QString & dataRoot, L
 			mixL += lw[ch] * ( cb[ch] + ( ca[ch] - cb[ch] ) * bestW );
 			vL += lw[ch] * V[ch];
 		}
-		/* THE BRIGHTNESS GAIN (TERRLIVE2): the palette has nothing as bright as
-		 * vanilla's far diffuse on steep ground (7-28 levels short above 30 deg),
-		 * so hue picks the textures and this per-sample gain carries the
-		 * brightness: vanilla's luminance over the mix's, clamped 0.5..2. */
+		// THE BRIGHTNESS GAIN: the palette has nothing as bright as vanilla's far diffuse on steep ground
+		// (7-28 levels short above 30 deg), so hue picks the textures and this per-sample gain carries the
+		// brightness: vanilla's luminance over the mix's, clamped 0.5..2.
 		float gain = mixL > 1e-4f ? vL / mixL : 1.0f;
 		if ( gain < 0.5f || gain > 2.0f )
 			nGainClamped++;
@@ -18373,7 +16018,7 @@ bool lodgenBakeOutsideRule( const EsmWorld & world, const QString & dataRoot,
 	return true;
 }
 
-/* ===== THE AO MAP (lane TERRLIVE2, 2026-09-30) -- see lodgen.h ===== */
+/* ===== THE AO MAP -- see lodgen.h ===== */
 
 void LodgenAoMap::rebuildIndex()
 {
@@ -18529,7 +16174,7 @@ bool lodgenBakeAoMap( const EsmWorld & world, const QString & dataRoot,
 	std::shared_ptr<LodgenObjectHeightField> objField;
 	bool objReused = false;
 	if ( opts.cover.terrainObjectAo || opts.cover.skyObjects ) {
-		// lane BAKESPEED3: the pyramid's field when it was gathered over this rectangle (the gather is a function of the key)
+		// the pyramid's field when it was gathered over this rectangle (the gather is a function of the key)
 		if ( caches && caches->objField && !lodgenBakeSpeedRed()
 			&& caches->objKey == lodgenObjFieldKey( world, dataRoot, west, south, east, north ) ) {
 			objField = std::static_pointer_cast<LodgenObjectHeightField>( caches->objField );
@@ -18628,7 +16273,7 @@ bool lodgenBakeAoMap( const EsmWorld & world, const QString & dataRoot,
 	return true;
 }
 
-/* ===== THE TERRAIN OPTION AND THE GROUND DECALS (lane TERRLIVE1, 2026-09-29) =====
+/* ===== THE TERRAIN OPTION AND THE GROUND DECALS =====
  *
  * The option names what of the terrain's colour is baked; the decals are
  * written by every option. See lodgen.h and io/loddecal.h. */
@@ -18804,7 +16449,7 @@ template <typename S> void lodgenDecalLocalise( S & sh, const Vector3 & pos, con
 } // namespace
 
 
-//! lane BAKESPEED1: everything LodgenRoadSet::gather reads besides the ESM, for the decals -> pyramid handoff
+//! everything LodgenRoadSet::gather reads besides the ESM, for the decals -> pyramid handoff
 static QString lodgenRoadSetKey( const EsmWorld & world, const QString & dataRoot,
 	int cx0, int cy0, int cx1, int cy1, const LodgenCoverOptions & cov )
 {
@@ -18893,11 +16538,7 @@ bool lodgenBakeDecals( const EsmWorld & world, const QString & dataRoot,
 		plPiece[i] = *it;
 	}
 
-	// every piece's pictures, scan-converted in its own frame
-	/* lane BAKESPEED3: in batches of pieces. Each batch localises its pieces in turn (the same lines as before),
-	 * scan-converts them on all cores over the shared texture LRU, turns the planes into the two pictures in turn
-	 * (the same lines), and encodes the BC3 chains on all cores. WW_LODGEN_BAKESPEED_RED=1: one piece a batch,
-	 * on this thread, the LRU unshared. */
+	// every piece's pictures, scan-converted in its own frame: in batches of pieces.
 	QVector<LoddPiece> pieces( build.size() );
 	int capped = 0;
 	qint64 texels = 0;
@@ -19221,7 +16862,7 @@ bool lodgenLtexPicture( const EsmWorld & world, const QString & dataRoot, Lodgen
 	return true;
 }
 
-/* lane BAKESPEED1: THE PYRAMID CHECKPOINT. Raw vectors and the censuses' plain counters, read back by the
+/* THE PYRAMID CHECKPOINT. Raw vectors and the censuses' plain counters, read back by the
  * same build only (the key carries the inputs; a file from another key is ignored and overwritten). */
 static const quint32 kVtResumeMagic = 0x32525456U;	// "VTR2"
 
@@ -19288,12 +16929,7 @@ bool lodgenBakeTerrainVt( const EsmWorld & world, const QString & dataRoot,
 	const QString & outDir, const LodgenVtOptions & opts, LodgenBakeCaches * caches,
 	QString * report, QString * error )
 {
-	/* The slab law's known-answer control, on the PYRAMID path. It has to sit
-	 * here as well as in `lodgenBakeTerrainTextures`: measured 2026-09-18, a
-	 * `--vt` bake never enters that per-chunk entry at all -- with
-	 * WW_TERRAIN_RING_TEST set it prints the ring test exactly once, from
-	 * `lodgenWarmSharedIndices`, and not twice. One-shot, and on this entry it
-	 * runs single-threaded before any tile worker starts. */
+	// The slab law's known-answer control, on the PYRAMID path.
 	lodgenObjectSlabSelfTestOnce();
 	auto fail = [error]( const QString & m ) {
 		if ( error )
@@ -19334,10 +16970,9 @@ bool lodgenBakeTerrainVt( const EsmWorld & world, const QString & dataRoot,
 		return fail( QString( "worldspace %1 has a %2-character EDID; the container stores 32 bytes "
 			"with a terminator, so this worldspace cannot be named in a .lodt" )
 			.arg( ws ).arg( ws.size() ) );
-	/* ONE ROOT (lane LAYOUT1, 2026-09-16): the pyramid's levels and its index
-	 * used to sit in `Terrain\` beside the landscape file; both now live under
-	 * `FO4CSLOD\<ws>\`, and the game-relative `file` written into the index
-	 * below says so as well. */
+	// ONE ROOT: the pyramid's levels and its index used to sit in `Terrain\` beside the landscape file; both
+	// now live under `FO4CSLOD\<ws>\`, and the game-relative `file` written into the index below says so as
+	// well.
 	const QString dir = lodgenFo4csWorldDir( outDir, ws );
 	if ( !QDir().mkpath( dir ) )
 		return fail( QString( "could not create %1" ).arg( dir ) );
@@ -19345,17 +16980,8 @@ bool lodgenBakeTerrainVt( const EsmWorld & world, const QString & dataRoot,
 	const quint64 vhgtHash = world.vhgtCorpusHash();
 	const quint64 paintHash = world.paintCorpusHash();
 
-	/* THE EMISSIVE SHEET IS DECIDED BEFORE ANY CONTAINER OPENS, because its
-	 * presence is a HEADER field and a tile's payload size depends on it.
-	 *
-	 * bungo's ruling, 2026-09-11 09:5x: an EMISSIVE sheet "when any layer
-	 * supplies one (absent = none, named in the index)". So every LTEX the
-	 * bake's own rectangle paints is resolved once, here, through the same
-	 * cache the tiles then reuse -- no layer is read twice and the pass costs
-	 * one walk of the region's LAND records. A worldspace whose landscape
-	 * names no emissive map writes NO emissive sheet at all, which is the
-	 * fallback, and the index says so in words rather than shipping a black
-	 * sheet nobody can tell from a missing one. */
+	// THE EMISSIVE SHEET IS DECIDED BEFORE ANY CONTAINER OPENS, because its presence is a HEADER field and a
+	// tile's payload size depends on it.
 	LodgenVtMaskCache maskCache;
 	bool wantEmissive = false;
 	int layerFormsSeen = 0;
@@ -19382,14 +17008,14 @@ bool lodgenBakeTerrainVt( const EsmWorld & world, const QString & dataRoot,
 		wantEmissive = maskCache.withEmissive > 0;
 	}
 
-	/* lane TERRLIVE1: levels below `writeFinestDim` are staged, not written;
+	/* levels below `writeFinestDim` are staged, not written;
 	 * the written ones carry the header a pyramid starting there would carry. */
 	int firstW = 0;
 	if ( opts.writeFinestDim > 0 )
 		while ( firstW < nLevels && levels[firstW].dim < opts.writeFinestDim )
 			firstW++;
 	const int nWritten = nLevels - firstW;
-	/* lane BAKESPEED1: RESUME. A checkpoint with this key puts every writer back at its saved table and the
+	/* RESUME. A checkpoint with this key puts every writer back at its saved table and the
 	 * rows below restart after its last row. The fill and the rule paint keep state outside it: no resume there. */
 	const bool resumeOn = !opts.resumeFile.isEmpty() && !opts.vanillaFill && !opts.outsideRule && !lodgenBakeSpeedRed();
 	QByteArray rsBytes;
@@ -19449,15 +17075,10 @@ bool lodgenBakeTerrainVt( const EsmWorld & world, const QString & dataRoot,
 		h.borderTexels = quint16( border );
 		h.storedTexels = quint16( stored );
 		h.mipCount = quint8( mips );
-		/* THE SHEET SET (2.2, version 2): colour, msn, mask, then HEIGHT if it
-		 * was asked for, then EMISSIVE if any layer in this bake supplies one.
-		 * The order here is the order the payload concatenates them in, so the
-		 * two are written from one place and cannot drift. */
+		// THE SHEET SET (2.2, version 2): colour, msn, mask, then HEIGHT if it was asked for, then EMISSIVE if
+		// any layer in this bake supplies one.
 		h.sheetCount = quint8( 3 + ( opts.height ? 1 : 0 ) + ( wantEmissive ? 1 : 0 ) );
-		// B >= ceil(A/2) at the coarsest stored mip: border 8 with 2 mips has 4
-		// there, which carries 8x. The container DECLARES what it supports and
-		// the consumer clamps its sampler; a border sized for a setting the
-		// consumer may not use is disk given away.
+		// B >= ceil(A/2) at the coarsest stored mip: border 8 with 2 mips has 4 there, which carries 8x.
 		h.anisoSupported = quint8( qMin( 16, 2 * ( border >> ( mips - 1 ) ) ) );
 		h.compression = quint8( opts.compression );
 		h.coverNormalisation = opts.cover.coverFull;
@@ -19475,7 +17096,7 @@ bool lodgenBakeTerrainVt( const EsmWorld & world, const QString & dataRoot,
 		if ( wantEmissive )
 			h.sheets[nextSheet++] = { LODV_DXGI_BC1_UNORM, LODV_DXGI_BC1_UNORM, LODV_ROLE_EMISSIVE, 0 };
 		/* HALF-RESOLUTION AUX SHEETS: every sheet but the colour one says, in
-		 * descriptor byte 6, that it stores no mip 0 (lane VTNORMAL1). Zero --
+		 * descriptor byte 6, that it stores no mip 0. Zero --
 		 * byte-identical to every earlier file -- when the switch is off. */
 		if ( opts.halfAux )
 			for ( int i = 1; i < nextSheet; i++ )
@@ -19499,10 +17120,8 @@ bool lodgenBakeTerrainVt( const EsmWorld & world, const QString & dataRoot,
 
 	LodgenVtLandCache landCache;
 
-	/* bungo's UPSCALED SHEETS AS THE PYRAMID'S NORMAL (lane VTNORMAL1): on
-	 * whenever the cleaned-normal folder is set, exactly as the chunk sheets
-	 * already were. The heights normal is kept beside it only when the .btr
-	 * chunk sheets are assembled here, so those bytes do not move. */
+	// bungo's UPSCALED SHEETS AS THE PYRAMID'S NORMAL: on whenever the cleaned-normal folder is set, exactly
+	// as the chunk sheets already were.
 	std::unique_ptr<LodgenVtMsnSheets> msnSheets;
 	const int finestUpt = levels[0].dim * 4096 / content;
 	if ( !lodgenMsnCacheDir().isEmpty() ) {
@@ -19525,7 +17144,7 @@ bool lodgenBakeTerrainVt( const EsmWorld & world, const QString & dataRoot,
 		const QString rk = lodgenRoadSetKey( world, dataRoot, levels[0].west, levels[0].south,
 			levels[0].east, levels[0].north, opts.cover );
 		if ( caches && caches->roadSet && caches->roadKey == rk )
-			roadSet = std::static_pointer_cast<LodgenRoadSet>( caches->roadSet );	// lane BAKESPEED1: the decals' gather
+			roadSet = std::static_pointer_cast<LodgenRoadSet>( caches->roadSet );	// the decals' gather
 		else {
 			roadSet.reset( new LodgenRoadSet );
 			roadSet->setFlat( opts.cover.flatObjects, opts.cover.flatObjectsFile );
@@ -19540,20 +17159,17 @@ bool lodgenBakeTerrainVt( const EsmWorld & world, const QString & dataRoot,
 		caches->roadKey.clear();
 	}
 
-	/* THE OBJECT HEIGHT FIELD (lane GROUND1), gathered ONCE for the whole
-	 * pyramid for the same reason the roads are: every tile at every level
-	 * stands on the same ground, so the ESM walk and the LOD model loads are
-	 * paid once. Coarser levels inherit the darkened AO byte through the
-	 * existing box filter, exactly as they inherit the splat. */
+	// THE OBJECT HEIGHT FIELD, gathered ONCE for the whole pyramid for the same reason the roads are: every
+	// tile at every level stands on the same ground, so the ESM walk and the LOD model loads are paid once.
 	std::shared_ptr<LodgenObjectHeightField> objField;
 	LodgenObjectAoCensus objCensus;
-	/* lane TERR1: the sky union (`skyObjects`, default on) reads the same
+	/* the sky union (`skyObjects`, default on) reads the same
 	 * field, so it is gathered for either switch. */
 	if ( opts.cover.terrainObjectAo || opts.cover.skyObjects ) {
 		objField.reset( new LodgenObjectHeightField );
 		objField->gather( world, dataRoot, levels[0].west, levels[0].south,
 			levels[0].east, levels[0].north );
-		// lane BAKESPEED3: the AO map gathers the same field over the same rectangle; it takes this one
+		// the AO map gathers the same field over the same rectangle; it takes this one
 		if ( caches && !lodgenBakeSpeedRed() ) {
 			caches->objField = objField;
 			caches->objKey = lodgenObjFieldKey( world, dataRoot, levels[0].west, levels[0].south,
@@ -19573,10 +17189,7 @@ bool lodgenBakeTerrainVt( const EsmWorld & world, const QString & dataRoot,
 	if ( opts.cover.cover )
 		world.setGrassTintResolver( &lodgenGrassTintResolve, &bc );
 
-	/* THE VANILLA-COLOUR FILL (2.6): the painted bitmap and the tone fit, once
-	 * for the whole pyramid. The fit's own low-resolution bakes run on COPIES
-	 * of the caches that count things, so the report's census lines are the
-	 * same with the fill on or off. */
+	// THE VANILLA-COLOUR FILL (2.6): the painted bitmap and the tone fit, once for the whole pyramid.
 	LodgenVtFill fill;
 	if ( opts.vanillaFill ) {
 		fill.on = true;
@@ -19600,7 +17213,7 @@ bool lodgenBakeTerrainVt( const EsmWorld & world, const QString & dataRoot,
 		LodgenVtLandCache fitLand;
 		LodgenRoadCensus fitRoads;
 		LodgenObjectAoCensus fitObj;
-		// the fit reads colour only: the normal stamp and the sky union (lane TERR1) would be work thrown away
+		// the fit reads colour only: the normal stamp and the sky union would be work thrown away
 		LodgenCoverOptions fitCover = opts.cover;
 		fitCover.stampNormals = false;
 		fitCover.skyObjects = false;
@@ -19612,10 +17225,8 @@ bool lodgenBakeTerrainVt( const EsmWorld & world, const QString & dataRoot,
 			} );
 	}
 
-	/* THE RULE PAINT OUTSIDE (lane TERRLIVE1, `--outside-paint rule`): the
-	 * id/weight map, written to its own new file, then read by every finest
-	 * tile that the fill reaches. The coarser levels are filtered from those
-	 * tiles, so Hybrid's far levels carry the rule paint with no extra bytes. */
+	// THE RULE PAINT OUTSIDE: the id/weight map, written to its own new file, then read by every finest tile
+	// that the fill reaches.
 	LodgenRuleMap ruleMap;
 	bool ruleOn = false;
 	QStringList ruleLog;
@@ -19655,7 +17266,7 @@ bool lodgenBakeTerrainVt( const EsmWorld & world, const QString & dataRoot,
 		};
 	}
 
-	/* ONE-VALUE SHEETS (lane FLAT2): per sheet index, how many tiles stored the
+	/* ONE-VALUE SHEETS: per sheet index, how many tiles stored the
 	 * 16-byte record instead of the sheet, and the raw bytes that saved. */
 	qint64 uniformCount[LODV_MAX_SHEETS] = {};
 	qint64 uniformSaved = 0;
@@ -19688,14 +17299,8 @@ bool lodgenBakeTerrainVt( const EsmWorld & world, const QString & dataRoot,
 		return true;
 	};
 
-	/* The .btr chunk sheets, when they are asked for, are assembled HERE --
-	 * from the level's own staging, while its two rows are live -- and not
-	 * from the written container. Reading them back would mean decoding BC
-	 * blocks and re-encoding them, which is exactly what the filter law
-	 * forbids and what would put the assembled sheet a quantisation step away
-	 * from a direct bake. A chunk at dim D is the 2x2 content blocks of level
-	 * D/2; a chunk row lines up with a tile-row PAIR because both are anchored
-	 * to the same origin, which is why this can happen at parent-row time. */
+	// The .btr chunk sheets, when they are asked for, are assembled HERE from the level's own staging, while
+	// its two rows are live -- and not from the written container.
 	auto assembleChunkRow = [&]( int lv, int parentRow ) -> bool {
 		if ( opts.btrTexDir.isEmpty() )
 			return true;
@@ -19732,7 +17337,7 @@ bool lodgenBakeTerrainVt( const EsmWorld & world, const QString & dataRoot,
 								+ size_t( bx * content + i );
 							col[dst] = st.colour[src];
 							// the heights normal when the sheets replaced the
-							// pyramid's (lane VTNORMAL1): this path does not move
+							// pyramid's: this path does not move
 							nrm[dst] = st.msnHeights.empty() ? st.msn[src] : st.msnHeights[src];
 							const quint32 cov = ( st.data[src] >> 24 ) & 0xFF;
 							if ( int( cov ) > coverMax )
@@ -19754,7 +17359,7 @@ bool lodgenBakeTerrainVt( const EsmWorld & world, const QString & dataRoot,
 			const quint32 stamp1 = coverMax > 0
 				? ( ( 1U << 24 ) | quint32( qBound( 0, int( opts.cover.coverFull + 0.5f ), 0xFFFFFF ) ) )
 				: 0U;
-			/* VANILLA REUSE (lane TILING3). THIS is the writer that ships --
+			/* VANILLA REUSE. THIS is the writer that ships --
 			 * the chunk sheet a player sees comes out of this assembly, not
 			 * the stock per-chunk bake -- so the ruling has to land here, and
 			 * it lands at both writers through one function so the two cannot
@@ -19807,7 +17412,7 @@ bool lodgenBakeTerrainVt( const EsmWorld & world, const QString & dataRoot,
 		return true;
 	};
 
-	/* lane BAKESPEED1: THE ROW ON EVERY CORE. A finest tile reads only the paint and the gathered sets, so a
+	/* THE ROW ON EVERY CORE. A finest tile reads only the paint and the gathered sets, so a
 	 * row's tiles bake at once: each worker owns a plugin reader (with its LTEX/GRAS caches), a land and a mask
 	 * cache; the texture LRU is shared and the censuses fold in tile order. Red or the rule paint: the serial loop. */
 	struct VtWorker
@@ -19854,7 +17459,7 @@ bool lodgenBakeTerrainVt( const EsmWorld & world, const QString & dataRoot,
 				.arg( vtThreads ).arg( wt.elapsed() / 1000.0, 0, 'f', 1 ) );
 	}
 
-	// lane BAKESPEED1: WW_LODGEN_MEMLOG times the row loop's parts (tiles, level-0 write, propagate)
+	// WW_LODGEN_MEMLOG times the row loop's parts (tiles, level-0 write, propagate)
 	qint64 msVtTiles = 0, msVtWrite = 0, msVtProp = 0;
 	QElapsedTimer vtPart;
 	int tyStart = 0;
@@ -20053,7 +17658,7 @@ bool lodgenBakeTerrainVt( const EsmWorld & world, const QString & dataRoot,
 			} else {
 				normalTilesHeights++;
 			}
-			// lane TERR1: the object normals, onto whichever surface normal the tile ended with
+			// the object normals, onto whichever surface normal the tile ended with
 			roadCensus.nrmTexels += int( lodgenVtStampMsn( content, border, row[size_t( tx )] ) );
 		}
 		msVtTiles += vtPart.restart();
@@ -20098,18 +17703,9 @@ bool lodgenBakeTerrainVt( const EsmWorld & world, const QString & dataRoot,
 	if ( nWritten > 0 ) {
 		QJsonObject root;
 		root.insert( QStringLiteral( "lodm" ), 1 );
-		/* THE FAMILY WORD IS REAL NOW, and it MEANS it (bungo, 2026-09-11
-		 * 09:5x: "you can mirror how it is set up for the .lodm").
-		 *
-		 * It said "legacy" until today and the contract called it vestigial,
-		 * because the sheets were terrain's own invention and neither family
-		 * described them. They are the OBJECT family's now: the mask sheet is
-		 * the `rmaos` slot's channels in the `rmaos` slot's order, so a
-		 * consumer that knows `.lodm` 2.1 knows this pyramid without a second
-		 * table. Legacy materials are CONVERTED at bake -- gloss inverted into
-		 * roughness, metallic 0 -- so what ships is PBR whatever the source
-		 * was, and `terrain.maskRules` below says how many layers came by which
-		 * road rather than leaving the word to be taken on trust. */
+		// THE FAMILY WORD IS REAL NOW, and it MEANS it:
+		// It said "legacy" until today and the contract called it vestigial, because the sheets were terrain's
+		// own invention and neither family described them.
 		root.insert( QStringLiteral( "family" ), QStringLiteral( "pbr" ) );
 		root.insert( QStringLiteral( "kind" ), QStringLiteral( "terrainVT" ) );
 		QJsonObject t;
@@ -20163,10 +17759,8 @@ bool lodgenBakeTerrainVt( const EsmWorld & world, const QString & dataRoot,
 		if ( wantEmissive )
 			sheets.append( sheet( "emissive", 71, 71, "linear",
 				"RGB emissive colour, no alpha" ) );
-		/* HALF-RESOLUTION AUX SHEETS (lane VTNORMAL1): said per sheet and once
-		 * at the top, and only when on, so an index with the switch off is
-		 * byte-identical to every earlier one. The container says the same in
-		 * descriptor byte 6. */
+		// HALF-RESOLUTION AUX SHEETS: said per sheet and once at the top, and only when on, so an index with
+		// the switch off is byte-identical to every earlier one.
 		if ( opts.halfAux ) {
 			for ( int i = 0; i < sheets.size(); i++ ) {
 				QJsonObject o = sheets[i].toObject();
@@ -20178,7 +17772,7 @@ bool lodgenBakeTerrainVt( const EsmWorld & world, const QString & dataRoot,
 			t.insert( QStringLiteral( "halfAux" ), true );
 		}
 		t.insert( QStringLiteral( "sheets" ), sheets );
-		/* WHERE THE NORMAL CAME FROM (lane VTNORMAL1), written when the
+		/* WHERE THE NORMAL CAME FROM, written when the
 		 * cleaned-normal folder was set; absent means every finest tile's
 		 * normal is the heights normal, as it was before. */
 		if ( msnSheets ) {
@@ -20213,11 +17807,7 @@ bool lodgenBakeTerrainVt( const EsmWorld & world, const QString & dataRoot,
 					"the runtime owns" ) );
 			t.insert( QStringLiteral( "dropped" ), dropped );
 		}
-		/* THE PER-LAYER RULE CENSUS. Every landscape texture the bake's own
-		 * rectangle paints, counted by the rule that served its mask -- so the
-		 * `family: pbr` above is auditable instead of asserted, and a
-		 * worldspace served entirely by `none-default` cannot pass for a
-		 * measurement. */
+		// THE PER-LAYER RULE CENSUS.
 		{
 			QJsonObject rules;
 			rules.insert( QStringLiteral( "pbrm" ), maskCache.ruleCounts[LODGEN_MASK_PBRM] );
@@ -20235,20 +17825,16 @@ bool lodgenBakeTerrainVt( const EsmWorld & world, const QString & dataRoot,
 		QJsonObject cov;
 		cov.insert( QStringLiteral( "present" ), coverTiles > 0 );
 		cov.insert( QStringLiteral( "normalisation" ), double( opts.cover.coverFull ) );
-		/* ordinal AND linear in composition: the value is not a coverage
-		 * fraction -- nothing states what Density counts per unit area -- but
-		 * it IS linear in Dtex, which is what makes averaging four cover bytes
-		 * the right filter for a coarser tile. A bare "ordinal" would forbid
-		 * the filter the pyramid needs. */
+		// ordinal AND linear in composition: the value is not a coverage fraction -- nothing states what
+		// Density counts per unit area -- but it IS linear in Dtex, which is what makes averaging four cover
+		// bytes the right filter for a coarser tile.
 		cov.insert( QStringLiteral( "ordinal" ), true );
 		cov.insert( QStringLiteral( "linearInComposition" ), true );
 		cov.insert( QStringLiteral( "tintStrength" ), double( opts.cover.tintStrength ) );
 		t.insert( QStringLiteral( "cover" ), cov );
 		t.insert( QStringLiteral( "coarseLevelsAreDownsamples" ), true );
-		/* Every level is anchored to ONE origin and each coarser tile covers
-		 * exactly four finer ones, so a consumer assembling nested grids can
-		 * take whole tiles at any level without resampling. Stated here, and
-		 * checked by the harness rather than assumed. */
+		// Every level is anchored to ONE origin and each coarser tile covers exactly four finer ones, so a
+		// consumer assembling nested grids can take whole tiles at any level without resampling.
 		t.insert( QStringLiteral( "alignedToWorldOrigin" ), true );
 		if ( opts.haveRegion )
 			t.insert( QStringLiteral( "partial" ), true );
@@ -20265,7 +17851,7 @@ bool lodgenBakeTerrainVt( const EsmWorld & world, const QString & dataRoot,
 			o.insert( QStringLiteral( "contentTexels" ), content );
 			o.insert( QStringLiteral( "unitsPerTexel" ), levels[l].dim * 4096 / content );
 			/* The GAME-RELATIVE name of the level container, which moved with
-			 * the folder (lane LAYOUT1, 2026-09-16): `Terrain\<ws>.VT.<d>.lodt`
+			 * the folder: `Terrain\<ws>.VT.<d>.lodt`
 			 * until today, `FO4CSLOD\<ws>\<ws>.VT.<d>.lodt` now. */
 			o.insert( QStringLiteral( "container" ),
 				lodgenFo4csGameWorldPath( ws ) + QChar( 92 )
@@ -20300,10 +17886,8 @@ bool lodgenBakeTerrainVt( const EsmWorld & world, const QString & dataRoot,
 		r << QString( "sheets %1" ).arg( 3 + ( opts.height ? 1 : 0 ) + ( wantEmissive ? 1 : 0 ) );
 		r << QString( "emissive %1" ).arg( wantEmissive
 			? QStringLiteral( "present" ) : QStringLiteral( "none" ) );
-		/* THE RULE CENSUS, on one physical line of key=value tokens, because
-		 * report lines in this tree are parsed by keyword and never by field
-		 * position. Every word is WRITTEN and every one of them MOVES with the
-		 * corpus (the three rules of 2026-09-04 21:33). */
+		// THE RULE CENSUS, on one physical line of key=value tokens, because report lines in this tree are
+		// parsed by keyword and never by field position.
 		r << QString( "maskPbrm %1" ).arg( maskCache.ruleCounts[LODGEN_MASK_PBRM] );
 		r << QString( "maskLegacyInverted %1" ).arg( maskCache.ruleCounts[LODGEN_MASK_LEGACY_INVERTED] );
 		r << QString( "maskNoneDefault %1" ).arg( maskCache.ruleCounts[LODGEN_MASK_NONE] );
@@ -20326,7 +17910,7 @@ bool lodgenBakeTerrainVt( const EsmWorld & world, const QString & dataRoot,
 		r << QString( "border %1" ).arg( border );
 		r << QString( "mips %1" ).arg( mips );
 		r << QString( "compression %1" ).arg( opts.compression );
-		/* THE ONE-VALUE CENSUS (lane FLAT2), unconditional: `collapseUniform 0`
+		/* THE ONE-VALUE CENSUS, unconditional: `collapseUniform 0`
 		 * with zeros is the gate's way back; with it on, the counts per sheet
 		 * kind and the raw bytes not stored MOVE with the corpus (open sea). */
 		{
@@ -20339,12 +17923,9 @@ bool lodgenBakeTerrainVt( const EsmWorld & world, const QString & dataRoot,
 			}
 			r << QString( "uniformBytesSaved %1" ).arg( uniformSaved );
 		}
-		/* THE VANILLA-REUSE CENSUS (lane TILING3), written UNCONDITIONALLY so
-		 * that a run with the switch off says so with zeros rather than going
-		 * silent, and so that a run that DID copy vanilla's sheets cannot be
-		 * believed without the counts beside it. `landDetail 0` means the
-		 * switch was off; `landDetail 1 msnCopied 0` means it was on and no
-		 * vanilla sheet was found under the named root. */
+		// THE VANILLA-REUSE CENSUS, written UNCONDITIONALLY so that a run with the switch off says so with
+		// zeros rather than going silent, and so that a run that DID copy vanilla's sheets cannot be believed
+		// without the counts beside it.
 		{
 			const LodgenVanillaReuse vr = lodgenVanillaReuseCensus();
 			r << QString( "landDetail %1" ).arg( lodgenLandDetailSource() );
@@ -20359,14 +17940,8 @@ bool lodgenBakeTerrainVt( const EsmWorld & world, const QString & dataRoot,
 			r << QString( "chunksLayerlessNoVanilla %1" ).arg( vr.layerlessNoVanilla );
 			r << QString( "chunksShaded %1" ).arg( vr.shaded );
 			r << QString( "landShade %1" ).arg( double( lodgenLandShade() ), 0, 'f', 3 );
-			/* The sheet format and the cleaned-`_msn` cache, same discipline:
-			 * written whether or not either is on, so `sheetFormat 0
-			 * msnCacheHit 0 msnCacheMiss 0` is a run that changed nothing and
-			 * says so. NOTE, because it would otherwise be a trap for a later
-			 * reader: this census LINE is emitted only on the `--vt` path,
-			 * while the counters increment on BOTH paths, because
-			 * lodgenWriteChunkSheets is shared. A stock per-chunk bake moves
-			 * these numbers and prints none of them. */
+			// The sheet format and the cleaned-`_msn` cache, same discipline: written whether or not either is
+			// on, so `sheetFormat 0 msnCacheHit 0 msnCacheMiss 0` is a run that changed nothing and says so.
 			r << QString( "sheetFormat %1" ).arg( vr.sheetFormat );
 			r << QString( "msnCacheDir %1%2" ).arg( lodgenMsnCacheDir().isEmpty()
 				? QStringLiteral( "(none)" ) : lodgenMsnCacheDir(),
@@ -20375,7 +17950,7 @@ bool lodgenBakeTerrainVt( const EsmWorld & world, const QString & dataRoot,
 			r << QString( "msnCacheMiss %1" ).arg( vr.msnCacheMiss );
 			r << QString( "msnCacheRenorm %1" ).arg( vr.msnCacheRenorm );
 		}
-		/* THE PYRAMID'S NORMAL SOURCE (lane VTNORMAL1), written whether or not
+		/* THE PYRAMID'S NORMAL SOURCE, written whether or not
 		 * the folder is set: `normalMsnCache 0 normalHeights N` is a bake whose
 		 * every finest tile took the heights normal. */
 		r << QString( "normalMsnCache %1" ).arg( normalTilesSheet );
@@ -20392,10 +17967,8 @@ bool lodgenBakeTerrainVt( const EsmWorld & world, const QString & dataRoot,
 		r << QString( "vhgtCorpusHash %1" ).arg( hex16( vhgtHash ) );
 		r << QString( "paintCorpusHash %1" ).arg( hex16( paintHash ) );
 		r << QString( "vhgtCorpusHashSorted %1" ).arg( hex16( world.vhgtCorpusHashSorted() ) );
-		/* THE ROAD CENSUS, same discipline: written whether or not the pass is
-		 * on, and every field zero on a region with no roads. `roads 0` means
-		 * the switch was off; `roads 1 roadTexels 0` means it was on and the
-		 * ground carries none. */
+		// THE ROAD CENSUS, same discipline: written whether or not the pass is on, and every field zero on a
+		// region with no roads.
 		r << QString( "roads %1" ).arg( opts.cover.roads ? 1 : 0 );
 		r << QString( "roadPlacements %1" ).arg( roadCensus.placements );
 		r << QString( "roadMeshes %1" ).arg( roadCensus.meshes );
@@ -20427,7 +18000,7 @@ bool lodgenBakeTerrainVt( const EsmWorld & world, const QString & dataRoot,
 		r << QString( "roadRefusedSidewalk %1" ).arg( roadCensus.refusedSidewalk );
 		r << QString( "roadSidewalkBases %1" ).arg( roadCensus.sidewalkBases );
 		r << QString( "roadSwappedPlacements %1" ).arg( roadCensus.swappedPlacements );
-		/* FLAT GROUND OBJECTS (lane FLAT1): the counts, and the per-bake report
+		/* FLAT GROUND OBJECTS: the counts, and the per-bake report
 		 * written BESIDE the sheets (never into them): every base model the rule
 		 * looked at, what it measured and what it decided. */
 		r << QString( "flatObjects %1" ).arg( opts.cover.roads && opts.cover.flatObjects ? 1 : 0 );
@@ -20439,7 +18012,7 @@ bool lodgenBakeTerrainVt( const EsmWorld & world, const QString & dataRoot,
 		r << QString( "flatTexels %1" ).arg( roadCensus.flatTexels );
 		r << QString( "flatDecalTexels %1" ).arg( roadCensus.flatDecalTexels );
 		r << QString( "flatRefusedNoTexture %1" ).arg( roadCensus.flatRefusedNoTexture );
-		// lane TERR1: the normal stamp
+		// the normal stamp
 		r << QString( "stampNormals %1" ).arg( opts.cover.roads && opts.cover.stampNormals ? 1 : 0 );
 		r << QString( "stampNormalShapeTiles %1" ).arg( roadCensus.nrmShapes );
 		r << QString( "stampNormalNoMap %1" ).arg( roadCensus.nrmNoMap );
@@ -20468,7 +18041,7 @@ bool lodgenBakeTerrainVt( const EsmWorld & world, const QString & dataRoot,
 		 * `terrainObjectAo 1 objAoTexels 0` means it was on and nothing in the
 		 * region stood high enough within 1,458 units of a texel to darken it. */
 		r << QString( "terrainObjectAo %1" ).arg( opts.cover.terrainObjectAo ? 1 : 0 );
-		/* lane TERR1: `skyObjects 1` = mask B is the terrain + object UNION
+		/* `skyObjects 1` = mask B is the terrain + object UNION
 		 * (the objAo* counters below then count ITS darkening against the
 		 * terrain-only march; GROUND1's product is not applied). */
 		r << QString( "skyObjects %1" ).arg( opts.cover.skyObjects ? 1 : 0 );
@@ -20480,10 +18053,8 @@ bool lodgenBakeTerrainVt( const EsmWorld & world, const QString & dataRoot,
 		r << QString( "objAoTriangles %1" ).arg( objCensus.triangles );
 		r << QString( "objAoSlab %1" ).arg( opts.cover.terrainObjectAoSlab ? 1 : 0 );
 		r << QString( "objAoSquares %1" ).arg( objCensus.squares );
-		/* `objAoSlabSquares` = of those squares, the ones whose LOWEST object
-		 * surface stands more than one cell (128 units) above the ESM terrain
-		 * under them: the squares the ceiling term can act on. 0 on a region
-		 * with no elevated deck, and that zero is WRITTEN, not omitted. */
+		// `objAoSlabSquares` = of those squares, the ones whose LOWEST object surface stands more than one
+		// cell (128 units) above the ESM terrain under them: the squares the ceiling term can act on.
 		r << QString( "objAoSlabSquares %1" ).arg( objCensus.slabSquares );
 		r << QString( "objAoTexels %1" ).arg( objCensus.texels );
 		r << QString( "objAoMeanDark %1" )
@@ -20534,12 +18105,8 @@ bool lodgenBuildAtlas( const QStringList & btoPaths, const QString & dataRoot,
 	const QString atlasNrm = atlasGameBase + QStringLiteral( "_n.DDS" );
 	const QString atlasSpec = atlasGameBase + QStringLiteral( "_s.DDS" );
 
-	/* Pass 1: find every atlasable shape and give each unique diffuse a
-	 * cell. Atlasable = UVs inside [0,1] (tiling breaks under an atlas).
-	 * The cell carries the source's _s too (vanilla's atlas has
-	 * Commonwealth.Objects_s.DDS beside the diffuse and normal), with the
-	 * shape's specular strength and smoothness folded into it so every
-	 * atlased shape can carry constants of 1 and merge with its neighbours. */
+	// Pass 1: find every atlasable shape and give each unique diffuse a cell. Atlasable = UVs inside [0,1]
+	// (tiling breaks under an atlas).
 	QHash<QString, int> cellOf;         // lowercased tex0 -> cell index
 	struct CellSrc { QString tex0, tex1, tex7; float smooth = 1.0f, mult = 1.0f; };
 	QHash<QString, CellSrc> cellTex;    // key -> the cell's sources
@@ -20687,12 +18254,9 @@ bool lodgenBuildAtlas( const QStringList & btoPaths, const QString & dataRoot,
 	for ( DDSTexture16 * t : texCache )
 		delete t;
 
-	/* Colour dilation: filtering and mips blend RGB across the alpha edge,
-	 * so transparent texels must hold plausible colour, not black — the
-	 * black-fringed mud on tree cards came exactly from here (found by
-	 * bungo's vanilla-vs-atlas colour comparison; vanilla's sheet keeps
-	 * filled RGB under its transparency). Dilate opaque RGB outward, then
-	 * flood what remains with the sheet's average opaque colour. */
+	// Colour dilation: filtering and mips blend RGB across the alpha edge, so transparent texels must hold
+	// plausible colour, not black — the black-fringed mud on tree cards came exactly from here (found by
+	// bungo's vanilla-vs-atlas colour comparison; vanilla's sheet keeps filled RGB under its transparency).
 	{
 		quint64 accR = 0, accG = 0, accB = 0, accN = 0;
 		for ( quint32 p : sheet ) {
@@ -20801,18 +18365,8 @@ bool lodgenBuildAtlas( const QStringList & btoPaths, const QString & dataRoot,
 			return fail( QString( "could not rewrite %1" ).arg( path ) );
 	}
 
-	/* Vanilla's diffuse sheet is DXT1, not BC3 -- measured on the shipped
-	 * `Commonwealth.Objects.DDS`: 4096x2048, 13 mips, fourCC DXT1,
-	 * 5,592,552 bytes. (Its `_n` and `_s` are both BC5U.) The comment here
-	 * claimed BC3 for a month and the claim was the argument for ours being
-	 * BC3 too, which is twice the memory per sheet.
-	 *
-	 * bc1 writes DXT1 with BC1's one-bit punch-through for the cut-outs and
-	 * carries that alpha down the mip chain; BC3 keeps eight-bit alpha, which
-	 * only a consumer that soft-blends card edges can spend. So the stock
-	 * target takes BC1 (vanilla parity, half the memory) and FO4CS keeps BC3.
-	 * RGB survives under transparent texels either way -- the dilation above
-	 * is what puts it there. */
+	// Vanilla's diffuse sheet is DXT1, not BC3 -- measured on the shipped `Commonwealth.Objects.DDS`:
+	// 4096x2048, 13 mips, fourCC DXT1, 5,592,552 bytes.
 	if ( !lodgenWriteDds( atlasFileBase + QStringLiteral( ".DDS" ), AW, AH, sheet, !bc1, 0, bc1 ) )
 		return fail( QStringLiteral( "could not write the atlas sheet" ) );
 	if ( !lodgenWriteDds( atlasFileBase + QStringLiteral( "_n.DDS" ), AW, AH, nrmSheet, true ) )
@@ -20858,28 +18412,7 @@ bool lodgenBuildAtlas( const QStringList & btoPaths, const QString & dataRoot,
 	return true;
 }
 
-/*! Merge a chunk's shapes down to one per material, after the atlas and the
- *  arrays have had their say.
- *
- *  A chunk is built one shape per source material (texture set, alpha,
- *  constants, material name), because the arrays pass keys layers on the
- *  source and the atlas keys cells on the diffuse. Once the atlas has
- *  repointed every atlasable shape at the same three sheets and folded the
- *  constants into the `_s` sheet, most of those shapes are the same material
- *  again — and the stock engine draws each as its own call. Vanilla's
- *  Commonwealth chunks hold three shapes (opaque, alpha-tested, and the
- *  toggle-ref one); Sanctuary (-20,24) built ten before this pass.
- *
- *  Shapes merge when everything the engine reads agrees: name (obj/obj-at),
- *  the ten texture slots, the alpha property, the shader's flags, type and
- *  constants, the vertex descriptor, and — for FO4CS — the array set their
- *  `A` line names, so one merged shape never spans two texture arrays (the
- *  layer stays per vertex in UV2.y; the `A` line then says `-1`). Vertices
- *  and triangles concatenate, triangles regrouped per segment (the cell
- *  segments must match, and do: dim x dim each); the bound and the multi
- *  bound take the union; the merged-away branches go and the root's child
- *  list is rebuilt without holes. A merge never crosses 65535 vertices.
- *  Manifest `A` and `M` lines are rewritten for the surviving blocks. */
+//! Merge a chunk's shapes down to one per material, after the atlas and the arrays have had their say.
 bool lodgenMergeChunkShapes( const QStringList & btoPaths, QString * report, QString * error )
 {
 	auto fail = [error]( const QString & message ) {
@@ -20984,10 +18517,9 @@ bool lodgenMergeChunkShapes( const QStringList & btoPaths, QString * report, QSt
 		chunks++;
 		before += recs.size();
 
-		/* Full precision is asked of the SHAPE, never of the chunk: one
-		 * object chunk carries one descriptor today, but the group key
-		 * carries the descriptor exactly because that may stop being true,
-		 * and reading a half as a float is silent. */
+		// Full precision is asked of the SHAPE, never of the chunk: one object chunk carries one descriptor
+		// today, but the group key carries the descriptor exactly because that may stop being true, and
+		// reading a half as a float is silent.
 		auto isFullPrec = [&]( const QModelIndex & iShape ) {
 			return ( ( nif.get<BSVertexDesc>( iShape, "Vertex Desc" ).Value() >> 44 ) & 0x400 ) != 0;
 		};
@@ -21255,51 +18787,8 @@ float lodgenSimplifyRatio( const LodgenSimplifyOptions & opts, int dim )
 	}
 }
 
-/*! Far-ring proxy meshes, run LAST after the merge: rings 2 and 3 ship at a
- *  fraction of their triangles with the same textures, which is what every
- *  engine since 2017 does with a far cluster. The merge has already made one
- *  shape per material, so "one proxy per cluster" is the same operation as
- *  simplifying that shape in place.
- *
- *  WHAT A SIMPLIFIER MUST NOT LOSE HERE. Every vertex of a chunk carries six
- *  channels the stock engine never reads and FO4CS does
- *  (docs/LODGEN_VERTEX_PACKING.md): the object identity index in vertex
- *  colours R+G, baked AO in B, the sway weight in A, sky visibility in UV2.x,
- *  the texture-array layer in UV2.y, and the ground-contact blend in Eye Data.
- *  Two of those are INDICES, not quantities: an interpolated identity is a
- *  different object and an interpolated layer is a different texture.
- *
- *  So the cut is made per GROUP, keyed by (identity index, array layer):
- *
- *   - meshoptimizer never creates a vertex -- the surviving set is a SUBSET of
- *     the original one -- so no channel is ever interpolated, whatever the
- *     metric does;
- *   - grouping by identity means no collapse can weld two objects together,
- *     and because a group is asked for at least two triangles and its
- *     originals are restored if the simplifier returns none, no object can
- *     vanish from the chunk;
- *   - grouping by layer means a merged shape that spans layers (the manifest's
- *     `A <block> -1`) still has one layer per group, so UV2.y is constant
- *     inside every collapse.
- *
- *  The four quantities ride along as weighted attributes, together with the
- *  normal and the UV, so the metric keeps them meaningful rather than merely
- *  intact. The weights are fractions of the error bound, so one knob scales
- *  the whole metric.
- *
- *  WHAT IS NOT CUT. A shape with an alpha property keeps every triangle: a
- *  cut-out card is four vertices that spell a silhouette and a collapse spends
- *  the silhouette to save nothing. That covers the impostor quads and the
- *  crossed quads inside vanilla's own tree LOD models alike; the impostor
- *  cards are excluded a second time, by object index off the manifest's `C`
- *  lines, so the rule is checkable rather than incidental. Groups at or under
- *  `minTris` keep every triangle too.
- *
- *  AFTERWARDS. Segments are regrouped by the cell of each triangle's CENTROID
- *  (the generator assigns them per placement; after a cut the placement is no
- *  longer the unit), the vertex array is compacted to the survivors, and the
- *  bounding sphere and the node's multi-bound AABB are recomputed from what is
- *  left. The manifest is not touched: no row's meaning changed. */
+//! Far-ring proxy meshes, run LAST after the merge: rings 2 and 3 ship at a fraction of their triangles with
+//! the same textures, which is what every engine since 2017 does with a far cluster.
 bool lodgenSimplifyFarRings( const QStringList & btoPaths, const LodgenSimplifyOptions & opts,
 	QString * report, QString * error )
 {
@@ -21314,11 +18803,7 @@ bool lodgenSimplifyFarRings( const QStringList & btoPaths, const LodgenSimplifyO
 	float worstErrorWorld = 0.0f;
 
 	for ( const QString & path : btoPaths ) {
-		/* The ring is the chunk's own dim, and its name carries it:
-		 * <ws>.<dim>.<x>.<y>.BTO. The shape's Scale carries it too and is
-		 * cross-checked below -- the error bound and the segment grid both
-		 * depend on it, so a file whose two answers disagree is left alone
-		 * rather than cut on a guess. */
+		// The ring is the chunk's own dim, and its name carries it: <ws>.<dim>.<x>.<y>.BTO.
 		const QStringList nameParts = QFileInfo( path ).fileName().split( QChar( '.' ) );
 		const int dim = nameParts.size() >= 5 ? nameParts[1].toInt() : 0;
 		const float ratio = lodgenSimplifyRatio( opts, dim );
@@ -21344,11 +18829,8 @@ bool lodgenSimplifyFarRings( const QStringList & btoPaths, const LodgenSimplifyO
 			}
 		}
 
-		/* The bound: errorWorld world units at ring 0, times dim/4 for this
-		 * ring, then divided by dim because a chunk shape's vertices are
-		 * miniatures at Scale = dim. The two cancel, which is the point --
-		 * the same on-screen error at every ring is a constant in the file's
-		 * own units. */
+		// The bound: errorWorld world units at ring 0, times dim/4 for this ring, then divided by dim because
+		// a chunk shape's vertices are miniatures at Scale = dim.
 		const float localBound = opts.errorWorld * ( float( dim ) / 4.0f ) / float( dim );
 		const float cellSpan = 4096.0f / float( dim );   // one cell, in miniature units
 		bool changed = false;
@@ -21419,10 +18901,7 @@ bool lodgenSimplifyFarRings( const QStringList & btoPaths, const LodgenSimplifyO
 				continue;
 			}
 
-			/* (identity index, array layer) per triangle. Both are constant
-			 * over a triangle by construction: a triangle comes from one
-			 * placement's one source shape, which carries one index and sits
-			 * on one layer. */
+			// (identity index, array layer) per triangle.
 			auto keyOf = [&]( quint16 v ) {
 				const Vtx & o = verts[v];
 				const quint32 id = hasCol
@@ -21441,14 +18920,8 @@ bool lodgenSimplifyFarRings( const QStringList & btoPaths, const LodgenSimplifyO
 				groups[key].append( t );
 			}
 
-			/* Weights as fractions of the error bound: a full unit swing of an
-			 * attribute costs that share of the geometric budget, so one knob
-			 * scales position and appearance together. UV first because a
-			 * swimming texture is the artefact a distant chunk shows soonest;
-			 * the baked channels are quantities, and a quarter-bound is enough
-			 * to stop a collapse that would flatten one. UV2.y (the layer) is
-			 * NOT an attribute: it is in the group key, so it never varies
-			 * inside a collapse. */
+			// Weights as fractions of the error bound: a full unit swing of an attribute costs that share of
+			// the geometric budget, so one knob scales position and appearance together.
 			std::vector<float> weights;
 			for ( int k = 0; k < 3; k++ )
 				weights.push_back( localBound * 0.5f );          // normal
@@ -21670,21 +19143,9 @@ bool lodgenSimplifyFarRings( const QStringList & btoPaths, const LodgenSimplifyO
 	return true;
 }
 
-/*! Card sheet arrays: every octahedral card set a worldspace's chunks stand
- *  on, packed by family and sheet size into one DX10 array per texture (BC3,
- *  and BC1 for the emissive, which has no alpha), so a consumer draws a whole
- *  ring's trees as one instanced quad per chunk instead of one texture bind
- *  per tree type.
- *
- *  The layers are built the way `lodgenCard` builds a set's own sheets —
- *  from the bake's PNGs, dilated frame by frame, mips capped while a frame
- *  spans eight texels — so a layer is what the per-card DDS would hold, not
- *  a re-encoding of it. A `.lodm` of kind `cardArray` beside the arrays
- *  carries the family, the three textures, the grid and frame shared by the
- *  set, and per layer the card's own extents, centre, depth span and source
- *  (`docs/LODGEN_IMPOSTOR_SPEC.md`). Every `C` manifest line whose card sits
- *  in an array gains two tokens: the array's `.lodm` and the layer. The
- *  per-card sets stay beside the cards for a consumer without arrays. */
+//! Card sheet arrays: every octahedral card set a worldspace's chunks stand on, packed by family and sheet size
+//! into one DX10 array per texture (BC3, and BC1 for the emissive, which has no alpha), so a consumer draws a
+//! whole ring's trees as one instanced quad per chunk instead of one texture bind per tree type.
 bool lodgenBuildCardArrays( const QStringList & btoPaths, const QString & cardDir,
 	const QString & arrayFileBase, const QString & arrayGameBase, int auxDiv,
 	QString * report, QString * error )
@@ -21720,10 +19181,9 @@ bool lodgenBuildCardArrays( const QStringList & btoPaths, const QString & cardDi
 	if ( idOf.isEmpty() )
 		return fail( QStringLiteral( "no placement in the chunks stands on an octahedral card" ) );
 
-	// pass 2: the sets, grouped by family and sheet size, their layers built as lodgenCard builds them
-	/* `conv` is the view-convention token (2026-09-19): per LAYER, not per
-	 * array, because an array packs whatever sets share a size class and a
-	 * library part-way through a re-bake legitimately holds both vintages. */
+	// pass 2: the sets, grouped by family and sheet size, their layers built as lodgenCard builds them `conv`
+	// is the view-convention token: per LAYER, not per array, because an array packs whatever sets share a
+	// size class and a library part-way through a re-bake legitimately holds both vintages.
 	struct Layer { QString id, lodmGame, source, projection, conv; float halfW = 0, halfH = 0, span = 0, emissiveScale = 1.0f; Vector3 center; QJsonArray frameOff; QJsonObject coverage;
 		bool swayModel = false; double leafAmplitude = 1.0, leafFrequency = 1.0; };
 	struct Group { bool pbr = false, ring = false; int w = 0, h = 0, aw = 0, ah = 0, oct = 0, fw = 0, fh = 0, padX = 0, padY = 0, gapX = 0, gapY = 0, mips = 1, auxMips = 1; QVector<Layer> layers; std::vector<std::vector<quint32>> color, n, mask, emis; };
@@ -21752,22 +19212,13 @@ bool lodgenBuildCardArrays( const QStringList & btoPaths, const QString & cardDi
 		const QJsonArray frame = card.value( QStringLiteral( "frame" ) ).toArray();
 		const QJsonArray half = card.value( QStringLiteral( "half" ) ).toArray();
 		const QJsonArray center = card.value( QStringLiteral( "center" ) ).toArray();
-		/* A RING card (CARDFIX1 step 5) says `views` V and `grid` [V,1], never `oct`:
+		/* A RING card says `views` V and `grid` [V,1], never `oct`:
 		 * V frames in one row. `oct` below is then V, and the sheet height is one frame. */
 		const int ringViews = card.value( QStringLiteral( "views" ) ).toInt();
 		const int oct = ringViews > 0 ? ringViews : card.value( QStringLiteral( "oct" ) ).toInt();
 		const int octRows = ringViews > 0 ? 1 : oct;
 		const int fw = frame.size() == 2 ? frame[0].toInt() : 0, fh = frame.size() == 2 ? frame[1].toInt() : 0;
-		/* The gutter and the GAP, per axis, as the set's own .lodm records them. An
-		 * array is built from the same PNGs and the same dilation as the per-card set,
-		 * so it inherits that set's spacing and therefore that set's clean mip depth.
-		 * The MIP CAP is log2(min(gap)) (bungo, 2026-09-09 evening: one mip fewer, so
-		 * the deepest shipped level still has a whole texel of margin on each side of
-		 * a border). Three vintages, and the same expression serves all of them:
-		 * `gap` present names the gap outright, while `pad` alone (lane CARDFIT3) and
-		 * neither (older still, max(4, longSide/16) per side) wrote a PER-SIDE number
-		 * whose gap is twice it -- and log2(2*pad) = 1 + log2(pad), exactly the chain
-		 * those two were built for. */
+		// The gutter and the GAP, per axis, as the set's own .lodm records them.
 		const QJsonArray padA = card.value( QStringLiteral( "pad" ) ).toArray();
 		const QJsonArray gapA = card.value( QStringLiteral( "gap" ) ).toArray();
 		const int padFallback = qMax( 4, qMax( fw, fh ) / 16 );
@@ -21833,10 +19284,8 @@ bool lodgenBuildCardArrays( const QStringList & btoPaths, const QString & cardDi
 		for ( int g2 = mipUnit; g2 >= 2; g2 /= 2 )
 			g.mips++;
 		g.mips = qMax( 1, g.mips );
-		/* The three sheets that are not the base colour come down by auxDiv,
-		 * AFTER the dilation just above - the gutter keeps a halving from
-		 * mixing across a frame border. They become their own arrays at their
-		 * own size; a layer index still means the same set in all four. */
+		// The three sheets that are not the base colour come down by auxDiv, AFTER the dilation just above -
+		// the gutter keeps a halving from mixing across a frame border.
 		g.aw = qMax( 4, g.w / auxDiv );
 		g.ah = qMax( 4, g.h / auxDiv );
 		g.auxMips = 0;
@@ -21859,24 +19308,17 @@ bool lodgenBuildCardArrays( const QStringList & btoPaths, const QString & cardDi
 		if ( center.size() == 3 )
 			l.center = Vector3( float( center[0].toDouble() ), float( center[1].toDouble() ), float( center[2].toDouble() ) );
 		l.span = float( card.value( QStringLiteral( "depthSpan" ) ).toDouble() );
-		/* PER-FRAME POSITIONING travels with the layer, like its geometry: the
-		 * frames of two sets in one array sit at different offsets, so the array
-		 * cannot hold one list for all of them. Absent on a set from before the
-		 * law, and absent from that layer here too. */
+		// PER-FRAME POSITIONING travels with the layer, like its geometry: the frames of two sets in one array
+		// sit at different offsets, so the array cannot hold one list for all of them.
 		l.frameOff = card.value( QStringLiteral( "frameOffset" ) ).toArray();
-		/* THE CAMERA the layer's own sheet was photographed through travels with
-		 * the layer too, and for the same reason as its geometry: an array can
-		 * hold a metric set and a foreshortened one side by side, and only the
-		 * layer knows which it is. Absent on a set from before the line, which
-		 * means perspective (lane CARDORTHO, 2026-09-10). */
+		// THE CAMERA the layer's own sheet was photographed through travels with the layer too, and for the
+		// same reason as its geometry: an array can hold a metric set and a foreshortened one side by side,
+		// and only the layer knows which it is.
 		l.projection = card.value( QStringLiteral( "projection" ) ).toString();
 		l.conv = card.value( QStringLiteral( "conv" ) ).toString();
-		/* THE COVERAGE CONTRACT travels with the layer for the same reason: an
-		 * array can hold a set whose alpha the consumer's 0.5 test reads correctly
-		 * beside one from before the contract, whose alpha is the raw fraction and
-		 * whose silhouette at 0.5 is smaller than its `half` declares. Absent on
-		 * an older set, and absent from that layer here too (lane CARDWIDTH,
-		 * 2026-09-10). */
+		// THE COVERAGE CONTRACT travels with the layer for the same reason: an array can hold a set whose
+		// alpha the consumer's 0.5 test reads correctly beside one from before the contract, whose alpha is
+		// the raw fraction and whose silhouette at 0.5 is smaller than its `half` declares.
 		l.coverage = card.value( QStringLiteral( "coverage" ) ).toObject();
 		// the set's emissive multiple travels with its layer, like its geometry
 		l.emissiveScale = lm.emissiveScale;
@@ -21896,7 +19338,7 @@ bool lodgenBuildCardArrays( const QStringList & btoPaths, const QString & cardDi
 	// pass 3: the arrays and their .lodm; the layer of every card
 	QHash<QString, QPair<QString, int>> layerOf;   // card lodm (lower) -> (array lodm game path, layer)
 	int arrays = 0, sets = 0, blackEmissiveDropped = 0;
-	/* ONE SET PER SIZE (lane LODMNAME1, bungo 2026-10-27): `<ws>.LodgenCards.<WxH>(.ring)`,
+	/* ONE SET PER SIZE: `<ws>.LodgenCards.<WxH>(.ring)`,
 	 * no family in the name, one shared `_n` (legacy layers first) and the colour and
 	 * mask per family, as the mesh arrays have it. lodm 3, docs/LODGEN_LODM_FORMAT.md 4.1. */
 	QMap<QString, QPair<Group *, Group *>> bySize;	// WxH(.ring) -> (legacy, pbr)
@@ -21922,7 +19364,7 @@ bool lodgenBuildCardArrays( const QStringList & btoPaths, const QString & cardDi
 		}
 		const QString stem = QStringLiteral( "." ) + it.key();
 		const QString fileBase = arrayFileBase + stem, gameBase = arrayGameBase + stem;
-		// `_n` is BC7, as the per-card set is (lane IMPOSTORDEPTH2); every layer, legacy then pbr
+		// `_n` is BC7, as the per-card set is; every layer, legacy then pbr
 		std::vector<std::vector<quint32>> nAll;
 		for ( Group * c : fams )
 			if ( c )
@@ -21948,7 +19390,7 @@ bool lodgenBuildCardArrays( const QStringList & btoPaths, const QString & cardDi
 			const QString colorSfx = QLatin1String( lodmColorSuffix( c->pbr ) ) + QStringLiteral( ".DDS" );
 			const QString maskSfx = QLatin1String( lodmMaskSuffix( c->pbr ) ) + QStringLiteral( ".DDS" );
 			const QString emSfx = QLatin1String( lodmEmissiveSuffix( c->pbr ) ) + QStringLiteral( ".DDS" );
-			// a black emissive is not written, as the mesh arrays have it (lane TIDY1);
+			// a black emissive is not written, as the mesh arrays have it;
 			// WW_LODGEN_KEEP_BLACK_EMISSIVE=1 is the gate's way back
 			// black as SHIPPED: the BC1 sheet at the aux size and mip count it is written with
 			const bool writeEmissive = !wwEnv( "WW_LODGEN_KEEP_BLACK_EMISSIVE" ).isEmpty()
@@ -21978,7 +19420,7 @@ bool lodgenBuildCardArrays( const QStringList & btoPaths, const QString & cardDi
 		root.insert( QStringLiteral( "textures" ), tex );
 		arr.insert( QStringLiteral( "class" ), QJsonArray{ g.w, g.h } );
 		if ( g.ring ) {
-			// a ring array: the aggregate's layout keys, and no `oct` (CARDFIX1 step 5)
+			// a ring array: the aggregate's layout keys, and no `oct`
 			arr.insert( QStringLiteral( "views" ), g.oct );
 			arr.insert( QStringLiteral( "grid" ), QJsonArray{ g.oct, 1 } );
 		} else {
@@ -22084,7 +19526,7 @@ bool lodgenBuildCardArrays( const QStringList & btoPaths, const QString & cardDi
 	return true;
 }
 
-/* ================= THE INPUT LEDGER (.lodb) -- lane INCR1, 2026-09-12 =======
+/* ================= THE INPUT LEDGER (.lodb) =======
  *
  * See docs/LODGEN_LEDGER_FORMAT.md. The dependency map came first; this is its
  * implementation and nothing here decides policy.
@@ -22127,7 +19569,7 @@ static QString lodgenLedgerAssetDigest( const QString & dataRoot, const QString 
 	return hex;
 }
 
-//! lane BAKEINCR1: the generator's asset reader, for the incremental probe check (src/probeincr.cpp)
+//! the generator's asset reader, for the incremental probe check (src/probeincr.cpp)
 bool lodgenReadAssetBytes( const QString & dataRoot, const QString & relPath, const char * archiveFolder,
 	const char * extension, QByteArray & out )
 {
@@ -22145,24 +19587,7 @@ QString lodgenFileDigest( const QString & path )
 	return QString::fromLatin1( h.result().toHex() );
 }
 
-/*! THE GENERATOR'S OWN IDENTITY -- the word that heads every chunk input digest
- *  (lane VTFIX1, 2026-09-24; the gap was found by DEFAULTS1 and DEFAULTS2).
- *
- *  The ledger compared the typed argument vector and the chunk's inputs, and
- *  nothing about the program that turns inputs into bytes. So a default flip --
- *  bungo's rulings move them, and they live in three places (nifcli's `lg*`
- *  locals, lodgen.h's option initialisers, this file's `g_*` globals) -- left
- *  argv and inputs as they were, and `--incremental` on the new exe kept the old
- *  exe's chunks and called them clean. A code change that moves bytes with no
- *  default flipped at all (this lane's own axis fix) is the same hole.
- *
- *  The word is the sha1 of the RUNNING EXECUTABLE's bytes: every default and every
- *  byte-moving code change is inside it, and nobody has to remember to bump a
- *  version constant. It can only over-rebake -- a rebuild that moves no output
- *  byte still dirties every chunk once -- which is the ledger's stated direction
- *  ("it can only over-rebake, never under-rebake"). An exe that cannot be read
- *  gets a word that can never match a stored ledger, for the same reason.
- *  Hashed once per process (~25 MB, tens of milliseconds). */
+//! THE GENERATOR'S OWN IDENTITY -- the word that heads every chunk input digest.
 static QByteArray lodgenGeneratorIdentity()
 {
 	static const QByteArray id = []() {
@@ -22220,14 +19645,7 @@ QString lodgenChunkInputDigest( const EsmWorld & world, int dim, int cx, int cy,
 						int( sizeof( land.colors ) ) ) );
 				QSet<quint32> ltexSeen;
 				auto feedLtex = [&]( quint32 form ) {
-					/* THE LANDSCAPE TEXTURES THEMSELVES (2026-09-12, second
-					 * pass). Feeding only the LTEX form id was a hole: the
-					 * colour sheet is built from the LTEX's DIFFUSE BYTES, so a
-					 * loose override of that .dds changes the sheet while every
-					 * form id in the cell stays put, and an incremental run
-					 * would have kept a stale sheet and called it clean. The
-					 * gate arm that found this is in the report; the digest
-					 * below is the fix, and the arm now passes. */
+					// THE LANDSCAPE TEXTURES THEMSELVES (2026-09-12, second pass).
 					if ( !form || ltexSeen.contains( form ) )
 						return;
 					ltexSeen.insert( form );
@@ -22239,14 +19657,9 @@ QString lodgenChunkInputDigest( const EsmWorld & world, int dim, int cx, int cy,
 							feedStr( lodgenLedgerAssetDigest( dataRoot, tp, "textures", ".dds" ) );
 					}
 					feedStr( ts.material );
-					/* Vanilla's LTEX TXSTs spell their MNAM as the ABSOLUTE
-					 * path of Bethesda's own build machine
-					 * ("c:/projects/fallout4/build/pc/data/materials/..."), so
-					 * asking the archives for it can only ever miss, once per
-					 * LTEX, loudly. The path string is still fed -- a changed
-					 * spelling is still a changed input -- but the lookup is
-					 * skipped, and with it a screenful of "not found in
-					 * archives" in every bake log. */
+					// Vanilla's LTEX TXSTs spell their MNAM as the ABSOLUTE path of Bethesda's own build
+					// machine ("c:/projects/fallout4/build/pc/data/materials/..."), so asking the archives for
+					// it can only ever miss, once per LTEX, loudly.
 					if ( !ts.material.isEmpty() && !ts.material.contains( QLatin1Char( ':' ) ) )
 						feedStr( lodgenLedgerAssetDigest( dataRoot, ts.material, "materials", ".bgsm" ) );
 				};
@@ -22309,9 +19722,4 @@ QString lodgenChunkInputDigest( const EsmWorld & world, int dim, int cx, int cy,
 	return QString::fromLatin1( h.result().toHex() );
 }
 
-/* ---- the container ------------------------------------------------------
- * MOVED to src/lodbfile.cpp (lane BAKEREC1, 2026-09-17). The chunk INPUT digest
- * and the file digest above stay here, beside the bake that feeds them; the
- * .lodb container is now a plain-text BAKE RECORD and lives in its own file,
- * with the plugin lines, the corpus hashes, the switch vector and the census.
- * docs/LODGEN_BAKE_RECORD.md is the format. */
+// the container MOVED to src/lodbfile.cpp.

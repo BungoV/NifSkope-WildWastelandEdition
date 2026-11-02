@@ -1,3 +1,30 @@
+## LEANCOMMENTS3R (2026-11-02): lean comments, re-cut on LAND6
+
+- Comment-only (tests/spells/comments_only_check.py: 0 FAIL). LEANCOMMENTS3's trim (LEANCOMMENTS2's 72 files, the
+  edits LEANCOMMENTS1 left unlanded, lane names cut out of mid-sentence comments) re-cut on LAND6; the glview.cpp
+  pass list keeps LAND6's RT reflection and before-tone-map TAA lines with lean comments. Lane history stays in the
+  commit log and this file.
+- The AO quality comments lose their lane tags. They stay true: since BUGS1102 the built-in presets step the AO tier
+  (src/ui/cellpresettable.h row CellWorkspaceAoQuality).
+
+## FOGLEAK1 (2026-11-02, landed in LAND2): the fog leak fix behind WW_CELL_FOGLEAK (off by default)
+- Four fixes, each compiled only under the loader's WW_CELL_FOGLEAK define (cell_volair.frag, lookdev_fog.glsl,
+  src/gl/cellvolair.cpp): the air's env share reads the ray-traced volume (red `dalcenv`); the sun past the cascades
+  is gated by the volume's sky visibility toward the sun (red `nosungate`); placed lights in the air go through the
+  volume's depth (red `lightleak`); the far grid's tail takes the sun's shadow (red `nofartailshadow`).
+- airLeakEnv walks the 8 probes once: +1.04 ms on the 160x90x64 inject (two reads: +2.34 ms).
+- Gates: tests/fogleak/fogleak_model_check.py (G1, the law offline) and tests/fogleak/fogleak_check.py (G2, the real
+  cell_volair program on a synthetic volume: 9 of 9; each red fails only its own rows).
+
+## GIFIX1101 (2026-11-01, landed in LAND2): bounce saturation, five-point lobe read, SSGI hands over to RTXGI
+- 1B: `WW_CELL_RTDDGI_BOUNCE_SAT` (live, in the build key; rtddgi `--bounce-sat`) scales the probe hits' albedo chroma
+  about its luminance. Ships 1 (unchanged). Unit check bouncesat, red `RTDDGI_RED_BOUNCESAT`.
+- SO: the screen GI texel carries the sky visibility at 5 equal angles on the lobe arc (was 3, a quadratic); surfaces
+  read a polyline. ddgiscreen `--tiles random` p99 0.1038 -> 0.0404 (bar 0.05). Red `WW_CELL_RTDDGI_RED=lobe3`.
+- HO: under RTXGI on sky-lit exteriors the screen GI keeps only the occluded share the volume's probes cannot see,
+  and that share of its bounce; interiors keep the probe-fill law. Red `WW_CELL_SSGI_RED=nohandover`. Gate
+  tests/ssgihandover: A rel err max 1.4e-7 (was 0.66), B mean 0.026 (was 0.123); the red fails A and B.
+
 ## AIRBOUNCE1 (2026-11-02): the lamps' light bounced off the floor into the cell air (switch, off by default)
 
 - **AIR-LAMPS-BOUNCE:** `WW_CELL_AIR_BOUNCE_LAMPS=1` adds each placed light's floor bounce to the cell air, at both lamp
