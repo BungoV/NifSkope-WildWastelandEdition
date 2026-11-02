@@ -1,3 +1,11 @@
+## LODMAPS-OFFKEYS (GEOLOD1, 2026-11-02): one off key per far map
+
+`WW_CELL_FARLOD_RED=noterrain | noobjects | nocards` turns off one far map, for pictures that show each map's share:
+noterrain builds the rings as before (their cuts stand) but hides every far terrain shape, ours and the game's, and
+skips ring 0's live ground; noobjects skips our .lodi objects and hides the game's .bto object shapes; nocards arms
+no tree cards. Each prints a `far lod: ... OFF (red ...)` line. The far build re-reads the key, so a live rebuild
+takes it. Any other value builds what it built.
+
 ## LARGEREF1 (GEOLOD1, 2026-11-02): large references drawn full past the loaded block (switch, default off)
 
 A worldspace's WRLD record lists its large references in RNAM subrecords: per grid cell, the refs that cell keeps
