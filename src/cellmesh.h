@@ -30,7 +30,7 @@ struct CellMeshInst
 	 *  minus its sub's base vertex, 1, 1 + 2 if mirrored) and fo4_default.vert reads farStream at that + gl_VertexID */
 	QByteArray vstream;
 	QVector<Cmd> cmds;       //!< by tile, then sub-mesh; baseInstance points into `inst`
-	QVector<Tile> tiles;     //!< 4x4-cell groups, culled against the camera as a whole
+	QVector<Tile> tiles;     //!< N x N-cell groups (gl/fartile.h, default 2), culled as a whole
 	quint64 id = 0;          //!< the GPU copy's key (unique per build)
 	qint64 instances = 0, uniqueVerts = 0, uniqueTris = 0, drawnTris = 0;
 	bool alphaTested = false;
