@@ -519,8 +519,8 @@ bool Scene::grabRefractionSource()
 	fn->glGetIntegerv( GL_ACTIVE_TEXTURE, &prevActive );
 
 	/* lane HDR1: a multisampled source resolves only into its own format, so the copy follows the frame:
-	 * the cell's linear frame is RGBA32F (gl/cellhdr.cpp) */
-	const GLenum fmt = wwCellHdrActive() ? GL_RGBA32F : GL_RGBA8;
+	 * lane FRAMEFMT1: the cell's linear frame is RGBA16F by default (gl/cellhdr.cpp; red WW_FRAMEFMT1_RED=1: RGBA32F) */
+	const GLenum fmt = wwCellHdrActive() ? GLenum( wwCellHdrColorFormat() ) : GLenum( GL_RGBA8 );
 	/* lane PERFFIX3 (PERFRES1101 B water OPT 3): the second pass draws its water shapes one after another with nothing
 	 * between them (drawDeferredShapes: decals, then every water, then the rest), so ONE copy at the first water of the
 	 * pass holds the frame every later water would have copied, except where a later water reads pixels an earlier

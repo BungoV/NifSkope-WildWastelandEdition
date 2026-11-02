@@ -14,6 +14,7 @@ BSD License - see nifskope.h
 #include "celluniform.h"	// lane CELLUNI2
 
 #include "gl/celllights.h"
+#include "gl/cellhdr.h"	// lane FRAMEFMT1: the frame's colour format for the previous-frame copy
 #include "gl/cellwater.h"
 #include "gl/celllooks.h"	// lane WATERREFL1: the Water reflections row picks the water march's twin
 #include "gl/glnode.h"
@@ -105,6 +106,7 @@ struct SsrTarget
 {
 	GLuint tex = 0, fbo = 0;
 	int w = 0, h = 0;
+	GLenum fmt = 0;	// lane FRAMEFMT1: the format ssrAlloc made it in
 };
 
 struct SsrGpu
@@ -151,16 +153,17 @@ QHash<const void *, SsrGpu> & ssrGpus()
 	return g;
 }
 
-void ssrAlloc( NifSkopeOpenGLContext::GLFunctions * fn, SsrTarget & t, int w, int h, bool linear )
+void ssrAlloc( NifSkopeOpenGLContext::GLFunctions * fn, SsrTarget & t, int w, int h, bool linear, GLenum fmt = GL_RGBA32F )
 {
-	if ( t.tex && t.w == w && t.h == h )
+	if ( t.tex && t.w == w && t.h == h && t.fmt == fmt )
 		return;
 	if ( !t.tex ) {
 		fn->glGenTextures( 1, &t.tex );
 		fn->glGenFramebuffers( 1, &t.fbo );
 	}
 	fn->glBindTexture( GL_TEXTURE_2D, t.tex );
-	fn->glTexImage2D( GL_TEXTURE_2D, 0, GL_RGBA32F, w, h, 0, GL_RGBA, GL_FLOAT, nullptr );
+	fn->glTexImage2D( GL_TEXTURE_2D, 0, GLint( fmt ), w, h, 0, GL_RGBA, GL_FLOAT, nullptr );
+	t.fmt = fmt;
 	fn->glTexParameteri( GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, linear ? GL_LINEAR : GL_NEAREST );
 	fn->glTexParameteri( GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, linear ? GL_LINEAR : GL_NEAREST );
 	fn->glTexParameteri( GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE );
@@ -291,7 +294,8 @@ void wwCellSsrKeepFrame( Scene * scene, unsigned int hdrFbo, int w, int h )
 		fn->glGetIntegerv( GL_DRAW_FRAMEBUFFER_BINDING, &prevDraw );
 		fn->glGetIntegerv( GL_READ_FRAMEBUFFER_BINDING, &prevRead );
 	}
-	ssrAlloc( fn, g.prev, w, h, true );
+	// lane FRAMEFMT1: the frame's own format (RGBA16F by default): a multisampled resolve needs equal formats
+	ssrAlloc( fn, g.prev, w, h, true, GLenum( wwCellHdrColorFormat() ) );
 	fn->glBindFramebuffer( GL_READ_FRAMEBUFFER, GLuint( hdrFbo ) );
 	fn->glBindFramebuffer( GL_DRAW_FRAMEBUFFER, g.prev.fbo );
 	fn->glBlitFramebuffer( 0, 0, w, h, 0, 0, w, h, GL_COLOR_BUFFER_BIT, GL_NEAREST );	// the samples resolved
