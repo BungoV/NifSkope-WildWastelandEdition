@@ -24,6 +24,11 @@
 #include "gl/atmomath.h"
 #include "rtddgimath.h"
 #include "twin_ref.h"
+#include "twin_ref_low.h"
+
+#ifndef TWINLOW_BAR
+#define TWINLOW_BAR 0.02	// GISKYTWIN-LOW: the twin's own bar (written before the first run)
+#endif
 
 #include <cmath>
 #include <cstdio>
@@ -167,6 +172,40 @@ int main()
 			"sun %.0f deg), worst R/B difference %.4f (bar 0.02)", double( n ), wRel, double( W.el ), wRb );
 		std::printf( "      worst case haze %.3f /km at %.3f km; noon haze, 90 m, sun 35 deg: +Z R/B %.3f (the drawn sky 0.527)\n",
 			double( W.haze[0] ), double( W.hKm ), wZrb );
+	}
+	// (6) GISKYTWIN-LOW: the Low tier's twin (msN 16, as atmosphere.cpp / rtddgicell.cpp take it) vs the drawn GPU sky
+	// with the 16x16 MS table (twin_ref_low.h, MSN=16 tests/gisky/twin_ref.py), same cases and bars as twin
+	{
+		SkyTables lowT;
+		double wRel = 0, wRb = 0;
+		int wi = 0, n = 0;
+		for ( const TwinRef & R : kTwinRefLow ) {
+			const float e = R.el * 3.14159265f / 180.0f;
+			const float s[3] = { 0.0f, -std::cos( e ), std::sin( e ) };
+			float ax[6][3];
+#if defined( GISKY_RED_TWIN )
+			skyIrradianceAxes( s, R.haze, ax );
+#elif defined( GISKY_RED_TWINLOW )
+			skyIrradianceAxesDrawn( s, R.haze, R.hKm, 1.0f, lowT, ax, 32 );	// red: the High+ table at the Low tier
+#else
+			skyIrradianceAxesDrawn( s, R.haze, R.hKm, 1.0f, lowT, ax, 16 );
+#endif
+			for ( int a = 0; a < 5; a++ ) {
+				for ( int c = 0; c < 3; c++ ) {
+					const double r = std::fabs( ax[a][c] - R.ax[a][c] ) / std::max( R.ax[a][c], 1e-9f );
+					if ( r > wRel ) {
+						wRel = r;
+						wi = n;
+					}
+				}
+				wRb = std::max( wRb, std::fabs( double( ax[a][0] / ax[a][2] ) - double( R.ax[a][0] / R.ax[a][2] ) ) );
+			}
+			n++;
+		}
+		const TwinRef & W = kTwinRefLow[wi];
+		report( "twinlow", wRel <= TWINLOW_BAR && wRb <= 0.02, "the Low tier's CPU sky (MS 16) vs the drawn GPU sky (MS 16), %g "
+			"cases: worst channel rel %.4f (bar 0.02; sun %.0f deg), worst R/B difference %.4f (bar 0.02)", double( n ), wRel,
+			double( W.el ), wRb );
 	}
 	std::printf( "GISKY %s %d%s\n", g_fail ? "FAIL" : "PASS", g_fail ? g_fail : g_pass, g_fail ? " failed" : "" );
 	return g_fail ? 1 : 0;

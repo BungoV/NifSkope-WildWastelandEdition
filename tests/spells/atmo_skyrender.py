@@ -36,8 +36,10 @@ def sundir(az_deg, el_deg):
 
 
 class Sky:
-    def __init__(self, sdir, haze=(0.0, 1.0, 0.0)):
+    def __init__(self, sdir, haze=(0.0, 1.0, 0.0), msN=32):
         self.sdir = sdir
+        self.msN = msN   # GISKYTWIN-LOW: the MS table's width, 32 (High+) or 16 (Low, atmosphere.cpp msN)
+        msS = (float(msN), float(msN))
         self.g = C.Gl()
         self.P = A.params(haze=haze)
         P = self.P
@@ -53,8 +55,8 @@ class Sky:
         self.ps = compile_src(S.expand(os.path.join(sdir, 'cell_ao.vert')), src)
         self.trans, tfb = self.g.target(256, 64)
         self.g.draw(self.pt, tfb, 256, 64, self.base, [])
-        self.ms, mfb = self.g.target(32, 32)
-        self.g.draw(self.pm, mfb, 32, 32, dict(self.base, atMsSize=(32.0, 32.0)), [('atTransTex', self.trans)])
+        self.ms, mfb = self.g.target(msN, msN)
+        self.g.draw(self.pm, mfb, msN, msN, dict(self.base, atMsSize=msS), [('atTransTex', self.trans)])
         for t in (self.trans, self.ms):
             gl.glBindTexture(0x0DE1, t)
             gl.glTexParameteri(0x0DE1, 0x2801, 0x2601)
@@ -80,7 +82,7 @@ class Sky:
         if key in self.cache:
             return self.cache[key]
         t, fb = self.g.target(w, h)
-        u = dict(self.base, atMsSize=(32.0, 32.0), atViewSize=(float(w), float(h)), atCamR=(camR,),
+        u = dict(self.base, atMsSize=(float(self.msN), float(self.msN)), atViewSize=(float(w), float(h)), atCamR=(camR,),
                  atLightMu=(float(light[2]),), atMsOn=(1.0,), atGround=(ground,))
         self.g.draw(self.pv, fb, w, h, u, [('atTransTex', self.trans), ('atMsTex', self.ms)])
         gl.glBindTexture(0x0DE1, t)
@@ -92,7 +94,7 @@ class Sky:
     def lut_ms(self, w, h, camR, light, ground=1.0, reps=20):
         """GPU ms of one sky-view LUT pass"""
         t, fb = self.target(w, h)
-        u = dict(self.base, atMsSize=(32.0, 32.0), atViewSize=(float(w), float(h)), atCamR=(camR,),
+        u = dict(self.base, atMsSize=(float(self.msN), float(self.msN)), atViewSize=(float(w), float(h)), atCamR=(camR,),
                  atLightMu=(float(light[2]),), atMsOn=(1.0,), atGround=(ground,))
         self.g.draw(self.pv, fb, w, h, u, [('atTransTex', self.trans), ('atMsTex', self.ms)])
         gl.glFinish()
@@ -131,7 +133,7 @@ class Sky:
         tl = float(np.dot(tl[0], [0.2126, 0.7152, 0.0722]))
         uni = dict(self.base, atViewSize=(float(lut[0]), float(lut[1])), atCamR=(camR,), atSunW=sw,
                    atMoonW=(0.0, 0.0, -1.0), atSunK=(math.pi / tl,), atMoonK=(0.0,), atLimb=(1.0,), atDiscCap=(disc,),
-                   sceneExposure=(1.0,), atTintOn=(0.0,), atMsSize=(32.0, 32.0), atMsOn=(1.0,), atGround=(ground,),
+                   sceneExposure=(1.0,), atTintOn=(0.0,), atMsSize=(float(self.msN), float(self.msN)), atMsOn=(1.0,), atGround=(ground,),
                    atPerPixel=(1.0 if perpixel else 0.0,))
         uni.update(extra or {})   # SKYDISC1: atLimb / atDiscHue / atSunK for the disc gates
         self.last = dict(uni, M=M, P=Pm, sv=sv, camR=camR)   # SKYDISC1: a pass drawn over this one reuses the camera
