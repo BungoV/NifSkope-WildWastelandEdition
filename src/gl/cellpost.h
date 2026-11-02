@@ -31,6 +31,13 @@ void wwCellObjectBlurSetOn( bool on );
  *  OFF: it changes the picture). The object blur and the temporal AA stay on the tone-mapped frame. */
 bool wwCellPostLinearOn();
 void wwCellPostLinearSetOn( bool on );
+/*! lane DOFLENS1: the depth of field through a thin lens instead of the game's Gaussian: the circle of confusion from
+ *  the thin-lens law (focal length from the field of view, the record's focus distance, an aperture matched to the
+ *  record's blur), a near / far gather (bokeh disks; a sharp subject is never blurred by what is behind it). Runs where
+ *  the game's would; WW_CELL_DOF_STATE=menu runs the Pip-Boy / dialogue lens (f/2.8, autofocus, far only).
+ *  WW_CELL_DOF_LENS=0|1 pins it (key WW/CellDofLens, default OFF); WW_CELL_DOF_LENS_RED=1 keeps the game's passes. */
+bool wwCellDofLensOn();
+void wwCellDofLensSetOn( bool on );
 
 //! The cell view, at cell open: indoors the cell's XCIM record's DNAM (read here, 16 bytes as stored), outdoors the weather.
 void wwCellPostSetCell( const EsmWorld & world, bool interior );

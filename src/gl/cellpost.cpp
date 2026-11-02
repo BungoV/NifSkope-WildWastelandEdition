@@ -35,6 +35,36 @@ const char * const kDofKey = "WW/CellDof";
 const char * const kMblurKey = "WW/CellMotionBlur";
 const char * const kObKey = "WW/CellObjectBlur";
 const char * const kLinKey = "WW/CellPostLinear";	// lane POSTFX2
+const char * const kLensKey = "WW/CellDofLens";	// lane DOFLENS1
+
+// lane DOFLENS1: the thin lens's rulings (notes/doflens1/RESULTS.md): a 24 mm high sensor (f = 12 mm / tan(fov / 2)),
+// 1 unit = 14.2875 mm, circles at most 64 px; the menu state's lens is f/2.8 focused on the frame's centre
+constexpr float kLensSensorMm = 24.0f;
+constexpr float kLensMmPerUnit = 14.2875f;
+constexpr float kLensMaxPx = 64.0f;
+constexpr float kLensMenuFNumber = 2.8f;
+constexpr int kLensTile = 8;	// the near reach's tiles, in quarter texels (32 px: the largest near radius)
+
+// lane DOFLENS1-CENSUS: the gameplay states whose depth of field the plugins hold (notes/doflens1/census): the IMAD
+// each state's record names in Fallout4.esm (ZOOM GNAM, DOBJ, DFOB, CAMS MNAM). Dialogue's IMAD (DialogueImod) holds no
+// depth of field, so dialogue stays the menu state's lens.
+struct DofState
+{
+	const char * name;
+	quint32 imad;
+	const char * edid;
+};
+const DofState kDofStates[] = {
+	{ "pipboy", 0x0012BC08U, "PipboyMenuImod" },
+	{ "pipboypa", 0x000BACD9U, "PipboyPowerArmorImod" },	// DOBJ IMPP
+	{ "scope", 0x002041B6U, "zd_ScopeTargetingRecon" },	// ZOOM ZM_Recon_Scope_x2 / x4 / x10
+	{ "vats", 0x00024590U, "VATSScanImod" },	// DFOB VATSMenuImageSpaceModifier
+	{ "inventory", 0x000E61E5U, "VATSPlaybackDesatBlurImod" },	// DOBJ IMID
+	{ "inspect", 0x001B2CBAU, "InspectImod" },	// DFOB InspectImageSpace_DO
+	{ "killcam", 0x00049B5EU, "VATSPlaybackDOFImod" },	// CAMS (the VATS playback cameras)
+	{ "vatsdialogue", 0x001A517AU, "VATSDialogueImodClose" },	// CAMS (the VATS dialogue cameras)
+};
+constexpr int kDofStateCount = int( sizeof( kDofStates ) / sizeof( kDofStates[0] ) );
 
 // lane POSTFX1: the object blur's rulings (notes/postfx1/RESULTS.md): a 180 degree shutter (half the frame's travel),
 // at most 32 px, 16 px tiles (the neighbour max reaches 3 tiles), 15 taps
@@ -64,6 +94,7 @@ const float kBlurWeights[kBlurMaxRadius][15] = {
 };
 
 constexpr int kUnitCur = 12, kUnitBlur = 13, kUnitDepth = 14, kUnitMv = 15;
+constexpr int kUnitNear = 11;	// lane DOFLENS1: the lens's near layer
 
 struct Dmat
 {
@@ -164,6 +195,9 @@ struct PostGpu
 	GLenum colFormat = 0;	// lane POSTFX2: cur / out, RGBA32F over a 32-bit linear frame, else RGBA16F
 	GLuint obVec = 0, obTile[2] = { 0, 0 };	// lane POSTFX1: the object blur's pixel vectors, tile max, neighbour max
 	int obTw = 0, obTh = 0;
+	GLuint lensFar = 0, lensNear = 0;	// lane DOFLENS1: the lens's far and near layers (tex2's size)
+	GLuint lensTile[2] = { 0, 0 };	// lane DOFLENS1-NEARTILE: the near reach's tile max and its 3 x 3 dilation
+	int lensTw = 0, lensTh = 0;
 };
 
 struct PostState
@@ -179,6 +213,21 @@ struct PostState
 	/* lane POSTFX3: WW_CELL_POST_MSAALIN_RED=1 writes the linear stage's picture into every multisample alike (POSTFX2's
 	 * copy: the tone map then maps one value per pixel and a still edge loses its anti-aliasing) */
 	bool redMsLin = false;
+	// lane DOFLENS1: the thin-lens depth of field (row WW_CELL_DOF_LENS), its red (WW_CELL_DOF_LENS_RED=1: the game's
+	// passes) and the gameplay state (WW_CELL_DOF_STATE=menu: the Pip-Boy / dialogue lens, else play)
+	bool lens = false, lensPinned = false, redLens = false, lensMenu = false;
+	// lane DOFLENS1-CENSUS: WW_CELL_DOF_STATE=<kDofStates name>: that state's IMAD instead of the cell's record (-1: play;
+	// -2: a name not in the table); its values read at the cell's load (strength, distance, range = the curves' largest
+	// keys, flags; target = the IMAD's use-target, the lens autofocuses)
+	int lensState = -1;
+	QString lensStateName;
+	struct StateRec
+	{
+		bool have = false;
+		float rec[4] = { 0, 0, 0, 0 };
+		bool target = false;
+	} stateRec[kDofStateCount];
+	bool redNearTile = false;	// lane DOFLENS1-NEARTILE: WW_CELL_DOF_LENS_NEARTILE_RED=1: the near reach is the fixed 32 px
 	int curFrame = 0;	// this frame's index and time, taken by the frame's first stage
 	double curDt = 0.0;
 	QString dumpDir;
@@ -240,6 +289,18 @@ PostState & ps()
 		s.ob = readPin( "WW_CELL_OBJBLUR", kObKey, s.obPinned );
 		s.lin = readPin( "WW_CELL_POST_LINEAR", kLinKey, s.linPinned );
 		s.redMsLin = wwEnvStr( "WW_CELL_POST_MSAALIN_RED" ).trimmed() == QLatin1StringView( "1" );
+		s.lens = readPin( "WW_CELL_DOF_LENS", kLensKey, s.lensPinned );
+		s.redLens = wwEnvStr( "WW_CELL_DOF_LENS_RED" ).trimmed() == QLatin1StringView( "1" );
+		s.lensStateName = wwEnvStr( "WW_CELL_DOF_STATE" ).trimmed().toLower();
+		s.lensMenu = s.lensStateName == QLatin1StringView( "menu" );
+		s.lensState = -1;
+		if ( !s.lensStateName.isEmpty() && !s.lensMenu && s.lensStateName != QLatin1StringView( "play" ) ) {
+			s.lensState = -2;
+			for ( int i = 0; i < kDofStateCount; i++ )
+				if ( s.lensStateName == QLatin1StringView( kDofStates[i].name ) )
+					s.lensState = i;
+		}
+		s.redNearTile = wwEnvStr( "WW_CELL_DOF_LENS_NEARTILE_RED" ).trimmed() == QLatin1StringView( "1" );
 		s.redObCamera = wwEnvStr( "WW_CELL_OBJBLUR_RED" ).contains( QLatin1StringView( "camera" ) );
 		s.dumpDir = wwEnvStr( "WW_CELL_POST_DUMP" ).trimmed();
 		bool ok = false;
@@ -305,12 +366,15 @@ GLuint makeTex( Renderer * r, GLenum internal, GLenum format, GLenum type, int w
 void freeGpu( Renderer * r, PostGpu & g )
 {
 	auto fn = r->fn;
-	GLuint texs[9] = { g.cur, g.depth, g.blur[0], g.blur[1], g.mv, g.out, g.obVec, g.obTile[0], g.obTile[1] };
+	GLuint texs[13] = { g.cur, g.depth, g.blur[0], g.blur[1], g.mv, g.out, g.obVec, g.obTile[0], g.obTile[1], g.lensFar, g.lensNear,
+		g.lensTile[0], g.lensTile[1] };
 	for ( GLuint t : texs )
 		if ( t )
 			fn->glDeleteTextures( 1, &t );
 	g.cur = g.depth = g.blur[0] = g.blur[1] = g.mv = g.out = 0;
 	g.obVec = g.obTile[0] = g.obTile[1] = 0;
+	g.lensFar = g.lensNear = 0;
+	g.lensTile[0] = g.lensTile[1] = 0;
 }
 
 // a float32 dump: int32 w h channels, then rows bottom-up (GL order), channels interleaved (the TAA dump's format)
@@ -437,6 +501,19 @@ void wwCellPostLinearSetOn( bool on )
 		QSettings().setValue( QLatin1StringView( kLinKey ), on );
 }
 
+bool wwCellDofLensOn()
+{
+	return ps().lens;
+}
+
+void wwCellDofLensSetOn( bool on )
+{
+	PostState & s = ps();
+	s.lens = on;
+	if ( !s.lensPinned )
+		QSettings().setValue( QLatin1StringView( kLensKey ), on );
+}
+
 void wwCellPostSetCell( const EsmWorld & world, bool interior )
 {
 	PostState & s = ps();
@@ -447,6 +524,39 @@ void wwCellPostSetCell( const EsmWorld & world, bool interior )
 	s.haveLast = false;
 	const quint32 xcim = interior ? world.interior().imageSpace : 0U;
 	ESMFile * esm = world.plugin();
+	// lane DOFLENS1-CENSUS: the gameplay states' IMADs (DNAM: use-target u8 at 224, flags u8 at 225, the game's IMGS
+	// flags packing; WNAM / XNAM / YNAM: (time, value) keys of strength, distance, range; the state = the largest key)
+	for ( int i = 0; i < kDofStateCount; i++ ) {
+		auto & sr = s.stateRec[i];
+		sr = PostState::StateRec {};
+		if ( !esm )
+			continue;
+		try {
+			const ESMFile::ESMRecord * r = esm->findRecord( kDofStates[i].imad );
+			if ( !r || !( *r == "IMAD" ) )
+				continue;
+			ESMFile::ESMField f( *esm, *r );
+			bool dnam = false;
+			while ( f.next() ) {
+				const int k = f == "WNAM" ? 0 : f == "XNAM" ? 1 : f == "YNAM" ? 2 : -1;
+				if ( k >= 0 ) {
+					for ( size_t o = 0; o + 8 <= f.size(); o += 8 ) {
+						float v = 0.0f;
+						std::memcpy( &v, f.data() + o + 4, 4 );
+						if ( std::isfinite( v ) )
+							sr.rec[k] = std::max( sr.rec[k], v );
+					}
+				} else if ( f == "DNAM" && f.size() >= 228 ) {
+					sr.target = f.data()[224] != 0;
+					sr.rec[3] = float( f.data()[225] );
+					dnam = true;
+				}
+			}
+			sr.have = dnam;
+		} catch ( std::exception & ) {
+			sr = PostState::StateRec {};
+		}
+	}
 	if ( !xcim || !esm )
 		return;
 	try {
@@ -567,12 +677,59 @@ void postApply( Scene * scene, bool linear )
 	bool farOnly = false;
 	int radius = 3;
 	FloatVector4 dc0( 0.0f ), dc1( 0.0f ), dc2( 0.0f ), dc3( 1.0f );
+	// lane DOFLENS1: the thin lens (row WW_CELL_DOF_LENS; red WW_CELL_DOF_LENS_RED=1 runs the game's passes). The focal
+	// length from the view's field of view; play: the record's verdict, focus and range, the aperture whose circle at
+	// distance + range is the game's blur (strength x 8 x radius px); menu (WW_CELL_DOF_STATE=menu): f/2.8, autofocus
+	// on the frame's centre, far only, whatever the record says
+	bool runLens = false;
+	FloatVector4 lz( 0.0f ), lensP( 0.0f ), lensQ( 0.0f );
+	const bool lensOn = s.lens && !s.redLens;
+	const float lensFmm = perspective ? 0.5f * kLensSensorMm * P[5] : 0.0f;
+	const float lensPxMm = float( H ) / kLensSensorMm;
+	const float lensFu = lensFmm / kLensMmPerUnit;
+	auto lensMenu = [&]() {
+		lz = FloatVector4( zNear, zFar - zNear, zFar * zNear, 0.0f );
+		lensP = FloatVector4( 0.0f, lensFmm / kLensMenuFNumber * lensPxMm, lensFu, 0.0f );
+		lensQ = FloatVector4( kLensMaxPx, 0.0f, 1.0f, 0.0f );
+		runLens = true;
+		return QStringLiteral( "on LENS menu f %1 mm f/%2 autofocus far-only max %3 px%4" )
+			.arg( f9( lensFmm ), f9( kLensMenuFNumber ), f9( kLensMaxPx ), where );
+	};
+	// lane DOFLENS1-CENSUS: a gameplay state's IMAD (WW_CELL_DOF_STATE=<name>) instead of the cell's record, for the
+	// game's passes and the lens alike
+	const PostState::StateRec * stateRec = s.lensState >= 0 ? &s.stateRec[s.lensState] : nullptr;
+	auto record = [&]( float rec[4], QString & src ) {
+		if ( s.lensState == -1 )
+			return dofRecord( s, rec, src );
+		if ( s.lensState == -2 ) {
+			QStringList names { QStringLiteral( "play" ), QStringLiteral( "menu" ) };
+			for ( const DofState & d : kDofStates )
+				names << QLatin1StringView( d.name );
+			src = QStringLiteral( "WW_CELL_DOF_STATE %1 is none of %2" ).arg( s.lensStateName, names.join( QLatin1Char( ' ' ) ) );
+			return false;
+		}
+		const DofState & d = kDofStates[s.lensState];
+		const QString id = QStringLiteral( "%1 %2 %3" ).arg( QLatin1StringView( d.name ), QLatin1StringView( d.edid ) )
+			.arg( d.imad, 8, 16, QLatin1Char( '0' ) );
+		if ( !stateRec->have ) {
+			src = QStringLiteral( "state %1: the IMAD is not in the loaded plugins" ).arg( id );
+			return false;
+		}
+		std::memcpy( rec, stateRec->rec, sizeof( stateRec->rec ) );
+		src = QStringLiteral( "state %1%2" ).arg( id, stateRec->target ? QStringLiteral( " target" ) : QString() );
+		return true;
+	};
 	if ( wantDof ) {
 		float rec[4] = { 0, 0, 0, 0 };
 		QString src;
 		if ( !perspective ) {
 			noteDof( s, QStringLiteral( "refused (an orthographic view has no depth of field)" ) );
-		} else if ( !dofRecord( s, rec, src ) ) {
+		} else if ( lensOn && s.lensMenu && !( perspective && lensFu > 0.0f ) ) {
+			noteDof( s, QStringLiteral( "refused (the lens has no focal length)" ) );
+		} else if ( lensOn && s.lensMenu ) {
+			runDof = true;
+			noteDof( s, lensMenu() );
+		} else if ( !record( rec, src ) ) {
 			noteDof( s, QStringLiteral( "refused (%1)" ).arg( src ) );
 		} else {
 			const float strength = rec[0], d = rec[1], rg = rec[2];
@@ -591,9 +748,29 @@ void postApply( Scene * scene, bool linear )
 					s.redNoCoc ? QStringLiteral( " RED nococ" ) : s.redBlurRow ? QStringLiteral( " RED blurrow" ) : QString() );
 			if ( !( strength > 0.0f ) ) {
 				noteDof( s, QStringLiteral( "refused (strength 0: %1)" ).arg( what ) );
+			} else if ( lensOn && lensFu > 0.0f ) {
+				runDof = true;
+				runLens = true;
+				const float s1 = std::max( d, lensFu * 1.01f + 0.001f );
+				const float rgv = rg > 0.0f ? rg : 1.0f;
+				const float want = strength * 8.0f * float( radius );	// the circle (px) at distance + range
+				// a state's range 0: the full circle at infinity (the play record keeps its range 1)
+				const float aPx = ( stateRec && !( rg > 0.0f ) ) ? want * ( s1 - lensFu ) / lensFu
+					: want * ( s1 + rgv ) * ( s1 - lensFu ) / ( lensFu * rgv );
+				const bool autofocus = stateRec && stateRec->target;	// the IMAD's use-target: the frame's centre
+				lz = FloatVector4( zNear, zFar - zNear, zFar * zNear, dc1[3] );
+				lensP = FloatVector4( autofocus ? 0.0f : s1, aPx, lensFu, 0.0f );
+				lensQ = FloatVector4( kLensMaxPx, ( farOnly || dc1[1] == 0.0f ) ? 0.0f : 1.0f, dc1[2], s.redNearTile ? 0.0f : 1.0f );
+				noteDof( s, QStringLiteral( "on LENS %1 f %2 mm f/%3 focus %4 max %5 px near %6 far %7 reach %8 (%9)%10" )
+					.arg( stateRec ? QLatin1StringView( kDofStates[s.lensState].name ) : QLatin1StringView( "play" ), f9( lensFmm ),
+						f9( aPx > 0.0f ? lensFmm * lensPxMm / aPx : 0.0f ),
+						autofocus ? QStringLiteral( "autofocus" ) : f9( s1 ), f9( kLensMaxPx ) )
+					.arg( int( lensQ[1] ) ).arg( int( lensQ[2] ) )
+					.arg( lensQ[1] == 0.0f ? QStringLiteral( "-" ) : s.redNearTile ? QStringLiteral( "fixed RED neartile" ) : QStringLiteral( "tile" ),
+						what, where ) );
 			} else {
 				runDof = true;
-				noteDof( s, QStringLiteral( "on %1%2" ).arg( what, where ) );
+				noteDof( s, QStringLiteral( "on %1%2%3" ).arg( what, s.lens && s.redLens ? QStringLiteral( " RED lens" ) : QString(), where ) );
 			}
 		}
 	}
@@ -827,7 +1004,118 @@ void postApply( Scene * scene, bool linear )
 	 * beside the picture: the depth of field alone composites into out and skips its copy to cur; the two-pass red
 	 * (WW_CELL_POSTFUSE_RED) overwrites cur and takes the plain copy. */
 	const bool msKeep = linear && frameSamples > 1 && !s.redMsLin && !( runDof && runMb && !fuse );
-	if ( ok && runDof ) {
+	// lane DOFLENS1: the thin lens instead of the game's passes: the prep (colour and circle, game_doflens_prep) into
+	// tex2, the near / far gather (game_doflens_gather) into the lens's two layers, then the composite into out
+	// (game_doflens; inside the motion blur's pass when fused); out back to cur
+	auto lensUnis = [&]( auto * p ) {
+		p->uni4f( "lz", lz );
+		p->uni4f( "lensP", lensP );
+		p->uni4f( "lensQ", lensQ );
+	};
+	if ( ok && runLens ) {
+		PassTime::subBegin( PassTime::PostDof );
+		if ( !g.lensFar ) {	// made on the first frame the lens runs (freed with the rest on a resize)
+			g.lensFar = makeTex( r, GL_RGBA16F, GL_RGBA, GL_FLOAT, g.qw[0], g.qh[0], GL_LINEAR );
+			g.lensNear = makeTex( r, GL_RGBA16F, GL_RGBA, GL_FLOAT, g.qw[0], g.qh[0], GL_LINEAR );
+		}
+		target( g.blur[0] );
+		fn->glViewport( 0, 0, g.qw[0], g.qh[0] );
+		if ( auto prog = r->useProgram( "game_doflens_prep.prog" ) ) {
+			bind( kUnitCur, g.cur );
+			bind( kUnitDepth, g.depth );
+			prog->uni1i( "t0", kUnitCur );
+			prog->uni1i( "t1", kUnitDepth );
+			lensUnis( prog );
+			r->drawShape( 4, 3, 6, GL_TRIANGLES, GL_UNSIGNED_SHORT, &attrs, idx );
+			r->stopProgram();
+		} else {
+			ok = false;
+		}
+		// lane DOFLENS1-NEARTILE: the near layer's reach (game_doflens_tile): the largest near radius per tile of 8 x 8
+		// quarter texels, then over the 3 x 3 tiles around; the gather's near kernel takes it (lensQ.w = 1)
+		const bool nearTile = lensQ[1] != 0.0f && lensQ[3] > 0.5f;
+		if ( ok && nearTile ) {
+			if ( !g.lensTile[0] ) {
+				g.lensTw = ( g.qw[0] + kLensTile - 1 ) / kLensTile;
+				g.lensTh = ( g.qh[0] + kLensTile - 1 ) / kLensTile;
+				for ( GLuint & t : g.lensTile )
+					t = makeTex( r, GL_R16F, GL_RED, GL_FLOAT, g.lensTw, g.lensTh, GL_NEAREST );
+			}
+			fn->glViewport( 0, 0, g.lensTw, g.lensTh );
+			for ( int pass = 0; pass < 2 && ok; pass++ ) {
+				target( g.lensTile[pass] );
+				if ( auto prog = r->useProgram( "game_doflens_tile.prog" ) ) {
+					bind( kUnitNear, pass ? g.lensTile[0] : g.blur[0] );
+					prog->uni1i( "t0", kUnitNear );
+					prog->uni1i( "dilate", pass );
+					r->drawShape( 4, 3, 6, GL_TRIANGLES, GL_UNSIGNED_SHORT, &attrs, idx );
+					r->stopProgram();
+				} else {
+					ok = false;
+				}
+			}
+			fn->glViewport( 0, 0, g.qw[0], g.qh[0] );
+		}
+		if ( ok ) {
+			fn->glBindFramebuffer( GL_FRAMEBUFFER, g.fbo );
+			fn->glFramebufferTexture2D( GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, g.lensFar, 0 );
+			fn->glFramebufferTexture2D( GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT1, GL_TEXTURE_2D, g.lensNear, 0 );
+			const GLenum two[2] = { GL_COLOR_ATTACHMENT0, GL_COLOR_ATTACHMENT1 };
+			fn->glDrawBuffers( 2, two );
+			bind( kUnitBlur, g.blur[0] );
+			filter( g.blur[0], GL_LINEAR );
+			if ( nearTile )
+				bind( kUnitNear, g.lensTile[1] );
+			if ( auto prog = r->useProgram( "game_doflens_gather.prog" ) ) {
+				prog->uni1i( "t0", kUnitBlur );
+				prog->uni1i( "t1", kUnitNear );
+				prog->uni4f( "lensQ", lensQ );
+				r->drawShape( 4, 3, 6, GL_TRIANGLES, GL_UNSIGNED_SHORT, &attrs, idx );
+				r->stopProgram();
+			} else {
+				ok = false;
+			}
+			fn->glFramebufferTexture2D( GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT1, GL_TEXTURE_2D, 0, 0 );
+		}
+		fn->glViewport( vp[0], vp[1], vp[2], vp[3] );
+		if ( ok && !fuse ) {
+			target( g.out );
+			if ( auto prog = r->useProgram( "game_doflens.prog" ) ) {
+				bind( kUnitCur, g.cur );
+				bind( kUnitBlur, g.lensFar );
+				bind( kUnitDepth, g.depth );
+				bind( kUnitNear, g.lensNear );
+				prog->uni1i( "t0", kUnitCur );
+				prog->uni1i( "t1", kUnitBlur );
+				prog->uni1i( "t2", kUnitDepth );
+				prog->uni1i( "lensNear", kUnitNear );
+				lensUnis( prog );
+				r->drawShape( 4, 3, 6, GL_TRIANGLES, GL_UNSIGNED_SHORT, &attrs, idx );
+				r->stopProgram();
+			} else {
+				ok = false;
+			}
+		}
+		if ( ok && dump ) {
+			dumpFloat( dd + "lens_prep.bin", g.qw[0], g.qh[0], 4, readTex( r, g.fbo, g.blur[0], false, GL_RGBA, 4, g.qw[0], g.qh[0] ) );
+			dumpFloat( dd + "lens_far.bin", g.qw[0], g.qh[0], 4, readTex( r, g.fbo, g.lensFar, false, GL_RGBA, 4, g.qw[0], g.qh[0] ) );
+			dumpFloat( dd + "lens_near.bin", g.qw[0], g.qh[0], 4, readTex( r, g.fbo, g.lensNear, false, GL_RGBA, 4, g.qw[0], g.qh[0] ) );
+			if ( nearTile )
+				dumpFloat( dd + "lens_tile.bin", g.lensTw, g.lensTh, 1, readTex( r, g.fbo, g.lensTile[1], false, GL_RED, 1, g.lensTw, g.lensTh ) );
+			if ( !fuse )
+				dumpFloat( dd + "dof_out.bin", W, H, 4, readTex( r, g.fbo, g.out, false, GL_RGBA, 4, W, H ) );
+		}
+		if ( ok && !fuse && !( msKeep && !runMb ) ) {	// the motion blur reads the depth of field's picture
+			fn->glBindFramebuffer( GL_READ_FRAMEBUFFER, g.fbo );
+			fn->glFramebufferTexture2D( GL_READ_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, g.out, 0 );
+			fn->glReadBuffer( GL_COLOR_ATTACHMENT0 );
+			fn->glBindFramebuffer( GL_DRAW_FRAMEBUFFER, g.inFbo );
+			fn->glDrawBuffers( 1, &one );
+			fn->glBlitFramebuffer( 0, 0, W, H, 0, 0, W, H, GL_COLOR_BUFFER_BIT, GL_NEAREST );
+		}
+		PassTime::subEnd( PassTime::PostDof );
+	}
+	if ( ok && runDof && !runLens ) {
 		PassTime::subBegin( PassTime::PostDof );
 		target( g.blur[0] );
 		fn->glViewport( 0, 0, g.qw[0], g.qh[0] );
@@ -946,14 +1234,19 @@ void postApply( Scene * scene, bool linear )
 		}
 		if ( ok && fuse ) {	// lane POSTFX2: the composite and the blur in one pass
 			target( g.out );
-			auto prog = r->useProgram( "game_dofmblur.prog" );
+			auto prog = r->useProgram( runLens ? "game_doflensmblur.prog" : "game_dofmblur.prog" );	// lane DOFLENS1
 			if ( !prog ) {
 				ok = false;
 			} else {
 				bind( kUnitCur, g.cur );
 				bind( kUnitMv, g.mv );
-				bind( kUnitBlur, g.blur[0] );
+				bind( kUnitBlur, runLens ? g.lensFar : g.blur[0] );
 				bind( kUnitDepth, g.depth );
+				if ( runLens ) {
+					bind( kUnitNear, g.lensNear );
+					prog->uni1i( "lensNear", kUnitNear );
+					lensUnis( prog );
+				}
 				prog->uni1i( "t0", kUnitCur );
 				prog->uni1i( "t1", kUnitMv );
 				prog->uni1i( "t2", kUnitBlur );

@@ -208,6 +208,7 @@ private:
 	QAction * cellMblur = nullptr;    // the game's motion blur
 	QAction * cellObjBlur = nullptr;  // lane POSTFX1: per-object motion blur (never the camera)
 	QAction * cellPostLinear = nullptr;  // lane POSTFX2: depth of field + motion blur before the tone map
+	QAction * cellDofLens = nullptr;  // lane DOFLENS1: the thin-lens depth of field (bokeh, near / far)
 	QMenu * cellBloom = nullptr;      // Vanilla | FO4CS, FO4CS's rows and its physical glare
 	QActionGroup * cellBloomGroup = nullptr;
 	QAction * cellBloomGlare = nullptr;
