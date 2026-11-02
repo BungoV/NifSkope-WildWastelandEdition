@@ -30,7 +30,7 @@ import json, os, shutil, struct, sys
 
 ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
 OUT = os.path.abspath(sys.argv[1]) if len(sys.argv) > 1 else os.path.join(ROOT, "tests", "fixtures", "pbr_data")
-DATA = r"E:\Tools\Fallout 4\DataUnpacked\Data"
+DATA = os.environ.get("PBR_R1_DATA") or r"E:\Tools\Fallout 4\DataUnpacked\Data"  # SKYCLOUD1102: a loose copy of the files read
 F76 = r"E:\Projects\F76\Data\materials\architecture\asylumbasewall01.bgsm"
 DUCT_NIF = os.path.join(DATA, "Meshes", "SetDressing", "ACDucts", "ACDuctConnector01.nif")
 DUCT_BGSM = os.path.join(DATA, "Materials", "SetDressing", "AcDuctsRusted.BGSM")
