@@ -1,3 +1,17 @@
+## SKINSSS2 (2026-11-02): the skin blur at half resolution (option WW_CELL_SKINSSS_HALF=1, off)
+
+Skin subsurface (SKINSSS1) can run its blur at half resolution, as FO4CS does: `WW_CELL_SKINSSS_HALF=1` (env only, off;
+a menu row is owed). The new program cell_skinssshalf.prog (a define and an include of cell_skinsss.frag) takes each 2x2
+block's skin pixels at the block's depth into a half-size target, with a half depth beside it; blurs it in x and y at
+half size with 3 taps; then blends it into the frame at full size through a depth-aware bilinear (taps across a depth
+step drop out, so a hand never lends its light to the face behind it). At 1080p with every pixel skin it costs
+0.053 ms against 0.113 for the full path (0.47). The picture is softer than the full path: mean error 0.56 of the
+effect, against the 0.10 bar set before the run, so the option stays off and the full path stays the default.
+src/gl/wwskinssshalf.h is the C++ twin; tests/skinsshalf checks it against the full twin (non-skin pixels exact,
+no light across a depth step, a flat field equal to the full path) and prints the missed picture bar. Red: the twin
+built with WWSKINSSSHALF_RED, which has only the full path. With the option off, every shader program's machine code
+is the same as before (only the stamp and source hash change).
+
 ## SKINSSS2 (2026-11-02): the iris under the cornea (EYEIRIS1, row Eye iris refraction, ships off)
 
 A new look row, Eye iris refraction (`WW_CELL_IRIS`, QSettings WW/CellEyeIris, off). FO4 paints the iris on the eye

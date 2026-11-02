@@ -1,0 +1,4 @@
+# lane SKINSSS2: skin subsurface scattering's half-resolution passes (src/gl/cellskinsss.cpp, WW_CELL_SKINSSS_HALF=1).
+# No conditions: never picked for a shape; cellskinsss.cpp selects it by name.
+
+shaders cell_ao.vert cell_skinssshalf.frag
