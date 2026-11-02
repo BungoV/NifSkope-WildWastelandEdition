@@ -376,16 +376,15 @@ bool rtddgiGiSkyPhysical()
 	return v == "physical" || v == "1";
 }
 
-/* GITRUTH1: WW_CELL_RTDDGI_SKY=level (live, ships off): the weather's sky at the physical sky's absolute level against
- * the frame's sun (atmomath giSkyLevel); =absolute: the physical sky's own colour and shares at that level (giSkyAbsolute).
- * Reds: unset (the weather's DALC as it is), "physical" (the physical colour anchored to the weather's +Z luminance).
+/* GITRUTH1: WW_CELL_RTDDGI_SKY=level (live): the weather's sky at the physical sky's absolute level against the frame's
+ * sun (atmomath giSkyLevel); =absolute: the physical sky's own colour and shares at that level (giSkyAbsolute).
+ * LAND5 (GISKYTWIN-FLIP, HOLDS1101's hold): level SHIPS ON (unset or empty = level). Reds: "dalc" (the old default, the
+ * weather's DALC as it is), "physical" (the physical colour anchored to the weather's +Z luminance).
  * 0 none, 1 level, 2 absolute */
 int rtddgiGiSkyAbsolute()
 {
-	if ( !wwEnvIsSet( "WW_CELL_RTDDGI_SKY" ) )
-		return 0;
-	const QByteArray v = wwEnv( "WW_CELL_RTDDGI_SKY" ).trimmed().toLower();
-	return v == "level" ? 1 : v == "absolute" ? 2 : 0;
+	const QByteArray v = wwEnvIsSet( "WW_CELL_RTDDGI_SKY" ) ? wwEnv( "WW_CELL_RTDDGI_SKY" ).trimmed().toLower() : QByteArray();
+	return v.isEmpty() || v == "level" ? 1 : v == "absolute" ? 2 : 0;
 }
 
 //! FIX1101A LATE ITEM 17: WW_CELL_RTDDGI_INTSKY_RED=1 = today's main (an interior's volume may take the weather's sky and sun)

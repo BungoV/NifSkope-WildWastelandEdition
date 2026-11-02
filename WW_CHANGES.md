@@ -1,3 +1,12 @@
+## GISKYTWIN-FLIP (LAND5, 2026-11-02): the GI volume's sky ships at the physical level
+
+- `WW_CELL_RTDDGI_SKY` unset (or empty) is now `level` (GITRUTH1's giSkyLevel: the weather's sky colour at the
+  physical sky's absolute level against the frame's sun), on an exterior volume with Physical Sky on. The HOLDS1101
+  hold showed `level` live and closer to the reference than unset and `absolute`.
+- Ways back: `WW_CELL_RTDDGI_SKY=dalc` = the old default (the weather's DALC as it is); `absolute` and `physical`
+  unchanged. Interiors and Physical Sky off are untouched. White balance is not changed here.
+- Code: src/rtddgicell.cpp rtddgiGiSkyAbsolute.
+
 ## BUGS1102B (2026-11-02): the GPU rain field reads the roof map; the rain fog cost gate stops drifting
 
 - **Rain under the roof, GPU field (PRECIPROOF-GPU2):** the GPU precipitation field now reads the sunlit interior's roof
