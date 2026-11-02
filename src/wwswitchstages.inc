@@ -451,6 +451,7 @@
 { "WW_CELL_PASSTIME_LOG", 0, "src/gl/cellpasstime.cpp:237 st | init-once state, re-read when a live set moves its prefix (b)" },
 { "WW_CELL_PASSTIME_SYNC", 0, "src/gl/cellpasstime.cpp:238 st | init-once state, re-read when a live set moves its prefix (b)" },
 { "WW_CELL_PFX_RED", 1, "src/cellview.cpp:4118 cellBuild | read while the cell document is built" },
+{ "WW_CELL_POSTFUSE_RED", 0, "src/gl/cellpost.cpp:230 ps | init-once state, re-read when a live set moves its prefix (b)" },
 { "WW_CELL_POST_DUMP", 0, "src/gl/cellpost.cpp:214 ps | init-once state, re-read when a live set moves its prefix (b)" },
 { "WW_CELL_POST_DUMP_FRAME", 0, "src/gl/cellpost.cpp:216 ps | init-once state, re-read when a live set moves its prefix (b)" },
 { "WW_CELL_PRECIP", 0, "src/gl/celllooks.cpp:333 pinOf | re-read per frame or per call (a)" },

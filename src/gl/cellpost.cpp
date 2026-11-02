@@ -171,6 +171,7 @@ struct PostState
 	bool dof = false, dofPinned = false, mb = false, mbPinned = false;
 	bool redNoCoc = false, redNoVelocity = false, redNoJitter = false, redBlurRow = false;
 	bool ob = false, obPinned = false, redObCamera = false, redRg32 = false;	// lane POSTFX1
+	bool redFuse = false;	// lane POSTFX2: WW_CELL_POSTFUSE_RED=1 keeps the depth of field and motion blur two passes
 	QString dumpDir;
 	int dumpFrame = 2;
 
@@ -226,6 +227,7 @@ PostState & ps()
 		s.redNoVelocity = wwEnvStr( "WW_CELL_MBLUR_RED" ).contains( QLatin1StringView( "novelocity" ) );
 		s.redNoJitter = wwEnvStr( "WW_CELL_MBLUR_RED" ).contains( QLatin1StringView( "nojitter" ) );
 		s.redRg32 = wwEnvStr( "WW_CELL_MBLUR_RED" ).contains( QLatin1StringView( "rg32" ) );
+		s.redFuse = wwEnvStr( "WW_CELL_POSTFUSE_RED" ).trimmed() == QLatin1StringView( "1" );
 		s.ob = readPin( "WW_CELL_OBJBLUR", kObKey, s.obPinned );
 		s.redObCamera = wwEnvStr( "WW_CELL_OBJBLUR_RED" ).contains( QLatin1StringView( "camera" ) );
 		s.dumpDir = wwEnvStr( "WW_CELL_POST_DUMP" ).trimmed();
@@ -596,12 +598,15 @@ void wwCellPostApply( Scene * scene )
 			// c0 = (scale x 0.001 x (1 / dt), max blur, fThreshold, 0); c1 = (1, 1, (W - 1) / W, (H - 1) / H)
 			mc0 = FloatVector4( kMbScale * 0.001f * ( 1.0f / float( dt ) ), kMbMax, kMbThreshold, 0.0f );
 			mc1 = FloatVector4( 1.0f, 1.0f, float( W - 1 ) / float( W ), float( H - 1 ) / float( H ) );
-			const QString line = QStringLiteral( "on frame %1 dt %2 c0 %3 jitter %4 %5%6" ).arg( frame ).arg( f9( dt ), v4( mc0 ),
+			// lane POSTFX2: say whether the pass also composites the depth of field
+			const QString fused = !runDof ? QString() : s.redFuse ? QStringLiteral( " two-pass RED postfuse" )
+				: QStringLiteral( " fused with the depth of field" );
+			const QString line = QStringLiteral( "on frame %1 dt %2 c0 %3 jitter %4 %5%6%7" ).arg( frame ).arg( f9( dt ), v4( mc0 ),
 				f9( jitX ), f9( jitY ), s.redNoVelocity ? QStringLiteral( " RED novelocity" )
-				: s.redNoJitter ? QStringLiteral( " RED nojitter" ) : QString() );
+				: s.redNoJitter ? QStringLiteral( " RED nojitter" ) : QString(), fused );
 			// the key: a path's fixed frame time, never an interactive window's measured one (no line per paint)
-			noteMb( s, line, QStringLiteral( "on %1 %2" ).arg( s.pathFrame >= 0 ? f9( dt ) : QStringLiteral( "measured" ) )
-				.arg( s.redNoVelocity ? 1 : 0 ) );
+			noteMb( s, line, QStringLiteral( "on %1 %2%3" ).arg( s.pathFrame >= 0 ? f9( dt ) : QStringLiteral( "measured" ) )
+				.arg( s.redNoVelocity ? 1 : 0 ).arg( fused ) );
 		}
 	}
 	// lane POSTFX1: the object blur's verdict: this frame's object vectors and the camera they were drawn with
@@ -759,6 +764,9 @@ void wwCellPostApply( Scene * scene )
 		fn->glTexParameteri( GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GLint( f ) );
 		fn->glTexParameteri( GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GLint( f ) );
 	};
+	// lane POSTFX2: with both on, the composite runs inside the motion blur's pass (game_dofmblur.frag): no composite
+	// target, no copy back (within 0.25 of an 8-bit step of the two passes, less GPU time, tests/postfx/postfx_fuse.py)
+	const bool fuse = runDof && runMb && !s.redFuse;
 	if ( ok && runDof ) {
 		PassTime::subBegin( PassTime::PostDof );
 		target( g.blur[0] );
@@ -811,7 +819,7 @@ void wwCellPostApply( Scene * scene )
 		fn->glViewport( vp[0], vp[1], vp[2], vp[3] );
 		if ( ok )
 			filter( g.blur[0], GL_LINEAR );
-		if ( ok ) {
+		if ( ok && !fuse ) {
 			target( g.out );
 			auto prog = r->useProgram( "game_dof.prog" );
 			if ( !prog ) {
@@ -835,9 +843,10 @@ void wwCellPostApply( Scene * scene )
 		}
 		if ( ok && dump ) {
 			dumpFloat( dd + "dof_blur.bin", g.qw[0], g.qh[0], 4, readTex( r, g.fbo, g.blur[0], false, GL_RGBA, 4, g.qw[0], g.qh[0] ) );
-			dumpFloat( dd + "dof_out.bin", W, H, 4, readTex( r, g.fbo, g.out, false, GL_RGBA, 4, W, H ) );
+			if ( !fuse )
+				dumpFloat( dd + "dof_out.bin", W, H, 4, readTex( r, g.fbo, g.out, false, GL_RGBA, 4, W, H ) );
 		}
-		if ( ok ) {	// the motion blur reads the depth of field's picture
+		if ( ok && !fuse ) {	// the motion blur reads the depth of field's picture
 			fn->glBindFramebuffer( GL_READ_FRAMEBUFFER, g.fbo );
 			fn->glFramebufferTexture2D( GL_READ_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, g.out, 0 );
 			fn->glReadBuffer( GL_COLOR_ATTACHMENT0 );
@@ -875,7 +884,32 @@ void wwCellPostApply( Scene * scene )
 			dumpFloat( dd + "mb_in.bin", W, H, 4, readTex( r, g.fbo, g.cur, false, GL_RGBA, 4, W, H ) );
 			dumpFloat( dd + "mv.bin", W, H, 2, readTex( r, g.mvFbo, g.mv, false, GL_RG, 2, W, H ) );
 		}
-		if ( ok ) {
+		if ( ok && fuse ) {	// lane POSTFX2: the composite and the blur in one pass
+			target( g.out );
+			auto prog = r->useProgram( "game_dofmblur.prog" );
+			if ( !prog ) {
+				ok = false;
+			} else {
+				bind( kUnitCur, g.cur );
+				bind( kUnitMv, g.mv );
+				bind( kUnitBlur, g.blur[0] );
+				bind( kUnitDepth, g.depth );
+				prog->uni1i( "t0", kUnitCur );
+				prog->uni1i( "t1", kUnitMv );
+				prog->uni1i( "t2", kUnitBlur );
+				prog->uni1i( "t3", kUnitDepth );
+				prog->uni4f( "dc0", dc0 );
+				prog->uni4f( "dc1", dc1 );
+				prog->uni4f( "dc2", dc2 );
+				prog->uni4f( "dc3", dc3 );
+				prog->uni4f( "mc0", mc0 );
+				prog->uni4f( "mc1", mc1 );
+				prog->uni1i( "farOnly", farOnly ? 1 : 0 );
+				prog->uni1i( "dofRed", s.redNoCoc ? 1 : 0 );
+				r->drawShape( 4, 3, 6, GL_TRIANGLES, GL_UNSIGNED_SHORT, &attrs, idx );
+				r->stopProgram();
+			}
+		} else if ( ok ) {
 			target( g.out );
 			auto prog = r->useProgram( "game_mblur.prog" );
 			if ( !prog ) {

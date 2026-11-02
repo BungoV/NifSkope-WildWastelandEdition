@@ -9,7 +9,9 @@ class Scene;
 /*! The game's depth of field and motion blur on the cell view's tone-mapped frame, before the temporal AA (the
  *  game's order); parameters from the IMGS DNAM (weather or cell XCIM), shaders game_dof*.frag / game_mblur.frag.
  *  Both rows ship OFF and then touch nothing. WW_CELL_DOF=0|1, WW_CELL_MBLUR=0|1 pin them;
- *  WW_CELL_DOF_RED, WW_CELL_MBLUR_RED and WW_CELL_POST_DUMP=<dir> (frame WW_CELL_POST_DUMP_FRAME) are debug aids. */
+ *  WW_CELL_DOF_RED, WW_CELL_MBLUR_RED and WW_CELL_POST_DUMP=<dir> (frame WW_CELL_POST_DUMP_FRAME) are debug aids.
+ *  lane POSTFX2: with both on, the composite runs inside the blur's pass (game_dofmblur.frag); WW_CELL_POSTFUSE_RED=1
+ *  keeps the two passes. */
 
 //! The rows' state (pinned, saved, or OFF in a harness run).
 bool wwCellDofOn();
