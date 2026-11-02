@@ -86,6 +86,9 @@ void wwLightningFrameBegin();
 bool wwLightningSky( Scene * scene, double secs, float unitK, WwLightningSky & out );
 bool wwLightningGround( float add[6][3] );
 
+//! lane WXBAND: the Low band's base km this frame (the cloud map's, else the default slab), the 2D layers' deck
+float wwCloudLayerDeckKm();
+
 /*! For readers of the density (CLOUD3, CLOUD4): sets cloud_common.glsl's uniforms (cvBands, cvCal) on the CURRENT
  *  program and binds cvShape, cvDetail, cvMap to units firstUnit .. firstUnit + 2. False (nothing bound) when the volume
  *  has no map this frame. Needs the GL context current; call after wwCloudMapUpdate.

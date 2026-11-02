@@ -1189,6 +1189,13 @@ bool wwLightningSky( Scene * scene, double secs, float unitK, WwLightningSky & o
 	return true;
 }
 
+float wwCloudLayerDeckKm()
+{
+	float base = 0.0f, top = 0.0f, dens = 0.0f, tint[3];
+	lowBandForFlash( base, top, dens, tint );
+	return base;
+}
+
 bool wwLightningGround( float add[6][3] )
 {
 	struct Memo

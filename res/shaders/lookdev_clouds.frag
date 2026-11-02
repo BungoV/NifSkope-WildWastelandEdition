@@ -32,11 +32,19 @@ uniform vec4 ldLtSrc;
 uniform vec4 ldLtPrm;
 uniform vec3 ldLtCol;
 uniform vec4 ldLtCam;	// the camera, world x, y km, height km; w = the deck's height km
+/* lane WXBAND (WEATHER-HORIZON-BAND): the sky's aerial perspective to the deck, as cloud_march.frag's cvApOn:
+ * tair = T(cam, mu) / T(deck, mu1) on the Low base's shell; drawn as alpha a x tm, colour c x tair / tm (tm = max
+ * channel), i.e. a x tair x c + (1 - a x tm) x the sky behind. ldApOn 0 (red WW_LOOKDEV_RED=cloudnoap, no physical
+ * sky this frame, camera above the deck): the layer as before */
+uniform int ldApOn;
+uniform sampler2D ldTrans;	// the sky's transmittance LUT
+uniform vec2 ldApR;	// km from the planet's centre: the camera, the deck's base
 
 out vec4 fragColor;
 
 #include "lookdev_output.glsl"
 #include "lightning_field.glsl"
+#include "atmo_common.glsl"
 
 void main()
 {
@@ -53,6 +61,16 @@ void main()
 		}
 	}
 	float a = t.a * vcol.a * alpha;
+	if ( ldApOn != 0 ) {
+		vec3 d = normalize( wdir );
+		float r0 = ldApR.x, R1 = ldApR.y, mu = d.z;
+		float s = -r0 * mu + sqrt( max( 0.0, r0 * r0 * ( mu * mu - 1.0 ) + R1 * R1 ) );
+		float r1 = sqrt( r0 * r0 + s * s + 2.0 * r0 * mu * s ), mu1 = ( r0 * mu + s ) / r1;
+		vec3 tair = clamp( atTrans( ldTrans, r0, mu ) / max( atTrans( ldTrans, r1, mu1 ), vec3( 1e-6 ) ), 0.0, 1.0 );
+		float tm = max( tair.r, max( tair.g, tair.b ) );
+		c *= tair / max( tm, 1e-6 );
+		a *= tm;
+	}
 	if ( probe ) {
 		fragColor = ndc.x < 0.0 ? vec4( studioOutput( c ), 1.0 ) : vec4( vec3( a ), 1.0 );
 		return;
