@@ -33,6 +33,7 @@ BSD License - see nifskope.h
 #include <QElapsedTimer>
 #include "io/pbrmfile.h"
 #include "io/pbrmresolve.h"
+#include "lodgenbakemem.h"
 #include <QJsonArray>
 #include <QJsonObject>
 #include "model/nifmodel.h"
@@ -1336,6 +1337,12 @@ static bool lodgenBakeMemRed()
 {
 	static const bool red = wwEnvInt( "WW_LODGEN_BAKEMEM_RED" ) == 1;
 	return red;
+}
+//! CARDMEM2's red: WW_CARDMEM_RED=land (the old land-cache drop), tex (the old 4 GiB texture budget), 1/all both
+static bool lodgenCardMemRed( const char * part )
+{
+	static const QString v = wwEnvStr( "WW_CARDMEM_RED" ).trimmed().toLower();
+	return v == QLatin1String( "1" ) || v == QLatin1String( "all" ) || v == QLatin1String( part );
 }
 //! what the native loader's per-thread caches took in (WW_LODGEN_MEMLOG only)
 static std::atomic<qint64> gNativeCacheBytes{ 0 }, gNativeCacheModels{ 0 };
@@ -5988,6 +5995,8 @@ LodgenBakeCaches * lodgenCreateBakeCaches( qint64 textureBudgetBytes )
 	LodgenBakeCaches * c = new LodgenBakeCaches;
 	if ( textureBudgetBytes > 0 )
 		c->texBudget = textureBudgetBytes;
+	else	// CARDMEM2: the default in real MB (WW_LODGEN_TEXBUDGET_MB); 512 Mi texel units was 4 GiB
+		c->texBudget = lodgenTexBudgetUnits( wwEnvInt( "WW_LODGEN_TEXBUDGET_MB" ), lodgenCardMemRed( "tex" ) );
 	return c;
 }
 
@@ -13133,16 +13142,18 @@ struct LodgenVtLandCache
 		return &cells.insert( k, land ).value();
 	}
 
-	void dropBelow( int minCellY )
+	//! after tile row `ty` (rows run north to south): only the cells the next row can reach stay
+	void dropAfterRow( int ty, int north, int dim )
 	{
+		const bool red = lodgenCardMemRed( "land" );
 		for ( auto it = cells.begin(); it != cells.end(); ) {
-			if ( int( qint32( quint32( it.key() & 0xFFFFFFFF ) ) ) < minCellY )
+			if ( lodgenVtLandDrop( int( qint32( quint32( it.key() & 0xFFFFFFFF ) ) ), ty, north, dim, red ) )
 				it = cells.erase( it );
 			else
 				++it;
 		}
 		for ( auto it = misses.begin(); it != misses.end(); ) {
-			if ( int( qint32( quint32( *it & 0xFFFFFFFF ) ) ) < minCellY )
+			if ( lodgenVtLandDrop( int( qint32( quint32( *it & 0xFFFFFFFF ) ) ), ty, north, dim, red ) )
 				it = misses.erase( it );
 			else
 				++it;
@@ -17629,7 +17640,7 @@ bool lodgenBakeTerrainVt( const EsmWorld & world, const QString & dataRoot,
 			lodgenTexShare( bc, &texShareLock );	// a new generation: no memo holds a texture now
 			lodgenTexEvict( bc, QString() );
 			for ( auto & w : vtWorkers ) {
-				w->land.dropBelow( levels[0].north - ( ty + 2 ) * levels[0].dim );
+				w->land.dropAfterRow( ty, levels[0].north, levels[0].dim );
 				for ( auto f = w->mask.byForm.constBegin(); f != w->mask.byForm.constEnd(); ++f )
 					if ( !maskCache.byForm.contains( f.key() ) )
 						maskCache.resolve( world, dataRoot, f.key() );
@@ -17667,7 +17678,7 @@ bool lodgenBakeTerrainVt( const EsmWorld & world, const QString & dataRoot,
 				return false;
 		rings[0][ty] = std::move( row );
 		// only the cells a later tile row can still reach stay cached
-		landCache.dropBelow( levels[0].north - ( ty + 2 ) * levels[0].dim );
+		landCache.dropAfterRow( ty, levels[0].north, levels[0].dim );
 		msVtWrite += vtPart.restart();
 		if ( !propagate( 0, ty ) )
 			return false;
@@ -17677,11 +17688,27 @@ bool lodgenBakeTerrainVt( const EsmWorld & world, const QString & dataRoot,
 			saveResume( ty + 1 );
 			rsTimer.restart();
 		}
-		if ( lodgenMemLogOn() )
+		if ( lodgenMemLogOn() ) {
+			// CARDMEM2 census: what the pyramid holds after this row
+			qint64 ringBytes = 0;
+			for ( const auto & lv : rings )
+				for ( const auto & r : lv )
+					for ( const LodgenVtStage & st : r )
+						ringBytes += qint64( ( st.colour.size() + st.msn.size() + st.data.size() + st.mask.size()
+							+ st.emissive.size() + st.msnHeights.size() + st.rule.size() ) * 4
+							+ st.height.size() * 2 + ( st.stampNormal.size() + st.stampW.size() ) * 4 );
+			qint64 landCells = landCache.cells.size();
+			for ( const auto & w : vtWorkers )
+				landCells += w->land.cells.size();
 			lodgenMemNote( QStringLiteral( "vt row %1/%2" ).arg( ty + 1 ).arg( levels[0].tilesY ),
-				QStringLiteral( "tiles %1 s, write0 %2 s, propagate %3 s (cumulative)" )
+				QStringLiteral( "tiles %1 s, write0 %2 s, propagate %3 s (cumulative); census tex %4 %5 MB real "
+					"(budget %6 MB) loads %7, land cells %8, rings %9 MB, sheets %10" )
 					.arg( msVtTiles / 1000.0, 0, 'f', 1 ).arg( msVtWrite / 1000.0, 0, 'f', 1 )
-					.arg( msVtProp / 1000.0, 0, 'f', 1 ) );
+					.arg( msVtProp / 1000.0, 0, 'f', 1 ).arg( bc.texCache.size() )
+					.arg( ( bc.texBytes * kLodgenTexBytesPerUnit ) >> 20 )
+					.arg( ( bc.texBudget * kLodgenTexBytesPerUnit ) >> 20 ).arg( bc.texLoads )
+					.arg( landCells ).arg( ringBytes >> 20 ).arg( msnSheets ? msnSheets->chunks.size() : 0 ) );
+		}
 		if ( opts.progress && !opts.progress( opts.progressUser, ty + 1, levels[0].tilesY ) )
 			return fail( QStringLiteral( "cancelled" ) );
 	}

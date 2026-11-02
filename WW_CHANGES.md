@@ -1,3 +1,15 @@
+## CARDMEM2 (2026-11-02): whole-map VT pyramid memory (land caches, texture budget, census)
+
+- Bug fix: the VT land caches (8 workers + the main one) dropped the cell rows SOUTH of the next tile row, the
+  ones still to come, and kept every passed row: the slow climb 15.2 -> 17.6 GB private after row 34 of
+  FARBAKE2's whole-map bake. They now drop the rows north of the next row's reach (src/lodgenbakemem.h
+  lodgenVtLandDrop). Same tiles: a dropped cell is never read again (tests/cardmem: same misses as keep-all).
+- The bake's texture LRU budget counts texels (8 bytes each): the old default 512 Mi units was 4 GiB real
+  ("textures released after vt pyramid" freed 4.2 GB). Default now 2048 MB real; WW_LODGEN_TEXBUDGET_MB sets it.
+  The chunk pass passes its own budget and is unchanged. Same pictures; more texture reloads possible.
+- WW_LODGEN_MEMLOG row lines carry a census: textures (count, real MB, budget, loads), land cells, rings MB, sheets.
+- Red WW_CARDMEM_RED=land | tex | all: the old drop rule / the old budget. Unit: bash tests/cardmem/run.sh <out>.
+
 ## LEANCOMMENTS3R (2026-11-02): lean comments, re-cut on LAND6
 
 - Comment-only (tests/spells/comments_only_check.py: 0 FAIL). LEANCOMMENTS3's trim (LEANCOMMENTS2's 72 files, the
