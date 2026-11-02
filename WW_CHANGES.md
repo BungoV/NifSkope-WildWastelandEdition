@@ -1,3 +1,25 @@
+## INTERIORPERF1 (2026-11-01): the volumetric particles walk their cluster's light list, not every light
+
+TIMING1's Museum of Freedom interior rows ran about 4 fps at every preset: the light loop (lit frames minus unlit
+frames, WW_CELL_PASSTIME_LIGHTLOOP=1) was 106-114 ms, and nearly all of it sat in the SORTED pass (sorted lit/unlit
+110.8/17.7 ms, 114.3/17.4; opaque only 71/60). The surfaces already walk the cluster lists (308 lights, mean list 4.9,
+none over the cap). VOLPART1's lit effect cards and particles (res/shaders/cell_volpart.glsl vpLight) did not: each
+fragment of every overdrawn volumetric card looped over all 308 lights.
+- vpLight now walks `vpLightsBegin( P, posView, n )`, the list of the cluster that holds the point it lights. A particle
+  lights at its sprite's centre, not at the fragment, so the tile comes from posView projected through the draw's
+  projection into volRect (the viewport), not from gl_FragCoord; the slice from P's view depth. The lists are padded past
+  their tiles and slices; every light a list leaves out is past its radius or outside its cone/plane at P, where
+  cellLightE gives exactly 0, and the lists are ascending: the sum is the flat loop's lights in the flat loop's order.
+  Off screen / outside the depth range / no viewport / no lists (WW_CELL_CLUSTER off, or a cluster over the cap): every
+  light, as before.
+- Red: `WW_CELL_VOLPART_RED=flatloop` (bit 1024) = the old loop over every light.
+- Unit: tests/volpartcluster (g++, no Qt, no GL; the real cluster build, the shader's pick mirrored in float):
+  200000 sprite centres per set on 64/308/308/1024-light interior sets, 0 lit lights missing from the picked list;
+  4.4-5.1x fewer lights walked per point (including the 17% of points past the frustum that walk every light). The red
+  (`-DVOLPART_CLUSTER_RED`, the fragment's own pixel as the surfaces pick) misses 777-6521 lights and exits 1.
+- Sweep: the 10 including programs link in base (30), `--extra WW_CELL_RTDDGI --modes none,ubo` (20) and
+  `--extra WW_CELL_PRT` (30), then every program in all three sets (notes/interiorperf1/tools/sweep3.sh).
+
 ## BEAMDRAW1 (2026-11-01): a laser beam draws as one continuous streak
 
 LaserRifleBeamRed.nif drew as about 8 short dashes instead of one beam. The lightning preview tiled the texture along
@@ -27,28 +49,6 @@ src/gamemanager.cpp adds release/Data as the LAST, lowest-priority source of the
 copy of the same name still wins. Only its data folders are read (Textures; Plugins is not one). Red:
 `WW_OWNDATA_RED=1` (launch key: the folder is not added). Gate: tests/owndata1 (the shipped maps + the release copies;
 a release without them fails) and the sky notes' `moon:` part. Our sun disc needs no texture (`discs=ours`).
-## INTERIORPERF1 (2026-11-01): the volumetric particles walk their cluster's light list, not every light
-
-TIMING1's Museum of Freedom interior rows ran about 4 fps at every preset: the light loop (lit frames minus unlit
-frames, WW_CELL_PASSTIME_LIGHTLOOP=1) was 106-114 ms, and nearly all of it sat in the SORTED pass (sorted lit/unlit
-110.8/17.7 ms, 114.3/17.4; opaque only 71/60). The surfaces already walk the cluster lists (308 lights, mean list 4.9,
-none over the cap). VOLPART1's lit effect cards and particles (res/shaders/cell_volpart.glsl vpLight) did not: each
-fragment of every overdrawn volumetric card looped over all 308 lights.
-- vpLight now walks `vpLightsBegin( P, posView, n )`, the list of the cluster that holds the point it lights. A particle
-  lights at its sprite's centre, not at the fragment, so the tile comes from posView projected through the draw's
-  projection into volRect (the viewport), not from gl_FragCoord; the slice from P's view depth. The lists are padded past
-  their tiles and slices; every light a list leaves out is past its radius or outside its cone/plane at P, where
-  cellLightE gives exactly 0, and the lists are ascending: the sum is the flat loop's lights in the flat loop's order.
-  Off screen / outside the depth range / no viewport / no lists (WW_CELL_CLUSTER off, or a cluster over the cap): every
-  light, as before.
-- Red: `WW_CELL_VOLPART_RED=flatloop` (bit 1024) = the old loop over every light.
-- Unit: tests/volpartcluster (g++, no Qt, no GL; the real cluster build, the shader's pick mirrored in float):
-  200000 sprite centres per set on 64/308/308/1024-light interior sets, 0 lit lights missing from the picked list;
-  4.4-5.1x fewer lights walked per point (including the 17% of points past the frustum that walk every light). The red
-  (`-DVOLPART_CLUSTER_RED`, the fragment's own pixel as the surfaces pick) misses 777-6521 lights and exits 1.
-- Sweep: the 10 including programs link in base (30), `--extra WW_CELL_RTDDGI --modes none,ubo` (20) and
-  `--extra WW_CELL_PRT` (30), then every program in all three sets (notes/interiorperf1/tools/sweep3.sh).
-
 ## PERFFIX2 a item 6 (2026-11-01): the light cluster build on one thread, its boxes from the tile edges (same lists)
 
 The cluster lists (LIGHTSYS2 / LIGHTCLUSTER1) are rebuilt on every frame the camera moves, once per kept grid. The live
@@ -317,32 +317,6 @@ themselves only on a miss (an edge, a blended draw, a probe picture).
 - Default: the screen-pass read is ON wherever the volume is on (RTXGI itself still ships as before). Live cost rows and
   the GI default-on proof: DEFAULT-ON OWED until notes/perffix2 hold 1 lands.
 ## PERFFIX1 (2026-11-01): five frame-time wins from PERFRES1101, each ON with its old path as a red
-## TIMING1 (2026-11-01): the timers that were missing, and presets decided per feature
-
-**Frame Timers (no look change).** New zones in the `pass time:` line and the Frame Timers row:
-- `water`: the wind's waves pass + the water's own draws in the sorted pass (its refraction copies included).
-- `ssr-water`: the SSR pass's water rays (step 1b). `ssr-donor`: the SSR pass's second opaque scene pass (SSGI's donor,
-  or the colour when the previous frame cannot stand in). `contact`: the contact mask. `reflections` is now the SSR
-  quads alone (it held all four before).
-- `cloud-shadows` and `far-ground`: cut out of `sun-cascades`, which is now the cascades alone.
-- `precip` (rain / snow), `underwater`, `clouds` (the volume clouds' depth copy and front pass): outside every zone before.
-- `taa`: the temporal AA's colour and depth blits, motion vectors, resolve and copy-back, plus TAAINPUTS1's object
-  vectors, cut out of `post`. The resolve-only `modern temporal aa: gpu` line is unchanged.
-- `WW_CELL_PASSTIME_LIGHTLOOP=1` (live, timing rows only: the picture flickers): every odd timed frame the cell-lit draws
-  get 0 lights; every 60 frames `pass time: light loop lit N unlit M | opaque a/b | ... | loop X ms` gives the light
-  loop's GPU ms (lit minus unlit over opaque + sorted + water + ssr-donor), and each `pass time:` line ends `| lights 1|0`.
-- How: `PassTime::Swap( from, to )` (cellpasstime.h) times a part of the open pass as its own pass and does nothing when
-  another pass is open, so a shared draw path stays in its caller's zone.
-
-**Presets (bungo 11-01, "each feature per preset").** The built-in Low / Medium / High / Ultra no longer turn every
-Fusion Shaders row on (and the heavy ones off at Low). Each row sets what `src/ui/cellpresettable.h` says for that
-preset. A feature enters a column only when its measured GPU ms there meets its PERFRES target. LOD is on at every
-preset. Group masters stay on. Ship-on rows keep their ship value (AO on, Modern TAA High, cached lamp shadows Medium).
-Rows with a method, a source or a curve are left as they are. The table holds the manager's 11-01 plan beside each row,
-and the measured ms and targets with their sources. `cell presets:` in the notes counts rows the table lacks.
-tests/presettable: every row x preset against those rules (red: the old rule, it must fail), plus a coverage check
-that every Fusion Shaders panel row has a table row (red: a row dropped). tests/cellshow keeps testing the step
-mechanics on its own synthetic codes (`wwDisplayPresetCodes`).
 
 bungo 11-01: the biggest frame-time wins from the PERFRES1101 research; reflections from last frame (ruled "Last frame").
 Live before/after ms are owed to hold 1 (queued; rows rvc6 / sea5 / mem / c3 / c3s); the unit tests below are green.
