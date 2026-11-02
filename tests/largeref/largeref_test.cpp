@@ -18,6 +18,11 @@ static const bool STREAMRED = true;
 #else
 static const bool STREAMRED = false;
 #endif
+#ifdef LARGEREF_FLAT_RED	// lane LARGEREF3: over a flat far field a large ref is drawn full beside its far copy
+static const bool FLATRED = true;
+#else
+static const bool FLATRED = false;
+#endif
 
 static int fails = 0;
 static void check( bool ok, const char * what )
@@ -68,7 +73,7 @@ static LargeRef::Row ref( uint32_t f, int x, int y )
 /* lane LARGEREF2: the census walk over a real world's RNAM (tools rnam_dump.py: uint32 length + subrecord, repeated).
  * A 5x5 block slides along routes one cell a step, its cells attaching one at a time as the stream attaches them;
  * after every attach or leave no ref may have two copies, and after every step each wanted ref has exactly one. */
-static int census( const char * path )
+static int census( const char * path, LargeRef::Far far )
 {
 	std::FILE * f = std::fopen( path, "rb" );
 	if ( !f ) {
@@ -89,6 +94,7 @@ static int census( const char * path )
 	}
 	std::fclose( f );
 	LargeRef::Owners o( STREAMRED );
+	o.setFullOutside( LargeRef::fullOutside( far, FLATRED ) );	// lane LARGEREF3: as cellstream.cpp sets it
 	o.setRows( rows );
 	std::set<uint32_t> all;
 	for ( const LargeRef::Row & r : rows )
@@ -101,9 +107,10 @@ static int census( const char * path )
 	std::set<uint32_t> everLayer;
 	auto watch = [&]() {
 		events++;
-		for ( uint32_t r : o.layer() )   // only a layer ref can be a second copy
-			twice += o.copies( r ) > 1 ? 1 : 0;
+		for ( uint32_t r : o.layer() )   // only a layer ref can be a second copy (full + full, or full + far)
+			twice += o.seen( r, far ) > 1 ? 1 : 0;
 	};
+	long farOnly = 0;   // lane LARGEREF3: step x ref seen as its far copy alone while a loaded cell lists it
 	for ( const auto & rt : routes ) {
 		int x = rt[0], y = rt[1];
 		for ( ;; ) {
@@ -127,7 +134,9 @@ static int census( const char * path )
 			for ( uint32_t r : all ) {
 				const bool w = o.wanted( r );
 				wantedN += w ? 1 : 0;
-				bad += o.copies( r ) != ( w ? 1 : 0 );
+				// lane LARGEREF3: with a far field every ref is on screen once (full or far); without, once while wanted
+				bad += far == LargeRef::Far::None ? o.copies( r ) != ( w ? 1 : 0 ) : o.seen( r, far ) != 1;
+				farOnly += w && o.copies( r ) == 0 ? 1 : 0;
 			}
 			stepsBad += bad ? 1 : 0;
 			steps++;
@@ -144,16 +153,28 @@ static int census( const char * path )
 		int( rows.size() ), int( all.size() ), steps, events );
 	std::printf( "census: layer up to %d units (block wanted up to %d large refs), %d refs drawn by a unit at some step\n",
 		int( maxLayer ), int( maxWanted ), int( everLayer.size() ) );
+	/* lane LARGEREF3: the layer's floor follows the far field: ByRef / None must draw units (a layer that never fills
+	 * would pass vacuously); Flat must draw none and show the listed refs by their far copy alone */
+	const bool flat = far == LargeRef::Far::Flat;
+	const bool floor = flat ? ( maxLayer == 0 && farOnly > 0 ) || FLATRED : maxLayer > 0;
+	const bool pass = twice == 0 && stepsBad == 0 && refused == 0 && floor;
+	std::printf( "census: far %s; listed refs shown by the far copy alone %ld step-refs\n",
+		far == LargeRef::Far::None ? "none" : flat ? "flat" : "byref", farOnly );
 	std::printf( "census: refs with two copies after a cell event %ld; steps with a wrong copy count %ld -- %s\n", twice,
-		stepsBad, ( twice == 0 && stepsBad == 0 && refused == 0 && maxLayer > 0 ) ? "PASS" : "FAIL" );
-	return ( twice == 0 && stepsBad == 0 && refused == 0 && maxLayer > 0 ) ? 0 : 1;
+		stepsBad, pass ? "PASS" : "FAIL" );
+	return pass ? 0 : 1;
 }
 
 int main( int argc, char ** argv )
 {
 	std::setvbuf( stdout, nullptr, _IONBF, 0 );
-	if ( argc > 2 && std::strcmp( argv[1], "--rnam" ) == 0 )
-		return census( argv[2] );
+	if ( argc > 2 && std::strcmp( argv[1], "--rnam" ) == 0 ) {	// lane LARGEREF3: [--far byref|flat|none], byref default
+		LargeRef::Far far = LargeRef::Far::ByRef;
+		if ( argc > 4 && std::strcmp( argv[3], "--far" ) == 0 )
+			far = std::strcmp( argv[4], "flat" ) == 0 ? LargeRef::Far::Flat
+				: std::strcmp( argv[4], "none" ) == 0 ? LargeRef::Far::None : LargeRef::Far::ByRef;
+		return census( argv[2], far );
+	}
 	std::vector<LargeRef::Row> rows;
 	// grid (10,-2) lists a tower at (12,-3) and one in its own cell; grid (11,-2) lists the tower again
 	const auto a = rnam( -2, 10, { ref( 0x100, 12, -3 ), ref( 0x101, 10, -2 ) } );
@@ -214,6 +235,40 @@ int main( int argc, char ** argv )
 		}
 		std::printf( "stream walk: %d steps, %d wrong copy counts\n", steps, bad );
 		check( bad == 0, "stream walk: every wanted ref drawn once, never twice" );
+	}
+	// lane LARGEREF3 (LARGEREF-FLAT, ruling a): over a flat far field (flattened rings, the game's .bto) a large ref is
+	// seen by its far copy alone until its own cell loads; never full beside its far copy
+	{
+		using LargeRef::Far;
+		check( LargeRef::farOf( true, false, true, false, true ) == Far::ByRef, "far: ours instanced -> ByRef" );
+		check( LargeRef::farOf( true, false, true, false, false ) == Far::Flat, "far: ours flattened -> Flat" );
+		check( LargeRef::farOf( true, false, false, false, true ) == Far::Flat, "far: the game's .bto -> Flat" );
+		check( LargeRef::farOf( false, false, true, false, true ) == Far::None, "far: far LOD off -> None" );
+		check( LargeRef::farOf( true, true, true, false, true ) == Far::None, "far: NEARONLY -> None" );
+		check( LargeRef::farOf( true, false, true, true, true ) == Far::None, "far: red noobjects -> None" );
+		check( LargeRef::fullOutside( Far::ByRef, false ) && LargeRef::fullOutside( Far::None, false ),
+			"full outside: ByRef and None draw large refs full" );
+		std::vector<LargeRef::Row> own = rows;
+		const auto c = rnam( -3, 12, { ref( 0x100, 12, -3 ) } );
+		LargeRef::decode( c.data(), c.size(), true, own );
+		LargeRef::Owners o( false );
+		o.setFullOutside( LargeRef::fullOutside( Far::Flat, FLATRED ) );
+		o.setRows( own );
+		o.cell( 10, -2, true );
+		check( o.copies( 0x100 ) == 0 && o.farCopy( 0x100, Far::Flat ) == 1 && o.seen( 0x100, Far::Flat ) == 1,
+			"flat: listing cell loaded -> the tower by its far copy alone" );
+		check( o.copies( 0x101 ) == 1 && o.seen( 0x101, Far::Flat ) == 1, "flat: a ref in its own loaded cell -> full once" );
+		o.cell( 12, -3, true );
+		check( o.copies( 0x100 ) == 1 && o.farCopy( 0x100, Far::Flat ) == 0, "flat: its own cell loads -> full, far masked" );
+		o.cell( 12, -3, false );
+		o.cell( 10, -2, false );
+		check( o.seen( 0x100, Far::Flat ) == 1 && o.layer().empty(), "flat: nothing loaded -> the far copy, no layer" );
+		// the ByRef reading of the same walk: full while listed, its far rows hidden
+		LargeRef::Owners b( STREAMRED );
+		b.setRows( own );
+		b.cell( 10, -2, true );
+		check( b.copies( 0x100 ) == 1 && b.farCopy( 0x100, Far::ByRef ) == 0 && b.seen( 0x100, Far::ByRef ) == 1,
+			"byref: listing cell loaded -> full, far rows hidden" );
 	}
 	// lane LARGEREF2 (LARGEREF-INI): the ini line largeRefsWanted reads, through the same reader and arguments
 	{

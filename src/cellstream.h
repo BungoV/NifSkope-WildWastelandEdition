@@ -52,6 +52,7 @@ struct CellStreamSeed
 	std::shared_ptr<EsmWorld> world;    //!< indexed once by the open; only the worker reads it afterwards
 	CellSceneSpec spec;                 //!< resolved (the far stack, the mod pick); terrain/water/grid as asked
 	QString dataRoot;
+	int largeRefFar = 0;                //!< lane LARGEREF3: the open's far objects for the large refs (LargeRef::Far)
 	Vector3 origin;                     //!< every shape's translation (the open's centre cell middle)
 	int rootBlock = -1;
 	int cx = 0, cy = 0;                 //!< the open's centre cell

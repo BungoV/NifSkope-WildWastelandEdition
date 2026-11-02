@@ -1365,10 +1365,16 @@ void cellStreamStart( NifModel * nif, std::shared_ptr<CellStreamSeed> seed )
 	if ( CellFarHide::largeRefsWanted() && seed->world ) {
 		s->lrOn = true;
 		s->lr = LargeRef::Owners( wwEnvStr( "WW_CELL_LARGEREFS_RED" ) == QLatin1String( "streamdouble" ) );
+		/* lane LARGEREF3 (LARGEREF-FLAT, ruling a): over a flat far field the layer draws no unit (the far copy alone until
+		 * the ref's own cell attaches); red WW_CELL_LARGEREFS_RED=flatdouble keeps the layer there too */
+		const bool flatDouble = wwEnvStr( "WW_CELL_LARGEREFS_RED" ) == QLatin1String( "flatdouble" );
+		s->lr.setFullOutside( LargeRef::fullOutside( LargeRef::Far( seed->largeRefFar ), flatDouble ) );
 		s->lr.setRows( seed->world->largeRefRows() );
-		std::fprintf( stderr, "cell stream: large refs on, %d refs in %d RNAM rows%s\n", int( s->lr.refs() ),
+		std::fprintf( stderr, "cell stream: large refs on, %d refs in %d RNAM rows%s%s\n", int( s->lr.refs() ),
 			int( seed->world->largeRefRows().size() ),
-			wwEnvStr( "WW_CELL_LARGEREFS_RED" ) == QLatin1String( "streamdouble" ) ? " (RED streamdouble)" : "" );
+			wwEnvStr( "WW_CELL_LARGEREFS_RED" ) == QLatin1String( "streamdouble" ) ? " (RED streamdouble)" : "",
+			s->lr.fullOutside() ? ( seed->largeRefFar == int( LargeRef::Far::Flat ) ? " (RED flatdouble)" : "" )
+				: "; far objects flat: no layer, the far copy alone" );
 	}
 	s->baseRefs = cellRefTable();
 	s->basePicks = cellPickTableMutable();

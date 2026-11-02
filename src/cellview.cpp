@@ -2957,6 +2957,24 @@ static bool cellBuild( NifModel * nif, const CellSceneSpec & specAsked, CellChun
 		}
 	}
 
+	/* lane LARGEREF3 (LARGEREF-FLAT, ruling a): over a flat far field (our rings flattened, or the game's .bto: cell masks
+	 * only, no per-ref hide) the large refs are NOT drawn full outside their own cells: the far copy alone, the vanilla
+	 * look. Decided here from the far build's own inputs (it runs after the cells). Red WW_CELL_LARGEREFS_RED=flatdouble:
+	 * drawn full beside the far copy (LARGEREF1/2). A streamed cell takes the open's answer. */
+	int largeRefFar = chunk ? chunk->seed->largeRefFar : 0;
+	if ( !chunk && !spec.interior && CellFarHide::largeRefsWanted() ) {
+		QStringList lrSearched;
+		QString lrWhy;
+		largeRefFar = cellFarLodObjectsFar( !cellFarLodl( cellLodWs( spec.world, &world ), dataRoot, lrSearched ).isEmpty(),
+			&lrWhy );
+		fprintf( stderr, "cell large refs: far objects %s: %s\n", qPrintable( lrWhy ),
+			largeRefFar != int( LargeRef::Far::Flat ) ? "drawn full outside the block"
+				: wwEnv( "WW_CELL_LARGEREFS_RED" ) == "flatdouble" ? "drawn full beside their far copies (RED flatdouble)"
+				: "the far copy alone outside their own cells" );
+	}
+	const bool largeRefFull = LargeRef::fullOutside( LargeRef::Far( largeRefFar ),
+		wwEnv( "WW_CELL_LARGEREFS_RED" ) == "flatdouble" );
+
 	int x0, y0, x1, y1;
 	spec.rect( x0, y0, x1, y1 );
 	// lane CELLSTREAM1: what the streamer is handed: the resolved spec (plugins after the far stack and the
@@ -2967,6 +2985,7 @@ static bool cellBuild( NifModel * nif, const CellSceneSpec & specAsked, CellChun
 		seed.world = worldOwn;
 		seed.spec = spec;
 		seed.dataRoot = dataRoot;
+		seed.largeRefFar = largeRefFar;	// lane LARGEREF3
 		x1 = x0 - 1;
 		y1 = y0 - 1;
 		spec.terrain = spec.water = spec.grid = false;
@@ -3415,7 +3434,7 @@ static bool cellBuild( NifModel * nif, const CellSceneSpec & specAsked, CellChun
 					pushRefr( r, int( std::floor( r.pos[0] / CELL_UNITS ) ), int( std::floor( r.pos[1] / CELL_UNITS ) ), pers );
 				}
 			}
-			if ( !chunk && CellFarHide::largeRefsWanted() ) {
+			if ( !chunk && CellFarHide::largeRefsWanted() && largeRefFull ) {	// lane LARGEREF3: not over a flat far field
 				int missing = 0, persist = 0, farthest = 0;
 				for ( const LargeRef::Row & lr : LargeRef::outside( world.largeRefRows(), x0, y0, x1, y1 ) ) {
 					EsmRefr r;
