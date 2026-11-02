@@ -28,6 +28,14 @@
 - Red `WW_CELL_STREAMTEX_RED=off`: every texture tier 0 (PERFFIX4's order); `WW_STREAM1_RED=texpool` still the 5 s timer.
 - Units: tests/texpool/run.sh (tiers_test: a walk over budget with a turning camera, 0 loaded-cell frees and 4200
   reloads vs 9363 and 12106 in PERFFIX4's order; -DTIERS_RED fails) and tests/spells/stream_tex_unit.sh.
+## FARCITYWASH1-PART (FOGENV1, 2026-11-02): the volume particles take the air's veil
+- cell_volpart.glsl vpVeilK (airVeilK's law and guards, on the puff's own GI + ambient scatter) scales the puff's
+  sky-lit share (sun, GI, ambient; thin and thick); lamps keep their level. Before, a daytime puff read ~1/k (about 3x
+  at Overcast noon) over the capped air around it. Uniform `volVeil` set in wwVolPartMediumUniforms (air drawn and not
+  veilphys); the particle dump lists it.
+- Red: the same `WW_CELL_AIR_RED=veilphys` (both physical).
+- Gate tests/farcitywash/volpart_veil_check.py (V1 law in tree, V2 puff = air at the froxel, V3 night bit-equal,
+  V4 veilphys); `--red` (the old puff) fails V2 (old puff / air up to 4.77).
 
 ## FARCITYWASH1 (2026-11-02, landed in LAND6): the air's sky-lit veil at most the records' fog colour (default ON)
 - cell_volair.frag airVeilK: per froxel, the open air's mean in-scatter (the sun's share + the env share) brought DOWN to
