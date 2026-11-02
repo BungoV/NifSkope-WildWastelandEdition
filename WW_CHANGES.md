@@ -159,6 +159,50 @@ ray runs past the soup's edge. The rule it mirrors is in src/reflcensus.h; tests
 ray-plane arithmetic on a square floor, with two reds (`--red lift`: the horizon at d.z < 0.1; `--red noreach`: no far
 plane) and a check that every mirrored literal is still in cellreflprobe.cpp and its two shaders. Nothing in the
 viewer changes.
+## ESPWRITE3 (2026-11-02): move, turn or disable a reference already in an interior cell
+
+- `NifSkope -no-gui espwrite edit <cell.wwcell> <out.esp> [--append] <ref> [move x y z] [turn deg] [disable] ...`
+  writes an override of each ref's winning record: DATA or the 0x800 flag changed, every other subrecord kept, the
+  record written uncompressed. Temporary refs are listed in ONAM. With --append, a ref the file already holds (its
+  own, or an earlier override) is changed in place. It never truly deletes anything.
+- It reads the cell back on the new load order. Each changed ref must appear once, won by the new plugin, at its new
+  pose. Every other ref in the cell must be unchanged.
+- Interior cells only; an exterior cell is refused by name. The cell view has no buttons for it yet.
+- Reds: WW_ESPWRITE_RED=editkeep leaves DATA unchanged, editflag skips 0x800.
+
+## ESPWRITE2 (2026-11-02): place a reference in the cell view and save it as a plugin
+
+The Cell panel gains an "Edits" section (switch WW_CELL_EDIT=0 hides it). Nothing changes until you place something.
+- Place: the button, or Shift+A in the view. A ghost box with a heading line follows the surface under the cursor:
+  depth readback, then a ray-triangle refine on the shapes near the hit (src/cellsurface).
+- Base: XMarkerHeading first, then XMarker, or any EditorID typed in the box. The ID is resolved in the cell's own
+  load order.
+- Turning:
+  - press-drag sets the yaw;
+  - T then a click faces a second point;
+  - the wheel turns 15 degrees, Ctrl+wheel 1;
+  - Yaw is a number field.
+- Align is "Z up" (yaw only) or "Flat on the surface" (up along the hit normal). Ground snap (G) drops a point on a wall
+or ceiling to the floor below.
+- Esc cancels the drop, then leaves Place.
+- Edit list: each placed ref is listed and can be removed.
+- Plugin: a path plus New file / Add to existing, and ESL.
+- Save: Save writes the plugin with src/io/espwrite.
+  - Add to existing keeps every ref already there, with its form id. New ids start past the file's HEDR next id.
+  - The cell then re-opens on the new load order.
+  - The saved .wwcell names the plugin last.
+
+`NifSkope -no-gui espwrite build|yaw|reemit|roundtrip|place` runs the ESPWRITE1 gates and the save on the built exe.
+Reds:
+- WW_CELLSURF_RED=lin reads the depth as linear.
+- WW_CELLEDIT_RED=ghost draws the un-negated euler.
+- WW_ESPWRITE_RED=renumber gives every ref a fresh id on append.
+
+Tests:
+- tests/cellsurface: the unit test.
+- tests/espwrite/celledit_gates.py:
+  - ghost recomputes the AABB and heading tip from the written REFR and the master's OBND;
+  - gap/append checks the "Add to existing" ids.
 
 ## ESPWRITE1 (2026-11-02): the plugin writer for cell edits (no UI yet)
 

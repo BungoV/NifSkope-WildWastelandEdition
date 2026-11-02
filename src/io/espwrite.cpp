@@ -230,6 +230,45 @@ QByteArray joinSubs( const QVector<Sub> & subs )
 	return b;
 }
 
+bool changeRef( const QByteArray & rec, const float * pos, const float * rot, bool disable, QByteArray & out,
+	QString * error )
+{
+	const QByteArray sig = recordSig( rec );
+	if ( sig != "REFR" && sig != "ACHR" ) {
+		fail( error, QStringLiteral( "%1 is a %2, not a REFR / ACHR" ).arg( hex8( recordForm( rec ) ), QString::fromLatin1( sig ) ) );
+		return false;
+	}
+	QByteArray payload;
+	QVector<Sub> subs;
+	if ( !recordPayload( rec, payload, error ) || !splitSubs( payload, subs, error ) )
+		return false;
+	int di = -1;
+	for ( int i = 0; i < subs.size(); i++ )
+		if ( subs[i].tag == "DATA" )
+			di = i;
+	if ( di < 0 || subs[di].data.size() != 24 ) {
+		fail( error, QStringLiteral( "ref %1 has no 24-byte DATA" ).arg( hex8( recordForm( rec ) ) ) );
+		return false;
+	}
+	const QString r = red();
+	if ( r != QLatin1String( "editkeep" ) ) {
+		QByteArray d;
+		for ( int k = 0; k < 6; k++ ) {
+			const float * src = k < 3 ? pos : rot;
+			if ( src )
+				putF32( d, src[k % 3] );
+			else
+				d.append( subs[di].data.mid( 4 * k, 4 ) );
+		}
+		subs[di].data = d;
+	}
+	quint32 fl = recordFlags( rec ) & ~kRecCompressed;
+	if ( disable && r != QLatin1String( "editflag" ) )
+		fl |= kRefDisabled;
+	out = record( sig.constData(), fl, recordForm( rec ), joinSubs( subs ), rec.mid( 16, 8 ) );
+	return true;
+}
+
 // ------------------------------------------------------------------ label rules
 quint32 interiorBlockLabel( quint32 cellForm )
 {
@@ -443,6 +482,8 @@ QString Report::line( const QString & file ) const
  * per-field remap, which this writer refuses by name instead of guessing. */
 static bool sameNumbering( const Plan & plan, const Copied & c, QString * error )
 {
+	if ( c.ours )	// ESPWRITE2 append: a record of the file being extended, already in its numbering
+		return true;
 	int k = c.sourceMasters.size();
 	bool ok = k < plan.masters.size() && plan.masters.at( k ).compare( c.source, Qt::CaseInsensitive ) == 0;
 	for ( int i = 0; ok && i < k; ++i )
@@ -559,7 +600,17 @@ bool build( Plan & plan, QByteArray & out, Report * report, QString * error )
 		fail( error, QStringLiteral( "%1 masters: past the 254 a plugin can name" ).arg( nm ) );
 		return false;
 	}
+	/* ESPWRITE2 append: kept refs keep their ids; new ids start past every kept one and past the old HEDR next id
+	 * (an id is never reused). Red `renumber` = the old rule: every ref takes a fresh id. */
+	const bool renumber = r == QLatin1String( "renumber" );
 	quint32 local = kLightFirst;
+	if ( !renumber ) {
+		local = std::max( local, plan.nextFloor & 0xFFFFFF );
+		for ( const CellEdit & c : plan.cells )
+			for ( const RefAdd & a : c.adds )
+				if ( a.keepForm )
+					local = std::max( local, ( a.keepForm & 0xFFFFFF ) + 1 );
+	}
 	QVector<quint32> onam;
 	QMap<quint32, CellOut> interior;
 	QMap<quint32, WorldOut> worlds;
@@ -578,15 +629,23 @@ bool build( Plan & plan, QByteArray & out, Report * report, QString * error )
 				fail( error, QStringLiteral( "base %1 names no master of this plugin" ).arg( hex8( a.base ) ) );
 				return false;
 			}
-			if ( plan.light && local > kLightLast ) {
-				fail( error, QStringLiteral( "light plugin full: 2048 references; untick ESL" ) );
-				return false;
+			if ( a.keepForm && !renumber ) {
+				if ( ( a.keepForm >> 24 ) != nm ) {
+					fail( error, QStringLiteral( "kept ref %1 is not this plugin's own id" ).arg( hex8( a.keepForm ) ) );
+					return false;
+				}
+				a.formOut = a.keepForm;
+			} else {
+				if ( plan.light && local > kLightLast ) {
+					fail( error, QStringLiteral( "light plugin full: 2048 references; untick ESL" ) );
+					return false;
+				}
+				if ( local > 0xFFFFFF ) {
+					fail( error, QStringLiteral( "plugin full: 16,777,216 ids" ) );
+					return false;
+				}
+				a.formOut = ( nm << 24 ) | local++;
 			}
-			if ( local > 0xFFFFFF ) {
-				fail( error, QStringLiteral( "plugin full: 16,777,216 ids" ) );
-				return false;
-			}
-			a.formOut = ( nm << 24 ) | local++;
 			QByteArray payload = subU32( "NAME", a.base );
 			if ( a.scale != 1.0f ) {
 				QByteArray s;

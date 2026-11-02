@@ -47,6 +47,8 @@ BSD License - see nifskope.h
 #include "gl/shadowset.h"	// lane OPENCELLFIX2: the shadow group's Scene window rows (note 26)
 #include "wwswitch.h"
 #include "cellmodpick.h"
+#include "celledit.h"	// lane ESPWRITE2: the place mode's session and its reopen
+#include "celleditpanel.h"
 
 #include <QAction>
 #include <QActionGroup>
@@ -1638,6 +1640,14 @@ void CellWorkspacePanel::buildUi()
 	};
 	page->addWidget( modPick );
 
+	// ---- lane ESPWRITE2: the Edits section (place a reference, save it as an .esp, re-open the cell with it)
+	if ( cellEditEnabled() ) {
+		refsLay->addWidget( new CellEditPanel( this ) );
+		connect( CellEditBus::instance(), &CellEditBus::reopen, this, [this]( const QString & p ) {
+			emit openCellRequested( p );
+		} );
+	}
+
 	// ---- band 4: the legend (the References tab)
 	page = refsLay;
 	page->addWidget( wwHeading( tr( "Legend" ), this ) );
@@ -1737,6 +1747,8 @@ void CellWorkspacePanel::setGLView( GLView * v )
 		f->setGLView( v );
 		f->refresh();
 	}
+	if ( auto * e = findChild<CellEditPanel *>() )	// lane ESPWRITE2
+		e->setGLView( v );
 }
 
 // ---- readers

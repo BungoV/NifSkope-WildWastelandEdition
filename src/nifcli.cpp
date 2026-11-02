@@ -14,6 +14,8 @@ See the LICENSE.md file for the full license text.
 #include "probeplace.h"
 #include "probealbedo.h"	// lane REDFIX1: gobocensus
 #include "gl/skyplacerun.h"	// lane INTSKY1: skyplace
+
+int cmdEspWrite( const QStringList & args );	// lane ESPWRITE2: src/io/espwritecli.cpp
 #include "cellaodecal.h"	// lane AODECAL1: aobake
 #include "probebake.h"
 #include "pgiwrite.h"
@@ -8133,6 +8135,13 @@ int nifskopeCliMain( const QStringList & args )
 	}
 	if ( cmd == QLatin1String( "skyplace" ) ) {	// lane INTSKY1: every worldspace's sun place, no NIF
 		const int rc = wwSkyPlaceCli( a );
+		out().flush();
+		err().flush();
+		return rc;
+	}
+	if ( cmd == QLatin1String( "espwrite" ) ) {	// lane ESPWRITE2: the plugin writer's gates; no NIF, no model layer
+		out().flush();
+		const int rc = cmdEspWrite( a );
 		out().flush();
 		err().flush();
 		return rc;
