@@ -10,6 +10,18 @@ value, and each ring reaches at least as far as the ring inside it. An Ultra Fal
 before. New notes line: `far lod: ring distances a / b / c / max d (<ini>)`. Pin `WW_CELL_FARLOD_PRESET=low|medium|high|ultra`;
 red `WW_CELL_FARLOD_PRESET_RED=1` (Ultra on every preset). WW_CELL_FARLOD_L0/L1/L2/MAX still override each ring. Both new
 switches are live (liveFarKey). Unit test: tests/farringdist (g++ alone, on the game folder's four preset inis).
+## GISKYTWIN (2026-11-02): the GI's CPU sky matches the drawn sky
+
+The ray-traced GI's physical sky modes (WW_CELL_RTDDGI_SKY=physical / absolute / level) took the sky's colour from a
+CPU copy (src/gl/atmomath.h skyIrradianceAxes) that read +Z R/B 0.87 at CommonwealthClear noon's haze where the drawn
+sky reads 0.53. Three causes, measured on the real shaders offline: 16 midpoint steps over-count the 214 m haze layer
+(0.87 -> 0.78), no multiple scattering (0.78 -> 0.62), and the ground instead of the probes' height (0.62 -> 0.53 at
+90 m). New skyIrradianceAxesDrawn ports the drawn sky itself: its transmittance and MS tables (atmo_transmittance /
+atmo_ms, at the tier's size, built on up to 8 threads, kept while the haze stands), its 30-step march with MS, from the
+soup's median height (64 u steps). Within 0.62 % per channel and 0.005 in R/B of the GPU sky over sun 5..80 deg, haze
+0 / 0.513 / 1.5 /km, 2 m and 90 m (tests/gisky twin; tests/gisky/twin_ref.py renders the reference). The live twin
+takes the haze in 2 % steps; tables 70-300 ms per step, a new sun ~3 ms. Red: WW_CELL_RTDDGI_SKYTWIN_RED=1 (the old
+twin from the ground). Physical sky modes still ship off.
 
 ## REFLPROBECLI1 (TOOLS1101, 2026-11-01): count the reflection probes' below-horizon misses without a window
 

@@ -40,7 +40,9 @@
 #include <thread>
 #include <vector>
 
-bool wwAtmoGiSkyAxes( const float sunTo[3], float out[6][3] );   // FIX1101A: src/gl/atmosphere.cpp (the physical sky's six axes)
+// FIX1101A: src/gl/atmosphere.cpp (the physical sky's six axes); GISKYTWIN: from hKm (the probes' height), the drawn sky's model
+bool wwAtmoGiSkyAxes( const float sunTo[3], float out[6][3], float * trans = nullptr, float hKm = 0.002f );
+bool wwAtmoGiSkyTwinRed();   // GISKYTWIN: WW_CELL_RTDDGI_SKYTWIN_RED=1, the old single-scatter twin from the ground
 
 namespace {
 
@@ -341,6 +343,30 @@ float rtddgiBounceSat()
 	return ok ? std::clamp( s, 0.0f, 1.0f ) : 1.0f;
 }
 
+/* GISKYTWIN: the height the volume's sky is taken from (km above the drawn sky's ground, as atmosphere.cpp's camera:
+ * world z x kUnitKm): the soup's median vertex z (up to 4096 vertices sampled), in 64 u steps (SKY3's rule for the
+ * probes' capture: the probes' height, never the camera's). The haze is a 214 m layer: 2 m vs 90 m moves +Z R/B 0.62 -> 0.53. */
+float rtddgiSkyHeightKm( const ProbeSoup & soup )
+{
+	static const float * seen = nullptr;
+	static size_t seenN = 0;
+	static float km = 0.002f;
+	const size_t nv = soup.tris.size() / 3;
+	if ( soup.tris.data() == seen && soup.tris.size() == seenN )
+		return km;
+	seen = soup.tris.data();
+	seenN = soup.tris.size();
+	if ( !nv )
+		return km = 0.002f;
+	std::vector<float> zs;
+	const size_t step = std::max<size_t>( 1, nv / 4096 );
+	for ( size_t v = 0; v < nv; v += step )
+		zs.push_back( soup.tris[v * 3 + 2] );
+	std::nth_element( zs.begin(), zs.begin() + std::ptrdiff_t( zs.size() / 2 ), zs.end() );
+	const float z = std::round( zs[zs.size() / 2] / 64.0f ) * 64.0f;
+	return km = std::clamp( z * WwAtmoMath::kUnitKm, 0.002f, 80.0f );
+}
+
 //! FIX1101A LATE ITEM 15d: WW_CELL_RTDDGI_SKY=physical (live, ships off): the volume's sky from the physical sky
 bool rtddgiGiSkyPhysical()
 {
@@ -348,6 +374,18 @@ bool rtddgiGiSkyPhysical()
 		return false;
 	const QByteArray v = wwEnv( "WW_CELL_RTDDGI_SKY" ).trimmed().toLower();
 	return v == "physical" || v == "1";
+}
+
+/* GITRUTH1: WW_CELL_RTDDGI_SKY=level (live, ships off): the weather's sky at the physical sky's absolute level against
+ * the frame's sun (atmomath giSkyLevel); =absolute: the physical sky's own colour and shares at that level (giSkyAbsolute).
+ * Reds: unset (the weather's DALC as it is), "physical" (the physical colour anchored to the weather's +Z luminance).
+ * 0 none, 1 level, 2 absolute */
+int rtddgiGiSkyAbsolute()
+{
+	if ( !wwEnvIsSet( "WW_CELL_RTDDGI_SKY" ) )
+		return 0;
+	const QByteArray v = wwEnv( "WW_CELL_RTDDGI_SKY" ).trimmed().toLower();
+	return v == "level" ? 1 : v == "absolute" ? 2 : 0;
 }
 
 //! FIX1101A LATE ITEM 17: WW_CELL_RTDDGI_INTSKY_RED=1 = today's main (an interior's volume may take the weather's sky and sun)
@@ -1569,10 +1607,36 @@ static void volumeFrame( Scene * scene, Cell & c, const CellSpec * spIn, bool du
 	 * WW_CELL_RTDDGI_SKY=physical turns it on. Measured (tests/gisky, CommonwealthClear's DALC, sun 30 deg): the physical
 	 * sides are LESS blue than the weather's (R/B 0.41-0.48 vs 0.34; zenith 0.33 both) and the sun side 1.47x the
 	 * anti-sun side, so it would warm the shade bungo calls tan (LATE ITEM 15): his call. In the build key via sky.amb */
-	if ( sky.on && !lights.interior && rtddgiGiSkyPhysical() ) {
-		float phys[6][3], mixed[6][3];
-		if ( wwAtmoGiSkyAxes( sky.sunTo, phys ) ) {
-			WwAtmoMath::giSkyFromPhysical( phys, sky.amb, mixed );
+	const int absMode = rtddgiGiSkyAbsolute();
+	if ( sky.on && !lights.interior && ( rtddgiGiSkyPhysical() || absMode ) ) {
+		float phys[6][3], mixed[6][3], T[3];
+		const float skyKm = rtddgiSkyHeightKm( *soup );
+		if ( wwAtmoGiSkyAxes( sky.sunTo, phys, T, skyKm ) ) {
+			static float saidKm = -1.0f;
+			if ( skyKm != saidKm ) {
+				saidKm = skyKm;
+				say( c.tag + ( wwAtmoGiSkyTwinRed() ? QStringLiteral( "GI sky: the old single-scatter twin from the ground "
+					"(the red WW_CELL_RTDDGI_SKYTWIN_RED)" ) : QStringLiteral( "GI sky: the drawn sky's model from %1 m (the soup's "
+					"median height; GISKYTWIN)" ).arg( double( skyKm ) * 1000.0, 0, 'f', 0 ) ) );
+			}
+			if ( absMode ) {
+				const float k = absMode == 1 ? WwAtmoMath::giSkyLevel( phys, T, sky.sun, sky.amb, mixed )
+				                             : WwAtmoMath::giSkyAbsolute( phys, T, sky.sun, sky.amb, mixed );
+				static float saidK = -1.0f;
+				if ( std::fabs( k - saidK ) > 1e-5f ) {
+					saidK = k;
+					const float lz = WwAtmoMath::lum( mixed[4] );
+					say( c.tag + QStringLiteral( "sky at the absolute level (GITRUTH1, %4): %1 %5; direct / diffuse "
+						"horizontal %2 (the weather's +Z: %3; IES clear sky ~3.9 at 33.5 deg)" )
+						.arg( double( k ), 0, 'f', 4 )
+						.arg( lz > 1e-9f ? double( WwAtmoMath::lum( sky.sun ) * std::max( sky.sunTo[2], 0.0f ) / lz ) : 0.0, 0, 'f', 2 )
+						.arg( WwAtmoMath::lum( sky.amb[4] ) > 1e-9f ? double( WwAtmoMath::lum( sky.sun ) * std::max( sky.sunTo[2], 0.0f )
+							/ WwAtmoMath::lum( sky.amb[4] ) ) : 0.0, 0, 'f', 2 )
+						.arg( absMode == 1 ? QStringLiteral( "level: the weather's sky x f" ) : QStringLiteral( "absolute: the physical sky x k" ) )
+						.arg( absMode == 1 ? QStringLiteral( "= f" ) : QStringLiteral( "= k = lum(sun) / lum(T(mu))" ) ) );
+				}
+			} else
+				WwAtmoMath::giSkyFromPhysical( phys, sky.amb, mixed );
 			std::memcpy( sky.amb, mixed, sizeof mixed );
 			static float said = -1.0f;
 			if ( std::fabs( mixed[4][2] - said ) > 1e-6f ) {

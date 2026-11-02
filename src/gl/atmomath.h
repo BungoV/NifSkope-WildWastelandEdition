@@ -7,6 +7,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <thread>
 #include <vector>
 
 namespace WwAtmoMath
@@ -286,6 +287,254 @@ inline void skyIrradianceAxes( const float s[3], const float haze[3], float out[
 		for ( int c = 0; c < 3; c++ )
 			out[a][c] = float( acc[a][c] );
 }
+
+/* GISKYTWIN (11-02): the DRAWN sky's own math on the CPU, so the GI's sky is the sky the view shows. skyIrradianceAxes above
+ * (single scattering, 16 view steps from the ground) read +Z R/B 0.87 at CommonwealthClear noon's haze (0.513, 0.214, 0)
+ * where the drawn sky reads 0.53 (notes/giskytwin/RESULTS.md): three causes, each measured on the real shaders:
+ *   - no multiple scattering: the drawn sky adds Hillaire 2020's MS LUT (Psi x scattering), mostly blue; single-scatter
+ *     R/B 0.78 -> 0.62 with it (the haze's single scattering is near-white, its 2nd+ orders take the Rayleigh blue)
+ *   - the quadrature: 16 midpoint steps over a 0.21 km haze scale height over-count the near-white haze (0.87 vs 0.78)
+ *   - the height: the drawn sky stands at the camera (atmosphere.cpp hKm), this at the ground; 90 m up sees a third less
+ *     haze overhead (0.62 -> 0.53)
+ * So this is atmo_transmittance.frag, atmo_ms.frag and atmo_common.glsl atSkyMarch ported 1:1 (the same LUT sizes, uv
+ * maps, sample points and bilinear reads), integrated on the six axes from height hKm. Red: skyIrradianceAxes (today's). */
+inline void skyMedium( float h, const float haze[3], float ozone, float rs[3], float & ms, float e[3] )
+{
+	h = std::max( h, 0.0f );
+	const float dr = std::exp( -h / 8.0f ), dm = std::exp( -h / 1.2f );
+	const float dz = std::max( 0.0f, 1.0f - std::fabs( h - 25.0f ) / 15.0f );
+	const float dh = haze[0] * std::exp( -std::max( h - haze[2], 0.0f ) / std::max( haze[1], 0.02f ) );
+	ms = kMieS * dm + dh * ( 3.996f / 4.40f );
+	for ( int c = 0; c < 3; c++ ) {
+		rs[c] = kRay[c] * dr;
+		e[c] = rs[c] + ( kMieE * dm + dh ) + kOzone[c] * ozone * dz;
+	}
+}
+inline float skyDistTop( float r, float mu )
+{
+	return std::max( 0.0f, -r * mu + std::sqrt( std::max( 0.0f, r * r * ( mu * mu - 1.0f ) + kRt * kRt ) ) );
+}
+inline float skyDistGround( float r, float mu )
+{
+	return std::max( 0.0f, -r * mu - std::sqrt( std::max( 0.0f, r * r * ( mu * mu - 1.0f ) + kRb * kRb ) ) );
+}
+inline bool skyHitsGround( float r, float mu )
+{
+	return mu < 0.0f && r * r * ( mu * mu - 1.0f ) + kRb * kRb >= 0.0f;
+}
+inline float skyUnitToSub( float u, float n ) { return 0.5f / n + u * ( 1.0f - 1.0f / n ); }
+inline float skySubToUnit( float u, float n ) { return ( u - 0.5f / n ) / ( 1.0f - 1.0f / n ); }
+
+struct SkyTables
+{
+	static constexpr int kTW = 256, kTH = 64;
+	int msN = 0;
+	float key[5] = { -1.0f, -1.0f, -1.0f, -1.0f, -1.0f };	// haze x3, ozone, msN
+	std::vector<float> trans, ms;	// rgb rows, row 0 = v 0 (GL's bottom row)
+};
+
+//! GL_LINEAR + clamp-to-edge read of an rgb table at uv
+inline void skyTexel( const std::vector<float> & t, int w, int h, float u, float v, float out[3] )
+{
+	const float x = std::clamp( u * float( w ) - 0.5f, 0.0f, float( w - 1 ) );
+	const float y = std::clamp( v * float( h ) - 0.5f, 0.0f, float( h - 1 ) );
+	const int x0 = int( x ), y0 = int( y ), x1 = std::min( x0 + 1, w - 1 ), y1 = std::min( y0 + 1, h - 1 );
+	const float fx = x - float( x0 ), fy = y - float( y0 );
+	for ( int c = 0; c < 3; c++ ) {
+		const float a = t[size_t( ( y0 * w + x0 ) * 3 + c )], b = t[size_t( ( y0 * w + x1 ) * 3 + c )];
+		const float d = t[size_t( ( y1 * w + x0 ) * 3 + c )], f = t[size_t( ( y1 * w + x1 ) * 3 + c )];
+		const float lo = a + ( b - a ) * fx, hi = d + ( f - d ) * fx;
+		out[c] = lo + ( hi - lo ) * fy;
+	}
+}
+//! atmo_common.glsl atTrans
+inline void skyTrans( const SkyTables & T, float r, float mu, float out[3] )
+{
+	if ( skyHitsGround( r, mu ) ) {
+		out[0] = out[1] = out[2] = 0.0f;
+		return;
+	}
+	const float H = std::sqrt( kRt * kRt - kRb * kRb );
+	const float rho = std::sqrt( std::max( 0.0f, r * r - kRb * kRb ) );
+	const float d = skyDistTop( r, mu ), dmin = kRt - r, dmax = rho + H;
+	skyTexel( T.trans, SkyTables::kTW, SkyTables::kTH, skyUnitToSub( ( d - dmin ) / std::max( dmax - dmin, 1e-6f ), float( SkyTables::kTW ) ),
+		skyUnitToSub( rho / H, float( SkyTables::kTH ) ), out );
+}
+//! atmo_common.glsl atMsUv + the MS read
+inline void skyMs( const SkyTables & T, float r, float mus, float out[3] )
+{
+	const float n = float( T.msN );
+	const float hu = std::clamp( ( r - kRb ) / ( kRt - kRb ), 0.0f, 1.0f );
+	skyTexel( T.ms, T.msN, T.msN, skyUnitToSub( std::clamp( mus * 0.5f + 0.5f, 0.0f, 1.0f ), n ), skyUnitToSub( std::sqrt( hu ), n ), out );
+}
+
+//! rows 0..n-1 of a table on up to 8 threads (each row writes only its own texels)
+template <class F> void skyRows( int n, F && row )
+{
+	const int nt = int( std::max( 1u, std::min( 8u, std::thread::hardware_concurrency() ) ) );
+	std::vector<std::thread> pool;
+	for ( int t = 0; t < nt; t++ )
+		pool.emplace_back( [&row, n, nt, t]() {
+			for ( int j = t; j < n; j += nt )
+				row( j );
+		} );
+	for ( auto & th : pool )
+		th.join();
+}
+
+//! atmo_transmittance.frag + atmo_ms.frag (msN 32 = High+, 16 = Low, atmosphere.cpp); kept while haze, ozone and msN stand
+inline void skyTablesBuild( const float haze[3], float ozone, int msN, SkyTables & T )
+{
+	const float key[5] = { haze[0], haze[1], haze[2], ozone, float( msN ) };
+	if ( std::equal( key, key + 5, T.key ) )
+		return;
+	std::copy( key, key + 5, T.key );
+	T.msN = msN;
+	const int W = SkyTables::kTW, Hh = SkyTables::kTH;
+	T.trans.assign( size_t( W * Hh * 3 ), 0.0f );
+	const float H = std::sqrt( kRt * kRt - kRb * kRb );
+	skyRows( Hh, [&]( int j ) {
+		for ( int i = 0; i < W; i++ ) {
+			const float xm = skySubToUnit( ( float( i ) + 0.5f ) / float( W ), float( W ) );
+			const float xr = skySubToUnit( ( float( j ) + 0.5f ) / float( Hh ), float( Hh ) );
+			const float rho = H * xr, r = std::sqrt( rho * rho + kRb * kRb );
+			const float dmin = kRt - r, dmax = rho + H, dd = dmin + xm * ( dmax - dmin );
+			const float mu = dd == 0.0f ? 1.0f : std::clamp( ( H * H - rho * rho - dd * dd ) / ( 2.0f * r * dd ), -1.0f, 1.0f );
+			const float d = skyDistTop( r, mu ), tm = std::clamp( -r * mu, 0.0f, d );
+			constexpr int N = 40;
+			double od[3] = { 0, 0, 0 };
+			for ( int k = 0; k < N; k++ ) {
+				const float a0 = float( k ) / N, a1 = float( k + 1 ) / N, am = ( a0 + a1 ) * 0.5f;
+				const float tA = tm * ( 1.0f - ( 1.0f - am ) * ( 1.0f - am ) ), wA = tm * ( ( 1.0f - a0 ) * ( 1.0f - a0 ) - ( 1.0f - a1 ) * ( 1.0f - a1 ) );
+				const float tB = tm + ( d - tm ) * am * am, wB = ( d - tm ) * ( a1 * a1 - a0 * a0 );
+				float rs[3], ms, e[3];
+				skyMedium( std::sqrt( r * r + tA * tA + 2.0f * r * mu * tA ) - kRb, haze, ozone, rs, ms, e );
+				for ( int c = 0; c < 3; c++ )
+					od[c] += double( e[c] ) * wA;
+				skyMedium( std::sqrt( r * r + tB * tB + 2.0f * r * mu * tB ) - kRb, haze, ozone, rs, ms, e );
+				for ( int c = 0; c < 3; c++ )
+					od[c] += double( e[c] ) * wB;
+			}
+			for ( int c = 0; c < 3; c++ )
+				T.trans[size_t( ( j * W + i ) * 3 + c )] = float( std::exp( -od[c] ) );
+		}
+	} );
+	T.ms.assign( size_t( msN * msN * 3 ), 0.0f );
+	const float n = float( msN );
+	skyRows( msN, [&]( int j ) {
+		for ( int i = 0; i < msN; i++ ) {
+			const float mus = skySubToUnit( ( float( i ) + 0.5f ) / n, n ) * 2.0f - 1.0f;
+			const float u = skySubToUnit( ( float( j ) + 0.5f ) / n, n );
+			const float r = kRb + std::max( 0.01f, u * u * ( kRt - kRb ) );
+			const float s[3] = { std::sqrt( std::max( 0.0f, 1.0f - mus * mus ) ), 0.0f, mus };
+			constexpr int K = 8, N = 40;
+			double L2[3] = { 0, 0, 0 }, F[3] = { 0, 0, 0 };
+			for ( int a = 0; a < K; a++ )
+				for ( int b = 0; b < K; b++ ) {
+					const float th = 2.0f * kPi * ( float( a ) + 0.5f ) / float( K );
+					const float ph = std::acos( 1.0f - 2.0f * ( float( b ) + 0.5f ) / float( K ) );
+					const float v[3] = { std::sin( ph ) * std::cos( th ), std::sin( ph ) * std::sin( th ), std::cos( ph ) };
+					const bool gnd = skyHitsGround( r, v[2] );
+					const float d = gnd ? skyDistGround( r, v[2] ) : skyDistTop( r, v[2] );
+					double thr[3] = { 1, 1, 1 }, L[3] = { 0, 0, 0 }, f[3] = { 0, 0, 0 };
+					for ( int k = 0; k < N; k++ ) {
+						const float a0 = float( k ) / N, a1 = float( k + 1 ) / N;
+						const float dt = d * ( a1 * a1 - a0 * a0 ), t = d * 0.5f * ( a0 * a0 + a1 * a1 );
+						const float p[3] = { v[0] * t, v[1] * t, r + v[2] * t };
+						const float rp = std::sqrt( p[0] * p[0] + p[1] * p[1] + p[2] * p[2] );
+						float rs[3], ms, e[3], Ts[3];
+						skyMedium( rp - kRb, haze, ozone, rs, ms, e );
+						skyTrans( T, rp, ( p[0] * s[0] + p[2] * s[2] ) / rp, Ts );
+						for ( int c = 0; c < 3; c++ ) {
+							const double sc = double( rs[c] ) + ms, Tst = std::exp( -e[c] * dt );
+							const double ie = 1.0 / std::max( double( e[c] ), 1e-9 );
+							L[c] += thr[c] * ( Ts[c] * sc / ( 4.0 * kPi ) ) * ( 1.0 - Tst ) * ie;
+							f[c] += thr[c] * sc * ( 1.0 - Tst ) * ie;
+							thr[c] *= Tst;
+						}
+					}
+					if ( gnd ) {
+						const float pg[3] = { v[0] * d, v[1] * d, r + v[2] * d };
+						const float lg = std::sqrt( pg[0] * pg[0] + pg[1] * pg[1] + pg[2] * pg[2] );
+						const float c0 = ( pg[0] * s[0] + pg[2] * s[2] ) / lg;
+						float Tg[3];
+						skyTrans( T, kRb + 1e-4f, c0, Tg );
+						for ( int c = 0; c < 3; c++ )
+							L[c] += thr[c] * Tg[c] * std::max( c0, 0.0f ) * 0.3 / kPi;
+					}
+					for ( int c = 0; c < 3; c++ ) {
+						L2[c] += L[c];
+						F[c] += f[c];
+					}
+				}
+			for ( int c = 0; c < 3; c++ ) {
+				const double l2 = L2[c] / ( K * K ), ff = F[c] / ( K * K );
+				T.ms[size_t( ( j * msN + i ) * 3 + c )] = float( l2 / std::max( 1e-4, 1.0 - ff ) );
+			}
+		}
+	} );
+}
+
+//! atmo_common.glsl atSkyMarch (single scattering + the MS term, 30 quadratic steps) for a view ray above the horizon
+inline void skyMarch( const SkyTables & T, const float haze[3], float ozone, float r, const float v[3], const float s[3], double L[3] )
+{
+	const bool gnd = skyHitsGround( r, v[2] );
+	const float d = gnd ? skyDistGround( r, v[2] ) : skyDistTop( r, v[2] );
+	const float cvs = v[0] * s[0] + v[1] * s[1] + v[2] * s[2];
+	const float pr = 3.0f / ( 16.0f * kPi ) * ( 1.0f + cvs * cvs );
+	const float g = kMieG, pm = ( 1.0f - g * g ) / ( 4.0f * kPi * std::pow( std::max( 1e-4f, 1.0f + g * g - 2.0f * g * cvs ), 1.5f ) );
+	constexpr int N = 30;
+	double thr[3] = { 1, 1, 1 };
+	L[0] = L[1] = L[2] = 0.0;
+	float t0 = 0.0f;
+	for ( int i = 0; i < N; i++ ) {
+		const float a = float( i + 1 ) / float( N ), t1 = d * a * a, dt = t1 - t0, t = t0 + dt * 0.5f;
+		t0 = t1;
+		const float p[3] = { v[0] * t, v[1] * t, r + v[2] * t };
+		const float rp = std::sqrt( p[0] * p[0] + p[1] * p[1] + p[2] * p[2] );
+		const float mus = ( p[0] * s[0] + p[1] * s[1] + p[2] * s[2] ) / rp;
+		float rs[3], ms, e[3], Ts[3], M[3];
+		skyMedium( rp - kRb, haze, ozone, rs, ms, e );
+		skyTrans( T, rp, mus, Ts );
+		skyMs( T, rp, mus, M );
+		for ( int c = 0; c < 3; c++ ) {
+			const double S = double( Ts[c] ) * ( rs[c] * pr + ms * pm ) + double( M[c] ) * ( rs[c] + ms );
+			const double Tst = std::exp( -double( e[c] ) * dt );
+			L[c] += thr[c] * S * ( 1.0 - Tst ) / std::max( double( e[c] ), 1e-9 );
+			thr[c] *= Tst;
+		}
+	}
+}
+
+/* the drawn sky's irradiance on the six world axes (+X -X +Y -Y +Z -Z) from height hKm, the sky above the horizon only (as
+ * skyIrradianceAxes: the ground below is the GI's SKYBELOW rule; -Z = 0), sun toward s, sun irradiance 1. Elevations packed
+ * toward the horizon (el = 90 deg u^2: the haze's bright band is a few degrees tall), NE x NA rays of skyMarch. */
+inline void skyIrradianceAxesDrawn( const float s[3], const float haze[3], float hKm, float ozone, SkyTables & T, float out[6][3],
+	int msN = 32, int NE = 24, int NA = 48 )
+{
+	skyTablesBuild( haze, ozone, msN, T );
+	const float r = kRb + std::clamp( hKm, 0.002f, 80.0f );
+	double acc[6][3] = {};
+	for ( int i = 0; i < NE; i++ ) {
+		const double u0 = double( i ) / NE, u1 = double( i + 1 ) / NE, um = 0.5 * ( u0 + u1 );
+		const double el = 0.5 * kPi * um * um, del = 0.5 * kPi * ( u1 * u1 - u0 * u0 );
+		const float ce = float( std::cos( el ) ), se = float( std::sin( el ) );
+		for ( int j = 0; j < NA; j++ ) {
+			const float az = ( float( j ) + 0.5f ) / NA * 2.0f * kPi;
+			const float v[3] = { ce * std::cos( az ), ce * std::sin( az ), se };
+			double L[3];
+			skyMarch( T, haze, ozone, r, v, s, L );
+			const double dw = double( ce ) * del * ( 2.0 * kPi / NA );
+			const double cosA[5] = { std::max( 0.0f, v[0] ), std::max( 0.0f, -v[0] ), std::max( 0.0f, v[1] ), std::max( 0.0f, -v[1] ), v[2] };
+			for ( int a = 0; a < 5; a++ )
+				for ( int c = 0; c < 3; c++ )
+					acc[a][c] += L[c] * cosA[a] * dw;
+		}
+	}
+	for ( int a = 0; a < 6; a++ )
+		for ( int c = 0; c < 3; c++ )
+			out[a][c] = float( acc[a][c] );
+}
 /* FIX1101A: the GI's sky from the physical sky: each axis takes the physical irradiance's colour and its share against
  * +Z, scaled so +Z keeps the weather's own luminance there (the exposure the weather was tuned with); -Z keeps the
  * weather's (the ground's light, not the sky's). Red (the caller's): the weather's DALC as it was. */
@@ -296,6 +545,38 @@ inline void giSkyFromPhysical( const float phys[6][3], const float weather[6][3]
 	for ( int a = 0; a < 6; a++ )
 		for ( int c = 0; c < 3; c++ )
 			out[a][c] = ( a == 5 || k <= 0.0f ) ? weather[a][c] : phys[a][c] * k;
+}
+/* GITRUTH1: the GI's sky from the physical sky at its ABSOLUTE level against the sun: phys is per unit top-of-atmosphere
+ * sun irradiance, the frame's sun is that sun's transmittance T(mu) x a scale (Sunlight From Sky: x the imagespace
+ * Sunlight Scale), so the sky takes the same scale k = lum(sun) / lum(T). -Z keeps the weather's (the ground's light).
+ * giSkyFromPhysical anchors +Z to the weather's luminance instead: direct / diffuse horizontal 7.5 at a 33.5 deg sun,
+ * where the IES clear sky gives 3.9 and this model 3.8 (notes/gitruth1/RESULTS.md section 4). Returns k (0 = unusable,
+ * out = the weather's). */
+inline float giSkyAbsolute( const float phys[6][3], const float T[3], const float sun[3], const float weather[6][3], float out[6][3] )
+{
+	const float lt = lum( T ), ls = lum( sun );
+	const float k = ( lt > 1e-9f && ls > 0.0f ) ? ls / lt : 0.0f;
+	for ( int a = 0; a < 6; a++ )
+		for ( int c = 0; c < 3; c++ )
+			out[a][c] = ( a == 5 || k <= 0.0f ) ? weather[a][c] : phys[a][c] * k;
+	return k;
+}
+/* GITRUTH1: only the LEVEL from the physical sky: the weather's own sky (its colour and its axis shares) times one factor
+ * f so +Z takes the physical sky's absolute luminance (giSkyAbsolute's +Z). The level is the input both sky models agree
+ * is wrong (direct / diffuse 7.5 against 3.8); the colour is not settled (the CPU single-scatter twin reads +Z R/B 0.87 at
+ * noon's haze where the drawn sky reads 0.53), so this keeps the weather's. -Z the weather's. Returns f (0 = unusable).
+ * GISKYTWIN: the live twin is now skyIrradianceAxesDrawn (R/B 0.527 there, within 0.6 % of the GPU sky); the old one is
+ * the red WW_CELL_RTDDGI_SKYTWIN_RED=1. Which colour the GI takes stays bungo's call (absolute vs level). */
+inline float giSkyLevel( const float phys[6][3], const float T[3], const float sun[3], const float weather[6][3], float out[6][3] )
+{
+	float ab[6][3];
+	const float k = giSkyAbsolute( phys, T, sun, weather, ab );
+	const float lw = lum( weather[4] );
+	const float f = ( k > 0.0f && lw > 1e-9f ) ? lum( ab[4] ) / lw : 0.0f;
+	for ( int a = 0; a < 6; a++ )
+		for ( int c = 0; c < 3; c++ )
+			out[a][c] = ( a == 5 || f <= 0.0f ) ? weather[a][c] : weather[a][c] * f;
+	return f;
 }
 
 /* the ambient's tint: the weather's ambient luminance kept, its colour turned by the sky irradiance's colour now
