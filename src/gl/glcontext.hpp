@@ -145,7 +145,7 @@ public:
 		void clear();
 
 		QString cacheFile;	// lane PERF1: the program binary cache file of this source, empty when off
-		int linkFrom = 0;	// 0 none, 1 linked from the source, 2 loaded from the cache
+		int linkFrom = 0;	// 0 none, 1 linked from the source, 2 loaded from the cache, 3 waiting for a COLDLINK1 worker
 		bool wwShadowFrame = false;	// lane PERF3: reads the cascades from the wwShadowFrame block (binding 2)
 		bool wwBindless = false;	// lane BINDLESS2: a *bl.prog twin (maps and matrices from the per-draw row)
 		int wwDrawIdLoc = -1;	// its wwDrawIdx uniform
@@ -437,6 +437,8 @@ protected:
 	// lane PERF1: the program binary cache (empty: off, WW_PROGCACHE=0) and its counts for the load line
 	QString	programCacheDir;
 	int	programCacheHits = 0, programCacheRejected = 0, programCacheWritten = 0;
+	// lane COLDLINK1: WW_COLDLINK=<n> links the programs the cache missed on n threads with shared contexts (0: serial)
+	int	coldLinkWorkers = 0;
 	AllocBuffers	shaderDataBuf;
 };
 
