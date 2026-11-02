@@ -44,7 +44,10 @@ QString wwCellPrecipEcho();
  * (shore wetness only, no rain wetness, dry SSR flags). Census on stderr: "rain wet: ...".
  * Lane FO76WEATHER2: a top-down cover map (gl/rainwetlaw.h exposed) keeps ground under roofs and bridges dry: solid
  * shapes without the terrain, 8192 u around the eye at 16 u texels, unit WwCellUnit::RainCover. Red
- * WW_CELL_RAINWET_RED=nocover: no cover test (FO76WEATHER1). Census "rain wet: cover map ...". */
+ * WW_CELL_RAINWET_RED=nocover: no cover test (FO76WEATHER1). Census "rain wet: cover map ...".
+ * Lane WETSNAP1: the game's snap (rainwetlaw.h update): indoors, or when neither weather of the change rains, the
+ * amount is 0 at once (the census adds "(snap: no rain in the change)"). A pinned amount does not snap. Red
+ * WW_CELL_RAINWET_RED=nosnap: the slow dry in every case (FO76WEATHER2). */
 //! the amount this frame (0 off, red, indoors or dry)
 float wwCellRainWetAmount( Scene * scene );
 //! the current program's rainWet uniform; custom porosity from the material (BGSM bCustomPorosity / fPorosityValue)

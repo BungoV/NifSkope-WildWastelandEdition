@@ -329,9 +329,11 @@ void rwSay( RwState & s, const QString & e )
 	}
 }
 
-//! the rain's share of the weather (a change: both, by pct); snow does not wet
-float rwTarget( Scene * scene, bool & interior )
+//! the rain's share of the weather (a change: both, by pct); snow does not wet. rainNow / rainPrev: the current weather
+//! rains, the leaving one rains while a change runs (lane WETSNAP1, the game's snap)
+float rwTarget( Scene * scene, bool & interior, bool & rainNow, bool & rainPrev )
 {
+	rainNow = rainPrev = false;
 	const WwCellLighting * CL = wwCellLightsFor( scene->nifModel );
 	interior = CL && CL->interior;
 	if ( interior )
@@ -343,6 +345,8 @@ float rwTarget( Scene * scene, bool & interior )
 	float pct = 1.0f;
 	if ( !wwLookdevWeatherPrecip( t, d, f, blending, pct ) )
 		return 0.0f;
+	rainNow = WwPrecip::spgdKind( t[0] ) == WwPrecip::SpgdRain;
+	rainPrev = blending && WwPrecip::spgdKind( t[1] ) == WwPrecip::SpgdRain;
 	const double one[2] = { 1.0, 1.0 };
 	double rain = 0.0, snow = 0.0;
 	WwRainFog::shares( t, one, blending, double( pct ), true, rain, snow );
@@ -469,7 +473,8 @@ float wwCellRainWetAmount( Scene * scene )
 	}
 	s.memoMs = now;
 	bool interior = false;
-	const float target = rwTarget( scene, interior );
+	bool rainNow = false, rainPrev = false;
+	const float target = rwTarget( scene, interior, rainNow, rainPrev );
 	WW_SWITCH_STATIC( QByteArray, pin, wwEnv( "WW_CELL_RAINWET_AMOUNT" ).trimmed() );
 	bool pinOk = false;
 	const float pinned = pin.isEmpty() ? 0.0f : pin.toFloat( &pinOk );
@@ -478,8 +483,9 @@ float wwCellRainWetAmount( Scene * scene )
 		s.init = true;
 		s.doc = scene->nifModel;
 		s.wet = s.target;
-	} else {
-		s.wet = WwRainWet::step( s.wet, s.target, float( now - s.lastMs ) * 0.001f );
+	} else {	// lane WETSNAP1: the game's snap to dry (red nosnap = the FO76WEATHER1 slow dry in every case)
+		s.wet = WwRainWet::update( s.wet, s.target, float( now - s.lastMs ) * 0.001f, rainNow, rainPrev, !interior,
+			red != "nosnap" );
 	}
 	s.lastMs = now;
 	s.moving = s.wet != s.target;
@@ -496,9 +502,11 @@ float wwCellRainWetAmount( Scene * scene )
 	} else {
 		s.coverWhy = QString();
 	}
-	rwSay( s, QStringLiteral( "rain wet: %1 target %2%3%4%5" ).arg( double( s.wet ), 0, 'f', 2 ).arg( double( s.target ), 0, 'f', 2 )
+	rwSay( s, QStringLiteral( "rain wet: %1 target %2%3%4%5%6" ).arg( double( s.wet ), 0, 'f', 2 ).arg( double( s.target ), 0, 'f', 2 )
 		.arg( interior ? QStringLiteral( " (interior)" ) : QString() )
-		.arg( pinOk ? QStringLiteral( " (WW_CELL_RAINWET_AMOUNT)" ) : QString() ).arg( s.coverWhy ) );
+		.arg( pinOk ? QStringLiteral( " (WW_CELL_RAINWET_AMOUNT)" ) : QString() ).arg( s.coverWhy )
+		.arg( red == "nosnap" ? QStringLiteral( " (RED WW_CELL_RAINWET_RED=nosnap)" )
+			: !pinOk && !interior && WwRainWet::snaps( rainNow, rainPrev, true ) ? QStringLiteral( " (snap: no rain in the change)" ) : QString() ) );
 	return s.wet;
 }
 

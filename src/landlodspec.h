@@ -74,6 +74,13 @@ inline float wetStep( float wet, bool raining, float dt )
 	return raining ? std::min( wet + 0.03f * dt, 1.0f ) : std::max( wet - 0.02f * dt, 0.0f );
 }
 
+//! lane WETSNAP1: the game's whole step: wetStep, then 0 indoors or when neither weather of the change is rain
+inline float wetUpdate( float wet, bool rainNow, bool rainPrev, bool exterior, float dt )
+{
+	wet = wetStep( wet, rainNow, dt );
+	return ( !exterior || ( !rainNow && !rainPrev ) ) ? 0.0f : wet;
+}
+
 //! lane LANDSPEC2: the land pre-pass writes its reflection (SSR) flag only on wet ground; dry land has none
 inline bool landSsr( float wet )
 {
