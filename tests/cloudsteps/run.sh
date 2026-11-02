@@ -17,6 +17,14 @@ git show 563dcf97:src/gl/cloudvol.cpp > "$S/base/cloudvol.cpp" 2>/dev/null && {
 	"$PY" -I tests/spells/cloudsteps_check.py "$S/w" --only W --src "$S/base" < /dev/null > "$S/red_wiring.log" 2>&1
 	rc=$?; echo "red wiring (base 563dcf97) rc=$rc (want 1)"; [ $rc -eq 1 ] || fail=1
 }
+# lane CLOUDSTEPS2: Ultra 96 -> 128; red ultra96 (the dump keeps 96) fails E on Ultra; wiring red = 4c9ea88e's cloudvol.cpp
+"$PY" -I tests/spells/cloudsteps_check.py "$S/u96" --red ultra96 --only E < /dev/null > "$S/red_ultra96.log" 2>&1
+rc=$?; echo "red ultra96 rc=$rc (want 1)"; [ $rc -eq 1 ] || fail=1
+mkdir -p "$S/base2"
+git show 4c9ea88e:src/gl/cloudvol.cpp > "$S/base2/cloudvol.cpp" 2>/dev/null && {
+	"$PY" -I tests/spells/cloudsteps_check.py "$S/w2" --only W --src "$S/base2" < /dev/null > "$S/red_wiring2.log" 2>&1
+	rc=$?; echo "red wiring (base 4c9ea88e) rc=$rc (want 1)"; [ $rc -eq 1 ] || fail=1
+}
 "$PY" -I tests/cloudband/stage_check.py src/wwswitchstages.inc WW_CLOUDVOL_MORESTEPS
 rc=$?; echo "stage rc=$rc (want 0)"; [ $rc -eq 0 ] || fail=1
 git show 563dcf97:src/wwswitchstages.inc > "$S/base/stages.inc" 2>/dev/null && {

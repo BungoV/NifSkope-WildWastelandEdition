@@ -7,6 +7,9 @@
 #endif
 #ifdef WW_CELLLIGHTS
 #define WW_CELL_PBR 1
+#ifndef WW_CELL_GI_MARCH_COPIES	// red (tests/spells/pbrm_headroom.sh): a march copy per call site, the old shader
+#define WW_CELL_GI_MARCH_ONCE 1	// lane PBRMCSMHEADROOM: the march (PRT red + march red) once a fragment, as fo4_default
+#endif
 #define CELL_GI_ONEREAD 1	// DDGIREADPERF1: one volume read site (cellGiFirst in main, cell_lights.glsl)
 #include "cell_lights.glsl"
 #include "cell_ao.glsl"
@@ -620,6 +623,12 @@ void main()
 		Surface sw = s;
 		sw.N = cellWorldDir( s.N );
 		vec3 Vw = cellWorldDir( V );
+#if defined( WW_CELL_GI_MARCH ) && defined( WW_CELL_GI_MARCH_ONCE )
+		// lane PBRMCSMHEADROOM: the one GI read, at the (P, N) every later caller passes (cellPassOut's nonormal red: up)
+		if ( cellGiOn )
+			cellGiMarchPrime( Pw, cellPass > 0 && cellPass != 6 && cellProbe == 0 && ( cellPassRed & 2 ) != 0
+			                      ? vec3( 0.0, 0.0, 1.0 ) : sw.N );
+#endif
 		vec3 cDiff = vec3( 0.0 ), cSpec = vec3( 0.0 ), cE = vec3( 0.0 );
 		vec3 farF, farGP;	// the real lights fade over the band, the surfels take over (diffuse only)
 		float farW = cellFarTerms( Pw, sw.N, farF, farGP );

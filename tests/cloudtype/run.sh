@@ -19,6 +19,14 @@ git show 563dcf97:src/gl/cloudmap.cpp > "$S/base/cloudmap.cpp" 2>/dev/null && gi
 	"$PY" -I tests/spells/cloudtype_check.py "$S/w" --only W --src "$S/base" < /dev/null > "$S/red_wiring.log" 2>&1
 	rc=$?; echo "red wiring (base 563dcf97) rc=$rc (want 1)"; [ $rc -eq 1 ] || fail=1
 }
+# lane CLOUDTYPE3: dry Rainy-flag weathers typed Cloudy; red rainflag (CLOUDTYPE2's rule) fails P; wiring red = 4c9ea88e
+"$PY" -I tests/spells/cloudtype_check.py "$S/rf" --red rainflag --only P < /dev/null > "$S/red_rainflag.log" 2>&1
+rc=$?; echo "red rainflag rc=$rc (want 1)"; [ $rc -eq 1 ] || fail=1
+mkdir -p "$S/base2"
+git show 4c9ea88e:src/gl/cloudmap.cpp > "$S/base2/cloudmap.cpp" 2>/dev/null && git show 4c9ea88e:src/gl/cloudvol.cpp > "$S/base2/cloudvol.cpp" 2>/dev/null && {
+	"$PY" -I tests/spells/cloudtype_check.py "$S/w2" --only W --src "$S/base2" < /dev/null > "$S/red_wiring2.log" 2>&1
+	rc=$?; echo "red wiring (base 4c9ea88e) rc=$rc (want 1)"; [ $rc -eq 1 ] || fail=1
+}
 "$PY" -I tests/cloudband/stage_check.py src/wwswitchstages.inc WW_CLOUDVOL_TYPERULE
 rc=$?; echo "stage rc=$rc (want 0)"; [ $rc -eq 0 ] || fail=1
 git show 563dcf97:src/wwswitchstages.inc > "$S/base/stages.inc" 2>/dev/null && {

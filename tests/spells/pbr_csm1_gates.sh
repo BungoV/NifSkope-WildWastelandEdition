@@ -53,7 +53,7 @@ while [ $# -gt 0 ]; do
 		*) echo "unknown argument $1"; exit 2 ;;
 	esac
 done
-DATA="/e/Tools/Fallout 4/DataUnpacked/Data"
+DATA="${PBR_CSM1_DATA:-/e/Tools/Fallout 4/DataUnpacked/Data}"  # SKYCLOUD1101: a folder holding the cube (no unpacked Data here)
 GAME="${PBR_CSM1_GAME:-/x/Programs/Steam/steamapps/common/Fallout 4/Data}"
 PBRDATA="$ROOT/tests/fixtures/pbr_r2a_data"
 CUBE="$DATA/Meshes/Architecture/Quarry/QryCube01.nif"
@@ -70,7 +70,10 @@ case "$OUT" in /[a-z]/*) ;; *) echo "REFUSED: --out must resolve to a drive path
 [ -f "$OLD/NifSkope.exe" ] || { echo "REFUSED: no rung $OLD/NifSkope.exe"; exit 2; }
 [ -f "$GAME/Fallout4.esm" ] || { echo "REFUSED: no Fallout4.esm in $GAME"; exit 2; }
 [ -f "$CUBE" ] || { echo "REFUSED: no known-answer caster $CUBE"; exit 2; }
-python "$HERE/pbr_r2a_fixtures.py" > /dev/null || exit 2
+# SKYCLOUD1101: only the duct parts need the duct fixture (it reads the unpacked Data's duct mesh + texture)
+if [ -z "$ONLY" ] || [[ "$ONLY" =~ ,(place|off|live|pics), ]]; then
+	python "$HERE/pbr_r2a_fixtures.py" > /dev/null || exit 2
+fi
 
 REDPIN=""
 KERNEL="$ARM/shaders/ww_sunshadow.glsl"
@@ -152,13 +155,13 @@ V8="WW_RENDER_VIEW=8 $GRD"
 TOP="WW_RENDER_VIEW=1 WW_RENDER_FOV=30 WW_RENDER_CENTER=-356,-100,-256 $GRD"
 
 # shellcheck disable=SC2086
-if want fit && aimed flipsun nofloor nosnap onecascade wrongsplit; then
+if want fit && aimed flipsun nofloor nosnap onecascade wrongsplit stablefit; then
 	echo "fit"
 	shot "$ARM" fit_11 "$CUBE" $V8 WW_LOOKDEV_HOUR=11 $ON $REDPIN
 	shot "$ARM" fit_1730 "$CUBE" $V8 WW_LOOKDEV_HOUR=17.5 $ON $REDPIN
 fi
 # shellcheck disable=SC2086
-if want foot && aimed flipsun nosnap onecascade wrongsplit; then
+if want foot && aimed flipsun nosnap onecascade wrongsplit stablefit; then
 	echo "foot"
 	for fd in 0:600: 1:2000: 2:5000:WW_CSM_DISTANCE=8000; do
 		IFS=: read -r i dist extra <<< "$fd"
@@ -174,7 +177,7 @@ if want seam && aimed noblend wrongsplit; then
 	shot "$ARM" seam_p5 "$CUBE" $V8 WW_LOOKDEV_HOUR=12 WW_CSM_PROBE=5 $ON $REDPIN
 fi
 # shellcheck disable=SC2086
-if want acne && aimed nobias bigbias flipsun; then
+if want acne && aimed nobias bigbias flipsun offbias; then
 	echo "acne"
 	# top-down, 1500 up, over a point 450 units down-sun of the cube (the sun law's
 	# horizontal travel at that hour): the shadow and the ground at the base of the faces
