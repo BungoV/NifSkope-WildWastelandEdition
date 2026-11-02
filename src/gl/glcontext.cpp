@@ -724,6 +724,9 @@ bool NifSkopeOpenGLContext::Program::finishLink( NifSkopeOpenGLContext * context
 				f->glProgramUniform1i( id, l, WwCellUnit::FarStream );
 			if ( linkFrom == 2 ) {
 				context->programCacheHits++;
+				// a hit stamps its binary, so the prune keeps the most recently used (gl/progcachekeep.h; WW_PROGCACHE_TOUCH_RED=1 = no stamp)
+				if ( !cacheFile.isEmpty() && wwProgCacheTouchOn( qgetenv( "WW_PROGCACHE_TOUCH_RED" ) ) )
+					wwProgCacheTouch( cacheFile );
 			} else if ( !cacheFile.isEmpty() ) {
 				GLint	len = 0;
 				f->glGetProgramiv( id, GL_PROGRAM_BINARY_LENGTH, &len );

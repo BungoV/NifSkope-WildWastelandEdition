@@ -1,3 +1,12 @@
+## BUGS1102F (2026-11-02): the shader cache keeps the most recently USED binaries
+
+- **Shader cache (SHOTCAPS-MTIME):** the prune keeps the newest binaries of a program by file time, but a cache hit
+  never changed the file time, so a define set used on every launch (the default rows) aged like one used once and was
+  pushed out by a run of rare define sets. A hit now stamps its binary's modification time (src/gl/progcachekeep.h
+  `wwProgCacheTouch`, called from finishLink once the driver accepted the binary), so the prune keeps the most
+  recently used. `WW_PROGCACHE_TOUCH_RED=1` is the red (no stamp: the newest written stay). Unit: tests/progcachekeep
+  `lru` case (set A every other launch, keep+2 rare sets between: A links once; the red links it 3 times and fails).
+
 ## BUGS1102C (2026-11-02): the shader cache keeps one binary a define set; rainfog2 unit follows the precip enum
 
 - **Shader cache (SHOTCAPS-COLD):** a program's cached binary is keyed on its sources after the switch defines
