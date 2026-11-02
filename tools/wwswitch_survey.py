@@ -69,6 +69,8 @@ OVERRIDES = {
     'WW_CELL_FARLOD_L1': ('live', 'rebuilt in place (live section)'),
     'WW_CELL_FARLOD_L2': ('live', 'rebuilt in place (live section)'),
     'WW_CELL_FARLOD_TREE_DIST': ('live', 'rebuilt in place (live section)'),
+    'WW_CELL_FARLOD_PRESET': ('live', 'in liveFarKey, rebuilt in place (live section, FARPRESET1)'),
+    'WW_CELL_FARLOD_PRESET_RED': ('live', 'in liveFarKey, rebuilt in place (live section, FARPRESET1)'),
     'WW_CELL_FARLOD_RINGS': ('live', 'rebuilt in place (live section)'),
     'WW_CELL_FARLOD_BUDGET_MB': ('live', 'rebuilt in place (live section)'),
     'WW_CELL_FARLOD_OURS': ('live', 'rebuilt in place (live section)'),

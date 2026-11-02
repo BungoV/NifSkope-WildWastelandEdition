@@ -285,6 +285,8 @@
 { "WW_CELL_FARLOD_NEAR", 0, "- | hand: wwCellFarLodNear: re-read per frame" },
 { "WW_CELL_FARLOD_NEARONLY", 0, "src/cellfarlod.cpp:365 cellFarLodAppend | hand: rebuilt in place (live section); it refuses the bake stack (CELLUNI5), so a changed near stack owes a reopen" },
 { "WW_CELL_FARLOD_OURS", 0, "src/cellfarlod.cpp:496 cellFarLodAppend | hand: rebuilt in place (live section)" },
+{ "WW_CELL_FARLOD_PRESET", 0, "src/cellfarlod.cpp:136 farRingCfg | hand: in liveFarKey, rebuilt in place (live section, FARPRESET1)" },
+{ "WW_CELL_FARLOD_PRESET_RED", 0, "src/cellfarlod.cpp:138 farRingCfg | hand: in liveFarKey, rebuilt in place (live section, FARPRESET1)" },
 { "WW_CELL_FARLOD_RED", 0, "src/cellfarlod.cpp:1496 wwCellFarLodFrame | hand: rebuilt in place (live section); a stack red that changes the near stack owes a reopen" },
 { "WW_CELL_FARLOD_RINGS", 0, "- | hand: rebuilt in place (live section)" },
 { "WW_CELL_FARLOD_SHORE", 0, "src/btdterrain.cpp:3652 lodlFarWaterGridEnv | hand: rebuilt in place (live section)" },

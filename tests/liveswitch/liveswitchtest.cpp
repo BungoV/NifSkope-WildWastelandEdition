@@ -51,7 +51,8 @@ int main()
 
 	// the converted switches classify live (a relaunch here would make the runner launch per row)
 	for ( const char * n : { "WW_CELL_FARLOD_RED", "WW_CELL_PROBES_HIDE", "WW_SHADOWCACHE", "WW_CSM_ECHO", "WW_GPUDRIVEN",
-			"WW_GPUDRIVEN_B", "WW_CELL_FARLOD_L0", "WW_CELL_FARLOD_NEARONLY" } ) {
+			"WW_GPUDRIVEN_B", "WW_CELL_FARLOD_L0", "WW_CELL_FARLOD_NEARONLY",
+			"WW_CELL_FARLOD_PRESET", "WW_CELL_FARLOD_PRESET_RED" } ) {	// lane FARPRESET1
 		const bool live = wwSwitchStageOf( n ) == WwSwitchStage::Live;
 		std::printf( "%s %s live\n", live ? "PASS" : "FAIL", n );
 		g_fail += live ? 0 : 1;

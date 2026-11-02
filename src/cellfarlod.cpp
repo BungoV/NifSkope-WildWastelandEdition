@@ -10,6 +10,8 @@ BSD License - see nifskope.h
 #include "btdterrain.h"
 #include "cellfarstackrule.h"	// lane CELLUNI5: the bake stack's refusals
 #include "cellfarvanilla.h"
+#include "cellmodsource.h"	// lane FARPRESET1: the game's ini chain (cellGameIniFloat)
+#include "farringdist.h"	// lane FARPRESET1: the ring distances of the player's preset
 #include "esmdata.h"
 #include "esmwater.h"
 #include "impostorchunk.h"
@@ -114,6 +116,60 @@ float envFloat( const char * name, float fallback )
 	bool ok = false;
 	const float v = wwEnvStr( name ).toFloat( &ok );
 	return ok ? v : fallback;
+}
+
+/* lane FARPRESET1 (GFXR-GEO G2): the rings reach the player's preset distances, [TerrainManager]
+ * fBlockLevel0/1/2Distance + fBlockMaximumDistance from the game's ini chain (the preset writes them into
+ * Fallout4Prefs.ini; Low 15000/25000/75000/100000 .. Ultra 60000/90000/110000/250000), as the game does. A key no ini
+ * sets keeps today's Ultra value. Pin WW_CELL_FARLOD_PRESET=low|medium|high|ultra (the game's preset ini values);
+ * red WW_CELL_FARLOD_PRESET_RED=1 = Ultra on every preset (the old rule). WW_CELL_FARLOD_L0/L1/L2/MAX still win
+ * per ring. Read at each far build (a live set rebuilds the section). */
+struct FarRingCfg
+{
+	FarRingDist::Dist d;
+	QString from;
+};
+
+FarRingCfg farRingCfg()
+{
+	FarRingCfg c;
+	const QByteArray pin = wwEnv( "WW_CELL_FARLOD_PRESET" ).trimmed();
+	const int pinned = pin.isEmpty() ? -1 : FarRingDist::presetByName( pin.toStdString() );
+	if ( wwEnv( "WW_CELL_FARLOD_PRESET_RED" ).trimmed() == "1" ) {
+		c.from = QStringLiteral( "RED: Ultra on every preset" );
+	} else if ( pinned >= 0 ) {
+		c.d = FarRingDist::preset( pinned );
+		c.from = QStringLiteral( "pinned WW_CELL_FARLOD_PRESET=%1" ).arg( QString::fromLatin1( pin ) );
+	} else {
+		QStringList from;
+		QString f;
+		auto rd = [&]( const char * key, float & v ) {
+			f.clear();
+			v = cellGameIniFloat( "[TerrainManager]", key, v, &f );
+			if ( !f.isEmpty() && !from.contains( f ) )
+				from << f;
+		};
+		rd( "fBlockLevel0Distance", c.d.l0 );
+		rd( "fBlockLevel1Distance", c.d.l1 );
+		rd( "fBlockLevel2Distance", c.d.l2 );
+		rd( "fBlockMaximumDistance", c.d.max );
+		c.d = FarRingDist::ordered( c.d );
+		c.from = from.isEmpty() ? QStringLiteral( "unset in the inis: Ultra" ) : from.join( QStringLiteral( ", " ) );
+	}
+	QStringList over;
+	auto env = [&]( const char * n, float & v ) {
+		if ( wwEnvIsSet( n ) ) {
+			v = envFloat( n, v );
+			over << QString::fromLatin1( n );
+		}
+	};
+	env( "WW_CELL_FARLOD_L0", c.d.l0 );
+	env( "WW_CELL_FARLOD_L1", c.d.l1 );
+	env( "WW_CELL_FARLOD_L2", c.d.l2 );
+	env( "WW_CELL_FARLOD_MAX", c.d.max );
+	if ( !over.isEmpty() )
+		c.from += QStringLiteral( "; pinned %1" ).arg( over.join( QLatin1Char( ',' ) ) );
+	return c;
 }
 
 int floorDiv( int a, int b )
@@ -371,7 +427,7 @@ QString cellFarLodAppend( NifModel * nif, const QModelIndex & iRoot, const EsmWo
 		fd.by0 = by0;
 		fd.bx1 = bx1;
 		fd.by1 = by1;
-		fd.reach = envFloat( "WW_CELL_FARLOD_MAX", 250000.0f );
+		fd.reach = farRingCfg().d.max;	// lane FARPRESET1: the preset's fBlockMaximumDistance
 		docs().insert( nif, fd );
 		say( QStringLiteral( "far lod: NEARONLY -- the planes alone, reach %1 units, near %2" )
 			.arg( double( fd.reach ), 0, 'f', 0 ).arg( wwCellFarLodNear( 0.0 ), 0, 'f', 2 ) );
@@ -393,12 +449,16 @@ QString cellFarLodAppend( NifModel * nif, const QModelIndex & iRoot, const EsmWo
 		return L.join( QLatin1Char( '\n' ) ) + QLatin1Char( '\n' );
 	}
 
-	/* The game's distances (Fallout4Prefs.ini): fBlockLevel0Distance 60000, Level1 90000, Level2 110000,
-	 * fBlockMaximumDistance 250000. Each ring reaches its level's distance in cells from the block center. */
-	const float d0 = envFloat( "WW_CELL_FARLOD_L0", 60000.0f );
-	const float d1 = envFloat( "WW_CELL_FARLOD_L1", 90000.0f );
-	const float d2 = envFloat( "WW_CELL_FARLOD_L2", 110000.0f );
-	const float dMax = envFloat( "WW_CELL_FARLOD_MAX", 250000.0f );
+	/* The game's distances: fBlockLevel0/1/2Distance, fBlockMaximumDistance of the player's preset (lane FARPRESET1;
+	 * before: Ultra's 60000 / 90000 / 110000 / 250000 on every preset). Each ring reaches its level's distance in
+	 * cells from the block center. */
+	const FarRingCfg ringCfg = farRingCfg();
+	const float d0 = ringCfg.d.l0;
+	const float d1 = ringCfg.d.l1;
+	const float d2 = ringCfg.d.l2;
+	const float dMax = ringCfg.d.max;
+	say( QStringLiteral( "far lod: ring distances %1 / %2 / %3 / max %4 (%5)" ).arg( double( d0 ), 0, 'f', 0 )
+		.arg( double( d1 ), 0, 'f', 0 ).arg( double( d2 ), 0, 'f', 0 ).arg( double( dMax ), 0, 'f', 0 ).arg( ringCfg.from ) );
 	/* No tree cut by default: fTreeLoadDistance is the FULL trees' reach, the game's tree LOD lives in the
 	 * .bto out to fBlockMaximumDistance. WW_CELL_FARLOD_TREE_DIST=<units> puts a cut back; 0 = none. */
 	const float treeDist = std::max( 0.0f, envFloat( "WW_CELL_FARLOD_TREE_DIST", 0.0f ) );
