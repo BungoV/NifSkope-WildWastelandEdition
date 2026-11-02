@@ -101,7 +101,8 @@ struct VaState
 	/* lane FOGLEAK1 (fog lit where no light reaches; only under the loader's WW_CELL_FOGLEAK, cell_volair.frag
 	 * WW_AIR_LEAK): reds WW_CELL_AIR_RED= 1 dalcenv (the env share the flat weather ambient), 2 nosungate (the sun past
 	 * the cascades unshadowed), 4 lightleak (unshadowed lights / the pixel ReSTIR ratio in the air), 8 nofartailshadow
-	 * (the far grid's tail without the sun's shadow) */
+	 * (the far grid's tail without the sun's shadow), 16 nointsungate (lane INTGI1: an unlit interior's directional in
+	 * the air without the volume's gate, as before) */
 	int leakRed = 0;
 	// lane PERFFIX3 reds (WW_CELL_AIR_RED=ask / sunpcf / f32): the uniforms and the GL state asked from the driver, the
 	// sun's shadow in the air through the surfaces' filter, the volumes RGBA32F; each the pass as before
@@ -163,7 +164,8 @@ VaState & vs()
 			s.sphereTop = s.sphereTop || r == "spheretop";
 			s.sunColumn = s.sunColumn || r == "suncolumn";	// lane FIX1101A
 			s.envHue = s.envHue || r == "envhue";	// lane FIX1101A
-			s.leakRed |= r == "dalcenv" ? 1 : r == "nosungate" ? 2 : r == "lightleak" ? 4 : r == "nofartailshadow" ? 8 : 0;	// lane FOGLEAK1
+			s.leakRed |= r == "dalcenv" ? 1 : r == "nosungate" ? 2 : r == "lightleak" ? 4 : r == "nofartailshadow" ? 8
+				: r == "nointsungate" ? 16 : 0;	// lane FOGLEAK1, INTGI1
 			s.askRed = s.askRed || r == "ask";
 			s.sunPcf = s.sunPcf || r == "sunpcf";
 			s.f32 = s.f32 || r == "f32";

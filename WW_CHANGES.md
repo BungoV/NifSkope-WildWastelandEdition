@@ -1,3 +1,13 @@
+## INTGI1 (2026-11-02): the air's sun gate indoors (FOGLEAK1-INT)
+
+Under WW_CELL_FOGLEAK + WW_CELL_RTDDGI (both off by default), FOGLEAK1's fix 2 now runs in an interior that is not
+sunlit too. Such a cell has no shadow map for its lighting template's directional, so its share in the air takes the
+traced volume's gate alone (the miss share toward it): an opening (the museum's open top) keeps the beam, a closed room's
+air loses it; the walls' bounce of it still reaches the air through fix 1's env share. The surfaces keep the directional
+unshadowed, as vanilla. Red `WW_CELL_AIR_RED=nointsungate` (bit 16) gives indoors as before; `nosungate` now drops
+the gate indoors and outdoors. tests/fogleak/fogleak_check.py gains gate I (closed room: air sun 0 inside; open room:
+unchanged). With the switches off the shader binaries are identical.
+
 ## REFLPROBECLI1 (TOOLS1101, 2026-11-01): count the reflection probes' below-horizon misses without a window
 
 `nifskope -no-gui reflcensus --soup <soup.psp> (--camera x,y,z ... | --auto N) [--interior] [--out probes.tsv]` places

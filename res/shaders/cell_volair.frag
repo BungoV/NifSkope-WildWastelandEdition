@@ -21,7 +21,7 @@
  * keeps the old path as a red bit of volLeakRed (cellvolair.cpp WW_CELL_AIR_RED= dalcenv / nosungate / lightleak) */
 #if defined( WW_CELL_FOGLEAK ) && defined( WW_CELL_RTDDGI )
 #define WW_AIR_LEAK 1
-uniform int volLeakRed;		// 1 dalcenv, 2 nosungate, 4 lightleak, 8 nofartailshadow (lookdev_fog.glsl: volAirFlags 256)
+uniform int volLeakRed;		// 1 dalcenv, 2 nosungate, 4 lightleak, 8 nofartailshadow (lookdev_fog.glsl: volAirFlags 256), 16 nointsungate (INTGI1)
 #endif
 #include "lookdev_fog.glsl"
 #include "ww_sunshadow.glsl"
@@ -115,7 +115,8 @@ vec3 airLeakEnv( vec3 P, vec3 dW, out float fade )
 	airLeakSun = 1.0;
 	// read only for a term that takes it: the ambient (fix 1) or the sun outdoors (fix 2)
 	bool needEnv = ( volTerms & 8 ) != 0 && ( volLeakRed & 1 ) == 0;
-	bool needSun = ( volTerms & 1 ) != 0 && cellHasDir && !cellInterior && ( volLeakRed & 2 ) == 0;
+	// lane INTGI1 (FOGLEAK1-INT): indoors too (an unlit interior's directional; a sunlit one already shades as outdoors)
+	bool needSun = ( volTerms & 1 ) != 0 && cellHasDir && ( volLeakRed & ( cellInterior ? 18 : 2 ) ) == 0;
 	if ( !cellDdgiOn || !( needEnv || needSun ) )
 		return vec3( 0.0 );
 	vec3 sd = needSun ? normalize( cellDirTo ) : vec3( 0.0, 0.0, 1.0 );
@@ -568,8 +569,12 @@ vec3 airSun( vec3 posView, vec3 dirView, float z )
 		if ( hard > 0.0 )
 			vis = mix( vis, min( vis, airSunMapVis( posView ) ), hard );
 #ifdef WW_AIR_LEAK
-		if ( !cellInterior )
-			vis = airLeakSunGate( posView, vis );	// lane FOGLEAK1 fix 2
+		/* lane FOGLEAK1 fix 2. lane INTGI1 (FOGLEAK1-INT, a ruling): an interior that is not sunlit (cellInterior; a
+		 * sunlit one shades as outdoors) has no shadow map for its lighting template's directional, so no cover: its
+		 * share in the air takes the volume's gate alone (the miss share toward it: an opening such as the museum's open
+		 * top keeps it, a closed room's air loses the beam; the bounce of it off the walls still reaches the air through
+		 * fix 1's env share). The surfaces keep the directional unshadowed, as vanilla. Red nointsungate: indoors as before */
+		vis = cellInterior ? min( vis, airLeakSun ) : airLeakSunGate( posView, vis );
 #endif
 		float Ts = airTupSun( z, to.z );	// lane FIX1101A: the ground layer only (red suncolumn: the whole column)
 		if ( volDriftSun && volDrift.x > 0.0 )	// lane WEATHERBLEND4: the sun's light through the drifting air
