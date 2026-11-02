@@ -16,6 +16,13 @@
  *   stage 2  integrate: L_k = L_(k-1) + T_(k-1) x inj_k.rgb, T_k = T_(k-1) x inj_k.a. */
 
 #define WW_CELL_FX 1
+/* lane FOGLEAK1 (fog lit where no light reaches, notes/fogleak-r/RESEARCH.md): the leak fix, compiled only under the
+ * loader's WW_CELL_FOGLEAK (off by default) and only with the ray-traced volume to read (WW_CELL_RTDDGI). Each fix
+ * keeps the old path as a red bit of volLeakRed (cellvolair.cpp WW_CELL_AIR_RED= dalcenv / nosungate / lightleak) */
+#if defined( WW_CELL_FOGLEAK ) && defined( WW_CELL_RTDDGI )
+#define WW_AIR_LEAK 1
+uniform int volLeakRed;		// 1 dalcenv, 2 nosungate, 4 lightleak, 8 nofartailshadow (lookdev_fog.glsl: volAirFlags 256)
+#endif
 #include "lookdev_fog.glsl"
 #include "ww_sunshadow.glsl"
 #include "cell_lights.glsl"
@@ -87,6 +94,201 @@ layout ( location = 1 ) out vec4 volMrt[7];	// stage 3: layers volLayer + 1 .. +
 #define AZ_TINT( q ) * azTintQ[q]
 #else
 #define AZ_TINT( q )
+#endif
+
+#ifdef WW_AIR_LEAK
+/* lane FOGLEAK1 fix 2: the volume's gate on the sun at this froxel, set once a froxel by airLeakEnv (airRest runs
+ * before the sub-steps' airSun); 1 = no gate (no volume, the red nosungate) */
+float airLeakSun = 1.0;
+
+/* lane FOGLEAK1 fix 1: the env share from the ray-traced volume. The six-axis cube's L0 + L1 scatter (volCubeScatter)
+ * needs only the irradiance at +dW and -dW: for an L1 field (2/3) sum E = 2 (E+ + E-) and sum (E+a - E-a) dW.a =
+ * E+ - E-. One walk of the 8 probes round P (the cascades dense to coarse by their tight fade, as cellDdgiRead walks
+ * them) with ONE weight a probe, trilinear x Chebyshev toward P (a froxel has no normal: no backface weight, no bias;
+ * fix 3's weights), reading each probe's tile at +dW, -dW and (fix 2) its sky visibility toward the sun. Two
+ * cellDdgiRead calls cost 2.3 ms more on the offline 160 x 90 x 64 inject (tests/fogleak/fogleak_check.py C), this
+ * walk 16 fetches a probe instead of 26. Returns fade x the scatter in the ambient's unit (E / pi, as cellLit's
+ * gi = cellGiE / pi); fade = the volume's cover (the flat ambient takes 1 - fade, as on the surfaces) */
+vec3 airLeakEnv( vec3 P, vec3 dW, out float fade )
+{
+	fade = 0.0;
+	airLeakSun = 1.0;
+	// read only for a term that takes it: the ambient (fix 1) or the sun outdoors (fix 2)
+	bool needEnv = ( volTerms & 8 ) != 0 && ( volLeakRed & 1 ) == 0;
+	bool needSun = ( volTerms & 1 ) != 0 && cellHasDir && !cellInterior && ( volLeakRed & 2 ) == 0;
+	if ( !cellDdgiOn || !( needEnv || needSun ) )
+		return vec3( 0.0 );
+	vec3 sd = needSun ? normalize( cellDirTo ) : vec3( 0.0, 0.0, 1.0 );
+	vec3 Ep = vec3( 0.0 ), Em = vec3( 0.0 );
+	float vs = 0.0, left = 1.0;
+#ifdef WW_CELL_RTDDGI_CASCADES
+	for ( int c = 0; c < cellDdgiCount && left > 0.0; c++ ) {
+		cellDdgiC = c;
+		vec4 O = cellDdgiCOrigin[c], S = cellDdgiCStep[c];
+		ivec4 Dm = cellDdgiCDims[c];
+		int base = cellDdgiCBase[c];
+		float tight = 1.0;
+#else
+	for ( int c = 0; c < 1; c++ ) {
+		vec4 O = cellDdgiOrigin, S = cellDdgiStep;
+		ivec4 Dm = cellDdgiDims;
+		int base = 0;
+		float tight = 0.0;
+#endif
+		vec3 g = ( P - O.xyz ) / S.xyz;
+		ivec3 b = clamp( ivec3( floor( g ) ), ivec3( 0 ), max( Dm.xyz - 2, ivec3( 0 ) ) );
+		vec3 a = clamp( g - vec3( b ), 0.0, 1.0 );
+		vec3 e = min( g, vec3( Dm.xyz - 1 ) - g ) - tight;
+		float fd = clamp( min( e.x, min( e.y, e.z ) ), 0.0, 1.0 );
+		if ( fd <= 0.0 )
+			continue;
+		vec3 sp = vec3( 0.0 ), sm = vec3( 0.0 );
+		float sv = 0.0, ws = 0.0, cover = 0.0;
+		for ( int k = 0; k < cellGiLoop8; k++ ) {
+			ivec3 o = ivec3( k % 2, ( k / 2 ) % 2, k / 4 );
+			ivec3 q = min( b + o, Dm.xyz - 1 );
+			int p = q.x + Dm.x * ( q.y + Dm.y * q.z );
+			vec4 pr = texelFetch( cellDdgiAtlas, base + 192 * Dm.w + p );
+			vec3 t = mix( vec3( 1.0 ) - a, a, vec3( o ) );
+			float w = t.x * t.y * t.z;
+			int st = int( pr.w + 0.5 );
+			if ( st != 2 ) {	// cellDdgiRead's cover: Off keeps its share, a missing probe does not
+				cover += st == 0 ? w : 0.0;
+				continue;
+			}
+			cover += w;
+			vec3 bp = O.xyz + vec3( q ) * S.xyz + pr.xyz - P;
+			float rr = length( bp );
+			if ( rr > 0.0 ) {
+				vec4 m = cellDdgiTile( p, bp * ( -1.0 / rr ), 16 );
+				w *= cellDdgiChebyshev( rr, m.x, m.y );
+			}
+			vec4 ea = cellDdgiTile( p, dW, 8 );
+			sp += pow( max( ea.rgb, vec3( 0.0 ) ), vec3( 2.5 ) ) * w;
+			if ( needEnv ) {
+				vec4 eb = cellDdgiTile( p, -dW, 8 );
+				sm += pow( max( eb.rgb, vec3( 0.0 ) ), vec3( 2.5 ) ) * w;
+			}
+			if ( needSun )
+				sv += cellDdgiTile( p, sd, 8 ).w * w;
+			ws += w;
+		}
+		if ( ws <= 0.0 )
+			continue;
+		float take = fd * min( cover, 1.0 ) * left;
+		vec3 mp = sp / ws, mm = sm / ws;
+		Ep += take * mp * mp;
+		Em += take * mm * mm;
+		vs += take * sv / ws;
+		left -= take;
+	}
+	float f = 1.0 - left;
+	if ( f <= 0.0 )
+		return vec3( 0.0 );
+	// fix 2 (a ruling, RESULTS.md): sky visibility toward the sun 0.1 -> 0 .. 0.4 -> 1 (open ground reads 0.6+)
+	if ( needSun )
+		airLeakSun = mix( 1.0, clamp( ( vs / f - 0.1 ) * ( 1.0 / 0.3 ), 0.0, 1.0 ), f );
+	if ( !needEnv )
+		return vec3( 0.0 );
+	fade = f;
+	Ep *= 2.0 / f;	// the read's decode: mean^2 x 2 pi, then / pi to the ambient's unit
+	Em *= 2.0 / f;
+	return f * 0.25 * max( 2.0 * ( Ep + Em ) + 3.0 * volGi.w * ( Ep - Em ), vec3( 0.0 ) ) * volGi.rgb;
+}
+
+/* fix 2: past the cascades' reach (their fade, as airSunMapVis weighs it) the sun takes the volume's gate; inside it
+ * the shadow map stays the verdict */
+float airLeakSunGate( vec3 posView, float vis )
+{
+	if ( ( volLeakRed & 2 ) != 0 || airLeakSun >= 1.0 )
+		return vis;
+	float cover = 0.0;
+	if ( volCsm && -posView.z * csmParams.x <= csmParams.y + csmParams.w ) {
+		float s = clamp( dot( posView, posView ) * csmParams.x * csmParams.x / ( csmParams.y * csmParams.y ), 0.0, 1.0 );
+		float s2 = s * s;
+		cover = 1.0 - s2 * s2;
+	}
+	return mix( min( vis, airLeakSun ), vis, cover );
+}
+
+/* fix 3: does light position Lp reach P, by the volume's depth: the 8 probes round P weighted as the read weighs them
+ * (trilinear x Chebyshev toward P), each probe's Chebyshev toward Lp over r - D / 2 (a lamp inside its own fixture,
+ * a ruling); the cascades dense to coarse by their tight fade; past the volume 1 (unshadowed, as before) */
+float airLeakLightVis( vec3 P, vec3 Lp )
+{
+	if ( !cellDdgiOn )
+		return 1.0;
+	float vis = 0.0, left = 1.0;
+#ifdef WW_CELL_RTDDGI_CASCADES
+	for ( int c = 0; c < cellDdgiCount && left > 0.0; c++ ) {
+		cellDdgiC = c;
+		vec4 O = cellDdgiCOrigin[c], S = cellDdgiCStep[c];
+		ivec4 Dm = cellDdgiCDims[c];
+		int base = cellDdgiCBase[c];
+		float tight = 1.0;
+#else
+	for ( int c = 0; c < 1; c++ ) {
+		vec4 O = cellDdgiOrigin, S = cellDdgiStep;
+		ivec4 Dm = cellDdgiDims;
+		int base = 0;
+		float tight = 0.0;
+#endif
+		vec3 g = ( P - O.xyz ) / S.xyz;
+		ivec3 b = clamp( ivec3( floor( g ) ), ivec3( 0 ), max( Dm.xyz - 2, ivec3( 0 ) ) );
+		vec3 a = clamp( g - vec3( b ), 0.0, 1.0 );
+		vec3 e = min( g, vec3( Dm.xyz - 1 ) - g ) - tight;
+		float fade = clamp( min( e.x, min( e.y, e.z ) ), 0.0, 1.0 );
+		if ( fade <= 0.0 )
+			continue;
+		float v = 0.0, ws = 0.0;
+		for ( int k = 0; k < cellGiLoop8; k++ ) {
+			ivec3 o = ivec3( k % 2, ( k / 2 ) % 2, k / 4 );
+			ivec3 q = min( b + o, Dm.xyz - 1 );
+			int p = q.x + Dm.x * ( q.y + Dm.y * q.z );
+			vec4 pr = texelFetch( cellDdgiAtlas, base + 192 * Dm.w + p );
+			if ( int( pr.w + 0.5 ) != 2 )
+				continue;
+			vec3 pp = O.xyz + vec3( q ) * S.xyz + pr.xyz;
+			vec3 t = mix( vec3( 1.0 ) - a, a, vec3( o ) );
+			float w = t.x * t.y * t.z;
+			vec3 bp = pp - P;
+			float rr = length( bp );
+			if ( rr > 0.0 ) {
+				vec4 m = cellDdgiTile( p, bp * ( -1.0 / rr ), 16 );
+				w *= cellDdgiChebyshev( rr, m.x, m.y );
+			}
+			vec3 bl = Lp - pp;
+			float rl = length( bl );
+			float cl = 1.0;
+			if ( rl > 0.0 ) {
+				vec4 m = cellDdgiTile( p, bl * ( 1.0 / rl ), 16 );
+				cl = cellDdgiChebyshev( max( rl - 0.5 * O.w, 0.0 ), m.x, m.y );
+			}
+			v += w * cl;
+			ws += w;
+		}
+		if ( ws <= 0.0 )
+			continue;
+		float take = fade * left;
+		vis += take * v / ws;
+		left -= take;
+	}
+	return vis + left;
+}
+
+// fix 3: light i's factor in the air: 1 for a light whose shadow cube is drawn (its map is the verdict), else the
+// volume's (an unshadowed light; every light under ReSTIR, whose pixel ratio the air no longer reads: cellShadowF)
+float airLeakLightK( int i, vec3 P, vec3 Lp )
+{
+	if ( ( volLeakRed & 4 ) != 0 )
+		return 1.0;
+	vec4 t4 = texelFetch( cellLights, i * CELL_TPL + 4 );
+	bool cubed = cellShadowOn && t4.y > 0.5 && t4.x > -0.5;
+#ifdef WW_CELL_RESTIR
+	cubed = cubed && !cellRestirOn;
+#endif
+	return cubed ? 1.0 : airLeakLightVis( P, Lp );
+}
 #endif
 
 /* lane FOGDRIFT1: the density factor at distance t along dirView, around 1 (the texture's exact mean subtracted, so
@@ -365,6 +567,10 @@ vec3 airSun( vec3 posView, vec3 dirView, float z )
 		float hard = airSunGate( cellWorldPos( posView ), to );
 		if ( hard > 0.0 )
 			vis = mix( vis, min( vis, airSunMapVis( posView ) ), hard );
+#ifdef WW_AIR_LEAK
+		if ( !cellInterior )
+			vis = airLeakSunGate( posView, vis );	// lane FOGLEAK1 fix 2
+#endif
 		float Ts = airTupSun( z, to.z );	// lane FIX1101A: the ground layer only (red suncolumn: the whole column)
 		if ( volDriftSun && volDrift.x > 0.0 )	// lane WEATHERBLEND4: the sun's light through the drifting air
 			Ts = pow( Ts, airDriftSunK( posView, z, to.z ) );
@@ -475,6 +681,9 @@ vec3 airRest( vec3 posView, vec3 dirView, float z, float sA, float sB, out vec3 
 				vec3 e = cellLightE( i, Pl, L, Lo, noSpec ) * cellFogK( i );	// N = L: no N.L, the shadow lifted toward the light
 				if ( all( equal( e, vec3( 0.0 ) ) ) )
 					continue;
+#ifdef WW_AIR_LEAK
+				e *= airLeakLightK( i, P, t0.xyz + volLightShift );	// lane FOGLEAK1 fix 3
+#endif
 				J += e * exp( -airOd( z, t0.z + zOff, d ) ) * volPhasePi( dot( L, dW ) );
 				continue;
 			}
@@ -503,9 +712,17 @@ vec3 airRest( vec3 posView, vec3 dirView, float z, float sA, float sB, out vec3 
 					continue;
 				Ji += e * exp( -airOd( Pk.z + zOff, t0.z + zOff, d ) ) * volPhasePi( dot( L, dW ) );
 			}
+#ifdef WW_AIR_LEAK
+			if ( any( greaterThan( Ji, vec3( 0.0 ) ) ) )	// lane FOGLEAK1 fix 3
+				Ji *= airLeakLightK( i, P, t0.xyz + volLightShift );
+#endif
 			J += Ji * ( 0.25 * ( s1 - s0 ) / max( sB - sA, 1e-6 ) );
 		}
 	}
+#ifdef WW_AIR_LEAK
+	float leakFade;
+	vec3 Jddgi = airLeakEnv( P, dW, leakFade );	// lane FOGLEAK1 fixes 1 + 2 (also sets airLeakSun)
+#endif
 	bool wantGi = ( volTerms & 4 ) != 0 && cellGiOn && ( volRed & 2 ) == 0;
 	bool ambDalc = cellInterior ? cellHasDalc : cellExtDalc;
 	bool wantAmb = ( volTerms & 8 ) != 0 && ambDalc && !( cellInterior && cellGiAmb == 2 );
@@ -538,7 +755,11 @@ vec3 airRest( vec3 posView, vec3 dirView, float z, float sA, float sB, out vec3 
 		vec3 A[6];
 		for ( int a = 0; a < 6; a++ )
 			A[a] = cellAmbient( axes[a], P ) * ( replace ? 1.0 - share[a] : 1.0 );
+#ifdef WW_AIR_LEAK
+		Jenv += volCubeScatter( A, dW ) * ( 1.0 - leakFade ) + Jddgi;	// lane FOGLEAK1 fix 1: the volume where it covers
+#else
 		Jenv += volCubeScatter( A, dW );
+#endif
 	}
 	return J;
 }
@@ -586,6 +807,9 @@ void airLightsQ( vec3 posView, vec3 dirView, float z, float sA, float sB, int ne
 		if ( s1 <= s0 )
 			continue;
 		float share = ( s1 - s0 ) / max( sB - sA, 1e-6 );
+#ifdef WW_AIR_LEAK
+		share *= airLeakLightK( i, P, t0.xyz + volLightShift );	// lane FOGLEAK1 fix 3
+#endif
 		for ( int k = 0; k < 4; k++ ) {
 			if ( ( need & ( 1 << k ) ) == 0 )
 				continue;

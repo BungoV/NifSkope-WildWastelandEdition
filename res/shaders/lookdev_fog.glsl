@@ -383,6 +383,95 @@ vec4 wwVolTex( vec3 p, bool xyOnly )
 	return g0.z * a + g1.z * b;
 }
 
+#ifdef WW_CELL_FOGLEAK
+/* lane FOGLEAK1 (fix 4, the loader's WW_CELL_FOGLEAK only): the far grid's closed-form tail took no sun shadow
+ * (wwVolAirAtFar), the near grid's did. Both grids' heads below end where their tail starts, and ONE tail takes the
+ * sun's shadow for either (one wwAirTailShadow call site: a second inlined copy would tip the programs at the limit).
+ * volAirFlags 256 off (red WW_CELL_AIR_RED=nofartailshadow): the far grid's tail unshadowed, as before */
+bool wwVolAirFarHead( float d, vec2 uv, vec3 posView, out vec4 o, out vec3 J, out float far )
+{
+	J = vec3( 0.0 );
+	far = 0.0;
+	float nN = volPackDims.w;
+	if ( d <= volSlices.x ) {
+		o = vec4( 0.0, 0.0, 0.0, 1.0 );
+		return false;
+	}
+	vec4 v = wwGridAt( uv, volPack.xy, 0.0, nN, log( d / volSlices.x ) / volSlices.y * nN );
+	if ( d <= volFar.x ) {
+		o = v;
+		return false;
+	}
+	float fF = log( d / volFar.x ) / volFar.y * volFar.z;
+	vec4 w = wwGridAt( uv, volPack.zw, nN, volFar.z, fF );
+	o = vec4( v.rgb + v.a * w.rgb, v.a * w.a );
+	if ( fF <= volFar.z || ( volAirFlags & 2 ) == 0 || volAirMed.x <= 0.0 )
+		return false;
+	far = volFar.x * exp( volFar.y );
+	J = wwGridTailJ( uv, volPack.zw, nN, volFar.z, w );
+	return true;
+}
+
+bool wwVolAirNearHead( float d, vec2 uv, out vec4 v, out vec3 J, out float far )
+{
+	J = vec3( 0.0 );
+	far = 0.0;
+	if ( d <= volSlices.x ) {
+		v = vec4( 0.0, 0.0, 0.0, 1.0 );
+		return false;
+	}
+	float f = log( d / volSlices.x ) / volSlices.y * volSlices.z;
+	if ( f < 1.0 ) {
+		v = wwVolTex( vec3( uv, 0.5 / volSlices.z ), true );
+		v = vec4( v.rgb * f, 1.0 - ( 1.0 - v.a ) * f );
+	} else {
+		v = wwVolTex( vec3( uv, ( min( f, volSlices.z ) - 0.5 ) / volSlices.z ), f > volSlices.z );
+	}
+	v = vec4( max( v.rgb, vec3( 0.0 ) ), clamp( v.a, 0.0, 1.0 ) );
+	if ( f <= volSlices.z || ( volAirFlags & 2 ) == 0 || volAirMed.x <= 0.0 )
+		return false;
+	far = volSlices.x * exp( volSlices.y );
+	vec4 p = wwVolTex( vec3( uv, ( volSlices.z - 1.5 ) / volSlices.z ), true );
+	float dT = p.a - v.a;
+	J = dT > 1e-7 ? max( ( v.rgb - p.rgb ) / dT, vec3( 0.0 ) ) : vec3( 0.0 );
+	return true;
+}
+
+vec4 wwVolAirAtUv( vec3 posView, vec2 uv )	// lane VOLPART1: uv = the column (a particle's probe: its centre's)
+{
+	float d = length( posView ) * fogDistScale;
+	if ( volFarClamp != 0 )
+		d = min( d, texture( volTile, uv ).r );
+	bool farGrid = volFar.w > 0.5;
+	vec4 v;
+	vec3 J;
+	float far;
+	bool tail = farGrid ? wwVolAirFarHead( d, uv, posView, v, J, far ) : wwVolAirNearHead( d, uv, v, J, far );
+	if ( !tail )
+		return v;
+	float z1 = dot( fogView.xyz, posView ) + fogView.w;
+	float zc = fogView.w;
+	float z0 = zc + ( z1 - zc ) * ( far / d );
+	float len = d - far;
+	float dz = z1 - z0;
+	vec4 gT = wwAirGroundRay( posView * ( far / d ), posView / max( length( posView ), 1e-12 ), len, dz / max( len, 1e-6 ) );	// FOGTERRAIN3: along the tail
+	float tau = abs( dz ) < 0.5 ? volAirMed.x * len * wwAirCol( z0, z0 + 1.0, gT ) : volAirMed.x * len * wwAirCol( min( z0, z1 ), max( z0, z1 ), gT ) / abs( dz );
+	float Tt = exp( -( tau + wwAirRainTau( posView * ( far / d ), posView ) ) );	// lane RAINFOG2: + the rain fog
+#ifdef WW_SUNSHADOW
+	if ( !farGrid || ( volAirFlags & 256 ) != 0 )
+		J *= wwAirTailShadow( posView / max( length( posView ), 1e-12 ), far, d, tau );
+#endif
+	if ( ( volAirFlags & 4 ) != 0 ) {
+		vec3 dirV = posView / max( length( posView ), 1e-12 );
+		bool ok0, ok1;
+		vec3 c0 = wwAirRecordColour( far, z0, dirV, ok0 );
+		vec3 c1 = wwAirRecordColour( 0.5 * ( far + d ), 0.5 * ( z0 + z1 ), dirV, ok1 );
+		if ( ok0 && ok1 )
+			J *= c1 / max( c0, vec3( 1e-6 ) );
+	}
+	return vec4( v.rgb + v.a * J * ( 1.0 - Tt ), v.a * Tt );
+}
+#else
 vec4 wwVolAirAtUv( vec3 posView, vec2 uv )	// lane VOLPART1: uv = the column (a particle's probe: its centre's)
 {
 	float d = length( posView ) * fogDistScale;
@@ -432,6 +521,7 @@ vec4 wwVolAirAtUv( vec3 posView, vec2 uv )	// lane VOLPART1: uv = the column (a 
 	}
 	return vec4( v.rgb + v.a * J * ( 1.0 - Tt ), v.a * Tt );
 }
+#endif
 
 // (L, T) of the air between the eye and posView, at this fragment's column
 vec4 wwVolAirAt( vec3 posView )
