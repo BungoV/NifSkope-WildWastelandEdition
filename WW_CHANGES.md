@@ -1,3 +1,12 @@
+## FO76WEATHER2 (2026-11-02): rain wetness stays dry under roofs and bridges
+
+- With `WW_CELL_RAINWET` on, an exterior builds a top-down cover map (PRECIPROOF's WwRoofMap: eye +-8192 u, 16 u
+  texels, rebuilt when the eye moves 2048 u) on texture unit 88. A surface under a roof, a bridge or an eave stays dry;
+  walls under an eave read their own eave. The log prints the map's census on each rebuild (`rain wet: cover map ...`).
+- Way back: `WW_CELL_RAINWET_RED=nocover` (every surface exposed, the FO76WEATHER1 path). Default stays OFF.
+- Code: src/gl/cellprecip.cpp, src/gl/rainwetlaw.h (CPU twin, now in NifSkope.pro), res/shaders/rain_wet.glsl.
+  New unit tests/raincover: CPU checks plus GPU-vs-CPU parity on the real driver.
+
 ## GISKYTWIN-FLIP (LAND5, 2026-11-02): the GI volume's sky ships at the physical level
 
 - `WW_CELL_RTDDGI_SKY` unset (or empty) is now `level` (GITRUTH1's giSkyLevel: the weather's sky colour at the
