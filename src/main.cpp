@@ -114,6 +114,9 @@ void wwStartupMark( const char * stage )
 	if ( std::strcmp( stage, "first frame" ) == 0 ) {
 		wwStartupDone = true;
 		std::fflush( stderr );
+		// lane STARTSPEED1: WW_STARTUP_QUIT=1 quits at the first frame (the build's shader-cache warm start)
+		if ( qgetenv( "WW_STARTUP_QUIT" ).trimmed() == "1" && QCoreApplication::instance() )
+			QMetaObject::invokeMethod( QCoreApplication::instance(), &QCoreApplication::quit, Qt::QueuedConnection );
 	}
 }
 
