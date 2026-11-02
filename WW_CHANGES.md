@@ -1,3 +1,13 @@
+## COLDLINK1 C++ (2026-11-02): the threaded cold link, behind WW_COLDLINK (off, not built yet)
+
+- `WW_COLDLINK=<n>` (1..16; unset or 0 = the serial link as before): `updateShaders` links every program the binary
+  cache missed on n `QThread`s, each with its own `QOffscreenSurface` + `QOpenGLContext` shared with the current one,
+  and waits for them; `finishLink` then reads each result in the load order as before. A worker that gets no context
+  leaves its programs to the serial link. stderr: `shader coldlink: workers N, M linked on them in T ms`.
+- Red `WW_COLDLINK_RED=1`: the serial link whatever WW_COLDLINK says. Both join src/wwswitchstages.inc (shaders stage).
+- Waiting on the offline bench (tests/spells/shader_link_bench.py) before any build: the default stays off until a
+  cold start shows "N of N linked" faster with a first frame equal to the serial link's.
+
 ## COLDLINK1 (2026-11-02): an offline bench of a threaded cold shader link
 
 - `tests/spells/shader_link_bench.py`: links every `.prog` through the real GL driver, no NifSkope, with N worker

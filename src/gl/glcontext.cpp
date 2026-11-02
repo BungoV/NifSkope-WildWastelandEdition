@@ -70,6 +70,12 @@ bool wwCellPrtOn();	// lane PRTOFF1: src/gl/celllights.cpp (the old baked probe 
 #include <QFileInfo>
 #include <QOpenGLContext>
 #include <QTextStream>
+#include <QOffscreenSurface>
+#include <QOpenGLFunctions>
+#include <QThread>
+#include <algorithm>
+#include <atomic>
+#include <vector>
 #if QT_VERSION >= QT_VERSION_CHECK(6, 0, 0)
 #  include <QOpenGLVersionFunctionsFactory>
 #endif
@@ -658,8 +664,12 @@ bool NifSkopeOpenGLContext::Program::load( const QString & filepath, NifSkopeOpe
 			}
 			f->glProgramParameteri( id, GL_PROGRAM_BINARY_RETRIEVABLE_HINT, GL_TRUE );
 		}
-		f->glLinkProgram( id );
-		linkFrom = 1;
+		if ( context->coldLinkWorkers > 0 ) {
+			linkFrom = 3;	// lane COLDLINK1: updateShaders links it on a worker thread
+		} else {
+			f->glLinkProgram( id );
+			linkFrom = 1;
+		}
 	}
 	catch ( QString & x )
 	{
@@ -1275,6 +1285,8 @@ void NifSkopeOpenGLContext::rehashShaders()
 	shaderHashMask = m;
 }
 
+static int wwColdLinkRun( const QVector< NifSkopeOpenGLContext::Program * > & started, int workers, qint64 & ms );
+
 void NifSkopeOpenGLContext::updateShaders()
 {
 	releaseShaders();
@@ -1315,6 +1327,7 @@ void NifSkopeOpenGLContext::updateShaders()
 		}
 	}
 
+	coldLinkWorkers = wwEnvInt( "WW_COLDLINK_RED" ) == 1 ? 0 : std::clamp( wwEnvInt( "WW_COLDLINK" ), 0, 16 );
 	QStringList	entryList = dir.entryList();
 	QVector< Program * >	started;
 	for ( int i = 0; i < 2; i++ ) {
@@ -1332,6 +1345,8 @@ void NifSkopeOpenGLContext::updateShaders()
 				started.append( static_cast< Program * >( shader ) );
 		}
 	}
+	qint64	coldMs = 0;
+	const int	coldLinked = coldLinkWorkers > 0 ? wwColdLinkRun( started, coldLinkWorkers, coldMs ) : 0;
 	const qint64	issued = clock.elapsed();
 	int	ok = 0;
 	for ( Program * p : started )	// in the load order: programsLinked keeps the order the renderer picks by
@@ -1339,6 +1354,73 @@ void NifSkopeOpenGLContext::updateShaders()
 	std::fprintf( stderr, "shader programs: %d of %d linked (cache: %d loaded, %d refused, %d written; %s) parallel=%s issue %lld ms total %lld ms\n",
 		ok, int( started.size() ), programCacheHits, programCacheRejected, programCacheWritten,
 		programCacheDir.isEmpty() ? "off" : "on", threads, (long long) issued, (long long) clock.elapsed() );
+	std::fprintf( stderr, "shader coldlink: workers %d, %d linked on them in %lld ms\n", coldLinkWorkers, coldLinked,
+		(long long) coldMs );
+}
+
+/* lane COLDLINK1: a cold start links every program the binary cache missed (~2 s each on the NV driver). With
+ * WW_COLDLINK=<n> they link on n threads, each with its own context shared with the current one (a program object
+ * is shared), and the GUI thread waits for them; finishLink then reads each result as before. A worker that gets no
+ * context leaves its programs to the serial link below. Red WW_COLDLINK_RED=1: the serial link. */
+static int wwColdLinkRun( const QVector< NifSkopeOpenGLContext::Program * > & started, int workers, qint64 & ms )
+{
+	QVector< NifSkopeOpenGLContext::Program * >	todo;
+	for ( NifSkopeOpenGLContext::Program * p : started )
+		if ( p->linkFrom == 3 )
+			todo.append( p );
+	QElapsedTimer	clock;
+	clock.start();
+	std::atomic< int >	next{ 0 }, linked{ 0 };
+	struct Worker { QOffscreenSurface * s; QOpenGLContext * c; QThread * t; };
+	std::vector< Worker >	ws;
+	QOpenGLContext *	cur = QOpenGLContext::currentContext();
+	QThread *	gui = QThread::currentThread();
+	const int	n = cur && QOpenGLContext::supportsThreadedOpenGL() ? std::min( workers, int( todo.size() ) ) : 0;
+	for ( int i = 0; i < n; i++ ) {
+		QOffscreenSurface *	s = new QOffscreenSurface;
+		s->setFormat( cur->format() );
+		s->create();
+		QOpenGLContext *	c = new QOpenGLContext;
+		c->setFormat( cur->format() );
+		c->setShareContext( cur );
+		if ( !s->isValid() || !c->create() ) {
+			delete c;
+			delete s;
+			break;
+		}
+		QThread *	t = QThread::create( [&todo, &next, &linked, s, c, gui]() {
+			if ( c->makeCurrent( s ) ) {
+				QOpenGLFunctions *	g = c->functions();
+				for ( int k; ( k = next++ ) < int( todo.size() ); ) {
+					GLint	r = 0;
+					g->glLinkProgram( todo[k]->id );
+					g->glGetProgramiv( todo[k]->id, GL_LINK_STATUS, &r );	// waits for the link
+					todo[k]->linkFrom = 1;
+					linked++;
+				}
+				g->glFinish();
+				c->doneCurrent();
+			}
+			c->moveToThread( gui );
+		} );
+		c->moveToThread( t );
+		ws.push_back( { s, c, t } );
+		t->start();
+	}
+	for ( Worker & w : ws ) {
+		w.t->wait();
+		delete w.t;
+		delete w.c;
+		delete w.s;
+	}
+	for ( NifSkopeOpenGLContext::Program * p : todo ) {
+		if ( p->linkFrom == 3 ) {
+			p->f->glLinkProgram( p->id );
+			p->linkFrom = 1;
+		}
+	}
+	ms = clock.elapsed();
+	return linked;
 }
 
 void NifSkopeOpenGLContext::releaseShaders()
