@@ -297,6 +297,36 @@ inline void giSkyFromPhysical( const float phys[6][3], const float weather[6][3]
 		for ( int c = 0; c < 3; c++ )
 			out[a][c] = ( a == 5 || k <= 0.0f ) ? weather[a][c] : phys[a][c] * k;
 }
+/* GITRUTH1: the GI's sky from the physical sky at its ABSOLUTE level against the sun: phys is per unit top-of-atmosphere
+ * sun irradiance, the frame's sun is that sun's transmittance T(mu) x a scale (Sunlight From Sky: x the imagespace
+ * Sunlight Scale), so the sky takes the same scale k = lum(sun) / lum(T). -Z keeps the weather's (the ground's light).
+ * giSkyFromPhysical anchors +Z to the weather's luminance instead: direct / diffuse horizontal 7.5 at a 33.5 deg sun,
+ * where the IES clear sky gives 3.9 and this model 3.8 (notes/gitruth1/RESULTS.md section 4). Returns k (0 = unusable,
+ * out = the weather's). */
+inline float giSkyAbsolute( const float phys[6][3], const float T[3], const float sun[3], const float weather[6][3], float out[6][3] )
+{
+	const float lt = lum( T ), ls = lum( sun );
+	const float k = ( lt > 1e-9f && ls > 0.0f ) ? ls / lt : 0.0f;
+	for ( int a = 0; a < 6; a++ )
+		for ( int c = 0; c < 3; c++ )
+			out[a][c] = ( a == 5 || k <= 0.0f ) ? weather[a][c] : phys[a][c] * k;
+	return k;
+}
+/* GITRUTH1: only the LEVEL from the physical sky: the weather's own sky (its colour and its axis shares) times one factor
+ * f so +Z takes the physical sky's absolute luminance (giSkyAbsolute's +Z). The level is the input both sky models agree
+ * is wrong (direct / diffuse 7.5 against 3.8); the colour is not settled (the CPU single-scatter twin reads +Z R/B 0.87 at
+ * noon's haze where the drawn sky reads 0.53), so this keeps the weather's. -Z the weather's. Returns f (0 = unusable). */
+inline float giSkyLevel( const float phys[6][3], const float T[3], const float sun[3], const float weather[6][3], float out[6][3] )
+{
+	float ab[6][3];
+	const float k = giSkyAbsolute( phys, T, sun, weather, ab );
+	const float lw = lum( weather[4] );
+	const float f = ( k > 0.0f && lw > 1e-9f ) ? lum( ab[4] ) / lw : 0.0f;
+	for ( int a = 0; a < 6; a++ )
+		for ( int c = 0; c < 3; c++ )
+			out[a][c] = ( a == 5 || f <= 0.0f ) ? weather[a][c] : weather[a][c] * f;
+	return f;
+}
 
 /* the ambient's tint: the weather's ambient luminance kept, its colour turned by the sky irradiance's colour now
  * against the same at 45 degrees (E, E45 from skyIrradiance), so a 45-degree sun keeps the weather's colour exactly */

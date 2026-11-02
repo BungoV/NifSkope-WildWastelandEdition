@@ -40,7 +40,7 @@
 #include <thread>
 #include <vector>
 
-bool wwAtmoGiSkyAxes( const float sunTo[3], float out[6][3] );   // FIX1101A: src/gl/atmosphere.cpp (the physical sky's six axes)
+bool wwAtmoGiSkyAxes( const float sunTo[3], float out[6][3], float * trans = nullptr );   // FIX1101A: src/gl/atmosphere.cpp (the physical sky's six axes)
 
 namespace {
 
@@ -348,6 +348,18 @@ bool rtddgiGiSkyPhysical()
 		return false;
 	const QByteArray v = wwEnv( "WW_CELL_RTDDGI_SKY" ).trimmed().toLower();
 	return v == "physical" || v == "1";
+}
+
+/* GITRUTH1: WW_CELL_RTDDGI_SKY=level (live, ships off): the weather's sky at the physical sky's absolute level against
+ * the frame's sun (atmomath giSkyLevel); =absolute: the physical sky's own colour and shares at that level (giSkyAbsolute).
+ * Reds: unset (the weather's DALC as it is), "physical" (the physical colour anchored to the weather's +Z luminance).
+ * 0 none, 1 level, 2 absolute */
+int rtddgiGiSkyAbsolute()
+{
+	if ( !wwEnvIsSet( "WW_CELL_RTDDGI_SKY" ) )
+		return 0;
+	const QByteArray v = wwEnv( "WW_CELL_RTDDGI_SKY" ).trimmed().toLower();
+	return v == "level" ? 1 : v == "absolute" ? 2 : 0;
 }
 
 //! FIX1101A LATE ITEM 17: WW_CELL_RTDDGI_INTSKY_RED=1 = today's main (an interior's volume may take the weather's sky and sun)
@@ -1569,10 +1581,28 @@ static void volumeFrame( Scene * scene, Cell & c, const CellSpec * spIn, bool du
 	 * WW_CELL_RTDDGI_SKY=physical turns it on. Measured (tests/gisky, CommonwealthClear's DALC, sun 30 deg): the physical
 	 * sides are LESS blue than the weather's (R/B 0.41-0.48 vs 0.34; zenith 0.33 both) and the sun side 1.47x the
 	 * anti-sun side, so it would warm the shade bungo calls tan (LATE ITEM 15): his call. In the build key via sky.amb */
-	if ( sky.on && !lights.interior && rtddgiGiSkyPhysical() ) {
-		float phys[6][3], mixed[6][3];
-		if ( wwAtmoGiSkyAxes( sky.sunTo, phys ) ) {
-			WwAtmoMath::giSkyFromPhysical( phys, sky.amb, mixed );
+	const int absMode = rtddgiGiSkyAbsolute();
+	if ( sky.on && !lights.interior && ( rtddgiGiSkyPhysical() || absMode ) ) {
+		float phys[6][3], mixed[6][3], T[3];
+		if ( wwAtmoGiSkyAxes( sky.sunTo, phys, T ) ) {
+			if ( absMode ) {
+				const float k = absMode == 1 ? WwAtmoMath::giSkyLevel( phys, T, sky.sun, sky.amb, mixed )
+				                             : WwAtmoMath::giSkyAbsolute( phys, T, sky.sun, sky.amb, mixed );
+				static float saidK = -1.0f;
+				if ( std::fabs( k - saidK ) > 1e-5f ) {
+					saidK = k;
+					const float lz = WwAtmoMath::lum( mixed[4] );
+					say( c.tag + QStringLiteral( "sky at the absolute level (GITRUTH1, %4): %1 %5; direct / diffuse "
+						"horizontal %2 (the weather's +Z: %3; IES clear sky ~3.9 at 33.5 deg)" )
+						.arg( double( k ), 0, 'f', 4 )
+						.arg( lz > 1e-9f ? double( WwAtmoMath::lum( sky.sun ) * std::max( sky.sunTo[2], 0.0f ) / lz ) : 0.0, 0, 'f', 2 )
+						.arg( WwAtmoMath::lum( sky.amb[4] ) > 1e-9f ? double( WwAtmoMath::lum( sky.sun ) * std::max( sky.sunTo[2], 0.0f )
+							/ WwAtmoMath::lum( sky.amb[4] ) ) : 0.0, 0, 'f', 2 )
+						.arg( absMode == 1 ? QStringLiteral( "level: the weather's sky x f" ) : QStringLiteral( "absolute: the physical sky x k" ) )
+						.arg( absMode == 1 ? QStringLiteral( "= f" ) : QStringLiteral( "= k = lum(sun) / lum(T(mu))" ) ) );
+				}
+			} else
+				WwAtmoMath::giSkyFromPhysical( phys, sky.amb, mixed );
 			std::memcpy( sky.amb, mixed, sizeof mixed );
 			static float said = -1.0f;
 			if ( std::fabs( mixed[4][2] - said ) > 1e-6f ) {

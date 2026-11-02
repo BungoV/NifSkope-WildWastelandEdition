@@ -7,6 +7,12 @@
 //             30 deg), and the zenith sky is blue (R/B < 0.75)
 //   open      a probe open to the whole sky takes the GI sky exactly on every axis (rtddgimath.h skyRadianceCube's
 //             forward map, flatAmbient), and +Z keeps the weather's luminance (the exposure anchor)
+//   level     GITRUTH1 (WW_CELL_RTDDGI_SKY=absolute, giSkyAbsolute): the sun at 33.5 deg as the frame draws it (T(mu) x the
+//             Sunlight Scale 4.5), CommonwealthClear noon's drawn haze (0.513, 0.214, 0; notes/fix1101a/atmo
+//             sky_irradiance_axes.txt: the no-haze sky above is a Rayleigh-only sky, direct / diffuse ~11); direct / diffuse horizontal luminance within [3.0, 5.0] (IES clear sky 3.9: NBS/IES
+//             1984, E_dn = 127.5 exp(-0.21 / sin alt) klx, diffuse 0.8 + 15.5 sqrt(sin alt) klx)
+//             The same bar for WW_CELL_RTDDGI_SKY=level (giSkyLevel: the weather's colour at that level), check levelw.
+// Red -DGISKY_RED_LEVEL: the level anchored to the weather's +Z (giSkyFromPhysical, the "physical" mode): level must FAIL.
 // Red -DGISKY_RED: the GI sky stays the weather's DALC (today's main and still the default: the physical sky ships off,
 // WW_CELL_RTDDGI_SKY=physical): sunside must FAIL (the weather's sides are equal).
 #include "gl/atmomath.h"
@@ -80,6 +86,43 @@ int main()
 	const bool minusZ = gi[5][0] == weather[5][0] && gi[5][1] == weather[5][1] && gi[5][2] == weather[5][2];
 	report( "open", anchor < 1e-4 && minusZ, "+Z luminance vs the weather's rel %.2g (bar 1e-4), -Z the weather's %g; open probe vs the "
 		"GI sky on the 6 axes worst rel %.2g (the cube's clamp, reported)", anchor, minusZ ? 1.0 : 0.0, worstOpen );
+	// (4) GITRUTH1 level: the sky's level against the sun it is drawn with
+	{
+		const float el4 = 33.5f * 3.14159265f / 180.0f, mu4 = std::sin( el4 );
+		const float s4[3] = { 0.0f, std::cos( el4 ), mu4 };
+		const float hz4[3] = { 0.513f, 0.214f, 0.0f };
+		float T4[3], sun4[3], ph4[6][3], g4[6][3];
+		cpuTrans( 0.0f, mu4, hz4, false, T4 );
+		for ( int c = 0; c < 3; c++ )
+			sun4[c] = 4.5f * T4[c];
+		skyIrradianceAxes( s4, hz4, ph4 );
+#ifdef GISKY_RED_LEVEL
+		giSkyFromPhysical( ph4, weather, g4 );
+		const double k4 = 0;
+#else
+		const double k4 = giSkyAbsolute( ph4, T4, sun4, weather, g4 );
+#endif
+		float w4[6][3];
+#ifdef GISKY_RED_LEVEL
+		for ( int a = 0; a < 6; a++ )
+			for ( int c = 0; c < 3; c++ )
+				w4[a][c] = weather[a][c];   // red: the weather's DALC at its own level
+		const double f4 = 1;
+#else
+		const double f4 = giSkyLevel( ph4, T4, sun4, weather, w4 );
+#endif
+		const double ratioW = lum( sun4 ) * mu4 / std::max( double( lum( w4[4] ) ), 1e-9 );
+		const double rbKept = ( w4[0][0] / w4[0][2] ) / ( weather[0][0] / weather[0][2] );
+		report( "levelw", ratioW >= 3.0 && ratioW <= 5.0 && std::fabs( rbKept - 1.0 ) < 1e-4, "weather sky x f %.3f: direct / diffuse %.2f "
+			"(bar 3.0..5.0), the weather's colour kept (R/B ratio %.5f)", f4, ratioW, rbKept );
+		const double ratio = lum( sun4 ) * mu4 / std::max( double( lum( g4[4] ) ), 1e-9 );
+		const bool keepsZ = g4[5][0] == weather[5][0] && g4[5][2] == weather[5][2];
+		report( "level", ratio >= 3.0 && ratio <= 5.0 && keepsZ, "direct / diffuse horizontal at sun 33.5 deg %.2f (bar 3.0..5.0, IES 3.9), "
+			"k %.3f, +Z R/B %.2f, -Z the weather's %g", ratio, k4, g4[4][0] / std::max( g4[4][2], 1e-9f ), keepsZ ? 1.0 : 0.0 );
+		std::printf( "      sun %.4f %.4f %.4f; GI sky +Z %.4f %.4f %.4f, sides +X %.4f %.4f %.4f +Y %.4f %.4f %.4f -Y %.4f %.4f %.4f\n",
+			sun4[0], sun4[1], sun4[2], g4[4][0], g4[4][1], g4[4][2], g4[0][0], g4[0][1], g4[0][2], g4[2][0], g4[2][1], g4[2][2],
+			g4[3][0], g4[3][1], g4[3][2] );
+	}
 	std::printf( "GISKY %s %d%s\n", g_fail ? "FAIL" : "PASS", g_fail ? g_fail : g_pass, g_fail ? " failed" : "" );
 	return g_fail ? 1 : 0;
 }
