@@ -1,3 +1,16 @@
+## BUGS1102 (2026-11-02): rain stays out from under a sunlit interior's roof; preset rows and numbers
+
+- **Rain under the roof (PRECIPROOF-GPU):** the GPU precipitation field builds its particles in the vertex shader and
+  has no roof map, so in a sunlit interior it rained under the roof (only the CPU field had INTSKY1's roof test).
+  A roofed interior now draws the CPU field and its per-particle roof test; exteriors keep the GPU field
+  (`wwPrecipGpuField` in src/gl/preciproof.h). Red: `WW_CELL_PRECIP_RED=gpuroof` (the old pick; the census line says
+  so). tests/preciproof checks both fields under the roof and under open sky, with two reds.
+- **Presets and the AO tier:** the preset table lacked rows for the AO quality tier and the VRS look switch, so a preset
+  left the AO tier where it was. Both rows are in src/ui/cellpresettable.h; tests/presettable's coverage check has no
+  exemptions left.
+- **Preset table numbers:** the measured GPU ms of contact shadows, AO, SSGI and air now come from TIMING1's Concord
+  hold (Museum numbers beside them). No preset column changed.
+
 ## REFLPROBECLI1 (TOOLS1101, 2026-11-01): count the reflection probes' below-horizon misses without a window
 
 `nifskope -no-gui reflcensus --soup <soup.psp> (--camera x,y,z ... | --auto N) [--interior] [--out probes.tsv]` places
