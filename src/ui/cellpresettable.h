@@ -57,6 +57,7 @@ inline const WwPresetRow * wwPresetTable( int * count )
 		{ "CellWorkspaceLook_WW_CELL_HAIRKK", '0', "0000", "0000", 'M', false, WW_PR_NONE, WW_PR_NONE, "MATLOOK3: off until a hold proves it; no ms" },
 		{ "CellWorkspaceLook_WW_CELL_CORNEA", '0', "0000", "0000", 'M', false, WW_PR_NONE, WW_PR_NONE, "MATLOOK3: off until a hold proves it; no ms" },
 		{ "CellWorkspaceLook_WW_CELL_SKINSSS", '0', "0000", "0000", 'M', false, WW_PR_NONE, WW_PR_NONE, "SKINSSS1: off until a hold proves it; ms owed" },
+		{ "CellWorkspaceLook_WW_CELL_IRIS", '0', "0000", "0000", 'M', false, WW_PR_NONE, WW_PR_NONE, "SKINSSS2: off until a hold proves it; no ms" },
 		{ "CellWorkspaceGroup_IMPROVED_LIGHTS", '1', "1111", "1111", 'G', false, WW_PR_NONE, WW_PR_NONE, "a master" },
 		{ "CellWorkspaceLook_WW_CELL_LIGHT_PHYS", '0', "1111", "0000", 'M', false, { 0.06f, 0.10f, 0.15f, 0.19f }, WW_PR_NONE,
 			"light extras target (PERFRES-A light_extras); no ms of its own" },

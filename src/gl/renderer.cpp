@@ -59,6 +59,7 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include "gl/cellgrass.h"	// lane GRASSMB1
 #include "gl/cellcull.h"	// lane DECALS1: the placed decals' parallax
 #include "gl/celllooks.h"
+#include "gl/wwiris.h"	// lane SKINSSS2: the eye atlas's iris
 #include "gl/cellwaterinfo.h"	// lane WATERWETBAKE1: the land side of the shore plane
 #include "gl/shadowset.h"	// lane WATERWETBAKE1: wwCellIsTerrainShape
 #include "gl/cellssr.h"
@@ -2628,6 +2629,17 @@ bool Renderer::setupProgramCE1( const NifModel * nif, Program * prog, Shape * me
 						prog->uni1b( "wwHairOn", hair );
 					if ( prog->uniLocation( "wwEyeOn" ) >= 0 )
 						prog->uni1b( "wwEyeOn", eye );
+				}
+				// lane SKINSSS2 (EYEIRIS1): an opaque eye with a known atlas steps its uv to the iris under the cornea
+				if ( prog->uniLocation( "wwIrisOn" ) >= 0 ) {
+					const ShaderMaterial *	bgsm = ( mat && mat->isShaderMaterial() ) ? static_cast< ShaderMaterial * >( mat ) : nullptr;
+					const bool	eye = ( bgsm && bgsm->bEnvironmentMappingEye ) || lsp->isST( ShaderFlags::ST_EyeEnvmap )
+						|| lsp->wwSrcShaderType == int( ShaderFlags::ST_EyeEnvmap );
+					float	iris[3] = { 0.0f, 0.0f, 0.0f };
+					if ( eye )
+						WwIris::layout( lsp->fileName( 0 ).toLatin1().constData(), iris );
+					prog->uni1b( "wwIrisOn", eye && iris[2] > 0.0f );
+					prog->uni3f( "wwIrisUv", iris[0], iris[1], iris[2] );
 				}
 				// lane SKINSSS1: skin draws (face and skin tint: the game's material code 5) tag the opaque pass
 				if ( prog->uniLocation( "wwSkinOn" ) >= 0 ) {

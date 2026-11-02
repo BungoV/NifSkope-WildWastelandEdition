@@ -1,3 +1,17 @@
+## SKINSSS2 (2026-11-02): the iris under the cornea (EYEIRIS1, row Eye iris refraction, ships off)
+
+A new look row, Eye iris refraction (`WW_CELL_IRIS`, QSettings WW/CellEyeIris, off). FO4 paints the iris on the eye
+mesh's surface; a real iris lies on a flat plane about 2.6 mm under the cornea, so it shifts against the eye's rim as the
+view turns. res/shaders/ww_hair_eye.glsl `wwIrisShift` models a cornea sphere of 7.8 mm over a limbus of 5.85 mm (IOR
+1.376): it rebuilds the eye axis from that sphere, refracts the view at the surface normal, steps down to the iris plane
+and maps the step back to uv from the screen derivatives. fo4_default.frag adds the step to the uv before every map of an
+opaque eye (the eye gate of the cornea row, plus the carried facegen type). The iris position comes from the atlas:
+human and ghoul eyes (textures/actors/character/eyes/) centre (0.502, 0.752), radius 0.162 of the texture, measured
+from the vanilla textures; other atlases (the supermutants') get no step. src/gl/wwiris.h is the C++ twin;
+tests/eyeiris traces the eye in double precision (views up to 45 degrees): max error 0.020, mean 0.005 iris radii,
+where the old flat iris is off by 0.30 / 0.094. Red `WW_CELL_IRIS_RED=1`: the step is 0. Bindless twins keep the old
+path (as the cornea row).
+
 ## SKINSSS2 (2026-11-02): cell facegen eyes get the cornea coat (EYECORNEA-CELL)
 
 The cell view's characters draw their eyes from the facegen heads, and the Eye cornea row (EYECORNEA1) never reached

@@ -1276,6 +1276,7 @@ void CellWorkspacePanel::buildUi()
 		head( F, "CellWorkspaceLook_WW_CELL_HAIRKK", "", -1, false, QStringList(), tr( "Hair specular" ) );	// lane MATLOOK3
 		head( F, "CellWorkspaceLook_WW_CELL_CORNEA", "", -1, false, QStringList(), tr( "Eye cornea" ) );
 		head( F, "CellWorkspaceLook_WW_CELL_SKINSSS", "", -1, false, QStringList(), tr( "Skin subsurface" ) );	// lane SKINSSS1
+		head( F, "CellWorkspaceLook_WW_CELL_IRIS", "", -1, false, QStringList(), tr( "Eye iris refraction" ) );	// lane SKINSSS2
 		master( F, WwGroup::ImprovedLights );
 		look( WwLook::LightPhysFalloff, tr( "Physical falloff" ) );
 		look( WwLook::LightArea, tr( "Area" ) );

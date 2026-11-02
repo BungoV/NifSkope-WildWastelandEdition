@@ -94,3 +94,55 @@ float wwEyeCoat( vec3 Ng, vec3 L, vec3 V )
 	return min( D * vis * F, 15.0 ) * 3.141593;
 }
 #endif
+
+// lane SKINSSS2 (EYEIRIS1, row "Eye iris refraction", WW_CELL_IRIS): the iris lies on a flat plane under the cornea, not
+// on the mesh's surface where the atlas paints it. A cornea sphere of 7.8 mm over a limbus of 5.85 mm (A = 4/3), IOR
+// 1.376: rebuild the eye axis from that sphere (the normal leans out by asin( rho / A ) along the radial direction),
+// refract the view at the normal, step down to the iris plane and map the step back to uv across the axis. 0 outside
+// the limbus. src/gl/wwiris.h is the C++ twin; tests/eyeiris traces the eye and checks it (max 0.02 iris radii off).
+#ifdef WW_CELL_IRIS
+#define WW_IRIS 1
+uniform bool wwIrisOn;	// the draw is an opaque eye with a known atlas (src/gl/renderer.cpp)
+uniform vec3 wwIrisUv;	// the atlas's iris: centre uv, radius
+const float wwIrisA = 1.333333;	// cornea radius / limbus radius
+const float wwIrisH1 = 0.881917;	// sqrt( A^2 - 1 )
+
+// V, N: unit view and normal (the space of ViewDir); the position is -ViewDir. Call in uniform control flow.
+vec2 wwIrisShift( vec2 uv, vec3 V, vec3 N )
+{
+	vec3 dPx = dFdx( -ViewDir );
+	vec3 dPy = dFdy( -ViewDir );
+	vec2 dUx = dFdx( uv );
+	vec2 dUy = dFdy( uv );
+#ifdef WW_IRIS_RED
+	return vec2( 0.0 );	// red: the iris stays on the surface
+#else
+	vec2 r = ( uv - wwIrisUv.xy ) / wwIrisUv.z;
+	float rho2 = dot( r, r );
+	float j = dUx.x * dUy.y - dUx.y * dUy.x;
+	if ( rho2 >= 1.0 || abs( j ) < 1.0e-20 )
+		return vec2( 0.0 );
+	vec3 Tu = ( dPx * dUy.y - dPy * dUx.y ) * ( wwIrisUv.z / j );
+	vec3 Tv = ( dPy * dUx.x - dPx * dUy.x ) * ( wwIrisUv.z / j );
+	float g11 = dot( Tu, Tu ), g12 = dot( Tu, Tv ), g22 = dot( Tv, Tv );
+	float s = sqrt( sqrt( max( g11 * g22 - g12 * g12, 0.0 ) ) );
+	float h = sqrt( wwIrisA * wwIrisA - rho2 ) - wwIrisH1;
+	vec3 rad = Tu * r.x + Tv * r.y;
+	rad -= N * dot( rad, N );
+	float rl = length( rad );
+	float sa = sqrt( rho2 ) / wwIrisA;
+	vec3 ax = ( rl > 1.0e-6 * s ) ? N * sqrt( 1.0 - sa * sa ) - rad * ( sa / rl ) : N;
+	vec3 t = refract( -V, N, 1.0 / 1.376 );
+	vec3 d = t * ( h * s / max( -dot( t, ax ), 0.2 ) );
+	vec3 pu = Tu - ax * dot( Tu, ax );
+	vec3 pv = Tv - ax * dot( Tv, ax );
+	vec3 pd = d - ax * dot( d, ax );
+	float q11 = dot( pu, pu ), q12 = dot( pu, pv ), q22 = dot( pv, pv );
+	float det = q11 * q22 - q12 * q12;
+	if ( det <= 0.0 )
+		return vec2( 0.0 );
+	float b1 = dot( pu, pd ), b2 = dot( pv, pd );
+	return vec2( q22 * b1 - q12 * b2, q11 * b2 - q12 * b1 ) / det * wwIrisUv.z;
+#endif
+}
+#endif

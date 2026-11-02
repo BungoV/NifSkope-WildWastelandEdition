@@ -309,7 +309,8 @@ vec3 tonemap(vec3 x)
 #include "cell_transl.glsl"
 #endif
 // lane MATLOOK3: the hair and cornea lobes (rows Hair specular / Eye cornea); the bindless twins keep the old path
-#if ( defined( WW_CELL_HAIRKK ) || defined( WW_CELL_CORNEA ) ) && !defined( WW_BINDLESS )
+// lane SKINSSS2: and the iris under the cornea (row Eye iris refraction)
+#if ( defined( WW_CELL_HAIRKK ) || defined( WW_CELL_CORNEA ) || defined( WW_CELL_IRIS ) ) && !defined( WW_BINDLESS )
 #include "ww_hair_eye.glsl"
 #endif
 #ifdef WW_CELLLIGHTS
@@ -448,6 +449,11 @@ void main()
 		if ( any( lessThan( offset, vec2( 0.0 ) ) ) || any( greaterThan( offset, vec2( 1.0 ) ) ) )
 			discard;
 	}
+#ifdef WW_IRIS
+	// lane SKINSSS2 (EYEIRIS1): every map of an opaque eye reads the iris where the refracted view meets it
+	if ( wwIrisOn && ( alphaFlags & 8 ) == 0 )
+		offset += wwIrisShift( offset, normalize( ViewDir ), normalize( btnMatrix[2] ) );
+#endif
 #ifdef WW_SUNSHADOW
 	/* lane SUNCELL1: the cascades on the SUN only (CSM1 spec 2.8). Every D.rgb below is the sun: D = sqrt(the
 	 * linear sun), so D x sqrt(f) is the sun x f in the linear light the tonemap squares back. The macro takes
