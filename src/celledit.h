@@ -25,6 +25,7 @@
  */
 
 #include <QObject>
+#include <QPair>
 #include <QString>
 #include <QStringList>
 #include <QVector>
@@ -82,8 +83,9 @@ bool cellEditMakePlan( const CellSceneSpec & spec, QVector<CellEditItem> & items
  *  openCellSpecDir()) and return it in `reopenPath`. `line` = the status line. */
 bool cellEditSave( const CellSceneSpec & spec, QVector<CellEditItem> & items, const CellEditTarget & target,
 	const QString & specDir, QString * reopenPath, QString * line, QString * error );
-/*! ESPWRITE3: a change to a reference already in the open cell (an override of its winning record). Interior cells
- *  only; an exterior cell is refused by name. `ref` is the LOAD-ORDER id. */
+/*! ESPWRITE3: a change to a reference already in the open cell (an override of its winning record). ESPWRITE3B:
+ *  exterior cells too (a grid cell's ref, or one in the world's persistent cell), a scale, and ref 0 = a lighting
+ *  change of the open interior (XCLL fields, see EspWrite::changeCellLight). `ref` is the LOAD-ORDER id. */
 struct CellEditChange
 {
 	quint32 ref = 0;
@@ -91,9 +93,15 @@ struct CellEditChange
 	float pos[3] = { 0, 0, 0 };
 	bool turn = false;          //!< rot replaces DATA's rotation (radians)
 	float rot[3] = { 0, 0, 0 };
+	bool resize = false;        //!< scale replaces XSCL
+	float scale = 1.0f;
 	bool disable = false;       //!< 0x800 (never a true delete)
 	bool persistent = false;    //!< filled by the plan: the group its original sits in
+	QVector<QPair<QString, QString>> light;   //!< ref 0: XCLL field name -> value
 };
+/*! ESPWRITE3B: the last plan's warnings: a precombined ref changed (XCRI / XPRI name it), a plugin after the target
+ *  wins the cell or a changed ref, a lighting template on a lit cell. Red WW_ESPWRITE_RED=nowarn drops them. */
+QStringList cellEditWarnings();
 bool cellEditMakePlan( const CellSceneSpec & spec, QVector<CellEditItem> & items, QVector<CellEditChange> & changes,
 	const CellEditTarget & target, EspWrite::Plan & plan, QString * summary, QString * error );
 bool cellEditSave( const CellSceneSpec & spec, QVector<CellEditItem> & items, QVector<CellEditChange> & changes,
@@ -130,6 +138,7 @@ struct CellEditSession
 	bool baseValid = false;
 	float normal[3] = { 0, 0, 1 };
 	QVector<CellEditItem> edits;
+	QVector<CellEditChange> changes;   //!< ESPWRITE3B: changes to refs already in the cell (one per ref; ref 0 = lighting)
 	CellEditTarget target;
 };
 
@@ -150,6 +159,13 @@ bool cellEditSaveSession( QString * line );
 QString cellEditSummary( bool * refusal );
 //! The list row of an edit.
 QString cellEditRowText( const CellEditItem & it );
+/*! ESPWRITE3B: change a reference of the open cell (its pick-table entry gives the start values), merged per ref:
+ *  what = 'm' move to v[0..2], 't' turn by v[0] radians (yaw), 's' scale to v[0], 'd' disable (v unused). */
+bool cellEditChangeRef( quint32 ref, char what, const float * v );
+//! ESPWRITE3B: set one XCLL field of the open interior (EspWrite::cellLightFields()).
+bool cellEditLight( const QString & field, const QString & value );
+//! The list row of a change.
+QString cellEditChangeText( const CellEditChange & c );
 
 // ---------------------------------------------------------------- GLView hooks (src/glview.cpp)
 enum class CellEditMouse { Press, Move, Release, Wheel };
