@@ -1,3 +1,10 @@
+## ELFXHARNESS1 (2026-11-02): cell spells load Enhanced Lights and FX by default
+
+tests/spells/volpart1_cell.sh (PROF) and tests/spells/decallit1_cell.sh (PROFILE) now read the harness profile
+notes/allon2/shots/profile_elfx.txt: the old profile plus EnhancedLightsandFX.esp as the last plugin and its mod folder
+as the last mod on the resource stack (only overwrite above it). Passing PROF= / PROFILE= with the old profile.txt is
+the way back; pictures taken before 2026-11-02 12:45 were made without ELFX. Nothing in the viewer changes.
+
 ## DECALWALK1 (2026-11-02): the decal checker reads receiver meshes from the game archives (test only)
 - tests/spells/cell_decal_check.py: a mesh or material missing under <data root> is read from the plugin's own
   `<stem> - *.ba2` GNRL archives (in <data root>, then beside the plugin). An unpacked Data whose Meshes holds folders
