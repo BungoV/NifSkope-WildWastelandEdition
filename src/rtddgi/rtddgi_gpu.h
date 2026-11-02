@@ -230,6 +230,42 @@ struct RestirGpuShare
 };
 bool restirGpuShare( DdgiGpuSession * s, int W, int H, RestirGpuShare * out );
 
+/* Lane RTREFL1 (2026-11-02): ray-traced reflections on the volume's BVH, the water's fallback where its screen-space
+ * march finds nothing (src/rtddgi/refl.comp; the CPU twin is src/rtddgi.cpp reflTexel). One step traces one ray per
+ * half-size texel: the first of its 2 x 2 pixels in the W x H ray target (view reflection ray xyz, view depth w; 0 none;
+ * bottom row first) and shades the hit the way a probe ray's is. Output: Wh x Hh x vec4 (rgb, hit distance; 0 miss). */
+inline int reflHalf( int n ) { return ( n + 1 ) / 2; }
+struct ReflGpuIn
+{
+	int W = 0, H = 0;
+	int red = 0;                          // refl.comp opts.x (none yet)
+	float bias = 1.0f, tmax = 0.0f;       // the origin's push along the ray (game units); 0: the volume's ray length
+	float rows[12] = { 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0 };   // view -> the soup's local frame
+	float proj[4] = { 1, 1, 0, 0 };                            // P00, P11, P20, P21
+	const float * rays = nullptr;         // host ray target W x H x 4 (the CLI); nullptr: GL wrote the shared one
+	bool readBack = false;                // copy the output to the host
+	std::function<bool()> beforeSubmit;   // interop (reflGpuShare): GL signalled glDone; the submit waits on it
+};
+struct ReflGpuOut
+{
+	bool ok = false, busy = false;
+	std::string why;
+	double msWall = 0;
+	std::vector<float> refl;              // readBack: Wh x Hh x 4
+};
+//! false + busy when the device's lock is taken; waits for its own submit
+bool reflGpuStep( DdgiGpuSession * s, const ReflGpuIn & in, ReflGpuOut * out );
+//! interop: the ray target (W x H x 16 bytes) and the output (Wh x Hh x 16 bytes) exported to GL, with two semaphores
+struct ReflGpuShare
+{
+	bool ok = false;
+	std::string why;
+	void * raysMemory = nullptr, * outMemory = nullptr;
+	uint64_t raysSize = 0, outSize = 0;
+	void * vkDone = nullptr, * glDone = nullptr;
+};
+bool reflGpuShare( DdgiGpuSession * s, int W, int H, ReflGpuShare * out );
+
 } // namespace bakert
 
 #endif // RTDDGI_GPU_H
