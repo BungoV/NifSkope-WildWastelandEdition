@@ -1,31 +1,10 @@
 #ifndef PROBEVOLUMES_H
 #define PROBEVOLUMES_H
 
-/*! THE SPACE STAGE: ROOMS, THRESHOLDS AND THEIR SHAPES (lane VOLFIT1, 2026-10-19; recx draft VOLUMES.md sections 4-6).
- *
- *  A shared base for GI, fog, sound, navmesh and previs: every enclosed space of a cell is a room made of joined
- *  primitives (box, cylinder, wedge, capsule, sphere); everything else is the one outdoor volume ("outside"); rooms
- *  meet each other and the outside only at stored thresholds.
- *    1. geometry first: the ROOMCLAMP1 grid (proberooms.h) with its working grids kept: solid/glass, the closing by
- *       the exact distance transform (pinch = half a door width), labels, one-sided facing
- *    2. the outdoor air that is roofed AND floored gets a sky share (cosine-weighted, 32 rays) and a wall share (16
- *       level rays within wallReach) by a DDA through a 2x-coarse occupancy grid (no triangle is traced); a part of
- *       it with sky < skyMax and wall >= wallMin is a candidate; a connected candidate becomes a room when, as a
- *       whole, its open boundary share is under openMax and its seen-from-behind share under backMax
- *    3. an enclosed room seen mostly from behind (inside a rock) is no room; a room under minVolume folds into the
- *       neighbor it shares most faces with (sealed: dropped); a roofed room grows back up to growSteps cells to
- *       its wall line (the sky rule leaves its edge short of an opening)
- *    4. thresholds: the faces between two labels and the glass between them, clustered, each an oriented rectangle
- *       with its opening type (opening, door, window, portal) and evidence (door boxes, PortalMarkers, the placer's
- *       apertures); RoomMarkers are evidence for rooms
- *    5. shapes: in the room's footprint frame (minimal-area rectangle), a greedy cover by boxes (each grown while
- *       its next slab is under 3 % other air and under half solid) with wedges competing for roofs; then one
- *       cylinder / sphere / capsule / wedge competes for the whole room (fewer shapes win, boxes win ties).
- *       Measured on the grid: coverage, overshoot into other air, overshoot into solid
- *    6. hand fixes: a .recx room's own "shapes" replace the fitted ones (matched by its anchor)
- *  Refuters (ProbeVolumeSpec::red, WW_CELL_VOLUMES_RED / --red): nosky, nowall, noopen, noback, nofloor, nogrow,
- *  nofold, nomerge, onebox, boxonly, noglass, nowedge, noevidence, noids, norecx; the stage record: fpsoup, noskip; the GI map (probevolumesgi.h): nogimap, gione, spaceshapes, spaceleftover
- *  (probeVolumesCheck). */
+//! THE SPACE STAGE: ROOMS, THRESHOLDS AND THEIR SHAPES:
+//! A shared base for GI, fog, sound, navmesh and previs: every enclosed space of a cell is a room made of
+//! joined primitives (box, cylinder, wedge, capsule, sphere); everything else is the one outdoor volume
+//! ("outside"); rooms meet each other and the outside only at stored thresholds.
 
 #include "probeplace.h"
 
@@ -67,7 +46,7 @@ struct ProbeVolumeSpec
 	float wallReach = 1536.0f;
 	float minVolume = 1.5e6f;   //!< about a 115-unit cube
 	int growSteps = 6;
-	//! lane VOLFIT1: roofed air sharing at least this share of its faces with a room is that room's (ROOMCLAMP1's
+	//! roofed air sharing at least this share of its faces with a room is that room's (ROOMCLAMP1's
 	//! watershed hands a room's floor layer by a doorway to the outdoor basin); a doorway between rooms is far below
 	float mergeShare = 0.2f;
 	float coverTarget = 0.92f;
@@ -85,8 +64,8 @@ struct ProbeVolumeShape
 	float center[3] = { 0, 0, 0 };
 	float size[3] = { 0, 0, 0 };
 	float rotation[3] = { 0, 0, 0 };   //!< degrees: R = Rz Ry Rx (world axes, x first)
-	/* lane VOLPLACE2: a threshold snapped to its opening's frame holds 8 corners (bit 0 the +x jamb, bit 1 the back
-	 * face, bit 2 the head); contains() is then inside their 12 triangles; center/size/rotation stay its box */
+	/* a threshold snapped to its opening's frame holds 8 corners (bit 0 the +x jamb, bit 1 the back
+	 * face, bit 2 the head); contains is then inside their 12 triangles; center/size/rotation stay its box */
 	bool hull = false;
 	float corners[8][3] = {};
 	bool contains( const float p[3] ) const;
@@ -107,7 +86,7 @@ struct ProbeVolumeRoom
 	bool borderline = false;
 	float coverage = 0, overshootAir = 0, overshootSolid = 0;
 	QStringList evidence;
-	QString group;              //!< lane VOLVIEW2: the building: rooms joined by thresholds share it (its largest room's name)
+	QString group;              //!< the building: rooms joined by thresholds share it (its largest room's name)
 };
 
 struct ProbeVolumeThreshold
@@ -139,14 +118,14 @@ struct ProbeVolumes
 	int handFixed = 0, idsKept = 0, idsNew = 0;
 	double doorWidth = 0;       //!< the median door box's narrow side (the pinch's check)
 	double msRooms = 0, msSky = 0, msClassify = 0, msThresholds = 0, msFit = 0, msTotal = 0;
-	qint64 refineRays = 0;      //!< rays the fit's refine cast onto the triangles (lane VOLRAY1)
-	qint64 fineRays = 0;        //!< rays of the fine lattice fit (lane VOLFIT2)
+	qint64 refineRays = 0;      //!< rays the fit's refine cast onto the triangles
+	qint64 fineRays = 0;        //!< rays of the fine lattice fit
 	int fineBoxes = 0;
 	qint64 fineGrown = 0;       //!< fine points grown past the owned cells by the indoor rule
 	qint64 finePruned = 0;      //!< fine boxes dropped (the others covered them within minGain)
 	qint64 fineLost = 0;        //!< room points the check flood missed
 	double msFine = 0;
-	QString fineNote;           //!< lane VOLFIT3: the per-room picks (grid / moved), extras, faces moved, merges
+	QString fineNote;           //!< the per-room picks (grid / moved), extras, faces moved, merges
 	QString roomsLine;
 
 	size_t index( int x, int y, int z ) const
@@ -169,9 +148,9 @@ QStringList probeVolumesApplyRecx( ProbeVolumes * v, const QString & recxPath, c
 //! Keeps room ids: each room of a previous file (same cell) gives its id to the room now holding its anchor.
 QStringList probeVolumesKeepIds( ProbeVolumes * v, const QString & cellKey, const ProbeVolumes & prev );
 QString probeVolumesCensusText( const ProbeVolumes & v );
-//! lane VOLVIEW2: a room's name across cells, "<cell>:0x<id>" (the .space file's room key with its cell)
+//! a room's name across cells, "<cell>:0x<id>" (the .space file's room key with its cell)
 QString probeVolumesRoomName( const ProbeVolumeRoom & r );
-/*! lane VOLVIEW2: every room's group: the rooms joined through thresholds between two rooms (any opening; the outdoors
+/*! every room's group: the rooms joined through thresholds between two rooms (any opening; the outdoors
  *  joins nothing) are one building, named by its largest room (most cells; then the smaller name). Returns the groups. */
 int probeVolumesGroups( ProbeVolumes * v );
 
@@ -224,7 +203,7 @@ struct ProbeVolumesStageSpec
 QString probeVolumesStage( const ProbeSoup & soup, const std::vector<ProbeVolumeMarker> & markers,
 	const std::vector<ProbeVolumeAperture> & apertures, const ProbeVolumesStageSpec & st, ProbeVolumes * out, bool * ok );
 
-/*! lane ROOMFIT9: the in-cell stage's other inputs (apertures, clip, keys, world, red, recx) as `<soup>.spacein` beside
+/*! the in-cell stage's other inputs (apertures, clip, keys, world, red, recx) as `<soup>.spacein` beside
  *  the soup dump; `volumes --like-cell <file>` reads them back, so the CLI rebuilds the in-cell files exactly. */
 bool probeVolumesStageInWrite( const QString & path, const std::vector<ProbeVolumeAperture> & aps, const ProbeVolumesStageSpec & st );
 bool probeVolumesStageInRead( const QString & path, std::vector<ProbeVolumeAperture> * aps, ProbeVolumesStageSpec * st );

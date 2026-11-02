@@ -45,10 +45,7 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include <map>
 #include <unordered_map>
 
-/* The project builds with -march=haswell, where GCC fuses a * b + c into one
- * FMA. Off in this file: a ray that grazes a triangle edge must land on the same
- * side on every CPU and in the gate's Python re-trace (tests/spells/probe_place.py),
- * which does the same arithmetic in the same order. */
+// The project builds with -march=haswell, where GCC fuses a * b + c into one FMA.
 #if defined( __GNUC__ ) && !defined( __clang__ )
 #pragma GCC optimize( "fp-contract=off" )
 #endif
@@ -121,7 +118,7 @@ struct Grid
 	float o[3] = { 0, 0, 0 };   // local coords of voxel (0,0,0)'s low corner
 	float v = 35.0f;
 	std::vector<quint8> s;      // 1 = solid
-	std::vector<quint8> up;     // lane ROOMCLAMP1: 1 = a solid voxel a probe may stand on (empty: every solid one)
+	std::vector<quint8> up;     // 1 = a solid voxel a probe may stand on (empty: every solid one)
 
 	//! 1 solid, 0 air, -1 outside the grid
 	int at( int x, int y, int z ) const
@@ -200,7 +197,7 @@ bool probePlace( const ProbeSoup & soup, const ProbePlaceSpec & spec, ProbePlace
 	const bool redWall = spec.red == QLatin1String( "wall" );
 	const bool redAp = spec.red == QLatin1String( "aperture" );
 	const bool redFrames = spec.red == QLatin1String( "frames" );
-	const bool redWallCap = spec.red == QLatin1String( "wallcap" );   // lane WALLSTACK1
+	const bool redWallCap = spec.red == QLatin1String( "wallcap" );
 	const bool redBuried = spec.red == QLatin1String( "buried" );
 	const int maxLevels = spec.red == QLatin1String( "levels" ) ? 6 : spec.maxLevels;
 
@@ -219,8 +216,8 @@ bool probePlace( const ProbeSoup & soup, const ProbePlaceSpec & spec, ProbePlace
 		zMax = std::max( zMax, soup.tris[i + 2] );
 	}
 	bvh.build();
-	bvh.mask = &soup.amask;   // lane ALPHATEST1: a ray through an alpha-test hole passes on
-	/* lane WATER1: the water surfaces in their own tree (they stop no ray): a column whose first floor lies under
+	bvh.mask = &soup.amask;   // a ray through an alpha-test hole passes on
+	/* the water surfaces in their own tree (they stop no ray): a column whose first floor lies under
 	 * the water is split at the line -- one probe an eye above the surface, one under it where the water is at
 	 * least minAirGap deep (half the depth up from the bed, at most an eye) -- so no probe straddles the surface */
 	Bvh wbvh;
@@ -268,10 +265,10 @@ bool probePlace( const ProbeSoup & soup, const ProbePlaceSpec & spec, ProbePlace
 	const float kWallDirs[4][2] = { { 1, 0 }, { -1, 0 }, { 0, 1 }, { 0, -1 } };
 	float lowestFloor = 3.4e38f;
 	std::vector<float> surfaces;
-	/* lane ROOMCLAMP1: a probe never stands on the back of a one-sided face (an interior shell's roof seen from
+	/* a probe never stands on the back of a one-sided face (an interior shell's roof seen from
 	 * above: outside the building). The surface still bounds the gaps below it. Red "floor": the old rule. */
 	std::vector<quint8> surfBack;
-	std::vector<int> surfTri;   // lane WALLSTACK1: the triangle each surface was hit on
+	std::vector<int> surfTri;   // the triangle each surface was hit on
 	const bool redFloor = spec.red == QLatin1String( "floor" );
 	auto backFacingDown = [&]( int tri ) -> bool {
 		if ( redFloor || tri < 0 || soup.isTwoSided( size_t( tri ) ) )
@@ -284,7 +281,7 @@ bool probePlace( const ProbeSoup & soup, const ProbePlaceSpec & spec, ProbePlace
 		const double nl = std::sqrt( nx * nx + ny * ny + nz * nz );
 		return nl > 0 && nz / nl < -0.05;
 	};
-	// lane WALLSTACK1: the triangle's unit face normal (stored winding); false = degenerate
+	// the triangle's unit face normal (stored winding); false = degenerate
 	auto faceNormal = [&]( int tri, double n[3] ) -> bool {
 		const float * q = &bvh.t[size_t( tri ) * 9];
 		const double e1[3] = { double( q[3] ) - q[0], double( q[4] ) - q[1], double( q[5] ) - q[2] };
@@ -300,10 +297,7 @@ bool probePlace( const ProbeSoup & soup, const ProbePlaceSpec & spec, ProbePlace
 		n[2] /= nl;
 		return true;
 	};
-	/* lane WALLSTACK1: is the gap under the surface hit on triangle `above` soil? Only when that face is one-sided
-	 * and faces up (the point is behind it, as under the terrain) and the point sees fewer than 2 faces from their
-	 * front along the 4 level rays out to buriedReach (a room under a one-sided roof still sees its own walls from
-	 * inside). A two-sided face has no back: the gap stays air, as before. */
+	// is the gap under the surface hit on triangle `above` soil?
 	auto buriedGap = [&]( double x, double y, double z, int above ) -> bool {
 		if ( redBuried || above < 0 || soup.isTwoSided( size_t( above ) ) )
 			return false;
@@ -369,7 +363,7 @@ bool probePlace( const ProbeSoup & soup, const ProbePlaceSpec & spec, ProbePlace
 			point.pos[2] = surfaces[0] + spec.eye;
 			point.cls = ProbeClass::FirstHit;
 			std::vector<ProbePoint> origins;
-			// lane WATER1: the water line over the first floor, if any
+			// the water line over the first floor, if any
 			double wz = -1e300;
 			if ( waterOn ) {
 				const double f[3] = { x, y, top }, down[3] = { 0.0, 0.0, -1.0 };
@@ -447,7 +441,7 @@ bool probePlace( const ProbeSoup & soup, const ProbePlaceSpec & spec, ProbePlace
 					int stack = 0;
 					const int nNear = int( spec.wallNearTop / spec.wallStepNear + 0.5f );
 					for ( int step = 0;; step++ ) {
-						/* lane WALLSTACK1: up the wall until it ends -- wallStepNear apart up to wallNearTop (the old
+						/* up the wall until it ends -- wallStepNear apart up to wallNearTop (the old
 						 * 240..960, as before), wallStepFar apart above it, at most wallMaxSteps levels */
 						if ( redWallCap && step >= nNear )
 							break;
@@ -562,7 +556,7 @@ bool probePlace( const ProbeSoup & soup, const ProbePlaceSpec & spec, ProbePlace
 		g.o[1] = ly0;
 		g.o[2] = gz0;
 		g.s.assign( size_t( g.nx ) * size_t( g.ny ) * size_t( g.nz ), 0 );
-		/* lane ROOMCLAMP1: which solid voxels a probe may stand on (the interior rule's frame only). The back of
+		/* which solid voxels a probe may stand on (the interior rule's frame only). The back of
 		 * a one-sided face is never a floor: a voxel whose every face is one-sided with its front pointing down
 		 * (an interior shell's roof seen from above, from outside the building) is solid but no floor. */
 		const bool wantUp = angDeg == 0.0f && spec.coverage && g0.s.empty() && spec.red != QLatin1String( "floor" );
@@ -753,11 +747,8 @@ bool probePlace( const ProbeSoup & soup, const ProbePlaceSpec & spec, ProbePlace
 						const float bot = g.o[2] + lo[2] * g.v;
 						const float width = spanL * g.v, height = spanZ * g.v, thick = spanP * g.v;
 						const float pz = bot + std::min( spec.eye, height * 0.5f );
-						/* EACH SIDE IS OPEN SKY, A ROOM, OR A POCKET. A room is a space
-						 * a probe could stand in: floor to ceiling at least the column
-						 * descent's own air gap (140). A pocket -- the inside of a car
-						 * wreck, the hollow of a rubble pile -- is not a volume the
-						 * light graph connects, so an opening into one is not a neck. */
+						// EACH SIDE IS OPEN SKY, A ROOM, OR A POCKET. A room is a space a probe could stand
+						// in: floor to ceiling at least the column descent's own air gap (140).
 						float sill = 3.4e38f;
 						bool roofed[2] = { false, false }, pocket = false;
 						for ( int side = 0; side < 2; side++ ) {
@@ -900,7 +891,7 @@ bool probePlace( const ProbeSoup & soup, const ProbePlaceSpec & spec, ProbePlace
 				if ( G.at( x, y, z ) != 0 || G.at( x, y, z - 1 ) != 1 )
 					continue;
 				if ( !G.up.empty() && !G.up[( size_t( z - 1 ) * size_t( G.ny ) + size_t( y ) ) * size_t( G.nx ) + size_t( x )] ) {
-					R.backFloors++;   // lane ROOMCLAMP1: on the back of a one-sided face
+					R.backFloors++;   // on the back of a one-sided face
 					continue;
 				}
 				int h = 0;
@@ -928,7 +919,7 @@ bool probePlace( const ProbeSoup & soup, const ProbePlaceSpec & spec, ProbePlace
 	// the cut: every walkable cell inside an opening's slab belongs to no room; a cell under
 	// a window's slab is lit (its room has a way in, so it is no sealed hollow)
 	std::vector<quint8> lit( W.size(), 0 );
-	std::vector<int> cutBy( W.size(), -1 );   // lane BAKE4: the opening (index into kept) that cut the cell
+	std::vector<int> cutBy( W.size(), -1 );   // the opening (index into kept) that cut the cell
 	int cutAp = -1;
 	for ( const ApCandidate * a : kept ) {
 		cutAp++;
@@ -1043,10 +1034,10 @@ bool probePlace( const ProbeSoup & soup, const ProbePlaceSpec & spec, ProbePlace
 			}
 		return false;
 	};
-	auto place = [&]( const WCell & c, ProbeClass cls, int roomId ) -> bool {   // lane WALLSTACK1: false = refused
+	auto place = [&]( const WCell & c, ProbeClass cls, int roomId ) -> bool {   // false = refused
 		double p[3];
 		standAt( c, p );
-		/* lane ROOMCLAMP1: a room or cover probe with the back of a one-sided face within 200 straight below stands
+		/* a room or cover probe with the back of a one-sided face within 200 straight below stands
 		 * behind a shell (a roof seen from above, a round hull's outer skin from inside its void: its voxel floor
 		 * came from a near-vertical face in the same voxel). No probe; the cover pass gives the cells round it another. */
 		if ( !redFloor ) {   // any frame (PrydwenHull01's is turned: no voxel floor mask there)
@@ -1058,7 +1049,7 @@ bool probePlace( const ProbeSoup & soup, const ProbePlaceSpec & spec, ProbePlace
 				return false;
 			}
 		}
-		/* lane WALLSTACK1: a room or cover probe under a one-sided up face (the terrain) that sees fewer than 2
+		/* a room or cover probe under a one-sided up face (the terrain) that sees fewer than 2
 		 * faces from their front stands in the soil (the void past an open tunnel end): no probe. Red "buried". */
 		{
 			const double up[3] = { 0, 0, 1 };
@@ -1079,10 +1070,9 @@ bool probePlace( const ProbeSoup & soup, const ProbePlaceSpec & spec, ProbePlace
 		addProbe( pp );
 		return true;
 	};
-	/* each room: enclosed or open; then, per cell, its clearance measured at EYE HEIGHT by 8
-	 * horizontal rays (the nearest wall), and whether it is a hallway (the narrowest
-	 * wall-to-wall span through it at most twice hallWidth). Measured at eye height,
-	 * not on the floor: tables, beds and display bases are not walls. */
+	// each room: enclosed or open; then, per cell, its clearance measured at EYE HEIGHT by 8 horizontal rays
+	// (the nearest wall), and whether it is a hallway (the narrowest wall-to-wall span through it at most
+	// twice hallWidth).
 	std::vector<int> roomNo( rooms.size(), -1 );
 	std::vector<quint8> enclosed( rooms.size(), 0 ), hallOf( W.size(), 0 );
 	std::vector<float> clr( W.size(), 0.0f );
@@ -1161,7 +1151,7 @@ bool probePlace( const ProbeSoup & soup, const ProbePlaceSpec & spec, ProbePlace
 			continue;
 		}
 		if ( place( W[size_t( best )], ProbeClass::Room, roomNo[id] ) )
-			R.room++;   // lane WALLSTACK1: placed ones only
+			R.room++;   // placed ones only
 	}
 	// the blind spots, widest cells first
 	std::vector<int> order;
@@ -1187,15 +1177,11 @@ bool probePlace( const ProbeSoup & soup, const ProbePlaceSpec & spec, ProbePlace
 			continue;
 		}
 		if ( place( c, ProbeClass::Cover, roomNo[size_t( c.comp )] ) )
-			R.cover++;   // lane WALLSTACK1: placed ones only
+			R.cover++;   // placed ones only
 	}
 
-	/* ---- lane BAKE4: ROOM IDS (`.tbk` v4, docs/PRTP_PLAN.md 2f). A room's air is its
-	 * walkable cells' air columns (floor up to the first solid). A covered cell that is no
-	 * room of its own (a table top, a counter, a shelf: too small or mostly a drop) takes
-	 * the enclosed room under it in its column when that room's air ends at most 3 voxels
-	 * below it (the furniture's thickness). An opening's cut is split at the opening's plane:
-	 * each half is the room (or the outdoors) on its side. */
+	// ROOM IDS (`.tbk` v4, docs/PRTP_PLAN.md 2f). A room's air is its walkable cells' air columns (floor up to
+	// the first solid).
 	{
 		quint32 h = 2166136261u;
 		for ( const float f : { spec.minX, spec.minY, spec.maxX, spec.maxY } ) {
@@ -1233,10 +1219,8 @@ bool probePlace( const ProbeSoup & soup, const ProbePlaceSpec & spec, ProbePlace
 					return k;
 			return -1;
 		};
-		// the walkable cell whose air holds local point p (-1 = none: outside the grid, or air
-		// over no walkable floor, which is outdoors). A point in a solid voxel (a probe against
-		// a wall or furniture) takes the nearest air voxel around it that it can SEE: the next
-		// voxel in a fixed order can be the far side of a thin wall.
+		// the walkable cell whose air holds local point p (-1 = none: outside the grid, or air over no
+		// walkable floor, which is outdoors).
 		auto cellAtPoint = [&]( const double p[3] ) -> int {
 			const int x = int( std::floor( ( p[0] - G.o[0] ) / v ) ), y = int( std::floor( ( p[1] - G.o[1] ) / v ) );
 			const int z = int( std::floor( ( p[2] - G.o[2] ) / v ) );
@@ -1418,10 +1402,9 @@ QString probeCensusText( const ProbePlaceResult & r )
 	t << "probe columns: " << r.columns << " (" << r.columnsEmpty << " hit nothing), gaps under 140 "
 	  << r.gapsRejected << ", level cap " << r.levelsCapped << ", wall levels refused " << r.wallRefused
 	  << ", columns with a wall " << r.wallColumns << "\n";
-	// lane WALLSTACK1
 	t << "probe walls: highest stack level " << r.wallTop << ", stacks at the step cap " << r.wallCapped
 	  << "; soil gaps refused " << r.buriedGaps << ", room/cover cells in the soil " << r.buriedPlaced << "\n";
-	if ( r.waterColumns > 0 )   // lane WATER1
+	if ( r.waterColumns > 0 )
 		t << "probe columns split at the water line: " << r.waterColumns << " (a probe under the water in " << r.waterUnder
 		  << ")\n";
 	t << "openings: doorway " << r.doorway << ", window " << r.window << ", breach " << r.breach
@@ -1433,7 +1416,7 @@ QString probeCensusText( const ProbePlaceResult & r )
 	  << ", in enclosed rooms " << r.coverCells << " (hallway " << r.hallCells << "), cut at openings " << r.cutCells
 	  << "; blind cells left " << r.blindLeft << "\n";
 	t << "floors: refused on the back of a one-sided face: walkable cells " << r.backFloors << ", column levels "
-	  << r.backColumnHits << ", room/cover probes " << r.backPlaced << "\n";   // lane ROOMCLAMP1
+	  << r.backColumnHits << ", room/cover probes " << r.backPlaced << "\n";
 	t << "room ids: " << r.roomIds << " enclosed rooms named, probes in a room " << r.probesInRoom
 	  << " (openings " << r.apertureRooms << "), room boxes " << r.roomBoxes.size() << "\n";
 	t << "probe soup: " << r.soupTris << " triangles; voxel grid " << r.gridX << " x " << r.gridY << " x "
@@ -1498,14 +1481,14 @@ bool probeSoupWrite( const QString & path, const ProbeSoup & soup, QString * err
 		f.write( reinterpret_cast<const char *>( tail ), sizeof tail );
 		f.write( reinterpret_cast<const char *>( soup.alb.data() ), qint64( soup.alb.size() ) );
 	}
-	// lane BAKE4: the glass and its transmittance
+	// the glass and its transmittance
 	if ( !soup.glass.empty() && soup.glassT.size() * 3 == soup.glass.size() ) {
 		const quint32 tail[2] = { 0x31534C47u /* 'GLS1' */, quint32( soup.glass.size() / 9 ) };
 		f.write( reinterpret_cast<const char *>( tail ), sizeof tail );
 		f.write( reinterpret_cast<const char *>( soup.glass.data() ), qint64( soup.glass.size() * sizeof( float ) ) );
 		f.write( reinterpret_cast<const char *>( soup.glassT.data() ), qint64( soup.glassT.size() ) );
 	}
-	// lane ROOMCLAMP1: the two-sided triangles, one byte each (written only when any is)
+	// the two-sided triangles, one byte each (written only when any is)
 	if ( !soup.twoSided.empty() ) {
 		std::vector<quint8> ts( soup.tris.size() / 9, 0 );
 		std::copy( soup.twoSided.begin(), soup.twoSided.begin() + qMin( soup.twoSided.size(), ts.size() ), ts.begin() );
@@ -1513,7 +1496,7 @@ bool probeSoupWrite( const QString & path, const ProbeSoup & soup, QString * err
 		f.write( reinterpret_cast<const char *>( tail ), sizeof tail );
 		f.write( reinterpret_cast<const char *>( ts.data() ), qint64( ts.size() ) );
 	}
-	/* lane LAND5: every tail after TWO1 is SIZED -- u32 magic, u32 count, u32 body bytes, then the body -- so a
+	/* every tail after TWO1 is SIZED -- u32 magic, u32 count, u32 body bytes, then the body -- so a
 	 * reader skips a tail it does not know by its byte count. Fixed order: AMK1, EMT1, VNM1, DRG1 (a new one last). */
 	qint64 sizedAt = -1;
 	auto sizedBegin = [&]( quint32 magic, quint32 count ) {
@@ -1528,7 +1511,7 @@ bool probeSoupWrite( const QString & path, const ProbeSoup & soup, QString * err
 		f.write( reinterpret_cast<const char *>( &bytes ), 4 );
 		f.seek( end );
 	};
-	/* lane ALPHATEST1: the alpha-test masks (written only when any triangle has one): the maps (name, w, h,
+	/* the alpha-test masks (written only when any triangle has one): the maps (name, w, h,
 	 * w*h alpha bytes), the model names, then 40 bytes a masked triangle (u32 triangle, i32 map, i32 model,
 	 * u32 threshold, 6 f32 uv) */
 	if ( !soup.amask.empty() ) {
@@ -1537,7 +1520,7 @@ bool probeSoupWrite( const QString & path, const ProbeSoup & soup, QString * err
 			u32( quint32( s.size() ) );
 			f.write( s.data(), qint64( s.size() ) );
 		};
-		/* lane ALPHATEST2: 'AMK2' = AMK1 with 3 f32 more a triangle (each corner's vertex alpha x material alpha),
+		/* 'AMK2' = AMK1 with 3 f32 more a triangle (each corner's vertex alpha x material alpha),
 		 * written only when some triangle's scale is not 1: otherwise the AMK1 bytes exactly. LAND6: it takes AMK1's
 		 * slot in the sized order (AMK1 or AMK2, EMT1, VNM1, DRG1). */
 		const bool amk2 = soup.amask.anyScaled();
@@ -1566,7 +1549,7 @@ bool probeSoupWrite( const QString & path, const ProbeSoup & soup, QString * err
 		}
 		sizedEnd();
 	}
-	/* lane EMISSIVEGI1: the glowing triangles (written only when any glows): the glow maps (name, w, h, w*h*3 RGB
+	/* the glowing triangles (written only when any glows): the glow maps (name, w, h, w*h*3 RGB
 	 * bytes as stored), the emitters (3 f32 glowColor x glowMult, i32 map or -1 = the whole surface), then 32 bytes
 	 * a glowing triangle (u32 triangle, i32 emitter, 6 f32 uv) */
 	if ( !soup.glow.empty() ) {
@@ -1596,7 +1579,7 @@ bool probeSoupWrite( const QString & path, const ProbeSoup & soup, QString * err
 		}
 		sizedEnd();
 	}
-	// lane SMOOTHN1: the vertex normals, 9 snorm16 a triangle (written only when any triangle has them)
+	// the vertex normals, 9 snorm16 a triangle (written only when any triangle has them)
 	if ( !soup.vn.empty() ) {
 		std::vector<qint16> vn( soup.tris.size(), 0 );
 		std::copy( soup.vn.begin(), soup.vn.begin() + qMin( soup.vn.size(), vn.size() ), vn.begin() );
@@ -1604,7 +1587,7 @@ bool probeSoupWrite( const QString & path, const ProbeSoup & soup, QString * err
 		f.write( reinterpret_cast<const char *>( vn.data() ), qint64( vn.size() * sizeof( qint16 ) ) );
 		sizedEnd();
 	}
-	/* lane GPURELIGHT1: the doors' real geometry (written only when any door has some): u32 glass count, the solid
+	/* the doors' real geometry (written only when any door has some): u32 glass count, the solid
 	 * triangles (9 f32 + u32 door), the glass triangles (9 f32 + 3 u8 transmittance + u8 0 + u32 door), then the
 	 * doors' masks as AMK1's body (maps, models), u32 masked count, masked triangles numbered over the solid ones */
 	if ( !soup.doorGeom.empty() ) {
@@ -1614,7 +1597,7 @@ bool probeSoupWrite( const QString & path, const ProbeSoup & soup, QString * err
 			u32( quint32( s.size() ) );
 			f.write( s.data(), qint64( s.size() ) );
 		};
-		// lane GAPFIX1: 'DRG2' = DRG1 with 3 f32 more a masked triangle (the corners' vertex alpha x material alpha), only when any
+		// 'DRG2' = DRG1 with 3 f32 more a masked triangle (the corners' vertex alpha x material alpha), only when any
 		const bool drg2 = g.amask.anyScaled();
 		sizedBegin( drg2 ? 0x32475244u /* 'DRG2' */ : 0x31475244u /* 'DRG1' */, quint32( g.tris.size() / 9 ) );
 		u32( quint32( g.glass.size() / 9 ) );
@@ -1653,7 +1636,7 @@ bool probeSoupWrite( const QString & path, const ProbeSoup & soup, QString * err
 		}
 		sizedEnd();
 	}
-	// lane NEONGI1: the glowing effect surfaces (written only when any): 9 f32 + 3 f32 Le + u8 two-sided + 3 u8 0 a triangle
+	// the glowing effect surfaces (written only when any): 9 f32 + 3 f32 Le + u8 two-sided + 3 u8 0 a triangle
 	if ( !soup.veil.empty() ) {
 		const ProbeSoup::Veil & v = soup.veil;
 		sizedBegin( 0x31564D45u /* 'EMV1' */, quint32( v.count() ) );
@@ -1665,7 +1648,7 @@ bool probeSoupWrite( const QString & path, const ProbeSoup & soup, QString * err
 		}
 		sizedEnd();
 	}
-	// lane LIGHTS5: each emitter's colour under the other "Emittance in bounce light" state (u32 emitter + 3 f32)
+	// each emitter's colour under the other "Emittance in bounce light" state (u32 emitter + 3 f32)
 	if ( !soup.glow.empty() && soup.glow.hasAlt() ) {
 		quint32 n = 0;
 		for ( const ProbeEmit::Emitter & em : soup.glow.emitters )
@@ -1725,7 +1708,7 @@ bool probeSoupRead( const QString & path, ProbeSoup * soup, QString * error )
 			soup->alb.clear();
 		more = f.read( reinterpret_cast<char *>( tail ), sizeof tail ) == qint64( sizeof tail );
 	}
-	// lane BAKE4: the optional glass tail
+	// the optional glass tail
 	if ( more && tail[0] == 0x31534C47u ) {
 		soup->glass.resize( size_t( tail[1] ) * 9 );
 		soup->glassT.resize( size_t( tail[1] ) * 3 );
@@ -1737,7 +1720,7 @@ bool probeSoupRead( const QString & path, ProbeSoup * soup, QString * error )
 		}
 		more = f.read( reinterpret_cast<char *>( tail ), sizeof tail ) == qint64( sizeof tail );
 	}
-	// lane ROOMCLAMP1: the optional two-sided tail
+	// the optional two-sided tail
 	soup->twoSided.clear();
 	if ( more && tail[0] == 0x314F5754u && tail[1] == head[1] ) {
 		soup->twoSided.resize( size_t( tail[1] ) );
@@ -1749,7 +1732,7 @@ bool probeSoupRead( const QString & path, ProbeSoup * soup, QString * error )
 	soup->glow = ProbeEmit();
 	soup->vn.clear();
 	soup->doorGeom = ProbeSoup::DoorGeom();
-	/* lane LAND5: the sized tails (u32 magic, u32 count, u32 body bytes, body) in the order AMK1, EMT1, VNM1, DRG1.
+	/* the sized tails (u32 magic, u32 count, u32 body bytes, body) in the order AMK1, EMT1, VNM1, DRG1.
 	 * sized() reads the byte count and skips every tail this reader does not know by it; next() goes to the end of
 	 * the current one (a known tail that does not fill its bytes exactly is dropped). */
 	quint32 bytes = 0;
@@ -1772,8 +1755,8 @@ bool probeSoupRead( const QString & path, ProbeSoup * soup, QString * error )
 		sized();
 	};
 	sized();
-	// lane ALPHATEST1: the optional alpha-test masks (a short or broken tail leaves every face solid)
-	if ( more && ( tail[0] == 0x314B4D41u || tail[0] == 0x324B4D41u ) ) {   // AMK1, or AMK2 (lane ALPHATEST2)
+	// the optional alpha-test masks (a short or broken tail leaves every face solid)
+	if ( more && ( tail[0] == 0x314B4D41u || tail[0] == 0x324B4D41u ) ) {   // AMK1, or AMK2
 		const bool amk2 = tail[0] == 0x324B4D41u;
 		probebvh::AlphaMask am;
 		bool ok = true;
@@ -1838,7 +1821,7 @@ bool probeSoupRead( const QString & path, ProbeSoup * soup, QString * error )
 			soup->amask = std::move( am );
 		next();
 	}
-	// lane EMISSIVEGI1: the optional glowing triangles (a short or broken tail leaves nothing glowing)
+	// the optional glowing triangles (a short or broken tail leaves nothing glowing)
 	if ( more && tail[0] == 0x31544D45u ) {
 		ProbeEmit ge;
 		bool ok = true;
@@ -1895,7 +1878,7 @@ bool probeSoupRead( const QString & path, ProbeSoup * soup, QString * error )
 		}
 		next();
 	}
-	// lane SMOOTHN1: the optional vertex-normal tail
+	// the optional vertex-normal tail
 	if ( more && tail[0] == 0x314D4E56u ) {
 		if ( tail[1] == head[1] && qint64( bytes ) == qint64( tail[1] ) * 18 ) {
 			soup->vn.resize( size_t( tail[1] ) * 9 );
@@ -1905,8 +1888,8 @@ bool probeSoupRead( const QString & path, ProbeSoup * soup, QString * error )
 		}
 		next();
 	}
-	// lane GPURELIGHT1: the doors' optional real geometry (a short or broken tail leaves the doors without any)
-	if ( more && ( tail[0] == 0x31475244u || tail[0] == 0x32475244u ) ) {   // DRG1, or DRG2 (lane GAPFIX1)
+	// the doors' optional real geometry (a short or broken tail leaves the doors without any)
+	if ( more && ( tail[0] == 0x31475244u || tail[0] == 0x32475244u ) ) {   // DRG1, or DRG2
 		const bool drg2 = tail[0] == 0x32475244u;
 		ProbeSoup::DoorGeom g;
 		bool ok = true;
@@ -1996,7 +1979,7 @@ bool probeSoupRead( const QString & path, ProbeSoup * soup, QString * error )
 			soup->doorGeom = std::move( g );
 		next();
 	}
-	// lane NEONGI1: the glowing effect surfaces (a short or broken tail leaves none)
+	// the glowing effect surfaces (a short or broken tail leaves none)
 	if ( more && tail[0] == 0x31564D45u ) {
 		const qint64 n = qint64( tail[1] );
 		if ( n * 52 == qint64( bytes ) ) {
@@ -2017,7 +2000,7 @@ bool probeSoupRead( const QString & path, ProbeSoup * soup, QString * error )
 		}
 		next();
 	}
-	// lane LIGHTS5: the emitters' other-state colours (a short or broken tail leaves none)
+	// the emitters' other-state colours (a short or broken tail leaves none)
 	if ( more && tail[0] == 0x31414D45u ) {
 		const qint64 n = qint64( tail[1] );
 		if ( n * 16 == qint64( bytes ) && !soup->glow.empty() ) {

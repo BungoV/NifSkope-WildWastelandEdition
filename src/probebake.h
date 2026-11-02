@@ -1,33 +1,9 @@
 #ifndef PROBEBAKE_H
 #define PROBEBAKE_H
 
-/*! THE PRTP BAKE (lane PRTPBAKE, 2026-09-30; docs/PRTP_PLAN.md 2g).
- *
- *  Transport only, no light (the Division rule FO4CS kept: sun, sky and placed
- *  lights are evaluated live through the baked transport). For every placed
- *  probe, rays in a Fibonacci sphere (equal solid angle each) go through the
- *  same soup and the same BVH the placer used. A hit is a surfel sample
- *  (70-unit cells: position, normal, albedo means); a miss is sky (void in an interior: noSky). Per probe:
- *  sky fraction and mean / RMS hit distance per octant, and links to the
- *  surfel cells it saw, weighted by solid angle, the strongest `maxLinks` kept.
- *
- *  Output: FO4CS's `.tbk` v3 sector files, byte for byte its layout
- *  ('TBK1', 64-byte header, surfels 32 B, probes 144 B, links 12 B, one file
- *  per cell, sector_%+05d_%+05d.tbk), so its relight reads them unchanged.
- *  One divergence: a cell's file carries EVERY surfel its own probes link to,
- *  also those standing in a neighbour cell, so each cell bakes alone (the
- *  reader keeps the first copy of a duplicated surfel cell).
- *
- *  Thin walls: a 70-unit cell often holds both faces of a wall. The cell keeps
- *  one side (the one most rays saw, plus faces not opposed to it), and a probe
- *  never links a surfel turned away from it: that weight goes to unlinkedWeight,
- *  which FO4CS's relight leaves out of the gather domain. Linking it would light
- *  a room with the sunlit outside of its own wall.
- *
- *  Lane BAKE4 (2026-10-01): v4 (the default; spec.tbkVersion) keeps both sides of a
- *  thin wall in their own cell, tags every link with its side, the glass tint on its
- *  way and the door it crossed, and every probe with its sky tint and rooms. The v3
- *  writer above is unchanged byte for byte (tbkVersion 3). */
+//! THE PRTP BAKE:
+//! Transport only, no light (the Division rule FO4CS kept: sun, sky and placed lights are evaluated live
+//! through the baked transport).
 
 #include "probeplace.h"
 #include "proberooms.h"
@@ -49,26 +25,22 @@ struct ProbeBakeSpec
 	 *  into the unloaded void, so its weight is unlinked (the relight renormalizes
 	 *  over the surfaces), and every octant's sky visibility is 0. */
 	bool noSky = false;
-	/*! 2026-10-01: THE SECOND SIDE, inside v3. A cell seen from both sides of a thin
-	 *  wall keeps one side; the other side's surfel goes into the EMPTY neighbour cell
-	 *  on its own side (the reader keys a surfel by its position, so the position is
-	 *  nudged across the boundary, under one cell). A probe the kept side faces away
-	 *  from links that surfel instead of being refused. Off = the old refusal. */
+	//! 2026-10-01: THE SECOND SIDE, inside v3.
 	bool spill = true;
-	/*! Lane BAKE4: the file version. 4 (default) = the v3 body plus a tail: a cell seen from
+	/*! the file version. 4 (default) = the v3 body plus a tail: a cell seen from
 	 *  both sides of a thin wall keeps BOTH sides in itself (a back surfel; each ray links
 	 *  the side whose face it hit), every link's side, glass tint and door, every probe's
 	 *  sky tint per octant and rooms, and the room boxes. FO4CS's reader takes v3 only
 	 *  (it refuses any other version and size), so 3 writes its file exactly (the second
 	 *  side spilled next door, as above). */
-	int tbkVersion = 5;   //!< lane SIDES6: 5 (default) = v4 with up to six surfels a cell, one per facing bin
+	int tbkVersion = 5;   //!< 5 (default) = v4 with up to six surfels a cell, one per facing bin
 	/*! A deliberate defect for the gate's refuters: "octant" swaps the octant
 	 *  bits (x negative -> bit 2), "normal" stores the triangle normal unflipped;
-	 *  lane BAKE4 (v4): "oneside" drops the back surfels (their links refused, the
+	 *  "oneside" drops the back surfels (their links refused, the
 	 *  old rule), "rooms" writes no room ids or boxes, "glass" bakes as if no glass.
 	 *  Empty in every real run. */
 	QString red;
-	/*! Lane CAPTURE1: where a surfel's albedo and normal come from (positions, sides, links, sky
+	/*! where a surfel's albedo and normal come from (positions, sides, links, sky
 	 *  and glass are the same in all three; only those two values differ):
 	 *    "tri" (default)  one albedo per triangle (its centroid UV, coarse map), the face normal
 	 *    "hit"            each ray hit's own point: UV -> texel at a mip from the ray's footprint,
@@ -84,37 +56,29 @@ struct ProbeBakeSpec
 	//! notes\probecap tracer's layout) are written to cubeDump
 	QString cubeDump;
 	std::vector<int> cubeDumpProbes;
-	/*! lane ROOMCLAMP1: a probe whose rays meet the BACKS of one-sided faces on more than this share of the
+	/*! a probe whose rays meet the BACKS of one-sided faces on more than this share of the
 	 *  sphere stands outside the shell: moved to the nearest clear point under it, or dropped (>= 1: off). */
 	float backMax = 0.25f;
 	QString backDump;   //!< the gate's list of every probe's share and fate (empty: none)
-	//! lane GIPROBE2: a probe whose nearest front face is under this many units is pushed into clear air (0: off)
+	//! a probe whose nearest front face is under this many units is pushed into clear air (0: off)
 	float probeClear = 0;
 	QString clearDump;  //!< the gate's list: each probe's nearest front face before/after and where it went
-	/*! lane SMOOTHN1: noise-driven ray counts. Every probe casts `rays` (today's set); one whose light-free
-	 *  estimate is still noisy (an octant's standard error over max(adaptRel x its mean, adaptAbs)) takes
-	 *  another batch of `rays`, turned at random, up to adaptMax batches. 1 = the base set alone (the
-	 *  gate's pin: WW_CELL_PROBE_BAKE_ADAPT=1). Never fewer rays than the base set. */
+	//! noise-driven ray counts.
 	int adaptMax = 16;
 	float adaptRel = 0.05f, adaptAbs = 0.005f;
-	//! lane WATER1: every ray of these probes (index into the probes), its water split, is written to waterDump
+	//! every ray of these probes (index into the probes), its water split, is written to waterDump
 	QString waterDump;
 	std::vector<int> waterDumpProbes;
-	/*! lane BAKENEIGH1: the cells this bake was asked for, as sector squares [ownX0..ownX1] x [ownY0..ownY1].
-	 *  A probe that stands outside them (the placer's grid closes ON the far edge, so its last column and row
-	 *  fall in the next cell) is left out of the files, and no file of a cell outside the set is written:
-	 *  that cell's own bake places the same edge itself. So tiles baked one after another into one folder
-	 *  never rewrite each other's cells. Unset (ownX1 < ownX0, the CLI tools and interiors): every sector
-	 *  the probes reach is written. */
+	//! the cells this bake was asked for, as sector squares [ownX0..ownX1] x [ownY0..ownY1].
 	int ownX0 = 0, ownY0 = 0, ownX1 = -1, ownY1 = -1;
-	/*! lane GAPBAKE1 (ROOMCLAMP1's straddle): v5 only. A surfel cell's samples split by the room of the probe whose
+	/*! v5 only. A surfel cell's samples split by the room of the probe whose
 	 *  ray found them (a ray reaches only its own room's side of a wall), up to kTbkRoomSlots rooms a cell; the
 	 *  record's pad0 and a link's side = bin + 6 x slot, header reserved[2] bit 32. Off = the old bytes. */
 	bool roomSplit = false;
-	//! lane GAPBAKE1: the split's rooms, the soup's grid (probeBakeRoomGrid); null = the placer's probe rooms
+	//! the split's rooms, the soup's grid (probeBakeRoomGrid); null = the placer's probe rooms
 	const ProbeRooms * roomGrid = nullptr;
 };
-constexpr int kTbkRoomSlots = 4;   //!< lane GAPBAKE1: rooms a surfel cell keeps apart (more merge into the last)
+constexpr int kTbkRoomSlots = 4;   //!< rooms a surfel cell keeps apart (more merge into the last)
 
 struct ProbeBakeResult
 {
@@ -130,7 +94,7 @@ struct ProbeBakeResult
 	bool noSky = false;                     //!< the spec's: misses went to unlinked, not sky
 	double voidMean = 0;                    //!< over probes, noSky only: the sphere share that met nothing
 	int albedoKnown = 0;                    //!< 1 when the soup carried albedo, else every surfel is grey
-	// lane CAPTURE1: the albedo way's census
+	// the albedo way's census
 	QString albedoWay;
 	qint64 albSamples = 0;                  //!< hit: ray hits read at their point; cube: pixels that landed on a surfel
 	qint64 albDropped = 0;                  //!< cube: pixels on a cell with no surfel (or sky)
@@ -138,57 +102,55 @@ struct ProbeBakeResult
 	int albSurfels = 0, albKept = 0;        //!< surfels the way rewrote; kept their tri value (no sample)
 	int albLeaned = 0;                      //!< normals leaned toward the face normal to face every probe linking them
 	double msAlbedo = 0;
-	// lane BAKE4
 	int version = 3;                        //!< the `.tbk` version written
 	int backSurfels = 0, backWritten = 0;   //!< v4: second sides kept in their own cell; written (summed over files)
 	qint64 linksBack = 0, linksDoor = 0, linksTinted = 0;   //!< v4 links: to a back surfel, through a door, through glass
 	int doors = 0, glassTris = 0;           //!< the soup's door boxes and glass triangles
-	int decalTris = 0;                      //!< lane GICAL1: decal triangles folded into the albedo
-	// lane WATER1: the water surfaces the rays split at
+	int decalTris = 0;                      //!< decal triangles folded into the albedo
+	// the water surfaces the rays split at
 	int waterTris = 0, waterTypes = 0, waterUnder = 0;   //!< triangles, WATR records; probes under the water
 	qint64 waterRays = 0, waterMirrorHits = 0, waterMirrorSky = 0;   //!< rays split; their mirror legs' hits, sky
 	double waterReflMean = 0;               //!< over probes: the sphere share the mirror legs took
-	qint64 decalHits = 0, surfelHits = 0;   //!< lane GICAL1: surfel hits a decal covered; all surfel hits
+	qint64 decalHits = 0, surfelHits = 0;   //!< surfel hits a decal covered; all surfel hits
 	double glassMean = 0;                   //!< over probes: the sphere share seen through glass
 	int probesRoomed = 0, boxesWritten = 0; //!< probes standing in an enclosed room; room boxes written (summed over files)
-	// lane EMISSIVEGI1: glowing surfaces
+	// glowing surfaces
 	int emitTris = 0, emitSurfels = 0, emitDropped = 0;   //!< the soup's glowing triangles; surfels written with Le; lost to v3
-	int emitAltSurfels = 0;                 //!< lane LIGHTS5: surfels in emitalt_*.bin (Le differs under the other state)
+	int emitAltSurfels = 0;                 //!< surfels in emitalt_*.bin (Le differs under the other state)
 	qint64 emitHits = 0;                    //!< pass-1 hits on a glowing triangle
-	// lane NEONGI1: glowing effect surfaces (the soup's veils): triangles; pass-1 crossings added to the surface behind,
+	// glowing effect surfaces (the soup's veils): triangles; pass-1 crossings added to the surface behind,
 	// crossed from behind (one-sided), crossed over a surfel cell in front of the surface
 	int veilTris = 0;
 	qint64 veilHits = 0, veilBack = 0, veilFar = 0;
 	double emitLeSum[3] = { 0, 0, 0 };      //!< the written surfels' Le, summed
-	double msRays = 0, msWrite = 0, msGpuRays = -1, msSurfelPass = 0;	// lane RTGI1: msRays' GPU batches + surfel pass
-	// lane RTGI2: msRays split (trees, shell, GPU scene, ray build, cast, read back, -, merge, sides, links); -1 = not run
+	double msRays = 0, msWrite = 0, msGpuRays = -1, msSurfelPass = 0;	// msRays' GPU batches + surfel pass
+	// msRays split (trees, shell, GPU scene, ray build, cast, read back, -, merge, sides, links); -1 = not run
 	double msPart[10] = { -1, -1, -1, -1, -1, -1, -1, -1, -1, -1 };
-	double msProf[11] = {};	//!< lane RTGI2: WW_BAKE_PROF=1 pass 1 / pass 2 sections, summed over the workers
-	QString rtNote;                         //!< lane RTBAKE1: the primary rays' tracer (bakert census), "" = cpu
-	// lane SIDES6: v5 sides, and the corner measure (every version)
+	double msProf[11] = {};	//!< WW_BAKE_PROF=1 pass 1 / pass 2 sections, summed over the workers
+	QString rtNote;                         //!< the primary rays' tracer (bakert census), "" = cpu
+	// v5 sides, and the corner measure (every version)
 	int sideSurfels = 0;                    //!< v5: surfels beyond each cell's first
-	int roomSplitCells = 0, roomSplitSurfels = 0, roomSlotsMerged = 0, roomSplitRooms = 0;   //!< lane GAPBAKE1: cells split by room; their extra surfels; rooms past the last slot
+	int roomSplitCells = 0, roomSplitSurfels = 0, roomSlotsMerged = 0, roomSplitRooms = 0;   //!< cells split by room; their extra surfels; rooms past the last slot
 	int cellsSampled = 0, cornerCells = 0;  //!< cells with a hit; whose v4 front merges faces over 45 deg apart
 	std::vector<int> sideHist;              //!< cells by the number of facing bins they were seen on (index 1..6)
 	double hitW = 0, offW = 0, cornerW = 0; //!< v4+: ray weight on a surfel; on one over 45 deg off its face; on a corner cell
-	// lane ROOMCLAMP1: probes outside the shell
+	// probes outside the shell
 	bool backRule = false;
 	float backMax = 0.25f;
 	int backMoved = 0, backDropped = 0;
 	double backShareMax = 0;
 	std::vector<int> backHist;              //!< probes per 0.05 of back-face share (20 bins), before the rule
-	// lane GIPROBE2: probes out of walls
+	// probes out of walls
 	bool clearRule = false;
 	float clearMin = 0;
 	qint64 clearTested = 0;
 	int clearShort = 0, clearMoved = 0, clearStill = 0;
 	double clearMoveMax = 0;
-	// lane SMOOTHN1
 	qint64 smoothTris = 0, nmapTris = 0;    //!< soup triangles with vertex normals; with a tangent-space normal map
 	qint64 smoothHits = 0, nmapHits = 0;    //!< surfel hits given a smooth normal; samples a normal map bent
 	qint64 raysCast = 0;                    //!< pass 2's rays: the base set plus every extra batch
 	int baseRays = 0, adaptMax = 1, probesRaised = 0, multMax = 1;
-	// lane BAKENEIGH1: probes outside the asked cells, left to their own cell's bake
+	// probes outside the asked cells, left to their own cell's bake
 	bool ownSet = false;
 	int ownCells = 0, outsideProbes = 0, outsideSectors = 0;
 	QStringList files;
@@ -199,7 +161,7 @@ struct ProbeBakeResult
 //! `roomBoxes` (the placer's) go into the v4 files whose probes name their rooms.
 bool probeBake( const ProbeSoup & soup, const std::vector<ProbePoint> & probes, const ProbeBakeSpec & spec,
 	const QString & outDir, ProbeBakeResult * out, const std::vector<ProbeRoomBox> * roomBoxes = nullptr );
-//! lane GAPBAKE1: the room split's rooms grid from the soup before the bake (probegi's grid rule over the probes'
+//! the room split's rooms grid from the soup before the bake (probegi's grid rule over the probes'
 //! box grown by `pad`): a placer that finds no enclosed room (two rooms sharing one wall) still splits.
 bool probeBakeRoomGrid( const ProbeSoup & soup, const std::vector<ProbePoint> & probes, const ProbeRoomSpec & spec,
 	ProbeRooms * out, float pad = 512.0f );

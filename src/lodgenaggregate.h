@@ -15,43 +15,7 @@ BSD License - see nifskope.h
 
 #include <vector>
 
-/* AGGREGATE RING-3 IMPOSTORS -- one card set per forested cell.
- *
- * bungo, 2026-09-11 08:2x -> 08:3x, verbatim: *"At ring 3 the bake takes each
- * cell's trees, places their cards with the same rotation and mirror the
- * repetition breaking would give them, photographs the whole cluster from the
- * horizon views, and writes one aggregate sheet per cell. The ring 3 instance
- * list then holds one placement per cell instead of one per tree. At the ring 2
- * to 3 border the per-tree cards cross-fade into the cell card. Same sheet
- * format, same sway rule from the height channel."* -- and *"1 sounds good"*.
- *
- * THE PHOTOGRAPH IS AN ORTHOGRAPHIC COMPOSITE, NOT A VIEWPORT RENDER, and that
- * is a deliberate deviation from the brief with three measured reasons:
- *
- *  1. The render hook photographs ONE model per process and sleeps 1,200 ms a
- *     card. The Commonwealth has 2,631 forested cells at the default threshold
- *     and 8 views each: 21,048 photographs, over SEVEN HOURS of sleep alone,
- *     against a bake whose whole object stage measures 4.1 s on a nine-chunk
- *     region. The render route cannot bake the worldspace bungo is going to
- *     bake.
- *  2. There is nothing left to photograph. Since 2026-09-10 every card sheet
- *     is ORTHOGRAPHIC and metric (`card.projection ortho`,
- *     docs/LODGEN_CARD_SHEETS.md 3.7): `half`, `center` and `frameOffset` are
- *     world lengths that describe the sheet beside them. An orthographic
- *     composite of orthographic sheets is EXACT -- there is no projection to
- *     redo, only a resample -- where a re-render through a viewport would add a
- *     second round of pixel quantisation on top of the first.
- *  3. It is deterministic. Two runs of one region produce byte-identical
- *     sheets, which is what `--aggregate` off being byte-identical is measured
- *     against, and it holds no GL context, no window and no instance slot.
- *
- * What the composite cannot do, stated rather than hidden: it can only show
- * what the per-tree cards show, so the aggregate inherits the cards' own frame
- * quantisation (a 12.8-degree horizon step at OCT 8) and their coverage floor.
- * That is the error the calibrated picture gate measures, and it is the reason
- * the reference for that gate is the per-tree cards at the same distance --
- * the thing the aggregate actually replaces -- and not the mesh.
- */
+// AGGREGATE RING-3 IMPOSTORS -- one card set per forested cell.
 
 //! What the compositor needs of ONE tree's card set. The caller fills it from
 //! the `LodgenCard` it already has, so this module never parses a sidecar and
@@ -133,24 +97,16 @@ struct LodgenAggStats
 	QStringList refusals;           //!< one line a reason, in words
 };
 
-/*! Build one aggregate set per forested cell.
- *
- * `trees` is every tree placement the caller wants considered, in any order,
- * each with the DRAWN rotation and the mirror the repetition breaker gives it
- * -- bungo's *"with the same rotation and mirror the repetition breaking would
- * give them"*. `cards` maps a base form id to its card set; a base absent from
- * it is REFUSED IN WORDS and its trees stay per-tree, which is the module's
- * fallback floor (CONSTITUTION 10) and never a silent drop.
- *
- * Returns false only on a programming error; a cell that cannot be built is a
- * refusal in `stats`, not a failure.
- */
+//! Build one aggregate set per forested cell:
+//! `trees` is every tree placement the caller wants considered, in any order, each with the DRAWN rotation and
+//! the mirror the repetition breaker gives it bungo's *"with the same rotation and mirror the repetition
+//! breaking would give them"*.
 bool lodgenAggregateBuild( const QVector<LodgenAggTree> & trees,
 	const QHash<quint32, LodgenAggCard> & cards, const LodgenAggOptions & opts,
 	QVector<LodgenAggSet> * out, LodgenAggStats * stats, QString * error );
 
 //! The game path stem of a cell's aggregate set, without the suffix:
-//! `Data\FO4CSLOD\<ws>\Aggregate\<cellX>_<cellY>_agg` (lane LAYOUT1,
+//! `Data\FO4CSLOD\<ws>\Aggregate\<cellX>_<cellY>_agg` (
 //! 2026-09-16: one root for every FO4CS-target output).
 QString lodgenAggregateStem( const QString & worldspace, int cellX, int cellY );
 

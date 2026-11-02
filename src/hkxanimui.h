@@ -32,7 +32,7 @@
    has come back with the clip not active -- a measurement, never a guess made
    before anything was tried (CONSTITUTION rule 4).
 
-   Lane HKX3, 2026-09-10. */
+ */
 
 #ifndef HKXANIMUI_H
 #define HKXANIMUI_H
@@ -45,7 +45,7 @@
 
 class GLView;
 class Scene;
-struct HkxClipEntry;   //!< src/hkxplayback.h -- one loaded clip (lane UINOTES1's copy/paste)
+struct HkxClipEntry;   //!< src/hkxplayback.h -- one loaded clip
 
 //! One row of the animations list that came from a file rather than a block.
 struct WwHkxListEntry
@@ -62,12 +62,7 @@ struct WwHkxListEntry
 	QString label() const;
 };
 
-/*! Every entry point that loads a .hkx as an animation, and the refusals.
- *
- *  One instance for the whole application (the clips themselves live in each
- *  Scene's own HkxPlayback; this only holds what that cannot hold). It owns no
- *  widgets and no OpenGL state.
- */
+//! Every entry point that loads a .hkx as an animation, and the refusals.
 class WwHkxAnimHub final : public QObject
 {
 	Q_OBJECT
@@ -94,12 +89,9 @@ public:
 	QString loadFiles( GLView * ogl, const QStringList & paths, bool activateFirst,
 					   bool * refusal = nullptr );
 
-	/*! Select a clip and REPORT whether it actually plays.
-	 *
-	 *  Returns true when the clip is now posing the scene. False marks it
-	 *  refused in the list with the playback's own sentence as the reason --
-	 *  which is a measurement of setActive, not a prediction.
-	 */
+	//! Select a clip and REPORT whether it actually plays:
+	//! Returns true when the clip is now posing the scene. False marks it refused in the list with the
+	//! playback's own sentence as the reason which is a measurement of setActive, not a prediction.
 	bool activate( GLView * ogl, const QString & entryName );
 
 	//! Drop one entry: a loaded clip (HkxPlayback::unload) or a refused row.
@@ -107,7 +99,7 @@ public:
 	//! Drop every clip and every refused row. Returns how many rows went.
 	int unloadAll( GLView * ogl );
 
-	/* ---- lane UINOTES1, bungo's ruling 5 of 2026-09-12: "For these
+	/* ---- bungo's ruling 5: "For these
 	   animations, I should be able to use a shortcut to delete, copy, paste,
 	   etc. them, same goes with reordering with a drag and drop, same goes
 	   with right clicking and selecting each such option."
@@ -120,12 +112,8 @@ public:
 	QString renameEntry( GLView * ogl, const QString & entryName, const QString & newName );
 	//! Paste: a copy of an entry taken earlier, placed at `atIndex`.
 	QString pasteEntry( GLView * ogl, const HkxClipEntry & e, int atIndex, QString * newName = nullptr );
-	/*! lane MORPHCYC1: put a GENERATED preview clip (src/morphcycle.h) at the
-	 *  end of the animations list and play it -- the same list, the same
-	 *  transport, the same activate() measurement as a loaded .hkx. A clip of
-	 *  the same name is replaced, so pressing the button twice does not stack
-	 *  copies. Returns the sentence for the status line (never empty);
-	 *  `refusal` says whether it is one. */
+	//! put a GENERATED preview clip (src/morphcycle.h) at the end of the animations list and play it -- the
+	//! same list, the same transport, the same activate measurement as a loaded .hkx.
 	QString addGenerated( GLView * ogl, const HkxClipEntry & e, bool * refusal = nullptr );
 	//! The loaded clips in this order (a drag-and-drop reorder). True when it moved.
 	bool setEntryOrder( GLView * ogl, const QStringList & entryNames );
@@ -147,12 +135,8 @@ public:
 
 	//! The last sentence produced, and whether it was a refusal.
 	const QString & sentence() const { return lastSentence; }
-	/*! THE SAME THING IN A FEW WORDS -- what a pinned LABEL shows (lane UI6,
-	 *  2026-09-11; bungo, over the old dock's binding paragraph: "look at all
-	 *  this text clutter"). sentence() is what its tooltip carries, so the
-	 *  names of the bones that did not bind are folded, never lost. Falls back
-	 *  to the full sentence when the last thing that happened had no short form
-	 *  -- a named fallback, never an empty label. */
+	//! THE SAME THING IN A FEW WORDS -- what a pinned LABEL shows. sentence is what its tooltip carries, so the
+	//! names of the bones that did not bind are folded, never lost.
 	const QString & sentenceShort() const
 	{
 		return lastShort.isEmpty() ? lastSentence : lastShort;
@@ -189,7 +173,7 @@ private:
 	bool lastWasRefusal = false;
 };
 
-/*! WW_HKXANIM_UI_TEST: lane HKX3's gates, run inside the real application.
+/*! WW_HKXANIM_UI_TEST: the gates, run inside the real application.
  *  Defined in src/hkxanimuitest.cpp so this lane's footprint in
  *  nifskope_ui.cpp is one line. Does nothing unless WW_HKXANIM_UI_TEST is set.
  */

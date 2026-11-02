@@ -1,3 +1,9 @@
+## LEANCOMMENTS3 (2026-11-02): lean comments, re-cut on LAND5
+
+- Comment-only (tests/spells/comments_only_check.py: 91 files, 0 FAIL).
+  LEANCOMMENTS2's trim re-cut on LAND5 (72 files), the edits LEANCOMMENTS1 left unlanded applied on the 20 cell files,
+  and lane names cut out of mid-sentence comments. Lane history stays in the commit log and this file.
+
 ## GISKYTWIN-FLIP (LAND5, 2026-11-02): the GI volume's sky ships at the physical level
 
 - `WW_CELL_RTDDGI_SKY` unset (or empty) is now `level` (GITRUTH1's giSkyLevel: the weather's sky colour at the

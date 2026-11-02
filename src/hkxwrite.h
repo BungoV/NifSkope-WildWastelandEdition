@@ -3,11 +3,11 @@
    `hkaInterleavedUncompressedAnimation` + `hkaAnimationBinding` (+ the
    extracted motion and the resource container that shipped clips carry).
 
-   Lane HKX5, 2026-09-10.  The byte contract is docs/HKX_WRITE_FORMAT.md; the
+  The byte contract is docs/HKX_WRITE_FORMAT.md; the
    reader's contract, which this file is the inverse of, is
    docs/HKX_ANIMATION_FORMAT.md.
 
-   WHY INTERLEAVED AND NOT SPLINE.  Lane HKXCLASS measured the 1.10.155 exe:
+   WHY INTERLEAVED AND NOT SPLINE.  Measured on the 1.10.155 exe:
    `hkaInterleavedUncompressedAnimation` is a registered, fully implemented
    class (it has reflection data and a vtable in the game, and is one of its
    statically linked classes; HKXPACK signature 0xa5eff3f2), and the loader dispatches on the class
@@ -56,7 +56,7 @@ struct HkxWriteOptions
 	//! clip has and what `hkaAnimation::annotationTracks` is sized against.
 	bool writeAnnotations = true;
 	//! The empty "Resource Data" -> hkMemoryResourceContainer named variant.
-	//! Shipped clips carry it; the Mixamo fixture does not (lane FIXTURE).
+	//! Shipped clips carry it; the Mixamo fixture does not.
 	bool writeResourceContainer = true;
 
 	//! Route A only.  Empty = the machine's HKXPACK

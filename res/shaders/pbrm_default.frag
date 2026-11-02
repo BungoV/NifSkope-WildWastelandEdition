@@ -753,9 +753,9 @@ void main()
 	}
 
 #ifdef WW_CELLLIGHTS
-	vec3 cellSsrScene = color.rgb;	// lane SSR1: what the reflections' march samples (probe 60)
+	vec3 cellSsrScene = color.rgb;	// what the reflections' march samples (probe 60)
 	if ( cellOn && cellProbe == 60 ) {
-		vec3 em = clamp( pbrEmitLin, vec3( 0.0 ), max( cellSsrScene, vec3( 0.0 ) ) );	// lane SSGI2: coverage in a
+		vec3 em = clamp( pbrEmitLin, vec3( 0.0 ), max( cellSsrScene, vec3( 0.0 ) ) );	// coverage in a
 		cellEmitOut = vec4( em, dot( em, vec3( 0.2126, 0.7152, 0.0722 ) ) > 1.0e-6 ? 1.0 : 0.0 );
 	}
 	// lane AO1: the ambient obscurance on the whole lit colour, before the fog

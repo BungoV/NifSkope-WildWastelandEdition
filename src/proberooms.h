@@ -1,30 +1,9 @@
 #ifndef PROBEROOMS_H
 #define PROBEROOMS_H
 
-/*! ROOM LABELS PER VOXEL (lane ROOMCLAMP1, 2026-10-03; docs/PRTP_PLAN.md 2am).
- *
- *  The bounce grid's voxels are bigger than a wall is thick: a voxel on one side of a two-unit wall blended into
- *  a fragment on the other side is a light leak. Every point of the air gets a room, rebuilt from the bake's soup
- *  when the bake is relit (no file format change), and the grid's blend keeps only the voxels of the sample's own
- *  room (probegi.h step 3, res/shaders/cell_lights.glsl cellGiSample):
- *    1. a fine grid (16 units, raised until it fits) over the soup; a cell any triangle touches is solid (the
- *       separating-axis test: a thin wall always closes), a cell blended glass touches is glass
- *    2. the air's distance to the nearest solid or glass cell (exact Euclidean); the air deeper than `pinch`
- *       (and outside every door box) is a room's core: openings narrower than 2 x pinch, doors and cracks in a
- *       shell split rooms. The cores flood 6-connected; a core that reaches the grid's border is outdoors (0)
- *    3. the rest of the air takes the room of the core it is reached from first, deepest first (a watershed);
- *       air no core reaches floods into rooms of its own (a closet narrower than the pinch)
- *    4. an air cell beside a cell of another room is an opening and names both; a glass cell names the rooms on
- *       its two sides (one value per side: the window between a room and the outdoors)
- *  A surface reads its room at P + N x 0.75 cell, or P + N x 1.75 cell when that is still solid (the surface's
- *  own cell). Refuters (WW_CELL_ROOMS_RED): "conn26" the floods 26-connected, "boxes" each room its bounding box
- *  (the old room boxes), "glasswall" glass names no room, "nomask" an alpha-tested triangle is solid all over.
- *
- *  Lane ALPHATEST2 (2026-10-04): an alpha-tested triangle (ProbeSoup::amask, the bake rays' own holes) closes a
- *  cell only where it is mostly solid: its surface is sampled about cell/8 apart (stratified, jittered), each
- *  sample a hole or not by the bake's own test, and a cell its samples fall in is solid only when under half of
- *  them are holes -- a chain-link fence or a grille no longer closes a room; boards with thin gaps still do. A
- *  cell the triangle touches but no sample falls in takes the triangle's overall share. */
+//! ROOM LABELS PER VOXEL:
+//! The bounce grid's voxels are bigger than a wall is thick: a voxel on one side of a two-unit wall blended
+//! into a fragment on the other side is a light leak.
 
 #include "probeplace.h"
 
@@ -38,14 +17,10 @@ struct ProbeRoomSpec
 	int maxCells = 8000000;
 	float pinch = 48.0f;        //!< a room's core is the air deeper than this
 	QString red;
-	/*! lane GIBLACK2: the box the grid may span (world; lo > hi on an axis: that axis is not clipped). The relight
-	 *  passes the GI grid's box (the probes' reach): the soup's own box spans the whole loaded block (Goodneighbor
-	 *  5 x 5 cells, 21000 units), so the cell was raised from 16 to 95 units to fit maxCells and a narrow recess's
-	 *  air came out solid. A face of the soup's box the clip cuts is not the open border: a flood that meets it is
-	 *  not outdoors for that (only the faces the clip leaves, as before). Red "soupbox": the soup's box. */
+	//! the box the grid may span (world; lo > hi on an axis: that axis is not clipped).
 	float clipLo[3] = { 1.0f, 1.0f, 1.0f };
 	float clipHi[3] = { 0.0f, 0.0f, 0.0f };
-	//! lane VOLFIT1: keep the working grids (ProbeRooms::state, labels, dist2, facing) for the Space stage (probevolumes.h)
+	//! keep the working grids (ProbeRooms::state, labels, dist2, facing) for the Space stage (probevolumes.h)
 	bool keep = false;
 };
 
@@ -60,12 +35,12 @@ struct ProbeRooms
 	int rooms = 0;                  //!< rooms 1 .. rooms (0 = outdoors)
 	qint64 cellsAir = 0, cellsSolid = 0, cellsGlass = 0, cellsDoor = 0, cellsCore = 0, cellsLeft = 0;
 	qint64 cellsOpening = 0, glassBoth = 0;
-	std::vector<qint32> openings;   //!< lane PERF1: the opening cells (step 4, air only), the threshold stand-in's input
-	qint64 cellsMaskOpen = 0, cellsMaskSolid = 0;   //!< lane ALPHATEST2: cells masked triangles touch, left air / solid
+	std::vector<qint32> openings;   //!< the opening cells (step 4, air only), the threshold stand-in's input
+	qint64 cellsMaskOpen = 0, cellsMaskSolid = 0;   //!< cells masked triangles touch, left air / solid
 	int cores = 0, coresOutdoors = 0, pockets = 0, folded = 0;
-	int clippedFaces = 0;           //!< lane GIBLACK2: the soup box's faces the clip cut (bits -x +x -y +y -z +z)
+	int clippedFaces = 0;           //!< the soup box's faces the clip cut (bits -x +x -y +y -z +z)
 	double ms = 0;
-	/*! lane VOLFIT1: with ProbeRoomSpec::keep, per cell: 0 air / 1 solid / 2 glass; the unfolded label (-1 solid or
+	/*! with ProbeRoomSpec::keep, per cell: 0 air / 1 solid / 2 glass; the unfolded label (-1 solid or
 	 *  glass, 0 outdoors); the squared distance to solid or glass (cells); the one-sided faces' summed normal x 32
 	 *  (saturated; a wall's front side reads along it). Empty otherwise. */
 	std::vector<quint8> state;
@@ -96,15 +71,8 @@ inline float probeRoomsPack( int a, int b )
 //! gi_rooms.bin: float32 origin[3], cell; int32 dims[3], rooms; then int16 a, int16 b per cell
 bool probeRoomsDump( const ProbeRooms & r, const QString & path, QString * err );
 
-/*! THE GI VOLUMES' INTERFACE (lane PERF1, 2026-10-19; the Division deck's D4; the shapes as VOLUMES.md section 6).
- *
- *  The outdoors is one volume, room 0, and has no shapes: a pixel no interior shape holds reads the outdoor GI.
- *  Every interior room is a volume, the union of its shapes; the runtime draws the shapes into a screen mask and a
- *  pixel reads only the grid slots of its volume's room (res/shaders/cell_lights.glsl cellGiVolume). Thresholds are
- *  the only path between two volumes: the voxels near one carry its weight and the room across it, and a pixel
- *  blends the other side's read in, both ways (light in through a door, a lamp's bounce out of it).
- *  The fitter (lane VOLFIT1) fills ProbeGiResult::volumes; empty, giVolumesFromRooms stands in from the room grid.
- *  A shape's room is the room grid's id (ProbeRooms::a), the id the grid's slots carry. */
+//! THE GI VOLUMES' INTERFACE:
+//! The outdoors is one volume, room 0, and has no shapes: a pixel no interior shape holds reads the outdoor GI.
 struct GiVolumeShape
 {
 	enum Type { Box = 0, Cylinder = 1, Wedge = 2, Capsule = 3, Sphere = 4 };

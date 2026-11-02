@@ -5,15 +5,15 @@ BSD License - see nifskope.h
 ***** END LICENCE BLOCK *****/
 
 #include "probegi.h"
-#include "wwswitch.h"	// lane TESTDRIVER1: the WW_* switch store
+#include "wwswitch.h"	// the WW_* switch store
 
 #include "gl/celllights.h"
 #include "probebvh.h"
-#include "bakert.h"	// lane RTBAKE1: the bake pools' worker count, the GPU ray back end
+#include "bakert.h"	// the bake pools' worker count, the GPU ray back end
 #include "probebake.h"
 #include "proberelight.h"
-#include "cellaodecal.h"	// lane AODECAL1
-#include "probevolumesgi.h"	// lane VOLFIT1: the Space rooms as the room source
+#include "cellaodecal.h"
+#include "probevolumesgi.h"	// the Space rooms as the room source
 
 #include <QCryptographicHash>
 #include <QDir>
@@ -79,7 +79,7 @@ struct TbkProbe
 };
 static_assert( sizeof( TbkProbe ) == 144, "tbk probe" );
 
-// lane BAKE4: the v4 tail's link record (src/probebake.cpp's TbkLinkExt)
+// the v4 tail's link record (src/probebake.cpp's TbkLinkExt)
 struct TbkLinkExt
 {
 	quint8 side;      //!< 1 = the cell's back surfel
@@ -88,7 +88,7 @@ struct TbkLinkExt
 };
 static_assert( sizeof( TbkLinkExt ) == 8, "tbk link ext" );
 
-// lane SKY1: the v4 tail's probe record (src/probebake.cpp's TbkProbeExt)
+// the v4 tail's probe record (src/probebake.cpp's TbkProbeExt)
 struct TbkProbeExt
 {
 	quint8 skyTint[8][3];   //!< per octant, the sky seen through glass (255 = clear)
@@ -96,7 +96,7 @@ struct TbkProbeExt
 };
 static_assert( sizeof( TbkProbeExt ) == 32, "tbk probe ext" );
 
-// lane BOUNCE2: the v4 tail's room box (src/probebake.cpp's TbkRoomBox), a room's air
+// the v4 tail's room box (src/probebake.cpp's TbkRoomBox), a room's air
 struct TbkRoomBox
 {
 	quint32 room;
@@ -105,7 +105,7 @@ struct TbkRoomBox
 };
 static_assert( sizeof( TbkRoomBox ) == 32, "tbk room box" );
 
-struct TbkEmit   // lane EMISSIVEGI1 (probebake.cpp): surfel index (top bit = back list), linear Le
+struct TbkEmit   // surfel index (top bit = back list), linear Le
 {
 	quint32 surfel;
 	float le[3];
@@ -121,9 +121,9 @@ struct Tbk
 	std::vector<TbkLink> links;
 	std::vector<TbkSurfel> back;      //!< v4: the cells' second sides
 	std::vector<TbkLinkExt> lext;     //!< v4: one per link
-	std::vector<TbkProbeExt> pext;    //!< v4: one per probe (lane SKY1 reads its sky tint)
-	std::vector<TbkRoomBox> boxes;    //!< v4: the rooms' air (lane BOUNCE2)
-	std::vector<TbkEmit> emits;       //!< v4: the surfels that glow (lane EMISSIVEGI1; header reserved[3])
+	std::vector<TbkProbeExt> pext;    //!< v4: one per probe
+	std::vector<TbkRoomBox> boxes;    //!< v4: the rooms' air
+	std::vector<TbkEmit> emits;       //!< v4: the surfels that glow
 };
 
 bool readTbk( const QString & path, Tbk & t, QString * err )
@@ -139,8 +139,8 @@ bool readTbk( const QString & path, Tbk & t, QString * err )
 		return false;
 	}
 	std::memcpy( &t.h, b.constData(), 64 );
-	// lane BAKE4: v4 = the v3 body + a tail (back surfels, link and probe extensions, room boxes)
-	// lane SIDES6: v5 = v4's tail; up to six surfels a cell in the one table (pad0 = the bin, a link's side = the bin)
+	// v4 = the v3 body + a tail (back surfels, link and probe extensions, room boxes)
+	// v5 = v4's tail; up to six surfels a cell in the one table (pad0 = the bin, a link's side = the bin)
 	if ( t.h.magic != 0x314B4254u || t.h.version < 3u || t.h.version > 5u || t.h.recordKind != 1u ) {
 		*err = QStringLiteral( "%1: not a v3, v4 or v5 resolved-albedo .tbk" ).arg( path );
 		return false;
@@ -183,7 +183,7 @@ bool readTbk( const QString & path, Tbk & t, QString * err )
 		t.boxes.resize( t.h.reserved[1] );
 		std::memcpy( t.boxes.data(), p, t.boxes.size() * 32 );
 		p += t.boxes.size() * 32;
-		t.emits.resize( t.h.reserved[3] );   // lane EMISSIVEGI1
+		t.emits.resize( t.h.reserved[3] );
 		std::memcpy( t.emits.data(), p, t.emits.size() * 16 );
 	}
 	t.name = QFileInfo( path ).fileName();
@@ -250,7 +250,7 @@ double radial( double d, double r, const WwCellLight & l )
 	return std::pow( k, 2.2 );
 }
 
-// lane LIGHTPHYS2: the curve the surfaces draw (src/gl/lightphys.h); the game's curve stays radial() bit for bit
+// the curve the surfaces draw (src/gl/lightphys.h); the game's curve stays radial bit for bit
 double radialPhys( const wwlp::Params & p, double d, double r, const WwCellLight & l )
 {
 	if ( wwlp::keepsGame( p, l.bias, l.scale, l.exponent ) )
@@ -276,12 +276,8 @@ const double kAxes[6][3] = { { 1, 0, 0 }, { -1, 0, 0 }, { 0, 1, 0 }, { 0, -1, 0 
 
 }	// namespace
 
-/* lane STATICCACHE1 (deck C6, s42: "lights marked static are cached separately"; WW_CELL_GI_STATICCACHE=1, ships
- * off). The placed lights' direct light on every surfel (and an interior's directional) does not change when only
- * the weather or the hour does, so a relight keeps it: the next relight with the same surfels, soup, lights and
- * shadow settings takes each surfel's sum from here and adds only the sun on top, in the order the full relight adds
- * it (so the result is the full relight's, bit for bit). Red WW_CELL_GI_STATICCACHE_RED=withsun: the cache keeps the
- * sum AFTER the sun, so the next hour's relight carries the old sun too. */
+// (deck C6, s42: "lights marked static are cached separately"; WW_CELL_GI_STATICCACHE=1,
+// ships off).
 namespace
 {
 struct StaticLightCache
@@ -301,7 +297,7 @@ StaticLightCache & staticLightCache()
 
 namespace
 {
-/* lane PERF1: a cell's load runs the relight two to four times over one soup (the load's, the placed-only one, the
+/* a cell's load runs the relight two to four times over one soup (the load's, the placed-only one, the
  * first frame's sky picture), and the tracer and the rooms come from the soup alone: the last ones built are kept,
  * keyed on the soup's bytes (and the room spec), and a relight over the same bytes copies them instead of building
  * them again. Off: WW_GI_GEOMEMO=0. */
@@ -417,14 +413,14 @@ bool probeGiRelight( const ProbeSoup & soup, const QString & bakeDir, const WwCe
 {
 	ProbeGiResult & R = *out;
 	R = ProbeGiResult();
-	if ( spec.record )   // lane GPURELIGHT1
+	if ( spec.record )
 		*spec.record = ProbeRelightOps();
 	QElapsedTimer clock;
 	clock.start();
 	const bool redNoShadow = spec.red == QLatin1String( "noshadow" );
 	const bool redNoVis = spec.red == QLatin1String( "novis" );
 	const bool redFlip = spec.red == QLatin1String( "flip" );
-	// lane SKY1: the weather's sky and sun, outdoors; lane SKYINT1: and in an interior that shows the sky
+	// the weather's sky and sun, outdoors; and in an interior that shows the sky
 	const bool skyOn = spec.sky.on && ( !lighting.interior || spec.interiorSky ) && spec.skyRed != QLatin1String( "off" );
 	const bool redSkyNoVis = spec.skyRed == QLatin1String( "novis" );
 	const bool redSkyNoTint = spec.skyRed == QLatin1String( "notint" );
@@ -494,7 +490,7 @@ bool probeGiRelight( const ProbeSoup & soup, const QString & bakeDir, const WwCe
 			M.bvhKey = trisKey;
 		}
 	}
-	bvh.mask = &soup.amask;   // lane ALPHATEST1: light passes an alpha-test hole
+	bvh.mask = &soup.amask;   // light passes an alpha-test hole
 	auto blocked = [&]( const double p[3], const double q[3], double clearEnd ) -> bool {
 		double d[3] = { q[0] - p[0], q[1] - p[1], q[2] - p[2] };
 		const double len = std::sqrt( d[0] * d[0] + d[1] * d[1] + d[2] * d[2] );
@@ -510,8 +506,8 @@ bool probeGiRelight( const ProbeSoup & soup, const QString & bakeDir, const WwCe
 
 	// ---- 1. the surfels, one per position + normal across the files, lit
 	std::unordered_map<SurfKey, int, SurfKeyHash> uniq;
-	std::vector<std::vector<int>> fileSurfel( tbks.size() ), fileBack( tbks.size() );   // lane BAKE4: + v4 back surfels
-	// S: the sun's part of B (lane SKY1); Le: the surfel's own emitted light, added once to B (lane EMISSIVEGI1)
+	std::vector<std::vector<int>> fileSurfel( tbks.size() ), fileBack( tbks.size() );   // + v4 back surfels
+	// S: the sun's part of B; Le: the surfel's own emitted light, added once to B
 	struct US { double p[3], n[3], a[3]; double B[3]; double S[3] = { 0, 0, 0 }; bool emits = false; double Le[3] = { 0, 0, 0 }; };
 	std::vector<US> us;
 	for ( size_t f = 0; f < tbks.size(); f++ ) {
@@ -528,7 +524,7 @@ bool probeGiRelight( const ProbeSoup & soup, const QString & bakeDir, const WwCe
 			if ( it == uniq.end() ) {
 				idx = int( us.size() );
 				uniq.emplace( k, idx );
-				if ( spec.record )   // lane GPURELIGHT1: the surfel id, its first file's order (front, then the back)
+				if ( spec.record )   // the surfel id, its first file's order (front, then the back)
 					spec.record->sid.insert( spec.record->sid.end(), { int( f ), int( si ) } );
 				US u;
 				double nl = 0.0;
@@ -550,7 +546,7 @@ bool probeGiRelight( const ProbeSoup & soup, const QString & bakeDir, const WwCe
 		}
 	}
 	R.surfels = int( us.size() );
-	/* lane LIGHTS5: the bake kept the other "Emittance in bounce light" state's Le in emitalt_*.bin; a live toggle
+	/* the bake kept the other "Emittance in bounce light" state's Le in emitalt_*.bin; a live toggle
 	 * overlays it on each file's list, so the relight equals a fresh bake under that state. */
 	std::vector<std::map<quint32, std::array<float, 3>>> emitAlt;
 	if ( spec.emitBaked >= 0 && spec.emitWant >= 0 && spec.emitWant != spec.emitBaked && !spec.noGlow && !spec.emitStale ) {
@@ -581,7 +577,7 @@ bool probeGiRelight( const ProbeSoup & soup, const QString & bakeDir, const WwCe
 		std::fprintf( stderr, "gi emittance: baked %d, want %d, %s\n", spec.emitBaked, spec.emitWant,
 			ok ? "the kept other state applied" : "the kept state does not match this bake (left as baked)" );
 	}
-	/* lane EMISSIVEGI1: the glowing surfels (each file names its own; a surfel in two files glows the same in both).
+	/* the glowing surfels (each file names its own; a surfel in two files glows the same in both).
 	 * Read once into B after the direct light, never inside the bounce passes (they rebuild from B: counted once). */
 	for ( size_t f = 0; f < tbks.size() && !emitAlt.empty(); f++ )
 		for ( const auto & e : emitAlt[f] ) {
@@ -599,7 +595,7 @@ bool probeGiRelight( const ProbeSoup & soup, const QString & bakeDir, const WwCe
 		}
 	for ( size_t f = 0; f < tbks.size() && emitAlt.empty(); f++ )
 		for ( const TbkEmit & e : tbks[f].emits ) {
-			if ( spec.noGlow )	// lane FARVIEW1
+			if ( spec.noGlow )
 				break;
 			const bool back = ( e.surfel & 0x80000000u ) != 0;
 			const size_t i = size_t( e.surfel & 0x7fffffffu );
@@ -614,13 +610,13 @@ bool probeGiRelight( const ProbeSoup & soup, const QString & bakeDir, const WwCe
 				u.Le[c] = e.le[c];
 		}
 	if ( !tbks.empty() )
-		R.surfelCell = tbks[0].h.surfelCellSize;	// lane PROBEVIEW1
+		R.surfelCell = tbks[0].h.surfelCellSize;
 	const QVector<WwCellLight> & lights = lighting.lights;
 	std::atomic<qint64> rays( 0 ), shadowed( 0 );
 	std::atomic<int> lit( 0 );
 	std::atomic<qint64> sunRays( 0 ), sunBlocked( 0 );
 	std::atomic<int> sunLit( 0 );
-	/* lane GPURELIGHT1: the record (src/proberelight.h). Every light the shadow ray reached is a pair (and the lights
+	/* the record (src/proberelight.h). Every light the shadow ray reached is a pair (and the lights
 	 * off at the start, spec.recordExtra, are traced for the record only); the doors' real geometry re-traces each
 	 * pair's ray where it crosses a door's box. Nothing below changes what the relight itself computes. */
 	ProbeRelightOps * const REC = spec.record;
@@ -633,8 +629,8 @@ bool probeGiRelight( const ProbeSoup & soup, const QString & bakeDir, const WwCe
 	std::atomic<qint64> recOver( 0 );
 	const int nLive = lights.size();
 	const int nAll = nLive + ( REC ? spec.recordExtra.size() : 0 );
-	// lane STATICCACHE1: the key of what the placed lights' stage reads (never with the GPU record: it wants the pairs)
-	// lane FOGPERF1 (SPEEDDEFAULT1): byte for byte the full relight (STATICCACHE1 gate), so on; =0 is the test red
+	// the key of what the placed lights' stage reads (never with the GPU record: it wants the pairs)
+	// byte for byte the full relight (STATICCACHE1 gate), so on; =0 is the test red
 	const bool scOn = wwEnvStr( "WW_CELL_GI_STATICCACHE" ) != QLatin1String( "0" ) && !REC;
 	const bool scRedWithSun = scOn && wwEnv( "WW_CELL_GI_STATICCACHE_RED" ).trimmed() == "withsun";
 	StaticLightCache & SC = staticLightCache();
@@ -646,7 +642,7 @@ bool probeGiRelight( const ProbeSoup & soup, const QString & bakeDir, const WwCe
 	QElapsedTimer scClock;
 	scClock.start();
 	if ( scOn ) {
-		/* lane GAPPERF1: the soup keyed by the geometry memo's trisKey (already paid) and the rest by two 64-bit mixes,
+		/* the soup keyed by the geometry memo's trisKey (already paid) and the rest by two 64-bit mixes,
 		 * not SHA-1 over every triangle (42 of 45 ms). Red WW_CELL_GI_STATICCACHE_KEY_RED=1: the SHA-1 key. */
 		const bool keyRed = wwEnvInt( "WW_CELL_GI_STATICCACHE_KEY_RED" ) == 1;
 		auto feed = [&]( auto && add, bool trisByKey ) {
@@ -685,7 +681,7 @@ bool probeGiRelight( const ProbeSoup & soup, const QString & bakeDir, const WwCe
 			add( &spec.fixtureClear, 4 );
 			const char ns = redNoShadow ? 1 : 0;
 			add( &ns, 1 );
-			add( &spec.lightPhys, sizeof spec.lightPhys );	// lane LIGHTPHYS2: the curve is part of the placed lights' sum
+			add( &spec.lightPhys, sizeof spec.lightPhys );	// the curve is part of the placed lights' sum
 		};
 		if ( keyRed ) {
 			QCryptographicHash h( QCryptographicHash::Sha1 );
@@ -707,7 +703,7 @@ bool probeGiRelight( const ProbeSoup & soup, const QString & bakeDir, const WwCe
 		}
 	}
 	const double scKeyMs = scClock.nsecsElapsed() / 1e6;
-	std::vector<double> lightKs( size_t( nLive ), 1.0 );	// lane LIGHTPHYS2: the intensity curve per light (1: off)
+	std::vector<double> lightKs( size_t( nLive ), 1.0 );	// the intensity curve per light (1: off)
 	if ( spec.lightPhys.curve != 1.0f )
 		for ( int li = 0; li < nLive; li++ )
 			lightKs[size_t( li )] = double( wwlp::intensityScale( spec.lightPhys, lights[li].color ) );
@@ -717,7 +713,7 @@ bool probeGiRelight( const ProbeSoup & soup, const QString & bakeDir, const WwCe
 		double E[3] = { 0, 0, 0 };
 		qint64 nr = 0, nb = 0;
 		bool any = false;
-		if ( scHit ) {   // lane STATICCACHE1: the placed lights' sum as the full relight would make it
+		if ( scHit ) {   // the placed lights' sum as the full relight would make it
 			for ( int c = 0; c < 3; c++ )
 				E[c] = SC.E[i * 3 + size_t( c )];
 			nr = SC.nr[i];
@@ -729,7 +725,7 @@ bool probeGiRelight( const ProbeSoup & soup, const QString & bakeDir, const WwCe
 			const WwCellLight & l = live ? lights[li] : spec.recordExtra[li - nLive];
 			const double Lv[3] = { l.pos[0] - u.p[0], l.pos[1] - u.p[1], l.pos[2] - u.p[2] };
 			const double d = std::sqrt( Lv[0] * Lv[0] + Lv[1] * Lv[1] + Lv[2] * Lv[2] );
-			if ( d >= l.radius || !wwCellLightShapeIn( l, u.p[0], u.p[1], u.p[2] ) )	// lane HEMI1: the volume
+			if ( d >= l.radius || !wwCellLightShapeIn( l, u.p[0], u.p[1], u.p[2] ) )	// the volume
 				continue;
 			const double inv = 1.0 / std::max( d, 0.001 );
 			const double L[3] = { Lv[0] * inv, Lv[1] * inv, Lv[2] * inv };
@@ -793,7 +789,7 @@ bool probeGiRelight( const ProbeSoup & soup, const QString & bakeDir, const WwCe
 			scNb[i] = nb;
 			scAny[i] = any ? 1 : 0;
 		}
-		// lane SKY1: the sun, behind one ray through the soup (to beyond anything loaded)
+		// the sun, behind one ray through the soup (to beyond anything loaded)
 		if ( sunOn ) {
 			const double nl = u.n[0] * spec.sky.sunTo[0] + u.n[1] * spec.sky.sunTo[1] + u.n[2] * spec.sky.sunTo[2];
 			if ( nl > 0.0 ) {
@@ -827,7 +823,7 @@ bool probeGiRelight( const ProbeSoup & soup, const QString & bakeDir, const WwCe
 		}
 		for ( int c = 0; c < 3; c++ )
 			u.B[c] = u.a[c] * E[c];
-		if ( u.emits )   // lane EMISSIVEGI1: guarded, so a surfel that does not glow keeps every bit
+		if ( u.emits )   // guarded, so a surfel that does not glow keeps every bit
 			for ( int c = 0; c < 3; c++ )
 				u.B[c] += u.Le[c];
 		rays += nr;
@@ -856,7 +852,7 @@ bool probeGiRelight( const ProbeSoup & soup, const QString & bakeDir, const WwCe
 	R.sunBlocked = sunBlocked;
 	R.msLight = clock.nsecsElapsed() / 1e6;
 
-	/* ---- lane BRICK1: the deck's second surfel level (s25): 4 m bricks, one per cell and facing. A brick's light is
+	/* ---- the deck's second surfel level (s25): 4 m bricks, one per cell and facing. A brick's light is
 	 * the mean of its surfels' B (s38); the probes' factors are gathered with the links below. Built every run (the
 	 * Pass view, the census, the gate's dump); the probes read them only with spec.bricks. */
 	const double msBricks0 = clock.nsecsElapsed() / 1e6;
@@ -934,20 +930,20 @@ bool probeGiRelight( const ProbeSoup & soup, const QString & bakeDir, const WwCe
 
 	// ---- 2. every probe's ambient cube from its links
 	struct UP { double p[3]; double E[6][3]; double sky[6]; double S[6][3]; double kUnl = 1.0; quint32 room[2] = { 0, 0xFFFFFFFFu };
-		double dS[6][3] = {}; };   // S: the sky's part of E (lane SKY1); dS: the decal copies' sky put back (lane AODECAL1)
+		double dS[6][3] = {}; };   // S: the sky's part of E; dS: the decal copies' sky put back
 	const bool aoOn = spec.aoDecals && !spec.aoDecals->copies.empty();
 	double aoDsSum = 0.0;
 	std::vector<UP> up;
-	struct LK { double omega, cosA[6], tint[3]; };   // lane BOUNCE2: a resolved link, for the later passes' gathers
+	struct LK { double omega, cosA[6], tint[3]; };   // a resolved link, for the later passes' gathers
 	std::vector<LK> lks;
 	double skyVisSum = 0.0;
-	R.probeLinkStart.assign( 1, 0 );	// lane PROBEVIEW1
+	R.probeLinkStart.assign( 1, 0 );
 	for ( size_t f = 0; f < tbks.size(); f++ ) {
 		const Tbk & t = tbks[f];
 		const float cs = t.h.surfelCellSize;
-		std::unordered_map<Key3, int, Key3Hash> keys, keysBack;   // lane BAKE4: the back side's own map
-		const bool six = t.h.version >= 5u;   // lane SIDES6: a cell's sides by bin, all in the one table
-		std::unordered_map<Key3, int, Key3Hash> keysSide[6 * kTbkRoomSlots];   // lane GAPBAKE1: + 6 x room slot
+		std::unordered_map<Key3, int, Key3Hash> keys, keysBack;   // the back side's own map
+		const bool six = t.h.version >= 5u;   // a cell's sides by bin, all in the one table
+		std::unordered_map<Key3, int, Key3Hash> keysSide[6 * kTbkRoomSlots];   // + 6 x room slot
 		for ( size_t i = 0; i < t.surfels.size(); i++ ) {
 			const TbkSurfel & s = t.surfels[i];
 			const Key3 k { floorDiv( s.position[0], cs ), floorDiv( s.position[1], cs ), floorDiv( s.position[2], cs ) };
@@ -968,7 +964,7 @@ bool probeGiRelight( const ProbeSoup & soup, const QString & bakeDir, const WwCe
 				P.p[c] = pr.position[c];
 			std::memset( P.E, 0, sizeof P.E );
 			std::memset( P.S, 0, sizeof P.S );
-			/* lane PROBEVIEW1: the open-sky share on each axis = the mean of the four octants on its side
+			/* the open-sky share on each axis = the mean of the four octants on its side
 			 * (octant = x<0 | (y<0)<<1 | (z<0)<<2, the bake's skyVis) */
 			for ( int a = 0; a < 6; a++ ) {
 				const int bit = 1 << ( a / 2 ), want = ( a & 1 ) ? bit : 0;
@@ -983,7 +979,7 @@ bool probeGiRelight( const ProbeSoup & soup, const QString & bakeDir, const WwCe
 			for ( quint32 j = 0; j < pr.linkCount; j++ ) {
 				const TbkLink & lk = t.links[size_t( pr.linkOffset + j )];
 				R.links++;
-				// lane BAKE4: a v4 link names its side and carries the glass tint on its way
+				// a v4 link names its side and carries the glass tint on its way
 				const size_t li = size_t( pr.linkOffset + j );
 				const bool sideBack = !six && li < t.lext.size() && t.lext[li].side;
 				const int sd = six && li < t.lext.size() ? int( t.lext[li].side ) : -1;
@@ -1020,7 +1016,7 @@ bool probeGiRelight( const ProbeSoup & soup, const QString & bakeDir, const WwCe
 						P.E[a][c] += u.B[c] * tint[c] * omega * cosA;
 				}
 				lks.push_back( rec );
-				{	// lane BRICK1: the link's share of its brick's factor
+				{	// the link's share of its brick's factor
 					const int b = brickOf[size_t( ui )];
 					auto fi = bfIdx.find( b );
 					if ( fi == bfIdx.end() ) {
@@ -1043,19 +1039,19 @@ bool probeGiRelight( const ProbeSoup & soup, const QString & bakeDir, const WwCe
 					for ( double & c : e )
 						c *= k;
 			}
-			{	// lane BOUNCE2: the probe's room, and an opening's second room
+			{	// the probe's room, and an opening's second room
 				const size_t pi = size_t( &pr - t.probes.data() );
 				if ( pi < t.pext.size() ) {
 					P.room[0] = t.pext[pi].room[0];
 					P.room[1] = t.pext[pi].room[1];
 				}
 			}
-			// lane SKY1: the sky this probe sees, beside what its surfaces send (src/probesky.h)
+			// the sky this probe sees, beside what its surfaces send (src/probesky.h)
 			if ( skyOn ) {
 				const size_t pi = size_t( &pr - t.probes.data() );
 				const TbkProbeExt * px = pi < t.pext.size() ? &t.pext[pi] : nullptr;
 				probeSkyCube( pr.skyVis, px ? px->skyTint : nullptr, spec.sky, redSkyNoVis, redSkyNoTint, P.S );
-				/* lane AODECAL1 (design section 4): the copies' own volumes say how much of each octant they took;
+				/* the copies' own volumes say how much of each octant they took;
 				 * the sky this probe would see without them, so the AO decal does not darken twice */
 				float sf[8];
 				if ( aoOn && spec.aoDecals->skyFree( P.p, pr.skyVis, sf ) ) {
@@ -1084,7 +1080,7 @@ bool probeGiRelight( const ProbeSoup & soup, const QString & bakeDir, const WwCe
 			}
 			up.push_back( P );
 			R.probeLinkStart.push_back( int( R.probeLinks.size() ) );
-			// lane BRICK1: this probe's factors done; the tint becomes the omega-weighted mean
+			// this probe's factors done; the tint becomes the omega-weighted mean
 			for ( size_t k = size_t( bfStart.back() ); k < bfac.size(); k++ )
 				for ( int c = 0; c < 3; c++ )
 					bfac[k].T[c] = bfac[k].O > 0.0 ? bfac[k].T[c] / bfac[k].O : 1.0;
@@ -1092,7 +1088,7 @@ bool probeGiRelight( const ProbeSoup & soup, const QString & bakeDir, const WwCe
 			bfIdx.clear();
 		}
 	}
-	/* lane BRICK1: a probe's cube from the bricks (s38: E[dir] += brick light x weight[dir]), in step 2's frame: the
+	/* a probe's cube from the bricks (s38: E[dir] += brick light x weight[dir]), in step 2's frame: the
 	 * unlinked share renormalized, then the sky added */
 	auto brickGather = [&]( size_t j, const std::vector<double> & Lb, double E[6][3] ) {
 		const UP & P = up[j];
@@ -1130,7 +1126,7 @@ bool probeGiRelight( const ProbeSoup & soup, const QString & bakeDir, const WwCe
 	if ( aoOn )
 		R.aoGate = QStringLiteral( "aodecal relight: %1 probes inside a copy's footprint, mean dE %2" )
 			.arg( R.aoProbes ).arg( R.aoDsMean, 0, 'g', 4 );
-	// lane AODECAL1 gate D: WW_CELL_AODECAL_GATE=<file>, the probes near a copy traced with and without the copies
+	// gate D: WW_CELL_AODECAL_GATE=<file>, the probes near a copy traced with and without the copies
 	if ( aoOn && !wwEnv( "WW_CELL_AODECAL_GATE" ).isEmpty() ) {
 		std::vector<float> pp, pv;
 		for ( const Tbk & t : tbks )
@@ -1172,11 +1168,8 @@ bool probeGiRelight( const ProbeSoup & soup, const QString & bakeDir, const WwCe
 		if ( !nn.empty() )
 			med = nn[nn.size() / 2];
 	}
-	/* lane GISHADE1: the grid spans the surfels the probes can reach (the probes' box grown by the blend radius), not
-	 * every surfel. An exterior bake carries the far soup's surfels too (lane BAKEBLOCK1: the whole worldspace), and
-	 * their box made Concord's voxel 1349 units (radius 2698): one voxel held a whole shop, its inside read the
-	 * street's sky (tracer 0.006, the grid 0.59). Beyond the probes' reach a voxel holds nothing either way; kPad
-	 * more voxels each side keep the clamped edge (the shader's CLAMP_TO_EDGE) out of reach of the grow and fill rings */
+	// the grid spans the surfels the probes can reach (the probes' box grown by the blend radius), not every
+	// surfel.
 	double mn[3] = { 1e300, 1e300, 1e300 }, mx[3] = { -1e300, -1e300, -1e300 };
 	double pmn[3] = { 1e300, 1e300, 1e300 }, pmx[3] = { -1e300, -1e300, -1e300 };
 	for ( const UP & q : up )
@@ -1225,7 +1218,7 @@ bool probeGiRelight( const ProbeSoup & soup, const QString & bakeDir, const WwCe
 		ph[Key3 { floorDiv( float( up[i].p[0] ), float( rad ) ), floorDiv( float( up[i].p[1] ), float( rad ) ),
 			floorDiv( float( up[i].p[2] ), float( rad ) ) }].push_back( int( i ) );
 
-	// lane GIPROBE2: Probe depth visibility, each probe's distance moments from its links (proberelight.h)
+	// Probe depth visibility, each probe's distance moments from its links (proberelight.h)
 	const bool dvOn = spec.depthVis;
 	const int dvT = 2 * kDepthVisN * kDepthVisN;
 	std::vector<float> dvM;
@@ -1260,7 +1253,7 @@ bool probeGiRelight( const ProbeSoup & soup, const QString & bakeDir, const WwCe
 		return w;
 	};
 
-	/* ---- lane BOUNCE2: more than one bounce (probegi.h). What each surfel reads: the probes within the radius
+	/* ---- more than one bounce (probegi.h). What each surfel reads: the probes within the radius
 	 * it can see from its own point and that stand in its room, else the closest such within twice the radius. */
 	const double msBefore = clock.nsecsElapsed() / 1e6;
 	const bool redRooms = spec.red == QLatin1String( "rooms" );
@@ -1419,7 +1412,7 @@ bool probeGiRelight( const ProbeSoup & soup, const QString & bakeDir, const WwCe
 					for ( int c = 0; c < 3; c++ )
 						P.E[a][c] += P.S[a][c];
 		}
-		if ( spec.bricks ) {	// lane BRICK1: the bricks' light of this pass, gathered instead
+		if ( spec.bricks ) {	// the bricks' light of this pass, gathered instead
 			std::vector<double> Lb;
 			brickLights( [&]( size_t i ) { return &Bk[i * 3]; }, Lb );
 			for ( size_t j = 0; j < up.size(); j++ )
@@ -1435,7 +1428,7 @@ bool probeGiRelight( const ProbeSoup & soup, const QString & bakeDir, const WwCe
 	R.gain = sum1 > 0.0 ? R.passLog[R.passLog.size() - 2] / sum1 : 1.0;
 	R.surfelBounce.assign( Bk.begin(), Bk.end() );
 	R.msBounce = clock.nsecsElapsed() / 1e6 - msBefore;
-	{	/* lane BRICK1: both gathers from the last pass's B, side by side (the census, the gate's dump). The probes keep
+	{	/* both gathers from the last pass's B, side by side (the census, the gate's dump). The probes keep
 		 * what spec.bricks chose; these are copies. */
 		const double t0 = clock.nsecsElapsed() / 1e6;
 		std::vector<double> Lb;
@@ -1491,9 +1484,9 @@ bool probeGiRelight( const ProbeSoup & soup, const QString & bakeDir, const WwCe
 	// the voxels a fragment on a surfel's surface samples (the shader's normal offset, then +-1)
 	const size_t nVox = size_t( dims[0] ) * size_t( dims[1] ) * size_t( dims[2] );
 	std::vector<quint8> near( nVox, 0 );
-	// lane ROOMCLAMP1: the rooms (src/proberooms.h), rebuilt from the soup; red "noclamp": none (every surface,
+	// the rooms (src/proberooms.h), rebuilt from the soup; red "noclamp": none (every surface,
 	// probe and slot then has the room -1 and the blend is the one before the lane)
-	/* lane GIBLACK2: the rooms span the GI grid's box (sides and bottom; the top stays the soup's, the open sky), not
+	/* the rooms span the GI grid's box (sides and bottom; the top stays the soup's, the open sky), not
 	 * the whole soup: over Goodneighbor's 5 x 5 cells the cell had grown to 95 units and the Memory Den recess's air
 	 * (134 units deep) came out solid; its probes took the room behind the wall. Over the grid's box the same cell
 	 * budget gives about a third of that. Red WW_CELL_ROOMS_RED=soupbox: the soup's box. */
@@ -1528,7 +1521,7 @@ bool probeGiRelight( const ProbeSoup & soup, const QString & bakeDir, const WwCe
 	if ( memoOn )
 		std::fprintf( stderr, "gi geomemo: tracer %s, rooms %s\n", bvhHit ? "kept" : "built",
 			!roomsWanted ? "off" : roomsHit ? "kept" : "built" );   // "prelane": the gates' pin (WW_CELL_ROOMCLAMP_PIN=off)
-	// lane VOLFIT1: the Space stage is the room source (ruling 10-19); after the memo, which keeps ROOMCLAMP1's grid
+	// the Space stage is the room source (ruling 10-19); after the memo, which keeps ROOMCLAMP1's grid
 	if ( R.roomsOn && spec.space )
 		R.spaceRooms = probeRoomsFromSpace( *spec.space, &R.rooms, QString::fromLatin1( wwEnv( "WW_CELL_VOLUMES_GI_RED" ) ) );
 	const ProbeRooms & RM = R.rooms;
@@ -1557,8 +1550,8 @@ bool probeGiRelight( const ProbeSoup & soup, const QString & bakeDir, const WwCe
 		for ( const auto & pr : probeRoom )
 			R.probeRooms.insert( R.probeRooms.end(), { pr[0], pr[1] } );
 	}
-	/* lane GPURELIGHT1 (10-23): Probe sharing (probegi.h ProbeGiSpec::share). Neighbours within kProbeShareReach x the
-	 * median spacing, in a common room (ROOMCLAMP1) and with a clear segment, so the share never crosses a wall. */
+	/* Probe sharing (probegi.h ProbeGiSpec::share). Neighbours within kProbeShareReach x the
+	 * median spacing, in a common room and with a clear segment, so the share never crosses a wall. */
 	std::vector<double> shareGd;
 	if ( ( spec.share || REC ) && !up.empty() ) {
 		const double s0 = clock.nsecsElapsed() / 1e6;
@@ -1651,7 +1644,7 @@ bool probeGiRelight( const ProbeSoup & soup, const QString & bakeDir, const WwCe
 				}
 				nu[j] = probeShareNu( sum, sq, P.kUnl, sky );
 			} );
-			// lane GIPROBE2: Wide probe sharing repeats the step with nu kept; the census compares with the unshared E
+			// Wide probe sharing repeats the step with nu kept; the census compares with the unshared E
 			const int sp = std::max( 1, spec.sharePasses );
 			std::vector<double> E0;
 			if ( sp > 1 )
@@ -1698,7 +1691,7 @@ bool probeGiRelight( const ProbeSoup & soup, const QString & bakeDir, const WwCe
 		}
 		R.msShare = clock.nsecsElapsed() / 1e6 - s0;
 	}
-	// lane ROOMCLAMP1: per near voxel, the rooms of the surfaces reading it (at most four), how many read it from
+	// per near voxel, the rooms of the surfaces reading it (at most four), how many read it from
 	// each, and each room's eye: its sample point (surface + half a voxel along its normal) nearest the voxel's
 	// centre, where a fragment of that room reading the voxel stands
 	struct VS { int lab[4] = { -1, -1, -1, -1 }; int n[4] = { 0, 0, 0, 0 }; float eye[4][3]; float eyeD[4] = { 1e30f, 1e30f, 1e30f, 1e30f }; int used = 0; };
@@ -1775,8 +1768,8 @@ bool probeGiRelight( const ProbeSoup & soup, const QString & bakeDir, const WwCe
 			todo.push_back( i );
 	R.voxelsNear = int( todo.size() );
 	R.grid.assign( nVox * 6 * 4, 0.0f );
-	R.gridSky.assign( nVox * 6 * 4, 0.0f );	// lane PROBEVIEW1: the same voxels, the same weights
-	if ( aoOn ) {	// lane AODECAL1: the copy-free grid, the same voxels and weights
+	R.gridSky.assign( nVox * 6 * 4, 0.0f );	// the same voxels, the same weights
+	if ( aoOn ) {	// the copy-free grid, the same voxels and weights
 		R.gridFree.assign( nVox * 6 * 4, 0.0f );
 		if ( R.roomsOn )
 			R.gridFree2.assign( nVox * 6 * 4, 0.0f );
@@ -1788,7 +1781,7 @@ bool probeGiRelight( const ProbeSoup & soup, const QString & bakeDir, const WwCe
 	}
 	std::atomic<qint64> vr( 0 ), vb( 0 );
 	std::atomic<int> valid( 0 );
-	// lane GPURELIGHT1: every slot's id, and the probes each slot's blend summed (with their door crossings)
+	// every slot's id, and the probes each slot's blend summed (with their door crossings)
 	struct RecBlend { int probe; double w; int door[2]; float T[8]; };
 	std::vector<int> recSlotId( REC ? nVox * 2 : 0, -1 );
 	std::vector<std::vector<RecBlend>> recBlend;
@@ -1822,7 +1815,7 @@ bool probeGiRelight( const ProbeSoup & soup, const QString & bakeDir, const WwCe
 			if ( slot == 1 )
 				nTwo++;
 			double acc[6][3] = {}, accSky[6] = {}, wsum = 0.0;
-			double accD[6][3] = {};	// lane AODECAL1
+			double accD[6][3] = {};
 			// the probes of room `lab` (any: -1) within r of o that o sees, weighted (1 - d^2/r^2)^2
 			auto gather = [&]( const double o[3], double r ) {
 				const Key3 ck { floorDiv( float( o[0] ), float( rad ) ), floorDiv( float( o[1] ), float( rad ) ), floorDiv( float( o[2] ), float( rad ) ) };
@@ -1880,7 +1873,7 @@ bool probeGiRelight( const ProbeSoup & soup, const QString & bakeDir, const WwCe
 			if ( !fromCentre )
 				nElse++;
 			gather( fromCentre ? c : e, rad );
-			// lane ROOMCLAMP1: blocked at the centre (inside a wall, or behind it): from the voxel's eye, then twice as far
+			// blocked at the centre (inside a wall, or behind it): from the voxel's eye, then twice as far
 			if ( wsum <= 0.0 && !redNoEye ) {
 				if ( fromCentre ) {
 					gather( e, rad );
@@ -1934,7 +1927,7 @@ bool probeGiRelight( const ProbeSoup & soup, const QString & bakeDir, const WwCe
 	R.voxelsFar = nFar;
 	R.voxelsTwoRooms = nTwo;
 	R.voxelsCentreElsewhere = nElse;
-	// lane ROOMCLAMP1: a slot whose eye sees no probe either (a pocket: a beam's top under the ceiling) takes the
+	// a slot whose eye sees no probe either (a pocket: a beam's top under the ceiling) takes the
 	// mean of the valid slots of its room among its neighbours, two rings at most
 	for ( int ring = 0; ring < 2 && !redNoEye; ring++ ) {
 		struct GW { size_t i; int slot; float val[6][4]; float valF[6][3]; std::vector<int> src; };
@@ -1969,7 +1962,7 @@ bool probeGiRelight( const ProbeSoup & soup, const QString & bakeDir, const WwCe
 								if ( G[j * 4 + 3] <= 0.0f )
 									continue;
 								n++;
-								if ( REC )   // lane GPURELIGHT1: the grown slot's sources, in the order summed
+								if ( REC )   // the grown slot's sources, in the order summed
 									src.push_back( recSlotId[j * 2 + size_t( sj )] );
 								for ( int a = 0; a < 6; a++ ) {
 									const size_t o = ( size_t( a ) * nVox + j ) * 4;
@@ -2037,14 +2030,9 @@ bool probeGiRelight( const ProbeSoup & soup, const QString & bakeDir, const WwCe
 		if ( REC && ring == 0 )
 			REC->growRing0 = int( REC->growSlot.size() );
 	}
-	/* lane GIDARK1: an outdoor (room 0) slot that neither its centre, its eye, twice the radius nor the grow rings gave a
-	 * probe stands where no outdoor probe was placed: past the probed rect (the grid box reaches a radius and five
-	 * voxels beyond it), the strip of street behind the last row of buildings. Left empty it reads 0, and a surface
-	 * there takes the indoor room's slot or the plain trilinear: black (Goodneighbor south edge, 22h: 0.005 of the
-	 * full tracer). It takes what a probe at its eye would hold of the sky instead: 8 octants x 32 rays from the eye,
-	 * a ray that meets nothing within the bake's reach is sky, the share per octant through probeSkyCube, the same law
-	 * as a probe's sky arm. Its bounce is not known (no links): sky only, the low side of the tracer. Exterior sky only;
-	 * a recording relight leaves them empty (its operators have no such slot). Red WW_CELL_GI_RED=noedge: left empty. */
+	// an outdoor (room 0) slot that neither its centre, its eye, twice the radius nor the grow rings gave a
+	// probe stands where no outdoor probe was placed: past the probed rect (the grid box reaches a radius and
+	// five voxels beyond it), the strip of street behind the last row of buildings.
 	if ( skyOn && R.roomsOn ) {
 		if ( spec.red == QLatin1String( "noedge" ) )
 			R.edgeSkyNote = QStringLiteral( "red noedge: left empty" );
@@ -2065,11 +2053,8 @@ bool probeGiRelight( const ProbeSoup & soup, const QString & bakeDir, const WwCe
 				dirOct[k] = ( dirs[k][0] < 0.0 ? 1 : 0 ) | ( dirs[k][1] < 0.0 ? 2 : 0 ) | ( dirs[k][2] < 0.0 ? 4 : 0 );
 				octN[dirOct[k]]++;
 			}
-			/* the own-sky floor (lane GIDARK1, Concord Hardware's open front at noon): a filled outdoor slot keeps the
-			 * probes' blend, but no axis reads below the sky its eye sees (the same 256 rays and law). The grid blends
-			 * only the probes of the slot's room; a voxel just inside a shop's open front holds the shop's dark
-			 * interior probes (the street's probes stand outside its blend) while its eye sees the street: the floor
-			 * within 2 m of the front read 0.12-0.4 of the full tracer. Red WW_CELL_GI_RED=noskyfloor: the blend alone. */
+			// the own-sky floor: a filled outdoor slot keeps the probes' blend, but no axis reads below the
+			// sky its eye sees (the same 256 rays and law).
 			const bool floorOn = spec.red != QLatin1String( "noskyfloor" );
 			R.skyFloorNote = floorOn ? QStringLiteral( "on" ) : QStringLiteral( "red noskyfloor: the blend alone" );
 			struct ES { size_t i; int slot; bool bare; };
@@ -2094,10 +2079,8 @@ bool probeGiRelight( const ProbeSoup & soup, const QString & bakeDir, const WwCe
 				o[1] = double( V.eye[si][1] ) - O[1];
 				o[2] = double( V.eye[si][2] );
 			};
-			/* lane RTBAKE1: these sky rays (slots x 256, ~20 M at Goodneighbor) are the bake's biggest ray load; on a GPU
-			 * they go out in batches as occlusion rays, each hit re-tested in double (bakert::Scene::refine). The cpu
-			 * path (WW_BAKE_RT_RED=cpu, or no Vulkan) is the loop below untouched. WW_BAKE_RT_CHECK=1 also casts every
-			 * ray on the CPU and counts the verdicts that differ (the gate). */
+			// these sky rays (slots x 256, ~20 M at Goodneighbor) are the bake's biggest ray load; on a GPU
+			// they go out in batches as occlusion rays, each hit re-tested in double (bakert::Scene::refine).
 			QElapsedTimer edgeClock;
 			edgeClock.start();
 			std::unique_ptr<bakert::Scene> rtScene;
@@ -2113,7 +2096,7 @@ bool probeGiRelight( const ProbeSoup & soup, const QString & bakeDir, const WwCe
 			if ( rtScene && rtScene->path() != bakert::Path::Cpu ) {
 				skyHit.assign( edge.size() * size_t( kDirs ), 0 );
 				const size_t chunk = 4096;   // slots a batch: 1 M rays
-				// lane RTGI1: whole occlusion rays (bakert::Scene::cast): the GPU's sure verdicts stand, the unsure walk
+				// whole occlusion rays (bakert::Scene::cast): the GPU's sure verdicts stand, the unsure walk
 				std::vector<bakert::XRay> rays;
 				std::vector<bakert::XHit> hits;
 				for ( size_t k0 = 0; k0 < edge.size(); k0 += chunk ) {
@@ -2253,13 +2236,8 @@ bool probeGiRelight( const ProbeSoup & soup, const QString & bakeDir, const WwCe
 	R.voxelsTwoBare = nTwoBare;
 	R.msGrid = clock.nsecsElapsed() / 1e6 - R.msLight - R.msGather - R.msBounce;
 
-	/* SKY2 FOGSLICE1: the air's own volume (Division deck D2 s55, D9 s61: a filled coarse volume of the probes' mean
-	 * irradiance that the fog samples). The grid above is valid only within the probes' reach of surfaces; the air
-	 * above it took the weather's flat ambient, which differs from the probes' light (Concord street, night: 0.0099
-	 * against 0.0182), so the fog held world-anchored layers where the grid's valid share fell 1 -> 0 over one voxel.
-	 * Here every voxel of the grid's box, at 3/4 of the probe spacing (the deck's 3 m to 4 m), holds the probes it sees
-	 * within the blend radius, weighted as the grid's; none seen: the probes within it, then within twice and four
-	 * times it, regardless of sight; still none: the nearest probe. Open air thus reads the probes' sky. */
+	// SKY2 FOGSLICE1: the air's own volume (Division deck D2 s55, D9 s61: a filled coarse volume of the
+	// probes' mean irradiance that the fog samples).
 	{
 		QElapsedTimer airClock;
 		airClock.start();
@@ -2272,10 +2250,8 @@ bool probeGiRelight( const ProbeSoup & soup, const QString & bakeDir, const WwCe
 				break;
 			av *= 1.1;
 		}
-		/* SKY3: the open-air top (a SKY2 residual). Above the box the shader clamps to the top layer, which held the
-		 * street probes' blend (0.36 of the tracer's open air 0.52-0.66 at Concord). The box now reaches 2 voxels over
-		 * the highest geometry in it (same limits, the voxel kept), and a voxel above every surface of its column
-		 * (+-1 voxel) reads at least the sky its eye sees (64 rays, GIDARK1's own-sky law). Red WW_CELL_GI_RED=noairtop. */
+		// the open-air top (a SKY2 residual). Above the box the shader clamps to the top layer, which held the
+		// street probes' blend (0.36 of the tracer's open air 0.52-0.66 at Concord).
 		const bool airTopOn = skyOn && spec.red != QLatin1String( "noairtop" );
 		std::vector<float> colTop;
 		int airExt = 0;
@@ -2323,7 +2299,7 @@ bool probeGiRelight( const ProbeSoup & soup, const QString & bakeDir, const WwCe
 		}
 		const size_t na = size_t( ad[0] ) * size_t( ad[1] ) * size_t( ad[2] );
 		R.air.assign( na * 6 * 4, 0.0f );
-		// SKY3: the open voxels' sky visibility (8 octants of 64 Fibonacci rays), kept while the geometry and box stand
+		// the open voxels' sky visibility (8 octants of 64 Fibonacci rays), kept while the geometry and box stand
 		struct AirVis { quint64 tris = 0; QString box; std::vector<uint8_t> open; };
 		static AirVis airVisMemo;
 		static std::mutex airVisLock;
@@ -2387,12 +2363,12 @@ bool probeGiRelight( const ProbeSoup & soup, const QString & bakeDir, const WwCe
 		std::atomic<int> nRaised( 0 );
 		std::atomic<int> nSeen( 0 ), nNear( 0 ), nNearest( 0 );
 		constexpr int kTaps = ProbeRelightOps::kAirTaps;
-		if ( REC ) {	// SKY3: the door's live relight moves the air with its probes
+		if ( REC ) {	// the door's live relight moves the air with its probes
 			REC->airProbe.assign( na * size_t( kTaps ), -1 );
 			REC->airW.assign( na * size_t( kTaps ), 0.0f );
 		}
 		parallelFor( na, [&]( size_t i ) {
-			std::vector<std::pair<double, int>> taps;	// SKY3: (weight, probe) of the blend, recording only
+			std::vector<std::pair<double, int>> taps;	// (weight, probe) of the blend, recording only
 			const int x = int( i % size_t( ad[0] ) ), y = int( ( i / size_t( ad[0] ) ) % size_t( ad[1] ) ),
 				z = int( i / ( size_t( ad[0] ) * size_t( ad[1] ) ) );
 			const double c[3] = { R.airOrigin[0] + ( x + 0.5 ) * av, R.airOrigin[1] + ( y + 0.5 ) * av, R.airOrigin[2] + ( z + 0.5 ) * av };
@@ -2464,7 +2440,7 @@ bool probeGiRelight( const ProbeSoup & soup, const QString & bakeDir, const WwCe
 					REC->airW[i * size_t( kTaps ) + k] = float( taps[k].first / ks );
 				}
 			}
-			if ( openTop ) {	// SKY3: open air reads at least the sky its eye sees
+			if ( openTop ) {	// open air reads at least the sky its eye sees
 				nTop++;
 				float vis[8];
 				for ( int q = 0; q < 8; q++ )
@@ -2503,7 +2479,7 @@ bool probeGiRelight( const ProbeSoup & soup, const QString & bakeDir, const WwCe
 		std::fprintf( stderr, "%s\n", qPrintable( R.airNote ) );
 	}
 
-	// lane EMISSIVEGRID1: the fine boxes round bright glow (probegifine.h); off: nothing here runs
+	// the fine boxes round bright glow (probegifine.h); off: nothing here runs
 	if ( spec.emissiveGrid && !spec.noGlow && lks.size() == R.probeLinks.size() ) {
 		R.fineOn = true;
 		ProbeGiFineInput fi;
@@ -2567,7 +2543,7 @@ bool probeGiRelight( const ProbeSoup & soup, const QString & bakeDir, const WwCe
 		for ( const double * a : { u.p, u.n, u.a, u.B } )
 			for ( int c = 0; c < 3; c++ )
 				R.surfelOut.push_back( float( a[c] ) );
-	R.depthVisTested = dvTested;   // lane GIPROBE2
+	R.depthVisTested = dvTested;
 	R.depthVisCut = dvCut;
 	R.depthVisMean = dvTested ? double( dvSum ) / 1e6 / double( dvTested ) : 1.0;
 	R.probeCube.reserve( up.size() * 21 );
@@ -2580,7 +2556,7 @@ bool probeGiRelight( const ProbeSoup & soup, const QString & bakeDir, const WwCe
 		for ( int a = 0; a < 6; a++ )
 			R.probeSky.push_back( float( P.sky[a] ) );
 	}
-	if ( skyOn ) {   // lane SKY1: the sky's and the sun's parts, for the gate
+	if ( skyOn ) {   // the sky's and the sun's parts, for the gate
 		R.probeSkyE.reserve( up.size() * 18 );
 		for ( const UP & P : up )
 			for ( int a = 0; a < 6; a++ )
@@ -2591,7 +2567,7 @@ bool probeGiRelight( const ProbeSoup & soup, const QString & bakeDir, const WwCe
 			for ( int c = 0; c < 3; c++ )
 				R.surfelSun.push_back( float( u.S[c] ) );
 	}
-	// ---- lane GPURELIGHT1: the record, assembled (src/proberelight.h's layouts)
+	// ---- the record, assembled (src/proberelight.h's layouts)
 	if ( REC ) {
 		QElapsedTimer rclock;
 		rclock.start();
@@ -2724,7 +2700,7 @@ bool probeGiRelight( const ProbeSoup & soup, const QString & bakeDir, const WwCe
 			} );
 		for ( size_t k = 0; k < R.feedProbe.size(); k++ )
 			census( 2, &X.feedDoor[k * 2], &X.feedT[k * 8], 4, true );
-		// 3b. lane GPURELIGHT1: the share lists (probe to probe, a visibility entry like the blend's)
+		// 3b. the share lists (probe to probe, a visibility entry like the blend's)
 		X.shareStart = R.shareStart;
 		X.shareProbe = R.shareProbe;
 		X.shareG = shareGd;
@@ -2773,7 +2749,7 @@ bool probeGiRelight( const ProbeSoup & soup, const QString & bakeDir, const WwCe
 	return true;
 }
 
-// lane SKY1: the census line of a weather-lit exterior
+// the census line of a weather-lit exterior
 static QString skyCensusText( const ProbeGiResult & r )
 {
 	return QStringLiteral( "gi sky: %1; %2 of %3 probes see sky (mean share %4), %5 through glass; sun reaches %6 of %7 surfels "
@@ -2782,7 +2758,7 @@ static QString skyCensusText( const ProbeGiResult & r )
 		.arg( r.surfelsSun ).arg( r.surfels ).arg( r.sunRays ).arg( r.sunBlocked );
 }
 
-// lane BOUNCE2: the passes
+// the passes
 static QString bounceCensusText( const ProbeGiResult & r )
 {
 	const size_t n = r.passLog.size();
@@ -2803,7 +2779,7 @@ void probeGiAoFreeSwap( ProbeGiResult & r )
 	}
 }
 
-/* lane PERF1: the GI volumes (src/proberooms.h GiVolumeSet), the fitter's or the rooms grid stand-in, for the runtime:
+/* the GI volumes (src/proberooms.h GiVolumeSet), the fitter's or the rooms grid stand-in, for the runtime:
  * the shapes as 12 floats each; per voxel, each slot's threshold to another volume: the weight 1 - distance / blend
  * width (the distance from the voxel's centre to the threshold's shape, the nearest threshold of the slot's room) and
  * the room across it. Both sides' slots carry it, so the blend runs both ways. */
@@ -2891,7 +2867,7 @@ void probeGiRoomsInto( ProbeGiResult & r, WwCellGi & gi )
 			gi.airDims[c] = r.airDims[c];
 		}
 	}
-	if ( r.fineOn && r.fine.boxes > 0 ) {	// lane EMISSIVEGRID1: the fine boxes ride the GI grid (both publish sites call here)
+	if ( r.fineOn && r.fine.boxes > 0 ) {	// the fine boxes ride the GI grid (both publish sites call here)
 		gi.fineBox = r.fine.box;	// copied: probesky's kept relight and the census still read the result
 		gi.fine = r.fine.data;
 		gi.fineLayers = r.fine.layers;
@@ -2900,7 +2876,7 @@ void probeGiRoomsInto( ProbeGiResult & r, WwCellGi & gi )
 		return;
 	gi.rgba.insert( gi.rgba.end(), r.grid2.begin(), r.grid2.end() );
 	gi.sky.insert( gi.sky.end(), r.gridSky2.begin(), r.gridSky2.end() );
-	giVolumesInto( r, gi );	// lane PERF1
+	giVolumesInto( r, gi );
 	gi.slotRooms = std::move( r.slotRooms );
 	gi.rooms.resize( r.rooms.a.size() );
 	for ( size_t i = 0; i < r.rooms.a.size(); i++ )
@@ -2925,24 +2901,23 @@ QString probeGiCensusText( const ProbeGiResult & r )
 		.arg( r.visRays ).arg( r.visBlocked ).arg( r.msLight, 0, 'f', 0 ).arg( r.msGather, 0, 'f', 0 ).arg( r.msGrid, 0, 'f', 0 )
 		+ QStringLiteral( "\n  gi grid: voxels blocked at their centre filled from their eye: within the radius %1, "
 			"within twice it %2; from valid neighbours %3; left empty %4" ).arg( r.voxelsEye ).arg( r.voxelsFar )
-			.arg( r.voxelsGrown ).arg( r.voxelsBare )   // lane ROOMCLAMP1
+			.arg( r.voxelsGrown ).arg( r.voxelsBare )
 		+ ( r.skyLit ? QStringLiteral( "\n  gi edge: outdoor slots no probe reached, lit by the sky their eye sees %1 "
 			"(slot 0 %2, slot 1 %3; mean sky share %4; %5)" ).arg( r.edgeSky0 + r.edgeSky1 ).arg( r.edgeSky0 ).arg( r.edgeSky1 )
-			.arg( r.edgeSkyShare, 0, 'f', 3 ).arg( r.edgeSkyNote ) : QString() )   // lane GIDARK1
+			.arg( r.edgeSkyShare, 0, 'f', 3 ).arg( r.edgeSkyNote ) : QString() )
 		+ ( r.skyLit ? QStringLiteral( "\n  gi sky floor: outdoor slots held at least at the sky their eye sees: looked at %1, "
 			"raised %2 (axes %3; %4)" ).arg( r.skyFloorSlots ).arg( r.skyFloorRaised ).arg( r.skyFloorAxes )
-			.arg( r.skyFloorNote.isEmpty() ? QStringLiteral( "off" ) : r.skyFloorNote ) : QString() )   // lane GIDARK1
+			.arg( r.skyFloorNote.isEmpty() ? QStringLiteral( "off" ) : r.skyFloorNote ) : QString() )
 		+ ( r.edgeRaysNote.isEmpty() ? QString() : QStringLiteral( "\n  gi %1; edge + floor ms %2" ).arg( r.edgeRaysNote )
-			.arg( r.msEdgeRays, 0, 'f', 0 ) )   // lane RTBAKE1
+			.arg( r.msEdgeRays, 0, 'f', 0 ) )
 		+ QStringLiteral( "\n  " ) + ( r.roomsOn ? probeRoomsCensusText( r.rooms )
 			+ QStringLiteral( "\n  gi rooms: voxels with a second room %1 (left empty %2), slots gathered from their eye "
 				"(the centre in another room) %3, probes in no room %4" ).arg( r.voxelsTwoRooms ).arg( r.voxelsTwoBare )
 				.arg( r.voxelsCentreElsewhere ).arg( r.probesRoomless )
-				+ ( r.spaceRooms.isEmpty() ? QString() : QStringLiteral( "\n  " ) + r.spaceRooms )   // lane VOLFIT1
+				+ ( r.spaceRooms.isEmpty() ? QString() : QStringLiteral( "\n  " ) + r.spaceRooms )
 			: QStringLiteral( "gi rooms: off (red noclamp: one value a voxel)" ) )
 		+ ( r.skyLit ? QStringLiteral( "\n  " ) + skyCensusText( r ) : QString() )
 		+ QStringLiteral( "\n  " ) + bounceCensusText( r )
-		// lane BRICK1
 		+ QStringLiteral( "\n  gi bricks: %1 bricks (edge %2, by facing), %3 surfels a brick, %4 factors for %5 links (%6x fewer "
 			"gather terms); brick against link gather %7% of the light (95th percentile a probe %8%); the probes gather "
 			"%9; ms %10" ).arg( r.bricks ).arg( double( r.brickEdge ), 0, 'f', 0 )
@@ -2951,17 +2926,17 @@ QString probeGiCensusText( const ProbeGiResult & r )
 			.arg( 100.0 * r.brickP95, 0, 'f', 2 ).arg( r.bricksGather ? QStringLiteral( "the BRICKS" ) : QStringLiteral( "their links" ) )
 			.arg( r.msBricks, 0, 'f', 0 )
 		+ ( r.surfelsEmit ? QStringLiteral( "\n  gi emissive: %1 of %2 surfels glow (their Le added once to B)" )
-			.arg( r.surfelsEmit ).arg( r.surfels ) : QString() )   // lane EMISSIVEGI1
-		+ ( r.fineOn ? QStringLiteral( "\n  " ) + probeGiFineCensusText( r.fine ) : QString() )   // lane EMISSIVEGRID1
+			.arg( r.surfelsEmit ).arg( r.surfels ) : QString() )
+		+ ( r.fineOn ? QStringLiteral( "\n  " ) + probeGiFineCensusText( r.fine ) : QString() )
 		+ ( r.airNote.isEmpty() ? QString() : QStringLiteral( "\n  " ) + r.airNote )   // SKY2 FOGSLICE1
 		+ ( r.shareOn ? QStringLiteral( "\n  gi share: %1 neighbour entries within %2 u (%3 segments tested, %4 blocked, %5 other room); "
 			"mean nu %6, E moved %7 %, %8 ms" ).arg( r.shareEntries ).arg( r.shareReach, 0, 'f', 0 ).arg( r.shareRays )
 			.arg( r.shareBlocked ).arg( r.shareOtherRoom ).arg( r.shareNuMean, 0, 'f', 4 ).arg( 100.0 * r.shareMoved, 0, 'f', 3 )
 			.arg( r.msShare, 0, 'f', 1 ) + ( r.sharePasses > 1 ? QStringLiteral( ", %1 steps (Wide probe sharing)" )
-			.arg( r.sharePasses ) : QString() ) : QString() )   // lane GPURELIGHT1
+			.arg( r.sharePasses ) : QString() ) : QString() )
 		+ ( r.depthVisOn ? QStringLiteral( "\n  gi depth visibility: %1 blend and feed weights tested, %2 cut below 1, mean "
 			"factor %3, moments built in %4 ms" ).arg( r.depthVisTested ).arg( r.depthVisCut ).arg( r.depthVisMean, 0, 'f', 4 )
-			.arg( r.msDepthVis, 0, 'f', 1 ) : QString() );   // lane GIPROBE2
+			.arg( r.msDepthVis, 0, 'f', 1 ) : QString() );
 }
 
 /* The dump (little-endian):
@@ -2969,7 +2944,7 @@ QString probeGiCensusText( const ProbeGiResult & r )
  *   gi_probes.bin   int32 n, then n x 21 float32: position, E on +X -X +Y -Y +Z -Z (rgb each);
  *                   the probes in file-name order, then file order
  *   gi_grid.bin     float32 origin[3], voxel, radius; int32 dims[3]; then the grid (probegi.h)
- *   gi_skygrid.bin  the same header, then the sky grid (lane PROBEVIEW1)
+ *   gi_skygrid.bin  the same header, then the sky grid
  *   gi_probesky.bin int32 n, then n x 6 float32: the sky share on +X -X +Y -Y +Z -Z
  *   gi_links.bin    int32 n, int32 start[n + 1], then int32 surfel index (gi_surfels.bin order) per resolved link
  *   gi_meta.txt     the spec */
@@ -2996,7 +2971,7 @@ bool probeGiDump( const ProbeGiResult & r, const ProbeGiSpec & spec, const QStri
 		+ i32( r.dims[0] ) + i32( r.dims[1] ) + i32( r.dims[2] );
 	if ( !put( QStringLiteral( "gi_grid.bin" ), gh, r.grid ) )
 		return false;
-	/* lane SKY1, a weather-lit exterior only:
+	/* a weather-lit exterior only:
 	 *   gi_sky.bin   int32 n, then n x 18 float32: the sky's part of each probe's E (same order)
 	 *   gi_sun.bin   int32 n, then n x 3 float32: the sun's part of each surfel's B (same order)
 	 *   gi_sky.txt   the light the relight used: amb (six rows, a surface facing +X -X +Y -Y +Z -Z),
@@ -3017,12 +2992,12 @@ bool probeGiDump( const ProbeGiResult & r, const ProbeGiSpec & spec, const QStri
 				.arg( double( spec.sky.sunTo[2] ), 0, 'g', 9 ).arg( double( spec.sky.sun[0] ), 0, 'g', 9 )
 				.arg( double( spec.sky.sun[1] ), 0, 'g', 9 ).arg( double( spec.sky.sun[2] ), 0, 'g', 9 )
 				.arg( spec.sky.label, spec.skyRed.isEmpty() ? QStringLiteral( "-" ) : spec.skyRed );
-			if ( spec.sky.vis < 1.0f )	// lane SKYSTR1: the Sky visibility row below 100 % (a full row writes as before)
+			if ( spec.sky.vis < 1.0f )	// the Sky visibility row below 100 % (a full row writes as before)
 				t += QStringLiteral( "skyVis %1\n" ).arg( double( spec.sky.vis ), 0, 'g', 9 );
 			s.write( t.toUtf8() );
 		}
 	}
-	// lane PROBEVIEW1: the sky grid (gi_grid.bin's header and layout), each probe's six sky shares, its links
+	// the sky grid (gi_grid.bin's header and layout), each probe's six sky shares, its links
 	if ( !put( QStringLiteral( "gi_skygrid.bin" ), gh, r.gridSky ) )
 		return false;
 	if ( !put( QStringLiteral( "gi_probesky.bin" ), i32( r.probes ), r.probeSky ) )
@@ -3037,7 +3012,7 @@ bool probeGiDump( const ProbeGiResult & r, const ProbeGiSpec & spec, const QStri
 		f.write( reinterpret_cast<const char *>( r.probeLinkStart.data() ), qint64( r.probeLinkStart.size() * 4 ) );
 		f.write( reinterpret_cast<const char *>( r.probeLinks.data() ), qint64( r.probeLinks.size() * 4 ) );
 	}
-	/* lane GPURELIGHT1: gi_share.bin (Probe sharing on): int32 n, int32 start[n + 1], per entry int32 probe + float32
+	/* gi_share.bin (Probe sharing on): int32 n, int32 start[n + 1], per entry int32 probe + float32
 	 * g, then float32 nu[n] */
 	if ( r.shareOn ) {
 		QFile f( QDir( dir ).filePath( QStringLiteral( "gi_share.bin" ) ) );
@@ -3051,7 +3026,7 @@ bool probeGiDump( const ProbeGiResult & r, const ProbeGiSpec & spec, const QStri
 			f.write( i32( r.shareProbe[k] ) + f32( r.shareG[k] ) );
 		f.write( reinterpret_cast<const char *>( r.shareNu.data() ), qint64( r.shareNu.size() * 4 ) );
 	}
-	/* lane BOUNCE2: the passes
+	/* the passes
 	 *   gi_bounce.bin  int32 n, int32 passes, then n x 3 float32: each surfel's B after the last pass
 	 *   gi_feed.bin    int32 n, int32 start[n + 1], then per entry int32 probe (gi_probes.bin order) + float32
 	 *                  weight, then int32 room per surfel (-1 = not known)
@@ -3084,7 +3059,7 @@ bool probeGiDump( const ProbeGiResult & r, const ProbeGiSpec & spec, const QStri
 			t.write( s.toUtf8() );
 		}
 	}
-	/* lane ROOMCLAMP1, with the rooms on:
+	/* with the rooms on:
 	 *   gi_rooms.bin  the fine grid (proberooms.h probeRoomsDump)
 	 *   gi_slots.bin  gi_grid.bin's header, then per voxel int32 slot 0 room, int32 slot 1 room (-1 none), then
 	 *                 slot 1's grid (gi_grid.bin's layout), then slot 1's sky grid
@@ -3110,7 +3085,7 @@ bool probeGiDump( const ProbeGiResult & r, const ProbeGiSpec & spec, const QStri
 		pr.write( i32( qint32( r.probeRooms.size() / 2 ) ) );
 		pr.write( reinterpret_cast<const char *>( r.probeRooms.data() ), qint64( r.probeRooms.size() * 4 ) );
 	}
-	/* lane BRICK1:
+	/* the brick files:
 	 *   gi_bricks.bin     float32 edge, int32 n, then n x (int32 cell x, y, z, facing, surfel count, float32 rgb light)
 	 *                     (light = the mean of the brick's surfels' last-pass B, gi_bounce.bin)
 	 *   gi_brickcube.bin  gi_probes.bin's layout, each probe gathered from the bricks (last pass)
@@ -3139,7 +3114,7 @@ bool probeGiDump( const ProbeGiResult & r, const ProbeGiSpec & spec, const QStri
 	return true;
 }
 
-/* lane DECK1: gi_lights.txt, the placed lights the relight lit the surfels with (tests/path_reference.cpp reads it):
+/* gi_lights.txt, the placed lights the relight lit the surfels with (tests/path_reference.cpp reads it):
  *   clear <fixtureClear>
  *   light px py pz radius r g b spot dx dy dz cosOuter bias scale exponent cone shape box[3][4]   (colour linear, fade in) */
 bool probeGiDumpLights( const WwCellLighting & lighting, const ProbeGiSpec & spec, const QString & dir, QString * err )
@@ -3174,10 +3149,10 @@ bool probeGiDumpLights( const WwCellLighting & lighting, const ProbeGiSpec & spe
 	return true;
 }
 
-// lane ROOMCLAMP1: `probegi --soup <f> --rect minX,minY,maxX,maxY --out <dir> --light x,y,z,radius,r,g,b [--light ...]
+// `probegi --soup <f> --rect minX,minY,maxX,maxY --out <dir> --light x,y,z,radius,r,g,b [--light ...]
 // [--spacing s] [--rays n] [--passes n] [--red noclamp|...] [--rooms-red conn26|boxes|glasswall|nomask] [--pinch u]
 // [--cell u]`: place, bake (<dir>/bake), relight as an interior lit by the lights given, dump into <dir>
-// lane BOUNCE1: [--sun tx,ty,tz,r,g,b] [--sky r,g,b | 18 values +X -X +Y -Y +Z -Z]: an exterior lit by that sun (toward
+// [--sun tx,ty,tz,r,g,b] [--sky r,g,b | 18 values +X -X +Y -Y +Z -Z]: an exterior lit by that sun (toward
 // it, its linear colour) and that weather ambient instead, the lights then optional (the colour-bleed fixture)
 int probeGiCli( const QStringList & args )
 {
@@ -3195,17 +3170,17 @@ int probeGiCli( const QStringList & args )
 		else if ( a == QLatin1String( "--rect" ) ) { rect = nx; i++; }
 		else if ( a == QLatin1String( "--spacing" ) ) { ps.spacing = nx.toFloat(); i++; }
 		else if ( a == QLatin1String( "--rays" ) ) { bs.rays = nx.toInt(); i++; }
-		// lane SMOOTHN1: the noise-driven extra batches, at most n x the base set (1 = the base set alone, the old bake)
+		// the noise-driven extra batches, at most n x the base set (1 = the base set alone, the old bake)
 		else if ( a == QLatin1String( "--adapt" ) ) { bs.adaptMax = nx.toInt(); i++; }
 		else if ( a == QLatin1String( "--passes" ) ) { gs.passes = nx.toInt(); i++; }
 		else if ( a == QLatin1String( "--red" ) ) { gs.red = nx; i++; }
 		else if ( a == QLatin1String( "--rooms-red" ) ) { gs.rooms.red = nx; i++; }
-		else if ( a == QLatin1String( "--share" ) ) { gs.share = nx.toInt() != 0; i++; }   // lane GPURELIGHT1: Probe sharing
+		else if ( a == QLatin1String( "--share" ) ) { gs.share = nx.toInt() != 0; i++; }   // Probe sharing
 		else if ( a == QLatin1String( "--share-red" ) ) { gs.shareRed = nx; i++; }
-		else if ( a == QLatin1String( "--share-passes" ) ) { gs.sharePasses = nx.toInt(); i++; }   // lane GIPROBE2
+		else if ( a == QLatin1String( "--share-passes" ) ) { gs.sharePasses = nx.toInt(); i++; }
 		else if ( a == QLatin1String( "--depthvis" ) ) { gs.depthVis = nx.toInt() != 0; i++; }
 		else if ( a == QLatin1String( "--depthvis-red" ) ) { gs.depthVisRed = nx; i++; }
-		else if ( a == QLatin1String( "--room-split" ) ) { bs.roomSplit = nx.toInt() != 0; i++; }   // lane GAPBAKE1
+		else if ( a == QLatin1String( "--room-split" ) ) { bs.roomSplit = nx.toInt() != 0; i++; }
 		else if ( a == QLatin1String( "--pinch" ) ) { gs.rooms.pinch = nx.toFloat(); i++; }
 		else if ( a == QLatin1String( "--cell" ) ) { gs.rooms.cell = nx.toFloat(); i++; }
 		else if ( a == QLatin1String( "--sun" ) || a == QLatin1String( "--sky" ) ) {
@@ -3267,7 +3242,7 @@ int probeGiCli( const QStringList & args )
 	}
 	const QString bakeDir = QDir( outDir ).filePath( QStringLiteral( "bake" ) );
 	ProbeBakeResult br;
-	ProbeRooms splitRooms;   // lane GAPBAKE1: the room split's rooms, from the soup before the bake
+	ProbeRooms splitRooms;   // the room split's rooms, from the soup before the bake
 	if ( bs.roomSplit && probeBakeRoomGrid( soup, pr.probes, gs.rooms, &splitRooms ) )
 		bs.roomGrid = &splitRooms;
 	if ( !probeBake( soup, pr.probes, bs, bakeDir, &br, &pr.roomBoxes ) ) {

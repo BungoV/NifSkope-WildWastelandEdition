@@ -11,13 +11,13 @@ BSD License - see nifskope.h
 
 #include "cellpick.h"
 #include "cellrefs.h"
-#include "cellclick.h"		// lane CELLVIEW2
-#include "cellground.h"		// lane CELLVIEW2
-#include "cellsplat.h"		// lane CELLVIEW4
-#include "landlodspec.h"	// lane LANDSPEC6: fixedWorld
-#include "cellmodsource.h"	// lane LANDSPEC8: uGridsToLoad
-#include "cellidentity.h"	// lane CELLVIEW2
-#include "cellactor.h"		// lane PLACED1
+#include "cellclick.h"
+#include "cellground.h"
+#include "cellsplat.h"
+#include "landlodspec.h"	// fixedWorld
+#include "cellmodsource.h"	// uGridsToLoad
+#include "cellidentity.h"
+#include "cellactor.h"
 #include "gl/celllooks.h"	// lane GAPLOOK2: Actors outdoors, Weapon mod parts
 #include "cellworldanim.h"		// lane FXPARITY2: Animated objects
 #include "cellweapon.h"		// lane MISS1 (GAPLOOK2)
@@ -32,23 +32,23 @@ BSD License - see nifskope.h
 #include "nativeemit.h"
 #include "probeplace.h"		// lane PRTPPLACE
 #include "probebake.h"		// lane PRTPBAKE
-#include "pgiwrite.h"		// lane PGI0
-#include "probegi.h"		// lane PRTPGI
-#include "probealbedo.h"		// lane PRTPBAKE
-#include "probefar.h"		// lane BAKEBLOCK1: the far soup beyond the loaded block
-#include "gl/cellpasstime.h"	// lane PERF1: private bytes at each stage
-#include "proberelight.h"	// lane GPURELIGHT1: the relight from recorded operators (CPU + GPU)
-#include "celldoorlive.h"	// lane DOORLIVE1: one live door
-#include "farlight.h"		// lane FARVIEW1: distant light from the surfels
-#include "cellmodelahead.h"	// lane SPEED1: models parsed on worker threads
-#include "cellmesh.h"		// lane SPEED1: the welded geometry beside the document
-#include "cellfarlod.h"		// lane FARLOD1: the far field around the block
+#include "pgiwrite.h"
+#include "probegi.h"
+#include "probealbedo.h"
+#include "probefar.h"		// the far soup beyond the loaded block
+#include "gl/cellpasstime.h"	// private bytes at each stage
+#include "proberelight.h"	// the relight from recorded operators (CPU + GPU)
+#include "celldoorlive.h"	// one live door
+#include "farlight.h"		// distant light from the surfels
+#include "cellmodelahead.h"	// models parsed on worker threads
+#include "cellmesh.h"		// the welded geometry beside the document
+#include "cellfarlod.h"		// the far field around the block
 #include "lodinative.h"		// lane FIX1101A lodch: the far LOD's baked AO / sky switches (liveFarKey)
-#include "cellmodpick.h"	// lane MODPICK1
-#include "cellspeed.h"		// lane SPEED1: stage timers (WW_CELL_SPEED_DUMP)
-#include "cellaodecal.h"		// lane AODECAL1: baked AO decals under big movable statics
-#include "cellstream.h"		// lane CELLSTREAM1: the cells round the camera
-#include "cellspawn.h"		// lane CELLSPAWN1: where the camera starts
+#include "cellmodpick.h"
+#include "cellspeed.h"		// stage timers (WW_CELL_SPEED_DUMP)
+#include "cellaodecal.h"		// baked AO decals under big movable statics
+#include "cellstream.h"		// the cells round the camera
+#include "cellspawn.h"		// where the camera starts
 #include "cellcambounds.h"	// lane CAMGATE1: the block and the ground the camera is judged against
 
 #include <limits>
@@ -68,12 +68,12 @@ BSD License - see nifskope.h
 #include "gl/cellairzone.h"	// lane AIRZONE1: the Air zones row
 #include "probevolumesgi.h"	// lane VOLFIT1: its rooms as the GI's volumes
 #include "gl/cellfxlit.h"
-#include "gl/celllensflare.h"	// lane LIGHTS3 (LENSFLARE1)
-#include "gl/cellaodecalgl.h"	// lane AODECAL1
-#include "gl/cellwater.h"	// lane WATER1
-#include "gl/cellwaterinfo.h"	// lane WATERDATA1
-#include "gl/cellcull.h"	// lane SUNCELL1: the per-placement culling runs
-#include "gl/cellobjfade.h"	// lane OBJFADE1: the runs' fade class
+#include "gl/celllensflare.h"
+#include "gl/cellaodecalgl.h"
+#include "gl/cellwater.h"
+#include "gl/cellwaterinfo.h"
+#include "gl/cellcull.h"	// the per-placement culling runs
+#include "gl/cellobjfade.h"	// the runs' fade class
 #include "gl/cellprevisrule.h"	// lane PERFFIX4: the tome's staleness
 #include "gl/glproperty.h"	// lane FIXPACK1: the renderer's .pbrm resolve (pbrmResolveForMaterial)
 #include "gl/cellgrass.h"
@@ -254,10 +254,10 @@ struct Bucket
 	bool decalAngle = false;   // lane DECALANGLE: its vertex alpha is dot(N, D); the shader runs the angle rule
 	bool decalMapped = false;  // lane DECALANGLE2: its vertex rgb is D; the rule reads the drawn normal
 	quint32 decalSF1 = 0;   // lane GAPFIX1: a lighting source's own Decal / Dynamic_Decal bits (the model's flags), kept
-	QString heightTex;      // lane DECALS1: a placed decal's TX04 height map (texture slot 2; no glow on decals)
-	float pomScale = 0.0f;  // lane DECALS1: its DODT parallax scale and passes
+	QString heightTex;      // a placed decal's TX04 height map (texture slot 2; no glow on decals)
+	float pomScale = 0.0f;  // its DODT parallax scale and passes
 	int pomPasses = 0;
-	/* Lane WATER1: a water surface of one WATR record (the cell's plane or a placed water mesh); its shapes are
+	/* a water surface of one WATR record (the cell's plane or a placed water mesh); its shapes are
 	 * registered with src/gl/cellwater.h, which draws them the game's way while the Cell lights row is on. */
 	bool water = false;
 	WwWaterRecord waterRec;
@@ -499,7 +499,7 @@ bool emitBucket( NifModel * nif, const QModelIndex & iRoot, const Bucket & b,
 	for ( const Bucket::Part & P : *parts ) {
 		const std::vector<OutVert> & pv = P.pv;
 		const std::vector<Triangle> & pt = P.pt;
-		const size_t p0 = P.p0;   // lane SUNCELL1: this part's first bucket triangle
+		const size_t p0 = P.p0;   // this part's first bucket triangle
 		const size_t i = P.p1;
 		part++;
 		if ( pv.empty() || pt.empty() )
@@ -517,11 +517,11 @@ bool emitBucket( NifModel * nif, const QModelIndex & iRoot, const Bucket & b,
 				.arg( CELL_MAX_TOTAL_VERTS ) );
 
 		QModelIndex iShape = cellNewBlock( nif, QStringLiteral( "BSTriShape" ) );
-		if ( b.fxLit >= 0 && g_cellChunkEmit )   // lane CELLSTREAM1: a local serial, registered by the streamer
+		if ( b.fxLit >= 0 && g_cellChunkEmit )   // a local serial, registered by the streamer
 			g_cellChunkEmit->fxShapes.emplace_back( nif->getBlockNumber( iShape ), b.fxLit );
-		else if ( b.fxLit >= 0 )   // lane FXLIT1: the renderer asks for this shape's four lights by block
+		else if ( b.fxLit >= 0 )   // the renderer asks for this shape's four lights by block
 			wwCellFxLitShape( nif, nif->getBlockNumber( iShape ), b.fxLit );
-		if ( b.xemi && g_cellChunkEmit )   // lane LIGHTS2 (XEMI1): the renderer asks for the colour by block
+		if ( b.xemi && g_cellChunkEmit )   // the renderer asks for the colour by block
 			g_cellChunkEmit->xemiShapes.emplace_back( nif->getBlockNumber( iShape ), b.xemi );
 		else if ( b.xemi )
 			wwCellXemiShape( nif, nif->getBlockNumber( iShape ), b.xemi );
@@ -677,7 +677,7 @@ bool emitBucket( NifModel * nif, const QModelIndex & iRoot, const Bucket & b,
 		 * the scene behind it instead of showing a solid swirled disk. */
 		nif->set<quint32>( iShader, "Shader Flags 1",
 			( b.emits ? 2151677953U : ( 2151677953U & ~0x400000U ) ) | ( b.refract ? 0x8000U : 0U )
-			| ( b.decal ? 0x04000000U : 0U ) | b.decalSF1 );   // lane PLACED1: Decal; lane GAPFIX1: the model's own
+			| ( b.decal ? 0x04000000U : 0U ) | b.decalSF1 );   // Decal; the model's own
 		if ( b.refract )
 			nif->set<float>( iShader, "Refraction Strength", b.refractStrength );
 		nif->set<quint32>( iShader, "Shader Flags 2", ( b.withColour ? 0x25U : 5U ) & ( b.decal ? ~1U : ~0U ) );
@@ -1459,9 +1459,9 @@ static void cellPublishLighting( const NifModel * nif, const EsmWorld & world, c
 		}
 		L.lights.append( l );
 		if ( !chunkOut )
-			wwCellFxLitNoOffset( nif, L.lights.size() - 1, fade > 0.0f ? b.fade / fade : 1.0f );   // lane FXLIT1: a red control's data
+			wwCellFxLitNoOffset( nif, L.lights.size() - 1, fade > 0.0f ? b.fade / fade : 1.0f );   // a red control's data
 	}
-	if ( nifx && !nifx->isEmpty() ) {	// lane NIFXLIGHT1: the fixtures, with their reference's .recx key
+	if ( nifx && !nifx->isEmpty() ) {	// the fixtures, with their reference's .recx key
 		L.nifxFixtures = *nifx;
 		for ( WwNifxFixture & f : L.nifxFixtures )
 			recxKey( f.ref, f.refPlugin, f.refLocal );
@@ -2783,9 +2783,9 @@ static bool cellBuild( NifModel * nif, const CellSceneSpec & specAsked, CellChun
 	QElapsedTimer clock;
 	clock.start();
 	if ( !chunk ) {
-		CellSpeed::begin();   // lane SPEED1
+		CellSpeed::begin();
 		cellMeshClear( nif );
-		cellStreamStop( nif );   // lane CELLSTREAM1: the last open's streamer lets go of this document
+		cellStreamStop( nif );   // the last open's streamer lets go of this document
 	}
 
 	/* One stack for near and far (cellfarlod.h): with the FO4CS far LOD the near cells load the load order
@@ -2995,10 +2995,10 @@ static bool cellBuild( NifModel * nif, const CellSceneSpec & specAsked, CellChun
 		/*! Should this reference be in the object-LOD bake: true when its base (or, for a SCOL, any part's
 		 *  base) carries a LOD model. Separates expected no-LOD refs from genuine orphans in the overlay. */
 		bool expectLod = false;
-		QString actorKey;   //!< lane PLACED1: a placed actor (src/cellactor.h); its shapes come from there
-		bool cable = false;   //!< lane CABLES1: a placed cable (BNDS base); its tube is built (src/cellcable.h)
+		QString actorKey;   //!< a placed actor (src/cellactor.h); its shapes come from there
+		bool cable = false;   //!< a placed cable (BNDS base); its tube is built (src/cellcable.h)
 		WwCableSpec cableSpec;
-		bool loadDoor = false;   //!< lane ROOMCLAMP1: a door with a teleport (XTEL)
+		bool loadDoor = false;   //!< a door with a teleport (XTEL)
 	};
 	QVector<Placement> placements;
 	QHash<QString, int> skippedByType;
@@ -3305,7 +3305,7 @@ static bool cellBuild( NifModel * nif, const CellSceneSpec & specAsked, CellChun
 		placements.append( out );
 		actorPlacements++;
 	};
-	// lane MISS1: every reference's enable facts, before the first one is placed (a parent may come later)
+	// every reference's enable facts, before the first one is placed (a parent may come later)
 	{
 		auto note = [&]( const QVector<EsmRefr> & refs ) {
 #ifdef ESM_HAS_CELL_FIELDS
@@ -3455,20 +3455,18 @@ static bool cellBuild( NifModel * nif, const CellSceneSpec & specAsked, CellChun
 	int shapesUnreadableMat = 0;            //!< named a material, nothing resolved: neutral grey
 	int blendBuckets = 0;                   //!< 2026-10-01: blended (glass) buckets
 	int effectBuckets = 0;                  //!< 2026-10-01: BGEM buckets drawn by the effect shader
-	int inlineFxBuckets = 0;                //!< lane EFX1: BGEM-less effect buckets, the source block written back
-	int refractBuckets = 0;                 //!< lane EFX1: Refraction-flagged buckets, drawn by the refraction preview
-	int decalFlagBuckets = 0, decalFlagShapes = 0;   //!< lane GAPFIX1: lighting buckets keeping the model's decal flags
+	int inlineFxBuckets = 0;                //!< BGEM-less effect buckets, the source block written back
+	int refractBuckets = 0;                 //!< Refraction-flagged buckets, drawn by the refraction preview
+	int decalFlagBuckets = 0, decalFlagShapes = 0;   //!< lighting buckets keeping the model's decal flags
 	// lane GAPFIX1 red (gates only): the welded lighting shapes drop the model's decal flags again
 	const bool fxdNoFlag = wwEnv( "WW_CELL_FXD_RED" ).trimmed() == "noflag";
-	/* Lane GLOW1: billboard shapes turned to the camera, and those welded flat (the red
+	/* billboard shapes turned to the camera, and those welded flat (the red
 	 * WW_CELL_GLOW_RED=1 welds all of them, as before; past the cap the rest weld flat too). */
 	const bool glowRed = wwEnvInt( "WW_CELL_GLOW_RED" ) != 0;
 	const int glowCap = 8192;
 	int billboardShapes = 0, billboardFlat = 0;
-	/* Lane FXLIT1: in an interior a lit effect shape (the effect-lighting flag) takes a bucket per placement,
-	 * because the game lights it with its MODEL's four placed lights (src/gl/cellfxlit.h). */
-	/* lane SUNCELL1 final: exteriors too. The game's lit effect constants (its lit-effect setup, lit branch)
-	 * take the scene's directional (the sun outdoors) and the placed lights near the model, inside or out. */
+	// in an interior a lit effect shape (the effect-lighting flag) takes a bucket per placement, because the
+	// game lights it with its MODEL's four placed lights (src/gl/cellfxlit.h).
 	const bool fxLitOn = spec.overlay == CellOverlay::None;
 	const int fxLitCap = 4096;
 	int fxLitModels = 0, fxLitShapes = 0;
@@ -3483,8 +3481,8 @@ static bool cellBuild( NifModel * nif, const CellSceneSpec & specAsked, CellChun
 	int xemiLitFx = 0;   // lane REDFIX1: lit effect shapes on XEMI placements (skipped by rule, now counted)
 	if ( !chunk ) {
 		wwCellFxLitBegin( nif );
-		wwCellXemiBegin( nif );   // lane LIGHTS2 (XEMI1)
-		wwCellCullBegin( nif );   // lane SUNCELL1
+		wwCellXemiBegin( nif );
+		wwCellCullBegin( nif );
 	}
 
 	/* Previs and occlusion: each loaded CELL's RVIS/VISI/PCMB/XCRI/XPRI, each block's previs file
@@ -3774,8 +3772,8 @@ static bool cellBuild( NifModel * nif, const CellSceneSpec & specAsked, CellChun
 		}
 	}
 	if ( !chunk ) {
-		wwCellWaterBegin( nif );   // lane WATER1: forget the last cell's water shapes
-		wwCellLandBegin( nif );    // lane TERRBLEND1: forget the last cell's blended-ground shapes
+		wwCellWaterBegin( nif );   // forget the last cell's water shapes
+		wwCellLandBegin( nif );    // forget the last cell's blended-ground shapes
 		// lane LANDSPEC2; LANDSPEC3: the band reads the worldspace whose LOD it draws (red ownlod: the child's own)
 		wwCellLandOrigin( nif, spec.interior ? QString()
 			: wwEnv( "WW_LANDSPEC_RED" ) == "ownlod" ? spec.world : world.lodWorldEdid(), origin[0], origin[1] );
@@ -5138,10 +5136,8 @@ static bool cellBuild( NifModel * nif, const CellSceneSpec & specAsked, CellChun
 							.arg( model, s.matName, s.tex0 );
 				}
 			}
-			/* THE MESH'S OWN VERTEX COLORS (lane PRTPPLACE, 2026-09-30): the loader kept them
-			 * (geom.rgba, only where the game applies them) and this view never drew them -- the
-			 * Concord pickup came out bare rust orange (bungo). An overlay still wins. Alpha: see
-			 * src/cellvertexalpha.h (lane TERRAINBLOCK1). */
+			// THE MESH'S OWN VERTEX COLORS: the loader kept them (geom.rgba, only where the game applies them)
+			// and this view never drew them -- the Concord pickup came out bare rust orange.
 			const bool ownColor = !colouring && s.geom.rgba.size() == nv * 4;
 			shapesVertexColor += ownColor ? 1 : 0;
 			float paletteR = 1.0f;
@@ -5208,8 +5204,8 @@ static bool cellBuild( NifModel * nif, const CellSceneSpec & specAsked, CellChun
 				fxLitShapes++;
 			}
 			if ( isActor )
-				bbOwn += QLatin1String( "|ACTOR" );   // lane PLACED1: own buckets; no decal lands on an actor
-			quint32 xemiHere = 0;   // lane LIGHTS2 (XEMI1): a bucket per colour
+				bbOwn += QLatin1String( "|ACTOR" );   // own buckets; no decal lands on an actor
+			quint32 xemiHere = 0;   // a bucket per colour
 			if ( xemiBuild && p.xemi && !isActor && !( s.nearFacts.effectShader && s.effectLit ) ) {
 				if ( s.extEmit ) {
 					xemiHere = p.xemi;
@@ -5910,11 +5906,9 @@ static bool cellBuild( NifModel * nif, const CellSceneSpec & specAsked, CellChun
 		}
 		waterVert0.push_back( quint32( waterAll.verts.size() ) );
 		waterTri0.push_back( quint32( waterAll.tris.size() ) );
-		/* lane WATER1: every water bucket carries ALL the water quads' vertices, in the one order the single
-		 * water bucket had before the lane; a quad of another record keeps its vertices through zero-area
-		 * triangles (no fragment). Each shape's bounding sphere is then the old water shape's, bit
-		 * for bit, so the scene's bounds -- and with them the view's near/far planes and the sun cascades --
-		 * do not move when the water splits by record (the Cell lights row off renders as before the lane). */
+		// every water bucket carries ALL the water quads' vertices, in the one order the single water bucket
+		// had; a quad of another record keeps its vertices through zero-area triangles (no
+		// fragment).
 		auto waterFill = [&]( Bucket & wb, quint32 owner ) {
 			wb.verts = waterAll.verts;
 			wb.tris.clear();
@@ -6515,7 +6509,7 @@ static bool cellBuild( NifModel * nif, const CellSceneSpec & specAsked, CellChun
 				// lane GIPROBE2: Probes out of walls (Show menu; the row reopens the cell, so this bake sees it)
 				bs.probeClear = wwLookOn( WwLook::ProbeClear ) ? 32.0f : 0.0f;
 				bs.clearDump = wwEnvStr( "WW_CELL_PROBE_CLEAR_DUMP" );
-				bs.waterDump = wwEnvStr( "WW_CELL_WATER_BAKEDUMP" );   // lane WATER1
+				bs.waterDump = wwEnvStr( "WW_CELL_WATER_BAKEDUMP" );
 				for ( const QString & q : wwEnvStr( "WW_CELL_WATER_BAKEDUMP_PROBES" ).split( ';', Qt::SkipEmptyParts ) ) {
 					const QStringList c = q.split( ',' );
 					if ( c.size() != 3 )
@@ -7138,9 +7132,9 @@ static bool cellBuild( NifModel * nif, const CellSceneSpec & specAsked, CellChun
 		cellStreamStart( nif, seedPtr );
 	}
 
-	/* lane PRTPGI: the bake just written, relit by those lights (src/probegi.h), for the GI row.
+	/* the bake just written, relit by those lights (src/probegi.h), for the GI row.
 	 * WW_CELL_GI_DUMP=<folder> writes the gate's copies; WW_CELL_GI_RED=<red> its refuters.
-	 * lane PRTOFF1: only under the PRT's red; a bake written here (the tool) is not relit without it. */
+	 * only under the PRT's red; a bake written here (the tool) is not relit without it. */
 	if ( !giBakeDir.isEmpty() && wwCellPrtOn() ) {
 		if ( const WwCellLighting * L = wwCellLightsFor( nif ) ) {
 			ProbeGiSpec gs;
@@ -7162,12 +7156,12 @@ static bool cellBuild( NifModel * nif, const CellSceneSpec & specAsked, CellChun
 			// lane GPURELIGHT1 (10-23): Probe sharing (Show menu); a later tick relights through probesky.cpp
 			gs.share = wwLookOn( WwLook::ProbeShare ) || wwLookOn( WwLook::ProbeShareWide );   // GIPROBE2: wide implies sharing
 			gs.shareRed = wwEnvStr( "WW_CELL_GI_SHARE_RED" ).trimmed();
-			// lane GIPROBE2: Wide probe sharing (3 steps) and Probe depth visibility, both relit live by probesky.cpp
+			// Wide probe sharing (3 steps) and Probe depth visibility, both relit live by probesky.cpp
 			gs.sharePasses = wwLookOn( WwLook::ProbeShareWide ) ? 3 : 1;
 			gs.depthVis = wwLookOn( WwLook::ProbeDepthVis );
 			gs.depthVisRed = wwEnvStr( "WW_CELL_GI_DEPTHVIS_RED" ).trimmed();
-			// lane SKY1: outdoors, the weather's sky and sun (src/probesky.h); WW_CELL_SKY_RED its refuters
-			// lane SKYINT1: and an interior whose cell shows the sky (the sun where Use Sky Lighting + Sunlight Shadows)
+			// outdoors, the weather's sky and sun (src/probesky.h); WW_CELL_SKY_RED its refuters
+			// and an interior whose cell shows the sky (the sun where Use Sky Lighting + Sunlight Shadows)
 			const quint16 cf = spec.interior ? cellInteriorFlags( world.interior() ) : quint16( 0 );
 			gs.interiorSky = ( cf & 0x0080u ) != 0;
 			if ( probeSoup.glow.hasAlt() )   // lane LIGHTS5: the bake keeps the other emittance state for a live flip
@@ -7351,8 +7345,8 @@ static bool cellBuild( NifModel * nif, const CellSceneSpec & specAsked, CellChun
 				gi.rgba = std::move( gr.grid );
 				// an interior keeps its own ambient, so its grid never stands in for the weather's
 				gi.skyLit = gr.skyLit && !spec.interior && gs.skyRed != QLatin1String( "keepamb" );
-				gi.sky = std::move( gr.gridSky );	// lane PROBEVIEW1: the Pass drop-down's Sky visibility
-				if ( volGiOn ) {   // lane VOLFIT1: the Space rooms as the GI's volumes (the room grid now carries their ids)
+				gi.sky = std::move( gr.gridSky );	// the Pass drop-down's Sky visibility
+				if ( volGiOn ) {   // the Space rooms as the GI's volumes (the room grid now carries their ids)
 					const ProbeVolumesGi vg = probeVolumesToGi( *volGi, gr.rooms, 0.2f, QString::fromLatin1( wwEnv( "WW_CELL_VOLUMES_GI_RED" ) ) );
 					probeNotes += QStringLiteral( "  %1\n" ).arg( vg.census );
 					for ( const QString & l : vg.log )
@@ -7399,7 +7393,7 @@ static bool cellBuild( NifModel * nif, const CellSceneSpec & specAsked, CellChun
 					}
 				}
 				wwCellAoDecalPublish( nif, gs.aoDecals );	// lane AODECAL1 (null: no decals)
-				if ( farBaked ) {	// lane FARVIEW1: the far tables for the group state, and the GI's placed share
+				if ( farBaked ) {	// the far tables for the group state, and the GI's placed share
 					// the GI grid relit by the placed lights alone, at the grid's own pass count: no sky, sun, directional or glow
 					ProbeGiSpec gp = gs;
 					gp.record = nullptr;
