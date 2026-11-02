@@ -27,8 +27,9 @@ uniform vec3 cellDirTo;				// world, TO the light
 uniform bool cellInterior;
 uniform vec3 cellCenter;
 uniform int cellProbe;
-// lane MATLOOK1 (TRANSLUC1): a v8+ material's thin translucency (WW_CELL_TRANSL=1); the bindless twin keeps the old path
-#if defined( WW_CELL_TRANSL ) && !defined( WW_BINDLESS )
+// lane MATLOOK1 (TRANSLUC1): a v8+ material's thin translucency (WW_CELL_TRANSL=1); lane MATLOOK2: the bindless twins
+// too, the lighting map from the row's slot 7 (red WW_CELL_TRANSL_RED=nobl: the twins keep the old path)
+#if defined( WW_CELL_TRANSL ) && !( defined( WW_BINDLESS ) && defined( WW_CELL_TRANSL_RED_NOBL ) )
 #define WW_TR 1
 #endif
 #ifdef WW_TR

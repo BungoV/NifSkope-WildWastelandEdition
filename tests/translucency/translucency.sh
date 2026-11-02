@@ -11,6 +11,14 @@ g++ -std=c++17 -O1 -DWWTRANSL_RED -I"$T/src" tests/translucency/translucency.cpp
 timeout 30 "$O/transl_green.exe"; G=$?
 echo "--- red (WWTRANSL_RED, must FAIL)"
 timeout 30 "$O/transl_red.exe"; R=$?
-echo "green rc=$G red rc=$R"
-[ "$G" = 0 ] && [ "$R" != 0 ] && echo "GATE PASS" && exit 0
+# lane MATLOOK2: the base's text (1e433b7b: the twins and the NIF view without the term) must fail the pins
+echo "--- red (base 1e433b7b shader text, must FAIL)"
+B="$O/transl_base"
+mkdir -p "$B/res/shaders" "$B/src/gl"
+for f in res/shaders/cell_transl.glsl res/shaders/cell_lights.glsl res/shaders/fo4_default.frag src/gl/cellbindless.cpp; do
+	"${GIT:-git}" show 1e433b7b:"$f" > "$B/$f" || exit 2
+done
+( cd "$B" && timeout 30 "$O/transl_green.exe" ); RB=$?
+echo "green rc=$G red rc=$R base-text red rc=$RB"
+[ "$G" = 0 ] && [ "$R" != 0 ] && [ "$RB" != 0 ] && echo "GATE PASS" && exit 0
 echo "GATE FAIL"; exit 1

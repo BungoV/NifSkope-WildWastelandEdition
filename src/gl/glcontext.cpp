@@ -453,8 +453,15 @@ bool NifSkopeOpenGLContext::Shader::load( const QString & filepath )
 		if ( wwFogLeakShaderDefine() && data.startsWith( "#version" ) && data.contains( "_CELL_FOGLEAK" ) )
 			data.insert( data.indexOf( '\n' ) + 1, "#define WW_CELL_FOGLEAK 1\n" );
 		// lane MATLOOK1 (TRANSLUC1): a v8+ material's thin translucency (cell_transl.glsl); not static: read per load
-		if ( wwTranslShaderDefine() && data.startsWith( "#version" ) && data.contains( "_CELL_TRANSL" ) )
+		if ( wwTranslShaderDefine() && data.startsWith( "#version" ) && data.contains( "_CELL_TRANSL" ) ) {
 			data.insert( data.indexOf( '\n' ) + 1, "#define WW_CELL_TRANSL 1\n" );
+			// lane MATLOOK2: reds WW_CELL_TRANSL_RED=nobl (the bindless twins without the term), noview (the NIF view without it)
+			const QByteArray trRed = wwEnv( "WW_CELL_TRANSL_RED" ).trimmed();
+			if ( trRed == "nobl" )
+				data.insert( data.indexOf( '\n' ) + 1, "#define WW_CELL_TRANSL_RED_NOBL 1\n" );
+			else if ( trRed == "noview" )
+				data.insert( data.indexOf( '\n' ) + 1, "#define WW_CELL_TRANSL_RED_NOVIEW 1\n" );
+		}
 		// lane PERF3: the cascades from one per-frame block, in the sources that ask for it (WW_FRAME_UBO_RED=1: plain uniforms)
 		static const bool frameUbo = qgetenv( "WW_FRAME_UBO" ).trimmed() != "0" && qgetenv( "WW_FRAME_UBO_RED" ).trimmed() != "1"
 			&& qgetenv( "WW_PERF3_RED" ).trimmed() != "1";

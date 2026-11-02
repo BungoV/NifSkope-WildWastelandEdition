@@ -11,7 +11,12 @@
 
 uniform vec4 wwTrCol;	// the material's subsurface colour, a the transmissive scale (src/gl/renderer.cpp)
 uniform vec4 wwTrFlags;	// x thick, y mix albedo, z on (a v8+ material with bTranslucency), w turbulence
+#ifdef WW_BINDLESS
+// lane MATLOOK2 (TRANSLUC1-BINDLESS): the twin reads the lighting map's handle from the draw's row, slot 7 (cellbindless.h)
+#define WwTrLightMap sampler2D( wwDraws[wwDrawIdx].tex[7] )
+#else
 uniform sampler2D WwTrLightMap;	// the lighting map (_l): B the transmission amount, A the glow mask; white when absent
+#endif
 
 vec4 wwTrRec = vec4( 0.0 );	// rgb tint x amount, a turbulence; set per pixel by the top shader before cellLit
 float wwTrKind = 0.0;	// 0 none, 1 thin, 2 thick
