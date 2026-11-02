@@ -13,6 +13,8 @@
 #include "gl/precipmath.h"
 #include "gl/preciproof.h"	// lane INTSKY1: rain only under open sky in a sunlit interior
 #include "gl/cellunits.h"	// lane BUGS1102B: the roof map's unit
+#include "gl/rainfogmath.h"	// lane FO76WEATHER1: the rain's share of a weather change
+#include "gl/rainwetlaw.h"
 #include "gl/glshape.h"
 #include "gl/precipspec.h"
 #include "gl/renderer.h"
@@ -297,9 +299,119 @@ QString wwCellPrecipEcho()
 	return st().echo;
 }
 
+// ---- lane FO76WEATHER1: rain wetness (cellprecip.h)
+namespace
+{
+struct RwState
+{
+	bool init = false, moving = false;
+	float wet = 0.0f, target = 0.0f;
+	const void * doc = nullptr;
+	QElapsedTimer clock;
+	qint64 lastMs = 0, memoMs = -1000;
+	QString echo = QStringLiteral( "rain wet: off" );
+};
+
+RwState & rw()
+{
+	static RwState s;
+	return s;
+}
+
+void rwSay( RwState & s, const QString & e )
+{
+	if ( e != s.echo ) {
+		s.echo = e;
+		std::fprintf( stderr, "%s\n", qPrintable( e ) );
+	}
+}
+
+//! the rain's share of the weather (a change: both, by pct); snow does not wet
+float rwTarget( Scene * scene, bool & interior )
+{
+	const WwCellLighting * CL = wwCellLightsFor( scene->nifModel );
+	interior = CL && CL->interior;
+	if ( interior )
+		return 0.0f;
+	int t[2] = { -2, -2 };
+	float d[2] = { -1.0f, -1.0f };
+	unsigned f[2] = { 0u, 0u };
+	bool blending = false;
+	float pct = 1.0f;
+	if ( !wwLookdevWeatherPrecip( t, d, f, blending, pct ) )
+		return 0.0f;
+	const double one[2] = { 1.0, 1.0 };
+	double rain = 0.0, snow = 0.0;
+	WwRainFog::shares( t, one, blending, double( pct ), true, rain, snow );
+	return WwRainWet::sat( float( rain ) );
+}
+}	// namespace
+
+float wwCellRainWetAmount( Scene * scene )
+{
+	RwState & s = rw();
+	s.moving = false;
+	if ( !scene || !wwLookOn( WwLook::RainWet ) ) {
+		s.init = false;
+		rwSay( s, QStringLiteral( "rain wet: off" ) );
+		return 0.0f;
+	}
+	WW_SWITCH_STATIC( QByteArray, red, wwEnv( "WW_CELL_RAINWET_RED" ).trimmed() );
+	if ( red == "shore" ) {
+		s.init = false;
+		rwSay( s, QStringLiteral( "rain wet: RED WW_CELL_RAINWET_RED=shore (shore wetness only)" ) );
+		return 0.0f;
+	}
+	if ( !s.clock.isValid() )
+		s.clock.start();
+	const qint64 now = s.clock.elapsed();
+	if ( s.init && s.doc == scene->nifModel && now - s.memoMs < 8 ) {	// one step per frame, not per draw
+		s.moving = s.wet != s.target;
+		return s.wet;
+	}
+	s.memoMs = now;
+	bool interior = false;
+	const float target = rwTarget( scene, interior );
+	WW_SWITCH_STATIC( QByteArray, pin, wwEnv( "WW_CELL_RAINWET_AMOUNT" ).trimmed() );
+	bool pinOk = false;
+	const float pinned = pin.isEmpty() ? 0.0f : pin.toFloat( &pinOk );
+	s.target = pinOk ? ( interior ? 0.0f : WwRainWet::sat( pinned ) ) : target;
+	if ( !s.init || s.doc != scene->nifModel || pinOk ) {	// a new document or the row turned on: settled
+		s.init = true;
+		s.doc = scene->nifModel;
+		s.wet = s.target;
+	} else {
+		s.wet = WwRainWet::step( s.wet, s.target, float( now - s.lastMs ) * 0.001f );
+	}
+	s.lastMs = now;
+	s.moving = s.wet != s.target;
+	rwSay( s, QStringLiteral( "rain wet: %1 target %2%3%4" ).arg( double( s.wet ), 0, 'f', 2 ).arg( double( s.target ), 0, 'f', 2 )
+		.arg( interior ? QStringLiteral( " (interior)" ) : QString() )
+		.arg( pinOk ? QStringLiteral( " (WW_CELL_RAINWET_AMOUNT)" ) : QString() ) );
+	return s.wet;
+}
+
+void wwCellRainWetUniforms( Scene * scene, float customPorosity, bool useCustom )
+{
+	if ( !scene || !scene->renderer )
+		return;
+	NifSkopeOpenGLContext::Program * prog = scene->renderer->getCurrentProgram();
+	if ( !prog || prog->uniLocation( "rainWet" ) < 0 )
+		return;
+	const float a = wwCellRainWetAmount( scene );
+	prog->uni4f( "rainWet", FloatVector4( a, useCustom ? customPorosity : 0.0f, useCustom ? 1.0f : 0.0f, 0.0f ) );
+}
+
+QString wwCellRainWetEcho()
+{
+	return rw().echo;
+}
+
 bool wwCellPrecipWantsFrames( Scene * scene )
 {
 	const PcState & s = st();
+	if ( scene && rw().moving )	// lane FO76WEATHER1: the ground wets or dries
+		return true;
 	return scene && wwLookOn( WwLook::Precip ) && s.lastDrawn > 0 && !s.timePinned;
 }
 
