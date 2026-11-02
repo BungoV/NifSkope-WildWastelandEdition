@@ -12,6 +12,7 @@ BSD License - see nifskope.h
 #include "gl/renderer.h"
 #include "gl/lookdevstage.h"	// lane LIGHTS3: a region's emittance at the clock
 #include "gl/celllooks.h"	// lane LIGHTS4: the emittance rows, read at draw time
+#include "gl/fxroomrule.h"	// lane HAZECARD1
 
 #include <QFile>
 #include <QHash>
@@ -20,6 +21,7 @@ BSD License - see nifskope.h
 
 #include <algorithm>
 #include <cmath>
+#include <cstdio>
 #include <vector>
 
 namespace
@@ -223,13 +225,25 @@ bool wwCellFxLitProbeShape( Scene * scene, int block )
 	return p >= 70 && p <= 75 && scene && wwCellFxLitFor( scene->nifModel, block ) != nullptr;
 }
 
-bool wwCellFxRoomLit( Scene * scene, int block )
+bool wwCellFxRoomLit( Scene * scene, int block, bool soft )
 {
 	WW_SWITCH_STATIC( bool, red, wwEnv( "WW_CELL_FXROOM_RED" ).trimmed() == "game" );
+	// lane HAZECARD1 (src/gl/fxroomrule.h): a soft card outdoors takes the game's base; red room: the room share
+	WW_SWITCH_STATIC( bool, hazeRed, wwEnv( "WW_CELL_HAZECARD_RED" ).trimmed() == "room" );
 	if ( red || !scene || !wwCellLightsWanted( scene ) )
 		return false;
 	const WwCellLighting * L = wwCellLightsFor( scene->nifModel );
-	return L && !L->interior && wwCellFxLitFor( scene->nifModel, block ) != nullptr;
+	const bool lit = L && wwCellFxLitFor( scene->nifModel, block ) != nullptr;
+	const bool room = wwFxRoomLitRule( L && !L->interior, lit, soft, hazeRed ? 2 : 0 );
+	if ( lit && !L->interior && soft ) {
+		static int said = -1;
+		if ( said != int( room ) ) {
+			said = int( room );
+			fprintf( stderr, "hazecard: soft lit cards outdoors take %s\n",
+				room ? "the room share on their base (red WW_CELL_HAZECARD_RED=room)" : "the game's base (Effect Lighting)" );
+		}
+	}
+	return room;
 }
 
 void wwCellFxLitSphere( const float * xyz, size_t count, float out[4] )

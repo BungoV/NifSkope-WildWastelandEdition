@@ -74,8 +74,9 @@ void wwCellFxLitUniforms( Scene * scene, int block );
 //! True when this shape draws in the running probe pass (a lit effect, probe 70..74).
 bool wwCellFxLitProbeShape( Scene * scene, int block );
 /*! True when this exterior lit effect draws with fxRoomLit: its base scales by the open-air light reaching it, so a
- *  lens in a dark shop follows the room. WW_CELL_FXROOM_RED=game keeps the game's base. */
-bool wwCellFxRoomLit( Scene * scene, int block );
+ *  lens in a dark shop follows the room. WW_CELL_FXROOM_RED=game keeps the game's base. Lane HAZECARD1: a soft card
+ *  (`soft`: soft depth > 0, the haze cards) keeps the game's base too; red WW_CELL_HAZECARD_RED=room (fxroomrule.h). */
+bool wwCellFxRoomLit( Scene * scene, int block, bool soft );
 
 /*! Lane LIGHTS2 (XEMI1): a placement's emittance colour (REFR XEMI -> its LIGH's colour, 0xRRGGBB) on a written shape.
  *  Lighting shapes with External Emittance draw it as their emissive colour; unlit effects with the flag are tinted
