@@ -2578,6 +2578,20 @@ void drawClouds( Scene * scene, const SkyFrame & f, float mul, QStringList & dre
 		prog->uni3f( "ldLtCol", lsky.col[0], lsky.col[1], lsky.col[2] );
 		prog->uni4f( "ldLtCam", FloatVector4( lsky.camKm[0], lsky.camKm[1], lsky.camKm[2], lsky.deckKm ) );
 	};
+	/* lane WXBAND (WEATHER-HORIZON-BAND): the sky's aerial perspective to the deck (lookdev_clouds.frag ldApOn), the
+	 * Low base's shell; red WW_LOOKDEV_RED=cloudnoap = the un-hazed layer that met the horizon band with a seam */
+	const float apDeckR = WwAtmoMath::kRb + wwCloudLayerDeckKm();
+	const bool apOn = atf.valid && atf.trans != 0 && atf.camR < apDeckR && !wwLookdevRed( "cloudnoap" );
+	auto apUniforms = [&]( NifSkopeOpenGLContext::Program * prog, bool on ) {
+		prog->uni1i( "ldApOn", on ? 1 : 0 );	// every draw: a program keeps its uniforms between draws
+		if ( !on )
+			return;
+		r->fn->glActiveTexture( GL_TEXTURE2 );
+		r->fn->glBindTexture( GL_TEXTURE_2D, atf.trans );
+		r->fn->glActiveTexture( GL_TEXTURE0 );
+		prog->uni1i( "ldTrans", 2 );
+		prog->uni2f( "ldApR", atf.camR, apDeckR );
+	};
 	// lane WEATHERBLEND1: W = the weather whose texture and scroll a pass draws (s.w, or the one a change leaves)
 	auto layerUniforms = [&]( NifSkopeOpenGLContext::Program * prog, const WwWeatherData & W, int i, float alpha ) {
 		float rgb[3], a = 0.0f;
@@ -2624,6 +2638,7 @@ void drawClouds( Scene * scene, const SkyFrame & f, float mul, QStringList & dre
 		prog->uni1f( "texBlend", 0.0f );
 		prog->uni1b( "probe", true );
 		flashUniforms( prog, false );
+		apUniforms( prog, false );
 		prog->uni2f( "probeUV", s.probeUV[0], s.probeUV[1] );
 		const float a = layerUniforms( prog, s.w, s.probeLayer, -1.0f );
 		static const float quad[12] = { -1, -1, 0, 1, -1, 0, -1, 1, 0, 1, 1, 0 };
@@ -2689,6 +2704,7 @@ void drawClouds( Scene * scene, const SkyFrame & f, float mul, QStringList & dre
 		layerUniforms( prog, *W, i, full ? a : mul * share );
 		prog->uni1f( "texBlend", fade ? pct : 0.0f );
 		flashUniforms( prog, lsky.on );
+		apUniforms( prog, apOn );
 		if ( fade )	// lane WEATHERBLEND3: the same one scroll (red cloudtwo: the new weather's own)
 			prog->uni2f( "uvOffset2", cloudScroll( s, s.w, i, 0, secs ), cloudScroll( s, s.w, i, 1, secs ) );
 		const float * attrs[8] = { m.pos.constData(), m.col.constData(), nullptr, nullptr, nullptr, nullptr, nullptr,
@@ -2703,6 +2719,9 @@ void drawClouds( Scene * scene, const SkyFrame & f, float mul, QStringList & dre
 		.arg( secs, 0, 'f', 3 );
 	if ( lsky.on && !drawn.isEmpty() )	// lane LIGHTNING2: the flash the layers took
 		drew.last() += QStringLiteral( " flash=%1" ).arg( double( lsky.level ), 0, 'f', 3 );
+	if ( !drawn.isEmpty() )	// lane WXBAND: the layers' aerial perspective and its deck
+		drew.last() += apOn ? QStringLiteral( " ap=on(deck=%1km)" ).arg( double( apDeckR - WwAtmoMath::kRb ), 0, 'f', 2 )
+			: QStringLiteral( " ap=off" );
 }
 
 } // namespace
