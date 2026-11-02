@@ -2889,6 +2889,7 @@ void wwVolPartMediumUniforms( Scene * scene )
 	prog->uni4f( "volGi", FloatVector4( gi[0], gi[1], gi[2], gi[3] ) );
 	prog->uni1b( "volCsm", air ? g.csm : wwSunShadowWanted( scene ) );
 	prog->uni1i( "volTerms", vs().terms );
+	prog->uni1b( "volVeil", air && !vs().veilPhys );	// FARCITYWASH1-PART: the air's veil on the puffs (red veilphys)
 	prog->uni1i( "volPartRed", s.red );
 	wwAirZoneUniforms( scene );	// lane AIRZONE1: the hand-placed volumes' particles block (a no-op without the Air zones define)
 }

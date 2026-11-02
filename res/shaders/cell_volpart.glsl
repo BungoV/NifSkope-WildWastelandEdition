@@ -52,6 +52,21 @@ uniform int volPartRed;			// gates only: 1 flat, 2 nothick, 4 nosoft, 8 nolights
 uniform int volPartDump;		// gates only: the probe row's width in pixels (particles.geom), 0 off
 uniform bool volCsm;			// the sun's cascades are drawn this frame
 uniform int volTerms;			// the air's mask (WW_CELL_AIR_TERMS): 1 directional, 2 placed, 4 GI, 8 ambient
+/* FARCITYWASH1-PART: the air's veil (cell_volair.frag airVeilK, the same law and guards) on the puff's sky-lit share,
+ * so a daytime puff sits at the air's level around it; lamps keep theirs. Red WW_CELL_AIR_RED=veilphys: off. */
+uniform bool volVeil;
+float vpVeilK( vec3 Jenv, float t, float z )
+{
+	if ( !volVeil || cellInterior || !( cellOn && cellHasDir ) || ( volTerms & 1 ) == 0 )
+		return 1.0;
+	float hb;
+	vec3 fc;
+	wwFogEval( t, z, hb, fc );
+	const vec3 lumK = vec3( 0.2126, 0.7152, 0.0722 );
+	float rec = dot( max( fc, vec3( 0.0 ) ), lumK );
+	float open = 0.25 * dot( cellDirColor, lumK ) + dot( Jenv, lumK );
+	return open > rec && open > 1e-8 ? rec / open : 1.0;
+}
 
 const float VP_EDGE0 = 0.05, VP_EDGE1 = 0.35;	// |N.V| a card is gone at / whole from
 const float VP_NEAR0 = 16.0, VP_NEAR1 = 128.0;	// game units from the eye a card is gone at / whole from
@@ -178,6 +193,7 @@ void vpLight( vec3 posView, vec3 P, vec3 dW, float z, vec3 N, float w, out vec3 
 	thin = vec3( 0.0 );
 	thick = vec3( 0.0 );
 	vec3 skyThin = vec3( 0.0 ), skyThick = vec3( 0.0 );	// the sky's share: the records' colour at the end (the air's rule)
+	vec3 jEnv = vec3( 0.0 );	// the env share alone, as the air's Jenv (the veil's open level)
 	airGroundAt( P );	// FOGTERRAIN2: the ground layer on the pass's terrain grid, as the froxels at this point
 #ifdef PC_LOOK
 	vpDom = vec4( 0.0 );
@@ -257,6 +273,7 @@ void vpLight( vec3 posView, vec3 P, vec3 dW, float z, vec3 N, float w, out vec3 
 		skyThin += volCubeScatter( Eg, dW );
 #endif
 		skyThick += vpCubeAt( Eg, N );
+		jEnv += volCubeScatter( Eg, dW );
 	}
 	if ( wantAmb ) {
 		bool replace = cellGiOn && ( cellInterior ? cellGiAmb == 1 : cellGiSky );
@@ -270,12 +287,14 @@ void vpLight( vec3 posView, vec3 P, vec3 dW, float z, vec3 N, float w, out vec3 
 		skyThin += volCubeScatter( Am, dW );
 #endif
 		skyThick += vpCubeAt( Am, N );
+		jEnv += volCubeScatter( Am, dW );
 	}
 	}
 	float t = length( posView ) * fogDistScale;
 	vec3 dirView = posView / max( length( posView ), 1e-12 );
-	thin += airEnvColour( skyThin, t, z, dirView );
-	thick += airEnvColour( skyThick, t, z, dirView );
+	float vk = vpVeilK( jEnv, t, z );
+	thin += vk * airEnvColour( skyThin, t, z, dirView );
+	thick += vk * airEnvColour( skyThick, t, z, dirView );
 }
 
 // the lit factor at this pixel (linear), in place of cellFxLit
