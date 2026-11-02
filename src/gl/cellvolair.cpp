@@ -174,7 +174,7 @@ VaState & vs()
 			s.envHue = s.envHue || r == "envhue";	// lane FIX1101A
 			s.veilPhys = s.veilPhys || r == "veilphys";	// lane FARCITYWASH1
 			s.leakRed |= r == "dalcenv" ? 1 : r == "nosungate" ? 2 : r == "lightleak" ? 4 : r == "nofartailshadow" ? 8
-				: r == "nointsungate" ? 16 : r == "envscale" ? 32 : r == "sun8" ? 64 : 0;	// lane FOGLEAK1, INTGI1, FOGENV1
+				: r == "nointsungate" ? 16 : r == "envscale" ? 32 : r == "sun8" ? 64 : r == "intratio" ? 128 : 0;	// lane FOGLEAK1, INTGI1, FOGENV1
 			s.askRed = s.askRed || r == "ask";
 			s.sunPcf = s.sunPcf || r == "sunpcf";
 			s.f32 = s.f32 || r == "f32";
@@ -1845,7 +1845,12 @@ static void vaPassInner( Scene * scene, bool run )
 	prog->uni1b( "volCsm", csm );
 	prog->uni1b( "volSunAir", !s.sunPcf );	// lane PERFFIX3: the air's own sun read (cell_volair.frag airSunVis); red sunpcf
 	prog->uni1i( "volRed", s.red & ~1 );
-	prog->uni1i( "volLeakRed", s.leakRed );	// lane FOGLEAK1 (only a WW_CELL_FOGLEAK program holds it)
+	/* lane MUSGI1: a sunlit interior's air takes the volume's own E / pi (bit 32), as its surfaces do: the open-field
+	 * ratio measures a froxel against an open probe no froxel under a roof stands near, and its clamp at 2 pinned the
+	 * lamp-lit and moon-lit air of ConcordMuseum01 to 2 x the sky ambient everywhere (a flat veil). Red
+	 * WW_CELL_AIR_RED=intratio (bit 128) keeps FOGENV1's ratio indoors */
+	const bool intDirect = L && L->interior && wwCellAsOutdoor( L ) && ( s.leakRed & 128 ) == 0;
+	prog->uni1i( "volLeakRed", ( s.leakRed & ~128 ) | ( intDirect ? 32 : 0 ) );	// lane FOGLEAK1 (only a WW_CELL_FOGLEAK program holds it)
 	prog->uni1f( "volShell", s.shellStep ? 0.0f : 1.0f );
 	if ( s.shellStep || s.noAirVol )
 		prog->uni1b( "cellGiAirOn", false );	// wwCellLightsUniforms turned it on
@@ -2429,7 +2434,7 @@ static void vaPassInner( Scene * scene, bool run )
 	s.last += QStringLiteral( " " ) + optNote + QStringLiteral( " " ) + groundNote + ( s.farTier > 0 ? QStringLiteral( " " ) + farNote : QString() )
 		+ ( dr.on ? QStringLiteral( " drift=" ) + dr.note : QString() ) + QStringLiteral( " sungate=" ) + sunGateNote
 		+ QStringLiteral( " rainfog=" ) + g.rfNote
-		+ QStringLiteral( " fogleak=%1(red=%2)" ).arg( wwFogLeakShaderDefine() ? "on" : "off" ).arg( s.leakRed )	// lane FOGLEAK1
+		+ QStringLiteral( " fogleak=%1(red=%2)" ).arg( wwFogLeakShaderDefine() ? "on" : "off" ).arg( s.leakRed ) + QStringLiteral( " intenv=%1" ).arg( L && L->interior && wwCellAsOutdoor( L ) ? ( ( s.leakRed & 128 ) ? "ratio(red)" : "direct" ) : "n/a" )	// lane FOGLEAK1
 		+ QStringLiteral( " veil=%1" ).arg( s.veilPhys ? "phys" : "record" )	// lane FARCITYWASH1
 		// lane PERFFIX3: the grid preset, the integrated volume's format, the sun's read in the air, the uniform reads
 		// (from the mirror / asked / mirror stale under WW_SETUP_MEMO_CHECK=1) and the entry state (noted / asked, stale)
