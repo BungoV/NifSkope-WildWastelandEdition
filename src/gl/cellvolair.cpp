@@ -114,6 +114,9 @@ struct VaState
 	// lane PERFFIX3 reds (WW_CELL_AIR_RED=ask / sunpcf / f32): the uniforms and the GL state asked from the driver, the
 	// sun's shadow in the air through the surfaces' filter, the volumes RGBA32F; each the pass as before
 	bool askRed = false, sunPcf = false, f32 = false;
+	// lane SHAFTS1: the air's sun shadow one hardware-compared tap (sharper shafts, cheaper); red
+	// WW_CELL_AIR_SHADOW_RED=soft = the surfaces' 32-tap disc as before (cell_volair.frag volSunTap)
+	bool airSoft = false;
 	int grid = 0;	// lane PERFFIX3: the near grid preset (vaGridOf)
 	// lane PERFFIX3: this pass's uniform reads from the mirror / asked from GL / mirror != GL (WW_SETUP_MEMO_CHECK=1);
 	// state: 1 the entry state from the frame's note, 0 asked
@@ -155,6 +158,7 @@ VaState & vs()
 			s.askRed = d.askRed;
 			s.sunPcf = d.sunPcf;
 			s.f32 = d.f32;
+			s.airSoft = d.airSoft;
 			s.terms = d.terms;
 			s.opt = d.opt;
 		}
@@ -165,6 +169,7 @@ VaState & vs()
 		} else {
 			s.on = QSettings().value( QStringLiteral( "WW/VolAir" ), false ).toBool();
 		}
+		s.airSoft = wwEnv( "WW_CELL_AIR_SHADOW_RED" ).trimmed() == "soft";	// lane SHAFTS1
 		for ( const QByteArray & t : wwEnv( "WW_CELL_AIR_RED" ).split( ',' ) ) {
 			const QByteArray r = t.trimmed();
 			s.shellStep = s.shellStep || r == "shellstep";
@@ -1844,6 +1849,7 @@ static void vaPassInner( Scene * scene, bool run )
 	g.rfNote = vaRainFog( scene, prog, L && L->interior, g.rfKey, g.rfTail );	// lane CLOUD6e: the rain fog (both grids; RAINFOG2: and the tails)
 	prog->uni1b( "volCsm", csm );
 	prog->uni1b( "volSunAir", !s.sunPcf );	// lane PERFFIX3: the air's own sun read (cell_volair.frag airSunVis); red sunpcf
+	prog->uni1b( "volSunTap", !s.airSoft );	// lane SHAFTS1: one tap; red WW_CELL_AIR_SHADOW_RED=soft
 	prog->uni1i( "volRed", s.red & ~1 );
 	prog->uni1i( "volLeakRed", s.leakRed );	// lane FOGLEAK1 (only a WW_CELL_FOGLEAK program holds it)
 	prog->uni1f( "volShell", s.shellStep ? 0.0f : 1.0f );
@@ -2434,7 +2440,7 @@ static void vaPassInner( Scene * scene, bool run )
 		// lane PERFFIX3: the grid preset, the integrated volume's format, the sun's read in the air, the uniform reads
 		// (from the mirror / asked / mirror stale under WW_SETUP_MEMO_CHECK=1) and the entry state (noted / asked, stale)
 		+ QStringLiteral( " grid=%1 vol=%2 sunread=%3 reads=%4/%5/%6 state=%7%8" ).arg( s.grid ).arg( g.half ? "16f" : "32f" )
-			.arg( s.sunPcf ? "pcf(red)" : "air" ).arg( s.mirrorKept ).arg( s.mirrorAsked ).arg( s.mirrorStale )
+			.arg( s.sunPcf ? "pcf(red)" : s.airSoft ? "air(soft red)" : "air(tap)" ).arg( s.mirrorKept ).arg( s.mirrorAsked ).arg( s.mirrorStale )
 			.arg( s.stateNoted ? "noted" : "asked" ).arg( s.stateStale ? QStringLiteral( "(stale)" ) : QString() )
 		+ QStringLiteral( ")" );
 

@@ -561,6 +561,11 @@ vec3 airLampGnd( vec3 L, float hf, vec3 Pk, vec3 dW, float d, float od )
  * (no composition, the Poisson tier, a forced factor, the reds, a debug view, the Off tier's stable bias) keeps the
  * surfaces' read. volSunAir false (red WW_CELL_AIR_RED=sunpcf): the surfaces' read, as before. */
 uniform bool volSunAir;
+/* lane SHAFTS1: the air's own sun read takes ONE hardware-compared tap (bilinear PCF, one texel) instead of the 32-tap disc.
+ * The froxel already low-passes the shadow over its 12 / 8 px footprint; the surfaces' disc on top of it (up to 42 world
+ * units with FO4CS-level shadows) only widened the shaft edges (tests/shafts: edge sharpness kept 0.65 -> 0.76 at 12 px,
+ * 0.75 -> 0.91 at 8 px) and cost 31 extra shadow reads a sub-step. Red WW_CELL_AIR_SHADOW_RED=soft: the disc, as before. */
+uniform bool volSunTap;
 
 // the Vogel disc at 32 taps (r = sqrt((t + 0.5) / 32), t x 2.39996323 rad): literal offsets, the pattern fixed in the
 // map's texels (so world-locked); 32 = 8..48 of the presets' range, as accurate as the rotated preset disc (tests/airsun A)
@@ -571,6 +576,8 @@ float airCsmVogel( int i, vec3 posView )
 	float R = ussCsmFilter.y * mix( 0.8, 1.2, clamp( float( i ) * 0.5, 0.0, 1.0 ) );
 	if ( ussCsmWorld.x > 0.5 )
 		R = clamp( ussCsmWorld[i + 1] / max( ussCsmTexel[i], 1e-6 ), 0.5, 16.0 );
+	if ( volSunTap )
+		return texture( csmMap, vec4( q.xy, float( i ), zRef ) );
 	vec2 k = vec2( R / csmParams.z );
 	float s = 0.0;
 	s += texture( csmMap, vec4( q.xy + vec2( 0.1250000, 0.0000000 ) * k, float( i ), zRef ) );
