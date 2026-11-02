@@ -227,6 +227,21 @@ struct Arena
 	}
 };
 
+/*! lane STREAMTEX5: the pool's budget. A pooled draw is a COPY of the shape's own buffers (they stay and draw it when
+ *  the pool says no), so a rebuild that would take every class past `budgetMB` is refused and the shape draws unpooled.
+ *  STREAMTEX2's walks that died in the driver all ran a pool of 2.4-2.5 GB; budgetMB <= 0 is the red (no cap). */
+inline double plannedBytes( const Arena & a, std::uint32_t verts, std::uint32_t idx, std::uint32_t floatsPerVert )
+{
+	std::uint32_t nv = 0, ni = 0;
+	a.plan( verts, idx, nv, ni );
+	return double( nv ) * floatsPerVert * 4.0 + double( ni ) * 2.0;
+}
+inline bool overBudget( double otherBytes, const Arena & a, std::uint32_t verts, std::uint32_t idx,
+	std::uint32_t floatsPerVert, double budgetMB )
+{
+	return budgetMB > 0.0 && otherBytes + plannedBytes( a, verts, idx, floatsPerVert ) > budgetMB * 1048576.0;
+}
+
 //! a packed rebuild: each live span's new place, in the order given (the copy moves old -> new range by range)
 inline void pack( std::vector<Span> & spans, Arena & a, std::uint32_t newVertCap, std::uint32_t newIdxCap )
 {
