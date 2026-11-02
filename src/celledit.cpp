@@ -40,6 +40,7 @@ using namespace EspWrite;
 namespace {
 
 constexpr float kPi = 3.14159265358979323846f;
+QStringList g_lastWarnings;	// ESPWRITE3B: the last plan's warnings (cellEditWarnings)
 
 QString baseName( QString p )
 {
@@ -209,6 +210,7 @@ struct Extra
 	int waitFrames = 0;
 	bool waitReopen = false;
 	int reopenFrames = 0;
+	quint32 scriptRef = 0;      //!< pickref: the ref move / turn / scale / disable change
 	QString logPath;
 	int probeLogs = 0;
 };
@@ -246,6 +248,11 @@ void changed()
 } // namespace
 
 // ================================================================== the core
+QStringList cellEditWarnings()
+{
+	return g_lastWarnings;
+}
+
 QString cellEditRed()
 {
 	return QString::fromLocal8Bit( qgetenv( "WW_CELLEDIT_RED" ) ).trimmed().toLower();
@@ -437,7 +444,12 @@ struct Carry
 	QVector<CellEdit> cells;
 	QHash<quint32, int> interiorAt;     //!< cell form -> cells index
 	QHash<quint32, QByteArray> worldRaw, pcellRaw;
-	int ownRefs = 0, overrides = 0;
+	int ownRefs = 0, overrides = 0, foreign = 0;
+	// ESPWRITE3B espmerge: what else the file holds, written back as it was
+	QVector<EspWrite::Node> keepTop;
+	QByteArray snam, tail;
+	QString author;
+	quint32 intv = 1;
 };
 
 bool addRefs( const EspWrite::Node& g6, CellEdit & ce, quint32 nm, Carry & c, QString * error )
@@ -450,12 +462,13 @@ bool addRefs( const EspWrite::Node& g6, CellEdit & ce, quint32 nm, Carry & c, QS
 				return fail( error, QStringLiteral( "Add to existing: a nested group under a cell's refs" ) );
 			const QByteArray sig = recordSig( r.raw );
 			const quint32 form = recordForm( r.raw );
-			if ( ( form >> 24 ) == nm && sig == "REFR" ) {
+			bool simple = ( form >> 24 ) == nm && sig == "REFR";
+			RefAdd a;
+			if ( simple ) {
 				QByteArray payload;
 				QVector<Sub> subs;
 				if ( !recordPayload( r.raw, payload, error ) || !splitSubs( payload, subs, error ) )
 					return false;
-				RefAdd a;
 				bool haveData = false;
 				for ( const Sub & s : subs ) {
 					if ( s.tag == "NAME" && s.data.size() == 4 )
@@ -469,26 +482,27 @@ bool addRefs( const EspWrite::Node& g6, CellEdit & ce, quint32 nm, Carry & c, QS
 						}
 						haveData = true;
 					} else
-						return fail( error, QStringLiteral( "Add to existing: ref %1 carries %2; only refs this panel wrote "
-							"(NAME, XSCL, DATA) can be carried" ).arg( hex8( form ), QString::fromLatin1( s.tag ) ) );
+						simple = false;
 				}
-				if ( !a.base || !haveData )
-					return fail( error, QStringLiteral( "Add to existing: ref %1 has no NAME or DATA" ).arg( hex8( form ) ) );
+				// re-made byte-identical only when this writer made it: same flags, tail and subrecord set
+				simple = simple && a.base && haveData && r.raw.mid( 16, 8 ) == newRecordTail()
+					&& !( recordFlags( r.raw ) & ~( kRefPersistent | kRefDisabled ) );
+			}
+			if ( simple ) {	// a ref this panel wrote: re-made, so a change can move it
 				const quint32 fl = recordFlags( r.raw );
 				a.persistent = ( fl & kRefPersistent ) != 0;
 				a.disabled = ( fl & kRefDisabled ) != 0;
 				a.keepForm = form;
 				ce.adds.append( a );
 				c.ownRefs++;
-			} else if ( sig == "REFR" || sig == "ACHR" ) {
+			} else {	// ESPWRITE3B espmerge: anything else is carried verbatim (an override, or another tool's record)
 				RefOverride o;
 				o.rec.raw = r.raw;
 				o.rec.ours = true;
 				o.persistent = g.type == 8;
 				ce.overrides.append( o );
-				c.overrides++;
-			} else
-				return fail( error, QStringLiteral( "Add to existing: a %1 record among a cell's refs" ).arg( QString::fromLatin1( sig ) ) );
+				( sig == "REFR" || sig == "ACHR" ? c.overrides : c.foreign )++;
+			}
 		}
 	}
 	return true;
@@ -501,15 +515,29 @@ bool readCarry( const QString & path, Carry & c, QString * error )
 		return false;
 	c.masters = idx.masters();
 	c.light = ( idx.tes4Flags() & kTes4Light ) != 0;
+	if ( idx.tes4Flags() & kTes4Localized )
+		return fail( error, QStringLiteral( "Add to existing: %1 is localised (its strings live in .strings files)" ).arg( baseName( path ) ) );
 	const QByteArray & bytes = idx.bytes();
 	{
 		QByteArray payload;
 		QVector<Sub> subs;
 		if ( !recordPayload( bytes.left( idx.tes4End() ), payload, error ) || !splitSubs( payload, subs, error ) )
 			return false;
-		for ( const Sub & s : subs )
+		for ( const Sub & s : subs ) {
+			if ( s.data.size() > 0xFFFF )
+				return fail( error, QStringLiteral( "Add to existing: %1's header holds a %2 past 64 KiB" ).arg( baseName( path ),
+					QString::fromLatin1( s.tag ) ) );
 			if ( s.tag == "HEDR" && s.data.size() >= 12 )
 				c.next = ru32( s.data, 8 );
+			else if ( s.tag == "CNAM" )
+				c.author = QString::fromLatin1( s.data.constData(), int( qstrnlen( s.data.constData(), uint( s.data.size() ) ) ) );
+			else if ( s.tag == "SNAM" )
+				c.snam += sub( "SNAM", s.data );
+			else if ( s.tag == "SCRN" || s.tag == "TNAM" )
+				c.tail += sub( s.tag.constData(), s.data );
+			else if ( s.tag == "INTV" && s.data.size() == 4 )
+				c.intv = ru32( s.data, 0 );
+		}
 	}
 	QVector<EspWrite::Node> top;
 	if ( !parseNodes( bytes, idx.tes4End(), bytes.size(), top, error ) )
@@ -532,6 +560,7 @@ bool readCarry( const QString & path, Carry & c, QString * error )
 						if ( !k.isGroup && recordSig( k.raw ) == "CELL" ) {
 							cell = &k;
 							CellEdit ce;
+							ce.keep = true;
 							ce.cell = ours( k.raw );
 							c.interiorAt.insert( recordForm( k.raw ), c.cells.size() );
 							c.cells.append( ce );
@@ -548,6 +577,11 @@ bool readCarry( const QString & path, Carry & c, QString * error )
 				if ( !k.isGroup && recordSig( k.raw ) == "WRLD" ) {
 					wraw = k.raw;
 					c.worldRaw.insert( recordForm( k.raw ), k.raw );
+					CellEdit ce;	// ESPWRITE3B: the WRLD itself is kept, children or none
+					ce.world = recordForm( k.raw );
+					ce.worldRec = ours( k.raw );
+					ce.keep = true;
+					c.cells.append( ce );
 					continue;
 				}
 				if ( !k.isGroup || k.type != 1 || wraw.isEmpty() )
@@ -555,24 +589,25 @@ bool readCarry( const QString & path, Carry & c, QString * error )
 				const quint32 wf = recordForm( wraw );
 				QByteArray praw;
 				std::function<bool( const EspWrite::Node& )> walk = [&]( const EspWrite::Node& g ) -> bool {
-					QByteArray cellRaw;
+					int at = -1;
 					for ( const EspWrite::Node& n : g.kids ) {
 						if ( !n.isGroup && recordSig( n.raw ) == "CELL" ) {
-							cellRaw = n.raw;
 							if ( g.type == 1 ) {
 								praw = n.raw;
 								c.pcellRaw.insert( wf, n.raw );
 							}
-						} else if ( n.isGroup && n.type == 6 && !cellRaw.isEmpty() ) {
-							CellEdit ce;
+							CellEdit ce;	// kept with or without a group 6
 							ce.world = wf;
-							ce.cell = ours( cellRaw );
+							ce.cell = ours( n.raw );
 							ce.worldRec = ours( wraw );
+							ce.keep = true;
 							if ( !praw.isEmpty() )
 								ce.persistentCell = ours( praw );
-							if ( !addRefs( n, ce, nm, c, error ) )
-								return false;
+							at = c.cells.size();
 							c.cells.append( ce );
+						} else if ( n.isGroup && n.type == 6 && at >= 0 ) {
+							if ( !addRefs( n, c.cells[at], nm, c, error ) )
+								return false;
 						} else if ( n.isGroup && ( n.type == 4 || n.type == 5 ) ) {
 							if ( !walk( n ) )
 								return false;
@@ -585,8 +620,7 @@ bool readCarry( const QString & path, Carry & c, QString * error )
 					return false;
 			}
 		} else {
-			return fail( error, QStringLiteral( "Add to existing: %1 holds a %2 group; only cell edits can be carried" )
-				.arg( baseName( path ), QString::fromLatin1( QByteArray( reinterpret_cast<const char *>( &t.label ), 4 ) ) ) );
+			c.keepTop.append( t );	// ESPWRITE3B espmerge: written back verbatim
 		}
 	}
 	c.ok = true;
@@ -614,8 +648,7 @@ bool cellEditMakePlan( const CellSceneSpec & spec, QVector<CellEditItem> & items
 		return fail( error, QStringLiteral( "%1: the plugin must be an .esp or an .esl" ).arg( tname ) );
 	if ( items.isEmpty() && changes.isEmpty() )
 		return fail( error, QStringLiteral( "nothing to save: place a reference first" ) );
-	if ( !changes.isEmpty() && !spec.interior )
-		return fail( error, QStringLiteral( "changing existing references works in interior cells only (ESPWRITE3)" ) );
+	g_lastWarnings.clear();
 	if ( !spec.valid && spec.plugins.isEmpty() )
 		return fail( error, QStringLiteral( "no cell open" ) );
 	const QStringList order = orderOf( spec.plugins );
@@ -650,9 +683,25 @@ bool cellEditMakePlan( const CellSceneSpec & spec, QVector<CellEditItem> & items
 
 	Sources src;
 	src.order = order;
+	/* The plugin a record is copied from: its winner, or, when that loads AFTER the target (the target is in the load
+	 * order), the last plugin up to the target that holds it. The target cannot master a later file; the later
+	 * winner is reported as a clobber warning below. */
+	auto winnerOf = [&]( quint32 lo ) -> QString {
+		const QString wn = w.recordPlugin( lo );
+		if ( targetInOrder < 0 || indexOfName( order, wn ) <= targetInOrder )
+			return wn;
+		for ( int i = targetInOrder; i >= 0; i-- ) {
+			const QString n = baseName( order[i] );
+			PluginIndex * p = src.get( n, nullptr );
+			quint32 ff = 0;
+			if ( p && fileForm( esm, order, lo, n, p->masters(), ff, nullptr ) && p->has( ff ) )
+				return n;
+		}
+		return wn;
+	};
 	// the copy of a load-order record from its winner (our own file's copy when the winner is the target)
 	auto copyOf = [&]( quint32 lo, Copied & out, QString * winner ) -> bool {
-		const QString wn = w.recordPlugin( lo );
+		const QString wn = winnerOf( lo );
 		if ( winner )
 			*winner = wn;
 		if ( wn.isEmpty() )
@@ -676,7 +725,7 @@ bool cellEditMakePlan( const CellSceneSpec & spec, QVector<CellEditItem> & items
 	const quint32 openCell = spec.interior ? w.interior().cellForm : w.cellForm( spec.cx, spec.cy );
 	if ( !openCell )
 		return fail( error, QStringLiteral( "the open cell has no CELL record" ) );
-	const QString openWinner = w.recordPlugin( openCell );
+	const QString openWinner = winnerOf( openCell );
 	if ( openWinner.compare( tname, Qt::CaseInsensitive ) == 0 ) {
 		if ( !target.append )
 			return fail( error, QStringLiteral( "%1 already holds this cell: tick Add to existing" ).arg( tname ) );
@@ -696,8 +745,9 @@ bool cellEditMakePlan( const CellSceneSpec & spec, QVector<CellEditItem> & items
 			QStringList lm;
 			for ( const QString & s : m )
 				lm.append( s.toLower() );
-			if ( cm != lm )
-				return fail( error, QStringLiteral( "Add to existing: %1's masters (%2) are not this cell's (%3)" )
+			// ESPWRITE3B: the cell's masters must START the file's list (more masters after them read the same)
+			if ( cm.mid( 0, lm.size() ) != lm )
+				return fail( error, QStringLiteral( "Add to existing: %1's masters (%2) do not start with this cell's (%3)" )
 					.arg( tname, carry.masters.join( QStringLiteral( ", " ) ), m.join( QStringLiteral( ", " ) ) ) );
 			plan.masters = carry.masters;
 		} else
@@ -708,6 +758,12 @@ bool cellEditMakePlan( const CellSceneSpec & spec, QVector<CellEditItem> & items
 	if ( target.append ) {
 		plan.nextFloor = carry.next;
 		plan.cells = carry.cells;
+		plan.keepTop = carry.keepTop;
+		plan.tes4Snam = carry.snam;
+		plan.tes4Tail = carry.tail;
+		plan.intv = carry.intv;
+		if ( !carry.author.isEmpty() )
+			plan.author = carry.author;
 	}
 	const quint32 nm = quint32( plan.masters.size() );
 
@@ -726,6 +782,67 @@ bool cellEditMakePlan( const CellSceneSpec & spec, QVector<CellEditItem> & items
 			if ( !fileForm( esm, order, cellLo, tname, carry.masters, ff, nullptr ) || !carry.interiorAt.contains( ff ) )
 				return fail( error, QStringLiteral( "%1 wins cell %2 but does not hold it" ).arg( tname, hex8( cellLo ) ) );
 			ce.cell = carry.cells[carry.interiorAt.value( ff )].cell;
+		}
+		ci = plan.cells.size();
+		at.insert( cellLo, ci );
+		plan.cells.append( ce );
+		return true;
+	};
+	// ESPWRITE3B: the CellEdit of an exterior cell (or the world's persistent cell), made once per cell
+	auto exteriorEdit = [&]( quint32 cellLo, bool persistent, int & ci ) -> bool {
+		ci = at.value( cellLo, -1 );
+		if ( ci >= 0 )
+			return true;
+		CellEdit ce;
+		{
+			const quint32 wsLo = w.worldspace();
+			QString wn;
+			if ( !copyOf( wsLo, ce.worldRec, &wn ) )
+				return false;
+			quint32 wsFile = 0;
+			if ( ce.worldRec.raw.isEmpty() ) {
+				if ( !fileForm( esm, order, wsLo, tname, carry.masters, wsFile, nullptr ) || !carry.worldRaw.contains( wsFile ) )
+					return fail( error, QStringLiteral( "%1 wins the world but does not hold it" ).arg( tname ) );
+				ce.worldRec.raw = carry.worldRaw.value( wsFile );
+				ce.worldRec.ours = true;
+			}
+			ce.world = recordForm( ce.worldRec.raw );
+			// the world's persistent cell, from the world's winner (ruling R3)
+			if ( carry.pcellRaw.contains( ce.world ) && ce.worldRec.ours ) {
+				ce.persistentCell.raw = carry.pcellRaw.value( ce.world );
+				ce.persistentCell.ours = true;
+			} else if ( !ce.worldRec.ours ) {
+				PluginIndex * p = src.get( wn, error );
+				if ( !p )
+					return false;
+				const quint32 pc = p->persistentCell( ce.world );
+				if ( pc ) {
+					ce.persistentCell = ce.worldRec;
+					ce.persistentCell.raw = p->recordBytes( pc );
+				}
+			}
+			if ( persistent ) {
+				if ( ce.persistentCell.raw.isEmpty() )
+					return fail( error, QStringLiteral( "%1 has no persistent cell for a persistent ref" ).arg( spec.world ) );
+				ce.cell = ce.persistentCell;
+			} else {
+				QString cw;
+				if ( !copyOf( cellLo, ce.cell, &cw ) )
+					return false;
+				if ( ce.cell.raw.isEmpty() ) {
+					bool found = false;
+					quint32 ff = 0;
+					if ( fileForm( esm, order, cellLo, tname, carry.masters, ff, nullptr ) )
+						for ( const CellEdit & k : std::as_const( carry.cells ) )
+							if ( !k.cell.raw.isEmpty() && recordForm( k.cell.raw ) == ff ) {
+								ce.cell = k.cell;
+								found = true;
+								break;
+							}
+					if ( !found )
+						return fail( error, QStringLiteral( "%1 wins cell %2 but does not hold it" ).arg( tname, hex8( cellLo ) ) );
+				}
+			}
 		}
 		ci = plan.cells.size();
 		at.insert( cellLo, ci );
@@ -757,61 +874,8 @@ bool cellEditMakePlan( const CellSceneSpec & spec, QVector<CellEditItem> & items
 		if ( spec.interior ) {
 			if ( !interiorEdit( cellLo, ci ) )
 				return false;
-		} else if ( ci < 0 ) {
-			CellEdit ce;
-			{
-				const quint32 wsLo = w.worldspace();
-				QString wn;
-				if ( !copyOf( wsLo, ce.worldRec, &wn ) )
-					return false;
-				quint32 wsFile = 0;
-				if ( ce.worldRec.raw.isEmpty() ) {
-					if ( !fileForm( esm, order, wsLo, tname, carry.masters, wsFile, nullptr ) || !carry.worldRaw.contains( wsFile ) )
-						return fail( error, QStringLiteral( "%1 wins the world but does not hold it" ).arg( tname ) );
-					ce.worldRec.raw = carry.worldRaw.value( wsFile );
-					ce.worldRec.ours = true;
-				}
-				ce.world = recordForm( ce.worldRec.raw );
-				// the world's persistent cell, from the world's winner (ruling R3)
-				if ( carry.pcellRaw.contains( ce.world ) && ce.worldRec.ours ) {
-					ce.persistentCell.raw = carry.pcellRaw.value( ce.world );
-					ce.persistentCell.ours = true;
-				} else if ( !ce.worldRec.ours ) {
-					PluginIndex * p = src.get( wn, error );
-					if ( !p )
-						return false;
-					const quint32 pc = p->persistentCell( ce.world );
-					if ( pc ) {
-						ce.persistentCell = ce.worldRec;
-						ce.persistentCell.raw = p->recordBytes( pc );
-					}
-				}
-				if ( it.persistent ) {
-					if ( ce.persistentCell.raw.isEmpty() )
-						return fail( error, QStringLiteral( "%1 has no persistent cell for a persistent ref" ).arg( spec.world ) );
-					ce.cell = ce.persistentCell;
-				} else {
-					QString cw;
-					if ( !copyOf( cellLo, ce.cell, &cw ) )
-						return false;
-					if ( ce.cell.raw.isEmpty() ) {
-						bool found = false;
-						quint32 ff = 0;
-						if ( fileForm( esm, order, cellLo, tname, carry.masters, ff, nullptr ) )
-							for ( const CellEdit & k : std::as_const( carry.cells ) )
-								if ( recordForm( k.cell.raw ) == ff ) {
-									ce.cell = k.cell;
-									found = true;
-									break;
-								}
-						if ( !found )
-							return fail( error, QStringLiteral( "%1 wins cell %2,%3 but does not hold it" ).arg( tname ).arg( cx ).arg( cy ) );
-					}
-				}
-			}
-			ci = plan.cells.size();
-			at.insert( cellLo, ci );
-			plan.cells.append( ce );
+		} else if ( !exteriorEdit( cellLo, it.persistent, ci ) ) {
+			return false;
 		}
 		RefAdd a;
 		a.base = it.baseFile;
@@ -824,15 +888,50 @@ bool cellEditMakePlan( const CellSceneSpec & spec, QVector<CellEditItem> & items
 		plan.cells[ci].adds.append( a );
 	}
 
-	// ESPWRITE3: changes to references already in the open (interior) cell, as overrides of their winners
+	/* ESPWRITE3 / 3B: changes to references already in the open cell (an interior, an exterior grid cell or the
+	 * world's persistent cell), as overrides of their winners. Ref 0 = a lighting (XCLL) change to the open interior. */
+	QStringList warnings;
+	// a form in a plugin's own numbering -> the load order's (a light plugin's ids are FE + slot)
+	auto loFromFile = [&]( quint32 ff, const QString & file, const QStringList & fileMasters ) -> quint32 {
+		const quint32 mi = ff >> 24;
+		const QString n = mi < quint32( fileMasters.size() ) ? baseName( fileMasters[int( mi )] ) : file;
+		const int oi = indexOfName( order, n );
+		if ( oi < 0 )
+			return 0;
+		for ( quint32 s = 0; s < 0x1000; s++ ) {
+			const quint32 fe = 0xFE000000u | ( s << 12 ) | ( ff & 0xFFFu );
+			if ( esm->getFormIDFile( fe ) == unsigned( oi ) )
+				return fe;
+		}
+		return ( quint32( oi ) << 24 ) | ( ff & 0xFFFFFFu );
+	};
 	QSet<quint32> changed;
 	for ( CellEditChange & ch : changes ) {
+		if ( !ch.ref ) {
+			if ( !spec.interior )
+				return fail( error, QStringLiteral( "lighting changes work in interior cells only" ) );
+			if ( ch.light.isEmpty() )
+				return fail( error, QStringLiteral( "a lighting change names no field" ) );
+			int ci = -1;
+			if ( !interiorEdit( openCell, ci ) )
+				return false;
+			const quint32 cf = recordForm( plan.cells[ci].cell.raw );
+			for ( CellEdit & c : plan.cells )
+				if ( !c.world && !c.cell.raw.isEmpty() && recordForm( c.cell.raw ) == cf ) {
+					QByteArray raw;
+					if ( !changeCellLight( c.cell.raw, ch.light, raw, &warnings, error ) )
+						return false;
+					c.cell.raw = raw;
+				}
+			continue;
+		}
 		if ( changed.contains( ch.ref ) )
 			return fail( error, QStringLiteral( "reference %1 is changed twice" ).arg( hex8( ch.ref ) ) );
 		changed.insert( ch.ref );
 		const float * np = ch.move ? ch.pos : nullptr;
 		const float * nr = ch.turn ? ch.rot : nullptr;
-		const QString wn = w.recordPlugin( ch.ref );
+		const float * ns = ch.resize ? &ch.scale : nullptr;
+		const QString wn = winnerOf( ch.ref );
 		if ( wn.isEmpty() )
 			return fail( error, QStringLiteral( "reference %1 is not in the load order" ).arg( hex8( ch.ref ) ) );
 		quint32 ffT = 0;
@@ -849,6 +948,8 @@ bool cellEditMakePlan( const CellSceneSpec & spec, QVector<CellEditItem> & items
 							if ( nr )
 								a.rot[k] = nr[k];
 						}
+						if ( ns && red() != QLatin1String( "editscale" ) )
+							a.scale = *ns;
 						if ( ch.disable && red() != QLatin1String( "editflag" ) )
 							a.disabled = true;
 						ch.persistent = a.persistent;
@@ -857,7 +958,7 @@ bool cellEditMakePlan( const CellSceneSpec & spec, QVector<CellEditItem> & items
 				for ( RefOverride & o : c.overrides )
 					if ( recordForm( o.rec.raw ) == ff ) {
 						QByteArray raw;
-						if ( !changeRef( o.rec.raw, np, nr, ch.disable, raw, error ) )
+						if ( !changeRef( o.rec.raw, np, nr, ns, ch.disable, raw, error ) )
 							return false;
 						o.rec.raw = raw;
 						ch.persistent = o.persistent;
@@ -872,29 +973,56 @@ bool cellEditMakePlan( const CellSceneSpec & spec, QVector<CellEditItem> & items
 		PluginIndex * p = src.get( wn, error );
 		if ( !p )
 			return false;
-		quint32 ff = 0, cellFf = 0;
+		quint32 ff = 0;
 		if ( !fileForm( esm, order, ch.ref, wn, p->masters(), ff, nullptr ) || !p->has( ff ) )
 			return fail( error, QStringLiteral( "reference %1 is not in its winner %2" ).arg( hex8( ch.ref ), wn ) );
 		const QVector<PluginIndex::Group> chain = p->chain( ff );
-		if ( chain.isEmpty() || ( chain[0].type != 8 && chain[0].type != 9 )
-			|| !fileForm( esm, order, openCell, wn, p->masters(), cellFf, nullptr ) || chain[0].label != cellFf )
-			return fail( error, QStringLiteral( "reference %1 is not in the open cell %2" ).arg( hex8( ch.ref ), spec.interiorCell ) );
+		if ( chain.isEmpty() || ( chain[0].type != 8 && chain[0].type != 9 ) )
+			return fail( error, QStringLiteral( "reference %1 is not under a cell in %2" ).arg( hex8( ch.ref ), wn ) );
+		const quint32 refCell = loFromFile( chain[0].label, wn, p->masters() );
+		quint32 worldLo = 0;
+		for ( const PluginIndex::Group & g : chain )
+			if ( g.type == 1 )
+				worldLo = loFromFile( g.label, wn, p->masters() );
+		if ( spec.interior ? ( worldLo || refCell != openCell ) : ( !worldLo || worldLo != w.worldspace() ) )
+			return fail( error, QStringLiteral( "reference %1 is not in the open cell %2" ).arg( hex8( ch.ref ),
+				spec.interior ? spec.interiorCell : spec.world ) );
 		RefOverride o;
 		o.rec.raw = p->recordBytes( ff );
 		o.rec.source = wn;
 		o.rec.sourceMasters = p->masters();
 		o.rec.sourceLocalized = ( p->tes4Flags() & kTes4Localized ) != 0;
 		QByteArray raw;
-		if ( !changeRef( o.rec.raw, np, nr, ch.disable, raw, error ) )
+		if ( !changeRef( o.rec.raw, np, nr, ns, ch.disable, raw, error ) )
 			return false;
 		o.rec.raw = raw;
 		o.persistent = chain[0].type == 8;
 		ch.persistent = o.persistent;
 		int ci = -1;
-		if ( !interiorEdit( openCell, ci ) )
+		if ( spec.interior ? !interiorEdit( openCell, ci ) : !exteriorEdit( o.persistent ? 0xFFFFFFFFu : refCell, o.persistent, ci ) )
 			return false;
 		plan.cells[ci].overrides.append( o );
+		// a ref the cell's precombines (XCRI) or previs (XPRI) name: the change shows only after a rebuild
+		QSet<quint32> pre;
+		if ( !o.persistent && precombinedRefs( plan.cells[ci].cell.raw, pre, nullptr ) && pre.contains( recordForm( o.rec.raw ) ) )
+			warnings << QStringLiteral( "cell is precombined: changing %1 needs a precombine / previs rebuild" ).arg( hex8( ch.ref ) );
 	}
+	// a plugin after the target in the load order that wins the cell or a changed ref hides the edit there
+	if ( targetInOrder >= 0 ) {
+		auto later = [&]( quint32 lo, const QString & what ) {
+			const QString wn2 = w.recordPlugin( lo );
+			if ( indexOfName( order, wn2 ) > targetInOrder )
+				warnings << QStringLiteral( "%1 loads after %2 and overrides %3: the edit will not show" ).arg( wn2, tname, what );
+		};
+		later( openCell, QStringLiteral( "the cell" ) );
+		for ( const CellEditChange & ch : std::as_const( changes ) )
+			if ( ch.ref )
+				later( ch.ref, QStringLiteral( "reference %1" ).arg( hex8( ch.ref ) ) );
+	}
+	warnings.removeDuplicates();
+	if ( red() == QLatin1String( "nowarn" ) )
+		warnings.clear();
+	g_lastWarnings = warnings;
 	if ( nm > 0xFE )
 		return fail( error, QStringLiteral( "too many masters" ) );
 	if ( summary ) {
@@ -908,6 +1036,8 @@ bool cellEditMakePlan( const CellSceneSpec & spec, QVector<CellEditItem> & items
 					plan.masters.join( QStringLiteral( ", " ) ) );
 		if ( !changes.isEmpty() )
 			*summary += QStringLiteral( "; changes %1 existing reference(s)" ).arg( changes.size() );
+		for ( const QString & wl : std::as_const( warnings ) )
+			*summary += QStringLiteral( ". Warning: " ) + wl;
 	}
 	return true;
 }
@@ -1100,9 +1230,12 @@ void cellEditUndo()
 void cellEditRemove( int index )
 {
 	CellEditSession & s = cellEditSession();
-	if ( index < 0 || index >= s.edits.size() )
+	if ( index < 0 || index >= s.edits.size() + s.changes.size() )
 		return;
-	s.edits.removeAt( index );
+	if ( index < s.edits.size() )
+		s.edits.removeAt( index );
+	else
+		s.changes.removeAt( index - s.edits.size() );	// the list shows the changes after the placed refs
 	if ( extra().view )
 		extra().view->update();
 	changed();
@@ -1111,9 +1244,127 @@ void cellEditRemove( int index )
 void cellEditClear()
 {
 	cellEditSession().edits.clear();
+	cellEditSession().changes.clear();
 	if ( extra().view )
 		extra().view->update();
 	changed();
+}
+
+bool cellEditChangeRef( quint32 ref, char what, const float * v )
+{
+	CellEditSession & s = cellEditSession();
+	const CellPickTable & t = cellPickTable();
+	const int pi = ref ? t.indexOfForm( ref ) : -1;
+	if ( pi < 0 ) {
+		say( QStringLiteral( "Change refused: reference %1 is not in the open cell" ).arg( hex8( ref ) ), true );
+		return false;
+	}
+	if ( what != 'd' && !v ) {
+		say( QStringLiteral( "Change refused: no value" ), true );
+		return false;
+	}
+	if ( what == 's' && !( v[0] > 0.0f && v[0] <= 10.0f ) ) {
+		say( QStringLiteral( "Change refused: scale %1 is outside 0..10" ).arg( double( v[0] ) ), true );
+		return false;
+	}
+	const CellPickEntry & e = t.at( pi );
+	CellEditChange * c = nullptr;
+	for ( CellEditChange & x : s.changes )
+		if ( x.ref == ref )
+			c = &x;
+	if ( !c ) {
+		CellEditChange n;
+		n.ref = ref;
+		for ( int k = 0; k < 3; k++ ) {
+			n.pos[k] = e.pos[k];
+			n.rot[k] = e.rot[k];
+		}
+		n.scale = e.scale;
+		s.changes.append( n );
+		c = &s.changes.last();
+	}
+	switch ( what ) {
+	case 'm':
+		c->move = true;
+		for ( int k = 0; k < 3; k++ )
+			c->pos[k] = v[k];
+		break;
+	case 't':
+		c->turn = true;
+		c->rot[2] = float( std::remainder( double( c->rot[2] + v[0] ), 2.0 * double( kPi ) ) );
+		if ( c->rot[2] < 0.0f )
+			c->rot[2] += 2.0f * kPi;
+		break;
+	case 's':
+		c->resize = true;
+		c->scale = v[0];
+		break;
+	case 'd':
+		c->disable = true;
+		break;
+	default:
+		return false;
+	}
+	say( QStringLiteral( "changed: " ) + cellEditChangeText( *c ), false );
+	changed();
+	return true;
+}
+
+bool cellEditLight( const QString & field, const QString & value )
+{
+	CellSceneSpec spec;
+	if ( !openSpec( spec ) || !spec.interior ) {
+		say( QStringLiteral( "Lighting refused: open an interior cell" ), true );
+		return false;
+	}
+	bool known = false;
+	for ( const QString & f : EspWrite::cellLightFields() )
+		known = known || f.compare( field, Qt::CaseInsensitive ) == 0;
+	if ( !known ) {
+		say( QStringLiteral( "Lighting refused: no field %1 (fields: %2)" ).arg( field, EspWrite::cellLightFields().join( QLatin1Char( ' ' ) ) ), true );
+		return false;
+	}
+	CellEditSession & s = cellEditSession();
+	CellEditChange * c = nullptr;
+	for ( CellEditChange & x : s.changes )
+		if ( !x.ref )
+			c = &x;
+	if ( !c ) {
+		s.changes.append( CellEditChange() );
+		c = &s.changes.last();
+	}
+	bool replaced = false;
+	for ( QPair<QString, QString> & kv : c->light )
+		if ( kv.first.compare( field, Qt::CaseInsensitive ) == 0 ) {
+			kv.second = value;
+			replaced = true;
+		}
+	if ( !replaced )
+		c->light.append( qMakePair( field, value ) );
+	say( QStringLiteral( "changed: " ) + cellEditChangeText( *c ), false );
+	changed();
+	return true;
+}
+
+QString cellEditChangeText( const CellEditChange & c )
+{
+	if ( !c.ref ) {
+		QStringList l;
+		for ( const QPair<QString, QString> & kv : c.light )
+			l << kv.first + QLatin1Char( '=' ) + kv.second;
+		return QStringLiteral( "cell lighting  " ) + l.join( QLatin1Char( ' ' ) );
+	}
+	QStringList l;
+	if ( c.move )
+		l << QStringLiteral( "move (%1, %2, %3)" ).arg( double( c.pos[0] ), 0, 'f', 1 ).arg( double( c.pos[1] ), 0, 'f', 1 )
+			.arg( double( c.pos[2] ), 0, 'f', 1 );
+	if ( c.turn )
+		l << QStringLiteral( "yaw %1" ).arg( double( c.rot[2] ) * 180.0 / double( kPi ), 0, 'f', 1 );
+	if ( c.resize )
+		l << QStringLiteral( "scale %1" ).arg( double( c.scale ), 0, 'f', 3 );
+	if ( c.disable )
+		l << QStringLiteral( "disable" );
+	return hex8( c.ref ) + QStringLiteral( "  " ) + l.join( QStringLiteral( ", " ) );
 }
 
 QString cellEditRowText( const CellEditItem & it )
@@ -1137,9 +1388,9 @@ QString cellEditSummary( bool * refusal )
 		return QStringLiteral( "Open a cell to place references." );
 	}
 	defaultTarget( s, spec );
-	if ( s.edits.isEmpty() ) {
+	if ( s.edits.isEmpty() && s.changes.isEmpty() ) {
 		r( true );
-		return extra().lastReopen.isEmpty() ? QStringLiteral( "Nothing to save: place a reference first." )
+		return extra().lastReopen.isEmpty() ? QStringLiteral( "Nothing to save: place or change a reference first." )
 			: QStringLiteral( "Saved; nothing new to save." );
 	}
 	if ( s.target.path.trimmed().isEmpty() ) {
@@ -1161,8 +1412,10 @@ QString cellEditSummary( bool * refusal )
 		return QStringLiteral( "Add to existing: %1 does not exist." ).arg( tname );
 	}
 	r( false );
-	return s.target.append ? QStringLiteral( "Adds %1 reference(s) to %2, then re-opens the cell with it." ).arg( s.edits.size() ).arg( tname )
-		: QStringLiteral( "Writes %1 reference(s) to a new %2 %3, then re-opens the cell with it." ).arg( s.edits.size() )
+	const QString what = s.changes.isEmpty() ? QStringLiteral( "%1 reference(s)" ).arg( s.edits.size() )
+		: QStringLiteral( "%1 reference(s) and %2 change(s)" ).arg( s.edits.size() ).arg( s.changes.size() );
+	return s.target.append ? QStringLiteral( "Adds %1 to %2, then re-opens the cell with it." ).arg( what, tname )
+		: QStringLiteral( "Writes %1 to a new %2 %3, then re-opens the cell with it." ).arg( what )
 			.arg( s.target.light ? QStringLiteral( "light" ) : QStringLiteral( "full" ), tname );
 }
 
@@ -1178,7 +1431,8 @@ bool cellEditSaveSession( QString * line )
 	defaultTarget( s, spec );
 	QString reopen, l, e;
 	QVector<CellEditItem> items = s.edits;
-	if ( !cellEditSave( spec, items, s.target, wwEnvStr( "WW_CELL_EDIT_SPECDIR" ), &reopen, &l, &e ) ) {
+	QVector<CellEditChange> changes = s.changes;
+	if ( !cellEditSave( spec, items, changes, s.target, wwEnvStr( "WW_CELL_EDIT_SPECDIR" ), &reopen, &l, &e ) ) {
 		say( QStringLiteral( "Save refused: " ) + e, true );
 		return false;
 	}
@@ -1186,7 +1440,13 @@ bool cellEditSaveSession( QString * line )
 	x.lastReopen = reopen;
 	for ( const CellEditItem & it : std::as_const( items ) )
 		logLine( QStringLiteral( "saved form %1 %2" ).arg( hex8( it.formOut ), cellEditGhostLine( it ) ) );
+	for ( const CellEditChange & c : std::as_const( changes ) )
+		logLine( QStringLiteral( "saved change %1%2" ).arg( cellEditChangeText( c ),
+			!c.ref ? QString() : c.persistent ? QStringLiteral( " persistent" ) : QStringLiteral( " temporary" ) ) );
+	for ( const QString & w : cellEditWarnings() )
+		logLine( QStringLiteral( "warning " ) + w );
 	s.edits.clear();
+	s.changes.clear();
 	s.target.append = true;	// the next save extends the same file
 	cellEditStopPlace();
 	if ( line )
@@ -1622,6 +1882,22 @@ bool scriptStep( GLView * view, const QString & raw )
 			c.kind = Extra::Action::Commit;
 			x.queue.push_back( c );
 		}
+	} else if ( v == QLatin1String( "pickref" ) ) {	// ESPWRITE3B: the ref the next move / turn / scale / disable changes
+		quint32 & picked = x.scriptRef;
+		picked = a.value( 1 ).toUInt( nullptr, 16 );
+		const int pi = cellPickTable().indexOfForm( picked );
+		logLine( pi < 0 ? QStringLiteral( "pickref FAIL %1 is not in the open cell" ).arg( hex8( picked ) )
+			: QStringLiteral( "pickref %1 %2" ).arg( hex8( picked ), cellPickTable().at( pi ).baseEdid ) );
+	} else if ( v == QLatin1String( "move" ) || v == QLatin1String( "turn" ) || v == QLatin1String( "scale" )
+		|| v == QLatin1String( "disable" ) ) {
+		const float val[3] = { num( 1 ), num( 2 ), num( 3 ) };
+		const float yaw[3] = { num( 1 ) * kPi / 180.0f, 0, 0 };
+		const char what = v == QLatin1String( "move" ) ? 'm' : v == QLatin1String( "turn" ) ? 't' : v == QLatin1String( "scale" ) ? 's' : 'd';
+		if ( !cellEditChangeRef( x.scriptRef, what, what == 't' ? yaw : val ) )
+			logLine( QStringLiteral( "step FAIL %1" ).arg( raw ) );
+	} else if ( v == QLatin1String( "light" ) ) {
+		if ( !cellEditLight( a.value( 1 ), a.value( 2 ) ) )
+			logLine( QStringLiteral( "step FAIL %1" ).arg( raw ) );
 	} else if ( v == QLatin1String( "ghost" ) ) {
 		logLine( cellEditGhostLine( s.ghost ) );
 	} else if ( v == QLatin1String( "save" ) ) {

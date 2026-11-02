@@ -1,6 +1,8 @@
 // Lane ESPWRITE1 (2026-11-02): the cell-edit plugin writer. See espwrite.h for the measured rules.
 #include "espwrite.h"
 
+#include <QDateTime>
+#include <QDir>
 #include <QFile>
 #include <QFileInfo>
 #include <QMap>
@@ -230,8 +232,8 @@ QByteArray joinSubs( const QVector<Sub> & subs )
 	return b;
 }
 
-bool changeRef( const QByteArray & rec, const float * pos, const float * rot, bool disable, QByteArray & out,
-	QString * error )
+bool changeRef( const QByteArray & rec, const float * pos, const float * rot, const float * scale, bool disable,
+	QByteArray & out, QString * error )
 {
 	const QByteArray sig = recordSig( rec );
 	if ( sig != "REFR" && sig != "ACHR" ) {
@@ -262,10 +264,182 @@ bool changeRef( const QByteArray & rec, const float * pos, const float * rot, bo
 		}
 		subs[di].data = d;
 	}
+	/* ESPWRITE3B: XSCL (f32) sits before XLOD / DATA in xEdit's REFR order; 1.0 removes it (the absent default).
+	 * Red `editscale` leaves XSCL as it was. */
+	if ( scale && r != QLatin1String( "editscale" ) ) {
+		int si = -1;
+		for ( int i = 0; i < subs.size(); i++ )
+			if ( subs[i].tag == "XSCL" )
+				si = i;
+		QByteArray s;
+		putF32( s, *scale );
+		if ( *scale == 1.0f ) {
+			if ( si >= 0 )
+				subs.removeAt( si );
+		} else if ( si >= 0 ) {
+			subs[si].data = s;
+		} else {
+			int at = 0;
+			while ( at < subs.size() && subs[at].tag != "XLOD" && subs[at].tag != "DATA" )
+				at++;
+			subs.insert( at, Sub{ QByteArray( "XSCL" ), s } );
+		}
+	}
 	quint32 fl = recordFlags( rec ) & ~kRecCompressed;
 	if ( disable && r != QLatin1String( "editflag" ) )
 		fl |= kRefDisabled;
 	out = record( sig.constData(), fl, recordForm( rec ), joinSubs( subs ), rec.mid( 16, 8 ) );
+	return true;
+}
+
+QStringList topGroupOrder()
+{
+	return QStringLiteral( "GMST KYWD LCRT AACT TRNS CMPO TXST GLOB DMGT CLAS FACT HDPT RACE SOUN ASPC MGEF LTEX ENCH SPEL "
+		"ACTI TACT ARMO BOOK CONT DOOR INGR LIGH MISC STAT SCOL MSTT GRAS TREE FLOR FURN WEAP AMMO NPC_ LVLN KEYM ALCH IDLM "
+		"NOTE PROJ HAZD BNDS TERM LVLI WTHR CLMT SPGD RFCT REGN NAVI CELL WRLD QUST IDLE PACK CSTY LSCR ANIO WATR EFSH EXPL "
+		"DEBR IMGS IMAD FLST PERK BPTD ADDN AVIF CAMS CPTH VTYP MATT IPCT IPDS ARMA ECZN LCTN MESG DOBJ DFOB LGTM MUSC FSTP "
+		"FSTS SMBN SMQN SMEN MUST DLVW EQUP RELA ASTP OTFT ARTO MATO MOVT SNDR SNCT SOPM COLL CLFM REVB PKIN RFGP AMDL LAYR "
+		"COBJ OMOD MSWP ZOOM INNR KSSM AECH SCCO AORU SCSN STAG NOCM LENS GDRY OVIS" ).split( QLatin1Char( ' ' ) );
+}
+
+// ------------------------------------------------------------------ ESPWRITE3B: cell lighting, precombines
+namespace
+{
+struct LightField
+{
+	const char * name;
+	int offset;
+	char kind;      //!< f = f32, c = colour (RRGGBB hex), i = s32
+	quint32 inherit; //!< the XCLL Inherits bit the field clears (0 = none)
+};
+// wbDefinitionsFO4.pas CELL XCLL (136 bytes in Fallout4.esm's interiors); Inherits at 88
+const LightField kLight[] = {
+	{ "ambient", 0, 'c', 0x1 }, { "directional", 4, 'c', 0x2 }, { "fogColorNear", 8, 'c', 0x4 },
+	{ "fogNear", 12, 'f', 0x8 }, { "fogFar", 16, 'f', 0x10 }, { "dirRotXY", 20, 'i', 0x20 }, { "dirRotZ", 24, 'i', 0x20 },
+	{ "dirFade", 28, 'f', 0x40 }, { "fogClip", 32, 'f', 0x80 }, { "fogPower", 36, 'f', 0x100 },
+	{ "fogColorFar", 72, 'c', 0x4 }, { "fogMax", 76, 'f', 0x200 }, { "lightFadeBegin", 80, 'f', 0x400 },
+	{ "lightFadeEnd", 84, 'f', 0x400 },
+};
+constexpr int kInheritsAt = 88;
+}
+
+QStringList cellLightFields()
+{
+	QStringList l;
+	for ( const LightField & f : kLight )
+		l << QString::fromLatin1( f.name );
+	return l;
+}
+
+bool changeCellLight( const QByteArray & rec, const QVector<QPair<QString, QString>> & fields, QByteArray & out,
+	QStringList * warnings, QString * error )
+{
+	if ( recordSig( rec ) != "CELL" ) {
+		fail( error, QStringLiteral( "a lighting change needs a CELL" ) );
+		return false;
+	}
+	QByteArray payload;
+	QVector<Sub> subs;
+	if ( !recordPayload( rec, payload, error ) || !splitSubs( payload, subs, error ) )
+		return false;
+	int xi = -1;
+	for ( int i = 0; i < subs.size(); i++ ) {
+		if ( subs[i].tag == "XCLL" )
+			xi = i;
+		if ( subs[i].tag == "LTMP" && subs[i].data.size() == 4 && getU32( subs[i].data, 0 ) && warnings )
+			*warnings << QStringLiteral( "the cell has a lighting template (LTMP %1): fields left inheriting still follow it" )
+				.arg( hex8( getU32( subs[i].data, 0 ) ) );
+	}
+	if ( xi < 0 ) {
+		fail( error, QStringLiteral( "cell %1 has no XCLL to change" ).arg( hex8( recordForm( rec ) ) ) );
+		return false;
+	}
+	QByteArray & x = subs[xi].data;
+	const bool keepInherit = red() == QLatin1String( "xcllinherit" );
+	for ( const auto & kv : fields ) {
+		const LightField * f = nullptr;
+		for ( const LightField & k : kLight )
+			if ( kv.first.compare( QLatin1String( k.name ), Qt::CaseInsensitive ) == 0 )
+				f = &k;
+		if ( !f ) {
+			fail( error, QStringLiteral( "no lighting field %1 (fields: %2)" ).arg( kv.first, cellLightFields().join( QLatin1Char( ' ' ) ) ) );
+			return false;
+		}
+		if ( x.size() < f->offset + 4 || ( f->inherit && x.size() < kInheritsAt + 4 ) ) {
+			fail( error, QStringLiteral( "cell %1's XCLL is %2 bytes: too short for %3" ).arg( hex8( recordForm( rec ) ) )
+				.arg( x.size() ).arg( kv.first ) );
+			return false;
+		}
+		bool ok = false;
+		QByteArray v;
+		if ( f->kind == 'c' ) {
+			QString h = kv.second;
+			if ( h.startsWith( QLatin1Char( '#' ) ) )
+				h = h.mid( 1 );
+			const quint32 rgb = h.toUInt( &ok, 16 );
+			ok = ok && h.size() == 6;
+			v.append( char( ( rgb >> 16 ) & 0xFF ) ).append( char( ( rgb >> 8 ) & 0xFF ) ).append( char( rgb & 0xFF ) ).append( '\0' );
+		} else if ( f->kind == 'i' ) {
+			putU32( v, quint32( kv.second.toInt( &ok ) ) );
+		} else {
+			putF32( v, kv.second.toFloat( &ok ) );
+		}
+		if ( !ok ) {
+			fail( error, QStringLiteral( "lighting field %1: %2 is not a %3" ).arg( kv.first, kv.second,
+				f->kind == 'c' ? QStringLiteral( "RRGGBB colour" ) : QStringLiteral( "number" ) ) );
+			return false;
+		}
+		x.replace( f->offset, 4, v );
+		if ( f->inherit && !keepInherit ) {
+			QByteArray in;
+			putU32( in, getU32( x, kInheritsAt ) & ~f->inherit );
+			x.replace( kInheritsAt, 4, in );
+		}
+	}
+	out = record( "CELL", recordFlags( rec ) & ~kRecCompressed, recordForm( rec ), joinSubs( subs ), rec.mid( 16, 8 ) );
+	return true;
+}
+
+bool cellLightRead( const QByteArray & xcll, const QString & field, QString & value, bool & inherited )
+{
+	for ( const LightField & f : kLight ) {
+		if ( field.compare( QLatin1String( f.name ), Qt::CaseInsensitive ) != 0 )
+			continue;
+		if ( xcll.size() < f.offset + 4 )
+			return false;
+		if ( f.kind == 'c' )
+			value = QString::fromLatin1( xcll.mid( f.offset, 3 ).toHex() ).toUpper();
+		else if ( f.kind == 'i' )
+			value = QString::number( qint32( getU32( xcll, f.offset ) ) );
+		else {
+			const quint32 u = getU32( xcll, f.offset );
+			float v;
+			std::memcpy( &v, &u, 4 );
+			value = QString::number( double( v ), 'g', 9 );
+		}
+		inherited = f.inherit && xcll.size() >= kInheritsAt + 4 && ( getU32( xcll, kInheritsAt ) & f.inherit );
+		return true;
+	}
+	return false;
+}
+
+bool precombinedRefs( const QByteArray & cellRec, QSet<quint32> & out, QString * error )
+{
+	QByteArray payload;
+	QVector<Sub> subs;
+	if ( !recordPayload( cellRec, payload, error ) || !splitSubs( payload, subs, error ) )
+		return false;
+	for ( const Sub & s : subs ) {
+		if ( s.tag == "XPRI" ) {
+			for ( qsizetype k = 0; k + 4 <= s.data.size(); k += 4 )
+				out.insert( getU32( s.data, k ) );
+		} else if ( s.tag == "XCRI" && s.data.size() >= 8 ) {
+			const quint32 meshes = getU32( s.data, 0 ), refs = getU32( s.data, 4 );
+			const qsizetype at = 8 + qsizetype( meshes ) * 4;
+			for ( quint32 k = 0; k < refs && at + qsizetype( k ) * 8 + 4 <= s.data.size(); k++ )
+				out.insert( getU32( s.data, at + qsizetype( k ) * 8 ) );
+		}
+	}
 	return true;
 }
 
@@ -615,14 +789,17 @@ bool build( Plan & plan, QByteArray & out, Report * report, QString * error )
 	QMap<quint32, CellOut> interior;
 	QMap<quint32, WorldOut> worlds;
 
+	static const QSet<QByteArray> onamTypes = { "ACHR", "LAND", "NAVM", "REFR", "PGRE", "PHZD", "PMIS", "PARW", "PBAR",
+		"PBEA", "PCON", "PFLA" };	// xEdit wbDefinitionsFO4 TES4 ONAM
 	for ( CellEdit & c : plan.cells ) {
-		if ( c.cell.raw.isEmpty() || recordSig( c.cell.raw ) != "CELL" ) {
+		const bool worldOnly = c.world && c.keep && c.cell.raw.isEmpty();
+		if ( !worldOnly && ( c.cell.raw.isEmpty() || recordSig( c.cell.raw ) != "CELL" ) ) {
 			fail( error, QStringLiteral( "no cell open: the edit names no CELL record" ) );
 			return false;
 		}
-		if ( !sameNumbering( plan, c.cell, error ) )
+		if ( !worldOnly && !sameNumbering( plan, c.cell, error ) )
 			return false;
-		quint32 cf = recordForm( c.cell.raw );
+		quint32 cf = worldOnly ? 0 : recordForm( c.cell.raw );
 		QVector<QByteArray> addP, addT, ovP, ovT;
 		for ( RefAdd & a : c.adds ) {
 			if ( ( a.base >> 24 ) >= nm ) {
@@ -665,7 +842,8 @@ bool build( Plan & plan, QByteArray & out, Report * report, QString * error )
 			++rep.newRefs;
 		}
 		for ( const RefOverride & o : c.overrides ) {
-			if ( recordSig( o.rec.raw ) != "REFR" && recordSig( o.rec.raw ) != "ACHR" ) {
+			const QByteArray osig = recordSig( o.rec.raw );
+			if ( osig != "REFR" && osig != "ACHR" && !o.rec.ours ) {
 				fail( error, QStringLiteral( "override is not a REFR / ACHR" ) );
 				return false;
 			}
@@ -673,7 +851,7 @@ bool build( Plan & plan, QByteArray & out, Report * report, QString * error )
 				return false;
 			( o.persistent ? ovP : ovT ).append( o.rec.raw );
 			quint32 of = recordForm( o.rec.raw );
-			if ( !o.persistent && ( of >> 24 ) < nm )
+			if ( !o.persistent && ( of >> 24 ) < nm && onamTypes.contains( osig ) )
 				onam.append( of );
 			++rep.overrides;
 		}
@@ -687,6 +865,18 @@ bool build( Plan & plan, QByteArray & out, Report * report, QString * error )
 			WorldOut & w = worlds[c.world];
 			if ( w.rec.isEmpty() && !copyBytes( c.worldRec, w.rec, rep, error ) )
 				return false;
+			if ( worldOnly )
+				continue;
+			const bool isPcell = !c.persistentCell.raw.isEmpty() && recordForm( c.persistentCell.raw ) == cf;
+			if ( c.keep && isPcell && w.pcell.isEmpty() ) {
+				if ( !sameNumbering( plan, c.persistentCell, error ) || !copyBytes( c.persistentCell, w.pcell, rep, error ) )
+					return false;
+				w.pcellForm = cf;
+			} else if ( c.keep && !isPcell ) {
+				CellOut & g = w.grid[cf];
+				if ( g.rec.isEmpty() && !copyBytes( c.cell, g.rec, rep, error ) )
+					return false;
+			}
 			if ( !addP.isEmpty() || !ovP.isEmpty() ) {
 				if ( recordSig( c.persistentCell.raw ) != "CELL" ) {
 					fail( error, QStringLiteral( "a persistent exterior ref needs the world's persistent cell" ) );
@@ -733,7 +923,8 @@ bool build( Plan & plan, QByteArray & out, Report * report, QString * error )
 				for ( quint32 cf : *s ) {
 					const CellOut & g = interior[cf];
 					sn.kids.append( recordNode( g.rec ) );
-					sn.kids.append( childrenNode( cf, g.pers, g.temp ) );
+					if ( !g.pers.isEmpty() || !g.temp.isEmpty() )	// ESPWRITE3B: a lighting-only cell has no group 6
+						sn.kids.append( childrenNode( cf, g.pers, g.temp ) );
 					++rep.cells;
 					++rep.interiorCells;
 				}
@@ -748,9 +939,10 @@ bool build( Plan & plan, QByteArray & out, Report * report, QString * error )
 		for ( auto w = worlds.constBegin(); w != worlds.constEnd(); ++w ) {
 			wrldTop.kids.append( recordNode( w->rec ) );
 			Node one = groupNode( w.key(), 1 );
-			if ( !w->pers.isEmpty() ) {
+			if ( !w->pcell.isEmpty() ) {
 				one.kids.append( recordNode( w->pcell ) );
-				one.kids.append( childrenNode( w->pcellForm, w->pers, {} ) );
+				if ( !w->pers.isEmpty() )
+					one.kids.append( childrenNode( w->pcellForm, w->pers, {} ) );
 				++rep.cells;
 			}
 			QMap<quint32, QMap<quint32, QVector<quint32>>> blocks;
@@ -767,16 +959,36 @@ bool build( Plan & plan, QByteArray & out, Report * report, QString * error )
 					for ( quint32 cf : *s ) {
 						const CellOut & g = w->grid[cf];
 						sn.kids.append( recordNode( g.rec ) );
-						sn.kids.append( childrenNode( cf, {}, g.temp ) );
+						if ( !g.temp.isEmpty() )
+							sn.kids.append( childrenNode( cf, {}, g.temp ) );
 						++rep.cells;
 					}
 					bn.kids.append( sn );
 				}
 				one.kids.append( bn );
 			}
-			wrldTop.kids.append( one );
+			if ( !one.kids.isEmpty() )
+				wrldTop.kids.append( one );
 		}
 		top.append( wrldTop );
+	}
+
+	/* ESPWRITE3B espmerge: the extended file's other top groups keep their order; CELL and WRLD go in before the
+	 * first kept group that Fallout4.esm puts after them. Red `mergedrop` = the old writer (they are lost). */
+	if ( !plan.keepTop.isEmpty() && r != QLatin1String( "mergedrop" ) ) {
+		const QStringList canon = topGroupOrder();
+		auto rank = [&]( const Node & n ) {
+			return int( canon.indexOf( QString::fromLatin1( QByteArray( reinterpret_cast<const char *>( &n.label ), 4 ) ) ) );
+		};
+		QVector<Node> merged = plan.keepTop;
+		for ( const Node & n : std::as_const( top ) ) {
+			const int nr = rank( n );
+			int at = 0;
+			while ( at < merged.size() && !( rank( merged[at] ) > nr ) )
+				at++;
+			merged.insert( at, n );
+		}
+		top = merged;
 	}
 
 	QByteArray body;
@@ -795,6 +1007,7 @@ bool build( Plan & plan, QByteArray & out, Report * report, QString * error )
 		t4 += sub( "HEDR", h );
 	}
 	t4 += subZString( "CNAM", plan.author );
+	t4 += plan.tes4Snam;
 	for ( const QString & m : plan.masters ) {
 		t4 += subZString( "MAST", m );
 		t4 += sub( "DATA", QByteArray( 8, '\0' ) );
@@ -805,7 +1018,8 @@ bool build( Plan & plan, QByteArray & out, Report * report, QString * error )
 			putU32( o, f );
 		t4 += sub( "ONAM", o );
 	}
-	t4 += subU32( "INTV", 1 );
+	t4 += plan.tes4Tail;
+	t4 += subU32( "INTV", plan.intv );
 	t4 += subU32( "INCC", quint32( rep.interiorCells ) );
 	out = record( "TES4", plan.light ? kTes4Light : 0, 0, t4 ) + body;
 	rep.bytes = out.size();
@@ -821,21 +1035,48 @@ bool write( const QString & path, Plan & plan, Report * report, QString * error 
 	QByteArray bytes;
 	if ( !build( plan, bytes, report, error ) )
 		return false;
+	/* ESPWRITE3B: a plugin the open cell reads is memory-mapped (libfo76utils FileBuffer), so it cannot be replaced
+	 * in place. It is renamed aside first (the reader opens with FILE_SHARE_DELETE), the new file written, the old
+	 * copy removed when nothing maps it any more (else on a later save). Red `mapped` skips the rename. */
+	const QFileInfo fi( path );
+	const QString stem = fi.fileName() + QStringLiteral( ".wwold-" );
+	QDir dir = fi.absoluteDir();
+	for ( const QString & old : dir.entryList( { stem + QLatin1Char( '*' ) }, QDir::Files ) )
+		dir.remove( old );
+	QString aside;
+	if ( fi.exists() && red() != QLatin1String( "mapped" ) ) {
+		aside = dir.filePath( stem + QString::number( QDateTime::currentMSecsSinceEpoch() ) );
+		if ( !QFile::rename( path, aside ) ) {
+			fail( error, QStringLiteral( "%1: cannot move the old copy aside, the file may be open in another program" ).arg( path ) );
+			return false;
+		}
+	}
+	auto restore = [&]() {
+		if ( !aside.isEmpty() ) {
+			QFile::remove( path );
+			QFile::rename( aside, path );
+		}
+	};
 	QSaveFile f( path );
 	if ( !f.open( QIODevice::WriteOnly ) ) {
 		fail( error, QStringLiteral( "%1: cannot open for writing (%2)" ).arg( path, f.errorString() ) );
+		restore();
 		return false;
 	}
 	if ( f.write( bytes ) != bytes.size() ) {
 		fail( error, QStringLiteral( "%1: write failed (%2)" ).arg( path, f.errorString() ) );
 		f.cancelWriting();
+		restore();
 		return false;
 	}
 	if ( !f.commit() ) {
 		fail( error, QStringLiteral( "%1: commit failed, the file may be open in another program (%2)" )
 			.arg( path, f.errorString() ) );
+		restore();
 		return false;
 	}
+	if ( !aside.isEmpty() )
+		QFile::remove( aside );
 	return true;
 }
 

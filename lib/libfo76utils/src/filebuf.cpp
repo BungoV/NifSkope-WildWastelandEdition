@@ -379,13 +379,13 @@ std::uintptr_t FileBuffer::openFileInDataPath(const char *fileName)
   }
   std::uintptr_t  f;
 #if defined(_WIN32) || defined(_WIN64)
-  f = std::uintptr_t(CreateFileA(fileName, GENERIC_READ, FILE_SHARE_READ,
+  f = std::uintptr_t(CreateFileA(fileName, GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_DELETE,
                                  LPSECURITY_ATTRIBUTES(0), OPEN_EXISTING, 0,
                                  HANDLE(0)));
   if (HANDLE(f) == INVALID_HANDLE_VALUE && dataPathOffset)
   {
     fileName = fileName + dataPathOffset;
-    f = std::uintptr_t(CreateFileA(fileName, GENERIC_READ, FILE_SHARE_READ,
+    f = std::uintptr_t(CreateFileA(fileName, GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_DELETE,
                                    LPSECURITY_ATTRIBUTES(0), OPEN_EXISTING, 0,
                                    HANDLE(0)));
   }

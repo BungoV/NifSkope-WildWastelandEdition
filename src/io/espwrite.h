@@ -26,6 +26,8 @@
 
 #include <QByteArray>
 #include <QHash>
+#include <QPair>
+#include <QSet>
 #include <QString>
 #include <QStringList>
 #include <QVector>
@@ -76,9 +78,20 @@ QByteArray recordSig( const QByteArray & rec );
 QByteArray withFlags( const QByteArray & rec, quint32 set, quint32 clear = 0 );
 /*! ESPWRITE3: an existing REFR / ACHR changed for an override. The payload is read decompressed and written plain;
  *  DATA takes `pos` / `rot` (radians) when given (nullptr keeps that half); `disable` sets 0x800; every other
- *  subrecord, the form id and the 8-byte header tail are kept. Reds: editkeep (DATA unchanged), editflag (no 0x800). */
-bool changeRef( const QByteArray & rec, const float * pos, const float * rot, bool disable, QByteArray & out,
-	QString * error );
+ *  subrecord, the form id and the 8-byte header tail are kept. Reds: editkeep (DATA unchanged), editflag (no 0x800).
+ *  ESPWRITE3B: `scale` sets XSCL (before XLOD / DATA; 1.0 removes it); red editscale leaves it. */
+bool changeRef( const QByteArray & rec, const float * pos, const float * rot, const float * scale, bool disable,
+	QByteArray & out, QString * error );
+/*! ESPWRITE3B: a CELL with named XCLL fields set (cellLightFields(); colours as RRGGBB hex) and each field's Inherits
+ *  bit cleared, so the cell's own value counts over its lighting template. A set LTMP adds a warning. Red
+ *  xcllinherit leaves the Inherits bits. */
+bool changeCellLight( const QByteArray & rec, const QVector<QPair<QString, QString>> & fields, QByteArray & out,
+	QStringList * warnings, QString * error );
+QStringList cellLightFields();
+//! The value of one XCLL field (as changeCellLight takes it) and whether its Inherits bit is set (the readback).
+bool cellLightRead( const QByteArray & xcll, const QString & field, QString & value, bool & inherited );
+//! ESPWRITE3B: the refs a CELL's precombines (XCRI) and previs (XPRI) name, in the CELL's numbering.
+bool precombinedRefs( const QByteArray & cellRec, QSet<quint32> & out, QString * error );
 
 // ------------------------------------------------------------------ label rules
 quint32 interiorBlockLabel( quint32 cellForm );
@@ -185,6 +198,9 @@ struct CellEdit
 	Copied persistentCell;      //!< exterior: the world's persistent cell (needed when any ref is persistent)
 	QVector<RefAdd> adds;
 	QVector<RefOverride> overrides;
+	/* ESPWRITE3B espmerge: written even with no refs (a carried CELL with no children, or the WRLD alone when `cell`
+	 * is empty). A carried override (`ours`) may be any record a cell's children hold (NAVM, LAND, PGRE...). */
+	bool keep = false;
 };
 
 struct Plan
@@ -195,7 +211,14 @@ struct Plan
 	QString target;             //!< the file name we write (refused when it is a master)
 	quint32 nextFloor = 0;      //!< ESPWRITE2 append: the old file's HEDR next id; new ids never go below it
 	QVector<CellEdit> cells;
+	/* ESPWRITE3B espmerge: the extended file's other top groups, verbatim and in its order (CELL / WRLD go in at
+	 * Fallout4.esm's place); its TES4 SNAM (before the masters) and SCRN / TNAM (after ONAM); its INTV. */
+	QVector<Node> keepTop;
+	QByteArray tes4Snam, tes4Tail;
+	quint32 intv = 1;
 };
+//! ESPWRITE3B: Fallout4.esm's top-group order (first occurrence; notes/espwrite2/tmp/toporder.py)
+QStringList topGroupOrder();
 
 struct Report
 {
