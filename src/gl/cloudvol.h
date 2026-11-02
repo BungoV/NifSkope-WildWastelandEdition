@@ -23,7 +23,7 @@ bool wwCloudVolPinned();
  * takes a cloud type per weather (stratus .. cumulonimbus towers, cloudmap.h WwCloudBandInfo::type), a weather noise
  * over tens of km, a curl-displaced, height-dependent erosion: every density program draws its *_v.prog twin
  * (cloud_march_v, cloud_fly_v, cloud_shadowmap_v, cloud_flybake_v); Off draws the old programs unchanged. Pin
- * WW_CLOUDVOL_VARIETY (0/1, off/on); reds in WW_CLOUDVOL_RED: onetype (one cumulus profile, no type swing), nocurl. */
+ * WW_CLOUDVOL_VARIETY (0/1, off/on); red in WW_CLOUDVOL_RED: nocurl. */
 int wwCloudVolVariety();
 void wwCloudVolSetVariety( int on );	//!< refused while WW_CLOUDVOL_VARIETY pins it
 bool wwCloudVolVarietyPinned();

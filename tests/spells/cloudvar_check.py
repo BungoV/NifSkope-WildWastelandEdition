@@ -3,7 +3,7 @@ no NifSkope. The density is res/shaders/cloud_common.glsl's WW_CLOUD_VARIETY clo
 and its CPU twin src/gl/cloudvolmath.h varietyDensity (tests/cloudvar/cloudvar_dump.cpp, g++); the noise bytes and CLOUD2's
 helpers come from cloudvol_check (imported, none of its gates run).
 
-    python -I tests/spells/cloudvar_check.py <scratch dir> [--red onetype|nocurl|nocal|shortlight|ign] [--only TSAVCBE]
+    python -I tests/spells/cloudvar_check.py <scratch dir> [--red nocurl|nocal|shortlight|ign] [--only TSAVCBE]
 
 Gates (bars written before the first run, lane CLOUD5 2026-10-29; a bar changed later says so here):
   T twin      GPU density == the CPU twin on two fixed point grids (a storm sky across 0..8.5 km and a clear sky at
@@ -24,12 +24,12 @@ Gates (bars written before the first run, lane CLOUD5 2026-10-29; a bar changed 
               shape period (6 km) along x <= 0.9 (no tiling). TODAY's density (CLOUD2's cloudDensity, the same map, the
               band 1.5..3.0 km) must FAIL each of V1..V3, else the metric does not separate and the gate FAILS.
               V4 wisps: the high-passed density's correlation at one detail period (0.6 km) on a slice inside thick
-              cumulus, with the curl / without it, <= 0.75 (4 windows of 6 km at 0.03 km). Red onetype fails V1; red
+              cumulus, with the curl / without it, <= 0.75 (4 windows of 6 km at 0.03 km). Red
               nocurl fails V4.
               Lane CLOUDVAR2 (10-31): V judges the SHIPPED arm: CLOUD6d's one profile set per weather (spread 0 unless
               WW_CLOUDVOL_PROFILESET=0 / RED=typemix). V1 asked for CLOUD5's type swing (towers beside puffs), which is
               CLOUD6d's red now (its gate P asks for one family a weather): V1 is RETIRED to INFO (printed, no bar), and
-              today's density must fail V2 + V3. The red onetype then fails nothing in V (it was V1's red): REDRETIRE.
+              today's density must fail V2 + V3. Red onetype (V1's red) failed nothing after that: retired (BUGS1102D).
   C towers    CLOUD2B's dark core for a 6 km tower: a slab 1.5..7.5 km of tau 60, sun 60 deg, seen from below with
               cloud_march_v.prog at the light reach cloudvol.cpp gives a cumulonimbus sky (cloudvolmath.h varLightKm):
               the underside within 0.5 .. 1.6 x a Monte Carlo of the same slab (same droplet phase). Red shortlight (the
@@ -53,6 +53,8 @@ TREE = os.path.dirname(os.path.dirname(HERE))
 args = sys.argv[1:]
 scratch = args[0] if args and not args[0].startswith('--') else os.path.join(TREE, '..', 'cloudvar_scratch')
 red = args[args.index('--red') + 1] if '--red' in args else ''
+if red not in ('', 'nocurl', 'nocal', 'shortlight', 'ign'):
+    sys.exit('cloudvar_check: no red %r (onetype retired by BUGS1102D)' % red)   # an unknown red would run green
 only = set(args[args.index('--only') + 1]) if '--only' in args else set('TSAVCBE')
 os.makedirs(scratch, exist_ok=True)
 
@@ -210,7 +212,6 @@ def gate(name, ok, msg):
     print('%-12s %s  %s' % (name, 'PASS' if ok else 'FAIL', msg))
 
 
-ONE = red == 'onetype'
 # lane CLOUDVAR2: the arm cloudvol.cpp draws: CLOUD6d's profile set (WW_CLOUDVOL_PROFILESET, defaultOnSwitch; RED=typemix off)
 _ps = os.environ.get('WW_CLOUDVOL_PROFILESET')
 PROFILESET = (_ps is None or _ps.strip().lower() not in ('0', 'off', 'false', 'no')) and \
@@ -366,7 +367,7 @@ if 'V' in only:
         # WW_CLOUDVOL_PROFILESET=0 / RED=typemix; V1 (the tops' IQR, which asked for CLOUD5's type swing: towers beside
         # puffs) is RETIRED to INFO, since CLOUD6d's gate P now asks for the opposite (one family per weather).
         spd = sp if not PROFILESET else 0.0
-        s = sky(2.0 / 3.0 if ONE else ty, 0.0 if ONE else spd, curl=CURL_G)
+        s = sky(ty, spd, curl=CURL_G)
         op, top = field(s)
         iqr, tstd, corr, frac = metrics(op, top, s['base0'], px)
         g_ok = tstd >= b2 and corr <= 0.9   # lane CLOUDVAR2: V1 retired (INFO), V2 + V3 gate the default arm
