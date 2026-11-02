@@ -1278,7 +1278,8 @@ NifSkopeOpenGLContext::Program * Renderer::setupProgram( Shape * mesh, Program *
 			&& p->name != std::string_view( "fo4_cellbl.prog" ) && p->name != std::string_view( "fo4_cellcsmbl.prog" )
 			&& p->name != std::string_view( "fo4_cellfgl.prog" ) && p->name != std::string_view( "fo4_cellfgc.prog" )	// lane FARDRAW1
 			&& p->name != std::string_view( "fo4_cellcsmfgl.prog" ) && p->name != std::string_view( "fo4_cellcsmfgc.prog" )
-			&& p->name != std::string_view( "fo4_cellfgp.prog" ) && p->name != std::string_view( "fo4_cellcsmfgp.prog" ) )
+			&& p->name != std::string_view( "fo4_cellfgp.prog" ) && p->name != std::string_view( "fo4_cellcsmfgp.prog" )
+			&& p->name != std::string_view( "fo4_cellfs.prog" ) && p->name != std::string_view( "fo4_cellcsmfs.prog" ) )	// FARLOOK1101
 			return p;
 		// red fognoswap: never swap, so the legacy path cannot fog
 		// lane SKYA: the sky's aerial perspective reads the fog program too (with the Fog row off)
@@ -1298,6 +1299,12 @@ NifSkopeOpenGLContext::Program * Renderer::setupProgram( Shape * mesh, Program *
 			const int t = CellFarGround::twinFor( mesh->scene->nifModel, mesh->id() );
 			if ( t > 0 ) {
 				want = kTwin[fgCsm ? 1 : 0][t - 1];
+				fgTwin = true;
+			}
+			/* lane FARLOOK1101 (gl/cellfarinst.h): an instanced far ring takes the far splat twin while WW_CELL_FARSPLAT
+			 * is set (never a bindless twin then: the splat twins are not bindless) */
+			if ( !fgTwin && mesh->wwFarInstData() && CellFarInst::splatPx() > 0.0f ) {
+				want = fgCsm ? "fo4_cellcsmfs.prog" : "fo4_cellfs.prog";
 				fgTwin = true;
 			}
 		}

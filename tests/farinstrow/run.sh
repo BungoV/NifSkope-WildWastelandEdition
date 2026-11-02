@@ -43,5 +43,16 @@ if [ "$r" = FAIL ] && [ "$rn" -ge 3 ] && [ "$rf" -ge 1 ]; then
 else
 	echo "FAIL red WW_CELL_FARINST_RED=blrow: $r ($rf of $rn rings foreign) -- $OUT/red.txt"; fail=1
 fi
+# lane FARLOOK1101 (FARINSTBL1): WW_CELL_FARINST_BL=1 = the twin with the row in the uniform alone: every ring on the
+# twin, 0 foreign; the blrow red still wins over it (foreign > 0)
+census bl WW_CELL_FARINST_BL=1
+bn=$(grep -c "bindless rows:" "$OUT/bl.txt")
+bb=$(grep "bindless rows:" "$OUT/bl.txt" | grep -vcE "drawn with the bindless twin, uniform row; 0 read another draw's row, 0 past")
+if [ "$bn" -ge 3 ] && [ "$bb" = 0 ]; then echo "ok   WW_CELL_FARINST_BL=1 (twin, uniform row): PASS"; else
+	echo "FAIL WW_CELL_FARINST_BL=1: $bb of $bn rings not clean -- $OUT/bl.txt"; fail=1; fi
+census blred WW_CELL_FARINST_BL=1 WW_CELL_FARINST_RED=blrow
+xf=$(grep "bindless rows:" "$OUT/blred.txt" | grep -cvE "; 0 read another draw's row")
+if [ "$xf" -ge 1 ]; then echo "ok   BL=1 + red blrow: FAIL ($xf rings foreign; the red wins)"; else
+	echo "FAIL BL=1 + red blrow: 0 rings foreign -- $OUT/blred.txt"; fail=1; fi
 [ $fail = 0 ] && echo "FARINSTROW RESULT PASS" || echo "FARINSTROW RESULT FAIL"
 exit $fail

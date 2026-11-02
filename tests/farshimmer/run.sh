@@ -16,8 +16,10 @@ PLACE="E:/Projects/Claude/notes/code1030/lodplace1/walk/still1/place.txt"
 CAM="E:/Projects/Claude/notes/merge1030a/hold/run2/c3_rt_move_path.txt"
 if [ -f "$BAKE/Commonwealth.lodi" ] && [ -f "$PLACE" ] && [ -f "$CAM" ]; then
 	c=$(timeout 600 "$PY" -I tests/farshimmer/census.py --bake "$BAKE" --place "$PLACE" --path "$CAM" < /dev/null 2>&1)
-	echo "$c" | grep -E "^(population|CENSUS)"
+	echo "$c" | grep -E "^(population|CENSUS|SPLAT)"
 	case "$c" in *"refusal HOLDS"*) ;; *) ok=0 ;; esac
+	# lane FARLOOK1101 (FARSHIMMER2): the blended splat (splat_rule.py) passes 0 blinks + ink 1 +- 0.10, its noalpha red fails
+	case "$c" in *"splat PASS"*) ;; *) ok=0 ;; esac
 else
 	echo "census skipped: the Concord bake / drawn rows / camera log are not on this machine"
 fi

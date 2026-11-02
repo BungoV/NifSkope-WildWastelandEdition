@@ -120,7 +120,8 @@ void wwWaterFlowBuild( const LodtFile & f, WwWaterInfoTables & t )
 							vy = my[b];
 						} else {
 							const double a = double( w & 0xFF ) / 256.0 * kTwoPi;
-							const double s = double( ( w >> 8 ) & 0xF ) * mm[b] / 8.0;
+							// lane FARLOOK1101 (FARWATER5 L3): the file's own speed encoding (0 linear: code / 8)
+							const double s = lodtFlowSpeedFactor( f.flowEncoding(), ( w >> 8 ) & 0xF ) * mm[b];
 							vx = std::cos( a ) * s;
 							vy = std::sin( a ) * s;
 							if ( conf == kLodlFlowSolvedConfidence )

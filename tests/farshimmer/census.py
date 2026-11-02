@@ -43,6 +43,8 @@ ap.add_argument('--grid', type=float, default=256.0)
 ap.add_argument('--out', default='')
 ap.add_argument('--mins', default='0.5,0.6,0.7,0.8,1.0,0.8:1.25,0.8:1.5,1.0:1.5',
                 help='candidate rules: s (min footprint s px) or s:g (and the widened area capped at g x the true one)')
+ap.add_argument('--splat', default='0.75,0.8,1.0,1.25,1.5,2.0',
+                help='FARSHIMMER2: blended splat sizes S px (splat_rule.py); empty = skip')
 ap.add_argument('--pan', type=float, default=0.0, help='> 0: frame 0 of the path turned by this many px a frame')
 ap.add_argument('--frames', type=int, default=24, help='frames of the --pan camera')
 a = ap.parse_args()
@@ -195,6 +197,26 @@ def main():
     print('CENSUS today blinks %d; %s; refusal %s' % (today, '; '.join(
         '%.2f%s: blinks %d ink %.2f' % (s, '/%.2f' % gc if gc else '', b, i) for s, gc, b, i in fits),
         'HOLDS' if holds else 'BROKEN'))
+    # lane FARLOOK1101 (FARSHIMMER2): the blended splat, as the shader draws it; its own red = the splat at alpha 1
+    if a.splat:
+        import splat_rule as SR
+        sizes = [float(s) for s in a.splat.split(',')]
+        sres = SR.splat_census(frames, idx, sizes)
+        lines, srows, pick = SR.splat_report(sres)
+        for line in lines:
+            print(line)
+        if pick:
+            rres = SR.splat_census(frames, idx, [pick[0]], alpha=False)
+            _, rrows, _ = SR.splat_report(rres)
+            red = rrows[1]
+            redfails = not (red[1] == 0 and abs(red[2] - 1.0) <= 0.10)
+            print('SPLAT pick S %.2f: blinks %d ink %.3f spread median %.2f (today: blinks %d ink %.3f spread %.2f); '
+                  'red noalpha S %.2f: blinks %d ink %.3f -> %s; splat %s'
+                  % (pick[0], pick[1], pick[2], pick[3], srows[0][1], srows[0][2], srows[0][3], red[0], red[1], red[2],
+                     'FAILS the bar' if redfails else 'PASSES (red broken)',
+                     'PASS' if redfails and srows[0][1] > 0 else 'FAIL'))
+        else:
+            print('SPLAT no size passes (0 blinks, ink 1 +- 0.10); splat FAIL')
     # which models blink (today's rule), by the .lodo model path
     tally = collections.Counter()
     for k, i in enumerate(idx):

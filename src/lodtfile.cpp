@@ -428,6 +428,7 @@ struct WaterOut
 	QByteArray idPlane, flowPlane, shorePlane;
 	int bodyCount = 0;
 	int bodySamples = 0, flowSamples = 0, shoreSamples = 0;
+	quint32 flowEncoding = kLodlFlowEncLinear;	//!< lane FARLOOK1101 (FARWATER5 L3): header 0xCC
 	QString census;      //!< the table --water-census prints
 	QString summary;     //!< one line for the writer's own census
 	/*! One byte a cell, row-major like the cell table: 1 = at least one of the
@@ -1485,6 +1486,11 @@ static bool lodtBuildWater( const WaterInput & in, quint64 baseOffset,
 	const bool dirRed = wwEnv( "WW_LODL_FLOW_DIR_RED" ).trimmed() == "raw";
 	const bool floorRed = waterSpeedFloorRed();
 	qint64 riverSmoothed = 0, riverLifted = 0, riverDead = 0;
+	/* lane FARLOOK1101 (FARWATER5 L3): WW_LODL_FLOW_LOG=1 writes the speed nibble as a half-octave log of the body's
+	 * median (flow encoding 1, lodtflowcode.h). Off (the default) = the linear nibble, byte for byte the old file. */
+	const bool flowLog = wwEnv( "WW_LODL_FLOW_LOG" ).trimmed() == "1";
+	out.flowEncoding = flowLog ? kLodlFlowEncLog : kLodlFlowEncLinear;
+	qint64 riverSat = 0;
 	if ( in.opt.flowField ) {
 		QElapsedTimer riverClock;
 		riverClock.start();
@@ -1736,13 +1742,15 @@ static bool lodtBuildWater( const WaterInput & in, quint64 baseOffset,
 					a += kTwoPi;
 				const int dir = int( a / kTwoPi * 256.0 + 0.5 ) & 0xFF;
 				const double s = std::sqrt( vx * vx + vy * vy );
-				int spd = qBound( 0, int( std::floor( 8.0 * s / median + 0.5 ) ), 15 );
+				int spd = flowLog ? lodtFlowSpeedCode( kLodlFlowEncLog, s / median )
+					: qBound( 0, int( std::floor( 8.0 * s / median + 0.5 ) ), 15 );
 				/* Lane FARWATER4 (L4): water that moves never reads 0 (watermark.h
 				 * waterSpeedFloor; red WW_WATER_SPEED_FLOOR_RED=round) */
 				const int spd0 = spd;
 				spd = waterSpeedFloor( spd, s, pieceMean, floorRed );
 				riverLifted += spd != spd0;
 				riverDead += spd == 0;
+				riverSat += spd == 15;
 				R.word[at] = quint16( dir | ( spd << 8 ) | ( kLodlFlowSolvedConfidence << 12 ) );
 				riverTexels++;
 			}
@@ -2339,6 +2347,9 @@ static bool lodtBuildWater( const WaterInput & in, quint64 baseOffset,
 				.arg( riverSmoothed ).arg( dirRed ? QStringLiteral( " (WW_LODL_FLOW_DIR_RED=raw: the raw solve)" ) : QString() )
 				.arg( riverDead ).arg( riverLifted )
 				.arg( floorRed ? QStringLiteral( " (WW_WATER_SPEED_FLOOR_RED=round)" ) : QString() )
+				+ QString( "; speed 15 on %1 (%2 nibble, flow encoding %3)" ).arg( riverSat )
+				.arg( flowLog ? QStringLiteral( "half-octave log, WW_LODL_FLOW_LOG" ) : QStringLiteral( "linear" ) )
+				.arg( out.flowEncoding )
 			: QStringLiteral( "  flow field: off (--water-flow-constant), every body carries its constant word" ) );
 		L << QString();
 		L << QStringLiteral( "== THE 20 BIGGEST BODIES ==" );
@@ -3238,6 +3249,7 @@ static bool lodtWriteSource( const LodtSource & src, const QString & outDir,
 		wr( wo.idPlane );
 		sect |= SECT_BODIES;
 		patch32( hdr, offFlowRateAt, quint32( wo.flowSamples ) );
+		patch32( hdr, offFlowRateAt + 4, wo.flowEncoding );	// lane FARLOOK1101 (FARWATER5 L3)
 		patch64( hdr, offFlowAt, pos );
 		wr( wo.flowPlane );
 		sect |= SECT_FLOW;

@@ -15,7 +15,9 @@ layout( std430, binding = 12 ) readonly buffer WwDrawBuf
 uniform uint wwDrawBase;
 #ifdef WW_BL_VERT
 #ifdef GL_ARB_shader_draw_parameters
-#define wwDrawIdx ( wwDrawBase + uint( gl_BaseInstanceARB ) )
+// lane FARLOOK1101 (FARINSTBL1): an instanced far ring's base instance is a placement row; it reads wwDrawBase alone
+uniform bool wwBlUniformRow;
+#define wwDrawIdx ( wwDrawBase + ( wwBlUniformRow ? 0u : uint( gl_BaseInstanceARB ) ) )
 #else
 #define wwDrawIdx wwDrawBase
 #endif

@@ -15,6 +15,7 @@ BSD License - see nifskope.h
 #include <QVector>
 
 #include <functional>
+#include "lodtflowcode.h"	// lane FARLOOK1101 (FARWATER5 L3): the speed nibble's encodings
 #include <vector>
 
 class EsmWorld;
@@ -391,7 +392,7 @@ public:
 	int shorePlaneSamples() const { return shoreS; }
 	//! World units per stored shore step (32 as written).
 	float shoreQuantum() const { return shoreQ; }
-	//! Flow-word encoding id; 0 = dir8 / speed4 / confidence4.
+	//! Flow-word encoding id; 0 = dir8 / speed4 / confidence4; 1 = the same with a log speed nibble (lodtflowcode.h).
 	quint32 flowEncoding() const { return flowEnc; }
 	/*! The dye plane (LODL_SECT_DYE): samples per cell edge, 0 when absent.
 	 *  One uint32 a sample: bits 0..15 the SOURCE -- 1..32767 a body id, the

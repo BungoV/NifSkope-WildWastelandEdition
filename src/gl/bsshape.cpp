@@ -333,6 +333,19 @@ void BSShape::drawShapes( NodeList * secondPass )
 			return;
 		if ( scene->selecting || !scene->nifModel )
 			return;
+		/* lane FARLOOK1101 (gl/cellfarinst.h): with the far splat on, the opaque pass draws the rows at or over S and
+		 * queues the shape again; the second pass (no list) draws the rows under S blended */
+		int splat = 0;
+		if ( CellFarInst::splatPx() > 0.0f ) {
+			if ( secondPass ) {
+				secondPass->add( this );
+				wwFarSplatPending = true;
+				splat = 1;
+			} else if ( wwFarSplatPending ) {
+				wwFarSplatPending = false;
+				splat = 2;
+			}
+		}
 		glEnable( GL_POLYGON_OFFSET_FILL );
 		glPolygonOffset( 1.0f, 2.0f );
 		if ( scene->nifModel->getBSVersion() >= 151 )
@@ -341,7 +354,7 @@ void BSShape::drawShapes( NodeList * secondPass )
 			glDisable( GL_FRAMEBUFFER_SRGB );
 		shader = scene->renderer->setupProgram( this, shader );
 		if ( shader )
-			CellFarInst::draw( scene->renderer, scene, *wwFarInst, shader, viewTrans() );
+			CellFarInst::draw( scene->renderer, scene, *wwFarInst, shader, viewTrans(), splat );
 		glDisable( GL_POLYGON_OFFSET_FILL );
 		return;
 	}

@@ -251,6 +251,8 @@ protected:
 	NifSkopeOpenGLContext::Program * shader = nullptr;
 	//! lane FARDRAW1: set = an instanced far ring shape (cellmesh.h CellMeshInst): no vertex arrays, drawn by gl/cellfarinst
 	QSharedPointer<struct CellMeshInst> wwFarInst;
+	//! lane FARLOOK1101: the ring's opaque rows drew; its splat rows draw in the second pass (gl/cellfarinst.h)
+	bool wwFarSplatPending = false;
 
 	//! Shader property
 	BSShaderLightingProperty * bssp = nullptr;

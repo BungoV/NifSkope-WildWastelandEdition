@@ -596,6 +596,59 @@ and the measured ms and targets with their sources. `cell presets:` in the notes
 tests/presettable: every row x preset against those rules (red: the old rule, it must fail), plus a coverage check
 that every Fusion Shaders panel row has a table row (red: a row dropped). tests/cellshow keeps testing the step
 mechanics on its own synthetic codes (`wwDisplayPresetCodes`).
+## FARWATER5 L3 (FARLOOK1101, 2026-11-02): a log speed nibble for the far river bake (flow encoding 1, OFF)
+
+The lodgen river bake writes speed as code = round(8 r), where r = the texel speed / the body's median. Code 15 is
+only 1.94 x the median, so 38953 of 138499 solved texels (28.1 %) went past what the nibble can hold. With
+`WW_LODL_FLOW_LOG=1` the bake writes a half-octave log instead: code = round(8 + 2 log2 r), so 1 = 0.088 x, 8 = 1 x
+and 15 = 11.3 x. It also sets the header's flow-encoding word (0xCC) to 1. Code 0 is still water, and the moving-water
+floor (FARWATER4 L4) still applies. Constant words write code 8, which means 1 x in both encodings. Readers:
+gl/cellwaterinfo.cpp decodes through src/lodtflowcode.h by the file's own encoding. The linear decode is bit-exact
+with the old `c * mean / 8`, and an unknown encoding reads as linear. The flow views (btdterrain, the water windows)
+show the code as brightness, which is monotone in both encodings, so they are unchanged. The marking tool still refuses
+an encoding-1 file and says so (FARWATER5 L4 owns one reference for both writers). Off (the default) writes the old
+bytes. The bake line now ends with `speed 15 on N (linear|half-octave log nibble, flow encoding E)`.
+
+Gate (tests/farwater5/run.sh, offline: g++ compiles the header alone over FARWATER4's 111 lodgen river dumps):
+- B1: the linear codes equal the old writer on 138499 of 138499 texels.
+- B2: the log codes equal FARWATER4's nibl.py rule on 138499 of 138499 texels.
+- B3: past the nibble's range, the log code has 5261 texels (3.80 %, bar < 5 %); the red, the linear code, has 38953
+  (28.13 %) and FAILS.
+- B4: the log decode of 111109 moving texels is within a quarter octave of the true speed (worst 0.189, p99 0.187);
+  linear reaches a worst of 6.17.
+
+Not covered: a re-bake on this exe, and the far river picture.
+
+## FARINSTBL1 (FARLOOK1101, 2026-11-01): far rings may take the bindless twin again, with the row in the uniform (OFF)
+
+SKYSHARDS3 kept the instanced far rings off the bindless twin. The twin reads its row at wwDrawBase + gl_BaseInstance,
+and a far command's base instance is a placement row. `WW_CELL_FARINST_BL=1` lets the twin back. While a far ring
+draws, `wwBlUniformRow` is set, so ww_bindless.glsl reads wwDrawBase alone, which is the shape's own committed row,
+for every command. Every other bindless draw (plain and multi-draw) leaves the uniform at 0 and reads as before. Off
+(the default, the SKYSHARDS3 rule: own program) waits on a GPU ms that asks for it. The red
+`WW_CELL_FARINST_RED=blrow` wins over the switch (the old twin at the base instance). Gate: tests/farinstrow/run.sh
+gets a BL arm (every ring on the twin, 0 commands read another draw's row) and a BL + blrow arm (must read foreign
+rows).
+
+## FARSHIMMER2 (FARLOOK1101, 2026-11-01): far rows under 2 px drawn as a blended splat at their true weight (OFF)
+
+FARTOGGLE4 showed that with the TAA off, 548 of the 14,573 far rows at Concord blink on a moving camera. No opaque
+rule can fix that without at least 2x the ink. `WW_CELL_FARSPLAT=<S px>` (1 or on means S = 2) takes another route.
+Every instanced far row whose projected mesh box is under S px on an axis is drawn in the second pass instead. It is
+widened about its projected centre to S on that axis, at alpha 1 / (kx * ky). The area grows by kx * ky, so the ink is
+exact by construction. Thin poles and beams (FARTHIN1) get widened on their thin axis only. The twins
+fo4_cellfs / fo4_cellcsmfs are fo4_defaultfs.vert plus a 4-line .frag, so every default binary stays as it was. The
+per-row mesh box (attributes 14/15) is made only on the first splat draw. Off (the default, waiting on bungo's eye) is
+the old rule. Red `WW_CELL_FARSPLAT_RED=noalpha` draws the splat opaque.
+
+Gate (tests/farshimmer/run.sh, splat_rule.py models the shader's own rule on the real Concord rows of the c3 move
+row): today 548 rows blink, ink 1.004, per-row weight spread over frames median 0.22 / p90 2.24. Splat S 0.75 / 0.8
+/ 1.0 / 1.25 / 1.5 / 2.0: 20 / 14 / 8 / 4 / 2 / 0 rows blink, ink 1.000 / 0.999 / 1.000 / 1.000 / 0.999 / 1.001.
+At S 2.0 the spread is median 0.09 / p90 0.13. Pick S = 2.0 (0 blinkers, ink within 1 +- 0.10). The noalpha red at
+S 2.0 has ink 3.774, which FAILS the bar. Not covered: PBR-mode far rows (pbrm_cell keeps the opaque rule), the far
+shadow cascades, and diagonal thin lines (they still widen along the box axes, so the ink stays exact but they look
+fatter).
+
 ## FOAMOFF2 (FIX1101A, 2026-11-01): River foam and Contact foam stay OFF
 
 The water lane's foam fixes land: lace streaks instead of solid patches, and no foam on a dry bank. Its two rows still

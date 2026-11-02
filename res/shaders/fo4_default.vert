@@ -66,6 +66,15 @@ layout ( location = 13 ) in vec4	farInstExtra;
 uniform bool farStreamOn;
 uniform samplerBuffer farStream;
 out float wwFarSkyVis;
+#ifdef WW_FAR_SPLAT
+/* lane FARLOOK1101 (FARSHIMMER2): a far row whose projected box is under S px on an axis draws widened to S about its
+ * projected centre at alpha 1 / (kx * ky) (exact ink: the area grows by kx * ky). farSplat = (S px, pass: 1 opaque =
+ * the rows at or over S, 2 the blended splat pass = the rows under it); the box = the row's mesh box (model space) */
+uniform vec2 farSplat;
+layout ( location = 14 ) in vec4	farInstBoxC;
+layout ( location = 15 ) in vec4	farInstBoxE;
+flat out float farSplatA;
+#endif
 
 #include "bonetransform.glsl"
 
@@ -136,6 +145,33 @@ void main()
 		v.xyz += viewMatrix * ( w * ( farSwayAmp * vertexColor.a ) );
 	}
 	gl_Position = projectionMatrix * v;
+#ifdef WW_FAR_SPLAT
+	farSplatA = 1.0;
+	if ( farInst && farSplat.x > 0.0 ) {
+		mat4 PMV = projectionMatrix * modelViewMatrix;
+		vec2 lo = vec2( 1.0e30 ), hi = vec2( -1.0e30 );
+		bool front = dot( farInstBoxE.xyz, vec3( 1.0 ) ) > 0.0;
+		for ( int k = 0; k < 8; k++ ) {
+			vec3 s = vec3( ( k & 4 ) != 0 ? 1.0 : -1.0, ( k & 2 ) != 0 ? 1.0 : -1.0, ( k & 1 ) != 0 ? 1.0 : -1.0 );
+			vec4 m = vec4( farInstBoxC.xyz + s * farInstBoxE.xyz, 1.0 );
+			vec4 p = PMV * vec4( dot( farInstRow0, m ), dot( farInstRow1, m ), dot( farInstRow2, m ), 1.0 );
+			front = front && p.w > 1.0e-3;
+			vec2 q = p.xy / max( p.w, 1.0e-3 );
+			lo = min( lo, q );
+			hi = max( hi, q );
+		}
+		vec2 px = ( hi - lo ) * 0.5 * vec2( viewportDimensions.zw );
+		vec2 kk = front ? max( vec2( 1.0 ), vec2( farSplat.x ) / max( px, vec2( 1.0e-4 ) ) ) : vec2( 1.0 );
+		bool splat = kk.x * kk.y > 1.0001;
+		if ( splat != ( farSplat.y > 1.5 ) ) {
+			gl_Position = vec4( 0.0, 0.0, 2.0, 1.0 );	// the other pass draws this row: outside the clip volume
+		} else if ( splat ) {
+			vec2 c = ( lo + hi ) * 0.5;
+			gl_Position.xy = ( c + ( gl_Position.xy / gl_Position.w - c ) * kk ) * gl_Position.w;
+			farSplatA = 1.0 / ( kk.x * kk.y );
+		}
+	}
+#endif
 	texCoord = uv0;
 
 	btnMatrix[2] = normalize( n * normalMatrix );
