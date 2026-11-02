@@ -6,6 +6,7 @@
   MiltonGeneral01 185 of 185.
 - Red `WW_DECALCHECK_RED=loose` (loose files only, the old rule): 0 triangles, and the walk now FAILS (rc 1) when ray
   decals have no triangles to meet.
+
 ## HAZECARD1 (2026-11-02): lamp-lit haze cards outdoors take the game's lit-effect base (default ON)
 - Cause: since GIDARK1 every exterior lit effect drew with fxRoomLit, so its base (the weather's Effect Lighting x fade
   x Sunlight Scale) was scaled by the room share (sun x visibility + ambient + RTDDGI over the open-air level, 0..4).
@@ -16,6 +17,7 @@
 - Red `WW_CELL_HAZECARD_RED=room`: soft cards room-lit as before. `WW_CELL_FXROOM_RED=game` (unchanged): every
   effect takes the game's base. Telemetry once per state: `hazecard: soft lit cards outdoors take ...`.
 - Unit tests/hazecard1/hazecard_rule_test.cpp (g++ -std=c++17 -Isrc; 8 cases); `-DHC_RED` (the old rule) must fail (the haze card case).
+
 ## STREAMTEX3 (2026-11-02): the streamed cell view's texture pool frees by cell count first, then by last bind
 - The PERFFIX4 pool (src/gl/texpool.h, budget `WW_CELL_STREAM_TEXPOOL`) now sorts what it may free by tier, then by
   last bind: tier 0 = textures whose loaded cells all left (STREAMTEX1's counts, src/gl/streamtexpool.h), tier 1 =
@@ -28,6 +30,7 @@
 - Red `WW_CELL_STREAMTEX_RED=off`: every texture tier 0 (PERFFIX4's order); `WW_STREAM1_RED=texpool` still the 5 s timer.
 - Units: tests/texpool/run.sh (tiers_test: a walk over budget with a turning camera, 0 loaded-cell frees and 4200
   reloads vs 9363 and 12106 in PERFFIX4's order; -DTIERS_RED fails) and tests/spells/stream_tex_unit.sh.
+
 ## FARCITYWASH1-PART (FOGENV1, 2026-11-02): the volume particles take the air's veil
 - cell_volpart.glsl vpVeilK (airVeilK's law and guards, on the puff's own GI + ambient scatter) scales the puff's
   sky-lit share (sun, GI, ambient; thin and thick); lamps keep their level. Before, a daytime puff read ~1/k (about 3x
@@ -36,6 +39,72 @@
 - Red: the same `WW_CELL_AIR_RED=veilphys` (both physical).
 - Gate tests/farcitywash/volpart_veil_check.py (V1 law in tree, V2 puff = air at the froxel, V3 night bit-equal,
   V4 veilphys); `--red` (the old puff) fails V2 (old puff / air up to 4.77).
+
+## FOGLEAK1-COST (FOGENV1, 2026-11-02): the fog's sun gate reads one tile, not eight
+- FOGLEAK1 fix 2 (the volume's gate on the sun in the air, `WW_CELL_FOGLEAK`, still default OFF) read the sun's tile at
+  all 8 probes of the walk: +0.46 ms on the 3-cascade inject (budget 0.10). Now one read at the walk's heaviest probe,
+  carried to P by the 8-probe spread of the sky visibility the +dW fetch already holds: +0.066 ms.
+- Red: `WW_CELL_AIR_RED=sun8` (the 8-probe read).
+- Gates: tests/fogleak/fogleak_check.py row N (one tile vs sun8 on a roof edge), tests/fogleak/fogleak_costbench.py
+  `--gate-sun` (on - nosun <= 0.10 ms; HEAD's shaders read 0.46 and fail).
+
+## FOGLEAK1-ENVSCALE (FOGENV1, 2026-11-02): the fog's DDGI env lands at the DALC's scale on open ground
+
+- FOGLEAK1's occluded env in the air (`WW_CELL_FOGLEAK`, still default OFF) took the volume's read at its own E / pi.
+  The volume's sky is not the DALC's scale (since GISKYTWIN-FLIP it is the weather at the physical level), so open
+  ground could read many times the flat ambient it replaces. The env is now the flat ambient times the read over the
+  volume's own OPEN field (`cellDdgiOpenE`, the six-axis irradiance an unoccluded probe of that sky and ground takes,
+  rtddgimath.h `openIrradiance`): open ground takes the DALC exactly, a probe that sees 30 % of the sky takes 30 % of it.
+  With no open field (interior, sky off) it keeps the old read.
+- Red: `WW_CELL_AIR_RED=envscale` (the read's own scale, FOGLEAK1 fix 1 as it was).
+- Gates: tests/fogleak/fogleak_check.py rows S (open K = 0.3 / 3 / 30 and occluded; the red fails all four),
+  tests/fogleak/fogenv_open_test.cpp (openIrradiance known answers; `-DFOGENV_RED_NOPI` fails).
+- Code: src/rtddgimath.h, src/rtddgi.h, src/rtddgi.cpp, src/rtddgicell.cpp, src/gl/cellvolair.cpp, res/shaders/cell_volair.frag.
+
+## ELFXHARNESS1 (2026-11-02): cell spells load Enhanced Lights and FX by default
+
+tests/spells/volpart1_cell.sh (PROF) and tests/spells/decallit1_cell.sh (PROFILE) now read the harness profile
+notes/allon2/shots/profile_elfx.txt: the old profile plus EnhancedLightsandFX.esp as the last plugin and its mod folder
+as the last mod on the resource stack (only overwrite above it). Passing PROF= / PROFILE= with the old profile.txt is
+the way back; pictures taken before 2026-11-02 12:45 were made without ELFX. Nothing in the viewer changes.
+
+## FARTILESPLIT (SHADOWSHIMMER5, 2026-11-02): the instanced far rows' cull tiles are 2 x 2 cells, not 4 x 4
+
+The instanced far-ring buckets group their rows into tiles that gl/cellfarinst.cpp culls as a whole (camera, each sun
+cascade's box, the sway view slice). A tile was 4 x 4 cells (the AABB of its rows' spheres, median radius ~10300 u on
+Concord c3 5x5 Ultra), so a cascade drew whole 16-cell blocks it barely touched. New `src/gl/fartile.h` keys the tiles
+by N x N cells; src/lodinative.cpp reads `WW_CELL_FARINST_TILE` (1, 2, 4 or 8 cells; default 2) while the cell
+document is built, and `WW_CELL_FARINST_TILE_RED=1` keeps the old 4 x 4. The depth-only caster pass is
+order-independent and the tile cull stays conservative, so the shadow depth is the same; only what is drawn shrinks.
+Offline (the real sway buckets through the tree's csm depth programs, GL timer, 5070 Ti, Ultra): 4 x 4 / 2 x 2 / 1 x 1
+= 2227 / 6432 / 17254 tiles, 7131 / 18414 / 40180 commands; sway paint amortised median 0.220 / 0.169 / 0.143 ms,
+all cascades in one paint 0.695 / 0.516 / 0.43 ms. The CPU cull of more tiles and the colour pass are judged live.
+tests/fartilesplit/run.sh: key grouping, every row sphere inside its tile sphere, median tile radius <= 0.6 x 4 x 4,
+rows through a box cull <= 0.8 x, no row the box meets left out, and the source pin; the red (`-DFTS_RED`) fails.
+
+## LODMAPS-OFFKEYS (GEOLOD1, 2026-11-02): one off key per far map
+
+`WW_CELL_FARLOD_RED=noterrain | noobjects | nocards` turns off one far map, for pictures that show each map's share:
+noterrain builds the rings as before (their cuts stand) but hides every far terrain shape, ours and the game's, and
+skips ring 0's live ground; noobjects skips our .lodi objects and hides the game's .bto object shapes; nocards arms
+no tree cards. Each prints a `far lod: ... OFF (red ...)` line. The far build re-reads the key, so a live rebuild
+takes it. Any other value builds what it built.
+
+## LARGEREF1 (GEOLOD1, 2026-11-02): large references drawn full past the loaded block (switch, default off)
+
+A worldspace's WRLD record lists its large references in RNAM subrecords: per grid cell, the refs that cell keeps
+drawn at full detail wherever they stand. The layout, measured on Fallout4.esm (Commonwealth: 7111 subrecords, 63954
+rows, 9624 refs, all STAT): int16 gridY, int16 gridX, uint32 count, then per ref uint32 form, int16 cellY, int16 cellX.
+Read Y,X, all 63954 rows put the ref in the cell its position says; read X,Y only 911 do. `src/largeref.h` decodes it
+and holds the rule: a large ref is drawn full while any cell whose RNAM lists it is loaded (the grid offset runs 0..9
+cells; a 5x5 block promotes 17 to 46 refs standing 3 to 7 cells outside it). EsmWorld reads the rows at load
+(`largeRefRows()`, `refrByForm()`). With `WW_CELL_LARGEREFS=1` the fixed open places those refs (the cell census
+prints `cell large refs: N drawn full outside the block ...`) and `CellFarHide::setExtraRefs` hides their far copies
+in the instanced far rings, as a loaded cell's refs are hidden. Off by default: the game's `bDisableLargeRefs:General`
+is 1 in the exe, so vanilla draws none. The streamed view does not place them yet. `farobjcensus ... --loaded` with
+`WW_CELL_LARGEREFS=1` prints a `farhide large refs step` line per step (far rows of them still drawn must be 0, refs
+not found where RNAM says must be 0). Reds: `WW_CELL_LARGEREFS_RED=xy` (read X,Y), `=nohide` (far copies stay).
+tests/largeref/run.sh is the unit test (its red reads X,Y and fails).
 
 ## FARCITYWASH1 (2026-11-02, landed in LAND6): the air's sky-lit veil at most the records' fog colour (default ON)
 - cell_volair.frag airVeilK: per froxel, the open air's mean in-scatter (the sun's share + the env share) brought DOWN to
@@ -294,26 +363,6 @@ side 2..16, rings of 8..32 views, both conventions, shuffle, three sharpen value
 level, below and eye-on-card directions) or a dump. Every frame index that differs must sit within 1e-4 of a floor,
 diagonal or snap tie, weights within 2e-4, axes within 2e-5; on 610.74 no index differed (weights 1.25e-5, axes
 1.8e-7). Reds `--red shuffle` and `--red convention` (flipped on the GPU only) fail.
-## FOGLEAK1-COST (FOGENV1, 2026-11-02): the fog's sun gate reads one tile, not eight
-- FOGLEAK1 fix 2 (the volume's gate on the sun in the air, `WW_CELL_FOGLEAK`, still default OFF) read the sun's tile at
-  all 8 probes of the walk: +0.46 ms on the 3-cascade inject (budget 0.10). Now one read at the walk's heaviest probe,
-  carried to P by the 8-probe spread of the sky visibility the +dW fetch already holds: +0.066 ms.
-- Red: `WW_CELL_AIR_RED=sun8` (the 8-probe read).
-- Gates: tests/fogleak/fogleak_check.py row N (one tile vs sun8 on a roof edge), tests/fogleak/fogleak_costbench.py
-  `--gate-sun` (on - nosun <= 0.10 ms; HEAD's shaders read 0.46 and fail).
-
-## FOGLEAK1-ENVSCALE (FOGENV1, 2026-11-02): the fog's DDGI env lands at the DALC's scale on open ground
-
-- FOGLEAK1's occluded env in the air (`WW_CELL_FOGLEAK`, still default OFF) took the volume's read at its own E / pi.
-  The volume's sky is not the DALC's scale (since GISKYTWIN-FLIP it is the weather at the physical level), so open
-  ground could read many times the flat ambient it replaces. The env is now the flat ambient times the read over the
-  volume's own OPEN field (`cellDdgiOpenE`, the six-axis irradiance an unoccluded probe of that sky and ground takes,
-  rtddgimath.h `openIrradiance`): open ground takes the DALC exactly, a probe that sees 30 % of the sky takes 30 % of it.
-  With no open field (interior, sky off) it keeps the old read.
-- Red: `WW_CELL_AIR_RED=envscale` (the read's own scale, FOGLEAK1 fix 1 as it was).
-- Gates: tests/fogleak/fogleak_check.py rows S (open K = 0.3 / 3 / 30 and occluded; the red fails all four),
-  tests/fogleak/fogenv_open_test.cpp (openIrradiance known answers; `-DFOGENV_RED_NOPI` fails).
-- Code: src/rtddgimath.h, src/rtddgi.h, src/rtddgi.cpp, src/rtddgicell.cpp, src/gl/cellvolair.cpp, res/shaders/cell_volair.frag.
 
 ## GISKYTWIN-FLIP (LAND5, 2026-11-02): the GI volume's sky ships at the physical level
 
@@ -693,48 +742,6 @@ and the WW_CELL_HDR_DUMP gate target. The rule is a pure header (src/gl/cellhdrf
 passes, the old rule as red fails). `WW_CELL_HDR_FORMAT=rgba32f` asks for the old frame; the reds `WW_FRAMEFMT1_RED=1`,
 `WW_CELL_HDR_FORMAT_RED=1` and `WW_AAFORMAT1_RED=1` force RGBA32F everywhere, as before. The air volumes were already
 RGBA16F (PERFFIX3); their slices and the running integrate stay RGBA32F (transmittance precision).
-## ELFXHARNESS1 (2026-11-02): cell spells load Enhanced Lights and FX by default
-
-tests/spells/volpart1_cell.sh (PROF) and tests/spells/decallit1_cell.sh (PROFILE) now read the harness profile
-notes/allon2/shots/profile_elfx.txt: the old profile plus EnhancedLightsandFX.esp as the last plugin and its mod folder
-as the last mod on the resource stack (only overwrite above it). Passing PROF= / PROFILE= with the old profile.txt is
-the way back; pictures taken before 2026-11-02 12:45 were made without ELFX. Nothing in the viewer changes.
-## FARTILESPLIT (SHADOWSHIMMER5, 2026-11-02): the instanced far rows' cull tiles are 2 x 2 cells, not 4 x 4
-
-The instanced far-ring buckets group their rows into tiles that gl/cellfarinst.cpp culls as a whole (camera, each sun
-cascade's box, the sway view slice). A tile was 4 x 4 cells (the AABB of its rows' spheres, median radius ~10300 u on
-Concord c3 5x5 Ultra), so a cascade drew whole 16-cell blocks it barely touched. New `src/gl/fartile.h` keys the tiles
-by N x N cells; src/lodinative.cpp reads `WW_CELL_FARINST_TILE` (1, 2, 4 or 8 cells; default 2) while the cell
-document is built, and `WW_CELL_FARINST_TILE_RED=1` keeps the old 4 x 4. The depth-only caster pass is
-order-independent and the tile cull stays conservative, so the shadow depth is the same; only what is drawn shrinks.
-Offline (the real sway buckets through the tree's csm depth programs, GL timer, 5070 Ti, Ultra): 4 x 4 / 2 x 2 / 1 x 1
-= 2227 / 6432 / 17254 tiles, 7131 / 18414 / 40180 commands; sway paint amortised median 0.220 / 0.169 / 0.143 ms,
-all cascades in one paint 0.695 / 0.516 / 0.43 ms. The CPU cull of more tiles and the colour pass are judged live.
-tests/fartilesplit/run.sh: key grouping, every row sphere inside its tile sphere, median tile radius <= 0.6 x 4 x 4,
-rows through a box cull <= 0.8 x, no row the box meets left out, and the source pin; the red (`-DFTS_RED`) fails.
-## LODMAPS-OFFKEYS (GEOLOD1, 2026-11-02): one off key per far map
-
-`WW_CELL_FARLOD_RED=noterrain | noobjects | nocards` turns off one far map, for pictures that show each map's share:
-noterrain builds the rings as before (their cuts stand) but hides every far terrain shape, ours and the game's, and
-skips ring 0's live ground; noobjects skips our .lodi objects and hides the game's .bto object shapes; nocards arms
-no tree cards. Each prints a `far lod: ... OFF (red ...)` line. The far build re-reads the key, so a live rebuild
-takes it. Any other value builds what it built.
-
-## LARGEREF1 (GEOLOD1, 2026-11-02): large references drawn full past the loaded block (switch, default off)
-
-A worldspace's WRLD record lists its large references in RNAM subrecords: per grid cell, the refs that cell keeps
-drawn at full detail wherever they stand. The layout, measured on Fallout4.esm (Commonwealth: 7111 subrecords, 63954
-rows, 9624 refs, all STAT): int16 gridY, int16 gridX, uint32 count, then per ref uint32 form, int16 cellY, int16 cellX.
-Read Y,X, all 63954 rows put the ref in the cell its position says; read X,Y only 911 do. `src/largeref.h` decodes it
-and holds the rule: a large ref is drawn full while any cell whose RNAM lists it is loaded (the grid offset runs 0..9
-cells; a 5x5 block promotes 17 to 46 refs standing 3 to 7 cells outside it). EsmWorld reads the rows at load
-(`largeRefRows()`, `refrByForm()`). With `WW_CELL_LARGEREFS=1` the fixed open places those refs (the cell census
-prints `cell large refs: N drawn full outside the block ...`) and `CellFarHide::setExtraRefs` hides their far copies
-in the instanced far rings, as a loaded cell's refs are hidden. Off by default: the game's `bDisableLargeRefs:General`
-is 1 in the exe, so vanilla draws none. The streamed view does not place them yet. `farobjcensus ... --loaded` with
-`WW_CELL_LARGEREFS=1` prints a `farhide large refs step` line per step (far rows of them still drawn must be 0, refs
-not found where RNAM says must be 0). Reds: `WW_CELL_LARGEREFS_RED=xy` (read X,Y), `=nohide` (far copies stay).
-tests/largeref/run.sh is the unit test (its red reads X,Y and fails).
 
 ## REFLPROBECLI1 (TOOLS1101, 2026-11-01): count the reflection probes' below-horizon misses without a window
 
