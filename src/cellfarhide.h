@@ -16,6 +16,7 @@
  * rule), =noshadow (the sun's cached shadow is not told). Read live. */
 
 #include "cellmesh.h"
+#include "largeref.h"	// lane LARGEREF6: the keep boxes (LargeRef::Box)
 
 #include <QHash>
 #include <QList>
@@ -71,8 +72,15 @@ struct View
 //! What an instanced bucket draws now (cached per change)
 View view( const CellMeshInst & d );
 
-//! A non-instanced far shape the stream may mask; cx0..cy1 = the cells its bound touches
-void registerMask( const void * doc, int block, int cx0, int cy0, int cx1, int cy1 );
+//! A non-instanced far shape the stream may mask; cx0..cy1 = the cells its bound touches.
+//! lane LARGEREF6: `objects` = a far objects shape (ours or the game's .bto): the keep boxes apply; terrain and water never keep
+void registerMask( const void * doc, int block, int cx0, int cy0, int cx1, int cy1, bool objects = true );
+/*! lane LARGEREF6 (LARGEREF-FLATMASK-FIX, keepbox): world-unit boxes the mask keeps inside the hidden cells (a large
+ *  ref's far footprint, LargeRef::footprint); a new call replaces the last. Returns the cells the old and the new boxes
+ *  touch (the blocks there take their arrays again). */
+QSet<qint64> setKeepBoxes( const void * doc, const std::vector<LargeRef::Box> & boxes );
+//! The keep boxes held now
+int keepBoxCount( const void * doc );
 //! Cheap: is `block` a registered mask shape of the document
 bool maskRegistered( const void * doc, int block );
 //! The registered blocks whose bound touches cell (x, y) (all of them for x = y = INT_MIN)
@@ -83,6 +91,9 @@ int applyMask( const void * doc, int block, const Transform & world, const QVect
 //! Pure: the same over `cells`
 int maskPure( const Transform & world, const QVector<Vector3> & verts, QVector<Triangle> & tris,
 	const QSet<qint64> & cells );
+//! lane LARGEREF6: the same, keeping a triangle whose centre lies in one of `keep`
+int maskPure( const Transform & world, const QVector<Vector3> & verts, QVector<Triangle> & tris,
+	const QSet<qint64> & cells, const std::vector<LargeRef::Box> & keep );
 //! Triangles the masks hid at their last apply, all blocks of the document
 qint64 maskedTris( const void * doc );
 }

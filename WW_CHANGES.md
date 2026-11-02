@@ -1,3 +1,21 @@
+## LARGEREF6 (2026-11-02): the flat cell mask and a large ref's far copy (LARGEREF-FLATMASK-FIX)
+- Over a flat far field (the game's .bto, our rings flattened) the streamed view degenerates far triangles centred in a
+  loaded cell, so a wide large ref standing one cell out loses the part of its far copy that reaches in (LARGEREF4
+  measured: 2288 listed step-refs cut over the census routes, median 18 %, up to 97 %).
+- `WW_CELL_LARGEREFS_FLATMASK=accept|keepbox|promote[:share]` (launch key; read when the stream starts): `accept` keeps
+  today's cut; `keepbox` hands the mask the far copy's footprint (the REFR's position, rotation and scale with the
+  base's OBND, `LargeRef::footprint`) and the far objects shapes keep the triangles inside it (terrain and water never
+  keep); `promote` draws a listed ref full by the layer once the loaded cells cut `share` (0.25) of its footprint,
+  beside the rest of its far copy. The default stays `accept` until the hold's pictures pick one.
+- `LargeRef::Owners` (src/largeref.h): `setFlatMask`, `pending` / `setFootprint` / `reeval` (footprints read lazily,
+  once per candidate), `cutShare`, `promoted`, `keepBoxes`; `CellFarHide::setKeepBoxes` + `registerMask(..., objects)`
+  (src/cellfarhide.*); `Stream::lrFlatMask` (src/cellstream.cpp) with the line
+  `cell stream: large refs flat mask <mode>: N far copies reach the loaded cells, ...`.
+- tests/largeref: unit checks for the footprint, the keep test and both modes; `--far flatmask <extent table>` walks the
+  census routes with every ref's footprint (`EXTENT=` in run.sh; notes/largeref6/tools/extent_txt.py): promote 838
+  step-refs at >= 0.25 of 2216 cut (python census 821 / 2288), keepbox one box per cut copy; red
+  `-DLARGEREF_FLATMASK_RED` (the cut stays) fails.
+
 ## LEANCOMMENTS3R (2026-11-02): lean comments, re-cut on the parked-free chain G (MERGEFIX1102 item 4)
 
 - Comment-only (tests/spells/comments_only_check.py: 0 FAIL). LEANCOMMENTS3's trim (LEANCOMMENTS2's 72 files, the
