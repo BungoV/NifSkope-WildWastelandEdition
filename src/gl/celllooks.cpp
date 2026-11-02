@@ -84,6 +84,7 @@ const LookRow kRows[] = {
 	{ "Far LOD baked AO", "WW/FarLodBakedAo", true },
 	{ "Far LOD baked sky light", "WW/FarLodBakedSky", true },
 	{ "Variable rate shading", "WW/CellVrs" },	// lane PERFFIX4: a menu row at last; ships off until its pair is judged
+	{ "Object distance fade", "WW/CellObjectFade" },	// lane OBJFADE1: ships off until bungo sees it
 };
 static_assert( sizeof( kRows ) / sizeof( kRows[0] ) == size_t( WwLook::Count ), "a row per look" );
 
@@ -345,6 +346,10 @@ QByteArray pinOf( WwLook l )
 		WW_SWITCH_STATIC( QByteArray, p, wwEnv( "WW_CELL_VRS" ).trimmed() );
 		return p;
 	}
+	case WwLook::ObjectFade: {
+		WW_SWITCH_STATIC( QByteArray, p, wwEnv( "WW_CELL_OBJFADE" ).trimmed() );
+		return p;
+	}
 	default:
 		return QByteArray();
 	}
@@ -420,6 +425,7 @@ const char * wwLookPinName( WwLook l )
 	case WwLook::FarLodAo: return "WW_LODL_AO";
 	case WwLook::FarLodSky: return "WW_LODL_SKY";
 	case WwLook::Vrs: return "WW_CELL_VRS";
+	case WwLook::ObjectFade: return "WW_CELL_OBJFADE";
 	default: return "";
 	}
 }
@@ -553,6 +559,7 @@ WwGroup wwLookGroup( WwLook l )
 	case WwLook::LensFlares:
 		return WwGroup::BloomVanilla;
 	case WwLook::ActorsOutdoors: case WwLook::WeaponParts: case WwLook::WorldAnim: case WwLook::AnimObjects:
+	case WwLook::ObjectFade:
 		return WwGroup::Objects;
 	default:
 		return WwGroup::Count;

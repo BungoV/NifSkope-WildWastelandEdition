@@ -1,3 +1,31 @@
+## OBJFADE1 (GFXR-GEO G1, 2026-11-02): the game's per-class distance fade for placed refs
+
+New row **Object distance fade** (Show menu, under Objects: "Distance fade"; key `WW/CellObjectFade`, pin
+`WW_CELL_OBJFADE`, live; ships OFF until bungo sees it). The game fades every placed ref by its own law, read from the
+exe: a range from the ref's bound radius r (far = 2048 (uGridsToLoad - 1) - r, at most 10 r; near = 0.6 far; near at
+least 500 and far at least 1000), a class multiplier (fLODFadeOutMultObjects / Items / Actors; items are SCRL ARMO BOOK
+INGR MISC WEAP AMMO KEYM ALCH HAZD SLGM, actors NPC_, the rest objects; a non-actor ref with r > 2048 outdoors takes
+0.2 with no FOV term) and the FOV / 80 term. A ref switches out at alpha 0.3 and back in at 0.7, then its alpha ramps in
+time. The row hides a run where its ref switches out (camera passes only, like previs; casters and probe captures draw
+all). The law is `src/gl/cellobjfade.h`; the runs carry their placement's whole bound and class (src/cellview.cpp), and
+single-run shapes are faded whole.
+
+- Multipliers: pin `WW_CELL_OBJFADE_MULT=o,i,a`; else `WW_CELL_OBJFADE_PRESET=low|medium|high|ultra|default`
+  (Low 5/1.5/5, Medium 5/3/5, High 9/6/9, Ultra 30/10/15, default 4.5/2.5/6); else the game's inis ([LOD], a later ini
+  wins; bungo's Prefs 30/10/15); else the exe's 4.5/2.5/6. Switch-out distances at FOV 70 for a small item: Low 1457 u,
+  Medium 2914, High 5829, Ultra 9714; a static of r 100 at Ultra 30171.
+- Options, off: `WW_CELL_OBJFADE_BAND=1` the dithered band (refs between the switch-in and switch-out thin out by a
+  per-ref hash; the game ramps in time instead); `WW_CELL_OBJFADE_LAW=angular` rung 0, hidden below
+  `WW_CELL_OBJFADE_ANGLE` radians (0.0014) of r / distance.
+- With the row on, the Decal distance fade takes each placement's class multiplier too (no `WW_CELL_DECAL_FADE_MULT`).
+- Red `WW_CELL_OBJFADE_RED=decalonly`: today's view (only decal-flag shapes fade), whatever the row says.
+- Census: `cell fade: runs faded N / items M / actors A (of runs R / items I / actors J; law, mults, source)`, printed
+  when it changes.
+- Gate: tests/objfade/run.sh (law unit test: the worked numbers, Low culls 98.4 % of a c3-like block's item runs
+  (floor 50 %), Ultra hides nothing within 4.9k u at FOV 60..100; the red `-DOBJFADE_RED` fails the floor).
+- Not done (rows owed): the switch's memory and time ramp, the location actor fade multiplier, visible-when-distant
+  refs as large refs, carried lights as items, the shadow casters.
+
 ## REFLPROBECLI1 (TOOLS1101, 2026-11-01): count the reflection probes' below-horizon misses without a window
 
 `nifskope -no-gui reflcensus --soup <soup.psp> (--camera x,y,z ... | --auto N) [--interior] [--out probes.tsv]` places

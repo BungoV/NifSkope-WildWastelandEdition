@@ -4,6 +4,9 @@
 
 #include "gl/cellpasstime.h"	// lane PERF1
 #include "gl/cellumbra.h"
+#include "gl/cellobjfade.h"	// lane OBJFADE1: the game's per-class distance fade
+#include "gl/celllooks.h"
+#include "cellmodsource.h"	// lane OBJFADE1: the fade multipliers from the game's inis
 #include "gl/cellprevisrule.h"	// lane PERFFIX4: previs per document, the tome's staleness
 #include "gl/glscene.h"
 #include "gl/glshape.h"
@@ -33,11 +36,16 @@ struct Counts
 	std::int64_t occluded = 0, roomCulled = 0, casterHidden = 0;	// the Previs row's share
 	std::int64_t tomeDrawn = 0, tomeCulled = 0, ungoverned = 0, tomeCasterHidden = 0;	// the tome's share
 	std::int64_t cDrawn[3] = { 0, 0, 0 }, cCulled[3] = { 0, 0, 0 };
+	// lane OBJFADE1: the camera passes' fade (runs with a class; of them hidden), all / items / actors
+	std::int64_t fadeRuns = 0, faded = 0, itemRuns = 0, itemFaded = 0, actorRuns = 0, actorFaded = 0;
 	bool operator==( const Counts & o ) const
 	{
 		for ( int i = 0; i < 3; i++ )
 			if ( cDrawn[i] != o.cDrawn[i] || cCulled[i] != o.cCulled[i] )
 				return false;
+		if ( fadeRuns != o.fadeRuns || faded != o.faded || itemRuns != o.itemRuns || itemFaded != o.itemFaded
+			|| actorRuns != o.actorRuns || actorFaded != o.actorFaded )
+			return false;
 		return shapes == o.shapes && runs == o.runs && drawn == o.drawn && culled == o.culled && calls == o.calls
 			&& tris == o.tris && trisAll == o.trisAll && occluded == o.occluded && roomCulled == o.roomCulled
 			&& casterHidden == o.casterHidden && tomeDrawn == o.tomeDrawn && tomeCulled == o.tomeCulled
@@ -179,6 +187,9 @@ struct CullState
 	QHash<const void *, QHash<int, std::vector<WwCullRun>>> decalFade;
 	QHash<const void *, QHash<int, std::pair<float, int>>> decalPom;
 	QHash<const void *, QHash<int, bool>> decalAngle;	// lane DECALANGLE
+	// lane OBJFADE1: a shape of ONE run (not in `docs`: nothing to cull inside it) whose run has a fade class
+	QHash<const void *, QHash<int, WwCullRun>> fadeOne;
+	QString lastFadeLine;
 };
 
 CullState & st()
@@ -419,6 +430,12 @@ void countsAdd( Counts & a, const Counts & b, std::int64_t sg )
 	a.tomeCulled += sg * b.tomeCulled;
 	a.ungoverned += sg * b.ungoverned;
 	a.tomeCasterHidden += sg * b.tomeCasterHidden;
+	a.fadeRuns += sg * b.fadeRuns;	// lane OBJFADE1
+	a.faded += sg * b.faded;
+	a.itemRuns += sg * b.itemRuns;
+	a.itemFaded += sg * b.itemFaded;
+	a.actorRuns += sg * b.actorRuns;
+	a.actorFaded += sg * b.actorFaded;
 	for ( int i = 0; i < 3; i++ ) {
 		a.cDrawn[i] += sg * b.cDrawn[i];
 		a.cCulled[i] += sg * b.cCulled[i];
@@ -800,6 +817,7 @@ void wwCellCullBegin( const void * nif )
 	st().decalFade.remove( nif );	// lane DECALS1
 	st().decalPom.remove( nif );
 	st().decalAngle.remove( nif );	// lane DECALANGLE
+	st().fadeOne.remove( nif );	// lane OBJFADE1
 	st().depthKeyValid = false;
 }
 
@@ -982,6 +1000,8 @@ int wwCellPrevisRed()
 void wwCellCullShape( const void * nif, int block, std::vector<WwCullRun> && runs )
 {
 	st().memo.clear();	// lane PERF5
+	if ( runs.size() == 1 && runs[0].fadeType != WwObjFade::None )
+		st().fadeOne[nif].insert( block, runs[0] );	// lane OBJFADE1: the fade may still hide it whole
 	if ( runs.size() < 2 )
 		return;	// one run: nothing to cull inside the shape
 	st().docs[nif].insert( block, std::move( runs ) );
@@ -996,12 +1016,76 @@ void wwCellCullForget( const void * nif, int block )
 	auto f = st().decalFade.find( nif );	// lane DECALS1
 	if ( f != st().decalFade.end() )
 		f->remove( block );
+	auto fo = st().fadeOne.find( nif );	// lane OBJFADE1
+	if ( fo != st().fadeOne.end() )
+		fo->remove( block );
 	auto pm = st().decalPom.find( nif );
 	if ( pm != st().decalPom.end() )
 		pm->remove( block );
 	auto da = st().decalAngle.find( nif );	// lane DECALANGLE
 	if ( da != st().decalAngle.end() )
 		da->remove( block );
+}
+
+/* lane OBJFADE1: the fade's settings, read once (again after a live set). Multipliers: pin WW_CELL_OBJFADE_MULT=o,i,a, else
+ * WW_CELL_OBJFADE_PRESET=low|medium|high|ultra|default (the shipped presets' [LOD] values; default = the exe's), else the
+ * game's inis ([LOD] fLODFadeOutMultObjects / Items / Actors, a later ini wins), else the exe's 4.5 / 2.5 / 6. Law
+ * WW_CELL_OBJFADE_LAW=angular (rung 0, WW_CELL_OBJFADE_ANGLE radians, 0.0014); WW_CELL_OBJFADE_BAND=1 the dithered band. */
+struct ObjFadeCfg
+{
+	bool red = false;
+	WwObjFade::Config c;
+	QString from;
+};
+
+static const ObjFadeCfg & objFadeCfg()
+{
+	WW_SWITCH_STATIC( ObjFadeCfg, f, [] {
+		ObjFadeCfg o;
+		o.red = wwEnv( "WW_CELL_OBJFADE_RED" ).trimmed() == "decalonly";
+		const QByteArray preset = wwEnv( "WW_CELL_OBJFADE_PRESET" ).trimmed().toLower();
+		const QByteArray pin = wwEnv( "WW_CELL_OBJFADE_MULT" ).trimmed();
+		static const char * const names[4] = { "low", "medium", "high", "ultra" };
+		int pi = preset == "default" ? -1 : -2;
+		for ( int i = 0; i < 4; i++ )
+			if ( preset == names[i] )
+				pi = i;
+		if ( !pin.isEmpty() ) {
+			const QList<QByteArray> p = pin.split( ',' );
+			o.c.mults.objects = p.value( 0 ).toFloat();
+			o.c.mults.items = p.size() > 1 ? p.value( 1 ).toFloat() : o.c.mults.objects;
+			o.c.mults.actors = p.size() > 2 ? p.value( 2 ).toFloat() : o.c.mults.objects;
+			o.from = QStringLiteral( "pinned WW_CELL_OBJFADE_MULT" );
+		} else if ( pi >= -1 ) {
+			o.c.mults = WwObjFade::presetMults( pi );
+			o.from = QStringLiteral( "preset %1" ).arg( pi < 0 ? QStringLiteral( "default" ) : QString::fromLatin1( names[pi] ) );
+		} else {
+			QString a, b, c;
+			o.c.mults.objects = cellGameIniFloat( "[LOD]", "fLODFadeOutMultObjects", 4.5f, &a );
+			o.c.mults.items = cellGameIniFloat( "[LOD]", "fLODFadeOutMultItems", 2.5f, &b );
+			o.c.mults.actors = cellGameIniFloat( "[LOD]", "fLODFadeOutMultActors", 6.0f, &c );
+			o.from = !a.isEmpty() ? a : !b.isEmpty() ? b : !c.isEmpty() ? c : QStringLiteral( "the exe defaults (no ini sets them)" );
+		}
+		o.c.law = wwEnv( "WW_CELL_OBJFADE_LAW" ).trimmed() == "angular" ? WwObjFade::Angular : WwObjFade::Game;
+		const float ang = wwEnv( "WW_CELL_OBJFADE_ANGLE" ).trimmed().toFloat();
+		if ( ang > 0.0f )
+			o.c.minAngle = ang;
+		o.c.band = wwEnv( "WW_CELL_OBJFADE_BAND" ).trimmed() == "1";
+		const int g = cellGameGrids();
+		o.c.grids = g > 0 ? g : 5;
+		return o;
+	}() );
+	return f;
+}
+
+bool wwCellObjFadeOn()
+{
+	return wwLookOn( WwLook::ObjectFade ) && !objFadeCfg().red;
+}
+
+const WwObjFade::Config & wwCellObjFadeConfig()
+{
+	return objFadeCfg().c;
 }
 
 void wwCellDecalFadeShape( const void * nif, int block, const std::vector<WwCullRun> & runs )
@@ -1035,10 +1119,13 @@ bool wwCellDecalFadeRanges( Scene * scene, const Shape * sh, int block, std::int
 	WW_SWITCH_STATIC( bool, red, wwEnv( "WW_CELL_DECAL_FADE_RED" ).trimmed() == "near" );
 	// fLODFadeOutMultObjects: bungo's Prefs 30 (the exe's default 4.5); the game takes 0.2 for a value <= 0
 	const float mult = red ? 1.0f : ( multPin > 0.0f ? multPin : 30.0f );
+	// lane OBJFADE1: with the object fade on (and no pin or red), each placement's own class multiplier
+	const bool perClass = !red && !( multPin > 0.0f ) && wwCellObjFadeOn();
+	const WwObjFade::Mults & cm = wwCellObjFadeConfig().mults;
 	const auto & pm = scene->renderer->globalUniforms->projectionMatrix;	// pm[column][row]
 	// the game's FOV / 80 with the horizontal FOV (which axis the game passes is not known)
 	const float fov = pm[0][0] > 0.0f ? 2.0f * std::atan( 1.0f / pm[0][0] ) * 57.29578f : 80.0f;
-	const float k = ( fov / 80.0f ) / ( mult * 7200.0f );
+	const float k0 = ( fov / 80.0f ) / ( mult * 7200.0f );
 	float pl[4][4];
 	if ( s.on )
 		cameraPlanes( scene, pl );
@@ -1054,6 +1141,11 @@ bool wwCellDecalFadeRanges( Scene * scene, const Shape * sh, int block, std::int
 		const Vector3 v = vt * r.center;
 		if ( s.on && !insidePlanes( pl, v, r.radius * vs ) )
 			continue;
+		float k = k0;
+		if ( perClass && r.fadeType != WwObjFade::None ) {
+			const float m = r.fadeType == WwObjFade::Items ? cm.items : r.fadeType == WwObjFade::Actors ? cm.actors : cm.objects;
+			k = m > 0.0f ? ( fov / 80.0f ) / ( m * 7200.0f ) : 0.2f / 7200.0f;
+		}
 		const float x = v.length() / vs * k;	// the placement's centre stands in for its fade node's
 		if ( x > 0.06f )
 			continue;
@@ -1137,6 +1229,9 @@ void wwCellCullRemap( const void * nif, const WwBlockMap & m )
 	auto da = st().decalAngle.find( nif );	// lane DECALANGLE
 	if ( da != st().decalAngle.end() )
 		wwRemapKeys( *da, m );
+	auto fo = st().fadeOne.find( nif );	// lane OBJFADE1
+	if ( fo != st().fadeOne.end() )
+		wwRemapKeys( *fo, m );
 	auto u = st().umbra.find( nif );
 	if ( u != st().umbra.end() && u.value() )
 		u.value()->gov.clear();	// a cache by shape block, filled again on the next draw
@@ -1202,12 +1297,53 @@ bool wwCellCullCamera( Scene * scene, const Shape * sh, int block, std::int64_t 
 	}
 	s.docPrevis = previsDoc;
 	s.docTome = tomeDoc;
+	/* lane OBJFADE1: THE GAME'S PER-CLASS DISTANCE FADE (src/gl/cellobjfade.h), through the frame's camera only, like
+	 * previs. Row "Distance fade" under Objects (WwLook::ObjectFade, pin WW_CELL_OBJFADE), ships off; red
+	 * WW_CELL_OBJFADE_RED=decalonly = today (only decal-flag shapes fade). */
+	const bool fade = cameraEye && wwCellObjFadeOn();
+	float fadeFov = 80.0f;
+	if ( fade ) {
+		const auto & pmx = scene->renderer->globalUniforms->projectionMatrix;	// the decal fade's FOV (horizontal)
+		fadeFov = pmx[0][0] > 0.0f ? 2.0f * std::atan( 1.0f / pmx[0][0] ) * 57.29578f : 80.0f;
+	}
+	WwObjFade::Config fadeCfg = wwCellObjFadeConfig();
+	fadeCfg.fovDeg = fadeFov;
+	const Transform & fvt = sh->viewTrans();
+	const float fvs = std::fabs( fvt.scale ) > 0.0f ? std::fabs( fvt.scale ) : 1.0f;
+	// counts one run of a class and says whether the fade hides it
+	auto fadeHides = [&]( const WwCullRun & r, Counts & c ) -> bool {
+		if ( !fade || r.fadeType == WwObjFade::None )
+			return false;
+		c.fadeRuns++;
+		c.itemRuns += r.fadeType == WwObjFade::Items ? 1 : 0;
+		c.actorRuns += r.fadeType == WwObjFade::Actors ? 1 : 0;
+		const float dist = ( fvt * r.fadeCenter ).length() / fvs;	// the placement's bound centre, world units
+		if ( !WwObjFade::hidden( dist, r.fadeRadius, r.fadeType, r.ref, interiorDoc, fadeCfg ) )
+			return false;
+		c.faded++;
+		c.itemFaded += r.fadeType == WwObjFade::Items ? 1 : 0;
+		c.actorFaded += r.fadeType == WwObjFade::Actors ? 1 : 0;
+		return true;
+	};
 	const std::vector<WwCullRun> * runs = wwCellCullRuns( scene->nifModel, block );
-	if ( !runs )
-		return false;
+	if ( !runs ) {
+		if ( !fade )
+			return false;
+		auto fd = s.fadeOne.constFind( scene->nifModel );
+		if ( fd == s.fadeOne.constEnd() )
+			return false;
+		auto f1 = fd->constFind( block );
+		if ( f1 == fd->constEnd() )
+			return false;
+		s.any = true;
+		if ( !fadeHides( *f1, s.cur ) )
+			return false;
+		out.clear();	// the one placement is faded: nothing of the shape is drawn
+		return true;
+	}
 	const bool umbra = ud && tomeDoc;	// rides the Previs rule
 	const bool previs = previsDoc && ( pvIt != s.previs.constEnd() || umbra );
-	if ( !s.on && !previs ) {	// counted all the same, so the off frame's draw calls stand beside the on frame's
+	if ( !s.on && !previs && !fade ) {	// counted all the same, so the off frame's draw calls stand beside the on frame's
 		s.any = true;
 		s.cur.shapes++;
 		s.cur.runs += std::int64_t( runs->size() );
@@ -1224,7 +1360,8 @@ bool wwCellCullCamera( Scene * scene, const Shape * sh, int block, std::int64_t 
 	const Transform & vt = sh->viewTrans();
 	// lane PERF5: every pass of a frame culls the same shape for the same camera; the later ones replay the first
 	const int memoMode = cullMemoMode();
-	const int flags = ( s.on ? 1 : 0 ) | ( previs ? 2 : 0 ) | ( umbra ? 4 : 0 ) | ( previsPlanesPerRun() ? 8 : 0 );
+	const int flags = ( s.on ? 1 : 0 ) | ( previs ? 2 : 0 ) | ( umbra ? 4 : 0 ) | ( previsPlanesPerRun() ? 8 : 0 )
+		| ( fade ? 16 : 0 );
 	float key[29];
 	for ( int r = 0; r < 3; r++ )
 		for ( int c = 0; c < 3; c++ )
@@ -1257,8 +1394,13 @@ bool wwCellCullCamera( Scene * scene, const Shape * sh, int block, std::int64_t 
 	if ( memoMode && previs )
 		hitsBefore = s.pc.occHits;
 	std::int64_t drawnTris = 0, occluded = 0, roomCulled = 0, tomeDrawn = 0, tomeCulled = 0, ungoverned = 0;
+	std::int64_t fadedHere = 0;	// lane OBJFADE1
 	const std::vector<UmbraGov> * gov = umbra ? &umbraGovFor( *ud, sh, block, *runs ) : nullptr;
 	const std::int64_t culled = collect( *runs, numTris, [&]( const WwCullRun & r ) {
+		if ( fadeHides( r, s.cur ) ) {	// lane OBJFADE1: before the frustum, so the class counts hold any view
+			fadedHere++;
+			return false;
+		}
 		const Vector3 v = vt * r.center;
 		const float rv = r.radius * std::fabs( vt.scale );
 		if ( s.on && !insidePlanes( pl, v, rv ) )
@@ -1286,7 +1428,7 @@ bool wwCellCullCamera( Scene * scene, const Shape * sh, int block, std::int64_t 
 	s.any = true;
 	s.cur.shapes++;
 	s.cur.runs += std::int64_t( runs->size() );
-	s.cur.culled += culled - occluded - roomCulled - tomeCulled;
+	s.cur.culled += culled - occluded - roomCulled - tomeCulled - fadedHere;
 	s.cur.occluded += occluded;
 	s.cur.roomCulled += roomCulled;
 	s.cur.tomeDrawn += tomeDrawn;
@@ -1486,6 +1628,21 @@ void wwCellCullFrame()
 		}
 	}
 	s.memoHits = s.memoMisses = s.memoBad = 0;
+	if ( s.any && wwCellObjFadeOn() ) {	// lane OBJFADE1: printed when it changes
+		const ObjFadeCfg & fc = objFadeCfg();
+		const QString line = QStringLiteral( "cell fade: runs faded %1 / items %2 / actors %3 (of runs %4 / items %5 / "
+			"actors %6; law %7%8, mults %9/%10/%11 %12)" )
+			.arg( qint64( s.cur.faded ) ).arg( qint64( s.cur.itemFaded ) ).arg( qint64( s.cur.actorFaded ) )
+			.arg( qint64( s.cur.fadeRuns ) ).arg( qint64( s.cur.itemRuns ) ).arg( qint64( s.cur.actorRuns ) )
+			.arg( fc.c.law == WwObjFade::Angular ? QStringLiteral( "angular" ) : QStringLiteral( "game" ) )
+			.arg( fc.c.band ? QStringLiteral( " band" ) : QString() )
+			.arg( double( fc.c.mults.objects ) ).arg( double( fc.c.mults.items ) ).arg( double( fc.c.mults.actors ) )
+			.arg( fc.from );
+		if ( line != s.lastFadeLine && wwFrameLog() ) {
+			s.lastFadeLine = line;
+			std::fprintf( stderr, "%s\n", line.toLocal8Bit().constData() );
+		}
+	}
 	if ( !s.any ) {
 		if ( !s.printed && !s.docs.isEmpty() ) {
 			std::fprintf( stderr, "cell cull: %s\n", s.on ? "on, no runs drawn this frame" : "off, no runs drawn this frame" );
