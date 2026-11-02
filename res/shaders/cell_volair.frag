@@ -21,7 +21,7 @@
  * keeps the old path as a red bit of volLeakRed (cellvolair.cpp WW_CELL_AIR_RED= dalcenv / nosungate / lightleak) */
 #if defined( WW_CELL_FOGLEAK ) && defined( WW_CELL_RTDDGI )
 #define WW_AIR_LEAK 1
-uniform int volLeakRed;		// 1 dalcenv, 2 nosungate, 4 lightleak, 8 nofartailshadow (lookdev_fog.glsl: volAirFlags 256), 16 nointsungate (INTGI1), 32 envscale (FOGENV1)
+uniform int volLeakRed;		// 1 dalcenv, 2 nosungate, 4 lightleak, 8 nofartailshadow (lookdev_fog.glsl: volAirFlags 256), 16 nointsungate (INTGI1), 32 envscale (FOGENV1), 64 sun8 (FOGLEAK1-COST)
 uniform vec3 cellDdgiOpenE[6];	// lane FOGENV1: an open probe's irradiance per axis from the volume's own sky (rtddgicell.cpp; 0 = none)
 #endif
 #include "lookdev_fog.glsl"
@@ -151,6 +151,12 @@ vec3 airLeakEnv( vec3 P, vec3 dW, out float fade )
 			continue;
 		vec3 sp = vec3( 0.0 ), sm = vec3( 0.0 );
 		float sv = 0.0, ws = 0.0, cover = 0.0;
+		/* FOGLEAK1-COST: the sun's tile read once, at the walk's heaviest probe, carried to P by the 8-probe spread of
+		 * the sky visibility the +dW fetch already holds (its .w): v(sun) = v_n(sun) + mean v(dW) - v_n(dW). Red sun8:
+		 * the sun's tile at all 8 probes, as before */
+		int pn = -1;
+		float wn = 0.0, svd = 0.0, vdn = 0.0;
+		bool sun8 = ( volLeakRed & 64 ) != 0;
 		for ( int k = 0; k < cellGiLoop8; k++ ) {
 			ivec3 o = ivec3( k % 2, ( k / 2 ) % 2, k / 4 );
 			ivec3 q = min( b + o, Dm.xyz - 1 );
@@ -172,16 +178,24 @@ vec3 airLeakEnv( vec3 P, vec3 dW, out float fade )
 			}
 			vec4 ea = cellDdgiTile( p, dW, 8 );
 			sp += pow( max( ea.rgb, vec3( 0.0 ) ), vec3( 2.5 ) ) * w;
+			svd += ea.w * w;
 			if ( needEnv ) {
 				vec4 eb = cellDdgiTile( p, -dW, 8 );
 				sm += pow( max( eb.rgb, vec3( 0.0 ) ), vec3( 2.5 ) ) * w;
 			}
-			if ( needSun )
+			if ( needSun && sun8 )
 				sv += cellDdgiTile( p, sd, 8 ).w * w;
+			if ( w > wn ) {
+				wn = w;
+				pn = p;
+				vdn = ea.w;
+			}
 			ws += w;
 		}
 		if ( ws <= 0.0 )
 			continue;
+		if ( needSun && !sun8 && pn >= 0 )
+			sv = clamp( cellDdgiTile( pn, sd, 8 ).w + svd / ws - vdn, 0.0, 1.0 ) * ws;
 		float take = fd * min( cover, 1.0 ) * left;
 		vec3 mp = sp / ws, mm = sm / ws;
 		Ep += take * mp * mp;

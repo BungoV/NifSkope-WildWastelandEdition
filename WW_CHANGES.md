@@ -1,3 +1,11 @@
+## FOGLEAK1-COST (FOGENV1, 2026-11-02): the fog's sun gate reads one tile, not eight
+- FOGLEAK1 fix 2 (the volume's gate on the sun in the air, `WW_CELL_FOGLEAK`, still default OFF) read the sun's tile at
+  all 8 probes of the walk: +0.46 ms on the 3-cascade inject (budget 0.10). Now one read at the walk's heaviest probe,
+  carried to P by the 8-probe spread of the sky visibility the +dW fetch already holds: +0.066 ms.
+- Red: `WW_CELL_AIR_RED=sun8` (the 8-probe read).
+- Gates: tests/fogleak/fogleak_check.py row N (one tile vs sun8 on a roof edge), tests/fogleak/fogleak_costbench.py
+  `--gate-sun` (on - nosun <= 0.10 ms; HEAD's shaders read 0.46 and fail).
+
 ## FOGLEAK1-ENVSCALE (FOGENV1, 2026-11-02): the fog's DDGI env lands at the DALC's scale on open ground
 
 - FOGLEAK1's occluded env in the air (`WW_CELL_FOGLEAK`, still default OFF) took the volume's read at its own E / pi.

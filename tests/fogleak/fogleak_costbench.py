@@ -7,6 +7,9 @@ usage: python -I tests/fogleak/fogleak_costbench.py <tree> [--shaders DIR] [--ca
     on       RTDDGI (+CASCADES) + FOGLEAK       leakred 0  terms 15
     onred7   on with every red bit (dalcenv+nosungate+lightleak): code compiled in, never run
     dalc / nosun / noleak  one red bit each (the live hold's reds)
+    sun8     on with the red sun8 (64): the sun's visibility from all 8 probes (FOGLEAK1-COST, the old read)
+  --gate-sun (FOGLEAK1-COST, bars written before the run): with sets on, nosun, sun8 (casc 3, lights 1), the sun gate's
+    cost on - nosun <= 0.10 ms, and the red's sun8 - nosun >= 0.25 ms (the old 8-probe read, FOGCOST1's 0.47).
 The scene: tests/fogleak/fogleak_check.py's (160 x 90 x 64 froxels, camera at 0 looking -z), imported for its GL
 helpers. --casc 3: WW_CELL_RTDDGI_CASCADES with the c3 hold's three cascades (16^3 @ 273, 16x13x16 @ 547,
 16x7x16 @ 1093 round the camera; the rig's y is the world's height). --lights N: N unshadowed omni lights in the
@@ -37,7 +40,7 @@ BASE = ['WW_CELL_RTDDGI'] + (['WW_CELL_RTDDGI_CASCADES'] if CASC else [])
 SPEC = {
     'off': (BASE, 0), 'on': (BASE + ['WW_CELL_FOGLEAK'], 0), 'onred7': (BASE + ['WW_CELL_FOGLEAK'], 7),
     'dalc': (BASE + ['WW_CELL_FOGLEAK'], 1), 'nosun': (BASE + ['WW_CELL_FOGLEAK'], 2),
-    'noleak': (BASE + ['WW_CELL_FOGLEAK'], 4),
+    'noleak': (BASE + ['WW_CELL_FOGLEAK'], 4), 'sun8': (BASE + ['WW_CELL_FOGLEAK'], 64),
 }
 for s in SETS:
     if ':' in s:
@@ -148,3 +151,9 @@ for s in SETS:
     m = min(res[lab], res2[lab])
     print('  %-10s %7.3f ms (passes %.3f / %.3f)%s' % (lab, m, res[lab], res2[lab],
           '' if off is None or lab == 'off' else '  +%.3f vs off' % (m - off)))
+if '--gate-sun' in args:
+    b = {k: min(res[k], res2[k]) for k in ('on', 'nosun', 'sun8')}
+    g1, g2 = b['on'] - b['nosun'], b['sun8'] - b['nosun']
+    ok = g1 <= 0.10 and g2 >= 0.25
+    print('%s sun gate cost: on - nosun %.3f ms (<= 0.10), red sun8 - nosun %.3f ms (>= 0.25)' % ('PASS' if ok else 'FAIL', g1, g2))
+    sys.exit(0 if ok else 1)
