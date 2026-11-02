@@ -1,3 +1,43 @@
+## DOFLENS1 (2026-11-02): a thin-lens depth of field (bokeh, near / far), the gameplay states
+
+New row "Lens depth of field" (cell Show menu, under the vanilla camera master; switch WW_CELL_DOF_LENS, key
+WW/CellDofLens, default OFF because it changes the picture; it needs "Depth of field" on). It replaces the game's
+quarter-size Gaussian with a lens: the circle of confusion comes from the thin-lens law, c = A f (z - S) / (z (S - f)),
+with the focal length from the field of view (24 mm sensor), the focus distance S from the image space's DoF record
+and an aperture A chosen so that the record's own blur (strength x 8 x radius px) is reached at S + range. A quarter-
+size prep stores the signed circle (near negative, far positive, nearest depth of the four texels), a 32-tap Vogel
+disk gathers the far layer (a tap counts only as far as its own circle reaches; a sharp subject is never smeared by
+the background) and the near layer (scattered as a gather, premultiplied) in one MRT pass, and the composite lays the
+far layer under the sharp frame and the near layer over it; in-focus pixels are the input bit for bit. The record's
+near-off flag and sky flag are kept. WW_CELL_DOF_STATE=menu runs the Pip-Boy / dialogue lens (f/2.8, autofocus on the
+screen centre, far only, sky blurred) whatever the record says. It runs inside the fused depth of field + motion blur
+pass when both are on (program game_doflensmblur), and on the linear frame when "Blur before tone map" is on.
+Gate tests/postfx/postfx_lens.py (the real shaders, hidden GL 4.1): the circle against a numpy thin-lens reference
+0.031 px, a 16 / 40 px bokeh disk reads 18.0 / 41.1 px with the light kept (1.000), no background leak onto a sharp
+subject (0.0002), focus plane bit-exact, the near layer's share over a sharp edge 0.222 (0.196 physical), fused = two
+passes within 0.25 of an 8-bit step; one red each. 1080p GPU time 0.048 ms (near on; 0.044 off), 0.090 fused with the
+motion blur (the game's chain 0.040, fused 0.069). Red WW_CELL_DOF_LENS_RED=1 runs the game's passes. The default
+programs game_dof / game_dofmblur are unchanged but the source hash.
+
+DOFLENS1-CENSUS: the depth of field of every IMAD in Fallout4.esm and the six DLCs, read offline (notes/doflens1/
+census, tool notes/doflens1/tools/imad_dof_census.py): 269 IMADs, 184 with a DoF strength curve; their users from ZOOM
+GNAM, DOBJ, DFOB and CAMS MNAM. Dialogue's IMAD (DialogueImod, DOBJ IMDI) holds no depth of field, so dialogue keeps
+the menu state's lens. WW_CELL_DOF_STATE takes the states the data holds: pipboy (PipboyMenuImod), pipboypa
+(PipboyPowerArmorImod), scope (zd_ScopeTargetingRecon, the recon and night-vision scopes), vats (VATSScanImod),
+inventory (VATSPlaybackDesatBlurImod), inspect (InspectImod), killcam (VATSPlaybackDOFImod), vatsdialogue
+(VATSDialogueImodClose). Each reads its IMAD from the loaded plugins at the cell's load (strength, distance, range =
+the curves' largest keys; DNAM flags in the IMGS packing; use-target = autofocus on the frame's centre) and drives the
+game's passes, or the lens when its row is on; a state whose IMAD is not loaded is refused in the telemetry. play and
+menu are unchanged.
+
+DOFLENS1-NEARTILE: the near layer's reach is the true near circle, not a fixed 32 px. A tile pass
+(game_doflens_tile, two draws over 8 x 8 quarter-texel tiles: the largest near radius per tile, then over the 3 x 3
+tiles around) gives the gather its near kernel radius, so far-only and small-near regions keep all 32 taps inside
+their own disk. Gate neartile: with no near surface, near on == near off bit for bit (the fixed reach: 42 off); a
+16 px near circle == an oracle with exactly that reach (0; fixed: 1.35). Noleak now also holds with the near reach at
+32 px around a sharp block. 1080p total 0.058 ms near on (prep + tile + gather + composite; bar 0.15), 0.044 off. Red
+WW_CELL_DOF_LENS_NEARTILE_RED=1 keeps the fixed reach. Default programs unchanged.
+
 ## LAND1102 F (2026-11-02): the cell air's sun shadow, beads, interior E and sky visibility (MUSGI1, SHAFTS1, AIRBEAD1, DARKAIR1)
 
 Four lanes landed in batch F without an entry of their own; their numbers are from their commit bodies.

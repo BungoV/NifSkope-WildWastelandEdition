@@ -1,0 +1,4 @@
+# The thin-lens depth of field's near / far gather (lane DOFLENS1; src/gl/cellpost.cpp).
+# No conditions: never picked for a shape; cellpost.cpp selects it by name.
+
+shaders cell_ao.vert game_doflens_gather.frag
