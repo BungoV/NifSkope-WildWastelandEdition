@@ -1,3 +1,13 @@
+## COLDLINK2 (2026-11-02): the threaded cold link built; flush before the workers link
+
+- Built for the first time (land5 base). `wwColdLinkRun` now calls `glFinish` on the GUI context before any worker
+  links: the shaders and programs were made there, and a shared context is only promised to see them after a flush
+  (GL 4.6, appendix D.3). Red `WW_COLDLINK_RED=2` skips the finish; `WW_COLDLINK_RED=1` stays the serial link.
+- src/wwswitchstages.inc regenerated (tools/wwswitch_survey.py): line numbers only.
+- `WW_COLDLINK` stays off (unset = serial). The cold-start bench (3 serial, 3 four-worker, a red, one eight-worker
+  start, every one with no program cache and no driver disk cache) is queued on the nifskope lock; the default changes
+  only if four workers clearly beat serial (judge: notes/coldlink2/tools/judge.py, floor 0.6 x serial's median).
+
 ## COLDLINK1 C++ (2026-11-02): the threaded cold link, behind WW_COLDLINK (off, not built yet)
 
 - `WW_COLDLINK=<n>` (1..16; unset or 0 = the serial link as before): `updateShaders` links every program the binary

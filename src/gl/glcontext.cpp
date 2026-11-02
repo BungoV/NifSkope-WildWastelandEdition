@@ -1376,6 +1376,10 @@ static int wwColdLinkRun( const QVector< NifSkopeOpenGLContext::Program * > & st
 	QOpenGLContext *	cur = QOpenGLContext::currentContext();
 	QThread *	gui = QThread::currentThread();
 	const int	n = cur && QOpenGLContext::supportsThreadedOpenGL() ? std::min( workers, int( todo.size() ) ) : 0;
+	// lane COLDLINK2: the shaders and programs were made on this context; a shared context sees them only after a
+	// flush (GL 4.6 appendix D.3). Red WW_COLDLINK_RED=2 skips it.
+	if ( n > 0 && wwEnvInt( "WW_COLDLINK_RED" ) != 2 )
+		cur->functions()->glFinish();
 	for ( int i = 0; i < n; i++ ) {
 		QOffscreenSurface *	s = new QOffscreenSurface;
 		s->setFormat( cur->format() );
