@@ -302,6 +302,21 @@ int main( int argc, char ** argv )
 			&& gv.find( "wwCellSkinSssApply( scene );" ) < gv.find( "wwCellPostApplyLinear( scene );" ), "pin: before the linear post chain" );
 		check( cs.find( "wwEnv( \"WW_CELL_SKINSSS_RED\" ).trimmed() == \"1\"" ) != std::string::npos, "pin: live red" );
 		check( lk.find( "{ \"Skin subsurface\", \"WW/CellSkinSubsurface\" }," ) != std::string::npos, "pin: row ships off" );
+		// lane HAIRDLC04: cell facegen shapes name no BGSM and the cell writer forces Shader Type 0, so the source type
+		// (4 face, 5 skin, 6 hair) is carried to the property as extra data and read by the skin and hair gates
+		const std::string lg = readAll( root + "/src/lodgen.cpp" );
+		const std::string cv = readAll( root + "/src/cellview.cpp" );
+		const std::string gp = readAll( root + "/src/gl/glproperty.cpp" );
+		check( lg.find( "s.srcShaderType = src.get<quint32>( iShader, \"Shader Type\" );" ) != std::string::npos
+			&& lg.find( "n.srcShaderType = s.srcShaderType;" ) != std::string::npos, "pin: loader keeps the source Shader Type" );
+		check( cv.find( "( s.srcShaderType >= 4u && s.srcShaderType <= 6u ) ? s.srcShaderType : 0u" ) != std::string::npos
+			&& cv.find( "QStringLiteral( \"|T%1\" ).arg( srcSt )" ) != std::string::npos, "pin: face / skin / hair keep their own bucket" );
+		check( cv.find( "nif->set<QString>( iSt, \"Name\", QStringLiteral( \"WWSrcShaderType\" ) );" ) != std::string::npos
+			&& cv.find( "wwEnv( \"WW_CELL_SRCST_RED\" ).trimmed() != \"1\"" ) != std::string::npos, "pin: cell writer tags the shader, red" );
+		check( gp.find( "== QLatin1String( \"WWSrcShaderType\" )" ) != std::string::npos, "pin: property reads the tag" );
+		check( rd.find( "|| lsp->wwSrcShaderType == int( ShaderFlags::ST_HairTint );" ) != std::string::npos, "pin: hair gate takes facegen hair" );
+		check( rd.find( "|| lsp->wwSrcShaderType == int( ShaderFlags::ST_SkinTint )" ) != std::string::npos
+			&& rd.find( "|| lsp->wwSrcShaderType == int( ShaderFlags::ST_Facegen ) );" ) != std::string::npos, "pin: skin gate takes facegen face + skin" );
 	}
 
 	std::printf( "%s %d failed\n", fails ? "FAIL" : "PASS", fails );

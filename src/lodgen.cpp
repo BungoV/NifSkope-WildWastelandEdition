@@ -1426,6 +1426,7 @@ struct LodSrcShape
 	bool extEmit = false;                //!< lane LIGHTS2 (XEMI1): External Emittance, the BGSM's or SF1 bit 29 (cell view only)
 	QByteArray effectBlock;              //!< lane EFX1: a BGEM-less effect property, serialized (cell view only)
 	quint32 shaderSF1 = 0, shaderSF2 = 0; //!< the source shader property's flags
+	quint32 srcShaderType = 0;           //!< lane HAIRDLC04: the lighting property's Shader Type, FO4 only (cell view only)
 	float refractStrength = 0.0f;        //!< lane EFX1: the lighting property's Refraction Strength (cell view only)
 	//! Lane GLOW1: the nearest NiBillboardNode above the shape, its model-space transform and mode (cell view only).
 	bool billboard = false;
@@ -2716,6 +2717,9 @@ const QVector<LodSrcShape> & lodgenLoadModel( const QString & dataRoot,
 					const quint32 sf2 = src.get<quint32>( iShader, "Shader Flags 2" );
 					s.shaderSF1 = sf1;
 					s.shaderSF2 = sf2;
+					// lane HAIRDLC04: facegen hair (6), face (4) and skin (5) name no BGSM; their type is the only tag
+					if ( src.blockInherits( iShader, "BSLightingShaderProperty" ) && src.getBSVersion() < 151 )
+						s.srcShaderType = src.get<quint32>( iShader, "Shader Type" );
 					s.extEmit = ( sf1 & ( 1U << 29 ) ) != 0;   // lane LIGHTS2 (XEMI1)
 					nf.effectShader = src.blockInherits( iShader, "BSEffectShaderProperty" );
 					nf.waterShader = src.blockInherits( iShader, "BSWaterShaderProperty" );   // lane WATER1
@@ -3099,6 +3103,7 @@ static bool nativeLoadModelImpl( void * user, const QString & model, const Lodge
 		n.extEmit = s.extEmit;	// lane LIGHTS2 (XEMI1)
 		n.effectBlock = s.effectBlock; n.alphaFlags = s.hasAlpha ? s.alphaFlags : 0;	// lane EFX1
 		n.refractStrength = s.refractStrength;
+		n.srcShaderType = s.srcShaderType;	// lane HAIRDLC04
 		n.bakeBlend = s.bakeBlend; n.bakeBlendSrc = s.bakeBlendSrc; n.bakeBlendDst = s.bakeBlendDst;	// lane BAKE4
 		n.bakeEnv = s.bakeEnv; n.bakeSoft = s.bakeSoft;
 		for ( int k = 0; k < 3; k++ )

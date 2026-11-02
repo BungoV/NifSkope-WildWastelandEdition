@@ -16,7 +16,7 @@ tail -1 "$OUT/green.txt"; tail -1 "$OUT/red.txt"
 B=1
 if [ -n "$BASE" ]; then
 	mkdir -p "$OUT/base"	# tar overwrites; the base has no new files, so none of the branch's can linger
-	git -C "$ROOT" archive "$BASE" res/shaders src/gl src/glview.cpp | tar -x -C "$OUT/base"
+	git -C "$ROOT" archive "$BASE" res/shaders src/gl src/glview.cpp src/lodgen.cpp src/cellview.cpp | tar -x -C "$OUT/base"
 	timeout 60 "$OUT/skinsss.exe" "$OUT/base" > "$OUT/base.txt"; B=$?
 	tail -1 "$OUT/base.txt"
 fi

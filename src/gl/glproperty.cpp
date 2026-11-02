@@ -1993,6 +1993,16 @@ void BSLightingShaderProperty::updateParams( const NifModel * nif )
 	}
 	isVertexAlphaAnimation = hasSF2(ShaderFlags::SLSF2_Tree_Anim);
 
+	// lane HAIRDLC04: the cell view tags a face / skin / hair source's type on the property (src/cellview.cpp)
+	wwSrcShaderType = -1;
+	if ( const QModelIndex iEx = nif->getIndex( iBlock, "Extra Data List" ); iEx.isValid() ) {
+		for ( int d = 0; d < nif->rowCount( iEx ); d++ ) {
+			const QModelIndex iSt = nif->getBlockIndex( nif->getLink( nif->getIndex( iEx, d ) ), "NiIntegerExtraData" );
+			if ( iSt.isValid() && nif->get<QString>( iSt, "Name" ) == QLatin1String( "WWSrcShaderType" ) )
+				wwSrcShaderType = int( nif->get<quint32>( iSt, "Integer Data" ) );
+		}
+	}
+
 	ShaderMaterial * m = ( material && material->isValid() ) ? static_cast<ShaderMaterial*>(material) : nullptr;
 	if ( m ) {
 		alpha = m->fAlpha;

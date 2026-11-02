@@ -238,6 +238,7 @@ struct Bucket
 	 * so the refraction preview bends what lies behind it. */
 	bool refract = false;
 	float refractStrength = 0.0f;
+	quint32 srcShaderType = 0;  //!< lane HAIRDLC04: a face (4), skin (5) or hair (6) source, tagged on the shader
 	bool emits = false;
 	float emissiveScale = 1.0f;
 	bool withColour = false;
@@ -673,6 +674,14 @@ bool emitBucket( NifModel * nif, const QModelIndex & iRoot, const Bucket & b,
 		}
 		QModelIndex iShader = cellNewBlock( nif, QStringLiteral( "BSLightingShaderProperty" ) );
 		nif->set<quint32>( iShader, "Shader Type", 0 );
+		/* lane HAIRDLC04: a face / skin / hair source's type rides on the shader as extra data for the look rows
+		 * (Shader Type stays 0: tint maps and every other path are untouched). Red WW_CELL_SRCST_RED=1: no tag. */
+		if ( b.srcShaderType && wwEnv( "WW_CELL_SRCST_RED" ).trimmed() != "1" ) {
+			QModelIndex iSt = cellNewBlock( nif, QStringLiteral( "NiIntegerExtraData" ) );
+			nif->set<QString>( iSt, "Name", QStringLiteral( "WWSrcShaderType" ) );
+			nif->set<quint32>( iSt, "Integer Data", b.srcShaderType );
+			addLink( nif, iShader, QStringLiteral( "Extra Data List" ), nif->getBlockNumber( iSt ) );
+		}
 		/* A Refraction bucket keeps Shader Flags 1 bit 15 and its strength, so the refraction preview bends
 		 * the scene behind it instead of showing a solid swirled disk. */
 		nif->set<quint32>( iShader, "Shader Flags 1",
@@ -3843,7 +3852,10 @@ static bool cellBuild( NifModel * nif, const CellSceneSpec & specAsked, CellChun
 			+ own;   // a billboard placement's own bucket
 		// lane GAPFIX1: the game honours a model's Decal flag without a material file; keyed only when set
 		const quint32 decalBits = ( effect || inlineFx || refract || fxdNoFlag ) ? 0U : ( s.shaderSF1 & 0x0C000000U );
-		const QString keyD = decalBits ? key + QStringLiteral( "|D%1" ).arg( decalBits ) : key;
+		const QString keyD0 = decalBits ? key + QStringLiteral( "|D%1" ).arg( decalBits ) : key;
+		// lane HAIRDLC04: face / skin / hair sources keep their own bucket, so the shader can carry the type
+		const quint32 srcSt = ( s.srcShaderType >= 4u && s.srcShaderType <= 6u ) ? s.srcShaderType : 0u;
+		const QString keyD = srcSt ? keyD0 + QStringLiteral( "|T%1" ).arg( srcSt ) : keyD0;
 		decalFlagShapes += decalBits ? 1 : 0;
 		auto it = buckets.find( keyD );
 		if ( it != buckets.end() )
@@ -3886,6 +3898,7 @@ static bool cellBuild( NifModel * nif, const CellSceneSpec & specAsked, CellChun
 			refractBuckets++;
 		}
 		b.decalSF1 = decalBits;
+		b.srcShaderType = srcSt;
 		decalFlagBuckets += decalBits ? 1 : 0;
 		return buckets.insert( keyD, b ).value();
 	};

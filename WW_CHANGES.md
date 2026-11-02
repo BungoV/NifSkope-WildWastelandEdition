@@ -13,6 +13,15 @@ blurred light includes the specular (a known error). Red `WW_CELL_SKINSSS_RED=1`
 The NIF view (no opaque pass of its own) is not covered. tests/skinsss checks the twin against FO4CS's law; its
 WWSKINSSS_RED and the base text must fail.
 
+HAIRDLC04 (same lane): the cell view's characters are drawn from their facegen heads, whose shapes name no BGSM (vanilla
+1094 facegen NIFs: 1252 hair shapes of Shader Type 6, 1077 face of type 4, 1045 skin of type 5; DLC04 224 NIFs: 306 /
+223 / 221), and the cell writer forces Shader Type 0. So no cell face got the skin tag and no cell hair got the Hair
+specular row, DLC04's included (its 14 hair BGSMs all have bHair 0, its hair head-part NIFs type 0). The loader now keeps
+the source Shader Type, face / skin / hair sources keep their own bucket, and the writer hangs an NiIntegerExtraData
+"WWSrcShaderType" on the shader (Shader Type stays 0, so tint maps and every other path are as before). The skin and
+hair gates in renderer.cpp read it. Red `WW_CELL_SRCST_RED=1`: no tag. A lone head-part NIF in the NIF view still
+follows its own file (type 0, bHair 0: not hair).
+
 ## MATLOOK3 TRANSLUC1-THICK (2026-11-02): a thick translucent object takes the sun through its thickness
 
 Under `WW_CELL_TRANSL=1` a v8+ material with bTranslucencyThickObject now takes FO4CS's sun share in the exterior cell:

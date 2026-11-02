@@ -2620,7 +2620,8 @@ bool Renderer::setupProgramCE1( const NifModel * nif, Program * prog, Shape * me
 				// lane MATLOOK3: hair and eye draws (res/shaders/ww_hair_eye.glsl, rows Hair specular / Eye cornea)
 				if ( prog->uniLocation( "wwHairOn" ) >= 0 || prog->uniLocation( "wwEyeOn" ) >= 0 ) {
 					const ShaderMaterial *	bgsm = ( mat && mat->isShaderMaterial() ) ? static_cast< ShaderMaterial * >( mat ) : nullptr;
-					const bool	hair = ( bgsm && bgsm->bHair ) || lsp->isST( ShaderFlags::ST_HairTint );
+					const bool	hair = ( bgsm && bgsm->bHair ) || lsp->isST( ShaderFlags::ST_HairTint )
+						|| lsp->wwSrcShaderType == int( ShaderFlags::ST_HairTint );	// lane HAIRDLC04: cell facegen hair
 					const bool	eye = ( bgsm && bgsm->bEnvironmentMappingEye ) || lsp->isST( ShaderFlags::ST_EyeEnvmap );
 					if ( prog->uniLocation( "wwHairOn" ) >= 0 )
 						prog->uni1b( "wwHairOn", hair );
@@ -2631,7 +2632,9 @@ bool Renderer::setupProgramCE1( const NifModel * nif, Program * prog, Shape * me
 				if ( prog->uniLocation( "wwSkinOn" ) >= 0 ) {
 					const ShaderMaterial *	bgsm = ( mat && mat->isShaderMaterial() ) ? static_cast< ShaderMaterial * >( mat ) : nullptr;
 					prog->uni1b( "wwSkinOn", ( bgsm && ( bgsm->bSkinTint || bgsm->bFacegen ) )
-						|| lsp->isST( ShaderFlags::ST_SkinTint ) || lsp->isST( ShaderFlags::ST_Facegen ) );
+						|| lsp->isST( ShaderFlags::ST_SkinTint ) || lsp->isST( ShaderFlags::ST_Facegen )
+						|| lsp->wwSrcShaderType == int( ShaderFlags::ST_SkinTint )	// lane HAIRDLC04: cell facegen
+						|| lsp->wwSrcShaderType == int( ShaderFlags::ST_Facegen ) );
 				}
 			} else {
 				FloatVector4	translucencyColorAndScale( 1.0f, 1.0f, 1.0f, -1.0f );
