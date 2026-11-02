@@ -102,6 +102,8 @@ bool wwCellDecalPomFor( const void * nif, int block, float & scale, float & step
  *  fade" under Objects (WwLook::ObjectFade, pin WW_CELL_OBJFADE), ships off. Red WW_CELL_OBJFADE_RED=decalonly. */
 bool wwCellObjFadeOn();
 const WwObjFade::Config & wwCellObjFadeConfig();
+//! LOCMULT: the document's location "Actor Fade Mult" (LCTN ANAM; 0 = none), the actors' multiplier x it
+void wwCellObjFadeSetLocation( const void * nif, float actorFadeMult );
 //! lane BINDLESSMDI1: wwCellDecalFadeRanges may draw the shape its own way (no side effect)
 bool wwCellDecalFadeHas( Scene * scene, int block );
 /*! Lane DECALANGLE: a placed decal shape whose vertex alpha is dot(N, D) (src/celldecalangle.h): the shader runs

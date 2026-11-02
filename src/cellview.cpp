@@ -5495,6 +5495,13 @@ static bool cellBuild( NifModel * nif, const CellSceneSpec & specAsked, CellChun
 				rf.c = p.pos + p.rot * ( fb->first * p.scale ) - origin;
 				rf.r = fb->second * p.scale;
 				rf.type = p.ref ? WwObjFade::typeOf( lb.type, isActor ) : quint8( WwObjFade::None );
+				if ( rf.type != WwObjFade::None && !isActor ) {	// the late items' bits (the cull reads them by switch)
+					const ESMFile::ESMRecord * fr = world.plugin() ? world.plugin()->findRecord( p.ref ) : nullptr;
+					if ( ( lb.recordFlags & 0x8000u ) || ( fr && ( fr->flags & 0x8000u ) ) )
+						rf.type |= WwObjFade::VisibleDistant;	// VWD: the ref's or its base's Visible When Distant
+					if ( std::memcmp( &lb.type, "LIGH", 4 ) == 0 && ( world.light( p.base ).flags & 0x2u ) )
+						rf.type |= WwObjFade::CarriedLight;	// LIGH: DATA flag "Can be Carried"
+				}
 				b.runFade.push_back( rf );
 			}
 			for ( size_t t = 0; t + 2 < s.geom.tris.size(); t += 3 ) {
@@ -7239,6 +7246,24 @@ static bool cellBuild( NifModel * nif, const CellSceneSpec & specAsked, CellChun
 	cellPublishLighting( nif, world, spec, lightRefs, primRefs, origin, nullptr, &lightStartOff, &nifxFix,
 		spawnAt ? spawnXY : nullptr );
 	cellAirZonePublish( nif, world, spec );	// lane AIRZONE1: the cells whose hand-placed volumes this view reads
+	{	/* lane OBJFADE1 LOCMULT: the location's "Actor Fade Mult" (LCTN ANAM) of the cell the view opened (the game
+		 * takes the player's current location; the view rules the opened cell stands in) */
+		float actorFadeMult = 0.0f;
+		ESMFile * fesm = world.plugin();
+		const quint32 fcell = spec.interior ? world.interior().cellForm : world.cellForm( spec.cx, spec.cy );
+		const std::vector<std::uint32_t> floc = fesm && fcell ? wwSkyPlaceLocationChain( *fesm, fcell ) : std::vector<std::uint32_t>();
+		if ( const ESMFile::ESMRecord * lr = floc.empty() ? nullptr : fesm->findRecord( floc.front() ) ) {
+			if ( *lr == "LCTN" ) {
+				ESMFile::ESMField f( *fesm, *lr );
+				while ( f.next() )
+					if ( f == "ANAM" && f.size() >= 4 ) {
+						actorFadeMult = f.readFloat();
+						break;
+					}
+			}
+		}
+		wwCellObjFadeSetLocation( nif, actorFadeMult );
+	}
 	{	// lane INTSKY1: the sun's place (the worldspace's climate .recx location, the vanilla table, the parent, Boston)
 		QStringList plugins;
 		for ( const QString & pl : world.pluginList().split( QLatin1Char( ',' ), Qt::SkipEmptyParts ) )
