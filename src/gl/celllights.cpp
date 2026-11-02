@@ -4902,6 +4902,12 @@ AoSortedList & aoSortedList()
 }
 }
 
+bool wwCellSortedMemo()
+{
+	WW_SWITCH_STATIC( bool, on, wwSwitchEcho( "sorted memo", wwEnvInt( "WW_CELL_SORTMEMO_RED" ) != 1 ) );
+	return on;
+}
+
 bool wwCellAoSortedTake( Scene * scene, NodeList & out )
 {
 	AoSortedList & l = aoSortedList();
@@ -5074,8 +5080,13 @@ void wwCellAoPass( Scene * scene, bool run )
 		// lane PERF2FIX1: the sorted draws keep their order; the cut skips only those that wrote nothing here last frame
 		if ( opaqueOnly )
 			wwOpaqueCutArm( true, "ao" );
+		const bool sortedMemo = memo && wwCellSortedMemo();
+		if ( sortedMemo )
+			wwSetupMemoArm( true, "cellProbe" );
 		Scene::drawDeferredShapes( second );
 		scene->drawShapeEffects();
+		if ( sortedMemo )
+			wwSetupMemoArm( false );
 		if ( opaqueOnly )
 			wwOpaqueCutArm( false, "ao" );
 	}

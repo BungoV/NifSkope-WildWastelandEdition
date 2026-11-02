@@ -524,8 +524,13 @@ void wwCellSsrPass( Scene * scene, bool run )
 		wwSetupMemoArm( false );
 	if ( opaqueOnly )
 		wwOpaqueCutArm( true, "ssr" );
+	const bool sortedMemo = memo && wwCellSortedMemo();	// lane PERFHUNT2: as the main sorted pass
+	if ( sortedMemo )
+		wwSetupMemoArm( true, "cellProbe" );
 	Scene::drawDeferredShapes( sceneSecond );
 	scene->drawShapeEffects();
+	if ( sortedMemo )
+		wwSetupMemoArm( false );
 	if ( opaqueOnly )
 		wwOpaqueCutArm( false, "ssr" );
 	s.pass = false;
@@ -566,6 +571,9 @@ void wwCellSsrPass( Scene * scene, bool run )
 			s.pass = true;
 			s.waterRay = true;
 			s.gbuf = ao.gbuf;
+			const bool rayMemo = memo && wwCellSortedMemo();	// lane PERFHUNT2: the rays' draws as the main sorted pass
+			if ( rayMemo )
+				wwSetupMemoArm( true );
 			if ( usePrev ) {	// lane WATERREFL1: the previous frame stood in for step 1, so nothing was collected
 				/* lane PERFHUNT2: that walk drew the whole opaque scene here with both masks shut (no water is opaque;
 				 * wwCellSsrDraw) only to fill the sorted list, and the obscurance walk of this paint already collected the
@@ -686,6 +694,8 @@ void wwCellSsrPass( Scene * scene, bool run )
 						ssrWaterRayCheck( fn, g.wray.fbo, W, H, oldWalk );
 				}
 			}
+			if ( rayMemo )
+				wwSetupMemoArm( false );
 			s.pass = false;
 			s.waterRay = false;
 			g.haveWater = true;
