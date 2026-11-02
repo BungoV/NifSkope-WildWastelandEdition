@@ -103,45 +103,96 @@ float airLeakSun = 1.0;
 
 /* lane FOGLEAK1 fix 1: the env share from the ray-traced volume. The six-axis cube's L0 + L1 scatter (volCubeScatter)
  * needs only the irradiance at +dW and -dW: for an L1 field (2/3) sum E = 2 (E+ + E-) and sum (E+a - E-a) dW.a =
- * E+ - E-. So two reads (one call site, a loop on a uniform bound), each as a surface facing that side (n = o = d:
- * a froxel has no normal; the surfaces' backface, Chebyshev and crush weights). The first read also takes the sky
- * visibility toward the sun (cellDdgiTwo) for fix 2. Returns fade x the scatter in the ambient's unit (E / pi, as
- * cellLit's gi = cellGiE / pi); fade = the volume's cover (the flat ambient takes 1 - fade, as on the surfaces) */
+ * E+ - E-. One walk of the 8 probes round P (the cascades dense to coarse by their tight fade, as cellDdgiRead walks
+ * them) with ONE weight a probe, trilinear x Chebyshev toward P (a froxel has no normal: no backface weight, no bias;
+ * fix 3's weights), reading each probe's tile at +dW, -dW and (fix 2) its sky visibility toward the sun. Two
+ * cellDdgiRead calls cost 2.3 ms more on the offline 160 x 90 x 64 inject (tests/fogleak/fogleak_check.py C), this
+ * walk 16 fetches a probe instead of 26. Returns fade x the scatter in the ambient's unit (E / pi, as cellLit's
+ * gi = cellGiE / pi); fade = the volume's cover (the flat ambient takes 1 - fade, as on the surfaces) */
 vec3 airLeakEnv( vec3 P, vec3 dW, out float fade )
 {
 	fade = 0.0;
 	airLeakSun = 1.0;
-	if ( !cellDdgiOn || ( volLeakRed & 3 ) == 3 )
+	// read only for a term that takes it: the ambient (fix 1) or the sun outdoors (fix 2)
+	bool needEnv = ( volTerms & 8 ) != 0 && ( volLeakRed & 1 ) == 0;
+	bool needSun = ( volTerms & 1 ) != 0 && cellHasDir && !cellInterior && ( volLeakRed & 2 ) == 0;
+	if ( !cellDdgiOn || !( needEnv || needSun ) )
 		return vec3( 0.0 );
-	bool two = cellDdgiTwo;
-	vec3 d2 = cellDdgiD2;
-	cellDdgiTwo = true;
-	cellDdgiD2 = cellHasDir ? normalize( cellDirTo ) : vec3( 0.0, 0.0, 1.0 );
+	vec3 sd = needSun ? normalize( cellDirTo ) : vec3( 0.0, 0.0, 1.0 );
 	vec3 Ep = vec3( 0.0 ), Em = vec3( 0.0 );
-	float f = 1.0, vs = 1.0;
-	for ( int s = 0; s < cellGiLoop8 / 4; s++ ) {
-		vec3 d = s == 0 ? dW : -dW;
-		CellDdgiOut r = cellDdgiRead( P, d, d, d );
-		f = min( f, r.w > 0.0 ? r.fade : 0.0 );
-		if ( s == 0 ) {
-			Ep = r.E;
-			vs = r.vis2;
-		} else {
-			Em = r.E;
+	float vs = 0.0, left = 1.0;
+#ifdef WW_CELL_RTDDGI_CASCADES
+	for ( int c = 0; c < cellDdgiCount && left > 0.0; c++ ) {
+		cellDdgiC = c;
+		vec4 O = cellDdgiCOrigin[c], S = cellDdgiCStep[c];
+		ivec4 Dm = cellDdgiCDims[c];
+		int base = cellDdgiCBase[c];
+		float tight = 1.0;
+#else
+	for ( int c = 0; c < 1; c++ ) {
+		vec4 O = cellDdgiOrigin, S = cellDdgiStep;
+		ivec4 Dm = cellDdgiDims;
+		int base = 0;
+		float tight = 0.0;
+#endif
+		vec3 g = ( P - O.xyz ) / S.xyz;
+		ivec3 b = clamp( ivec3( floor( g ) ), ivec3( 0 ), max( Dm.xyz - 2, ivec3( 0 ) ) );
+		vec3 a = clamp( g - vec3( b ), 0.0, 1.0 );
+		vec3 e = min( g, vec3( Dm.xyz - 1 ) - g ) - tight;
+		float fd = clamp( min( e.x, min( e.y, e.z ) ), 0.0, 1.0 );
+		if ( fd <= 0.0 )
+			continue;
+		vec3 sp = vec3( 0.0 ), sm = vec3( 0.0 );
+		float sv = 0.0, ws = 0.0, cover = 0.0;
+		for ( int k = 0; k < cellGiLoop8; k++ ) {
+			ivec3 o = ivec3( k % 2, ( k / 2 ) % 2, k / 4 );
+			ivec3 q = min( b + o, Dm.xyz - 1 );
+			int p = q.x + Dm.x * ( q.y + Dm.y * q.z );
+			vec4 pr = texelFetch( cellDdgiAtlas, base + 192 * Dm.w + p );
+			vec3 t = mix( vec3( 1.0 ) - a, a, vec3( o ) );
+			float w = t.x * t.y * t.z;
+			int st = int( pr.w + 0.5 );
+			if ( st != 2 ) {	// cellDdgiRead's cover: Off keeps its share, a missing probe does not
+				cover += st == 0 ? w : 0.0;
+				continue;
+			}
+			cover += w;
+			vec3 bp = O.xyz + vec3( q ) * S.xyz + pr.xyz - P;
+			float rr = length( bp );
+			if ( rr > 0.0 ) {
+				vec4 m = cellDdgiTile( p, bp * ( -1.0 / rr ), 16 );
+				w *= cellDdgiChebyshev( rr, m.x, m.y );
+			}
+			vec4 ea = cellDdgiTile( p, dW, 8 );
+			sp += pow( max( ea.rgb, vec3( 0.0 ) ), vec3( 2.5 ) ) * w;
+			if ( needEnv ) {
+				vec4 eb = cellDdgiTile( p, -dW, 8 );
+				sm += pow( max( eb.rgb, vec3( 0.0 ) ), vec3( 2.5 ) ) * w;
+			}
+			if ( needSun )
+				sv += cellDdgiTile( p, sd, 8 ).w * w;
+			ws += w;
 		}
+		if ( ws <= 0.0 )
+			continue;
+		float take = fd * min( cover, 1.0 ) * left;
+		vec3 mp = sp / ws, mm = sm / ws;
+		Ep += take * mp * mp;
+		Em += take * mm * mm;
+		vs += take * sv / ws;
+		left -= take;
 	}
-	cellDdgiTwo = two;
-	cellDdgiD2 = d2;
+	float f = 1.0 - left;
 	if ( f <= 0.0 )
 		return vec3( 0.0 );
 	// fix 2 (a ruling, RESULTS.md): sky visibility toward the sun 0.1 -> 0 .. 0.4 -> 1 (open ground reads 0.6+)
-	if ( ( volLeakRed & 2 ) == 0 && cellHasDir )
-		airLeakSun = mix( 1.0, clamp( ( vs - 0.1 ) * ( 1.0 / 0.3 ), 0.0, 1.0 ), f );
-	if ( ( volLeakRed & 1 ) != 0 )
+	if ( needSun )
+		airLeakSun = mix( 1.0, clamp( ( vs / f - 0.1 ) * ( 1.0 / 0.3 ), 0.0, 1.0 ), f );
+	if ( !needEnv )
 		return vec3( 0.0 );
 	fade = f;
-	Ep *= 1.0 / PI;
-	Em *= 1.0 / PI;
+	Ep *= 2.0 / f;	// the read's decode: mean^2 x 2 pi, then / pi to the ambient's unit
+	Em *= 2.0 / f;
 	return f * 0.25 * max( 2.0 * ( Ep + Em ) + 3.0 * volGi.w * ( Ep - Em ), vec3( 0.0 ) ) * volGi.rgb;
 }
 
