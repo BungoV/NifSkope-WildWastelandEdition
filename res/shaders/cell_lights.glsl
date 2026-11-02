@@ -27,6 +27,13 @@ uniform vec3 cellDirTo;				// world, TO the light
 uniform bool cellInterior;
 uniform vec3 cellCenter;
 uniform int cellProbe;
+// lane MATLOOK1 (TRANSLUC1): a v8+ material's thin translucency (WW_CELL_TRANSL=1); the bindless twin keeps the old path
+#if defined( WW_CELL_TRANSL ) && !defined( WW_BINDLESS )
+#define WW_TR 1
+#endif
+#ifdef WW_TR
+#include "cell_transl.glsl"
+#endif
 // probe 6 is multiplied by this (WW_CELL_LIT_PROBE_GAIN, debug only; 1 otherwise)
 uniform float cellProbeGain;
 // the Ambient Only volumes (src/gl/celllights.h): world center + 1.22077 x radius, and the
@@ -1898,8 +1905,13 @@ void cellSumLights( vec3 P, vec3 N, vec3 Vw, float gloss, out vec3 diff, out vec
 			continue;
 		vec3 L = Lv / max( d, 0.001 );
 		float NdotL = dot( N, L );
+#ifdef WW_TR
+		if ( NdotL <= 0.0 && !wwTrLive )	// a translucent pixel keeps the lights behind it (MATLOOK1)
+			continue;
+#else
 		if ( NdotL <= 0.0 )
 			continue;
+#endif
 		vec4 t1 = texelFetch( cellLights, i * CELL_TPL + 1 );
 		if ( !cellShapeIn( i, P, t0.xyz, t1.w ) )
 			continue;
@@ -1916,14 +1928,32 @@ void cellSumLights( vec3 P, vec3 N, vec3 Vw, float gloss, out vec3 diff, out vec
 		}
 		if ( a > 0.0 )
 			g = cellGobo( i, -Lv, gAx, t1.w > -1.5 );	// GOBO2
+#ifdef WW_TR
+		// MATLOOK1: the back of a thin surface takes its front's shadow (the normal offset turned to the light)
+		if ( a > 0.0 )
+			a *= cellShadowF( i, P, NdotL < 0.0 ? -N : N ) * cellContactLocal( i, P );
+		if ( NdotL <= 0.0 ) {
+			if ( a > 0.0 )
+				wwTrAdd += wwTrExcess( N, L, Vw, t1.rgb * g * a, vec3( 0.0 ) );
+			continue;
+		}
+#else
 		if ( a > 0.0 )
 			a *= cellShadowF( i, P, N ) * cellContactLocal( i, P );	// lane SHADOW1; GAPLOOK1 (C8)
+#endif
 		vec3 E = t1.rgb * g * a * NdotL;
 		diff += E;
 		// No Rim Lighting (2) drops the back-light; Ignore Roughness (4) also takes Lambert's diffuse
 		int fl = int( t3.w + 0.5 ) & ( ( cellRed & 64 ) != 0 ? 1 : 7 );	// WW_CELL_LIT_RED=rimflags
 		float rim = ( fl & 6 ) != 0 ? 0.0 : cellRim( N, L, Vw, gloss );
+#ifdef WW_TR
+		vec3 eOn = E * ( ( ( fl & 4 ) != 0 ? 1.0 : cellOren( N, L, Vw, NdotL, gloss ) ) + rim );
+		diffOn += eOn;
+		if ( wwTrLive )	// FO4CS: max( T, albedo x this light's diffuse ), the excess beside the diffuse
+			wwTrAdd += wwTrExcess( N, L, Vw, t1.rgb * g * a, wwTrAlb * eOn );
+#else
 		diffOn += E * ( ( ( fl & 4 ) != 0 ? 1.0 : cellOren( N, L, Vw, NdotL, gloss ) ) + rim );
+#endif
 		cellRimSum += E * rim;
 		// Non Specular (1) has no specular in the game's light shaders either
 		if ( ( fl & 1 ) == 0 || ( cellRed & 65536 ) != 0 )	// WW_CELL_SPEC_RED=nonspec
@@ -1934,6 +1964,9 @@ void cellSumLights( vec3 P, vec3 N, vec3 Vw, float gloss, out vec3 diff, out vec
 		diffOn *= 1.0 - fw;
 		cellRimSum *= 1.0 - fw;
 		spec *= 1.0 - fw;
+#ifdef WW_TR
+		wwTrAdd *= 1.0 - fw;
+#endif
 	}
 }
 
@@ -2071,7 +2104,15 @@ vec3 cellLit( vec3 color, vec3 albedo, vec3 normalView, vec3 posView, vec3 Vview
 	vec3 Vw = cellWorldDir( Vview );
 	vec3 diff, diffOn, spec;
 	float gloss = 1.0 - sqrt( alphaR );	// the program's rough = 1 - gloss, alphaR = rough^2
+#ifdef WW_TR
+	wwTrAdd = vec3( 0.0 );
+	wwTrAlb = albedo * albedo;
+	wwTrLive = wwTrKind > 0.5 && wwTrKind < 1.5;	// thin only: a thick object takes no local light (FO4CS)
+#endif
 	cellSumLights( P, N, Vw, gloss, diff, diffOn, spec );
+#ifdef WW_TR
+	wwTrLive = false;
+#endif
 	vec3 alb = albedo * albedo;
 	vec3 gi = cellSsgiE( CELL_GI_UP ? cellGiE( P, N ) : vec3( 0.0 ) ) * 0.31830989;
 	vec3 farF, farGP;	// the far placed light (diffuse only); the GI's placed share out x w
@@ -2082,6 +2123,9 @@ vec3 cellLit( vec3 color, vec3 albedo, vec3 normalView, vec3 posView, vec3 Vview
 		diffOn += farW * farF;
 	}
 	vec3 add = alb * ( diffOn + gi ) + spec * specMask * specCol;	// albedo x the game's diffuse; the GI stays Lambert
+#ifdef WW_TR
+	add += wwTrAdd;
+#endif
 	/* an exterior with the weather's sun takes the game's terms: the sun through Oren-Nayar + rim, shadowed by the
 	 * cascades (cellDirVis), and the cube at the game's strength; color is then the viewport's ambient alone.
 	 * Without the sun: the viewport light plus the cell's lights. */
@@ -2100,6 +2144,11 @@ vec3 cellLit( vec3 color, vec3 albedo, vec3 normalView, vec3 posView, vec3 Vview
 #endif
 		vec3 linx = color * color * ambDim + alb * Edx + spec * specMask * specCol + cellExtSpec
 		          + cubeK * specDim * ( ( cellRed & 512 ) != 0 ? Ex : Edx + cellExtAmb ) + cellReflAdd;
+#ifdef WW_TR
+		// FO4CS's sun share: the excess over the unshadowed diffuse, under the cascades' shadow
+		linx += wwTrAdd + cellDirVis * wwTrExcess( N, Ld, Vw, cellDirColor, nl > 0.0
+		      ? alb * cellDirColor * nl * ( cellOren( N, Ld, Vw, nl, gloss ) + cellRim( N, Ld, Vw, gloss ) ) : vec3( 0.0 ) );
+#endif
 		return sqrt( max( linx, vec3( 0.0 ) ) ) + emissive;
 	}
 	// the light reaching this point (a white surface would show it): the cubemap reflection is lit by it,
@@ -2122,6 +2171,15 @@ vec3 cellLit( vec3 color, vec3 albedo, vec3 normalView, vec3 posView, vec3 Vview
 	}
 	// the game multiplies its cube term by the diffuse light (Ed); debug cubeold takes the Lambert sum
 	vec3 lin = alb * Ed + spec * specMask * specCol + cubeK * ( ( cellRed & 512 ) != 0 ? E : Ed ) + cellReflAdd;
+#ifdef WW_TR
+	lin += wwTrAdd;
+	if ( cellHasDir ) {
+		vec3 Ld = normalize( cellDirTo );
+		float nl = dot( N, Ld );
+		lin += wwTrExcess( N, Ld, Vw, cellDirColor, nl > 0.0
+		     ? alb * cellDirColor * nl * ( cellOren( N, Ld, Vw, nl, gloss ) + cellRim( N, Ld, Vw, gloss ) ) : vec3( 0.0 ) );
+	}
+#endif
 	return sqrt( max( lin, vec3( 0.0 ) ) ) + emissive;
 }
 

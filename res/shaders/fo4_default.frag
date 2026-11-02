@@ -920,6 +920,14 @@ void main()
 	// lane PRTP3: the cell's own lights (src/gl/celllights.h)
 	// lane GAPFIX1: the game's deferred lights read only the spec scale (pool1 findings 5); blended draws are forward and keep the colour
 	cellSpecTint = ( ( alphaFlags & 8 ) != 0 || ( cellRed & 262144 ) != 0 ) ? specColor : vec3( 1.0 );	// WW_CELL_SPEC_RED=tint
+#ifdef WW_TR
+	// lane MATLOOK1 (TRANSLUC1): the pixel's translucency record (cell_transl.glsl), read by cellLit
+	if ( cellOn && wwTrFlags.z > 0.5 ) {
+		vec4 lm = texture( WwTrLightMap, offset );
+		wwTrRecord( wwTrCol.rgb, wwTrFlags.y > 0.5, albedo * albedo, lm.b, wwTrCol.a, wwTrFlags.w, lm.a * glowMult > 0.0,
+		            wwTrFlags.x > 0.5 );
+	}
+#endif
 	if ( cellOn )
 		color.rgb = cellLit( color.rgb, albedo, normal, -ViewDir, V, specMask, cellSpecTint, alphaR, kSmith,
 		                     emissive * glowScaleSRGB, cubeK );
