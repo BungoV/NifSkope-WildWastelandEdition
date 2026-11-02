@@ -8,7 +8,9 @@
  * MIRRORS (tests/reflcensus/run.sh greps each literal there; a drift fails the gate):
  *   placement  cellreflprobe.cpp: the 3x3 outdoor grid of kBox 2048 boxes round floor(cam/2048), z = camZ +- 1024,
  *              camZ = round(cam.z/256)*256, the probe at the box centre xy and camZ; the camera probe (slot 0) at the
- *              camera snapped to 128, half box 4096,4096,2048 outdoors and 1024,1024,512 indoors.
+ *              camera snapped to 128, half box 4096,4096,2048 outdoors and 1024,1024,512 indoors. With a footprint
+ *              (--fit, WW_CELL_REFLPLACE=1; lane REFLPLACE1) the interior grid probes go through reflplace::fit, the
+ *              pass's own call (kept, moved into a room column of their box, or dropped); red place = the old grid.
  *   capture    near 4, far = reach = max(2*|box far corner from the probe|, 4096), PLANAR (the cube face's depth),
  *              so a texel in direction d sees t in [4/m, reach/m], m = max|d_i|.
  *   relight    the 64x64 tile, texel centre uv, rpOctDecode; a miss below the horizon = d.z < 0 (wwSkyBelow);
@@ -21,6 +23,7 @@
 #include <vector>
 
 #include "probebvh.h"
+#include "reflplace.h"   // lane REFLPLACE1: the interior grid probes fitted into the geometry (the pass's own rule)
 
 namespace reflcensus
 {
@@ -35,6 +38,7 @@ enum Red : int {
 	RedNoReach = 2,   // no far plane: every ray runs to the soup's end (hits rise where the reach cut them)
 	RedRoof = 4,      // lane INTGI1: --auto --interior puts the cameras on the topmost surface again (the roof)
 	RedStand = 8,     // every probe counts as standing in the geometry (no split of the misses past the soup)
+	RedPlace = 16,    // lane REFLPLACE1: with a footprint (--fit) the old interior grid placement (WW_CELL_REFLPLACE_RED)
 };
 
 struct Probe
@@ -42,6 +46,7 @@ struct Probe
 	double pos[3], bmin[3], bmax[3];
 	int kind = 1;     // 0 the camera probe (slot 0), 1 a grid box
 	int gi = 0, gj = 0;
+	int fit = -1;     // lane REFLPLACE1: reflplace::Fit of an interior grid probe (-1 not fitted)
 };
 
 struct Count
@@ -53,8 +58,11 @@ struct Count
 	double reach = 0.0;
 };
 
-//! the probes the pass places round a camera: the camera probe first, then the 3x3 grid (the pass keeps all 9)
-inline void place( const double cam[3], bool interior, std::vector<Probe> & out )
+/*! the probes the pass places round a camera: the camera probe first, then the 3x3 grid (the pass keeps all 9).
+ *  lane REFLPLACE1: fp (WW_CELL_REFLPLACE=1, the soup's footprint) fits interior grid probes into the geometry
+ *  (reflplace.h fit: kept, moved, dropped ones left out); red RedPlace keeps the old placement */
+inline void place( const double cam[3], bool interior, std::vector<Probe> & out, const reflplace::Footprint * fp = nullptr,
+	int red = RedNone )
 {
 	out.clear();
 	Probe c;
@@ -82,6 +90,11 @@ inline void place( const double cam[3], bool interior, std::vector<Probe> & out 
 				p.pos[a] = p.bmin[a] + kBox * 0.5;
 			}
 			p.pos[2] = camZ;
+			if ( interior && fp && !( red & RedPlace ) ) {
+				p.fit = reflplace::fit( *fp, p.bmin, p.bmax, p.pos );
+				if ( p.fit == reflplace::Dropped )
+					continue;
+			}
 			out.push_back( p );
 		}
 }

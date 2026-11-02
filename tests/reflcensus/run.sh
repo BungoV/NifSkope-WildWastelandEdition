@@ -3,7 +3,7 @@
 # (src/reflcensus.h through the bake's tracer, against ray-plane arithmetic) green and with both reds, then checks
 # that every literal reflcensus.h mirrors is still in the pass and its shaders (a drift there fails here).
 #   tests/reflcensus/run.sh <out dir>       (from the tree root; CXX defaults to g++, UCRT64 first on PATH)
-# Green must print "REFLCENSUS PASS <n>"; red lift must "FAIL below:", red noreach "FAIL hits:", red roof "FAIL floors:", red stand "FAIL stand:"; the drift check must
+# Green must print "REFLCENSUS PASS <n>"; red lift must "FAIL below:", red noreach "FAIL hits:", red roof "FAIL floors:", red stand "FAIL stand:", red place "FAIL fit:"; the drift check must
 # find every literal and must refuse a copy of the pass with one literal changed (its floor). rc 0 = gate OK.
 set -u
 OUT="${1:?usage: run.sh <out dir>}"
@@ -15,7 +15,7 @@ bad=0
 timeout 60 "$OUT/reflcensus_test.exe" > "$OUT/green.txt"; rc=$?
 tail -n 1 "$OUT/green.txt"
 if [ $rc -ne 0 ] || ! grep -q '^REFLCENSUS PASS [0-9]*$' "$OUT/green.txt"; then echo "GREEN FAILED (rc $rc)"; bad=1; fi
-for pair in lift:below noreach:hits roof:floors stand:stand; do	# roof: the interior --auto cameras; stand: where a probe stands
+for pair in lift:below noreach:hits roof:floors stand:stand place:fit; do	# roof: the interior --auto cameras; stand: where a probe stands; place: REFLPLACE1's old grid
 	red="${pair%%:*}"; check="${pair##*:}"
 	timeout 60 "$OUT/reflcensus_test.exe" "$red" > "$OUT/red_$red.txt"; rc=$?
 	if [ $rc -eq 1 ] && grep -q "^FAIL $check:" "$OUT/red_$red.txt"; then
@@ -36,6 +36,7 @@ LIT=(
 	"src/gl/cellreflprobe.cpp|reach = std::max( std::sqrt( reach ) * 2.0f, 4096.0f );"
 	"src/gl/cellreflprobe.cpp|const float n = 4.0f, f = reach;"
 	"src/gl/cellreflprobe.cpp|const bool byRooms = L->interior && !g.rooms.empty();"
+	"src/gl/cellreflprobe.cpp|const int f = reflplace::fit( *fit, bmin, bmax, pos );"
 	"res/shaders/cell_reflrelight.frag|vec2 f = uv * 2.0 - 1.0;"
 	"res/shaders/cell_reflrelight.frag|float t = max( -n.z, 0.0 );"
 	"res/shaders/cell_reflrelight.frag|if ( a.a < 0.5 ) {"
@@ -61,5 +62,5 @@ sed 's/\* 2\.0f, 4096\.0f );/* 2.0f, 8192.0f );/' src/gl/cellreflprobe.cpp > "$O
 drift "$OUT/floor" > "$OUT/drift_floor.txt"; nf=$?
 if [ $nf -eq 1 ]; then echo "drift floor: a copy with the reach minimum 8192 is refused as it must"; else echo "DRIFT FLOOR DID NOT FIRE ($nf)"; bad=1; fi
 rm -rf "$OUT/floor"
-[ $bad -eq 0 ] && echo "REFLCENSUS GATE OK (green + 4 reds +${#LIT[@]} literals + drift floor)" || echo "REFLCENSUS GATE FAILED"
+[ $bad -eq 0 ] && echo "REFLCENSUS GATE OK (green + 5 reds +${#LIT[@]} literals + drift floor)" || echo "REFLCENSUS GATE FAILED"
 exit $bad

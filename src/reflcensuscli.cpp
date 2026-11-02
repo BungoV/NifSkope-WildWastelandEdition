@@ -20,14 +20,16 @@ namespace
 {
 const char * kUsage =
 	"usage: nifskope -no-gui reflcensus --soup <soup.psp> (--camera x,y,z ... | --auto N) [--interior] [--eye 128]\n"
-	"         [--red lift|noreach|roof|stand] [--out <probes.tsv>]\n"
+	"         [--fit] [--red lift|noreach|roof|stand|place] [--out <probes.tsv>]\n"
 	"  the probes the reflection pass places round each camera (the camera probe + the 3x3 grid of 2048 boxes),\n"
 	"  each one's 64x64 oct tile traced through the soup: hits, misses above (sky) and below the horizon (ground\n"
 	"  since SKYBELOW2), below misses with no ground tap hit (albedo 0.5) and below misses that run past the soup.\n"
 	"  --auto N: an N x N grid of cameras over the soup's middle 80 %, each at the ground under it + eye (128);\n"
 	"  with --interior eye over every floor under a ceiling (red roof: the topmost surface, often the roof).\n"
 	"  the misses past the soup split by where the probe stands: outside the soup's xy box, in the void (no surface\n"
-	"  in its column, under the lowest, indoors over the topmost) or in the geometry (red stand: no split).\n";
+	"  in its column, under the lowest, indoors over the topmost) or in the geometry (red stand: no split).\n"
+	"  --fit (WW_CELL_REFLPLACE=1): interior grid probes fitted into the soup's rooms (src/reflplace.h: kept, moved,\n"
+	"  dropped); red place: the old placement (WW_CELL_REFLPLACE_RED=1).\n";
 
 void line( const QString & s )
 {
@@ -41,7 +43,7 @@ int reflCensusCli( const QStringList & args )
 	std::vector<std::array<double, 3>> cams;
 	int autoN = 0, red = reflcensus::RedNone;
 	double eye = 128.0;
-	bool interior = false;
+	bool interior = false, fitOn = false;
 	for ( int i = 0; i < args.size(); i++ ) {
 		const QString & a = args[i];
 		const QString nx = i + 1 < args.size() ? args[i + 1] : QString();
@@ -50,13 +52,15 @@ int reflCensusCli( const QStringList & args )
 		else if ( a == QLatin1String( "--auto" ) ) { autoN = nx.toInt(); i++; }
 		else if ( a == QLatin1String( "--eye" ) ) { eye = nx.toDouble(); i++; }
 		else if ( a == QLatin1String( "--interior" ) ) interior = true;
+		else if ( a == QLatin1String( "--fit" ) ) fitOn = true;	// lane REFLPLACE1
 		else if ( a == QLatin1String( "--red" ) ) {
 			for ( const QString & r : nx.split( ',' ) ) {
 				if ( r == QLatin1String( "lift" ) ) red |= reflcensus::RedLift;
 				else if ( r == QLatin1String( "noreach" ) ) red |= reflcensus::RedNoReach;
 				else if ( r == QLatin1String( "roof" ) ) red |= reflcensus::RedRoof;	// lane INTGI1
 				else if ( r == QLatin1String( "stand" ) ) red |= reflcensus::RedStand;
-				else { std::fprintf( stderr, "reflcensus: REFUSED: unknown red '%s' (lift, noreach, roof, stand)\n", qPrintable( r ) ); return 2; }
+				else if ( r == QLatin1String( "place" ) ) red |= reflcensus::RedPlace;	// lane REFLPLACE1
+				else { std::fprintf( stderr, "reflcensus: REFUSED: unknown red '%s' (lift, noreach, roof, stand, place)\n", qPrintable( r ) ); return 2; }
 			}
 			i++;
 		}
@@ -102,6 +106,10 @@ int reflCensusCli( const QStringList & args )
 	bvh.build();
 	bvh.mask = &soup.amask;
 	const double soupXY[4] = { mn[0], mn[1], mx[0], mx[1] };
+	// lane REFLPLACE1: the footprint the pass fits its interior grid probes into (the same function, the same soup)
+	reflplace::Footprint fp;
+	if ( fitOn )
+		reflplace::build( soup.tris.data(), nTri, fp );
 
 	line( QStringLiteral( "reflcensus: soup %1: %2 triangles (%3 glass not traced, %4 alpha masks), box %5,%6,%7 .. %8,%9,%10" )
 		.arg( soupPath ).arg( nTri ).arg( soup.glass.size() / 9 ).arg( soup.amask.tris.size() )
@@ -162,15 +170,24 @@ int reflCensusCli( const QStringList & args )
 			std::fprintf( stderr, "reflcensus: REFUSED: cannot write %s\n", qPrintable( outPath ) );
 			return 1;
 		}
-		ts << "camera\tcx\tcy\tcz\tprobe\tkind\tx\ty\tz\treach\ttexels\thits\tabove\tbelow\tbelowTapless\tbelowEdge\ttaps\tstand\n";
+		ts << "camera\tcx\tcy\tcz\tprobe\tkind\tx\ty\tz\treach\ttexels\thits\tabove\tbelow\tbelowTapless\tbelowEdge\ttaps\tstand\tfit\n";
 	}
 	reflcensus::Count all;
 	long probes = 0, taplessProbes = 0, camBelow = 0, camTexels = 0;
 	long edgeBy[3] = { 0, 0, 0 }, probesBy[3] = { 0, 0, 0 };	// by reflcensus::Stand
 	static const char * const kStand[3] = { "geometry", "outside", "void" };
+	static const char * const kFit[4] = { "-", "kept", "moved", "dropped" };
+	long fitN[3] = { 0, 0, 0 };	// lane REFLPLACE1: interior grid probes kept, moved, dropped
 	std::vector<reflcensus::Probe> P;
 	for ( size_t ci = 0; ci < cams.size(); ci++ ) {
-		reflcensus::place( cams[ci].data(), interior, P );
+		reflcensus::place( cams[ci].data(), interior, P, fitOn ? &fp : nullptr, red );
+		long placedGrid = 0;
+		for ( const reflcensus::Probe & q : P ) {
+			placedGrid += q.kind == 1 ? 1 : 0;
+			if ( q.fit >= 0 )
+				fitN[q.fit]++;
+		}
+		fitN[reflplace::Dropped] += fitOn && interior && !( red & reflcensus::RedPlace ) ? 9 - placedGrid : 0;
 		reflcensus::Count cc;
 		for ( size_t pi = 0; pi < P.size(); pi++ ) {
 			const reflcensus::Count c = reflcensus::census( bvh, O, P[pi], red, soupXY );
@@ -189,7 +206,7 @@ int reflCensusCli( const QStringList & args )
 				ts << ci << '\t' << cams[ci][0] << '\t' << cams[ci][1] << '\t' << cams[ci][2] << '\t' << pi << '\t'
 				   << ( P[pi].kind == 0 ? "camera" : "grid" ) << '\t' << P[pi].pos[0] << '\t' << P[pi].pos[1] << '\t' << P[pi].pos[2]
 				   << '\t' << c.reach << '\t' << c.texels << '\t' << c.hits << '\t' << c.above << '\t' << c.below << '\t'
-				   << c.belowTapless << '\t' << c.belowEdge << '\t' << c.tapsHit << '\t' << kStand[st] << '\n';
+				   << c.belowTapless << '\t' << c.belowEdge << '\t' << c.tapsHit << '\t' << kStand[st] << '\t' << kFit[P[pi].fit + 1] << '\n';
 		}
 		line( QStringLiteral( "camera %1 %2,%3,%4: %5 probes, texels %6: hits %7, sky misses %8, below misses %9 (%10 %), "
 			"tapless %11, past the soup %12" )
@@ -209,6 +226,12 @@ int reflCensusCli( const QStringList & args )
 		.arg( edgeBy[reflcensus::StandOutside] ).arg( probesBy[reflcensus::StandOutside] ).arg( edgeBy[reflcensus::StandVoid] )
 		.arg( probesBy[reflcensus::StandVoid] ).arg( edgeBy[reflcensus::StandGeometry] ).arg( probesBy[reflcensus::StandGeometry] )
 		.arg( ( red & reflcensus::RedStand ) ? QStringLiteral( " (RED stand: no split)" ) : QString() ) );
+	if ( fitOn )   // lane REFLPLACE1
+		line( !interior ? QStringLiteral( "reflcensus fit: exterior, nothing fitted (the pass fits interior grid probes only)" )
+			: ( red & reflcensus::RedPlace ) ? QStringLiteral( "reflcensus fit: RED place: the old interior grid placement" )
+			: QStringLiteral( "reflcensus fit: footprint %1 x %2 columns of %3 u over %4 triangles; interior grid probes kept %5, moved %6, dropped %7" )
+				.arg( fp.nx ).arg( fp.ny ).arg( fp.cell, 0, 'f', 0 ).arg( qulonglong( fp.tris ) )
+				.arg( fitN[reflplace::Kept] ).arg( fitN[reflplace::Moved] ).arg( fitN[reflplace::Dropped] ) );
 	if ( all.hits + all.above + all.below != all.texels ) {
 		std::fprintf( stderr, "reflcensus: REFUSED: hits + above + below != texels\n" );
 		return 1;
