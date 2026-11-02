@@ -1017,19 +1017,40 @@ bool wwAtmoGiActive()
 }
 
 /* FIX1101A (LATE ITEM 15d): the physical sky's irradiance on the six world axes for the ray-traced GI's sky (sun toward
- * sunTo, sun irradiance 1, the last drawn haze; atmomath skyIrradianceAxes, ~6 ms, kept while sun and haze stand).
+ * sunTo, sun irradiance 1, the last drawn haze; kept while sun, haze and height stand).
+ * GISKYTWIN: the drawn sky's own model (atmomath skyIrradianceAxesDrawn: its transmittance + MS tables at this tier's
+ * size, its 30-step march with MS) from hKm (the probes' height), within 0.6 % of the GPU sky (tests/gisky twin).
+ * The old single-scatter twin read +Z R/B 0.87 where the drawn sky reads 0.53: launch key WW_CELL_RTDDGI_SKYTWIN_RED=1
+ * keeps it (skyIrradianceAxes, from the ground, the exact haze). The twin takes the haze in 2 % steps, so its tables
+ * (~70-300 ms on 8 threads) rebuild only on a step; a new sun or height alone is ~3 ms.
  * False while Physical Sky is off or the sun is under the horizon (the weather's ambient stays the GI's sky then). */
-bool wwAtmoGiSkyAxes( const float sunTo[3], float out[6][3], float * trans )
+bool wwAtmoGiSkyTwinRed()
+{
+	static const bool red = wwEnvStr( "WW_CELL_RTDDGI_SKYTWIN_RED" ).trimmed() == QLatin1StringView( "1" );
+	return red;
+}
+
+bool wwAtmoGiSkyAxes( const float sunTo[3], float out[6][3], float * trans, float hKm )
 {
 	const AtState & s = as();
 	if ( s.tier <= 0 || sunTo[2] <= 0.0f )
 		return false;
-	static float key[6] = { -9.0f, -9.0f, -9.0f, -9.0f, -9.0f, -9.0f };
+	const bool twinRed = wwAtmoGiSkyTwinRed();
+	const int msN = s.tier == 1 ? 16 : 32;
+	auto q2 = []( float x ) { return x > 1e-4f ? std::exp( std::round( std::log( x ) * 50.0f ) / 50.0f ) : x; };
+	const float hq[3] = { twinRed ? s.haze[0] : q2( s.haze[0] ), twinRed ? s.haze[1] : q2( s.haze[1] ),
+		twinRed ? s.haze[2] : std::round( s.haze[2] * 100.0f ) / 100.0f };
+	const float h = twinRed ? 0.0f : std::round( std::clamp( hKm, 0.002f, 80.0f ) * 1000.0f ) / 1000.0f;
+	static float key[10] = { -9.0f, -9.0f, -9.0f, -9.0f, -9.0f, -9.0f, -9.0f, -9.0f, -9.0f, -9.0f };
 	static float memo[6][3], memoT[3];
-	const float now[6] = { sunTo[0], sunTo[1], sunTo[2], s.haze[0], s.haze[1], s.haze[2] };
-	if ( !std::equal( now, now + 6, key ) ) {
-		std::copy( now, now + 6, key );
-		skyIrradianceAxes( sunTo, s.haze, memo );
+	static SkyTables tables;
+	const float now[10] = { sunTo[0], sunTo[1], sunTo[2], hq[0], hq[1], hq[2], h, g_ozone, float( msN ), twinRed ? 1.0f : 0.0f };
+	if ( !std::equal( now, now + 10, key ) ) {
+		std::copy( now, now + 10, key );
+		if ( twinRed )
+			skyIrradianceAxes( sunTo, s.haze, memo );
+		else
+			skyIrradianceAxesDrawn( sunTo, hq, h, g_ozone, tables, memo, msN );
 		cpuTrans( 0.0f, sunTo[2], s.haze, false, memoT );   // GITRUTH1: the sun's own transmittance (the absolute level)
 	}
 	if ( trans )
