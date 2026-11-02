@@ -1373,8 +1373,16 @@ void cellStreamStart( NifModel * nif, std::shared_ptr<CellStreamSeed> seed )
 		/* lane LARGEREF4 (LARGEREF-FLAT-MIXED, LARGEREF-BUDGET): the far build's own map decides per ref, at its own cell
 		 * (the FO4CS type's .bto fill, a refused object ring); red WW_CELL_LARGEREFS_RED=permode: one kind per mode */
 		const bool perMode = wwEnvStr( "WW_CELL_LARGEREFS_RED" ) == QLatin1String( "permode" );
-		LargeRef::FarMap farMap;
-		const bool haveMap = cellFarLodLargeRefMap( nif, farMap );
+		/* lane LARGEREF4 (LARGEREF-MAP-LIVE): a live far rebuild starts the stream again (cellview.cpp); the map is read
+		 * now, not carried; red WW_CELL_LARGEREFS_RED=stalemap: the map this stream read before wins */
+		const bool stale = wwEnvStr( "WW_CELL_LARGEREFS_RED" ) == QLatin1String( "stalemap" );
+		LargeRef::FarMap mapNow;
+		const bool haveNow = cellFarLodLargeRefMap( nif, mapNow );
+		const LargeRef::FarMap * use = LargeRef::streamMap( haveNow ? &mapNow : nullptr, seed->largeRefMap.get(), stale );
+		const bool heldUsed = use && use != &mapNow;
+		const LargeRef::FarMap farMap = use ? *use : LargeRef::FarMap();
+		const bool haveMap = use != nullptr;
+		seed->largeRefMap = haveMap ? std::make_shared<const LargeRef::FarMap>( farMap ) : nullptr;
 		if ( haveMap && !perMode )
 			s->lr.setFarMap( farMap, flatDouble );
 		s->lr.setRows( seed->world->largeRefRows() );
@@ -1385,8 +1393,9 @@ void cellStreamStart( NifModel * nif, std::shared_ptr<CellStreamSeed> seed )
 				( k == LargeRef::Far::ByRef ? byRef : k == LargeRef::Far::Flat ? flat : none )++;
 			}
 			std::fprintf( stderr, "cell stream: large refs far map %d rectangles, RNAM rows by own cell: %d ours by ref, %d flat, "
-				"%d none%s\n", int( farMap.size() ), byRef, flat, none,
-				perMode ? " (RED permode: one kind per mode)" : "" );
+				"%d none%s%s\n", int( farMap.size() ), byRef, flat, none,
+				perMode ? " (RED permode: one kind per mode)" : "",
+				heldUsed ? " (RED stalemap: the map read before the live rebuild)" : "" );
 		}
 		std::fprintf( stderr, "cell stream: large refs on, %d refs in %d RNAM rows%s%s\n", int( s->lr.refs() ),
 			int( seed->world->largeRefRows().size() ),

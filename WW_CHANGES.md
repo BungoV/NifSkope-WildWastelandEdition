@@ -12,7 +12,19 @@
 - tests/largeref/run.sh: map unit checks + red `-DLARGEREF_PERMODE_RED`; the census walk adds `--far mixed` (ours by ref
   to +-12, the game's .bto past it) and `--far budget` (ours to +-8, refused to +-16, the .bto past it): green 0 double
   (549 / 633 refs by a unit, 2202 / 2068 step-refs by the far copy alone); red 27882 / 25338 double.
-- Not changed: the fixed open still decides one kind per mode (it places the refs before the far build).
+- LARGEREF-MAP-LIVE: a live far rebuild suspends the stream, rebuilds the far LOD (and its map) and starts the stream
+  again; `cellStreamStart` reads the map now (`LargeRef::streamMap`) and keeps it in the seed
+  (`CellStreamSeed::largeRefMap`). A far LOD removed live leaves no far copy: the restarted stream draws the large refs
+  full (`LargeRef::liveFar`; before, the open's flat kind stayed and they were drawn by nothing). Red
+  `WW_CELL_LARGEREFS_RED=stalemap`: the map and kind read before the rebuild. Census `--far live` (budget rebuilt to
+  mixed before route 3) green 0 / red 916 double; `--far liveoff` (far LOD removed) green 0 / red 69 wrong steps.
+- LARGEREF-FIXEDOPEN-MIXED: a fixed open (no stream) places the large refs outside its block before the far build, each
+  in buckets of its own; after the build it reads the map (`LargeRef::fixedFull`) and hides (Flags bit 0) the blocks of
+  those whose own cell is flat, and hands the far hide only the ones kept full (`cell large refs: far map ...` line).
+  Red `WW_CELL_LARGEREFS_RED=fixedpermode`: the mode alone, shared buckets. Census `--far fixedmixed` / `fixedbudget`:
+  green 0 double (2202 / 2068 step-refs hidden, 1200 / 1334 kept full); red 2202 / 2068 double.
+- Not changed: a fixed open whose mode is flat (the game's .bto) places no large ref full, so one whose own cell the map
+  calls none (a refused ring) shows nothing outside its own cell there.
 - LARGEREF-FLATMASK measured offline (Commonwealth, the census routes): the flat cell mask cuts part of a large ref's
   far copy over a loaded cell for 2308 step-refs (1246 refs); share cut median 0.18, p90 0.45, max 0.97. Not fixed.
 

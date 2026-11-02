@@ -28,6 +28,16 @@ static const bool PERMODERED = true;
 #else
 static const bool PERMODERED = false;
 #endif
+#ifdef LARGEREF_STALEMAP_RED	// lane LARGEREF4 (MAP-LIVE): a live far rebuild keeps the map read before it
+static const bool STALERED = true;
+#else
+static const bool STALERED = false;
+#endif
+#ifdef LARGEREF_FIXEDOPEN_RED	// lane LARGEREF4 (FIXEDOPEN-MIXED): the fixed open keeps the mode's answer, no map
+static const bool FIXEDRED = true;
+#else
+static const bool FIXEDRED = false;
+#endif
 
 /* lane LARGEREF4: far fields as cellFarLodAppend maps them, round an open at 0,0 (the census routes cross every band).
  * mixed: the FO4CS type, ours instanced to +-12, the game's .bto past it (WW_CELL_FARLOD_OURS, or a .lodl smaller than
@@ -98,15 +108,14 @@ static LargeRef::Row ref( uint32_t f, int x, int y )
 /* lane LARGEREF2: the census walk over a real world's RNAM (tools rnam_dump.py: uint32 length + subrecord, repeated).
  * A 5x5 block slides along routes one cell a step, its cells attaching one at a time as the stream attaches them;
  * after every attach or leave no ref may have two copies, and after every step each wanted ref has exactly one. */
-static int census( const char * path, LargeRef::Far far, int mapMode = 0 )
+static bool readRnam( const char * path, std::vector<LargeRef::Row> & rows, int & subs, int & refused )
 {
 	std::FILE * f = std::fopen( path, "rb" );
 	if ( !f ) {
 		std::printf( "census: cannot read %s\n", path );
-		return 2;
+		return false;
 	}
-	std::vector<LargeRef::Row> rows;
-	int subs = 0, refused = 0;
+	subs = refused = 0;
 	for ( ;; ) {
 		uint32_t n = 0;
 		if ( std::fread( &n, 4, 1, f ) != 1 )
@@ -118,10 +127,26 @@ static int census( const char * path, LargeRef::Far far, int mapMode = 0 )
 		refused += LargeRef::decode( b.data(), b.size(), YX, rows ) < 0 ? 1 : 0;
 	}
 	std::fclose( f );
+	return true;
+}
+
+// the census routes (block centres): Sanctuary east, Concord to downtown, along downtown, the south coast up north
+static const int routes[4][4] = { { -17, 23, 12, 23 }, { -15, 17, 2, -2 }, { -10, -2, 30, -2 }, { 25, -25, 25, 20 } };
+
+/* mapMode 3 / 4 (lane LARGEREF4, LARGEREF-MAP-LIVE): a live far rebuild as the third route starts: 3 the budget
+ * field rebuilt whole (the mixed one), 4 the far LOD removed. The stream starts again (cellStreamStart): new owners,
+ * the map read now, the cells streaming in again. */
+static int census( const char * path, LargeRef::Far far, int mapMode = 0 )
+{
+	std::vector<LargeRef::Row> rows;
+	int subs = 0, refused = 0;
+	if ( !readRnam( path, rows, subs, refused ) )
+		return 2;
 	LargeRef::Owners o( STREAMRED );
 	o.setFullOutside( LargeRef::fullOutside( far, FLATRED ) );	// lane LARGEREF3: as cellstream.cpp sets it
 	// lane LARGEREF4: a mapped field (mixed / budget): the truth is the map; green owners read it, the red the mode's kind
-	const LargeRef::FarMap truth = censusMap( mapMode );
+	LargeRef::FarMap truth = censusMap( mapMode == 3 ? 2 : mapMode == 4 ? 1 : mapMode );
+	int switched = 0;
 	if ( mapMode && !PERMODERED )
 		o.setFarMap( truth, FLATRED );
 	o.setRows( rows );
@@ -134,8 +159,6 @@ static int census( const char * path, LargeRef::Far far, int mapMode = 0 )
 	std::set<uint32_t> all;
 	for ( const LargeRef::Row & r : rows )
 		all.insert( r.ref );
-	// routes (block centres): Sanctuary east, Concord to downtown, along downtown, the south coast up north
-	const int routes[][4] = { { -17, 23, 12, 23 }, { -15, 17, 2, -2 }, { -10, -2, 30, -2 }, { 25, -25, 25, 20 } };
 	std::set<std::pair<int, int>> loaded;
 	long events = 0, twice = 0, stepsBad = 0, steps = 0;
 	size_t maxLayer = 0, maxWanted = 0;
@@ -146,7 +169,21 @@ static int census( const char * path, LargeRef::Far far, int mapMode = 0 )
 			twice += o.seen( r, kindOf( r ) ) > 1 ? 1 : 0;
 	};
 	long farOnly = 0;   // lane LARGEREF3: step x ref seen as its far copy alone while a loaded cell lists it
-	for ( const auto & rt : routes ) {
+	for ( int ri = 0; ri < 4; ri++ ) {
+		const int * rt = routes[ri];
+		if ( mapMode >= 3 && ri == 2 ) {	// lane LARGEREF4 (LARGEREF-MAP-LIVE): the live far rebuild
+			const LargeRef::FarMap held = truth;
+			const bool built = mapMode == 3;
+			truth = built ? censusMap( 1 ) : LargeRef::FarMap();
+			o = LargeRef::Owners( STREAMRED );
+			o.setFullOutside( LargeRef::fullOutside( LargeRef::liveFar( built, far, STALERED ), FLATRED ) );
+			const LargeRef::FarMap * use = LargeRef::streamMap( built ? &truth : nullptr, &held, STALERED );
+			if ( use && !PERMODERED )
+				o.setFarMap( *use, FLATRED );
+			o.setRows( rows );
+			loaded.clear();	// the rebuild cut the streamed cells; they stream in again
+			switched++;
+		}
 		int x = rt[0], y = rt[1];
 		for ( ;; ) {
 			std::set<std::pair<int, int>> next;
@@ -193,16 +230,61 @@ static int census( const char * path, LargeRef::Far far, int mapMode = 0 )
 	 * would pass vacuously); Flat must draw none and show the listed refs by their far copy alone */
 	const bool flat = far == LargeRef::Far::Flat;
 	// lane LARGEREF4: a mapped field has both: units where ours hide by ref or nothing is far, far copies over the .bto
-	const bool floor = mapMode ? maxLayer > 0 && farOnly > 0
+	const bool floor = mapMode ? maxLayer > 0 && farOnly > 0 && switched == ( mapMode >= 3 ? 1 : 0 )
 		: flat ? ( maxLayer == 0 && farOnly > 0 ) || FLATRED : maxLayer > 0;
 	const bool pass = twice == 0 && stepsBad == 0 && refused == 0 && floor;
-	std::printf( "census: far %s%s; listed refs shown by the far copy alone %ld step-refs\n",
+	std::printf( "census: far %s%s%s; listed refs shown by the far copy alone %ld step-refs\n",
 		mapMode == 1 ? "mixed (ours byref +-12, the game's .bto past it)"
 			: mapMode == 2 ? "budget (ours byref +-8, refused to +-16, the game's .bto past it)"
+			: mapMode == 3 ? "budget, rebuilt live to mixed before route 3"
+			: mapMode == 4 ? "mixed, the far LOD removed live before route 3"
 			: far == LargeRef::Far::None ? "none" : flat ? "flat" : "byref",
-		mapMode && PERMODERED ? " (RED permode: byref everywhere)" : "", farOnly );
+		mapMode && PERMODERED ? " (RED permode: byref everywhere)" : "",
+		mapMode >= 3 && STALERED ? " (RED stalemap: the map and kind read before the rebuild)" : "", farOnly );
 	std::printf( "census: refs with two copies after a cell event %ld; steps with a wrong copy count %ld -- %s\n", twice,
 		stepsBad, pass ? "PASS" : "FAIL" );
+	return pass ? 0 : 1;
+}
+
+/* lane LARGEREF4 (LARGEREF-FIXEDOPEN-MIXED): a fixed open (no stream) at every step of the routes. The 5x5 block's
+ * cells draw their own refs; the large refs they list standing outside are placed full by the mode (the FO4CS type:
+ * ByRef), then the far build's map hides those whose own cell it calls flat (LargeRef::fixedFull). Each must be on
+ * screen once: full with its far rows hidden (ByRef), its far copy alone (Flat), full alone (None). */
+static int fixedCensus( const char * path, int mapMode )
+{
+	std::vector<LargeRef::Row> rows;
+	int subs = 0, refused = 0;
+	if ( !readRnam( path, rows, subs, refused ) )
+		return 2;
+	using LargeRef::Far;
+	const LargeRef::FarMap truth = censusMap( mapMode );
+	const bool placed = LargeRef::fullOutside( Far::ByRef, FLATRED );
+	long steps = 0, stepRefs = 0, kept = 0, hidden = 0, doubles = 0, missing = 0;
+	for ( const auto & rt : routes ) {
+		int x = rt[0], y = rt[1];
+		for ( ;; ) {
+			for ( const LargeRef::Row & r : LargeRef::outside( rows, x - 2, y - 2, x + 2, y + 2 ) ) {
+				const Far k = truth.at( r.rx, r.ry );
+				const bool full = LargeRef::fixedFull( placed, &truth, r.rx, r.ry, FLATRED, FIXEDRED );
+				const int seen = ( full ? 1 : 0 ) + ( k == Far::Flat ? 1 : k == Far::ByRef && !full ? 1 : 0 );
+				stepRefs++;
+				( full ? kept : hidden )++;
+				doubles += seen > 1 ? 1 : 0;
+				missing += seen < 1 ? 1 : 0;
+			}
+			steps++;
+			if ( x == rt[2] && y == rt[3] )
+				break;
+			x += ( rt[2] > x ) - ( rt[2] < x );
+			y += ( rt[3] > y ) - ( rt[3] < y );
+		}
+	}
+	const bool pass = doubles == 0 && missing == 0 && refused == 0 && kept > 0 && hidden > 0;
+	std::printf( "fixed open: %d RNAM subrecords (%d refused), %d rows; %ld steps, %ld step-refs outside the block\n", subs,
+		refused, int( rows.size() ), steps, stepRefs );
+	std::printf( "fixed open: far %s%s; kept full %ld, hidden after the far build %ld step-refs\n",
+		mapMode == 1 ? "mixed" : "budget", FIXEDRED ? " (RED fixedpermode: the mode alone)" : "", kept, hidden );
+	std::printf( "fixed open: two copies %ld, none %ld step-refs -- %s\n", doubles, missing, pass ? "PASS" : "FAIL" );
 	return pass ? 0 : 1;
 }
 
@@ -216,6 +298,10 @@ int main( int argc, char ** argv )
 			far = std::strcmp( argv[4], "flat" ) == 0 ? LargeRef::Far::Flat
 				: std::strcmp( argv[4], "none" ) == 0 ? LargeRef::Far::None : LargeRef::Far::ByRef;
 			mapMode = std::strcmp( argv[4], "mixed" ) == 0 ? 1 : std::strcmp( argv[4], "budget" ) == 0 ? 2 : 0;
+			// lane LARGEREF4: live (budget rebuilt to mixed mid-walk), liveoff (far LOD removed), fixedmixed|fixedbudget
+			mapMode = std::strcmp( argv[4], "live" ) == 0 ? 3 : std::strcmp( argv[4], "liveoff" ) == 0 ? 4 : mapMode;
+			if ( std::strncmp( argv[4], "fixed", 5 ) == 0 )
+				return fixedCensus( argv[2], std::strcmp( argv[4], "fixedbudget" ) == 0 ? 2 : 1 );
 		}
 		return census( argv[2], far, mapMode );
 	}
@@ -334,6 +420,19 @@ int main( int argc, char ** argv )
 			"map: over the game's .bto -> its far copy alone (the mixed FO4CS field)" );
 		check( p.copies( 0x102 ) == 1 && p.seen( 0x102, m.at( 14, -4 ) ) == 1, "map: no far objects there -> full by the layer" );
 		check( p.copies( 0x103 ) == 1 && p.seen( 0x103, m.at( 11, 2 ) ) == 1, "map: over ours -> full, far rows hidden" );
+		// lane LARGEREF4 (LARGEREF-MAP-LIVE): what the stream started again after a live far rebuild reads
+		LargeRef::FarMap now;
+		now.add( 0, 0, 0, 0, Far::Flat );
+		check( LargeRef::streamMap( &now, &m, STALERED ) == &now, "live: the restarted stream reads the rebuilt map" );
+		check( LargeRef::streamMap( nullptr, &m, STALERED ) == nullptr, "live: far LOD removed -> no map" );
+		check( LargeRef::liveFar( false, Far::Flat, STALERED ) == Far::None, "live: far LOD removed -> drawn full (None)" );
+		check( LargeRef::liveFar( true, Far::Flat, STALERED ) == Far::Flat, "live: far LOD kept -> the open's kind" );
+		// lane LARGEREF4 (LARGEREF-FIXEDOPEN-MIXED): the fixed open, once the far build's map exists
+		check( !LargeRef::fixedFull( true, &m, 12, -3, FLATRED, FIXEDRED ), "fixed: over the game's .bto -> hidden after the build" );
+		check( LargeRef::fixedFull( true, &m, 11, 2, FLATRED, FIXEDRED ) && LargeRef::fixedFull( true, &m, 14, -4, FLATRED, FIXEDRED ),
+			"fixed: over ours, or no far objects -> stays full" );
+		check( LargeRef::fixedFull( true, nullptr, 12, -3, false, FIXEDRED ), "fixed: no map (far LOD off) -> the mode" );
+		check( !LargeRef::fixedFull( false, &m, 11, 2, false, FIXEDRED ), "fixed: not placed by the mode -> not full" );
 	}
 	// lane LARGEREF2 (LARGEREF-INI): the ini line largeRefsWanted reads, through the same reader and arguments
 	{

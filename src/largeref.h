@@ -131,6 +131,21 @@ private:
 	std::vector<Rect> rects_;
 };
 
+/* lane LARGEREF4 (LARGEREF-MAP-LIVE): a live far rebuild cuts the streamed cells and starts the stream again; the new
+ * stream reads the far build's map as it is now. now: that map (null: the far LOD went, or none was built); held: the
+ * one the stream read before. A far LOD removed live leaves no far copy: the open's kind gives way to None. Red stale
+ * (WW_CELL_LARGEREFS_RED=stalemap): the held map and the open's kind stay. */
+inline const FarMap * streamMap( const FarMap * now, const FarMap * held, bool stale ) { return stale && held ? held : now; }
+inline Far liveFar( bool farBuilt, Far before, bool stale ) { return farBuilt || stale ? before : Far::None; }
+
+/* lane LARGEREF4 (LARGEREF-FIXEDOPEN-MIXED): a fixed open (no stream) places its large refs by the mode before the far
+ * build runs; once the build's map exists a placed ref stays full only where the map at its own cell wants it full
+ * (cellview.cpp hides the rest). Red perMode (WW_CELL_LARGEREFS_RED=fixedpermode): the mode alone decides. */
+inline bool fixedFull( bool placed, const FarMap * map, int ownX, int ownY, bool flatDouble, bool perMode )
+{
+	return placed && ( perMode || !map || fullOutside( map->at( ownX, ownY ), flatDouble ) );
+}
+
 /* lane LARGEREF2 (LARGEREF-STREAM): per-document ownership counts for the streamed view. A large ref is drawn by exactly
  * one owner: its own cell while that cell is loaded (the cell's own refs place it), else the large-ref layer while any
  * loaded cell lists it (counts[ref] = loaded listing cells). So a ref is never drawn by two listing cells, nor by a
