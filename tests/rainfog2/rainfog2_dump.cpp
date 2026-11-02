@@ -54,6 +54,7 @@ int main()
 	const WwPrecip::TypeInfo & rn = WwPrecip::typeInfo( WwPrecip::Rain );
 	std::printf( "snowdefault %.17g %.17g\n", sn.sizeMm, sn.rateMmH );
 	std::printf( "raindefault %.17g %.17g\n", rn.sizeMm, rn.rateMmH );
+	std::printf( "typeids %d %d\n", int( WwPrecip::Rain ), int( WwPrecip::SnowFine ) );	// the enum moves (PRECIPLOOK1 dropped sleet)
 	for ( int t = -3; t <= 2; t++ )
 #ifdef RAINFOG2_RED
 		std::printf( "kind %d %d\n", t, t >= -1 ? 1 : 0 );
