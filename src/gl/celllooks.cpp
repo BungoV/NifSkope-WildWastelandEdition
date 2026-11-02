@@ -84,6 +84,7 @@ const LookRow kRows[] = {
 	{ "Far LOD baked AO", "WW/FarLodBakedAo", true },
 	{ "Far LOD baked sky light", "WW/FarLodBakedSky", true },
 	{ "Variable rate shading", "WW/CellVrs" },	// lane PERFFIX4: a menu row at last; ships off until its pair is judged
+	{ "Rain wetness", "WW/CellRainWet" },	// lane FO76WEATHER1: ships off until bungo sees it
 };
 static_assert( sizeof( kRows ) / sizeof( kRows[0] ) == size_t( WwLook::Count ), "a row per look" );
 
@@ -345,6 +346,10 @@ QByteArray pinOf( WwLook l )
 		WW_SWITCH_STATIC( QByteArray, p, wwEnv( "WW_CELL_VRS" ).trimmed() );
 		return p;
 	}
+	case WwLook::RainWet: {
+		WW_SWITCH_STATIC( QByteArray, p, wwEnv( "WW_CELL_RAINWET" ).trimmed() );
+		return p;
+	}
 	default:
 		return QByteArray();
 	}
@@ -420,6 +425,7 @@ const char * wwLookPinName( WwLook l )
 	case WwLook::FarLodAo: return "WW_LODL_AO";
 	case WwLook::FarLodSky: return "WW_LODL_SKY";
 	case WwLook::Vrs: return "WW_CELL_VRS";
+	case WwLook::RainWet: return "WW_CELL_RAINWET";
 	default: return "";
 	}
 }
@@ -541,7 +547,7 @@ WwGroup wwLookGroup( WwLook l )
 		return WwGroup::ShadowsVanilla;
 	case WwLook::PlacementEmittance: case WwLook::RegionEmittance: case WwLook::ParticleEmittance:
 		return WwGroup::Emittance;
-	case WwLook::Ephemeris: case WwLook::WeatherRecx: case WwLook::Precip:
+	case WwLook::Ephemeris: case WwLook::WeatherRecx: case WwLook::Precip: case WwLook::RainWet:
 		return WwGroup::Sky;
 	case WwLook::WaterDepth: case WwLook::WaterCaustics: case WwLook::WaterSoftEdge: case WwLook::ShoreFoam:
 	case WwLook::WaterSwell: case WwLook::WaterRefl: case WwLook::WaterGlint: case WwLook::WaterOcean:

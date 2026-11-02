@@ -18,6 +18,7 @@
 #include "water_info.glsl"
 #include "water_shore.glsl"
 #include "land_swash.glsl"
+#include "rain_wet.glsl"
 #define WW_CELL_FOGGED cellOn	// a cell-lit draw is fogged before its imagespace
 uniform sampler2D CellSpecMap;	// a legacy material's specular map (R scale, G smoothness), for the cube term
 uniform vec4 landLod;	// lane LANDSPEC2: as fo4_default.frag (src/landlodspec.h), for ground with a .pbrm
@@ -534,6 +535,11 @@ void main()
 		s.base *= wwLandWetBase( wet.x, por );
 		s.base = mix( s.base, vec3( 0.8 ), sw.y );	// the run-up's foam
 		s.rough = max( wwLandWetRough( s.rough, wet, por ), 0.035 );
+	}
+	if ( cellOn && rainWet.x > 0.0 ) {	// lane FO76WEATHER1: rain wetness, Fallout 76's law (metal from the F0)
+		float rw = wwRainWetW( 1.0 - s.rough, wwRainWetMetal( mix( s.weight * s.f0d, s.base, s.metal ) ) );
+		s.base *= 1.0 - 0.8 * rw;
+		s.rough = max( ( 1.0 - 0.4 * rw ) * s.rough, 0.035 );
 	}
 #endif
 

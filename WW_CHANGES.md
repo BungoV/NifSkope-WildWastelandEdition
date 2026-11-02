@@ -1,3 +1,16 @@
+## FO76WEATHER1 (2026-11-02): rain wets every material, Fallout 76's law
+
+Show > Improved Sky > Rain wetness (WW/CellRainWet, ships off; pin `WW_CELL_RAINWET=0|1`, live). While the Lookdev
+weather rains, every cell material wets by Fallout 76's porosity law (src/gl/rainwetlaw.h, res/shaders/rain_wet.glsl):
+porosity = 1.1666 - 1.666 x smoothness (or the BGSM's custom porosity), metals never wet; albedo x (1 - 0.8 w) and
+smoothness 1 - (1 - 0.4 w)(1 - smoothness); normal and F0 unchanged. The amount runs on Fallout 4's wet clock (+0.03 a
+second while it rains, -0.02 dry) toward the rain's share of the weather, so a weather change wets and dries slowly;
+it starts settled when a cell opens. Interiors stay dry. Wet ground keeps the game's wet reflection (SSR) flag, and a
+material whose BGSM sets the wetness SSR switch takes the flag while wet (puddle reflections on the WEATHERLOOK rules).
+Harness pin `WW_CELL_RAINWET_AMOUNT=<0..1>`; red `WW_CELL_RAINWET_RED=shore` (the old path: shore wetness only).
+Census on stderr: "rain wet: ...". Unit: `bash tests/rainwet/run.sh <out>` (green 0 of 20, red 4 of 20).
+Not yet: Fallout 76's top-down cover map (dry under roofs and bridges), ripples and puddles.
+
 ## REFLPROBECLI1 (TOOLS1101, 2026-11-01): count the reflection probes' below-horizon misses without a window
 
 `nifskope -no-gui reflcensus --soup <soup.psp> (--camera x,y,z ... | --auto N) [--interior] [--out probes.tsv]` places

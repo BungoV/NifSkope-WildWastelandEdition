@@ -60,6 +60,7 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include "gl/cellcull.h"	// lane DECALS1: the placed decals' parallax
 #include "gl/celllooks.h"
 #include "gl/cellwaterinfo.h"	// lane WATERWETBAKE1: the land side of the shore plane
+#include "gl/cellprecip.h"	// lane FO76WEATHER1: rain wetness
 #include "gl/shadowset.h"	// lane WATERWETBAKE1: wwCellIsTerrainShape
 #include "gl/cellssr.h"
 #include "gl/cellreflprobe.h"	// lane REFLPROBE1
@@ -1093,8 +1094,12 @@ NifSkopeOpenGLContext::Program * Renderer::setupProgram( Shape * mesh, Program *
 	{	// lane SSR1: the draw's reflection flag (an environment-mapped material file with its reflections switch on)
 		const Material * sm = mesh->bslsp ? mesh->bslsp->getMaterial() : nullptr;
 		bool ssr = sm && sm->isShaderMaterial() && sm->bEnvironmentMapping && sm->bScreenSpaceReflections;
-		// lane LANDSPEC2: the game's land pre-pass writes the flag only on wet ground; the viewer's land is dry
-		if ( ssr && !LandLodSpec::landSsr( 0.0f ) && wwLandSpecRed() != "ssr" && wwLandLodMode( mesh->scene, mesh ) != LandLodSpec::Off )
+		// lane FO76WEATHER1: the rain's wetness (0 = dry, the old flags); a material's wetness SSR switch flags it while wet
+		const float wwWetNow = wwCellRainWetAmount( mesh->scene );
+		if ( !ssr && wwWetNow > 0.0f && sm && sm->isShaderMaterial() && sm->bWetnessControl_ScreenSpaceReflections )
+			ssr = true;
+		// lane LANDSPEC2: the game's land pre-pass writes the flag only on wet ground
+		if ( ssr && !LandLodSpec::landSsr( wwWetNow ) && wwLandSpecRed() != "ssr" && wwLandLodMode( mesh->scene, mesh ) != LandLodSpec::Off )
 			ssr = false;
 		wwCellSsrNote( ssr );
 		wwCellReflProbeNote( mesh->bslsp && mesh->bslsp->greyscaleColor );	// lane REFLPROBE1: the palette owns GreyscaleMap
@@ -2206,6 +2211,11 @@ bool Renderer::setupProgramPBRM( const NifModel * nif, Program * prog, Shape * m
 	wwCellGrassUniforms( scene, mesh->id() );	// lane GRASSMB1: the grass fade, zero on every other shape
 	if ( prog->uniLocation( "landShoreIndex" ) >= 0 )	// lane WATERWETBAKE1: the cell programs (the Wet shore row)
 		wwCellLandShoreUniforms( scene, wwCellIsTerrainShape( mesh ) );
+	if ( prog->uniLocation( "rainWet" ) >= 0 ) {	// lane FO76WEATHER1: rain wetness (gl/cellprecip.h)
+		const Material * wm = mesh->bslsp ? mesh->bslsp->getMaterial() : nullptr;
+		const ShaderMaterial * wsm = wm && wm->isShaderMaterial() ? static_cast<const ShaderMaterial *>( wm ) : nullptr;
+		wwCellRainWetUniforms( scene, wsm ? wsm->fPorosityValue : 0.0f, wsm && wsm->bCustomPorosity );
+	}
 	if ( prog->uniLocation( "landLod" ) >= 0 )	// lane LANDSPEC2: pbrm_cell, ground with a .pbrm
 		wwLandLodUniforms( scene, prog, mesh );
 
@@ -2381,6 +2391,11 @@ bool Renderer::setupProgramCE1( const NifModel * nif, Program * prog, Shape * me
 			CellFarGround::uniforms( scene, prog );
 		if ( prog->uniLocation( "landShoreIndex" ) >= 0 )	// lane WATERWETBAKE1: the cell programs (the Wet shore row)
 			wwCellLandShoreUniforms( scene, wwCellIsTerrainShape( mesh ) );
+		if ( prog->uniLocation( "rainWet" ) >= 0 ) {	// lane FO76WEATHER1: rain wetness (gl/cellprecip.h)
+			const Material * wm = mesh->bslsp ? mesh->bslsp->getMaterial() : nullptr;
+			const ShaderMaterial * wsm = wm && wm->isShaderMaterial() ? static_cast<const ShaderMaterial *>( wm ) : nullptr;
+			wwCellRainWetUniforms( scene, wsm ? wsm->fPorosityValue : 0.0f, wsm && wsm->bCustomPorosity );
+		}
 		if ( prog->uniLocation( "landLod" ) >= 0 )	// lane LANDSPEC1: the cell programs only
 			wwLandLodUniforms( scene, prog, mesh );
 		if ( prog->uniLocation( "fxAdditive" ) >= 0 ) {

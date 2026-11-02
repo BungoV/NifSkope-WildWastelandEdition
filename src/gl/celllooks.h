@@ -70,6 +70,7 @@ enum class WwLook : int
 	FarLodAo,			// FIX1101A lodch: far LOD objects + terrain draw the bake's AO, ships ON (WW_LODL_AO; red WW_LODL_AO_RED=off)
 	FarLodSky,			// FIX1101A lodch: far objects' ambient takes the bake's per-vertex sky, ships ON (WW_LODL_SKY; red WW_LODL_SKY_RED)
 	Vrs,				// PERFFIX4: variable rate shading of the opaque + sorted passes from last frame's picture (WW_CELL_VRS)
+	RainWet,			// FO76WEATHER1: rain wets every material, Fallout 76's porosity law (WW_CELL_RAINWET; gl/cellprecip.h)
 	Count
 };
 
