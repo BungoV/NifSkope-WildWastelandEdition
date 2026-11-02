@@ -14,6 +14,14 @@ Offline bench (300 lights, 1920x1045 x 4): fo4_cell one volume 50.1 -> 39.5 ms, 
 written over by the AO and SSR passes as before. Red `WW_CELL_VIEWS_RED=1`: the views in every program, cbbaab55's
 machine code (14 programs x 2 modes x 3 RT sets identical but the hash).
 
+## PBRMVIEWS1 (2026-11-02): the same for the PBRM cell programs
+
+pbrm_default.frag's probe view (cellProbeRaw) and Pass view (cellPassOut) now sit under the same
+`WW_CELL_VIEWS || !WW_CELL_RTDDGI` guard as fo4_default.frag's (FO4CELLGI1's loader define and red WW_CELL_VIEWS_RED=1;
+no C++ change). Offline bench (300 lights, 1920x1045 x 4): pbrm_cellcsm one volume 150.9 -> 110.0 ms, cascades 147.9
+-> 109.9, ReSTIR 148.2 -> 110.1 (volume off 110.8 -> 110.7); pbrm_cell 38.0 -> 37.9 ms (it was already under). The
+volume-off and PRT programs (4 programs x 3 modes) and the red (4 x 2 modes x 3 RT sets) are identical but the hash.
+
 ## DDGIREADPERF2 (2026-11-02): the screen texel's upsample at one site too
 
 After DDGIREADPERF1 every cellGiSample site and cellSpecSky still inlined cellGiHalfAt, the screen GI pass's upsample (4
