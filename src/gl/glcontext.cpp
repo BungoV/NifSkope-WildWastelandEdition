@@ -282,6 +282,17 @@ bool wwStartupEager()
 	return eager;
 }
 
+// lane STARTSPEED1: FNV-1a 64 of a cached program binary, checked before the driver sees it
+static quint64 wwProgSum( const char * p, qsizetype n )
+{
+	quint64	h = 14695981039346656037ull;
+	for ( qsizetype i = 0; i < n; i++ ) {
+		h ^= quint8( p[i] );
+		h *= 1099511628211ull;
+	}
+	return h;
+}
+
 namespace {
 struct WwDeferredShader {
 	std::string	name;
@@ -701,14 +712,29 @@ bool NifSkopeOpenGLContext::Program::load( const QString & filepath, NifSkopeOpe
 			QFile	cf( cacheFile );
 			if ( cf.open( QIODevice::ReadOnly ) ) {
 				QByteArray	b = cf.readAll();
-				if ( b.size() > 8 && b.startsWith( "WWPB" ) ) {
-					if ( wwEnvInt( "WW_PROGCACHE_RED" ) == 1 )
-						b[b.size() / 2] = char( b.at( b.size() / 2 ) ^ 0x5A );	// red: a damaged binary must fall back
-					GLenum	fmt;
-					std::memcpy( &fmt, b.constData() + 4, 4 );
-					f->glProgramBinary( id, fmt, b.constData() + 8, GLsizei( b.size() - 8 ) );
-					linkFrom = 2;
-					return true;
+				/* lane STARTSPEED1: "WWPC" files carry a checksum of the binary, and a binary that does not match
+				 * never reaches the driver (a damaged one crashed the NV driver); old "WWPB" files load unchecked.
+				 * red WW_PROGCACHE_RED=1 damages a byte after the read (refused here, compiled from source),
+				 * =2 hands the driver a wrong format (refused by the driver, the finishLink() fallback) */
+				const int	red = wwEnvInt( "WW_PROGCACHE_RED" );
+				const bool	sum = b.size() > 16 && b.startsWith( "WWPC" );
+				if ( sum || ( b.size() > 8 && b.startsWith( "WWPB" ) && red != 1 ) ) {
+					const int	at = sum ? 16 : 8;
+					if ( red == 1 )
+						b[at + ( b.size() - at ) / 2] = char( b.at( at + ( b.size() - at ) / 2 ) ^ 0x5A );
+					quint64	want = 0;
+					if ( sum )
+						std::memcpy( &want, b.constData() + 8, 8 );
+					if ( !sum || wwProgSum( b.constData() + at, b.size() - at ) == want ) {
+						GLenum	fmt;
+						std::memcpy( &fmt, b.constData() + 4, 4 );
+						if ( red == 2 )
+							fmt ^= 1;
+						f->glProgramBinary( id, fmt, b.constData() + at, GLsizei( b.size() - at ) );
+						linkFrom = 2;
+						return true;
+					}
+					context->programCacheRejected++;
 				}
 			}
 			f->glProgramParameteri( id, GL_PROGRAM_BINARY_RETRIEVABLE_HINT, GL_TRUE );
@@ -784,13 +810,15 @@ bool NifSkopeOpenGLContext::Program::finishLink( NifSkopeOpenGLContext * context
 				GLint	len = 0;
 				f->glGetProgramiv( id, GL_PROGRAM_BINARY_LENGTH, &len );
 				if ( len > 0 ) {
-					QByteArray	b( 8 + len, '\0' );
+					QByteArray	b( 16 + len, '\0' );
 					GLenum	fmt = 0;
 					GLsizei	got = 0;
-					f->glGetProgramBinary( id, len, &got, &fmt, b.data() + 8 );
-					std::memcpy( b.data(), "WWPB", 4 );
+					f->glGetProgramBinary( id, len, &got, &fmt, b.data() + 16 );
+					b.resize( 16 + qMax( got, 0 ) );
+					const quint64	sum = wwProgSum( b.constData() + 16, b.size() - 16 );
+					std::memcpy( b.data(), "WWPC", 4 );
 					std::memcpy( b.data() + 4, &fmt, 4 );
-					b.resize( 8 + got );
+					std::memcpy( b.data() + 8, &sum, 8 );
 					// one file a program: the binaries of older sources go
 					const QFileInfo	fi( cacheFile );
 					QDir	d( fi.absolutePath() );
