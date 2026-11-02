@@ -247,6 +247,7 @@ HEADERS += \
 	src/gl/cellflickclock.h \
 	src/gl/cellclustergl.h \
 	src/gl/cellfxlit.h \
+	src/gl/fxroomrule.h \
 	src/gl/celllensflare.h \
 	src/gl/cellprecip.h \
 	src/gl/precipmath.h \

@@ -155,6 +155,8 @@ public:
 	//! lane FXRES1: a Soft effect, blended in the sorted pass, writing no depth, not a decal, not lit by its spot:
 	//! the low-resolution layer may take it (src/gl/cellfxres.h)
 	bool wwFxResSoft() const;
+	//! lane HAZECARD1: a soft effect card (soft depth > 0: the haze cards), which keeps the game's lit-effect base outdoors
+	bool wwFxSoftCard() const;
 	Scene * wwFxResScene() const { return scene; }
 	//! lane PERF2FIX1: did this shape's last draw write in an opaque-only pass (cell program, no blend), and when
 	bool wwCutWrote = true;
