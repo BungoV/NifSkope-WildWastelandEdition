@@ -34,6 +34,7 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include "wwswitch.h"	// lane TESTDRIVER1: the WW_* switch store
 #include "cellspeed.h"
 #include "celltexahead.h"
+#include "cellstreamtex.h"	// lane STREAMTEX1
 #include "cellpasstime.h"	// lane STREAM1
 #include "celldrawpacket.h"	// lane GAPPERF-BINDLESS
 #include "cellbindless.h"	// lane BINDLESS2
@@ -575,6 +576,7 @@ std::uint16_t TexCache::loadTex( Tex & txIn, const NifModel * nif )
 		glBindTexture( t->target, t->id[0] );
 
 	wwCovLoadRef = covRef;	// lane TREELEAF1: read by texLoadDDS
+	const qint64	bytes0 = PassTime::cacheCounts().texBytes;	// lane STREAMTEX1
 	try
 	{
 		i->mipmaps = texLoad( nif, i->filepath, i->format, t->target, i->width, i->height, t->id );
@@ -586,6 +588,8 @@ std::uint16_t TexCache::loadTex( Tex & txIn, const NifModel * nif )
 	}
 	wwCovLoadRef = 0;
 	paramForget( t->id[1] );	// lane CELLUNI4: FO76's second cube (a fresh name may reuse a freed one)
+	if ( t->mipmaps )	// lane STREAMTEX1: the stream's pool counts it (no stream: one map lookup)
+		cellStreamTexLoaded( nif, i->filename, PassTime::cacheCounts().texBytes - bytes0 );
 
 	return t->mipmaps;
 }
@@ -666,16 +670,7 @@ int TexCache::evictUnused( std::uint32_t tick, QStringList * names )
 		Tex &	tx = textures[i];
 		if ( !tx.nameLen || !tx.isLoaded() || !tx.mipmaps || tx.useTick >= tick )
 			continue;
-		PassTime::texResidentDrop( tx.id[0] );	// lane STREAM1
-		paramForget( tx.id[0] );	// lane PERF5
-		paramForget( tx.id[1] );	// lane CELLUNI4
-		WwDp::invalidate();	// lane GAPPERF-BINDLESS
-		WwBl::forget( tx.id[0] );	// lane BINDLESS2
-		WwBl::forget( tx.id[1] );
-		glDeleteTextures( ( !tx.id[1] ? 1 : 2 ), tx.id );
-		tx.id[0] = tx.id[1] = 0;
-		tx.mipmaps = 0;
-		tx.target = 0;
+		freeLoaded( tx );
 		if ( names )
 			names->append( tx.filename().toString() );
 		n++;
@@ -683,33 +678,43 @@ int TexCache::evictUnused( std::uint32_t tick, QStringList * names )
 	return n;
 }
 
-int TexCache::evictPool( std::int64_t budgetBytes, std::uint32_t protectTick, QStringList * names )
+int TexCache::evictPool( std::int64_t budgetBytes, std::uint32_t protectTick, QStringList * names,
+	const std::function<int( QStringView )> & tierOf )
 {
 	std::vector<WwTexPool::Entry> e;
 	for ( size_t i = 0; i <= textureHashMask; i++ ) {
 		const Tex & tx = textures[i];
 		if ( !tx.nameLen || !tx.isLoaded() || !tx.mipmaps )
 			continue;
-		e.push_back( { int( i ), tx.useTick, PassTime::texResidentBytesOf( tx.id[0] ) } );
+		e.push_back( { int( i ), tx.useTick, PassTime::texResidentBytesOf( tx.id[0] ), 0 } );
 	}
-	const std::vector<int> pick = WwTexPool::pick( std::move( e ), PassTime::cacheCounts().texResidentBytes, budgetBytes,
-		protectTick );
+	const std::int64_t total = PassTime::cacheCounts().texResidentBytes;
+	if ( tierOf && total > budgetBytes )	// lane STREAMTEX3: asked only when something must go, never of a protected one
+		for ( WwTexPool::Entry & x : e )
+			if ( x.useTick < protectTick )
+				x.tier = tierOf( textures[size_t( x.index )].filename() );
+	const std::vector<int> pick = WwTexPool::pick( std::move( e ), total, budgetBytes, protectTick );
 	for ( const int i : pick ) {
 		Tex &	tx = textures[size_t( i )];
-		PassTime::texResidentDrop( tx.id[0] );	// lane STREAM1
-		paramForget( tx.id[0] );	// lane PERF5
-		paramForget( tx.id[1] );	// lane CELLUNI4
-		WwDp::invalidate();	// lane GAPPERF-BINDLESS
-		WwBl::forget( tx.id[0] );	// lane BINDLESS2
-		WwBl::forget( tx.id[1] );
-		glDeleteTextures( ( !tx.id[1] ? 1 : 2 ), tx.id );
-		tx.id[0] = tx.id[1] = 0;
-		tx.mipmaps = 0;
-		tx.target = 0;
+		freeLoaded( tx );
 		if ( names )
 			names->append( tx.filename().toString() );
 	}
 	return int( pick.size() );
+}
+
+void TexCache::freeLoaded( Tex & tx )
+{
+	PassTime::texResidentDrop( tx.id[0] );	// lane STREAM1
+	paramForget( tx.id[0] );	// lane PERF5
+	paramForget( tx.id[1] );	// lane CELLUNI4
+	WwDp::invalidate();	// lane GAPPERF-BINDLESS
+	WwBl::forget( tx.id[0] );	// lane BINDLESS2
+	WwBl::forget( tx.id[1] );
+	glDeleteTextures( ( !tx.id[1] ? 1 : 2 ), tx.id );
+	tx.id[0] = tx.id[1] = 0;
+	tx.mipmaps = 0;
+	tx.target = 0;
 }
 
 int TexCache::wwPump( const NifModel * nif, qint64 budgetBytes )

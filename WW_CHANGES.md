@@ -16,6 +16,18 @@
 - Red `WW_CELL_HAZECARD_RED=room`: soft cards room-lit as before. `WW_CELL_FXROOM_RED=game` (unchanged): every
   effect takes the game's base. Telemetry once per state: `hazecard: soft lit cards outdoors take ...`.
 - Unit tests/hazecard1/hazecard_rule_test.cpp (g++ -std=c++17 -Isrc; 8 cases); `-DHC_RED` (the old rule) must fail (the haze card case).
+## STREAMTEX3 (2026-11-02): the streamed cell view's texture pool frees by cell count first, then by last bind
+- The PERFFIX4 pool (src/gl/texpool.h, budget `WW_CELL_STREAM_TEXPOOL`) now sorts what it may free by tier, then by
+  last bind: tier 0 = textures whose loaded cells all left (STREAMTEX1's counts, src/gl/streamtexpool.h), tier 1 =
+  textures no streamed cell named (the open's own blocks, far field, sky), and a texture a loaded cell names is never
+  freed. Before, a loaded cell's textures went as soon as the camera turned from them and loaded again when it turned
+  back. The tier is asked only when the pool is over budget and never of a texture the last 3 paints bound.
+- Each crossing prints a `stream tex:` census line; the walk dump carries texCrossing/texKept/texRefd/texFreed/
+  texReloadedN/texReloadedMb/texReleasedMb/texLoadsMb/texKeepFreed/texBudgetMb/texRed. tests/spells/cell_stream.sh
+  row (e): no loaded cell's texture freed.
+- Red `WW_CELL_STREAMTEX_RED=off`: every texture tier 0 (PERFFIX4's order); `WW_STREAM1_RED=texpool` still the 5 s timer.
+- Units: tests/texpool/run.sh (tiers_test: a walk over budget with a turning camera, 0 loaded-cell frees and 4200
+  reloads vs 9363 and 12106 in PERFFIX4's order; -DTIERS_RED fails) and tests/spells/stream_tex_unit.sh.
 
 ## FARCITYWASH1 (2026-11-02, landed in LAND6): the air's sky-lit veil at most the records' fog colour (default ON)
 - cell_volair.frag airVeilK: per froxel, the open air's mean in-scatter (the sun's share + the env share) brought DOWN to
