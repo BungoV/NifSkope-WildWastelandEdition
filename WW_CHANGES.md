@@ -23,8 +23,24 @@ single-run shapes are faded whole.
   when it changes.
 - Gate: tests/objfade/run.sh (law unit test: the worked numbers, Low culls 98.4 % of a c3-like block's item runs
   (floor 50 %), Ultra hides nothing within 4.9k u at FOV 60..100; the red `-DOBJFADE_RED` fails the floor).
-- Not done (rows owed): the switch's memory and time ramp, the location actor fade multiplier, visible-when-distant
-  refs as large refs, carried lights as items, the shadow casters.
+- Late items, each its own switch (launch keys, off; off is its red = the rule above), read from the exe:
+  - `WW_CELL_OBJFADE_RAMP=1` the game's memory and time ramp: a shown ref ramps out once alpha < 0.3, a hidden one
+    comes back past 0.7 (or past 0.3 while still part way in); the alpha moves min(dt / 2 s, 0.1) a frame
+    (fFadeInTime, fFadeOutTime, maxFadeIncrement); a ref first seen, or unseen for 20 frames, starts shown at 1.
+    `WW_CELL_OBJFADE_RAMP_DT=<s>` pins dt for a harness. Ruling: the cull has no per-pixel alpha, so a ref part way
+    is drawn while its per-ref hash is below its alpha; actors ramp in 2 s too (their fActorAlphaFadeSeconds is set
+    at run time). Census `; ramp partial N dt T`.
+  - `WW_CELL_OBJFADE_LOCMULT=1` the actors' multiplier x the location's "Actor Fade Mult" (LCTN ANAM) when it is not
+    0. Ruling: the location of the cell the view opened (the game takes the player's current one; no parent chain,
+    as the game). Census `; locmult xM` (or none).
+  - `WW_CELL_OBJFADE_VWD=1` a non-actor ref whose own or base record carries flag 0x8000 (Visible When Distant /
+    Has Distant LOD) is large outdoors (d = |..| x 0.2).
+  - `WW_CELL_OBJFADE_LIGH=1` a LIGH base with "Can be Carried" (DATA flags 0x2) fades as an item.
+  - `WW_CELL_OBJFADE_CASTERS=1` shadow passes drop a ref the camera faded out (the game refreshes the fade only for
+    the main camera and every other culler skips a node at alpha 0): with the ramp, alpha 0 (a ref still ramping
+    casts); without, hidden at the last camera eye and FOV. Census `; casters faded N`.
+  - tests/objfade/run.sh checks each, and builds each red (`-DOBJFADE_RED_RAMP`, `_LOCMULT`, `_VWD`, `_LIGH`,
+    `_CASTERS`) which must fail its own checks.
 
 ## REFLPROBECLI1 (TOOLS1101, 2026-11-01): count the reflection probes' below-horizon misses without a window
 
