@@ -1,3 +1,15 @@
+## DDGIREADPERF2 (2026-11-02): the screen texel's upsample at one site too
+
+After DDGIREADPERF1 every cellGiSample site and cellSpecSky still inlined cellGiHalfAt, the screen GI pass's upsample (4
+key and texel fetches with their weights). Under CELL_GI_ONE cellGiFirst now takes the texel once as well and leaves it in
+the memo (cellGiSample's answer, visibility and path) and in cellGiSpecV (cellSpecSky's lobe, GIFIX1101 SO's cellGiHalfLobe
+at the same r, N, R); the sites take those. Same call, same P and N (cellPass 0, where Ns is N): the values the sites
+computed. Offline bench (300 lights, 1920x1045 x 4): pbrm_cell cascades only (Low) 56.2 -> 38.1 ms, one volume 56.1 ->
+38.2, ReSTIR 38.2 = 38.3, volume off 29.2 = 29.2; fo4_cell one volume 50.6 -> 50.1 (its last ~10 ms over the volume-off
+program is not a copy: one read OR one upsample anywhere in it costs that; a LANES row). Red `WW_CELL_RTDDGI_ONEHALF=0`
+(the loader's `WW_CELL_GI_ONEHALF_RED`): the upsample at every site, DDGIREADPERF1's machine code (47 programs x 3 RT
+sets identical but the hash); with the volume off every program is the base's (141 binaries).
+
 ## DDGIREADPERF1 (2026-11-02): the cell programs read the GI volume at one site
 
 The Museum of Freedom interior at Medium spent ~102 ms in the opaque pass with the ray-traced GI volume on and ~12 with
