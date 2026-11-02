@@ -3,6 +3,7 @@
 
 #include <algorithm>
 #include <climits>
+#include <cstddef>
 #include <cstdint>
 #include <functional>
 #include <unordered_map>
@@ -231,5 +232,25 @@ private:
 	bool redOff = false;
 	Census cur;
 };
+
+/*! lane STREAMTEX5 (STREAMTEX4-WWCOVKEY): where a texture cache name's "|wwcov<digits>" suffix starts, or -1. TREELEAF1
+ *  loads an alpha-tested base map as "<file>|wwcov<ref>" while note() names <file>, so the copy counted as unnoted and
+ *  escaped kTierKeep; the stream keys the pool by <file> (red WW_CELL_STREAMTEX_RED=rawkey: the raw name). Two copies of
+ *  one file share its entry: the last load's bytes, the first free marks it gone. */
+template< class C >
+std::ptrdiff_t streamTexCovAt( const C * s, std::ptrdiff_t n )
+{
+	static const char tag[] = "|wwcov";
+	const std::ptrdiff_t t = std::ptrdiff_t( sizeof( tag ) - 1 );
+	std::ptrdiff_t d = n;
+	while ( d > 0 && s[d - 1] >= C( '0' ) && s[d - 1] <= C( '9' ) )
+		d--;
+	if ( d == n || d < t )
+		return -1;
+	for ( std::ptrdiff_t i = 0; i < t; i++ )
+		if ( s[d - t + i] != C( tag[i] ) )
+			return -1;
+	return d - t;
+}
 
 #endif

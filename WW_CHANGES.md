@@ -1,3 +1,16 @@
+## STREAMTEX5 (2026-11-02): a leaf's coverage copy is pooled under its noted file (STREAMTEX4-WWCOVKEY)
+- STREAMTEX4's census counted textures as "unnoted" (loaded, never named by a shader property the stream saw), and
+  those escape kTierKeep, so the pool could free them while their cell was loaded. The main source: TREELEAF1/2 bind
+  an alpha-tested base map (leaves, foliage, fences) as the TexCache copy "<file>|wwcov<ref>", while note() gets the
+  plain <file> from the material. The copy was unnoted, and the noted plain name never showed as resident.
+- cellstream.cpp texPoolKey: cellStreamTexLoaded / Freed and the tier lookup (cellStreamTexTiers) strip the
+  "|wwcov<digits>" suffix (gl/streamtexpool.h streamTexCovAt) before the pool lookup. Two copies of one file share its
+  entry (the last load's bytes; the first free marks it gone).
+- Red WW_CELL_STREAMTEX_RED=rawkey: the cache's raw name, as before.
+- Unit: `bash tests/wwcovkey/run.sh <out>` (g++ only): a coverage copy of a noted file is rule Keep (kTierKeep) with
+  0 unnoted; the red reads it unnoted, rule Timer -> WWCOVKEY FAIL. Still never noted (far field / global, tier 1 by
+  design): land LOD chunks, terrain noise and detail normals, water noise.
+
 ## LARGEREF6 (2026-11-02): the flat cell mask and a large ref's far copy (LARGEREF-FLATMASK-FIX)
 - Over a flat far field (the game's .bto, our rings flattened) the streamed view degenerates far triangles centred in a
   loaded cell, so a wide large ref standing one cell out loses the part of its far copy that reaches in (LARGEREF4
