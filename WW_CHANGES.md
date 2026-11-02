@@ -523,6 +523,18 @@ and the measured ms and targets with their sources. `cell presets:` in the notes
 tests/presettable: every row x preset against those rules (red: the old rule, it must fail), plus a coverage check
 that every Fusion Shaders panel row has a table row (red: a row dropped). tests/cellshow keeps testing the step
 mechanics on its own synthetic codes (`wwDisplayPresetCodes`).
+## REFLPROBECLI1 (TOOLS1101, 2026-11-01): count the reflection probes' below-horizon misses without a window
+
+`nifskope -no-gui reflcensus --soup <soup.psp> (--camera x,y,z ... | --auto N) [--interior] [--out probes.tsv]` places
+the probes the reflection pass would place round each camera (the camera probe and the 3x3 grid of 2048 boxes) and
+traces each probe's 64x64 tile through a bake's soup with the bake's own tracer. Per camera and in total it prints the
+texels that hit, the sky misses, the misses below the horizon (since SKYBELOW2 those draw the ground outdoors and 0
+indoors), the below misses of probes whose 9 ground taps all missed (they take albedo 0.5) and the below misses whose
+ray runs past the soup's edge. The rule it mirrors is in src/reflcensus.h; tests/reflcensus/run.sh checks it against
+ray-plane arithmetic on a square floor, with two reds (`--red lift`: the horizon at d.z < 0.1; `--red noreach`: no far
+plane) and a check that every mirrored literal is still in cellreflprobe.cpp and its two shaders. Nothing in the
+viewer changes.
+
 ## FOAMOFF2 (FIX1101A, 2026-11-01): River foam and Contact foam stay OFF
 
 The water lane's foam fixes land: lace streaks instead of solid patches, and no foam on a dry bank. Its two rows still
