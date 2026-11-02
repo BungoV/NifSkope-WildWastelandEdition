@@ -4,7 +4,7 @@ res/shaders/cell_volair.prog (the air's froxel pass, inject stage) through this 
 context (shader_link_check.py / atmo_lut_check.py), and the CPU law through tests/rainfog/rainfog_dump.cpp (g++). No
 NifSkope, no game data (the weather census is the derived fixture tests/rainfog/census_rain.tsv).
 
-    python -I tests/spells/rainfog_check.py <scratch> [--red today|flagrule|wiring] [--only ZIPHSMDKWC] [--base <sha>]
+    python -I tests/spells/rainfog_check.py <scratch> [--red today|flagrule|wiring|cost] [--only ZIPHSMDKWC] [--base <sha>] [--cbase strip|<sha>]
 
 RDR2 (Bauer 2019, SIGGRAPH Advances, slide 19 + note 19): "rain fog beneath clouds, where placement is derived off the
 density in the cloud map. A height-based falloff is applied to connect the fog to the cloud." No numbers given.
@@ -35,8 +35,10 @@ in Z and C, so a froxel's T is the rain fog's alone):
               the uniforms before the far grid keys on them, cell_volair.frag adds rfSigma in the sub-step loop before
               `scatters`. Red wiring (the --base sources) FAILS.
   C cost      GPU ms of the inject pass at 160 x 90 x 64 (1080p), 20 reps: today / rfOn 0 / rfOn 1 (INFO; bars rfOn 0
-              <= today + 0.02 ms, rfOn 1 <= today + 0.15 ms).
-Reds: today (today's program for I P S H: no rain fog, every one FAILS), flagrule (K), wiring (W).
+              <= today + 0.02 ms, rfOn 1 <= today + 0.15 ms). Since BUGS1102B "today" here is the tree's cell_volair.frag
+              with the rain fog's sub-step add cut out (--cbase strip, default; --cbase <sha> = that commit's file).
+Reds: today (today's program for I P S H: no rain fog, every one FAILS), flagrule (K), wiring (W), cost (C: the add
+unconditional with 4 more rfSigma reads a sub-step).
 Amendments after the first run (before any red run), both measurement resolution, not the law:
   M  rel 1e-9 -> 1e-5: precipmath.h's water mass constant is 0.5236 (pi / 6 to 4 digits): rel 2.3e-6.
   H  the 2 % bar judges only slices of od >= 1e-4; the near slices (od 1e-6..1e-4) are judged by |d od| <= 3e-7: the
@@ -56,6 +58,7 @@ scratch = args[0] if args and not args[0].startswith('--') else os.path.join(TRE
 red = args[args.index('--red') + 1] if '--red' in args else ''
 only = set(args[args.index('--only') + 1]) if '--only' in args else set('ZIPHSMDKWC')
 BASE = args[args.index('--base') + 1] if '--base' in args else '0e7c2c3a'
+CBASE = args[args.index('--cbase') + 1] if '--cbase' in args else 'strip'
 os.makedirs(scratch, exist_ok=True)
 
 import shader_link_check as S   # noqa: E402
@@ -519,12 +522,44 @@ if 'C' in only:
             f_getq(q[0], 0x8866, ctypes.byref(r))
             ms.append(r.value / 1e6)
         return float(np.median(ms))
-    t_old = timed(P_OLD, U_OLD, 0)
-    t_0 = timed(P_NEW, U_NEW, 0)
-    t_1 = timed(P_NEW, U_NEW, 1)
+    # lane BUGS1102B (RAINFOG-CBASE): "today" for C is the tree's own cell_volair.frag with the rain fog's sub-step add
+    # cut out (--cbase strip, the default), so later lanes' inject cost (FOGLEAK1, INTERIORPERF1) sits on both sides
+    # and the gate prices the rain fog alone. --cbase <sha> = the old form (cell_volair.frag at that commit).
+    # Red cost: the add made unconditional with 4 more rfSigma reads a sub-step (rfOn 0 pays it too): C must FAIL.
+    RF_ADD = (r'\t\tif \( rfOn != 0 \)\t// lane CLOUD6e: [^\r\n]*\r?\n'
+              r'\t\t\ttauQ\[q\] \+= rfSigma\( dirView \* \( 0\.5 \* \( ta \+ tb \) / fogDistScale \) \) \* \( tb - ta \);(\r?\n)')
+
+    def volair_dir(name, frag):
+        d = os.path.join(scratch, name)
+        if os.path.isdir(d):
+            shutil.rmtree(d)
+        shutil.copytree(SDIR, d)
+        open(os.path.join(d, 'cell_volair.frag'), 'wb').write(frag)
+        return program(d)
+
+    def cut_volair(name, new):
+        src = open(os.path.join(SDIR, 'cell_volair.frag'), 'rb').read().decode('latin-1')
+        hits = re.findall(RF_ADD, src)
+        if len(hits) != 1:
+            raise SystemExit('C: the rain fog add matched %d times in cell_volair.frag (want 1)' % len(hits))
+        return volair_dir(name, re.sub(RF_ADD, lambda mm: new.replace('\n', mm.group(1)), src).encode('latin-1'))
+    if CBASE == 'strip':
+        P_CB, U_CB = cut_volair('shaders_cbase', '')
+    else:
+        P_CB, U_CB = volair_dir('shaders_cbase', subprocess.run(['git', '-C', TREE, 'show', CBASE + ':res/shaders/cell_volair.frag'],
+                                                                capture_output=True, check=True).stdout)
+    P_CN, U_CN = (P_NEW, U_NEW)
+    if red == 'cost':
+        m = 'dirView * ( 0.5 * ( ta + tb ) / fogDistScale )'
+        P_CN, U_CN = cut_volair('shaders_redcost', '\t\ttauQ[q] += ( rfSigma( %s ) + 1e-6 * ( rfSigma( 1.01 * %s ) + rfSigma( 0.99 * %s )'
+                                ' + rfSigma( 1.02 * %s ) + rfSigma( 0.98 * %s ) ) ) * ( tb - ta );\n' % (m, m, m, m, m))
+    t_old = timed(P_CB, U_CB, 0)
+    t_0 = timed(P_CN, U_CN, 0)
+    t_1 = timed(P_CN, U_CN, 1)
     gate('C cost', t_0 <= t_old + 0.02 and t_1 <= t_old + 0.15,
-         'inject 160x90x64, median of 20 (this machine\'s GPU, offline, lights off): today %.3f ms, rfOn 0 %.3f, rfOn 1 %.3f'
-         % (t_old, t_0, t_1))
+         'inject 160x90x64, median of 20 (this machine\'s GPU, offline, lights off): today (%s) %.3f ms, rfOn 0 %.3f, '
+         'rfOn 1 %.3f%s' % ('the tree without the rain fog add' if CBASE == 'strip' else CBASE, t_old, t_0, t_1,
+                            ' [red cost]' if red == 'cost' else ''))
 
 print('RAINFOG-CHECK %s (%d of %d)%s' % ('PASS' if all(results) else 'FAIL', sum(results), len(results),
                                         ' [red %s]' % red if red else ''))

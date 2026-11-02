@@ -12,6 +12,7 @@
 #include "gl/lookdevstage.h"
 #include "gl/precipmath.h"
 #include "gl/preciproof.h"	// lane INTSKY1: rain only under open sky in a sunlit interior
+#include "gl/cellunits.h"	// lane BUGS1102B: the roof map's unit
 #include "gl/glshape.h"
 #include "gl/precipspec.h"
 #include "gl/renderer.h"
@@ -83,6 +84,8 @@ struct PcState
 	bool timePinned = false;
 	GLuint vao = 0, vbo = 0;
 	GLuint vaoGpu = 0;	// lane PERFFIX3 D: the GPU field reads no attribute (core profile still needs a bound VAO)
+	GLuint roofTex = 0;	// lane BUGS1102B: the roof map for the GPU field (R32F), uploaded once per map (roofTexGen)
+	long roofTexGen = -1;
 	std::vector<float> buf;
 };
 
@@ -155,6 +158,16 @@ bool gpuRoofRedFromEnv()
 	WW_SWITCH_STATIC( QByteArray, r, wwEnv( "WW_CELL_PRECIP_RED" ).trimmed().toLower() );
 	for ( const QByteArray & t : r.split( ',' ) )
 		if ( t.trimmed() == "gpuroof" )
+			return true;
+	return false;
+}
+
+//! lane BUGS1102B: WW_CELL_PRECIP_RED=cpuroof, BUGS1102's rule (a roofed interior takes the CPU field and its upload)
+bool cpuRoofRedFromEnv()
+{
+	WW_SWITCH_STATIC( QByteArray, r, wwEnv( "WW_CELL_PRECIP_RED" ).trimmed().toLower() );
+	for ( const QByteArray & t : r.split( ',' ) )
+		if ( t.trimmed() == "cpuroof" )
 			return true;
 	return false;
 }
@@ -300,6 +313,7 @@ struct PcRoof
 	int shapes = -1;
 	WwRoofMap map;
 	QString note;
+	long gen = 0;	// lane BUGS1102B: a global count of map builds (the GPU texture's key; never reset with the map)
 };
 
 PcRoof & pcRoof()
@@ -317,7 +331,9 @@ const WwRoofMap & pcRoofFor( Scene * scene )
 			shapes++;
 	if ( R.nif == scene->nifModel && R.shapes == shapes )
 		return R.map;
+	static long builds = 0;
 	R = PcRoof();
+	R.gen = ++builds;
 	R.nif = scene->nifModel;
 	R.shapes = shapes;
 	QElapsedTimer t;
@@ -431,8 +447,9 @@ int wwCellPrecipDraw( Scene * scene )
 	}
 	// lane PERFFIX3 D: from here the pass has work: its own Frame Timers zone ("precip", CPU + GPU ms)
 	PassTime::Scope ptPrecip( PassTime::Precip );
-	// lane BUGS1102: the GPU field has no roof map, so a roofed interior keeps the CPU field (preciproof.h)
-	const bool gpuField = wwPrecipGpuField( cpuFieldFromEnv(), ( redBits() & RedNoWrap ) != 0, roof != nullptr, gpuRoofRedFromEnv() );
+	// lane BUGS1102B: a roofed interior keeps the GPU field, which reads the roof map as a texture (preciproof.h)
+	const bool gpuField = wwPrecipGpuField( cpuFieldFromEnv(), ( redBits() & RedNoWrap ) != 0, roof != nullptr, cpuRoofRedFromEnv() );
+	const bool gpuRoof = wwPrecipGpuRoofTest( gpuField, roof != nullptr, gpuRoofRedFromEnv() ) && roof->valid();
 
 	// the clock: a harness pin, else the wall clock
 	WW_SWITCH_STATIC( QByteArray, timePin, wwEnv( "WW_CELL_PRECIP_TIME" ).trimmed() );
@@ -549,7 +566,9 @@ int wwCellPrecipDraw( Scene * scene )
 		.arg( gpuField ? QStringLiteral( "gpu" ) : QStringLiteral( "cpu" ) )
 		+ ( look ? QStringLiteral( "; look %1 (shutter 1/%2 s)" ).arg( lookWords.join( QLatin1Char( ',' ) ) ).arg( 1.0 / kShutter, 0, 'f', 0 )
 			: QString() )
-		+ ( roof && gpuField ? QStringLiteral( "; interior, RED WW_CELL_PRECIP_RED=gpuroof (GPU field, no roof test)" )
+		+ ( roof && gpuField && gpuRoofRedFromEnv() ? QStringLiteral( "; interior, RED WW_CELL_PRECIP_RED=gpuroof (GPU field, no roof test)" )
+			: roof && gpuField ? QStringLiteral( "; interior under open sky only, roof map on the GPU (%1)" ).arg( pcRoof().note )
+			: roof && cpuRoofRedFromEnv() ? QStringLiteral( "; interior under open sky only, RED WW_CELL_PRECIP_RED=cpuroof (CPU field) (%1)" ).arg( pcRoof().note )
 			: roof ? QStringLiteral( "; interior under open sky only (%1)" ).arg( pcRoof().note )
 			: CL && CL->interior ? QStringLiteral( "; interior, RED WW_INTSKY_RED=rain (no roof test)" ) : QString() );
 	s.echo = echo;
@@ -597,6 +616,34 @@ int wwCellPrecipDraw( Scene * scene )
 		if ( !s.vaoGpu )
 			fn->glGenVertexArrays( 1, &s.vaoGpu );
 		fn->glBindVertexArray( s.vaoGpu );
+		// lane BUGS1102B (PRECIPROOF-GPU2): the roof map as an R32F texture, uploaded once per map build
+		prog->uni1b( "pcRoofOn", gpuRoof );
+		prog->uni1i( "pcRoof", WwCellUnit::PrecipRoof );
+		if ( gpuRoof ) {
+			const WwRoofMap & m = *roof;
+			fn->glActiveTexture( GLenum( GL_TEXTURE0 + WwCellUnit::PrecipRoof ) );
+			if ( !s.roofTex )
+				fn->glGenTextures( 1, &s.roofTex );
+			fn->glBindTexture( GL_TEXTURE_2D, s.roofTex );
+			if ( s.roofTexGen != pcRoof().gen ) {
+				std::vector<float> z( m.z.size() );
+				std::transform( m.z.begin(), m.z.end(), z.begin(), wwRoofTexel );
+				fn->glPixelStorei( GL_UNPACK_ALIGNMENT, 4 );
+				fn->glTexImage2D( GL_TEXTURE_2D, 0, GL_R32F, m.nx, m.ny, 0, GL_RED, GL_FLOAT, z.data() );
+				fn->glTexParameteri( GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST );
+				fn->glTexParameteri( GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST );
+				fn->glTexParameteri( GL_TEXTURE_2D, GL_TEXTURE_MAX_LEVEL, 0 );
+				fn->glTexParameteri( GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE );
+				fn->glTexParameteri( GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE );
+				s.roofTexGen = pcRoof().gen;
+			}
+			fn->glActiveTexture( GL_TEXTURE0 );
+			// the eye in the map's texels, in double here (the shader adds the particle's camera-relative offset)
+			float rc[3];
+			wwRoofCam( m, cam, rc );
+			prog->uni3f( "pcRoofCam", rc[0], rc[1], rc[2] );
+			prog->uni1f( "pcRoofInv", 1.0f / m.cell );
+		}
 	} else {
 		// the buffer: one upload a frame
 		if ( !s.vao ) {
@@ -738,6 +785,11 @@ int wwCellPrecipDraw( Scene * scene )
 		fn->glActiveTexture( GL_TEXTURE0 );
 	}
 	fn->glBindTexture( GL_TEXTURE_2D, 0 );
+	if ( gpuRoof ) {
+		fn->glActiveTexture( GLenum( GL_TEXTURE0 + WwCellUnit::PrecipRoof ) );
+		fn->glBindTexture( GL_TEXTURE_2D, 0 );
+		fn->glActiveTexture( GL_TEXTURE0 );
+	}
 	r->stopProgram();
 	fn->glDepthMask( depthMask );
 	if ( !wasBlend )

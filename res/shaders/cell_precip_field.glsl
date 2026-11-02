@@ -24,6 +24,26 @@ uniform float pcT;			// seconds
 uniform int pcCols;			// the atlas grid
 uniform int pcCells;
 uniform vec2 pcCellUv;		// one cell in uv
+// lane BUGS1102B (PRECIPROOF-GPU2): a sunlit interior's roof map (src/gl/preciproof.h WwRoofMap, R32F: the highest occluder
+// z a texel, -1e30 open), so a particle under a roof is dropped here as the CPU field drops it. pcRoofOn false: no map
+// (an exterior) or red WW_CELL_PRECIP_RED=gpuroof
+uniform bool pcRoofOn;
+uniform sampler2D pcRoof;
+uniform vec3 pcRoofCam;		// the eye in the map: ( ( eye.xy - map corner ) / texel, eye.z ), from the CPU in double
+uniform float pcRoofInv;	// 1 / the texel side, game units
+
+//! roofAt's rule: the texel holding the particle; off the map is open sky
+bool pcRoofOpen( vec3 rel )
+{
+	ivec2 t = ivec2( floor( pcRoofCam.xy + rel.xy * pcRoofInv ) );
+	ivec2 n = textureSize( pcRoof, 0 );
+#ifdef PC_ROOF_RED
+	t = t.yx;	// tests/precipgpuroof red: the map read across its axes
+#endif
+	if ( any( lessThan( t, ivec2( 0 ) ) ) || any( greaterThanEqual( t, n ) ) )
+		return true;
+	return texelFetch( pcRoof, t, 0 ).r - pcRoofCam.z < rel.z;
+}
 
 uint pcHash( uint x )
 {
@@ -47,7 +67,7 @@ float pcWrap( float x, float L )
 }
 
 /* particle i: camera-relative position, velocity (world units/s), half size, angle, atlas cell corner (uv); false
- * when it sits inside the near box (far tier: skipped) */
+ * when it sits inside the near box (far tier: skipped) or under the roof map (pcRoofOn) */
 bool pcParticle( uint i, out vec3 rel, out vec3 vel, out float hs, out float angle, out vec2 cellUv )
 {
 	uint h = pcHash( i ^ pcSeedS );
@@ -79,5 +99,7 @@ bool pcParticle( uint i, out vec3 rel, out vec3 vel, out float hs, out float ang
 	angle = a0 + spin * pcT;
 	int cell = var % max( pcCells, 1 );
 	cellUv = vec2( float( cell % max( pcCols, 1 ) ), float( cell / max( pcCols, 1 ) ) ) * pcCellUv;
-	return !( pcInner > 0.0 && all( lessThan( abs( rel ), vec3( 0.5 * pcInner ) ) ) );
+	if ( pcInner > 0.0 && all( lessThan( abs( rel ), vec3( 0.5 * pcInner ) ) ) )
+		return false;
+	return !pcRoofOn || pcRoofOpen( rel );
 }
