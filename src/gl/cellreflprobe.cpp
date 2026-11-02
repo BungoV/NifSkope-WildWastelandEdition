@@ -43,11 +43,12 @@ BSD License - see nifskope.h
 bool rtddgiSkyBelowRedNow();	// lane SKYBELOW2: SKYBELOW1's red (src/rtddgicell.cpp), read every frame (live)
 
 /* lane FRAMESCHED1: WW_FRAMESCHED_RED=1 keeps today's schedule (the camera face and the placed face in one frame, on
- * the coarse cascades' frames too). Read every frame (live) */
+ * the coarse cascades' frames too); =0 runs the one-capture-a-frame schedule. Unset = today's schedule until the
+ * lane's spike hold says ON. Read every frame (live) */
 static bool frameSchedRed()
 {
 	if ( !wwEnvIsSet( "WW_FRAMESCHED_RED" ) )
-		return false;
+		return true;
 	const QByteArray v = wwEnv( "WW_FRAMESCHED_RED" ).trimmed();
 	return !v.isEmpty() && v != "0";
 }

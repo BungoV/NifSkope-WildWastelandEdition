@@ -7,7 +7,8 @@ face take turns when both wait; no capture on a frame a coarse cascade stepped o
 every-frame step and WW_CELL_REFLPROBE_ALL are not touched), waiting at most 3 frames in a row. rtddgicell.cpp reports
 the step (rtddgiCellCoarseStepped). Lamp shadow cubes (event-driven, already sliced by WwLampSlice) and the exposure
 measure (every frame) have no period to move. The reflection probes ship off, so the default picture is unchanged.
-Red WW_FRAMESCHED_RED=1 (live) = the old schedule. The `reflprobe frame:` line (WW_CELL_REFLPROBE_TIME=1) prints
+Red WW_FRAMESCHED_RED=1 (live) = the old schedule; =0 = the new one. Unset = the old schedule until the spike hold
+(notes/framesched1/hold) says ON. The `reflprobe frame:` line (WW_CELL_REFLPROBE_TIME=1) prints
 `sched deferred= alternated=`. Gate: tests/framesched (g++; -DFRAMESCHED_RED fails "no frame carries two").
 
 ## REFLPROBECLI1 (TOOLS1101, 2026-11-01): count the reflection probes' below-horizon misses without a window
