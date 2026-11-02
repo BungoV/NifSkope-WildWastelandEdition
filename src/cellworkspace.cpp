@@ -1242,6 +1242,7 @@ void CellWorkspacePanel::buildUi()
 		look( WwLook::WeaponParts, tr( "Weapon mod parts" ) );
 		look( WwLook::AnimObjects, tr( "Animated objects" ) );
 		look( WwLook::WorldAnim, tr( "World animation" ) );
+		look( WwLook::ObjectFade, tr( "Distance fade" ) );	// lane OBJFADE1
 		head( V, "CellWorkspaceCellGrass" );
 		head( V, "CellWorkspaceParticles" );
 		head( V, "CellWorkspaceShow_ground" );

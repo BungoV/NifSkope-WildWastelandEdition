@@ -73,6 +73,7 @@ BSD License - see nifskope.h
 #include "gl/cellwater.h"	// lane WATER1
 #include "gl/cellwaterinfo.h"	// lane WATERDATA1
 #include "gl/cellcull.h"	// lane SUNCELL1: the per-placement culling runs
+#include "gl/cellobjfade.h"	// lane OBJFADE1: the runs' fade class
 #include "gl/cellprevisrule.h"	// lane PERFFIX4: the tome's staleness
 #include "gl/glproperty.h"	// lane FIXPACK1: the renderer's .pbrm resolve (pbrmResolveForMaterial)
 #include "gl/cellgrass.h"
@@ -269,6 +270,9 @@ struct Bucket
 	std::vector<quint32> runStart;
 	//! The placed reference of each run (parallel to `runStart`; 0 = none)
 	std::vector<quint32> runRef;
+	//! lane OBJFADE1: each run's placement bound (the whole model, placed; the vertices' space) and fade class
+	struct RunFade { Vector3 c; float r = 0.0f; quint8 type = 0; };
+	std::vector<RunFade> runFade;
 	//! lane CELLSTREAM1: the shapes' own vertex lists, cut on the worker so the writer only copies them out
 	struct Part { std::vector<OutVert> pv; std::vector<Triangle> pt; size_t p0 = 0, p1 = 0; };
 	std::vector<Part> parts;
@@ -549,6 +553,11 @@ bool emitBucket( NifModel * nif, const QModelIndex & iRoot, const Bucket & b,
 					const size_t ri = size_t( rr - b.runStart.begin() );
 					if ( ri > 0 && ri - 1 < b.runRef.size() )
 						r.ref = b.runRef[ri - 1];
+					if ( ri > 0 && ri - 1 < b.runFade.size() ) {	// lane OBJFADE1
+						r.fadeCenter = b.runFade[ri - 1].c;
+						r.fadeRadius = b.runFade[ri - 1].r;
+						r.fadeType = b.runFade[ri - 1].type;
+					}
 				}
 				r.center = ( rlo + rhi ) / 2.0f;
 				for ( size_t t = s0 - p0; t < s1 - p0; t++ )
@@ -4120,6 +4129,7 @@ static bool cellBuild( NifModel * nif, const CellSceneSpec & specAsked, CellChun
 	const Vector3 copyShift = copyRedOrigin ? origin : Vector3( 0.0f, 0.0f, 0.0f );
 	const Vector3 pfxShift = pfxRedOrigin ? origin : Vector3( 0.0f, 0.0f, 0.0f );
 	QSet<quint32> animObjRefs, animObjCapped;
+	QHash<QString, std::pair<Vector3, float>> fadeModelBound;	// lane OBJFADE1: a model's bound sphere, model space
 	int animObjShapes = 0;
 	auto soupLeavesOut = [&]( const Placement & p, bool counted ) -> bool {
 		const EsmLodBase & lb = world.lodBase( p.base );
@@ -5337,6 +5347,29 @@ static bool cellBuild( NifModel * nif, const CellSceneSpec & specAsked, CellChun
 			}
 			b.runStart.push_back( quint32( b.tris.size() ) );   // one culling run per placed shape
 			b.runRef.push_back( p.ref );
+			{	// lane OBJFADE1: the placement's whole bound (the model's, as placed) and its class, for the distance fade
+				auto fb = fadeModelBound.constFind( mkey );
+				if ( fb == fadeModelBound.constEnd() ) {
+					Vector3 mlo( 3.4e38f, 3.4e38f, 3.4e38f ), mhi( -3.4e38f, -3.4e38f, -3.4e38f );
+					for ( const NativeSrcShape & ms : mit.value() )
+						for ( size_t q = 0; q + 2 < ms.geom.pos.size(); q += 3 )
+							for ( int a = 0; a < 3; a++ ) {
+								mlo[a] = qMin( mlo[a], ms.geom.pos[q + size_t( a )] );
+								mhi[a] = qMax( mhi[a], ms.geom.pos[q + size_t( a )] );
+							}
+					const Vector3 mc = mlo[0] <= mhi[0] ? ( mlo + mhi ) / 2.0f : Vector3( 0.0f, 0.0f, 0.0f );
+					float mr = 0.0f;
+					for ( const NativeSrcShape & ms : mit.value() )
+						for ( size_t q = 0; q + 2 < ms.geom.pos.size(); q += 3 )
+							mr = qMax( mr, ( Vector3( ms.geom.pos[q], ms.geom.pos[q + 1], ms.geom.pos[q + 2] ) - mc ).length() );
+					fb = fadeModelBound.insert( mkey, std::make_pair( mc, mr ) );
+				}
+				Bucket::RunFade rf;
+				rf.c = p.pos + p.rot * ( fb->first * p.scale ) - origin;
+				rf.r = fb->second * p.scale;
+				rf.type = p.ref ? WwObjFade::typeOf( lb.type, isActor ) : quint8( WwObjFade::None );
+				b.runFade.push_back( rf );
+			}
 			for ( size_t t = 0; t + 2 < s.geom.tris.size(); t += 3 ) {
 				b.tris.push_back( BucketTri{ { quint32( base + int( s.geom.tris[t + 0] ) ),
 					quint32( base + int( s.geom.tris[t + 1] ) ),

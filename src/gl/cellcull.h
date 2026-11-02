@@ -23,7 +23,13 @@ struct WwCullRun
 	Vector3 center;				//!< bounding sphere, the shape's own space
 	float radius = 0.0f;
 	std::uint32_t ref = 0;			//!< the placed reference's form id (0 = none)
+	//! lane OBJFADE1: the placement's whole bound (all its shapes) in the same space, and its fade class (0 = none)
+	Vector3 fadeCenter;
+	float fadeRadius = 0.0f;
+	std::uint8_t fadeType = 0;
 };
+
+namespace WwObjFade { struct Config; }
 
 /*! One previs primitive in the cell document's space: center, unit axes, half extents. `type` 1 box, 3 plane
  *  (thinnest axis is the normal); a portal names its rooms (`from`, `to`, 0 = outside). */
@@ -91,6 +97,11 @@ bool wwCellDecalFadeRanges( Scene * scene, const Shape * sh, int block, std::int
 void wwCellDecalPomShape( const void * nif, int block, float scale, int passes );
 //! (scale x 0.1, the step cap clamp(passes, 16, 72)) for the shape, or false.
 bool wwCellDecalPomFor( const void * nif, int block, float & scale, float & steps );
+/*! Lane OBJFADE1 (GFXR-GEO G1): THE GAME'S PER-CLASS DISTANCE FADE of placed refs (src/gl/cellobjfade.h), in
+ *  wwCellCullCamera through the frame's camera: a run is hidden where the game switches its ref out. Row "Distance
+ *  fade" under Objects (WwLook::ObjectFade, pin WW_CELL_OBJFADE), ships off. Red WW_CELL_OBJFADE_RED=decalonly. */
+bool wwCellObjFadeOn();
+const WwObjFade::Config & wwCellObjFadeConfig();
 //! lane BINDLESSMDI1: wwCellDecalFadeRanges may draw the shape its own way (no side effect)
 bool wwCellDecalFadeHas( Scene * scene, int block );
 /*! Lane DECALANGLE: a placed decal shape whose vertex alpha is dot(N, D) (src/celldecalangle.h): the shader runs
