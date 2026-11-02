@@ -566,6 +566,14 @@ uniform bool volSunAir;
  * units with FO4CS-level shadows) only widened the shaft edges (tests/shafts: edge sharpness kept 0.65 -> 0.76 at 12 px,
  * 0.75 -> 0.91 at 8 px) and cost 31 extra shadow reads a sub-step. Red WW_CELL_AIR_SHADOW_RED=soft: the disc, as before. */
 uniform bool volSunTap;
+/* lane AIRBEAD1: thin beams beaded along the ray. Each sub-step read the sun at its middle, so a beam narrower than a
+ * sub-step (~180 u at 6000 u) was hit or missed in a pattern fixed to the slice grid. volSunBead: the tap reads twice,
+ * at the sub-step's 1/4 and 3/4 points (8 strata a slice; tests/shafts gate B: radial roughness on screen -19 % Low,
+ * -27 % Medium; inject +0.03 ms Low, +0.06..0.07 ms Medium, so it ships off: WW_CELL_AIR_SHADOW=bead). One jittered
+ * or ordered-dither read per sub-step measured WORSE (noise, notes/airbead1). airSunDs: the reads' half spacing (view
+ * space, a quarter sub-step), set once a froxel before the sub-steps (airSun is called only there). */
+uniform bool volSunBead;
+vec3 airSunDs = vec3( 0.0 );
 
 // the Vogel disc at 32 taps (r = sqrt((t + 0.5) / 32), t x 2.39996323 rad): literal offsets, the pattern fixed in the
 // map's texels (so world-locked); 32 = 8..48 of the presets' range, as accurate as the rotated preset disc (tests/airsun A)
@@ -576,8 +584,12 @@ float airCsmVogel( int i, vec3 posView )
 	float R = ussCsmFilter.y * mix( 0.8, 1.2, clamp( float( i ) * 0.5, 0.0, 1.0 ) );
 	if ( ussCsmWorld.x > 0.5 )
 		R = clamp( ussCsmWorld[i + 1] / max( ussCsmTexel[i], 1e-6 ), 0.5, 16.0 );
-	if ( volSunTap )
-		return texture( csmMap, vec4( q.xy, float( i ), zRef ) );
+	if ( volSunTap ) {
+		if ( !volSunBead )
+			return texture( csmMap, vec4( q.xy, float( i ), zRef ) );
+		vec3 d = mat3( csmMat[i] ) * airSunDs;	// lane AIRBEAD1: the map is affine, so the two reads sit at q -/+ d
+		return 0.5 * ( texture( csmMap, vec4( q.xy - d.xy, float( i ), zRef - d.z ) ) + texture( csmMap, vec4( q.xy + d.xy, float( i ), zRef + d.z ) ) );
+	}
 	vec2 k = vec2( R / csmParams.z );
 	float s = 0.0;
 	s += texture( csmMap, vec4( q.xy + vec2( 0.1250000, 0.0000000 ) * k, float( i ), zRef ) );
@@ -1156,14 +1168,16 @@ void main()
 		airLightsQ( posM, dirView, zc + dzdt * tm, t0 - tm, t1 - tm, need, Jq );
 		vec3 acc = vec3( 0.0 );
 		vec4 so[4];
+		airSunDs = dirView * ( 0.0625 * ( t1 - t0 ) / fogDistScale );	// lane AIRBEAD1: a quarter of a sub-step
 		for ( int q = 0; q < 4; q++ ) {
 			float ta = mix( t0, t1, float( q ) * 0.25 ), tb = mix( t0, t1, float( q + 1 ) * 0.25 );
 			float t = 0.5 * ( ta + tb ), zt = zc + dzdt * t;
 			vec3 Cq;
 			if ( ( need & ( 1 << q ) ) != 0 ) {
 				Cq = 0.25 * W * Jq[q] AZ_TINT( q );
-				if ( wq[q] > 0.0 )
+				if ( wq[q] > 0.0 ) {
 					Cq += Tq[q] * wq[q] * vk * airEnvColour( airSun( dirView * ( t / fogDistScale ), dirView, zt ), t, zt, dirView ) AZ_TINT( q );
+				}
 				so[q] = vec4( Cq / W, 1.0 );
 			} else {
 				Cq = h[q].rgb * W;
@@ -1189,6 +1203,7 @@ void main()
 	float vk = airVeilK( Jenv, tm, zc + dzdt * tm );	// lane FARCITYWASH1
 	vec3 acc = vec3( 0.0 );
 	float T = 1.0;
+	airSunDs = dirView * ( 0.0625 * ( t1 - t0 ) / fogDistScale );	// lane AIRBEAD1: a quarter of a sub-step
 	for ( int q = 0; q < 4; q++ ) {
 		float ta = mix( t0, t1, float( q ) * 0.25 ), tb = mix( t0, t1, float( q + 1 ) * 0.25 );
 		float tau = tauQ[q];

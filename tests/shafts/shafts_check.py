@@ -2,13 +2,20 @@
 Scene: a shadow-casting layer 6000 units toward the sun with round gaps (beams), the sun 28 deg off the view axis (into the
 sun, like Concord c3), FO4CS-level shadows (the world-unit disc, Ultra cascades). The integrated volume is read as surfaces
 read it (bilinear in the screen at the backdrop's slice) on 1920 px scanlines, against an exact hard-shadow ray march.
-usage: python -I tests/shafts/shafts_check.py <scratch> [--base <commit>] [--red soft] [--only ZSC] [--quick]
+usage: python -I tests/shafts/shafts_check.py <scratch> [--base <commit>] [--red soft|bead] [--only ZSBC] [--quick]
 Bars (pre-registered from the attribution runs, notes/shafts1: today 0.647 / 0.752, one tap 0.759 / 0.911):
-  Z  identity  the red (volSunTap 0) == the base program, integrated L and T bit for bit at 12 px x 64, frame lit
-  S  sharpness gradient kept (mean |d/dx| vs the exact reference) >= 0.72 at 12 px x 64 (Low) and >= 0.85 at 8 px x 64
-               (Medium); --red soft judges the soft disc as shipped and must FAIL
-  C  cost      sun-only inject, base and new interleaved, median of 15: new - base <= +0.15 ms at 160x90x64 AND 240x135x64;
-               also printed: the Medium grid with the tap vs the Low grid as today (the "Medium by default" row)
+  Z  identity  the reds (volSunTap 0 and 1, volSunBead 0) == the base program (bf1c42a2, SHAFTS1's tip), integrated L and T
+               bit for bit at 12 px x 64, frame lit
+  S  sharpness gradient kept >= 0.72 at 12 px x 64 (Low) and >= 0.85 at 8 px x 64 (Medium); --red soft judges the soft
+               disc as shipped and must FAIL. Lane AIRBEAD1 INFO rows: the switch's gradient, and the gradient projected
+               on the exact one (sum gi gr / sum gr gr; along-ray beads count as "sharp" in mean |d/dx|)
+  B  beading   lane AIRBEAD1: radial roughness on screen (second difference along the beams, as surfaces read the volume)
+               with WW_CELL_AIR_SHADOW=bead (two reads) <= 0.85 x the one middle read at 12 px and 8 px; --red bead
+               judges the middle read as the switch and must FAIL
+  C  cost      sun-only inject, base and new interleaved, median of 41: new - base <= +0.05 ms at 160x90x64 AND 240x135x64
+               as shipped; INFO: the same for WW_CELL_AIR_SHADOW=bead (over the bar at Medium, so it ships off)
+               (lane AIRBEAD1: base = bf1c42a2 with its tap, the lane's bar; SHAFTS1 had +0.15 against the soft disc);
+               also printed: the Medium grid vs the Low grid (the "Medium by default" row)
 """
 import ctypes, math, os, shutil, subprocess, sys
 import numpy as np
@@ -18,9 +25,9 @@ TREE = os.path.dirname(os.path.dirname(HERE))
 sys.path.insert(0, os.path.join(TREE, 'tests', 'spells'))
 args = sys.argv[1:]
 SCR = args[0]
-BASE = args[args.index('--base') + 1] if '--base' in args else '3af8c3a4'
+BASE = args[args.index('--base') + 1] if '--base' in args else 'bf1c42a2'
 RED = args[args.index('--red') + 1] if '--red' in args else ''
-ONLY = set(args[args.index('--only') + 1]) if '--only' in args else set('ZSC')
+ONLY = set(args[args.index('--only') + 1]) if '--only' in args else set('ZSBC')
 QUICK = '--quick' in args
 os.makedirs(SCR, exist_ok=True)
 import shader_link_check as S   # noqa: E402
@@ -184,6 +191,7 @@ def uniforms(p, units, csm, cols, rows, sl, tap):
     setu(p, 'volCsm', 1)
     setu(p, 'volSunAir', 1)
     setu(p, 'volSunTap', int(tap))
+    setu(p, 'volSunBead', int(BEAD[0]))   # lane AIRBEAD1: the two reads a sub-step (base programs have no such uniform)
     setu(p, 'volSunRoom', 0)
     setu(p, 'ussOn', 1)
     setu(p, 'ussCsmOn', 1)
@@ -282,14 +290,43 @@ CSM = shadow_map()
 PN, UN = program(os.path.join(TREE, 'res', 'shaders'))
 PB, UB = program(BDIR)
 TAP = 0 if RED == 'soft' else 1   # the shipped value (C++: volSunTap = !WW_CELL_AIR_SHADOW_RED=soft)
+SHIP_BEAD = 0   # lane AIRBEAD1: shipped off (C++: volSunBead = WW_CELL_AIR_SHADOW=bead)
+ON_BEAD = 0 if RED == 'bead' else 1   # the switch's reads that B and C judge; --red bead judges the one middle read
+BEAD = [SHIP_BEAD]
 
 if 'Z' in ONLY:
-    Lb, Tb, _ = volume(PB, UB, CSM, 12, 64, 0)
-    Lr, Tr, _ = volume(PN, UN, CSM, 12, 64, 0)
-    d = max(float(np.abs(Lb - Lr).max()), float(np.abs(Tb - Tr).max()))
-    lit = int((Lb > 0).sum())
-    gate('Z identity', d == 0.0 and lit > 0.5 * Lb.size, 'base %s vs the red (volSunTap 0) at 160x90x64: max |dL|,|dT| %g, '
-         'lit froxel columns %d of %d' % (BASE, d, lit, Lb.size))
+    for tap in (0, 1):
+        BEAD[0] = 0
+        Lb, Tb, _ = volume(PB, UB, CSM, 12, 64, tap)
+        Lr, Tr, _ = volume(PN, UN, CSM, 12, 64, tap)
+        d = max(float(np.abs(Lb - Lr).max()), float(np.abs(Tb - Tr).max()))
+        lit = int((Lb > 0).sum())
+        gate('Z identity%d' % tap, d == 0.0 and lit > 0.5 * Lb.size, 'base %s vs the reds (volSunTap %d, volSunBead 0) at '
+             '160x90x64: max |dL|,|dT| %g, lit froxel columns %d of %d' % (BASE, tap, d, lit, Lb.size))
+    BEAD[0] = SHIP_BEAD
+
+
+def box_rough(L, px):
+    """lane AIRBEAD1: the screen as surfaces read it (the bilinear froxel read, 4 px samples), mean-normalised; rms of the
+    second difference ALONG the beam (radial from the sun's screen point, 1 sample apart), below the sun"""
+    rows, cols = L.shape
+    A = L / L.mean()
+    sx = (Lv[0] / -Lv[2] * P00 * 0.5 + 0.5) * cols - 0.5
+    sy = (Lv[1] / -Lv[2] * P11 * 0.5 + 0.5) * rows - 0.5
+
+    def bil(x, y):
+        x = np.clip(x, 0, cols - 1.001); y = np.clip(y, 0, rows - 1.001)
+        x0 = np.floor(x).astype(int); y0 = np.floor(y).astype(int); fx = x - x0; fy = y - y0
+        return ((A[y0, x0] * (1 - fx) + A[y0, x0 + 1] * fx) * (1 - fy) + (A[y0 + 1, x0] * (1 - fx) + A[y0 + 1, x0 + 1] * fx) * fy)
+    SY, SX = np.mgrid[0:270, 0:480].astype(float)
+    gx, gy = (SX + 0.5) / 480 * cols - 0.5, (SY + 0.5) / 270 * rows - 0.5
+    dx, dy = gx - sx, gy - sy
+    dd = np.maximum(np.hypot(dx, dy), 1e-6)
+    ux, uy = dx / dd * cols / 480, dy / dd * rows / 270
+    d2 = bil(gx + ux, gy + uy) + bil(gx - ux, gy - uy) - 2 * bil(gx, gy)
+    m = (dd > 6) & (gy < sy - 4) & (gx > 1) & (gx < cols - 2) & (gy > 1)
+    return float(np.sqrt((d2[m] ** 2).mean()))
+
 
 if 'S' in ONLY:
     ys = [330, 610] if QUICK else [200, 330, 470, 610, 760, 900]
@@ -302,13 +339,33 @@ if 'S' in ONLY:
         img = img / (img.mean() / ref.mean())
         sharp = np.abs(np.diff(img, axis=1)).mean() / np.abs(np.diff(ref, axis=1)).mean()
         gate('S sharp %dpx' % px, sharp >= bar, 'gradient kept %.3f (bar >= %.2f; 1 = the exact hard-shadow march; '
-             'volSunTap %d)' % (sharp, bar, TAP))
+             'volSunTap %d volSunBead %d)' % (sharp, bar, TAP, BEAD[0]))
+        BEAD[0] = ON_BEAD   # lane AIRBEAD1: the switch, and the gradient projected on the exact one (beads do not count)
+        img2 = scan(volume(PN, UN, CSM, px, 64, TAP)[0], ys)
+        img2 = img2 / (img2.mean() / ref.mean())
+        gr = np.diff(ref, axis=1)
+        proj = [float((np.diff(v, axis=1) * gr).sum() / (gr * gr).sum()) for v in (img, img2)]
+        print('%-12s INFO  WW_CELL_AIR_SHADOW=bead: gradient kept %.3f (off %.3f); projected on the exact gradient %.3f '
+              '(off %.3f)' % ('S bead %dpx' % px, np.abs(np.diff(img2, axis=1)).mean() / np.abs(gr).mean(), sharp,
+                             proj[1], proj[0]), flush=True)
+        BEAD[0] = SHIP_BEAD
+
+if 'B' in ONLY:
+    for px, bar in ((12, 0.85), (8, 0.85)):
+        BEAD[0] = 0
+        r0 = box_rough(volume(PN, UN, CSM, px, 64, TAP)[0], px)
+        BEAD[0] = ON_BEAD
+        r1 = box_rough(volume(PN, UN, CSM, px, 64, TAP)[0], px)
+        BEAD[0] = SHIP_BEAD
+        gate('B bead %dpx' % px, r1 <= bar * r0, 'radial roughness on screen (beads along the beams) %.4f vs the middle read '
+             '%.4f: x%.3f (bar <= x%.2f; WW_CELL_AIR_SHADOW=bead, volSunBead %d)' % (r1, r0, r1 / r0, bar, ON_BEAD))
 
 if 'C' in ONLY:
     q = (GLuint * 1)()
     f_genq(1, q)
 
-    def once(p, units, cols, rows, tap):
+    def once(p, units, cols, rows, tap, bead=SHIP_BEAD):
+        BEAD[0] = bead
         uniforms(p, units, CSM, cols, rows, 64, tap)
         G.bindfb(0x8D40, target(cols, rows))
         gl.glViewport(0, 0, cols, rows)
@@ -323,19 +380,24 @@ if 'C' in ONLY:
         f_getq(q[0], 0x8866, ctypes.byref(r))
         return r.value / 1e6
 
-    arms = {'base low': (PB, UB, 160, 90, 0), 'new low': (PN, UN, 160, 90, TAP),
-            'base med': (PB, UB, 240, 135, 0), 'new med': (PN, UN, 240, 135, TAP)}
+    arms = {'base low': (PB, UB, 160, 90, TAP), 'new low': (PN, UN, 160, 90, TAP),
+            'base med': (PB, UB, 240, 135, TAP), 'new med': (PN, UN, 240, 135, TAP),
+            'bead low': (PN, UN, 160, 90, TAP, ON_BEAD), 'bead med': (PN, UN, 240, 135, TAP, ON_BEAD)}
     ms = {k: [] for k in arms}
     for k in arms:
         once(*arms[k])   # warm
-    for rep in range(15):
+    for rep in range(41):
         for k in (arms if rep % 2 == 0 else list(arms)[::-1]):
             ms[k].append(once(*arms[k]))
     m = {k: float(np.median(v)) for k, v in ms.items()}
     dl, dm = m['new low'] - m['base low'], m['new med'] - m['base med']
-    gate('C cost', dl <= 0.15 and dm <= 0.15, 'sun-only inject x64, interleaved median of 15: Low 160x90 base %.3f new %.3f '
-         '(%+.3f ms); Medium 240x135 base %.3f new %.3f (%+.3f ms); bar <= +0.15' % (m['base low'], m['new low'], dl,
+    BEAD[0] = SHIP_BEAD
+    gate('C cost', dl <= 0.05 and dm <= 0.05, 'sun-only inject x64, interleaved median of 41, as shipped: Low 160x90 base %.3f new %.3f '
+         '(%+.3f ms); Medium 240x135 base %.3f new %.3f (%+.3f ms); bar <= +0.05' % (m['base low'], m['new low'], dl,
                                                                                   m['base med'], m['new med'], dm))
+    bl, bm = m['bead low'] - m['base low'], m['bead med'] - m['base med']
+    print('%-12s INFO  WW_CELL_AIR_SHADOW=bead (volSunBead %d): Low %+.3f ms, Medium %+.3f ms (the +0.05 bar: %s; why it '
+          'ships off)' % ('C bead', ON_BEAD, bl, bm, 'within' if bl <= 0.05 and bm <= 0.05 else 'over'), flush=True)
     print('%-12s INFO  Medium grid by default (new med - base low): %+.3f ms in the sun-only inject; the whole air pass '
           'scales with the froxel count (x2.25)' % ('C grid', m['new med'] - m['base low']), flush=True)
 
