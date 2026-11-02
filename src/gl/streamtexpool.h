@@ -115,6 +115,17 @@ public:
 			cur.keepEvicted++;
 	}
 
+	//! `k` went without a free being counted (a flush of the whole cache): not a free, not a reload later
+	void gone( const Key & k )
+	{
+		auto it = entries.find( k );
+		if ( it == entries.end() || !it->second.resident )
+			return;
+		it->second.resident = false;
+		resident -= it->second.bytes;
+		it->second.freedAt = -1;
+	}
+
 	//! who may free `k`: nobody (a loaded cell names it), the timer (never named by a cell, or the red), the pool
 	Rule rule( const Key & k ) const
 	{
@@ -123,7 +134,9 @@ public:
 		auto it = entries.find( k );
 		if ( it == entries.end() || !it->second.noted || it->second.base )
 			return it != entries.end() && it->second.refs > 0 ? Rule::Keep : Rule::Timer;
-		return it->second.refs > 0 ? Rule::Keep : Rule::Pool;
+		if ( it->second.refs > 0 )
+			return Rule::Keep;
+		return it->second.resident ? Rule::Pool : Rule::Timer;	// a load the pool never saw (before the stream began)
 	}
 
 	/*! the pool's textures to free now, oldest released first, until what is left fits the budget.
