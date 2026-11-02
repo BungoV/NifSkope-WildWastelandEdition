@@ -689,9 +689,10 @@ int TexCache::evictPool( std::int64_t budgetBytes, std::uint32_t protectTick, QS
 		e.push_back( { int( i ), tx.useTick, PassTime::texResidentBytesOf( tx.id[0] ), 0 } );
 	}
 	const std::int64_t total = PassTime::cacheCounts().texResidentBytes;
-	if ( tierOf && total > budgetBytes )	// lane STREAMTEX3: asked only when something must go
+	if ( tierOf && total > budgetBytes )	// lane STREAMTEX3: asked only when something must go, never of a protected one
 		for ( WwTexPool::Entry & x : e )
-			x.tier = tierOf( textures[size_t( x.index )].filename() );
+			if ( x.useTick < protectTick )
+				x.tier = tierOf( textures[size_t( x.index )].filename() );
 	const std::vector<int> pick = WwTexPool::pick( std::move( e ), total, budgetBytes, protectTick );
 	for ( const int i : pick ) {
 		Tex &	tx = textures[size_t( i )];
