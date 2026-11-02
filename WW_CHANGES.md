@@ -1,3 +1,15 @@
+## BUGS1102B (2026-11-02): the GPU rain field reads the roof map; the rain fog cost gate stops drifting
+
+- **Rain under the roof, GPU field (PRECIPROOF-GPU2):** the GPU precipitation field now reads the sunlit interior's roof
+  map as a texture (cell_precip_field.glsl `pcRoofOpen`, texture unit 87), so a roofed interior keeps the GPU field
+  instead of falling back to the CPU field. The particles it drops are the ones the CPU roof test drops.
+  Reds: `WW_CELL_PRECIP_RED=cpuroof` (BUGS1102's CPU field under a roof), `WW_CELL_PRECIP_RED=gpuroof` (the GPU field,
+  no roof test). New unit tests/precipgpuroof checks the shader's roof test against the CPU map on the real driver.
+- **Rain fog cost gate (RAINFOG-CBASE):** tests/spells/rainfog_check.py's cost gate C compared against cell_volair.frag
+  at an old commit, so other lanes' later fog work counted against the rain fog and C failed. "Today" is now the tree's
+  own shader with the rain fog's add cut out (`--cbase strip`, the default; `--cbase <sha>` = the old form). New red
+  `--red cost` (a dearer add) must fail C.
+
 ## FARWATER5 L4 (FARWATER6, 2026-11-02): one speed reference for both flow writers; the marking tool marks a log-nibble file
 
 The far river flow word stores speed as a 4-bit code where code 8 means the reference speed. The two writers used
@@ -38,17 +50,6 @@ curve) a lamp at 30 keeps 0.998 of its light in a pan's streak (the tone-mapped 
 depth of field (0.079); a still frame is unchanged (1.3e-5 of a step). The pass alone costs 0.056 ms instead of 0.028
 (motion blur) and 0.106 instead of 0.093 (both) at 1080p. The object blur, the volume clouds' front pass and the
 temporal AA stay on the tone-mapped frame.
-## BUGS1102B (2026-11-02): the GPU rain field reads the roof map; the rain fog cost gate stops drifting
-
-- **Rain under the roof, GPU field (PRECIPROOF-GPU2):** the GPU precipitation field now reads the sunlit interior's roof
-  map as a texture (cell_precip_field.glsl `pcRoofOpen`, texture unit 87), so a roofed interior keeps the GPU field
-  instead of falling back to the CPU field. The particles it drops are the ones the CPU roof test drops.
-  Reds: `WW_CELL_PRECIP_RED=cpuroof` (BUGS1102's CPU field under a roof), `WW_CELL_PRECIP_RED=gpuroof` (the GPU field,
-  no roof test). New unit tests/precipgpuroof checks the shader's roof test against the CPU map on the real driver.
-- **Rain fog cost gate (RAINFOG-CBASE):** tests/spells/rainfog_check.py's cost gate C compared against cell_volair.frag
-  at an old commit, so other lanes' later fog work counted against the rain fog and C failed. "Today" is now the tree's
-  own shader with the rain fog's add cut out (`--cbase strip`, the default; `--cbase <sha>` = the old form). New red
-  `--red cost` (a dearer add) must fail C.
 
 ## BUGS1102 (2026-11-02): rain stays out from under a sunlit interior's roof; preset rows and numbers
 
