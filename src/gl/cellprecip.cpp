@@ -117,7 +117,40 @@ bool cpuFieldFromEnv()
 	return false;
 }
 
-//! a linked texture (under Textures\) looked up loose in the roots, first root wins
+/* lane PRECIPLOOK1: WW_CELL_PRECIP_LOOK=rain,snow,clump,hail (1/on/all = every word; default off) = the new look on the
+ * GPU field (cell_precip_look.prog); WW_CELL_PRECIP_LOOK_RED=1 = the old path whatever the look says */
+enum Look : int { LookRain = 1, LookSnow = 2, LookClump = 4, LookHail = 8, LookAll = 15 };
+int lookFromEnv()
+{
+	WW_SWITCH_STATIC( QByteArray, red, wwEnv( "WW_CELL_PRECIP_LOOK_RED" ).trimmed().toLower() );
+	if ( !red.isEmpty() && red != "0" && red != "off" )
+		return 0;
+	WW_SWITCH_STATIC( QByteArray, r, wwEnv( "WW_CELL_PRECIP_LOOK" ).trimmed().toLower() );
+	int bits = 0;
+	for ( const QByteArray & t : r.split( ',' ) ) {
+		const QByteArray w = t.trimmed();
+		bits |= ( w == "1" || w == "on" || w == "all" ) ? LookAll : w == "rain" ? LookRain : w == "snow" ? LookSnow
+			: w == "clump" ? LookClump : w == "hail" ? LookHail : 0;
+	}
+	return bits;
+}
+
+//! the texture path's key with the old and new shipped folders made one (FO4CS/Precip <-> WW/Precip)
+QString texKey( QString rel )
+{
+	rel.replace( QLatin1Char( '\\' ), QLatin1Char( '/' ) );
+	while ( rel.startsWith( QLatin1Char( '/' ) ) )
+		rel.remove( 0, 1 );
+	if ( rel.startsWith( QLatin1String( "textures/" ), Qt::CaseInsensitive ) )
+		rel.remove( 0, 9 );
+	rel = rel.toLower();
+	if ( rel.startsWith( QLatin1String( "ww/precip/" ) ) )
+		rel = QStringLiteral( "fo4cs/precip/" ) + rel.mid( 10 );
+	return rel;
+}
+
+//! a linked texture (under Textures\) looked up loose in the roots, first root wins. PRECIPLOOK1: a path under
+//! FO4CS/Precip is also looked for under the old WW/Precip (and the other way round), in each root after its own name
 QString findTexture( const QStringList & roots, QString rel )
 {
 	rel.replace( QLatin1Char( '\\' ), QLatin1Char( '/' ) );
@@ -125,10 +158,20 @@ QString findTexture( const QStringList & roots, QString rel )
 		rel.remove( 0, 1 );
 	if ( rel.startsWith( QLatin1String( "textures/" ), Qt::CaseInsensitive ) )
 		rel.remove( 0, 9 );
+	QString alt;
+	if ( rel.startsWith( QLatin1String( "fo4cs/precip/" ), Qt::CaseInsensitive ) )
+		alt = QStringLiteral( "WW/Precip/" ) + rel.mid( 13 );
+	else if ( rel.startsWith( QLatin1String( "ww/precip/" ), Qt::CaseInsensitive ) )
+		alt = QStringLiteral( "FO4CS/Precip/" ) + rel.mid( 10 );
 	for ( const QString & r : roots ) {
 		const QString p = r + QStringLiteral( "/Textures/" ) + rel;
 		if ( QFileInfo::exists( p ) )
 			return p;
+		if ( !alt.isEmpty() ) {
+			const QString q = r + QStringLiteral( "/Textures/" ) + alt;
+			if ( QFileInfo::exists( q ) )
+				return q;
+		}
 	}
 	return QString();
 }
@@ -218,7 +261,7 @@ QVector<PcLayer> layersOf( const QStringList & roots, const QStringList & files,
 		L.field.windShare = L.spec.windShare;
 		L.field.spin = L.spec.spin;
 		L.field.swayU = L.spec.sway;
-		L.field.seed = hash32( formID * 2654435761u + quint32( i ) * 0x9E3779B9u + quint32( L.spec.type ) );
+		L.field.seed = hash32( formID * 2654435761u + quint32( i ) * 0x9E3779B9u + quint32( typeInfo( L.spec.type ).seedTag ) );
 		out.append( L );
 	}
 	return out;
@@ -479,9 +522,22 @@ int wwCellPrecipDraw( Scene * scene )
 			.arg( nb.side, 0, 'f', 0 ).arg( drawnL[0] ).arg( fb.side, 0, 'f', 0 ).arg( drawnL[1] ).arg( fb.thin, 0, 'f', 1 )
 			.arg( L.spec.texture );
 	}
+	// lane PRECIPLOOK1: the look rides the GPU field only (the CPU field red keeps the old draw)
+	const int look = gpuField ? lookFromEnv() : 0;
+	QStringList lookWords;
+	if ( look & LookRain )
+		lookWords << QStringLiteral( "rain" );
+	if ( look & LookSnow )
+		lookWords << QStringLiteral( "snow" );
+	if ( look & LookClump )
+		lookWords << QStringLiteral( "clump" );
+	if ( look & LookHail )
+		lookWords << QStringLiteral( "hail" );
 	const QString echo = QStringLiteral( "precip: on, field %4, wind %1 u/s, red %2: %3" ).arg( std::hypot( wv[0], wv[1] ), 0, 'f', 1 )
 		.arg( redBits() ).arg( census.join( QStringLiteral( "; " ) ) )
 		.arg( gpuField ? QStringLiteral( "gpu" ) : QStringLiteral( "cpu" ) )
+		+ ( look ? QStringLiteral( "; look %1 (shutter 1/%2 s)" ).arg( lookWords.join( QLatin1Char( ',' ) ) ).arg( 1.0 / kShutter, 0, 'f', 0 )
+			: QString() )
 		+ ( roof ? QStringLiteral( "; interior under open sky only (%1)" ).arg( pcRoof().note )
 			: CL && CL->interior ? QStringLiteral( "; interior, RED WW_INTSKY_RED=rain (no roof test)" ) : QString() );
 	s.echo = echo;
@@ -492,12 +548,14 @@ int wwCellPrecipDraw( Scene * scene )
 	if ( runs.isEmpty() )
 		return 0;
 
-	NifSkopeOpenGLContext::Program * prog = r->useProgram( gpuField ? "cell_precip_gpu.prog" : "cell_precip.prog" );
+	const char * progName = look ? "cell_precip_look.prog" : gpuField ? "cell_precip_gpu.prog" : "cell_precip.prog";
+	NifSkopeOpenGLContext::Program * prog = r->useProgram( progName );
 	if ( !prog ) {
-		static bool saidNo[2] = { false, false };
-		if ( !saidNo[gpuField] ) {
-			saidNo[gpuField] = true;
-			std::fprintf( stderr, "precip: %s not loaded: nothing drawn\n", gpuField ? "cell_precip_gpu.prog" : "cell_precip.prog" );
+		static bool saidNo[3] = { false, false, false };
+		const int which = look ? 2 : gpuField ? 1 : 0;
+		if ( !saidNo[which] ) {
+			saidNo[which] = true;
+			std::fprintf( stderr, "precip: %s not loaded: nothing drawn\n", progName );
 		}
 		return 0;
 	}
@@ -520,6 +578,8 @@ int wwCellPrecipDraw( Scene * scene )
 	prog->uni1f( "pcMinPx", 0.75f );
 	prog->uni2f( "pcNear", 8.0f * sc, 40.0f * sc );	// game units: a flake fades out over the last 40 before the eye
 	prog->uni1i( "pcTex", 0 );
+	if ( look )
+		prog->uni1i( "pcTexN", 1 );
 	if ( gpuField ) {
 		prog->uni4f( "pcViewport", FloatVector4( float( vp[0] ), float( vp[1] ), float( vp[2] ), float( vp[3] ) ) );
 		if ( !s.vaoGpu )
@@ -565,35 +625,67 @@ int wwCellPrecipDraw( Scene * scene )
 	for ( const Run & run : runs ) {
 		const PcLayer & L = *all.at( run.layer );
 		const TypeInfo & ti = typeInfo( L.spec.type );
-		PcTex & tx = s.tex[L.spec.texture];
-		if ( !tx.id && tx.file.isEmpty() ) {
-			const QString path = findTexture( s.roots, L.spec.texture );
-			if ( path.isEmpty() || !loadDds( fn, path, tx ) ) {
-				tx.file = QStringLiteral( "-" );	// tried: the soft-dot fallback from now on
-				std::fprintf( stderr, "precip: texture %s %s: soft dots instead\n", qPrintable( L.spec.texture ),
-					path.isEmpty() ? "not found loose in the .recx roots" : "not a BC1/BC3/BC7 DDS" );
-			} else {
-				std::fprintf( stderr, "precip: texture %s <- %s (%dx%d, %d mips)\n", qPrintable( L.spec.texture ), qPrintable( path ),
-					tx.width, tx.height, tx.mips );
+		// a texture the type did not ship: 16 px a cell is the deepest mip read (the snow_fine rule); the type's own
+		// atlas: its measured cap (precipmath.h maxMip)
+		const bool ownAtlas = texKey( L.spec.texture ) == texKey( QLatin1String( ti.texture ) );
+		/* lane PRECIPLOOK1: the look swaps only the type's own atlas (a .recx's own texture is kept): the clumps read the
+		 * merged density atlas at their threshold, hail the 3D build; a snow/hail atlas's normal map (<name>_n.dds) on unit 1 */
+		const bool isClump = L.spec.type == SnowWetClump || L.spec.type == SnowBigClump;
+		const bool lookRain = ( look & LookRain ) && L.spec.type == Rain && ownAtlas;
+		const bool lookClump = ( look & LookClump ) && isClump && ownAtlas;
+		const bool lookHail = ( look & LookHail ) && L.spec.type == Hail && ownAtlas;
+		const bool wantN = ( ( look & LookSnow ) && L.spec.type >= SnowFine ) || lookHail;
+		const QString texName = lookClump ? QLatin1String( kClumpAtlas ) : lookHail ? QLatin1String( kHailAtlas ) : L.spec.texture;
+		auto loadTex = [&]( const QString & name, bool quiet ) -> PcTex & {
+			PcTex & x = s.tex[name];
+			if ( !x.id && x.file.isEmpty() ) {
+				const QString path = findTexture( s.roots, name );
+				if ( path.isEmpty() || !loadDds( fn, path, x ) ) {
+					x.file = QStringLiteral( "-" );	// tried: the soft-dot fallback from now on
+					if ( !quiet )
+						std::fprintf( stderr, "precip: texture %s %s: soft dots instead\n", qPrintable( name ),
+							path.isEmpty() ? "not found loose in the .recx roots" : "not a BC1/BC3/BC7 DDS" );
+				} else {
+					x.file = path;
+					std::fprintf( stderr, "precip: texture %s <- %s (%dx%d, %d mips)\n", qPrintable( name ), qPrintable( path ),
+						x.width, x.height, x.mips );
+				}
 			}
-		}
+			return x;
+		};
+		PcTex & tx = loadTex( texName, false );
 		const bool hasTex = tx.id != 0;
+		GLuint nId = 0;
+		if ( wantN && hasTex && texName.endsWith( QLatin1String( "_d.dds" ), Qt::CaseInsensitive ) ) {
+			const PcTex & nx = loadTex( texName.left( texName.size() - 6 ) + QStringLiteral( "_n.dds" ), true );
+			if ( nx.id && nx.width == tx.width && nx.height == tx.height )
+				nId = nx.id;
+		}
 		fn->glActiveTexture( GL_TEXTURE0 );
 		fn->glBindTexture( GL_TEXTURE_2D, tx.id );
 		const int cols = std::max( 1, L.spec.cols ), rows = std::max( 1, L.spec.rows );
 		const float cellPx = hasTex ? float( tx.width ) / float( cols ) : 1.0f;
-		// a texture the type did not ship: 16 px a cell is the deepest mip read (the snow_fine rule); the type's own
-		// atlas: its measured cap (precipmath.h maxMip)
-		const bool ownAtlas = L.spec.texture.compare( QLatin1String( ti.texture ), Qt::CaseInsensitive ) == 0;
-		const float maxLod = hasTex ? std::min( float( tx.mips - 1 ), ownAtlas ? float( ti.maxMip )
+		const int ownMip = lookClump ? kClumpMaxMip : lookHail ? kHailMaxMip : ti.maxMip;
+		const float maxLod = hasTex ? std::min( float( tx.mips - 1 ), ownAtlas ? float( ownMip )
 			: std::max( 0.0f, std::log2( cellPx / 16.0f ) ) ) : 0.0f;
+		if ( look ) {
+			fn->glActiveTexture( GL_TEXTURE1 );
+			fn->glBindTexture( GL_TEXTURE_2D, nId );
+			fn->glActiveTexture( GL_TEXTURE0 );
+			const ClumpLook cl = L.spec.type == SnowWetClump ? kClumpWet : kClumpDry;
+			prog->uni1i( "pcLook", lookRain ? 1 : nId ? 2 : 0 );
+			prog->uni1b( "pcHasN", nId != 0 );
+			prog->uni2f( "pcClump", lookClump ? float( cl.t ) : 0.0f, lookClump ? float( cl.k ) : 1.0f );
+			prog->uni1f( "pcAlbedo", lookClump ? float( cl.albedo ) : 1.0f );
+			prog->uni1f( "pcMmPerView", float( kMmPerUnit / ( double( sc ) * std::max( L.field.drawScale, 1e-3 ) ) ) );
+		}
 		const float oneLod = hasTex ? std::min( float( tx.mips - 1 ), std::max( 0.0f, std::log2( cellPx ) ) ) : 0.0f;
 		prog->uni4f( "pcAtlas", FloatVector4( 1.0f / float( cols ), 1.0f / float( rows ), maxLod, oneLod ) );
 		prog->uni2f( "pcInset", hasTex ? 0.5f * std::exp2( maxLod ) / float( tx.width ) : 0.0f,
 			hasTex ? 0.5f * std::exp2( maxLod ) / float( tx.height ) : 0.0f );
 		prog->uni1b( "pcHasTex", hasTex );
 		prog->uni1i( "pcFar", run.farT ? 1 : 0 );
-		prog->uni1f( "pcTrans", float( L.spec.translucency ) );
+		prog->uni1f( "pcTrans", lookRain ? 1.0f : float( L.spec.translucency ) );	// a drop: all thin (its phase table)
 		if ( gpuField ) {
 			// lane PERFFIX3 D: the run's field (precipmath.h gpuRun; the shader's names in cell_precip_field.glsl)
 			const GpuRun & g = run.g;
@@ -601,7 +693,7 @@ int wwCellPrecipDraw( Scene * scene )
 			for ( int k = 0; k < 16; k++ ) {
 				offZ[k] = float( g.offZ[k] );
 				fallU[k] = float( g.fallU[k] );
-				halfU[k] = float( g.halfU[k] );
+				halfU[k] = float( g.halfU[k] * lookHalfScale( L.spec.type, k, lookRain, lookClump ) );	// PRECIPLOOK1
 			}
 			fn->glUniform1ui( prog->uniLocation( "pcSeedS" ), GLuint( g.seedS ) );
 			prog->uni1f( "pcL", float( g.L ) );
@@ -628,6 +720,11 @@ int wwCellPrecipDraw( Scene * scene )
 	fn->glBindVertexArray( 0 );
 	if ( !gpuField )
 		fn->glBindBuffer( GL_ARRAY_BUFFER, 0 );
+	if ( look ) {
+		fn->glActiveTexture( GL_TEXTURE1 );
+		fn->glBindTexture( GL_TEXTURE_2D, 0 );
+		fn->glActiveTexture( GL_TEXTURE0 );
+	}
 	fn->glBindTexture( GL_TEXTURE_2D, 0 );
 	r->stopProgram();
 	fn->glDepthMask( depthMask );

@@ -1,6 +1,7 @@
 // lane WEATHERLOOK1 phase B: the precipitation field's unit test (src/gl/precipmath.h is the code the cell view draws
 // with; src/gl/precipspec.h its .recx parser). One test per rule; PRECIP_RED=<bits> runs the same exe with a rule
-// removed (precipmath.h Red: 1 constdensity, 2 nowrap, 4 onespeed, 8 nowind) and that rule's test must FAIL.
+// removed (precipmath.h Red: 1 constdensity, 2 nowrap, 4 onespeed, 8 nowind; PRECIPLOOK1: 16 = the look's old path,
+// rule 6) and that rule's test must FAIL. Rule 7 (the drop phase table vs its Monte Carlo fixture) has no red.
 // The expected numbers are airpart_data.md's table rows (notes/weatherlook1), typed here, not computed from the laws.
 #include "gl/precipmath.h"
 #include "gl/precipspec.h"
@@ -12,7 +13,12 @@
 #include <cstdio>
 #include <cstring>
 #include <cstdlib>
+#include <string>
 #include <vector>
+
+#ifndef PRECIP_ROOT
+#define PRECIP_ROOT "."	// the tree (run.sh passes it)
+#endif
 
 using namespace WwPrecip;
 
@@ -46,7 +52,6 @@ int main()
 		{ Rain, 0.5, 2.02 }, { Rain, 1, 4.00 }, { Rain, 2, 6.55 }, { Rain, 3, 7.95 }, { Rain, 5, 9.14 }, { Rain, 6, 9.17 },
 		{ SnowFine, 2, 0.89 }, { SnowFine, 3, 0.95 }, { SnowFine, 5, 1.03 },
 		{ SnowWetClump, 6, 1.28 }, { SnowWetClump, 10, 1.47 }, { SnowWetClump, 12, 1.55 }, { SnowWetClump, 20, 1.77 },
-		{ Sleet, 1, 4.00 }, { Sleet, 2, 6.55 }, { Sleet, 3, 7.95 }, { Sleet, 5, 9.14 },
 		{ Hail, 5, 9.04 }, { Hail, 10, 12.79 }, { Hail, 20, 18.08 }, { Hail, 30, 22.15 }, { Hail, 50, 28.59 },
 		{ SnowBigClump, 20, 1.3 }, { SnowBigClump, 50, 1.5 } };
 	char what[160];
@@ -60,7 +65,7 @@ int main()
 		// sizes an atlas cell has: the table's row where one exists, else (wet 11 mm, hail 12 mm) the table's law at that
 		// size, written out (0.79 x 11^0.27; sqrt(4 x 9.81 x 900 x 0.012 / (3 x 0.6 x 1.2)))
 		const struct { int type; double size, v; } fieldRows[] = { { Rain, 2.0, 6.55 }, { SnowFine, 3.0, 0.95 },
-			{ SnowWetClump, 11.0, 1.516 }, { Sleet, 2.0, 6.55 }, { Hail, 12.0, 14.01 }, { SnowBigClump, 20.0, 1.3 } };
+			{ SnowWetClump, 11.0, 1.516 }, { Hail, 12.0, 14.01 }, { SnowBigClump, 20.0, 1.3 } };
 		for ( const auto & fr : fieldRows ) {
 			Layer la;
 			la.type = fr.type;
@@ -90,7 +95,7 @@ int main()
 	// measured as the particles in each tier over its volume
 	{
 		const struct { int type; double D, rate, m, v; } rows[] = { { Rain, 2, 4, 4.19, 6.55 }, { SnowFine, 3, 1, 0.34, 0.95 },
-			{ SnowWetClump, 10, 2, 2.94, 1.47 }, { Sleet, 2, 2, 3.77, 6.55 }, { Hail, 10, 10, 471, 12.79 },
+			{ SnowWetClump, 10, 2, 2.94, 1.47 }, { Hail, 10, 10, 471, 12.79 },
 			{ SnowFarDot, 5, 1, 0.695, 1.03 }, { SnowBigClump, 50, 1, 17.5, 1.5 } };
 		const double cam[3] = { 1234.5, -987.0, 333.0 }, wv[2] = { 80.0, -40.0 };
 		for ( const auto & r : rows ) {
@@ -258,7 +263,124 @@ int main()
 					ms, sink );
 			}
 		}
-		check( 0, diff == 0, "prepared path = slow path (particles differing of 7 x 4000)", double( diff ), 0.0 );
+		check( 0, diff == 0, "prepared path = slow path (particles differing of 6 x 4000)", double( diff ), 0.0 );
+	}
+
+	// ---- rule 6 (PRECIPLOOK1): the look's numbers. Red bit 16 = the old path (WW_CELL_PRECIP_LOOK_RED): a box of uniform
+	// alpha 4 r^2 / ((2r + l) 2r) over the streak's rectangle, every quad at its atlas cell's size, the two old clump atlases
+	{
+		const bool red = ( redBits() & 16 ) != 0;
+		// the streak's coverage x area = the disc's area x the shutter (pi r^2), for a still drop and a 7.5 cm streak
+		const double r = 1.0, lens[] = { 0.0, 2.0, 75.0 };
+		for ( double l : lens ) {
+			const int n = 1200;
+			const double hs = 0.5 * l + r, du = 2.0 * r / n, ds = 2.0 * hs / n;
+			double sum = 0.0;
+			for ( int i = 0; i < n; i++ )
+				for ( int j = 0; j < n; j++ ) {
+					const double s = -hs + ( i + 0.5 ) * ds, u = -r + ( j + 0.5 ) * du;
+					sum += ( red ? 4.0 * r * r / ( ( 2.0 * r + l ) * 2.0 * r ) : dropCoverage( s, u, r, l ) ) * ds * du;
+				}
+			std::snprintf( what, sizeof what, "drop coverage integral, r 1 mm, streak %.1f mm (mm^2; pi r^2)", l );
+			check( 6, within( sum, 3.14159265358979, 0.01 ), what, sum, 3.14159265358979 );
+		}
+		// the drawn sizes: a rain quad as wide as its drop; the wet clump drawn from the merged (big-clump) atlas at its size
+		for ( int k = 0; k < typeInfo( Rain ).nVariants; k++ ) {
+			const Variant & v = typeInfo( Rain ).v[k];
+			const double got = v.cellMm * ( red ? 1.0 : lookHalfScale( Rain, k, true, false ) );
+			std::snprintf( what, sizeof what, "rain drawn width, %.1f mm drop (mm)", v.sizeMm );
+			check( 6, within( got, v.sizeMm, 0.001 ), what, got, v.sizeMm );
+		}
+		const TypeInfo & wet = typeInfo( SnowWetClump ), &big = typeInfo( SnowBigClump );
+		for ( int k = 0; k < wet.nVariants; k++ ) {
+			// the shape fills big.size / big.cell of a merged cell; the old wet atlas's shape filled wet.size / wet.cell
+			const double cellDrawn = wet.v[k].cellMm * ( red ? 1.0 : lookHalfScale( SnowWetClump, k, false, true ) );
+			const double got = cellDrawn * big.v[k].sizeMm / big.v[k].cellMm;
+			std::snprintf( what, sizeof what, "wet clump drawn from the merged atlas, %.0f mm (mm)", wet.v[k].sizeMm );
+			check( 6, within( got, wet.v[k].sizeMm, 0.001 ), what, got, wet.v[k].sizeMm );
+		}
+		// the merged atlas's fit to the old wet atlas (clump_fit.tsv from notes/preciplook1/tools/clumpmerge.py): the
+		// red reads the old wet atlas through the dry threshold's shapes unchanged (its metric distance)
+		if ( FILE * f = std::fopen( PRECIP_ROOT "/tests/precip/clump_fit.tsv", "r" ) ) {
+			char line[256], name[32];
+			double t, k, err, errDry = -1, errWet = -1, errRed = -1;
+			while ( std::fgets( line, sizeof line, f ) )
+				if ( line[0] != '#' && std::sscanf( line, "%31s %lf %lf %lf", name, &t, &k, &err ) == 4 ) {
+					if ( !std::strcmp( name, "dry" ) )
+						errDry = err;
+					else if ( !std::strcmp( name, "wet" ) )
+						errWet = err;
+					else if ( !std::strcmp( name, "red_wet" ) )
+						errRed = err;
+				}
+			std::fclose( f );
+			check( 6, errDry >= 0 && errDry < 1.0, "clump fit: dry threshold vs the old big-clump atlas (metric distance, < 1)", errDry, 1.0 );
+			const double e = red ? errRed : errWet;
+			check( 6, e >= 0 && e < 1.0, "clump fit: wet threshold vs the old wet atlas (metric distance, < 1)", e, 1.0 );
+		} else
+			check( 6, false, "clump_fit.tsv read", 0.0, 1.0 );
+		// the flicker (offline streak render) and the n = 2 oscillation (Rayleigh: 8 sigma / (rho r0^3), sigma 0.0728 N/m)
+		check( 6, within( dropFlickerDepth( 2.0 ), 0.51, 0.001 ), "flicker depth, 2 mm", dropFlickerDepth( 2.0 ), 0.51 );
+		check( 6, within( dropFlickerDepth( 4.0 ), 0.2703, 0.001 ), "flicker depth, 4 mm", dropFlickerDepth( 4.0 ), 0.2703 );
+		check( 6, dropFlickerDepth( 0.5 ) == 0.0, "flicker depth, 0.5 mm (none)", dropFlickerDepth( 0.5 ), 0.0 );
+		check( 6, within( dropOscW2( 2.0 ), 763.15, 0.001 ), "n = 2 oscillation, 2 mm drop (rad/s; 121.5 Hz)", dropOscW2( 2.0 ), 763.15 );
+	}
+
+	// ---- rule 7 (PRECIPLOOK1): the shader's drop phase table (cell_volpart.glsl PC_DROP_PI, pi x p) against the Monte
+	// Carlo ray trace of a water sphere (dropphase_mc.tsv): normalised, g = 0.767, and bin by bin where the MC has weight
+	{
+		std::vector<double> sh, mc;
+		if ( FILE * f = std::fopen( PRECIP_ROOT "/res/shaders/cell_volpart.glsl", "r" ) ) {
+			std::string all;
+			char buf[4096];
+			size_t got;
+			while ( ( got = std::fread( buf, 1, sizeof buf, f ) ) > 0 )
+				all.append( buf, got );
+			std::fclose( f );
+			const size_t at = all.find( "PC_DROP_PI[64] = float[64](" );
+			if ( at != std::string::npos ) {
+				const char * p = all.c_str() + at + std::strlen( "PC_DROP_PI[64] = float[64](" );
+				for ( int i = 0; i < 64; i++ ) {
+					char * e = nullptr;
+					const double v = std::strtod( p, &e );
+					if ( e == p )
+						break;
+					sh.push_back( v );
+					p = e;
+					while ( *p == ',' || *p == ' ' || *p == '\t' || *p == '\r' || *p == '\n' )
+						p++;
+				}
+			}
+		}
+		if ( FILE * f = std::fopen( PRECIP_ROOT "/tests/precip/dropphase_mc.tsv", "r" ) ) {
+			char line[256];
+			double th, v;
+			while ( std::fgets( line, sizeof line, f ) )
+				if ( line[0] != '#' && std::sscanf( line, "%lf %lf", &th, &v ) == 2 )
+					mc.push_back( v );
+			std::fclose( f );
+		}
+		check( 7, sh.size() == 64 && mc.size() == 64, "phase table: 64 bins in the shader and the fixture", double( sh.size() ), 64.0 );
+		if ( sh.size() == 64 && mc.size() == 64 ) {
+			const double pi = 3.14159265358979, dth = pi / 64.0;
+			double norm = 0.0, g = 0.0, gmc = 0.0, worst = 0.0;
+			int nb = 0;
+			for ( int i = 0; i < 64; i++ ) {
+				const double th = ( i + 0.5 ) * dth, w = 2.0 * std::sin( th ) * dth;	// (pi p) x 2 pi sin / pi
+				norm += sh[i] * w;
+				g += sh[i] * w * std::cos( th );
+				gmc += mc[i] * w * std::cos( th );
+				if ( sh[i] * w > 0.005 ) {	// bins carrying > 0.5 % of the power (dropphase.py's own measure: 26 bins, 3.4 %)
+					worst = std::max( worst, std::fabs( sh[i] - mc[i] ) / mc[i] );
+					nb++;
+				}
+			}
+			check( 7, within( norm, 1.0, 0.01 ), "phase table: integral of p over the sphere", norm, 1.0 );
+			check( 7, within( g, 0.7668, 0.005 ), "phase table: g (cos-weighted mean)", g, 0.7668 );
+			check( 7, within( g, gmc, 0.01 ), "phase table: g vs the Monte Carlo's", g, gmc );
+			std::snprintf( what, sizeof what, "phase table vs Monte Carlo: worst relative bin of %d carrying > 0.5 %% of the power", nb );
+			check( 7, worst < 0.05, what, worst, 0.05 );
+		}
 	}
 
 	// ---- the parser (no red: it is the format, docs/RECX.md)
@@ -275,10 +397,24 @@ int main()
 		check( 0, R.size() == 2 && R[0].type == Rain && R[1].type == SnowFine, "record fallback: Rainy + Snow flags -> rain + snow_fine",
 			double( R.size() ), 2.0 );
 		check( 0, wwPrecipFromRecord( 1u | 2u ).isEmpty(), "record fallback: Pleasant + Cloudy -> none", double( wwPrecipFromRecord( 3u ).size() ), 0.0 );
+		// PRECIPLOOK1: sleet is no type; a layer naming it is dropped with its own note
+		QStringList sn;
+		const QVector<WwPrecipLayerSpec> S = wwPrecipParse(
+			QJsonDocument::fromJson( R"({ "layers": [ { "type": "sleet", "rate": 2 }, { "type": "rain" } ] })" ).object(), sn );
+		const bool sleetNote = sn.size() == 1 && sn[0].contains( QLatin1String( "sleet removed" ) );
+		check( 0, S.size() == 1 && S[0].type == Rain && sleetNote, "parse: a sleet layer dropped with the removal note (1 = yes)",
+			sleetNote ? 1.0 : 0.0, 1.0 );
+		// the field seeds keep the type indices from before sleet went (rain 0, hail 2, snow_fine 3, far_dot 4, wet 5, big 6)
+		const int tags[TypeCount] = { 0, 2, 3, 4, 5, 6 };
+		int bad = 0;
+		for ( int ty = 0; ty < TypeCount; ty++ )
+			bad += typeInfo( ty ).seedTag != tags[ty];
+		check( 0, bad == 0, "seed tags = the old type indices (types differing)", double( bad ), 0.0 );
 	}
 
-	std::printf( "precip unit: %d of %d failed (rule1 %d, rule2 %d, rule3 %d, rule4 %d, rule5 %d, parser %d)\n", g_fail, g_checks,
-		g_failRule[1], g_failRule[2], g_failRule[3], g_failRule[4], g_failRule[5], g_failRule[0] );
+	std::printf( "precip unit: %d of %d failed (rule1 %d, rule2 %d, rule3 %d, rule4 %d, rule5 %d, look %d, phase %d, parser %d)\n",
+		g_fail, g_checks, g_failRule[1], g_failRule[2], g_failRule[3], g_failRule[4], g_failRule[5], g_failRule[6], g_failRule[7],
+		g_failRule[0] );
 	std::printf( "PRECIP %s\n", g_fail ? "FAIL" : "PASS" );
 	return g_fail ? 1 : 0;
 }

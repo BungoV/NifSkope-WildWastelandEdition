@@ -85,8 +85,8 @@ NifSkope's air has two test switches, set in `WW_CELL_AIR_RED`:
 
 ## precipitation (Weathers)
 
-Rain, sleet, hail and snow particles for the weather (Show > Improved Sky > Precipitation, off until switched on). A
-list of layers; a weather may mix several (fine snow with wet clumps, rain with sleet). During a weather change the new
+Rain, hail and snow particles for the weather (Show > Improved Sky > Precipitation, off until switched on). A
+list of layers; a weather may mix several (fine snow with wet clumps, rain with hail). During a weather change the new
 weather's layers come in with the change and the old weather's go out with it.
 
 ```json
@@ -95,7 +95,7 @@ weather's layers come in with the change and the old weather's go out with it.
 
 | key | meaning |
 | --- | --- |
-| `type` | `rain`, `sleet`, `hail`, `snow_fine`, `snow_far_dot`, `snow_wet_clump` or `snow_big_clump` (required) |
+| `type` | `rain`, `hail`, `snow_fine`, `snow_far_dot`, `snow_wet_clump` or `snow_big_clump` (required). `sleet` is no longer a type: a layer naming it is dropped with a note (use `rain` or `hail`) |
 | `rate` | how hard it falls, in mm of water per hour; with `size` it sets how many particles hang in each cubic metre |
 | `density` | particles per cubic metre, instead of `rate` |
 | `size` | the particle size in mm; the fall speed follows from the type and the size |
@@ -104,7 +104,7 @@ weather's layers come in with the change and the old weather's go out with it.
 | `translucency` | 0 to 1: how much light passes through (a flake in front of a lamp glows) |
 | `spin` | the fastest turn about the view axis, radians per second |
 | `sway` | how far light flakes flutter from side to side, game units |
-| `texture` | the particle atlas, under `Textures\`, as the game links textures (default: one shipped per type, `Textures\WW\Precip\`) |
+| `texture` | the particle atlas, under `Textures\`, as the game links textures (default: one shipped per type, `Textures\FO4CS\Precip\`; a path under the old `Textures\WW\Precip\` is still found) |
 | `atlas` | `[columns, rows]` of that atlas |
 
 With no `precipitation` block, the weather's own record decides: a weather flagged Rainy gets one rain layer, a weather

@@ -452,6 +452,8 @@
 { "WW_CELL_POST_DUMP", 0, "src/gl/cellpost.cpp:214 ps | init-once state, re-read when a live set moves its prefix (b)" },
 { "WW_CELL_POST_DUMP_FRAME", 0, "src/gl/cellpost.cpp:216 ps | init-once state, re-read when a live set moves its prefix (b)" },
 { "WW_CELL_PRECIP", 0, "src/gl/celllooks.cpp:333 pinOf | re-read per frame or per call (a)" },
+{ "WW_CELL_PRECIP_LOOK", 0, "src/gl/cellprecip.cpp:128 lookFromEnv | re-read per frame or per call (a)" },
+{ "WW_CELL_PRECIP_LOOK_RED", 0, "src/gl/cellprecip.cpp:125 lookFromEnv | re-read per frame or per call (a)" },
 { "WW_CELL_PRECIP_RED", 0, "src/gl/cellprecip.cpp:99 redFromEnv | re-read per frame or per call (a)" },
 { "WW_CELL_PRECIP_TIME", 0, "src/gl/cellprecip.cpp:384 wwCellPrecipDraw | re-read per frame or per call (a)" },
 { "WW_CELL_PREVIS", 0, "src/gl/cellcull.cpp:205 st | init-once state, re-read when a live set moves its prefix (b)" },

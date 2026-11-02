@@ -5,13 +5,12 @@
  * (tests/precip). Plain C++, no Qt, no GL.
  *
  * Numbers and laws (notes/weatherlook1/airpart_data.md, sources there):
- *   fall speed (m/s, D in mm)  rain + sleet  v = 9.65 - 10.3 exp(-0.6 D), capped 9.17 (ATLAS73 / GK49; NF15: most ice
- *                                             pellets fall at raindrop speed)
+ *   fall speed (m/s, D in mm)  rain          v = 9.65 - 10.3 exp(-0.6 D), capped 9.17 (ATLAS73 / GK49)
  *                              hail          v = sqrt(4 g rho_ice D / (3 Cd rho_air)), Cd 0.6 (KK01, an upper bound)
  *                              dry snow      v = 0.8 D^0.16 (LH74 unrimed dendrite aggregates; extrapolated past 10 mm)
  *                              wet clumps    v = 0.79 D^0.27 (LH74 densely rimed; the pick over YUTER06's 2.0 m/s: it
  *                                             keeps the size dependence the atlas needs)
- *   mass (mg)                  rain 0.5236 D^3 (water), sleet + hail 0.9 x that (ice), dry snow 0.073 D^1.4,
+ *   mass (mg)                  rain 0.5236 D^3 (water), hail 0.9 x that (ice), dry snow 0.073 D^1.4,
  *                              wet clumps 0.037 D^1.9 (LH74)
  *   number density (per m^3)   N = rate x 277.78 / (m v): a rate of 1 mm/h of water carries 277.78 mg per m^2 per
  *                              second; every particle carries m and falls at v (one size per layer: ours)
@@ -30,7 +29,9 @@
  *         so its opacity is multiplied by thin (coverage kept), drawn from the texture's small mips
  * A weather change: the new weather's layers at weight pct, the weather left behind at 1 - pct; a layer at weight w
  * draws its first floor(w x N) particles (the rest wait), so its density moves with w and never jumps.
- * Reds (redBits, one per rule; WW_CELL_PRECIP_RED=constdensity,nowrap,onespeed,nowind; tests/precip): the rule removed. */
+ * Reds (redBits, one per rule; WW_CELL_PRECIP_RED=constdensity,nowrap,onespeed,nowind; tests/precip): the rule removed.
+ * Lane PRECIPLOOK1 (2026-11-02): sleet removed (its type, atlas and rows; a .recx naming it is refused, precipspec.h);
+ * the shipped atlases moved to Textures/FO4CS/Precip (the reader still finds the old WW/Precip, cellprecip.cpp). */
 
 #include <algorithm>
 #include <cmath>
@@ -53,7 +54,7 @@ constexpr double kFarMax = 6144.0;
 constexpr int kNearCap = 32768, kFarCap = 24576;
 constexpr double kRedDensity = 100.0;	// per m^3: the red's constant
 
-enum Type : int { Rain = 0, Sleet, Hail, SnowFine, SnowFarDot, SnowWetClump, SnowBigClump, TypeCount };
+enum Type : int { Rain = 0, Hail, SnowFine, SnowFarDot, SnowWetClump, SnowBigClump, TypeCount };
 
 /* the reds, one per rule (WW_CELL_PRECIP_RED, tests/precip): 1 constdensity (a constant density, the weight ignored),
  * 2 nowrap (positions never wrap into the box), 4 onespeed (every particle falls at 1 m/s), 8 nowind (no wind) */
@@ -80,13 +81,14 @@ struct TypeInfo
 	double sizeMm;	// the layer's size when the .recx gives none
 	double rateMmH;	// the layer's rate (water equivalent) when the .recx gives neither rate nor density
 	double drawScale;	// the quad x this (bungo's Division reference: snow drawn above true size, airpart crowd mock 3x)
-	double translucency;	// the share lit as thin medium (airpart_data.md: dry 0.6, wet 0.3; rain/sleet/hail ours)
+	double translucency;	// the share lit as thin medium (airpart_data.md: dry 0.6, wet 0.3; rain/hail ours)
 	double spin;	// the largest spin about the view axis, rad/s (bungo 10-28: every crystal flat-on; slow spin)
 	double swayU;	// the flutter's amplitude, game units (0: none)
 	/* the deepest mip a near quad samples: below it the shapes touch their cell's border and bilinear reads bleed into
 	 * the next cell (measured, notes/code1030/weatherlook1b/texgate.txt: 16 px a cell; hail 64 px). The far dots read
 	 * the 1-texel-a-cell mip's centre (the cell's mean) instead, where no neighbour mixes in */
 	int maxMip;
+	int seedTag;	// the type's index before sleet went (PRECIPLOOK1): every layer's field seed stays as it was
 };
 
 /* the atlases as phase A made them (meta.json, notes/weatherlook1/airpart_textures). snow_fine is the 1k 4 x 4 atlas
@@ -94,29 +96,26 @@ struct TypeInfo
 inline const TypeInfo & typeInfo( int t )
 {
 	static const TypeInfo kTypes[TypeCount] = {
-		{ "rain", "WW/Precip/rain_d.dds", 4, 2, 8,
+		{ "rain", "FO4CS/Precip/rain_d.dds", 4, 2, 8,
 			{ { 0.5, 8 }, { 1, 8 }, { 1.5, 8 }, { 2, 8 }, { 3, 8 }, { 4, 8 }, { 5, 8 }, { 6, 8 } },
-			2.0, 4.0, 1.0, 0.9, 0.0, 0.0, 4 },
-		{ "sleet", "WW/Precip/sleet_d.dds", 4, 2, 8,
-			{ { 1.2, 5.5 }, { 1.8, 5.5 }, { 2.2, 5.5 }, { 2.5, 5.5 }, { 3, 5.5 }, { 3.4, 5.5 }, { 2.0, 5.5 }, { 4.4, 5.5 } },
-			2.5, 2.0, 1.0, 0.8, 1.0, 0.0, 4 },
-		{ "hail", "WW/Precip/hail_d.dds", 4, 2, 8,
+			2.0, 4.0, 1.0, 0.9, 0.0, 0.0, 4, 0 },
+		{ "hail", "FO4CS/Precip/hail_d.dds", 4, 2, 8,
 			{ { 5, 50 }, { 8, 50 }, { 12, 50 }, { 16, 50 }, { 20, 50 }, { 26, 50 }, { 34, 50 }, { 44, 50 } },
-			10.0, 10.0, 1.0, 0.5, 2.0, 0.0, 2 },
-		{ "snow_fine", "WW/Precip/snow_fine_d.dds", 4, 4, 16,
+			10.0, 10.0, 1.0, 0.5, 2.0, 0.0, 2, 2 },
+		{ "snow_fine", "FO4CS/Precip/snow_fine_d.dds", 4, 4, 16,
 			{ { 3.0, 3.5572 }, { 3.0, 3.5698 }, { 3.0, 3.5572 }, { 3.0, 3.6575 }, { 3.93, 4.5971 }, { 4.1, 4.7982 },
 				{ 4.59, 5.3648 }, { 4.55, 5.3144 }, { 5.5, 3.9031 }, { 5.5, 4.4517 }, { 5.5, 4.7008 }, { 5.5, 4.2866 },
 				{ 10.0, 6.1308 }, { 10.0, 5.6934 }, { 10.0, 5.8648 }, { 10.0, 5.7326 } },
-			5.5, 1.0, 3.0, 0.6, 0.5, 6.0, 4 },
-		{ "snow_far_dot", "WW/Precip/snow_far_dot_d.dds", 4, 2, 8,
+			5.5, 1.0, 3.0, 0.6, 0.5, 6.0, 4, 3 },
+		{ "snow_far_dot", "FO4CS/Precip/snow_far_dot_d.dds", 4, 2, 8,
 			{ { 4, 14 }, { 5, 14 }, { 6, 14 }, { 7, 14 }, { 8, 14 }, { 9, 14 }, { 10, 14 }, { 11, 14 } },
-			6.0, 1.0, 3.0, 0.6, 0.0, 6.0, 4 },
-		{ "snow_wet_clump", "WW/Precip/snow_wet_clump_d.dds", 4, 2, 8,
+			6.0, 1.0, 3.0, 0.6, 0.0, 6.0, 4, 4 },
+		{ "snow_wet_clump", "FO4CS/Precip/snow_wet_clump_d.dds", 4, 2, 8,
 			{ { 5, 27 }, { 7, 27 }, { 9, 27 }, { 11, 27 }, { 14, 27 }, { 17, 27 }, { 21, 27 }, { 25, 27 } },
-			10.0, 2.0, 2.0, 0.3, 0.3, 3.0, 4 },
-		{ "snow_big_clump", "WW/Precip/snow_big_clump_d.dds", 4, 2, 8,
+			10.0, 2.0, 2.0, 0.3, 0.3, 3.0, 4, 5 },
+		{ "snow_big_clump", "FO4CS/Precip/snow_big_clump_d.dds", 4, 2, 8,
 			{ { 15, 54 }, { 20, 54 }, { 25, 54 }, { 30, 54 }, { 35, 54 }, { 40, 54 }, { 45, 54 }, { 50, 54 } },
-			20.0, 1.0, 1.5, 0.6, 0.4, 8.0, 4 },
+			20.0, 1.0, 1.5, 0.6, 0.4, 8.0, 4, 6 },
 	};
 	return kTypes[std::clamp( t, 0, int( TypeCount ) - 1 )];
 }
@@ -138,7 +137,6 @@ inline double fallSpeedMps( int type, double D )
 	D = std::max( D, 0.05 );
 	switch ( type ) {
 	case Rain:
-	case Sleet:
 		return std::clamp( 9.65 - 10.3 * std::exp( -0.6 * D ), 0.1, 9.17 );
 	case Hail:
 		return std::sqrt( 4.0 * kG * kRhoIce * ( D / 1000.0 ) / ( 3.0 * kCdHail * kRhoAir ) );
@@ -155,7 +153,6 @@ inline double massMg( int type, double D )
 	switch ( type ) {
 	case Rain:
 		return 0.5236 * D * D * D;
-	case Sleet:
 	case Hail:
 		return 0.9 * 0.5236 * D * D * D;
 	case SnowWetClump:
@@ -547,6 +544,68 @@ inline bool ddsParse( const unsigned char * b, std::size_t n, DdsInfo & o )
 	for ( int m = 0; m < o.mips; m++ )
 		o.dataBytes += ddsMipBytes( o.width, o.height, m, o.blockBytes );
 	return o.dataOffset + o.dataBytes <= n;
+}
+
+/* lane PRECIPLOOK1 (2026-11-02): the look's numbers (WW_CELL_PRECIP_LOOK; the shaders' twins, tests/precip).
+ * Drop: a 2 mm drop at about 6.5 m/s (GK49) moves 5.4 cm in the 1/120 s shutter, a 9 m/s one 7.5 cm, so on screen it is
+ * a streak, the drop's disc swept along its path (Garg & Nayar 2006, "Photorealistic rendering of rain streaks"; Tariq
+ * 2007 "Rain", NVIDIA SDK; Tatarchuk 2006 "Artist-directable real-time rain rendering"). A pixel at (s, u) from the
+ * streak's middle (s along it, u across) is covered for the share of the shutter the disc of radius r sits on it:
+ * cov = overlap( [s - c, s + c], [-l/2, l/2] ) / l, c = sqrt( r^2 - u^2 ); the integral over the streak is pi r^2
+ * (coverage x time kept). The drop's shape oscillates (Garg & Nayar 2006, n = 2 mode, w2^2 = 8 sigma / (rho r0^3)), so
+ * its brightness flickers along the streak: depth from the offline streak render (notes/preciplook1/tools/
+ * droprender.py: 2 mm 0.36, 4 mm 0.19, under 0.5 mm none). */
+inline double dropCoverage( double s, double u, double r, double l )
+{
+	const double c2 = r * r - u * u;
+	if ( c2 <= 0.0 )
+		return 0.0;
+	const double c = std::sqrt( c2 );
+	if ( l <= 1e-4 * r )
+		return std::fabs( s ) < c ? 1.0 : 0.0;
+	return std::clamp( ( std::min( s + c, 0.5 * l ) - std::max( s - c, -0.5 * l ) ) / l, 0.0, 1.0 );
+}
+
+inline double dropFlickerDepth( double D )
+{
+	return 0.51 * std::clamp( ( D - 0.5 ) / 1.5, 0.0, 1.0 ) * ( 1.0 + ( 0.53 - 1.0 ) * std::clamp( ( D - 2.0 ) / 2.0, 0.0, 1.0 ) );
+}
+
+//! the n = 2 oscillation's angular frequency, rad/s, of a drop of D mm (Rayleigh / Garg & Nayar 2006)
+inline double dropOscW2( double D )
+{
+	const double r0 = 0.0005 * std::max( D, 0.05 );
+	return std::sqrt( 8.0 * 0.0728 / ( 1000.0 * r0 * r0 * r0 ) );
+}
+
+/* Clump: one density atlas for both clump types (notes/preciplook1/tools/clumpmerge.py, fitted to the two old atlases'
+ * area, rim, coverage and holes): alpha = clamp( (d - t) / k ). Dry big clump (t 0.1, k 1.0), wet clump (t 0.05, k 0.5);
+ * the colour is the material's (dry 0.95, wet 0.82; airpart_data.md), the translucency the type's (dry 0.6, wet 0.3). */
+struct ClumpLook
+{
+	double t, k, albedo;
+};
+constexpr ClumpLook kClumpDry = { 0.1, 1.0, 0.95 }, kClumpWet = { 0.05, 0.5, 0.82 };
+constexpr const char * kClumpAtlas = "FO4CS/Precip/snow_clump_d.dds";
+constexpr const char * kHailAtlas = "FO4CS/Precip/hail3d_d.dds";
+constexpr int kClumpMaxMip = 4, kHailMaxMip = 3;
+
+/* the quad's half size under the look, as a multiple of the type's own (prepare: 0.5 cellMm / kMmPerUnit x drawScale):
+ * rain 1 the drop's own size (no atlas cell: the disc is the drop); the wet clump drawn from the merged atlas, whose
+ * cells hold the big clump's shapes (big size b_k in a 54 mm cell), at its own size w_k: (w_k x 54 / b_k) / 27 */
+inline double lookHalfScale( int type, int k, bool rain, bool clump )
+{
+	const TypeInfo & ti = typeInfo( type );
+	if ( k < 0 || k >= ti.nVariants )
+		return 1.0;
+	if ( rain && type == Rain )
+		return ti.v[k].sizeMm / ti.v[k].cellMm;
+	if ( clump && type == SnowWetClump ) {
+		const TypeInfo & big = typeInfo( SnowBigClump );
+		const int kb = std::min( k, big.nVariants - 1 );
+		return ti.v[k].sizeMm * big.v[kb].cellMm / big.v[kb].sizeMm / ti.v[k].cellMm;
+	}
+	return 1.0;
 }
 
 }	// namespace WwPrecip

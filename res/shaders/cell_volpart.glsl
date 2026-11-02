@@ -56,9 +56,51 @@ uniform int volTerms;			// the air's mask (WW_CELL_AIR_TERMS): 1 directional, 2 
 const float VP_EDGE0 = 0.05, VP_EDGE1 = 0.35;	// |N.V| a card is gone at / whole from
 const float VP_NEAR0 = 16.0, VP_NEAR1 = 128.0;	// game units from the eye a card is gone at / whole from
 
+#ifdef PC_LOOK
+/* lane PRECIPLOOK1: the precipitation look (cell_precip_look.prog only). pcLook 1 = a raindrop: lit by a clear water
+ * sphere's phase instead of the air's. pi x p in 64 bins of the scattering angle (bin centres (i + 0.5) pi / 64, 0 =
+ * forward, the light behind the drop): n 1.333, geometric optics, orders 0-3 (van de Hulst ch. 12) + the higher orders
+ * as an isotropic floor, checked by a 3D Monte Carlo trace (notes/preciplook1/tools/dropphase.py: g 0.7668 vs 0.7684,
+ * max 3.4 % over the 26 bins that carry the power, primary bow 137.9 deg). Diffraction (a lobe inside the drop's own
+ * image of the lamp) is left out: the opacity is the geometric coverage. pcLook 2 = a snow flake with its normal map. */
+uniform int pcLook;
+const float PC_DROP_PI[64] = float[64]( 4.04346, 3.90733, 3.67826, 3.38087, 3.04174, 2.68648, 2.33624, 2.00613,
+	1.70524, 1.43772, 1.20417, 1.00292, 0.831049, 0.685161, 0.561819, 0.457799, 0.370243, 0.296684, 0.235034, 0.183567,
+	0.140872, 0.105796, 0.0774053, 0.0549332, 0.03773, 0.0252197, 0.0168245, 0.0118989, 0.0096194, 0.00885462,
+	0.00845281, 0.00811393, 0.00782906, 0.0075927, 0.00740107, 0.00725139, 0.00714302, 0.00707708, 0.00705803, 0.0070959,
+	0.00738626, 0.00864573, 0.0111939, 0.0150758, 0.0211726, 0.0439136, 0.00599946, 0.00597454, 0.00595439, 0.248741,
+	0.116676, 0.0919814, 0.0766472, 0.0640965, 0.0527782, 0.0426043, 0.0342018, 0.0285447, 0.0262184, 0.0258249, 0.02565,
+	0.0255301, 0.0254555, 0.0254196 );
+const float PC_DROP_G = 0.7668;
+
+float pcDropPi( float c )
+{
+	float x = acos( clamp( c, -1.0, 1.0 ) ) * ( 64.0 / PI ) - 0.5;
+	int i = int( floor( x ) );
+	float f = x - float( i );
+	return mix( PC_DROP_PI[clamp( i, 0, 63 )], PC_DROP_PI[clamp( i + 1, 0, 63 )], clamp( f, 0.0, 1.0 ) );
+}
+
+// volCubeScatter's form (the six-axis cube's first two moments) with the drop's g and no haze tint
+vec3 pcDropCube( vec3 E[6], vec3 dW )
+{
+	vec3 fl = ( 2.0 / 3.0 ) * ( E[0] + E[1] + E[2] + E[3] + E[4] + E[5] );
+	vec3 l1 = ( E[0] - E[1] ) * dW.x + ( E[2] - E[3] ) * dW.y + ( E[4] - E[5] ) * dW.z;
+	return 0.25 * max( fl + 3.0 * PC_DROP_G * l1, vec3( 0.0 ) );
+}
+
+// the snow look's key light: the lights' luminance-weighted direction (world, xyz) and luminance (w), their colour
+vec4 vpDom = vec4( 0.0 );
+vec3 vpDomC = vec3( 0.0 );
+#endif
+
 // pi x the air's phase at c; red nophase: isotropic (the weights / 4)
 vec3 vpPhase( float c )
 {
+#ifdef PC_LOOK
+	if ( pcLook == 1 )
+		return vec3( pcDropPi( c ) );
+#endif
 	return ( volPartRed & 256 ) != 0 ? volGi.rgb * 0.25 : volPhasePi( c );
 }
 
@@ -137,6 +179,10 @@ void vpLight( vec3 posView, vec3 P, vec3 dW, float z, vec3 N, float w, out vec3 
 	thick = vec3( 0.0 );
 	vec3 skyThin = vec3( 0.0 ), skyThick = vec3( 0.0 );	// the sky's share: the records' colour at the end (the air's rule)
 	airGroundAt( P );	// FOGTERRAIN2: the ground layer on the pass's terrain grid, as the froxels at this point
+#ifdef PC_LOOK
+	vpDom = vec4( 0.0 );
+	vpDomC = vec3( 0.0 );
+#endif
 	if ( ( volPartRed & 1 ) != 0 )
 		N = cellWorldDir( vec3( 0.0, 0.0, 1.0 ) );	// red flat: every pixel faces the eye's axis
 	if ( ( volTerms & 1 ) != 0 && cellHasDir ) {
@@ -146,6 +192,10 @@ void vpLight( vec3 posView, vec3 P, vec3 dW, float z, vec3 N, float w, out vec3 
 		vec3 e = vpTint( cellDirColor ) * vis * pow( airTupSun( z, to.z ), wwAirDriftSunK( posView, z, to.z, airMed.w ) );	// FIX1101A: airTupSun
 		skyThin += e * vpPhase( dot( to, dW ) );
 		skyThick += e * vpWrap( dot( N, to ), w ) * vpPhaseN( dot( to, dW ) );
+#ifdef PC_LOOK
+		vpDom += vec4( to, 1.0 ) * dot( e, vec3( 0.2126, 0.7152, 0.0722 ) );
+		vpDomC += e;
+#endif
 	}
 	float zOff = z - P.z;	// the fog's height frame minus world z
 	if ( ( volTerms & 2 ) != 0 && ( volPartRed & 8 ) == 0 ) {
@@ -179,6 +229,10 @@ void vpLight( vec3 posView, vec3 P, vec3 dW, float z, vec3 N, float w, out vec3 
 			e = vpTint( e ) * exp( -airOd( z, t0.z + zOff, d ) * dL );
 			thin += e * vpPhase( dot( L, dW ) );
 			thick += e * vpWrap( dot( N, L ), w ) * vpPhaseN( dot( L, dW ) );
+#ifdef PC_LOOK
+			vpDom += vec4( L, 1.0 ) * dot( e, vec3( 0.2126, 0.7152, 0.0722 ) );
+			vpDomC += e;
+#endif
 		}
 	}
 	bool wantGi = ( volTerms & 4 ) != 0 && cellGiOn;
@@ -197,7 +251,11 @@ void vpLight( vec3 posView, vec3 P, vec3 dW, float z, vec3 N, float w, out vec3 
 		vec3 Eg[6];
 		for ( int a = 0; a < 6; a++ )
 			Eg[a] = E[a] * ( 1.0 / PI );	// the surfaces' GI unit -> the ambient's, as the air
+#ifdef PC_LOOK
+		skyThin += pcLook == 1 ? pcDropCube( Eg, dW ) : volCubeScatter( Eg, dW );
+#else
 		skyThin += volCubeScatter( Eg, dW );
+#endif
 		skyThick += vpCubeAt( Eg, N );
 	}
 	if ( wantAmb ) {
@@ -206,7 +264,11 @@ void vpLight( vec3 posView, vec3 P, vec3 dW, float z, vec3 N, float w, out vec3 
 		vec3 Am[6];
 		for ( int a = 0; a < 6; a++ )
 			Am[a] = cellAmbient( axes[a], P ) * ( replace ? 1.0 - share[a] : 1.0 );
+#ifdef PC_LOOK
+		skyThin += pcLook == 1 ? pcDropCube( Am, dW ) : volCubeScatter( Am, dW );
+#else
 		skyThin += volCubeScatter( Am, dW );
+#endif
 		skyThick += vpCubeAt( Am, N );
 	}
 	}
