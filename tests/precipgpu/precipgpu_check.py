@@ -107,7 +107,7 @@ def visible(rel, vel, half, angle, R, P):
 
 
 class Gl:
-    def __init__(self, red):
+    def __init__(self, red, extra=()):
         S.context()
         f = S.fn
         self.createShader = f('glCreateShader', GLuint, GLenum)
@@ -143,7 +143,7 @@ class Gl:
         S.gl.glEnable.argtypes = [GLenum]
         S.gl.glDrawArrays.argtypes = [GLenum, GLint, ctypes.c_int]
         S.gl.glGetError.restype = GLenum
-        defines = ['PC_TEST'] + (['PC_FIELD_RED'] if red == 'field' else []) + (['PC_CULL_RED'] if red == 'cull' else [])
+        defines = ['PC_TEST'] + (['PC_FIELD_RED'] if red == 'field' else []) + (['PC_CULL_RED'] if red == 'cull' else []) + list(extra)
         src = S.inject(S.expand(os.path.join(TREE, 'res', 'shaders', 'cell_precip_gpu.vert')), defines)
         sh = self.createShader(0x8B31)
         b = ctypes.c_char_p(src.encode('latin-1'))

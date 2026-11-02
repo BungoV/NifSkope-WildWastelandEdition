@@ -93,18 +93,39 @@ struct WwRoofMap
 	}
 };
 
-/* lane BUGS1102 (PRECIPROOF-GPU): the GPU field (PERFFIX3 D, cell_precip_field.glsl) builds its particles in the vertex
- * shader and has no roof map, so in a sunlit interior it rained under the roof. A roofed interior keeps the CPU field
- * and its per-particle roof test. redGpuRoof (WW_CELL_PRECIP_RED=gpuroof) = the old rule: the GPU field under roofs. */
-inline bool wwPrecipGpuField( bool cpuForced, bool noWrapRed, bool roofed, bool redGpuRoof )
+/* lane BUGS1102 (PRECIPROOF-GPU) made a roofed interior take the CPU field: the GPU field (PERFFIX3 D,
+ * cell_precip_field.glsl) had no roof map and rained under the roof. Lane BUGS1102B (PRECIPROOF-GPU2): the GPU field reads
+ * the same map as a texture (pcRoof, texel rule of roofAt), so a roofed interior keeps the GPU field too.
+ * redCpuRoof (WW_CELL_PRECIP_RED=cpuroof) = BUGS1102's rule: a roofed interior takes the CPU field. */
+inline bool wwPrecipGpuField( bool cpuForced, bool noWrapRed, bool roofed, bool redCpuRoof )
 {
-	return !cpuForced && !noWrapRed && ( !roofed || redGpuRoof );
+	return !cpuForced && !noWrapRed && ( !roofed || !redCpuRoof );
 }
 
-//! a particle at p is drawn by the chosen field: the CPU field drops it under a roof, the GPU field has no roof test
-inline bool wwPrecipDrawn( const WwRoofMap * roof, bool gpuField, const double p[3] )
+//! the GPU field tests the roof map; redGpuRoof (WW_CELL_PRECIP_RED=gpuroof) = the GPU field with no roof test (pre-BUGS1102)
+inline bool wwPrecipGpuRoofTest( bool gpuField, bool roofed, bool redGpuRoof )
 {
-	return gpuField || !roof || roof->open( p );
+	return gpuField && roofed && !redGpuRoof;
+}
+
+//! a particle at p is drawn: noRoofTest = the GPU field without its roof test; otherwise a roof drops it
+inline bool wwPrecipDrawn( const WwRoofMap * roof, bool noRoofTest, const double p[3] )
+{
+	return noRoofTest || !roof || roof->open( p );
+}
+
+//! the map's texel as the GPU field reads it (R32F): open (-inf) uploads as -1e30, which every particle is above
+inline float wwRoofTexel( float z )
+{
+	return std::isinf( z ) ? -1e30f : z;
+}
+
+//! the GPU field's pcRoofCam: the eye in the map's texels (in double, then float) and its z; pcRoofInv = 1 / m.cell
+inline void wwRoofCam( const WwRoofMap & m, const double cam[3], float out[3] )
+{
+	out[0] = float( ( cam[0] - double( m.x0 ) ) / double( m.cell ) );
+	out[1] = float( ( cam[1] - double( m.y0 ) ) / double( m.cell ) );
+	out[2] = float( cam[2] );
 }
 
 #endif // PRECIPROOF_H
