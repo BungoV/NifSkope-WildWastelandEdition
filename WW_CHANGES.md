@@ -1,3 +1,16 @@
+## FARPRESET1 (2026-11-02): the far LOD rings reach the player's preset distances
+
+The far rings used Ultra's distances on every preset (fBlockLevel0/1/2Distance 60000 / 90000 / 110000,
+fBlockMaximumDistance 250000). They now read `[TerrainManager]` fBlockLevel0Distance, fBlockLevel1Distance,
+fBlockLevel2Distance and fBlockMaximumDistance through the game's ini chain (cellGameIniFloat: the game folder's
+Fallout4_Default.ini, then Fallout4.ini / Fallout4Prefs.ini / Fallout4Custom.ini of the MO2 profile or My Games), the
+values the game's preset writes: Low 15000/25000/75000/100000, Medium 20000/32000/80000/100000, High
+30000/60000/110000/180000, Ultra 60000/90000/110000/250000 (src/farringdist.h). A key that no ini sets keeps the Ultra
+value, and each ring reaches at least as far as the ring inside it. An Ultra Fallout4Prefs.ini builds what it built
+before. New notes line: `far lod: ring distances a / b / c / max d (<ini>)`. Pin `WW_CELL_FARLOD_PRESET=low|medium|high|ultra`;
+red `WW_CELL_FARLOD_PRESET_RED=1` (Ultra on every preset). WW_CELL_FARLOD_L0/L1/L2/MAX still override each ring. Both new
+switches are live (liveFarKey). Unit test: tests/farringdist (g++ alone, on the game folder's four preset inis).
+
 ## REFLPROBECLI1 (TOOLS1101, 2026-11-01): count the reflection probes' below-horizon misses without a window
 
 `nifskope -no-gui reflcensus --soup <soup.psp> (--camera x,y,z ... | --auto N) [--interior] [--out probes.tsv]` places
