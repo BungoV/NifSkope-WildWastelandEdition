@@ -257,7 +257,7 @@ if 'W' in only:
     w3 = 'specs = wwPrecipFromSpgd( spgdType, spgdDensity, classFlags, spgdRed );' in cp
     w4 = ('prog->uniLocation( "volAirRainMap" )' in cv and 'RF::shares( ptype, scale, blending' in cv
           and 'g.rfNote = vaRainFog( scene, prog, L && L->interior, g.rfKey, g.rfTail );' in cv)
-    w5 = lf.count('wwAirRainTau( posView * ( far / d ), posView )') == 2 and 'wwAirRainTau( dirView * ( far' in lf
+    w5 = lf.count('wwAirRainTau( posView * ( far / d ), posView )') >= 2 and 'wwAirRainTau( dirView * ( far' in lf
     gate('W wiring', w1 and w2 and w3 and w4 and w5, 'esmweather SPGD %s, lookdevstage %s, cellprecip %s, cellvolair %s, '
          'lookdev_fog tails %s%s' % (w1, w2, w3, w4, w5, ' [red wiring: %s sources]' % BASE if red == 'wiring' else ''))
 

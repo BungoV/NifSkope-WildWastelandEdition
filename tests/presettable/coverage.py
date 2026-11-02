@@ -46,18 +46,11 @@ def main():
     if red:
         table = table[1:]
     rows = panel_rows(tree)
-    # rows the presets leave as they are (LAND2 11-02): PERFFIX2's AO quality, PERFFIX4's VRS look row
-    left = ['CellWorkspaceAoQuality', 'CellWorkspaceLook_WW_CELL_VRS']
-    missing = [k for k in rows if k not in table and k not in left]
+    # BUGS1102 (11-02): no exemptions. LAND2 exempted CellWorkspaceAoQuality + Look_WW_CELL_VRS here, but PERFFIX2 item 9
+    # says the presets step the AO tier: the table lacked the row (a product bug), so both rows went into the table.
+    missing = [k for k in rows if k not in table]
     extra = [k for k in table if k not in rows]
-    print('panel Fusion Shaders rows %d, table rows %d, left by the presets %d%s' % (len(rows), len(table), len(left), ' (RED: first table row dropped)' if red else ''))
-    for k in left:
-        if k in table:
-            print('FAIL a left row is also in the table:', k)
-            missing.append(k)
-        if k not in rows:
-            print('FAIL a left row the panel lacks:', k)
-            missing.append(k)
+    print('panel Fusion Shaders rows %d, table rows %d%s' % (len(rows), len(table), ' (RED: first table row dropped)' if red else ''))
     for k in missing:
         print('FAIL a panel row the table lacks:', k)
     for k in extra:
