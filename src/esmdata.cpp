@@ -115,10 +115,22 @@ bool EsmWorld::load( const QString & esmPath, quint32 worldspaceFormID, QString 
 		wsFlags = 0;
 		wsHasCentre = false;
 		wsCentreX = wsCentreY = 0;
+		largeRows.clear();
+		refrCellCache.clear();
 		{
+			const bool rnamXY = wwEnv( "WW_CELL_LARGEREFS_RED" ) == "xy";   // lane GEOLOD1: the red reads X,Y
+			std::vector<unsigned char> rnam;
 			ESMFile::ESMField f( *esm, w );
 			while ( f.next() ) {
-				if ( f == "WNAM" && f.size() >= 4 ) {
+				if ( f == "RNAM" && f.size() >= 8 ) {	// lane GEOLOD1: large references (src/largeref.h)
+					rnam.resize( f.size() );
+					for ( size_t k = 0; k < rnam.size(); k++ )
+						rnam[k] = (unsigned char) f.readUInt8();
+					const size_t first = largeRows.size();
+					LargeRef::decode( rnam.data(), rnam.size(), !rnamXY, largeRows );
+					for ( size_t k = first; k < largeRows.size(); k++ )
+						largeRows[k].ref = esm->mapFormID( w, largeRows[k].ref );
+				} else if ( f == "WNAM" && f.size() >= 4 ) {
 					wnam = f.readUInt32();
 				} else if ( f == "PNAM" && f.size() >= 2 ) {
 					pnam = f.readUInt16();
@@ -962,6 +974,30 @@ const QVector<EsmRefr> & EsmWorld::persistentRefrs() const
 		persistentCacheBuilt = true;
 	}
 	return persistentCache;
+}
+
+bool EsmWorld::refrByForm( quint32 formID, int cx, int cy, EsmRefr & out, bool * persistent ) const
+{
+	if ( persistent )
+		*persistent = false;
+	const QPair<int, int> k = qMakePair( cx, cy );
+	auto it = refrCellCache.find( k );
+	if ( it == refrCellCache.end() )
+		it = refrCellCache.insert( k, hasCell( cx, cy ) ? refrs( cx, cy ) : QVector<EsmRefr>() );
+	for ( int i = it->size() - 1; i >= 0; i-- )
+		if ( it->at( i ).formID == formID ) {
+			out = it->at( i );
+			return true;
+		}
+	const QVector<EsmRefr> & p = persistentRefrs();
+	for ( int i = p.size() - 1; i >= 0; i-- )
+		if ( p.at( i ).formID == formID ) {
+			out = p.at( i );
+			if ( persistent )
+				*persistent = true;
+			return true;
+		}
+	return false;
 }
 
 QVector<EsmRefr> EsmWorld::persistentRefrsIn( float minX, float minY, float maxX, float maxY ) const
