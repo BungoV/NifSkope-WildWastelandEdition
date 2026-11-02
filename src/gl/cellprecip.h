@@ -34,4 +34,21 @@ bool wwCellPrecipWantsFrames( Scene * scene );
 //! the last census line ("precip: off" when the row is off)
 QString wwCellPrecipEcho();
 
+/* lane FO76WEATHER1: rain wetness on every material (gl/rainwetlaw.h, res/shaders/rain_wet.glsl), Fallout 76's law.
+ * The amount runs on Fallout 4's clock (+0.03 a second while it rains, -0.02 while dry) toward the rain's share of the
+ * weather (a change blends both weathers); it starts settled when a document opens or the row turns on. Interiors 0.
+ * Wet ground also takes the game's wet reflection (SSR) flag (renderer.cpp, src/landlodspec.h landSsr), and a
+ * material with its wetness SSR switch takes the flag while wet.
+ * Row: Show > Improved Sky > Rain wetness (WW/CellRainWet), ships OFF; pin WW_CELL_RAINWET=0|1 (live).
+ * Harness pin WW_CELL_RAINWET_AMOUNT=<0..1> (a fixed amount, outdoors). Red WW_CELL_RAINWET_RED=shore: the old path
+ * (shore wetness only, no rain wetness, dry SSR flags). Census on stderr: "rain wet: ...".
+ * Lane FO76WEATHER2: a top-down cover map (gl/rainwetlaw.h exposed) keeps ground under roofs and bridges dry: solid
+ * shapes without the terrain, 8192 u around the eye at 16 u texels, unit WwCellUnit::RainCover. Red
+ * WW_CELL_RAINWET_RED=nocover: no cover test (FO76WEATHER1). Census "rain wet: cover map ...". */
+//! the amount this frame (0 off, red, indoors or dry)
+float wwCellRainWetAmount( Scene * scene );
+//! the current program's rainWet uniform; custom porosity from the material (BGSM bCustomPorosity / fPorosityValue)
+void wwCellRainWetUniforms( Scene * scene, float customPorosity, bool useCustom );
+QString wwCellRainWetEcho();
+
 #endif // CELLPRECIP_H
