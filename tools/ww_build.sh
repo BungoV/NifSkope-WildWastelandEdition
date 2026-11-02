@@ -79,6 +79,19 @@ if [ -n "$HEADREV" ] && [ -f Makefile.Release ]; then
 	else
 		echo "revision: $HEADREV (Makefiles on HEAD)"
 	fi
+	# lane PERFHUNT2: the precompiled header (STARTSPEED1, release/ww_pch.h.gch) was compiled with that define too,
+	# and g++ refuses a PCH whose -D values differ ("defined as X not Y"), then looks for release/ww_pch.h, which
+	# does not exist. Its make rule depends only on src/ww_pch.h, so a stale one is never rebuilt by make. Each
+	# gated build stamps the revision it was made for; a gch with another stamp (a commit since, or a copy from a
+	# seed tree) is dropped here and make builds it again (about a minute).
+	if [ -d release/ww_pch.h.gch ]; then
+		PCHREV="$(cat release/ww_pch.h.gch/.rev 2>/dev/null)"
+		if [ "$PCHREV" != "$HEADREV" ]; then
+			rm -rf release/ww_pch.h.gch
+			echo "pch: release/ww_pch.h.gch was for '${PCHREV:-unknown}', dropped (make rebuilds it for $HEADREV)"
+		fi
+	fi
+	WW_PCH_REV="$HEADREV"
 fi
 # lane STARTSPEED1: WW_BUILD_JOBS=<n> sets make's -j (default 2: up to 2 builds share the machine under withlock);
 # WW_BUILD_TIMES=<log> puts tools/ww_ctime.sh before the compiler (one line per object, ranked by
@@ -96,6 +109,8 @@ rc=$?
 echo "build wall $(( $(date +%s) - bt0 )) s (make -j$JOBS)"
 ls -l --time-style=+%H:%M:%S release/NifSkope.exe
 [ $rc -eq 0 ] || { echo "BUILD FAILED"; exit $rc; }
+# lane PERFHUNT2: the PCH make just built (or kept) is for this revision
+[ -n "${WW_PCH_REV:-}" ] && [ -d release/ww_pch.h.gch ] && printf '%s\n' "$WW_PCH_REV" > release/ww_pch.h.gch/.rev
 
 if [ $# -gt 0 ]; then
 	for s in "$@"; do
