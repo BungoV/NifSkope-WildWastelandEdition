@@ -152,13 +152,13 @@ V8="WW_RENDER_VIEW=8 $GRD"
 TOP="WW_RENDER_VIEW=1 WW_RENDER_FOV=30 WW_RENDER_CENTER=-356,-100,-256 $GRD"
 
 # shellcheck disable=SC2086
-if want fit && aimed flipsun nofloor nosnap onecascade wrongsplit; then
+if want fit && aimed flipsun nofloor nosnap onecascade wrongsplit stablefit; then
 	echo "fit"
 	shot "$ARM" fit_11 "$CUBE" $V8 WW_LOOKDEV_HOUR=11 $ON $REDPIN
 	shot "$ARM" fit_1730 "$CUBE" $V8 WW_LOOKDEV_HOUR=17.5 $ON $REDPIN
 fi
 # shellcheck disable=SC2086
-if want foot && aimed flipsun nosnap onecascade wrongsplit; then
+if want foot && aimed flipsun nosnap onecascade wrongsplit stablefit; then
 	echo "foot"
 	for fd in 0:600: 1:2000: 2:5000:WW_CSM_DISTANCE=8000; do
 		IFS=: read -r i dist extra <<< "$fd"
@@ -174,7 +174,7 @@ if want seam && aimed noblend wrongsplit; then
 	shot "$ARM" seam_p5 "$CUBE" $V8 WW_LOOKDEV_HOUR=12 WW_CSM_PROBE=5 $ON $REDPIN
 fi
 # shellcheck disable=SC2086
-if want acne && aimed nobias bigbias flipsun; then
+if want acne && aimed nobias bigbias flipsun offbias; then
 	echo "acne"
 	# top-down, 1500 up, over a point 450 units down-sun of the cube (the sun law's
 	# horizontal travel at that hour): the shadow and the ground at the base of the faces
