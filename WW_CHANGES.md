@@ -1,3 +1,16 @@
+## BUGS1102C (2026-11-02): the shader cache keeps one binary a define set; rainfog2 unit follows the precip enum
+
+- **Shader cache (SHOTCAPS-COLD):** a program's cached binary is keyed on its sources after the switch defines
+  (`WW_CELL_FOGLEAK`, `WW_CELL_RESTIR`, ...), but writing a binary deleted every other binary of that program. Rows
+  that alternate define sets then relinked those programs on every launch (about 46 programs, 7 min on a fresh
+  snapshot), and shot scripts with 60-180 s caps died with no picture. Now the newest 6 binaries of a program stay
+  (src/gl/progcachekeep.h, by file time; the one just written always). `WW_PROGCACHE_KEEP=<n>` (1..64) sets the
+  count; `WW_PROGCACHE_KEEP=1` is the red (the old one-file rule). Worst case about 6 x 25 MB on disk.
+  Unit: tests/progcachekeep (two define sets over 8 launches: 2 relinks; the red relinks 8 and fails).
+- **rainfog2 unit (RAINFOG2-SNOWLAYERS):** PRECIPLOOK1 removed sleet from the precipitation type enum, so snow_fine
+  moved from 3 to 2 and the unit's S and D gates failed on a correct build. The unit now reads the type ids from the
+  enum. Test change only.
+
 ## GISKYTWIN-FLIP (LAND5, 2026-11-02): the GI volume's sky ships at the physical level
 
 - `WW_CELL_RTDDGI_SKY` unset (or empty) is now `level` (GITRUTH1's giSkyLevel: the weather's sky colour at the

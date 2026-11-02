@@ -42,6 +42,7 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include "cellpasstime.h"	// lane PERF1
 #include "celldrawpacket.h"	// lane GAPPERF-BINDLESS: the setters record while a draw packet records
 #include "cellbindless.h"	// lane BINDLESS2
+#include "progcachekeep.h"	// lane BUGS1102C
 
 // lane CELLUNI1: inside the cell-uniform scope an unchanged value is not uploaded again (celluniform.h)
 #define WWCU( k, l, v, n ) WwCellUni::want( wwUni, l, WwCellUni::k, v, n, WwDp::rec != nullptr )
@@ -734,15 +735,14 @@ bool NifSkopeOpenGLContext::Program::finishLink( NifSkopeOpenGLContext * context
 					std::memcpy( b.data(), "WWPB", 4 );
 					std::memcpy( b.data() + 4, &fmt, 4 );
 					b.resize( 8 + got );
-					// one file a program: the binaries of older sources go
+					// one binary a define set, the newest few kept (gl/progcachekeep.h; WW_PROGCACHE_KEEP=1 = the red, one file)
 					const QFileInfo	fi( cacheFile );
-					QDir	d( fi.absolutePath() );
-					for ( const QString & old : d.entryList( { QString::fromLatin1( name.data(), qsizetype( name.size() ) ) + "-*.bin" } ) )
-						if ( old != fi.fileName() )
-							d.remove( old );
 					QFile	cf( cacheFile );
 					if ( got > 0 && cf.open( QIODevice::WriteOnly ) && cf.write( b ) == b.size() )
 						context->programCacheWritten++;
+					cf.close();
+					wwProgCachePrune( fi.absolutePath(), QString::fromLatin1( name.data(), qsizetype( name.size() ) ), fi.fileName(),
+						wwProgCacheKeep( qgetenv( "WW_PROGCACHE_KEEP" ) ) );
 				}
 			}
 		}

@@ -250,6 +250,7 @@ HEADERS += \
 	src/gl/cellprecip.h \
 	src/gl/precipmath.h \
 	src/gl/precipspec.h \
+	src/gl/progcachekeep.h \
 	src/gl/cellcull.h \
 	src/gl/cellumbra.h \
 	src/gl/cellwater.h \
