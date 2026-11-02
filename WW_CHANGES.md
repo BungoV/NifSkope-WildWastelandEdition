@@ -8,6 +8,19 @@ unshadowed, as vanilla. Red `WW_CELL_AIR_RED=nointsungate` (bit 16) gives indoor
 the gate indoors and outdoors. tests/fogleak/fogleak_check.py gains gate I (closed room: air sun 0 inside; open room:
 unchanged). With the switches off the shader binaries are identical.
 
+SSGIHO-INT: in such an interior under the traced volume the screen-space bounce now marches only to the volume's
+smallest probe spacing (140 u by default, never past its 256): the probes hold the occlusion and the bounce of what lies
+farther, the screen keeps the contact scale, and the fill law then darkens and adds only that share. Offline (the SSGI
+bench's room, Ultra) the occluded share falls from 0.090 to 0.061 and the bounce's mean from 0.111 to 0.078, at the same
+cost. The census line `cell ssgi:` ends `radius <n>`. Red `WW_CELL_SSGI_RED=nointradius`; volume off (the default):
+unchanged.
+
+REFLPROBECLI2: `reflcensus --auto N --interior` puts its cameras eye over every floor that has a ceiling over it (each
+storey of a column, eye + 32 of headroom at least) instead of on the topmost surface, which indoors is mostly the roof.
+`--red roof` gives the old cameras. tests/reflcensus/run.sh gains a two-storey box and that red. Museum (`--auto 6`):
+49 cameras instead of 29; hits 44.4 % (was 33.1 %), sky misses 26.1 % (was 42.4 %), below-horizon misses 29.5 % (was
+24.5 %, of them past the soup 452630, was 244631); the red reproduces the old run to the texel.
+
 ## REFLPROBECLI1 (TOOLS1101, 2026-11-01): count the reflection probes' below-horizon misses without a window
 
 `nifskope -no-gui reflcensus --soup <soup.psp> (--camera x,y,z ... | --auto N) [--interior] [--out probes.tsv]` places
