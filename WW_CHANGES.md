@@ -510,6 +510,19 @@ and the measured ms and targets with their sources. `cell presets:` in the notes
 tests/presettable: every row x preset against those rules (red: the old rule, it must fail), plus a coverage check
 that every Fusion Shaders panel row has a table row (red: a row dropped). tests/cellshow keeps testing the step
 mechanics on its own synthetic codes (`wwDisplayPresetCodes`).
+## ESPWRITE1 (2026-11-02): the plugin writer for cell edits (no UI yet)
+
+New `src/io/espwrite.{h,cpp}` (QtCore only) writes a Fallout 4 override plugin from a plan: a new .esp, or an ESL
+(flag 0x200, ids 0x800..0xFFF); new refs in an interior or exterior cell, persistent or temporary; "disable" overrides
+of master refs. The layout follows the master: interior CELL > block > sub-block > cell children > 8/9; exterior WRLD >
+world children > persistent cell (every exterior persistent ref), then block/sub-block by (y, x) > grid cell > 9; labels
+sorted as u32, cells by form id. TES4 writes HEDR (records + groups), MAST/DATA, ONAM (master refs overridden in
+temporary groups), INTV, INCC. A localised master FULL is dropped from the copied CELL/WRLD. `yawToward` gives the
+rotation that faces a target the way the cell view draws a ref. Saving is atomic (QSaveFile).
+Red WW_ESPWRITE_RED=xy|temp|count|onam|yaw (the old/wrong rule). Gates in tests/espwrite: the C++ output equals the
+independent tools/espwrite_ref.py byte for byte on 4 plans, and its walk passes; EsmWorld reads every ref back; the
+yaw unit test; three CC files' CELL/WRLD trees re-emit byte-identical. Not in NifSkope.pro yet (ESPWRITE2 adds the UI).
+
 ## FOAMOFF2 (FIX1101A, 2026-11-01): River foam and Contact foam stay OFF
 
 The water lane's foam fixes land: lace streaks instead of solid patches, and no foam on a dry bank. Its two rows still

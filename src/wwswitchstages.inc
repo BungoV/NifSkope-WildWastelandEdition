@@ -744,6 +744,7 @@
 { "WW_EFFECTBAKE_TEST", 2, "src/nifskope_ui.cpp:8040 NifSkope::createWindow | createWindow: picks which harness the window runs" },
 { "WW_EFFECTBAKE_TIME", 2, "src/nifskope_ui.cpp:8066 NifSkope::createWindow | createWindow: picks which harness the window runs" },
 { "WW_ESM_TRACE", 1, "src/esmdata.cpp:93 EsmWorld::load | read while the cell document is built" },
+{ "WW_ESPWRITE_RED", 0, "src/io/espwrite.cpp:19 red | re-read per frame or per call (a)" },
 { "WW_EXPOSURE_EV", 0, "src/gl/scenelighting.cpp:92 st | init-once state, re-read when a live set moves its prefix (b)" },
 { "WW_EXTERNAL_DROP_CHOICE", 0, "src/nifskope.cpp:10201 NifSkope::showExternalNifDropMenu | re-read per frame or per call (a)" },
 { "WW_EXTERNAL_DROP_TEST", 2, "src/nifskope_ui.cpp:26467 NifSkope::createWindow | createWindow: picks which harness the window runs" },

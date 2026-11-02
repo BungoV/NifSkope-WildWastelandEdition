@@ -1,0 +1,6 @@
+{"masters": ["Fallout4.esm"], "light": false, "author": "NifSkope WW",
+ "note": "Commonwealth cell (-5,3): a persistent XMarker (to the world persistent cell), a temporary STAT, one temporary master ref disabled",
+ "cells": [{"cell": "0000DFA3", "world": "0000003C",
+            "adds": [{"base": "0000003B", "pos": [-18000.0, 13000.0, 512.0], "rot": [0.0, 0.0, 3.141592653589793], "scale": 1.0, "persistent": true},
+                     {"base": "0008E7C5", "pos": [-17900.5, 13100.25, 520.0], "rot": [0.0, 0.0, 0.5], "scale": 1.0, "persistent": false}],
+            "disable": ["0022F853"]}]}

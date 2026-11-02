@@ -1,0 +1,9 @@
+{"masters": ["Fallout4.esm"], "light": false, "author": "NifSkope WW",
+ "note": "interior and exterior in one file: both top groups, CELL before WRLD",
+ "cells": [{"cell": "0000DFA3", "world": "0000003C",
+            "adds": [{"base": "0008E7C5", "pos": [-17950.0, 13050.0, 515.0], "rot": [0.0, 0.0, 1.0], "scale": 1.0, "persistent": false},
+                     {"base": "00000034", "pos": [-18100.0, 12900.0, 505.0], "rot": [0.0, 0.0, 2.0], "scale": 1.0, "persistent": true}],
+            "disable": []},
+           {"cell": "0005C92E", "world": null,
+            "adds": [{"base": "0000003B", "pos": [250.0, 4250.0, -980.5], "rot": [0.0, 0.0, 0.0], "scale": 1.0, "persistent": true}],
+            "disable": ["00249CEF"]}]}

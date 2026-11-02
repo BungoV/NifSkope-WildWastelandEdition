@@ -1,0 +1,5 @@
+{"masters": ["Fallout4.esm"], "light": true, "author": "NifSkope WW",
+ "note": "Commonwealth cell (-5,3): only a persistent XMarkerHeading, so only the world persistent cell is written (no grid cell)",
+ "cells": [{"cell": "0000DFA3", "world": "0000003C",
+            "adds": [{"base": "00000034", "pos": [-18200.0, 12800.0, 500.0], "rot": [0.0, 0.0, -0.7853981633974483], "scale": 1.0, "persistent": true}],
+            "disable": []}]}
