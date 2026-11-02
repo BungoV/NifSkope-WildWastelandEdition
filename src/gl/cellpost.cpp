@@ -34,6 +34,7 @@ namespace {
 const char * const kDofKey = "WW/CellDof";
 const char * const kMblurKey = "WW/CellMotionBlur";
 const char * const kObKey = "WW/CellObjectBlur";
+const char * const kLinKey = "WW/CellPostLinear";	// lane POSTFX2
 
 // lane POSTFX1: the object blur's rulings (notes/postfx1/RESULTS.md): a 180 degree shutter (half the frame's travel),
 // at most 32 px, 16 px tiles (the neighbour max reaches 3 tiles), 15 taps
@@ -160,6 +161,7 @@ struct PostGpu
 	GLenum dsFormat = 0;
 	GLbitfield depthBits = 0;
 	GLenum mvFormat = 0;	// lane POSTFX1: RG16F (red WW_CELL_MBLUR_RED=rg32: RG32F)
+	GLenum colFormat = 0;	// lane POSTFX2: cur / out, RGBA32F over a 32-bit linear frame, else RGBA16F
 	GLuint obVec = 0, obTile[2] = { 0, 0 };	// lane POSTFX1: the object blur's pixel vectors, tile max, neighbour max
 	int obTw = 0, obTh = 0;
 };
@@ -171,6 +173,11 @@ struct PostState
 	bool dof = false, dofPinned = false, mb = false, mbPinned = false;
 	bool redNoCoc = false, redNoVelocity = false, redNoJitter = false, redBlurRow = false;
 	bool ob = false, obPinned = false, redObCamera = false, redRg32 = false;	// lane POSTFX1
+	bool redFuse = false;	// lane POSTFX2: WW_CELL_POSTFUSE_RED=1 keeps the depth of field and motion blur two passes
+	bool lin = false, linPinned = false;	// lane POSTFX2: the depth of field and motion blur in the linear frame
+	bool linRan = false;	// the linear stage ran them this frame (the display stage then skips them)
+	int curFrame = 0;	// this frame's index and time, taken by the frame's first stage
+	double curDt = 0.0;
 	QString dumpDir;
 	int dumpFrame = 2;
 
@@ -226,7 +233,9 @@ PostState & ps()
 		s.redNoVelocity = wwEnvStr( "WW_CELL_MBLUR_RED" ).contains( QLatin1StringView( "novelocity" ) );
 		s.redNoJitter = wwEnvStr( "WW_CELL_MBLUR_RED" ).contains( QLatin1StringView( "nojitter" ) );
 		s.redRg32 = wwEnvStr( "WW_CELL_MBLUR_RED" ).contains( QLatin1StringView( "rg32" ) );
+		s.redFuse = wwEnvStr( "WW_CELL_POSTFUSE_RED" ).trimmed() == QLatin1StringView( "1" );
 		s.ob = readPin( "WW_CELL_OBJBLUR", kObKey, s.obPinned );
+		s.lin = readPin( "WW_CELL_POST_LINEAR", kLinKey, s.linPinned );
 		s.redObCamera = wwEnvStr( "WW_CELL_OBJBLUR_RED" ).contains( QLatin1StringView( "camera" ) );
 		s.dumpDir = wwEnvStr( "WW_CELL_POST_DUMP" ).trimmed();
 		bool ok = false;
@@ -237,10 +246,10 @@ PostState & ps()
 	return s;
 }
 
-QHash<Renderer *, PostGpu> & postGpus()
+QHash<Renderer *, PostGpu> & postGpus( bool linear )
 {
-	static QHash<Renderer *, PostGpu> g;
-	return g;
+	static QHash<Renderer *, PostGpu> g, gl;	// lane POSTFX2: the linear stage keeps its own (float) targets
+	return linear ? gl : g;
 }
 
 // telemetry: one line per change of verdict, never per frame (the frame number is left out of the comparison)
@@ -411,6 +420,19 @@ void wwCellObjectBlurSetOn( bool on )
 		QSettings().setValue( QLatin1StringView( kObKey ), on );
 }
 
+bool wwCellPostLinearOn()
+{
+	return ps().lin;
+}
+
+void wwCellPostLinearSetOn( bool on )
+{
+	PostState & s = ps();
+	s.lin = on;
+	if ( !s.linPinned )
+		QSettings().setValue( QLatin1StringView( kLinKey ), on );
+}
+
 void wwCellPostSetCell( const EsmWorld & world, bool interior )
 {
 	PostState & s = ps();
@@ -465,28 +487,43 @@ QString wwCellPostEcho()
 	return QStringLiteral( "cell dof: %1 | cell mblur: %2 | cell objblur: %3" ).arg( s.lastDof, s.lastMb, s.lastOb );
 }
 
-void wwCellPostApply( Scene * scene )
+namespace {
+
+/*! lane POSTFX2: one stage of the chain. linear: the linear frame before the tone map, the depth of field and motion
+ *  blur only (the row WW_CELL_POST_LINEAR); else the tone-mapped frame: what the linear stage did not run this frame. */
+void postApply( Scene * scene, bool linear )
 {
 	PostState & s = ps();
-	if ( !s.dof )
-		s.lastDof = QStringLiteral( "off" );
-	if ( !s.mb )
-		s.lastMb = QStringLiteral( "off" );
-	if ( !s.ob )
-		s.lastOb = QStringLiteral( "off" );
-	if ( ( !s.dof && !s.mb && !s.ob ) || !scene || !scene->renderer || scene->selecting )
+	const bool linRan = !linear && s.linRan;	// the linear stage already took the depth of field and motion blur
+	if ( !linear )
+		s.linRan = false;
+	if ( linear && ( !s.lin || ( !s.dof && !s.mb ) || !scene || !scene->renderer || scene->selecting ) )
 		return;
-	if ( s.ob )
+	const bool wantDof = s.dof && !linRan, wantMb = s.mb && !linRan, wantOb = s.ob && !linear;
+	if ( !linear ) {
+		if ( !s.dof )
+			s.lastDof = QStringLiteral( "off" );
+		if ( !s.mb )
+			s.lastMb = QStringLiteral( "off" );
+		if ( !s.ob )
+			s.lastOb = QStringLiteral( "off" );
+	}
+	if ( ( !wantDof && !wantMb && !wantOb ) || !scene || !scene->renderer || scene->selecting )
+		return;
+	if ( wantOb )
 		wwTaaInputsRequest();	// lane POSTFX1: the object vectors of the NEXT frame (the inputs ran before this pass)
 	Renderer * r = scene->renderer;
 	auto fn = r->fn;
 	while ( fn->glGetError() != GL_NO_ERROR ) {
 	}
 
-	// this frame's index and time
+	// this frame's index and time, taken once a frame (by the linear stage when it ran)
 	int frame = 0;
 	double dt = 0.0;
-	if ( s.pathFrame >= 0 ) {
+	if ( linRan ) {
+		frame = s.curFrame;
+		dt = s.curDt;
+	} else if ( s.pathFrame >= 0 ) {
 		frame = s.pathFrame;
 		dt = s.pathFps > 0.0f ? 1.0 / double( s.pathFps ) : 0.0;
 	} else {
@@ -498,6 +535,11 @@ void wwCellPostApply( Scene * scene )
 			s.clock.start();
 		}
 	}
+	s.curFrame = frame;
+	s.curDt = dt;
+	if ( linear )
+		s.linRan = true;
+	const QString where = linear ? QStringLiteral( " in the linear frame" ) : QString();
 
 	GLint prevDraw = 0, prevRead = 0, vp[4] = { 0, 0, 1, 1 };
 	fn->glGetIntegerv( GL_DRAW_FRAMEBUFFER_BINDING, &prevDraw );
@@ -521,7 +563,7 @@ void wwCellPostApply( Scene * scene )
 	bool farOnly = false;
 	int radius = 3;
 	FloatVector4 dc0( 0.0f ), dc1( 0.0f ), dc2( 0.0f ), dc3( 1.0f );
-	if ( s.dof ) {
+	if ( wantDof ) {
 		float rec[4] = { 0, 0, 0, 0 };
 		QString src;
 		if ( !perspective ) {
@@ -547,7 +589,7 @@ void wwCellPostApply( Scene * scene )
 				noteDof( s, QStringLiteral( "refused (strength 0: %1)" ).arg( what ) );
 			} else {
 				runDof = true;
-				noteDof( s, QStringLiteral( "on %1" ).arg( what ) );
+				noteDof( s, QStringLiteral( "on %1%2" ).arg( what, where ) );
 			}
 		}
 	}
@@ -565,7 +607,7 @@ void wwCellPostApply( Scene * scene )
 	bool runMb = false;
 	Dmat reproj = Dmat::identity();
 	FloatVector4 mc0( 0.0f ), mc1( 0.0f );
-	if ( s.mb ) {
+	if ( wantMb ) {
 		Dmat prevVP = curVP;
 		bool have = false;
 		if ( s.haveLast && s.lastW == W && s.lastH == H ) {
@@ -596,12 +638,15 @@ void wwCellPostApply( Scene * scene )
 			// c0 = (scale x 0.001 x (1 / dt), max blur, fThreshold, 0); c1 = (1, 1, (W - 1) / W, (H - 1) / H)
 			mc0 = FloatVector4( kMbScale * 0.001f * ( 1.0f / float( dt ) ), kMbMax, kMbThreshold, 0.0f );
 			mc1 = FloatVector4( 1.0f, 1.0f, float( W - 1 ) / float( W ), float( H - 1 ) / float( H ) );
-			const QString line = QStringLiteral( "on frame %1 dt %2 c0 %3 jitter %4 %5%6" ).arg( frame ).arg( f9( dt ), v4( mc0 ),
+			// lane POSTFX2: say whether the pass also composites the depth of field
+			const QString fused = ( !runDof ? QString() : s.redFuse ? QStringLiteral( " two-pass RED postfuse" )
+				: QStringLiteral( " fused with the depth of field" ) ) + where;
+			const QString line = QStringLiteral( "on frame %1 dt %2 c0 %3 jitter %4 %5%6%7" ).arg( frame ).arg( f9( dt ), v4( mc0 ),
 				f9( jitX ), f9( jitY ), s.redNoVelocity ? QStringLiteral( " RED novelocity" )
-				: s.redNoJitter ? QStringLiteral( " RED nojitter" ) : QString() );
+				: s.redNoJitter ? QStringLiteral( " RED nojitter" ) : QString(), fused );
 			// the key: a path's fixed frame time, never an interactive window's measured one (no line per paint)
-			noteMb( s, line, QStringLiteral( "on %1 %2" ).arg( s.pathFrame >= 0 ? f9( dt ) : QStringLiteral( "measured" ) )
-				.arg( s.redNoVelocity ? 1 : 0 ) );
+			noteMb( s, line, QStringLiteral( "on %1 %2%3" ).arg( s.pathFrame >= 0 ? f9( dt ) : QStringLiteral( "measured" ) )
+				.arg( s.redNoVelocity ? 1 : 0 ).arg( fused ) );
 		}
 	}
 	// lane POSTFX1: the object blur's verdict: this frame's object vectors and the camera they were drawn with
@@ -609,7 +654,7 @@ void wwCellPostApply( Scene * scene )
 	GLuint obVel = 0, obMask = 0;
 	float obReproj[16] = {};
 	float obJx = 0.0f, obJy = 0.0f;
-	if ( s.ob ) {
+	if ( wantOb ) {
 		int vw = 0, vh = 0, mw = 0, mh = 0;
 		obVel = wwTaaInputsVelocityTex( scene, vw, vh );
 		obMask = wwTaaInputsMaskTex( scene, mw, mh );
@@ -661,11 +706,19 @@ void wwCellPostApply( Scene * scene )
 		return;
 	}
 
-	PostGpu & g = postGpus()[r];
+	PostGpu & g = postGpus( linear )[r];
+	// lane POSTFX2: the linear frame's own precision (RGBA32F by default): its values pass through unclamped
+	GLenum colFormat = GL_RGBA16F;
+	if ( linear && prevDraw ) {
+		GLint redBits = 0;
+		fn->glGetFramebufferAttachmentParameteriv( GL_DRAW_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_FRAMEBUFFER_ATTACHMENT_RED_SIZE, &redBits );
+		if ( redBits >= 32 )
+			colFormat = GL_RGBA32F;
+	}
 	// lane POSTFX1: the camera vectors in RG16F (the inputs' format; the game's motion blur reads them within 0.5 of an
 	// 8-bit step on 99.99% of pixels, tests/postfx/postfx_gates.py); red WW_CELL_MBLUR_RED=rg32 keeps RG32F
 	const GLenum mvFormat = s.redRg32 ? GL_RG32F : GL_RG16F;
-	if ( !g.inFbo || g.w != W || g.h != H || g.dsFormat != dsFormat || g.mvFormat != mvFormat ) {
+	if ( !g.inFbo || g.w != W || g.h != H || g.dsFormat != dsFormat || g.mvFormat != mvFormat || g.colFormat != colFormat ) {
 		freeGpu( r, g );
 		if ( !g.inFbo ) {
 			fn->glGenFramebuffers( 1, &g.inFbo );
@@ -677,13 +730,14 @@ void wwCellPostApply( Scene * scene )
 		g.qw[1] = std::max( W >> 2, 1 );
 		g.qh[1] = std::max( H >> 2, 1 );
 		// half floats between the passes, as the game's targets: the frame's values pass through unclamped
-		g.cur = makeTex( r, GL_RGBA16F, GL_RGBA, GL_FLOAT, W, H, GL_LINEAR );				// t0
+		g.cur = makeTex( r, colFormat, GL_RGBA, GL_FLOAT, W, H, GL_LINEAR );				// t0
 		g.depth = makeTex( r, dsFormat, dsFmt, dsType, W, H, GL_NEAREST );					// the DoF's t2
 		g.blur[0] = makeTex( r, GL_RGBA16F, GL_RGBA, GL_FLOAT, g.qw[0], g.qh[0], GL_NEAREST );	// tex2, the DoF's t1
 		g.blur[1] = makeTex( r, GL_RGBA16F, GL_RGBA, GL_FLOAT, g.qw[1], g.qh[1], GL_NEAREST );	// tex3
 		g.mv = makeTex( r, mvFormat, GL_RG, GL_FLOAT, W, H, GL_LINEAR );					// the blur's t1
-		g.out = makeTex( r, GL_RGBA16F, GL_RGBA, GL_FLOAT, W, H, GL_LINEAR );
+		g.out = makeTex( r, colFormat, GL_RGBA, GL_FLOAT, W, H, GL_LINEAR );
 		g.mvFormat = mvFormat;
+		g.colFormat = colFormat;
 		fn->glBindFramebuffer( GL_FRAMEBUFFER, g.inFbo );
 		fn->glFramebufferTexture2D( GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, g.cur, 0 );
 		fn->glFramebufferTexture2D( GL_FRAMEBUFFER, dsFmt == GL_DEPTH_STENCIL ? GL_DEPTH_STENCIL_ATTACHMENT : GL_DEPTH_ATTACHMENT,
@@ -759,6 +813,9 @@ void wwCellPostApply( Scene * scene )
 		fn->glTexParameteri( GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GLint( f ) );
 		fn->glTexParameteri( GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GLint( f ) );
 	};
+	// lane POSTFX2: with both on, the composite runs inside the motion blur's pass (game_dofmblur.frag): no composite
+	// target, no copy back (within 0.25 of an 8-bit step of the two passes, less GPU time, tests/postfx/postfx_fuse.py)
+	const bool fuse = runDof && runMb && !s.redFuse;
 	if ( ok && runDof ) {
 		PassTime::subBegin( PassTime::PostDof );
 		target( g.blur[0] );
@@ -811,7 +868,7 @@ void wwCellPostApply( Scene * scene )
 		fn->glViewport( vp[0], vp[1], vp[2], vp[3] );
 		if ( ok )
 			filter( g.blur[0], GL_LINEAR );
-		if ( ok ) {
+		if ( ok && !fuse ) {
 			target( g.out );
 			auto prog = r->useProgram( "game_dof.prog" );
 			if ( !prog ) {
@@ -835,9 +892,10 @@ void wwCellPostApply( Scene * scene )
 		}
 		if ( ok && dump ) {
 			dumpFloat( dd + "dof_blur.bin", g.qw[0], g.qh[0], 4, readTex( r, g.fbo, g.blur[0], false, GL_RGBA, 4, g.qw[0], g.qh[0] ) );
-			dumpFloat( dd + "dof_out.bin", W, H, 4, readTex( r, g.fbo, g.out, false, GL_RGBA, 4, W, H ) );
+			if ( !fuse )
+				dumpFloat( dd + "dof_out.bin", W, H, 4, readTex( r, g.fbo, g.out, false, GL_RGBA, 4, W, H ) );
 		}
-		if ( ok ) {	// the motion blur reads the depth of field's picture
+		if ( ok && !fuse ) {	// the motion blur reads the depth of field's picture
 			fn->glBindFramebuffer( GL_READ_FRAMEBUFFER, g.fbo );
 			fn->glFramebufferTexture2D( GL_READ_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, g.out, 0 );
 			fn->glReadBuffer( GL_COLOR_ATTACHMENT0 );
@@ -875,7 +933,32 @@ void wwCellPostApply( Scene * scene )
 			dumpFloat( dd + "mb_in.bin", W, H, 4, readTex( r, g.fbo, g.cur, false, GL_RGBA, 4, W, H ) );
 			dumpFloat( dd + "mv.bin", W, H, 2, readTex( r, g.mvFbo, g.mv, false, GL_RG, 2, W, H ) );
 		}
-		if ( ok ) {
+		if ( ok && fuse ) {	// lane POSTFX2: the composite and the blur in one pass
+			target( g.out );
+			auto prog = r->useProgram( "game_dofmblur.prog" );
+			if ( !prog ) {
+				ok = false;
+			} else {
+				bind( kUnitCur, g.cur );
+				bind( kUnitMv, g.mv );
+				bind( kUnitBlur, g.blur[0] );
+				bind( kUnitDepth, g.depth );
+				prog->uni1i( "t0", kUnitCur );
+				prog->uni1i( "t1", kUnitMv );
+				prog->uni1i( "t2", kUnitBlur );
+				prog->uni1i( "t3", kUnitDepth );
+				prog->uni4f( "dc0", dc0 );
+				prog->uni4f( "dc1", dc1 );
+				prog->uni4f( "dc2", dc2 );
+				prog->uni4f( "dc3", dc3 );
+				prog->uni4f( "mc0", mc0 );
+				prog->uni4f( "mc1", mc1 );
+				prog->uni1i( "farOnly", farOnly ? 1 : 0 );
+				prog->uni1i( "dofRed", s.redNoCoc ? 1 : 0 );
+				r->drawShape( 4, 3, 6, GL_TRIANGLES, GL_UNSIGNED_SHORT, &attrs, idx );
+				r->stopProgram();
+			}
+		} else if ( ok ) {
 			target( g.out );
 			auto prog = r->useProgram( "game_mblur.prog" );
 			if ( !prog ) {
@@ -1020,4 +1103,16 @@ void wwCellPostApply( Scene * scene )
 		if ( runOb )
 			noteOb( s, why, why );
 	}
+}
+
+}	// namespace
+
+void wwCellPostApply( Scene * scene )
+{
+	postApply( scene, false );
+}
+
+void wwCellPostApplyLinear( Scene * scene )
+{
+	postApply( scene, true );
 }

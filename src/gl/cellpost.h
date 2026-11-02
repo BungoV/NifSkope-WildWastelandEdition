@@ -9,7 +9,9 @@ class Scene;
 /*! The game's depth of field and motion blur on the cell view's tone-mapped frame, before the temporal AA (the
  *  game's order); parameters from the IMGS DNAM (weather or cell XCIM), shaders game_dof*.frag / game_mblur.frag.
  *  Both rows ship OFF and then touch nothing. WW_CELL_DOF=0|1, WW_CELL_MBLUR=0|1 pin them;
- *  WW_CELL_DOF_RED, WW_CELL_MBLUR_RED and WW_CELL_POST_DUMP=<dir> (frame WW_CELL_POST_DUMP_FRAME) are debug aids. */
+ *  WW_CELL_DOF_RED, WW_CELL_MBLUR_RED and WW_CELL_POST_DUMP=<dir> (frame WW_CELL_POST_DUMP_FRAME) are debug aids.
+ *  lane POSTFX2: with both on, the composite runs inside the blur's pass (game_dofmblur.frag); WW_CELL_POSTFUSE_RED=1
+ *  keeps the two passes. */
 
 //! The rows' state (pinned, saved, or OFF in a harness run).
 bool wwCellDofOn();
@@ -24,6 +26,11 @@ void wwCellMotionBlurSetOn( bool on );
  *  after the game's depth of field / motion blur, before the temporal AA. */
 bool wwCellObjectBlurOn();
 void wwCellObjectBlurSetOn( bool on );
+/*! lane POSTFX2: the depth of field and motion blur on the linear frame before the tone map (bright lights keep their
+ *  energy in the blur) instead of the tone-mapped one. WW_CELL_POST_LINEAR=0|1 pins it (key WW/CellPostLinear, default
+ *  OFF: it changes the picture). The object blur and the temporal AA stay on the tone-mapped frame. */
+bool wwCellPostLinearOn();
+void wwCellPostLinearSetOn( bool on );
 
 //! The cell view, at cell open: indoors the cell's XCIM record's DNAM (read here, 16 bytes as stored), outdoors the weather.
 void wwCellPostSetCell( const EsmWorld & world, bool interior );
@@ -39,6 +46,9 @@ float wwCellPostPathFps();
 //! After the tone map, before the temporal AA: the depth of field, then the motion blur, the frame back. Inert when
 //! both rows are off.
 void wwCellPostApply( Scene * scene );
+//! lane POSTFX2: in the linear frame, just before the tone map: the depth of field and motion blur when the linear row
+//! is on (wwCellPostApply then skips them that frame); inert otherwise.
+void wwCellPostApplyLinear( Scene * scene );
 
 //! One line for the notes: what the last frame ran, or why not.
 QString wwCellPostEcho();

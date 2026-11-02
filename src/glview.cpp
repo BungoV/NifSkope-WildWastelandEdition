@@ -4338,6 +4338,10 @@ void GLView::paintGL()
 				PassTime::begin( PassTime::Underwater );	// lane TIMING1
 				wwCellUnderwaterPass( scene );	// lane WATERUNDER1: the camera under water (no GL call off or above it)
 				PassTime::end( PassTime::Underwater );
+				{
+					PassTime::Scope pt( PassTime::Post );
+					wwCellPostApplyLinear( scene );	// lane POSTFX2: the depth of field + motion blur before the tone map (row WW_CELL_POST_LINEAR; inert off)
+				}
 				PassTime::begin( PassTime::ToneMap );
 				wwCellHdrEnd( scene );
 				PassTime::end( PassTime::ToneMap );
