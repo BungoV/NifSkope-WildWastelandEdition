@@ -11,6 +11,8 @@ BSD License - see nifskope.h
 
 #include "cellpick.h"
 #include "cellrefs.h"
+#include "cellfarhide.h"	// lane GEOLOD1: the large refs' far rows
+#include "largeref.h"	// lane GEOLOD1
 #include "cellclick.h"		// lane CELLVIEW2
 #include "cellground.h"		// lane CELLVIEW2
 #include "cellsplat.h"		// lane CELLVIEW4
@@ -3380,6 +3382,41 @@ static bool cellBuild( NifModel * nif, const CellSceneSpec & specAsked, CellChun
 				const int cy = int( std::floor( r.pos[1] / CELL_UNITS ) );
 				pushRefr( r, cx, cy, true );
 			}
+		}
+		/* lane GEOLOD1 (LARGEREF1): the large refs (WRLD RNAM) the block's cells list draw full wherever they stand, as the
+		 * game draws them while a listing cell is loaded (src/largeref.h); their far rows hide as a loaded cell's do.
+		 * Off by default (the game's bDisableLargeRefs is 1); WW_CELL_LARGEREFS=1 turns it on. The stream owes it. */
+		{
+			QVector<quint32> large;
+			if ( !chunk && CellFarHide::largeRefsWanted() ) {
+				int missing = 0, persist = 0, farthest = 0;
+				for ( const LargeRef::Row & lr : LargeRef::outside( world.largeRefRows(), x0, y0, x1, y1 ) ) {
+					EsmRefr r;
+					bool pers = false;
+					if ( seenRefs.contains( lr.ref ) )
+						continue;
+					if ( !world.refrByForm( lr.ref, lr.rx, lr.ry, r, &pers ) ) {
+						missing++;
+						continue;
+					}
+					seenRefs.insert( r.formID );
+#ifdef ESM_HAS_CELL_FIELDS
+					if ( !enableFacts.contains( r.formID ) )
+						enableFacts.insert( r.formID, EnableFact{ r.initiallyDisabled, r.enableParent, r.enableParentOpposite } );
+#endif
+					const int cx = int( std::floor( r.pos[0] / CELL_UNITS ) );
+					const int cy = int( std::floor( r.pos[1] / CELL_UNITS ) );
+					farthest = std::max( farthest, std::max( std::max( x0 - cx, cx - x1 ), std::max( y0 - cy, cy - y1 ) ) );
+					persist += pers ? 1 : 0;
+					pushRefr( r, cx, cy, pers );
+					large << r.formID;
+				}
+				fprintf( stderr, "cell large refs: %d drawn full outside the block (%d persistent), farthest %d cells; "
+					"%d listed refs not found; %d RNAM rows in the world\n", int( large.size() ), persist, farthest, missing,
+					int( world.largeRefRows().size() ) );
+			}
+			if ( !chunk )
+				CellFarHide::setExtraRefs( nif, large );
 		}
 		// lane GAPLOOK2: outdoor actors, as the interior's (not REFRs: their own census line)
 		for ( const EsmRefr & r : actorRefs )

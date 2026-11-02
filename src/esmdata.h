@@ -21,6 +21,9 @@ BSD License - see nifskope.h
 #include <QVector>
 
 #include <memory>
+#include <vector>
+
+#include "largeref.h"	// lane GEOLOD1: WRLD RNAM rows
 
 class ESMFile;
 
@@ -565,6 +568,10 @@ public:
 	quint32 cellForm( int cx, int cy ) const;
 	//! The worldspace's persistent-cell REFRs, grid-filtered by world position.
 	QVector<EsmRefr> persistentRefrsIn( float minX, float minY, float maxX, float maxY ) const;
+	//! lane GEOLOD1: the WRLD's RNAM large-ref rows (load-order form ids), as read (red WW_CELL_LARGEREFS_RED=xy: X,Y order)
+	const std::vector<LargeRef::Row> & largeRefRows() const { return largeRows; }
+	//! lane GEOLOD1: one REFR of cell (cx, cy) or of the persistent cell by form id; false when neither holds it
+	bool refrByForm( quint32 formID, int cx, int cy, EsmRefr & out, bool * persistent = nullptr ) const;
 	//! lane CELLSPAWN1: a base form's OBND (object bounds, base-local units), false when it has none
 	bool objectBounds( quint32 baseForm, float lo[3], float hi[3] ) const;
 	//! lane CELLSPAWN1: the REFR `doorRef`'s XTEL arrival point (where the game puts the player who uses the
@@ -724,6 +731,8 @@ private:
 	EsmInteriorCell interiorCell;           //!< lane PRTP1
 	QVector<quint32> interiorGroups;        //!< its type-6 groups, load order
 	mutable QHash<quint32, EsmLight> lightCache;
+	std::vector<LargeRef::Row> largeRows;   //!< lane GEOLOD1
+	mutable QHash<QPair<int, int>, QVector<EsmRefr>> refrCellCache;   //!< lane GEOLOD1: refrByForm's cells
 
 	void indexWorldspace();
 	QVector<EsmRefr> refrsInGroup( quint32 groupID ) const;

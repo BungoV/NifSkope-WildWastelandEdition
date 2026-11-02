@@ -2039,6 +2039,33 @@ static int farHideCensus( NifModel & nif, const QVector<std::array<int, 4>> & lo
 				cells.insert( CellFarHide::cellKey( x, y ) );
 				CellFarHide::setCell( &nif, x, y, true, refs );
 			}
+		/* lane GEOLOD1 (LARGEREF1, WW_CELL_LARGEREFS=1): the large refs the loaded cells list and that stand outside
+		 * them, fetched where RNAM says (their cell, else the persistent cell), hidden from the far rows as the fixed
+		 * open does. lrDrawn = far rows of such a ref still drawn: must be 0 (red nohide); lrMissing = listed refs
+		 * not found where RNAM says: must be 0 (red xy). */
+		QSet<quint32> large;
+		int lrMissing = 0, lrPersist = 0, lrFar = 0;
+		const bool lrOn = CellFarHide::largeRefsWanted();
+		if ( lrOn ) {
+			QVector<quint32> lv;
+			for ( const LargeRef::Row & lr : LargeRef::outside( world.largeRefRows(), L[0], L[1], L[2], L[3] ) ) {
+				EsmRefr r;
+				bool pers = false;
+				if ( listed.contains( lr.ref ) )
+					continue;
+				if ( !world.refrByForm( lr.ref, lr.rx, lr.ry, r, &pers ) ) {
+					lrMissing++;
+					continue;
+				}
+				const int cx = int( std::floor( r.pos[0] / 4096.0f ) ), cy = int( std::floor( r.pos[1] / 4096.0f ) );
+				lrFar = std::max( lrFar, std::max( std::max( L[0] - cx, cx - L[2] ), std::max( L[1] - cy, cy - L[3] ) ) );
+				lrPersist += pers ? 1 : 0;
+				large.insert( r.formID );
+				lv << r.formID;
+			}
+			CellFarHide::setExtraRefs( &nif, lv );
+		}
+		qint64 lrRows = 0, lrDrawn = 0;
 		qint64 rows = 0, hidden = 0, dbl = 0, noref = 0, reach = 0, hidOut = 0, trisAll = 0, trisDrawn = 0, viewRows = 0;
 		int keyed = 0, hidShapes = 0;
 		for ( const Inst & in : insts ) {
@@ -2061,6 +2088,10 @@ static int farHideCensus( NifModel & nif, const QVector<std::array<int, 4>> & lo
 				rows++;
 				const bool in5 = cells.contains( d.rowCell[i] );
 				const quint32 ref = i < d.rowRef.size() ? d.rowRef[i] : 0u;
+				if ( ref && large.contains( ref ) ) {
+					lrRows++;
+					lrDrawn += vis[size_t( i )] ? 1 : 0;
+				}
 				if ( !vis[size_t( i )] ) {
 					hidden++;
 					hidOut += in5 ? 0 : 1;
@@ -2091,8 +2122,14 @@ static int farHideCensus( NifModel & nif, const QVector<std::array<int, 4>> & lo
 					int( std::floor( c[1] / 4096.0f ) ) ) ) ? 1 : 0;
 			}
 		}
+		const bool lrPass = !lrOn || ( !large.isEmpty() && lrDrawn == 0 && lrMissing == 0 );
 		const bool pass = rows + flatAll > 0 && dbl == 0 && noref == 0 && flatIn == 0 && viewRows + hidden == rows
-			&& keyed == hidShapes;
+			&& keyed == hidShapes && lrPass;
+		if ( lrOn )
+			out << QString( "farhide large refs step %1: %2 drawn full outside the loaded cells (%3 persistent), farthest %4 "
+				"cells; %5 not found where RNAM says; far rows of them %6, still drawn %7 -- %8\n" )
+				.arg( s ).arg( large.size() ).arg( lrPersist ).arg( lrFar ).arg( lrMissing ).arg( lrRows ).arg( lrDrawn )
+				.arg( lrPass ? "PASS" : "FAIL" );
 		fails += pass ? 0 : 1;
 		out << QString( "farhide step %1 loaded %2,%3..%4,%5 mode %6: %7 refs listed; rows %8, hidden %9 (%10 standing "
 			"outside the loaded cells); drawn in the loaded cells: double %11, noref %12, reach %13 (owner not loaded); "
