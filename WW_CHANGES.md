@@ -1,3 +1,23 @@
+## LAND1102 F (2026-11-02): the cell air's sun shadow, beads, interior E and sky visibility (MUSGI1, SHAFTS1, AIRBEAD1, DARKAIR1)
+
+Four lanes landed in batch F without an entry of their own; their numbers are from their commit bodies.
+- MUSGI1 (658e8902): under WW_CELL_FOGLEAK a sunlit interior's air takes the read's own E / pi, as its surfaces do
+  (the open-field ratio, clamped at 2, pinned ConcordMuseum01's lamp- and moon-lit air to twice the sky ambient: a flat
+  veil). Red WW_CELL_AIR_RED=intratio keeps the ratio. Census: `fogleak=... intenv=`.
+- SHAFTS1 (123f4c73, bf1c42a2): the air's sun shadow takes one hardware-compared bilinear PCF tap (cell_volair.frag
+  airCsmVogel, volSunTap, default on) instead of the surfaces' 32-tap Vogel disc; the froxel columns already low-pass it.
+  Red WW_CELL_AIR_SHADOW_RED=soft = the disc (census `sunread=air(soft red)`). Gate tests/shafts/shafts_check.py: Z red ==
+  base 3af8c3a4 bit for bit; S gradient 0.759 Low (bar 0.72), 0.911 Medium (bar 0.85), red 0.647 / 0.752 fails; C sun-only
+  inject -0.474 ms at 160x90x64, -0.794 ms at 240x135x64.
+- AIRBEAD1 (1b07aba5): WW_CELL_AIR_SHADOW=bead reads the shadow at each sub-step's 1/4 and 3/4 points (thin beams no longer
+  beaded along the slice grid). Gate B radial roughness x0.814 at 12 px, x0.734 at 8 px; cost on +0.041 / +0.070 ms (Low /
+  Medium) over the +0.05 bar, so it ships OFF (shipped +0.018 / +0.024, output identical to bf1c42a2). Gate 7 of 7.
+- DARKAIR1 (0f090130): opt-in loader define WW_CELL_AIR_SKYVIEW=1 (like WW_CELL_FOGLEAK): outdoors the weather ambient in
+  the air is scaled by the sky the RTDDGI volume sees up from the froxel (cell_volair.frag airSkyView); off binaries equal
+  base but the source hash. Red WW_CELL_AIR_RED=openenv. Census `envocc=off|sky|red(open)`. Offline shaded-vs-lit froxel
+  contrast x1.72 (Concord Foggy noon), street lit air -31 % (so not default); gate tests/darkair/darkair_check.py 6/6;
+  +0.38 ms inject.
+
 ## BUGS1102B round 2 (2026-11-02): preset table row for Rain wetness
 
 - src/ui/cellpresettable.h gains CellWorkspaceLook_WW_CELL_RAINWET (off at every preset, no ms): FO76WEATHER1's
