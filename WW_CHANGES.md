@@ -1,3 +1,15 @@
+## SKINSSS2 (2026-11-02): cell facegen eyes get the cornea coat (EYECORNEA-CELL)
+
+The cell view's characters draw their eyes from the facegen heads, and the Eye cornea row (EYECORNEA1) never reached
+them. A census of the vanilla facegen heads (1094 FaceGeom NIFs) found no eye shape of Shader Type 16 and none with the
+Eye_Environment_Mapping flag: the eyes are Shader Type 1 (EnvironmentMap) with no BGSM, the same type and flags as the
+synth head rear. The eye cube in texture slot 4 tells them apart (eyecubemap.dds; the supermutants' mipblur_eye1.dds).
+src/wwfacegeneye.h holds the rule: a type-1 source shape with no BGSM and an eye cube carries type 16. Its cell bucket
+keeps that type (as HAIRDLC04's face, skin and hair do), the writer tags the shader, and the renderer's eye gate reads
+the carried type. Census: 1059 eyes tagged, 19 synth rear shapes left alone. Red `WW_CELL_EYEST_RED=1`: eyes keep type 1
+(the old cell picture). tests/eyecornea checks the rule against the census and pins the four hunks; its
+WWFACEGENEYE_RED and the base text must fail. The NIF view is not changed.
+
 ## SKINSSS1 (2026-11-02): skin subsurface scattering in the cell view (row Skin subsurface, ships off)
 
 A new look row, Skin subsurface (`WW_CELL_SKINSSS`, QSettings WW/CellSkinSubsurface, off), ports FO4CS's separable

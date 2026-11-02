@@ -2622,7 +2622,8 @@ bool Renderer::setupProgramCE1( const NifModel * nif, Program * prog, Shape * me
 					const ShaderMaterial *	bgsm = ( mat && mat->isShaderMaterial() ) ? static_cast< ShaderMaterial * >( mat ) : nullptr;
 					const bool	hair = ( bgsm && bgsm->bHair ) || lsp->isST( ShaderFlags::ST_HairTint )
 						|| lsp->wwSrcShaderType == int( ShaderFlags::ST_HairTint );	// lane HAIRDLC04: cell facegen hair
-					const bool	eye = ( bgsm && bgsm->bEnvironmentMappingEye ) || lsp->isST( ShaderFlags::ST_EyeEnvmap );
+					const bool	eye = ( bgsm && bgsm->bEnvironmentMappingEye ) || lsp->isST( ShaderFlags::ST_EyeEnvmap )
+						|| lsp->wwSrcShaderType == int( ShaderFlags::ST_EyeEnvmap );	// lane SKINSSS2: cell facegen eyes
 					if ( prog->uniLocation( "wwHairOn" ) >= 0 )
 						prog->uni1b( "wwHairOn", hair );
 					if ( prog->uniLocation( "wwEyeOn" ) >= 0 )

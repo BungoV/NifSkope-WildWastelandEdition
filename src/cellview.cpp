@@ -3854,7 +3854,8 @@ static bool cellBuild( NifModel * nif, const CellSceneSpec & specAsked, CellChun
 		const quint32 decalBits = ( effect || inlineFx || refract || fxdNoFlag ) ? 0U : ( s.shaderSF1 & 0x0C000000U );
 		const QString keyD0 = decalBits ? key + QStringLiteral( "|D%1" ).arg( decalBits ) : key;
 		// lane HAIRDLC04: face / skin / hair sources keep their own bucket, so the shader can carry the type
-		const quint32 srcSt = ( s.srcShaderType >= 4u && s.srcShaderType <= 6u ) ? s.srcShaderType : 0u;
+		// lane SKINSSS2: and a facegen eye (16, src/wwfacegeneye.h)
+		const quint32 srcSt = ( ( s.srcShaderType >= 4u && s.srcShaderType <= 6u ) || s.srcShaderType == 16u ) ? s.srcShaderType : 0u;
 		const QString keyD = srcSt ? keyD0 + QStringLiteral( "|T%1" ).arg( srcSt ) : keyD0;
 		decalFlagShapes += decalBits ? 1 : 0;
 		auto it = buckets.find( keyD );

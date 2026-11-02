@@ -12,6 +12,7 @@ BSD License - see nifskope.h
 #include "lodgengpu.h"
 #include "lodgenao.h"
 #include "cellspeed.h"
+#include "wwfacegeneye.h"	// lane SKINSSS2: the facegen eye rule
 
 #include <QMutex>
 #include <QWaitCondition>
@@ -2751,6 +2752,10 @@ const QVector<LodSrcShape> & lodgenLoadModel( const QString & dataRoot,
 							nf.textures.append( src.get<QString>( src.getIndex( iArr, t ) ) );
 					}
 				}
+				// lane SKINSSS2: a facegen eye (type 1, no BGSM, eye cube in slot 4) carries type 16 (red WW_CELL_EYEST_RED=1)
+				if ( s.srcShaderType == 1u && nf.textures.size() > 4 && wwEnv( "WW_CELL_EYEST_RED" ).trimmed() != "1" )
+					s.srcShaderType = wwFacegenSrcType( 1u, s.matName.endsWith( QStringLiteral( ".bgsm" ), Qt::CaseInsensitive ),
+						nf.textures.at( 4 ).toLatin1().constData() );
 				/* A BGSM wins over the texture set, as the renderer's
 				 * fileName() has it: its textures where it names them, its
 				 * constants always; the specular slot only while it enables
