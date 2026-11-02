@@ -69,7 +69,7 @@ declare -A CAM=( [rev1]="23300 -9700 745 22300 -10150 800 55" [memden]="22600 -1
 declare -A WEA=( [rev1]=CommonwealthFoggy [memden]=CommonwealthClear )
 declare -A HOUR=( [rev1]=18 [memden]=22 )
 ESM="X:/Programs/Steam/steamapps/common/Fallout 4/Data/Fallout4.esm"
-PROF="$NOTES/allon2/shots/profile.txt"
+PROF="${PROF:-$NOTES/allon2/shots/profile_elfx.txt}"
 PLUGINS="$(grep -E '^plugin [0-9]+: ' "$PROF" | sed 's/^plugin [0-9]*: //' | tr -d '\r' | paste -sd, -)"
 RES="$(grep -E '^resource [0-9]+: ' "$PROF" | sed 's/^resource [0-9]*: //' | tr -d '\r' | paste -sd';' -)"
 BD="$NOTES/neongi1/bake_veil"
