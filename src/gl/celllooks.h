@@ -71,6 +71,7 @@ enum class WwLook : int
 	FarLodSky,			// FIX1101A lodch: far objects' ambient takes the bake's per-vertex sky, ships ON (WW_LODL_SKY; red WW_LODL_SKY_RED)
 	Vrs,				// PERFFIX4: variable rate shading of the opaque + sorted passes from last frame's picture (WW_CELL_VRS)
 	ObjectFade,			// OBJFADE1: placed refs fade out per class (objects, items, actors), the game's LOD rule (WW_CELL_OBJFADE)
+	RainWet,			// FO76WEATHER1: rain wets every material, Fallout 76's porosity law (WW_CELL_RAINWET; gl/cellprecip.h)
 	Count
 };
 

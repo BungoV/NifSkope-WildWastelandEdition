@@ -235,6 +235,7 @@ HEADERS += \
 	src/gl/skyplacerun.h \
 	src/gl/cellsunlit.h \
 	src/gl/preciproof.h \
+	src/gl/rainwetlaw.h \
 	src/gl/skydisc.h \
 	src/gl/fxparity.h \
 	src/gl/fxparityrules.h \
