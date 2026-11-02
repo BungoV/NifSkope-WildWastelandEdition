@@ -63,6 +63,9 @@ uniform vec2 volSurfPx;			// the main viewport's pixels a froxel column (x, y)
 uniform bool volSurfRed;		// red drop: each walk leaves out its first light
 uniform vec4 volMs;				// lane GAPLOOK1 (FOGEXTRAS): the sun's scattering octaves a, b, c, w 1 = shadows lift (x 0: off)
 uniform vec4 volMsLamp;		// lane AIRMS1 (AIR-MS-LAMPS): the lamps' orders >= 2: K0, K1, a, s (x 0: off; src/gl/airmslamp.h)
+#ifdef WW_CELL_AIR_BOUNCE
+uniform vec4 volGndLamp;		// lane AIRBOUNCE1 (AIR-LAMPS-BOUNCE): the lamps' floor bounce: K a, m, sb, floor depth (x 0: red; src/gl/airbouncelamp.h)
+#endif
 uniform bool volMsMedium;		// lane GLAREBLOW1: a = min(volMs.x, the air's re-scatter chance) (red WW_CELL_GLAREBLOW_RED=off: volMs.x)
 // lane FOGDRIFT1 (cellvolair.h): x amp / span (0: smooth air), y the fade's start, z 1 / its length, w the noise's mean
 uniform vec4 volDrift;
@@ -488,6 +491,30 @@ vec3 airLampMs( float c, float od )
 	return max( volMsLamp.x + volMsLamp.y * volGi.w, 0.0 ) * od * exp( -volMsLamp.z * od ) * ph;
 }
 
+#ifdef WW_CELL_AIR_BOUNCE
+/* lane AIRBOUNCE1 (AIR-LAMPS-BOUNCE): a placed light's light bounced off the floor, over its e: the lit floor as a source
+ * at the lamp's image (hl under the floor), pi B = K a (1 + m sigma D) 2 cos pi P2(c_s) (d / D)^2, P2 the phase with
+ * each HG g x sb, fitted to a Monte Carlo of a lamp over a Lambertian floor (notes/airbounce1). CPU twin:
+ * src/gl/airbouncelamp.h (tests/airbouncelamp). The floor: the terrain grid's, else volGndLamp.w under the lamp. Only
+ * in the loader's WW_CELL_AIR_BOUNCE program (WW_CELL_AIR_BOUNCE_LAMPS=1): the off program is the base's. */
+float airGndK = 1.0;	// 1 - the ray-traced volume's cover of the env share (where it covers, it holds the bounce already)
+float airGndZ( vec3 L )
+{
+	return airTerrOn != 0 ? airTerrH( L.xy ) : L.z - volGndLamp.w;
+}
+vec3 airLampGnd( vec3 L, float hf, vec3 Pk, vec3 dW, float d, float od )
+{
+	float hl = L.z - hf, hx = Pk.z - hf;
+	if ( hl <= 0.0 || hx < 0.0 )
+		return vec3( 0.0 );
+	vec3 v = vec3( L.xy, hf - hl ) - Pk;
+	float D2 = dot( v, v ), D = sqrt( D2 ), c = dot( v, dW ) / D;
+	vec3 ph = PI * ( volPhase[0].rgb * ( 3.0 / ( 16.0 * PI ) ) * ( 1.0 + c * c )
+		+ volPhase[1].rgb * volHg( c, volPhase[1].w * volGndLamp.z ) + volPhase[2].rgb * volHg( c, volPhase[2].w * volGndLamp.z ) );
+	return volGndLamp.x * ( 1.0 + volGndLamp.y * ( od / d ) * D ) * 2.0 * ( ( hx + hl ) / D ) * ph * ( d * d / D2 );
+}
+#endif
+
 /* lane PERFFIX3: the sun's visibility for one air sample. The surfaces' read (wwSunShadow) evaluates its Vogel disc
  * (8..48 taps) with a cos, a sin and a sqrt per tap, rotated per point: offline that trigonometry, not the fetches, was
  * most of the inject's sun cost (tests/airsun: 32 taps 1.33 ms, the same disc from literal offsets 0.49 ms at 160x90x64).
@@ -666,6 +693,20 @@ vec3 airRest( vec3 posView, vec3 dirView, float z, float sA, float sB, out vec3 
 	float zOff = z - P.z;	// the fog's height frame minus world z
 	vec3 Dw = cellWorldPos( dirView * ( 1.0 / fogDistScale ) ) - cellWorldPos( vec3( 0.0 ) );	// world per game unit along the ray
 	vec3 Pl = P - volLightShift;	// gates only: the lights moved (0 otherwise)
+#ifdef WW_CELL_AIR_BOUNCE
+	// lane AIRBOUNCE1: the leak walk and the env terms' flags before the lamps, so their bounce takes 1 - the volume's
+	// env cover (airLightsQ too, after this call)
+#ifdef WW_AIR_LEAK
+	float leakFade;
+	vec3 Jddgi = airLeakEnv( P, dW, leakFade );	// lane FOGLEAK1 fixes 1 + 2 (also sets airLeakSun)
+#endif
+	bool wantGi = ( volTerms & 4 ) != 0 && cellGiOn && ( volRed & 2 ) == 0;
+	bool ambDalc = cellInterior ? cellHasDalc : cellExtDalc;
+	bool wantAmb = ( volTerms & 8 ) != 0 && ambDalc && !( cellInterior && cellGiAmb == 2 );
+#ifdef WW_AIR_LEAK
+	airGndK = wantAmb && ( volLeakRed & 1 ) == 0 ? 1.0 - leakFade : 1.0;
+#endif
+#endif
 	if ( ( volTerms & 2 ) != 0 && lights && ( volRed & 16 ) == 0 ) {
 		// clustered: only the lights whose sphere can reach this cluster, in the same ascending order (a light left out
 		// would add exactly nothing below: d >= radius)
@@ -717,6 +758,9 @@ vec3 airRest( vec3 posView, vec3 dirView, float z, float sA, float sB, out vec3 
 			if ( s1 <= s0 )
 				continue;
 			vec3 Ji = vec3( 0.0 );
+#ifdef WW_CELL_AIR_BOUNCE
+			float hf = volGndLamp.x > 0.0 ? airGndZ( t0.xyz ) : 0.0;	// lane AIRBOUNCE1
+#endif
 			for ( int k = 0; k < 4; k++ ) {
 				vec3 Pk = Pl + Dw * mix( s0, s1, ( float( k ) + 0.5 ) * 0.25 );
 				float d = length( t0.xyz - Pk );
@@ -731,6 +775,10 @@ vec3 airRest( vec3 posView, vec3 dirView, float z, float sA, float sB, out vec3 
 				Ji += e * exp( -od ) * volPhasePi( c );
 				if ( volMsLamp.x > 0.0 )
 					Ji += e * airLampMs( c, od );
+#ifdef WW_CELL_AIR_BOUNCE
+				if ( volGndLamp.x > 0.0 )
+					Ji += e * airLampGnd( t0.xyz, hf, Pk, dW, d, od ) * airGndK;
+#endif
 			}
 #ifdef WW_AIR_LEAK
 			if ( any( greaterThan( Ji, vec3( 0.0 ) ) ) )	// lane FOGLEAK1 fix 3
@@ -739,6 +787,7 @@ vec3 airRest( vec3 posView, vec3 dirView, float z, float sA, float sB, out vec3 
 			J += Ji * ( 0.25 * ( s1 - s0 ) / max( sB - sA, 1e-6 ) );
 		}
 	}
+#ifndef WW_CELL_AIR_BOUNCE
 #ifdef WW_AIR_LEAK
 	float leakFade;
 	vec3 Jddgi = airLeakEnv( P, dW, leakFade );	// lane FOGLEAK1 fixes 1 + 2 (also sets airLeakSun)
@@ -746,6 +795,7 @@ vec3 airRest( vec3 posView, vec3 dirView, float z, float sA, float sB, out vec3 
 	bool wantGi = ( volTerms & 4 ) != 0 && cellGiOn && ( volRed & 2 ) == 0;
 	bool ambDalc = cellInterior ? cellHasDalc : cellExtDalc;
 	bool wantAmb = ( volTerms & 8 ) != 0 && ambDalc && !( cellInterior && cellGiAmb == 2 );
+#endif
 	if ( !wantGi && !wantAmb )
 		return J;
 	vec3 E[6];
@@ -830,6 +880,9 @@ void airLightsQ( vec3 posView, vec3 dirView, float z, float sA, float sB, int ne
 #ifdef WW_AIR_LEAK
 		share *= airLeakLightK( i, P, t0.xyz + volLightShift );	// lane FOGLEAK1 fix 3
 #endif
+#ifdef WW_CELL_AIR_BOUNCE
+		float hf = volGndLamp.x > 0.0 ? airGndZ( t0.xyz ) : 0.0;	// lane AIRBOUNCE1
+#endif
 		for ( int k = 0; k < 4; k++ ) {
 			if ( ( need & ( 1 << k ) ) == 0 )
 				continue;
@@ -846,6 +899,10 @@ void airLightsQ( vec3 posView, vec3 dirView, float z, float sA, float sB, int ne
 			Jq[k] += e * exp( -od ) * volPhasePi( c ) * share;
 			if ( volMsLamp.x > 0.0 )
 				Jq[k] += e * airLampMs( c, od ) * share;
+#ifdef WW_CELL_AIR_BOUNCE
+			if ( volGndLamp.x > 0.0 )
+				Jq[k] += e * airLampGnd( t0.xyz, hf, Pk, dW, d, od ) * ( share * airGndK );
+#endif
 		}
 	}
 }

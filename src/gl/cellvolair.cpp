@@ -8,6 +8,7 @@ BSD License - see nifskope.h
 #include "wwswitch.h"	// lane TESTDRIVER1: the WW_* switch store
 #include "cellunits.h"
 
+#include "gl/airbouncelamp.h"	// lane AIRBOUNCE1: the lamps' floor-bounce law
 #include "gl/airmslamp.h"	// lane AIRMS1: the lamps' multiple-scattering law
 #include "gl/atmomath.h"	// lane CLOUD6e: kUnitKm, the cloud map's units
 #include "gl/cellairzone.h"	// lane AIRZONE1: the hand-placed volumes' fog and particle blocks
@@ -1057,6 +1058,12 @@ bool wwFogLeakShaderDefine()
 	return wwEnv( "WW_CELL_FOGLEAK" ).trimmed() == "1";
 }
 
+// lane AIRBOUNCE1: the lamps' floor bounce in the air (src/gl/glcontext.cpp injects WW_CELL_AIR_BOUNCE; read per load)
+bool wwAirBounceShaderDefine()
+{
+	return wwEnv( "WW_CELL_AIR_BOUNCE_LAMPS" ).trimmed() == "1";
+}
+
 bool wwVolAirWantsSettle()
 {
 	VaState & s = vs();
@@ -1998,6 +2005,13 @@ static void vaPassInner( Scene * scene, bool run )
 	const bool msLampRed = msLampOn && wwEnvStr( "WW_CELL_AIR_MS_LAMPS_RED" ) == QLatin1String( "off" );
 	prog->uni4f( "volMsLamp", msLampOn && !msLampRed ? FloatVector4( airmslamp::kK0, airmslamp::kK1, airmslamp::kA, airmslamp::kS )
 		: FloatVector4( 0.0f, 0.0f, 0.0f, 0.0f ) );
+	// lane AIRBOUNCE1 (AIR-LAMPS-BOUNCE): the placed lights' floor bounce (WW_CELL_AIR_BOUNCE_LAMPS=1, off by default: the
+	// loader's WW_CELL_AIR_BOUNCE program holds the term, the off program is the base's); red off: the term 0
+	const bool gndLampOn = wwAirBounceShaderDefine();
+	const bool gndLampRed = gndLampOn && wwEnvStr( "WW_CELL_AIR_BOUNCE_LAMPS_RED" ) == QLatin1String( "off" );
+	prog->uni4f( "volGndLamp", gndLampOn && !gndLampRed
+		? FloatVector4( airbouncelamp::kK * airbouncelamp::kAlbedo, airbouncelamp::kM, airbouncelamp::kSb, airbouncelamp::kFloor )
+		: FloatVector4( 0.0f, 0.0f, 0.0f, 0.0f ) );
 	if ( !surfCl && ( s.opt & 1 ) && g.optUnitsOk && ( s.terms & 2 ) && !( s.red & 16 ) && uniI( "cellOn" ) ) {
 		const std::vector<float> * sp = wwCellLightSpheres( scene );
 		const int nL = uniI( "cellLightCount" );
@@ -2369,7 +2383,7 @@ static void vaPassInner( Scene * scene, bool run )
 		ms = double( timer.nsecsElapsed() ) / 1.0e6;
 	}
 	s.last = QStringLiteral( "on(%1x%2x%3 near=%4 far=%5 sigma0=%6 zb=%7 H=%8 top=%9 phase=%10 tint=%11,%12,%13 lights=%14 "
-		"gi=%15 csm=%16 terms=%17 red=%18 ms=%19 octaves=%20 lampms=%21)" )
+		"gi=%15 csm=%16 terms=%17 red=%18 ms=%19 octaves=%20 lampms=%21 lampgnd=%22)" )
 		.arg( cols ).arg( rows ).arg( kSlices ).arg( double( nearD ), 0, 'f', 1 ).arg( double( farD ), 0, 'f', 1 )
 		.arg( double( M.sigma0 ), 0, 'g', 6 ).arg( double( M.zb ), 0, 'f', 1 )
 		.arg( M.invH > 0.0f ? QString::number( double( 1.0f / M.invH ), 'f', 1 ) : QStringLiteral( "uniform" ) )
@@ -2377,7 +2391,8 @@ static void vaPassInner( Scene * scene, bool run )
 		.arg( double( ph.gi[0] ), 0, 'f', 4 ).arg( double( ph.gi[1] ), 0, 'f', 4 ).arg( double( ph.gi[2] ), 0, 'f', 4 )
 		.arg( cellLightCountV ).arg( cellGiOnV ).arg( csm ? 1 : 0 ).arg( s.terms ).arg( s.red ).arg( ms, 0, 'f', 3 )
 		.arg( !wwLookOn( WwLook::AirMultiScatter ) ? QStringLiteral( "off" ) : msMedium ? QStringLiteral( "medium" ) : QStringLiteral( "half(red)" ) )
-		.arg( !msLampOn ? QStringLiteral( "off" ) : msLampRed ? QStringLiteral( "off(red)" ) : QStringLiteral( "on" ) );
+		.arg( !msLampOn ? QStringLiteral( "off" ) : msLampRed ? QStringLiteral( "off(red)" ) : QStringLiteral( "on" ) )
+		.arg( !gndLampOn ? QStringLiteral( "off" ) : gndLampRed ? QStringLiteral( "off(red)" ) : QStringLiteral( "on" ) );
 	// the optimisation's echo: the mode, the clusters (all / non-empty / mean list over the non-empty), the CPU build,
 	// the depth skip (0 off, 1 on, 2 the red)
 	const QString optNote = QStringLiteral( "opt=%1 clusters=%2 nonempty=%3 meanlist=%4 buildms=%5 depthskip=%6 zsource=%7 farclamp=%8 temporal=%9" )
