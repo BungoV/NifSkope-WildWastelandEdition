@@ -49,6 +49,15 @@ single-run shapes are faded whole.
   (floor 50 %), Ultra hides nothing within 4.9k u at FOV 60..100; the red `-DOBJFADE_RED` fails the floor).
 - Not done (rows owed): the switch's memory and time ramp, the location actor fade multiplier, visible-when-distant
   refs as large refs, carried lights as items, the shadow casters.
+## FRAMEFMT1 (GFXR-FRAME G2, 2026-11-02): the cell's linear HDR frame is RGBA16F by default
+
+The multisampled linear frame (src/gl/cellhdr.cpp) is now RGBA16F instead of RGBA32F: half the bytes on every
+full-frame touch (63 MB instead of 127 MB colour at 1080p 4x). The copies resolved from it follow its format, since a
+multisampled resolve needs equal formats: the water refraction copy (glscene.cpp), the SSR previous frame (cellssr.cpp)
+and the WW_CELL_HDR_DUMP gate target. The rule is a pure header (src/gl/cellhdrformat.h, tests/framefmt/run.sh: green
+passes, the old rule as red fails). `WW_CELL_HDR_FORMAT=rgba32f` asks for the old frame; the reds `WW_FRAMEFMT1_RED=1`,
+`WW_CELL_HDR_FORMAT_RED=1` and `WW_AAFORMAT1_RED=1` force RGBA32F everywhere, as before. The air volumes were already
+RGBA16F (PERFFIX3); their slices and the running integrate stay RGBA32F (transmittance precision).
 
 ## REFLPROBECLI1 (TOOLS1101, 2026-11-01): count the reflection probes' below-horizon misses without a window
 

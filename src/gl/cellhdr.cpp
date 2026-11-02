@@ -5,6 +5,7 @@
 #include "gl/atmosphere.h"	// lane SKYA (EXPO1): the sky in the exposure's mean
 #include "gl/cellbloom.h"
 #include "gl/cellfogbloom.h"
+#include "gl/cellhdrformat.h"	// lane FRAMEFMT1: the frame's format rule (pure; tests/framefmt)
 #include "gl/celllights.h"
 #include "gl/cellssr.h"
 #include "gl/celluniform.h"	// lane CELLUNI4: the known state the frame end's passes take
@@ -45,30 +46,19 @@ bool stexOn()
 	return on;
 }
 
-/* lane AAFORMAT1 (study, default RGBA32F): WW_CELL_HDR_FORMAT=rgba16f | r11g11b10f picks the linear frame's format.
+/* lane AAFORMAT1 (study): WW_CELL_HDR_FORMAT=rgba32f | rgba16f | r11g11b10f picks the linear frame's format.
  * r11g11b10f has no alpha (the effects over the sky lose their coverage): a cost arm, never a default.
- * WW_CELL_HDR_FORMAT_RED=1 / WW_AAFORMAT1_RED=1: RGBA32F whatever was asked. */
-struct HdrFormat
-{
-	GLenum gl = GL_RGBA32F;
-	int bytes = 16;
-	const char * name = "rgba32f";
-	bool red = false;
-};
+ * lane FRAMEFMT1: the default is RGBA16F (gl/cellhdrformat.h); WW_FRAMEFMT1_RED=1 / WW_CELL_HDR_FORMAT_RED=1 /
+ * WW_AAFORMAT1_RED=1: RGBA32F whatever was asked (the frame and every copy that follows it, as before). */
+using HdrFormat = WwHdrFormatRule;
+static_assert( GL_RGBA16F == 0x881A && GL_RGBA32F == 0x8814 && GL_R11F_G11F_B10F == 0x8C3A, "cellhdrformat.h's GL enums" );
 const HdrFormat & hdrFormat()
 {
 	WW_SWITCH_STATIC( HdrFormat, f, [] {	// lane LIVESET1: a live set makes the frame's colour target again (HdrGpu.colorFormat)
-		HdrFormat h;
 		const QByteArray v = qgetenv( "WW_CELL_HDR_FORMAT" ).trimmed().toLower();
-		h.red = qEnvironmentVariableIntValue( "WW_CELL_HDR_FORMAT_RED" ) != 0 || qEnvironmentVariableIntValue( "WW_AAFORMAT1_RED" ) != 0;
-		if ( h.red )
-			return h;
-		if ( v == "rgba16f" ) {
-			h.gl = GL_RGBA16F; h.bytes = 8; h.name = "rgba16f";
-		} else if ( v == "r11g11b10f" ) {
-			h.gl = GL_R11F_G11F_B10F; h.bytes = 4; h.name = "r11g11b10f";
-		}
-		return h;
+		const bool red = qEnvironmentVariableIntValue( "WW_FRAMEFMT1_RED" ) != 0
+			|| qEnvironmentVariableIntValue( "WW_CELL_HDR_FORMAT_RED" ) != 0 || qEnvironmentVariableIntValue( "WW_AAFORMAT1_RED" ) != 0;
+		return wwHdrFormatOf( v.isEmpty() ? nullptr : v.constData(), red );
 	}() );
 	return f;
 }
@@ -742,6 +732,11 @@ QString wwCellHdrEcho()
 	return hst().last;
 }
 
+unsigned int wwCellHdrColorFormat()
+{
+	return hdrFormat().gl;
+}
+
 namespace {
 struct DepthMaxGpu
 {
@@ -1091,9 +1086,9 @@ bool wwCellHdrBegin( Scene * scene )
 			fn->glDeleteTextures( 1, &g.color );
 		fn->glGenTextures( 1, &g.color );
 		fn->glBindTexture( GL_TEXTURE_2D_MULTISAMPLE, g.color );
-		/* RGBA32F, not RGBA16F: multisampled additive blending into fp16 rounded differently run to run on identical
-		 * inputs. */
-		const HdrFormat & hf = hdrFormat();	// lane AAFORMAT1: RGBA32F unless a study run asks
+		/* lane FRAMEFMT1: RGBA16F by default (was RGBA32F: SUNCELL1 had seen fp16 additive MSAA blends not repeat run to
+		 * run; the FRAMEFMT1 hold measures f16 against f16 again in one launch). Red WW_FRAMEFMT1_RED=1: RGBA32F. */
+		const HdrFormat & hf = hdrFormat();
 		fn->glTexImage2DMultisample( GL_TEXTURE_2D_MULTISAMPLE, S, hf.gl, W, H, GL_TRUE );
 		g.colorFormat = hf.gl;
 		fn->glBindTexture( GL_TEXTURE_2D_MULTISAMPLE, 0 );
@@ -1242,7 +1237,9 @@ void wwCellHdrEnd( Scene * scene )
 		GLuint tex = 0, fbo = 0;
 		fn->glGenTextures( 1, &tex );
 		fn->glBindTexture( GL_TEXTURE_2D, tex );
-		fn->glTexImage2D( GL_TEXTURE_2D, 0, GL_RGBA32F, s.w, s.h, 0, GL_RGBA, GL_FLOAT, nullptr );
+		// lane FRAMEFMT1: the resolve's target in the frame's own format (a multisampled resolve needs equal formats);
+		// read back as float32 either way
+		fn->glTexImage2D( GL_TEXTURE_2D, 0, GLint( hdrFormat().gl ), s.w, s.h, 0, GL_RGBA, GL_FLOAT, nullptr );
 		fn->glGenFramebuffers( 1, &fbo );
 		fn->glBindFramebuffer( GL_DRAW_FRAMEBUFFER, fbo );
 		fn->glFramebufferTexture2D( GL_DRAW_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, tex, 0 );

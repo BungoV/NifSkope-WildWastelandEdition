@@ -25,6 +25,9 @@ bool wwCellHdrSkyIn();
 //! lane GATEFIX3: the linear frame's depth / stencil format (a GLenum) when `fbo` is its framebuffer, else 0. Its
 //! texture samples stencil (TONEMAP1), so a framebuffer query reads its depth as 0 bits.
 unsigned int wwCellHdrDepthFormat( unsigned int fbo );
+//! lane FRAMEFMT1: the linear frame's colour format (a GLenum; RGBA16F by default, RGBA32F under WW_FRAMEFMT1_RED=1).
+//! A copy resolved from the multisampled frame takes this format (a resolve needs equal formats).
+unsigned int wwCellHdrColorFormat();
 //! Lane VOLAIR1 (gates only, WW_CELL_DRAW_PROBE): after a draw, logs which watched pixels it changed.
 void wwCellDrawProbe( Scene * scene, const QString & what );
 //! lane PERF1: the probe is watching (a caller builds its label only then).
