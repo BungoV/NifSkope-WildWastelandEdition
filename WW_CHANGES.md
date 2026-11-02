@@ -1,3 +1,16 @@
+## STREAMTEX5 (2026-11-02): a leaf's coverage copy is pooled under its noted file (STREAMTEX4-WWCOVKEY)
+- STREAMTEX4's census counted textures as "unnoted" (loaded, never named by a shader property the stream saw), and
+  those escape kTierKeep, so the pool could free them while their cell was loaded. The main source: TREELEAF1/2 bind
+  an alpha-tested base map (leaves, foliage, fences) as the TexCache copy "<file>|wwcov<ref>", while note() gets the
+  plain <file> from the material. The copy was unnoted, and the noted plain name never showed as resident.
+- cellstream.cpp texPoolKey: cellStreamTexLoaded / Freed and the tier lookup (cellStreamTexTiers) strip the
+  "|wwcov<digits>" suffix (gl/streamtexpool.h streamTexCovAt) before the pool lookup. Two copies of one file share its
+  entry (the last load's bytes; the first free marks it gone).
+- Red WW_CELL_STREAMTEX_RED=rawkey: the cache's raw name, as before.
+- Unit: `bash tests/wwcovkey/run.sh <out>` (g++ only): a coverage copy of a noted file is rule Keep (kTierKeep) with
+  0 unnoted; the red reads it unnoted, rule Timer -> WWCOVKEY FAIL. Still never noted (far field / global, tier 1 by
+  design): land LOD chunks, terrain noise and detail normals, water noise.
+
 ## STREAMTEX5 (2026-11-02): the bindless geometry pool has a budget (the walk crash's suspect, bounded)
 - Every stream walk that died in the driver (STREAMTEX2 R1/R2, 10-29: 0xc0000409 in the driver's worker thread) ran
   the old append-only pool, which doubled to 2.4-2.5 GB of vertex/index buffers on top of ~6 GB of textures; the only

@@ -1456,19 +1456,33 @@ void cellStreamTexNote( const NifModel * nif, int block, const QStringList & nam
 			s->texPool.note( cell, n );
 }
 
+// lane STREAMTEX5 (STREAMTEX4-WWCOVKEY): TREELEAF1's "<file>|wwcov<ref>" copy is pooled as <file>, the name note() got;
+// red WW_CELL_STREAMTEX_RED=rawkey: the cache's own name (the copy was unnoted and could go while its cell was loaded)
+static bool texRawKeyRed()
+{
+	WW_SWITCH_STATIC( bool, red, wwEnvStr( "WW_CELL_STREAMTEX_RED" ) == QLatin1String( "rawkey" ) );
+	return red;
+}
+
+static QString texPoolKey( QStringView name )
+{
+	const std::ptrdiff_t at = texRawKeyRed() ? -1 : streamTexCovAt( name.utf16(), std::ptrdiff_t( name.size() ) );
+	return ( at < 0 ? name : name.left( at ) ).toString();
+}
+
 void cellStreamTexLoaded( const NifModel * nif, const QString & name, qint64 bytes )
 {
 	if ( Stream * s = streamFor( nif ) )
-		s->texPool.loaded( name, std::uint64_t( std::max<qint64>( bytes, 0 ) ) );
+		s->texPool.loaded( texPoolKey( name ), std::uint64_t( std::max<qint64>( bytes, 0 ) ) );
 }
 
 void cellStreamTexFreed( const NifModel * nif, const QString & name, bool counted )
 {
 	if ( Stream * s = streamFor( nif ) ) {
 		if ( counted )
-			s->texPool.freed( name );
+			s->texPool.freed( texPoolKey( name ) );
 		else
-			s->texPool.gone( name );
+			s->texPool.gone( texPoolKey( name ) );
 	}
 }
 
@@ -1479,7 +1493,7 @@ std::function<int( QStringView )> cellStreamTexTiers( const NifModel * nif )
 		return nullptr;
 	using Pool = StreamTexPool<QString, QStringStdHash>;
 	return [s]( QStringView name ) {
-		switch ( s->texPool.rule( name.toString() ) ) {
+		switch ( s->texPool.rule( texPoolKey( name ) ) ) {
 		case Pool::Rule::Pool:
 			return 0;	// its cells left
 		case Pool::Rule::Keep:
