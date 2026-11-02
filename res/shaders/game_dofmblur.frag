@@ -33,9 +33,20 @@ vec2 V( vec2 d )	// game texture space -> this view's
 	return vec2( d.x, 1.0 - d.y );
 }
 
+// lane DOFLENS1: the thin-lens composite (twin game_doflensmblur.frag; t2 = the far layer)
+#ifdef WW_DOF_LENS
+#define LENS_FRAME t0
+#define LENS_FAR t2
+#define LENS_DEPTH t3
+#include "game_doflens.glsl"
+#endif
+
 // game_dof.frag's composite at one texel
 vec4 dofTexel( ivec2 p, vec2 size )
 {
+#ifdef WW_DOF_LENS
+	return lensTexel( p );
+#endif
 	vec2 v1 = ( vec2( p ) + 0.5 ) / size;
 	float x = 1.0 - texelFetch( t3, p, 0 ).r;
 	float y = x * dc2.z + dc2.y;
@@ -100,6 +111,9 @@ float tapW( vec2 m, float L )
 
 void main()
 {
+#ifdef WW_DOF_LENS
+	lensS1 = lensFocus( LENS_DEPTH );
+#endif
 	vec2 size = vec2( textureSize( t0, 0 ) );
 	vec2 g = gl_FragCoord.xy / size;
 	vec2 v1 = V( g );

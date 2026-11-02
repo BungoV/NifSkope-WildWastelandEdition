@@ -25,8 +25,21 @@ float sat( float v )	// D3D _sat: NaN -> 0
 	return v >= 0.0 ? min( v, 1.0 ) : 0.0;
 }
 
+// lane DOFLENS1: the thin-lens composite (twin game_doflens.frag; t1 = the far layer)
+#ifdef WW_DOF_LENS
+#define LENS_FRAME t0
+#define LENS_FAR t1
+#define LENS_DEPTH t2
+#include "game_doflens.glsl"
+#endif
+
 void main()
 {
+#ifdef WW_DOF_LENS
+	lensS1 = lensFocus( LENS_DEPTH );
+	fragColor = lensTexel( ivec2( gl_FragCoord.xy ) );
+	return;
+#endif
 	vec2 v1 = gl_FragCoord.xy / vec2( textureSize( t0, 0 ) );
 	float x = 1.0 - texture( t2, v1 ).r;		// add r0.x, -r0.x, 1
 	float y = x * c2.z + c2.y;					// mad
