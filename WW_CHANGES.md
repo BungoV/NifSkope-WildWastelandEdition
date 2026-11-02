@@ -497,6 +497,33 @@ material whose BGSM sets the wetness SSR switch takes the flag while wet (puddle
 Harness pin `WW_CELL_RAINWET_AMOUNT=<0..1>`; red `WW_CELL_RAINWET_RED=shore` (the old path: shore wetness only).
 Census on stderr: "rain wet: ...". Unit: `bash tests/rainwet/run.sh <out>` (green 0 of 20, red 4 of 20).
 Not yet: Fallout 76's top-down cover map (dry under roofs and bridges), ripples and puddles.
+## MATLOOK2 TRANSLUC1-BINDLESS + TRANSLUC1-VIEWPORT (2026-11-02): the translucency in the bindless twins and the NIF view
+
+Under `WW_CELL_TRANSL=1` the bindless twins (fo4_cellbl, fo4_cellcsmbl) now draw MATLOOK1's thin translucency too. The
+lighting map is read from the draw's row through slot 7 (cellbindless.h TrLightMap; the slot was free).
+The programs without the cell's lights (fo4_default for the NIF view's headlight, fo4_fog, fo4_csm, fo4_fogcsm) also
+take the same law for their one light D. That colour is the root of linear light, so the law runs on squares there:
+albedo squared, D squared, and the diffuse just drawn squared. The excess joins the square, and the root is taken back.
+Reds: `WW_CELL_TRANSL_RED=nobl` (the twins keep the old path), `noview` (the view programs keep it). With the switch
+off nothing is defined, and the programs compile as before. tests/translucency pins the new text, and the base's text
+must fail.
+
+## MATLOOK1 TRANSLUC1 (2026-11-02): a v8+ material's thin translucency, FO4CS's law (switch, off by default)
+
+`WW_CELL_TRANSL=1` makes the shader loader define WW_CELL_TRANSL, and the cell lights then give a pixel whose BGSM
+(version 8 or later) sets bTranslucency what FO4CS's AdvancedLighting port gives it. The amount is the lighting map's
+blue channel times fTranslucencyTransmissiveScale. Nothing is drawn at or under 0.001, or where the map's glow mask
+lights. The tint is the subsurface colour, times the albedo when bTranslucencyMixAlbedoWithSubsurfaceCol is set. Per
+light the pixel takes max( T, D ): T = tint x amount x the light's colour (every factor of its diffuse but N.L) x the
+view lobe, and D = albedo x that light's diffuse. The lobe is max( mix( dot( L, -N ) x max( dot( V, -L ), 0 )^2,
+0.5, turbulence quantised to 1/127 ), 0 ). The excess over D is added beside the diffuse, for the placed lights and the
+cell's sun; under the cascades it takes the sun's shadow. Lights behind the surface are kept for such a pixel, and the
+back of a thin surface takes its front's shadow. A thick object (bTranslucencyThickObject) takes nothing: FO4CS lights
+it only through the sun's thickness shadow map, which is not drawn yet. The bindless twin programs keep the old path.
+The shader is res/shaders/cell_transl.glsl, its C++ twin is src/gl/wwtransl.h, and renderer.cpp uploads the material's
+values (wwTrCol, wwTrFlags) and binds the lighting map (WwTrLightMap, white when absent). `tests/translucency/translucency.sh`
+checks the twin against an independent reading of the law (6.97 M cases, worst 4.8e-7) and pins the shader's text;
+its red (WWTRANSL_RED, the upstream FO76 term) fails. With the switch off every program's machine code equals main's.
 
 ## REFLPROBECLI1 (TOOLS1101, 2026-11-01): count the reflection probes' below-horizon misses without a window
 

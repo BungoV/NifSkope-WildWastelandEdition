@@ -52,6 +52,8 @@ bool rtddgiCellShaderDefine();	// lane RTXGI1 M2: src/rtddgicell.cpp (the Ray-tr
 int rtddgiCellCascades();	// lane RTXCASCADE1: src/rtddgicell.h (WW_CELL_RTDDGI_CASCADES)
 bool rtddgiRestirShaderDefine();	// lane RESTIRDI1: src/rtddgicell.cpp (the RT quality row Medium+ / WW_CELL_RT_PRESET)
 bool wwAirZoneShaderDefine();	// lane AIRZONE1: src/gl/cellairzone.cpp (the Air zones row / WW_CELL_AIRZONE)
+// lane MATLOOK1 (TRANSLUC1): WW_CELL_TRANSL=1, a v8+ material's translucency (res/shaders/cell_transl.glsl); off by default
+static bool wwTranslShaderDefine() { return wwEnv( "WW_CELL_TRANSL" ).trimmed() == "1"; }
 bool wwFogLeakShaderDefine();	// lane FOGLEAK1: src/gl/cellvolair.cpp (WW_CELL_FOGLEAK, the fog leak fix; off by default)
 int wwCellGiVis();	// lane PERF1: src/gl/celllights.cpp (1: the march, WW_CELL_GI_MARCH)
 bool wwCellPrtOn();	// lane PRTOFF1: src/gl/celllights.cpp (the old baked probe GI, only under its red)
@@ -462,6 +464,16 @@ bool NifSkopeOpenGLContext::Shader::load( const QString & filepath )
 		// lane FOGLEAK1: the fog leak fix (cell_volair.frag WW_AIR_LEAK, lookdev_fog.glsl's far tail); not static: read per load
 		if ( wwFogLeakShaderDefine() && data.startsWith( "#version" ) && data.contains( "_CELL_FOGLEAK" ) )
 			data.insert( data.indexOf( '\n' ) + 1, "#define WW_CELL_FOGLEAK 1\n" );
+		// lane MATLOOK1 (TRANSLUC1): a v8+ material's thin translucency (cell_transl.glsl); not static: read per load
+		if ( wwTranslShaderDefine() && data.startsWith( "#version" ) && data.contains( "_CELL_TRANSL" ) ) {
+			data.insert( data.indexOf( '\n' ) + 1, "#define WW_CELL_TRANSL 1\n" );
+			// lane MATLOOK2: reds WW_CELL_TRANSL_RED=nobl (the bindless twins without the term), noview (the NIF view without it)
+			const QByteArray trRed = wwEnv( "WW_CELL_TRANSL_RED" ).trimmed();
+			if ( trRed == "nobl" )
+				data.insert( data.indexOf( '\n' ) + 1, "#define WW_CELL_TRANSL_RED_NOBL 1\n" );
+			else if ( trRed == "noview" )
+				data.insert( data.indexOf( '\n' ) + 1, "#define WW_CELL_TRANSL_RED_NOVIEW 1\n" );
+		}
 		// lane PERF3: the cascades from one per-frame block, in the sources that ask for it (WW_FRAME_UBO_RED=1: plain uniforms)
 		static const bool frameUbo = qgetenv( "WW_FRAME_UBO" ).trimmed() != "0" && qgetenv( "WW_FRAME_UBO_RED" ).trimmed() != "1"
 			&& qgetenv( "WW_PERF3_RED" ).trimmed() != "1";

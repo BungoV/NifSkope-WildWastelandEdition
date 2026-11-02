@@ -298,6 +298,12 @@ vec3 tonemap(vec3 x)
 }
 
 
+#if defined( WW_CELL_TRANSL ) && !defined( WW_CELLLIGHTS ) && !defined( WW_CELL_TRANSL_RED_NOVIEW )
+// lane MATLOOK2 (TRANSLUC1-VIEWPORT): the programs without the cell's lights (the NIF view's headlight, the lookdev sun)
+// take the thin translucency of their one light D (cell_transl.glsl); red WW_CELL_TRANSL_RED=noview
+#define WW_TRV 1
+#include "cell_transl.glsl"
+#endif
 #ifdef WW_CELLLIGHTS
 #ifndef WW_CELL_GI_MARCH_COPIES	// red (tests/spells/cell_giblack_link.sh): a march copy per call site, over the link limit
 #define WW_CELL_GI_MARCH_ONCE 1	// lane GIBLACKLINK1: the march red runs once (cellGiMarchPrime in main)
@@ -882,6 +888,17 @@ void main()
 	// stays Oren-Nayar rather than the editor's Lambert — it is roughness-aware
 	// and is what the rest of the FO4 path is tuned against.
 	color.rgb = diffuse * albedo * D.rgb * ( 1.0 - F );
+#ifdef WW_TRV
+	/* lane MATLOOK2 (TRANSLUC1-VIEWPORT): this colour is the root of linear light (tonemap squares it), so the law runs
+	 * on squares (albedo, D and the diffuse just drawn) and the excess joins the square before the root is taken back */
+	if ( wwTrFlags.z > 0.5 ) {
+		vec4 lm = texture( WwTrLightMap, offset );
+		wwTrRecord( wwTrCol.rgb, wwTrFlags.y > 0.5, albedo * albedo, lm.b, wwTrCol.a, wwTrFlags.w, lm.a * glowMult > 0.0,
+		            wwTrFlags.x > 0.5 );
+		vec3 dLin = color.rgb * color.rgb;
+		color.rgb = sqrt( dLin + wwTrExcess( normal, L, V, D.rgb * D.rgb, dLin ) );
+	}
+#endif
 	// Ambient
 	color.rgb += A.rgb * albedo;
 	// Specular
@@ -939,6 +956,14 @@ void main()
 	// lane PRTP3: the cell's own lights (src/gl/celllights.h)
 	// lane GAPFIX1: the game's deferred lights read only the spec scale (pool1 findings 5); blended draws are forward and keep the colour
 	cellSpecTint = ( ( alphaFlags & 8 ) != 0 || ( cellRed & 262144 ) != 0 ) ? specColor : vec3( 1.0 );	// WW_CELL_SPEC_RED=tint
+#ifdef WW_TR
+	// lane MATLOOK1 (TRANSLUC1): the pixel's translucency record (cell_transl.glsl), read by cellLit
+	if ( cellOn && wwTrFlags.z > 0.5 ) {
+		vec4 lm = texture( WwTrLightMap, offset );
+		wwTrRecord( wwTrCol.rgb, wwTrFlags.y > 0.5, albedo * albedo, lm.b, wwTrCol.a, wwTrFlags.w, lm.a * glowMult > 0.0,
+		            wwTrFlags.x > 0.5 );
+	}
+#endif
 	if ( cellOn )
 		color.rgb = cellLit( color.rgb, albedo, normal, -ViewDir, V, specMask, cellSpecTint, alphaR, kSmith,
 		                     emissive * glowScaleSRGB, cubeK );
