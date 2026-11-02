@@ -126,6 +126,19 @@ def main():
              red or kf == 0,
              '%d crossings, keep-freed %d, reloaded %d (%.1f MB), released stock peak %.1f MB, pool %.0f MB'
              % (len(cen), kf, rn, rl, kept, num(cen[min(cen)], 'texBudgetMb')))
+        # (f) lane STREAMTEX4 (STREAMTEX2's census): no bindless handle dropped while a frame naming it may still be
+        # queued, none of a deleted texture still cached under a new name (gl/cellbindless.cpp forget / bornName;
+        # totals since launch, so the max). The fenced frees (gl/texgrave.h) keep both 0; red WW_CELL_STREAMTEX_RED=
+        # unfenced frees at once (texUnfenced 1, gated the same: tests/texgrave shows where it fails)
+        if all('texFreedLive' in r for r in cen.values()):
+            live = max(int(num(r, 'texFreedLive')) for r in cen.values())
+            stale = max(int(num(r, 'texStaleNames')) for r in cen.values())
+            unf = any(num(r, 'texUnfenced') > 0 for r in cen.values())
+            gate('(f) bindless handles: none dropped under a queued frame, none stale on a new name%s'
+                 % (' (RED unfenced)' if unf else ''), live == 0 and stale == 0,
+                 'dropped live %d, stale names %d (all crossings)' % (live, stale))
+        else:
+            print('  SKIP  (f) bindless handles: the dump has no texFreedLive (an exe before STREAMTEX4)')
     else:
         print('  SKIP  (e) texture pool: the dump has no texCrossing (an exe before STREAMTEX1)')
 

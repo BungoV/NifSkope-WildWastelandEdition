@@ -7302,6 +7302,9 @@ void GLView::wwCellStreamEvict()
 	// lane CELLSTREAM1: file textures no paint has bound for a while (a cell that left, mostly) are freed every
 	// few seconds, in a paint (the context is current). What the last 3 paints bound stays however slow they were:
 	// a wall clock alone freed the textures of a paint longer than the keep, which loaded them all again
+	// lane STREAMTEX4 (STREAMTEX2's fence): the frees whose fence the GPU passed go now (handles, then names)
+	if ( textures )
+		textures->wwGraveSweep();
 	if ( !textures || !model || !cellStreamOn( model ) )
 		return;
 	static QElapsedTimer clock;
@@ -7333,13 +7336,16 @@ void GLView::wwCellStreamEvict()
 	// lane GAPFIX1: a freed file is read ahead again when its cell comes back (stream1 FINAL: it was read on this
 	// thread, a hitch). Red WW_STREAM1_RED=texredo
 	static const bool redoRed = PassTime::stream1Red( "texredo" );
+	// lane STREAMTEX4: a freed texture's handle and names wait for a fence taken after the free; red
+	// WW_CELL_STREAMTEX_RED=unfenced (nofence): freed at once, as before
+	const bool fenced = !cellStreamTexUnfenced();
 	if ( !poolRed ) {
 		if ( !keep || paints < 4 || sec < nextEvict )
 			return;
 		nextEvict = sec + 2U;
 		QStringList freedP;	// lane STREAMTEX1: the names go to the stream's census whatever the reds
 		cellStreamCountEvicted( model, textures->evictPool( cellStreamTexPoolBytes(), paintSec[paints & 3U], &freedP,
-			cellStreamTexTiers( model ) ) );
+			cellStreamTexTiers( model ), fenced ) );
 		for ( const QString & n : freedP ) {
 			cellStreamTexFreed( model, n );
 			if ( !redoRed )
@@ -7355,7 +7361,7 @@ void GLView::wwCellStreamEvict()
 	if ( !before )
 		return;
 	QStringList freed;
-	cellStreamCountEvicted( model, textures->evictUnused( before, &freed ) );
+	cellStreamCountEvicted( model, textures->evictUnused( before, &freed, fenced ) );
 	for ( const QString & n : freed ) {
 		cellStreamTexFreed( model, n );
 		if ( !redoRed )

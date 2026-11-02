@@ -1,3 +1,14 @@
+## STREAMTEX4 (2026-11-02): the streamed cell view's texture frees wait for the GPU (STREAMTEX2's fences, ported)
+- A texture the pool (or the keep timer) frees is no longer deleted at once: its GL names go into a grave
+  (src/gl/texgrave.h) behind one GLsync taken after the frees, and TexCache::wwGraveSweep (top of each stream paint)
+  makes its bindless handles non-resident and deletes the names only once the GPU passed that fence. Before, a frame
+  still queued could sample a dropped handle, and glGenTextures could hand the freed name to another file.
+- Census (gl/cellbindless.cpp): `freedlive` = handles dropped while a frame naming them may still be queued (a ring
+  of 8 census fences, never waited on), `stale` = a deleted texture's handle still cached under a reused name. On the
+  bindless line, and as texFreedLive / texStaleNames / texUnfenced in the walk dump; tests/spells/cell_stream.sh
+  row (f): both 0.
+- Red `WW_CELL_STREAMTEX_RED=unfenced` (also `nofence`): free at once, as before.
+
 ## STREAMTEX3 (2026-11-02): the streamed cell view's texture pool frees by cell count first, then by last bind
 - The PERFFIX4 pool (src/gl/texpool.h, budget `WW_CELL_STREAM_TEXPOOL`) now sorts what it may free by tier, then by
   last bind: tier 0 = textures whose loaded cells all left (STREAMTEX1's counts, src/gl/streamtexpool.h), tier 1 =
