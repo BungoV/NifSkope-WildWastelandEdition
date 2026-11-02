@@ -440,12 +440,12 @@ struct Carry
 	int ownRefs = 0, overrides = 0;
 };
 
-bool addRefs( const Node & g6, CellEdit & ce, quint32 nm, Carry & c, QString * error )
+bool addRefs( const EspWrite::Node& g6, CellEdit & ce, quint32 nm, Carry & c, QString * error )
 {
-	for ( const Node & g : g6.kids ) {
+	for ( const EspWrite::Node& g : g6.kids ) {
 		if ( !g.isGroup || ( g.type != 8 && g.type != 9 ) )
 			return fail( error, QStringLiteral( "Add to existing: a cell's children hold group type %1" ).arg( g.type ) );
-		for ( const Node & r : g.kids ) {
+		for ( const EspWrite::Node& r : g.kids ) {
 			if ( r.isGroup )
 				return fail( error, QStringLiteral( "Add to existing: a nested group under a cell's refs" ) );
 			const QByteArray sig = recordSig( r.raw );
@@ -511,7 +511,7 @@ bool readCarry( const QString & path, Carry & c, QString * error )
 			if ( s.tag == "HEDR" && s.data.size() >= 12 )
 				c.next = ru32( s.data, 8 );
 	}
-	QVector<Node> top;
+	QVector<EspWrite::Node> top;
 	if ( !parseNodes( bytes, idx.tes4End(), bytes.size(), top, error ) )
 		return false;
 	const quint32 nm = quint32( c.masters.size() );
@@ -521,14 +521,14 @@ bool readCarry( const QString & path, Carry & c, QString * error )
 		k.ours = true;
 		return k;
 	};
-	for ( const Node & t : top ) {
+	for ( const EspWrite::Node& t : top ) {
 		if ( !t.isGroup || t.type != 0 )
 			return fail( error, QStringLiteral( "Add to existing: a top-level record outside any group" ) );
 		if ( t.label == label4( "CELL" ) ) {
-			for ( const Node & b : t.kids )
-				for ( const Node & s : b.kids ) {
-					const Node * cell = nullptr;
-					for ( const Node & k : s.kids ) {
+			for ( const EspWrite::Node& b : t.kids )
+				for ( const EspWrite::Node& s : b.kids ) {
+					const EspWrite::Node* cell = nullptr;
+					for ( const EspWrite::Node& k : s.kids ) {
 						if ( !k.isGroup && recordSig( k.raw ) == "CELL" ) {
 							cell = &k;
 							CellEdit ce;
@@ -544,7 +544,7 @@ bool readCarry( const QString & path, Carry & c, QString * error )
 				}
 		} else if ( t.label == label4( "WRLD" ) ) {
 			QByteArray wraw;
-			for ( const Node & k : t.kids ) {
+			for ( const EspWrite::Node& k : t.kids ) {
 				if ( !k.isGroup && recordSig( k.raw ) == "WRLD" ) {
 					wraw = k.raw;
 					c.worldRaw.insert( recordForm( k.raw ), k.raw );
@@ -554,9 +554,9 @@ bool readCarry( const QString & path, Carry & c, QString * error )
 					return fail( error, QStringLiteral( "Add to existing: a world group out of order" ) );
 				const quint32 wf = recordForm( wraw );
 				QByteArray praw;
-				std::function<bool( const Node & )> walk = [&]( const Node & g ) -> bool {
+				std::function<bool( const EspWrite::Node& )> walk = [&]( const EspWrite::Node& g ) -> bool {
 					QByteArray cellRaw;
-					for ( const Node & n : g.kids ) {
+					for ( const EspWrite::Node& n : g.kids ) {
 						if ( !n.isGroup && recordSig( n.raw ) == "CELL" ) {
 							cellRaw = n.raw;
 							if ( g.type == 1 ) {

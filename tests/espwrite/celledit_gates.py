@@ -6,6 +6,8 @@
       REFR the file holds (NAME, XSCL, DATA) and the base's OBND in the master, with the drawn rule
       M = fromEuler(-rx, -ry, -rz) (Rx Ry Rz, niftypes.cpp), tip = pos + M (0, 48, 0). Red WW_CELLEDIT_RED=ghost
       (the un-negated euler) must fail on any yaw that is not 0 or 180 degrees.
+  gap <in.esp> <out.esp>
+      the append fixture: own REFR ids moved up by 0x80, HEDR next 0x900 (a file whose refs were deleted elsewhere).
   append <before.esp> <after.esp> [--added N]
       the "Add to existing" identity: every REFR of the old file is in the new one byte for byte with its form id,
       the new file holds N more, HEDR next grows, and HEDR count = records + groups. Red WW_ESPWRITE_RED=renumber
@@ -165,8 +167,37 @@ def gate_append(before, after, added):
     print('append gate: %d failures' % len(FAILS))
 
 
+def make_gap(src, dst, shift=0x80, next_id=0x900):
+    """A plugin whose ids do not start at the writer's first id (refs deleted in xEdit, ids never reused): every own
+    REFR id moves up by `shift` and HEDR next becomes `next_id`. Append to it must keep the moved ids and start past
+    next_id; the red `renumber` hands out 0x800 again."""
+    buf = bytearray(open(src, 'rb').read())
+    tes4, recs, _, _ = walk(bytes(buf))
+    nm = sum(1 for t, v in tes4 if t == 'MAST')
+    t4 = 24 + struct.unpack_from('<I', buf, 4)[0]
+    p, moved = t4, 0
+    while p < len(buf):
+        if buf[p:p + 4] == b'GRUP':
+            p += 24
+            continue
+        size, flags, fid = struct.unpack_from('<III', buf, p + 4)
+        if buf[p:p + 4] == b'REFR' and (fid >> 24) == nm:
+            struct.pack_into('<I', buf, p + 12, fid + shift); moved += 1
+        p += 24 + size
+    q = 24
+    while q < t4:
+        n = struct.unpack_from('<H', buf, q + 4)[0]
+        if buf[q:q + 4] == b'HEDR':
+            struct.pack_into('<I', buf, q + 6 + 8, next_id)
+        q += 6 + n
+    open(dst, 'wb').write(bytes(buf))
+    print('gap: %d own REFR id(s) moved by %X, HEDR next %X -> %s' % (moved, shift, next_id, dst))
+
+
 def main(argv):
-    if len(argv) >= 5 and argv[1] == 'ghost':
+    if len(argv) >= 4 and argv[1] == 'gap':
+        make_gap(argv[2], argv[3])
+    elif len(argv) >= 5 and argv[1] == 'ghost':
         gate_ghost(argv[2], argv[3], argv[4])
     elif len(argv) >= 4 and argv[1] == 'append':
         added = int(argv[argv.index('--added') + 1]) if '--added' in argv else 1
