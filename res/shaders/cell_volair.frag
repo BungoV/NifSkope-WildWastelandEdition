@@ -21,7 +21,8 @@
  * keeps the old path as a red bit of volLeakRed (cellvolair.cpp WW_CELL_AIR_RED= dalcenv / nosungate / lightleak) */
 #if defined( WW_CELL_FOGLEAK ) && defined( WW_CELL_RTDDGI )
 #define WW_AIR_LEAK 1
-uniform int volLeakRed;		// 1 dalcenv, 2 nosungate, 4 lightleak, 8 nofartailshadow (lookdev_fog.glsl: volAirFlags 256), 16 nointsungate (INTGI1)
+uniform int volLeakRed;		// 1 dalcenv, 2 nosungate, 4 lightleak, 8 nofartailshadow (lookdev_fog.glsl: volAirFlags 256), 16 nointsungate (INTGI1), 32 envscale (FOGENV1)
+uniform vec3 cellDdgiOpenE[6];	// lane FOGENV1: an open probe's irradiance per axis from the volume's own sky (rtddgicell.cpp; 0 = none)
 #endif
 #include "lookdev_fog.glsl"
 #include "ww_sunshadow.glsl"
@@ -100,6 +101,10 @@ layout ( location = 1 ) out vec4 volMrt[7];	// stage 3: layers volLayer + 1 .. +
 /* lane FOGLEAK1 fix 2: the volume's gate on the sun at this froxel, set once a froxel by airLeakEnv (airRest runs
  * before the sub-steps' airSun); 1 = no gate (no volume, the red nosungate) */
 float airLeakSun = 1.0;
+/* lane FOGENV1: the env's share of the flat ambient where the volume covers, set by airLeakEnv: the read's scatter over
+ * the scatter an OPEN probe of the same volume takes (cellDdgiOpenE), 0 .. 2; < 0 = the read's own E / pi (no open
+ * field, or the red envscale) */
+float airLeakR = -1.0;
 
 /* lane FOGLEAK1 fix 1: the env share from the ray-traced volume. The six-axis cube's L0 + L1 scatter (volCubeScatter)
  * needs only the irradiance at +dW and -dW: for an L1 field (2/3) sum E = 2 (E+ + E-) and sum (E+a - E-a) dW.a =
@@ -113,6 +118,7 @@ vec3 airLeakEnv( vec3 P, vec3 dW, out float fade )
 {
 	fade = 0.0;
 	airLeakSun = 1.0;
+	airLeakR = -1.0;
 	// read only for a term that takes it: the ambient (fix 1) or the sun outdoors (fix 2)
 	bool needEnv = ( volTerms & 8 ) != 0 && ( volLeakRed & 1 ) == 0;
 	// lane INTGI1 (FOGLEAK1-INT): indoors too (an unlit interior's directional; a sunlit one already shades as outdoors)
@@ -194,6 +200,21 @@ vec3 airLeakEnv( vec3 P, vec3 dW, out float fade )
 	fade = f;
 	Ep *= 2.0 / f;	// the read's decode: mean^2 x 2 pi, then / pi to the ambient's unit
 	Em *= 2.0 / f;
+	/* lane FOGENV1 (a ruling, notes/fogenv1/RESULTS.md): the volume's E is its own sky's (since LAND5 the weather's x the
+	 * GI sky level), not the flat ambient's unit, so the env is the flat ambient x (the read's scatter / an open probe's
+	 * scatter of the same volume): open ground takes the flat ambient exactly, occluded air less. The open probe's
+	 * irradiance at +-dW is the six axes' L1 field; luminance ratio, so the ambient keeps its colour */
+	if ( ( volLeakRed & 32 ) == 0 ) {
+		vec3 o0 = cellDdgiOpenE[0], o1 = cellDdgiOpenE[1], o2 = cellDdgiOpenE[2];
+		vec3 o3 = cellDdgiOpenE[3], o4 = cellDdgiOpenE[4], o5 = cellDdgiOpenE[5];
+		vec3 om = ( o0 + o1 + o2 + o3 + o4 + o5 ) * ( 1.0 / 6.0 );
+		vec3 ol = 0.5 * ( ( o0 - o1 ) * dW.x + ( o2 - o3 ) * dW.y + ( o4 - o5 ) * dW.z );
+		vec3 Op = ( om + ol ) * ( 1.0 / PI ), Om = ( om - ol ) * ( 1.0 / PI );
+		const vec3 Y = vec3( 0.2126, 0.7152, 0.0722 );
+		float so = dot( max( 2.0 * ( Op + Om ) + 3.0 * volGi.w * ( Op - Om ), vec3( 0.0 ) ), Y );
+		if ( so > 1e-8 )
+			airLeakR = clamp( dot( max( 2.0 * ( Ep + Em ) + 3.0 * volGi.w * ( Ep - Em ), vec3( 0.0 ) ), Y ) / so, 0.0, 2.0 );
+	}
 	return f * 0.25 * max( 2.0 * ( Ep + Em ) + 3.0 * volGi.w * ( Ep - Em ), vec3( 0.0 ) ) * volGi.rgb;
 }
 
@@ -761,7 +782,10 @@ vec3 airRest( vec3 posView, vec3 dirView, float z, float sA, float sB, out vec3 
 		for ( int a = 0; a < 6; a++ )
 			A[a] = cellAmbient( axes[a], P ) * ( replace ? 1.0 - share[a] : 1.0 );
 #ifdef WW_AIR_LEAK
-		Jenv += volCubeScatter( A, dW ) * ( 1.0 - leakFade ) + Jddgi;	// lane FOGLEAK1 fix 1: the volume where it covers
+		if ( airLeakR >= 0.0 )	// lane FOGENV1: the flat ambient x the volume's open-field share where it covers
+			Jenv += volCubeScatter( A, dW ) * ( 1.0 - leakFade + leakFade * airLeakR );
+		else
+			Jenv += volCubeScatter( A, dW ) * ( 1.0 - leakFade ) + Jddgi;	// lane FOGLEAK1 fix 1: the volume where it covers
 #else
 		Jenv += volCubeScatter( A, dW );
 #endif

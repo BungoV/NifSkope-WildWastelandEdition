@@ -1,3 +1,16 @@
+## FOGLEAK1-ENVSCALE (FOGENV1, 2026-11-02): the fog's DDGI env lands at the DALC's scale on open ground
+
+- FOGLEAK1's occluded env in the air (`WW_CELL_FOGLEAK`, still default OFF) took the volume's read at its own E / pi.
+  The volume's sky is not the DALC's scale (since GISKYTWIN-FLIP it is the weather at the physical level), so open
+  ground could read many times the flat ambient it replaces. The env is now the flat ambient times the read over the
+  volume's own OPEN field (`cellDdgiOpenE`, the six-axis irradiance an unoccluded probe of that sky and ground takes,
+  rtddgimath.h `openIrradiance`): open ground takes the DALC exactly, a probe that sees 30 % of the sky takes 30 % of it.
+  With no open field (interior, sky off) it keeps the old read.
+- Red: `WW_CELL_AIR_RED=envscale` (the read's own scale, FOGLEAK1 fix 1 as it was).
+- Gates: tests/fogleak/fogleak_check.py rows S (open K = 0.3 / 3 / 30 and occluded; the red fails all four),
+  tests/fogleak/fogenv_open_test.cpp (openIrradiance known answers; `-DFOGENV_RED_NOPI` fails).
+- Code: src/rtddgimath.h, src/rtddgi.h, src/rtddgi.cpp, src/rtddgicell.cpp, src/gl/cellvolair.cpp, res/shaders/cell_volair.frag.
+
 ## GISKYTWIN-FLIP (LAND5, 2026-11-02): the GI volume's sky ships at the physical level
 
 - `WW_CELL_RTDDGI_SKY` unset (or empty) is now `level` (GITRUTH1's giSkyLevel: the weather's sky colour at the
