@@ -264,6 +264,8 @@
 { "WW_CELL_FARHIDE_RED", 0, "src/cellfarhide.cpp:45 mode | re-read per frame or per call (a)" },
 { "WW_CELL_FARINST_CENSUS", 0, "src/gl/cellfarinst.cpp:67 census | re-read per frame or per call (a)" },
 { "WW_CELL_FARINST_RED", 0, "src/gl/cellfarinst.cpp:61 redNoCull | re-read per frame or per call (a)" },
+{ "WW_CELL_FARINST_TILE", 1, "src/lodinative.cpp:1037 nifAppendLodiObjects | read while the cell document is built" },
+{ "WW_CELL_FARINST_TILE_RED", 1, "src/lodinative.cpp:1037 nifAppendLodiObjects | read while the cell document is built" },
 { "WW_CELL_FARLIGHT", 1, "src/cellview.cpp:6613 cellBuild | read while the cell document is built" },
 { "WW_CELL_FARLIGHTWALK", 2, "src/farlightmap.cpp:770 farLightWalkStep | function static: read once for the process (not WW_SWITCH_STATIC)" },
 { "WW_CELL_FARLIGHTWALK_MEMCAP", 0, "src/farlightmap.cpp:807 farLightWalkStep | re-read per frame or per call (a)" },

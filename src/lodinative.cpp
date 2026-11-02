@@ -15,6 +15,7 @@ BSD License - see nifskope.h
 #include "esmdata.h"
 #include "gl/cellfarinst.h"	// lane SKYSHARDS3: the rows an instanced ring's commands read (farobjcensus)
 #include "gl/celllooks.h"	// lane FIX1101A lodch: the Far LOD baked AO / sky rows
+#include "gl/fartile.h"	// lane SHADOWSHIMMER5: the instanced rows' cull tile size (WW_CELL_FARINST_TILE)
 #include "lodchsky.h"	// lane FIX1101A lodch: the baked sky byte as the GI's share
 #include "model/nifmodel.h"
 #include "spells/blocks.h"
@@ -262,7 +263,7 @@ void attachMaterial( NifModel * nif, const QModelIndex & iRoot, const QModelInde
 }
 
 /* lane SHADOWSHIMMER4 (FARSWAYCOST2): WW_FAROBJ_SWAYDUMP=<file> appends every swaying instanced far bucket (the
- * arrays, commands and 4x4-cell tiles gl/cellfarinst.cpp uploads and culls) so an offline bench can draw the sun
+ * arrays, commands and N x N-cell tiles gl/cellfarinst.cpp uploads and culls) so an offline bench can draw the sun
  * casters' far sway work through the real caster programs. Census only: nothing in NifSkope reads the file back. */
 void instSwayDump( const Bucket & b, const CellMeshInst & d, const Vector3 & origin )
 {
@@ -1032,11 +1033,13 @@ bool nifAppendLodiObjects( NifModel * nif, const QModelIndex & iRoot,
 		return r;
 	};
 	auto unorm8 = []( float f ) { return quint8( std::lround( qBound( 0.0f, f, 1.0f ) * 255.0f ) ); };
+	// lane SHADOWSHIMMER5 (FARTILESPLIT): N x N cells a cull tile (default 2; red WW_CELL_FARINST_TILE_RED=1 = 4)
+	const int farTileShift = WwFarTile::shiftOf( wwEnvInt( "WW_CELL_FARINST_TILE" ), wwEnvInt( "WW_CELL_FARINST_TILE_RED" ) == 1 );
 	auto placeInst = [&]( quint16 baseId, const LodoBase & base, quint16 meshId, const std::vector<MeshPart> & parts,
 		const Vector3 & pos, const float m[9], float scale, bool mirrorU, const float rgb[3], int cellX, int cellY,
 		quint32 ref, const PlaceStream & ps ) {
 		const LodoMesh & meshRow = lib.meshes[meshId];
-		const quint32 tile = ( quint32( ( cellX >> 2 ) + 32768 ) << 16 ) | quint32( ( cellY >> 2 ) + 32768 );
+		const quint32 tile = WwFarTile::key( cellX, cellY, farTileShift );
 		for ( int pi = 0; pi < int( parts.size() ); pi++ ) {
 			const MeshPart & p = parts[size_t( pi )];
 			if ( p.verts.empty() || p.tris.empty() )
