@@ -84,7 +84,7 @@ def dump(redbuild):
         w = l.split()
         if not w:
             continue
-        if w[0] in ('rainsigma', 'snowsigma', 'segments', 'snowdefault', 'raindefault'):
+        if w[0] in ('rainsigma', 'snowsigma', 'segments', 'snowdefault', 'raindefault', 'typeids'):
             D[w[0]] = [float(x) for x in w[1:]]
         elif w[0] == 'kind':
             D['kind'][int(w[1])] = int(w[2])
@@ -110,6 +110,8 @@ if NEED_CPU:
     SIGMA_KM = DD['rainsigma'][0]
     RAIN_D, RAIN_RATE = DD['raindefault']
     SNOW_D, SNOW_RATE = DD['snowdefault']
+    # layer type ids from gl/precipmath.h's enum (PRECIPLOOK1 removed sleet: snow_fine 3 -> 2); the claim is the type
+    T_RAIN, T_SNOW = (int(x) for x in DD['typeids'])
 EXCESS, FALLKM, ABOVEKM, EDGE = 1.0, 0.3, 0.15, 0.1   # rainfogmath.h (CLOUD6e's gate D pins them to the dump)
 SEGMENTS = 8
 
@@ -141,15 +143,15 @@ def want_layers(t, d, f, rb):
     out = []
     if rb & 1:
         if f & 4:
-            out.append([0, RAIN_RATE])
+            out.append([T_RAIN, RAIN_RATE])
         if f & 8:
-            out.append([3, SNOW_RATE])
+            out.append([T_SNOW, SNOW_RATE])
     else:
         k = want_kind(t)
         if k == 1:
-            out.append([0, RAIN_RATE])
+            out.append([T_RAIN, RAIN_RATE])
         elif k == 2:
-            out.append([3, SNOW_RATE])
+            out.append([T_SNOW, SNOW_RATE])
     if not (rb & 2) and t >= -1:
         for o in out:
             o[1] *= want_scale(d)
@@ -189,9 +191,9 @@ if 'K' in only:
     dry_ok = True
     for e, f, t, d in W:
         L = DD['layers'][(t, d, f & 12, 0)]   # the census holds densities 7 and -1 (none) only
-        nr += any(k == 0 for k, rate in L)
-        ns += any(k == 3 for k, rate in L)
-        bad_rate += [e for k, rate in L if k == 0 and abs(rate - RAIN_RATE) > 1e-12]
+        nr += any(k == T_RAIN for k, rate in L)
+        ns += any(k == T_SNOW for k, rate in L)
+        bad_rate += [e for k, rate in L if k == T_RAIN and abs(rate - RAIN_RATE) > 1e-12]
         if (e in dry or e in snowflag) and L:
             dry_ok = False
     gate('K census', len(W) == 107 and nr == 10 and ns == 0 and dry_ok and not bad_rate and len(snowflag) == 10,
@@ -225,9 +227,9 @@ if 'S' in only:
     N = SNOW_RATE * 1.0e6 / 3600.0 / (m * v)
     sig = N * 2.0 * math.pi * (D * 0.5e-3) ** 2 * 1000.0
     rel = abs(DD['snowsigma'][0] / sig - 1.0)
-    ok = (len(Ls) == 1 and Ls[0][0] == 3 and so == (0.0, 1.0) and sf == (1.0, 0.0) and rel <= 1e-6)
-    gate('S snow', ok, 'Type 1 shader: layers %s (want snow_fine 3), fog shares on %s off %s; snow law %.4f / km (checker %.4f, '
-         'rel %.2g; visibility %.2f km; rain %.4f / km)%s' % (Ls, so, sf, DD['snowsigma'][0], sig, rel, 3.912 / sig, SIGMA_KM,
+    ok = (len(Ls) == 1 and Ls[0][0] == T_SNOW and so == (0.0, 1.0) and sf == (1.0, 0.0) and rel <= 1e-6)
+    gate('S snow', ok, 'Type 1 shader: layers %s (want snow_fine %d), fog shares on %s off %s; snow law %.4f / km (checker %.4f, '
+         'rel %.2g; visibility %.2f km; rain %.4f / km)%s' % (Ls, T_SNOW, so, sf, DD['snowsigma'][0], sig, rel, 3.912 / sig, SIGMA_KM,
                                                             ' [red today]' if red == 'today' else ''))
 
 if 'D' in only:
