@@ -12,9 +12,17 @@
  *   3 up.xyz, frame 0            4 fwd.xyz, frame 1               5 weight 0..2, frame 2
  * cardFrames, 4 texels a frame of the set (frameTableBase + frame * 4):
  *   0 rect (u0 v0 du dv)   1 right.xyz, offset right   2 up.xyz, offset up   3 fwd.xyz, 0
+ *
+ * WW_CARD_GPUPICK (lane FARCARDPICK1, the twins impostor_instgp.vert / impostor_instezgp.vert): the frames and the
+ * billboard are picked HERE (impostor_pick.glsl, the CPU's arithmetic), and cardData is static:
+ *   2 texels a placement slot: 0 centre.xyz, depthSpan   1 half.xy, sway offset, scale
+ *   then this pass's visible slots, 4 a texel, from cardIndexBase: slot = list[cardBase + gl_InstanceID].
  */
 
 #include "uniforms.glsl"
+#ifdef WW_CARD_GPUPICK
+#include "impostor_pick.glsl"
+#endif
 
 uniform mat4 modelViewMatrix;
 
@@ -26,6 +34,17 @@ uniform vec3  cardEyeModel;      // the camera's position in model space
 uniform bool  cardOrtho;         // true: no eye point, the ray is cardFwd
 #ifdef WW_CARD_EARLYZ
 uniform bool  useDepthOffset;    // lane PERFFIX4: the fragment's pixel depth offset (impostor_oct.frag), read here too
+#endif
+#ifdef WW_CARD_GPUPICK
+uniform int   cardIndexBase;     // the first texel of this pass's slot list
+uniform float cardSwayBase;      // Options::swayPhase; a slot adds its own offset
+uniform int   pickN;             // the set's grid side (a grid set)
+uniform int   pickV;             // the set's views (a ring set)
+uniform bool  pickRing;
+uniform bool  pickAsBaked;       // the set's convention: the legacy 180
+uniform bool  pickShuffle;       // the red control: the quarter turn
+uniform float pickSharpen;
+uniform int   pickFrameCount;    // after the ring's cap of 2
 #endif
 
 layout ( location = 0 ) in vec3 vertexPosition;   // the unit quad, -1..1 in xy
@@ -50,6 +69,28 @@ flat out float swayPhase;
 
 void main()
 {
+#ifdef WW_CARD_GPUPICK
+	int ci = cardBase + gl_InstanceID;
+	int slot = int( texelFetch( cardData, cardIndexBase + ( ci >> 2 ) )[ci & 3] );
+	vec4 t0 = texelFetch( cardData, slot * 2 );
+	vec4 t1 = texelFetch( cardData, slot * 2 + 1 );
+	ivec3 pIdx;
+	vec3 pW, inRight, inUp, inFwd;
+	wwCardPick( cardEyeModel, t0.xyz, pickN, pickV, pickRing, pickAsBaked, pickShuffle, pickSharpen, pickFrameCount,
+				pIdx, pW, inRight, inUp, inFwd );
+
+	vec3 inCenter = t0.xyz;
+	vec2 inHalf = t1.xy;
+	float scale = t1.w;
+
+	cardCenter = inCenter;
+	cardHalf = inHalf;
+	cardDepthSpan = t0.w;
+	swayPhase = cardSwayBase + t1.z;
+	frameCount = pickFrameCount;
+	frameWeightV = pW;
+	float frames[3] = float[3]( float( pIdx.x ), float( pIdx.y ), float( pIdx.z ) );
+#else
 	int base = ( cardBase + gl_InstanceID ) * 6;
 	vec4 t0 = texelFetch( cardData, base );
 	vec4 t1 = texelFetch( cardData, base + 1 );
@@ -72,6 +113,7 @@ void main()
 	frameCount = int( t2.w );
 	frameWeightV = t5.xyz;
 	float frames[3] = float[3]( t3.w, t4.w, t5.w );
+#endif
 	for ( int k = 0; k < 3; k++ ) {
 		int f = frameTableBase + int( frames[k] ) * 4;
 		vec4 f1 = texelFetch( cardFrames, f + 1 );

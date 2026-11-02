@@ -1,0 +1,4 @@
+# lane FARCARDPICK1: impostor_cellinst.prog with the frame pick and the billboard in the vertex stage (static card
+# buffer). Selected BY NAME in ImpostorDraw::drawCardsInstanced; WW_FARCARD_RED=cpupick draws with the CPU pick again.
+
+shaders impostor_instgp.vert impostor_cellinst.frag

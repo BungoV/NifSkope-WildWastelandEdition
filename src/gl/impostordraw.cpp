@@ -15,6 +15,7 @@ BSD License - see nifskope.h
 #include "gl/lookdevstage.h"
 #include "gl/glscene.h"
 #include "gl/gltex.h"
+#include "gl/impostorpick.h"
 #include "gl/renderer.h"
 #include "impostorcard.h"
 #include "model/nifmodel.h"
@@ -30,6 +31,9 @@ BSD License - see nifskope.h
 #include <gli.hpp>
 
 #include <cmath>
+#include <cstdio>
+#include <cstring>
+#include <limits>
 
 /* WW_IMPOSTOR_TRACE -- a bracket trace for THIS draw path, written with the
  * file closed again at every step so a segfault cannot lose the last line.
@@ -298,13 +302,19 @@ ImpostorOct::Convention effectiveConvention( const ImpostorCardSet & set,
 							: ImpostorOct::Convention::SpecLiteral;
 }
 
+/*! The card's world centre: the placement plus the set's centre at the placement's scale. ONE function (lane
+ *  FARCARDPICK1): the CPU pick and the GPU pick's static buffer take the same float. */
+Vector3 cardCentre( const ImpostorCardSet & set, const Vector3 & worldOffset, float sc )
+{
+	return worldOffset + Vector3( set.center[0], set.center[1], set.center[2] ) * sc;
+}
+
 //! `pickFramesForCamera` for the card as this scene currently sees it.
 void selectFrames( const Scene * scene, const ImpostorCardSet & set,
 					const Vector3 & worldOffset, const ImpostorDraw::Options & opt,
 					float camDir[3], int idx[3], float w[3], const Vector3 * eyeIn = nullptr )
 {
-	const Vector3 centre = worldOffset + Vector3( set.center[0], set.center[1], set.center[2] )
-			* ( ( opt.worldScale > 0.0f ) ? opt.worldScale : 1.0f );
+	const Vector3 centre = cardCentre( set, worldOffset, ( opt.worldScale > 0.0f ) ? opt.worldScale : 1.0f );
 	Vector3 d = ( eyeIn ? *eyeIn : cardBatch().prog ? cardBatch().eye : eyeWorld( scene ) ) - centre;
 	const float len = d.length();
 	if ( len > 1e-6f )
@@ -322,27 +332,11 @@ void selectFrames( const Scene * scene, const ImpostorCardSet & set,
 		 * picks nothing -- a ring has no top frames, and a view from above reads
 		 * the horizon frames as they are (the error that costs is measured, not
 		 * hidden). The stronger frame goes first, which is the one the crisp end
-		 * draws alone. Slot 2 repeats it at weight 0: a ring blends TWO. */
-		const int V = set.views;
-		const float twoPi = 6.28318530718f;
-		float phi = std::atan2( d[1], d[0] );
-		if ( phi < 0.0f )
-			phi += twoPi;
-		const float f = phi / twoPi * float( V );
-		const float fl = std::floor( f );
-		const float t = f - fl;
-		const int i0 = ( ( int( fl ) % V ) + V ) % V, i1 = ( i0 + 1 ) % V;
-		if ( t <= 0.5f ) {
-			idx[0] = i0; w[0] = 1.0f - t; idx[1] = i1; w[1] = t;
-		} else {
-			idx[0] = i1; w[0] = t; idx[1] = i0; w[1] = 1.0f - t;
-		}
-		idx[2] = idx[0]; w[2] = 0.0f;
-		// THE RED CONTROL, the ring's form of the grid's quarter turn: every frame
-		// becomes the view from 90 degrees round.
-		if ( opt.shuffleFrames )
-			for ( int k = 0; k < 3; k++ )
-				idx[k] = ( idx[k] + V / 4 ) % V;
+		 * draws alone. Slot 2 repeats it at weight 0: a ring blends TWO.
+		 * THE RED CONTROL (opt.shuffleFrames), the ring's form of the grid's quarter
+		 * turn: every frame becomes the view from 90 degrees round. The arithmetic
+		 * lives in impostorpick.h (lane FARCARDPICK1), shared with the offline unit. */
+		ImpostorPick::ringFrames( camDir, set.views, opt.shuffleFrames, idx, w );
 		return;
 	}
 
@@ -373,11 +367,7 @@ void selectFrames( const Scene * scene, const ImpostorCardSet & set,
 		 * card against the mesh from the spec direction AND from the opposite
 		 * one, and step 8 runs the old convention on purpose to show that row
 		 * failing. */
-		for ( int k = 0; k < 3; k++ ) {
-			const int i = idx[k] % set.oct;
-			const int j = idx[k] / set.oct;
-			idx[k] = j + ( set.oct - 1 - i ) * set.oct;
-		}
+		ImpostorPick::gridShuffle( set.oct, idx );
 	}
 }
 
@@ -446,27 +436,8 @@ void pickCard( const Scene * scene, const ImpostorCardSet & set, const Vector3 &
 	/* THE SLIDER (lane IMPOSTORDEPTH2): crisp end = FLAT SNAP, the nearest frame alone; smooth end = three
 	 * frames, stipple, search 16; between = three frames with the weights sharpened. A RING set blends its two
 	 * neighbouring azimuths, never three (CARDFIX1 step 5). */
-	const int frameCount = set.ring() ? qMin( rs.frameCount, 2 ) : rs.frameCount;
-	if ( frameCount > 1 && rs.sharpen != 1.0f ) {
-		float sum = 0.0f;
-		for ( int k = 0; k < 3; k++ ) {
-			w[k] = std::pow( qMax( 0.0f, w[k] ), rs.sharpen );
-			sum += w[k];
-		}
-		if ( sum > 0.0f )
-			for ( int k = 0; k < 3; k++ )
-				w[k] /= sum;
-	}
-	if ( frameCount == 1 ) {
-		// No blend: the nearest frame alone, at full weight.
-		int best = 0;
-		for ( int k = 1; k < 3; k++ ) {
-			if ( w[k] > w[best] )
-				best = k;
-		}
-		idx[0] = idx[best];
-		w[0] = 1.0f;
-	}
+	const int frameCount = ImpostorPick::framesDrawn( set.ring(), rs.frameCount );
+	ImpostorPick::sharpenWeights( frameCount, rs.sharpen, idx, w );	// frameCount 1: the nearest frame alone, at full weight
 	c.frameCount = frameCount;
 
 	// the placement's scale multiplies the centre offset, the quad, the depth span and the frame offsets together
@@ -474,23 +445,14 @@ void pickCard( const Scene * scene, const ImpostorCardSet & set, const Vector3 &
 	c.sc = sc;
 
 	/* The quad faces the camera and stands UP: world +Z projected into the plane perpendicular to the view
-	 * direction. A card that rolls with the camera is the classic impostor tell. */
-	Vector3 fwdV( camDir[0], camDir[1], camDir[2] );
-	Vector3 worldUp( 0.0f, 0.0f, 1.0f );
-	Vector3 rightV = Vector3::crossproduct( worldUp, fwdV );
-	if ( rightV.length() < 1e-4f ) {
-		// Looking straight down the pole: +X, the one the bake's own top frame uses.
-		rightV = Vector3( 1.0f, 0.0f, 0.0f );
-	}
-	rightV.normalize();
-	Vector3 upV = Vector3::crossproduct( fwdV, rightV );
-	upV.normalize();
-
-	c.fwdV = fwdV;
-	c.rightV = rightV;
-	c.upV = upV;
-	c.centre = worldOffset
-			+ Vector3( set.center[0], set.center[1], set.center[2] ) * sc;
+	 * direction. A card that rolls with the camera is the classic impostor tell. Looking straight down the pole:
+	 * +X, the one the bake's own top frame uses (ImpostorPick::billboard). */
+	float right[3], up[3];
+	ImpostorPick::billboard( camDir, right, up );
+	c.fwdV = Vector3( camDir[0], camDir[1], camDir[2] );
+	c.rightV = Vector3( right[0], right[1], right[2] );
+	c.upV = Vector3( up[0], up[1], up[2] );
+	c.centre = cardCentre( set, worldOffset, sc );
 }
 
 /* The cut's coverage (lane IMPOSTORTEAR1): WW_IMPOSTOR_CUT=mean|strong forces rule 1 or 2 for every draw, read
@@ -877,7 +839,16 @@ struct InstGl
 	bool tabDirty = false;
 	QHash< const ImpostorSheet *, GLuint > layerIds;	// an array-layer sheet's texture, resolved once per arming
 	std::vector< float > data;
+	/* lane FARCARDPICK1, the GPU pick: the static card buffer. kSlotFloats a placement slot (impostor_inst.vert's
+	 * WW_CARD_GPUPICK layout), kept while the armed sets hold (tabKey) and re-sent only where a slot's floats
+	 * changed; this pass's visible slots follow it, 4 a texel. */
+	GLuint slotBuf = 0;
+	std::vector< float > slotData;	// not `slots`: a Qt macro
+	std::vector< float > slotList;
+	size_t slotCap = 0;		// slotBuf's size in floats
 };
+
+constexpr int kSlotFloats = 8;		// impostor_inst.vert's WW_CARD_GPUPICK slot: 2 texels
 
 InstGl & instGl()
 {
@@ -930,6 +901,53 @@ int frameTableBase( const ImpostorCardSet & set, const ImpostorDraw::Options & o
 	return base;
 }
 
+/*! lane FARCARDPICK1: WW_FARCARD_PICKDUMP=<file> writes the first pass's cards once, each with the GPU pick's
+ *  inputs and the CPU pick's answer (pickCard, whichever pick draws), for the offline unit tests/farcardpick:
+ *  eye.xyz centre.xyz N V ring asBaked shuffle sharpen frameCount | idx0..2 w0..2 right.xyz up.xyz fwd.xyz */
+void dumpPicks( const Scene * scene, const QVector< ImpostorDraw::InstCard > & cards, const ImpostorDraw::Options & opt,
+				const ImpostorDraw::Resolved & rs, const Vector3 & eye )
+{
+	static bool done = false;
+	if ( done || cards.isEmpty() )
+		return;
+	const QString path = wwEnvStr( "WW_FARCARD_PICKDUMP" );
+	if ( path.isEmpty() )
+		return;
+	done = true;
+	QFile f( path );
+	if ( !f.open( QIODevice::WriteOnly | QIODevice::Truncate ) ) {
+		qWarning().noquote() << QStringLiteral( "far cards: pick dump %1 cannot be written" ).arg( path );
+		return;
+	}
+	QByteArray out;
+	out += "# far card picks (WW_FARCARD_PICKDUMP): eye.xyz centre.xyz N V ring asBaked shuffle sharpen frameCount"
+		   " | idx0..2 w0..2 right.xyz up.xyz fwd.xyz\n";
+	char line[640];
+	for ( const ImpostorDraw::InstCard & c : cards ) {
+		const ImpostorCardSet & set = *c.set;
+		ImpostorDraw::Options o = opt;
+		o.worldScale = c.scale;
+		o.swayPhase = c.swayPhase;
+		CardPick pk;
+		pickCard( scene, set, Vector3( c.offset[0], c.offset[1], c.offset[2] ), o, rs, &eye, pk );
+		const bool asBaked = effectiveConvention( set, opt ) == ImpostorOct::Convention::AsBaked;
+		std::snprintf( line, sizeof( line ),
+			"%.9g %.9g %.9g %.9g %.9g %.9g %d %d %d %d %d %.9g %d | %d %d %d %.9g %.9g %.9g %.9g %.9g %.9g %.9g %.9g %.9g"
+			" %.9g %.9g %.9g\n",
+			double( eye[0] ), double( eye[1] ), double( eye[2] ),
+			double( pk.centre[0] ), double( pk.centre[1] ), double( pk.centre[2] ),
+			set.oct, set.views, set.ring() ? 1 : 0, asBaked ? 1 : 0, opt.shuffleFrames ? 1 : 0, double( rs.sharpen ),
+			ImpostorPick::framesDrawn( set.ring(), rs.frameCount ),
+			pk.idx[0], pk.idx[1], pk.idx[2], double( pk.w[0] ), double( pk.w[1] ), double( pk.w[2] ),
+			double( pk.rightV[0] ), double( pk.rightV[1] ), double( pk.rightV[2] ),
+			double( pk.upV[0] ), double( pk.upV[1] ), double( pk.upV[2] ),
+			double( pk.fwdV[0] ), double( pk.fwdV[1] ), double( pk.fwdV[2] ) );
+		out += line;
+	}
+	f.write( out );
+	qInfo().noquote() << QStringLiteral( "far cards: pick dump, %1 cards to %2" ).arg( cards.size() ).arg( path );
+}
+
 void instGlCreate( Scene * scene, InstGl & g )
 {
 	auto * fn = scene->renderer->fn;
@@ -951,6 +969,7 @@ void instGlCreate( Scene * scene, InstGl & g )
 	fn->glBindBuffer( GL_ARRAY_BUFFER, 0 );
 	fn->glGenBuffers( 1, &g.dataBuf );
 	fn->glGenBuffers( 1, &g.tabBuf );
+	fn->glGenBuffers( 1, &g.slotBuf );
 	fn->glGenTextures( 1, &g.dataTex );
 	fn->glGenTextures( 1, &g.tabTex );
 }
@@ -1002,7 +1021,40 @@ bool ImpostorDraw::drawCardsInstanced( Scene * scene, const QVector< InstCard > 
 	 * the quad's, so the layout holds by construction), so the hardware tests depth BEFORE the sheets are marched.
 	 * WW_FARCARD_EARLYZ_RED=1: impostor_cellinst.prog again. A twin that does not link falls back to it. */
 	WW_SWITCH_STATIC( bool, earlyZRed, wwEnv( "WW_FARCARD_EARLYZ_RED" ) == "1" );
-	NifSkopeOpenGLContext::Program * prog = earlyZRed ? nullptr : r->useProgram( "impostor_cellinstez.prog" );
+	/* lane FARCARDPICK1: THE GPU PICK. impostor_instgp.vert / impostor_instezgp.vert pick the frames and build the
+	 * billboard from the eye and the card's centre (impostor_pick.glsl, the CPU's arithmetic), so the card buffer
+	 * holds only what a placement IS (centre, half size, depth span, sway offset, scale) and is re-sent only where it
+	 * changed; a pass uploads its visible slots, 4 bytes a card. WW_FARCARD_RED=cpupick: the CPU pick and the 6-texel
+	 * fill every pass, as before. A card without a slot, or a gp twin that does not link, takes the CPU pick too.
+	 * Opt-in (WW_FARCARD_GPICK=1) until a live pair proves the same picture in less frame time. */
+	WW_SWITCH_STATIC( bool, gpuPickOn, wwSwitchEcho( "far cards GPU pick", wwEnv( "WW_FARCARD_GPICK" ) == "1" && wwEnv( "WW_FARCARD_RED" ) != "cpupick" ) );
+	bool gpuPick = gpuPickOn;
+	for ( int i = 0; i < cards.size() && gpuPick; i++ )
+		gpuPick = cards.at( i ).slot >= 0;
+	NifSkopeOpenGLContext::Program * prog = nullptr;
+	if ( gpuPick ) {
+		prog = r->useProgram( earlyZRed ? "impostor_cellinstgp.prog" : "impostor_cellinstezgp.prog" );
+		gpuPick = prog != nullptr;
+		static int said = -1;
+		const int now = gpuPick ? 1 : 0;
+		if ( now != said ) {
+			said = now;
+			qInfo().noquote() << ( gpuPick ? QStringLiteral( "far cards: frame pick on the GPU (%1), static card buffer" )
+					.arg( earlyZRed ? QStringLiteral( "impostor_cellinstgp.prog" ) : QStringLiteral( "impostor_cellinstezgp.prog" ) )
+				: QStringLiteral( "far cards: GPU-pick twin did not link; frame pick on the CPU" ) );
+		}
+	} else {
+		static int said = -1;
+		const int now = gpuPickOn ? 1 : 0;
+		if ( now != said ) {
+			said = now;
+			qInfo().noquote() << ( gpuPickOn ? QStringLiteral( "far cards: frame pick on the CPU (a card without a slot)" )
+				: wwEnv( "WW_FARCARD_RED" ) == "cpupick" ? QStringLiteral( "far cards: frame pick on the CPU (RED WW_FARCARD_RED=cpupick)" )
+				: QStringLiteral( "far cards: frame pick on the CPU (default; WW_FARCARD_GPICK=1 picks on the GPU)" ) );
+		}
+	}
+	if ( !prog )
+		prog = earlyZRed ? nullptr : r->useProgram( "impostor_cellinstez.prog" );
 	{
 		static int said = -1;
 		const int now = earlyZRed ? 2 : prog ? 1 : 0;
@@ -1033,6 +1085,7 @@ bool ImpostorDraw::drawCardsInstanced( Scene * scene, const QVector< InstCard > 
 		g.tab.clear();
 		g.layerIds.clear();
 		g.tabDirty = true;
+		g.slotData.clear();	// lane FARCARDPICK1: another placement list, other slots
 	}
 
 	// ---- the sets, in the order their first card comes; a set's cards keep their placement order ----
@@ -1056,9 +1109,55 @@ bool ImpostorDraw::drawCardsInstanced( Scene * scene, const QVector< InstCard > 
 		run += count.at( s );
 	}
 
-	// ---- every card's values: drawCard's own arithmetic (pickCard), into the buffer ----
 	const Resolved rs = resolve( opt );
 	const Vector3 eye = eyeWorld( scene );
+	dumpPicks( scene, cards, opt, rs, eye );
+
+	if ( gpuPick ) {
+		// ---- the GPU pick: a placement's floats once, re-sent where they changed; the visible slots every pass ----
+		int nSlots = int( g.slotData.size() / kSlotFloats );
+		for ( int i = 0; i < cards.size(); i++ )
+			nSlots = qMax( nSlots, cards.at( i ).slot + 1 );
+		g.slotData.resize( size_t( nSlots ) * kSlotFloats, std::numeric_limits< float >::quiet_NaN() );	// NaN: never equal, so sent
+		const size_t listFloats = ( size_t( cards.size() ) + 3 ) / 4 * 4;
+		g.slotList.assign( listFloats, 0.0f );
+		size_t lo = g.slotData.size(), hi = 0;
+		for ( int i = 0; i < cards.size(); i++ ) {
+			const InstCard & c = cards.at( i );
+			const ImpostorCardSet & set = *c.set;
+			frameTableBase( set, opt, g );
+			const float sc = ( c.scale > 0.0f ) ? c.scale : 1.0f;
+			const Vector3 centre = cardCentre( set, Vector3( c.offset[0], c.offset[1], c.offset[2] ), sc );
+			const float v[kSlotFloats] = { centre[0], centre[1], centre[2], set.depthSpan * sc,
+				set.halfW * sc, set.halfH * sc, c.swayOff, sc };
+			float * d = g.slotData.data() + size_t( c.slot ) * kSlotFloats;
+			if ( std::memcmp( d, v, sizeof( v ) ) != 0 ) {
+				std::memcpy( d, v, sizeof( v ) );
+				lo = qMin( lo, size_t( c.slot ) * kSlotFloats );
+				hi = qMax( hi, size_t( c.slot + 1 ) * kSlotFloats );
+			}
+			g.slotList[size_t( fill[groupOfCard.at( i )]++ )] = float( c.slot );
+		}
+		const size_t need = g.slotData.size() + listFloats;
+		fn->glBindBuffer( GL_TEXTURE_BUFFER, g.slotBuf );
+		if ( need > g.slotCap ) {	// grow: a new store, every slot sent
+			g.slotCap = need + need / 2 + 64;
+			fn->glBufferData( GL_TEXTURE_BUFFER, GLsizeiptr( g.slotCap * sizeof( float ) ), nullptr, GL_DYNAMIC_DRAW );
+			lo = 0;
+			hi = g.slotData.size();
+		}
+		if ( hi > lo ) {
+			fn->glBufferSubData( GL_TEXTURE_BUFFER, GLintptr( lo * sizeof( float ) ), GLsizeiptr( ( hi - lo ) * sizeof( float ) ),
+				g.slotData.data() + lo );
+			st.bytes += qint64( ( hi - lo ) * sizeof( float ) );
+		}
+		if ( listFloats ) {
+			fn->glBufferSubData( GL_TEXTURE_BUFFER, GLintptr( g.slotData.size() * sizeof( float ) ),
+				GLsizeiptr( listFloats * sizeof( float ) ), g.slotList.data() );
+			st.bytes += qint64( listFloats * sizeof( float ) );
+		}
+	} else {
+	// ---- every card's values: drawCard's own arithmetic (pickCard), into the buffer ----
 	g.data.resize( size_t( cards.size() ) * kInstTexels * 4 );
 	for ( int i = 0; i < cards.size(); i++ ) {
 		const InstCard & c = cards.at( i );
@@ -1083,6 +1182,8 @@ bool ImpostorDraw::drawCardsInstanced( Scene * scene, const QVector< InstCard > 
 	st.bytes = qint64( g.data.size() * sizeof( float ) );
 	fn->glBindBuffer( GL_TEXTURE_BUFFER, g.dataBuf );
 	fn->glBufferData( GL_TEXTURE_BUFFER, GLsizeiptr( st.bytes ), g.data.data(), GL_STREAM_DRAW );
+	}
+	st.gpuPick = gpuPick;
 	if ( g.tabDirty ) {
 		fn->glBindBuffer( GL_TEXTURE_BUFFER, g.tabBuf );
 		fn->glBufferData( GL_TEXTURE_BUFFER, GLsizeiptr( g.tab.size() * sizeof( float ) ), g.tab.data(), GL_STATIC_DRAW );
@@ -1091,7 +1192,7 @@ bool ImpostorDraw::drawCardsInstanced( Scene * scene, const QVector< InstCard > 
 	fn->glBindBuffer( GL_TEXTURE_BUFFER, 0 );
 	fn->glActiveTexture( GLenum( GL_TEXTURE0 + WwCellUnit::CardData ) );
 	fn->glBindTexture( GL_TEXTURE_BUFFER, g.dataTex );
-	fn->glTexBuffer( GL_TEXTURE_BUFFER, GL_RGBA32F, g.dataBuf );
+	fn->glTexBuffer( GL_TEXTURE_BUFFER, GL_RGBA32F, gpuPick ? g.slotBuf : g.dataBuf );
 	fn->glActiveTexture( GLenum( GL_TEXTURE0 + WwCellUnit::CardFrames ) );
 	fn->glBindTexture( GL_TEXTURE_BUFFER, g.tabTex );
 	fn->glTexBuffer( GL_TEXTURE_BUFFER, GL_RGBA32F, g.tabBuf );
@@ -1121,6 +1222,12 @@ bool ImpostorDraw::drawCardsInstanced( Scene * scene, const QVector< InstCard > 
 	prog->uni1b( "useBakedAo", opt.bakedAo );
 	prog->uni1i( "debugChannel", opt.debugChannel );
 	prog->uni1f( "swayAmplitude", opt.swayAmplitude );
+	if ( gpuPick ) {
+		prog->uni1i( "cardIndexBase", int( g.slotData.size() / 4 ) );
+		prog->uni1f( "cardSwayBase", opt.swayPhase );
+		prog->uni1b( "pickShuffle", opt.shuffleFrames );
+		prog->uni1f( "pickSharpen", rs.sharpen );
+	}
 	glDisable( GL_BLEND );
 	glEnable( GL_DEPTH_TEST );
 	glDepthFunc( GL_LEQUAL );
@@ -1151,6 +1258,13 @@ bool ImpostorDraw::drawCardsInstanced( Scene * scene, const QVector< InstCard > 
 		prog->uni1f( "cardCovBase",  set.covOk() ? float( set.covBase )  / 255.0f : 0.0f );
 		prog->uni1i( "cardBase", first.at( s ) );
 		prog->uni1i( "frameTableBase", g.tabBase.value( &set ) );
+		if ( gpuPick ) {	// the set's own pick: grid side or ring, its convention, the frames it draws
+			prog->uni1i( "pickN", set.oct );
+			prog->uni1i( "pickV", set.views );
+			prog->uni1b( "pickRing", set.ring() );
+			prog->uni1b( "pickAsBaked", effectiveConvention( set, opt ) == ImpostorOct::Convention::AsBaked );
+			prog->uni1i( "pickFrameCount", ImpostorPick::framesDrawn( set.ring(), rs.frameCount ) );
+		}
 		fn->glDrawElementsInstanced( GL_TRIANGLES, 6, GL_UNSIGNED_SHORT, nullptr, GLsizei( count.at( s ) ) );
 		PassTime::countDraw( count.at( s ) );
 		st.draws++;
