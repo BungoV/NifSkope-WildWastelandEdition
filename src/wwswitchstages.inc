@@ -752,6 +752,7 @@
 { "WW_FACEBONES_TEST", 2, "src/nifskope_ui.cpp:3475 NifSkope::createWindow | createWindow: picks which harness the window runs" },
 { "WW_FARCARD", 0, "src/gl/impostordraw.cpp:981 ImpostorDraw::instancedOn | re-read per frame or per call (a)" },
 { "WW_FARCARD_EARLYZ_RED", 0, "src/gl/impostordraw.cpp:1023 ImpostorDraw::drawCardsInstanced | re-read per frame or per call (a)" },
+{ "WW_FARCARD_GPICK", 0, "src/gl/impostordraw.cpp:1030 ImpostorDraw::drawCardsInstanced | re-read per frame or per call (a)" },
 { "WW_FARCARD_PICKDUMP", 1, "src/gl/impostordraw.cpp:913 dumpPicks | read when the renderer is handed the cell (publish/load/build)" },
 { "WW_FARCARD_RED", 0, "src/gl/impostordraw.cpp:981 ImpostorDraw::instancedOn | re-read per frame or per call (a)" },
 { "WW_FARCARD_ZCULL", 0, "src/gl/impostordraw.cpp:1004 ImpostorDraw::drawCardsInstanced | re-read per frame or per call (a)" },

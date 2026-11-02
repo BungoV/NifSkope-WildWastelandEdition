@@ -1025,8 +1025,9 @@ bool ImpostorDraw::drawCardsInstanced( Scene * scene, const QVector< InstCard > 
 	 * billboard from the eye and the card's centre (impostor_pick.glsl, the CPU's arithmetic), so the card buffer
 	 * holds only what a placement IS (centre, half size, depth span, sway offset, scale) and is re-sent only where it
 	 * changed; a pass uploads its visible slots, 4 bytes a card. WW_FARCARD_RED=cpupick: the CPU pick and the 6-texel
-	 * fill every pass, as before. A card without a slot, or a gp twin that does not link, takes the CPU pick too. */
-	WW_SWITCH_STATIC( bool, gpuPickOn, wwSwitchEcho( "far cards GPU pick", wwEnv( "WW_FARCARD_RED" ) != "cpupick" ) );
+	 * fill every pass, as before. A card without a slot, or a gp twin that does not link, takes the CPU pick too.
+	 * Opt-in (WW_FARCARD_GPICK=1) until a live pair proves the same picture in less frame time. */
+	WW_SWITCH_STATIC( bool, gpuPickOn, wwSwitchEcho( "far cards GPU pick", wwEnv( "WW_FARCARD_GPICK" ) == "1" && wwEnv( "WW_FARCARD_RED" ) != "cpupick" ) );
 	bool gpuPick = gpuPickOn;
 	for ( int i = 0; i < cards.size() && gpuPick; i++ )
 		gpuPick = cards.at( i ).slot >= 0;
@@ -1048,7 +1049,8 @@ bool ImpostorDraw::drawCardsInstanced( Scene * scene, const QVector< InstCard > 
 		if ( now != said ) {
 			said = now;
 			qInfo().noquote() << ( gpuPickOn ? QStringLiteral( "far cards: frame pick on the CPU (a card without a slot)" )
-				: QStringLiteral( "far cards: frame pick on the CPU (RED WW_FARCARD_RED=cpupick)" ) );
+				: wwEnv( "WW_FARCARD_RED" ) == "cpupick" ? QStringLiteral( "far cards: frame pick on the CPU (RED WW_FARCARD_RED=cpupick)" )
+				: QStringLiteral( "far cards: frame pick on the CPU (default; WW_FARCARD_GPICK=1 picks on the GPU)" ) );
 		}
 	}
 	if ( !prog )

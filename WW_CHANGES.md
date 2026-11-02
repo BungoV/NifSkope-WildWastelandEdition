@@ -1,4 +1,4 @@
-## FARCARDPICK1 (2026-11-02): the far cards pick their frames on the GPU
+## FARCARDPICK1 (2026-11-02): the far cards can pick their frames on the GPU (opt-in WW_FARCARD_GPICK=1)
 
 The instanced far cards (drawCardsInstanced) used to run selectFrames + pickCard on the CPU for every visible card,
 every frame, and upload six texels a card. Now the vertex stage picks: res/shaders/impostor_pick.glsl (wwCardPick) is
@@ -10,7 +10,8 @@ src/gl/impostorpick.h, shared by pickCard and the unit test. The card buffer is 
 slot list. The sets pass N / V / ring / convention / frame count as uniforms. The programs are twins
 (impostor_cellinstgp / impostor_cellinstezgp: a define plus an include of impostor_inst.vert), so the CPU-pick
 programs' binaries differ only in the source hash.
-Red WW_FARCARD_RED=cpupick: today's CPU pick and its six-texel fill. WW_FARCARD_PICKDUMP=<file> writes the first
+The GPU pick is OPT-IN (WW_FARCARD_GPICK=1) until a live pair shows the same picture in less frame time; the default
+is today's CPU path. Red WW_FARCARD_RED=cpupick: today's CPU pick and its six-texel fill. WW_FARCARD_PICKDUMP=<file> writes the first
 pass's cards with the CPU's answer, for the unit test. tests/farcardpick (farcardpick.sh) runs the shader's wwCardPick
 through the driver (transform feedback, no window) against the shipped CPU code on 46,480 synthetic rows (every grid
 side 2..16, rings of 8..32 views, both conventions, shuffle, three sharpen values, the snap and the blend, the pole,
