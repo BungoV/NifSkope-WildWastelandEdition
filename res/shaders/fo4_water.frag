@@ -114,10 +114,9 @@ uniform int waterRed;		// debug: 1 norefl, 2 nofresnel, 4 nosilt, 8 nospec, 16 n
 uniform bool waterSsrOn;	// this frame's reflections are bound (half the view, top row first)
 uniform sampler2D waterSsrRaw;	// the march
 uniform sampler2D waterSsrFin;	// the march blurred
-#ifdef WW_CELL_RTREFL	// lane RTREFL1: the ray-traced hits (half the view, bottom row first: rgb, a the distance, 0 none)
-uniform bool waterRtOn;
-uniform samplerBuffer waterRt;
-uniform vec4 waterRtSize;
+// lane RTREFL1: the ray-traced hits (half the view, bottom row first: rgb, a the distance, 0 none); RTREFLUNIT1: one file
+#ifdef WW_CELL_RTREFL
+#include "water_rtrefl.glsl"
 #endif
 uniform int waterSslr;		// 1: the reflection-ray pass (waterDepth is then the obscurance pass's linear depth)
 uniform int waterProbe;
@@ -469,21 +468,19 @@ void main()
 	sky *= skyVis;
 #endif
 #ifdef WW_CELL_RTREFL	// lane RTREFL1: a traced hit takes the sky's place (sky visibility stays on the sky share); the march over it
-	if ( waterRtOn && !under ) {
-		vec2 rv = clamp( ( gl_FragCoord.xy - vec2( viewportDimensions.xy ) ) / vec2( viewportDimensions.zw ), 0.0, 1.0 );
+	if ( waterRtOn && !under ) {	// RTREFLUNIT1: water_rtrefl.glsl (tests/rtreflunit)
+		bool rtBent = false;
+		vec2 rtBend = vec2( 0.0 );
 #ifdef WW_WATER_REFL
 		if ( waterSsrFlat ) {
-			vec2 bend = wwWaterSsrBend( R, vec3( V.xy, -V.z ) );
-			rv = clamp( rv + vec2( bend.x, -bend.y ), 0.0, 1.0 );
+			rtBent = true;
+			rtBend = wwWaterSsrBend( R, vec3( V.xy, -V.z ) );
 		}
 #endif
-		ivec2 rs = max( ivec2( waterRtSize.xy ), ivec2( 1 ) );
-		ivec2 rp = clamp( ivec2( rv * vec2( rs ) ), ivec2( 0 ), rs - 1 );
-		vec4 rt = texelFetch( waterRt, rp.y * rs.x + rp.x );
-		float rtHit = rt.a > 0.0 ? 1.0 : 0.0;
-		sky = mix( sky, rt.rgb, rtHit );
+		vec4 rtHit = wwWaterRtHit( gl_FragCoord.xy, rtBent, rtBend, under );
+		sky = wwWaterRtOver( sky, rtHit );
 #ifdef WW_WATER_REFL
-		reflSky = mix( reflSky, rt.rgb, rtHit );
+		reflSky = wwWaterRtOver( reflSky, rtHit );
 #endif
 	}
 #endif

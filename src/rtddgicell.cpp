@@ -1563,6 +1563,16 @@ bool rtddgiReflTexture( Scene * scene, unsigned int & tex, int & w, int & h )
 	return true;
 }
 
+void rtddgiReflFullSize( int & w, int & h )
+{
+	// RTREFLUNIT1: the water pairs its full-size pixel 2 x 2 as refl.comp reflPick does; the red scales the half size
+	// (RTREFL1's rule: on an odd width or height, one texel off past mid-view)
+	WW_SWITCH_STATIC( bool, texelRed, wwEnv( "WW_CELL_RTREFL_TEXEL_RED" ).trimmed() == "1" );
+	const ReflGl & G = reflGl();
+	w = texelRed ? 0 : G.W;
+	h = texelRed ? 0 : G.H;
+}
+
 bool rtddgiCellPinned()
 {
 	return wwEnvIsSet( "WW_CELL_RTDDGI" );
