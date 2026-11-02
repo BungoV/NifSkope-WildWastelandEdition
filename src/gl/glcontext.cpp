@@ -439,6 +439,10 @@ bool NifSkopeOpenGLContext::Shader::load( const QString & filepath )
 			// lane RTXCASCADE1: 2..4 nested volumes (cell_ddgi.glsl's cascades' read); 1 = M3's program, not a line added
 			if ( rtddgiCellCascades() > 1 )
 				data.insert( data.indexOf( '\n' ) + 1, "#define WW_CELL_RTDDGI_CASCADES 1\n" );
+			/* lane DDGIREADPERF1: fo4_cell / pbrm_cell read the volume once (cellGiFirst); WW_CELL_RTDDGI_ONEREAD=0 is the red
+			 * (a read inlined at every cellGiSample site, main before the lane). Not static: a set reloads the shaders */
+			if ( qgetenv( "WW_CELL_RTDDGI_ONEREAD" ).trimmed() == "0" && data.contains( "_CELL_GI_ONEREAD" ) )
+				data.insert( data.indexOf( '\n' ) + 1, "#define WW_CELL_GI_ONEREAD_RED 1\n" );
 		}
 		// lane RESTIRDI1: the RT quality preset's ray-traced shadow ratio (cell_lights.glsl cellShadowF); not static: the row reloads
 		if ( !giMarch && rtddgiRestirShaderDefine() && data.startsWith( "#version" ) && data.contains( "_CELL_RESTIR" ) )

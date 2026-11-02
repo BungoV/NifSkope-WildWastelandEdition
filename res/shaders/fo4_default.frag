@@ -302,6 +302,7 @@ vec3 tonemap(vec3 x)
 #ifndef WW_CELL_GI_MARCH_COPIES	// red (tests/spells/cell_giblack_link.sh): a march copy per call site, over the link limit
 #define WW_CELL_GI_MARCH_ONCE 1	// lane GIBLACKLINK1: the march red runs once (cellGiMarchPrime in main)
 #endif
+#define CELL_GI_ONEREAD 1	// DDGIREADPERF1: one volume read site (cellGiFirst in main, cell_lights.glsl)
 #include "cell_lights.glsl"
 #include "cell_reflprobe.glsl"
 #include "cell_ao.glsl"
@@ -792,6 +793,15 @@ void main()
 	// Environment
 	float specSky = 1.0;	// lane SPECOCC1: outdoors the cube reflection keeps the sky visibility along R (cell_lights.glsl)
 #ifdef WW_CELLLIGHTS
+#ifdef CELL_GI_ONE
+	/* DDGIREADPERF1: the one volume read, at the P and N every later site asks for (cellSpecSky, cellGiSkyK, cellLit's
+	 * cellGiE, the probe and pass views; the PROBEVIEW1 pass red's up normal included); they then take its answer */
+	if ( cellOn )
+		cellGiFirst( cellWorldPos( -ViewDir ), cellWorldDir( normal ),
+		             cellPass > 0 && cellPass != 6 && cellProbe == 0 && ( cellPassRed & 2 ) != 0 ? vec3( 0.0, 0.0, 1.0 ) : cellWorldDir( normal ),
+		             cellWorldDir( R ), rough );
+	cellGiOneRead = true;
+#endif
 	if ( cellOn )
 		specSky = cellSpecSky( cellWorldPos( -ViewDir ), cellWorldDir( normal ), cellWorldDir( R ), rough );
 #endif

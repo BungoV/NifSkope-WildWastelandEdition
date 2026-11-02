@@ -133,6 +133,20 @@ storey of a column, eye + 32 of headroom at least) instead of on the topmost sur
 `--red roof` gives the old cameras. tests/reflcensus/run.sh gains a two-storey box and that red. Museum (`--auto 6`):
 49 cameras instead of 29; hits 44.4 % (was 33.1 %), sky misses 26.1 % (was 42.4 %), below-horizon misses 29.5 % (was
 24.5 %, of them past the soup 452630, was 244631); the red reproduces the old run to the texel.
+## DDGIREADPERF1 (2026-11-02): the cell programs read the GI volume at one site
+
+The Museum of Freedom interior at Medium spent ~102 ms in the opaque pass with the ray-traced GI volume on and ~12 with
+it off, while the screen pass that reads the volume (PERFFIX2) costs under 1 ms. The cost was the read's CODE, not its
+work: fo4_cell inlined the read at each of its cellGiSample sites (cellGiSkyK, cellLit's cellGiE, the probe and pass
+views) and its light loop ran 1.8x slower with no read executed (offline, 300 lights at 1920x1045: 40 ms off, 72 ms
+with the volume compiled in). Now fo4_default.frag and pbrm_default.frag define CELL_GI_ONEREAD and call cellGiFirst
+once in main: it reads the volume at the P and N every later site asks for, takes cellSpecSky's lobe visibility in the
+same read (FIX1101A's two-direction read), and leaves the memo; after it the sites compile to the memo alone. Same
+call, same arguments: the values are the ones the old sites read. Offline bench (fo4_cell, 300 lights): ReSTIR preset
+(Medium+) 72.6 -> 50.4 ms, cascades only (Low) 72.7 -> 50.1; pbrm_cell ReSTIR 59.6 -> 38.2 (Low unchanged, 56.2).
+Red `WW_CELL_RTDDGI_ONEREAD=0` (the loader's `WW_CELL_GI_ONEREAD_RED`): a read at every site, main's machine code
+(binaries identical but the hash, 47 programs x 3 RT sets). The FIX1101A slowread red now needs the red too. With the
+volume off every program is main's (141 binaries identical).
 
 ## REFLPROBECLI1 (TOOLS1101, 2026-11-01): count the reflection probes' below-horizon misses without a window
 
