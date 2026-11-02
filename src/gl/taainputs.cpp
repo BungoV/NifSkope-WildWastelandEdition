@@ -171,6 +171,8 @@ struct InState
 	quint64 step = 0;
 	bool haveVP = false;
 	Dmat curVP = Dmat::identity(), prevVP = Dmat::identity();
+	Matrix4 camReproj;	// lane POSTFX1: the camera vectors' reprojection and jitter of the last pass (wwTaaInputsCamera)
+	float camJit[2] = { 0.0f, 0.0f };
 	QHash<const Shape *, ShapeRec> shapes;
 
 	QHash<Scene *, QVector<Node *>> blended;
@@ -334,6 +336,17 @@ unsigned wwTaaInputsMaskTex( Scene * scene, int & w, int & h )
 	w = it->w;
 	h = it->h;
 	return it->mask;
+}
+
+bool wwTaaInputsCamera( Scene * scene, float reproj[16], float & jitX, float & jitY )
+{
+	int w = 0, h = 0;
+	if ( !wwTaaInputsVelocityTex( scene, w, h ) )
+		return false;
+	std::memcpy( reproj, st().camReproj.data(), 16 * sizeof( float ) );
+	jitX = st().camJit[0];
+	jitY = st().camJit[1];
+	return true;
 }
 
 QString wwTaaInputsEcho()
@@ -612,6 +625,9 @@ void wwTaaInputsPass( Scene * scene )
 		Dmat invCur, reproj = Dmat::identity();
 		if ( camOk && invert( curVP, invCur ) )
 			reproj = s.prevVP * invCur;
+		s.camReproj = toMatrix4( reproj );
+		s.camJit[0] = jx;
+		s.camJit[1] = jy;
 		fn->glBindFramebuffer( GL_FRAMEBUFFER, g.camFbo );
 		const GLenum one = GL_COLOR_ATTACHMENT0;
 		fn->glDrawBuffers( 1, &one );

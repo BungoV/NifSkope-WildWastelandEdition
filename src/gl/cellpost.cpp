@@ -1,6 +1,8 @@
 #include "cellpost.h"
 #include "wwswitch.h"	// lane TESTDRIVER1: the WW_* switch store
 #include "gl/celllooks.h"	// lane OPENCELLFIX2: the Camera master
+#include "gl/cellpasstime.h"	// lane POSTFX1: the post zone's sub-timers
+#include "gl/taainputs.h"	// lane POSTFX1: the object vectors
 
 #include "esmdata.h"
 #include "gl/gametaa.h"
@@ -31,6 +33,14 @@ namespace {
 
 const char * const kDofKey = "WW/CellDof";
 const char * const kMblurKey = "WW/CellMotionBlur";
+const char * const kObKey = "WW/CellObjectBlur";
+
+// lane POSTFX1: the object blur's rulings (notes/postfx1/RESULTS.md): a 180 degree shutter (half the frame's travel),
+// at most 32 px, 16 px tiles (the neighbour max reaches 3 tiles), 15 taps
+constexpr float kObShutter = 0.5f;
+constexpr float kObMaxPx = 32.0f;
+constexpr int kObTile = 16;
+constexpr int kObSamples = 15;
 
 // the game's motion blur: scale (50, times the literal 0.001 and
 // 1 / the frame time), its max blur (0.01) and fThreshold (70)
@@ -149,6 +159,9 @@ struct PostGpu
 	int qw[2] = { 0, 0 }, qh[2] = { 0, 0 };	// tex2 = (ceil(W / 4), ceil(H / 4)), tex3 = (W >> 2, H >> 2)
 	GLenum dsFormat = 0;
 	GLbitfield depthBits = 0;
+	GLenum mvFormat = 0;	// lane POSTFX1: RG16F (red WW_CELL_MBLUR_RED=rg32: RG32F)
+	GLuint obVec = 0, obTile[2] = { 0, 0 };	// lane POSTFX1: the object blur's pixel vectors, tile max, neighbour max
+	int obTw = 0, obTh = 0;
 };
 
 struct PostState
@@ -157,6 +170,7 @@ struct PostState
 	quint64 liveGen = 0;	// lane TESTDRIVER1: the switch generation last read
 	bool dof = false, dofPinned = false, mb = false, mbPinned = false;
 	bool redNoCoc = false, redNoVelocity = false, redNoJitter = false, redBlurRow = false;
+	bool ob = false, obPinned = false, redObCamera = false, redRg32 = false;	// lane POSTFX1
 	QString dumpDir;
 	int dumpFrame = 2;
 
@@ -175,8 +189,8 @@ struct PostState
 	int lastFrame = 0, lastW = 0, lastH = 0;
 	Dmat lastVP = Dmat::identity(), lastPrevVP = Dmat::identity();
 
-	QString lastDof = QStringLiteral( "off" ), lastMb = QStringLiteral( "off" );
-	QString saidDof, saidMb;
+	QString lastDof = QStringLiteral( "off" ), lastMb = QStringLiteral( "off" ), lastOb = QStringLiteral( "off" );
+	QString saidDof, saidMb, saidOb;
 };
 
 bool readPin( const char * env, const char * key, bool & pinned )
@@ -198,7 +212,7 @@ PostState & ps()
 {
 	static PostState s;
 	// lane TESTDRIVER1: a live set of these switches re-reads them (pins and or-ed reds back to their defaults first)
-	if ( !s.init || wwSwitchMovedFor( s.liveGen, { "WW_CELL_DOF", "WW_CELL_MBLUR", "WW_CELL_POST" } ) ) {
+	if ( !s.init || wwSwitchMovedFor( s.liveGen, { "WW_CELL_DOF", "WW_CELL_MBLUR", "WW_CELL_POST", "WW_CELL_OBJBLUR" } ) ) {
 		s.init = true;
 		s.liveGen = wwSwitchGen();
 		{
@@ -211,6 +225,9 @@ PostState & ps()
 		s.redBlurRow = wwEnvStr( "WW_CELL_DOF_RED" ).contains( QLatin1StringView( "blurrow" ) );
 		s.redNoVelocity = wwEnvStr( "WW_CELL_MBLUR_RED" ).contains( QLatin1StringView( "novelocity" ) );
 		s.redNoJitter = wwEnvStr( "WW_CELL_MBLUR_RED" ).contains( QLatin1StringView( "nojitter" ) );
+		s.redRg32 = wwEnvStr( "WW_CELL_MBLUR_RED" ).contains( QLatin1StringView( "rg32" ) );
+		s.ob = readPin( "WW_CELL_OBJBLUR", kObKey, s.obPinned );
+		s.redObCamera = wwEnvStr( "WW_CELL_OBJBLUR_RED" ).contains( QLatin1StringView( "camera" ) );
 		s.dumpDir = wwEnvStr( "WW_CELL_POST_DUMP" ).trimmed();
 		bool ok = false;
 		const int df = wwEnvStr( "WW_CELL_POST_DUMP_FRAME" ).toInt( &ok );
@@ -245,6 +262,15 @@ void noteMb( PostState & s, const QString & line, const QString & key )
 	}
 }
 
+void noteOb( PostState & s, const QString & line, const QString & key )
+{
+	s.lastOb = line;
+	if ( s.saidOb != key ) {
+		s.saidOb = key;
+		qInfo().noquote() << "cell objblur:" << line;
+	}
+}
+
 GLuint makeTex( Renderer * r, GLenum internal, GLenum format, GLenum type, int w, int h, GLenum filter )
 {
 	auto fn = r->fn;
@@ -266,11 +292,12 @@ GLuint makeTex( Renderer * r, GLenum internal, GLenum format, GLenum type, int w
 void freeGpu( Renderer * r, PostGpu & g )
 {
 	auto fn = r->fn;
-	GLuint texs[6] = { g.cur, g.depth, g.blur[0], g.blur[1], g.mv, g.out };
+	GLuint texs[9] = { g.cur, g.depth, g.blur[0], g.blur[1], g.mv, g.out, g.obVec, g.obTile[0], g.obTile[1] };
 	for ( GLuint t : texs )
 		if ( t )
 			fn->glDeleteTextures( 1, &t );
 	g.cur = g.depth = g.blur[0] = g.blur[1] = g.mv = g.out = 0;
+	g.obVec = g.obTile[0] = g.obTile[1] = 0;
 }
 
 // a float32 dump: int32 w h channels, then rows bottom-up (GL order), channels interleaved (the TAA dump's format)
@@ -371,6 +398,19 @@ void wwCellMotionBlurSetOn( bool on )
 		QSettings().setValue( QLatin1StringView( kMblurKey ), on );
 }
 
+bool wwCellObjectBlurOn()
+{
+	return ps().ob;	// not the game's: no Camera (vanilla) master
+}
+
+void wwCellObjectBlurSetOn( bool on )
+{
+	PostState & s = ps();
+	s.ob = on;
+	if ( !s.obPinned )
+		QSettings().setValue( QLatin1StringView( kObKey ), on );
+}
+
 void wwCellPostSetCell( const EsmWorld & world, bool interior )
 {
 	PostState & s = ps();
@@ -422,7 +462,7 @@ void wwCellPostSetPath( int frame, float fps )
 QString wwCellPostEcho()
 {
 	const PostState & s = ps();
-	return QStringLiteral( "cell dof: %1 | cell mblur: %2" ).arg( s.lastDof, s.lastMb );
+	return QStringLiteral( "cell dof: %1 | cell mblur: %2 | cell objblur: %3" ).arg( s.lastDof, s.lastMb, s.lastOb );
 }
 
 void wwCellPostApply( Scene * scene )
@@ -432,8 +472,12 @@ void wwCellPostApply( Scene * scene )
 		s.lastDof = QStringLiteral( "off" );
 	if ( !s.mb )
 		s.lastMb = QStringLiteral( "off" );
-	if ( ( !s.dof && !s.mb ) || !scene || !scene->renderer || scene->selecting )
+	if ( !s.ob )
+		s.lastOb = QStringLiteral( "off" );
+	if ( ( !s.dof && !s.mb && !s.ob ) || !scene || !scene->renderer || scene->selecting )
 		return;
+	if ( s.ob )
+		wwTaaInputsRequest();	// lane POSTFX1: the object vectors of the NEXT frame (the inputs ran before this pass)
 	Renderer * r = scene->renderer;
 	auto fn = r->fn;
 	while ( fn->glGetError() != GL_NO_ERROR ) {
@@ -560,7 +604,30 @@ void wwCellPostApply( Scene * scene )
 				.arg( s.redNoVelocity ? 1 : 0 ) );
 		}
 	}
-	if ( !runDof && !runMb )
+	// lane POSTFX1: the object blur's verdict: this frame's object vectors and the camera they were drawn with
+	bool runOb = false;
+	GLuint obVel = 0, obMask = 0;
+	float obReproj[16] = {};
+	float obJx = 0.0f, obJy = 0.0f;
+	if ( s.ob ) {
+		int vw = 0, vh = 0, mw = 0, mh = 0;
+		obVel = wwTaaInputsVelocityTex( scene, vw, vh );
+		obMask = wwTaaInputsMaskTex( scene, mw, mh );
+		if ( !perspective ) {
+			noteOb( s, QStringLiteral( "refused (an orthographic view)" ), QStringLiteral( "ortho" ) );
+		} else if ( !obVel || !obMask || !wwTaaInputsCamera( scene, obReproj, obJx, obJy ) ) {
+			noteOb( s, QStringLiteral( "waiting (no object vectors this frame)" ), QStringLiteral( "waiting" ) );
+		} else if ( vw != W || vh != H || mw != W || mh != H ) {
+			noteOb( s, QStringLiteral( "refused (vectors %1x%2, frame %3x%4)" ).arg( vw ).arg( vh ).arg( W ).arg( H ),
+				QStringLiteral( "size" ) );
+		} else {
+			runOb = true;
+			noteOb( s, QStringLiteral( "on shutter %1 max %2 px tile %3 taps %4%5" ).arg( f9( kObShutter ), f9( kObMaxPx ) )
+				.arg( kObTile ).arg( kObSamples ).arg( s.redObCamera ? QStringLiteral( " RED camera" ) : QString() ),
+				QStringLiteral( "on %1" ).arg( s.redObCamera ? 1 : 0 ) );
+		}
+	}
+	if ( !runDof && !runMb && !runOb )
 		return;
 
 	// the frame's depth format: the depth goes over by a blit, which needs the same format both sides
@@ -589,11 +656,16 @@ void wwCellPostApply( Scene * scene )
 			noteDof( s, why );
 		if ( runMb )
 			noteMb( s, why, why );
+		if ( runOb )
+			noteOb( s, why, why );
 		return;
 	}
 
 	PostGpu & g = postGpus()[r];
-	if ( !g.inFbo || g.w != W || g.h != H || g.dsFormat != dsFormat ) {
+	// lane POSTFX1: the camera vectors in RG16F (the inputs' format; the game's motion blur reads them within 0.5 of an
+	// 8-bit step on 99.99% of pixels, tests/postfx/postfx_gates.py); red WW_CELL_MBLUR_RED=rg32 keeps RG32F
+	const GLenum mvFormat = s.redRg32 ? GL_RG32F : GL_RG16F;
+	if ( !g.inFbo || g.w != W || g.h != H || g.dsFormat != dsFormat || g.mvFormat != mvFormat ) {
 		freeGpu( r, g );
 		if ( !g.inFbo ) {
 			fn->glGenFramebuffers( 1, &g.inFbo );
@@ -609,8 +681,9 @@ void wwCellPostApply( Scene * scene )
 		g.depth = makeTex( r, dsFormat, dsFmt, dsType, W, H, GL_NEAREST );					// the DoF's t2
 		g.blur[0] = makeTex( r, GL_RGBA16F, GL_RGBA, GL_FLOAT, g.qw[0], g.qh[0], GL_NEAREST );	// tex2, the DoF's t1
 		g.blur[1] = makeTex( r, GL_RGBA16F, GL_RGBA, GL_FLOAT, g.qw[1], g.qh[1], GL_NEAREST );	// tex3
-		g.mv = makeTex( r, GL_RG32F, GL_RG, GL_FLOAT, W, H, GL_LINEAR );					// the blur's t1
+		g.mv = makeTex( r, mvFormat, GL_RG, GL_FLOAT, W, H, GL_LINEAR );					// the blur's t1
 		g.out = makeTex( r, GL_RGBA16F, GL_RGBA, GL_FLOAT, W, H, GL_LINEAR );
+		g.mvFormat = mvFormat;
 		fn->glBindFramebuffer( GL_FRAMEBUFFER, g.inFbo );
 		fn->glFramebufferTexture2D( GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, g.cur, 0 );
 		fn->glFramebufferTexture2D( GL_FRAMEBUFFER, dsFmt == GL_DEPTH_STENCIL ? GL_DEPTH_STENCIL_ATTACHMENT : GL_DEPTH_ATTACHMENT,
@@ -621,6 +694,13 @@ void wwCellPostApply( Scene * scene )
 		g.h = H;
 		g.dsFormat = dsFormat;
 		g.depthBits = blitBits;
+	}
+	if ( runOb && !g.obVec ) {	// lane POSTFX1: made on the first frame that blurs (freed with the rest on a resize)
+		g.obTw = ( W + kObTile - 1 ) / kObTile;
+		g.obTh = ( H + kObTile - 1 ) / kObTile;
+		g.obVec = makeTex( r, GL_RG16F, GL_RG, GL_FLOAT, W, H, GL_NEAREST );
+		g.obTile[0] = makeTex( r, GL_RG16F, GL_RG, GL_FLOAT, g.obTw, g.obTh, GL_NEAREST );
+		g.obTile[1] = makeTex( r, GL_RG16F, GL_RG, GL_FLOAT, g.obTw, g.obTh, GL_NEAREST );
 	}
 
 	// state kept for the restore
@@ -680,6 +760,7 @@ void wwCellPostApply( Scene * scene )
 		fn->glTexParameteri( GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GLint( f ) );
 	};
 	if ( ok && runDof ) {
+		PassTime::subBegin( PassTime::PostDof );
 		target( g.blur[0] );
 		fn->glViewport( 0, 0, g.qw[0], g.qh[0] );
 		auto prog = r->useProgram( "game_dof_down.prog" );
@@ -764,10 +845,12 @@ void wwCellPostApply( Scene * scene )
 			fn->glDrawBuffers( 1, &one );
 			fn->glBlitFramebuffer( 0, 0, W, H, 0, 0, W, H, GL_COLOR_BUFFER_BIT, GL_NEAREST );
 		}
+		PassTime::subEnd( PassTime::PostDof );
 	}
 
 	// 3. the motion blur: the camera's vectors (the temporal AA's vector pass), then the game's blur into out
 	if ( ok && runMb ) {
+		PassTime::subBegin( PassTime::PostMblur );
 		fn->glBindFramebuffer( GL_FRAMEBUFFER, g.mvFbo );
 		fn->glDrawBuffers( 1, &one );
 		if ( s.redNoVelocity ) {
@@ -810,6 +893,73 @@ void wwCellPostApply( Scene * scene )
 		}
 		if ( ok && dump )
 			dumpFloat( dd + "mb_out.bin", W, H, 4, readTex( r, g.fbo, g.out, false, GL_RGBA, 4, W, H ) );
+		PassTime::subEnd( PassTime::PostMblur );
+	}
+
+	// 3b. lane POSTFX1: the object blur on the picture so far (out after the motion blur, else cur): the pixel
+	// vectors without the camera, the tile max and the neighbour max, then the gather into the other texture
+	GLuint picture = runMb ? g.out : g.cur;
+	if ( ok && runOb ) {
+		PassTime::subBegin( PassTime::PostObjBlur );
+		const GLuint dst = runMb ? g.cur : g.out;
+		auto pass = [&]( const char * name, GLuint into, int w, int h, auto && set ) {
+			if ( !ok )
+				return;
+			target( into );
+			fn->glViewport( 0, 0, w, h );
+			auto prog = r->useProgram( name );
+			if ( !prog ) {
+				ok = false;
+				return;
+			}
+			set( prog );
+			r->drawShape( 4, 3, 6, GL_TRIANGLES, GL_UNSIGNED_SHORT, &attrs, idx );
+			r->stopProgram();
+		};
+		pass( "cell_objblur_vec.prog", g.obVec, W, H, [&]( auto * p ) {
+			bind( kUnitMv, obVel );
+			bind( kUnitBlur, obMask );
+			bind( kUnitDepth, g.depth );
+			p->uni1i( "velTex", kUnitMv );
+			p->uni1i( "maskTex", kUnitBlur );
+			p->uni1i( "depthTex", kUnitDepth );
+			p->uni4m( "reproj", Matrix4( obReproj ) );
+			p->uni2f( "jitterNdc", obJx, obJy );
+			p->uni2f( "invSize", 1.0f / float( W ), 1.0f / float( H ) );
+			p->uni1f( "shutter", kObShutter );
+			p->uni1f( "maxPx", kObMaxPx );
+			p->uni1i( "objRed", s.redObCamera ? 1 : 0 );
+		} );
+		for ( int mode = 0; mode < 2; mode++ )
+			pass( "cell_objblur_tile.prog", g.obTile[mode], g.obTw, g.obTh, [&]( auto * p ) {
+				bind( kUnitMv, mode ? g.obTile[0] : g.obVec );
+				p->uni1i( "srcTex", kUnitMv );
+				p->uni1i( "tile", kObTile );
+				p->uni1i( "tileMode", mode );
+			} );
+		pass( "cell_objblur.prog", dst, W, H, [&]( auto * p ) {
+			bind( kUnitCur, picture );
+			bind( kUnitBlur, g.obVec );
+			bind( kUnitMv, g.obTile[1] );
+			bind( kUnitDepth, g.depth );
+			p->uni1i( "colTex", kUnitCur );
+			p->uni1i( "blurTex", kUnitBlur );
+			p->uni1i( "neighTex", kUnitMv );
+			p->uni1i( "depthTex", kUnitDepth );
+			p->uni1i( "tile", kObTile );
+			p->uni1i( "samples", kObSamples );
+			p->uni1f( "zNear", zNear );
+			p->uni1f( "zFar", zFar );
+			p->uni1f( "noiseSeed", float( frame % 8 ) * 0.125f );
+		} );
+		fn->glViewport( vp[0], vp[1], vp[2], vp[3] );
+		if ( ok && dump ) {
+			dumpFloat( dd + "ob_vec.bin", W, H, 2, readTex( r, g.fbo, g.obVec, false, GL_RG, 2, W, H ) );
+			dumpFloat( dd + "ob_out.bin", W, H, 4, readTex( r, g.fbo, dst, false, GL_RGBA, 4, W, H ) );
+		}
+		if ( ok )
+			picture = dst;
+		PassTime::subEnd( PassTime::PostObjBlur );
 	}
 
 	if ( ok && dump ) {
@@ -838,7 +988,7 @@ void wwCellPostApply( Scene * scene )
 		if ( !prog ) {
 			ok = false;
 		} else {
-			bind( kUnitCur, runMb ? g.out : g.cur );	// after the DoF alone its picture is already in cur
+			bind( kUnitCur, picture );	// after the DoF alone its picture is already in cur
 			prog->uni1i( "srcTex", kUnitCur );
 			r->drawShape( 4, 3, 6, GL_TRIANGLES, GL_UNSIGNED_SHORT, &attrs, idx );
 			r->stopProgram();
@@ -862,10 +1012,12 @@ void wwCellPostApply( Scene * scene )
 	if ( !ok ) {
 		s.haveLast = false;
 		const QString why = blitErr != GL_NO_ERROR ? QStringLiteral( "refused (the frame's blit failed, GL error %1)" ).arg( blitErr )
-			: QStringLiteral( "refused (a game_dof / game_mblur program is missing)" );
+			: QStringLiteral( "refused (a game_dof / game_mblur / cell_objblur program is missing)" );
 		if ( runDof )
 			noteDof( s, why );
 		if ( runMb )
 			noteMb( s, why, why );
+		if ( runOb )
+			noteOb( s, why, why );
 	}
 }

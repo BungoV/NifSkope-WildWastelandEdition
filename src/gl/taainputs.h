@@ -28,6 +28,9 @@ void wwTaaInputsView( Scene * scene );
 //! This frame's textures (0 when not produced this frame) and their size.
 unsigned wwTaaInputsVelocityTex( Scene * scene, int & w, int & h );
 unsigned wwTaaInputsMaskTex( Scene * scene, int & w, int & h );
+//! lane POSTFX1: the reprojection (column-major, game_taa_mv's reproj) and NDC jitter this frame's camera vectors
+//! used, so a consumer takes the camera out of the velocity exactly; false when no velocity was produced this frame.
+bool wwTaaInputsCamera( Scene * scene, float reproj[16], float & jitX, float & jitY );
 //! One line: what the last pass drew and cost, or why it did not run.
 QString wwTaaInputsEcho();
 

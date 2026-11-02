@@ -1,3 +1,19 @@
+## POSTFX1 (2026-11-02): per-object motion blur (never the camera), RG16F game blur vectors, post sub-timers
+
+New "Object motion blur" (cell Show menu, under the vanilla camera master; switch WW_CELL_OBJBLUR, key
+WW/CellObjectBlur, default OFF until bungo has looked at it). It blurs only what moves on its own: the camera's own
+motion is taken out of TAAINPUTS1's velocity with that pass's reprojection and jitter, so a turning or walking camera
+blurs nothing. Four passes (cell_objblur_vec, two cell_objblur_tile, cell_objblur): vector in pixels times a 0.5
+shutter, clamped to 32 px; 16 px tile max; 3x3 neighbour max; a 15-tap gather where each tap is an equal share of
+the shutter and counts by depth order and pixel coverage (a still frame is copied bit-exact). It runs after the
+game's DoF and motion blur and before the TAA resolve; it asks TAAINPUTS1 for vectors every frame it is on.
+Red WW_CELL_OBJBLUR_RED=camera (the camera motion kept in: the old whole-screen blur).
+The game motion blur's vector target is RG16F instead of RG32F (half the bandwidth; red WW_CELL_MBLUR_RED=rg32).
+Pass timer subs post-dof, post-mblur, post-objblur, post-flare split the post zone.
+Gates tests/postfx/postfx_gates.py (the real shaders in a hidden GL 4.1 context): still frame max diff 0, camera pan
+blur 0.000 px (red 2.556), a self-moving bar's edge 3.704 px (want 3.2..5.0 for 0.5 x 8 px), RG16F vs RG32F
+0.0069% of pixels >= 0.5 step (an 8-bit vector red reads 9.18%); 0.19 ms at 1080p.
+
 ## REFLPROBECLI1 (TOOLS1101, 2026-11-01): count the reflection probes' below-horizon misses without a window
 
 `nifskope -no-gui reflcensus --soup <soup.psp> (--camera x,y,z ... | --auto N) [--interior] [--out probes.tsv]` places
