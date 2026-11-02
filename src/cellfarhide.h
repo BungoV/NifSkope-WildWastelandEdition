@@ -47,6 +47,12 @@ const Hidden * hiddenFor( const void * doc );
 void setCell( const void * doc, int x, int y, bool hide, const QVector<quint32> & refs );
 //! Forget the document (its stream stopped)
 void clear( const void * doc );
+/*! lane GEOLOD1 (LARGEREF1): REFRs drawn full outside the loaded cells (large refs); their far rows hide as a listed
+ *  REFR's do. Refs only: no cell joins `cells`, so no far terrain is masked. A new call replaces the last list; an
+ *  empty list on a document never given one is a no-op. Red WW_CELL_LARGEREFS_RED=nohide: nothing is hidden. */
+void setExtraRefs( const void * doc, const QVector<quint32> & refs );
+//! lane GEOLOD1: WW_CELL_LARGEREFS=1 draws the large refs full (the game's bDisableLargeRefs default 1 = off)
+bool largeRefsWanted();
 
 //! Pure: is row i of an instanced bucket hidden by `h` in `mode`
 bool rowHidden( const CellMeshInst & d, int row, const Hidden & h, int mode );

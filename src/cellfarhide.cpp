@@ -20,7 +20,15 @@ struct Doc
 {
 	CellFarHide::Hidden h;
 	QHash<int, MaskInfo> masks;
+	QVector<quint32> extra;   //!< lane GEOLOD1: setExtraRefs' list, counted in h.refs
 };
+
+// one counter for every document and clear(): a set made again must never repeat a key the row caches hold
+quint64 nextGen()
+{
+	static quint64 gens = 0;
+	return ++gens;
+}
 
 std::map<const void *, Doc> & docs()
 {
@@ -83,14 +91,43 @@ void setCell( const void * doc, int x, int y, bool hide, const QVector<quint32> 
 				h.refs.erase( it );
 		}
 	}
-	// one counter for every document and clear(): a set made again must never repeat a key the row caches hold
-	static quint64 gens = 0;
-	h.gen = ++gens;
+	h.gen = nextGen();
 }
 
 void clear( const void * doc )
 {
 	docs().erase( doc );
+}
+
+void setExtraRefs( const void * doc, const QVector<quint32> & refs )
+{
+	if ( !doc )
+		return;
+	WW_SWITCH_STATIC( bool, nohide, wwEnv( "WW_CELL_LARGEREFS_RED" ) == "nohide" );
+	if ( nohide || ( refs.isEmpty() && !docOf( doc ) ) )
+		return;
+	Doc & d = docs()[doc];
+	if ( refs.isEmpty() && d.extra.isEmpty() )
+		return;
+	Hidden & h = d.h;
+	for ( quint32 r : d.extra ) {
+		auto it = h.refs.find( r );
+		if ( it != h.refs.end() && --it.value() <= 0 )
+			h.refs.erase( it );
+	}
+	d.extra.clear();
+	for ( quint32 r : refs )
+		if ( r ) {
+			h.refs[r]++;
+			d.extra << r;
+		}
+	h.gen = nextGen();
+}
+
+bool largeRefsWanted()
+{
+	WW_SWITCH_STATIC( bool, on, wwEnvInt( "WW_CELL_LARGEREFS" ) != 0 );
+	return on;
 }
 
 bool rowHidden( const CellMeshInst & d, int row, const Hidden & h, int mode )

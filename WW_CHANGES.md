@@ -1,3 +1,27 @@
+## LODMAPS-OFFKEYS (GEOLOD1, 2026-11-02): one off key per far map
+
+`WW_CELL_FARLOD_RED=noterrain | noobjects | nocards` turns off one far map, for pictures that show each map's share:
+noterrain builds the rings as before (their cuts stand) but hides every far terrain shape, ours and the game's, and
+skips ring 0's live ground; noobjects skips our .lodi objects and hides the game's .bto object shapes; nocards arms
+no tree cards. Each prints a `far lod: ... OFF (red ...)` line. The far build re-reads the key, so a live rebuild
+takes it. Any other value builds what it built.
+
+## LARGEREF1 (GEOLOD1, 2026-11-02): large references drawn full past the loaded block (switch, default off)
+
+A worldspace's WRLD record lists its large references in RNAM subrecords: per grid cell, the refs that cell keeps
+drawn at full detail wherever they stand. The layout, measured on Fallout4.esm (Commonwealth: 7111 subrecords, 63954
+rows, 9624 refs, all STAT): int16 gridY, int16 gridX, uint32 count, then per ref uint32 form, int16 cellY, int16 cellX.
+Read Y,X, all 63954 rows put the ref in the cell its position says; read X,Y only 911 do. `src/largeref.h` decodes it
+and holds the rule: a large ref is drawn full while any cell whose RNAM lists it is loaded (the grid offset runs 0..9
+cells; a 5x5 block promotes 17 to 46 refs standing 3 to 7 cells outside it). EsmWorld reads the rows at load
+(`largeRefRows()`, `refrByForm()`). With `WW_CELL_LARGEREFS=1` the fixed open places those refs (the cell census
+prints `cell large refs: N drawn full outside the block ...`) and `CellFarHide::setExtraRefs` hides their far copies
+in the instanced far rings, as a loaded cell's refs are hidden. Off by default: the game's `bDisableLargeRefs:General`
+is 1 in the exe, so vanilla draws none. The streamed view does not place them yet. `farobjcensus ... --loaded` with
+`WW_CELL_LARGEREFS=1` prints a `farhide large refs step` line per step (far rows of them still drawn must be 0, refs
+not found where RNAM says must be 0). Reds: `WW_CELL_LARGEREFS_RED=xy` (read X,Y), `=nohide` (far copies stay).
+tests/largeref/run.sh is the unit test (its red reads X,Y and fails).
+
 ## FARTILESPLIT (SHADOWSHIMMER5, 2026-11-02): the instanced far rows' cull tiles are 2 x 2 cells, not 4 x 4
 
 The instanced far-ring buckets group their rows into tiles that gl/cellfarinst.cpp culls as a whole (camera, each sun

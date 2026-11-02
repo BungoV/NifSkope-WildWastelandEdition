@@ -404,6 +404,10 @@ QString cellFarLodAppend( NifModel * nif, const QModelIndex & iRoot, const EsmWo
 	// lane SHORE1: the far water's old texel-grid shore (red watergrid, or the switch off)
 	const bool waterGrid = lodlFarWaterGridEnv();	// lane SHORE2: one reader with the farwatercensus CLI
 	const bool flatRed = red == "flat";   // lane FARDRAW1: the flattened rings and their budget refusals
+	// lane GEOLOD1 (LODMAPS-OFFKEYS): one off key per far map, for the lodmap rows
+	const bool noTerrainRed = red == "noterrain";   // terrain built (the rings' cuts stand), every terrain shape hidden
+	const bool noObjectsRed = red == "noobjects";   // ours not built, the game's .bto objects hidden
+	const bool noCardsRed = red == "nocards";   // the tree cards not armed
 	const int h = std::max( 0, ( n - 1 ) / 2 );
 	const int bx0 = cx - h, by0 = cy - h, bx1 = cx + h, by1 = cy + h;
 	// lane CELLSTREAM1: objects and cards leave out every cell a 5x5 round any roam position can load
@@ -615,7 +619,7 @@ QString cellFarLodAppend( NifModel * nif, const QModelIndex & iRoot, const EsmWo
 				say( QStringLiteral( "far lod: terrain REFUSED -- %1" ).arg( terr ) );
 			} else {
 				r = one[0];
-				if ( i == 0 && !stream && r.built ) {	// lane FARDRAW1: ring 0's live ground (the Far ground row)
+				if ( i == 0 && !stream && r.built && !noTerrainRed ) {	// lane FARDRAW1: ring 0's live ground (the Far ground row)
 					QStringList fg;
 					CellFarGround::prepare( nif, world, lodlPath, blocksBefore, nif->getBlockCount(),
 						std::max( r.x0, r.ox0 ), std::max( r.y0, r.oy0 ), std::min( r.x1, r.ox1 ), std::min( r.y1, r.oy1 ),
@@ -1072,7 +1076,9 @@ QString cellFarLodAppend( NifModel * nif, const QModelIndex & iRoot, const EsmWo
 	const float ctrX = origin[0], ctrY = origin[1];
 	QSet<quint32> cardRefs;
 	int cards = 0;
-	if ( ours ) {
+	if ( ours && noCardsRed )
+		say( QStringLiteral( "far lod: cards OFF (red nocards)" ) );
+	if ( ours && !noCardsRed ) {
 		const int R = cellsTo( treeDist > 0.0f ? treeDist : dMax ) + 1;
 		const int dim = 8;
 		QStringList chunks;
@@ -1113,6 +1119,8 @@ QString cellFarLodAppend( NifModel * nif, const QModelIndex & iRoot, const EsmWo
 	}
 	if ( !ours ) {
 		say( QStringLiteral( "far lod: objects ours off (type %1): the game's .bto only" ).arg( typeName ) );
+	} else if ( noObjectsRed ) {
+		say( QStringLiteral( "far lod: objects ours OFF (red noobjects)" ) );
 	} else if ( !QFileInfo( lodi ).isFile() ) {
 		say( QStringLiteral( "far lod: objects NONE -- no %1" ).arg( QDir::toNativeSeparators( lodi ) ) );
 	} else {
@@ -1254,6 +1262,22 @@ QString cellFarLodAppend( NifModel * nif, const QModelIndex & iRoot, const EsmWo
 		say( QStringLiteral( "far lod: stream hand-over %1 ring-0 shapes (one a cell), %2 vertices on the LAND, objects and cards out of cells %3,%4..%5,%6" )
 			.arg( int( stream->handBlocks.size() ) ).arg( rings.empty() ? 0 : rings[0].snappedAll )
 			.arg( ox0 ).arg( oy0 ).arg( ox1 ).arg( oy1 ) );
+
+	if ( noTerrainRed || noObjectsRed ) {	// lane GEOLOD1: the map's shapes stay in the document, hidden
+		int hid = 0;
+		for ( int b = firstFarBlock + 1; b < nif->getBlockCount(); b++ ) {
+			const QModelIndex iB = nif->getBlockIndex( b );
+			if ( !nif->blockInherits( iB, "BSTriShape" ) )
+				continue;
+			const QString bn = nif->get<QString>( iB, "Name" );
+			if ( ( noTerrainRed && bn.startsWith( QLatin1String( "FarLOD terrain" ) ) )
+				|| ( noObjectsRed && bn.startsWith( QLatin1String( "FarLOD v " ) ) ) ) {
+				nif->set<quint32>( iB, "Flags", nif->get<quint32>( iB, "Flags" ) | 1u );
+				hid++;
+			}
+		}
+		say( QStringLiteral( "far lod: map OFF (red %1): %2 far shapes hidden" ).arg( QString::fromLatin1( red ) ).arg( hid ) );
+	}
 
 	// ---- the draw's view of it
 	FarDoc fd;
