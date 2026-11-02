@@ -655,7 +655,8 @@ static bool packVolume( const ProbeSoup & soup, const WwCellLighting & lighting,
 		out->skyClamped = skyRadianceCube( sky.amb, R );
 		for ( int f = 0; f < 6; f++ )
 			for ( int c = 0; c < 3; c++ )
-				P.sky[f][c] = R[f][c];
+				P.sky[f][c] = out->skyR[f][c] = R[f][c];
+		out->skyOn = true;
 		P.sky[0][3] = 1.0f;
 	}
 	/* lane SKYBELOW1 (bungo 10-30, "Shouldn't that be a rule for every probe"): a miss below the horizon returns the

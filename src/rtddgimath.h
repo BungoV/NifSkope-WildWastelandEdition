@@ -969,6 +969,33 @@ inline void missRadiance( const float R[6][3], const float ground[3], V3 d, bool
 	}
 	skyRadiance( R, d, out );
 }
+/*! lane FOGENV1: the irradiance an OPEN probe takes on each axis (+X -X +Y -Y +Z -Z) from the misses alone (the sky
+ *  cube above the horizon, the ground below under the rule): a 64 x 128 midpoint quadrature of missRadiance. With the
+ *  rule off it returns the amb skyRadianceCube solved for. The air's env (cell_volair.frag airLeakEnv) divides the
+ *  volume's read by it, so open ground takes the flat ambient exactly, whatever the volume's sky level.  C++ only */
+inline void openIrradiance( const float R[6][3], const float ground[3], bool rule, float E[6][3] )
+{
+	const int nT = 64, nPh = 128;
+	double acc[6][3] = {};
+	for ( int i = 0; i < nT; i++ ) {
+		const double th = double( kPi ) * ( i + 0.5 ) / nT, st = std::sin( th ), ct = std::cos( th );
+		const double dOm = ( double( kPi ) / nT ) * ( 2.0 * double( kPi ) / nPh ) * st;
+		for ( int j = 0; j < nPh; j++ ) {
+			const double ph = 2.0 * double( kPi ) * ( j + 0.5 ) / nPh;
+			const V3 d( float( st * std::cos( ph ) ), float( st * std::sin( ph ) ), float( ct ) );
+			float L[3];
+			missRadiance( R, ground, d, rule, L );
+			const float cs[6] = { d.x, -d.x, d.y, -d.y, d.z, -d.z };
+			for ( int a = 0; a < 6; a++ )
+				if ( cs[a] > 0.0f )
+					for ( int c = 0; c < 3; c++ )
+						acc[a][c] += dOm * double( cs[a] ) * double( L[c] );
+		}
+	}
+	for ( int a = 0; a < 6; a++ )
+		for ( int c = 0; c < 3; c++ )
+			E[a][c] = float( acc[a][c] );
+}
 
 // ------------------------------------------------------------------ FIX1101A: the bounce read hands over as the surfaces' read
 /*! the flat ambient's irradiance at normal n, what a surface takes where the volume does not hold (the cell view's weather

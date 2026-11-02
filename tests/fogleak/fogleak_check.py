@@ -29,12 +29,25 @@ Bars (written before the first run):
             today), volume A, the directional only (volTerms 1). Sky visibility 0.05 (a closed room): inside, on / off
             max <= 0.01 at every depth (no cascade cover indoors); outside on == off. Visibility 0.6 (an opening): on == off
             on every froxel. Red nointsungate (16) fails the closed row only.
+  S scale   lane FOGENV1 (the absolute gate: the DDGI env against the DALC it replaces, which the ratio rows cannot
+            see): volume A open (sky vis 0.6), E(d) = K pi A (1 + 0.5 d.z) for K = 0.3, 3, 30, and the volume's open
+            field (cellDdgiOpenE) the same E on the six axes, the ambient only (volTerms 8). Inside: on / off median in
+            [0.95, 1.05], p1 >= 0.85, p99 <= 1.15 for every K. S occl: K = 3 with an open field 1 / 0.3 of the read
+            (the probes see 0.3 of an open probe's light): median in [0.25, 0.36]. Red envscale (32, the read's own
+            E / pi, FOGLEAK1 fix 1 as it was) fails both. A and E run with no open field (cellDdgiOpenE 0): the read's
+            own scale, the law they always checked.
+  N sun1    lane FOGENV1 (FOGLEAK1-COST): the sun's gate reads ONE tile (the walk's heaviest probe) instead of 8. An
+            unlit interior (the gate owns the directional), volume A, the roof (sky vis 0.05) on probes x <= 12000 and
+            open (0.6) on x >= 16000. Against the red sun8 (64, the 8-probe read): froxels with x <= 11000 or >= 17000
+            (all 4 readings) equal (|d| <= 1e-5 x max); in the band between, the mean |on - red| / off <= 0.20 (a step at
+            the probes' midpoint where the old read ramps). Its cost is fogleak_costbench.py --gate-sun.
   C cost    INFO: GPU ms of the 64 inject draws, every term (sun + light + ambient), on vs off (median of 9).
 Amended after the first run, before any red run: A's reference reads the synthetic tile as the shader does (tile_E,
 the octahedral interpolation of the 8 x 8 tile), not the analytic E(d): the analytic one read 0 - 8.8 % high, one-signed,
 the same in every slice. Measured 11-02 (this GPU): two cellDdgiRead calls cost +2.3 ms on all three terms; the one
 probe walk (airLeakEnv) +1.04 ms (off 0.601, on 1.645).
-Reds (each must FAIL its rows): dalcenv (A, E), nosungate (B, I), lightleak (L, R), nointsungate (I closed only).
+Reds (each must FAIL its rows): dalcenv (A, E), nosungate (B, I), lightleak (L, R), nointsungate (I closed only),
+envscale (S).
 Exit 0 only when every gate run passes.
 """
 import ctypes, math, os, sys
@@ -46,8 +59,8 @@ TREE = os.path.dirname(os.path.dirname(HERE))
 sys.path.insert(0, os.path.join(TREE, 'tests', 'spells'))
 args = sys.argv[1:]
 red = args[args.index('--red') + 1] if '--red' in args else ''
-only = set(args[args.index('--only') + 1]) if '--only' in args else set('AEBILRC')
-REDBIT = {'': 0, 'dalcenv': 1, 'nosungate': 2, 'lightleak': 4, 'nointsungate': 16}[red]
+only = set(args[args.index('--only') + 1]) if '--only' in args else set('AEBILRSNC')
+REDBIT = {'': 0, 'dalcenv': 1, 'nosungate': 2, 'lightleak': 4, 'nointsungate': 16, 'envscale': 32, 'sun8': 64}[red]
 SDIR = os.path.join(TREE, 'res', 'shaders')
 
 import shader_link_check as S   # noqa: E402
@@ -211,7 +224,7 @@ D8, D16 = tile_dirs(8), tile_dirs(16)
 
 
 class Volume:
-    def __init__(self, origin, step, dims, E_of_d, alpha, wall=None, far=3.0e4):
+    def __init__(self, origin, step, dims, E_of_d, alpha, wall=None, far=3.0e4, alpha_x=None):
         self.origin, self.step, self.dims = np.array(origin, float), float(step), dims
         nx, ny, nz = dims
         nP = nx * ny * nz
@@ -225,6 +238,10 @@ class Volume:
         q = np.stack(np.meshgrid(np.arange(nx), np.arange(ny), np.arange(nz), indexing='ij'), -1)
         q = q.transpose(2, 1, 0, 3).reshape(-1, 3)   # p = x + nx (y + ny z)
         pp = self.origin[None, :] + q * step
+        if alpha_x is not None:   # lane FOGENV1 row N: the sky visibility per probe by its x
+            irr = irr.reshape(nP, 64, 4)
+            irr[:, :, 3] = alpha_x(pp[:, 0])[:, None]
+            irr = irr.reshape(-1, 4)
         if wall is None:
             m = np.full((nP, 256), far)
         else:   # distance to the plane x = wall along each texel's direction (far past it)
@@ -312,8 +329,10 @@ DALC_M = 0.5
 A_FLAT = DALC_M ** 2.2
 
 
-def uniforms(p, units, vol, terms, leakred=0, light=None, shadow=False, restir=False, interior=False):
+def uniforms(p, units, vol, terms, leakred=0, light=None, shadow=False, restir=False, interior=False, openE=None):
     G.use(p)
+    for k in range(6):   # lane FOGENV1: the volume's open field (none: 0, the read's own scale)
+        setu(p, 'cellDdgiOpenE[%d]' % k, tuple(float(x) for x in openE[k]) if openE is not None else (0.0, 0.0, 0.0))
     setu(p, 'volStage', 1)
     f_u3i(G.loc(p, b'volDims'), COLS, ROWS, SL)
     setu(p, 'volProj', (P00, P11))
@@ -602,6 +621,55 @@ if only & set('LR'):
         gate('R cubed', nbad == 0 and float(lum(off[..., :3]).max()) > 0.0,
              'a light with a drawn cube: %d of %d froxels differ (max |d| %.2e of max; lit max %.3g)%s'
              % (nbad, every.sum(), dmax, float(lum(off[..., :3]).max()), tag))
+
+# ---- S: the absolute scale on open ground (lane FOGENV1) ----------------------------------------------------------------
+if 'S' in only:
+    def open_axes(E0):   # E(d) = E0 (1 + 0.5 d.z) on the six axes +X -X +Y -Y +Z -Z
+        return [(E0,) * 3, (E0,) * 3, (E0,) * 3, (E0,) * 3, (1.5 * E0,) * 3, (0.5 * E0,) * 3]
+    for K, share in ((0.3, 1.0), (3.0, 1.0), (30.0, 1.0), (3.0, 0.3)):
+        E0 = K * math.pi * A_FLAT
+        VS = Volume((-4000.0, -24000.0, -36000.0), 4000.0, (19, 13, 12), lambda d: E0 * (1.0 + 0.5 * d[:, 2]), 0.6)
+        lo, hi = VS.lo_hi_fade1()
+        inside = all_in(lo, hi, 1100.0)
+        uniforms(P_OFF, U_OFF, VS, 8)
+        off = inject(P_OFF)
+        uniforms(P_ON, U_ON, VS, 8, REDBIT, openE=open_axes(E0 / share))
+        on = inject(P_ON)
+        r = (lum(on[..., :3]) / np.maximum(lum(off[..., :3]), 1e-30))[inside]
+        med = float(np.median(r)) if len(r) else -1.0
+        p1, p99 = (float(np.percentile(r, 1)), float(np.percentile(r, 99))) if len(r) else (-1.0, -1.0)
+        if share == 1.0:
+            gate('S open K=%g' % K, len(r) > 100 and 0.95 <= med <= 1.05 and p1 >= 0.85 and p99 <= 1.15,
+                 'open ground, the read %g x pi A: inside %d froxels on/off median %.4f p1 %.4f p99 %.4f (bar median '
+                 '0.95..1.05, p1 >= 0.85, p99 <= 1.15)%s' % (K, len(r), med, p1, p99, tag))
+        else:
+            gate('S occl', len(r) > 100 and 0.25 <= med <= 0.36,
+                 'the probes see %.1f of an open probe: inside %d froxels on/off median %.4f (bar 0.25..0.36)%s'
+                 % (share, len(r), med, tag))
+
+# ---- N: the sun's gate from one tile (lane FOGENV1, FOGLEAK1-COST) ------------------------------------------------------
+if 'N' in only:
+    VN = Volume((-4000.0, -24000.0, -36000.0), 4000.0, (19, 13, 12), lambda d: 0.1 + 0.0 * d[:, 2], 0.05,
+                alpha_x=lambda x: np.where(x <= 12000.0, 0.05, 0.6))
+    lo, hi = VN.lo_hi_fade1()
+    inside = all_in(lo, hi, 1100.0)
+    awayL = inside & all_where(lambda P: P[..., 0] <= 11000.0)
+    awayR = inside & all_where(lambda P: P[..., 0] >= 17000.0)
+    band = inside & all_where(lambda P: (P[..., 0] >= 12000.0) & (P[..., 0] <= 16000.0))
+    uniforms(P_OFF, U_OFF, VN, 1, 0, interior=True)
+    off = inject(P_OFF)
+    uniforms(P_ON, U_ON, VN, 1, REDBIT, interior=True)
+    on = inject(P_ON)
+    uniforms(P_ON, U_ON, VN, 1, 64, interior=True)
+    r8 = inject(P_ON)
+    nbad, dmax = same(on, r8, awayL | awayR)
+    lo_ = np.maximum(lum(off[..., :3]), 1e-30)
+    dband = float(np.mean(np.abs(lum(on[..., :3]) - lum(r8[..., :3]))[band] / lo_[band])) if band.any() else -1.0
+    shut = float((lum(on[..., :3]) / lo_)[awayL].max()) if awayL.any() else -1.0
+    ok = awayL.sum() > 100 and awayR.sum() > 100 and band.sum() > 10 and nbad == 0 and 0.0 <= dband <= 0.20 and shut <= 0.01
+    gate('N sun1', ok, 'one tile vs the 8-probe red: away %d + %d froxels, %d differ (max |d| %.2e); band %d froxels mean '
+         '|on - red| / off %.3f (bar <= 0.20); roofed on/off max %.4f (<= 0.01)%s'
+         % (awayL.sum(), awayR.sum(), nbad, dmax, band.sum(), dband, shut, tag))
 
 # ---- C: cost (INFO) ---------------------------------------------------------------------------------------------------
 if 'C' in only:

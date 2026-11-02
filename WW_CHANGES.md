@@ -1,3 +1,24 @@
+## FOGLEAK1-COST (FOGENV1, 2026-11-02): the fog's sun gate reads one tile, not eight
+- FOGLEAK1 fix 2 (the volume's gate on the sun in the air, `WW_CELL_FOGLEAK`, still default OFF) read the sun's tile at
+  all 8 probes of the walk: +0.46 ms on the 3-cascade inject (budget 0.10). Now one read at the walk's heaviest probe,
+  carried to P by the 8-probe spread of the sky visibility the +dW fetch already holds: +0.066 ms.
+- Red: `WW_CELL_AIR_RED=sun8` (the 8-probe read).
+- Gates: tests/fogleak/fogleak_check.py row N (one tile vs sun8 on a roof edge), tests/fogleak/fogleak_costbench.py
+  `--gate-sun` (on - nosun <= 0.10 ms; HEAD's shaders read 0.46 and fail).
+
+## FOGLEAK1-ENVSCALE (FOGENV1, 2026-11-02): the fog's DDGI env lands at the DALC's scale on open ground
+
+- FOGLEAK1's occluded env in the air (`WW_CELL_FOGLEAK`, still default OFF) took the volume's read at its own E / pi.
+  The volume's sky is not the DALC's scale (since GISKYTWIN-FLIP it is the weather at the physical level), so open
+  ground could read many times the flat ambient it replaces. The env is now the flat ambient times the read over the
+  volume's own OPEN field (`cellDdgiOpenE`, the six-axis irradiance an unoccluded probe of that sky and ground takes,
+  rtddgimath.h `openIrradiance`): open ground takes the DALC exactly, a probe that sees 30 % of the sky takes 30 % of it.
+  With no open field (interior, sky off) it keeps the old read.
+- Red: `WW_CELL_AIR_RED=envscale` (the read's own scale, FOGLEAK1 fix 1 as it was).
+- Gates: tests/fogleak/fogleak_check.py rows S (open K = 0.3 / 3 / 30 and occluded; the red fails all four),
+  tests/fogleak/fogenv_open_test.cpp (openIrradiance known answers; `-DFOGENV_RED_NOPI` fails).
+- Code: src/rtddgimath.h, src/rtddgi.h, src/rtddgi.cpp, src/rtddgicell.cpp, src/gl/cellvolair.cpp, res/shaders/cell_volair.frag.
+
 ## STREAMTEX3 (2026-11-02): the streamed cell view's texture pool frees by cell count first, then by last bind
 - The PERFFIX4 pool (src/gl/texpool.h, budget `WW_CELL_STREAM_TEXPOOL`) now sorts what it may free by tier, then by
   last bind: tier 0 = textures whose loaded cells all left (STREAMTEX1's counts, src/gl/streamtexpool.h), tier 1 =
