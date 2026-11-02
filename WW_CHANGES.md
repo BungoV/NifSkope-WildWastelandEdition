@@ -1,3 +1,17 @@
+## BUGS1102E (2026-11-02): reflcensus tells a probe in the void from a soup that stops short
+
+- MUSEUMSOUP1: the Museum census (REFLPROBECLI2) counted 452630 below-horizon misses "past the soup" and they were read
+  as the soup's floor coverage. Measured on the same soup and census: the soup is not short (every drawn placement is
+  in it or listed as left out). 67.4 % of those misses come from grid probes centred outside the soup's xy box, 27.5 %
+  from grid probes over an empty column or under the lowest floor, and 5.1 % from probes inside the building. The soup
+  writer is unchanged.
+- `reflcensus` now prints this split itself: each probe stands outside the soup box, in the void (no surface in its
+  column, under the lowest surface, indoors over the topmost one) or in the geometry. The total gains a line
+  `past the soup by where the probe stands`, and the `--out` tsv gains a `stand` column (last). Red `--red stand`:
+  no split (every probe in the geometry).
+- Gate: tests/reflcensus/run.sh, REFLCENSUS PASS 223; red stand fails 4 `stand` checks (six fixture probes: between
+  two storeys, under the ground, over the roof indoors and outdoors, an empty column, past the box).
+
 ## BUGS1102D (2026-11-02): red onetype retired; a gate for a stale switch table
 
 - **REDRETIRE-ONETYPE:** `WW_CLOUDVOL_RED=onetype` (one cumulus profile, no type swing) is gone. It was the red of

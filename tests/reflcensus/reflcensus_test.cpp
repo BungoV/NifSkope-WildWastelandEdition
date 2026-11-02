@@ -6,6 +6,7 @@
 //   reflcensus_test.exe lift       the census runs the red horizon d.z < 0.1: must print "FAIL below:" and exit 1
 //   reflcensus_test.exe noreach    the census runs with no far plane: must print "FAIL hits:" and exit 1
 //   reflcensus_test.exe roof       lane INTGI1: the interior --auto cameras on the topmost surface: must print "FAIL floors:"
+//   reflcensus_test.exe stand      every probe stands in the geometry (no split): must print "FAIL stand:"
 #include <cmath>
 #include <cstdio>
 #include <cstring>
@@ -80,6 +81,8 @@ int main( int argc, char ** argv )
 		red = RedNoReach;
 	if ( argc > 1 && !std::strcmp( argv[1], "roof" ) )
 		red = RedRoof;
+	if ( argc > 1 && !std::strcmp( argv[1], "stand" ) )
+		red = RedStand;
 
 	{	// lane INTGI1 (REFLPROBECLI2): the interior --auto cameras. A two-storey box (half 3000): a roof slab 1000/990, a
 		// floor slab 500/490, the ground at 0 under it and past it (half 20000)
@@ -133,6 +136,33 @@ int main( int argc, char ** argv )
 		}
 		std::printf( "interior auto: box column %d surfaces -> %d cameras; open ground %d surface(s) -> %d\n", int( zs.size() ),
 			int( cz.size() ), int( open.size() ), int( out.size() ) );
+
+		// where a probe stands (standOf): the soup box wider than the geometry, so one column inside it is empty
+		const double O2[2] = { 0.0, 0.0 }, box2[4] = { -30000.0, -30000.0, 30000.0, 30000.0 };
+		struct St { double x, y, z; bool interior; int want; const char * what; } st[] = {
+			{ 777.0, 333.0, 628.0, true, StandGeometry, "between the storeys" },
+			{ 777.0, 333.0, -200.0, true, StandVoid, "under the ground" },
+			{ 777.0, 333.0, 1200.0, true, StandVoid, "over the roof indoors" },
+			{ 777.0, 333.0, 1200.0, false, StandGeometry, "over the roof outdoors" },
+			{ 25000.0, 0.0, 128.0, true, StandVoid, "an empty column in the box" },
+			{ 40000.0, 0.0, 128.0, true, StandOutside, "past the box" },
+		};
+		int stOk = 0;
+		for ( const St & s : st ) {
+			Probe p;
+			p.pos[0] = s.x;
+			p.pos[1] = s.y;
+			p.pos[2] = s.z;
+			const int got = standOf( b2, O2, p, box2, 1016.0, 1048.0, s.interior, red );
+			checks++;
+			if ( got != s.want ) {
+				fails++;
+				std::printf( "FAIL stand: %s: stand %d (want %d)\n", s.what, got, s.want );
+			} else {
+				stOk++;
+			}
+		}
+		std::printf( "stand: %d of %d probes placed right (geometry, outside, void)\n", stOk, int( sizeof st / sizeof st[0] ) );
 	}
 
 	probebvh::Bvh bvh;

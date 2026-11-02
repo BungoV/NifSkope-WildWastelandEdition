@@ -34,6 +34,7 @@ enum Red : int {
 	RedLift = 1,      // the horizon at d.z < 0.1 (cell_skybelow.glsl's SKYBELOW2_RED_LIFT): below counts move
 	RedNoReach = 2,   // no far plane: every ray runs to the soup's end (hits rise where the reach cut them)
 	RedRoof = 4,      // lane INTGI1: --auto --interior puts the cameras on the topmost surface again (the roof)
+	RedStand = 8,     // every probe counts as standing in the geometry (no split of the misses past the soup)
 };
 
 struct Probe
@@ -220,5 +221,24 @@ inline void columnHits( const probebvh::Bvh & bvh, double x, double y, double z0
 		z -= th + 0.5;
 		left -= th + 0.5;
 	}
+}
+
+/* Where a probe stands against the soup, so a miss past the soup's edge can be told from a soup that stops short
+ * (Museum, 11-02: 95 % of those misses came from grid probes outside the building). Outside: past the soup's xy box.
+ * Void: no surface in the probe's column, under the column's lowest surface, or (interior) over its topmost one. */
+enum Stand : int { StandGeometry = 0, StandOutside = 1, StandVoid = 2 };
+
+inline int standOf( const probebvh::Bvh & bvh, const double O[2], const Probe & p, const double soupXY[4], double topZ,
+	double len, bool interior, int red )
+{
+	if ( red & RedStand )
+		return StandGeometry;
+	if ( p.pos[0] < soupXY[0] || p.pos[1] < soupXY[1] || p.pos[0] > soupXY[2] || p.pos[1] > soupXY[3] )
+		return StandOutside;
+	std::vector<double> zs;
+	columnHits( bvh, p.pos[0] - O[0], p.pos[1] - O[1], topZ, len, zs );
+	if ( zs.empty() || p.pos[2] < zs.back() || ( interior && p.pos[2] > zs.front() ) )
+		return StandVoid;
+	return StandGeometry;
 }
 }   // namespace reflcensus
