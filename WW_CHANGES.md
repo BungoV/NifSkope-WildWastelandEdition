@@ -1,3 +1,11 @@
+## FARCITYWASH1 (2026-11-02, landed in LAND6): the air's sky-lit veil at most the records' fog colour (default ON)
+- cell_volair.frag airVeilK: per froxel, the open air's mean in-scatter (the sun's share + the env share) brought DOWN to
+  the records' fog colour at that distance and height, never up (lamps, night unchanged), the same scale on lit and
+  shadowed air; exteriors with the cell's sun only. Uniform `volVeil` (src/gl/cellvolair.cpp).
+- Red `WW_CELL_AIR_RED=veilphys`: the old physical level. Census `veil=record|phys`.
+- Gate tests/farcitywash/farcitywash_check.py (G1 law in tree, G2 veil/game 0.6..1.6, G3 one-sided + night bit-equal,
+  G4 shadow ratio kept); `--red` fails 9 rows.
+
 ## AIRMS1 (2026-11-02, landed in LAND6): the placed lamps' multiple scattering in the cell air (switch, off by default)
 - `WW_CELL_AIR_MS_LAMPS=1`: cell_volair.frag adds airLampMs (orders >= 2 of a point lamp, a fit to a backward Monte
   Carlo: pi M = (1.9 - 0.75 gbar) od exp(-0.4 od) pi P2(c), P2 the phase with its HG lobes' g x 0.8) at both lamp
