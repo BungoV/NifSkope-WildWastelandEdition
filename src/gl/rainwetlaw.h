@@ -59,6 +59,22 @@ inline float step( float wet, float target, float dt )
 	return std::max( wet - kDrySpeed * dt, target );
 }
 
+/* lane WETSNAP1: Fallout 4's Precipitation::Update ends each step with a snap: the wetness is 0 at once indoors, or
+ * outdoors when neither weather of the change (the current one, and the leaving one while a change runs) is rain. So a
+ * rain -> clear change dries at fDrySpeed only while it runs and ends dry. snapOn false = the old slow dry
+ * (WW_CELL_RAINWET_RED=nosnap). */
+inline bool snaps( bool rainNow, bool rainPrev, bool exterior )
+{
+	return !exterior || ( !rainNow && !rainPrev );
+}
+
+//! one frame: step toward target, then the snap
+inline float update( float wet, float target, float dt, bool rainNow, bool rainPrev, bool exterior, bool snapOn )
+{
+	wet = step( wet, target, dt );
+	return snapOn && snaps( rainNow, rainPrev, exterior ) ? 0.0f : wet;
+}
+
 /* lane FO76WEATHER2: the sky exposure. Fallout 76's wet pixel shaders test a top-down precipitation depth map
  * (comparison sampler, so a 2 x 2 filtered test): a pixel with something above it stays dry. Here the map is
  * INTSKY1's roof map (preciproof.h WwRoofMap: each texel the highest z over it), built over the loaded cell's

@@ -1,3 +1,13 @@
+## WETSNAP1 (2026-11-02): rain wetness snaps dry like the game
+
+- With `WW_CELL_RAINWET` on, the wet amount follows Fallout 4's whole wetness step: it still dries at fDrySpeed
+  (0.02 a second) while a rain weather is one of the change's two weathers, but it is 0 at once indoors, or outdoors
+  when neither weather rains (a rain -> clear change that ends with ground still wet ends dry). A pinned
+  `WW_CELL_RAINWET_AMOUNT` does not snap. The census line adds `(snap: no rain in the change)`.
+- Way back: `WW_CELL_RAINWET_RED=nosnap` (the FO76WEATHER2 slow dry in every case). Default stays OFF.
+- Code: src/gl/rainwetlaw.h (`snaps`, `update`), src/gl/cellprecip.cpp, src/landlodspec.h (`wetUpdate`, the game's
+  step for the land). New unit tests/wetsnap (green 0 of 17 failed, red 7 of 17).
+
 ## FO76WEATHER2 (2026-11-02): rain wetness stays dry under roofs and bridges
 
 - With `WW_CELL_RAINWET` on, an exterior builds a top-down cover map (PRECIPROOF's WwRoofMap: eye +-8192 u, 16 u
