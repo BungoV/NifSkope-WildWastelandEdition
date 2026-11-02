@@ -541,7 +541,8 @@ void main()
 		s.rough = max( wwLandWetRough( s.rough, wet, por ), 0.035 );
 	}
 	if ( cellOn && rainWet.x > 0.0 ) {	// lane FO76WEATHER1: rain wetness, Fallout 76's law (metal from the F0)
-		float rw = wwRainWetW( 1.0 - s.rough, wwRainWetMetal( mix( s.weight * s.f0d, s.base, s.metal ) ) );
+		float rw = wwRainWetW( 1.0 - s.rough, wwRainWetMetal( mix( s.weight * s.f0d, s.base, s.metal ) ) )
+			* wwRainWetExposed( cellWorldPos( -ViewDir ), cellWorldDir( normalize( tbn[2] ) ) );	// FO76WEATHER2: dry under cover
 		s.base *= 1.0 - 0.8 * rw;
 		s.rough = max( ( 1.0 - 0.4 * rw ) * s.rough, 0.035 );
 	}

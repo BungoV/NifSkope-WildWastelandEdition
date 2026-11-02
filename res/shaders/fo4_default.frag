@@ -760,7 +760,7 @@ void main()
 		albedo = mix( albedo, vec3( 0.9 ), sw.y );	// the run-up's foam (texture gamma)
 	}
 	if ( cellOn && rainWet.x > 0.0 ) {	// lane FO76WEATHER1: rain wetness, Fallout 76's law; F0 is 0.04 here, no metal
-		float rw = wwRainWetW( smoothness, 0.0 );
+		float rw = wwRainWetW( smoothness, 0.0 ) * wwRainWetExposed( cellWorldPos( -ViewDir ), cellWorldDir( btnMatrix_norm[2] ) );	// FO76WEATHER2: dry under cover
 		albedo *= pow( 1.0 - 0.8 * rw, 1.0 / 2.2 );	// the albedo is texture gamma here
 		smoothness = wwRainWetSmooth( smoothness, rw );
 	}

@@ -15,6 +15,7 @@
 #include "gl/cellunits.h"	// lane BUGS1102B: the roof map's unit
 #include "gl/rainfogmath.h"	// lane FO76WEATHER1: the rain's share of a weather change
 #include "gl/rainwetlaw.h"
+#include "gl/shadowset.h"	// lane FO76WEATHER2: the cover map leaves the terrain out
 #include "gl/glshape.h"
 #include "gl/precipspec.h"
 #include "gl/renderer.h"
@@ -305,6 +306,8 @@ namespace
 struct RwState
 {
 	bool init = false, moving = false;
+	bool cover = false;	// lane FO76WEATHER2: the cover map is built and tested
+	QString coverWhy;
 	float wet = 0.0f, target = 0.0f;
 	const void * doc = nullptr;
 	QElapsedTimer clock;
@@ -344,6 +347,101 @@ float rwTarget( Scene * scene, bool & interior )
 	double rain = 0.0, snow = 0.0;
 	WwRainFog::shares( t, one, blending, double( pct ), true, rain, snow );
 	return WwRainWet::sat( float( rain ) );
+}
+
+/* lane FO76WEATHER2: the cover map of the exterior around the eye (rainwetlaw.h exposed; INTSKY1's WwRoofMap and its
+ * triangle rule), Fallout 76's top-down precipitation depth over its occlusion range. Solid shapes without the terrain,
+ * kRcHalf u around the eye at kRcCell u texels; rebuilt when the eye moves kRcMove u from the build centre or the
+ * cell's shapes change. */
+constexpr float kRcHalf = 8192.0f, kRcCell = 16.0f, kRcMove = 2048.0f;
+
+struct RcState
+{
+	const void * nif = nullptr;
+	int shapes = -1;
+	float cx = 0.0f, cy = 0.0f;
+	WwRoofMap map;
+	long gen = 0;
+	GLuint tex = 0;
+	long texGen = 0;
+};
+
+RcState & rc()
+{
+	static RcState s;
+	return s;
+}
+
+void rcEye( Scene * scene, float out[3] )
+{
+	const Transform & vt = scene->view;
+	const float sc = vt.scale != 0.0f ? vt.scale : 1.0f;
+	for ( int j = 0; j < 3; j++ ) {
+		float acc = 0.0f;
+		for ( int k = 0; k < 3; k++ )
+			acc -= vt.rotation( k, j ) * vt.translation[k];
+		out[j] = acc / sc;
+	}
+}
+
+bool rcCovers( const Shape * sh )
+{
+	return sh && sh->isVisible() && sh->wwBlocksRain() && !sh->wwFarInstData() && !wwCellIsTerrainShape( sh );
+}
+
+//! the map, built or kept; "" when kept, else the census line
+QString rcBuild( Scene * scene )
+{
+	RcState & R = rc();
+	int shapes = 0;
+	for ( Node * node : scene->nodes.list() )
+		if ( rcCovers( dynamic_cast<const Shape *>( node ) ) )
+			shapes++;
+	float eye[3];
+	rcEye( scene, eye );
+	if ( R.nif == scene->nifModel && R.shapes == shapes && R.map.valid()
+		&& std::fabs( eye[0] - R.cx ) < kRcMove && std::fabs( eye[1] - R.cy ) < kRcMove )
+		return QString();
+	static long builds = 0;
+	QElapsedTimer t;
+	t.start();
+	R.nif = scene->nifModel;
+	R.shapes = shapes;
+	R.cx = eye[0];
+	R.cy = eye[1];
+	R.gen = ++builds;
+	R.map.reset( eye[0] - kRcHalf, eye[1] - kRcHalf, eye[0] + kRcHalf, eye[1] + kRcHalf, kRcCell, 1024 );
+	const float bx0 = R.map.x0, by0 = R.map.y0, bx1 = R.map.x0 + R.map.cell * R.map.nx, by1 = R.map.y0 + R.map.cell * R.map.ny;
+	long tris = 0;
+	int used = 0;
+	for ( Node * node : scene->nodes.list() ) {
+		const Shape * sh = dynamic_cast<const Shape *>( node );
+		if ( !rcCovers( sh ) )
+			continue;
+		const Transform & T = sh->worldTrans();
+		bool any = false;
+		for ( const Triangle & f : sh->triangles ) {
+			if ( f[0] >= sh->verts.size() || f[1] >= sh->verts.size() || f[2] >= sh->verts.size() )
+				continue;
+			float w[3][3];
+			for ( int k = 0; k < 3; k++ ) {
+				const Vector3 v = T * sh->verts.at( f[k] );
+				w[k][0] = v[0];
+				w[k][1] = v[1];
+				w[k][2] = v[2];
+			}
+			if ( std::max( { w[0][0], w[1][0], w[2][0] } ) < bx0 || std::min( { w[0][0], w[1][0], w[2][0] } ) > bx1
+				|| std::max( { w[0][1], w[1][1], w[2][1] } ) < by0 || std::min( { w[0][1], w[1][1], w[2][1] } ) > by1 )
+				continue;
+			R.map.addTri( w[0], w[1], w[2] );
+			tris++;
+			any = true;
+		}
+		used += any ? 1 : 0;
+	}
+	return QStringLiteral( "cover map %1 x %2 of %3 u around (%4, %5): %6 of %7 shapes, %8 triangles, %9 ms" )
+		.arg( R.map.nx ).arg( R.map.ny ).arg( double( R.map.cell ), 0, 'f', 1 ).arg( double( eye[0] ), 0, 'f', 0 )
+		.arg( double( eye[1] ), 0, 'f', 0 ).arg( used ).arg( shapes ).arg( tris ).arg( t.elapsed() );
 }
 }	// namespace
 
@@ -385,9 +483,22 @@ float wwCellRainWetAmount( Scene * scene )
 	}
 	s.lastMs = now;
 	s.moving = s.wet != s.target;
-	rwSay( s, QStringLiteral( "rain wet: %1 target %2%3%4" ).arg( double( s.wet ), 0, 'f', 2 ).arg( double( s.target ), 0, 'f', 2 )
+	// lane FO76WEATHER2: the cover map, once a frame while anything is wet (red nocover = FO76WEATHER1, no cover test)
+	s.cover = false;
+	if ( red == "nocover" ) {
+		s.coverWhy = QStringLiteral( " (RED WW_CELL_RAINWET_RED=nocover)" );
+	} else if ( !interior && s.wet > 0.0f ) {
+		const QString note = rcBuild( scene );
+		if ( !note.isEmpty() )
+			std::fprintf( stderr, "rain wet: %s\n", qPrintable( note ) );
+		s.cover = rc().map.valid();
+		s.coverWhy = s.cover ? QStringLiteral( " cover %1" ).arg( rc().gen ) : QStringLiteral( " (no cover map)" );
+	} else {
+		s.coverWhy = QString();
+	}
+	rwSay( s, QStringLiteral( "rain wet: %1 target %2%3%4%5" ).arg( double( s.wet ), 0, 'f', 2 ).arg( double( s.target ), 0, 'f', 2 )
 		.arg( interior ? QStringLiteral( " (interior)" ) : QString() )
-		.arg( pinOk ? QStringLiteral( " (WW_CELL_RAINWET_AMOUNT)" ) : QString() ) );
+		.arg( pinOk ? QStringLiteral( " (WW_CELL_RAINWET_AMOUNT)" ) : QString() ).arg( s.coverWhy ) );
 	return s.wet;
 }
 
@@ -399,7 +510,35 @@ void wwCellRainWetUniforms( Scene * scene, float customPorosity, bool useCustom 
 	if ( !prog || prog->uniLocation( "rainWet" ) < 0 )
 		return;
 	const float a = wwCellRainWetAmount( scene );
-	prog->uni4f( "rainWet", FloatVector4( a, useCustom ? customPorosity : 0.0f, useCustom ? 1.0f : 0.0f, 0.0f ) );
+	// lane FO76WEATHER2: the cover map at its own unit; the sampler always names it (a program's samplers each need a unit)
+	bool cover = false;
+	if ( prog->uniLocation( "rainCover" ) >= 0 ) {
+		prog->uni1i( "rainCover", WwCellUnit::RainCover );
+		RcState & R = rc();
+		if ( rw().cover && R.map.valid() && a > 0.0f ) {
+			auto fn = scene->renderer->fn;
+			fn->glActiveTexture( GLenum( GL_TEXTURE0 + WwCellUnit::RainCover ) );
+			if ( !R.tex )
+				fn->glGenTextures( 1, &R.tex );
+			fn->glBindTexture( GL_TEXTURE_2D, R.tex );
+			if ( R.texGen != R.gen ) {
+				std::vector<float> z( R.map.z.size() );
+				std::transform( R.map.z.begin(), R.map.z.end(), z.begin(), wwRoofTexel );
+				fn->glPixelStorei( GL_UNPACK_ALIGNMENT, 4 );
+				fn->glTexImage2D( GL_TEXTURE_2D, 0, GL_R32F, R.map.nx, R.map.ny, 0, GL_RED, GL_FLOAT, z.data() );
+				fn->glTexParameteri( GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST );
+				fn->glTexParameteri( GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST );
+				fn->glTexParameteri( GL_TEXTURE_2D, GL_TEXTURE_MAX_LEVEL, 0 );
+				fn->glTexParameteri( GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE );
+				fn->glTexParameteri( GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE );
+				R.texGen = R.gen;
+			}
+			fn->glActiveTexture( GL_TEXTURE0 );
+			prog->uni4f( "rainCoverGrid", FloatVector4( R.map.x0, R.map.y0, 1.0f / R.map.cell, R.map.cell ) );
+			cover = true;
+		}
+	}
+	prog->uni4f( "rainWet", FloatVector4( a, useCustom ? customPorosity : 0.0f, useCustom ? 1.0f : 0.0f, cover ? 1.0f : 0.0f ) );
 }
 
 QString wwCellRainWetEcho()

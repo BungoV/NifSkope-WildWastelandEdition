@@ -41,7 +41,10 @@ QString wwCellPrecipEcho();
  * material with its wetness SSR switch takes the flag while wet.
  * Row: Show > Improved Sky > Rain wetness (WW/CellRainWet), ships OFF; pin WW_CELL_RAINWET=0|1 (live).
  * Harness pin WW_CELL_RAINWET_AMOUNT=<0..1> (a fixed amount, outdoors). Red WW_CELL_RAINWET_RED=shore: the old path
- * (shore wetness only, no rain wetness, dry SSR flags). Census on stderr: "rain wet: ...". */
+ * (shore wetness only, no rain wetness, dry SSR flags). Census on stderr: "rain wet: ...".
+ * Lane FO76WEATHER2: a top-down cover map (gl/rainwetlaw.h exposed) keeps ground under roofs and bridges dry: solid
+ * shapes without the terrain, 8192 u around the eye at 16 u texels, unit WwCellUnit::RainCover. Red
+ * WW_CELL_RAINWET_RED=nocover: no cover test (FO76WEATHER1). Census "rain wet: cover map ...". */
 //! the amount this frame (0 off, red, indoors or dry)
 float wwCellRainWetAmount( Scene * scene );
 //! the current program's rainWet uniform; custom porosity from the material (BGSM bCustomPorosity / fPorosityValue)
