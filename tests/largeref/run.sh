@@ -15,3 +15,11 @@ tail -1 "$O/red.txt"
 grep -E "^FAIL|stream walk" "$O/red2.txt"
 echo "green rc=$G red rc=$R streamred rc=$R2"
 [ $G -eq 0 ] && [ $R -ne 0 ] && [ $R2 -ne 0 ] && echo "LARGEREF UNIT PASS" || { echo "LARGEREF UNIT FAIL"; exit 1; }
+# lane LARGEREF2: RNAM=<dump> (a world's RNAM subrecords, uint32 length + bytes each) adds the census walk, green + stream red
+if [ -n "$RNAM" ]; then
+	timeout 300 "$O/largeref.exe" --rnam "$RNAM"; CG=$?
+	timeout 300 "$O/largeref_red2.exe" --rnam "$RNAM" > "$O/census_red2.txt"; CR=$?
+	tail -1 "$O/census_red2.txt"
+	echo "census green rc=$CG streamred rc=$CR"
+	[ $CG -eq 0 ] && [ $CR -ne 0 ] && echo "LARGEREF CENSUS PASS" || { echo "LARGEREF CENSUS FAIL"; exit 1; }
+fi

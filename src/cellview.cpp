@@ -2971,6 +2971,11 @@ static bool cellBuild( NifModel * nif, const CellSceneSpec & specAsked, CellChun
 		y1 = y0 - 1;
 		spec.terrain = spec.water = spec.grid = false;
 	}
+	if ( chunk && chunk->largeRef ) {	// lane LARGEREF2: a stream unit, one large ref (no cell, no ground)
+		x1 = x0 - 1;
+		y1 = y0 - 1;
+		spec.terrain = spec.water = spec.grid = false;
+	}
 	CellSpeed::mark( "plugin index" );
 	// lane CELLSTREAM1: a streamed cell fills its own tables; the view's are merged from the resident cells
 	CellRefTable & refTable = chunk ? chunk->refs : cellRefTableMutable();
@@ -3395,9 +3400,21 @@ static bool cellBuild( NifModel * nif, const CellSceneSpec & specAsked, CellChun
 		}
 		/* lane GEOLOD1 (LARGEREF1): the large refs (WRLD RNAM) the block's cells list draw full wherever they stand, as the
 		 * game draws them while a listing cell is loaded (src/largeref.h); their far rows hide as a loaded cell's do.
-		 * Off by default (the game's bDisableLargeRefs is 1); WW_CELL_LARGEREFS=1 turns it on. The stream owes it. */
+		 * Off by default (the game's bDisableLargeRefs is 1); WW_CELL_LARGEREFS=1 or the game's inis turn it on. The
+		 * streamed view draws them in units of their own (lane LARGEREF2, src/cellstream.cpp). */
 		{
 			QVector<quint32> large;
+			if ( chunk && chunk->largeRef ) {	// lane LARGEREF2: a stream unit places its one ref (src/cellstream.cpp)
+				EsmRefr r;
+				bool pers = false;
+				if ( world.refrByForm( chunk->largeRef, chunk->cx, chunk->cy, r, &pers ) ) {
+#ifdef ESM_HAS_CELL_FIELDS
+					if ( !enableFacts.contains( r.formID ) )
+						enableFacts.insert( r.formID, EnableFact{ r.initiallyDisabled, r.enableParent, r.enableParentOpposite } );
+#endif
+					pushRefr( r, int( std::floor( r.pos[0] / CELL_UNITS ) ), int( std::floor( r.pos[1] / CELL_UNITS ) ), pers );
+				}
+			}
 			if ( !chunk && CellFarHide::largeRefsWanted() ) {
 				int missing = 0, persist = 0, farthest = 0;
 				for ( const LargeRef::Row & lr : LargeRef::outside( world.largeRefRows(), x0, y0, x1, y1 ) ) {

@@ -65,9 +65,95 @@ static LargeRef::Row ref( uint32_t f, int x, int y )
 	return r;
 }
 
-int main()
+/* lane LARGEREF2: the census walk over a real world's RNAM (tools rnam_dump.py: uint32 length + subrecord, repeated).
+ * A 5x5 block slides along routes one cell a step, its cells attaching one at a time as the stream attaches them;
+ * after every attach or leave no ref may have two copies, and after every step each wanted ref has exactly one. */
+static int census( const char * path )
+{
+	std::FILE * f = std::fopen( path, "rb" );
+	if ( !f ) {
+		std::printf( "census: cannot read %s\n", path );
+		return 2;
+	}
+	std::vector<LargeRef::Row> rows;
+	int subs = 0, refused = 0;
+	for ( ;; ) {
+		uint32_t n = 0;
+		if ( std::fread( &n, 4, 1, f ) != 1 )
+			break;
+		std::vector<unsigned char> b( n );
+		if ( n && std::fread( b.data(), 1, n, f ) != n )
+			break;
+		subs++;
+		refused += LargeRef::decode( b.data(), b.size(), YX, rows ) < 0 ? 1 : 0;
+	}
+	std::fclose( f );
+	LargeRef::Owners o( STREAMRED );
+	o.setRows( rows );
+	std::set<uint32_t> all;
+	for ( const LargeRef::Row & r : rows )
+		all.insert( r.ref );
+	// routes (block centres): Sanctuary east, Concord to downtown, along downtown, the south coast up north
+	const int routes[][4] = { { -17, 23, 12, 23 }, { -15, 17, 2, -2 }, { -10, -2, 30, -2 }, { 25, -25, 25, 20 } };
+	std::set<std::pair<int, int>> loaded;
+	long events = 0, twice = 0, stepsBad = 0, steps = 0;
+	size_t maxLayer = 0, maxWanted = 0;
+	std::set<uint32_t> everLayer;
+	auto watch = [&]() {
+		events++;
+		for ( uint32_t r : o.layer() )   // only a layer ref can be a second copy
+			twice += o.copies( r ) > 1 ? 1 : 0;
+	};
+	for ( const auto & rt : routes ) {
+		int x = rt[0], y = rt[1];
+		for ( ;; ) {
+			std::set<std::pair<int, int>> next;
+			for ( int dy = -2; dy <= 2; dy++ )
+				for ( int dx = -2; dx <= 2; dx++ )
+					next.insert( { x + dx, y + dy } );
+			for ( const auto & k : next )   // the stream attaches the new cells before the old ones leave
+				if ( !loaded.count( k ) ) {
+					o.cell( k.first, k.second, true );
+					watch();
+				}
+			for ( const auto & k : loaded )
+				if ( !next.count( k ) ) {
+					o.cell( k.first, k.second, false );
+					watch();
+				}
+			loaded = next;
+			int bad = 0;
+			size_t wantedN = 0;
+			for ( uint32_t r : all ) {
+				const bool w = o.wanted( r );
+				wantedN += w ? 1 : 0;
+				bad += o.copies( r ) != ( w ? 1 : 0 );
+			}
+			stepsBad += bad ? 1 : 0;
+			steps++;
+			maxLayer = std::max( maxLayer, o.layer().size() );
+			maxWanted = std::max( maxWanted, wantedN );
+			everLayer.insert( o.layer().begin(), o.layer().end() );
+			if ( x == rt[2] && y == rt[3] )
+				break;
+			x += ( rt[2] > x ) - ( rt[2] < x );
+			y += ( rt[3] > y ) - ( rt[3] < y );
+		}
+	}
+	std::printf( "census: %d RNAM subrecords (%d refused), %d rows, %d refs; %ld steps, %ld cell events\n", subs, refused,
+		int( rows.size() ), int( all.size() ), steps, events );
+	std::printf( "census: layer up to %d units (block wanted up to %d large refs), %d refs drawn by a unit at some step\n",
+		int( maxLayer ), int( maxWanted ), int( everLayer.size() ) );
+	std::printf( "census: refs with two copies after a cell event %ld; steps with a wrong copy count %ld -- %s\n", twice,
+		stepsBad, ( twice == 0 && stepsBad == 0 && refused == 0 && maxLayer > 0 ) ? "PASS" : "FAIL" );
+	return ( twice == 0 && stepsBad == 0 && refused == 0 && maxLayer > 0 ) ? 0 : 1;
+}
+
+int main( int argc, char ** argv )
 {
 	std::setvbuf( stdout, nullptr, _IONBF, 0 );
+	if ( argc > 2 && std::strcmp( argv[1], "--rnam" ) == 0 )
+		return census( argv[2] );
 	std::vector<LargeRef::Row> rows;
 	// grid (10,-2) lists a tower at (12,-3) and one in its own cell; grid (11,-2) lists the tower again
 	const auto a = rnam( -2, 10, { ref( 0x100, 12, -3 ), ref( 0x101, 10, -2 ) } );

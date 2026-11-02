@@ -87,6 +87,7 @@ struct CellChunk
 	std::shared_ptr<const CellStreamSeed> seed;
 	int cx = 0, cy = 0;
 	int facts[4] = { 0, 0, -1, -1 };    //!< the 5x5 whose enable facts apply (the fixed block's rule)
+	quint32 largeRef = 0;               //!< lane LARGEREF2: a large-ref unit, this ref only (cx, cy: the cell it stands in)
 	// worker out
 	bool ok = false;
 	QString error;
