@@ -23,6 +23,13 @@
 #define WW_AIR_LEAK 1
 uniform int volLeakRed;		// 1 dalcenv, 2 nosungate, 4 lightleak, 8 nofartailshadow (lookdev_fog.glsl: volAirFlags 256), 16 nointsungate (INTGI1)
 #endif
+/* lane DARKAIR1 (SHAFTS-DARKAIR): outdoors the weather's ambient in the air takes the sky the ray-traced volume sees
+ * above the froxel (FOGLEAK1's read replaces the whole env share instead, so not under WW_AIR_LEAK). Opt-in:
+ * WW_CELL_AIR_SKYVIEW=1 (the loader's define). Red WW_CELL_AIR_RED=openenv (volEnvOccRed 1): the flat ambient */
+#if defined( WW_CELL_RTDDGI ) && !defined( WW_AIR_LEAK ) && defined( WW_CELL_AIR_SKYVIEW )
+#define WW_AIR_SKYVIEW 1
+uniform int volEnvOccRed;
+#endif
 #include "lookdev_fog.glsl"
 #include "ww_sunshadow.glsl"
 #include "cell_lights.glsl"
@@ -94,6 +101,74 @@ layout ( location = 1 ) out vec4 volMrt[7];	// stage 3: layers volLayer + 1 .. +
 #define AZ_TINT( q ) * azTintQ[q]
 #else
 #define AZ_TINT( q )
+#endif
+
+#ifdef WW_AIR_SKYVIEW
+/* lane DARKAIR1: the share of the open sky the volume sees UP from P (the irradiance tile's alpha at +z: the
+ * cosine-weighted sky visibility, 1 over open flat ground), one walk of the 8 probes round P per cascade, trilinear x
+ * Chebyshev toward P as airLeakEnv weighs them (a froxel has no normal). Returns 1 where no volume covers P (the
+ * flat ambient as before), and fades to 1 over the volume's edge */
+float airSkyView( vec3 P )
+{
+	if ( !cellDdgiOn || cellInterior || volEnvOccRed != 0 )
+		return 1.0;
+	float vs = 0.0, left = 1.0;
+#ifdef WW_CELL_RTDDGI_CASCADES
+	for ( int c = 0; c < cellDdgiCount && left > 0.0; c++ ) {
+		cellDdgiC = c;
+		vec4 O = cellDdgiCOrigin[c], S = cellDdgiCStep[c];
+		ivec4 Dm = cellDdgiCDims[c];
+		int base = cellDdgiCBase[c];
+		float tight = 1.0;
+#else
+	for ( int c = 0; c < 1; c++ ) {
+		vec4 O = cellDdgiOrigin, S = cellDdgiStep;
+		ivec4 Dm = cellDdgiDims;
+		int base = 0;
+		float tight = 0.0;
+#endif
+		vec3 g = ( P - O.xyz ) / S.xyz;
+		ivec3 b = clamp( ivec3( floor( g ) ), ivec3( 0 ), max( Dm.xyz - 2, ivec3( 0 ) ) );
+		vec3 a = clamp( g - vec3( b ), 0.0, 1.0 );
+		vec3 e = min( g, vec3( Dm.xyz - 1 ) - g ) - tight;
+		float fd = clamp( min( e.x, min( e.y, e.z ) ), 0.0, 1.0 );
+		if ( fd <= 0.0 )
+			continue;
+		float sv = 0.0, ws = 0.0, cover = 0.0;
+		for ( int k = 0; k < cellGiLoop8; k++ ) {
+			ivec3 o = ivec3( k % 2, ( k / 2 ) % 2, k / 4 );
+			ivec3 q = min( b + o, Dm.xyz - 1 );
+			int p = q.x + Dm.x * ( q.y + Dm.y * q.z );
+			vec4 pr = texelFetch( cellDdgiAtlas, base + 192 * Dm.w + p );
+			vec3 t = mix( vec3( 1.0 ) - a, a, vec3( o ) );
+			float w = t.x * t.y * t.z;
+			int st = int( pr.w + 0.5 );
+			if ( st != 2 ) {
+				cover += st == 0 ? w : 0.0;
+				continue;
+			}
+			cover += w;
+			vec3 bp = O.xyz + vec3( q ) * S.xyz + pr.xyz - P;
+			float rr = length( bp );
+			if ( rr > 0.0 ) {
+				vec4 m = cellDdgiTile( p, bp * ( -1.0 / rr ), 16 );
+				w *= cellDdgiChebyshev( rr, m.x, m.y );
+			}
+			/* the tile at +z is the bilinear of texels (3,3) (4,3) (3,4) (4,4) at weight 1/4 each (cellDdgiTile's own
+			 * law); fetched by hand: a cellDdgiTile call with the literal +z read .y/.w as 0 on driver 610 (DARKAIR1) */
+			int tb = base + 64 * p + 27;
+			sv += 0.25 * ( texelFetch( cellDdgiAtlas, tb ).w + texelFetch( cellDdgiAtlas, tb + 1 ).w
+				+ texelFetch( cellDdgiAtlas, tb + 8 ).w + texelFetch( cellDdgiAtlas, tb + 9 ).w ) * w;
+			ws += w;
+		}
+		if ( ws <= 0.0 )
+			continue;
+		float take = fd * min( cover, 1.0 ) * left;
+		vs += take * clamp( sv / ws, 0.0, 1.0 );
+		left -= take;
+	}
+	return vs + left;	// the uncovered share keeps the flat ambient
+}
 #endif
 
 #ifdef WW_AIR_LEAK
@@ -758,8 +833,13 @@ vec3 airRest( vec3 posView, vec3 dirView, float z, float sA, float sB, out vec3 
 		bool replace = cellGiOn && ( cellInterior ? cellGiAmb == 1 : cellGiSky );
 		const vec3 axes[6] = vec3[6]( vec3( 1, 0, 0 ), vec3( -1, 0, 0 ), vec3( 0, 1, 0 ), vec3( 0, -1, 0 ), vec3( 0, 0, 1 ), vec3( 0, 0, -1 ) );
 		vec3 A[6];
+#ifdef WW_AIR_SKYVIEW
+		float skyV = airSkyView( P );	// lane DARKAIR1: the sky the froxel sees (1 in the open, 1 with no volume)
+#else
+		const float skyV = 1.0;
+#endif
 		for ( int a = 0; a < 6; a++ )
-			A[a] = cellAmbient( axes[a], P ) * ( replace ? 1.0 - share[a] : 1.0 );
+			A[a] = cellAmbient( axes[a], P ) * ( ( replace ? 1.0 - share[a] : 1.0 ) * skyV );
 #ifdef WW_AIR_LEAK
 		Jenv += volCubeScatter( A, dW ) * ( 1.0 - leakFade ) + Jddgi;	// lane FOGLEAK1 fix 1: the volume where it covers
 #else
