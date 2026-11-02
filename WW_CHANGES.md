@@ -1,3 +1,11 @@
+## LEANCOMMENTS2 (2026-11-02): comment trim over the LOD generator, probe, hkx, ESM-data and impostor sources
+
+Comments only, in src/lodgen*, src/probe*, src/hkx*, src/esmdata*, src/impostor* and the WW-added parts of
+src/nifskope_ui.cpp and src/glview.cpp (lines of the upstream baseline untouched): lane, date and review tags are cut,
+and comment runs of more than three lines keep their first sentence or two. Lists, tables, doxygen commands and
+commented-out code stay as they were. tests/spells/comments_only_check.py passes on every changed file; the object
+files built before and after are identical. Nothing the program does changes.
+
 ## REFLPROBECLI1 (TOOLS1101, 2026-11-01): count the reflection probes' below-horizon misses without a window
 
 `nifskope -no-gui reflcensus --soup <soup.psp> (--camera x,y,z ... | --auto N) [--interior] [--out probes.tsv]` places
