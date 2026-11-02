@@ -1,3 +1,13 @@
+## SKINSSS3 (2026-11-02): the bindless programs write the skin tag (SKINSSS-BINDLESS)
+
+Skin subsurface found no cell skin while Bindless draws was on (the default): every FO4 lighting shape of a cell, faces
+and bodies included, draws through the bindless twins fo4_cellbl / fo4_cellcsmbl, and those wrote no skin tag. Now they
+write it like fo4_cell does. The multi-draw never puts a skin draw and a non-skin draw in one call: `wwSkinOn` is set
+while the draw packet records, so the two packets differ and `WwDp::sameButHandles` refuses the join (skinned shapes
+never join at all). tests/skinsss pins that chain. Non-skin draws: the twins' colour code is the same as before (the
+NV assembly differs only by the tag write); with the row off, every program's machine code is the same as before.
+Red `WW_CELL_SKINSSS_RED=nobl` (read when the shaders load): the twins write no tag, as in SKINSSS1/2.
+
 ## SKINSSS2 (2026-11-02): the skin blur at half resolution (option WW_CELL_SKINSSS_HALF=1, off)
 
 Skin subsurface (SKINSSS1) can run its blur at half resolution, as FO4CS does: `WW_CELL_SKINSSS_HALF=1` (env only, off;

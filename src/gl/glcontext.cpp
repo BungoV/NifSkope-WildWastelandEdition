@@ -492,8 +492,11 @@ bool NifSkopeOpenGLContext::Shader::load( const QString & filepath )
 				data.insert( data.indexOf( '\n' ) + 1, "#define WW_CORNEA_RED 1\n" );
 		}
 		// lane SKINSSS1: the opaque pass's skin tag (fo4_default.frag); not static: the row reloads
-		if ( wwSkinSssShaderDefine() && data.startsWith( "#version" ) && data.contains( "_CELL_SKINSSS" ) )
+		if ( wwSkinSssShaderDefine() && data.startsWith( "#version" ) && data.contains( "_CELL_SKINSSS" ) ) {
 			data.insert( data.indexOf( '\n' ) + 1, "#define WW_CELL_SKINSSS 1\n" );
+			if ( wwEnv( "WW_CELL_SKINSSS_RED" ).trimmed() == "nobl" )	// lane SKINSSS3 red: the bindless twins write no tag
+				data.insert( data.indexOf( '\n' ) + 1, "#define WW_SKINSSS_RED_NOBL 1\n" );
+		}
 		// lane SKINSSS2 (EYEIRIS1): the iris under the cornea (fo4_default.frag); not static: the row reloads
 		if ( wwIrisShaderDefine() && data.startsWith( "#version" ) && data.contains( "_CELL_IRIS" ) ) {
 			data.insert( data.indexOf( '\n' ) + 1, "#define WW_CELL_IRIS 1\n" );

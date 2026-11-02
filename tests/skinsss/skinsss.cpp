@@ -291,8 +291,25 @@ int main( int argc, char ** argv )
 			&& tw.find( "falloff[3] = { 1.0f, 0.37f, 0.30f };" ) != std::string::npos, "pin: twin 5-Gaussian constants" );
 		check( countOf( fd, "cellEmitOut = vec4( wwSkinOn ? 1.0 : 0.0 );" ) == 2, "pin: both probe-20 sites write the tag",
 			double( countOf( fd, "cellEmitOut = vec4( wwSkinOn ? 1.0 : 0.0 );" ) ) );
-		check( fd.find( "#if defined( WW_CELL_SKINSSS ) && defined( WW_CELLLIGHTS ) && !defined( WW_BINDLESS )" ) != std::string::npos,
-			"pin: the tag only in the cell programs, bindless twins keep the old path" );
+		// lane SKINSSS3: the bindless twins write the tag too; red WW_CELL_SKINSSS_RED=nobl keeps them out
+		check( fd.find( "#if defined( WW_CELL_SKINSSS ) && defined( WW_CELLLIGHTS ) && !( defined( WW_BINDLESS ) && defined( WW_SKINSSS_RED_NOBL ) )" )
+				!= std::string::npos, "pin: the tag in the cell programs and their bindless twins (red nobl)" );
+		check( gc.find( "if ( wwEnv( \"WW_CELL_SKINSSS_RED\" ).trimmed() == \"nobl\" )" ) != std::string::npos
+			&& gc.find( "\"#define WW_SKINSSS_RED_NOBL 1\\n\"" ) > gc.find( "\"#define WW_CELL_SKINSSS 1\\n\"" ), "pin: loader red nobl inside the row's define" );
+		{
+			// wwSkinOn is set while the draw packet records, so two draws that differ in it have different packets, and the
+			// multi-draw join (sameButHandles) never puts a skin and a non-skin draw under one uniform value
+			const std::string dp = readAll( root + "/src/gl/celldrawpacket.cpp" );
+			const std::string bs = readAll( root + "/src/gl/bsshape.cpp" );
+			const size_t pb = rd.find( "WwDp::begin( *dpSlot, prog );" ), pe = rd.find( "WwDp::end( true, texunit );" );
+			const size_t ps = rd.find( "prog->uni1b( \"wwSkinOn\"," );
+			check( pb != std::string::npos && pe != std::string::npos && ps != std::string::npos && pb < ps && ps < pe,
+				"pin: wwSkinOn is set inside the packet's recording" );
+			check( dp.find( "return std::equal( a.data.begin() + from, a.data.end(), b.data.begin() + from );" ) != std::string::npos
+				&& dp.find( "if ( x.kind != y.kind || x.a != y.a || x.b != y.b || x.off != y.off )" ) != std::string::npos,
+				"pin: the join compares every recorded value but the handles" );
+			check( bs.find( "!WwDp::sameButHandles( *lp, *fp )" ) != std::string::npos, "pin: the multi-draw join asks sameButHandles" );
+		}
 		check( rd.find( "( bgsm && ( bgsm->bSkinTint || bgsm->bFacegen ) )" ) != std::string::npos
 			&& rd.find( "lsp->isST( ShaderFlags::ST_SkinTint ) || lsp->isST( ShaderFlags::ST_Facegen )" ) != std::string::npos, "pin: skin gate" );
 		check( cl.find( "GL_COLOR_ATTACHMENT1, GL_TEXTURE_2D, g.skinTex, 0" ) != std::string::npos
@@ -309,7 +326,8 @@ int main( int argc, char ** argv )
 		const std::string gp = readAll( root + "/src/gl/glproperty.cpp" );
 		check( lg.find( "s.srcShaderType = src.get<quint32>( iShader, \"Shader Type\" );" ) != std::string::npos
 			&& lg.find( "n.srcShaderType = s.srcShaderType;" ) != std::string::npos, "pin: loader keeps the source Shader Type" );
-		check( cv.find( "( s.srcShaderType >= 4u && s.srcShaderType <= 6u ) ? s.srcShaderType : 0u" ) != std::string::npos
+		// SKINSSS2 (EYECORNEA-CELL) added the eye (16) to the kept types; this pin was stale at 510b5d92 (fixed in SKINSSS3)
+		check( cv.find( "( ( s.srcShaderType >= 4u && s.srcShaderType <= 6u ) || s.srcShaderType == 16u ) ? s.srcShaderType : 0u" ) != std::string::npos
 			&& cv.find( "QStringLiteral( \"|T%1\" ).arg( srcSt )" ) != std::string::npos, "pin: face / skin / hair keep their own bucket" );
 		check( cv.find( "nif->set<QString>( iSt, \"Name\", QStringLiteral( \"WWSrcShaderType\" ) );" ) != std::string::npos
 			&& cv.find( "wwEnv( \"WW_CELL_SRCST_RED\" ).trimmed() != \"1\"" ) != std::string::npos, "pin: cell writer tags the shader, red" );

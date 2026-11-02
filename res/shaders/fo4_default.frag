@@ -135,7 +135,9 @@ layout ( location = 0 ) out vec4 fragColor;
 // lane SSGI2: the scene pass's second target, the emitted share alone (the bounce's emissive cast; 0 elsewhere)
 layout ( location = 1 ) out vec4 cellEmitOut;
 #endif
-#if defined( WW_CELL_SKINSSS ) && defined( WW_CELLLIGHTS ) && !defined( WW_BINDLESS )
+// lane SKINSSS3: the bindless twins write the tag too (wwSkinOn is in the draw packet, so the multi-draw never joins a
+// skin and a non-skin draw); WW_CELL_SKINSSS_RED=nobl keeps them out (the SKINSSS1/2 path)
+#if defined( WW_CELL_SKINSSS ) && defined( WW_CELLLIGHTS ) && !( defined( WW_BINDLESS ) && defined( WW_SKINSSS_RED_NOBL ) )
 #define WW_SKINSSS_TAG 1
 uniform bool wwSkinOn;	// lane SKINSSS1: the draw is skin (src/gl/renderer.cpp); the opaque pass writes it to its skin tag
 #endif
