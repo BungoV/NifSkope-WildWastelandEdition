@@ -62,6 +62,7 @@ uniform bool volSurfClusters;	// lane GAPLOOK1 (LIGHTSYS-4): the lights from the
 uniform vec2 volSurfPx;			// the main viewport's pixels a froxel column (x, y)
 uniform bool volSurfRed;		// red drop: each walk leaves out its first light
 uniform vec4 volMs;				// lane GAPLOOK1 (FOGEXTRAS): the sun's scattering octaves a, b, c, w 1 = shadows lift (x 0: off)
+uniform vec4 volMsLamp;		// lane AIRMS1 (AIR-MS-LAMPS): the lamps' orders >= 2: K0, K1, a, s (x 0: off; src/gl/airmslamp.h)
 uniform bool volMsMedium;		// lane GLAREBLOW1: a = min(volMs.x, the air's re-scatter chance) (red WW_CELL_GLAREBLOW_RED=off: volMs.x)
 // lane FOGDRIFT1 (cellvolair.h): x amp / span (0: smooth air), y the fade's start, z 1 / its length, w the noise's mean
 uniform vec4 volDrift;
@@ -476,6 +477,17 @@ vec3 airMsSum( float vis, float T, float c, float hard, float a0 )
 	return r;
 }
 
+/* lane AIRMS1 (AIR-MS-LAMPS): a placed light's orders >= 2 over its e (the single scattering is e exp(-od) pi p(c)):
+ * pi M = (K0 + K1 gbar) od exp(-a od) pi P2(c), P2 the phase with each HG lobe's g x s, fitted to a Monte Carlo of a
+ * point lamp in the same medium (notes/airms1). CPU twin: src/gl/airmslamp.h (tests/airmslamp). */
+vec3 airLampMs( float c, float od )
+{
+	float s = volMsLamp.w;
+	vec3 ph = PI * ( volPhase[0].rgb * ( 3.0 / ( 16.0 * PI ) ) * ( 1.0 + c * c )
+		+ volPhase[1].rgb * volHg( c, volPhase[1].w * s ) + volPhase[2].rgb * volHg( c, volPhase[2].w * s ) );
+	return max( volMsLamp.x + volMsLamp.y * volGi.w, 0.0 ) * od * exp( -volMsLamp.z * od ) * ph;
+}
+
 /* lane PERFFIX3: the sun's visibility for one air sample. The surfaces' read (wwSunShadow) evaluates its Vogel disc
  * (8..48 taps) with a cos, a sin and a sqrt per tap, rotated per point: offline that trigonometry, not the fetches, was
  * most of the inject's sun cost (tests/airsun: 32 taps 1.33 ms, the same disc from literal offsets 0.49 ms at 160x90x64).
@@ -715,7 +727,10 @@ vec3 airRest( vec3 posView, vec3 dirView, float z, float sA, float sB, out vec3 
 				vec3 e = cellLightE( i, Pk, L, Lo, noSpec ) * cellFogK( i );	// N = L: no N.L, the shadow lifted toward the light
 				if ( all( equal( e, vec3( 0.0 ) ) ) )
 					continue;
-				Ji += e * exp( -airOd( Pk.z + zOff, t0.z + zOff, d ) ) * volPhasePi( dot( L, dW ) );
+				float od = airOd( Pk.z + zOff, t0.z + zOff, d ), c = dot( L, dW );
+				Ji += e * exp( -od ) * volPhasePi( c );
+				if ( volMsLamp.x > 0.0 )
+					Ji += e * airLampMs( c, od );
 			}
 #ifdef WW_AIR_LEAK
 			if ( any( greaterThan( Ji, vec3( 0.0 ) ) ) )	// lane FOGLEAK1 fix 3
@@ -827,7 +842,10 @@ void airLightsQ( vec3 posView, vec3 dirView, float z, float sA, float sB, int ne
 			vec3 e = cellLightE( i, Pk, L, Lo, noSpec ) * cellFogK( i );
 			if ( all( equal( e, vec3( 0.0 ) ) ) )
 				continue;
-			Jq[k] += e * exp( -airOd( Pk.z + zOff, t0.z + zOff, d ) ) * volPhasePi( dot( L, dW ) ) * share;
+			float od = airOd( Pk.z + zOff, t0.z + zOff, d ), c = dot( L, dW );
+			Jq[k] += e * exp( -od ) * volPhasePi( c ) * share;
+			if ( volMsLamp.x > 0.0 )
+				Jq[k] += e * airLampMs( c, od ) * share;
 		}
 	}
 }
