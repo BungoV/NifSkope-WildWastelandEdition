@@ -97,6 +97,7 @@ uniform bool cellIsVanCurve;
 uniform bool cellIsBloomOn;
 uniform sampler2D cellIsBloom;
 uniform vec4 cellIsBloomRect;
+uniform vec3 cellIsWbD;
 """ + tm + '\n' + isFn + '\n' + curveFns + r"""
 uniform sampler2D src;
 uniform int mode;

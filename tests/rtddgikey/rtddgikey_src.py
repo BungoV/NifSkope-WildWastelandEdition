@@ -19,8 +19,11 @@ print('rtddgikey: key block %d chars; rule 1 (albedo in the key) %s, rule 2 (red
       % (len(blk), 'OK' if r1 else 'FAIL', 'OK' if r2 else 'FAIL', 'OK' if r3 else 'FAIL'))
 # 4. FIX1101A LATE ITEM 17: an interior's volume takes no sky and no sun (sky.on = false) unless the red
 #    WW_CELL_RTDDGI_INTSKY_RED is set (main: a Use Sky Lighting interior took the weather's sky + sun: the museum's open top)
-r4 = bool(re.search(r'if\s*\(\s*lights\.interior\s*&&\s*!\s*rtddgiIntSkyRed\(\)\s*\)\s*\{\s*sky\.on\s*=\s*false;', s)) and \
-    'wwEnv( "WW_CELL_RTDDGI_INTSKY_RED" )' in s
+#    INTSKY1 (11-01, LAND2 11-02): a .recx-SUNLIT interior keeps the weather's sky and sun through its openings, so the
+#    test also takes `lights.interior && !sunlit && !rtddgiIntSkyRed()` when sunlit comes from wwCellSunlitNow.
+m4 = re.search(r'if\s*\(\s*lights\.interior\s*&&\s*(!\s*sunlit\s*&&\s*)?!\s*rtddgiIntSkyRed\(\)\s*\)\s*\{\s*sky\.on\s*=\s*false;', s)
+r4 = bool(m4) and 'wwEnv( "WW_CELL_RTDDGI_INTSKY_RED" )' in s and \
+    (not m4.group(1) or bool(re.search(r'const\s+bool\s+sunlit\s*=\s*lights\.interior\s*&&\s*wwCellSunlitNow\(', s)))
 print('rtddgikey: rule 4 (an interior volume: no sky, no sun) %s' % ('OK' if r4 else 'FAIL'))
 ok = r1 and r2 and r3 and r4
 print('RTDDGIKEY %s' % ('OK' if ok else 'FAIL'))
