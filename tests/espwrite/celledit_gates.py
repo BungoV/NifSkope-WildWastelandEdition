@@ -8,11 +8,12 @@
       (the un-negated euler) must fail on any yaw that is not 0 or 180 degrees.
   gap <in.esp> <out.esp>
       the append fixture: own REFR ids moved up by 0x80, HEDR next 0x900 (a file whose refs were deleted elsewhere).
-  append <before.esp> <after.esp> [--added N]
+  append <before.esp> <after.esp> [--added N] [--red]
       the "Add to existing" identity: every REFR of the old file is in the new one byte for byte with its form id,
       the new file holds N more, HEDR next grows, and HEDR count = records + groups. Red WW_ESPWRITE_RED=renumber
-      must fail.
-Exit 0 = pass, 1 = a failure (each printed as FAIL ...).
+      must fail; pass --red on a red run: a <before> with contiguous own ids from 0x800 (renumber hands out the same
+      ids) is refused as VACUOUS, rc 2. The red runs on the gap fixture (tests/espwrite/append_gate.sh).
+Exit 0 = pass, 1 = a failure (each printed as FAIL ...), 2 = usage or a vacuous red.
 """
 import math, os, re, struct, sys, zlib
 
@@ -147,11 +148,27 @@ def gate_ghost(log, esp, master):
     print('gate 5: %d item(s), %d failures' % (n, len(FAILS)))
 
 
-def gate_append(before, after, added):
+FIRST_ID = 0x800   # the writer's first own id (espwrite.cpp kLightFirst)
+
+
+def renumber_blind(tes4, recs, next_id):
+    """True when the old rule (every ref a fresh id from FIRST_ID) hands out the very ids append keeps: own REFR ids
+    FIRST_ID .. FIRST_ID+n-1 and HEDR next FIRST_ID+n. Such a file cannot tell the red renumber from the green."""
+    nm = sum(1 for t, v in tes4 if t == 'MAST')
+    own = sorted(f & 0xFFFFFF for f, (s, r) in recs.items() if s == 'REFR' and (f >> 24) == nm)
+    return own == list(range(FIRST_ID, FIRST_ID + len(own))) and (next_id & 0xFFFFFF) == FIRST_ID + len(own)
+
+
+def gate_append(before, after, added, red=False):
     b = open(before, 'rb').read(); a = open(after, 'rb').read()
     tb, rb, _, _ = walk(b); ta, ra, nrec, ngrp = walk(a)
     hb = dict(tb)['HEDR']; ha = dict(ta)['HEDR']
     _, cb, nb = struct.unpack('<fII', hb[:12]); _, ca, na = struct.unpack('<fII', ha[:12])
+    if red and renumber_blind(tb, rb, nb):
+        # lane BUGS1102D (ESPWRITE2-RENUMBER-RED): the red on such a file read rc 0 in every exe gate run
+        print('VACUOUS red: %s holds contiguous own ids from %X with next %X; renumber gives the same ids. '
+              'Run the red on the gap fixture (gap <in> <out>).' % (before, FIRST_ID, nb))
+        return 2
     check(ca == nrec + ngrp, 'HEDR count %d, the file holds %d records + %d groups' % (ca, nrec, ngrp))
     old = {f: r for f, (s, r) in rb.items() if s == 'REFR'}
     new = {f: r for f, (s, r) in ra.items() if s == 'REFR'}
@@ -201,7 +218,8 @@ def main(argv):
         gate_ghost(argv[2], argv[3], argv[4])
     elif len(argv) >= 4 and argv[1] == 'append':
         added = int(argv[argv.index('--added') + 1]) if '--added' in argv else 1
-        gate_append(argv[2], argv[3], added)
+        if gate_append(argv[2], argv[3], added, red='--red' in argv) == 2:
+            return 2
     else:
         print(__doc__); return 2
     return 1 if FAILS else 0

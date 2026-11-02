@@ -1,3 +1,12 @@
+## BUGS1102D (2026-11-02): the append red renumber runs where it can fail
+
+- **ESPWRITE2-RENUMBER-RED:** the exe gates ran `WW_ESPWRITE_RED=renumber` on a file whose own ids run from 0x800 with
+  HEDR next right after them; the old rule hands out the very same ids there, so the red read rc 0 on every run.
+  `celledit_gates.py append --red` now refuses such a file as VACUOUS (rc 2), and tests/espwrite/append_gate.sh
+  (`<exe> <wwcell> <scratch>`) runs green on both fixtures and the red on the gap fixture: on 864e90d8's exe green
+  rc 0 / 0, red renumber rc 1 (3 failures: old ref not kept, next 900 -> 802, new ids below next), contiguous red rc 2.
+  No writer change.
+
 ## ESPWRITE3B (2026-11-02): scale, exterior refs, cell lighting, buttons, keep the whole file on Add to existing
 
 - Edits panel: click a reference in the view, then Move (x y z, prefilled), Turn -15 / +15 deg, Scale (Set) or
