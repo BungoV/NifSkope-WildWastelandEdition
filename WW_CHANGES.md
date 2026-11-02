@@ -245,6 +245,35 @@ Behind `WW_CELL_PRECIP_LOOK` (off by default; `rain`, `snow`, `clump`, `hail`, o
 - The shipped atlases moved to `Textures/FO4CS/Precip/`; a path under the old `Textures/WW/Precip/` is still found.
 - tests/precip: rule 6 (the coverage integral, the drawn sizes, the clump fit, the flicker and oscillation) with red 16
   (the old path); rule 7 (the shader's phase table against its Monte Carlo fixture).
+## BUGS1102D (2026-11-02): the append red renumber runs where it can fail
+
+- **ESPWRITE2-RENUMBER-RED:** the exe gates ran `WW_ESPWRITE_RED=renumber` on a file whose own ids run from 0x800 with
+  HEDR next right after them; the old rule hands out the very same ids there, so the red read rc 0 on every run.
+  `celledit_gates.py append --red` now refuses such a file as VACUOUS (rc 2), and tests/espwrite/append_gate.sh
+  (`<exe> <wwcell> <scratch>`) runs green on both fixtures and the red on the gap fixture: on 864e90d8's exe green
+  rc 0 / 0, red renumber rc 1 (3 failures: old ref not kept, next 900 -> 802, new ids below next), contiguous red rc 2.
+  No writer change.
+
+## ESPWRITE3B (2026-11-02): scale, exterior refs, cell lighting, buttons, keep the whole file on Add to existing
+
+- Edits panel: click a reference in the view, then Move (x y z, prefilled), Turn -15 / +15 deg, Scale (Set) or
+  Disable. Each change joins the edit list, one row per ref, and Save writes it with the placed refs. Disable sets
+  Initially Disabled only; there is no delete (xEdit's Undelete and Disable rule is in the lane notes).
+- Exterior cells: a ref of a grid cell or of the world's persistent cell is overridden in its own group, under the
+  WRLD record and the persistent cell copied from the winner.
+- Scale: XSCL is set, replaced or removed (1.0 = none).
+- Cell lighting: `light <field> <value>` sets XCLL fields of an interior (colours as RRGGBB hex) and clears each
+  field's Inherits bit, so the cell's value counts over its lighting template.
+- Warnings in the action bar and the log: a precombined ref changed (needs a precombine / previs rebuild), a plugin
+  later in the load order that overrides the cell or the ref (the edit will not show), a lighting template set.
+  The copy and the masters come from the last plugin up to the target that holds the record, not a later one.
+- Add to existing keeps the whole file: every top group (KYWD, ..., CELL, WRLD) and header field (CNAM, SNAM, INTV)
+  is carried byte for byte, in Fallout4.esm's group order. Foreign refs and overrides are carried as they are.
+- A plugin the open cell maps can now be rewritten: the old file is renamed aside before the new one is committed
+  (libfo76utils opens plugins with FILE_SHARE_DELETE), and is put back if the write fails.
+- Script verbs (WW_CELL_EDIT_SCRIPT): pickref, move, turn, scale, disable, light.
+- `espwrite edit` takes exterior specs, `scale s`, `light f v`, `--hold`, and prints `warning ...` lines.
+- Reds: WW_ESPWRITE_RED=editscale, xcllinherit, nowarn, mapped (no rename aside), mergedrop (other groups dropped).
 
 ## ESPWRITE3 (2026-11-02): move, turn or disable a reference already in an interior cell
 
@@ -254,7 +283,7 @@ Behind `WW_CELL_PRECIP_LOOK` (off by default; `rain`, `snow`, `clump`, `hail`, o
   own, or an earlier override) is changed in place. It never truly deletes anything.
 - It reads the cell back on the new load order. Each changed ref must appear once, won by the new plugin, at its new
   pose. Every other ref in the cell must be unchanged.
-- Interior cells only; an exterior cell is refused by name. The cell view has no buttons for it yet.
+- Interior cells only at first (ESPWRITE3B adds exterior cells and the panel buttons).
 - Reds: WW_ESPWRITE_RED=editkeep leaves DATA unchanged, editflag skips 0x800.
 
 ## ESPWRITE2 (2026-11-02): place a reference in the cell view and save it as a plugin

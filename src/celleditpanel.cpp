@@ -2,7 +2,9 @@
 
 #include "celleditpanel.h"
 
+#include "cellclick.h"
 #include "celledit.h"
+#include "cellpick.h"
 #include "wwskin.h"
 #include "ui/widgets/wwnumberfield.h"
 
@@ -78,6 +80,54 @@ CellEditPanel::CellEditPanel( QWidget * parent ) : QWidget( parent )
 	placeBtn->setObjectName( QStringLiteral( "CellEditPlace" ) );
 	placeBtn->setCheckable( true );
 	row( QString(), placeBtn, tr( "Place mode (Shift+A in the view): click drops, drag turns, Esc leaves" ) );
+
+	// ESPWRITE3B: change the picked reference (an override of its winner; never a delete)
+	pickedLabel = new QLabel( this );
+	pickedLabel->setObjectName( QStringLiteral( "CellEditPicked" ) );
+	pickedLabel->setWordWrap( true );
+	row( tr( "Picked" ), pickedLabel, tr( "The reference clicked in the view; the buttons below change it" ) );
+	auto * moveRow = new QWidget( this );
+	auto * mh = new QHBoxLayout( moveRow );
+	mh->setContentsMargins( 0, 0, 0, 0 );
+	for ( int k = 0; k < 3; k++ ) {
+		moveSpin[k] = new QDoubleSpinBox( moveRow );
+		moveSpin[k]->setObjectName( QStringLiteral( "CellEditMove%1" ).arg( QLatin1Char( "XYZ"[k] ) ) );
+		moveSpin[k]->setRange( -1.0e6, 1.0e6 );
+		moveSpin[k]->setDecimals( 1 );
+		wwMakeScrubField( moveSpin[k] );
+		mh->addWidget( moveSpin[k], 1 );
+	}
+	moveBtn = new QPushButton( tr( "Move" ), moveRow );
+	moveBtn->setObjectName( QStringLiteral( "CellEditMove" ) );
+	mh->addWidget( moveBtn );
+	row( tr( "Position" ), moveRow, tr( "Move the picked reference to this point (game units)" ) );
+	auto * turnRow = new QWidget( this );
+	auto * th = new QHBoxLayout( turnRow );
+	th->setContentsMargins( 0, 0, 0, 0 );
+	turnLeftBtn = new QPushButton( tr( "-15 deg" ), turnRow );
+	turnLeftBtn->setObjectName( QStringLiteral( "CellEditTurnLeft" ) );
+	turnRightBtn = new QPushButton( tr( "+15 deg" ), turnRow );
+	turnRightBtn->setObjectName( QStringLiteral( "CellEditTurnRight" ) );
+	th->addWidget( turnLeftBtn, 1 );
+	th->addWidget( turnRightBtn, 1 );
+	row( tr( "Turn" ), turnRow, tr( "Turn the picked reference about Z" ) );
+	auto * scaleRow = new QWidget( this );
+	auto * sh = new QHBoxLayout( scaleRow );
+	sh->setContentsMargins( 0, 0, 0, 0 );
+	scaleSpin = new QDoubleSpinBox( scaleRow );
+	scaleSpin->setObjectName( QStringLiteral( "CellEditScale" ) );
+	scaleSpin->setRange( 0.01, 10.0 );
+	scaleSpin->setDecimals( 3 );
+	scaleSpin->setSingleStep( 0.05 );
+	wwMakeScrubField( scaleSpin );
+	scaleBtn = new QPushButton( tr( "Set" ), scaleRow );
+	scaleBtn->setObjectName( QStringLiteral( "CellEditScaleSet" ) );
+	sh->addWidget( scaleSpin, 1 );
+	sh->addWidget( scaleBtn );
+	row( tr( "Scale" ), scaleRow, tr( "The picked reference's scale (1 = none written)" ) );
+	disableBtn = new QPushButton( tr( "Disable" ), this );
+	disableBtn->setObjectName( QStringLiteral( "CellEditDisable" ) );
+	row( QString(), disableBtn, tr( "Initially disabled: the reference stays in the file, hidden in the game (no delete)" ) );
 	outer->addLayout( form );
 
 	list = new QListWidget( this );
@@ -166,6 +216,25 @@ CellEditPanel::CellEditPanel( QWidget * parent ) : QWidget( parent )
 		refresh();
 	} );
 	connect( removeBtn, &QPushButton::clicked, this, [this]() { cellEditRemove( list->currentRow() ); } );
+	connect( moveBtn, &QPushButton::clicked, this, [this]() {
+		const float v[3] = { float( moveSpin[0]->value() ), float( moveSpin[1]->value() ), float( moveSpin[2]->value() ) };
+		cellEditChangeRef( pickedRef(), 'm', v );
+	} );
+	connect( turnLeftBtn, &QPushButton::clicked, this, [this]() {
+		const float v[1] = { float( -15.0 / kDeg ) };
+		cellEditChangeRef( pickedRef(), 't', v );
+	} );
+	connect( turnRightBtn, &QPushButton::clicked, this, [this]() {
+		const float v[1] = { float( 15.0 / kDeg ) };
+		cellEditChangeRef( pickedRef(), 't', v );
+	} );
+	connect( scaleBtn, &QPushButton::clicked, this, [this]() {
+		const float v[1] = { float( scaleSpin->value() ) };
+		cellEditChangeRef( pickedRef(), 's', v );
+	} );
+	connect( disableBtn, &QPushButton::clicked, this, [this]() { cellEditChangeRef( pickedRef(), 'd', nullptr ); } );
+	connect( CellPickBus::instance(), &CellPickBus::picked, this, [this]( int, int ) { refreshPicked(); } );
+	connect( CellPickBus::instance(), &CellPickBus::sceneChanged, this, [this]() { refreshPicked(); } );
 	connect( browse, &QPushButton::clicked, this, [this]() {
 		const QString p = QFileDialog::getSaveFileName( this, tr( "Plugin to write" ), pathEdit->text(),
 			tr( "Plugins (*.esp *.esl)" ), nullptr, QFileDialog::DontConfirmOverwrite );
@@ -243,16 +312,56 @@ void CellEditPanel::refresh()
 	list->clear();
 	for ( const CellEditItem & it : s.edits )
 		list->addItem( cellEditRowText( it ) );
+	for ( const CellEditChange & c : s.changes )
+		list->addItem( cellEditChangeText( c ) );
 	if ( cur >= 0 && cur < list->count() )
 		list->setCurrentRow( cur );
-	removeBtn->setEnabled( !s.edits.isEmpty() );
+	removeBtn->setEnabled( list->count() > 0 );
 	if ( !pathEdit->hasFocus() )
 		pathEdit->setText( s.target.path );
 	modeBox->setCurrentIndex( s.target.append ? 1 : 0 );
 	eslBox->setChecked( s.target.light );
 	eslBox->setEnabled( !s.target.append );
 	syncing = false;
+	refreshPicked();
 	refreshSummary();
+}
+
+quint32 CellEditPanel::pickedRef() const
+{
+	const int i = cellPickCurrent();
+	return i >= 0 && i < cellPickTable().size() ? cellPickTable().at( i ).refForm : 0;
+}
+
+void CellEditPanel::refreshPicked()
+{
+	const int i = cellPickCurrent();
+	const bool on = i >= 0 && i < cellPickTable().size() && cellPickTable().at( i ).refForm;
+	for ( QWidget * w : { static_cast<QWidget *>( moveBtn ), static_cast<QWidget *>( turnLeftBtn ),
+			static_cast<QWidget *>( turnRightBtn ), static_cast<QWidget *>( scaleBtn ), static_cast<QWidget *>( disableBtn ),
+			static_cast<QWidget *>( scaleSpin ), static_cast<QWidget *>( moveSpin[0] ), static_cast<QWidget *>( moveSpin[1] ),
+			static_cast<QWidget *>( moveSpin[2] ) } )
+		w->setEnabled( on );
+	if ( !on ) {
+		pickedLabel->setText( tr( "Click a reference in the view" ) );
+		return;
+	}
+	const CellPickEntry & e = cellPickTable().at( i );
+	// the pending change's values when there is one, else the reference's own
+	const float * pos = e.pos;
+	float scale = e.scale;
+	for ( const CellEditChange & c : cellEditSession().changes )
+		if ( c.ref == e.refForm ) {
+			pos = c.pos;
+			scale = c.scale;
+		}
+	pickedLabel->setText( QStringLiteral( "%1  %2%3" ).arg( CellPickTable::formName( e.refForm ), e.baseEdid,
+		e.precombined ? tr( "  (precombined)" ) : QString() ) );
+	for ( int k = 0; k < 3; k++ )
+		if ( !moveSpin[k]->hasFocus() )
+			moveSpin[k]->setValue( double( pos[k] ) );
+	if ( !scaleSpin->hasFocus() )
+		scaleSpin->setValue( double( scale ) );
 }
 
 void CellEditPanel::refreshSummary()
