@@ -376,6 +376,22 @@ and the WW_CELL_HDR_DUMP gate target. The rule is a pure header (src/gl/cellhdrf
 passes, the old rule as red fails). `WW_CELL_HDR_FORMAT=rgba32f` asks for the old frame; the reds `WW_FRAMEFMT1_RED=1`,
 `WW_CELL_HDR_FORMAT_RED=1` and `WW_AAFORMAT1_RED=1` force RGBA32F everywhere, as before. The air volumes were already
 RGBA16F (PERFFIX3); their slices and the running integrate stay RGBA32F (transmittance precision).
+## MATLOOK1 TRANSLUC1 (2026-11-02): a v8+ material's thin translucency, FO4CS's law (switch, off by default)
+
+`WW_CELL_TRANSL=1` makes the shader loader define WW_CELL_TRANSL, and the cell lights then give a pixel whose BGSM
+(version 8 or later) sets bTranslucency what FO4CS's AdvancedLighting port gives it. The amount is the lighting map's
+blue channel times fTranslucencyTransmissiveScale. Nothing is drawn at or under 0.001, or where the map's glow mask
+lights. The tint is the subsurface colour, times the albedo when bTranslucencyMixAlbedoWithSubsurfaceCol is set. Per
+light the pixel takes max( T, D ): T = tint x amount x the light's colour (every factor of its diffuse but N.L) x the
+view lobe, and D = albedo x that light's diffuse. The lobe is max( mix( dot( L, -N ) x max( dot( V, -L ), 0 )^2,
+0.5, turbulence quantised to 1/127 ), 0 ). The excess over D is added beside the diffuse, for the placed lights and the
+cell's sun; under the cascades it takes the sun's shadow. Lights behind the surface are kept for such a pixel, and the
+back of a thin surface takes its front's shadow. A thick object (bTranslucencyThickObject) takes nothing: FO4CS lights
+it only through the sun's thickness shadow map, which is not drawn yet. The bindless twin programs keep the old path.
+The shader is res/shaders/cell_transl.glsl, its C++ twin is src/gl/wwtransl.h, and renderer.cpp uploads the material's
+values (wwTrCol, wwTrFlags) and binds the lighting map (WwTrLightMap, white when absent). `tests/translucency/translucency.sh`
+checks the twin against an independent reading of the law (6.97 M cases, worst 4.8e-7) and pins the shader's text;
+its red (WWTRANSL_RED, the upstream FO76 term) fails. With the switch off every program's machine code equals main's.
 
 ## REFLPROBECLI1 (TOOLS1101, 2026-11-01): count the reflection probes' below-horizon misses without a window
 

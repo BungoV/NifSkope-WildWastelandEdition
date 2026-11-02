@@ -2600,6 +2600,23 @@ bool Renderer::setupProgramCE1( const NifModel * nif, Program * prog, Shape * me
 				prog->uni1f( "subsurfaceRolloff", lsp->lightingEffect1 );
 				prog->uni1f( "rimPower", lsp->rimPower );
 				prog->uni1f( "backlightPower", lsp->backlightPower );
+				// lane MATLOOK1 (TRANSLUC1): a v8+ material's bTranslucency (res/shaders/cell_transl.glsl, WW_CELL_TRANSL=1)
+				if ( prog->uniLocation( "wwTrFlags" ) >= 0 ) {
+					FloatVector4	trCol( 0.0f ), trFlags( 0.0f );
+					if ( mat && mat->isShaderMaterial() ) {
+						const ShaderMaterial *	bgsm = static_cast< ShaderMaterial * >( mat );
+						if ( bgsm->bTranslucency ) {
+							const Color3 &	c = bgsm->cTranslucencySubsurfaceColor;
+							trCol = FloatVector4( c[0], c[1], c[2], bgsm->fTranslucencyTransmissiveScale );
+							trFlags = FloatVector4( bgsm->bTranslucencyThickObject ? 1.0f : 0.0f,
+													bgsm->bTranslucencyMixAlbedoWithSubsurfaceCol ? 1.0f : 0.0f, 1.0f,
+													bgsm->fTranslucencyTurbulence );
+						}
+					}
+					prog->uni4f( "wwTrCol", trCol );
+					prog->uni4f( "wwTrFlags", trFlags );
+					prog->uniSampler( bsprop, "WwTrLightMap", 9, texunit, white, clamp );
+				}
 			} else {
 				FloatVector4	translucencyColorAndScale( 1.0f, 1.0f, 1.0f, -1.0f );
 				if ( mat && mat->isShaderMaterial() ) {
