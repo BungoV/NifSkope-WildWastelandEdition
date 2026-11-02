@@ -1,3 +1,15 @@
+## MATLOOK3-HOLD2 (2026-11-02): a hair/eye draw census so a blind hold shows itself
+
+The hold's hair look read 0 px in every framing and hair == hair red exactly: the draw never took `wwHairOn`, which
+is set only for a BGSM with bHair or ST HairTint (renderer.cpp, the MATLOOK3 block), and nothing in the notes said
+whether the fixture's HairShort BGSM loaded. The renderer now prints, once per change (first draw of each new shape):
+`hair/eye draws: H/E of N shapes, bgsm read B of M named (first unread: <path>)`. H/E = shapes the hair / eye
+uniform was true for, B = shapes whose named material file loaded as a ShaderMaterial, M = shapes naming a material
+file; the first named-but-unread path is quoted. A hold judge reads it: H = 0 with the hair shape named = the resource
+stack lacks the materials archive (harness), H > 0 with 0 px = the look (code). No switch, no picture change: the line
+only goes to stderr. Hold: notes/matlook3/hold/hold_v3.sh (materials archive proven in the resource stack first,
+neckcheck path through cygpath -m), judge_v3.py.
+
 ## MATLOOK3 TRANSLUC1-THICK (2026-11-02): a thick translucent object takes the sun through its thickness
 
 Under `WW_CELL_TRANSL=1` a v8+ material with bTranslucencyThickObject now takes FO4CS's sun share in the exterior cell:

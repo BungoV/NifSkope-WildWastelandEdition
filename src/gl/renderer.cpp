@@ -2626,6 +2626,33 @@ bool Renderer::setupProgramCE1( const NifModel * nif, Program * prog, Shape * me
 						prog->uni1b( "wwHairOn", hair );
 					if ( prog->uniLocation( "wwEyeOn" ) >= 0 )
 						prog->uni1b( "wwEyeOn", eye );
+					// MATLOOK3-HOLD2: a census, once per change, so a hold whose hair/eye draws never took the
+					// uniform (BGSM not loaded, ST 0) shows itself: "hair/eye draws: H/E of N shapes, bgsm read B of M named"
+					{
+						static QSet<int>	seen;
+						static int	nHair = 0, nEye = 0, nBgsm = 0, nNamed = 0;
+						static QString	unread, said;
+						if ( !seen.contains( mesh->id() ) ) {
+							seen.insert( mesh->id() );
+							nHair += int( hair );
+							nEye += int( eye );
+							nBgsm += int( bgsm != nullptr );
+							const QString &	mname = bsprop->materialFileName();
+							if ( !mname.isEmpty() ) {
+								nNamed++;
+								if ( !bgsm && unread.isEmpty() )
+									unread = mname;
+							}
+							const QString	now = QString( "hair/eye draws: %1/%2 of %3 shapes, bgsm read %4 of %5 named%6" )
+								.arg( nHair ).arg( nEye ).arg( seen.size() ).arg( nBgsm ).arg( nNamed )
+								.arg( unread.isEmpty() ? QString() : QString( " (first unread: %1)" ).arg( unread ) );
+							if ( now != said ) {
+								said = now;
+								fprintf( stderr, "%s\n", qPrintable( now ) );
+								fflush( stderr );
+							}
+						}
+					}
 				}
 			} else {
 				FloatVector4	translucencyColorAndScale( 1.0f, 1.0f, 1.0f, -1.0f );
