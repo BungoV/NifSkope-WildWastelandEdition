@@ -485,6 +485,9 @@ void wwCellAoPass( Scene * scene, bool run );
  *  same walk, same camera, same paint: what another collectShapes would add). false (out untouched): no walk this paint
  *  for that scene. Taken once; the next obscurance pass forgets it. */
 bool wwCellAoSortedTake( Scene * scene, NodeList & out );
+/*! lane PERFHUNT2: the obscurance and SSR passes' sorted draws run under the setup memo as the main sorted pass does
+ *  (scene globals once per program, the cell-uniform class record replayed). Red WW_CELL_SORTMEMO_RED=1: unarmed. */
+bool wwCellSortedMemo();
 //! called with every program setupProgram binds: the opaque pass's masks, and the obscurance a cell-lit draw reads
 void wwCellAoDraw( Scene * scene, bool cellProgram );
 //! lane PERF3: the opaque pass is drawing
