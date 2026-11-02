@@ -436,6 +436,8 @@ void wwCellLightsUniforms( Scene * scene );
 const std::vector<float> * wwCellLightSpheres( Scene * scene );
 //! a harness probe pass (WW_CELL_LIT_PROBE or WW_CELL_FOG_PROBE) on a cell-lit scene: effects are not drawn
 bool wwCellProbePass( Scene * scene );
+//! lane FO4CELLGI1: a probe (WW_CELL_LIT_PROBE) or a Pass is asked, or WW_CELL_VIEWS_RED=1: the shaders compile the views
+bool wwCellViewsShaderDefine();
 //! probe 80 (the albedo as drawn): also leaves out the second-pass shapes (alpha blend and decals)
 bool wwCellAlbedoProbePass( Scene * scene );
 //! census echo: "celllit=on lights=N dalc=.. dir=.. probe=.. red=.."

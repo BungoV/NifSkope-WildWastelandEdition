@@ -1098,8 +1098,17 @@ void main()
 
 	fragColor = color;
 #ifdef WW_CELLLIGHTS
+	/* lane FO4CELLGI1: the probe and pass views (cellProbeOut, cellPassOut) compile only under the loader's WW_CELL_VIEWS,
+	 * added while a probe or a Pass is asked (wwCellViewsShaderDefine; red WW_CELL_VIEWS_RED=1 always), in the programs with
+	 * the GI volume read: compiled in, never run, they set fo4_cell's light-loop occupancy there (300 lights offline: 50 ms
+	 * with them, 40 without). Without the volume the program keeps them (its machine code as before) */
+#if defined( WW_CELL_VIEWS ) || !defined( WW_CELL_RTDDGI )
 	if ( cellOn && cellProbe > 0 )
 		fragColor = cellProbe == 6 ? vec4( cellHdr * cellProbeGain, color.a ) : vec4( cellProbeOut( normal, -ViewDir, alphaR, kSmith ), 1.0 );
+#else
+	if ( cellOn && cellProbe > 0 )	// 6 the measuring pass; 20, 60 and 61 (the AO and SSR passes) write over it below
+		fragColor = cellProbe == 6 ? vec4( cellHdr * cellProbeGain, color.a ) : vec4( cellWorldDir( normal ) * 0.5 + 0.5, 1.0 );
+#endif
 	if ( cellOn && cellProbe >= 50 && cellProbe <= 53 )	// lane CUBE1
 		fragColor = vec4( cellProbe == 50 ? clamp( cubeK * 0.25, 0.0, 1.0 ) : cellCubeProbe( offset, normal ), 1.0 );
 	if ( cellOn && cellProbe == 66 )	// lane REFLPROBE1: the boxes' weight, the camera probe's share, the added light
@@ -1108,8 +1117,10 @@ void main()
 		fragColor = vec4( clamp( albedo, 0.0, 1.0 ), 1.0 );
 	if ( cellOn && cellProbe == 81 )	// lane GICAL1: the same, blends and decals composited over it with their own alpha
 		fragColor = vec4( clamp( albedo, 0.0, 1.0 ), color.a );
+#if defined( WW_CELL_VIEWS ) || !defined( WW_CELL_RTDDGI )
 	if ( cellOn && cellPass > 0 && cellProbe == 0 )	// lane PROBEVIEW1: the PRTP band's Pass
 		fragColor = vec4( cellPassOut( cellWorldPos( -ViewDir ), cellWorldDir( normal ) ), 1.0 );
+#endif
 #endif
 #ifdef WW_FOG
 	vec3 fogProbeOut;

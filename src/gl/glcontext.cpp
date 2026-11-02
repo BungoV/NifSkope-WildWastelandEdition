@@ -61,6 +61,7 @@ bool wwHairShaderDefine();	// lane MATLOOK3: src/gl/celllooks.cpp (the Hair spec
 bool wwCorneaShaderDefine();	// lane MATLOOK3: the Eye cornea row / WW_CELL_CORNEA
 bool wwSkinSssShaderDefine();	// lane SKINSSS1: the Skin subsurface row / WW_CELL_SKINSSS
 bool wwIrisShaderDefine();	// lane SKINSSS2: the Eye iris refraction row / WW_CELL_IRIS
+bool wwCellViewsShaderDefine();	// lane FO4CELLGI1: src/gl/celllights.cpp (WW_CELL_VIEWS, the probe and pass views)
 bool wwFogLeakShaderDefine();	// lane FOGLEAK1: src/gl/cellvolair.cpp (WW_CELL_FOGLEAK, the fog leak fix; off by default)
 int wwCellGiVis();	// lane PERF1: src/gl/celllights.cpp (1: the march, WW_CELL_GI_MARCH)
 bool wwCellPrtOn();	// lane PRTOFF1: src/gl/celllights.cpp (the old baked probe GI, only under its red)
@@ -474,6 +475,9 @@ bool NifSkopeOpenGLContext::Shader::load( const QString & filepath )
 		// the row's tick reloads the shaders
 		if ( wwAirZoneShaderDefine() && data.startsWith( "#version" ) && data.contains( "_CELL_AIRZONE" ) )
 			data.insert( data.indexOf( '\n' ) + 1, "#define WW_CELL_AIRZONE 1\n" );
+		// lane FO4CELLGI1: fo4_default.frag's probe and pass views only while one is asked; not static: a set reloads the shaders
+		if ( wwCellViewsShaderDefine() && data.startsWith( "#version" ) && data.contains( "_CELL_VIEWS" ) )
+			data.insert( data.indexOf( '\n' ) + 1, "#define WW_CELL_VIEWS 1\n" );
 		// lane FOGLEAK1: the fog leak fix (cell_volair.frag WW_AIR_LEAK, lookdev_fog.glsl's far tail); not static: read per load
 		if ( wwFogLeakShaderDefine() && data.startsWith( "#version" ) && data.contains( "_CELL_FOGLEAK" ) )
 			data.insert( data.indexOf( '\n' ) + 1, "#define WW_CELL_FOGLEAK 1\n" );

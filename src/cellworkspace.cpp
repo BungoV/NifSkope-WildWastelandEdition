@@ -1592,7 +1592,10 @@ void CellWorkspacePanel::buildUi()
 			glView->update();
 	} );
 	connect( cellPassGroup, &QActionGroup::triggered, this, [this]( QAction * a ) {
+		const bool views = wwCellViewsShaderDefine();
 		wwCellSetPass( a->data().toInt() );
+		if ( glView && views != wwCellViewsShaderDefine() )
+			glView->updateShaders();	// lane FO4CELLGI1: the pass views are the loader's WW_CELL_VIEWS
 		if ( glView )
 			glView->update();
 	} );
