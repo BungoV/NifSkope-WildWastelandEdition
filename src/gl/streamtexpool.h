@@ -37,13 +37,17 @@ public:
 		int released = 0;	//!< resident textures whose last loaded cell left in this crossing (they entered the pool)
 		std::uint64_t releasedBytes = 0;
 		int keepEvicted = 0;	//!< frees of a texture a loaded cell names (the timer's churn; 0 with the pool on)
+		/*! lane STREAMTEX4 (OPENCELLS): resident textures the pool's tier 1 holds, by why. baseOnly = named by a block
+		 *  no streamed cell wrote (the open's root, far field, sky) and by no loaded cell; unnoted = never named by any shader
+		 *  property the stream saw (loaded by another path). A loaded cell's texture in either escapes kTierKeep */
+		int baseOnly = 0, unnoted = 0;
+		std::uint64_t baseOnlyBytes = 0, unnotedBytes = 0;
 	};
 
 	StreamTexPool( std::uint64_t budgetBytes, int reloadCrossings, bool red )
 		: budget( budgetBytes ), reloadN( reloadCrossings ), redOff( red ) {}
 
 	static Cell cellId( int x, int y ) { return ( Cell( x ) << 32 ) | Cell( std::uint32_t( y ) ); }
-
 	//! a shader property of `c` names `k` (once per cell however often it is asked)
 	void note( Cell c, const Key & k )
 	{
@@ -184,6 +188,12 @@ public:
 			} else if ( e.noted && !e.base ) {
 				c.kept++;
 				c.keptBytes += e.bytes;
+			} else if ( e.base ) {
+				c.baseOnly++;
+				c.baseOnlyBytes += e.bytes;
+			} else {
+				c.unnoted++;
+				c.unnotedBytes += e.bytes;
 			}
 		}
 		cur = Census();

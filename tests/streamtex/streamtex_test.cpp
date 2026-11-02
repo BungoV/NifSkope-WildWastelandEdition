@@ -250,12 +250,18 @@ int main( int argc, char ** argv )
 		p.note( P::kBase, "f" );
 		p.loaded( "f", 1ull << 20 );
 		const bool keep = p.rule( "a" ) == P::Rule::Keep;
+		p.loaded( "u", 2ull << 20 );	// lane STREAMTEX4 (OPENCELLS): loaded, named by no property the stream saw
+		const auto cc = p.cross();	// tier 1's resident stock by why: base-only "f" 1 MB, unnoted "u" 2 MB
+		const bool tier1 = cc.baseOnly == 1 && cc.baseOnlyBytes == ( 1ull << 20 ) && cc.unnoted == 1
+			&& cc.unnotedBytes == ( 2ull << 20 ) && cc.refd == 1;
+		std::printf( "(o) tier-1 census: baseOnly %d (%llu B) unnoted %d (%llu B) refd %d: %s\n", cc.baseOnly,
+			(unsigned long long)cc.baseOnlyBytes, cc.unnoted, (unsigned long long)cc.unnotedBytes, cc.refd, tier1 ? "pass" : "FAIL" );
 		p.dropCell( c );
 		const bool pool = p.rule( "a" ) == P::Rule::Pool, unseen = p.rule( "b" ) == P::Rule::Timer;
 		const bool base = p.rule( "f" ) == P::Rule::Timer, never = p.rule( "z" ) == P::Rule::Timer;
 		const auto plan = p.plan();
 		const bool planned = plan.size() == 1 && plan[0] == "a";	// 4 MB past a 1 MB budget; never the base's
-		okU = keep && pool && unseen && base && never && planned;
+		okU = keep && pool && unseen && base && never && planned && tier1;
 		std::printf( "(u) rule table: named+loaded Keep %d, released Pool %d, unseen load Timer %d, base Timer %d, "
 			"unknown Timer %d, plan {a} %d: %s\n", keep, pool, unseen, base, never, planned, okU ? "pass" : "FAIL" );
 	}

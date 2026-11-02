@@ -27,6 +27,8 @@ class NifModel;
 
 //! WW_CELL_STREAMTEX_RED=off
 bool cellStreamTexRed();
+//! lane STREAMTEX4: WW_CELL_STREAMTEX_RED=unfenced (or nofence): the view frees textures at once, no fence (gl/texgrave.h)
+bool cellStreamTexUnfenced();
 //! this document streams its cells (the names below are counted)
 bool cellStreamTexCounting( const NifModel * nif );
 //! a shader property block of `nif` names these texture files (glproperty.cpp, main thread)

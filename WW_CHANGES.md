@@ -1,3 +1,32 @@
+## LARGEREF3 (2026-11-02): over a flat far field large refs show by their far copy alone (LARGEREF-FLAT)
+- Ruling (a): when the far objects cannot hide one reference (our rings flattened by `WW_CELL_FARLOD_RED=flat|perbase`
+  or `WW_CELL_SPEED_RED=slow`, or the game's .bto chunks: cell masks only), a large ref is NOT drawn full outside its own
+  cell; its far copy stays until its own cell loads (the vanilla look). Our instanced rings (the default) are unchanged:
+  full, far rows hidden. No far objects (far LOD off, NEARONLY, red noobjects): full, as before.
+- `cellFarLodObjectsFar()` (cellfarlod.cpp) decides from the far build's own inputs before the cells are placed
+  (`LargeRef::farOf`, src/largeref.h); the fixed open skips the large-ref push, the streamed view's layer draws no
+  unit (`Owners::setFullOutside`). The open prints `cell large refs: far objects <kind>: <what is drawn>`.
+- Red `WW_CELL_LARGEREFS_RED=flatdouble`: drawn full beside the far copy (LARGEREF1/2's double draw).
+- tests/largeref/run.sh: unit checks for the far kinds + red `-DLARGEREF_FLAT_RED`; with `RNAM=<dump>` the 5x5 walk
+  (137 steps, 1641 cell events) also runs `--far flat`: green 0 double, 0 units, 3402 step-refs shown by the far copy;
+  red 45955 double -> `LARGEREF CENSUS PASS`.
+
+## STREAMTEX4 (2026-11-02): the streamed cell view's texture frees wait for the GPU (STREAMTEX2's fences, ported)
+- A texture the pool (or the keep timer) frees is no longer deleted at once: its GL names go into a grave
+  (src/gl/texgrave.h) behind one GLsync taken after the frees, and TexCache::wwGraveSweep (top of each stream paint)
+  makes its bindless handles non-resident and deletes the names only once the GPU passed that fence. Before, a frame
+  still queued could sample a dropped handle, and glGenTextures could hand the freed name to another file.
+- Census (gl/cellbindless.cpp): `freedlive` = handles dropped while a frame naming them may still be queued (a ring
+  of 8 census fences, never waited on), `stale` = a deleted texture's handle still cached under a reused name. On the
+  bindless line, and as texFreedLive / texStaleNames / texUnfenced in the walk dump; tests/spells/cell_stream.sh
+  row (f): both 0.
+- Red `WW_CELL_STREAMTEX_RED=unfenced` (also `nofence`): free at once, as before.
+- Unit tests/texgrave/run.sh: a mock driver 4 frames behind; fenced 0 handles dropped / 0 names reused under a queued
+  frame (1339 frees), unfenced 824 / 273 (FAIL).
+- Tier 1's resident stock by why (OPENCELLS): texBaseOnly / texBaseOnlyMb (named only by blocks no streamed cell wrote)
+  and texUnnoted / texUnnotedMb (loaded, never named by a property the stream saw), printed by cell_stream_check.py.
+  The open's first cells are streamed cells (the open welds an empty rectangle), so they already count per cell.
+
 ## LEANCOMMENTS3R (2026-11-02): lean comments, re-cut on LAND6
 
 - Comment-only (tests/spells/comments_only_check.py: 0 FAIL). LEANCOMMENTS3's trim (LEANCOMMENTS2's 72 files, the

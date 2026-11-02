@@ -568,8 +568,10 @@ std::uint16_t TexCache::loadTex( Tex & txIn, const NifModel * nif )
 			return 0;
 	}
 
-	if ( !t->id[0] )
+	if ( !t->id[0] ) {
 		glGenTextures( 1, t->id );
+		WwBl::bornName( t->id[0] );	// lane STREAMTEX4: no handle of a deleted texture may answer for the new name (census)
+	}
 	paramForget( t->id[0] );	// lane PERF5: a load sets its own parameters
 
 	if ( t->target )
@@ -639,6 +641,14 @@ void TexCache::flush()
 	paramShadow.clear();	// lane PERF5
 	WwDp::invalidate();	// lane GAPPERF-BINDLESS: packets name these textures
 	WwBl::forgetAll();	// lane BINDLESS2: no handle may stay resident on a deleted texture
+	// lane STREAMTEX4: the fenced frees too (forgetAll waited for the GPU and dropped their handles)
+	grave.sweep( []( void * ) { return true; }, [this]( std::uint32_t a, std::uint32_t b ) {
+		const GLuint ids[2] = { a, b };
+		glDeleteTextures( b ? 2 : 1, ids );
+	}, [this]( void * f ) {
+		if ( f && fn )
+			fn->glDeleteSync( static_cast<GLsync>( f ) );
+	}, true );
 	for ( size_t i = 0; i <= textureHashMask; i++ ) {
 		Tex &	tx = textures[i];
 		if ( tx.isLoaded() ) {
@@ -663,24 +673,54 @@ void TexCache::flush()
 	embedTextures.clear();
 }
 
-int TexCache::evictUnused( std::uint32_t tick, QStringList * names )
+int TexCache::evictUnused( std::uint32_t tick, QStringList * names, bool fenced )
 {
+	fenced = fenced && fn;	// lane STREAMTEX4: no context functions, no fence: freed at once
 	int n = 0;
 	for ( size_t i = 0; i <= textureHashMask; i++ ) {
 		Tex &	tx = textures[i];
 		if ( !tx.nameLen || !tx.isLoaded() || !tx.mipmaps || tx.useTick >= tick )
 			continue;
-		freeLoaded( tx );
+		freeLoaded( tx, fenced );
 		if ( names )
 			names->append( tx.filename().toString() );
 		n++;
 	}
+	graveSeal( fenced );
 	return n;
 }
 
-int TexCache::evictPool( std::int64_t budgetBytes, std::uint32_t protectTick, QStringList * names,
-	const std::function<int( QStringView )> & tierOf )
+void TexCache::graveSeal( bool fenced )
 {
+	if ( fenced && grave.unsealed() )	// lane STREAMTEX4: one fence behind the whole batch, taken after its frees
+		grave.seal( static_cast<void *>( fn->glFenceSync( GL_SYNC_GPU_COMMANDS_COMPLETE, 0 ) ) );
+}
+
+int TexCache::wwGraveSweep()
+{
+	/* lane STREAMTEX4 (STREAMTEX2's fence): a batch goes once its fence signalled (the GPU did every command before the
+	 * frees, so no queued frame's row names its handles); a failed wait (no such sync) releases too, else its names would
+	 * never be freed. Each name's handle goes non-resident and out of the handle cache before glDeleteTextures can hand
+	 * the name out again */
+	if ( grave.empty() || !fn )
+		return 0;
+	return grave.sweep( [this]( void * f ) {
+		return !f || fn->glClientWaitSync( static_cast<GLsync>( f ), 0, 0 ) != GL_TIMEOUT_EXPIRED;
+	}, [this]( std::uint32_t a, std::uint32_t b ) {
+		WwBl::forget( a );	// lane BINDLESS2's free, as freeLoaded does it unfenced
+		WwBl::forget( b );
+		const GLuint ids[2] = { a, b };
+		glDeleteTextures( b ? 2 : 1, ids );
+	}, [this]( void * f ) {
+		if ( f )
+			fn->glDeleteSync( static_cast<GLsync>( f ) );
+	} );
+}
+
+int TexCache::evictPool( std::int64_t budgetBytes, std::uint32_t protectTick, QStringList * names,
+	const std::function<int( QStringView )> & tierOf, bool fenced )
+{
+	fenced = fenced && fn;	// lane STREAMTEX4
 	std::vector<WwTexPool::Entry> e;
 	for ( size_t i = 0; i <= textureHashMask; i++ ) {
 		const Tex & tx = textures[i];
@@ -696,19 +736,27 @@ int TexCache::evictPool( std::int64_t budgetBytes, std::uint32_t protectTick, QS
 	const std::vector<int> pick = WwTexPool::pick( std::move( e ), total, budgetBytes, protectTick );
 	for ( const int i : pick ) {
 		Tex &	tx = textures[size_t( i )];
-		freeLoaded( tx );
+		freeLoaded( tx, fenced );
 		if ( names )
 			names->append( tx.filename().toString() );
 	}
+	graveSeal( fenced );
 	return int( pick.size() );
 }
 
-void TexCache::freeLoaded( Tex & tx )
+void TexCache::freeLoaded( Tex & tx, bool fenced )
 {
 	PassTime::texResidentDrop( tx.id[0] );	// lane STREAM1
 	paramForget( tx.id[0] );	// lane PERF5
 	paramForget( tx.id[1] );	// lane CELLUNI4
 	WwDp::invalidate();	// lane GAPPERF-BINDLESS
+	if ( fenced ) {	// lane STREAMTEX4: names and handles kept until the GPU is past them (graveSeal, wwGraveSweep)
+		grave.bury( tx.id[0], tx.id[1] );
+		tx.id[0] = tx.id[1] = 0;
+		tx.mipmaps = 0;
+		tx.target = 0;
+		return;
+	}
 	WwBl::forget( tx.id[0] );	// lane BINDLESS2
 	WwBl::forget( tx.id[1] );
 	glDeleteTextures( ( !tx.id[1] ? 1 : 2 ), tx.id );

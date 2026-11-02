@@ -40,6 +40,7 @@ bool anyFrozen = false;
 bool resolving = false;
 GLuint resolvedTex = 0;
 Geo geo;
+long long freedLiveAll = 0, staleAll = 0;	// lane STREAMTEX4: forget()'s and bornName()'s census, since launch
 
 namespace
 {
@@ -53,6 +54,7 @@ constexpr std::uint32_t kSegRows = 8192, kSegs = 8, kRows = kSegRows * kSegs;
 // lane BINDLESSMDI1: a segment's indirect commands, reused under the same fence as its rows (2 a row: cull ranges)
 constexpr std::uint32_t kCmdSeg = kSegRows * 2, kCmds = kCmdSeg * kSegs, kCmdBytes = 20;
 constexpr bool kMdiDefault = true;
+constexpr std::uint32_t kCensusFences = 8;	// lane STREAMTEX4: the handle census's syncs, one a frame, 8 frames back
 
 struct Key
 {
@@ -94,7 +96,19 @@ struct Ctx
 	GLuint cmdBuf = 0;
 	unsigned char * cmdMap = nullptr;
 	std::uint32_t cmdCursor = 0;
-	std::unordered_map<GLuint, std::uint64_t> handles, redHandles;
+	/* lane STREAMTEX4 (STREAMTEX2's census): each handle with the frame that last named it (handleOfBound). censusFence:
+	 * one sync a frame (frame()), census only, never waited on; censusDone: the newest frame the GPU finished. forget()
+	 * counts a handle dropped while a frame naming it may still run (freedLive), bornName() a stale one (stale) */
+	struct Held
+	{
+		std::uint64_t h = 0;
+		std::uint32_t frame = 0;
+	};
+	std::unordered_map<GLuint, Held> handles, redHandles;
+	GLsync censusFence[kCensusFences] = {};
+	std::uint32_t censusTag[kCensusFences] = {};
+	std::uint32_t censusDone = 0;
+	long long freedLive = 0, stale = 0;
 	std::unordered_map<GLuint, Key> frozen;
 	GLuint redSampler = 0, black = 0;
 	std::uint64_t blackHandle = 0;
@@ -268,7 +282,8 @@ std::uint64_t handleOfBound( NifSkopeOpenGLContext::GLFunctions * f )
 		auto it = map.find( GLuint( tex ) );
 		if ( it != map.end() ) {
 			lastKeyValid = false;
-			return it->second;
+			it->second.frame = c.frameNo;	// lane STREAMTEX4: this frame names it
+			return it->second.h;
 		}
 	}
 	std::uint64_t h = 0;
@@ -307,7 +322,7 @@ std::uint64_t handleOfBound( NifSkopeOpenGLContext::GLFunctions * f )
 		return c.blackHandle;
 	}
 	c.resident( h );
-	map[GLuint( tex )] = h;
+	map[GLuint( tex )] = Ctx::Held{ h, c.frameNo };
 	if ( !c.frozen.count( GLuint( tex ) ) )
 		c.frozen[GLuint( tex )] = lastKeyValid ? lastKey : Key{};
 	lastKeyValid = false;
@@ -490,6 +505,36 @@ bool runIssue( NifSkopeOpenGLContext::GLFunctions * f )
 	return true;
 }
 
+namespace
+{
+//! lane STREAMTEX4: the frames the GPU finished since the last ask (syncs pass in order: stop at the first still running)
+void pollCensus( Ctx & c )
+{
+	if ( !c.fn )
+		return;
+	const std::uint32_t back = c.frameNo > kCensusFences ? c.frameNo - kCensusFences : 1u;
+	for ( std::uint32_t t = std::max( c.censusDone + 1u, back ); t < c.frameNo; t++ ) {
+		const std::uint32_t s = t % kCensusFences;
+		if ( !c.censusFence[s] || c.censusTag[s] != t )
+			continue;	// never fenced, or dropped 8 frames on: a later one that passes covers it
+		if ( c.fn->glClientWaitSync( c.censusFence[s], 0, 0 ) == GL_TIMEOUT_EXPIRED )
+			break;
+		c.censusDone = t;
+		c.fn->glDeleteSync( c.censusFence[s] );
+		c.censusFence[s] = nullptr;
+	}
+}
+
+//! lane STREAMTEX4: a frame that named the handle (the last was `frame`) may still run on the GPU (no syncs yet: not counted)
+bool stillQueued( Ctx & c, std::uint32_t frame )
+{
+	if ( !c.fn || frame <= c.censusDone )
+		return false;
+	pollCensus( c );
+	return frame > c.censusDone;
+}
+}
+
 void forget( GLuint tex )
 {
 	if ( !anyFrozen )
@@ -498,8 +543,28 @@ void forget( GLuint tex )
 	for ( auto * m : { &c.handles, &c.redHandles } ) {
 		auto it = m->find( tex );
 		if ( it != m->end() ) {
-			c.nonResident( it->second );
+			if ( stillQueued( c, it->second.frame ) ) {	// lane STREAMTEX4: the census of the frees' order
+				c.freedLive++;
+				freedLiveAll++;
+			}
+			c.nonResident( it->second.h );
 			m->erase( it );
+		}
+	}
+	c.frozen.erase( tex );
+}
+
+void bornName( GLuint tex )
+{
+	if ( !anyFrozen || !tex )
+		return;
+	Ctx & c = cx();
+	for ( auto * m : { &c.handles, &c.redHandles } ) {
+		auto it = m->find( tex );
+		if ( it != m->end() ) {	// lane STREAMTEX4: a deleted texture's handle, cached under the name glGenTextures reused
+			c.stale++;
+			staleAll++;
+			m->erase( it );	// not made non-resident: its texture is gone, and the handle with it
 		}
 	}
 	c.frozen.erase( tex );
@@ -665,6 +730,11 @@ struct GlSteps
 			if ( gl && c.fn )
 				c.fn->glDeleteSync( ff.second );
 		c.frameFences.clear();
+		for ( GLsync & s : c.censusFence ) {	// lane STREAMTEX4
+			if ( s && gl && c.fn )
+				c.fn->glDeleteSync( s );
+			s = nullptr;
+		}
 		c.doneEpoch = c.frameNo;
 		c.cursor = 0;
 		c.cmdCursor = 0;
@@ -682,9 +752,10 @@ struct GlSteps
 		for ( auto * m : { &c.handles, &c.redHandles } ) {
 			if ( gl )
 				for ( auto & e : *m )
-					c.nonResident( e.second );
+					c.nonResident( e.second.h );
 			m->clear();
 		}
+		c.censusDone = c.frameNo;	// lane STREAMTEX4: the teardown waited for the GPU (fence wait / finish first)
 	}
 	void frozenClear()
 	{
@@ -938,6 +1009,14 @@ void frame()
 	}
 	for ( auto & k : c.classes )
 		k.second.a.retire( c.doneEpoch );
+	if ( c.fn && ( !c.handles.empty() || !c.redHandles.empty() ) ) {	// lane STREAMTEX4: the frame just issued, for forget's census
+		pollCensus( c );
+		const std::uint32_t s = c.frameNo % kCensusFences;
+		if ( c.censusFence[s] )
+			c.fn->glDeleteSync( c.censusFence[s] );	// 8 frames unfinished: a later sync that passes covers its frame
+		c.censusFence[s] = c.fn->glFenceSync( GL_SYNC_GPU_COMMANDS_COMPLETE, 0 );
+		c.censusTag[s] = c.frameNo;
+	}
 	c.frameNo++;
 	static quint64 lineGen = 0;	// lane BINDLESS2FIX: a live set says the line again (the check row repeated the on row's)
 	if ( wwSwitchMoved( lineGen ) )
@@ -992,7 +1071,10 @@ void frame()
 			+ QStringLiteral( " poolLive=%1MB reused=%2 shrinks=%3 graves=%4" ).arg( liveMB, 0, 'f', 1 )
 				.arg( [&c] { unsigned long long n = 0; for ( auto & k : c.classes ) n += k.second.a.reused; return n; }() )
 				.arg( c.shrinks )
-				.arg( [&c] { unsigned long long n = 0; for ( auto & k : c.classes ) n += k.second.a.graves.size(); return n; }() );
+				.arg( [&c] { unsigned long long n = 0; for ( auto & k : c.classes ) n += k.second.a.graves.size(); return n; }() )
+			// lane STREAMTEX4: handles dropped while a frame naming them may still run; deleted textures' handles on a new name
+			+ QStringLiteral( " freedlive=%1 stale=%2 (all frames %3 %4)" ).arg( c.freedLive ).arg( c.stale ).arg( freedLiveAll )
+				.arg( staleAll );
 		if ( line != c.line && wwFrameLog() ) {
 			c.line = line;
 			std::fprintf( stderr, "%s\n", line.toLocal8Bit().constData() );
@@ -1000,6 +1082,7 @@ void frame()
 	}
 	c.draws = c.pooled = c.uploads = c.waits = c.conflicts = c.fallbacks = c.rebuilds = 0;
 	c.runs = c.merged = c.mdiCalls = c.longest = 0;
+	c.freedLive = c.stale = 0;
 }
 }
 
