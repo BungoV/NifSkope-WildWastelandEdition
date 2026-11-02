@@ -59,6 +59,7 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include "gl/cellgrass.h"	// lane GRASSMB1
 #include "gl/cellcull.h"	// lane DECALS1: the placed decals' parallax
 #include "gl/celllooks.h"
+#include "gl/wwiris.h"	// lane SKINSSS2: the eye atlas's iris
 #include "gl/cellwaterinfo.h"	// lane WATERWETBAKE1: the land side of the shore plane
 #include "gl/cellprecip.h"	// lane FO76WEATHER1: rain wetness
 #include "gl/shadowset.h"	// lane WATERWETBAKE1: wwCellIsTerrainShape
@@ -2631,6 +2632,37 @@ bool Renderer::setupProgramCE1( const NifModel * nif, Program * prog, Shape * me
 					prog->uni4f( "wwTrCol", trCol );
 					prog->uni4f( "wwTrFlags", trFlags );
 					prog->uniSampler( bsprop, "WwTrLightMap", 9, texunit, white, clamp );
+				}
+				// lane MATLOOK3: hair and eye draws (res/shaders/ww_hair_eye.glsl, rows Hair specular / Eye cornea)
+				if ( prog->uniLocation( "wwHairOn" ) >= 0 || prog->uniLocation( "wwEyeOn" ) >= 0 ) {
+					const ShaderMaterial *	bgsm = ( mat && mat->isShaderMaterial() ) ? static_cast< ShaderMaterial * >( mat ) : nullptr;
+					const bool	hair = ( bgsm && bgsm->bHair ) || lsp->isST( ShaderFlags::ST_HairTint )
+						|| lsp->wwSrcShaderType == int( ShaderFlags::ST_HairTint );	// lane HAIRDLC04: cell facegen hair
+					const bool	eye = ( bgsm && bgsm->bEnvironmentMappingEye ) || lsp->isST( ShaderFlags::ST_EyeEnvmap )
+						|| lsp->wwSrcShaderType == int( ShaderFlags::ST_EyeEnvmap );	// lane SKINSSS2: cell facegen eyes
+					if ( prog->uniLocation( "wwHairOn" ) >= 0 )
+						prog->uni1b( "wwHairOn", hair );
+					if ( prog->uniLocation( "wwEyeOn" ) >= 0 )
+						prog->uni1b( "wwEyeOn", eye );
+				}
+				// lane SKINSSS2 (EYEIRIS1): an opaque eye with a known atlas steps its uv to the iris under the cornea
+				if ( prog->uniLocation( "wwIrisOn" ) >= 0 ) {
+					const ShaderMaterial *	bgsm = ( mat && mat->isShaderMaterial() ) ? static_cast< ShaderMaterial * >( mat ) : nullptr;
+					const bool	eye = ( bgsm && bgsm->bEnvironmentMappingEye ) || lsp->isST( ShaderFlags::ST_EyeEnvmap )
+						|| lsp->wwSrcShaderType == int( ShaderFlags::ST_EyeEnvmap );
+					float	iris[3] = { 0.0f, 0.0f, 0.0f };
+					if ( eye )
+						WwIris::layout( lsp->fileName( 0 ).toLatin1().constData(), iris );
+					prog->uni1b( "wwIrisOn", eye && iris[2] > 0.0f );
+					prog->uni3f( "wwIrisUv", iris[0], iris[1], iris[2] );
+				}
+				// lane SKINSSS1: skin draws (face and skin tint: the game's material code 5) tag the opaque pass
+				if ( prog->uniLocation( "wwSkinOn" ) >= 0 ) {
+					const ShaderMaterial *	bgsm = ( mat && mat->isShaderMaterial() ) ? static_cast< ShaderMaterial * >( mat ) : nullptr;
+					prog->uni1b( "wwSkinOn", ( bgsm && ( bgsm->bSkinTint || bgsm->bFacegen ) )
+						|| lsp->isST( ShaderFlags::ST_SkinTint ) || lsp->isST( ShaderFlags::ST_Facegen )
+						|| lsp->wwSrcShaderType == int( ShaderFlags::ST_SkinTint )	// lane HAIRDLC04: cell facegen
+						|| lsp->wwSrcShaderType == int( ShaderFlags::ST_Facegen ) );
 				}
 			} else {
 				FloatVector4	translucencyColorAndScale( 1.0f, 1.0f, 1.0f, -1.0f );

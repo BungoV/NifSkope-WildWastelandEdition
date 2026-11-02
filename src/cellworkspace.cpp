@@ -1273,6 +1273,10 @@ void CellWorkspacePanel::buildUi()
 		look( WwLook::BounceEmittance, tr( "Emittance in bounce light" ) );
 		kid( "CellWorkspaceSkySpecOcc", tr( "Sky specular occlusion" ) );
 		kid( "CellWorkspaceAoDecals", tr( "Ambient occlusion decals" ) );
+		head( F, "CellWorkspaceLook_WW_CELL_HAIRKK", "", -1, false, QStringList(), tr( "Hair specular" ) );	// lane MATLOOK3
+		head( F, "CellWorkspaceLook_WW_CELL_CORNEA", "", -1, false, QStringList(), tr( "Eye cornea" ) );
+		head( F, "CellWorkspaceLook_WW_CELL_SKINSSS", "", -1, false, QStringList(), tr( "Skin subsurface" ) );	// lane SKINSSS1
+		head( F, "CellWorkspaceLook_WW_CELL_IRIS", "", -1, false, QStringList(), tr( "Eye iris refraction" ) );	// lane SKINSSS2
 		master( F, WwGroup::ImprovedLights );
 		look( WwLook::LightPhysFalloff, tr( "Physical falloff" ) );
 		look( WwLook::LightArea, tr( "Area" ) );
@@ -1448,6 +1452,11 @@ void CellWorkspacePanel::buildUi()
 	for ( int k = 0; k < lookActions.size(); k++ )
 		connect( lookActions.at( k ), &QAction::toggled, this, [this, l = WwLook( lookActions.at( k )->data().toInt() ), liveFirst]( bool on ) {
 			wwLookSet( l, on );
+			if ( wwLookReloadsShaders( l ) ) {	// lane MATLOOK3: a loader define
+				if ( glView )
+					glView->updateShaders();
+				return;
+			}
 			if ( wwLookReopens( l ) && !syncing && !g_path.isEmpty() ) {	// lane GAPLOOK2: built when the cell opens
 				if ( liveFirst() )
 					return;

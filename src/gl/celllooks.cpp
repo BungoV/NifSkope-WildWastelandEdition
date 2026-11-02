@@ -86,6 +86,10 @@ const LookRow kRows[] = {
 	{ "Variable rate shading", "WW/CellVrs" },	// lane PERFFIX4: a menu row at last; ships off until its pair is judged
 	{ "Object distance fade", "WW/CellObjectFade" },	// lane OBJFADE1: ships off until bungo sees it
 	{ "Rain wetness", "WW/CellRainWet" },	// lane FO76WEATHER1: ships off until bungo sees it
+	{ "Hair specular", "WW/CellHairSpecular" },	// lane MATLOOK3: ships off until a hold proves it
+	{ "Eye cornea", "WW/CellEyeCornea" },	// lane MATLOOK3: ships off until a hold proves it
+	{ "Skin subsurface", "WW/CellSkinSubsurface" },	// lane SKINSSS1: ships off until a hold proves it
+	{ "Eye iris refraction", "WW/CellEyeIris" },	// lane SKINSSS2: ships off until a hold proves it
 };
 static_assert( sizeof( kRows ) / sizeof( kRows[0] ) == size_t( WwLook::Count ), "a row per look" );
 
@@ -355,6 +359,22 @@ QByteArray pinOf( WwLook l )
 		WW_SWITCH_STATIC( QByteArray, p, wwEnv( "WW_CELL_RAINWET" ).trimmed() );
 		return p;
 	}
+	case WwLook::HairSpecular: {
+		WW_SWITCH_STATIC( QByteArray, p, wwEnv( "WW_CELL_HAIRKK" ).trimmed() );
+		return p;
+	}
+	case WwLook::EyeCornea: {
+		WW_SWITCH_STATIC( QByteArray, p, wwEnv( "WW_CELL_CORNEA" ).trimmed() );
+		return p;
+	}
+	case WwLook::SkinSubsurface: {
+		WW_SWITCH_STATIC( QByteArray, p, wwEnv( "WW_CELL_SKINSSS" ).trimmed() );
+		return p;
+	}
+	case WwLook::EyeIris: {
+		WW_SWITCH_STATIC( QByteArray, p, wwEnv( "WW_CELL_IRIS" ).trimmed() );
+		return p;
+	}
 	default:
 		return QByteArray();
 	}
@@ -432,6 +452,10 @@ const char * wwLookPinName( WwLook l )
 	case WwLook::Vrs: return "WW_CELL_VRS";
 	case WwLook::ObjectFade: return "WW_CELL_OBJFADE";
 	case WwLook::RainWet: return "WW_CELL_RAINWET";
+	case WwLook::HairSpecular: return "WW_CELL_HAIRKK";
+	case WwLook::EyeCornea: return "WW_CELL_CORNEA";
+	case WwLook::SkinSubsurface: return "WW_CELL_SKINSSS";
+	case WwLook::EyeIris: return "WW_CELL_IRIS";
 	default: return "";
 	}
 }
@@ -450,6 +474,34 @@ bool wwLookReopens( WwLook l )
 	// FIX1101A lodch: the far LOD's baked AO and sky are written into its vertices and rows while it is built
 	return l == WwLook::ActorsOutdoors || l == WwLook::WeaponParts || l == WwLook::AnimObjects || l == WwLook::BtoSway
 		|| l == WwLook::ProbeClear || l == WwLook::FarLodAo || l == WwLook::FarLodSky;
+}
+
+bool wwLookReloadsShaders( WwLook l )
+{
+	return l == WwLook::HairSpecular || l == WwLook::EyeCornea || l == WwLook::SkinSubsurface || l == WwLook::EyeIris;
+}
+
+// lane MATLOOK3: the loader's defines (src/gl/glcontext.cpp), read per shader load; reds swap the lobe's constants
+bool wwHairShaderDefine()
+{
+	return wwLookOn( WwLook::HairSpecular );
+}
+
+bool wwCorneaShaderDefine()
+{
+	return wwLookOn( WwLook::EyeCornea );
+}
+
+// lane SKINSSS1: the opaque pass's skin tag (fo4_default.frag) and the screen pass (src/gl/cellskinsss.cpp)
+bool wwSkinSssShaderDefine()
+{
+	return wwLookOn( WwLook::SkinSubsurface );
+}
+
+// lane SKINSSS2 (EYEIRIS1): the iris step (ww_hair_eye.glsl wwIrisShift)
+bool wwIrisShaderDefine()
+{
+	return wwLookOn( WwLook::EyeIris );
 }
 
 bool wwLookHasRow( WwLook l )

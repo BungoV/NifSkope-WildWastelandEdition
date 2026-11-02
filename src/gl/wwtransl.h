@@ -58,6 +58,30 @@ inline V3 excess( const Rec & r, V3 N, V3 L, V3 V, V3 lightColour, V3 diffuseLit
 #endif
 }
 
+// lane MATLOOK3 (TRANSLUC1-THICK): the cascade taps' estimate of FO4CS's thickness visibility. A tap at receiver offset
+// base + 0.6 (k + 0.5) / taps is lit when the caster thickness (beyond base) is under it.
+inline float thickVisTaps( float thickness, float base, int taps )
+{
+	int lit = 0;
+	for ( int k = 0; k < taps; k++ )
+		if ( thickness <= base + 0.6f * ( k + 0.5f ) / taps )
+			lit++;
+	return float( lit ) / taps;
+}
+
+// the sun's share of a thick pixel over its shadowed diffuse (thick records only; WWTRANSL_THICK_RED: the old nothing)
+inline V3 thickSun( const Rec & r, V3 N, V3 L, V3 V, V3 lightColour, float thickVis, V3 shadowedDiffuse )
+{
+	if ( r.kind != 2 )
+		return V3{};
+#ifdef WWTRANSL_THICK_RED
+	(void)N; (void)L; (void)V; (void)lightColour; (void)thickVis; (void)shadowedDiffuse;
+	return V3{};
+#else
+	return vmax0( r.col * lightColour * lobe( N, L, V, r.turb ) * thickVis - shadowedDiffuse );
+#endif
+}
+
 }	// namespace WwTransl
 
 #endif

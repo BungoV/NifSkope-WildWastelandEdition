@@ -57,6 +57,7 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include "gl/gametaa.h"	// lane MOTION1: the game's temporal AA
 #include "gl/taainputs.h"	// lane TAAINPUTS1: velocity + reactive mask for a temporal resolve
 #include "gl/cellpost.h"	// lane GRASSMB1: the game's depth of field + motion blur
+#include "gl/cellskinsss.h"	// lane SKINSSS1: skin subsurface scattering
 #include "gl/cellgrass.h"	// lane GRASSMB1: the grass wind's clock
 #include "impostorchunk.h"
 #include "cellfarlod.h"		// lane FARLOD1: the far field's planes, sway and cards
@@ -4342,6 +4343,7 @@ void GLView::paintGL()
 				PassTime::end( PassTime::Underwater );
 				{
 					PassTime::Scope pt( PassTime::Post );
+					wwCellSkinSssApply( scene );	// lane SKINSSS1: skin's light blurred in the linear frame (row WW_CELL_SKINSSS; no GL call off)
 					wwCellPostApplyLinear( scene );	// lane POSTFX2: the depth of field + motion blur before the tone map (row WW_CELL_POST_LINEAR; inert off)
 				}
 				PassTime::begin( PassTime::ToneMap );

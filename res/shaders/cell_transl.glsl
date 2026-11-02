@@ -7,7 +7,7 @@
 //   a light gives the pixel max( T, D ): T = tint x amount x the light's colour (every factor of the diffuse but N.L)
 //   x lobe, D = albedo x that light's diffuse; the excess max( T - D, 0 ) is added beside the diffuse.
 // A thick object (bTranslucencyThickObject) takes nothing from the local lights; the sun reaches it only through a
-// thickness shadow map, which NifSkope does not draw yet, so it takes nothing (as FO4CS does with that map absent).
+// thickness shadow (lane MATLOOK3, TRANSLUC1-THICK: wwTrThickSun below, the exterior sun's cascades).
 
 uniform vec4 wwTrCol;	// the material's subsurface colour, a the transmissive scale (src/gl/renderer.cpp)
 uniform vec4 wwTrFlags;	// x thick, y mix albedo, z on (a v8+ material with bTranslucency), w turbulence
@@ -50,3 +50,39 @@ vec3 wwTrExcess( vec3 N, vec3 L, vec3 V, vec3 lightColour, vec3 diffuseLit )
 		return vec3( 0.0 );
 	return max( wwTrRec.rgb * lightColour * wwTrLobe( N, L, V, wwTrRec.a ) - diffuseLit, vec3( 0.0 ) );
 }
+
+#if defined( WW_SUNSHADOW ) && !defined( WW_TRV ) && !defined( WW_CELL_TRANSL_RED_NOTHICK )
+/* lane MATLOOK3 (TRANSLUC1-THICK): FO4CS's sun thickness shadow, visibility = saturate( ( occ - ( recv - 0.6 ) ) / 0.6 ),
+ * 1 at no thickness, 0 at 0.6 units of the caster between the sun and the pixel. FO4CS draws the thick casters into a
+ * map of their own; here the sun's cascade map stands in (a ruling: any caster counts, not only thick ones). One
+ * comparison tap at receiver offsets base + 0.6 (k + 0.5) / N is lit when the thickness is under that offset, so the
+ * lit share of the N taps is the linear visibility (within 1 / 2N). Nearer cascade only; outside the cascades'
+ * reach, or with no cascade map, a thick object takes nothing (the old rule). Red WW_CELL_TRANSL_RED=nothick. */
+#define WW_TR_THICK 1
+#define WW_TR_THICK_TAPS 8
+float wwTrThickVis( vec3 posView )
+{
+	if ( ( ussOn != 0 && ussCsmOn == 0 ) || !( -posView.z * csmParams.x <= csmParams.y ) )
+		return 0.0;
+	int a, b;
+	float t;
+	csmSelect( posView, a, b, t );
+	vec3 q = csmUvd( a, posView );
+	float base = ( ussOn != 0 && ussCsmFilter.x > 0.5 ) || ussCsmStable.w != 0.0 ? ussCsmBias[a] : csmSplitOffset.z;
+	float lit = 0.0;
+	for ( int k = 0; k < WW_TR_THICK_TAPS; k++ ) {
+		float o = base + 0.6 * ( float( k ) + 0.5 ) / float( WW_TR_THICK_TAPS );
+		lit += texture( csmMap, vec4( q.xy, float( a ), q.z - o * csmInvRange[a] ) );
+	}
+	return lit / float( WW_TR_THICK_TAPS );
+}
+
+// the sun's share of a thick pixel: max( T x thickness visibility, the shadowed diffuse ) less that diffuse
+vec3 wwTrThickSun( vec3 N, vec3 L, vec3 V, vec3 lightColour, vec3 shadowedDiffuse, vec3 posView )
+{
+	if ( wwTrKind < 1.5 )
+		return vec3( 0.0 );
+	vec3 T = wwTrRec.rgb * lightColour * wwTrLobe( N, L, V, wwTrRec.a );
+	return max( T * wwTrThickVis( posView ) - shadowedDiffuse, vec3( 0.0 ) );
+}
+#endif

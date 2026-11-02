@@ -859,6 +859,8 @@ public:
 
 	//! Is Shader Type
 	bool isST( ShaderFlags::ShaderType st ) { return shaderType == st; };
+	//! lane HAIRDLC04: the cell view's source Shader Type (NiIntegerExtraData "WWSrcShaderType"), -1 = none
+	int wwSrcShaderType = -1;
 
 	bool hasGlowMap = false;
 	bool hasEmittance = false;

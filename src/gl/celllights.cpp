@@ -33,6 +33,7 @@ BSD License - see nifskope.h
 #include "gl/cubefacecull.h"	// lane PERFFIX2 b: a caster draws only into the cube faces it can reach
 #include "gl/lampslice.h"	// lane PERFFIX2 b: the lamp store's first stores spread over frames
 #include "gl/celllooks.h"	// lane GAPLOOK1
+#include "gl/cellskinsss.h"	// lane SKINSSS1: the opaque pass's skin tag
 #include "gl/celllensflare.h"	// lane LIGHTS3 (LENSFLARE1): its echo
 #include "gl/cellfxlit.h"	// lane LIGHTS4: a placement's emittance colour
 #include "gamemanager.h"	// lane SUNCELL1: the weather imagespace's LUT
@@ -4482,6 +4483,10 @@ struct AoGpu
 	GLuint volBuf = 0, volTex = 0, volVao = 0;	// the shapes, 3 RGBA32F texels each (a buffer texture)
 	std::vector<float> volData;	// what volBuf holds
 	bool giUnits = false;	// the GPU has WwCellUnit::GiHalfKey
+	GLuint skinTex = 0;		// lane SKINSSS1: the opaque pass's attachment 1 (R8, 1 on skin) while the Skin subsurface row is on
+	int skinW = 0, skinH = 0;
+	bool skinOn = false;	// attached this frame
+	bool skinReady = false;	// and written
 };
 
 QHash<const void *, AoGpu> & aoGpus()
@@ -4895,6 +4900,8 @@ void wwCellAoPass( Scene * scene, bool run )
 	const bool forDecal = g.decalUnit >= 0 && wwCellAoDecalWanted( scene->nifModel );
 	const bool forContact = wwContactShadowWantsTargets( scene );	// lane TERRSHADOW1: contact shadows march its depth
 	const bool forDecalAngle = wwCellDecalMappedHas( scene->nifModel );	// lane DECALANGLE2: placed decals read its normal
+	const bool forSss = wwCellSkinSssWanted( scene );	// lane SKINSSS1: the skin tag rides on it
+	g.skinReady = false;
 	// lane PERF1: the half-res GI reads it too (the GI row on, no probe pass, a GPU with the units)
 	const int giRate = wwCellGiRate();
 	/* PERFFIX2 (PERFRES1101 A gap 2): without the PRT (PRTOFF1) the pass runs for the ray-traced volume's read instead,
@@ -4908,14 +4915,14 @@ void wwCellAoPass( Scene * scene, bool run )
 	else if ( !g.giUnits )
 		giEcho( QStringLiteral( "full (the GPU has no unit %1)" ).arg( WwCellUnit::GiHalfKey ) );
 	if ( !a.on ) {
-		aoEcho( ( forSsr || forDecal || forContact || forGi || forDecalAngle ) ? QStringLiteral( "off (row); the shared opaque pass kept for%1%2%3%4%5" )
+		aoEcho( ( forSsr || forDecal || forContact || forGi || forDecalAngle || forSss ) ? QStringLiteral( "off (row); the shared opaque pass kept for%1%2%3%4%5%6" )
 			.arg( forSsr ? QStringLiteral( " ssr" ) : QString() ).arg( forDecal ? QStringLiteral( " aodecal" ) : QString() )
 			.arg( forContact ? QStringLiteral( " contact" ) : QString() ).arg( forGi ? QStringLiteral( " gihalf" ) : QString() )
-			.arg( forDecalAngle ? QStringLiteral( " decalangle" ) : QString() )
+			.arg( forDecalAngle ? QStringLiteral( " decalangle" ) : QString() ).arg( forSss ? QStringLiteral( " skinsss" ) : QString() )
 			: QStringLiteral( "off (row); no opaque pass (nothing reads it)" ) );
 		// lane SSAO2: the keep rule lives in cellaomethod.h (tests/aomethod); its red drops SSR's claim
 		// lane RESTIRDI1: the RT quality preset's ReSTIR pass reads it too (rtddgiRestirPass)
-		if ( !wwAoSharedPassRuns( false, forSsr, forDecal || forContact || forGi || forDecalAngle || rtddgiRestirShaderDefine(), a.ssrRedOld ) ) {
+		if ( !wwAoSharedPassRuns( false, forSsr, forDecal || forContact || forGi || forDecalAngle || forSss || rtddgiRestirShaderDefine(), a.ssrRedOld ) ) {
 			a.last = QStringLiteral( "off" );
 			return;
 		}
@@ -4974,6 +4981,27 @@ void wwCellAoPass( Scene * scene, bool run )
 	fn->glBindRenderbuffer( GL_RENDERBUFFER, 0 );
 	fn->glBindFramebuffer( GL_FRAMEBUFFER, g.gbuf.fbo );
 	fn->glFramebufferRenderbuffer( GL_FRAMEBUFFER, GL_DEPTH_STENCIL_ATTACHMENT, GL_RENDERBUFFER, g.gbufDepth );
+	if ( forSss ) {	// lane SKINSSS1: the skin tag on attachment 1 (off: nothing attached, the old target)
+		if ( !g.skinTex || g.skinW != W || g.skinH != H ) {
+			if ( !g.skinTex )
+				fn->glGenTextures( 1, &g.skinTex );
+			fn->glBindTexture( GL_TEXTURE_2D, g.skinTex );
+			fn->glTexImage2D( GL_TEXTURE_2D, 0, GL_R8, W, H, 0, GL_RED, GL_UNSIGNED_BYTE, nullptr );
+			fn->glTexParameteri( GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST );
+			fn->glTexParameteri( GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST );
+			fn->glTexParameteri( GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE );
+			fn->glTexParameteri( GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE );
+			fn->glTexParameteri( GL_TEXTURE_2D, GL_TEXTURE_MAX_LEVEL, 0 );
+			fn->glBindTexture( GL_TEXTURE_2D, 0 );
+			g.skinW = W;
+			g.skinH = H;
+		}
+		fn->glFramebufferTexture2D( GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT1, GL_TEXTURE_2D, g.skinTex, 0 );
+		g.skinOn = true;
+	} else if ( g.skinOn ) {
+		fn->glFramebufferTexture2D( GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT1, GL_TEXTURE_2D, 0, 0 );
+		g.skinOn = false;
+	}
 	for ( int m = 1; m < 5; m++ )
 		aoAlloc( fn, g.mip[m], ms[m][0], ms[m][1], GL_R32F, GL_RED, false );
 	aoAlloc( fn, g.raw, hw, hh, GL_RG32F, GL_RG, false );
@@ -5007,6 +5035,12 @@ void wwCellAoPass( Scene * scene, bool run )
 	fn->glDepthMask( GL_TRUE );
 	const GLfloat far4[4] = { 0.0f, 0.0f, 0.0f, 1.0e6f };
 	fn->glClearBufferfv( GL_COLOR, 0, far4 );
+	if ( g.skinOn ) {	// lane SKINSSS1: both targets drawn; the tag cleared to 0 (not skin)
+		const GLenum bufs[2] = { GL_COLOR_ATTACHMENT0, GL_COLOR_ATTACHMENT1 };
+		fn->glDrawBuffers( 2, bufs );
+		const GLfloat zero4[4] = { 0.0f, 0.0f, 0.0f, 0.0f };
+		fn->glClearBufferfv( GL_COLOR, 1, zero4 );
+	}
 	if ( wwCellSsrPrevStencil() )
 		fn->glStencilMask( 0xFF );	// lane PERF3: the clear zeroes the flag bit too
 	fn->glClear( GL_DEPTH_BUFFER_BIT | GL_STENCIL_BUFFER_BIT );
@@ -5036,6 +5070,11 @@ void wwCellAoPass( Scene * scene, bool run )
 	}
 	PassTime::subEnd( PassTime::AoGeometry );
 	a.pass = false;
+	if ( g.skinOn ) {
+		const GLenum one0 = GL_COLOR_ATTACHMENT0;
+		fn->glDrawBuffers( 1, &one0 );
+		g.skinReady = true;
+	}
 	fn->glColorMask( GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE );
 	fn->glDepthMask( GL_TRUE );
 	fn->glDisable( GL_STENCIL_TEST );
@@ -5217,6 +5256,19 @@ const std::vector<float> * wwCellLightSpheres( Scene * scene )
 	return &g.spheres;
 }
 
+// lane SKINSSS1: this frame's skin tag (src/gl/cellskinsss.h); 0 when the opaque pass did not write it
+GLuint wwCellSkinSssTag( Scene * scene, int & w, int & h )
+{
+	if ( !scene || !scene->renderer || !aoGpus().contains( scene->renderer ) )
+		return 0;
+	const AoGpu & g = aoGpus()[scene->renderer];
+	if ( !g.ready || !g.skinReady || g.doc != scene->nifModel )
+		return 0;
+	w = g.skinW;
+	h = g.skinH;
+	return g.skinTex;
+}
+
 // this frame's opaque pass and depth pyramid, for the reflections' march (src/gl/cellssr.h)
 bool wwCellAoTargets( Scene * scene, WwCellAoTargets & out )
 {
@@ -5250,6 +5302,10 @@ void wwCellAoDraw( Scene * scene, bool cellProgram )
 		// the game's opaque (deferred) pass: no blended draw, no effect, nothing that is not cell-lit
 		const bool opaque = cellProgram && !wwDrawBlend();
 		glColorMask( opaque, opaque, opaque, opaque );
+		if ( aoGpus()[r].skinOn ) {	// lane SKINSSS1: the tag only from a program that writes it (the rest keep the clear)
+			const GLboolean sk = opaque && prog->uniLocation( "wwSkinOn" ) >= 0;
+			r->fn->glColorMaski( 1, sk, sk, sk, sk );
+		}
 		if ( !opaque )
 			glDepthMask( GL_FALSE );
 		if ( wwCellSsrPrevStencil() ) {

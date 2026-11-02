@@ -2,7 +2,7 @@
 // reading of FO4CS's BGSM22 translucency law (its packed record: rgb = -(tint x amount), a = -(tag + turbulence)),
 // over a grid of normals, light and view directions, materials and lighting-map values; and the shader's text
 // pinned to the same law. Build: g++ -std=c++17 -I<tree>/src tests/translucency/translucency.cpp; run from the tree.
-// Red: -DWWTRANSL_RED (the upstream FO76 term) must fail.
+// Red: -DWWTRANSL_RED (the upstream FO76 term) must fail; -DWWTRANSL_THICK_RED (a thick object takes no sun) too.
 
 #include "gl/wwtransl.h"
 
@@ -46,6 +46,25 @@ V3 refExcess( Ref4 aux, V3 N, V3 L, V3 V, V3 lc, V3 diff )
 	V3 ca = v3( std::max( -aux.r, 0.0f ), std::max( -aux.g, 0.0f ), std::max( -aux.b, 0.0f ) );
 	return v3( std::max( ca.x * lc.x * lobeR - diff.x, 0.0f ), std::max( ca.y * lc.y * lobeR - diff.y, 0.0f ),
 			   std::max( ca.z * lc.z * lobeR - diff.z, 0.0f ) );
+}
+
+// lane MATLOOK3: FO4CS's thick sun (FO4CSBgsm22ThickTransmission / ThickVisibility / ThickSunExcess)
+float refThickVis( float occ, float recv )
+{
+	return std::min( std::max( ( occ - std::max( recv - 0.6f, 0.0f ) ) * 1.666667f, 0.0f ), 1.0f );
+}
+
+V3 refThickSun( Ref4 aux, V3 N, V3 L, V3 V, V3 lc, float thickShadow, V3 shadowedDiffuse )
+{
+	if ( !( aux.a < -2.5f ) )
+		return V3{};
+	float turb = std::min( std::max( -aux.a - 3.0f, 0.0f ), 1.0f );
+	float vt = std::max( V.x * -L.x + V.y * -L.y + V.z * -L.z, 0.0f );
+	float x = ( L.x * -N.x + L.y * -N.y + L.z * -N.z ) * vt * vt;
+	float lobeR = std::max( x * ( 1.0f - turb ) + 0.5f * turb, 0.0f );
+	return v3( std::max( std::max( -aux.r, 0.0f ) * lc.x * lobeR * thickShadow - shadowedDiffuse.x, 0.0f ),
+			   std::max( std::max( -aux.g, 0.0f ) * lc.y * lobeR * thickShadow - shadowedDiffuse.y, 0.0f ),
+			   std::max( std::max( -aux.b, 0.0f ) * lc.z * lobeR * thickShadow - shadowedDiffuse.z, 0.0f ) );
 }
 
 V3 unit( float th, float ph )
@@ -107,6 +126,41 @@ int main()
 		std::printf( "FAIL gates\n" );
 		fails++;
 	}
+	// 2b. lane MATLOOK3 (TRANSLUC1-THICK): the thick sun against FO4CS's, and the cascade taps against its visibility
+	{
+		long tc = 0, tlit = 0;
+		double tw = 0.0;
+		for ( float turb : turbs )
+			for ( int flags = 0; flags < 4; flags++ ) {
+				bool mix = flags & 1, thick = flags & 2;
+				Rec r = record( colour, mix, albedo, 1.0f, 1.0f, turb, false, thick );
+				Ref4 aux = refPayload( colour, mix, albedo, 1.0f, 1.0f, turb, false, thick );
+				for ( float th = 0.0f; th <= 0.8f; th += 0.05f ) {
+					const float vis = refThickVis( 100.0f, 100.0f + th );
+					for ( const V3 & L : dirs )
+						for ( const V3 & V : dirs )
+							for ( int d = 0; d < 2; d++ ) {
+								float nl = std::max( dot( N, L ), 0.0f );
+								V3 sd = d ? albedo * lc * ( nl * 0.5f ) : V3{};
+								V3 a = thickSun( r, N, L, V, lc, vis, sd ), b = refThickSun( aux, N, L, V, lc, vis, sd );
+								tw = std::max( { tw, double( std::fabs( a.x - b.x ) ), double( std::fabs( a.y - b.y ) ),
+												 double( std::fabs( a.z - b.z ) ) } );
+								tc++;
+								if ( b.x + b.y + b.z > 1e-4f )
+									tlit++;
+							}
+				}
+			}
+		double vw = 0.0;
+		for ( float th = 0.0f; th <= 0.9f; th += 0.001f )
+			vw = std::max( vw, double( std::fabs( thickVisTaps( th, 0.0f, 8 ) - refThickVis( 100.0f, 100.0f + th ) ) ) );
+		std::printf( "thick: %ld cases, %ld lit, worst |twin - FO4CS| %.3g (bar 1e-5, lit >= 10000); taps vs linear %.4f "
+					 "(bar 1/16)\n", tc, tlit, tw, vw );
+		if ( !( tw <= 1e-5 ) || tlit < 10000 || !( vw <= 0.0625 + 1e-4 ) ) {
+			std::printf( "FAIL thick\n" );
+			fails++;
+		}
+	}
 	// 3. the shader says the same (text pins on res/shaders/cell_transl.glsl and its call sites)
 	auto slurp = []( const char * p ) {
 		std::ifstream f( p, std::ios::binary );
@@ -123,6 +177,12 @@ int main()
 		"return max( mix( dot( L, -N ) * v * v, 0.5, turbulence ), 0.0 );",
 		"if ( wwTrKind < 0.5 || wwTrKind > 1.5 )",
 		"return max( wwTrRec.rgb * lightColour * wwTrLobe( N, L, V, wwTrRec.a ) - diffuseLit, vec3( 0.0 ) );",
+		"#if defined( WW_SUNSHADOW ) && !defined( WW_TRV ) && !defined( WW_CELL_TRANSL_RED_NOTHICK )",
+		"#define WW_TR_THICK_TAPS 8",
+		"float o = base + 0.6 * ( float( k ) + 0.5 ) / float( WW_TR_THICK_TAPS );",
+		"lit += texture( csmMap, vec4( q.xy, float( a ), q.z - o * csmInvRange[a] ) );",
+		"if ( wwTrKind < 1.5 )",
+		"return max( T * wwTrThickVis( posView ) - shadowedDiffuse, vec3( 0.0 ) );",
 	};
 	const char * sites[] = {
 		"wwTrAdd += wwTrExcess( N, L, Vw, t1.rgb * g * a, wwTrAlb * eOn );",
@@ -131,6 +191,7 @@ int main()
 		"linx += wwTrAdd + cellDirVis * wwTrExcess( N, Ld, Vw, cellDirColor, nl > 0.0",
 		"lin += wwTrAdd;",
 		"add += wwTrAdd;",
+		"linx += wwTrThickSun( N, Ld, Vw, cellDirColor, nl > 0.0 ? cellDirVis * alb * cellDirColor * nl",
 	};
 	int missing = 0;
 	for ( const char * p : pins )

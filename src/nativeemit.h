@@ -95,6 +95,8 @@ struct NativeSrcShape
 	QByteArray effectBlock;
 	quint16 alphaFlags = 0;
 	float refractStrength = 0.0f;  //!< lane EFX1: a Refraction-flagged lighting property's strength
+	//! Lane HAIRDLC04: the source lighting property's Shader Type (FO4: 4 face, 5 skin, 6 hair). Cell view only.
+	quint32 srcShaderType = 0;
 	/*! Lane GLOW1: the shape hangs under an NiBillboardNode (the Vault's pod-base glow cards).
 	 *  `geom` stays model space as authored, so no bake moves; the cell view reads the node's
 	 *  model-space transform (rotation row-major, model = R * local * scale + pos) and mode. */

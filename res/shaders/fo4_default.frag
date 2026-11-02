@@ -135,6 +135,12 @@ layout ( location = 0 ) out vec4 fragColor;
 // lane SSGI2: the scene pass's second target, the emitted share alone (the bounce's emissive cast; 0 elsewhere)
 layout ( location = 1 ) out vec4 cellEmitOut;
 #endif
+// lane SKINSSS3: the bindless twins write the tag too (wwSkinOn is in the draw packet, so the multi-draw never joins a
+// skin and a non-skin draw); WW_CELL_SKINSSS_RED=nobl keeps them out (the SKINSSS1/2 path)
+#if defined( WW_CELL_SKINSSS ) && defined( WW_CELLLIGHTS ) && !( defined( WW_BINDLESS ) && defined( WW_SKINSSS_RED_NOBL ) )
+#define WW_SKINSSS_TAG 1
+uniform bool wwSkinOn;	// lane SKINSSS1: the draw is skin (src/gl/renderer.cpp); the opaque pass writes it to its skin tag
+#endif
 
 vec3 ViewDir_norm = normalize( ViewDir );
 mat3 btnMatrix_norm = mat3( normalize( btnMatrix[0] ), normalize( btnMatrix[1] ), normalize( btnMatrix[2] ) );
@@ -304,6 +310,11 @@ vec3 tonemap(vec3 x)
 #define WW_TRV 1
 #include "cell_transl.glsl"
 #endif
+// lane MATLOOK3: the hair and cornea lobes (rows Hair specular / Eye cornea); the bindless twins keep the old path
+// lane SKINSSS2: and the iris under the cornea (row Eye iris refraction)
+#if ( defined( WW_CELL_HAIRKK ) || defined( WW_CELL_CORNEA ) || defined( WW_CELL_IRIS ) ) && !defined( WW_BINDLESS )
+#include "ww_hair_eye.glsl"
+#endif
 #ifdef WW_CELLLIGHTS
 #ifndef WW_CELL_GI_MARCH_COPIES	// red (tests/spells/cell_giblack_link.sh): a march copy per call site, over the link limit
 #define WW_CELL_GI_MARCH_ONCE 1	// lane GIBLACKLINK1: the march red runs once (cellGiMarchPrime in main)
@@ -441,6 +452,11 @@ void main()
 		if ( any( lessThan( offset, vec2( 0.0 ) ) ) || any( greaterThan( offset, vec2( 1.0 ) ) ) )
 			discard;
 	}
+#ifdef WW_IRIS
+	// lane SKINSSS2 (EYEIRIS1): every map of an opaque eye reads the iris where the refracted view meets it
+	if ( wwIrisOn && ( alphaFlags & 8 ) == 0 )
+		offset += wwIrisShift( offset, normalize( ViewDir ), normalize( btnMatrix[2] ) );
+#endif
 #ifdef WW_SUNSHADOW
 	/* lane SUNCELL1: the cascades on the SUN only (CSM1 spec 2.8). Every D.rgb below is the sun: D = sqrt(the
 	 * linear sun), so D x sqrt(f) is the sun x f in the linear light the tonemap squares back. The macro takes
@@ -685,6 +701,9 @@ void main()
 #ifdef WW_CELLLIGHTS
 	if ( cellOn && cellProbe == 20 && cellAoEarly == 1 ) {	// lane PERF1: the obscurance pass reads the normal and depth only
 		fragColor = cellAoPassOut( normal, -ViewDir );
+#ifdef WW_SKINSSS_TAG
+		cellEmitOut = vec4( wwSkinOn ? 1.0 : 0.0 );	// lane SKINSSS1: attachment 1 of the opaque pass (celllights.cpp)
+#endif
 		return;
 	}
 #endif
@@ -800,6 +819,19 @@ void main()
 		else
 			ambMask = 1.0;
 	}
+#ifdef WW_HAIRKK
+	// lane MATLOOK3: hair's lobe for the viewport light and the cell sun (the game's law path, as the cell lights)
+	if ( wwHairOn && !editorBrdf && hasSpecularMap )
+		spec = wwHairSpec( wwHairStrand( btnMatrix_norm[1], normal ), normal, L, V, smoothness, albedo * albedo )
+		       * specMask * NdotL0 * D.rgb * specColor;
+#endif
+#ifdef WW_CORNEA
+	// lane MATLOOK3: the cornea's coat on the geometric normal; the iris spec under it takes 1 - F
+	if ( wwEyeOn && ( alphaFlags & 8 ) == 0 ) {
+		vec3 ngV = normalize( btnMatrix_norm[2] );
+		spec = spec * ( 1.0 - wwEyeFv( ngV, V ) ) + wwEyeCoat( ngV, L, V ) * max( dot( ngV, L ), 0.0 ) * D.rgb;
+	}
+#endif
 	vec3 specSun = spec;	// lane SUNCELL1: the sun's specular before the cube (the exterior cell sun keeps it)
 
 	// Environment
@@ -964,9 +996,27 @@ void main()
 		            wwTrFlags.x > 0.5 );
 	}
 #endif
+#ifdef WW_HAIRKK
+	wwHairLive = cellOn && wwHairOn;	// lane MATLOOK3: read by cellLit's lights (cell_lights.glsl)
+	if ( wwHairLive ) {
+		wwHairT = cellWorldDir( wwHairStrand( btnMatrix_norm[1], normal ) );
+		wwHairAlb = albedo * albedo;
+	}
+#endif
+#ifdef WW_CORNEA
+	wwEyeLive = cellOn && wwEyeOn && ( alphaFlags & 8 ) == 0;
+	if ( wwEyeLive )
+		wwEyeN = cellWorldDir( normalize( btnMatrix_norm[2] ) );
+#endif
 	if ( cellOn )
 		color.rgb = cellLit( color.rgb, albedo, normal, -ViewDir, V, specMask, cellSpecTint, alphaR, kSmith,
 		                     emissive * glowScaleSRGB, cubeK );
+#ifdef WW_HAIRKK
+	wwHairLive = false;
+#endif
+#ifdef WW_CORNEA
+	wwEyeLive = false;
+#endif
 	vec3 cellSsrScene = color.rgb * color.rgb;	// lane SSR1: what the reflections' march samples (probe 60)
 	if ( cellOn && cellProbe == 60 ) {
 		// lane SSGI2: the glow's share of that (cellLit adds it after the root; c^2 - (c - e)^2), coverage in a
@@ -1071,6 +1121,9 @@ void main()
 #ifdef WW_CELLLIGHTS
 	if ( cellOn && cellProbe == 20 ) {
 		fragColor = cellAoPassOut( normal, -ViewDir );	// lane AO1
+#ifdef WW_SKINSSS_TAG
+		cellEmitOut = vec4( wwSkinOn ? 1.0 : 0.0 );
+#endif
 		if ( cellAoEarly == 2 )
 			fragColor.w *= 1.001;	// lane PERF1 red: full shading runs (the old cost), and the gate must see the mark
 	}

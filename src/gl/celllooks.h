@@ -72,6 +72,10 @@ enum class WwLook : int
 	Vrs,				// PERFFIX4: variable rate shading of the opaque + sorted passes from last frame's picture (WW_CELL_VRS)
 	ObjectFade,			// OBJFADE1: placed refs fade out per class (objects, items, actors), the game's LOD rule (WW_CELL_OBJFADE)
 	RainWet,			// FO76WEATHER1: rain wets every material, Fallout 76's porosity law (WW_CELL_RAINWET; gl/cellprecip.h)
+	HairSpecular,		// MATLOOK3 HAIRKK1: hair's light specular is a shifted Kajiya-Kay lobe (WW_CELL_HAIRKK; ww_hair_eye.glsl)
+	EyeCornea,			// MATLOOK3 EYECORNEA1: an opaque eye takes a smooth cornea coat per light (WW_CELL_CORNEA)
+	SkinSubsurface,		// SKINSSS1: skin's light blurred by FO4CS's separable 5-Gaussian profile, cell view (WW_CELL_SKINSSS)
+	EyeIris,			// SKINSSS2 EYEIRIS1: an opaque eye's maps read the iris under the cornea, refracted (WW_CELL_IRIS)
 	Count
 };
 
@@ -85,6 +89,8 @@ bool wwLookPinned( WwLook l );
 bool wwLookHasRow( WwLook l );
 //! true when the look is read while the cell is built: the menu row reopens the cell
 bool wwLookReopens( WwLook l );
+//! lane MATLOOK3: the look is a shader define (glcontext.cpp's loader): the menu row reloads the shaders
+bool wwLookReloadsShaders( WwLook l );
 void wwLookSet( WwLook l, bool on );
 //! lane LIGHTS5: red WW_CELL_XEMI_GI_RED=stale, the bounce emittance row's live flip keeps the baked Le
 bool wwLookBounceEmitRedStale();

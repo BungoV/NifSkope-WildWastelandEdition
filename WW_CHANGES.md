@@ -1,3 +1,110 @@
+## SKINSSS3 (2026-11-02): the bindless programs write the skin tag (SKINSSS-BINDLESS)
+
+Skin subsurface found no cell skin while Bindless draws was on (the default): every FO4 lighting shape of a cell, faces
+and bodies included, draws through the bindless twins fo4_cellbl / fo4_cellcsmbl, and those wrote no skin tag. Now they
+write it like fo4_cell does. The multi-draw never puts a skin draw and a non-skin draw in one call: `wwSkinOn` is set
+while the draw packet records, so the two packets differ and `WwDp::sameButHandles` refuses the join (skinned shapes
+never join at all). tests/skinsss pins that chain. Non-skin draws: the twins' colour code is the same as before (the
+NV assembly differs only by the tag write); with the row off, every program's machine code is the same as before.
+Red `WW_CELL_SKINSSS_RED=nobl` (read when the shaders load): the twins write no tag, as in SKINSSS1/2.
+
+## SKINSSS2 (2026-11-02): the skin blur at half resolution (option WW_CELL_SKINSSS_HALF=1, off)
+
+Skin subsurface (SKINSSS1) can run its blur at half resolution, as FO4CS does: `WW_CELL_SKINSSS_HALF=1` (env only, off;
+a menu row is owed). The new program cell_skinssshalf.prog (a define and an include of cell_skinsss.frag) takes each 2x2
+block's skin pixels at the block's depth into a half-size target, with a half depth beside it; blurs it in x and y at
+half size with 3 taps; then blends it into the frame at full size through a depth-aware bilinear (taps across a depth
+step drop out, so a hand never lends its light to the face behind it). At 1080p with every pixel skin it costs
+0.053 ms against 0.113 for the full path (0.47). The picture is softer than the full path: mean error 0.56 of the
+effect, against the 0.10 bar set before the run, so the option stays off and the full path stays the default.
+src/gl/wwskinssshalf.h is the C++ twin; tests/skinsshalf checks it against the full twin (non-skin pixels exact,
+no light across a depth step, a flat field equal to the full path) and prints the missed picture bar. Red: the twin
+built with WWSKINSSSHALF_RED, which has only the full path. With the option off, every shader program's machine code
+is the same as before (only the stamp and source hash change).
+
+## SKINSSS2 (2026-11-02): the iris under the cornea (EYEIRIS1, row Eye iris refraction, ships off)
+
+A new look row, Eye iris refraction (`WW_CELL_IRIS`, QSettings WW/CellEyeIris, off). FO4 paints the iris on the eye
+mesh's surface; a real iris lies on a flat plane about 2.6 mm under the cornea, so it shifts against the eye's rim as the
+view turns. res/shaders/ww_hair_eye.glsl `wwIrisShift` models a cornea sphere of 7.8 mm over a limbus of 5.85 mm (IOR
+1.376): it rebuilds the eye axis from that sphere, refracts the view at the surface normal, steps down to the iris plane
+and maps the step back to uv from the screen derivatives. fo4_default.frag adds the step to the uv before every map of an
+opaque eye (the eye gate of the cornea row, plus the carried facegen type). The iris position comes from the atlas:
+human and ghoul eyes (textures/actors/character/eyes/) centre (0.502, 0.752), radius 0.162 of the texture, measured
+from the vanilla textures; other atlases (the supermutants') get no step. src/gl/wwiris.h is the C++ twin;
+tests/eyeiris traces the eye in double precision (views up to 45 degrees): max error 0.020, mean 0.005 iris radii,
+where the old flat iris is off by 0.30 / 0.094. Red `WW_CELL_IRIS_RED=1`: the step is 0. Bindless twins keep the old
+path (as the cornea row).
+
+## SKINSSS2 (2026-11-02): cell facegen eyes get the cornea coat (EYECORNEA-CELL)
+
+The cell view's characters draw their eyes from the facegen heads, and the Eye cornea row (EYECORNEA1) never reached
+them. A census of the vanilla facegen heads (1094 FaceGeom NIFs) found no eye shape of Shader Type 16 and none with the
+Eye_Environment_Mapping flag: the eyes are Shader Type 1 (EnvironmentMap) with no BGSM, the same type and flags as the
+synth head rear. The eye cube in texture slot 4 tells them apart (eyecubemap.dds; the supermutants' mipblur_eye1.dds).
+src/wwfacegeneye.h holds the rule: a type-1 source shape with no BGSM and an eye cube carries type 16. Its cell bucket
+keeps that type (as HAIRDLC04's face, skin and hair do), the writer tags the shader, and the renderer's eye gate reads
+the carried type. Census: 1059 eyes tagged, 19 synth rear shapes left alone. Red `WW_CELL_EYEST_RED=1`: eyes keep type 1
+(the old cell picture). tests/eyecornea checks the rule against the census and pins the four hunks; its
+WWFACEGENEYE_RED and the base text must fail. The NIF view is not changed.
+
+## SKINSSS1 (2026-11-02): skin subsurface scattering in the cell view (row Skin subsurface, ships off)
+
+A new look row, Skin subsurface (`WW_CELL_SKINSSS`, QSettings WW/CellSkinSubsurface, off), ports FO4CS's separable
+screen-space subsurface scattering with its skin profile: extract (coverage 0.65, saturation 1.08), blur along x, blur
+along y with the Jimenez / d'Eon 5-Gaussian kernel (red falloff widest, so red bleeds furthest) and a depth rejection
+of 0.003 in window depth, then the composite. Skin is a draw whose BGSM has bSkinTint or bFacegen, or whose NIF shader
+type is SkinTint or FaceGen (the game's material code 5: faces and first-person hands). The cell's shared opaque pass
+gets an R8 attachment 1 for the skin tag while the row is on; only the programs that write it (fo4_default's cell
+programs; the bindless twins keep the old path, tag 0) open its mask. The pass (src/gl/cellskinsss.cpp,
+res/shaders/cell_skinsss.frag) runs in the linear frame before the depth of field. It runs at full resolution, so the
+kernel radius is 6 pixels (FO4CS: 3 at half resolution). A forward frame holds lit light, not irradiance, so the
+blurred light includes the specular (a known error). Red `WW_CELL_SKINSSS_RED=1`: the passes run and the frame is kept.
+The NIF view (no opaque pass of its own) is not covered. tests/skinsss checks the twin against FO4CS's law; its
+WWSKINSSS_RED and the base text must fail.
+
+HAIRDLC04 (same lane): the cell view's characters are drawn from their facegen heads, whose shapes name no BGSM (vanilla
+1094 facegen NIFs: 1252 hair shapes of Shader Type 6, 1077 face of type 4, 1045 skin of type 5; DLC04 224 NIFs: 306 /
+223 / 221), and the cell writer forces Shader Type 0. So no cell face got the skin tag and no cell hair got the Hair
+specular row, DLC04's included (its 14 hair BGSMs all have bHair 0, its hair head-part NIFs type 0). The loader now keeps
+the source Shader Type, face / skin / hair sources keep their own bucket, and the writer hangs an NiIntegerExtraData
+"WWSrcShaderType" on the shader (Shader Type stays 0, so tint maps and every other path are as before). The skin and
+hair gates in renderer.cpp read it. Red `WW_CELL_SRCST_RED=1`: no tag. A lone head-part NIF in the NIF view still
+follows its own file (type 0, bHair 0: not hair).
+
+## MATLOOK3 TRANSLUC1-THICK (2026-11-02): a thick translucent object takes the sun through its thickness
+
+Under `WW_CELL_TRANSL=1` a v8+ material with bTranslucencyThickObject now takes FO4CS's sun share in the exterior cell:
+max( T x the thickness visibility, the shadowed diffuse ), with the visibility 1 at no caster thickness and 0 at 0.6
+units (FO4CS's shadow-mask law). FO4CS draws the thick casters into a map of their own; here the sun's cascade map
+stands in (a ruling: any caster counts, not only thick ones). Eight comparison taps at receiver offsets
+0.6 (k + 0.5) / 8 beyond the cascade's own offset give the linear visibility within 1/16; nearer cascade only. Outside
+the cascades' reach, indoors and in the NIF view a thick object still takes nothing, and local lights never reach it
+(FO4CS). Red `WW_CELL_TRANSL_RED=nothick` (the old nothing). With the switch off nothing is compiled in.
+tests/translucency checks the twin against FO4CS's thick functions and the taps against its visibility; its
+WWTRANSL_THICK_RED must fail.
+
+## MATLOOK3 (2026-11-02): hair Kajiya-Kay lobe and eye cornea coat (two rows, both ship OFF)
+
+- **Hair specular (HAIRKK1)**, Show-menu row "Hair specular" (`WW/CellHairSpecular`, pin `WW_CELL_HAIRKK`): on a hair
+  material (BGSM bHair, or a NIF Hair Tint shader) the spec lobe becomes a double-shifted Kajiya-Kay (Scheuermann's
+  form, as in SkyrimCS Hair Specular): the strand is the UV bitangent made normal to N, the exponent is the game's
+  2^(gloss x 10 + 1), the primary is shifted by tan 6 deg toward the root, the secondary (exponent / 2) by tan 9 deg
+  toward the tip and tinted by sqrt(albedo), Schlick F at IOR 1.55, clamped at 15 x pi as the game's lobe. The diffuse
+  stays the game's. FO4 and FO4CS draw hair with the plain lobe.
+- **Eye cornea (EYECORNEA1)**, row "Eye cornea" (`WW/CellEyeCornea`, pin `WW_CELL_CORNEA`): on an opaque eye material
+  (eye environment mapping; the blended eyewet and lashes are left alone) a smooth dielectric coat on the geometric
+  normal: GGX at roughness 0.05, F0 of IOR 1.376 (0.025), height-correlated Smith visibility, added per light white and
+  unmasked; the iris spec under it takes (1 - F(N.V)). The diffuse stays the game's. Iris refraction and parallax are
+  not in it.
+- Both cover the viewport (NIF view) lobe and the cell lights + cell sun. A tick reloads the shaders (the define is
+  read at shader load). Bindless twins keep the old path (ruling). Effect and PBR programs are unchanged.
+- Reds: `WW_CELL_HAIRKK_RED=1` (unshifted lobes), `WW_CELL_CORNEA_RED=1` (a rough coat, alpha 0.25).
+- Ship OFF, not in any preset ('0' in every column) until a hold proves them. Unit: tests/haireye (twin vs an
+  independent reading, highlight angles -6.0 / +9.0 deg, coat sharpness, F0 values, text pins; red build must fail).
+- Code: res/shaders/ww_hair_eye.glsl (new), cell_lights.glsl, fo4_default.frag, src/gl/wwhaireye.h (C++ twin),
+  src/gl/celllooks.*, glcontext.cpp, renderer.cpp, src/cellworkspace.cpp, src/ui/cellpresettable.h.
+
 ## DECALWALK1 (2026-11-02): the decal checker reads receiver meshes from the game archives (test only)
 - tests/spells/cell_decal_check.py: a mesh or material missing under <data root> is read from the plugin's own
   `<stem> - *.ba2` GNRL archives (in <data root>, then beside the plugin). An unpacked Data whose Meshes holds folders
