@@ -808,6 +808,8 @@ bool wwFarVanAppend( NifModel * nif, const QModelIndex & parent, const QString &
 						continue;
 					}
 					any = true;
+					if ( kind == 1 )	// lane LARGEREF4: the large refs' far map (the game's objects stand here)
+						r.objectChunks.push_back( { { x, y, x + L - 1, y + L - 1 } } );
 					/* a .btr is chunk-local (0..4096 at Scale L, root at 0): the game places it at the
 					 * chunk's corner */
 					if ( kind == 0 && src.getBlockCount() > 0 && src.blockInherits( src.getBlockIndex( 0 ), "NiAVObject" ) ) {

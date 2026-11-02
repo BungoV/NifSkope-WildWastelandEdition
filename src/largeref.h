@@ -93,6 +93,44 @@ inline Far farOf( bool farWanted, bool nearOnly, bool ours, bool noObjects, bool
 //! vanilla look). `flatDouble` = red WW_CELL_LARGEREFS_RED=flatdouble: drawn full there too, beside its far copy.
 inline bool fullOutside( Far f, bool flatDouble ) { return f != Far::Flat || flatDouble; }
 
+/* lane LARGEREF4 (LARGEREF-FLAT-MIXED, LARGEREF-BUDGET): the far field's kind cell by cell, as it was built. The FO4CS
+ * type lets the game's .bto fill the chunks our .lodl lacks, and an object ring the budget refuses leaves its cells
+ * with no far objects at all, so one kind per mode is wrong somewhere. Rectangles in inclusive cells; the first that
+ * holds a cell wins; a cell no rectangle holds is None. cellFarLodAppend fills it from inside out: the hole round the
+ * open, then per ring ours (its object ring's kind), the game's chunks that loaded a .bto (Flat), the ring's footprint
+ * (None: what is left of it drew no far objects). */
+class FarMap
+{
+public:
+	struct Rect { int x0, y0, x1, y1; Far kind; };
+
+	void add( int x0, int y0, int x1, int y1, Far kind )
+	{
+		if ( x1 >= x0 && y1 >= y0 )
+			rects_.push_back( Rect{ x0, y0, x1, y1, kind } );
+	}
+	Far at( int x, int y ) const
+	{
+		for ( const Rect & r : rects_ )
+			if ( x >= r.x0 && x <= r.x1 && y >= r.y0 && y <= r.y1 )
+				return r.kind;
+		return Far::None;
+	}
+	bool empty() const { return rects_.empty(); }
+	size_t size() const { return rects_.size(); }
+	//! Rectangles of a kind (the census line)
+	int count( Far k ) const
+	{
+		int n = 0;
+		for ( const Rect & r : rects_ )
+			n += r.kind == k ? 1 : 0;
+		return n;
+	}
+
+private:
+	std::vector<Rect> rects_;
+};
+
 /* lane LARGEREF2 (LARGEREF-STREAM): per-document ownership counts for the streamed view. A large ref is drawn by exactly
  * one owner: its own cell while that cell is loaded (the cell's own refs place it), else the large-ref layer while any
  * loaded cell lists it (counts[ref] = loaded listing cells). So a ref is never drawn by two listing cells, nor by a
@@ -106,6 +144,23 @@ public:
 	//! lane LARGEREF3: false (a flat far field, fullOutside) = the layer draws nothing; call before the first cell()
 	void setFullOutside( bool on ) { full_ = on; }
 	bool fullOutside() const { return full_; }
+	/* lane LARGEREF4: the far kind per ref, at its own cell (where its far copy stands); replaces setFullOutside.
+	 * Red WW_CELL_LARGEREFS_RED=permode keeps the one kind per mode (setFullOutside, no map). */
+	void setFarMap( const FarMap & m, bool flatDouble )
+	{
+		map_ = m;
+		mapOn_ = true;
+		flatDouble_ = flatDouble;
+	}
+	bool hasFarMap() const { return mapOn_; }
+	//! The far kind at the ref's own cell; `fallback` without a map (or an unlisted ref)
+	Far farAt( uint32_t ref, Far fallback ) const
+	{
+		int x = 0, y = 0;
+		if ( !mapOn_ || !ownCell( ref, x, y ) )
+			return fallback;
+		return map_.at( x, y );
+	}
 
 	void setRows( const std::vector<Row> & rows )
 	{
@@ -202,10 +257,16 @@ public:
 
 private:
 	static int64_t key( int x, int y ) { return int64_t( ( uint64_t( uint32_t( x ) ) << 32 ) | uint64_t( uint32_t( y ) ) ); }
-	bool inLayer( uint32_t r ) const { return full_ && listers( r ) > 0 && ( red_ || !ownLoaded( r ) ); }
+	bool fullFor( uint32_t r ) const
+	{
+		return mapOn_ ? LargeRef::fullOutside( farAt( r, Far::None ), flatDouble_ ) : full_;	// lane LARGEREF4
+	}
+	bool inLayer( uint32_t r ) const { return fullFor( r ) && listers( r ) > 0 && ( red_ || !ownLoaded( r ) ); }
 
 	bool red_ = false;
 	bool full_ = true;	// lane LARGEREF3
+	FarMap map_;	// lane LARGEREF4
+	bool mapOn_ = false, flatDouble_ = false;
 	std::map<int64_t, std::vector<uint32_t>> lists_;      //!< grid cell -> refs it lists
 	std::map<int64_t, std::vector<uint32_t>> standing_;   //!< cell -> refs standing in it
 	std::map<uint32_t, int64_t> own_;                     //!< ref -> its own cell

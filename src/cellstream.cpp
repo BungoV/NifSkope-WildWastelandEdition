@@ -4,6 +4,7 @@
 #include "wwswitch.h"	// lane TESTDRIVER1: the WW_* switch store
 
 #include "cellfarhide.h"	// lane FARHOLE2: the far field leaves room for every loaded cell
+#include "cellfarlod.h"	// lane LARGEREF4: the far build's map for the large refs
 #include "cellmesh.h"
 #include "cellsplat.h"
 #include "esmdata.h"		// lane WEATHERBLEND6: the camera cell's regions
@@ -1369,7 +1370,24 @@ void cellStreamStart( NifModel * nif, std::shared_ptr<CellStreamSeed> seed )
 		 * the ref's own cell attaches); red WW_CELL_LARGEREFS_RED=flatdouble keeps the layer there too */
 		const bool flatDouble = wwEnvStr( "WW_CELL_LARGEREFS_RED" ) == QLatin1String( "flatdouble" );
 		s->lr.setFullOutside( LargeRef::fullOutside( LargeRef::Far( seed->largeRefFar ), flatDouble ) );
+		/* lane LARGEREF4 (LARGEREF-FLAT-MIXED, LARGEREF-BUDGET): the far build's own map decides per ref, at its own cell
+		 * (the FO4CS type's .bto fill, a refused object ring); red WW_CELL_LARGEREFS_RED=permode: one kind per mode */
+		const bool perMode = wwEnvStr( "WW_CELL_LARGEREFS_RED" ) == QLatin1String( "permode" );
+		LargeRef::FarMap farMap;
+		const bool haveMap = cellFarLodLargeRefMap( nif, farMap );
+		if ( haveMap && !perMode )
+			s->lr.setFarMap( farMap, flatDouble );
 		s->lr.setRows( seed->world->largeRefRows() );
+		if ( haveMap ) {
+			int byRef = 0, flat = 0, none = 0;
+			for ( const LargeRef::Row & r : seed->world->largeRefRows() ) {
+				const LargeRef::Far k = farMap.at( r.rx, r.ry );
+				( k == LargeRef::Far::ByRef ? byRef : k == LargeRef::Far::Flat ? flat : none )++;
+			}
+			std::fprintf( stderr, "cell stream: large refs far map %d rectangles, RNAM rows by own cell: %d ours by ref, %d flat, "
+				"%d none%s\n", int( farMap.size() ), byRef, flat, none,
+				perMode ? " (RED permode: one kind per mode)" : "" );
+		}
 		std::fprintf( stderr, "cell stream: large refs on, %d refs in %d RNAM rows%s%s\n", int( s->lr.refs() ),
 			int( seed->world->largeRefRows().size() ),
 			wwEnvStr( "WW_CELL_LARGEREFS_RED" ) == QLatin1String( "streamdouble" ) ? " (RED streamdouble)" : "",

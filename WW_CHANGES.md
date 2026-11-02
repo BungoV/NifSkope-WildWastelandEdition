@@ -1,3 +1,21 @@
+## LARGEREF4 (2026-11-02): the streamed view reads the far kind per large ref, cell by cell (LARGEREF-FLAT-MIXED, LARGEREF-BUDGET)
+- The FO4CS type lets the game's .bto fill the chunks our .lodl lacks (`WW_CELL_FARLOD_OURS`, a .lodl smaller than the
+  reach, a terrain ring the budget stopped), and an object ring the budget refuses leaves its cells with no far objects.
+  One kind per mode (LARGEREF3) then drew a large ref full beside its .bto copy there.
+- `LargeRef::FarMap` (src/largeref.h): rectangles of cells with a kind, the first that holds a cell wins, none outside.
+  `cellFarLodAppend` fills it as it built the field (the hole round the open; per ring ours as built -- instanced = by
+  ref, flattened = flat, refused or not reached = none; the game's chunks that loaded a .bto = flat; the rest of the
+  ring's footprint = none), prints `far lod: large-ref map N rectangles: ...` and keeps it per document
+  (`cellFarLodLargeRefMap`). `WwFarVanRing::objectChunks` records the .bto chunks that loaded.
+- The stream's `Owners::setFarMap` decides per ref at its own cell (`Owners::farAt`); it prints `cell stream: large refs
+  far map ...` with the RNAM rows by kind. Red `WW_CELL_LARGEREFS_RED=permode`: one kind per mode, as before.
+- tests/largeref/run.sh: map unit checks + red `-DLARGEREF_PERMODE_RED`; the census walk adds `--far mixed` (ours by ref
+  to +-12, the game's .bto past it) and `--far budget` (ours to +-8, refused to +-16, the .bto past it): green 0 double
+  (549 / 633 refs by a unit, 2202 / 2068 step-refs by the far copy alone); red 27882 / 25338 double.
+- Not changed: the fixed open still decides one kind per mode (it places the refs before the far build).
+- LARGEREF-FLATMASK measured offline (Commonwealth, the census routes): the flat cell mask cuts part of a large ref's
+  far copy over a loaded cell for 2308 step-refs (1246 refs); share cut median 0.18, p90 0.45, max 0.97. Not fixed.
+
 ## LARGEREF3 (2026-11-02): over a flat far field large refs show by their far copy alone (LARGEREF-FLAT)
 - Ruling (a): when the far objects cannot hide one reference (our rings flattened by `WW_CELL_FARLOD_RED=flat|perbase`
   or `WW_CELL_SPEED_RED=slow`, or the game's .bto chunks: cell masks only), a large ref is NOT drawn full outside its own
