@@ -1,3 +1,21 @@
+## POSTFX2 (2026-11-02): the game's depth of field and motion blur fused into one pass
+
+With both the depth of field and the motion blur on, the depth of field's composite now runs inside the motion
+blur's pass (new res/shaders/game_dofmblur.frag): each of the blur's taps takes the composite of the four texels the
+linear filter would have read and blends them with the filter's weights, so the composite target, its copy back and
+one full-screen pass are gone. Gate tests/postfx/postfx_fuse.py (the real shaders, hidden GL 4.1): a still frame is
+identical to the two-pass chain (max 0), a moving frame is within 0.25 of an 8-bit step (bar 1); the red that reads
+the nearest texel fails at 21 steps. 1080p GPU time 0.069 -> 0.038 ms moving, 0.068 -> 0.019 ms still.
+Red WW_CELL_POSTFUSE_RED=1 keeps the two passes.
+New row "Blur before tone map" (cell Show menu, under the vanilla camera master; switch WW_CELL_POST_LINEAR, key
+WW/CellPostLinear, default OFF because it changes the picture): the depth of field and motion blur run on the linear
+frame just before the tone map, in the frame's own precision (RGBA32F), instead of on the tone-mapped frame. A bright
+light then keeps its light in the blur: offline (tests/postfx/postfx_linear.py, the real shaders and the vanilla
+curve) a lamp at 30 keeps 0.998 of its light in a pan's streak (the tone-mapped order keeps 0.064) and 1.06 through the
+depth of field (0.079); a still frame is unchanged (1.3e-5 of a step). The pass alone costs 0.056 ms instead of 0.028
+(motion blur) and 0.106 instead of 0.093 (both) at 1080p. The object blur, the volume clouds' front pass and the
+temporal AA stay on the tone-mapped frame.
+
 ## BUGS1102 (2026-11-02): rain stays out from under a sunlit interior's roof; preset rows and numbers
 
 - **Rain under the roof (PRECIPROOF-GPU):** the GPU precipitation field builds its particles in the vertex shader and
@@ -53,23 +71,6 @@ picture in less time. Red `WW_FRAMEFMT1B_RED=1` keeps RGBA32F whatever was asked
 wwPostFormatOf. Unit: tests/framefmt/run_post.sh (green 7/7, red -DPOSTFMT_RED fails 2).
 
 Link sweeps: 144 programs, base 432 / RTDDGI 288 / PRT 432 / RTDDGI+cascades+ReSTIR 288 rows, all LINK OK.
-## POSTFX2 (2026-11-02): the game's depth of field and motion blur fused into one pass
-
-With both the depth of field and the motion blur on, the depth of field's composite now runs inside the motion
-blur's pass (new res/shaders/game_dofmblur.frag): each of the blur's taps takes the composite of the four texels the
-linear filter would have read and blends them with the filter's weights, so the composite target, its copy back and
-one full-screen pass are gone. Gate tests/postfx/postfx_fuse.py (the real shaders, hidden GL 4.1): a still frame is
-identical to the two-pass chain (max 0), a moving frame is within 0.25 of an 8-bit step (bar 1); the red that reads
-the nearest texel fails at 21 steps. 1080p GPU time 0.069 -> 0.038 ms moving, 0.068 -> 0.019 ms still.
-Red WW_CELL_POSTFUSE_RED=1 keeps the two passes.
-New row "Blur before tone map" (cell Show menu, under the vanilla camera master; switch WW_CELL_POST_LINEAR, key
-WW/CellPostLinear, default OFF because it changes the picture): the depth of field and motion blur run on the linear
-frame just before the tone map, in the frame's own precision (RGBA32F), instead of on the tone-mapped frame. A bright
-light then keeps its light in the blur: offline (tests/postfx/postfx_linear.py, the real shaders and the vanilla
-curve) a lamp at 30 keeps 0.998 of its light in a pan's streak (the tone-mapped order keeps 0.064) and 1.06 through the
-depth of field (0.079); a still frame is unchanged (1.3e-5 of a step). The pass alone costs 0.056 ms instead of 0.028
-(motion blur) and 0.106 instead of 0.093 (both) at 1080p. The object blur, the volume clouds' front pass and the
-temporal AA stay on the tone-mapped frame.
 
 ## POSTFX1 (2026-11-02): per-object motion blur (never the camera), RG16F game blur vectors, post sub-timers
 
