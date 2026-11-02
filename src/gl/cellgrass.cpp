@@ -19,6 +19,7 @@
 #include <QTextStream>
 
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <cstdint>
 #include <cstring>
@@ -50,6 +51,10 @@ struct GrassState
 	QHash<const void *, QSet<int>> shapes;
 	QHash<const void *, QHash<int, float>> wave;	// block -> its GRAS wave period (the property's +0xf4)
 	QHash<const void *, QSet<int>> noFade;	// lane CABLES1: blocks that sway but never fade (cables)
+	// lane WINDTREE1: the tree-wind shapes' constants (wwCellTreeWindShape); treeEver = some program got them once
+	QHash<const void *, QHash<int, std::array<float, 10>>> tree;
+	bool treeBuild = false, treeRed = false, treeEver = false;
+	QString saidTree;
 	// the wind's clock: the game's accumulated frame seconds (St+0x3c), here the time since the first grass frame;
 	// cur at this frame, prev at the last (the vertex shader's two phases)
 	QElapsedTimer clock;
@@ -64,7 +69,7 @@ GrassState & gs()
 {
 	static GrassState s;
 	// lane TESTDRIVER1: a live set of these switches re-reads them (pins and or-ed reds back to their defaults first)
-	if ( !s.init || wwSwitchMovedFor( s.liveGen, { "WW_CELL_GRASS" } ) ) {
+	if ( !s.init || wwSwitchMovedFor( s.liveGen, { "WW_CELL_GRASS", "WW_CELL_TREEWIND" } ) ) {
 		s.init = true;
 		s.liveGen = wwSwitchGen();
 		{
@@ -84,6 +89,8 @@ GrassState & gs()
 			s.on = QSettings().value( QLatin1StringView( kGrassKey ), false ).toBool();
 		}
 		s.redSeed = wwEnvStr( "WW_CELL_GRASS_RED" ).contains( QLatin1StringView( "seed" ) );
+		s.treeBuild = wwEnvStr( "WW_CELL_TREEWIND" ).trimmed() == QLatin1StringView( "1" );
+		s.treeRed = wwEnvStr( "WW_CELL_TREEWIND_RED" ).trimmed() == QLatin1StringView( "1" );
 		s.dump = wwEnvStr( "WW_CELL_GRASS_DUMP" ).trimmed();
 		bool ok = false;
 		const double t = wwEnvStr( "WW_CELL_GRASS_WIND_T" ).toDouble( &ok );
@@ -652,6 +659,7 @@ void wwCellGrassBegin( const void * nif )
 	gs().shapes.remove( nif );
 	gs().wave.remove( nif );
 	gs().noFade.remove( nif );
+	gs().tree.remove( nif );
 	gs().notes.remove( nif );
 	gs().dumpedDocs.clear();
 }
@@ -672,6 +680,9 @@ void wwCellGrassForget( const void * nif, int block )
 	auto w = gs().wave.find( nif );
 	if ( w != gs().wave.end() )
 		w->remove( block );
+	auto tr = gs().tree.find( nif );
+	if ( tr != gs().tree.end() )
+		tr->remove( block );
 }
 
 void wwCellGrassRemap( const void * nif, const WwBlockMap & m )
@@ -685,6 +696,84 @@ void wwCellGrassRemap( const void * nif, const WwBlockMap & m )
 	auto f = gs().noFade.find( nif );
 	if ( f != gs().noFade.end() )
 		wwRemapKeys( *f, m );
+	auto tr = gs().tree.find( nif );
+	if ( tr != gs().tree.end() )
+		wwRemapKeys( *tr, m );
+}
+
+bool wwCellTreeWindBuild()
+{
+	return gs().treeBuild;
+}
+
+void wwCellTreeWindShape( const void * nif, int block, const float k[10] )
+{
+	std::array<float, 10> a;
+	for ( int i = 0; i < 10; i++ )
+		a[size_t( i )] = k[i];
+	gs().tree[nif].insert( block, a );
+}
+
+bool wwCellTreeWindIsShape( const void * nif, int block )
+{
+	const GrassState & s = gs();
+	const auto it = s.tree.constFind( nif );
+	return it != s.tree.constEnd() && it->contains( block );
+}
+
+bool wwCellTreeWindFor( const void * nif, int block, float k[10], float w[6] )
+{
+	GrassState & s = gs();
+	const auto it = s.tree.constFind( nif );
+	if ( s.treeRed || it == s.tree.constEnd() )
+		return false;
+	const auto sh = it->constFind( block );
+	if ( sh == it->constEnd() )
+		return false;
+	float wind[4], wind2[4];
+	if ( !wwCellGrassWind( wind, wind2 ) )
+		return false;
+	for ( int i = 0; i < 10; i++ )
+		k[i] = sh.value()[size_t( i )];
+	// the tree's phase is the grass clock's at wave period 1 (cb2[8].w = timer * 0.00166667 * 6.28318)
+	w[0] = wind[0];
+	w[1] = wwCellGrassPhase( s.tPrev, 1.0f );
+	w[2] = wwCellGrassPhase( s.tCur, 1.0f );
+	w[3] = wind2[0];
+	w[4] = wind2[1];
+	w[5] = wind2[2];
+	s.windDrawn = s.windDrawn || wind2[1] > 0.0f;
+	return true;
+}
+
+namespace {
+// lane WINDTREE1: per draw, a tree-wind shape's constants, (0, 0, 0, 0) on every other once any program had them
+void treeWindUniforms( NifSkopeOpenGLContext::Program * prog, const void * nif, int block )
+{
+	if ( prog->uniLocation( "wwTreeWind2" ) < 0 )
+		return;
+	GrassState & s = gs();
+	float k[10], w[6];
+	if ( !wwCellTreeWindFor( nif, block, k, w ) ) {
+		if ( s.treeEver )
+			prog->uni4f( "wwTreeWind2", FloatVector4( 0.0f ) );
+		return;
+	}
+	s.treeEver = true;
+	prog->uni4f( "wwTreeWind", FloatVector4( w[0], 0.0f, w[1], w[2] ) );
+	prog->uni4f( "wwTreeWind2", FloatVector4( w[3], w[4], w[5], 1.0f ) );
+	prog->uni4f( "wwTreeWind3", FloatVector4( k[0], k[1], k[2], k[3] ) );
+	prog->uni4f( "wwTreeWind4", FloatVector4( k[4], k[5], k[6], 0.0f ) );
+	prog->uni4f( "wwTreeWind5", FloatVector4( k[7], k[8], k[9], 0.0f ) );
+	const auto it = s.tree.constFind( nif );
+	const QString said = QStringLiteral( "cell tree wind: %1 shapes, angle %2 min %3 max %4 freq %5%6" )
+		.arg( it != s.tree.constEnd() ? it->size() : 0 ).arg( double( w[0] ) ).arg( double( w[3] ) ).arg( double( w[4] ) )
+		.arg( double( w[5] ) ).arg( s.timePinned ? QStringLiteral( " (clock pinned)" ) : QString() );
+	if ( said != s.saidTree ) {
+		s.saidTree = said;
+		qInfo().noquote() << said;
+	}
+}
 }
 
 bool wwCellGrassWind( float wind[4], float wind2[4] )
@@ -784,7 +873,7 @@ bool wwCellGrassIs( Scene * scene, int block )
 		return false;
 	const GrassState & s = gs();
 	const auto it = s.shapes.constFind( scene->nifModel );
-	return it != s.shapes.constEnd() && it->contains( block );
+	return ( it != s.shapes.constEnd() && it->contains( block ) ) || wwCellTreeWindIsShape( scene->nifModel, block );
 }
 
 void wwCellGrassUniforms( Scene * scene, int block )
@@ -792,6 +881,8 @@ void wwCellGrassUniforms( Scene * scene, int block )
 	if ( !scene || !scene->renderer )
 		return;
 	NifSkopeOpenGLContext::Program * prog = scene->renderer->getCurrentProgram();
+	if ( prog )
+		treeWindUniforms( prog, scene->nifModel, block );
 	if ( !prog || prog->uniLocation( "wwGrassFade" ) < 0 )
 		return;
 	const GrassState & s = gs();

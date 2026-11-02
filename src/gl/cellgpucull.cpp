@@ -848,7 +848,7 @@ void prepare( Scene * scene )
 			continue;
 		const qsizetype nt = sh->triangles.size();
 		if ( nt <= 0 || nt > qsizetype( 0x3fffffff ) || sh->verts.isEmpty() || sh->wwGpuSkinned()
-			|| wwCellGrassIsShape( scene->nifModel, sh->id() ) )
+			|| wwCellGrassIsShape( scene->nifModel, sh->id() ) || wwCellTreeWindIsShape( scene->nifModel, sh->id() ) )
 			continue;
 		Rec & rec = f.recs[sh];
 		rec.numTris = std::uint32_t( nt );

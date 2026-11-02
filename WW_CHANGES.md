@@ -1,3 +1,20 @@
+## WINDTREE1 (2026-11-02): loaded-cell Tree_Anim trees sway in the weather's wind, shadows too (WW_CELL_TREEWIND=1)
+
+The game's tree wind (Todd's treat) on every Tree_Anim shape of a loaded cell: a leaf flutter along the normal (the
+STAT's DNAM leaf amplitude and frequency, faded out from 3600 to 4600 units of camera distance, only when the model's
+root is a BSLeafAnimNode) and a bend about the reference in the wind's bearing that grows with height over twice the
+model's bound radius; the length from the reference is kept and the vertex alpha weights both. The law sits in
+src/gl/celltreewind.h (C++, the shadow casters) and res/shaders/ww_treewind.glsl (fo4_default.vert, the colour draw),
+fed the grass wind's own angle, speeds, frequency and clock (wave period 1). Each placement gets its own buckets (its
+constants are per reference); the vertex alpha rides in the bitangent's length (2 + alpha); the shapes stay out of the
+bindless batches and the GPU cull. The sun's casters run the same law on the CPU (" treesway=N" in the shadow line).
+Census: "tree wind: on, N Tree_Anim shapes of M placements (L with a BSLeafAnimNode root)"; the first draw logs
+"cell tree wind: ...". Switch WW_CELL_TREEWIND=1 (read at the cell build, default OFF); red WW_CELL_TREEWIND_RED=1
+(no sway: today's picture). Gates: notes-side the game's own vertex shader run op for op on synthetic placed trees
+agrees with the GLSL twin to 0.001 units once the world sum is rounded the game's way (seven reds disagree by 35-117);
+tests/treewind runs this header against those 864 game answers (worst 0.31 units, inside the 0.38 the game moves
+itself when only the eye moves; red: no sway, 785 fail).
+
 ## LARGEREF3 (2026-11-02): over a flat far field large refs show by their far copy alone (LARGEREF-FLAT)
 - Ruling (a): when the far objects cannot hide one reference (our rings flattened by `WW_CELL_FARLOD_RED=flat|perbase`
   or `WW_CELL_SPEED_RED=slow`, or the game's .bto chunks: cell masks only), a large ref is NOT drawn full outside its own
