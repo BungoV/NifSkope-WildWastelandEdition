@@ -101,5 +101,7 @@ bool rtddgiReflShaderDefine();
 void rtddgiReflPass( Scene * scene );
 //! this frame's hits (a texture buffer, half size, bottom row first: rgb, a the hit distance, 0 none) for the water
 bool rtddgiReflTexture( Scene * scene, unsigned int & tex, int & w, int & h );
+//! RTREFLUNIT1: the full-size ray target the hits pair 2 x 2 (water_rtrefl.glsl's texel rule); 0 0 under WW_CELL_RTREFL_TEXEL_RED=1
+void rtddgiReflFullSize( int & w, int & h );
 
 #endif // RTDDGICELL_H

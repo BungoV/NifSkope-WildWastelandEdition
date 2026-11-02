@@ -548,7 +548,10 @@ bool wwCellWaterUniforms( Scene * scene, int block, int unit )
 		fn->glBindTexture( GL_TEXTURE_BUFFER, rtOn ? rtTex : 0 );
 		prog->uni1i( "waterRt", WwCellUnit::RtRefl );
 		prog->uni1b( "waterRtOn", rtOn );
-		prog->uni4f( "waterRtSize", FloatVector4( float( rtW ), float( rtH ), 0.0f, 0.0f ) );
+		int rtFw = 0, rtFh = 0;	// RTREFLUNIT1: the full ray target, paired 2 x 2 (water_rtrefl.glsl)
+		if ( rtOn )
+			rtddgiReflFullSize( rtFw, rtFh );
+		prog->uni4f( "waterRtSize", FloatVector4( float( rtW ), float( rtH ), float( rtFw ), float( rtFh ) ) );
 	}
 	unit += wwCellWaterInfoUniforms( scene, unit );	// lane WATERDATA1: units 7..9 when the program reads them (WATERFLOWBAKE1's flow: cell units 66/67)
 	{	// lane SHORE2: per draw; the red keeps SHORE1's quads whole
