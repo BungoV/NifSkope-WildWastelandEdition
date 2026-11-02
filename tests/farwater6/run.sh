@@ -47,14 +47,17 @@ esac
 case $STEP in judge|all)
 	bad=0
 	cat "$OUT/g1.txt"; grep -q PASS "$OUT/g1.txt" || bad=1
-	extra=$(comm -23 <(fails green_lin | grep -v ' L4 ') <(fails base_lin))
-	l4=$(grep -c '^  ok   L4 ' "$OUT/st_green_lin.log")
+	# FARWATER4 already has an "L4" check (moving water never reads 0): match this lane's by its words
+	extra=$(comm -23 <(fails green_lin | grep -v ' L4 one speed') <(fails base_lin))
+	l4=$(grep -c '^  ok   L4 one speed' "$OUT/st_green_lin.log")
 	[ -z "$extra" ] && [ "$l4" = 1 ] && echo "G2 PASS green linear: L4 ok, no FAIL the base lacks ($(fails base_lin | wc -l) shared)" \
 		|| { echo "G2 FAIL green linear (L4 ok lines $l4; new FAILs: $extra)"; bad=1; }
-	l4g=$(grep '^  ok   L4 ' "$OUT/st_green_log.log" | grep -c 'flow encoding 1')
+	l4g=$(grep '^  ok   L4 one speed' "$OUT/st_green_log.log" | grep -c 'flow encoding 1')
+	# P3 undo == the opened file byte for byte, header word 0xCC included: the save kept encoding 1
+	l4g=$(( l4g * $(grep -c '^  ok   P3 undo' "$OUT/st_green_log.log") ))
 	[ "$l4g" = 1 ] && echo "G3 PASS green log: opened, L4 ok on encoding 1 ($(grep -c '^  FAIL ' "$OUT/st_green_log.log") FAIL)" \
 		|| { echo "G3 FAIL green log: $(grep -m2 -E 'L4|encoding' "$OUT/st_green_log.log")"; bad=1; }
-	grep -q '^  FAIL L4 ' "$OUT/st_red_lin.log" && echo "G4 PASS red linear FAILS L4: $(grep -o 'is -\?[0-9]* (needs 8' "$OUT/st_red_lin.log")" \
+	grep -q '^  FAIL L4 one speed' "$OUT/st_red_lin.log" && echo "G4 PASS red linear FAILS L4: $(grep -o 'is -\?[0-9]* (needs 8' "$OUT/st_red_lin.log")" \
 		|| { echo "G4 FAIL the red does not fail L4"; bad=1; }
 	grep -q 'uses encoding 1' "$OUT/st_red_log.log" && echo "G5 PASS red refuses encoding 1" \
 		|| { echo "G5 FAIL red log was not refused"; bad=1; }
