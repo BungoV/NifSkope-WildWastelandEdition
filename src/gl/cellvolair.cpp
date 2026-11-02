@@ -653,6 +653,42 @@ struct VaPhase
 	float gi[4] = {};	// rgb tint (the three weights summed), w = the luminance-weighted g
 };
 
+/* Lane FOGMATCH1 (2026-11-02, bungo: "never seen our fog lit by the sun the way" The Division 2 shows it). The GDRY
+ * records' lobes are nearly flat at low sun (FoggySunrise into/away the sun 5.4, FoggySunset 2.5; notes/fogmatch1/
+ * tools/phase_model.py), while fog and haze are water droplets: Mie, strongly forward (HG g ~0.85 for 5-20 um, Jendersie
+ * & d'Eon 2023). WW_CELL_AIR_PHASE=mie: a two-lobe droplet phase, forward g (WW_CELL_AIR_PHASE_G, 0.85) weight 0.9 + a
+ * back g -0.4 weight 0.1 (the glory side), grey weights (the hue stays the fog records' and the light's). Normalised:
+ * the air scatters the same total, only its direction changes. Off / WW_CELL_AIR_PHASE=records (the red): as before. */
+static bool vaPhaseMieOn()
+{
+	return wwEnvStr( "WW_CELL_AIR_PHASE" ).trimmed() == QLatin1String( "mie" );
+}
+
+static float vaPhaseMieG()
+{
+	bool ok = false;
+	const float g = wwEnvStr( "WW_CELL_AIR_PHASE_G" ).toFloat( &ok );
+	return ( ok && g > 0.0f && g < 0.99f ) ? g : 0.85f;
+}
+
+static void vaPhaseMie( VaPhase & p )
+{
+	if ( !vaPhaseMieOn() )
+		return;
+	const float g = vaPhaseMieG();
+	const float wf = 0.9f, wb = 0.1f, gb = -0.4f;
+	for ( int c = 0; c < 3; c++ ) {
+		p.w[0][c] = 0.0f;
+		p.w[1][c] = wf;
+		p.w[2][c] = wb;
+		p.gi[c] = 1.0f;
+	}
+	p.w[0][3] = 0.0f;
+	p.w[1][3] = g;
+	p.w[2][3] = gb;
+	p.gi[3] = wf * g + wb * gb;
+}
+
 VaPhase vaPhase( const float m[12], bool coloured )
 {
 	VaPhase p;
@@ -677,6 +713,7 @@ VaPhase vaPhase( const float m[12], bool coloured )
 	for ( int c = 0; c < 3; c++ )
 		p.gi[c] = p.w[0][c] + p.w[1][c] + p.w[2][c];
 	p.gi[3] = lumOf( 1 ) * m[9] + lumOf( 2 ) * m[10];	// the air's g is 0; the lobes' luminances sum to 1
+	vaPhaseMie( p );
 	return p;
 }
 
@@ -1598,6 +1635,8 @@ static void vaPassInner( Scene * scene, bool run )
 	} else if ( !wwLookdevGodRays( med, &medNote ) ) {
 		medNote = QStringLiteral( "fallback (no weather)" );
 	}
+	if ( vaPhaseMieOn() )	// lane FOGMATCH1: the droplet phase replaces the record's lobes (its hue is unchanged)
+		medNote += QStringLiteral( " mie(g %1 w 0.9, back -0.4 w 0.1)" ).arg( double( vaPhaseMieG() ), 0, 'f', 2 );
 	const VaPhase ph = vaPhase( med, ( s.red & 524288 ) != 0 );
 	// the ground layer (vaNearShare, vaGround); red noground: the far band alone, as before it
 	VaLayer G;
