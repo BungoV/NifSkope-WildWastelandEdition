@@ -332,7 +332,8 @@ template <typename F> static void wwSceneGlobals( Renderer * r, Scene * scene, i
 	}
 	m.runs++;
 	WwCellUni::State & cu = WwCellUni::state();	// lane CELLUNI1: the pass's viewport, asked once per epoch
-	cu.vpEpoch = can ? m.epoch : 0;
+	// lane PERFHUNT2: the armed pass's viewport also when this program's stamp cannot be kept (a dedicated texture unit)
+	cu.vpEpoch = m.armed && ( can || !wwCellUni6Red( "viewport" ) ) ? m.epoch : 0;
 	cu.vpCheck = m.check;
 	{
 		cu.red = wwCellUniRed();

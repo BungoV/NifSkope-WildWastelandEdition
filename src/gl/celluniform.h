@@ -686,7 +686,8 @@ bool wwCellUniRed();
 //! lane CELLUNI2: the per-frame tick and the `cell uni:` line (any scope's first call in a frame)
 void wwCellUniFrame();
 /*! lane CELLUNI6: WW_CELL_UNI6_RED=<name>[,<name>...] (live): that item asks as before. Names: jitter, nonlinear,
- *  hdrdepth, hdrbegin, bsshape, depthcfg, glerror (all: every one). WW_CELL_UNI_RED=1 holds them all too. */
+ *  hdrdepth, hdrbegin, bsshape, depthcfg, glerror, viewport (PERFHUNT2: the lights' bloom rect and a stampless globals
+ *  run ask the viewport per call) (all: every one). WW_CELL_UNI_RED=1 holds them all too. */
 bool wwCellUni6Red( const char * name );
 //! lane CELLUNI6: WW_SETUP_MEMO_CHECK=1 (live), for a check outside an armed setup-memo pass
 bool wwSetupMemoChecking();

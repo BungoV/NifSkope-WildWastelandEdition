@@ -2345,7 +2345,14 @@ void wwCellLightsUniforms( Scene * scene )
 	rec.b( prog, "cellIsBloomOn", bloomDraw );
 	if ( bloomDraw ) {
 		GLint vp[4] = { 0, 0, 1, 1 };
+		// lane PERFHUNT2: this runs outside the globals memo window (vpEpoch 0) yet inside the armed pass, whose viewport
+		// the memo holds already (it re-arms on a change; wwDrawViewport trusts the same). WW_CELL_UNI6_RED=viewport asks.
+		WwCellUni::State & cu = WwCellUni::state();
+		const quint64 vpWas = cu.vpEpoch;
+		if ( !vpWas && !wwCellUni6Red( "viewport" ) )
+			cu.vpEpoch = wwSetupMemoEpochArmed();
 		WwCellUni::viewport( fn, vp );
+		cu.vpEpoch = vpWas;
 		rec.f4l( prog, "cellIsBloomRect", -1, FloatVector4( float( vp[0] ), float( vp[1] ),
 			1.0f / float( std::max( vp[2], 1 ) ), 1.0f / float( std::max( vp[3], 1 ) ) ) );
 	}
