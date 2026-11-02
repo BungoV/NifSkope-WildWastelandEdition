@@ -4362,7 +4362,8 @@ void GLView::paintGL()
 				PassTime::Scope pt( PassTime::Post );	// lane PERF1
 				{
 					PassTime::Swap taaT( PassTime::Post, PassTime::Taa );	// lane TIMING1: the AA's own vectors count as the AA
-					wwTaaInputsPass( scene );	// lane TAAINPUTS1: inert unless asked for (gl/taainputs.h)
+					if ( !wwGameTaaInputsRan() )	// lane POSTFX3: the before-tone-map resolve ran it already
+						wwTaaInputsPass( scene );	// lane TAAINPUTS1: inert unless asked for (gl/taainputs.h)
 				}
 				wwCellPostApply( scene );
 				PassTime::subBegin( PassTime::PostFlare );	// lane POSTFX1: the post zone's parts

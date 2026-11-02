@@ -175,6 +175,7 @@ struct TaaGpu
 	int qCur = 0;
 	GLuint lock[2] = { 0, 0 };	// lane TAA3: the thin-feature lock (r flip rate, g sign), ping-pong with hist2
 	GLenum histFormat = 0, histFilter = 0;	// lane MOTION1-FMT2: the game resolve's history pair (RGBA16F, or RGBA8 pinned)
+	GLenum curFormat = 0, outFormat = 0;	// lane POSTFX3: t0 / t_out (RGBA8, or float before the tone map)
 };
 
 struct TaaState
@@ -191,6 +192,10 @@ struct TaaState
 	bool taa2Pinned = false, taa2Fresh = true;
 	int taa2Red = 0;	// bits: 1 noclip, 2 nobicubic, 4 wrongjitter, 8 nolock, 16 noinputs (lane TAA3), 32 oldmotion, 64 oldfilter (TAA4),
 						// 128 oldlock (FARTOGGLE3)
+	/* lane POSTFX3: WW_TAA2_LINEAR=1 resolves the linear frame before its tone map; red WW_TAA2_LINEAR_RED=blit takes its
+	 * multisamples by a plain blit (TAA3's input) instead of the tone-weighted average */
+	bool taa2Linear = false, taa2LinearBlit = false;
+	bool hdrTook = false, inputsRan = false;	// this frame's linear resolve ran / ran the inputs pass
 	QString taa2Dump;
 	double taa2Ms = 0.0;
 	int taa2Timed = 0;
@@ -277,8 +282,11 @@ TaaState & ts()
 			| ( red2.contains( QLatin1StringView( "oldtimer" ) ) ? 512 : 0 )
 			| ( red2.contains( QLatin1StringView( "nomipbias" ) ) ? 1024 : 0 );	// lane PERFFIX4: no LOD bias under jitter
 		s.taa2Dump = wwEnvStr( "WW_TAA2_DUMP" ).trimmed();
-		if ( s.taa2 != was2 )
-			s.taa2Fresh = true;
+		const bool wasLinear = s.taa2Linear, wasBlit = s.taa2LinearBlit;
+		s.taa2Linear = wwEnvInt( "WW_TAA2_LINEAR" ) == 1;	// lane POSTFX3: env only until a hold proves it
+		s.taa2LinearBlit = wwEnvStr( "WW_TAA2_LINEAR_RED" ).trimmed() == QLatin1StringView( "blit" );
+		if ( s.taa2 != was2 || s.taa2Linear != wasLinear || s.taa2LinearBlit != wasBlit )
+			s.taa2Fresh = true;	// the history's colour space changes
 	}
 	return s;
 }
@@ -424,6 +432,20 @@ void wwTaa2SetTier( int tier )
 		QSettings().setValue( QLatin1StringView( kTaa2Key ), s.taa2 );
 }
 
+bool wwGameTaaLinearOn()
+{
+	const TaaState & s = ts();
+	return s.taa2Linear && s.taa2 > 0;
+}
+
+bool wwGameTaaInputsRan()
+{
+	TaaState & s = ts();
+	const bool ran = s.inputsRan;
+	s.inputsRan = false;
+	return ran;
+}
+
 void wwGameTaaSetOn( bool on )
 {
 	TaaState & s = ts();
@@ -547,13 +569,50 @@ QString wwGameTaaEcho()
 
 namespace {
 
-bool taaResolveImpl( Scene * scene );
+struct LinearIn	// lane POSTFX3: the linear frame before its tone map
+{
+	GLuint fbo = 0, msTex = 0;
+	GLenum format = 0;
+	int samples = 1;
+	float expose = 1.0f;
+};
+
+bool taaResolveImpl( Scene * scene, const LinearIn * lin );
 
 }	// namespace
+
+void wwGameTaaResolveLinear( Scene * scene, unsigned fbo, unsigned format, unsigned msTex, int samples, float expose )
+{
+	TaaState & s = ts();
+	s.hdrTook = false;
+	s.inputsRan = false;
+	if ( !s.jittered || !s.taa2Linear || s.taa2 <= 0 || !fbo || !msTex || !scene || !scene->renderer || scene->selecting )
+		return;
+	if ( s.taa2 >= ( ( s.taa2Red & 256 ) ? 4 : 3 ) && !( s.taa2Red & 16 ) ) {	// the inputs pass runs here, before the resolve reads it
+		wwTaaInputsRequest();
+		wwTaaInputsPass( scene );
+		s.inputsRan = true;
+	}
+	auto it = taaGpus().find( scene->renderer );
+	if ( it != taaGpus().end() )
+		it->mvOk = false;
+	LinearIn lin;
+	lin.fbo = GLuint( fbo );
+	lin.msTex = GLuint( msTex );
+	lin.format = GLenum( format );
+	lin.samples = std::max( samples, 1 );
+	lin.expose = expose > 0.0f ? expose : 1.0f;
+	s.hdrTook = taaResolveImpl( scene, &lin );
+}
 
 void wwGameTaaResolve( Scene * scene )
 {
 	TaaState & s = ts();
+	if ( s.hdrTook ) {	// lane POSTFX3: resolved before the tone map this frame; the vectors stay this frame's
+		s.hdrTook = false;
+		s.jittered = false;
+		return;
+	}
 	if ( scene && scene->renderer ) {	// lane VRS1: the vectors count only for the frame that drew them
 		auto it = taaGpus().find( scene->renderer );
 		if ( it != taaGpus().end() )
@@ -568,16 +627,18 @@ void wwGameTaaResolve( Scene * scene )
 		return;
 	}
 	s.jittered = false;
-	taaResolveImpl( scene );
+	taaResolveImpl( scene, nullptr );
 }
 
 namespace {
 
-bool taaResolveImpl( Scene * scene )
+bool taaResolveImpl( Scene * scene, const LinearIn * lin )
 {
 	TaaState & s = ts();
 	if ( !scene || !scene->renderer || scene->selecting )
 		return false;
+	const bool linear = lin != nullptr;
+	const float expose = linear ? lin->expose : 1.0f;
 	Renderer * r = scene->renderer;
 	auto fn = r->fn;
 	static WwCellUni::DepthCfg depthCfg;	// the frame's depth format, asked once per framebuffer and size
@@ -646,7 +707,9 @@ bool taaResolveImpl( Scene * scene )
 	TaaGpu & g = taaGpus()[r];
 	const GLenum histFormat = s.hist8 ? GLenum( GL_RGBA8 ) : GLenum( GL_RGBA16F );
 	const GLenum histFilter = s.redHist8Nearest ? GLenum( GL_NEAREST ) : GLenum( GL_LINEAR );
-	const bool resized = !g.inFbo || g.w != W || g.h != H || g.dsFormat != dsFormat
+	// lane POSTFX3: before the tone map t0 takes the linear frame's own format (the red's multisample blit needs it), t_out half floats
+	const GLenum curFormat = linear ? lin->format : GLenum( GL_RGBA8 ), outFormat = linear ? GLenum( GL_RGBA16F ) : GLenum( GL_RGBA8 );
+	const bool resized = !g.inFbo || g.w != W || g.h != H || g.dsFormat != dsFormat || g.curFormat != curFormat || g.outFormat != outFormat
 		|| g.histFormat != histFormat || g.histFilter != histFilter;
 	if ( resized ) {
 		freeGpu( r, g );
@@ -655,10 +718,14 @@ bool taaResolveImpl( Scene * scene )
 			fn->glGenFramebuffers( 1, &g.mvFbo );
 			fn->glGenFramebuffers( 1, &g.outFbo );
 		}
-		g.cur = makeTex( r, GL_RGBA8, GL_RGBA, GL_UNSIGNED_BYTE, W, H, GL_NEAREST );		// t0 NEAREST
+		g.cur = linear ? makeTex( r, curFormat, curFormat == GL_R11F_G11F_B10F ? GL_RGB : GL_RGBA, GL_FLOAT, W, H, GL_NEAREST )
+			: makeTex( r, GL_RGBA8, GL_RGBA, GL_UNSIGNED_BYTE, W, H, GL_NEAREST );		// t0 NEAREST
 		g.depth = makeTex( r, dsFormat, dsFmt, dsType, W, H, GL_NEAREST );				// t3 NEAREST
 		g.mv = makeTex( r, GL_RG32F, GL_RG, GL_FLOAT, W, H, GL_NEAREST );				// t2 NEAREST
-		g.out = makeTex( r, GL_RGBA8, GL_RGBA, GL_UNSIGNED_BYTE, W, H, GL_NEAREST );
+		g.out = linear ? makeTex( r, GL_RGBA16F, GL_RGBA, GL_FLOAT, W, H, GL_NEAREST )
+			: makeTex( r, GL_RGBA8, GL_RGBA, GL_UNSIGNED_BYTE, W, H, GL_NEAREST );
+		g.curFormat = curFormat;
+		g.outFormat = outFormat;
 		s.taa2Fresh = true;	// lane TAA3: the Modern history went with the old targets
 		for ( GLuint & t : g.hist )	// t1 BILERP
 			t = s.hist8 ? makeTex( r, GL_RGBA8, GL_RGBA, GL_UNSIGNED_BYTE, W, H, histFilter )
@@ -778,7 +845,43 @@ bool taaResolveImpl( Scene * scene )
 	}
 	fn->glBindFramebuffer( GL_DRAW_FRAMEBUFFER, g.inFbo );
 	fn->glDisable( GL_SCISSOR_TEST );
-	fn->glBlitFramebuffer( 0, 0, W, H, 0, 0, W, H, GL_COLOR_BUFFER_BIT, GL_NEAREST );
+	static const float quad[12] = { -1, -1, 0, 1, -1, 0, -1, 1, 0, 1, 1, 0 };
+	static const std::uint16_t idx[6] = { 0, 1, 2, 2, 1, 3 };
+	const float * attrs = quad;
+	bool msOk = true;
+	if ( !linear ) {
+		fn->glBlitFramebuffer( 0, 0, W, H, 0, 0, W, H, GL_COLOR_BUFFER_BIT, GL_NEAREST );
+	} else if ( s.taa2LinearBlit ) {	// the red: TAA3's plain blit of the linear frame (its samples averaged in light)
+		fn->glBindFramebuffer( GL_READ_FRAMEBUFFER, lin->fbo );
+		fn->glReadBuffer( GL_COLOR_ATTACHMENT0 );
+		fn->glBlitFramebuffer( 0, 0, W, H, 0, 0, W, H, GL_COLOR_BUFFER_BIT, GL_NEAREST );
+		fn->glBindFramebuffer( GL_READ_FRAMEBUFFER, GLuint( prevDraw ) );	// the depth went back to the frame (cellhdr)
+	} else {
+		/* lane POSTFX3: the samples averaged as the tone map will show them (Karis: each c / (1 + max c) at about display
+		 * level, the mean turned back to light), so an edge against a bright sky resolves as it will look */
+		auto mp = r->useProgram( "taa2_msresolve.prog" );
+		if ( !mp ) {
+			msOk = false;
+		} else {
+			fn->glDisable( GL_DEPTH_TEST );
+			fn->glDisable( GL_BLEND );
+			fn->glDisable( GL_CULL_FACE );
+			fn->glDisable( GL_STENCIL_TEST );
+			fn->glDepthMask( GL_FALSE );
+			fn->glColorMask( GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE );
+			const GLenum one = GL_COLOR_ATTACHMENT0;
+			fn->glDrawBuffers( 1, &one );
+			fn->glActiveTexture( GLenum( GL_TEXTURE0 + kUnitCur ) );
+			fn->glBindTexture( GL_TEXTURE_2D_MULTISAMPLE, lin->msTex );
+			mp->uni1i( "msTex", kUnitCur );
+			mp->uni1i( "msSamples", lin->samples );
+			mp->uni1f( "msExpose", expose );
+			r->drawShape( 4, 3, 6, GL_TRIANGLES, GL_UNSIGNED_SHORT, &attrs, idx );
+			r->stopProgram();
+			fn->glBindTexture( GL_TEXTURE_2D_MULTISAMPLE, 0 );
+			fn->glDepthMask( GL_TRUE );	// the depth blit below writes through the mask
+		}
+	}
 	fn->glBlitFramebuffer( 0, 0, W, H, 0, 0, W, H, g.depthBits, GL_NEAREST );
 	const GLenum blitErr = checkErr ? fn->glGetError() : GLenum( GL_NO_ERROR );
 	if ( trustErrCheck && blitErr != GL_NO_ERROR )
@@ -795,10 +898,7 @@ bool taaResolveImpl( Scene * scene )
 	fn->glDisable( GL_STENCIL_TEST );
 	fn->glColorMask( GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE );
 
-	static const float quad[12] = { -1, -1, 0, 1, -1, 0, -1, 1, 0, 1, 1, 0 };
-	static const std::uint16_t idx[6] = { 0, 1, 2, 2, 1, 3 };
-	const float * attrs = quad;
-	bool ok = blitErr == GL_NO_ERROR;
+	bool ok = blitErr == GL_NO_ERROR && msOk;
 	const Matrix4 reproj4 = toMatrix4( reproj );
 
 	// 2. the motion vectors (t2): the camera's reprojection of the frame's depth
@@ -1006,13 +1106,20 @@ bool taaResolveImpl( Scene * scene )
 			taa2Inputs = inputs;
 			taa2Vel = ( inputs & 1 ) ? velTex : g.mv;
 			taa2Mask = ( inputs & 2 ) ? maskTex : 0;
+			prog->uni1i( "taa2Linear", linear ? 1 : 0 );
+			prog->uni1f( "taa2Expose", expose );
 			r->drawShape( 4, 3, 6, GL_TRIANGLES, GL_UNSIGNED_SHORT, &attrs, idx );
 			r->stopProgram();
 		}
 		fn->glFramebufferTexture2D( GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT2, GL_TEXTURE_2D, 0, 0 );
 		if ( ok ) {
-			// the picture back into the frame
-			fn->glBindFramebuffer( GL_DRAW_FRAMEBUFFER, GLuint( prevDraw ) );
+			// the picture back: into the frame, or (lane POSTFX3) into the linear frame with its alpha kept for the tone map
+			fn->glBindFramebuffer( GL_DRAW_FRAMEBUFFER, linear ? lin->fbo : GLuint( prevDraw ) );
+			if ( linear ) {
+				const GLenum one = GL_COLOR_ATTACHMENT0;
+				fn->glDrawBuffers( 1, &one );
+				fn->glColorMask( GL_TRUE, GL_TRUE, GL_TRUE, GL_FALSE );
+			}
 			const bool rcas = kRcasStops[s.taa2] > 0.0f;
 			auto fp = r->useProgram( rcas ? "taa2_rcas.prog" : "game_taa_copy.prog" );
 			if ( !fp ) {
@@ -1021,8 +1128,11 @@ bool taaResolveImpl( Scene * scene )
 				fn->glActiveTexture( GLenum( GL_TEXTURE0 + kUnitCur ) );
 				fn->glBindTexture( GL_TEXTURE_2D, g.out );
 				fp->uni1i( "srcTex", kUnitCur );
-				if ( rcas )
+				if ( rcas ) {
 					fp->uni1f( "rcasSharp", std::exp2( -kRcasStops[s.taa2] ) );
+					fp->uni1i( "rcasLinear", linear ? 1 : 0 );
+					fp->uni1f( "rcasExpose", expose );
+				}
 				r->drawShape( 4, 3, 6, GL_TRIANGLES, GL_UNSIGNED_SHORT, &attrs, idx );
 				r->stopProgram();
 			}
@@ -1055,14 +1165,18 @@ bool taaResolveImpl( Scene * scene )
 		QDir().mkpath( s.taa2Dump );
 		const QString d = s.taa2Dump + QLatin1Char( '/' );
 		const int x0 = ( W - kTaa2Crop ) / 2, y0 = ( H - kTaa2Crop ) / 2;
-		const GLuint crop = makeTex( r, GL_RGBA8, GL_RGBA, GL_UNSIGNED_BYTE, kTaa2Crop, kTaa2Crop, GL_NEAREST );
+		// lane POSTFX3 (TAA4's rule): a linear frame is cropped in float from the linear frame the resolve wrote
+		const GLuint crop = linear ? makeTex( r, GL_RGBA32F, GL_RGBA, GL_FLOAT, kTaa2Crop, kTaa2Crop, GL_NEAREST )
+			: makeTex( r, GL_RGBA8, GL_RGBA, GL_UNSIGNED_BYTE, kTaa2Crop, kTaa2Crop, GL_NEAREST );
 		GLuint cropFbo = 0;
 		fn->glGenFramebuffers( 1, &cropFbo );
 		fn->glBindFramebuffer( GL_DRAW_FRAMEBUFFER, cropFbo );
 		fn->glFramebufferTexture2D( GL_DRAW_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, crop, 0 );
 		const GLenum one = GL_COLOR_ATTACHMENT0;
 		fn->glDrawBuffers( 1, &one );
-		fn->glBindFramebuffer( GL_READ_FRAMEBUFFER, GLuint( prevDraw ) );	// a multisampled frame resolves here
+		fn->glBindFramebuffer( GL_READ_FRAMEBUFFER, linear ? lin->fbo : GLuint( prevDraw ) );	// a multisampled frame resolves here
+		if ( linear )
+			fn->glReadBuffer( GL_COLOR_ATTACHMENT0 );
 		fn->glBlitFramebuffer( x0, y0, x0 + kTaa2Crop, y0 + kTaa2Crop, 0, 0, kTaa2Crop, kTaa2Crop, GL_COLOR_BUFFER_BIT, GL_NEAREST );
 		const QString tag = QString::number( s.frame - s.dumpFrame ).rightJustified( 2, QLatin1Char( '0' ) );
 		dumpFloat( d + "out_" + tag + ".bin", kTaa2Crop, kTaa2Crop, 4, readFloat( r, cropFbo, GL_COLOR_ATTACHMENT0, GL_RGBA, 4, kTaa2Crop, kTaa2Crop ) );
@@ -1097,8 +1211,8 @@ bool taaResolveImpl( Scene * scene )
 			QTextStream t( &f );
 			t << "frame " << s.frame << " tier " << s.taa2 << " gameRow " << ( s.on ? 1 : 0 ) << " red " << s.taa2Red
 			  << " jitterPx " << f9( jpx ) << ' ' << f9( jpy ) << " noHist " << ( noHist2 ? 1 : 0 ) << " reset " << ( reset ? 1 : 0 )
-			  << " ms " << f9( s.taa2Ms ) << " W " << W << " H " << H << " inputs " << taa2Inputs
-			  << " reproj " << mat( reproj4 ) << '\n';
+			  << " ms " << f9( s.taa2Ms ) << " W " << W << " H " << H << " hdr " << ( linear ? ( s.taa2LinearBlit ? 2 : 1 ) : 0 )
+			  << " inputs " << taa2Inputs << " expose " << f9( expose ) << " reproj " << mat( reproj4 ) << '\n';
 		}
 	}
 
@@ -1128,6 +1242,7 @@ bool taaResolveImpl( Scene * scene )
 			.arg( f9( px ), f9( py ), QLatin1StringView( tiers[s.taa2] ), QString::number( s.taa2Ms, 'f', 4 ),
 				noHist2 ? QStringLiteral( " history-reset" ) : QString(),
 				s.taa2Red ? QStringLiteral( " RED %1" ).arg( s.taa2Red ) : QString() )
+			+ ( linear ? ( s.taa2LinearBlit ? QStringLiteral( " before-tone-map RED blit" ) : QStringLiteral( " before-tone-map" ) ) : QString() )
 			+ ( taa2Inputs ? QStringLiteral( " inputs %1" ).arg( taa2Inputs ) : QString() ) );
 		return true;
 	}

@@ -1,3 +1,23 @@
+## POSTFX3 (2026-11-02): Modern TAA before the tone map; the linear post keeps the multisamples (both default OFF)
+
+- **Modern temporal AA before the tone map (`WW_TAA2_LINEAR=1`, POSTFX2-TAALINEAR):** the resolve runs on the linear
+  frame inside wwCellHdrEnd (after the linear depth of field / motion blur, before the tone map: the game's order),
+  TAA3's path restored onto today's resolve (the High inputs, the timer, the depth config). The multisampled frame goes
+  in through a new tone-weighted resolve (res/shaders/taa2_msresolve.frag: each sample c/(1+max c) at the last
+  frame's exposure, averaged, turned back to light) instead of a plain blit; taa2.frag and the sharpen pass work in that
+  space and write light back (alpha kept). When it runs, the display-stage resolve and the inputs pass skip.
+  Red `WW_TAA2_LINEAR_RED=blit`: TAA3's plain blit of the frame. Offline: tests/postfx/postfx_msaa.py (edge error vs
+  the per-sample tone map 9.1 steps vs the blit's 34.6) and the TAA3 chart rig (Ultra HDR ghost 0.048, the shaders
+  without this path 0.274).
+- **Multisamples kept after the linear post (POSTFX2-MSAALIN):** with Blur before tone map on and an MSAA frame, the
+  post's picture B goes back into the frame by a dual-source blend (res/shaders/cell_post_mscopy.frag): each sample
+  s becomes s w + (B - w R), R the frame's resolve, w = min(1, B/R). Pixels the blur left alone keep every sample bit
+  for bit, so the tone map still works per sample; the sample mean is B; no sample goes negative. Not in the two-pass
+  depth of field + motion blur red (`WW_CELL_POSTFUSE_RED=1`). Red `WW_CELL_POST_MSAALIN_RED=1`: POSTFX2's copy of B
+  into every sample.
+- Code: src/gl/gametaa.cpp (wwGameTaaResolveLinear, wwGameTaaLinearOn, wwGameTaaInputsRan), src/gl/cellhdr.cpp,
+  src/gl/cellpost.cpp (step 4b), src/glview.cpp, src/wwswitchstages.inc.
+
 ## GISKYTWIN-FLIP (LAND5, 2026-11-02): the GI volume's sky ships at the physical level
 
 - `WW_CELL_RTDDGI_SKY` unset (or empty) is now `level` (GITRUTH1's giSkyLevel: the weather's sky colour at the
