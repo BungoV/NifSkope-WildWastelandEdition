@@ -10,6 +10,7 @@ BSD License - see nifskope.h
 #include "btdterrain.h"
 #include "cellfarstackrule.h"	// lane CELLUNI5: the bake stack's refusals
 #include "cellfarvanilla.h"
+#include "largeref.h"	// lane LARGEREF3: the far objects' kind for the large refs
 #include "cellmodsource.h"	// lane FARPRESET1: the game's ini chain (cellGameIniFloat)
 #include "farringdist.h"	// lane FARPRESET1: the ring distances of the player's preset
 #include "esmdata.h"
@@ -369,6 +370,22 @@ void cellFarLodSetType( int type )
 int cellFarLodLastType()
 {
 	return farlod1LastType();
+}
+
+int cellFarLodObjectsFar( bool lodlFound, QString * why )
+{
+	QString typeWhy;
+	const int type = farlod1TypeFor( lodlFound, &typeWhy );
+	const QByteArray red = wwEnv( "WW_CELL_FARLOD_RED" );
+	const bool ours = type == WwFarLodFo4cs && lodlFound;
+	const bool inst = red != "flat" && red != "perbase" && cellMeshOn();	// the rings' own test (objects, ring by ring)
+	const LargeRef::Far f = LargeRef::farOf( cellFarLodWanted(), wwEnvInt( "WW_CELL_FARLOD_NEARONLY" ) != 0, ours,
+		red == "noobjects", inst );
+	if ( why )
+		*why = f == LargeRef::Far::None ? QStringLiteral( "no far objects" )
+			: f == LargeRef::Far::ByRef ? QStringLiteral( "our instanced rings (%1)" ).arg( typeWhy )
+			: ours ? QStringLiteral( "our rings flattened" ) : QStringLiteral( "the game's .bto (%1)" ).arg( typeWhy );
+	return int( f );
 }
 
 void cellFarLodForget( const void * nif )

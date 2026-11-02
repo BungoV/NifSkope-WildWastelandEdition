@@ -8,6 +8,7 @@
 #include "cellsplat.h"
 #include "esmdata.h"		// lane WEATHERBLEND6: the camera cell's regions
 #include "landlodspec.h"	// lane LANDSPEC6: streamCentre
+#include "largeref.h"		// lane LARGEREF2: who draws each large ref
 #include "cellmodsource.h"	// lane LANDSPEC8: uGridsToLoad
 #include "impostorchunk.h"
 #include "gl/bsshape.h"
@@ -53,6 +54,8 @@
 #endif
 
 extern std::vector<NifItem *> * g_nifResetGrave;   // lane CELLSPIKE3: nifmodel.cpp resetNiBlock
+// lane STREAMTEX4 (gl/cellbindless.cpp): declared outside the anonymous namespace below, or the link misses them
+namespace WwBl { extern long long freedLiveAll, staleAll; }
 
 namespace {
 
@@ -118,7 +121,14 @@ struct StreamCell
 	size_t linked = 0;                              //!< containers whose links are updated
 	double writeMs = 0.0;
 	int pfx = 0;                                    //!< lane LIVESET3: particle copies it holds (the stream's cap)
+	quint32 lref = 0;                               //!< lane LARGEREF2: a large-ref unit (x, y: the cell it stands in)
 };
+
+/* lane LARGEREF2 (LARGEREF-STREAM): a large ref a loaded cell lists but whose own cell is not loaded is drawn by a unit
+ * of its own, keyed (kLrX, ref) beside the cells; LargeRef::Owners decides who draws it, so it is drawn once. */
+constexpr int kLrX = INT_MIN + 1;
+Key lrKey( quint32 ref ) { return Key( kLrX, int( ref ) ); }
+Key keyOf( const StreamCell & c ) { return c.lref ? lrKey( c.lref ) : Key( c.x, c.y ); }
 
 bool isNodeType( const QString & t )
 {
@@ -211,6 +221,11 @@ public:
 	StreamTexPool<QString, QStringStdHash> texPool { std::uint64_t( cellStreamTexPoolBytes() ), 2, cellStreamTexRed() };
 	QHash<int, Key> blockCell;	//!< every block a cell was written into -> that cell (no entry: the open's own)
 	Key texCentre { INT_MIN, INT_MIN };	//!< the centre the last census was taken at
+	// lane LARGEREF2: the large refs (CellFarHide::largeRefsWanted), counted over the attached cells
+	bool lrOn = false;
+	LargeRef::Owners lr;
+	std::set<Key> lrWanted;	//!< the units the layer draws now
+	bool want( const Key & k ) const { return wanted.count( k ) > 0 || lrWanted.count( k ) > 0; }
 
 	void texCensus();
 
@@ -248,7 +263,7 @@ public:
 		}
 		if ( writing && idx.isValid() ) {
 			writing->takes.emplace_back( m->getBlockNumber( idx ), type );
-			blockCell.insert( writing->takes.back().first, Key( writing->x, writing->y ) );	// lane STREAMTEX1
+			blockCell.insert( writing->takes.back().first, keyOf( *writing ) );	// lane STREAMTEX1
 		}
 		if ( idx.isValid() && isNodeType( type ) )
 			sliceNodes++;
@@ -264,7 +279,7 @@ public:
 	{
 		if ( writing ) {
 			writing->takes.emplace_back( block, m->itemName( m->getBlockIndex( block ) ) );
-			blockCell.insert( block, Key( writing->x, writing->y ) );	// lane STREAMTEX1
+			blockCell.insert( block, keyOf( *writing ) );	// lane STREAMTEX1
 		}
 	}
 
@@ -303,6 +318,8 @@ public:
 	void farHideRefresh( int x, int y );
 	void farHideForget();
 	void registerMasks( Scene * sc );
+	void lrCell( const StreamCell & c, bool on );
+	void lrPublish();
 private:
 	void rebuild();
 	Node * makeNode( const QModelIndex & idx, const QString & type );
@@ -371,7 +388,8 @@ bool Stream::resolve( Scene * sc )
 		} else if ( c.st == CellState::Attached && c.cellBlock >= 0 ) {
 			c.cellNode = sc->findNode( nif, nif->getBlockIndex( c.cellBlock ) );
 			c.nodes.clear();
-			showFar( c.x, c.y, false );	// lane FRAMESPEED2: the nohandover red is retired (SHOTPASS1 confirmed it live)
+			if ( !c.lref )	// lane LARGEREF2: a unit holds no far tile
+				showFar( c.x, c.y, false );	// lane FRAMESPEED2: the nohandover red is retired (SHOTPASS1 confirmed it live)
 			if ( !rescanRed )
 				for ( const auto & tk : c.takes )
 					if ( isNodeType( tk.second ) )
@@ -413,7 +431,7 @@ void Stream::pumpWorker( const Vector3 & eye )
 		std::shared_ptr<CellChunk> done = std::move( job );
 		job.reset();
 		st.buildMaxMs = std::max( st.buildMaxMs, double( done->buildMs ) );
-		auto it = cells.find( Key( done->cx, done->cy ) );
+		auto it = cells.find( done->largeRef ? lrKey( done->largeRef ) : Key( done->cx, done->cy ) );
 		if ( it != cells.end() && it->second.st == CellState::Building ) {
 			trace( QStringLiteral( "built %1,%2 in %3 ms" ).arg( done->cx ).arg( done->cy ).arg( done->buildMs ) );
 			it->second.chunk = std::move( done );
@@ -429,7 +447,7 @@ void Stream::pumpWorker( const Vector3 & eye )
 	if ( unloadWaiting || !toReset.empty() || !toClear.empty() || !toFree.empty() )
 		return;
 	for ( const auto & kv : cells )
-		if ( wanted.count( kv.first ) && ( kv.second.st == CellState::Ready || kv.second.st == CellState::Writing ) )
+		if ( want( kv.first ) && ( kv.second.st == CellState::Ready || kv.second.st == CellState::Writing ) )
 			return;
 	const int ex = cellOf( eye[0] ), ey = cellOf( eye[1] );
 	StreamCell * best = nullptr;
@@ -441,7 +459,7 @@ void Stream::pumpWorker( const Vector3 & eye )
 			continue;
 		queued++;
 		const double d = std::hypot( double( c.x - ex ), double( c.y - ey ) );
-		const double score = ( wanted.count( kv.first ) ? 0.0 : 1000.0 ) + d;
+		const double score = ( want( kv.first ) ? 0.0 : 1000.0 ) + d;
 		if ( score < bestScore ) {
 			bestScore = score;
 			best = &c;
@@ -452,14 +470,15 @@ void Stream::pumpWorker( const Vector3 & eye )
 	best->st = CellState::Building;
 	// lane SHORE1: the eye cell, the pick's distance and the queue it beat, so a log proves nearest-first
 	trace( QStringLiteral( "build %1,%2 (%3) eye %4,%5 d %6 of %7 queued" ).arg( best->x ).arg( best->y )
-		.arg( wanted.count( Key( best->x, best->y ) ) ? "wanted" : "prefetch" ).arg( ex ).arg( ey )
+		.arg( want( keyOf( *best ) ) ? ( best->lref ? "large ref" : "wanted" ) : "prefetch" ).arg( ex ).arg( ey )
 		.arg( std::fmod( bestScore, 1000.0 ), 0, 'f', 2 ).arg( queued ) );
 	job = std::make_shared<CellChunk>();
 	job->seed = seed;
 	job->cx = best->x;
 	job->cy = best->y;
+	job->largeRef = best->lref;	// lane LARGEREF2
 	// the enable facts of the 5x5 the cell is wanted in (the fixed block's rule)
-	const bool now = wanted.count( Key( best->x, best->y ) ) > 0;
+	const bool now = want( keyOf( *best ) );
 	const int fx = now ? ccx : ex, fy = now ? ccy : ey;
 	job->facts[0] = fx - 2;
 	job->facts[1] = fy - 2;
@@ -610,6 +629,45 @@ void Stream::farHideForget()
 		scene->transformDirty = true;
 }
 
+/* lane LARGEREF2: a cell joined (on) or left the attached set. A unit the layer no longer wants goes at once, in the
+ * same step as the cell that now draws its ref (no frame with two copies); the far rows follow the attached units. */
+void Stream::lrCell( const StreamCell & c, bool on )
+{
+	if ( !lrOn || c.lref || !lr.cell( c.x, c.y, on ) )
+		return;
+	bool gone = false;
+	for ( auto it = cells.begin(); it != cells.end(); ) {
+		StreamCell & u = it->second;
+		if ( !u.lref || lr.layer().count( u.lref ) || &u == writing ) {
+			++it;
+			continue;
+		}
+		trace( QStringLiteral( "large ref %1 let go (cell %2,%3 %4)" ).arg( u.lref, 8, 16, QLatin1Char( '0' ) ).arg( c.x )
+			.arg( c.y ).arg( on ? "attached" : "left" ) );
+		if ( u.st == CellState::Attached || u.st == CellState::Writing )
+			unload( u );
+		it = cells.erase( it );
+		gone = true;
+	}
+	if ( gone )
+		lrPublish();
+}
+
+//! lane LARGEREF2: the attached units' refs: their far rows hide (CellFarHide::setExtraRefs, red nohide)
+void Stream::lrPublish()
+{
+	if ( !lrOn || !nif )
+		return;
+	QVector<quint32> refs;
+	for ( const auto & kv : cells )
+		if ( kv.second.lref && kv.second.st == CellState::Attached && kv.second.chunk )
+			for ( int i = 0; i < kv.second.chunk->refs.size(); i++ )
+				refs << kv.second.chunk->refs.at( i ).refForm;
+	CellFarHide::setExtraRefs( nif, refs );
+	if ( scene && root )
+		scene->transformDirty = true;
+}
+
 void Stream::showFar( int x, int y, bool show )
 {
 	for ( FarTile & f : farTiles ) {
@@ -681,7 +739,8 @@ bool Stream::write( StreamCell & c, double budget )
 	writing = &c;
 	if ( c.st == CellState::Ready ) {
 		const QModelIndex iCell = take( nif, QStringLiteral( "NiNode" ) );
-		nif->set<QString>( iCell, "Name", QStringLiteral( "cell %1,%2" ).arg( c.x ).arg( c.y ) );
+		nif->set<QString>( iCell, "Name", c.lref ? QStringLiteral( "large ref %1" ).arg( c.lref, 8, 16, QLatin1Char( '0' ) )
+			: QStringLiteral( "cell %1,%2" ).arg( c.x ).arg( c.y ) );
 		nif->set<quint32>( iCell, "Flags", 14 );
 		nif->set<float>( iCell, "Scale", 1.0f );
 		c.cellBlock = nif->getBlockNumber( iCell );
@@ -749,9 +808,15 @@ bool Stream::attach( StreamCell & c, const QElapsedTimer & t, double budget )
 	setRootSlot( -1, c.cellBlock );
 	if ( c.cellNode && root )
 		c.cellNode->makeParent( root.data() );
-	showFar( c.x, c.y, false );   // the near ground replaces the far tile in the same step: no overlap
-	farHide( c, true );   // lane FARHOLE2: and the far objects, cards and rings past 0 it holds
+	if ( !c.lref ) {	// lane LARGEREF2: a unit's far rows go by lrPublish
+		showFar( c.x, c.y, false );   // the near ground replaces the far tile in the same step: no overlap
+		farHide( c, true );   // lane FARHOLE2: and the far objects, cards and rings past 0 it holds
+	}
 	c.st = CellState::Attached;
+	if ( c.lref )
+		lrPublish();
+	else
+		lrCell( c, true );
 	st.attaches++;
 	trace( QStringLiteral( "attach %1,%2 block %3 after %4 ms of writing" ).arg( c.x ).arg( c.y ).arg( c.cellBlock ).arg( c.writeMs, 0, 'f', 1 ) );
 	dirty = true;
@@ -768,8 +833,11 @@ void Stream::unload( StreamCell & c )
 	if ( c.cellBlock >= 0 && c.st == CellState::Attached )
 		setRootSlot( c.cellBlock, -1 );
 	const double msRoot = msOf( t );
-	showFar( c.x, c.y, true );
-	farHide( c, false );   // lane FARHOLE2
+	const bool wasAttached = c.st == CellState::Attached;	// lane LARGEREF2
+	if ( !c.lref ) {
+		showFar( c.x, c.y, true );
+		farHide( c, false );   // lane FARHOLE2
+	}
 	const double msFar = msOf( t );
 	QSet<int> nodeBlocks, propBlocks;
 	for ( const auto & tk : c.takes ) {
@@ -784,7 +852,7 @@ void Stream::unload( StreamCell & c )
 		blockCell.remove( b );   // lane STREAMTEX1
 		( isNodeType( tk.second ) ? nodeBlocks : propBlocks ).insert( b );
 	}
-	texPool.dropCell( texPool.cellId( c.x, c.y ) );   // lane STREAMTEX1: its textures lose this cell's count
+	texPool.dropCell( texPool.cellId( keyOf( c ).first, keyOf( c ).second ) );   // lane STREAMTEX1: its textures lose this cell's count
 	const double msTakes = msOf( t );
 	std::vector<Node *> ns;
 	for ( auto it = c.nodes.cbegin(); it != c.nodes.cend(); ++it )
@@ -832,6 +900,10 @@ void Stream::unload( StreamCell & c )
 	c.cellBlock = -1;
 	c.chunk.reset();
 	st.unloads++;
+	if ( c.lref )	// lane LARGEREF2: its far rows draw again; a cell's leaving may hand its refs to the layer
+		lrPublish();
+	else if ( wasAttached )
+		lrCell( c, false );
 	// lane CELLSPIKE2: each part of the dearest unload (the dump's worstUnload field, the trace past 3 ms)
 	const double ms = msOf( t );
 	const QString parts = QStringLiteral( "wuRoot %1 wuFar %2 wuForget %3 wuFind %4 wuShapes %5 wuNodesOut %6 wuProps %7 "
@@ -1009,7 +1081,7 @@ bool Stream::busy() const
 		return true;
 	for ( const auto & kv : cells ) {
 		const CellState s = kv.second.st;
-		if ( s == CellState::Attached || ( s == CellState::Ready && !wanted.count( kv.first ) ) )
+		if ( s == CellState::Attached || ( s == CellState::Ready && !want( kv.first ) ) )
 			continue;
 		return true;
 	}
@@ -1064,11 +1136,25 @@ bool Stream::tick( Scene * sc, const Vector3 & eye )
 			if ( !noPrefetch && !wanted.count( Key( ex + dx, ey + dy ) ) )
 				prefetch.insert( Key( ex + dx, ey + dy ) );
 
+	// lane LARGEREF2: the units the layer draws (a ref listed by an attached cell whose own cell is not attached)
+	lrWanted.clear();
+	if ( lrOn )
+		for ( const quint32 r : lr.layer() ) {
+			const Key k = lrKey( r );
+			lrWanted.insert( k );
+			if ( !cells.count( k ) ) {
+				StreamCell c;
+				c.lref = r;
+				lr.ownCell( r, c.x, c.y );
+				cells.emplace( k, std::move( c ) );
+			}
+		}
+
 	unloadWaiting = false;
 	const double msUnload0 = msOf( t );
 	for ( auto it = cells.begin(); it != cells.end(); ) {
 		StreamCell & c = it->second;
-		const bool w = wanted.count( it->first ) > 0, p = prefetch.count( it->first ) > 0;
+		const bool w = want( it->first ), p = prefetch.count( it->first ) > 0;
 		if ( w ) {
 			++it;
 			continue;
@@ -1141,7 +1227,7 @@ bool Stream::tick( Scene * sc, const Vector3 & eye )
 		double bestD = 1.0e30;
 		for ( auto & kv : cells ) {
 			StreamCell & c = kv.second;
-			if ( !wanted.count( kv.first ) )
+			if ( !want( kv.first ) )
 				continue;
 			if ( c.st == CellState::Writing ) {
 				next = &c;
@@ -1169,7 +1255,7 @@ bool Stream::tick( Scene * sc, const Vector3 & eye )
 	if ( dirty && !worker.joinable() && toReset.empty() ) {
 		bool writingAny = false;
 		for ( const auto & kv : cells )
-			writingAny |= wanted.count( kv.first ) && kv.second.st != CellState::Attached;
+			writingAny |= want( kv.first ) && kv.second.st != CellState::Attached;
 		if ( !writingAny ) {
 			g_phase = "rebuild";
 			msRebuild0 = msOf( t );
@@ -1227,7 +1313,14 @@ void Stream::texCensus()
 		.arg( mb( c.evictedBytes ) )
 		+ QStringLiteral( "texReloadedN %1 texReloadedMb %2 texReleasedMb %3 texLoadsMb %4 texKeepFreed %5 texBudgetMb %6 texRed %7" )
 		.arg( c.reloaded ).arg( mb( c.reloadedBytes ) ).arg( mb( c.releasedBytes ) ).arg( mb( c.loadBytes ) ).arg( c.keepEvicted )
-		.arg( mb( texPool.budgetBytes() ) ).arg( texPool.red() ? 1 : 0 );
+		.arg( mb( texPool.budgetBytes() ) ).arg( texPool.red() ? 1 : 0 )
+		// lane STREAMTEX4 (STREAMTEX2's census, gl/cellbindless.cpp; row (f)): since launch, bindless handles dropped
+		// while a frame naming them may still be queued, and handles found cached under a new texture's name
+		+ QStringLiteral( " texFreedLive %1 texStaleNames %2 texUnfenced %3" )
+		.arg( WwBl::freedLiveAll ).arg( WwBl::staleAll ).arg( cellStreamTexUnfenced() ? 1 : 0 )
+		// lane STREAMTEX4 (OPENCELLS): what tier 1 holds resident, by why (streamtexpool.h Census)
+		+ QStringLiteral( " texBaseOnly %1 texBaseOnlyMb %2 texUnnoted %3 texUnnotedMb %4" )
+		.arg( c.baseOnly ).arg( mb( c.baseOnlyBytes ) ).arg( c.unnoted ).arg( mb( c.unnotedBytes ) );
 	st.texReloaded += c.reloaded;
 	st.texKeepEvicted += c.keepEvicted;
 	texCentre = Key( ccx, ccy );
@@ -1276,6 +1369,22 @@ void cellStreamStart( NifModel * nif, std::shared_ptr<CellStreamSeed> seed )
 	if ( wwEnvIsSet( "WW_CELL_STREAM_SHIFT" ) )
 		s->shift = std::clamp( float( wwEnvInt( "WW_CELL_STREAM_SHIFT" ) ), 0.0f, 4096.0f );
 	s->red = wwEnvStr( "WW_CELL_STREAM_RED" );
+	/* lane LARGEREF2 (LARGEREF-STREAM): large refs in the streamed view, counted per document (largeref.h Owners).
+	 * Red WW_CELL_LARGEREFS_RED=streamdouble: a ref stays in the layer while its own cell draws it (two copies). */
+	if ( CellFarHide::largeRefsWanted() && seed->world ) {
+		s->lrOn = true;
+		s->lr = LargeRef::Owners( wwEnvStr( "WW_CELL_LARGEREFS_RED" ) == QLatin1String( "streamdouble" ) );
+		/* lane LARGEREF3 (LARGEREF-FLAT, ruling a): over a flat far field the layer draws no unit (the far copy alone until
+		 * the ref's own cell attaches); red WW_CELL_LARGEREFS_RED=flatdouble keeps the layer there too */
+		const bool flatDouble = wwEnvStr( "WW_CELL_LARGEREFS_RED" ) == QLatin1String( "flatdouble" );
+		s->lr.setFullOutside( LargeRef::fullOutside( LargeRef::Far( seed->largeRefFar ), flatDouble ) );
+		s->lr.setRows( seed->world->largeRefRows() );
+		std::fprintf( stderr, "cell stream: large refs on, %d refs in %d RNAM rows%s%s\n", int( s->lr.refs() ),
+			int( seed->world->largeRefRows().size() ),
+			wwEnvStr( "WW_CELL_LARGEREFS_RED" ) == QLatin1String( "streamdouble" ) ? " (RED streamdouble)" : "",
+			s->lr.fullOutside() ? ( seed->largeRefFar == int( LargeRef::Far::Flat ) ? " (RED flatdouble)" : "" )
+				: "; far objects flat: no layer, the far copy alone" );
+	}
 	s->baseRefs = cellRefTable();
 	s->basePicks = cellPickTableMutable();
 	s->st.on = true;
@@ -1417,6 +1526,13 @@ void cellStreamCountEvicted( const NifModel * nif, int n )
 		s->st.texEvicted += n;
 }
 
+bool cellStreamTexUnfenced()
+{
+	WW_SWITCH_STATIC( bool, red, wwEnvStr( "WW_CELL_STREAMTEX_RED" ) == QLatin1String( "unfenced" )
+		|| wwEnvStr( "WW_CELL_STREAMTEX_RED" ) == QLatin1String( "nofence" ) );
+	return red;
+}
+
 bool cellStreamTexRed()
 {
 	WW_SWITCH_STATIC( bool, red, wwEnvStr( "WW_CELL_STREAMTEX_RED" ) == QLatin1String( "off" ) );
@@ -1497,6 +1613,8 @@ CellStreamStats cellStreamStats( const NifModel * nif, bool resetMaxima )
 	std::vector<Key> exp( s->wanted.begin(), s->wanted.end() ), got;
 	r.attached = r.ready = r.pending = 0;
 	for ( const auto & kv : s->cells ) {
+		if ( kv.second.lref )	// lane LARGEREF2: the units are not cells (the coverage line counts them)
+			continue;
 		switch ( kv.second.st ) {
 		case CellState::Attached:
 			if ( kv.second.cellBlock >= 0 )
@@ -1590,7 +1708,7 @@ QString cellStreamCoverage( const NifModel * nif, int * holes, int * doubles, in
 	std::set<Key> attached;
 	for ( const auto & kv : s->cells ) {
 		const StreamCell & c = kv.second;
-		if ( c.st != CellState::Attached || c.cellBlock < 0 )
+		if ( c.st != CellState::Attached || c.cellBlock < 0 || c.lref )	// lane LARGEREF2: a unit has no ground
 			continue;
 		attached.insert( kv.first );
 		for ( auto it = c.nodes.cbegin(); it != c.nodes.cend(); ++it ) {
@@ -1682,12 +1800,33 @@ QString cellStreamCoverage( const NifModel * nif, int * holes, int * doubles, in
 	//   farinstReach   drawn rows placed in a loaded cell whose owner is not loaded (right: nothing near draws them)
 	//   farmaskCentred drawn triangles of the masked far shapes centred in a loaded cell: must be 0
 	//   farcardsPlaced far cards placed in a loaded cell still drawn: must be 0
+	// lane LARGEREF2: a unit's ref counts as listed (its far rows must hide) but its cell is not loaded
+	//   largeRefUnits  attached large-ref units; largeRefDouble  of them, a ref an attached cell also draws: must be 0
+	//   largeRefEmpty  attached units that placed nothing (the ref not where RNAM says): must be 0
 	QSet<qint64> loadedCells;
-	QSet<quint32> listed;
+	QSet<quint32> listed, cellListed;
+	int lrUnits = 0, lrDouble = 0, lrEmpty = 0;
+	for ( const auto & kv : s->cells ) {
+		const StreamCell & c = kv.second;
+		if ( c.st != CellState::Attached || c.lref || !c.chunk )
+			continue;
+		for ( int i = 0; i < c.chunk->refs.size(); i++ )
+			cellListed.insert( c.chunk->refs.at( i ).refForm );
+	}
 	for ( const auto & kv : s->cells ) {
 		const StreamCell & c = kv.second;
 		if ( c.st != CellState::Attached )
 			continue;
+		if ( c.lref ) {
+			lrUnits++;
+			const int n = c.chunk ? c.chunk->refs.size() : 0;
+			lrEmpty += n ? 0 : 1;
+			for ( int i = 0; i < n; i++ ) {
+				lrDouble += cellListed.contains( c.chunk->refs.at( i ).refForm ) ? 1 : 0;
+				listed.insert( c.chunk->refs.at( i ).refForm );
+			}
+			continue;
+		}
 		loadedCells.insert( CellFarHide::cellKey( c.x, c.y ) );
 		if ( c.chunk )
 			for ( int i = 0; i < c.chunk->refs.size(); i++ )
@@ -1740,7 +1879,9 @@ QString cellStreamCoverage( const NifModel * nif, int * holes, int * doubles, in
 			" farmaskShapes %7 farmaskTris %8 farmaskCentred %9" )
 		.arg( CellFarHide::mode() ).arg( iRows ).arg( iHidden ).arg( iDouble ).arg( iNoref ).arg( iReach ).arg( mShapes )
 		.arg( CellFarHide::maskedTris( s->nif ) ).arg( mCentred )
-		+ QStringLiteral( " farcardsPlaced %1" ).arg( ImpostorChunk::cellFarCardsShownIn( loadedCells ) );
+		+ QStringLiteral( " farcardsPlaced %1" ).arg( ImpostorChunk::cellFarCardsShownIn( loadedCells ) )
+		+ ( s->lrOn ? QStringLiteral( " largeRefUnits %1 largeRefDouble %2 largeRefEmpty %3" ).arg( lrUnits ).arg( lrDouble )
+			.arg( lrEmpty ) : QString() );
 }
 
 qint64 cellStreamPrivateBytes()

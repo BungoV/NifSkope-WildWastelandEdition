@@ -64,6 +64,10 @@ const Row & staged();
 
 void frame();
 void forget( GLuint tex );	// a texture is deleted
+//! lane STREAMTEX4 (STREAMTEX2's census): glGenTextures just made `tex`; a handle still cached under it is a deleted one's
+void bornName( GLuint tex );
+//! lane STREAMTEX4: since launch, handles dropped while a frame naming them may still run / found stale on a new name
+extern long long freedLiveAll, staleAll;
 /* a reopen / texture flush (TexCache::flush). lane BINDREOPEN1: prints `bindless reopen: ...` and tears down in the
  * order of gl/cellbindlessreopen.h -- fence wait, ring reset, staged row zeroed, handles non-resident (before the
  * textures go), the geometry pool's entries and buffers dropped. Red WW_BINDLESS_RED=reopenraw: the order before. */

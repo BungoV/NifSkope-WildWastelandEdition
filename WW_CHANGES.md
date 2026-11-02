@@ -1,3 +1,59 @@
+## LARGEREF3 (2026-11-02): over a flat far field large refs show by their far copy alone (LARGEREF-FLAT)
+- Ruling (a): when the far objects cannot hide one reference (our rings flattened by `WW_CELL_FARLOD_RED=flat|perbase`
+  or `WW_CELL_SPEED_RED=slow`, or the game's .bto chunks: cell masks only), a large ref is NOT drawn full outside its own
+  cell; its far copy stays until its own cell loads (the vanilla look). Our instanced rings (the default) are unchanged:
+  full, far rows hidden. No far objects (far LOD off, NEARONLY, red noobjects): full, as before.
+- `cellFarLodObjectsFar()` (cellfarlod.cpp) decides from the far build's own inputs before the cells are placed
+  (`LargeRef::farOf`, src/largeref.h); the fixed open skips the large-ref push, the streamed view's layer draws no
+  unit (`Owners::setFullOutside`). The open prints `cell large refs: far objects <kind>: <what is drawn>`.
+- Red `WW_CELL_LARGEREFS_RED=flatdouble`: drawn full beside the far copy (LARGEREF1/2's double draw).
+- tests/largeref/run.sh: unit checks for the far kinds + red `-DLARGEREF_FLAT_RED`; with `RNAM=<dump>` the 5x5 walk
+  (137 steps, 1641 cell events) also runs `--far flat`: green 0 double, 0 units, 3402 step-refs shown by the far copy;
+  red 45955 double -> `LARGEREF CENSUS PASS`.
+
+## STREAMTEX4 (2026-11-02): the streamed cell view's texture frees wait for the GPU (STREAMTEX2's fences, ported)
+- A texture the pool (or the keep timer) frees is no longer deleted at once: its GL names go into a grave
+  (src/gl/texgrave.h) behind one GLsync taken after the frees, and TexCache::wwGraveSweep (top of each stream paint)
+  makes its bindless handles non-resident and deletes the names only once the GPU passed that fence. Before, a frame
+  still queued could sample a dropped handle, and glGenTextures could hand the freed name to another file.
+- Census (gl/cellbindless.cpp): `freedlive` = handles dropped while a frame naming them may still be queued (a ring
+  of 8 census fences, never waited on), `stale` = a deleted texture's handle still cached under a reused name. On the
+  bindless line, and as texFreedLive / texStaleNames / texUnfenced in the walk dump; tests/spells/cell_stream.sh
+  row (f): both 0.
+- Red `WW_CELL_STREAMTEX_RED=unfenced` (also `nofence`): free at once, as before.
+- Unit tests/texgrave/run.sh: a mock driver 4 frames behind; fenced 0 handles dropped / 0 names reused under a queued
+  frame (1339 frees), unfenced 824 / 273 (FAIL).
+- Tier 1's resident stock by why (OPENCELLS): texBaseOnly / texBaseOnlyMb (named only by blocks no streamed cell wrote)
+  and texUnnoted / texUnnotedMb (loaded, never named by a property the stream saw), printed by cell_stream_check.py.
+  The open's first cells are streamed cells (the open welds an empty rectangle), so they already count per cell.
+
+## LEANCOMMENTS3R (2026-11-02): lean comments, re-cut on LAND6
+
+- Comment-only (tests/spells/comments_only_check.py: 0 FAIL). LEANCOMMENTS3's trim (LEANCOMMENTS2's 72 files, the
+  edits LEANCOMMENTS1 left unlanded, lane names cut out of mid-sentence comments) re-cut on LAND6; the glview.cpp
+  pass list keeps LAND6's RT reflection and before-tone-map TAA lines with lean comments. Lane history stays in the
+  commit log and this file.
+- The AO quality comments lose their lane tags. They stay true: since BUGS1102 the built-in presets step the AO tier
+  (src/ui/cellpresettable.h row CellWorkspaceAoQuality).
+
+## FOGLEAK1 (2026-11-02, landed in LAND2): the fog leak fix behind WW_CELL_FOGLEAK (off by default)
+- Four fixes, each compiled only under the loader's WW_CELL_FOGLEAK define (cell_volair.frag, lookdev_fog.glsl,
+  src/gl/cellvolair.cpp): the air's env share reads the ray-traced volume (red `dalcenv`); the sun past the cascades
+  is gated by the volume's sky visibility toward the sun (red `nosungate`); placed lights in the air go through the
+  volume's depth (red `lightleak`); the far grid's tail takes the sun's shadow (red `nofartailshadow`).
+- airLeakEnv walks the 8 probes once: +1.04 ms on the 160x90x64 inject (two reads: +2.34 ms).
+- Gates: tests/fogleak/fogleak_model_check.py (G1, the law offline) and tests/fogleak/fogleak_check.py (G2, the real
+  cell_volair program on a synthetic volume: 9 of 9; each red fails only its own rows).
+
+## GIFIX1101 (2026-11-01, landed in LAND2): bounce saturation, five-point lobe read, SSGI hands over to RTXGI
+- 1B: `WW_CELL_RTDDGI_BOUNCE_SAT` (live, in the build key; rtddgi `--bounce-sat`) scales the probe hits' albedo chroma
+  about its luminance. Ships 1 (unchanged). Unit check bouncesat, red `RTDDGI_RED_BOUNCESAT`.
+- SO: the screen GI texel carries the sky visibility at 5 equal angles on the lobe arc (was 3, a quadratic); surfaces
+  read a polyline. ddgiscreen `--tiles random` p99 0.1038 -> 0.0404 (bar 0.05). Red `WW_CELL_RTDDGI_RED=lobe3`.
+- HO: under RTXGI on sky-lit exteriors the screen GI keeps only the occluded share the volume's probes cannot see,
+  and that share of its bounce; interiors keep the probe-fill law. Red `WW_CELL_SSGI_RED=nohandover`. Gate
+  tests/ssgihandover: A rel err max 1.4e-7 (was 0.66), B mean 0.026 (was 0.123); the red fails A and B.
+
 ## AIRBOUNCE1 (2026-11-02): the lamps' light bounced off the floor into the cell air (switch, off by default)
 
 - **AIR-LAMPS-BOUNCE:** `WW_CELL_AIR_BOUNCE_LAMPS=1` adds each placed light's floor bounce to the cell air, at both lamp

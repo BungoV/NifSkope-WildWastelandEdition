@@ -33,6 +33,10 @@ enum WwCellFarLodType { WwFarLodAuto = 0, WwFarLodVanilla = 1, WwFarLodFo4cs = 2
 int cellFarLodTypePinned();                  //!< the setting: auto, vanilla or fo4cs
 void cellFarLodSetType( int type );
 int cellFarLodLastType();                    //!< what the last build resolved to (the drop-down shows it on auto)
+/*! lane LARGEREF3 (LARGEREF-FLAT): what the far objects this open will build can do with one ref's far copy, from the
+ *  inputs cellFarLodAppend decides by (largeref.h LargeRef::Far): 0 none, 1 by ref (our instanced rings), 2 flat
+ *  (flattened rings or the game's .bto, cell masks only). `lodlFound` = an FO4CSLOD .lodl exists for the world. */
+int cellFarLodObjectsFar( bool lodlFound, QString * why = nullptr );
 //! lane LIVESET4: a live set cut the document's far section: the draw forgets its far field
 void cellFarLodForget( const void * nif );
 
