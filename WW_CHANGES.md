@@ -592,6 +592,37 @@ Not yet: Fallout 76's top-down cover map (dry under roofs and bridges), ripples 
   src/wwswitchstages.inc, 1352 switches). New gate tests/switchsurvey/run.sh: the committed table must equal a fresh
   `tools/wwswitch_survey.py --inc`; its red (the table minus the FRAMEFMT1 row) fails.
 
+## COLDLINK2 (2026-11-02): the threaded cold link built; flush before the workers link
+
+- Built for the first time (land5 base). `wwColdLinkRun` now calls `glFinish` on the GUI context before any worker
+  links: the shaders and programs were made there, and a shared context is only promised to see them after a flush
+  (GL 4.6, appendix D.3). Red `WW_COLDLINK_RED=2` skips the finish; `WW_COLDLINK_RED=1` stays the serial link.
+- src/wwswitchstages.inc regenerated (tools/wwswitch_survey.py): line numbers only.
+- `WW_COLDLINK` stays off (unset = serial). The cold-start bench (3 serial, 3 four-worker, a red, one eight-worker
+  start, every one with no program cache and no driver disk cache) is queued on the nifskope lock; the default changes
+  only if four workers clearly beat serial (judge: notes/coldlink2/tools/judge.py, floor 0.6 x serial's median).
+
+## COLDLINK1 C++ (2026-11-02): the threaded cold link, behind WW_COLDLINK (off, not built yet)
+
+- `WW_COLDLINK=<n>` (1..16; unset or 0 = the serial link as before): `updateShaders` links every program the binary
+  cache missed on n `QThread`s, each with its own `QOffscreenSurface` + `QOpenGLContext` shared with the current one,
+  and waits for them; `finishLink` then reads each result in the load order as before. A worker that gets no context
+  leaves its programs to the serial link. stderr: `shader coldlink: workers N, M linked on them in T ms`.
+- Red `WW_COLDLINK_RED=1`: the serial link whatever WW_COLDLINK says. Both join src/wwswitchstages.inc (shaders stage).
+- Waiting on the offline bench (tests/spells/shader_link_bench.py) before any build: the default stays off until a
+  cold start shows "N of N linked" faster with a first frame equal to the serial link's.
+
+## COLDLINK1 (2026-11-02): an offline bench of a threaded cold shader link
+
+- `tests/spells/shader_link_bench.py`: links every `.prog` through the real GL driver, no NifSkope, with N worker
+  threads that each own a hidden-window context shared with one main context (the shape a threaded link in
+  `glcontext.cpp` would take). Sources as the loader builds them (includes, `WW_FRAME_UBO` only where a file mentions
+  it, `NUM_TEXTURE_UNITS`); a per-run nonce define makes every source new to the driver's disk cache, so every arm is
+  a cold link. One child process per arm; `--procs P` adds P processes of one worker each. The main context checks
+  that it sees every program a worker linked, and `--savebin` keeps the binaries for `tests/spells/shader_bincmp.py`
+  (serial and threaded links must give the same machine code: only the stamp and source hash may differ).
+- No NifSkope code changed. The threaded link is built only if 4 workers clearly beat about 140 s.
+
 ## GISKYTWIN-FLIP (LAND5, 2026-11-02): the GI volume's sky ships at the physical level
 
 - `WW_CELL_RTDDGI_SKY` unset (or empty) is now `level` (GITRUTH1's giSkyLevel: the weather's sky colour at the
