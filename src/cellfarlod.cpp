@@ -88,6 +88,13 @@ QHash<const void *, FarDoc> & docs()
 	return d;
 }
 
+//! lane LARGEREF4: the far kind cell by cell as the last build made it, per document (largeref.h LargeRef::FarMap)
+QHash<const void *, LargeRef::FarMap> & largeRefMaps()
+{
+	static QHash<const void *, LargeRef::FarMap> d;
+	return d;
+}
+
 QSet<const void *> & hooked()
 {
 	static QSet<const void *> h;
@@ -393,12 +400,23 @@ void cellFarLodForget( const void * nif )
 	if ( docs().remove( nif ) )
 		ImpostorChunk::forgetCellFar();
 	CellFarGround::forget( nif );
+	largeRefMaps().remove( nif );	// lane LARGEREF4
+}
+
+bool cellFarLodLargeRefMap( const void * nif, LargeRef::FarMap & out )
+{
+	auto it = largeRefMaps().constFind( nif );
+	if ( it == largeRefMaps().constEnd() )
+		return false;
+	out = it.value();
+	return true;
 }
 
 QString cellFarLodAppend( NifModel * nif, const QModelIndex & iRoot, const EsmWorld & world,
 	const QString & ws, int cx, int cy, int n, const QString & lodlPath, const Vector3 & origin,
 	CellFarStream * stream )
 {
+	largeRefMaps().remove( nif );	// lane LARGEREF4: an early return leaves no stale map
 	QStringList L;
 	auto say = [&L]( const QString & line ) {
 		L << line;
@@ -1274,6 +1292,37 @@ QString cellFarLodAppend( NifModel * nif, const QModelIndex & iRoot, const EsmWo
 		}
 	}
 
+	/* lane LARGEREF4 (LARGEREF-FLAT-MIXED, LARGEREF-BUDGET): the far kind cell by cell as built, for the stream's large
+	 * refs: the hole round the open, then per ring ours (its object ring's kind as built: instanced = by ref, flattened
+	 * = flat, refused or not reached = none), the game's chunks that loaded a .bto (flat), the rest of the ring's
+	 * footprint (no far objects). Red noobjects hides ours and the game's: none everywhere. */
+	if ( nif ) {
+		LargeRef::FarMap fm;
+		const bool instMap = !flatRed && !perBaseRed && cellMeshOn();
+		const bool oursObjects = ours && !noObjectsRed && QFileInfo( lodi ).isFile();
+		fm.add( ox0, oy0, ox1, oy1, LargeRef::Far::None );
+		int btoChunks = 0;
+		for ( size_t i = 0; !noObjectsRed && i < rings.size(); i++ ) {
+			const std::array<int, 8> & g = ringRegion[i];
+			if ( g[2] >= g[0] )
+				fm.add( g[0], g[1], g[2], g[3], oursObjects && ringState[i] == QLatin1String( "built" )
+					? ( instMap ? LargeRef::Far::ByRef : LargeRef::Far::Flat ) : LargeRef::Far::None );
+			if ( i < van.size() )
+				for ( const std::array<int, 4> & c : van[i].objectChunks ) {
+					fm.add( std::max( c[0], van[i].x0 ), std::max( c[1], van[i].y0 ), std::min( c[2], van[i].x1 ),
+						std::min( c[3], van[i].y1 ), LargeRef::Far::Flat );
+					btoChunks++;
+				}
+			fm.add( foot[i][0], foot[i][1], foot[i][2], foot[i][3], LargeRef::Far::None );
+		}
+		largeRefMaps().insert( nif, fm );
+		const bool mixed = fm.count( LargeRef::Far::ByRef ) > 0 && fm.count( LargeRef::Far::Flat ) > 0;
+		say( QStringLiteral( "far lod: large-ref map %1 rectangles: %2 ours by ref, %3 flat (%4 of the game's .bto chunks), "
+			"%5 none%6" ).arg( int( fm.size() ) ).arg( fm.count( LargeRef::Far::ByRef ) ).arg( fm.count( LargeRef::Far::Flat ) )
+			.arg( btoChunks ).arg( fm.count( LargeRef::Far::None ) )
+			.arg( mixed ? QStringLiteral( " -- MIXED: the kind is read per ref" ) : QString() ) );
+	}
+
 	if ( stream )
 		say( QStringLiteral( "far lod: stream hand-over %1 ring-0 shapes (one a cell), %2 vertices on the LAND, objects and cards out of cells %3,%4..%5,%6" )
 			.arg( int( stream->handBlocks.size() ) ).arg( rings.empty() ? 0 : rings[0].snappedAll )
@@ -1332,9 +1381,12 @@ QString cellFarLodAppend( NifModel * nif, const QModelIndex & iRoot, const EsmWo
 		QObject::connect( nif, &QAbstractItemModel::modelReset, nif, [nif, key]() {
 			if ( nif->getBlockCount() == 0 && docs().remove( key ) )
 				ImpostorChunk::forgetCellFar();
+			if ( nif->getBlockCount() == 0 )
+				largeRefMaps().remove( key );	// lane LARGEREF4
 		} );
 		QObject::connect( nif, &QObject::destroyed, [key]() {
 			docs().remove( key );
+			largeRefMaps().remove( key );	// lane LARGEREF4
 			hooked().remove( key );
 		} );
 	}

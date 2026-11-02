@@ -39,6 +39,10 @@ int cellFarLodLastType();                    //!< what the last build resolved t
 int cellFarLodObjectsFar( bool lodlFound, QString * why = nullptr );
 //! lane LIVESET4: a live set cut the document's far section: the draw forgets its far field
 void cellFarLodForget( const void * nif );
+namespace LargeRef { class FarMap; }
+/*! lane LARGEREF4 (LARGEREF-FLAT-MIXED, LARGEREF-BUDGET): the far kind cell by cell as the document's far field was
+ *  built (ours by ref, flat, none), for the stream's large refs. False: no far build on this document. */
+bool cellFarLodLargeRefMap( const void * nif, LargeRef::FarMap & out );
 
 /*! With the FO4CS type the near cells must load from the stack the far LOD was baked from (<ws>.lodb),
  *  or the block shows vanilla trees under a modded far field. Called BEFORE the worldspace loads;

@@ -45,6 +45,7 @@
 class EsmWorld;
 class NifModel;
 class Scene;
+namespace LargeRef { class FarMap; }
 
 //! What the open hands the streamer.
 struct CellStreamSeed
@@ -53,6 +54,7 @@ struct CellStreamSeed
 	CellSceneSpec spec;                 //!< resolved (the far stack, the mod pick); terrain/water/grid as asked
 	QString dataRoot;
 	int largeRefFar = 0;                //!< lane LARGEREF3: the open's far objects for the large refs (LargeRef::Far)
+	std::shared_ptr<const LargeRef::FarMap> largeRefMap;	//!< lane LARGEREF4: the far map the stream last read
 	Vector3 origin;                     //!< every shape's translation (the open's centre cell middle)
 	int rootBlock = -1;
 	int cx = 0, cy = 0;                 //!< the open's centre cell
