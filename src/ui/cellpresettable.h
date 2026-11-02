@@ -110,6 +110,8 @@ inline const WwPresetRow * wwPresetTable( int * count )
 		{ "CellWorkspaceLook_WW_WEATHER_RECX", '0', "1111", "0000", 'M', false, { 0.17f, 0.19f, 0.23f, 0.30f }, WW_PR_NONE, "sky; no ms" },
 		{ "CellWorkspaceLook_WW_CELL_PRECIP", '0', "1111", "0000", 'M', false, { 0.05f, 0.10f, 0.15f, 0.25f }, WW_PR_NONE,
 			"PERFRES-B precip: GPU never timed (TIMING1's precip zone), CPU 3.50 ms a layer" },
+		{ "CellWorkspaceLook_WW_CELL_RAINWET", '0', "0000", "0000", 'M', false, WW_PR_NONE, WW_PR_NONE,
+			"FO76WEATHER1: off until bungo sees it; no ms" },
 		{ "CellWorkspaceGroup_WATER", '1', "1111", "1111", 'G', false, WW_PR_NONE, WW_PR_NONE, "a master" },
 		{ "CellWorkspaceLook_WW_CELL_WATER_DEPTH", '0', "0111", "0000", 'M', false, { 0.40f, 0.75f, 1.00f, 1.30f }, WW_PR_NONE, "water; no ms of its own" },
 		{ "CellWorkspaceLook_WW_CELL_WATER_CAUSTICS", '0', "0111", "0000", 'M', false, { 0.40f, 0.75f, 1.00f, 1.30f }, WW_PR_NONE, "water; no ms" },

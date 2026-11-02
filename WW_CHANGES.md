@@ -1,3 +1,9 @@
+## BUGS1102B round 2 (2026-11-02): preset table row for Rain wetness
+
+- src/ui/cellpresettable.h gains CellWorkspaceLook_WW_CELL_RAINWET (off at every preset, no ms): FO76WEATHER1's
+  Rain wetness row had no preset-table row, so tests/presettable coverage read "panel rows 74, table rows 73" and
+  FAILED on the base. The red is the base itself (coverage FAIL) and coverage.py --red (a row dropped).
+
 ## LEANCOMMENTS3R (2026-11-02): lean comments, re-cut on LAND6
 
 - Comment-only (tests/spells/comments_only_check.py: 0 FAIL). LEANCOMMENTS3's trim (LEANCOMMENTS2's 72 files, the
