@@ -20,12 +20,14 @@ namespace
 {
 const char * kUsage =
 	"usage: nifskope -no-gui reflcensus --soup <soup.psp> (--camera x,y,z ... | --auto N) [--interior] [--eye 128]\n"
-	"         [--red lift|noreach|roof] [--out <probes.tsv>]\n"
+	"         [--red lift|noreach|roof|stand] [--out <probes.tsv>]\n"
 	"  the probes the reflection pass places round each camera (the camera probe + the 3x3 grid of 2048 boxes),\n"
 	"  each one's 64x64 oct tile traced through the soup: hits, misses above (sky) and below the horizon (ground\n"
 	"  since SKYBELOW2), below misses with no ground tap hit (albedo 0.5) and below misses that run past the soup.\n"
 	"  --auto N: an N x N grid of cameras over the soup's middle 80 %, each at the ground under it + eye (128);\n"
-	"  with --interior eye over every floor under a ceiling (red roof: the topmost surface, often the roof).\n";
+	"  with --interior eye over every floor under a ceiling (red roof: the topmost surface, often the roof).\n"
+	"  the misses past the soup split by where the probe stands: outside the soup's xy box, in the void (no surface\n"
+	"  in its column, under the lowest, indoors over the topmost) or in the geometry (red stand: no split).\n";
 
 void line( const QString & s )
 {
@@ -53,7 +55,8 @@ int reflCensusCli( const QStringList & args )
 				if ( r == QLatin1String( "lift" ) ) red |= reflcensus::RedLift;
 				else if ( r == QLatin1String( "noreach" ) ) red |= reflcensus::RedNoReach;
 				else if ( r == QLatin1String( "roof" ) ) red |= reflcensus::RedRoof;	// lane INTGI1
-				else { std::fprintf( stderr, "reflcensus: REFUSED: unknown red '%s' (lift, noreach, roof)\n", qPrintable( r ) ); return 2; }
+				else if ( r == QLatin1String( "stand" ) ) red |= reflcensus::RedStand;
+				else { std::fprintf( stderr, "reflcensus: REFUSED: unknown red '%s' (lift, noreach, roof, stand)\n", qPrintable( r ) ); return 2; }
 			}
 			i++;
 		}
@@ -159,16 +162,21 @@ int reflCensusCli( const QStringList & args )
 			std::fprintf( stderr, "reflcensus: REFUSED: cannot write %s\n", qPrintable( outPath ) );
 			return 1;
 		}
-		ts << "camera\tcx\tcy\tcz\tprobe\tkind\tx\ty\tz\treach\ttexels\thits\tabove\tbelow\tbelowTapless\tbelowEdge\ttaps\n";
+		ts << "camera\tcx\tcy\tcz\tprobe\tkind\tx\ty\tz\treach\ttexels\thits\tabove\tbelow\tbelowTapless\tbelowEdge\ttaps\tstand\n";
 	}
 	reflcensus::Count all;
 	long probes = 0, taplessProbes = 0, camBelow = 0, camTexels = 0;
+	long edgeBy[3] = { 0, 0, 0 }, probesBy[3] = { 0, 0, 0 };	// by reflcensus::Stand
+	static const char * const kStand[3] = { "geometry", "outside", "void" };
 	std::vector<reflcensus::Probe> P;
 	for ( size_t ci = 0; ci < cams.size(); ci++ ) {
 		reflcensus::place( cams[ci].data(), interior, P );
 		reflcensus::Count cc;
 		for ( size_t pi = 0; pi < P.size(); pi++ ) {
 			const reflcensus::Count c = reflcensus::census( bvh, O, P[pi], red, soupXY );
+			const int st = reflcensus::standOf( bvh, O, P[pi], soupXY, mx[2] + 16.0, mx[2] - mn[2] + 32.0, interior, red );
+			edgeBy[st] += c.belowEdge;
+			probesBy[st]++;
 			probes++;
 			taplessProbes += c.tapsHit == 0 ? 1 : 0;
 			cc.texels += c.texels; cc.hits += c.hits; cc.misses += c.misses; cc.above += c.above; cc.below += c.below;
@@ -181,7 +189,7 @@ int reflCensusCli( const QStringList & args )
 				ts << ci << '\t' << cams[ci][0] << '\t' << cams[ci][1] << '\t' << cams[ci][2] << '\t' << pi << '\t'
 				   << ( P[pi].kind == 0 ? "camera" : "grid" ) << '\t' << P[pi].pos[0] << '\t' << P[pi].pos[1] << '\t' << P[pi].pos[2]
 				   << '\t' << c.reach << '\t' << c.texels << '\t' << c.hits << '\t' << c.above << '\t' << c.below << '\t'
-				   << c.belowTapless << '\t' << c.belowEdge << '\t' << c.tapsHit << '\n';
+				   << c.belowTapless << '\t' << c.belowEdge << '\t' << c.tapsHit << '\t' << kStand[st] << '\n';
 		}
 		line( QStringLiteral( "camera %1 %2,%3,%4: %5 probes, texels %6: hits %7, sky misses %8, below misses %9 (%10 %), "
 			"tapless %11, past the soup %12" )
@@ -196,6 +204,11 @@ int reflCensusCli( const QStringList & args )
 		"camera probes %10 of %11), of them tapless %12 (%13 probes with no ground tap) and past the soup %14" )
 		.arg( int( cams.size() ) ).arg( probes ).arg( all.texels ).arg( all.hits ).arg( pc( all.hits ) ).arg( all.above ).arg( pc( all.above ) )
 		.arg( all.below ).arg( pc( all.below ) ).arg( camBelow ).arg( camTexels ).arg( all.belowTapless ).arg( taplessProbes ).arg( all.belowEdge ) );
+	line( QStringLiteral( "reflcensus past the soup by where the probe stands: outside the soup box %1 (%2 probes), in the void %3 (%4), "
+		"in the geometry %5 (%6)%7" )
+		.arg( edgeBy[reflcensus::StandOutside] ).arg( probesBy[reflcensus::StandOutside] ).arg( edgeBy[reflcensus::StandVoid] )
+		.arg( probesBy[reflcensus::StandVoid] ).arg( edgeBy[reflcensus::StandGeometry] ).arg( probesBy[reflcensus::StandGeometry] )
+		.arg( ( red & reflcensus::RedStand ) ? QStringLiteral( " (RED stand: no split)" ) : QString() ) );
 	if ( all.hits + all.above + all.below != all.texels ) {
 		std::fprintf( stderr, "reflcensus: REFUSED: hits + above + below != texels\n" );
 		return 1;
