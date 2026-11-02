@@ -1,3 +1,12 @@
+## BUGS1102H (2026-11-02): a picture gate for the cloud deck's hard edge on the horizon band
+
+- bungo's Concord shot (Clear -> Overcast, 2D cloud layers) showed the deck ending in a hard straight line across the
+  frame with a flat pale band under it. The fix is WXBAND's (the layers take the sky's aerial perspective to the deck,
+  red `WW_LOOKDEV_RED=cloudnoap`); this lane adds the gate on the picture itself.
+- `tests/cloudhorizonedge/run.sh <out> [<green png> <red png>]`: a row is an edge when a step of >= 6 levels in 6 rows
+  runs straight across >= 80 % of the width. bungo's end shot fails it (rows 479-495, median step 28 levels,
+  100 % of columns); the Clear shot of the same camera passes. Without pictures it runs a synthetic self-test.
+
 ## GISKYTWIN-FLIP (LAND5, 2026-11-02): the GI volume's sky ships at the physical level
 
 - `WW_CELL_RTDDGI_SKY` unset (or empty) is now `level` (GITRUTH1's giSkyLevel: the weather's sky colour at the
