@@ -793,13 +793,22 @@ void main()
 
 	fragColor = color;
 #ifdef WW_CELLLIGHTS
+	/* lane PBRMVIEWS1: as fo4_default.frag (FO4CELLGI1), the probe and pass views compile only under the loader's
+	 * WW_CELL_VIEWS in the programs with the ray-traced GI volume; elsewhere the source is unchanged */
+#if defined( WW_CELL_VIEWS ) || !defined( WW_CELL_RTDDGI )
 	if ( cellOn && cellProbe > 0 )
 		fragColor = cellProbe == 6 ? vec4( cellHdr, color.a )
 			: vec4( cellProbeRaw( cellWorldPos( -ViewDir ), cellWorldDir( s.N ) ), 1.0 );
+#else
+	if ( cellOn && cellProbe > 0 )	// 6 the measuring pass; 20, 60 and 61 (the AO and SSR passes) write over it below
+		fragColor = cellProbe == 6 ? vec4( cellHdr, color.a ) : vec4( cellWorldDir( s.N ) * 0.5 + 0.5, 1.0 );
+#endif
 	if ( cellOn && cellProbe >= 50 && cellProbe <= 53 )
 		fragColor = vec4( cellProbe == 50 ? clamp( cubeK * 0.25, 0.0, 1.0 ) : cellCubeProbe( offset, s.N ), 1.0 );
+#if defined( WW_CELL_VIEWS ) || !defined( WW_CELL_RTDDGI )
 	if ( cellOn && cellPass > 0 && cellProbe == 0 )	// the PRTP band's Pass view
 		fragColor = vec4( cellPassOut( cellWorldPos( -ViewDir ), cellWorldDir( s.N ) ), 1.0 );
+#endif
 #endif
 	vec3 fogProbeOut;
 	if ( wwFogProbe( -ViewDir, fogProbeOut ) )
