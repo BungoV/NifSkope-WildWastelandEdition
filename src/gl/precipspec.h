@@ -6,9 +6,9 @@
  * layer, the type defaults of gl/precipmath.h). Header only (Qt Core), so tests/precip reads the same parser.
  *
  *   "precipitation": { "layers": [ { "type": "snow_fine", "rate": 1.5, "size": 5.5, "drawScale": 3,
- *                                    "texture": "WW/Precip/snow_fine_d.dds", "atlas": [4, 4] }, ... ] }
+ *                                    "texture": "FO4CS/Precip/snow_fine_d.dds", "atlas": [4, 4] }, ... ] }
  *
- * Keys of a layer (all but type optional; the type's default where absent): type (rain, sleet, hail, snow_fine,
+ * Keys of a layer (all but type optional; the type's default where absent): type (rain, hail, snow_fine,
  * snow_far_dot, snow_wet_clump, snow_big_clump), rate (mm/h of water), density (particles per m^3; wins over rate),
  * size (mm), drawScale, wind (the share of the wind it rides, 0..2), translucency (0..1), spin (rad/s), sway (game
  * units), texture (under Textures\, as the game links textures), atlas ([columns, rows]). Unknown keys and bad values
@@ -122,7 +122,10 @@ inline QVector<WwPrecipLayerSpec> wwPrecipParse( const QJsonObject & block, QStr
 		const QJsonObject o = arr.at( i ).toObject();
 		const int type = WwPrecip::typeOf( get( o, "type" ).toString().trimmed().toLower().toLatin1().constData() );
 		if ( type < 0 ) {
-			notes << where + QStringLiteral( " dropped (not-type \"%1\")" ).arg( get( o, "type" ).toString() );
+			if ( get( o, "type" ).toString().trimmed().compare( QLatin1String( "sleet" ), Qt::CaseInsensitive ) == 0 )
+				notes << where + QStringLiteral( " dropped (sleet removed by PRECIPLOOK1: use rain or hail)" );
+			else
+				notes << where + QStringLiteral( " dropped (not-type \"%1\")" ).arg( get( o, "type" ).toString() );
 			continue;
 		}
 		for ( auto it = o.constBegin(); it != o.constEnd(); ++it ) {

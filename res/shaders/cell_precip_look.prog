@@ -1,0 +1,5 @@
+# lane PRECIPLOOK1 (2026-11-02): cell_precip_gpu.prog with the precipitation look (drops as a swept water lens, snow
+# normal maps, the merged clump threshold). No conditions: cellprecip.cpp selects it by name under WW_CELL_PRECIP_LOOK;
+# red WW_CELL_PRECIP_LOOK_RED=1 = cell_precip_gpu.prog.
+
+shaders cell_precip_gpu.vert cell_precip_look.geom cell_precip_look.frag

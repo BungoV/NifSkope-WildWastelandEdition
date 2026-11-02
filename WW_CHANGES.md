@@ -147,6 +147,28 @@ call, same arguments: the values are the ones the old sites read. Offline bench 
 Red `WW_CELL_RTDDGI_ONEREAD=0` (the loader's `WW_CELL_GI_ONEREAD_RED`): a read at every site, main's machine code
 (binaries identical but the hash, 47 programs x 3 RT sets). The FIX1101A slowread red now needs the red too. With the
 volume off every program is main's (141 binaries identical).
+## PRECIPLOOK1 (2026-11-02): rain as a water lens, lit snow flakes, one clump atlas, 3D hail; sleet removed
+
+Behind `WW_CELL_PRECIP_LOOK` (off by default; `rain`, `snow`, `clump`, `hail`, or `1`/`on`/`all`; GPU field only), with
+`WW_CELL_PRECIP_LOOK_RED=1` drawing the old path. The census line adds `look <parts> (shutter 1/120 s)` while it is on.
+- Rain: the drop is a clear water lens, not a grey card. Each streak is the drop's disc swept over the 1/120 s shutter
+  (a 2 mm drop at about 6.5 m/s covers 5.4 cm, a 9 m/s one 7.5 cm): a pixel's coverage is the share of the shutter the
+  disc sits on it, so coverage x area stays pi r^2 (Garg & Nayar 2006; Tariq 2007; Tatarchuk 2006). Its light is the
+  lamps and sky through a water sphere's phase function (Fresnel + refraction, 64-bin table from a ray trace, g 0.767)
+  and the env cube; its brightness flickers along the streak with the drop's n = 2 oscillation. The quad is the drop's
+  own size (Marshall-Palmer sizes, Beard-Chuang shapes, Gunn-Kinzer speeds as before).
+- Snow: snow_fine and snow_far_dot gain normal maps (`*_n.dds`, DirectX green). Their translucency splits into a thin
+  part (the light through the flake, which a backlit flake glows with) and a thick part shaded by the normal (a flake
+  facing a lamp is lit, with a small facet glint).
+- Clumps: snow_wet_clump and snow_big_clump draw from one density atlas (`snow_clump_d.dds` + `_n`); a threshold
+  picks the look (dry, loose: 0.1 over 1.0; wet, compact: 0.05 over 0.5) and the colour (0.95, 0.82) and
+  translucency (0.6, 0.3) stay the type's. The two old atlases are the red.
+- Hail: rebuilt from a 3D shape (`hail3d_d.dds` + `_n`): lumpy ice with a clear shell and a milky core.
+- Sleet is no longer a type: its atlas, its rows and its tests are gone, and a `.recx` layer naming it is dropped
+  with a note (use rain or hail). The other types' field seeds are unchanged.
+- The shipped atlases moved to `Textures/FO4CS/Precip/`; a path under the old `Textures/WW/Precip/` is still found.
+- tests/precip: rule 6 (the coverage integral, the drawn sizes, the clump fit, the flicker and oscillation) with red 16
+  (the old path); rule 7 (the shader's phase table against its Monte Carlo fixture).
 
 ## REFLPROBECLI1 (TOOLS1101, 2026-11-01): count the reflection probes' below-horizon misses without a window
 

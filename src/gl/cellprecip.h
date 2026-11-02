@@ -4,10 +4,11 @@
 /* lane WEATHERLOOK1 phase B (2026-10-30): precipitation in the cell view, drawn from the Lookdev weather.
  *
  * Source, per weather: its .recx block "precipitation" (docs/RECX.md; parser gl/precipspec.h), else its own record (WTHR
- * DATA class flags: Rainy -> a rain layer, Snow -> a snow_fine layer). Each layer: a type (rain, sleet, hail, snow_fine,
+ * DATA class flags: Rainy -> a rain layer, Snow -> a snow_fine layer). Each layer: a type (rain, hail, snow_fine,
  * snow_far_dot, snow_wet_clump, snow_big_clump), its rate or density, size, draw scale and texture (under Textures\,
  * looked up loose in the .recx roots: the loaded plugins' folders, the game's Data, the shipped Data; each type ships a
- * default, res/Data/Textures/WW/Precip, the phase A atlases of notes/weatherlook1).
+ * default, res/Data/Textures/FO4CS/Precip, the phase A atlases of notes/weatherlook1; a texture under the old
+ * WW/Precip is still found there and the other way round).
  * The field (gl/precipmath.h, unit tests/precip): a camera-centred box of world-anchored particles that fall at their
  * type's speed and ride the weather's wind (the fog drift's law and bearing); near ones are textured quads flat-on to
  * the camera with a slow spin, stretched over the shutter; far ones (out to 6 x the near box) are dots of the atlas
@@ -16,7 +17,11 @@
  * (stencil 1, so they bloom and tone-map with the cell). None indoors.
  * Row: Show > Improved Sky > Precipitation (WW/CellPrecip), ships OFF; pin WW_CELL_PRECIP=0|1 (live). Harness pins:
  * WW_CELL_PRECIP_TIME=<s> (the field's clock; unset = the wall clock). Reds WW_CELL_PRECIP_RED=constdensity, nowrap,
- * onespeed, nowind (comma list; precipmath.h Red). Census on stderr: "precip: ...". */
+ * onespeed, nowind (comma list; precipmath.h Red). Census on stderr: "precip: ...".
+ * Lane PRECIPLOOK1 (2026-11-02): WW_CELL_PRECIP_LOOK=rain,snow,clump,hail (or 1/on/all; default off) draws the new look
+ * on the GPU field (cell_precip_look.prog): rain as a clear water lens swept over the shutter, snow with its normal map
+ * (thin/thick split, lamp glints), wet and big clumps from one density atlas at two thresholds, hail from the 3D build.
+ * Red WW_CELL_PRECIP_LOOK_RED=1 = the old path. */
 
 #include <QString>
 

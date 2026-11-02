@@ -53,6 +53,22 @@ flat out vec4 gCol;
 flat out vec4 gBox;	// the cell's uv box, inset half a texel of the deepest mip read (no neighbour in a bilinear read)
 flat out vec3 gA;	// the fogged light per unit albedo
 flat out vec3 gB;	// the fog's own light
+#ifdef PC_LOOK
+/* lane PRECIPLOOK1 (cell_precip_look.prog; pcLook in cell_volpart.glsl). Drop (1): the quad holds the drop's disc swept
+ * over the shutter; the fragment draws its time-averaged coverage (cell_precip_gpu.frag). The drop's shape oscillates
+ * (Garg & Nayar 2006: r = r0 (1 + A20 sin(w2 t) P20 + A31 sin(w3 t) cos(phi) P31), w_n^2 = n (n-1) (n+2) sigma / (rho r0^3)),
+ * so its brightness flickers along the streak: depth from the offline streak render (notes/preciplook1/tools/
+ * droprender.py, std / mean along a 2 mm streak 0.36 at A20 0.2, 0.19 at 4 mm, 0.04 for a sphere), cycles = w2 x shutter.
+ * Snow (2): thin and thick light apart, the key light's direction, for the normal map's split per fragment. */
+uniform float pcMmPerView;	// mm of the particle's true size per view unit (14.28 / (view scale x draw scale))
+flat out vec4 gDrop;	// drop: the disc's radius, the streak's length (view units), the flicker depth, cycles over the streak
+flat out float gOsc;	// drop: the flicker's phase
+flat out vec3 gThin;	// snow: the fogged thin light per unit albedo
+flat out vec3 gThick;	// snow: the fogged thick light per unit albedo
+flat out vec4 gDomL;	// snow: the key light's direction (view, toward the light) and its directional share
+flat out vec3 gDomE;	// snow: the key light's fogged colour
+flat out vec2 gAx;	// the quad's u axis on screen (the normal map's tangent)
+#endif
 
 void main()
 {
@@ -71,7 +87,23 @@ void main()
 	col.a *= 4.0 * h * h / ( ( 2.0 * hd + tl ) * 2.0 * hd );
 	vec2 ax, ay;
 	float hx = hd, hy = hd;
+#ifdef PC_LOOK
+	vec4 pDrop = vec4( 0.0 );
+	float pOsc = 0.0;
+	if ( pcLook == 1 ) {
+		// the coverage is the fragment's (swept disc): here only the least-size spread (h^2 / hd^2)
+		col = vec4( vsColor[0].rgb, vsColor[0].a * h * h / ( hd * hd ) );
+		float D = 2.0 * h * pcMmPerView;	// mm
+		float r0 = 0.0005 * D;	// m
+		float w2 = sqrt( 8.0 * 0.0728 / ( 1000.0 * r0 * r0 * r0 ) );	// rad/s, n = 2
+		float kf = 0.51 * clamp( ( D - 0.5 ) / 1.5, 0.0, 1.0 ) * mix( 1.0, 0.53, clamp( ( D - 2.0 ) / 2.0, 0.0, 1.0 ) );
+		pDrop = vec4( hd, tl, kf, w2 * pcShutter / 6.2831853 );
+		pOsc = vsAngle[0] * 7.0;
+	}
+	if ( tl > ( pcLook == 1 ? 1e-4 * hd : 0.2 * hd ) ) {
+#else
 	if ( tl > 0.2 * hd ) {
+#endif
 		ax = tr / tl;
 		hx = hd + 0.5 * tl;
 	} else {
@@ -80,7 +112,11 @@ void main()
 	ay = vec2( -ax.y, ax.x );
 	vec2 cell = pcAtlas.xy;
 	gBox = vec4( vsCell[0] + pcInset, vsCell[0] + cell - pcInset );
+#ifdef PC_LOOK
+	if ( pcFar != 0 && pcLook != 1 ) {
+#else
 	if ( pcFar != 0 ) {
+#endif
 		// the cell's mean: 16 taps at the one-texel-a-cell mip (all one texel there; a capped chain averages its 4 x 4)
 		vec4 m = vec4( 0.0 );
 		if ( pcHasTex ) {
@@ -101,14 +137,31 @@ void main()
 	pcDPx = vec3( 1.0 / k, 0.0, 0.0 );
 	pcDPy = vec3( 0.0, 1.0 / k, 0.0 );
 	vec3 lit = vec3( 1.0 );
+#ifdef PC_LOOK
+	vec3 thinS = vec3( 1.0 ), thickS = vec3( 1.0 ), domE = vec3( 0.0 );
+	vec4 domL = vec4( 0.0, 0.0, 1.0, 0.0 );
+#endif
 	if ( cellInterior || cellHasDir ) {
 		vec3 thin, thick;
 		vpLight( c, cellWorldPos( c ), cellWorldDir( c ), dot( fogView.xyz, c ) + fogView.w,
 			cellWorldDir( vec3( 0.0, 0.0, 1.0 ) ), pcTrans, thin, thick );
 		lit = pcTrans * thin + ( 1.0 - pcTrans ) * thick;
+#ifdef PC_LOOK
+		thinS = thin;
+		thickS = thick;
+		vec3 dV = cellRow[0].xyz * vpDom.x + cellRow[1].xyz * vpDom.y + cellRow[2].xyz * vpDom.z;	// world -> view (rows transposed)
+		float dl = length( dV );
+		domL = vec4( dl > 0.0 ? dV / dl : vec3( 0.0, 0.0, 1.0 ), vpDom.w > 0.0 ? clamp( length( vpDom.xyz ) / vpDom.w, 0.0, 1.0 ) : 0.0 );
+		domE = vpDomC * domL.w;
+#endif
 	}
 	vec3 fogB = wwFogFx( vec3( 0.0 ), c, false );
 	vec3 fogA = wwFogFx( lit, c, false ) - fogB;
+#ifdef PC_LOOK
+	vec3 pThin = pcLook == 2 ? wwFogFx( thinS, c, false ) - fogB : vec3( 0.0 );
+	vec3 pThick = pcLook == 2 ? wwFogFx( thickS, c, false ) - fogB : vec3( 0.0 );
+	vec3 pDomE = pcLook == 2 ? wwFogFx( domE, c, false ) - fogB : vec3( 0.0 );
+#endif
 
 	for ( int v = 0; v < 4; v++ ) {
 		vec2 q = vec2( ( v & 1 ) != 0 ? 1.0 : -1.0, ( v & 2 ) != 0 ? 1.0 : -1.0 );
@@ -118,6 +171,15 @@ void main()
 		gView = p;
 		gA = fogA;
 		gB = fogB;
+#ifdef PC_LOOK
+		gDrop = pDrop;
+		gOsc = pOsc;
+		gThin = pThin;
+		gThick = pThick;
+		gDomL = domL;
+		gDomE = pDomE;
+		gAx = ax;
+#endif
 		gl_Position = pcProj * vec4( p, 1.0 );
 		EmitVertex();
 	}
