@@ -4,11 +4,18 @@
 
 #include <cstdio>
 #include <cstring>
+#include <set>
+#include <utility>
 
 #ifdef LARGEREF_RED
 static const bool YX = false;
 #else
 static const bool YX = true;
+#endif
+#ifdef LARGEREF_STREAM_RED	// lane LARGEREF2: the layer keeps a ref its own loaded cell draws (the double draw)
+static const bool STREAMRED = true;
+#else
+static const bool STREAMRED = false;
 #endif
 
 static int fails = 0;
@@ -79,6 +86,48 @@ int main()
 	std::vector<unsigned char> s( a.begin(), a.begin() + 12 );
 	const size_t before = rows.size();
 	check( LargeRef::decode( s.data(), s.size(), YX, rows ) == -1 && rows.size() == before, "short subrecord refused" );
+
+	// lane LARGEREF2: ownership counts in the streamed view (each wanted large ref drawn exactly once)
+	{
+		std::vector<LargeRef::Row> own = rows;
+		const auto c = rnam( -3, 12, { ref( 0x100, 12, -3 ) } );   // the tower's own cell lists it too
+		LargeRef::decode( c.data(), c.size(), true, own );
+		LargeRef::Owners o( STREAMRED );
+		o.setRows( own );
+		o.cell( 10, -2, true );
+		check( o.layer().count( 0x100 ) && o.copies( 0x100 ) == 1, "stream: listing cell loaded -> the layer draws the tower once" );
+		check( !o.layer().count( 0x101 ) && o.copies( 0x101 ) == 1, "stream: a ref in its own loaded cell -> the cell draws it, not the layer" );
+		o.cell( 11, -2, true );
+		check( o.listers( 0x100 ) == 2 && o.copies( 0x100 ) == 1, "stream: two listing cells loaded -> still one copy" );
+		o.cell( 12, -3, true );
+		check( o.copies( 0x100 ) == 1 && !o.layer().count( 0x100 ), "stream: its own cell loads -> the layer lets go (one copy)" );
+		o.cell( 12, -3, false );
+		check( o.copies( 0x100 ) == 1 && o.layer().count( 0x100 ), "stream: its own cell leaves -> the layer takes it back" );
+		o.cell( 10, -2, false );
+		o.cell( 11, -2, false );
+		check( o.copies( 0x100 ) == 0 && !o.wanted( 0x100 ) && o.layer().empty(), "stream: no listing cell -> none drawn" );
+		// a walk: a 5x5 block sliding over the cells, every ref drawn exactly once while wanted, never twice
+		int bad = 0, steps = 0;
+		std::set<std::pair<int, int>> loaded;
+		const int path[][2] = { { 8, -4 }, { 9, -4 }, { 10, -3 }, { 11, -3 }, { 12, -3 }, { 13, -2 }, { 12, -1 }, { 10, -2 }, { 28, 4 }, { 30, 5 }, { 11, -2 } };
+		for ( const auto & p : path ) {
+			std::set<std::pair<int, int>> next;
+			for ( int dy = -2; dy <= 2; dy++ )
+				for ( int dx = -2; dx <= 2; dx++ )
+					next.insert( { p[0] + dx, p[1] + dy } );
+			for ( const auto & k : loaded )
+				if ( !next.count( k ) )
+					o.cell( k.first, k.second, false );
+			for ( const auto & k : next )
+				o.cell( k.first, k.second, true );
+			loaded = next;
+			for ( uint32_t r : { 0x100u, 0x101u, 0x102u } )
+				bad += o.copies( r ) != ( o.wanted( r ) ? 1 : 0 );
+			steps++;
+		}
+		std::printf( "stream walk: %d steps, %d wrong copy counts\n", steps, bad );
+		check( bad == 0, "stream walk: every wanted ref drawn once, never twice" );
+	}
 	std::printf( "largeref: %d failed -- %s\n", fails, fails ? "FAIL" : "PASS" );
 	return fails ? 1 : 0;
 }

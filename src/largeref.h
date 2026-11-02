@@ -6,9 +6,11 @@
  * Measured on Fallout4.esm Commonwealth: read Y,X, 63954 of 63954 rows put the ref in the cell its position says; read X,Y
  * only 911 do (the red). The rule: a large ref draws full while any cell whose RNAM lists it is loaded. */
 
+#include <algorithm>
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
+#include <map>
 #include <set>
 #include <vector>
 
@@ -72,6 +74,113 @@ inline std::vector<Row> outside( const std::vector<Row> & rows, int x0, int y0, 
 	}
 	return out;
 }
+
+/* lane LARGEREF2 (LARGEREF-STREAM): per-document ownership counts for the streamed view. A large ref is drawn by exactly
+ * one owner: its own cell while that cell is loaded (the cell's own refs place it), else the large-ref layer while any
+ * loaded cell lists it (counts[ref] = loaded listing cells). So a ref is never drawn by two listing cells, nor by a
+ * listing cell and its own cell. `red` (WW_CELL_LARGEREFS_RED=streamdouble) keeps it in the layer while its own cell is
+ * loaded: the double draw comes back. */
+class Owners
+{
+public:
+	explicit Owners( bool red = false ) : red_( red ) {}
+
+	void setRows( const std::vector<Row> & rows )
+	{
+		lists_.clear();
+		own_.clear();
+		standing_.clear();
+		count_.clear();
+		loaded_.clear();
+		layer_.clear();
+		for ( const Row & r : rows ) {
+			std::vector<uint32_t> & l = lists_[key( r.gx, r.gy )];
+			if ( std::find( l.begin(), l.end(), r.ref ) == l.end() )
+				l.push_back( r.ref );
+			if ( own_.emplace( r.ref, key( r.rx, r.ry ) ).second )
+				standing_[key( r.rx, r.ry )].push_back( r.ref );
+		}
+	}
+
+	//! A cell joined (on) or left the loaded set; a repeat call is a no-op. Returns true when the layer changed.
+	bool cell( int x, int y, bool on )
+	{
+		const int64_t k = key( x, y );
+		if ( on == ( loaded_.count( k ) > 0 ) )
+			return false;
+		if ( on )
+			loaded_.insert( k );
+		else
+			loaded_.erase( k );
+		std::vector<uint32_t> touched;
+		auto it = lists_.find( k );
+		if ( it != lists_.end() )
+			for ( uint32_t r : it->second ) {
+				int & c = count_[r];
+				c += on ? 1 : -1;
+				if ( c <= 0 )
+					count_.erase( r );
+				touched.push_back( r );
+			}
+		auto st = standing_.find( k );   // the refs standing in this cell change owner
+		if ( st != standing_.end() )
+			touched.insert( touched.end(), st->second.begin(), st->second.end() );
+		bool changed = false;
+		for ( uint32_t r : touched ) {
+			const bool want = inLayer( r );
+			if ( want == ( layer_.count( r ) > 0 ) )
+				continue;
+			if ( want )
+				layer_.insert( r );
+			else
+				layer_.erase( r );
+			changed = true;
+		}
+		return changed;
+	}
+
+	//! The refs the layer draws now (sorted)
+	const std::set<uint32_t> & layer() const { return layer_; }
+	//! Loaded cells listing the ref
+	int listers( uint32_t ref ) const
+	{
+		auto it = count_.find( ref );
+		return it == count_.end() ? 0 : it->second;
+	}
+	//! The ref's own cell is loaded (it places the ref itself)
+	bool ownLoaded( uint32_t ref ) const
+	{
+		auto it = own_.find( ref );
+		return it != own_.end() && loaded_.count( it->second ) > 0;
+	}
+	//! Full copies drawn of a large ref: its own cell's (when loaded) + the layer's
+	int copies( uint32_t ref ) const { return ( ownLoaded( ref ) ? 1 : 0 ) + ( layer_.count( ref ) ? 1 : 0 ); }
+	//! The ref should be drawn full: a loaded cell lists it, or it stands in a loaded cell
+	bool wanted( uint32_t ref ) const { return listers( ref ) > 0 || ownLoaded( ref ); }
+	//! The cell the ref stands in (false: no RNAM row names it)
+	bool ownCell( uint32_t ref, int & x, int & y ) const
+	{
+		auto it = own_.find( ref );
+		if ( it == own_.end() )
+			return false;
+		x = int( int32_t( uint32_t( uint64_t( it->second ) >> 32 ) ) );
+		y = int( int32_t( uint32_t( uint64_t( it->second ) ) ) );
+		return true;
+	}
+	size_t refs() const { return own_.size(); }
+
+private:
+	static int64_t key( int x, int y ) { return int64_t( ( uint64_t( uint32_t( x ) ) << 32 ) | uint64_t( uint32_t( y ) ) ); }
+	bool inLayer( uint32_t r ) const { return listers( r ) > 0 && ( red_ || !ownLoaded( r ) ); }
+
+	bool red_ = false;
+	std::map<int64_t, std::vector<uint32_t>> lists_;      //!< grid cell -> refs it lists
+	std::map<int64_t, std::vector<uint32_t>> standing_;   //!< cell -> refs standing in it
+	std::map<uint32_t, int64_t> own_;                     //!< ref -> its own cell
+	std::map<uint32_t, int> count_;                       //!< ref -> loaded listing cells
+	std::set<int64_t> loaded_;
+	std::set<uint32_t> layer_;
+};
 
 }
 
