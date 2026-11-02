@@ -66,6 +66,33 @@ int main()
 	// a vertical wall is no roof: rain just inside the east wall, under the open half, falls
 	check( "wallnoroof", open( 1000.0 - 10.0, 300, 100 ), m.roofAt( 990, 300 ) );
 	check( "outside", open( 5000, 5000, -100 ) );
-	std::printf( "%s: %d failed%s\n", fails ? "FAIL" : "PASS", fails, red ? " under red noroof" : "" );
+
+	// lane BUGS1102 (PRECIPROOF-GPU): the field the pass picks, with and without a roof map. Under a roof no field may
+	// draw a particle; under open sky both do. PRECIPROOF_RED=gpuroof: the old pick (the GPU field under a roof).
+	const bool redGpu = r && std::string( r ) == "gpuroof";
+	for ( int cpuForced = 0; cpuForced < 2; cpuForced++ )
+		for ( int noWrap = 0; noWrap < 2; noWrap++ ) {
+			const bool exterior = wwPrecipGpuField( cpuForced, noWrap, false, redGpu );
+			const bool roofed = wwPrecipGpuField( cpuForced, noWrap, true, redGpu );
+			const std::string tag = std::string( cpuForced ? "cpu" : "-" ) + ( noWrap ? "+nowrap" : "" );
+			check( ( "pick_exterior_" + tag ).c_str(), exterior == ( !cpuForced && !noWrap ), exterior, 0 );
+			const double under[3] = { 250, 300, 100 }, sky[3] = { 900, 300, 100 };
+			check( ( "gpuroofed_" + tag ).c_str(), !wwPrecipDrawn( &m, roofed, under ), roofed, 0 );
+			check( ( "gpuopensky_" + tag ).c_str(), wwPrecipDrawn( &m, roofed, sky ) && wwPrecipDrawn( nullptr, exterior, under ), roofed, 0 );
+		}
+	// a grid under the roof: the field the pass picks for a roofed interior draws none of it
+	{
+		const bool gpu = wwPrecipGpuField( false, false, true, redGpu );
+		long under = 0, drawnUnder = 0;
+		for ( int y = 20; y < 600; y += 40 )
+			for ( int x = 20; x < 500; x += 40 )
+				for ( int z = 20; z < 400; z += 60 ) {
+					const double p[3] = { double( x ), double( y ), double( z ) };
+					under++;
+					drawnUnder += wwPrecipDrawn( &m, gpu, p ) ? 1 : 0;
+				}
+		check( "gpuroofed_grid", drawnUnder == 0, double( drawnUnder ), double( under ) );
+	}
+	std::printf( "%s: %d failed%s\n", fails ? "FAIL" : "PASS", fails, red ? " under red noroof" : redGpu ? " under red gpuroof" : "" );
 	return fails ? 1 : 0;
 }

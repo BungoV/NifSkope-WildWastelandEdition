@@ -12,4 +12,10 @@ tail -1 "$OUT/green.txt"
 [ $rc = 0 ] || { grep FAIL "$OUT/green.txt"; exit 1; }
 PRECIPROOF_RED=noroof "$OUT/preciproof_test.exe" > "$OUT/red.txt"; rrc=$?
 if [ $rrc != 0 ] && grep -q "^FAIL roofed " "$OUT/red.txt"; then echo "red noroof: FAIL as it must"; else echo "red noroof DID NOT BITE"; exit 1; fi
-echo "preciproof unit: PASS (green + 1 red)"
+# lane BUGS1102 (PRECIPROOF-GPU): the old pick (the GPU field, which has no roof map, in a roofed interior) must FAIL
+PRECIPROOF_RED=gpuroof "$OUT/preciproof_test.exe" > "$OUT/red_gpuroof.txt"; grc=$?
+if [ $grc != 0 ] && grep -q "^FAIL gpuroofed_grid " "$OUT/red_gpuroof.txt" && grep -q "^FAIL gpuroofed_- " "$OUT/red_gpuroof.txt" \
+	&& ! grep -q "^FAIL roofed " "$OUT/red_gpuroof.txt"; then echo "red gpuroof: FAIL as it must"; else echo "red gpuroof DID NOT BITE"; exit 1; fi
+# the pass picks its field through that rule (on 1d96238a this line was absent: the GPU field ignored the roof)
+grep -q "wwPrecipGpuField( cpuFieldFromEnv(), .*roof != nullptr" "$ROOT/src/gl/cellprecip.cpp" || { echo "cellprecip.cpp does not pick its field through wwPrecipGpuField"; exit 1; }
+echo "preciproof unit: PASS (green + 2 reds)"

@@ -117,6 +117,16 @@ bool cpuFieldFromEnv()
 	return false;
 }
 
+//! lane BUGS1102: WW_CELL_PRECIP_RED=gpuroof, the old rule (the GPU field drew rain under a sunlit interior's roof)
+bool gpuRoofRedFromEnv()
+{
+	WW_SWITCH_STATIC( QByteArray, r, wwEnv( "WW_CELL_PRECIP_RED" ).trimmed().toLower() );
+	for ( const QByteArray & t : r.split( ',' ) )
+		if ( t.trimmed() == "gpuroof" )
+			return true;
+	return false;
+}
+
 //! a linked texture (under Textures\) looked up loose in the roots, first root wins
 QString findTexture( const QStringList & roots, QString rel )
 {
@@ -378,7 +388,8 @@ int wwCellPrecipDraw( Scene * scene )
 	}
 	// lane PERFFIX3 D: from here the pass has work: its own Frame Timers zone ("precip", CPU + GPU ms)
 	PassTime::Scope ptPrecip( PassTime::Precip );
-	const bool gpuField = !cpuFieldFromEnv() && !( redBits() & RedNoWrap );
+	// lane BUGS1102: the GPU field has no roof map, so a roofed interior keeps the CPU field (preciproof.h)
+	const bool gpuField = wwPrecipGpuField( cpuFieldFromEnv(), ( redBits() & RedNoWrap ) != 0, roof != nullptr, gpuRoofRedFromEnv() );
 
 	// the clock: a harness pin, else the wall clock
 	WW_SWITCH_STATIC( QByteArray, timePin, wwEnv( "WW_CELL_PRECIP_TIME" ).trimmed() );
@@ -459,7 +470,7 @@ int wwCellPrecipDraw( Scene * scene )
 				const Particle p = particleAt( field, b, i, tier != 0, t, cam, wv );
 				if ( p.inside )
 					continue;
-				if ( roof && !roof->open( p.pos ) ) {	// lane INTSKY1: under a roof
+				if ( !wwPrecipDrawn( roof, false, p.pos ) ) {	// lane INTSKY1: under a roof
 					roofDropped++;
 					continue;
 				}
@@ -482,7 +493,8 @@ int wwCellPrecipDraw( Scene * scene )
 	const QString echo = QStringLiteral( "precip: on, field %4, wind %1 u/s, red %2: %3" ).arg( std::hypot( wv[0], wv[1] ), 0, 'f', 1 )
 		.arg( redBits() ).arg( census.join( QStringLiteral( "; " ) ) )
 		.arg( gpuField ? QStringLiteral( "gpu" ) : QStringLiteral( "cpu" ) )
-		+ ( roof ? QStringLiteral( "; interior under open sky only (%1)" ).arg( pcRoof().note )
+		+ ( roof && gpuField ? QStringLiteral( "; interior, RED WW_CELL_PRECIP_RED=gpuroof (GPU field, no roof test)" )
+			: roof ? QStringLiteral( "; interior under open sky only (%1)" ).arg( pcRoof().note )
 			: CL && CL->interior ? QStringLiteral( "; interior, RED WW_INTSKY_RED=rain (no roof test)" ) : QString() );
 	s.echo = echo;
 	if ( echo != s.said ) {

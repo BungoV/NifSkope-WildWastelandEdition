@@ -93,4 +93,18 @@ struct WwRoofMap
 	}
 };
 
+/* lane BUGS1102 (PRECIPROOF-GPU): the GPU field (PERFFIX3 D, cell_precip_field.glsl) builds its particles in the vertex
+ * shader and has no roof map, so in a sunlit interior it rained under the roof. A roofed interior keeps the CPU field
+ * and its per-particle roof test. redGpuRoof (WW_CELL_PRECIP_RED=gpuroof) = the old rule: the GPU field under roofs. */
+inline bool wwPrecipGpuField( bool cpuForced, bool noWrapRed, bool roofed, bool redGpuRoof )
+{
+	return !cpuForced && !noWrapRed && ( !roofed || redGpuRoof );
+}
+
+//! a particle at p is drawn by the chosen field: the CPU field drops it under a roof, the GPU field has no roof test
+inline bool wwPrecipDrawn( const WwRoofMap * roof, bool gpuField, const double p[3] )
+{
+	return gpuField || !roof || roof->open( p );
+}
+
 #endif // PRECIPROOF_H
