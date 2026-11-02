@@ -117,6 +117,10 @@ struct VaState
 	// lane SHAFTS1: the air's sun shadow one hardware-compared tap (sharper shafts, cheaper); red
 	// WW_CELL_AIR_SHADOW_RED=soft = the surfaces' 32-tap disc as before (cell_volair.frag volSunTap)
 	bool airSoft = false;
+	// lane AIRBEAD1: WW_CELL_AIR_SHADOW=bead reads the tap twice a sub-step (its 1/4 and 3/4 points; thin beams bead
+	// less along the ray). Default off (the red: one read at the middle, as before): +0.06 ms on the Medium grid, over
+	// its +0.05 bar (cell_volair.frag volSunBead, tests/shafts B and C)
+	bool bead = false;
 	int grid = 0;	// lane PERFFIX3: the near grid preset (vaGridOf)
 	// lane PERFFIX3: this pass's uniform reads from the mirror / asked from GL / mirror != GL (WW_SETUP_MEMO_CHECK=1);
 	// state: 1 the entry state from the frame's note, 0 asked
@@ -159,6 +163,7 @@ VaState & vs()
 			s.sunPcf = d.sunPcf;
 			s.f32 = d.f32;
 			s.airSoft = d.airSoft;
+			s.bead = d.bead;
 			s.terms = d.terms;
 			s.opt = d.opt;
 		}
@@ -170,6 +175,7 @@ VaState & vs()
 			s.on = QSettings().value( QStringLiteral( "WW/VolAir" ), false ).toBool();
 		}
 		s.airSoft = wwEnv( "WW_CELL_AIR_SHADOW_RED" ).trimmed() == "soft";	// lane SHAFTS1
+		s.bead = wwEnv( "WW_CELL_AIR_SHADOW" ).trimmed() == "bead";	// lane AIRBEAD1
 		for ( const QByteArray & t : wwEnv( "WW_CELL_AIR_RED" ).split( ',' ) ) {
 			const QByteArray r = t.trimmed();
 			s.shellStep = s.shellStep || r == "shellstep";
@@ -1850,6 +1856,7 @@ static void vaPassInner( Scene * scene, bool run )
 	prog->uni1b( "volCsm", csm );
 	prog->uni1b( "volSunAir", !s.sunPcf );	// lane PERFFIX3: the air's own sun read (cell_volair.frag airSunVis); red sunpcf
 	prog->uni1b( "volSunTap", !s.airSoft );	// lane SHAFTS1: one tap; red WW_CELL_AIR_SHADOW_RED=soft
+	prog->uni1b( "volSunBead", s.bead );	// lane AIRBEAD1: two reads a sub-step (WW_CELL_AIR_SHADOW=bead)
 	prog->uni1i( "volRed", s.red & ~1 );
 	/* lane MUSGI1: a sunlit interior's air takes the volume's own E / pi (bit 32), as its surfaces do: the open-field
 	 * ratio measures a froxel against an open probe no froxel under a roof stands near, and its clamp at 2 pinned the
@@ -2445,7 +2452,7 @@ static void vaPassInner( Scene * scene, bool run )
 		// lane PERFFIX3: the grid preset, the integrated volume's format, the sun's read in the air, the uniform reads
 		// (from the mirror / asked / mirror stale under WW_SETUP_MEMO_CHECK=1) and the entry state (noted / asked, stale)
 		+ QStringLiteral( " grid=%1 vol=%2 sunread=%3 reads=%4/%5/%6 state=%7%8" ).arg( s.grid ).arg( g.half ? "16f" : "32f" )
-			.arg( s.sunPcf ? "pcf(red)" : s.airSoft ? "air(soft red)" : "air(tap)" ).arg( s.mirrorKept ).arg( s.mirrorAsked ).arg( s.mirrorStale )
+			.arg( s.sunPcf ? "pcf(red)" : s.airSoft ? "air(soft red)" : s.bead ? "air(tap x2)" : "air(tap)" ).arg( s.mirrorKept ).arg( s.mirrorAsked ).arg( s.mirrorStale )
 			.arg( s.stateNoted ? "noted" : "asked" ).arg( s.stateStale ? QStringLiteral( "(stale)" ) : QString() )
 		+ QStringLiteral( ")" );
 
