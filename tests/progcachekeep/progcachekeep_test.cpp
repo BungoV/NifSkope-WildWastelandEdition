@@ -1,4 +1,4 @@
-// lane BUGS1102C (SHOTCAPS-COLD): gl/progcachekeep.h on a scratch folder. usage: progcachekeep_test <scratch dir> <keep>
+// lane BUGS1102C (SHOTCAPS-COLD): gl/progcachekeep.h on a scratch folder. usage: progcachekeep_test <scratch dir> <keep> [notouch]
 // Prints one `case <name> <PASS|FAIL> ...` line a case and `alternate relinks <n>` (two define sets over 8 launches).
 #include "gl/progcachekeep.h"
 
@@ -8,6 +8,7 @@
 
 #include <cstdio>
 #include <cstdlib>
+#include <string>
 
 static QString D;
 static int fails = 0;
@@ -41,6 +42,7 @@ int main( int argc, char ** argv )
 		return 2;
 	D = QString::fromLocal8Bit( argv[1] );
 	const int	keep = wwProgCacheKeep( QByteArray( argv[2] ) );
+	const bool	touchOn = argc < 4 || std::string( argv[3] ) != "notouch";	// BUGS1102F: argv[3] notouch = the stamp red
 	QDir().mkpath( D );
 	clear();
 	// 8 older variants of one program, a twin-prefix program, then the new binary
@@ -75,6 +77,36 @@ int main( int argc, char ** argv )
 	}
 	std::printf( "alternate relinks %d\n", relinks );
 	check( "alternate", relinks == 2, QStringLiteral( "relinks %1 (want 2: one a define set; the red relinks every launch)" ).arg( relinks ) );
+
+	/* lane BUGS1102F (SHOTCAPS-MTIME): set A (the default rows) every other launch, keep+2 rare sets between them, twice
+	 * round. A hit stamps A, so A is never the oldest and links once; without the stamp (the red) the rare writes push A out */
+	clear();
+	int	relinksA = 0;
+	const int	rare = keep + 2;
+	for ( int launch = 0; launch < 4 * rare; launch++ ) {
+		const QString	f = launch % 2 ? QStringLiteral( "fo4_effect.prog-r%1.bin" ).arg( ( launch / 2 ) % rare ) : QStringLiteral( "fo4_effect.prog-A.bin" );
+		const int	age = 1000 - launch;
+		if ( QFile::exists( D + '/' + f ) ) {
+			if ( touchOn )
+				wwProgCacheTouch( D + '/' + f, QDateTime::currentDateTime().addSecs( -age ) );
+			continue;
+		}
+		if ( launch % 2 == 0 )
+			relinksA++;
+		touch( f, age );
+		wwProgCachePrune( D, "fo4_effect.prog", f, keep );
+	}
+	std::printf( "lru relinks A %d (touch %d)\n", relinksA, int( touchOn ) );
+	check( "lru", relinksA == 1, QStringLiteral( "set A linked %1 times (want 1: hits keep it; the red without the stamp relinks it)" ).arg( relinksA ) );
+	{
+		touch( "stamp.bin", 500 );
+		const QDateTime	t = QDateTime::currentDateTime().addSecs( -7 );
+		const bool	ok = wwProgCacheTouch( D + "/stamp.bin", t );
+		const qint64	dt = QFileInfo( D + "/stamp.bin" ).lastModified().secsTo( t );
+		check( "stamp", ok && dt >= -1 && dt <= 1 && !wwProgCacheTouch( D + "/missing.bin" ),
+			QStringLiteral( "a hit sets the file time (off %1 s), a missing file is refused" ).arg( dt ) );
+	}
+	check( "touch_env", wwProgCacheTouchOn( "" ) && wwProgCacheTouchOn( "0" ) && !wwProgCacheTouchOn( "1" ), QStringLiteral( "stamp on unless the red =1" ) );
 	check( "env", wwProgCacheKeep( "" ) == 6 && wwProgCacheKeep( "1" ) == 1 && wwProgCacheKeep( "x" ) == 6
 		&& wwProgCacheKeep( "0" ) == 6 && wwProgCacheKeep( "999" ) == 64, QStringLiteral( "default 6, red 1, clamp 64" ) );
 	clear();
