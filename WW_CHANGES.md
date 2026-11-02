@@ -92,6 +92,7 @@
   twin_ref.py with MSN=16 writes tests/gisky/twin_ref_low.h (30 cases).
 - Gate: gisky check 6 `twinlow`, bar 0.02: green 0.0064 relative (0.0047 R/B); red `GISKY_RED_TWINLOW` (the 32-wide
   table at Low) 0.0495 FAILS. run.sh: green 7 checks; red twin fails twin and twinlow, red twinlow fails twinlow only.
+
 ## WETSNAP1 (2026-11-02): rain wetness snaps dry like the game
 
 - With `WW_CELL_RAINWET` on, the wet amount follows Fallout 4's whole wetness step: it still dries at fDrySpeed
@@ -211,6 +212,20 @@ its red (WWTRANSL_RED, the upstream FO76 term) fails. With the switch off every 
 - Readers (cell water, the marking tool) decode encoding 2; `WW_LODL_FLOW_LOG=1` (the red) and the linear default
   write the same bytes as before. The bake census adds "over the code range on N". Default unchanged.
 - Code: src/lodtflowcode.h, src/lodtfile.cpp, src/watermark.cpp. Gate: tests/farwater7/run.sh.
+
+## RTREFLUNIT1 (2026-11-02): the water reads the ray-traced reflection texel the kernel wrote, on odd view sizes too
+
+RTREFL1's water read scaled the view point by the half-size hit buffer (`ivec2( rv * halfSize )`). The kernel
+(src/rtddgi/refl.comp) writes half texel k from full pixels 2k and 2k+1, so on an odd width or height the old rule read
+texel k+1 past about mid-view: 43.6 % of the pixels of a 321x201 view (28130 of 64521) took a neighbour's hit or miss;
+even sizes were exact. The read now takes the full-size pixel and halves it (`fp / 2`): src/gl/cellwater.cpp sends the
+full ray target's size in waterRtSize.zw (new rtddgiReflFullSize). The read lives in its own file,
+res/shaders/water_rtrefl.glsl, that fo4_water.frag includes under WW_CELL_RTREFL; a hit takes the sky's place by a
+select (its bits, no blend). Red WW_CELL_RTREFL_TEXEL_RED=1 sends 0 0 (the old rule). Programs without WW_CELL_RTREFL
+are the same machine code (6 water programs x 3 modes: binaries equal but the stamp and source hash).
+Unit tests/rtreflunit/run.sh (no window, the real driver): 4 views (even, odd, offset, 641x361) x flat and bent rows,
+0 wrong texels of 835,023 compared, every hit's rgb bit-exact (HDR 1e-4..1e4), the sky kept on a miss, with the
+buffer off and under the surface; reds texel, flip, row, gamma, weight, off and under each FAIL.
 
 ## GISKYTWIN-FLIP (LAND5, 2026-11-02): the GI volume's sky ships at the physical level
 
@@ -590,19 +605,6 @@ and the WW_CELL_HDR_DUMP gate target. The rule is a pure header (src/gl/cellhdrf
 passes, the old rule as red fails). `WW_CELL_HDR_FORMAT=rgba32f` asks for the old frame; the reds `WW_FRAMEFMT1_RED=1`,
 `WW_CELL_HDR_FORMAT_RED=1` and `WW_AAFORMAT1_RED=1` force RGBA32F everywhere, as before. The air volumes were already
 RGBA16F (PERFFIX3); their slices and the running integrate stay RGBA32F (transmittance precision).
-## RTREFLUNIT1 (2026-11-02): the water reads the ray-traced reflection texel the kernel wrote, on odd view sizes too
-
-RTREFL1's water read scaled the view point by the half-size hit buffer (`ivec2( rv * halfSize )`). The kernel
-(src/rtddgi/refl.comp) writes half texel k from full pixels 2k and 2k+1, so on an odd width or height the old rule read
-texel k+1 past about mid-view: 43.6 % of the pixels of a 321x201 view (28130 of 64521) took a neighbour's hit or miss;
-even sizes were exact. The read now takes the full-size pixel and halves it (`fp / 2`): src/gl/cellwater.cpp sends the
-full ray target's size in waterRtSize.zw (new rtddgiReflFullSize). The read lives in its own file,
-res/shaders/water_rtrefl.glsl, that fo4_water.frag includes under WW_CELL_RTREFL; a hit takes the sky's place by a
-select (its bits, no blend). Red WW_CELL_RTREFL_TEXEL_RED=1 sends 0 0 (the old rule). Programs without WW_CELL_RTREFL
-are the same machine code (6 water programs x 3 modes: binaries equal but the stamp and source hash).
-Unit tests/rtreflunit/run.sh (no window, the real driver): 4 views (even, odd, offset, 641x361) x flat and bent rows,
-0 wrong texels of 835,023 compared, every hit's rgb bit-exact (HDR 1e-4..1e4), the sky kept on a miss, with the
-buffer off and under the surface; reds texel, flip, row, gamma, weight, off and under each FAIL.
 
 ## REFLPROBECLI1 (TOOLS1101, 2026-11-01): count the reflection probes' below-horizon misses without a window
 
