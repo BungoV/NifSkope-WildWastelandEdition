@@ -2252,6 +2252,12 @@ vec3 cellLit( vec3 color, vec3 albedo, vec3 normalView, vec3 posView, vec3 Vview
 		// FO4CS's sun share: the excess over the unshadowed diffuse, under the cascades' shadow
 		linx += wwTrAdd + cellDirVis * wwTrExcess( N, Ld, Vw, cellDirColor, nl > 0.0
 		      ? alb * cellDirColor * nl * ( cellOren( N, Ld, Vw, nl, gloss ) + cellRim( N, Ld, Vw, gloss ) ) : vec3( 0.0 ) );
+#ifdef WW_TR_THICK
+		// lane MATLOOK3 (TRANSLUC1-THICK): a thick record takes the sun through its thickness shadow
+		if ( wwTrKind > 1.5 )
+			linx += wwTrThickSun( N, Ld, Vw, cellDirColor, nl > 0.0 ? cellDirVis * alb * cellDirColor * nl
+			      * ( cellOren( N, Ld, Vw, nl, gloss ) + cellRim( N, Ld, Vw, gloss ) ) : vec3( 0.0 ), posView );
+#endif
 #endif
 #ifdef WW_CORNEA
 		linx += wwEyeAdd;

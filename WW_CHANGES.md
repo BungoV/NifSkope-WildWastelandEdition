@@ -1,3 +1,15 @@
+## MATLOOK3 TRANSLUC1-THICK (2026-11-02): a thick translucent object takes the sun through its thickness
+
+Under `WW_CELL_TRANSL=1` a v8+ material with bTranslucencyThickObject now takes FO4CS's sun share in the exterior cell:
+max( T x the thickness visibility, the shadowed diffuse ), with the visibility 1 at no caster thickness and 0 at 0.6
+units (FO4CS's shadow-mask law). FO4CS draws the thick casters into a map of their own; here the sun's cascade map
+stands in (a ruling: any caster counts, not only thick ones). Eight comparison taps at receiver offsets
+0.6 (k + 0.5) / 8 beyond the cascade's own offset give the linear visibility within 1/16; nearer cascade only. Outside
+the cascades' reach, indoors and in the NIF view a thick object still takes nothing, and local lights never reach it
+(FO4CS). Red `WW_CELL_TRANSL_RED=nothick` (the old nothing). With the switch off nothing is compiled in.
+tests/translucency checks the twin against FO4CS's thick functions and the taps against its visibility; its
+WWTRANSL_THICK_RED must fail.
+
 ## MATLOOK3 (2026-11-02): hair Kajiya-Kay lobe and eye cornea coat (two rows, both ship OFF)
 
 - **Hair specular (HAIRKK1)**, Show-menu row "Hair specular" (`WW/CellHairSpecular`, pin `WW_CELL_HAIRKK`): on a hair

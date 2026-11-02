@@ -475,6 +475,8 @@ bool NifSkopeOpenGLContext::Shader::load( const QString & filepath )
 				data.insert( data.indexOf( '\n' ) + 1, "#define WW_CELL_TRANSL_RED_NOBL 1\n" );
 			else if ( trRed == "noview" )
 				data.insert( data.indexOf( '\n' ) + 1, "#define WW_CELL_TRANSL_RED_NOVIEW 1\n" );
+			else if ( trRed == "nothick" )	// lane MATLOOK3: a thick object takes no sun (TRANSLUC1-THICK's red)
+				data.insert( data.indexOf( '\n' ) + 1, "#define WW_CELL_TRANSL_RED_NOTHICK 1\n" );
 		}
 		// lane MATLOOK3: hair's Kajiya-Kay lobe and the eye's cornea coat (ww_hair_eye.glsl); not static: the rows reload
 		if ( wwHairShaderDefine() && data.startsWith( "#version" ) && data.contains( "_CELL_HAIRKK" ) ) {
