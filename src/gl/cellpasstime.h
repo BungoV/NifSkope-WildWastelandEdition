@@ -73,6 +73,7 @@ enum CpuSub { CpuSetup, CpuCellUni, CpuSunUni, CpuFogUni, CpuAoDraw, CpuSsrDraw,
 	CpuBlGeo, CpuBlRow,	// lane BINDLESSPERF1: a bindless draw's pooled geometry bind and its row write
 	CpuSunCasters, CpuSunTerrStep, CpuCloudShadow, CpuFarGroundPass,	// lane PERFFIX2 b: the sun-cascades zone's parts
 	CpuWater, CpuUnder,	// lane PERFFIX3: the water's colour draws (setup + issue), the under-water decision + pass
+	CpuSunWalk, CpuCe1Tail,	// lane PERFHUNT2: the casters' scene walk inside sun-casters; the CE1 setup's per-shape tail inside setup
 	CpuSubCount };
 qint64 nowNs();
 void cpuSubAdd( int sub, qint64 ns );

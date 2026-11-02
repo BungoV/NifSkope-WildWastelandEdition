@@ -1026,6 +1026,7 @@ static void sunShadowPassImpl( Scene * scene )
 		long long oneTris = 0;
 		std::vector<std::pair<long long, QString>> top;
 	} ic;
+	const qint64 walkT0 = PassTime::on() ? PassTime::nowNs() : 0;	// lane PERFHUNT2: `cpu sun-walk`, the walk inside sun-casters
 	for ( Node * node : scene->nodes.list() ) {
 		if ( sunlitInt ) {
 			const Shape * cs = dynamic_cast<const Shape *>( node );
@@ -1098,6 +1099,8 @@ static void sunShadowPassImpl( Scene * scene )
 		s.tris += sh->wwFarInstData() ? int( sh->wwFarInstData()->drawnTris ) : int( sh->triangles.size() );
 		casters.push_back( std::move( c ) );
 	}
+	if ( walkT0 )
+		PassTime::cpuSubAdd( PassTime::CpuSunWalk, PassTime::nowNs() - walkT0 );
 	s.casters = int( casters.size() );
 	s.decalsSkipped = decalsSkipped;
 	if ( sunlitInt ) {

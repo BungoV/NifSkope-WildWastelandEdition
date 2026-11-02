@@ -2367,6 +2367,7 @@ bool Renderer::setupProgramCE1( const NifModel * nif, Program * prog, Shape * me
 			wwCellLightsUniforms( scene );	// lane PRTP3: a no-op unless this is fo4_cell.prog
 			wwSunShadowUniforms( scene );	// lane SUNCELL1: a no-op unless this is a cascade program (fo4_cellcsm, fo4_csm, fo4_fogcsm)
 		} );
+		PassTime::DrawCpuScope tailT( PassTime::CpuCe1Tail );	// lane PERFHUNT2: `cpu ce1-tail`, the per-shape rest
 		const bool uniRed = wwCellUniRed();	// lane CELLUNI3: the tail's scalars through the program's cache
 		WwCellUni::state().red = uniRed;
 		const WwCellUni::Scope tailScope( WwCellUni::Tail );
