@@ -4,7 +4,7 @@ BSD License - see nifskope.h
 
 ***** END LICENCE BLOCK *****/
 
-// lane VOLFIT1: the Space stage (probevolumes.h)
+// the Space stage (probevolumes.h)
 
 #include "probevolumes.h"
 
@@ -42,9 +42,9 @@ constexpr double kPi = 3.14159265358979323846;
 constexpr int kSkyRays = 32, kWallRays = 16;
 constexpr int kStageVersion = 2;   // 2: lane VOLRAY1 (ray refine, z clip)
 
-//! lane VOLFIT6: a worker of the room fan-out runs its inner fan-outs on itself
+//! a worker of the room fan-out runs its inner fan-outs on itself
 thread_local bool tlVolSerial = false;
-//! lane ROOMFIT8: ... or shares the machine with the rooms still running (the last rooms get the freed threads)
+//! ... or shares the machine with the rooms still running (the last rooms get the freed threads)
 thread_local const std::atomic<int> * tlVolActive = nullptr;
 
 void volParallel( size_t n, const std::function<void( size_t )> & fn )
@@ -141,7 +141,7 @@ QJsonObject shapeJson( const ProbeVolumeShape & s )
 	o.insert( QStringLiteral( "center" ), vec3( s.center ) );
 	o.insert( QStringLiteral( "size" ), vec3( s.size ) );
 	o.insert( QStringLiteral( "rotation" ), vec3( s.rotation ) );
-	if ( s.hull ) {   // lane VOLPLACE2: a threshold snapped to its opening's frame
+	if ( s.hull ) {   // a threshold snapped to its opening's frame
 		QJsonArray c;
 		for ( int k = 0; k < 8; k++ )
 			c.append( vec3( s.corners[k] ) );
@@ -193,7 +193,7 @@ bool shapeFromJson( const QJsonObject & o, ProbeVolumeShape * s, QStringList * l
 	return true;
 }
 
-//! lane VOLPLACE2: inside the 8-corner hexahedron (bit 0 x, bit 1 y, bit 2 z): on the centroid's side of its 12 triangles
+//! inside the 8-corner hexahedron (bit 0 x, bit 1 y, bit 2 z): on the centroid's side of its 12 triangles
 bool hullContains( const float c[8][3], const float p[3] )
 {
 	static const int q[6][4] = { { 0, 2, 6, 4 }, { 1, 5, 7, 3 }, { 0, 4, 5, 1 }, { 2, 3, 7, 6 }, { 0, 1, 3, 2 }, { 4, 6, 7, 5 } };
@@ -446,23 +446,20 @@ bool probeVolumesBuild( const ProbeSoup & soup, const std::vector<ProbeVolumeMar
 	if ( red == QLatin1String( "nomerge" ) )
 		spec.mergeShare = 2.0f;
 	const bool useFloor = red != QLatin1String( "nofloor" );
-	/* lane VOLPLACE2 (bungo 10-28: "use as few of these as possible, to wholly fill the room"): rooms parted only at
-	 * walls, each room's boxes square to its own walls, the fewest boxes that fill it, thresholds fitted to the open
-	 * hole. The default; any red keeps the stages as they were ("volplace1" = VOLPLACE1's bytes).
-	 * Knobs WW_VOLFIT_SPEC=join=0,joinwall=0.5,joinmin=4,jointop=0,joinlog=1,wallyaw=0,yawshare=0.35,openfit=0,greedy2=6,
-	 * place2fine=0 */
+	// rooms parted only at walls, each room's boxes square to its own walls, the fewest boxes that fill it,
+	// thresholds fitted to the open hole.
 	const bool place2 = red.isEmpty();
 	bool joinOn = true, wallYawOn = true, openFitOn = true, joinTop = true, joinLog = false;
 	/* knob greedy2 (bits): 1 cover to 97 % (off: it laid extra boxes, the store's main room 2 -> 1 box without it),
 	 * 2 the slab test on the room's own air, 4 the 3 % stop */
 	int greedyBits = 6;
 	double joinWall = 0.5, joinMin = 4, yawShare = 0.35;
-	/* VOLPLACE2 (bungo 10-28): a roofed room must fit a standing person: clear height >= minHeight and a floor of
+	/* VOLPLACE2: a roofed room must fit a standing person: clear height >= minHeight and a floor of
 	 * >= minFloor u2 (the store's fire escape: a 244 x 244 x 122 u landing under the landing above read as a room) */
 	double minHeight = 180.0, minFloor = 14884.0;
 	int rejHeight = 0, rejFloor = 0;
 	bool stripOn = true, rimOn = true;
-	bool personAll = true;   // VOLPLACE2 (bungo 10-29 "the same issues"): the person rule for EVERY room, not only roofed ones
+	bool personAll = true;   // the person rule for EVERY room, not only roofed ones
 	for ( const QString & kv : qEnvironmentVariable( "WW_VOLFIT_SPEC" ).split( QLatin1Char( ',' ), Qt::SkipEmptyParts ) ) {
 		const QString k = kv.section( QLatin1Char( '=' ), 0, 0 ).trimmed();
 		const double x = kv.section( QLatin1Char( '=' ), 1 ).toDouble();
@@ -527,7 +524,7 @@ bool probeVolumesBuild( const ProbeSoup & soup, const std::vector<ProbeVolumeMar
 		V.error = R.error;
 		return false;
 	}
-	probeGiRoomsOffer( soup, rs, R );   // lane GAPPERF1: GI and Space share one grid when clip and cell agree
+	probeGiRoomsOffer( soup, rs, R );   // GI and Space share one grid when clip and cell agree
 	V.roomsLine = probeRoomsCensusText( R );
 	V.msRooms = clock.nsecsElapsed() / 1e6;
 	const float C = R.cell;
@@ -901,12 +898,8 @@ bool probeVolumesBuild( const ProbeSoup & soup, const std::vector<ProbeVolumeMar
 			if ( lab[i] > 0 && !info.count( lab[i] ) )
 				lab[i] = -1;
 	}
-	/* lane VOLPLACE2: the watershed parts one open floor at a pinch where no wall stands (the Concord store: five rooms
-	 * and free-standing thresholds on one floor). A real opening sits in a wall: around the side faces two rooms share,
-	 * the rim (the next face positions in the plane that touch solid: left, right, above, below) is mostly wall that parts the two rooms
-	 * (a solid cell with one room's air behind it and the other's in front, within 3 cells), and a door or window has a
-	 * lintel (the rim above is such a wall). Two rooms (neither roofed) sharing at least joinMin side faces are one when
-	 * the parting wall holds under joinWall of their rim, or (jointop=1) under half of the rim above */
+	// the watershed parts one open floor at a pinch where no wall stands (the Concord store: five rooms and
+	// free-standing thresholds on one floor).
 	if ( place2 && joinOn ) {
 		QElapsedTimer jc;
 		jc.start();
@@ -1116,10 +1109,8 @@ bool probeVolumesBuild( const ProbeSoup & soup, const std::vector<ProbeVolumeMar
 		for ( const auto & f : into )
 			info.erase( f.first );
 	}
-	/* VOLPLACE2 (bungo 10-29): air pockets sealed inside props (a sign box, a car, the space under a roof's skin) passed as
-	 * enclosed/sealed rooms and drew boxes in the street. After the joins and folds, a room nobody can stand in is no
-	 * room: under minHeight of clear air in its tallest column, or a floor under minFloor. Touching the outside: outdoor
-	 * air (0); else no air (-1, as inside a rock) */
+	// VOLPLACE2: air pockets sealed inside props (a sign box, a car, the space under a roof's skin) passed as
+	// enclosed/sealed rooms and drew boxes in the street.
 	int rejAllHeight = 0, rejAllFloor = 0;
 	if ( place2 && personAll ) {
 		/* the floor counts only the columns a person stands in: an unbroken run of air at least minHeight tall (a pocket
@@ -1530,12 +1521,12 @@ bool probeVolumesBuild( const ProbeSoup & soup, const std::vector<ProbeVolumeMar
 		*oa = float( double( inOther ) / n );
 		*os = float( double( inSolid ) / double( std::max<qint64>( 1, inAll ) ) );
 	};
-	// lane VOLRAY1: a cell any triangle touches is solid, so every grown face stops about a cell short of the wall.
+	// a cell any triangle touches is solid, so every grown face stops about a cell short of the wall.
 	// Rays from inside each face, along its normal, move it onto the real triangles (src/probevolcheck.cpp judges it).
 	const bool refineOn = red != QLatin1String( "norefine" ) && !soup.tris.empty();
-	// lane VOLFIT2: the fine lattice fit replaces the per-face refine (red "nofine" keeps the VOLRAY1 refine)
+	// the fine lattice fit replaces the per-face refine (red "nofine" keeps the VOLRAY1 refine)
 	const bool fineOn = refineOn && red != QLatin1String( "nofine" );
-	// lane VOLFIT3: the fine fit moves the refined grid shapes on volcheck's lattice (red "volfit2": VOLFIT2's fit)
+	// the fine fit moves the refined grid shapes on volcheck's lattice (red "volfit2": VOLFIT2's fit)
 	const bool legacyFine = red == QLatin1String( "volfit2" );
 	const double rC = double( C );
 	probebvh::Bvh rb;
@@ -1581,10 +1572,8 @@ bool probeVolumesBuild( const ProbeSoup & soup, const std::vector<ProbeVolumeMar
 		const size_t i = V.index( g[0], g[1], g[2] );
 		return st[i] ? 3 : V.labels[i] == room ? 1 : V.labels[i] >= 0 ? 2 : 3;
 	};
-	// free run past each sample's face point: the first triangle, or 1 unit into a sibling shape the ray enters; a
-	// sample whose face already touches a sibling is inside the room's union and has no say (NaN). The grid guards
-	// both ways: a face point in the room's own air never shrinks (a lamp or a beam inside the room is not its wall),
-	// a grow stops where the grid turns to other air (a doorway), a shrink stops at the room's own air.
+	// free run past each sample's face point: the first triangle, or 1 unit into a sibling shape the ray
+	// enters; a sample whose face already touches a sibling is inside the room's union and has no say (NaN).
 	auto freeRuns = [&]( const std::vector<RSample> & smp, const std::vector<const ProbeVolumeShape *> & sib, int room ) {
 		std::vector<double> run( smp.size() );
 		volParallel( ( smp.size() + 255 ) / 256, [&]( size_t blk ) {
@@ -1870,7 +1859,7 @@ bool probeVolumesBuild( const ProbeSoup & soup, const std::vector<ProbeVolumeMar
 				}
 			}
 	};
-	/* lane VOLPLACE2: each room's wall yaw. The area of the vertical triangles beside its air (a cell of the room within
+	/* each room's wall yaw. The area of the vertical triangles beside its air (a cell of the room within
 	 * one of the triangle's middle), by their normal's yaw mod 90; the best three degrees holding yawShare of it set the
 	 * room's frame (the store's walls stand at 50.5 degrees, its footprint read 45 and 0) */
 	std::vector<std::array<double, 90>> wallHist( place2 && wallYawOn ? V.rooms.size() : 0 );
@@ -1921,7 +1910,7 @@ bool probeVolumesBuild( const ProbeSoup & soup, const std::vector<ProbeVolumeMar
 	std::atomic<int> wallYawRooms( 0 );
 	std::vector<double> roomYaw( V.rooms.size(), 0.0 );
 	std::vector<char> keepGrid( V.rooms.size(), 0 );
-	// lane VOLFIT6: the fit stage's profile (wall ms): before the rooms, the room loop and its ray refine, the thresholds
+	// the fit stage's profile (wall ms): before the rooms, the room loop and its ray refine, the thresholds
 	QElapsedTimer pf;
 	pf.start();
 	const double msPre = clock.nsecsElapsed() / 1e6;
@@ -2043,7 +2032,7 @@ bool probeVolumesBuild( const ProbeSoup & soup, const std::vector<ProbeVolumeMar
 		const std::vector<qint32> tRoom = table( [&]( size_t i ) { return lc[i] == 1; } );
 		const std::vector<qint32> tOther = table( [&]( size_t i ) { return lc[i] == 2; } );
 		const std::vector<qint32> tSolid = table( [&]( size_t i ) { return lc[i] == 3; } );
-		// VOLPLACE2: a roofed room (street air under a roof) keeps the old slab test: its walls are not all there, and
+		// a roofed room (street air under a roof) keeps the old slab test: its walls are not all there, and
 		// Goodneighbor's 4,-2 street grew two boxes up to 2146 u long into the open (pokes 480 -> 2565 M u3)
 		const bool slab2 = place2 && ( greedyBits & 2 ) && rm.source != QLatin1String( "roofed" );
 		std::vector<quint8> covered( NL, 0 );
@@ -2124,7 +2113,7 @@ bool probeVolumesBuild( const ProbeSoup & soup, const std::vector<ProbeVolumeMar
 						}
 						const qint64 vol = qint64( sh[0] - sl[0] + 1 ) * ( sh[1] - sl[1] + 1 ) * ( sh[2] - sl[2] + 1 );
 						const qint64 m = sum( tRoom, sl, sh ), o = sum( tOther, sl, sh ), s = sum( tSolid, sl, sh );
-						// VOLPLACE2: a slab may hold solid (clutter, the wall's jags) while a quarter of it is the room's own air
+						// a slab may hold solid (clutter, the wall's jags) while a quarter of it is the room's own air
 						if ( m == 0 || double( o ) > spec.slabOther * double( m + o ) || ( slab2 ? m * 4 < vol : s * 2 > vol ) )
 							continue;
 						const double fill = double( m ) / double( vol );
@@ -2199,7 +2188,7 @@ bool probeVolumesBuild( const ProbeSoup & soup, const std::vector<ProbeVolumeMar
 					}
 				}
 				const qint64 gain = wedge ? 0 : gainBox;
-				/* VOLPLACE2 (bungo 10-28, store room 0x000F: "it'd be two rectangles here"): under the 3 % stop, a leftover
+				/* under the 3 % stop, a leftover
 				 * strip of the room's air wider than one cell on both floor axes still gets its own box (knob strip=0) */
 				const bool strip = place2 && stripOn && ( greedyBits & 4 ) && hi[0] - lo[0] >= 1 && hi[1] - lo[1] >= 1
 					&& gain >= 2 * ( hi[2] - lo[2] + 1 );
@@ -2298,7 +2287,7 @@ bool probeVolumesBuild( const ProbeSoup & soup, const std::vector<ProbeVolumeMar
 			for ( int a = 0; a < 2; a++ )
 				for ( int hm = 0; hm < 2; hm++ )
 					alts.push_back( { wedgeShape( rlo, rhi, a, hm == 1 ) } );
-			// lane VOLFIT1: a gabled room: walls to the eaves (the top level still filling 90 % of the footprint),
+			// a gabled room: walls to the eaves (the top level still filling 90 % of the footprint),
 			// the roof's two halves above, high at the ridge
 			if ( useWedge ) {
 				std::vector<quint8> foot( size_t( L.X ) * size_t( L.Y ), 0 );
@@ -2387,7 +2376,7 @@ bool probeVolumesBuild( const ProbeSoup & soup, const std::vector<ProbeVolumeMar
 		rm.overshootAir = oa;
 		rm.overshootSolid = os;
 	};
-	// lane VOLFIT6: rooms side by side, the biggest first, each on one worker. A room reads only the shared grid and tree
+	// rooms side by side, the biggest first, each on one worker. A room reads only the shared grid and tree
 	// and writes only its own slots, so the order changes no byte (WW_VOLFIT_SPEC=roompar=0: one at a time, inner fan-outs)
 	bool roomPar = true, roomShare = true;   // ROOMFIT8 roomshare=0: VOLFIT6's serial inner fan-outs
 	for ( const QString & kv : qEnvironmentVariable( "WW_VOLFIT_SPEC" ).split( QLatin1Char( ',' ), Qt::SkipEmptyParts ) ) {
@@ -2423,7 +2412,7 @@ bool probeVolumesBuild( const ProbeSoup & soup, const std::vector<ProbeVolumeMar
 	}
 	const double msRooms = pf.nsecsElapsed() / 1e6;
 	pf.start();
-	// lane VOLRAY1: a threshold from the cell faces leans with the stepped boundary and is one cell thick. Square it to
+	// a threshold from the cell faces leans with the stepped boundary and is one cell thick. Square it to
 	// its room, then fit it by rays to the opening: jamb to jamb, floor to lintel, through the wall.
 	if ( refineOn )
 		for ( ProbeVolumeThreshold & t : V.thresholds ) {
@@ -2525,7 +2514,7 @@ bool probeVolumesBuild( const ProbeSoup & soup, const std::vector<ProbeVolumeMar
 			t.shape.rotation[0] = t.shape.rotation[1] = 0.0f;
 			t.shape.rotation[2] = float( psi );
 		}
-	// lane VOLFIT2: the rooms refitted on a fine lattice; the fitted thresholds part the floods (the threshold fit reads
+	// the rooms refitted on a fine lattice; the fitted thresholds part the floods (the threshold fit reads
 	// only the rooms' yaw, which the fine shapes keep)
 	const double msThr = pf.nsecsElapsed() / 1e6;
 	QString prof = QStringLiteral( "; fit ms pre %1 rooms %2 (refine %3 summed, longest room %5) thresholds %4" ).arg( qRound( msPre ) )
@@ -2590,12 +2579,12 @@ bool probeVolumesBuild( const ProbeSoup & soup, const std::vector<ProbeVolumeMar
 			return l > 0 ? ( n[0] * d[0] + n[1] * d[1] + n[2] * d[2] ) / l : 1.0;
 		};
 		ProbeFineSpec spec;
-		/* lane VOLPLACE2: the fine fit moves each room's own boxes onto the walls and merges them, but adds no lattice
+		/* the fine fit moves each room's own boxes onto the walls and merges them, but adds no lattice
 		 * boxes (extras 0: they were the thin slabs in open floor); knob place2fine=0 skips the fine fit */
 		bool place2Fine = true;
 		if ( place2 )
 			spec.extras = 0;
-		// lane VOLPLACE1: the wall placement pass after the fit (knobs place=0 off, placepad, placeq; red "noplace")
+		// the wall placement pass after the fit (knobs place=0 off, placepad, placeq; red "noplace")
 		bool placeOn = !legacyFine && red != QLatin1String( "noplace" );
 		double placePad = rC * 0.5, placeQ = 0.1;
 		// a tuning pin for the gate runs: WW_VOLFIT_SPEC=h=16,boxes=64,gain=12288,grow=4,reach=3
@@ -2652,16 +2641,7 @@ bool probeVolumesBuild( const ProbeSoup & soup, const std::vector<ProbeVolumeMar
 			rm.overshootAir = oa;
 			rm.overshootSolid = os;
 		}
-		/* lane VOLPLACE1 (bungo 10-28: "Those volumes have incorrect placement"): each box face onto the room's real wall,
-		 * floor or ceiling, padded into it. Per face, rays from the box's middle plane along the face normal find the
-		 * first surface whose far side is not the room's own air (a shelf or a counter with the room behind it is
-		 * skipped) and that wall's thickness (to its back face within 256; a one-sided wall has none and takes no pad).
-		 * The face goes to the front of the walls (the placeQ quantile of the samples) plus min(placePad, half the median
-		 * thickness), never past the middle of a wall at or beyond that plane. A shrink needs 60 % of the face's samples
-		 * with the wall inside the box and not the room's own air at the face (clutter in the room never pulls it in); a
-		 * grow never sweeps another room's air or the outdoors and stops short of other rooms' shapes (as fitted, before
-		 * the pass); a face that is mostly open (doorways, the street, a threshold) stays. A face within 2 units stays,
-		 * and a box another box of its room then holds whole is dropped. Boxes only (wedges and cylinders keep theirs). */
+		// each box face onto the room's real wall, floor or ceiling, padded into it.
 		int placeFaces = 0, placeMoved = 0, placeGrown = 0, placeShrunk = 0, placeOpen = 0, placeDropped = 0, placeRooms = 0, placeTrim = 0;
 		double msPlace = 0;
 		if ( placeOn ) {
@@ -2830,7 +2810,7 @@ bool probeVolumesBuild( const ProbeSoup & soup, const std::vector<ProbeVolumeMar
 						std::sort( st2.begin(), st2.end() );
 						const double tq = sw[size_t( std::floor( placeQ * double( nw - 1 ) ) )];
 						const double thMed = st2[nw / 2];
-						/* lane VOLPLACE2: a face with an opening takes no pad (the padded strip over the opening is outdoor air:
+						/* a face with an opening takes no pad (the padded strip over the opening is outdoor air:
 						 * the synth church and turned rooms poked 1-2 samples there) */
 						double target = tq + ( place2 && nOpen ? 0.0 : std::min( placePad, 0.5 * thMed ) );
 						for ( size_t i = 0; i < nw; i++ )   // never past the middle of a wall at or beyond the plane
@@ -3028,11 +3008,7 @@ bool probeVolumesBuild( const ProbeSoup & soup, const std::vector<ProbeVolumeMar
 			placeTrim = placeTrimmed;
 			msPlace = pc.nsecsElapsed() / 1e6;
 		}
-		/* lane VOLPLACE2 (bungo 10-28: "it doesn't cover just the hole in the boarded up window"): a threshold holds only
-		 * the open part of its opening. 16 x 16 rays along its normal through its depth (+16 each side): a sample is open
-		 * when no solid triangle crosses it (glass panes pass light and stay in). Up to 4 all-open rectangles, the largest
-		 * first, until 90 % of the open samples are held (a further piece only for 15 % of them), replace it; shut (< 3 open)
-		 * or 95 % open ones stay as fitted */
+		// a threshold holds only the open part of its opening.
 		if ( place2 && openFitOn ) {
 			QElapsedTimer oc;
 			oc.start();
@@ -3147,12 +3123,7 @@ bool probeVolumesBuild( const ProbeSoup & soup, const std::vector<ProbeVolumeMar
 				.arg( nPieces ).arg( nThr ? shareBefore / nThr : 0.0, 0, 'f', 3 ).arg( nThr ? shareAfter / nThr : 0.0, 0, 'f', 3 )
 				.arg( qRound( oc.nsecsElapsed() / 1e6 ) );
 		}
-		/* VOLPLACE2 (bungo 10-28, his hand-made store doorway 'TEST': "it conforms to the real geometry"): a threshold
-		 * is the opening snapped to its frame. Each wall face is a line fitted to rays beside and over the hole (so it
-		 * carries the wall's turn and thickness); each jamb is found along each face, the sill and the head over each
-		 * jamb: 8 corners. Its box becomes the corners' box in the wall's frame (what the GI mask reads: the wall's angle
-		 * and depth). A hole whose floor runs on through the wall on both sides is a door. Left as it was when a face or
-		 * a jamb is not found, the wall is under 4 or over 80 u thick, or the corners are not convex (knob rim=0) */
+		// a threshold is the opening snapped to its frame.
 		if ( place2 && rimOn ) {
 			QElapsedTimer rc;
 			rc.start();
@@ -3400,7 +3371,7 @@ bool probeVolumesBuild( const ProbeSoup & soup, const std::vector<ProbeVolumeMar
 		V.msFine = fc.nsecsElapsed() / 1e6;
 		prof += QStringLiteral( " scene %1 fine %2 measure %3;" ).arg( qRound( msScene ) ).arg( qRound( fs.msWall ) ).arg( qRound( pf.nsecsElapsed() / 1e6 ) )
 			+ fs.prof;
-		if ( fg.scene )   // ROOMFIT10: the fit's own ray census (sure, re-cast, the check's unlike answers)
+		if ( fg.scene )   // the fit's own ray census (sure, re-cast, the check's unlike answers)
 			prof += QStringLiteral( "; " ) + QString::fromStdString( bakert::census( "fit", *fg.scene ) );
 	}
 	if ( place2 )
@@ -3669,7 +3640,7 @@ QByteArray probeVolumesJson( const ProbeVolumes & v, const QString & key, const 
 		o.insert( QStringLiteral( "classify" ), cls );
 		o.insert( QStringLiteral( "bounds" ), QJsonArray { vec3( r.lo ), vec3( r.hi ) } );
 		o.insert( QStringLiteral( "evidence" ), QJsonArray::fromStringList( r.evidence ) );
-		if ( !r.group.isEmpty() )	// lane VOLVIEW2
+		if ( !r.group.isEmpty() )
 			o.insert( QStringLiteral( "group" ), r.group );
 		rooms.append( o );
 	}
@@ -3772,7 +3743,7 @@ ProbeVolumesInputs probeVolumesInputs( const ProbeSoup & soup, const std::vector
 			sha( h, d.lo, 12 );
 			sha( h, d.hi, 12 );
 		}
-		// lane ROOMFIT9: two-sided and masked triangles by index, so a soup read back (tails padded to every triangle)
+		// two-sided and masked triangles by index, so a soup read back (tails padded to every triangle)
 		// hashes as the one the view wrote
 		for ( size_t i = 0; i < soup.twoSided.size(); i++ )
 			if ( soup.twoSided[i] ) {
@@ -3906,7 +3877,7 @@ bool probeVolumesMarkersWrite( const QString & path, const std::vector<ProbeVolu
 	if ( !f.open( QIODevice::WriteOnly | QIODevice::Truncate ) )
 		return false;
 	QTextStream s( &f );
-	s.setRealNumberPrecision( 9 );   // lane ROOMFIT9: floats round-trip (6 digits moved the CLI's fit off the view's)
+	s.setRealNumberPrecision( 9 );   // floats round-trip (6 digits moved the CLI's fit off the view's)
 	for ( const ProbeVolumeMarker & m : ms ) {
 		s << m.type << ' ' << m.ref << ' ' << m.from << ' ' << m.to;
 		for ( float v : m.c )
@@ -3949,7 +3920,7 @@ bool probeVolumesMarkersRead( const QString & path, std::vector<ProbeVolumeMarke
 	return true;
 }
 
-// lane ROOMFIT9: 9 significant digits round-trip a float exactly
+// 9 significant digits round-trip a float exactly
 static QString exactF( float v )
 {
 	return QString::number( double( v ), 'g', 9 );
@@ -4125,7 +4096,7 @@ int probeVolumesCli( const QStringList & args )
 		for ( int y = int( std::floor( rc[1] / 4096.0 ) ); y <= int( std::floor( rc[3] / 4096.0 ) ); y++ )
 			for ( int x = int( std::floor( rc[0] / 4096.0 ) ); x <= int( std::floor( rc[2] / 4096.0 ) ); x++ )
 				st.keys << QStringLiteral( "%1_%2" ).arg( x ).arg( y );
-	if ( !likeCell.isEmpty() ) {   // lane ROOMFIT9: the view's own stage inputs, not a rect's guess at them
+	if ( !likeCell.isEmpty() ) {   // the view's own stage inputs, not a rect's guess at them
 		ProbeVolumesStageSpec in;
 		if ( !probeVolumesStageInRead( likeCell, &apertures, &in ) ) {
 			o << "volumes: cannot read the stage inputs " << likeCell << "\n";
@@ -4260,7 +4231,7 @@ QString probeVolumesStage( const ProbeSoup & soup, const std::vector<ProbeVolume
 				for ( const QString & l : probeVolumesKeepIds( &v, k, prev ) )
 					o << "  ids " << k << ": " << l << "\n";
 		}
-	/* lane VOLVIEW2: the building each room belongs to, across cells (after the ids: a group is named by a kept id).
+	/* the building each room belongs to, across cells (after the ids: a group is named by a kept id).
 	 * Red WW_CELL_VOLUMES_RED=nogroup: no group field (the files as before the lane, byte for byte) */
 	if ( spec.red != QLatin1String( "nogroup" ) )
 		o << "  groups " << probeVolumesGroups( &v ) << " of " << v.rooms.size() << " rooms\n";

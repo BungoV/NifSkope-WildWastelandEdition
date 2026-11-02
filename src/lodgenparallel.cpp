@@ -5,7 +5,7 @@ BSD License - see nifskope.h
 ***** END LICENCE BLOCK *****/
 
 #include "lodgenparallel.h"
-#include "wwswitch.h"	// lane TESTDRIVER1: the WW_* switch store
+#include "wwswitch.h"	// the WW_* switch store
 
 #include <QByteArray>
 #include <QElapsedTimer>
@@ -40,18 +40,8 @@ int g_chunkThreads = 1;                     //!< ONE: safe at 16, but slower
 qint64 g_chunkTexBudgetBytes = qint64( 512 ) << 20;   //!< what the cap is computed against
 thread_local bool tlsInWorker = false;
 
-/*! The fan-out's own pool, PERSISTENT.
- *
- *  It used to create a fresh QThread per call and join it. The BC writers call
- *  the fan-out once per MIP of every sheet, so that was thousands of thread
- *  creations for block rows that encode in less time than a CreateThread takes
- *  -- measured as a 54 percent REGRESSION in the texture stage (5.2 s -> 8.0 s
- *  on the nine-chunk region) before this pool existed.
- *
- *  Its own pool rather than the global one, because the global instance's size
- *  is other code's business. Expiry disabled so the threads survive between
- *  calls. Nothing nested ever reaches it: a caller already inside a generator
- *  worker takes the serial path, so the pool cannot saturate against itself. */
+//! The fan-out's own pool, PERSISTENT:
+//! It used to create a fresh QThread per call and join it.
 QThreadPool & forPool()
 {
 	static QThreadPool pool;
@@ -64,8 +54,8 @@ QThreadPool & forPool()
 	return pool;
 }
 
-/*! lane BAKESPEED2: the pool of lodgenParallelForOuter. Its threads are NOT generator workers, so a
- *  lodgenParallelFor inside one fans out on forPool(); forPool tasks never wait, so the two cannot deadlock. */
+/*! the pool of lodgenParallelForOuter. Its threads are NOT generator workers, so a
+ *  lodgenParallelFor inside one fans out on forPool; forPool tasks never wait, so the two cannot deadlock. */
 QThreadPool & outerPool()
 {
 	static QThreadPool pool;
@@ -129,7 +119,7 @@ int lodgenThreadCount()
 }
 
 //! Set true by the CLI/panel only, so the census can tell the SHIPPED default
-//! apart from a 1 somebody typed (lane RESUME3, 2026-09-11).
+//! apart from a 1 somebody typed.
 static bool g_chunkThreadsAsked = false;
 
 void lodgenSetChunkThreadCount( int n )
@@ -138,10 +128,8 @@ void lodgenSetChunkThreadCount( int n )
 	g_chunkThreadsAsked = true;
 }
 
-//! The per-worker plugin reader, MEASURED: a load-plus-one-chunk run peaks
-//! at 336 MB and the marginal cost of a second world is ~250 MB (BAKEPERF1,
-//! 2026-09-11 section 3.10). Not an estimate, and not a round number chosen
-//! to make the arithmetic come out.
+//! The per-worker plugin reader, MEASURED: a load-plus-one-chunk run peaks at 336 MB and the marginal cost of a
+//! second world is ~250 MB (BAKEPERF1, 2026-09-11 section 3.10).
 static const qint64 kWorkerWorldBytes = qint64( 250 ) << 20;
 
 //! Which bound decided the count, for the census line.
@@ -177,7 +165,7 @@ int lodgenChunkThreadCount()
 {
 	int n = g_chunkThreads;
 	if ( !g_chunkThreadsAsked && !lodgenBakeSpeedRed() ) {
-		/* lane BAKESPEED1: eight by default (a worker measured ~0.5 GB in the chunk pass; the workers' inner
+		/* eight by default (a worker measured ~0.5 GB in the chunk pass; the workers' inner
 		 * loops share the pool), never past what free memory holds; red keeps the old one */
 		const int cap = lodgenChunkThreadMemoryCap( g_chunkTexBudgetBytes );
 		g_chunkBoundBy = ( cap < 8 ) ? QStringLiteral( "memory" ) : QStringLiteral( "default" );
@@ -188,14 +176,7 @@ int lodgenChunkThreadCount()
 			: QStringLiteral( "default" );
 		return n;
 	}
-	/* 0 or negative used to mean "the machine". It cannot: each chunk worker
-	 * owns its own plugin reader AND its own texture cache, so sixteen of
-	 * them is ~12 GB of FIXED overhead before one chunk of state -- 21.9 GB
-	 * measured on twenty-five chunks, 70 percent of this machine. The count
-	 * is the smaller of the cores and what free memory can hold, and the
-	 * census says WHICH bound it was, so a run held back by memory reads as
-	 * held back by memory rather than as mysteriously slow.
-	 * (lane NIFPARSE1, 2026-09-11.) */
+	// 0 or negative used to mean "the machine".
 	const int cores = QThread::idealThreadCount();
 	const int cap = lodgenChunkThreadMemoryCap( g_chunkTexBudgetBytes );
 	g_chunkBoundBy = ( cap < cores ) ? QStringLiteral( "memory" ) : QStringLiteral( "cores" );
@@ -350,7 +331,7 @@ void lodgenMemNote( const QString & phase, const QString & extra )
 			.arg( n ).arg( busy >> 20 ).arg( big >> 20 ).arg( freeC >> 20 );
 	}
 #endif
-	// lane BAKESPEED1: wall and process CPU seconds, so a phase's cores-busy is dcpu / dt
+	// wall and process CPU seconds, so a phase's cores-busy is dcpu / dt
 	static QElapsedTimer & since = g_memSince;
 	double cpu = 0.0;
 #ifdef Q_OS_WIN32
@@ -469,10 +450,9 @@ struct LodgenWriter::Impl
 					item = std::move( impl->queue.front() );
 					impl->queue.pop_front();
 				}
-				/* QSaveFile with the direct-write fallback, exactly as
-				 * BaseModel::saveToFile does it, so a file that goes
-				 * through the queue lands the same way as one written
-				 * inline -- including under MO2's overlay. */
+				// QSaveFile with the direct-write fallback, exactly as BaseModel::saveToFile does it, so a
+				// file that goes through the queue lands the same way as one written inline -- including under
+				// MO2's overlay.
 				QSaveFile f( item.path );
 				f.setDirectWriteFallback( true );
 				bool ok = f.open( QIODevice::WriteOnly );

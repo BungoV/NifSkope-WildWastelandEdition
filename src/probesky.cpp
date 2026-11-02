@@ -1,21 +1,21 @@
-/* lane SKY1 (2026-10-02): the sky and the sun in the cell view's bounce light; see probesky.h. */
+/* the sky and the sun in the cell view's bounce light; see probesky.h. */
 
 #include "probesky.h"
-#include "wwswitch.h"	// lane TESTDRIVER1: the WW_* switch store
+#include "wwswitch.h"	// the WW_* switch store
 
 #include "esmweather.h"
 #include "gl/celllights.h"
-#include "gl/cellnifxlights.h"	// lane NIFXLIGHT2: Mesh lights relight the GI; the bulbs light the bounce
-#include "gl/celllooks.h"	// lane GPURELIGHT1: Probe sharing; lane LIGHTPHYS2: the light physics rows, compared live
+#include "gl/cellnifxlights.h"	// Mesh lights relight the GI; the bulbs light the bounce
+#include "gl/celllooks.h"	// Probe sharing; lane LIGHTPHYS2: the light physics rows, compared live
 #include "gl/cellprobeview.h"
 #include "gl/lookdevstage.h"
-#include "gl/atmosphere.h"	// SKY3: the physical sky's capture height
-#include "gl/cloudshadow.h"	// lane CLOUD3: the clouds over the eye dim the bounce's sun
+#include "gl/atmosphere.h"	// the physical sky's capture height
+#include "gl/cloudshadow.h"	// the clouds over the eye dim the bounce's sun
 #include "gl/scenelighting.h"
-#include "airzone.h"	// lane AIRZONE1: the hand-placed volumes' gi blocks on a relight
-#include "gl/cellairzone.h"	// lane AIRZONE1: the Air zones row
+#include "airzone.h"	// the hand-placed volumes' gi blocks on a relight
+#include "gl/cellairzone.h"	// the Air zones row
 #include "probegi.h"
-#include "gl/celllooks.h"	// lane LIGHTS5: the emittance row's live flip
+#include "gl/celllooks.h"	// the emittance row's live flip
 
 #include <QDir>
 #include <QElapsedTimer>
@@ -41,7 +41,7 @@ namespace
 {
 bool skyPicOn()
 {
-	// on by default since 2026-10-15 (bungo); WW_CELL_SKYPIC=0 gives the weather's flat ambient (SKY1)
+	// on by default since 2026-10-15; WW_CELL_SKYPIC=0 gives the weather's flat ambient
 	return !wwEnvIsSet( "WW_CELL_SKYPIC" ) || wwEnvInt( "WW_CELL_SKYPIC" ) == 1;
 }
 
@@ -81,7 +81,7 @@ QString picKeyNow()
 	const float z = captureZNow();
 	return wwLookdevSkyPictureKey() + ( skyPicFlat( f ) ? QStringLiteral( "|flat %1 %2 %3" ).arg( double( f[0] ) )
 		.arg( double( f[1] ) ).arg( double( f[2] ) ) : QString() )
-		// SKY3: only while the probes take the physical sky (the dome has no height; Off keeps today's key)
+		// only while the probes take the physical sky (the dome has no height; Off keeps today's key)
 		+ ( std::isfinite( z ) ? QStringLiteral( "|z %1" ).arg( double( z ), 0, 'f', 0 ) : QString() );
 }
 }	// namespace
@@ -153,15 +153,15 @@ ProbeSkyLight probeSkyLightNow()
 		s.sunTo[c] = float( dir[c] / std::max( dl, 1e-9 ) );
 		s.sun[c] = dif[c] * sunScale;
 	}
-	// lane CLOUD3: in 1/32 steps, so a change relights once (exactly 1 with Cloud Shadows off or red nogi)
+	// in 1/32 steps, so a change relights once (exactly 1 with Cloud Shadows off or red nogi)
 	if ( const float cloud = wwCloudShadowGiFactor(); cloud != 1.0f )
 		for ( float & v : s.sun )
 			v *= cloud;
 	s.label = QStringLiteral( "%1 hour %2%3" ).arg( wwLookdevWeatherKey() ).arg( wwLookdevHour(), 0, 'f', 2 )
 		.arg( fromWeather ? QString() : QStringLiteral( " (no weather record: the neutral light)" ) );
 	s.on = true;
-	s.vis = wwCellSkyVis();	// lane SKYSTR1: a change of the row relights as a change of weather does
-	// lane SKYPIC1: the drawn sky per direction, once a frame has captured it for this weather and hour
+	s.vis = wwCellSkyVis();	// a change of the row relights as a change of weather does
+	// the drawn sky per direction, once a frame has captured it for this weather and hour
 	float flat[3];
 	const bool haveFlat = skyPicFlat( flat );
 	if ( skyPicOn() ) {
@@ -182,7 +182,7 @@ ProbeSkyLight probeSkyLightNow()
 	return s;
 }
 
-/* lane SKYSTR1: an octant's sky visibility as the relight takes it -- the stored share, opened toward the free sky by
+/* an octant's sky visibility as the relight takes it -- the stored share, opened toward the free sky by
  * the Sky visibility row as FO4CS's Skylighting strength does (lerp(1, v, strength)); a full row leaves it bit for bit */
 static double octantVis( float v, const ProbeSkyLight & sky, bool redNoVis )
 {
@@ -198,7 +198,7 @@ void probeSkyCube( const float vis[8], const unsigned char ( *tint )[3], const P
 	bool redNoTint, double E[6][3] )
 {
 	const double kPi = 3.14159265358979323846;
-	if ( sky.pic ) {   // lane SKYPIC1: each octant's own drawn sky on this axis
+	if ( sky.pic ) {   // each octant's own drawn sky on this axis
 		for ( int a = 0; a < 6; a++ )
 			for ( int o = 0; o < 8; o++ ) {
 				const double s = octantVis( vis[o], sky, redNoVis );
@@ -228,10 +228,7 @@ void probeSkyCube( const float vis[8], const unsigned char ( *tint )[3], const P
 namespace
 {
 
-/* lane GIPROBE2: Probe light smoothing. A relight no longer pops: the published grid fades toward the new one, each
- * texel with its own time constant tau = kFadeTau / (1 + 4 c), c its relative luminance change (a big change settles
- * faster; the per-texel rate is our own choice after DDGI's per-probe hysteresis). Steps at most every kFadeStepMs,
- * then the exact new grid at kFadeEndMs (4 tau: within 2 %). Another publish (a door run, a reopen) ends it. */
+// Probe light smoothing.
 constexpr double kFadeTau = 1.0;
 constexpr qint64 kFadeStepMs = 66, kFadeEndMs = 4000;
 
@@ -253,11 +250,11 @@ struct Kept
 	QString bakeDir;
 	ProbeGiSpec spec;
 	ProbeSkyLight wanted;
-	bool skyKept = true;   // lane GPURELIGHT1: false = a cell kept only for Probe sharing or, lane LIGHTS5, for the emittance row (no weather relight)
+	bool skyKept = true;   // false = a cell kept only for Probe sharing or, lane LIGHTS5, for the emittance row (no weather relight)
 	QPointer<QTimer> timer;   // the view's child: it goes with the window
 	QPointer<QWindow> view;
-	Fade fade;   // lane GIPROBE2
-	int nifxStamp = 0;   // lane NIFXLIGHT2: the Mesh lights publish the kept bake was last relit with (0: as built)
+	Fade fade;
+	int nifxStamp = 0;   // the Mesh lights publish the kept bake was last relit with (0: as built)
 };
 
 Kept & kept()
@@ -266,7 +263,7 @@ Kept & kept()
 	return k;
 }
 
-/* SKY3: the physical sky's capture stands at the kept exterior's probes' median height. It took the view camera's: the
+/* the physical sky's capture stands at the kept exterior's probes' median height. It took the view camera's: the
  * probes' sky depended on where the camera was at the first capture (a raised camera thins the haze). Red
  * WW_ATMO_GI_RED=camz: the view's, as before. NaN while the dome is captured (no height) or no probe is known yet. */
 float captureZNow()
@@ -293,7 +290,7 @@ float captureZNow()
 	return z;
 }
 
-//! lane GIPROBE2: one smoothing step (or the snap to the target); false when no fade runs
+//! one smoothing step (or the snap to the target); false when no fade runs
 bool fadeStep( Kept & k, bool snap )
 {
 	Fade & f = k.fade;
@@ -342,7 +339,7 @@ bool fadeStep( Kept & k, bool snap )
 	return true;
 }
 
-//! lane GIPROBE2: start a fade from the grid on screen to `to` (moved in); gi.rgba becomes the grid on screen
+//! start a fade from the grid on screen to `to` (moved in); gi.rgba becomes the grid on screen
 void fadeBegin( Kept & k, const WwCellGi & was, WwCellGi & gi )
 {
 	Fade & f = k.fade;
@@ -359,7 +356,7 @@ void fadeBegin( Kept & k, const WwCellGi & was, WwCellGi & gi )
 	}
 }
 
-//! lane SKYPIC1: the relight that took the drawn sky states it, and a gate's dump folder gets it beside the bake's
+//! the relight that took the drawn sky states it, and a gate's dump folder gets it beside the bake's
 void skyPicRelit( const ProbeGiResult & gr, const ProbeGiSpec & spec )
 {
 	const ProbeSkyLight & s = spec.sky;
@@ -416,12 +413,12 @@ void relightKept( bool emitOnly = false )
 {
 	Kept & k = kept();
 	const WwCellLighting * L = k.nif ? wwCellLightsFor( k.nif ) : nullptr;
-	if ( !L || ( k.skyKept && L->interior && !k.spec.interiorSky && !emitOnly ) )   // lane SKYINT1: an interior that shows the sky too
+	if ( !L || ( k.skyKept && L->interior && !k.spec.interiorSky && !emitOnly ) )   // an interior that shows the sky too
 		return;
 	if ( k.skyKept )
 		k.spec.sky = k.wanted;
 	ProbeGiResult gr;
-	WwCellLighting withBulbs;   // lane NIFXLIGHT2: a .nifx bulb-tier light lights the bounce (never a surface directly)
+	WwCellLighting withBulbs;   // a .nifx bulb-tier light lights the bounce (never a surface directly)
 	const WwCellLighting & lit = wwNifxGiLights( *L, wwNifxLightsRed(), withBulbs ) ? withBulbs : *L;
 	if ( !probeGiRelight( k.soup, k.bakeDir, lit, k.spec, &gr ) )
 		return;
@@ -436,16 +433,16 @@ void relightKept( bool emitOnly = false )
 	gi.skyLit = gr.skyLit && !L->interior && k.spec.skyRed != QLatin1String( "keepamb" );
 	gi.summary = QStringLiteral( "grid %1x%2x%3 voxel %4" ).arg( gr.dims[0] ).arg( gr.dims[1] ).arg( gr.dims[2] )
 		.arg( double( gr.voxel ), 0, 'f', 1 );
-	probeGiAoFreeSwap( gr );	// lane AODECAL1: the kept spec carries the decal copies
+	probeGiAoFreeSwap( gr );	// the kept spec carries the decal copies
 	gi.rgba = std::move( gr.grid );
 	gi.sky = std::move( gr.gridSky );	// the Pass drop-down's sky share (weather-free, carried over)
-	if ( gr.roomsOn && wwAirZonesOn() ) {	// lane AIRZONE1: the hand-placed gi volumes, as the build merged them
+	if ( gr.roomsOn && wwAirZonesOn() ) {	// the hand-placed gi volumes, as the build merged them
 		if ( gr.volumes.shapes.empty() && gr.volumes.thresholds.empty() )
 			gr.volumes = giVolumesFromRooms( gr.rooms );	// the stand-in probeGiRoomsInto would take (the same call)
 		wwAirZoneGiApply( k.nif, gr.volumes, true );
 	}
-	probeGiRoomsInto( gr, gi );   // lane ROOMCLAMP1
-	// lane GIPROBE2: Probe light smoothing: the same grid shape on screen fades toward this relight
+	probeGiRoomsInto( gr, gi );
+	// Probe light smoothing: the same grid shape on screen fades toward this relight
 	const WwCellGi * was = wwLookOn( WwLook::ProbeSmooth ) ? wwCellGiFor( k.nif ) : nullptr;
 	const bool fading = was && was->rgba.size() == gi.rgba.size() && was->rgba != gi.rgba && was->voxel == gi.voxel
 		&& std::equal( was->dims, was->dims + 3, gi.dims ) && std::equal( was->origin, was->origin + 3, gi.origin );
@@ -496,8 +493,8 @@ void probeSkyForget()
 	if ( k.timer )
 		k.timer->stop();
 	k.nif = nullptr;
-	k.fade = Fade();   // lane GIPROBE2
-	k.nifxStamp = 0;   // lane NIFXLIGHT2
+	k.fade = Fade();
+	k.nifxStamp = 0;
 	picNow() = PicNow();
 }
 
@@ -511,7 +508,7 @@ const ProbeSoup * probeSkyKeptSoup( const void * nif, ProbeSkyLight * sky, WwCel
 		return nullptr;
 	if ( sky ) {
 		const bool skyLit = k.skyKept && !( L->interior && !k.spec.interiorSky );
-		// lane PRTOFF1: without the PRT no relight follows the weather, so the volume takes the sky as it is now
+		// without the PRT no relight follows the weather, so the volume takes the sky as it is now
 		*sky = !skyLit ? ProbeSkyLight() : wwCellPrtOn() ? k.spec.sky : probeSkyLightNow();
 	}
 	if ( lights ) {
@@ -531,11 +528,11 @@ void probeSkyKeep( const void * nif, const ProbeSoup & soup, const QString & bak
 	k.spec.record = nullptr;   // the caller's operators live on its stack; a later relight records nothing
 	k.wanted = spec.sky;
 	k.skyKept = skyKept;
-	k.fade = Fade();   // lane GIPROBE2: a new cell's grid is published whole
-	k.nifxStamp = 0;   // lane NIFXLIGHT2: the bake traced the lights as built
+	k.fade = Fade();   // a new cell's grid is published whole
+	k.nifxStamp = 0;   // the bake traced the lights as built
 }
 
-//! lane LIGHTPHYS2: a set of the light physics rows relights the kept bake at once (the lamp term only, no rebake)
+//! a set of the light physics rows relights the kept bake at once (the lamp term only, no rebake)
 bool cellFarLightRelit( const void * nif, const ProbeSoup & soup, const QString & giBakeDir );	// lane LIGHTPHYS4 (cellview.h)
 void wwDoorLiveRowsRelit( const void * nif, const WwCellGi * relit );	// lane LIGHTPHYS4 (celldoorlive.h)
 
@@ -544,7 +541,7 @@ static bool lightPhysRelit( const void * nif )
 	Kept & k = kept();
 	if ( !k.nif || k.nif != nif )
 		return false;
-	const bool far = cellFarLightRelit( nif, k.soup, k.bakeDir );	// lane LIGHTPHYS4: the far light keeps its own rows
+	const bool far = cellFarLightRelit( nif, k.soup, k.bakeDir );	// the far light keeps its own rows
 	if ( !wwCellGiOn() )
 		return far;
 	const wwlp::Params now = wwLightPhysParams();
@@ -553,11 +550,11 @@ static bool lightPhysRelit( const void * nif )
 	k.spec.lightPhys = now;
 	const int was = wwCellGiVersion( nif );
 	relightKept( true );
-	wwDoorLiveRowsRelit( nif, wwCellGiVersion( nif ) != was ? wwCellGiFor( nif ) : nullptr );	// lane LIGHTPHYS4
+	wwDoorLiveRowsRelit( nif, wwCellGiVersion( nif ) != was ? wwCellGiFor( nif ) : nullptr );
 	return true;
 }
 
-/* lane NIFXLIGHT2: a Mesh lights (.nifx) publish (the row toggled, a sidecar edited) relights the kept bake at once, as
+/* a Mesh lights (.nifx) publish (the row toggled, a sidecar edited) relights the kept bake at once, as
  * the light physics rows do: the lamp term only, no rebake. Red WW_NIFX_LIGHTS_RED=norelight: the GI keeps the old lights. */
 static bool nifxRelit( const void * nif )
 {
@@ -582,11 +579,11 @@ void probeSkyTick( Scene * scene, const void * nif, QWindow * view )
 	Kept & k = kept();
 	if ( !k.nif || k.nif != nif || !wwCellGiOn() )
 		return;
-	// lane GIPROBE2: a smoothing step while a fade runs (the row off: the exact grid at once); keep painting until done
+	// a smoothing step while a fade runs (the row off: the exact grid at once); keep painting until done
 	if ( fadeStep( k, !wwLookOn( WwLook::ProbeSmooth ) ) && view )
 		view->requestUpdate();
-	// lane GPURELIGHT1: a Probe sharing tick relights at once (a toggle, nothing to wait out)
-	// lane GIPROBE2: and so do Wide probe sharing (3 steps, implies sharing) and Probe depth visibility
+	// a Probe sharing tick relights at once (a toggle, nothing to wait out)
+	// and so do Wide probe sharing (3 steps, implies sharing) and Probe depth visibility
 	const bool wide = wwLookOn( WwLook::ProbeShareWide );
 	const bool share = wwLookOn( WwLook::ProbeShare ) || wide;
 	const int sharePasses = wide ? 3 : 1;
@@ -605,7 +602,7 @@ void probeSkyTick( Scene * scene, const void * nif, QWindow * view )
 		relightKept();
 		return;
 	}
-	if ( k.spec.emitBaked >= 0 ) {   // lane LIGHTS5: the "Emittance in bounce light" row, relit from the kept other state
+	if ( k.spec.emitBaked >= 0 ) {   // the "Emittance in bounce light" row, relit from the kept other state
 		const int want = wwLookOn( WwLook::BounceEmittance ) ? 1 : 0;
 		const bool stale = wwLookBounceEmitRedStale();
 		if ( want != k.spec.emitWant || stale != k.spec.emitStale ) {
@@ -618,7 +615,7 @@ void probeSkyTick( Scene * scene, const void * nif, QWindow * view )
 	if ( !k.skyKept )
 		return;
 	bool firstPic = false;
-	if ( skyPicOn() && wwLookdevActive() ) {   // lane SKYPIC1: capture the drawn sky when it changed
+	if ( skyPicOn() && wwLookdevActive() ) {   // capture the drawn sky when it changed
 		PicNow & p = picNow();
 		const QString key = picKeyNow();
 		if ( p.key != key ) {

@@ -90,15 +90,9 @@ bool wantsRootMotion( const HkxAnimClip & c, const HkxWriteOptions & o )
 	return o.writeRootMotion && !c.rootMotion.isEmpty();
 }
 
-// ------------------------------------------------------------------- route B
-/*! The __data__ payload builder.
- *
- *  A Havok binary packfile is a memory image plus three fixup tables: a
- *  pointer in the image is written as zero and named by a fixup that says
- *  where it points (local = inside this section, global = another object).
- *  So the builder appends bytes and records fixups against the offsets it
- *  hands out; nothing is patched afterwards.
- */
+//! route B The __data__ payload builder:
+//! A Havok binary packfile is a memory image plus three fixup tables: a pointer in the image is written as zero
+//! and named by a fixup that says where it points (local = inside this section, global = another object).
 struct Payload
 {
 	QByteArray b;

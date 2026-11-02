@@ -1,76 +1,8 @@
-/* WW_HKXANIM_UI_TEST: the pre-registered gates of lane HKX3 -- a loaded Havok
-   animation clip as a row of the ANIMATION DOCK's own list, the drop path, the
-   unload, and the panel-style rules the controls must obey.
-
-   RE-AIMED BY LANE UI6, 2026-09-11. Every letter below still asks its own
-   question of the same loader (WwHkxAnimHub) and the same playback; what moved
-   is the SURFACE it asks them of. bungo retired the Animation Manager dock
-   ("old and outdated", then three screenshots of its clipped spin boxes and
-   its text clutter), so the widgets this harness drives are the Animation
-   dock's: AnimWsClipList (a QListWidget where the old dock had a QComboBox),
-   AnimWsReadout, AnimWsNote, AnimWsSpeed, AnimWsUnloadAnim. Nothing about what
-   is MEASURED changed, and the count moves only by the checks whose widget
-   moved with it.
-
-   Its own translation unit for the same reason lane HKX2's is: nifskope_ui.cpp
-   is 31,000 lines, two other lanes are writing into it this session, and the
-   whole of this lane's footprint there is the one line that calls
-   wwHkxAnimUiHarness().
-
-   Everything here reads the WIDGETS by object name -- AnimWsClipList,
-   AnimWsLoadAnim, AnimWsUnloadAnim, AnimWsRootMotion, AnimWsSpeed,
-   AnimWsReadout, AnimWsNote -- and never the dock's private members. A gate
-   that reads the private state reads what the code MEANT; a gate that reads
-   the list reads what the user is looking at.
-
-   WHAT IT MEASURES (the brief's gate letters)
-
-     (a) loading the Mixamo fixture puts ONE row in the dock's list carrying its
-         name, 93 frames and 60 fps.
-         FLOOR: a name that was never loaded has no row.
-     (b) with that row selected and the scene driven to frame 46, every bound
-         node's local transform equals the DECODER's output for frame 46 --
-         translation and scale within 1e-4, rotation within 0.01 degrees (the
-         4*asin metric; see below).
-         FLOOR: the same comparison against frame 0 must go red.
-     (c) the readout row and the transport rows move as they should: the frame
-         readout says "frame 46 / 92" -- which is only true at the clip's OWN
-         60 fps, since 30 would call the same instant frame 23 -- the Speed row
-         writes GLView::animationSpeed, and the Loop action the dock mirrors
-         flips.
-         FLOORS: the readout at t=0 says frame 0; the speed reads 1 before the
-         row is touched.
-     (d) unloading restores every Transform in the scene byte for byte.
-         FLOOR: while the clip is posed, more than zero nodes differ.
-     (e) DROPPING the same file on the main window yields the same row. The
-         drag-enter must be ACCEPTED, and the drop must go through the same
-         loader.
-         FLOOR: dropping a file that is not an animation adds no row and is not
-         accepted by that branch.
-     (f) a file that is not an animation clip -- skeleton.hkx, which is a
-         skeleton -- lands as a row MARKED REFUSED, with the reason in words.
-         FLOOR: the good clip's row is not marked refused.
-     (g) the panel-style counts, each with a floor: every number field carries
-         the scrub stamp, the selector carries the matched drop-down rule, no
-         QGroupBox, every new control has a tooltip, the summary line and the
-         toolbar live outside the splitter, and the wheel over the unfocused
-         Speed field leaves it while stepping it once focused.
-
-   And one picture: the dock with a clip loaded and the timeline at mid-clip.
-
-   ENVIRONMENT (tests/spells/hkxanim_ui.sh sets all of them):
-     WW_HKXANIM_UI_TEST=1        arm the harness
-     WW_HKXANIM_UI_CLIP=<file>   the clip (the Mixamo fixture)
-     WW_HKXANIM_UI_REFUSE=<file> a non-animation .hkx (skeleton.hkx)
-     WW_HKXANIM_UI_EXPECT=93,60  frames, fps -- pre-registered
-     WW_HKXANIM_UI_FRAME=46      the frame gate (b) compares at
-     WW_HKXANIM_UI_SHOT=<png>    where the dock grab goes
-   Log: release/ww_hkxanim_ui_test.log
-
-   Lane HKX3, 2026-09-10. */
+// WW_HKXANIM_UI_TEST: the pre-registered gates of lane HKX3 -- a loaded Havok animation clip as a row of the
+// ANIMATION DOCK's own list, the drop path, the unload, and the panel-style rules the controls must obey.
 
 #include "hkxanimui.h"
-#include "wwswitch.h"	// lane TESTDRIVER1: the WW_* switch store
+#include "wwswitch.h"	// the WW_* switch store
 #include "hkxplayback.h"
 
 #include "nifskope.h"
@@ -231,7 +163,7 @@ void wwStepTo( NifSkope * skope, Scene * sc, float t )
 }
 
 /*! The row of the dock's LIST that carries `name` as its user data, or -1.
- *  Lane UI6: the Animation dock's list is a QListWidget where the retired
+ *  the Animation dock's list is a QListWidget where the retired
  *  Animation Manager's was a QComboBox; the user data is the same entry name. */
 int wwRowOf( QListWidget * box, const QString & name )
 {
@@ -244,15 +176,8 @@ int wwRowOf( QListWidget * box, const QString & name )
 	return -1;
 }
 
-/*! Let the dock rebuild its list, and WAIT FOR IT.
- *
- *  The Animation dock answers WwHkxAnimHub::clipsChanged with refreshLater(),
- *  which arms a 50 ms QTimer. QApplication::processEvents() does not fire a
- *  timer that has not expired, so every check below that reads a row was
- *  reading the list as it stood BEFORE the load -- the first run of the
- *  re-aimed harness went red on six of them for that one reason. refresh() is
- *  the same rebuild without the timer, and the dock is idempotent about it.
- */
+//! Let the dock rebuild its list, and WAIT FOR IT:
+//! The Animation dock answers WwHkxAnimHub::clipsChanged with refreshLater(), which arms a 50 ms QTimer.
 void wwSettle( AnimWorkspace * tl )
 {
 	qApp->processEvents();
@@ -270,13 +195,7 @@ QString wwRowText( QListWidget * box, int row )
 	return box->item( row )->text();
 }
 
-/*! Send one drag-enter and one drop carrying `paths` to the main window.
- *
- *  The application event filter is installed on qApp, so an event SENT to the
- *  window goes through exactly the code an Explorer drop goes through -- this
- *  is the real branch, not a call to the loader with a different name.
- *  Returns whether the drop was accepted.
- */
+//! Send one drag-enter and one drop carrying `paths` to the main window.
 bool wwSimulateDrop( NifSkope * skope, const QStringList & paths, bool * enterAccepted )
 {
 	QMimeData mime;
@@ -368,7 +287,7 @@ void wwPanelStyle( WwUiState & st, AnimWorkspace * tl )
 	 * asked for BY NAME now, which is what the rest of this file already does. */
 	QSplitter * vsplit = tl->findChild<QSplitter *>( QStringLiteral( "AnimWsSplitter" ) );
 	QWidget * note = tl->findChild<QWidget *>( QStringLiteral( "AnimWsNote" ) );
-	/* Lane UINOTES1 (ruling 6): the bottom action bar is gone -- its fifteen
+	/* the bottom action bar is gone -- its fifteen
 	 * buttons are header-menu actions now -- so the widget that must stay
 	 * pinned outside the splitter is the header bar. Same predicate. */
 	QWidget * box = tl->findChild<QWidget *>( QStringLiteral( "AnimWsHeader" ) );
@@ -378,11 +297,9 @@ void wwPanelStyle( WwUiState & st, AnimWorkspace * tl )
 	} else {
 		wwCheck( st, QStringLiteral( "(g) the summary line is outside the splitter" ),
 				 !vsplit->isAncestorOf( note ) );
-		/* Lane UI6: in the Animation dock the LIST is inside the splitter's
-		 * left column by design -- it is a pane, not a strip control -- so the
-		 * question the old dock's check asked (can it scroll away from what it
-		 * answers for) is asked of the ACTION BAR, which is the thing that
-		 * must stay pinned. Same predicate, same splitter, different widget. */
+		// in the Animation dock the LIST is inside the splitter's left column by design -- it is a pane, not a
+		// strip control -- so the question the old dock's check asked (can it scroll away from what it answers
+		// for) is asked of the ACTION BAR, which is the thing that must stay pinned.
 		wwCheck( st, QStringLiteral( "(g) the header menu bar is outside the splitter" ),
 				 !vsplit->isAncestorOf( box ) );
 	}
@@ -402,12 +319,8 @@ void wwPanelStyle( WwUiState & st, AnimWorkspace * tl )
 
 		speed->setFocus( Qt::OtherFocusReason );
 		qApp->processEvents();
-		/* WHY THE FOCUS STATE IS PRINTED (lane BUILD9, 2026-09-10).
-		 * The guard in wwGuardWheel blocks the wheel while `!w->hasFocus()`,
-		 * and hasFocus() is false in an INACTIVE window however many times
-		 * setFocus() is called. Without these two words the floor's red says
-		 * "the guard is broken" when it may only say "the harness window was
-		 * never activated" -- two very different verdicts. */
+		// WHY THE FOCUS STATE IS PRINTED. The guard in wwGuardWheel blocks the wheel while `!w->hasFocus`, and
+		// hasFocus is false in an INACTIVE window however many times setFocus is called.
 		wwSay( st, QStringLiteral( "  after setFocus: hasFocus %1, focusWidget %2, window active %3" )
 			.arg( speed->hasFocus() ? QStringLiteral( "yes" ) : QStringLiteral( "no" ),
 				  QApplication::focusWidget()
@@ -505,10 +418,8 @@ void wwRun( NifSkope * skope, WwUiState & st, bool loaded )
 	wwSettle( tl );
 	wwSay( st, QStringLiteral( "load: %1" ).arg( said ) );
 
-	/* The clip's LIST NAME comes from the playback, not from the file name:
-	 * loadFiles activated it, so the scene's active clip is the one just
-	 * loaded. Guessing the stem here would make gate (a) fail on a file whose
-	 * clip is named something else, which is a defect in the gate. */
+	// The clip's LIST NAME comes from the playback, not from the file name: loadFiles activated it, so the
+	// scene's active clip is the one just loaded.
 	QString clipName = sc->hkx->activeName();
 	if ( clipName.isEmpty() )
 		clipName = QFileInfo( st.clipPath ).completeBaseName();

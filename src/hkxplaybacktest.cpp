@@ -1,43 +1,8 @@
-/* WW_HKXANIM_TEST: the pre-registered gates of lane HKX2 (playback + mapping),
-   run inside the real application against the real scene graph.
-
-   It lives in its own translation unit rather than beside the thirty other
-   WW_*_TEST harnesses in nifskope_ui.cpp because that file is 31,000 lines and
-   two other lanes are writing into it this session; the whole of this lane's
-   footprint there is the one line that calls wwHkxAnimHarness().
-
-   WHAT IT MEASURES (the gate letters are the brief's):
-
-     (a) after loading a clip and stepping to frame N, every matched NiNode's
-         local transform EQUALS the decoder's output for frame N -- translation
-         and scale within 1e-4, rotation within 0.01 degrees. Read back off
-         Node::localTrans(), not off the playback's own idea of what it wrote.
-         FLOOR: the same comparison against a DIFFERENT frame's output must
-         fail, or the check would pass on a playback that never wrote anything.
-     (b) unloading restores every node's transform BYTE for byte to what it was
-         before the clip was loaded -- all 13 floats of every Transform in the
-         scene, memcmp, not "close enough". FLOOR: while the clip is active at
-         least one node's bytes must differ, or "it restored" is vacuous.
-     (c) the mapping report on the player skeleton.nif: 78 matched, 17 unmatched
-         and 4 case-folded, which are lane HKX1's measured numbers for
-         skeleton.hkx (95 bones) against skeleton.nif. FLOOR: 95 names that are
-         in no NIF must map to 0 matched / 95 unmatched.
-     (d) a NIF with no matching bones refuses IN WORDS and changes nothing:
-         setActive returns false, the summary sentence says so and names the
-         count, and every node's transform is byte-identical afterwards.
-
-   ENVIRONMENT (tests/spells/hkxanim_play.sh sets all of them):
-     WW_HKXANIM_TEST=1          arm the harness
-     WW_HKXANIM_CLIP=<file>     the clip to play (a spline-compressed .hkx)
-     WW_HKXANIM_SKEL=<file>     skeleton.hkx, for the bone names of gate (c)
-     WW_HKXANIM_NOMATCH=<file>  a NIF with none of those bones, for gate (d)
-     WW_HKXANIM_EXPECT=78,17,4  gate (c)'s pre-registered counts
-   Log: release/ww_hkxanim_test.log
-
-   Lane HKX2, 2026-09-10. */
+// WW_HKXANIM_TEST: the pre-registered gates of lane HKX2 (playback + mapping), run inside the real application
+// against the real scene graph.
 
 #include "hkxplayback.h"
-#include "wwswitch.h"	// lane TESTDRIVER1: the WW_* switch store
+#include "wwswitch.h"	// the WW_* switch store
 
 #include "nifskope.h"
 #include "glview.h"
@@ -147,12 +112,9 @@ Node * wwNodeById( const Scene * sc, int id )
 	return nullptr;
 }
 
-/*! Compare the SCENE against the DECODER at one time.
- *
- *  `sampleTime` is what the scene was driven to; `decodeTime` is the time the
- *  decoder is asked about. They are the same for the gate and deliberately
- *  different for the floor.
- */
+//! Compare the SCENE against the DECODER at one time:
+//! `sampleTime` is what the scene was driven to; `decodeTime` is the time the decoder is asked about. They are
+//! the same for the gate and deliberately different for the floor.
 void wwCompareAtTime( const Scene * sc, const HkxClipEntry * e, float decodeTime,
 					  float & worstTrans, float & worstRotDeg, float & worstScale, int & compared )
 {
@@ -335,10 +297,7 @@ void wwStage1( NifSkope * skope, WwHkxState & st, bool ok )
 	wwCheck( st, QStringLiteral( "(a) worst scale %1 <= 1e-4" ).arg( worstS ),
 			 worstS <= 1.0e-4f );
 
-	// FLOOR for (a): the scene is standing at the LAST frame. Held against the
-	// decoder's answer for frame 0 the same comparison must go red, or it is
-	// measuring nothing -- a playback that wrote the bind pose and never moved
-	// would pass the three checks above only if the clip itself is static.
+	// FLOOR for (a): the scene is standing at the LAST frame.
 	{
 		float dT = 0.0f, dR = 0.0f, dS = 0.0f;
 		int compared = 0;

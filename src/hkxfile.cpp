@@ -1,10 +1,7 @@
-/* Generic Havok 2014 packfile object model (lane HKXEDIT1, 2026-09-10).
-   Contract: docs/HKX_PACKFILE_MODEL.md. The independent oracle written from
-   the same page is tests/spells/hkxfile_oracle.py; the two are held against
-   each other and against every shipped .hkx by tests/spells/hkxfile_gates.py. */
+// Generic Havok 2014 packfile object model. Contract: docs/HKX_PACKFILE_MODEL.md.
 
 #include "hkxfile.h"
-#include "wwswitch.h"	// lane TESTDRIVER1: the WW_* switch store
+#include "wwswitch.h"	// the WW_* switch store
 
 #include <QCoreApplication>
 #include <QDir>

@@ -47,19 +47,9 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 namespace probebvh {
 
-// ------------------------------------------------------------------ alpha-test masks
-/* Lane ALPHATEST1 (2026-10-03): an alpha-tested surface (BGSM/BGEM bAlphaTest, or the NiAlphaProperty test
- * bit) is a hole wherever its map's alpha is under the material's threshold -- the Concord storefront glass
- * (GlassWindows01.BGSM, threshold 128) is 66-72% holes. Such a triangle carries its UVs and a mask; a ray
- * that meets it on a hole texel passes on as if it were not there. Nearest texel of the map at its largest
- * mip of at most 1024 texels across, wrapped; hole = alpha (0..255) < threshold. Triangles past the end of
- * `triOf`, or with -1, have no mask: a soup with no masked triangle traces exactly as before.
- *
- * Lane ALPHATEST2 (2026-10-04): the tested alpha is the renderer's (res/shaders/fo4_default.frag and the legacy
- * branch of pbrm_default.frag: a = vertex alpha x map alpha x material alpha), so each corner carries a scale
- * `as` = its vertex alpha (0..1; 1 where the shape draws no vertex colour or the alpha is a tree's wind weight)
- * x the material's fAlpha, interpolated over the triangle like the vertex colour: hole = map alpha x scale <
- * threshold. A triangle whose three scales are 1 tests exactly the ALPHATEST1 way (integer compare). */
+// alpha-test masks Lane ALPHATEST1: an alpha-tested surface (BGSM/BGEM bAlphaTest, or the NiAlphaProperty test
+// bit) is a hole wherever its map's alpha is under the material's threshold -- the Concord storefront glass
+// (GlassWindows01.BGSM, threshold 128) is 66-72% holes.
 struct AlphaMask
 {
 	struct Map
@@ -73,7 +63,7 @@ struct AlphaMask
 		int model = -1;                 // into `models` (census and the gate's twin only)
 		unsigned char thr = 128;
 		float uv[6] = { 0, 0, 0, 0, 0, 0 };
-		float as[3] = { 1.0f, 1.0f, 1.0f };   // lane ALPHATEST2: vertex alpha x material alpha per corner
+		float as[3] = { 1.0f, 1.0f, 1.0f };   // vertex alpha x material alpha per corner
 		bool scaled() const { return as[0] != 1.0f || as[1] != 1.0f || as[2] != 1.0f; }
 	};
 	std::vector<Map> maps;
@@ -107,14 +97,14 @@ struct AlphaMask
 		const double s = b0 * double( t.as[0] ) + b1 * double( t.as[1] ) + b2 * double( t.as[2] );
 		return double( alphaAt( t.map, u, v ) ) * s < double( t.thr );
 	}
-	//! lane ALPHATEST2: the test at (u, v) of map `m` with scale `s` (the soup builder's albedo pick)
+	//! the test at (u, v) of map `m` with scale `s` (the soup builder's albedo pick)
 	bool holeAt( int m, double u, double v, unsigned char thr, double s ) const
 	{
 		if ( s == 1.0 )
 			return alphaAt( m, u, v ) < int( thr );
 		return double( alphaAt( m, u, v ) ) * s < double( thr );
 	}
-	//! lane ALPHATEST2: any triangle carries a scale (the soup then writes AMK2, else AMK1 byte for byte)
+	//! any triangle carries a scale (the soup then writes AMK2, else AMK1 byte for byte)
 	bool anyScaled() const
 	{
 		for ( const Tri & t : tris )

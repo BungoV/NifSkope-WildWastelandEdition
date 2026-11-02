@@ -4,16 +4,16 @@ BSD License - see nifskope.h
 
 ***** END LICENCE BLOCK *****/
 
-// lane GPURELIGHT1: the relight without rays, on the CPU (double) and the GPU (GL 4.3 compute). src/proberelight.h.
+// the relight without rays, on the CPU (double) and the GPU (GL 4.3 compute). src/proberelight.h.
 
 #include "proberelight.h"
-#include "bakert.h"	// lane RTBAKE1: the bake pools' worker count
+#include "bakert.h"	// the bake pools' worker count
 
 #include "gl/celllights.h"
 #include "probebake.h"
 #include "probegi.h"
-#include "celldoorlive.h"	// lane LIGHTPHYS4: the live door's grid share (gate D3)
-#include "farlight.h"		// lane LIGHTPHYS4: the far light under the rows (gate F)
+#include "celldoorlive.h"	// the live door's grid share (gate D3)
+#include "farlight.h"		// the far light under the rows (gate F)
 
 #include <QCoreApplication>
 #include <QDir>
@@ -66,7 +66,7 @@ double radialL( double d, double r, const ProbeRelightOps::Light & l )
 	return std::pow( k, 2.2 );
 }
 
-// lane LIGHTPHYS2: probegi.cpp's radialPhys() term for term (the game's curve stays radialL())
+// probegi.cpp's radialPhys term for term (the game's curve stays radialL)
 double radialPhysL( const wwlp::Params & p, double d, double r, const ProbeRelightOps::Light & l )
 {
 	if ( wwlp::keepsGame( p, l.bias, l.scale, l.exponent ) )
@@ -74,7 +74,7 @@ double radialPhysL( const wwlp::Params & p, double d, double r, const ProbeRelig
 	return double( wwlp::falloff( p, float( d ), float( r ), l.bias, l.scale, l.exponent ) );
 }
 
-//! lane LIGHTPHYS2: the intensity curve on a live colour (1: off, the colour untouched)
+//! the intensity curve on a live colour (1: off, the colour untouched)
 double lightKsOf( const wwlp::Params & p, const float c[3] )
 {
 	return p.curve != 1.0f ? double( wwlp::intensityScale( p, c ) ) : 1.0;
@@ -127,7 +127,7 @@ inline double doorFactor( const int door[2], const float * T, int c, bool vis, c
 		const int d = door[s];
 		if ( d < 0 || size_t( d ) >= closed.size() || !( closed[size_t( d )] > 0.0f ) )
 			continue;
-		// lane DOORLIVE1: a part-shut door (0..1) blends its T toward open; shut 1 keeps the closed factor exactly
+		// a part-shut door (0..1) blends its T toward open; shut 1 keeps the closed factor exactly
 		const double cl = closed[size_t( d )];
 		const float * t = T + s * 4;
 		double tt;
@@ -482,7 +482,7 @@ bool probeRelightCpu( const ProbeRelightOps & X, const ProbeRelightState & st, P
 	const size_t nS = size_t( X.surfels ), nP = size_t( X.probes ), nL = X.lights.size();
 	const int red = redMode( st.red );
 	const bool glassClear = hasToken( st.red, "glassclear" );   // the D1 gate's knob (its reference merges no panes)
-	const bool placed = st.placedOnly;   // lane FARVIEW1: the placed lights alone
+	const bool placed = st.placedOnly;   // the placed lights alone
 	// the live lights
 	std::vector<double> col( nL * 3 ), rad( nL );
 	std::vector<quint8> on( nL, 1 );
@@ -496,7 +496,7 @@ bool probeRelightCpu( const ProbeRelightOps & X, const ProbeRelightState & st, P
 			any = any || col[l * 3 + size_t( c )] != 0.0;
 		}
 		on[l] = any;
-		const double ks = lightKsOf( st.lightPhys, cf );	// lane LIGHTPHYS2: x 1.0 when off (exact)
+		const double ks = lightKsOf( st.lightPhys, cf );	// x 1.0 when off (exact)
 		for ( int c = 0; c < 3; c++ )
 			col[l * 3 + size_t( c )] *= ks;
 		double r = L.radius;
@@ -519,7 +519,7 @@ bool probeRelightCpu( const ProbeRelightOps & X, const ProbeRelightState & st, P
 	// 1. direct
 	O.B1.resize( nS * 3 );
 	std::vector<double> B1( nS * 3 ), Bk( nS * 3 );
-	std::vector<double> Ed( st.wantE ? nS * 3 : 0 ), Ef( st.wantE ? nS * 3 : 0 );   // lane FARVIEW1: direct E, the last feed / pi
+	std::vector<double> Ed( st.wantE ? nS * 3 : 0 ), Ef( st.wantE ? nS * 3 : 0 );   // direct E, the last feed / pi
 	parallelFor( nS, [&]( size_t i ) {
 		double E[3] = { 0, 0, 0 };
 		for ( int k = X.pairStart[i]; k < X.pairStart[i + 1]; k++ ) {
@@ -662,7 +662,7 @@ bool probeRelightCpu( const ProbeRelightOps & X, const ProbeRelightState & st, P
 			break;
 		}
 	}
-	// lane GPURELIGHT1 (10-23): Probe sharing, probegi.cpp's sums in its order (the closed doors cut like the blend's)
+	// Probe sharing, probegi.cpp's sums in its order (the closed doors cut like the blend's)
 	if ( st.share && X.shareStart.size() == nP + 1 ) {
 		QElapsedTimer sc;
 		sc.start();
@@ -696,7 +696,7 @@ bool probeRelightCpu( const ProbeRelightOps & X, const ProbeRelightState & st, P
 			}
 			nu[j] = probeShareNu( sum, sq, X.kUnl[j], sky );
 		} );
-		// lane GIPROBE2: Wide probe sharing repeats the step (nu kept); the census compares with the unshared E
+		// Wide probe sharing repeats the step (nu kept); the census compares with the unshared E
 		const int sp = std::max( 1, st.sharePasses );
 		std::vector<double> PE0;
 		if ( sp > 1 )
@@ -1090,7 +1090,7 @@ void main()
 }
 )";
 
-/* lane GPURELIGHT1 (10-23) Probe sharing, 1: each probe's nu (proberelight.h probeShareNu) from the last pass's B
+/* lane GPURELIGHT1 Probe sharing, 1: each probe's nu (proberelight.h probeShareNu) from the last pass's B
  * (Bsrc) through its links; written to Bdst (bound to the nu buffer) */
 const char * kGlslNu = R"(
 void main()
@@ -1453,7 +1453,7 @@ bool ProbeRelightGpu::run( const ProbeRelightState & st, ProbeRelightOut * out, 
 			p[c] = L.pos[c];
 			p[4 + c] = st.color.size() == nL * 3 ? st.color[l * 3 + size_t( c )] : ( L.onAtStart ? L.color[c] : 0.0f );
 		}
-		const double ks = lightKsOf( st.lightPhys, p + 4 );	// lane LIGHTPHYS2: the intensity curve (off: untouched)
+		const double ks = lightKsOf( st.lightPhys, p + 4 );	// the intensity curve (off: untouched)
 		if ( ks != 1.0 )
 			for ( int c = 0; c < 3; c++ )
 				p[4 + c] = float( double( p[4 + c] ) * ks );
@@ -1472,7 +1472,7 @@ bool ProbeRelightGpu::run( const ProbeRelightState & st, ProbeRelightOut * out, 
 		p[10] = L.cone;
 		p[11] = L.cosOuter;
 		p[12] = L.spot ? 1.0f : 0.0f;
-		const wwlp::LightTerm lt = wwlp::lightTerm( st.lightPhys, r, L.bias, L.scale, L.exponent );	// lane LIGHTPHYS2
+		const wwlp::LightTerm lt = wwlp::lightTerm( st.lightPhys, r, L.bias, L.scale, L.exponent );
 		p[13] = lt.k;
 		p[14] = lt.kind >= 2 ? lt.x0 : lt.s;
 		p[15] = float( lt.kind );
@@ -1577,7 +1577,7 @@ bool ProbeRelightGpu::run( const ProbeRelightState & st, ProbeRelightOut * out, 
 			}
 		}
 	}
-	// lane GPURELIGHT1 (10-23): Probe sharing (nu from the last B, still on binding 10; then the shared E into bPES)
+	// Probe sharing (nu from the last B, still on binding 10; then the shared E into bPES)
 	const bool share = st.share && d->shareRec;
 	int shareOut = Impl::bPE;
 	if ( share ) {
@@ -1587,7 +1587,7 @@ bool ProbeRelightGpu::run( const ProbeRelightState & st, ProbeRelightOut * out, 
 		d->dispatch( d->nP );
 		d->bind( 12, Impl::bShareStart );
 		d->bind( 13, Impl::bShare );
-		// lane GIPROBE2: Wide probe sharing ping-pongs bPE / bPES (nu kept on binding 11)
+		// Wide probe sharing ping-pongs bPE / bPES (nu kept on binding 11)
 		const int sp = std::max( 1, st.sharePasses );
 		for ( int pass = 0; pass < sp; pass++ ) {
 			d->bind( 9, pass % 2 ? Impl::bPES : Impl::bPE );
@@ -1657,7 +1657,7 @@ bool ProbeRelightGpu::run( const ProbeRelightState & st, ProbeRelightOut * out, 
 
 // ======================================================================== the shared light record
 
-/* lane FARVIEW1: RGB9E5 (the shared-exponent HDR of EXT_texture_shared_exponent: 9-bit mantissas, a 5-bit exponent,
+/* RGB9E5 (the shared-exponent HDR of EXT_texture_shared_exponent: 9-bit mantissas, a 5-bit exponent,
  * bias 15), r in bits 0-8, g 9-17, b 18-26, the exponent 27-31. Negative and NaN read as 0. */
 quint32 probeRgb9e5( const float c[3] )
 {
@@ -1834,7 +1834,7 @@ bool probeRelightWriteRecords( const ProbeRelightOps & X, const QString & dir, c
 			lights.f16( L.cosOuter );
 			lights.f16( L.cone );
 			lights.u16( quint16( gOf( l ) ) );
-			const bool dot = L.dot[0] > 0.0f || L.dot[1] > 0.0f || L.dot[2] > 0.0f;   // lane FARVIEW1: the bulb dot
+			const bool dot = L.dot[0] > 0.0f || L.dot[1] > 0.0f || L.dot[2] > 0.0f;   // the bulb dot
 			lights.u16( quint16( L.flags | ( dot ? 32 : 0 ) ) );
 			lights.u32( dot ? probeRgb9e5( L.dot ) : 0u );
 		}
@@ -1854,7 +1854,7 @@ bool probeRelightWriteRecords( const ProbeRelightOps & X, const QString & dir, c
 		wlt.u32( quint32( plugins.size() ) );
 		wlt.u32( quint32( 64 + groups.b.size() + lights.b.size() ) );
 		wlt.u64( hash );
-		wlt.u32( X.interior ? 1u : 0u );   // lane FARVIEW1: bit 0 interior (the cell view says; the gate scenes are interiors)
+		wlt.u32( X.interior ? 1u : 0u );   // bit 0 interior (the cell view says; the gate scenes are interiors)
 		wlt.zero( 20 );
 		wlt.b += groups.b + lights.b + table.b;
 		// the pairs, by .wlt light, then surfel id
@@ -1957,10 +1957,8 @@ void addBox( std::vector<float> & out, double x0, double y0, double z0, double x
 	addBox( out, lo, hi );
 }
 
-/*! The synthetic scene: two rooms (A: x 0..512, B: x 528..1040; y 0..768, z 0..256) behind a 16-unit middle wall
- *  with three doorways (96 wide, 192 high, centred at y 128, 384, 640). Each doorway holds a door (closed, as
- *  placed): 0 a solid slab, 1 a slab with an alpha-tested hole (the ALPHATEST1 mask on its two broad faces),
- *  2 a frame around a glass pane (tint 60, 200, 110). */
+//! The synthetic scene: two rooms (A: x 0..512, B: x 528..1040; y 0..768, z 0..256) behind a 16-unit middle
+//! wall with three doorways (96 wide, 192 high, centred at y 128, 384, 640).
 struct RelightScene
 {
 	ProbeSoup soup;
@@ -2213,7 +2211,7 @@ int probeRelightCli( const QStringList & args )
 		gate( QStringLiteral( "DRG1 round trip" ), same, QStringLiteral( "%1 door triangles (%2 masked), %3 panes read back equal" )
 			.arg( b.tris.size() / 9 ).arg( b.amask.tris.size() ).arg( b.glass.size() / 9 ) );
 	}
-	{	// lane GAPFIX1: a door mask scaled by vertex alpha writes DRG2 and reads its corner scales back
+	{	// a door mask scaled by vertex alpha writes DRG2 and reads its corner scales back
 		ProbeSoup sc = S.soup;
 		for ( size_t i = 0; i < sc.doorGeom.amask.tris.size(); i++ )
 			for ( int k = 0; k < 3; k++ )
@@ -2260,7 +2258,7 @@ int probeRelightCli( const QStringList & args )
 		return l;
 	};
 	const WwCellLight L0 = mk( 256, 384, 200, 1100, 2.0, 1.8, 1.5 ), L1 = mk( 900, 600, 220, 500, 0.3, 0.3, 0.4 ),
-		L2 = mk( 800, 150, 200, 600, 1.5, 0.6, 0.3 ), L3 = mk( 400, 640, 130, 700, 1.0, 1.0, 1.0 );   // L3: before the pane
+		L2 = mk( 800, 150, 200, 600, 1.5, 0.6, 0.3 ), L3 = mk( 400, 640, 130, 700, 1.0, 1.0, 1.0 );   // before the pane
 	WwCellLighting lit;
 	lit.interior = true;
 	lit.lights = { L0, L1, L3 };
@@ -2343,7 +2341,7 @@ int probeRelightCli( const QStringList & args )
 		s.st.color = colors( { L0, L1, L3, L2 } );
 		s.live = { L0, L1, L3, L2 };
 		states.push_back( s );
-		// lane LIGHTPHYS2: the light physics rows on the lamp term (the ray reference relights with the same curve)
+		// the light physics rows on the lamp term (the ray reference relights with the same curve)
 		s.st.color = colors( { L0, L1, L3, off2 } );
 		s.live = { L0, L1, L3 };
 		const char * physNames[5] = { "physical", "advanced", "advcalib2", "curve15", "physcurve" };
@@ -2430,7 +2428,7 @@ int probeRelightCli( const QStringList & args )
 				r << QString::number( double( s.st.radius.size() == X.lights.size() ? s.st.radius[l] : X.lights[l].radius ), 'g', 9 );
 			for ( size_t k = 0; k < X.doorRefs.size(); k++ )
 				d << QString::number( k < s.st.doorClosed.size() ? s.st.doorClosed[k] : 0 );
-			const wwlp::Params & lp = s.st.lightPhys;	// lane LIGHTPHYS2: the twin re-derives the curve from these
+			const wwlp::Params & lp = s.st.lightPhys;	// the twin re-derives the curve from these
 			const QString phys = QStringLiteral( "{\"mode\": %1, \"anchor\": %2, \"s\": %3, \"adv\": %4, \"advMin\": %5, \"curve\": %6, "
 				"\"pivot\": %7, \"red\": %8}" ).arg( lp.mode ).arg( double( lp.anchor ), 0, 'g', 9 ).arg( double( lp.sourceFraction ), 0, 'g', 9 )
 				.arg( double( lp.advNumerator ), 0, 'g', 9 ).arg( double( lp.advMinMetres ), 0, 'g', 9 ).arg( double( lp.curve ), 0, 'g', 9 )
@@ -2443,7 +2441,7 @@ int probeRelightCli( const QStringList & args )
 			L.lights = s.live;
 			ProbeGiResult ref;
 			ProbeGiSpec gsP = gs;
-			gsP.lightPhys = s.st.lightPhys;	// lane LIGHTPHYS2
+			gsP.lightPhys = s.st.lightPhys;
 			clock.restart();
 			probeGiRelight( soup, bakeDir, L, gsP, &ref );
 			msRefs.push_back( clock.nsecsElapsed() / 1e6 );
@@ -2596,7 +2594,7 @@ int probeRelightCli( const QStringList & args )
 			QStringLiteral( "%1 rays, %2 through the pane, %3 of them tinted exactly (%4, %5, %6)/255, %7 otherwise" ).arg( t[2].n )
 				.arg( t[2].through ).arg( t[2].tinted ).arg( S.tint[0] ).arg( S.tint[1] ).arg( S.tint[2] ).arg( t[2].other ) );
 	}
-	// ---- lane GPURELIGHT1 (10-23): Probe sharing. S: the lists cross the middle wall only at a doorway (x = 520 plane)
+	// ---- lane GPURELIGHT1: Probe sharing. S: the lists cross the middle wall only at a doorway (x = 520 plane)
 	std::vector<double> msShareCpu, msShareGpu;
 	{
 		const size_t nP = X.kUnl.size();
@@ -2894,7 +2892,7 @@ int probeRelightCli( const QStringList & args )
 		gate( QStringLiteral( "F files" ), !fvl[0].isEmpty() && fvl[0] != fvl[1] && fvl[0] != fvl[2] && fvl[1] != fvl[2],
 			QStringLiteral( "the far layers (.fvl) differ per rows: game %1, physical %2, advanced %3 bytes" ).arg( fvl[0].size() )
 				.arg( fvl[1].size() ).arg( fvl[2].size() ) );
-		// D3: the solid door shut live after a row set = the new rows' bake + (shut run - open run) under the new rows
+		// the solid door shut live after a row set = the new rows' bake + (shut run - open run) under the new rows
 		{
 			const std::vector<float> baked = colors( { L0, L1, L3, off2 } );
 			const size_t nVox = X.nVox;
@@ -2976,7 +2974,7 @@ int probeRelightCli( const QStringList & args )
 	G << QStringLiteral( "share timings (median): CPU %1 ms, GPU %2 ms (the share step only)" )
 		.arg( msShareCpu.empty() ? -1.0 : median( msShareCpu ), 0, 'f', 3 ).arg( msShareGpu.empty() ? -1.0 : median( msShareGpu ), 0, 'f', 3 );
 	std::printf( "%s\n", qPrintable( G.back() ) );
-	G << QStringLiteral( "wide share timings (median, 2 and 3 steps): CPU %1 ms, GPU %2 ms (the share step only)" )   // lane GIPROBE2
+	G << QStringLiteral( "wide share timings (median, 2 and 3 steps): CPU %1 ms, GPU %2 ms (the share step only)" )
 		.arg( msWideCpu.empty() ? -1.0 : median( msWideCpu ), 0, 'f', 3 ).arg( msWideGpu.empty() ? -1.0 : median( msWideGpu ), 0, 'f', 3 );
 	std::printf( "%s\n", qPrintable( G.back() ) );
 	G << QStringLiteral( "%1 failures" ).arg( failures );

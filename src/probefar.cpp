@@ -1,5 +1,5 @@
 #include "probefar.h"
-#include "wwswitch.h"	// lane TESTDRIVER1: the WW_* switch store
+#include "wwswitch.h"	// the WW_* switch store
 
 #include "lodifile.h"
 #include "lodofile.h"
@@ -25,7 +25,7 @@
 #include <map>
 #include <memory>
 
-/* THE FAR MAP (lane PRTPFAR; docs/PRTP_PLAN.md 2h). See probefar.h. */
+/* THE FAR MAP. See probefar.h. */
 
 namespace {
 
@@ -57,7 +57,7 @@ struct CellRec
 	bool ok = false, water = false;
 };
 
-/* lane TREE1: THE TREES. The bake knows solid triangles of one color, and a leaf card is mostly holes
+/* THE TREES. The bake knows solid triangles of one color, and a leaf card is mostly holes
  * (its texture keeps 0.08 .. 0.43 of it). So a tree goes in as its coarsest authored LOD model (what the
  * game shows far away), every alpha-tested triangle shrunk about its centroid to the share of it its
  * texture keeps, in the mean color of the texels that pass: to a ray the same area, color and place.
@@ -190,7 +190,7 @@ const TreeMat & FarTrees::material( quint16 id )
 			readManifests();
 		const auto l = layers.constFind( key );
 		if ( l != layers.constEnd() ) {
-			// the layer's colour sheet and slice: its family's, on a lodm 3 set (LODMNAME1)
+			// the layer's colour sheet and slice: its family's, on a lodm 3 set
 			if ( !lodms.contains( l->first ) ) {
 				QFile lf( dir.filePath( QStringLiteral( "Objects/" ) + l->first ) );
 				lodms.insert( l->first, lf.open( QIODevice::ReadOnly ) ? lodmParse( lf.readAll() ) : LodmMaterial() );
@@ -429,7 +429,7 @@ bool probeFarBuild( const ProbeFarSpec & spec, ProbeSoup & soup, std::vector<Pro
 	const int gx0 = std::max( f.cellMinX(), x0 - ring ), gy0 = std::max( f.cellMinY(), y0 - ring );
 	const int gx1 = std::min( f.cellMaxX(), x1 + ring ), gy1 = std::min( f.cellMaxY(), y1 + ring );
 	const int W = gx1 - gx0 + 1, H = gy1 - gy0 + 1;
-	// lane BAKEBLOCK1: the caller's full-detail block
+	// the caller's full-detail block
 	auto inHole = [&]( int cx, int cy ) {
 		return spec.hole && cx >= spec.hx0 && cx <= spec.hx1 && cy >= spec.hy0 && cy <= spec.hy1;
 	};
@@ -458,7 +458,7 @@ bool probeFarBuild( const ProbeFarSpec & spec, ProbeSoup & soup, std::vector<Pro
 	const float q = f.heightQuantum();
 	const int n = spc / step;
 	const float qs = kCell / float( n );
-	// lane GAPBAKE1: corner (a, b)'s normal from central differences one quad step each way (h clamps at the file edge)
+	// corner (a, b)'s normal from central differences one quad step each way (h clamps at the file edge)
 	auto gnorm = [&]( int cx, int cy, int a, int b, float o[3] ) {
 		o[0] = h( cx, cy, ( a - 1 ) * step, b * step ) - h( cx, cy, ( a + 1 ) * step, b * step );
 		o[1] = h( cx, cy, a * step, ( b - 1 ) * step ) - h( cx, cy, a * step, ( b + 1 ) * step );
@@ -573,7 +573,7 @@ bool probeFarBuild( const ProbeFarSpec & spec, ProbeSoup & soup, std::vector<Pro
 					if ( c.water && std::min( { z00, z10, z01, z11 } ) < c.waterH ) {
 						const float w00[3] = { wx0, wy0, c.waterH }, w10[3] = { wx0 + qs, wy0, c.waterH };
 						const float w01[3] = { wx0, wy0 + qs, c.waterH }, w11[3] = { wx0 + qs, wy0 + qs, c.waterH };
-						if ( soup.waterApart ) {   // lane WATER1: a water surface the bake splits rays at
+						if ( soup.waterApart ) {   // a water surface the bake splits rays at
 							soup.addWater( w00, w10, w11, 0 );
 							soup.addWater( w00, w11, w01, 0 );
 						} else {
@@ -798,12 +798,12 @@ int probeFarCli( const QStringList & args )
 {
 	ProbeFarSpec fs;
 	ProbeBakeSpec bs;
-	/* Measured on the whole Commonwealth (2026-10-01): surfel cell 512 / one file a cell = 731 MB;
+	/* Measured on the whole Commonwealth: surfel cell 512 / one file a cell = 731 MB;
 	 * 1024 / 16 x 16 cells a file = 265 MB at irradiance 0.027 / 0.046 against the brute-force
 	 * reference; 2048 = 161 MB at 0.053 / 0.094. */
 	bs.surfelCell = 1024.0f;
 	bs.sector = 16384.0f;
-	bs.tbkVersion = 3;   // lane BAKE4: the far map stays FO4CS's v3 (no rooms or glass at this scale)
+	bs.tbkVersion = 3;   // the far map stays FO4CS's v3 (no rooms or glass at this scale)
 	QString outDir, soupOut, probesOut;
 	for ( int i = 0; i < args.size(); i++ ) {
 		const QString & a = args[i];
@@ -827,7 +827,7 @@ int probeFarCli( const QStringList & args )
 			i++;
 		}
 		else if ( a == QLatin1String( "--rays" ) ) { bs.rays = nx.toInt(); i++; }
-		// lane SMOOTHN1: the noise-driven extra batches, at most n x the base set (1 = the base set alone, the old bake)
+		// the noise-driven extra batches, at most n x the base set (1 = the base set alone, the old bake)
 		else if ( a == QLatin1String( "--adapt" ) ) { bs.adaptMax = nx.toInt(); i++; }
 		else if ( a == QLatin1String( "--threads" ) ) { bs.threads = nx.toInt(); i++; }
 		else if ( a == QLatin1String( "--sector" ) ) { bs.sector = std::max( 4096.0f, nx.toFloat() ); i++; }

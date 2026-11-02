@@ -80,10 +80,8 @@ struct HkxAnimClip
 	//! track i drives bone trackToBone[i] of the skeleton named above
 	//! (hkaAnimationBinding::transformTrackToBoneIndices)
 	QVector<int> trackToBone;
-	//! true when the file gave no mapping and the identity map was used:
-	//! either there is no hkaAnimationBinding at all, or its
-	//! transformTrackToBoneIndices is EMPTY (third-party clips). Names the
-	//! serving arm, so a consumer never reports a derived map as a stored one.
+	//! true when the file gave no mapping and the identity map was used: either there is no hkaAnimationBinding
+	//! at all, or its transformTrackToBoneIndices is EMPTY (third-party clips).
 	bool trackToBoneIsIdentity = false;
 	//! per track, its annotations (text keys), in file order
 	QVector<QVector<HkxAnnotation>> annotations;

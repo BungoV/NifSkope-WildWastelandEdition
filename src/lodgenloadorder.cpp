@@ -1,5 +1,5 @@
 #include "lodgenloadorder.h"
-#include "wwswitch.h"	// lane TESTDRIVER1: the WW_* switch store
+#include "wwswitch.h"	// the WW_* switch store
 
 #include <QDir>
 #include <QFile>

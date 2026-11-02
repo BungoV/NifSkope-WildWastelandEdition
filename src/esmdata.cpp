@@ -5,10 +5,10 @@ BSD License - see nifskope.h
 ***** END LICENCE BLOCK *****/
 
 #include "esmdata.h"
-#include "wwswitch.h"	// lane TESTDRIVER1: the WW_* switch store
+#include "wwswitch.h"	// the WW_* switch store
 #include "esmwater.h"
-#include "landlodspec.h"	// lane LANDSPEC3: usesParentLod
-#include <QFileInfo>	// lane LANDSPEC5: lodWorldOf's cache key
+#include "landlodspec.h"	// usesParentLod
+#include <QFileInfo>	// lodWorldOf's cache key
 #include <QHash>
 #include <QMutex>
 
@@ -25,14 +25,8 @@ BSD License - see nifskope.h
 #include <QFileInfo>
 #include <QSet>
 
-/* Group-tree conventions, measured against Fallout4.esm (2026-08-31):
- * only GRUP entries carry `children`; a RECORD's child group is its NEXT
- * SIBLING — a GRUP whose label (the `flags` field) equals the record's form
- * ID. A group entry's `formID` field holds the GROUP TYPE: 1 = world
- * children, 4/5 = exterior block/sub-block, 6 = cell children. The
- * worldspace's persistent cell sits DIRECTLY under the type-1 group (its
- * XCLC still says (0,0)); real exterior cells sit under sub-blocks.
- */
+// Group-tree conventions, measured against Fallout4.esm: only GRUP entries carry `children`; a RECORD's child
+// group is its NEXT SIBLING — a GRUP whose label (the `flags` field) equals the record's form ID.
 
 namespace
 {
@@ -51,7 +45,7 @@ QString fieldString( const ESMFile::ESMField & f )
 
 } // namespace
 
-/* lane LANDSPEC5: the EDID of the world whose terrain LOD `w` (its WNAM / PNAM given) draws: up the WNAM chain while
+/* the EDID of the world whose terrain LOD `w` (its WNAM / PNAM given) draws: up the WNAM chain while
  * each world sets PNAM "Use LOD Data" (LandLodSpec::lodClimb), empty when `w` keeps its own or its parent is
  * unreadable; red WW_LANDSPEC_RED=climb1 stops at the first parent (LANDSPEC3/4) */
 static QString esmLodWorldEdid( ESMFile & esm, const ESMFile::ESMRecord & w, quint32 wnam, quint32 pnam )
@@ -111,7 +105,7 @@ bool EsmWorld::load( const QString & esmPath, quint32 worldspaceFormID, QString 
 				*error = QString( "form %1 is not a WRLD record" ).arg( wsForm, 8, 16, QChar( '0' ) );
 			return false;
 		}
-		quint32 wnam = 0, pnam = 0;	// lane ALLON2: the parent worldspace and its use flags
+		quint32 wnam = 0, pnam = 0;	// the parent worldspace and its use flags
 		wsFlags = 0;
 		wsHasCentre = false;
 		wsCentreX = wsCentreY = 0;
@@ -124,9 +118,9 @@ bool EsmWorld::load( const QString & esmPath, quint32 worldspaceFormID, QString 
 					pnam = f.readUInt16();
 				} else if ( f == "EDID" ) {
 					wsEdid = fieldString( f );
-				} else if ( f == "DATA" && f.size() >= 1 ) {	// lane LANDSPEC6: the world's flags
+				} else if ( f == "DATA" && f.size() >= 1 ) {	// the world's flags
 					wsFlags = f.readUInt8();
-				} else if ( f == "WCTR" && f.size() >= 4 ) {	// lane LANDSPEC6: the fixed centre cell
+				} else if ( f == "WCTR" && f.size() >= 4 ) {	// the fixed centre cell
 					wsCentreX = f.readInt16();
 					wsCentreY = f.readInt16();
 					wsHasCentre = true;
@@ -136,19 +130,19 @@ bool EsmWorld::load( const QString & esmPath, quint32 worldspaceFormID, QString 
 				} else if ( f == "NAM2" && f.size() >= 4 ) {
 					// the worldspace's default water type; cells override it
 					// with XCWT. Commonwealth's is ExtOceanWater.
-					defWaterType = esm->mapFormID( w, f.readUInt32() );	// lane WATERUNDER6: plugin id space
+					defWaterType = esm->mapFormID( w, f.readUInt32() );	// plugin id space
 				}
 			}
 		}
-		if ( LandLodSpec::fixedWorld( wsFlags ) )	// lane LANDSPEC6
+		if ( LandLodSpec::fixedWorld( wsFlags ) )
 			std::fprintf( stderr, "esm world: %s has Fixed Dimensions (DATA 0x%02X), centre cell %d,%d%s\n",
 				qPrintable( wsEdid ), wsFlags, wsCentreX, wsCentreY, wsHasCentre ? "" : " (no WCTR: 0,0)" );
 		tr( "load: header fields read, indexing cells" );
 		indexWorldspace();
 		tr( "load: cells indexed" );
 		lodEdid.clear();
-		if ( LandLodSpec::usesParentLod( wnam, pnam ) ) {	// lane LANDSPEC3: the parent lends its terrain LOD
-			lodEdid = esmLodWorldEdid( *esm, w, wnam, pnam );	// lane LANDSPEC5: the chain's end
+		if ( LandLodSpec::usesParentLod( wnam, pnam ) ) {	// the parent lends its terrain LOD
+			lodEdid = esmLodWorldEdid( *esm, w, wnam, pnam );	// the chain's end
 			std::fprintf( stderr, "esm world: %s takes its terrain LOD from %s\n", qPrintable( wsEdid ),
 				lodEdid.isEmpty() ? "(unreadable parent)" : qPrintable( lodEdid ) );
 		}
@@ -200,17 +194,7 @@ void EsmWorld::indexWorldspace()
 							cy = int( f.readInt32() );
 							haveGrid = true;
 						} else if ( f == "EDID" ) {
-							/* THE CELL'S OWN NAME (lane CELLWORK1, bungo: "the
-							 * viewed cells should include their names too if
-							 * they have them"). EDID is a literal string in
-							 * every plugin. The DISPLAY name, FULL, is NOT
-							 * read here and deliberately not guessed at:
-							 * Fallout4.esm is a LOCALISED plugin, so its FULL
-							 * is a four-byte index into the STRINGS/ILSTRINGS
-							 * tables, and this reader has no string-table
-							 * reader at all. Printing the raw index as a name
-							 * would be a number pretending to be "Sanctuary
-							 * Hills". */
+							// THE CELL'S OWN NAME. EDID is a literal string in every plugin.
 							cellEdid = fieldString( f );
 						}
 					}
@@ -225,7 +209,7 @@ void EsmWorld::indexWorldspace()
 				const bool underWorldGroup = pg && pg->type == GRUP && pg->formID == 1;
 				if ( underWorldGroup ) {
 					/* the FIRST file's persistent cell; a later plugin overrides
-					 * the record, and its groups join below (BAKE1) */
+					 * the record, and its groups join below */
 					if ( !persistentCellGroup ) {
 						persistentCellGroup = group;
 						persistentCellForm = r->formID;
@@ -245,21 +229,7 @@ void EsmWorld::indexWorldspace()
 	};
 	walk( wg->children );
 
-	/* LATER PLUGINS' GROUPS (lane BAKE1, 2026-09-25). libfo76utils merges a
-	 * comma list record by record: an override replaces the record's DATA in
-	 * place and is never linked into the later file's chain, so a plugin's own
-	 * world-children group, and every cell-children group it opens under an
-	 * OVERRIDDEN cell, hang from no record's `next`. The walk above therefore
-	 * saw the first file's tree only: BNS Trees.esp's 22,827 new REFRs (21,073
-	 * in the persistent cell, the rest under 755 overridden exterior cells)
-	 * never reached a bake. Group ids are 0x80000000 | k, k dense from 0 across
-	 * every file, so enumerate them once: a type-1 group labelled with this
-	 * worldspace other than the one walked is walked the same way (its NEW
-	 * cells index themselves), and every type-6 group labelled with an indexed
-	 * cell, or the persistent cell, that is not that cell's own child group is
-	 * joined to it in load order. A one-file load has no such group, so it is
-	 * unchanged to the byte. An overriding REFR stays in the FIRST file's chain
-	 * with the last file's data, so no REFR is read twice. */
+	// LATER PLUGINS' GROUPS.
 	QHash<quint32, QVector<quint32>> cellGroups;
 	QVector<quint32> worldGroups;
 	for ( quint32 k = 0; k < 0x7FFFFFFFU; k++ ) {
@@ -332,7 +302,7 @@ bool EsmWorld::cellWater( int cx, int cy, float & height,
 			hasWater = ( f.readUInt16() & 0x0002 ) != 0;
 		} else if ( f == "XCWT" && f.size() >= 4 ) {
 			if ( typeForm )
-				*typeForm = esm->mapFormID( *cr, f.readUInt32() );	// lane WATERUNDER6: plugin id space
+				*typeForm = esm->mapFormID( *cr, f.readUInt32() );	// plugin id space
 		} else if ( f == "XCLW" && f.size() >= 4 ) {
 			const quint32 raw = f.readUInt32();
 			if ( raw != 0xFF7FFFFFU && raw != 0x7F7FFFFFU && raw != 0x4F7FFFC9U ) {
@@ -368,7 +338,7 @@ QVector<quint32> EsmWorld::cellRegions( int cx, int cy, quint32 * cellForm ) con
 	return out;
 }
 
-/* lane WATER1: the WATR record, field for field (xEdit wbRecord(WATR): DNAM fog / physical / specular /
+/* the WATR record, field for field (xEdit wbRecord(WATR): DNAM fog / physical / specular /
  * noise / silt / SSR, then NAM2-4 the noise textures). A short DNAM keeps the defaults past its end. */
 bool EsmWorld::waterRecord( quint32 form, WwWaterRecord & r ) const
 {
@@ -393,10 +363,10 @@ bool EsmWorld::waterRecord( quint32 form, WwWaterRecord & r ) const
 			r.opacity = p[0];
 		} else if ( f == "NAM2" || f == "NAM3" || f == "NAM4" ) {
 			r.noise[f == "NAM2" ? 0 : f == "NAM3" ? 1 : 2] = str();
-		} else if ( f == "INAM" && n >= 4 ) {	// lane WATERUNDER3: the underwater imagespace
+		} else if ( f == "INAM" && n >= 4 ) {	// the underwater imagespace
 			quint32 raw;
 			std::memcpy( &raw, p, 4 );
-			r.imageSpace = esm->mapFormID( *wr, raw );	// lane WATERUNDER5: a plugin's raw id is in its own master space
+			r.imageSpace = esm->mapFormID( *wr, raw );	// a plugin's raw id is in its own master space
 		} else if ( f == "DNAM" ) {
 			r.dnamBytes = n;
 			int o = 0;
@@ -503,7 +473,7 @@ QString wwWaterDescribe( const WwWaterRecord & r )
  *   - a LAND whose owning CELL carried no XCLC contributes nothing;
  *   - no de-duplication of repeated cells.
  * ESMField inflates compressed records itself and its window after next() is
- * the field payload, which is what land() already reads its floats from. */
+ * the field payload, which is what land already reads its floats from. */
 quint64 EsmWorld::vhgtCorpusHash( int * landsHashed ) const
 {
 	quint64 h = Q_UINT64_C( 0xCBF29CE484222325 );
@@ -586,7 +556,7 @@ bool EsmWorld::land( int cx, int cy, EsmLand & out ) const
 	out = EsmLand();
 	out.cellX = cx;
 	out.cellY = cy;
-	// the LAND record in the cell's child group subtree, else its parent worldspace's (lane ALLON2)
+	// the LAND record in the cell's child group subtree, else its parent worldspace's
 	const quint32 landForm = landFormOf( cx, cy );
 	if ( !landForm )
 		return false;
@@ -606,10 +576,8 @@ bool EsmWorld::land( int cx, int cy, EsmLand & out ) const
 			if ( quadrant >= 0 && quadrant < 4 ) {
 				EsmLandLayer layer;
 				layer.ltex = ltex;
-				/* The two fields after the quadrant byte (lane CELLVIEW4): one
-				 * unknown byte, then the int16 LAYER INDEX at offset 6. The
-				 * field is at least 8 bytes (tested above) and 4 + 1 + 1 + 2
-				 * is exactly 8, so this consumes the payload and no more. */
+				// The two fields after the quadrant byte: one unknown byte, then the int16 LAYER INDEX at
+				// offset 6.
 				(void) f.readUInt8();
 				layer.index = int( f.readInt16() );
 				std::memset( layer.opacity, 0, sizeof( layer.opacity ) );
@@ -657,7 +625,7 @@ bool EsmWorld::land( int cx, int cy, EsmLand & out ) const
 						out.colors[row][col][k] = d[( row * 33 + col ) * 3 + k];
 			out.hasColors = true;
 		} else if ( f == "VNML" && f.size() >= 33 * 33 * 3 ) {
-			/* lane SMOOTHN1: the vertex normals the game lights the ground with, 3 bytes a vertex on the VHGT
+			/* the vertex normals the game lights the ground with, 3 bytes a vertex on the VHGT
 			 * grid, x east, y north, z up. Each byte is a SIGNED component (measured on the shipped LAND
 			 * records against the heights: notes/smoothn1 STATUS); normalized here, a zero vector reads up. */
 			const unsigned char * d = f.data();
@@ -709,29 +677,29 @@ QVector<EsmRefr> EsmWorld::refrsInGroup( quint32 groupID ) const
 						ref.enableParent = esm->mapFormID( *r, f.readUInt32() );
 						ref.enableParentOpposite = ( f.readUInt32() & 1 ) != 0;
 					} else if ( f == "XTEL" && f.size() >= 4 ) {
-						ref.teleport = esm->mapFormID( *r, f.readUInt32() );   // lane ROOMCLAMP1
+						ref.teleport = esm->mapFormID( *r, f.readUInt32() );
 					} else if ( f == "XLYR" && f.size() >= 4 ) {
 						ref.layer = esm->mapFormID( *r, f.readUInt32() );
 					} else if ( f == "XMSP" && f.size() >= 4 ) {
-						// lane SWAP1: the placement's material swap (MSWP)
+						// the placement's material swap (MSWP)
 						ref.materialSwap = esm->mapFormID( *r, f.readUInt32() );
 					} else if ( f == "XEMI" && f.size() >= 4 ) {
-						ref.emittance = esm->mapFormID( *r, f.readUInt32() );   // lane LIGHTS2 (XEMI1)
+						ref.emittance = esm->mapFormID( *r, f.readUInt32() );
 					} else if ( f == "XRDS" && f.size() >= 4 ) {
-						ref.radius = f.readFloat();      // lane PRTP1
+						ref.radius = f.readFloat();
 						ref.hasRadius = true;
 					} else if ( f == "XLIG" && f.size() >= 4 ) {
 						ref.xligCount = qMin( 6, int( f.size() / 4 ) );
 						for ( int i = 0; i < ref.xligCount; i++ )
 							ref.xlig[i] = f.readFloat();
 					} else if ( f == "XLKR" && f.size() >= 8 ) {
-						// lane HEMI1: the LightBoxLink keyword's target is the light's box
+						// the LightBoxLink keyword's target is the light's box
 						const quint32 kw = esm->mapFormID( *r, f.readUInt32() );
 						const quint32 to = esm->mapFormID( *r, f.readUInt32() );
 						if ( kw == 0x00115705U )
 							ref.lightBox = to;
 					} else if ( f == "XBSD" && f.size() >= 20 ) {
-						// lane CABLES1: slack, thickness, half extents (3), then the detached-end byte
+						// slack, thickness, half extents (3), then the detached-end byte
 						ref.splineSlack = f.readFloat();
 						ref.splineThickness = f.readFloat();
 						for ( int i = 0; i < 3; i++ )
@@ -739,7 +707,7 @@ QVector<EsmRefr> EsmWorld::refrsInGroup( quint32 groupID ) const
 						ref.splineDetached = f.size() >= 21 && f.readUInt8() != 0;
 						ref.hasSpline = true;
 					} else if ( f == "XPRM" && f.size() >= 32 ) {
-						// lane HEMI1: Bounds (half extents) 3 floats, Color 3, Unknown, Type
+						// Bounds (half extents) 3 floats, Color 3, Unknown, Type
 						for ( int i = 0; i < 3; i++ )
 							ref.primHalf[i] = f.readFloat();
 						for ( int i = 0; i < 4; i++ )
@@ -747,11 +715,11 @@ QVector<EsmRefr> EsmWorld::refrsInGroup( quint32 groupID ) const
 						ref.primType = f.readUInt32();
 						ref.hasPrim = true;
 					} else if ( f == "XPOD" && f.size() >= 8 ) {
-						// lane SUNCELL1: a portal's origin and destination rooms
+						// a portal's origin and destination rooms
 						ref.portalFrom = esm->mapFormID( *r, f.readUInt32() );
 						ref.portalTo = esm->mapFormID( *r, f.readUInt32() );
 					} else if ( f == "XRMR" && f.size() >= 1 ) {
-						ref.roomBound = true;	// lane SUNCELL1: a room's bound data
+						ref.roomBound = true;	// a room's bound data
 					} else if ( f == "XLRM" && f.size() >= 4 ) {
 						ref.linkedRooms.append( esm->mapFormID( *r, f.readUInt32() ) );
 					}
@@ -792,7 +760,7 @@ EsmCellPrevis EsmWorld::cellPrevis( quint32 cellForm ) const
 	if ( !cr || cr->type == GRUP || !( *cr == "CELL" ) )
 		return out;
 	out.exists = true;
-	out.srcFile = cr->srcFile;	// lane PERFFIX4: the plugin whose CELL version wins
+	out.srcFile = cr->srcFile;	// the plugin whose CELL version wins
 	ESMFile::ESMField f( *esm, *cr );
 	while ( f.next() ) {
 		if ( f == "RVIS" && f.size() >= 4 ) {
@@ -808,7 +776,7 @@ EsmCellPrevis EsmWorld::cellPrevis( quint32 cellForm ) const
 			out.combinedMeshes = f.readUInt32();
 			const quint32 words = f.readUInt32();
 			out.combinedRefs = words / 2;
-			/* lane UMBRA1: then the mesh keys, then `words` u32s as (ref, value) pairs (the game's ExtraDataList load,
+			/* then the mesh keys, then `words` u32s as (ref, value) pairs (the game's ExtraDataList load,
 			 * read from Todd's treat) */
 			if ( quint64( f.size() ) >= 8ULL + 4ULL * ( quint64( out.combinedMeshes ) + quint64( words ) ) ) {
 				for ( quint32 k = 0; k < out.combinedMeshes; k++ )
@@ -826,7 +794,7 @@ EsmCellPrevis EsmWorld::cellPrevis( quint32 cellForm ) const
 	return out;
 }
 
-/* Lane PERFFIX4 (PREVISSTALE2): one REFR version's placement, for the previs tome's stale rule: the deleted and
+/* one REFR version's placement, for the previs tome's stale rule: the deleted and
  * disabled flags, DATA (position + rotation), XSCL (1 when absent) and XESP (mapped enable parent + its flags). False
  * for a compressed version (not compared: the caller counts it as changed). */
 namespace
@@ -887,7 +855,7 @@ QVector<EsmRefSource> EsmWorld::refSources( const QVector<quint32> & groups ) co
 				s.src = r->srcFile;
 				s.disabled = ( r->flags & 0x00000800 ) != 0;
 				s.deleted = ( r->flags & 0x00000020 ) != 0;
-				// lane PERFFIX4 (PREVISSTALE2): the trailing run of versions placed as the winner is
+				// the trailing run of versions placed as the winner is
 				s.settled = r->srcFile;
 				RefPlace win;
 				const std::vector<ESMFile::PriorVersion> * pv = esm->getPriorVersions( r->formID );
@@ -1026,7 +994,7 @@ const EsmLodBase & EsmWorld::lodBase( quint32 baseFormID ) const
 		ESMFile::ESMField f( *esm, *br );
 		while ( f.next() ) {
 			if ( f == "DEST" || f == "DSTD" )
-				b.hasDestructible = true;   // lane NEAR1: read-only, nothing else consults it
+				b.hasDestructible = true;   // read-only, nothing else consults it
 			if ( f == "MNAM" && *br == "STAT" ) {
 				/* STAT MNAM: 4 x 260-byte entries, each a zero-terminated
 				 * mesh path followed by junk (wbDefinitionsFO4). */
@@ -1061,11 +1029,11 @@ const EsmLodBase & EsmWorld::lodBase( quint32 baseFormID ) const
 			} else if ( f == "EDID" ) {
 				b.edid = fieldString( f );
 			} else if ( f == "WNAM" && *br == "ACTI" && f.size() >= 4 ) {
-				/* Lane WATER1: the ACTI's water type (wbDefinitionsFO4:
+				/* the ACTI's water type (wbDefinitionsFO4:
 				 * wbFormIDCk(WNAM, 'Water Type', [WATR])). */
 				b.waterType = esm->mapFormID( *br, f.readUInt32() );
 			} else if ( f == "MODS" && f.size() >= 4 && !b.materialSwap ) {
-				/* Lane SWAP1: the base's default material swap, the MODS of its
+				/* the base's default material swap, the MODS of its
 				 * MODL group (wbDefinitionsFO4 wbMODL). The first one wins: it is
 				 * the only one a STAT, SCOL or TREE carries. */
 				b.materialSwap = esm->mapFormID( *br, f.readUInt32() );
@@ -1075,7 +1043,7 @@ const EsmLodBase & EsmWorld::lodBase( quint32 baseFormID ) const
 				b.colorRemap = f.readFloat();
 				b.hasColorRemap = b.colorRemap < std::numeric_limits<float>::max();
 			} else if ( *br == "ARMO" && ( f == "MODL" || f == "MOD2" || f == "MO2S" ) ) {
-				// lane MISS1: a piece of clothing lies in the world as its MOD2 model (MO2S its swap); an
+				// a piece of clothing lies in the world as its MOD2 model (MO2S its swap); an
 				// ARMO's MODL is the form id of its worn piece, four bytes that were being read as a path
 				if ( f == "MOD2" && b.model.isEmpty() )
 					b.model = fieldString( f );
@@ -1083,15 +1051,12 @@ const EsmLodBase & EsmWorld::lodBase( quint32 baseFormID ) const
 					b.materialSwap = esm->mapFormID( *br, f.readUInt32() );
 			} else if ( f == "MODL" && !( *br == "TREE" || *br == "STAT" )
 				&& b.model.isEmpty() ) {
-				/* CELLVIEW1: every record type the cell view draws -- MSTT,
-				 * FURN, CONT, DOOR, ACTI, FLOR, LIGH -- carries its near model
-				 * in MODL exactly as STAT does. The LOD bake never asked, so
-				 * the reader never answered; nothing about the STAT/TREE route
-				 * below changes, and `models[]` is still filled only there. */
+				// every record type the cell view draws -- MSTT, FURN, CONT, DOOR, ACTI, FLOR, LIGH -- carries
+				// its near model in MODL exactly as STAT does.
 				b.model = fieldString( f );
 			} else if ( f == "MODL" && ( *br == "TREE" || *br == "STAT" ) ) {
 				/* The base's own near model: what the impostor bake photographs
-				 * (bungo, 2026-09-06: "the base is more detailed"). A TREE has
+				 * . A TREE has
 				 * no MNAM; its near model stands at level 0, as before. */
 				b.model = fieldString( f );
 				if ( *br == "TREE" )
@@ -1156,10 +1121,8 @@ const EsmMaterialSwap & EsmWorld::materialSwap( quint32 mswpForm ) const
 	const ESMFile::ESMRecord * r = mswpForm ? esm->findRecord( mswpForm ) : nullptr;
 	if ( r && r->type != GRUP && *r == "MSWP" ) {
 		m.exists = true;
-		/* wbDefinitionsFO4 MSWP: EDID, FNAM (tree folder), then repeating
-		 * Substitution structs of BNAM (original), SNAM (replacement), an
-		 * obsolete FNAM, CNAM (f32 colour-remapping index). A row starts at
-		 * its BNAM; SNAM and CNAM belong to the row they follow. */
+		// wbDefinitionsFO4 MSWP: EDID, FNAM (tree folder), then repeating Substitution structs of BNAM
+		// (original), SNAM (replacement), an obsolete FNAM, CNAM (f32 colour-remapping index).
 		ESMFile::ESMField f( *esm, *r );
 		while ( f.next() ) {
 			if ( f == "EDID" ) {
@@ -1206,9 +1169,6 @@ const EsmLtexTextureSet & EsmWorld::ltexTextureSet( quint32 ltexForm ) const
 	EsmLtexTextureSet s;
 	if ( ltexForm == ESM_LTEX_ENGINE_DEFAULT ) {
 		// the engine's own fallback set (esmdata.h), paths as a TXST spells them.
-		// ESCAPED backslashes: a bare "\G" is an unknown escape that g++ turns into
-		// "G" with a warning, the path then names no file and the ground went to the
-		// missing-texture colour (lane SEAM1, GRASSCOL picture, 2026-09-25)
 		s.diffuse = QStringLiteral( "Landscape\\Ground\\CommonwealthDefault01_d.dds" );
 		s.normal = QStringLiteral( "Landscape\\Ground\\CommonwealthDefault01_n.dds" );
 		s.specular = QStringLiteral( "Landscape\\Ground\\CommonwealthDefault01_s.dds" );
@@ -1293,7 +1253,7 @@ quint32 EsmWorld::landFormOf( int cx, int cy ) const
 {
 	auto it = cellIndex.constFind( qMakePair( cx, cy ) );
 	quint32 landForm = ( it != cellIndex.constEnd() && it->childGroup ) ? landFormInGroup( it->childGroup ) : 0;
-	if ( !landForm ) {	// lane ALLON2: a child worldspace that uses its parent's land (esmdata.h)
+	if ( !landForm ) {	// a child worldspace that uses its parent's land (esmdata.h)
 		const quint32 pg = parentLandGroups.value( qMakePair( cx, cy ), 0 );
 		if ( pg )
 			landForm = landFormInGroup( pg );
@@ -1323,7 +1283,7 @@ quint32 EsmWorld::landFormInGroup( quint32 group ) const
 	return landForm;
 }
 
-/*! lane ALLON2: the parent worldspace's cells at this worldspace's indexed grid: walk the parent's world-children
+/*! the parent worldspace's cells at this worldspace's indexed grid: walk the parent's world-children
  *  group (the first file's tree, as indexWorldspace walks its own), CELL with XCLC -> its type-6 group. */
 void EsmWorld::indexParentLand()
 {
@@ -1468,10 +1428,7 @@ bool EsmWorld::grass( quint32 grasForm, EsmGrass & out ) const
 		ESMFile::ESMField f( *esm, *r );
 		while ( f.next() ) {
 			if ( f == "DATA" && f.size() >= 32 ) {
-				/* GRAS DATA, 32 bytes in all 107 records of the shipped corpus.
-				 * Offsets 3, 6..7 and 29..31 are stale slots (they co-vary in
-				 * three fixed groups across the corpus — 4-byte fields now
-				 * written 3, 2 and 1 bytes deep) and are read past, not used. */
+				// GRAS DATA, 32 bytes in all 107 records of the shipped corpus.
 				g.density = f.readUInt8();
 				g.minSlope = f.readUInt8();
 				g.maxSlope = f.readUInt8();
@@ -1671,15 +1628,9 @@ quint64 EsmWorld::loadOrderHash() const
 	return h;
 }
 
-/* ---- v9, THE WORKSHOP-SCRAPPABLE INDEX (lane HORIZON3, 2026-09-19) -------
- *
- * A port of `scratchpad/horizon3_20260919/scrap_rule.py`, which measured the
- * rule against Fallout4.esm and counted 14 scrappable placements of the urban
- * region's 33,123. The port is deliberately literal -- same three clauses,
- * same yaw-only box test, same FormList expansion -- so that when the two
- * disagree the disagreement is a BUG and not a design difference nobody wrote
- * down. `tests/spells/lodgen_scrappable.sh` re-derives the count from the
- * written `.lodi` without calling any of this. */
+// v9, THE WORKSHOP-SCRAPPABLE INDEX:
+// A port of `scratchpad/horizon3_20260919/scrap_rule.py`, which measured the rule against Fallout4.esm and
+// counted 14 scrappable placements of the urban region's 33,123.
 
 //! The three keywords the rule is written in, and the one place they live.
 constexpr quint32 ESM_KW_SCRAP_FILTER = 0x00106D8FU;    //!< WorkshopRecipeFilterScrap
@@ -1787,13 +1738,9 @@ void EsmWorld::buildScrapIndex() const
 							prims.append( pr );
 						}
 					} else {
-						/* THE WORKBENCH BASES, by EDID, which is the one clause
-						 * of this rule that is a HEURISTIC and is labelled as
-						 * one: a base whose editor id contains both "workshop"
-						 * and "workbench". There is no keyword on the workbench
-						 * side to read instead -- the link goes the other way,
-						 * from the primitive to the bench -- and the oracle
-						 * this ports matched the same way, so the two agree. */
+						// THE WORKBENCH BASES, by EDID, which is the one clause of this rule that is a
+						// HEURISTIC and is labelled as one: a base whose editor id contains both "workshop"
+						// and "workbench".
 						ESMFile::ESMField f( *r, *esm );
 						while ( f.next() ) {
 							if ( !( f == "EDID" ) )
@@ -1956,7 +1903,7 @@ QVector<QPair<quint32, QString>> EsmWorld::listWorldspaces( const QString & esmP
 	return out;
 }
 
-/* lane LANDSPEC5: the worldspace whose terrain LOD `wsEdid` draws, read before any EsmWorld loads: its parent's EDID
+/* the worldspace whose terrain LOD `wsEdid` draws, read before any EsmWorld loads: its parent's EDID
  * under WRLD PNAM bit 1 "Use LOD Data" (LandLodSpec::usesParentLod, as load() reads it), else empty. One plugin open
  * per load order and worldspace: cached on the plugin paths, their sizes and times. */
 QString EsmWorld::lodWorldOf( const QString & esmPath, const QString & wsEdid, QString * error )
@@ -2075,7 +2022,7 @@ const EsmLight & EsmWorld::light( quint32 formID ) const
 					L.nearClip = f.readFloat();
 				}
 				if ( f.size() >= 52 ) {
-					L.flickerPeriod = f.readFloat();	// lane LIGHTFLICKER1: Flicker Effect (run by flags 0x8, 0x180)
+					L.flickerPeriod = f.readFloat();	// Flicker Effect (run by flags 0x8, 0x180)
 					L.flickerIntensity = f.readFloat();
 					L.flickerMovement = f.readFloat();
 					L.constant = f.readFloat();
@@ -2084,15 +2031,15 @@ const EsmLight & EsmWorld::light( quint32 formID ) const
 					L.hasAttenuation = true;
 				}
 				if ( f.size() >= 56 )
-					L.godRayNear = f.readFloat();       // lane VOLFOG1: God Rays - Near Clip
+					L.godRayNear = f.readFloat();       // God Rays - Near Clip
 			} else if ( f == "FNAM" && f.size() >= 4 ) {
 				L.fade = f.readFloat();
 			} else if ( f == "NAM0" ) {
 				L.gobo = fieldString( f );
 			} else if ( f == "WGDR" && f.size() >= 4 ) {
-				L.godRays = esm->mapFormID( *r, f.readUInt32() );	// lane VOLFOG1
+				L.godRays = esm->mapFormID( *r, f.readUInt32() );
 			} else if ( f == "LNAM" && f.size() >= 4 ) {
-				L.lens = esm->mapFormID( *r, f.readUInt32() );	// lane LIGHTS3 (LENSFLARE1)
+				L.lens = esm->mapFormID( *r, f.readUInt32() );
 			}
 		}
 	}
@@ -2256,8 +2203,8 @@ bool EsmWorld::loadInterior( const QString & esmPath, const QString & cell, QStr
 			} else if ( f == "XCIM" && f.size() >= 4 ) {
 				ic.imageSpace = esm->mapFormID( *found, f.readUInt32() );
 			} else if ( f == "XGDR" && f.size() >= 4 ) {
-				ic.godRays = esm->mapFormID( *found, f.readUInt32() );	// lane VOLFOG1
-			} else if ( f == "DATA" && f.size() >= 1 ) {   // lane SKYINT1: the cell's flags (one byte in old records)
+				ic.godRays = esm->mapFormID( *found, f.readUInt32() );
+			} else if ( f == "DATA" && f.size() >= 1 ) {   // the cell's flags (one byte in old records)
 				const unsigned char * d = f.data();
 				ic.flags = quint16( d[0] | ( f.size() >= 2 ? d[1] << 8 : 0 ) );
 			} else if ( f == "XCLW" && f.size() >= 4 ) {

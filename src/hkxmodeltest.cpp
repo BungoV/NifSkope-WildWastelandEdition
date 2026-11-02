@@ -1,36 +1,8 @@
-/* WW_HKXMODEL_TEST: the in-application gate of lane HKXEDIT1 (2026-09-10), the
-   RAW layer -- an .hkx opened as a document is a block tree in the Blocks tab,
-   every field editable like a NIF block, saved through the packfile writer.
-   bungo, verbatim: "Just make hkx fully editable in our nifskope".
-
-   A STUB IN THE SENSE OF ww-test-harness-add section 9: written, syntax-
-   checked, NEVER EXECUTED by this lane (the exe is bungo's, the hook-up is a
-   refusing script). Its numbers below are pre-registrations; its own defects
-   are found by the first run, which is the resume lane's.
-
-   WHAT IT MEASURES, on the .hkx the spell opens (jog.hkx: 6 objects):
-     (a) the Blocks tab's tree model IS an HkxModel after the load (read off the
-         WIDGET `tree`, never off a private member), with 6 top-level rows whose
-         names are the packfile's classes in file order.
-     (b) a field edit through the MODEL'S setData -- numFrames 23 -> 24 on the
-         animation block -- reads back 24 through the model, is undoable
-         (undoStack->undo() reads 23 again) and redoable.
-         FLOOR: before the edit the stack is clean; after it, it is not.
-     (c) an UNEDITED save reproduces the source file byte for byte
-         (saveToFile on a temp path, compared to the bytes the spell opened).
-         FLOOR: after (b)'s redo the saved bytes DIFFER from the source, at an
-         offset that lies inside the animation object, and reloading them
-         through Hkx::File reads numFrames = 24.
-     (d) the animation layer's view: animFile() decodes the document's bytes
-         to a clip with numFrames 23 (unedited) -- the same reader the
-         workspace uses, on the same bytes the file would be saved as.
-   ENVIRONMENT (tests/spells/hkxmodel_test.sh sets all of them):
-     WW_HKXMODEL_TEST=1          arm the harness
-     WW_HKXMODEL_OUT=<dir>       where the two saved files go
-   Log: release/ww_hkxmodel_test.log, ending PASS / FAIL then done. */
+// WW_HKXMODEL_TEST: the in-application gate of lane HKXEDIT1, the RAW layer -- an .hkx opened as a document is
+// a block tree in the Blocks tab, every field editable like a NIF block, saved through the packfile writer.
 
 #include "hkxmodel.h"
-#include "wwswitch.h"	// lane TESTDRIVER1: the WW_* switch store
+#include "wwswitch.h"	// the WW_* switch store
 #include "hkxfile.h"
 #include "nifskope.h"
 #include "model/nifmodel.h"

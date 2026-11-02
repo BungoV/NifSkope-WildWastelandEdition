@@ -41,33 +41,7 @@ extern "C" bool detexDecompressBlockBPTC( const uint8_t * bitstring, uint32_t mo
 
 const char * const kLodgenGpuSettingKey = "Settings/Nif/Use GPU";
 
-/* THE BC7 ENCODER IN GLSL. The same search as src/lodgenbc7.h -- the same
- * modes in the same order, the same four ranked partitions per two-subset mode,
- * the same least-squares refinement and local search, the same ties (strict <,
- * earlier candidate wins) -- in single precision. Read the two side by side.
- *
- *  * NOT THE CPU'S BYTES. The CPU fits in doubles; a double-precision port that
- *    matched it bit for bit was measured slower than the CPU (lane GPU1: GPU
- *    3.0 s vs 16 CPU threads 0.4 s on a 1024x512 image; a GeForce runs doubles
- *    at 1/64 rate). In floats a fit can land one code step away from the
- *    CPU's, either way. What is exact: the palette, the index choice and the
- *    error of the chosen block are integer arithmetic, so the error each block
- *    reports is the true weighted squared error of the bytes it wrote.
- *  * THE GATE is the CPU's own error measure (the weighted squared error the
- *    encoder minimises), per texture class: on the card normal sheets, the one
- *    class that is BC7-encoded, the GPU's total must not exceed the CPU's.
- *    The context's start-up self-check re-measures it on a fixed image and
- *    decodes every GPU block with the vendored detex decoder: a block whose
- *    decoded error differs from its reported error, or a total above the
- *    CPU's, refuses the GPU path.
- *  * DETERMINISM: no atomics, no reductions across threads: one thread per
- *    block, each block a pure function of its 16 pixels. Two runs on one
- *    machine write the same bytes.
- *  * The error is an int, not an int64: its largest value is 16 texels x
- *    (1+1+32+1) x 255^2 = 36.4 million, under 2^31 for any weight up to 500.
- *    The host refuses heavier weights.
- *  * A subset is a 16-bit pixel mask, and the fitted indices are stored per
- *    pixel, four bits each. */
+// THE BC7 ENCODER IN GLSL.
 static const char * const kBc7Glsl = R"GLSL(
 #version 430 core
 layout( local_size_x = 64 ) in;
@@ -790,10 +764,7 @@ bool gpuBc7( const quint32 * px, int w, int h, const int wt[4], quint8 * out, st
 	gl->glBindBufferBase( GL_SHADER_STORAGE_BUFFER, 3, g.bufList );
 	QElapsedTimer clock;
 	clock.start();
-	/* Three passes (see the shader's uPass). Between passes the host reads the
-	 * errors back and lists, in block order, the blocks still above zero: the
-	 * list is a function of the errors alone, so the passes change the speed,
-	 * never a byte. */
+	// Three passes (see the shader's uPass).
 	std::vector<qint32> err( static_cast<size_t>( nb ) );
 	std::vector<qint32> list;
 	for ( int pass = 0; pass < 3; pass++ ) {
@@ -1035,11 +1006,7 @@ static void makeContext()
 		fail( why.isEmpty() ? QStringLiteral( "OpenGL setup failed" ) : why );
 		return;
 	}
-	/* THE SELF-CHECK, on a fixed image under an even and an uneven weighting
-	 * (the card sheet's). The GPU path is live only if (1) every GPU block
-	 * decodes, with the detex decoder, to exactly the error the shader reported
-	 * -- the bytes are a well-formed encoding of the fit it chose -- and (2) the
-	 * GPU's total error is no more than the CPU encoder's on the same image. */
+	// THE SELF-CHECK, on a fixed image under an even and an uneven weighting (the card sheet's).
 	const int sw = 128, sh = 64, bw = sw / 4, bh = sh / 4;
 	const std::vector<quint32> img = selfCheckImage( sw, sh );
 	const int wts[2][4] = { { 1, 1, 1, 1 }, { 1, 1, 32, 1 } };

@@ -1,7 +1,7 @@
 /* The one loader for .hkx animation clips, and the refusals the animations
    list would otherwise have nowhere to put. Header carries the rationale.
 
-   Lane HKX3, 2026-09-10. */
+   2026-09-10. */
 
 #include "hkxanimui.h"
 
@@ -24,10 +24,9 @@ QString WwHkxListEntry::label() const
 	if ( refused )
 		return QObject::tr( "%1 — refused" ).arg( name );
 
-	// Frame count and rate, because they are the two numbers that decide
-	// whether the timeline's ticks mean anything: the Mixamo fixture is 60 fps
-	// and every vanilla Fallout 4 clip is 30, and a ruler ticking at the wrong
-	// one is wrong in a way nobody notices.
+	// Frame count and rate, because they are the two numbers that decide whether the timeline's ticks mean
+	// anything: the Mixamo fixture is 60 fps and every vanilla Fallout 4 clip is 30, and a ruler ticking at
+	// the wrong one is wrong in a way nobody notices.
 	if ( numFrames > 0 && fps > 0.0f )
 		return QObject::tr( "%1 — %2 frames @ %3 fps" )
 			.arg( name ).arg( numFrames ).arg( qRound( fps ) );
@@ -50,7 +49,7 @@ bool WwHkxAnimHub::isAnimationFile( const QString & path )
 {
 	const QString suffix = QFileInfo( path ).suffix().toLower();
 	// .xml is HKXPACK's text form of the same packfile, which the reader takes
-	// through the same API (lane HKX1). It is not a NifSkope document type, so
+	// through the same API. It is not a NifSkope document type, so
 	// there is no ambiguity with File > Open.
 	return suffix == QLatin1String( "hkx" ) || suffix == QLatin1String( "xml" );
 }
@@ -103,13 +102,9 @@ QString WwHkxAnimHub::loadFiles( GLView * ogl, const QStringList & paths,
 		return answer( tr( "There is no 3D scene open, so there is nothing for an "
 						   "animation to play on." ), true );
 
-	/* NO MODEL -> REFUSE IN WORDS (bungo's ruling for the drop path).
-	 *
-	 * "No model" is measured as an empty node list, not as an empty filename:
-	 * NifSkope always has a document open, and the starter cube is a model. A
-	 * clip loaded against an empty scene would sit in the list posing nothing,
-	 * which is the silent failure this refusal exists to prevent.
-	 */
+	// NO MODEL -> REFUSE IN WORDS:
+	// "No model" is measured as an empty node list, not as an empty filename: NifSkope always has a document
+	// open, and the starter cube is a model.
 	if ( sc->getNodes().isEmpty() )
 		return answer( tr( "Nothing is open to animate. Open a rigged NIF first, "
 						   "then load %1 onto it." )
@@ -158,10 +153,7 @@ QString WwHkxAnimHub::loadFiles( GLView * ogl, const QStringList & paths,
 			continue;
 		}
 		if ( added.isEmpty() ) {
-			/* Read, but it carried no animation. skeleton.hkx is the usual
-			 * one: its bones ARE kept, and clips loaded later use them for
-			 * names, so this is a refusal of the REQUEST and not a wasted
-			 * read -- which is what the sentence has to say (rule 10). */
+			// Read, but it carried no animation.
 			refuse( tr( "%1 carries no animation — %2" )
 					.arg( QFileInfo( path ).fileName(),
 						  sc->hkx->summary().isEmpty()
@@ -208,7 +200,7 @@ QString WwHkxAnimHub::loadFiles( GLView * ogl, const QStringList & paths,
 	emit clipsChanged();
 	/* The LABEL gets the playback's few-word form; the full sentence -- which
 	 * names every bone that did not bind -- goes to the tooltip through
-	 * sentence() (lane UI6). */
+	 * sentence. */
 	return answer( text, bad, loaded > 0 ? sc->hkx->summaryShort() : QString() );
 }
 
@@ -266,7 +258,7 @@ bool WwHkxAnimHub::unload( GLView * ogl, const QString & entryName )
 
 	if ( sc->hkx->has( entryName ) ) {
 		// Clearing the sequence FIRST would restore the rig twice; unload()
-		// restores it itself (lane HKX2's gate (b)), so the only thing left to
+		// restores it itself, so the only thing left to
 		// do is stop the scene naming a sequence that is gone.
 		const bool wasActive = ( sc->hkx->activeName() == entryName );
 		went = sc->hkx->unload( entryName ) || went;

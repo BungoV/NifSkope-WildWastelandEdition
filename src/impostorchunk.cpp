@@ -5,7 +5,7 @@ BSD License - see nifskope.h
 ***** END LICENCE BLOCK *****/
 
 #include "impostorchunk.h"
-#include "wwswitch.h"	// lane TESTDRIVER1: the WW_* switch store
+#include "wwswitch.h"	// the WW_* switch store
 
 #include "gl/glscene.h"
 #include "gl/renderer.h"
@@ -21,22 +21,11 @@ BSD License - see nifskope.h
 
 #include <cmath>
 
-/* ---------------------------------------------------------------------------
- * See impostorchunk.h for what this is and why it ships OFF.
- *
- * THE MANIFEST IS PARSED HERE IN ONE PASS, not by calling
- * `impostorReadManifest` and then reading the file a second time for the
- * object rows. The two kinds of line are PAIRED BY ADJACENCY as well as by
- * index -- lodgen writes each `C` line directly under the object row it
- * belongs to -- and a reader that makes two independent passes has to invent a
- * rule for what to do when the indices disagree. One pass cannot disagree with
- * itself: the `C` line takes the object row above it, and its own `index`
- * token is CHECKED against that row rather than trusted, so a manifest written
- * by some future tool in another order is refused loudly instead of drawing
- * trees in the wrong places.
- * ------------------------------------------------------------------------- */
+// See impostorchunk.h for what this is and why it ships OFF:
+// THE MANIFEST IS PARSED HERE IN ONE PASS, not by calling `impostorReadManifest` and then reading the file a
+// second time for the object rows.
 
-bool wwFrameLog();	// lane FLYFIX1 (gl/cellcull.cpp): WW_FRAME_LOG=0 keeps the per-camera far LOD lines out
+bool wwFrameLog();	// WW_FRAME_LOG=0 keeps the per-camera far LOD lines out
 
 namespace
 {
@@ -60,13 +49,13 @@ ChunkState & st()
 	return s;
 }
 
-//! lane FARLOD1: the cell view's far cards (see impostorchunk.h)
+//! the cell view's far cards (see impostorchunk.h)
 struct CellFarState
 {
 	ChunkState cards;
 	float shift[3] = { 0.0f, 0.0f, 0.0f };
 };
-// lane FARHOLE2: cells a streamed near cell holds; their cards do not draw. Kept apart from CellFarState so a far
+// cells a streamed near cell holds; their cards do not draw. Kept apart from CellFarState so a far
 // rebuild (forgetCellFar + arm) keeps the stream's cells. hideGen bumps on each change (the shadow casters rebuild).
 struct CardHide
 {
@@ -92,7 +81,7 @@ CellFarState & farSt()
 	static CellFarState s;
 	return s;
 }
-//! lane FARCARD1: bumped on every arm and forget, so the instanced pass rebuilds its frame tables
+//! bumped on every arm and forget, so the instanced pass rebuilds its frame tables
 quint64 & farGenRef()
 {
 	static quint64 g = 0;
@@ -105,18 +94,9 @@ quint64 farGen()
 
 const char * kSettingsKey = "GLView/ImpostorChunkCards";
 
-/*! Where the `.lodm` a `C` line names actually is.
- *
- *  The manifest writes a GAME path (`Data\FO4CSLOD\Cards\<id>_oct.lodm`), and
- *  the same set can be beside the chunk, under a data root, or inside an
- *  archive. The order below is cheapest-and-most-local first, and each step is
- *  a place the file has actually been found during this lane rather than a
- *  guess: `bake_fixture.sh` leaves it in `<chunkdir>/cards/`, a real lodgen run
- *  leaves it under the data root the run was given.
- *
- *  Returns empty when none of them has it, and the caller SAYS SO -- a card
- *  that silently does not appear is the failure this lane exists to end.
- */
+//! Where the `.lodm` a `C` line names actually is:
+//! The manifest writes a GAME path (`Data\FO4CSLOD\Cards\<id>_oct.lodm`), and the same set can be beside the
+//! chunk, under a data root, or inside an archive.
 QString resolveLodm( NifModel * nif, const QString & chunkDir, const QString & gamePath )
 {
 	QString rel = gamePath;
@@ -133,7 +113,7 @@ QString resolveLodm( NifModel * nif, const QString & chunkDir, const QString & g
 		if ( !t.isEmpty() && QFileInfo::exists( t ) )
 			return QFileInfo( t ).absoluteFilePath();
 	}
-	/* lane FARLOD2: a Data-rooted game path ("data\FO4CSLOD\Commonwealth\Objects\<atlas>.lodm", the C line's array
+	/* a Data-rooted game path ("data\FO4CSLOD\Commonwealth\Objects\<atlas>.lodm", the C line's array
 	 * atlas) resolves against the Data root the chunk itself sits in: the chunk folder's ancestors, nearest first.
 	 * His FO4CSLOD is found through the mods folder, not the profile's stack, so the stack alone never has it. */
 	if ( rel.startsWith( QLatin1String( "Data/" ), Qt::CaseInsensitive ) ) {
@@ -179,10 +159,7 @@ QString resolveLodm( NifModel * nif, const QString & chunkDir, const QString & g
 
 bool ImpostorChunk::enabled()
 {
-	/* THE ENVIRONMENT WINS, and only for a measuring run. The gate must be able
-	 * to switch the master on without writing to the person's QSettings -- a
-	 * harness that persists the state it forced is the known cause of the
-	 * standing `native_open.sh` red. */
+	// THE ENVIRONMENT WINS, and only for a measuring run.
 	if ( wwEnvIsSet( "WW_IMPOSTOR_CHUNK" ) )
 		return wwEnvInt( "WW_IMPOSTOR_CHUNK" ) != 0;
 	return QSettings().value( QLatin1String( kSettingsKey ), false ).toBool();
@@ -295,10 +272,8 @@ int ImpostorChunk::arm( NifModel * nif, const QString & chunkPath )
 		int at = s.lodmKeys.indexOf( key );
 		if ( at < 0 ) {
 			QString path = resolveLodm( nif, s.chunkDir, p.c.lodm );
-			/* lane FARLOD2: the C line names the model's own octahedral set AND the array atlas the same bake
-			 * wrote with the model's layer in it. An install that carries the atlas and not the per-model set
-			 * (his FO4CSLOD: 79 sets named, no Cards folder) draws the atlas layer -- the same bake's card --
-			 * and says which one served. WW_CELL_FARLOD_RED=noatlas keeps the old refusal. */
+			// the C line names the model's own octahedral set AND the array atlas the same bake wrote with the
+			// model's layer in it.
 			WW_SWITCH_STATIC( bool, noAtlas, wwEnv( "WW_CELL_FARLOD_RED" ) == "noatlas" );
 			if ( path.isEmpty() && !p.c.arrayLodm.isEmpty() && !noAtlas ) {
 				path = resolveLodm( nif, s.chunkDir, p.c.arrayLodm );
@@ -394,10 +369,7 @@ int ImpostorChunk::draw( Scene * scene, const ImpostorDraw::Options & opt )
 	if ( !s.document && !enabled() )
 		return 0;
 
-	/* THE SHEETS FIRST, ALWAYS, AND ONCE. `TexCache` remembers a failure: a
-	 * bind attempted before the set's own folder is on the resource list leaves
-	 * the entry poisoned for the rest of the session, however correct the path
-	 * becomes a frame later (gltex.cpp:337..341). */
+	// THE SHEETS FIRST, ALWAYS, AND ONCE.
 	if ( !s.sheetsRegistered ) {
 		s.sheetsRegistered = true;
 		for ( const ImpostorCardSet & set : s.sets ) {
@@ -407,19 +379,10 @@ int ImpostorChunk::draw( Scene * scene, const ImpostorDraw::Options & opt )
 			if ( !root.isEmpty() )
 				s.notes << QStringLiteral( "impostor chunk: registered %1" ).arg( root );
 		}
-		/* AND THEN DRAW, in this same frame. The cache is only poisoned by a
-		 * bind attempted BEFORE the folder is on the resource list, and the
-		 * registration above has just finished; skipping a frame here cost a
-		 * blank picture on every one-frame render (`WW_RENDER_SHOT` grabs and
-		 * exits), which is the one case where there is no second frame. */
+		// AND THEN DRAW, in this same frame.
 	}
 
-	/* THE COUNT, SAID ONCE, ON stdout. A picture of a chunk full of trees does
-	 * not tell anyone whether the cards are drawn or whether they are the
-	 * chunk's own LOD shapes seen through them, and a gate cannot read a
-	 * picture. This line is what `tests/spells/impostor_draw.sh` row 12 reads,
-	 * and it is printed only when the number CHANGES, so a 60 Hz viewport does
-	 * not fill the log with it. */
+	// THE COUNT, SAID ONCE, ON stdout.
 	static int saidDrawn = -1;
 
 	int drawn = 0;
@@ -465,7 +428,7 @@ int ImpostorChunk::armCellFar( NifModel * nif, const QStringList & chunkPaths, c
 	// the chunk state is borrowed per manifest and put back as it was found
 	const ChunkState saved = st();
 	int read = 0, kept = 0, inHole = 0, beyond = 0;
-	QSet<QString> said;   // lane FARLOD2: a set's note once, not once a chunk
+	QSet<QString> said;   // a set's note once, not once a chunk
 	for ( const QString & chunk : chunkPaths ) {
 		const int got = arm( nif, chunk );
 		if ( got <= 0 ) {
@@ -545,11 +508,9 @@ int ImpostorChunk::drawCellFar( Scene * scene, const ImpostorDraw::Options & opt
 	}
 	static int saidDrawn = -1, saidOut = -1;
 	int drawn = 0, outside = 0, refused = 0;
-	QString firstWhy;	// lane FARLOD2: a card the drawer refuses says why, once (was thrown away)
-	/* THE CAMERA'S CULL (lane FARLOD1): a card whose bounding sphere is outside one of the four side planes
-	 * is not drawn, the game's per-object test (SUNCELL1's cellcull uses the same planes for the document's
-	 * shapes). Cards cast no sun shadow (they are no document shape), so no cascade asks for them.
-	 * WW_CELL_FARLOD_RED=nocardcull draws every card: the picture must not change, the count must. */
+	QString firstWhy;	// a card the drawer refuses says why, once (was thrown away)
+	// THE CAMERA'S CULL: a card whose bounding sphere is outside one of the four side planes is not drawn, the
+	// game's per-object test (SUNCELL1's cellcull uses the same planes for the document's shapes).
 	float pl[4][4];
 	bool cull = wwEnv( "WW_CELL_FARLOD_RED" ) != "nocardcull" && scene->renderer
 		&& scene->renderer->globalUniforms->projectionMatrix[3][3] != 1.0f;
@@ -570,15 +531,15 @@ int ImpostorChunk::drawCellFar( Scene * scene, const ImpostorDraw::Options & opt
 					pl[i][c] /= l;
 		}
 	}
-	// lane FARCARD1: the culled cards go to one instanced draw per set; WW_FARCARD=0 / _RED=percard draw them one by one
+	// the culled cards go to one instanced draw per set; WW_FARCARD=0 / _RED=percard draw them one by one
 	const bool inst = opt.cellLit && ImpostorDraw::instancedOn( scene );
 	static QVector< ImpostorDraw::InstCard > instCards;
 	instCards.clear();
-	ImpostorDraw::batchBegin();	// lane PERF1: the program, pass uniforms and sheets bound once, not per card
+	ImpostorDraw::batchBegin();	// the program, pass uniforms and sheets bound once, not per card
 	for ( const Placed & p : std::as_const( s.placed ) ) {
 		if ( p.setIndex < 0 || p.setIndex >= s.sets.size() )
 			continue;
-		if ( cardHidden( p ) )   // lane FARHOLE2: the near cell draws it
+		if ( cardHidden( p ) )   // the near cell draws it
 			continue;
 		if ( cull ) {
 			const float sc = std::fabs( p.scale );
@@ -704,7 +665,7 @@ int ImpostorChunk::cellFarCasters( QVector<FarCasterPiece> & out, float apexScal
 	for ( const Placed & p : s.placed ) {
 		if ( p.setIndex < 0 || p.setIndex >= s.sets.size() || !s.sets.at( p.setIndex ).ok )
 			continue;
-		if ( cardHidden( p ) )   // lane FARHOLE2
+		if ( cardHidden( p ) )
 			continue;
 		if ( out.isEmpty() || out.last().verts.size() >= 13000 * 5 )
 			out.append( FarCasterPiece() );

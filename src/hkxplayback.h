@@ -61,14 +61,8 @@ struct HkxMapping
 	bool any() const { return !matched.isEmpty(); }
 	//! One sentence: how many play, how many do not, and WHICH ones do not.
 	QString summary( const QString & what ) const;
-	/*! THE SAME THING IN A FEW WORDS -- "78 of 95 bones" (lane UI6, 2026-09-11).
-	 *
-	 *  bungo, over a screenshot of the old dock's binding paragraph: "look at
-	 *  all this text clutter". The names of the bones that did not bind are
-	 *  what makes summary() a paragraph, and a paragraph is not what a pinned
-	 *  status line is for. This is what the label shows; summary() is what its
-	 *  tooltip carries, so nothing is lost, only folded. Never longer than
-	 *  40 characters, and it always carries BOTH numbers. */
+	//! THE SAME THING IN A FEW WORDS -- "78 of 95 bones":
+	//! bungo, over a screenshot of the old dock's binding paragraph: "look at all this text clutter".
 	QString summaryShort() const;
 };
 
@@ -94,27 +88,9 @@ struct HkxClipEntry
 	bool additive = false;
 	bool bound = false;
 
-	/* ---- lane MORPHCYC1: a GENERATED preview clip (src/morphcycle.h).
-	 *
-	 * Built in memory from the chargen tables, never read from a file, and
-	 * NEVER a game clip: skeleton.hkx has no *_skin and no skin_bone_* bones,
-	 * so no Fallout 4 .hkx can carry what these clips move. `generated` names
-	 * the kind in words; while it is non-empty every export path refuses with
-	 * HkxPlayback::generatedRefusal() and the workspace's edits are refused.
-	 *
-	 * `clip.frames` holds each track's posed transform in its SKELETON-LOCAL
-	 * frame with a per-axis scale (HkxTransform::scale is three floats), and
-	 * applyLocal() plays it by `genMode`:
-	 *   GenLocalScale    out = saved * T * R * diag(scale)  -- the body build
-	 *                    panel's own fold (bodybuildpanel.cpp, R * S on the
-	 *                    saved local), per-axis scale kept in the 3x3 basis;
-	 *   GenSkeletonSpace the track's posed GLOBAL is composed down the
-	 *                    skeleton chain the clip was built from
-	 *                    (G = parentG * T * R * diag(scale)), taken relative to
-	 *                    that bone's rest global, and written as the local that
-	 *                    puts the NIF's node there. Needed because the head
-	 *                    NIFs are flat under HEAD while skeleton_faceBones.nif
-	 *                    chains the same bones under C_MasterBot/.../Nose. */
+	// a GENERATED preview clip (src/morphcycle.h):
+	// Built in memory from the chargen tables, never read from a file, and NEVER a game clip: skeleton.hkx has
+	// no *_skin and no skin_bone_* bones, so no Fallout 4 .hkx can carry what these clips move.
 	enum GenMode { GenNone = 0, GenLocalScale = 1, GenSkeletonSpace = 2 };
 	QString generated;					//!< "" = a real clip; else the preview's kind, in words
 	int genMode = GenNone;
@@ -124,29 +100,13 @@ struct HkxClipEntry
 	bool isGenerated() const { return !generated.isEmpty(); }
 };
 
-/*! Every .hkx clip loaded into one Scene, and the pose of the one that plays.
- *
- *  Owned by Scene (`Scene::hkx`), created with it and destroyed with it. Holds
- *  no OpenGL state and no widgets: the UI reads `names()`, `summary()` and
- *  `load()` and nothing else.
- */
+//! Every .hkx clip loaded into one Scene, and the pose of the one that plays.
 class HkxPlayback
 {
 public:
 	explicit HkxPlayback( Scene * s ) : scene( s ) {}
 
-	/*! Read a .hkx (or an HKXPACK .xml) and add every clip in it to the list.
-	 *
-	 *  Returns a REFUSAL SENTENCE when the file cannot be read or decoded, and
-	 *  an empty string otherwise. A file that carries only a skeleton
-	 *  (skeleton.hkx) is not a refusal: its bones are remembered for clips that
-	 *  need names, `added` comes back empty, and `summary()` says so.
-	 *
-	 *  Zero name matches against the open NIF is NOT a load failure either --
-	 *  the clip stays in the list, `summary()` refuses in words, and binding it
-	 *  refuses and writes nothing. That way a clip loaded before its NIF is not
-	 *  thrown away.
-	 */
+	//! Read a .hkx (or an HKXPACK .xml) and add every clip in it to the list.
 	QString load( const QString & path, QStringList * added = nullptr );
 
 	//! Drop one clip. Restores every node it posed, byte for byte.
@@ -161,12 +121,7 @@ public:
 	//! Every hkaSkeleton this session has seen, newest last.
 	const QVector<HkxSkeleton> & knownSkeletons() const { return skeletons; }
 
-	/*! Select the clip that plays, or none. Called from Scene::setSequence.
-	 *
-	 *  Returns true when a clip is now posing the scene. A name that is not a
-	 *  loaded clip unbinds and returns false, which is what happens whenever one
-	 *  of the NIF's own sequences is chosen.
-	 */
+	//! Select the clip that plays, or none. Called from Scene::setSequence.
 	bool setActive( const QString & clipName );
 	const QString & activeName() const { return active; }
 
@@ -177,38 +132,20 @@ public:
 	//! The nodes are about to be deleted: forget every binding (Scene::clear).
 	void onSceneCleared();
 
-	//! Root motion is a separate switch, default off (bungo's ruling).
+	//! Root motion is a separate switch, default off.
 	bool rootMotionEnabled() const { return rootMotion; }
 	void setRootMotion( bool on );
 
-	// ---- lane HKXEDIT2: the animation workspace edits the clip that plays
-	/*! Replace a loaded clip's decoded data with an edited one (same entry
-	 *  name). The frame count and rate may have changed (trim, retime), so
-	 *  the scene's animations-list range is re-registered and, when this is
-	 *  the active clip, it is re-bound against the nodes -- the pose the
-	 *  viewport shows at the current time is the edited clip's. The track
-	 *  names are the workspace's (a rename changes what binds). Returns a
-	 *  refusal sentence, or "" when done. */
+	//! the animation workspace edits the clip that plays Replace a loaded clip's decoded data with an edited
+	//! one (same entry name).
 	QString replaceClip( const QString & clipName, const HkxAnimClip & clip, const QStringList & trackNames );
-	/*! Hold one node out of the pose: while `nodeId` is held, applyLocal()
-	 *  leaves that node's local transform alone, so the viewport shows what the
-	 *  transform gizmo wrote to it (the pose the user is keying) instead of the
-	 *  clip's sample. -1 releases. The hold never touches the saved pre-pose
-	 *  transform, so unload still restores byte for byte. */
+	//! Hold one node out of the pose: while `nodeId` is held, applyLocal() leaves that node's local transform
+	//! alone, so the viewport shows what the transform gizmo wrote to it (the pose the user is keying) instead
+	//! of the clip's sample.
 	void setHeldNode( int nodeId ) { heldNode = nodeId; }
 	int heldNode_() const { return heldNode; }
-	/* ---- lane UINOTES1, bungo's ruling 5 of 2026-09-12: the Animations list
-	   is edited the way Blender edits a list -- reorder, duplicate, rename,
-	   paste. The list widget owns none of this; it asks here, so the scene's
-	   own animations list (animGroups, animTags, animCycle) stays in step and
-	   the clip that is playing keeps playing.
-
-	   ORDER: each loaded .hkx is its own file, so this order is the session's,
-	   not any file's. Nothing is written by a reorder. (The NIF's own
-	   sequences ARE in file order -- their block order -- and the workspace
-	   refuses to move those from here; that is a Blocks-tab edit.) */
-	//! Put the loaded clips in this name order; names left out keep their
-	//! relative order at the end. True when the order actually changed.
+	//! bungo's ruling 5 of 2026-09-12: the Animations list is edited the way Blender edits a list -- reorder,
+	//! duplicate, rename, paste.
 	bool setOrder( const QStringList & order );
 	//! Copy a loaded clip under a unique name, right after it.
 	QString duplicateClip( const QString & clipName, QString * newName = nullptr );
@@ -230,33 +167,22 @@ public:
 	//! Per frame, from Node::transform(): pose this node if the clip names it.
 	void applyLocal( Node * node ) const;
 
-	/*! The decoder's own answer for one track at one time, with no node
-	 *  anywhere near it. This is the instrument gate (a) reads: the harness
-	 *  compares it against what actually landed in `Node::local`.
-	 *
-	 *  At a decoded frame the stored transform is returned VERBATIM -- no
-	 *  interpolation, no renormalisation -- so a frame-exact comparison has no
-	 *  slack of its own. Between frames: linear on translation and scale,
-	 *  nlerp (shortest arc, exact normalise) on rotation, which is what a
-	 *  degree-1 spline does and what the engine does between control points.
-	 */
+	//! The decoder's own answer for one track at one time, with no node anywhere near it. This is the
+	//! instrument gate (a) reads: the harness compares it against what actually landed in `Node::local`.
 	static bool sampleTrack( const HkxAnimClip & clip, int track, float time,
 							 HkxTransform & out );
 
 	//! Hold a list of bone names against the scene's named nodes.
 	static HkxMapping mapNames( const Scene * scene, const QStringList & boneNames );
 
-	/*! lane MORPHCYC1: the one sentence every export path refuses a generated
+	/*! the one sentence every export path refuses a generated
 	 *  preview clip with ("" for a real clip or null). One string, so the
 	 *  workspace's Save, Save as, its edits and the glTF export cannot drift. */
 	static QString generatedRefusal( const HkxClipEntry * e );
 
 	//! The last sentence this playback produced -- what a tooltip or a log shows.
 	const QString & summary() const { return lastSummary; }
-	/*! The same thing in a few words -- what the panel's LABEL shows (lane UI6).
-	 *  Falls back to the full sentence when the last thing that happened had no
-	 *  short form (an unload, a file that could not be read): a named fallback,
-	 *  never an empty label. */
+	//! The same thing in a few words -- what the panel's LABEL shows.
 	const QString & summaryShort() const
 	{
 		return lastShort.isEmpty() ? lastSummary : lastShort;
@@ -267,13 +193,13 @@ private:
 	bool bind( HkxClipEntry & e );
 	void restore( HkxClipEntry & e );
 	void registerInScene( const HkxClipEntry & e );
-	//! Put the scene's own animations list in our order (lane UINOTES1).
+	//! Put the scene's own animations list in our order.
 	void syncSceneOrder();
 	//! Fill `e.trackBone` from a skeleton; sets `e.skeletonSource` to the arm.
 	void resolveNames( HkxClipEntry & e );
 	bool namesFromSkeletons( HkxClipEntry & e );
 	bool loadSkeletonBeside( const QString & clipPath );
-	//! lane MORPHCYC1: the local a generated clip puts on this node at time t
+	//! the local a generated clip puts on this node at time t
 	bool generatedPose( const HkxClipEntry & e, const Node * node, int track, float t,
 						Transform & out ) const;
 
@@ -285,13 +211,11 @@ private:
 	bool rootMotion = false;
 	QString lastSummary;
 	QString lastShort;		//!< the few-word form of lastSummary, "" when there is none
-	int heldNode = -1;		//!< lane HKXEDIT2: the node the gizmo is posing, left alone by applyLocal
+	int heldNode = -1;		//!< the node the gizmo is posing, left alone by applyLocal
 };
 
-/*! WW_HKXANIM_TEST: lane HKX2's gates, run inside the real application.
- *  Defined in src/hkxplaybacktest.cpp; called once from the UI setup so this
- *  lane's footprint in nifskope_ui.cpp is one line. Does nothing unless
- *  WW_HKXANIM_TEST is set. */
+//! WW_HKXANIM_TEST: lane HKX2's gates, run inside the real application. Defined in src/hkxplaybacktest.cpp;
+//! called once from the UI setup so this lane's footprint in nifskope_ui.cpp is one line.
 void wwHkxAnimHarness( class NifSkope * skope );
 
 #endif

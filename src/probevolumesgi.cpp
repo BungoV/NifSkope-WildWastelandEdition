@@ -6,7 +6,7 @@
 #include <algorithm>
 #include <cmath>
 
-// lane VOLFIT1: see probevolumesgi.h
+// see probevolumesgi.h
 ProbeVolumesGi probeVolumesToGi( const ProbeVolumes & v, const ProbeRooms & gi, float splitShare, const QString & red )
 {
 	ProbeVolumesGi g;
@@ -272,7 +272,7 @@ QString probeRoomsFromSpace( const ProbeVolumes & v, ProbeRooms * r, const QStri
 	for ( int k = 1; k <= nRooms; k++ ) {
 		if ( cellsOf[size_t( k )] > 0 )
 			inGrid++;
-		else {   // lane ROOMFIT9: an unmapped room no grid cell centre fits in (its box thinner than a cell on some axis)
+		else {   // an unmapped room no grid cell centre fits in (its box thinner than a cell on some axis)
 			float lo[3] = { 3.4e38f, 3.4e38f, 3.4e38f }, hi[3] = { -3.4e38f, -3.4e38f, -3.4e38f };
 			for ( const ProbeVolumeShape & s : v.rooms[size_t( k - 1 )].shapes ) {
 				const float h = 0.5f * std::sqrt( s.size[0] * s.size[0] + s.size[1] * s.size[1] + s.size[2] * s.size[2] );

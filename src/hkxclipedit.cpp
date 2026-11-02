@@ -30,13 +30,8 @@ static Vector3 hkxLerp3( const Vector3 & a, const Vector3 & b, float t )
 	return Vector3( a[0] + ( b[0] - a[0] ) * t, a[1] + ( b[1] - a[1] ) * t, a[2] + ( b[2] - a[2] ) * t );
 }
 
-/*! Shortest-arc nlerp with an EXACT normalise.
- *
- *  Quat::normalize() in data/niftypes.h divides by the squared magnitude
- *  (lane HKX2's finding), so the normalise is done here. The same law as
- *  HkxPlayback::hkxNlerp, so the dope sheet and the viewport agree between
- *  keys; degree-1 splines are what every FO4 clip carries, and a degree-1
- *  spline between two unit quaternions is exactly this. */
+//! Shortest-arc nlerp with an EXACT normalise:
+//! Quat::normalize in data/niftypes.h divides by the squared magnitude, so the normalise is done here.
 static Quat hkxNlerp( const Quat & a, const Quat & b, float t )
 {
 	float dot = 0.0f;
@@ -378,11 +373,9 @@ HkxEditResult HkxClipDocument::reduce( float tolTranslation, float tolDegrees, f
 			after += keys.at( t ).count();
 			continue;
 		}
-		/* Greedy refinement against the DENSE frames (the truth): start with the
-		 * first and last frame, find the frame the interpolation misses by the
-		 * most, key it, repeat until every frame is within tolerance. Every
-		 * kept key reads the dense frame verbatim, so a reduced track still
-		 * hits its keyed frames exactly. */
+		// Greedy refinement against the DENSE frames (the truth): start with the first and last frame, find
+		// the frame the interpolation misses by the most, key it, repeat until every frame is within
+		// tolerance.
 		QVector<int> kept;
 		kept.append( 0 );
 		kept.append( clip.numFrames - 1 );
@@ -895,16 +888,8 @@ HkxEditResult HkxClipDocument::removeTrack( int track )
 
 HkxEditResult HkxClipDocument::removeTransformAxes( int track, const HkxAxisMask & mask )
 {
-	/* bungo's ruling 3, 2026-09-12: hold the ticked directions still so "the
-	   slide stays in the center, but the COM still moves downward when the
-	   player crouches".
-
-	   THE REFERENCE IS FRAME 0, not zero. Zeroing a translation would teleport
-	   the bone to the skeleton's origin; frame 0 is where the animation starts,
-	   so a stripped axis simply stops moving. The rotation triple is
-	   NifSkope's own Matrix Euler (toEuler / fromEuler), about the bone's local
-	   axes; a key whose rotation is left alone is not converted at all, so
-	   nothing is lost to a round trip it did not need. */
+	// bungo's ruling 3, 2026-09-12: hold the ticked directions still so "the slide stays in the center, but
+	// the COM still moves downward when the player crouches".
 	if ( track < 0 || track >= clip.numTracks || track >= keys.count() )
 		return HkxEditResult::refused( QObject::tr( "Track %1 does not exist." ).arg( track ) );
 	if ( !mask.any() )
@@ -1110,15 +1095,7 @@ QByteArray HkxClipDocument::toPackfile( QString & error ) const
 	HkxWriteOptions opt;
 	QByteArray bytes = hkxWritePackfile( clip, opt, error );
 #ifdef WW_HKXCLIP_CANON
-	/* THE CANONICAL LAYOUT (lane HKXEDIT2, measured 2026-09-10). HKX5's writer
-	 * orders the local fixups its own way, and HKXPACK 0.1.6 then prints an
-	 * EMPTY text for every annotation (the bytes are there; HKX1's reader and
-	 * HKXEDIT1's oracle both read them). Passed through HKXEDIT1's generic
-	 * packfile model -- read, then write with the layout every one of the
-	 * 15,278 shipped files has -- the same objects come out with the fixups in
-	 * file order, and HKXPACK reads the names. 16 bytes differ, all in the
-	 * fixup tables. When the class database cannot be found the writer's own
-	 * bytes are kept and the message says so. */
+	// THE CANONICAL LAYOUT.
 	if ( !bytes.isEmpty() ) {
 		QString dbErr;
 		const Hkx::ClassDb * db = Hkx::ClassDb::instance( &dbErr );
@@ -1137,10 +1114,8 @@ QByteArray HkxClipDocument::toPackfile( QString & error ) const
 
 bool HkxClipDocument::save( const QString & path, HkxWriteReport & report, QString & error ) const
 {
-	/* THE PLAY RANGE IS WHAT GOES IN THE FILE (bungo's ruling 9, 2026-09-12).
-	   The document keeps every frame so the grips can be dragged back, but the
-	   .hkx carries the range alone -- its duration is the number the grips
-	   show. Done on a COPY, so saving changes nothing in the open document. */
+	// THE PLAY RANGE IS WHAT GOES IN THE FILE. The document keeps every frame so the grips can be dragged
+	// back, but the .hkx carries the range alone -- its duration is the number the grips show.
 	if ( rangeIsPartial() ) {
 		HkxClipDocument out = *this;
 		out.rangeFirst = 0;

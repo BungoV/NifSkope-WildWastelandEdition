@@ -9,7 +9,7 @@ BSD License - see nifskope.h
 
 #include "impostorcard.h"
 #include "gl/impostordraw.h"
-#include "data/niftypes.h"	// lane FAR5: Triangle (the card casters)
+#include "data/niftypes.h"	// Triangle (the card casters)
 
 #include <QSet>
 #include <QString>
@@ -19,34 +19,7 @@ BSD License - see nifskope.h
 class Scene;
 class NifModel;
 
-/* ---------------------------------------------------------------------------
- * OCTAHEDRAL CARDS INSIDE A NATIVE LOD CHUNK -- a feature master, shipped OFF.
- *
- * The spec (329..333) gives the chunk manifest a `C` line per placed card:
- *
- *     C index cx cy cz halfW halfH N depthspan lodm [arrayLodm layer]
- *
- * and the object row above it gives that index its worldspace position and its
- * SCALE. Neither line is enough on its own: the `C` line's extents are the
- * set's own, unscaled (on Commonwealth chunk -32 16 every `C` line for
- * 000531b3 reads 135.314 x 360.837 while its references read 1.1543, 0.9118,
- * 0.7857 ...), so a reader that ignores the object row draws every tree in the
- * chunk at one size. This pairs them.
- *
- * WHY IT SHIPS OFF. Standing rule, bungo: every feature master ships OFF by
- * default with a menu row. Drawing cards where vanilla puts authored tree LOD
- * changes what a person sees in a chunk they opened to inspect, and that is a
- * choice they make, not one this viewer makes for them.
- *
- * WHAT IT DOES NOT DO. It does not remove the chunk's own tree LOD shapes. The
- * manifest names the reference by its object index and by its form ID, and
- * nothing in this lane has yet proved which drawn shape that index owns; the
- * `hideReplaced` switch below is therefore absent rather than guessed at, and
- * the picture is cards drawn OVER the authored LOD until the mapping is
- * measured. Said here, in the menu row's own text and in the changelog,
- * because a half-done replacement that looks finished is worse than one that
- * says what it is.
- * ------------------------------------------------------------------------- */
+// OCTAHEDRAL CARDS INSIDE A NATIVE LOD CHUNK -- a feature master, shipped OFF.
 
 namespace ImpostorChunk
 {
@@ -59,7 +32,7 @@ struct Placed
 	float scale = 1.0f;				//!< the object row's scale
 	QString formId;					//!< for the log, so a card names its tree
 	int setIndex = -1;				//!< into `sets()`; -1 = its set did not load
-	QString ref;					//!< lane FARLOD1: the row's REFR (manifest column `ref`), hex
+	QString ref;					//!< the row's REFR (manifest column `ref`), hex
 };
 
 //! THE MASTER. False unless the person turned it on, or `WW_IMPOSTOR_CHUNK` is
@@ -68,29 +41,10 @@ struct Placed
 bool enabled();
 void setEnabled( bool on );
 
-/*! Read a chunk's manifest and hold what it places, for the scene now open.
- *
- *  `chunkPath` is the `.bto`; the manifest is `<chunkPath>.manifest.txt`. A
- *  missing manifest is not an error -- most chunks have none -- and leaves
- *  nothing armed. Returns the number of placements paired with an object row.
- *
- *  Safe to call with the master off: nothing is drawn until `draw`, and
- *  `report()` then still says what the manifest holds, which is the answer to
- *  "why do I see no cards".
- */
+//! Read a chunk's manifest and hold what it places, for the scene now open.
 int arm( NifModel * nif, const QString & chunkPath );
 
-/*! Arm ONE set, at the origin, because the person opened its `.lodm` itself.
- *
- *  THIS ONE IS NOT BEHIND THE MASTER, and that is deliberate. A master exists
- *  so that drawing cards in place of a chunk's authored LOD is a choice; a
- *  person who opens `000531b3_oct.lodm` has already made every choice there is
- *  to make, and a viewer that answered with an empty window and a switch
- *  somewhere else would be a viewer that cannot open its own file format.
- *
- *  Returns false, with `error` set, for a `.lodm` that is not a card set --
- *  the extension is also the material format, and a material opened here says
- *  which it is rather than drawing nothing. */
+//! Arm ONE set, at the origin, because the person opened its `.lodm` itself.
 bool armSingle( NifModel * nif, const QString & lodmPath, QString * error );
 
 //! Forget everything. Called when the document changes.
@@ -106,15 +60,8 @@ QStringList report();
 //! The placements, for a harness or a gate that wants to count them.
 const QVector<Placed> & placements();
 
-/* ---- lane FARLOD1: the cell view's far tree cards ----
- * A state of their own: `arm()` runs after every load (the cell document too) and
- * resets the chunk state, so the cards around a cell block live apart from it.
- * `armCellFar` reads each chunk's manifest (the path WITHOUT ".manifest.txt", as
- * `arm` takes it), keeps a card whose cell is outside the hole and whose distance
- * from (cx, cy) is at most rMax, and adds its REFR to `refs` (the `.lodi` rows the
- * cards stand in for). `shift` is the cell scene's origin: cards draw at world minus
- * it. The chunk state is left exactly as it was found. Drawn by `drawCellFar` with
- * the chunk master's gate NOT applied (the Far LOD row is the gate). */
+// the cell view's far tree cards A state of their own: `arm` runs after every load (the cell document too) and
+// resets the chunk state, so the cards around a cell block live apart from it.
 int armCellFar( NifModel * nif, const QStringList & chunkPaths, const float shift[3],
 	float cx, float cy, float rMax, int hx0, int hy0, int hx1, int hy1,
 	QSet<quint32> * refs, QStringList * notes );
@@ -122,10 +69,7 @@ int drawCellFar( Scene * scene, const ImpostorDraw::Options & opt );
 void forgetCellFar();
 int cellFarCount();
 
-/* lane FAR5: the far cards as terrain-shadow casters, in the cell scene's frame (world minus the shift). Each card is
- * a 4-sided pyramid: apex at its centre + halfH, base +-halfW at its centre's height (our crown rule, not the game's:
- * the game's far trees are in its .bto and its cards cast nothing). Pieces of at most 13000 cards (16-bit indices).
- * apexScale scales the apex height (a red). Returns the cards used; cellFarGen() changes on every arm and forget. */
+// the far cards as terrain-shadow casters, in the cell scene's frame (world minus the shift).
 struct FarCasterPiece
 {
 	QVector<Vector3> verts;
@@ -134,7 +78,7 @@ struct FarCasterPiece
 int cellFarCasters( QVector<FarCasterPiece> & out, float apexScale = 1.0f );
 quint64 cellFarGen();
 
-/* lane FARHOLE2: the cells the stream holds loaded (cellfarhide.h); a far card placed in one does not draw nor cast.
+/* the cells the stream holds loaded (cellfarhide.h); a far card placed in one does not draw nor cast.
  * The key is the card's placement cell, armCellFar's hole test. Empty = every card. */
 inline qint64 cellFarCellKey( int x, int y ) { return ( qint64( x ) << 32 ) ^ qint64( quint32( y ) ); }
 void cellFarHideSet( const QSet<qint64> & cells );

@@ -1,7 +1,7 @@
 #ifndef PROBEINCR_H
 #define PROBEINCR_H
 
-/*! INCREMENTAL PROBE BAKE (lane BAKEINCR1, 2026-10-04).
+/*! INCREMENTAL PROBE BAKE.
  *
  *  An exterior probe bake writes, next to its sector `.tbk` files, one text record
  *  (`bakeincr.txt`) of everything the bake read:
@@ -71,7 +71,7 @@ QString identity( const QString & world );
 //! the ESM views a bake of cell (cx, cy) with a (2 half + 1)^2 block reads
 QString recordsDigest( const EsmWorld & world, int cx, int cy, int half );
 
-/*! lane FARLIGHTMAP1: the placed lights the block's relight reads (each LIGH ref's fields, its base's light data,
+/*! the placed lights the block's relight reads (each LIGH ref's fields, its base's light data,
  *  its box, its enable chain). Light moves no .tbk byte, so only a far-light bake writes it as the `lights` line. */
 QString lightsDigest( const EsmWorld & world, int cx, int cy, int half, int * count = nullptr );
 

@@ -5,7 +5,7 @@ BSD License - see nifskope.h
 ***** END LICENCE BLOCK *****/
 
 #include "lodbfile.h"
-#include "wwswitch.h"	// lane TESTDRIVER1: the WW_* switch store
+#include "wwswitch.h"	// the WW_* switch store
 #include "lodgen.h"
 #include "lodgenchunkpass.h"
 #include "lodgengpu.h"
@@ -71,24 +71,13 @@ BSD License - see nifskope.h
 
 #include "lodtfile.h"
 
-/* The World LOD manager (docs/LODGEN_PLAN.md "Where it lives"): the GUI face
- * over the lodgen generators. One chunk is built per event-loop tick so the
- * window stays live and Cancel lands between chunks; every finished chunk is
- * also spliced into the workspace as a Loaded-NIFs document whose root
- * carries the chunk's WORLD translation, so the worldspace assembles tile by
- * tile in the viewport while the real (translation-free, engine-placed)
- * files land in the output folder. */
+// The World LOD manager (docs/LODGEN_PLAN.md "Where it lives"): the GUI face over the lodgen generators.
 
 namespace
 {
 
-/*! An ordered list you drag to reorder - the block list's drag, which is what
- *  bungo asked the mod priority to reuse - accepting drops from the file
- *  manager of whatever it is a list of.
- *
- *  Two of them: the plugins (.esm/.esp/.esl) and the resources (mod folders and
- *  .ba2/.bsa archives). Both read the same way, MOD ORGANIZER'S way: the LAST
- *  row overrides the ones above it. */
+//! An ordered list you drag to reorder - the block list's drag, which is what bungo asked the mod priority to
+//! reuse - accepting drops from the file manager of whatever it is a list of.
 class OrderedPathList final : public QListWidget
 {
 public:
@@ -157,12 +146,7 @@ private:
 	bool folders;
 };
 
-/*! Top-down map of the worldspace, one rectangle per cell, painted by bake
- *  state. North is up. It is the "watch the chunks bake" view: coarse
- *  pyramid levels fill the whole map first, each finer level refines it, and
- *  chunk jobs (.bto/.btr) stamp their squares as they land. Repaints are
- *  coalesced on a timer so a worker reporting thousands of blocks a second
- *  does not turn into thousands of paints. */
+//! Top-down map of the worldspace, one rectangle per cell, painted by bake state. North is up.
 class LodgenProgressMap final : public QWidget
 {
 public:
@@ -300,11 +284,8 @@ private:
 	QTimer repaintTimer;
 };
 
-/*! A collapsible sub-panel with its check box in the header - Blender's
- *  panel with a toggle in its title. The arrow folds the body; the box is
- *  the setting. A greyed body stays open (the caller's enable rule greys
- *  it), because a greyed body still says what the output would have done;
- *  the fold is the user's, and persists. */
+//! A collapsible sub-panel with its check box in the header - Blender's panel with a toggle in its title. The
+//! arrow folds the body; the box is the setting.
 class LodgenSection final : public QWidget
 {
 public:
@@ -341,14 +322,7 @@ public:
 	QWidget * body() const { return bodyWidget; }
 	bool isOpen() const { return open; }
 
-	/*! A SECOND check in the header row, of which exactly one is shown at a
-	 *  time (lane LODUI1). The object settings below are the same settings
-	 *  whichever reader the run is for -- the same placements, channels,
-	 *  cull, simplification and cards -- and only the FILE they end up in
-	 *  differs: `.bto` chunks for the stock engine, the `.lodo`/`.lodi` pair
-	 *  for FO4 Community Shaders. One section with two faces keeps every
-	 *  setting reachable under both targets; two sections would have split
-	 *  them and doubled the rows. */
+	//! A SECOND check in the header row, of which exactly one is shown at a time.
 	void addHeaderCheck( QCheckBox * alt )
 	{
 		if ( headerRow && alt )
@@ -368,20 +342,8 @@ private:
 	bool open = true;
 };
 
-/*! The LOD Generation workspace panel.
- *
- *  What it replaces: a modal "World LOD Generator" dialog. What it is: a dock
- *  that stays open while you work, organised the way a person thinks about the
- *  job - WHERE the world comes from, WHAT to make, HOW MUCH of it, and a map of
- *  it filling in.
- *
- *  Whole-worldspace outputs (the .lodl landscape file, its AO-only refresh,
- *  the shadow heightmap) run on a worker thread against their own EsmWorld
- *  and report through the writer's progress callback; the per-chunk outputs
- *  (.bto objects, legacy .btr terrain) run one chunk per event-loop tick on
- *  the GUI thread as before, because they preview into the viewport. Cancel
- *  is honoured by both: the writer removes its partial file, the chunk loop
- *  stops between chunks. */
+//! The LOD Generation workspace panel:
+//! What it replaces: a modal "World LOD Generator" dialog.
 class LodgenPanel final : public QWidget
 {
 public:
@@ -389,26 +351,10 @@ public:
 		: QWidget( parent ), skope( win )
 	{
 		setObjectName( QStringLiteral( "LodgenPanel" ) );
-		/* The house style, not a form of its own.
-		 *
-		 * The first build of this panel had group-box titles for sections,
-		 * plain Qt spin boxes for every number, selectors in their default
-		 * chrome, two settings to a row and the explanation of each output
-		 * after a dash in its label. bungo saw all of it from one screenshot,
-		 * the way he caught the collision fields on 2026-08-05. Each of those
-		 * is a helper this fork already had and this file did not call:
-		 * wwHeading (the group-box title was one of the four idioms it
-		 * retired), wwMakeScrubField (there is one number field in the
-		 * program), wwMatchFieldStyle (a selector next to a scrub field is
-		 * the same species of control), and the label | field grid with one
-		 * setting per row and the explanation in the tooltip. The self-test
-		 * counts each of them, so the next panel cannot ship without them.
-		 *
-		 * THREE BANDS. The settings scroll; the progress map and bar sit
-		 * below them on a splitter the user drags; the summary line and the
-		 * buttons are pinned under both and never scroll away. The first
-		 * layout put Generate at the bottom of one long scrolling column,
-		 * below the map, off the screen at 1080p. */
+		// The house style, not a form of its own:
+		// The first build of this panel had group-box titles for sections, plain Qt spin boxes for every
+		// number, selectors in their default chrome, two settings to a row and the explanation of each output
+		// after a dash in its label.
 		auto * outer = new QVBoxLayout( this );
 		outer->setContentsMargins( 0, 0, 0, 0 );
 		outer->setSpacing( 0 );
@@ -430,14 +376,7 @@ public:
 		splitter->addWidget( scroll );
 		QSettings settings;
 
-		/* THE 2026-09-12 RULINGS REACH A PANEL THAT HAS ALREADY BEEN SAVED
-		 * (lane DEFAULTS1). Five rows had their defaults moved by bungo's
-		 * rulings of that day, but a panel that has been used once holds the
-		 * OLD numbers in QSettings and would keep baking the old look while
-		 * the command line baked the new one. This runs once, and it only
-		 * touches a key that is still EXACTLY the old default -- a number he
-		 * chose himself is not the old default and is left alone. The marker
-		 * is what makes it once; delete it and the sweep runs again. */
+		// THE 2026-09-12 RULINGS REACH A PANEL THAT HAS ALREADY BEEN SAVED.
 		if ( !settings.value( QStringLiteral( "LodGeneration/defaults1Applied" ), false ).toBool() ) {
 			struct Moved { const char * key; double was, now; };
 			static const Moved moved[] = {
@@ -465,10 +404,8 @@ public:
 				qDebug() << "LOD Generation: 2026-09-12 defaults applied to" << moveds
 					<< "saved rows," << kept << "left as they were set";
 		}
-		/* The same once-only sweep for the water bodies (lane WATER1,
-		 * 2026-09-27): they are ON by default now, and a panel saved before
-		 * holds the old default `false` for the row. Only that exact old value
-		 * moves; the marker makes it once. */
+		// The same once-only sweep for the water bodies: they are ON by default now, and a panel saved before
+		// holds the old default `false` for the row.
 		if ( !settings.value( QStringLiteral( "LodGeneration/water1Applied" ), false ).toBool() ) {
 			const QString k = QStringLiteral( "LodGeneration/waterBodies" );
 			if ( settings.contains( k ) && !settings.value( k ).toBool() )
@@ -476,13 +413,8 @@ public:
 			settings.setValue( QStringLiteral( "LodGeneration/water1Applied" ), true );
 		}
 
-		/* One label | field grid per section, the field column stretching so
-		 * every value is the same width; `indent` sets a sub-form under its
-		 * parent check box. The label column is one width for the whole panel
-		 * (less the indent), so the values line up down the page instead of
-		 * each section starting its own column - the first grab of this
-		 * panel had seven different value edges. add() hands the label back
-		 * so a field that greys can grey its label with it. */
+		// One label | field grid per section, the field column stretching so every value is the same width;
+		// `indent` sets a sub-form under its parent check box.
 		struct Form
 		{
 			QGridLayout * g = nullptr;
@@ -518,18 +450,7 @@ public:
 			return host;
 		};
 
-		/* ---- THE EXTRA ROWS' FIVE MAKERS (lane PANEL1, 2026-09-12) --------
-		 * bungo: "They should all be configurable in the gen menu". Fifty-odd
-		 * rows written out one at a time is fifty-odd chances to forget the
-		 * scrub field, the tooltip, the save or the load, so each kind of row
-		 * is made ONCE here and every row is registered under its settings key
-		 * in `extras`. The save, the load, the run and the self-test all walk
-		 * that one registry, so they cannot drift from each other.
-		 *
-		 * The DEFAULT handed to each maker is the command line's own default,
-		 * unchanged (bungo's call, not this lane's), and it is kept beside the
-		 * row: a row the target has HIDDEN reads back as its default, which is
-		 * the panel's tick-AND-VISIBLE rule applied to a value. */
+		// THE EXTRA ROWS' FIVE MAKERS bungo: "They should all be configurable in the gen menu".
 		auto xReg = [this]( const QString & key, QWidget * field, const QVariant & dflt, QLabel * label ) {
 			extras.insert( key, WwExtraRow{ field, dflt } );
 			if ( label )
@@ -624,10 +545,8 @@ public:
 		wwMatchFieldStyle( sourceBox );
 		src.add( page, tr( "Source" ), sourceBox );
 
-		/* THE PROFILE, OFF DISK (lane LOADORDER1, 2026-09-24). The same reader
-		 * as the command line's --mo2-profile / --mo2-mods
-		 * (lodgenLoadOrderFromMo2), so the panel and a scripted bake resolve one
-		 * load order the same way. Shown only under that source. */
+		// THE PROFILE, OFF DISK. The same reader as the command line's --mo2-profile / --mo2-mods
+		// (lodgenLoadOrderFromMo2), so the panel and a scripted bake resolve one load order the same way.
 		mo2ProfileEdit = new QLineEdit( page );
 		mo2ProfileEdit->setObjectName( QStringLiteral( "LodgenMo2ProfileEdit" ) );
 		{
@@ -704,11 +623,8 @@ public:
 		}
 		pluginLabel = src.add( page, tr( "Plugins" ), pluginHost, Qt::AlignTop );
 
-		/* The mods themselves: folders and archives, the same drag list, the
-		 * same rule. bungo: "For a specified bake, we can use the nif block
-		 * list dragging system for reordering mod priority ... Instead of top
-		 * wins, we use MO2's standard, the last one in the order overrides the
-		 * previous ones." */
+		// The mods themselves: folders and archives, the same drag list, the same rule. bungo: "For a
+		// specified bake, we can use the nif block list dragging system for reordering mod priority ...
 		resourceList = new OrderedPathList( page,
 			{ QStringLiteral( ".ba2" ), QStringLiteral( ".bsa" ) }, true );
 		resourceList->setObjectName( QStringLiteral( "LodgenResourceList" ) );
@@ -794,16 +710,8 @@ public:
 		 * viewer reads them from. The first cut asked for an unpacked Data
 		 * folder; bungo: "there's no point in that game data thing". */
 
-		/* The output is the MOD FOLDER itself - bungo's ask, made twice: the
-		 * first cut wanted a Data path, the second split it into a mods root
-		 * and a name. In Mod Organizer a mod folder IS a Data folder, so this
-		 * one field is the place a person thinks in: pick a mod, or make a new
-		 * folder in the picker and that is the new mod. Under FO4 Community
-		 * Shaders every file this panel writes lands inside it under ONE root,
-		 * FO4CSLOD\ (bungo, 2026-09-16; lane LAYOUT1) -- the far shadow
-		 * heightmap under Textures\Terrain\ is the one exception, because that
-		 * path is the game's. Under the stock engine nothing moved: chunks go
-		 * to meshes\terrain\ and their sheets to textures\terrain\. */
+		// The output is the MOD FOLDER itself - bungo's ask, made twice: the first cut wanted a Data path, the
+		// second split it into a mods root and a name.
 		outEdit = new QLineEdit( page );
 		outEdit->setObjectName( QStringLiteral( "LodgenOutputEdit" ) );
 		{
@@ -821,12 +729,7 @@ public:
 			"exist yet is created when you generate; enable it in Mod Organizer afterwards." )
 			.arg( lodgenFo4csFolderName() ) );
 		src.add( page, tr( "Output mod" ), browseHost( outEdit, tr( "Output mod folder" ) ) );
-		/* THE ROOT, on the panel (lane LAYOUT1, 2026-09-16). One line under the
-		 * output field saying where this bake's files land inside that mod
-		 * folder, because the answer changed today and a person cannot see a
-		 * layout from a folder picker. A label, not a sentence: it reads
-		 * `FO4CSLOD\Commonwealth\`. Hidden under the stock engine, whose files
-		 * did not move. */
+		// THE ROOT, on the panel.
 		outRootLabel = new QLabel( page );
 		outRootLabel->setObjectName( QStringLiteral( "LodgenOutputRootLabel" ) );
 		outRootLabel->setTextInteractionFlags( Qt::TextSelectableByMouse );
@@ -836,10 +739,7 @@ public:
 		// ---- What to generate -----------------------------------------------
 		layout->addWidget( wwHeading( tr( "What to generate" ), page ) );
 		{
-			/* One choice a user can make without knowing the formats: what
-			 * will read the files. It sets the outputs and hides the ones the
-			 * other reader has no use for, the way Blender's render engine
-			 * hides the panels of the engine not chosen. */
+			// One choice a user can make without knowing the formats: what will read the files.
 			Form f = form( 0 );
 			targetBox = new QComboBox( page );
 			targetBox->setObjectName( QStringLiteral( "LodgenTargetBox" ) );
@@ -933,11 +833,8 @@ public:
 		objectsCheck->setToolTip( tr( "Distant buildings, trees and rocks: one mesh per chunk under\n"
 			"meshes\\terrain\\<worldspace>\\, for the cells in the chunk range below." ) );
 		objectsSection = new LodgenSection( objectsCheck, QStringLiteral( "Objects" ), true, page );
-		/* THE NATIVE PAIR, the FO4CS face of the same section (bungo
-		 * 2026-09-11 06:4x: "we should only have those 5 .lod types in fo4
-		 * community shaders target"). The settings below belong to the OBJECT
-		 * PASS, not to the .bto container, so the section keeps them and only
-		 * its head changes with the target. */
+		// THE NATIVE PAIR, the FO4CS face of the same section. The settings below belong to the OBJECT PASS,
+		// not to the .bto container, so the section keeps them and only its head changes with the target.
 		nativeCheck = new QCheckBox( tr( "Native object files (.lodo/.lodi)" ), page );
 		nativeCheck->setObjectName( QStringLiteral( "LodgenNativeCheck" ) );
 		nativeCheck->setChecked( settings.value( QStringLiteral( "LodGeneration/native" ), true ).toBool() );
@@ -949,10 +846,8 @@ public:
 		layout->addWidget( objectsSection );
 		{
 			Form f = form( 24 );
-			/* OFF since 2026-09-12 (lane DEFAULTS1, bungo's 15:56 ruling), and
-			 * the manifest is no longer part of what this row controls: the
-			 * sidecar is written either way, so the row names only what goes
-			 * inside the chunk. */
+			// OFF since 2026-09-12, and the manifest is no longer part of what this row controls: the sidecar
+			// is written either way, so the row names only what goes inside the chunk.
 			identityCheck = new QCheckBox( tr( "Identity channels" ), page );
 			identityCheck->setObjectName( QStringLiteral( "LodgenIdentityCheck" ) );
 			identityCheck->setChecked( false );
@@ -966,11 +861,8 @@ public:
 			atlasCheck->setChecked( false );
 			atlasCheck->setToolTip( tr( "Packs the chunks' non-tiling textures onto one sheet. An optimisation only;\nnever reuses vanilla's atlas name." ) );
 			f.span( identityCheck );
-			/* The rest of what a .bto carries, which the first panel never
-			 * showed - bungo: "where are the toggles for data other than
-			 * identity and AO?". Sway and the two channels ride on the identity
-			 * profile, so they grey with it and hide with it under the stock
-			 * engine, where they are inert bytes. */
+			// The rest of what a .bto carries, which the first panel never showed - bungo: "where are the
+			// toggles for data other than identity and AO?".
 			swayCheck = new QCheckBox( tr( "Tree sway weights" ), page );
 			swayCheck->setObjectName( QStringLiteral( "LodgenSwayCheck" ) );
 			swayCheck->setChecked( settings.value( QStringLiteral( "LodGeneration/treeSway" ), true ).toBool() );
@@ -1103,13 +995,8 @@ public:
 			// trees only in effect since 2026-09-11, and the label says so
 			impostorLevelLabel = f.add( page, tr( "Tree cards from ring" ), impostorLevelBox );
 
-			/* The octahedral grid, in FRAMES PER SIDE - the bake's own convention
-			 * (WW_IMPOSTOR_OCT=4 writes a sheet four frames wide, not five). Costs
-			 * are measured per frame and multiply by the square, so the choice is
-			 * really a memory dial: at 30 far-field tree bases the three come to
-			 * 6.0, 13.5 and 24.0 MiB. Grids are not mixed within a run: the card
-			 * arrays group by sheet size, so two grids in one directory become two
-			 * arrays and two binds. */
+			// The octahedral grid, in FRAMES PER SIDE - the bake's own convention (WW_IMPOSTOR_OCT=4 writes a
+			// sheet four frames wide, not five).
 			cardFramesBox = new QComboBox( page );
 			cardFramesBox->setObjectName( QStringLiteral( "LodgenCardFramesBox" ) );
 			cardFramesBox->addItem( tr( "4 x 4 (16 views)" ), 4 );
@@ -1128,15 +1015,7 @@ public:
 			wwMatchFieldStyle( cardFramesBox );
 			cardFramesLabel = f.add( page, tr( "Card frames" ), cardFramesBox );
 
-			/* THE RESOLUTION IS THE LARGEST BASE'S. bungo, 2026-09-06: "you
-			 * should also be able to select their base resolution", and then
-			 * "if it's really small, roughly half the size of the biggest tree
-			 * we generated an impostor for, we can scale that down". So this is
-			 * the top of a ladder, not a flat setting: the card baker measures
-			 * every base against the largest in the run and takes it down by
-			 * halves, then takes the short side down again by the silhouette's
-			 * aspect. A worldspace of trees therefore costs far less than this
-			 * figure times the number of trees, which the cost line says. */
+			// THE RESOLUTION IS THE LARGEST BASE'S.
 			cardResBox = new QComboBox( page );
 			cardResBox->setObjectName( QStringLiteral( "LodgenCardResBox" ) );
 			cardResBox->addItem( tr( "64 px" ), 64 );
@@ -1146,7 +1025,7 @@ public:
 			// bake hook already clamps to 32..512; only this list stopped at 256.
 			cardResBox->addItem( tr( "512 px" ), 512 );
 			{
-				// 256 px since 2026-09-23 (bungo: tree cards "8x8 at 2k", lane DEFAULTS2)
+				// 256 px since 2026-09-23
 				const int saved = settings.value( QStringLiteral( "LodGeneration/cardRes" ), 256 ).toInt();
 				const int idx = cardResBox->findData( saved );
 				cardResBox->setCurrentIndex( idx >= 0 ? idx : 2 );
@@ -1159,10 +1038,8 @@ public:
 			wwMatchFieldStyle( cardResBox );
 			cardResLabel = f.add( page, tr( "Card resolution" ), cardResBox );
 
-			/* The base colour is the one sheet that cannot come down: its ALPHA
-			 * is the coverage, so it is the silhouette, and a soft silhouette is
-			 * the single fault an impostor cannot hide. The other three are
-			 * lit-appearance data at LOD distance. */
+			// The base colour is the one sheet that cannot come down: its ALPHA is the coverage, so it is the
+			// silhouette, and a soft silhouette is the single fault an impostor cannot hide.
 			cardHalfAuxCheck = new QCheckBox( tr( "Half-resolution normal, mask and emissive sheets" ), page );
 			cardHalfAuxCheck->setObjectName( QStringLiteral( "LodgenCardHalfAuxCheck" ) );
 			cardHalfAuxCheck->setChecked( settings.value( QStringLiteral( "LodGeneration/cardHalfAux" ), false ).toBool() );
@@ -1172,10 +1049,7 @@ public:
 				"which is the cut-out around every leaf. Not yet looked at in a game." ) );
 			f.span( cardHalfAuxCheck );
 
-			/* One computed line for all three rows, because they multiply and
-			 * the arithmetic is not obvious. Typed figures were wrong here once
-			 * already - "0.80 MB a tree" was true of a 64 px frame while the
-			 * driver defaulted to 128 - so nothing here is typed. */
+			// One computed line for all three rows, because they multiply and the arithmetic is not obvious.
 			cardCostLabel = new QLabel( page );
 			cardCostLabel->setObjectName( QStringLiteral( "LodgenCardCostLabel" ) );
 			cardCostLabel->setWordWrap( true );
@@ -1263,7 +1137,7 @@ public:
 			texCheck->setChecked( true );
 			terrainIdCheck = new QCheckBox( tr( "Terrain identity channels" ), page );
 			terrainIdCheck->setObjectName( QStringLiteral( "LodgenTerrainIdentityCheck" ) );
-			// OFF since 2026-09-12 (lane DEFAULTS1, bungo's 15:53 ruling)
+			// OFF since 2026-09-12
 			terrainIdCheck->setChecked( false );
 			terrainIdCheck->setToolTip( tr( "Material class and wetness in the chunk's vertex colours, for FO4CS.\n"
 				"Off, the .BTR carries vanilla's vertex layout.\nCommand line: --terrain-identity" ) );
@@ -1318,10 +1192,7 @@ public:
 			sync();
 		}
 
-		/* The terrain virtual texture. A LodgenSection whose header IS its
-		 * check box, folded by default like the .btr one - not a QGroupBox,
-		 * which the panel self-test counts at zero, and not a wwHeading, which
-		 * cannot carry the enable. */
+		// The terrain virtual texture.
 		vtCheck = new QCheckBox( tr( "Terrain virtual texture (.lodt)" ), page );
 		vtCheck->setObjectName( QStringLiteral( "LodgenVtCheck" ) );
 		vtCheck->setChecked( settings.value( QStringLiteral( "LodGeneration/vt" ), false ).toBool() );
@@ -1332,8 +1203,8 @@ public:
 		layout->addWidget( vtSection );
 		{
 			Form f = form( 24 );
-			/* THE TERRAIN OPTION (lane TERRLIVE1, 2026-09-29): hybrid (the
-			 * default) or dynamic; full was ditched (bungo, 08:19). Label and
+			/* THE TERRAIN OPTION: hybrid (the
+			 * default) or dynamic; full was ditched. Label and
 			 * control only. */
 			terrainBox = new QComboBox( page );
 			terrainBox->setObjectName( QStringLiteral( "LodgenTerrainOptionBox" ) );
@@ -1347,10 +1218,7 @@ public:
 			}
 			wwMatchFieldStyle( terrainBox );
 			terrainLabel = f.add( page, tr( "Terrain" ), terrainBox );
-			/* THE RULE PAINT OUTSIDE (lane TERRLIVE1, 2026-09-29, bungo: "make
-			 * it optional in the baking settings"): Vanilla (the default) or
-			 * Rule. Label and control only. Rule brings the vanilla-colour
-			 * fill with it, since the rule matches vanilla's colour. */
+			// THE RULE PAINT OUTSIDE: Vanilla (the default) or Rule. Label and control only.
 			outsideBox = new QComboBox( page );
 			outsideBox->setObjectName( QStringLiteral( "LodgenOutsidePaintBox" ) );
 			outsideBox->addItem( tr( "Vanilla" ), 0 );
@@ -1361,11 +1229,8 @@ public:
 			outsideLabel = f.add( page, tr( "Outside paint" ), outsideBox );
 			vtFinestBox = new QComboBox( page );
 			vtFinestBox->setObjectName( QStringLiteral( "LodgenVtFinestBox" ) );
-			/* THE FINEST TEXEL DENSITY, ONE ROW (lane VTNORMAL1, bungo's ruling
-			 * 2026-09-23 09:4x: three values, 16 the default). The item data is
-			 * world units a texel; vtOptions() turns it into the finest level
-			 * and the tile content, the same pairs `--vt-density` names. The
-			 * old "Tile content" row is gone: it is decided here now. */
+			// THE FINEST TEXEL DENSITY, ONE ROW. The item data is world units a texel; vtOptions turns it into
+			// the finest level and the tile content, the same pairs `--vt-density` names.
 			vtFinestBox->addItem( tr( "32 units a texel" ), 32 );
 			vtFinestBox->addItem( tr( "16 units a texel" ), 16 );
 			vtFinestBox->addItem( tr( "8 units a texel" ), 8 );
@@ -1380,10 +1245,9 @@ public:
 				"Command line: --vt-density" ) );
 			wwMatchFieldStyle( vtFinestBox );
 			vtFinestLabel = f.add( page, tr( "Finest texel size" ), vtFinestBox );
-			/* The rest of the pyramid's own numbers (lane PANEL1): they were
-			 * command-line switches with no row, and they live here rather
-			 * than in a section of their own because they only mean anything
-			 * while the pyramid is being written. */
+			// The rest of the pyramid's own numbers: they were command-line switches with no row, and they
+			// live here rather than in a section of their own because they only mean anything while the
+			// pyramid is being written.
 			xI( f, "LodgenVtBorderSpin", QStringLiteral( "vtBorder" ),
 				tr( "Tile border" ), 8, 0, 64,
 				tr( "How many texels of the neighbouring tile are copied around each tile so a\n"
@@ -1406,10 +1270,8 @@ public:
 				tr( "Ground no landscape record paints is blended toward the game's own\n"
 					"terrain LOD colour, matched in tone where painted ground meets it.\n"
 					"Command line: --vt-fill-vanilla" ) );
-			/* Lane FIX1 (2026-09-26, bungo's owed call): ground cover under the
-			 * FO4CS target. The stock row lives in the hidden .btr section and
-			 * needs the stock sheets ticked, so this target could not ask for
-			 * it. Label and control only (his menu rule). */
+			// ground cover under the FO4CS target. The stock row lives in the hidden .btr section and needs
+			// the stock sheets ticked, so this target could not ask for it.
 			xB( f, "LodgenVtCoverCheck", QStringLiteral( "vtCover" ),
 				tr( "Ground cover" ), false, tr( "Command line: --cover" ) );
 			if ( auto * c = qobject_cast<QCheckBox *>( extras.value( QStringLiteral( "vtCover" ) ).field ) )
@@ -1464,17 +1326,9 @@ public:
 			sync();
 		}
 
-		/* ==== EVERY OTHER BAKE SETTING THE COMMAND LINE HAS =================
-		 * bungo, 2026-09-12 15:4x: "Erosion is a knob in the menu, corret?" --
-		 * it was not -- then "They should all be configurable in the gen menu,
-		 * anything else we're missing in that menu?". The audit of `lodgen`'s
-		 * own option parser (src/nifcli.cpp) is in the lane report; every bake
-		 * setting it found without a row is a row here, grouped under the
-		 * family its switches belong to.
-		 *
-		 * EVERY DEFAULT IS THE COMMAND LINE'S, unchanged: with nothing touched
-		 * the panel writes the bytes a switch-free command line writes, and
-		 * that is gate (a) of this lane. */
+		// EVERY OTHER BAKE SETTING THE COMMAND LINE HAS bungo, 2026-09-12 15:4x: "Erosion is a knob in the
+		// menu, corret?" it was not -- then "They should all be configurable in the gen menu, anything else
+		// we're missing in that menu?".
 
 		// ---- Terrain --------------------------------------------------------
 		layout->addWidget( wwHeading( tr( "Terrain" ), page ) );
@@ -1488,11 +1342,9 @@ public:
 			layout->addLayout( f.g );
 		}
 
-		// ---- Land detail ----------------------------------------------------
-		/* How the landscape TEXTURE is read into the far sheets: the repeat,
-		 * the sample rule, the geometry that breaks the repeat, the guide that
-		 * steers it, where the fine detail comes from, and the two colour
-		 * terms. Every one of these is a texture decision, not a mesh one. */
+		// Land detail How the landscape TEXTURE is read into the far sheets: the repeat, the sample rule, the
+		// geometry that breaks the repeat, the guide that steers it, where the fine detail comes from, and the
+		// two colour terms.
 		layout->addWidget( wwHeading( tr( "Land detail" ), page ) );
 		{
 			Form f = form( 0 );
@@ -1597,10 +1449,8 @@ public:
 			layout->addLayout( f.g );
 		}
 
-		// ---- Erosion --------------------------------------------------------
-		/* bungo asked for this one by name. Strength 0 is off and is the bake
-		 * without it, byte for byte, so the section can sit at its defaults
-		 * without moving anything. */
+		// Erosion bungo asked for this one by name. Strength 0 is off and is the bake without it, byte for
+		// byte, so the section can sit at its defaults without moving anything.
 		layout->addWidget( wwHeading( tr( "Erosion" ), page ) );
 		{
 			Form f = form( 0 );
@@ -1630,10 +1480,8 @@ public:
 				tr( "How a chunk's texture sheets are compressed and how far their mip chain\n"
 					"goes. Legacy is what this fork has always written.\n"
 					"Command line: --sheet-format" ) );
-			/* The tooltip described a decode cache this folder never was (lane
-			 * VTNORMAL1): it names the cleaned or upscaled normal sheets, and
-			 * since 2026-09-23 they are the pyramid's normal as well as the
-			 * chunk sheets'. The row is remembered like every other one. */
+			// The tooltip described a decode cache this folder never was: it names the cleaned or upscaled
+			// normal sheets, and since 2026-09-23 they are the pyramid's normal as well as the chunk sheets'.
 			xP( f, "LodgenMsnCacheEdit", QStringLiteral( "msnCache" ),
 				tr( "Normal sheets folder" ), QString(),
 				tr( "A folder of cleaned or upscaled terrain normal sheets, one\n"
@@ -1659,12 +1507,8 @@ public:
 			layout->addLayout( f.g );
 		}
 
-		// ---- Roads ----------------------------------------------------------
-		/* A folding section whose header check IS `--roads`: roads on is the
-		 * default, and the rows under it only mean anything while it is on.
-		 * There is no opacity row -- bungo, 2026-09-12 16:0x, "we don't use
-		 * that opacity at all, we render roads at their full diffuse" -- and no
-		 * legacy row; both stay on the command line. */
+		// Roads A folding section whose header check IS `--roads`: roads on is the default, and the rows under
+		// it only mean anything while it is on.
 		roadsCheck = new QCheckBox( tr( "Roads painted into the far terrain" ), page );
 		roadsCheck->setObjectName( QStringLiteral( "LodgenRoadsCheck" ) );
 		roadsCheck->setChecked( settings.value( QStringLiteral( "LodGeneration/roads" ), true ).toBool() );
@@ -1721,10 +1565,9 @@ public:
 			sync();
 		}
 
-		// ---- Object occlusion on the terrain --------------------------------
-		/* OFF is the default and off is the rung's BYTES: the object term is
-		 * its own horizon march and returns exactly 1 where nothing occludes,
-		 * so the multiply cannot move a byte while the box is clear. */
+		// Object occlusion on the terrain OFF is the default and off is the rung's BYTES: the object term is
+		// its own horizon march and returns exactly 1 where nothing occludes, so the multiply cannot move a
+		// byte while the box is clear.
 		terrainObjAoCheck = new QCheckBox( tr( "Far terrain shaded by the objects on it" ), page );
 		terrainObjAoCheck->setObjectName( QStringLiteral( "LodgenTerrainObjectAoCheck" ) );
 		terrainObjAoCheck->setChecked(
@@ -1746,10 +1589,8 @@ public:
 			sync();
 		}
 
-		// ---- Water bodies in the landscape file -----------------------------
-		/* A module of the `.lodl` writer, ON by default since lane WATER1
-		 * (2026-09-27): the file says where water is, body by body. Unticked,
-		 * the file is the version-2 one the same bake wrote before. */
+		// Water bodies in the landscape file A module of the `.lodl` writer, ON by default since lane WATER1:
+		// the file says where water is, body by body.
 		waterBodiesCheck = new QCheckBox( tr( "Water bodies in the landscape file" ), page );
 		waterBodiesCheck->setObjectName( QStringLiteral( "LodgenWaterBodiesCheck" ) );
 		waterBodiesCheck->setChecked(
@@ -1801,10 +1642,8 @@ public:
 			sync();
 		}
 
-		// ---- Aggregate impostors --------------------------------------------
-		/* Ring 3's forested cells stand on one composited sheet instead of one
-		 * card each. Off by default, and it REFUSES IN WORDS without a card
-		 * directory rather than writing an empty table. */
+		// Aggregate impostors Ring 3's forested cells stand on one composited sheet instead of one card each.
+		// Off by default, and it REFUSES IN WORDS without a card directory rather than writing an empty table.
 		aggregateCheck = new QCheckBox( tr( "Aggregate impostors for forested cells" ), page );
 		aggregateCheck->setObjectName( QStringLiteral( "LodgenAggregateCheck" ) );
 		aggregateCheck->setChecked(
@@ -1893,16 +1732,8 @@ public:
 				tr( "How many chunks are baked at once. More is slower and much hungrier here\n"
 					"-- each worker owns its own plugin reader and texture cache -- which is\n"
 					"why one is the default.\nCommand line: --chunk-threads" ) );
-			/* REBAKE ONLY WHAT CHANGED (lane INCRGATE1, 2026-09-24): INCR1's
-			 * `--incremental` as a standing row, OFF by default -- with it off the
-			 * bake is byte for byte what it was. On, every run writes the bake
-			 * record and the per-chunk native caches, and a run that finds a
-			 * record beside it rebuilds only the chunks whose inputs moved. A run
-			 * the record cannot vouch for (another range or chunk size, a setting
-			 * moved, a region-wide product ticked) bakes whole, rewrites the record
-			 * and says why: the command line refuses there, but a standing row
-			 * that refused would have no way back short of deleting the record.
-			 * WW_LODGEN_INCREMENTAL=0|1 forces it for a harness. */
+			// REBAKE ONLY WHAT CHANGED: INCR1's `--incremental` as a standing row, OFF by default -- with it
+			// off the bake is byte for byte what it was.
 			xB( f, "LodgenIncrementalCheck", QStringLiteral( "incremental" ),
 				tr( "Rebake only what changed" ), false,
 				tr( "Keep a bake record in the output folder and, on the next run, rebuild only\n"
@@ -1918,11 +1749,8 @@ public:
 			layout->addLayout( f.g );
 		}
 
-		/* The stochastic sample's own numbers belong to the SELECTOR when a
-		 * stochastic mode is chosen: those rows go away rather than sit there
-		 * disagreeing with the mode above them. The command line composes by
-		 * the order the switches are typed in, which a panel has no way to
-		 * say, so the panel says it by hiding what the mode owns. */
+		// The stochastic sample's own numbers belong to the SELECTOR when a stochastic mode is chosen: those
+		// rows go away rather than sit there disagreeing with the mode above them.
 		{
 			auto sync = [this]() {
 				const int mode = xi( "landSample" );
@@ -2083,11 +1911,7 @@ public:
 		summary->setObjectName( QStringLiteral( "LodgenSummaryLabel" ) );
 		summary->setWordWrap( true );
 		summary->setTextInteractionFlags( Qt::TextSelectableByMouse );
-		/* THE RESULT LINE, under the summary in the pinned bar: what the last
-		 * run cost, by stage. bungo asked for the four stage times of a GUI
-		 * bake (2026-09-11 10:0x, the end-to-end item), and a number that only
-		 * exists in a log is a number he has to go and find. Empty until a run
-		 * finishes, so the bar does not carry a sentence about nothing. */
+		// THE RESULT LINE, under the summary in the pinned bar: what the last run cost, by stage.
 		resultLabel = new QLabel( actionBar );
 		resultLabel->setObjectName( QStringLiteral( "LodgenResultLabel" ) );
 		resultLabel->setWordWrap( true );
@@ -2117,19 +1941,8 @@ public:
 				aoSkirtSpin, cullMarginSpin, tintSpin } )
 			wwMakeScrubField( s );
 
-		/* The target hides what its reader cannot use and, when CHOSEN, ticks
-		 * what it needs. Restoring a saved target only hides; the ticks come
-		 * back from their own settings. */
-		/* THE FIVE .lod TYPES (bungo, 2026-09-11 06:4x, verbatim: "we should
-		 * only have those 5 .lod types in fo4 community shaders target").
-		 * Under FO4 Community Shaders the panel offers `.lodl`, `.lodt`, the
-		 * `.lodo`/`.lodi` pair and the `.lodm` sidecars that ride with them,
-		 * and every legacy row goes: the `.btr` section whole (with its
-		 * terrain-texture bake, its cover rows and its identity channels), the
-		 * `.bto` head, the object ATLAS (a stock draw-call optimisation --
-		 * FO4CS binds the texture arrays instead) and "Chunk textures from the
-		 * pyramid", which exists only to fill legacy chunk sheets. The stock
-		 * engine keeps all of them and loses the native head instead. */
+		// The target hides what its reader cannot use and, when CHOSEN, ticks what it needs. Restoring a saved
+		// target only hides; the ticks come back from their own settings.
 		auto applyTarget = [this]( bool chosen ) {
 			const bool cs = fo4cs();
 			lodtSection->setVisible( cs );
@@ -2164,10 +1977,8 @@ public:
 			if ( chosen ) {
 				lodtCheck->setChecked( cs );
 				heightmapCheck->setChecked( cs );
-				/* NOT ticked by the FO4CS target any more (lane DEFAULTS1,
-				 * 2026-09-12): bungo's 15:56 ruling is that the LEGACY files
-				 * carry no FO4CS data even under that target -- the .lod*
-				 * files above are where it lives. */
+				// NOT ticked by the FO4CS target any more: bungo's 15:56 ruling is that the LEGACY files carry
+				// no FO4CS data even under that target -- the .lod* files above are where it lives.
 				identityCheck->setChecked( false );
 				terrainIdCheck->setChecked( false );
 				objectsCheck->setChecked( true );
@@ -2285,7 +2096,7 @@ private:
 	// ---- the source: Specified, or Mod Organizer 2 -------------------------
 
 	bool mo2Mode() const { return sourceBox->currentData().toInt() == 1; }
-	//! Mod Organizer 2 profile: the profile read off disk (lane LOADORDER1)
+	//! Mod Organizer 2 profile: the profile read off disk
 	bool mo2DiskMode() const { return sourceBox->currentData().toInt() == 2; }
 
 	//! The game's own Data folder - under MO2 this is the VIRTUAL one.
@@ -2303,14 +2114,7 @@ private:
 		return rows;
 	}
 
-	/*! The stack the run reads, LAST WINS. Specified: the game's Data
-	 *  underneath, then the rows in order. MO2: the virtual Data, the base
-	 *  archives, then each enabled plugin's archives in load order.
-	 *
-	 *  Empty in Specified mode with no rows, and that is deliberate: with
-	 *  nothing to layer, the generator reads what it always read (the game
-	 *  manager's own resources), so the byte-identity gate keeps measuring the
-	 *  thing it was written to measure. */
+	//! The stack the run reads, LAST WINS. Specified: the game's Data underneath, then the rows in order.
 	QStringList resourceStack() const
 	{
 		if ( mo2DiskMode() )
@@ -2326,16 +2130,8 @@ private:
 		return stack + rows;
 	}
 
-	/*! Hand the stack to the generator AND to the renderer, so a mod's trees
-	 *  photograph with their own textures and the viewport shows what the bake
-	 *  will see. The game manager takes a list of folders and archives, FIRST
-	 *  wins, which is exactly what lodgenResourceSearchPaths() hands back; its
-	 *  own folders stay underneath as a fallback. Nothing is written to
-	 *  QSettings - GameManager::save() is what persists, and only the Settings
-	 *  dialog calls it - and the original list is put back when the panel goes.
-	 *  (Opening Settings > Resources calls GameManager::load(), which reloads
-	 *  from QSettings and so DROPS this session view; reopen the panel or press
-	 *  Generate to put it back.) */
+	//! Hand the stack to the generator AND to the renderer, so a mod's trees photograph with their own textures
+	//! and the viewport shows what the bake will see.
 	void installResources()
 	{
 		const QStringList stack = resourceStack();
@@ -2365,10 +2161,9 @@ private:
 		Game::GameManager::close_resources();
 	}
 
-	/*! Switching the source reshapes the section: Specified shows the Resources
-	 *  list and lets you order the plugins; Mod Organizer 2 fills the plugin
-	 *  list from the profile's own plugins.txt and makes it read only, because
-	 *  the order is MO2's. Off MO2 it says so and Generate refuses. */
+	//! Switching the source reshapes the section: Specified shows the Resources list and lets you order the
+	//! plugins; Mod Organizer 2 fills the plugin list from the profile's own plugins.txt and makes it read
+	//! only, because the order is MO2's.
 	void applySource( bool userChose )
 	{
 		const bool disk = mo2DiskMode();
@@ -2433,10 +2228,9 @@ private:
 		sourceStatus->setStyleSheet( QStringLiteral( "color: %1;" ).arg( wwSkinColor( "textMuted" ) ) );
 		QString line = tr( "Mod Organizer 2: %1 plugins, %2 archives, files from %3" )
 			.arg( mo2Plugins.size() ).arg( archives ).arg( data );
-		/* The file count walks the virtual Data folder, so it is only paid for
-		 * once the dock is on screen - this panel is built (and hidden) at
-		 * startup, and a walk of every enabled mod's meshes there would be a
-		 * delay at every launch for no one's benefit. */
+		// The file count walks the virtual Data folder, so it is only paid for once the dock is on screen -
+		// this panel is built (and hidden) at startup, and a walk of every enabled mod's meshes there would be
+		// a delay at every launch for no one's benefit.
 		if ( isVisible() )
 			line += tr( " (%1 files)" ).arg( countDataFiles( data ) );
 		sourceStatus->setText( line );
@@ -2444,10 +2238,8 @@ private:
 		refreshSummary();
 	}
 
-	/*! Mod Organizer 2 profile: read the profile off disk and show what it
-	 *  resolved -- every plugin as a full path in load order, the mod order as
-	 *  the stack, and one line saying what was read. A refusal names its cause
-	 *  on the status line and Generate carries the same words. */
+	//! Mod Organizer 2 profile: read the profile off disk and show what it resolved -- every plugin as a full
+	//! path in load order, the mod order as the stack, and one line saying what was read.
 	void applyMo2Disk()
 	{
 		mo2Plugins.clear();
@@ -2518,10 +2310,7 @@ private:
 			"(like FO4Edit), or use Specified" );
 	}
 
-	/*! How many loose files the (virtual) Data folder shows. MO2's VFS cannot
-	 *  say which mod a file came from, so this counts FILES, not mods, and it
-	 *  stops at a cap rather than walking every enabled mod's textures folder
-	 *  while the panel waits. */
+	//! How many loose files the (virtual) Data folder shows.
 	static QString countDataFiles( const QString & data )
 	{
 		const int cap = 20000;
@@ -2625,31 +2414,17 @@ private:
 	/*! Whether the OBJECT PASS runs at all. Both heads drive the same walk of
 	 *  the placements; they differ only in what is written at the end of it. */
 	bool objectPassOn() const { return wantObjects() || wantNative(); }
-	/*! WHERE THE OBJECT TEXTURE SETS GO (lane LAYOUT1, 2026-09-16).
-	 *
-	 *  The mesh arrays, the object atlas and the card arrays are the one group
-	 *  the ruling table does not name, because they are written by the object
-	 *  pass rather than by a terrain writer. Gate (a) settles it all the same:
-	 *  NOTHING of ours lands outside `FO4CSLOD/` under the FO4CS target, and
-	 *  the "stays where it is" clause is explicitly about the STOCK target's
-	 *  `textures/terrain/<ws>/`. So under FO4CS they follow the rest into
-	 *  `FO4CSLOD/<ws>/Objects/` and their game-relative strings say so; under
-	 *  the stock engine not one byte moves. The command line composes the same
-	 *  two strings from the same function (nifcli.cpp). */
+	//! WHERE THE OBJECT TEXTURE SETS GO:
+	//! The mesh arrays, the object atlas and the card arrays are the one group the ruling table does not name,
+	//! because they are written by the object pass rather than by a terrain writer.
 	QString objectsDir() const
 	{
 		return wantNative()
 			? lodgenFo4csWorldDir( outputDir(), world->worldspaceEdid() ) + QStringLiteral( "/Objects" )
 			: texDir + QStringLiteral( "/Objects" );
 	}
-	/*! THE IMPOSTOR CARD FOLDER, and its default (lane LAYOUT1, 2026-09-16).
-	 *
-	 *  Cards are per TREE, not per worldspace, so bungo's one root gives them
-	 *  one home: `<out>/FO4CSLOD/Cards`. Under the FO4CS target an EMPTY field
-	 *  now MEANS that folder -- but only when it is there, so "empty = no
-	 *  impostor cards" still means exactly that on a tree that has none, and
-	 *  no bake starts compositing (or refusing) where it used to say nothing.
-	 *  A typed folder always wins; the tooltip says so. */
+	//! THE IMPOSTOR CARD FOLDER, and its default:
+	//! Cards are per TREE, not per worldspace, so bungo's one root gives them one home: `<out>/FO4CSLOD/Cards`.
 	QString cardSourceDir() const
 	{
 		const QString typed = impostorEdit ? impostorEdit->text().trimmed() : QString();
@@ -2668,17 +2443,10 @@ private:
 			: QString( "data\\Textures\\Terrain\\%1\\Objects\\%1.%2" ).arg( ws ).arg( stem );
 	}
 	bool wantTerrainId() const { return terrainIdCheck->isChecked() && !terrainIdCheck->isHidden(); }
-	/*! Ground cover is available on BOTH targets - the tint is FOR the stock
-	 *  engine, which reads no data sheet at all, and the alpha plane costs a
-	 *  stock user nothing on a chunk with no grass. It still reads tick AND
-	 *  visible, and it needs the sheets it lives in. */
-	//! A tick under a hidden section is a setting saved under the other
-	//! target, not a request.
+	//! Ground cover is available on BOTH targets - the tint is FOR the stock engine, which reads no data sheet
+	//! at all, and the alpha plane costs a stock user nothing on a chunk with no grass.
 	bool wantVt() const { return vtCheck->isChecked() && !vtSection->isHidden(); }
-	/*! The estimate for the settings as they stand. The worldspace's own
-	 *  bounds when they are known; otherwise the chunk range, said out loud,
-	 *  so the section always carries a number that MOVES with its settings
-	 *  rather than a sentence that cannot. */
+	//! The estimate for the settings as they stand.
 	LodgenTerrainOption terrainOption() const
 	{
 		return LodgenTerrainOption( terrainBox ? terrainBox->currentData().toInt()
@@ -2717,13 +2485,8 @@ private:
 			.arg( double( e.btrBytes ) / 1073741824.0, 0, 'f', 2 )
 			.arg( double( e.deliveredBytes ) / 1073741824.0, 0, 'f', 2 ) );
 	}
-	/* ---- THE EXTRA ROWS: read, show, enable (lane PANEL1, 2026-09-12) -----
-	 *
-	 *  `xraw` is what the widget says. `xvar` is what the RUN reads, and the
-	 *  difference is the panel's tick-AND-VISIBLE rule applied to a value: a
-	 *  row the target has hidden reads back as the command line's default, so
-	 *  a setting the target cannot use cannot reach the bake either. The save
-	 *  uses `xraw`, so hiding a row never overwrites what is in it. */
+	// THE EXTRA ROWS: read, show, enable:
+	// `xraw` is what the widget says.
 	QVariant xraw( const QString & key ) const
 	{
 		const WwExtraRow r = extras.value( key );
@@ -2771,14 +2534,7 @@ private:
 			l->setEnabled( on );
 	}
 
-	/*! THE PROCESS-WIDE GENERATOR SETTINGS, written from the rows at the top
-	 *  of every run.
-	 *
-	 *  They are file statics inside lodgen.cpp reached only through these
-	 *  setters, so they are written EVERY run and not only when a row moves:
-	 *  otherwise the LAST run's value would still be standing. Every row is at
-	 *  the command line's default until somebody moves it, so a default run
-	 *  writes the defaults and no byte moves -- which is gate (a). */
+	//! THE PROCESS-WIDE GENERATOR SETTINGS, written from the rows at the top of every run.
 	void applyGeneratorSettings()
 	{
 		lodgenSetThreadCount( xi( "threads" ) );
@@ -2814,7 +2570,7 @@ private:
 		lodgenSetLandGuideSlopeRef( xf( "landGuideSlope" ) );
 		lodgenSetLandDetailSource( xi( "landDetailSource" ) );
 		lodgenSetVanillaLodRoot( xs( "vanillaLodRoot" ) );
-		// lane FIX1: the vanilla fill's shape half (landless cells take vanilla's terrain LOD heights)
+		// the vanilla fill's shape half (landless cells take vanilla's terrain LOD heights)
 		lodgenSetLandFillVanilla( xb( "vtFillVanilla" ) );
 		lodgenSetLandShade( xf( "landShade" ) );
 		lodgenSetLandGrade( xf( "landGrade" ) );
@@ -2858,7 +2614,7 @@ private:
 		LodgenCoverOptions o;
 		const bool stockCover = coverCheck->isChecked() && !coverCheck->isHidden()
 			&& texCheck->isChecked() && btrCheck->isChecked();
-		// the FO4CS row (lane FIX1): the cover plane in the pyramid's mask
+		// the FO4CS row: the cover plane in the pyramid's mask
 		// tiles; the hidden tint row reads as the command line's default
 		const bool vtCover = fo4cs() && wantVt() && xb( "vtCover" );
 		o.cover = stockCover || vtCover;
@@ -2882,11 +2638,9 @@ private:
 		return o;
 	}
 
-	/*! The line beside the buttons: what Generate will write, with sizes from
-	 *  what was measured (a .lodl is about 1 KB a cell; a native heightmap is
-	 *  32 texels a cell at 2 bytes each), or the one reason it cannot run.
-	 *  Generate is greyed while there is a reason, and the reason is the text
-	 *  - a greyed button with no sentence next to it is a broken button. */
+	//! The line beside the buttons: what Generate will write, with sizes from what was measured (a .lodl is
+	//! about 1 KB a cell; a native heightmap is 32 texels a cell at 2 bytes each), or the one reason it cannot
+	//! run.
 	void refreshSummary()
 	{
 		if ( !summary || running )
@@ -2899,15 +2653,11 @@ private:
 			outRootLabel->setText( ws.isEmpty()
 				? lodgenFo4csFolderName() + QChar( 92 ) + tr( "<worldspace>" ) + QChar( 92 )
 				: lodgenFo4csGameWorldPath( ws ) + QChar( 92 ) );
-		/* The pyramid's line is computed BEFORE the refusal chain can return.
-		 * It describes what the pyramid would cost, which is a fact about the
-		 * settings and not about whether the run can start; hiding it behind
-		 * "choose an output folder" would make the one live number in the
-		 * section look like a fixed sentence. */
+		// The pyramid's line is computed BEFORE the refusal chain can return.
 		refreshVtSummary();
-		/* The cover request as the run will read it (lane FIX1), set before the
+		/* The cover request as the run will read it, set before the
 		 * refusal chain like the pyramid's line: WW_LODGEN_TEST reads it to prove
-		 * the FO4CS row reaches coverOptions(), which no bake-free gate sees. */
+		 * the FO4CS row reaches coverOptions, which no bake-free gate sees. */
 		summary->setProperty( "wwCoverRequested", coverOptions().cover );
 		const bool chunks = objectPassOn() || btrCheck->isChecked();
 		QString why;
@@ -3004,7 +2754,7 @@ private:
 				 * them, so the mod folder gets our types and nothing else. The
 				 * manifest sidecar stays. Said out loud, because a folder that
 				 * loses files at the end of a run should not be a surprise. */
-				/* WHERE THE SIDECAR LANDS (lane LAYOUT1, 2026-09-16): under the
+				/* WHERE THE SIDECAR LANDS: under the
 				 * one root with the files it describes, so the sentence asks
 				 * the composer rather than naming the folder it used to be
 				 * in.  A summary that names a path nothing writes is the
@@ -3014,7 +2764,7 @@ private:
 					.arg( buildQueue().size() ).arg( lodgenFo4csGameWorldPath( ws ) );
 			}
 		}
-		/* NOT on wantIdentity() since 2026-09-12 (lane DEFAULTS1): the arrays
+		/* NOT on wantIdentity since 2026-09-12: the arrays
 		 * are their own module and the identity flag is not their master
 		 * switch -- gating them on it emptied the far rings. */
 		if ( objectPassOn() && arraysCheck->isChecked() )
@@ -3029,14 +2779,9 @@ private:
 	}
 
 
-	/*! A SETTINGS SAVE THE SELF-TEST CAN ASK FOR (lane PANEL1, 2026-09-12).
-	 *
-	 *  WW_LODGEN_TEST checks that every row round-trips through its own
-	 *  QSettings key, which means it has to make the panel save between moving
-	 *  a row and reading the key. This class has no Q_OBJECT and so no slot to
-	 *  call; a dynamic property does the same job with no moc: setting
-	 *  `wwSaveSettings` on the panel raises DynamicPropertyChange here and the
-	 *  rows are written. It changes nothing about a normal run. */
+	//! A SETTINGS SAVE THE SELF-TEST CAN ASK FOR:
+	//! WW_LODGEN_TEST checks that every row round-trips through its own QSettings key, which means it has to
+	//! make the panel save between moving a row and reading the key.
 	bool event( QEvent * e ) override
 	{
 		if ( e->type() == QEvent::DynamicPropertyChange
@@ -3136,7 +2881,7 @@ private:
 		}
 		saveSettings();
 		// the process-wide generator settings, from their rows, before any
-		// stage reads one of them (lane PANEL1)
+		// stage reads one of them
 		applyGeneratorSettings();
 		// GPU or CPU for this run, from Settings > NIF > LOD bake > Use GPU (src/lodgengpu.h)
 		lodgenGpuConfigure( false );
@@ -3145,10 +2890,7 @@ private:
 		// does not run this time reads 0 and not the last run's number
 		msLandscape = msMeshes = msTextures = msImpostors = 0;
 		msLandscapeWorker.store( 0 );
-		/* The layout clause starts blank for every run and is filled by the
-		 * writers themselves (lane LAYOUT1, 2026-09-16). It is cleared HERE and
-		 * not in startChunks(): the landscape file is written by the world job,
-		 * which runs first, and clearing later would throw its note away. */
+		// The layout clause starts blank for every run and is filled by the writers themselves.
 		lodgenClearLayoutCensus();
 		/* The stack goes in before anything reads an asset, and stays for the
 		 * session so the viewport shows the same worldspace the bake sees. */
@@ -3225,11 +2967,8 @@ private:
 				LodtOptions o;
 				o.aoSamples = job.aoSamples;
 				o.overviewSamples = job.overviewSamples;
-				/* The water-body module of the .lodl writer, ON by default
-				 * since lane WATER1; unticked, the file is the version-2 one
-				 * this bake wrote before. A worldspace the module cannot
-				 * classify (no water above its ground) falls back to version 2
-				 * and says so, instead of failing the bake. */
+				// The water-body module of the .lodl writer, ON by default since lane WATER1; unticked, the
+				// file is the version-2 one this bake wrote before.
 				o.water.enabled = xb( "waterBodies" );
 				o.water.fallbackV2 = true;
 				o.water.bridgeGap = xi( "waterBridge" );
@@ -3258,7 +2997,7 @@ private:
 					} );
 					return !cancelFlag.load();
 				};
-				/* Lane FIX1: with the vanilla fill on, a landless cell takes the
+				/* with the vanilla fill on, a landless cell takes the
 				 * game's own terrain LOD heights too (lodgen.h), as on the CLI. */
 				lodgenSetLandFillVanilla( xb( "vtFillVanilla" ) );
 				if ( lodgenLandFillVanilla() ) {
@@ -3267,11 +3006,8 @@ private:
 						return lodgenVanillaCellHeights( fillWs, cx, cy, h );
 					};
 				}
-				/* Lane WATER1 (sloped water): the placed water meshes' triangles,
-				 * model space, 9 floats a triangle, through the object bake's own
-				 * NIF reader. An EMPTY data root = the session's resource stack,
-				 * as for the native pair below. Same loader as the command line
-				 * (src/nifcli.cpp), so the panel and the CLI write the same file. */
+				// the placed water meshes' triangles, model space, 9 floats a triangle, through the object
+				// bake's own NIF reader.
 				if ( o.water.enabled ) {
 					lodgenWarmSharedIndices();
 					o.placedWaterModel = []( const QString & model, std::vector<float> & tris ) {
@@ -3296,7 +3032,7 @@ private:
 						}
 						return true;
 					};
-					// lane WATERSKYVISFAR2: the placed statics' far-LOD tops, walls in the water sky plane
+					// the placed statics' far-LOD tops, walls in the water sky plane
 					o.staticTops = [&w]( int cx0, int cy0, int cx1, int cy1,
 						const std::function<bool( int, int )> & want, LodtStaticTops & st ) {
 						return lodgenStaticTops( w, QString(), cx0, cy0, cx1, cy1, want, st );
@@ -3376,29 +3112,17 @@ private:
 		progress->setValue( 0 );
 		meshDir = outputDir() + QStringLiteral( "/meshes/terrain/" ) + world->worldspaceEdid();
 		texDir = outputDir() + QStringLiteral( "/textures/terrain/" ) + world->worldspaceEdid();
-		/* EMPTY-FOLDER HYGIENE (lane LAYOUT1, 2026-09-16): the legacy chunk
+		/* EMPTY-FOLDER HYGIENE: the legacy chunk
 		 * folder is created only when a legacy chunk is going to be written
 		 * into it. Under the FO4CS target nothing does. */
 		if ( wantObjects() || ( btrCheck->isChecked() && !btrSection->isHidden() ) || xb( "keepBto" ) )
 			QDir().mkpath( meshDir );
 		if ( texCheck->isChecked() && btrCheck->isChecked() )
 			QDir().mkpath( texDir );
-		/* ===== REBAKE ONLY WHAT CHANGED (lane INCRGATE1, 2026-09-24) =======
-		 *
-		 * The command line's ledger, verbatim: lodgenIncrementalBegin() in
-		 * src/lodgenchunkpass.cpp diffs this run against the record and
-		 * filters the job list, and the queue below is rebuilt from what it
-		 * kept, in job order. Two differences, both because a row is a
-		 * standing setting and a flag is a request:
-		 *   - no record yet is not a refusal: the whole range bakes and the
-		 *     record is written, so the next run can diff;
-		 *   - a run the record cannot vouch for bakes whole and says why,
-		 *     instead of refusing -- a refusing row would have no way back.
-		 * The switches are "--panel" and the IDENTITY WORD, which hashes every
-		 * setting the bake reads: the pass's own options, the post passes, and
-		 * every extra row the RUN reads (xvar, so a hidden row counts as its
-		 * default). Threads, folders and this row itself are not settings of
-		 * the bytes and stay out. */
+		// REBAKE ONLY WHAT CHANGED:
+		// The command line's ledger, verbatim: lodgenIncrementalBegin() in src/lodgenchunkpass.cpp diffs this
+		// run against the record and filters the job list, and the queue below is rebuilt from what it kept,
+		// in job order.
 		incOn = false;
 		incCensus.clear();
 		incNotes.clear();
@@ -3505,21 +3229,9 @@ private:
 				progress->setRange( 0, qMax( 1, queue.size() ) );
 			}
 		}
-		/* ===== THE .BTO SCRATCH FOLDER (lane BTOFREE1, 2026-09-16) =========
-		 *
-		 * bungo, 2026-09-12 18:3x: "essentially, no legacy vanilla file types
-		 * are now used by us or baked in the FO4CS lod bake". The `.BTO` was
-		 * the last one, and it was last because five passes read it BACK --
-		 * not because anything downstream of the bake wants it. So under the
-		 * FO4CS target it is built here instead, every read-back works on it
-		 * here, and the teardown after the card arrays removes it.
-		 *
-		 * The folder sits inside the mod folder rather than in %TEMP% so an
-		 * interrupted bake leaves its scaffolding where the operator can see
-		 * it; a run that finds one left by a dead bake removes it first, which
-		 * makes that self-healing instead of a second failure. Same path, same
-		 * name and the same teardown function as the command line, because
-		 * lodgen_byte_gate.sh compares what the two leave on disk. */
+		// THE .BTO SCRATCH FOLDER:
+		// bungo, 2026-09-12 18:3x: "essentially, no legacy vanilla file types are now used by us or baked in
+		// the FO4CS lod bake".
 		btoScratch.clear();
 		lodgenClearBtoDisposition();
 		if ( wantNative() && objectPassOn() && !xb( "keepBto" ) ) {
@@ -3547,17 +3259,13 @@ private:
 		if ( wantNative() ) {
 			const QString nativeDir = lodgenFo4csWorldDir( outputDir(), world->worldspaceEdid() );
 			QDir().mkpath( nativeDir );
-			/* The two modules of the pair, from their rows (lane PANEL1): the
-			 * ladder is the several-levels-per-mesh library and the occluders
-			 * are the .lodi's box table. The ladder defaults OFF (bungo
-			 * 2026-09-17, authored LODs only), the occluders ON. */
+			// The two modules of the pair, from their rows: the ladder is the several-levels-per-mesh library
+			// and the occluders are the .lodi's box table. The ladder defaults OFF, the occluders ON.
 			lodgenNativeBegin( world.get(), nativeDir, lodgenNativeLoadModel, &nativeDataRoot,
 				QString(), xb( "nativeLadder" ), xb( "nativeOccluders" ) );
-			/* AGGREGATE RING-3 IMPOSTORS, armed the same way the command line
-			 * arms them and refusing in the same words: a set is composited
-			 * from the cell's own trees' card sheets, so there is nothing to
-			 * photograph without a card tree. The refusal is carried to the
-			 * result line rather than thrown away. */
+			// AGGREGATE RING-3 IMPOSTORS, armed the same way the command line arms them and refusing in the
+			// same words: a set is composited from the cell's own trees' card sheets, so there is nothing to
+			// photograph without a card tree.
 			aggRefusal.clear();
 			if ( xb( "aggregate" ) ) {
 				const QString cardDir = cardSourceDir();
@@ -3590,10 +3298,7 @@ private:
 		 * seventy meshes for every chunk in the range. */
 		lodgenDestroyBakeCaches( bakeCaches );
 		bakeCaches = lodgenCreateBakeCaches();
-		/* The pyramid runs ONCE and FIRST. When the chunk sheets come from it
-		 * they are assembled while its staging is live, so a pass that ran
-		 * after the chunk queue would have nothing to read; and the output is
-		 * the mod folder itself - the writer creates Terrain/ under it. */
+		// The pyramid runs ONCE and FIRST.
 		vtSuppliesTex = false;
 		if ( wantVt() ) {
 			progress->setFormat( tr( "the terrain virtual texture\u2026" ) );
@@ -3610,7 +3315,7 @@ private:
 			vo.progress = &LodgenPanel::vtProgressThunk;
 			vo.progressUser = this;
 			QString rep, verr;
-			/* THE TERRAIN OPTION (lane TERRLIVE1): the decals for every option,
+			/* THE TERRAIN OPTION: the decals for every option,
 			 * the pyramid for full and hybrid. */
 			const LodgenTerrainOption to = terrainOption();
 			lodbSetTerrainOption( lodgenTerrainOptionName( to ) );
@@ -3645,10 +3350,7 @@ private:
 		QTimer::singleShot( 0, this, [this]() { step(); } );
 	}
 
-	/*! The pyramid's per-row callback: repaint, and honour Cancel. A
-	 *  whole-worldspace pass is minutes long and must not freeze the
-	 *  window; the bake takes a plain function pointer so lodgen.cpp keeps
-	 *  no Qt object of ours. */
+	//! The pyramid's per-row callback: repaint, and honour Cancel.
 	static bool vtProgressThunk( void * user, int rowsDone, int rowsTotal )
 	{
 		LodgenPanel * self = static_cast<LodgenPanel *>( user );
@@ -3662,7 +3364,7 @@ private:
 
 	/*! The chunk pass's options, from the rows. One function, because the
 	 *  identity word of "Rebake only what changed" is read off the same
-	 *  options the pass bakes with (lane INCRGATE1, 2026-09-24). */
+	 *  options the pass bakes with. */
 	LodgenChunkPassOptions chunkPassOptions()
 	{
 		LodgenChunkPassOptions pass;
@@ -3708,23 +3410,9 @@ private:
 		return pass;
 	}
 
-	/*! THE CHUNK QUEUE, over the machine.
-	 *
-	 *  The panel used to build ONE chunk per event-loop tick, so a 3,060-chunk
-	 *  Commonwealth ran on one core with fifteen idle. The loop is now
-	 *  lodgenRunChunkPass (lodgenchunkpass.h), shared with the command line and
-	 *  fanned over lodgenThreadCount() workers.
-	 *
-	 *  The window stays live because the pass calls `retire` on THIS thread,
-	 *  once per chunk, in QUEUE ORDER, and `retire` pumps the event loop -- the
-	 *  same thing the pyramid pass already does through vtProgressThunk.
-	 *  Cancel still lands between chunks: the workers poll cancelFlag before
-	 *  they pick a job up.
-	 *
-	 *  The live preview is spliced from `retire` too, so the documents arrive
-	 *  in chunk order however the workers finish. No NifModel crosses a thread:
-	 *  a worker writes the preview copy as a file, translation already applied,
-	 *  and the main thread only opens it. */
+	//! THE CHUNK QUEUE, over the machine:
+	//! The panel used to build ONE chunk per event-loop tick, so a 3,060-chunk Commonwealth ran on one core
+	//! with fifteen idle.
 	void runChunkQueue()
 	{
 		// an incremental run with nothing dirty still runs: every chunk replays its cache
@@ -3777,7 +3465,7 @@ private:
 	{
 		if ( cancelFlag || done >= queue.size() ) {
 			QString tail;
-			// not on wantIdentity() since 2026-09-12 (lane DEFAULTS1)
+			// not on wantIdentity since 2026-09-12
 			if ( !cancelFlag && !writtenBto.isEmpty() && objectPassOn()
 				&& arraysCheck->isChecked() ) {
 				// before the atlas: the arrays key on the shapes' own diffuse paths
@@ -3809,12 +3497,9 @@ private:
 				QElapsedTimer t;
 				t.start();
 				QString aerr;
-				/* Vanilla's own sheet is DXT1 (measured), so the stock target gets
-				 * BC1 with one-bit alpha for the cut-outs - parity and half the
-				 * memory - and FO4CS keeps BC3's eight-bit alpha, which only a
-				 * consumer that soft-blends card edges can spend. */
-				/* The row picks it; "Match the target" is what the panel has
-				 * always done and is its default (lane PANEL1). */
+				// Vanilla's own sheet is DXT1 (measured), so the stock target gets BC1 with one-bit alpha for
+				// the cut-outs - parity and half the memory - and FO4CS keeps BC3's eight-bit alpha, which
+				// only a consumer that soft-blends card edges can spend.
 				const int atlasFmt = xi( "atlasFormat" );
 				const bool atlasBc1 = atlasFmt < 0 ? !fo4cs() : ( atlasFmt == 1 );
 				if ( lodgenBuildAtlas( writtenBto, QString(),
@@ -3860,7 +3545,7 @@ private:
 					tail += tr( ", far rings: %1" ).arg( serr );
 				msMeshes += t.elapsed();
 			}
-			// not on wantIdentity() since 2026-09-12 (lane DEFAULTS1)
+			// not on wantIdentity since 2026-09-12
 			if ( !cancelFlag && !writtenBto.isEmpty() && objectPassOn()
 				&& arraysCheck->isChecked() && !cardSourceDir().isEmpty() ) {
 				// the card sets the chunks stand on, as arrays beside the mesh arrays
@@ -3879,7 +3564,7 @@ private:
 					tail += tr( ", card arrays: %1" ).arg( rep );
 					if ( wantNative() )
 						lodgenNoteLayoutDir( arrDir );
-					/* CARDLINK1: the emitter links the arrays just written, while the
+					/* the emitter links the arrays just written, while the
 					 * manifests still sit beside the chunks (the teardown below
 					 * removes them before the pair is written). */
 					if ( lodgenNativeActive() ) {
@@ -3894,21 +3579,13 @@ private:
 					tail += tr( ", card arrays: %1" ).arg( cerr2 );
 				msImpostors += t.elapsed();		// the IMPOSTOR stage
 			}
-			/* ===== THE SCRATCH TEARDOWN (lane BTOFREE1, 2026-09-16) ========
-			 *
-			 * LAST of the object passes: the texture arrays, the atlas, the
-			 * shape merge, the far-ring cut and the card arrays above have all
-			 * had the chunks and their manifests side by side, exactly as they
-			 * did when the chunks lived in the mod folder. Now the sidecars
-			 * move into the mod folder and the chunks go. Before the pair,
-			 * because the pair is written from the emitter and not from the
-			 * files, and after a CANCEL as well -- a cancelled run must not
-			 * leave a scratch folder behind either. */
+			// THE SCRATCH TEARDOWN:
+			// LAST of the object passes: the texture arrays, the atlas, the shape merge, the far-ring cut and
+			// the card arrays above have all had the chunks and their manifests side by side, exactly as they
+			// did when the chunks lived in the mod folder.
 			if ( !btoScratch.isEmpty() ) {
-				/* The sidecars BTOFREE1 keeps land beside the files they
-				 * describe, which since lane LAYOUT1 (2026-09-16) means
-				 * FO4CSLOD\<ws>\ and no longer meshes\terrain\<ws>\. The
-				 * scratch folder only ever exists under the FO4CS target. */
+				// The sidecars BTOFREE1 keeps land beside the files they describe, which since lane LAYOUT1
+				// means FO4CSLOD\<ws>\ and no longer meshes\terrain\<ws>\.
 				const QString manifestDir = lodgenFo4csWorldDir( outputDir(), world->worldspaceEdid() );
 				QDir().mkpath( manifestDir );
 				const LodgenBtoScratchResult r =
@@ -3920,15 +3597,8 @@ private:
 				writtenBto.clear();
 				btoScratch.clear();
 			}
-			/* The native pair, written once the chunk queue has handed the
-			 * emitter every placement -- the same order the CLI's region
-			 * driver uses. Disarmed on every path, including a cancel, so a
-			 * cancelled run cannot leave the accumulator armed for the next. */
-			/* REBAKE ONLY WHAT CHANGED: the pair is written from the rebuilt
-			 * chunks AND the replayed caches, so INCR1's two cache refusals
-			 * hold here as on the command line. A refused pair is not written
-			 * and neither is the record, so the next run diffs against the old
-			 * one and rebuilds what this run touched. */
+			// The native pair, written once the chunk queue has handed the emitter every placement -- the same
+			// order the CLI's region driver uses.
 			bool incPairRefused = false;
 			if ( incOn && !cancelFlag && lodgenNativeActive() ) {
 				const QString cc = lodgenIncrementalCacheCensus( incRun );
@@ -3956,10 +3626,8 @@ private:
 					else
 						tail += tr( ", native: %1" ).arg( nerr );
 					msMeshes += t.elapsed();
-					/* The aggregate SHEETS, written after the pair because the
-					 * compositor runs inside the .lodi write. They go into the
-					 * output Data tree, never the card bake tree: a set is per
-					 * worldspace CELL and the card tree is per base. */
+					// The aggregate SHEETS, written after the pair because the compositor runs inside the
+					// .lodi write.
 					if ( !lodgenNativeAggregateSets().isEmpty() ) {
 						QStringList aggWritten;
 						QString aggErr;
@@ -3980,10 +3648,8 @@ private:
 				}
 				lodgenNativeEnd();
 			}
-			/* REBAKE ONLY WHAT CHANGED: the record, LAST, after every file it
-			 * lists is on disk -- the command line's order. Not after a cancel
-			 * and not after a refused pair: a record must only ever describe a
-			 * finished bake. */
+			// REBAKE ONLY WHAT CHANGED: the record, LAST, after every file it lists is on disk -- the command
+			// line's order.
 			if ( incOn ) {
 				if ( !cancelFlag && !incPairRefused ) {
 					lodbNoteCensus( stageTimeLine() );
@@ -4018,15 +3684,7 @@ private:
 		}
 	}
 
-	/*! The four stage times, in one line, in the order the work happens.
-	 *
-	 *  Each is accumulated from the calls that belong to that stage and from
-	 *  nothing else, so a stage that did not run reads exactly 0.0 s -- which
-	 *  is what makes the line a measurement rather than a decoration (the
-	 *  three rules of 2026-09-04: a status line ships with a test that it is
-	 *  written AND that it moves). Seconds to one decimal: the numbers a
-	 *  person compares are tens of seconds and minutes, and milliseconds in a
-	 *  pinned bar read as noise. */
+	//! The four stage times, in one line, in the order the work happens.
 	QString stageTimeLine() const
 	{
 		// the words live in lodgen.cpp, so the panel and the command line
@@ -4045,10 +3703,8 @@ private:
 			progress->setValue( progress->maximum() );
 		map->setLabel( message.section( QChar( '\n' ), 0, 0 ) );
 		if ( resultLabel ) {
-			/* The four stage times, then the bake census -- how many threads the
-			 * run was allowed, how many chunk jobs it had, how many workers the
-			 * queue could actually use, and what it cost the machine. One
-			 * formatter with the command line (lodgenBakeCensusLine). */
+			// The four stage times, then the bake census -- how many threads the run was allowed, how many
+			// chunk jobs it had, how many workers the queue could actually use, and what it cost the machine.
 			resultLabel->setText( stageTimeLine() + QStringLiteral( "\n" ) + lodgenBakeCensusLine() );
 			resultLabel->setToolTip( message );
 			resultLabel->setVisible( true );
@@ -4110,15 +3766,8 @@ private:
 	QCheckBox * cardHalfAuxCheck = nullptr;
 	QLabel * cardCostLabel = nullptr;
 
-	/*! The grid and the RUN's resolution of the card sets already in
-	 *  `impostorEdit`'s directory, read from the first `<id>_oct.lodm` there,
-	 *  or zeroes when it holds none.
-	 *
-	 *  The run's resolution, not the frame: a frame below it is that base's
-	 *  rung on the size ladder and perfectly correct. A card carries its own
-	 *  geometry, so without this a run configured one way loads cards baked
-	 *  another without a word, and the card arrays then split by sheet size
-	 *  into separate arrays and separate binds. */
+	//! The grid and the RUN's resolution of the card sets already in `impostorEdit`'s directory, read from the
+	//! first `<id>_oct.lodm` there, or zeroes when it holds none.
 	QPair<int, int> cardsOnDisk() const
 	{
 		const QString dir = cardSourceDir();
@@ -4153,11 +3802,7 @@ private:
 	QCheckBox * nativeCheck = nullptr;			//!< the FO4CS head of the object section
 	QCheckBox * treesOnlyCheck = nullptr;		//!< impostor cards are trees only
 	std::function<void()> syncObjectRows, syncRangeRows;
-	/*! The four stage times of the last run, in milliseconds, in the order the
-	 *  result line prints them. Each is accumulated from the calls that belong
-	 *  to that stage and NOTHING else, so a stage that did not run reads 0 --
-	 *  which is what makes the line testable (the three rules of 2026-09-04:
-	 *  written AND moving). */
+	//! The four stage times of the last run, in milliseconds, in the order the result line prints them.
 	qint64 msLandscape = 0, msMeshes = 0, msTextures = 0, msImpostors = 0;
 	//! atomics: the landscape stage is accumulated on the worker thread
 	std::atomic<qint64> msLandscapeWorker { 0 };
@@ -4170,18 +3815,13 @@ private:
 	QCheckBox * vtCheck = nullptr, * vtBtrCheck = nullptr;
 	QComboBox * vtFinestBox = nullptr;
 	QLabel * vtSummary = nullptr, * vtFinestLabel = nullptr;
-	QComboBox * terrainBox = nullptr;       //!< lane TERRLIVE1
+	QComboBox * terrainBox = nullptr;
 	QLabel * terrainLabel = nullptr;
-	QComboBox * outsideBox = nullptr;       //!< lane TERRLIVE1: the rule paint outside
+	QComboBox * outsideBox = nullptr;       //!< the rule paint outside
 	QLabel * outsideLabel = nullptr;
 	QList<QWidget *> vtSub;
-	/*! ONE REGISTRY FOR THE ROWS LANE PANEL1 ADDED (2026-09-12).
-	 *
-	 *  Key = the `LodGeneration/` settings key without its group. `dflt` is the
-	 *  COMMAND LINE'S default for that switch, kept beside the widget so a
-	 *  hidden row reads back as the default and so the self-test can check
-	 *  every row round-trips. The save, the load, the run and the self-test
-	 *  all walk this one hash. */
+	//! ONE REGISTRY FOR THE ROWS LANE PANEL1 ADDED:
+	//! Key = the `LodGeneration/` settings key without its group.
 	struct WwExtraRow
 	{
 		QWidget * field = nullptr;
@@ -4203,7 +3843,7 @@ private:
 	LodgenSection * lodtSection = nullptr, * heightmapSection = nullptr, * objectsSection = nullptr, * btrSection = nullptr;
 	LodgenSection * vtSection = nullptr;
 	QLabel * summary = nullptr;
-	//! the FO4CS root line under the output field, and its name cell (lane LAYOUT1)
+	//! the FO4CS root line under the output field, and its name cell
 	QLabel * outRootLabel = nullptr, * outRootName = nullptr;
 	QLabel * resultLabel = nullptr;		//!< the four stage times of the last run
 	QString nativeDataRoot;				//!< empty = the session's own resource stack
@@ -4217,10 +3857,8 @@ private:
 	QVector<ChunkJob> queue;
 	QStringList writtenBto;
 	QString meshDir, texDir, btoScratch, lastReport;
-	/*! "Rebake only what changed" (lane INCRGATE1, 2026-09-24): the ledger
-	 *  run the command line's `--incremental` uses, armed once per bake in
-	 *  startChunks() and closed in step(). `incOn` is false for every bake
-	 *  with the row off, and then nothing below touches the run. */
+	//! "Rebake only what changed": the ledger run the command line's `--incremental` uses, armed once per bake
+	//! in startChunks and closed in step.
 	LodgenIncrementalRun incRun;
 	bool incOn = false;
 	QString incCensus;			//!< the one census line: what was dirty, or why all of it was
@@ -4276,39 +3914,9 @@ QDockWidget * tlCreateLodGenerationDock( NifModel *, QMainWindow * mw, GLView * 
 	// the panel scrolls its own settings and pins its action bar: no wrapper
 	auto * panel = new LodgenPanel( qobject_cast<NifSkope *>( mw ) );
 
-	/* THE PANEL'S OWN SEGMENTED STRIP: LOD | Water (lane WATER8, 2026-09-10).
-	 *
-	 * bungo, on seeing lane WATER7 put the Water tab in the LEFT strip:
-	 * *"What? I wanted it in that right panel though"*. Read with what he had
-	 * said an hour earlier -- *"They should be in the LOD gen workspace"*, then,
-	 * over a screenshot of Header | Blocks | Files, *"You'd access them like
-	 * this"* -- the strip was the STYLE and THIS panel is the PLACE. WATER7
-	 * took it for the place; the left strip goes back to its three tabs.
-	 *
-	 * So this dock stops holding the settings page directly and holds a strip
-	 * above a stack instead. The strip is built exactly as the left editor's is
-	 * (src/nifskope_ui.cpp:24402-24429): a QTabBar in document mode with no
-	 * base, expanding, no scroll buttons, wwSegmentedTabBarQss(), tabData
-	 * carrying the STACK PAGE INDEX in both directions, over a QStackedWidget
-	 * in a zero-margin column. Same helper, same skin, so the two strips cannot
-	 * drift apart -- gate L5 of tests/spells/water_ui.sh compares the two
-	 * sheets byte for byte.
-	 *
-	 * The tab index means nothing outside this widget: everything asks through
-	 * tabData, which is what makes adding the water page (src/watermarkpanel.cpp,
-	 * which finds this strip by object name) a one-call change rather than a
-	 * renumbering.
-	 *
-	 * The row height is NOT set here. `wwAlignBarRow` states it once, after
-	 * restoreState, for every bar at the top of the window at once
-	 * (src/nifskope_ui.cpp, restoreUi) -- three setFixedHeight calls at three
-	 * call sites is exactly how the bars came to disagree in the first place.
-	 * Until then this strip carries the compact default, which is also what it
-	 * keeps if the row never gets a height.
-	 *
-	 * FALLBACK FLOOR (CONSTITUTION 10): with no second page ever added the
-	 * strip is a single `LOD` tab over the settings the dock always held, so
-	 * the workspace works exactly as it did before this lane. */
+	// THE PANEL'S OWN SEGMENTED STRIP: LOD | Water:
+	// bungo, on seeing lane WATER7 put the Water tab in the LEFT strip: *"What? I wanted it in that right
+	// panel though"*.
 	auto * host = new QWidget( dock );
 	host->setObjectName( QStringLiteral( "LodPanelHost" ) );
 	auto * hostLayout = new QVBoxLayout( host );

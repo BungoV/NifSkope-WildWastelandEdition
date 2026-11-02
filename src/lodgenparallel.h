@@ -14,51 +14,23 @@ BSD License - see nifskope.h
 #include <atomic>
 #include <functional>
 
-/*! THE GENERATOR'S THREAD BUDGET, and the one way back.
- *
- *  Everything the LOD generator fans out goes through here, so there is ONE
- *  number to turn down and one place that says what it means.
- *
- *  `lodgenSetThreadCount( 1 )` (`--threads 1` on the command line) is the exact
- *  way back: `lodgenParallelFor` degenerates into the plain `for` loop the code
- *  had before this file existed, on the calling thread, and the chunk pass
- *  builds one chunk at a time in queue order. Nothing about the arithmetic
- *  depends on the count -- that is what the byte-identity gate proves.
- *
- *  0 or negative means "the machine": QThread::idealThreadCount().
- */
+//! THE GENERATOR'S THREAD BUDGET, and the one way back:
+//! Everything the LOD generator fans out goes through here, so there is ONE number to turn down and one place
+//! that says what it means.
 void lodgenSetThreadCount( int n );
 
 //! The resolved count, always >= 1.
 int lodgenThreadCount();
 
-/*! THE CHUNK FAN-OUT'S OWN NUMBER, and it defaults to ONE.
- *
- *  Separate from `lodgenThreadCount()` because the two have different
- *  evidence behind them. The generic fan-out (the BC encoders) is pure
- *  arithmetic over disjoint output and is proven byte-identical. The CHUNK
- *  fan-out builds NifModels on worker threads, and the NifModel / NifItem /
- *  nif.xml layer is not safe for that: measured 2026-09-11, five runs out of
- *  five at nine workers faulted in `NifItem::deleteChildItems()` under
- *  `BaseModel::~BaseModel()` with every other worker inside the same parser
- *  (lane BAKEPERF1 §3.4). Until that is fixed the chunk queue runs one chunk
- *  at a time unless somebody asks otherwise, and the ask is `--chunk-threads`.
- *
- *  0 or negative means "the machine". */
+//! THE CHUNK FAN-OUT'S OWN NUMBER, and it defaults to ONE:
+//! Separate from `lodgenThreadCount` because the two have different evidence behind them. The generic fan-out
+//! (the BC encoders) is pure arithmetic over disjoint output and is proven byte-identical.
 void lodgenSetChunkThreadCount( int n );
 int lodgenChunkThreadCount();
 
-/*! WHAT THE MACHINE'S MEMORY CAN HOLD, in chunk workers.
- *
- *  Each chunk worker owns its OWN plugin reader and its OWN texture cache,
- *  so N workers is N x (world + budget) of fixed overhead before one chunk
- *  of state. `lodgenChunkThreadCount()` never returns more than this.
- *
- *  `texBudgetBytes` is the per-worker texture budget the pass will use.
- *  The world figure is a measured constant, not an estimate; the census
- *  line prints the cap and what bound it, so a run that was held back by
- *  memory rather than by cores says so in words.
- */
+//! WHAT THE MACHINE'S MEMORY CAN HOLD, in chunk workers:
+//! Each chunk worker owns its OWN plugin reader and its OWN texture cache, so N workers is N x (world + budget)
+//! of fixed overhead before one chunk of state. `lodgenChunkThreadCount()` never returns more than this.
 int lodgenChunkThreadMemoryCap( qint64 texBudgetBytes );
 
 //! Which bound decided the worker count: "cores", "memory" or "asked".
@@ -67,13 +39,8 @@ QString lodgenChunkThreadBoundBy();
 //! True while the caller is running inside one of the generator's own workers.
 bool lodgenInWorker();
 
-/*! Marks the calling thread as one of the generator's own workers for this
- *  scope, so any `lodgenParallelFor` underneath it runs SERIALLY.
- *
- *  A chunk fan-out already has every core; a second fan-out inside it does not
- *  find more, and creating its threads per mip of every sheet corrupted the
- *  heap on four runs out of four before this existed (lane BAKEPERF1,
- *  2026-09-11 -- bisected to the terrain texture stage). */
+//! Marks the calling thread as one of the generator's own workers for this scope, so any `lodgenParallelFor`
+//! underneath it runs SERIALLY.
 class LodgenWorkerScope
 {
 public:
@@ -106,7 +73,7 @@ private:
  */
 void lodgenParallelFor( int n, const std::function<void( int )> & f, int cap = 0 );
 
-/*! lane BAKESPEED2: as lodgenParallelFor, with no size floor, on a pool of its own whose threads are not
+/*! as lodgenParallelFor, with no size floor, on a pool of its own whose threads are not
  *  generator workers, so a lodgenParallelFor inside f still fans out (a few big items keep every core busy).
  *  Serial where lodgenParallelFor is; WW_LODGEN_BAKESPEED_RED=1 is exactly lodgenParallelFor. */
 void lodgenParallelForOuter( int n, const std::function<void( int )> & f );
@@ -121,13 +88,13 @@ quint64 lodgenPeakWorkingSet();
 //! "peak working set: N.N GB (N bytes)", the words the panel and the CLI share.
 QString lodgenPeakWorkingSetLine();
 
-//! lane BAKEMEM1: with WW_LODGEN_MEMLOG set, one "mem: <phase> | private, peak private, ws" line on stderr.
+//! with WW_LODGEN_MEMLOG set, one "mem: <phase> | private, peak private, ws" line on stderr.
 //! lane BAKESPEED1's red: WW_LODGEN_BAKESPEED_RED=1 runs the stages it made parallel serially, as before
 bool lodgenBakeSpeedRed();
 bool lodgenMemLogOn();
 void lodgenMemNote( const QString & phase, const QString & extra = QString() );
 
-/*! lane BAKESPEED3: the CPU block encoders' share, for WW_LODGEN_MEMLOG. Each BC1/BC3/BC4/BC5/BC7 block loop adds
+/*! the CPU block encoders' share, for WW_LODGEN_MEMLOG. Each BC1/BC3/BC4/BC5/BC7 block loop adds
  *  its wall time here; loops on several threads at once add up, so the total reads as CPU seconds. */
 extern std::atomic<qint64> g_lodgenBcNs;
 struct LodgenBcTimer
@@ -137,7 +104,7 @@ struct LodgenBcTimer
 	~LodgenBcTimer() { g_lodgenBcNs += t.nsecsElapsed(); }
 };
 
-/*! lane BAKEMEM1: drop the pages of this process's MAPPED FILES (the plugins, the archives) from its working
+/*! drop the pages of this process's MAPPED FILES (the plugins, the archives) from its working
  *  set. They stay in the file cache, so a later read is a soft fault; private memory is not touched. Returns
  *  the mapped bytes visited. A no-op under WW_LODGEN_BAKEMEM_RED=1. */
 qint64 lodgenTrimMappedWorkingSet();
@@ -153,14 +120,8 @@ private:
 	Impl * d;
 };
 
-/*! A bounded write queue on a thread of its own, so a worker hands over bytes
- *  and goes back to building instead of waiting on the disk.
- *
- *  BOUNDED on purpose: a 3,060-chunk bake would otherwise hold every chunk it
- *  has built and not yet written. `push` blocks once the queue holds
- *  `maxBytes`. `finish()` drains -- a run that returned 0 with a file still
- *  unwritten is worse than a slow run, so nothing may exit before it.
- */
+//! A bounded write queue on a thread of its own, so a worker hands over bytes and goes back to building instead
+//! of waiting on the disk.
 class LodgenWriter
 {
 public:

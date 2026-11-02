@@ -7,11 +7,8 @@ BSD License - see nifskope.h
 #ifndef ESMDATA_H
 #define ESMDATA_H
 
-/* Lane CELLVIEW1 (2026-09-19): the fields the CELL VIEW needs and the
- * LOD bake never did -- the layer a ref is on, its enable parent, and a
- * base's editor id. A consumer compiled before this existed still
- * compiles: src/cellview.cpp tests this switch and says in its census
- * line which half it was built against. */
+// the fields the CELL VIEW needs and the LOD bake never did -- the layer a ref is on, its enable parent, and a
+// base's editor id.
 #define ESM_HAS_CELL_FIELDS 1
 
 #include <QHash>
@@ -24,19 +21,7 @@ BSD License - see nifskope.h
 
 class ESMFile;
 
-/* The record layer LODGEN reads a worldspace through (docs/LODGEN_PLAN.md,
- * rung 0). It answers exactly three questions per cell: what is the ground
- * (LAND heights), what stands on it (REFRs with their transforms), and which
- * of those have LOD models (STAT MNAM / TREE). Everything else in the ESM is
- * out of scope on purpose.
- *
- * The container parser is the vendored fo76utils ESMFile; layouts follow
- * wbDefinitionsFO4.pas. One trap this layer owns so callers cannot fall into
- * it: a worldspace's PERSISTENT cell also reports grid (0,0) — it holds
- * thousands of REFRs and no LAND. It is distinguished by its parent group
- * (directly under the world-children group, not under a subblock), kept
- * separate, and its REFRs are served alongside every cell's.
- */
+// The record layer LODGEN reads a worldspace through (docs/LODGEN_PLAN.md, rung 0).
 
 //! One placed reference, already resolved far enough for LOD generation.
 struct EsmRefr
@@ -49,44 +34,38 @@ struct EsmRefr
 	float scale = 1.0f;         //!< XSCL, 1.0 when absent
 	bool initiallyDisabled = false;
 	bool deleted = false;
-	/* v10 (lane CELLVIEW1): XLYR, the Creation Kit LAYER this ref is on,
+	/* v10: XLYR, the Creation Kit LAYER this ref is on,
 	 * and XESP, its enable parent. Both 0 when the ref carries neither. */
 	quint32 layer = 0;
 	quint32 enableParent = 0;
 	bool enableParentOpposite = false;    //!< XESP flag bit 0: the parent's state, inverted
-	/* Lane SWAP1 (2026-09-25): XMSP, the placement's MATERIAL SWAP (an MSWP
-	 * form), 0 when the ref carries none. It overrides the base's MODS. The
-	 * Creation Kit applies it to the LOD model when it builds vanilla's .bto,
-	 * so a LOD bake that ignores it draws the wrong colourway. */
+	// XMSP, the placement's MATERIAL SWAP (an MSWP form), 0 when the ref carries none. It overrides the base's
+	// MODS.
 	quint32 materialSwap = 0;
-	// lane LIGHTS2 (XEMI1): XEMI, the placement's emittance source (a LIGH or a REGN), 0 when none
+	// XEMI, the placement's emittance source (a LIGH or a REGN), 0 when none
 	quint32 emittance = 0;
-	/* lane ROOMCLAMP1: XTEL, a door's teleport (its first field, the destination door), 0 when none. A load
+	/* XTEL, a door's teleport (its first field, the destination door), 0 when none. A load
 	 * door: in game it never opens, it only plays a short animation and loads elsewhere. */
 	quint32 teleport = 0;
-	/* Lane PRTP1 (2026-09-30): what a placed LIGH overrides. XRDS is the
-	 * radius, when `hasRadius` (else the base's DATA radius stands; the plugin
-	 * stores NEGATIVE values too -- 2,080 of the gate's 3,945 rows -- so no sentinel). XLIG is six
-	 * floats, optional from the fifth (wbDefinitionsFO4): FOV delta, fade
-	 * delta, end-distance cap, shadow depth bias, near clip, volumetric
-	 * intensity; `xligCount` says how many the record carried. */
+	// what a placed LIGH overrides. XRDS is the radius, when `hasRadius` (else the base's DATA radius stands;
+	// the plugin stores NEGATIVE values too -- 2,080 of the gate's 3,945 rows -- so no sentinel).
 	bool hasRadius = false;
 	float radius = 0.0f;
 	int xligCount = 0;
 	float xlig[6] = { 0, 0, 0, 0, 0, 0 };
-	/* lane HEMI1: a light's box. `lightBox` = the XLKR target under KYWD 00115705 LightBoxLink
+	/* a light's box. `lightBox` = the XLKR target under KYWD 00115705 LightBoxLink
 	 * (0 when none); a primitive ref carries XPRM: its type (1 Box) and half extents as stored. */
 	quint32 lightBox = 0;
 	bool hasPrim = false;
 	quint32 primType = 0;
 	float primHalf[3] = { 0, 0, 0 };
-	/* lane SUNCELL1: the game's rooms and portals (wbDefinitionsFO4 REFR). A portal (PortalMarker) carries XPOD,
+	/* the game's rooms and portals (wbDefinitionsFO4 REFR). A portal (PortalMarker) carries XPOD,
 	 * its origin and destination ROOM refs (0 = outside); a room (RoomMarker) carries XRMR and its XLRM linked
 	 * rooms, the rooms it always sees without a portal. */
 	quint32 portalFrom = 0, portalTo = 0;
 	bool roomBound = false;
 	QVector<quint32> linkedRooms;
-	/* lane CABLES1: XBSD, a placed cable (its base is a BNDS bendable spline). Slack, thickness, the half
+	/* XBSD, a placed cable (its base is a BNDS bendable spline). Slack, thickness, the half
 	 * extents (the cable's ends sit at the ref's position minus / plus these, in the ref's own frame), and
 	 * the detached-end byte (absent in a 20-byte XBSD = attached at both ends; any nonzero byte = detached). */
 	bool hasSpline = false;
@@ -96,7 +75,7 @@ struct EsmRefr
 	bool splineDetached = false;
 };
 
-/*! lane CABLES1: a BNDS (bendable spline) base, the look of a cable. DNAM: default tile count, slices round
+/*! a BNDS (bendable spline) base, the look of a cable. DNAM: default tile count, slices round
  *  the tube, whether the tiles count per unit of length, the default colour, wind sensibility and wind
  *  flexibility; TNAM: a texture set (TXST TX00 / TX01), empty when none. */
 struct EsmBendable
@@ -112,10 +91,7 @@ struct EsmBendable
 	QString diffuse, normal;
 };
 
-/*! lane SUNCELL1: one CELL's precombined / previs fields (wbDefinitionsFO4 CELL). `rvis` = RVIS, the cell whose
- *  previs file holds this cell's visibility (an exterior block of 3x3 cells shares one); `visi` / `pcmb` = the
- *  2-byte stamps of the previs and precombined builds; XCRI = the precombined meshes and the refs they replace
- *  (the second count is in u32s, measured: two per ref); XPRI = the refs the previs build took in. */
+//! one CELL's precombined / previs fields (wbDefinitionsFO4 CELL).
 struct EsmCellPrevis
 {
 	bool exists = false;
@@ -123,29 +99,25 @@ struct EsmCellPrevis
 	quint16 visi = 0, pcmb = 0;
 	bool hasVisi = false, hasPcmb = false;
 	quint32 combinedMeshes = 0, combinedRefs = 0, previsRefs = 0;
-	//! lane UMBRA1: XCRI's refs (each pair's first word, mapped to the load order): the refs a precombined mesh replaced
+	//! XCRI's refs (each pair's first word, mapped to the load order): the refs a precombined mesh replaced
 	QVector<quint32> combinedRefIds;
-	//! lane PERFFIX4: the winning CELL record's plugin (load-order index) and whether it carries XPRI / VISI
+	//! the winning CELL record's plugin (load-order index) and whether it carries XPRI / VISI
 	quint32 srcFile = 0;
 	bool hasPrevisFields = false;
 };
 
-/* Lane PERFFIX4: one REFR's plugins, for the previs staleness rule (src/gl/cellprevisrule.h): the plugin that owns
+/* one REFR's plugins, for the previs staleness rule (src/gl/cellprevisrule.h): the plugin that owns
  * its form id, the plugin of its winning version, and its record flags. */
 struct EsmRefSource
 {
 	quint32 owner = 0, src = 0;
 	bool deleted = false, disabled = false;
-	//! lane PERFFIX4 (PREVISSTALE2): the plugin of the first version in the trailing run of versions whose placement
+	//! the plugin of the first version in the trailing run of versions whose placement
 	//! (DATA, XSCL, deleted/disabled, XESP) equals the winner's (WwPrevisRule::RefSrc::settled)
 	quint32 settled = 0xFFFFFFFFu;
 };
 
-/* Lane PRTP1: one LIGH record (wbDefinitionsFO4 LIGH DATA + FNAM). The
- * light's TYPE is in the flags: 0x400 shadow spot, 0x800 shadow hemisphere,
- * 0x1000 shadow omni, 0x4000 non-shadow spot, 0x20000 non-shadow box, none of
- * those = omni. Nothing here evaluates the light -- PRTP2 owns how the game
- * does that. */
+// one LIGH record (wbDefinitionsFO4 LIGH DATA + FNAM).
 struct EsmLight
 {
 	bool exists = false;
@@ -161,38 +133,36 @@ struct EsmLight
 	bool hasAttenuation = false;
 	float fade = 1.0f;              //!< FNAM
 	QString gobo;                   //!< NAM0
-	quint32 godRays = 0;            //!< lane VOLFOG1: WGDR, the light's GDRY (0 = none: the light casts no shafts)
-	quint32 lens = 0;               //!< lane LIGHTS3 (LENSFLARE1): LNAM, the light's LENS (0 = no lens flare)
-	float godRayNear = 0.0f;        //!< lane VOLFOG1: DATA "God Rays - Near Clip" (offset 52)
-	float flickerPeriod = 0.0f, flickerIntensity = 0.0f, flickerMovement = 0.0f;	//!< lane LIGHTFLICKER1: DATA Flicker Effect
+	quint32 godRays = 0;            //!< WGDR, the light's GDRY (0 = none: the light casts no shafts)
+	quint32 lens = 0;               //!< LNAM, the light's LENS (0 = no lens flare)
+	float godRayNear = 0.0f;        //!< DATA "God Rays - Near Clip" (offset 52)
+	float flickerPeriod = 0.0f, flickerIntensity = 0.0f, flickerMovement = 0.0f;	//!< DATA Flicker Effect
 	//! "omni", "spot", "hemi", "box", with "shadow " in front when it casts one
 	QString typeName() const;
 };
 
-/* Lane PRTP1: an interior cell -- no LAND, no grid, its own lighting (XCLL,
- * wbDefinitionsFO4 layout) and an optional lighting template (LTMP -> LGTM).
- * The XCLL payload is kept whole: PRTP2 decides what the game reads from it,
- * so nothing is interpreted here beyond the named colours and distances. */
+// an interior cell -- no LAND, no grid, its own lighting (XCLL, wbDefinitionsFO4 layout) and an optional
+// lighting template (LTMP -> LGTM).
 struct EsmInteriorCell
 {
 	bool valid = false;
 	quint32 cellForm = 0;
 	QString edid;
 	quint32 lightingTemplate = 0;   //!< LTMP, 0 when absent
-	quint32 imageSpace = 0;         //!< XCIM, the cell's IMGS (lane IMGS1), 0 when absent
-	quint32 godRays = 0;            //!< XGDR, the cell's GDRY (lane VOLFOG1), 0 when absent
+	quint32 imageSpace = 0;         //!< XCIM, the cell's IMGS, 0 when absent
+	quint32 godRays = 0;            //!< XGDR, the cell's GDRY, 0 when absent
 	QByteArray xcll;                //!< raw, empty when absent
 	quint8 ambient[3] = { 0, 0, 0 };
 	quint8 directional[3] = { 0, 0, 0 };
 	quint8 fogNearColor[3] = { 0, 0, 0 };
 	float fogNear = 0.0f, fogFar = 0.0f;
 	quint32 inherits = 0;           //!< XCLL "Inherits" flags: which fields come from LTMP
-	quint16 flags = 0;              //!< DATA (lane SKYINT1): bit 7 Show Sky, 8 Use Sky Lighting, 11 Sunlight Shadows
+	quint16 flags = 0;              //!< DATA: bit 7 Show Sky, 8 Use Sky Lighting, 11 Sunlight Shadows
 	bool hasWater = false;
 	float waterHeight = 0.0f;       //!< XCLW, valid when hasWater
 };
 
-//! Lane SWAP1: one MSWP substitution row, BNAM -> SNAM (+ CNAM when present).
+//! one MSWP substitution row, BNAM -> SNAM (+ CNAM when present).
 struct EsmMaterialSubst
 {
 	QString original;           //!< BNAM, as stored (relative to Materials\)
@@ -201,7 +171,7 @@ struct EsmMaterialSubst
 	float colorRemap = 0.0f;    //!< CNAM, the colour-remapping index
 };
 
-//! Lane SWAP1: an MSWP record, the winning version by load order.
+//! an MSWP record, the winning version by load order.
 struct EsmMaterialSwap
 {
 	quint32 formID = 0;
@@ -219,18 +189,18 @@ struct EsmLodBase
 	QString model;              //!< the base's own near model (MODL): what the impostor bake photographs
 	bool hasLod = false;
 	QString edid;               //!< EDID, for the cell view's pick panel
-	quint32 materialSwap = 0;   //!< lane SWAP1: MODS, the base's default material swap (MSWP), 0 = none
+	quint32 materialSwap = 0;   //!< MODS, the base's default material swap (MSWP), 0 = none
 	/* 2026-10-01: MODC, the model's color remapping index -- the paint row a
 	 * Greyscale_To_PaletteColor material takes (the Concord museum pickup, MSTT
 	 * PickUpTruck08, is 0.235). An MSWP row's own CNAM wins for its material. */
 	bool hasColorRemap = false;
 	float colorRemap = 0.0f;
-	/* Lane NEAR1 (2026-09-26): the record header's flag word (STAT bit 23 = Is
+	/* the record header's flag word (STAT bit 23 = Is
 	 * Marker, 0x00800000) and whether the record carries destructible data
 	 * (a DEST or DSTD subrecord). Read-only facts for the near-library bake. */
 	quint32 recordFlags = 0;
 	bool hasDestructible = false;
-	/* Lane WATER1 (2026-09-27): an ACTI's WNAM, the water type (WATR) it
+	/* an ACTI's WNAM, the water type (WATR) it
 	 * carries. A placed ACTI with one is an authored water mesh (a river,
 	 * a pool); 0 = none. */
 	quint32 waterType = 0;
@@ -256,11 +226,7 @@ struct EsmScolPart
 	QVector<EsmScolPlacement> placements;
 };
 
-/* THE ATXT LAYER INDEX IS NOW READ (lane CELLVIEW4).
- * cellsplat.cpp composites a quadrant's layers in this order. Without it
- * the order is the one the layers happen to sit in the record, which is
- * not the engine's paint order -- so the define is what lets the splat
- * builder tell a known order from a guess instead of quietly assuming. */
+// THE ATXT LAYER INDEX IS NOW READ. cellsplat.cpp composites a quadrant's layers in this order.
 #define WW_CELLSPLAT_LAYER_INDEX 1
 
 //! One additional splat layer on a cell quadrant: 17x17 opacities.
@@ -271,11 +237,8 @@ struct EsmLandLayer
 	int index = 0;              //!< ATXT layer index: the engine's paint order
 };
 
-/*! One GRAS record's ground-cover parameters. The payload is `DATA`, 32 bytes,
- *  in all 107 GRAS of the shipped corpus (there is no `DNAM`); offsets 3, 6..7
- *  and 29..31 are stale slots and are not read. The bake reads Density,
- *  Max Slope and MODL and nothing else — Min Slope is 0 in every record, so a
- *  lower gate would be dead code. */
+//! One GRAS record's ground-cover parameters. The payload is `DATA`, 32 bytes, in all 107 GRAS of the shipped
+//! corpus (there is no `DNAM`); offsets 3, 6..7 and 29..31 are stale slots and are not read.
 struct EsmGrass
 {
 	quint32 form = 0;
@@ -292,11 +255,8 @@ struct EsmGrass
 	QString model;              //!< MODL, the grass mesh the tint is read from
 };
 
-/*! The per-LTEX ground-cover constants of docs/LODGEN_TERRAIN_VT.md §2:
- *  D = the GNAM density sum, S = the density-weighted Max Slope, T = the
- *  density-weighted average grass colour. Cached per form exactly as
- *  ltexTextures() caches the texture pair, so a worldspace whose paint names
- *  no grass-bearing LTEX never opens a GRAS record. */
+//! The per-LTEX ground-cover constants of docs/LODGEN_TERRAIN_VT.md §2: D = the GNAM density sum, S = the
+//! density-weighted Max Slope, T = the density-weighted average grass colour.
 struct EsmLtexCover
 {
 	quint16 density = 0;        //!< D(L)
@@ -311,40 +271,7 @@ struct EsmLtexCover
 	bool resolved = false;
 };
 
-/*! Everything a layer's TXST names, not only the two slots the colour bake
- *  used to need.
- *
- *  The far-terrain mask sheet (docs/LODGEN_TERRAIN_VT.md §2.2) needs the
- *  MATERIAL as well as the maps: bungo's ruling of 2026-09-11 09:3x-09:5x is
- *  that a PBRM-backed layer gives its own roughness and metallic and a legacy
- *  one gives `1 - gloss`, and neither can be decided from TX00/TX01 alone.
- *  `specular` is TX07 -- the vanilla `_s` map, whose GREEN channel is the gloss
- *  this tree has always composed as `smoothness * _s.G` (the arrays pass in
- *  lodgen.cpp); `material` is MNAM, which is where a `.bgsm` and its same-name
- *  `.pbrm` sibling are looked for.
- *
- *  `diffuse` keeps its old behaviour EXACTLY, including the fallback that hands
- *  the material path through when a material-backed TXST carries no TX00, so
- *  every existing caller reads what it read before. */
-/*! THE ENGINE'S DEFAULT LAND TEXTURE, as a form (lane SEAM1, 2026-09-25).
- *
- *  A LAND quadrant with no BTXT, and an ATXT layer whose LTEX is 0, are painted
- *  by the game with ONE texture set for the whole world: the INI settings
- *  `[Landscape] sDefaultLandDiffuseTexture` / `sDefaultLandNormalTexture` /
- *  `sDefaultLandSpecularTexture`, whose defaults sit beside their names in the
- *  exe's string table as `Ground\CommonwealthDefault01_d.dds`, `_n`, `_s`, and
- *  are resolved under `Landscape\` (the format string that follows them). It
- *  is not an LTEX, so it names no grass.
- *
- *  Until SEAM1 the bake painted those texels with the enclosing dim-4 chunk's
- *  DOMINANT base instead, a stand-in that changes from chunk to chunk: at
- *  Sanctuary, chunk (-20,20) came out LRiverbedSilt01 and its neighbours
- *  LRubbleRock01 / LRootsEroded01, a hard-edged block of 10-13 levels on the
- *  chunk grid that Bethesda's own LOD of the same cells does not have.
- *
- *  0xFFFFFFFF is never a record in a plugin (load-order byte 0xFF is the
- *  runtime's own), so ltexTextureSet() and ltexCover() answer it without a
- *  record lookup and every other caller is unchanged. */
+//! Everything a layer's TXST names, not only the two slots the colour bake used to need.
 constexpr quint32 ESM_LTEX_ENGINE_DEFAULT = 0xFFFFFFFFu;
 
 struct EsmLtexTextureSet
@@ -370,11 +297,7 @@ struct EsmCoverCensus
 	int grasWithoutData = 0;
 };
 
-/*! Resolves a grass mesh path to its average diffuse colour, 0..1 RGB.
- *  The resolver lives in lodgen.cpp because it needs the asset reader and the
- *  DDS decoder, both internal there; the bake installs it with
- *  setGrassTintResolver() before the first ltexCover() call. Returning false
- *  means "no tint" — the grass still contributes its density to D. */
+//! Resolves a grass mesh path to its average diffuse colour, 0..1 RGB.
 typedef bool ( *EsmGrassTintFn )( const QString & model, const QString & dataRoot,
 	void * user, float * rgb );
 
@@ -389,29 +312,16 @@ struct EsmLand
 	QVector<EsmLandLayer> layers[4];        //!< ATXT/VTXT layers, draw order
 	bool hasColors = false;                 //!< VCLR present
 	quint8 colors[33][33][3];               //!< [row][col] RGB, 255 = neutral
-	/*! Lane SMOOTHN1: VNML, the game's own vertex normals on the same 33x33 grid ([row][col], world x y z,
+	/*! VNML, the game's own vertex normals on the same 33x33 grid ([row][col], world x y z,
 	 *  unit length after decode). The raw bytes are kept beside them so a gate can decode them on its own. */
 	bool hasNormals = false;
 	float normals[33][33][3];
 	quint8 normalsRaw[33 * 33 * 3];
 };
 
-/*! v9 (lane HORIZON3, 2026-09-19): ONE WORKSHOP BUILD AREA.
- *
- *  An XPRM Box primitive on a REFR that links, by KYWD
- *  `000B91E6 WorkshopLinkedPrimitive`, to a workshop workbench REFR. That box
- *  IS the settlement's build area: what is inside it is what the player can
- *  walk up to and scrap.
- *
- *  The box is rotated by its own REFR's DATA rotation, and ONLY ABOUT Z. That
- *  is not a simplification of the record -- DATA carries all three angles and
- *  they are read -- it is what the measurement found: every one of the 111
- *  build areas in Fallout4.esm has X and Y within float noise of 0, because
- *  the Creation Kit's build-area tool only ever yaws them. The Python oracle
- *  this ports (`scratchpad/horizon3_20260919/scrap_rule.py`) tests the same
- *  way, so the two agree by construction rather than by luck, and a plugin
- *  that ever pitches one will be caught by `tiltedAreas` below rather than
- *  silently mis-tested. */
+//! v9: ONE WORKSHOP BUILD AREA:
+//! An XPRM Box primitive on a REFR that links, by KYWD `000B91E6 WorkshopLinkedPrimitive`, to a workshop
+//! workbench REFR.
 struct EsmScrapBox
 {
 	float centre[3] = { 0.0f, 0.0f, 0.0f };
@@ -421,29 +331,7 @@ struct EsmScrapBox
 	quint32 workshop = 0;       //!< the workbench REFR it links to
 };
 
-/*! v9 (lane HORIZON3): THE WORKSHOP-SCRAPPABLE INDEX, built once per plugin
- *  set on first use and cached.
- *
- *  THE RULE, in three clauses, each read out of the plugin and none of them
- *  from memory:
- *
- *    1. the placement's BASE is the CNAM (created object) of a COBJ whose FNAM
- *       category array contains `00106D8F WorkshopRecipeFilterScrap`. 87 of
- *       those CNAM targets are FormLists rather than bases -- a scrap recipe
- *       may name a whole family at once -- so FLST members are expanded
- *       transitively; AND
- *    2. the placement's position lies inside at least one build area
- *       (`EsmScrapBox`); AND
- *    3. the placement's base does NOT carry `001CC46A UnscrappableObject`.
- *
- *  Clause 3 removes nothing on Fallout4.esm -- 149 bases carry the keyword and
- *  only 2 of them are in clause 1, and neither of those 2 is placed inside a
- *  build area. It is in the rule anyway, because a DLC or a mod that sets it
- *  means it, and a rule that only works on the base game is not a rule.
- *
- *  ON THE MEASURED URBAN REGION THIS IS 14 PLACEMENTS OF 33,123 (0.04%). That
- *  number is the gate: a bake whose `scrappablePlacements` is not 14 on that
- *  region has changed the rule, whether or not anyone meant to. */
+//! v9: THE WORKSHOP-SCRAPPABLE INDEX, built once per plugin set on first use and cached.
 struct EsmScrapIndex
 {
 	bool built = false;
@@ -473,9 +361,9 @@ public:
 
 	quint32 worldspace() const { return wsForm; }
 	QString worldspaceEdid() const { return wsEdid; }
-	//! lane LANDSPEC3: whose terrain LOD files the worldspace draws (the parent's under PNAM "Use LOD Data")
+	//! whose terrain LOD files the worldspace draws (the parent's under PNAM "Use LOD Data")
 	QString lodWorldEdid() const { return lodEdid.isEmpty() ? wsEdid : lodEdid; }
-	//! lane LANDSPEC6: WRLD DATA (the flags byte; 0x40 "Fixed Dimensions") and WCTR (the fixed centre cell)
+	//! WRLD DATA (the flags byte; 0x40 "Fixed Dimensions") and WCTR (the fixed centre cell)
 	unsigned worldFlags() const { return wsFlags; }
 	bool hasFixedCentre() const { return wsHasCentre; }
 	int fixedCentreX() const { return wsCentreX; }
@@ -484,67 +372,45 @@ public:
 	//! Exactly the string load() was given: one plugin path, or a comma-separated list in load order.
 	QString pluginList() const { return srcPath; }
 
-	/*! Lane FLAT1: the base file name of the plugin that holds the WINNING
+	/*! the base file name of the plugin that holds the WINNING
 	 *  version of a record (ESMFile's srcFile, an index into pluginList()).
 	 *  Empty when the form is not in the load order. */
 	QString recordPlugin( quint32 formID ) const;
 
-	/*! FNV-1a 64 over the LOAD ORDER, in the order load() was given: for each
-	 *  plugin, its lower-cased BASE FILE NAME's UTF-8 bytes, then its byte
-	 *  size as a little-endian u64. Nothing else -- not the path, not the
-	 *  mtime, so moving a mod folder or touching a file does not fire it while
-	 *  adding, removing, reordering or editing a plugin does. `.lodo`/`.lodi`
-	 *  carry it at header 0xB8 / 0x90 (docs/LODGEN_NATIVE_LODO_LODI.md 8);
-	 *  the object corpus hash beside it covers the RECORDS. */
+	//! FNV-1a 64 over the LOAD ORDER, in the order load() was given: for each plugin, its lower-cased BASE FILE
+	//! NAME's UTF-8 bytes, then its byte size as a little-endian u64.
 	quint64 loadOrderHash() const;
 
 	float defaultLandHeight() const { return defLandH; }
 	float defaultWaterHeight() const { return defWaterH; }
 
-	//! Cell water: true when the cell has water, with its height resolved
-	//! (XCLW when present and not the no-water sentinel, else the
-	//! worldspace default).
-	//!
-	//! typeForm, when given, receives the cell's WATR form: XCWT when the cell
-	//! overrides it, else the worldspace default from WRLD NAM2. Only 507 of
-	//! the Commonwealth's 36,865 exterior cells override it -- but those are
-	//! the Glowing Sea, the marshes and the rivers, so a consumer that cannot
-	//! tell them from the harbour has nothing to go on.
+	//! Cell water: true when the cell has water, with its height resolved (XCLW when present and not the
+	//! no-water sentinel, else the worldspace default).
 	bool cellWater( int cx, int cy, float & height,
 		quint32 * typeForm = nullptr ) const;
-	//! lane WEATHERBLEND4: cell (cx, cy)'s regions (XCLR, load-order forms) and its form in *cellForm; empty = none
+	//! cell (cx, cy)'s regions (XCLR, load-order forms) and its form in *cellForm; empty = none
 	QVector<quint32> cellRegions( int cx, int cy, quint32 * cellForm = nullptr ) const;
 
 	//! The worldspace's default water type (WRLD NAM2), 0 when absent.
 	quint32 defaultWaterType() const { return defWaterType; }
 
-	//! lane WATER1: the WATR record `form` (src/esmwater.h), false when it is no WATR
+	//! the WATR record `form` (src/esmwater.h), false when it is no WATR
 	bool waterRecord( quint32 form, struct WwWaterRecord & out ) const;
 
 	//! Grid extent of indexed exterior cells (inclusive).
 	void cellBounds( int & minX, int & minY, int & maxX, int & maxY ) const;
 
-	/*! FO4CS's fingerprint of a heightmap bake's INPUT: FNV-1a 64 over the raw
-	 *  VHGT payload of every LAND under this worldspace, in file order. The
-	 *  Commonwealth's value is pinned inside that loader (0xD8337D022F637F22)
-	 *  and a heightmap carrying any other value is refused, so the CLI checks
-	 *  ours against it after every bake. */
+	//! FO4CS's fingerprint of a heightmap bake's INPUT: FNV-1a 64 over the raw VHGT payload of every LAND under
+	//! this worldspace, in file order.
 	quint64 vhgtCorpusHash( int * landsHashed = nullptr ) const;
 	static constexpr quint64 kCommonwealthVhgtCorpusHash = Q_UINT64_C( 0xD8337D022F637F22 );
 
-	/*! FNV-1a 64 over the inputs the ground-cover plane and the far albedo
-	 *  actually read: every LAND's raw BTXT/ATXT/VTXT payloads in ascending
-	 *  cell order, then every referenced LTEX's TNAM and GNAM list, then every
-	 *  referenced GRAS's DATA and MODL, both in ascending form-id order.
-	 *  vhgtCorpusHash() pins HEIGHTS only and a plugin that adds a grass mod or
-	 *  overrides an LTEX leaves it untouched — this is the hash that catches
-	 *  that, and .lodv carries both. */
+	//! FNV-1a 64 over the inputs the ground-cover plane and the far albedo actually read: every LAND's raw
+	//! BTXT/ATXT/VTXT payloads in ascending cell order, then every referenced LTEX's TNAM and GNAM list, then
+	//! every referenced GRAS's DATA and MODL, both in ascending form-id order.
 	quint64 paintCorpusHash() const;
 
-	/*! The VHGT corpus hash taken in ascending cell order (y then x) instead of
-	 *  file order. Measured only: vhgtCorpusHash() stays in FILE order because
-	 *  its value is pinned inside FO4CS's shipped heightmap loader and inside
-	 *  every heightmap DDS already written. See lane_terrain_report.md §4. */
+	//! The VHGT corpus hash taken in ascending cell order (y then x) instead of file order.
 	quint64 vhgtCorpusHashSorted( int * landsHashed = nullptr ) const;
 	int cellCount() const { return cellIndex.size(); }
 	bool hasCell( int cx, int cy ) const;
@@ -559,42 +425,34 @@ public:
 	 *  worldspace has no cell there or the record carries none (lane
 	 *  CELLWORK1). The DISPLAY name (FULL) is not available: see CellEntry. */
 	QString cellEditorId( int cx, int cy ) const;
-	//! lane SUNCELL1: the CELL record `cellForm`'s previs / precombined fields (exists false: no such CELL)
+	//! the CELL record `cellForm`'s previs / precombined fields (exists false: no such CELL)
 	EsmCellPrevis cellPrevis( quint32 cellForm ) const;
 	//! The cell record's form id at this grid position, or 0.
 	quint32 cellForm( int cx, int cy ) const;
 	//! The worldspace's persistent-cell REFRs, grid-filtered by world position.
 	QVector<EsmRefr> persistentRefrsIn( float minX, float minY, float maxX, float maxY ) const;
-	//! lane CELLSPAWN1: a base form's OBND (object bounds, base-local units), false when it has none
+	//! a base form's OBND (object bounds, base-local units), false when it has none
 	bool objectBounds( quint32 baseForm, float lo[3], float hi[3] ) const;
-	//! lane CELLSPAWN1: the REFR `doorRef`'s XTEL arrival point (where the game puts the player who uses the
+	//! the REFR `doorRef`'s XTEL arrival point (where the game puts the player who uses the
 	//! OTHER side's door), false when that REFR or its XTEL is absent
 	bool teleportArrival( quint32 doorRef, float pos[3], float rot[3] ) const;
 
 	//! LOD model info for a base object, cached. Never null.
 	const EsmLodBase & lodBase( quint32 baseFormID ) const;
 
-	/*! Lane SWAP1 (2026-09-25): an MSWP record's substitution rows, cached.
-	 *  Never null; a form that is not an MSWP comes back with `exists` false.
-	 *  The record read is the WINNING one (libfo76utils merges overrides in
-	 *  load order, as for every other record). Layout: wbDefinitionsFO4 MSWP. */
+	//! an MSWP record's substitution rows, cached. Never null; a form that is not an MSWP comes back with
+	//! `exists` false.
 	const EsmMaterialSwap & materialSwap( quint32 mswpForm ) const;
 
-	//! lane CABLES1: a BNDS base's cable look, cached. Never null; `exists` false when the form is not a BNDS.
+	//! a BNDS base's cable look, cached. Never null; `exists` false when the form is not a BNDS.
 	const EsmBendable & bendable( quint32 bndsForm ) const;
 
-	/*! Lane SWAP1: a placed REFR's XMSP and NAME, read from the record by its
-	 *  form id (the winning version). False when the form is not a REFR. The
-	 *  native writer asks this per placement, because its placements carry the
-	 *  REFR form and not the record. */
+	//! a placed REFR's XMSP and NAME, read from the record by its form id (the winning version). False when the
+	//! form is not a REFR.
 	bool refrMaterialSwap( quint32 refrForm, quint32 * xmsp, quint32 * base ) const;
 
-	/*! v9 (lane HORIZON3, 2026-09-19): is this placement WORKSHOP-SCRAPPABLE?
-	 *  The three-clause rule of `EsmScrapIndex`, on the base form and the
-	 *  placement's WORLD position. The index behind it is built once, on the
-	 *  first call, by one walk of the whole plugin set; a bake that never asks
-	 *  never pays for it. `areaRefr` receives the build area that answered.
-	 */
+	//! v9: is this placement WORKSHOP-SCRAPPABLE? The three-clause rule of `EsmScrapIndex`, on the base form
+	//! and the placement's WORLD position.
 	bool scrappable( quint32 baseForm, const float worldPos[3], quint32 * areaRefr = nullptr ) const;
 	//! The index itself, for the census line. Built on first use.
 	const EsmScrapIndex & scrapIndex() const;
@@ -630,58 +488,58 @@ public:
 	//! All worldspaces in the file: formID -> EDID (static convenience).
 	static QVector<QPair<quint32, QString>> listWorldspaces( const QString & esmPath, QString * error );
 
-	//! lane LANDSPEC5: the parent EDID whose terrain LOD `wsEdid` draws ("Use LOD Data"), else empty; no load()
+	//! the parent EDID whose terrain LOD `wsEdid` draws ("Use LOD Data"), else empty; no load
 	static QString lodWorldOf( const QString & esmPath, const QString & wsEdid, QString * error = nullptr );
 
-	/*! Lane PRTP1: every INTERIOR cell of a load order: formID -> EDID, in
+	/*! every INTERIOR cell of a load order: formID -> EDID, in
 	 *  file order. Walks the top-level CELL group only (blocks, subblocks). */
 	static QVector<QPair<quint32, QString>> listInteriors( const QString & esmPath, QString * error );
 
-	/*! Lane PRTP1: open a load order for ONE interior cell instead of a
+	/*! open a load order for ONE interior cell instead of a
 	 *  worldspace. `cell` is its EDID or its form id in hex. After this the
-	 *  exterior queries answer nothing; interior() and interiorRefrs() do. */
+	 *  exterior queries answer nothing; interior and interiorRefrs do. */
 	bool loadInterior( const QString & esmPath, const QString & cell, QString * error );
 	const EsmInteriorCell & interior() const { return interiorCell; }
 	//! The interior's REFRs, persistent and temporary, later plugins' groups joined.
 	QVector<EsmRefr> interiorRefrs() const;
 
-	//! Lane PRTP1: one LIGH record, cached. Never null; `exists` false when not a LIGH.
+	//! one LIGH record, cached. Never null; `exists` false when not a LIGH.
 	const EsmLight & light( quint32 formID ) const;
-	/*! Lane PRTP3: one LGTM (lighting template) record, raw: `data` = DATA (the XCLL layout through
+	/*! one LGTM (lighting template) record, raw: `data` = DATA (the XCLL layout through
 	 *  the Light Fade distances), `dalc` = its DALC (6 axis colours, specular, scale). False when
 	 *  the form is not an LGTM. */
 	bool lightingTemplate( quint32 formID, QByteArray & data, QByteArray & dalc ) const;
-	//! lane VOLFOG1: an LGTM's WGDR (its GDRY), 0 when absent or not an LGTM
+	//! an LGTM's WGDR (its GDRY), 0 when absent or not an LGTM
 	quint32 lightingTemplateGodRays( quint32 formID ) const;
-	//! lane IMGS1: an IMGS record's EDID, HNAM (HDR, 9 floats), CNAM (cinematic, 3), TNAM (tint, 4) raw and its
+	//! an IMGS record's EDID, HNAM (HDR, 9 floats), CNAM (cinematic, 3), TNAM (tint, 4) raw and its
 	//! TX00 LUT path; false when not an IMGS
 	bool imageSpace( quint32 formID, QString & edid, QByteArray & hnam, QByteArray & cnam, QByteArray & tnam,
 		QString & lut ) const;
 
-	//! lane PLACED1: the plugin itself, for readers kept in their own files (src/esmplaced.cpp)
+	//! the plugin itself, for readers kept in their own files (src/esmplaced.cpp)
 	ESMFile * plugin() const { return esm.get(); }
-	//! lane PLACED1: the open interior's child groups, load order (empty for a worldspace)
+	//! the open interior's child groups, load order (empty for a worldspace)
 	const QVector<quint32> & interiorChildGroups() const { return interiorGroups; }
-	//! lane GAPLOOK2: an exterior cell's child groups (its own + later plugins'), empty when the cell is absent
+	//! an exterior cell's child groups (its own + later plugins'), empty when the cell is absent
 	QVector<quint32> cellChildGroups( int cx, int cy ) const;
-	//! lane GAPLOOK2: the worldspace's persistent-cell groups (its own + later plugins')
+	//! the worldspace's persistent-cell groups (its own + later plugins')
 	QVector<quint32> persistentChildGroups() const;
-	//! lane PERFFIX4: every REFR in these groups (nested groups walked) once, with its owner and winning plugins
+	//! every REFR in these groups (nested groups walked) once, with its owner and winning plugins
 	QVector<EsmRefSource> refSources( const QVector<quint32> & groups ) const;
 
 private:
 	std::unique_ptr<ESMFile> esm;
 	quint32 wsForm = 0;
 	QString wsEdid;
-	QString lodEdid;            //!< lane LANDSPEC3: the parent's EDID when it lends its LOD, else empty
-	unsigned wsFlags = 0;       //!< lane LANDSPEC6: WRLD DATA
-	bool wsHasCentre = false;   //!< lane LANDSPEC6: WRLD WCTR read
+	QString lodEdid;            //!< the parent's EDID when it lends its LOD, else empty
+	unsigned wsFlags = 0;       //!< WRLD DATA
+	bool wsHasCentre = false;   //!< WRLD WCTR read
 	int wsCentreX = 0, wsCentreY = 0;
 	QString srcPath;            //!< what load() was given, verbatim
 	float defLandH = 0.0f;
 	float defWaterH = 0.0f;
 	quint32 defWaterType = 0;
-	/*! lane ALLON2 (2026-10-12, the Rexford street hole): a child worldspace that takes its parent's land (WRLD
+	/*! a child worldspace that takes its parent's land (WRLD
 	 *  WNAM parent + PNAM bit 0 "Use Land Data": in Fallout4.esm only Goodneighbor) holds no LAND of its own; the game
 	 *  draws the PARENT's LAND at the same cell grid. Cell grid -> the parent cell's type-6 group, indexed cells only. */
 	quint32 landParent = 0;
@@ -693,9 +551,9 @@ private:
 		quint32 cellForm = 0;
 		quint32 childGroup = 0;   //!< the cell's type-6 group (0 if none)
 		//! type-6 groups a LATER plugin opened under this cell (its new REFRs);
-		//! libfo76utils links them to no record, see indexWorldspace (BAKE1)
+		//! libfo76utils links them to no record, see indexWorldspace
 		QVector<quint32> extraGroups;
-		//! lane CELLWORK1: the cell record's EDID. FULL is a localised string
+		//! the cell record's EDID. FULL is a localised string
 		//! index in Fallout4.esm and this reader has no string table, so the
 		//! DISPLAY name is not available here -- see esmdata.cpp.
 		QString edid;
@@ -703,12 +561,12 @@ private:
 	QHash<QPair<int, int>, CellEntry> cellIndex;
 	quint32 persistentCellGroup = 0;
 	quint32 persistentCellForm = 0;
-	QVector<quint32> persistentExtraGroups;   //!< later plugins' persistent-cell groups (BAKE1)
-	int extraWorldGroups = 0;                 //!< later plugins' world-children groups walked (BAKE1)
-	int extraCellGroups = 0;                  //!< later plugins' cell-children groups joined (BAKE1)
+	QVector<quint32> persistentExtraGroups;   //!< later plugins' persistent-cell groups
+	int extraWorldGroups = 0;                 //!< later plugins' world-children groups walked
+	int extraCellGroups = 0;                  //!< later plugins' cell-children groups joined
 	mutable QHash<quint32, EsmLodBase> lodBaseCache;
-	mutable QHash<quint32, EsmMaterialSwap> mswpCache;   //!< lane SWAP1
-	mutable QHash<quint32, EsmBendable> bendableCache;   //!< lane CABLES1
+	mutable QHash<quint32, EsmMaterialSwap> mswpCache;
+	mutable QHash<quint32, EsmBendable> bendableCache;
 	mutable QHash<quint32, QVector<EsmScolPart>> scolCache;
 	mutable EsmScrapIndex scrapIdx;     //!< v9, built on first scrappable() call
 	mutable QHash<quint32, EsmLtexTextureSet> ltexCache;
@@ -721,7 +579,7 @@ private:
 	mutable int grasReads = 0;
 	mutable QVector<EsmRefr> persistentCache;
 	mutable bool persistentCacheBuilt = false;
-	EsmInteriorCell interiorCell;           //!< lane PRTP1
+	EsmInteriorCell interiorCell;
 	QVector<quint32> interiorGroups;        //!< its type-6 groups, load order
 	mutable QHash<quint32, EsmLight> lightCache;
 

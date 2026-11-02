@@ -56,7 +56,7 @@ struct HkxWriteOptions
 	//! clip has and what `hkaAnimation::annotationTracks` is sized against.
 	bool writeAnnotations = true;
 	//! The empty "Resource Data" -> hkMemoryResourceContainer named variant.
-	//! Shipped clips carry it; the Mixamo fixture does not (lane FIXTURE).
+	//! Shipped clips carry it; the Mixamo fixture does not.
 	bool writeResourceContainer = true;
 
 	//! Route A only.  Empty = the machine's HKXPACK

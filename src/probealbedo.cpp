@@ -31,7 +31,7 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 ***** END LICENSE BLOCK *****/
 
 #include "probealbedo.h"
-#include "wwswitch.h"	// lane TESTDRIVER1: the WW_* switch store
+#include "wwswitch.h"	// the WW_* switch store
 
 #include "data/niftypes.h"
 #include "gamemanager.h"
@@ -73,7 +73,7 @@ float ProbeAlbedo::linearToSrgb( float c )
 
 const DDSTexture16 * ProbeAlbedo::load( const QString & texIn, int cap )
 {
-	QHash<QString, DDSTexture16 *> & cache = cap > 64 ? fine : this->cache;   // lane CAPTURE1: two sizes
+	QHash<QString, DDSTexture16 *> & cache = cap > 64 ? fine : this->cache;   // two sizes
 	const QString key = texIn.toLower();
 	const auto it = cache.constFind( key );
 	if ( it != cache.constEnd() )
@@ -107,7 +107,7 @@ DDSTexture16 * ProbeAlbedo::decode( const QString & texIn, int cap )
 		}
 		path.replace( QChar( '\\' ), QChar( '/' ) );
 	}
-	/* lane REDFIX1: the shared rule (strip a leading data/ etc., add textures/ only when absent). A light's NAM0
+	/* the shared rule (strip a leading data/ etc., add textures/ only when absent). A light's NAM0
 	 * pattern names data\textures\gobo\...; the old prepend made textures/data/textures/... and read nothing. */
 	path = QString::fromStdString( Game::GameManager::get_full_path( path, "textures", "" ) );
 	DDSTexture16 * tex = nullptr;
@@ -226,7 +226,7 @@ bool ProbeAlbedo::sample( const QString & tex, float u, float v, const float vc[
 		const float g = t->isSRGBTexture() ? linearToSrgb( c[size_t( k )] ) : c[size_t( k )];
 		out[k] = srgbToLinear( g * vc[k] );
 	}
-	if ( alpha )   // lane BAKE4: alpha is linear in every format
+	if ( alpha )   // alpha is linear in every format
 		*alpha = std::clamp( c[3], 0.0f, 1.0f );
 	return true;
 }
@@ -292,7 +292,7 @@ bool ProbeAlbedo::meanGamma( const QString & tex, float out[3] )
 	return true;
 }
 
-// lane BAKE4: a real cell's glass into the soup (the rule and the formula are in the header)
+// a real cell's glass into the soup (the rule and the formula are in the header)
 int probeGlassFeed( ProbeSoup & soup, ProbeAlbedo & alb, const NativeSrcShape & s, const Vector3 & pos,
 	const Matrix & rot, float scale, quint32 ref, const QString & model, QString * census )
 {
