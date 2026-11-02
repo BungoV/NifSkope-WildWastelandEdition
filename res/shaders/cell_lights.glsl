@@ -1238,6 +1238,16 @@ vec2 cellGiMemoV = vec2( 1.0, 0.0 );
 /* GIFIX1101 HO: the last cellGiSample's sky visibility at the normal and its fade (1, 0 = no volume read): cellSsgiE's
  * hand-over takes the volume's own occlusion out of the screen's */
 vec2 cellGiVisN = vec2( 1.0, 0.0 );
+/* DDGIREADPERF1 (Museum Medium: opaque 102 ms, 12 with the volume off; the read itself < 1 ms): a program that inlines the
+ * read at every cellGiSample site (fo4_cell: 7) runs its light loop 1.8x slower with no read executed (offline bench,
+ * 300 lights: 40 -> 72 ms). A program that defines CELL_GI_ONEREAD (fo4_default.frag, pbrm_default.frag) samples once in
+ * main and sets cellGiOneRead = true after it, unconditionally: the later sites (all at the same P, N) then
+ * compile to the memo alone. Red WW_CELL_RTDDGI_ONEREAD=0 (the loader's WW_CELL_GI_ONEREAD_RED): a read at every site */
+#if defined( CELL_GI_ONEREAD ) && !defined( WW_CELL_GI_ONEREAD_RED )
+#define CELL_GI_ONE 1
+#endif
+bool cellGiOneRead = false;
+vec2 cellGiSpecV = vec2( 1.0, 0.0 );	// cellGiFirst's sky visibility on cellSpecSky's lobe (vis2) and its fade (0: no own sky)
 #endif
 vec4 cellGiSample( vec3 P, vec3 N )
 {
@@ -1254,7 +1264,7 @@ vec4 cellGiSample( vec3 P, vec3 N )
 		cellGiVisN = hs.a > 0.0 ? vec2( cellGiHalfVis.x, hs.a ) : vec2( 1.0, 0.0 );
 		return hs;
 	}
-	if ( cellGiMemoOk && ( cellDdgiRed & 16 ) == 0 && P == cellGiMemoP && N == cellGiMemoN ) {
+	if ( cellGiOneRead || ( cellGiMemoOk && ( cellDdgiRed & 16 ) == 0 && P == cellGiMemoP && N == cellGiMemoN ) ) {
 		if ( cellGiMemoS.a > 0.0 )
 			cellGiPath = 12;
 		cellGiVisN = cellGiMemoV;
@@ -1446,6 +1456,11 @@ float cellSpecSky( vec3 P, vec3 N, vec3 R, float rough )
 		float vh = 1.0 + hs.a * cellSkyVis * ( clamp( vl, 0.0, 1.0 ) - 1.0 );
 		return cellSpecOcc == 2 ? mix( 1.0, vh, r ) : vh;
 	}
+#ifdef CELL_GI_ONE
+	if ( cellGiSpecV.y <= 0.0 )	// DDGIREADPERF1: cellGiFirst's read took the lobe too
+		return 1.0;
+	float v = 1.0 + cellGiSpecV.y * cellSkyVis * ( clamp( cellGiSpecV.x, 0.0, 1.0 ) - 1.0 );
+#else
 	vec3 oSky = normalize( vec3( cellRow[0].w, cellRow[1].w, cellRow[2].w ) - P );
 	bool fast = ( cellDdgiRed & 16 ) == 0;
 	cellDdgiTwo = fast;
@@ -1463,11 +1478,39 @@ float cellSpecSky( vec3 P, vec3 N, vec3 R, float rough )
 	if ( !ownSky )
 		return 1.0;
 	float v = 1.0 + dv.fade * cellSkyVis * ( clamp( fast ? dv.vis2 : dv.vis, 0.0, 1.0 ) - 1.0 );
+#endif
 #else
 	float v = 1.0;
 #endif
 	return cellSpecOcc == 2 ? mix( 1.0, v, r ) : v;
 }
+#ifdef CELL_GI_ONE
+/* DDGIREADPERF1: the program's one volume read, called in main before cellSpecSky and every cellGiSample. Without a
+ * screen texel it reads once at (P, Ns) and, where cellSpecSky will want it, the lobe's visibility with the same weights
+ * (FIX1101A's two-direction read, the one cellSpecSky made). cellGiSample's memo and cellSpecSky's answer come from it,
+ * bit for bit the values the old sites read (same call, same arguments). Ns: the sample's normal (N, or a pass red's up).
+ * The slowread red (cellDdgiRed 16) needs WW_CELL_RTDDGI_ONEREAD=0 as well: here every site takes this read. */
+void cellGiFirst( vec3 P, vec3 N, vec3 Ns, vec3 R, float rough )
+{
+	if ( !cellDdgiOn )
+		return;
+	vec4 hs;
+	if ( cellGiHalfOn && cellPass == 0 && cellProbe == 0 && cellGiHalfAt( P, Ns, hs ) )
+		return;	// every site takes the screen texel itself
+	float r = clamp( rough, 0.0, 1.0 );
+	cellDdgiTwo = cellSpecOcc != 0 && cellGiSky && !cellInterior;
+	cellDdgiD2 = cellSpecOcc == 2 ? N : normalize( mix( N, R, ( 1.0 - r ) * ( sqrt( 1.0 - r ) + r ) ) );
+	CellDdgiOut d = cellDdgiRead( P, Ns, normalize( vec3( cellRow[0].w, cellRow[1].w, cellRow[2].w ) - P ), Ns );
+	cellDdgiTwo = false;
+	bool own = d.w > 0.0 && d.fade > 0.0;
+	cellGiMemoOk = true;
+	cellGiMemoP = P;
+	cellGiMemoN = Ns;
+	cellGiMemoS = own ? d.fade * ( cellPass == 2 ? vec4( vec3( d.vis ), 1.0 ) : vec4( d.E, 1.0 ) ) : vec4( 0.0 );
+	cellGiMemoV = own ? vec2( d.vis, d.fade ) : vec2( 1.0, 0.0 );
+	cellGiSpecV = own ? vec2( d.vis2, d.fade ) : vec2( 1.0, 0.0 );
+}
+#endif
 
 /* probe 90 indoors: the share of the cell's ambient (DALC) the probe light replaced at P under cellAmbGi's rule:
  * the grid's valid share with replace (the default), 0 with keep or without the GI */

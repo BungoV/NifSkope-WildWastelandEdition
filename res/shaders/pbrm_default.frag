@@ -7,6 +7,7 @@
 #endif
 #ifdef WW_CELLLIGHTS
 #define WW_CELL_PBR 1
+#define CELL_GI_ONEREAD 1	// DDGIREADPERF1: one volume read site (cellGiFirst in main, cell_lights.glsl)
 #include "cell_lights.glsl"
 #include "cell_ao.glsl"
 #include "cell_ssr.glsl"
@@ -611,6 +612,9 @@ void main()
 	/* the cell's own lights through this BRDF (irradiance x PI, as the sun above) and the bake's bounce.
 	 * Interior: they replace the viewport light and ambient (DALC for the cube); exterior: they add. */
 	vec3 cubeK = vec3( 0.0 );	// the interior cube reflection before its light (probe 50)
+#ifdef CELL_GI_ONE
+	cellGiOneRead = true;	// DDGIREADPERF1: every cellGiSample below takes cellGiFirst's answer (unconditional: no read compiled there)
+#endif
 	if ( cellOn ) {
 		vec3 Pw = cellWorldPos( -ViewDir );
 		Surface sw = s;
@@ -641,6 +645,13 @@ void main()
 			if ( !noSpec )
 				cSpec += dS * E * M_PI;
 		}
+#ifdef CELL_GI_ONE
+		/* DDGIREADPERF1: the one volume read, after the light loop (before it the PBR loop ran slower), at the P and N
+		 * every site asks for (cellGiE, cellGiSkyK, cellSpecSky, the probe and pass views; the PROBEVIEW1 pass red's up
+		 * normal included) */
+		cellGiFirst( Pw, sw.N, cellPass > 0 && cellPass != 6 && cellProbe == 0 && ( cellPassRed & 2 ) != 0 ? vec3( 0.0, 0.0, 1.0 ) : sw.N,
+		             cellWorldDir( R ), s.rough );
+#endif
 		vec3 giE = cellSsgiE( CELL_GI_UP ? cellGiE( Pw, sw.N ) : vec3( 0.0 ) ) / M_PI;	// lane PRTOFF1: the PRT's grid or the ray-traced volume
 		if ( farW > 0.0 ) {
 			cDiff = cDiff * ( 1.0 - farW ) + farW * rho * farF;
