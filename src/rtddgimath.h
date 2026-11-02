@@ -440,6 +440,20 @@ inline float crushWeight( float w )
 {
 	return w < kCrush ? w * w * w / ( kCrush * kCrush ) : w;
 }
+/*! GIFIX1101 1B: the bounce's albedo with its chroma scaled by s about its luminance (Rec.709, linear), luminance kept,
+ *  each channel clamped 0..1: a' = L + s (a - L). s = 1 = the albedo as read (today's); 0 = grey bounce. Only the light
+ *  a probe ray's hit sends on takes it; the drawn surfaces keep their texture */
+inline void bounceAlbedo( float a[3], float s )
+{
+#ifdef RTDDGI_RED_BOUNCESAT
+	s = 1.0f;   // red: the albedo as read whatever s asks
+#endif
+	if ( s == 1.0f )
+		return;
+	const float L = 0.2126f * a[0] + 0.7152f * a[1] + 0.0722f * a[2];
+	for ( int c = 0; c < 3; c++ )
+		a[c] = clampf( L + s * ( a[c] - L ), 0.0f, 1.0f );
+}
 
 // ------------------------------------------------------------------ the 8-probe read (M2: the bounce and the surfaces)
 //! the read's red bits: the twin's (src/rtddgi.cpp kRedNoCheb / kRedNoBias, ddgi_common.glsl DDGI_RED_*) and the cell's
@@ -448,6 +462,7 @@ constexpr unsigned kSampleNoCheb = 2u;      // no Chebyshev factor
 constexpr unsigned kSampleNoBias = 4u;      // no self-shadow bias
 constexpr unsigned kSampleNoCover = 8u;     // FIX1031B: WW_CELL_RTDDGI_RED=nocover, the fade ignores the missing probes (today's main)
 constexpr unsigned kSampleSlowRead = 16u;   // FIX1101A: WW_CELL_RTDDGI_RED=slowread, no early out, no per-fragment memo (today's main)
+constexpr unsigned kSampleLobe3 = 32u;      // GIFIX1101 SO: WW_CELL_RTDDGI_RED=lobe3, the screen texel's three-point lobe read (PERFFIX2's)
 //! a probe the read takes: Vigilant and blended at least once (Asleep probes are not traced, Off ones sit in walls)
 inline bool probeUsable( int state, uint32_t age )
 {

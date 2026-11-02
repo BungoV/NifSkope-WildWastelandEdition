@@ -54,6 +54,7 @@ struct RtDdgiSpec
 	bool skipAsleep = true;     //!< GUIDE 2.6: Off and Asleep probes trace nothing
 	bool oneBounce = false;     //!< the hits take no irradiance from the volume (bounce_reference's one bounce)
 	bool noSky = false;         //!< misses are black (bounce_reference adds no sky)
+	float bounceSat = 1.0f;     //!< GIFIX1101 1B: the hits' albedo chroma x this about its luminance (1 = as read; rtddgimath.h bounceAlbedo)
 	int gpu = 0;                //!< 0 the CPU twin, 1 the GPU when it can (else the twin, and the path says why)
 	/*! refuters for the gates (comma list): "noback" backface hits shaded as front faces, "nocheb" the bounce sampler
 	 *  without Chebyshev, "nobias" without the self-shadow bias, "norot" no per-update rotation; M1FIX: "hwhit" (GPU

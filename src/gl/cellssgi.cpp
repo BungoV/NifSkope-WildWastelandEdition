@@ -84,7 +84,8 @@ SsgiState & st()
 		for ( const QByteArray & w : red.split( ',' ) )
 			s.red |= w == "off" ? 1 : w == "stack" ? 2 : w == "notemporal" ? 4 : w == "noblur" ? 8 : w == "ign" ? 16
 				: w == "nohiz" ? 32 : w == "oldblur" ? 64 : w == "noemissive" ? 128 : w == "oldlaw" ? 256
-				: w == "oldframes" ? 512 : w == "emitchain" ? 1024 : w == "hiz" ? 2048 : w == "oldtiers" ? 4096 : 0;
+				: w == "oldframes" ? 512 : w == "emitchain" ? 1024 : w == "hiz" ? 2048 : w == "oldtiers" ? 4096
+				: w == "nohandover" ? 8192 : 0;	// GIFIX1101 HO: the probe-fill law under the traced volume too
 	}
 	return s;
 }
@@ -250,12 +251,12 @@ void wwCellSsgiPass( Scene * scene, bool run )
 	if ( verdict != s.lastVerdict && ( verdict != 0 || s.lastVerdict > 0 ) ) {
 		static const char * const words[4] = { "off", "off (no obscurance pass)", "off (no scene pass)", "on" };
 		std::snprintf( s.echo, sizeof( s.echo ),
-			"cell ssgi: %s quality %d red %d noise %s hiz %s denoise %s emissive %s law %s frames %s tiers %s",
+			"cell ssgi: %s quality %d red %d noise %s hiz %s denoise %s emissive %s law %s frames %s tiers %s handover %s",
 			words[verdict], s.quality, s.red, ( s.red & 16 ) ? "ign" : "fast",
 			wwSsgiHizBuilt( s.red ) ? "on" : wwSsgiFullBreak( s.red ) ? "break" : "off",
 			( s.red & 8 ) ? "none" : ( s.red & 64 ) ? "5x5" : "robust+quarter", ( s.red & 128 ) ? "off" : wwSsgiEmissive( s.red ) == WwSsgiEmitChain ? "chain" : "folded",
 			( s.red & 256 ) ? "old" : "fill", !wwHarnessRun() ? "live" : ( s.red & 512 ) ? "per-paint" : "pinned",
-			( s.red & 4096 ) ? "fo4cs" : "perffix2" );
+			( s.red & 4096 ) ? "fo4cs" : "perffix2", ( s.red & 8192 ) ? "off" : "volume" );
 		std::fprintf( stderr, "%s\n", s.echo );
 		s.lastVerdict = verdict;
 	}

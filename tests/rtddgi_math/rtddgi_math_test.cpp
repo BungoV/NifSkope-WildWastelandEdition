@@ -1302,6 +1302,30 @@ void checkCascJump()
 		rule ? "yes" : "NO", dueDiff );
 }
 
+/* GIFIX1101 1B: the bounce albedo's saturation. s = 1 leaves the albedo as read; s = 0.5 keeps the luminance and halves
+ * each channel's distance from it (the Concord soup's area mean 0.138 0.112 0.076); s = 0 is grey. Red
+ * RTDDGI_RED_BOUNCESAT: the albedo as read whatever s asks */
+void checkBounceSat()
+{
+	const float m[3] = { 0.138f, 0.112f, 0.076f };
+	float one[3] = { m[0], m[1], m[2] }, half[3] = { m[0], m[1], m[2] }, zero[3] = { m[0], m[1], m[2] };
+	bounceAlbedo( one, 1.0f );
+	bounceAlbedo( half, 0.5f );
+	bounceAlbedo( zero, 0.0f );
+	const float L = 0.2126f * m[0] + 0.7152f * m[1] + 0.0722f * m[2];
+	auto lum = []( const float * a ) { return 0.2126f * a[0] + 0.7152f * a[1] + 0.0722f * a[2]; };
+	float eHalf = 0.0f, eZero = 0.0f, eOne = 0.0f;
+	for ( int c = 0; c < 3; c++ ) {
+		eOne = std::max( eOne, std::fabs( one[c] - m[c] ) );
+		eHalf = std::max( eHalf, std::fabs( half[c] - ( L + 0.5f * ( m[c] - L ) ) ) );
+		eZero = std::max( eZero, std::fabs( zero[c] - L ) );
+	}
+	const double rbHalf = half[0] / half[2];
+	const bool ok = eOne == 0.0f && eHalf < 1e-6f && eZero < 1e-6f && std::fabs( lum( half ) - L ) < 1e-6f && rbHalf < 1.40;
+	report( "bouncesat", ok, "s 0.5: R/B %.3f (as read %.3f, bar under 1.40); max error vs a' = L + s (a - L) %.2g", rbHalf,
+		m[0] / m[2], std::max( eHalf, eZero ) );
+}
+
 } // namespace
 
 int main()
@@ -1336,6 +1360,7 @@ int main()
 	checkSkyBelow();
 	checkSkyAbove();
 	checkSkyVisUp();
+	checkBounceSat();
 	std::printf( "RTDDGI_MATH %s %d%s\n", g_fail ? "FAIL" : "PASS", g_fail ? g_fail : g_pass, g_fail ? " failed" : "" );
 	return g_fail ? 1 : 0;
 }

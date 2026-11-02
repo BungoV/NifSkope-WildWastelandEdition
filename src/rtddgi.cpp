@@ -602,6 +602,7 @@ static bool packVolume( const ProbeSoup & soup, const WwCellLighting & lighting,
 		float * a = &S.triAttr[t * kAttr];
 		for ( int c = 0; c < 3; c++ )
 			a[c] = hasAlb ? soup.alb[t * 3 + size_t( c )] / 255.0f : 0.5f;   // ours: mid grey without ALB1
+		bounceAlbedo( a, spec.bounceSat );   // GIFIX1101 1B (1 = as read)
 		a[3] = soup.isTwoSided( t ) ? 1.0f : 0.0f;
 		if ( soup.glow.emits( int( t ) ) ) {   // the glow at the triangle's centre (ours: one texel a triangle)
 			double le[3];
@@ -1491,6 +1492,7 @@ int rtddgiCli( const QStringList & args )
 		else if ( a == QLatin1String( "--lights" ) ) { lightsFile = nx; i++; }
 		else if ( a == QLatin1String( "--one-bounce" ) ) spec.oneBounce = true;
 		else if ( a == QLatin1String( "--no-sky" ) ) spec.noSky = true;
+		else if ( a == QLatin1String( "--bounce-sat" ) ) { spec.bounceSat = std::clamp( nx.toFloat(), 0.0f, 1.0f ); i++; }   // GIFIX1101 1B
 		else if ( a == QLatin1String( "--no-place" ) ) spec.place = false;
 		else if ( a == QLatin1String( "--no-reloc" ) ) spec.relocate = false;
 		else if ( a == QLatin1String( "--no-classify" ) ) spec.classify = false;
