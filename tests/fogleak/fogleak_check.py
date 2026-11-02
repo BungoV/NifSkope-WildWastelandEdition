@@ -359,6 +359,7 @@ def uniforms(p, units, vol, terms, leakred=0, light=None, shadow=False, restir=F
     setu(p, 'volTerms', terms)
     setu(p, 'volJitter', 0.0)
     setu(p, 'volLeakRed', leakred)
+    setu(p, 'volEnvOccRed', 1)   # lane DARKAIR1: OFF keeps the flat ambient it gates against (red openenv)
     setu(p, 'cellOn', 1)
     setu(p, 'cellInterior', int(interior))   # lane INTGI1: an unlit interior (after the zero list above)
     setu(p, 'cellHasDir', 1)
