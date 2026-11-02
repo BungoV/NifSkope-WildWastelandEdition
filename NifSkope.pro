@@ -36,6 +36,12 @@ contains(QT_VERSION, ^5\\.15\\..*) {
 # Dependencies
 CONFIG += qhull gli libfo76utils
 
+# lane STARTSPEED1: Qt and the standard headers parsed once (src/ww_pch.h); qmake nopch=1 builds without it
+!contains(nopch, 1) {
+	CONFIG += precompile_header
+	PRECOMPILED_HEADER = src/ww_pch.h
+}
+
 # Debug/Release options
 contains(debug, 1) {
 	CONFIG += debug

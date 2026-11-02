@@ -3058,6 +3058,9 @@ static void wwCardBakeFinished( NifSkope * skope )
 	QTimer::singleShot( 0, qApp, &wwCardBatchNext );
 }
 
+void wwStartupMark( const char * stage );	// main.cpp (lane STARTSPEED1)
+bool wwStartupEager();	// gl/glcontext.cpp (lane STARTSPEED1): red WW_STARTUP_EAGER=1
+
 NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 {
 	NifSkope * primary = nullptr;
@@ -3067,11 +3070,14 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 			if ( document->isActiveWindow() ) break;
 		}
 	wwCardStamp( QStringLiteral( "cw" ) );
+	wwStartupMark( "window create" );
 	NifSkope * skope = new NifSkope( background );
 	wwCardStamp( QStringLiteral( "ctor" ) );
+	wwStartupMark( "window built" );
 	skope->setAttribute( Qt::WA_DeleteOnClose );
 	skope->loadTheme();
 	wwCardStamp( QStringLiteral( "theme" ) );
+	wwStartupMark( "theme" );
 	skope->workspaceRoot = background && primary
 		? ( primary->workspaceRoot ? primary->workspaceRoot : primary ) : skope;
 	if ( !background ) {
@@ -3202,6 +3208,7 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 		wwHarnessRecordViewport( skope, skope->getGLView(), "shown" );
 	}
 	wwCardStamp( QStringLiteral( "shown" ) );
+	wwStartupMark( "window shown" );
 
 	// TEMP DIAGNOSTIC (WW_EXTRUDE_TEST=1, remove when the append-row condition
 	// bug is fixed): after the file loads, grow "Vertex Data" on the first
@@ -27233,6 +27240,7 @@ void NifSkope::initDockWidgets()
 	 * nothing else in the window addresses it -- so nifskope.h gains no member
 	 * while another lane is holding that file. */
 	{
+		wwStartupMark( "docks: left editor" );
 		QDockWidget * dBodyBuild = new QDockWidget( tr( "Body Build" ), this );
 		dBodyBuild->setObjectName( "BodyBuildDock" );
 		BodyBuildPanel * bodyBuild = new BodyBuildPanel( dBodyBuild );
@@ -27258,6 +27266,7 @@ void NifSkope::initDockWidgets()
 	 * finds the panel by object name and nothing else in the window addresses
 	 * it, so nifskope.h gains no member while another lane holds that file. */
 	{
+		wwStartupMark( "docks: body build" );
 		QDockWidget * dCellPick = new QDockWidget( tr( "Reference" ), this );
 		dCellPick->setObjectName( "CellPickDock" );
 		CellPickPanel * cellPick = new CellPickPanel( dCellPick );
@@ -27311,6 +27320,7 @@ void NifSkope::initDockWidgets()
 	 * rows, and the clip fully editable (keys, annotations, trim, retime,
 	 * root-motion bake, Save as .hkx). The Animation Manager dock above stays
 	 * until this one is proven in the app; a follow-up retires it. */
+	wwStartupMark( "docks: reference" );
 	dAnimWs = new QDockWidget( tr( "Animation" ), this );
 	dAnimWs->setObjectName( "AnimWorkspaceDock" );
 	animws = new AnimWorkspace( dAnimWs );
@@ -29544,6 +29554,7 @@ void NifSkope::initDockWidgets()
 			"QToolButton:disabled { color: %4; }" )
 			.arg( wwSkinColor( "bgBtnHover" ), wwSkinColor( "bgBtnDown" ),
 				  wwSkinColor( "accentText" ), wwSkinColor( "textMuted" ) );
+		wwStartupMark( "docks: animation + view menus" );
 		QWidget * contributionPanel = new QWidget( shadeMenu );
 		contributionPanel->setObjectName( QStringLiteral( "ShadingChannelMixer" ) );
 		QGridLayout * contributionLayout = new QGridLayout( contributionPanel );
@@ -29713,24 +29724,56 @@ void NifSkope::initDockWidgets()
 		 * from this toolbar button, remembering its size and position. */
 		{
 			wwSceneLoadSettings();
+			// the stored lookdev plugin/weather/hour/ground (pins win), whether or not the Scene window is built
+			wwLookdevLoadSettings();
 			QAction * aScene = new QAction( tlMakeIcon( QStringLiteral( "bulb" ), icoColHdr ), tr( "Scene" ), this );
 			aScene->setObjectName( QStringLiteral( "aSceneWindow" ) );
 			aScene->setCheckable( true );
-			auto * sceneWin = new SceneWindow( this,
-				[this]() {
-					if ( ogl )
+			wwStartupMark( "docks: shade menu" );
+			/* lane STARTSPEED1: the window is built on its first show (about 0.3 s of rows at start);
+			 * red WW_STARTUP_EAGER=1 builds it here as before */
+			auto sceneWin = std::make_shared< QPointer<SceneWindow> >();
+			auto makeScene = [this, aScene, sceneWin]() -> QWidget * {
+				if ( !*sceneWin ) {
+					QElapsedTimer t;
+					t.start();
+					*sceneWin = new SceneWindow( this,
+						[this]() {
+							if ( ogl )
+								ogl->update();
+						},
+						[aScene]( bool shown ) {
+							const QSignalBlocker block( aScene );
+							aScene->setChecked( shown );
+						} );
+					std::fprintf( stderr, "scene window: built %lld ms (%s)\n", (long long) t.elapsed(),
+						wwStartupEager() ? "at start, WW_STARTUP_EAGER=1" : "on first show" );
+				}
+				return sceneWin->data();
+			};
+			wwSceneWindowSetMaker( this, makeScene );
+			if ( wwStartupEager() ) {
+				makeScene();
+			} else {
+				// the cloud scroll (SceneWindow::syncCloudTimer) until the window exists
+				QTimer * clouds = new QTimer( this );
+				clouds->setInterval( 100 );
+				connect( clouds, &QTimer::timeout, this, [this, sceneWin, clouds]() {
+					if ( *sceneWin )
+						clouds->stop();
+					else if ( ogl && wwSceneCloudsAnimate() )
 						ogl->update();
-				},
-				[aScene]( bool shown ) {
-					const QSignalBlocker block( aScene );
-					aScene->setChecked( shown );
 				} );
-			connect( aScene, &QAction::toggled, sceneWin, [sceneWin]( bool on ) {
+				clouds->start();
+			}
+			connect( aScene, &QAction::toggled, this, [sceneWin, makeScene]( bool on ) {
 				if ( on ) {
-					sceneWin->show();
-					sceneWin->raise();
-				} else {
-					sceneWin->hide();
+					if ( QWidget * w = makeScene() ) {
+						w->show();
+						w->raise();
+					}
+				} else if ( *sceneWin ) {
+					( *sceneWin )->hide();
 				}
 			} );
 			if ( ui->mView )
@@ -30170,6 +30213,7 @@ void NifSkope::initDockWidgets()
 		QMenu * animMenu = new QMenu( animBtn );
 		animBtn->setMenu( animMenu );
 
+		wwStartupMark( "docks: scene window" );
 		QWidget * animPanel = new QWidget( animMenu );
 		animPanel->setObjectName( QStringLiteral( "AnimationQuickPanel" ) );
 		auto * grid = new QGridLayout( animPanel );
@@ -30533,6 +30577,7 @@ void NifSkope::initDockWidgets()
 		colBtn->setObjectName( QStringLiteral( "ViewCollisionButton" ) );
 
 		QMenu * colMenu = new QMenu( colBtn );
+		wwStartupMark( "docks: anim menu" );
 		PhysicsSimPanel * quick = new PhysicsSimPanel( ogl, nif,
 			PhysicsSimPanel::Mode::Essentials, ui->aShowCollision, colMenu );
 		quick->setObjectName( QStringLiteral( "CollisionQuickPanel" ) );
@@ -30742,6 +30787,7 @@ void NifSkope::initDockWidgets()
 		 * companion, not a copy. One panel, one set of rows, one place a
 		 * reference is described. */
 		{
+			wwStartupMark( "docks: physics panel" );
 			QDockWidget * dCellWs = new QDockWidget( tr( "Cell" ), this );
 			dCellWs->setObjectName( QStringLiteral( "CellWorkspaceDock" ) );
 			CellWorkspacePanel * cellWs = new CellWorkspacePanel( dCellWs );
@@ -30986,7 +31032,7 @@ void NifSkope::initDockWidgets()
 
 	// Set Inspect widget
 	dInsp->setWidget( inspect );
-
+	wwStartupMark( "docks: cell workspace + inspector" );
 }
 
 void NifSkope::initMenu()

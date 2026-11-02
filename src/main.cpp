@@ -63,6 +63,62 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include <cstdio>	// lane PERF1: setvbuf
 
 #include "probeincr.h"
+#ifdef Q_OS_WIN
+#  ifndef NOMINMAX
+#    define NOMINMAX
+#  endif
+#  include <windows.h>	// lane STARTSPEED1: GetProcessTimes (the process's own start, before main)
+#endif
+#include <QElapsedTimer>
+#include <cstring>
+
+/* lane STARTSPEED1: the start's stages, one "startup: <stage> <ms> ms (+<ms>)" line each on stderr: ms since the
+ * PROCESS was created (the loader and static init before main count), and the step from the stage before.
+ * WW_STARTUP_LOG=<file> appends the same lines to that file (a timing runner's record). Marks end at the first
+ * painted frame: a later shader reload or a second window prints nothing. */
+static double wwStartupNowMs()
+{
+#ifdef Q_OS_WIN
+	FILETIME c, e, k, u, now;
+	if ( GetProcessTimes( GetCurrentProcess(), &c, &e, &k, &u ) ) {
+		GetSystemTimePreciseAsFileTime( &now );
+		const auto q = []( const FILETIME & t ) { return ( quint64( t.dwHighDateTime ) << 32 ) | t.dwLowDateTime; };
+		return double( qint64( q( now ) - q( c ) ) ) / 10000.0;
+	}
+#endif
+	static QElapsedTimer t;
+	if ( !t.isValid() )
+		t.start();
+	return double( t.nsecsElapsed() ) / 1e6;
+}
+
+static bool wwStartupDone = false;
+
+void wwStartupMark( const char * stage )
+{
+	static double last = 0.0;
+	if ( wwStartupDone )
+		return;
+	const double t = wwStartupNowMs();
+	char line[256];
+	std::snprintf( line, sizeof( line ), "startup: %s %.0f ms (+%.0f)\n", stage, t, t - last );
+	last = t;
+	std::fputs( line, stderr );
+	static const QByteArray logPath = qgetenv( "WW_STARTUP_LOG" );
+	if ( !logPath.isEmpty() ) {
+		if ( FILE * f = std::fopen( logPath.constData(), "ab" ) ) {
+			std::fputs( line, f );
+			std::fclose( f );
+		}
+	}
+	if ( std::strcmp( stage, "first frame" ) == 0 ) {
+		wwStartupDone = true;
+		std::fflush( stderr );
+		// lane STARTSPEED1: WW_STARTUP_QUIT=1 quits at the first frame (the build's shader-cache warm start)
+		if ( qgetenv( "WW_STARTUP_QUIT" ).trimmed() == "1" && QCoreApplication::instance() )
+			QMetaObject::invokeMethod( QCoreApplication::instance(), &QCoreApplication::quit, Qt::QueuedConnection );
+	}
+}
 
 
 QCoreApplication * createApplication( int &argc, char *argv[] )
@@ -121,6 +177,7 @@ int main( int argc, char * argv[] )
 	else if ( wwSb != "0" && std::setvbuf( stderr, nullptr, _IOFBF, 64 << 10 ) == 0 )
 		wwStderrFrameFlush = true;
 	PassTime::profileFromStart();	// lane PERF1: WW_PROF_SAMPLE_ALL=1, the load profiled too
+	wwStartupMark( "main entry" );
 
 	wwCardTimesMainEntry();
 	// Before anything creates a GL context: RenderDoc cannot hook a driver it
@@ -150,6 +207,7 @@ int main( int argc, char * argv[] )
 	}
 
 	QScopedPointer<QCoreApplication> app( createApplication( argc, argv ) );
+	wwStartupMark( "application" );
 
 	if ( auto a = qobject_cast<QApplication *>(app.data()) ) {
 		a->setOrganizationName( "NifTools" );
@@ -232,13 +290,16 @@ int main( int argc, char * argv[] )
 		cfg.beginGroup( "Settings" );
 		NifSkope::SetAppLocale( cfg.value( "Locale", "en" ).toLocale() );
 		cfg.endGroup();
+		wwStartupMark( "settings + locale" );
 
 		// Load XML files
 		NifModel::loadXML();
 		KfmModel::loadXML();
+		wwStartupMark( "nif.xml + kfm.xml" );
 
 		// Init game manager
 		(void) Game::GameManager::get();
+		wwStartupMark( "game manager" );
 
 		/* WW_LODGEN_RESOURCES=<entry>;<entry>;... - the LOD generator's resource
 		 * stack, in Mod Organizer's order (the LAST one overrides the earlier
@@ -329,7 +390,9 @@ int main( int argc, char * argv[] )
 		}
 		if ( IPCsocket * ipc = IPCsocket::create( port ) ) {
 			//qDebug() << "IPCSocket exec";
+			wwStartupMark( "ipc socket" );
 			ipc->execCommand( QString( "NifSkope::open %1" ).arg( fnames.pop() ) );
+			wwStartupMark( "window open command" );
 
 			while ( !fnames.isEmpty() ) {
 				IPCsocket::sendCommand( QString( "NifSkope::open %1" ).arg( fnames.pop() ), port );
