@@ -659,6 +659,19 @@ tests/spells/volpart1_cell.sh (PROF) and tests/spells/decallit1_cell.sh (PROFILE
 notes/allon2/shots/profile_elfx.txt: the old profile plus EnhancedLightsandFX.esp as the last plugin and its mod folder
 as the last mod on the resource stack (only overwrite above it). Passing PROF= / PROFILE= with the old profile.txt is
 the way back; pictures taken before 2026-11-02 12:45 were made without ELFX. Nothing in the viewer changes.
+## FARTILESPLIT (SHADOWSHIMMER5, 2026-11-02): the instanced far rows' cull tiles are 2 x 2 cells, not 4 x 4
+
+The instanced far-ring buckets group their rows into tiles that gl/cellfarinst.cpp culls as a whole (camera, each sun
+cascade's box, the sway view slice). A tile was 4 x 4 cells (the AABB of its rows' spheres, median radius ~10300 u on
+Concord c3 5x5 Ultra), so a cascade drew whole 16-cell blocks it barely touched. New `src/gl/fartile.h` keys the tiles
+by N x N cells; src/lodinative.cpp reads `WW_CELL_FARINST_TILE` (1, 2, 4 or 8 cells; default 2) while the cell
+document is built, and `WW_CELL_FARINST_TILE_RED=1` keeps the old 4 x 4. The depth-only caster pass is
+order-independent and the tile cull stays conservative, so the shadow depth is the same; only what is drawn shrinks.
+Offline (the real sway buckets through the tree's csm depth programs, GL timer, 5070 Ti, Ultra): 4 x 4 / 2 x 2 / 1 x 1
+= 2227 / 6432 / 17254 tiles, 7131 / 18414 / 40180 commands; sway paint amortised median 0.220 / 0.169 / 0.143 ms,
+all cascades in one paint 0.695 / 0.516 / 0.43 ms. The CPU cull of more tiles and the colour pass are judged live.
+tests/fartilesplit/run.sh: key grouping, every row sphere inside its tile sphere, median tile radius <= 0.6 x 4 x 4,
+rows through a box cull <= 0.8 x, no row the box meets left out, and the source pin; the red (`-DFTS_RED`) fails.
 
 ## REFLPROBECLI1 (TOOLS1101, 2026-11-01): count the reflection probes' below-horizon misses without a window
 
