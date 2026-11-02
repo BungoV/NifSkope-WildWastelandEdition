@@ -16,6 +16,9 @@ BSD License - see nifskope.h
 #include "rtddgicell.h"	// lane PERFFIX2 a: the ray-traced GI volume on (its updates relight the camera probe)
 #include "gl/cellreflcam.h"	// lane PERFFIX2 a: the camera probe's schedule
 #include "gl/wwframesched.h"	// lane FRAMESCHED1: one capture a frame, none on a coarse DDGI cascade's frame
+#include "probeplace.h"	// lane REFLPLACE1: the soup the GI keeps (ProbeSoup)
+#include "probesky.h"	// lane REFLPLACE1: probeSkyKeptSoup
+#include "reflplace.h"	// lane REFLPLACE1: the interior grid probes fitted into the rooms
 
 #include "gl/celllights.h"
 #include "gl/cellssr.h"
@@ -51,6 +54,18 @@ static bool frameSchedRed()
 		return true;
 	const QByteArray v = wwEnv( "WW_FRAMESCHED_RED" ).trimmed();
 	return !v.isEmpty() && v != "0";
+}
+
+/* lane REFLPLACE1: WW_CELL_REFLPLACE=1 fits the interior grid probes into the rooms of the soup the GI keeps
+ * (src/reflplace.h); WW_CELL_REFLPLACE_RED=1 keeps the old placement with it on. Unset = off (the old placement)
+ * until the lane's hold says ON. Read every frame (live). 0 off, 1 on, 2 red */
+static int reflPlaceMode()
+{
+	const QByteArray v = wwEnv( "WW_CELL_REFLPLACE" ).trimmed();
+	if ( v.isEmpty() || v == "0" )
+		return 0;
+	const QByteArray r = wwEnv( "WW_CELL_REFLPLACE_RED" ).trimmed();
+	return !r.isEmpty() && r != "0" ? 2 : 1;
 }
 
 namespace
@@ -123,6 +138,11 @@ struct RpGpu
 	const void * roomsGi = nullptr;	// the GI the room candidates came from
 	size_t roomsSize = 0;
 	std::vector<Candidate> rooms;	// per room (or room part): its probe and box
+	reflplace::Footprint fp;		// lane REFLPLACE1: the kept soup's footprint (fpSoup/fpData/fpTris: which one)
+	const void * fpSoup = nullptr, * fpData = nullptr;
+	size_t fpTris = 0;
+	quint64 fpStamp = 0;			// bumps with every footprint built (in the grid keys while the fit is on)
+	QString fitSaid;				// the census suffix of the status line
 	Probe slot[kSlots];
 	int camFace = 0;				// the camera probe's next face
 	/* lane PERFFIX2 a: the camera probe's capture key per face (what the face was drawn from) and its relight key
@@ -447,6 +467,29 @@ void wwCellReflProbePass( Scene * scene, bool run )
 	std::vector<Candidate> cand;
 	const bool byRooms = L->interior && !g.rooms.empty();
 	const float camZ = std::round( cam[2] / 256.0f ) * 256.0f;
+	/* lane REFLPLACE1: indoors the grid probes fitted into the rooms of the soup the GI keeps (reflplace.h): kept where
+	 * they stand in the geometry, moved to the nearest room column in their box, dropped when the box holds none.
+	 * No kept soup (no GI bake in this view): the old placement, said in the status line */
+	const int placeMode = byRooms || !L->interior ? 0 : reflPlaceMode();
+	const reflplace::Footprint * fit = nullptr;
+	int fitN[3] = { 0, 0, 0 };
+	if ( placeMode == 1 ) {
+		const ProbeSoup * soup = probeSkyKeptSoup( scene->nifModel, nullptr, nullptr );
+		if ( soup && !soup->tris.empty() ) {
+			if ( g.fpSoup != soup || g.fpData != soup->tris.data() || g.fpTris != soup->tris.size() / 9 ) {
+				QElapsedTimer ft;
+				ft.start();
+				reflplace::build( soup->tris.data(), soup->tris.size() / 9, g.fp );
+				g.fpSoup = soup;
+				g.fpData = soup->tris.data();
+				g.fpTris = soup->tris.size() / 9;
+				g.fpStamp++;
+				std::fprintf( stderr, "reflprobe fit: footprint %d x %d columns of %.0f u over %zu triangles in %lld ms\n",
+					g.fp.nx, g.fp.ny, g.fp.cell, g.fpTris, (long long) ft.elapsed() );
+			}
+			fit = &g.fp;
+		}
+	}
 	if ( byRooms ) {
 		cand = g.rooms;
 	} else {
@@ -464,9 +507,29 @@ void wwCellReflProbePass( Scene * scene, bool run )
 					c.pos[a] = c.bmin[a] + kBox * 0.5f;
 				}
 				c.pos[2] = camZ;
+				if ( fit ) {
+					double bmin[3], bmax[3], pos[3];
+					for ( int a = 0; a < 3; a++ ) {
+						bmin[a] = c.bmin[a];
+						bmax[a] = c.bmax[a];
+						pos[a] = c.pos[a];
+					}
+					const int f = reflplace::fit( *fit, bmin, bmax, pos );
+					fitN[f]++;
+					if ( f == reflplace::Dropped )
+						continue;
+					for ( int a = 0; a < 3; a++ )
+						c.pos[a] = float( pos[a] );
+					c.key = mix64( mix64( c.key, 0x464954ULL ), g.fpStamp );	// a fitted probe is another probe
+				}
 				cand.push_back( c );
 			}
 	}
+	g.fitSaid = byRooms || !L->interior ? QString()
+		: placeMode == 2 ? QStringLiteral( " fit=RED(old placement, WW_CELL_REFLPLACE_RED)" )
+		: placeMode == 0 ? QString()
+		: !fit ? QStringLiteral( " fit=refused(no kept soup: the old placement)" )
+		: QStringLiteral( " fit=kept %1 moved %2 dropped %3" ).arg( fitN[0] ).arg( fitN[1] ).arg( fitN[2] );
 	auto boxDist = [&]( const Candidate & c ) {
 		float d2 = 0.0f;
 		for ( int a = 0; a < 3; a++ ) {
@@ -970,7 +1033,7 @@ void wwCellReflProbePass( Scene * scene, bool run )
 		.arg( placedLit ).arg( g.slot[0].lit ? QStringLiteral( "lit" ) : QStringLiteral( "capturing" ) )
 		.arg( s.all ? QStringLiteral( "all" ) : schedRed ? QStringLiteral( "2 (WW_FRAMESCHED_RED)" ) : QStringLiteral( "1 (framesched)" ) ).arg( g.kb )
 		+ ( rtddgiSkyBelowRedNow() ? QStringLiteral( " below-horizon miss=sky (WW_SKYBELOW_RED)" )	// lane SKYBELOW2
-			: QStringLiteral( " below-horizon miss=ground" ) ) );
+			: QStringLiteral( " below-horizon miss=ground" ) ) + g.fitSaid );	// lane REFLPLACE1
 	if ( qEnvironmentVariableIsSet( "WW_CELL_REFLPROBE_TIME" ) && ( captured || relit ) )
 		std::fprintf( stderr, "reflprobe frame: captured=%d draws=%lld relit=%d cpu-ms=%lld camera-still=%lld%s sched deferred=%llu alternated=%llu%s\n",
 			captured, (long long) draws, relit, (long long) timer.elapsed(), (long long) g.camSkipped,
