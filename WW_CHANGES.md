@@ -1,3 +1,13 @@
+## FARWATER7-SAT (2026-11-02): flow encoding 2, a three-quarter-octave log speed nibble
+
+- `WW_LODL_FLOW_LOG=2` bakes the .lodl river speed nibble as code = round(8 + log2(r) / 0.75), r = speed over the
+  bake's median (code 1 = 0.026 x, 8 = 1 x, 15 = 38 x; 0 = still), header word 0xCC = 2. Encoding 1 (`=1`, half-octave,
+  15 = 11.3 x) clipped 5.47 % of moving river texels on the Commonwealth (FARWATER4's 111 dumps); encoding 2 clips
+  0.76 %, and the p99 decode error falls from 1.85 to 0.37 octave. The price is a coarser step (worst 0.375 octave in range).
+- Readers (cell water, the marking tool) decode encoding 2; `WW_LODL_FLOW_LOG=1` (the red) and the linear default
+  write the same bytes as before. The bake census adds "over the code range on N". Default unchanged.
+- Code: src/lodtflowcode.h, src/lodtfile.cpp, src/watermark.cpp. Gate: tests/farwater7/run.sh.
+
 ## BUGS1102F (2026-11-02): the shader cache keeps the most recently USED binaries
 
 - **Shader cache (SHOTCAPS-MTIME):** the prune keeps the newest binaries of a program by file time, but a cache hit
