@@ -1,3 +1,35 @@
+## FOGMATCH1 (2026-11-02): a fog-droplet phase for the cell air (off by default)
+
+- `WW_CELL_AIR_PHASE=mie` replaces the fog records' GDRY lobes in the cell air with a two-lobe droplet phase: forward
+  Henyey-Greenstein g 0.85 (`WW_CELL_AIR_PHASE_G`, 0 < g < 0.99) at weight 0.9 plus a back lobe g -0.4 at weight 0.1.
+  The weights are grey, so the hue stays the records' and the light's. The lobes are normalised: the air scatters the
+  same total, only the direction changes. Why: the record lobes are nearly flat at low sun, so backlit haze never
+  glowed toward the sun.
+- Off (unset) or `WW_CELL_AIR_PHASE=records` = the record lobes, as before. The air census line gains
+  `mie(g 0.85 w 0.9, back -0.4 w 0.1)` while it is on.
+- Code: src/gl/cellvolair.cpp (vaPhaseMie).
+
+## WXBAND (2026-11-02): the 2D cloud layers take the sky's aerial perspective to the deck
+
+- WEATHER-HORIZON-BAND (Concord, Clear to Overcast): the 2D cloud layers drew the deck with no haze down to the
+  HORIZONBAND1 band, which is fully hazed, so a dark deck sat on a pale band with a hard top edge. lookdev_clouds.frag
+  now fades each layer texel by the air between the camera and the Low band's base (the deck): tair = T(cam, mu) /
+  T(deck, mu1) from the sky's transmittance LUT, drawn as alpha a x tm and colour c x tair / tm (tm = the largest
+  channel), the same rule as the volume clouds' aerial perspective.
+- On whenever the physical sky's transmittance is up and the camera is under the deck. Red `WW_LOOKDEV_RED=cloudnoap`
+  = the old layer. The layers' notes line gains `ap=on(deck=<km>)` or `ap=off`.
+- Code: res/shaders/lookdev_clouds.frag, src/gl/lookdevstage.cpp, src/gl/cloudvol.cpp (wwCloudLayerDeckKm).
+- Gate: tests/cloudlayerap/cloudlayerap_check.py: S1 the deck's share at the band top 0.100 (bar <= 0.15; red 1.0
+  FAILS), S2 at 20 degrees 0.875 (>= 0.5), S3 the largest step 0.017 per 0.1 degree (<= 0.05).
+
+## GISKYTWIN-LOW (2026-11-02): the GI sky twin checked at the Low tier
+
+- Test only, no code change: tests/gisky now also checks the Low tier's CPU sky twin (its 16-wide multiple-scattering
+  table) against the drawn GPU sky at MS 16. tests/spells/atmo_skyrender.py's Sky takes the table width (msN), and
+  twin_ref.py with MSN=16 writes tests/gisky/twin_ref_low.h (30 cases).
+- Gate: gisky check 6 `twinlow`, bar 0.02: green 0.0064 relative (0.0047 R/B); red `GISKY_RED_TWINLOW` (the 32-wide
+  table at Low) 0.0495 FAILS. run.sh: green 7 checks; red twin fails twin and twinlow, red twinlow fails twinlow only.
+
 ## BUGS1102E (2026-11-02): reflcensus tells a probe in the void from a soup that stops short
 
 - MUSEUMSOUP1: the Museum census (REFLPROBECLI2) counted 452630 below-horizon misses "past the soup" and they were read
