@@ -1,3 +1,19 @@
+## FO4CELLGI1 (2026-11-02): the probe and pass views leave the cell programs while no view is asked
+
+DDGIREADPERF2 left fo4_cell with one GI volume ~10 ms over the volume-off program (300 lights offline: 50 vs 40 ms). The
+gap grew with the light count (0 lights 0.87 vs 0.78 ms, 100 lights 17.3 vs 13.6): the light loop's occupancy, set by
+the whole program's register peak. The NV assembly did not show it (variants with equal instruction and temp counts
+ran 39 or 50 ms), and no cut inside the GI read moved it (one texel fetch in place of the read: still 50). Removing the
+debug views did: cellProbeOut (WW_CELL_LIT_PROBE's ~40 views, with its own light loop, shadow and far probes) and
+cellPassOut (the PRTP band's Pass) at the end of fo4_default.frag. Now they compile only under the loader's
+WW_CELL_VIEWS, which Shader::load adds while a probe or a Pass is asked (wwCellViewsShaderDefine); the Pass menu and a
+live set of WW_CELL_LIT_PROBE / WW_CELL_PASS reload the shaders. Only the programs with the GI volume read change: the
+volume-off and PRT programs keep the views and their machine code (14 programs x 3 modes, identical but the hash).
+Offline bench (300 lights, 1920x1045 x 4): fo4_cell one volume 50.1 -> 39.5 ms, cascades 49.3 -> 38.8, ReSTIR 50.0 ->
+38.5; fo4_cellbl 49.6 -> 39.6; fo4_cellcsm 187 -> 137. Probe 6 (the measuring pass) stays; probes 20 and 60/61 are
+written over by the AO and SSR passes as before. Red `WW_CELL_VIEWS_RED=1`: the views in every program, cbbaab55's
+machine code (14 programs x 2 modes x 3 RT sets identical but the hash).
+
 ## DDGIREADPERF2 (2026-11-02): the screen texel's upsample at one site too
 
 After DDGIREADPERF1 every cellGiSample site and cellSpecSky still inlined cellGiHalfAt, the screen GI pass's upsample (4

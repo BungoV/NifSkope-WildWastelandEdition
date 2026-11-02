@@ -1023,6 +1023,14 @@ bool wwCellProbePass( Scene * scene )
 	return ( s.probe > 0 || s.fogProbe > 0 || ( scene && wwCellPassFor( scene->nifModel ) > 0 ) ) && wwCellLightsWanted( scene );
 }
 
+/* lane FO4CELLGI1: the loader's WW_CELL_VIEWS (fo4_default.frag's probe and pass views in the programs with the GI volume
+ * read). Not static: read at every shader load; a probe or Pass set reloads the shaders (the Pass menu, the live driver) */
+bool wwCellViewsShaderDefine()
+{
+	const ClState & s = st();
+	return s.probe > 0 || s.pass > 0 || wwEnvInt( "WW_CELL_VIEWS_RED" ) != 0;
+}
+
 bool wwCellAlbedoProbePass( Scene * scene )
 {
 	return st().probe == 80 && wwCellProbePass( scene );
