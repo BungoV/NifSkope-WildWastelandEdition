@@ -643,6 +643,12 @@ and the WW_CELL_HDR_DUMP gate target. The rule is a pure header (src/gl/cellhdrf
 passes, the old rule as red fails). `WW_CELL_HDR_FORMAT=rgba32f` asks for the old frame; the reds `WW_FRAMEFMT1_RED=1`,
 `WW_CELL_HDR_FORMAT_RED=1` and `WW_AAFORMAT1_RED=1` force RGBA32F everywhere, as before. The air volumes were already
 RGBA16F (PERFFIX3); their slices and the running integrate stay RGBA32F (transmittance precision).
+## ELFXHARNESS1 (2026-11-02): cell spells load Enhanced Lights and FX by default
+
+tests/spells/volpart1_cell.sh (PROF) and tests/spells/decallit1_cell.sh (PROFILE) now read the harness profile
+notes/allon2/shots/profile_elfx.txt: the old profile plus EnhancedLightsandFX.esp as the last plugin and its mod folder
+as the last mod on the resource stack (only overwrite above it). Passing PROF= / PROFILE= with the old profile.txt is
+the way back; pictures taken before 2026-11-02 12:45 were made without ELFX. Nothing in the viewer changes.
 
 ## REFLPROBECLI1 (TOOLS1101, 2026-11-01): count the reflection probes' below-horizon misses without a window
 
