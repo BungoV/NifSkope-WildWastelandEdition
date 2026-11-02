@@ -1,3 +1,17 @@
+## AIRBOUNCE1 (2026-11-02): the lamps' light bounced off the floor into the cell air (switch, off by default)
+
+- **AIR-LAMPS-BOUNCE:** `WW_CELL_AIR_BOUNCE_LAMPS=1` adds each placed light's floor bounce to the cell air, at both lamp
+  sites (airRest, airLightsQ): the lit floor as a source at the lamp's image, pi B = K a (1 + m sigma D) 2 cos pi P2
+  (d / D)^2 over the lamp's e (K 0.94, m 1, P2 = the phase with each HG g x 0.5, floor albedo a 0.2). Fitted to a
+  backward Monte Carlo of a lamp over a Lambertian floor (6 phases, sigma 0.005..0.1 / m, lamp 2.5..8 m up, albedo
+  0.1..0.4): single + AIRMS1's rest + this is within rms log 0.13 of the MC total (without it 0.40).
+- The floor: the terrain grid's height (airTerrH) where it is on, else 192 units under the lamp. Under WW_CELL_FOGLEAK
+  the bounce takes 1 - the ray-traced volume's env cover (the volume's irradiance already holds the lamps' bounce).
+- Off: the loader leaves out `WW_CELL_AIR_BOUNCE`, so the off program is the base's (binaries identical but the source
+  hash). Red `WW_CELL_AIR_BOUNCE_LAMPS_RED=off`: the term 0. Census: `lampgnd=on|off|off(red)`.
+- Code: res/shaders/cell_volair.frag (airLampGnd), src/gl/cellvolair.cpp, src/gl/glcontext.cpp, src/gl/airbouncelamp.h
+  (the CPU twin), tests/airbouncelamp (g++, MC fixture; `-DAIRBOUNCELAMP_RED` fails), src/wwswitchstages.inc regenerated.
+
 ## DOFLENS1 (2026-11-02): a thin-lens depth of field (bokeh, near / far), the gameplay states
 
 New row "Lens depth of field" (cell Show menu, under the vanilla camera master; switch WW_CELL_DOF_LENS, key
