@@ -1,0 +1,252 @@
+#version 460
+// Lane RTAO1 (2026-11-02): ray-traced ambient occlusion on the DDGI volume's BVH, for the range the screen-space
+// obscurance cannot see (past ~1 m). One invocation a half-size texel: the first of its 2 x 2 pixels in the cell view's
+// shared opaque pass (view normal, linear depth; src/gl/cellssr.h WwCellAoTargets gbuf, copied into set 1 binding 1),
+// up to 16 cosine-weighted rays about the world normal (a fixed table, turned by a 4 x 4 interleave), nearest hits on the
+// true triangles. A hit at distance t from the surface in [near, range] occludes by (1 - (t - near) / (range - near))^2;
+// visibility = 1 - strength x the mean. The CPU twin is src/rtddgi.cpp aoTexel (the `-no-gui rtao` gate).
+// The functions down to the RTAO1 line are trace.comp's, copied verbatim (as refl.comp; MIRROR trace.comp).
+#extension GL_EXT_ray_query : require
+#extension GL_GOOGLE_include_directive : require
+layout( local_size_x = 64 ) in;
+#include "ddgi_common.glsl"
+
+// ---- MIRROR trace.comp (verbatim from here to the RTAO1 line: refl.comp's copy through ddgiNearest)
+// BLAS (geometry g, primitive i) -> its row in remap[] / verts[] (geometry 1 follows the P.counts.w opaque rows)
+uint ddgiPrim( uint g, uint i ) { return i + ( g == 1u ? uint( P.counts.w ) : 0u ); }
+
+// MIRROR probebvh.h Bvh::tri (in float): the ray against BLAS row pr's TRUE triangle (binding 8, not the grown copy
+// the BLAS was built from); u weighs vertex 1, v vertex 2 (the barycentrics ddgiHole and AlphaMask::hole take)
+bool ddgiTriTest( uint pr, vec3 o, vec3 d, out float t, out float u, out float v )
+{
+	t = 0.0;
+	u = 0.0;
+	v = 0.0;
+	const uint vb = pr * 9u;
+	const vec3 p0 = vec3( verts[vb], verts[vb + 1u], verts[vb + 2u] );
+	const vec3 e1 = vec3( verts[vb + 3u], verts[vb + 4u], verts[vb + 5u] ) - p0;
+	const vec3 e2 = vec3( verts[vb + 6u], verts[vb + 7u], verts[vb + 8u] ) - p0;
+	const vec3 pv = cross( d, e2 );
+	const float det = dot( e1, pv );
+	if ( abs( det ) < 1e-12 )
+		return false;
+	const float id = 1.0 / det;
+	const vec3 tv = o - p0;
+	u = dot( tv, pv ) * id;
+	if ( u < 0.0 || u > 1.0 )
+		return false;
+	const vec3 qv = cross( tv, e1 );
+	v = dot( d, qv ) * id;
+	if ( v < 0.0 || u + v > 1.0 )
+		return false;
+	t = dot( e2, qv ) * id;
+	return true;
+}
+
+// MIRROR src/rtddgi.cpp Twin::backFace: a one-sided face seen from behind
+bool ddgiBackFace( uint pr, vec3 d )
+{
+	const uint vb = pr * 9u;
+	const vec3 v0 = vec3( verts[vb], verts[vb + 1u], verts[vb + 2u] );
+	const vec3 e1 = vec3( verts[vb + 3u], verts[vb + 4u], verts[vb + 5u] ) - v0;
+	const vec3 e2 = vec3( verts[vb + 6u], verts[vb + 7u], verts[vb + 8u] ) - v0;
+	const vec3 nf = normalize( cross( e1, e2 ) );
+	return triAttr[uint( remap[pr] ) * 2u].w < 0.5 && dot( nf, d ) > 0.0;
+}
+
+// MIRROR probebvh.h Bvh::anyHitIn (tLo 1e-4, every face picked): is anything hit in (1e-4, tmax]?
+bool ddgiShadow( vec3 o, vec3 d, float tmax )
+{
+	if ( tmax <= 1e-3 )
+		return false;
+	const bool hw = ( uint( P.flags.w ) & DDGI_RED_HWHIT ) != 0u;
+	rayQueryEXT q;
+	rayQueryInitializeEXT( q, tlas, gl_RayFlagsTerminateOnFirstHitEXT | ( hw ? gl_RayFlagsNoneEXT : gl_RayFlagsNoOpaqueEXT ), 0xFF, o,
+		0.0, d, tmax );
+	while ( rayQueryProceedEXT( q ) ) {
+		if ( rayQueryGetIntersectionTypeEXT( q, false ) != gl_RayQueryCandidateIntersectionTriangleEXT )
+			continue;
+		const uint pr = ddgiPrim( rayQueryGetIntersectionGeometryIndexEXT( q, false ), rayQueryGetIntersectionPrimitiveIndexEXT( q, false ) );
+		if ( hw ) {
+			const vec2 bc = rayQueryGetIntersectionBarycentricsEXT( q, false );
+			if ( !ddgiHole( remap[pr], bc.x, bc.y ) )
+				rayQueryConfirmIntersectionEXT( q );
+			continue;
+		}
+		float t, u, v;
+		if ( ddgiTriTest( pr, o, d, t, u, v ) && t > DDGI_TMIN && t <= tmax && !ddgiHole( remap[pr], u, v ) )
+			rayQueryConfirmIntersectionEXT( q );
+	}
+	return rayQueryGetIntersectionTypeEXT( q, true ) == gl_RayQueryCommittedIntersectionTriangleEXT;
+}
+
+// MIRROR src/rtddgi.cpp Twin::nearest: the nearest hit on the true triangles (probebvh::Bvh::ray's rule), then the
+// tie pass: of every face hit within ddgiTieWindow of that t, the one ddgiTieWins keeps. bestPr = the BLAS row.
+bool ddgiNearest( vec3 o, vec3 d, float tmax, out uint bestPr, out float bestT )
+{
+	bestPr = 0u;
+	bestT = tmax;
+	const uint red = uint( P.flags.w );
+	if ( ( red & DDGI_RED_HWHIT ) != 0u ) {   // the refuter: M1's rule
+		rayQueryEXT q;
+		rayQueryInitializeEXT( q, tlas, gl_RayFlagsNoneEXT, 0xFF, o, 0.0, d, tmax );
+		while ( rayQueryProceedEXT( q ) ) {
+			if ( rayQueryGetIntersectionTypeEXT( q, false ) != gl_RayQueryCandidateIntersectionTriangleEXT )
+				continue;
+			const uint pr = ddgiPrim( rayQueryGetIntersectionGeometryIndexEXT( q, false ), rayQueryGetIntersectionPrimitiveIndexEXT( q, false ) );
+			const vec2 bc = rayQueryGetIntersectionBarycentricsEXT( q, false );
+			if ( !ddgiHole( remap[pr], bc.x, bc.y ) )
+				rayQueryConfirmIntersectionEXT( q );
+		}
+		if ( rayQueryGetIntersectionTypeEXT( q, true ) != gl_RayQueryCommittedIntersectionTriangleEXT )
+			return false;
+		bestT = rayQueryGetIntersectionTEXT( q, true );
+		bestPr = ddgiPrim( rayQueryGetIntersectionGeometryIndexEXT( q, true ), rayQueryGetIntersectionPrimitiveIndexEXT( q, true ) );
+		return true;
+	}
+	bool hit = false;
+	{
+		rayQueryEXT q;
+		rayQueryInitializeEXT( q, tlas, gl_RayFlagsNoOpaqueEXT, 0xFF, o, 0.0, d, tmax );
+		while ( rayQueryProceedEXT( q ) ) {
+			if ( rayQueryGetIntersectionTypeEXT( q, false ) != gl_RayQueryCandidateIntersectionTriangleEXT )
+				continue;
+			const uint pr = ddgiPrim( rayQueryGetIntersectionGeometryIndexEXT( q, false ), rayQueryGetIntersectionPrimitiveIndexEXT( q, false ) );
+			float t, u, v;
+			if ( ddgiTriTest( pr, o, d, t, u, v ) && t > DDGI_TMIN && t <= bestT && !ddgiHole( remap[pr], u, v ) ) {
+				bestT = t;
+				bestPr = pr;
+				hit = true;
+				rayQueryConfirmIntersectionEXT( q );   // the hardware culls past it; our own bestT decides
+			}
+		}
+	}
+	if ( !hit || ( red & DDGI_RED_NOTIE ) != 0u )
+		return hit;
+	// the tie pass: a short query over [t0 - w, t0 + w], nothing confirmed, every face in it seen
+	const float t0 = bestT;
+	const float w = ddgiTieWindow( o, t0 );
+	int keepTri = remap[bestPr];
+	bool keepBack = ddgiBackFace( bestPr, d );
+	rayQueryEXT q2;
+	rayQueryInitializeEXT( q2, tlas, gl_RayFlagsNoOpaqueEXT, 0xFF, o, max( t0 - w, 0.0 ), d, t0 + w );
+	while ( rayQueryProceedEXT( q2 ) ) {
+		if ( rayQueryGetIntersectionTypeEXT( q2, false ) != gl_RayQueryCandidateIntersectionTriangleEXT )
+			continue;
+		const uint pr = ddgiPrim( rayQueryGetIntersectionGeometryIndexEXT( q2, false ), rayQueryGetIntersectionPrimitiveIndexEXT( q2, false ) );
+		float t, u, v;
+		if ( ddgiTriTest( pr, o, d, t, u, v ) && t > DDGI_TMIN && t >= t0 - w && t <= t0 + w && !ddgiHole( remap[pr], u, v ) ) {
+			const bool back = ddgiBackFace( pr, d );
+			const int tri = remap[pr];
+			if ( ddgiTieWins( back, tri, keepBack, keepTri ) ) {
+				keepTri = tri;
+				keepBack = back;
+				bestPr = pr;
+				bestT = t;
+			}
+		}
+	}
+	return true;
+}
+
+// ------------------------------------------------------------------ RTAO1: the occlusion rays (set 1)
+struct AoParams {
+	ivec4 size;    // the g-buffer W, H (full size, bottom row first), the output Wh, Hh (half size)
+	ivec4 opts;    // red bits (1: no rays, visibility 1), rays a texel (1..16), 0, 0
+	vec4 knobs;    // the origin's push along the normal (game units), range, near cut, strength
+	vec4 rows[3];  // view -> the soup's local frame
+	vec4 proj;     // P00, P11, P20, P21
+};
+layout( std430, set = 1, binding = 0 ) readonly buffer FParams { AoParams F; };
+layout( std430, set = 1, binding = 1 ) readonly buffer FGbuf { vec4 gbuf[]; };   // view normal, linear depth (1e6 or 0: none)
+layout( std430, set = 1, binding = 2 ) buffer FOut { vec4 ao[]; };              // visibility, hits, rays, 1 (a: 0 no surface)
+
+// MIRROR src/rtddgi.cpp kAoDirs / kAoRots (the same literals): cosine-weighted directions about +z, the texel's turn
+const vec3 kAoDir[16] = vec3[16]( vec3( 0.176776695, 0.0, 0.984250984 ), vec3( -0.306186218, 0.0, 0.951971638 ),
+	vec3( 0.0, 0.395284708, 0.918558654 ), vec3( 0.0, -0.467707173, 0.883883476 ), vec3( 0.375, 0.375, 0.847791248 ),
+	vec3( -0.414578099, -0.414578099, 0.810092587 ), vec3( -0.450693909, 0.450693909, 0.77055175 ),
+	vec3( 0.484122918, -0.484122918, 0.728868987 ), vec3( 0.673387139, 0.278926086, 0.684653197 ),
+	vec3( -0.711896991, -0.294877389, 0.637377439 ), vec3( -0.310009012, 0.748427961, 0.58630197 ),
+	vec3( 0.324435665, -0.783256982, 0.530330086 ), vec3( 0.338247563, 0.816601853, 0.467707173 ),
+	vec3( -0.351517178, -0.848637539, 0.395284708 ), vec3( -0.879507112, 0.364303774, 0.306186218 ),
+	vec3( 0.909329339, -0.376656545, 0.176776695 ) );
+const vec2 kAoRot[16] = vec2[16]( vec2( 0.98078528, 0.195090322 ), vec2( -0.98078528, -0.195090322 ),
+	vec2( 0.555570233, 0.831469612 ), vec2( -0.555570233, -0.831469612 ), vec2( 0.195090322, -0.98078528 ),
+	vec2( -0.195090322, 0.98078528 ), vec2( 0.831469612, -0.555570233 ), vec2( -0.831469612, 0.555570233 ),
+	vec2( 0.195090322, 0.98078528 ), vec2( -0.195090322, -0.98078528 ), vec2( 0.831469612, 0.555570233 ),
+	vec2( -0.831469612, -0.555570233 ), vec2( 0.98078528, -0.195090322 ), vec2( -0.98078528, 0.195090322 ),
+	vec2( 0.555570233, -0.831469612 ), vec2( -0.555570233, 0.831469612 ) );
+
+/* MIRROR src/rtddgi.cpp aoTexel: the half-size texel's surface = the first of its 2 x 2 full-size pixels (row-major from
+ * the bottom left) the opaque pass drew (depth in (0, 1e5), a normal); false = none */
+bool aoPick( int hx, int hy, out int px, out int py, out vec4 r )
+{
+	px = 0;
+	py = 0;
+	r = vec4( 0.0 );
+	for ( int k = 0; k < 4; k++ ) {
+		const int x = 2 * hx + ( k & 1 ), y = 2 * hy + ( k >> 1 );
+		if ( x >= F.size.x || y >= F.size.y )
+			continue;
+		const vec4 g = gbuf[y * F.size.x + x];
+		if ( dot( g.xyz, g.xyz ) > 0.25 && g.w > 0.0 && g.w < 1e5 ) {
+			px = x;
+			py = y;
+			r = g;
+			return true;
+		}
+	}
+	return false;
+}
+
+void main()
+{
+	const uint id = ddgiLinearId();
+	if ( id >= uint( F.size.z * F.size.w ) )
+		return;
+	const int hx = int( id % uint( F.size.z ) ), hy = int( id / uint( F.size.z ) );
+	int px, py;
+	vec4 g;
+	if ( !aoPick( hx, hy, px, py, g ) ) {
+		ao[id] = vec4( 1.0, 0.0, 0.0, 0.0 );
+		return;
+	}
+	if ( ( F.opts.x & 1 ) != 0 ) {
+		ao[id] = vec4( 1.0, 0.0, 0.0, 1.0 );   // the red: no rays
+		return;
+	}
+	// MIRROR src/rtddgi.cpp aoTexel: the view position (restir_common.glsl restirViewPos's rule), into the soup's frame
+	const float nx = ( float( px ) + 0.5 ) / float( F.size.x ) * 2.0 - 1.0;
+	const float ny = ( float( py ) + 0.5 ) / float( F.size.y ) * 2.0 - 1.0;
+	const vec3 pv = vec3( g.w * ( nx + F.proj.z ) / F.proj.x, g.w * ( ny + F.proj.w ) / F.proj.y, -g.w );
+	const vec3 Pw = vec3( dot( F.rows[0].xyz, pv ) + F.rows[0].w, dot( F.rows[1].xyz, pv ) + F.rows[1].w, dot( F.rows[2].xyz, pv ) + F.rows[2].w );
+	const vec3 N = normalize( vec3( dot( F.rows[0].xyz, g.xyz ), dot( F.rows[1].xyz, g.xyz ), dot( F.rows[2].xyz, g.xyz ) ) );
+	const float bias = F.knobs.x, range = F.knobs.y, nearCut = F.knobs.z;
+	const vec3 o = Pw + N * bias;
+	// a branchless orthonormal basis about N (Duff et al. 2017)
+	const float sg = N.z >= 0.0 ? 1.0 : -1.0;
+	const float a = -1.0 / ( sg + N.z );
+	const float b = N.x * N.y * a;
+	const vec3 Tx = vec3( 1.0 + sg * N.x * N.x * a, sg * b, -sg * N.x );
+	const vec3 Ty = vec3( b, sg + N.y * N.y * a, -N.y );
+	const vec2 rot = kAoRot[( hx & 3 ) + 4 * ( hy & 3 )];
+	const int n = clamp( F.opts.y, 1, 16 );
+	float occ = 0.0;
+	int hits = 0;
+	for ( int i = 0; i < n; i++ ) {
+		const vec3 l = kAoDir[i];
+		const float lx = rot.x * l.x - rot.y * l.y, ly = rot.y * l.x + rot.x * l.y;
+		const vec3 d = normalize( Tx * lx + Ty * ly + N * l.z );
+		uint pr;
+		float t;
+		if ( !ddgiNearest( o, d, range, pr, t ) )
+			continue;
+		const float s = t + bias;
+		if ( s < nearCut )
+			continue;   // the screen-space obscurance's range
+		const float w = clamp( 1.0 - ( s - nearCut ) / max( range - nearCut, 1e-3 ), 0.0, 1.0 );
+		occ += w * w;
+		hits++;
+	}
+	ao[id] = vec4( clamp( 1.0 - F.knobs.w * occ / float( n ), 0.0, 1.0 ), float( hits ), float( n ), 1.0 );
+}

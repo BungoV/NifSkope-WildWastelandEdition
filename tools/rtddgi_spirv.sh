@@ -10,7 +10,8 @@ G="${GLSLANG:-/e/Tools/RenderDoc/RenderDoc_1.45_64/plugins/spirv/glslangValidato
 cd "$ROOT/src/rtddgi"
 # lane RESTIRDI1: restir (ReSTIR DI on the volume's BVH, src/rtddgi/restir_vk.inc; it includes restir_common.glsl)
 # lane RTREFL1: refl (reflection rays, src/rtddgi/refl_vk.inc; its functions are trace.comp's, copied)
-for k in trace blend border reloc restir refl; do
+# lane RTAO1: ao (occlusion rays, src/rtddgi/ao_vk.inc; the same copy of trace.comp's functions)
+for k in trace blend border reloc restir refl ao; do
 	"$G" --target-env vulkan1.2 -V --vn "rtddgi_${k}_spv" -o "${k}.spv.h" "${k}.comp"
 done
-ls -la trace.spv.h blend.spv.h border.spv.h reloc.spv.h restir.spv.h refl.spv.h
+ls -la trace.spv.h blend.spv.h border.spv.h reloc.spv.h restir.spv.h refl.spv.h ao.spv.h
