@@ -1267,6 +1267,132 @@ bool reflImport( ReflGl & G, Renderer * r, bakert::DdgiGpuSession * s, int W, in
 	return true;
 }
 
+/* lane RTAO1: the occlusion rays' GL side (ReflGl's pattern): the shared opaque pass's g-buffer copied into the shared
+ * input (a pixel-pack buffer), the half-size visibility read by the cell programs as a texture buffer (RGBA32F) */
+struct AoGl
+{
+	const void * owner = nullptr;
+	const bakert::DdgiGpuSession * session = nullptr;
+	int W = 0, H = 0;
+	GLuint mem[2] = { 0, 0 }, buf[2] = { 0, 0 }, tex = 0, semVk = 0, semGl = 0;
+	bool ready = false;
+	qint64 runs = 0, busy = 0;
+	QString last;
+};
+
+AoGl & aoGl()
+{
+	static AoGl * g = new AoGl;   // never destroyed (as cell())
+	return *g;
+}
+
+void aoSay( AoGl & G, const QString & line )
+{
+	if ( line == G.last )
+		return;
+	G.last = line;
+	std::fprintf( stderr, "rtao cell: %s\n", qPrintable( line ) );
+	std::fflush( stderr );
+}
+
+void aoDropGl( AoGl & G, Renderer * r )
+{
+	if ( r && G.owner == r ) {
+		auto fn = r->fn;
+		GlShare & sh = glShare();
+		if ( G.tex )
+			fn->glDeleteTextures( 1, &G.tex );
+		for ( GLuint & b : G.buf )
+			if ( b )
+				fn->glDeleteBuffers( 1, &b );
+		if ( sh.ok ) {
+			for ( GLuint & m : G.mem )
+				if ( m )
+					sh.deleteMem( 1, &m );
+			for ( GLuint * s : { &G.semVk, &G.semGl } )
+				if ( *s )
+					sh.deleteSem( 1, s );
+		}
+	}
+	const QString last = G.last;
+	G = AoGl();
+	G.last = last;
+}
+
+bool aoImport( AoGl & G, Renderer * r, bakert::DdgiGpuSession * s, int W, int H, QString * why )
+{
+	GlShare & g = glShare();
+	if ( !g.ok ) {
+		*why = g.why;
+		return false;
+	}
+	bakert::AoGpuShare sh;
+	if ( !bakert::aoGpuShare( s, W, H, &sh ) ) {
+		*why = QString::fromStdString( sh.why );
+		return false;
+	}
+	auto fn = r->fn;
+	for ( int i = 0; i < 16 && fn->glGetError() != GL_NO_ERROR; i++ ) {}
+	G.owner = r;
+	const GLint dedicated = 1;
+	void * mems[2] = { sh.gbufMemory, sh.outMemory };
+	const quint64 sizes[2] = { sh.gbufSize, sh.outSize };
+	const GLsizeiptr bytes[2] = { GLsizeiptr( W ) * H * 16, GLsizeiptr( bakert::aoHalf( W ) ) * bakert::aoHalf( H ) * 16 };
+	const GLenum targets[2] = { GL_PIXEL_PACK_BUFFER, GL_TEXTURE_BUFFER };
+	for ( int k = 0; k < 2; k++ ) {
+		g.createMem( 1, &G.mem[k] );
+		g.memParam( G.mem[k], kGlDedicatedMemoryObject, &dedicated );
+		g.importMem( G.mem[k], sizes[k], kGlHandleOpaqueWin32, mems[k] );
+		fn->glGenBuffers( 1, &G.buf[k] );
+		fn->glBindBuffer( targets[k], G.buf[k] );
+		g.bufferStorageMem( targets[k], bytes[k], G.mem[k], 0 );
+		fn->glBindBuffer( targets[k], 0 );
+	}
+	g.genSem( 1, &G.semVk );
+	g.importSem( G.semVk, kGlHandleOpaqueWin32, sh.vkDone );
+	g.genSem( 1, &G.semGl );
+	g.importSem( G.semGl, kGlHandleOpaqueWin32, sh.glDone );
+	GLint prevActive = 0;
+	fn->glGetIntegerv( GL_ACTIVE_TEXTURE, &prevActive );
+	fn->glActiveTexture( GLenum( GL_TEXTURE0 + WwCellUnit::RtAo ) );
+	fn->glGenTextures( 1, &G.tex );
+	fn->glBindTexture( GL_TEXTURE_BUFFER, G.tex );
+	fn->glTexBuffer( GL_TEXTURE_BUFFER, GL_RGBA32F, G.buf[1] );
+	fn->glBindTexture( GL_TEXTURE_BUFFER, 0 );
+	fn->glActiveTexture( GLenum( prevActive ) );
+	const GLenum err = fn->glGetError();
+	for ( void * h : { sh.gbufMemory, sh.outMemory, sh.vkDone, sh.glDone } )
+		bakert::ddgiGpuCloseHandle( h );
+	if ( err != GL_NO_ERROR ) {
+		*why = QStringLiteral( "the GL import failed (GL error 0x%1)" ).arg( qulonglong( err ), 0, 16 );
+		return false;
+	}
+	G.session = s;
+	G.W = W;
+	G.H = H;
+	return true;
+}
+
+//! the visibility's texture buffer and size on a program compiled under WW_CELL_RTAO (cell_ao.glsl cellAoFactor)
+void aoUniforms( Renderer * r, NifSkopeOpenGLContext::Program * prog )
+{
+	const int loc = prog->uniLocation( "cellRtAoOn" );
+	if ( loc < 0 )
+		return;
+	AoGl & G = aoGl();
+	const bool on = G.ready && G.owner == r && G.tex;
+	auto fn = r->fn;
+	{
+		WwCellUni::Units<std::remove_pointer_t<decltype( fn )>> u( fn, wwCellUniDsa() );
+		u.section();
+		u.bind( WwCellUnit::RtAo, GL_TEXTURE_BUFFER, on ? G.tex : 0 );
+		u.done();
+	}
+	prog->uni1i( "cellRtAo", WwCellUnit::RtAo );
+	prog->uni1b_l( loc, on );
+	prog->uni4f( "cellRtAoSize", FloatVector4( float( bakert::aoHalf( G.W ) ), float( bakert::aoHalf( G.H ) ), 0.0f, 0.0f ) );
+}
+
 } // namespace
 
 bool rtddgiRtPresetPinned()
@@ -1524,6 +1650,137 @@ bool rtddgiReflTexture( Scene * scene, unsigned int & tex, int & w, int & h )
 	w = bakert::reflHalf( G.W );
 	h = bakert::reflHalf( G.H );
 	return true;
+}
+
+bool rtddgiAoOn()
+{
+	const QByteArray v = wwEnv( "WW_CELL_RTAO" ).trimmed();
+	return !v.isEmpty() && v != "0";
+}
+
+bool rtddgiAoRed()
+{
+	const QByteArray v = wwEnv( "WW_CELL_RTAO_RED" ).trimmed();
+	return !v.isEmpty() && v != "0";
+}
+
+bool rtddgiAoShaderDefine()
+{
+	return rtddgiAoOn() && !rtddgiAoRed() && rtddgiRtPreset() >= 3 && rtddgiCellShaderDefine();
+}
+
+static float rtaoKnob( const char * key, float def, float lo, float hi )
+{
+	bool ok = false;
+	const float v = wwEnv( key ).trimmed().toFloat( &ok );
+	return ok ? std::clamp( v, lo, hi ) : def;
+}
+
+void rtddgiAoPass( Scene * scene )
+{
+	AoGl & G = aoGl();
+	G.ready = false;
+	Renderer * r = scene ? scene->renderer : nullptr;
+	if ( !r || scene->selecting || !scene->nifModel )
+		return;
+	if ( !rtddgiAoShaderDefine() ) {
+		if ( G.owner ) {
+			aoDropGl( G, r );
+			aoSay( G, rtddgiAoRed() ? QStringLiteral( "freed (the red: the screen-space obscurance only)" )
+				: QStringLiteral( "freed (off, or the RT quality is below Ultra)" ) );
+		}
+		return;
+	}
+	Cell & c = cell();
+	if ( !c.live || !c.live->live.isOpen() || c.nif != scene->nifModel || c.glOwner != r ) {
+		aoSay( G, QStringLiteral( "waiting for the ray-traced GI volume (the occlusion rays trace its BVH)" ) );
+		return;
+	}
+	if ( !c.interop ) {
+		aoSay( G, QStringLiteral( "refused(the volume has no GL interop: %1)" ).arg( c.interopWhy ) );
+		return;
+	}
+	WwCellAoTargets t;
+	if ( !wwCellAoTargets( scene, t ) || !t.gbuf || t.w <= 0 || t.h <= 0 ) {
+		aoSay( G, QStringLiteral( "idle (no shared opaque pass this frame: the screen-space obscurance is off)" ) );
+		return;
+	}
+	bakert::DdgiGpuSession * s = c.live->live.session();
+	if ( G.owner != r || G.session != s || G.W != t.w || G.H != t.h ) {
+		aoDropGl( G, r );
+		QString why;
+		if ( !aoImport( G, r, s, t.w, t.h, &why ) ) {
+			aoDropGl( G, r );
+			aoSay( G, QStringLiteral( "refused(%1)" ).arg( why ) );
+			return;
+		}
+	}
+	auto fn = r->fn;
+	GlShare & sh = glShare();
+	GLint prevActive = 0, prevPack = 0;
+	fn->glGetIntegerv( GL_ACTIVE_TEXTURE, &prevActive );
+	fn->glGetIntegerv( GL_PIXEL_PACK_BUFFER_BINDING, &prevPack );
+	fn->glActiveTexture( GLenum( GL_TEXTURE0 + WwCellUnit::RtAo ) );
+	fn->glBindTexture( GL_TEXTURE_2D, t.gbuf );
+	fn->glBindBuffer( GL_PIXEL_PACK_BUFFER, G.buf[0] );
+	fn->glPixelStorei( GL_PACK_ALIGNMENT, 4 );
+	fn->glGetTexImage( GL_TEXTURE_2D, 0, GL_RGBA, GL_FLOAT, nullptr );
+	fn->glBindBuffer( GL_PIXEL_PACK_BUFFER, GLuint( prevPack ) );
+	fn->glBindTexture( GL_TEXTURE_2D, 0 );
+	fn->glActiveTexture( GLenum( prevActive ) );
+	bakert::AoGpuIn in;
+	const Transform & vt = scene->view;
+	const float sc = vt.scale != 0.0f ? vt.scale : 1.0f;
+	for ( int k = 0; k < 3; k++ ) {
+		float w = 0.0f;
+		for ( int j = 0; j < 3; j++ )
+			w -= vt.rotation( j, k ) * vt.translation[j];
+		for ( int j = 0; j < 3; j++ )
+			in.rows[k * 4 + j] = vt.rotation( j, k ) / sc;
+		in.rows[k * 4 + 3] = w / sc;
+	}
+	in.rows[3] = float( double( in.rows[3] ) - c.live->live.localX() );
+	in.rows[7] = float( double( in.rows[7] ) - c.live->live.localY() );
+	const auto & pm = r->globalUniforms->projectionMatrix;
+	in.proj[0] = pm[0][0];
+	in.proj[1] = pm[1][1];
+	in.proj[2] = pm[2][0];
+	in.proj[3] = pm[2][1];
+	in.W = t.w;
+	in.H = t.h;
+	in.rays = int( rtaoKnob( "WW_CELL_RTAO_RAYS", 8.0f, 1.0f, 16.0f ) );
+	in.range = rtaoKnob( "WW_CELL_RTAO_RANGE", 350.0f, 10.0f, 20000.0f );
+	in.nearCut = rtaoKnob( "WW_CELL_RTAO_NEAR", 70.0f, 0.0f, in.range - 1.0f );
+	in.strength = rtaoKnob( "WW_CELL_RTAO_STRENGTH", 1.0f, 0.0f, 1.0f );
+	in.readBack = ( G.runs % 64 ) == 0;   // the census's mean, one frame in 64
+	in.beforeSubmit = [&G, &sh, fn]() {
+		sh.signalSem( G.semGl, 2, G.buf, 0, nullptr, nullptr );
+		fn->glFlush();
+		return true;
+	};
+	bakert::AoGpuOut out;
+	if ( !bakert::aoGpuStep( s, in, &out ) ) {
+		G.busy += out.busy ? 1 : 0;
+		aoSay( G, out.busy ? QStringLiteral( "busy (a bake holds the device): this frame the screen-space obscurance only" )
+			: QStringLiteral( "refused(%1)" ).arg( QString::fromStdString( out.why ) ) );
+		return;
+	}
+	sh.waitSem( G.semVk, 2, G.buf, 0, nullptr, nullptr );
+	G.ready = true;
+	if ( ( G.runs++ % 64 ) == 0 ) {
+		qint64 surf = 0, hits = 0;
+		double vis = 0.0;
+		for ( size_t i = 0; i + 3 < out.ao.size(); i += 4 )
+			if ( out.ao[i + 3] > 0.0f ) {
+				surf++;
+				vis += out.ao[i];
+				hits += qint64( out.ao[i + 1] );
+			}
+		aoSay( G, QStringLiteral( "on %1 x %2 (half %3 x %4), rays %5, range %6 near %7 strength %8; surface texels %9, mean visibility %10, "
+			"hits %11, device wall %12 ms, busy %13" ).arg( t.w ).arg( t.h ).arg( bakert::aoHalf( t.w ) ).arg( bakert::aoHalf( t.h ) )
+			.arg( in.rays ).arg( in.range ).arg( in.nearCut ).arg( in.strength ).arg( surf ).arg( surf ? vis / double( surf ) : 1.0, 0, 'f', 4 )
+			.arg( hits ).arg( out.msWall, 0, 'f', 3 ).arg( G.busy ) );
+	}
 }
 
 bool rtddgiCellPinned()
@@ -2246,6 +2503,7 @@ void rtddgiCellUniforms( Scene * scene )
 	if ( !prog )
 		return;
 	restirUniforms( r, prog );   // lane RESTIRDI1: a program compiled under WW_CELL_RESTIR (else no location: nothing)
+	aoUniforms( r, prog );       // lane RTAO1: a program compiled under WW_CELL_RTAO (the same)
 	const int locOn = prog->uniLocation( "cellDdgiOn" );
 	if ( locOn < 0 )
 		return;   // a program without the read: with the switch off, every program

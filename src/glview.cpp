@@ -4258,6 +4258,7 @@ void GLView::paintGL()
 	wwCellAoPass( scene, cellPasses );
 	PassTime::end( PassTime::Obscurance );
 	rtddgiRestirPass( scene );	// lane RESTIRDI1: the RT quality preset's ReSTIR DI on that pass's g-buffer (Low: nothing)
+	rtddgiAoPass( scene );	// lane RTAO1: the occlusion rays on that g-buffer and the RT volume's BVH (off: nothing)
 	PassTime::begin( PassTime::Water );	// lane TIMING1: the water zone (its draws in the sorted pass join it)
 	wwCellOceanPass( scene, cellPasses );	// lane WATERLOOK1: the wind's waves, before any pass that draws water
 	PassTime::end( PassTime::Water );

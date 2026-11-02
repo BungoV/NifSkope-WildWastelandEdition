@@ -101,5 +101,11 @@ bool rtddgiReflShaderDefine();
 void rtddgiReflPass( Scene * scene );
 //! this frame's hits (a texture buffer, half size, bottom row first: rgb, a the hit distance, 0 none) for the water
 bool rtddgiReflTexture( Scene * scene, unsigned int & tex, int & w, int & h );
+/* lane RTAO1 (2026-11-02): ray-traced ambient occlusion past the screen-space obscurance's reach, on the volume's BVH.
+ * WW_CELL_RTAO=1 (default off) at the RT quality Ultra; WW_CELL_RTAO_RED=1 = the screen-space obscurance only. The
+ * loader's define WW_CELL_RTAO (cell_ao.glsl cellAoFactor multiplies the two); the pass runs after wwCellAoPass on
+ * its g-buffer. Knobs WW_CELL_RTAO_RAYS (8), _RANGE (350 u), _NEAR (70 u: the screen-space term's reach), _STRENGTH (1). */
+bool rtddgiAoShaderDefine();
+void rtddgiAoPass( Scene * scene );
 
 #endif // RTDDGICELL_H

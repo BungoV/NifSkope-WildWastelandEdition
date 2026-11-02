@@ -2154,3 +2154,281 @@ int rtreflCli( const QStringList & args )
 	std::fflush( stdout );
 	return 0;
 }
+
+/* lane RTAO1: the occlusion rays' CLI gate. The CPU writes the shared opaque pass's g-buffer (view normal facing the camera,
+ * linear depth; bottom row first) by casting the camera's rays on the soup's BVH, the GPU kernel (ao.comp) traces the
+ * occlusion rays on the volume's session, the CPU twin (aoTexel) on the same BVH; prints per-texel agreement for the
+ * kernel (green) and its red (no rays: visibility 1), writes rtao.tsv */
+namespace {
+// MIRROR ao.comp kAoDir / kAoRot (the same literals; notes/rtao1/tmp/dirs.py)
+const float kAoDirs[48] = { 0.176776695f, 0.0f, 0.984250984f, -0.306186218f, 0.0f, 0.951971638f, 0.0f, 0.395284708f, 0.918558654f,
+	0.0f, -0.467707173f, 0.883883476f, 0.375f, 0.375f, 0.847791248f, -0.414578099f, -0.414578099f, 0.810092587f, -0.450693909f,
+	0.450693909f, 0.77055175f, 0.484122918f, -0.484122918f, 0.728868987f, 0.673387139f, 0.278926086f, 0.684653197f, -0.711896991f,
+	-0.294877389f, 0.637377439f, -0.310009012f, 0.748427961f, 0.58630197f, 0.324435665f, -0.783256982f, 0.530330086f, 0.338247563f,
+	0.816601853f, 0.467707173f, -0.351517178f, -0.848637539f, 0.395284708f, -0.879507112f, 0.364303774f, 0.306186218f, 0.909329339f,
+	-0.376656545f, 0.176776695f };
+const float kAoRots[32] = { 0.98078528f, 0.195090322f, -0.98078528f, -0.195090322f, 0.555570233f, 0.831469612f, -0.555570233f,
+	-0.831469612f, 0.195090322f, -0.98078528f, -0.195090322f, 0.98078528f, 0.831469612f, -0.555570233f, -0.831469612f, 0.555570233f,
+	0.195090322f, 0.98078528f, -0.195090322f, -0.98078528f, 0.831469612f, 0.555570233f, -0.831469612f, -0.555570233f, 0.98078528f,
+	-0.195090322f, -0.98078528f, 0.195090322f, 0.555570233f, -0.831469612f, -0.555570233f, 0.831469612f };
+
+// MIRROR ao.comp main (one half-size texel; false = no surface there): out = visibility, hits, rays
+bool aoTexel( const Twin & T, const std::vector<float> & gbuf, int W, int H, int hx, int hy, const float rows[12], const float proj[4],
+	const bakert::AoGpuIn & in, float out[3] )
+{
+	out[0] = 1.0f;
+	out[1] = out[2] = 0.0f;
+	int px = -1, py = -1;
+	const float * g = nullptr;
+	for ( int k = 0; k < 4 && !g; k++ ) {
+		const int x = 2 * hx + ( k & 1 ), y = 2 * hy + ( k >> 1 );
+		if ( x >= W || y >= H )
+			continue;
+		const float * r = &gbuf[( size_t( y ) * size_t( W ) + size_t( x ) ) * 4];
+		if ( r[0] * r[0] + r[1] * r[1] + r[2] * r[2] > 0.25f && r[3] > 0.0f && r[3] < 1e5f ) {
+			g = r;
+			px = x;
+			py = y;
+		}
+	}
+	if ( !g )
+		return false;
+	if ( in.red & 1 )
+		return true;
+	const float nx = ( float( px ) + 0.5f ) / float( W ) * 2.0f - 1.0f, ny = ( float( py ) + 0.5f ) / float( H ) * 2.0f - 1.0f;
+	const V3 pv( g[3] * ( nx + proj[2] ) / proj[0], g[3] * ( ny + proj[3] ) / proj[1], -g[3] );
+	const V3 Pw( rows[0] * pv.x + rows[1] * pv.y + rows[2] * pv.z + rows[3], rows[4] * pv.x + rows[5] * pv.y + rows[6] * pv.z + rows[7],
+		rows[8] * pv.x + rows[9] * pv.y + rows[10] * pv.z + rows[11] );
+	const V3 N = normalize( V3( rows[0] * g[0] + rows[1] * g[1] + rows[2] * g[2], rows[4] * g[0] + rows[5] * g[1] + rows[6] * g[2],
+		rows[8] * g[0] + rows[9] * g[1] + rows[10] * g[2] ) );
+	const V3 o = Pw + N * in.bias;
+	const float sg = N.z >= 0.0f ? 1.0f : -1.0f;
+	const float a = -1.0f / ( sg + N.z );
+	const float b = N.x * N.y * a;
+	const V3 Tx( 1.0f + sg * N.x * N.x * a, sg * b, -sg * N.x );
+	const V3 Ty( b, sg + N.y * N.y * a, -N.y );
+	const float * rot = &kAoRots[2 * ( ( hx & 3 ) + 4 * ( hy & 3 ) )];
+	const int n = std::clamp( in.rays, 1, 16 );
+	float occ = 0.0f;
+	int hits = 0;
+	for ( int i = 0; i < n; i++ ) {
+		const float * l = &kAoDirs[3 * i];
+		const float lx = rot[0] * l[0] - rot[1] * l[1], ly = rot[1] * l[0] + rot[0] * l[1];
+		const V3 d = normalize( Tx * lx + Ty * ly + N * l[2] );
+		double t = 0.0;
+		int tri = -1;
+		if ( !T.nearest( o, d, in.range, &t, &tri ) )
+			continue;
+		const float s = float( t ) + in.bias;
+		if ( s < in.nearCut )
+			continue;
+		const float w = std::clamp( 1.0f - ( s - in.nearCut ) / std::max( in.range - in.nearCut, 1e-3f ), 0.0f, 1.0f );
+		occ += w * w;
+		hits++;
+	}
+	out[0] = std::clamp( 1.0f - in.strength * occ / float( n ), 0.0f, 1.0f );
+	out[1] = float( hits );
+	out[2] = float( n );
+	return true;
+}
+} // namespace
+
+int rtaoCli( const QStringList & args )
+{
+	QString soupPath, outDir, rect;
+	RtDdgiSpec spec;
+	spec.gpu = 1;
+	spec.place = false;
+	spec.fitProbes = true;
+	spec.maxProbes = 4096;
+	spec.rays = 64;
+	spec.relocate = false;
+	spec.classify = false;
+	WwCellLighting L;
+	L.interior = true;
+	ProbeSkyLight sky;
+	float cam[6] = { 0, 0, 0, 0, 1, 0 };
+	bool haveCam = false;
+	int W = 320, H = 192, steps = 1;
+	float fov = 60.0f;
+	bakert::AoGpuIn in;
+	for ( int i = 0; i < args.size(); i++ ) {
+		const QString & a = args[i];
+		const QString nx = i + 1 < args.size() ? args[i + 1] : QString();
+		if ( a == QLatin1String( "--soup" ) ) { soupPath = nx; i++; }
+		else if ( a == QLatin1String( "--out" ) ) { outDir = nx; i++; }
+		else if ( a == QLatin1String( "--rect" ) ) { rect = nx; i++; }
+		else if ( a == QLatin1String( "--steps" ) ) { steps = std::clamp( nx.toInt(), 0, 64 ); i++; }
+		else if ( a == QLatin1String( "--fov" ) ) { fov = nx.toFloat(); i++; }
+		else if ( a == QLatin1String( "--bias" ) ) { in.bias = nx.toFloat(); i++; }
+		else if ( a == QLatin1String( "--rays" ) ) { in.rays = std::clamp( nx.toInt(), 1, 16 ); i++; }
+		else if ( a == QLatin1String( "--range" ) ) { in.range = std::max( 1.0f, nx.toFloat() ); i++; }
+		else if ( a == QLatin1String( "--near" ) ) { in.nearCut = std::max( 0.0f, nx.toFloat() ); i++; }
+		else if ( a == QLatin1String( "--strength" ) ) { in.strength = nx.toFloat(); i++; }
+		else if ( a == QLatin1String( "--size" ) ) {
+			const QStringList v = nx.split( ',' );
+			if ( v.size() == 2 ) {
+				W = std::max( 8, v[0].toInt() );
+				H = std::max( 8, v[1].toInt() );
+			}
+			i++;
+		} else if ( a == QLatin1String( "--cam" ) ) {
+			const QStringList v = nx.split( ',' );
+			if ( v.size() == 6 ) {
+				for ( int k = 0; k < 6; k++ )
+					cam[k] = v[k].toFloat();
+				haveCam = true;
+			}
+			i++;
+		} else if ( a == QLatin1String( "--light" ) ) {
+			const QStringList v = nx.split( ',' );
+			if ( v.size() == 7 ) {
+				WwCellLight l;
+				for ( int c = 0; c < 3; c++ ) {
+					l.pos[c] = v[c].toFloat();
+					l.color[c] = v[4 + c].toFloat();
+				}
+				l.radius = v[3].toFloat();
+				l.shadow = 3;
+				L.lights.push_back( l );
+			}
+			i++;
+		}
+	}
+	const QStringList rc = rect.split( ',' );
+	if ( soupPath.isEmpty() || outDir.isEmpty() || rc.size() != 4 || L.lights.isEmpty() || !haveCam ) {
+		std::fprintf( stderr, "usage: rtao --soup <file> --rect minX,minY,maxX,maxY --out <dir> --cam ex,ey,ez,tx,ty,tz "
+			"--light x,y,z,radius,r,g,b [--size W,H] [--fov deg] [--rays n] [--range u] [--near u] [--strength k] [--bias u] [--steps n]\n" );
+		return 2;
+	}
+	for ( int k = 0; k < 4; k++ )
+		spec.rect[k] = rc[k].toFloat();
+	ProbeSoup soup;
+	QString err;
+	if ( !probeSoupRead( soupPath, &soup, &err ) ) {
+		std::fprintf( stderr, "rtao: %s\n", qPrintable( err ) );
+		return 1;
+	}
+	RtDdgiVolume vol;
+	Packed S;
+	if ( !packVolume( soup, L, sky, spec, &vol, S ) ) {
+		std::fprintf( stderr, "rtao: %s\n", qPrintable( vol.error ) );
+		return 1;
+	}
+	const V3 eye( float( cam[0] - S.O[0] ), float( cam[1] - S.O[1] ), cam[2] );
+	const V3 at( float( cam[3] - S.O[0] ), float( cam[4] - S.O[1] ), cam[5] );
+	const V3 f = normalize( at - eye );
+	const V3 rt = normalize( cross( f, std::fabs( f.z ) > 0.99f ? V3( 0, 1, 0 ) : V3( 0, 0, 1 ) ) );
+	const V3 up = cross( rt, f );
+	const float rows[12] = { rt.x, up.x, -f.x, eye.x, rt.y, up.y, -f.y, eye.y, rt.z, up.z, -f.z, eye.z };
+	const float fy = 1.0f / std::tan( 0.5f * fov * kPi / 180.0f );
+	const float proj[4] = { fy * float( H ) / float( W ), fy, 0.0f, 0.0f };
+	// the shared opaque pass's g-buffer (bottom row first): the face normal toward the camera in view space, linear depth
+	const size_t np = size_t( W ) * size_t( H );
+	std::vector<float> gbuf( np * 4, 0.0f );
+	int surf = 0;
+	for ( int y = 0; y < H; y++ )
+		for ( int x = 0; x < W; x++ ) {
+			float * r = &gbuf[( size_t( y ) * size_t( W ) + size_t( x ) ) * 4];
+			r[3] = 1e6f;
+			const float nxv = ( float( x ) + 0.5f ) / float( W ) * 2.0f - 1.0f, nyv = ( float( y ) + 0.5f ) / float( H ) * 2.0f - 1.0f;
+			const V3 dv( nxv / proj[0], nyv / proj[1], -1.0f );
+			const V3 dw( rows[0] * dv.x + rows[1] * dv.y + rows[2] * dv.z, rows[4] * dv.x + rows[5] * dv.y + rows[6] * dv.z,
+				rows[8] * dv.x + rows[9] * dv.y + rows[10] * dv.z );
+			const float len = length( dw );
+			const double od[3] = { eye.x, eye.y, eye.z }, dd[3] = { dw.x / len, dw.y / len, dw.z / len };
+			double tg = 0.0;
+			int tri = -1;
+			if ( !S.bvh.ray( od, dd, 1e5, &tg, &tri ) || tri < 0 )
+				continue;
+			const float * v = &S.bvh.t[size_t( tri ) * 9];
+			const V3 v0( v[0], v[1], v[2] );
+			V3 nf = normalize( cross( V3( v[3], v[4], v[5] ) - v0, V3( v[6], v[7], v[8] ) - v0 ) );
+			if ( dot( nf, dw ) > 0.0f )
+				nf = -nf;
+			r[0] = dot( nf, rt );
+			r[1] = dot( nf, up );
+			r[2] = -dot( nf, f );
+			r[3] = std::max( float( tg ) / len, 1e-3f );
+			surf++;
+		}
+	RtDdgiLive live;
+	if ( !live.open( soup, L, sky, spec, false ) ) {
+		std::printf( "rtao: no gpu (%s)\n", qPrintable( live.why() ) );
+		return 1;
+	}
+	for ( int s = 0; s < steps; s++ )
+		if ( !live.step( 16 ) ) {
+			std::printf( "rtao: a volume step failed (%s)\n", qPrintable( live.why() ) );
+			return 1;
+		}
+	Twin T( S );
+	in.W = W;
+	in.H = H;
+	std::copy( rows, rows + 12, in.rows );
+	std::copy( proj, proj + 4, in.proj );
+	in.gbuf = gbuf.data();
+	in.readBack = true;
+	const int Wh = bakert::aoHalf( W ), Hh = bakert::aoHalf( H );
+	// arm 0 = the kernel (green), arm 1 = its red (no rays: visibility 1), both against the twin of the kernel
+	bakert::AoGpuOut go[2];
+	for ( int arm = 0; arm < 2; arm++ ) {
+		in.red = arm;
+		if ( !bakert::aoGpuStep( live.session(), in, &go[arm] ) ) {
+			std::printf( "rtao: the GPU refused (%s)\n", go[arm].why.c_str() );
+			return 1;
+		}
+		if ( go[arm].ao.size() != size_t( Wh ) * size_t( Hh ) * 4 ) {
+			std::printf( "rtao: the read-back holds %d floats\n", int( go[arm].ao.size() ) );
+			return 1;
+		}
+	}
+	in.red = 0;
+	QDir().mkpath( outDir );
+	QFile o( outDir + QStringLiteral( "/rtao.tsv" ) );
+	const bool tsv = o.open( QIODevice::WriteOnly | QIODevice::Text );
+	if ( tsv )
+		o.write( "hx\thy\ttwin_vis\ttwin_hits\tgpu_vis\tgpu_hits\tgpu_a\tred_vis\n" );
+	int texels = 0, surfAgree = 0, hitsEq = 0, over[2] = { 0, 0 };
+	double dsum[2] = { 0, 0 }, dmax[2] = { 0, 0 }, visT = 0, visG[2] = { 0, 0 }, hitT = 0;
+	const float tol = 1.0f / float( std::clamp( in.rays, 1, 16 ) );
+	QElapsedTimer tm;
+	tm.start();
+	for ( int hy = 0; hy < Hh; hy++ )
+		for ( int hx = 0; hx < Wh; hx++ ) {
+			float tw[3];
+			const bool has = aoTexel( T, gbuf, W, H, hx, hy, rows, proj, in, tw );
+			const float * g = &go[0].ao[( size_t( hy ) * size_t( Wh ) + size_t( hx ) ) * 4];
+			const float * gr = &go[1].ao[( size_t( hy ) * size_t( Wh ) + size_t( hx ) ) * 4];
+			surfAgree += has == ( g[3] > 0.5f ) ? 1 : 0;
+			if ( !has )
+				continue;
+			texels++;
+			hitsEq += int( g[1] + 0.5f ) == int( tw[1] + 0.5f ) ? 1 : 0;
+			visT += tw[0];
+			hitT += tw[1];
+			for ( int arm = 0; arm < 2; arm++ ) {
+				const float gv = arm ? gr[0] : g[0];
+				const double d = std::fabs( double( gv ) - double( tw[0] ) );
+				dsum[arm] += d;
+				dmax[arm] = std::max( dmax[arm], d );
+				over[arm] += d > tol ? 1 : 0;
+				visG[arm] += gv;
+			}
+			if ( tsv )
+				o.write( QStringLiteral( "%1\t%2\t%3\t%4\t%5\t%6\t%7\t%8\n" ).arg( hx ).arg( hy ).arg( tw[0] ).arg( tw[1] ).arg( g[0] ).arg( g[1] )
+					.arg( g[3] ).arg( gr[0] ).toLatin1() );
+		}
+	const double cpuMs = double( tm.nsecsElapsed() ) / 1e6;
+	const double nt = std::max( texels, 1 );
+	std::printf( "rtao: %d x %d, surface pixels %d; half %d x %d, texels with a surface %d (surface agree %.3f %% of all); rays %d, "
+		"range %.1f, near %.1f, strength %.2f; mean twin hits %.3f; volume %d probes\n", W, H, surf, Wh, Hh, texels,
+		100.0 * surfAgree / std::max( Wh * Hh, 1 ), std::clamp( in.rays, 1, 16 ), in.range, in.nearCut, in.strength, hitT / nt, T.nP );
+	std::printf( "rtao green: texels over 1/n %.3f %%, |d| mean %.5f max %.5f, hits equal %.3f %%; mean visibility twin %.5f gpu %.5f; "
+		"gpu wall %.2f ms, twin %.1f ms\n", 100.0 * over[0] / nt, dsum[0] / nt, dmax[0], 100.0 * hitsEq / nt, visT / nt, visG[0] / nt,
+		go[0].msWall, cpuMs );
+	std::printf( "rtao red: texels over 1/n %.3f %%, |d| mean %.5f max %.5f; mean visibility %.5f\n", 100.0 * over[1] / nt, dsum[1] / nt,
+		dmax[1], visG[1] / nt );
+	std::fflush( stdout );
+	return 0;
+}
