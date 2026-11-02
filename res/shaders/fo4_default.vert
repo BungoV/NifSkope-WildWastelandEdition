@@ -68,6 +68,7 @@ uniform samplerBuffer farStream;
 out float wwFarSkyVis;
 
 #include "bonetransform.glsl"
+#include "ww_treewind.glsl"
 
 void main()
 {
@@ -126,6 +127,8 @@ void main()
 		v.xyz = d * w + v.xyz;
 		vc.rgb = exp2( log2( vertexColor.rgb ) * 2.2 );		// log, mul 2.2, exp: o6.rgb = (v4.rgb * v5.w)^2.2
 	}
+	if ( wwTreeWind2.w > 0.5 )	// lane WINDTREE1: a loaded cell's Tree_Anim shape in the weather's wind
+		v.xyz = wwTreeWindApply( v.xyz, normalVector, length( bitangentVector ), modelViewMatrix );
 
 	v = modelViewMatrix * v;
 	vec3 farRel = transpose( viewMatrix ) * ( v.xyz - farSwayBlock.xyz );	// world-axis offset from the block's centre

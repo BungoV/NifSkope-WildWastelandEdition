@@ -579,6 +579,8 @@
 { "WW_CELL_STREAM_WAIT", 0, "src/nifskope_ui.cpp:2196 wwCellStreamPathRun | re-read per frame or per call (a)" },
 { "WW_CELL_SUNSCALE_RED", 0, "src/gl/lookdevstage.cpp:1925 wwLookdevSunlightScale | re-read per frame or per call (a)" },
 { "WW_CELL_SWAPLOG", 1, "src/cellview.cpp:4370 cellBuild | read while the cell document is built" },
+{ "WW_CELL_TREEWIND", 1, "src/gl/cellgrass.cpp:92 defined | read while the cell document is built" },
+{ "WW_CELL_TREEWIND_RED", 0, "src/gl/cellgrass.cpp:93 defined | re-read per frame or per call (a)" },
 { "WW_CELL_UMBRA", 0, "src/gl/cellcull.cpp:214 st | init-once state, re-read when a live set moves its prefix (b)" },
 { "WW_CELL_UMBRA_DEPTH", 0, "src/gl/cellcull.cpp:219 st | init-once state, re-read when a live set moves its prefix (b)" },
 { "WW_CELL_UMBRA_DUMP", 0, "src/gl/cellcull.cpp:218 st | init-once state, re-read when a live set moves its prefix (b)" },

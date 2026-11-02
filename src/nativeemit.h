@@ -66,6 +66,7 @@ struct NearShapeFacts
 	quint32 lod0Tris = 0;           //!< BSMeshLODTriShape LOD0 Size, 0 on any other shape
 	bool modelAnimated = false;     //!< the MODEL carries a NiTimeController or NiSequence block
 	int modelControllers = 0;       //!< how many
+	bool rootLeafAnim = false;      //!< lane WINDTREE1: the model's root block is a BSLeafAnimNode
 	QStringList textures;           //!< every texture the material names, slot order, empty slots kept as ""
 };
 

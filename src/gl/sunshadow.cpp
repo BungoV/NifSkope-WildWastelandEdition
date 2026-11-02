@@ -16,6 +16,7 @@ BSD License - see nifskope.h
 #include "cellfarhide.h"	// lane FARHOLE2: the rows a loaded near cell leaves out
 #include "gl/cellcull.h"	// lane SUNCELL1: each cascade culls its casters against its own window
 #include "gl/cellgrass.h"	// lane FAR5: a wind cable's shadow sways with it
+#include "gl/celltreewind.h"	// lane WINDTREE1: a tree-wind shape's caster sways with it
 #include "gl/celllights.h"	// lane INTSKY1: a sunlit interior's casters
 #include "gl/celllooks.h"
 #include "gl/cellpasstime.h"	// lane PERF1: the casters' draw count
@@ -119,6 +120,7 @@ struct CsmState
 	bool bothFaces = false;	// lane INTSKY1: a sunlit interior's casters draw both faces
 	int decalsSkipped = 0;	// lane INTSKY1: decals the sunlit interior's sun passes
 	int swayCables = -1;	// lane FAR5: wind cables cast where they sway (-1 = Cable shadows sway off)
+	int swayTrees = 0;		// lane WINDTREE1: tree-wind casters swayed on the CPU (gl/celltreewind.h)
 	int swayCasters = 0;	// lane SHADOWSHIMMER2: far tree-animation casters swayed as the colour pass sways them
 	int swaySplit = 0, swayTiles[kCascades] = {};	// lane SHADOWSHIMMER4: far sway casters split by the view slice, their swaying tiles
 	double swayStep = 0.0;	// lane SHADOWSHIMMER4: their clock step (s; 0 = every paint)
@@ -381,6 +383,43 @@ struct Caster
 	std::uint64_t sliceHash = 0;		// lane SHADOWSHIMMER4: which tiles, for the static set's signature
 	std::uint64_t sig = 0;
 };
+
+// lane WINDTREE1: ww_treewind.glsl on the CPU (model space) for a tree-wind shape's caster, the colour draw's own law
+// and constants (the caster then draws per draw, dynamic); false for any other shape or under WW_CELL_TREEWIND_RED.
+bool treeWindSway( const Scene * scene, const Shape * sh, std::vector<Vector3> & out )
+{
+	float k[10], w[6];
+	const qsizetype nv = sh->verts.size();
+	if ( sh->norms.size() != nv || sh->bitangents.size() != nv || !wwCellTreeWindFor( scene->nifModel, sh->id(), k, w ) )
+		return false;
+	WwTreeWindK K;
+	for ( int i = 0; i < 3; i++ )
+		K.pivot[i] = k[i];
+	K.objSum = k[3];
+	K.bound2 = k[4];
+	K.amp = k[5];
+	K.leafFreq = k[6];
+	for ( int i = 0; i < 3; i++ )
+		K.sumAxis[i] = k[7 + i];
+	WwTreeWindW W;
+	W.angle = w[0];
+	W.prevPhase = w[1];
+	W.phase = w[2];
+	W.minS = w[3];
+	W.maxS = w[4];
+	W.freq = w[5];
+	const Transform & vt = sh->viewTrans();
+	const Vector3 pv = vt * Vector3( k[0], k[1], k[2] );
+	const float dist = vt.scale > 0.0f ? pv.length() / vt.scale : pv.length();
+	out.resize( size_t( nv ) );
+	for ( qsizetype v = 0; v < nv; v++ ) {
+		float o[3];
+		wwTreeWindVertex( &sh->verts.at( v )[0], &sh->norms.at( v )[0], wwTreeWindWeightOf( sh->bitangents.at( v ).length() ),
+			dist, K, W, W.phase, o );
+		out[size_t( v )] = Vector3( o[0], o[1], o[2] );
+	}
+	return true;
+}
 
 // lane FAR5: fo4_default.vert's grass wind on the CPU (model space) for a wind cable; false for any other shape.
 // Red WW_CELL_CABLES_SHADOWSWAY_RED=double casts at twice the offset.
@@ -968,6 +1007,7 @@ static void sunShadowPassImpl( Scene * scene )
 	const bool cpuSkin = scene->hasOption( Scene::DoSkinning );
 	const bool cableSwayOn = wwLookOn( WwLook::CableShadowSway );
 	s.swayCables = cableSwayOn ? 0 : -1;
+	s.swayTrees = 0;
 	/* lane SHADOWSHIMMER2 (FARSWAYSHADOW): the far trees' wind, the colour pass's sample of this paint. A tree-animation
 	 * shape (lane SHADOWSHIMMER3: the SHAPE's flag, TREECROWN1's FarLOD Tree_Anim rule included, as both colour paths now
 	 * set lodTreeAnim; red WW_SUN_SHADOW_STABLE_RED=treeanim: the shader property's flag) that reaches outside the loaded
@@ -1075,6 +1115,8 @@ static void sunShadowPassImpl( Scene * scene )
 		}
 		if ( cableSwayOn && c.skinned.empty() && !sh->wwFarInstData() && cableSway( scene, sh, c.skinned ) )
 			s.swayCables++;
+		if ( c.skinned.empty() && !sh->wwFarInstData() && !sh->wwGpuSkinned() && treeWindSway( scene, sh, c.skinned ) )
+			s.swayTrees++;
 		if ( farSway.amp > 0.0f && c.skinned.empty() && sh->wwShaderLighting()
 			&& ( ( wwSunShadowStableRed() & 128 ) ? sh->wwShaderLighting()->isVertexAlphaAnimation : sh->wwTreeAnim() ) ) {
 			const BoundSphere bs = sh->bounds();
@@ -2100,6 +2142,8 @@ QString wwSunShadowSummary()
 		o += QString( " sunlitinterior bothfaces=%1 decalspass=%2" ).arg( s.bothFaces ? 1 : 0 ).arg( s.decalsSkipped );
 	if ( s.swayCables >= 0 )
 		o += QString( " cablesway=%1" ).arg( s.swayCables );	// lane FAR5: the wind cables cast where they sway
+	if ( s.swayTrees > 0 )
+		o += QString( " treesway=%1" ).arg( s.swayTrees );	// lane WINDTREE1: the tree-wind casters
 	// lane VOLAIR1: the receiver constants a judge needs to predict the factor from WW_CSM_DUMP's map
 	o += QString( " recv=%1,%2,%3,%4" ).arg( g( kOffsetA ), g( kOffsetB ), g( kBlend ), g( kNear ) );
 	o += QString( " casters=%1 tris=%2 ground=%3 probe=%4 force=%5 red=%6" ).arg( s.casters ).arg( s.tris ).arg( s.groundCast ? 1 : 0 )
