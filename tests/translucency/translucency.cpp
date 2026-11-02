@@ -11,6 +11,7 @@
 #include <fstream>
 #include <sstream>
 #include <string>
+#include <utility>
 #include <vector>
 
 using namespace WwTransl;
@@ -142,8 +143,34 @@ int main()
 			std::printf( "missing in cell_lights.glsl: %s\n", p );
 			missing++;
 		}
-	std::printf( "shader pins: %d of %d present\n", int( std::size( pins ) + std::size( sites ) ) - missing,
-				 int( std::size( pins ) + std::size( sites ) ) );
+	// lane MATLOOK2: the bindless twins (slot 7) and the programs without the cell's lights (the NIF view) take it too
+	const std::string fr = slurp( "res/shaders/fo4_default.frag" ), bl = slurp( "src/gl/cellbindless.cpp" );
+	const std::pair< const std::string *, const char * > more[] = {
+		{ &cl, "#if defined( WW_CELL_TRANSL ) && !( defined( WW_BINDLESS ) && defined( WW_CELL_TRANSL_RED_NOBL ) )" },
+		{ &sh, "#define WwTrLightMap sampler2D( wwDraws[wwDrawIdx].tex[7] )" },
+		{ &bl, "\"EnvironmentMap\", \"WwTrLightMap\" };" },
+		{ &bl, "for ( int i = 0; i < 8; i++ )" },
+		{ &fr, "#if defined( WW_CELL_TRANSL ) && !defined( WW_CELLLIGHTS ) && !defined( WW_CELL_TRANSL_RED_NOVIEW )" },
+		{ &fr, "color.rgb = sqrt( dLin + wwTrExcess( normal, L, V, D.rgb * D.rgb, dLin ) );" },
+		{ &fr, "wwTrRecord( wwTrCol.rgb, wwTrFlags.y > 0.5, albedo * albedo, lm.b, wwTrCol.a, wwTrFlags.w, lm.a * glowMult > 0.0," },
+	};
+	int moreMissing = 0;
+	for ( const auto & m : more )
+		if ( m.first->find( m.second ) == std::string::npos ) {
+			std::printf( "missing (bindless / view): %s\n", m.second );
+			moreMissing++;
+		}
+	// the record must stand twice in fo4_default.frag: the cell path's and the view's
+	size_t recs = 0;
+	for ( size_t at = fr.find( "wwTrRecord( wwTrCol.rgb" ); at != std::string::npos; at = fr.find( "wwTrRecord( wwTrCol.rgb", at + 1 ) )
+		recs++;
+	if ( recs != 2 ) {
+		std::printf( "fo4_default.frag records: %zu, want 2\n", recs );
+		moreMissing++;
+	}
+	missing += moreMissing;
+	std::printf( "shader pins: %d of %d present\n", int( std::size( pins ) + std::size( sites ) + std::size( more ) + 1 ) - missing,
+				 int( std::size( pins ) + std::size( sites ) + std::size( more ) + 1 ) );
 	if ( missing || sh.empty() ) {
 		std::printf( "FAIL shader text\n" );
 		fails++;

@@ -298,6 +298,12 @@ vec3 tonemap(vec3 x)
 }
 
 
+#if defined( WW_CELL_TRANSL ) && !defined( WW_CELLLIGHTS ) && !defined( WW_CELL_TRANSL_RED_NOVIEW )
+// lane MATLOOK2 (TRANSLUC1-VIEWPORT): the programs without the cell's lights (the NIF view's headlight, the lookdev sun)
+// take the thin translucency of their one light D (cell_transl.glsl); red WW_CELL_TRANSL_RED=noview
+#define WW_TRV 1
+#include "cell_transl.glsl"
+#endif
 // lane MATLOOK3: the hair and cornea lobes (rows Hair specular / Eye cornea); the bindless twins keep the old path
 #if ( defined( WW_CELL_HAIRKK ) || defined( WW_CELL_CORNEA ) ) && !defined( WW_BINDLESS )
 #include "ww_hair_eye.glsl"
@@ -893,6 +899,17 @@ void main()
 	// stays Oren-Nayar rather than the editor's Lambert — it is roughness-aware
 	// and is what the rest of the FO4 path is tuned against.
 	color.rgb = diffuse * albedo * D.rgb * ( 1.0 - F );
+#ifdef WW_TRV
+	/* lane MATLOOK2 (TRANSLUC1-VIEWPORT): this colour is the root of linear light (tonemap squares it), so the law runs
+	 * on squares (albedo, D and the diffuse just drawn) and the excess joins the square before the root is taken back */
+	if ( wwTrFlags.z > 0.5 ) {
+		vec4 lm = texture( WwTrLightMap, offset );
+		wwTrRecord( wwTrCol.rgb, wwTrFlags.y > 0.5, albedo * albedo, lm.b, wwTrCol.a, wwTrFlags.w, lm.a * glowMult > 0.0,
+		            wwTrFlags.x > 0.5 );
+		vec3 dLin = color.rgb * color.rgb;
+		color.rgb = sqrt( dLin + wwTrExcess( normal, L, V, D.rgb * D.rgb, dLin ) );
+	}
+#endif
 	// Ambient
 	color.rgb += A.rgb * albedo;
 	// Specular

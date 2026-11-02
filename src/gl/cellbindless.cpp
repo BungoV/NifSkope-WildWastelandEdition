@@ -179,8 +179,8 @@ bool init( Ctx & c )
 int slotOf( const char * var )
 {
 	static const char * const names[] = { "BaseMap", "NormalMap", "GlowMap", "BacklightMap", "SpecularMap", "GreyscaleMap",
-		"EnvironmentMap" };
-	for ( int i = 0; i < 7; i++ )
+		"EnvironmentMap", "WwTrLightMap" };	// lane MATLOOK2: slot 7, the translucency's lighting map
+	for ( int i = 0; i < 8; i++ )
 		if ( std::strcmp( var, names[i] ) == 0 )
 			return i;
 	return -1;

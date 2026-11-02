@@ -25,7 +25,9 @@ namespace WwBl
 {
 enum Slot
 {
-	BaseMap, NormalMap, GlowMap, BacklightMap, SpecularMap, GreyscaleMap, EnvironmentMap, SlotCount = 8
+	BaseMap, NormalMap, GlowMap, BacklightMap, SpecularMap, GreyscaleMap, EnvironmentMap,
+	TrLightMap,	// lane MATLOOK2 (TRANSLUC1-BINDLESS): the translucency's lighting map (cell_transl.glsl WwTrLightMap)
+	SlotCount = 8
 };
 //! the slot of a material sampler name, -1 when the bindless shader keeps it bound
 int slotOf( const char * var );

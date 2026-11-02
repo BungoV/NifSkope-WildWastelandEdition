@@ -397,6 +397,17 @@ and the WW_CELL_HDR_DUMP gate target. The rule is a pure header (src/gl/cellhdrf
 passes, the old rule as red fails). `WW_CELL_HDR_FORMAT=rgba32f` asks for the old frame; the reds `WW_FRAMEFMT1_RED=1`,
 `WW_CELL_HDR_FORMAT_RED=1` and `WW_AAFORMAT1_RED=1` force RGBA32F everywhere, as before. The air volumes were already
 RGBA16F (PERFFIX3); their slices and the running integrate stay RGBA32F (transmittance precision).
+## MATLOOK2 TRANSLUC1-BINDLESS + TRANSLUC1-VIEWPORT (2026-11-02): the translucency in the bindless twins and the NIF view
+
+Under `WW_CELL_TRANSL=1` the bindless twins (fo4_cellbl, fo4_cellcsmbl) now draw MATLOOK1's thin translucency too. The
+lighting map is read from the draw's row through slot 7 (cellbindless.h TrLightMap; the slot was free).
+The programs without the cell's lights (fo4_default for the NIF view's headlight, fo4_fog, fo4_csm, fo4_fogcsm) also
+take the same law for their one light D. That colour is the root of linear light, so the law runs on squares there:
+albedo squared, D squared, and the diffuse just drawn squared. The excess joins the square, and the root is taken back.
+Reds: `WW_CELL_TRANSL_RED=nobl` (the twins keep the old path), `noview` (the view programs keep it). With the switch
+off nothing is defined, and the programs compile as before. tests/translucency pins the new text, and the base's text
+must fail.
+
 ## MATLOOK1 TRANSLUC1 (2026-11-02): a v8+ material's thin translucency, FO4CS's law (switch, off by default)
 
 `WW_CELL_TRANSL=1` makes the shader loader define WW_CELL_TRANSL, and the cell lights then give a pixel whose BGSM
