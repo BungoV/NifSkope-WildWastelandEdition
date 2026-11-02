@@ -3,6 +3,7 @@
 usage: python cell_stream_check.py <out folder>     exit 0 = every gate and every red as required
 """
 import os
+import re
 import sys
 
 import numpy as np
@@ -34,6 +35,31 @@ def steps(path):
             if w[0] == 'step':
                 r['step'] = int(w[1])
         rows.append(r)
+    return rows
+
+
+POOL_MB = 1536.0        # lane STREAMTEX5: the geometry pool's default budget (WW_BINDLESS_POOL_MB)
+
+
+def pool_series(path):
+    """(pool MB, budget MB or None, refused all frames) of every `bindless: draws=` line of a notes file"""
+    if not os.path.exists(path):
+        return []
+    raw = open(path, 'rb').read()
+    if raw[:2] in (b'\xff\xfe', b'\xfe\xff') or raw.count(b'\x00') > len(raw) // 4:
+        txt = raw.decode('utf-16', 'replace')
+    else:
+        txt = raw.decode('utf-8', 'replace')
+    rows = []
+    for line in txt.splitlines():
+        if 'bindless: draws=' not in line:
+            continue
+        m = re.search(r' pool=([0-9.]+)MB', line)
+        if not m:
+            continue
+        b = re.search(r' budget=([0-9.]+)MB', line)
+        c = re.search(r'poolCapped=\d+ \(all frames (\d+)\)', line)
+        rows.append((float(m.group(1)), float(b.group(1)) if b else None, int(c.group(1)) if c else 0))
     return rows
 
 
@@ -148,6 +174,22 @@ def main():
                      num(cen[min(cen)], 'texBaseOnlyMb'), num(cen[min(cen)], 'texUnnotedMb')))
     else:
         print('  SKIP  (e) texture pool: the dump has no texCrossing (an exe before STREAMTEX1)')
+
+    # (g) lane STREAMTEX5: the bindless geometry pool stays within its budget over the walk. STREAMTEX2's walks that
+    # died in the driver all ran a pool of 2.4-2.5 GB (the append-only arena); the walk's notes carry one `bindless:`
+    # line a change. budget=0 (red WW_BINDLESS_RED=poolnocap / poolgrow) is judged at the default 1536 MB
+    pool = pool_series(os.path.join(out, 'walk.notes'))
+    if pool:
+        peak = max(p for p, _, _ in pool)
+        budgets = [b for _, b, _ in pool if b is not None]
+        budget = budgets[-1] if budgets and budgets[-1] > 0 else POOL_MB
+        capped = max(c for _, _, c in pool)
+        red = bool(budgets) and budgets[-1] <= 0
+        gate('(g) bindless pool <= %.0f MB%s' % (budget, ' (RED no cap)' if red else ''), peak <= budget,
+             'peak pool %.1f MB over %d lines, last %.1f MB; placements refused by the budget %d (all frames)'
+             % (peak, len(pool), pool[-1][0], capped))
+    else:
+        print('  SKIP  (g) bindless pool: walk.notes has no bindless line')
 
     # reds
     nu = steps(os.path.join(out, 'red_nounload.stream.txt'))
