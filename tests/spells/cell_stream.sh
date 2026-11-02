@@ -11,7 +11,7 @@
 # usage: bash tests/spells/cell_stream.sh            every phase
 #        PHASE="walk check" bash tests/spells/cell_stream.sh
 #        RECHECK=1 bash tests/spells/cell_stream.sh  the checker on the files already written
-# Runs NifSkope through withlock (one at a time) with MEMCAP=15.
+# Runs NifSkope through withlock (one at a time) with MEMCAP=15 (WALK_MEMCAP / WALK_MEMFLOOR override the guard's cap and free-RAM floor, GB).
 set -u
 
 . "$(dirname "$0")/_harness.sh"
@@ -89,7 +89,7 @@ run() {   # run <name> <cells open "x,y|n"> <path file> <env...>: one NifSkope u
 	local shot="$OUT/$name.png" notes="$OUT/$name.notes" try rc
 	rm -f "$shot" "$OUT/$name.stream.txt"
 	for try in 1 2; do
-		MEMCAP=15 bash "$LOCK" nifskope env "${STILL[@]}" "${LD[@]}" "$@" \
+		MEMCAP="${WALK_MEMCAP:-15}" MEMFLOOR="${WALK_MEMFLOOR:-3}" bash "$LOCK" nifskope env "${STILL[@]}" "${LD[@]}" "$@" \
 			WW_CELL_OPEN="$ESM|Commonwealth|$open" WW_CELL_DATAROOT="$DATA" WW_LODGEN_RESOURCES="$DATA" WW_CELL_LIT=1 \
 			WW_CELL_STREAM_PATH="$(winpath "$path")" WW_CELL_STREAM_DUMP="$(winpath "$OUT/$name.stream.txt")" \
 			WW_RENDER_SHOT="$(winpath "$shot")" WW_RENDER_SIZE="$SIZE" WW_RENDER_CLEAN=1 \
