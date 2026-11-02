@@ -38,6 +38,26 @@ static const bool FIXEDRED = true;
 #else
 static const bool FIXEDRED = false;
 #endif
+#ifdef LARGEREF_FIXEDFLAT_RED	// lane LARGEREF5 (FIXEDOPEN-FLATMODE): a flat-mode fixed open places no large ref full
+static const bool FLATNONERED = true;
+#else
+static const bool FLATNONERED = false;
+#endif
+
+/* lane LARGEREF5: a flat far field round a fixed open at cx,cy as cellFarLodAppend maps it (a fixed open's hole is the
+ * block itself): the hole None (+-2), ring 0 Flat to +-8 except one 4x4 chunk east (+4..+7, -1..+2) with no .bto (its
+ * footprint None), ring 1 refused by the budget (None to +-16), the outer rings Flat to +-40, None past the reach. */
+static LargeRef::FarMap flatModeMap( int cx, int cy )
+{
+	using LargeRef::Far;
+	LargeRef::FarMap m;
+	m.add( cx - 2, cy - 2, cx + 2, cy + 2, Far::None );
+	m.add( cx + 4, cy - 1, cx + 7, cy + 2, Far::None );
+	m.add( cx - 8, cy - 8, cx + 8, cy + 8, Far::Flat );
+	m.add( cx - 16, cy - 16, cx + 16, cy + 16, Far::None );
+	m.add( cx - 40, cy - 40, cx + 40, cy + 40, Far::Flat );
+	return m;
+}
 
 /* lane LARGEREF4: far fields as cellFarLodAppend maps them, round an open at 0,0 (the census routes cross every band).
  * mixed: the FO4CS type, ours instanced to +-12, the game's .bto past it (WW_CELL_FARLOD_OURS, or a .lodl smaller than
@@ -257,15 +277,19 @@ static int fixedCensus( const char * path, int mapMode )
 	if ( !readRnam( path, rows, subs, refused ) )
 		return 2;
 	using LargeRef::Far;
-	const LargeRef::FarMap truth = censusMap( mapMode );
-	const bool placed = LargeRef::fullOutside( Far::ByRef, FLATRED );
+	// lane LARGEREF5: mapMode 3 = flat mode (the vanilla type), its map round each step's open (flatModeMap)
+	const Far mode = mapMode == 3 ? Far::Flat : Far::ByRef;
+	LargeRef::FarMap truth = censusMap( mapMode == 3 ? 1 : mapMode );
+	const bool placed = LargeRef::fixedPlaced( mode, FIXEDRED || FLATNONERED, FLATRED );
 	long steps = 0, stepRefs = 0, kept = 0, hidden = 0, doubles = 0, missing = 0;
 	for ( const auto & rt : routes ) {
 		int x = rt[0], y = rt[1];
 		for ( ;; ) {
+			if ( mapMode == 3 )
+				truth = flatModeMap( x, y );
 			for ( const LargeRef::Row & r : LargeRef::outside( rows, x - 2, y - 2, x + 2, y + 2 ) ) {
 				const Far k = truth.at( r.rx, r.ry );
-				const bool full = LargeRef::fixedFull( placed, &truth, r.rx, r.ry, FLATRED, FIXEDRED );
+				const bool full = LargeRef::fixedFull( placed, &truth, r.rx, r.ry, FLATRED, FIXEDRED, mode );
 				const int seen = ( full ? 1 : 0 ) + ( k == Far::Flat ? 1 : k == Far::ByRef && !full ? 1 : 0 );
 				stepRefs++;
 				( full ? kept : hidden )++;
@@ -282,8 +306,10 @@ static int fixedCensus( const char * path, int mapMode )
 	const bool pass = doubles == 0 && missing == 0 && refused == 0 && kept > 0 && hidden > 0;
 	std::printf( "fixed open: %d RNAM subrecords (%d refused), %d rows; %ld steps, %ld step-refs outside the block\n", subs,
 		refused, int( rows.size() ), steps, stepRefs );
-	std::printf( "fixed open: far %s%s; kept full %ld, hidden after the far build %ld step-refs\n",
-		mapMode == 1 ? "mixed" : "budget", FIXEDRED ? " (RED fixedpermode: the mode alone)" : "", kept, hidden );
+	std::printf( "fixed open: far %s%s%s; kept full %ld, hidden after the far build %ld step-refs\n",
+		mapMode == 1 ? "mixed" : mapMode == 3 ? "flat mode (a .bto-less chunk and a refused ring None)" : "budget",
+		FIXEDRED ? " (RED fixedpermode: the mode alone)" : "",
+		FLATNONERED ? " (RED fixedflatnone: flat mode places none)" : "", kept, hidden );
 	std::printf( "fixed open: two copies %ld, none %ld step-refs -- %s\n", doubles, missing, pass ? "PASS" : "FAIL" );
 	return pass ? 0 : 1;
 }
@@ -301,7 +327,8 @@ int main( int argc, char ** argv )
 			// lane LARGEREF4: live (budget rebuilt to mixed mid-walk), liveoff (far LOD removed), fixedmixed|fixedbudget
 			mapMode = std::strcmp( argv[4], "live" ) == 0 ? 3 : std::strcmp( argv[4], "liveoff" ) == 0 ? 4 : mapMode;
 			if ( std::strncmp( argv[4], "fixed", 5 ) == 0 )
-				return fixedCensus( argv[2], std::strcmp( argv[4], "fixedbudget" ) == 0 ? 2 : 1 );
+				return fixedCensus( argv[2], std::strcmp( argv[4], "fixedbudget" ) == 0 ? 2
+					: std::strcmp( argv[4], "fixedflat" ) == 0 ? 3 : 1 );	// lane LARGEREF5: fixedflat
 		}
 		return census( argv[2], far, mapMode );
 	}
@@ -428,11 +455,21 @@ int main( int argc, char ** argv )
 		check( LargeRef::liveFar( false, Far::Flat, STALERED ) == Far::None, "live: far LOD removed -> drawn full (None)" );
 		check( LargeRef::liveFar( true, Far::Flat, STALERED ) == Far::Flat, "live: far LOD kept -> the open's kind" );
 		// lane LARGEREF4 (LARGEREF-FIXEDOPEN-MIXED): the fixed open, once the far build's map exists
-		check( !LargeRef::fixedFull( true, &m, 12, -3, FLATRED, FIXEDRED ), "fixed: over the game's .bto -> hidden after the build" );
-		check( LargeRef::fixedFull( true, &m, 11, 2, FLATRED, FIXEDRED ) && LargeRef::fixedFull( true, &m, 14, -4, FLATRED, FIXEDRED ),
+		check( !LargeRef::fixedFull( true, &m, 12, -3, FLATRED, FIXEDRED, Far::ByRef ), "fixed: over the game's .bto -> hidden after the build" );
+		check( LargeRef::fixedFull( true, &m, 11, 2, FLATRED, FIXEDRED, Far::ByRef )
+				&& LargeRef::fixedFull( true, &m, 14, -4, FLATRED, FIXEDRED, Far::ByRef ),
 			"fixed: over ours, or no far objects -> stays full" );
-		check( LargeRef::fixedFull( true, nullptr, 12, -3, false, FIXEDRED ), "fixed: no map (far LOD off) -> the mode" );
-		check( !LargeRef::fixedFull( false, &m, 11, 2, false, FIXEDRED ), "fixed: not placed by the mode -> not full" );
+		check( LargeRef::fixedFull( true, nullptr, 12, -3, false, FIXEDRED, Far::ByRef ), "fixed: no map (far LOD off) -> the mode" );
+		check( !LargeRef::fixedFull( false, &m, 11, 2, false, FIXEDRED, Far::ByRef ), "fixed: not placed by the mode -> not full" );
+		// lane LARGEREF5 (FIXEDOPEN-FLATMODE): flat mode places them all; the map keeps the None ones full
+		const bool flatPlaced = LargeRef::fixedPlaced( Far::Flat, FLATNONERED, false );
+		check( flatPlaced, "fixed flat mode: every outside large ref placed before the far build" );
+		check( LargeRef::fixedFull( flatPlaced, &m, 14, -4, false, false, Far::Flat ),
+			"fixed flat mode: own cell None in the map -> stays full" );
+		check( !LargeRef::fixedFull( flatPlaced, &m, 12, -3, false, false, Far::Flat ), "fixed flat mode: own cell flat -> hidden" );
+		check( !LargeRef::fixedFull( true, nullptr, 12, -3, false, false, Far::Flat ), "fixed flat mode: no map -> the mode (hidden)" );
+		check( !LargeRef::fixedPlaced( Far::Flat, true, false ) && LargeRef::fixedPlaced( Far::ByRef, true, false ),
+			"fixed: by the mode (fixedpermode, the stream's open) -> flat places none, byref all" );
 	}
 	// lane LARGEREF2 (LARGEREF-INI): the ini line largeRefsWanted reads, through the same reader and arguments
 	{

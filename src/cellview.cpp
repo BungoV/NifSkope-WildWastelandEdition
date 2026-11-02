@@ -2974,10 +2974,9 @@ static bool cellBuild( NifModel * nif, const CellSceneSpec & specAsked, CellChun
 		fprintf( stderr, "cell large refs: far objects %s: %s\n", qPrintable( lrWhy ),
 			largeRefFar != int( LargeRef::Far::Flat ) ? "drawn full outside the block"
 				: wwEnv( "WW_CELL_LARGEREFS_RED" ) == "flatdouble" ? "drawn full beside their far copies (RED flatdouble)"
-				: "the far copy alone outside their own cells" );
+				: wwEnv( "WW_CELL_LARGEREFS_RED" ) == "fixedflatnone" ? "the far copy alone outside their own cells (RED fixedflatnone)"
+				: "placed, hidden after the far build where its map is flat (the far copy alone there)" );
 	}
-	const bool largeRefFull = LargeRef::fullOutside( LargeRef::Far( largeRefFar ),
-		wwEnv( "WW_CELL_LARGEREFS_RED" ) == "flatdouble" );
 
 	int x0, y0, x1, y1;
 	spec.rect( x0, y0, x1, y1 );
@@ -3042,6 +3041,12 @@ static bool cellBuild( NifModel * nif, const CellSceneSpec & specAsked, CellChun
 	QHash<quint32, QPair<int, int>> largeFixedCell;
 	QHash<quint32, QVector<qint32>> largeFixedBlocks;
 	const bool largeFixedPerMode = wwEnv( "WW_CELL_LARGEREFS_RED" ) == "fixedpermode";
+	/* lane LARGEREF5 (LARGEREF-FIXEDOPEN-FLATMODE): a fixed open places every outside large ref, flat mode too; the far
+	 * map then hides the flat ones, so a ref whose own cell the map calls None still shows. Red
+	 * WW_CELL_LARGEREFS_RED=fixedflatnone: the mode alone (flat mode places none). */
+	const bool largePlace = LargeRef::fixedPlaced( LargeRef::Far( largeRefFar ),
+		streamInit || largeFixedPerMode || wwEnv( "WW_CELL_LARGEREFS_RED" ) == "fixedflatnone",
+		wwEnv( "WW_CELL_LARGEREFS_RED" ) == "flatdouble" );
 
 	/* The reference model is emptied here, right before the reads that fill it: the REFR loop runs before
 	 * the pick table's clear further down. */
@@ -3444,7 +3449,7 @@ static bool cellBuild( NifModel * nif, const CellSceneSpec & specAsked, CellChun
 					pushRefr( r, int( std::floor( r.pos[0] / CELL_UNITS ) ), int( std::floor( r.pos[1] / CELL_UNITS ) ), pers );
 				}
 			}
-			if ( !chunk && CellFarHide::largeRefsWanted() && largeRefFull ) {	// lane LARGEREF3: not over a flat far field
+			if ( !chunk && CellFarHide::largeRefsWanted() && largePlace ) {	// lane LARGEREF3/5: the far map decides after
 				int missing = 0, persist = 0, farthest = 0;
 				for ( const LargeRef::Row & lr : LargeRef::outside( world.largeRefRows(), x0, y0, x1, y1 ) ) {
 					EsmRefr r;
@@ -7190,7 +7195,7 @@ static bool cellBuild( NifModel * nif, const CellSceneSpec & specAsked, CellChun
 			int lrHidden = 0, lrHiddenBlocks = 0, lrBare = 0;
 			for ( auto it = largeFixedCell.constBegin(); it != largeFixedCell.constEnd(); ++it ) {
 				if ( LargeRef::fixedFull( true, lrHave ? &lrMap : nullptr, it.value().first, it.value().second, lrFlatDouble,
-						false ) ) {
+						false, LargeRef::Far( largeRefFar ) ) ) {
 					lrKept << it.key();
 					continue;
 				}

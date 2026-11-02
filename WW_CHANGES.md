@@ -1,3 +1,16 @@
+## LARGEREF5 (2026-11-02): a flat-mode fixed open places its large refs too (LARGEREF-FIXEDOPEN-FLATMODE)
+- A fixed open (WW_CELL_OPEN) over a flat far field (the vanilla type's .bto, or our rings flattened) placed no large ref
+  full, so a ref whose own cell the far build's map calls None (a ring the budget refused, a chunk with no .bto) showed
+  nothing outside its own cell.
+- `LargeRef::fixedPlaced` (src/largeref.h): a fixed open now places every outside large ref in buckets of its own,
+  flat mode too; after the far build `LargeRef::fixedFull` hides the ones whose own cell the map calls flat (their far
+  copy alone there). With no map it falls back to the open's kind (flat = hidden), never to full. The stream's own open
+  and the `fixedpermode` red keep the mode's answer. Red `WW_CELL_LARGEREFS_RED=fixedflatnone`: flat mode places none.
+- tests/largeref/run.sh: unit checks + red `-DLARGEREF_FIXEDFLAT_RED`; census `--far fixedflat` (a flat field round each
+  step's open, a .bto-less chunk and a refused ring None): Commonwealth green 0 two copies, 0 none (21 kept full, 3381
+  hidden step-refs); red 21 none. Earlier walks unchanged.
+- src/wwswitchstages.inc regenerated (cellview.cpp line numbers only).
+
 ## LARGEREF4 (2026-11-02): the streamed view reads the far kind per large ref, cell by cell (LARGEREF-FLAT-MIXED, LARGEREF-BUDGET)
 - The FO4CS type lets the game's .bto fill the chunks our .lodl lacks (`WW_CELL_FARLOD_OURS`, a .lodl smaller than the
   reach, a terrain ring the budget stopped), and an object ring the budget refuses leaves its cells with no far objects.

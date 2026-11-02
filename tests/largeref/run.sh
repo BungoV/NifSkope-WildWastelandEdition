@@ -22,6 +22,10 @@ timeout 30 "$O/largeref_red5.exe" > "$O/red5.txt"; R5=$?
 grep -E "^FAIL" "$O/red5.txt"
 timeout 30 "$O/largeref_red6.exe" > "$O/red6.txt"; R6=$?
 grep -E "^FAIL" "$O/red6.txt"
+# lane LARGEREF5 (FIXEDOPEN-FLATMODE): -DLARGEREF_FIXEDFLAT_RED (a flat-mode fixed open places no large ref full)
+g++ -std=c++17 -O1 -DLARGEREF_FIXEDFLAT_RED -I"$T/src" "$T/tests/largeref/largeref_test.cpp" -o "$O/largeref_red7.exe" || exit 2
+timeout 30 "$O/largeref_red7.exe" > "$O/red7.txt"; R7=$?
+grep -E "^FAIL" "$O/red7.txt"
 timeout 30 "$O/largeref.exe"; G=$?
 timeout 30 "$O/largeref_red.exe" > "$O/red.txt"; R=$?
 timeout 30 "$O/largeref_red2.exe" > "$O/red2.txt"; R2=$?
@@ -29,8 +33,10 @@ timeout 30 "$O/largeref_red3.exe" > "$O/red3.txt"; R3=$?
 tail -1 "$O/red.txt"
 grep -E "^FAIL|stream walk" "$O/red2.txt"
 grep -E "^FAIL" "$O/red3.txt"
-echo "green rc=$G red rc=$R streamred rc=$R2 flatred rc=$R3 permodered rc=$R4 stalemapred rc=$R5 fixedred rc=$R6"
+echo "green rc=$G red rc=$R streamred rc=$R2 flatred rc=$R3 permodered rc=$R4 stalemapred rc=$R5 fixedred rc=$R6" \
+	"fixedflatred rc=$R7"
 [ $G -eq 0 ] && [ $R -ne 0 ] && [ $R2 -ne 0 ] && [ $R3 -ne 0 ] && [ $R4 -ne 0 ] && [ $R5 -ne 0 ] && [ $R6 -ne 0 ] \
+	&& [ $R7 -ne 0 ] \
 	&& echo "LARGEREF UNIT PASS" \
 	|| { echo "LARGEREF UNIT FAIL"; exit 1; }
 # lane LARGEREF2: RNAM=<dump> (a world's RNAM subrecords, uint32 length + bytes each) adds the census walk, green + stream red
@@ -63,11 +69,15 @@ if [ -n "$RNAM" ]; then
 	timeout 300 "$O/largeref.exe" --rnam "$RNAM" --far fixedbudget; YG=$?
 	timeout 300 "$O/largeref_red6.exe" --rnam "$RNAM" --far fixedbudget > "$O/census_red6b.txt"; YR=$?
 	tail -1 "$O/census_red6b.txt"
+	# lane LARGEREF5 (FIXEDOPEN-FLATMODE): the fixed open in flat mode (a .bto-less chunk and a refused ring None), green + red7
+	timeout 300 "$O/largeref.exe" --rnam "$RNAM" --far fixedflat; ZG=$?
+	timeout 300 "$O/largeref_red7.exe" --rnam "$RNAM" --far fixedflat > "$O/census_red7f.txt"; ZR=$?
+	tail -1 "$O/census_red7f.txt"
 	echo "census green rc=$CG streamred rc=$CR flat green rc=$FG flatred rc=$FR mixed green rc=$MG red rc=$MR" \
 		"budget green rc=$BG red rc=$BR live green rc=$LG red rc=$LR liveoff green rc=$OG red rc=$OR" \
-		"fixedmixed green rc=$XG red rc=$XR fixedbudget green rc=$YG red rc=$YR"
+		"fixedmixed green rc=$XG red rc=$XR fixedbudget green rc=$YG red rc=$YR fixedflat green rc=$ZG red rc=$ZR"
 	[ $CG -eq 0 ] && [ $CR -ne 0 ] && [ $FG -eq 0 ] && [ $FR -ne 0 ] && [ $MG -eq 0 ] && [ $MR -ne 0 ] \
 		&& [ $BG -eq 0 ] && [ $BR -ne 0 ] && [ $LG -eq 0 ] && [ $LR -ne 0 ] && [ $OG -eq 0 ] && [ $OR -ne 0 ] \
-		&& [ $XG -eq 0 ] && [ $XR -ne 0 ] && [ $YG -eq 0 ] && [ $YR -ne 0 ] \
+		&& [ $XG -eq 0 ] && [ $XR -ne 0 ] && [ $YG -eq 0 ] && [ $YR -ne 0 ] && [ $ZG -eq 0 ] && [ $ZR -ne 0 ] \
 		&& echo "LARGEREF CENSUS PASS" || { echo "LARGEREF CENSUS FAIL"; exit 1; }
 fi

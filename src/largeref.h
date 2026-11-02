@@ -140,11 +140,19 @@ inline Far liveFar( bool farBuilt, Far before, bool stale ) { return farBuilt ||
 
 /* lane LARGEREF4 (LARGEREF-FIXEDOPEN-MIXED): a fixed open (no stream) places its large refs by the mode before the far
  * build runs; once the build's map exists a placed ref stays full only where the map at its own cell wants it full
- * (cellview.cpp hides the rest). Red perMode (WW_CELL_LARGEREFS_RED=fixedpermode): the mode alone decides. */
-inline bool fixedFull( bool placed, const FarMap * map, int ownX, int ownY, bool flatDouble, bool perMode )
+ * (cellview.cpp hides the rest). Red perMode (WW_CELL_LARGEREFS_RED=fixedpermode): the mode alone decides.
+ * lane LARGEREF5: no map (the far build made none) falls back to the open's kind `mode`, not to full. */
+inline bool fixedFull( bool placed, const FarMap * map, int ownX, int ownY, bool flatDouble, bool perMode, Far mode )
 {
-	return placed && ( perMode || !map || fullOutside( map->at( ownX, ownY ), flatDouble ) );
+	return placed && ( perMode || ( map ? fullOutside( map->at( ownX, ownY ), flatDouble ) : fullOutside( mode, flatDouble ) ) );
 }
+
+/* lane LARGEREF5 (LARGEREF-FIXEDOPEN-FLATMODE): what a fixed open places before the far build. In flat mode it placed
+ * none, so a ref whose own cell the far map calls None (a ring the budget refused, a chunk with no .bto)
+ * showed nothing outside its own cell. Now every outside ref is placed in buckets of its own and the map hides the flat
+ * ones (fixedFull). byMode (the fixedpermode red, the stream's own open, red WW_CELL_LARGEREFS_RED=fixedflatnone): the
+ * mode alone, as before. */
+inline bool fixedPlaced( Far mode, bool byMode, bool flatDouble ) { return byMode ? fullOutside( mode, flatDouble ) : true; }
 
 /* lane LARGEREF2 (LARGEREF-STREAM): per-document ownership counts for the streamed view. A large ref is drawn by exactly
  * one owner: its own cell while that cell is loaded (the cell's own refs place it), else the large-ref layer while any
