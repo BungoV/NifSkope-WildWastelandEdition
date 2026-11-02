@@ -232,11 +232,17 @@ struct InstCard
 	float offset[3] = { 0.0f, 0.0f, 0.0f };	//!< drawCard's worldOffset
 	float scale = 1.0f;						//!< Options::worldScale
 	float swayPhase = 0.0f;					//!< Options::swayPhase
+	/* lane FARCARDPICK1, the GPU pick: the placement's slot in the static card buffer (its index in the caller's
+	 * placement list, the same card every pass while the list holds; -1 = none, the pass picks on the CPU) and its
+	 * own sway, so swayPhase == the pass's Options::swayPhase + swayOff (the one add the shader repeats). */
+	int slot = -1;
+	float swayOff = 0.0f;
 };
 struct InstStats
 {
 	int drawn = 0, refused = 0, draws = 0, sets = 0;
 	qint64 bytes = 0;		//!< the card buffer uploaded this pass
+	bool gpuPick = false;	//!< lane FARCARDPICK1: the frames were picked in the vertex stage
 	QString firstWhy;		//!< the first refusal, as drawCard words it
 };
 /*! WW_FARCARD=0 (the off switch) or WW_FARCARD_RED=percard (the red: the old per-card path and its cost)

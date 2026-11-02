@@ -1,0 +1,5 @@
+# lane FARCARDPICK1: impostor_cellinstez.prog (hardware early depth) with the frame pick and the billboard in the
+# vertex stage (static card buffer). Selected BY NAME in ImpostorDraw::drawCardsInstanced, the default;
+# WW_FARCARD_RED=cpupick draws with impostor_cellinstez.prog and the CPU pick again.
+
+shaders impostor_instezgp.vert impostor_cellinstez.frag

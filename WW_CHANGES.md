@@ -605,6 +605,26 @@ and the WW_CELL_HDR_DUMP gate target. The rule is a pure header (src/gl/cellhdrf
 passes, the old rule as red fails). `WW_CELL_HDR_FORMAT=rgba32f` asks for the old frame; the reds `WW_FRAMEFMT1_RED=1`,
 `WW_CELL_HDR_FORMAT_RED=1` and `WW_AAFORMAT1_RED=1` force RGBA32F everywhere, as before. The air volumes were already
 RGBA16F (PERFFIX3); their slices and the running integrate stay RGBA32F (transmittance precision).
+## FARCARDPICK1 (2026-11-02): the far cards can pick their frames on the GPU (opt-in WW_FARCARD_GPICK=1)
+
+The instanced far cards (drawCardsInstanced) used to run selectFrames + pickCard on the CPU for every visible card,
+every frame, and upload six texels a card. Now the vertex stage picks: res/shaders/impostor_pick.glsl (wwCardPick) is
+the CPU pick step for step (the view direction, the ring's two azimuths or the octahedral grid's three frames under the
+set's convention, the quarter-turn shuffle red, the sharpen / one-frame snap, the standing billboard), with `precise`
+temporaries so the driver does not fuse what the CPU does in separate steps. The CPU half is now one header,
+src/gl/impostorpick.h, shared by pickCard and the unit test. The card buffer is static: two texels per placed card
+(centre, depth span, half size, sway offset, scale), sent only for the cards that changed, plus this pass's visible
+slot list. The sets pass N / V / ring / convention / frame count as uniforms. The programs are twins
+(impostor_cellinstgp / impostor_cellinstezgp: a define plus an include of impostor_inst.vert), so the CPU-pick
+programs' binaries differ only in the source hash.
+The GPU pick is OPT-IN (WW_FARCARD_GPICK=1) until a live pair shows the same picture in less frame time; the default
+is today's CPU path. Red WW_FARCARD_RED=cpupick: today's CPU pick and its six-texel fill. WW_FARCARD_PICKDUMP=<file> writes the first
+pass's cards with the CPU's answer, for the unit test. tests/farcardpick (farcardpick.sh) runs the shader's wwCardPick
+through the driver (transform feedback, no window) against the shipped CPU code on 46,480 synthetic rows (every grid
+side 2..16, rings of 8..32 views, both conventions, shuffle, three sharpen values, the snap and the blend, the pole,
+level, below and eye-on-card directions) or a dump. Every frame index that differs must sit within 1e-4 of a floor,
+diagonal or snap tie, weights within 2e-4, axes within 2e-5; on 610.74 no index differed (weights 1.25e-5, axes
+1.8e-7). Reds `--red shuffle` and `--red convention` (flipped on the GPU only) fail.
 
 ## REFLPROBECLI1 (TOOLS1101, 2026-11-01): count the reflection probes' below-horizon misses without a window
 

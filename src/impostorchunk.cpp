@@ -596,8 +596,11 @@ int ImpostorChunk::drawCellFar( Scene * scene, const ImpostorDraw::Options & opt
 		}
 		ImpostorDraw::Options o = opt;
 		o.worldScale = p.scale;
-		if ( o.swayAmplitude != 0.0f )   // a forest does not sway as one
-			o.swayPhase += 0.0021f * p.world[0] + 0.0017f * p.world[1];
+		float swayOff = 0.0f;
+		if ( o.swayAmplitude != 0.0f ) {   // a forest does not sway as one
+			swayOff = 0.0021f * p.world[0] + 0.0017f * p.world[1];
+			o.swayPhase += swayOff;
+		}
 		if ( inst && s.sets.at( p.setIndex ).ok ) {
 			ImpostorDraw::InstCard c;
 			c.set = &s.sets.at( p.setIndex );
@@ -606,6 +609,8 @@ int ImpostorChunk::drawCellFar( Scene * scene, const ImpostorDraw::Options & opt
 			c.offset[2] = p.world[2] - F.shift[2];
 			c.scale = p.scale;
 			c.swayPhase = o.swayPhase;
+			c.slot = int( &p - s.placed.constData() );	// lane FARCARDPICK1: the GPU pick's static slot
+			c.swayOff = swayOff;
 			instCards << c;
 			continue;
 		}
@@ -640,14 +645,20 @@ int ImpostorChunk::drawCellFar( Scene * scene, const ImpostorDraw::Options & opt
 			ist.sets = -1;
 		}
 	}
-	static int saidSets = -2, saidDraws = -1;
-	if ( inst && wwFrameLog() && ( ist.sets != saidSets || ist.draws != saidDraws ) ) {
+	static int saidSets = -2, saidDraws = -1, sinceSaid = 0;
+	// once more 60 frames after a change: the GPU pick's first frame sends the whole static buffer
+	const bool steady = inst && ++sinceSaid == 60;
+	if ( inst && wwFrameLog() && ( ist.sets != saidSets || ist.draws != saidDraws || steady ) ) {
+		if ( !steady )
+			sinceSaid = 0;
 		saidSets = ist.sets;
 		saidDraws = ist.draws;
 		qInfo().noquote() << ( ist.sets < 0
 			? QStringLiteral( "far cards: instanced program missing, drawn one by one" )
-			: QStringLiteral( "far cards: instanced, %1 cards in %2 draws (%3 sets), %4 KB a frame" )
-				.arg( ist.drawn ).arg( ist.draws ).arg( ist.sets ).arg( double( ist.bytes ) / 1024.0, 0, 'f', 1 ) );
+			: QStringLiteral( "far cards: instanced, %1 cards in %2 draws (%3 sets), %4 KB a frame (%5 pick%6)" )
+				.arg( ist.drawn ).arg( ist.draws ).arg( ist.sets ).arg( double( ist.bytes ) / 1024.0, 0, 'f', 1 )
+				.arg( ist.gpuPick ? QStringLiteral( "GPU" ) : QStringLiteral( "CPU" ) )
+				.arg( steady ? QStringLiteral( ", steady" ) : QString() ) );
 	}
 	if ( ( drawn != saidDrawn || outside != saidOut ) && wwFrameLog() ) {
 		saidDrawn = drawn;
