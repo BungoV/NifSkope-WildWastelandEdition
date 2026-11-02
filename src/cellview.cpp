@@ -267,6 +267,8 @@ struct Bucket
 	bool grass = false;   // blades of the game's grass (src/gl/cellgrass.h): the fade applies
 	float grassWave = 0.0f;   // its GRAS wave period (one bucket per grass type), the wind's phase
 	bool grassNoFade = false;   // lane CABLES1: a swaying cable: the grass wind, never the grass fade
+	bool treeWind = false;      // lane WINDTREE1: one placement's Tree_Anim shapes (gl/celltreewind.h)
+	float treeWindK[10] = { 0.0f, 0.0f, 0.0f, 0.0f, 3.4e38f, 0.0f, 1.0f, 1.0f, 1.0f, 1.0f };   // its constants (WwTreeWindK's order)
 	std::vector<OutVert> verts;
 	std::vector<BucketTri> tris;   // 32-bit: a bucket welds far more than 65,536 vertices
 	//! Where each placed shape's triangles start in `tris` (the culling runs, src/gl/cellcull.h)
@@ -587,6 +589,8 @@ bool emitBucket( NifModel * nif, const QModelIndex & iRoot, const Bucket & b,
 			wwCellGroundSpecShape( nif, nif->getBlockNumber( iShape ), b.groundSpec );
 		if ( b.grass )        // the renderer fades this shape the game's grass way
 			wwCellGrassShape( nif, nif->getBlockNumber( iShape ), b.grassWave, !b.grassNoFade );
+		if ( b.treeWind )     // lane WINDTREE1: the renderer sways it in the weather's wind
+			wwCellTreeWindShape( nif, nif->getBlockNumber( iShape ), b.treeWindK );
 		nif->set<QString>( iShape, "Name", part > 1
 			? QString( "%1 #%2" ).arg( b.name ).arg( part ) : b.name );
 		nif->set<quint32>( iShape, "Flags", 14 );
@@ -3552,6 +3556,8 @@ static bool cellBuild( NifModel * nif, const CellSceneSpec & specAsked, CellChun
 	const bool fxLitOn = spec.overlay == CellOverlay::None;
 	const int fxLitCap = 4096;
 	int fxLitModels = 0, fxLitShapes = 0;
+	const bool treeWindOn = wwCellTreeWindBuild();   // lane WINDTREE1 (WW_CELL_TREEWIND=1)
+	int treeWindModels = 0, treeWindShapes = 0, treeWindLeaf = 0;
 	QHash<QString, std::array<float, 4>> fxLitBound;   // a loaded model's bounding sphere, model space
 	/* lane LIGHTS2 (XEMI1): a placement's emittance colour on the shapes that ask for it (External Emittance): a lighting
 	 * shape's emissive colour is replaced, an UNLIT effect is tinted (lit effect variants never read it). Read at build. */
@@ -4578,6 +4584,8 @@ static bool cellBuild( NifModel * nif, const CellSceneSpec & specAsked, CellChun
 #endif
 		Vector3 lo( 3.4e38f, 3.4e38f, 3.4e38f ), hi( -3.4e38f, -3.4e38f, -3.4e38f );
 		int fxLitSerial = -1;   // this placement's model in the lit-effect table, once a shape needs it
+		int twSerial = -1;      // lane WINDTREE1: this placement's tree-wind serial, once a Tree_Anim shape needs it
+		float twK[10] = { 0.0f, 0.0f, 0.0f, 0.0f, 3.4e38f, 0.0f, 1.0f, 1.0f, 1.0f, 1.0f };
 		int role = 0;
 		bool soupFoliage = false;   // alpha-tested leaves and grass cards never roof or wall a probe
 		if ( probing && !p.disabled && !pick.marker ) {
@@ -5328,6 +5336,43 @@ static bool cellBuild( NifModel * nif, const CellSceneSpec & specAsked, CellChun
 					placedWaterShapes++;
 				}
 			}
+			/* lane WINDTREE1: a Tree_Anim shape sways about its reference (the game's per-object constants), so each
+			 * placement gets its own buckets: pivot, world sum, 2 x the model's bound (merged shape spheres) x scale, and
+			 * the STAT's DNAM leaf values when the model's root is a BSLeafAnimNode (else amplitude 0, frequency 1). */
+			const bool twHere = treeWindOn && s.nearFacts.treeAnim && !bb && !isActor && !cableSway && !placedWater
+				&& !s.nearFacts.effectShader;
+			if ( twHere ) {
+				if ( twSerial < 0 ) {
+					auto bit = fxLitBound.constFind( mkey );
+					if ( bit == fxLitBound.constEnd() ) {
+						std::array<float, 4> all = { 0.0f, 0.0f, 0.0f, -1.0f };
+						for ( const NativeSrcShape & o : mit.value() ) {
+							float one[4];
+							wwCellFxLitSphere( o.geom.pos.data(), o.geom.pos.size() / 3, one );
+							wwCellFxLitMerge( all.data(), one );
+						}
+						bit = fxLitBound.insert( mkey, all );
+					}
+					const Vector3 piv = p.pos - origin;
+					const float r2 = 2.0f * bit.value()[3] * p.scale;
+					const bool leaf = s.nearFacts.rootLeafAnim;
+					twK[0] = piv[0];
+					twK[1] = piv[1];
+					twK[2] = piv[2];
+					twK[3] = p.pos[0] + p.pos[1] + p.pos[2];
+					twK[4] = r2 > 0.0f ? r2 : 3.4e38f;
+					twK[5] = leaf ? lb.leafAmplitude * p.scale : 0.0f;
+					twK[6] = leaf ? lb.leafFrequency : 1.0f;
+					const Vector3 ax = p.rot * Vector3( 1.0f, 1.0f, 1.0f );   // the object normal's sum, from the world normal
+					twK[7] = ax[0];
+					twK[8] = ax[1];
+					twK[9] = ax[2];
+					twSerial = treeWindModels++;
+					treeWindLeaf += leaf ? 1 : 0;
+				}
+				bbOwn += QStringLiteral( "|TW|%1" ).arg( twSerial );
+				treeWindShapes++;
+			}
 			if ( doorLiveRef && p.ref == doorLiveRef && !isActor ) {   // lane DOORLIVE1: drawn by its copied branch
 				for ( size_t v = 0; v < nv; v++ ) {
 					const Vector3 wp = p.pos + p.rot * ( Vector3( s.geom.pos[v * 3 + 0], s.geom.pos[v * 3 + 1], s.geom.pos[v * 3 + 2] ) * p.scale );
@@ -5364,6 +5409,11 @@ static bool cellBuild( NifModel * nif, const CellSceneSpec & specAsked, CellChun
 			if ( placedWater ) {
 				b.water = true;
 				b.waterRec = *placedWater;
+			}
+			if ( twHere ) {
+				b.treeWind = true;
+				for ( int k = 0; k < 10; k++ )
+					b.treeWindK[k] = twK[k];
 			}
 			if ( fxLitSerial >= 0 && bbOwn.contains( QLatin1String( "|FL|" ) ) )
 				b.fxLit = fxLitSerial;
@@ -5413,6 +5463,10 @@ static bool cellBuild( NifModel * nif, const CellSceneSpec & specAsked, CellChun
 				o.bit = Vector3::crossproduct( o.nrm, o.tan );
 				if ( o.bit.length() < 1.0e-6f )
 					o.bit = Vector3( 0.0f, 0.0f, 1.0f );
+				if ( twHere ) {   // lane WINDTREE1: the bitangent's length carries the sway weight, 2 + the vertex alpha
+					const float wgt = s.geom.rgba.size() >= ( v + 1 ) * 4 ? float( s.geom.rgba[v * 4 + 3] ) / 255.0f : 1.0f;
+					o.bit = o.bit * ( ( 2.0f + wgt ) / o.bit.length() );
+				}
 				o.uv = s.geom.uv.size() >= ( v + 1 ) * 2
 					? Vector2( s.geom.uv[v * 2 + 0], s.geom.uv[v * 2 + 1] )
 					: Vector2( 0.0f, 0.0f );
@@ -7646,6 +7700,8 @@ static bool cellBuild( NifModel * nif, const CellSceneSpec & specAsked, CellChun
 		  << lodgenEditorMarkerInsideModels().join( QLatin1String( "; " ) ) << ")\n";
 		s << "  billboards: " << billboardShapes << " shapes turned to the camera, "
 		  << billboardFlat << " welded flat" << ( glowRed ? " (WW_CELL_GLOW_RED)" : "" ) << "\n";
+		s << "  tree wind: " << ( treeWindOn ? "on" : "off (WW_CELL_TREEWIND)" ) << ", " << treeWindShapes
+		  << " Tree_Anim shapes of " << treeWindModels << " placements (" << treeWindLeaf << " with a BSLeafAnimNode root)\n";
 		s << "  lit effects: " << fxLitShapes << " shapes of " << fxLitModels
 		  << " placed models take their four placed lights"
 		  << ( spec.interior ? "" : fxLitOn ? " (exterior: the sun is the base)" : " (exterior off: RED=indoors)" ) << "\n";

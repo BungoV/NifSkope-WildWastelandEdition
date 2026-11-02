@@ -2300,8 +2300,10 @@ const QVector<LodSrcShape> & lodgenLoadModel( const QString & dataRoot,
 	 * so; the near bake leaves such a base to the engine. Counted here, on the
 	 * one parse, and read by nobody else. */
 	int modelControllers = 0;
-	bool modelParticles = false;	// a particle system rides the same scan
-	bool modelMoves = false;		// a looping sequence, or a free controller (not a particle's)
+	bool modelParticles = false;	// lane SUNCELL1: a particle system rides the same scan
+	bool modelMoves = false;		// lane FXPARITY2: a looping sequence, or a free controller (not a particle's)
+	// lane WINDTREE1: the game hands a STAT's DNAM leaf values to the model's root only when it is a BSLeafAnimNode
+	const bool rootLeafAnim = loaded && src.getBlockCount() > 0 && src.blockInherits( src.getBlockIndex( 0 ), "BSLeafAnimNode" );
 	if ( loaded )
 		for ( int b = 0; b < src.getBlockCount(); b++ ) {
 			const QModelIndex ib = src.getBlockIndex( b );
@@ -2391,6 +2393,7 @@ const QVector<LodSrcShape> & lodgenLoadModel( const QString & dataRoot,
 				nf.lod0Tris = src.get<quint32>( iShape, "LOD0 Size" );
 			nf.modelControllers = modelControllers;
 			nf.modelAnimated = modelControllers > 0;
+			nf.rootLeafAnim = rootLeafAnim;
 			QModelIndex iAlpha = src.getBlockIndex(
 				src.getLink( iShape, "Alpha Property" ) );
 			if ( iAlpha.isValid() ) {

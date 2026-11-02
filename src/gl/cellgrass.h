@@ -61,6 +61,16 @@ bool wwCellGrassIs( Scene * scene, int block );
 //! lane GPUDRIVEN1 step B: the shape waves in the wind (its vertices leave its bounds), so no culling bound holds it.
 bool wwCellGrassIsShape( const void * nif, int block );
 
+/*! lane WINDTREE1: a loaded cell's Tree_Anim shapes sway in the weather's wind, the game's tree law (gl/celltreewind.h,
+ *  ww_treewind.glsl), their sun casters too. WW_CELL_TREEWIND=1 builds them (read at cell open; default OFF: one bucket
+ *  per placement and the bitangent carries the vertex alpha); WW_CELL_TREEWIND_RED=1 builds them but draws them still. */
+bool wwCellTreeWindBuild();
+//! k = pivot xyz (model space), objSum, bound2, amp (x scale), leafFreq, sumAxis xyz (WwTreeWindK's order)
+void wwCellTreeWindShape( const void * nif, int block, const float k[10] );
+bool wwCellTreeWindIsShape( const void * nif, int block );
+//! The shape's constants and this frame's wind; false when the shape is none, the red is on or no weather is loaded.
+bool wwCellTreeWindFor( const void * nif, int block, float k[10], float w[6] );
+
 //! The wind constants from the loaded weather (the engine's wind update): wind = (angle, 0, 0, 0), wind2 = (min * 300,
 //! max * 300, frequency, 1); false without a weather.
 bool wwCellGrassWind( float wind[4], float wind2[4] );
