@@ -1,3 +1,11 @@
+## FARCITYWASH1 (2026-11-02, landed in LAND6): the air's sky-lit veil at most the records' fog colour (default ON)
+- cell_volair.frag airVeilK: per froxel, the open air's mean in-scatter (the sun's share + the env share) brought DOWN to
+  the records' fog colour at that distance and height, never up (lamps, night unchanged), the same scale on lit and
+  shadowed air; exteriors with the cell's sun only. Uniform `volVeil` (src/gl/cellvolair.cpp).
+- Red `WW_CELL_AIR_RED=veilphys`: the old physical level. Census `veil=record|phys`.
+- Gate tests/farcitywash/farcitywash_check.py (G1 law in tree, G2 veil/game 0.6..1.6, G3 one-sided + night bit-equal,
+  G4 shadow ratio kept); `--red` fails 9 rows.
+
 ## FARCARDPICK1 (2026-11-02): the far cards can pick their frames on the GPU (opt-in WW_FARCARD_GPICK=1)
 
 The instanced far cards (drawCardsInstanced) used to run selectFrames + pickCard on the CPU for every visible card,
