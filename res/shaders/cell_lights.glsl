@@ -1248,6 +1248,13 @@ vec2 cellGiVisN = vec2( 1.0, 0.0 );
 #endif
 bool cellGiOneRead = false;
 vec2 cellGiSpecV = vec2( 1.0, 0.0 );	// cellGiFirst's sky visibility on cellSpecSky's lobe (vis2) and its fade (0: no own sky)
+/* DDGIREADPERF2 (fo4_cell 50 ms offline vs 40 with the volume off, the read already one site): every cellGiSample site
+ * and cellSpecSky still inlined the screen texel's upsample (cellGiHalfAt). Under CELL_GI_ONE cellGiFirst takes the
+ * texel once too and leaves it in the memo and cellGiSpecV, the values the sites computed (same call, same P and N).
+ * Red WW_CELL_RTDDGI_ONEHALF=0 (the loader's WW_CELL_GI_ONEHALF_RED): the upsample at every site */
+#if defined( CELL_GI_ONE ) && !defined( WW_CELL_GI_ONEHALF_RED )
+#define CELL_GI_HALF1 1
+#endif
 #endif
 vec4 cellGiSample( vec3 P, vec3 N )
 {
@@ -1257,6 +1264,7 @@ vec4 cellGiSample( vec3 P, vec3 N )
 	/* PERFFIX2 (PERFRES1101 A gap 2): the volume read once a screen texel (cell_gihalf.frag, giHalfPass) and this
 	 * surface upsampled from the texels that are its own (cellGiHalfAt: plane + normal keys); a miss (an edge, a
 	 * blended draw, a probe picture) reads the volume itself below. Red WW_CELL_GI_RATE=inline: no pass. */
+#ifndef CELL_GI_HALF1
 	vec4 hs;
 	if ( cellGiHalfOn && cellPass == 0 && cellProbe == 0 && cellGiHalfAt( P, N, hs ) ) {
 		if ( hs.a > 0.0 )
@@ -1264,6 +1272,7 @@ vec4 cellGiSample( vec3 P, vec3 N )
 		cellGiVisN = hs.a > 0.0 ? vec2( cellGiHalfVis.x, hs.a ) : vec2( 1.0, 0.0 );
 		return hs;
 	}
+#endif
 	if ( cellGiOneRead || ( cellGiMemoOk && ( cellDdgiRed & 16 ) == 0 && P == cellGiMemoP && N == cellGiMemoN ) ) {
 		if ( cellGiMemoS.a > 0.0 )
 			cellGiPath = 12;
@@ -1448,6 +1457,7 @@ float cellSpecSky( vec3 P, vec3 N, vec3 R, float rough )
 	 * WW_CELL_RTDDGI_RED=slowread: the lobe's own read, as before */
 	/* PERFFIX2: with the screen pass, its texel (cellGiHalfAt) holds the sky visibility at the normal, half way and at
 	 * the mirror direction; the lobe's is the three-point read at D's own bend (cellGiHalfLobeVis): no read of its own */
+#ifndef CELL_GI_HALF1
 	vec4 hs;
 	if ( cellGiHalfOn && cellPass == 0 && cellProbe == 0 && cellGiHalfAt( P, N, hs ) ) {
 		if ( hs.a <= 0.0 )
@@ -1456,6 +1466,7 @@ float cellSpecSky( vec3 P, vec3 N, vec3 R, float rough )
 		float vh = 1.0 + hs.a * cellSkyVis * ( clamp( vl, 0.0, 1.0 ) - 1.0 );
 		return cellSpecOcc == 2 ? mix( 1.0, vh, r ) : vh;
 	}
+#endif
 #ifdef CELL_GI_ONE
 	if ( cellGiSpecV.y <= 0.0 )	// DDGIREADPERF1: cellGiFirst's read took the lobe too
 		return 1.0;
@@ -1495,8 +1506,23 @@ void cellGiFirst( vec3 P, vec3 N, vec3 Ns, vec3 R, float rough )
 	if ( !cellDdgiOn )
 		return;
 	vec4 hs;
-	if ( cellGiHalfOn && cellPass == 0 && cellProbe == 0 && cellGiHalfAt( P, Ns, hs ) )
-		return;	// every site takes the screen texel itself
+	if ( cellGiHalfOn && cellPass == 0 && cellProbe == 0 && cellGiHalfAt( P, Ns, hs ) ) {
+#ifdef CELL_GI_HALF1
+		// DDGIREADPERF2: the texel for every site (cellPass 0 here, so Ns is N): cellGiSample's and cellSpecSky's answers
+		float r = clamp( rough, 0.0, 1.0 );
+		bool own = hs.a > 0.0;
+		cellGiMemoOk = true;
+		cellGiMemoP = P;
+		cellGiMemoN = Ns;
+		cellGiMemoS = hs;
+		cellGiMemoV = own ? vec2( cellGiHalfVis.x, hs.a ) : vec2( 1.0, 0.0 );
+		if ( own && cellSpecOcc != 0 && cellGiSky && !cellInterior )
+			cellGiSpecV = vec2( cellSpecOcc == 2 ? cellGiHalfVis.x : cellGiHalfLobe( ( 1.0 - r ) * ( sqrt( 1.0 - r ) + r ), N, R ), hs.a );
+		else
+			cellGiSpecV = vec2( 1.0, 0.0 );
+#endif
+		return;	// without CELL_GI_HALF1 every site takes the screen texel itself
+	}
 	float r = clamp( rough, 0.0, 1.0 );
 	cellDdgiTwo = cellSpecOcc != 0 && cellGiSky && !cellInterior;
 	cellDdgiD2 = cellSpecOcc == 2 ? N : normalize( mix( N, R, ( 1.0 - r ) * ( sqrt( 1.0 - r ) + r ) ) );

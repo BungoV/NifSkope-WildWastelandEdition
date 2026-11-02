@@ -443,6 +443,10 @@ bool NifSkopeOpenGLContext::Shader::load( const QString & filepath )
 			 * (a read inlined at every cellGiSample site, main before the lane). Not static: a set reloads the shaders */
 			if ( qgetenv( "WW_CELL_RTDDGI_ONEREAD" ).trimmed() == "0" && data.contains( "_CELL_GI_ONEREAD" ) )
 				data.insert( data.indexOf( '\n' ) + 1, "#define WW_CELL_GI_ONEREAD_RED 1\n" );
+			/* lane DDGIREADPERF2: cellGiFirst also takes the screen texel once; WW_CELL_RTDDGI_ONEHALF=0 is the red (the
+			 * upsample inlined at every cellGiSample site and cellSpecSky). Not static: a set reloads the shaders */
+			if ( qgetenv( "WW_CELL_RTDDGI_ONEHALF" ).trimmed() == "0" && data.contains( "_CELL_GI_ONEREAD" ) )
+				data.insert( data.indexOf( '\n' ) + 1, "#define WW_CELL_GI_ONEHALF_RED 1\n" );
 		}
 		// lane RESTIRDI1: the RT quality preset's ray-traced shadow ratio (cell_lights.glsl cellShadowF); not static: the row reloads
 		if ( !giMarch && rtddgiRestirShaderDefine() && data.startsWith( "#version" ) && data.contains( "_CELL_RESTIR" ) )
