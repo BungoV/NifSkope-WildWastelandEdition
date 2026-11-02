@@ -4881,8 +4881,36 @@ bool wwCellAoQualityPinned()
 	return ao().qualityPinned;
 }
 
+namespace {
+// lane PERFHUNT2: the obscurance walk's sorted list for the SSR water rays (raw pointers: read only within the paint)
+struct AoSortedList
+{
+	Scene * scene = nullptr;
+	QVector<Node *> nodes;
+};
+AoSortedList & aoSortedList()
+{
+	static AoSortedList l;
+	return l;
+}
+}
+
+bool wwCellAoSortedTake( Scene * scene, NodeList & out )
+{
+	AoSortedList & l = aoSortedList();
+	if ( !scene || l.scene != scene )
+		return false;
+	for ( Node * n : std::as_const( l.nodes ) )
+		out.add( n );
+	l.scene = nullptr;
+	l.nodes.clear();
+	return true;
+}
+
 void wwCellAoPass( Scene * scene, bool run )
 {
+	aoSortedList().scene = nullptr;	// lane PERFHUNT2: a list from an earlier paint is never taken
+	aoSortedList().nodes.clear();
 	if ( !scene || !scene->renderer )
 		return;
 	AoState & a = ao();
@@ -5034,6 +5062,8 @@ void wwCellAoPass( Scene * scene, bool run )
 		scene->collectShapes( second );
 		if ( memo )
 			wwSetupMemoArm( false );
+		aoSortedList().scene = scene;	// lane PERFHUNT2: before the sort below reorders it
+		aoSortedList().nodes = second.list();
 		// lane PERF2FIX1: the sorted draws keep their order; the cut skips only those that wrote nothing here last frame
 		if ( opaqueOnly )
 			wwOpaqueCutArm( true, "ao" );
