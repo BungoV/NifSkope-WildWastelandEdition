@@ -37,14 +37,9 @@ QString baseNameOf( const QString & gamePath )
 	return ( slash >= 0 ) ? p.mid( slash + 1 ) : p;
 }
 
-/*! Find the sheet beside the `.lodm`, if it is there.
- *
- *  Windows does not care about case and MSYS2 sometimes does, and the bake
- *  writes `.DDS` while half the corpus says `.dds`, so the four spellings are
- *  tried rather than assumed. Returns empty when nothing is on disk -- which
- *  is NOT an error: the set may well be installed, and then the game path is
- *  what the resource stack wants.
- */
+//! Find the sheet beside the `.lodm`, if it is there:
+//! Windows does not care about case and MSYS2 sometimes does, and the bake writes `.DDS` while half the corpus
+//! says `.dds`, so the four spellings are tried rather than assumed.
 QString findLocal( const QDir & dir, const QString & gamePath )
 {
 	const QString base = baseNameOf( gamePath );
@@ -65,15 +60,10 @@ QString findLocal( const QDir & dir, const QString & gamePath )
 	return QString();
 }
 
-/*! Read the set's coverage contract, whole or not at all.
- *
- *  `floor`, `test` and `base` only mean anything together (they are three
- *  points of one remap), so a block missing any of them, or one whose numbers
- *  are not ordered floor < test < base <= 255, is left at zero and the drawer
- *  takes the older contract where the alpha IS the fraction. Half a contract is
- *  never guessed at: a wrong decode would silently change the silhouette the
- *  bake measured `half` and every `frameOffset` against.
- */
+//! Read the set's coverage contract, whole or not at all:
+//! `floor`, `test` and `base` only mean anything together (they are three points of one remap), so a block
+//! missing any of them, or one whose numbers are not ordered floor < test < base <= 255, is left at zero and
+//! the drawer takes the older contract where the alpha IS the fraction.
 void readCoverage( const QJsonObject & o, ImpostorCardSet & set )
 {
 	const QJsonObject cov = o.value( "coverage" ).toObject();
@@ -89,10 +79,8 @@ void readCoverage( const QJsonObject & o, ImpostorCardSet & set )
 	}
 }
 
-//! Fill one sheet: what the material named, what is on disk, which one wins.
-//! The loose sibling WINS when it exists. A person who has just baked a set
-//! into a folder and opened it there means that folder's sheets, not whatever
-//! an older copy of the same name in the installed data happens to hold.
+//! Fill one sheet: what the material named, what is on disk, which one wins. The loose sibling WINS when it
+//! exists.
 void fillSheet( ImpostorSheet & sheet, const QDir & dir, const QString & gamePath )
 {
 	sheet.gamePath = gamePath;
@@ -103,10 +91,7 @@ void fillSheet( ImpostorSheet & sheet, const QDir & dir, const QString & gamePat
 		sheet.resolved = sheet.localPath;
 		sheet.fromLocal = true;
 	} else {
-		// Handed to the resource stack as named. Whether IT has the file is
-		// not knowable from here without dragging the whole game-data
-		// machinery into a file the offline gate compiles; the drawer reports
-		// the bind failure, and `notes()` says the sheet was not found loose.
+		// Handed to the resource stack as named.
 		sheet.resolved = gamePath;
 		sheet.fromLocal = false;
 	}
@@ -128,20 +113,8 @@ bool readFloats( const QJsonValue & v, float * out, int n )
 	return true;
 }
 
-/*! `frameOffset` into the set: 2 floats per frame, in the frames' own sheet
- *  order. See `ImpostorCardSet::frameOffset` for what they mean and what
- *  ignoring them does to a blended card.
- *
- *  ABSENCE IS NOT AN ERROR, AND NEITHER IS A SHORT ARRAY. A set baked before
- *  per-frame positioning carries no key at all, and zero offsets are exactly
- *  the law it was baked under, so there is nothing here to refuse. What is
- *  DROPPED is a half-length or non-numeric array: taking the pairs it does
- *  have would silently mix the two laws inside one sheet, and a card wrong
- *  that way is wrong in a manner no reader could attribute. All or none.
- */
-/* THE HORIZON RING (CARDFIX1 step 5): `views` V and `grid` [V,1], together or
- * not at all, and never beside `oct` -- a set that declares both layouts
- * declares neither. False = refused, with the reason in set.error. */
+//! `frameOffset` into the set: 2 floats per frame, in the frames' own sheet order. See
+//! `ImpostorCardSet::frameOffset` for what they mean and what ignoring them does to a blended card.
 bool readRing( const QJsonObject & o, ImpostorCardSet & set, const QString & lodmPath )
 {
 	set.views = o.value( QStringLiteral( "views" ) ).toInt( 0 );
@@ -339,11 +312,8 @@ ImpostorCardSet impostorCardLoad( const QString & lodmPath, int layer )
 		fillSheet( set.emissive, dir, mat.emissive );
 
 	} else if ( mat.kind == QLatin1String( "cardArray" ) ) {
-		/* A cardArray's SHEETS are the array's (one texture array, N x N frames
-		 * per layer, spec 335..389) and its EXTENTS are per layer, because two
-		 * trees in one array are two different sizes. The grid, the frame size
-		 * and the mips are shared -- that is what makes them arrayable at all
-		 * (spec 341: "same frame size class, same grid"). */
+		// A cardArray's SHEETS are the array's (one texture array, N x N frames per layer, spec 335..389) and
+		// its EXTENTS are per layer, because two trees in one array are two different sizes.
 		const QJsonObject arr = mat.root.value( "array" ).toObject();
 		if ( arr.isEmpty() ) {
 			set.error = QString( "%1: kind is \"cardArray\" but there is no array block" ).arg( lodmPath );
@@ -361,7 +331,7 @@ ImpostorCardSet impostorCardLoad( const QString & lodmPath, int layer )
 			return set;
 		}
 		set.layer = want;
-		// lodm 3 (LODMNAME1): the layer's own family picks the colour/mask/emissive
+		// lodm 3: the layer's own family picks the colour/mask/emissive
 		// sheets and its slice in them; the `_n` slice stays the layer's index
 		QString colourPath = mat.color, maskPath = mat.mask, emissivePath = mat.emissive;
 		if ( mat.payloadVersion == 3 ) {

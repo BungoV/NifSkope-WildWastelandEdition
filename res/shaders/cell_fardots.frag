@@ -1,6 +1,6 @@
 #version 410 core
 
-// lane FARVIEW1: a bulb's Gaussian, added into the linear frame (cell_fardots.vert). Lane VOLAIR1: dimmed by the
+// a bulb's Gaussian, added into the linear frame (cell_fardots.vert), dimmed by the
 // air's transmittance to the bulb, as an additive effect is (wwFogFx; red fxfog: the game's fog alone)
 
 #include "uniforms.glsl"

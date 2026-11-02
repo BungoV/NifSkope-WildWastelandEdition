@@ -369,11 +369,9 @@ void cellProjectDecals( const EsmWorld & world, const QString & dataRoot,
 {
 	out = CellDecalResult();
 	out.fates.assign( refs.size(), CellDecalFate::Drawn );
-	/* RED CONTROL (WW_CELL_DECAL_RED): "none" draws no decal, "wide" doubles every
-	 * box's width and height, "axis" projects along the wrong local axis. Each one
-	 * breaks a different claim of tests/spells/cell_decal.sh. "vertexangle" (lane DECALANGLE)
-	 * draws the old per-vertex angle fade instead of the game's per-pixel rule; "nonormalmap" (lane DECALANGLE2)
-	 * reads the interpolated vertex normal instead of the drawn, normal-mapped one. */
+	/* WW_CELL_DECAL_RED debug modes: "none" draws no decal, "wide" doubles every box's width and height,
+	 * "axis" projects along the wrong local axis, "vertexangle" the per-vertex angle fade, "nonormalmap" the
+	 * interpolated vertex normal instead of the drawn one. */
 	const QByteArray red = wwEnv( "WW_CELL_DECAL_RED" ).trimmed().toLower();
 	out.red = QString::fromLatin1( red );
 	const bool redNone = red == "none" || red == "1";

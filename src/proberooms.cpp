@@ -4,10 +4,10 @@ BSD License - see nifskope.h
 
 ***** END LICENCE BLOCK *****/
 
-// lane ROOMCLAMP1: room labels per voxel (proberooms.h)
+// room labels per voxel (proberooms.h)
 
 #include "proberooms.h"
-#include "bakert.h"	// lane RTBAKE1: the bake pools' worker count
+#include "bakert.h"	// the bake pools' worker count
 
 #include <QDir>
 #include <QElapsedTimer>
@@ -165,7 +165,7 @@ bool ProbeRooms::surface( const double p[3], const double n[3], int out[2] ) con
 		if ( at( q, out ) && out[0] >= 0 )
 			return true;
 	}
-	// lane ROOMCLAMP1: both reads in a wall's cells (a floor beside a thin wall, the wall in the same cell column): of
+	// both reads in a wall's cells (a floor beside a thin wall, the wall in the same cell column): of
 	// the 8 cells round either read in the plane of the two axes along the surface (an inner corner's room is the
 	// diagonal one), the air cell nearest its read (the sum of the faces crossed), the 0.75 read first on a tie (a
 	// floor beside an outer wall: the 0.75 read's one air neighbour is the outdoors across the wall)
@@ -220,7 +220,7 @@ bool probeRoomsBuild( const ProbeSoup & soup, const ProbeRoomSpec & spec, ProbeR
 	const bool red26 = spec.red == QLatin1String( "conn26" );
 	const bool redBoxes = spec.red == QLatin1String( "boxes" );
 	const bool redGlass = spec.red == QLatin1String( "glasswall" );
-	const bool redNoMask = spec.red == QLatin1String( "nomask" );   // lane ALPHATEST2: masks ignored (ALPHATEST1 rooms)
+	const bool redNoMask = spec.red == QLatin1String( "nomask" );   // masks ignored (ALPHATEST1 rooms)
 	const bool useMask = !redNoMask && !soup.amask.empty();
 	auto masked = [&]( size_t k ) {
 		return useMask && k < soup.amask.triOf.size() && soup.amask.triOf[k] >= 0;
@@ -236,7 +236,7 @@ bool probeRoomsBuild( const ProbeSoup & soup, const ProbeRoomSpec & spec, ProbeR
 		R.error = QStringLiteral( "rooms: the soup is empty" );
 		return false;
 	}
-	// lane VOLRAY1: an x y clip with no z clip takes z from the triangles inside it, faces left open. A dumped
+	// an x y clip with no z clip takes z from the triangles inside it, faces left open. A dumped
 	// exterior soup carries the far ring (Concord: z -6584..26304 against 4230..10458 in the block), which raised
 	// the cell from about 50 to 95 units.
 	if ( spec.clipLo[0] <= spec.clipHi[0] && spec.clipLo[1] <= spec.clipHi[1] && spec.clipLo[2] > spec.clipHi[2]
@@ -256,7 +256,7 @@ bool probeRoomsBuild( const ProbeSoup & soup, const ProbeRoomSpec & spec, ProbeR
 			hi[2] = std::min( hi[2], zh + 256.0 );
 		}
 	}
-	// lane GIBLACK2: the clip box (proberooms.h ProbeRoomSpec::clipLo). A face it cuts is not the open border.
+	// the clip box (proberooms.h ProbeRoomSpec::clipLo). A face it cuts is not the open border.
 	bool openFace[6] = { true, true, true, true, true, true };   // -x +x -y +y -z +z
 	if ( spec.red != QLatin1String( "soupbox" ) )
 		for ( int c = 0; c < 3; c++ ) {
@@ -317,7 +317,7 @@ bool probeRoomsBuild( const ProbeSoup & soup, const ProbeRoomSpec & spec, ProbeR
 			const int z = int( zs );
 			for ( int k : bySlab[zs] ) {
 				if ( val == 1 && masked( size_t( k ) ) )
-					continue;   // lane ALPHATEST2: below
+					continue;   // below
 				const float * p = &t[size_t( k ) * 9];
 				int g0[2], g1[2];
 				for ( int c = 0; c < 2; c++ ) {
@@ -325,7 +325,7 @@ bool probeRoomsBuild( const ProbeSoup & soup, const ProbeRoomSpec & spec, ProbeR
 					g0[c] = std::max( 0, int( std::floor( ( l - R.origin[c] ) / cell - 0.001f ) ) );
 					g1[c] = std::min( R.dims[c] - 1, int( std::floor( ( u - R.origin[c] ) / cell + 0.001f ) ) );
 				}
-				// lane VOLFIT1: a one-sided face's unit normal x 32, summed into every cell it touches (its front side)
+				// a one-sided face's unit normal x 32, summed into every cell it touches (its front side)
 				int fn[3] = { 0, 0, 0 };
 				const bool face = spec.keep && val == 1 && !soup.isTwoSided( size_t( k ) );
 				if ( face ) {
@@ -357,7 +357,7 @@ bool probeRoomsBuild( const ProbeSoup & soup, const ProbeRoomSpec & spec, ProbeR
 	};
 	mark( soup.glass, 2 );
 	mark( soup.tris, 1 );   // a cell both touch is solid
-	/* lane ALPHATEST2: the masked triangles. Per cell, the samples that land in it and the holes among them; a
+	/* the masked triangles. Per cell, the samples that land in it and the holes among them; a
 	 * cell with samples is solid when holes x 2 < samples, one without takes the triangle's overall share */
 	if ( useMask ) {
 		std::vector<quint32> nSam( N, 0 ), nHole( N, 0 );
@@ -438,7 +438,7 @@ bool probeRoomsBuild( const ProbeSoup & soup, const ProbeRoomSpec & spec, ProbeR
 							const int cx = int( std::floor( ( q[0] - R.origin[0] ) / cell ) );
 							const int cy = int( std::floor( ( q[1] - R.origin[1] ) / cell ) );
 							if ( cx < 0 || cy < 0 || cx >= X || cy >= Y )
-								continue;   // lane GIBLACK2: a sample beyond a clipped face (unclipped: never)
+								continue;   // a sample beyond a clipped face (unclipped: never)
 							const size_t ci = R.index( cx, cy, z );
 							nSam[ci]++;
 							nHole[ci] += soup.amask.hole( k, b1, b2 ) ? 1u : 0u;
@@ -510,7 +510,7 @@ bool probeRoomsBuild( const ProbeSoup & soup, const ProbeRoomSpec & spec, ProbeR
 				if ( m == 1 || ( red26 && m > 1 ) )
 					nb.push_back( { dx, dy, dz } );
 			}
-	auto border = [&]( int x, int y, int z ) {   // lane GIBLACK2: only the faces the clip left open
+	auto border = [&]( int x, int y, int z ) {   // only the faces the clip left open
 		return ( openFace[0] && x == 0 ) || ( openFace[2] && y == 0 ) || ( openFace[4] && z == 0 )
 			|| ( openFace[1] && x == X - 1 ) || ( openFace[3] && y == Y - 1 ) || ( openFace[5] && z == Z - 1 );
 	};
@@ -654,7 +654,7 @@ bool probeRoomsBuild( const ProbeSoup & soup, const ProbeRoomSpec & spec, ProbeR
 					if ( st[j] == 0 && R.a[j] >= 0 && R.a[j] != R.a[i] ) {
 						R.b[i] = R.a[j];
 						R.cellsOpening++;
-						R.openings.push_back( qint32( i ) );	// lane PERF1
+						R.openings.push_back( qint32( i ) );
 						break;
 					}
 				}
@@ -705,7 +705,7 @@ bool probeRoomsBuild( const ProbeSoup & soup, const ProbeRoomSpec & spec, ProbeR
 							break;
 						}
 				}
-	if ( spec.keep ) {   // lane VOLFIT1: the Space stage reads them (probevolumes.cpp)
+	if ( spec.keep ) {   // the Space stage reads them (probevolumes.cpp)
 		for ( size_t i = 0; i < N; i++ )
 			if ( st[i] != 0 )
 				lab[i] = -1;
@@ -729,7 +729,7 @@ QString probeRoomsCensusText( const ProbeRooms & r )
 		.arg( r.cores ).arg( r.coresOutdoors ).arg( r.cellsCore ).arg( r.rooms ).arg( r.pockets ).arg( r.cellsLeft )
 		.arg( r.cellsOpening ).arg( r.glassBoth )
 		.arg( ( r.folded ? QStringLiteral( ", %1 cells folded past 4094 rooms" ).arg( r.folded ) : QString() )
-			+ ( r.cellsMaskOpen + r.cellsMaskSolid   // lane ALPHATEST2 (no masked triangle: the line as before)
+			+ ( r.cellsMaskOpen + r.cellsMaskSolid   // no masked triangle: the line as before
 				? QStringLiteral( "; alpha-tested cells open %1, solid %2" ).arg( r.cellsMaskOpen ).arg( r.cellsMaskSolid )
 				: QString() )
 			+ ( r.clippedFaces ? QStringLiteral( "; clipped to the GI grid's box (faces %1)" ).arg( r.clippedFaces ) : QString() ) )
@@ -758,7 +758,7 @@ bool probeRoomsDump( const ProbeRooms & r, const QString & path, QString * err )
 	return true;
 }
 
-// lane PERF1: the GI volumes' stand-in (proberooms.h giVolumesFromRooms), until the fitter (lane VOLFIT1) lands
+// the GI volumes' stand-in (proberooms.h giVolumesFromRooms), until the fitter lands
 GiVolumeSet giVolumesFromRooms( const ProbeRooms & r, int maxPerRoom )
 {
 	GiVolumeSet V;

@@ -7,33 +7,7 @@ BSD License - see nifskope.h
 #ifndef LODGENBC7_H
 #define LODGENBC7_H
 
-/*! A DETERMINISTIC BC7 (BPTC UNORM) BLOCK ENCODER, written for the card
- *  bake's `_n` sheet (lane IMPOSTORDEPTH2, 2026-09-23; bungo's ruling: the
- *  depth sheet is stored as BC7).
- *
- *  Why: `_n` carries the card's height in B. Under DXT5 that height rode the
- *  5:6:5 colour block, a 5-bit endpoint, and came back off by 2.81 levels on
- *  average (34 units): 28 of the 59 heights the bake wrote survived. BC7 gives
- *  every channel 7- or 8-bit endpoints and up to 16 steps between them.
- *
- *  What is in the tree and what is new:
- *    * the partition table, the anchor table and the three weight tables are
- *      the VENDORED detex ones (lib/libfo76utils/src/bptc-tables.c, ISC
- *      licence), already compiled into NifSkope for the BC7 DECODER in
- *      decompress-bptc.c. They are C symbols, hence the extern "C" below.
- *    * the encoder itself is new and lives only in this header.
- *
- *  Modes tried per block: 6 (one subset, RGBA, 16 steps), 5 (rotations 0-3),
- *  4 (rotations 0-3, both index selections), 7 (two subsets with alpha, best
- *  partitions by a cheap estimate), and 3 and 1 when the block's alpha is all
- *  255. The block keeps the candidate with the least WEIGHTED squared error,
- *  the weight per channel being the caller's (`wt`, RGBA): the card bake
- *  weights the height channel above the others.
- *
- *  Deterministic: no randomness, no thread-dependent state, fixed iteration
- *  counts, ties go to the earlier candidate. The same exe given the same
- *  pixels writes the same bytes. The caller may encode blocks in parallel.
- */
+//! A DETERMINISTIC BC7 (BPTC UNORM) BLOCK ENCODER, written for the card bake's `_n` sheet.
 
 #include <cstdint>
 #include <cstring>

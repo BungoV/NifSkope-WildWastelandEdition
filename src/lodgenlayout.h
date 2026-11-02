@@ -4,7 +4,7 @@
 #include <QString>
 
 
-/*! THE ONE ROOT EVERY FO4CS-TARGET FILE GOES UNDER (lane LAYOUT1, 2026-09-16).
+/*! THE ONE ROOT EVERY FO4CS-TARGET FILE GOES UNDER.
  *
  * bungo, 19:2x: "shouldn't all these files sit under a new single directory
  * then?" -- then 19:3x, and this is the ruling: "The folder should be called
@@ -33,7 +33,7 @@
  *                                        sit beside the worldspaces, not inside
  *                                        one -- a maple is the same maple in
  *                                        the Commonwealth and on Far Harbour
- *   FO4CSLOD/<ws>/<ws>.lodb              the bake ledger (lane BAKEREC1's spot;
+ *   FO4CSLOD/<ws>/<ws>.lodb              the bake ledger (its spot;
  *                                        LAYOUT1 writes nothing there)
  *
  * WHAT DOES NOT MOVE. The stock-engine target is untouched -- its `.BTR`,
@@ -63,36 +63,17 @@ QString lodgenFo4csWorldDir( const QString & modFolder, const QString & ws );
 //! `<modFolder>/FO4CSLOD/Cards` -- the impostor cards, shared by every worldspace.
 QString lodgenFo4csCardDir( const QString & modFolder );
 
-/*! The GAME-RELATIVE spelling written INTO a file, with backslashes and no
- *  leading `Data\`: `FO4CSLOD\<ws>`. The caller prepends whatever `Data\` case
- *  its own format already used, because those two spellings are already in the
- *  shipped files and this lane is not changing them. */
+//! The GAME-RELATIVE spelling written INTO a file, with backslashes and no leading `Data\`: `FO4CSLOD\<ws>`.
 QString lodgenFo4csGameWorldPath( const QString & ws );
 
 //! The game-relative card folder: `FO4CSLOD\Cards`.
 QString lodgenFo4csGameCardPath();
 
 
-/*! THE LAYOUT CENSUS CLAUSE -- read back from the paths actually written.
- *
- * Every FO4CS-target writer hands the path it just wrote to
- * `lodgenNoteLayoutFile()`. The clause then states the ROOT those files landed
- * under, counted from the paths themselves and never from the setting that was
- * meant to produce them (CONSTITUTION 4, the three rules of 2026-09-04 21:33:
- * a census field states what is on disk or it states nothing).
- *
- * It is a tri-state whose default accuses its own plumbing: a run that wrote no
- * FO4CS-target file at all reads `layout n/a`, never `layout <root>, 0 files`,
- * so "nothing was written" and "nothing was asked for" cannot be read as the
- * same sentence. A file noted from OUTSIDE the root is counted and the first
- * one is named, so a writer that escapes the folder says so in the census
- * instead of being found by a gate a year later. */
+//! THE LAYOUT CENSUS CLAUSE -- read back from the paths actually written.
 void lodgenClearLayoutCensus();
 void lodgenNoteLayoutFile( const QString & path );
-/*! Every FILE directly inside `dir`, read off the disk after the pass that
- *  filled it. Used where the writer hands back a report sentence instead of a
- *  file list (the texture, atlas and card arrays), so the clause still counts
- *  what is on disk rather than what was meant to be. */
+//! Every FILE directly inside `dir`, read off the disk after the pass that filled it.
 void lodgenNoteLayoutDir( const QString & dir );
 //! `layout <abs root>, N file(s), 0 outside` / `layout n/a (no FO4CS-target file written)`
 QString lodgenLayoutCensusLine();

@@ -1,4 +1,4 @@
-/*! lane VOLRAY1 (2026-10-27): `volcheck`, the independent ray check of the Space stage's shapes (probevolcheck.h).
+/*! `volcheck`, the independent ray check of the Space stage's shapes (probevolcheck.h).
  *  It shares no code with the fitter (src/probevolumes.cpp): its own .space reader, its own shape containment, its
  *  own lattice; the only common inputs are the soup's triangles and the .space files. */
 #include "probevolcheck.h"
@@ -446,8 +446,8 @@ QString at3( const double p[3] ) { return QStringLiteral( "(%1, %2, %3)" ).arg( 
 int probeVolCheckCli( const QStringList & args )
 {
 	QString soupPath, spacePath, outDir, raysWay = QStringLiteral( "auto" ), mutate, cellsOnly, pngPath, pointsPath;
-	QString indoorRule = QStringLiteral( "openings" );   // lane HALLINDOOR1; "old" = VOLRAY1's rule (the red)
-	double glassMin = 0, glassReach = 128;   // lane ROOMFIT8: a window counts as an opening only if glass covers this much of its open face
+	QString indoorRule = QStringLiteral( "openings" );   // "old" = VOLRAY1's rule (the red)
+	double glassMin = 0, glassReach = 128;   // a window counts as an opening only if glass covers this much of its open face
 	double h = 16, margin = 128, tolPoke = 4, tolSkin = 8, tolGap = 4096, skyMax = 0.25, openMax = 0.25, reach = 1536;
 	int K = 32;
 	for ( int i = 0; i < args.size(); i++ ) {
@@ -691,7 +691,7 @@ int probeVolCheckCli( const QStringList & args )
 	}
 	// the indoor rule's openings: every window (glass: light passes, air does not) between a room and the outside;
 	// doors and plain openings stay outdoor air
-	// ROOMFIT8: the fit calls a threshold a window when any of its cells touches glass; here rays cross each window's box
+	// the fit calls a threshold a window when any of its cells touches glass; here rays cross each window's box
 	// along its thin axis (12 x 12) and count the first hit: glass, solid (frame, wall), or nothing (air passes)
 	ProbeVolOpenings openings;
 	QString glassLine;

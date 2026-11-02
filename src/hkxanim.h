@@ -6,7 +6,7 @@
    The format contract, every offset traced to the 1.10.155 exe's hkClass
    reflection and to the engine's own decoder (checked in Todd's treat), is
    docs/HKX_ANIMATION_FORMAT.md. This reader implements exactly what that page
-   states and refuses, by name, everything it does not (lane HKX1, 2026-09-10).
+   states and refuses, by name, everything it does not.
 
    Two routes behind one call:
      route A  an HKXPACK unpack of the file (.xml)          hkxAnimLoadXml
@@ -80,10 +80,8 @@ struct HkxAnimClip
 	//! track i drives bone trackToBone[i] of the skeleton named above
 	//! (hkaAnimationBinding::transformTrackToBoneIndices)
 	QVector<int> trackToBone;
-	//! true when the file gave no mapping and the identity map was used:
-	//! either there is no hkaAnimationBinding at all, or its
-	//! transformTrackToBoneIndices is EMPTY (third-party clips). Names the
-	//! serving arm, so a consumer never reports a derived map as a stored one.
+	//! true when the file gave no mapping and the identity map was used: either there is no hkaAnimationBinding
+	//! at all, or its transformTrackToBoneIndices is EMPTY (third-party clips).
 	bool trackToBoneIsIdentity = false;
 	//! per track, its annotations (text keys), in file order
 	QVector<QVector<HkxAnnotation>> annotations;

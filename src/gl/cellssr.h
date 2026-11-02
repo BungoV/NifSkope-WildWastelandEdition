@@ -9,33 +9,10 @@ BSD License - see nifskope.h
 
 class Scene;
 
-/*! THE SCREEN-SPACE REFLECTIONS (lane SSR1, docs/PRTP_PLAN.md "screen-space reflections"): the game's, from its
- *  own shaders. The game draws its opaque frame WITHOUT the reflection term, then, at half the view: a ray per
- *  flagged pixel (the view ray mirrored about the normal, its world z doubled first; kept when it points more
- *  than 0.2 into the view), a march of at most 32 steps over the min-of-2x2 depth mips (4 levels; at the finest
- *  a ray 50 units or more behind the surface is refused), the hit's color with a confidence (screen edge,
- *  travelled distance, 25 x the depth gained / (far - near)), squared; a 5-tap blur across and down where taps
- *  without confidence hand their weight on; and its composite takes lerp(cube, reflection, confidence) in
- *  lane CUBE1's term. A surface carries the flag when its material is environment-mapped and its material file's
- *  reflections switch is on. near = 15; far = the cell's clip distance (XCLL, or its lighting template's).
- *  Here: wwCellSsrPass draws the frame's opaque cell-lit fragments once more (probe 60: the lit color without
- *  reflection, obscurance and fog; alpha = the flag) into a full-size float target, runs
- *  res/shaders/cell_ssr.frag over it and lane AO1's depth pyramid (one pyramid, not two), and the cell programs
- *  mix the bilinear sample into their cube term: cellSsrMix in res/shaders/cell_ssr.glsl is the ONE place the
- *  reflection enters the picture. Interiors only; part of the Cell lights row. The opaque pass and depth pyramid
- *  run whenever SSR is on, whatever the Ambient Occlusion row or method (lane SSAO2: WW_CELL_AO_SSR_RED=old drops them).
- *  The march reads LINEAR light, before the imagespace's tone map (the cell view applies that per fragment,
- *  after the point the scene pass taps). When the frame becomes one linear target with a single tone map, it
- *  should read that same opaque linear frame before the reflection term, and cellSsrMix moves with the cube term.
- *  ASSUMED, not read from the game: (1) the four scales and near / far sit in the constant rows in the order
- *  their uses imply; (2) the depth pyramid the march loads is the obscurance's; (3) the ray pass point-samples
- *  its inputs; (4) the composite reads the blurred result bilinearly. DEVIATIONS: float targets (the game
- *  keeps the march and the blurs in 8 bits); the color marched is the cell view's own opaque frame (its
- *  emissive is added after the square root, lane CUBE1's form); a material set in a NIF without a material
- *  file carries no flag; exteriors are not done.
- *  Pins: WW_CELL_SSR_RED=off (computed, not applied) | nogap (no 50-unit refusal) | nofade (confidence 1 on a
- *  hit), WW_CELL_SSR_DUMP=<file> (the inputs, the ray, the march, the blurred result, the numbers;
- *  tests/spells/cell_ssr.sh). Probe 61: the reflection as a draw read it. */
+/*! The game's screen-space reflections: re-draws the opaque cell-lit fragments into a float target, marches
+ *  res/shaders/cell_ssr.frag over the AO pass's depth pyramid, and cellSsrMix (cell_ssr.glsl) is the one place the
+ *  result enters the picture. Needs the obscurance's pass. Debug: WW_CELL_SSR_RED=off|nogap|nofade,
+ *  WW_CELL_SSR_DUMP=<file>. */
 void wwCellSsrPass( Scene * scene, bool run );
 /*! Rows "SSR" (WW_CELL_SSR, default on) and "SSR outdoors" (WW_CELL_SSR_EXT, ships OFF). */
 bool wwCellSsrOn();
@@ -47,8 +24,8 @@ void wwCellSsrNote( bool flagged );
 //! called with every program setupProgram binds: the scene pass's masks, and the reflection a flagged draw reads
 void wwCellSsrDraw( Scene * scene, bool cellProgram );
 
-/*! Lane PERF3, on since PERF5 (a speed change; WW_CELL_SSR_PREV=0, WW_CELL_SSR_PREV_RED=1 or WW_PERF3_RED=1: the
- *  second scene pass as before). The reflections draw no second scene pass: the obscurance pass writes the flag into
+/*! On by default (WW_CELL_SSR_PREV=0, WW_CELL_SSR_PREV_RED=1 or WW_PERF3_RED=1: the second scene pass as before).
+ *  The reflections draw no second scene pass: the obscurance pass writes the flag into
  *  stencil bit 0x01 of its depth buffer, and a hit samples the previous frame's linear color (kept at the end of
  *  the HDR frame) reprojected into its camera. Falls back to the scene pass when there is no previous frame of
  *  this size and document, when the water's rays or the bounce need the pass. */
@@ -60,9 +37,9 @@ void wwCellSsrKeepFrame( Scene * scene, unsigned int hdrFbo, int w, int h );
 
 /*! Water reflections: when a cell water with the WATR SSR flag draws, wwCellSsrPass also draws the water into a
  *  ray target and the march uses that ray where the water is in front (outdoors the pass runs for water alone).
- *  Lane FIX1101A (src/gl/cellssrwater.h): the water's part has its own row, WW_CELL_SSR_WATER / WW/CellSsrWater, ON
- *  by default indoors and outdoors whatever the SSR row; with the SSR row off the pass runs for the water alone and
- *  reuses the previous frame (PERF3). Red WW_CELL_SSR_WATER_RED=1: the water follows the SSR row as before. */
+ *  The water's part has its own row (src/gl/cellssrwater.h), WW_CELL_SSR_WATER / WW/CellSsrWater, ON by default
+ *  indoors and outdoors whatever the SSR row; with the SSR row off the pass runs for the water alone and reuses the
+ *  previous frame. Red WW_CELL_SSR_WATER_RED=1: the water follows the SSR row as before. */
 //! lane FIX1101A: the water ray pass reflects off the flat surface and the colour pass bends the read (water_refl.glsl
 //! wwWaterSsrBend); false under WW_CELL_SSR_WATER_RED=1 (the ray from the full normal)
 bool wwCellSsrWaterFlat();

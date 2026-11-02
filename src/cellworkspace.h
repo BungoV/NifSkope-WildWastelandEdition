@@ -173,12 +173,12 @@ private:
 	QActionGroup * cellFarLodTypeGroup = nullptr;   // lane FARLOD1: Vanilla | FO4CS
 	QMenu * cellFarGround = nullptr;   // lane FARDRAW1: Baked | Live, shader decals | Live, cached pages
 	QActionGroup * cellFarGroundGroup = nullptr;
-	QMenu * cellFarGroundQ = nullptr;   // lane FARDRAW1: the cached pages' sharpness
+	QMenu * cellFarGroundQ = nullptr;   // the cached pages' sharpness
 	QActionGroup * cellFarGroundQGroup = nullptr;
-	QAction * cellTaa = nullptr;      // lane MOTION1: the game's temporal AA (one state with the Scene popup's row)
-	QMenu * cellModernTaa = nullptr;	// lane TAA2: Off | Low | Medium | High | Ultra
+	QAction * cellTaa = nullptr;      // the game's temporal AA (one state with the Scene popup's row)
+	QMenu * cellModernTaa = nullptr;	// Off | Low | Medium | High | Ultra
 	QActionGroup * cellModernTaaGroup = nullptr;
-	// lane CELLALL1: the second row, the features that were env-only (their defaults unchanged; new ones ship off)
+	// the second row, the features that were env-only (their defaults unchanged; new ones ship off)
 	QAction * cellAo = nullptr;
 	QAction * cellShadow = nullptr;
 	QAction * cellFlicker = nullptr;	// lane LIGHTFLICKER1: the lamps' LIGH flicker (ships off)
@@ -201,7 +201,7 @@ private:
 	QAction * cellAoDecal = nullptr;
 	QAction * cellSpecOcc = nullptr;	// lane SPECOCC1: specular occlusion from the baked sky visibility; ships off
 	QAction * cellGiGpu = nullptr;
-	QAction * cellEmissiveGrid = nullptr;	// lane EMISSIVEGRID1
+	QAction * cellEmissiveGrid = nullptr;
 	QAction * cellParticles = nullptr;	// placed models' particle systems (cellview.h); ships off
 	QAction * cellGrass = nullptr;    // the game's grass (placed at cell open)
 	QAction * cellDof = nullptr;      // the game's depth of field

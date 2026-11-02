@@ -1,3 +1,13 @@
+## LEANCOMMENTS3R (2026-11-02): lean comments, re-cut on the parked-free chain G (MERGEFIX1102 item 4)
+
+- Comment-only (tests/spells/comments_only_check.py: 0 FAIL). LEANCOMMENTS3's trim (LEANCOMMENTS2's 72 files, the
+  edits LEANCOMMENTS1 left unlanded, lane names cut out of mid-sentence comments) re-cut on land1102g + the coldlink2
+  merge: the three blocks the 3-way could not place (cellgrass.cpp, lodgen.cpp next to WINDTREE1's lines; the
+  glview.cpp pass list) take the base's code lines with the lane tags cut; the parked RT reflection pass line is not
+  brought in. Lane history stays in the commit log and this file.
+- The AO quality comments lose their lane tags. They stay true: since BUGS1102 the built-in presets step the AO tier
+  (src/ui/cellpresettable.h row CellWorkspaceAoQuality).
+
 ## DOFLENS1 (2026-11-02): a thin-lens depth of field (bokeh, near / far), the gameplay states
 
 New row "Lens depth of field" (cell Show menu, under the vanilla camera master; switch WW_CELL_DOF_LENS, key

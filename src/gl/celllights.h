@@ -26,10 +26,8 @@ class Scene;
 //! lane BINDLESS2FIX (gl/cellbindless.cpp): WW_BINDLESS_RED=cellname, the bindless twins not taken as cell programs
 bool wwBlCellNameRed();
 
-/*! lane SUNCELL1: a cell-lit program by name -- fo4_cell / pbrm_cell, and their cascade variants fo4_cellcsm /
- *  pbrm_cellcsm (the same shaders with the Lookdev sun shadows compiled in, chosen while the map is built).
- *  lane BINDLESS2FIX: and the bindless twins fo4_cellbl / fo4_cellcsmbl, which stand in for fo4_cell / fo4_cellcsm
- *  (without them every cell uniform -- lights, sun, AO, fog, linear output -- skipped the twin: a black, fogless frame) */
+/*! A cell-lit program by name: fo4_cell / pbrm_cell, their sun-cascade variants and the bindless twins
+ *  (a program missing here skips every cell uniform: a black, fogless frame). */
 inline bool wwIsCellProgramName( std::string_view n )
 {
 	return n == "fo4_cell.prog" || n == "pbrm_cell.prog" || n == "fo4_cellcsm.prog" || n == "pbrm_cellcsm.prog"
@@ -280,14 +278,9 @@ quint64 wwCellLightsStateKey( Scene * scene );
 bool wwCellEmissiveGridOn();
 void wwCellEmissiveGridSetOn( bool on );
 
-/*! lane PROBEVIEW1: the PRTP band's Pass (Division deck, s18/s40/s65 views). 0 Combined (the frame as drawn),
- *  1 GI (the probe grid's E / pi on the surface's normal), 2 Sky visibility (the probes' open-sky share on the
- *  normal), 3 Surfel color, 4 Surfel light, 5 Brick light (lane BRICK1) (src/gl/cellprobeview.h draws the surfels over a cyan frame),
- *  6 Probe coverage (lane WALLSTACK1: magenta where the GI grid's valid share k, after the rooms and seen filtering, is 0,
- *  so exactly where the probe term lights nothing; grey 0.25 + 0.5 k elsewhere).
- *  Stored as WW/CellPass; the pin WW_CELL_PASS (number or entry name) wins. WW_CELL_PV_RED=direct|nonormal|open|noclamp|nosee|borrow|lendamb|strand|firstslot|tiepick|lonesky|nofilter|nolastfill.
- *  Lane GIWALL2: WW_CELL_GIWALL_RED=off: a GI voxel whose centre is in solid or behind a wall (from the surface) counts
- *  again, in both GI visibility modes (res/shaders/cell_lights.glsl cellGiWall). */
+/*! The PRTP band's Pass: 0 Combined, 1 GI, 2 Sky visibility, 3 Surfel color, 4 Surfel light, 5 Brick light,
+ *  6 Probe coverage. Stored as WW/CellPass; WW_CELL_PASS (number or name) wins; WW_CELL_PV_RED and
+ *  WW_CELL_GIWALL_RED are harness switches. */
 QStringList wwCellPassNames();
 int wwCellPass();
 //! the Pass this document draws: the stored one once its bake is relit (a GI grid published), else Combined
@@ -459,13 +452,8 @@ void wwCellImageSpaceMeasuring( bool on );
 bool wwCellImageSpaceIsMeasuring();
 //! effects write their color into the measure, as the game's effects feed its adaptation and bloom
 bool wwCellImageSpaceMeasuresEffects();
-/*! THE EFFECTS (lane EFX2, docs/PRTP_PLAN.md 2q): a cell-lit effect draws with fo4_effectcell.prog, the game's
- *  effect shader (Shaders011.fxp, the effect group) transcribed: no room light (its only "lighting" is a
- *  script-set emit colour, white when unset), colour linear (texture and base colour decoded with 2.2), alpha x the
- *  soft fade x the near fade for a Soft effect, the fog, then the cell's imagespace (no bloom: the frame has it).
- *  WW_CELL_FX_RED=legacy (the viewer's effect shader, as before), nosoft (both fades 1), nolin (no 2.2 decode),
- *  hide (the gate's reference: cell-lit effects draw nothing), prewater (lane GLOWHAZE1: the soft fade reads the depth
- *  grabbed before the water drew, as before), comma-separated. tests/spells/cell_fx.sh gates it. */
+/*! A cell-lit effect draws with fo4_effectcell.prog, the game's effect shader transcribed (linear color, soft
+ *  fade, fog, imagespace). WW_CELL_FX_RED=legacy|nosoft|nolin|hide|prewater: harness switches. */
 int wwCellFxRed();
 //! the measured mean luminance of the last measure (negative before any)
 void wwCellImageSpaceSetAdapted( Scene * scene, float lum, int pixels );

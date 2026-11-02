@@ -8,10 +8,10 @@ BSD License - see nifskope.h
 #include "wwswitch.h"	// lane TESTDRIVER1: the WW_* switch store
 
 #include "gl/cellclustergl.h"
-#include "gl/alphabgsm.h"	// lane ALPHABGSM1: the side passes' alpha-test census
+#include "gl/alphabgsm.h"	// the side passes' alpha-test census
 #include "gl/cellssr.h"
-#include "gl/cellvolair.h"	// lane VOLAIR1
-#include "gl/shadowset.h"	// lane TERRSHADOW1
+#include "gl/cellvolair.h"
+#include "gl/shadowset.h"
 #include "gl/glnode.h"
 #include "gl/glscene.h"
 #include "gl/glshape.h"
@@ -20,15 +20,15 @@ BSD License - see nifskope.h
 #include "gl/cellhdr.h"
 #include "gl/cellbloom.h"	// lane BLOOM1b
 #include "gl/cellaodecalgl.h"	// lane AODECAL1
-#include "gl/cellaomethod.h"	// lane SSAO2
-#include "gl/cellcull.h"	// lane DECALANGLE2: wwCellDecalMappedHas
-#include "gl/cellpasstime.h"	// lane PERF2: sub-stage timers
-#include "gl/celldrawstate.h"	// lane PERF3
-#include "gl/lookdevstage.h"	// lane SUNCELL1
-#include "gl/cellwater.h"	// lane SUNCELL1: water casts no cube shadow
-#include "gl/cellunderwater.h"	// lane WATERUNDER3: the WATR INAM imagespace under water
+#include "gl/cellaomethod.h"
+#include "gl/cellcull.h"	// wwCellDecalMappedHas
+#include "gl/cellpasstime.h"	// sub-stage timers
+#include "gl/celldrawstate.h"
+#include "gl/lookdevstage.h"
+#include "gl/cellwater.h"	// water casts no cube shadow
+#include "gl/cellunderwater.h"	// the WATR INAM imagespace under water
 #include "esmwater.h"
-#include "gl/cellwatergi.h"	// lane PRTP6: water reads no probe GI
+#include "gl/cellwatergi.h"	// water reads no probe GI
 #include "gl/celllampshadow.h"	// lane LAMPSHADOW1
 #include "gl/cubefacecull.h"	// lane PERFFIX2 b: a caster draws only into the cube faces it can reach
 #include "gl/lampslice.h"	// lane PERFFIX2 b: the lamp store's first stores spread over frames
@@ -84,15 +84,15 @@ namespace
 constexpr int kTextureUnit = WwCellUnit::Lights;		// TexCache allocates from unit 0 upward; 15 is the CSM map
 constexpr int kTexelsPerLight = 8;		// lane SHADOW1 added the 5th: shadow slot, kind, near clip, XLIG bias;
 										// lane HEMI1 the 6th to 8th: the box rows (cell_lights.glsl CELL_TPL)
-constexpr int kGiUnit = WwCellUnit::Gi;			// lane PRTPGI: the bounce grid (sampler3D)
-constexpr int kGiSlotUnit = WwCellUnit::GiSlot;		// lane ROOMCLAMP1: the grid's slot rooms, the fine rooms (sampler3D, R32F); off
+constexpr int kGiUnit = WwCellUnit::Gi;			// the bounce grid (sampler3D)
+constexpr int kGiSlotUnit = WwCellUnit::GiSlot;		// the grid's slot rooms, the fine rooms (sampler3D, R32F); off
 constexpr int kRoomUnit = WwCellUnit::Room;		// on a GPU with fewer than 20 units (the blend before the lane)
-constexpr int kFarSlotUnit = WwCellUnit::FarSlot;	// lane FARVIEW1: the far table's slots (usamplerBuffer), records (samplerBuffer) and the
+constexpr int kFarSlotUnit = WwCellUnit::FarSlot;	// the far table's slots (usamplerBuffer), records (samplerBuffer) and the
 constexpr int kFarRecUnit = WwCellUnit::FarRec;		// GI grid's placed share (sampler3D); off on a GPU without FarPlaced (cellunits.h)
 constexpr int kFarPlacedUnit = WwCellUnit::FarPlaced;
-constexpr int kLutUnit = WwCellUnit::Lut;		// lane IMGS1: the imagespace LUT (sampler3D)
-constexpr int kBloomUnit = WwCellUnit::Bloom;		// lane BLOOM1: the imagespace bloom (sampler2D, a quarter of the view)
-constexpr int kShadowUnit = WwCellUnit::Shadow;		// lane SHADOW1: the lights' depth cubes (samplerCubeArrayShadow)
+constexpr int kLutUnit = WwCellUnit::Lut;		// the imagespace LUT (sampler3D)
+constexpr int kBloomUnit = WwCellUnit::Bloom;		// the imagespace bloom (sampler2D, a quarter of the view)
+constexpr int kShadowUnit = WwCellUnit::Shadow;		// the lights' depth cubes (samplerCubeArrayShadow)
 constexpr int kShadowSlots = 16;	// shadowed lights at once, the nearest the camera
 constexpr int kShadowFace = 512;	// texels a cube face edge (the game's 2048 paraboloid's centre texel at 1024)
 
@@ -103,9 +103,9 @@ float cellExposure( const float * h, float adapted )
 	const float cap = wwLookOn( WwLook::ExposureWide ) ? std::max( h[4], 16.0f ) : h[4];
 	return std::min( std::max( h[8] / ( adapted + 0.001f ), h[5] ), cap );
 }
-// lane GAPLOOK1 (LIGHTSYS-3): the budget's distance fade, Godot's Light3D shadow fade (40 to 50 m) at 70 units a metre
+// the budget's distance fade, Godot's Light3D shadow fade (40 to 50 m) at 70 units a metre
 constexpr float kShadowFadeBegin = 2800.0f, kShadowFadeEnd = 3500.0f;
-constexpr int kAmbientSlots = 16;	// lane AMBO2: Ambient Only volumes a cell (Fallout4.esm's most in one cell: 5, measured)
+constexpr int kAmbientSlots = 16;	// Ambient Only volumes a cell (Fallout4.esm's most in one cell: 5, measured)
 
 //! one bloom per document: the blurred bright pass, rgb floats, w x h (rows bottom-up, as read back)
 struct ClBloom
@@ -168,9 +168,9 @@ struct ClState
 	int pass = 0;           // the PRTP band's Pass (WwCellPass); WW_CELL_PASS pins it
 	bool passPinned = false;
 	int passRed = 0;        // WW_CELL_PV_RED: 1 direct, 2 nonormal (the shader), 4 open (every sky direction open), 8 noclamp, 16 nosee, 32 borrow, 64 lendamb, 128 strand, 256 firstslot, 512 tiepick, 1024 lonesky, 2048 nofilter, 4096 nolastfill; 8192 WW_CELL_GIWALL_RED=off
-	int giAmb = 1;          // lane GICAL1: WW_CELL_GI_AMB = keep (0) | replace | off | max | asgi (the measure's red); lane GIAMB1: replace by default (his ruling), keep = the gate's red
-	bool giFill = true;     // lane GICAL1: WW_CELL_GI_FILL=0 leaves the GI's gaps black (as before the lane)
-	// lane LIGHTFLICKER1: the Light flicker row (WW/CellFlicker, pin WW_CELL_FLICKER), its red and gate pins
+	int giAmb = 1;          // WW_CELL_GI_AMB = keep (0) | replace | off | max | asgi (the measure's red); replace by default (his ruling), keep = the gate's red
+	bool giFill = true;     // WW_CELL_GI_FILL=0 leaves the GI's gaps black
+	// the Light flicker row (WW/CellFlicker, pin WW_CELL_FLICKER), its red and gate pins
 	bool flickerOn = false, flickerPinned = false, flickerRed = false;
 	float flickerStep = 0.0f;	// > 0: WW_CELL_FLICKER_STEP, seconds a frame
 	bool flickerClockRed = false;	// lane PERFFIX2 a: WW_CELL_FLICKER_CLOCK_RED=1, the wall-clock dt per painted frame
@@ -210,7 +210,7 @@ ClState & st()
 		} else {
 			s.giOn = QSettings().value( QStringLiteral( "WW/CellGi" ), false ).toBool();
 		}
-		const QByteArray farPin = wwEnv( "WW_CELL_FAR" );	// lane FARVIEW1
+		const QByteArray farPin = wwEnv( "WW_CELL_FAR" );
 		if ( !farPin.isEmpty() ) {
 			s.farPinned = true;
 			s.farOn = farPin.trimmed() != "0";
@@ -242,8 +242,8 @@ ClState & st()
 		s.shadowOn = s.shadowPinned ? shPin != "0" : QSettings().value( QStringLiteral( "WW/CellShadow" ), true ).toBool();
 		s.shadowRed = wwEnv( "WW_CELL_SHADOW_RED" ).trimmed() == "noshadow";
 		s.fogProbe = wwEnvInt( "WW_CELL_FOG_PROBE" );
-		const QByteArray giAmb = wwEnv( "WW_CELL_GI_AMB" ).trimmed();	// lane GICAL1
-		s.giAmb = giAmb == "keep" ? 0 : giAmb == "off" ? 2 : giAmb == "max" ? 3 : giAmb == "asgi" ? 4 : 1;	// lane GIAMB1: unset = replace
+		const QByteArray giAmb = wwEnv( "WW_CELL_GI_AMB" ).trimmed();
+		s.giAmb = giAmb == "keep" ? 0 : giAmb == "off" ? 2 : giAmb == "max" ? 3 : giAmb == "asgi" ? 4 : 1;	// unset = replace
 		s.giFill = wwEnv( "WW_CELL_GI_FILL" ).trimmed() != "0";
 		const QByteArray red = wwEnv( "WW_CELL_LIT_RED" ).trimmed();
 		if ( red == "linear" )
@@ -1419,7 +1419,7 @@ static void nifxTick( const void * nif )
 }
 
 /* WW_CELL_CAM_DUMP=<file>: the camera in world units, rewritten when it moves (the fog and diffuse gates measure from it).
- * lane CELLSPAWN2: called by GLView::paintGL every frame, so a cell drawn with the Cell lights row off (fo4_default.prog,
+ * called by GLView::paintGL every frame, so a cell drawn with the Cell lights row off (fo4_default.prog,
  * no cell uniforms) still says where its eye is; the CELLSPAWN1 hold read "drawn camera none" on every row. */
 void wwCellCamDump( Scene * scene )
 {
@@ -2243,18 +2243,18 @@ void wwCellLightsUniforms( Scene * scene )
 	rec.b( prog, "cellGiOn", giDraw );
 	rec.live( 1 );	rtddgiCellUniforms( scene );	// lane RTXGI1 M2: the ray-traced GI volume (src/rtddgicell.h); no-op in an off program
 	prof.at( 9, "rtddgi" );
-	// lane PRTOFF1: without the PRT a weather-lit exterior's sky is the ray-traced volume's (its misses: cell_lights.glsl CELL_GI_UP)
-	const bool ddgiSky = !wwCellPrtOn() && L && wwCellAsOutdoor( L ) && wwLookdevActive();	// lane INTSKY1: + sunlit interiors
+	// without the PRT a weather-lit exterior's sky is the ray-traced volume's (its misses: cell_lights.glsl CELL_GI_UP)
+	const bool ddgiSky = !wwCellPrtOn() && L && wwCellAsOutdoor( L ) && wwLookdevActive();	// + sunlit interiors
 	rec.b( prog, "cellGiSky", ( giDraw && !skyDraw && G->skyLit ) || ddgiSky );	// lane SKY1 (never on the sky-share grid)
-	rec.f( prog, "cellSkyVis", wwCellSkyVis() );	// lane SKYSTR1: the Sky visibility row, for the AO decals
-	// lane SPECOCC1: the sky grid's slabs start after the GI's own (6, or 12 with the rooms' second slot)
+	rec.f( prog, "cellSkyVis", wwCellSkyVis() );	// the Sky visibility row, for the AO decals
+	// the sky grid's slabs start after the GI's own (6, or 12 with the rooms' second slot)
 	const bool specOccDraw = giDraw && !skyDraw && G->skyLit && g.giSpecSky;
-	rec.i( prog, "cellSpecOcc", specOccDraw || ddgiSky ? wwCellSpecOccMode() : 0 );	// lane PRTOFF1: or the volume's sky visibility
+	rec.i( prog, "cellSpecOcc", specOccDraw || ddgiSky ? wwCellSpecOccMode() : 0 );	// or the volume's sky visibility
 	rec.f( prog, "cellSpecSkyBase", specOccDraw ? ( G->slotRooms.empty() ? 6.0f : 12.0f ) : 0.0f );	// 0: no sky slot (the water reads it)
-	rec.i( prog, "cellGiAmb", s.giAmb );	// lane GICAL1
+	rec.i( prog, "cellGiAmb", s.giAmb );
 	rec.b( prog, "cellGiFill", s.giFill && !skyDraw );	// the gap fill is the GI grid's, never the sky share's
-	rec.i( prog, "cellPass", pass );	// lane PROBEVIEW1
-	rec.i( prog, "cellPassRed", s.passRed & ~4 );	// lane GIWALL2: + 8192 WW_CELL_GIWALL_RED=off	// lane WALLSTACK1: + 2048 nofilter, 4096 nolastfill (was & 251, which dropped them)	// lane ROOMCLAMP1: + 8 noclamp; lane GISHADE1: + 16 nosee; lane GIBLACK1: + 32 borrow; lane GIBLACK2: + 64 lendamb, 128 strand
+	rec.i( prog, "cellPass", pass );
+	rec.i( prog, "cellPassRed", s.passRed & ~4 );	// + 8192 WW_CELL_GIWALL_RED=off	// + 2048 nofilter, 4096 nolastfill (was & 251, which dropped them)	// + 8 noclamp; + 16 nosee; + 32 borrow; + 64 lendamb, 128 strand
 	if ( giDraw ) {
 		rec.f3( prog, "cellGiOrigin", G->origin[0], G->origin[1], G->origin[2] );
 		rec.f( prog, "cellGiVoxel", G->voxel );
@@ -2522,12 +2522,12 @@ void wwCellLightsUniforms( Scene * scene )
 	 * the imagespace Sunlight Scale (the imagespace HDR data's 7th float, HNAM's 7th float) in
 	 * cb2[12]; the scene's directional outdoors is the sun. No ambient: the lit asm reads cb2 rows 0..14 only
 	 * (lights 0..11, base 12, alpha 13..14).
-	 * lane ALLON2 (2026-10-12, the Goodneighbor steam drew near-white): the game puts that same Sunlight Scale on the
+	 * the game puts that same Sunlight Scale on the
 	 * SURFACES' sun too (the lit-surface and deferred-light setups both multiply the imagespace Sunlight Scale
 	 * in; checked in Todd's treat), so effect and wall keep a 1:1 sun. This
 	 * viewer's surfaces take the sun unscaled, so a lit effect takes the surfaces' scale (1): with x4.5 it drew 4.5x
 	 * brighter than the wall behind it. Red WW_CELL_FXLIT_SCALE_RED=game puts the Sunlight Scale back (in and out).
-	 * lane EFFECTPARITY1: the colour is not the sunlight. The game's per-frame sun update copies the sky's colours into the sun light:
+	 * the colour is not the sunlight. The game's per-frame sun update copies the sky's colours into the sun light:
 	 * the diffuse (what the surfaces read) from the weather's Sunlight row, and a second colour (the light's
 	 * effect colour) from its Effect Lighting row (NAM0 row 9); the effect
 	 * shader's lit branch reads that effect colour. CommonwealthClear at noon: Sunlight 225 grey, Effect Lighting 150 grey
@@ -3233,8 +3233,8 @@ QString wwCellLightsEcho( Scene * scene )
 		o += QStringLiteral( " pass=%1(asked=%2 %3, sky=%4, pvred=%5)" ).arg( scene ? wwCellPassFor( scene->nifModel ) : 0 )
 			.arg( s.pass ).arg( wwCellPassNames().value( s.pass ) ).arg( G && !G->sky.empty() ? 1 : 0 ).arg( s.passRed );
 	return o + QLatin1Char( ' ' ) + wwCellShadowEcho( scene )
-		+ ( wwVolAirOn() ? QStringLiteral( " " ) + wwVolAirSummary() : QString() )	// lane VOLAIR1
-		+ ( wwLookOn( WwLook::LensFlares ) ? QStringLiteral( " " ) + wwCellLensFlareEcho( scene ) : QString() );	// lane LIGHTS3
+		+ ( wwVolAirOn() ? QStringLiteral( " " ) + wwVolAirSummary() : QString() )
+		+ ( wwLookOn( WwLook::LensFlares ) ? QStringLiteral( " " ) + wwCellLensFlareEcho( scene ) : QString() );
 }
 
 //! WW_CELL_SHADOW_DUMP=<file>: the echo, rewritten whenever the slots change
@@ -4422,7 +4422,7 @@ struct AoState
 	bool methodPinned = false;
 	int methodRed = 0;		// WW_CELL_AO_METHOD_RED: 1 vanilla (the method runs, vanilla's term bound), 2 raw (no denoise)
 	bool ssrRedOld = false;	// WW_CELL_AO_SSR_RED=old: AO off leaves the reflections no opaque pass (the old coupling)
-	int quality = WwAoTierUltra;	// lane PERFFIX2 (item 9): WW_CELL_AO_QUALITY (pin) or WW/CellAoQuality, the presets' tier
+	int quality = WwAoTierUltra;	// WW_CELL_AO_QUALITY (pin) or WW/CellAoQuality, the presets' tier
 	bool qualityPinned = false;
 	bool qualityRedOld = false;	// WW_CELL_AO_QUALITY_RED=old: every tier draws as before the tiers (8 angles, 9 x 3)
 	bool pass = false;		// the opaque pass is drawing
@@ -5104,7 +5104,7 @@ void wwCellAoPass( Scene * scene, bool run )
 		prog->uni1i( "mipLevel", m );
 		pass( 1, g.mip[m], m > 1 ? &g.mip[m - 1] : nullptr );
 	}
-	// lane AOOFF1: the obscurance itself; the pyramid above is shared. lane SSAO2: a ported method skips it
+	// the obscurance itself; the pyramid above is shared. A ported method skips it
 	if ( a.on && ( method == WwAoVanilla || a.methodRed == 1 ) ) {
 		pass( 2, g.raw, nullptr );
 		pass( 3, g.across, &g.raw );

@@ -50,8 +50,8 @@ struct GrassState
 	QString dump;
 	QHash<const void *, QSet<int>> shapes;
 	QHash<const void *, QHash<int, float>> wave;	// block -> its GRAS wave period (the property's +0xf4)
-	QHash<const void *, QSet<int>> noFade;	// lane CABLES1: blocks that sway but never fade (cables)
-	// lane WINDTREE1: the tree-wind shapes' constants (wwCellTreeWindShape); treeEver = some program got them once
+	QHash<const void *, QSet<int>> noFade;	// blocks that sway but never fade (cables)
+	// the tree-wind shapes' constants (wwCellTreeWindShape); treeEver = some program got them once
 	QHash<const void *, QHash<int, std::array<float, 10>>> tree;
 	bool treeBuild = false, treeRed = false, treeEver = false;
 	QString saidTree;

@@ -1,24 +1,11 @@
 #version 410 core
 
-/* lane SSR1: the game's screen-space reflections for the cell view (src/gl/cellssr.cpp, docs/PRTP_PLAN.md
- * "screen-space reflections"), read from the game's shader. Every target here is half the view and stored top
- * row first (the game's pixel order). Inputs: gbuf (lane AO1's opaque pass: view normal, GL axes, and the linear
- * depth in game units; full size, bottom row first), its min-of-2x2 depth mips 1..4 (top row first), and scene:
- * this frame's opaque lit color WITHOUT the reflection term, the obscurance and the fog (linear, full size,
- * bottom row first, bilinear), alpha = the material's reflection flag.
- *   stage 1  the ray: for a flagged pixel facing the eye, the reflection of the view ray about the normal (its
- *            world z doubled first), kept when it points more than ssrK.y into the view; the screen line through
- *            the pixel is run back to the near plane: (u0, v0, start depth)
- *   stage 2  the march: at most 32 steps over the depth mips (4 = coarsest), crossing one cell a step, going a
- *            level down where the ray is behind the depth and up where it is not; at level 1 a ray 50 units or
- *            more behind the surface is refused (it passes behind a thin thing). A hit samples scene there;
- *            alpha = the confidence squared (screen edge, travelled distance, depth gained)
- *   stage 3  the 5-tap blur across, stage 4 down: taps without confidence hand their weight to the others
- * ASSUMED (not read from the game): stage 1 point-samples its inputs (the full-size texel under the half pixel's
- * centre). Deviation: float targets (the game stores the march and the blurs in 8 bits, sRGB).
- * Lane PERF3 (WW_CELL_SSR_PREV=1, a look change, ships off): stage 0 writes the flag alone (alpha 1 where the
- * obscurance pass's stencil carries it), and a stage 2 hit samples the PREVIOUS frame's finished linear color,
- * reprojected into its camera, instead of a second scene pass. */
+/* The game's screen-space reflections for the cell view (src/gl/cellssr.cpp). Targets are half size, top row
+ * first; gbuf and scene (opaque lit color without reflection, obscurance and fog; alpha = reflection flag) are
+ * full size, bottom row first. Stages: 1 the reflected ray run back to the near plane, 2 a hierarchical march over
+ * depth mips 1..4 (max 32 steps; alpha = confidence squared), 3 and 4 a 5-tap blur across and down.
+ * Deviation from the game: float targets (the game stores the march and blurs as 8-bit sRGB).
+ * WW_CELL_SSR_PREV=1 (ships off): a stage 2 hit samples the previous frame's linear color, reprojected. */
 
 uniform int ssrStage;
 uniform sampler2D gbuf;

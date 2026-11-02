@@ -1,7 +1,7 @@
-/* lane BAKEINCR1 (2026-10-04): the incremental probe bake's record and check. See probeincr.h. */
+/* the incremental probe bake's record and check. See probeincr.h. */
 
 #include "probeincr.h"
-#include "wwswitch.h"	// lane TESTDRIVER1: the WW_* switch store
+#include "wwswitch.h"	// the WW_* switch store
 
 #include "cellview.h"
 #include "gl/celllooks.h"
@@ -51,12 +51,8 @@ QString fileSha1( const QString & path )
 	return QString::fromLatin1( h.result().toHex() );
 }
 
-/* The knobs that are NOT a bake's identity: where it writes and how the run is driven
- * (paths, window, shot, settings scope, timers), what this lane's own driver sets, and
- * light and time (relight is a runtime pass). The resource stack and the data root are
- * not identity either: every file they resolve is content-hashed in the asset lines,
- * so a loose override dirties exactly the cells that read it, not the world. Anything
- * else WW_* is in: an unknown knob can only over-rebake. */
+// The knobs that are NOT a bake's identity: where it writes and how the run is driven (paths, window, shot,
+// settings scope, timers), what this lane's own driver sets, and light and time (relight is a runtime pass).
 bool knobIsRunOnly( const QString & k )
 {
 	static const QSet<QString> exact {
@@ -69,8 +65,8 @@ bool knobIsRunOnly( const QString & k )
 		QStringLiteral( "WW_CELL_LIGHTS" ), QStringLiteral( "WW_CELL_FAR_LOD" ),
 	};
 	static const char * prefixes[] = { "WW_RENDER_", "WW_CELL_SPEED_", "WW_CELL_BAKEINCR_", "WW_LOOKDEV_",
-		"WW_CELL_GI_", "WW_CELL_LIT", "WW_CELL_FARLIGHT",   // FARLIGHTMAP1: the far layers move no .tbk byte
-		"WW_CELL_KEEP_" };   // FARLIGHTMAP1: what a walk keeps between cells (the same bytes, read once)
+		"WW_CELL_GI_", "WW_CELL_LIT", "WW_CELL_FARLIGHT",   // the far layers move no .tbk byte
+		"WW_CELL_KEEP_" };   // what a walk keeps between cells (the same bytes, read once)
 	if ( exact.contains( k ) )
 		return true;
 	for ( const char * p : prefixes )
@@ -222,7 +218,7 @@ void feedLand( Feeder & F, const EsmWorld & world, int x, int y, QSet<quint32> &
 
 bool byForm( const EsmRefr & a, const EsmRefr & b ) { return a.formID < b.formID; }
 
-/* lane FARLIGHTMAP1: one placed light, every field the relight and the far layers read (its base's light data,
+/* one placed light, every field the relight and the far layers read (its base's light data,
  * its overrides, its box, and the enable chain that picks its switch group) */
 void feedLight( Feeder & F, const EsmWorld & world, const EsmRefr & r, const QHash<quint32, const EsmRefr *> & refOf )
 {
@@ -347,7 +343,7 @@ QStringList identityKnobs()
 			continue;
 		out.append( k + QLatin1Char( '=' ) + env.value( k ) );
 	}
-	// lane GIPROBE2: the menu row moves probes like its pin does, so it is a knob too (off: the identity is unchanged)
+	// the menu row moves probes like its pin does, so it is a knob too (off: the identity is unchanged)
 	if ( !env.contains( QStringLiteral( "WW_CELL_PROBE_CLEAR" ) ) && wwLookOn( WwLook::ProbeClear ) )
 		out.append( QStringLiteral( "WW_CELL_PROBE_CLEAR=1" ) );
 	out.sort();
@@ -469,7 +465,7 @@ bool writeRecord( const QString & dir, const QString & world, int cx, int cy, in
 	lines << QStringLiteral( "records %1" ).arg( records );
 	lines << QStringLiteral( "cellrecords %1" ).arg( cellRecords );   // the asked cell alone: the nonbr red's
 	lines << QStringLiteral( "far %1" ).arg( far );
-	if ( !lights.isEmpty() )   // lane FARLIGHTMAP1: only a far-light bake reads the lights into a file
+	if ( !lights.isEmpty() )   // only a far-light bake reads the lights into a file
 		lines << QStringLiteral( "lights %1" ).arg( lights );
 	for ( const Asset & a : recorded() )
 		lines << QStringLiteral( "asset %1\t%2\t%3\t%4\t%5" ).arg( a.digest, a.root, a.folder, a.ext, a.relPath );
@@ -583,7 +579,7 @@ int checkMain()
 			if ( why.isEmpty() && ( red() == "nonbr" ? recordsDigest( world, x, y, 0 ) != cellRecords
 				: recordsDigest( world, x, y, half ) != records ) )
 				why = QStringLiteral( "records" );
-			// lane FARLIGHTMAP1: a far-light bake's record also holds its lights (a plain bake's has no line)
+			// a far-light bake's record also holds its lights (a plain bake's has no line)
 			if ( why.isEmpty() && !lights.isEmpty() && lightsDigest( world, x, y, half ) != lights )
 				why = QStringLiteral( "lights" );
 			if ( why.isEmpty() ) {

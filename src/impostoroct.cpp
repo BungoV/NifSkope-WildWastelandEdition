@@ -17,81 +17,14 @@ namespace ImpostorOct
 
 static const float kPi = 3.14159265358979323846f;
 
-/* ---------------------------------------------------------------------------
- * THE BAKE CAMERA, AND THE 180 DEGREES NOBODY HAD SEEN (repaired 2026-09-19).
- *
- * `Matrix::fromEuler` (src/data/niftypes.cpp:215) with rotY = 0 has rows
- *
- *     row0 = ( cosZ, -sinZ, 0 )
- *     row1 = ( sinZ cosX, cosX cosZ, -sinX )
- *     row2 = ( sinX sinZ, sinX cosZ, cosX )
- *
- * and the rotation is the view transform's (GLView::viewTransform,
- * src/glview.cpp:7029), so its ROWS are the camera's axes in world space.
- * Putting the six axis views of `GLView::viewRotations` (src/glview.cpp:187)
- * through it settles the convention with no guessing left in it:
- *
- *     Top ( 0, 0, 0 )        row2 = +Z        Bottom ( 180, 0, 0 )  row2 = -Z
- *     Left ( -90, 0, -90 )   row2 = +X        Right ( -90, 0, 90 )  row2 = -X
- *     Front ( -90, 0, 180 )  row2 = +Y        Back ( -90, 0, 0 )    row2 = -Y
- *
- * Six for six: the camera SITS at +row2, `up` is row1 -- which comes out as
- * the world +Z projected perpendicular to row2, i.e. roll zero -- and
- * row0 = up x fwd exactly. There is no sign left to guess, in either vector.
- *
- * Now put the BAKE's own angles through the same rows. Until 2026-09-19 the
- * bake drove the camera to rotX = -90 + elevation, rotY = 0,
- * rotZ = 90 - azimuth, with elevation = asin(d.z) and
- * azimuth = atan2(d.y, d.x) of the frame direction d. For every direction,
- * every elevation and every azimuth, that yields
- *
- *     row2 = ( -d.x, -d.y, +d.z )
- *
- * -- the elevation is right and THE AZIMUTH IS TURNED BY 180 DEGREES. So
- * frame (i, j) did not hold the view from `frameDir(i, j)`. It held the
- * view from the opposite side of the object.
- *
- * That was a defect in the bake against its own spec (spec 226..233 builds the
- * whole grid on frame (i, j) BEING direction (i, j)), and the reason it
- * survived is that nothing but trees had ever been baked: a maple is near
- * enough symmetric about its axis that the wrong side looks like the right
- * one. It was invisible until you put the card beside the mesh -- which is
- * exactly what this lane's gate does -- or until somebody baked a car.
- *
- * RULED AND REPAIRED, bungo 2026-09-19: "Okay, fix the 180 issue". The bake
- * now drives `rz = 270 - azim` (src/nifskope_ui.cpp), and the DERIVATION,
- * because a one-liner is not a proof:
- *
- *     the camera sits at row2 = ( sinX sinZ, sinX cosZ, cosX )
- *     want row2 = d = ( cos(elev) cos(azim), cos(elev) sin(azim), sin(elev) )
- *
- *     rx = -90 + elev  =>  cosX = sin(elev)          the elevation was already right
- *                          sinX = -cos(elev)
- *     so we need        sinZ = -cos(azim),  cosZ = -sin(azim)
- *     and               Z = 270 - azim  gives  sin = -cos(azim), cos = -sin(azim)   OK
- *     while the old     Z =  90 - azim  gives  sin = +cos(azim), cos = +sin(azim)
- *                       i.e. row2 = ( -d.x, -d.y, +d.z ): the azimuth turned by 180.
- *
- * `Convention` now names WHICH BAKE A SET CAME FROM, not a preference:
- *   SpecLiteral (the default) -- a set baked by this exe or later. The
- *       `.lodm` says so with `card.conv` and the manifest `oct` line with a
- *       trailing `conv <token>`.
- *   AsBaked -- a LEGACY set, baked before the repair, with no token. It is a
- *       diagnostic value so such a set can still be opened and looked at; it
- *       is not a way back for the bake and nothing writes it.
- *
- * EVERY IMPOSTOR SET BAKED BEFORE THIS EXE MUST BE RE-BAKED.
- * ------------------------------------------------------------------------- */
+// THE BAKE CAMERA, AND THE 180 DEGREES NOBODY HAD SEEN (repaired 2026-09-19).
 
 Convention g_convention = Convention::SpecLiteral;
 
 void bakeCameraDir( const float d[3], float out[3] )
 {
-	/* Where the bake's camera stood for the frame whose spec direction is `d`.
-	 * After the repair that IS `d`; for a legacy set it is the azimuth turned
-	 * by 180. Kept as a function rather than folded away because the gate
-	 * measures the legacy case on purpose -- a red control that cannot be
-	 * expressed cannot be run. */
+	// Where the bake's camera stood for the frame whose spec direction is `d`. After the repair that IS `d`;
+	// for a legacy set it is the azimuth turned by 180.
 	if ( g_convention == Convention::AsBaked ) {
 		out[0] = -d[0];
 		out[1] = -d[1];
@@ -157,11 +90,7 @@ bool dirToGrid( const float d[3], int N, float * fi, float * fj )
 	float e[3] = { d[0], d[1], d[2] };
 	if ( !normalise( e ) )
 		return false;
-	/* The hemisphere clamp. A hemi-octahedral grid holds no view from below
-	 * the horizon, so a direction from below is answered with the horizon
-	 * direction under it rather than with a wrapped frame that would show the
-	 * tree's top from underneath. A camera exactly level with the card lands
-	 * on the grid's outer edge, which is where the spec puts the horizon. */
+	// The hemisphere clamp.
 	if ( e[2] < 0.0f ) {
 		e[2] = 0.0f;
 		if ( !normalise( e ) )
@@ -204,10 +133,7 @@ bool pickFrames( const float d[3], int N, int idx[3], int gi[3], int gj[3], floa
 	const float a = fi - float( i0 );
 	const float b = fj - float( j0 );
 
-	/* SPEC GAP #2: the cell's diagonal runs (i+1, j) -- (i, j+1), and the
-	 * weights are barycentric in the GRID. Continuous across the diagonal:
-	 * on a + b == 1 the lower branch gives ( 0, a, b ) and the upper gives
-	 * weight b to (i, j+1) and a to (i+1, j), which is the same picture. */
+	// SPEC GAP #2: the cell's diagonal runs (i+1, j) -- (i, j+1), and the weights are barycentric in the GRID.
 	if ( a + b <= 1.0f ) {
 		gi[0] = i0;     gj[0] = j0;     w[0] = 1.0f - a - b;
 		gi[1] = i0 + 1; gj[1] = j0;     w[1] = a;
@@ -269,12 +195,9 @@ bool frameBasis( const float d[3], float right[3], float up[3], float fwd[3] )
 	if ( !frameAngles( d, &elev, &azim ) )
 		return false;
 
-	/* The camera the bake drove for THIS frame: rotX = -90 + elevation,
-	 * rotY = 0, rotZ = 270 - azimuth (src/nifskope_ui.cpp:22755..22757, the
-	 * repaired form -- the derivation is in the block at the top of this file).
-	 * The basis is that camera's, whatever it points at: a drawer has to sample
-	 * the SHEET, so for a legacy set baked before the repair the old 90 - azim
-	 * is still the honest answer and `AsBaked` selects it. */
+	// The camera the bake drove for THIS frame: rotX = -90 + elevation, rotY = 0, rotZ = 270 - azimuth
+	// (src/nifskope_ui.cpp:22755..22757, the repaired form -- the derivation is in the block at the top of
+	// this file).
 	const float rx = ( -90.0f + elev ) * kPi / 180.0f;
 	const float rz = ( ( g_convention == Convention::AsBaked ? 90.0f : 270.0f )
 					   - azim ) * kPi / 180.0f;
@@ -297,10 +220,7 @@ bool frameBasis( const float d[3], float right[3], float up[3], float fwd[3] )
 
 void unpackNormal( float tx, float ty, float out[3] )
 {
-	/* CLAUSE C5, spec 49: half-packed X and Y, Z rebuilt as the positive root
-	 * of 1 - x^2 - y^2. A sheet texel can exceed the unit disc after BC3
-	 * quantisation, so the radicand is floored rather than allowed to produce
-	 * a NaN that would poison the blend. */
+	// CLAUSE C5, spec 49: half-packed X and Y, Z rebuilt as the positive root of 1 - x^2 - y^2.
 	const float nx = tx * 2.0f - 1.0f;
 	const float ny = ty * 2.0f - 1.0f;
 	float r = 1.0f - nx * nx - ny * ny;

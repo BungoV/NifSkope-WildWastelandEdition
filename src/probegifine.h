@@ -1,12 +1,7 @@
 #ifndef PROBEGIFINE_H
 #define PROBEGIFINE_H
 
-/* lane EMISSIVEGRID1: a finer GI grid (a third of the coarse voxel) in a box round each bright cluster of glowing
- * surfels. The coarse grid (about 100 units, probes about 280 apart) smears a sign's splash into a faint wash; the
- * fine box holds the glow's direct irradiance D (each glowing surfel a small area light, shadowed by the bake's
- * geometry) and the coarse grid's own share of the same surfels C (their links blended as the coarse grid blends its
- * probes), so the shader trades C for D inside the box and fades back to the coarse grid at its edge. Built from the
- * relight's surfels and links at cell load: no rebake. Off (WW_CELL_EMISSIVEGRID=0, the default) nothing is built. */
+// a finer GI grid (a third of the coarse voxel) in a box round each bright cluster of glowing surfels.
 
 #include <QString>
 

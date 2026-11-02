@@ -39,14 +39,9 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include <string>
 #include <vector>
 
-// ------------------------------------------------------------------ emissive surfaces in the bake
-/* Lane EMISSIVEGI1 (2026-10-03; docs/cloud/EMISSIVEGI1_DESIGN.md): a bake ray that hits a glowing surface takes
- * that surface's own emitted light on top of its lit-albedo term (GIBS, SEED SIGGRAPH 2021; no new lights).
- * The game's shader adds e = glowColor x glowMult x glowMap.rgb in sqrt-of-linear space, so the light it shows
- * unlit is e^2: each hit squares its own texel (the mean of e^2 over the hits, never the square of a mean).
- * Nearest texel of the glow map at its largest mip of at most 1024 texels across, wrapped (the alpha masks'
- * rule). The renderer's gates: Own-Emit off = nothing; the glow-map flag off = the whole surface glows; the
- * flag on with no map = black. Only triangles that can glow are listed: a soup with none bakes as before. */
+// emissive surfaces in the bake (docs/cloud/EMISSIVEGI1_DESIGN.md): a bake ray
+// that hits a glowing surface takes that surface's own emitted light on top of its lit-albedo term (GIBS, SEED
+// SIGGRAPH 2021; no new lights).
 struct ProbeEmit
 {
 	struct Map
@@ -58,7 +53,7 @@ struct ProbeEmit
 	{
 		float e[3] = { 0, 0, 0 };   // glowColor x glowMult (sqrt-of-linear)
 		int map = -1;               // into `maps`; -1 = the whole surface glows
-		// lane LIGHTS5: the colour under the other "Emittance in bounce light" state, so the bake can keep both
+		// the colour under the other "Emittance in bounce light" state, so the bake can keep both
 		bool hasAlt = false;
 		float alt[3] = { 0, 0, 0 };
 	};
@@ -82,7 +77,7 @@ struct ProbeEmit
 		return false;
 	}
 	bool emits( int tri ) const { return tri >= 0 && size_t( tri ) < triOf.size() && triOf[size_t( tri )] >= 0; }
-	//! lane LIGHTS5: emits() with a colour now (an emitter kept only for the other state has e = 0)
+	//! emits with a colour now (an emitter kept only for the other state has e = 0)
 	bool lit( int tri ) const
 	{
 		if ( !emits( tri ) )
