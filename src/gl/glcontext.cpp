@@ -56,7 +56,7 @@ bool wwAirZoneShaderDefine();	// lane AIRZONE1: src/gl/cellairzone.cpp (the Air 
 bool wwCellViewsShaderDefine();	// lane FO4CELLGI1: src/gl/celllights.cpp (WW_CELL_VIEWS, the probe and pass views)
 bool wwFogLeakShaderDefine();	// lane FOGLEAK1: src/gl/cellvolair.cpp (WW_CELL_FOGLEAK, the fog leak fix; off by default)
 bool wwAirBounceShaderDefine();	// lane AIRBOUNCE1: src/gl/cellvolair.cpp (WW_CELL_AIR_BOUNCE_LAMPS, the lamps' floor bounce; off by default)
-bool wwAirSkyViewShaderDefine();	// lane DARKAIR1: src/gl/cellvolair.cpp (WW_CELL_AIR_SKYVIEW, the air's sky visibility; off by default)
+bool wwAirSkyViewShaderDefine();	// lane DARKAIR1: src/gl/cellvolair.cpp (WW_CELL_AIR_SKYVIEW, the air's sky visibility; on since DARKAIR2, 0 compiles it out)
 int wwCellGiVis();	// lane PERF1: src/gl/celllights.cpp (1: the march, WW_CELL_GI_MARCH)
 bool wwCellPrtOn();	// lane PRTOFF1: src/gl/celllights.cpp (the old baked probe GI, only under its red)
 

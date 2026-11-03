@@ -2,6 +2,11 @@
 - bungo 11-03 ("Allowed, show the difference"): AIRBEAD1's two shadow reads a sub-step (cell_volair.frag volSunBead)
   are the default, at +0.07 ms on the Medium air grid. Red WW_CELL_AIR_SHADOW=mid = one read at the middle, as before
   (src/gl/cellvolair.cpp). WW_CELL_AIR_SHADOW=bead still reads as on.
+## DARKAIR2 (2026-11-03): the air's sky visibility ships on
+- bungo 11-03 ("Yes to it"): DARKAIR1's airSkyView (the shaded outdoor air's ambient share occluded by the sky the
+  ray-traced volume sees, cell_volair.frag) is compiled in by default; WW_CELL_AIR_SKYVIEW=0 compiles it out (the
+  loader define, src/gl/cellvolair.cpp wwAirSkyViewShaderDefine). Red WW_CELL_AIR_RED=openenv = the flat weather
+  ambient, as before. Needs the ray-traced GI volume (WW_CELL_RTDDGI); without it nothing changes.
 
 ## STREAMTEX5 (2026-11-02): a leaf's coverage copy is pooled under its noted file (STREAMTEX4-WWCOVKEY)
 - STREAMTEX4's census counted textures as "unnoted" (loaded, never named by a shader property the stream saw), and
