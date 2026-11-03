@@ -131,7 +131,8 @@ struct FarCasterPiece
 	QVector<Vector3> verts;
 	QVector<Triangle> tris;
 };
-int cellFarCasters( QVector<FarCasterPiece> & out, float apexScale = 1.0f );
+// SHAFTS1b: keep (x0, y0, x1, y1) drops the pyramids whose base square is not inside it (counted in *cut)
+int cellFarCasters( QVector<FarCasterPiece> & out, float apexScale = 1.0f, const float * keep = nullptr, int * cut = nullptr );
 quint64 cellFarGen();
 
 /* lane FARHOLE2: the cells the stream holds loaded (cellfarhide.h); a far card placed in one does not draw nor cast.

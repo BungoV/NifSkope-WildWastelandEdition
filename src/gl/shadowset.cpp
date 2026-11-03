@@ -160,6 +160,7 @@ struct Terrain
 	std::vector<std::uint16_t> castOut;
 	bool wantCast = false;
 	int cards = -1;	// far cards cast this set (-1: Far tree card shadows off)
+	int cardsCut = 0;	// SHAFTS1b: card pyramids dropped, their base outside the near tier (-1: red nocut)
 
 	// GL
 	const void * ctx = nullptr;
@@ -1370,13 +1371,21 @@ void terrainFrame( Scene * scene, const double toSun[3], const float disc[3] )
 		sig ^= quint64( std::llround( t.x0 ) ) * 31ull ^ quint64( std::llround( t.y0 ) ) * 17ull ^ quint64( t.N );
 		// lane FAR5: the far cards cast as crown pyramids, outside the block (no cut: the cascades never draw them).
 		// Red WW_SHADOW_FARCARDS_RED=tall raises each apex 3x.
+		// SHAFTS1b (bungo's rock marks): the pyramids whose base square is not inside the near tier's window are cut;
+		// red WW_SHADOW_FARCARDS_RED=nocut keeps them all (today's rule). Census: cardcut= on the set line.
 		QVector<ImpostorChunk::FarCasterPiece> cardPieces;
 		t.cards = -1;
+		t.cardsCut = 0;
 		if ( cardsOn ) {
+			const bool noCut = wwEnvStr( "WW_SHADOW_FARCARDS_RED" ) == QLatin1String( "nocut" ) || t.Nn <= 0;
+			const float keep[4] = { float( t.nx0 ), float( t.ny0 ), float( t.nx0 + t.Nn * t.nT ), float( t.ny0 + t.Nn * t.nT ) };
 			t.cards = ImpostorChunk::cellFarCasters( cardPieces,
-				wwEnvStr( "WW_SHADOW_FARCARDS_RED" ) == QLatin1String( "tall" ) ? 3.0f : 1.0f );
+				wwEnvStr( "WW_SHADOW_FARCARDS_RED" ) == QLatin1String( "tall" ) ? 3.0f : 1.0f, noCut ? nullptr : keep, &t.cardsCut );
+			if ( noCut )
+				t.cardsCut = -1;
 			sig ^= ( ImpostorChunk::cellFarGen() + 1ull ) * 0x9E3779B97F4A7C15ull ^ quint64( t.cards ) * 131ull
-				^ ( wwEnvStr( "WW_SHADOW_FARCARDS_RED" ) == QLatin1String( "tall" ) ? 7ull : 0ull );
+				^ ( wwEnvStr( "WW_SHADOW_FARCARDS_RED" ) == QLatin1String( "tall" ) ? 7ull : 0ull )
+				^ ( noCut ? 0ull : quint64( std::llround( keep[0] ) ) * 37ull ^ quint64( std::llround( keep[1] ) ) * 41ull );
 		}
 		if ( sig != t.sig ) {
 			t.sig = sig;
@@ -1576,7 +1585,8 @@ void terrainFrame( Scene * scene, const double toSun[3], const float disc[3] )
 			: QStringLiteral( "off" ) ).arg( double( t.strength ), 0, 'f', 3 )
 		.arg( t.blended ? 1 : 0 );
 	if ( t.extra > 0 || t.pubExtra > 0 || t.cards >= 0 )
-		t.last += QStringLiteral( " extra=%1 pub_extra=%2 cards=%3" ).arg( t.extra ).arg( t.pubExtra ).arg( t.cards );
+		t.last += QStringLiteral( " extra=%1 pub_extra=%2 cards=%3 cardcut=%4" ).arg( t.extra ).arg( t.pubExtra ).arg( t.cards )
+			.arg( t.cardsCut );
 }
 
 // ---- (B) contact ----

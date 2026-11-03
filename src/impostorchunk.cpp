@@ -706,9 +706,11 @@ int ImpostorChunk::cellFarCardsShownIn( const QSet<qint64> & cells )
 	return n;
 }
 
-int ImpostorChunk::cellFarCasters( QVector<FarCasterPiece> & out, float apexScale )
+int ImpostorChunk::cellFarCasters( QVector<FarCasterPiece> & out, float apexScale, const float * keep, int * cut )
 {
 	out.clear();
+	if ( cut )
+		*cut = 0;
 	const CellFarState & F = farSt();
 	const ChunkState & s = F.cards;
 	int used = 0;
@@ -724,6 +726,11 @@ int ImpostorChunk::cellFarCasters( QVector<FarCasterPiece> & out, float apexScal
 		const float cx = p.world[0] - F.shift[0] + p.c.center[0] * sc, cy = p.world[1] - F.shift[1] + p.c.center[1] * sc;
 		const float cz = p.world[2] - F.shift[2] + p.c.center[2] * sc;
 		const float w = p.c.halfW * sc, h = p.c.halfH * sc;
+		if ( keep && ( cx - w < keep[0] || cy - w < keep[1] || cx + w > keep[2] || cy + w > keep[3] ) ) {
+			if ( cut )
+				++*cut;
+			continue;
+		}
 		const int b = int( k.verts.size() );
 		k.verts << Vector3( cx, cy, cz + h * apexScale ) << Vector3( cx - w, cy - w, cz ) << Vector3( cx + w, cy - w, cz )
 			<< Vector3( cx + w, cy + w, cz ) << Vector3( cx - w, cy + w, cz );
