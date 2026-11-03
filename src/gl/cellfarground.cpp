@@ -59,7 +59,9 @@ State & st()
 		const QByteArray red = wwEnv( "WW_CELL_FARGROUND_RED" ).trimmed().toLower();
 		const int mi = m == "baked" ? 0 : m == "lookup" ? 1 : m == "cached" ? 2 : -1;
 		s.pinM = mi >= 0;
-		s.mode = s.pinM ? mi : std::clamp( QSettings().value( QStringLiteral( "WW/CellFarGround" ), 0 ).toInt(), 0, 2 );
+		// SHAFTS1b (bungo's seam): the far ground ships as lookup (1), the near ground's own textures, so its colour meets
+		// the near ground at the edge; the red WW_CELL_FARGROUND_RED=baked keeps today's baked sheet (status line names it)
+		s.mode = s.pinM ? mi : std::clamp( QSettings().value( QStringLiteral( "WW/CellFarGround" ), 1 ).toInt(), 0, 2 );
 		// FARPAGES1: Ultra (2048) is gone -- finer than the screen resolves at ring 0; an old pin reads as High
 		const int qi = q == "low" ? 0 : q == "medium" ? 1 : ( q == "high" || q == "ultra" ) ? 2 : -1;
 		s.pinQ = qi >= 0;
