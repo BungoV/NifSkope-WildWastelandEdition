@@ -1087,11 +1087,12 @@ bool wwAirBounceShaderDefine()
 	return wwEnv( "WW_CELL_AIR_BOUNCE_LAMPS" ).trimmed() == "1";
 }
 
-/* lane DARKAIR1: WW_CELL_AIR_SKYVIEW=1 compiles the air's sky visibility (cell_volair.frag airSkyView) into the program;
- * off (the default until a hold): not a line of it compiled. Read at each shader load, like WW_CELL_FOGLEAK */
+/* lane DARKAIR1: the air's sky visibility (cell_volair.frag airSkyView) is compiled into the program by default
+ * (DARKAIR2, bungo 11-03); WW_CELL_AIR_SKYVIEW=0 leaves not a line of it compiled, and the red WW_CELL_AIR_RED=openenv
+ * keeps the flat ambient at run time. Read at each shader load, like WW_CELL_FOGLEAK */
 bool wwAirSkyViewShaderDefine()
 {
-	return wwEnv( "WW_CELL_AIR_SKYVIEW" ).trimmed() == "1";
+	return wwEnv( "WW_CELL_AIR_SKYVIEW" ).trimmed() != "0";
 }
 
 bool wwVolAirWantsSettle()
