@@ -130,8 +130,9 @@ struct FarCasterPiece
 {
 	QVector<Vector3> verts;
 	QVector<Triangle> tris;
+	bool nearOut = false;	// SHAFTS1b: base not wholly inside keep: the near tier skips it, the far tiers cast it
 };
-// SHAFTS1b: keep (x0, y0, x1, y1) drops the pyramids whose base square is not inside it (counted in *cut)
+// SHAFTS1b: keep (x0, y0, x1, y1) marks the pyramids whose base square is not inside it (nearOut, counted in *cut)
 int cellFarCasters( QVector<FarCasterPiece> & out, float apexScale = 1.0f, const float * keep = nullptr, int * cut = nullptr );
 quint64 cellFarGen();
 
