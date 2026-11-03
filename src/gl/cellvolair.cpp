@@ -10,6 +10,7 @@ BSD License - see nifskope.h
 
 #include "gl/airmslamp.h"	// lane AIRMS1: the lamps' multiple-scattering law
 #include "gl/atmomath.h"	// lane CLOUD6e: kUnitKm, the cloud map's units
+#include "gl/atmosphere.h"	// SHAFTS1b: the aerial perspective's haze, for the no-double-count fit
 #include "gl/cellairzone.h"	// lane AIRZONE1: the hand-placed volumes' fog and particle blocks
 #include "gl/cloudmap.h"	// lane CLOUD6e: the rain fog follows the Low band's coverage
 #include "gl/rainfogmath.h"	// lane CLOUD6e: the rain fog's law
@@ -89,6 +90,7 @@ struct VaState
 	int farTier = 0;	// lane FARGRID1: the Far Air row, 0 Off .. 4 Ultra (the pin WW_CELL_AIR_FAR wins)
 	bool farPinned = false;
 	bool farOffRed = false;	// SHAFTS1b red WW_CELL_AIR_RED=faroff: the far air ships Off again (today's rule)
+	bool apStackRed = false;	// SHAFTS1b red WW_CELL_AIR_RED=apstack: the air keeps the sky's haze share (today's rule)
 	const char * farSrc = "default";
 	int red = 0;
 	bool shellStep = false;	// SKY2 red WW_CELL_AIR_RED=shellstep: the old law (no air volume, the GI shell's edge one voxel wide)
@@ -175,6 +177,7 @@ VaState & vs()
 			s.envHue = s.envHue || r == "envhue";	// lane FIX1101A
 			s.veilPhys = s.veilPhys || r == "veilphys";	// lane FARCITYWASH1
 			s.farOffRed = s.farOffRed || r == "faroff";	// SHAFTS1b
+			s.apStackRed = s.apStackRed || r == "apstack";	// SHAFTS1b
 			s.leakRed |= r == "dalcenv" ? 1 : r == "nosungate" ? 2 : r == "lightleak" ? 4 : r == "nofartailshadow" ? 8
 				: r == "nointsungate" ? 16 : r == "envscale" ? 32 : r == "sun8" ? 64 : 0;	// lane FOGLEAK1, INTGI1, FOGENV1
 			s.askRed = s.askRed || r == "ask";
@@ -744,6 +747,7 @@ struct VaMedium
 {
 	float sigma0 = 0.0f, zb = 0.0f, invH = 0.0f, dFull = 0.0f, farD = 0.0f;
 	bool band = false;
+	bool apCut = false;	// SHAFTS1b: the sky's haze share taken off (the aerial perspective drawn)
 };
 
 // the game's fog alpha at distance d and fog-frame height z (lookdev_fog.glsl wwFogEval, the same formula)
@@ -767,7 +771,7 @@ double vaGameAlpha( const float K[6][4], double d, double z )
  * thinner than the far-end fit (1 - exp(-sigma0 dFull) = min(max, 0.99)) unless the record's curve ends inside the
  * street range (an interior's short steep curve; there the street fit alone). The slices end where the air reaches that
  * opacity (tau_max / sigma0, at most dFull), so what lies beyond keeps the game's 1 - max showing through. */
-VaMedium vaFit( const float K[6][4], bool wrong, bool farFit )
+VaMedium vaFit( const float K[6][4], bool wrong, bool farFit, float apPerUnit = 0.0f )
 {
 	VaMedium m;
 	m.dFull = ( 1.0f + K[0][2] ) / K[0][0];
@@ -794,6 +798,14 @@ VaMedium vaFit( const float K[6][4], bool wrong, bool farFit )
 	}
 	const float sStreet = den > 0.0 ? float( num / den ) : 0.0f;
 	m.sigma0 = farFit ? sFar : ( knee <= 5000.0 ? sStreet : std::max( sFar, sStreet ) );	// curve ends in the street range: street alone
+	/* SHAFTS1b (bungo's c3 haze): with the aerial perspective drawn, the sky's medium already holds the haze rung taken
+	 * from this same fog record (atmosphere.cpp hazeFromFog), apPerUnit its ground extinction. The far-end floor is
+	 * the sky's then (the air past the street is its), and the air keeps only the street fit's share above the sky's:
+	 * one count of the record's haze, not the air's on top of the sky's. Red apstack: today's fit. */
+	if ( apPerUnit > 0.0f && !farFit ) {
+		m.sigma0 = std::max( sStreet - apPerUnit, 0.0f );
+		m.apCut = true;
+	}
 	m.farD = m.dFull;
 	if ( m.sigma0 > sFar && m.sigma0 > 0.0f )
 		m.farD = std::min( m.dFull, tauMax / m.sigma0 );
@@ -1602,7 +1614,9 @@ static void vaPassInner( Scene * scene, bool run )
 		return;
 	}
 	vaCpu.mark( PassTime::CpuAirState );
-	VaMedium M = vaFit( K, ( s.red & 32 ) != 0, ( s.red & 128 ) != 0 );
+	const float apHazeKm = wwAtmoApActive() && wwAtmoFrame().valid ? wwAtmoFrame().haze[0] : 0.0f;	// SHAFTS1b
+	VaMedium M = vaFit( K, ( s.red & 32 ) != 0, ( s.red & 128 ) != 0,
+		s.apStackRed ? 0.0f : apHazeKm / kUnitsPerKm );
 	/* lane LIGHTBOOTH1 (the light test booth; a harness pin, never a user toggle): WW_CELL_BOOTH_AIR = <sigma0 per
 	 * unit> replaces the fitted medium with EVEN air of that density at every height (no band, no ground layer), so a
 	 * fixture's glow is measured in the same air wherever it stands. The slices end where the air reaches 99%
@@ -2422,8 +2436,14 @@ static void vaPassInner( Scene * scene, bool run )
 			.arg( s.farTier ).arg( fp.cols ).arg( fp.rows ).arg( fp.slices ).arg( double( farStart ), 0, 'f', 0 )
 			.arg( double( farEnd ), 0, 'f', 0 ).arg( fp.refresh ).arg( g.farBuilds ).arg( g.farGpuMs, 0, 'f', 3 )
 			.arg( volMb, 0, 'f', 1 ).arg( [] { WwTerrainShadowMap t; return wwTerrainShadowMap( t ) ? 1 : 0; }() ) );
+	// SHAFTS1b census: the ground extinction each medium holds and the clear-day visibility they leave (Koschmieder
+	// 3.912 / beta; the surfaces see the larger of the two, atmo_apfog.glsl's min of the transmittances)
+	const double airKm = double( M.sigma0 ) * kUnitsPerKm, apKm = apHazeKm > 0.0f ? double( apHazeKm + kRay[1] + kMieE ) : 0.0;
+	const QString hazeNote = QStringLiteral( "haze=(air=%1/km ap=%2/km vis=%3km apcut=%4%5)" ).arg( airKm, 0, 'f', 3 )
+		.arg( apKm, 0, 'f', 3 ).arg( 3.912 / std::max( std::max( airKm, apKm ), 1e-4 ), 0, 'f', 1 ).arg( M.apCut ? 1 : 0 )
+		.arg( s.apStackRed ? QStringLiteral( ",RED=apstack" ) : QString() );
 	s.last.chop( 1 );
-	s.last += QStringLiteral( " " ) + optNote + QStringLiteral( " " ) + groundNote + QStringLiteral( " " ) + farNote
+	s.last += QStringLiteral( " " ) + optNote + QStringLiteral( " " ) + groundNote + QStringLiteral( " " ) + farNote + QStringLiteral( " " ) + hazeNote
 		+ ( dr.on ? QStringLiteral( " drift=" ) + dr.note : QString() ) + QStringLiteral( " sungate=" ) + sunGateNote
 		+ QStringLiteral( " rainfog=" ) + g.rfNote
 		+ QStringLiteral( " fogleak=%1(red=%2)" ).arg( wwFogLeakShaderDefine() ? "on" : "off" ).arg( s.leakRed )	// lane FOGLEAK1
