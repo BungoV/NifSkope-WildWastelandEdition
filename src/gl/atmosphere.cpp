@@ -1,6 +1,9 @@
 #include "atmosphere.h"
 #include "atmomath.h"
 #include "gl/weatherrecx.h"	// lane WX1: the weather .recx atmosphere block
+#include "gl/weatherrecxmath.h"	// SHAFTS1b: hazeFromVisibility for the clear-day aerosol
+#include "gl/cloudmath.h"	// SHAFTS1b: the WTHR class flags
+#include "gl/lookdevstage.h"	// SHAFTS1b: the Lookdev weather's class
 #include "skydisc.h"
 #include "moonlight.h"	// lane FIX1101A (moon): the disc's gain through the air
 #include "gl/cellvolair.h"	// lane FIX1101A (moon): the air's medium for that gain
@@ -142,6 +145,31 @@ bool red( const char * word )
 bool apRed( const char * word )
 {
 	return wwEnvStr( "WW_ATMO_AP_RED" ).trimmed().toLower() == QLatin1StringView( word );
+}
+
+/* SHAFTS1b (manager ruling 11-03, bungo's c3 haze): the fog record is the game's art fog, not a measurement. A clear
+ * weather (WTHR class Pleasant only, no precipitation) takes the haze rung from a physical aerosol instead: clear
+ * continental noon, 30 km visibility (Mie extinction ~0.11 /km over the clear air's 0.018). A weather .recx
+ * atmosphere.visibility (metres, recx/SPEC.md) still wins; every other weather keeps the record's fog. Red
+ * WW_CELL_AIR_RED=recordhaze: the record for every weather (today's rule). */
+constexpr float kClearDayVisM = 30000.0f;
+const char * g_hazeSrc = "record";
+
+void clearDayHaze( float haze[3], bool recordHasFog )
+{
+	g_hazeSrc = "record";
+	const bool recordRed = wwEnvStr( "WW_CELL_AIR_RED" ).toLower().split( QLatin1Char( ',' ) ).contains( QStringLiteral( "recordhaze" ) );
+	unsigned f = 0, th = 0;
+	int precip = 0;
+	if ( !recordRed && wwLookdevWeatherClass( f, th, nullptr, &precip ) && ( f & WwCloudMath::kWxPleasant )
+		&& !( f & ( WwCloudMath::kWxCloudy | WwCloudMath::kWxRainy | WwCloudMath::kWxSnow ) ) && precip == 0 ) {
+		haze[0] = WwWeatherRecxMath::hazeFromVisibility( kClearDayVisM, kRay[1] + kMieE );
+		g_hazeSrc = "clearday";
+	}
+	wwWeatherRecxHaze( haze, recordHasFog, kRay[1] + kMieE );
+	const WwWeatherRecx & r = wwWeatherRecx();
+	if ( r.on && r.visibilityM >= 0.0f && !( r.recordFirst && recordHasFog ) )
+		g_hazeSrc = "recx";
 }
 
 //! lane SKYA (NIGHT1): nophase (the moon's light at every phase = the full moon's), noext (the stars and the moon disc
@@ -480,7 +508,7 @@ bool wwAtmoDrawSky( Scene * scene, const WwAtmoInputs & in, QString * line )
 	hazeFromFog( in.fogFar, in.fogMax, in.fogMid, in.fogRange, red( "nohaze" ), s.haze );
 	// lane WX1: a weather .recx visibility / hazeHeight wins over the fog-derived haze (Weather .recx row)
 	if ( !red( "nohaze" ) )
-		wwWeatherRecxHaze( s.haze, in.fogFar > 0.0f && in.fogMax > 0.0f, kRay[1] + kMieE );
+		clearDayHaze( s.haze, in.fogFar > 0.0f && in.fogMax > 0.0f );	// SHAFTS1b: clear day, then the .recx
 	g_ozone = wwWeatherRecxOzone();
 	const float hKm = std::clamp( in.camZ * kUnitKm, 0.002f, 80.0f );
 	const float camR = kRb + hKm;
@@ -795,6 +823,11 @@ const WwAtmoFrame & wwAtmoFrame()
 	return g_frame;
 }
 
+const char * wwAtmoHazeSource()
+{
+	return g_hazeSrc;
+}
+
 unsigned wwAtmoSkyViewTex()
 {
 	return g_last ? g_last->sunView.tex : 0;
@@ -929,7 +962,7 @@ bool wwAtmoKeyLight( float muLight, const float fog[4], float keyLum45, float su
 	float haze[3];
 	hazeFromFog( fog[0], fog[1], fog[2], fog[3], red( "nohaze" ), haze );
 	if ( !red( "nohaze" ) )
-		wwWeatherRecxHaze( haze, fog[0] > 0.0f && fog[1] > 0.0f, kRay[1] + kMieE );	// lane WX1
+		clearDayHaze( haze, fog[0] > 0.0f && fog[1] > 0.0f );	// lane WX1; SHAFTS1b: clear day, then the .recx
 	float rows[7][3];
 	std::copy( amb, amb + 3, rows[0] );
 	for ( int a = 0; a < 6; a++ )

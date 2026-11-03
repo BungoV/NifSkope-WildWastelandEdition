@@ -2439,9 +2439,9 @@ static void vaPassInner( Scene * scene, bool run )
 	// SHAFTS1b census: the ground extinction each medium holds and the clear-day visibility they leave (Koschmieder
 	// 3.912 / beta; the surfaces see the larger of the two, atmo_apfog.glsl's min of the transmittances)
 	const double airKm = double( M.sigma0 ) * kUnitsPerKm, apKm = apHazeKm > 0.0f ? double( apHazeKm + WwAtmoMath::kRay[1] + WwAtmoMath::kMieE ) : 0.0;
-	const QString hazeNote = QStringLiteral( "haze=(air=%1/km ap=%2/km vis=%3km apcut=%4%5)" ).arg( airKm, 0, 'f', 3 )
+	const QString hazeNote = QStringLiteral( "haze=(src=%6 air=%1/km ap=%2/km vis=%3km apcut=%4%5)" ).arg( airKm, 0, 'f', 3 )
 		.arg( apKm, 0, 'f', 3 ).arg( 3.912 / std::max( std::max( airKm, apKm ), 1e-4 ), 0, 'f', 1 ).arg( M.apCut ? 1 : 0 )
-		.arg( s.apStackRed ? QStringLiteral( ",RED=apstack" ) : QString() );
+		.arg( s.apStackRed ? QStringLiteral( ",RED=apstack" ) : QString() ).arg( QLatin1StringView( wwAtmoHazeSource() ) );
 	s.last.chop( 1 );
 	s.last += QStringLiteral( " " ) + optNote + QStringLiteral( " " ) + groundNote + QStringLiteral( " " ) + farNote + QStringLiteral( " " ) + hazeNote
 		+ ( dr.on ? QStringLiteral( " drift=" ) + dr.note : QString() ) + QStringLiteral( " sungate=" ) + sunGateNote
