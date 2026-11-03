@@ -667,13 +667,6 @@ QHash<const void *, VaGpu> & vaGpus()
 static int vaPathFrame = -1;
 static unsigned vaPathGen = 0;
 
-void wwCellVolAirSetPath( int frame )
-{
-	if ( frame < 0 && vaPathFrame >= 0 )
-		vaPathGen++;
-	vaPathFrame = frame;
-}
-
 void vaAlloc3D( NifSkopeOpenGLContext::GLFunctions * fn, GLuint & tex, int w, int h, int d, bool linear, bool half )
 {
 	if ( !tex )
@@ -1143,6 +1136,13 @@ static bool foggiSunRed()
 bool wwVolAirSunGateWanted()
 {
 	return vs().on && !foggiSunRed();
+}
+
+void wwCellVolAirSetPath( int frame )
+{
+	if ( frame < 0 && vaPathFrame >= 0 )
+		vaPathGen++;
+	vaPathFrame = frame;
 }
 
 void wwVolAirSetOn( bool on )
