@@ -290,7 +290,7 @@ CSM = shadow_map()
 PN, UN = program(os.path.join(TREE, 'res', 'shaders'))
 PB, UB = program(BDIR)
 TAP = 0 if RED == 'soft' else 1   # the shipped value (C++: volSunTap = !WW_CELL_AIR_SHADOW_RED=soft)
-SHIP_BEAD = 0   # lane AIRBEAD1: shipped off (C++: volSunBead = WW_CELL_AIR_SHADOW=bead)
+SHIP_BEAD = 0 if RED == 'mid' else 1   # lane AIRBEAD2: shipped on (bungo 11-03; C++: volSunBead = WW_CELL_AIR_SHADOW != mid); --red mid = the one middle read
 ON_BEAD = 0 if RED == 'bead' else 1   # the switch's reads that B and C judge; --red bead judges the one middle read
 BEAD = [SHIP_BEAD]
 
@@ -392,12 +392,12 @@ if 'C' in ONLY:
     m = {k: float(np.median(v)) for k, v in ms.items()}
     dl, dm = m['new low'] - m['base low'], m['new med'] - m['base med']
     BEAD[0] = SHIP_BEAD
-    gate('C cost', dl <= 0.05 and dm <= 0.05, 'sun-only inject x64, interleaved median of 41, as shipped: Low 160x90 base %.3f new %.3f '
-         '(%+.3f ms); Medium 240x135 base %.3f new %.3f (%+.3f ms); bar <= +0.05' % (m['base low'], m['new low'], dl,
+    gate('C cost', dl <= 0.10 and dm <= 0.10, 'sun-only inject x64, interleaved median of 41, as shipped: Low 160x90 base %.3f new %.3f '
+         '(%+.3f ms); Medium 240x135 base %.3f new %.3f (%+.3f ms); bar <= +0.10 (AIRBEAD2: bungo took the beads at +0.07)' % (m['base low'], m['new low'], dl,
                                                                                   m['base med'], m['new med'], dm))
     bl, bm = m['bead low'] - m['base low'], m['bead med'] - m['base med']
-    print('%-12s INFO  WW_CELL_AIR_SHADOW=bead (volSunBead %d): Low %+.3f ms, Medium %+.3f ms (the +0.05 bar: %s; why it '
-          'ships off)' % ('C bead', ON_BEAD, bl, bm, 'within' if bl <= 0.05 and bm <= 0.05 else 'over'), flush=True)
+    print('%-12s INFO  the beaded reads (volSunBead %d): Low %+.3f ms, Medium %+.3f ms (AIRBEAD1 bar +0.05: %s; shipped on '
+          'at +0.07, bungo 11-03)' % ('C bead', ON_BEAD, bl, bm, 'within' if bl <= 0.05 and bm <= 0.05 else 'over'), flush=True)
     print('%-12s INFO  Medium grid by default (new med - base low): %+.3f ms in the sun-only inject; the whole air pass '
           'scales with the froxel count (x2.25)' % ('C grid', m['new med'] - m['base low']), flush=True)
 
