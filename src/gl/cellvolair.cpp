@@ -88,6 +88,8 @@ struct VaState
 	bool on = false, pinned = false;
 	int farTier = 0;	// lane FARGRID1: the Far Air row, 0 Off .. 4 Ultra (the pin WW_CELL_AIR_FAR wins)
 	bool farPinned = false;
+	bool farOffRed = false;	// SHAFTS1b red WW_CELL_AIR_RED=faroff: the far air ships Off again (today's rule)
+	const char * farSrc = "default";
 	int red = 0;
 	bool shellStep = false;	// SKY2 red WW_CELL_AIR_RED=shellstep: the old law (no air volume, the GI shell's edge one voxel wide)
 	bool noAirVol = false;	// SKY2 red WW_CELL_AIR_RED=noairvol: no air volume, the shell read over the probes' reach (the stopgap)
@@ -172,6 +174,7 @@ VaState & vs()
 			s.sunColumn = s.sunColumn || r == "suncolumn";	// lane FIX1101A
 			s.envHue = s.envHue || r == "envhue";	// lane FIX1101A
 			s.veilPhys = s.veilPhys || r == "veilphys";	// lane FARCITYWASH1
+			s.farOffRed = s.farOffRed || r == "faroff";	// SHAFTS1b
 			s.leakRed |= r == "dalcenv" ? 1 : r == "nosungate" ? 2 : r == "lightleak" ? 4 : r == "nofartailshadow" ? 8
 				: r == "nointsungate" ? 16 : r == "envscale" ? 32 : r == "sun8" ? 64 : 0;	// lane FOGLEAK1, INTGI1, FOGENV1
 			s.askRed = s.askRed || r == "ask";
@@ -209,11 +212,20 @@ VaState & vs()
 		s.tricubic = wwEnvInt( "WW_CELL_VOLAIR_TRICUBIC" ) == 1 ? 1 : 0;
 		if ( s.fogBlend && ( s.red & 64 ) )
 			s.fogBlend = 2;	// red blendnear: the fog colour by the air's own 1 - T, no start distance (must fail B)
-		s.farTier = std::clamp( QSettings().value( QStringLiteral( "WW/VolAirFar" ), 0 ).toInt(), 0, 4 );	// lane FARGRID1
+		/* SHAFTS1b (bungo's floating ridge): the far air ships on at Medium (2), so the air reaches the far LOD ridge with
+		 * default settings; a saved row still wins. Red faroff: Off whatever the row says (today's rule). */
+		const QVariant farRow = QSettings().value( QStringLiteral( "WW/VolAirFar" ) );
+		s.farTier = std::clamp( farRow.isValid() ? farRow.toInt() : 2, 0, 4 );	// lane FARGRID1
+		s.farSrc = farRow.isValid() ? "row" : "default";
+		if ( s.farOffRed ) {
+			s.farTier = 0;
+			s.farSrc = "red";
+		}
 		const QByteArray farPin = wwEnv( "WW_CELL_AIR_FAR" ).trimmed();	// lane FARGRID1: the pin wins
 		if ( !farPin.isEmpty() ) {
 			s.farPinned = true;
 			s.farTier = std::clamp( farPin.toInt(), 0, 4 );
+			s.farSrc = "pin";
 		}
 		s.dump = QString::fromLocal8Bit( wwEnv( "WW_CELL_AIR_DUMP" ) );
 		s.grid = std::clamp( QSettings().value( QStringLiteral( "WW/VolAirGrid" ), 0 ).toInt(), 0, 4 );	// lane PERFFIX3
@@ -2404,14 +2416,14 @@ static void vaPassInner( Scene * scene, bool run )
 			: QStringLiteral( " recxoverride=1" ) ).arg( g.terrNote );
 	// lane FARGRID1: the far grid's echo (the grid, its range, builds, GPU ms of its last build, the volumes' bytes)
 	const double volMb = double( g.texW ) * g.texH * g.texD * 16.0 * 2.0 / ( 1024.0 * 1024.0 );
-	const QString farNote = !farOn ? QStringLiteral( "far=off(tier=%1%2)" ).arg( s.farTier )
+	const QString farNote = QStringLiteral( "farsrc=%1 " ).arg( QLatin1StringView( s.farSrc ) ) + ( !farOn ? QStringLiteral( "far=off(tier=%1%2)" ).arg( s.farTier )
 			.arg( s.farTier > 0 ? QStringLiteral( " handoff=%1 end=%2" ).arg( double( kFarHandoff ), 0, 'f', 0 ).arg( double( farEnd ), 0, 'f', 0 ) : QString() )
 		: QStringLiteral( "far=on(tier=%1 %2x%3x%4 start=%5 end=%6 refresh=%7 builds=%8 gpums=%9 volmb=%10 terrain=%11)" )
 			.arg( s.farTier ).arg( fp.cols ).arg( fp.rows ).arg( fp.slices ).arg( double( farStart ), 0, 'f', 0 )
 			.arg( double( farEnd ), 0, 'f', 0 ).arg( fp.refresh ).arg( g.farBuilds ).arg( g.farGpuMs, 0, 'f', 3 )
-			.arg( volMb, 0, 'f', 1 ).arg( [] { WwTerrainShadowMap t; return wwTerrainShadowMap( t ) ? 1 : 0; }() );
+			.arg( volMb, 0, 'f', 1 ).arg( [] { WwTerrainShadowMap t; return wwTerrainShadowMap( t ) ? 1 : 0; }() ) );
 	s.last.chop( 1 );
-	s.last += QStringLiteral( " " ) + optNote + QStringLiteral( " " ) + groundNote + ( s.farTier > 0 ? QStringLiteral( " " ) + farNote : QString() )
+	s.last += QStringLiteral( " " ) + optNote + QStringLiteral( " " ) + groundNote + QStringLiteral( " " ) + farNote
 		+ ( dr.on ? QStringLiteral( " drift=" ) + dr.note : QString() ) + QStringLiteral( " sungate=" ) + sunGateNote
 		+ QStringLiteral( " rainfog=" ) + g.rfNote
 		+ QStringLiteral( " fogleak=%1(red=%2)" ).arg( wwFogLeakShaderDefine() ? "on" : "off" ).arg( s.leakRed )	// lane FOGLEAK1
