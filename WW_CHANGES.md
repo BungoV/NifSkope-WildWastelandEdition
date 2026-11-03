@@ -1,3 +1,12 @@
+## VOLAIRPATH1 (2026-11-03): the air temporal's history follows the camera path frame
+- WW_CELL_VOLAIR_TEMPORAL=1 stepped its history once per pass (frame++, histCur flip, volQ = frame & 3), so a path's
+  frames depended on how many paints came before the row, and two runs of one path differed.
+- wwRenderPathRun calls wwCellVolAirSetPath( frame ) beside the TAA / post / SSGI hooks (-1 after the run). During a
+  path, cellvolair.cpp keys the history on the path frame: a run's first frame (or a step back) starts a fresh
+  history, a repaint of the same frame redoes it from that frame's starting state, volQ = path frame & 3.
+- No path running, or temporal off: unchanged (one step a paint). Echo: `temporal=N histpath=<frame>` during a path.
+- Check: notes/perfhunt2/show c3_tm_{off,on}_{a,b} rows (the same pan run twice per arm, a vs b ~0 px).
+
 ## STREAMTEX5 (2026-11-02): a leaf's coverage copy is pooled under its noted file (STREAMTEX4-WWCOVKEY)
 - STREAMTEX4's census counted textures as "unnoted" (loaded, never named by a shader property the stream saw), and
   those escape kTierKeep, so the pool could free them while their cell was loaded. The main source: TREELEAF1/2 bind

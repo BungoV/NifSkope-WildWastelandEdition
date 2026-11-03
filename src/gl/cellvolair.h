@@ -122,6 +122,9 @@ bool wwVolAirDriftOn();
 void wwVolAirSetDriftOn( bool on );
 //! the view repaints while the fog drifts (never in a harness or with the clock pinned)
 bool wwVolAirWantsRepaint();
+//! lane VOLAIRPATH1: the camera path runner's frame (-1 after the run); the air temporal (WW_CELL_VOLAIR_TEMPORAL)
+//! keys its history on it, so a path's frames repeat exactly. No path running: nothing changes
+void wwCellVolAirSetPath( int frame );
 //! census echo: "volair=on(...)" or why none was drawn
 QString wwVolAirSummary();
 //! lane FIX1101A (moon, 24d(2)): the last air pass's medium (airMed, airLayer, airGround.xy); false when no pass ran in

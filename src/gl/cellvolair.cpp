@@ -480,6 +480,16 @@ struct VaGpu
 	float prevGrid[4] = { 0, 0, 0, 0 }, prevScale = 0.0f;
 	unsigned frame = 0;
 	int tmode = 0;
+	// lane VOLAIRPATH1: the path frame this history last drew (-1 none), the path run it belongs to, and the state
+	// that frame started from (a repaint of the same frame redoes it from the same history)
+	int pathDone = -1;
+	unsigned pathGen = 0;
+	struct {
+		int histCur;
+		bool histOk;
+		double prevV[3][4];
+		float prevGrid[4], prevScale;
+	} pathSnap = {};
 	// lane VOLPART1: the frame's phase and cascades, for the particles lit by the same law (wwVolPartUniforms; the
 	// medium is med / layer / ground above)
 	float phase[3][4] = {};
@@ -650,6 +660,18 @@ QHash<const void *, VaGpu> & vaGpus()
 {
 	static QHash<const void *, VaGpu> g;
 	return g;
+}
+
+// lane VOLAIRPATH1: the camera path's frame (wwCellVolAirSetPath), -1 no path running; the run count moves when a
+// path run ends, so the next run starts a fresh history
+static int vaPathFrame = -1;
+static unsigned vaPathGen = 0;
+
+void wwCellVolAirSetPath( int frame )
+{
+	if ( frame < 0 && vaPathFrame >= 0 )
+		vaPathGen++;
+	vaPathFrame = frame;
 }
 
 void vaAlloc3D( NifSkopeOpenGLContext::GLFunctions * fn, GLuint & tex, int w, int h, int d, bool linear, bool half )
@@ -1748,6 +1770,38 @@ static void vaPassInner( Scene * scene, bool run )
 	}
 	if ( !temporal || g.doc != scene->nifModel )
 		g.histOk = false;	// another document: its history is not this one's
+	/* lane VOLAIRPATH1: a camera path keys the history on its frame, so every repeat of a path draws the same strata
+	 * from the same history: a run's first frame (or a step back) starts a fresh history, a repaint of the same frame
+	 * redoes it from the state that frame started from, and the stratum is the frame's (volQ = frame & 3). No path
+	 * running: one step a paint, as before */
+	const int pathFrame = temporal ? vaPathFrame : -1;
+	if ( pathFrame >= 0 ) {
+		auto & ps = g.pathSnap;
+		const bool fresh = g.pathDone < 0 || g.pathGen != vaPathGen || pathFrame < g.pathDone;
+		if ( fresh ) {
+			g.histOk = false;
+			g.histCur = 0;
+			std::fill( &g.prevV[0][0], &g.prevV[0][0] + 12, 0.0 );
+			std::fill( g.prevGrid, g.prevGrid + 4, 0.0f );
+			g.prevScale = 0.0f;
+		}
+		if ( !fresh && pathFrame == g.pathDone ) {
+			g.histCur = ps.histCur;
+			g.histOk = ps.histOk;
+			std::copy( &ps.prevV[0][0], &ps.prevV[0][0] + 12, &g.prevV[0][0] );
+			std::copy( ps.prevGrid, ps.prevGrid + 4, g.prevGrid );
+			g.prevScale = ps.prevScale;
+		} else {
+			ps.histCur = g.histCur;
+			ps.histOk = g.histOk;
+			std::copy( &g.prevV[0][0], &g.prevV[0][0] + 12, &ps.prevV[0][0] );
+			std::copy( g.prevGrid, g.prevGrid + 4, ps.prevGrid );
+			ps.prevScale = g.prevScale;
+		}
+		g.frame = unsigned( pathFrame );
+	} else {
+		g.pathDone = -1;
+	}
 
 	// red flat: one cube for every froxel, the GI grid's mean per axis
 	float flat[6][3] = {};
@@ -2395,6 +2449,10 @@ static void vaPassInner( Scene * scene, bool run )
 		g.histCur ^= 1;
 		g.histOk = true;
 		g.frame++;
+		if ( pathFrame >= 0 ) {
+			g.pathDone = pathFrame;
+			g.pathGen = vaPathGen;
+		}
 		std::copy( &curV[0][0], &curV[0][0] + 12, &g.prevV[0][0] );
 		std::copy( curGrid, curGrid + 4, g.prevGrid );
 		g.prevScale = distScale;
@@ -2440,7 +2498,8 @@ static void vaPassInner( Scene * scene, bool run )
 		.arg( depthOn ? ( ( s.red & 8192 ) ? 2 : 1 ) : 0 )
 		.arg( !tileOn ? QStringLiteral( "none" ) : zDepth ? QStringLiteral( "depth" ) : QStringLiteral( "colour" ) )
 		.arg( g.tileValid && !( s.red & 2097152 ) ? 1 : 0 )
-		.arg( g.tmode );	// lane PERF2: 0 the 4 sub-steps, 1 temporal reprojected, 2 temporal, camera unchanged
+		.arg( g.tmode )	// lane PERF2: 0 the 4 sub-steps, 1 temporal reprojected, 2 temporal, camera unchanged
+		+ ( g.pathDone >= 0 ? QStringLiteral( " histpath=%1" ).arg( g.pathDone ) : QString() );	// VOLAIRPATH1
 	// the ground layer's echo: what was applied (the near share, the strength, thickness and anchor) and its source
 	const QString groundNote = QStringLiteral( "nearw=%1 ground=%2 thick=%3 zg=%4 terrain=%7 recx=%5%6" )
 		.arg( double( G.w ), 0, 'f', 2 ).arg( double( G.s ), 0, 'g', 4 )
