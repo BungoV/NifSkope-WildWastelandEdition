@@ -72,6 +72,7 @@ const char * const kContactKey = "Settings/Render/Scene/Contact Shadows";
 const char * const kTerrainKey = "Settings/Render/Scene/Terrain Shadows";
 const char * const kSunPathKey = "Settings/Render/Scene/Sun Path";
 const char * const kParKey = "Settings/Render/Scene/FO4CS-Level Shadows";
+const char * const kParKey2 = "Settings/Render/Scene/FO4CS-Level Shadows2";	// lane DEFAULTS1: ships on
 const char * const kDistanceKey = "Settings/Render/Scene/Shadow Distance";
 const char * const kParNames[14] = { "dist", "cradius", "cphase", "cslope", "contact", "objlod", "near", "pen", "lowsun",
 	"moon", "tslope", "dim", "temporal", "fogtail" };
@@ -332,7 +333,9 @@ SetState & ss()
 		} else if ( wwHarnessRun() ) {
 			s.pinPar = true;
 		} else {
-			s.par = q.value( QLatin1StringView( kParKey ), 0 ).toInt() != 0 ? WwParAll : 0;
+			// lane DEFAULTS1: the Fusion Shaders shadow rules ship on (new key); WW_DEFAULTS1_RED=1 = the old row
+			s.par = ( wwEnvInt( "WW_DEFAULTS1_RED" ) == 1 ? q.value( QLatin1StringView( kParKey ), 0 ).toInt()
+				: q.value( QLatin1StringView( kParKey2 ), 1 ).toInt() ) != 0 ? WwParAll : 0;
 		}
 		bool dok = false;
 		const double de = wwEnvStr( "WW_SHADOW_DISTANCE" ).toDouble( &dok );
@@ -1643,7 +1646,7 @@ void wwShadowSetParMask( int mask )
 	SetState & s = ss();
 	s.par = mask & WwParAll;
 	if ( !s.pinPar )
-		QSettings().setValue( QLatin1StringView( kParKey ), s.par ? 1 : 0 );
+		QSettings().setValue( QLatin1StringView( kParKey2 ), s.par ? 1 : 0 );
 }
 
 void wwShadowSetAirAmbientShare( float a ) { ss().airAmb = std::clamp( a, 0.05f, 0.95f ); }

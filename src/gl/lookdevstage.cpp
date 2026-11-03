@@ -72,7 +72,7 @@ const char * const kCloudsKey = "Settings/Render/Scene/Lookdev Clouds";
 const char * const kMoonKey = "Settings/Render/Scene/Lookdev Moon";
 const char * const kDayKey = "Settings/Render/Scene/Lookdev Game Day";
 const char * const kFogKey = "Settings/Render/Scene/Lookdev Fog";
-const char * const kShadowsKey = "Settings/Render/Scene/Lookdev Shadows";
+const char * const kShadowsKey = "Settings/Render/Scene/Lookdev Shadows2";	// lane DEFAULTS1: new key (ships on)
 
 const char * const kDefaultCube = "textures/shared/cubemaps/mipblur_defaultoutside1.dds";
 const char * const kGroundD = "textures/landscape/ground/commonwealthdefault01_d.dds";
@@ -163,7 +163,8 @@ struct LdState
 	QString fogLast = QStringLiteral( "pending" );	// what the last fogged draw uploaded, for the echo
 
 	// the cascaded sun shadows (lane CSM1, gl/sunshadow.cpp)
-	bool shadows = false, pinShadows = false;
+	// lane DEFAULTS1: ships on (new key below so an old OFF does not stick); WW_DEFAULTS1_RED=1 = the old default, off
+	bool shadows = wwEnvInt( "WW_DEFAULTS1_RED" ) != 1, pinShadows = false;
 
 	// ground height cache
 	float bsKey[4] = { 0, 0, 0, -1 };

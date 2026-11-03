@@ -129,7 +129,9 @@ bool wwAirZonesOn()
 	if ( !r.loaded ) {
 		r.loaded = true;
 		QSettings s( QStringLiteral( "NifTools" ), rowApp() );
-		r.on = s.value( QStringLiteral( "WW/CellAirZones" ), false ).toBool();
+		// lane DEFAULTS1: ships on (new key so an old OFF does not stick); WW_DEFAULTS1_RED=1 = the old row
+		r.on = wwEnv( "WW_DEFAULTS1_RED" ).trimmed() == "1" ? s.value( QStringLiteral( "WW/CellAirZones" ), false ).toBool()
+			: s.value( QStringLiteral( "WW/CellAirZones2" ), true ).toBool();
 	}
 	return r.on;
 }
@@ -140,7 +142,7 @@ void wwAirZonesSetOn( bool on )
 	r.loaded = true;
 	r.on = on;
 	QSettings s( QStringLiteral( "NifTools" ), rowApp() );
-	s.setValue( QStringLiteral( "WW/CellAirZones" ), on );
+	s.setValue( QStringLiteral( "WW/CellAirZones2" ), on );
 }
 
 bool wwAirZoneShaderDefine()

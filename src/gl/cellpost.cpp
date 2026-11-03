@@ -31,7 +31,8 @@
 
 namespace {
 
-const char * const kDofKey = "WW/CellDof";
+const char * const kDofKey = "WW/CellDof2";	// lane DEFAULTS1: ships on; new key so an old OFF does not stick
+const char * const kDofOldKey = "WW/CellDof";	// WW_DEFAULTS1_RED=1: the old row, default off
 const char * const kMblurKey = "WW/CellMotionBlur";
 const char * const kObKey = "WW/CellObjectBlur";
 const char * const kLinKey = "WW/CellPostLinear";	// lane POSTFX2
@@ -252,7 +253,7 @@ struct PostState
 	QString saidDof, saidMb, saidOb;
 };
 
-bool readPin( const char * env, const char * key, bool & pinned )
+bool readPin( const char * env, const char * key, bool & pinned, bool def = false )
 {
 	const QString pin = wwEnvStr( env ).trimmed();
 	if ( !pin.isEmpty() ) {
@@ -264,7 +265,7 @@ bool readPin( const char * env, const char * key, bool & pinned )
 		return false;
 	}
 	pinned = false;
-	return QSettings().value( QLatin1StringView( key ), false ).toBool();	// new rows ship OFF
+	return QSettings().value( QLatin1StringView( key ), def ).toBool();	// new rows ship OFF unless def
 }
 
 PostState & ps()
@@ -278,7 +279,8 @@ PostState & ps()
 			const PostState d {};
 			s.dumpFrame = d.dumpFrame;
 		}
-		s.dof = readPin( "WW_CELL_DOF", kDofKey, s.dofPinned );
+		const bool dRed = wwEnvStr( "WW_DEFAULTS1_RED" ).trimmed() == QLatin1StringView( "1" );	// lane DEFAULTS1
+		s.dof = readPin( "WW_CELL_DOF", dRed ? kDofOldKey : kDofKey, s.dofPinned, !dRed );
 		s.mb = readPin( "WW_CELL_MBLUR", kMblurKey, s.mbPinned );
 		s.redNoCoc = wwEnvStr( "WW_CELL_DOF_RED" ).contains( QLatin1StringView( "nococ" ) );
 		s.redBlurRow = wwEnvStr( "WW_CELL_DOF_RED" ).contains( QLatin1StringView( "blurrow" ) );

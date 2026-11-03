@@ -731,7 +731,9 @@ void shadowsLeg( NifSkope * skope, WwScState & st )
 	check( st, QStringLiteral( "(floor) the Cascaded Shadows row exists" ), all );
 	if ( !all )
 		return;
-	check( st, QStringLiteral( "(ship) the Cascaded Shadows row starts OFF in a fresh scope" ), !sh->isChecked() && !wwLookdevShadows() );
+	// lane DEFAULTS1: the row ships ON now (WW_DEFAULTS1_RED=1 = the old OFF); the checks below start from off
+	check( st, QStringLiteral( "(ship) the Cascaded Shadows row starts ON in a fresh scope" ), sh->isChecked() && wwLookdevShadows() );
+	sh->setChecked( false );
 	if ( !w->isVisible() ) {
 		w->show();
 		pump();
@@ -755,7 +757,7 @@ void shadowsLeg( NifSkope * skope, WwScState & st )
 	check( st, QStringLiteral( "(live) Shadows on changes the viewport at 09:00 (%1 px >= 200)" ).arg( d9 ), d9 >= 200 );
 	check( st, QStringLiteral( "(live) the echo names the cascade pass" ), e9.contains( QLatin1StringView( "csm=on map=" ) ) );
 	check( st, QStringLiteral( "(save) the Cascaded Shadows row wrote ON to its setting" ),
-		QSettings().value( QLatin1StringView( "Settings/Render/Scene/Lookdev Shadows" ) ).toBool() );
+		QSettings().value( QLatin1StringView( "Settings/Render/Scene/Lookdev Shadows2" ) ).toBool() );
 	hour->setValue( 15.0 );
 	pump();
 	const QImage on15 = freshGrab( skope );
@@ -779,7 +781,7 @@ void shadowsLeg( NifSkope * skope, WwScState & st )
 	const int dBack = diffCount( off9, back );
 	say( st, QStringLiteral( "  shadows off again at 09:00: %1 px differ from the pre-CSM grab" ).arg( dBack ) );
 	check( st, QStringLiteral( "(live) Shadows off reached the state and saved OFF" ), !wwLookdevShadows()
-		&& !QSettings().value( QLatin1StringView( "Settings/Render/Scene/Lookdev Shadows" ) ).toBool() );
+		&& !QSettings().value( QLatin1StringView( "Settings/Render/Scene/Lookdev Shadows2" ) ).toBool() );
 	check( st, QStringLiteral( "(live) Shadows off restores the pre-CSM picture (%1 px)" ).arg( dBack ), dBack == 0 );
 	check( st, QStringLiteral( "(live) the echo drops the cascades when off" ), !wwLookdevSummary().contains( QLatin1StringView( "csm=" ) ) );
 	hour->setValue( 12.0 );

@@ -79,7 +79,10 @@ SsrState & ssr()
 		s.pinOn = !pinOn.isEmpty();
 		s.pinExt = !pinExt.isEmpty();
 		s.on = s.pinOn ? pinOn != "0" : QSettings().value( QStringLiteral( "WW/CellSsr" ), true ).toBool();
-		s.ext = s.pinExt ? pinExt != "0" : QSettings().value( QStringLiteral( "WW/CellSsrExterior" ), false ).toBool();
+		// lane DEFAULTS1: outdoors ships on (the one SSR row means both halves); WW_DEFAULTS1_RED=1 = the old row
+		s.ext = s.pinExt ? pinExt != "0" : wwEnvInt( "WW_DEFAULTS1_RED" ) == 1
+			? QSettings().value( QStringLiteral( "WW/CellSsrExterior" ), false ).toBool()
+			: QSettings().value( QStringLiteral( "WW/CellSsrExterior2" ), true ).toBool();
 		const QByteArray pinWater = wwEnv( "WW_CELL_SSR_WATER" ).trimmed();
 		s.pinWater = !pinWater.isEmpty();
 		s.water = s.pinWater ? pinWater != "0" : QSettings().value( QStringLiteral( "WW/CellSsrWater" ), true ).toBool();
@@ -248,7 +251,7 @@ void wwCellSsrExteriorSetOn( bool on )
 	if ( s.pinExt )
 		return;
 	s.ext = on;
-	QSettings().setValue( QStringLiteral( "WW/CellSsrExterior" ), on );
+	QSettings().setValue( QStringLiteral( "WW/CellSsrExterior2" ), on );
 }
 
 bool wwCellSsrWantsTargets( Scene * scene )
