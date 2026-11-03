@@ -387,6 +387,13 @@ int rtddgiGiSkyAbsolute()
 	return v.isEmpty() || v == "level" ? 1 : v == "absolute" ? 2 : 0;
 }
 
+//! lane MUSGI1 (11-03): WW_CELL_RTDDGI_INTLEVEL_RED=1 = a sunlit interior's volume takes the weather's DALC as it is
+bool rtddgiIntLevelRed()
+{
+	const QByteArray v = wwEnvIsSet( "WW_CELL_RTDDGI_INTLEVEL_RED" ) ? wwEnv( "WW_CELL_RTDDGI_INTLEVEL_RED" ).trimmed() : QByteArray();
+	return !v.isEmpty() && v != "0";
+}
+
 //! FIX1101A LATE ITEM 17: WW_CELL_RTDDGI_INTSKY_RED=1 = today's main (an interior's volume may take the weather's sky and sun)
 bool rtddgiIntSkyRed()
 {
@@ -2107,8 +2114,20 @@ static void volumeFrame( Scene * scene, Cell & c, const CellSpec * spIn, bool du
 	 * WW_CELL_RTDDGI_SKY=physical turns it on. Measured (tests/gisky, CommonwealthClear's DALC, sun 30 deg): the physical
 	 * sides are LESS blue than the weather's (R/B 0.41-0.48 vs 0.34; zenith 0.33 both) and the sun side 1.47x the
 	 * anti-sun side, so it would warm the shade bungo calls tan (LATE ITEM 15): his call. In the build key via sky.amb */
+	/* lane MUSGI1 (11-03, bungo "night looks like the brightest noon"): a SUNLIT interior takes the exterior's sky level
+	 * too. It skipped it, so its volume kept the weather's DALC as it is at every hour: at 22 h (moon up) the outdoors
+	 * take f 0.07-0.26 of it, the Museum took 1, and its night measured as bright as noon (adapted 0.275 vs 0.295). */
 	const int absMode = rtddgiGiSkyAbsolute();
-	if ( sky.on && !lights.interior && ( rtddgiGiSkyPhysical() || absMode ) ) {
+	const bool skyLevelled = !lights.interior || ( sunlit && !rtddgiIntLevelRed() );
+	if ( lights.interior && sunlit ) {
+		static int saidLv = -1;
+		if ( int( skyLevelled ) != saidLv ) {
+			saidLv = int( skyLevelled );
+			say( c.tag + ( skyLevelled ? QStringLiteral( "interior (sunlit): the sky at the exterior's level (MUSGI1)" )
+				: QStringLiteral( "interior (sunlit): the weather's DALC as it is (the red WW_CELL_RTDDGI_INTLEVEL_RED)" ) ) );
+		}
+	}
+	if ( sky.on && skyLevelled && ( rtddgiGiSkyPhysical() || absMode ) ) {
 		float phys[6][3], mixed[6][3], T[3];
 		const float skyKm = rtddgiSkyHeightKm( *soup );
 		if ( wwAtmoGiSkyAxes( sky.sunTo, phys, T, skyKm ) ) {

@@ -309,6 +309,10 @@ void BSShape::drawShapes( NodeList * secondPass )
 	if ( !scene->hasOption(Scene::ShowMarkers) && name.contains( QLatin1StringView("EditorMarker") ) )
 		return;
 
+	// lane MUSGI1: the game's fake fog / shaft cards while our Volumetric Air is on (gl/fakeair.h)
+	if ( name.contains( QLatin1StringView( "FakeAir " ) ) && wwFakeAirHidden() )
+		return;
+
 	// flat shading: GLView fills the geometry with uniform grey instead
 	if ( scene->flatGrey && !scene->selecting )
 		return;

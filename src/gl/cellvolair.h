@@ -159,6 +159,10 @@ void wwVolPartFxSet( int flags );
 int wwVolPartFx();
 //! gates only: WW_CELL_VOLPART_HIDE=1, no volumetric particle or card drawn (the plate)
 bool wwVolPartHidden();
+//! lane MUSGI1: the game's fake fog / shaft cards (cell buckets named "FakeAir ...", gl/fakeair.h) hide while our
+//! Volumetric Air is on; WW_CELL_FAKEAIR_RED=keep draws them
+bool wwFakeAirHidden();
+bool wwFakeAirRed();
 //! gates only (WW_CELL_VOLPART_DUMP): a volumetric effect card's probe, drawn again by draw() with the CURRENT
 //! program (fo4_effectcell.prog); appended to the dump as system "fx:<name>"
 void wwVolPartFxDump( Scene * scene, const std::function<void()> & draw, int block, const QString & name );

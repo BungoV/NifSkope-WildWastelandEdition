@@ -21,6 +21,7 @@ BSD License - see nifskope.h
 #include "cellidentity.h"	// lane CELLVIEW2
 #include "cellactor.h"		// lane PLACED1
 #include "gl/celllooks.h"	// lane GAPLOOK2: Actors outdoors, Weapon mod parts
+#include "gl/fakeair.h"	// lane MUSGI1: the game's fake fog / shaft cards
 #include "cellworldanim.h"		// lane FXPARITY2: Animated objects
 #include "cellweapon.h"		// lane MISS1 (GAPLOOK2)
 #include "cellvertexalpha.h"	// lane TERRAINBLOCK1
@@ -4180,6 +4181,8 @@ static bool cellBuild( NifModel * nif, const CellSceneSpec & specAsked, CellChun
 	QSet<quint32> animObjRefs, animObjCapped;
 	QHash<QString, std::pair<Vector3, float>> fadeModelBound;	// lane OBJFADE1: a model's bound sphere, model space
 	int animObjShapes = 0;
+	int fakeAirShapes = 0;	// lane MUSGI1: the game's fake fog / shaft cards, by model
+	QMap<QString, int> fakeAirModels;
 	auto soupLeavesOut = [&]( const Placement & p, bool counted ) -> bool {
 		const EsmLodBase & lb = world.lodBase( p.base );
 		if ( !p.actorKey.isEmpty() ) {   // a placed actor never enters the soup
@@ -5319,7 +5322,17 @@ static bool cellBuild( NifModel * nif, const CellSceneSpec & specAsked, CellChun
 				animObjShapes++;
 				continue;
 			}
+			/* lane MUSGI1: a fake fog / light-shaft card (gl/fakeair.h) takes its own bucket named "FakeAir ...";
+			 * BSShape hides it while our Volumetric Air is on (wwFakeAirHidden) */
+			const bool fakeAir = s.nearFacts.effectShader && !isActor && wwFakeAirModel( model );
+			if ( fakeAir ) {
+				bbOwn += QLatin1String( "|FA" );
+				fakeAirShapes++;
+				fakeAirModels[QString( model ).replace( QLatin1Char( '\\' ), QLatin1Char( '/' ) ).section( QLatin1Char( '/' ), -1 )]++;
+			}
 			Bucket & b = bucketFor( s, colouring || ownColor || repaint, bbOwn );
+			if ( fakeAir && !b.name.startsWith( QLatin1String( "FakeAir " ) ) )
+				b.name.prepend( QLatin1String( "FakeAir " ) );
 			if ( cableSway ) {
 				b.grass = true;
 				b.grassWave = cableLook->windFlexibility;
@@ -7093,6 +7106,14 @@ static bool cellBuild( NifModel * nif, const CellSceneSpec & specAsked, CellChun
 				animObjShapes, refused, why.isEmpty() ? "" : ": last ", qPrintable( why ), int( animObjCapped.size() ), animObjCap );
 		}
 		wwCellAnimObjSet( nif, roots );
+	}
+	{	// lane MUSGI1: census of the fake air cards (hidden while our air is on; WW_CELL_FAKEAIR_RED=keep draws them)
+		QStringList names;
+		for ( auto it = fakeAirModels.constBegin(); it != fakeAirModels.constEnd(); ++it )
+			names << QStringLiteral( "%1 x%2" ).arg( it.key() ).arg( it.value() );
+		fprintf( stderr, "cell fake air: %d effect shapes of %d models tagged (hidden while our air is on%s)%s%s\n",
+			fakeAirShapes, int( fakeAirModels.size() ), wwFakeAirRed() ? ", red keep: drawn" : "",
+			names.isEmpty() ? "" : ": ", qPrintable( names.join( QStringLiteral( ", " ) ) ) );
 	}
 
 	/* The pick highlight: created once here and moved on every click (src/cellclick.h), since the welded

@@ -2826,6 +2826,24 @@ bool wwVolPartHidden()
 	return hide;
 }
 
+bool wwFakeAirRed()
+{
+	WW_SWITCH_STATIC( bool, keep, wwEnvStr( "WW_CELL_FAKEAIR_RED" ) == QLatin1String( "keep" ) );
+	return keep;
+}
+
+bool wwFakeAirHidden()
+{
+	const bool hide = wwVolAirOn() && !wwFakeAirRed();
+	static int was = -1;
+	if ( was != int( hide ) ) {	// telemetry: each change of the rule's answer
+		was = int( hide );
+		qInfo( "cell fake air: cards %s (our air %s%s)", hide ? "hidden" : "drawn", wwVolAirOn() ? "on" : "off",
+			wwFakeAirRed() ? ", red keep" : "" );
+	}
+	return hide;
+}
+
 void wwVolPartSetOn( bool on )
 {
 	VpState & s = vps();
