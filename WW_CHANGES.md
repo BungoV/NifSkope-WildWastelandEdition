@@ -1,3 +1,19 @@
+## MUSGI1 round 3 (2026-11-03): sunlit interiors take the exterior's GI sky level and an eye limit; the game's fake air hidden under ours
+
+- **Night as bright as noon (bungo 11-03):** a sunlit interior's RT GI volume skipped the exterior's sky level (GITRUTH1
+  "level", rtddgicell.cpp), so it kept the weather's DALC at f = 1 at every hour. The Museum at 22 h measured adapted 0.275
+  against 0.295 at 13 h; outdoors take f 0.07-0.26 at 22 h and 2.3-3.8 at noon. Sunlit interiors now take the same level.
+  Red `WW_CELL_RTDDGI_INTLEVEL_RED=1`; census `rtddgi cell: interior (sunlit): the sky at the exterior's level`.
+  Measured (hold MUSCHK7): the Museum picture does not move (22 h mean 171.1 -> 170.9, 13 h 170.6 -> 170.4): at mus_cam2
+  its light is the cell's own lamps and their GI bounce, not the sky. The night-as-noon bug stays open.
+- **The eye's limit** (celllights.cpp cellExposure): under a daylight adapted level L0 the eye adapts only partly
+  (exposure ~ adapted^-a, equal to the old law at L0; a 0.4, L0 0.14, under Concord noon's 0.145, so noon outdoors is
+  unchanged). Pin `WW_CELL_EYE=a,L0`, red `WW_CELL_EYE_RED=1` (full adaptation). Telemetry `cell eye: exposure ... cap ...
+  adapted ... law ...` on a 2 % move, and `eye=` in the imagespace measure echo.
+- **Fake air:** with our Volumetric Air on, placed effect cards whose model is an Effects mist / fog / haze / beam /
+  glowfill card (src/gl/fakeair.h; steam, smoke, fire, sparks, debris, weapon beams, particles stay) are hidden. Census
+  `cell fake air: N effect shapes of M models tagged ...`; red `WW_CELL_FAKEAIR_RED=keep`.
+
 ## LEANCOMMENTS3R (2026-11-02): lean comments, re-cut on LAND6
 
 - Comment-only (tests/spells/comments_only_check.py: 0 FAIL). LEANCOMMENTS3's trim (LEANCOMMENTS2's 72 files, the
