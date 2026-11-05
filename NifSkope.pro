@@ -610,6 +610,7 @@ SOURCES += \
 	src/features/lights/cellclustergl.cpp \
 	src/features/lights/cellfxlit.cpp \
 	src/features/post/celllensflare.cpp \
+	src/features/overlays/overlays.cpp \
 	src/features/weather/cellprecip.cpp \
 	src/features/near/cellcull.cpp \
 	src/features/far-lod/cellfarinst.cpp \

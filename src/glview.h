@@ -893,6 +893,8 @@ protected:
 	void resizeEvent( QResizeEvent * event ) override final;
 	//! Renders the OpenGL scene.
 	void paintGL() override final;
+	//! The editor overlays drawn after the frame (src/features/overlays/overlays.cpp).
+	void paintEditorOverlays( const Transform & viewTrans );
 	void glProjection( int x = -1, int y = -1 );
 
 	// QWidget Event Handlers
