@@ -33,6 +33,9 @@ int wwCellPrecipDraw( Scene * scene );
 bool wwCellPrecipWantsFrames( Scene * scene );
 //! the last census line ("precip: off" when the row is off)
 QString wwCellPrecipEcho();
+/*! lane MUSGI1 r5 (11-05): the roof map's box in world game units (the cell's non-effect shapes; z: up to the highest
+ *  roof, down unbounded) for the sky's air in a sunlit interior (cellvolair.cpp wwVolAirSkyDraw); false with no shapes */
+bool wwCellRoofBox( Scene * scene, float lo[3], float hi[3] );
 
 /* lane FO76WEATHER1: rain wetness on every material (gl/rainwetlaw.h, res/shaders/rain_wet.glsl), Fallout 76's law.
  * The amount runs on Fallout 4's clock (+0.03 a second while it rains, -0.02 while dry) toward the rain's share of the

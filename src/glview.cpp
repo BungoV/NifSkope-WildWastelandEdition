@@ -3616,6 +3616,8 @@ void GLView::paintGL()
 	globalUniforms.toneMapScale = toneMapping;
 	globalUniforms.brightnessScale = brightnessScale;
 	globalUniforms.glowScale = ( scene->hasOption(Scene::DoGlow) ? glowScale : 0.0f );
+	if ( const WwCellLighting * cl = wwCellLightsFor( scene->nifModel ) )
+		globalUniforms.glowScale *= cl->glowScale;	// lane MUSGI1 r5: a sunlit interior's lamp scale on the emissive surfaces
 	FloatVector4	mat_amb( 0.0f );
 	FloatVector4	mat_diff( 0.0f );
 	FloatVector4	lightDir( 0.0f, 0.0f, 1.0f, 0.0f );

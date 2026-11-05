@@ -217,6 +217,10 @@ struct WwCellLighting
 	QVector<WwNifxFixture> nifxFixtures;
 	QVector<WwCellLight> nifxOffPlaced, nifxBulbs;
 	QVector<WwCellLight> nifxOffBulbs;	//!< lane NIFXLIGHT3: bulb-tier lights dark with the start-off light they took
+	/*! lane MUSGI1 r5 (11-05): a sunlit interior's lamp scale (cellview.cpp cellPublishLighting; 1 elsewhere) as the .nifx
+	 *  lights take it (red WW_CELL_NIFX_SCALE_RED=1: 1) and as the emissive surfaces and their RT GI glow take it (red
+	 *  WW_CELL_GLOW_SCALE_RED=1: 1) */
+	float nifxScale = 1.0f, glowScale = 1.0f;
 	QString summary;                    //!< one census line
 };
 

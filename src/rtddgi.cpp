@@ -608,7 +608,7 @@ static bool packVolume( const ProbeSoup & soup, const WwCellLighting & lighting,
 			double le[3];
 			soup.glow.le( int( t ), 1.0 / 3.0, 1.0 / 3.0, le );
 			for ( int c = 0; c < 3; c++ )
-				a[4 + c] = float( le[c] );
+				a[4 + c] = float( le[c] ) * lighting.glowScale;	// lane MUSGI1 r5: a sunlit interior's lamp scale
 		}
 	}
 	for ( const WwCellLight & l : lighting.lights ) {

@@ -1,3 +1,38 @@
+## MUSGI1 round 5 (2026-11-05): the sky through a sunlit interior's roof; the lamp scale on .nifx lights and glow
+
+- **The sky, sun and moon through the roof (bungo 11-05: "we don't display the correct sky I guess, and sun and moon"):**
+  the sky pass already draws the physical sky, the moon and the discs in a sunlit interior; the air's sky pass
+  (cell_volsky, lookdev_fog.glsl wwVolAirSky) then laid the whole exterior air over them: the froxels to their far end
+  (7.5 km) and a tail to the air's top, lit by the sun. Over the Museum's roof openings that was a white veil by day and
+  night. In a sunlit interior a sky ray's air now ends where the ray leaves the cell's box (cellprecip.cpp
+  `wwCellRoofBox`: the roof map's extent, up to its highest roof), read from the froxels at that distance with no tail
+  (the sky's own aerial perspective holds the air past it). An eye outside the box keeps the open-air ray.
+  **MERGE1105 (bungo 11-05: built on a guess): the roof cut lands OFF** -- `WW_CELL_ROOFSKY_RED` defaults on (the
+  open-air ray, the path before round 5); `WW_CELL_ROOFSKY_RED=0` runs the roof cut. Census `cell air sky: ...; sunlit interior: the air ends where the ray leaves the cell's box
+  (W x D u, top z Z)`.
+- **The lamp scale on the .nifx lights and the emissive surfaces:** round 4's sunlit-interior lamp scale (the census
+  `cell lamp scale:`, pin `WW_CELL_LAMP_SCALE`) now also scales the .nifx lights (cellnifxlights.cpp; census `nifx
+  lights: x S (the sunlit interior's lamp scale) on N lights made`; red `WW_CELL_NIFX_SCALE_RED=1`) and the emissive
+  surfaces of the lit shaders (glview.cpp glowScale, so their screen-space GI share follows) and their RT GI glow
+  (rtddgi.cpp packVolume; red `WW_CELL_GLOW_SCALE_RED=1`). Census `cell lamp scale: <EDID> the .nifx lights x ..., the
+  emissive surfaces and their RT GI glow x ...`. Not scaled: effect-shader glow (glowMult) and PBRM emissive.
+
+## MUSGI1 round 3 (2026-11-03): sunlit interiors take the exterior's GI sky level and an eye limit; the game's fake air hidden under ours
+
+- **Night as bright as noon (bungo 11-03):** a sunlit interior's RT GI volume skipped the exterior's sky level (GITRUTH1
+  "level", rtddgicell.cpp), so it kept the weather's DALC at f = 1 at every hour. The Museum at 22 h measured adapted 0.275
+  against 0.295 at 13 h; outdoors take f 0.07-0.26 at 22 h and 2.3-3.8 at noon. Sunlit interiors now take the same level.
+  Red `WW_CELL_RTDDGI_INTLEVEL_RED=1`; census `rtddgi cell: interior (sunlit): the sky at the exterior's level`.
+  Measured (hold MUSCHK7): the Museum picture does not move (22 h mean 171.1 -> 170.9, 13 h 170.6 -> 170.4): at mus_cam2
+  its light is the cell's own lamps and their GI bounce, not the sky. The night-as-noon bug stays open.
+- **The eye's limit** (celllights.cpp cellExposure): under a daylight adapted level L0 the eye adapts only partly
+  (exposure ~ adapted^-a, equal to the old law at L0; a 0.4, L0 0.14, under Concord noon's 0.145, so noon outdoors is
+  unchanged). Pin `WW_CELL_EYE=a,L0`, red `WW_CELL_EYE_RED=1` (full adaptation). Telemetry `cell eye: exposure ... cap ...
+  adapted ... law ...` on a 2 % move, and `eye=` in the imagespace measure echo.
+- **Fake air:** with our Volumetric Air on, placed effect cards whose model is an Effects mist / fog / haze / beam /
+  glowfill card (src/gl/fakeair.h; steam, smoke, fire, sparks, debris, weapon beams, particles stay) are hidden. Census
+  `cell fake air: N effect shapes of M models tagged ...`; red `WW_CELL_FAKEAIR_RED=keep`.
+
 ## PERFHUNT2 (2026-11-05): three speed switches ship on, from the 11-03 show
 
 - bungo 11-03 "we need to see it work": one hold (exe cfb14780 snap2, Concord Foggy noon 5x5 + Memory Den, each

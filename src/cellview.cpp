@@ -21,6 +21,7 @@ BSD License - see nifskope.h
 #include "cellidentity.h"	// lane CELLVIEW2
 #include "cellactor.h"		// lane PLACED1
 #include "gl/celllooks.h"	// lane GAPLOOK2: Actors outdoors, Weapon mod parts
+#include "gl/fakeair.h"	// lane MUSGI1: the game's fake fog / shaft cards
 #include "cellworldanim.h"		// lane FXPARITY2: Animated objects
 #include "cellweapon.h"		// lane MISS1 (GAPLOOK2)
 #include "cellvertexalpha.h"	// lane TERRAINBLOCK1
@@ -60,6 +61,7 @@ BSD License - see nifskope.h
 #include "gl/celllights.h"
 #include "io/nifxfile.h"	// lane NIFXLIGHT1: a model's .nifx path
 #include "gl/cellnifxlights.h"	// lane NIFXLIGHT3: the .nifx path rule, kept live by src/gl/celllights.cpp
+#include "gl/lightphys.h"	// lane MUSGI1 round 4: the vanilla curve's flux for the lamp scale
 #include "gl/sunshadow.h"	// lane LIVESET1: wwSunShadowForget
 #include "gl/cellprobeview.h"
 #include "gl/lookdevstage.h"	// lane SKYTOP1: the cell's load order feeds the weather
@@ -1466,6 +1468,65 @@ static void cellPublishLighting( const NifModel * nif, const EsmWorld & world, c
 		L.lights.append( l );
 		if ( !chunkOut )
 			wwCellFxLitNoOffset( nif, L.lights.size() - 1, fade > 0.0f ? b.fade / fade : 1.0f );   // a red control's data
+	}
+	/* lane MUSGI1 round 4 (bungo 11-03 "night looks like the brightest noon"): a SUNLIT interior's lamps on the sun's
+	 * physical scale. FO4 authors a lamp about as bright as its sun; the sun here is physical (lux per scene unit
+	 * = 128 klx / k, k = the sky's level at CommonwealthClear 13 h, atmosphere.cpp census k=4.816), the lamps were not, so
+	 * the Museum's lamp-lit night adapted 1.9x Concord's outdoor noon. Per lamp: its vanilla flux in lumens (637 lm per
+	 * fade x Y of its colour bytes, the household-bulb anchor of the vanilla light census, skill fo4-vanilla-light-census)
+	 * over the flux it draws (4 pi x lum(colour) x radius^2 x the vanilla curve's flux integral, lightphys.h) in lux m^2;
+	 * the cell's ONE factor is the median over its lamps. Colour only, so the surfaces, the RT GI's lamps (rtddgi.cpp
+	 * packs these colours), the air and the flares take the same factor. Other interiors keep theirs: no sun to stand
+	 * against, and the eye's cap (7) would black them out. Pin WW_CELL_LAMP_SCALE=<x> (0 = lamps off, a measurement);
+	 * red WW_CELL_LAMP_SCALE_RED=1 = the lamps as authored. Census `cell lamp scale:`. */
+	if ( spec.interior && !chunkOut ) {
+		constexpr float kLumenPerFade = 637.0f, kSunLux = 128000.0f, kSkyLevelNoon = 4.816f;
+		auto y709 = []( const float c[3] ) { return 0.2126f * c[0] + 0.7152f * c[1] + 0.0722f * c[2]; };
+		QVector<float> per;
+		for ( const QVector<WwCellLight> * v : { &L.lights, &L.offLights } )
+			for ( const WwCellLight & l : *v ) {
+				const float lc = y709( l.color ), yb = y709( l.byteColor );
+				if ( !( lc > 0.0f ) || !( l.radius > 0.0f ) || !( yb > 0.0f ) )
+					continue;
+				const float lin[3] = { std::pow( l.byteColor[0], 2.2f ), std::pow( l.byteColor[1], 2.2f ), std::pow( l.byteColor[2], 2.2f ) };
+				const float fadeOf = lc / std::max( y709( lin ), 1e-6f );	// the fade (XLIG delta and boost in)
+				const float phi = kLumenPerFade * fadeOf * yb;
+				const float drawn = 4.0f * 3.14159265f * lc * l.radius * l.radius * wwlp::vanillaFlux()
+					* ( kSunLux / kSkyLevelNoon ) / ( wwlp::kUnitsPerMetre * wwlp::kUnitsPerMetre );
+				per.append( phi / drawn );
+			}
+		std::sort( per.begin(), per.end() );
+		const float derived = per.isEmpty() ? 1.0f : per.at( per.size() / 2 );
+		const QByteArray pin = wwEnv( "WW_CELL_LAMP_SCALE" ).trimmed();
+		bool pinOk = false;
+		const float pinned = pin.toFloat( &pinOk );
+		const bool red = wwEnv( "WW_CELL_LAMP_SCALE_RED" ).trimmed() == "1";
+		const bool sunlit = wwCellSunlit( &L ).on;
+		const float s = ( red || !sunlit ) ? 1.0f : ( pinOk && pinned >= 0.0f ) ? pinned : derived;
+		int scaled = 0;
+		if ( s != 1.0f )
+			for ( QVector<WwCellLight> * v : { &L.lights, &L.offLights, &L.nifxOffPlaced } )
+				for ( WwCellLight & l : *v ) {
+					for ( int c = 0; c < 3; c++ )
+						l.color[c] *= s;
+					scaled++;
+				}
+		auto q = [&]( double f ) { return per.isEmpty() ? 0.0 : double( per.at( std::min( qsizetype( f * per.size() ), per.size() - 1 ) ) ); };
+		std::fprintf( stderr, "cell lamp scale: %s %s factor %.6f on %d lights (derived %.6f = median of %lld lamps, p10 %.6f "
+			"p90 %.6f: %g lm per fade x Y(bytes) / (4 pi lum r^2 x %.5f) at %g lux / k %.3f per scene unit, %.2f units/m)%s%s\n",
+			qPrintable( world.interior().edid ), sunlit ? "sunlit" : "not sunlit (lamps as authored)", double( s ), scaled,
+			double( derived ), qint64( per.size() ), q( 0.1 ), q( 0.9 ), double( kLumenPerFade ), double( wwlp::vanillaFlux() ),
+			double( kSunLux ), double( kSkyLevelNoon ), double( wwlp::kUnitsPerMetre ),
+			red ? " RED WW_CELL_LAMP_SCALE_RED=1" : "", pinOk ? " PINNED WW_CELL_LAMP_SCALE" : "" );
+		// lane MUSGI1 r5 (bungo 11-05): the .nifx lights (cellnifxlights.cpp) and the emissive surfaces (glview.cpp glowScale,
+		// rtddgi.cpp's glow) take the same factor, so a sunlit hall's lit signs and bulbs stand against the sun as its lamps do
+		const bool nifxRed = wwEnv( "WW_CELL_NIFX_SCALE_RED" ).trimmed() == "1";
+		const bool glowRed = wwEnv( "WW_CELL_GLOW_SCALE_RED" ).trimmed() == "1";
+		L.nifxScale = nifxRed ? 1.0f : s;
+		L.glowScale = glowRed ? 1.0f : s;
+		std::fprintf( stderr, "cell lamp scale: %s the .nifx lights x %.6f%s, the emissive surfaces and their RT GI glow x %.6f%s\n",
+			qPrintable( world.interior().edid ), double( L.nifxScale ), nifxRed ? " RED WW_CELL_NIFX_SCALE_RED=1" : "",
+			double( L.glowScale ), glowRed ? " RED WW_CELL_GLOW_SCALE_RED=1" : "" );
 	}
 	if ( nifx && !nifx->isEmpty() ) {	// the fixtures, with their reference's .recx key
 		L.nifxFixtures = *nifx;
@@ -4225,6 +4286,8 @@ static bool cellBuild( NifModel * nif, const CellSceneSpec & specAsked, CellChun
 	QSet<quint32> animObjRefs, animObjCapped;
 	QHash<QString, std::pair<Vector3, float>> fadeModelBound;	// lane OBJFADE1: a model's bound sphere, model space
 	int animObjShapes = 0;
+	int fakeAirShapes = 0;	// lane MUSGI1: the game's fake fog / shaft cards, by model
+	QMap<QString, int> fakeAirModels;
 	auto soupLeavesOut = [&]( const Placement & p, bool counted ) -> bool {
 		const EsmLodBase & lb = world.lodBase( p.base );
 		if ( !p.actorKey.isEmpty() ) {   // a placed actor never enters the soup
@@ -5405,7 +5468,17 @@ static bool cellBuild( NifModel * nif, const CellSceneSpec & specAsked, CellChun
 				animObjShapes++;
 				continue;
 			}
+			/* lane MUSGI1: a fake fog / light-shaft card (gl/fakeair.h) takes its own bucket named "FakeAir ...";
+			 * BSShape hides it while our Volumetric Air is on (wwFakeAirHidden) */
+			const bool fakeAir = s.nearFacts.effectShader && !isActor && wwFakeAirModel( model );
+			if ( fakeAir ) {
+				bbOwn += QLatin1String( "|FA" );
+				fakeAirShapes++;
+				fakeAirModels[QString( model ).replace( QLatin1Char( '\\' ), QLatin1Char( '/' ) ).section( QLatin1Char( '/' ), -1 )]++;
+			}
 			Bucket & b = bucketFor( s, colouring || ownColor || repaint, bbOwn );
+			if ( fakeAir && !b.name.startsWith( QLatin1String( "FakeAir " ) ) )
+				b.name.prepend( QLatin1String( "FakeAir " ) );
 			if ( cableSway ) {
 				b.grass = true;
 				b.grassWave = cableLook->windFlexibility;
@@ -7213,6 +7286,14 @@ static bool cellBuild( NifModel * nif, const CellSceneSpec & specAsked, CellChun
 				animObjShapes, refused, why.isEmpty() ? "" : ": last ", qPrintable( why ), int( animObjCapped.size() ), animObjCap );
 		}
 		wwCellAnimObjSet( nif, roots );
+	}
+	{	// lane MUSGI1: census of the fake air cards (hidden while our air is on; WW_CELL_FAKEAIR_RED=keep draws them)
+		QStringList names;
+		for ( auto it = fakeAirModels.constBegin(); it != fakeAirModels.constEnd(); ++it )
+			names << QStringLiteral( "%1 x%2" ).arg( it.key() ).arg( it.value() );
+		fprintf( stderr, "cell fake air: %d effect shapes of %d models tagged (hidden while our air is on%s)%s%s\n",
+			fakeAirShapes, int( fakeAirModels.size() ), wwFakeAirRed() ? ", red keep: drawn" : "",
+			names.isEmpty() ? "" : ": ", qPrintable( names.join( QStringLiteral( ", " ) ) ) );
 	}
 
 	/* The pick highlight: created once here and moved on every click (src/cellclick.h), since the welded

@@ -98,10 +98,65 @@ constexpr int kShadowFace = 512;	// texels a cube face edge (the game's 2048 par
 
 /* the frame's exposure: the tonemap PS's clamp( mid / (lum + 0.001), HNAM min, HNAM max ). lane GIBAKE2 (GISHADE1): the
  * Wide exposure range row lifts the max to 16, so a dim GI-lit room opens up (the imagespace caps it at ~3.25). */
-float cellExposure( const float * h, float adapted )
+/* lane MUSGI1 (11-03, bungo "night looks like the brightest noon"): the eye's adaptation limit. Above L0 (a daylight
+ * adapted level, under Concord noon's 0.145) the eye adapts fully, the old law; under it only partly, as the mesopic and
+ * scotopic eye does (the key falls with the light, Krawczyk 2005): the exposure follows adapted^-a, not adapted^-1, so a
+ * dark scene stays dark. Equal at L0. Pin WW_CELL_EYE=a,L0 (live; default 0.4,0.14); red WW_CELL_EYE_RED=1 = full. */
+struct CellEye
+{
+	bool red = false;
+	float a = 0.4f, l0 = 0.14f;
+};
+
+CellEye cellEye()
+{
+	WW_SWITCH_STATIC( bool, red, [] {
+		const QByteArray v = wwEnvIsSet( "WW_CELL_EYE_RED" ) ? wwEnv( "WW_CELL_EYE_RED" ).trimmed() : QByteArray();
+		return !v.isEmpty() && v != "0";
+	}() );
+	WW_SWITCH_STATIC( QByteArray, pin, wwEnvIsSet( "WW_CELL_EYE" ) ? wwEnv( "WW_CELL_EYE" ).trimmed() : QByteArray() );
+	CellEye e;
+	e.red = red;
+	const QList<QByteArray> p = pin.split( ',' );
+	bool ok = false;
+	if ( !pin.isEmpty() && p.size() >= 1 ) {
+		const float a = p[0].toFloat( &ok );
+		if ( ok )
+			e.a = std::clamp( a, 0.0f, 1.0f );
+	}
+	if ( p.size() >= 2 ) {
+		const float l = p[1].toFloat( &ok );
+		if ( ok && l > 0.0f )
+			e.l0 = l;
+	}
+	return e;
+}
+
+float cellExposureFull( const float * h, float adapted )
 {
 	const float cap = wwLookOn( WwLook::ExposureWide ) ? std::max( h[4], 16.0f ) : h[4];
 	return std::min( std::max( h[8] / ( adapted + 0.001f ), h[5] ), cap );
+}
+
+float cellExposure( const float * h, float adapted )
+{
+	const CellEye eye = cellEye();
+	const float cap = wwLookOn( WwLook::ExposureWide ) ? std::max( h[4], 16.0f ) : h[4];
+	const float ad = adapted + 0.001f;
+	const bool partial = !eye.red && ad > 0.0f && ad < eye.l0 && eye.a < 1.0f;
+	const float raw = partial ? h[8] / ( std::pow( ad, eye.a ) * std::pow( eye.l0, 1.0f - eye.a ) ) : h[8] / ad;
+	const float e = std::min( std::max( raw, h[5] ), cap );
+	static float saidE = -1.0f;
+	static int saidLaw = -1;
+	const int law = eye.red ? 2 : partial ? 1 : 0;
+	if ( law != saidLaw || std::fabs( e - saidE ) > 0.02f * std::max( saidE, 0.01f ) ) {	// telemetry: on a 2 % move
+		saidLaw = law;
+		saidE = e;
+		qInfo( "cell eye: exposure %.4f cap %.3f adapted %.5f law %s (a=%.2f L0=%.3f; full adaptation would give %.4f)", double( e ),
+			double( cap ), double( adapted ), law == 2 ? "full (the red WW_CELL_EYE_RED)" : law == 1 ? "partial" : "full (over L0)",
+			double( eye.a ), double( eye.l0 ), double( cellExposureFull( h, adapted ) ) );
+	}
+	return e;
 }
 // the budget's distance fade, Godot's Light3D shadow fade (40 to 50 m) at 70 units a metre
 constexpr float kShadowFadeBegin = 2800.0f, kShadowFadeEnd = 3500.0f;
@@ -3181,6 +3236,11 @@ QString wwCellImageSpaceEcho( Scene * scene )
 	if ( s.isRed )
 		o += QStringLiteral( " red=%1" ).arg( s.isRed );
 	o += wwTonemapVanilla() ? QStringLiteral( " curve=vanilla" ) : QStringLiteral( " curve=physical" );
+	{	// lane MUSGI1: the eye's limit (cellExposure)
+		const CellEye eye = cellEye();
+		o += QStringLiteral( " eye=%1 a=%2 L0=%3 full=%4" ).arg( eye.red ? QStringLiteral( "red" ) : QStringLiteral( "limit" ) )
+			.arg( double( eye.a ), 0, 'g', 3 ).arg( double( eye.l0 ), 0, 'g', 3 ).arg( double( cellExposureFull( h, a ) ), 0, 'g', 7 );
+	}
 	return o;
 }
 

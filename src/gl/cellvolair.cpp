@@ -21,6 +21,7 @@ BSD License - see nifskope.h
 #include "gl/celllooks.h"	// lane GAPLOOK1
 #include "gl/cellpasstime.h"
 #include "gl/cellpost.h"
+#include "gl/cellprecip.h"	// lane MUSGI1 r5: the cell's box (wwCellRoofBox) for the sky's air in a sunlit interior
 #include "gl/cellssr.h"
 #include "gl/fogterrain.h"	// lane FOGTERRAIN1: the ground layer on the low-pass terrain
 #include "gl/glscene.h"
@@ -1092,10 +1093,25 @@ void vaGround( const float K[6][4], const VaMedium & M, bool interior, bool igno
  * define): the air's env share from the ray-traced volume, its sun gated by the volume's sky visibility past the
  * cascades, the placed lights through the volume's depth, the far grid's tail shadowed. Off (the default until bungo
  * looks): not a line of it compiled. Read at each shader load: a launch key (a set needs a shader reload) */
+/* lane MUSGI1 round 4 (bungo 11-03, the white veil under the Museum roof): compiled by default now, and LIVE only in a
+ * sunlit interior; everywhere else every fix's red bit is set (vaLeakBits), so the old path runs in the same program.
+ * A sunlit interior's air without it took the weather's full DALC cube at every froxel (the RT GI never reached the
+ * air): a flat sky-lit veil under the roof. WW_CELL_FOGLEAK=1 = live everywhere, as before; =0 = not compiled (the old
+ * programs); red WW_CELL_AIR_INTLEAK_RED=1 = a sunlit interior's air as before (the flat DALC) */
 bool wwFogLeakShaderDefine()
 {
-	return wwEnv( "WW_CELL_FOGLEAK" ).trimmed() == "1";
+	return wwEnv( "WW_CELL_FOGLEAK" ).trimmed() != "0";
 }
+
+namespace {
+int vaLeakBits( const WwCellLighting * L, int leakRed )
+{
+	if ( wwEnv( "WW_CELL_FOGLEAK" ).trimmed() == "1" )
+		return leakRed;
+	const bool live = L && L->interior && wwCellAsOutdoor( L ) && wwEnv( "WW_CELL_AIR_INTLEAK_RED" ).trimmed() != "1";
+	return live ? leakRed : ( leakRed | 1 | 2 | 4 | 8 | 16 );
+}
+}	// namespace
 
 // lane AIRBOUNCE1: the lamps' floor bounce in the air (src/gl/glcontext.cpp injects WW_CELL_AIR_BOUNCE; read per load)
 bool wwAirBounceShaderDefine()
@@ -1931,7 +1947,7 @@ static void vaPassInner( Scene * scene, bool run )
 	 * lamp-lit and moon-lit air of ConcordMuseum01 to 2 x the sky ambient everywhere (a flat veil). Red
 	 * WW_CELL_AIR_RED=intratio (bit 128) keeps FOGENV1's ratio indoors */
 	const bool intDirect = L && L->interior && wwCellAsOutdoor( L ) && ( s.leakRed & 128 ) == 0;
-	prog->uni1i( "volLeakRed", ( s.leakRed & ~128 ) | ( intDirect ? 32 : 0 ) );	// lane FOGLEAK1 (only a WW_CELL_FOGLEAK program holds it)
+	prog->uni1i( "volLeakRed", ( vaLeakBits( L, s.leakRed ) & ~128 ) | ( intDirect ? 32 : 0 ) );	// lane FOGLEAK1 (only a WW_CELL_FOGLEAK program holds it)
 	prog->uni1i( "volEnvOccRed", s.openEnv ? 1 : 0 );	// lane DARKAIR1 (only a WW_CELL_RTDDGI program without FOGLEAK holds it)
 	prog->uni1f( "volShell", s.shellStep ? 0.0f : 1.0f );
 	if ( s.shellStep || s.noAirVol )
@@ -2521,7 +2537,7 @@ static void vaPassInner( Scene * scene, bool run )
 	s.last += QStringLiteral( " " ) + optNote + QStringLiteral( " " ) + groundNote + ( s.farTier > 0 ? QStringLiteral( " " ) + farNote : QString() )
 		+ ( dr.on ? QStringLiteral( " drift=" ) + dr.note : QString() ) + QStringLiteral( " sungate=" ) + sunGateNote
 		+ QStringLiteral( " rainfog=" ) + g.rfNote
-		+ QStringLiteral( " fogleak=%1(red=%2)" ).arg( wwFogLeakShaderDefine() ? "on" : "off" ).arg( s.leakRed ) + QStringLiteral( " intenv=%1" ).arg( L && L->interior && wwCellAsOutdoor( L ) ? ( ( s.leakRed & 128 ) ? "ratio(red)" : "direct" ) : "n/a" )	// lane FOGLEAK1
+		+ QStringLiteral( " fogleak=%1(red=%2)" ).arg( !wwFogLeakShaderDefine() ? "off" : vaLeakBits( L, s.leakRed ) == s.leakRed ? "live" : "compiled,old-path" ).arg( vaLeakBits( L, s.leakRed ) ) +QStringLiteral( " intenv=%1" ).arg( L && L->interior && wwCellAsOutdoor( L ) ? ( ( s.leakRed & 128 ) ? "ratio(red)" : "direct" ) : "n/a" )	// lane FOGLEAK1
 		+ QStringLiteral( " veil=%1" ).arg( s.veilPhys ? "phys" : "record" )	// lane FARCITYWASH1
 		+ QStringLiteral( " fogleak=%1(red=%2)" ).arg( wwFogLeakShaderDefine() ? "on" : "off" ).arg( s.leakRed )	// lane FOGLEAK1
 		+ QStringLiteral( " envocc=%1" ).arg( !wwAirSkyViewShaderDefine() ? "off" : s.openEnv ? "red(open)" : "sky" )	// lane DARKAIR1
@@ -2733,7 +2749,7 @@ void wwVolAirUniforms( Scene * scene )
 		prog->uni1i_l( fl, ( ( s.red & 512 ) ? 0 : 1 ) | ( ( s.red & 1024 ) ? 0 : 2 ) | ( ( s.red & 256 ) ? 0 : 4 )
 			| ( ( s.red & 65536 ) ? 0 : 8 ) | ( ( s.red & 131072 ) ? 0 : 16 ) | ( s.tricubic ? 32 : 0 ) | ( terr ? 64 : 0 )
 			| ( s.sunColumn ? 0 : 128 )	// lane FIX1101A: 128 = the surfaces' sun dimmed by the ground layer only
-			| ( ( s.leakRed & 8 ) ? 0 : 256 ) );	// lane FOGLEAK1: 256 = the far grid's tail takes the sun's shadow (WW_CELL_FOGLEAK only)
+			| ( ( vaLeakBits( scene && wwCellLightsWanted( scene ) ? wwCellLightsFor( scene->nifModel ) : nullptr, s.leakRed ) & 8 ) ? 0 : 256 ) );	// lane FOGLEAK1: 256 = the far grid's tail takes the sun's shadow (WW_CELL_FOGLEAK only)
 }
 
 /* lane VOLAIR1 (bungo 10-14, cellvolair.h): the sky through the air. The far tower stood out against a sky the air never
@@ -2792,6 +2808,34 @@ void wwVolAirSkyDraw( Scene * scene, bool probes )
 	wwLookdevFogUniforms( scene );	// fogOn, the view and the sun; wwVolAirUniforms: the volume, the medium, the flags
 	prog->uni1i( "volSkyMode", probes ? 1 : 0 );
 	prog->uni1b( "volSkyOn", !( s.red & 65536 ) );
+	/* lane MUSGI1 r5 (bungo 11-05: "we don't display the correct sky I guess, and sun and moon"): in a sunlit interior a
+	 * sky ray's air ends where the ray leaves the cell's box (cellprecip.cpp wwCellRoofBox): past the roof the air is the
+	 * sky's own, not the froxels to 7.5 km and a tail to the air's top laid over the opening. MERGE1105 (bungo 11-05:
+	 * built on a guess): OFF until proven -- WW_CELL_ROOFSKY_RED defaults on (the open-air ray); =0 runs the roof cut. */
+	float rlo[3] = { 0, 0, 0 }, rhi[3] = { 0, 0, 0 };
+	const bool roofRed = wwEnv( "WW_CELL_ROOFSKY_RED" ).trimmed() != "0";
+	const bool sunlitInt = wwCellSunlitNow( wwCellLightsFor( scene->nifModel ) );
+	const bool roofSky = !probes && !roofRed && sunlitInt && wwCellRoofBox( scene, rlo, rhi );
+	prog->uni1b( "volSkyRoof", roofSky );
+	QString roofNote;
+	if ( roofSky ) {
+		// the eye: posView = R (sc p) + t, so p = -R^T t / sc
+		const Transform & vt = scene->view;
+		const float sc = vt.scale != 0.0f ? vt.scale : 1.0f;
+		float eye[3] = { 0, 0, 0 };
+		for ( int k = 0; k < 3; k++ ) {
+			for ( int j = 0; j < 3; j++ )
+				eye[k] -= vt.rotation( j, k ) * vt.translation[j];
+			eye[k] /= sc;
+		}
+		prog->uni3f( "volSkyBoxLo", rlo[0], rlo[1], rlo[2] );
+		prog->uni3f( "volSkyBoxHi", rhi[0], rhi[1], rhi[2] );
+		prog->uni3f( "volSkyEye", eye[0], eye[1], eye[2] );
+		roofNote = QStringLiteral( "; sunlit interior: the air ends where the ray leaves the cell's box (%1 x %2 u, top z %3)" )
+			.arg( double( rhi[0] - rlo[0] ), 0, 'f', 0 ).arg( double( rhi[1] - rlo[1] ), 0, 'f', 0 ).arg( double( rhi[2] ), 0, 'f', 0 );
+	} else if ( sunlitInt && roofRed && !probes ) {
+		roofNote = QStringLiteral( "; sunlit interior: roof cut off (WW_CELL_ROOFSKY_RED default; =0 runs it): the open-air ray" );
+	}
 	auto fn = r->fn;
 	GLboolean colorMask[4], depthMask = GL_TRUE;
 	fn->glGetBooleanv( GL_COLOR_WRITEMASK, colorMask );
@@ -2847,9 +2891,9 @@ void wwVolAirSkyDraw( Scene * scene, bool probes )
 	if ( wasStencil ) fn->glEnable( GL_STENCIL_TEST ); else fn->glDisable( GL_STENCIL_TEST );
 	fn->glColorMask( colorMask[0], colorMask[1], colorMask[2], colorMask[3] );
 	fn->glDepthMask( depthMask );
-	note( probes ? QStringLiteral( "probes (red nosky %1)" ).arg( ( s.red & 65536 ) ? 1 : 0 )
+	note( ( probes ? QStringLiteral( "probes (red nosky %1)" ).arg( ( s.red & 65536 ) ? 1 : 0 )
 		: overSky ? QStringLiteral( "through the air (linear frame, over the sky in the frame: sky x T + L)" )
-		: QStringLiteral( "through the air (linear frame, composited by 1 - T over the backdrop)" ) );
+		: QStringLiteral( "through the air (linear frame, composited by 1 - T over the backdrop)" ) ) + roofNote );
 }
 
 /* ---- lane VOLPART1: volumetric particles (cellvolair.h, res/shaders/particles.frag) ---- */
@@ -2912,6 +2956,26 @@ int wwVolPartFx()
 bool wwVolPartHidden()
 {
 	WW_SWITCH_STATIC( bool, hide, qEnvironmentVariableIntValue( "WW_CELL_VOLPART_HIDE" ) == 1 );	// lane LIVESET1: follows a live set
+	return hide;
+}
+
+bool wwFakeAirRed()
+{
+	WW_SWITCH_STATIC( bool, keep, wwEnvStr( "WW_CELL_FAKEAIR_RED" ) == QLatin1String( "keep" ) );
+	return keep;
+}
+
+bool wwFakeAirHidden()
+{
+	// lane MUSGI1 round 4: WW_CELL_FAKEAIR_HIDE=1 (a measurement key) hides them with our air off too
+	WW_SWITCH_STATIC( bool, force, wwEnvStr( "WW_CELL_FAKEAIR_HIDE" ) == QLatin1String( "1" ) );
+	const bool hide = ( wwVolAirOn() && !wwFakeAirRed() ) || force;
+	static int was = -1;
+	if ( was != int( hide ) ) {	// telemetry: each change of the rule's answer
+		was = int( hide );
+		qInfo( "cell fake air: cards %s (our air %s%s)", hide ? "hidden" : "drawn", wwVolAirOn() ? "on" : "off",
+			wwFakeAirRed() ? ", red keep" : "" );
+	}
 	return hide;
 }
 
