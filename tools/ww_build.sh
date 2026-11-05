@@ -5,7 +5,7 @@
 #      is renamed aside, never killed; a NifSkope running from any other tree
 #      (bungo's window, a sibling lane's harness) is not this exe and is left be
 #   2. make -j2 under MSYS2 UCRT64 with git on the PATH, in THIS tree, gated on
-#      make's OWN exit code
+#      make's OWN exit code (WW_CCACHE=1 puts E:\Tools\ccache in front of g++, see below)
 #   3. the exe must be newer than every source given (or src/ when none)
 #   4. the link-time copies must be in step (style.qss, the shaders)
 # Exit 0 only when every gate holds. Runs from Git Bash; the MSYS2 bash it
@@ -103,10 +103,26 @@ if [ -n "${WW_BUILD_TIMES:-}" ]; then
 	CTLOG="$(cygpath -u "$WW_BUILD_TIMES" 2>/dev/null || echo "$WW_BUILD_TIMES")"	# the MSYS2 login shell drops exported vars: passed as $3
 	CXXOVR="CXX=$ROOT/tools/ww_ctime.sh g++"
 fi
+# lane STARTSPEED1-CCACHE: WW_CCACHE=1 compiles through ccache (opt-in, off by default). The binary and its
+# ccache.conf live in E:\Tools\ccache (cache_dir, max_size, sloppiness=pch_defines,time_macros so the -include'd
+# PCH still hits); CCACHE_CONFIGPATH is passed as $4 (the login shell drops exports, USERPROFILE too, which
+# ccache insists on: it is pointed at the conf's folder), so nothing is read from or written to the real user
+# profile. WW_BUILD_TIMES wins when both are set (one CXX override at a time).
+CCCONF=""
+if [ -n "${WW_CCACHE:-}" ] && [ -z "$CXXOVR" ]; then
+	CCX="${WW_CCACHE_EXE:-/e/Tools/ccache/ccache-4.14.2-windows-x86_64/ccache.exe}"
+	if [ -x "$CCX" ]; then
+		CXXOVR="CXX=$CCX g++"
+		CCCONF="${WW_CCACHE_CONF:-E:/Tools/ccache/ccache.conf}"
+		echo "ccache: $CCX ($CCCONF)"
+	else
+		echo "ccache: $CCX not found, building without it"
+	fi
+fi
 bt0=$(date +%s)
-MSYSTEM=UCRT64 CHERE_INVOKING=1 /c/msys64/usr/bin/bash -lc 'export PATH="$PATH:/e/Tools/GIT/cmd"; cd "$1" || exit 2; j="$2"; [ -n "$3" ] && export WW_CTIME_LOG="$3"; shift 3; make -j"$j" "$@" > release/ww_build.log 2>&1; rc=$?; grep -E "error:|Error [0-9]" release/ww_build.log | head -20; echo BUILD-RC=$rc; exit $rc' _ "$ROOT" "$JOBS" "$CTLOG" ${CXXOVR:+"$CXXOVR"}
+MSYSTEM=UCRT64 CHERE_INVOKING=1 /c/msys64/usr/bin/bash -lc 'export PATH="$PATH:/e/Tools/GIT/cmd"; cd "$1" || exit 2; j="$2"; [ -n "$3" ] && export WW_CTIME_LOG="$3"; [ -n "$4" ] && { export CCACHE_CONFIGPATH="$4"; export USERPROFILE="$(cygpath -w "${4%/*}")"; }; shift 4; make -j"$j" "$@" > release/ww_build.log 2>&1; rc=$?; grep -E "error:|Error [0-9]" release/ww_build.log | head -20; echo BUILD-RC=$rc; exit $rc' _ "$ROOT" "$JOBS" "$CTLOG" "$CCCONF" ${CXXOVR:+"$CXXOVR"}
 rc=$?
-echo "build wall $(( $(date +%s) - bt0 )) s (make -j$JOBS)"
+echo "build wall $(( $(date +%s) - bt0 )) s (make -j$JOBS${CCCONF:+, ccache})"
 ls -l --time-style=+%H:%M:%S release/NifSkope.exe
 [ $rc -eq 0 ] || { echo "BUILD FAILED"; exit $rc; }
 # lane PERFHUNT2: the PCH make just built (or kept) is for this revision
