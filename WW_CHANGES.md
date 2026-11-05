@@ -1,3 +1,17 @@
+## MERGEFIX1102 item 5 (2026-11-05): a driven launch without its document refuses at once
+
+- SHAFTS1's "a refused rtddgi cell at launch stalls the frame loop" (11-03, c3 + Museum, DARKAIR1's hold too) was not
+  the volume: every stalled launch named `lanes/<tree>/tests/fixtures/empty.wwcell` in a sparse tree that has no
+  `tests/` folder. main.cpp dropped a positional file that does not exist without a word, the window opened on the
+  starter scene (0 shapes: the `rtddgi cell: refused(no relit cell in this view ...)` line is that empty window's), and
+  the WW_RENDER_SHOT handler that arms the live driver (nifskope_ui.cpp createWindow) is connected only for a document,
+  so no `live:` line came for 90 minutes and every row read NOT REACHED. hold5 (WW_CELL_RTDDGI=0) stalled the same way.
+- Now: a positional file that does not exist prints `open: <file> does not exist, opened without it`; when the launch is
+  driven (WW_RENDER_SHOT, WW_LIVE_STEPS or WW_LIVE_SERVE set) and no document is left, it prints `LAUNCH REFUSED: ...`
+  naming the missing file (or "none was given") and returns 89, so a runner reads the refusal in seconds instead of
+  waiting out its cap. A plain GUI launch keeps the starter scene.
+- Code: src/main.cpp (the positional-argument loop). No shader, no switch changed.
+
 ## GISKYTWIN-FLIP (LAND5, 2026-11-02): the GI volume's sky ships at the physical level
 
 - `WW_CELL_RTDDGI_SKY` unset (or empty) is now `level` (GITRUTH1's giSkyLevel: the weather's sky colour at the
