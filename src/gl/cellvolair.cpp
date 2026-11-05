@@ -120,10 +120,10 @@ struct VaState
 	// lane SHAFTS1: the air's sun shadow one hardware-compared tap (sharper shafts, cheaper); red
 	// WW_CELL_AIR_SHADOW_RED=soft = the surfaces' 32-tap disc as before (cell_volair.frag volSunTap)
 	bool airSoft = false;
-	// lane AIRBEAD1: WW_CELL_AIR_SHADOW=bead reads the tap twice a sub-step (its 1/4 and 3/4 points; thin beams bead
-	// less along the ray). Default off (the red: one read at the middle, as before): +0.06 ms on the Medium grid, over
-	// its +0.05 bar (cell_volair.frag volSunBead, tests/shafts B and C)
-	bool bead = false;
+	// lane AIRBEAD1: the tap reads twice a sub-step (its 1/4 and 3/4 points; thin beams bead less along the ray).
+	// Default on (bungo 11-03, +0.07 ms on the Medium grid); red WW_CELL_AIR_SHADOW=mid = one read at the middle, as
+	// before (cell_volair.frag volSunBead, tests/shafts B and C)
+	bool bead = true;
 	int grid = 0;	// lane PERFFIX3: the near grid preset (vaGridOf)
 	// lane PERFFIX3: this pass's uniform reads from the mirror / asked from GL / mirror != GL (WW_SETUP_MEMO_CHECK=1);
 	// state: 1 the entry state from the frame's note, 0 asked
@@ -179,7 +179,7 @@ VaState & vs()
 			s.on = QSettings().value( QStringLiteral( "WW/VolAir" ), false ).toBool();
 		}
 		s.airSoft = wwEnv( "WW_CELL_AIR_SHADOW_RED" ).trimmed() == "soft";	// lane SHAFTS1
-		s.bead = wwEnv( "WW_CELL_AIR_SHADOW" ).trimmed() == "bead";	// lane AIRBEAD1
+		s.bead = wwEnv( "WW_CELL_AIR_SHADOW" ).trimmed() != "mid";	// lane AIRBEAD1 (red: mid)
 		for ( const QByteArray & t : wwEnv( "WW_CELL_AIR_RED" ).split( ',' ) ) {
 			const QByteArray r = t.trimmed();
 			s.shellStep = s.shellStep || r == "shellstep";
@@ -1087,11 +1087,12 @@ bool wwAirBounceShaderDefine()
 	return wwEnv( "WW_CELL_AIR_BOUNCE_LAMPS" ).trimmed() == "1";
 }
 
-/* lane DARKAIR1: WW_CELL_AIR_SKYVIEW=1 compiles the air's sky visibility (cell_volair.frag airSkyView) into the program;
- * off (the default until a hold): not a line of it compiled. Read at each shader load, like WW_CELL_FOGLEAK */
+/* lane DARKAIR1: the air's sky visibility (cell_volair.frag airSkyView) is compiled into the program by default
+ * (DARKAIR2, bungo 11-03); WW_CELL_AIR_SKYVIEW=0 leaves not a line of it compiled, and the red WW_CELL_AIR_RED=openenv
+ * keeps the flat ambient at run time. Read at each shader load, like WW_CELL_FOGLEAK */
 bool wwAirSkyViewShaderDefine()
 {
-	return wwEnv( "WW_CELL_AIR_SKYVIEW" ).trimmed() == "1";
+	return wwEnv( "WW_CELL_AIR_SKYVIEW" ).trimmed() != "0";
 }
 
 bool wwVolAirWantsSettle()
