@@ -37,8 +37,8 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include "celldoorlive.h"	// a path frame poses the live door
 #include "features/gi/probesky.h"	// the live driver waits for a pending sky relight
 #include "features/gi/rtddgicell.h"	// and for the ray-traced GI volume (rtddgiCellPending)
-#include "gl/cloudvol.h"	// and for the clouds' coverage tables (built on workers)
-#include "gl/cloudshadow.h"	// and for the cloud shadow map's sliced rebuild
+#include "features/clouds/cloudvol.h"	// and for the clouds' coverage tables (built on workers)
+#include "features/clouds/cloudshadow.h"	// and for the cloud shadow map's sliced rebuild
 #include "features/shadows/shadowset.h"	// ... and for the terrain shadow sweep
 #include "features/far-lod/lodgen.h"
 #include "features/far-lod/lodgengpu.h"

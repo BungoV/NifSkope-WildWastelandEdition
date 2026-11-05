@@ -14,10 +14,10 @@ BSD License - see nifskope.h
 #include "gl/gametaa.h"
 #include "features/shadows/shadowset.h"	// lane TERRSHADOW1
 #include "features/sky/atmosphere.h"	// lane ATMO1
-#include "gl/cloudmap.h"	// lane CLOUD1
-#include "gl/cloudvol.h"	// lane CLOUD2
-#include "gl/cloudshadow.h"	// lane CLOUD3
-#include "gl/cloudfly.h"	// lane CLOUD4
+#include "features/clouds/cloudmap.h"	// lane CLOUD1
+#include "features/clouds/cloudvol.h"	// lane CLOUD2
+#include "features/clouds/cloudshadow.h"	// lane CLOUD3
+#include "features/clouds/cloudfly.h"	// lane CLOUD4
 #include "features/gi/cellssgi.h"	// lane SSGI1
 #include "gl/celllights.h"	// lane GAPTOOL1: the SSAO row
 #include "gl/cellbloom.h"	// lane GAPTOOL1: the Bloom row

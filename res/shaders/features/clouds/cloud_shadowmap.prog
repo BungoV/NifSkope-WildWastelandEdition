@@ -1,0 +1,3 @@
+# lane CLOUD3: the cloud shadow map (src/features/clouds/cloudshadow.cpp), selected by name.
+
+shaders cell_ao.vert cloud_shadowmap.frag

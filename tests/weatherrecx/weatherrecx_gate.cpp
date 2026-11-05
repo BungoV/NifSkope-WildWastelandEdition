@@ -4,7 +4,7 @@
  * must fail. Build: tests/weatherrecx/build.sh. */
 #include "features/sky/atmomath.h"
 #include "gl/celllooks.h"
-#include "gl/cloudmath.h"
+#include "features/clouds/cloudmath.h"
 #include "gl/weatherrecx.h"
 #include "gl/weatherrecxmath.h"
 #include "recx.h"

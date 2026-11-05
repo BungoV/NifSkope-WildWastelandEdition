@@ -2,7 +2,7 @@
 #include "features/sky/atmomath.h"
 #include "gl/weatherrecx.h"	// lane WX1: the weather .recx atmosphere block
 #include "gl/weatherrecxmath.h"	// SHAFTS1b: hazeFromVisibility for the clear-day aerosol
-#include "gl/cloudmath.h"	// SHAFTS1b: the WTHR class flags
+#include "features/clouds/cloudmath.h"	// SHAFTS1b: the WTHR class flags
 #include "gl/lookdevstage.h"	// SHAFTS1b: the Lookdev weather's class
 #include "features/sky/skydisc.h"
 #include "features/sky/moonlight.h"	// lane FIX1101A (moon): the disc's gain through the air

@@ -169,7 +169,7 @@ private:
 #include "features/far-ground/cellfarground.h"
 #include "features/water/cellocean.h"
 #include "features/water/cellunderwater.h"
-#include "gl/cloudvol.h"	// the volume clouds' depth test
+#include "features/clouds/cloudvol.h"	// the volume clouds' depth test
 
 // NOTE: The FPS define is a frame limiter,
 //	NOT the guaranteed FPS in the viewport.

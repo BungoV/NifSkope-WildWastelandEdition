@@ -278,16 +278,16 @@ HEADERS += \
 	src/gl/cellbloom.h \
 	src/gl/cellfogbloom.h \
 	src/features/sky/atmosphere.h \
-	src/gl/cloudmap.h \
+	src/features/clouds/cloudmap.h \
 	src/gl/weatherrecx.h \
 	src/gl/weatherrecxmath.h \
-	src/gl/cloudnoise.h \
-	src/gl/cloudvol.h \
-	src/gl/cloudshadow.h \
-	src/gl/cloudshadowmath.h \
-	src/gl/cloudfly.h \
-	src/gl/cloudflymath.h \
-	src/gl/cloudvolmath.h \
+	src/features/clouds/cloudnoise.h \
+	src/features/clouds/cloudvol.h \
+	src/features/clouds/cloudshadow.h \
+	src/features/clouds/cloudshadowmath.h \
+	src/features/clouds/cloudfly.h \
+	src/features/clouds/cloudflymath.h \
+	src/features/clouds/cloudvolmath.h \
 	src/features/sky/atmomath.h \
 	src/features/gi/cellprobeview.h \
 	src/features/gi/cellvolumeview.h \
@@ -630,12 +630,12 @@ SOURCES += \
 	src/gl/cellbloom.cpp \
 	src/gl/cellfogbloom.cpp \
 	src/features/sky/atmosphere.cpp \
-	src/gl/cloudmap.cpp \
+	src/features/clouds/cloudmap.cpp \
 	src/gl/weatherrecx.cpp \
 	src/features/sky/skyplacerun.cpp \
-	src/gl/cloudvol.cpp \
-	src/gl/cloudshadow.cpp \
-	src/gl/cloudfly.cpp \
+	src/features/clouds/cloudvol.cpp \
+	src/features/clouds/cloudshadow.cpp \
+	src/features/clouds/cloudfly.cpp \
 	src/features/gi/cellprobeview.cpp \
 	src/features/gi/cellvolumeview.cpp \
 	src/features/reflections/cellssr.cpp \

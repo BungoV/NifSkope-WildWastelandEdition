@@ -45,7 +45,7 @@ BSD License - see nifskope.h
 #include "features/gi/rtddgicell.h"	// lane RTXGI1 M2: the ray-traced GI volume's read (rtddgiCellUniforms)
 #include "gl/celluniprof.h"	// lane PERFFIX1: WW_CELL_UNI_PROF
 #include "gl/cellunirec.h"	// lane PERFFIX1: the cell-uniform class record
-#include "gl/cloudvol.h"	// lane LIGHTNING2: a storm's flash on the exterior ambient (wwLightningGround)
+#include "features/clouds/cloudvol.h"	// lane LIGHTNING2: a storm's flash on the exterior ambient (wwLightningGround)
 #include "cellworldanim.h"	// lane NIFXLIGHT3: the world clock a .nifx light's dimmer follows
 #include "features/sky/atmosphere.h"	// lane FIX1101A (atmo): wwAtmoWbGain, the test white balance
 #include "features/sky/cellsunlit.h"	// lane INTSKY1: the sunlit interior rule

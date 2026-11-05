@@ -21,9 +21,9 @@ BSD License - see nifskope.h
 #include "features/shadows/shadowset.h"	// lane TERRSHADOW1: the Sun Path row
 #include "features/sky/atmosphere.h"	// lane ATMO1: the physical sky
 #include "gl/weatherrecx.h"	// lane WX1: the weather .recx night block
-#include "gl/cloudmap.h"	// lane CLOUD1: the cloud map
-#include "gl/cloudvol.h"	// lane CLOUD2: the volume clouds
-#include "gl/cloudlightning.h"	// lane CLOUD6f: the storm share of the lightning
+#include "features/clouds/cloudmap.h"	// lane CLOUD1: the cloud map
+#include "features/clouds/cloudvol.h"	// lane CLOUD2: the volume clouds
+#include "features/clouds/cloudlightning.h"	// lane CLOUD6f: the storm share of the lightning
 #include "features/sky/atmomath.h"	// lane SKYA (ATMOCHECK1): the weather tint table
 #include "features/sky/skyephem.h"	// lane EPHEM1: the real moon's phase texture
 #include "features/sky/skyplacerun.h"	// lane INTSKY1: the worldspace's place

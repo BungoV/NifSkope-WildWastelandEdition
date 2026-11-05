@@ -23,10 +23,10 @@ done
 rc=$?; echo "red wiring rc=$rc (want 1)"; [ $rc -eq 1 ] || fail=1
 # the six switches are live (stage 0); red = the base's table (missing: a set would be a relaunch)
 N="WW_CLOUD_RAINFOG_TAIL WW_CLOUD_RAINFOG_TAIL_RED WW_CLOUD_SNOWFOG WW_CLOUD_SNOWFOG_RED WW_PRECIP_SPGD WW_PRECIP_SPGD_RED"
-"$PY" -I tests/cloudband/stage_check.py src/wwswitchstages.inc $N > "$S/stage.log"
+"$PY" -I tests/features/clouds/cloudband/stage_check.py src/wwswitchstages.inc $N > "$S/stage.log"
 rc=$?; echo "stage rc=$rc (want 0)"; [ $rc -eq 0 ] || fail=1
 git show $BASE:src/wwswitchstages.inc > "$S/base_stages.inc" 2>/dev/null && {
-	"$PY" -I tests/cloudband/stage_check.py "$S/base_stages.inc" $N > "$S/stage_red.log"
+	"$PY" -I tests/features/clouds/cloudband/stage_check.py "$S/base_stages.inc" $N > "$S/stage_red.log"
 	rc=$?; echo "stage red (base table) rc=$rc (want 1)"; [ $rc -eq 1 ] || fail=1
 }
 # CLOUD6e's own gates still hold on this tree (its rain law and wiring are untouched)

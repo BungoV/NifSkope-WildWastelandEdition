@@ -24,10 +24,10 @@ rc=$?; echo "red wiring rc=$rc (want 1)"; [ $rc -eq 1 ] || fail=1
 "$PY" -I tests/spells/rainfog_check.py "$S/cost" --base $BASE --red cost --only C < /dev/null > "$S/red_cost.log" 2>&1
 rc=$?; echo "red cost rc=$rc (want 1)"; [ $rc -eq 1 ] || fail=1
 # the switches are live (stage 0); red = the base's table (missing: a set would be a relaunch)
-"$PY" -I tests/cloudband/stage_check.py src/wwswitchstages.inc WW_CLOUD_RAINFOG WW_CLOUD_RAINFOG_RED
+"$PY" -I tests/features/clouds/cloudband/stage_check.py src/wwswitchstages.inc WW_CLOUD_RAINFOG WW_CLOUD_RAINFOG_RED
 rc=$?; echo "stage rc=$rc (want 0)"; [ $rc -eq 0 ] || fail=1
 git show $BASE:src/wwswitchstages.inc > "$S/base_stages.inc" 2>/dev/null && {
-	"$PY" -I tests/cloudband/stage_check.py "$S/base_stages.inc" WW_CLOUD_RAINFOG WW_CLOUD_RAINFOG_RED
+	"$PY" -I tests/features/clouds/cloudband/stage_check.py "$S/base_stages.inc" WW_CLOUD_RAINFOG WW_CLOUD_RAINFOG_RED
 	rc=$?; echo "stage red (base table) rc=$rc (want 1)"; [ $rc -eq 1 ] || fail=1
 }
 echo "RAINFOG-RUN $([ $fail -eq 0 ] && echo PASS || echo FAIL)"

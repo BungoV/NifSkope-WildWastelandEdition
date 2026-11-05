@@ -14,7 +14,7 @@ BSD License - see nifskope.h
 #include "features/sky/atmomath.h"	// lane CLOUD6e: kUnitKm, the cloud map's units
 #include "features/sky/atmosphere.h"	// SHAFTS1b: the aerial perspective's haze, for the no-double-count fit
 #include "features/air/cellairzone.h"	// lane AIRZONE1: the hand-placed volumes' fog and particle blocks
-#include "gl/cloudmap.h"	// lane CLOUD6e: the rain fog follows the Low band's coverage
+#include "features/clouds/cloudmap.h"	// lane CLOUD6e: the rain fog follows the Low band's coverage
 #include "gl/rainfogmath.h"	// lane CLOUD6e: the rain fog's law
 #include "gl/cellgrass.h"	// lane FOGWIND1: the game's wind angle, shared with the grass
 #include "features/exposure/cellhdr.h"

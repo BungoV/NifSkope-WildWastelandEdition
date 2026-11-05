@@ -9,7 +9,7 @@ BSD License - see nifskope.h
 
 #include "gl/cellunits.h"	// lane HARNESSMIN1 (testint): the terrain/contact maps registered on 31/32
 #include "gl/celluniform.h"	// lane CELLUNI2
-#include "gl/cloudshadow.h"	// lane CLOUD3: the clouds' shadow map joins the composition
+#include "features/clouds/cloudshadow.h"	// lane CLOUD3: the clouds' shadow map joins the composition
 #include "gl/celllooks.h"	// lane GAPLOOK1: the contact far tier's switch
 #include "features/sky/skyephem.h"	// lane EPHEM1: FO4CS Solar's sun + moon arithmetic
 #include "features/sky/skyplacerun.h"	// lane INTSKY1: the worldspace's place (location)

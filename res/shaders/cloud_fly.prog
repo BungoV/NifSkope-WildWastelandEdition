@@ -1,3 +1,0 @@
-# lane CLOUD4: the volume clouds march with the fly-through grid (src/gl/cloudvol.cpp, Fly-through Clouds on).
-
-shaders cell_ao.vert cloud_fly.frag

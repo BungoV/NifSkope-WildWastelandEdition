@@ -12,7 +12,7 @@
 #include "features/shadows/sunshadow.h"	// lane WATERCAUSTICS1: the caustics read the sun's cascades when they are built
 #include "cellworldanim.h"	// lane FXPARITY2: the world clock
 #include "gl/cellunits.h"	// lane WATERREFL1: the noise layers' moment textures
-#include "gl/cloudmap.h"	// lane WATERREFL1: the weather's clouds in the reflected sky
+#include "features/clouds/cloudmap.h"	// lane WATERREFL1: the weather's clouds in the reflected sky
 #include "features/water/cellocean.h"	// lane WATERLOOK1: the wind's wave spectrum
 #include "features/water/cellunderwater.h"	// lane WATERUNDER3: the sun under water
 #include "features/water/waterplanefit.h"	// lane WATERUNDER5: the placed-water polygon, mean plane and room test

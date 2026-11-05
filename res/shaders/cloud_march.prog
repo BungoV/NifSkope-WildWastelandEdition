@@ -1,3 +1,0 @@
-# lane CLOUD2: the volume clouds ray march (src/gl/cloudvol.cpp), selected by name.
-
-shaders cell_ao.vert cloud_march.frag
