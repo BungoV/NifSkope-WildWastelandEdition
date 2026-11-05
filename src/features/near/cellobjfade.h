@@ -2,7 +2,7 @@
 #define CELLOBJFADE_H
 
 /* lane OBJFADE1 (GFXR-GEO G1): the game's per-class distance fade of placed references, as Fallout 4 runs it for
- * every ref with a fade node. Pure math, no Qt and no GL, so tests/objfade checks it alone.
+ * every ref with a fade node. Pure math, no Qt and no GL, so tests/features/near/objfade checks it alone.
  *
  * Per ref, from its fade node's world bound radius r (uGridsToLoad G = 5):
  *   far  = 2048 (G - 1) - r, and when r > 0 at most fLODBoundRadiusMult (10) x r

@@ -1,7 +1,7 @@
-#include "gl/cellbindless.h"
+#include "features/near/cellbindless.h"
 
-#include "gl/cellbindlesspool.h"
-#include "gl/cellbindlessreopen.h"
+#include "features/near/cellbindlesspool.h"
+#include "features/near/cellbindlessreopen.h"
 #include "gl/celllooks.h"
 #include "gl/glshape.h"
 #include "wwswitch.h"
@@ -708,7 +708,7 @@ double poolMB( const Ctx & c, double * liveMB = nullptr )
 	return cap / 1048576.0;
 }
 
-//! lane BINDREOPEN1: the teardown steps of src/gl/cellbindlessreopen.h on the real GL (`gl` false: no GL call is made)
+//! lane BINDREOPEN1: the teardown steps of src/features/near/cellbindlessreopen.h on the real GL (`gl` false: no GL call is made)
 struct GlSteps
 {
 	Ctx & c;

@@ -1,4 +1,4 @@
-// lane BINDLESS2: the per-draw row (src/gl/cellbindless.h WwBl::Row, std430, 176 bytes): the draw's matrices and the
+// lane BINDLESS2: the per-draw row (src/features/near/cellbindless.h WwBl::Row, std430, 176 bytes): the draw's matrices and the
 // material's seven 2D maps as resident texture handles. wwDrawIdx is the draw's row in the ring at binding 12.
 // lane BINDLESSMDI1: the row is wwDrawBase + the draw's base instance (0 for a plain draw; a multi-draw's command
 // carries its own), handed to the fragment stage flat.

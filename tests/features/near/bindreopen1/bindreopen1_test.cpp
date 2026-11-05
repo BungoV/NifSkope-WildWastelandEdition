@@ -1,14 +1,14 @@
 // lane BINDREOPEN1: the bindless geometry pool over a stream walk, and the reopen teardown order, with no GL.
-//   bindreopen1_test pool             the real arena (src/gl/cellbindlesspool.h) under a twin of cellbindless.cpp's
+//   bindreopen1_test pool             the real arena (src/features/near/cellbindlesspool.h) under a twin of cellbindless.cpp's
 //                                     pool policy (600-frame sweep, a fence per frame 2 frames late, shrink check every
 //                                     64 frames): a 22-step walk of a 5x5 window. POOL PASS / POOL FAIL
 //   bindreopen1_test pool poolgrow    the red (WW_BINDLESS_RED=poolgrow, the append-only arena): must print POOL FAIL
-//   bindreopen1_test reopen           the real order (src/gl/cellbindlessreopen.h) on a mock GL that aborts on a use
+//   bindreopen1_test reopen           the real order (src/features/near/cellbindlessreopen.h) on a mock GL that aborts on a use
 //                                     after delete, 60 reopens + a context re-made every 10th. REOPEN PASS
 //   bindreopen1_test reopen reopenraw the red (WW_BINDLESS_RED=reopenraw): must print REOPEN ABORT
 // rc: 0 pass, 1 fail/abort, 2 usage.
-#include "gl/cellbindlesspool.h"
-#include "gl/cellbindlessreopen.h"
+#include "features/near/cellbindlesspool.h"
+#include "features/near/cellbindlessreopen.h"
 
 #include <algorithm>
 #include <cstdio>
@@ -307,7 +307,7 @@ struct Mock
 		if ( abortWhy.find( why ) == std::string::npos )
 			abortWhy += ( abortWhy.empty() ? "" : "; " ) + why;
 	}
-	// ---- the steps (src/gl/cellbindlessreopen.h)
+	// ---- the steps (src/features/near/cellbindlessreopen.h)
 	void finish() { rowsInFlight.clear(); }
 	void fenceWait() { rowsInFlight.clear(); }
 	void ringReset() {}

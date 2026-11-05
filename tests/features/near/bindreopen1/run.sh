@@ -1,15 +1,15 @@
 #!/bin/bash
 # lane BINDREOPEN1 unit: the geometry pool over a stream walk and the reopen teardown order (g++ only, no GL, no Qt).
-# Also re-runs tests/bindlesspool (the arena's offsets; its red -DPOOL_RED_OFF1 must still fail).
-# Usage: bash tests/bindreopen1/run.sh [outdir]     PASS = every green passes and every red fails.
-T=$(cd "$(dirname "$0")/../.." && pwd)
-O=${1:-$T/tests/bindreopen1/out}
+# Also re-runs tests/features/near/bindlesspool (the arena's offsets; its red -DPOOL_RED_OFF1 must still fail).
+# Usage: bash tests/features/near/bindreopen1/run.sh [outdir]     PASS = every green passes and every red fails.
+T=$(cd "$(dirname "$0")/../../../.." && pwd)
+O=${1:-$T/tests/features/near/bindreopen1/out}
 mkdir -p "$O"
 export PATH=/c/msys64/ucrt64/bin:$PATH
 CXX=${CXX:-g++}
-$CXX -std=c++17 -O2 -I"$T/src" "$T/tests/bindreopen1/bindreopen1_test.cpp" -o "$O/bindreopen1_test.exe" || { echo "BUILD FAIL"; exit 2; }
-$CXX -std=c++17 -O2 -I"$T/src" "$T/tests/bindlesspool/bindlesspool_test.cpp" -o "$O/bindlesspool_test.exe" || { echo "BUILD FAIL"; exit 2; }
-$CXX -std=c++17 -O2 -I"$T/src" -DPOOL_RED_OFF1 "$T/tests/bindlesspool/bindlesspool_test.cpp" -o "$O/bindlesspool_red.exe" || { echo "BUILD FAIL"; exit 2; }
+$CXX -std=c++17 -O2 -I"$T/src" "$T/tests/features/near/bindreopen1/bindreopen1_test.cpp" -o "$O/bindreopen1_test.exe" || { echo "BUILD FAIL"; exit 2; }
+$CXX -std=c++17 -O2 -I"$T/src" "$T/tests/features/near/bindlesspool/bindlesspool_test.cpp" -o "$O/bindlesspool_test.exe" || { echo "BUILD FAIL"; exit 2; }
+$CXX -std=c++17 -O2 -I"$T/src" -DPOOL_RED_OFF1 "$T/tests/features/near/bindlesspool/bindlesspool_test.cpp" -o "$O/bindlesspool_red.exe" || { echo "BUILD FAIL"; exit 2; }
 fails=0
 run() {	# name expected-rc command...
 	local n=$1 want=$2

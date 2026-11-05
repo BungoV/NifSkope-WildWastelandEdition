@@ -40,8 +40,8 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include "glproperty.h"
 #include "harnesswindow.h"
 #include "features/shared/cellpasstime.h"	// lane PERF1
-#include "celldrawpacket.h"	// lane GAPPERF-BINDLESS: the setters record while a draw packet records
-#include "cellbindless.h"	// lane BINDLESS2
+#include "features/near/celldrawpacket.h"	// lane GAPPERF-BINDLESS: the setters record while a draw packet records
+#include "features/near/cellbindless.h"	// lane BINDLESS2
 #include "progcachekeep.h"	// lane BUGS1102C
 
 // lane CELLUNI1: inside the cell-uniform scope an unchanged value is not uploaded again (celluniform.h)

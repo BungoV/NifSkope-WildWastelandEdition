@@ -9,7 +9,7 @@ BSD License - see nifskope.h
 #include "wwswitch.h"	// lane TESTDRIVER1: the WW_* switch store
 #include "cellssgi.h"
 #include "features/shared/cellpasstime.h"	// lane PERF2: the draws' CPU setup time
-#include "gl/celldrawstate.h"	// lane PERF3
+#include "features/near/celldrawstate.h"	// lane PERF3
 #include "cellunits.h"
 #include "celluniform.h"	// lane CELLUNI2
 

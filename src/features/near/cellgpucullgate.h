@@ -2,7 +2,7 @@
 #define CELLGPUCULLGATE_H
 
 /* lane SIGNDROP1 (2026-10-29): which draws of the last frame may stand in the GPU cull's depth prepass
- * (gl/cellgpucull.h, step B). Plain C++ with no Qt or GL, so tests/signdrop1 compiles the same rule.
+ * (gl/cellgpucull.h, step B). Plain C++ with no Qt or GL, so tests/features/near/signdrop1 compiles the same rule.
  *
  * The prepass draws its occluders depth-only (lookdev_csmdepth_q: no texture, no discard), so every covered sample
  * gets the occluder's depth. A draw whose fragment shader may discard has holes the frame shows and the prepass

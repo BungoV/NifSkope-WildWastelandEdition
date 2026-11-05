@@ -1,6 +1,6 @@
 #version 410 core
 
-/* lane VRS1 (src/gl/cellvrs.h): one fragment per shading-rate tile. The method of AMD FidelityFX-VariableShading
+/* lane VRS1 (src/features/near/cellvrs.h): one fragment per shading-rate tile. The method of AMD FidelityFX-VariableShading
  * (MIT, GPUOpen): the largest step between neighbouring pixels of the finished picture across the tile (and its
  * one-pixel border), horizontal and vertical apart; an axis whose steps all stay under the allowance shades coarse
  * along it. The step is per channel (max), so a colour-only edge stays 1x1. Fast camera motion (the temporal AA's

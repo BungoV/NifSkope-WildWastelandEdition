@@ -21,9 +21,9 @@ BSD License - see nifskope.h
 #include "gl/cellbloom.h"	// lane BLOOM1b
 #include "features/ao/cellaodecalgl.h"	// lane AODECAL1
 #include "features/ao/cellaomethod.h"
-#include "gl/cellcull.h"	// wwCellDecalMappedHas
+#include "features/near/cellcull.h"	// wwCellDecalMappedHas
 #include "features/shared/cellpasstime.h"	// sub-stage timers
-#include "gl/celldrawstate.h"
+#include "features/near/celldrawstate.h"
 #include "gl/lookdevstage.h"
 #include "gl/cellwater.h"	// water casts no cube shadow
 #include "gl/cellunderwater.h"	// the WATR INAM imagespace under water

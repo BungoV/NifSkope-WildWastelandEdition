@@ -6,7 +6,7 @@
 #include "features/shared/cellpasstime.h"
 #include "gl/cellssr.h"
 #include "gl/cellunits.h"	// lane WATERFIX7: the passes' named units
-#include "gl/cellvrs.h"
+#include "features/near/cellvrs.h"
 #include "gl/glnode.h"
 #include "gl/glscene.h"
 #include "gl/glshape.h"

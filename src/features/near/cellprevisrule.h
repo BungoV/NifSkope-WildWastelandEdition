@@ -2,7 +2,7 @@
 #define CELLPREVISRULE_H
 
 /* Lane PERFFIX4 (2026-11-01): when the game's previs applies in the cell view. Pure C++, no Qt, so
- * tests/previsrule tests it with g++ alone.
+ * tests/features/near/previsrule tests it with g++ alone.
  *
  * 1. Interiors take rooms, portals and occlusion planes ALWAYS (the game draws them that way; UMBRA1 measured the
  *    picture identical at Vault111Cryo, -51 % calls). Exteriors keep the Previs row (default off): our Hi-Z culls

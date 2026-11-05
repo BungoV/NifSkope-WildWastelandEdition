@@ -8,7 +8,7 @@ BSD License - see nifskope.h
 #include "cellunits.h"
 #include "celluniform.h"	// lane CELLUNI2
 #include "gl/alphabgsm.h"	// lane ALPHABGSM1: the side passes' alpha-test census
-#include "gl/celldrawstate.h"
+#include "features/near/celldrawstate.h"
 #include "wwswitch.h"	// fix TDFIX2: a live set re-reads the switches
 #include "gl/celllooks.h"	// lane OPENCELLFIX2: the Reflections master
 #include "features/shared/cellpasstime.h"	// lane PERFFIX2 a: the texture cache's upload count (a capture key)

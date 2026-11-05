@@ -8,7 +8,7 @@
 #include <QSet>
 #include <cstdio>
 #include "gl/cellhdr.h"	// lane SUNCELL1: the HDR frame's stencil
-#include "gl/cellqueue.h"	// lane GPUFIX1
+#include "features/near/cellqueue.h"	// lane GPUFIX1
 #include "gl/cellunits.h"	// lane WATERFIX7: the soft-depth unit
 #include "gl/celllights.h"	// lane SUNCELL1: the cell effect law
 #include "gl/cellfxlit.h"	// lane SUNCELL1: a lit particle's placed lights

@@ -8,7 +8,7 @@
 #pragma fp_contract( off )
 #endif
 
-#include "cellumbra.h"
+#include "features/near/cellumbra.h"
 
 #include <algorithm>
 #include <climits>

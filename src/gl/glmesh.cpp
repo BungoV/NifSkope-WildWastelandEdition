@@ -33,7 +33,7 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include "glmesh.h"
 
 #include "message.h"
-#include "gl/cellqueue.h"	// lane GPUFIX1
+#include "features/near/cellqueue.h"	// lane GPUFIX1
 #include "gl/controllers.h"
 #include "gl/glscene.h"
 #include "gl/renderer.h"

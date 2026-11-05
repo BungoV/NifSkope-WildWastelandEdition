@@ -4,16 +4,16 @@ BSD License - see nifskope.h
 
 ***** END LICENCE BLOCK *****/
 
-#include "gl/cellgpucull.h"
-#include "gl/cellbindless.h"	// lane BINDLESS2
-#include "gl/cellgpucullgate.h"	// lane SIGNDROP1: the occluder gate (tests/signdrop1 compiles it too)
+#include "features/near/cellgpucull.h"
+#include "features/near/cellbindless.h"	// lane BINDLESS2
+#include "features/near/cellgpucullgate.h"	// lane SIGNDROP1: the occluder gate (tests/signdrop1 compiles it too)
 
-#include "gl/cellcull.h"
+#include "features/near/cellcull.h"
 #include "gl/cellgrass.h"
 #include "gl/cellhdr.h"
 #include "gl/celllights.h"
 #include "features/shared/cellpasstime.h"
-#include "gl/cellqueue.h"
+#include "features/near/cellqueue.h"
 #include "gl/cellssr.h"
 #include "gl/glcontext.hpp"
 #include "gl/glscene.h"

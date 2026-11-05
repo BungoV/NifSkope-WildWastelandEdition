@@ -4,8 +4,8 @@ BSD License - see nifskope.h
 
 ***** END LICENCE BLOCK *****/
 
-#include "gl/cellqueue.h"
-#include "gl/cellgpucull.h"	// lane GPUDRIVEN1 step B
+#include "features/near/cellqueue.h"
+#include "features/near/cellgpucull.h"	// lane GPUDRIVEN1 step B
 #include "wwswitch.h"	// lane LIVESET1: the switches follow a live set
 
 #include "gl/glcontext.hpp"

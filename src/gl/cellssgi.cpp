@@ -9,7 +9,7 @@ BSD License - see nifskope.h
 #include "cellssr.h"
 #include "cellunits.h"
 #include "celluniform.h"	// lane CELLUNI2
-#include "gl/celldrawstate.h"	// lane PERF3
+#include "features/near/celldrawstate.h"	// lane PERF3
 #include "features/shared/cellpasstime.h"	// lane PERFFIX2: the stages' GPU sub-timers
 #include "gl/cellssgiplan.h"	// lane PERFFIX2: the pass's pure decisions
 

@@ -14,13 +14,13 @@ BSD License - see nifskope.h
 #include "cellmesh.h"	// lane FARDRAW1: CellMeshInst
 #include "gl/cellfarinst.h"	// lane FARDRAW1: the instanced far rings cast
 #include "cellfarhide.h"	// lane FARHOLE2: the rows a loaded near cell leaves out
-#include "gl/cellcull.h"	// lane SUNCELL1: each cascade culls its casters against its own window
+#include "features/near/cellcull.h"	// lane SUNCELL1: each cascade culls its casters against its own window
 #include "gl/cellgrass.h"	// lane FAR5: a wind cable's shadow sways with it
 #include "gl/celltreewind.h"	// lane WINDTREE1: a tree-wind shape's caster sways with it
 #include "gl/celllights.h"	// lane INTSKY1: a sunlit interior's casters
 #include "gl/celllooks.h"
 #include "features/shared/cellpasstime.h"	// lane PERF1: the casters' draw count
-#include "gl/cellqueue.h"	// lane GPUDRIVEN1: the casters' render queues
+#include "features/near/cellqueue.h"	// lane GPUDRIVEN1: the casters' render queues
 
 #include "gl/glnode.h"
 #include "gl/glproperty.h"	// lane VOLAIR1: alpha-tested casters read the base map

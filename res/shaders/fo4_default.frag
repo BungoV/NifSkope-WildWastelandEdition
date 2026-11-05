@@ -17,7 +17,7 @@
 #endif
 
 #ifdef WW_BINDLESS
-// lane BINDLESS2: the material's maps as resident handles in the draw's row (slots of src/gl/cellbindless.h)
+// lane BINDLESS2: the material's maps as resident handles in the draw's row (slots of src/features/near/cellbindless.h)
 #include "ww_bindless.glsl"
 #define BaseMap sampler2D( wwDraws[wwDrawIdx].tex[0] )
 #define NormalMap sampler2D( wwDraws[wwDrawIdx].tex[1] )

@@ -3,7 +3,7 @@
 # Green (the new occluder gate) must print "SIGNDROP1 PASS" and exit 0; the red (-DSIGNDROP1_RED, the gate before
 # the fix = WW_GPUDRIVEN_B_RED=atocc) must print "SIGNDROP1 FAIL" naming the sign and exit 1.
 # Prints "SIGNDROP1 UNIT PASS" only when both hold. OUT= picks the scratch folder (default notes/signdrop1/unit).
-#   bash tests/signdrop1/run.sh
+#   bash tests/features/near/signdrop1/run.sh
 set -u
 HERE="$(cd "$(dirname "$0")" && pwd)"
 OUT="${OUT:-/e/Projects/Claude/notes/signdrop1/unit}"

@@ -1,8 +1,8 @@
-// lane BINDLESS2: the geometry pool's offsets (src/gl/cellbindlesspool.h), run on a CPU copy of the arena.
-// g++ -std=c++17 -I<tree>/src tests/bindlesspool/bindlesspool_test.cpp            -> POOL PASS, rc 0
-// g++ -std=c++17 -I<tree>/src -DPOOL_RED_OFF1 tests/bindlesspool/bindlesspool_test.cpp -> the red: draws the span
+// lane BINDLESS2: the geometry pool's offsets (src/features/near/cellbindlesspool.h), run on a CPU copy of the arena.
+// g++ -std=c++17 -I<tree>/src tests/features/near/bindlesspool/bindlesspool_test.cpp            -> POOL PASS, rc 0
+// g++ -std=c++17 -I<tree>/src -DPOOL_RED_OFF1 tests/features/near/bindlesspool/bindlesspool_test.cpp -> the red: draws the span
 //     allocated before each shape's (WW_BINDLESS_RED=pooloff1), must print POOL FAIL, rc 1
-#include "gl/cellbindlesspool.h"
+#include "features/near/cellbindlesspool.h"
 
 #include <algorithm>
 #include <cstdio>

@@ -23,11 +23,11 @@ BSD License - see nifskope.h
 #include "harnesswindow.h"	// lane GAPFIX1
 #include "gl/cellhdr.h"
 #if __has_include( "gl/cellcull.h" )
-#include "gl/cellcull.h"   // the cell cull table, when merged
+#include "features/near/cellcull.h"   // the cell cull table, when merged
 #define FARLOD1_HAVE_CULL 1
 #endif
 #include "gl/cellwater.h"
-#include "gl/cellbindless.h"	// lane BINDLESS2FIX: the sway reaches the bindless twins
+#include "features/near/cellbindless.h"	// lane BINDLESS2FIX: the sway reaches the bindless twins
 #include "gl/cellfarinst.h"	// lane FARLOOK1101: and the far splat twins
 #include "gl/cellfarground.h"	// lane FARDRAW1: the far ring 0's live ground
 #include "gl/glscene.h"

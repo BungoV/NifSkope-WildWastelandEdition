@@ -13,7 +13,7 @@
 #include "cellmodsource.h"	// lane LANDSPEC8: uGridsToLoad
 #include "impostorchunk.h"
 #include "gl/bsshape.h"
-#include "gl/cellcull.h"
+#include "features/near/cellcull.h"
 #include "gl/cellgrass.h"
 #include "gl/cellwater.h"
 #include "gl/glnode.h"

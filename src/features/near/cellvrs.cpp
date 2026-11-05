@@ -1,4 +1,4 @@
-#include "cellvrs.h"
+#include "features/near/cellvrs.h"
 #include "wwswitch.h"	// lane LIVESET1: the configuration follows a live set
 
 #include "gl/cellhdr.h"

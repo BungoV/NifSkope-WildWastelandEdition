@@ -1,6 +1,6 @@
-// Lane PERFFIX4: the previs rule (src/gl/cellprevisrule.h). g++ -std=c++17 -I<tree>/src tests/previsrule/previsrule_test.cpp
+// Lane PERFFIX4: the previs rule (src/features/near/cellprevisrule.h). g++ -std=c++17 -I<tree>/src tests/features/near/previsrule/previsrule_test.cpp
 // Red: -DPREVISRULE_RED swaps in the old rules (interiors follow the row, every tome used) and must fail.
-#include "gl/cellprevisrule.h"
+#include "features/near/cellprevisrule.h"
 
 #include <cstdio>
 #include <vector>

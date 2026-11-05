@@ -1,13 +1,13 @@
 /*! The cell view's per-placement culling (see cellcull.h). */
-#include "cellcull.h"
+#include "features/near/cellcull.h"
 #include "wwswitch.h"	// lane TESTDRIVER1: the WW_* switch store
 
 #include "features/shared/cellpasstime.h"	// lane PERF1
-#include "gl/cellumbra.h"
-#include "gl/cellobjfade.h"	// lane OBJFADE1: the game's per-class distance fade
+#include "features/near/cellumbra.h"
+#include "features/near/cellobjfade.h"	// lane OBJFADE1: the game's per-class distance fade
 #include "gl/celllooks.h"
 #include "cellmodsource.h"	// lane OBJFADE1: the fade multipliers from the game's inis
-#include "gl/cellprevisrule.h"	// lane PERFFIX4: previs per document, the tome's staleness
+#include "features/near/cellprevisrule.h"	// lane PERFFIX4: previs per document, the tome's staleness
 #include "gl/glscene.h"
 #include "gl/glshape.h"
 #include "gl/renderer.h"
@@ -131,7 +131,7 @@ struct UmbraDoc
 	bool camValid = false;
 	std::uint64_t frame = ~std::uint64_t( 0 );
 	int queried = 0, noStart = 0, cells = 0, visible = 0, objects = 0, govUid = 0, govComb = 0, decoded = 0;
-	bool stale = false;	// lane PERFFIX4: any block's tome is stale (src/gl/cellprevisrule.h)
+	bool stale = false;	// lane PERFFIX4: any block's tome is stale (src/features/near/cellprevisrule.h)
 };
 
 //! lane PERF5: one shape's camera cull this frame, replayed by a later pass with the same camera and switches
@@ -1324,7 +1324,7 @@ bool wwCellCullCamera( Scene * scene, const Shape * sh, int block, std::int64_t 
 	CullState & s = st();
 	if ( !scene || !sh || !scene->renderer || numTris <= 0 || s.docs.isEmpty() || s.probing )
 		return false;	// the depth probe draws everything and counts nothing
-	/* lane PERFFIX4: previs per document (src/gl/cellprevisrule.h): an interior always, an exterior by the row; the
+	/* lane PERFFIX4: previs per document (src/features/near/cellprevisrule.h): an interior always, an exterior by the row; the
 	 * tome only when fresh. */
 	const auto pvIt = s.previs.constFind( scene->nifModel );
 	const bool interiorDoc = pvIt != s.previs.constEnd() && pvIt->interior;
@@ -1348,7 +1348,7 @@ bool wwCellCullCamera( Scene * scene, const Shape * sh, int block, std::int64_t 
 	}
 	s.docPrevis = previsDoc;
 	s.docTome = tomeDoc;
-	/* lane OBJFADE1: THE GAME'S PER-CLASS DISTANCE FADE (src/gl/cellobjfade.h), through the frame's camera only, like
+	/* lane OBJFADE1: THE GAME'S PER-CLASS DISTANCE FADE (src/features/near/cellobjfade.h), through the frame's camera only, like
 	 * previs. Row "Distance fade" under Objects (WwLook::ObjectFade, pin WW_CELL_OBJFADE), ships off; red
 	 * WW_CELL_OBJFADE_RED=decalonly = today (only decal-flag shapes fade). */
 	const bool fade = cameraEye && wwCellObjFadeOn();

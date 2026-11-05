@@ -1,4 +1,4 @@
-/* lane SIGNDROP1 (2026-10-29): a CPU twin of the GPU cull's occlusion test (src/gl/cellgpucull.cpp step B) on a
+/* lane SIGNDROP1 (2026-10-29): a CPU twin of the GPU cull's occlusion test (src/features/near/cellgpucull.cpp step B) on a
  * synthetic frame, with no GL: the depth prepass (only the draws gl/cellgpucullgate.h admits, written depth-only),
  * kHiz0 (MS: the farthest sample), kHizN (2x2 max, ceil sizes, clamped), the level table of prepare(), and kCull's
  * screen box, level pick and depth compare. The frame is 333 x 187 (odd at every level), 4 samples, a TAA-jittered
@@ -22,7 +22,7 @@
  * Green: SIGNDROP1 PASS, exit 0. Red (-DSIGNDROP1_RED: the gate before the fix, WW_GPUDRIVEN_B_RED=atocc):
  * SIGNDROP1 FAIL (the sign is visible and culled), exit 1. */
 
-#include "../../src/gl/cellgpucullgate.h"
+#include "../../../../src/features/near/cellgpucullgate.h"
 
 #include <algorithm>
 #include <cmath>

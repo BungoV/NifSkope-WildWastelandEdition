@@ -76,9 +76,9 @@ BSD License - see nifskope.h
 #include "features/ao/cellaodecalgl.h"
 #include "gl/cellwater.h"
 #include "gl/cellwaterinfo.h"
-#include "gl/cellcull.h"	// the per-placement culling runs
-#include "gl/cellobjfade.h"	// the runs' fade class
-#include "gl/cellprevisrule.h"	// lane PERFFIX4: the tome's staleness
+#include "features/near/cellcull.h"	// the per-placement culling runs
+#include "features/near/cellobjfade.h"	// the runs' fade class
+#include "features/near/cellprevisrule.h"	// lane PERFFIX4: the tome's staleness
 #include "gl/glproperty.h"	// lane FIXPACK1: the renderer's .pbrm resolve (pbrmResolveForMaterial)
 #include "gl/cellgrass.h"
 #include "gl/cellpost.h"
@@ -272,7 +272,7 @@ struct Bucket
 	float treeWindK[10] = { 0.0f, 0.0f, 0.0f, 0.0f, 3.4e38f, 0.0f, 1.0f, 1.0f, 1.0f, 1.0f };   // its constants (WwTreeWindK's order)
 	std::vector<OutVert> verts;
 	std::vector<BucketTri> tris;   // 32-bit: a bucket welds far more than 65,536 vertices
-	//! Where each placed shape's triangles start in `tris` (the culling runs, src/gl/cellcull.h)
+	//! Where each placed shape's triangles start in `tris` (the culling runs, src/features/near/cellcull.h)
 	std::vector<quint32> runStart;
 	//! The placed reference of each run (parallel to `runStart`; 0 = none)
 	std::vector<quint32> runRef;
@@ -3719,7 +3719,7 @@ static bool cellBuild( NifModel * nif, const CellSceneSpec & specAsked, CellChun
 		std::vector<WwUmbraBlockIn> umbraIn;
 		int cellsRead = 0, cellsRvis = 0, cellsVisi = 0, cellsPcmb = 0;
 		quint64 combRefs = 0, combMeshes = 0, previsRefs = 0;
-		/* lane PERFFIX4: per cell, is the tome its refs were baked against still true? (src/gl/cellprevisrule.h) The
+		/* lane PERFFIX4: per cell, is the tome its refs were baked against still true? (src/features/near/cellprevisrule.h) The
 		 * writer = the winning CELL record's plugin when it carries XPRI / VISI; any ref whose winning version comes
 		 * from a later plugin makes the block's tome stale. */
 		struct PrevisCensus

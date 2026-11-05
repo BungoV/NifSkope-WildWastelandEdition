@@ -1,5 +1,5 @@
 #!/bin/bash
-# lane FARTOGGLE2: the CPU twin of the GPU-driven step B occlusion cull (src/gl/cellgpucull.cpp kHiz0/kHizN/kCull)
+# lane FARTOGGLE2: the CPU twin of the GPU-driven step B occlusion cull (src/features/near/cellgpucull.cpp kHiz0/kHizN/kCull)
 # over 24 TAA-jittered frames of a steady camera, synthetic far scene. No exe, no window (python + numpy).
 #   today's cull            must PASS (no visible object culled, the cull adds no frame-to-frame flip)
 #   --feedback               must PASS (the occluder list fed back frame to frame: no loop with a conservative test)
@@ -7,7 +7,7 @@
 # The "jitter blink" lines are the raw sub-pixel signal (no cull involved) the temporal AA has to hold together.
 set -u
 HERE=$(cd "$(dirname "$0")" && pwd)
-OUT=${OUT:-${TMPDIR:-$HERE/../../drop}/gpucull_twin}
+OUT=${OUT:-${TMPDIR:-$HERE/../../../../drop}/gpucull_twin}
 mkdir -p "$OUT"
 fail=0
 arm() {	# arm <tag> <want PASS|FAIL> [args]

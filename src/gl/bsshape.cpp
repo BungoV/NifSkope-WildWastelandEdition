@@ -2,23 +2,23 @@
 #include "wwswitch.h"	// lane TESTDRIVER1: the WW_* switch store
 
 #include "gl/celllights.h"
-#include "gl/cellbindless.h"	// lane BINDLESS2
+#include "features/near/cellbindless.h"	// lane BINDLESS2
 #include "gl/cellfarground.h"
 #include "gl/cellfxlit.h"
 #include "gl/cellwater.h"	// lane WATER1
-#include "gl/cellcull.h"	// lane SUNCELL1
+#include "features/near/cellcull.h"	// lane SUNCELL1
 #include "gl/celllooks.h"	// lane DECALS1: the Decal distance fade row
 #include "features/air/cellvolair.h"	// lane VOLPART1: volumetric lit effect cards
 #include "gl/cellhdr.h"	// finalfix: blended draws single-sample outside the linear frame
 #include "gl/celluniform.h"	// lane CELLUNI6: the draw's blend note
 #include "features/shared/cellpasstime.h"	// lane PERF1
-#include "gl/cellqueue.h"	// lane GPUDRIVEN1: the main walks' render queues
-#include "gl/cellgpucull.h"	// lane GPUDRIVEN1 step B: the GPU cluster cull
+#include "features/near/cellqueue.h"	// lane GPUDRIVEN1: the main walks' render queues
+#include "features/near/cellgpucull.h"	// lane GPUDRIVEN1 step B: the GPU cluster cull
 #include "gl/cellfarinst.h"	// lane FARDRAW1: the instanced far rings
-#include "gl/celldrawpacket.h"	// lane BINDLESSMDI1: the follower tests
+#include "features/near/celldrawpacket.h"	// lane BINDLESSMDI1: the follower tests
 #include "gl/cellfxres.h"
 #include "gl/cellgrass.h"
-#include "gl/cellvrs.h"
+#include "features/near/cellvrs.h"
 #include "gl/shadowset.h"
 #include "cellsplat.h"
 #include "cellfarhide.h"	// lane FARHOLE2: far triangles inside a streamed near cell

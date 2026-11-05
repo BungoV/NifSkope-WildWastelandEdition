@@ -1,8 +1,8 @@
 #ifndef CELLBINDLESSREOPEN_H
 #define CELLBINDLESSREOPEN_H
 
-/* lane BINDREOPEN1: the ORDER of the bindless teardown, apart from GL so tests/bindreopen1 runs the same steps on a
- * mock GL that aborts on a use after delete. G supplies the steps (src/gl/cellbindless.cpp: the real GL; the test: the
+/* lane BINDREOPEN1: the ORDER of the bindless teardown, apart from GL so tests/features/near/bindreopen1 runs the same steps on a
+ * mock GL that aborts on a use after delete. G supplies the steps (src/features/near/cellbindless.cpp: the real GL; the test: the
  * mock). Red WW_BINDLESS_RED=reopenraw (`raw`): the order before the lane (WwBl::forgetAll: glFinish, handles made
  * non-resident, the frozen table cleared; the staged row, the ring, the geometry pool and a dead context's Ctx kept). */
 

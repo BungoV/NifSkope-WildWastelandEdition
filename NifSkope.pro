@@ -259,8 +259,8 @@ HEADERS += \
 	src/gl/precipmath.h \
 	src/gl/precipspec.h \
 	src/gl/progcachekeep.h \
-	src/gl/cellcull.h \
-	src/gl/cellumbra.h \
+	src/features/near/cellcull.h \
+	src/features/near/cellumbra.h \
 	src/gl/cellwater.h \
 	src/gl/cellocean.h \
 	src/gl/oceanspectrum.h \
@@ -270,7 +270,7 @@ HEADERS += \
 	src/gl/cellgrass.h \
 	src/gl/cellpost.h \
 	src/gl/cellhdr.h \
-	src/gl/cellvrs.h \
+	src/features/near/cellvrs.h \
 	src/gl/cellfxres.h \
 	src/gl/cellbloom.h \
 	src/gl/cellfogbloom.h \
@@ -307,12 +307,12 @@ HEADERS += \
 	src/gl/geokeepclock.h \
 	src/gl/streamtexpool.h \
 	src/gl/texgrave.h \
-	src/gl/cellqueue.h \
-	src/gl/celldrawpacket.h \
-	src/gl/cellbindless.h \
-	src/gl/cellbindlesspool.h \
-	src/gl/cellbindlessreopen.h \
-	src/gl/cellgpucull.h \
+	src/features/near/cellqueue.h \
+	src/features/near/celldrawpacket.h \
+	src/features/near/cellbindless.h \
+	src/features/near/cellbindlesspool.h \
+	src/features/near/cellbindlessreopen.h \
+	src/features/near/cellgpucull.h \
 	src/gl/cellfarinst.h \
 	src/gl/cellfarground.h \
 	src/gl/cellfgsched.h \
@@ -607,10 +607,11 @@ SOURCES += \
 	src/gl/cellfxlit.cpp \
 	src/gl/celllensflare.cpp \
 	src/gl/cellprecip.cpp \
-	src/gl/cellcull.cpp \
+	src/features/near/cellcull.cpp \
 	src/gl/cellfarinst.cpp \
 	src/gl/cellfarground.cpp \
-	src/gl/cellumbra.cpp \
+	src/features/near/cellumbra.cpp \
+	src/features/near/cellumbradepth.cpp \
 	src/gl/cellwater.cpp \
 	src/gl/cellocean.cpp \
 	src/gl/cellwaterinfo.cpp \
@@ -618,7 +619,7 @@ SOURCES += \
 	src/gl/cellgrass.cpp \
 	src/gl/cellpost.cpp \
 	src/gl/cellhdr.cpp \
-	src/gl/cellvrs.cpp \
+	src/features/near/cellvrs.cpp \
 	src/gl/cellfxres.cpp \
 	src/gl/cellbloom.cpp \
 	src/gl/cellfogbloom.cpp \
@@ -646,10 +647,10 @@ SOURCES += \
 	src/features/shared/wwtelemetry.cpp \
 	src/features/ao/ao.cpp \
 	src/features/ao/aomenu.cpp \
-	src/gl/cellqueue.cpp \
-	src/gl/celldrawpacket.cpp \
-	src/gl/cellbindless.cpp \
-	src/gl/cellgpucull.cpp \
+	src/features/near/cellqueue.cpp \
+	src/features/near/celldrawpacket.cpp \
+	src/features/near/cellbindless.cpp \
+	src/features/near/cellgpucull.cpp \
 	src/ui/scenewindow.cpp \
 	src/io/materialfile.cpp \
 	src/io/pbrmfile.cpp \

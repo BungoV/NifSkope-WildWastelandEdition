@@ -1,4 +1,4 @@
-"""lane FARTOGGLE2: a CPU twin of the GPU-driven step B occlusion cull (src/gl/cellgpucull.cpp) over a steady
+"""lane FARTOGGLE2: a CPU twin of the GPU-driven step B occlusion cull (src/features/near/cellgpucull.cpp) over a steady
 camera's frames, on a synthetic far scene: does the cull make a far object toggle on and off?
 
 What it mirrors (cellgpucull.cpp, origin/main f46b1c76):

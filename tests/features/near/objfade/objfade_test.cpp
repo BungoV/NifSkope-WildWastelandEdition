@@ -1,7 +1,7 @@
-// lane OBJFADE1: the game's per-class distance fade law (src/gl/cellobjfade.h).
-// g++ -std=c++17 -I<tree>/src tests/objfade/objfade_test.cpp; red: -DOBJFADE_RED (today: only decal shapes fade).
+// lane OBJFADE1: the game's per-class distance fade law (src/features/near/cellobjfade.h).
+// g++ -std=c++17 -I<tree>/src tests/features/near/objfade/objfade_test.cpp; red: -DOBJFADE_RED (today: only decal shapes fade).
 // The late items' reds (each its switch off = today): -DOBJFADE_RED_RAMP, _LOCMULT, _VWD, _LIGH, _CASTERS.
-#include "gl/cellobjfade.h"
+#include "features/near/cellobjfade.h"
 
 #include <cmath>
 #include <cstdio>

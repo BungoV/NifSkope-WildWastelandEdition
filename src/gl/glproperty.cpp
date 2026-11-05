@@ -34,9 +34,9 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include "wwswitch.h"	// lane TESTDRIVER1: the WW_* switch store
 #include "gl/scenelighting.h"
 #include "gl/lookdevstage.h"
-#include "gl/cellqueue.h"	// lane GPUDRIVEN1: the sampler census
-#include "gl/celldrawpacket.h"	// lane GAPPERF-BINDLESS
-#include "gl/cellbindless.h"	// lane BINDLESS2
+#include "features/near/cellqueue.h"	// lane GPUDRIVEN1: the sampler census
+#include "features/near/celldrawpacket.h"	// lane GAPPERF-BINDLESS
+#include "features/near/cellbindless.h"	// lane BINDLESS2
 #include "gl/celluniform.h"	// lane CELLUNI3: the blend note
 
 /*! Which vertex-colour channel the viewport previews, or 0 for normal shading.

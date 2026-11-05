@@ -55,10 +55,10 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include <QAction>
 #include <QOpenGLContext>
 #include "features/shared/cellpasstime.h"	// lane PERF1
-#include "gl/cellvrs.h"	// lane VRS1
+#include "features/near/cellvrs.h"	// lane VRS1
 #include "gl/cellfxres.h"	// lane FXRES1
-#include "gl/cellqueue.h"	// lane GPUDRIVEN1
-#include "gl/cellgpucull.h"	// lane GPUDRIVEN1 step B
+#include "features/near/cellqueue.h"	// lane GPUDRIVEN1
+#include "features/near/cellgpucull.h"	// lane GPUDRIVEN1 step B
 #include "gl/taainputs.h"	// lane TAAINPUTS1
 
 #include <QOpenGLFunctions>

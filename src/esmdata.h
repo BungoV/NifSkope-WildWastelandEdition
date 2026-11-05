@@ -109,7 +109,7 @@ struct EsmCellPrevis
 	bool hasPrevisFields = false;
 };
 
-/* one REFR's plugins, for the previs staleness rule (src/gl/cellprevisrule.h): the plugin that owns
+/* one REFR's plugins, for the previs staleness rule (src/features/near/cellprevisrule.h): the plugin that owns
  * its form id, the plugin of its winning version, and its record flags. */
 struct EsmRefSource
 {

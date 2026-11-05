@@ -47,12 +47,12 @@ struct WwPrevisBox
 struct WwPrevisScene
 {
 	std::vector<WwPrevisBox> occluders, rooms, portals;
-	bool interior = false;	//!< lane PERFFIX4: an interior takes previs whatever the row (src/gl/cellprevisrule.h)
+	bool interior = false;	//!< lane PERFFIX4: an interior takes previs whatever the row (src/features/near/cellprevisrule.h)
 };
 //! The document's previs scene (replaced whole; wwCellCullBegin forgets it).
 void wwCellPrevisSet( const void * nif, WwPrevisScene && sc );
 
-/*! One loaded previs block for the tome cull (src/gl/cellumbra.h): its .uvd bytes and its cells' XCRI refs with
+/*! One loaded previs block for the tome cull (src/features/near/cellumbra.h): its .uvd bytes and its cells' XCRI refs with
  *  the 0xFD cell code (x mod 32) << 19 | (y mod 32) << 14 (0 for an interior). Runs the tome does not govern keep
  *  the frustum / occluder path. WW_CELL_UMBRA=0 disables it; WW_CELL_UMBRA_RED, _DUMP=<dir>, _DEPTH=1: debug aids. */
 struct WwUmbraBlockIn
@@ -69,9 +69,11 @@ bool wwCellUmbraDepthWanted( Scene * scene );
 void wwCellUmbraProbing( bool on );
 //! The probe's depth (GL window depth, `w` x `h`, bottom row first) unprojected to world points into depth.txt.
 void wwCellUmbraDepthWrite( Scene * scene, const float * depth, int w, int h );
+//! MODULES1: the probe pass itself (features/near/cellumbradepth.cpp), called by GLView::paintGL
+void wwCellUmbraDepthPass( Scene * scene );
 bool wwCellPrevisOn();
 void wwCellPrevisSetOn( bool on );
-//! lane PERFFIX4: whether previs applies to a document of this kind now (an interior always; src/gl/cellprevisrule.h)
+//! lane PERFFIX4: whether previs applies to a document of this kind now (an interior always; src/features/near/cellprevisrule.h)
 bool wwCellPrevisFor( bool interior );
 //! 1 = the red control `casters`
 int wwCellPrevisRed();
@@ -99,7 +101,7 @@ bool wwCellDecalFadeRanges( Scene * scene, const Shape * sh, int block, std::int
 void wwCellDecalPomShape( const void * nif, int block, float scale, int passes );
 //! (scale x 0.1, the step cap clamp(passes, 16, 72)) for the shape, or false.
 bool wwCellDecalPomFor( const void * nif, int block, float & scale, float & steps );
-/*! Lane OBJFADE1 (GFXR-GEO G1): THE GAME'S PER-CLASS DISTANCE FADE of placed refs (src/gl/cellobjfade.h), in
+/*! Lane OBJFADE1 (GFXR-GEO G1): THE GAME'S PER-CLASS DISTANCE FADE of placed refs (src/features/near/cellobjfade.h), in
  *  wwCellCullCamera through the frame's camera: a run is hidden where the game switches its ref out. Row "Distance
  *  fade" under Objects (WwLook::ObjectFade, pin WW_CELL_OBJFADE), ships off. Red WW_CELL_OBJFADE_RED=decalonly. */
 bool wwCellObjFadeOn();

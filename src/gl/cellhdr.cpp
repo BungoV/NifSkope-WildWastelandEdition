@@ -12,7 +12,7 @@
 #include "gl/glscene.h"
 #include "gl/renderer.h"
 #include "features/shared/cellpasstime.h"
-#include "gl/cellvrs.h"
+#include "features/near/cellvrs.h"
 #include "gl/gametaa.h"	// lane TAA3: the Modern resolve before the tone map
 
 #include <QDebug>

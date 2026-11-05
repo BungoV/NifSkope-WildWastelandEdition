@@ -32,11 +32,11 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 #include "renderer.h"
 #include "features/shared/cellpasstime.h"	// lane PERF2: the draws' CPU setup time
-#include "gl/celldrawstate.h"	// lane PERF3
-#include "gl/celldrawpacket.h"	// lane GAPPERF-BINDLESS
-#include "gl/cellbindless.h"	// lane BINDLESS2
-#include "gl/cellqueue.h"	// lane GAPPERF-BINDLESS: the sampler census reads every bind
-#include "gl/cellvrs.h"	// lane VRS1
+#include "features/near/celldrawstate.h"	// lane PERF3
+#include "features/near/celldrawpacket.h"	// lane GAPPERF-BINDLESS
+#include "features/near/cellbindless.h"	// lane BINDLESS2
+#include "features/near/cellqueue.h"	// lane GAPPERF-BINDLESS: the sampler census reads every bind
+#include "features/near/cellvrs.h"	// lane VRS1
 #include "gl/cellfxres.h"	// lane FXRES1
 #include "gl/celluniform.h"	// lane CELLUNI1
 #include "gl/glasspanerules.h"	// lane GLASSPANE1: the effect shader's env mask channel
@@ -57,7 +57,7 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include "gl/cellwater.h"	// lane WATER1
 #include "cellsplat.h"	// lane TERRBLEND1: wwCellLandIs
 #include "gl/cellgrass.h"	// lane GRASSMB1
-#include "gl/cellcull.h"	// lane DECALS1: the placed decals' parallax
+#include "features/near/cellcull.h"	// lane DECALS1: the placed decals' parallax
 #include "gl/celllooks.h"
 #include "gl/cellwaterinfo.h"	// lane WATERWETBAKE1: the land side of the shore plane
 #include "gl/cellprecip.h"	// lane FO76WEATHER1: rain wetness

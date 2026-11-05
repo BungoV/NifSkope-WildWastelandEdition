@@ -1,4 +1,4 @@
-// lane STREAMTEX5: the bindless geometry pool's budget (WwBlPool::overBudget, src/gl/cellbindlesspool.h) over a stream
+// lane STREAMTEX5: the bindless geometry pool's budget (WwBlPool::overBudget, src/features/near/cellbindlesspool.h) over a stream
 // walk, with no GL. A twin of cellbindless.cpp poolBind's order: alloc, else (budget check over every class, else
 // rebuild), a fence per frame 2 frames late, a shrink check every 64 frames. A refused shape draws unpooled.
 //   poolcap_test <density> <budgetMB>   density 1 = a Concord-like 5x5 (~0.4 GB live), 3 = a downtown one (~1.2 GB)
@@ -6,7 +6,7 @@
 //   within the budget (budget <= 0, the red WW_BINDLESS_RED=poolnocap, has no bound: it prints CAP FAIL when the
 //   peak passes the default 1536 MB).
 // rc: 0 pass, 1 fail, 2 usage.
-#include "gl/cellbindlesspool.h"
+#include "features/near/cellbindlesspool.h"
 
 #include <algorithm>
 #include <cstdio>

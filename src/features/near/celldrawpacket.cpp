@@ -1,9 +1,9 @@
-#include "celldrawpacket.h"
+#include "features/near/celldrawpacket.h"
 
 #include "wwswitch.h"
 #include "gl/glcontext.hpp"
 #include "gl/gltex.h"
-#include "gl/cellbindless.h"
+#include "features/near/cellbindless.h"
 #include "gl/celluniform.h"	// lane CELLUNI3: a replayed blend write notes itself
 
 #include <QString>

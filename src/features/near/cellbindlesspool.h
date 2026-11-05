@@ -1,7 +1,7 @@
 #ifndef CELLBINDLESSPOOL_H
 #define CELLBINDLESSPOOL_H
 
-/* lane BINDLESS2: the geometry pool's bookkeeping, apart from GL so tests/bindlesspool can run it alone.
+/* lane BINDLESS2: the geometry pool's bookkeeping, apart from GL so tests/features/near/bindlesspool can run it alone.
  * One arena per vertex layout: vertices and 16-bit indices are appended; a shape draws its span with a base vertex
  * (its indices stay the shape's own) and an index byte offset. A full arena is rebuilt packed (garbage dropped) at
  * twice the size when more than half of it is still live.
@@ -10,7 +10,7 @@
  * and index ranges join free lists (coalesced, the tail given back to the append point) and are reused best-fit. A
  * rebuild sizes the arena from its live part (1.5x, 4096-element steps, the old floors), so it also SHRINKS: the
  * frame sweep re-makes an arena whose live share fell under half (`shrinkWanted`). Red WW_BINDLESS_RED=poolgrow
- * (`grow`): the old append-only rule above. tests/bindreopen1 runs both over a stream walk. */
+ * (`grow`): the old append-only rule above. tests/features/near/bindreopen1 runs both over a stream walk. */
 
 #include <cstdint>
 #include <iterator>
