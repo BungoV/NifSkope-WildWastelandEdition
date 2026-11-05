@@ -19,6 +19,7 @@ ALLOW = {
     ('cellbloom.cpp', 'kUnitA'), ('cellbloom.cpp', 'kUnitB'),
     ('cellhdr.cpp', 'kSrcUnit'), ('cellhdr.cpp', 'kFogBloomUnit'), ('cellfogbloom.cpp', 'kDepthUnit'),
     ('cellpost.cpp', 'kUnitCur'), ('cellpost.cpp', 'kUnitBlur'), ('cellpost.cpp', 'kUnitDepth'), ('cellpost.cpp', 'kUnitMv'),
+    ('cellpost.cpp', 'kUnitNear'),	# MODULES1: DOFLENS1's lens near layer, the same own-program pass as kUnitCur
     ('gametaa.cpp', 'kUnitCur'), ('gametaa.cpp', 'kUnitHist'), ('gametaa.cpp', 'kUnitMv'), ('gametaa.cpp', 'kUnitDepth'),
 }
 ENTRY = re.compile(r'^\s*constexpr int (\w+) = (\d+);', re.M)
