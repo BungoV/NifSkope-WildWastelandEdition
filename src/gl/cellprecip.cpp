@@ -631,26 +631,6 @@ const WwRoofMap & pcRoofFor( Scene * scene )
 }
 }	// namespace
 
-bool wwCellRoofBox( Scene * scene, float lo[3], float hi[3] )
-{
-	const WwRoofMap & m = pcRoofFor( scene );
-	if ( !m.valid() )
-		return false;
-	float top = -INFINITY;
-	for ( float z : m.z )
-		if ( std::isfinite( z ) )
-			top = std::max( top, z );
-	if ( !std::isfinite( top ) )
-		return false;
-	lo[0] = m.x0;
-	lo[1] = m.y0;
-	lo[2] = -1e9f;
-	hi[0] = m.x0 + float( m.nx ) * m.cell;
-	hi[1] = m.y0 + float( m.ny ) * m.cell;
-	hi[2] = top;
-	return true;
-}
-
 int wwCellPrecipDraw( Scene * scene )
 {
 	PcState & s = st();

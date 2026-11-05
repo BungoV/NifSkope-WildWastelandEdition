@@ -562,7 +562,6 @@
 { "WW_CELL_REFS_RED", 1, "src/cellview.cpp:3133 cellBuild | read while the cell document is built" },
 { "WW_CELL_REGION_RED", 0, "src/gl/lookdevstage.cpp:604 regionWalk | re-read per frame or per call (a)" },
 { "WW_CELL_RESTIR_RED", 0, "src/rtddgicell.cpp:1073 restirRedBits | hand: restirRedBits read every frame by rtddgiRestirPass: the kernel red bits (RESTIRDI1)" },
-{ "WW_CELL_ROOFSKY_RED", 0, "src/gl/cellvolair.cpp:2848 wwVolAirSkyDraw | re-read per frame or per call (a)" },
 { "WW_CELL_ROOMCLAMP_PIN", 1, "src/cellview.cpp:4153 cellBuild | read while the cell document is built" },
 { "WW_CELL_ROOMFIT_RED", 2, "src/probevolfine.cpp:1535 probeVolumesFineFit | cell build, function static: read once for the process (a reopen keeps it)" },
 { "WW_CELL_ROOMS_RED", 1, "src/cellview.cpp:6828 cellBuild | read while the cell document is built" },

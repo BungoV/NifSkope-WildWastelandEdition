@@ -1,3 +1,9 @@
+## MODULES1 step 5 (2026-11-05): the roof cut is gone
+
+- MUSGI1 round 5's sunlit-interior roof cut on the sky's air (`wwVolAirSkyRoof`, `wwCellRoofBox`, switch
+  `WW_CELL_ROOFSKY_RED`) is deleted (bungo 11-05: built on a guess, never proven). It shipped off, so the default
+  picture is the same: the sky's air is the open-air ray everywhere. `WW_CELL_ROOFSKY_RED=0` no longer does anything.
+
 ## MODULES1 step 4 (2026-11-05): the AO walk skips draws that write nothing there
 
 - The obscurance pass's scene walk (`ao-collect`) now arms the PERF2FIX1 opaque cut too: a shape whose last draw in an
