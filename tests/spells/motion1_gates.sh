@@ -1,7 +1,7 @@
 #!/bin/bash
 #
 # LANE MOTION1 (2026-10-04): THE CAMERA PATH, THE GAME'S TEMPORAL AA, THE SUN CASCADES IN MOTION.
-# src/gl/campath.h (WW_RENDER_PATH / --path), src/gl/gametaa.h (the Temporal AA row), src/gl/sunshadow.h.
+# src/gl/campath.h (WW_RENDER_PATH / --path), src/features/post/gametaa.h (the Temporal AA row), src/gl/sunshadow.h.
 #
 # Not judged by eye. Stages, each a launch of the exe (one window at a time, our port only):
 #   off      the row OFF (as shipped) = the before-lane exe, byte for byte: a Sanctuary cell shot and a lookdev
@@ -79,7 +79,7 @@ harness_alive() {
 say "motion1_gates.sh  $(date '+%Y-%m-%d %H:%M:%S')${RED:+   RED CONTROL: $RED (must fail)}"
 { sha1sum "$EXE" "$BEFORE"; } | tee -a "$LOG"
 newer=1
-for s in src/gl/gametaa.cpp src/gl/gametaa.h src/gl/campath.cpp src/gl/campath.h src/features/shadows/sunshadow.cpp src/glview.cpp \
+for s in src/features/post/gametaa.cpp src/features/post/gametaa.h src/gl/campath.cpp src/gl/campath.h src/features/shadows/sunshadow.cpp src/glview.cpp \
 	src/glview.h src/nifskope_ui.cpp src/main.cpp; do
 	[ "$REPO/$s" -nt "$EXE" ] && { say "  $s is NEWER than the exe"; newer=0; }
 done

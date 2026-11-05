@@ -72,7 +72,7 @@ BSD License - see nifskope.h
 #include "features/air/cellairzone.h"	// lane AIRZONE1: the Air zones row
 #include "features/gi/probevolumesgi.h"	// lane VOLFIT1: its rooms as the GI's volumes
 #include "features/lights/cellfxlit.h"
-#include "gl/celllensflare.h"
+#include "features/post/celllensflare.h"
 #include "features/ao/cellaodecalgl.h"
 #include "features/water/cellwater.h"
 #include "features/water/cellwaterinfo.h"
@@ -81,7 +81,7 @@ BSD License - see nifskope.h
 #include "features/near/cellprevisrule.h"	// lane PERFFIX4: the tome's staleness
 #include "gl/glproperty.h"	// lane FIXPACK1: the renderer's .pbrm resolve (pbrmResolveForMaterial)
 #include "gl/cellgrass.h"
-#include "gl/cellpost.h"
+#include "features/post/cellpost.h"
 #include "features/water/esmwater.h"
 #include "gamemanager.h"	// the imagespace LUT
 

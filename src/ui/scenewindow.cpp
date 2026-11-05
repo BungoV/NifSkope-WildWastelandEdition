@@ -11,7 +11,7 @@ BSD License - see nifskope.h
 #include "gl/lookdevstage.h"
 #include "features/air/cellvolair.h"	// lane VOLAIR1
 #include "features/shared/cellpasstime.h"	// lane PERF1
-#include "gl/gametaa.h"
+#include "features/post/gametaa.h"
 #include "features/shadows/shadowset.h"	// lane TERRSHADOW1
 #include "features/sky/atmosphere.h"	// lane ATMO1
 #include "features/clouds/cloudmap.h"	// lane CLOUD1
@@ -20,7 +20,7 @@ BSD License - see nifskope.h
 #include "features/clouds/cloudfly.h"	// lane CLOUD4
 #include "features/gi/cellssgi.h"	// lane SSGI1
 #include "gl/celllights.h"	// lane GAPTOOL1: the SSAO row
-#include "gl/cellbloom.h"	// lane GAPTOOL1: the Bloom row
+#include "features/post/cellbloom.h"	// lane GAPTOOL1: the Bloom row
 #include "features/particles/fxparity.h"	// lane FXPARITY1
 #include "ui/cellshowpanel.h"	// lane OPENCELLFIX2: the Display tab's fog and shadow rows share these settings
 #include "features/weather/esmweather.h"

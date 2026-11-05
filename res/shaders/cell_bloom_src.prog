@@ -1,4 +1,0 @@
-# The FO4CS bloom's src pass, full-screen quad (src/gl/cellbloom.h).
-# No conditions: cellbloom.cpp selects it by name.
-
-shaders cell_ao.vert cell_bloom_src.frag

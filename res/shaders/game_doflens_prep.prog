@@ -1,4 +1,0 @@
-# The thin-lens depth of field's downsample and circle of confusion (lane DOFLENS1; src/gl/cellpost.cpp).
-# No conditions: never picked for a shape; cellpost.cpp selects it by name.
-
-shaders cell_ao.vert game_doflens_prep.frag

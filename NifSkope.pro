@@ -245,8 +245,8 @@ HEADERS += \
 	src/features/sky/skydisc.h \
 	src/features/particles/fxparity.h \
 	src/features/particles/fxparityrules.h \
-	src/gl/gametaa.h \
-	src/gl/taainputs.h \
+	src/features/post/gametaa.h \
+	src/features/post/taainputs.h \
 	src/gl/campath.h \
 	src/gl/celllights.h \
 	src/features/lights/celllights_p.h \
@@ -256,7 +256,7 @@ HEADERS += \
 	src/features/lights/cellclustergl.h \
 	src/features/lights/cellfxlit.h \
 	src/gl/fxroomrule.h \
-	src/gl/celllensflare.h \
+	src/features/post/celllensflare.h \
 	src/features/weather/cellprecip.h \
 	src/features/weather/precipmath.h \
 	src/features/weather/precipspec.h \
@@ -270,13 +270,13 @@ HEADERS += \
 	src/features/water/cellwaterinfo.h \
 	src/features/water/cellunderwater.h \
 	src/gl/cellgrass.h \
-	src/gl/cellpost.h \
+	src/features/post/cellpost.h \
 	src/features/exposure/cellhdr.h \
 	src/features/exposure/exposure.h \
 	src/features/near/cellvrs.h \
 	src/features/particles/cellfxres.h \
-	src/gl/cellbloom.h \
-	src/gl/cellfogbloom.h \
+	src/features/post/cellbloom.h \
+	src/features/post/cellfogbloom.h \
 	src/features/sky/atmosphere.h \
 	src/features/clouds/cloudmap.h \
 	src/features/weather/weatherrecx.h \
@@ -601,15 +601,15 @@ SOURCES += \
 	src/features/shadows/sunshadow.cpp \
 	src/features/shadows/shadowset.cpp \
 	src/features/particles/fxparity.cpp \
-	src/gl/gametaa.cpp \
-	src/gl/taainputs.cpp \
+	src/features/post/gametaa.cpp \
+	src/features/post/taainputs.cpp \
 	src/gl/campath.cpp \
 	src/gl/celllights.cpp \
 	src/features/lights/celllamps.cpp \
 	src/features/lights/cellcluster.cpp \
 	src/features/lights/cellclustergl.cpp \
 	src/features/lights/cellfxlit.cpp \
-	src/gl/celllensflare.cpp \
+	src/features/post/celllensflare.cpp \
 	src/features/weather/cellprecip.cpp \
 	src/features/near/cellcull.cpp \
 	src/features/far-lod/cellfarinst.cpp \
@@ -622,14 +622,14 @@ SOURCES += \
 	src/features/water/cellwaterinfo.cpp \
 	src/features/water/cellunderwater.cpp \
 	src/gl/cellgrass.cpp \
-	src/gl/cellpost.cpp \
+	src/features/post/cellpost.cpp \
 	src/features/exposure/cellhdr.cpp \
 	src/features/exposure/exposure.cpp \
 	src/features/near/cellvrs.cpp \
 	src/features/particles/cellfxres.cpp \
 	src/features/particles/particlepreroll.cpp \
-	src/gl/cellbloom.cpp \
-	src/gl/cellfogbloom.cpp \
+	src/features/post/cellbloom.cpp \
+	src/features/post/cellfogbloom.cpp \
 	src/features/sky/atmosphere.cpp \
 	src/features/clouds/cloudmap.cpp \
 	src/features/weather/weatherrecx.cpp \

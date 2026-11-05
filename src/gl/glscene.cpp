@@ -59,7 +59,7 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include "features/particles/cellfxres.h"	// lane FXRES1
 #include "features/near/cellqueue.h"	// lane GPUDRIVEN1
 #include "features/near/cellgpucull.h"	// lane GPUDRIVEN1 step B
-#include "gl/taainputs.h"	// lane TAAINPUTS1
+#include "features/post/taainputs.h"	// lane TAAINPUTS1
 
 #include <QOpenGLFunctions>
 #include <QCoreApplication>

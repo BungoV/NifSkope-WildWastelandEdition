@@ -24,7 +24,7 @@ def squash(s):
 
 
 NEED = {
-    'src/gl/taainputs.cpp': [
+    'src/features/post/taainputs.cpp': [
         # lane TREELEAF4: a blended mover's coverage reads the same composed alpha (was `fx = at ? ...`)
         'Shape::WwFxAlpha fx = ( at || ( blended && based ) ) ? sh->wwFxSideAlpha( da, "taa" ) : Shape::WwFxAlpha();',
         'prog->uni1i( "fxMode", fx.mode );',
@@ -36,7 +36,7 @@ NEED = {
         'vtxA ? &( sh->colors.constFirst()[0] ) : nullptr',
         '( vtxA ? 0x40ULL : 0ULL )',
     ],
-    'res/shaders/taa_objvel.frag': [
+    'res/shaders/features/post/taa_objvel.frag': [
         'uniform int fxMode;',
         'uniform sampler2D GreyscaleMap;',
         'float a = texture( BaseMap, texCoord * uvScale + uvOffset ).a;',
@@ -47,7 +47,7 @@ NEED = {
         'a *= alpha;',
         'if ( alphaTest != 0 && covMode != 2 && a < alphaThreshold ) discard;',
     ],
-    'res/shaders/taa_objvel.vert': ['vAlpha = vertexColor.a;'],
+    'res/shaders/features/post/taa_objvel.vert': ['vAlpha = vertexColor.a;'],
     'src/gl/wwfxcov.h': [
         'return ( o.mode & 2 ) ? pal( base, k * o.mult ) : base * k * o.mult;',
         'o.mult = s.baseColorA * s.baseColorA;',

@@ -1,0 +1,4 @@
+# The thin-lens depth of field's composite and the motion blur in one pass (lane DOFLENS1; src/features/post/cellpost.cpp).
+# No conditions: never picked for a shape; cellpost.cpp selects it by name.
+
+shaders cell_ao.vert game_doflensmblur.frag

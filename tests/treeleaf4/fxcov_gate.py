@@ -269,7 +269,7 @@ def side_program(red):
                 raise SystemExit('cannot read %s at %s' % (f, BASE))
             open(os.path.join(d, f), 'wb').write(r.stdout)
         return build([os.path.join(d, 'taa_objvel.vert'), os.path.join(d, 'taa_objvel.frag')])
-    return build([os.path.join(SD, 'taa_objvel.vert'), os.path.join(SD, 'taa_objvel.frag')])
+    return build([S.shader_path(os.path.join(SD, 'taa_objvel.vert')), S.shader_path(os.path.join(SD, 'taa_objvel.frag'))])
 
 
 SIDE = side_program(RED)

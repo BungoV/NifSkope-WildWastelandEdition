@@ -42,7 +42,7 @@ NEED = {
         'return alphaProperty && alphaProperty->hasAlphaBlend();',
     ],
     'src/gl/glshape.h': ['bool wwBlendedAsDrawn() const;', 'float softDepth = 1.0f;', 'bool volPart = false;'],
-    'src/gl/taainputs.cpp': [
+    'src/features/post/taainputs.cpp': [
         'wwEnv( "WW_TAABLENDMOVER_RED" )',
         'constexpr float kCovThreshold = 0.5f;',
         'const bool fxDepthOk = scene->fxDepthPass == Scene::fxDepthPassNow && scene->fxDepthState > 0 && scene->fxDepthTexId',
@@ -70,7 +70,7 @@ NEED = {
         '( tbnOk ? 0x33300ULL : 0ULL )',
         'fn->glColorMaski( 1, GL_FALSE, GL_FALSE, GL_TRUE, GL_FALSE );	// the own-motion flag only, as before',
     ],
-    'res/shaders/taa_objvel.vert': ['btnMatrix[2] = normalize( normalVector * normalMatrix );',
+    'res/shaders/features/post/taa_objvel.vert': ['btnMatrix[2] = normalize( normalVector * normalMatrix );',
                                     'btnMatrix[0] = normalize( bitangentVector * normalMatrix );'],
 }
 

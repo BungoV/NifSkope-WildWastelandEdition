@@ -65,14 +65,14 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include "features/reflections/cellssr.h"
 #include "features/reflections/cellreflprobe.h"	// lane REFLPROBE1
 #include "features/gi/cellssgi.h"
-#include "gl/gametaa.h"	// lane PERFFIX4: the material maps' mip bias under the TAA2 jitter
+#include "features/post/gametaa.h"	// lane PERFFIX4: the material maps' mip bias under the TAA2 jitter
 #include "features/weather/esmweather.h"
 #include "io/material.h"
 #include "model/nifmodel.h"
 #include "ui/settingsdialog.h"
 #include "gl/BSMesh.h"
 #include "features/exposure/cellhdr.h"
-#include "gl/cellfogbloom.h"
+#include "features/post/cellfogbloom.h"
 #include "gl/cellunits.h"	// lane PERF1: the first dedicated unit
 #include "features/air/cellvolair.h"	// lane VOLPART1: volumetric lit effect cards
 #include "features/far-ground/cellfarground.h"	// lane FARDRAW1: the far ring 0's live ground

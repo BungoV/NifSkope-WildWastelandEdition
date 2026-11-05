@@ -131,7 +131,7 @@ uniform sampler3D cellFarPlaced;	// the GI grid relit by the placed lights alone
 uniform vec3 cellFarPlacedOrigin;
 uniform float cellFarPlacedVoxel;
 uniform vec3 cellFarPlacedDims;
-// the FO4CS bloom (src/gl/cellbloom.h), the tone map's final combine: cell_hdr.frag sets cellFoBloomHere
+// the FO4CS bloom (src/features/post/cellbloom.h), the tone map's final combine: cell_hdr.frag sets cellFoBloomHere
 // to tent(the chain's top) x the bloom weight before it calls cellImageSpace
 #if defined( WW_CELL_HDR )
 uniform bool cellIsFoBloomOn;
@@ -139,7 +139,7 @@ uniform sampler2D cellIsFoBloom;
 uniform vec4 cellIsFoBloomParams;	// radius (pixels), bloom weight, dispersion, 0
 uniform vec2 cellIsFoBloomFrame;	// the frame's size: the combine's uv
 vec3 cellFoBloomHere = vec3( 0.0 );
-// lane FOGBLOOM1 (src/gl/cellfogbloom.h): the bloom-intensity target, (gain - 1) / 4 per sample; cell_hdr.frag sets
+// lane FOGBLOOM1 (src/features/post/cellfogbloom.h): the bloom-intensity target, (gain - 1) / 4 per sample; cell_hdr.frag sets
 // cellBloomGain from it, which scales both blooms (1.0 exactly in clear air: the same bits)
 uniform bool cellFogBloomOn;
 uniform sampler2DMS cellFogBloom;

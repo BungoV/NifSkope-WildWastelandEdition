@@ -1,4 +1,0 @@
-# The linear post's picture back into a multisampled linear frame, samples kept (lane POSTFX3; src/gl/cellpost.cpp).
-# No conditions: never picked for a shape; cellpost.cpp selects it by name.
-
-shaders cell_ao.vert cell_post_mscopy.frag

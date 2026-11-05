@@ -59,12 +59,12 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include "harnesswindow.h"
 #include "gl/campath.h"		// WW_RENDER_PATH
 #include "gl/lookdevstage.h"	// the path's hour step
-#include "gl/gametaa.h"
-#include "gl/cellpost.h"
+#include "features/post/gametaa.h"
+#include "features/post/cellpost.h"
 #include "features/gi/cellssgi.h"
 #include "features/air/cellvolair.h"	// the air temporal follows the path frame
-#include "gl/cellbloom.h"
-#include "gl/celllensflare.h"	// the lens flare echo per path frame
+#include "features/post/cellbloom.h"
+#include "features/post/celllensflare.h"	// the lens flare echo per path frame
 #include "gl/celllooks.h"
 #include "features/shadows/sunshadow.h"
 #include "ui_nifskope.h"

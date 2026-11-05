@@ -33,11 +33,11 @@ BSD License - see nifskope.h
 #include "gl/celllooks.h"
 #include "features/water/cellwater.h"	// the Water row
 #include "features/ao/cellaodecal.h"	// the AO decals row
-#include "gl/gametaa.h"
+#include "features/post/gametaa.h"
 #include "gl/cellgrass.h"
-#include "gl/cellpost.h"
-#include "gl/cellbloom.h"
-#include "gl/cellfogbloom.h"
+#include "features/post/cellpost.h"
+#include "features/post/cellbloom.h"
+#include "features/post/cellfogbloom.h"
 #include "ui/widgets/wwnumberfield.h"	// the Bloom rows
 #include "ui/opencelldialog.h"	// the Load order and Cells tabs
 #include "ui/cellshowpanel.h"	// lane OPENCELLFIX1: the Show tab, the Show menu stays open

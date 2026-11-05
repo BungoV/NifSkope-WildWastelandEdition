@@ -13,7 +13,7 @@
 #include "gl/glproperty.h"	// lane GAPFIX1: alpha-tested cube casters read the base map
 #include "gl/renderer.h"
 #include "features/exposure/cellhdr.h"
-#include "gl/cellbloom.h"	// lane BLOOM1b
+#include "features/post/cellbloom.h"	// lane BLOOM1b
 #include "features/ao/cellaodecalgl.h"	// lane AODECAL1
 #include "features/ao/cellaomethod.h"
 #include "features/near/cellcull.h"	// wwCellDecalMappedHas
@@ -28,7 +28,7 @@
 #include "features/lights/cubefacecull.h"	// lane PERFFIX2 b: a caster draws only into the cube faces it can reach
 #include "features/lights/lampslice.h"	// lane PERFFIX2 b: the lamp store's first stores spread over frames
 #include "gl/celllooks.h"	// lane GAPLOOK1
-#include "gl/celllensflare.h"	// lane LIGHTS3 (LENSFLARE1): its echo
+#include "features/post/celllensflare.h"	// lane LIGHTS3 (LENSFLARE1): its echo
 #include "features/lights/cellfxlit.h"	// lane LIGHTS4: a placement's emittance colour
 #include "gamemanager.h"	// lane SUNCELL1: the weather imagespace's LUT
 #include "features/weather/esmweather.h"	// lane WEATHERBLEND2: wwLutBlendN

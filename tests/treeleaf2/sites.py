@@ -15,7 +15,7 @@ SITES = {
     'src/gl/renderer.cpp': ('colour', r'^bool Renderer::setupProgramCE1\(', 1, 0),
     'src/features/shadows/sunshadow.cpp': ('sun', None, 2, 2),
     'src/gl/celllights.cpp': ('cube', None, 1, 1),
-    'src/gl/taainputs.cpp': ('taa', None, 1, 1),
+    'src/features/post/taainputs.cpp': ('taa', None, 1, 1),
     'src/features/reflections/cellreflprobe.cpp': ('refl', None, 1, 1),
 }
 

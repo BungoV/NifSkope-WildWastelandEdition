@@ -3,8 +3,8 @@
 #include "gl/cellunits.h"
 
 #include "features/sky/atmosphere.h"	// lane SKYA (EXPO1): the sky in the exposure's mean
-#include "gl/cellbloom.h"
-#include "gl/cellfogbloom.h"
+#include "features/post/cellbloom.h"
+#include "features/post/cellfogbloom.h"
 #include "features/exposure/cellhdrformat.h"	// lane FRAMEFMT1: the frame's format rule (pure; tests/framefmt)
 #include "gl/celllights.h"
 #include "features/reflections/cellssr.h"
@@ -13,7 +13,7 @@
 #include "gl/renderer.h"
 #include "features/shared/cellpasstime.h"
 #include "features/near/cellvrs.h"
-#include "gl/gametaa.h"	// lane TAA3: the Modern resolve before the tone map
+#include "features/post/gametaa.h"	// lane TAA3: the Modern resolve before the tone map
 
 #include <QDebug>
 #include <QFile>

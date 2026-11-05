@@ -1,4 +1,0 @@
-# The game's depth of field composite and motion blur in one pass (lane POSTFX2; src/gl/cellpost.cpp).
-# No conditions: never picked for a shape; cellpost.cpp selects it by name.
-
-shaders cell_ao.vert game_dofmblur.frag

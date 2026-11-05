@@ -1,6 +1,6 @@
 #version 410 core
 
-/* lane TAAINPUTS1: one moving shape's current and previous clip positions (src/gl/taainputs.h).
+/* lane TAAINPUTS1: one moving shape's current and previous clip positions (src/features/post/taainputs.h).
  * velMode 0: rigid (the same vertex, last frame's matrix); 1: skinned (the CPU skin now in 0, last frame's in 8);
  * 2: the cell's grass wind at this and last frame's phase (fo4_default.vert's offset, step for step). */
 

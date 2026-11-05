@@ -1,4 +1,0 @@
-# Modern temporal AA before the tone map: the linear frame's samples, tone-weighted, into t0 (lane POSTFX3; src/gl/gametaa.h).
-# No conditions: never picked for a shape; gametaa.cpp selects it by name.
-
-shaders cell_ao.vert taa2_msresolve.frag

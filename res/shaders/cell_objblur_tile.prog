@@ -1,4 +1,0 @@
-# lane POSTFX1: per-object motion blur (src/gl/cellpost.h).
-# No conditions: never picked for a shape; cellpost.cpp selects it by name.
-
-shaders cell_ao.vert cell_objblur_tile.frag

@@ -52,11 +52,11 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include "features/particles/glparticles.h"
 #include "gl/renderer.h"
 #include "features/exposure/cellhdr.h"
-#include "gl/celllensflare.h"	// lane LIGHTS3 (LENSFLARE1)
+#include "features/post/celllensflare.h"	// lane LIGHTS3 (LENSFLARE1)
 #include "features/weather/cellprecip.h"	// lane WEATHERLOOK1 B
-#include "gl/gametaa.h"	// lane MOTION1: the game's temporal AA
-#include "gl/taainputs.h"	// lane TAAINPUTS1: velocity + reactive mask for a temporal resolve
-#include "gl/cellpost.h"	// lane GRASSMB1: the game's depth of field + motion blur
+#include "features/post/gametaa.h"	// lane MOTION1: the game's temporal AA
+#include "features/post/taainputs.h"	// lane TAAINPUTS1: velocity + reactive mask for a temporal resolve
+#include "features/post/cellpost.h"	// lane GRASSMB1: the game's depth of field + motion blur
 #include "gl/cellgrass.h"	// lane GRASSMB1: the grass wind's clock
 #include "features/far-lod/impostorchunk.h"
 #include "features/far-lod/cellfarlod.h"		// the far field's planes, sway and cards

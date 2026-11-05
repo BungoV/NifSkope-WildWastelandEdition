@@ -76,7 +76,7 @@ BSD License - see nifskope.h
 #include "model/nifmodel.h"
 #include "ui/scenewindow.h"
 #include "gl/celllights.h"	// lane GAPTOOL1: the SSAO row
-#include "gl/cellbloom.h"	// lane GAPTOOL1: the Bloom row
+#include "features/post/cellbloom.h"	// lane GAPTOOL1: the Bloom row
 
 #include <QAction>
 #include <QApplication>
