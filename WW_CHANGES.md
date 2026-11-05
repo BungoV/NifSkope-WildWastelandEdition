@@ -1,3 +1,12 @@
+## VOLAIRPATH1 (2026-11-03): the air temporal's history follows the camera path frame
+- WW_CELL_VOLAIR_TEMPORAL=1 stepped its history once per pass (frame++, histCur flip, volQ = frame & 3), so a path's
+  frames depended on how many paints came before the row, and two runs of one path differed.
+- wwRenderPathRun calls wwCellVolAirSetPath( frame ) beside the TAA / post / SSGI hooks (-1 after the run). During a
+  path, cellvolair.cpp keys the history on the path frame: a run's first frame (or a step back) starts a fresh
+  history, a repaint of the same frame redoes it from that frame's starting state, volQ = path frame & 3.
+- No path running, or temporal off: unchanged (one step a paint). Echo: `temporal=N histpath=<frame>` during a path.
+- Check: notes/perfhunt2/show c3_tm_{off,on}_{a,b} rows (the same pan run twice per arm, a vs b ~0 px).
+
 ## DEFAULTS1 (in TIMING1, 2026-11-03): OPTIN1's SHOULD BE ON rows ship on (bungo 11-03 04:45 "I give you the okay")
 - Source: notes/optin1/SUMMARY.md ranks 1-16 (22 keys). On by default now, each on a NEW settings key so a value an
   earlier build saved OFF does not stick (the BINDLESSPERF1 / PERFFIX4 precedent):

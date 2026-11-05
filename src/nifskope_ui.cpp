@@ -62,6 +62,7 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include "gl/gametaa.h"
 #include "gl/cellpost.h"
 #include "gl/cellssgi.h"
+#include "gl/cellvolair.h"	// the air temporal follows the path frame
 #include "gl/cellbloom.h"
 #include "gl/celllensflare.h"	// the lens flare echo per path frame
 #include "gl/celllooks.h"
@@ -1995,6 +1996,7 @@ static void wwRenderPathRun( GLView * ogl, const QString & pathFile, const QStri
 		wwGameTaaSetFrame( k );
 		wwCellPostSetPath( k, float( path.fps() ) );	// the motion blur's frame and frame time
 		wwCellSsgiSetPath( k );	// the bounce's temporal state follows the path frame
+		wwCellVolAirSetPath( k );	// and the air's
 		pump();
 	}
 	/* WW_RENDER_PATH_HOURSTEP=<hours a frame> moves the sun along the path too (frame k at the
@@ -2012,6 +2014,7 @@ static void wwRenderPathRun( GLView * ogl, const QString & pathFile, const QStri
 		wwGameTaaSetFrame( preroll + k );
 		wwCellPostSetPath( preroll + k, float( path.fps() ) );
 		wwCellSsgiSetPath( preroll + k );
+		wwCellVolAirSetPath( preroll + k );
 		// the live door at this frame's time (posed and relit before the frame draws)
 		const QString door = wwDoorLiveStep( ogl->getScene(), path.fps() > 0 ? double( k ) / double( path.fps() ) : 0.0 );
 		pump();
@@ -2044,6 +2047,7 @@ static void wwRenderPathRun( GLView * ogl, const QString & pathFile, const QStri
 	wwGameTaaSetFrame( -1 );
 	wwCellPostSetPath( -1, 0.0f );
 	wwCellSsgiSetPath( -1 );
+	wwCellVolAirSetPath( -1 );
 	ogl->wwSetPathCamera( false );
 	if ( video ) {
 		QString ff = wwEnvStr( "WW_FFMPEG" );
