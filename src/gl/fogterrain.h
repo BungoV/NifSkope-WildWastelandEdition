@@ -2,7 +2,7 @@
 #define WW_FOGTERRAIN_H
 
 /* lane FOGTERRAIN1 (10-27): the ground fog layer stands on the terrain. The terrain-only heights the terrain shadow
- * already rasters (cell LAND + the far terrain LOD, src/gl/shadowset.cpp) are low-passed here into a coarse height
+ * already rasters (cell LAND + the far terrain LOD, src/features/shadows/shadowset.cpp) are low-passed here into a coarse height
  * grid; the air pass (res/shaders/features/air/cell_airmed.glsl airGroundAt) raises the layer's anchor by the local ground's rise
  * over the fog frame's ground, so thickness and strength stay measured above the local ground.
  * Lane FOGTERRAIN2: the grid has its own job (shadowset.cpp fogTerrainFrame: no sun, no terrain-shadow tier), and the

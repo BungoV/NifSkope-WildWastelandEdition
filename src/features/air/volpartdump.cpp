@@ -19,7 +19,7 @@
 #include "gl/glproperty.h"
 #include "gl/glscene.h"
 #include "gl/renderer.h"
-#include "gl/sunshadow.h"	// lane VOLPART1: the sun's cascades on a puff
+#include "features/shadows/sunshadow.h"	// lane VOLPART1: the sun's cascades on a puff
 #include "glview.h"
 #include "model/nifmodel.h"
 #include <QFile>

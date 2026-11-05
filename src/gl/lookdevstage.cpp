@@ -18,7 +18,7 @@ BSD License - see nifskope.h
 #include "gl/glshape.h"
 #include "gl/renderer.h"
 #include "gl/scenelighting.h"
-#include "gl/shadowset.h"	// lane TERRSHADOW1: the Sun Path row
+#include "features/shadows/shadowset.h"	// lane TERRSHADOW1: the Sun Path row
 #include "gl/atmosphere.h"	// lane ATMO1: the physical sky
 #include "gl/weatherrecx.h"	// lane WX1: the weather .recx night block
 #include "gl/cloudmap.h"	// lane CLOUD1: the cloud map
@@ -30,7 +30,7 @@ BSD License - see nifskope.h
 #include "gl/skydisc.h"	// lane SKYDISC1: our moon globe's math
 #include "gl/moonlight.h"	// lane FIX1101A (moon): the one key light round the clock
 #include "gl/celllooks.h"	// lane SKYDISC1: the real-sky look decides the moon's frame
-#include "gl/sunshadow.h"
+#include "features/shadows/sunshadow.h"
 #include "model/nifmodel.h"
 
 #include "gamemanager.h"

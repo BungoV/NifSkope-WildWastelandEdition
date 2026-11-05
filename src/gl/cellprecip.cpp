@@ -15,11 +15,11 @@
 #include "gl/cellunits.h"	// lane BUGS1102B: the roof map's unit
 #include "gl/rainfogmath.h"	// lane FO76WEATHER1: the rain's share of a weather change
 #include "gl/rainwetlaw.h"
-#include "gl/shadowset.h"	// lane FO76WEATHER2: the cover map leaves the terrain out
+#include "features/shadows/shadowset.h"	// lane FO76WEATHER2: the cover map leaves the terrain out
 #include "gl/glshape.h"
 #include "gl/precipspec.h"
 #include "gl/renderer.h"
-#include "gl/sunshadow.h"
+#include "features/shadows/sunshadow.h"
 
 #include <QElapsedTimer>
 #include <QFile>

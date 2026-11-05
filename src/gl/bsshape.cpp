@@ -19,7 +19,7 @@
 #include "gl/cellfxres.h"
 #include "gl/cellgrass.h"
 #include "features/near/cellvrs.h"
-#include "gl/shadowset.h"
+#include "features/shadows/shadowset.h"
 #include "cellsplat.h"
 #include "cellfarhide.h"	// lane FARHOLE2: far triangles inside a streamed near cell
 #include "gl/glproperty.h"

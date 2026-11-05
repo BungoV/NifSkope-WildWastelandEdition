@@ -1,5 +1,5 @@
 """lane CLOUD3: offline gate of the cloud shadow map (src/gl/cloudshadow.cpp, res/shaders/cloud_shadowmap.frag) and its
-receivers (res/shaders/ww_sunshadow.glsl ussCloudT / wwSunShadow), through the real driver, no NifSkope.
+receivers (res/shaders/features/shadows/ww_sunshadow.glsl ussCloudT / wwSunShadow), through the real driver, no NifSkope.
 
   python -I tests/spells/cloudshadow_check.py <scratch> [--red vertical|noinject|nofade|wind0] [--only CVSOWTM]
 
@@ -291,7 +291,7 @@ if 'O' in only:
 if 'W' in only:
     va = open(os.path.join(SDIR, 'features', 'air', 'cell_volair.frag'), encoding='latin-1').read()
     cs = open(os.path.join(TREE, 'src', 'gl', 'cloudshadow.cpp'), encoding='latin-1').read()
-    ss = open(os.path.join(TREE, 'src', 'gl', 'shadowset.cpp'), encoding='latin-1').read()
+    ss = open(os.path.join(TREE, 'src', 'features', 'shadows', 'shadowset.cpp'), encoding='latin-1').read()
     fn = re.search(r'float airCloudShadow\( vec3 posView \)\s*\{\s*return ussCloudT\( posView \);', va)
     uses = len(re.findall(r'airCloudShadow\( posView \)', va))
     noinj = '!( volume && red( "noinject" ) )' in cs

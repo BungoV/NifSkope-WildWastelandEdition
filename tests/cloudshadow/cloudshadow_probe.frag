@@ -4,7 +4,7 @@
 // (ww_sunshadow.glsl) on a grid of points: r = ussCloudT (the clouds), g = wwSunShadow (surfaces), b = wwSunShadowGeo.
 // prMode 0: a level grid at height prPlane.x; 1: a vertical slice through (prPlane.y, prPlane.z) along prAxis.
 
-#include "../../res/shaders/ww_sunshadow.glsl"
+#include "../../res/shaders/features/shadows/ww_sunshadow.glsl"
 
 uniform int prMode;
 uniform vec4 prGrid;	// x0, y0 (or z0), dx, dy (or dz), world units

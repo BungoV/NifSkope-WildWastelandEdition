@@ -28,7 +28,7 @@ BSD License - see nifskope.h
 #include "gl/glshape.h"
 #include "gl/lookdevstage.h"
 #include "gl/renderer.h"
-#include "gl/sunshadow.h"
+#include "features/shadows/sunshadow.h"
 
 #include <QElapsedTimer>
 #include <QHash>

@@ -62,7 +62,7 @@ BSD License - see nifskope.h
 #include "io/nifxfile.h"	// lane NIFXLIGHT1: a model's .nifx path
 #include "gl/cellnifxlights.h"	// lane NIFXLIGHT3: the .nifx path rule, kept live by src/gl/celllights.cpp
 #include "gl/lightphys.h"	// lane MUSGI1 round 4: the vanilla curve's flux for the lamp scale
-#include "gl/sunshadow.h"	// lane LIVESET1: wwSunShadowForget
+#include "features/shadows/sunshadow.h"	// lane LIVESET1: wwSunShadowForget
 #include "gl/cellprobeview.h"
 #include "gl/lookdevstage.h"	// lane SKYTOP1: the cell's load order feeds the weather
 #include "gl/cellvolumeview.h"	// lane VOLFIT1

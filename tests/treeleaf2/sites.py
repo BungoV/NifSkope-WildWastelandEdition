@@ -13,7 +13,7 @@ rev = sys.argv[3] if len(sys.argv) > 3 and sys.argv[2] == '--rev' else None
 # file -> (pass, function span start regex or None, expected BaseMap binds, expected threshold sites)
 SITES = {
     'src/gl/renderer.cpp': ('colour', r'^bool Renderer::setupProgramCE1\(', 1, 0),
-    'src/gl/sunshadow.cpp': ('sun', None, 2, 2),
+    'src/features/shadows/sunshadow.cpp': ('sun', None, 2, 2),
     'src/gl/celllights.cpp': ('cube', None, 1, 1),
     'src/gl/taainputs.cpp': ('taa', None, 1, 1),
     'src/gl/cellreflprobe.cpp': ('refl', None, 1, 1),

@@ -14,7 +14,7 @@
 // PRE-REGISTERED bar: the penumbra's sigma moves by <= 0.1 screen px (a fifth of 4x MSAA's 0.5 px sample spacing,
 // which is the finest step the colour pass's own edge can take), at 720p (the smallest window: the largest pixel), for
 // every Cascade Quality tier and every cascade. A green here = a matching caster path cannot be seen, so it does not pay.
-#include "gl/sunshadowfit.h"
+#include "features/shadows/sunshadowfit.h"
 
 #include <cmath>
 #include <cstdio>

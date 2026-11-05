@@ -51,7 +51,7 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include "gl/scenelighting.h"
 #include "gl/lookdevstage.h"
 #include "gl/atmosphere.h"	// lane SKYA
-#include "gl/sunshadow.h"
+#include "features/shadows/sunshadow.h"
 #include "gl/celllights.h"
 #include "gl/cellfxlit.h"
 #include "gl/cellwater.h"	// lane WATER1
@@ -61,7 +61,7 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include "gl/celllooks.h"
 #include "gl/cellwaterinfo.h"	// lane WATERWETBAKE1: the land side of the shore plane
 #include "gl/cellprecip.h"	// lane FO76WEATHER1: rain wetness
-#include "gl/shadowset.h"	// lane WATERWETBAKE1: wwCellIsTerrainShape
+#include "features/shadows/shadowset.h"	// lane WATERWETBAKE1: wwCellIsTerrainShape
 #include "gl/cellssr.h"
 #include "gl/cellreflprobe.h"	// lane REFLPROBE1
 #include "gl/cellssgi.h"

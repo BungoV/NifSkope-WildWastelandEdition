@@ -9,7 +9,7 @@
 #include "cellwaterinfo.h"	// lane WATERDATA1: the baked water planes
 #include "lookdevstage.h"
 #include "esmwater.h"
-#include "sunshadow.h"	// lane WATERCAUSTICS1: the caustics read the sun's cascades when they are built
+#include "features/shadows/sunshadow.h"	// lane WATERCAUSTICS1: the caustics read the sun's cascades when they are built
 #include "cellworldanim.h"	// lane FXPARITY2: the world clock
 #include "cellunits.h"	// lane WATERREFL1: the noise layers' moment textures
 #include "cloudmap.h"	// lane WATERREFL1: the weather's clouds in the reflected sky

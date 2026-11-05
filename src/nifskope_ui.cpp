@@ -39,7 +39,7 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include "rtddgicell.h"	// and for the ray-traced GI volume (rtddgiCellPending)
 #include "gl/cloudvol.h"	// and for the clouds' coverage tables (built on workers)
 #include "gl/cloudshadow.h"	// and for the cloud shadow map's sliced rebuild
-#include "gl/shadowset.h"	// ... and for the terrain shadow sweep
+#include "features/shadows/shadowset.h"	// ... and for the terrain shadow sweep
 #include "lodgen.h"
 #include "lodgengpu.h"
 #include "lodgenlayout.h"
@@ -66,7 +66,7 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include "gl/cellbloom.h"
 #include "gl/celllensflare.h"	// the lens flare echo per path frame
 #include "gl/celllooks.h"
-#include "gl/sunshadow.h"
+#include "features/shadows/sunshadow.h"
 #include "ui_nifskope.h"
 
 #include "bakegeom.h"

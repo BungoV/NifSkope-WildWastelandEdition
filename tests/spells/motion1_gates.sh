@@ -79,14 +79,14 @@ harness_alive() {
 say "motion1_gates.sh  $(date '+%Y-%m-%d %H:%M:%S')${RED:+   RED CONTROL: $RED (must fail)}"
 { sha1sum "$EXE" "$BEFORE"; } | tee -a "$LOG"
 newer=1
-for s in src/gl/gametaa.cpp src/gl/gametaa.h src/gl/campath.cpp src/gl/campath.h src/gl/sunshadow.cpp src/glview.cpp \
+for s in src/gl/gametaa.cpp src/gl/gametaa.h src/gl/campath.cpp src/gl/campath.h src/features/shadows/sunshadow.cpp src/glview.cpp \
 	src/glview.h src/nifskope_ui.cpp src/main.cpp; do
 	[ "$REPO/$s" -nt "$EXE" ] && { say "  $s is NEWER than the exe"; newer=0; }
 done
 check "the exe is newer than every source this gate covers" "$newer"
 step=1
 for f in game_taa.frag game_taa.prog game_taa_mv.frag game_taa_mv.prog game_taa_copy.frag game_taa_copy.prog cell_ao.vert \
-	ww_sunshadow.glsl; do
+	features/shadows/ww_sunshadow.glsl; do
 	cmp -s "$REPO/res/shaders/$f" "$REPO/release/shaders/$f" || { say "  release/shaders/$f is not res/shaders/$f"; step=0; }
 done
 check "the shaders the exe loads are the tree's" "$step"

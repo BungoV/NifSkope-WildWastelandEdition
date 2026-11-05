@@ -45,7 +45,7 @@ BSD License - see nifskope.h
 #include "features/air/cellvolair.h"	// lane OPENCELLFIX2: the fog group's rows (notes 22)
 #include "features/air/airlampatlas.h"	// lane MODULES1 route (a): the air's Lamp shadows row
 #include "gl/lookdevstage.h"
-#include "gl/shadowset.h"	// lane OPENCELLFIX2: the shadow group's Scene window rows (note 26)
+#include "features/shadows/shadowset.h"	// lane OPENCELLFIX2: the shadow group's Scene window rows (note 26)
 #include "wwswitch.h"
 #include "cellmodpick.h"
 #include "celledit.h"	// lane ESPWRITE2: the place mode's session and its reopen

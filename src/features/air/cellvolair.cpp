@@ -29,8 +29,8 @@ BSD License - see nifskope.h
 #include "gl/glshape.h"	// lane CLOUDLOOK1: the shapes' spheres (vaShapesTop)
 #include "gl/lookdevstage.h"
 #include "gl/renderer.h"
-#include "gl/shadowset.h"	// lane FARGRID1: the terrain map
-#include "gl/sunshadow.h"
+#include "features/shadows/shadowset.h"	// lane FARGRID1: the terrain map
+#include "features/shadows/sunshadow.h"
 #include "esmweather.h"
 #include "harnesswindow.h"
 #include "recx.h"

@@ -1,8 +1,8 @@
-"""THE SUN CASCADES IN MOTION (lane MOTION1, 2026-10-04; src/gl/sunshadow.h, the CSM1 law).
+"""THE SUN CASCADES IN MOTION (lane MOTION1, 2026-10-04; src/features/shadows/sunshadow.h, the CSM1 law).
 
 Reads a camera path's sidecar (<out>_path.txt from WW_RENDER_PATH: per frame the camera, the temporal AA's
 echo and wwSunShadowSummary()) and judges every frame with lane CSM1's own independent fit
-(tests/spells/pbr_csm1_gates.py: fit(), model_uvd(), parse rules), then what only motion can show:
+(tests/features/shadows/pbr_csm1_gates.py: fit(), model_uvd(), parse rules), then what only motion can show:
 
   F  per frame   the splits and blend zones (zn, zf of each slice), the texel, the viewport, the snapped light
                  origin and window (pb, l, b) = the spec's, and the UPLOADED matrices put the judge's world
@@ -22,7 +22,7 @@ import os, sys, tempfile
 
 import numpy as np
 
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'features', 'shadows'))
 import pbr_csm1_gates as g  # noqa: E402
 
 

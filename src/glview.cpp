@@ -46,8 +46,8 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include "cellclick.h"		// one call, in mouseReleaseEvent
 #include "gl/controllers.h"
 #include "gl/lookdevstage.h"
-#include "gl/sunshadow.h"
-#include "gl/shadowset.h"	// contact shadows
+#include "features/shadows/sunshadow.h"
+#include "features/shadows/shadowset.h"	// contact shadows
 #include "features/near/cellcull.h"
 #include "gl/glparticles.h"
 #include "gl/renderer.h"

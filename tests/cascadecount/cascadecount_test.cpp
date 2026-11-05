@@ -4,7 +4,7 @@
  * the reach lies in the slice of each cascade that gets weight; with 3 the slices are today's (split0, split1, D).
  * Reds (each must FAIL): -DCASCADES_RED_TODAY (3 at Low: the count is today's) and -DCASCADES_RED_RECV (the receivers
  * still hand the far half to the undrawn cascade 2). The presets are shadowset.cpp's (checked in the source text). */
-#include "gl/sunshadowfit.h"
+#include "features/shadows/sunshadowfit.h"
 
 #include <cmath>
 #include <cstdio>
@@ -90,7 +90,7 @@ int main( int argc, char ** argv )
 			ss << in.rdbuf();
 			return ss.str();
 		};
-		const std::string set = read( "/src/gl/shadowset.cpp" ), sun = read( "/src/gl/sunshadow.cpp" );
+		const std::string set = read( "/src/features/shadows/shadowset.cpp" ), sun = read( "/src/features/shadows/sunshadow.cpp" );
 		check( set.find( "p.D = 4000; p.split0 = 900; p.split1 = 2600; p.blend = 150;" ) != std::string::npos
 			&& set.find( "p.D = 16000; p.split0 = 2000; p.split1 = 6500; p.blend = 400;" ) != std::string::npos,
 			"the tiers' numbers are shadowset.cpp's" );

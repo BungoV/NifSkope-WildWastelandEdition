@@ -234,8 +234,8 @@ HEADERS += \
 	src/gl/renderer.h \
 	src/gl/scenelighting.h \
 	src/gl/lookdevstage.h \
-	src/gl/sunshadow.h \
-	src/gl/shadowset.h \
+	src/features/shadows/sunshadow.h \
+	src/features/shadows/shadowset.h \
 	src/gl/skyephem.h \
 	src/gl/skyplace.h \
 	src/gl/skyplacerun.h \
@@ -293,7 +293,7 @@ HEADERS += \
 	src/gl/cellreflcam.h \
 	src/gl/cellssgi.h \
 	src/gl/cellssgiplan.h \
-	src/gl/contactlines.h \
+	src/features/shadows/contactlines.h \
 	src/gl/celllampshadow.h \
 	src/gl/celllooks.h \
 	src/gl/cellnifxlights.h \
@@ -595,8 +595,8 @@ SOURCES += \
 	src/scenetest.cpp \
 	src/gl/scenelighting.cpp \
 	src/gl/lookdevstage.cpp \
-	src/gl/sunshadow.cpp \
-	src/gl/shadowset.cpp \
+	src/features/shadows/sunshadow.cpp \
+	src/features/shadows/shadowset.cpp \
 	src/gl/fxparity.cpp \
 	src/gl/gametaa.cpp \
 	src/gl/taainputs.cpp \
