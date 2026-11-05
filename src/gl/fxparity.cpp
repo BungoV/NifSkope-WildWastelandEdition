@@ -25,7 +25,10 @@ FxpState & fxp()
 		s.init = true;
 		const QByteArray pin = wwEnv( "WW_FX_PARITY" ).trimmed();
 		s.pinned = !pin.isEmpty();
-		s.on = s.pinned ? pin != "0" : QSettings().value( QStringLiteral( "WW/FxParity" ), false ).toBool();
+		// lane DEFAULTS1: ships on (new key so an old OFF does not stick); WW_DEFAULTS1_RED=1 = the old row
+		s.on = s.pinned ? pin != "0" : wwEnv( "WW_DEFAULTS1_RED" ).trimmed() == "1"
+			? QSettings().value( QStringLiteral( "WW/FxParity" ), false ).toBool()
+			: QSettings().value( QStringLiteral( "WW/FxParity2" ), true ).toBool();
 		s.reds = 0;
 		for ( const QByteArray & t : wwEnv( "WW_FX_PARITY_RED" ).split( ',' ) ) {
 			const QByteArray r = t.trimmed();
@@ -49,7 +52,7 @@ void wwFxParitySetOn( bool on )
 	if ( s.pinned )
 		return;
 	s.on = on;
-	QSettings().setValue( QStringLiteral( "WW/FxParity" ), on );
+	QSettings().setValue( QStringLiteral( "WW/FxParity2" ), on );
 }
 
 int wwFxParityRules()

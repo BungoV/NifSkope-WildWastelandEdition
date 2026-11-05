@@ -199,7 +199,9 @@ ClState & st()
 			s.pinned = true;
 			s.on = pin.trimmed() != "0";
 		} else {
-			s.on = QSettings().value( QStringLiteral( "WW/CellLights" ), false ).toBool();
+			// lane DEFAULTS1: ships on (new key so an old OFF does not stick); WW_DEFAULTS1_RED=1 = the old row
+			s.on = wwEnvInt( "WW_DEFAULTS1_RED" ) == 1 ? QSettings().value( QStringLiteral( "WW/CellLights" ), false ).toBool()
+				: QSettings().value( QStringLiteral( "WW/CellLights2" ), true ).toBool();
 		}
 		const QByteArray giPin = wwEnv( "WW_CELL_GI" );
 		if ( !wwCellPrtOn() ) {
@@ -219,7 +221,9 @@ ClState & st()
 		}
 		const QByteArray flPin = qgetenv( "WW_CELL_FLICKER" ).trimmed();	// lane LIGHTFLICKER1
 		s.flickerPinned = !flPin.isEmpty();
-		s.flickerOn = s.flickerPinned ? flPin != "0" : QSettings().value( QStringLiteral( "WW/CellFlicker" ), false ).toBool();
+		s.flickerOn = s.flickerPinned ? flPin != "0" : wwEnvInt( "WW_DEFAULTS1_RED" ) == 1	// DEFAULTS1
+			? QSettings().value( QStringLiteral( "WW/CellFlicker" ), false ).toBool()
+			: QSettings().value( QStringLiteral( "WW/CellFlicker2" ), true ).toBool();
 		s.flickerRed = qEnvironmentVariableIntValue( "WW_CELL_FLICKER_RED" ) != 0;
 		s.flickerStep = std::max( 0.0f, qEnvironmentVariable( "WW_CELL_FLICKER_STEP" ).toFloat() );
 		s.flickerClockRed = wwEnvInt( "WW_CELL_FLICKER_CLOCK_RED" ) != 0;
@@ -232,7 +236,9 @@ ClState & st()
 			s.isPinned = true;
 			s.isOn = isPin.trimmed() != "0";
 		} else {
-			s.isOn = QSettings().value( QStringLiteral( "WW/CellImageSpace" ), false ).toBool();
+			s.isOn = wwEnvInt( "WW_DEFAULTS1_RED" ) == 1	// DEFAULTS1
+				? QSettings().value( QStringLiteral( "WW/CellImageSpace" ), false ).toBool()
+				: QSettings().value( QStringLiteral( "WW/CellImageSpace2" ), true ).toBool();
 		}
 		const QByteArray isRed = wwEnv( "WW_CELL_IS_RED" ).trimmed();
 		s.isRed = isRed == "nolut" ? 1 : isRed == "noexp" ? 2 : isRed == "nograde" ? 4 : isRed == "nobloom" ? 8
@@ -794,7 +800,7 @@ void wwCellFlickerSetOn( bool on )
 	if ( s.flickerPinned )
 		return;
 	s.flickerOn = on;
-	QSettings().setValue( QStringLiteral( "WW/CellFlicker" ), on );
+	QSettings().setValue( QStringLiteral( "WW/CellFlicker2" ), on );
 }
 
 void wwCellFlickerFrame( Scene * scene )
@@ -999,7 +1005,7 @@ void wwCellLightsSetOn( bool on )
 	if ( s.pinned )
 		return;
 	s.on = on;
-	QSettings().setValue( QStringLiteral( "WW/CellLights" ), on );
+	QSettings().setValue( QStringLiteral( "WW/CellLights2" ), on );
 }
 
 bool wwCellLightsWanted( Scene * scene )
@@ -2996,7 +3002,7 @@ void wwCellImageSpaceSetOn( bool on )
 	if ( s.isPinned )
 		return;
 	s.isOn = on;
-	QSettings().setValue( QStringLiteral( "WW/CellImageSpace" ), on );
+	QSettings().setValue( QStringLiteral( "WW/CellImageSpace2" ), on );
 }
 
 bool wwCellImageSpaceWanted( Scene * scene )

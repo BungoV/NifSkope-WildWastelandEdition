@@ -1,3 +1,23 @@
+## DEFAULTS1 (in TIMING1, 2026-11-03): OPTIN1's SHOULD BE ON rows ship on (bungo 11-03 04:45 "I give you the okay")
+- Source: notes/optin1/SUMMARY.md ranks 1-16 (22 keys). On by default now, each on a NEW settings key so a value an
+  earlier build saved OFF does not stick (the BINDLESSPERF1 / PERFFIX4 precedent):
+  Cell lights (WW/CellLights2) with Flicker (WW/CellFlicker2) and Patterns (look); Imagespace (WW/CellImageSpace2);
+  Cascaded shadows (Lookdev Shadows2); SSR outdoors (WW/CellSsrExterior2); Fusion Shaders shadow rules
+  (FO4CS-Level Shadows2); Objects looks (actors outdoors, weapon mod parts, world animation); Emittance looks
+  (placement, region, particles); Decals looks (distance fade, parallax); Lens flares; Depth of field (WW/CellDof2);
+  Particle game rules (WW/FxParity2); Air zones (WW/CellAirZones2); Cable shadows sway.
+- Skipped, already shipped on by their lane: WW_CELL_FARLOD (PERFFIX4, CellView/FarLod2), WW_CELL_UNDERWATER
+  (PERFFIX3, WW/CellUnderwater2).
+- One tick per group: the groups' existing master rows (Cell lights, Emittance, Decals, Objects, Shadows) are the one
+  tick; their children now ship on, so the master alone turns the group on or off. No description text.
+- Red (launch key, read once): WW_DEFAULTS1_RED=1 reads every old key with its old default (off) = the build before.
+- Harness behaviour unchanged where a reader forces its own value under a harness run (DOF, shadow rules: off).
+  Every other flipped row now starts ON in a harness's fresh settings scope: rows that measure something else and
+  relied on the off default must pin the key (e.g. `^WW_CELL_LIT=0`).
+- Preset table: CellWorkspaceCascadedShadows ships '1', its columns hold the ship value (1111) until a measured ms
+  enters a level; tests/presettable PASS. scenetest's Cascaded Shadows check now wants ON in a fresh scope.
+- Air zones on = the loader's WW_CELL_AIRZONE define in every program that names it: swept offline in all 3 modes.
+
 ## AIRBEAD2 (2026-11-03): the air's beaded sun shadow reads ship on
 - bungo 11-03 ("Allowed, show the difference"): AIRBEAD1's two shadow reads a sub-step (cell_volair.frag volSunBead)
   are the default, at +0.07 ms on the Medium air grid. Red WW_CELL_AIR_SHADOW=mid = one read at the middle, as before

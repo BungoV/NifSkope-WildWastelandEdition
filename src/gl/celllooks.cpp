@@ -17,6 +17,7 @@ struct LookRow
 	const char * label;
 	const char * key;
 	bool defOn = false;	// the row's value before the menu ever set it
+	const char * oldKey = nullptr;	// lane DEFAULTS1: the shipped-off key WW_DEFAULTS1_RED=1 reads (default off)
 };
 
 // the order of WwLook
@@ -30,24 +31,25 @@ const LookRow kRows[] = {
 	{ "PBR ambient in terrain shadow", "WW/ShadowPbrDim" },
 	{ "Bloom width in fog", "WW/CellBloomPerPixel" },
 	{ "Real sun and moon", "WW/SkyEphemeris" },
-	{ "Actors outdoors", "WW/CellActorsOutdoors" },
-	{ "Weapon mod parts", "WW/CellWeaponParts" },
-	{ "World animation", "WW/CellWorldAnim" },
+	// lane DEFAULTS1 (OPTIN1 SHOULD BE ON): ship on; new keys so an old OFF does not stick
+	{ "Actors outdoors", "WW/CellActorsOutdoors2", true, "WW/CellActorsOutdoors" },
+	{ "Weapon mod parts", "WW/CellWeaponParts2", true, "WW/CellWeaponParts" },
+	{ "World animation", "WW/CellWorldAnim2", true, "WW/CellWorldAnim" },
 	{ "Animated objects", "WW/CellAnimObjects" },
 	{ "Wide exposure range", "WW/CellExposureWide" },
 	{ "Probe sharing", "WW/CellGiShare" },
-	{ "Decal distance fade", "WW/CellDecalFade" },
-	{ "Decal parallax", "WW/CellDecalParallax" },
+	{ "Decal distance fade", "WW/CellDecalFade2", true, "WW/CellDecalFade" },	// DEFAULTS1
+	{ "Decal parallax", "WW/CellDecalParallax2", true, "WW/CellDecalParallax" },	// DEFAULTS1
 	{ "Terrain shadow slope from heights", "WW/ShadowSlopeMap" },
 	{ "Object LOD shadows on ground only", "WW/ShadowGroundGate" },
-	{ "Cable shadows sway", "WW/CableShadowSway" },
+	{ "Cable shadows sway", "WW/CableShadowSway2", true, "WW/CableShadowSway" },	// DEFAULTS1
 	{ "Game LOD trees sway", "WW/FarLodBtoSway" },
 	{ "Far tree card shadows", "WW/ShadowFarCards" },
-	{ "Placement emittance", "WW/CellPlacementEmittance" },
-	{ "Region emittance", "WW/CellRegionEmittance" },
-	{ "Emittance on particles", "WW/CellParticleEmittance" },
+	{ "Placement emittance", "WW/CellPlacementEmittance2", true, "WW/CellPlacementEmittance" },	// DEFAULTS1
+	{ "Region emittance", "WW/CellRegionEmittance2", true, "WW/CellRegionEmittance" },	// DEFAULTS1
+	{ "Emittance on particles", "WW/CellParticleEmittance2", true, "WW/CellParticleEmittance" },	// DEFAULTS1
 	{ "Emittance in bounce light", "WW/CellBounceEmittance" },
-	{ "Lens flares", "WW/CellLensFlares" },
+	{ "Lens flares", "WW/CellLensFlares2", true, "WW/CellLensFlares" },	// DEFAULTS1
 	{ "Wide probe sharing", "WW/CellGiShareWide" },
 	{ "Probe depth visibility", "WW/CellGiDepthVis" },
 	{ "Probe light smoothing", "WW/CellGiSmooth" },
@@ -55,7 +57,7 @@ const LookRow kRows[] = {
 	{ "Physical light falloff", "WW/CellLightPhys" },
 	{ "Advanced light model", "WW/CellLightAdvanced" },
 	{ "Area lights", "WW/CellLightArea" },
-	{ "Light patterns", "WW/CellLightPatterns" },
+	{ "Light patterns", "WW/CellLightPatterns2", true, "WW/CellLightPatterns" },	// DEFAULTS1
 	{ "Mesh lights (.nifx)", "WW/CellNifxLights" },
 	{ "Bindless draws", "WW/CellBindlessDraws", true },	// BINDLESSPERF1: faster on c3 + Memory Den; new key so an old OFF does not stick
 	{ "Weather .recx (sky, clouds, night)", "WW/WeatherRecx" },
@@ -97,8 +99,10 @@ int & rowVal( WwLook l )
 	if ( !loaded ) {
 		loaded = true;
 		QSettings s;
+		const bool red = wwEnv( "WW_DEFAULTS1_RED" ).trimmed() == "1";	// lane DEFAULTS1: the old shipped-off rows
 		for ( int k = 0; k < int( WwLook::Count ); k++ )
-			v[k] = s.value( QLatin1String( kRows[k].key ), kRows[k].defOn ).toBool() ? 1 : 0;
+			v[k] = ( red && kRows[k].oldKey ) ? ( s.value( QLatin1String( kRows[k].oldKey ), false ).toBool() ? 1 : 0 )
+				: s.value( QLatin1String( kRows[k].key ), kRows[k].defOn ).toBool() ? 1 : 0;
 	}
 	return v[size_t( l )];
 }

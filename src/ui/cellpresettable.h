@@ -65,8 +65,9 @@ inline const WwPresetRow * wwPresetTable( int * count )
 		{ "CellWorkspaceLightCurve", '-', "----", "----", '-', false, WW_PR_NONE, WW_PR_NONE, "a look curve, not a cost step" },
 		{ "CellWorkspaceCellFar", '0', "1111", "0000", 'M', false, { 0.06f, 0.10f, 0.15f, 0.19f }, WW_PR_NONE, "far lights; no ms" },
 		{ "CellWorkspaceGroup_SHADOWS", '1', "1111", "1111", 'G', false, WW_PR_NONE, WW_PR_NONE, "a master" },
-		{ "CellWorkspaceCascadedShadows", '0', "LMHU", "0000", 'M', false, { 0.21f, 0.27f, 0.40f, 0.50f }, WW_PR_NONE,
-			"PERFRES-A sun_shadows: no live ms since the cache (the old 0.2-0.3 was pre-cache, 10-19); TIMING1's sun-cascades zone" },
+		{ "CellWorkspaceCascadedShadows", '1', "LMHU", "1111", 'M', false, { 0.21f, 0.27f, 0.40f, 0.50f }, WW_PR_NONE,
+			"ships on (DEFAULTS1, OPTIN1 SHOULD BE ON): the preset holds it; PERFRES-A sun_shadows: no live ms since the cache "
+			"(the old 0.2-0.3 was pre-cache, 10-19); TIMING1's sun-cascades zone" },
 		{ "CellWorkspaceScreenSpaceShadows", '0', "00HU", "0000", 'M', false, { 0.013f, 0.018f, 0.062f, 0.088f },
 			{ 0.19f, 0.33f, 0.65f, 1.01f }, "TIMING1 hold c1 contact zone, c3 (mus 0.21/0.36/0.68/1.07); was terrshadow1 0.14-0.73" },
 		{ "CellWorkspaceTerrainShadows", '0', "LMHU", "0000", 'M', false, { 0.02f, 0.02f, 0.02f, 0.02f }, WW_PR_NONE,
