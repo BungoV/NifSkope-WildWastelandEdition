@@ -683,6 +683,18 @@ void BA2File::loadArchiveFile(const char *fileName, size_t prefixLen)
     loadFile(fileName, nameLen, prefixLen, fileSize);
     return;
   }
+  {
+    // bungo 11-06: the 4K texture pack stays out (RAM); red WW_ARCHIVE_UHR_RED=on loads it
+    const char  *b = fileName + nameLen;
+    while (b > fileName && b[-1] != '/' && b[-1] != '\\')
+      b--;
+    const char  *r = std::getenv("WW_ARCHIVE_UHR_RED");
+    if (std::strlen(b) > 22 &&
+        std::equal(b, b + 22, "dlcultrahighresolution",
+                   [](char a, char c) { return (a | 0x20) == c; }) &&
+        !(r && std::strcmp(r, "on") == 0))
+      return;
+  }
 
   FileBuffer  *bufp = new FileBuffer(fileName);
   try
