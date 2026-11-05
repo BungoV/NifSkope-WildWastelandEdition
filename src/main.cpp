@@ -368,12 +368,28 @@ int main( int argc, char * argv[] )
 		}
 
 		// Files were passed to NifSkope
+		QStringList missing;
 		for ( const QString & arg : parser.positionalArguments() ) {
 			QString fname = QDir::current().filePath( arg );
 
 			if ( QFileInfo( fname ).exists() ) {
 				fnames.push( fname );
+			} else {
+				missing << fname;
+				fprintf( stderr, "open: %s does not exist, opened without it\n", qPrintable( fname ) );
 			}
+		}
+
+		/* MERGEFIX1102 item 5 (SHAFTS1 11-03, "a refused rtddgi cell stalls the frame loop"): the stalled holds named
+		 * lanes/<tree>/tests/fixtures/empty.wwcell in a sparse tree without tests/. The file was dropped above without a
+		 * word, the window opened on the starter scene, and the WW_RENDER_SHOT handler that arms the live driver
+		 * (nifskope_ui.cpp createWindow) is connected only for a document: no `live:` line for 90 minutes, every row
+		 * NOT REACHED. A driven launch needs its document: it refuses at once and says why. */
+		if ( fnames.isEmpty() && ( wwEnvIsSet( "WW_RENDER_SHOT" ) || wwEnvIsSet( "WW_LIVE_STEPS" ) || wwEnvIsSet( "WW_LIVE_SERVE" ) ) ) {
+			fprintf( stderr, "LAUNCH REFUSED: the shot/live driver (WW_RENDER_SHOT, WW_LIVE_STEPS, WW_LIVE_SERVE) is armed by the document on the command line, and %s\n",
+				missing.isEmpty() ? "none was given" : qPrintable( QStringLiteral( "it does not exist: " ) + missing.join( QLatin1String( ", " ) ) ) );
+			fflush( stderr );
+			return 89;
 		}
 
 		// No files were passed to NifSkope, push empty string
