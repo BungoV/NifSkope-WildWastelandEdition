@@ -164,7 +164,7 @@ if [ "$WARM" != 0 ]; then
 		echo "warm: the NifSkope lock is taken or has waiters, skipped (the next start links cold)"
 	else
 		wt0=$(date +%s)
-		wcmd="cd '$ROOT' && WW_STARTUP_QUIT=1 WW_SETTINGS_SCOPE=ww_warm timeout 900 release/NifSkope.exe > release/ww_warm.log 2>&1"
+		wcmd="bash '$ROOT/tools/ww_warm.sh' '$ROOT'"	# MODULES1: ends the NifSkope 10 s after its first frame
 		if [ -n "$WRUN" ]; then
 			MEMCAP=8 bash "$WRUN" nifskope bash -c "$wcmd" < /dev/null > /dev/null 2>&1
 		else
