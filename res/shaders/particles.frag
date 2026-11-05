@@ -40,7 +40,7 @@ uniform bool fxAdditive;
  * flag alone, beside Ptcl (checked in Todd's treat), so a particle whose
  * effect shader is lit takes the same placed lights as a lit effect card (lane FXLIT1, fo4_effectshader.frag):
  * mix( 1, directional + the model's four lights, lighting influence ), in linear light, before the fog.
- * glparticles.cpp sets these from src/gl/cellfxlit.h; fxLitMode 0 = unlit, as before. */
+ * glparticles.cpp sets these from src/features/lights/cellfxlit.h; fxLitMode 0 = unlit, as before. */
 uniform float lightingInfluence;
 uniform vec4 fxEmit;			// lane LIGHTS3 (XEMI-PARTICLES): the placement's emittance colour ^2.2 on an unlit system; w 0 = none
 uniform int fxLitMode;			// 0 unlit; 1 lit; red controls: 2 every light, 4 no 2.2 on the falloff, 8 self-lit

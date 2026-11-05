@@ -1,6 +1,6 @@
 #!/bin/bash
 #
-# THE GAME'S DIFFUSE: OREN-NAYAR ON THE CELL LIGHTS (lane ON1, 2026-10-01; res/shaders/cell_lights.glsl cellOren).
+# THE GAME'S DIFFUSE: OREN-NAYAR ON THE CELL LIGHTS (lane ON1, 2026-10-01; res/shaders/features/lights/cell_lights.glsl cellOren).
 #
 # Not judged by eye. Per interior, one window per pass, the same camera each time:
 #   lit        the Cell lights row on: the picture bungo looks at
@@ -80,11 +80,11 @@ check() { if [ "$2" = "1" ]; then say "  PASS  $1"; else say "  FAIL  $1"; fails
 [ -x "$EXE" ] || { echo "no NifSkope.exe at $EXE"; exit 2; }
 say "cell_oren.sh  $(date '+%Y-%m-%d %H:%M:%S')${RED:+   RED CONTROL: $RED}"
 newer=1
-for s in src/gl/celllights.cpp res/shaders/cell_lights.glsl; do
+for s in src/gl/celllights.cpp res/shaders/features/lights/cell_lights.glsl; do
 	[ "$REPO/$s" -nt "$EXE" ] && { say "  $s is NEWER than the exe"; newer=0; }
 done
 # the program reads release/shaders, which the build refreshes from res/shaders
-cmp -s "$REPO/res/shaders/cell_lights.glsl" "$REPO/release/shaders/cell_lights.glsl" || { say "  release/shaders/cell_lights.glsl is stale"; newer=0; }
+cmp -s "$REPO/res/shaders/features/lights/cell_lights.glsl" "$REPO/release/shaders/features/lights/cell_lights.glsl" || { say "  release/shaders/cell_lights.glsl is stale"; newer=0; }
 check "the exe and its shaders are current" "$newer"
 
 shoot() {   # shoot <entry> <tag> <env...>

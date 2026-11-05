@@ -1,6 +1,6 @@
 #!/bin/bash
 #
-# A RECESSED OUTDOOR WALL THE PROBE GI MUST NOT BLACK OUT (lane GIBLACK1, 2026-10-14; res/shaders/cell_lights.glsl
+# A RECESSED OUTDOOR WALL THE PROBE GI MUST NOT BLACK OUT (lane GIBLACK1, 2026-10-14; res/shaders/features/lights/cell_lights.glsl
 # cellGiSample's lend rule). Judged by tests/spells/cell_giblack_check.py, not by eye.
 #
 # The defect: an outdoor wall at the back of a narrow recess whose air the rooms grid marks solid. Both of the

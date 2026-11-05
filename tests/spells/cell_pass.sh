@@ -74,12 +74,12 @@ check() { if [ "$2" = "1" ]; then say "  PASS  $1"; else say "  FAIL  $1"; fails
 say "cell_pass.sh  $(date '+%Y-%m-%d %H:%M:%S')${RED:+   RED CONTROL: $RED}"
 newer=1
 for s in src/probegi.cpp src/gl/celllights.cpp src/gl/cellprobeview.cpp src/cellview.cpp src/glview.cpp \
-	res/shaders/cell_lights.glsl res/shaders/fo4_default.frag res/shaders/pbrm_default.frag; do
+	res/shaders/features/lights/cell_lights.glsl res/shaders/fo4_default.frag res/shaders/pbrm_default.frag; do
 	[ "$REPO/$s" -nt "$EXE" ] && { say "  $s is NEWER than the exe"; newer=0; }
 done
 check "the exe is newer than every source this gate covers" "$newer"
 same=1
-for f in cell_lights.glsl fo4_default.frag pbrm_default.frag; do
+for f in features/lights/cell_lights.glsl fo4_default.frag pbrm_default.frag; do
 	cmp -s "$REPO/res/shaders/$f" "$(dirname "$EXE")/shaders/$f" || { say "  release/shaders/$f is not res/shaders/$f"; same=0; }
 done
 check "the exe's shaders are the tree's" "$same"

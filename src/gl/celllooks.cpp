@@ -2,7 +2,7 @@
 
 #include "wwswitch.h"
 #include "wwredtwin.h"	// lane REDRETIRE1
-#include "gl/lightphys.h"
+#include "features/lights/lightphys.h"
 #include "gl/waterpreset.h"	// lane FIX1101A: the water quality preset
 
 #include <QSettings>

@@ -2,7 +2,7 @@
 // src/gl/celllights.cpp unchanged. The screen GI half pass and the light spheres ride along until their module moves.
 #include "gl/celllights.h"
 #include "wwswitch.h"	// lane TESTDRIVER1: the WW_* switch store
-#include "gl/cellclustergl.h"
+#include "features/lights/cellclustergl.h"
 #include "gl/alphabgsm.h"	// the side passes' alpha-test census
 #include "gl/cellssr.h"
 #include "features/air/cellvolair.h"
@@ -24,17 +24,17 @@
 #include "gl/cellunderwater.h"	// the WATR INAM imagespace under water
 #include "esmwater.h"
 #include "gl/cellwatergi.h"	// water reads no probe GI
-#include "gl/celllampshadow.h"	// lane LAMPSHADOW1
-#include "gl/cubefacecull.h"	// lane PERFFIX2 b: a caster draws only into the cube faces it can reach
-#include "gl/lampslice.h"	// lane PERFFIX2 b: the lamp store's first stores spread over frames
+#include "features/lights/celllampshadow.h"	// lane LAMPSHADOW1
+#include "features/lights/cubefacecull.h"	// lane PERFFIX2 b: a caster draws only into the cube faces it can reach
+#include "features/lights/lampslice.h"	// lane PERFFIX2 b: the lamp store's first stores spread over frames
 #include "gl/celllooks.h"	// lane GAPLOOK1
 #include "gl/celllensflare.h"	// lane LIGHTS3 (LENSFLARE1): its echo
-#include "gl/cellfxlit.h"	// lane LIGHTS4: a placement's emittance colour
+#include "features/lights/cellfxlit.h"	// lane LIGHTS4: a placement's emittance colour
 #include "gamemanager.h"	// lane SUNCELL1: the weather imagespace's LUT
 #include "esmweather.h"	// lane WEATHERBLEND2: wwLutBlendN
 #include "probealbedo.h"	// lane LIGHTS5 (GOBO1): a spot's pattern
 #include "recx.h"	// lane LIGHTS5 (FOGSCALE1): fog.scale
-#include "gl/cellnifxlights.h"	// lane NIFXLIGHT1: a fixture mesh's .nifx lights
+#include "features/lights/cellnifxlights.h"	// lane NIFXLIGHT1: a fixture mesh's .nifx lights
 #include "rtddgicell.h"	// lane RTXGI1 M2: the ray-traced GI volume's read (rtddgiCellUniforms)
 #include "gl/celluniprof.h"	// lane PERFFIX1: WW_CELL_UNI_PROF
 #include "gl/cellunirec.h"	// lane PERFFIX1: the cell-uniform class record
@@ -42,7 +42,7 @@
 #include "cellworldanim.h"	// lane NIFXLIGHT3: the world clock a .nifx light's dimmer follows
 #include "gl/atmosphere.h"	// lane FIX1101A (atmo): wwAtmoWbGain, the test white balance
 #include "gl/cellsunlit.h"	// lane INTSKY1: the sunlit interior rule
-#include "gl/cellflickclock.h"	// lane PERFFIX2 a: the flicker's phase on the world clock
+#include "features/lights/cellflickclock.h"	// lane PERFFIX2 a: the flicker's phase on the world clock
 #include <QDateTime>
 #include <QDir>	// lane INTSKY1: the Cells file in the census
 #include <QJsonValue>

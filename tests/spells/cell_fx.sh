@@ -12,10 +12,10 @@
 #      (measured 2026-10-01: 0.39 on the walkway, 0.86 at the far end; limits 0.6 and 0.95)
 #
 #
-# THE LIT EFFECTS (lane FXLIT1, 2026-10-02; src/gl/cellfxlit.h, docs/PRTP_PLAN.md): an effect shape whose material
+# THE LIT EFFECTS (lane FXLIT1, 2026-10-02; src/features/lights/cellfxlit.h, docs/PRTP_PLAN.md): an effect shape whose material
 # sets the effect-lighting flag is lit by its placed model's (up to) four lights. Per LSHOTS camera the viewer
 # writes, for those shapes alone, the model (probe 70), the world position (71 / 72) and the multiplier (73 / 74);
-# tests/spells/cell_fxlit_check.py computes the multiplier itself from the plugin and the models on disk:
+# tests/features/lights/cell_fxlit_check.py computes the multiplier itself from the plugin and the models on disk:
 #   L  the share of pixels that agree >= 95%, and the viewer's total over the expected total within 5%
 #   U  outside the lit effects, every pixel equals the exe before the lane (BEFORE=<exe>; SKIP without one):
 #      the shapes without the flag keep their path. A camera whose frame shows under 300 such pixels skips U
@@ -68,7 +68,7 @@ SIZE="${SIZE:-960x600}"
 SHOTS="${SHOTS:-Vault111Cryo:300,-512,40:3:500:0.6 Vault111Cryo:-4600,-280,120:5:350:0.95}"
 # lane FXLIT1: the cryo walkway from bungo's eye (644,-480,60) to the far door
 LSHOTS="${LSHOTS:-Vault111Cryo:384,-480,60:3:260 GoodneighborTheThirdRail:2932,-636,100:5:350}"
-LPICK="rule"		# the viewer's default pick: the game's rule (src/gl/cellfxlit.cpp)
+LPICK="rule"		# the viewer's default pick: the game's rule (src/features/lights/cellfxlit.cpp)
 LBASE="${LBASE:-$REPO/scratchpad/efx2_20261001/gate}"
 BEFORE="${BEFORE:-$REPO/release/NifSkope.before_fxlit1.exe}"
 case "$RED" in white|nofade|all|nopower) LRED="$RED" ;; *) LRED="" ;; esac
@@ -83,13 +83,13 @@ check() { if [ "$2" = "1" ]; then say "  PASS  $1"; else say "  FAIL  $1"; fails
 say "cell_fx.sh  $(date '+%Y-%m-%d %H:%M:%S')${RED:+   RED CONTROL: $RED}"
 newer=1
 for s in src/gl/celllights.cpp src/gl/celllights.h src/gl/renderer.cpp src/gl/glscene.cpp src/gl/glproperty.cpp \
-	src/gl/cellfxlit.cpp src/gl/cellfxlit.h src/gl/bsshape.cpp src/cellview.cpp src/lodgen.cpp \
-	res/shaders/cell_lights.glsl res/shaders/fo4_effectshader.frag res/shaders/fo4_effectcell.frag; do
+	src/features/lights/cellfxlit.cpp src/features/lights/cellfxlit.h src/gl/bsshape.cpp src/cellview.cpp src/lodgen.cpp \
+	res/shaders/features/lights/cell_lights.glsl res/shaders/fo4_effectshader.frag res/shaders/fo4_effectcell.frag; do
 	[ "$REPO/$s" -nt "$EXE" ] && { say "  $s is NEWER than the exe"; newer=0; }
 done
 check "the exe is newer than every source this gate covers" "$newer"
 copies=1
-for s in cell_lights.glsl fo4_effectshader.frag fo4_effectcell.frag; do
+for s in features/lights/cell_lights.glsl fo4_effectshader.frag fo4_effectcell.frag; do
 	cmp -s "$REPO/res/shaders/$s" "$(dirname "$EXE")/shaders/$s" || { say "  shaders/$s beside the exe is not res/shaders/$s"; copies=0; }
 done
 check "the shaders beside the exe are the tree's" "$copies"
@@ -159,7 +159,7 @@ for shot in $LSHOTS; do
 	done
 	check "$cell L$i: the five probes written" \
 		"$([ -s "$run/p70.png" ] && [ -s "$run/p71.png" ] && [ -s "$run/p72.png" ] && [ -s "$run/p73.png" ] && [ -s "$run/p74.png" ] && [ -s "$run/dump.txt" ] && echo 1 || echo 0)"
-	python "$(dirname "$0")/cell_fxlit_check.py" "$ESM" "$DATA" "$cell" "$run" "${PICK:-$LPICK}" >"$run/check.txt" 2>&1
+	python "$(dirname "$0")/../features/lights/cell_fxlit_check.py" "$ESM" "$DATA" "$cell" "$run" "${PICK:-$LPICK}" >"$run/check.txt" 2>&1
 	sed 's/^/  /' "$run/check.txt" | tee -a "$LOG"
 	if [ -n "$LRED" ]; then
 		check "$cell L$i: the red control FAILS stage L" "$(grep -q "^L FAIL" "$run/check.txt" && echo 1 || echo 0)"
@@ -174,7 +174,7 @@ for shot in $LSHOTS; do
 	shoot "$run" before "$BEFORE"
 	shoot "$run" on "$EXE" ${PICK:+WW_CELL_FXLIT_PICK=$PICK}
 	shoot "$run" hide "$EXE" WW_CELL_FX_RED=hide
-	python "$(dirname "$0")/cell_fxlit_check.py" --unlit "$run" >"$run/unlit.txt" 2>&1
+	python "$(dirname "$0")/../features/lights/cell_fxlit_check.py" --unlit "$run" >"$run/unlit.txt" 2>&1
 	sed 's/^/  /' "$run/unlit.txt" | tee -a "$LOG"
 	if grep -q "^U SKIP" "$run/unlit.txt"; then
 		say "  skip  $cell L$i: too few unflagged effects in view for stage U"

@@ -29,7 +29,7 @@ BSD License - see nifskope.h
 #include "gl/cellreflprobe.h"	// lane REFLPROBE1: the Reflection probes row
 #include "gl/cellssgi.h"
 #include "gl/cellfarground.h"	// the Far ground rows
-#include "gl/celllampshadow.h"
+#include "features/lights/celllampshadow.h"
 #include "gl/celllooks.h"
 #include "gl/cellwater.h"	// the Water row
 #include "features/ao/cellaodecal.h"	// the AO decals row

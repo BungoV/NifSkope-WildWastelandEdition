@@ -6,7 +6,7 @@
  * Rows, pins, reds and costs: WW_CHANGES "GAPLOOK1". */
 
 #include <QString>
-#include "gl/lightphys.h"
+#include "features/lights/lightphys.h"
 
 enum class WwLook : int
 {
@@ -144,7 +144,7 @@ void wwCellLightCurveSet( float curve );
 float wwCellLightCalibration();
 bool wwCellLightCalibrationPinned();
 void wwCellLightCalibrationSet( float scale );
-//! this frame's light-physics values for the shaders and the light buffer (src/gl/lightphys.h)
+//! this frame's light-physics values for the shaders and the light buffer (src/features/lights/lightphys.h)
 wwlp::Params wwLightPhysParams();
 
 #endif // CELLLOOKS_H

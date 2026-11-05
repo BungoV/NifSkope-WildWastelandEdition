@@ -5,7 +5,7 @@
 
 #include "esmweather.h"
 #include "gl/celllights.h"
-#include "gl/cellnifxlights.h"	// Mesh lights relight the GI; the bulbs light the bounce
+#include "features/lights/cellnifxlights.h"	// Mesh lights relight the GI; the bulbs light the bounce
 #include "gl/celllooks.h"	// Probe sharing; the light physics rows, compared live
 #include "gl/cellprobeview.h"
 #include "gl/lookdevstage.h"

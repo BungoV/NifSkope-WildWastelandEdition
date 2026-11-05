@@ -182,7 +182,7 @@ def cube_game(spec_mult, smooth, R, G, env_scale):
 
 
 def cube_ours(spec_mult, smooth, R, G, env_scale):
-    """res/shaders/cell_lights.glsl cellCubeGame(gloss = cellCubeMat.y x _s.G, spec = cellCubeMat.x x _s.R): k =
+    """res/shaders/features/lights/cell_lights.glsl cellCubeGame(gloss = cellCubeMat.y x _s.G, spec = cellCubeMat.x x _s.R): k =
     3 x clamp(spec) x min(sqrt(clamp(g - 0.3)), 1) x clamp(envScale, 0, 50), g = clamp(gloss)."""
     g = np.clip(smooth * G, 0.0, 1.0)
     return 3.0 * np.clip(spec_mult * R, 0.0, 1.0) * np.minimum(np.sqrt(np.clip(g - 0.3, 0.0, 1.0)), 1.0) \

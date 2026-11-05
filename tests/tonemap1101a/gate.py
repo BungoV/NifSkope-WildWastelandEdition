@@ -67,7 +67,7 @@ pad = np.zeros((W * H, 3), np.float64)
 pad[:N] = X
 
 # ---- the shader text
-lights = S.expand(os.path.join(a.shaders, 'cell_lights.glsl'))
+lights = S.expand(os.path.join(a.shaders, 'features', 'lights', 'cell_lights.glsl'))
 lines = lights.split('\n')
 i0 = [i for i, l in enumerate(lines) if l.startswith('vec3 cellImageSpace( vec3 sqrtColor )')][0]
 i1 = [i for i, l in enumerate(lines) if i > i0 and l.rstrip('\r') == '}'][0]

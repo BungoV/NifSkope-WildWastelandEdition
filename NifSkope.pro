@@ -249,10 +249,12 @@ HEADERS += \
 	src/gl/taainputs.h \
 	src/gl/campath.h \
 	src/gl/celllights.h \
-	src/gl/cellcluster.h \
-	src/gl/cellflickclock.h \
-	src/gl/cellclustergl.h \
-	src/gl/cellfxlit.h \
+	src/gl/celllights_p.h \
+	src/features/lights/lights.h \
+	src/features/lights/cellcluster.h \
+	src/features/lights/cellflickclock.h \
+	src/features/lights/cellclustergl.h \
+	src/features/lights/cellfxlit.h \
 	src/gl/fxroomrule.h \
 	src/gl/celllensflare.h \
 	src/gl/cellprecip.h \
@@ -294,9 +296,9 @@ HEADERS += \
 	src/gl/cellssgi.h \
 	src/gl/cellssgiplan.h \
 	src/features/shadows/contactlines.h \
-	src/gl/celllampshadow.h \
+	src/features/lights/celllampshadow.h \
 	src/gl/celllooks.h \
-	src/gl/cellnifxlights.h \
+	src/features/lights/cellnifxlights.h \
 	src/features/ao/cellaodecalgl.h \
 	src/features/air/cellvolair.h \
 	src/features/air/airlampatlas.h \
@@ -327,7 +329,7 @@ HEADERS += \
 	src/io/pbrmfile.h \
 	src/io/pbrmresolve.h \
 	src/io/nifxfile.h \
-	src/io/nifxlights.h \
+	src/features/lights/nifxlights.h \
 	src/io/lodmfile.h \
 	src/io/lodvfile.h \
 	src/io/loddecal.h \
@@ -591,7 +593,7 @@ SOURCES += \
 	src/impostorcard.cpp \
 	src/impostorchunk.cpp \
 	src/impostorpreviewtest.cpp \
-	src/lightanglestest.cpp \
+	src/features/lights/lightanglestest.cpp \
 	src/scenetest.cpp \
 	src/gl/scenelighting.cpp \
 	src/gl/lookdevstage.cpp \
@@ -602,9 +604,10 @@ SOURCES += \
 	src/gl/taainputs.cpp \
 	src/gl/campath.cpp \
 	src/gl/celllights.cpp \
-	src/gl/cellcluster.cpp \
-	src/gl/cellclustergl.cpp \
-	src/gl/cellfxlit.cpp \
+	src/features/lights/celllamps.cpp \
+	src/features/lights/cellcluster.cpp \
+	src/features/lights/cellclustergl.cpp \
+	src/features/lights/cellfxlit.cpp \
 	src/gl/celllensflare.cpp \
 	src/gl/cellprecip.cpp \
 	src/features/near/cellcull.cpp \
@@ -635,9 +638,9 @@ SOURCES += \
 	src/gl/cellssr.cpp \
 	src/gl/cellreflprobe.cpp \
 	src/gl/cellssgi.cpp \
-	src/gl/celllampshadow.cpp \
+	src/features/lights/celllampshadow.cpp \
 	src/gl/celllooks.cpp \
-	src/gl/cellnifxlights.cpp \
+	src/features/lights/cellnifxlights.cpp \
 	src/features/ao/cellaodecalgl.cpp \
 	src/features/air/cellvolair.cpp \
 	src/features/air/airlampatlas.cpp \
@@ -656,7 +659,7 @@ SOURCES += \
 	src/io/pbrmfile.cpp \
 	src/io/pbrmresolve.cpp \
 	src/io/nifxfile.cpp \
-	src/io/nifxlights.cpp \
+	src/features/lights/nifxlights.cpp \
 	src/io/lodmfile.cpp \
 	src/io/lodvfile.cpp \
 	src/io/loddecal.cpp \

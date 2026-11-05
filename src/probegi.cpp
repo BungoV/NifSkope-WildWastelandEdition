@@ -250,7 +250,7 @@ double radial( double d, double r, const WwCellLight & l )
 	return std::pow( k, 2.2 );
 }
 
-// the curve the surfaces draw (src/gl/lightphys.h); the game's curve stays radial bit for bit
+// the curve the surfaces draw (src/features/lights/lightphys.h); the game's curve stays radial bit for bit
 double radialPhys( const wwlp::Params & p, double d, double r, const WwCellLight & l )
 {
 	if ( wwlp::keepsGame( p, l.bias, l.scale, l.exponent ) )

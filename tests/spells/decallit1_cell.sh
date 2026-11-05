@@ -95,7 +95,7 @@ if [ "$RECHECK" != 1 ]; then
 	done
 	check "the exe is newer than every source this gate covers" "$newer"
 	same=1
-	for s in fo4_effectshader.frag fo4_effectdecal.frag fo4_effectdecalcsm.frag fo4_default.frag cell_lights.glsl; do
+	for s in fo4_effectshader.frag fo4_effectdecal.frag fo4_effectdecalcsm.frag fo4_default.frag features/lights/cell_lights.glsl; do
 		cmp -s "$REPO/res/shaders/$s" "$(dirname "$EXE")/shaders/$s" || { say "  shaders/$s differs from the source"; same=0; }
 	done
 	check "the shaders beside the exe are the source's" "$same"

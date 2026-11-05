@@ -29,7 +29,7 @@
  *  a group state (farLightSum), and the GPU tables (farLightTables): an open-addressed hash on (world cell, side)
  *  -> record, and the records (position, E). The bulb dots come from the .wlt's lights with flag 32. */
 
-#include "gl/lightphys.h"
+#include "features/lights/lightphys.h"
 
 #include <QString>
 #include <QStringList>

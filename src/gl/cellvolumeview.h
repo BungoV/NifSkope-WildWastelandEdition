@@ -11,7 +11,7 @@
  * src/probevolumes.h probeVolumesGroups), the same in every cell; each threshold's outline is drawn twice, a hair to
  * each side, in its two rooms' colors (the outdoors white); room and threshold labels are painted by GLView. Each
  * probe gets three rings in its room's color and a line to every probe it works with: the probes whose GI grid reads
- * share a voxel slot by the shader's rule (cellGiRoomBlend in res/shaders/cell_lights.glsl: the room match, the seen
+ * share a voxel slot by the shader's rule (cellGiRoomBlend in res/shaders/features/lights/cell_lights.glsl: the room match, the seen
  * filter, both slots across a threshold), solid in the room's color, dashed in both rooms' colors across a threshold. */
 
 #include "probevolumes.h"

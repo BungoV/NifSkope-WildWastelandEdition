@@ -188,7 +188,7 @@ void main()
 	wn = vec4( n, 0.0 );
 }
 """
-keyfns = open(os.path.join(sdir, 'cell_lights.glsl'), 'rb').read().decode('latin-1')
+keyfns = open(os.path.join(sdir, 'features', 'lights', 'cell_lights.glsl'), 'rb').read().decode('latin-1')
 def cut(src, sig):
     i = src.index(sig); j = src.index('\n}', i); return src[i:j + 2] + '\n'
 keys = cut(keyfns, 'float cellGiKeyPack( vec3 n )') + cut(keyfns, 'vec3 cellGiKeyNormal( float k )')

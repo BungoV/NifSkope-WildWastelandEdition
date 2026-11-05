@@ -53,7 +53,7 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include "gl/atmosphere.h"	// lane SKYA
 #include "features/shadows/sunshadow.h"
 #include "gl/celllights.h"
-#include "gl/cellfxlit.h"
+#include "features/lights/cellfxlit.h"
 #include "gl/cellwater.h"	// lane WATER1
 #include "cellsplat.h"	// lane TERRBLEND1: wwCellLandIs
 #include "gl/cellgrass.h"	// lane GRASSMB1
@@ -2672,7 +2672,7 @@ bool Renderer::setupProgramCE1( const NifModel * nif, Program * prog, Shape * me
 			}
 		}
 		prog->uni1i( "hasCubeMap", hasCubeMap );
-		/* lane CUBE1: what the game's interior reflection reads (res/shaders/cell_lights.glsl cellCubeGame): the
+		/* lane CUBE1: what the game's interior reflection reads (res/shaders/features/lights/cell_lights.glsl cellCubeGame): the
 		 * specular scale (0 with the material's specular switch off), the smoothness, 1 when the material's own
 		 * env map is bound (indoors the game has no default cube), and the gate's material number */
 		if ( prog->uniLocation( "cellCubeMat" ) >= 0 ) {

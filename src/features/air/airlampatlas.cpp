@@ -12,7 +12,7 @@
 #include "wwswitch.h"
 #include "gl/cellunits.h"
 #include "gl/celllights.h"
-#include "gl/cubefacecull.h"
+#include "features/lights/cubefacecull.h"
 #include "gl/glscene.h"
 #include "gl/glshape.h"
 #include "gl/renderer.h"

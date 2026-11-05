@@ -30,7 +30,7 @@
 #include "cellpick.h"
 #include "data/niftypes.h"
 #include "gl/celllights.h"
-#include "gl/cellfxlit.h"
+#include "features/lights/cellfxlit.h"
 
 #include <QHash>
 #include <QPersistentModelIndex>

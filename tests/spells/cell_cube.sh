@@ -1,6 +1,6 @@
 #!/bin/bash
 #
-# THE INTERIOR CUBE MAP AT THE GAME'S STRENGTH (lane CUBE1, 2026-10-01; res/shaders/cell_lights.glsl cellCubeGame).
+# THE INTERIOR CUBE MAP AT THE GAME'S STRENGTH (lane CUBE1, 2026-10-01; res/shaders/features/lights/cell_lights.glsl cellCubeGame).
 #
 # Not judged by eye. Per interior view, one window per pass, the same camera each time:
 #   lit         the Cell lights row on: the picture bungo looks at (and cubeold, the pair's other half)
@@ -68,7 +68,7 @@ for s in src/gl/celllights.cpp src/gl/renderer.cpp; do
 	[ "$REPO/$s" -nt "$EXE" ] && { say "  $s is NEWER than the exe"; newer=0; }
 done
 # the program reads release/shaders, which the build refreshes from res/shaders
-for s in cell_lights.glsl fo4_default.frag pbrm_default.frag; do
+for s in features/lights/cell_lights.glsl fo4_default.frag pbrm_default.frag; do
 	cmp -s "$REPO/res/shaders/$s" "$REPO/release/shaders/$s" || { say "  release/shaders/$s is stale"; newer=0; }
 done
 check "the exe and its shaders are current" "$newer"

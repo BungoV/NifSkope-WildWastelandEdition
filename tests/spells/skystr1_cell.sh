@@ -79,11 +79,11 @@ say "skystr1_cell.sh  $(date '+%Y-%m-%d %H:%M:%S')${RED:+   RED CONTROL: $RED}  
 if [ "$RECHECK" != 1 ]; then
 	newer=1
 	for s in src/probesky.cpp src/probegi.cpp src/gl/celllights.cpp src/cellworkspace.cpp src/cellworkspacetest.cpp \
-		res/shaders/cell_lights.glsl; do
+		res/shaders/features/lights/cell_lights.glsl; do
 		[ "$REPO/$s" -nt "$EXE" ] && { say "  $s is NEWER than the exe"; newer=0; }
 	done
 	check "the exe is newer than every source this gate covers" "$newer"
-	cmp -s "$REPO/res/shaders/cell_lights.glsl" "$REPO/release/shaders/cell_lights.glsl"
+	cmp -s "$REPO/res/shaders/features/lights/cell_lights.glsl" "$REPO/release/shaders/features/lights/cell_lights.glsl"
 	check "the shader beside the exe is the source's" "$([ $? = 0 ] && echo 1 || echo 0)"
 fi
 

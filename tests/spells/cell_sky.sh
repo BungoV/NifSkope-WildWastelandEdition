@@ -108,12 +108,12 @@ say "cell_sky.sh  $(date '+%Y-%m-%d %H:%M:%S')${RED:+   RED CONTROL: $RED}   pha
 if [ "$RECHECK" != 1 ]; then
 	newer=1
 	for s in src/probesky.cpp src/probegi.cpp src/gl/celllights.cpp src/cellview.cpp src/glview.cpp \
-		res/shaders/cell_lights.glsl res/shaders/fo4_default.frag res/shaders/pbrm_default.frag; do
+		res/shaders/features/lights/cell_lights.glsl res/shaders/fo4_default.frag res/shaders/pbrm_default.frag; do
 		[ "$REPO/$s" -nt "$EXE" ] && { say "  $s is NEWER than the exe"; newer=0; }
 	done
 	check "the exe is newer than every source this gate covers" "$newer"
 	same=1
-	for s in cell_lights.glsl fo4_default.frag pbrm_default.frag; do
+	for s in features/lights/cell_lights.glsl fo4_default.frag pbrm_default.frag; do
 		cmp -s "$REPO/res/shaders/$s" "$REPO/release/shaders/$s" || { say "  release/shaders/$s is not res/shaders/$s"; same=0; }
 	done
 	check "the shaders beside the exe are the source's" "$same"

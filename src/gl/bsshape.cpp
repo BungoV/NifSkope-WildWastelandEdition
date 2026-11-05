@@ -4,7 +4,7 @@
 #include "gl/celllights.h"
 #include "features/near/cellbindless.h"	// lane BINDLESS2
 #include "gl/cellfarground.h"
-#include "gl/cellfxlit.h"
+#include "features/lights/cellfxlit.h"
 #include "gl/cellwater.h"	// lane WATER1
 #include "features/near/cellcull.h"	// lane SUNCELL1
 #include "gl/celllooks.h"	// lane DECALS1: the Decal distance fade row

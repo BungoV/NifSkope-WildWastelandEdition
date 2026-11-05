@@ -100,7 +100,7 @@ shoot() {   # shoot <cell> <tag> <env...>
 	local camvar="CAM_$cell" distvar="DIST_$cell" viewvar="VIEW_$cell" cam=()
 	[ -n "${!camvar:-}" ] && cam=( WW_RENDER_CENTER="${!camvar}" WW_RENDER_DIST="${!distvar:-${DIST:-1400}}" WW_RENDER_FOV=70 )
 	local view="${!viewvar:-${VIEW:-1}}"
-	# WW_CELL_SHADOW=0: the PRTP2 evaluation is unshadowed (tests/spells/cell_shadow.sh judges the shadows)
+	# WW_CELL_SHADOW=0: the PRTP2 evaluation is unshadowed (tests/features/lights/cell_shadow.sh judges the shadows)
 	env WW_CELL_SHADOW=0 "$@" "${cam[@]}" \
 		WW_CELL_OPEN="$ESM|interior|$cell" WW_CELL_DATAROOT="$DATA" \
 		WW_RENDER_SHOT="$(winpath "$shot")" WW_RENDER_SIZE="$SIZE" \

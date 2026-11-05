@@ -8767,7 +8767,7 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 		wwHkxModelHarness( skope );
 	}
 	{
-		// WW_LIGHTANGLES_TEST, src/lightanglestest.cpp
+		// WW_LIGHTANGLES_TEST, src/features/lights/lightanglestest.cpp
 		extern void wwLightAnglesHarness( NifSkope * );
 		wwLightAnglesHarness( skope );
 	}

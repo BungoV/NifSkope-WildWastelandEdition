@@ -1,6 +1,6 @@
 #!/bin/bash
 #
-# THE PLACED LIGHTS' SPECULAR, AND THE NON SPECULAR FLAG (lane POOL1, 2026-10-01; res/shaders/cell_lights.glsl
+# THE PLACED LIGHTS' SPECULAR, AND THE NON SPECULAR FLAG (lane POOL1, 2026-10-01; res/shaders/features/lights/cell_lights.glsl
 # cellSumLights / cellSpecGame).
 #
 # Why this gate exists: the Vault 111 cryo walkway shows bright highlight pools in the game that the cell view
@@ -65,10 +65,10 @@ check() { if [ "$2" = "1" ]; then say "  PASS  $1"; else say "  FAIL  $1"; fails
 [ -x "$EXE" ] || { echo "no NifSkope.exe at $EXE"; exit 2; }
 say "cell_spec.sh  $(date '+%Y-%m-%d %H:%M:%S')${RED:+   RED CONTROL: $RED}"
 newer=1
-for s in src/gl/celllights.cpp res/shaders/cell_lights.glsl; do
+for s in src/gl/celllights.cpp res/shaders/features/lights/cell_lights.glsl; do
 	[ "$REPO/$s" -nt "$EXE" ] && { say "  $s is NEWER than the exe"; newer=0; }
 done
-cmp -s "$REPO/res/shaders/cell_lights.glsl" "$REPO/release/shaders/cell_lights.glsl" || { say "  release/shaders/cell_lights.glsl is stale"; newer=0; }
+cmp -s "$REPO/res/shaders/features/lights/cell_lights.glsl" "$REPO/release/shaders/features/lights/cell_lights.glsl" || { say "  release/shaders/cell_lights.glsl is stale"; newer=0; }
 check "the exe and its shaders are current" "$newer"
 
 shoot() {   # shoot <entry> <tag> <env...>

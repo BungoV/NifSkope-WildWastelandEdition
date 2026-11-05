@@ -1,15 +1,15 @@
 // lane INTERIORPERF1: the volumetric particles' light loop walks a cluster list (res/shaders/features/air/cell_volpart.glsl
 // vpLightsBegin) instead of every light. A particle lights at its sprite's CENTRE, so the list must be the cluster
 // that holds that point (its own projected pixel), not the cluster of the fragment being shaded. Pure C++, no Qt, no GL:
-// the lists from the real build (src/gl/cellcluster.cpp), the shader's pick mirrored in float as WwClusterGrid::clusterOf.
+// the lists from the real build (src/features/lights/cellcluster.cpp), the shader's pick mirrored in float as WwClusterGrid::clusterOf.
 //   1. every light that can light the point (inside its radius, inside its cone / half space) is in the picked list, or
 //      the pick says "every light": the walk sums the same lights, in the same ascending order, as the flat loop
 //   2. the lights walked per point (the loop's cost) on an interior-like set of 308 lights (the Museum's count)
 //   3. control: the fragment's own pixel (gl_FragCoord, the surfaces' pick) misses lights for points off its tile
-// Build: g++ -std=c++17 -O2 -I<tree>/src tests/features/air/volpartcluster/volpartcluster.cpp src/gl/cellcluster.cpp
+// Build: g++ -std=c++17 -O2 -I<tree>/src tests/features/air/volpartcluster/volpartcluster.cpp src/features/lights/cellcluster.cpp
 // Red:   -DVOLPART_CLUSTER_RED picks by the fragment's pixel (check 1 must FAIL).
 #define _USE_MATH_DEFINES
-#include "gl/cellcluster.h"
+#include "features/lights/cellcluster.h"
 
 #include <algorithm>
 #include <cmath>

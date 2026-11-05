@@ -68,7 +68,7 @@ out vec4 fragColor;
  *   colour   = texture x vertex colour x base colour, all linear (sampled sRGB, base colour powered 2.2)
  *   lighting = mix( c, c x emit, lighting influence ), emit the script-set external emit colour, WHITE when
  *              unset. That is the UNLIT effect. One whose material sets the effect-lighting flag takes the
- *              game's lit shader instead (lane FXLIT1, src/gl/cellfxlit.h): emit = the directional colour +
+ *              game's lit shader instead (lane FXLIT1, src/features/lights/cellfxlit.h): emit = the directional colour +
  *              up to four placed lights, colour x pow( 1 - saturate( d / radius )^2, 2.2 ) x the spot cone,
  *              per pixel, no N.L and no shadow
  *   Soft     = saturate( (scene w - w) / soft depth ) x smoothstep( 0.075, 0.5, w / soft depth ), w the view
@@ -100,7 +100,7 @@ uniform bool fxDecalProbe;
 uniform bool fxRoomLit;
 uniform vec3 cellFxBase;
 vec3 fxRoomShare = vec3( 1.0 );	// probe 75
-// lane FXLIT1: this shape's model's placed lights (src/gl/cellfxlit.h)
+// lane FXLIT1: this shape's model's placed lights (src/features/lights/cellfxlit.h)
 uniform int fxLitMode;			// 0 an unlit effect; 1 lit; red controls: 2 every light, 4 no 2.2 on the falloff, 8 self-lit
 uniform vec4 fxLit;				// indices into cellLights, -1 = none
 uniform vec4 fxLitScale;		// 1 (a red control's per-light ratio)

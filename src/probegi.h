@@ -6,7 +6,7 @@
 //! generated".
 
 #include "probeplace.h"
-#include "gl/lightphys.h"
+#include "features/lights/lightphys.h"
 #include "proberooms.h"
 #include "probesky.h"
 #include "probegifine.h"

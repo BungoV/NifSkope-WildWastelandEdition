@@ -460,7 +460,7 @@ def door_cmd(esm, run, cell, eye=''):
 # ---------------------------------------------------------------- synth (part C: room labels)
 # Every scene is built here, its rooms known here by construction; NifSkope's probegi command places, bakes and
 # relights it and dumps the labels (gi_rooms.bin) and the two-slot grid (gi_grid.bin, gi_slots.bin). The shader's
-# blend (res/shaders/cell_lights.glsl cellGiRoomSample, and the plain trilinear one without rooms) is redone here.
+# blend (res/shaders/features/lights/cell_lights.glsl cellGiRoomSample, and the plain trilinear one without rooms) is redone here.
 LEAK_TOL = 1.02      # the dark side of a shared wall reads no more than the dark room's own brightest probe face
 COVER_MIN = 0.01     # cellGiE's own floor: a sample with less weight paints the no-probe marker in the pass view
 QUAD = lambda a, b, c, d: [(a, b, c), (a, c, d)]

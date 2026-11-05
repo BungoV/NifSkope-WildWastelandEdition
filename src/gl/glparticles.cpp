@@ -44,7 +44,7 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include "features/near/cellqueue.h"	// lane GPUFIX1
 #include "gl/cellunits.h"	// lane WATERFIX7: the soft-depth unit
 #include "gl/celllights.h"	// lane SUNCELL1: the cell effect law
-#include "gl/cellfxlit.h"	// lane SUNCELL1: a lit particle's placed lights
+#include "features/lights/cellfxlit.h"	// lane SUNCELL1: a lit particle's placed lights
 #include "features/air/cellvolair.h"	// lane VOLPART1: volumetric particles
 #include "features/air/volpartdump.h"	// lane VOLPART1: the volumetric particle probe dump
 #include "gl/fxparity.h"	// lane FXPARITY1: Particle Game Rules

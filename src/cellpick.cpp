@@ -5,7 +5,7 @@ BSD License - see nifskope.h
 ***** END LICENCE BLOCK *****/
 
 #include "cellpick.h"
-#include "io/nifxlights.h"
+#include "features/lights/nifxlights.h"
 
 #include <QStringList>
 

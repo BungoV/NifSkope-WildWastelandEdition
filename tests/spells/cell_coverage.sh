@@ -1,6 +1,6 @@
 #!/bin/bash
 #
-# THE PROBE COVERAGE PASS (lane WALLSTACK1, 2026-10-15; res/shaders/cell_lights.glsl cellPassOut, pass 6).
+# THE PROBE COVERAGE PASS (lane WALLSTACK1, 2026-10-15; res/shaders/features/lights/cell_lights.glsl cellPassOut, pass 6).
 # Magenta where no probe reaches: the GI row's own sample (rooms, seen fill, lend rule, gap fill) has valid share
 # k <= 0.01, so exactly the pixels the probe term lights nothing. Not judged by eye:
 #   probe2-4   position and normal at every cell-lit pixel (WW_CELL_LIT_PROBE), the bake as is
@@ -63,7 +63,7 @@ fails=0
 check() { if [ "$2" = "1" ]; then say "  PASS  $1"; else say "  FAIL  $1"; fails=$((fails+1)); fi; }
 say "cell_coverage.sh  $(date '+%Y-%m-%d %H:%M:%S')${RED:+   RED CONTROL: $RED}"
 same=1
-for f in cell_lights.glsl fo4_default.frag pbrm_default.frag; do
+for f in features/lights/cell_lights.glsl fo4_default.frag pbrm_default.frag; do
 	cmp -s "$REPO/res/shaders/$f" "$(dirname "$EXE")/shaders/$f" || { say "  release/shaders/$f is not res/shaders/$f"; same=0; }
 done
 check "the exe's shaders are the tree's" "$same"

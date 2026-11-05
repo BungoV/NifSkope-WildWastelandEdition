@@ -60,8 +60,8 @@ BSD License - see nifskope.h
 #include "spells/blocks.h"
 #include "gl/celllights.h"
 #include "io/nifxfile.h"	// lane NIFXLIGHT1: a model's .nifx path
-#include "gl/cellnifxlights.h"	// lane NIFXLIGHT3: the .nifx path rule, kept live by src/gl/celllights.cpp
-#include "gl/lightphys.h"	// lane MUSGI1 round 4: the vanilla curve's flux for the lamp scale
+#include "features/lights/cellnifxlights.h"	// lane NIFXLIGHT3: the .nifx path rule, kept live by src/gl/celllights.cpp
+#include "features/lights/lightphys.h"	// lane MUSGI1 round 4: the vanilla curve's flux for the lamp scale
 #include "features/shadows/sunshadow.h"	// lane LIVESET1: wwSunShadowForget
 #include "gl/cellprobeview.h"
 #include "gl/lookdevstage.h"	// lane SKYTOP1: the cell's load order feeds the weather
@@ -71,7 +71,7 @@ BSD License - see nifskope.h
 #include "gl/skyplacerun.h"	// lane INTSKY1: the sun's place for the open cell
 #include "features/air/cellairzone.h"	// lane AIRZONE1: the Air zones row
 #include "probevolumesgi.h"	// lane VOLFIT1: its rooms as the GI's volumes
-#include "gl/cellfxlit.h"
+#include "features/lights/cellfxlit.h"
 #include "gl/celllensflare.h"
 #include "features/ao/cellaodecalgl.h"
 #include "gl/cellwater.h"
@@ -251,7 +251,7 @@ struct Bucket
 	Vector3 bbPos;
 	float bbScale = 1.0f;
 	int bbMode = 0;
-	//! One placement's lit effect shapes; the placed model's serial in src/gl/cellfxlit.h, -1 = none.
+	//! One placement's lit effect shapes; the placed model's serial in src/features/lights/cellfxlit.h, -1 = none.
 	int fxLit = -1;
 	quint32 xemi = 0;   // lane LIGHTS2 (XEMI1): the placement's emittance colour, 0x01RRGGBB (bit 24 = set), 0 = none
 	bool decal = false;   // lane PLACED1: a placed decal's pieces (src/celldecal.h): Decal flag, no depth write
@@ -997,7 +997,7 @@ static int cellProbeKindOf( const ProbePoint & q )
  * and, when there is one, every NiAVObject's name and frame in the model (the root's own transform is the placement's) */
 static std::shared_ptr<const WwNifxModel> cellNifxModel( const QString & dataRoot, const QString & model )
 {
-	// lane NIFXLIGHT3: the same rule as nifxPathForNif, shared with the live scan (src/gl/cellnifxlights.cpp)
+	// lane NIFXLIGHT3: the same rule as nifxPathForNif, shared with the live scan (src/features/lights/cellnifxlights.cpp)
 	const QString found = wwNifxSidecarFind( { wwEnvStr( "WW_NIFX_ROOT" ), dataRoot }, model );
 	if ( found.isEmpty() )
 		return nullptr;
@@ -3621,7 +3621,7 @@ static bool cellBuild( NifModel * nif, const CellSceneSpec & specAsked, CellChun
 	const int glowCap = 8192;
 	int billboardShapes = 0, billboardFlat = 0;
 	// in an interior a lit effect shape (the effect-lighting flag) takes a bucket per placement, because the
-	// game lights it with its MODEL's four placed lights (src/gl/cellfxlit.h).
+	// game lights it with its MODEL's four placed lights (src/features/lights/cellfxlit.h).
 	const bool fxLitOn = spec.overlay == CellOverlay::None;
 	const int fxLitCap = 4096;
 	int fxLitModels = 0, fxLitShapes = 0;

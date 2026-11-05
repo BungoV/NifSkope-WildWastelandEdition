@@ -3,7 +3,7 @@
     python -I tests/ssgihandover/ssgihandover_gl.py <worktree> [--red nohandover]
 
 No NifSkope. A hidden 4.1 core context (tests/spells/shader_link_check.py's) runs cellSsgiE, cut byte for byte from
-res/shaders/cell_lights.glsl under WW_CELL_RTDDGI, once a pixel over a row of analytic cases. Each case is a hemisphere
+res/shaders/features/lights/cell_lights.glsl under WW_CELL_RTDDGI, once a pixel over a row of analytic cases. Each case is a hemisphere
 with two occluder classes: a BIG one (share b, a wall the probes resolve: the volume's sky visibility at the normal is
 1 - b, its E already darkened and lit by it) and a CONTACT one (share c, under the probe spacing: the volume cannot see
 it). The screen march sees q x b + c (q = the big one's share inside the frame) and its bounce is b q Lb + c Lc.
@@ -23,7 +23,7 @@ RED = args[args.index('--red') + 1] if '--red' in args else ''
 sys.path.insert(0, os.path.join(tree, 'tests', 'spells'))
 import shader_link_check as slc
 
-src = open(os.path.join(tree, 'res', 'shaders', 'cell_lights.glsl'), 'rb').read().decode('latin-1').replace('\r\n', '\n')
+src = open(os.path.join(tree, 'res', 'shaders', 'features', 'lights', 'cell_lights.glsl'), 'rb').read().decode('latin-1').replace('\r\n', '\n')
 def cut(s, sig):
     i = s.index(sig); j = s.index('\n}', i); return s[i:j + 2] + '\n'
 law = cut(src, 'vec3 cellSsgiE( vec3 eProbe )\n{')

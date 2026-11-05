@@ -14,7 +14,7 @@
 
 #include "probebvh.h"
 #include "probeplace.h"
-#include "gl/lightphys.h"
+#include "features/lights/lightphys.h"
 
 struct WwCellLight;
 

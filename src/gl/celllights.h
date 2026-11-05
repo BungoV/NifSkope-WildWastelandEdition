@@ -22,6 +22,7 @@ BSD License - see nifskope.h
 #include <vector>
 
 #include "features/ao/ao.h"	// lane MODULES1: the AO module's interface (its rows, pass and targets)
+#include "features/lights/lights.h"	// lane MODULES1: the lights module's interface (shadows, flicker, XEMI, spheres)
 
 class Scene;
 class NodeList;
@@ -214,7 +215,7 @@ struct WwCellLighting
 	QString godRayNote = QStringLiteral( "fallback" );
 	QStringList recxPlugins;			//!< lane LIGHTS5 (FOGSCALE1): the load order's files (recx.h roots and merge order)
 	QString recxData;					//!< the game's Data folder
-	//! lane NIFXLIGHT1: the fixtures with a .nifx (src/gl/cellnifxlights.cpp applies them while Mesh lights is on),
+	//! lane NIFXLIGHT1: the fixtures with a .nifx (src/features/lights/cellnifxlights.cpp applies them while Mesh lights is on),
 	//! the start-off placed lights the list above skipped (their state carries over), and the bulb-tier lights
 	QVector<WwNifxFixture> nifxFixtures;
 	QVector<WwCellLight> nifxOffPlaced, nifxBulbs;
@@ -311,10 +312,7 @@ int wwCellGiVis();
  *  pass runs, the surfaces read inline). With WW_CELL_GI_VIS=march: no screen pass. */
 int wwCellGiRate();
 void wwCellGiSetOn( bool on );
-/*! Rows for light shadows (WW/CellShadow, WW_CELL_SHADOW) and GPU relight (WW/CellGiGpu, WW_CELL_GI_GPU, read when
- *  a cell opens). Each env pin wins over its row. The AO rows: src/features/ao/ao.h. */
-bool wwCellShadowOn();
-void wwCellShadowSetOn( bool on );
+//! the GPU relight row (WW/CellGiGpu, WW_CELL_GI_GPU, read when a cell opens); the env pin wins over its row
 bool wwCellGiGpuOn();
 void wwCellGiGpuSetOn( bool on );
 /*! The Sky visibility row, 0-100 % (WW/CellSkyVis, default 100; pin WW_CELL_SKYSTR). As FO4CS's Skylighting
@@ -395,32 +393,10 @@ bool wwCellLightsOn();
 void wwCellCamDump( Scene * scene );
 void wwCellLightsSetOn( bool on );
 
-/*! LIGHT FLICKER (lane LIGHTFLICKER1): a placed LIGH with flag 0x8 (flicker) or 0x80 / 0x100 (pulse) varies each frame as
- *  the game does (measured; celllights.cpp wwCellFlickerFrame): a dimmer on its colour and an
- *  offset of its position. One value per light per frame, written into the light buffer that the surfaces, the effects
- *  and the air all read, so they always agree. The bake (GI, relight, far light) keeps the steady light.
- *  The Light flicker row ships off (WW/CellFlicker; the pin WW_CELL_FLICKER wins). WW_CELL_FLICKER_RED=1 holds every
- *  light steady (dimmer 1, no offset: the row-off picture). WW_CELL_FLICKER_STEP=<seconds> a fixed step a frame (gates),
- *  WW_CELL_FLICKER_DUMP=<file> one line per flickering light per frame. */
-bool wwCellFlickerOn();
-void wwCellFlickerSetOn( bool on );
-//! once a frame, before the draw: advance the scene's document's flickering lights by the frame's time
-void wwCellFlickerFrame( Scene * scene );
-//! the view should repaint every frame: the row on and not red, cell-lit, the document has a flickering light
-bool wwCellFlickerWantsFrames( Scene * scene );
-//! light i's value this frame (dimmer on its colour, world offset); false (1, 0) when it is steady
-bool wwCellFlickerOf( const void * nif, qsizetype i, float * dimmer, float offset[3] );
-/*! lane LIGHTS4 (XEMI-LIGHT): once a frame, the colour factor of each light whose placement has XEMI: its source's
- *  colour^2.2 when its row (Placement / Region emittance) is on, else 1. A change rebuilds the light buffer. */
-void wwCellXemiLightsFrame( Scene * scene );
-
 //! this scene draws cell-lit: the row on, the scene's document published, a perspective non-picking draw
 bool wwCellLightsWanted( Scene * scene );
 //! the uniforms of the renderer's CURRENT program (a no-op for a program without `cellOn`)
 void wwCellLightsUniforms( Scene * scene );
-//! lane VOLAIR1: the uploaded light buffer as spheres (world x, y, z, radius per light, the buffer's order, copies
-//! included; cellLightCount of them), or null when it is not this scene's; valid after wwCellLightsUniforms
-const std::vector<float> * wwCellLightSpheres( Scene * scene );
 //! a harness probe pass (WW_CELL_LIT_PROBE or WW_CELL_FOG_PROBE) on a cell-lit scene: effects are not drawn
 bool wwCellProbePass( Scene * scene );
 //! lane FO4CELLGI1: a probe (WW_CELL_LIT_PROBE) or a Pass is asked, or WW_CELL_VIEWS_RED=1: the shaders compile the views
@@ -461,15 +437,6 @@ bool wwCellImageSpaceBloomParams( Scene * scene, float & thresh, float & scale )
 //! lane PERFFIX1: the vanilla bloom blurred on the GPU (cellhdr.cpp), w x h RGBA32F, sampled in place of the CPU's
 void wwCellImageSpaceSetBloomGpu( Scene * scene, unsigned tex, int w, int h );
 QString wwCellImageSpaceEcho( Scene * scene );
-
-/*! Shadows: each shadow-casting light near the camera (up to kShadowSlots) gets a depth cube rendered from the
- *  document's opaque shapes, re-rendered only when the document, lights or slots change. WW_CELL_SHADOW=0 skips it. */
-void wwCellShadowPass( Scene * scene );
-//! lane DOORLIVE1: a caster moved (a live door): the next pass re-renders every held shadow slot
-void wwCellShadowKick( const void * nif );
-//! lane LIVESET1: a section of the document was rebuilt live: every held slot and the lamp store start over
-void wwCellShadowsForget( const void * nif );
-QString wwCellShadowEcho( Scene * scene );
 
 /*! lane PERFHUNT2: the obscurance and SSR passes' sorted draws run under the setup memo as the main sorted pass does
  *  (scene globals once per program, the cell-uniform class record replayed). Red WW_CELL_SORTMEMO_RED=1: unarmed. */
