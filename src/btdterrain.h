@@ -81,7 +81,7 @@ BtdRegionSpec btdDefaultRegion( const BtdWorldInfo & info );
  * .lodl — our own whole-worldspace landscape file (docs/LODGEN_BTD_FORMAT.md)
  *
  * It was written and opened as `.lodt` until 2026-09-09; `.lodt` names the
- * terrain TEXTURE sheets now (src/io/lodvfile.h). The C++ names below still
+ * terrain TEXTURE sheets now (src/features/far-lod/lodvfile.h). The C++ names below still
  * say `lodt` and are internal: read every one of them as "the .lodl file".
  *
  * Same species of problem as a .btd and therefore the same route: the file
@@ -166,7 +166,7 @@ struct LodtRegionSpec
 //! Read the .lodl header and tables only. False (with *error set) when the
 //! file is not a .lodl or does not describe itself consistently. A terrain
 //! TEXTURE file (.lodt) handed to this route is refused BY NAME, not by
-//! "bad magic" -- src/lodtfile.cpp, LodtFile::open.
+//! "bad magic" -- src/features/far-lod/lodtfile.cpp, LodtFile::open.
 bool lodtReadWorldInfo( const QString & path, LodtWorldInfo & info, QString * error );
 
 //! Which planes this particular file actually carries, in enum order. A file

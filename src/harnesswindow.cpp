@@ -46,7 +46,7 @@ See the accompanying LICENSE file for the full text.
  * 1920x1048 on screen 1, MAXIMIZED, normal 1280x800 -- bungo's last window.
  *
  * Lane IMPOSTORSHOW then reproduced it exactly and named the mechanism
- * (src/impostorpreviewtest.cpp, forceWindow()): showNormal() ALONE DOES NOT
+ * (src/features/far-lod/impostorpreviewtest.cpp, forceWindow()): showNormal() ALONE DOES NOT
  * CLEAR A WindowMaximized BIT that arrived with the restored geometry, and a
  * resize() applied to a still-maximized window is discarded WITHOUT A WORD.
  * "asked 1024x1024, got 1822x989".  The height survives the discard because the
@@ -206,7 +206,7 @@ QSize viewportSize( const QObject * v )
 
 //! WxH out of an environment variable, or an invalid QSize.
 //! Floors at 320x240 exactly as the two existing readers do
-//! (src/nifskope_ui.cpp:22091, src/impostorpreviewtest.cpp:224), so a harness
+//! (src/nifskope_ui.cpp:22091, src/features/far-lod/impostorpreviewtest.cpp:224), so a harness
 //! that moves onto this path sees no change of behaviour at the small end.
 QSize parseSizeEnv( const char * name )
 {

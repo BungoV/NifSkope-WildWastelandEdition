@@ -8,7 +8,7 @@ BSD License - see nifskope.h
 #include "wwswitch.h"	// lane TESTDRIVER1: the WW_* switch store
 
 #include "gamemanager.h"
-#include "lodgenloadorder.h"
+#include "features/far-lod/lodgenloadorder.h"
 #include "landlodspec.h"	// lane LANDSPEC8: gridsLine
 #include "gameinikey.h"	// lane PERFFIX4: one float key of the game's inis
 

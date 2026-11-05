@@ -6,15 +6,15 @@ BSD License - see nifskope.h
 
 #include "nativeemit.h"
 #include "wwswitch.h"	// lane TESTDRIVER1: the WW_* switch store
-#include "lodbfile.h"
-#include "lodifile.h"
-#include "lodpplace.h"
-#include "lodgen.h"
+#include "features/far-lod/lodbfile.h"
+#include "features/far-lod/lodifile.h"
+#include "features/far-lod/lodpplace.h"
+#include "features/far-lod/lodgen.h"
 #include "esmdata.h"
-#include "lodgenlayout.h"
-#include "lodgenparallel.h"
-#include "lodgenao.h"
-#include "io/lodmfile.h"
+#include "features/far-lod/lodgenlayout.h"
+#include "features/far-lod/lodgenparallel.h"
+#include "features/far-lod/lodgenao.h"
+#include "features/far-lod/lodmfile.h"
 #include <array>
 #include <atomic>
 #include <limits>
@@ -553,7 +553,7 @@ double triTriDist2( const float * A, const float * B )
  *      more), so a box of whole voxels can still stand partly outside the
  *      walls -- 84 of 599 boxes did by more than 1 percent in the Boston box.
  *      The box is checked against the TRIANGLES the way the file's gate
- *      (tests/spells/lodi_occluder_building.py) checks it: a 9 x 9 x 9 lattice
+ *      (tests/features/far-lod/lodi_occluder_building.py) checks it: a 9 x 9 x 9 lattice
  *      over the box, faces and corners included, and a point is inside when a
  *      ray along every named direction meets a triangle. Over half a percent
  *      outside, every face comes in by half a voxel and the box is probed
@@ -1122,7 +1122,7 @@ void lodgenNativeScrappableOption( bool scrappable )
 
 /*! LOD PRTP step 1 (lane LODP1, 2026-10-15): the `.lodo` v8 CHART STREAM,
  *  one byte a cluster triangle naming the patch chart it belongs to
- *  (src/lodpplace.h). OFF by default and off is the exact way back: no
+ *  (src/features/far-lod/lodpplace.h). OFF by default and off is the exact way back: no
  *  stream, the `.lodo` stays v6/v7 byte for byte. */
 void lodgenNativePatchChartsOption( bool on )
 {
@@ -2504,7 +2504,7 @@ bool lodgenNativeWrite( QString * report, QString * error )
 		 * it reads -- `models` itself (by pointer, never by QMap::operator[], which
 		 * would insert), the loader's data root -- are fixed before the fan-out and
 		 * not written by anyone during it. The loader's own model cache is per
-		 * THREAD as of this lane (src/lodgen.cpp lodgenNativeLoadModel).
+		 * THREAD as of this lane (src/features/far-lod/lodgen.cpp lodgenNativeLoadModel).
 		 *
 		 * The way back: `--threads 1`, where lodgenParallelFor is the plain loop. */
 		struct ModelJob
@@ -2887,7 +2887,7 @@ bool lodgenNativeWrite( QString * report, QString * error )
 			 * before the fan-out. A shape is see-through when its material blends
 			 * (NIF alpha property bit 0, or the BGSM/BGEM switch) or is a decal that
 			 * tests; its diffuse alpha then decides, texel by texel, where it blocks
-			 * a ray (src/lodgenao.h, LodgenAoAlpha). One row can gather shapes of
+			 * a ray (src/features/far-lod/lodgenao.h, LodgenAoAlpha). One row can gather shapes of
 			 * several models (the key has no blend bit), so a row is see-through only
 			 * when EVERY shape on it is; a row with both kinds stays solid and is
 			 * counted. A row whose texture does not load stays solid and is counted. */
@@ -3696,7 +3696,7 @@ bool lodgenNativeWrite( QString * report, QString * error )
 			constexpr int SKIRT = 1;
 			const int cells = dim + 2 * SKIRT;
 			/* The scene is built in the CHUNK'S MINIATURE units (world x 1/dim), as
-			 * the .BTO colour-B cast was (src/lodgen.cpp ~3940, invDim): the caster's
+			 * the .BTO colour-B cast was (src/features/far-lod/lodgen.cpp ~3940, invDim): the caster's
 			 * 2-unit ray-start offset and its 300-unit reach are then the same
 			 * fraction of the geometry they were there. In world units the offset
 			 * was 2 u, and an overpass whose road-surface layer floats 3-5 u above
@@ -4445,7 +4445,7 @@ bool lodgenNativeWrite( QString * report, QString * error )
 							if ( wantSky )
 								r.vertexSky[v] = quint8( std::lround( std::min( 1.0f, std::max( 0.0f, skV[b0 + v] ) ) * 255.0f ) );
 							if ( set.vertexGround ) {
-								/* v12: the stock ground-contact law at THIS vertex (src/lodgen.cpp,
+								/* v12: the stock ground-contact law at THIS vertex (src/features/far-lod/lodgen.cpp,
 								 * CONTACT_RANGE): 1 at or below the bilinear ESM surface, 0 by
 								 * 256 world u above it. The vertex's own placed position, not
 								 * the across-face samples the AO pools: the ramp is geometry,
@@ -5580,7 +5580,7 @@ bool lodgenNativeWrite( QString * report, QString * error )
 	/* THE PER-MESH REPORT. The cache-order and silhouette numbers are per
 	 * mesh and there are thousands of them, so they go to a file beside the
 	 * pair and the census line carries only the summary.
-	 * tests/spells/lodgen_native_fields.py is the gate that reads it. */
+	 * tests/features/far-lod/lodgen_native_fields.py is the gate that reads it. */
 	double acmrB = 0.0, acmrA = 0.0, atvrB = 0.0, atvrA = 0.0;
 	quint64 triW = 0, srcVerts = 0, emitVerts = 0;
 	quint32 opened = 0, acmrWorse = 0;
@@ -5958,7 +5958,7 @@ bool lodgenNativeWrite( QString * report, QString * error )
 		 * region's 33,123 placements (0.04%), read out of Fallout4.esm by
 		 * `scratchpad/horizon3_20260919/scrap_rule.py` and re-derived from the
 		 * written file, without calling any of this code, by
-		 * `tests/spells/lodgen_scrappable.sh`. A bake whose number is not
+		 * `tests/features/far-lod/lodgen_scrappable.sh`. A bake whose number is not
 		 * 14 on that region has changed the rule, whether or not anyone meant
 		 * to. The index's own counts are printed beside it so a disagreement
 		 * says WHICH clause moved instead of only that one did. */
@@ -6093,8 +6093,8 @@ bool lodgenNativeWrite( QString * report, QString * error )
 		for ( const QString & r : s.aggStats.refusals )
 			aggLine += QStringLiteral( "\n  native-aggregate refused: " ) + r;
 		/* `native-library-build:` -- its OWN census keyword, registered in
-		 * g_censusKeywords[] (src/lodbfile.cpp) and in the gate's copy of the
-		 * list (tests/spells/lodgen_bakerec_gate.py). It is NOT hung off the
+		 * g_censusKeywords[] (src/features/far-lod/lodbfile.cpp) and in the gate's copy of the
+		 * list (tests/features/far-lod/lodgen_bakerec_gate.py). It is NOT hung off the
 		 * existing `native-library:`, which already carries where level 0 came
 		 * from: every keyword in that list appears exactly once in a record,
 		 * and a reader greps by keyword. So the record carries this without a

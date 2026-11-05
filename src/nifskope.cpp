@@ -37,7 +37,7 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include "features/gi/bakegeom.h"
 #include "cellmesh.h"
 #include "cellspeed.h"
-#include "farlightmap.h"	// lane FARLIGHTMAP1
+#include "features/far-lod/farlightmap.h"	// lane FARLIGHTMAP1
 #include "ui/widgets/wwnumberfield.h"
 #include "freezeanim.h"
 #include "glview.h"
@@ -56,8 +56,8 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include "wwskin.h"
 #include "filestab.h"	// lane FILESTAB: the Files tab's extensions and .hkx route
 #include "hkxplayback.h"
-#include "impostorchunk.h"	// lane IMPOSTORSHOW: cards a chunk manifest places
-#include "lodinative.h"	// lane NATIVEVIEW1: the .lodi/.lodo built document
+#include "features/far-lod/impostorchunk.h"	// lane IMPOSTORSHOW: cards a chunk manifest places
+#include "features/far-lod/lodinative.h"	// lane NATIVEVIEW1: the .lodi/.lodo built document
 #include "cellview.h"	// lane CELLVIEW1: a whole exterior cell, built
 #include "cellworkspace.h"	// lane CELLWORK1
 
@@ -82,7 +82,7 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include "ui/about_dialog.h"
 #include "ui/settingsdialog.h"
 #include "qt5compat.hpp"
-#include "watermarkpanel.h"
+#include "features/far-lod/watermarkpanel.h"
 
 #include <QAction>
 #include <QActionGroup>
@@ -2856,7 +2856,7 @@ NifSkope::NifSkope( bool background )
 	initConnections();
 	wwStartupMark( "window toolbars + menus" );
 
-	/* The Water Marking dock (src/watermarkpanel.cpp): marking water
+	/* The Water Marking dock (src/features/far-lod/watermarkpanel.cpp): marking water
 	 * direction by hand on a .lodl, which bungo asked for on 2026-09-09.
 	 * One call, because the dock, its entry in the Workspaces dropdown, its
 	 * canvas and its self-test are all built in that file -- the other

@@ -4,7 +4,7 @@
 #include "cellspeed.h"
 #include "data/nifitemcache.h"
 #include "esmdata.h"
-#include "lodgenparallel.h"
+#include "features/far-lod/lodgenparallel.h"
 
 #include <QSet>
 #include <QThread>

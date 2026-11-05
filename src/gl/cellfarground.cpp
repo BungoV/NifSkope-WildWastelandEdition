@@ -14,9 +14,9 @@ BSD License - see nifskope.h
 #include "wwswitch.h"
 
 #include "esmdata.h"
-#include "lodgen.h"
-#include "lodtfile.h"
-#include "io/loddecal.h"
+#include "features/far-lod/lodgen.h"
+#include "features/far-lod/lodtfile.h"
+#include "features/far-lod/loddecal.h"
 
 #include <QElapsedTimer>
 #include <QHash>

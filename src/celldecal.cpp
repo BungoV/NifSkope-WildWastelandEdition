@@ -6,7 +6,7 @@
 
 #include "esmdata.h"
 #include "esmplaced.h"
-#include "lodgen.h"
+#include "features/far-lod/lodgen.h"
 #include "data/niftypes.h"
 #include "io/material.h"
 

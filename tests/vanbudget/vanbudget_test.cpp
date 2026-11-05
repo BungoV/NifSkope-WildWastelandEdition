@@ -1,4 +1,4 @@
-// lane FIX1101A lodch r2 (LATE ITEM 23): the VANILLA far path's budget (src/cellfarvanilla.h wwFarVanChargeMB, read by
+// lane FIX1101A lodch r2 (LATE ITEM 23): the VANILLA far path's budget (src/features/far-lod/cellfarvanilla.h wwFarVanChargeMB, read by
 // cellfarlod.cpp's overBudget before every chunk) on SHOTS1101's c3 vanilla rows. Inputs, MEASURED:
 //   terrain + skirt triangles per ring: run2c3/live_c3_g13.notes "far lod: source ring i level L type vanilla" lines
 //   ring 0 objects: the same line (386,920 tris, 8 chunks)
@@ -9,7 +9,7 @@
 // Green: every object chunk of rings 0-2 is built and the charge stays under 2048 MB. Red (-DVANBUDGET_RED: every
 // triangle a document row, the code before r2) must stop at ring 1's first chunk, as the c3 notes measured
 // ("objects NOT BUILT past chunk -32,0").
-#include "cellfarvanilla.h"
+#include "features/far-lod/cellfarvanilla.h"
 
 #include <cstdio>
 

@@ -30,9 +30,9 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 ***** END LICENCE BLOCK *****/
 
-#include "lodgen.h"
+#include "features/far-lod/lodgen.h"
 #include "wwswitch.h"	// lane TESTDRIVER1: the WW_* switch store
-#include "lodgengpu.h"
+#include "features/far-lod/lodgengpu.h"
 #include "features/gi/proberelight.h"
 #include "celldoorlive.h"	// lane DOORLIVE1: the port's NifSkope::door
 #include "glview.h"
@@ -143,7 +143,7 @@ QCoreApplication * createApplication( int &argc, char *argv[] )
 		// -no-gui: start as core app without all the GUI overhead
 		if ( !qstrcmp( argv[i], "-no-gui" ) ) {
 			/* A headless LOD bake that may use the GPU needs the GUI platform for
-			 * its offscreen OpenGL context (src/lodgengpu.h); it still opens no
+			 * its offscreen OpenGL context (src/features/far-lod/lodgengpu.h); it still opens no
 			 * window, and a QGuiApplication is not a QApplication, so main()
 			 * below still takes the headless path. */
 			if ( lodgenGpuWantedForArgs( argc, argv ) || probeRelightGpuWantedForArgs( argc, argv ) )
@@ -303,7 +303,7 @@ int main( int argc, char * argv[] )
 
 		/* WW_LODGEN_RESOURCES=<entry>;<entry>;... - the LOD generator's resource
 		 * stack, in Mod Organizer's order (the LAST one overrides the earlier
-		 * ones), for a headless card bake: tools/bake_impostor_cards.sh passes
+		 * ones), for a headless card bake: src/features/far-lod/bake_impostor_cards.sh passes
 		 * the same stack the generator will read, so a mod's trees photograph
 		 * with their own textures instead of vanilla's. Session only, never
 		 * written to QSettings (GameManager::save() is what persists, and only

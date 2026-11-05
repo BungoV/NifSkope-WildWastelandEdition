@@ -4,7 +4,7 @@
 #include "features/water/cellwater.h"	// lane WATERLOOK1 step 14: the sea constants of the Wave run-up row
 #include "cellworldanim.h"	// lane WATERLOOK1 step 14: the world clock
 
-#include "lodtfile.h"
+#include "features/far-lod/lodtfile.h"
 #include "gl/cellunits.h"
 #include "gl/glscene.h"
 #include "gl/renderer.h"

@@ -1,6 +1,6 @@
 #include "io/pbrmresolve.h"
 
-#include "io/lodmfile.h"
+#include "features/far-lod/lodmfile.h"
 #include "io/material.h"
 
 

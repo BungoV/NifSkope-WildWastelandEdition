@@ -26,7 +26,7 @@
  * -DSS4_RED_REACH (a doctored reach without the frustum's corner factor -- G4).
  * Build: g++ -std=c++17 -I<tree>/src tests/features/shadows/shadowshimmer4/shadowshimmer4_test.cpp; run: <exe> <tree>. */
 
-#include "gl/farswayslice.h"
+#include "features/far-lod/farswayslice.h"
 #include "features/shadows/sunshadowfit.h"
 
 #include <algorithm>
@@ -437,7 +437,7 @@ static void gateG4()
 
 static void gateG5( const std::string & tree )
 {
-	const std::string sun = readFile( tree + "/src/features/shadows/sunshadow.cpp" ), inst = readFile( tree + "/src/gl/cellfarinst.cpp" );
+	const std::string sun = readFile( tree + "/src/features/shadows/sunshadow.cpp" ), inst = readFile( tree + "/src/features/far-lod/cellfarinst.cpp" );
 	const bool a = countOf( sun, "return k.split ? ( WwFarSwaySlice::parts( set, k.dynamic ) & ( k.meets[i] > 0 ? 3 : 1 ) ) != 0" ) == 1
 		&& countOf( sun, "const int part = WwFarSwaySlice::parts( J.set, k.dynamic );" ) == 1
 		&& countOf( sun, "WwFarSwaySlice::reachInside( s.c[i].zf, s.tanX, s.tanY, edge )" ) == 1

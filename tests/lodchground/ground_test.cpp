@@ -1,4 +1,4 @@
-// lane FIX1101A lodch r2 (LATE ITEM 25): the far objects' ground contact (src/lodchsky.h contactAo), the .lodi v12
+// lane FIX1101A lodch r2 (LATE ITEM 25): the far objects' ground contact (src/features/far-lod/lodchsky.h contactAo), the .lodi v12
 // ramp folded into the AO byte the instanced rows carry. One rule a check:
 //   foot     a wall foot AT the terrain whose AO reads open (the 8-ray cast misses grazing ground) draws <= 0.70
 //   nodouble where the AO already holds the contact (a foot at 0.40) the result is the AO, never darker
@@ -7,7 +7,7 @@
 //   monotone a vertex nearer the terrain is never lighter
 // Green prints "LODCHGROUND PASS" (rc 0). -DLODCH_GROUND_RED=1 (today: the ramp not drawn) and =2 (the product, which
 // darkens twice) must print "LODCHGROUND FAIL" (rc 1).
-#include "lodchsky.h"
+#include "features/far-lod/lodchsky.h"
 
 #include <cstdio>
 

@@ -37,7 +37,7 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include "gamemanager.h"
 #include "io/material.h"
 #include "io/pbrmfile.h"
-#include "lodgen.h"
+#include "features/far-lod/lodgen.h"
 #include "nativeemit.h"
 #include "features/gi/probeplace.h"
 

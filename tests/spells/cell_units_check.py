@@ -24,7 +24,7 @@ ALLOW = {
 ENTRY = re.compile(r'^\s*constexpr int (\w+) = (\d+);', re.M)
 KALL = re.compile(r'kAll\[\] = \{([^}]*)\}', re.S)
 LIT_CONST = re.compile(r'constexpr int ((?:\w+ = \d+,\s*)*\w+ = \d+);')
-LIT_LIMIT = re.compile(r'\bunits\s*>\s*\d+')
+LIT_LIMIT = re.compile(r'\bunits\s*>\s*\d+(?![.\d])')	# MODULES1: a float (lodgen's `units > 0.0f`) is a world size
 
 
 def judge_table(text):

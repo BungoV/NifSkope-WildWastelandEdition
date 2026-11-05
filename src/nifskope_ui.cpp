@@ -40,9 +40,9 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include "gl/cloudvol.h"	// and for the clouds' coverage tables (built on workers)
 #include "gl/cloudshadow.h"	// and for the cloud shadow map's sliced rebuild
 #include "features/shadows/shadowset.h"	// ... and for the terrain shadow sweep
-#include "lodgen.h"
-#include "lodgengpu.h"
-#include "lodgenlayout.h"
+#include "features/far-lod/lodgen.h"
+#include "features/far-lod/lodgengpu.h"
+#include "features/far-lod/lodgenlayout.h"
 #include "esmdata.h"
 #include "cellclick.h"		// lane CELLVIEW2
 #include "cellpanel.h"		// lane CELLVIEW2
@@ -72,8 +72,8 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include "features/gi/bakegeom.h"
 #include "bsamodel.h"
 #include "glview.h"
-#include "impostorchunk.h"
-#include "impostorpreviewtest.h"
+#include "features/far-lod/impostorchunk.h"
+#include "features/far-lod/impostorpreviewtest.h"
 #include "ui/wwglyphs.h"
 #include "nifmerge.h"
 #include "gl/gltools.h"
@@ -116,7 +116,7 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include "gl/glproperty.h"
 #include "gl/scenelighting.h"
 #include "ui/scenewindow.h"
-#include "io/lodmfile.h"
+#include "features/far-lod/lodmfile.h"
 #include "io/pbrmfile.h"
 #include "io/pbrmresolve.h"
 #include "libfo76utils/src/ddstxt16.hpp"
@@ -1605,7 +1605,7 @@ bool wwPbrmCardSources( const NifModel * nif, const QString & looseRoot, const Q
 
 /*! Resolve one shape's .pbrm through the viewport's one resolver (io/pbrmresolve: the direct name, the
  *  same-name sibling, the diffuse stem), reading the loose root first and then the stack -- the mesh-LOD
- *  mask path's order (src/lodgen.cpp ~1849-1869). Fills `s` (no sources yet) and returns true when one served. */
+ *  mask path's order (src/features/far-lod/lodgen.cpp ~1849-1869). Fills `s` (no sources yet) and returns true when one served. */
 bool wwPbrmResolveShape( Scene * sc, const QString & looseRoot, int b, const QModelIndex & iShader,
 	const QString & matName, const QString & diffuse, WwPbrmCardShape & s )
 {
@@ -21179,7 +21179,7 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 						 * resolves a .pbrm through the viewport's one resolver (io/pbrmresolve:
 						 * the direct name, the same-name sibling, the diffuse stem), read from
 						 * the loose root first and then the stack -- the mesh-LOD mask path's
-						 * order (src/lodgen.cpp ~1849-1869). Counted pbr-sourced here; its law
+						 * order (src/features/far-lod/lodgen.cpp ~1849-1869). Counted pbr-sourced here; its law
 						 * is evaluated after the loop, and a map it cannot read refuses it. */
 						std::vector<WwPbrmCardShape> pbrmShapes;
 						auto pbrmTry = [&]( int b, const QModelIndex & iShader, const QString & matName, const QString & diffuse ) {
@@ -21565,7 +21565,7 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 						 * `aa` line names the arm that served. */
 						/* THE FACTOR: 4 x 4 samples a texel,
 						 * raised from IMPOSTORAA1's 2 x 2. Measured on the 512-unit cube
-						 * (tests/spells/lodgen_octahedral.sh F1, N 8, tile 64): the 2x
+						 * (tests/features/far-lod/lodgen_octahedral.sh F1, N 8, tile 64): the 2x
 						 * bake reproduces its own ideal 2x2 estimator exactly and that
 						 * estimator reads 1.27-1.32 texels against F1's bar of 1.0 -- the
 						 * DESIGN could not pass, whatever the code did -- while 3x3 and
@@ -23313,7 +23313,7 @@ void NifSkope::setLeftColumnMode( LeftColumnMode mode )
 	 * so a fourth page of this stack could be reached; bungo's "What? I
 	 * wanted it in that right panel though" retired that page, and a clamp
 	 * that still admitted 3 would let a stale saved mode select a page this
-	 * stack no longer has. Gate L6 of tests/spells/water_ui.sh counts the
+	 * stack no longer has. Gate L6 of tests/features/far-lod/water_ui.sh counts the
 	 * strip's tabs and the stack's pages at 3 in both workspace states. */
 	if ( mode < LeftBlocks || mode > LeftHeader )
 		mode = LeftBlocks;
@@ -27155,21 +27155,21 @@ void NifSkope::initMenu()
 							{ "LodgenMsnCacheEdit", "msnCache", nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr },
 							{ "LodgenCoverFullSpin", "coverFull", nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, "96.0" },
 							{ "LodgenRoadsCheck", "roads", nullptr,
-								"the road pass writes nothing on this chunk -- the command line own --no-roads moves only the ledger here (measured 2026-09-12); tests/spells/lodgen_roads.sh reads the road rows", nullptr, nullptr, nullptr, nullptr, "1" },
+								"the road pass writes nothing on this chunk -- the command line own --no-roads moves only the ledger here (measured 2026-09-12); tests/features/far-lod/lodgen_roads.sh reads the road rows", nullptr, nullptr, nullptr, nullptr, "1" },
 							{ "LodgenRoadDetailSpin", "roadDetail", nullptr,
-								"the road pass writes nothing on this chunk -- the command line own --no-roads moves only the ledger here (measured 2026-09-12); tests/spells/lodgen_roads.sh reads the road rows", nullptr, nullptr, nullptr, nullptr, "1.0" },
+								"the road pass writes nothing on this chunk -- the command line own --no-roads moves only the ledger here (measured 2026-09-12); tests/features/far-lod/lodgen_roads.sh reads the road rows", nullptr, nullptr, nullptr, nullptr, "1.0" },
 							{ "LodgenRoadGroundPaintSpin", "roadGroundPaint", nullptr,
-								"the road pass writes nothing on this chunk -- the command line own --no-roads moves only the ledger here (measured 2026-09-12); tests/spells/lodgen_roads.sh reads the road rows", nullptr, nullptr, nullptr, nullptr, "1.0" },
+								"the road pass writes nothing on this chunk -- the command line own --no-roads moves only the ledger here (measured 2026-09-12); tests/features/far-lod/lodgen_roads.sh reads the road rows", nullptr, nullptr, nullptr, nullptr, "1.0" },
 							{ "LodgenRoadCoverSuppressSpin", "roadCoverSuppress", nullptr,
-								"the road pass writes nothing on this chunk -- the command line own --no-roads moves only the ledger here (measured 2026-09-12); tests/spells/lodgen_roads.sh reads the road rows", nullptr, nullptr, nullptr, nullptr, "1.0" },
+								"the road pass writes nothing on this chunk -- the command line own --no-roads moves only the ledger here (measured 2026-09-12); tests/features/far-lod/lodgen_roads.sh reads the road rows", nullptr, nullptr, nullptr, nullptr, "1.0" },
 							{ "LodgenRoadCompositeBox", "roadComposite", nullptr,
-								"the road pass writes nothing on this chunk -- the command line own --no-roads moves only the ledger here (measured 2026-09-12); tests/spells/lodgen_roads.sh reads the road rows", nullptr, nullptr, nullptr, nullptr, "0" },
+								"the road pass writes nothing on this chunk -- the command line own --no-roads moves only the ledger here (measured 2026-09-12); tests/features/far-lod/lodgen_roads.sh reads the road rows", nullptr, nullptr, nullptr, nullptr, "0" },
 							{ "LodgenRoadRaisedCheck", "roadRaised", nullptr,
-								"the road pass writes nothing on this chunk -- the command line own --no-roads moves only the ledger here (measured 2026-09-12); tests/spells/lodgen_roads.sh reads the road rows", nullptr, nullptr, nullptr, nullptr, "0" },
+								"the road pass writes nothing on this chunk -- the command line own --no-roads moves only the ledger here (measured 2026-09-12); tests/features/far-lod/lodgen_roads.sh reads the road rows", nullptr, nullptr, nullptr, nullptr, "0" },
 							{ "LodgenRoadSidewalksCheck", "roadSidewalks", nullptr,
-								"the road pass writes nothing on this chunk -- the command line own --no-roads moves only the ledger here (measured 2026-09-12); tests/spells/lodgen_roads.sh reads the road rows", nullptr, nullptr, nullptr, nullptr, "1" },
+								"the road pass writes nothing on this chunk -- the command line own --no-roads moves only the ledger here (measured 2026-09-12); tests/features/far-lod/lodgen_roads.sh reads the road rows", nullptr, nullptr, nullptr, nullptr, "1" },
 							{ "LodgenFlatObjectsCheck", "flatObjects", nullptr,
-								"the road pass writes nothing on this chunk -- the command line own --no-roads moves only the ledger here (measured 2026-09-12); tests/spells/lodgen_roads.sh reads the road rows", nullptr, nullptr, nullptr, nullptr, "1" },
+								"the road pass writes nothing on this chunk -- the command line own --no-roads moves only the ledger here (measured 2026-09-12); tests/features/far-lod/lodgen_roads.sh reads the road rows", nullptr, nullptr, nullptr, nullptr, "1" },
 							{ "LodgenTerrainObjectAoCheck", "terrainObjectAo", nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, "0" },
 							{ "LodgenTerrainObjectAoStrengthSpin", "terrainObjectAoStrength", "LodgenTerrainObjectAoCheck", nullptr, nullptr, nullptr, nullptr, nullptr, "0.5" },
 							{ "LodgenWaterBodiesCheck", "waterBodies", nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, "1" },
@@ -27180,16 +27180,16 @@ void NifSkope::initMenu()
 							{ "LodgenWaterShoreCheck", "waterShore", "LodgenWaterBodiesCheck", nullptr, nullptr, nullptr, nullptr, nullptr, "1" },
 							{ "LodgenWaterVelocitiesEdit", "waterVelocities", nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr },
 							{ "LodgenAggregateCheck", "aggregate", nullptr,
-								"aggregate sheets need a card library and this gate arms none, so the run has nothing to aggregate; tools/bake_impostor_cards.sh builds one and tests/spells/lodgen_card_arrays.sh reads it", nullptr, nullptr, nullptr, nullptr, "0" },
+								"aggregate sheets need a card library and this gate arms none, so the run has nothing to aggregate; src/features/far-lod/bake_impostor_cards.sh builds one and tests/features/far-lod/lodgen_card_arrays.sh reads it", nullptr, nullptr, nullptr, nullptr, "0" },
 							{ "LodgenAggregateMinSpin", "aggregateMin", nullptr,
-								"aggregate sheets need a card library and this gate arms none, so the run has nothing to aggregate; tools/bake_impostor_cards.sh builds one and tests/spells/lodgen_card_arrays.sh reads it", nullptr, nullptr, nullptr, nullptr, "8" },
+								"aggregate sheets need a card library and this gate arms none, so the run has nothing to aggregate; src/features/far-lod/bake_impostor_cards.sh builds one and tests/features/far-lod/lodgen_card_arrays.sh reads it", nullptr, nullptr, nullptr, nullptr, "8" },
 							{ "LodgenAggregateTileSpin", "aggregateTile", nullptr,
-								"aggregate sheets need a card library and this gate arms none, so the run has nothing to aggregate; tools/bake_impostor_cards.sh builds one and tests/spells/lodgen_card_arrays.sh reads it", nullptr, nullptr, nullptr, nullptr, "64" },
+								"aggregate sheets need a card library and this gate arms none, so the run has nothing to aggregate; src/features/far-lod/bake_impostor_cards.sh builds one and tests/features/far-lod/lodgen_card_arrays.sh reads it", nullptr, nullptr, nullptr, nullptr, "64" },
 							{ "LodgenAggregateViewsSpin", "aggregateViews", nullptr,
-								"aggregate sheets need a card library and this gate arms none, so the run has nothing to aggregate; tools/bake_impostor_cards.sh builds one and tests/spells/lodgen_card_arrays.sh reads it", nullptr, nullptr, nullptr, nullptr, "8" },
+								"aggregate sheets need a card library and this gate arms none, so the run has nothing to aggregate; src/features/far-lod/bake_impostor_cards.sh builds one and tests/features/far-lod/lodgen_card_arrays.sh reads it", nullptr, nullptr, nullptr, nullptr, "8" },
 							{ "LodgenNativeLadderCheck", "nativeLadder", nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, "0" },
 							{ "LodgenNativeOccludersCheck", "nativeOccluders", nullptr,
-								"no occluder box is found on this chunk -- the command line own --native-no-occluders moves only the ledger here (measured 2026-09-12); tests/spells/lodgen_native.sh reads it", nullptr, nullptr, nullptr, nullptr, "1" },
+								"no occluder box is found on this chunk -- the command line own --native-no-occluders moves only the ledger here (measured 2026-09-12); tests/features/far-lod/lodgen_native.sh reads it", nullptr, nullptr, nullptr, nullptr, "1" },
 							{ "LodgenKeepBtoCheck", "keepBto", nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, "0" },
 							{ "LodgenMergeCheck", "merge", nullptr,
 								"hidden under the FO4 Community Shaders target this gate arms, and a hidden row reads as its default by design; the stock-engine target is where it reaches the bake", nullptr, nullptr, nullptr, nullptr, "1" },
@@ -27198,17 +27198,17 @@ void NifSkope::initMenu()
 							{ "LodgenThreadsSpin", "threads", nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, "0" },
 							{ "LodgenChunkThreadsSpin", "chunkThreads", nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, "1" },
 							{ "LodgenVtBorderSpin", "vtBorder", nullptr,
-								"the terrain virtual texture module is off in this gate module set -- the pyramid is worldspace-wide, not one chunk; tests/spells/lodgen_terrain_vt.sh reads the pyramid rows", nullptr, nullptr, nullptr, nullptr, "8" },
+								"the terrain virtual texture module is off in this gate module set -- the pyramid is worldspace-wide, not one chunk; tests/features/far-lod/lodgen_terrain_vt.sh reads the pyramid rows", nullptr, nullptr, nullptr, nullptr, "8" },
 							{ "LodgenVtMipsSpin", "vtMips", nullptr,
-								"the terrain virtual texture module is off in this gate module set -- the pyramid is worldspace-wide, not one chunk; tests/spells/lodgen_terrain_vt.sh reads the pyramid rows", nullptr, nullptr, nullptr, nullptr, "2" },
+								"the terrain virtual texture module is off in this gate module set -- the pyramid is worldspace-wide, not one chunk; tests/features/far-lod/lodgen_terrain_vt.sh reads the pyramid rows", nullptr, nullptr, nullptr, nullptr, "2" },
 							{ "LodgenVtCompressBox", "vtCompress", nullptr,
-								"the terrain virtual texture module is off in this gate module set -- the pyramid is worldspace-wide, not one chunk; tests/spells/lodgen_terrain_vt.sh reads the pyramid rows", nullptr, nullptr, nullptr, nullptr, "0" },
+								"the terrain virtual texture module is off in this gate module set -- the pyramid is worldspace-wide, not one chunk; tests/features/far-lod/lodgen_terrain_vt.sh reads the pyramid rows", nullptr, nullptr, nullptr, nullptr, "0" },
 							{ "LodgenVtHeightCheck", "vtHeight", nullptr,
-								"the terrain virtual texture module is off in this gate module set -- the pyramid is worldspace-wide, not one chunk; tests/spells/lodgen_terrain_vt.sh reads the pyramid rows", nullptr, nullptr, nullptr, nullptr, "0" },
+								"the terrain virtual texture module is off in this gate module set -- the pyramid is worldspace-wide, not one chunk; tests/features/far-lod/lodgen_terrain_vt.sh reads the pyramid rows", nullptr, nullptr, nullptr, nullptr, "0" },
 							{ "LodgenVtCoverInColorCheck", "vtCoverInColor", nullptr,
-								"the terrain virtual texture module is off in this gate module set -- the pyramid is worldspace-wide, not one chunk; tests/spells/lodgen_terrain_vt.sh reads the pyramid rows", nullptr, nullptr, nullptr, nullptr, "0" },
+								"the terrain virtual texture module is off in this gate module set -- the pyramid is worldspace-wide, not one chunk; tests/features/far-lod/lodgen_terrain_vt.sh reads the pyramid rows", nullptr, nullptr, nullptr, nullptr, "0" },
 							{ "LodgenVtHalfAuxCheck", "vtHalfAux", nullptr,
-								"the terrain virtual texture module is off in this gate module set -- the pyramid is worldspace-wide, not one chunk; tests/spells/lodgen_terrain_vt.sh reads the pyramid rows", nullptr, nullptr, nullptr, nullptr, "0" },
+								"the terrain virtual texture module is off in this gate module set -- the pyramid is worldspace-wide, not one chunk; tests/features/far-lod/lodgen_terrain_vt.sh reads the pyramid rows", nullptr, nullptr, nullptr, nullptr, "0" },
 						};
 						const int wwNewRowCount = int( sizeof( wwNewRows ) / sizeof( wwNewRows[0] ) );
 						// what a row says, whatever kind of row it is
@@ -28103,7 +28103,7 @@ void NifSkope::initMenu()
 						 * into that stand-in mod folder and walks what landed: the
 						 * FO4CSLOD root, and no legacy .BTO / .BTR anywhere (bungo's
 						 * R2). Settings are put back as the run leg puts them back.
-						 * Every line carries "MO2DISK"; tests/spells/lodgen_panel_mo2.sh
+						 * Every line carries "MO2DISK"; tests/features/far-lod/lodgen_panel_mo2.sh
 						 * counts its own. */
 						if ( wwEnvInt( "WW_LODGEN_MO2DISK" ) == 1 ) {
 							QMap<QString, QVariant> savedGroup3;

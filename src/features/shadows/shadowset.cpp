@@ -23,7 +23,7 @@ BSD License - see nifskope.h
 #include "gl/lookdevstage.h"
 #include "gl/renderer.h"
 #include "harnesswindow.h"
-#include "impostorchunk.h"	// lane FAR5: the far cards as terrain-shadow casters
+#include "features/far-lod/impostorchunk.h"	// lane FAR5: the far cards as terrain-shadow casters
 #include "features/water/cellwater.h"	// lane FOGTERRAIN3: the water shapes the ground fog stands on
 #include "gl/fogterrain.h"	// lane FOGTERRAIN1: the ground fog's low-pass terrain (FOGTERRAIN2: its own job here)
 #include "features/shared/cellpasstime.h"	// lane PERFFIX2: the contact sub-timer

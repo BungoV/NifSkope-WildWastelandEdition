@@ -70,7 +70,7 @@
 # run, by tests/spells/native_lighting_fixtures.py, and the gate then proves they
 # are pairwise distinct before it believes any picture.  Lane GATEFIX1,
 # 2026-09-19.  They used to be artefacts on disk from 2026-09-12, and the exe ate
-# them: src/lodtsheets.cpp:501-506 reuses a cached tile only when it is NEWER than
+# them: src/features/far-lod/lodtsheets.cpp:501-506 reuses a cached tile only when it is NEWER than
 # the .lodt container, the container was re-baked 2026-09-16 16:44, so the first
 # run after that rule (2026-09-18 09:12:47..09:13:19, one arm every ten seconds)
 # refilled all four caches from the SAME container.  Commonwealth.VT.2.0.4.n.DDS

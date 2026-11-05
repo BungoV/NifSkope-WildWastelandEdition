@@ -7,8 +7,8 @@ BSD License - see nifskope.h
 #ifndef NATIVEEMIT_H
 #define NATIVEEMIT_H
 
-#include "lodofile.h"
-#include "lodgenaggregate.h"
+#include "features/far-lod/lodofile.h"
+#include "features/far-lod/lodgenaggregate.h"
 
 #include <QHash>
 #include <QString>
@@ -259,8 +259,8 @@ bool lodgenNativeWrite( QString * report, QString * error );
  *  It is appended to the existing `stage times:` census line rather than given a
  *  line of its own, so the record gains no SIXTH volatile field: that line is
  *  already declared volatile and already masked WHOLE by both normalisers
- *  (`lodbNormalise` in src/lodbfile.cpp and `normalise` in
- *  tests/spells/lodb_read.py). `ww-volatile-field-law` step 4 -- the count stays
+ *  (`lodbNormalise` in src/features/far-lod/lodbfile.cpp and `normalise` in
+ *  tests/features/far-lod/lodb_read.py). `ww-volatile-field-law` step 4 -- the count stays
  *  at five and all of it keeps moving together. */
 QString lodgenNativeLibrarySplit();
 

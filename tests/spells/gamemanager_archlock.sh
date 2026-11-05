@@ -46,7 +46,7 @@
 #   (d) NIFPARSE1's reason for the lock still stands. The lock is kept, so the
 #       sixteen chunk workers are still serialised against a teardown: the same
 #       fixture region baked by the rung and by the new exe must come out BYTE
-#       IDENTICAL. (tests/spells/lodgen_native.sh and lodgen_defaults.sh are run
+#       IDENTICAL. (tests/features/far-lod/lodgen_native.sh and lodgen_defaults.sh are run
 #       separately and their counts go in the lane report.)
 #   (e) the `--bake-record` refusal NAMES THE DIRECTORY IT LOOKED IN. Batch mode
 #       resolves a relative path against the NifSkope folder on purpose
@@ -318,7 +318,7 @@ else
 		exe="$PREV"; [ "$who" = "new" ] && exe="$EXE"
 		rm -rf "$W/bake_$who"; mkdir -p "$W/bake_$who"
 		# --worldspace and --terrain-region X0 Y0 X1 Y1, the spelling
-		# tests/spells/lodgen_native.sh uses. The first draft said
+		# tests/features/far-lod/lodgen_native.sh uses. The first draft said
 		# `--region`, which is not a flag: both bakes exited 2 with the
 		# worldspace list on stdout and wrote no files, and the leg's own
 		# floor is what caught it (0 files compared).

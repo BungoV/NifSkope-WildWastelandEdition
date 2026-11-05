@@ -18,7 +18,7 @@ BSD License - see nifskope.h
 #include "cellview.h"
 #include "cellsplat.h"
 #include "cellgroundlegend.h"	// lane DUNESAND3
-#include "cellfarlod.h"
+#include "features/far-lod/cellfarlod.h"
 #include "cellmodpickbox.h"	// the Mods band
 #include "gl/celllights.h"
 #include "features/air/airzonepanel.h"	// lane AIRZONE1: the Air zones band

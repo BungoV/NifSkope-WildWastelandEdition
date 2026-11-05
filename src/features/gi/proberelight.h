@@ -161,7 +161,7 @@ std::vector<float> probeRelightShut( const ProbeRelightState & st, size_t nDoors
 	 *  closed door is ignored */
 	QString red;
 	/*! the placed lights alone -- no sun, no interior directional, no glow (Le), no sky. The far term's
-	 *  layers (src/farlight.h) are linear in the placed lights only with these out; false = as before */
+	 *  layers (src/features/far-lod/farlight.h) are linear in the placed lights only with these out; false = as before */
 	bool placedOnly = false;
 	bool wantE = false;                     //!< fill ProbeRelightOut::Es
 	bool share = false;                     //!< Probe sharing after the last gather (needs ops.shareStart)

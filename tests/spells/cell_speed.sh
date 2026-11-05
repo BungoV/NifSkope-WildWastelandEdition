@@ -81,7 +81,7 @@ check() { if [ "$2" = "1" ]; then say "  PASS  $1"; else say "  FAIL  $1"; fails
 case "$RED" in ""|slow|transform|rows|nonet) ;; *) echo "unknown red control: $RED"; exit 2;; esac
 say "cell_speed.sh  $(date '+%Y-%m-%d %H:%M:%S')${RED:+   RED CONTROL: $RED}${BEFORE:+   reference exe: $BEFORE}"
 newer=1
-for s in src/cellview.cpp src/cellmesh.cpp src/celltexahead.cpp src/cellspeed.cpp src/lodgen.cpp src/gl/bsshape.cpp \
+for s in src/cellview.cpp src/cellmesh.cpp src/celltexahead.cpp src/cellspeed.cpp src/features/far-lod/lodgen.cpp src/gl/bsshape.cpp \
 		src/gl/gltexloaders.cpp src/gl/glproperty.cpp src/model/nifmodel.cpp src/model/basemodel.cpp \
 		src/cellmodelahead.cpp src/data/nifitem.cpp; do
 	[ -f "$REPO/$s" ] && [ "$REPO/$s" -nt "$EXE" ] && { say "  $s is NEWER than the exe"; newer=0; }

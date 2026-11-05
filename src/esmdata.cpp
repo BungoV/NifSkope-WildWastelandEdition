@@ -116,7 +116,7 @@ bool EsmWorld::load( const QString & esmPath, quint32 worldspaceFormID, QString 
 			std::vector<unsigned char> rnam;
 			ESMFile::ESMField f( *esm, w );
 			while ( f.next() ) {
-				if ( f == "RNAM" && f.size() >= 8 ) {	// lane GEOLOD1: large references (src/largeref.h)
+				if ( f == "RNAM" && f.size() >= 8 ) {	// lane GEOLOD1: large references (src/features/far-lod/largeref.h)
 					rnam.resize( f.size() );
 					for ( size_t k = 0; k < rnam.size(); k++ )
 						rnam[k] = (unsigned char) f.readUInt8();
@@ -1619,7 +1619,7 @@ const QVector<EsmScolPart> & EsmWorld::scolParts( quint32 formID ) const
 quint64 EsmWorld::loadOrderHash() const
 {
 	/* The law is stated once, in the header, and the independent decoder
-	 * (tests/spells/lodgen_native_decode.py, load_order_hash) reproduces it
+	 * (tests/features/far-lod/lodgen_native_decode.py, load_order_hash) reproduces it
 	 * from the same list without linking any of this. */
 	quint64 h = Q_UINT64_C( 0xCBF29CE484222325 );
 	auto fold = [&h]( const unsigned char * p, size_t n ) {

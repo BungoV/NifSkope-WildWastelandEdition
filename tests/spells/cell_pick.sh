@@ -43,7 +43,7 @@
 #
 #   (4) THE MAGENTA. A SOURCE row, and deliberately so. The defect is that an
 #       already-absolute Bethesda build path had `materials/` prepended to it
-#       (src/lodgen.cpp ~2212 and ~4758), which resolves to nothing, leaves the
+#       (src/features/far-lod/lodgen.cpp ~2212 and ~4758), which resolves to nothing, leaves the
 #       diffuse slot empty and binds the missing-texture magenta under
 #       Scene::DoErrorColor. Whether the repair makes a particular street stop
 #       being pink is bungo's eye on a picture; whether the broken shape still
@@ -144,7 +144,7 @@ newer=1
 for s in src/cellclick.cpp src/cellclick.h src/cellground.cpp src/cellground.h \
          src/cellidentity.cpp src/cellidentity.h src/cellpanel.cpp src/cellpanel.h \
          src/cellpicktest.cpp src/cellpicktest.h \
-         src/cellview.cpp src/glview.cpp src/nifskope_ui.cpp src/lodgen.cpp; do
+         src/cellview.cpp src/glview.cpp src/nifskope_ui.cpp src/features/far-lod/lodgen.cpp; do
 	if [ ! -f "$REPO/$s" ] || [ "$REPO/$s" -nt "$EXE" ]; then
 		say "  $s is missing or NEWER than the exe"
 		newer=0
@@ -530,7 +530,7 @@ count_paths() {   # count_paths <file-or-> : "<prepends> <cuts>"
 	echo "$p $c"
 }
 
-set -- $(count_paths "$REPO/src/lodgen.cpp")
+set -- $(count_paths "$REPO/src/features/far-lod/lodgen.cpp")
 prep=$1; cuts=$2
 say "  lodgen.cpp: $prep materials/ prepends, $cuts absolute-path cuts"
 check "every materials/ prepend in lodgen.cpp is paired with the absolute-path cut" \

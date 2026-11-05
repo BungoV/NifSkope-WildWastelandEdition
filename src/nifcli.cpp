@@ -23,7 +23,7 @@ int cmdEspWrite( const QStringList & args );	// lane ESPWRITE2: src/io/espwritec
 #include "features/gi/probegi.h"		// lane ROOMCLAMP1: probegi
 #include "features/gi/rtddgi.h"		// lane RTXGI1: rtddgi
 #include "features/reflections/reflcensuscli.h"	// lane TOOLS1101: reflcensus
-#include "farlightmap.h"	// lane FARLIGHTMAP1: farlightmap
+#include "features/far-lod/farlightmap.h"	// lane FARLIGHTMAP1: farlightmap
 #include "features/gi/proberelight.h"	// lane GPURELIGHT1: gpurelight
 #include "features/gi/probevolumes.h"	// lane VOLFIT1: volumes
 #include "features/gi/probevolcheck.h"	// lane VOLRAY1: volcheck
@@ -40,30 +40,30 @@ int cmdEspWrite( const QStringList & args );	// lane ESPWRITE2: src/io/espwritec
 #include "btdterrain.h"
 #include "esmdata.h"
 #include "esmweather.h"
-#include "lodgen.h"
-#include "lodgenchunkpass.h"
-#include "lodgengpu.h"
-#include "lodgenloadorder.h"
-#include "lodgenlayout.h"
-#include "lodgenparallel.h"
+#include "features/far-lod/lodgen.h"
+#include "features/far-lod/lodgenchunkpass.h"
+#include "features/far-lod/lodgengpu.h"
+#include "features/far-lod/lodgenloadorder.h"
+#include "features/far-lod/lodgenlayout.h"
+#include "features/far-lod/lodgenparallel.h"
 #include "nifparsestress.h"
 #include "nativeemit.h"
 #include "nearlib.h"
-#include "lodifile.h"
-#include "lodinative.h"	// lane FAR3: farobjcensus
-#include "lodofile.h"
-#include "lodpbake.h"
-#include "lodpplace.h"
-#include "lodbfile.h"
-#include "io/loddecal.h"
+#include "features/far-lod/lodifile.h"
+#include "features/far-lod/lodinative.h"	// lane FAR3: farobjcensus
+#include "features/far-lod/lodofile.h"
+#include "features/far-lod/lodpbake.h"
+#include "features/far-lod/lodpplace.h"
+#include "features/far-lod/lodbfile.h"
+#include "features/far-lod/loddecal.h"
 #include "features/water/cellwaterinfo.h"	// lane WATERDATA1: lodl --water-info
 #include "terrainpreview.h"
 #include <QDateTime>
 #include <QDirIterator>
-#include "lodtfile.h"
-#include "watermark.h"
-#include "io/lodmfile.h"
-#include "io/lodvfile.h"
+#include "features/far-lod/lodtfile.h"
+#include "features/far-lod/watermark.h"
+#include "features/far-lod/lodmfile.h"
+#include "features/far-lod/lodvfile.h"
 #include <QElapsedTimer>
 #include <QJsonArray>
 #include <QJsonObject>
@@ -2832,7 +2832,7 @@ static LodtWaterOptions gLodlWater = lodlWaterDefaults();
  *  empty when the flag was not given.
  *
  *  `gLgSwitchDigest` is sha1 over the ARGUMENT VECTOR, in order, with the
- *  tokens in gLgSwitchSkip (src/lodgenchunkpass.cpp) and their values dropped;
+ *  tokens in gLgSwitchSkip (src/features/far-lod/lodgenchunkpass.cpp) and their values dropped;
  *  the record's `switches` line folds the IDENTITY WORD into it as well
  *  (lodgenSwitchesWithIdentity, lane INCRGATE1). It is deliberately
  *  CONSERVATIVE: reordering flags, or spelling a default explicitly, changes
@@ -2882,7 +2882,7 @@ static bool gLgNativeCache = true;
 
 /*! Print a line AND record it if it is a census line. One choke point, so a
  *  census line that is printed is a census line that is recorded. The FLOOR is
- *  in the gate: `tests/spells/lodgen_bakerec.sh` leg (a) greps the bake's own
+ *  in the gate: `tests/features/far-lod/lodgen_bakerec.sh` leg (a) greps the bake's own
  *  log for the registered keywords and requires the record's set to equal it,
  *  so a print site that forgot this helper fails a check. */
 static void censusOut( const QString & line )
@@ -2892,7 +2892,7 @@ static void censusOut( const QString & line )
 }
 
 /* lodbRecordPath(), lodbFindRecord(), the switch-digest skip lists and
- * lodgenSwitchDigestOf() moved to src/lodgenchunkpass.cpp with the rest of the
+ * lodgenSwitchDigestOf() moved to src/features/far-lod/lodgenchunkpass.cpp with the rest of the
  * ledger (lane INCRGATE1, 2026-09-24), so the panel writes the same record. */
 
 /*! `--keep-bto` (lane BTOFREE1, 2026-09-16), a global for the same reason the
@@ -3128,7 +3128,7 @@ int cmdLodgen( const QString & file, bool listWorldspaces, quint32 worldspace,
 		 * one rule is the only way a wrong mask is caught. In this tree it
 		 * WAS written twice and never compared: `lodbNormalise()` had no
 		 * caller anywhere in src/, and every gate used the Python half
-		 * (`tests/spells/lodb_read.py`) alone, so a fifth volatile field
+		 * (`tests/features/far-lod/lodb_read.py`) alone, so a fifth volatile field
 		 * masked in one half and not the other would have gone unnoticed.
 		 *
 		 * A DIGEST is enough: the gate normalises the same file with the
@@ -4387,7 +4387,7 @@ int cmdLodgen( const QString & file, bool listWorldspaces, quint32 worldspace,
 		 *
 		 * Lane INCRGATE1 (2026-09-24) moved the ledger itself -- the diff, the
 		 * refusals, the `.lodj` cache hooks and the record -- into
-		 * `src/lodgenchunkpass.cpp`, so the LOD Generation panel runs the same
+		 * `src/features/far-lod/lodgenchunkpass.cpp`, so the LOD Generation panel runs the same
 		 * code. The words printed here did not change.
 		 *
 		 * The pass is built FIRST because the IDENTITY WORD is read off it: the
@@ -5070,12 +5070,12 @@ int cmdLodgen( const QString & file, bool listWorldspaces, quint32 worldspace,
 		 * complete. Its presence beside the outputs is what says "this bake
 		 * finished".
 		 *
-		 * It is DETERMINISTIC except for the FIVE things `src/lodbfile.h` names
+		 * It is DETERMINISTIC except for the FIVE things `src/features/far-lod/lodbfile.h` names
 		 * -- the `baked` line, a plugin's path field, the resource lines, the
 		 * `stage times:` census line and the `peak working set:` clause of the
 		 * `bake census:` one -- so two full bakes of the same tree write the
 		 * same bytes everywhere else.
-		 * Gate B4 and `tests/spells/lodgen_bakerec.sh` leg (h) check exactly
+		 * Gate B4 and `tests/features/far-lod/lodgen_bakerec.sh` leg (h) check exactly
 		 * that. */
 		{
 			QStringList recWarn;
@@ -7175,7 +7175,7 @@ int usage()
 		  << "  lodl <file.lodl> --water-mark-fixture   mark the file as a user would (a\n"
 		  << "                                          stroke, names, a colour, a still\n"
 		  << "                                          lake, a dye mouth) and save it; the\n"
-		  << "                                          re-bake gate of tests/farwater1\n"
+		  << "                                          re-bake gate of tests/features/far-lod/farwater1\n"
 		  << "  lodl <file.lodl> --water-rebake-note    the line the marking panel shows\n"
 		  << "                                          about the last re-bake (from a\n"
 		  << "                                          <file>.premarks beside it; read only)\n"
@@ -8698,7 +8698,7 @@ int nifskopeCliMain( const QStringList & args )
 		else if ( t == QLatin1String( "--no-identity" ) ) lgIdentity = false;
 		else if ( t == QLatin1String( "--no-ao" ) ) lgBakeAO = false;
 		/* `--no-gpu`: this run on the CPU whatever Settings > NIF > LOD bake >
-		 * Use GPU says (src/lodgengpu.h). The path taken, not this token, goes
+		 * Use GPU says (src/features/far-lod/lodgengpu.h). The path taken, not this token, goes
 		 * into the chunk digest (lodgenGpuDigestWord). */
 		else if ( t == QLatin1String( "--no-gpu" ) ) lgNoGpu = true;
 		/* THE THREAD BUDGET, and the exact way back. `--threads 1` runs the
@@ -8913,7 +8913,7 @@ int nifskopeCliMain( const QStringList & args )
 		 * and the triple RENORMALISED, never clamped. The sheet is written
 		 * UNCOMPRESSED (B8G8R8A8 through a DX10 header) with a full mip chain,
 		 * because a BC re-encode puts back the 4x4 block grid that is the one
-		 * thing the cache removed. BC7 (src/lodgenbc7.h) is not used here. What
+		 * thing the cache removed. BC7 (src/features/far-lod/lodgenbc7.h) is not used here. What
 		 * this costs over a worldspace is in the lane report; it is not a
 		 * decision this flag makes for anyone. */
 		else if ( t == QLatin1String( "--msn-cache" ) ) lodgenSetMsnCacheDir( next() );
@@ -9200,7 +9200,7 @@ int nifskopeCliMain( const QStringList & args )
 			/* `next()` and NOT `args[++i]`: the loop walks `a`, which starts at the
 			 * subcommand's first argument, while `args` is the whole argv. Reading
 			 * the wrong list took the token three places to the left and this switch
-			 * never worked until tests/spells/lodgen_ladder.sh ran it. */
+			 * never worked until tests/features/far-lod/lodgen_ladder.sh ran it. */
 			const QString v = next().toLower();
 			if ( v == QLatin1String( "near" ) ) {
 				lgLibraryNear = true;
@@ -9611,7 +9611,7 @@ int nifskopeCliMain( const QStringList & args )
 		QStringList mo2Plugins;
 		if ( !lgMo2Profile.isEmpty() ) {
 			/* His MO2 load order read off disk, no usvfs (lane LOADORDER1,
-			 * src/lodgenloadorder.h): the plugins as full paths, masters first,
+			 * src/features/far-lod/lodgenloadorder.h): the plugins as full paths, masters first,
 			 * and the stack Data -> mods bottom-up -> overwrite, --resource above. */
 			if ( !lodgenApplyMo2Profile( lgMo2Profile, lgMo2Mods, lgDataRoot, lgResources,
 					lgMo2 || !lgPluginsTxt.isEmpty(), &stack, &file, out(), err() ) )
@@ -9971,7 +9971,7 @@ int nifskopeCliMain( const QStringList & args )
 			btdRegion[0], btdRegion[1], btdRegion[2], btdRegion[3], btdLod, outFile );
 	else if ( cmd == QLatin1String( "lodl" ) ) {
 		/* --water-mark-selftest runs the MARKING tool's own gates
-		 * (src/watermark.cpp), which rewrite the file, so it is answered
+		 * (src/features/far-lod/watermark.cpp), which rewrite the file, so it is answered
 		 * here rather than inside the scene builder. */
 		if ( lodtWaterMarkSelfTestOnly ) {
 			QString report, werr;
@@ -9981,7 +9981,7 @@ int nifskopeCliMain( const QStringList & args )
 				err() << "error: " << werr << Qt::endl;
 			rc = ok ? 0 : 1;
 		} else if ( lodtWaterMarkFixtureOnly ) {
-			// lane FARWATER1: mark the file as a user would, for the re-bake gate (tests/farwater1)
+			// lane FARWATER1: mark the file as a user would, for the re-bake gate (tests/features/far-lod/farwater1)
 			QString report, werr;
 			const bool ok = lodtWaterMarkFixture( file, &report, &werr );
 			if ( ok )
@@ -10046,7 +10046,7 @@ int nifskopeCliMain( const QStringList & args )
 	 * --native above.
 	 *
 	 * The .lodl's AO plane is computed by ONE function (lodtComputeAo,
-	 * src/lodtfile.cpp) from the container's own stored height word and nothing
+	 * src/features/far-lod/lodtfile.cpp) from the container's own stored height word and nothing
 	 * else, and that same function serves both the writer and --refresh-ao.
 	 * That is what makes a refreshed plane byte-identical to a written one -- it
 	 * is the plane's stated contract, not a coincidence. Putting the placed

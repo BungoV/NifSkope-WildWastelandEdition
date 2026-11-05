@@ -12,8 +12,8 @@ BSD License - see nifskope.h
 #include "gl/gametaa.h"
 #include "features/water/cellwater.h"	// lane SUNCELL1: water never casts
 #include "cellmesh.h"	// lane FARDRAW1: CellMeshInst
-#include "gl/cellfarinst.h"	// lane FARDRAW1: the instanced far rings cast
-#include "cellfarhide.h"	// lane FARHOLE2: the rows a loaded near cell leaves out
+#include "features/far-lod/cellfarinst.h"	// lane FARDRAW1: the instanced far rings cast
+#include "features/far-lod/cellfarhide.h"	// lane FARHOLE2: the rows a loaded near cell leaves out
 #include "features/near/cellcull.h"	// lane SUNCELL1: each cascade culls its casters against its own window
 #include "gl/cellgrass.h"	// lane FAR5: a wind cable's shadow sways with it
 #include "gl/celltreewind.h"	// lane WINDTREE1: a tree-wind shape's caster sways with it
@@ -40,7 +40,7 @@ static bool shadowCacheCheck()
 	WW_SWITCH_STATIC( bool, on, wwEnvInt( "WW_SHADOWCACHE_CHECK" ) == 1 );
 	return on;
 }
-#include "cellfarlod.h"	// lane SHADOWSHIMMER2: the far sway sample the colour pass takes
+#include "features/far-lod/cellfarlod.h"	// lane SHADOWSHIMMER2: the far sway sample the colour pass takes
 
 #include <QDir>
 #include <QFile>

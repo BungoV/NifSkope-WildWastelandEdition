@@ -1,7 +1,7 @@
 #!/bin/bash
 #
 # EVERY PLACED REFERENCE THE GAME SHOWS IS DRAWN BY THE CELL VIEW, WHERE THE GAME PUTS IT
-# (lane MISS1, 2026-10-02; src/cellview.cpp, src/lodgen.cpp, src/esmdata.cpp).
+# (lane MISS1, 2026-10-02; src/cellview.cpp, src/features/far-lod/lodgen.cpp, src/esmdata.cpp).
 #
 # Not judged by eye. Per interior, one window: the cell is opened and the viewer writes what it drew
 # (WW_CELL_DUMP, one row per drawn thing with its world box) and its reference list (WW_CELL_REFDUMP, one row
@@ -64,7 +64,7 @@ check() { if [ "$2" = "1" ]; then say "  PASS  $1"; else say "  FAIL  $1"; fails
 say "cell_refs.sh  $(date '+%Y-%m-%d %H:%M:%S')${RED:+   RED CONTROL: $RED}"
 say "exe: $EXE  ($(stat -c %y "$EXE" | cut -c1-19))"
 newer=1
-for s in src/cellview.cpp src/lodgen.cpp src/esmdata.cpp; do
+for s in src/cellview.cpp src/features/far-lod/lodgen.cpp src/esmdata.cpp; do
 	[ "$REPO/$s" -nt "$EXE" ] && { say "  $s is NEWER than the exe"; newer=0; }
 done
 check "the exe is newer than every source this gate covers" "$newer"

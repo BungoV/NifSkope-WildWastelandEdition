@@ -25,7 +25,7 @@
 # HKCU\Software\NifTools\NifSkope 2.0\UI\Window Geometry decoded to frame
 # 1920x1048 on screen 1, MAXIMIZED, normal 1280x800 -- bungo's last window.
 # restoreUi() replayed it into every harness run, and lane IMPOSTORSHOW then
-# named the mechanism exactly (src/impostorpreviewtest.cpp, forceWindow()):
+# named the mechanism exactly (src/features/far-lod/impostorpreviewtest.cpp, forceWindow()):
 # showNormal() ALONE DOES NOT CLEAR a WindowMaximized bit that arrived with a
 # restored geometry, and a resize() applied to a still-maximized window is
 # discarded WITHOUT A WORD -- "asked 1024x1024, got 1822x989".

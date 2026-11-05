@@ -8,8 +8,8 @@ BSD License - see nifskope.h
 #include "wwswitch.h"	// lane TESTDRIVER1: the WW_* switch store
 
 #include "cellmodsource.h"
-#include "lodbfile.h"
-#include "lodgen.h"
+#include "features/far-lod/lodbfile.h"
+#include "features/far-lod/lodgen.h"
 
 #include <QDir>
 #include <QFile>

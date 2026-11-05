@@ -8,7 +8,7 @@
 #include "cellview.h"
 #include "esmdata.h"
 #include "gltfexport.h"
-#include "lodgen.h"
+#include "features/far-lod/lodgen.h"
 #include "nativeemit.h"
 #include "wwswitch.h"
 #include "io/material.h"

@@ -83,7 +83,7 @@ check() { if [ "$2" = "1" ]; then say "  PASS  $1"; else say "  FAIL  $1"; fails
 say "cell_fx.sh  $(date '+%Y-%m-%d %H:%M:%S')${RED:+   RED CONTROL: $RED}"
 newer=1
 for s in src/gl/celllights.cpp src/gl/celllights.h src/gl/renderer.cpp src/gl/glscene.cpp src/gl/glproperty.cpp \
-	src/features/lights/cellfxlit.cpp src/features/lights/cellfxlit.h src/gl/bsshape.cpp src/cellview.cpp src/lodgen.cpp \
+	src/features/lights/cellfxlit.cpp src/features/lights/cellfxlit.h src/gl/bsshape.cpp src/cellview.cpp src/features/far-lod/lodgen.cpp \
 	res/shaders/features/lights/cell_lights.glsl res/shaders/fo4_effectshader.frag res/shaders/fo4_effectcell.frag; do
 	[ "$REPO/$s" -nt "$EXE" ] && { say "  $s is NEWER than the exe"; newer=0; }
 done

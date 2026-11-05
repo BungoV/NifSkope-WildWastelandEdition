@@ -6,7 +6,7 @@
 #include "cellview.h"
 #include "gl/celllooks.h"
 #include "esmdata.h"
-#include "lodgen.h"
+#include "features/far-lod/lodgen.h"
 
 #include <QCoreApplication>
 #include <QCryptographicHash>

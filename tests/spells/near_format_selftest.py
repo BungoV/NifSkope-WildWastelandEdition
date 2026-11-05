@@ -3,7 +3,7 @@
 
 Reads a NEAR library pair and a FAR pair (both as written by the exe), checks what each must be,
 then corrupts ONE thing at a time -- re-signing every CRC it would otherwise trip -- and requires the
-decoder (tests/spells/lodgen_native_decode.py) to refuse it BY NAME. A mutation refused only by a CRC
+decoder (tests/features/far-lod/lodgen_native_decode.py) to refuse it BY NAME. A mutation refused only by a CRC
 proves nothing, so each case names the substring its refusal must contain; each case has a control
 (the same file re-signed with no change) that must be accepted.
 

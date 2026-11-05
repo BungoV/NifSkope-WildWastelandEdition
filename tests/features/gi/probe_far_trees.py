@@ -2,7 +2,7 @@
 """The far map's trees, read a second time (lane TREE1, 2026-10-02; docs/PRTP_PLAN.md).
 
 Imported by probe_far.py. Shares no code with src/features/gi/probefar.cpp: the placements and the tree models come
-through tests/spells/lodgen_native_decode.py, the texture layers through this file's own BC3 decoder, the
+through tests/features/far-lod/lodgen_native_decode.py, the texture layers through this file's own BC3 decoder, the
 layer of a material from the LOD folder's own text files (Objects/<world>.LodgenArrays.txt, then the chunk
 manifests' `M` + `A` lines).
 

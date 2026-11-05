@@ -1,13 +1,13 @@
 #include "features/gi/probefar.h"
 #include "wwswitch.h"	// the WW_* switch store
 
-#include "lodifile.h"
-#include "lodofile.h"
-#include "lodtfile.h"
-#include "lodtsheets.h"
+#include "features/far-lod/lodifile.h"
+#include "features/far-lod/lodofile.h"
+#include "features/far-lod/lodtfile.h"
+#include "features/far-lod/lodtsheets.h"
 #include "features/gi/probebake.h"
-#include "io/lodvfile.h"
-#include "io/lodmfile.h"
+#include "features/far-lod/lodvfile.h"
+#include "features/far-lod/lodmfile.h"
 
 #include "ddstxt16.hpp"
 
@@ -317,7 +317,7 @@ const TreeModel & FarTrees::model( quint16 baseId, bool mirrored )
 	}
 	if ( far < 0 )
 		return M;
-	// the repetition breaker's mirror is about each material's OWN U range (the viewer's rule, src/lodinative.cpp)
+	// the repetition breaker's mirror is about each material's OWN U range (the viewer's rule, src/features/far-lod/lodinative.cpp)
 	std::map<quint16, std::pair<float, float>> uRange;
 	if ( mirrored )
 		walk( base.rep[far], [&]( const LodoCluster & cl, quint32, const std::vector<V> & v ) {

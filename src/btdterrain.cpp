@@ -11,10 +11,10 @@ BSD License - see nifskope.h
 #include "spells/blocks.h"
 
 #include "btdfile.hpp"
-#include "io/lodvfile.h"
-#include "lodinative.h"
-#include "lodtfile.h"
-#include "lodtsheets.h"
+#include "features/far-lod/lodvfile.h"
+#include "features/far-lod/lodinative.h"
+#include "features/far-lod/lodtfile.h"
+#include "features/far-lod/lodtsheets.h"
 
 #include <QCoreApplication>
 #include <QDebug>
@@ -54,7 +54,7 @@ BSD License - see nifskope.h
  *  - a `.lodl` is OUR equivalent, written by the LOD generator and specified in
  *    docs/LODGEN_BTD_FORMAT.md. It takes FO76's idea and not its layout, and it
  *    carries planes a `.btd` has no room for: baked ambient occlusion, water
- *    height and type, per-cell height ranges. Its reader is src/lodtfile.cpp
+ *    height and type, per-cell height ranges. Its reader is src/features/far-lod/lodtfile.cpp
  *    and this file does not contain a second one.
  *
  * So "opening" either means choosing a region and a detail level and BUILDING
@@ -2759,7 +2759,7 @@ bool nifCreateLodtTerrainScene( NifModel * nif, const QString & lodtPath,
 	if ( spec.plane == LodtPlane::Height && s.rgba.empty()
 		&& sheetChan == LodlChannel::Ground ) {
 		/* The ramp is 1 at or below the surface falling to 0 over 256 world units
-		 * above it (src/lodgen.cpp ~4008), so the surface's own value is 255. The
+		 * above it (src/features/far-lod/lodgen.cpp ~4008), so the surface's own value is 255. The
 		 * terrain is drawn at that value -- the top of the same grey ramp the
 		 * placements are drawn in -- and a placement reads as its distance off
 		 * the ground against a white floor. */

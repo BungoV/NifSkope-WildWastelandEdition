@@ -5,7 +5,7 @@
  * the loader's own inputs (model as named, swap rows as given), so a miss only costs a late load, never a
  * different one. Off under WW_CELL_SPEED_RED=slow and =nomodels. */
 
-#include "lodgen.h"
+#include "features/far-lod/lodgen.h"
 #include "nativeemit.h"
 
 #include <QHash>

@@ -13,7 +13,7 @@ BSD License - see nifskope.h
 #include "features/gi/probebake.h"
 #include "features/gi/probegi.h"
 #include "celldoorlive.h"	// the live door's grid share (gate D3)
-#include "farlight.h"		// the far light under the rows (gate F)
+#include "features/far-lod/farlight.h"		// the far light under the rows (gate F)
 
 #include <QCoreApplication>
 #include <QDir>

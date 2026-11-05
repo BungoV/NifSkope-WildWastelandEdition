@@ -532,8 +532,8 @@ private:
 	 * and said, verbatim: "What? I wanted it in that right panel though".
 	 * The strip was the STYLE; the LOD Generation panel is the place, and
 	 * the water rows are a tab of THAT strip now
-	 * (src/lodgenmanager.cpp, tlCreateLodGenerationDock -> LodPanelModeSelector
-	 * over LodPanelStack; the page is added by src/watermarkpanel.cpp).
+	 * (src/features/far-lod/lodgenmanager.cpp, tlCreateLodGenerationDock -> LodPanelModeSelector
+	 * over LodPanelStack; the page is added by src/features/far-lod/watermarkpanel.cpp).
 	 *
 	 * So this enum is back to what it was before WATER7, and there is no
 	 * unreachable fourth mode left behind: the mode number IS the stack page

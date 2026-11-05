@@ -183,10 +183,10 @@ WW_LODL_SHEETS="$(winpath "$SHEETS")" "$NS" -no-gui lodl "$(winpath "$LODL")" \
 check "a non-height plane ignores the sheets entirely (byte-identical with them present)" \
 	"$([ -s "$P_OFF" ] && [ -s "$P_ON" ] && cmp -s "$P_OFF" "$P_ON" && echo 1 || echo 0)"
 
-if [ "${RUN_LODL_OPEN:-1}" = "1" ] && [ -f "$ROOT/tests/spells/lodl_open.sh" ]; then
+if [ "${RUN_LODL_OPEN:-1}" = "1" ] && [ -f "$ROOT/tests/features/far-lod/lodl_open.sh" ]; then
 	# its OWN fixtures: lodl_open.sh reads LODL and PORT too and means another
 	# file, so an LODL= given to this harness must not reach it (EXE and PY may)
-	lo=$(env -u LODL -u PORT bash "$ROOT/tests/spells/lodl_open.sh" 2>&1 | tail -3)
+	lo=$(env -u LODL -u PORT bash "$ROOT/tests/features/far-lod/lodl_open.sh" 2>&1 | tail -3)
 	echo "$lo" | sed 's/^/    /'
 	locount=$(echo "$lo" | grep -oE '^[0-9]+ checks' | grep -oE '^[0-9]+')
 	lofail=$(echo "$lo" | grep -oE '[0-9]+ failures' | grep -oE '^[0-9]+')
@@ -255,14 +255,14 @@ if [ -n "$MAN" ] && [ -f "$MAN" ]; then
 			check "every identity-on placement is within 1 unit of its own file" \
 				"$([ "$cmprc" = "0" ] && echo 1 || echo 0)"
 		fi
-		"$PY" "$ROOT/tests/spells/lodgen_native_decode.py" "$GC" "$GI" --manifest "$MAN" 2>&1 \
+		"$PY" "$ROOT/tests/features/far-lod/lodgen_native_decode.py" "$GC" "$GI" --manifest "$MAN" 2>&1 \
 			| sed 's/^/    /' | tail -12
 	else
 		check "the identity-on bake's own .lodo/.lodi sit under GNATIVE" 0
 	fi
 else
 	skip "the manifest leg of (b): no <chunk>.manifest.txt under GBAKE=${GBAKE:-<unset>}"
-	echo "       (the look bake passes --no-identity and src/lodgen.cpp writes placement"
+	echo "       (the look bake passes --no-identity and src/features/far-lod/lodgen.cpp writes placement"
 	echo "        rows only under opts.identity; re-bake THIS ONE CHUNK with identity on)"
 fi
 

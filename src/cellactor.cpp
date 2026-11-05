@@ -6,7 +6,7 @@
 
 #include "esmfile.hpp"
 #include "hkxanim.h"	// lane ACTORPOSE1: skeleton.hkx and the idle clip
-#include "lodgen.h"
+#include "features/far-lod/lodgen.h"
 #include "data/niftypes.h"
 #include "model/nifmodel.h"
 

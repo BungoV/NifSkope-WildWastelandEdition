@@ -7,7 +7,7 @@ cache the exe just filled from the real container.
 WHY THIS EXISTS (lane GATEFIX1, 2026-09-19).  The three synthetic caches used to
 be artefacts on disk, written once by lane NATIVEVIEW2 on 2026-09-12
 (scratchpad/nativeview2_20260912/work/make_tiltcache.py, make_tiltw.py, and the
-flat one inline in shots.sh).  src/lodtsheets.cpp:501-506 reuses a cached tile
+flat one inline in shots.sh).  src/features/far-lod/lodtsheets.cpp:501-506 reuses a cached tile
 only when it is NEWER than the .lodt container it came out of -- a correct rule,
 added 2026-09-18 -- and the container was re-baked on 2026-09-16 16:44.  So the
 first gate run after that rule landed (2026-09-18 09:12:47..09:13:19, one arm
@@ -156,7 +156,7 @@ def main():
         return 1
 
     # The own cache is only a usable SOURCE when the exe has already refreshed it
-    # from the container; src/lodtsheets.cpp reuses a tile only when it is newer
+    # from the container; src/features/far-lod/lodtsheets.cpp reuses a tile only when it is newer
     # than the container, so that is exactly the test.
     cmt = os.path.getmtime(container)
     stale = []

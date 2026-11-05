@@ -9,11 +9,11 @@
  * lane FRAMESPEED1: a second verdict (CPU-VERDICT) holds every crossing step's dearest ON-PROCESSOR frame to the same
  * bar: the wall bar also counts the machine's pre-emption and paging, which no change here moves. */
 
-#include "cellfarhide.h"
+#include "features/far-lod/cellfarhide.h"
 #include "cellmesh.h"
 #include "cellstream.h"
 #include "cellview.h"
-#include "lodgen.h"
+#include "features/far-lod/lodgen.h"
 #include "wwswitch.h"
 #include "gl/glscene.h"
 #include "gl/glshape.h"
@@ -43,7 +43,7 @@
 
 /* lane LODPLACE1 (CODE1030 2a + 2b): two censuses on the open's own document, no window.
  *   --place <file>  after the walk: every far object row of the instanced rings, every other shape and every far
- *                   terrain vertex in WORLD units (tests/lodplace/place_census.py puts them against the LAND height
+ *                   terrain vertex in WORLD units (tests/features/far-lod/lodplace/place_census.py puts them against the LAND height
  *                   and the ESM at their XY: under the map, flipped, floating).
  *   --still <n>     n more frames at the last step's eye. Each frame's far state (the rows every instanced ring draws,
  *                   the masked far triangles, the hidden far nodes, the loaded cells) against the frame before it:

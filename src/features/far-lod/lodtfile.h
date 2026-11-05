@@ -1,0 +1,581 @@
+/***** BEGIN LICENSE BLOCK *****
+
+BSD License - see nifskope.h
+
+***** END LICENCE BLOCK *****/
+
+#ifndef LODTFILE_H
+#define LODTFILE_H
+
+#include <QByteArray>
+#include <QFile>
+#include <QHash>
+#include <QList>
+#include <QString>
+#include <QVector>
+
+#include <functional>
+#include "lodtflowcode.h"	// lane FARLOOK1101 (FARWATER5 L3): the speed nibble's encodings
+#include <vector>
+
+class EsmWorld;
+
+/*! The landscape file's magic, first four bytes, little-endian.
+ *
+ *  It spells `LODT` on disk and it is NOT changing: the 2026-09-09 rename is an
+ *  extension rename, and the gate on it is that the bytes of a `.lodl` are
+ *  identical to the bytes the same worldspace wrote as a `.lodt` yesterday.
+ *  What distinguishes the two formats is that the TEXTURE file has its own
+ *  magic (LODTEX_MAGIC, `LDTX`, src/features/far-lod/lodvfile.h) -- so each reader can NAME
+ *  the other's file instead of misparsing it. */
+constexpr quint32 LODL_MAGIC = 0x54444F4CU;   // 'L','O','D','T' little-endian
+
+/*! The section-present bits of the header word at 0x44.
+ *
+ *  A READER CHECKS THE BIT, NOT THE OFFSET -- the rule
+ *  docs/LODGEN_BTD_FORMAT.md has stated since version 1, and the reason the
+ *  offsets of absent sections are allowed to hold anything at all. Bits 0..3
+ *  are version 1's; bits 4..7 are version 3's water bodies, and each names one
+ *  section that a version 1 or 2 file simply does not have. */
+constexpr quint32 LODL_SECT_COLOUR      = 1u << 0;
+constexpr quint32 LODL_SECT_GROUNDCOVER = 1u << 1;
+constexpr quint32 LODL_SECT_AO          = 1u << 2;
+constexpr quint32 LODL_SECT_WATER       = 1u << 3;
+constexpr quint32 LODL_SECT_BODIES      = 1u << 4;   //!< body table + body-ID plane
+constexpr quint32 LODL_SECT_FLOW        = 1u << 5;   //!< flow plane
+constexpr quint32 LODL_SECT_SHORE       = 1u << 6;   //!< shore-distance plane
+constexpr quint32 LODL_SECT_STROKE      = 1u << 7;   //!< stroke store
+/*! The DYE plane (lane WATER4): where one body's water is carried into
+ *  another's -- a river's tint past its mouth, a dye pin's plume.  It lives
+ *  in the version-3 header's reserved word at 0xF4 as a 32-bit offset, so
+ *  the version stays 3 and no existing offset moves; a reader checks this
+ *  bit, never the word. */
+constexpr quint32 LODL_SECT_DYE         = 1u << 8;   //!< dye plane
+/*! The SURFACE plane (lane WATER1, 2026-09-27): water that is not flat. One
+ *  float32 a sample at the body plane's rate, the surface height MINUS the
+ *  body's one waterHeight, so a sloped river's surface is `waterHeight +
+ *  delta`. It comes from placed non-flat water meshes (ACTI with a WNAM); a
+ *  worldspace without any writes the plane all uniform 0. The version-3 header
+ *  grew from 0xF8 to 0x100 for its u64 offset at 0xF8; the version stays 3. */
+constexpr quint32 LODL_SECT_SURFACE     = 1u << 9;   //!< surface plane
+/*! The SKY plane (lane WATERSKYVISFAR1): one byte a body-plane sample, the wet texel's sky visibility through
+ *  the terrain (1 + round(vis * 254)); 0 = dry. Version 4 only: its u64 offset and u32 rate sit at 0x100. */
+constexpr quint32 LODL_SECT_SKY         = 1u << 10;  //!< sky-visibility plane
+
+/*! One water BODY: a connected sheet of water with one plane height, one WATR
+ *  form and one flow, addressed by the body-ID plane.
+ *
+ *  Sixteen WATR forms serve 590 candidate bodies in the Commonwealth --
+ *  `ExtLakeWater` alone paints sixteen separate lakes with one colour and one
+ *  velocity -- so "a different colour per body of water" cannot be expressed
+ *  per FORM at all. That is what this record exists for. The layout is
+ *  scratchpad/specs_20260909/spec_water.md §3.3 and it is 48 bytes; the file
+ *  carries the stride, so a longer record can be added later without a version
+ *  bump and a reader that knows fewer fields reads the prefix it knows. */
+struct LodtWaterBody
+{
+	quint16 id = 0;              //!< == its index + 1; the reader refuses otherwise
+	quint8 cls = 0;              //!< 0 sea, 1 river, 2 lake
+	quint8 flags = 0;            //!< bit0 user-edited, 1 flow from a stroke,
+	                             //!< 2 colour override, 3 ambiguous merge,
+	                             //!< 4 TINY (< 4 texels), 5 class set by hand
+	float waterHeight = 0.0f;    //!< world units; the body's one plane
+	quint32 watrForm = 0;        //!< RESOLVED -- never 0, never 0xFFFF
+	quint32 area = 0;            //!< texels of the body-ID plane
+	qint16 x0 = 0, y0 = 0, x1 = 0, y1 = 0;   //!< cell bbox, inclusive
+	quint16 source = 0;          //!< flows FROM this body, 0 = none
+	quint16 outlet = 0;          //!< flows INTO this body, 0 = none
+	float flowX = 0.0f, flowY = 0.0f;        //!< mean flow, world units/second
+	quint8 colour[4] = { 0, 0, 0, 0 };       //!< RGBA override; A = 0 means none
+	quint8 confidence = 0;       //!< 0..255
+	quint8 flowSource = 0;       //!< 0 none, 1 form NAM0, 2 bed, 3 drain, 4 stroke
+	quint32 nameOffset = 0;      //!< into the name blob, 0 = unnamed
+};
+
+/*! The water-bodies module's own switches (CONSTITUTION rule 10: every feature
+ *  is a module with its own master switch and a fallback floor beneath it).
+ *
+ *  With `enabled` false the writer emits version 2 and the bytes are what they
+ *  were; that is the zero-effort way back, and it is what `WW_LODL_VERSION=2`
+ *  reaches without a rebuild.
+ *
+ *  The STRUCT default stays off (a library caller that says nothing gets the
+ *  bytes it always got); the two front ends turn it ON (lane WATER1,
+ *  2026-09-27): the command line unless `--no-water-bodies`, the panel row
+ *  ticked unless unticked. */
+/*! The flow word's confidence nibble the WRITER puts on a texel it solved
+ *  (lane WATERFLOWBAKE1): 0 = the body's constant mean, 15 = a stroke, 8 = the
+ *  automatic per-texel potential solve. */
+static const int kLodlFlowSolvedConfidence = 8;
+
+struct LodtWaterOptions
+{
+	bool enabled = false;        //!< on in both front ends; --no-water-bodies
+	/*! When the classifier REFUSES the worldspace (no water above its ground,
+	 *  or a grid too large to hold), write version 2 and say why in the census
+	 *  instead of failing the whole file. Set by the front ends' default; an
+	 *  explicit `--water-bodies` clears it and keeps the strict refusal. */
+	bool fallbackV2 = false;
+	int bridgeGap = 2;           //!< --water-bridge N, texels; 0 = no bridging
+	int nearTexels = 64;         //!< the drainage proximity, texels
+	int bodySamples = 0;         //!< body-ID plane rate; 0 = the file's own
+	int flowSamples = 0;         //!< flow plane rate; 0 = the file's own
+	bool shore = true;           //!< bake the shore-distance plane
+	/*! Lane WATERWETBAKE1: the shore plane's DRY texels carry their distance to the nearest wet texel (same
+	 *  3-4 chamfer, same 32-unit step, 255 = far). Off = every dry texel 255, byte for byte the old file. */
+	bool shoreLand = true;
+	/*! Lane WATERBODYSEAM1: the old rule, where a wet neighbour of ANOTHER body counted as shore (foam in open water
+	 *  at a river mouth). Off (default) = distance to land only; --water-shore-per-body = the old bytes. */
+	bool shorePerBody = false;
+	/*! Lane WATERFLOWBAKE1: solve each river's flow per texel (potential flow
+	 *  on its mask, confidence 8 in the word). Off = the constant word a body,
+	 *  byte for byte the file before it (--water-flow-constant). */
+	bool flowField = true;
+	/*! Lane WATERSKYVISFAR1: bake each wet texel's sky visibility (the sky plane, version 4). Off = the version-3
+	 *  bytes of before (--water-no-sky). */
+	bool skyVis = true;
+	/*! Lane WATERSKYVISFAR2: placed statics with a far LOD mesh (cliffs, rocks, buildings) block the sky rays too,
+	 *  as wall tops stamped into the ray heightfield. Off = terrain only, the WATERSKYVISFAR1 bytes
+	 *  (--water-sky-terrain-only). Needs LodtOptions::staticTops; without it the plane is terrain only. */
+	bool skyStatics = true;
+	/*! Lane WATERSKYVISFAR3: a wet texel a static covers (a pier deck, a bridge, a rock over its own point) casts
+	 *  through the statics as SLABS (lowest to highest surface) instead of the walls; every other texel keeps the
+	 *  wall bytes. Off = the WATERSKYVISFAR2 bytes (--water-sky-walls-only). */
+	bool skySlabs = true;
+	/*! Lane WATERFIX7: a square's slab is ONE run lowest to highest surface, piles and all (a pier's piles made its
+	 *  square one floor-to-deck slab). Off (default) = up to 4 runs a square; on = the WATERSKYVISFAR3 bytes
+	 *  (--water-sky-one-slab). */
+	bool skyOneSlab = false;
+	//! Lane WATERSKYVISFAR2: --water-sky-dump <file>, the ray heightfield before and after the statics (gate input).
+	QString skyDumpPath;
+	/*! The plugin the WATR `NAM0` linear velocities are read from -- vanilla's
+	 *  ONLY flow signal, and the fallback floor under the automatic rules. Empty
+	 *  means the arm is unavailable, which the census SAYS rather than silently
+	 *  writing zeroes. */
+	QString velocityPlugin;
+	QString reportPath;          //!< --water-report <file>, empty = stdout only
+};
+
+/*! Lane WATERFIX7: one z run of a square's statics (o = the square, row-major from gx0, gy0; lo..hi world z). */
+struct LodtSlabRun
+{
+	quint32 o = 0;
+	float lo = 0.0f, hi = 0.0f;
+};
+
+/*! Lane WATERSKYVISFAR2: the placed statics' far-LOD surfaces over world-aligned 128 u squares
+ *  (square = floor( world / 128 ), row-major from gx0, gy0). hi = the highest surface, lo = the lowest;
+ *  hi < -1e29 = no static over the square. Filled by LodtOptions::staticTops (the lodgen object height field). */
+struct LodtStaticTops
+{
+	int gx0 = 0, gy0 = 0, gw = 0, gh = 0;
+	std::vector<float> hi, lo;
+	/*! Lane WATERFIX7: in: also fill `runs`, the square's surfaces as up to 4 z runs (a deck and the water under
+	 *  it apart), with thin steep pieces (piles, posts) left out. Out: sorted by o, then lo. */
+	bool wantRuns = false;
+	std::vector<LodtSlabRun> runs;
+	QString census;   //!< the gather's own line (refs, models, trees skipped, load failures)
+};
+
+/*! Writer for the `.lodl` whole-worldspace LANDSCAPE file.
+ *
+ *  THE NAME MOVED (bungo's ruling, 2026-09-09). This file used to be written
+ *  as `.lodt`; `.lodt` now names the terrain TEXTURE sheets (src/features/far-lod/lodvfile.h,
+ *  magic LDTX), and the landscape file is `.lodl`. The C++ names in this header
+ *  -- LodtFile, lodtWrite, LodtOptions -- were NOT renamed with it: they are
+ *  internal, they appear in no file on disk and in no command, and renaming
+ *  three hundred call sites is churn a reader gains nothing from. Read
+ *  every `lodt` identifier here as "the .lodl landscape file". The magic bytes
+ *  did not move either (LODL_MAGIC still spells LODT on disk), because the
+ *  rename must leave the file byte-identical.
+ *
+ *  The format is specified in docs/LODGEN_BTD_FORMAT.md; that document is the
+ *  contract, not this header. It replaces the per-chunk `.btr` terrain path
+ *  entirely: one file per worldspace holding heights, LTEX blend alphas, water
+ *  (height AND type), terrain colour, ground cover and a coarse AO channel,
+ *  behind a LOD pyramid of zlib blocks.
+ *
+ *  Two properties are worth knowing before reading the implementation:
+ *
+ *   - the height quantum is a HEADER FIELD, not a constant. From Fallout 4 it
+ *     is 8, which is VHGT's own storage quantum and therefore exactly
+ *     lossless; a Fallout 76 source would use something finer;
+ *   - the LOD pyramid is PROGRESSIVE and its coarse levels are SUBSAMPLES.
+ *     Each finer level stores only the samples its coarser parent lacks, which
+ *     is both what geomorphing needs (a coarse vertex must BE a fine vertex)
+ *     and what a clipmap needs (levels must nest exactly).
+ */
+struct LodtOptions
+{
+	//! World units per stored height step. 8 = VHGT's quantum, lossless for FO4.
+	float heightQuantum = 8.0f;
+	//! Samples per cell edge. 32 from FO4 LAND; a header field, never assumed.
+	int samplesPerCell = 32;
+	//! Block edge in samples. One block per cell at the finest level.
+	int blockEdge = 32;
+	//! LOD levels, level 0 finest.
+	int levelCount = 4;
+	//! Coarse always-resident overview, samples per cell edge. 0 = none.
+	int overviewSamples = 8;
+	//! Baked AO, samples per cell edge. 0 = none.
+	int aoSamples = 8;
+	/*! Header version to WRITE. 2 adds the worldspace default water height and
+	 *  WATR form after the section offsets, which is what makes a cell's
+	 *  "water type 0xFFFF = the worldspace default" resolvable at all; 1 is the
+	 *  exact bytes this writer produced before that, for a consumer that has
+	 *  not learned version 2 yet. Both are accepted by the reader. The
+	 *  environment variable WW_LODL_VERSION overrides it, so the fallback is
+	 *  reachable without a rebuild (WW_LODT_VERSION is refused by name).
+	 *
+	 *  Version 3 appends the water-body sections. The writer raises the
+	 *  version to 3 only when the water module is switched on, so a file
+	 *  nobody asked new sections of is byte-identical to the one this writer
+	 *  produced before the module existed. Since lane WATER1 (2026-09-27) the
+	 *  CLI and the panel switch it on by default; `--no-water-bodies` is the
+	 *  way back to these version-2 bytes. */
+	int headerVersion = 2;
+
+	//! Water bodies, flow and shore -- off in the struct, on in both front ends.
+	LodtWaterOptions water;
+
+	/*! THE LANDLESS-CELL HEIGHT FILL (lane FIX1, 2026-09-26). Empty by default,
+	 *  and then every byte is the one this writer wrote before it existed. Set,
+	 *  it is asked once per cell that has NO LAND record, for that cell's 33x33
+	 *  heights (row 0 = south, as VHGT) in world units; false = it has none and
+	 *  the worldspace's default height stands. The samples a landless cell
+	 *  inherits across a shared edge from a neighbour WITH land keep the seam
+	 *  rule: real terrain wins over any fill. lodgenVanillaCellHeights (the
+	 *  game's own terrain LOD, read as input) is the one filler today. */
+	std::function<bool( int cx, int cy, float * h33x33 )> landFill;
+
+	/*! PLACED WATER MESHES (lane WATER1, 2026-09-27). Empty by default, and
+	 *  then placed water is not gathered at all and the census says so. Set,
+	 *  it is asked once per distinct model path of a placed ACTI that carries
+	 *  a water type (WNAM), for that model's triangles in MODEL space: nine
+	 *  floats a triangle (three xyz corners). False = the mesh did not load;
+	 *  that is counted, never fatal. The front ends answer it with the lodgen
+	 *  NIF loader, so this file never includes the loader itself. */
+	std::function<bool( const QString & model, std::vector<float> & tris )> placedWaterModel;
+
+	/*! Lane WATERSKYVISFAR2: the sky plane's static occluders. Asked once, by the water pass, for the cell
+	 *  rectangle [cx0, cx1] x [cy0, cy1] (world cells); `cellWanted( cx, cy )` false = skip that cell's refs.
+	 *  Empty = the sky plane is terrain only and the census says so. The front ends answer it with
+	 *  lodgenStaticTops (the object AO's height field), so this file never includes the loader. */
+	std::function<bool( int cx0, int cy0, int cx1, int cy1, const std::function<bool( int, int )> & cellWanted,
+		LodtStaticTops & out )> staticTops;
+
+	/*! Progress, for a GUI: phase 0 = pass one (done = cell rows, total =
+	 *  cell rows), phase 1 = blocks (done = blocks emitted, total = blocks;
+	 *  level and the block's i, j so a map can paint the cells it covers -
+	 *  a level-L block at (i, j) is cells [i<<L, (i+1)<<L) x [j<<L, (j+1)<<L)).
+	 *  Return false to cancel: the writer stops, removes the partial file and
+	 *  fails with "cancelled". Called on the writer's thread. */
+	std::function<bool( int phase, int done, int total, int level, int i, int j )> progress;
+};
+
+/*! Recompute ONLY the AO plane of an existing .lodl, in place.
+ *
+ *  AO is a flat uncompressed section of fixed size at a known offset, and it
+ *  is derived from the file's own heights, so it can be rebuilt without
+ *  touching anything else - which is what "re-bake the AO but keep the
+ *  heightmap" means. The plane is computed by the same function the writer
+ *  uses, from the same samples read back through the reader, so a refreshed
+ *  file is byte-identical to a freshly written one. `progress( done, total )`
+ *  counts AO rows; return false to cancel (the file is untouched until the
+ *  single write at the end). */
+bool lodtRefreshAo( const QString & path, QString * error,
+	std::function<bool( int, int )> progress = {} );
+
+//! Write <outDir>/FO4CSLOD/<EDID>/<EDID>.lodl for one worldspace (lane LAYOUT1,
+//! 2026-09-16: the path is composed by lodgenFo4csWorldDir(), never spelled here).
+bool lodtWrite( const EsmWorld & world, const QString & outDir,
+	const LodtOptions & opts, QString * outPath, QString * error );
+
+/*! Convert a Fallout 76 .btd to .lodl.
+ *
+ *  The format was specified with this conversion in mind, so most of it copies
+ *  across untouched -- the alpha packing, the progressive 3/4-per-level pyramid
+ *  and the block edge are the same scheme. Two things differ: heights are
+ *  rescaled from their world-normalised uint16 onto our quantum, which is why
+ *  the quantum is a header field rather than a constant, and there is no water,
+ *  because a .btd carries none. `notes` receives what the conversion measured.
+ */
+bool lodtWriteBtd( const QString & btdPath, const QString & outDir,
+	const LodtOptions & opts, QString * outPath, QString * error,
+	QString * notes = nullptr, const EsmWorld * waterFrom = nullptr );
+
+/*! The `--water-census` table, read back out of a written file.
+ *
+ *  It reads the FILE, never the writer's own in-memory tables: a census that
+ *  reported what the writer meant to write rather than what a reader sees would
+ *  be the "telemetry echoes intent" failure this tree has a rule against. False,
+ *  with the reason named, when the file carries no body table. */
+bool lodtWaterCensus( const QString & path, QString * text, QString * error );
+
+/*! The water classifier's KNOWN-ANSWER control (`lodl <file> --water-selftest`).
+ *
+ *  A synthetic worldspace with a sea, a stepped river, a lake and a puddle whose
+ *  answer was written down before the code, run through the same classifier that
+ *  writes real files, with the type-blind REFUTER beside it so the check is seen
+ *  to fail on the other side of the floor. False = the control did not hold. */
+bool lodtWaterSelfTest( QString * text, QString * error );
+
+/*! The SLOPED-water known-answer test (`lodl <out.lodl> --water-slope-selftest`,
+ *  lane WATER1). Writes a real .lodl at `outPath` through the same writer from
+ *  a synthetic valley with a flat sea and one sloped ribbon of placed water,
+ *  reads it back with LodtFile and checks the surface against the ribbon's
+ *  analytic height. When `flatPath` is not empty the refuter's file (the same
+ *  valley with the ribbon forced flat) is kept there so both can be drawn.
+ *  False = the test did not pass; `text` holds the ok/FAIL lines either way. */
+bool lodtWaterSlopeSelfTest( const QString & outPath, const QString & flatPath,
+	QString * text, QString * error );
+
+/*! Reader. Nothing verifies a format writer except an independent reader --
+ *  a file can be self-consistently wrong, which is exactly how a DDS header
+ *  with the pixel-format block at the wrong offset passed its own parser until
+ *  a shipped file was run through the same code.
+ */
+class LodtFile
+{
+public:
+	bool open( const QString & path, QString * error );
+
+	int cellMinX() const { return minX; }
+	int cellMinY() const { return minY; }
+	int cellMaxX() const { return maxX; }
+	int cellMaxY() const { return maxY; }
+	int cellsX() const { return maxX - minX + 1; }
+	int cellsY() const { return maxY - minY + 1; }
+	int samplesPerCell() const { return spc; }
+	int blockEdge() const { return blkEdge; }
+	int levelCount() const { return levels; }
+	float heightQuantum() const { return quantum; }
+	float minHeight() const { return hMin; }
+	float maxHeight() const { return hMax; }
+	int ltexCount() const { return int( ltex.size() ); }
+	int watrCount() const { return int( watr.size() ); }
+	int headerVersion() const { return ver; }
+	/*! The worldspace's own water, from WRLD DNAM/NAM2 -- what a cell whose
+	 *  water type reads 0xFFFF is inheriting. Version 1 files carry neither,
+	 *  and report 0 and "no default water": the fields did not exist, so a
+	 *  reader must not treat the zero as a form id. */
+	bool hasDefaultWater() const { return ver >= 2 && defWaterType != 0; }
+	float defaultWaterHeight() const { return defWaterH; }
+	quint32 defaultWaterType() const { return defWaterType; }
+	int gcvrCount() const { return int( gcvr.size() ); }
+	int aoSamples() const { return aoS; }
+	int overviewSamples() const { return ovS; }
+	quint32 sectionFlags() const { return sect; }
+	quint32 ltexForm( int i ) const { return ltex.value( i, 0 ); }
+	quint32 watrForm( int i ) const { return watr.value( i, 0 ); }
+	quint32 gcvrForm( int i ) const { return gcvr.value( i, 0 ); }
+
+	/* ---- version 3: water bodies, flow and shore --------------------------
+	 *
+	 * Every one of these answers a NEUTRAL value on a file that carries no such
+	 * section, for the same reason aoSample() answers 255: an absent plane and
+	 * an all-zero plane look identical in a picture, so the neutral value is
+	 * the one that changes nothing. `bodyCount() == 0` is how a consumer asks
+	 * whether the section is there at all -- it already tested the flag bit. */
+
+	//! How many bodies the table holds; 0 when the file carries none.
+	int bodyCount() const { return int( bodies.size() ); }
+	//! The stride the FILE declares, which may exceed this reader's 48.
+	int bodyRecordBytes() const { return bodyStride; }
+	/*! Body `id` (1-based, as the plane stores it). False outside 1..count. */
+	bool waterBody( int id, LodtWaterBody & out ) const;
+	//! A body's name from the blob, or an empty string.
+	QString bodyName( const LodtWaterBody & b ) const;
+
+	int bodyIdSamples() const { return bodyS; }
+	int flowPlaneSamples() const { return flowS; }
+	int shorePlaneSamples() const { return shoreS; }
+	//! World units per stored shore step (32 as written).
+	float shoreQuantum() const { return shoreQ; }
+	//! Flow-word encoding id; 0 = dir8 / speed4 / confidence4; 1 = the same with a log speed nibble (lodtflowcode.h).
+	quint32 flowEncoding() const { return flowEnc; }
+	/*! The dye plane (LODL_SECT_DYE): samples per cell edge, 0 when absent.
+	 *  One uint32 a sample: bits 0..15 the SOURCE -- 1..32767 a body id, the
+	 *  body whose water this is; 0x8000 | n the n-th dye pin of the stroke
+	 *  store; 0 no dye -- and bits 16..23 the weight 0..255.  The plane is
+	 *  written at the flow plane's rate by the marking tool (watermark.cpp);
+	 *  the generator never writes one. */
+	int dyePlaneSamples() const { return dyeS; }
+	//! Where the dye plane store sits, 0 when absent (the word at 0xF4).
+	quint64 dyePlaneOffset() const { return dyeAt; }
+
+	//! Body id at a sample of the BODY plane's own grid; 0 = no water here.
+	quint16 bodyIdAt( int bx, int by ) const;
+	//! Lane SHORE1: true when the cell tile holding body sample (bx, by) is one value (`id`, or `d` the delta).
+	bool bodyTileUniform( int bx, int by, quint16 & id ) const;
+	bool surfaceTileUniform( int bx, int by, float & d ) const;
+	//! Lane SHORE1: an n x n block of body ids / surface deltas from (bx, by), row-major, inside one cell tile.
+	void bodyIdBlock( int bx, int by, int n, quint16 * out ) const;
+	void surfaceDeltaBlock( int bx, int by, int n, float * out ) const;
+	//! Flow word at a sample of the FLOW plane's own grid; 0 = still water.
+	quint16 flowWordAt( int fx, int fy ) const;
+	//! Shore steps at a sample of the SHORE plane's own grid; 255 = far/absent.
+	quint8 shoreAt( int sx, int sy ) const;
+	//! Dye word at a sample of the DYE plane's own grid; 0 = no dye here.
+	quint32 dyeWordAt( int dx, int dy ) const;
+
+	/*! The surface plane (LODL_SECT_SURFACE): samples per cell edge, 0 when
+	 *  absent; always the body plane's rate. `surfaceDeltaAt` is the float
+	 *  stored at a BODY-plane sample -- the water surface minus that texel's
+	 *  body waterHeight, 0 for flat water and when the plane is absent.
+	 *  `waterSurfaceAt` is the answer a renderer wants: the body's height plus
+	 *  the delta; false (z untouched) where there is no body. */
+	int surfacePlaneSamples() const { return surfS; }
+	float surfaceDeltaAt( int bx, int by ) const;
+	bool waterSurfaceAt( int bx, int by, float & z ) const;
+	//! Lane WATERSKYVISFAR1: the sky plane's rate (0 = absent) and its byte at a body sample (0 = dry or absent).
+	int skyPlaneSamples() const { return skyS; }
+	quint8 skyAt( int bx, int by ) const;
+
+	/*! Lane WATERDATA1: a water plane's tile store, `plane` 0 body id, 1 shore, 2 surface (WATERFLOWBAKE1: 3 flow,
+	 *  WATERSKYVISFAR1: 4 sky).
+	 *  The tile edge in samples (0 = the plane is absent), and whether tile (tx, ty) is stored UNIFORM, its one
+	 *  sample in `value` (an absent plane is uniform at its neutral value: 0, 255, 0, 0). */
+	int waterTileEdge( int plane ) const;
+	bool waterTileUniform( int plane, int tx, int ty, quint32 & value ) const;
+
+	//! How many strokes the store holds; 0 when there is no store.
+	int strokeCount() const { return nStrokes; }
+	//! The raw stroke store, exactly as written (empty when absent).
+	QByteArray strokeStore() const { return strokes; }
+
+	//! Per-cell record. Returns false outside the worldspace.
+	bool cell( int cx, int cy, float & lo, float & hi,
+		float & waterH, quint16 & waterType, quint16 & flags ) const;
+
+	//! Height at a full-rate global sample, walking the progressive pyramid.
+	//! This is the operation the whole block layout exists to serve.
+	float height( int gx, int gy ) const;
+
+	//! The stored height word itself (height = (word - 32767) * quantum).
+	quint16 heightWord( int gx, int gy ) const { return planeSample( gx, gy, 0 ); }
+
+	//! Where the AO plane sits in the file; 0 when there is none.
+	quint64 aoOffset() const { return ( sect & 4u ) ? oAo : 0; }
+
+	/*! One texel of the baked AO plane, which is FLAT and uncompressed:
+	 *  `cellsX * aoSamples` by `cellsY * aoSamples`, one uint8 each. 255 is
+	 *  fully open sky. Returns 255 - the "nothing occludes this" value - when
+	 *  the file carries no AO plane or the coordinates leave it, so a consumer
+	 *  that forgot to check `aoSamples()` darkens nothing rather than
+	 *  everything. */
+	quint8 aoSample( int ax, int ay ) const;
+
+	/*! One sample of the coarse overview: the uncompressed always-resident
+	 *  height grid at `overviewSamples()` a cell, in the SAME quantised
+	 *  encoding as the blocks (`height = (word - 32767) * quantum`), so a
+	 *  reader can compare the two directly. 32767 (height zero) when there is
+	 *  no overview section or the coordinates leave it. */
+	quint16 overviewWord( int ox, int oy ) const;
+	float overviewHeight( int ox, int oy ) const
+	{ return ( float( overviewWord( ox, oy ) ) - 32767.0f ) * quantum; }
+
+	/*! How many inflated blocks the reader keeps. One is right for a verifier
+	 *  walking samples in order; a consumer that reads a SUBSAMPLED grid needs
+	 *  more, because the progressive pyramid puts consecutive samples of such
+	 *  a grid on DIFFERENT levels - a step of 4 alternates between the level
+	 *  that stores every 4th sample and the one that stores every 8th, and a
+	 *  one-block cache then misses on every single sample. Clamped to >= 1. */
+	void setBlockCacheSize( int blocks );
+
+	//! LTEX alpha word at a full-rate global sample; five 3-bit weights.
+	quint16 alphaWord( int gx, int gy ) const;
+
+	//! Terrain colour, 5-5-5 (R at 11, G at 6, B at 0); 0xFFFF when the file has none.
+	quint16 colourWord( int gx, int gy ) const;
+
+	//! Ground cover mask, one bit a slot; 0 when the file has none.
+	quint16 groundCover( int gx, int gy ) const;
+
+	//! The five LTEX slots of a quadrant, plus its base at index 5.
+	void quadrantSlots( int cx, int cy, int quad, quint16 out[6] ) const;
+
+	int blockCount() const { return nBlocks; }
+
+private:
+	/* Everything up to the block data - header, tables, per-cell records, the
+	 * overview, the AO plane and the block directory - is read once into
+	 * `buf`; that is ~20 MB for Appalachia. The block payloads are NOT: they
+	 * are seek-read one at a time through `file`, because the payloads are
+	 * the file (1.5 GB of Appalachia's 1.55) and a reader that loaded them
+	 * whole was the 2.1 GB peak the streamed writer had been blamed for. */
+	mutable QFile file;
+	QByteArray buf;
+	int minX = 0, minY = 0, maxX = 0, maxY = 0;
+	int spc = 32, blkEdge = 32, levels = 4, aoS = 0, ovS = 0;
+	int ver = 1;
+	float defWaterH = 0.0f;
+	quint32 defWaterType = 0;
+	float quantum = 8.0f, hMin = 0.0f, hMax = 0.0f;
+	quint32 sect = 0;
+	QVector<quint32> ltex, watr, gcvr;
+	quint64 oQuad = 0, oCell = 0, oOver = 0, oAo = 0, oDir = 0, oData = 0;
+	int nBlocks = 0;
+
+	/* ---- version 3 ------------------------------------------------------
+	 * The water sections live AFTER the block data, so they are not inside
+	 * `buf` (which stops at oData) and are read into their own buffers at
+	 * open: the body table and the name blob whole, each plane's directory
+	 * whole, and the tile payloads on demand. A directory is 16 bytes a cell
+	 * -- 590 KB for the Commonwealth -- and a uniform tile costs no read at
+	 * all, which is the whole point of the container. */
+	QVector<LodtWaterBody> bodies;
+	QByteArray nameBlob;
+	int bodyStride = 0;
+	int bodyS = 0, flowS = 0, shoreS = 0;
+	int dyeS = 0;
+	quint64 dyeAt = 0;
+	int surfS = 0;
+	int skyS = 0;
+	float shoreQ = 32.0f;
+	quint32 flowEnc = 0;
+	int nStrokes = 0;
+	QByteArray strokes;
+
+	struct PlaneStore
+	{
+		int tilesX = 0, tilesY = 0, tileEdge = 0, bytesPerSample = 0;
+		quint64 dirOffset = 0, dataOffset = 0;
+		QByteArray dir;              //!< tilesX*tilesY * { u64, u32, u32 }
+		bool ok = false;
+	};
+	PlaneStore idStore, flowStore, shoreStore;
+	PlaneStore dyeStore;
+	PlaneStore surfStore;
+	PlaneStore skyStore;
+	//! Read a plane container's head and directory; refuses by name.
+	bool readPlaneStore( quint64 at, int bytesPerSample, PlaneStore & s,
+		QString * error ) const;
+	//! One tile, inflated; `uniform` tiles never touch the file.
+	quint32 planeSampleOf( const PlaneStore & s, int x, int y, quint32 absent ) const;
+	bool planeTileUniformOf( const PlaneStore & s, int x, int y, quint32 absent, quint32 & v ) const;
+	void planeBlockOf( const PlaneStore & s, int x, int y, int n, quint32 absent, quint32 * out ) const;
+	mutable QHash<quint64, QByteArray> tileCache;
+	mutable QList<quint64> tileOrder;
+
+	//! plane 0 = heights, 1 = alphas, 2 = colour, 3 = ground cover
+	quint16 planeSample( int gx, int gy, int plane ) const;
+
+	/* Inflated blocks, kept between calls. Consecutive samples almost always
+	 * land in the same block, and without this every sample paid a full 131 KB
+	 * inflate: --verify-only on Appalachia took 4m48s for 18,496 samples.
+	 * Least-recently-used, capacity 1 by default so a sample walk behaves
+	 * exactly as it did when this was a single slot. Single-threaded by
+	 * design; this is a verifier, not a renderer. */
+	struct CachedBlock
+	{
+		int idx = -1;
+		quint64 used = 0;
+		QByteArray raw;
+	};
+	mutable QVector<CachedBlock> cache;
+	mutable quint64 cacheClock = 0;
+	int cacheCap = 1;
+};
+
+#endif // LODTFILE_H

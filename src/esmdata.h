@@ -20,7 +20,7 @@ BSD License - see nifskope.h
 #include <memory>
 #include <vector>
 
-#include "largeref.h"	// lane GEOLOD1: WRLD RNAM rows
+#include "features/far-lod/largeref.h"	// lane GEOLOD1: WRLD RNAM rows
 
 class ESMFile;
 

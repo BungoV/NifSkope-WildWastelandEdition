@@ -1,7 +1,7 @@
 """ALPHATEST1 twin: does the probe bake honour alpha-test masks? (lane ALPHATEST1, 2026-10-03)
 
 Independent of the exe's sampler: the maps named in the soup's AMK1 tail are decoded here from the
-loose DDS files (tests/spells/impostor_bc_decode.py's BC1/BC3 decoder, Pillow for BC7), at the mip the
+loose DDS files (tests/features/far-lod/impostor_bc_decode.py's BC1/BC3 decoder, Pillow for BC7), at the mip the
 rule names (the largest of at most 1024 texels across), and compared with the bytes the exe wrote. Then
 every pixel of a cube dump (WW_CELL_BAKE_CUBE_DUMP, the bake's own cube way) is re-intersected with the
 masked triangles only (Moller-Trumbore in float64), and the mask is sampled HERE at the twin's own hit:

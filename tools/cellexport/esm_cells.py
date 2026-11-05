@@ -9,7 +9,7 @@ Reads straight out of the .esm, no NifSkope, no game:
     POSITION (so persistent references land in the right cell);
   * each cell's LAND VHGT height grid (33 x 33, 128 units a step).
 
-The placement convention is the generator's own (src/lodgen.cpp, "Bethesda's
+The placement convention is the generator's own (src/features/far-lod/lodgen.cpp, "Bethesda's
 stored euler angles are applied NEGATED relative to Matrix::fromEuler"):
 world R = fromEuler(-x, -y, -z), a SCOL part at rp + R * (part.pos * scale),
 rotation R * Rpart, scale scale * part.scale.

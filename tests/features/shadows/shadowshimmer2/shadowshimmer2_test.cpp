@@ -418,7 +418,7 @@ static void gateG3( const std::string & tree )
 			fmt( "worst %.4f units", worst ) );
 	}
 	// the C++ side: both passes take the one per-paint sample; the casters get its three uniforms and the tree flag
-	const std::string sun = readFile( tree + "/src/features/shadows/sunshadow.cpp" ), far = readFile( tree + "/src/cellfarlod.cpp" );
+	const std::string sun = readFile( tree + "/src/features/shadows/sunshadow.cpp" ), far = readFile( tree + "/src/features/far-lod/cellfarlod.cpp" );
 	const bool cpp = countOf( sun, "wwCellFarLodSway( scene )" ) == 1 && countOf( far, "wwCellFarLodSway( scene )" ) == 1
 		&& countOf( sun, "p->uni1f( \"farSwayAmp\", farSway.amp );" ) == 1 && countOf( sun, "p->uni1f( \"farSwayTime\", farSway.time );" ) == 1
 		&& countOf( sun, "p->uni1i( \"lodTreeAnim\", k.sway ? 1 : 0 );" ) == 1

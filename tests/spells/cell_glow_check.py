@@ -5,7 +5,7 @@
 
 The shot dir holds flat.png (WW_CELL_GLOW_RED=1: every billboard welded flat, as before), on.png (the run under
 test), on.notes (its census) and cam.txt (WW_CELL_CAM_DUMP: "cam=x,y,z"). Everything else is this file's OWN read
-of the plugin and the meshes (nothing shared with src/lodgen.cpp or src/cellview.cpp):
+of the plugin and the meshes (nothing shared with src/features/far-lod/lodgen.cpp or src/cellview.cpp):
   every REFR of the cell, not deleted, whose base names a MODL; the loose mesh under <data root>/Meshes; every
   BSTriShape below an NiBillboardNode (EditorMarker subtrees skipped); the card = the shape's bounding sphere,
   carried into the billboard node's frame. The game (and the viewer) drops the node's rotation and the

@@ -64,7 +64,7 @@ check() { if [ "$2" = "1" ]; then say "  PASS  $1"; else say "  FAIL  $1"; fails
 [ -x "$EXE" ] || { echo "no NifSkope.exe at $EXE"; exit 2; }
 say "probe_glass.sh  $(date '+%Y-%m-%d %H:%M:%S')${RED:+   RED CONTROL: $RED}"
 newer=1
-for s in src/cellview.cpp src/lodgen.cpp src/nativeemit.h src/features/gi/probebake.cpp src/features/gi/probealbedo.cpp; do
+for s in src/cellview.cpp src/features/far-lod/lodgen.cpp src/nativeemit.h src/features/gi/probebake.cpp src/features/gi/probealbedo.cpp; do
 	[ "$REPO/$s" -nt "$EXE" ] && { say "  $s is NEWER than the exe"; newer=0; }
 done
 check "the exe is newer than every source this gate covers" "$newer"

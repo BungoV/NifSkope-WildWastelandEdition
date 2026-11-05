@@ -3,15 +3,15 @@
 #include "cellstreamtex.h"	// lane STREAMTEX1: the stream's file textures, counted by cell
 #include "wwswitch.h"	// lane TESTDRIVER1: the WW_* switch store
 
-#include "cellfarhide.h"	// lane FARHOLE2: the far field leaves room for every loaded cell
-#include "cellfarlod.h"	// lane LARGEREF4: the far build's map for the large refs
+#include "features/far-lod/cellfarhide.h"	// lane FARHOLE2: the far field leaves room for every loaded cell
+#include "features/far-lod/cellfarlod.h"	// lane LARGEREF4: the far build's map for the large refs
 #include "cellmesh.h"
 #include "cellsplat.h"
 #include "esmdata.h"		// lane WEATHERBLEND6: the camera cell's regions
 #include "landlodspec.h"	// lane LANDSPEC6: streamCentre
-#include "largeref.h"		// lane LARGEREF2: who draws each large ref
+#include "features/far-lod/largeref.h"		// lane LARGEREF2: who draws each large ref
 #include "cellmodsource.h"	// lane LANDSPEC8: uGridsToLoad
-#include "impostorchunk.h"
+#include "features/far-lod/impostorchunk.h"
 #include "gl/bsshape.h"
 #include "features/near/cellcull.h"
 #include "gl/cellgrass.h"

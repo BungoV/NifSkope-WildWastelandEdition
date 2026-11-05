@@ -117,7 +117,7 @@ uniform bool cellRestirOn;
 uniform samplerBuffer cellRestir;	// RG32F, bottom row first: ratio, linear depth
 uniform vec4 cellRestirSize;		// W, H
 #endif
-// distant light from the surfels (src/farlight.h), set by celllights.cpp
+// distant light from the surfels (src/features/far-lod/farlight.h), set by celllights.cpp
 uniform bool cellFarOn;
 uniform samplerBuffer cellFarSlots;	// a slot: x, y, z x 8 + side, record + 1 (0 empty); exact integers
 uniform samplerBuffer cellFarRecs;	// 2 texels a record: pos, E (the shader's diff units)
@@ -1694,7 +1694,7 @@ float cellFarW( vec3 P )
 	return smoothstep( cellFarBand.x, cellFarBand.y, d );
 }
 
-// the hash farLightHash (src/farlight.h) uses: an int's bits as uint, products wrap
+// the hash farLightHash (src/features/far-lod/farlight.h) uses: an int's bits as uint, products wrap
 uint cellFarHash( ivec3 k, int side )
 {
 	return ( uint( k.x ) * 73856093u ) ^ ( uint( k.y ) * 19349663u ) ^ ( uint( k.z ) * 83492791u ) ^ ( uint( side ) * 2654435761u );

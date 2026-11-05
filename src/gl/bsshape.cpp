@@ -14,14 +14,14 @@
 #include "features/shared/cellpasstime.h"	// lane PERF1
 #include "features/near/cellqueue.h"	// lane GPUDRIVEN1: the main walks' render queues
 #include "features/near/cellgpucull.h"	// lane GPUDRIVEN1 step B: the GPU cluster cull
-#include "gl/cellfarinst.h"	// lane FARDRAW1: the instanced far rings
+#include "features/far-lod/cellfarinst.h"	// lane FARDRAW1: the instanced far rings
 #include "features/near/celldrawpacket.h"	// lane BINDLESSMDI1: the follower tests
 #include "gl/cellfxres.h"
 #include "gl/cellgrass.h"
 #include "features/near/cellvrs.h"
 #include "features/shadows/shadowset.h"
 #include "cellsplat.h"
-#include "cellfarhide.h"	// lane FARHOLE2: far triangles inside a streamed near cell
+#include "features/far-lod/cellfarhide.h"	// lane FARHOLE2: far triangles inside a streamed near cell
 #include "gl/glproperty.h"
 #include "cellmesh.h"
 #include "cellspeed.h"

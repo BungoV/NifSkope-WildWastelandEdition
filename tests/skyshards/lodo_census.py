@@ -1,7 +1,7 @@
 """SKYSHARDS2 step 1: the .lodo far-object library census (no stretched or stray vertices in what the baker wrote).
 
 python -I tests/skyshards/lodo_census.py <ws.lodo> [--write-red <out.lodo>]
-Read by tests/spells/lodgen_native_decode.py (independent of src/lodofile.cpp), which already refuses an index past its
+Read by tests/features/far-lod/lodgen_native_decode.py (independent of src/features/far-lod/lodofile.cpp), which already refuses an index past its
 cluster's vertices, an unsorted table or a bad CRC. On top of it, per mesh:
   * vertex bounds: the dequantised vertices (aabbMin + q / 65535 * extent) against the mesh box, and the mesh box's
     half-diagonal against the boundRadius of every base that uses the mesh (the source model's own bound, written by the

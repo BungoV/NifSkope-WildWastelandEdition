@@ -126,6 +126,8 @@ FILE_RULES = [
     (r'/main\.cpp$', 'relaunch'),
     (r'/cell(view|stream|farlod|mesh|texahead|splat|cable|aodecal|modsource|speed|census|modelahead)\.cpp$|/probe[a-z]*\.cpp$|/esm[a-z]*\.cpp$|/btdterrain\.cpp$|/lodinative\.cpp$|/lodofile\.cpp$|/impostorchunk\.cpp$|/aovolume\.cpp$|/nativeemit\.cpp$', 'reopen'),
 ]
+# MODULES1: renderer files moved from src/gl into a module folder keep the renderer's load-time rule
+GL_MOVED = ('src/features/far-lod/impostordraw.cpp', 'src/features/far-lod/cellfarinst.cpp')
 LOAD_FN = re.compile(r'(Publish|Load|load|Build|build|Open|open|Bake|bake|Pick|Import|import)')
 CTOR = re.compile(r'\b(\w+)::\1$')
 STARTUP_FN = re.compile(r'^(main|NifSkope::restoreUi|NifSkope::loadSettings|NifSkope::NifSkope|GLView::GLView|GLView::create|Renderer::Renderer|Scene::Scene|NifSkope::initActions|NifSkope::initDockWidgets|NifSkope::initMenu|NifSkope::initToolBars)$')
@@ -336,7 +338,7 @@ def stage_of(rel, fn, static, line=0):
         if a <= line <= b:
             return 'reopen', 'shot handler option: the live reopen runs the handler again (window, camera, options)'
         return 'relaunch', 'createWindow: picks which harness the window runs'
-    if fn and LOAD_FN.search(fn.split('::')[-1]) and re.search(r'/gl/', '/' + rel):
+    if fn and LOAD_FN.search(fn.split('::')[-1]) and (re.search(r'/gl/', '/' + rel) or rel in GL_MOVED):
         return 'reopen', 'read when the renderer is handed the cell (publish/load/build)'
     if static:	# TDFIX2: a C++ function static is read once for the process (WW_SWITCH_STATIC sites are not 'static')
         return 'relaunch', 'function static: read once for the process (not WW_SWITCH_STATIC)'

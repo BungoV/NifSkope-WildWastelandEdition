@@ -35,7 +35,7 @@ BSD License - see nifskope.h
 
 #include "gamemanager.h"
 #include "harnesswindow.h"
-#include "lodgen.h"
+#include "features/far-lod/lodgen.h"
 #include "cellmodsource.h"	// lane SKYTOP1: the active load order
 #include "cellstream.h"	// lane WEATHERBLEND6: the streamed camera's cell, for the region walk
 

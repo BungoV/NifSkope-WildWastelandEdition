@@ -7,7 +7,7 @@ BSD License - see nifskope.h
 #include "opencellcatalog.h"
 #include "wwswitch.h"	// lane TESTDRIVER1: the WW_* switch store
 #include "wwredtwin.h"	// lane REDRETIRE1: OPENCELLFIX2's retired red "lang"
-#include "lodgenloadorder.h"	// lane OPENCELLFIX1: the masters and the MO2 profile, as the LOD panel reads them
+#include "features/far-lod/lodgenloadorder.h"	// lane OPENCELLFIX1: the masters and the MO2 profile, as the LOD panel reads them
 
 #include "ba2file.hpp"
 #include "esmfile.hpp"

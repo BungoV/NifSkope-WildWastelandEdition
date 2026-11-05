@@ -1,0 +1,1662 @@
+/***** BEGIN LICENSE BLOCK *****
+
+BSD License - see nifskope.h
+
+***** END LICENCE BLOCK *****/
+
+#include "lodgenchunkpass.h"
+
+#include "esmdata.h"
+#include "lodgenparallel.h"
+#include "lodbfile.h"
+#include "lodgenlayout.h"
+#include "lodofile.h"
+#include "model/nifmodel.h"
+#include "nativeemit.h"
+
+#include <QBuffer>
+#include <QCryptographicHash>
+#include <QDataStream>
+#include <QDateTime>
+#include <QDir>
+#include <QDirIterator>
+#include <QFile>
+#include <QElapsedTimer>
+#include <QFileInfo>
+#include <QHash>
+#include <QSaveFile>
+#include <QSet>
+#include <QThread>
+
+#include <atomic>
+#include <cstdio>
+#include <memory>
+#include <vector>
+
+namespace
+{
+
+int g_lastWorkers = 0;
+int g_lastJobs = 0;
+
+/*! One worker's world. Everything in here is private to one thread for the
+ *  length of the pass: the plugin reader with its six lazy caches (which hand
+ *  out references INTO themselves), and the texture/grass-tint caches with
+ *  their LRU (whose evictor deletes textures another worker could be reading).
+ *  Neither survives being shared, with or without a mutex. */
+struct Worker
+{
+	std::unique_ptr<EsmWorld> world;
+	LodgenBakeCaches * caches = nullptr;
+	qint64 msMeshes = 0, msTextures = 0;
+
+	~Worker()
+	{
+		if ( caches )
+			lodgenDestroyBakeCaches( caches );
+	}
+};
+
+//! `<edid>.<dim>.<cx>.<cy>` -- the vanilla stem both drivers already built.
+QString chunkStem( const QString & edid, int dim, int cx, int cy )
+{
+	return QString( "%1.%2.%3.%4" ).arg( edid ).arg( dim ).arg( cx ).arg( cy );
+}
+
+/*! Serialise a document exactly as BaseModel::saveToFile does before it opens
+ *  a file -- through a QBuffer -- so the bytes handed to the writer thread are
+ *  the bytes an inline save would have written. */
+bool serialise( const NifModel & nif, QByteArray & out )
+{
+	QBuffer buf( &out );
+	if ( !buf.open( QIODevice::WriteOnly ) )
+		return false;
+	const bool ok = nif.save( buf );
+	buf.close();
+	return ok;
+}
+
+/*! Write, through the queue when there is one. Without a queue it is
+ *  QSaveFile with the direct-write fallback, which is what
+ *  BaseModel::saveToFile does -- so the file lands the same way either way. */
+bool writeBytes( const QString & path, const QByteArray & bytes, LodgenWriter * writer )
+{
+	if ( writer ) {
+		writer->push( path, bytes );
+		return true;            // the queue reports its failures at finish()
+	}
+	QSaveFile f( path );
+	f.setDirectWriteFallback( true );
+	if ( !f.open( QIODevice::WriteOnly ) )
+		return false;
+	if ( f.write( bytes ) != bytes.size() ) {
+		f.cancelWriting();
+		f.commit();
+		return false;
+	}
+	return f.commit();
+}
+
+/*! Build one job into its outcome. Runs on a worker thread, or -- at one
+ *  thread -- on the caller's, which is the loop this replaced. */
+void runJob( const LodgenChunkJob & job, int index, const LodgenChunkPassOptions & opts,
+	Worker & w, LodgenWriter * writer, bool journalNative, LodgenChunkOutcome & out )
+{
+	out.index = index;
+	out.dim = job.dim;
+	out.cx = job.cx;
+	out.cy = job.cy;
+	const QString stem = chunkStem( opts.worldEdid, job.dim, job.cx, job.cy );
+	/* THE RING IS THE JOB'S, not the option block's. A panel run over "all
+	 * rings" mixes 4/8/16/32 in one queue and the builders read `dim` off
+	 * their own options, so each job takes its own copy. */
+	LodgenTerrainOptions terrain = opts.terrain;
+	terrain.dim = job.dim;
+	LodgenObjectOptions object = opts.object;
+	object.dim = job.dim;
+
+	// THE NATIVE ORDERING.
+	LodgenNativeJournal * journal = journalNative ? lodgenNativeJournalBegin() : nullptr;
+
+	if ( opts.wantBtr ) {
+		NifModel nif;
+		QString cerr;
+		QElapsedTimer tMesh;
+		tMesh.start();
+		out.btrBuilt = lodgenBuildTerrainChunk( &nif, *w.world, job.cx, job.cy, terrain, &cerr );
+		w.msMeshes += tMesh.elapsed();
+		if ( !out.btrBuilt ) {
+			out.btrError = cerr;
+			out.btrNoLand = cerr.startsWith( QLatin1String( "no LAND" ) );
+		} else {
+			const QString path = opts.meshDir + QStringLiteral( "/" ) + stem + QStringLiteral( ".BTR" );
+			QByteArray bytes;
+			if ( serialise( nif, bytes ) ) {
+				// The preview copy carries the chunk's WORLD translation on its root -- what the panel used to
+				// put on the live document before saving it and then undo.
+				if ( !opts.previewDir.isEmpty() ) {
+					const QModelIndex root = nif.getBlockIndex( 0 );
+					nif.set<Vector3>( root, "Translation",
+						Vector3( float( job.cx ) * 4096.0f, float( job.cy ) * 4096.0f, 0.0f ) );
+					QByteArray pv;
+					if ( serialise( nif, pv ) ) {
+						const QString pp = opts.previewDir + QStringLiteral( "/lodgen_preview_" )
+							+ stem + QStringLiteral( "_btr.nif" );
+						if ( writeBytes( pp, pv, writer ) )
+							out.btrPreviewPath = pp;
+					}
+					nif.set<Vector3>( root, "Translation", Vector3() );
+				}
+				out.btrSaved = writeBytes( path, bytes, writer );
+				if ( out.btrSaved )
+					out.btrPath = path;
+			}
+			if ( opts.wantTex ) {
+				QElapsedTimer tTex;
+				tTex.start();
+				QString terr;
+				if ( !lodgenBakeTerrainTextures( *w.world, job.cx, job.cy, job.dim, opts.texDataRoot,
+					opts.texDir, opts.cover, w.caches, &terr ) )
+					out.texError = terr;
+				w.msTextures += tTex.elapsed();
+			}
+		}
+	}
+
+	if ( opts.wantBto ) {
+		NifModel nif;
+		QString manifest, cerr;
+		QElapsedTimer tObj;
+		tObj.start();
+		out.btoBuilt = lodgenBuildObjectChunk( &nif, *w.world, job.cx, job.cy, object, &manifest, &cerr );
+		w.msMeshes += tObj.elapsed();
+		if ( !out.btoBuilt ) {
+			out.btoError = cerr;
+		} else {
+			// The scratch directory when the `.BTO` is scaffolding, `meshDir` when it is an output.
+			const QString btoDir = opts.btoScratchDir.isEmpty() ? opts.meshDir : opts.btoScratchDir;
+			const QString path = btoDir + QStringLiteral( "/" ) + stem + QStringLiteral( ".BTO" );
+			QByteArray bytes;
+			if ( serialise( nif, bytes ) ) {
+				if ( !opts.previewDir.isEmpty() ) {
+					// BTO shapes self-place: the preview copy IS the document
+					const QString pp = opts.previewDir + QStringLiteral( "/lodgen_preview_" )
+						+ stem + QStringLiteral( "_bto.nif" );
+					if ( writeBytes( pp, bytes, writer ) )
+						out.btoPreviewPath = pp;
+				}
+				out.btoSaved = writeBytes( path, bytes, writer );
+				if ( out.btoSaved ) {
+					out.btoPath = path;
+					// THE MANIFEST IS A SIDECAR, not chunk data, and is written whatever the identity flag
+					// says: the texture arrays, the impostor card arrays, the shape merge and the far-ring cut
+					// all read it back, and gating it on identity took them with it.
+					{
+						const QString mp = path + QStringLiteral( ".manifest.txt" );
+						if ( writeBytes( mp, manifest.toUtf8(), writer ) )
+							out.manifestPath = mp;
+					}
+				}
+			}
+		}
+	}
+
+	if ( journal ) {
+		lodgenNativeJournalEnd();
+		out.nativeJournal = journal;
+		out.nativeEvents = lodgenNativeJournalSize( journal );
+	}
+}
+
+/* THE RESUME LEDGER, one file a retired chunk: the key, the outcome, the raw journal. */
+const quint32 kChunkLedgerMagic = 0x314A4352U;	// "RCJ1"
+
+QString ledgerPath( const LodgenChunkPassOptions & o, int i, const LodgenChunkJob & j )
+{
+	return QString( "%1/%2.%3.%4.%5.chunk" ).arg( o.resumeDir ).arg( i ).arg( j.dim ).arg( j.cx ).arg( j.cy );
+}
+
+//! the ledger's bytes; it goes through the same writer queue as the chunk's files, so it lands after them
+QByteArray ledgerBytes( const LodgenChunkPassOptions & o, const LodgenChunkOutcome & r )
+{
+	QByteArray b;
+	QDataStream s( &b, QIODevice::WriteOnly );
+	s << kChunkLedgerMagic << o.resumeKey << qint32( r.index ) << qint32( r.dim ) << qint32( r.cx ) << qint32( r.cy )
+	  << r.btrBuilt << r.btrNoLand << r.btrSaved << r.btoBuilt << r.btoSaved << r.btrError << r.btoError << r.texError
+	  << r.btrPath << r.btoPath << r.manifestPath << r.btrPreviewPath << r.btoPreviewPath << qint32( r.nativeEvents )
+	  << bool( r.nativeJournal ) << lodgenNativeJournalSave( r.nativeJournal );
+	return b;
+}
+
+//! a ledger for this job under this key whose files are all still there; the journal comes back as bytes
+bool loadLedger( const LodgenChunkPassOptions & o, int i, const LodgenChunkJob & j, LodgenChunkOutcome & r,
+	bool & hasJournal, QByteArray & journal )
+{
+	QFile f( ledgerPath( o, i, j ) );
+	if ( !f.open( QIODevice::ReadOnly ) )
+		return false;
+	QDataStream s( &f );
+	quint32 magic = 0;
+	QString key;
+	qint32 idx = 0, dim = 0, cx = 0, cy = 0, ev = 0;
+	s >> magic >> key >> idx >> dim >> cx >> cy;
+	if ( s.status() != QDataStream::Ok || magic != kChunkLedgerMagic || key != o.resumeKey || idx != i
+		|| dim != j.dim || cx != j.cx || cy != j.cy )
+		return false;
+	LodgenChunkOutcome t;
+	t.index = i;
+	t.dim = dim;
+	t.cx = cx;
+	t.cy = cy;
+	s >> t.btrBuilt >> t.btrNoLand >> t.btrSaved >> t.btoBuilt >> t.btoSaved >> t.btrError >> t.btoError >> t.texError
+	  >> t.btrPath >> t.btoPath >> t.manifestPath >> t.btrPreviewPath >> t.btoPreviewPath >> ev >> hasJournal >> journal;
+	if ( s.status() != QDataStream::Ok )
+		return false;
+	if ( hasJournal ) {
+		LodgenNativeJournal * jr = lodgenNativeJournalLoad( journal );
+		if ( !jr )
+			return false;
+		lodgenNativeJournalDestroy( jr );
+	}
+	for ( const QString & p : { t.btrPath, t.btoPath, t.manifestPath, t.btrPreviewPath, t.btoPreviewPath } )
+		if ( !p.isEmpty() && !QFileInfo::exists( p ) )
+			return false;
+	t.nativeEvents = ev;
+	r = t;
+	return true;
+}
+
+/*! A worker thread: take the next job nobody has taken, build it, mark it
+ *  done. Completion order is not job order; the driver retires from the
+ *  results array by index. */
+class ChunkThread final : public QThread
+{
+public:
+	ChunkThread( Worker * w, const QVector<LodgenChunkJob> * jobs, const LodgenChunkPassOptions * o,
+		LodgenWriter * writer, std::atomic<int> * cursor, LodgenChunkOutcome * results,
+		std::atomic<int> * flags, const std::function<bool()> * cancel, const char * skipJobs )
+		: worker( w ), jobList( jobs ), options( o ), out( writer ),
+		  next( cursor ), res( results ), doneFlags( flags ), cancelled( cancel ), skip( skipJobs ) {}
+
+protected:
+	void run() override
+	{
+		/* This thread IS one of the generator's workers. Red: the BC encoders it reaches do not fan out again
+		 * underneath it. Otherwise its inner loops share the one pool with the other workers. */
+		std::unique_ptr<LodgenWorkerScope> workerScope;
+		if ( lodgenBakeSpeedRed() )
+			workerScope.reset( new LodgenWorkerScope );
+		for ( ;; ) {
+			const int i = next->fetch_add( 1 );
+			if ( i >= jobList->size() )
+				break;
+			if ( skip[i] ) {
+				doneFlags[i].store( 1 );      // resumed: its outcome came from the ledger
+				continue;
+			}
+			if ( cancelled && *cancelled && ( *cancelled )() ) {
+				doneFlags[i].store( 2 );      // Cancel still lands between chunks
+				continue;
+			}
+			runJob( jobList->at( i ), i, *options, *worker, out, true, res[i] );
+			doneFlags[i].store( 1 );
+		}
+	}
+
+private:
+	Worker * worker;
+	const QVector<LodgenChunkJob> * jobList;
+	const LodgenChunkPassOptions * options;
+	LodgenWriter * out;
+	std::atomic<int> * next;
+	LodgenChunkOutcome * res;
+	std::atomic<int> * doneFlags;
+	const std::function<bool()> * cancelled;
+	const char * skip;
+};
+
+} // namespace
+
+int lodgenLastPassWorkers() { return g_lastWorkers; }
+int lodgenLastPassJobs() { return g_lastJobs; }
+
+// THE `.BTO` DISPOSITION. Statics because the census line is one shared formatter with no argument list,
+// exactly as the thread counts above it are.
+static QString g_btoWhere;                 // the scratch directory, or empty
+static int     g_btoState   = 0;           // 0 n/a, 1 kept in the mod folder, 2 dropped
+static int     g_btoChunks  = 0;           // how many .BTO files the run built
+static int     g_btoDropped = 0;           // how many of them were removed
+static qint64  g_btoFreed   = 0;           // their total size in bytes
+
+void lodgenSetBtoDisposition( const QString & scratchDir, int built, int dropped, qint64 bytesFreed )
+{
+	g_btoWhere   = scratchDir;
+	g_btoState   = scratchDir.isEmpty() ? 1 : 2;
+	g_btoChunks  = built;
+	g_btoDropped = dropped;
+	g_btoFreed   = bytesFreed;
+}
+
+void lodgenClearBtoDisposition()
+{
+	g_btoWhere.clear();
+	g_btoState = 0;
+	g_btoChunks = g_btoDropped = 0;
+	g_btoFreed = 0;
+}
+
+LodgenBtoScratchResult lodgenDropBtoScratch( const QStringList & writtenBto,
+	const QString & scratchDir, const QString & finalDir )
+{
+	LodgenBtoScratchResult r;
+	if ( scratchDir.isEmpty() )
+		return r;
+	for ( const QString & p : writtenBto ) {
+		const QFileInfo fi( p );
+		if ( !fi.exists() )
+			continue;
+		r.built++;
+		r.freed += fi.size();
+		// THE SIDECAR TRAVELS WITH THE CHUNK AND STAYS BEHIND IT.
+		const QString man = p + QStringLiteral( ".manifest.txt" );
+		if ( QFileInfo::exists( man ) ) {
+			const QString dst = finalDir + QStringLiteral( "/" ) + fi.fileName()
+				+ QStringLiteral( ".manifest.txt" );
+			QFile::remove( dst );
+			if ( QFile::rename( man, dst ) ) {
+				r.manifests++;
+				/* `finalDir` is the FO4CS worldspace folder from today (lane
+				 * LAYOUT1, 2026-09-16); the clause reads the root back from
+				 * the sidecar's own landing place. */
+				lodgenNoteLayoutFile( dst );
+			} else
+				r.warnings.append( QStringLiteral( "warning: %1 could not be moved out of "
+					"the scratch folder" ).arg( QFileInfo( man ).fileName() ) );
+		}
+		if ( QFile::remove( p ) )
+			r.dropped++;
+	}
+	if ( !QDir( scratchDir ).removeRecursively() )
+		r.warnings.append( QStringLiteral( "warning: the .BTO scratch folder %1 could not be "
+			"removed; the bake itself is complete" ).arg( scratchDir ) );
+	lodgenSetBtoDisposition( scratchDir, r.built, r.dropped, r.freed );
+	return r;
+}
+
+QString lodgenBtoDispositionLine()
+{
+	if ( g_btoState == 0 )
+		return QStringLiteral( "bto n/a (no object pass ran)" );
+	if ( g_btoState == 1 )
+		return QStringLiteral( "bto built in the mod folder, %1 chunk(s), 0 dropped, 0 bytes freed" )
+			.arg( g_btoChunks );
+	return QStringLiteral( "bto built in scratch %1, %2 chunk(s), %3 dropped, %4 bytes freed" )
+		.arg( g_btoWhere ).arg( g_btoChunks ).arg( g_btoDropped ).arg( g_btoFreed );
+}
+
+QString lodgenBakeCensusLine()
+{
+	// `bound by`: which limit decided the chunk worker count -- "asked" when --chunk-threads named a number,
+	// "cores" when the machine did, "memory" when free RAM did.
+	return QStringLiteral( "bake census: threads %1, chunk threads %2 bound by %3, "
+		"chunk jobs %4, chunk workers %5, %6" )
+		.arg( lodgenThreadCount() ).arg( lodgenChunkThreadCount() )
+		.arg( lodgenChunkThreadBoundBy() )
+		.arg( g_lastJobs ).arg( g_lastWorkers ).arg( lodgenPeakWorkingSetLine() )
+		+ QStringLiteral( ", " ) + lodgenBtoDispositionLine()
+		// `layout`: the one root every FO4CS-target file went under, read back from the paths the writers
+		// actually opened and never from the setting that produced them.
+		+ QStringLiteral( ", " ) + lodgenLayoutCensusLine();
+}
+
+bool lodgenRunChunkPass( const QVector<LodgenChunkJob> & jobs,
+	const LodgenChunkPassOptions & opts,
+	const std::function<void( const LodgenChunkOutcome & )> & retire,
+	const std::function<bool()> & cancelled,
+	qint64 * msMeshes, qint64 * msTextures, QString * error )
+{
+	g_lastJobs = jobs.size();
+	g_lastWorkers = 0;
+	if ( jobs.isEmpty() ) {
+		/* NOTHING DIRTY. For the stock target that really is nothing to do.
+		 * For the FO4CS pair it is the opposite: every chunk of the region
+		 * has to speak from its cache, or the rewritten `.lodo`/`.lodi` would
+		 * be EMPTY -- the worst possible shape of this bug, because both
+		 * files would still be written and still be valid. */
+		if ( opts.nativeReplayCached ) {
+			for ( const LodgenChunkJob & cj : opts.nativeAllJobs )
+				opts.nativeReplayCached( cj );
+		}
+		return true;
+	}
+
+	const int threads = qBound( 1, lodgenChunkThreadCount(), int( jobs.size() ) );
+	g_lastWorkers = threads;
+
+	// WARM the process-wide lazy singletons on THIS thread before anything fans out -- the resource-stack
+	// index and the mesh archive index are "build once on first use" statics, and first use is the only moment
+	// they can race.
+	lodgenWarmSharedIndices();
+
+	QElapsedTimer wall;
+	wall.start();
+
+	std::vector<std::unique_ptr<Worker>> workers;
+	workers.reserve( size_t( threads ) );
+	for ( int i = 0; i < threads; i++ ) {
+		auto w = std::make_unique<Worker>();
+		w->world = std::make_unique<EsmWorld>();
+		QString werr;
+		if ( !w->world->load( opts.plugins, opts.worldspace, &werr ) ) {
+			if ( error )
+				*error = QStringLiteral( "worker %1: %2" ).arg( i ).arg( werr );
+			return false;
+		}
+		// EVERY worker gets the WHOLE budget, not a share of it.
+		w->caches = lodgenCreateBakeCaches( opts.texBudgetBytes );
+		workers.push_back( std::move( w ) );
+	}
+
+	std::vector<LodgenChunkOutcome> results( size_t( jobs.size() ) );
+
+	/* RESUME: a job whose ledger matches this run's key and whose files are still there is not
+	 * built again; its outcome and its journal come back from the ledger and retire in their own place. */
+	const bool resumeOn = !opts.resumeDir.isEmpty() && !lodgenBakeSpeedRed();
+	std::vector<char> skip( size_t( jobs.size() ), 0 );
+	std::vector<QByteArray> stored( size_t( jobs.size() ) );
+	if ( resumeOn ) {
+		QDir().mkpath( opts.resumeDir );
+		int resumed = 0;
+		for ( int i = 0; i < jobs.size(); i++ ) {
+			bool hasJournal = false;
+			if ( loadLedger( opts, i, jobs.at( i ), results[size_t( i )], hasJournal, stored[size_t( i )] ) ) {
+				skip[size_t( i )] = 1;
+				resumed++;
+				if ( !hasJournal )
+					stored[size_t( i )].clear();
+			}
+		}
+		if ( resumed )
+			fprintf( stderr, "lodgen: chunks resumed: %d of %d from the ledger\n", resumed, int( jobs.size() ) );
+	}
+	LodgenWriter * ledgerQueue = nullptr;	// set on the threaded path: the ledger follows the chunk's files
+	auto retireOne = [&]( int i ) {
+		LodgenChunkOutcome & r = results[size_t( i )];
+		if ( skip[size_t( i )] ) {
+			if ( !stored[size_t( i )].isEmpty() )
+				r.nativeJournal = lodgenNativeJournalLoad( stored[size_t( i )] );
+			stored[size_t( i )] = QByteArray();
+		} else if ( resumeOn ) {
+			const QByteArray b = ledgerBytes( opts, r );
+			const QString path = ledgerPath( opts, i, jobs.at( i ) );
+			if ( ledgerQueue ) {
+				ledgerQueue->push( path, b );
+			} else {
+				QSaveFile f( path );
+				if ( f.open( QIODevice::WriteOnly ) && f.write( b ) == b.size() )
+					f.commit();
+			}
+		}
+		if ( r.nativeJournal ) {
+			if ( opts.nativeJournalSink )
+				opts.nativeJournalSink( r, r.nativeJournal );
+			lodgenNativeJournalReplay( r.nativeJournal );
+			lodgenNativeJournalDestroy( r.nativeJournal );
+			r.nativeJournal = nullptr;
+		}
+		retire( r );
+	};
+
+	// EMPTY-FOLDER HYGIENE. `meshDir` is the LEGACY chunk folder, `meshes/terrain/<ws>/`.
+	if ( opts.wantBtr || opts.btoScratchDir.isEmpty() )
+		QDir().mkpath( opts.meshDir );
+	if ( opts.wantTex && !opts.texDir.isEmpty() )
+		QDir().mkpath( opts.texDir );
+
+	bool ok = true;
+
+	// THE CURSOR OVER THE FULL QUEUE.
+	int nativeCursor = 0;
+	const bool haveNativeCache = !opts.nativeAllJobs.isEmpty()
+						&& bool( opts.nativeReplayCached );
+	auto sameChunk = []( const LodgenChunkJob & a, const LodgenChunkJob & b ) {
+		return a.dim == b.dim && a.cx == b.cx && a.cy == b.cy;
+	};
+	auto replayCachedBefore = [&]( const LodgenChunkJob & job ) {
+		if ( !haveNativeCache )
+			return;
+		while ( nativeCursor < opts.nativeAllJobs.size()
+				&& !sameChunk( opts.nativeAllJobs.at( nativeCursor ), job ) ) {
+			opts.nativeReplayCached( opts.nativeAllJobs.at( nativeCursor ) );
+			nativeCursor++;
+		}
+		if ( nativeCursor < opts.nativeAllJobs.size() )
+			nativeCursor++;         // this chunk speaks for itself
+	};
+	auto replayCachedTail = [&]() {
+		while ( haveNativeCache && nativeCursor < opts.nativeAllJobs.size() ) {
+			opts.nativeReplayCached( opts.nativeAllJobs.at( nativeCursor ) );
+			nativeCursor++;
+		}
+	};
+
+	if ( threads == 1 ) {
+		/* THE WAY BACK (`--threads 1`): one world, one cache set, one job at a
+		 * time, in order, written inline, speaking to the native accumulator
+		 * directly. This is the loop both drivers had. */
+		Worker & w = *workers[0];
+		// Journalling at ONE thread exists only for the cache: without a sink the serial loop speaks to the
+		// emitter directly, which is what it has always done and the reason `--threads 1` is the way back.
+		const bool journalNative = bool( opts.nativeJournalSink ) || resumeOn;
+		for ( int i = 0; i < jobs.size(); i++ ) {
+			if ( cancelled && cancelled() )
+				break;
+			replayCachedBefore( jobs.at( i ) );
+			if ( !skip[size_t( i )] )
+				runJob( jobs.at( i ), i, opts, w, nullptr, journalNative, results[size_t( i )] );
+			retireOne( i );
+		}
+		replayCachedTail();
+		if ( msMeshes )
+			*msMeshes += w.msMeshes;
+		if ( msTextures )
+			*msTextures += w.msTextures;
+		return ok;
+	}
+
+	std::vector<std::atomic<int>> flags( size_t( jobs.size() ) );
+	for ( auto & f : flags )
+		f.store( 0 );
+	std::atomic<int> cursor{ 0 };
+
+	/* The writer thread with its bounded queue: a worker hands over bytes and
+	 * goes back to building. Nothing returns before finish has drained it. */
+	LodgenWriter writer;
+	ledgerQueue = &writer;
+
+	QVector<ChunkThread *> ths;
+	for ( int i = 0; i < threads; i++ ) {
+		ChunkThread * t = new ChunkThread( workers[size_t( i )].get(), &jobs, &opts, &writer,
+			&cursor, results.data(), flags.data(), &cancelled, skip.data() );
+		ths.append( t );
+		t->start();
+	}
+
+	// RETIRE IN JOB ORDER, on the calling thread.
+	for ( int i = 0; i < jobs.size(); i++ ) {
+		while ( flags[size_t( i )].load() == 0 )
+			QThread::msleep( 1 );
+		if ( flags[size_t( i )].load() == 2 )
+			continue;                   // cancelled before this job was picked up
+		replayCachedBefore( jobs.at( i ) );
+		retireOne( i );
+	}
+	replayCachedTail();
+
+	for ( ChunkThread * t : ths ) {
+		t->wait();
+		delete t;
+	}
+	// a cancelled run can leave journals nobody retired
+	for ( LodgenChunkOutcome & r : results ) {
+		if ( r.nativeJournal ) {
+			lodgenNativeJournalDestroy( r.nativeJournal );
+			r.nativeJournal = nullptr;
+		}
+	}
+
+	if ( !writer.finish() ) {
+		ok = false;
+		if ( error )
+			*error = QStringLiteral( "%1 file(s) failed to write, first: %2" )
+				.arg( writer.failures().size() ).arg( writer.failures().value( 0 ) );
+	}
+
+	qint64 sumMesh = 0, sumTex = 0;
+	for ( auto & w : workers ) {
+		sumMesh += w->msMeshes;
+		sumTex += w->msTextures;
+	}
+	// THE STAGE TIMES under a fan-out. The per-chunk sums add up to the CPU time every worker spent, which is
+	// not what "how long did the bake take" means.
+	const qint64 wallMs = wall.elapsed();
+	const qint64 sum = sumMesh + sumTex;
+	if ( msMeshes )
+		*msMeshes += sum > 0 ? ( wallMs * sumMesh ) / sum : wallMs;
+	if ( msTextures )
+		*msTextures += sum > 0 ? ( wallMs * sumTex ) / sum : 0;
+
+	return ok;
+}
+
+
+// THE BAKE RECORD AND INCREMENTAL REGENERATION:
+// Moved out of `cmdLodgen` (src/nifcli.cpp), 2026-09-24, so the panel runs the same ledger.
+
+//! WHERE THE RECORD GOES, composed in ONE place:
+//! Under the FO4CS target it sits with the files it describes, at `<mod>/FO4CSLOD/<ws>/<ws>.lodb` -- lane
+//! LAYOUT1's ruling, written down in `docs/LODGEN_LEDGER_FORMAT.md` section 1 and in `src/features/far-lod/lodgenlayout.h`.
+QString lodbRecordPath( const QString & outDir, const QString & ws, bool fo4csTarget )
+{
+	return fo4csTarget
+		? ( lodgenFo4csWorldDir( outDir, ws ) + QChar( '/' ) + ws + QStringLiteral( ".lodb" ) )
+		: ( outDir + QChar( '/' ) + ws + QStringLiteral( ".lodb" ) );
+}
+
+//! The record an `--incremental` run must diff against, FOUND rather than assumed: the previous bake may have
+//! been a stock one or an FO4CS one, and this run has no way to know which.
+QString lodbFindRecord( const QString & dir, const QString & ws )
+{
+	const QString a = lodbRecordPath( dir, ws, true );
+	if ( QFileInfo( a ).isFile() )
+		return a;
+	const QString b = lodbRecordPath( dir, ws, false );
+	if ( QFileInfo( b ).isFile() )
+		return b;
+	return QString();
+}
+
+//! Flags whose TOKEN AND VALUE are both dropped from the digest, because neither can make a TRACKED CHUNK
+//! OUTPUT stale.
+static const char * const gLgSwitchSkip[] = {
+	"--out-dir", "--tex-dir", "--data-root", "--incremental",
+	"--threads", "--chunk-threads", "--preview-dir",
+	"--resource", "--plugins-txt", "--mo2-profile", "--mo2-mods",
+	"--native", "--native-mesh-report",
+	nullptr
+};
+
+//! Flags whose TOKEN stays in the digest and whose VALUE is dropped.
+static const char * const gLgSwitchSkipValue[] = {
+	"--vt",
+	nullptr
+};
+
+//! Flags that take NO value and are dropped alone.
+static const char * const gLgSwitchSkipToken[] = {
+	"--no-gpu",
+	nullptr
+};
+
+QString lodgenSwitchDigestOf( const QStringList & a )
+{
+	QCryptographicHash h( QCryptographicHash::Sha1 );
+	for ( int i = 0; i < a.size(); i++ ) {
+		bool skip = false;
+		for ( const char * const * s = gLgSwitchSkipToken; *s; s++ )
+			if ( a.at( i ) == QLatin1String( *s ) )
+				skip = true;
+		if ( skip )
+			continue;
+		for ( const char * const * s = gLgSwitchSkip; *s; s++ ) {
+			if ( a.at( i ) == QLatin1String( *s ) ) {
+				skip = true;
+				i++;                    /* and its value */
+				break;
+			}
+		}
+		if ( skip )
+			continue;
+		for ( const char * const * s = gLgSwitchSkipValue; *s; s++ ) {
+			if ( a.at( i ) == QLatin1String( *s ) ) {
+				h.addData( a.at( i ).toUtf8() );   /* the flag, never its path */
+				h.addData( QByteArray( "\x1f", 1 ) );
+				skip = true;
+				i++;
+				break;
+			}
+		}
+		if ( skip )
+			continue;
+		h.addData( a.at( i ).toUtf8() );
+		h.addData( QByteArray( "\x1f", 1 ) );
+	}
+	return QString::fromLatin1( h.result().toHex() );
+}
+
+namespace
+{
+
+QString chunkKey( int cx, int cy )
+{
+	return QString( "%1,%2" ).arg( cx ).arg( cy );
+}
+
+// A run over several rings (`--dim all`) has a ring-4 and a ring-8 chunk at the same corner.
+QString chunkKeyAt( int dim, int runDim, int cx, int cy )
+{
+	return dim == runDim ? chunkKey( cx, cy )
+		: QString( "%1,%2@%3" ).arg( cx ).arg( cy ).arg( dim );
+}
+
+} // namespace
+
+QStringList lodgenIdentityDump( const LodgenChunkPassOptions & pass, const LodgenIdentityExtras & x )
+{
+	// ONE LINE PER EFFECTIVE SETTING, in a fixed order, so the dump can be printed and two of them diffed by
+	// eye. Floats go through `%.9g`, which round-trips a float exactly; nothing is formatted by locale.
+	QStringList d;
+	auto b = []( bool v ) { return v ? QStringLiteral( "1" ) : QStringLiteral( "0" ); };
+	auto f = []( double v ) { return QString::number( v, 'g', 9 ); };
+	auto n = []( qint64 v ) { return QString::number( v ); };
+	auto add = [&d]( const QString & k, const QString & v ) { d.append( k + QChar( '=' ) + v ); };
+	auto cover = [&]( const QString & p, const LodgenCoverOptions & c ) {
+		add( p + "cover", b( c.cover ) );
+		add( p + "tintStrength", f( c.tintStrength ) );
+		add( p + "coverFull", f( c.coverFull ) );
+		add( p + "roads", b( c.roads ) );
+		add( p + "roadCoverSuppress", f( c.roadCoverSuppress ) );
+		add( p + "roadOpacity", f( c.roadOpacity ) );
+		add( p + "roadComposite", n( c.roadComposite ) );
+		add( p + "roadDetail", f( c.roadDetail ) );
+		add( p + "roadGroundPaint", f( c.roadGroundPaint ) );
+		add( p + "roadRaised", b( c.roadRaised ) );
+		add( p + "roadSidewalks", b( c.roadSidewalks ) );
+		add( p + "flatObjects", b( c.flatObjects ) );
+		/* The override file's rules move the output, so their digest is an input
+		 * (the rule lines only: a comment edit moves nothing). */
+		add( p + "flatObjectsRules", c.roads && c.flatObjects
+			? lodgenFlatObjectsRulesDigest( c.flatObjectsFile ) : QStringLiteral( "-" ) );
+		add( p + "stampNormals", b( c.stampNormals ) );
+		add( p + "terrainObjectAo", b( c.terrainObjectAo ) );
+		add( p + "terrainObjectAoStrength", f( c.terrainObjectAoStrength ) );
+		add( p + "terrainObjectAoSlab", b( c.terrainObjectAoSlab ) );
+		add( p + "skyObjects", b( c.skyObjects ) );
+	};
+
+	add( "generator", n( kLodgenGeneratorRevision ) );
+
+	const LodgenTerrainOptions & t = pass.terrain;
+	add( "terrain.dim", n( t.dim ) );
+	add( "terrain.water", b( t.water ) );
+	add( "terrain.waterSubdiv", n( t.waterSubdiv ) );
+	add( "terrain.waterCullBuried", b( t.waterCullBuried ) );
+	add( "terrain.shoreDenser", b( t.shoreDenser ) );
+	add( "terrain.shoreDensity", n( t.shoreDensity ) );
+	add( "terrain.targetTrisPerCell", n( t.targetTrisPerCell ) );
+	add( "terrain.geomorph", b( t.geomorph ) );
+	add( "terrain.terrainIdentity", b( t.terrainIdentity ) );
+	// a format string written INTO the .BTR, not a place on disk
+	add( "terrain.textureBase", t.textureBase );
+
+	const LodgenObjectOptions & o = pass.object;
+	add( "object.dim", n( o.dim ) );
+	add( "object.identity", b( o.identity ) );
+	add( "object.bakeAO", b( o.bakeAO ) );
+	add( "object.cullBuried", b( o.cullBuried ) );
+	add( "object.aoGrey", b( o.aoGrey ) );
+	add( "object.aoSkirtCells", n( o.aoSkirtCells ) );
+	add( "object.treeSway", b( o.treeSway ) );
+	add( "object.objectChannels", b( o.objectChannels ) );
+	add( "object.cullMargin", f( o.cullMargin ) );
+	add( "object.cardAuxDiv", n( o.cardAuxDiv ) );
+	add( "object.lodLevel", n( o.lodLevel ) );
+	add( "object.slotFallback", b( o.slotFallback ) );
+	add( "object.impostors", b( !o.impostorDir.isEmpty() ) );
+	add( "object.impostorFromLevel", n( o.impostorFromLevel ) );
+	add( "object.treesOnly", b( o.treesOnly ) );
+
+	cover( QStringLiteral( "cover." ), pass.cover );
+
+	// THE PROCESS-WIDE LAND AND BLEND SETTINGS.
+	add( "land.tiling", f( lodgenLandTiling() ) );
+	add( "land.sampleAverage", b( lodgenLandSampleAverage() ) );
+	add( "land.detail", f( lodgenLandDetail() ) );
+	add( "land.warpAmp", f( lodgenLandWarpAmp() ) );
+	add( "land.warpLattice", f( lodgenLandWarpLattice() ) );
+	add( "land.warpOctaves", n( lodgenLandWarpOctaves() ) );
+	add( "land.mipBias", f( lodgenLandMipBias() ) );
+	add( "land.hexSize", f( lodgenLandHexSize() ) );
+	add( "land.guideRule", n( lodgenLandGuideRule() ) );
+	add( "land.guideStrength", f( lodgenLandGuideStrength() ) );
+	add( "land.guideScale", f( lodgenLandGuideScale() ) );
+	add( "land.guideSlopeRef", f( lodgenLandGuideSlopeRef() ) );
+	add( "land.erosion", f( lodgenErosion() ) );
+	add( "land.erosionIterations", n( lodgenErosionIterations() ) );
+	add( "land.erosionSeed", n( lodgenErosionSeed() ) );
+	add( "land.detailSource", n( lodgenLandDetailSource() ) );
+	add( "land.shade", f( lodgenLandShade() ) );
+	add( "land.grade", f( lodgenLandGrade() ) );
+	add( "land.sheetFormat", n( lodgenSheetFormat() ) );
+	add( "blend.edges", n( lodgenBlendEdges() ) );
+	add( "blend.margin", f( lodgenBlendMargin() ) );
+	/* named only when ON, so a ledger written without them is
+	 * the rung's bytes and an incremental run still sees them change */
+	if ( lodgenLandHeightBlend() )
+		add( "land.heightBlend", b( true ) );
+	if ( lodgenLandMacro() )
+		add( "land.macro", b( true ) );
+
+	add( "run.atlas", b( x.atlas ) );
+	add( "run.arrays", b( x.arrays ) );
+	add( "run.merge", b( x.merge ) );
+	add( "run.atlasBc1", b( x.atlasBc1 ) );
+	add( "run.keepBto", b( x.keepBto ) );
+	add( "run.texFromVt", b( x.texFromVt ) );
+	add( "simplify.enabled", b( x.simplify.enabled ) );
+	add( "simplify.ratio8", f( x.simplify.ratio8 ) );
+	add( "simplify.ratio16", f( x.simplify.ratio16 ) );
+	add( "simplify.ratio32", f( x.simplify.ratio32 ) );
+	add( "simplify.errorWorld", f( x.simplify.errorWorld ) );
+	add( "simplify.minTris", n( x.simplify.minTris ) );
+	add( "vt.finestDim", n( x.vt.finestDim ) );
+	add( "vt.content", n( x.vt.content ) );
+	add( "vt.border", n( x.vt.border ) );
+	add( "vt.mips", n( x.vt.mips ) );
+	add( "vt.compression", n( x.vt.compression ) );
+	add( "vt.height", b( x.vt.height ) );
+	add( "vt.coverInColor", b( x.vt.coverInColor ) );
+	add( "vt.halfAux", b( x.vt.halfAux ) );
+	add( "vt.btr", n( x.vtBtr ) );
+	cover( QStringLiteral( "vt.cover." ), x.vt.cover );
+	add( "native.ladder", b( x.nativeLadder ) );
+	add( "native.occluders", b( x.nativeOccluders ) );
+	add( "native.libraryNear", b( x.libraryNear ) );
+	add( "native.ladderFoliage", b( x.ladderFoliage ) );
+	add( "native.silhouetteMin", f( x.silhouetteMin ) );
+	add( "native.placementAo", b( x.placementAo ) );
+	add( "native.vertexAo", b( x.vertexAo ) );
+	add( "native.lodiV7", b( x.lodiV7 ) );
+	add( "native.scrappable", b( x.scrappable ) );
+	add( "native.identityJoinLegacy", b( x.identityJoinLegacy ) );
+	add( "native.identityJoinGap", f( x.identityJoinGap ) );
+	// named only when ON, so the off bake's identity word is the old one exactly
+	if ( x.identityJoinContact )
+		add( "native.identityJoinContact", b( true ) );
+	if ( x.occluderBuilding )
+		add( "native.occluderBuilding", b( true ) );
+	// the landmark list moves the groups, so its digest is an input (named only with the contact join)
+	if ( x.identityJoinContact )
+		add( "native.landmarks", x.landmarksDigest );
+	add( "native.aggregate", b( x.aggregate ) );
+	add( "native.aggregateMin", n( x.aggMin ) );
+	add( "native.aggregateTile", n( x.aggTile ) );
+	add( "native.aggregateViews", n( x.aggViews ) );
+
+	QStringList more = x.more;
+	more.sort();
+	d += more;
+	return d;
+}
+
+QString lodgenIdentityWord( const QStringList & dump )
+{
+	const QByteArray h = QCryptographicHash::hash(
+		dump.join( QChar( '\n' ) ).toUtf8(), QCryptographicHash::Sha1 );
+	return QStringLiteral( "gen%1:%2" ).arg( kLodgenGeneratorRevision )
+		.arg( QString::fromLatin1( h.toHex() ) );
+}
+
+QString lodgenSwitchesWithIdentity( const QString & argvDigest, const QString & identityWord )
+{
+	QCryptographicHash h( QCryptographicHash::Sha1 );
+	h.addData( argvDigest.toUtf8() );
+	h.addData( QByteArray( "\x1f", 1 ) );
+	h.addData( identityWord.toUtf8() );
+	return QString::fromLatin1( h.result().toHex() );
+}
+
+LodgenIncrementalVerdict lodgenIncrementalBegin( LodgenIncrementalRun & run, const EsmWorld & world,
+	QVector<LodgenChunkJob> & jobs, QString * census, QStringList * reasonsOut, QString * detail )
+{
+	const QString ws = world.worldspaceEdid();
+	const bool fo4cs = !run.nativeDir.isEmpty();
+	run.ledgerPath = lodbRecordPath( run.recordRoot.isEmpty() ? run.outDir : run.recordRoot, ws, fo4cs );
+	run.lodjDir = fo4cs ? lodgenFo4csWorldDir( run.nativeDir, ws ) : QString();
+	run.allJobs = jobs;
+	run.incremental = false;
+	run.prev = LodgenLedger();
+	run.prevRecordDir.clear();
+	run.producedFiles.clear();
+	run.lodjWritten = run.lodjReplayed = run.lodjFailed = 0;
+	run.lodjPlacements = 0;
+	if ( run.fromDir.isEmpty() )
+		return LodgenIncrementalVerdict::Go;
+
+	/* The directory the PREVIOUS record's relative output paths resolve
+	 * against: the record's own folder, which is the law the format states
+	 * (`docs/LODGEN_BAKE_RECORD.md`) and which lets a mod folder be moved. */
+	const QString found = lodbFindRecord( run.fromDir, ws );
+	const QString srcLedger = found.isEmpty() ? lodbRecordPath( run.fromDir, ws, fo4cs ) : found;
+	run.prevRecordDir = QFileInfo( srcLedger ).absolutePath();
+	/* THE REFUSALS, in INCR1's order. Each is reported with the reason AND the
+	 * way forward and nothing is baked: an incremental run that silently
+	 * promoted itself to a full bake would lie to an operator watching a clock. */
+	QString lerr;
+	if ( !lodgenReadLedger( srcLedger, &run.prev, &lerr ) ) {
+		run.prev = LodgenLedger();
+		if ( !run.requireRecord ) {
+			/* THE PANEL'S FIRST RUN. A row that stays ticked is a standing
+			 * setting, not a request to diff, so with no record yet the whole
+			 * region is baked and the record written; the next run diffs. */
+			if ( census )
+				*census = QString( "incremental: no bake record at %1 yet; all %2 chunk(s) baked "
+								   "and the record written" ).arg( srcLedger ).arg( jobs.size() );
+			return LodgenIncrementalVerdict::Go;
+		}
+		if ( detail )
+			*detail = lerr;
+		return LodgenIncrementalVerdict::NoRecord;
+	}
+	const LodgenLedger & prev = run.prev;
+	if ( prev.worldspace != run.worldspace || prev.dim != run.dim
+		 || prev.region[0] != run.region[0] || prev.region[1] != run.region[1]
+		 || prev.region[2] != run.region[2] || prev.region[3] != run.region[3] ) {
+		if ( detail )
+			*detail = srcLedger;
+		return LodgenIncrementalVerdict::Shape;
+	}
+	if ( prev.switches != run.switches )
+		return LodgenIncrementalVerdict::Switches;
+	// WHICH POST-PASSES ARE WHOLE-REGION.
+	if ( run.regionProducts && !( fo4cs && run.rawCache && run.nativeCache ) )
+		return LodgenIncrementalVerdict::RegionProducts;
+	// native builds ONE .lodo/.lodi pair out of the placements the chunk pass hands it.
+	if ( fo4cs && !run.nativeCache )
+		return LodgenIncrementalVerdict::NativeNoCache;
+
+	/* Now the diff. A chunk is dirty when its input digest moved, when the
+	 * ledger has never heard of it, or when an output it claims is missing or
+	 * has been edited under us.
+	 *
+	 * THE LIST THE WIDENING IS SEEDED FROM is not the
+	 * same list: a chunk dirty only because its own `.lodj` went missing
+	 * changes nothing for its neighbours. Seeding the widening from it made
+	 * deleting ONE cache file rebake the whole region
+	 * (`scratchpad/incr1_20260917/s2_proof.txt` leg C). */
+	/* RING-AWARE. A `--dim all` run has four
+	 * chunks at one corner; each is keyed `cx,cy@dim` (a chunk of the run's own
+	 * ring keeps the plain `cx,cy`, so a one-ring record reads exactly as
+	 * before), digested at ITS OWN ring, and widens only its own ring: a ring-8
+	 * chunk reads nothing a ring-4 chunk wrote. */
+	const int d = run.dim;
+	QSet<QString> dirty, dirtyWide;
+	QHash<QString, const LodgenLedgerEntry *> byKey;
+	for ( const LodgenLedgerEntry & e : prev.chunks )
+		byKey.insert( chunkKeyAt( e.dim, d, e.cx, e.cy ), &e );
+	auto ringTag = [d]( const LodgenChunkJob & j ) {
+		return j.dim == d ? QString() : QString( " ring %1" ).arg( j.dim );
+	};
+	int movedInputs = 0, unknown = 0, lostOutput = 0;
+	QStringList reasons;
+	for ( const LodgenChunkJob & j : run.allJobs ) {
+		const QString key = chunkKeyAt( j.dim, d, j.cx, j.cy );
+		const LodgenLedgerEntry * pe = byKey.value( key, nullptr );
+		if ( !pe ) {
+			dirty.insert( key );
+			dirtyWide.insert( key );
+			unknown++;
+			continue;
+		}
+		const LodgenLedgerEntry & e = *pe;
+		const QString now = lodgenChunkInputDigest( world, j.dim, j.cx, j.cy, run.digestRoot );
+		run.inputsMemo.insert( key, now );
+		if ( now != e.inputs ) {
+			dirty.insert( key );
+			dirtyWide.insert( key );
+			movedInputs++;
+			if ( reasons.size() < 8 )
+				reasons.append( QString( "  (%1,%2)%5 inputs %3 -> %4" )
+					.arg( j.cx ).arg( j.cy ).arg( e.inputs.left( 12 ), now.left( 12 ), ringTag( j ) ) );
+			continue;
+		}
+		/* EVERY output, not the first lost one, because WHICH output was lost
+		 * decides whether the neighbours are dragged in with it. */
+		bool lostAny = false, lostReal = false;
+		for ( int k = 0; k < e.outFiles.size(); k++ ) {
+			// An out row is relative to the record folder -- unless the out-dir sits on another drive, where
+			// QDir::relativeFilePath can only give the absolute path back.
+			const QString fp = QDir::isAbsolutePath( e.outFiles[k] )
+				? e.outFiles[k] : run.prevRecordDir + "/" + e.outFiles[k];
+			if ( lodgenFileDigest( fp ) == e.outDigests[k] )
+				continue;
+			const bool isCache = e.outFiles[k].endsWith( QLatin1String( ".lodj" ) );
+			if ( !lostAny && reasons.size() < 8 )
+				reasons.append( QString( "  (%1,%2)%5 output %3 is missing or edited%4" )
+					.arg( j.cx ).arg( j.cy ).arg( e.outFiles[k] )
+					.arg( isCache ? QStringLiteral( " (a chunk cache: this chunk only)" ) : QString(), ringTag( j ) ) );
+			lostAny = true;
+			if ( !isCache )
+				lostReal = true;
+		}
+		if ( lostAny ) {
+			dirty.insert( key );
+			lostOutput++;
+			if ( lostReal )
+				dirtyWide.insert( key );
+		}
+	}
+	/* THE WIDENING. A chunk is also dirty when a chunk OF ITS OWN RING within
+	 * ONE CELL of it is: the terrain ring and the AO skirt each reach exactly
+	 * one cell (docs/LODGEN_LEDGER_FORMAT.md section 2). It fires on a
+	 * neighbour whose OUTPUT was lost, which no input digest can see. */
+	QVector<LodgenChunkJob> wideJobs;
+	for ( const LodgenChunkJob & j : run.allJobs )
+		if ( dirtyWide.contains( chunkKeyAt( j.dim, d, j.cx, j.cy ) ) )
+			wideJobs.append( j );
+	QSet<QString> widened = dirty;
+	for ( const LodgenChunkJob & j : run.allJobs ) {
+		const QString key = chunkKeyAt( j.dim, d, j.cx, j.cy );
+		if ( widened.contains( key ) )
+			continue;
+		const int jd = j.dim;
+		for ( const LodgenChunkJob & w : wideJobs ) {
+			if ( w.dim != jd )
+				continue;
+			if ( j.cx <= w.cx + jd && w.cx <= j.cx + jd && j.cy <= w.cy + jd && w.cy <= j.cy + jd ) {
+				widened.insert( key );
+				break;
+			}
+		}
+	}
+	const int spread = widened.size() - dirty.size();
+	// THE CACHE HAS TO BE THERE FOR EVERY CHUNK THIS RUN WILL SKIP.
+	int lostCache = 0;
+	if ( fo4cs ) {
+		for ( const LodgenChunkJob & j : run.allJobs ) {
+			const QString key = chunkKeyAt( j.dim, d, j.cx, j.cy );
+			if ( widened.contains( key ) )
+				continue;
+			const QString cp = QString( "%1/%2.%3.%4.%5.lodj" )
+				.arg( run.lodjDir, ws ).arg( j.dim ).arg( j.cx ).arg( j.cy );
+			if ( !QFileInfo::exists( cp ) ) {
+				widened.insert( key );
+				lostCache++;
+				if ( reasons.size() < 8 )
+					reasons.append( QString( "  (%1,%2)%3 has no native chunk cache" )
+						.arg( j.cx ).arg( j.cy ).arg( ringTag( j ) ) );
+			}
+		}
+	}
+	// THE RAW CHUNK CACHE has to be there, and be the bytes its key names, for every chunk this run will skip
+	// -- the region passes are about to read those files as if this run had written them.
+	run.rawCacheLost = 0;
+	if ( fo4cs && run.rawCache ) {
+		run.rawCacheDir = QDir( run.outDir ).absolutePath() + QStringLiteral( "/lodgen_chunk_cache" );
+		for ( const LodgenChunkJob & j : run.allJobs ) {
+			const QString key = chunkKeyAt( j.dim, d, j.cx, j.cy );
+			if ( widened.contains( key ) )
+				continue;
+			const QString stem = chunkStem( ws, j.dim, j.cx, j.cy );
+			const QString base = run.rawCacheDir + QChar( '/' ) + stem;
+			QString why;
+			QFile kf( base + QStringLiteral( ".key" ) );
+			if ( !kf.open( QIODevice::ReadOnly ) ) {
+				why = QStringLiteral( "no raw chunk cache" );
+			} else {
+				QHash<QString, QString> kv;
+				for ( const QByteArray & raw : kf.readAll().split( '\n' ) ) {
+					const QString l = QString::fromUtf8( raw ).trimmed();
+					const int sp = l.indexOf( QChar( ' ' ) );
+					if ( sp > 0 )
+						kv.insert( l.left( sp ), l.mid( sp + 1 ) );
+				}
+				const LodgenLedgerEntry * pe = byKey.value( key, nullptr );
+				if ( !pe || kv.value( QStringLiteral( "inputs" ) ) != pe->inputs )
+					why = QStringLiteral( "raw chunk cache baked from other inputs" );
+				else if ( kv.value( QStringLiteral( "switches" ) ) != run.switches )
+					why = QStringLiteral( "raw chunk cache baked under other switches" );
+				else {
+					const QString bs = kv.value( QStringLiteral( "bto" ) );
+					const QString ms = kv.value( QStringLiteral( "manifest" ) );
+					if ( bs.isEmpty() || ms.isEmpty() )
+						why = QStringLiteral( "raw chunk cache key is short" );
+					else if ( bs != QLatin1String( "-" ) && lodgenFileDigest( base + QStringLiteral( ".BTO" ) ) != bs )
+						why = QStringLiteral( "raw chunk .BTO missing or edited" );
+					else if ( ms != QLatin1String( "-" )
+						&& lodgenFileDigest( base + QStringLiteral( ".BTO.manifest.txt" ) ) != ms )
+						why = QStringLiteral( "raw chunk manifest missing or edited" );
+				}
+			}
+			if ( !why.isEmpty() ) {
+				widened.insert( key );
+				run.rawCacheLost++;
+				if ( reasons.size() < 8 )
+					reasons.append( QString( "  (%1,%2)%3 %4 (this chunk only)" )
+						.arg( j.cx ).arg( j.cy ).arg( ringTag( j ), why ) );
+			}
+		}
+	}
+	QVector<LodgenChunkJob> kept;
+	for ( const LodgenChunkJob & j : run.allJobs )
+		if ( widened.contains( chunkKeyAt( j.dim, d, j.cx, j.cy ) ) )
+			kept.append( j );
+	if ( census ) {
+		*census = QString( "incremental: %1 of %2 chunks dirty "
+						   "(%3 inputs moved, %4 not in the ledger, %5 output lost, "
+						   "%6 by neighbour, %7 with no native chunk cache" )
+			.arg( kept.size() ).arg( run.allJobs.size() )
+			.arg( movedInputs ).arg( unknown ).arg( lostOutput ).arg( spread )
+			.arg( lostCache );
+		if ( fo4cs && run.rawCache )
+			*census += QString( ", %1 with no raw chunk cache" ).arg( run.rawCacheLost );
+		*census += QChar( ')' );
+	}
+	if ( reasonsOut )
+		*reasonsOut = reasons;
+	run.movedInputs = movedInputs;
+	run.unknownChunks = unknown;
+	jobs = kept;
+	run.incremental = true;
+	return LodgenIncrementalVerdict::Go;
+}
+
+QStringList lodgenIncrementalRefusal( LodgenIncrementalVerdict v, const LodgenIncrementalRun & run,
+	const QString & detail )
+{
+	const LodgenLedger & p = run.prev;
+	switch ( v ) {
+	case LodgenIncrementalVerdict::NoRecord:
+		return { QStringLiteral( "refused: --incremental has nothing to diff against -- " ) + detail,
+			QStringLiteral( "  run the same command once WITHOUT --incremental; every bake writes "
+				"the ledger, so the next run can be incremental." ) };
+	case LodgenIncrementalVerdict::Shape:
+		return { QString( "refused: %1 describes worldspace %2 dim %3 region %4 %5 %6 %7, and this "
+				"run is a different shape." ).arg( detail ).arg( p.worldspace, 0, 16 ).arg( p.dim )
+				.arg( p.region[0] ).arg( p.region[1] ).arg( p.region[2] ).arg( p.region[3] ),
+			QStringLiteral( "  an incremental run must cover exactly the region its ledger covers; "
+				"bake this region once without --incremental." ) };
+	case LodgenIncrementalVerdict::Switches:
+		return { QStringLiteral( "refused: the switches differ from the ones the ledger was written with, "
+				"so EVERY chunk is dirty and an incremental run would be a full run with "
+				"extra bookkeeping." ),
+			QStringLiteral( "  bake without --incremental. (The digest covers the argument vector in "
+				"order; even reordering flags fires it, which is deliberate -- it can "
+				"only over-rebake, never under-rebake. Since 2026-09-24 it also covers the "
+				"identity word -- the generator revision and every setting the bake used, "
+				"typed or defaulted -- so a default that moved between two builds fires it too.)" ) };
+	case LodgenIncrementalVerdict::RegionProducts:
+		return { QStringLiteral( "refused: --atlas, --arrays and --impostors each build ONE region-wide "
+				"product out of the whole written .BTO list, so a filtered chunk list "
+				"would build them from a FRACTION of the region and not say so." ),
+			QStringLiteral( "  bake without --incremental, or drop those flags from this run and do "
+				"them in a separate full pass over the finished chunks. (The merge and "
+				"the far-ring simplify are NOT on this list: both rewrite one .BTO at a "
+				"time with nothing carried between files.)" ) };
+	case LodgenIncrementalVerdict::NativeNoCache:
+		return { QStringLiteral( "refused: --native builds ONE .lodo/.lodi pair for the whole region out of "
+				"the placements the chunk pass hands it, so an incremental run would write "
+				"a pair covering only the chunks it rebaked and say nothing about the rest." ),
+			QStringLiteral( "  --no-native-cache is what turned the per-chunk cache off; drop it and "
+				"the skipped chunks speak from their .lodj files. Or bake without "
+				"--incremental." ) };
+	case LodgenIncrementalVerdict::Go:
+		break;
+	}
+	return {};
+}
+
+void lodgenIncrementalArmCache( LodgenIncrementalRun & run, const QString & worldEdid,
+	LodgenChunkPassOptions & pass )
+{
+	// THE PER-CHUNK NATIVE CACHE. Written on every FO4CS bake the front end arms it for, full or incremental,
+	// because a cache only helps the run AFTER the one that made it.
+	if ( run.nativeDir.isEmpty() || !run.nativeCache )
+		return;
+	LodgenIncrementalRun * rp = &run;
+	const QString ws = worldEdid;
+	auto lodjPath = [rp, ws]( int dm, int cx, int cy ) {
+		return QString( "%1/%2.%3.%4.%5.lodj" ).arg( rp->lodjDir, ws ).arg( dm ).arg( cx ).arg( cy );
+	};
+	pass.nativeJournalSink = [rp, ws, lodjPath]( const LodgenChunkOutcome & r, LodgenNativeJournal * jr ) {
+		const QString cp = lodjPath( r.dim, r.cx, r.cy );
+		QString jerr;
+		if ( !lodgenNativeJournalWriteCache( jr, cp, ws, r.dim, r.cx, r.cy, &jerr ) ) {
+			if ( rp->warn )
+				rp->warn( QString( "native cache (%1,%2): %3" ).arg( r.cx ).arg( r.cy ).arg( jerr ) );
+			rp->lodjFailed++;
+			return;
+		}
+		rp->lodjWritten++;
+		/* the retire hook for this same job appends to this very list a moment
+		 * later, on this same thread */
+		rp->producedFiles[chunkKeyAt( r.dim, rp->dim, r.cx, r.cy )].append( cp );
+	};
+	if ( run.incremental ) {
+		pass.nativeAllJobs = run.allJobs;
+		pass.nativeReplayCached = [rp, lodjPath]( const LodgenChunkJob & j ) {
+			QString jerr;
+			if ( !lodgenNativeReplayCache( lodjPath( j.dim, j.cx, j.cy ), &jerr ) ) {
+				if ( rp->warn )
+					rp->warn( QStringLiteral( "native cache: " ) + jerr );
+				rp->lodjFailed++;
+				return;
+			}
+			rp->lodjReplayed++;
+			rp->lodjPlacements += lodgenNativeCacheLastPlacements();
+		};
+	}
+}
+
+void lodgenIncrementalNoteRetired( LodgenIncrementalRun & run, const LodgenChunkPassOptions & pass,
+	const LodgenChunkOutcome & r )
+{
+	QStringList & pf = run.producedFiles[chunkKeyAt( r.dim, run.dim, r.cx, r.cy )];
+	const bool scratch = !pass.btoScratchDir.isEmpty();
+	// WITH A SCRATCH FOLDER the `.BTO` will not survive this run, so it is not a tracked output: digesting a
+	// file about to be deleted made every later incremental run rebake the whole region.
+	for ( const QString & p : { r.btrPath, r.btoPath, r.manifestPath } ) {
+		if ( p.isEmpty() )
+			continue;
+		if ( scratch && p == r.btoPath )
+			continue;
+		if ( scratch && p == r.manifestPath ) {
+			// THE ROOT THE TEARDOWN MOVES IT UNDER: `--fo4cs-one-root` puts it under --native, not --out-dir.
+			pf.append( lodgenFo4csWorldDir( run.recordRoot.isEmpty() ? run.outDir : run.recordRoot,
+					pass.worldEdid ) + QStringLiteral( "/" )
+				+ QFileInfo( r.btoPath ).fileName() + QStringLiteral( ".manifest.txt" ) );
+			continue;
+		}
+		/* NO EXISTENCE CHECK: at more than one chunk thread the
+		 * bytes may still sit in the writer's queue when the job retires. */
+		pf.append( p );
+	}
+	// The colour/normal/data sheets, named from the same format string lodgenBakeTerrainTextures builds them
+	// with: the outcome carries only an error string for them, and without this deleting a sheet by hand would
+	// not make its chunk dirty.
+	if ( pass.wantTex && !pass.texDir.isEmpty() ) {
+		const QString sheetBase = QString( "%1/%2.%3.%4.%5" )
+			.arg( pass.texDir ).arg( pass.worldEdid ).arg( r.dim ).arg( r.cx ).arg( r.cy );
+		for ( const QString & sfx : { QStringLiteral( ".DDS" ), QStringLiteral( "_msn.DDS" ),
+				QStringLiteral( "_data.DDS" ) } )
+			if ( QFileInfo::exists( sheetBase + sfx ) )
+				pf.append( sheetBase + sfx );
+	}
+}
+
+QString lodgenIncrementalCacheCensus( const LodgenIncrementalRun & run )
+{
+	if ( run.nativeDir.isEmpty() || !run.nativeCache )
+		return QString();
+	return QString( "native cache: %1 chunk(s) written to .lodj, "
+					"%2 replayed from cache (%3 placement(s)), %4 failure(s), "
+					"%5 arrival(s) lit by more than one chunk" )
+		.arg( run.lodjWritten ).arg( run.lodjReplayed ).arg( run.lodjPlacements )
+		.arg( run.lodjFailed ).arg( lodgenNativeSharedArrivals() );
+}
+
+QStringList lodgenIncrementalCacheRefusal( const LodgenIncrementalRun & run )
+{
+	if ( run.lodjFailed > 0 )
+		return { QString( "error: %1 native chunk cache failure(s); the pair this run would write "
+				"is missing whole chunks. Bake without --incremental." ).arg( run.lodjFailed ) };
+	/* THE ONE CASE THE CACHE CANNOT REPRODUCE BIT FOR BIT: an arrival keyed
+	 * across chunks has lighting sums built from both, and `(prev + a1) + a2`
+	 * is not `prev + (a1 + a2)` in floating point. */
+	if ( run.lodjReplayed > 0 && lodgenNativeSharedArrivals() > 0 )
+		return { QString( "refused: %1 placement(s) were lit by more than one chunk, so a rebuilt "
+				"chunk and a cached one would have to have their lighting sums "
+				"added in an order this run cannot reproduce." ).arg( lodgenNativeSharedArrivals() ),
+			QStringLiteral( "  bake without --incremental: a full bake adds them in the one "
+				"order there is." ) };
+	return {};
+}
+
+void lodgenIncrementalOfferReuse( const LodgenIncrementalRun & run )
+{
+	// THE LIBRARY-REUSE OFFER. Only an incremental bake offers, with the three hashes the PREVIOUS record
+	// wrote; lodgenNativeWrite keeps the previous `.lodo` only when all three agree and it reads back whole.
+	if ( !run.incremental || run.prev.loadOrderHashHex.isEmpty()
+		|| run.prev.pluginCorpusHashHex.isEmpty() || run.prev.objectCorpusHashHex.isEmpty() )
+		return;
+	NativeReuseOffer offer;
+	offer.armed = true;
+	offer.loadOrderHex    = run.prev.loadOrderHashHex;
+	offer.pluginCorpusHex = run.prev.pluginCorpusHashHex;
+	offer.objectCorpusHex = run.prev.objectCorpusHashHex;
+	lodgenNativeOfferLibraryReuse( offer );
+}
+
+bool lodgenIncrementalWriteRecord( const LodgenIncrementalRun & run, const EsmWorld & world,
+	const QStringList & switchTokens, const QStringList & resourceStack,
+	QStringList * warnings, QString * readBack )
+{
+	/* THE BAKE RECORD. Written by every bake that
+	 * asks for it, LAST: after every file is closed -- the merge and the
+	 * far-ring cut rewrite each .BTO, and digesting before them recorded
+	 * hashes of files that no longer existed -- and after every census line,
+	 * because the record carries the census verbatim. Deterministic except for
+	 * the five things `src/features/far-lod/lodbfile.h` names. */
+	LodgenLedger led;
+	led.worldspace = run.worldspace;
+	led.worldEdid  = world.worldspaceEdid();
+	led.dim        = run.dim;
+	for ( int k = 0; k < 4; k++ )
+		led.region[k] = run.region[k];
+	led.switches  = run.switches;
+	led.loadOrder = QString::number( world.loadOrderHash(), 16 );
+	/* THE RELATIVE ROOT IS THE RECORD'S OWN FOLDER, so a mod folder can be
+	 * moved; the incremental reader resolves them the same way. */
+	const QString ledgerRoot = QFileInfo( run.ledgerPath ).absolutePath();
+	QHash<QString, const LodgenLedgerEntry *> oldByKey;
+	for ( const LodgenLedgerEntry & e : run.prev.chunks )
+		oldByKey.insert( chunkKeyAt( e.dim, run.dim, e.cx, e.cy ), &e );
+	for ( const LodgenChunkJob & j : run.allJobs ) {
+		const QString key = chunkKeyAt( j.dim, run.dim, j.cx, j.cy );
+		const bool rebaked = run.producedFiles.contains( key );
+		if ( !rebaked && run.incremental ) {
+			// A chunk this run SKIPPED: its row is carried forward, which makes the record a record of what is
+			// on disk.
+			if ( const LodgenLedgerEntry * pe = oldByKey.value( key, nullptr ) ) {
+				LodgenLedgerEntry e = *pe;
+				if ( !run.nullRun && run.rawCache )
+					for ( int k = 0; k < e.outFiles.size() && k < e.outDigests.size(); k++ )
+						e.outDigests[k] = lodgenFileDigest( ledgerRoot + QChar( '/' ) + e.outFiles.at( k ) );
+				led.chunks.append( e );
+			}
+			continue;
+		}
+		LodgenLedgerEntry e;
+		e.dim = j.dim; e.cx = j.cx; e.cy = j.cy;
+		e.inputs = run.inputsMemo.value( key );
+		if ( e.inputs.isEmpty() ) {
+			e.inputs = lodgenChunkInputDigest( world, j.dim, j.cx, j.cy, run.digestRoot );
+			run.inputsMemo.insert( key, e.inputs );
+		}
+		for ( const QString & p : run.producedFiles.value( key ) ) {
+			e.outFiles.append( QDir( ledgerRoot ).relativeFilePath( QDir( p ).absolutePath() ) );
+			e.outDigests.append( lodgenFileDigest( p ) );
+		}
+		led.chunks.append( e );
+	}
+
+	led.fo4csTarget = !run.nativeDir.isEmpty();
+	led.exeStamp    = lodbExeStamp();
+	led.exeBytes    = lodbExeSize();
+	led.bakedUtc    = QDateTime::currentDateTimeUtc().toString( Qt::ISODate );
+
+	/* THE CORPUS HASHES, from the pair that was just written, so the record
+	 * cannot disagree with it. No pair, no hash line. */
+	auto hex16 = []( quint64 v ) { return QString( "%1" ).arg( v, 16, 16, QChar( '0' ) ); };
+	led.loadOrderHashHex = hex16( world.loadOrderHash() );
+	if ( led.fo4csTarget ) {
+		const QString lodoPath = lodgenFo4csWorldDir( run.nativeDir, world.worldspaceEdid() )
+			+ QChar( '/' ) + world.worldspaceEdid() + QStringLiteral( ".lodo" );
+		LodoHeader lh;
+		QString rerr;
+		if ( lodoRead( lodoPath, &lh, nullptr, false, &rerr ) ) {
+			led.pluginCorpusHashHex = hex16( lh.pluginCorpusHash );
+			led.objectCorpusHashHex = hex16( lh.objectCorpusHash );
+			led.modelCorpusHashHex  = hex16( lh.modelCorpusHash );
+			led.cardCorpusHashHex   = hex16( lh.cardCorpusHash );
+			led.loadOrderHashHex    = hex16( lh.loadOrderHash );
+		} else if ( warnings ) {
+			warnings->append( QString( "warning: the bake record cannot read back %1 for its corpus "
+				"hashes (%2) -- the record will carry loadOrderHash only" ).arg( lodoPath, rerr ) );
+		}
+	}
+
+	/* THE PLUGINS, IN LOAD ORDER, each with an FNV-1a 64 over its BYTES
+	 * (bungo 2026-09-16: "each bake needs to know plugins used or what's
+	 * different, to even attempt a partial rebake"). */
+	{
+		const QStringList paths = world.pluginList().split( QChar( ',' ), Qt::SkipEmptyParts );
+		for ( int i = 0; i < paths.size(); i++ ) {
+			const QFileInfo fi( paths.at( i ).trimmed() );
+			LodbPlugin p;
+			p.index = i;
+			p.name  = fi.fileName().toLower();
+			p.bytes = fi.size();
+			p.path  = QDir::fromNativeSeparators( fi.absoluteFilePath() );
+			if ( !lodbFileFnv1a64( p.path, &p.hash ) ) {
+				p.hash = 0;
+				if ( warnings )
+					warnings->append( QString( "warning: the bake record cannot read %1 to hash it -- "
+						"that plugin line carries a zero hash and cannot detect an edit" ).arg( p.path ) );
+			}
+			led.plugins.append( p );
+		}
+	}
+
+	/* THE RESOURCE STACK, in the order it was given (last wins). Informational
+	 * and masked by lodbNormalise. */
+	for ( const QString & r : resourceStack ) {
+		const QFileInfo fi( r );
+		LodbResource e;
+		e.path = QDir::fromNativeSeparators( fi.absoluteFilePath() );
+		if ( fi.isDir() ) {
+			e.kind = QStringLiteral( "folder" );
+		} else {
+			e.kind = fi.suffix().toLower() == QLatin1String( "bsa" )
+				? QStringLiteral( "bsa" ) : QStringLiteral( "ba2" );
+			e.bytes = fi.size();
+			e.mtimeIso = fi.lastModified().toUTC().toString( Qt::ISODate );
+		}
+		led.resources.append( e );
+	}
+
+	/* THE REGION PRODUCTS: every file under the record's folder
+	 * that no chunk row names, hashed from the disk. A null run carries the
+	 * previous rows: it verified each of them a moment ago and wrote nothing. */
+	if ( led.fo4csTarget ) {
+		if ( run.nullRun ) {
+			led.productFiles = run.prev.productFiles;
+			led.productDigests = run.prev.productDigests;
+		} else {
+			QSet<QString> claimed;
+			claimed.insert( QDir::fromNativeSeparators( QFileInfo( run.ledgerPath ).absoluteFilePath() ).toLower() );
+			for ( const LodgenLedgerEntry & e : led.chunks )
+				for ( const QString & f : e.outFiles )
+					claimed.insert( QDir::fromNativeSeparators(
+						QFileInfo( ledgerRoot + QChar( '/' ) + f ).absoluteFilePath() ).toLower() );
+			QStringList rel;
+			QDirIterator it( ledgerRoot, QDir::Files, QDirIterator::Subdirectories );
+			while ( it.hasNext() ) {
+				it.next();
+				const QString abs = QDir::fromNativeSeparators( it.fileInfo().absoluteFilePath() );
+				if ( claimed.contains( abs.toLower() ) )
+					continue;
+				rel.append( QDir( ledgerRoot ).relativeFilePath( abs ) );
+			}
+			rel.sort();
+			for ( const QString & r : rel ) {
+				led.productFiles.append( r );
+				led.productDigests.append( lodgenFileDigest( ledgerRoot + QChar( '/' ) + r ) );
+			}
+		}
+	}
+
+	led.switchTokens = switchTokens;
+	led.census = lodbCensusLines();
+
+	QDir().mkpath( QFileInfo( run.ledgerPath ).absolutePath() );
+	QString lwerr;
+	if ( !lodgenWriteLedger( run.ledgerPath, led, &lwerr ) ) {
+		if ( warnings )
+			warnings->append( QStringLiteral( "warning: " ) + lwerr
+				+ QStringLiteral( " -- the bake is fine, but the next --incremental run will refuse" ) );
+		return false;
+	}
+	if ( led.fo4csTarget )
+		lodgenNoteLayoutFile( run.ledgerPath );
+	/* THE LINE IS READ BACK OFF THE FILE (CONSTITUTION 4): a writer that
+	 * dropped a section says so here instead of being believed. */
+	LodgenLedger back;
+	QString rerr;
+	if ( readBack ) {
+		if ( !lodgenReadLedger( run.ledgerPath, &back, &rerr ) )
+			*readBack = QString( "bake-record: %1 REFUSED ON READ-BACK -- %2" ).arg( run.ledgerPath, rerr );
+		else
+			*readBack = QString( "bake-record: %1, %2 plugin(s), %3 resource(s), "
+								 "%4 switch token(s), %5 chunk(s), %6 census line(s), "
+								 "end %7 file(s) %8 bytes, record %9 bytes" )
+				.arg( run.ledgerPath ).arg( back.plugins.size() ).arg( back.resources.size() )
+				.arg( back.switchTokens.size() ).arg( back.chunks.size() )
+				.arg( back.census.size() ).arg( back.endFiles ).arg( back.endBytes )
+				.arg( QFileInfo( run.ledgerPath ).size() );
+	}
+	return true;
+}
+
+// LANE INCR2: WHOLE-MAP INCREMENTAL FO4CS BAKES:
+// bungo, 2026-09-26: "And yes, allow quick rebakes".
+
+QString lodgenIncrementalChunkKey( const LodgenIncrementalRun & run, int dim, int cx, int cy )
+{
+	return chunkKeyAt( dim, run.dim, cx, cy );
+}
+
+void lodgenIncrementalCheckProducts( LodgenIncrementalRun & run, const EsmWorld & world,
+	QStringList * reasons )
+{
+	run.productsLost = 0;
+	if ( !run.incremental )
+		return;
+	auto say = [reasons]( const QString & r ) {
+		if ( reasons && reasons->size() < 8 )
+			reasons->append( r );
+	};
+	const LodgenLedger & p = run.prev;
+	if ( p.productFiles.isEmpty() ) {
+		run.productsLost++;
+		say( QStringLiteral( "  the record lists no region products (written before lane INCR2)" ) );
+	}
+	for ( int i = 0; i < p.productFiles.size(); i++ ) {
+		const QString fp = run.prevRecordDir + QChar( '/' ) + p.productFiles.at( i );
+		if ( lodgenFileDigest( fp ) != p.productDigests.value( i ) ) {
+			run.productsLost++;
+			say( QString( "  product %1 is missing or edited" ).arg( p.productFiles.at( i ) ) );
+		}
+	}
+	/* THE LOAD ORDER AND THE PLUGINS' BYTES. A plugin that moved without
+	 * moving any chunk's inputs still moves the pair's header words; a null run
+	 * would keep yesterday's. */
+	const QString lo = QString( "%1" ).arg( world.loadOrderHash(), 16, 16, QChar( '0' ) );
+	if ( !p.loadOrderHashHex.isEmpty() && p.loadOrderHashHex != lo ) {
+		run.productsLost++;
+		say( QString( "  the load order moved (%1 -> %2)" ).arg( p.loadOrderHashHex, lo ) );
+	}
+	const QStringList paths = world.pluginList().split( QChar( ',' ), Qt::SkipEmptyParts );
+	bool pluginsMoved = paths.size() != p.plugins.size();
+	for ( int i = 0; !pluginsMoved && i < paths.size(); i++ ) {
+		const QFileInfo fi( paths.at( i ).trimmed() );
+		quint64 h = 0;
+		if ( fi.fileName().toLower() != p.plugins.at( i ).name || fi.size() != p.plugins.at( i ).bytes
+			|| !lodbFileFnv1a64( QDir::fromNativeSeparators( fi.absoluteFilePath() ), &h )
+			|| h != p.plugins.at( i ).hash )
+			pluginsMoved = true;
+	}
+	if ( pluginsMoved ) {
+		run.productsLost++;
+		say( QStringLiteral( "  the plugin list or the bytes of a plugin moved" ) );
+	}
+}
+
+bool lodgenIncrementalStoreRaw( LodgenIncrementalRun & run, const QString & worldEdid,
+	const QHash<QString, QString> & retired, QString * error )
+{
+	run.rawStored.clear();
+	if ( !run.rawCache || run.nativeDir.isEmpty() )
+		return true;
+	run.rawCacheDir = QDir( run.outDir ).absolutePath() + QStringLiteral( "/lodgen_chunk_cache" );
+	if ( !QDir().mkpath( run.rawCacheDir ) ) {
+		if ( error )
+			*error = QStringLiteral( "cannot create the raw chunk cache %1" ).arg( run.rawCacheDir );
+		return false;
+	}
+	for ( const LodgenChunkJob & j : run.allJobs ) {
+		const QString key = chunkKeyAt( j.dim, run.dim, j.cx, j.cy );
+		if ( !retired.contains( key ) )
+			continue;
+		const QString base = run.rawCacheDir + QChar( '/' ) + chunkStem( worldEdid, j.dim, j.cx, j.cy );
+		/* THE KEY GOES FIRST AND COMES BACK LAST: a run that dies between here
+		 * and the record leaves a cache entry with no key, which the next run
+		 * reads as missing and rebakes. */
+		QFile::remove( base + QStringLiteral( ".key" ) );
+		QFile::remove( base + QStringLiteral( ".BTO" ) );
+		QFile::remove( base + QStringLiteral( ".BTO.manifest.txt" ) );
+		const QString bto = retired.value( key );
+		QStringList sums{ QStringLiteral( "-" ), QStringLiteral( "-" ) };
+		if ( !bto.isEmpty() ) {
+			if ( !QFile::copy( bto, base + QStringLiteral( ".BTO" ) ) ) {
+				if ( error )
+					*error = QStringLiteral( "cannot copy %1 into the raw chunk cache" ).arg( bto );
+				return false;
+			}
+			sums[0] = lodgenFileDigest( base + QStringLiteral( ".BTO" ) );
+			const QString man = bto + QStringLiteral( ".manifest.txt" );
+			if ( QFileInfo::exists( man ) ) {
+				if ( !QFile::copy( man, base + QStringLiteral( ".BTO.manifest.txt" ) ) ) {
+					if ( error )
+						*error = QStringLiteral( "cannot copy %1 into the raw chunk cache" ).arg( man );
+					return false;
+				}
+				sums[1] = lodgenFileDigest( base + QStringLiteral( ".BTO.manifest.txt" ) );
+			}
+		}
+		run.rawStored.insert( key, sums );
+	}
+	return true;
+}
+
+bool lodgenIncrementalRestoreRaw( LodgenIncrementalRun & run, const QString & worldEdid,
+	const QString & btoDir, const QHash<QString, QString> & retired, QStringList * writtenBto,
+	QString * error )
+{
+	run.rawRestored = 0;
+	QStringList full;
+	for ( const LodgenChunkJob & j : run.allJobs ) {
+		const QString key = chunkKeyAt( j.dim, run.dim, j.cx, j.cy );
+		if ( retired.contains( key ) ) {
+			if ( !retired.value( key ).isEmpty() )
+				full.append( retired.value( key ) );
+			continue;
+		}
+		if ( !run.incremental || !run.rawCache )
+			continue;
+		const QString stem = chunkStem( worldEdid, j.dim, j.cx, j.cy );
+		const QString base = run.rawCacheDir + QChar( '/' ) + stem;
+		if ( !QFileInfo::exists( base + QStringLiteral( ".BTO" ) ) )
+			continue;           // the key said "-": this chunk builds no .BTO
+		const QString dst = btoDir + QChar( '/' ) + stem + QStringLiteral( ".BTO" );
+		const QString dstMan = dst + QStringLiteral( ".manifest.txt" );
+		QFile::remove( dst );
+		QFile::remove( dstMan );
+		if ( !QFile::copy( base + QStringLiteral( ".BTO" ), dst )
+			|| ( QFileInfo::exists( base + QStringLiteral( ".BTO.manifest.txt" ) )
+				 && !QFile::copy( base + QStringLiteral( ".BTO.manifest.txt" ), dstMan ) ) ) {
+			if ( error )
+				*error = QStringLiteral( "cannot copy the raw chunk cache for %1 back into %2" ).arg( stem, btoDir );
+			return false;
+		}
+		/* QFile::copy keeps the source's read-only bit on Windows; the merge
+		 * and the far-ring cut save over this file. */
+		QFile( dst ).setPermissions( QFile( dst ).permissions() | QFileDevice::WriteOwner );
+		if ( QFileInfo::exists( dstMan ) )
+			QFile( dstMan ).setPermissions( QFile( dstMan ).permissions() | QFileDevice::WriteOwner );
+		full.append( dst );
+		run.rawRestored++;
+	}
+	if ( writtenBto )
+		*writtenBto = full;
+	return true;
+}
+
+void lodgenIncrementalSealRaw( const LodgenIncrementalRun & run, const QString & worldEdid )
+{
+	if ( !run.rawCache || run.rawCacheDir.isEmpty() )
+		return;
+	for ( auto it = run.rawStored.constBegin(); it != run.rawStored.constEnd(); ++it ) {
+		const QString inputs = run.inputsMemo.value( it.key() );
+		if ( inputs.isEmpty() )
+			continue;           // no record row was written for it: leave it unkeyed
+		int dim = run.dim, cx = 0, cy = 0;
+		{
+			QString k = it.key();
+			const int at = k.indexOf( QChar( '@' ) );
+			if ( at >= 0 ) {
+				dim = k.mid( at + 1 ).toInt();
+				k = k.left( at );
+			}
+			cx = k.section( QChar( ',' ), 0, 0 ).toInt();
+			cy = k.section( QChar( ',' ), 1, 1 ).toInt();
+		}
+		const QString base = run.rawCacheDir + QChar( '/' ) + chunkStem( worldEdid, dim, cx, cy );
+		QSaveFile f( base + QStringLiteral( ".key" ) );
+		if ( !f.open( QIODevice::WriteOnly ) )
+			continue;
+		f.write( QString( "inputs %1\nswitches %2\nbto %3\nmanifest %4\n" )
+			.arg( inputs, run.switches, it.value().value( 0 ), it.value().value( 1 ) ).toUtf8() );
+		f.commit();
+	}
+}

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# lane FIX1101A lodch r2 (2026-11-01, LATE ITEM 25): the far objects' ground contact (src/lodchsky.h contactAo).
+# lane FIX1101A lodch r2 (2026-11-01, LATE ITEM 25): the far objects' ground contact (src/features/far-lod/lodchsky.h contactAo).
 # Green must print "LODCHGROUND PASS" and exit 0; both reds must print "LODCHGROUND FAIL" and exit 1:
 #   -DLODCH_GROUND_RED=1  today: the .lodi v12 ground ramp is not drawn
 #   -DLODCH_GROUND_RED=2  the ramp as a product on the AO (darkens a foot the AO already darkened, twice)

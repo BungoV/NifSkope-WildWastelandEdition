@@ -5,7 +5,7 @@
 
 #include "esmdata.h"
 #include "esmfile.hpp"
-#include "lodgen.h"
+#include "features/far-lod/lodgen.h"
 #include "nativeemit.h"
 #include "wwswitch.h"
 #include "data/niftypes.h"

@@ -6,7 +6,7 @@ BSD License - see nifskope.h
 
 #include "cellidentity.h"
 
-#include "lodifile.h"
+#include "features/far-lod/lodifile.h"
 
 #include <QFileInfo>
 
@@ -44,7 +44,7 @@ bool cellIdentityLoad( const QString & lodiPath, QHash<quint32, CellIdentity> & 
 
 	if ( t.cold.size() != t.instances.size() )
 		return fail( QString( "the cold blob has %1 rows and the instance blob has %2; "
-			"they are parallel by contract (src/lodifile.h, LodiCold)" )
+			"they are parallel by contract (src/features/far-lod/lodifile.h, LodiCold)" )
 			.arg( t.cold.size() ).arg( t.instances.size() ) );
 
 	if ( !c.hasGroups ) {

@@ -361,7 +361,7 @@ bool wwCellSpecOccPinned();
 void wwCellSpecOccSetOn( bool on );
 int wwCellSpecOccMode();
 
-/*! Distant light from the surfels (src/farlight.h): past the band's near end a surface's placed-light diffuse
+/*! Distant light from the surfels (src/features/far-lod/farlight.h): past the band's near end a surface's placed-light diffuse
  *  fades from the real lights to the bake's surfels; `placed` is subtracted so the far bounce is not counted twice. */
 struct WwCellFar
 {

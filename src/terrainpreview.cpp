@@ -12,10 +12,10 @@
 #include "wwswitch.h"	// lane TESTDRIVER1: the WW_* switch store
 
 #include "esmdata.h"
-#include "lodgen.h"
-#include "lodtfile.h"
-#include "io/loddecal.h"
-#include "io/lodvfile.h"
+#include "features/far-lod/lodgen.h"
+#include "features/far-lod/lodtfile.h"
+#include "features/far-lod/loddecal.h"
+#include "features/far-lod/lodvfile.h"
 
 #include "ddstxt16.hpp"
 

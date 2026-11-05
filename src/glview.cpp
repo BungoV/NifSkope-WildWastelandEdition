@@ -58,12 +58,12 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include "gl/taainputs.h"	// lane TAAINPUTS1: velocity + reactive mask for a temporal resolve
 #include "gl/cellpost.h"	// lane GRASSMB1: the game's depth of field + motion blur
 #include "gl/cellgrass.h"	// lane GRASSMB1: the grass wind's clock
-#include "impostorchunk.h"
-#include "cellfarlod.h"		// the far field's planes, sway and cards
+#include "features/far-lod/impostorchunk.h"
+#include "features/far-lod/cellfarlod.h"		// the far field's planes, sway and cards
 #include "features/water/cellwater.h"	// far water held until its dry mask's lookup lands
 #include "landlodspec.h"		// the land-LOD blend centre's glide
 #include "cellmodpick.h"	// "Mods differ from the far LOD bake" over the view
-#include "impostorpreviewtest.h"
+#include "features/far-lod/impostorpreviewtest.h"
 #include "gl/glshape.h"
 #include "gl/gltex.h"
 #include "model/nifmodel.h"

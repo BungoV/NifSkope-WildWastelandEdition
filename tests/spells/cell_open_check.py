@@ -16,7 +16,7 @@ shares no code with either) and the NIFs itself, and checks three things:
 
   (3) THE WORLD BOX, recomputed here from the model's own vertex bounds under
       the engine's euler convention -- Matrix::fromEuler(-x,-y,-z), the
-      convention src/lodgen.cpp ~3468 measured against vanilla chunks. This is
+      convention src/features/far-lod/lodgen.cpp ~3468 measured against vanilla chunks. This is
       the only one of the three that depends on the ROTATION and the SCALE and
       not merely on the parse.
 

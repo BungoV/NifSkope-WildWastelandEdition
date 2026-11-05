@@ -316,24 +316,24 @@ HEADERS += \
 	src/features/near/cellbindlesspool.h \
 	src/features/near/cellbindlessreopen.h \
 	src/features/near/cellgpucull.h \
-	src/gl/cellfarinst.h \
+	src/features/far-lod/cellfarinst.h \
 	src/gl/cellfarground.h \
 	src/gl/cellfgsched.h \
 	src/gl/cellunits.h \
 	src/ui/scenewindow.h \
-	src/gl/impostordraw.h \
-	src/impostoroct.h \
-	src/impostorcard.h \
-	src/impostorchunk.h \
-	src/impostorpreviewtest.h \
+	src/features/far-lod/impostordraw.h \
+	src/features/far-lod/impostoroct.h \
+	src/features/far-lod/impostorcard.h \
+	src/features/far-lod/impostorchunk.h \
+	src/features/far-lod/impostorpreviewtest.h \
 	src/io/material.h \
 	src/io/pbrmfile.h \
 	src/io/pbrmresolve.h \
 	src/io/nifxfile.h \
 	src/features/lights/nifxlights.h \
-	src/io/lodmfile.h \
-	src/io/lodvfile.h \
-	src/io/loddecal.h \
+	src/features/far-lod/lodmfile.h \
+	src/features/far-lod/lodvfile.h \
+	src/features/far-lod/loddecal.h \
 	src/terrainpreview.h \
 	src/io/MeshFile.h \
 	src/io/nifstream.h \
@@ -411,21 +411,21 @@ HEADERS += \
 	src/features/water/esmwater.h \
 	src/esmweather.h \
 	src/recx.h \
-	src/lodgen.h \
-	src/lodgenao.h \
-	src/lodgenchunkpass.h \
-	src/lodgengpu.h \
-	src/lodgenloadorder.h \
-	src/lodbfile.h \
-	src/lodgenlayout.h \
-	src/lodgenparallel.h \
+	src/features/far-lod/lodgen.h \
+	src/features/far-lod/lodgenao.h \
+	src/features/far-lod/lodgenchunkpass.h \
+	src/features/far-lod/lodgengpu.h \
+	src/features/far-lod/lodgenloadorder.h \
+	src/features/far-lod/lodbfile.h \
+	src/features/far-lod/lodgenlayout.h \
+	src/features/far-lod/lodgenparallel.h \
 	src/nifparsestress.h \
-	src/lodtfile.h \
-	src/lodofile.h \
-	src/lodifile.h \
-	src/lodpfile.h \
-	src/lodpplace.h \
-	src/lodpbake.h \
+	src/features/far-lod/lodtfile.h \
+	src/features/far-lod/lodofile.h \
+	src/features/far-lod/lodifile.h \
+	src/features/far-lod/lodpfile.h \
+	src/features/far-lod/lodpplace.h \
+	src/features/far-lod/lodpbake.h \
 	src/cellpick.h \
 	src/cellclick.h \
 	src/cellground.h \
@@ -434,12 +434,12 @@ HEADERS += \
 	src/cellpanel.h \
 	src/cellpicktest.h \
 	src/cellview.h \
-	src/cellfarlod.h \
+	src/features/far-lod/cellfarlod.h \
 	src/cellmodpick.h \
 	src/cellmodpickbox.h \
 	src/cellmodsource.h \
-	src/cellfarvanilla.h \
-	src/cellfarhide.h \
+	src/features/far-lod/cellfarvanilla.h \
+	src/features/far-lod/cellfarhide.h \
 	src/cellmesh.h \
 	src/cellspeed.h \
 	src/cellstream.h \
@@ -475,8 +475,8 @@ HEADERS += \
 	src/features/gi/probegi.h \
 	src/features/gi/probegifine.h \
 	src/features/gi/proberelight.h \
-	src/farlight.h \
-	src/farlightmap.h \
+	src/features/far-lod/farlight.h \
+	src/features/far-lod/farlightmap.h \
 	src/features/gi/proberooms.h \
 	src/features/gi/probevolcheck.h \
 	src/features/gi/probevolfine.h \
@@ -498,15 +498,15 @@ HEADERS += \
 	src/cellworkspace.h \
 	src/cellfavorites.h \
 	src/cellfavoritespanel.h \
-	src/lodinative.h \
-	src/lodtsheets.h \
-	src/lodgenaggregate.h \
+	src/features/far-lod/lodinative.h \
+	src/features/far-lod/lodtsheets.h \
+	src/features/far-lod/lodgenaggregate.h \
 	src/nativeemit.h \
 	src/nearlib.h \
-	src/watermark.h \
-	src/watermarkpanel.h \
-	src/watercurves.h \
-	src/waterwindow.h \
+	src/features/far-lod/watermark.h \
+	src/features/far-lod/watermarkpanel.h \
+	src/features/far-lod/watercurves.h \
+	src/features/far-lod/waterwindow.h \
 	src/wwfullscreen.h \
 	src/rdccapture.h \
 	src/nifsnapshot.h \
@@ -583,17 +583,17 @@ SOURCES += \
 	src/uialigntest.cpp \
 	src/viewfulltest.cpp \
 	src/wwfullscreen.cpp \
-	src/wateruitest.cpp \
-	src/wateruitest_lod.cpp \
+	src/features/far-lod/wateruitest.cpp \
+	src/features/far-lod/wateruitest_lod.cpp \
 	src/physics/physicspreview.cpp \
 	src/physics/ragdollsim.cpp \
 	src/gl/hknpencode.cpp \
 	src/gl/renderer.cpp \
-	src/gl/impostordraw.cpp \
-	src/impostoroct.cpp \
-	src/impostorcard.cpp \
-	src/impostorchunk.cpp \
-	src/impostorpreviewtest.cpp \
+	src/features/far-lod/impostordraw.cpp \
+	src/features/far-lod/impostoroct.cpp \
+	src/features/far-lod/impostorcard.cpp \
+	src/features/far-lod/impostorchunk.cpp \
+	src/features/far-lod/impostorpreviewtest.cpp \
 	src/features/lights/lightanglestest.cpp \
 	src/scenetest.cpp \
 	src/gl/scenelighting.cpp \
@@ -612,7 +612,7 @@ SOURCES += \
 	src/gl/celllensflare.cpp \
 	src/gl/cellprecip.cpp \
 	src/features/near/cellcull.cpp \
-	src/gl/cellfarinst.cpp \
+	src/features/far-lod/cellfarinst.cpp \
 	src/gl/cellfarground.cpp \
 	src/features/near/cellumbra.cpp \
 	src/features/near/cellumbradepth.cpp \
@@ -663,9 +663,9 @@ SOURCES += \
 	src/io/pbrmresolve.cpp \
 	src/io/nifxfile.cpp \
 	src/features/lights/nifxlights.cpp \
-	src/io/lodmfile.cpp \
-	src/io/lodvfile.cpp \
-	src/io/loddecal.cpp \
+	src/features/far-lod/lodmfile.cpp \
+	src/features/far-lod/lodvfile.cpp \
+	src/features/far-lod/loddecal.cpp \
 	src/terrainpreview.cpp \
 	src/io/MeshFile.cpp \
 	src/io/nifstream.cpp \
@@ -777,20 +777,20 @@ SOURCES += \
 	src/esmdata.cpp \
 	src/esmweather.cpp \
 	src/recx.cpp \
-	src/lodgen.cpp 	src/lodgenmanager.cpp 	src/lodtfile.cpp \
-	src/lodgenchunkpass.cpp \
-	src/lodgengpu.cpp \
-	src/lodgenloadorder.cpp \
-	src/lodbfile.cpp \
-	src/lodgenlayout.cpp \
-	src/lodgenparallel.cpp \
+	src/features/far-lod/lodgen.cpp 	src/features/far-lod/lodgenmanager.cpp 	src/features/far-lod/lodtfile.cpp \
+	src/features/far-lod/lodgenchunkpass.cpp \
+	src/features/far-lod/lodgengpu.cpp \
+	src/features/far-lod/lodgenloadorder.cpp \
+	src/features/far-lod/lodbfile.cpp \
+	src/features/far-lod/lodgenlayout.cpp \
+	src/features/far-lod/lodgenparallel.cpp \
 	src/nifparsestress.cpp \
-	src/lodofile.cpp \
-	src/lodifile.cpp \
-	src/lodpfile.cpp \
-	src/lodpplace.cpp \
-	src/lodpfixture.cpp \
-	src/lodpbake.cpp \
+	src/features/far-lod/lodofile.cpp \
+	src/features/far-lod/lodifile.cpp \
+	src/features/far-lod/lodpfile.cpp \
+	src/features/far-lod/lodpplace.cpp \
+	src/features/far-lod/lodpfixture.cpp \
+	src/features/far-lod/lodpbake.cpp \
 	src/cellpick.cpp \
 	src/cellclick.cpp \
 	src/cellground.cpp \
@@ -799,13 +799,13 @@ SOURCES += \
 	src/cellpanel.cpp \
 	src/cellpicktest.cpp \
 	src/cellview.cpp \
-	src/cellfarlod.cpp \
+	src/features/far-lod/cellfarlod.cpp \
 	src/cellmodpick.cpp \
 	src/cellmodpickbox.cpp \
 	src/cellmodpicktest.cpp \
 	src/cellmodsource.cpp \
-	src/cellfarvanilla.cpp \
-	src/cellfarhide.cpp \
+	src/features/far-lod/cellfarvanilla.cpp \
+	src/features/far-lod/cellfarhide.cpp \
 	src/cellmesh.cpp \
 	src/cellspeed.cpp \
 	src/cellstream.cpp \
@@ -835,8 +835,8 @@ SOURCES += \
 	src/features/gi/probegi.cpp \
 	src/features/gi/probegifine.cpp \
 	src/features/gi/proberelight.cpp \
-	src/farlight.cpp \
-	src/farlightmap.cpp \
+	src/features/far-lod/farlight.cpp \
+	src/features/far-lod/farlightmap.cpp \
 	src/features/gi/proberooms.cpp \
 	src/features/gi/probevolcheck.cpp \
 	src/features/gi/probevolfine.cpp \
@@ -861,15 +861,15 @@ SOURCES += \
 	src/cellfavoritespanel.cpp \
 	src/cellworkspacetest.cpp \
 	src/cellcensustest.cpp \
-	src/lodinative.cpp \
-	src/lodtsheets.cpp \
-	src/lodgenaggregate.cpp \
+	src/features/far-lod/lodinative.cpp \
+	src/features/far-lod/lodtsheets.cpp \
+	src/features/far-lod/lodgenaggregate.cpp \
 	src/nativeemit.cpp \
 	src/nearlib.cpp \
-	src/watermark.cpp \
-	src/watermarkpanel.cpp \
-	src/watercurves.cpp \
-	src/waterwindow.cpp \
+	src/features/far-lod/watermark.cpp \
+	src/features/far-lod/watermarkpanel.cpp \
+	src/features/far-lod/watercurves.cpp \
+	src/features/far-lod/waterwindow.cpp \
 	src/rdccapture.cpp \
 	src/skeletonops.cpp \
 	src/uvtools.cpp \

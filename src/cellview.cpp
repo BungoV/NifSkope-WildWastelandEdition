@@ -11,8 +11,8 @@ BSD License - see nifskope.h
 
 #include "cellpick.h"
 #include "cellrefs.h"
-#include "cellfarhide.h"	// lane GEOLOD1: the large refs' far rows
-#include "largeref.h"	// lane GEOLOD1
+#include "features/far-lod/cellfarhide.h"	// lane GEOLOD1: the large refs' far rows
+#include "features/far-lod/largeref.h"	// lane GEOLOD1
 #include "cellclick.h"		// lane CELLVIEW2
 #include "cellground.h"		// lane CELLVIEW2
 #include "cellsplat.h"		// lane CELLVIEW4
@@ -31,7 +31,7 @@ BSD License - see nifskope.h
 #include "esmdata.h"
 #include "esmfile.hpp"		// lane LEFTOVERS1: light-plugin form IDs back to their file
 #include "esmweather.h"		// the fog packing
-#include "lodgen.h"
+#include "features/far-lod/lodgen.h"
 #include "nativeemit.h"
 #include "features/gi/probeplace.h"		// lane PRTPPLACE
 #include "features/gi/probebake.h"		// lane PRTPBAKE
@@ -42,11 +42,11 @@ BSD License - see nifskope.h
 #include "features/shared/cellpasstime.h"	// private bytes at each stage
 #include "features/gi/proberelight.h"	// the relight from recorded operators (CPU + GPU)
 #include "celldoorlive.h"	// one live door
-#include "farlight.h"		// distant light from the surfels
+#include "features/far-lod/farlight.h"		// distant light from the surfels
 #include "cellmodelahead.h"	// models parsed on worker threads
 #include "cellmesh.h"		// the welded geometry beside the document
-#include "cellfarlod.h"		// the far field around the block
-#include "lodinative.h"		// lane FIX1101A lodch: the far LOD's baked AO / sky switches (liveFarKey)
+#include "features/far-lod/cellfarlod.h"		// the far field around the block
+#include "features/far-lod/lodinative.h"		// lane FIX1101A lodch: the far LOD's baked AO / sky switches (liveFarKey)
 #include "cellmodpick.h"
 #include "cellspeed.h"		// stage timers (WW_CELL_SPEED_DUMP)
 #include "features/ao/cellaodecal.h"		// baked AO decals under big movable statics
@@ -292,7 +292,7 @@ bool isMaterialFile( const QString & s )
 	return s.endsWith( QStringLiteral( ".bgsm" ), Qt::CaseInsensitive );
 }
 
-//! Separators only -- see the note in src/lodinative.cpp: prepending
+//! Separators only -- see the note in src/features/far-lod/lodinative.cpp: prepending
 //! `materials\` is what BREAKS an absolute build-machine path.
 QString materialNameFor( const QString & s )
 {
@@ -3498,7 +3498,7 @@ static bool cellBuild( NifModel * nif, const CellSceneSpec & specAsked, CellChun
 			}
 		}
 		/* lane GEOLOD1 (LARGEREF1): the large refs (WRLD RNAM) the block's cells list draw full wherever they stand, as the
-		 * game draws them while a listing cell is loaded (src/largeref.h); their far rows hide as a loaded cell's do.
+		 * game draws them while a listing cell is loaded (src/features/far-lod/largeref.h); their far rows hide as a loaded cell's do.
 		 * Off by default (the game's bDisableLargeRefs is 1); WW_CELL_LARGEREFS=1 or the game's inis turn it on. The
 		 * streamed view draws them in units of their own (lane LARGEREF2, src/cellstream.cpp). */
 		{
@@ -7475,7 +7475,7 @@ static bool cellBuild( NifModel * nif, const CellSceneSpec & specAsked, CellChun
 			 * and closed, and states timings; WW_CELL_GI_RECORDS=<folder> writes the shared light record. */
 			const bool giGpu = wwCellGiGpuOn();
 			/* WW_CELL_FARLIGHT=<folder> records the operators too, writes the light record and the far light's
-			 * layers there (src/farlight.h), and publishes the far tables for the Far light row */
+			 * layers there (src/features/far-lod/farlight.h), and publishes the far tables for the Far light row */
 			const QString farDir = QString::fromLocal8Bit( wwEnv( "WW_CELL_FARLIGHT" ) );
 			const bool giRec = giGpu || !farDir.isEmpty() || wwDoorLiveWantsGi();
 			bool farBaked = false;

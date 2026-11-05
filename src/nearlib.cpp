@@ -7,10 +7,10 @@ BSD License - see nifskope.h
 #include "nearlib.h"
 
 #include "esmdata.h"
-#include "lodgen.h"
-#include "lodgenparallel.h"
-#include "lodifile.h"
-#include "lodofile.h"
+#include "features/far-lod/lodgen.h"
+#include "features/far-lod/lodgenparallel.h"
+#include "features/far-lod/lodifile.h"
+#include "features/far-lod/lodofile.h"
 #include "nativeemit.h"
 #include "data/niftypes.h"
 
