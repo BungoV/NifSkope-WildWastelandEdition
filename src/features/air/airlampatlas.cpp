@@ -65,12 +65,19 @@ void wwAirLampVisSetChoice( int item )
 	QSettings().setValue( QStringLiteral( "WW/AirLampVis" ), g_lampVisRow );
 }
 
+int wwAirLampAtlasRed()
+{
+	const QByteArray v = wwEnv( "WW_CELL_AIR_LAMPATLAS_RED" ).trimmed();	// read live; "twice,faces"
+	return ( v.contains( "twice" ) ? 1 : 0 ) | ( v.contains( "faces" ) ? 2 : 0 );
+}
+
 namespace {
 
 constexpr int kAtlas = 8192;
 constexpr int kLevels = 9;	// 8192 .. 32
 constexpr int kMinS = 32, kMaxS = 256;
-constexpr int kFacesPerFrame = 192;
+constexpr int kFacesPerFrame = 192;	// red "faces": the first fill's cap
+constexpr qint64 kFillNs = 4000000;	// the fill's CPU budget a frame (AUDIT row 13); one face at least
 constexpr int kTexelsPerLamp = 4;
 
 int levelOf( int s )
@@ -155,7 +162,7 @@ struct State
 	bool tableDirty = true;
 	qint64 frames = 0, facesTotal = 0;
 	int lastReady = -1, lastPending = -1;
-	double drawMs = 0.0;
+	double drawMs = 0.0, maxMs = 0.0;	// since the cell's key last changed
 };
 
 State & st()
@@ -290,6 +297,8 @@ int wwAirLampAtlasFrame( Scene * scene, const WwCellLighting * L, const float ca
 		s.lamps.assign( size_t( n ), Lamp() );
 		s.tableDirty = true;
 		s.lastReady = s.lastPending = -1;
+		s.frames = s.facesTotal = 0;
+		s.drawMs = s.maxMs = 0.0;
 	}
 
 	// the sizes: half the lamp's screen extent, on the ladder; away from the air the tiles go back to the pool
@@ -407,8 +416,10 @@ int wwAirLampAtlasFrame( Scene * scene, const WwCellLighting * L, const float ca
 			const int lRel = prog->uniLocation( "shRelFromView" ), lClip = prog->uniLocation( "shClipFromRel" );
 			const int lRn = prog->uniLocation( "shRadiusNear" );
 			std::vector<const WwCubeCaster *> mine;
+			const bool faceCap = ( wwAirLampAtlasRed() & 2 ) != 0;
+			auto full = [&]() { return faceCap ? faces >= kFacesPerFrame : faces > 0 && clock.nsecsElapsed() >= kFillNs; };
 			for ( int i : pending ) {
-				if ( faces >= kFacesPerFrame )
+				if ( full() )
 					break;
 				const WwCellLight & l = L->lights.at( i );
 				Lamp & m = s.lamps[i];
@@ -433,7 +444,7 @@ int wwAirLampAtlasFrame( Scene * scene, const WwCellLighting * L, const float ca
 					if ( dx * dx + dy * dy + dz * dz < reach * reach )
 						mine.push_back( &c );
 				}
-				for ( ; m.next.drawn < 6 && faces < kFacesPerFrame; m.next.drawn++, faces++ ) {
+				for ( ; m.next.drawn < 6 && !full(); m.next.drawn++, faces++ ) {
 					const int f = m.next.drawn;
 					const int ox = int( m.next.at[f] >> 16 ), oy = int( m.next.at[f] & 0xffff ), sz = m.next.s;
 					fn->glViewport( ox, oy, sz, sz );
@@ -517,19 +528,24 @@ int wwAirLampAtlasFrame( Scene * scene, const WwCellLighting * L, const float ca
 	// the census: on a change of the ready / pending counts, and every 120 frames while tiles are drawn
 	s.frames++;
 	s.facesTotal += faces;
-	s.drawMs += double( clock.nsecsElapsed() ) * 1e-6;
-	int ready = 0, tiled = 0;
+	const double ms = double( clock.nsecsElapsed() ) * 1e-6;
+	s.drawMs += ms;
+	s.maxMs = std::max( s.maxMs, ms );
+	int ready = 0, tiled = 0, bySize[4] = { 0, 0, 0, 0 };	// 32, 64, 128, 256
 	double used = 0.0;
 	for ( const Lamp & m : s.lamps ) {
 		ready += m.cur.s ? 1 : 0;
+		if ( m.cur.s )
+			bySize[std::clamp( int( std::log2( double( m.cur.s ) ) + 0.5 ) - 5, 0, 3 )]++;
 		used += 6.0 * ( double( m.cur.s ) * m.cur.s + double( m.next.s ) * m.next.s );
 	}
 	for ( int w : want )
 		tiled += w ? 1 : 0;
 	const int pend = int( pending.size() );
 	if ( ready != s.lastReady || ( pend == 0 ) != ( s.lastPending == 0 ) || ( pend && s.frames % 120 == 0 ) ) {
-		std::fprintf( stderr, "air lamp atlas: lamps %d in air %d ready %d pending %d faces %lld used %.1f%% cpu %.2f ms (%lld frames)\n",
-			n, tiled, ready, pend, (long long)s.facesTotal, 100.0 * used / ( double( kAtlas ) * kAtlas ), s.drawMs, (long long)s.frames );
+		std::fprintf( stderr, "air lamp atlas: lamps %d in air %d ready %d pending %d faces %lld used %.1f%% cpu %.2f ms (%lld frames, max %.2f) tiles 32/64/128/256 %d/%d/%d/%d\n",
+			n, tiled, ready, pend, (long long)s.facesTotal, 100.0 * used / ( double( kAtlas ) * kAtlas ), s.drawMs, (long long)s.frames,
+			s.maxMs, bySize[0], bySize[1], bySize[2], bySize[3] );
 		s.lastReady = ready;
 		s.lastPending = pend;
 	}

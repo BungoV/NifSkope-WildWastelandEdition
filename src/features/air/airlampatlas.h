@@ -34,6 +34,9 @@ bool wwAirLampVisPinned();
 //! the row's item: 0 Atlas, 1 Ray traced, 2 Probe walk
 int wwAirLampVisChoice();
 void wwAirLampVisSetChoice( int item );
+//! the atlas's red, read live (WW_CELL_AIR_LAMPATLAS_RED): 1 "twice" = lamps in a cube slot read the atlas too,
+//! 2 "faces" = the first fill capped at 192 faces a frame, not 4 ms
+int wwAirLampAtlasRed();
 
 /* one frame of the atlas: tiles for the lamps whose sphere reaches the air (camera distance - radius < farD), drawn
  * nearest first, binds the atlas on unit AirLampAtlas and the table on AirLampTable. Returns the lamps in the table

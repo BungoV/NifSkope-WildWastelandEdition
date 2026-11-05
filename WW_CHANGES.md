@@ -1,3 +1,15 @@
+## MODULES1 step 8 (2026-11-05): the atlas fills by time, cube-slot lamps skip it; sun shafts jitter into a mean
+
+- Atlas: the first fill draws faces for at most 4 ms of CPU a frame (at least one face), nearest lamps first, in place
+  of 192 faces a frame (hold12: 29-71 ms a frame for 12-19 frames). A lamp that holds one of the 16 cube slots is
+  shadowed by its cube already and no longer reads the atlas as well (it was shadowed twice). Red
+  `WW_CELL_AIR_LAMPATLAS_RED=twice,faces` (live) brings either back. The census line adds the slowest frame and the
+  tile sizes.
+- Sun shafts (temporal air, on by default): the fresh stratum's sun read moves inside its sub-step each refresh by the
+  golden ratio and goes into a running mean with its history (1/4 with a still camera, 1/2 while it moves), so thin
+  beams are sampled across the whole sub-step instead of at its middle. Red `WW_CELL_AIR_SUNJIT_RED=1` (live): the
+  middle, no mean.
+
 ## MODULES1 step 7 (2026-11-05): Volumetric Air > Lamp shadows (Atlas | Ray traced | Probe walk)
 
 - A new live row under Volumetric Air picks how the air's lamp leak sees shadows: Atlas (route (a), new), Ray traced

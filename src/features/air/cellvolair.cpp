@@ -1890,6 +1890,7 @@ static void vaPassInner( Scene * scene, bool run )
 		}
 		prog->uni1i( "volLampVis", lampN > 0 ? 1 : 0 );
 		prog->uni1i( "volLampN", lampN );
+		prog->uni1i( "volLampAtlasRed", wwAirLampAtlasRed() & 1 );
 		prog->uni1i( "volLampAtlas", WwCellUnit::AirLampAtlas );
 		prog->uni1i( "volLampTable", WwCellUnit::AirLampTable );
 	}
@@ -2048,6 +2049,14 @@ static void vaPassInner( Scene * scene, bool run )
 	}
 	prog->uni1i( "volTemporal", g.tmode );
 	prog->uni1i( "volQ", int( g.frame & 3u ) );
+	{
+		// MODULES1 step 5: the sun read of the fresh stratum steps by the golden ratio each refresh, into a running mean
+		// (1/4 with a still camera, 1/2 while it moves); red WW_CELL_AIR_SUNJIT_RED=1: the middle, no mean (live)
+		const bool red = wwEnv( "WW_CELL_AIR_SUNJIT_RED" ).trimmed() == "1";
+		const double k = double( g.frame >> 2 ) * 0.6180339887498949;
+		prog->uni1f( "volSunJit", red ? 0.0f : float( k - std::floor( k ) ) - 0.5f );
+		prog->uni1f( "volSunBlend", red ? 1.0f : g.tmode == 2 ? 0.25f : 0.5f );
+	}
 	prog->uni1b( "volHistOk", temporal && g.histOk );
 	prog->uni1i( "volHist", kInjectUnit );
 	{

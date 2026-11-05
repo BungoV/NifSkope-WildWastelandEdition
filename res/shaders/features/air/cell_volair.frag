@@ -26,6 +26,7 @@ uniform vec3 cellDdgiOpenE[6];	// lane FOGENV1: an open probe's irradiance per a
 // lane MODULES1 route (a): the lamps' depth atlas (features/air/airlampatlas.cpp); volLampVis 0 = the probe walk
 uniform int volLampVis;
 uniform int volLampN;
+uniform int volLampAtlasRed;	// 1 = the first atlas: lamps in a cube slot read the atlas too (shadowed twice)
 uniform sampler2DShadow volLampAtlas;
 uniform samplerBuffer volLampTable;
 #endif
@@ -65,6 +66,10 @@ uniform int volCount;			// lane PERF2, stage 3: the layers this draw writes (vol
 uniform sampler2D volCarry;		// lane PERF2, stage 3: the running (L, T) after layer volLayer - 1
 uniform int volTemporal;		// lane PERF2, stage 1: 0 the four sub-steps; 1 one fresh stratum + the history reprojected; 2 the same, camera unchanged
 uniform int volQ;				// this frame's fresh stratum (0..3)
+// lane MODULES1 step 5: the fresh stratum's sun read moves inside its sub-step each refresh (volSunJit, -0.5..0.5 of a
+// sub-step) and is blended into its history (volSunBlend, the fresh weight). Red WW_CELL_AIR_SUNJIT_RED: 0 and 1, the middle
+uniform float volSunJit;
+uniform float volSunBlend;
 uniform sampler3D volHist;		// last frame's strata: layer p x slices + k = stratum p's light / (1 - a), a = 1 where valid
 uniform vec4 volReproj[3];		// this frame's view -> last frame's view (rows, view units)
 uniform vec4 volPrevGrid;		// last frame's [0][0], [1][1], near, ln(far / near)
@@ -440,18 +445,18 @@ float airLampAtlasVis( int i, vec3 P, vec3 Lp )
 
 float airLeakLightK( int i, vec3 P, vec3 Lp )
 {
-	if ( volLampVis == 1 ) {
+	vec4 t4 = texelFetch( cellLights, i * CELL_TPL + 4 );
+	bool cubed = cellShadowOn && t4.y > 0.5 && t4.x > -0.5;
+#ifdef WW_CELL_RESTIR
+	cubed = cubed && !cellRestirOn;
+#endif
+	if ( volLampVis == 1 && ( !cubed || volLampAtlasRed == 1 ) ) {	// a lamp in a cube slot is shadowed by its cube already
 		float av = airLampAtlasVis( i, P, Lp );	// every cell: the atlas is no probe guess (AUDIT row 5)
 		if ( av >= 0.0 )
 			return av;
 	}
 	if ( ( volLeakRed & 4 ) != 0 )
 		return 1.0;
-	vec4 t4 = texelFetch( cellLights, i * CELL_TPL + 4 );
-	bool cubed = cellShadowOn && t4.y > 0.5 && t4.x > -0.5;
-#ifdef WW_CELL_RESTIR
-	cubed = cubed && !cellRestirOn;
-#endif
 	return cubed ? 1.0 : airLeakLightVis( P, Lp );
 }
 #endif
@@ -1306,9 +1311,14 @@ void main()
 			if ( ( need & ( 1 << q ) ) != 0 ) {
 				Cq = 0.25 * W * Jq[q] AZ_TINT( q );
 				if ( wq[q] > 0.0 ) {
-					Cq += Tq[q] * wq[q] * vk * airEnvColour( airSun( dirView * ( t / fogDistScale ), dirView, zt ), t, zt, dirView ) AZ_TINT( q );
+					float ts = t + volSunJit * ( tb - ta );
+					Cq += Tq[q] * wq[q] * vk * airEnvColour( airSun( dirView * ( ts / fogDistScale ), dirView, zt ), t, zt, dirView ) AZ_TINT( q );
 				}
 				so[q] = vec4( Cq / W, 1.0 );
+				if ( volSunBlend < 1.0 && need == ( 1 << q ) && h[q].a > 0.9999 ) {	// a valid history: the running mean
+					so[q].rgb = mix( h[q].rgb, so[q].rgb, volSunBlend );
+					Cq = so[q].rgb * W;
+				}
 			} else {
 				Cq = h[q].rgb * W;
 				so[q] = vec4( h[q].rgb, 1.0 );
