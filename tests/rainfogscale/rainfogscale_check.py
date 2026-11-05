@@ -152,7 +152,7 @@ gate('D words', not bad and len(D['words']) == len(want), '%d words, %d wrong %s
 if red == 'wiring':
     src = subprocess.run(['git', 'show', base + ':src/gl/cellvolair.cpp'], cwd=TREE, capture_output=True, text=True).stdout
 else:
-    src = open(os.path.join(TREE, 'src', 'gl', 'cellvolair.cpp'), encoding='utf-8').read()
+    src = open(os.path.join(TREE, 'src', 'features', 'air', 'cellvolair.cpp'), encoding='utf-8').read()
 need = ['RF::defaultMpSigmaPerKm()', 'RF::mpRateFactor(', 'RF::redWords(', 'RF::RedNoTail', 'mono ? RF::defaultSigmaPerKm()']
 miss = [n for n in need if n not in src]
 gate('W wiring', not miss, '%s: %d of %d hooks%s' % ('base ' + base if red == 'wiring' else 'tree', len(need) - len(miss),

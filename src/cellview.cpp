@@ -74,15 +74,15 @@ BSD License - see nifskope.h
 #include "features/lights/cellfxlit.h"
 #include "gl/celllensflare.h"
 #include "features/ao/cellaodecalgl.h"
-#include "gl/cellwater.h"
-#include "gl/cellwaterinfo.h"
+#include "features/water/cellwater.h"
+#include "features/water/cellwaterinfo.h"
 #include "features/near/cellcull.h"	// the per-placement culling runs
 #include "features/near/cellobjfade.h"	// the runs' fade class
 #include "features/near/cellprevisrule.h"	// lane PERFFIX4: the tome's staleness
 #include "gl/glproperty.h"	// lane FIXPACK1: the renderer's .pbrm resolve (pbrmResolveForMaterial)
 #include "gl/cellgrass.h"
 #include "gl/cellpost.h"
-#include "esmwater.h"
+#include "features/water/esmwater.h"
 #include "gamemanager.h"	// the imagespace LUT
 
 #include <QBuffer>
@@ -262,7 +262,7 @@ struct Bucket
 	float pomScale = 0.0f;  // its DODT parallax scale and passes
 	int pomPasses = 0;
 	/* a water surface of one WATR record (the cell's plane or a placed water mesh); its shapes are
-	 * registered with src/gl/cellwater.h, which draws them the game's way while the Cell lights row is on. */
+	 * registered with src/features/water/cellwater.h, which draws them the game's way while the Cell lights row is on. */
 	bool water = false;
 	WwWaterRecord waterRec;
 	bool grass = false;   // blades of the game's grass (src/gl/cellgrass.h): the fade applies
@@ -5388,7 +5388,7 @@ static bool cellBuild( NifModel * nif, const CellSceneSpec & specAsked, CellChun
 			if ( cableSway )
 				bbOwn += QStringLiteral( "|CABLEWIND|%1" ).arg( p.base, 8, 16, QLatin1Char( '0' ) );
 			/* Lane WATER1: a placed water mesh (an ACTI whose WNAM names a WATR; its shape carries the water
-			 * shader) gets a bucket per record, drawn by src/gl/cellwater.h with that record's terms. */
+			 * shader) gets a bucket per record, drawn by src/features/water/cellwater.h with that record's terms. */
 			const WwWaterRecord * placedWater = nullptr;
 			if ( !isActor && lb.waterType != 0 && s.nearFacts.waterShader && !s.nearFacts.effectShader ) {
 				auto pw = placedWaterRecs.find( lb.waterType );

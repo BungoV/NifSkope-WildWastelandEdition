@@ -526,7 +526,7 @@ QString cellSplatLegend( const CellSplatBuild & b )
 
 
 /* Which blocks of which document are blended-ground shapes, keyed like the water registry
- * (src/gl/cellwater.cpp): NifModel pointer plus block number. */
+ * (src/features/water/cellwater.cpp): NifModel pointer plus block number. */
 namespace {
 QMutex & landMutex()
 {

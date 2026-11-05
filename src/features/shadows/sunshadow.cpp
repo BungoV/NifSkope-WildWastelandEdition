@@ -10,7 +10,7 @@ BSD License - see nifskope.h
 #include "gl/celluniform.h"	// lane CELLUNI2
 #include "gl/alphabgsm.h"	// lane ALPHABGSM1: the side passes' alpha-test census
 #include "gl/gametaa.h"
-#include "gl/cellwater.h"	// lane SUNCELL1: water never casts
+#include "features/water/cellwater.h"	// lane SUNCELL1: water never casts
 #include "cellmesh.h"	// lane FARDRAW1: CellMeshInst
 #include "gl/cellfarinst.h"	// lane FARDRAW1: the instanced far rings cast
 #include "cellfarhide.h"	// lane FARHOLE2: the rows a loaded near cell leaves out

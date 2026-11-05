@@ -60,7 +60,7 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include "gl/cellgrass.h"	// lane GRASSMB1: the grass wind's clock
 #include "impostorchunk.h"
 #include "cellfarlod.h"		// the far field's planes, sway and cards
-#include "gl/cellwater.h"	// far water held until its dry mask's lookup lands
+#include "features/water/cellwater.h"	// far water held until its dry mask's lookup lands
 #include "landlodspec.h"		// the land-LOD blend centre's glide
 #include "cellmodpick.h"	// "Mods differ from the far LOD bake" over the view
 #include "impostorpreviewtest.h"
@@ -167,8 +167,8 @@ private:
 #include "features/shared/cellpasstime.h"
 #include "gl/geokeepclock.h"
 #include "gl/cellfarground.h"
-#include "gl/cellocean.h"
-#include "gl/cellunderwater.h"
+#include "features/water/cellocean.h"
+#include "features/water/cellunderwater.h"
 #include "gl/cloudvol.h"	// the volume clouds' depth test
 
 // NOTE: The FPS define is a frame limiter,

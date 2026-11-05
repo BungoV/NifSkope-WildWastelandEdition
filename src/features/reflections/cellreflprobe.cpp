@@ -22,7 +22,7 @@ BSD License - see nifskope.h
 
 #include "gl/celllights.h"
 #include "features/reflections/cellssr.h"
-#include "gl/cellwater.h"
+#include "features/water/cellwater.h"
 #include "gl/glnode.h"
 #include "gl/glscene.h"
 #include "gl/glshape.h"

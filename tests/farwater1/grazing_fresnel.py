@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Lane FARWATER1 (part B): how much sky the far water reflects at the far rings' grazing angles.
 
-A twin of res/shaders/water_refl.glsl wwWaterFresnel (Frostbite's rough Schlick, F0 0.0204) and of the GGX alpha
+A twin of res/shaders/features/water/water_refl.glsl wwWaterFresnel (Frostbite's rough Schlick, F0 0.0204) and of the GGX alpha
 floor of wwWaterAlpha2 (a0 = 2 / (4 n + 2), n the WATR's sun specular power). The far rings' distances are the
 cell view's (skill ww-far-water-shore-census: band 0, rings 1-4 out to ~95 cells); the eye heights are a shore
 walker (128 u over the water) and a hill (2048 u). The shader's per-pixel slope variance and footprint only RAISE
@@ -9,7 +9,7 @@ alpha, so alpha = sqrt(a0) is the upper bound of F; F at alpha 0.3 shows the cap
 It asserts the twin against the GLSL's text (the formula lines verbatim), so a law change makes it fail."""
 import math, re, sys
 
-GLSL = 'res/shaders/water_refl.glsl'
+GLSL = 'res/shaders/features/water/water_refl.glsl'
 
 
 def fresnel(nov, alpha, f0=0.0204):

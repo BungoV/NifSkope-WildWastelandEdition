@@ -41,7 +41,7 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include "io/material.h"
 #include "gl/renderer.h"
 #include "gl/celllights.h"
-#include "gl/cellwater.h"	// lane WATER1
+#include "features/water/cellwater.h"	// lane WATER1
 #include "features/lights/cellfxlit.h"	// lane FXRES1: wwCellFxRoomLit
 #include "features/air/cellvolair.h"	// lane TREELEAF4: wwVolPartOn
 #include "gl/glmesh.h"
@@ -846,7 +846,7 @@ bool Shape::wwDecalDrawsFirst() const
 
 bool Shape::wwWaterDraws() const
 {
-	// lane WATER1: a registered water surface, drawn by src/gl/cellwater.h while the Cell lights row is on
+	// lane WATER1: a registered water surface, drawn by src/features/water/cellwater.h while the Cell lights row is on
 	return wwCellWaterWanted( scene, id() );
 }
 

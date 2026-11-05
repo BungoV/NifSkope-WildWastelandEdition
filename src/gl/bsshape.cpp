@@ -5,7 +5,7 @@
 #include "features/near/cellbindless.h"	// lane BINDLESS2
 #include "gl/cellfarground.h"
 #include "features/lights/cellfxlit.h"
-#include "gl/cellwater.h"	// lane WATER1
+#include "features/water/cellwater.h"	// lane WATER1
 #include "features/near/cellcull.h"	// lane SUNCELL1
 #include "gl/celllooks.h"	// lane DECALS1: the Decal distance fade row
 #include "features/air/cellvolair.h"	// lane VOLPART1: volumetric lit effect cards
@@ -326,7 +326,7 @@ void BSShape::drawShapes( NodeList * secondPass )
 		secondPass->add( this );
 		return;
 	}
-	// lane WATER1: a cell water surface draws after the opaque frame it refracts (src/gl/cellwater.h)
+	// lane WATER1: a cell water surface draws after the opaque frame it refracts (src/features/water/cellwater.h)
 	if ( secondPass && wwCellWaterWanted( scene, id() ) ) {
 		secondPass->add( this );
 		return;

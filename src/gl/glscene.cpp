@@ -38,7 +38,7 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 #include "gl/renderer.h"
 #include "features/exposure/cellhdr.h"
-#include "gl/cellwater.h"	// lane WATER1
+#include "features/water/cellwater.h"	// lane WATER1
 #include "gl/celllights.h"	// lane GLOWHAZE1: wwCellFxRed
 #include "gl/gltex.h"
 #include "gl/glcontroller.h"
@@ -757,7 +757,7 @@ void Scene::drawDeferredShapes( NodeList & secondPass )
 		if ( isDecal( node ) )
 			node->drawShapes();
 	}
-	/* lane WATER1: then the water (src/gl/cellwater.h), as the game draws its water after the opaque frame and
+	/* lane WATER1: then the water (src/features/water/cellwater.h), as the game draws its water after the opaque frame and
 	 * its decals and before the blended pass: the water refracts the bed, and the haze over it blends on top */
 	auto isWater = [&isDecal]( Node * node ) {
 		Shape * s = dynamic_cast<Shape *>( node );

@@ -54,12 +54,12 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include "features/shadows/sunshadow.h"
 #include "gl/celllights.h"
 #include "features/lights/cellfxlit.h"
-#include "gl/cellwater.h"	// lane WATER1
+#include "features/water/cellwater.h"	// lane WATER1
 #include "cellsplat.h"	// lane TERRBLEND1: wwCellLandIs
 #include "gl/cellgrass.h"	// lane GRASSMB1
 #include "features/near/cellcull.h"	// lane DECALS1: the placed decals' parallax
 #include "gl/celllooks.h"
-#include "gl/cellwaterinfo.h"	// lane WATERWETBAKE1: the land side of the shore plane
+#include "features/water/cellwaterinfo.h"	// lane WATERWETBAKE1: the land side of the shore plane
 #include "gl/cellprecip.h"	// lane FO76WEATHER1: rain wetness
 #include "features/shadows/shadowset.h"	// lane WATERWETBAKE1: wwCellIsTerrainShape
 #include "features/reflections/cellssr.h"
@@ -1146,7 +1146,7 @@ NifSkopeOpenGLContext::Program * Renderer::setupProgram( Shape * mesh, Program *
 		}
 	}
 
-	/* lane WATER1: a cell water surface (src/gl/cellwater.h) takes fo4_water.prog by name while the draw is
+	/* lane WATER1: a cell water surface (src/features/water/cellwater.h) takes fo4_water.prog by name while the draw is
 	 * cell-lit: the matrices, the cell's uniforms and the fog through the lighting setup, then the record's */
 	if ( mesh->bslsp && wwLodChannelView == 0 && wwCellWaterWanted( mesh->scene, mesh->id() ) ) {
 		Program * waterProg = useProgram( wwCellWaterProgram() );	// lane WATERCOMBINE1: or the water looks' twin

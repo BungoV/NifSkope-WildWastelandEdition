@@ -263,12 +263,12 @@ HEADERS += \
 	src/gl/progcachekeep.h \
 	src/features/near/cellcull.h \
 	src/features/near/cellumbra.h \
-	src/gl/cellwater.h \
-	src/gl/cellocean.h \
-	src/gl/oceanspectrum.h \
+	src/features/water/cellwater.h \
+	src/features/water/cellocean.h \
+	src/features/water/oceanspectrum.h \
 	src/features/gi/cellwatergi.h \
-	src/gl/cellwaterinfo.h \
-	src/gl/cellunderwater.h \
+	src/features/water/cellwaterinfo.h \
+	src/features/water/cellunderwater.h \
 	src/gl/cellgrass.h \
 	src/gl/cellpost.h \
 	src/features/exposure/cellhdr.h \
@@ -408,7 +408,7 @@ HEADERS += \
 	src/starterscene.h \
 	src/btdterrain.h \
 	src/esmdata.h \
-	src/esmwater.h \
+	src/features/water/esmwater.h \
 	src/esmweather.h \
 	src/recx.h \
 	src/lodgen.h \
@@ -616,10 +616,11 @@ SOURCES += \
 	src/gl/cellfarground.cpp \
 	src/features/near/cellumbra.cpp \
 	src/features/near/cellumbradepth.cpp \
-	src/gl/cellwater.cpp \
-	src/gl/cellocean.cpp \
-	src/gl/cellwaterinfo.cpp \
-	src/gl/cellunderwater.cpp \
+	src/features/water/cellwater.cpp \
+	src/features/water/esmwater.cpp \
+	src/features/water/cellocean.cpp \
+	src/features/water/cellwaterinfo.cpp \
+	src/features/water/cellunderwater.cpp \
 	src/gl/cellgrass.cpp \
 	src/gl/cellpost.cpp \
 	src/features/exposure/cellhdr.cpp \

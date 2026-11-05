@@ -27,9 +27,9 @@ BSD License - see nifskope.h
 #include "features/shared/cellpasstime.h"	// sub-stage timers
 #include "features/near/celldrawstate.h"
 #include "gl/lookdevstage.h"
-#include "gl/cellwater.h"	// water casts no cube shadow
-#include "gl/cellunderwater.h"	// the WATR INAM imagespace under water
-#include "esmwater.h"
+#include "features/water/cellwater.h"	// water casts no cube shadow
+#include "features/water/cellunderwater.h"	// the WATR INAM imagespace under water
+#include "features/water/esmwater.h"
 #include "features/gi/cellwatergi.h"	// water reads no probe GI
 #include "celllampshadow.h"	// lane LAMPSHADOW1
 #include "cubefacecull.h"	// lane PERFFIX2 b: a caster draws only into the cube faces it can reach

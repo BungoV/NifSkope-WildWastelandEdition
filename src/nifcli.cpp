@@ -56,7 +56,7 @@ int cmdEspWrite( const QStringList & args );	// lane ESPWRITE2: src/io/espwritec
 #include "lodpplace.h"
 #include "lodbfile.h"
 #include "io/loddecal.h"
-#include "gl/cellwaterinfo.h"	// lane WATERDATA1: lodl --water-info
+#include "features/water/cellwaterinfo.h"	// lane WATERDATA1: lodl --water-info
 #include "terrainpreview.h"
 #include <QDateTime>
 #include <QDirIterator>

@@ -117,7 +117,7 @@ gate('T', ts[30] >= 0.25 and ts[20] >= 0.12 and min(ts.values()) * CONTRAST * 25
 if rev:
     src = subprocess.run(['git', '-C', tree, 'show', '%s:src/gl/cellvolair.cpp' % rev], capture_output=True).stdout
 else:
-    src = open(os.path.join(tree, 'src', 'gl', 'cellvolair.cpp'), 'rb').read()
+    src = open(os.path.join(tree, 'src', 'features', 'air', 'cellvolair.cpp'), 'rb').read()
 src = src.decode('utf-8', 'replace')
 w1 = re.search(r'topW\s*=\s*s\.sphereTop\s*\?\s*bs\.center\[2\]\s*\+\s*bs\.radius\s*:\s*vaShapesTop\(\s*scene,\s*bs\s*\)', src)
 w2 = 'r == "spheretop"' in src

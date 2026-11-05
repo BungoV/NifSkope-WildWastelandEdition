@@ -1,3 +1,0 @@
-# lane WATERLOOK1: the ocean spectrum's final pass (src/gl/cellocean.cpp selects it by name; never picked for a shape)
-
-shaders cell_hdr.vert ocean_layers.geom ocean_final.frag

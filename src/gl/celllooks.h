@@ -120,7 +120,7 @@ WwGroup wwLookGroup( WwLook l );	//!< Count: not under a master
 /* note 20: the one Screen-Space Reflections row sets indoors and outdoors alike (cellssr.h's two setters).
  * Red twin REDTWIN=CELLGROUP=ssr: indoors only. */
 void wwCellSsrRowSet( bool on );
-//! lane FIX1101A (src/gl/waterpreset.h): the water quality preset 0 low .. 3 ultra (the default); WW_CELL_WATER_PRESET pins it
+//! lane FIX1101A (src/features/water/waterpreset.h): the water quality preset 0 low .. 3 ultra (the default); WW_CELL_WATER_PRESET pins it
 int wwCellWaterPreset();
 void wwCellWaterPresetSet( int step );
 

@@ -54,7 +54,7 @@ def v1():
     sh = os.path.join(TREE, 'res', 'shaders')
     fr = open(os.path.join(sh, 'features', 'air', 'cell_volair.frag'), 'rb').read().decode('utf-8')
     vp = open(os.path.join(sh, 'features', 'air', 'cell_volpart.glsl'), 'rb').read().decode('utf-8')
-    cpp = open(os.path.join(TREE, 'src', 'gl', 'cellvolair.cpp'), 'rb').read().decode('utf-8')
+    cpp = open(os.path.join(TREE, 'src', 'features', 'air', 'cellvolair.cpp'), 'rb').read().decode('utf-8')
     ba, bp = body(fr, 'airVeilK', 'vec3 Jenv, float t, float z'), body(vp, 'vpVeilK', 'vec3 Jenv, float t, float z')
     same = ba is not None and ba == bp
     calls = len(re.findall(r'float vk = vpVeilK\( jEnv, t, z \);', vp))

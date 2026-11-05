@@ -31,7 +31,7 @@ BSD License - see nifskope.h
 #include "gl/cellfarground.h"	// the Far ground rows
 #include "features/lights/celllampshadow.h"
 #include "gl/celllooks.h"
-#include "gl/cellwater.h"	// the Water row
+#include "features/water/cellwater.h"	// the Water row
 #include "features/ao/cellaodecal.h"	// the AO decals row
 #include "gl/gametaa.h"
 #include "gl/cellgrass.h"
@@ -820,7 +820,7 @@ void CellWorkspacePanel::buildUi()
 	cellSsr = tick( showMenu, tr( "Screen-Space Reflections" ), "CellWorkspaceSsr", wwCellSsrOn() );	// note 15: labels only
 	if ( wwCellSsrExteriorOn() != wwCellSsrOn() )
 		wwCellSsrRowSet( wwCellSsrOn() );	// note 20: one row sets both halves; an old split takes the row's state
-	// lane FIX1101A (src/gl/waterpreset.h): the water look's four GPU steps; Ultra (the default) = every water row as it ships
+	// lane FIX1101A (src/features/water/waterpreset.h): the water look's four GPU steps; Ultra (the default) = every water row as it ships
 	cellWaterQ = showMenu->addMenu( tr( "Water quality" ) );
 	cellWaterQ->setObjectName( QStringLiteral( "CellWorkspaceWaterQuality" ) );
 	cellWaterQGroup = new QActionGroup( cellWaterQ );

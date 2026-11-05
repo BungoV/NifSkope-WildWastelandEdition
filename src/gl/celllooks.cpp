@@ -3,7 +3,7 @@
 #include "wwswitch.h"
 #include "wwredtwin.h"	// lane REDRETIRE1
 #include "features/lights/lightphys.h"
-#include "gl/waterpreset.h"	// lane FIX1101A: the water quality preset
+#include "features/water/waterpreset.h"	// lane FIX1101A: the water quality preset
 
 #include <QSettings>
 
@@ -76,10 +76,10 @@ const LookRow kRows[] = {
 	{ "Water clear colour", "WW/CellWaterClear2", true },
 	{ "Water sky visibility", "WW/CellWaterSkyVis" },
 	{ "Surf", "WW/CellWaterSurf" },
-	{ "Contact foam", "WW/CellWaterContact3" },	// FIX1101A 11-01: OFF (h2 rvc6_on 1:1: still flat grey darts, not foam; lace + wet cut kept, tests/waterfoam2); new key over FOAMOFF (FIX1031B LATE ITEM 8: current-made foam)
+	{ "Contact foam", "WW/CellWaterContact3" },	// FIX1101A 11-01: OFF (h2 rvc6_on 1:1: still flat grey darts, not foam; lace + wet cut kept, tests/features/water/waterfoam2); new key over FOAMOFF (FIX1031B LATE ITEM 8: current-made foam)
 	{ "Wet shore", "WW/CellLandWet" },
 	{ "Wave run-up", "WW/CellLandSwash" },
-	{ "River foam", "WW/CellWaterRiverFoam3" },	// FIX1101A 11-01: OFF (h2 rvc6_on 1:1: still flat grey darts, not foam; lace + wet cut kept, tests/waterfoam2); new key over FOAMOFF (FIX1031B LATE ITEM 8: m/s flow, shallows + shoals)
+	{ "River foam", "WW/CellWaterRiverFoam3" },	// FIX1101A 11-01: OFF (h2 rvc6_on 1:1: still flat grey darts, not foam; lace + wet cut kept, tests/features/water/waterfoam2); new key over FOAMOFF (FIX1031B LATE ITEM 8: m/s flow, shallows + shoals)
 	{ "Underwater light", "WW/CellWaterUnderLight" },
 	{ "Precipitation", "WW/CellPrecip" },	// lane WEATHERLOOK1 B: ships off until bungo sees it
 	// FIX1101A lodch (LATE ITEMs 11 + 16 + 20): the LOD bake's channels drawn by default
@@ -598,7 +598,7 @@ static bool wwLookWaterShippedRed( WwLook l )
 	return shipped;
 }
 
-/* lane FIX1101A (src/gl/waterpreset.h): the water quality preset steps the water looks; Ultra (the default) lets every
+/* lane FIX1101A (src/features/water/waterpreset.h): the water quality preset steps the water looks; Ultra (the default) lets every
  * row as it ships, Low none (the game's water + its SSR). A row's own pin wins (pinOf above). */
 static WwWaterPreset::Term wwLookWaterTerm( WwLook l )
 {

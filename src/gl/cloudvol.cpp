@@ -9,7 +9,7 @@
 #include "features/sky/atmosphere.h"
 #include "features/sky/atmomath.h"
 #include "features/exposure/cellhdr.h"
-#include "cellunderwater.h"	// lane WATERUNDER3: no clouds over a camera under water
+#include "features/water/cellunderwater.h"	// lane WATERUNDER3: no clouds over a camera under water
 #include "wwswitch.h"
 #include "gl/glscene.h"
 #include "gl/renderer.h"
