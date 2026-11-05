@@ -89,7 +89,11 @@ def params(target, minf, magf, wrap=0x812F):
 # ---- the tree's shaders, plus two test wrappers beside them (a copy: nothing is written into the tree)
 SD = tempfile.mkdtemp(prefix='fgpages_', dir=os.environ.get('FG_SCRATCH') or None)
 for n in os.listdir(os.path.join(TREE, 'res', 'shaders')):
-    shutil.copy(os.path.join(TREE, 'res', 'shaders', n), SD)
+    src = os.path.join(TREE, 'res', 'shaders', n)
+    if os.path.isdir(src):  # MODULES1: the modules' folders (features/<m>/)
+        shutil.copytree(src, os.path.join(SD, n))
+    else:
+        shutil.copy(src, SD)
 WRAP = """#version 410 core
 #define WW_FARGROUND %d
 #include "cell_farground.glsl"

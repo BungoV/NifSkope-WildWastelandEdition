@@ -21,6 +21,8 @@ BSD License - see nifskope.h
 #include <string_view>
 #include <vector>
 
+#include "features/ao/ao.h"	// lane MODULES1: the AO module's interface (its rows, pass and targets)
+
 class Scene;
 class NodeList;
 
@@ -309,21 +311,8 @@ int wwCellGiVis();
  *  pass runs, the surfaces read inline). With WW_CELL_GI_VIS=march: no screen pass. */
 int wwCellGiRate();
 void wwCellGiSetOn( bool on );
-/*! Rows for AO (WW/CellAo, WW_CELL_AO), light shadows (WW/CellShadow, WW_CELL_SHADOW) and GPU relight
- *  (WW/CellGiGpu, WW_CELL_GI_GPU, read when a cell opens). Each env pin wins over its row. */
-bool wwCellAoOn();
-void wwCellAoSetOn( bool on );
-bool wwCellAoPinned();	// lane GAPTOOL1: the Scene window's SSAO row greys on the pin
-/*! lane SSAO2: the Ambient Occlusion method (src/gl/cellaomethod.h WwAoMethod): WW/CellAoMethod, pin
- *  WW_CELL_AO_METHOD=vanilla|gtao|xegtao|hbao; live (the next frame runs it) */
-int wwCellAoMethod();
-void wwCellAoSetMethod( int method );
-bool wwCellAoMethodPinned();
-/*! lane PERFFIX2 (item 9): the AO quality tier 0 Low .. 3 Ultra (cellaomethod.h WwAoTier*; the default Ultra is the
- *  picture before the tiers): WW/CellAoQuality, pin WW_CELL_AO_QUALITY=low|medium|high|ultra; live */
-int wwCellAoQuality();
-void wwCellAoSetQuality( int tier );
-bool wwCellAoQualityPinned();
+/*! Rows for light shadows (WW/CellShadow, WW_CELL_SHADOW) and GPU relight (WW/CellGiGpu, WW_CELL_GI_GPU, read when
+ *  a cell opens). Each env pin wins over its row. The AO rows: src/features/ao/ao.h. */
 bool wwCellShadowOn();
 void wwCellShadowSetOn( bool on );
 bool wwCellGiGpuOn();
@@ -482,20 +471,9 @@ void wwCellShadowKick( const void * nif );
 void wwCellShadowsForget( const void * nif );
 QString wwCellShadowEcho( Scene * scene );
 
-/*! Ambient obscurance: the game's screen-space AO (INI settings, not the cell's) computed from a pass of the
- *  opaque cell-lit fragments by res/shaders/cell_ao.frag; it multiplies the lit color before the fog. WW_CELL_AO=0 skips it. */
-void wwCellAoPass( Scene * scene, bool run );
-/*! lane PERFHUNT2: the sorted list this paint's obscurance walk collected, appended to out in its collected order (the
- *  same walk, same camera, same paint: what another collectShapes would add). false (out untouched): no walk this paint
- *  for that scene. Taken once; the next obscurance pass forgets it. */
-bool wwCellAoSortedTake( Scene * scene, NodeList & out );
 /*! lane PERFHUNT2: the obscurance and SSR passes' sorted draws run under the setup memo as the main sorted pass does
  *  (scene globals once per program, the cell-uniform class record replayed). Red WW_CELL_SORTMEMO_RED=1: unarmed. */
 bool wwCellSortedMemo();
-//! called with every program setupProgram binds: the opaque pass's masks, and the obscurance a cell-lit draw reads
-void wwCellAoDraw( Scene * scene, bool cellProgram );
-//! lane PERF3: the opaque pass is drawing
-bool wwCellAoInPass();
 /*! lane PRTP6: a cell water shape (cellwater.h) drawn through a cell program reads no probe GI (water is dynamic);
  *  called per draw after wwCellAoDraw. Red WW_CELL_WATER_PRTP_RED=1: it reads the GI as before. */
 void wwCellGiWaterDraw( Scene * scene, int block, bool cellProgram );

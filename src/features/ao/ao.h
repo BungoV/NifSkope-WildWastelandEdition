@@ -32,7 +32,7 @@ void wwCellAoSetQuality( int tier );
 bool wwCellAoQualityPinned();
 
 /*! Ambient obscurance: the game's screen-space AO (INI settings, not the cell's) computed from a pass of the
- *  opaque cell-lit fragments by res/shaders/cell_ao.frag; it multiplies the lit color before the fog. WW_CELL_AO=0 skips it. */
+ *  opaque cell-lit fragments by res/shaders/features/ao/cell_ao.frag; it multiplies the lit color before the fog. WW_CELL_AO=0 skips it. */
 void wwCellAoPass( Scene * scene, bool run );
 /*! lane PERFHUNT2: the sorted list this paint's obscurance walk collected, appended to out in its collected order (the
  *  same walk, same camera, same paint: what another collectShapes would add). false (out untouched): no walk this paint

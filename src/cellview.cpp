@@ -49,7 +49,7 @@ BSD License - see nifskope.h
 #include "lodinative.h"		// lane FIX1101A lodch: the far LOD's baked AO / sky switches (liveFarKey)
 #include "cellmodpick.h"
 #include "cellspeed.h"		// stage timers (WW_CELL_SPEED_DUMP)
-#include "cellaodecal.h"		// baked AO decals under big movable statics
+#include "features/ao/cellaodecal.h"		// baked AO decals under big movable statics
 #include "cellstream.h"		// the cells round the camera
 #include "cellspawn.h"		// where the camera starts
 #include "cellcambounds.h"	// lane CAMGATE1: the block and the ground the camera is judged against
@@ -73,7 +73,7 @@ BSD License - see nifskope.h
 #include "probevolumesgi.h"	// lane VOLFIT1: its rooms as the GI's volumes
 #include "gl/cellfxlit.h"
 #include "gl/celllensflare.h"
-#include "gl/cellaodecalgl.h"
+#include "features/ao/cellaodecalgl.h"
 #include "gl/cellwater.h"
 #include "gl/cellwaterinfo.h"
 #include "gl/cellcull.h"	// the per-placement culling runs

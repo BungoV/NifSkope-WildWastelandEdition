@@ -16,7 +16,7 @@ See the LICENSE.md file for the full license text.
 #include "gl/skyplacerun.h"	// lane INTSKY1: skyplace
 
 int cmdEspWrite( const QStringList & args );	// lane ESPWRITE2: src/io/espwritecli.cpp
-#include "cellaodecal.h"	// lane AODECAL1: aobake
+#include "features/ao/cellaodecal.h"	// lane AODECAL1: aobake
 #include "probebake.h"
 #include "pgiwrite.h"
 #include "probefar.h"		// lane PRTPFAR

@@ -8,10 +8,10 @@
 #   clutter  red: small clutter let in -> the census must show more decals than the green
 #   off      switch off: the shot and the GI dump byte-identical to the rung exe (BEFORE)
 #   sunlamp  WW_CELL_GI=0 (sun and lamps only): decal on == decal off, byte for byte
-# Usage: bash tests/spells/aodecal1_cell.sh [OUT]   (CAM=x,y,z/view/dist picks the shot; the census picks it next)
+# Usage: bash tests/features/ao/aodecal1_cell.sh [OUT]   (CAM=x,y,z/view/dist picks the shot; the census picks it next)
 set -u
-. "$(dirname "$0")/_harness.sh"
-REPO="$(cd "$(dirname "$0")/../.." && pwd)"
+. "$(dirname "$0")/../../spells/_harness.sh"
+REPO="$(cd "$(dirname "$0")/../../.." && pwd)"
 EXE="${EXE:-$REPO/release/NifSkope.exe}"
 BEFORE="${BEFORE:-$REPO/release/NifSkope.before_aodecal1.exe}"
 ESM="${ESM:-X:/Programs/Steam/steamapps/common/Fallout 4/Data/Fallout4.esm}"
@@ -32,7 +32,7 @@ fresh_scope() {
 	reg add "$REGKEY\\Settings" //v Version //t REG_SZ //d 1 //f > /dev/null 2>&1 || true
 	reg add "$REGKEY" //v "Game Manager Version" //t REG_DWORD //d 2 //f > /dev/null 2>&1 || true
 	local gm; gm="$(mktemp)"
-	python "$(dirname "$0")/settings_scope_game.py" "$SCOPE" "$(cygpath -w "$gm")" > /dev/null 2>&1 \
+	python "$(dirname "$0")/../../spells/settings_scope_game.py" "$SCOPE" "$(cygpath -w "$gm")" > /dev/null 2>&1 \
 		&& reg import "$(cygpath -w "$gm")" > /dev/null 2>&1
 	rm -f "$gm"
 	printf '%s' "$SCOPE"

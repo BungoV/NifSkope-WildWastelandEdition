@@ -12,10 +12,6 @@ void wwDrawGlCacheDirty();
 //! lane CELLUNI4: a hook wrote blend on/off inside the census (the cache keeps it; the red reads it again)
 void wwDrawGlCacheBlend( bool on );
 
-//! lane PERF3: the AO opaque pass skips the SSR/SSGI per-draw hooks (the main pass sets them again per draw);
-//! WW_CELL_AO_LEAN=0 or the red WW_CELL_AO_LEAN_RED=1 runs them
-bool wwCellAoLean();
-
 struct WwDrawGlScope
 {
 	WwDrawGlScope();

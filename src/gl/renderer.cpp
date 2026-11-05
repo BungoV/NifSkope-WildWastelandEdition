@@ -871,12 +871,6 @@ void wwDrawGlCacheBlend( bool on )
 	WwCellUni::noteBlend( on );	// lane CELLUNI6: the note stays the draw's blend after the census (bsshape reads it)
 }
 
-bool wwCellAoLean()
-{
-	static const bool on = envOn( "WW_CELL_AO_LEAN", "WW_CELL_AO_LEAN_RED" );
-	return on;
-}
-
 static NifSkopeOpenGLContext::Program * wwProgramCensus( const NifModel * nif, Shape * mesh,
 	const BSShaderLightingProperty * wwSp, const char * wwKind,
 	int msn, int lodLand, NifSkopeOpenGLContext::Program * program,

@@ -19,8 +19,8 @@ BSD License - see nifskope.h
 #include "gl/renderer.h"
 #include "gl/cellhdr.h"
 #include "gl/cellbloom.h"	// lane BLOOM1b
-#include "gl/cellaodecalgl.h"	// lane AODECAL1
-#include "gl/cellaomethod.h"
+#include "features/ao/cellaodecalgl.h"	// lane AODECAL1
+#include "features/ao/cellaomethod.h"
 #include "gl/cellcull.h"	// wwCellDecalMappedHas
 #include "features/shared/cellpasstime.h"	// sub-stage timers
 #include "gl/celldrawstate.h"
@@ -4475,7 +4475,7 @@ QString wwCellShadowEcho( Scene * scene )
 	return o;
 }
 
-/* ---- the ambient obscurance (celllights.h, res/shaders/cell_ao.frag) ---- */
+/* ---- the ambient obscurance (celllights.h, res/shaders/features/ao/cell_ao.frag) ---- */
 
 // lane VOLAIR1: the light buffer's spheres (src/gl/celllights.h)
 const std::vector<float> * wwCellLightSpheres( Scene * scene )

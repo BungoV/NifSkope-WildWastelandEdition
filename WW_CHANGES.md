@@ -1,3 +1,17 @@
+## MODULES1 step 6 (2026-11-05): every AO type and the shared timers sit in their module folders
+
+- The AO module is complete in `src/features/ao/`: the screen AO interface and menus (`ao.h`, `aomenu.cpp`), the
+  method table (`cellaomethod.h`), the baked AO decals (`cellaodecal*`, `cellaodecalgl.*`, `cellaodecalrule.h`,
+  `aovolume.*`), and its tests in `tests/features/ao/`. Its shaders (`cell_ao`, `cell_aox`, `cell_aox_xe`,
+  `cell_aodecal`, `cell_gihalf`, `cell_gihalfat`, `cell_givol`) are in `res/shaders/features/ao/`.
+  `cell_ao.vert` stays in `res/shaders/` (the full-screen quad of ~60 screen programs). The LOD bake's vertex AO stays
+  with the LOD code.
+- The pass timer (`cellpasstime.*`) and `telemetry.py` are in `src/features/shared/`.
+- The shader loader also reads `shaders/features/<module>/`. Names stay bare: a `.prog` lists names, and an
+  `#include` not found beside its file is found in the shaders folder or a module folder.
+  `tests/spells/shader_link_check.py` does the same lookup, and `--list` prints every program.
+- Moves only: the pictures are unchanged.
+
 ## MODULES1 step 5 (2026-11-05): the roof cut is gone
 
 - MUSGI1 round 5's sunlit-interior roof cut on the sky's air (`wwVolAirSkyRoof`, `wwCellRoofBox`, switch

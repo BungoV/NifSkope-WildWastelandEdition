@@ -3,7 +3,7 @@
 
 #include <cstring>
 
-/*! lane SSAO2: the cell view's ambient occlusion methods (src/gl/celllights.cpp, res/shaders/cell_aox.frag) and the
+/*! lane SSAO2: the cell view's ambient occlusion methods (src/gl/celllights.cpp, res/shaders/features/ao/cell_aox.frag) and the
  *  shared opaque pass's keep rule. Pure (no Qt, no GL) so tests/aomethod checks them alone. */
 
 enum WwAoMethod

@@ -30,7 +30,7 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 ***** END LICENSE BLOCK *****/
 
-#include "aovolume.h"
+#include "features/ao/aovolume.h"
 #include "probebvh.h"	// the probe soup's tracer (fp-contract off for the whole file)
 #include "bakert.h"	// lane RTBAKE1: the bake pools' worker count, the GPU ray back end
 

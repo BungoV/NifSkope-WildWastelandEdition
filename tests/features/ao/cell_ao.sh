@@ -8,7 +8,7 @@
 #   on    the obscurance applied: WW_CELL_AO_DUMP (the opaque pass's view normal + linear depth, the raw
 #         obscurance, the final) and WW_CELL_IS_DUMP (the measure pass's linear light, full size)
 #   off   WW_CELL_AO_RED=off: the same frame without it (the measure pass only)
-# Then tests/spells/cell_ao_check.py rebuilds the game's obscurance in numpy from the dumped depth and normals
+# Then tests/features/ao/cell_ao_check.py rebuilds the game's obscurance in numpy from the dumped depth and normals
 # with its own constants (the game's INI defaults) and compares:
 #   E  the dumped normals belong to the surface the dumped depth describes (and a mirrored control does not)
 #   A  the raw obscurance and its depth key        B  the bilateral blur of the dumped raw
@@ -21,14 +21,14 @@
 #                                           --red noblur   the raw obscurance applied  (stage B)
 #                                           --red noreset  the plain mean, no history  (stage R)
 #
-# USAGE  bash tests/spells/cell_ao.sh [--red off|radius|noblur|noreset]
+# USAGE  bash tests/features/ao/cell_ao.sh [--red off|radius|noblur|noreset]
 #        CELLS="..." to pick interiors; the camera stands at CAM_<cell> (x,y,z look-at) if set.
 
 set -u
 
-. "$(dirname "$0")/_harness.sh"
+. "$(dirname "$0")/../../spells/_harness.sh"
 
-REPO="$(cd "$(dirname "$0")/../.." && pwd)"
+REPO="$(cd "$(dirname "$0")/../../.." && pwd)"
 EXE="${EXE:-$REPO/release/NifSkope.exe}"
 SCOPE="${SCOPE:-cell_ao}"
 REGKEY="HKCU\Software\NifTools\NifSkope 2.0 $SCOPE"
@@ -38,7 +38,7 @@ fresh_scope() {
 	reg add "$REGKEY\Settings" //v Version //t REG_SZ //d 1 //f > /dev/null 2>&1 || true
 	reg add "$REGKEY" //v "Game Manager Version" //t REG_DWORD //d 2 //f > /dev/null 2>&1 || true
 	local gm; gm="$(mktemp)"
-	python "$(dirname "$0")/settings_scope_game.py" "$SCOPE" "$(cygpath -w "$gm")" > /dev/null 2>&1 \
+	python "$(dirname "$0")/../../spells/settings_scope_game.py" "$SCOPE" "$(cygpath -w "$gm")" > /dev/null 2>&1 \
 		&& reg import "$(cygpath -w "$gm")" > /dev/null 2>&1
 	rm -f "$gm"
 	printf '%s' "$SCOPE"
@@ -68,8 +68,8 @@ check() { if [ "$2" = "1" ]; then say "  PASS  $1"; else say "  FAIL  $1"; fails
 [ -x "$EXE" ] || { echo "no NifSkope.exe at $EXE"; exit 2; }
 say "cell_ao.sh  $(date '+%Y-%m-%d %H:%M:%S')${RED:+   RED CONTROL: $RED (must fail stage $STAGE)}"
 newer=1
-for s in src/gl/celllights.cpp src/gl/celllights.h src/glview.cpp src/gl/renderer.cpp res/shaders/cell_ao.frag \
-	res/shaders/cell_ao.glsl res/shaders/fo4_default.frag res/shaders/pbrm_default.frag; do
+for s in src/features/ao/ao.cpp src/gl/celllights.cpp src/gl/celllights.h src/glview.cpp src/gl/renderer.cpp res/shaders/features/ao/cell_ao.frag \
+	res/shaders/features/ao/cell_ao.glsl res/shaders/fo4_default.frag res/shaders/pbrm_default.frag; do
 	[ "$REPO/$s" -nt "$EXE" ] && { say "  $s is NEWER than the exe"; newer=0; }
 done
 check "the exe is newer than every source this gate covers" "$newer"

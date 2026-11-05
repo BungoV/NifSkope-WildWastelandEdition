@@ -8,7 +8,32 @@ Exit 0 only when it linked. WW_CELL_GI_MARCH is the define WW_CELL_GI_VIS=march 
 """
 import ctypes, ctypes.wintypes as W, os, re, sys
 
+def shader_path(path):
+    """MODULES1: the loader's lookup (glcontext.cpp wwShaderPath): a name missing beside the asking file is found in
+    the shaders folder or a module's folder (features/<module>/), from that folder up two levels."""
+    if os.path.exists(path):
+        return path
+    name, root = os.path.basename(path), os.path.dirname(os.path.abspath(path))
+    for _ in range(3):
+        if os.path.isfile(os.path.join(root, name)):
+            return os.path.join(root, name)
+        feat = os.path.join(root, 'features')
+        for m in sorted(os.listdir(feat)) if os.path.isdir(feat) else []:
+            if os.path.isfile(os.path.join(feat, m, name)):
+                return os.path.join(feat, m, name)
+        root = os.path.dirname(root)
+    return path
+
+def programs(sdir):
+    """Every .prog name the loader links: the shaders folder, then each module's folder."""
+    feat = os.path.join(sdir, 'features')
+    names = [n for n in os.listdir(sdir) if n.lower().endswith('.prog')]
+    for m in sorted(os.listdir(feat)) if os.path.isdir(feat) else []:
+        names += [n for n in os.listdir(os.path.join(feat, m)) if n.lower().endswith('.prog')]
+    return sorted(names)
+
 def expand(path, depth=0):
+    path = shader_path(path)
     with open(path, 'rb') as f:
         data = f.read().decode('latin-1')
     if depth > 0 and data.startswith('#version'):
@@ -71,7 +96,10 @@ def main():
     dump = a[a.index('--dump') + 1] if '--dump' in a else None
     save = a[a.index('--save-binary') + 1] if '--save-binary' in a else None
     files = None
-    for line in open(os.path.join(sdir, prog)):
+    if prog == '--list':
+        print('\n'.join(programs(sdir)))
+        return
+    for line in open(shader_path(os.path.join(sdir, prog))):
         if line.startswith('shaders'):
             files = line.split()[1:]
     context()

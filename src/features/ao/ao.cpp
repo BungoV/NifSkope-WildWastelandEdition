@@ -14,8 +14,8 @@
 #include "gl/renderer.h"
 #include "gl/cellhdr.h"
 #include "gl/cellbloom.h"	// lane BLOOM1b
-#include "gl/cellaodecalgl.h"	// lane AODECAL1
-#include "gl/cellaomethod.h"
+#include "features/ao/cellaodecalgl.h"	// lane AODECAL1
+#include "features/ao/cellaomethod.h"
 #include "gl/cellcull.h"	// wwCellDecalMappedHas
 #include "features/shared/cellpasstime.h"	// sub-stage timers
 #include "gl/celldrawstate.h"
@@ -421,7 +421,7 @@ constexpr float kAoxRadius = 38.4f, kAoxFalloff = 0.615f, kAoxIntensity = 1.0f, 
 constexpr int kAoxSlices = 9, kAoxSteps = 3;
 constexpr float kAoxDenoiseRadius = 2.0f, kAoxDenoiseSigma = 0.08f, kAoxBlurBeta = 1.2f;
 
-//! lane SSAO2: a ported method's full-size passes (res/shaders/cell_aox.frag) over the opaque pass; sets g.aoTex
+//! lane SSAO2: a ported method's full-size passes (res/shaders/features/ao/cell_aox.frag) over the opaque pass; sets g.aoTex
 const char * aoxPasses( Renderer * r, AoGpu & g, int method, int red, int W, int H, const int ms[5][2], float p00, float p11 )
 {
 	auto fn = r->fn;
@@ -934,7 +934,20 @@ void wwCellAoPass( Scene * scene, bool run )
 	if ( wasStencil ) fn->glEnable( GL_STENCIL_TEST ); else fn->glDisable( GL_STENCIL_TEST );
 }
 
-// this frame's opaque pass and depth pyramid, for the reflections' march (src/gl/cellssr.h)
+// lane PERF3 (moved from renderer.cpp by MODULES1): the renderer's envOn, the same three keys
+namespace {
+bool envOn( const char * sw, const char * red )
+{
+	return qgetenv( sw ).trimmed() != "0" && qgetenv( red ).trimmed() != "1" && qgetenv( "WW_PERF3_RED" ).trimmed() != "1";
+}
+}
+bool wwCellAoLean()
+{
+	static const bool on = envOn( "WW_CELL_AO_LEAN", "WW_CELL_AO_LEAN_RED" );
+	return on;
+}
+
+// this frame's opaque pass and depth pyramid, for the reflections' march (ao.h)
 bool wwCellAoTargets( Scene * scene, WwCellAoTargets & out )
 {
 	if ( !scene || !scene->renderer || !aoGpus().contains( scene->renderer ) )

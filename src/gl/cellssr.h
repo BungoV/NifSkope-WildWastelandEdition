@@ -9,6 +9,8 @@ BSD License - see nifskope.h
 
 class Scene;
 
+#include "features/ao/ao.h"	// lane MODULES1: the AO pass's targets (WwCellAoTargets) live in the AO module
+
 /*! The game's screen-space reflections: re-draws the opaque cell-lit fragments into a float target, marches
  *  res/shaders/cell_ssr.frag over the AO pass's depth pyramid, and cellSsrMix (cell_ssr.glsl) is the one place the
  *  result enters the picture. Needs the obscurance's pass. Debug: WW_CELL_SSR_RED=off|nogap|nofade,
@@ -58,15 +60,6 @@ bool wwCellSsrEmissionTexture( Scene * scene, unsigned int & tex );
 //! this frame's march and its blurred result for the water (half the view, top row first, bilinear)
 bool wwCellSsrWaterTextures( Scene * scene, unsigned int & raw, unsigned int & fin );
 
-//! the AO pass's targets of this frame (src/gl/celllights.cpp); false unless its opaque pass ran for this scene
-struct WwCellAoTargets
-{
-	unsigned int gbuf = 0;		// full size RGBA32F, bottom row first: view normal, linear depth (game units)
-	unsigned int depthRb = 0;	// its depth-stencil renderbuffer
-	unsigned int mip[5] = {};	// 1..4: min-of-2x2 depth (R32F), top row first
-	int w = 0, h = 0, mipW[5] = {}, mipH[5] = {};
-};
-bool wwCellAoTargets( Scene * scene, WwCellAoTargets & out );
 /*! Will this frame's reflections read those targets? The AO opaque pass then runs even with the AO row off. */
 bool wwCellSsrWantsTargets( Scene * scene );
 

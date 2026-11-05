@@ -43,7 +43,7 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include <memory>
 #include <vector>
 
-#include "aovolume.h"
+#include "features/ao/aovolume.h"
 
 struct NativeSrcShape;
 struct ProbeSoup;

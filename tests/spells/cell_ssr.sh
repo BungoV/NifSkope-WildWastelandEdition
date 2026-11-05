@@ -81,7 +81,7 @@ for s in src/gl/cellssr.cpp src/gl/cellssr.h src/gl/celllights.cpp src/gl/cellli
 done
 check "the exe is newer than every source this gate covers" "$newer"
 step=1
-for f in cell_ssr.frag cell_ssr.vert cell_ssr.prog cell_ssr.glsl cell_lights.glsl cell_ao.glsl cell_ao.frag fo4_default.frag \
+for f in cell_ssr.frag cell_ssr.vert cell_ssr.prog cell_ssr.glsl cell_lights.glsl features/ao/cell_ao.glsl features/ao/cell_ao.frag fo4_default.frag \
 	pbrm_default.frag; do
 	cmp -s "$REPO/res/shaders/$f" "$REPO/release/shaders/$f" || { say "  release/shaders/$f is not res/shaders/$f"; step=0; }
 done

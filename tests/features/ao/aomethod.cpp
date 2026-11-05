@@ -1,6 +1,6 @@
 // lane SSAO2: src/gl/cellaomethod.h alone (no Qt, no GL).
-// g++ -std=c++17 -I<tree>/src tests/aomethod/aomethod.cpp; -DAOMETHOD_RED tests the old SSR coupling (must fail)
-#include "gl/cellaomethod.h"
+// g++ -std=c++17 -I<tree>/src tests/features/ao/aomethod.cpp; -DAOMETHOD_RED tests the old SSR coupling (must fail)
+#include "features/ao/cellaomethod.h"
 
 #include <cstdio>
 

@@ -4,10 +4,10 @@ BSD License - see nifskope.h
 
 ***** END LICENCE BLOCK *****/
 
-#include "cellaodecalgl.h"
+#include "features/ao/cellaodecalgl.h"
 #include "wwswitch.h"	// lane TESTDRIVER1: the WW_* switch store
 
-#include "cellaodecal.h"
+#include "features/ao/cellaodecal.h"
 #include "gl/glscene.h"
 #include "gl/renderer.h"
 

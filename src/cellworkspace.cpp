@@ -32,7 +32,7 @@ BSD License - see nifskope.h
 #include "gl/celllampshadow.h"
 #include "gl/celllooks.h"
 #include "gl/cellwater.h"	// the Water row
-#include "cellaodecal.h"	// the AO decals row
+#include "features/ao/cellaodecal.h"	// the AO decals row
 #include "gl/gametaa.h"
 #include "gl/cellgrass.h"
 #include "gl/cellpost.h"
@@ -775,27 +775,7 @@ void CellWorkspacePanel::buildUi()
 		lookActions.append( a );
 	}
 	cellAo = tick( showMenu, tr( "Ambient Occlusion" ), "CellWorkspaceAo", wwCellAoOn() );	// note 25: no abbreviations
-	{	// lane OPENCELLFIX2 item 27 (lane SSAO2's methods): inline on the Ambient Occlusion row; a pin greys it
-		QMenu * m = showMenu->addMenu( tr( "Ambient Occlusion method" ) );
-		m->setObjectName( QStringLiteral( "CellWorkspaceAoMethod" ) );
-		auto * grp = new QActionGroup( m );
-		grp->setExclusive( true );
-		const QStringList names = { tr( "Vanilla Screen-Space Ambient Occlusion" ), tr( "Ground Truth Ambient Occlusion" ),
-			tr( "Intel Xe Ground Truth Ambient Occlusion" ), tr( "Horizon-Based Ambient Occlusion Plus" ) };
-		for ( int k = 0; k < names.size(); k++ ) {
-			QAction * a = m->addAction( names.at( k ) );
-			a->setCheckable( true );
-			a->setData( k );
-			a->setChecked( k == wwCellAoMethod() );
-			grp->addAction( a );
-		}
-		m->menuAction()->setEnabled( !wwCellAoMethodPinned() );
-		connect( grp, &QActionGroup::triggered, this, [this]( QAction * a ) {
-			wwCellAoSetMethod( a->data().toInt() );	// WW/CellAoMethod
-			if ( glView )
-				glView->update();
-		} );
-	}
+	wwAoMethodMenu( showMenu, this, [this]() { if ( glView ) glView->update(); } );	// lane MODULES1: src/features/ao/aomenu.cpp
 	cellAoDecal = tick( showMenu, tr( "Ambient occlusion decals" ), "CellWorkspaceAoDecals", aoDecalOn() );
 	cellSpecOcc = tick( showMenu, tr( "Sky specular occlusion" ), "CellWorkspaceSkySpecOcc", wwCellSpecOccOn() );	// lane SPECOCC1
 	cellSpecOcc->setEnabled( !wwCellSpecOccPinned() );
@@ -1136,26 +1116,7 @@ void CellWorkspacePanel::buildUi()
 		&wwShadowSetContactTier );
 	liveTier( "CellWorkspaceTerrainShadows", tr( "Terrain shadows" ), "terrainShadows", &wwShadowTerrainTier,
 		&wwShadowSetTerrainTier );
-	{	// the AO quality tier (src/gl/cellaomethod.h); the built-in presets pick it by name; live
-		QMenu * m = groupsMenu->addMenu( tr( "Ambient Occlusion quality" ) );
-		m->setObjectName( QStringLiteral( "CellWorkspaceAoQuality" ) );
-		auto * grp = new QActionGroup( m );
-		grp->setExclusive( true );
-		const QStringList names = { tr( "Low" ), tr( "Medium" ), tr( "High" ), tr( "Ultra" ) };
-		for ( int k = 0; k < names.size(); k++ ) {
-			QAction * a = m->addAction( names.at( k ) );
-			a->setCheckable( true );
-			a->setData( k );
-			a->setChecked( k == wwCellAoQuality() );
-			grp->addAction( a );
-		}
-		m->menuAction()->setEnabled( !wwCellAoQualityPinned() );
-		connect( grp, &QActionGroup::triggered, this, [this]( QAction * a ) {
-			wwCellAoSetQuality( a->data().toInt() );	// WW/CellAoQuality
-			if ( glView )
-				glView->update();
-		} );
-	}
+	wwAoQualityMenu( groupsMenu, this, [this]() { if ( glView ) glView->update(); } );	// lane MODULES1: src/features/ao/aomenu.cpp
 	liveTick( "CellWorkspaceShadowRules", tr( "Fusion Shaders shadow rules" ), "shadowPar",
 		[]() { return wwShadowParMask() != 0; }, []( bool on ) { wwShadowSetParMask( on ? WwParAll : 0 ); } );
 	if ( showButton )

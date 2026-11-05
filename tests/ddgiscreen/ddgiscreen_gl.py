@@ -36,7 +36,7 @@ scratch = tempfile.mkdtemp(prefix='ddgiscreen_', dir=os.path.join(tree, 'tests',
 sdir = os.path.join(scratch, 'shaders')
 shutil.copytree(sdir0, sdir)
 def doctor(name, old, new):
-    p = os.path.join(sdir, name)
+    p = slc.shader_path(os.path.join(sdir, name))  # MODULES1: features/<m>/ too
     b = open(p, 'rb').read().decode('latin-1')
     assert b.count(old) == 1, (name, old, b.count(old))
     open(p, 'wb').write(b.replace(old, new).encode('latin-1'))
@@ -130,7 +130,7 @@ def compile_srcs(srcs, attribs=()):
 
 DEFS = ['WW_CELL_RTDDGI'] + (['WW_CELL_RTDDGI_CASCADES'] if K > 1 else [])
 def prog_file(prog):
-    files = [l.split()[1:] for l in open(os.path.join(sdir, prog)) if l.startswith('shaders')][0]
+    files = [l.split()[1:] for l in open(slc.shader_path(os.path.join(sdir, prog))) if l.startswith('shaders')][0]
     srcs = []
     for f in files:
         src = slc.inject(slc.expand(os.path.join(sdir, f)), DEFS)

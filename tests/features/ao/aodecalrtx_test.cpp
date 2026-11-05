@@ -1,7 +1,7 @@
 // PERFFIX2 (2026-11-01): src/cellaodecalrule.h, when the baked AO decals are built and drawn.
-//   g++ -std=c++17 -I src tests/aodecalrtx/aodecalrtx_test.cpp -o x && ./x      -> "AODECALRTX PASS 3", exit 0
+//   g++ -std=c++17 -I src tests/features/ao/aodecalrtx_test.cpp -o x && ./x      -> "AODECALRTX PASS 3", exit 0
 //   ... -DAODECALRTX_RED (the rule before PERFFIX2: the row alone)                -> "FAIL rtx", exit 1
-#include "cellaodecalrule.h"
+#include "features/ao/cellaodecalrule.h"
 #include <cstdio>
 
 #ifdef AODECALRTX_RED

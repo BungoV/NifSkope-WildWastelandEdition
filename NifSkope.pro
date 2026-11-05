@@ -297,11 +297,12 @@ HEADERS += \
 	src/gl/celllampshadow.h \
 	src/gl/celllooks.h \
 	src/gl/cellnifxlights.h \
-	src/gl/cellaodecalgl.h \
+	src/features/ao/cellaodecalgl.h \
 	src/gl/cellvolair.h \
 	src/gl/fogterrain.h \
 	src/features/shared/cellpasstime.h \
 	src/features/shared/wwtelemetry.h \
+	src/features/ao/ao.h \
 	src/gl/geokeepclock.h \
 	src/gl/streamtexpool.h \
 	src/gl/texgrave.h \
@@ -487,8 +488,8 @@ HEADERS += \
 	src/cellweapon.h \
 	src/cellcable.h \
 	src/celldecal.h \
-	src/aovolume.h \
-	src/cellaodecal.h \
+	src/features/ao/aovolume.h \
+	src/features/ao/cellaodecal.h \
 	src/esmplaced.h \
 	src/cellworkspace.h \
 	src/cellfavorites.h \
@@ -635,12 +636,13 @@ SOURCES += \
 	src/gl/celllampshadow.cpp \
 	src/gl/celllooks.cpp \
 	src/gl/cellnifxlights.cpp \
-	src/gl/cellaodecalgl.cpp \
+	src/features/ao/cellaodecalgl.cpp \
 	src/gl/cellvolair.cpp \
 	src/gl/fogterrain.cpp \
 	src/features/shared/cellpasstime.cpp \
 	src/features/shared/wwtelemetry.cpp \
 	src/features/ao/ao.cpp \
+	src/features/ao/aomenu.cpp \
 	src/gl/cellqueue.cpp \
 	src/gl/celldrawpacket.cpp \
 	src/gl/cellbindless.cpp \
@@ -841,8 +843,8 @@ SOURCES += \
 	src/cellweapon.cpp \
 	src/cellcable.cpp \
 	src/celldecal.cpp \
-	src/aovolume.cpp \
-	src/cellaodecal.cpp \
+	src/features/ao/aovolume.cpp \
+	src/features/ao/cellaodecal.cpp \
 	src/esmplaced.cpp \
 	src/cellworkspace.cpp \
 	src/cellfavorites.cpp \

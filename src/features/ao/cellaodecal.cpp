@@ -30,8 +30,8 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 ***** END LICENSE BLOCK *****/
 
-#include "cellaodecal.h"
-#include "cellaodecalrule.h"	// PERFFIX2: built only when something reads the decals
+#include "features/ao/cellaodecal.h"
+#include "features/ao/cellaodecalrule.h"	// PERFFIX2: built only when something reads the decals
 #include "wwswitch.h"	// lane TESTDRIVER1: the WW_* switch store
 
 #include "nativeemit.h"

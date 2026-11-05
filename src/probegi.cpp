@@ -12,7 +12,7 @@ BSD License - see nifskope.h
 #include "bakert.h"	// the bake pools' worker count, the GPU ray back end
 #include "probebake.h"
 #include "proberelight.h"
-#include "cellaodecal.h"
+#include "features/ao/cellaodecal.h"
 #include "probevolumesgi.h"	// the Space rooms as the room source
 
 #include <QCryptographicHash>

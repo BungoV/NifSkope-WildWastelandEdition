@@ -138,8 +138,8 @@ else
 fi
 echo "exe newer than the sources"
 cmp res/style.qss release/style.qss || { echo "style.qss copy out of step"; exit 5; }
-for f in res/shaders/*; do
-	[ -f "release/shaders/$(basename "$f")" ] && ! cmp -s "$f" "release/shaders/$(basename "$f")" && { echo "shader copy out of step: $f"; exit 5; }
+for f in $(cd res/shaders && find . -type f | sed 's|^\./||'); do	# MODULES1: the modules' folders (features/<m>/) too
+	[ -f "release/shaders/$f" ] && ! cmp -s "res/shaders/$f" "release/shaders/$f" && { echo "shader copy out of step: res/shaders/$f"; exit 5; }
 done
 echo "copies in step"
 

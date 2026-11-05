@@ -434,8 +434,33 @@ void NifSkopeOpenGLContext::Shader::printCompileError( const QString & err )
 	Message::append( QObject::tr( "There were errors during shader compilation" ), tmp );
 }
 
-static QByteArray loadShaderFile( const QString & filepath, int includeDepth = 0 )
+/* MODULES1: a module's shaders sit in shaders/features/<module>/ under their own names (a .prog lists names, an
+ * #include names a file). A name missing beside the file that asks for it is looked up in the shaders folder and its
+ * modules' folders, from the asking file's folder up two levels (tests/spells/shader_link_check.py shader_path). */
+static QString wwShaderPath( const QString & filepath )
 {
+	if ( QFileInfo::exists( filepath ) )
+		return filepath;
+	const QFileInfo	fi( filepath );
+	QDir	root( fi.absolutePath() );
+	for ( int up = 0; up < 3; up++ ) {
+		if ( root.exists( fi.fileName() ) )
+			return root.filePath( fi.fileName() );
+		const QDir	feat( root.filePath( "features" ) );
+		for ( const QString & m : feat.entryList( QDir::Dirs | QDir::NoDotAndDotDot ) ) {
+			const QString	p = feat.filePath( m + QChar( '/' ) + fi.fileName() );
+			if ( QFileInfo::exists( p ) )
+				return p;
+		}
+		if ( !root.cdUp() )
+			break;
+	}
+	return filepath;
+}
+
+static QByteArray loadShaderFile( const QString & asked, int includeDepth = 0 )
+{
+	const QString	filepath = wwShaderPath( asked );
 	QFile file( filepath );
 
 	if ( !file.open( QIODevice::ReadOnly ) )
@@ -1456,18 +1481,36 @@ void NifSkopeOpenGLContext::updateShaders()
 	}
 
 	coldLinkWorkers = wwEnvInt( "WW_COLDLINK_RED" ) == 1 ? 0 : std::clamp( wwEnvInt( "WW_COLDLINK" ), 0, 16 );
+	// MODULES1: the shaders folder in its own order, then each module's folder (features/<module>/)
 	QStringList	entryList = dir.entryList();
+	QStringList	entryPath;
+	for ( const QString & name : entryList )
+		entryPath.append( dir.filePath( name ) );
+	if ( const QDir feat( dir.filePath( "features" ) ); feat.exists() ) {
+		for ( const QString & m : feat.entryList( QDir::Dirs | QDir::NoDotAndDotDot ) ) {
+			const QDir	md( feat.filePath( m ) );
+			for ( const QString & name : md.entryList( QDir::Files ) ) {
+				if ( entryList.contains( name, Qt::CaseInsensitive ) ) {
+					std::fprintf( stderr, "shader name twice: %s (features/%s kept out)\n", qPrintable( name ), qPrintable( m ) );
+					continue;
+				}
+				entryList.append( name );
+				entryPath.append( md.filePath( name ) );
+			}
+		}
+	}
 	QVector< Program * >	started;
 	wwShadersCompiled = wwShadersLoaded = 0;
 	for ( int i = 0; i < 2; i++ ) {
-		for ( const QString & name : entryList ) {
+		for ( qsizetype k = 0; k < entryList.size(); k++ ) {
+			const QString &	name = entryList.at( k );
 			bool	isProgram = name.endsWith( QLatin1StringView( ".prog" ), Qt::CaseInsensitive );
 			if ( isProgram != bool( i ) )
 				continue;
 			Shader *	shader = createShader( name );
 			if ( !shader )
 				continue;
-			QString	fullPath = dir.filePath( name );
+			const QString &	fullPath = entryPath.at( k );
 			if ( !shader->isProgram )
 				shader->load( fullPath );
 			else if ( static_cast< Program * >( shader )->load( fullPath, this ) )
