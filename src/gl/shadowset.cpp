@@ -93,6 +93,7 @@ struct TerrSrc
 	QVector<Triangle> tris;
 	float cut[4] = { 1.0f, 1.0f, 0.0f, 0.0f };	// lane OBJLODSHADOW1: triangles centred in this XY rect skipped (x0 > x1: none)
 	bool obj = false;	// lane FAR5: an object-LOD or card caster (not in the terrain-only heights)
+	bool nearOut = false;	// SHAFTS1b: a card pyramid not wholly inside the near window: the near tier skips it
 };
 
 struct Terrain
@@ -161,6 +162,7 @@ struct Terrain
 	std::vector<std::uint16_t> castOut;
 	bool wantCast = false;
 	int cards = -1;	// far cards cast this set (-1: Far tree card shadows off)
+	int cardsCut = 0;	// SHAFTS1b: card pyramids dropped, their base outside the near tier (-1: red nocut)
 
 	// GL
 	const void * ctx = nullptr;
@@ -615,7 +617,7 @@ void collectTerrain( Scene * scene, std::vector<const Shape *> & out, std::vecto
 }
 
 //! the heights at the texel centres (point samples of the surface; the max where surfaces overlap)
-void rasterTerrain( Terrain & t, const std::vector<TerrSrc> & shapes, const std::atomic<bool> & stop )
+void rasterTerrain( Terrain & t, const std::vector<TerrSrc> & shapes, const std::atomic<bool> & stop, bool nearTier = false )
 {
 	QElapsedTimer tm;
 	tm.start();
@@ -626,6 +628,8 @@ void rasterTerrain( Terrain & t, const std::vector<TerrSrc> & shapes, const std:
 	for ( const TerrSrc & sh : shapes ) {
 		if ( stop.load( std::memory_order_relaxed ) )
 			return;
+		if ( nearTier && sh.nearOut )
+			continue;
 		const Transform & xf = sh.xf;
 		w.resize( size_t( sh.verts.size() ) );
 		for ( qsizetype v = 0; v < sh.verts.size(); v++ )
@@ -952,7 +956,7 @@ void runTerrJob( TerrJob * j )
 	}
 	Terrain & wn = j->wn;
 	if ( wn.N > 0 && j->rasterNear ) {
-		rasterTerrain( wn, j->srcKept, j->stop );
+		rasterTerrain( wn, j->srcKept, j->stop, true );
 		j->rasterNear = false;
 	}
 	w.wantCast = j->extra >= 2;	// lane FAR6: the self-test reads the casters' heights
@@ -1373,13 +1377,22 @@ void terrainFrame( Scene * scene, const double toSun[3], const float disc[3] )
 		sig ^= quint64( std::llround( t.x0 ) ) * 31ull ^ quint64( std::llround( t.y0 ) ) * 17ull ^ quint64( t.N );
 		// lane FAR5: the far cards cast as crown pyramids, outside the block (no cut: the cascades never draw them).
 		// Red WW_SHADOW_FARCARDS_RED=tall raises each apex 3x.
+		// SHAFTS1b (bungo's rock marks): the pyramids whose base square is not wholly inside the near tier's window are
+		// kept out of the near tier's raster (the far tiers still cast them all); red WW_SHADOW_FARCARDS_RED=nocut puts
+		// them all in the near tier too (today's rule). Census: cardcut=near:N on the set line.
 		QVector<ImpostorChunk::FarCasterPiece> cardPieces;
 		t.cards = -1;
+		t.cardsCut = 0;
 		if ( cardsOn ) {
+			const bool noCut = wwEnvStr( "WW_SHADOW_FARCARDS_RED" ) == QLatin1String( "nocut" ) || t.Nn <= 0;
+			const float keep[4] = { float( t.nx0 ), float( t.ny0 ), float( t.nx0 + t.Nn * t.nT ), float( t.ny0 + t.Nn * t.nT ) };
 			t.cards = ImpostorChunk::cellFarCasters( cardPieces,
-				wwEnvStr( "WW_SHADOW_FARCARDS_RED" ) == QLatin1String( "tall" ) ? 3.0f : 1.0f );
+				wwEnvStr( "WW_SHADOW_FARCARDS_RED" ) == QLatin1String( "tall" ) ? 3.0f : 1.0f, noCut ? nullptr : keep, &t.cardsCut );
+			if ( noCut )
+				t.cardsCut = -1;
 			sig ^= ( ImpostorChunk::cellFarGen() + 1ull ) * 0x9E3779B97F4A7C15ull ^ quint64( t.cards ) * 131ull
-				^ ( wwEnvStr( "WW_SHADOW_FARCARDS_RED" ) == QLatin1String( "tall" ) ? 7ull : 0ull );
+				^ ( wwEnvStr( "WW_SHADOW_FARCARDS_RED" ) == QLatin1String( "tall" ) ? 7ull : 0ull )
+				^ ( noCut ? 0ull : quint64( std::llround( keep[0] ) ) * 37ull ^ quint64( std::llround( keep[1] ) ) * 41ull );
 		}
 		if ( sig != t.sig ) {
 			t.sig = sig;
@@ -1396,6 +1409,7 @@ void terrainFrame( Scene * scene, const double toSun[3], const float disc[3] )
 			for ( const ImpostorChunk::FarCasterPiece & k : std::as_const( cardPieces ) ) {
 				t.src.push_back( { Transform(), k.verts, k.tris } );
 				t.src.back().obj = true;
+				t.src.back().nearOut = k.nearOut;
 			}
 			t.setShapes = int( t.src.size() );
 			t.needRaster = true;
@@ -1579,7 +1593,8 @@ void terrainFrame( Scene * scene, const double toSun[3], const float disc[3] )
 			: QStringLiteral( "off" ) ).arg( double( t.strength ), 0, 'f', 3 )
 		.arg( t.blended ? 1 : 0 );
 	if ( t.extra > 0 || t.pubExtra > 0 || t.cards >= 0 )
-		t.last += QStringLiteral( " extra=%1 pub_extra=%2 cards=%3" ).arg( t.extra ).arg( t.pubExtra ).arg( t.cards );
+		t.last += QStringLiteral( " extra=%1 pub_extra=%2 cards=%3 cardcut=near:%4" ).arg( t.extra ).arg( t.pubExtra ).arg( t.cards )
+			.arg( t.cardsCut );
 }
 
 // ---- (B) contact ----

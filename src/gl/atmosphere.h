@@ -59,6 +59,8 @@ struct WwAtmoFrame
 	float tint[17][3] = {};
 };
 const WwAtmoFrame & wwAtmoFrame();
+//! SHAFTS1b: where the last sky's haze rung came from: "recx", "clearday" (a clear weather's aerosol) or "record"
+const char * wwAtmoHazeSource();
 
 //! the CPU transmittance (the LUT's math) from height km along cos zenith, haze from the last drawn frame
 void wwAtmoTransmittance( float heightKm, float cosZenith, float out[3] );

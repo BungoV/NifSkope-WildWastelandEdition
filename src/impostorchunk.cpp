@@ -667,24 +667,33 @@ int ImpostorChunk::cellFarCardsShownIn( const QSet<qint64> & cells )
 	return n;
 }
 
-int ImpostorChunk::cellFarCasters( QVector<FarCasterPiece> & out, float apexScale )
+int ImpostorChunk::cellFarCasters( QVector<FarCasterPiece> & out, float apexScale, const float * keep, int * cut )
 {
 	out.clear();
+	if ( cut )
+		*cut = 0;
 	const CellFarState & F = farSt();
 	const ChunkState & s = F.cards;
-	int used = 0;
+	int used = 0, curIn = -1, curOut = -1;
 	for ( const Placed & p : s.placed ) {
 		if ( p.setIndex < 0 || p.setIndex >= s.sets.size() || !s.sets.at( p.setIndex ).ok )
 			continue;
 		if ( cardHidden( p ) )
 			continue;
-		if ( out.isEmpty() || out.last().verts.size() >= 13000 * 5 )
-			out.append( FarCasterPiece() );
-		FarCasterPiece & k = out.last();
 		const float sc = std::fabs( p.scale );
 		const float cx = p.world[0] - F.shift[0] + p.c.center[0] * sc, cy = p.world[1] - F.shift[1] + p.c.center[1] * sc;
 		const float cz = p.world[2] - F.shift[2] + p.c.center[2] * sc;
 		const float w = p.c.halfW * sc, h = p.c.halfH * sc;
+		const bool nearOut = keep && ( cx - w < keep[0] || cy - w < keep[1] || cx + w > keep[2] || cy + w > keep[3] );
+		if ( nearOut && cut )
+			++*cut;
+		int & cur = nearOut ? curOut : curIn;	// SHAFTS1b: one piece holds pyramids of one side of the near window only
+		if ( cur < 0 || out.at( cur ).verts.size() >= 13000 * 5 ) {
+			cur = int( out.size() );
+			out.append( FarCasterPiece() );
+			out.last().nearOut = nearOut;
+		}
+		FarCasterPiece & k = out[cur];
 		const int b = int( k.verts.size() );
 		k.verts << Vector3( cx, cy, cz + h * apexScale ) << Vector3( cx - w, cy - w, cz ) << Vector3( cx + w, cy - w, cz )
 			<< Vector3( cx + w, cy + w, cz ) << Vector3( cx - w, cy + w, cz );
