@@ -11,7 +11,7 @@ BSD License - see nifskope.h
 
 #include "cellclustergl.h"
 #include "gl/alphabgsm.h"	// the side passes' alpha-test census
-#include "gl/cellssr.h"
+#include "features/reflections/cellssr.h"
 #include "features/air/cellvolair.h"
 #include "features/shadows/shadowset.h"
 #include "gl/glnode.h"

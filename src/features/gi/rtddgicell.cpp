@@ -17,7 +17,7 @@
 #include "gl/celllights.h"
 #include "gl/cellunits.h"
 #include "gl/celluniform.h"	// lane PERFFIX1: the volume's unit bound without asking the driver
-#include "gl/cellssr.h"      // lane RESTIRDI1: wwCellAoTargets (the shared opaque pass ReSTIR reads)
+#include "features/reflections/cellssr.h"      // lane RESTIRDI1: wwCellAoTargets (the shared opaque pass ReSTIR reads)
 #include "gl/glscene.h"
 #include "gl/lookdevstage.h"   // lane RTXFIX1: wwLookdevFogUniforms (the probes view in the frame takes the fog)
 #include "gl/renderer.h"

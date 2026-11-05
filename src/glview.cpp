@@ -160,10 +160,10 @@ private:
 #include "features/sky/atmosphere.h"	// the sky in the exposure's mean
 #include "features/gi/cellprobeview.h"	// the Pass overlays
 #include "features/gi/cellvolumeview.h"	// the Space stage's view
-#include "gl/cellssr.h"
+#include "features/reflections/cellssr.h"
 #include "features/gi/cellssgi.h"
 #include "features/air/cellvolair.h"
-#include "gl/cellreflprobe.h"
+#include "features/reflections/cellreflprobe.h"
 #include "features/shared/cellpasstime.h"
 #include "gl/geokeepclock.h"
 #include "gl/cellfarground.h"

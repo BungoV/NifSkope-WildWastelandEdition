@@ -62,8 +62,8 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include "gl/cellwaterinfo.h"	// lane WATERWETBAKE1: the land side of the shore plane
 #include "gl/cellprecip.h"	// lane FO76WEATHER1: rain wetness
 #include "features/shadows/shadowset.h"	// lane WATERWETBAKE1: wwCellIsTerrainShape
-#include "gl/cellssr.h"
-#include "gl/cellreflprobe.h"	// lane REFLPROBE1
+#include "features/reflections/cellssr.h"
+#include "features/reflections/cellreflprobe.h"	// lane REFLPROBE1
 #include "features/gi/cellssgi.h"
 #include "gl/gametaa.h"	// lane PERFFIX4: the material maps' mip bias under the TAA2 jitter
 #include "esmweather.h"

@@ -4,7 +4,7 @@
 #include "gl/cellhdr.h"
 #include "gl/celllights.h"
 #include "features/shared/cellpasstime.h"
-#include "gl/cellssr.h"
+#include "features/reflections/cellssr.h"
 #include "gl/cellunits.h"	// lane WATERFIX7: the passes' named units
 #include "features/near/cellvrs.h"
 #include "gl/glnode.h"

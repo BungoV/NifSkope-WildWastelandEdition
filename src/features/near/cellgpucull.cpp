@@ -14,7 +14,7 @@ BSD License - see nifskope.h
 #include "gl/celllights.h"
 #include "features/shared/cellpasstime.h"
 #include "features/near/cellqueue.h"
-#include "gl/cellssr.h"
+#include "features/reflections/cellssr.h"
 #include "gl/glcontext.hpp"
 #include "gl/glscene.h"
 #include "gl/glshape.h"

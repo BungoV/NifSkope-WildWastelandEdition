@@ -1,5 +1,5 @@
 // Lane SKYBELOW2 (2026-10-31, bungo 10-30 LATE ITEMs 3 + 3b after SKYBELOW1): below the horizon is ground, never sky,
-// for the reflection probes' relight too (cell_reflrelight.frag, src/gl/cellreflprobe.cpp). A G-buffer cube texel that
+// for the reflection probes' relight too (cell_reflrelight.frag, src/features/reflections/cellreflprobe.cpp). A G-buffer cube texel that
 // MISSES (nothing drawn there) in a world direction below the horizon returns the ground, never the sky ambient:
 // outdoors the ground's albedo x what an open up-facing white surface shows (rpAmbient(+Z): the sky irradiance from
 // above / pi, the shader's own unit), indoors 0 (the void under a cell is never sky). Above the horizon the miss is the

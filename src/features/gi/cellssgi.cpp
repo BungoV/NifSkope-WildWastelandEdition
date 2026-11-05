@@ -6,7 +6,7 @@ BSD License - see nifskope.h
 
 #include "features/gi/cellssgi.h"
 #include "wwswitch.h"	// lane TESTDRIVER1: the WW_* switch store
-#include "gl/cellssr.h"
+#include "features/reflections/cellssr.h"
 #include "gl/cellunits.h"
 #include "gl/celluniform.h"	// lane CELLUNI2
 #include "features/near/celldrawstate.h"	// lane PERF3

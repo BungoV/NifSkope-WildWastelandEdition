@@ -25,8 +25,8 @@ BSD License - see nifskope.h
 #include "features/air/cellairzone.h"	// lane AIRZONE1: the Air zones row
 #include "features/gi/rtddgicell.h"	// lane RTXGI1 M2: the Ray-traced GI rows
 #include "features/near/cellcull.h"	// lane SUNCELL1: the Culling row
-#include "gl/cellssr.h"	// lane CELLALL1: the SSR rows
-#include "gl/cellreflprobe.h"	// lane REFLPROBE1: the Reflection probes row
+#include "features/reflections/cellssr.h"	// lane CELLALL1: the SSR rows
+#include "features/reflections/cellreflprobe.h"	// lane REFLPROBE1: the Reflection probes row
 #include "features/gi/cellssgi.h"
 #include "gl/cellfarground.h"	// the Far ground rows
 #include "features/lights/celllampshadow.h"

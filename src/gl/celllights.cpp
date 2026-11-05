@@ -9,7 +9,7 @@ BSD License - see nifskope.h
 
 #include "features/lights/cellclustergl.h"
 #include "gl/alphabgsm.h"	// the side passes' alpha-test census
-#include "gl/cellssr.h"
+#include "features/reflections/cellssr.h"
 #include "features/air/cellvolair.h"
 #include "features/shadows/shadowset.h"
 #include "gl/glnode.h"
@@ -2583,27 +2583,6 @@ QString wwCellImageSpaceEcho( Scene * scene )
 int wwCellLightsRed()
 {
 	return st().red;
-}
-
-int wwCellCubeTag( const QString & material )
-{
-	// WW_CELL_CUBE_DUMP=<file> numbers each env-mapped material (1..255) and writes "tag|material"
-	WW_SWITCH_STATIC( QString, dump, QString::fromLocal8Bit( wwEnv( "WW_CELL_CUBE_DUMP" ) ) );
-	static QHash<QString, int> tags;
-	if ( dump.isEmpty() || material.isEmpty() )
-		return 0;
-	const QString key = material.toLower().replace( QLatin1Char( '\\' ), QLatin1Char( '/' ) );
-	auto it = tags.constFind( key );
-	if ( it != tags.constEnd() )
-		return it.value();
-	if ( tags.size() >= 255 )
-		return 0;
-	const int tag = int( tags.size() ) + 1;
-	tags.insert( key, tag );
-	QFile f( dump );
-	if ( f.open( QIODevice::WriteOnly | ( tag == 1 ? QIODevice::Truncate : QIODevice::Append ) ) )
-		f.write( QStringLiteral( "cubetag=%1|%2\n" ).arg( tag ).arg( key ).toUtf8() );
-	return tag;
 }
 
 QString wwCellLightsEcho( Scene * scene )

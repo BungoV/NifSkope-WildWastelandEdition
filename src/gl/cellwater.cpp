@@ -4,7 +4,7 @@
 #include "cellhdr.h"
 #include "celllights.h"
 #include "celllooks.h"	// lane WATERDEPTH1: the Water depth colour row
-#include "cellssr.h"
+#include "features/reflections/cellssr.h"
 #include "celllooks.h"	// lane WATERSHORE1: the Water soft edge and Shore foam rows
 #include "cellwaterinfo.h"	// lane WATERDATA1: the baked water planes
 #include "lookdevstage.h"

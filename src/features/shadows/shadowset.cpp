@@ -16,7 +16,7 @@ BSD License - see nifskope.h
 #include "gl/gametaa.h"
 #include "features/shadows/sunshadow.h"	// lane SHADOWSHIMMER1: the stable shadows' red
 #include "features/shadows/sunshadowfit.h"	// lane PERFFIX2 b: the cascade count per tier
-#include "gl/cellssr.h"		// the cell view's shared opaque pass (contact shadows read its depth)
+#include "features/reflections/cellssr.h"		// the cell view's shared opaque pass (contact shadows read its depth)
 #include "gl/glnode.h"
 #include "gl/glscene.h"
 #include "gl/glshape.h"

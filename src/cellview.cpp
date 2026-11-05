@@ -1609,7 +1609,7 @@ static void cellPublishLighting( const NifModel * nif, const EsmWorld & world, c
 		}
 		/* The fog (WwCellLighting::hasFog). WW_CELL_FOG=0 publishes none;
 		 * WW_CELL_FOG_RED=noclamp|nogamma|noinherit each disable one rule. */
-		{	// the clip distance (the reflections' far plane, src/gl/cellssr.h)
+		{	// the clip distance (the reflections' far plane, src/features/reflections/cellssr.h)
 			const QByteArray & clS = fromT( 0x80 ) ? tData : x;
 			L.clipDist = clS.size() >= 36 ? f32( clS, 32 ) : 0.0f;
 		}

@@ -407,8 +407,6 @@ bool wwCellAlbedoProbePass( Scene * scene );
 QString wwCellLightsEcho( Scene * scene );
 //! the red bits (1 linear, 2 axis, 4 nodalc); the cell view applies "axis" when it publishes
 int wwCellLightsRed();
-//! a material's number for the cube probe (WW_CELL_CUBE_DUMP set), else 0
-int wwCellCubeTag( const QString & material );
 
 /*! The imagespace: the game's HDR -> display chain (exposure from mean luminance, Hable tonemap, grade, LUT),
  *  transcribed from the shipped Shaders011.fxp. Row ships off; WW_CELL_IS pins it, WW_CELL_IS_DUMP=<file> dumps it. */

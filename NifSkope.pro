@@ -290,9 +290,9 @@ HEADERS += \
 	src/features/sky/atmomath.h \
 	src/features/gi/cellprobeview.h \
 	src/features/gi/cellvolumeview.h \
-	src/gl/cellssr.h \
-	src/gl/cellreflprobe.h \
-	src/gl/cellreflcam.h \
+	src/features/reflections/cellssr.h \
+	src/features/reflections/cellreflprobe.h \
+	src/features/reflections/cellreflcam.h \
 	src/features/gi/cellssgi.h \
 	src/features/gi/cellssgiplan.h \
 	src/features/shadows/contactlines.h \
@@ -456,8 +456,8 @@ HEADERS += \
 	src/features/gi/probebvh.h \
 	src/features/gi/bakert.h \
 	src/features/gi/rtddgi.h \
-	src/reflcensus.h \
-	src/reflcensuscli.h \
+	src/features/reflections/reflcensus.h \
+	src/features/reflections/reflcensuscli.h \
 	src/features/gi/rtddgimath.h \
 	src/features/gi/rtddgi/rtddgi_gpu.h \
 	src/features/gi/rtddgicell.h \
@@ -635,8 +635,8 @@ SOURCES += \
 	src/gl/cloudfly.cpp \
 	src/features/gi/cellprobeview.cpp \
 	src/features/gi/cellvolumeview.cpp \
-	src/gl/cellssr.cpp \
-	src/gl/cellreflprobe.cpp \
+	src/features/reflections/cellssr.cpp \
+	src/features/reflections/cellreflprobe.cpp \
 	src/features/gi/cellssgi.cpp \
 	src/features/lights/celllampshadow.cpp \
 	src/gl/celllooks.cpp \
@@ -817,7 +817,7 @@ SOURCES += \
 	src/features/gi/pgiwrite.cpp \
 	src/features/gi/bakert.cpp \
 	src/features/gi/rtddgi.cpp \
-	src/reflcensuscli.cpp \
+	src/features/reflections/reflcensuscli.cpp \
 	src/features/gi/rtddgicell.cpp \
 	src/features/air/airzone.cpp \
 	src/features/air/airzonepanel.cpp \

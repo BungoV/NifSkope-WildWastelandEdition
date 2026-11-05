@@ -22,7 +22,7 @@ int cmdEspWrite( const QStringList & args );	// lane ESPWRITE2: src/io/espwritec
 #include "features/gi/probefar.h"		// lane PRTPFAR
 #include "features/gi/probegi.h"		// lane ROOMCLAMP1: probegi
 #include "features/gi/rtddgi.h"		// lane RTXGI1: rtddgi
-#include "reflcensuscli.h"	// lane TOOLS1101: reflcensus
+#include "features/reflections/reflcensuscli.h"	// lane TOOLS1101: reflcensus
 #include "farlightmap.h"	// lane FARLIGHTMAP1: farlightmap
 #include "features/gi/proberelight.h"	// lane GPURELIGHT1: gpurelight
 #include "features/gi/probevolumes.h"	// lane VOLFIT1: volumes

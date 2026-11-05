@@ -7,7 +7,7 @@
 #include "gl/cellfogbloom.h"
 #include "gl/cellhdrformat.h"	// lane FRAMEFMT1: the frame's format rule (pure; tests/framefmt)
 #include "gl/celllights.h"
-#include "gl/cellssr.h"
+#include "features/reflections/cellssr.h"
 #include "gl/celluniform.h"	// lane CELLUNI4: the known state the frame end's passes take
 #include "gl/glscene.h"
 #include "gl/renderer.h"

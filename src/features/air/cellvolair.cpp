@@ -23,7 +23,7 @@ BSD License - see nifskope.h
 #include "gl/celllooks.h"	// lane GAPLOOK1
 #include "features/shared/cellpasstime.h"
 #include "gl/cellpost.h"
-#include "gl/cellssr.h"
+#include "features/reflections/cellssr.h"
 #include "gl/fogterrain.h"	// lane FOGTERRAIN1: the ground layer on the low-pass terrain
 #include "gl/glscene.h"
 #include "gl/glshape.h"	// lane CLOUDLOOK1: the shapes' spheres (vaShapesTop)
