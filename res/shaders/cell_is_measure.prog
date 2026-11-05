@@ -1,4 +1,0 @@
-# lane PERF1 (src/gl/cellhdr.cpp): the exposure's and the bloom's source, read from the linear frame already drawn.
-# No conditions: never picked for a shape; cellhdr.cpp selects it by name.
-
-shaders cell_ao.vert cell_is_measure.frag

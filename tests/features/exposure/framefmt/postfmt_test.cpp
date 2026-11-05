@@ -1,10 +1,10 @@
-// lane PRESETPERF1 (FRAMEFMT1-B): the measure copy + bloom quarter format rule (src/gl/cellhdrformat.h wwPostFormatOf).
-//   g++ -std=c++17 -I<tree>/src tests/framefmt/postfmt_test.cpp -o postfmt_test
+// lane PRESETPERF1 (FRAMEFMT1-B): the measure copy + bloom quarter format rule (src/features/exposure/cellhdrformat.h wwPostFormatOf).
+//   g++ -std=c++17 -I<tree>/src tests/features/exposure/framefmt/postfmt_test.cpp -o postfmt_test
 // Red: -DPOSTFMT_RED puts back the code before the lane (RGBA32F whatever was asked); it must fail.
 #include <cstdio>
 #include <cstring>
 
-#include "gl/cellhdrformat.h"
+#include "features/exposure/cellhdrformat.h"
 #ifdef POSTFMT_RED
 #define wwPostFormatOf wwPostFormatBefore
 inline WwHdrFormatRule wwPostFormatBefore( const char *, bool red )

@@ -5,9 +5,9 @@
 # Green must PASS; both reds must FAIL: --red vanilla (WW_TONEMAP_RED=vanilla, the game's filmic curve) and the base
 # c0a30fab's own shader files (the curve before this lane).
 # PY= the python with numpy (code1030 unit.sh puts MSYS2 first on PATH).
-cd "$(dirname "$0")/../.." || exit 2
+cd "$(dirname "$0")/../../../.." || exit 2
 PY="${PY:-$(command -v python)}"
-T=tests/tonemap1101a/gate.py
+T=tests/features/exposure/tonemap1101a/gate.py
 ok=1
 g=$(timeout 300 "$PY" -I "$T" < /dev/null 2>&1 | grep '^VERDICT')
 echo "green       $g"

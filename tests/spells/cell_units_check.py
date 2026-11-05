@@ -78,6 +78,11 @@ def main():
     for f in sorted(os.listdir(gl)):
         if f.endswith(('.cpp', '.h')) and f != 'cellunits.h':
             files[f] = open(os.path.join(gl, f), encoding='utf-8', errors='replace').read()
+    feat = os.path.join(root, 'src', 'features')	# MODULES1: the sources moved into the modules
+    for m in sorted(os.listdir(feat)) if os.path.isdir(feat) else []:
+        for f in sorted(os.listdir(os.path.join(feat, m))):
+            if f.endswith(('.cpp', '.h')) and f not in files:
+                files[f] = open(os.path.join(feat, m, f), encoding='utf-8', errors='replace').read()
 
     units, tbad = judge_table(table)
     print('  T  ' + ('PASS' if not tbad else 'FAIL') + '  ' + ', '.join(f'{n} {v}' for n, v in units))

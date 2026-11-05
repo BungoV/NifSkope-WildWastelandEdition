@@ -9,7 +9,7 @@
 #include "features/near/cellcull.h"	// lane SUNCELL1
 #include "gl/celllooks.h"	// lane DECALS1: the Decal distance fade row
 #include "features/air/cellvolair.h"	// lane VOLPART1: volumetric lit effect cards
-#include "gl/cellhdr.h"	// finalfix: blended draws single-sample outside the linear frame
+#include "features/exposure/cellhdr.h"	// finalfix: blended draws single-sample outside the linear frame
 #include "gl/celluniform.h"	// lane CELLUNI6: the draw's blend note
 #include "features/shared/cellpasstime.h"	// lane PERF1
 #include "features/near/cellqueue.h"	// lane GPUDRIVEN1: the main walks' render queues

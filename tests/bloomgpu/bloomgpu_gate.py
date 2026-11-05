@@ -1,4 +1,4 @@
-"""lane PERFFIX1: the vanilla bloom's GPU blur (res/shaders/cell_bloomblur.frag, src/gl/cellhdr.cpp bloomBlur) against a
+"""lane PERFFIX1: the vanilla bloom's GPU blur (res/shaders/cell_bloomblur.frag, src/features/exposure/cellhdr.cpp bloomBlur) against a
 numpy twin of the CPU blur it replaces (src/gl/celllights.cpp wwCellImageSpaceSetBloom, step 1), on the real driver in
 a hidden GL 4.1 context (tests/spells/shader_link_check.py). No NifSkope.
 

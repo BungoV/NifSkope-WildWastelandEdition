@@ -19,7 +19,7 @@ BSD License - see nifskope.h
 #include "gl/glshape.h"
 #include "gl/glproperty.h"	// lane GAPFIX1: alpha-tested cube casters read the base map
 #include "gl/renderer.h"
-#include "gl/cellhdr.h"
+#include "features/exposure/cellhdr.h"
 #include "gl/cellbloom.h"	// lane BLOOM1b
 #include "features/ao/cellaodecalgl.h"	// lane AODECAL1
 #include "features/ao/cellaomethod.h"

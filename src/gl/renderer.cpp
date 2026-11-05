@@ -71,7 +71,7 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include "model/nifmodel.h"
 #include "ui/settingsdialog.h"
 #include "gl/BSMesh.h"
-#include "gl/cellhdr.h"
+#include "features/exposure/cellhdr.h"
 #include "gl/cellfogbloom.h"
 #include "gl/cellunits.h"	// lane PERF1: the first dedicated unit
 #include "features/air/cellvolair.h"	// lane VOLPART1: volumetric lit effect cards

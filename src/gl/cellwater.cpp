@@ -1,7 +1,7 @@
 #include "cellwater.h"
 #include "wwswitch.h"	// lane TESTDRIVER1: the WW_* switch store
 
-#include "cellhdr.h"
+#include "features/exposure/cellhdr.h"
 #include "celllights.h"
 #include "celllooks.h"	// lane WATERDEPTH1: the Water depth colour row
 #include "features/reflections/cellssr.h"

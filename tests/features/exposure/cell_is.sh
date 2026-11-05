@@ -4,7 +4,7 @@
 #
 # Not judged by eye. Per interior, one window with Cell lights + Imagespace on shoots the picture (on.png)
 # and dumps the measure pass at full size (WW_CELL_IS_DUMP: the raw linear frame + the echo). Then
-# tests/spells/cell_is_check.py walks Fallout4.esm ITSELF (CELL XCIM -> IMGS), reads the LUT out of the
+# tests/features/exposure/cell_is_check.py walks Fallout4.esm ITSELF (CELL XCIM -> IMGS), reads the LUT out of the
 # Misc archive itself and runs the game's chain in numpy over the dump:
 #   A  the adapted luminance and the exposure NifSkope used = the mean luma of the dump over the pixels a
 #      cell-lit fragment reached (stencil bit 0, written after the floats), the HNAM clamp
@@ -26,15 +26,15 @@
 #                                                        display space (cameras whose blended pixels are
 #                                                        >= 10% of the frame: one layer alone barely parts)
 #
-# USAGE  bash tests/spells/cell_is.sh [--red nolut|noexp|nograde|nobloom|perfrag]
+# USAGE  bash tests/features/exposure/cell_is.sh [--red nolut|noexp|nograde|nobloom|perfrag]
 #        CELLS="..." to pick interiors (cell or cell@tag); the camera stands at CAM_<cell>[_<tag>] (x,y,z
 #        look-at) if set, VIEW_<cell>_<tag> / DIST_<cell>_<tag> per tagged entry.
 
 set -u
 
-. "$(dirname "$0")/_harness.sh"
+. "$(dirname "$0")/../../spells/_harness.sh"
 
-REPO="$(cd "$(dirname "$0")/../.." && pwd)"
+REPO="$(cd "$(dirname "$0")/../../.." && pwd)"
 EXE="${EXE:-$REPO/release/NifSkope.exe}"
 SCOPE="${SCOPE:-cell_is}"
 REGKEY="HKCU\Software\NifTools\NifSkope 2.0 $SCOPE"
@@ -44,7 +44,7 @@ fresh_scope() {
 	reg add "$REGKEY\Settings" //v Version //t REG_SZ //d 1 //f > /dev/null 2>&1 || true
 	reg add "$REGKEY" //v "Game Manager Version" //t REG_DWORD //d 2 //f > /dev/null 2>&1 || true
 	local gm; gm="$(mktemp)"
-	python "$(dirname "$0")/settings_scope_game.py" "$SCOPE" "$(cygpath -w "$gm")" > /dev/null 2>&1 \
+	python "$(dirname "$0")/../../spells/settings_scope_game.py" "$SCOPE" "$(cygpath -w "$gm")" > /dev/null 2>&1 \
 		&& reg import "$(cygpath -w "$gm")" > /dev/null 2>&1
 	rm -f "$gm"
 	printf '%s' "$SCOPE"
@@ -76,7 +76,7 @@ say "cell_is.sh  $(date '+%Y-%m-%d %H:%M:%S')${RED:+   RED CONTROL: $RED}"
 newer=1
 for s in src/gl/celllights.cpp src/gl/celllights.h src/cellview.cpp src/esmdata.cpp src/glview.cpp src/gl/renderer.cpp \
 	res/shaders/features/lights/cell_lights.glsl res/shaders/fo4_default.frag res/shaders/pbrm_default.frag \
-	src/gl/cellhdr.cpp res/shaders/cell_hdr.frag res/shaders/fo4_effectshader.frag; do
+	src/features/exposure/cellhdr.cpp res/shaders/features/exposure/cell_hdr.frag res/shaders/fo4_effectshader.frag; do
 	[ "$REPO/$s" -nt "$EXE" ] && { say "  $s is NEWER than the exe"; newer=0; }
 done
 check "the exe is newer than every source this gate covers" "$newer"

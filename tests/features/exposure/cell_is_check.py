@@ -29,6 +29,7 @@ import numpy as np
 from PIL import Image
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', '..', 'spells'))
 from cell_lit_check import walk, record  # noqa: E402
 
 LUMA = np.array([0.2125, 0.7154, 0.0721])

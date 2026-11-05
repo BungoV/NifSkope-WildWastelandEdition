@@ -10,7 +10,7 @@ BSD License - see nifskope.h
 
 #include "features/near/cellcull.h"
 #include "gl/cellgrass.h"
-#include "gl/cellhdr.h"
+#include "features/exposure/cellhdr.h"
 #include "gl/celllights.h"
 #include "features/shared/cellpasstime.h"
 #include "features/near/cellqueue.h"

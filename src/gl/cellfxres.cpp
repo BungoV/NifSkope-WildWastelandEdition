@@ -1,7 +1,7 @@
 #include "cellfxres.h"
 #include "wwswitch.h"	// lane LIVESET1: the configuration follows a live set
 
-#include "gl/cellhdr.h"
+#include "features/exposure/cellhdr.h"
 #include "gl/celllights.h"
 #include "features/shared/cellpasstime.h"
 #include "features/reflections/cellssr.h"

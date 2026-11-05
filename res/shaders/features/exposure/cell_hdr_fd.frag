@@ -1,7 +1,7 @@
 #version 410 core
 
 /* lane PERF2 red (WW_CELL_HDR_EARLY_RED=1): cell_hdr.frag as it was, its depth written per sample (no early tests).
- * lane HDR1: the cell view's one tone map (src/gl/cellhdr.h). The main draw went into a linear float frame;
+ * lane HDR1: the cell view's one tone map (src/features/exposure/cellhdr.h). The main draw went into a linear float frame;
  * this full-screen pass draws it back into the view, sample for sample:
  *   hdrMode 0  the pixels a cell program or a cell effect wrote last: the cell's imagespace (the bloom added
  *              once, the exposure, the curve, the grade, the LUT) on the summed linear light, as the game runs

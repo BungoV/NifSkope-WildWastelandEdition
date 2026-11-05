@@ -1,6 +1,6 @@
 #version 410 core
 
-/* lane PERF1: the exposure's and the bloom's source from the linear frame already drawn (src/gl/cellhdr.cpp),
+/* lane PERF1: the exposure's and the bloom's source from the linear frame already drawn (src/features/exposure/cellhdr.cpp),
  * as the game reads its own HDR target: the pixel's samples averaged (a non-finite one read as 0), alpha 1. The
  * stencil lets it write only where a cell program or a cell effect wrote last (linear light); its mips then hold
  * the mean light over those pixels (rgb / a). */

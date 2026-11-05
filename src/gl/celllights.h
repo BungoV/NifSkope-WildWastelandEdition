@@ -408,33 +408,10 @@ QString wwCellLightsEcho( Scene * scene );
 //! the red bits (1 linear, 2 axis, 4 nodalc); the cell view applies "axis" when it publishes
 int wwCellLightsRed();
 
-/*! The imagespace: the game's HDR -> display chain (exposure from mean luminance, Hable tonemap, grade, LUT),
- *  transcribed from the shipped Shaders011.fxp. Row ships off; WW_CELL_IS pins it, WW_CELL_IS_DUMP=<file> dumps it. */
-bool wwCellImageSpaceOn();
-void wwCellImageSpaceSetOn( bool on );
-//! the cell view draws through the imagespace: cell-lit, the row on, the document's cell has one
-bool wwCellImageSpaceWanted( Scene * scene );
-//! the measure pass's switch: while true every cell-lit fragment writes its raw linear colour
-void wwCellImageSpaceMeasuring( bool on );
-//! true inside the measure pass: every program that is neither cell-lit nor an effect is masked
-bool wwCellImageSpaceIsMeasuring();
-//! effects write their color into the measure, as the game's effects feed its adaptation and bloom
-bool wwCellImageSpaceMeasuresEffects();
+#include "features/exposure/exposure.h"	// lane MODULES1 (exposure): the imagespace row (wwCellImageSpace*)
 /*! A cell-lit effect draws with fo4_effectcell.prog, the game's effect shader transcribed (linear color, soft
  *  fade, fog, imagespace). WW_CELL_FX_RED=legacy|nosoft|nolin|hide|prewater: harness switches. */
 int wwCellFxRed();
-//! the measured mean luminance of the last measure (negative before any)
-void wwCellImageSpaceSetAdapted( Scene * scene, float lum, int pixels );
-//! lane PERF1: the document's adapted value (negative before any measure)
-float wwCellImageSpaceAdapted( Scene * scene );
-/*! Bloom from the measure's float RGBA: HNAM scale * max(0, c - threshold), blurred 15 taps each way; the
- *  shader adds it to the HDR before the exposure */
-void wwCellImageSpaceSetBloom( Scene * scene, const float * rgba, int w, int h, int step );
-//! lane PERFFIX1: the bloom's threshold and scale (the imagespace HDR data's 3rd, 4th floats); false = no imagespace
-bool wwCellImageSpaceBloomParams( Scene * scene, float & thresh, float & scale );
-//! lane PERFFIX1: the vanilla bloom blurred on the GPU (cellhdr.cpp), w x h RGBA32F, sampled in place of the CPU's
-void wwCellImageSpaceSetBloomGpu( Scene * scene, unsigned tex, int w, int h );
-QString wwCellImageSpaceEcho( Scene * scene );
 
 /*! lane PERFHUNT2: the obscurance and SSR passes' sorted draws run under the setup memo as the main sorted pass does
  *  (scene globals once per program, the cell-uniform class record replayed). Red WW_CELL_SORTMEMO_RED=1: unarmed. */

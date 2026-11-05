@@ -271,7 +271,8 @@ HEADERS += \
 	src/gl/cellunderwater.h \
 	src/gl/cellgrass.h \
 	src/gl/cellpost.h \
-	src/gl/cellhdr.h \
+	src/features/exposure/cellhdr.h \
+	src/features/exposure/exposure.h \
 	src/features/near/cellvrs.h \
 	src/gl/cellfxres.h \
 	src/gl/cellbloom.h \
@@ -621,7 +622,8 @@ SOURCES += \
 	src/gl/cellunderwater.cpp \
 	src/gl/cellgrass.cpp \
 	src/gl/cellpost.cpp \
-	src/gl/cellhdr.cpp \
+	src/features/exposure/cellhdr.cpp \
+	src/features/exposure/exposure.cpp \
 	src/features/near/cellvrs.cpp \
 	src/gl/cellfxres.cpp \
 	src/gl/cellbloom.cpp \

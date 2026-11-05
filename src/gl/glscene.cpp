@@ -37,7 +37,7 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include "hkxplayback.h"
 
 #include "gl/renderer.h"
-#include "gl/cellhdr.h"
+#include "features/exposure/cellhdr.h"
 #include "gl/cellwater.h"	// lane WATER1
 #include "gl/celllights.h"	// lane GLOWHAZE1: wwCellFxRed
 #include "gl/gltex.h"

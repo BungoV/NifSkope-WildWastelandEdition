@@ -12,7 +12,7 @@ BSD License - see nifskope.h
 #include "esmweather.h"
 #include "features/air/cellvolair.h"	// lane VOLAIR1
 #include "gl/celllights.h"
-#include "gl/cellhdr.h"	// lane LIGHTBOOTH1
+#include "features/exposure/cellhdr.h"	// lane LIGHTBOOTH1
 #include "gl/glnode.h"
 #include "gl/glscene.h"
 #include "gl/glshape.h"

@@ -1,11 +1,11 @@
-#include "cellhdr.h"
+#include "features/exposure/cellhdr.h"
 #include "wwswitch.h"	// lane TESTDRIVER1: the WW_* switch store
-#include "cellunits.h"
+#include "gl/cellunits.h"
 
 #include "features/sky/atmosphere.h"	// lane SKYA (EXPO1): the sky in the exposure's mean
 #include "gl/cellbloom.h"
 #include "gl/cellfogbloom.h"
-#include "gl/cellhdrformat.h"	// lane FRAMEFMT1: the frame's format rule (pure; tests/framefmt)
+#include "features/exposure/cellhdrformat.h"	// lane FRAMEFMT1: the frame's format rule (pure; tests/framefmt)
 #include "gl/celllights.h"
 #include "features/reflections/cellssr.h"
 #include "gl/celluniform.h"	// lane CELLUNI4: the known state the frame end's passes take

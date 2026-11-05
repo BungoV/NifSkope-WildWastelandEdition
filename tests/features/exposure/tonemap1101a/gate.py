@@ -1,7 +1,7 @@
 """lane FIX1101A area T (LATE ITEM 26): is the cell view's tone curve Fusion Shaders' Physical operator?
 
 Runs the REAL shader text through the driver in a hidden GL 4.1 core context (tests/spells/shader_link_check.py), no
-NifSkope: res/shaders/cell_tonemap.glsl + cellImageSpace() as cell_lights.glsl has it (taken from the file) + cellCurveW /
+NifSkope: res/shaders/features/exposure/cell_tonemap.glsl + cellImageSpace() as cell_lights.glsl has it (taken from the file) + cellCurveW /
 cellCurveInv as cell_hdr.frag has them, and compares with physical.py (a numpy port of FO4CS res/Post/TonemapCS.hlsl,
 SDR mode, FO4CS's default constants).
 Inputs (exposed scene-linear Rec.709, 1.0 = paper white): a grey ramp 0..64 (2048 steps, half linear, half log), the 24
@@ -26,7 +26,7 @@ import sys
 import numpy as np
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-TREE = os.path.abspath(os.path.join(HERE, '..', '..'))
+TREE = os.path.abspath(os.path.join(HERE, '..', '..', '..', '..'))
 sys.path.insert(0, os.path.join(TREE, 'tests', 'spells'))
 sys.path.insert(0, HERE)
 import shader_link_check as S  # noqa: E402
@@ -67,14 +67,14 @@ pad = np.zeros((W * H, 3), np.float64)
 pad[:N] = X
 
 # ---- the shader text
-lights = S.expand(os.path.join(a.shaders, 'features', 'lights', 'cell_lights.glsl'))
+lights = S.expand(S.shader_path(os.path.join(a.shaders, 'cell_lights.glsl')))
 lines = lights.split('\n')
 i0 = [i for i, l in enumerate(lines) if l.startswith('vec3 cellImageSpace( vec3 sqrtColor )')][0]
 i1 = [i for i, l in enumerate(lines) if i > i0 and l.rstrip('\r') == '}'][0]
 isFn = '\n'.join(lines[i0:i1 + 1])
-tm_path = os.path.join(a.shaders, 'cell_tonemap.glsl')
+tm_path = S.shader_path(os.path.join(a.shaders, 'cell_tonemap.glsl'))
 tm = S.expand(tm_path) if os.path.exists(tm_path) else ''
-hdr = S.expand(os.path.join(a.shaders, 'cell_hdr.frag')).split('\n')
+hdr = S.expand(S.shader_path(os.path.join(a.shaders, 'cell_hdr.frag'))).split('\n')
 j0 = [i for i, l in enumerate(hdr) if l.startswith('float cellCurveW( float x )')][0]
 j1 = [i for i, l in enumerate(hdr) if l.startswith('vec3 cellGlowShoulder(')][0]
 curveFns = '\n'.join(hdr[j0:j1])

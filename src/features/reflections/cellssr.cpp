@@ -15,7 +15,7 @@ BSD License - see nifskope.h
 
 #include "gl/celllights.h"
 #include "gl/cellfarinst.h"
-#include "gl/cellhdr.h"	// lane FRAMEFMT1: the frame's colour format for the previous-frame copy
+#include "features/exposure/cellhdr.h"	// lane FRAMEFMT1: the frame's colour format for the previous-frame copy
 #include "gl/cellwater.h"
 #include "gl/celllooks.h"	// lane WATERREFL1: the Water reflections row picks the water march's twin
 #include "gl/glnode.h"

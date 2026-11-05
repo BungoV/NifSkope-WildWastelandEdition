@@ -51,7 +51,7 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include "features/near/cellcull.h"
 #include "gl/glparticles.h"
 #include "gl/renderer.h"
-#include "gl/cellhdr.h"
+#include "features/exposure/cellhdr.h"
 #include "gl/celllensflare.h"	// lane LIGHTS3 (LENSFLARE1)
 #include "gl/cellprecip.h"	// lane WEATHERLOOK1 B
 #include "gl/gametaa.h"	// lane MOTION1: the game's temporal AA

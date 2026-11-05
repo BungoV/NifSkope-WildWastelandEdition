@@ -1,11 +1,11 @@
-// lane FRAMEFMT1: the linear HDR frame's format rule (src/gl/cellhdrformat.h). Pure header, no Qt:
-//   g++ -std=c++17 -I<tree>/src tests/framefmt/framefmt_test.cpp -o framefmt_test
+// lane FRAMEFMT1: the linear HDR frame's format rule (src/features/exposure/cellhdrformat.h). Pure header, no Qt:
+//   g++ -std=c++17 -I<tree>/src tests/features/exposure/framefmt/framefmt_test.cpp -o framefmt_test
 // Red: -DFRAMEFMT_RED puts back the rule before the lane (RGBA32F unless rgba16f was asked); it must fail.
 #include <cstdio>
 #include <cstring>
 
 #ifndef FRAMEFMT_RED
-#include "gl/cellhdrformat.h"
+#include "features/exposure/cellhdrformat.h"
 #else
 struct WwHdrFormatRule
 {

@@ -7,7 +7,7 @@
 #include <QRegularExpression>
 #include <QSet>
 #include <cstdio>
-#include "gl/cellhdr.h"	// lane SUNCELL1: the HDR frame's stencil
+#include "features/exposure/cellhdr.h"	// lane SUNCELL1: the HDR frame's stencil
 #include "features/near/cellqueue.h"	// lane GPUFIX1
 #include "gl/cellunits.h"	// lane WATERFIX7: the soft-depth unit
 #include "gl/celllights.h"	// lane SUNCELL1: the cell effect law

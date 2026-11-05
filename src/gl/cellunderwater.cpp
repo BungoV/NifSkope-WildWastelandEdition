@@ -2,7 +2,7 @@
 #include "wwswitch.h"
 
 #include "cellunits.h"
-#include "gl/cellhdr.h"
+#include "features/exposure/cellhdr.h"
 #include "features/shared/cellpasstime.h"
 #include "gl/celllights.h"
 #include "gl/celllooks.h"

@@ -21,7 +21,7 @@ BSD License - see nifskope.h
 #include "lodgen.h"
 #include "gamemanager.h"
 #include "harnesswindow.h"	// lane GAPFIX1
-#include "gl/cellhdr.h"
+#include "features/exposure/cellhdr.h"
 #if __has_include( "gl/cellcull.h" )
 #include "features/near/cellcull.h"   // the cell cull table, when merged
 #define FARLOD1_HAVE_CULL 1

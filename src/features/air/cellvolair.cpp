@@ -17,7 +17,7 @@ BSD License - see nifskope.h
 #include "gl/cloudmap.h"	// lane CLOUD6e: the rain fog follows the Low band's coverage
 #include "gl/rainfogmath.h"	// lane CLOUD6e: the rain fog's law
 #include "gl/cellgrass.h"	// lane FOGWIND1: the game's wind angle, shared with the grass
-#include "gl/cellhdr.h"
+#include "features/exposure/cellhdr.h"
 #include "gl/celllights.h"
 #include "gl/celluniform.h"	// lane CELLUNI3: the units bound without a unit ask
 #include "gl/celllooks.h"	// lane GAPLOOK1

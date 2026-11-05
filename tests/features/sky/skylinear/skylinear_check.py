@@ -85,7 +85,7 @@ def main():
                                  'void main() { c = texelFetch( src, ivec2( gl_FragCoord.xy ), 0 ); }\n')
     pair = SR.compile_src(vsrc, '#version 410 core\nuniform sampler2D src;\nout vec4 c;\n'
                                 'void main() { vec4 a = texelFetch( src, ivec2( gl_FragCoord.xy ), 0 ); c = vec4( a.rgb, 1.0 - a.a ); }\n')
-    hsrc = S.expand(os.path.join(SDIR, 'cell_hdr.frag'))
+    hsrc = S.expand(S.shader_path(os.path.join(SDIR, 'cell_hdr.frag')))
     hsrc, n = re.subn(r'layout\s*\(\s*std140\s*\)\s*uniform\s+globalUniforms\s*\{.*?\};',
                       'uniform mat3 viewMatrix;\nuniform mat4 projectionMatrix;', hsrc, flags=re.S)
     phdr = SR.compile_src(S.expand(os.path.join(SDIR, 'cell_hdr.vert')), hsrc)
@@ -282,7 +282,7 @@ def main():
             return subprocess.run([os.environ.get('GIT', 'git'), '-C', TREE, 'show', red.split('=', 1)[1] + ':' + path],
                                   capture_output=True, text=True, encoding='latin-1').stdout
         return open(os.path.join(TREE, path), encoding='latin-1').read()
-    ld, hd, va, gv = (src('src/gl/lookdevstage.cpp'), src('src/gl/cellhdr.cpp'), src('src/features/air/cellvolair.cpp'),
+    ld, hd, va, gv = (src('src/gl/lookdevstage.cpp'), src('src/features/exposure/cellhdr.cpp'), src('src/features/air/cellvolair.cpp'),
                       src('src/glview.cpp'))
     checks = {
         'lookdev stencil 1 REPLACE': 'glStencilFunc( GL_ALWAYS, 1, 0xFF );' in ld.split('void wwLookdevSkyLinearDraw')[-1]

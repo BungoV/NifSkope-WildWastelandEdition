@@ -1,6 +1,6 @@
 #version 410 core
 
-/* The cell view's tone map (src/gl/cellhdr.h): draws the linear float frame back into the view, per sample.
+/* The cell view's tone map (src/features/exposure/cellhdr.h): draws the linear float frame back into the view, per sample.
  * The stencil picks the mode per pixel (copied back, or read here through hdrStencilTest):
  *   hdrMode 0  pixels a cell program or effect wrote last: the cell's imagespace on the summed linear light
  *   hdrMode 1  the pixels any other program wrote last: the value as it was written

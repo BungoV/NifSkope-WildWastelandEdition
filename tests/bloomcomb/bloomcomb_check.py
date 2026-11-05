@@ -34,7 +34,7 @@ if not BASE:
     BASE_SRC = subprocess.run([git, '-C', TREE, 'show', '4c9ea88e:res/shaders/cell_hdr.frag'], capture_output=True).stdout.decode('latin-1')
 else:
     BASE_SRC = open(BASE, 'rb').read().decode('latin-1')
-TREE_SRC = open(os.path.join(SH, 'cell_hdr.frag'), 'rb').read().decode('latin-1')
+TREE_SRC = open(S.shader_path(os.path.join(SH, 'cell_hdr.frag')), 'rb').read().decode('latin-1')
 
 S.context()
 gl = S.gl

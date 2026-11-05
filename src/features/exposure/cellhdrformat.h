@@ -3,7 +3,7 @@
 
 #include <cstring>
 
-/* lane FRAMEFMT1 (GFXR-FRAME G2): the cell's linear HDR frame format, as a pure rule (tests/framefmt).
+/* lane FRAMEFMT1 (GFXR-FRAME G2): the cell's linear HDR frame format, as a pure rule (tests/features/exposure/framefmt).
  * Default RGBA16F: half the bytes of RGBA32F on every full-frame touch (the MSAA frame, its tone map, and the
  * copies resolved from it, which follow it: a multisampled resolve needs equal formats). TIMING1 c3 High: f16 vs f32
  * px>16 0.02 %, no visible change. WW_CELL_HDR_FORMAT=rgba32f | rgba16f | r11g11b10f picks one (r11g11b10f has no

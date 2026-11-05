@@ -2,7 +2,7 @@
 res/Post/TonemapCS.hlsl (F4FX_PhysicalCurve, F4FX_PhysicalInversePq, F4FX_PhysicalPqEotf, the ICtCp pair,
 F4FX_TonemapPhysical in its SDR output mode) and res/HDR/DisplayMap.hlsli (the Rec.709 <-> Rec.2020 matrices), with the
 constants FO4CS feeds it (src/Post/Tonemap.cpp ResolveTonemapConstants + the defaults below). Adapted from Polyphony
-Digital's MIT-licensed GT7 Tone Mapping sample (LICENSE.md). Independent of res/shaders/cell_tonemap.glsl: the gate
+Digital's MIT-licensed GT7 Tone Mapping sample (LICENSE.md). Independent of res/shaders/features/exposure/cell_tonemap.glsl: the gate
 (gate.py) runs that file through the driver and compares.
 
 Also the game's filmic curve as cell_lights.glsl had it (the red) and its inverse.
