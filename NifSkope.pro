@@ -640,6 +640,7 @@ SOURCES += \
 	src/gl/fogterrain.cpp \
 	src/gl/cellpasstime.cpp \
 	src/features/shared/wwtelemetry.cpp \
+	src/features/ao/ao.cpp \
 	src/gl/cellqueue.cpp \
 	src/gl/celldrawpacket.cpp \
 	src/gl/cellbindless.cpp \

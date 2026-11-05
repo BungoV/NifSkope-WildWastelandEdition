@@ -1,3 +1,9 @@
+## MODULES1 step 2 (2026-11-05): the screen AO module moves to src/features/ao/ao.cpp
+
+- The AO depth+normal pass, its targets, the AO methods (vanilla/GTAO/HBAO+/XeGTAO), the AO draw hook and the AO
+  switches moved unchanged out of src/gl/celllights.cpp. The light spheres and the GI water guard stay in celllights.cpp
+  (they read its state); the AO draw asks `wwCellLitProbePicture()` for the probe-picture test. No behaviour change.
+
 ## MODULES1 step 1 (2026-11-05): one shared telemetry file (src/features/shared/wwtelemetry.*)
 
 - `WW_TELEMETRY=<file>` (read once at launch) writes JSON lines: `t, frame, row, gen, module, event` plus fields.
