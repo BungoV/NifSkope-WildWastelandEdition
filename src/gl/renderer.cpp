@@ -31,7 +31,7 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 ***** END LICENCE BLOCK *****/
 
 #include "renderer.h"
-#include "gl/cellpasstime.h"	// lane PERF2: the draws' CPU setup time
+#include "features/shared/cellpasstime.h"	// lane PERF2: the draws' CPU setup time
 #include "gl/celldrawstate.h"	// lane PERF3
 #include "gl/celldrawpacket.h"	// lane GAPPERF-BINDLESS
 #include "gl/cellbindless.h"	// lane BINDLESS2

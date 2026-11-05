@@ -3,7 +3,7 @@
 
 #include "gl/cellhdr.h"
 #include "gl/celllooks.h"	// lane PERFFIX4: the "Variable rate shading" row (pin WW_CELL_VRS)
-#include "gl/cellpasstime.h"
+#include "features/shared/cellpasstime.h"
 #include "gl/cellunits.h"	// lane WATERFIX7: the passes' named units
 #include "gl/gametaa.h"
 #include "gl/glscene.h"

@@ -54,7 +54,7 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 #include <QAction>
 #include <QOpenGLContext>
-#include "gl/cellpasstime.h"	// lane PERF1
+#include "features/shared/cellpasstime.h"	// lane PERF1
 #include "gl/cellvrs.h"	// lane VRS1
 #include "gl/cellfxres.h"	// lane FXRES1
 #include "gl/cellqueue.h"	// lane GPUDRIVEN1

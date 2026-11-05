@@ -3,7 +3,7 @@
 #include "cellfarhide.h"
 #include "cellmesh.h"
 #include "wwswitch.h"
-#include "gl/cellpasstime.h"
+#include "features/shared/cellpasstime.h"
 #include "gl/cellunits.h"	// lane FIX1101A lodch: the far stream's unit
 #include "gl/glscene.h"
 #include "gl/renderer.h"

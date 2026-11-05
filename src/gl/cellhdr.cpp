@@ -11,7 +11,7 @@
 #include "gl/celluniform.h"	// lane CELLUNI4: the known state the frame end's passes take
 #include "gl/glscene.h"
 #include "gl/renderer.h"
-#include "gl/cellpasstime.h"
+#include "features/shared/cellpasstime.h"
 #include "gl/cellvrs.h"
 #include "gl/gametaa.h"	// lane TAA3: the Modern resolve before the tone map
 

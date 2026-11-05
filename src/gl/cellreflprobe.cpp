@@ -11,7 +11,7 @@ BSD License - see nifskope.h
 #include "gl/celldrawstate.h"
 #include "wwswitch.h"	// fix TDFIX2: a live set re-reads the switches
 #include "gl/celllooks.h"	// lane OPENCELLFIX2: the Reflections master
-#include "gl/cellpasstime.h"	// lane PERFFIX2 a: the texture cache's upload count (a capture key)
+#include "features/shared/cellpasstime.h"	// lane PERFFIX2 a: the texture cache's upload count (a capture key)
 #include "cellworldanim.h"	// lane PERFFIX2 a: the world clock (a live window's relight tick)
 #include "rtddgicell.h"	// lane PERFFIX2 a: the ray-traced GI volume on (its updates relight the camera probe)
 #include "gl/cellreflcam.h"	// lane PERFFIX2 a: the camera probe's schedule

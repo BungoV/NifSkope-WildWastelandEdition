@@ -2,7 +2,7 @@
 #include "cellcull.h"
 #include "wwswitch.h"	// lane TESTDRIVER1: the WW_* switch store
 
-#include "gl/cellpasstime.h"	// lane PERF1
+#include "features/shared/cellpasstime.h"	// lane PERF1
 #include "gl/cellumbra.h"
 #include "gl/cellobjfade.h"	// lane OBJFADE1: the game's per-class distance fade
 #include "gl/celllooks.h"

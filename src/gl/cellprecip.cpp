@@ -6,7 +6,7 @@
 #include "gl/celllooks.h"
 #include "gl/cellgrass.h"
 #include "gl/cellhdr.h"
-#include "gl/cellpasstime.h"
+#include "features/shared/cellpasstime.h"
 #include "gl/cellvolair.h"
 #include "gl/glscene.h"
 #include "gl/lookdevstage.h"

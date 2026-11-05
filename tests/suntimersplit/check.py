@@ -6,8 +6,8 @@ import re, sys
 
 root = sys.argv[1]
 red = '--red' in sys.argv
-h = open(root + '/src/gl/cellpasstime.h', encoding='utf-8').read()
-c = open(root + '/src/gl/cellpasstime.cpp', encoding='utf-8').read()
+h = open(root + '/src/features/shared/cellpasstime.h', encoding='utf-8').read()
+c = open(root + '/src/features/shared/cellpasstime.cpp', encoding='utf-8').read()
 s = open(root + '/src/gl/sunshadow.cpp', encoding='utf-8').read()
 if red:
     c = c.replace('"cloud-shadow", ', '', 1)	# the GPU table loses one name: the names after it shift

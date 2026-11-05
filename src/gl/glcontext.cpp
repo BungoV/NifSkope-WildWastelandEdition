@@ -39,7 +39,7 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include "gltex.h"
 #include "glproperty.h"
 #include "harnesswindow.h"
-#include "cellpasstime.h"	// lane PERF1
+#include "features/shared/cellpasstime.h"	// lane PERF1
 #include "celldrawpacket.h"	// lane GAPPERF-BINDLESS: the setters record while a draw packet records
 #include "cellbindless.h"	// lane BINDLESS2
 #include "progcachekeep.h"	// lane BUGS1102C

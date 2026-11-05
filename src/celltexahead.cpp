@@ -3,7 +3,7 @@
 
 #include "cellspeed.h"
 #include "cellstream.h"
-#include "gl/cellpasstime.h"
+#include "features/shared/cellpasstime.h"
 #include "gamemanager.h"
 #include "model/nifmodel.h"
 

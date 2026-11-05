@@ -1,7 +1,7 @@
 #include "cellpost.h"
 #include "wwswitch.h"	// lane TESTDRIVER1: the WW_* switch store
 #include "gl/celllooks.h"	// lane OPENCELLFIX2: the Camera master
-#include "gl/cellpasstime.h"	// lane POSTFX1: the post zone's sub-timers
+#include "features/shared/cellpasstime.h"	// lane POSTFX1: the post zone's sub-timers
 #include "gl/taainputs.h"	// lane POSTFX1: the object vectors
 
 #include "esmdata.h"

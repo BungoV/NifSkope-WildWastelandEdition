@@ -3,7 +3,7 @@
 
 #include "cellunits.h"
 #include "gl/cellhdr.h"
-#include "gl/cellpasstime.h"
+#include "features/shared/cellpasstime.h"
 #include "gl/celllights.h"
 #include "gl/celllooks.h"
 #include "gl/cellwater.h"

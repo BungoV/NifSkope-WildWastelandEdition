@@ -10,7 +10,7 @@ BSD License - see nifskope.h
 #include "gamemanager.h"
 #include "gl/celllights.h"
 #include "gl/cellhdr.h"
-#include "gl/cellpasstime.h"
+#include "features/shared/cellpasstime.h"
 #include "gl/cellunits.h"
 #include "gl/lookdevstage.h"
 #include "gl/glscene.h"

@@ -22,7 +22,7 @@ BSD License - see nifskope.h
 #include "gl/cellaodecalgl.h"	// lane AODECAL1
 #include "gl/cellaomethod.h"
 #include "gl/cellcull.h"	// wwCellDecalMappedHas
-#include "gl/cellpasstime.h"	// sub-stage timers
+#include "features/shared/cellpasstime.h"	// sub-stage timers
 #include "gl/celldrawstate.h"
 #include "gl/lookdevstage.h"
 #include "gl/cellwater.h"	// water casts no cube shadow

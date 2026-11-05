@@ -1,6 +1,6 @@
 #include "cellspeed.h"
 #include "wwswitch.h"	// lane TESTDRIVER1: the WW_* switch store
-#include "gl/cellpasstime.h"	// lane PERF1
+#include "features/shared/cellpasstime.h"	// lane PERF1
 
 #include <QByteArray>
 #include <QCoreApplication>

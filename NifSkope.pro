@@ -300,7 +300,7 @@ HEADERS += \
 	src/gl/cellaodecalgl.h \
 	src/gl/cellvolair.h \
 	src/gl/fogterrain.h \
-	src/gl/cellpasstime.h \
+	src/features/shared/cellpasstime.h \
 	src/features/shared/wwtelemetry.h \
 	src/gl/geokeepclock.h \
 	src/gl/streamtexpool.h \
@@ -638,7 +638,7 @@ SOURCES += \
 	src/gl/cellaodecalgl.cpp \
 	src/gl/cellvolair.cpp \
 	src/gl/fogterrain.cpp \
-	src/gl/cellpasstime.cpp \
+	src/features/shared/cellpasstime.cpp \
 	src/features/shared/wwtelemetry.cpp \
 	src/features/ao/ao.cpp \
 	src/gl/cellqueue.cpp \

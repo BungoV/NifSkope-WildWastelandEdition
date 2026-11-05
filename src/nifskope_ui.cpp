@@ -236,7 +236,7 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include <QtEndian>
 #include "ui/opencellmenu.h"
 #include "ui/opencelldialog.h"	// the WW_OPENCELL_SHOT harness
-#include "gl/cellpasstime.h"
+#include "features/shared/cellpasstime.h"
 #include "celltexahead.h"
 #include "features/shared/wwtelemetry.h"	// lane MODULES1
 #include <vector>

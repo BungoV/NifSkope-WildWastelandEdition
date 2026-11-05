@@ -11,7 +11,7 @@
 #include "gl/cellvolair.h"	// lane VOLPART1: volumetric lit effect cards
 #include "gl/cellhdr.h"	// finalfix: blended draws single-sample outside the linear frame
 #include "gl/celluniform.h"	// lane CELLUNI6: the draw's blend note
-#include "gl/cellpasstime.h"	// lane PERF1
+#include "features/shared/cellpasstime.h"	// lane PERF1
 #include "gl/cellqueue.h"	// lane GPUDRIVEN1: the main walks' render queues
 #include "gl/cellgpucull.h"	// lane GPUDRIVEN1 step B: the GPU cluster cull
 #include "gl/cellfarinst.h"	// lane FARDRAW1: the instanced far rings

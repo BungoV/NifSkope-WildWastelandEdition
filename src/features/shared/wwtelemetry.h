@@ -6,7 +6,7 @@
  * per-frame cost row every N frames (default 1). Records: {"t","frame","row","gen","module","event", fields...}.
  * Events: start (the launch switches), switch (a live set: name, value, stage, the generation it made), row (the live
  * driver's row step), cost (frame + per-zone + per-module GPU/CPU ms). A cost row whose "gen" equals a switch record's
- * "gen" is drawn with that set in effect. Reader: tools/telemetry.py. It never changes a picture. */
+ * "gen" is drawn with that set in effect. Reader: src/features/shared/telemetry.py. It never changes a picture. */
 
 #include <QByteArray>
 

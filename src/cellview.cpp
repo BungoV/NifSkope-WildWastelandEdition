@@ -39,7 +39,7 @@ BSD License - see nifskope.h
 #include "probegi.h"
 #include "probealbedo.h"
 #include "probefar.h"		// the far soup beyond the loaded block
-#include "gl/cellpasstime.h"	// private bytes at each stage
+#include "features/shared/cellpasstime.h"	// private bytes at each stage
 #include "proberelight.h"	// the relight from recorded operators (CPU + GPU)
 #include "celldoorlive.h"	// one live door
 #include "farlight.h"		// distant light from the surfels

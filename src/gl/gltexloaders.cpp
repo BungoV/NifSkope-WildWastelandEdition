@@ -37,7 +37,7 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include "model/nifmodel.h"
 #include "cellspeed.h"
 #include "celltexahead.h"
-#include "cellpasstime.h"	// lane PERF1
+#include "features/shared/cellpasstime.h"	// lane PERF1
 #include "wwalphacov.h"	// lane TREELEAF1
 
 #include "libfo76utils/src/filebuf.hpp"

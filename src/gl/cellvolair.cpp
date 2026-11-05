@@ -20,7 +20,7 @@ BSD License - see nifskope.h
 #include "gl/celllights.h"
 #include "gl/celluniform.h"	// lane CELLUNI3: the units bound without a unit ask
 #include "gl/celllooks.h"	// lane GAPLOOK1
-#include "gl/cellpasstime.h"
+#include "features/shared/cellpasstime.h"
 #include "gl/cellpost.h"
 #include "gl/cellssr.h"
 #include "gl/fogterrain.h"	// lane FOGTERRAIN1: the ground layer on the low-pass terrain

@@ -6,7 +6,7 @@ BSD License - see nifskope.h
 
 #include "gl/cellfarground.h"
 #include "gl/cellfgsched.h"
-#include "gl/cellpasstime.h"
+#include "features/shared/cellpasstime.h"
 #include "gl/cellunits.h"
 #include "gl/celluniform.h"	// lane CELLUNI3: the units bound without a unit ask
 #include "gl/glscene.h"

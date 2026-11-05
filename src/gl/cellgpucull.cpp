@@ -12,7 +12,7 @@ BSD License - see nifskope.h
 #include "gl/cellgrass.h"
 #include "gl/cellhdr.h"
 #include "gl/celllights.h"
-#include "gl/cellpasstime.h"
+#include "features/shared/cellpasstime.h"
 #include "gl/cellqueue.h"
 #include "gl/cellssr.h"
 #include "gl/glcontext.hpp"

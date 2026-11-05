@@ -40,7 +40,7 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include "nifskope.h"
 #include "hkxanimui.h"
 #include "version.h"
-#include "gl/cellpasstime.h"
+#include "features/shared/cellpasstime.h"
 #include "harnesswindow.h"
 #include "data/nifvalue.h"
 #include "model/nifmodel.h"

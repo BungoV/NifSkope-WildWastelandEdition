@@ -35,7 +35,7 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include "cellspeed.h"
 #include "celltexahead.h"
 #include "cellstreamtex.h"	// lane STREAMTEX1
-#include "cellpasstime.h"	// lane STREAM1
+#include "features/shared/cellpasstime.h"	// lane STREAM1
 #include "celldrawpacket.h"	// lane GAPPERF-BINDLESS
 #include "cellbindless.h"	// lane BINDLESS2
 #include "texpool.h"	// lane PERFFIX4: the streaming pool

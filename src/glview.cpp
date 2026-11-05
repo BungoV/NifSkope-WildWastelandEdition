@@ -164,7 +164,7 @@ private:
 #include "gl/cellssgi.h"
 #include "gl/cellvolair.h"
 #include "gl/cellreflprobe.h"
-#include "gl/cellpasstime.h"
+#include "features/shared/cellpasstime.h"
 #include "gl/geokeepclock.h"
 #include "gl/cellfarground.h"
 #include "gl/cellocean.h"

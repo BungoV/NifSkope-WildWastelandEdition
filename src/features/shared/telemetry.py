@@ -3,10 +3,10 @@
 
 One JSON object per line: t, frame, row, gen, module, event, fields. Events: start, row, switch set/unset/reset, cost.
 
-  python tools/telemetry.py <file>                  per row: frame-time and per-module medians (GPU/CPU ms)
-  python tools/telemetry.py <file> --zones          per row: per-zone medians too
-  python tools/telemetry.py <file> --switches       launch switches and every live set with its generation
-  python tools/telemetry.py <file> --json           the per-row medians as JSON (for harnesses and judges)
+  python src/features/shared/telemetry.py <file>                  per row: frame-time and per-module medians (GPU/CPU ms)
+  python src/features/shared/telemetry.py <file> --zones          per row: per-zone medians too
+  python src/features/shared/telemetry.py <file> --switches       launch switches and every live set with its generation
+  python src/features/shared/telemetry.py <file> --json           the per-row medians as JSON (for harnesses and judges)
   --last N   only the last N cost rows of each row (default all); --after-gen  only cost rows drawn after the row's
   last live set took effect (gen >= that set's gen).
 """

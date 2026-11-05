@@ -19,7 +19,7 @@ BSD License - see nifskope.h
 #include "gl/celltreewind.h"	// lane WINDTREE1: a tree-wind shape's caster sways with it
 #include "gl/celllights.h"	// lane INTSKY1: a sunlit interior's casters
 #include "gl/celllooks.h"
-#include "gl/cellpasstime.h"	// lane PERF1: the casters' draw count
+#include "features/shared/cellpasstime.h"	// lane PERF1: the casters' draw count
 #include "gl/cellqueue.h"	// lane GPUDRIVEN1: the casters' render queues
 
 #include "gl/glnode.h"

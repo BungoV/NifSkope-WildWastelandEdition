@@ -5,7 +5,7 @@ BSD License - see nifskope.h
 ***** END LICENCE BLOCK *****/
 
 #include "lookdevstage.h"
-#include "gl/cellpasstime.h"	// lane PERF2: the draws' CPU setup time
+#include "features/shared/cellpasstime.h"	// lane PERF2: the draws' CPU setup time
 #include "gl/celluniprof.h"	// lane PERFFIX1: WW_CELL_UNI_PROF
 #include "wwswitch.h"	// lane TESTDRIVER1: the WW_* switch store
 
