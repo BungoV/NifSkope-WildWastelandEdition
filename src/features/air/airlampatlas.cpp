@@ -18,6 +18,7 @@
 #include "gl/renderer.h"
 
 #include <QElapsedTimer>
+#include <QOpenGLContext>
 #include <QSettings>
 
 #include <algorithm>
@@ -46,7 +47,7 @@ int wwAirLampVisMode()
 	if ( !v.isEmpty() )
 		return 0;
 	if ( g_lampVisRow < 0 )
-		g_lampVisRow = std::clamp( QSettings().value( QStringLiteral( "WW/AirLampVis" ), 0 ).toInt(), 0, 2 );
+		g_lampVisRow = std::clamp( QSettings().value( QStringLiteral( "WW/AirLampVis" ), 1 ).toInt(), 0, 2 );	// default Atlas (the Museum winner, 11-05)
 	return g_lampVisRow;
 }
 
@@ -67,8 +68,10 @@ void wwAirLampVisSetChoice( int item )
 
 int wwAirLampAtlasRed()
 {
-	const QByteArray v = wwEnv( "WW_CELL_AIR_LAMPATLAS_RED" ).trimmed();	// read live; "twice,faces"
-	return ( v.contains( "twice" ) ? 1 : 0 ) | ( v.contains( "faces" ) ? 2 : 0 );
+	const QByteArray v = wwEnv( "WW_CELL_AIR_LAMPATLAS_RED" ).trimmed();	// read live; "twice,faces,perface"
+	const bool perface = v.contains( "perface" );
+	const bool faces = QByteArray( v ).replace( "perface", "" ).contains( "faces" );
+	return ( v.contains( "twice" ) ? 1 : 0 ) | ( faces ? 2 : 0 ) | ( perface ? 4 : 0 );
 }
 
 namespace {
@@ -221,6 +224,17 @@ int nextPow2( float v )
 	while ( s < kMaxS && float( s ) < v )
 		s <<= 1;
 	return s;
+}
+
+bool layeredSupported()
+{
+	static int ok = -1;
+	if ( ok < 0 ) {
+		const QOpenGLContext * c = QOpenGLContext::currentContext();
+		ok = ( c && c->hasExtension( QByteArrayLiteral( "GL_ARB_shader_viewport_layer_array" ) ) ) ? 1 : 0;
+		std::fprintf( stderr, "air lamp atlas: layered face draw %s\n", ok ? "on (GL_ARB_shader_viewport_layer_array)" : "off (no GL_ARB_shader_viewport_layer_array)" );
+	}
+	return ok != 0;
 }
 
 std::uint64_t cellKey( const WwCellLighting * L )
@@ -378,7 +392,13 @@ int wwAirLampAtlasFrame( Scene * scene, const WwCellLighting * L, const float ca
 	if ( !pending.empty() ) {
 		std::vector<WwCubeCaster> casters;
 		wwCellCubeCasters( scene, casters );
-		NifSkopeOpenGLContext::Program * prog = r->useProgram( "cell_shadowdepth.prog" );
+		// one instanced draw a caster for all the faces it touches (the vertex stage picks the face's viewport,
+		// GL_ARB_shader_viewport_layer_array; notes/modules1/ATLASFACES_RESEARCH.md); else one draw a face
+		const bool layered = !( wwAirLampAtlasRed() & 4 ) && layeredSupported();
+		NifSkopeOpenGLContext::Program * prog = layered ? r->useProgram( "cell_shadowdepth6.prog" ) : nullptr;
+		const bool useLayered = prog != nullptr;
+		if ( !prog )
+			prog = r->useProgram( "cell_shadowdepth.prog" );
 		if ( prog ) {
 			GLint prevRead = 0, prevDraw = 0, vp[4], sb[4], polyMode[2], depthFunc = 0, prevActive = 0;
 			GLboolean depthMask = GL_TRUE, colorMask[4];
@@ -415,6 +435,8 @@ int wwAirLampAtlasFrame( Scene * scene, const WwCellLighting * L, const float ca
 			const float sc = vt.scale != 0.0f ? vt.scale : 1.0f;
 			const int lRel = prog->uniLocation( "shRelFromView" ), lClip = prog->uniLocation( "shClipFromRel" );
 			const int lRn = prog->uniLocation( "shRadiusNear" );
+			const int lFaceClip = useLayered ? prog->uniLocation( "shClipFace" ) : -1;
+			const int lFaces = useLayered ? prog->uniLocation( "shFaces" ) : -1;
 			std::vector<const WwCubeCaster *> mine;
 			const bool faceCap = ( wwAirLampAtlasRed() & 2 ) != 0;
 			auto full = [&]() { return faceCap ? faces >= kFacesPerFrame : faces > 0 && clock.nsecsElapsed() >= kFillNs; };
@@ -444,13 +466,7 @@ int wwAirLampAtlasFrame( Scene * scene, const WwCellLighting * L, const float ca
 					if ( dx * dx + dy * dy + dz * dz < reach * reach )
 						mine.push_back( &c );
 				}
-				for ( ; m.next.drawn < 6 && !full(); m.next.drawn++, faces++ ) {
-					const int f = m.next.drawn;
-					const int ox = int( m.next.at[f] >> 16 ), oy = int( m.next.at[f] & 0xffff ), sz = m.next.s;
-					fn->glViewport( ox, oy, sz, sz );
-					fn->glScissor( ox, oy, sz, sz );
-					fn->glClear( GL_DEPTH_BUFFER_BIT );
-					float clip[16];
+				auto faceClip = [&]( int f, float * clip ) {
 					for ( int c = 0; c < 3; c++ ) {
 						clip[c * 4 + 0] = WwCubeFace::kU[f][c];
 						clip[c * 4 + 1] = WwCubeFace::kV[f][c];
@@ -459,6 +475,48 @@ int wwAirLampAtlasFrame( Scene * scene, const WwCellLighting * L, const float ca
 					}
 					clip[12] = clip[13] = clip[15] = 0.0f;
 					clip[14] = B;
+				};
+				if ( useLayered ) {	// the lamp's six faces at once: clear the tiles, one viewport + scissor a face
+					float clips[6 * 16];
+					const int sz = m.next.s;
+					for ( int f = 0; f < 6; f++ ) {
+						faceClip( f, clips + f * 16 );
+						const int ox = int( m.next.at[f] >> 16 ), oy = int( m.next.at[f] & 0xffff );
+						fn->glScissorIndexed( 0, ox, oy, sz, sz );	// glClear takes viewport 0's scissor
+						fn->glClear( GL_DEPTH_BUFFER_BIT );
+					}
+					for ( int f = 0; f < 6; f++ ) {
+						const int ox = int( m.next.at[f] >> 16 ), oy = int( m.next.at[f] & 0xffff );
+						fn->glViewportIndexedf( GLuint( f ), float( ox ), float( oy ), float( sz ), float( sz ) );
+						fn->glScissorIndexed( GLuint( f ), ox, oy, sz, sz );
+					}
+					if ( lFaceClip >= 0 )
+						fn->glUniformMatrix4fv( lFaceClip, 6, GL_FALSE, clips );
+					for ( const WwCubeCaster * c : mine ) {
+						const float cr[3] = { c->c[0] - l.pos[0], c->c[1] - l.pos[1], c->c[2] - l.pos[2] };
+						GLint list[6];
+						int k = 0;
+						for ( int f = 0; f < 6; f++ )
+							if ( WwCubeFace::touches( f, cr, c->rad ) )
+								list[k++] = f;
+						if ( !k )
+							continue;
+						if ( lFaces >= 0 )
+							fn->glUniform1iv( lFaces, k, list );
+						prog->uni4m( "modelViewMatrix", c->sh->viewTrans().toMatrix4() );
+						wwCellCubeDrawCaster( r, prog, c->sh, k );
+					}
+					faces += 6 - m.next.drawn;
+					m.next.drawn = 6;
+				}
+				for ( ; m.next.drawn < 6 && !full(); m.next.drawn++, faces++ ) {
+					const int f = m.next.drawn;
+					const int ox = int( m.next.at[f] >> 16 ), oy = int( m.next.at[f] & 0xffff ), sz = m.next.s;
+					fn->glViewport( ox, oy, sz, sz );
+					fn->glScissor( ox, oy, sz, sz );
+					fn->glClear( GL_DEPTH_BUFFER_BIT );
+					float clip[16];
+					faceClip( f, clip );
 					if ( lClip >= 0 )
 						fn->glUniformMatrix4fv( lClip, 1, GL_FALSE, clip );
 					for ( const WwCubeCaster * c : mine ) {

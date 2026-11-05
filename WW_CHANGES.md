@@ -1,3 +1,12 @@
+## MODULES1 step 9 (2026-11-05): Lamp shadows default Atlas; the atlas draws all six faces of a lamp in one go
+
+- Volumetric Air > Lamp shadows now starts on Atlas (the Museum's air 38.7 -> 14.0 ms at the same picture). Probe walk
+  and Ray traced stay selectable; a saved choice is kept.
+- Atlas fill: each caster is drawn once a lamp, instanced over the cube faces it touches; the vertex shader sends each
+  instance to its face's tile (one viewport a face, GL_ARB_shader_viewport_layer_array). Same depths as the one draw a
+  face it replaces, far fewer draw calls. Without the extension it draws a face at a time as before (logged once). Red
+  `WW_CELL_AIR_LAMPATLAS_RED=perface` (live): the old draw.
+
 ## MODULES1 step 8 (2026-11-05): the atlas fills by time, cube-slot lamps skip it; sun shafts jitter into a mean
 
 - Atlas: the first fill draws faces for at most 4 ms of CPU a frame (at least one face), nearest lamps first, in place

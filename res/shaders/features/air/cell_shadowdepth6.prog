@@ -1,0 +1,4 @@
+# The air lamp atlas's layered caster pass (lane MODULES1; src/features/air/airlampatlas.cpp): all of a lamp's cube faces
+# in one instanced draw a caster. No conditions: never picked for a shape; airlampatlas.cpp selects it by name.
+
+shaders cell_shadowdepth6.vert cell_shadowdepth.frag

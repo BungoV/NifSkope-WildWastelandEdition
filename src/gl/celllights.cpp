@@ -3549,7 +3549,7 @@ static void cubeHash( Renderer * r, const Gpu & g )
 		(unsigned long long)h, held, g.shFace );
 }
 
-static void cubeDrawCaster( Renderer * r, NifSkopeOpenGLContext::Program * prog, const Shape * sh )
+static void cubeDrawCaster( Renderer * r, NifSkopeOpenGLContext::Program * prog, const Shape * sh, int instances = 1 )
 {
 	const Shape::WwDrawAlpha da = sh->wwDrawAlpha( "cube" );	// lane ALPHABGSM1
 	const bool at = da.test;
@@ -3571,8 +3571,15 @@ static void cubeDrawCaster( Renderer * r, NifSkopeOpenGLContext::Program * prog,
 		mask = 0x20000003ULL;
 		g_cubeAtDraws++;
 	}
-	r->drawShape( (unsigned int) ( sh->verts.size() ), mask, (unsigned int) ( sh->triangles.size() * 3 ),
-		GL_TRIANGLES, GL_UNSIGNED_SHORT, attrv, sh->triangles.constData() );
+	if ( instances <= 1 ) {
+		r->drawShape( (unsigned int) ( sh->verts.size() ), mask, (unsigned int) ( sh->triangles.size() * 3 ),
+			GL_TRIANGLES, GL_UNSIGNED_SHORT, attrv, sh->triangles.constData() );
+		return;
+	}
+	// lane MODULES1: one draw, one instance a cube face (the air atlas's layered program picks the face and viewport)
+	const unsigned int n = (unsigned int) ( sh->triangles.size() * 3 );
+	r->bindShape( (unsigned int) ( sh->verts.size() ), mask, size_t( n ) * 2u, attrv, sh->triangles.constData() );
+	r->fn->glDrawElementsInstanced( GL_TRIANGLES, GLsizei( n ), GL_UNSIGNED_SHORT, nullptr, GLsizei( instances ) );
 }
 
 // lane MODULES1 route (a): the light cubes' casters (wwCellShadowPass's filter) and draw, for the air's lamp atlas
@@ -3593,9 +3600,9 @@ void wwCellCubeCasters( Scene * scene, std::vector<WwCubeCaster> & out )
 	}
 }
 
-void wwCellCubeDrawCaster( Renderer * r, NifSkopeOpenGLContext::Program * prog, const Shape * sh )
+void wwCellCubeDrawCaster( Renderer * r, NifSkopeOpenGLContext::Program * prog, const Shape * sh, int instances )
 {
-	cubeDrawCaster( r, prog, sh );
+	cubeDrawCaster( r, prog, sh, instances );
 }
 
 static void lampShadowPass( Scene * scene, Gpu & g, const WwCellLighting & L, std::vector<int> & dirty, const float cam[3] )

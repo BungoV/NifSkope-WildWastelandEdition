@@ -26,7 +26,8 @@ struct WwCubeCaster
 
 // celllights.cpp (owner of the cube pass's caster rules and draw)
 void wwCellCubeCasters( Scene * scene, std::vector<WwCubeCaster> & out );
-void wwCellCubeDrawCaster( Renderer * r, NifSkopeOpenGLContext::Program * prog, const Shape * sh );
+//! instances > 1: one instanced draw, one instance a cube face (the layered program cell_shadowdepth6.prog)
+void wwCellCubeDrawCaster( Renderer * r, NifSkopeOpenGLContext::Program * prog, const Shape * sh, int instances = 1 );
 
 //! 0 walk, 1 atlas, 2 rays (the pin WW_CELL_AIR_LAMPVIS, read live, else the Volumetric Air > Lamp shadows row)
 int wwAirLampVisMode();
@@ -35,7 +36,8 @@ bool wwAirLampVisPinned();
 int wwAirLampVisChoice();
 void wwAirLampVisSetChoice( int item );
 //! the atlas's red, read live (WW_CELL_AIR_LAMPATLAS_RED): 1 "twice" = lamps in a cube slot read the atlas too,
-//! 2 "faces" = the first fill capped at 192 faces a frame, not 4 ms
+//! 2 "faces" = the first fill capped at 192 faces a frame, not 4 ms, 4 "perface" = one draw a face (the old fill), not
+//! one instanced draw a caster for its six faces
 int wwAirLampAtlasRed();
 
 /* one frame of the atlas: tiles for the lamps whose sphere reaches the air (camera distance - radius < farD), drawn
