@@ -3,7 +3,7 @@
 /* lane FO76WEATHER1: rain wetness on every material, Fallout 76's law as its deferred PBR shaders apply it.
  * Porosity comes from the smoothness (or the material's custom porosity); metals never wet. A wet pixel darkens and
  * gains smoothness; its normal and F0 stay. res/shaders/rain_wet.glsl is the same law on the GPU.
- * The clock is Fallout 4's (src/landlodspec.h wetStep), run toward the rain's share of the weather (a change blends). */
+ * The clock is Fallout 4's (src/features/far-ground/landlodspec.h wetStep), run toward the rain's share of the weather (a change blends). */
 
 #include <algorithm>
 #include <cmath>

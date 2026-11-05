@@ -1,7 +1,7 @@
 #ifndef LANDLODSPEC_H
 #define LANDLODSPEC_H
 
-/* lane LANDSPEC1: the game's LOD land specular and its land-LOD blend (no Qt; tests/landspec). The far ground takes
+/* lane LANDSPEC1: the game's LOD land specular and its land-LOD blend (no Qt; tests/features/far-ground/landspec). The far ground takes
  * fLODLandSpecPower / fLODLandSpecScale as its gloss / spec mask; the near ground lerps its own toward them by the
  * blend factor of the distance (xy) to the centre of the camera's cell. fo4_default.frag (landLod) runs the same law. */
 

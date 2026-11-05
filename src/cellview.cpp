@@ -16,7 +16,7 @@ BSD License - see nifskope.h
 #include "cellclick.h"		// lane CELLVIEW2
 #include "cellground.h"		// lane CELLVIEW2
 #include "cellsplat.h"		// lane CELLVIEW4
-#include "landlodspec.h"	// lane LANDSPEC6: fixedWorld
+#include "features/far-ground/landlodspec.h"	// lane LANDSPEC6: fixedWorld
 #include "cellmodsource.h"	// lane LANDSPEC8: uGridsToLoad
 #include "cellidentity.h"	// lane CELLVIEW2
 #include "cellactor.h"		// lane PLACED1
@@ -2976,7 +2976,7 @@ static bool cellBuild( NifModel * nif, const CellSceneSpec & specAsked, CellChun
 		}
 	}
 	/* lane LANDSPEC7: the game loads a fixed world's cell only within uGridsToLoad / 2 of WCTR, so the open's block is
-	 * fitted inside WCTR +- 2 (src/landlodspec.h fixedBlock) before the camera, the far rings, the land-LOD block and
+	 * fitted inside WCTR +- 2 (src/features/far-ground/landlodspec.h fixedBlock) before the camera, the far rings, the land-LOD block and
 	 * the streamer read it. Red WW_LANDSPEC_RED=fixedopen: the asked block. LANDSPEC8: +- uGridsToLoad / 2 of the inis */
 	QString fixedOpenNote;
 	if ( !chunk && !spec.interior && LandLodSpec::fixedWorld( world.worldFlags() ) ) {

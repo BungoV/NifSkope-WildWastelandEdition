@@ -4,8 +4,8 @@ BSD License - see nifskope.h
 
 ***** END LICENCE BLOCK *****/
 
-#include "gl/cellfarground.h"
-#include "gl/cellfgsched.h"
+#include "features/far-ground/cellfarground.h"
+#include "features/far-ground/cellfgsched.h"
 #include "features/shared/cellpasstime.h"
 #include "gl/cellunits.h"
 #include "gl/celluniform.h"	// lane CELLUNI3: the units bound without a unit ask

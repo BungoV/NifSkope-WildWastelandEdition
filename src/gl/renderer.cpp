@@ -75,9 +75,9 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include "gl/cellfogbloom.h"
 #include "gl/cellunits.h"	// lane PERF1: the first dedicated unit
 #include "features/air/cellvolair.h"	// lane VOLPART1: volumetric lit effect cards
-#include "gl/cellfarground.h"	// lane FARDRAW1: the far ring 0's live ground
+#include "features/far-ground/cellfarground.h"	// lane FARDRAW1: the far ring 0's live ground
 #include "features/far-lod/cellfarinst.h"	// lane SKYSHARDS3: the far ring keeps its own program
-#include "landlodspec.h"	// lane LANDSPEC1
+#include "features/far-ground/landlodspec.h"	// lane LANDSPEC1
 #include "libfo76utils/src/ddstxt16.hpp"
 #include "glview.h"
 
@@ -402,7 +402,7 @@ static bool wwFxEnvNormalAlpha()
 	return v != 0;
 }
 
-/* lane LANDSPEC1: the game's LOD land spec on the ground (src/landlodspec.h): far LOD terrain whole, the cells' LAND by
+/* lane LANDSPEC1: the game's LOD land spec on the ground (src/features/far-ground/landlodspec.h): far LOD terrain whole, the cells' LAND by
  * the land-LOD blend round the camera's cell. (LANDSPEC8 retired its red off, confirmed live by SHOTPASS1.) */
 static int wwLandLodMode( Scene * scene, const Shape * mesh )
 {
@@ -430,7 +430,7 @@ static const QByteArray & wwLandSpecRed()
 	return v;
 }
 
-/* lane LANDSPEC2: the blend centre's glide (src/landlodspec.h). Harness pins: WW_LANDSPEC_GLIDEFROM=dx,dy (cells) starts
+/* lane LANDSPEC2: the blend centre's glide (src/features/far-ground/landlodspec.h). Harness pins: WW_LANDSPEC_GLIDEFROM=dx,dy (cells) starts
  * the first frame's glide that far from the camera's cell, WW_LANDSPEC_GLIDETIME=t freezes its elapsed seconds. */
 static LandLodSpec::Glide & wwLandGlide()
 {

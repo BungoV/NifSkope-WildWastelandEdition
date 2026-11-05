@@ -2,7 +2,7 @@
 #define WW_CELLFGSCHED_H
 
 /* lane FARPAGES1: the far ground pages' sizes, bytes and repaint scheduler, free of Qt and GL so that
- * tests/fgpages can run them offline (src/gl/cellfarground.cpp does the GL half). One page a ring-0 cell, in one of
+ * tests/features/far-ground/fgpages can run them offline (src/features/far-ground/cellfarground.cpp does the GL half). One page a ring-0 cell, in one of
  * two pools: near (the finer side) or far. A cell with no page draws the baked sheet and fades to its page. */
 
 #include <algorithm>

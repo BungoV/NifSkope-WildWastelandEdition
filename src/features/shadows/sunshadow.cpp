@@ -30,7 +30,7 @@ BSD License - see nifskope.h
 #include "gl/renderer.h"
 #include "features/shadows/shadowset.h"	// lane TERRSHADOW1: the unified set (presets, terrain, contact, composition)
 #include "gl/cloudshadow.h"	// lane CLOUD3
-#include "gl/cellfarground.h"	// lane FARDRAW1
+#include "features/far-ground/cellfarground.h"	// lane FARDRAW1
 #include "features/shadows/sunshadowfit.h"	// lane SHADOWSHIMMER1: the fit and the kernel's rotation (tests/shadowshimmer1 runs them)
 #include "features/shadows/sunshadowdyn.h"	// lane PERFFIX2 b: a Hit copies back only the dynamic casters' footprint
 

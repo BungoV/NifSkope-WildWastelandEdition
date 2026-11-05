@@ -3,7 +3,7 @@
 
 #include "gl/celllights.h"
 #include "features/near/cellbindless.h"	// lane BINDLESS2
-#include "gl/cellfarground.h"
+#include "features/far-ground/cellfarground.h"
 #include "features/lights/cellfxlit.h"
 #include "features/water/cellwater.h"	// lane WATER1
 #include "features/near/cellcull.h"	// lane SUNCELL1

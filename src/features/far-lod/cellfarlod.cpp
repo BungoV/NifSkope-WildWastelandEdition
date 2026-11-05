@@ -7,7 +7,7 @@ BSD License - see nifskope.h
 #include "cellfarlod.h"
 #include "wwswitch.h"	// lane TESTDRIVER1: the WW_* switch store
 
-#include "btdterrain.h"
+#include "features/far-ground/btdterrain.h"
 #include "cellfarstackrule.h"	// lane CELLUNI5: the bake stack's refusals
 #include "cellfarvanilla.h"
 #include "largeref.h"	// lane LARGEREF3: the far objects' kind for the large refs
@@ -29,7 +29,7 @@ BSD License - see nifskope.h
 #include "features/water/cellwater.h"
 #include "features/near/cellbindless.h"	// lane BINDLESS2FIX: the sway reaches the bindless twins
 #include "features/far-lod/cellfarinst.h"	// lane FARLOOK1101: and the far splat twins
-#include "gl/cellfarground.h"	// lane FARDRAW1: the far ring 0's live ground
+#include "features/far-ground/cellfarground.h"	// lane FARDRAW1: the far ring 0's live ground
 #include "gl/glscene.h"
 #include "gl/renderer.h"
 #include "model/nifmodel.h"

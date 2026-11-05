@@ -28,7 +28,7 @@ BSD License - see nifskope.h
 #include "features/reflections/cellssr.h"	// lane CELLALL1: the SSR rows
 #include "features/reflections/cellreflprobe.h"	// lane REFLPROBE1: the Reflection probes row
 #include "features/gi/cellssgi.h"
-#include "gl/cellfarground.h"	// the Far ground rows
+#include "features/far-ground/cellfarground.h"	// the Far ground rows
 #include "features/lights/celllampshadow.h"
 #include "gl/celllooks.h"
 #include "features/water/cellwater.h"	// the Water row

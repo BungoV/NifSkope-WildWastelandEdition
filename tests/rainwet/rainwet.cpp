@@ -2,7 +2,7 @@
  * Build: g++ -std=c++17 -I<tree>/src tests/rainwet/rainwet.cpp. Red: -DRAINWET_RED = the base (shore wetness only:
  * the rain wets nothing), which must fail. Hand values from the law in the header's comment, worked by hand. */
 #include "gl/rainwetlaw.h"
-#include "landlodspec.h"
+#include "features/far-ground/landlodspec.h"
 
 #include <cmath>
 #include <cstdio>

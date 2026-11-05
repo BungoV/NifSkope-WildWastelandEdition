@@ -1,8 +1,8 @@
-// lanes LANDSPEC1/2: src/landlodspec.h against hand-computed values, and the shaders' literals against the header.
-// g++ -std=c++17 -I<tree>/src tests/landspec/landspec.cpp; run with <tree> as argv[1]. Reds, one per goal:
+// lanes LANDSPEC1/2: src/features/far-ground/landlodspec.h against hand-computed values, and the shaders' literals against the header.
+// g++ -std=c++17 -I<tree>/src tests/features/far-ground/landspec/landspec.cpp; run with <tree> as argv[1]. Reds, one per goal:
 // -DLANDSPEC_RED (the law), -DLANDSPEC_RED_GLIDE (snap), -DLANDSPEC_RED_BAND (no band textures),
 // -DLANDSPEC_RED_SSR (dry land flagged); the shader reds run a green build against the base's shaders.
-#include "landlodspec.h"
+#include "features/far-ground/landlodspec.h"
 
 #include <cstdio>
 #include <fstream>

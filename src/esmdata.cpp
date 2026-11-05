@@ -7,7 +7,7 @@ BSD License - see nifskope.h
 #include "esmdata.h"
 #include "wwswitch.h"	// the WW_* switch store
 #include "features/water/esmwater.h"
-#include "landlodspec.h"	// usesParentLod
+#include "features/far-ground/landlodspec.h"	// usesParentLod
 #include <QFileInfo>	// lodWorldOf's cache key
 #include <QHash>
 #include <QMutex>

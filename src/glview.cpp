@@ -61,7 +61,7 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include "features/far-lod/impostorchunk.h"
 #include "features/far-lod/cellfarlod.h"		// the far field's planes, sway and cards
 #include "features/water/cellwater.h"	// far water held until its dry mask's lookup lands
-#include "landlodspec.h"		// the land-LOD blend centre's glide
+#include "features/far-ground/landlodspec.h"		// the land-LOD blend centre's glide
 #include "cellmodpick.h"	// "Mods differ from the far LOD bake" over the view
 #include "features/far-lod/impostorpreviewtest.h"
 #include "gl/glshape.h"
@@ -166,7 +166,7 @@ private:
 #include "features/reflections/cellreflprobe.h"
 #include "features/shared/cellpasstime.h"
 #include "gl/geokeepclock.h"
-#include "gl/cellfarground.h"
+#include "features/far-ground/cellfarground.h"
 #include "features/water/cellocean.h"
 #include "features/water/cellunderwater.h"
 #include "gl/cloudvol.h"	// the volume clouds' depth test

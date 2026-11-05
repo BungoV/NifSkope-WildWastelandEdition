@@ -1,10 +1,10 @@
-// lane FARPAGES1: offline gates of the far ground pages (src/gl/cellfgsched.h) -- VRAM from the code's own sizes
+// lane FARPAGES1: offline gates of the far ground pages (src/features/far-ground/cellfgsched.h) -- VRAM from the code's own sizes
 // against the target, and the repaint scheduler's budget, reach and layer bookkeeping.
-// Build: g++ -std=c++17 -I<tree>/src tests/fgpages/fgpages.cpp -o fgpages.exe
+// Build: g++ -std=c++17 -I<tree>/src tests/features/far-ground/fgpages/fgpages.cpp -o fgpages.exe
 // Reds: -DFG_RED_NOCOMPRESS (RGBA8 pools: the VRAM gate fails), -DFG_SCHED_RED_NOBUDGET, -DFG_SCHED_RED_NOFREE,
 // -DFG_SCHED_RED_VISONLY (the scheduler gates fail).
 
-#include "gl/cellfgsched.h"
+#include "features/far-ground/cellfgsched.h"
 
 #include <cmath>
 #include <cstdio>

@@ -160,7 +160,7 @@ bool lodiSpecFromEnv( LodiSceneSpec & spec );
  *
  * Objects (src/features/far-lod/lodinative.cpp) carry `identity`..`ao` as vertex colour;
  * `mask-*`, `emissive` and `normal` are the terrain's sheets
- * (src/btdterrain.cpp, through the LodtSheets sampler and no second decoder);
+ * (src/features/far-ground/btdterrain.cpp, through the LodtSheets sampler and no second decoder);
  * `ground` colours both, so the placements' blend can be read against the
  * surface they blend into.
  * ------------------------------------------------------------------------- */

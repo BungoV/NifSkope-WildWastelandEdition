@@ -46,7 +46,7 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include <QVector>
 
 #include <data/nifvalue.h>
-#include "btdterrain.h"
+#include "features/far-ground/btdterrain.h"
 #include "wwfullscreen.h"	// lane VIEWFULL1
 
 /* lane FILESTAB (2026-09-10): the Files tab. Defined by the hook-up so that

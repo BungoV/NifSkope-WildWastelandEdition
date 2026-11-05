@@ -317,8 +317,8 @@ HEADERS += \
 	src/features/near/cellbindlessreopen.h \
 	src/features/near/cellgpucull.h \
 	src/features/far-lod/cellfarinst.h \
-	src/gl/cellfarground.h \
-	src/gl/cellfgsched.h \
+	src/features/far-ground/cellfarground.h \
+	src/features/far-ground/cellfgsched.h \
 	src/gl/cellunits.h \
 	src/ui/scenewindow.h \
 	src/features/far-lod/impostordraw.h \
@@ -334,7 +334,7 @@ HEADERS += \
 	src/features/far-lod/lodmfile.h \
 	src/features/far-lod/lodvfile.h \
 	src/features/far-lod/loddecal.h \
-	src/terrainpreview.h \
+	src/features/far-ground/terrainpreview.h \
 	src/io/MeshFile.h \
 	src/io/nifstream.h \
 	src/lib/importex/3ds.h \
@@ -406,7 +406,7 @@ HEADERS += \
 	src/shortcutregistry.h \
 	src/skeletontools.h \
 	src/starterscene.h \
-	src/btdterrain.h \
+	src/features/far-ground/btdterrain.h \
 	src/esmdata.h \
 	src/features/water/esmwater.h \
 	src/esmweather.h \
@@ -613,7 +613,7 @@ SOURCES += \
 	src/gl/cellprecip.cpp \
 	src/features/near/cellcull.cpp \
 	src/features/far-lod/cellfarinst.cpp \
-	src/gl/cellfarground.cpp \
+	src/features/far-ground/cellfarground.cpp \
 	src/features/near/cellumbra.cpp \
 	src/features/near/cellumbradepth.cpp \
 	src/features/water/cellwater.cpp \
@@ -666,7 +666,7 @@ SOURCES += \
 	src/features/far-lod/lodmfile.cpp \
 	src/features/far-lod/lodvfile.cpp \
 	src/features/far-lod/loddecal.cpp \
-	src/terrainpreview.cpp \
+	src/features/far-ground/terrainpreview.cpp \
 	src/io/MeshFile.cpp \
 	src/io/nifstream.cpp \
 	src/lib/importex/3ds.cpp \
@@ -773,7 +773,7 @@ SOURCES += \
 	src/skeletontools.cpp \
 	src/unfucktools.cpp \
 	src/starterscene.cpp \
-	src/btdterrain.cpp \
+	src/features/far-ground/btdterrain.cpp \
 	src/esmdata.cpp \
 	src/esmweather.cpp \
 	src/recx.cpp \

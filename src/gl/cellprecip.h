@@ -37,7 +37,7 @@ QString wwCellPrecipEcho();
 /* lane FO76WEATHER1: rain wetness on every material (gl/rainwetlaw.h, res/shaders/rain_wet.glsl), Fallout 76's law.
  * The amount runs on Fallout 4's clock (+0.03 a second while it rains, -0.02 while dry) toward the rain's share of the
  * weather (a change blends both weathers); it starts settled when a document opens or the row turns on. Interiors 0.
- * Wet ground also takes the game's wet reflection (SSR) flag (renderer.cpp, src/landlodspec.h landSsr), and a
+ * Wet ground also takes the game's wet reflection (SSR) flag (renderer.cpp, src/features/far-ground/landlodspec.h landSsr), and a
  * material with its wetness SSR switch takes the flag while wet.
  * Row: Show > Improved Sky > Rain wetness (WW/CellRainWet), ships OFF; pin WW_CELL_RAINWET=0|1 (live).
  * Harness pin WW_CELL_RAINWET_AMOUNT=<0..1> (a fixed amount, outdoors). Red WW_CELL_RAINWET_RED=shore: the old path

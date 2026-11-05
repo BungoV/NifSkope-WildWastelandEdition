@@ -25,7 +25,7 @@
 #include "rain_wet.glsl"
 #define WW_CELL_FOGGED cellOn	// a cell-lit draw is fogged before its imagespace
 uniform sampler2D CellSpecMap;	// a legacy material's specular map (R scale, G smoothness), for the cube term
-uniform vec4 landLod;	// lane LANDSPEC2: as fo4_default.frag (src/landlodspec.h), for ground with a .pbrm
+uniform vec4 landLod;	// lane LANDSPEC2: as fo4_default.frag (src/features/far-ground/landlodspec.h), for ground with a .pbrm
 uniform vec4 landLodK;
 #else
 #define WW_CELL_FOGGED false

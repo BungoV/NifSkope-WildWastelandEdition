@@ -1,4 +1,4 @@
-/* lane FARDRAW1 (bungo 10-26): the far ring 0's ground drawn live per pixel (src/gl/cellfarground.cpp) -- the
+/* lane FARDRAW1 (bungo 10-26): the far ring 0's ground drawn live per pixel (src/features/far-ground/cellfarground.cpp) -- the
  * .lodl splat (the terrain preview's splatGrid: four bilinear samples, the top-4 LTEX layers, x the vertex colour)
  * with the .lodg/.lodd decals over it, in place of the baked sheet's colour. Two decal options:
  *   WW_FARGROUND 1  each pixel walks its 512-unit bin's record list (the preview's unproject, in record order)

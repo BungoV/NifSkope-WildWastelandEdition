@@ -37,7 +37,7 @@ int cmdEspWrite( const QStringList & args );	// lane ESPWRITE2: src/io/espwritec
 #include "model/nifmodel.h"
 #include "skeletontools.h"
 #include "starterscene.h"
-#include "btdterrain.h"
+#include "features/far-ground/btdterrain.h"
 #include "esmdata.h"
 #include "esmweather.h"
 #include "features/far-lod/lodgen.h"
@@ -57,7 +57,7 @@ int cmdEspWrite( const QStringList & args );	// lane ESPWRITE2: src/io/espwritec
 #include "features/far-lod/lodbfile.h"
 #include "features/far-lod/loddecal.h"
 #include "features/water/cellwaterinfo.h"	// lane WATERDATA1: lodl --water-info
-#include "terrainpreview.h"
+#include "features/far-ground/terrainpreview.h"
 #include <QDateTime>
 #include <QDirIterator>
 #include "features/far-lod/lodtfile.h"
@@ -2857,7 +2857,7 @@ static bool gLgOneRoot = false;
  *  `--terrain-option hybrid|dynamic`, hybrid the default. A global for
  *  the reason the others here are. */
 static LodgenTerrainOption gLgTerrainOption = LodgenTerrainOption::Hybrid;
-//! lane TERRLIVE1: `--terrain-preview <spec.json>` (src/terrainpreview.h)
+//! lane TERRLIVE1: `--terrain-preview <spec.json>` (src/features/far-ground/terrainpreview.h)
 static QString gLgTerrainPreview;
 
 /*! The argument vector verbatim and the resource stack as the run was given

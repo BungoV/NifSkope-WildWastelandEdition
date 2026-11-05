@@ -1,6 +1,6 @@
 #version 410 core
 
-/* lane FARPAGES1: one far ground page (src/gl/cellfarground.cpp) -- the cell's live layer blend (fgSplat, filtered at
+/* lane FARPAGES1: one far ground page (src/features/far-ground/cellfarground.cpp) -- the cell's live layer blend (fgSplat, filtered at
  * the page's own texel) with the ring's decals composited over it, opaque. The draw then samples only the page. */
 
 #define WW_FG_STAMP 1

@@ -9,7 +9,7 @@ BSD License - see nifskope.h
 
 #include "gamemanager.h"
 #include "features/far-lod/lodgenloadorder.h"
-#include "landlodspec.h"	// lane LANDSPEC8: gridsLine
+#include "features/far-ground/landlodspec.h"	// lane LANDSPEC8: gridsLine
 #include "gameinikey.h"	// lane PERFFIX4: one float key of the game's inis
 
 #include <QDir>

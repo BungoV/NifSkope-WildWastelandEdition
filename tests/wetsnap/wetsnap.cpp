@@ -1,10 +1,10 @@
-/* lane WETSNAP1: unit test of the wetness snap (src/gl/rainwetlaw.h update, src/landlodspec.h wetUpdate): Fallout 4's
+/* lane WETSNAP1: unit test of the wetness snap (src/gl/rainwetlaw.h update, src/features/far-ground/landlodspec.h wetUpdate): Fallout 4's
  * wetness update dries at fDrySpeed only while a rain weather is one of the change's two weathers, and puts the
  * wetness to 0 at once indoors or when neither weather rains.
  * Build: g++ -std=c++17 -I<tree>/src tests/wetsnap/wetsnap.cpp. Red: -DWETSNAP_RED = the viewer's switch off
  * (WW_CELL_RAINWET_RED=nosnap, the FO76WEATHER2 slow dry), which must fail. Hand values worked by hand. */
 #include "gl/rainwetlaw.h"
-#include "landlodspec.h"
+#include "features/far-ground/landlodspec.h"
 
 #include <cmath>
 #include <cstdio>

@@ -1,9 +1,9 @@
 """Offline gate of the far ground pages (lane FARPAGES1) through the real GL driver, no NifSkope.
 
-    python -I tests/spells/fgpages_gpu.py <tree> [--red bc1|decalonly|nodecals]
+    python -I tests/features/far-ground/fgpages_gpu.py <tree> [--red bc1|decalonly|nodecals]
 
 A synthetic 3 x 3 cell ring (3 LTEX layers, weights and vertex colour varying over the grid, 3 decals, one over a
-cell border) runs the tree's own shaders the way src/gl/cellfarground.cpp does: cell_fgpage paints the centre cell's
+cell border) runs the tree's own shaders the way src/features/far-ground/cellfarground.cpp does: cell_fgpage paints the centre cell's
 page, mips, cell_fgbc1 encodes each level into RG32UI, glReadPixels into a pixel buffer, glCompressedTexSubImage3D
 into a BC1 array layer. Then, at the same texels:
   A  the live blend + decals (cell_farground.glsl, WW_FARGROUND 1, the lookup twin's fgGround)
@@ -122,7 +122,7 @@ link = f('glLinkProgram', None, GLuint)
 getProgramiv = f('glGetProgramiv', None, GLuint, GLenum, ctypes.POINTER(GLint))
 
 def program(prog):
-    files = [l.split()[1:] for l in open(os.path.join(SD, prog)) if l.startswith('shaders')][0]
+    files = [l.split()[1:] for l in open(S.shader_path(os.path.join(SD, prog))) if l.startswith('shaders')][0]
     p = createProgram()
     for fn_ in files:
         src = S.expand(os.path.join(SD, fn_))

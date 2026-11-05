@@ -8,7 +8,7 @@
 #include "cellmesh.h"
 #include "cellsplat.h"
 #include "esmdata.h"		// lane WEATHERBLEND6: the camera cell's regions
-#include "landlodspec.h"	// lane LANDSPEC6: streamCentre
+#include "features/far-ground/landlodspec.h"	// lane LANDSPEC6: streamCentre
 #include "features/far-lod/largeref.h"		// lane LARGEREF2: who draws each large ref
 #include "cellmodsource.h"	// lane LANDSPEC8: uGridsToLoad
 #include "features/far-lod/impostorchunk.h"

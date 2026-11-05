@@ -38,10 +38,10 @@
 # NOTE ON PORTS: not needed, this is headless - the CLI takes no port.
 #
 # USAGE
-#   bash tests/spells/btd_terrain.sh
+#   bash tests/features/far-ground/btd_terrain.sh
 
 set -u
-ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
+ROOT="$(cd "$(dirname "$0")/../../.." && pwd)"
 NS="${EXE:-$ROOT/release/NifSkope.exe}"
 SRC="${SRC:-X:/Programs/Steam/steamapps/common/Fallout76/Data/Terrain/Appalachia.btd}"
 W="$(mktemp -d)"

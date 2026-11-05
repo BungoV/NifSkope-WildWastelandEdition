@@ -13,7 +13,7 @@
 # The cause: a terrain sheet is an `_msn`, a MODEL-space normal map, and the
 # shape says so (Shader Flags 1 bit 12).  fo4_default.frag had no model-space
 # branch, so it read the sheet as a TANGENT-space map and sent its "up" along
-# whatever bitangent src/btdterrain.cpp happened to build (T = n x worldUp,
+# whatever bitangent src/features/far-ground/btdterrain.cpp happened to build (T = n x worldUp,
 # B = n x T -- an arbitrary frame).  The fix is one branch: when bit 12 is set,
 # transform the texel by the model matrix alone.
 #

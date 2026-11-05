@@ -460,7 +460,7 @@ void main()
 	baseMap.rgb = fgGround( cellWorldPos( -ViewDir ), baseMap.rgb );
 #endif
 #if defined( WW_CELLLIGHTS ) && !defined( WW_LANDSPEC_NONE )
-	/* lane LANDSPEC2 (src/landlodspec.h): the near ground's land-LOD band, as the game's near land PS: v from the
+	/* lane LANDSPEC2 (src/features/far-ground/landlodspec.h): the near ground's land-LOD band, as the game's near land PS: v from the
 	 * (gliding) blend centre; the albedo toward the level-4 LOD diffuse x the noise, the normal (below) toward the
 	 * detail normals. Gradients first: the samples sit in a branch. */
 	vec2 landBandW = cellWorldPos( -ViewDir ).xy;
@@ -739,7 +739,7 @@ void main()
 	// matte, which is not what the game does with it.
 	float specMask = s * specStrength;
 #if defined( WW_CELLLIGHTS ) && !defined( WW_LANDSPEC_NONE )
-	/* lane LANDSPEC1 (src/landlodspec.h): the game's LOD land gloss/spec on the far ground, and on the near ground
+	/* lane LANDSPEC1 (src/features/far-ground/landlodspec.h): the game's LOD land gloss/spec on the far ground, and on the near ground
 	 * lerped in from 1.7 to 2.35 cells off the camera cell's centre (its land-LOD blend) */
 	float landLodV = landLod.x > 1.5 ? 1.0 : landBandV;	// lane LANDSPEC2: the band's v, worked out with the albedo
 	smoothness = mix( smoothness, landLodK.x, landLodV );

@@ -1,6 +1,6 @@
 #version 410 core
 
-/* lane FARDRAW1: the cached far-ground option's stamp (src/gl/cellfarground.cpp). One page a cell: every decal of
+/* lane FARDRAW1: the cached far-ground option's stamp (src/features/far-ground/cellfarground.cpp). One page a cell: every decal of
  * the ring over the cell's ground, premultiplied, at fgStampSide texels a cell (the "Far ground pages" preset). */
 
 #define WW_FG_STAMP 1
