@@ -1,6 +1,6 @@
 #!/bin/bash
 #
-# VOLUMETRIC PARTICLES IN THE CELL VIEW (lane VOLPART1, 2026-10-14; src/features/air/cellvolair.h, res/shaders/particles.frag).
+# VOLUMETRIC PARTICLES IN THE CELL VIEW (lane VOLPART1, 2026-10-14; src/features/air/cellvolair.h, res/shaders/features/particles/particles.frag).
 #
 # Not judged by eye. Goodneighbor's street steam (the PCloud systems), his profile stack (WW_ALL_ON=1, the neon veil
 # GI bake, the air on, DOF / motion blur / far LOD / glare off), 1920 x 1040, a still 19-frame path, frame 17 kept.

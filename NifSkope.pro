@@ -190,13 +190,13 @@ HEADERS += \
 	src/gl/BSMesh.h \
 	src/gl/bsshape.h \
 	src/gl/controllers.h \
-	src/gl/psyslive.h \
+	src/features/particles/psyslive.h \
 	src/gl/glcontext.hpp \
 	src/gl/glcontroller.h \
 	src/gl/glmarker.h \
 	src/gl/glmesh.h \
 	src/gl/glnode.h \
-	src/gl/glparticles.h \
+	src/features/particles/glparticles.h \
 	src/gl/glproperty.h \
 	src/gl/glscene.h \
 	src/gl/glshape.h \
@@ -243,8 +243,8 @@ HEADERS += \
 	src/features/weather/preciproof.h \
 	src/features/weather/rainwetlaw.h \
 	src/features/sky/skydisc.h \
-	src/gl/fxparity.h \
-	src/gl/fxparityrules.h \
+	src/features/particles/fxparity.h \
+	src/features/particles/fxparityrules.h \
 	src/gl/gametaa.h \
 	src/gl/taainputs.h \
 	src/gl/campath.h \
@@ -274,7 +274,7 @@ HEADERS += \
 	src/features/exposure/cellhdr.h \
 	src/features/exposure/exposure.h \
 	src/features/near/cellvrs.h \
-	src/gl/cellfxres.h \
+	src/features/particles/cellfxres.h \
 	src/gl/cellbloom.h \
 	src/gl/cellfogbloom.h \
 	src/features/sky/atmosphere.h \
@@ -542,7 +542,7 @@ SOURCES += \
 	src/gl/glmarker.cpp \
 	src/gl/glmesh.cpp \
 	src/gl/glnode.cpp \
-	src/gl/glparticles.cpp \
+	src/features/particles/glparticles.cpp \
 	src/gl/glproperty.cpp \
 	src/gl/glscene.cpp \
 	src/gl/glshape.cpp \
@@ -600,7 +600,7 @@ SOURCES += \
 	src/gl/lookdevstage.cpp \
 	src/features/shadows/sunshadow.cpp \
 	src/features/shadows/shadowset.cpp \
-	src/gl/fxparity.cpp \
+	src/features/particles/fxparity.cpp \
 	src/gl/gametaa.cpp \
 	src/gl/taainputs.cpp \
 	src/gl/campath.cpp \
@@ -626,7 +626,8 @@ SOURCES += \
 	src/features/exposure/cellhdr.cpp \
 	src/features/exposure/exposure.cpp \
 	src/features/near/cellvrs.cpp \
-	src/gl/cellfxres.cpp \
+	src/features/particles/cellfxres.cpp \
+	src/features/particles/particlepreroll.cpp \
 	src/gl/cellbloom.cpp \
 	src/gl/cellfogbloom.cpp \
 	src/features/sky/atmosphere.cpp \

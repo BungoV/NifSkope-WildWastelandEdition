@@ -21,7 +21,7 @@ BSD License - see nifskope.h
 #include "features/gi/cellssgi.h"	// lane SSGI1
 #include "gl/celllights.h"	// lane GAPTOOL1: the SSAO row
 #include "gl/cellbloom.h"	// lane GAPTOOL1: the Bloom row
-#include "gl/fxparity.h"	// lane FXPARITY1
+#include "features/particles/fxparity.h"	// lane FXPARITY1
 #include "ui/cellshowpanel.h"	// lane OPENCELLFIX2: the Display tab's fog and shadow rows share these settings
 #include "features/weather/esmweather.h"
 #include "harnesswindow.h"

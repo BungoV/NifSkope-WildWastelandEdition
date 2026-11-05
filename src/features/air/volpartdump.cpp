@@ -1,7 +1,7 @@
 /* Volumetric Air module: the volumetric-particle probe dump (lane VOLPART1, gates only; was in
- * src/gl/glparticles.cpp until MODULES1). The particle draw calls wwVolPartDumpSystem after a volumetric system. */
+ * src/features/particles/glparticles.cpp until MODULES1). The particle draw calls wwVolPartDumpSystem after a volumetric system. */
 #include "features/air/volpartdump.h"
-#include "gl/glparticles.h"
+#include "features/particles/glparticles.h"
 #include "wwswitch.h"	// lane TESTDRIVER1: the WW_* switch store
 #include <cmath>
 #include <QRegularExpression>
@@ -13,7 +13,7 @@
 #include "gl/celllights.h"	// lane SUNCELL1: the cell effect law
 #include "features/lights/cellfxlit.h"	// lane SUNCELL1: a lit particle's placed lights
 #include "features/air/cellvolair.h"	// lane VOLPART1: volumetric particles
-#include "gl/fxparity.h"	// lane FXPARITY1: Particle Game Rules
+#include "features/particles/fxparity.h"	// lane FXPARITY1: Particle Game Rules
 #include "gl/controllers.h"
 #include "gl/lookdevstage.h"	// lane SUNCELL1: the weather fog
 #include "gl/glproperty.h"

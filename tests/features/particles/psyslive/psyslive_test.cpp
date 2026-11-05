@@ -2,7 +2,7 @@
  *
  * GLAREBLOW2's fix reads the gravity / drag / bomb objects' frames each step and its red (`setup`: the frames update()
  * read before the cell copy is placed) each step too. But the PARTICLES its steps moved stay: a repeat row shot after
- * live red rows (glareblow2 run2 c3_t2z_fix2b) drew the red's two strands again. The fix (src/gl/psyslive.h, called at
+ * live red rows (glareblow2 run2 c3_t2z_fix2b) drew the red's two strands again. The fix (src/features/particles/psyslive.h, called at
  * the top of PSysSimController::updateTime): the first step after the red was set or unset empties the system and takes
  * the step a freshly built controller takes first (lastTime as constructed).
  *
@@ -14,7 +14,7 @@
  * Prints "PSYSLIVE PASS" (exit 0) or "PSYSLIVE FAIL" (exit 1). */
 
 #include "wwswitch.h"
-#include "gl/psyslive.h"
+#include "features/particles/psyslive.h"
 
 #include <algorithm>
 #include <cmath>

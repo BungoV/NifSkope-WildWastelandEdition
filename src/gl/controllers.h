@@ -35,7 +35,7 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 #include "gl/glcontroller.h" // Inherited
 #include "data/niftypes.h"
-#include "gl/fxparityrules.h"	// lane FXPARITY1
+#include "features/particles/fxparityrules.h"	// lane FXPARITY1
 
 #include <QPointer>
 

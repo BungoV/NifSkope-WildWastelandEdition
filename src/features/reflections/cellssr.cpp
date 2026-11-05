@@ -19,9 +19,9 @@ BSD License - see nifskope.h
 #include "features/water/cellwater.h"
 #include "gl/celllooks.h"	// lane WATERREFL1: the Water reflections row picks the water march's twin
 #include "gl/glnode.h"
-#include "gl/glparticles.h"	// lane PERFFIX1: the water ray walk skips particles after the masks shut
+#include "features/particles/glparticles.h"	// lane PERFFIX1: the water ray walk skips particles after the masks shut
 #include "gl/glscene.h"
-#include "gl/cellfxres.h"	// lane PERFFIX1: the soft-effect layer keeps the sorted list in the water rays
+#include "features/particles/cellfxres.h"	// lane PERFFIX1: the soft-effect layer keeps the sorted list in the water rays
 #include "gl/glshape.h"
 #include "gl/renderer.h"
 

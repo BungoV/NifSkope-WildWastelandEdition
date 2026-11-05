@@ -30,7 +30,7 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 ***** END LICENCE BLOCK *****/
 
-#include "glparticles.h"
+#include "features/particles/glparticles.h"
 #include "wwswitch.h"	// lane TESTDRIVER1: the WW_* switch store
 
 #include <cmath>
@@ -47,7 +47,7 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include "features/lights/cellfxlit.h"	// lane SUNCELL1: a lit particle's placed lights
 #include "features/air/cellvolair.h"	// lane VOLPART1: volumetric particles
 #include "features/air/volpartdump.h"	// lane VOLPART1: the volumetric particle probe dump
-#include "gl/fxparity.h"	// lane FXPARITY1: Particle Game Rules
+#include "features/particles/fxparity.h"	// lane FXPARITY1: Particle Game Rules
 #include "gl/controllers.h"
 #include "gl/lookdevstage.h"	// lane SUNCELL1: the weather fog
 #include "gl/glproperty.h"

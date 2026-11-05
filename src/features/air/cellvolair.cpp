@@ -2932,7 +2932,7 @@ void wwVolAirSkyDraw( Scene * scene, bool probes )
 		: QStringLiteral( "through the air (linear frame, composited by 1 - T over the backdrop)" ) );
 }
 
-/* ---- lane VOLPART1: volumetric particles (cellvolair.h, res/shaders/particles.frag) ---- */
+/* ---- lane VOLPART1: volumetric particles (cellvolair.h, res/shaders/features/particles/particles.frag) ---- */
 namespace
 {
 struct VpState

@@ -5,7 +5,7 @@
 #include "gl/cellunits.h"	// lane WATERFIX7: the passes' named units
 #include "gl/alphabgsm.h"	// lane ALPHABGSM1: the side passes' alpha-test census
 #include "gl/gametaa.h"
-#include "gl/glparticles.h"
+#include "features/particles/glparticles.h"
 #include "gl/glproperty.h"
 #include "gl/glscene.h"
 #include "gl/glshape.h"

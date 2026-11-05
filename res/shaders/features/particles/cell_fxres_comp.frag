@@ -1,6 +1,6 @@
 #version 410 core
 
-/* lane FXRES1 (src/gl/cellfxres.h): the soft-effect layer over the full-resolution frame. The layer holds the sorted
+/* lane FXRES1 (src/features/particles/cellfxres.h): the soft-effect layer over the full-resolution frame. The layer holds the sorted
  * soft draws' sum as an offset C and a transmittance T (every draw is dst = src x A + dst x B, B a function of the
  * draw's alpha only), so the frame takes frame x T + C, exactly what the draws in place would have made at the
  * layer's resolution. Upsampled depth-aware (Jansen + Bavoil 2011, Cantlay 2007): where the four layer texels around

@@ -1,7 +1,7 @@
-/* lane FXPARITY1: unit gate for src/gl/fxparityrules.h (the game's particle modifier rules).
- * Build: g++ -std=c++17 -I<tree>/src tests/fxparity/fxparity_rules_test.cpp -o fxp.exe  (exit 0 = PASS)
+/* lane FXPARITY1: unit gate for src/features/particles/fxparityrules.h (the game's particle modifier rules).
+ * Build: g++ -std=c++17 -I<tree>/src tests/features/particles/fxparity/fxparity_rules_test.cpp -o fxp.exe  (exit 0 = PASS)
  * Red:   add -DFXP_RED: the rules under test become the viewer's old ones, and the gate must FAIL. */
-#include "gl/fxparityrules.h"
+#include "features/particles/fxparityrules.h"
 
 #include <cmath>
 #include <cstdio>

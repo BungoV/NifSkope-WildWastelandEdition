@@ -132,7 +132,7 @@ QString wwVolAirSummary();
 bool wwVolAirMediumNow( float med[4], float layer[4], float ground[2] );
 
 /*! VOLUMETRIC PARTICLES (lane VOLPART1): a particle system the cell lights (steam, smoke, fog puffs) is a little
- *  piece of the air. In particles_cell.prog (res/shaders/particles.frag, the law written out there):
+ *  piece of the air. In particles_cell.prog (res/shaders/features/particles/particles.frag, the law written out there):
  *    lit    DIRECTLY per pixel at the sprite's own point from the very list the air reads (the directional light x its
  *           cascade shadow, every placed light x its cone x its shadow cube x the air's transmittance to it, the GI
  *           and the ambient as six-axis cubes): thin = the air's phase (per unit opacity the air's own J), thick = a

@@ -1,6 +1,6 @@
 #version 410 core
 
-/* lane FXRES1 (src/gl/cellfxres.h): the soft-effect layer's depth, the NEAREST opaque depth under each of its texels
+/* lane FXRES1 (src/features/particles/cellfxres.h): the soft-effect layer's depth, the NEAREST opaque depth under each of its texels
  * (Cantlay, GPU Gems 3 ch. 23: an effect is hidden in the layer only where the nearest surface hides it; the
  * composite's depth test picks the texel that belongs to the pixel's own surface). Written as the layer's depth
  * buffer and as a colour copy the soft fade reads (fxDepth). */

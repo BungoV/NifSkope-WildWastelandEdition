@@ -2,7 +2,7 @@
 #define WW_FXPARITY_H
 
 /* lane FXPARITY1: "Particle Game Rules" (Scene window row, key WW/FxParity, pin WW_FX_PARITY=0|1). On: particles are
- * simulated and drawn by the game's rules (src/gl/fxparityrules.h, res/shaders/particles.frag). Off (the default):
+ * simulated and drawn by the game's rules (src/features/particles/fxparityrules.h, res/shaders/features/particles/particles.frag). Off (the default):
  * the viewer's particle look as before. Red WW_FX_PARITY_RED=color,drag,subtex,law,soft,range,bomb,gravity puts one rule back as before. */
 
 enum WwFxRule

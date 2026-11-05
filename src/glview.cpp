@@ -49,7 +49,7 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include "features/shadows/sunshadow.h"
 #include "features/shadows/shadowset.h"	// contact shadows
 #include "features/near/cellcull.h"
-#include "gl/glparticles.h"
+#include "features/particles/glparticles.h"
 #include "gl/renderer.h"
 #include "features/exposure/cellhdr.h"
 #include "gl/celllensflare.h"	// lane LIGHTS3 (LENSFLARE1)

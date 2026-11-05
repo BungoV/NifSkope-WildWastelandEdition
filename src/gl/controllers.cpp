@@ -32,11 +32,11 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 #include "controllers.h"
 #include "wwswitch.h"	// lane TESTDRIVER1: the WW_* switch store
-#include "gl/fxparity.h"	// lane FXPARITY1
-#include "gl/psyslive.h"	// lane GLARESB2
+#include "features/particles/fxparity.h"	// lane FXPARITY1
+#include "features/particles/psyslive.h"	// lane GLARESB2
 
 #include "gl/glshape.h"
-#include "gl/glparticles.h"
+#include "features/particles/glparticles.h"
 #include "gl/glproperty.h"
 #include "gl/glscene.h"
 #include "gl/renderer.h"

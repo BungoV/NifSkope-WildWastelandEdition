@@ -115,7 +115,7 @@ uniform vec4 falloffParams;			// x,y = start/stop angle, z,w = start/stop opacit
 uniform vec4 glowColor;				// BGEM emissive colour (defaults to white)
 uniform float glowMult;				// BGEM emissive multiple (defaults to 1)
 uniform float envReflection;
-/* lane FXPARITY1: Particle Game Rules (src/gl/fxparity.h); 0 = as before. Bit 1: the effect card's law for a
+/* lane FXPARITY1: Particle Game Rules (src/features/particles/fxparity.h); 0 = as before. Bit 1: the effect card's law for a
  * particle (material alpha squared, no falloff: the game sets Fo only off Ptcl, the palette row as the colour). Bit 2: its soft fade */
 uniform int pfxGame;
 

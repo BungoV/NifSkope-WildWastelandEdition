@@ -1,4 +1,4 @@
-#include "cellfxres.h"
+#include "features/particles/cellfxres.h"
 #include "wwswitch.h"	// lane LIVESET1: the configuration follows a live set
 
 #include "features/exposure/cellhdr.h"

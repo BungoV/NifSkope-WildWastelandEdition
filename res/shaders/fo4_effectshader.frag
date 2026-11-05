@@ -53,7 +53,7 @@ in mat3 btnMatrix;
 flat in mat3 reflMatrix;
 
 #ifdef WW_FXRES
-// lane FXRES1 (fo4_effectcellfx.frag, src/gl/cellfxres.h): the soft-effect layer's other two targets, blended by the
+// lane FXRES1 (fo4_effectcellfx.frag, src/features/particles/cellfxres.h): the soft-effect layer's other two targets, blended by the
 // draw's own factors: the transmittance (0 colour, the draw's alpha, over 1) and the coverage (1, as the stencil)
 layout ( location = 0 ) out vec4 fragColor;
 layout ( location = 1 ) out vec4 fxResT;

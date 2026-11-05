@@ -37,7 +37,7 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include "features/near/cellbindless.h"	// lane BINDLESS2
 #include "features/near/cellqueue.h"	// lane GAPPERF-BINDLESS: the sampler census reads every bind
 #include "features/near/cellvrs.h"	// lane VRS1
-#include "gl/cellfxres.h"	// lane FXRES1
+#include "features/particles/cellfxres.h"	// lane FXRES1
 #include "gl/celluniform.h"	// lane CELLUNI1
 #include "gl/glasspanerules.h"	// lane GLASSPANE1: the effect shader's env mask channel
 #include "wwswitch.h"	// lane TESTDRIVER1: the WW_* switch store

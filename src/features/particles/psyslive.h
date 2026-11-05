@@ -9,7 +9,7 @@
  * NiPSysAgeDeathModifier never kills one. A fresh open has none of them. So the first step after the red was set or
  * unset (any value, either way) empties the system and takes the step a freshly built controller takes first
  * (lastTime as constructed: one clamped step from empty). Nothing else moves the stamp: with no live set of this name
- * the simulation runs exactly as before. Unit: tests/psyslive (twin of the clock + spherical pull, red = no restart). */
+ * the simulation runs exactly as before. Unit: tests/features/particles/psyslive (twin of the clock + spherical pull, red = no restart). */
 
 #include "wwswitch.h"
 

@@ -46,7 +46,7 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include "gl/glmesh.h"
 #include "gl/bsshape.h"
 #include "gl/BSMesh.h"
-#include "gl/glparticles.h"
+#include "features/particles/glparticles.h"
 #include "gl/gltex.h"
 #include "model/nifmodel.h"
 #include "glview.h"
@@ -56,7 +56,7 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include <QOpenGLContext>
 #include "features/shared/cellpasstime.h"	// lane PERF1
 #include "features/near/cellvrs.h"	// lane VRS1
-#include "gl/cellfxres.h"	// lane FXRES1
+#include "features/particles/cellfxres.h"	// lane FXRES1
 #include "features/near/cellqueue.h"	// lane GPUDRIVEN1
 #include "features/near/cellgpucull.h"	// lane GPUDRIVEN1 step B
 #include "gl/taainputs.h"	// lane TAAINPUTS1
@@ -742,7 +742,7 @@ void Scene::drawDeferredShapes( NodeList & secondPass )
 {
 	secondPass.alphaSort();
 	++fxDepthPassNow;	// lane EFX2: the opaque depth is grabbed again at this pass's first Soft effect
-	// lane FXRES1 (src/gl/cellfxres.h): the large Soft effects leave the order for the low-resolution layer
+	// lane FXRES1 (src/features/particles/cellfxres.h): the large Soft effects leave the order for the low-resolution layer
 	const QVector<Node *> fxLayer = wwCellFxResSplit( secondPass.list() );
 	auto inFxLayer = [&fxLayer]( Node * node ) { return !fxLayer.isEmpty() && fxLayer.contains( node ); };
 

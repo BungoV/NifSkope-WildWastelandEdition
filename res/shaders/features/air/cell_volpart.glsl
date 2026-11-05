@@ -1,6 +1,6 @@
 // lane VOLPART1: the volumetric law shared by particles.frag (a sprite) and fo4_effectshader.frag (a lit effect
 // card, as the street steam): included once, after cell_lights.glsl, lookdev_fog.glsl, lightingInfluence and fxLitMode.
-/* lane VOLPART1: VOLUMETRIC PARTICLES (src/gl/glparticles.cpp; the row "Volumetric Particles" ships off). A puff of
+/* lane VOLPART1: VOLUMETRIC PARTICLES (src/features/particles/glparticles.cpp; the row "Volumetric Particles" ships off). A puff of
  * steam or fog is a little piece of the air: lit by the light that is really there, from the very list the air
  * (Volumetric Air, cell_volair.frag) reads -- the directional light x its cascade shadow, every placed light (colour x
  * radial curve x cone x its shadow cube) x the air's transmittance to it, the GI and the ambient as six-axis cubes --

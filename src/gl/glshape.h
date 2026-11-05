@@ -153,7 +153,7 @@ public:
 	//! lane WATER1: a cell water surface; with Cell lights on it draws after the decals, before the blended shapes
 	bool wwWaterDraws() const;
 	//! lane FXRES1: a Soft effect, blended in the sorted pass, writing no depth, not a decal, not lit by its spot:
-	//! the low-resolution layer may take it (src/gl/cellfxres.h)
+	//! the low-resolution layer may take it (src/features/particles/cellfxres.h)
 	bool wwFxResSoft() const;
 	//! lane HAZECARD1: a soft effect card (soft depth > 0: the haze cards), which keeps the game's lit-effect base outdoors
 	bool wwFxSoftCard() const;

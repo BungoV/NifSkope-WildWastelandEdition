@@ -5,7 +5,7 @@
 #include "gl/celllights.h"
 #include "gl/celllooks.h"
 #include "gl/glnode.h"
-#include "gl/glparticles.h"
+#include "features/particles/glparticles.h"
 #include "gl/glscene.h"
 #include "gl/glshape.h"
 

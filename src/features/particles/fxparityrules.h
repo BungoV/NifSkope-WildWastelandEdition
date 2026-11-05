@@ -2,7 +2,7 @@
 #define WW_FXPARITYRULES_H
 
 /* lane FXPARITY1: the game's particle modifier rules as pure functions, read from Todd's treat.
- * src/gl/controllers.cpp runs them while "Particle Game Rules" is on (fxparity.h); tests/fxparity checks them. */
+ * src/gl/controllers.cpp runs them while "Particle Game Rules" is on (fxparity.h); tests/features/particles/fxparity checks them. */
 
 #include <algorithm>
 #include <cmath>

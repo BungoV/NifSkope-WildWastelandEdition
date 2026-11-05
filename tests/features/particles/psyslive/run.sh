@@ -1,13 +1,13 @@
 #!/usr/bin/env bash
 # lane GLARESB2 (2026-10-30): a live set of WW_CELL_PSYS_OBJ_RED leaves no particle of the other value behind
 # (psyslive_test.cpp: twin of PSysSimController::updateTime's clock + spherical pull, the real switch store).
-# Green (src/gl/psyslive.h's restart) must print "PSYSLIVE PASS" and exit 0; the red (-DPSYSLIVE_RED, today's
+# Green (src/features/particles/psyslive.h's restart) must print "PSYSLIVE PASS" and exit 0; the red (-DPSYSLIVE_RED, today's
 # updateTime: no restart) must print "PSYSLIVE FAIL" on the fresh-build check and exit 1.
 # Prints "PSYSLIVE UNIT PASS" only when both hold. OUT= picks the scratch folder (default notes/code1030/glaresb2/unit).
-#   bash tests/psyslive/run.sh
+#   bash tests/features/particles/psyslive/run.sh
 set -u
 HERE="$(cd "$(dirname "$0")" && pwd)"
-ROOT="$(cd "$HERE/../.." && pwd)"
+ROOT="$(cd "$HERE/../../../.." && pwd)"
 OUT="${OUT:-/e/Projects/Claude/notes/code1030/glaresb2/unit}"
 UCRT="${UCRT:-/c/msys64/ucrt64}"
 export PATH="$UCRT/bin:$PATH"

@@ -857,7 +857,7 @@ bool Shape::wwFxSoftCard() const
 
 bool Shape::wwFxResSoft() const
 {
-	// lane FXRES1 (src/gl/cellfxres.h): the effects the soft fade reads the opaque depth for; the layer keeps no depth
+	// lane FXRES1 (src/features/particles/cellfxres.h): the effects the soft fade reads the opaque depth for; the layer keeps no depth
 	return bsesp && !bslsp && bsesp->soft && bsesp->falloff.softDepth > 0.0f && drawInSecondPass && !effectDecal
 		&& !surfaceDecal && !depthWrite && !wwCellFxRoomLit( scene, id(), true );
 }

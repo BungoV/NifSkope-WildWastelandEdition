@@ -16,7 +16,7 @@
 #include "features/near/cellgpucull.h"	// lane GPUDRIVEN1 step B: the GPU cluster cull
 #include "features/far-lod/cellfarinst.h"	// lane FARDRAW1: the instanced far rings
 #include "features/near/celldrawpacket.h"	// lane BINDLESSMDI1: the follower tests
-#include "gl/cellfxres.h"
+#include "features/particles/cellfxres.h"
 #include "gl/cellgrass.h"
 #include "features/near/cellvrs.h"
 #include "features/shadows/shadowset.h"
