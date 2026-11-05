@@ -1,3 +1,8 @@
+## MODULES1 step 3 (2026-11-05): the AO walk's CPU split
+
+- PassTime CPU sub-timers `ao-collect` (scene walk + the opaque draws), `ao-sorted` (the sorted draws) and `ao-effects`
+  inside the obscurance pass (stderr `pass time:` line and the telemetry `cpusub`). Measurement only; pictures unchanged.
+
 ## MODULES1 step 2 (2026-11-05): the screen AO module moves to src/features/ao/ao.cpp
 
 - The AO depth+normal pass, its targets, the AO methods (vanilla/GTAO/HBAO+/XeGTAO), the AO draw hook and the AO

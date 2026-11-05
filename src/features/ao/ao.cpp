@@ -729,7 +729,10 @@ void wwCellAoPass( Scene * scene, bool run )
 		wwOpaqueCutNewFrame();
 		if ( memo )
 			wwSetupMemoArm( true, "cellProbe" );	// wwCellAoDraw sets it (20) after every setup
-		scene->collectShapes( second );
+		{
+			PassTime::DrawCpuScope cpuT( PassTime::CpuAoCollect );	// lane MODULES1
+			scene->collectShapes( second );
+		}
 		if ( memo )
 			wwSetupMemoArm( false );
 		aoSortedList().scene = scene;	// lane PERFHUNT2: before the sort below reorders it
@@ -740,8 +743,14 @@ void wwCellAoPass( Scene * scene, bool run )
 		const bool sortedMemo = memo && wwCellSortedMemo();
 		if ( sortedMemo )
 			wwSetupMemoArm( true, "cellProbe" );
-		Scene::drawDeferredShapes( second );
-		scene->drawShapeEffects();
+		{
+			PassTime::DrawCpuScope cpuT( PassTime::CpuAoSorted );	// lane MODULES1
+			Scene::drawDeferredShapes( second );
+		}
+		{
+			PassTime::DrawCpuScope cpuT( PassTime::CpuAoEffects );	// lane MODULES1
+			scene->drawShapeEffects();
+		}
 		if ( sortedMemo )
 			wwSetupMemoArm( false );
 		if ( opaqueOnly )
