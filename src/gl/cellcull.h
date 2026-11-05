@@ -15,8 +15,10 @@ class Shape;
 
 /*! Game-style culling for the cell view: welded shapes keep per-placement triangle RUNS with bounding spheres, and
  *  the camera pass draws only runs in the frustum, then applies previs (occluders, rooms / portals, the Umbra tome).
- *  Shadow casters are never culled by the camera. WW_CELL_CULL=0|1 and WW_CELL_PREVIS=0|1 pin the rows (both ship
- *  OFF); WW_CELL_CULL_RED=casters and WW_CELL_PREVIS_RED=casters wrongly cull casters (debug control). */
+ *  Shadow casters are never culled by the camera. WW_CELL_CULL=0|1 and WW_CELL_PREVIS=0|1 pin the rows. Culling ships
+ *  ON (PERFHUNT2 show 11-03: Concord -1.7 ms GPU, Memory Den -2.4 ms CPU, stills within noise; WW_CELL_CULL_RED=off is
+ *  the old default); previs ships OFF (the same show: Concord +5 ms with 63k runs occluded, Memory Den within noise).
+ *  WW_CELL_CULL_RED=casters and WW_CELL_PREVIS_RED=casters wrongly cull casters (debug control). */
 struct WwCullRun
 {
 	std::uint32_t first = 0, count = 0;	//!< triangles [first, first + count) of the shape

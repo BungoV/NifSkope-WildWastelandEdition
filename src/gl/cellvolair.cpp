@@ -65,7 +65,7 @@ constexpr int kSlices = 64;
 
 /* lane PERFFIX3: the near grid's quality preset (WW_CELL_AIR_GRID / QSettings WW/VolAirGrid, live): 0 the grid as before
  * (12 px columns, 64 slices = Low), 1 Low, 2 Medium 8 px x 64, 3 High 8 px x 128, 4 Ultra 8 px x 128 (Ultra's plan adds
- * the temporal reuse, WW_CELL_VOLAIR_TEMPORAL, off until bungo rules). At 1080p: 160x90x64, 240x135x64, 240x135x128
+ * the temporal reuse, WW_CELL_VOLAIR_TEMPORAL, on by default since PERFHUNT2's 11-03 show). At 1080p: 160x90x64, 240x135x64, 240x135x128
  * (the F4FS plan's Low/Med/High; perfres1101/B/fog.md section 4). */
 struct VaGrid
 {
@@ -204,9 +204,10 @@ VaState & vs()
 			// lane PERF2: echoall moved off 4194304 (VOLAIR1's roomstep); oldint the O(S^2) integrate, noearly no empty-air
 			// early out, noskip recomputes unchanged frames, histstale (temporal gates) never refreshes the history
 		}
-		// lane PERF2: temporal reuse (one fresh stratum a frame + the history); off until bungo sees it. The red brings
-		// the 4 sub-steps back
-		s.temporal = qEnvironmentVariableIntValue( "WW_CELL_VOLAIR_TEMPORAL" ) == 1
+		// lane PERF2: temporal reuse (one fresh stratum a frame + the history). PERFHUNT2 show 11-03: ships ON (Concord and
+		// Memory Den stills within the repeat noise; a pan's frames 6-8 read twice the still noise, 30 levels at most).
+		// WW_CELL_VOLAIR_TEMPORAL=0 or the red brings the 4 sub-steps back
+		s.temporal = wwEnv( "WW_CELL_VOLAIR_TEMPORAL" ).trimmed() != "0"
 			&& qEnvironmentVariableIntValue( "WW_CELL_VOLAIR_TEMPORAL_RED" ) != 1;
 		// gates only: from path frame N the air sees every placed light moved by (dx, dy, dz) world units: "N,dx,dy,dz"
 		const QList<QByteArray> sh = qgetenv( "WW_CELL_AIR_LIGHTSHIFT" ).split( ',' );

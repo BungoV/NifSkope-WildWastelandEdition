@@ -22,7 +22,9 @@ class Shape;
  *  composite is exact at the layer's resolution: frame x T + C, by dual-source blending. AO, the opaque pass and
  *  the frame's size stay full resolution.
  *
- *  WW_CELL_FXRES=1 turns it on (OFF until bungo sees the pairs). WW_CELL_FXRES_SCALE=1|2|4 (pixels per layer texel,
+ *  WW_CELL_FXRES=1 turns it on. OFF by default: PERFHUNT2's 11-03 show read Concord -1.5 ms GPU with the still within
+ *  noise, but Memory Den -4.0 ms with the still moved (32k px over 2 levels against a 12k noise bar): the interior
+ *  upsample is owed a fix first. WW_CELL_FXRES_SCALE=1|2|4 (pixels per layer texel,
  *  per axis; 2), WW_CELL_FXRES_MINPX (a draw's projected radius in pixels to leave its place; 32),
  *  WW_CELL_FXRES_MINAREA (the soft set's summed screen share to use the layer at all; 0.1), WW_CELL_FXRES_EDGE
  *  (the relative depth step of an edge in the upsample; 0.1). Reds: WW_CELL_FXRES_RED=full (the classification and

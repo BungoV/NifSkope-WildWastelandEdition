@@ -132,8 +132,8 @@ inline const WwPresetRow * wwPresetTable( int * count )
 		{ "CellWorkspaceLook_WW_CELL_BLOOM_PERPIX", '0', "1111", "0000", 'M', false, WW_PR_NONE, WW_PR_NONE, "under the bloom; no ms" },
 		{ "CellWorkspaceGroup_CAMERA", '1', "1111", "1111", 'G', false, WW_PR_NONE, WW_PR_NONE, "a master" },
 		{ "CellWorkspaceLook_WW_CELL_EXPOSURE_WIDE", '0', "1111", "0000", 'M', false, WW_PR_NONE, WW_PR_NONE, "an exposure range rule; no ms" },
-		{ "CellWorkspaceLook_WW_CELL_VRS", '0', "0000", "0000", 'M', false, WW_PR_NONE, WW_PR_NONE,
-			"PERFFIX4 coarse shading: changes the picture, off until bungo has seen it (BUGS1102)" },
+		{ "CellWorkspaceLook_WW_CELL_VRS", '1', "0000", "1111", 'M', false, WW_PR_NONE, WW_PR_NONE,
+			"PERFFIX4 coarse shading; PERFHUNT2 show 11-03: on at every preset (Concord 56.7 -> 54.8 ms GPU, Memory Den 30.8 -> 30.5; stills within the repeat noise)" },
 	};
 	if ( count )
 		*count = int( sizeof( t ) / sizeof( t[0] ) );

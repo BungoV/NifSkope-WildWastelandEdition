@@ -225,9 +225,12 @@ CullState & st()
 			s.pinned = true;
 			s.on = pin != "0";
 		} else {
-			s.on = QSettings().value( QStringLiteral( "WW/CellCull" ), false ).toBool();
+			// PERFHUNT2 show 11-03: ships ON (Concord 57.0 -> 55.3 ms GPU, Memory Den 11.6 -> 9.2 ms CPU; stills within noise)
+			s.on = QSettings().value( QStringLiteral( "WW/CellCull" ), true ).toBool();
 		}
 		s.red = wwEnv( "WW_CELL_CULL_RED" ).trimmed() == "casters" ? 1 : 0;
+		if ( wwEnv( "WW_CELL_CULL_RED" ).trimmed() == "off" )	// PERFHUNT2: the old default (no camera cull), whatever the row or pin says
+			s.on = false;
 		const QByteArray pv = wwEnv( "WW_CELL_PREVIS" ).trimmed();
 		if ( !pv.isEmpty() ) {
 			s.previsPinned = true;

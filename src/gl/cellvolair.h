@@ -54,8 +54,8 @@ class Scene;
  *               Continuous at farD; a mountain top (thinner air above the band) hazes less than its foot.
  *  The surfaces' sun (FOGSUN1): the directional light on every lit surface outdoors x the air's transmittance up the
  *  sun ray, exp(-sigma0 x col(z, top) / max(mu, 0.02)), mu = the sun's height (lookdev_fog.glsl wwVolAirSunT).
- *  Temporal reuse (lane PERF2, as shipped games reuse past fog frames; test only until bungo sees it:
- *  WW_CELL_VOLAIR_TEMPORAL=1, WW_CELL_VOLAIR_TEMPORAL_RED=1 the 4 sub-steps): one of the four strata a frame is fresh
+ *  Temporal reuse (lane PERF2, as shipped games reuse past fog frames; on by default since PERFHUNT2's 11-03 show:
+ *  WW_CELL_VOLAIR_TEMPORAL=0 or WW_CELL_VOLAIR_TEMPORAL_RED=1 the 4 sub-steps): one of the four strata a frame is fresh
  *  (its sun and placed-light samples), the other three are the history reprojected to the froxel's centre last frame;
  *  the medium, GI and ambient exact every frame. A froxel missing history takes all four; a still camera holds the
  *  4-sub-step sum after 4 frames, and an interactive window paints until it does.
