@@ -20,6 +20,7 @@ import numpy as np
 TREE = os.environ.get('TREE', os.path.abspath(os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', '..')))
 sys.path.insert(0, TREE + '/tests/spells')
 import shader_link_check as S   # noqa: E402
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'features', 'sky'))  # sky helpers
 import atmo_lut_check as C      # noqa: E402
 
 gl = S.gl

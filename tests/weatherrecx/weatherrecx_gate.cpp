@@ -2,7 +2,7 @@
  * Usage: weatherrecx_gate <fixture dir>   (sub-folders full, merge, prec, bad-values, case-free, each a Data root)
  * Prints the drawn values per arm and exits 1 on any failed check. Reds (env WW_WEATHER_RECX_RED=ignore|recordfirst)
  * must fail. Build: tests/weatherrecx/build.sh. */
-#include "gl/atmomath.h"
+#include "features/sky/atmomath.h"
 #include "gl/celllooks.h"
 #include "gl/cloudmath.h"
 #include "gl/weatherrecx.h"

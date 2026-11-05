@@ -2,7 +2,7 @@
 #include "wwswitch.h"	// lane TESTDRIVER1: the WW_* switch store
 #include "cellunits.h"
 
-#include "gl/atmosphere.h"	// lane SKYA (EXPO1): the sky in the exposure's mean
+#include "features/sky/atmosphere.h"	// lane SKYA (EXPO1): the sky in the exposure's mean
 #include "gl/cellbloom.h"
 #include "gl/cellfogbloom.h"
 #include "gl/cellhdrformat.h"	// lane FRAMEFMT1: the frame's format rule (pure; tests/framefmt)

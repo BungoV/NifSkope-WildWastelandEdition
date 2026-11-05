@@ -2,7 +2,7 @@
 /* Lane TOOLS1101 (REFLPROBECLI1, 2026-11-01): a census of the reflection probes' captures without a window.
  * The live pass (src/gl/cellreflprobe.cpp) renders each probe's cube from the cell's statics and relights it into an
  * octahedral tile (res/shaders/cell_reflrelight.frag); a texel whose G-buffer MISSED takes the sky above the horizon
- * and, since SKYBELOW2, the ground below it (res/shaders/cell_skybelow.glsl). How many below-horizon misses a real
+ * and, since SKYBELOW2, the ground below it (res/shaders/features/sky/cell_skybelow.glsl). How many below-horizon misses a real
  * probe has could only be counted in a window; this header traces the same texel directions through a bake's soup
  * (src/features/gi/probebvh.h, the bake's own tracer) for the probes the pass would place round a camera.
  * MIRRORS (tests/reflcensus/run.sh greps each literal there; a drift fails the gate):

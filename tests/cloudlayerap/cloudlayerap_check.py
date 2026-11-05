@@ -19,6 +19,7 @@ deck base 1.5 km (WwCloudLightning::kDefBaseKm: Cloud Map off, as the harness ru
 import math, os, sys
 import numpy as np
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'spells'))
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'features', 'sky'))  # sky helpers
 import atmo_model as A
 
 RED = sys.argv[sys.argv.index('--red') + 1] if '--red' in sys.argv else ''
@@ -26,7 +27,7 @@ HAZE = (0.821, 0.143, 0.0)
 CAM_KM = 9400 * A.UNIT_M / 1000.0
 DECK_KM = 1.5
 BAND_T = 0.03
-FIX = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'horizonband1', 'c3_column.txt')
+FIX = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'features', 'sky', 'horizonband1', 'c3_column.txt')
 
 
 def band_top():

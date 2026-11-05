@@ -19,16 +19,16 @@ BSD License - see nifskope.h
 #include "gl/renderer.h"
 #include "gl/scenelighting.h"
 #include "features/shadows/shadowset.h"	// lane TERRSHADOW1: the Sun Path row
-#include "gl/atmosphere.h"	// lane ATMO1: the physical sky
+#include "features/sky/atmosphere.h"	// lane ATMO1: the physical sky
 #include "gl/weatherrecx.h"	// lane WX1: the weather .recx night block
 #include "gl/cloudmap.h"	// lane CLOUD1: the cloud map
 #include "gl/cloudvol.h"	// lane CLOUD2: the volume clouds
 #include "gl/cloudlightning.h"	// lane CLOUD6f: the storm share of the lightning
-#include "gl/atmomath.h"	// lane SKYA (ATMOCHECK1): the weather tint table
-#include "gl/skyephem.h"	// lane EPHEM1: the real moon's phase texture
-#include "gl/skyplacerun.h"	// lane INTSKY1: the worldspace's place
-#include "gl/skydisc.h"	// lane SKYDISC1: our moon globe's math
-#include "gl/moonlight.h"	// lane FIX1101A (moon): the one key light round the clock
+#include "features/sky/atmomath.h"	// lane SKYA (ATMOCHECK1): the weather tint table
+#include "features/sky/skyephem.h"	// lane EPHEM1: the real moon's phase texture
+#include "features/sky/skyplacerun.h"	// lane INTSKY1: the worldspace's place
+#include "features/sky/skydisc.h"	// lane SKYDISC1: our moon globe's math
+#include "features/sky/moonlight.h"	// lane FIX1101A (moon): the one key light round the clock
 #include "gl/celllooks.h"	// lane SKYDISC1: the real-sky look decides the moon's frame
 #include "features/shadows/sunshadow.h"
 #include "model/nifmodel.h"
@@ -990,7 +990,7 @@ LdLight computeLight()
 	const float fogIn[4] = { fog.effOff ? 0.0f : fog.fogFar, fog.effOff ? 0.0f : fog.maxv, fog.fMid, fog.fRange };
 	if ( wwAtmoSunKey() > 0 && wwAtmoSun() == 2 && wwAtmoNightOn() && wwSunPathMode() == 1 && !oldNight ) {
 		/* the physical night (Full + Moon Phase and Stars + Sun Path Real): the real sun's part plus our globe's part,
-		 * the Day / Night keys anchored at 45 degrees as ATMOSUN1 anchors the sun (tests/moonlight1101a) */
+		 * the Day / Night keys anchored at 45 degrees as ATMOSUN1 anchors the sun (tests/features/sky/moonlight1101a) */
 		double rs[3];
 		const double eSun = wwSunPathReal( s.hour, s.gameDay, rs );
 		const MoonGeo g = moonGeo( s, raw.sunPos );

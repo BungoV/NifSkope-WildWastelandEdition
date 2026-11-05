@@ -20,6 +20,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 SPELLS = os.path.join(HERE, '..', 'spells')
 sys.path.insert(0, SPELLS)
 import shader_link_check as S   # noqa: E402
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'features', 'sky'))  # sky helpers
 import atmo_model as A          # noqa: E402
 import atmo_lut_check as L      # noqa: E402
 
@@ -29,8 +30,8 @@ STAGE = {'vert': 0x8B31, 'frag': 0x8B30, 'geom': 0x8DD9}
 
 
 def build(sdir, prog):
-    files = [os.path.join(sdir, f) for f in
-             [l.split()[1:] for l in open(os.path.join(sdir, prog)) if l.startswith('shaders')][0]]
+    files = [L._sp(sdir, f) for f in
+             [l.split()[1:] for l in open(L._sp(sdir, prog)) if l.startswith('shaders')][0]]
     p = S.fn('glCreateProgram', GLuint)()
     for f in files:
         src = S.expand(f)
@@ -56,9 +57,10 @@ def build(sdir, prog):
 def red_copy(sdir, red):
     """A scratch copy of the shaders with the red's geometry shader (the tree is never touched)."""
     d = tempfile.mkdtemp(prefix='aplayer_red_', dir=os.environ.get('APLAYER_TMP') or None)
-    for f in os.listdir(sdir):
-        if os.path.isfile(os.path.join(sdir, f)):
-            shutil.copy(os.path.join(sdir, f), d)
+    for s in (sdir, os.path.join(sdir, 'features', 'sky')):  # the top folder and sky's own, flat
+        for f in os.listdir(s):
+            if os.path.isfile(os.path.join(s, f)):
+                shutil.copy(os.path.join(s, f), d)
     g = open(os.path.join(d, 'atmo_apl.geom'), encoding='latin-1').read()
     if red == 'shift':
         new = g.replace('atApSliceIn = float( gl_InvocationID );', 'atApSliceIn = float( gl_InvocationID + 1 );')

@@ -3,7 +3,7 @@
 #include "cloudmap.h"
 #include "cloudvol.h"
 #include "cloudvolmath.h"
-#include "atmomath.h"
+#include "features/sky/atmomath.h"
 #include "recx.h"
 #include "wwswitch.h"
 #include "gl/glscene.h"

@@ -11,8 +11,8 @@ BSD License - see nifskope.h
 #include "gl/celluniform.h"	// lane CELLUNI2
 #include "gl/cloudshadow.h"	// lane CLOUD3: the clouds' shadow map joins the composition
 #include "gl/celllooks.h"	// lane GAPLOOK1: the contact far tier's switch
-#include "gl/skyephem.h"	// lane EPHEM1: FO4CS Solar's sun + moon arithmetic
-#include "gl/skyplacerun.h"	// lane INTSKY1: the worldspace's place (location)
+#include "features/sky/skyephem.h"	// lane EPHEM1: FO4CS Solar's sun + moon arithmetic
+#include "features/sky/skyplacerun.h"	// lane INTSKY1: the worldspace's place (location)
 #include "gl/gametaa.h"
 #include "features/shadows/sunshadow.h"	// lane SHADOWSHIMMER1: the stable shadows' red
 #include "features/shadows/sunshadowfit.h"	// lane PERFFIX2 b: the cascade count per tier

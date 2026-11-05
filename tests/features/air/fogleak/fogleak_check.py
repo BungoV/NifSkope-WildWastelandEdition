@@ -64,6 +64,7 @@ REDBIT = {'': 0, 'dalcenv': 1, 'nosungate': 2, 'lightleak': 4, 'nointsungate': 1
 SDIR = os.path.join(TREE, 'res', 'shaders')
 
 import shader_link_check as S   # noqa: E402
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', '..', 'sky'))  # sky helpers
 import atmo_lut_check as C      # noqa: E402
 
 gl = S.gl

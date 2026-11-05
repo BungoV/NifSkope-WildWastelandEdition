@@ -9,7 +9,7 @@
 #include "gl/celllooks.h"	// Probe sharing; the light physics rows, compared live
 #include "features/gi/cellprobeview.h"
 #include "gl/lookdevstage.h"
-#include "gl/atmosphere.h"	// the physical sky's capture height
+#include "features/sky/atmosphere.h"	// the physical sky's capture height
 #include "gl/cloudshadow.h"	// the clouds over the eye dim the bounce's sun
 #include "gl/scenelighting.h"
 #include "features/air/airzone.h"	// the hand-placed volumes' gi blocks on a relight

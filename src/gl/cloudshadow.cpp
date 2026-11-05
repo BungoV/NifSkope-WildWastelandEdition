@@ -2,7 +2,7 @@
 #include "gl/cloudshadowmath.h"
 #include "gl/cloudmap.h"
 #include "gl/cloudvol.h"
-#include "gl/atmomath.h"
+#include "features/sky/atmomath.h"
 #include "gl/cellunits.h"
 #include "gl/celluniform.h"	// lane CELLUNI2
 #include "gl/celllights.h"

@@ -19,6 +19,7 @@ TREE = os.environ.get('TREE', os.path.abspath(os.path.join(os.path.dirname(os.pa
 sys.path.insert(0, TREE + '/tests/spells')
 sys.path.insert(0, TREE + '/tests/postfx')
 import shader_link_check as S   # noqa: E402
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'features', 'sky'))  # sky helpers
 import atmo_lut_check as C      # noqa: E402
 import postfx_gates as P        # noqa: E402
 

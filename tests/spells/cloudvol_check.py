@@ -39,6 +39,7 @@ TREE = os.path.dirname(os.path.dirname(HERE))
 os.environ.setdefault('TREE', TREE)
 sys.path.insert(0, HERE)
 import shader_link_check as S   # noqa: E402
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'features', 'sky'))  # sky helpers
 import atmo_lut_check as C      # noqa: E402
 import atmo_model as A          # noqa: E402
 import atmo_skyrender as R      # noqa: E402

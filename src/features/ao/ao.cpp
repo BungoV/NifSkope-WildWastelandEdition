@@ -40,8 +40,8 @@
 #include "gl/cellunirec.h"	// lane PERFFIX1: the cell-uniform class record
 #include "gl/cloudvol.h"	// lane LIGHTNING2: a storm's flash on the exterior ambient (wwLightningGround)
 #include "cellworldanim.h"	// lane NIFXLIGHT3: the world clock a .nifx light's dimmer follows
-#include "gl/atmosphere.h"	// lane FIX1101A (atmo): wwAtmoWbGain, the test white balance
-#include "gl/cellsunlit.h"	// lane INTSKY1: the sunlit interior rule
+#include "features/sky/atmosphere.h"	// lane FIX1101A (atmo): wwAtmoWbGain, the test white balance
+#include "features/sky/cellsunlit.h"	// lane INTSKY1: the sunlit interior rule
 #include "features/lights/cellflickclock.h"	// lane PERFFIX2 a: the flicker's phase on the world clock
 #include <QDateTime>
 #include <QDir>	// lane INTSKY1: the Cells file in the census

@@ -157,7 +157,7 @@ private:
 #include <QOpenGLFramebufferObject>
 #include <QOpenGLExtraFunctions>	// the GPU timer
 #include "gl/celllights.h"	// the imagespace measure
-#include "gl/atmosphere.h"	// the sky in the exposure's mean
+#include "features/sky/atmosphere.h"	// the sky in the exposure's mean
 #include "features/gi/cellprobeview.h"	// the Pass overlays
 #include "features/gi/cellvolumeview.h"	// the Space stage's view
 #include "gl/cellssr.h"

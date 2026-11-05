@@ -839,7 +839,7 @@ void wwCellReflProbePass( Scene * scene, bool run )
 		prog->uni1i( "rpRed", ( s.red >> 1 ) & 15 );
 		/* lane SKYBELOW2 (bungo 10-30, SKYBELOW1's rule for every probe): a G-buffer miss below the horizon is the
 		 * ground (outdoors the probe's own ground albedo x the sky from above, indoors 0), never the sky ambient
-		 * (res/shaders/cell_skybelow.glsl). Ships on; WW_SKYBELOW_RED=1 keeps today's main, live: it is in the hash */
+		 * (res/shaders/features/sky/cell_skybelow.glsl). Ships on; WW_SKYBELOW_RED=1 keeps today's main, live: it is in the hash */
 		const bool skyBelowRed = rtddgiSkyBelowRedNow();
 		prog->uni1i( "rpSkyBelow", skyBelowRed ? 0 : 1 );
 		auto uniF = [&]( const char * name, int cnt, quint64 h ) {

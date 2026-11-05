@@ -68,7 +68,7 @@ BSD License - see nifskope.h
 #include "features/gi/cellvolumeview.h"	// lane VOLFIT1
 #include "features/gi/probevolumes.h"	// lane VOLFIT1: the Space stage
 #include "features/air/airzone.h"	// lane AIRZONE1: the hand-placed volumes' files (the cells, the GI merge, the converter)
-#include "gl/skyplacerun.h"	// lane INTSKY1: the sun's place for the open cell
+#include "features/sky/skyplacerun.h"	// lane INTSKY1: the sun's place for the open cell
 #include "features/air/cellairzone.h"	// lane AIRZONE1: the Air zones row
 #include "features/gi/probevolumesgi.h"	// lane VOLFIT1: its rooms as the GI's volumes
 #include "features/lights/cellfxlit.h"

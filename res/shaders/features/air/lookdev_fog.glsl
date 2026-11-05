@@ -20,7 +20,7 @@ uniform vec4 fogProbe;		// gates only: .z = 0 off, 1 alpha, 2 colour / 2, 3 hb (
 				// 6 / 7 per fragment (lane FOG2): (alpha, hb, 0) / colour ^ 1/2.2; 8 the geometry, wide (d / 16384, 0.5 + z / 32768)
 uniform int fogRed;		// gates only: 1 maxclamp, 2 noescape, 4 height0
 
-/* lane SKYA (ATMO2): the physical sky's aerial perspective (src/gl/atmosphere.h, Hillaire 2020 sec. 5.4). atApTex
+/* lane SKYA (ATMO2): the physical sky's aerial perspective (src/features/sky/atmosphere.h, Hillaire 2020 sec. 5.4). atApTex
  * holds per froxel the light the air sends toward the eye from the camera to slice k (rgb, the sky's scene units)
  * and the mean transmittance (a); slice k's centre sits at maxKm ((k + 0.5) / n)^2, so the texture's depth
  * coordinate is sqrt(d / maxKm). Off (atAp.x 0): every path below is the one before the lane. */

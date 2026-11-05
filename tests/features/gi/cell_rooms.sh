@@ -80,7 +80,7 @@ cells)
 		# the bake's back-face list and the soup's refs beside the run (cell_rooms_check reads both)
 		env "${env[@]}" WW_CELL_PROBE_BACKDUMP="$(winpath "$d")\\back.tsv" WW_CELL_PROBE_SOUP_REFS="$(winpath "$d")\\refs.tsv" \
 			OUT="$R" CELLS="" SKYINT="$spec" PHASE="skyint check" SCOPE="cell_rooms_$tag" \
-			bash "$REPO/tests/spells/cell_sky.sh" > "$R/$tag.sky.log" 2>&1
+			bash "$REPO/tests/features/sky/cell_sky.sh" > "$R/$tag.sky.log" 2>&1
 		grep -h "^  rooms: grid\|^  gi rooms:" "$d/lit.notes" 2>/dev/null | tee -a "$LOG"
 		if ! grep -q "PASS  $cell" "$R/$tag.sky.log"; then
 			say "  FAIL cell_sky skyint ($R/$tag.sky.log)"

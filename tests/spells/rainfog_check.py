@@ -62,6 +62,7 @@ CBASE = args[args.index('--cbase') + 1] if '--cbase' in args else 'strip'
 os.makedirs(scratch, exist_ok=True)
 
 import shader_link_check as S   # noqa: E402
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'features', 'sky'))  # sky helpers
 import atmo_lut_check as C      # noqa: E402
 
 gl = S.gl

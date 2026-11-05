@@ -46,8 +46,8 @@ BSD License - see nifskope.h
 #include "gl/cellunirec.h"	// lane PERFFIX1: the cell-uniform class record
 #include "gl/cloudvol.h"	// lane LIGHTNING2: a storm's flash on the exterior ambient (wwLightningGround)
 #include "cellworldanim.h"	// lane NIFXLIGHT3: the world clock a .nifx light's dimmer follows
-#include "gl/atmosphere.h"	// lane FIX1101A (atmo): wwAtmoWbGain, the test white balance
-#include "gl/cellsunlit.h"	// lane INTSKY1: the sunlit interior rule
+#include "features/sky/atmosphere.h"	// lane FIX1101A (atmo): wwAtmoWbGain, the test white balance
+#include "features/sky/cellsunlit.h"	// lane INTSKY1: the sunlit interior rule
 #include "features/lights/cellflickclock.h"	// lane PERFFIX2 a: the flicker's phase on the world clock
 
 #include <QDateTime>
@@ -2226,7 +2226,7 @@ WwCellSunlit wwCellSunlit( const WwCellLighting * L )
 	m.flag = L->useSkyLighting;
 	m.gen = g;
 	m.red = red;
-	// the rule (gl/cellsunlit.h, tests/cellsunlit): the block's keys over the winning record's flag, weather = enabled
+	// the rule (gl/cellsunlit.h, tests/features/sky/cellsunlit): the block's keys over the winning record's flag, weather = enabled
 	r.why = QStringLiteral( "flag 0x%1 Use Sky Lighting %2" ).arg( L->useSkyLighting ? QStringLiteral( "100" ) : QStringLiteral( "0" ) )
 		.arg( L->useSkyLighting ? QStringLiteral( "on" ) : QStringLiteral( "off" ) );
 	bool haveBlock = false;

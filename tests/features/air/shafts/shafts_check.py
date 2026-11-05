@@ -31,6 +31,7 @@ ONLY = set(args[args.index('--only') + 1]) if '--only' in args else set('ZSBC')
 QUICK = '--quick' in args
 os.makedirs(SCR, exist_ok=True)
 import shader_link_check as S   # noqa: E402
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', '..', 'sky'))  # sky helpers
 import atmo_lut_check as C      # noqa: E402
 
 BDIR = os.path.join(SCR, 'base_shaders')

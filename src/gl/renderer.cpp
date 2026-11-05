@@ -50,7 +50,7 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include "gl/gltex.h"
 #include "gl/scenelighting.h"
 #include "gl/lookdevstage.h"
-#include "gl/atmosphere.h"	// lane SKYA
+#include "features/sky/atmosphere.h"	// lane SKYA
 #include "features/shadows/sunshadow.h"
 #include "gl/celllights.h"
 #include "features/lights/cellfxlit.h"

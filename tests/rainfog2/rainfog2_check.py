@@ -267,6 +267,7 @@ if 'W' in only:
 NEED_GL = only & set('ZTC')
 if NEED_GL:
     import shader_link_check as S   # noqa: E402
+    sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'features', 'sky'))  # sky helpers
     import atmo_lut_check as C      # noqa: E402
     gl = S.gl
     GLuint, GLint, GLenum = ctypes.c_uint, ctypes.c_int, ctypes.c_uint

@@ -13,7 +13,7 @@ See the LICENSE.md file for the full license text.
 #include "wwswitch.h"	// lane TESTDRIVER1: the WW_* switch store
 #include "features/gi/probeplace.h"
 #include "features/gi/probealbedo.h"	// lane REDFIX1: gobocensus
-#include "gl/skyplacerun.h"	// lane INTSKY1: skyplace
+#include "features/sky/skyplacerun.h"	// lane INTSKY1: skyplace
 
 int cmdEspWrite( const QStringList & args );	// lane ESPWRITE2: src/io/espwritecli.cpp
 #include "features/ao/cellaodecal.h"	// lane AODECAL1: aobake

@@ -40,10 +40,10 @@ LIT=(
 	"res/shaders/cell_reflrelight.frag|vec2 f = uv * 2.0 - 1.0;"
 	"res/shaders/cell_reflrelight.frag|float t = max( -n.z, 0.0 );"
 	"res/shaders/cell_reflrelight.frag|if ( a.a < 0.5 ) {"
-	"res/shaders/cell_skybelow.glsl|return d.z < 0.0;"
-	"res/shaders/cell_skybelow.glsl|float c = 0.93969262, s = -0.34202014;"
-	"res/shaders/cell_skybelow.glsl|float q = 0.35355339, s6 = -0.86602540;"
-	"res/shaders/cell_skybelow.glsl|return n > 0.5 ? sum * ( 1.0 / n ) : vec3( 0.5 );"
+	"res/shaders/features/sky/cell_skybelow.glsl|return d.z < 0.0;"
+	"res/shaders/features/sky/cell_skybelow.glsl|float c = 0.93969262, s = -0.34202014;"
+	"res/shaders/features/sky/cell_skybelow.glsl|float q = 0.35355339, s6 = -0.86602540;"
+	"res/shaders/features/sky/cell_skybelow.glsl|return n > 0.5 ? sum * ( 1.0 / n ) : vec3( 0.5 );"
 )
 drift() {   # drift <root>: prints the missing literals, rc = how many
 	local n=0 e f l
@@ -57,7 +57,7 @@ drift . > "$OUT/drift.txt"; nd=$?
 if [ $nd -eq 0 ]; then echo "drift: all ${#LIT[@]} mirrored literals present"; else cat "$OUT/drift.txt"; echo "DRIFT $nd"; bad=1; fi
 # the floor: a copy with the reach's minimum changed must be refused
 mkdir -p "$OUT/floor/src/gl" "$OUT/floor/res/shaders"
-cp res/shaders/cell_reflrelight.frag res/shaders/cell_skybelow.glsl "$OUT/floor/res/shaders/"
+cp res/shaders/cell_reflrelight.frag res/shaders/features/sky/cell_skybelow.glsl "$OUT/floor/res/shaders/"
 sed 's/\* 2\.0f, 4096\.0f );/* 2.0f, 8192.0f );/' src/gl/cellreflprobe.cpp > "$OUT/floor/src/gl/cellreflprobe.cpp"
 drift "$OUT/floor" > "$OUT/drift_floor.txt"; nf=$?
 if [ $nf -eq 1 ]; then echo "drift floor: a copy with the reach minimum 8192 is refused as it must"; else echo "DRIFT FLOOR DID NOT FIRE ($nf)"; bad=1; fi

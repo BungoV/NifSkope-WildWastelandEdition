@@ -236,13 +236,13 @@ HEADERS += \
 	src/gl/lookdevstage.h \
 	src/features/shadows/sunshadow.h \
 	src/features/shadows/shadowset.h \
-	src/gl/skyephem.h \
-	src/gl/skyplace.h \
-	src/gl/skyplacerun.h \
-	src/gl/cellsunlit.h \
+	src/features/sky/skyephem.h \
+	src/features/sky/skyplace.h \
+	src/features/sky/skyplacerun.h \
+	src/features/sky/cellsunlit.h \
 	src/gl/preciproof.h \
 	src/gl/rainwetlaw.h \
-	src/gl/skydisc.h \
+	src/features/sky/skydisc.h \
 	src/gl/fxparity.h \
 	src/gl/fxparityrules.h \
 	src/gl/gametaa.h \
@@ -276,7 +276,7 @@ HEADERS += \
 	src/gl/cellfxres.h \
 	src/gl/cellbloom.h \
 	src/gl/cellfogbloom.h \
-	src/gl/atmosphere.h \
+	src/features/sky/atmosphere.h \
 	src/gl/cloudmap.h \
 	src/gl/weatherrecx.h \
 	src/gl/weatherrecxmath.h \
@@ -287,7 +287,7 @@ HEADERS += \
 	src/gl/cloudfly.h \
 	src/gl/cloudflymath.h \
 	src/gl/cloudvolmath.h \
-	src/gl/atmomath.h \
+	src/features/sky/atmomath.h \
 	src/features/gi/cellprobeview.h \
 	src/features/gi/cellvolumeview.h \
 	src/gl/cellssr.h \
@@ -626,10 +626,10 @@ SOURCES += \
 	src/gl/cellfxres.cpp \
 	src/gl/cellbloom.cpp \
 	src/gl/cellfogbloom.cpp \
-	src/gl/atmosphere.cpp \
+	src/features/sky/atmosphere.cpp \
 	src/gl/cloudmap.cpp \
 	src/gl/weatherrecx.cpp \
-	src/gl/skyplacerun.cpp \
+	src/features/sky/skyplacerun.cpp \
 	src/gl/cloudvol.cpp \
 	src/gl/cloudshadow.cpp \
 	src/gl/cloudfly.cpp \

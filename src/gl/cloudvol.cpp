@@ -6,8 +6,8 @@
 #include "cloudfly.h"
 #include "cloudlightning.h"	// lane CLOUD6f: the storm's lightning inside the clouds
 #include "lookdevstage.h"
-#include "atmosphere.h"
-#include "atmomath.h"
+#include "features/sky/atmosphere.h"
+#include "features/sky/atmomath.h"
 #include "cellhdr.h"
 #include "cellunderwater.h"	// lane WATERUNDER3: no clouds over a camera under water
 #include "wwswitch.h"

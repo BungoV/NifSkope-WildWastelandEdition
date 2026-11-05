@@ -11,8 +11,8 @@ BSD License - see nifskope.h
 #include "features/air/airbouncelamp.h"	// lane AIRBOUNCE1: the lamps' floor-bounce law
 #include "features/air/airmslamp.h"	// lane AIRMS1: the lamps' multiple-scattering law
 #include "features/air/airlampatlas.h"	// lane MODULES1 route (a): the lamps' shadows in the air
-#include "gl/atmomath.h"	// lane CLOUD6e: kUnitKm, the cloud map's units
-#include "gl/atmosphere.h"	// SHAFTS1b: the aerial perspective's haze, for the no-double-count fit
+#include "features/sky/atmomath.h"	// lane CLOUD6e: kUnitKm, the cloud map's units
+#include "features/sky/atmosphere.h"	// SHAFTS1b: the aerial perspective's haze, for the no-double-count fit
 #include "features/air/cellairzone.h"	// lane AIRZONE1: the hand-placed volumes' fog and particle blocks
 #include "gl/cloudmap.h"	// lane CLOUD6e: the rain fog follows the Low band's coverage
 #include "gl/rainfogmath.h"	// lane CLOUD6e: the rain fog's law

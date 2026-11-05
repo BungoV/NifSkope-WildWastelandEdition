@@ -13,7 +13,7 @@ BSD License - see nifskope.h
 #include "features/shared/cellpasstime.h"	// lane PERF1
 #include "gl/gametaa.h"
 #include "features/shadows/shadowset.h"	// lane TERRSHADOW1
-#include "gl/atmosphere.h"	// lane ATMO1
+#include "features/sky/atmosphere.h"	// lane ATMO1
 #include "gl/cloudmap.h"	// lane CLOUD1
 #include "gl/cloudvol.h"	// lane CLOUD2
 #include "gl/cloudshadow.h"	// lane CLOUD3

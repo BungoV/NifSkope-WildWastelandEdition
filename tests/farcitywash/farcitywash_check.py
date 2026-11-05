@@ -3,7 +3,7 @@ to vanilla's haze. Offline gate on the curve: the veil (the light the haze adds)
 own fog (its FNAM curve x its fog colour), along the rays of the camera concord_hatch_boston.
 
 The frame is the shot's census (run5c3 row c3_wb5_tend): the medium, the sun, the DALC, the phase record (OvercastDay
-GDRY), the fog K rows (weather --fog dump). Our light per ray: the aerial perspective (tests/spells/atmo_model.py, the
+GDRY), the fog K rows (weather --fog dump). Our light per ray: the aerial perspective (tests/features/sky/atmo_model.py, the
 min rule of atmo_apfog.glsl) and the cell air (wwAirRhoLaw's ground layer over a terrain falling toward Boston, the
 inject's J = D vis Ts pi p(c) + the env cube, x airVeilK of cell_volair.frag).
 
@@ -20,6 +20,7 @@ import numpy as np
 HERE = os.path.dirname(os.path.abspath(__file__))
 TREE = os.path.normpath(os.path.join(HERE, '..', '..'))
 sys.path.insert(0, os.path.join(TREE, 'tests', 'spells'))
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'features', 'sky'))  # sky helpers
 import atmo_model as A
 
 RED = '--red' in sys.argv

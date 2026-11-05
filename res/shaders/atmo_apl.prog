@@ -1,5 +1,0 @@
-# lane PERFFIX3 (item 1): the aerial-perspective volume in one layered draw (every slice at once, gl_Layer from the
-# geometry shader) into its 3D target (src/gl/atmosphere.cpp buildAp). Red WW_ATMO_AP_RED=slices: atmo_ap.prog, a draw
-# a slice. No conditions: never picked for a shape; selected by name.
-
-shaders cell_ao.vert atmo_apl.geom atmo_apl.frag

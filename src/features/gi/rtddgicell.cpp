@@ -13,7 +13,7 @@
 #include "features/gi/rtddgi/rtddgi_gpu.h"
 #include "version.h"
 #include "wwswitch.h"
-#include "gl/atmomath.h"    // FIX1101A: giSkyFromPhysical
+#include "features/sky/atmomath.h"    // FIX1101A: giSkyFromPhysical
 #include "gl/celllights.h"
 #include "gl/cellunits.h"
 #include "gl/celluniform.h"	// lane PERFFIX1: the volume's unit bound without asking the driver
@@ -40,7 +40,7 @@
 #include <thread>
 #include <vector>
 
-// FIX1101A: src/gl/atmosphere.cpp (the physical sky's six axes); GISKYTWIN: from hKm (the probes' height), the drawn sky's model
+// FIX1101A: src/features/sky/atmosphere.cpp (the physical sky's six axes); GISKYTWIN: from hKm (the probes' height), the drawn sky's model
 bool wwAtmoGiSkyAxes( const float sunTo[3], float out[6][3], float * trans = nullptr, float hKm = 0.002f );
 bool wwAtmoGiSkyTwinRed();   // GISKYTWIN: WW_CELL_RTDDGI_SKYTWIN_RED=1, the old single-scatter twin from the ground
 
@@ -1609,9 +1609,9 @@ static void volumeFrame( Scene * scene, Cell & c, const CellSpec * spIn, bool du
 	}
 	/* FIX1101A LATE ITEM 15d (bungo 11-01 "does our GI not take sky into consideration?"): with Physical Sky on, an
 	 * exterior volume's sky is the physical sky's irradiance on the six axes (its colour and its sun-side / anti-sun /
-	 * zenith shares, src/gl/atmomath.h skyIrradianceAxes), scaled so +Z keeps the weather's own luminance; -Z (the
+	 * zenith shares, src/features/sky/atmomath.h skyIrradianceAxes), scaled so +Z keeps the weather's own luminance; -Z (the
 	 * ground's light) stays the weather's. Physical Sky off or the sun down: the weather's ambient as before. SHIPS OFF:
-	 * WW_CELL_RTDDGI_SKY=physical turns it on. Measured (tests/gisky, CommonwealthClear's DALC, sun 30 deg): the physical
+	 * WW_CELL_RTDDGI_SKY=physical turns it on. Measured (tests/features/sky/gisky, CommonwealthClear's DALC, sun 30 deg): the physical
 	 * sides are LESS blue than the weather's (R/B 0.41-0.48 vs 0.34; zenith 0.33 both) and the sun side 1.47x the
 	 * anti-sun side, so it would warm the shade bungo calls tan (LATE ITEM 15): his call. In the build key via sky.amb */
 	/* lane MUSGI1 (11-03, bungo "night looks like the brightest noon"): a SUNLIT interior takes the exterior's sky level
