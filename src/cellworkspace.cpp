@@ -43,6 +43,7 @@ BSD License - see nifskope.h
 #include "ui/cellshowpanel.h"	// lane OPENCELLFIX1: the Show tab, the Show menu stays open
 #include "ui/widgets/wwdropdown.h"	// lane OPENCELLFIX2: the dock's one dropdown
 #include "features/air/cellvolair.h"	// lane OPENCELLFIX2: the fog group's rows (notes 22)
+#include "features/air/airlampatlas.h"	// lane MODULES1 route (a): the air's Lamp shadows row
 #include "gl/lookdevstage.h"
 #include "gl/shadowset.h"	// lane OPENCELLFIX2: the shadow group's Scene window rows (note 26)
 #include "wwswitch.h"
@@ -1068,6 +1069,32 @@ void CellWorkspacePanel::buildUi()
 	};
 	liveTick( "CellWorkspaceVolAir", tr( "Improved Volumetric Fog" ), "volAir", &wwVolAirOn, &wwVolAirSetOn );
 	liveTier( "CellWorkspaceFarAir", tr( "Far air" ), "farAir", &wwVolAirFarTier, &wwVolAirSetFarTier );
+	{	// lane MODULES1 route (a): how the air's lamps find their walls; live (read each frame), the pin WW_CELL_AIR_LAMPVIS wins
+		QMenu * m = groupsMenu->addMenu( tr( "Lamp shadows" ) );
+		m->setObjectName( QStringLiteral( "CellWorkspaceAirLampVis" ) );
+		m->setEnabled( !wwAirLampVisPinned() );
+		auto * grp = new QActionGroup( m );
+		grp->setExclusive( true );
+		const QStringList names = { tr( "Atlas" ), tr( "Ray traced" ), tr( "Probe walk" ) };
+		for ( int k = 0; k < names.size(); k++ ) {
+			QAction * a = m->addAction( names.at( k ) );
+			a->setCheckable( true );
+			a->setData( k );
+			a->setChecked( k == wwAirLampVisChoice() );
+			grp->addAction( a );
+		}
+		connect( grp, &QActionGroup::triggered, this, [this]( QAction * a ) {
+			wwAirLampVisSetChoice( a->data().toInt() );
+			wwLiveChanged( QStringLiteral( "airLampVis" ) );
+			if ( glView )
+				glView->update();
+		} );
+		wwLiveWatch( m, QStringLiteral( "airLampVis" ), [grp]() {
+			for ( QAction * a : grp->actions() )
+				if ( a->data().toInt() == wwAirLampVisChoice() && !a->isChecked() )
+					a->setChecked( true );
+		} );
+	}
 	liveTick( "CellWorkspaceVolPart", tr( "Particles" ), "volPart", &wwVolPartOn, &wwVolPartSetOn );
 	liveTick( "CellWorkspaceFogDrift", tr( "Drift" ), "fogDrift", &wwVolAirDriftOn, &wwVolAirSetDriftOn );
 	{	// lane AIRZONE1 (src/features/air/cellairzone.h): the hand-placed volumes; ships Off. The read is a #define: a tick reloads the shaders
@@ -1273,6 +1300,7 @@ void CellWorkspacePanel::buildUi()
 		look( WwLook::GroundFogDerived, tr( "Ground layer from weather" ) );
 		kid( "", tr( "Far air" ), "CellWorkspaceFarAir", 0, true );
 		rows.last().heavy = true;
+		kid( "", tr( "Lamp shadows" ), "CellWorkspaceAirLampVis", -1, true );	// lane MODULES1 route (a)
 		kid( "CellWorkspaceVolPart", tr( "Particles" ) );
 		rows.last().heavy = true;
 		kid( "CellWorkspaceFogDrift", tr( "Drift" ) );

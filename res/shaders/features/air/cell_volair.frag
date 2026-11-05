@@ -23,6 +23,11 @@
 #define WW_AIR_LEAK 1
 uniform int volLeakRed;		// 1 dalcenv, 2 nosungate, 4 lightleak, 8 nofartailshadow (lookdev_fog.glsl: volAirFlags 256), 16 nointsungate (INTGI1), 32 envscale (FOGENV1), 64 sun8 (FOGLEAK1-COST)
 uniform vec3 cellDdgiOpenE[6];	// lane FOGENV1: an open probe's irradiance per axis from the volume's own sky (rtddgicell.cpp; 0 = none)
+// lane MODULES1 route (a): the lamps' depth atlas (features/air/airlampatlas.cpp); volLampVis 0 = the probe walk
+uniform int volLampVis;
+uniform int volLampN;
+uniform sampler2DShadow volLampAtlas;
+uniform samplerBuffer volLampTable;
 #endif
 /* lane DARKAIR1 (SHAFTS-DARKAIR): outdoors the weather's ambient in the air takes the sky the ray-traced volume sees
  * above the froxel (FOGLEAK1's read replaces the whole env share instead, so not under WW_AIR_LEAK). Opt-in:
@@ -393,8 +398,53 @@ float airLeakLightVis( vec3 P, vec3 Lp )
 
 // fix 3: light i's factor in the air: 1 for a light whose shadow cube is drawn (its map is the verdict), else the
 // volume's (an unshadowed light; every light under ReSTIR, whose pixel ratio the air no longer reads: cellShadowF)
+/* lane MODULES1 route (a): light i's six tiles in the atlas (an unfolded cube, GL's face table, depth = distance / radius);
+ * < 0 = the lamp holds no ready tiles (the walk answers). One 2x2 compare one texel inside the face's tile */
+float airLampAtlasVis( int i, vec3 P, vec3 Lp )
+{
+	if ( i >= volLampN )
+		return -1.0;
+	vec4 t3 = texelFetch( volLampTable, i * 4 + 3 );
+	if ( t3.y < 0.5 )
+		return -1.0;
+	vec3 r = P - Lp, a = abs( r );
+	int f;
+	vec3 u, v;
+	float m;
+	if ( a.x >= a.y && a.x >= a.z ) {
+		f = r.x > 0.0 ? 0 : 1;
+		m = a.x;
+		u = r.x > 0.0 ? vec3( 0.0, 0.0, -1.0 ) : vec3( 0.0, 0.0, 1.0 );
+		v = vec3( 0.0, -1.0, 0.0 );
+	} else if ( a.y >= a.z ) {
+		f = r.y > 0.0 ? 2 : 3;
+		m = a.y;
+		u = vec3( 1.0, 0.0, 0.0 );
+		v = r.y > 0.0 ? vec3( 0.0, 0.0, 1.0 ) : vec3( 0.0, 0.0, -1.0 );
+	} else {
+		f = r.z > 0.0 ? 4 : 5;
+		m = a.z;
+		u = r.z > 0.0 ? vec3( 1.0, 0.0, 0.0 ) : vec3( -1.0, 0.0, 0.0 );
+		v = vec3( 0.0, -1.0, 0.0 );
+	}
+	vec4 o4 = texelFetch( volLampTable, i * 4 + ( f >> 1 ) );
+	vec2 o = ( f & 1 ) == 0 ? o4.xy : o4.zw;
+	float s = t3.x;
+	vec2 ndc = vec2( dot( u, r ), dot( v, r ) ) / max( m, 1e-4 );
+	vec2 px = clamp( o + ( ndc * 0.5 + 0.5 ) * s, o + 1.0, o + s - 1.0 );
+	float d = length( r );
+	float radius = max( texelFetch( cellLights, i * CELL_TPL ).w, 0.001 );
+	float ref = ( d - 1.0 - 3.0 * d / s ) / radius;
+	return texture( volLampAtlas, vec3( px / vec2( textureSize( volLampAtlas, 0 ) ), ref ) );
+}
+
 float airLeakLightK( int i, vec3 P, vec3 Lp )
 {
+	if ( volLampVis == 1 ) {
+		float av = airLampAtlasVis( i, P, Lp );	// every cell: the atlas is no probe guess (AUDIT row 5)
+		if ( av >= 0.0 )
+			return av;
+	}
 	if ( ( volLeakRed & 4 ) != 0 )
 		return 1.0;
 	vec4 t4 = texelFetch( cellLights, i * CELL_TPL + 4 );

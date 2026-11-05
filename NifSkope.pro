@@ -299,6 +299,7 @@ HEADERS += \
 	src/gl/cellnifxlights.h \
 	src/features/ao/cellaodecalgl.h \
 	src/features/air/cellvolair.h \
+	src/features/air/airlampatlas.h \
 	src/gl/fogterrain.h \
 	src/features/shared/cellpasstime.h \
 	src/features/shared/wwtelemetry.h \
@@ -638,6 +639,7 @@ SOURCES += \
 	src/gl/cellnifxlights.cpp \
 	src/features/ao/cellaodecalgl.cpp \
 	src/features/air/cellvolair.cpp \
+	src/features/air/airlampatlas.cpp \
 	src/features/air/volpartdump.cpp \
 	src/gl/fogterrain.cpp \
 	src/features/shared/cellpasstime.cpp \

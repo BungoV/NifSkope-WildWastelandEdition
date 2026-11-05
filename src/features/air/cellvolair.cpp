@@ -10,6 +10,7 @@ BSD License - see nifskope.h
 
 #include "features/air/airbouncelamp.h"	// lane AIRBOUNCE1: the lamps' floor-bounce law
 #include "features/air/airmslamp.h"	// lane AIRMS1: the lamps' multiple-scattering law
+#include "features/air/airlampatlas.h"	// lane MODULES1 route (a): the lamps' shadows in the air
 #include "gl/atmomath.h"	// lane CLOUD6e: kUnitKm, the cloud map's units
 #include "gl/atmosphere.h"	// SHAFTS1b: the aerial perspective's haze, for the no-double-count fit
 #include "features/air/cellairzone.h"	// lane AIRZONE1: the hand-placed volumes' fog and particle blocks
@@ -1869,6 +1870,29 @@ static void vaPassInner( Scene * scene, bool run )
 
 	const auto & pm = r->globalUniforms->projectionMatrix;
 	const float p00 = pm[0][0], p11 = pm[1][1];
+	// lane MODULES1 route (a): the lamps' shadows in the air from the atlas (features/air/airlampatlas.h); its draw takes
+	// its own program, so this one is bound again. The samplers always get their own units (a shadow and a plain
+	// sampler on one unit refuse the draw)
+	int lampN = 0;
+	{
+		float camW[3];
+		for ( int k = 0; k < 3; k++ ) {
+			camW[k] = 0.0f;
+			for ( int j = 0; j < 3; j++ )
+				camW[k] -= vt.rotation( j, k ) * vt.translation[j] / sc;
+		}
+		lampN = wwAirLampAtlasFrame( scene, L, camW, p11, H, farD );
+		prog = r->useProgram( "cell_volair.prog" );
+		if ( !prog ) {
+			s.last = QStringLiteral( "refused(cell_volair.prog did not link)" );
+			restore();
+			return;
+		}
+		prog->uni1i( "volLampVis", lampN > 0 ? 1 : 0 );
+		prog->uni1i( "volLampN", lampN );
+		prog->uni1i( "volLampAtlas", WwCellUnit::AirLampAtlas );
+		prog->uni1i( "volLampTable", WwCellUnit::AirLampTable );
+	}
 	const bool csm = wwSunShadowWanted( scene );
 	fn->glDisable( GL_DEPTH_TEST );
 	fn->glDisable( GL_CULL_FACE );

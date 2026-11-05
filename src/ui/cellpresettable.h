@@ -98,6 +98,8 @@ inline const WwPresetRow * wwPresetTable( int * count )
 		{ "CellWorkspaceLook_WW_CELL_AIR_BURNOFF", '0', "0111", "0000", 'M', false, WW_PR_NONE, WW_PR_NONE, "under the air; no ms" },
 		{ "CellWorkspaceLook_WW_CELL_AIR_GROUND_DERIVED", '0', "0111", "0000", 'M', false, WW_PR_NONE, WW_PR_NONE, "under the air; no ms" },
 		{ "CellWorkspaceFarAir", '0', "00HU", "0000", 'M', true, WW_PR_NONE, WW_PR_NONE, "far air (sub air-far); no target of its own" },
+		{ "CellWorkspaceAirLampVis", '-', "----", "----", '-', false, WW_PR_NONE, WW_PR_NONE,
+			"MODULES1 route (a): Atlas | Ray traced | Probe walk; left as it is until the Museum timing picks the default" },
 		{ "CellWorkspaceVolPart", '0', "0011", "0000", 'M', true, WW_PR_NONE, WW_PR_NONE, "the air's particles; no ms" },
 		{ "CellWorkspaceFogDrift", '0', "0111", "0000", 'M', false, WW_PR_NONE, WW_PR_NONE, "under the air; no ms" },
 		{ "CellWorkspaceAirZones", '-', "----", "----", '-', false, WW_PR_NONE, WW_PR_NONE, "hand-placed volumes (data), not a cost step" },

@@ -31,6 +31,7 @@ BSD License - see nifskope.h
 #include "gl/cellwatergi.h"	// water reads no probe GI
 #include "gl/celllampshadow.h"	// lane LAMPSHADOW1
 #include "gl/cubefacecull.h"	// lane PERFFIX2 b: a caster draws only into the cube faces it can reach
+#include "features/air/airlampatlas.h"	// lane MODULES1 route (a): the air's lamp atlas draws these casters
 #include "gl/lampslice.h"	// lane PERFFIX2 b: the lamp store's first stores spread over frames
 #include "gl/celllooks.h"	// lane GAPLOOK1
 #include "gl/celllensflare.h"	// lane LIGHTS3 (LENSFLARE1): its echo
@@ -3572,6 +3573,29 @@ static void cubeDrawCaster( Renderer * r, NifSkopeOpenGLContext::Program * prog,
 	}
 	r->drawShape( (unsigned int) ( sh->verts.size() ), mask, (unsigned int) ( sh->triangles.size() * 3 ),
 		GL_TRIANGLES, GL_UNSIGNED_SHORT, attrv, sh->triangles.constData() );
+}
+
+// lane MODULES1 route (a): the light cubes' casters (wwCellShadowPass's filter) and draw, for the air's lamp atlas
+void wwCellCubeCasters( Scene * scene, std::vector<WwCubeCaster> & out )
+{
+	out.clear();
+	WW_SWITCH_STATIC( bool, waterCastsRed, wwEnv( "WW_CELL_SHADOW_RED" ).trimmed() == "watercasts" );
+	for ( Node * node : scene->nodes.list() ) {
+		const Shape * sh = dynamic_cast<const Shape *>( node );
+		if ( !sh || !sh->isVisible() || !sh->wwCastsSunShadow() || cubeSkipsCaster( sh ) )
+			continue;
+		if ( sh->verts.isEmpty() || sh->triangles.isEmpty() )
+			continue;
+		if ( !waterCastsRed && wwCellWaterIsShape( scene->nifModel, sh->id() ) )
+			continue;
+		const BoundSphere b = sh->bounds();
+		out.push_back( { sh, { b.center[0], b.center[1], b.center[2] }, b.radius } );
+	}
+}
+
+void wwCellCubeDrawCaster( Renderer * r, NifSkopeOpenGLContext::Program * prog, const Shape * sh )
+{
+	cubeDrawCaster( r, prog, sh );
 }
 
 static void lampShadowPass( Scene * scene, Gpu & g, const WwCellLighting & L, std::vector<int> & dirty, const float cam[3] )

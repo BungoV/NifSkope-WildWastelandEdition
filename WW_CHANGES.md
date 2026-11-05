@@ -1,3 +1,14 @@
+## MODULES1 step 7 (2026-11-05): Volumetric Air > Lamp shadows (Atlas | Ray traced | Probe walk)
+
+- A new live row under Volumetric Air picks how the air's lamp leak sees shadows: Atlas (route (a), new), Ray traced
+  (reads the Probe walk until route (b) lands) and Probe walk (the old way, the default until the Museum timing picks
+  one). Key `WW/AirLampVis`; pin `WW_CELL_AIR_LAMPVIS=atlas|rays|walk`, re-read each frame. Presets leave it as it is.
+- Atlas: `src/features/air/airlampatlas.*`. One 8192 x 8192 depth atlas, six tiles a lamp sized by its screen size
+  (32..256 px), at most 192 faces drawn a frame, nearest lamps first, new tiles drawn before the old are freed. The
+  static world is drawn once a cell (movers are frozen at the draw: AUDIT row 11). The air reads a 2x2 compare;
+  lamps with no tiles yet use the walk.
+- Default is unchanged (Probe walk): the pictures are unchanged until the row is set.
+
 ## MODULES1 step 6 (2026-11-05): every AO type and the shared timers sit in their module folders
 
 - The AO module is complete in `src/features/ao/`: the screen AO interface and menus (`ao.h`, `aomenu.cpp`), the
