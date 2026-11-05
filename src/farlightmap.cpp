@@ -3,7 +3,7 @@
 #include "farlightmap.h"
 
 #include "esmdata.h"
-#include "probeincr.h"
+#include "features/gi/probeincr.h"
 #include "version.h"
 
 #include <QCoreApplication>
@@ -330,7 +330,7 @@ void walkSay( const QString & l )
 	std::fflush( stderr );
 }
 
-//! the per-cell env of tools/ww_bake_world.py's bake, plus WW_CELL_FARLIGHT (driver and walk set it the same way)
+//! the per-cell env of src/features/gi/ww_bake_world.py's bake, plus WW_CELL_FARLIGHT (driver and walk set it the same way)
 void prepCell( const QString & spec, const QString & cellDir, const QString & runDir, int x, int y,
 	const std::function<void( const QString &, const QString & )> & set )
 {

@@ -28,7 +28,7 @@ BSD License - see nifskope.h
 #include "gl/cellwater.h"	// water casts no cube shadow
 #include "gl/cellunderwater.h"	// the WATR INAM imagespace under water
 #include "esmwater.h"
-#include "gl/cellwatergi.h"	// water reads no probe GI
+#include "features/gi/cellwatergi.h"	// water reads no probe GI
 #include "features/lights/celllampshadow.h"	// lane LAMPSHADOW1
 #include "features/lights/cubefacecull.h"	// lane PERFFIX2 b: a caster draws only into the cube faces it can reach
 #include "features/air/airlampatlas.h"	// lane MODULES1 route (a): the air's lamp atlas draws these casters
@@ -38,10 +38,10 @@ BSD License - see nifskope.h
 #include "features/lights/cellfxlit.h"	// lane LIGHTS4: a placement's emittance colour
 #include "gamemanager.h"	// lane SUNCELL1: the weather imagespace's LUT
 #include "esmweather.h"	// lane WEATHERBLEND2: wwLutBlendN
-#include "probealbedo.h"	// lane LIGHTS5 (GOBO1): a spot's pattern
+#include "features/gi/probealbedo.h"	// lane LIGHTS5 (GOBO1): a spot's pattern
 #include "recx.h"	// lane LIGHTS5 (FOGSCALE1): fog.scale
 #include "features/lights/cellnifxlights.h"	// lane NIFXLIGHT1: a fixture mesh's .nifx lights
-#include "rtddgicell.h"	// lane RTXGI1 M2: the ray-traced GI volume's read (rtddgiCellUniforms)
+#include "features/gi/rtddgicell.h"	// lane RTXGI1 M2: the ray-traced GI volume's read (rtddgiCellUniforms)
 #include "gl/celluniprof.h"	// lane PERFFIX1: WW_CELL_UNI_PROF
 #include "gl/cellunirec.h"	// lane PERFFIX1: the cell-uniform class record
 #include "gl/cloudvol.h"	// lane LIGHTNING2: a storm's flash on the exterior ambient (wwLightningGround)
@@ -71,7 +71,7 @@ BSD License - see nifskope.h
 #include <map>
 #include <vector>
 #include <unordered_map>	// lane PERFFIX1: the cell-uniform class records
-#include "celllights_p.h"	// lane MODULES1 (lights): the state the lamps share
+#include "features/lights/celllights_p.h"	// lane MODULES1 (lights): the state the lamps share
 
 using namespace WwCellLightsP;
 
@@ -1515,7 +1515,7 @@ void wwCellLightsUniforms( Scene * scene )
 		}
 	}
 	prof.at( 6, "air" );
-	// the rooms (src/proberooms.h): the grid's slot rooms and the fine rooms, nearest, R32F
+	// the rooms (src/features/gi/proberooms.h): the grid's slot rooms and the fine rooms, nearest, R32F
 	if ( g.units < 0 ) {
 		GLint units = 0;
 		fn->glGetIntegerv( GL_MAX_TEXTURE_IMAGE_UNITS, &units );
@@ -1652,7 +1652,7 @@ void wwCellLightsUniforms( Scene * scene )
 	prof.at( 8, "far" );
 	rec.i( prog, "cellGi", kGiUnit );
 	rec.b( prog, "cellGiOn", giDraw );
-	rec.live( 1 );	rtddgiCellUniforms( scene );	// lane RTXGI1 M2: the ray-traced GI volume (src/rtddgicell.h); no-op in an off program
+	rec.live( 1 );	rtddgiCellUniforms( scene );	// lane RTXGI1 M2: the ray-traced GI volume (src/features/gi/rtddgicell.h); no-op in an off program
 	prof.at( 9, "rtddgi" );
 	// without the PRT a weather-lit exterior's sky is the ray-traced volume's (its misses: cell_lights.glsl CELL_GI_UP)
 	const bool ddgiSky = !wwCellPrtOn() && L && wwCellAsOutdoor( L ) && wwLookdevActive();	// + sunlit interiors

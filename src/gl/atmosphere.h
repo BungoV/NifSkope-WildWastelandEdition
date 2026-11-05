@@ -134,7 +134,7 @@ bool wwAtmoTintRedFlat();	//!< the red: the horizon's color at every elevation (
 //! SKY2B (SKYTINT2) red WW_ATMO_TINT_RED=physical: the aerial perspective and the ambient keep the physical color
 bool wwAtmoTintRedPhysical();
 
-/* lane SKYA (SKYGI1): the probes' sky light from the physical sky. The probe bake's sky term (src/probesky.h, lane
+/* lane SKYA (SKYGI1): the probes' sky light from the physical sky. The probe bake's sky term (src/features/gi/probesky.h, lane
  * SKYPIC1) integrates a 6-face capture of the drawn sky; with this row on and Physical Sky on, the capture draws the
  * physical sky (its sky-view LUTs, no sun disc: the sun is the bake's own term) in place of the weather dome. Row
  * Render > Scene > GI Sky From Physical Sky: Off / On, ships Off; Off (or Physical Sky Off) = today's capture, key

@@ -2,8 +2,8 @@
 #define RESTIRMATH_H
 
 /* Lane RESTIRDI1 (2026-10-30): ReSTIR DI for the cell lights that cast shadows, the rules in one header (no Qt).
- * Each primitive names its GLSL twin in src/rtddgi/restir_common.glsl (the "MIRROR restirmath.h <name>" lines there);
- * change both or neither. restir::frame() below is the CPU twin of src/rtddgi/restir.comp's three passes (the GPU
+ * Each primitive names its GLSL twin in src/features/gi/rtddgi/restir_common.glsl (the "MIRROR restirmath.h <name>" lines there);
+ * change both or neither. restir::frame() below is the CPU twin of src/features/gi/rtddgi/restir.comp's three passes (the GPU
  * runs the same steps on the same inputs with the same random streams), and tests/restir_math holds the unit test
  * (one red per rule) and the brute-force CPU reference gate.
  *
@@ -26,7 +26,7 @@
  *   RESTIR_RED_VIEWPOS     the pixel's view point with the projection's offset sign flipped (check viewpos)
  * The runtime red bits (the GPU's and the twin's `red`, `-no-gui restir --red`) are kRedNoVis .. kRedNoHole. */
 
-#include "rtddgimath.h"   // V3, lightRadial, spotCone
+#include "features/gi/rtddgimath.h"   // V3, lightRadial, spotCone
 
 #include <algorithm>
 #include <cmath>
@@ -42,7 +42,7 @@ constexpr float kHistoryCap = 20.0f;    // [Bitterli 2020 sec. 6]
 constexpr float kDepthTol = 0.1f;       // ours, inside Bitterli's 10 % / 25 deg rule
 constexpr float kNormalTol = 0.906f;    // cos 25 deg
 constexpr float kNone = 1e5f;           // a g-buffer depth at or past this is background (the GL pass clears to 1e6)
-constexpr int kLightFloats = 32;        // src/rtddgi.cpp packLight: 8 vec4 a light
+constexpr int kLightFloats = 32;        // src/features/gi/rtddgi.cpp packLight: 8 vec4 a light
 constexpr float kAccMax = 16.0f;        // restir_common.glsl RESTIR_ACC_MAX
 
 //! the runtime red bits with the compile-time reds of this build folded in (the unit test's red builds)
@@ -285,7 +285,7 @@ struct FrameIn
 	const float * gbuf = nullptr;      // W x H x 4: view normal xyz, linear depth (>= kNone: none); bottom row first
 	const float * prevGbuf = nullptr;  // last frame's (nullptr: no history)
 	Cam cam, prev;
-	const float * lights = nullptr;    // 32 floats a light (src/rtddgi.cpp packLight; [29] source radius, [30] shadow flag)
+	const float * lights = nullptr;    // 32 floats a light (src/features/gi/rtddgi.cpp packLight; [29] source radius, [30] shadow flag)
 	int nLights = 0;
 	const int * cand = nullptr;        // the candidate lights (the shadow-flag ones)
 	int nCand = 0;

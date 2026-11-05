@@ -39,7 +39,7 @@ uniform vec4 cellLightPhys;			// x falloff 0 game / 1 physical / 2 advanced, y a
 uniform vec4 cellLightPhysB;		// z source fraction, w advanced numerator; B: x advanced min metres, y area size (0 off), z red bits
 uniform int cellRed;				// 1 linear: the radial curve without its 2.2; 8 lambert, 16 normalised, 32 norim,
 									// 64 rimflags (the lights' rim / roughness flags ignored); 512 cubeold
-// the bake relit by these lights (src/probegi.h), six axis slabs of dims.z each, x fastest;
+// the bake relit by these lights (src/features/gi/probegi.h), six axis slabs of dims.z each, x fastest;
 // rgb = irradiance x valid, a = valid (so a filtered sample divides by its own valid)
 uniform bool cellGiOn;
 uniform sampler3D cellGi;
@@ -47,7 +47,7 @@ uniform vec3 cellGiOrigin;
 uniform float cellGiVoxel;
 uniform vec3 cellGiDims;
 uniform float cellGiPad;		// lane GIEDGE1: the grid's x/y edge voxels past the probes' reach (probegi kPad); 0 = the clampedge red
-// rooms (src/proberooms.h): the grid holds 12 slabs (slot 0's six, then slot 1's); cellGiSlots
+// rooms (src/features/gi/proberooms.h): the grid holds 12 slabs (slot 0's six, then slot 1's); cellGiSlots
 // per voxel and cellRooms per fine cell hold two rooms packed as (a + 1) x 4096 + (b + 1), -1 none
 uniform bool cellGiRooms;
 uniform sampler3D cellGiSlots;
@@ -55,10 +55,10 @@ uniform sampler3D cellRooms;
 uniform vec3 cellRoomsOrigin;
 uniform float cellRoomsCell;
 uniform vec3 cellRoomsDims;
-// a weather-lit exterior's grid holds the sky the probes see (src/probesky.h), so it stands in
+// a weather-lit exterior's grid holds the sky the probes see (src/features/gi/probesky.h), so it stands in
 // for the weather's unshadowed ambient by the grid's valid share (0 where the grid does not reach)
 uniform bool cellGiSky;
-// lane EMISSIVEGRID1 (src/probegifine.h): the fine boxes round bright glow, their atlas in cellGi's layers after the grid's
+// lane EMISSIVEGRID1 (src/features/gi/probegifine.h): the fine boxes round bright glow, their atlas in cellGi's layers after the grid's
 uniform bool cellGiFineOn;
 uniform int cellGiFineN;
 uniform int cellGiFineRed;		// 1 noseen, 2 nosub (WW_CELL_EMISSIVEGRID_RED)
@@ -111,7 +111,7 @@ uniform float cellShadowTexel;
 uniform bool cellShadowFadeOn;		// lane GAPLOOK1 (LIGHTSYS-3): the budget's per-slot strength (celllights.cpp shFade)
 uniform float cellShadowFade[16];
 #ifdef WW_CELL_RESTIR
-// lane RESTIRDI1 (src/rtddgicell.cpp, src/rtddgi/restir.comp): the RT quality preset Medium+. ReSTIR DI's ratio a pixel
+// lane RESTIRDI1 (src/features/gi/rtddgicell.cpp, src/features/gi/rtddgi/restir.comp): the RT quality preset Medium+. ReSTIR DI's ratio a pixel
 // (Heitz 2018: the shadowed / unshadowed estimates of the shadow-casting lights) and the linear depth it was traced for
 uniform bool cellRestirOn;
 uniform samplerBuffer cellRestir;	// RG32F, bottom row first: ratio, linear depth
@@ -1005,13 +1005,13 @@ vec3 cellGiKeyNormal( float k )
  * The outdoors is one volume (room 0); every interior room is a volume of its own, drawn as primitive shapes into a
  * screen mask (src/gl/celllights.cpp giVolPass, cell_givol.frag). A pixel reads only the grid voxels (slots) of its own
  * volume: the 8 voxels round P + N x half a voxel, trilinear, renormalized. Where a threshold joins two volumes the
- * voxels near it carry its weight t and the other side's room (baked, src/probegi.cpp probeGiRoomsInto), and the pixel
+ * voxels near it carry its weight t and the other side's room (baked, src/features/gi/probegi.cpp probeGiRoomsInto), and the pixel
  * blends the other side's read in by t / 2: both ways, so light passes in and out through thresholds only.
  *   cellGiVolume: one copy of the read, loops kept as loops (the bound is a uniform), so a call site costs little.
  *   Its volume: the screen mask (the full-screen GI pass, cell_gihalf.frag), else the fine room grid at P + N x 0.75
  *   cell, else 1.75 cell (blended and effect draws, the probe passes); neither: every voxel's first slot.
  * Red WW_CELL_GI_VIS=march compiles WW_CELL_GI_MARCH: today's chain (cellGiSampleFull), every call, as before PERF1.
- * Probe 95 paths, in lane GIBLACK2's words (tests/spells/cell_giblack_check.py): 1 the volume's own voxels (a room's
+ * Probe 95 paths, in lane GIBLACK2's words (tests/features/gi/cell_giblack_check.py): 1 the volume's own voxels (a room's
  * blend; also with a threshold's), 2 the nearest own-volume voxel (a room's fill), 4 no volume known or none of its
  * voxels in reach (the trilinear); outdoors, a surface the room grid cannot place (lane GIBLACK2's stranded): 6 and 7
  * the outdoors' volume, 5 none in reach. A probe picture reads the mask at its own pixel (the screen pass's read). */
@@ -1171,7 +1171,7 @@ vec4 cellGiVolume( vec3 P, vec3 N, ivec2 L )
 
 #ifdef WW_CELL_RTDDGI
 #undef cellGiVolume
-/* lane RTXGI1 M2 (src/rtddgicell.h): the ray-traced GI volume's read (cell_ddgi.glsl) in place of the baked grid's
+/* lane RTXGI1 M2 (src/features/gi/rtddgicell.h): the ray-traced GI volume's read (cell_ddgi.glsl) in place of the baked grid's
  * inside its probe box; the grid's read (cellGiVolumeGrid above, unchanged) past the box, across its last cell (the
  * fade), and wherever none of the 8 probes is usable. Its .a is 1: the volume holds the sky (its misses) and every
  * bounce, so it replaces the flat ambient whole (cellGiSkyK's k; the linear law of ww-probe-sky-shade). The Sky
@@ -1311,7 +1311,7 @@ float cellAoDecalAt()
 	return texelFetch( cellAoDecal, ivec2( gl_FragCoord.xy - cellAoDecalRect.xy ), 0 ).r;
 }
 
-/* lane EMISSIVEGRID1 (src/probegifine.h): inside a fine box the coarse grid's share of the box's glow (C, kC of it in
+/* lane EMISSIVEGRID1 (src/features/gi/probegifine.h): inside a fine box the coarse grid's share of the box's glow (C, kC of it in
  * the sample) gives way to the box's own (D), faded back to the coarse grid over the box's outer two voxels. A fine
  * voxel counts only when its centre is air and the fine room grid shows no solid cell between the surface's room
  * read and it (cellGiSeen's rule). One call site (cellGiE0): the program link limit (GIDARK1). */
@@ -1856,7 +1856,7 @@ vec3 cellProbeRaw( vec3 P, vec3 N )
 /* a probe pass's picture on a white surface: no albedo, direct light, fog or imagespace. GI = E(N) / pi; Sky
  * visibility = the sky grid read the same way. Display: pow(clamp(x), 1 / 2.2), a fixed curve so two bakes compare.
  * Cyan = no probe reaches here (not magenta, which means a missing texture); in the surfel passes every surface is
- * cyan and the surfel tiles draw over it (src/gl/cellprobeview.h). */
+ * cyan and the surfel tiles draw over it (src/features/gi/cellprobeview.h). */
 vec3 cellPassOut( vec3 P, vec3 N )
 {
 	const vec3 none = vec3( 0.0, 1.0, 1.0 );	// cyan, never magenta (magenta = missing texture)
@@ -2100,7 +2100,7 @@ vec3 cellCubeProbe( vec2 uv, vec3 normalView )
 }
 #endif
 
-// lane SSGI1: the screen-space bounce (src/gl/cellssgi.h, cell_ssgi.frag): the probe GI keeps the share of the
+// lane SSGI1: the screen-space bounce (src/features/gi/cellssgi.h, cell_ssgi.frag): the probe GI keeps the share of the
 // hemisphere the march left open, the screen's bounce is added (FO4CS's probe-fill law; red "stack" adds on top)
 uniform bool cellSsgiOn;
 uniform sampler2D cellSsgi;		// the work size, bottom row first: rgb the bounce E, a the open share

@@ -1,4 +1,4 @@
-# ConcordMuseum01 (flags 0x1181: Show Sky, Use Sky Lighting: the sky-lit grid runs the stranded law), whole cell, a fresh bake by this tree (tests/spells/cell_rooms.sh cells), stranded under its rooms grid (25.0-unit cells); area samples kept where rays meet <= 10% backs
+# ConcordMuseum01 (flags 0x1181: Show Sky, Use Sky Lighting: the sky-lit grid runs the stranded law), whole cell, a fresh bake by this tree (tests/features/gi/cell_rooms.sh cells), stranded under its rooms grid (25.0-unit cells); area samples kept where rays meet <= 10% backs
 # set px py x y z nx ny nz tracer   (lane GIBLACK2: stranded surfaces; set 0 a viewer can stand before (median hemisphere ray free distance >= 64 u), 1 tight; tracer = bounce_reference cosine sky share, 256 rays, cull 3000)
 0 0 0 -651.26 -1409.73 388.61 0.0302 -0.0162 0.9994 0.00000
 0 0 0 -1920.50 65.58 257.97 -1.0000 0.0000 0.0000 0.00000

@@ -1,6 +1,6 @@
 #include "features/air/airzone.h"
 
-#include "proberooms.h"	// GiVolumeSet (plain types; no link to proberooms.cpp)
+#include "features/gi/proberooms.h"	// GiVolumeSet (plain types; no link to proberooms.cpp)
 #include "recx.h"
 #include "wwswitch.h"
 

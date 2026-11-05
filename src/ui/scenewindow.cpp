@@ -18,7 +18,7 @@ BSD License - see nifskope.h
 #include "gl/cloudvol.h"	// lane CLOUD2
 #include "gl/cloudshadow.h"	// lane CLOUD3
 #include "gl/cloudfly.h"	// lane CLOUD4
-#include "gl/cellssgi.h"	// lane SSGI1
+#include "features/gi/cellssgi.h"	// lane SSGI1
 #include "gl/celllights.h"	// lane GAPTOOL1: the SSAO row
 #include "gl/cellbloom.h"	// lane GAPTOOL1: the Bloom row
 #include "gl/fxparity.h"	// lane FXPARITY1

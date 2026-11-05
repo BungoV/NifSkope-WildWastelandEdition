@@ -33,7 +33,7 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include "lodgen.h"
 #include "wwswitch.h"	// lane TESTDRIVER1: the WW_* switch store
 #include "lodgengpu.h"
-#include "proberelight.h"
+#include "features/gi/proberelight.h"
 #include "celldoorlive.h"	// lane DOORLIVE1: the port's NifSkope::door
 #include "glview.h"
 #include "nifcli.h"
@@ -62,7 +62,7 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include <QUrl>
 #include <cstdio>	// lane PERF1: setvbuf
 
-#include "probeincr.h"
+#include "features/gi/probeincr.h"
 #ifdef Q_OS_WIN
 #  ifndef NOMINMAX
 #    define NOMINMAX
@@ -332,7 +332,7 @@ int main( int argc, char * argv[] )
 
 		/* lane BAKEINCR1: WW_CELL_BAKEINCR_CHECK=... is the incremental probe bake's check: it runs here,
 		 * after the game manager and the resource stack are set exactly as a bake sets them, and before
-		 * any window, then exits (src/probeincr.cpp). */
+		 * any window, then exits (src/features/gi/probeincr.cpp). */
 		if ( !wwEnvIsEmpty( "WW_CELL_BAKEINCR_CHECK" ) )
 			return ProbeIncr::checkMain();
 

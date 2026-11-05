@@ -6,7 +6,7 @@ BSD License - see nifskope.h
 
 #include "lodgen.h"
 #include "wwswitch.h"	// the WW_* switch store
-#include "probeincr.h"
+#include "features/gi/probeincr.h"
 #include "lodgenparallel.h"
 #include "lodgenbc7.h"
 #include "lodgengpu.h"
@@ -1580,7 +1580,7 @@ qint64 assetKeepCap()
 } // namespace
 
 /* every asset read passes here, and while a probe bake records its inputs
- * (src/probeincr.cpp) the read is noted -- data root, path, folder, extension and the
+ * (src/features/gi/probeincr.cpp) the read is noted -- data root, path, folder, extension and the
  * bytes' sha1, or "missing" -- so the incremental check can ask the same question later. */
 static bool lodgenReadAsset( const QString & dataRoot, const QString & relPath,
 	const char * archiveFolder, const char * extension, QByteArray & out )
@@ -19589,7 +19589,7 @@ static QString lodgenLedgerAssetDigest( const QString & dataRoot, const QString 
 	return hex;
 }
 
-//! the generator's asset reader, for the incremental probe check (src/probeincr.cpp)
+//! the generator's asset reader, for the incremental probe check (src/features/gi/probeincr.cpp)
 bool lodgenReadAssetBytes( const QString & dataRoot, const QString & relPath, const char * archiveFolder,
 	const char * extension, QByteArray & out )
 {

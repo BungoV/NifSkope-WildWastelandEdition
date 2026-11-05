@@ -193,7 +193,7 @@ def main(a):
     if mode == 'tbk':
         import glob
         import os
-        sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+        sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'features', 'gi')); sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
         from probe_bake import read_tbk
         pos, nr = [], []
         for f in sorted(glob.glob(os.path.join(a[2], '*.tbk'))):

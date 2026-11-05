@@ -1,5 +1,5 @@
 # Lane RESTIRSPV1: every committed SPIR-V header (src/**/*.spv.h) must be what its generator script makes of its
-# source TODAY. A .comp / .glsl edit without `bash tools/rtddgi_spirv.sh` (or tools/bakert_spirv.sh) leaves the exe
+# source TODAY. A .comp / .glsl edit without `bash src/features/gi/rtddgi_spirv.sh` (or src/features/gi/bakert_spirv.sh) leaves the exe
 # running the OLD kernel against a CPU twin with the new rule (skill ww-rtddgi-volume, "a stale header").
 #   python -I tests/spvsync/check_spv.py <tree> <scratch dir> [--glslang <exe>] [--committed <name>=<file>]...
 # Rebuilds each header from its source into <scratch> with the same tool + flags the generator scripts use, and
@@ -9,34 +9,34 @@
 # the bytes then cannot be compared, which is not a pass).
 import os, re, shutil, subprocess, sys
 
-# (source dir, kernel, --target-env, --vn) == tools/bakert_spirv.sh + tools/rtddgi_spirv.sh
+# (source dir, kernel, --target-env, --vn) == src/features/gi/bakert_spirv.sh + src/features/gi/rtddgi_spirv.sh
 SPECS = [
-	('src/bakert', 'rq', 'vulkan1.2', 'bakert_rq_spv'),
-	('src/bakert', 'bvh', 'vulkan1.1', 'bakert_bvh_spv'),
-	('src/bakert', 'rqx', 'vulkan1.2', 'bakert_rqx_spv'),
-] + [('src/rtddgi', k, 'vulkan1.2', 'rtddgi_%s_spv' % k) for k in ('trace', 'blend', 'border', 'reloc', 'restir')]
+	('src/features/gi/bakert', 'rq', 'vulkan1.2', 'bakert_rq_spv'),
+	('src/features/gi/bakert', 'bvh', 'vulkan1.1', 'bakert_bvh_spv'),
+	('src/features/gi/bakert', 'rqx', 'vulkan1.2', 'bakert_rqx_spv'),
+] + [('src/features/gi/rtddgi', k, 'vulkan1.2', 'rtddgi_%s_spv' % k) for k in ('trace', 'blend', 'border', 'reloc', 'restir')]
 DEFAULT_G = 'E:/Tools/RenderDoc/RenderDoc_1.45_64/plugins/spirv/glslangValidator.exe'
 
 
 def script_ok(tree):
 	"""The generator scripts still say what SPECS says (one table, checked against the scripts it mirrors)."""
 	bad = []
-	b = open(os.path.join(tree, 'tools/bakert_spirv.sh'), encoding='utf-8', errors='replace').read()
-	r = open(os.path.join(tree, 'tools/rtddgi_spirv.sh'), encoding='utf-8', errors='replace').read()
+	b = open(os.path.join(tree, 'src/features/gi/bakert_spirv.sh'), encoding='utf-8', errors='replace').read()
+	r = open(os.path.join(tree, 'src/features/gi/rtddgi_spirv.sh'), encoding='utf-8', errors='replace').read()
 	m = re.search(r'^for k in ([a-z ]+); do$', r, re.M)
 	loop = m.group(1).split() if m else []
 	if '"$G" --target-env vulkan1.2 -V --vn "rtddgi_${k}_spv" -o "${k}.spv.h" "${k}.comp"' not in r:
-		bad.append('tools/rtddgi_spirv.sh: its compile line changed')
+		bad.append('src/features/gi/rtddgi_spirv.sh: its compile line changed')
 	for d, k, env, vn in SPECS:
-		if d == 'src/bakert':
+		if d == 'src/features/gi/bakert':
 			if '"$G" --target-env %s -V --vn %s -o %s.spv.h %s.comp' % (env, vn, k, k) not in b:
-				bad.append('tools/bakert_spirv.sh: no line for %s (%s)' % (k, env))
+				bad.append('src/features/gi/bakert_spirv.sh: no line for %s (%s)' % (k, env))
 		elif k not in loop:
-			bad.append('tools/rtddgi_spirv.sh: %s not in its kernel loop' % k)
-	known = set(k for d, k, e, v in SPECS if d == 'src/rtddgi')
+			bad.append('src/features/gi/rtddgi_spirv.sh: %s not in its kernel loop' % k)
+	known = set(k for d, k, e, v in SPECS if d == 'src/features/gi/rtddgi')
 	for k in loop:
 		if k not in known:
-			bad.append('tools/rtddgi_spirv.sh: kernel %s is not in this checker' % k)
+			bad.append('src/features/gi/rtddgi_spirv.sh: kernel %s is not in this checker' % k)
 	return bad
 
 
@@ -123,7 +123,7 @@ def main(argv):
 			else:
 				why = 'line endings only' if a.replace(b'\r\n', b'\n') == c.replace(b'\r\n', b'\n') else first_diff(a, c)
 				fails.append('%s/%s: STALE, rebuilt %d B vs committed %d B (%s); run tools/%s_spirv.sh'
-				             % (d, name, len(a), len(c), why, 'bakert' if d == 'src/bakert' else 'rtddgi'))
+				             % (d, name, len(a), len(c), why, 'bakert' if d == 'src/features/gi/bakert' else 'rtddgi'))
 	for f in fails:
 		print('FAIL  ' + f)
 	for s in skips:

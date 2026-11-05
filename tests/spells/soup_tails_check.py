@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Lane LAND5: the probe soup's optional tails after TWO1 are SIZED (u32 magic, u32 count, u32 body bytes, body),
 in the fixed order AMK1, EMT1, VNM1, DRG1 (any new tail appended last), and every reader skips a tail it does not
-know by its byte count (src/probeplace.h, the AMK1 comment). Synthetic scene from probe_bake.py, no game data.
+know by its byte count (src/features/gi/probeplace.h, the AMK1 comment). Synthetic scene from probe_bake.py, no game data.
 
   soup_tails_check.py <nifskope.exe> <work dir> [--prtp <prtp_reference.exe>] [--red unsized|amk2unsized]
 
@@ -23,7 +23,7 @@ import sys
 
 import numpy as np
 
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'features', 'gi')); sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import probe_bake as pb   # noqa: E402
 
 VNM_MAGIC = 0x314D4E56

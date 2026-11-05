@@ -1,7 +1,7 @@
 // irradiance_reference -- the brute-force FULL-irradiance reference for the probe GI (lane GISHADE1, 2026-10-13).
 //
-// Shares NO code with src/probebake.cpp or src/probegi.cpp: its soup reader and glass walk are copies of
-// tests/bounce_reference.cpp's, its BVH is its own (a plain median split). Where bounce_reference stops at the
+// Shares NO code with src/features/gi/probebake.cpp or src/features/gi/probegi.cpp: its soup reader and glass walk are copies of
+// tests/features/gi/bounce_reference.cpp's, its BVH is its own (a plain median split). Where bounce_reference stops at the
 // sun's first bounce and leaves the sky out, this one follows each path through <bounces> surfaces and keeps
 // every source apart, so a shortfall can be told as strength (the first bounce) or count (the later ones):
 //

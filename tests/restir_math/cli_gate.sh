@@ -1,5 +1,5 @@
 #!/bin/bash
-# Lane RESTIRDI1: the GPU-vs-twin gate of ReSTIR DI, no window (`-no-gui restir`, src/rtddgi.cpp restirCli).
+# Lane RESTIRDI1: the GPU-vs-twin gate of ReSTIR DI, no window (`-no-gui restir`, src/features/gi/rtddgi.cpp restirCli).
 #   tests/restir_math/cli_gate.sh <out dir>      (from the tree root; EXE= another exe; SOUP= another soup + RECT/CAM/LIGHTS)
 # Default scene: gpurelight's synthetic three-door room (written into <out>/synth on the first run), its two lamps.
 # Pass: every frame line of di0 and full reads "light kept differs 0" and "hit/miss differs 0"; red_novis reads mean ratio 1.

@@ -35,7 +35,7 @@ namespace az {
 
 enum ShapeType : int { Box = 0, Cylinder = 1, Wedge = 2, Capsule = 3, Sphere = 4 };
 
-//! the GI volumes' shape (src/proberooms.h GiVolumeShape): size = box edges; cylinder x, y diameters, height; wedge edges
+//! the GI volumes' shape (src/features/gi/proberooms.h GiVolumeShape): size = box edges; cylinder x, y diameters, height; wedge edges
 //! (full height at -y, none at +y); capsule diameter, diameter, end to end on z; sphere diameters. Degrees, R = Rz Ry Rx.
 struct Shape
 {

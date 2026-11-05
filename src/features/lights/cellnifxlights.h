@@ -26,7 +26,7 @@ enum WwNifxRed
 	WwNifxRedNoFollow = 32,		//!< "nofollow": follows and NiLight edits ignore the NiLight's dimmer
 	WwNifxRedBulbSurface = 64,	//!< "bulbsurface": a bulb-tier light is drawn on surfaces like a normal one
 	WwNifxRedBulbLit = 128,		//!< "bulblit": a bulb that took a start-off light stays lit
-	WwNifxRedNoRelight = 256,	//!< "norelight": a Mesh lights change does not relight the GI (src/probesky.cpp)
+	WwNifxRedNoRelight = 256,	//!< "norelight": a Mesh lights change does not relight the GI (src/features/gi/probesky.cpp)
 	WwNifxRedNoBulbGi = 512,	//!< "nobulbgi": the GI relight leaves the bulbs out
 	// lane NIFXLIGHT3
 	WwNifxRedStaticDim = 1024,	//!< "staticdim": a light keeps its still dimmer while the World animation row plays

@@ -1,4 +1,4 @@
-// Lane RESTIRDI1 (2026-10-30): just enough GLSL for C++ to compile src/rtddgi/restir_common.glsl as written (the
+// Lane RESTIRDI1 (2026-10-30): just enough GLSL for C++ to compile src/features/gi/rtddgi/restir_common.glsl as written (the
 // rtddgi_math glsl_shim.h pattern). Include inside namespace glsl, after <cmath>; it includes nothing. Scalar functions
 // take double and return float, so a 0.5 literal never makes a call ambiguous.
 

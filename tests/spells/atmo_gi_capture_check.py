@@ -1,10 +1,10 @@
 """SKY3 (SKYGI2, offline, no NifSkope window): the probes' sky term from the physical sky.
 
 The 6-face capture (atmo_sky.frag at exposure 1, linear, no sun disc, 90-degree faces, the tree's real .prog files) is
-projected as src/probesky.cpp probeSkyPictureQ does (exact texel solid angle by the atan formula, the cosine at the
+projected as src/features/gi/probesky.cpp probeSkyPictureQ does (exact texel solid angle by the atan formula, the cosine at the
 texel centre) onto the +Z axis, and compared with atmo_model's sky irradiance on level ground (the MS Psi, the cosine-
 weighted upper hemisphere). Both in the sky pass's scene units (pi / T45 x L), the units of the probes' sun term.
-The capture stands at the probes' height (src/probesky.cpp captureZNow; 20 m here).
+The capture stands at the probes' height (src/features/gi/probesky.cpp captureZNow; 20 m here).
 
 Reds (each must FAIL):
   --red half  the texel solid angle as the flat (2/N)^2 (no projection of the face onto the sphere)

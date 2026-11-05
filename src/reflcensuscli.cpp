@@ -3,8 +3,8 @@
 // src/reflcensus.h holds the rule and what it mirrors; tests/reflcensus/run.sh is its gate.
 #include "reflcensuscli.h"
 
-#include "probebvh.h"
-#include "probeplace.h"
+#include "features/gi/probebvh.h"
+#include "features/gi/probeplace.h"
 #include "reflcensus.h"
 
 #include <QFile>

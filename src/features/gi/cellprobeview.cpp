@@ -1,0 +1,278 @@
+// the PRTP band's Pass overlays (src/features/gi/cellprobeview.h)
+
+#include "features/gi/cellprobeview.h"
+#include "wwswitch.h"	// lane TESTDRIVER1: the WW_* switch store
+
+#include "gl/celllights.h"
+#include "gl/glscene.h"
+
+#include <QFile>
+#include <QHash>
+
+#include <algorithm>
+#include <cmath>
+
+namespace {
+
+struct PvState
+{
+	QHash<const void *, WwCellProbeView> views;
+	QHash<const void *, int> picked;	// the probe picked per document, -1 none
+	int pin = -2;				// WW_CELL_PV_PROBE, -2 unread, -1 none
+	QString lastDump;
+};
+
+PvState & pv()
+{
+	static PvState s;
+	if ( s.pin == -2 ) {
+		const QByteArray p = wwEnv( "WW_CELL_PV_PROBE" ).trimmed();
+		bool ok = false;
+		const int i = p.toInt( &ok );
+		s.pin = ok ? i : -1;
+	}
+	return s;
+}
+
+constexpr float kBoxHalf = 18.0f;	// the probe sphere's radius (and the picked outline), around the largest marker (16)
+constexpr int kSphereRings = 10, kSphereSegs = 16;	// the probe sphere: rings from pole to pole, segments around
+const float kAxes[6][3] = { { 1, 0, 0 }, { -1, 0, 0 }, { 0, 1, 0 }, { 0, -1, 0 }, { 0, 0, 1 }, { 0, 0, -1 } };
+
+// the GI pass's curve (cell_lights.glsl cellPassOut): clamp, then 1 / 2.2
+float shown( float v )
+{
+	return std::pow( std::min( std::max( v, 0.0f ), 1.0f ), 1.0f / 2.2f );
+}
+
+void drawChunked( Scene * scene, const std::vector<Vector3> & p, const std::vector<FloatVector4> & c, bool lines )
+{
+	constexpr size_t kChunk = 65532;	// a multiple of 6 and of 2
+	for ( size_t i = 0; i < p.size(); i += kChunk ) {
+		const size_t n = std::min( kChunk, p.size() - i );
+		if ( lines )
+			scene->drawLines( p.data() + i, n, c.data() + i );
+		else
+			scene->drawTriangles( p.data() + i, n, c.data() + i, true );
+	}
+}
+
+} // namespace
+
+void wwCellProbeViewPublish( const void * nif, const WwCellProbeView & v )
+{
+	PvState & s = pv();
+	s.views.insert( nif, v );
+	s.picked.insert( nif, s.pin >= 0 && size_t( s.pin ) * 21 < v.probes.size() ? s.pin : -1 );
+}
+
+void wwCellProbeViewSetShown( const void * nif, bool shown )
+{
+	PvState & s = pv();
+	auto it = s.views.find( nif );
+	if ( it != s.views.end() )
+		it->probesShown = shown;
+}
+
+const WwCellProbeView * wwCellProbeViewFor( const void * nif )
+{
+	PvState & s = pv();
+	auto it = s.views.constFind( nif );
+	return it == s.views.constEnd() ? nullptr : &*it;
+}
+
+bool wwCellProbeViewPick( Scene * scene, const float origin[3], const float dir[3] )
+{
+	if ( !scene || !scene->nifModel || wwCellPassFor( scene->nifModel ) <= 0 )
+		return false;
+	const WwCellProbeView * v = wwCellProbeViewFor( scene->nifModel );
+	if ( !v || !v->probesShown )
+		return false;
+	int best = -1;
+	float bestT = 1e30f;
+	for ( size_t i = 0; i * 21 + 2 < v->probes.size(); i++ ) {
+		const float * c = &v->probes[i * 21];
+		// the ray against the probe sphere
+		const Vector3 oc( origin[0] - c[0], origin[1] - c[1], origin[2] - c[2] );
+		const float bq = oc[0] * dir[0] + oc[1] * dir[1] + oc[2] * dir[2];
+		const float cq = oc[0] * oc[0] + oc[1] * oc[1] + oc[2] * oc[2] - kBoxHalf * kBoxHalf;
+		const float dd = dir[0] * dir[0] + dir[1] * dir[1] + dir[2] * dir[2];
+		const float disc = bq * bq - dd * cq;
+		const bool hit = disc >= 0.0f && dd > 1e-12f;
+		const float t0 = hit ? std::max( 0.0f, ( -bq - std::sqrt( disc ) ) / dd ) : 0.0f;
+		if ( hit && ( -bq + std::sqrt( disc ) ) < 0.0f )
+			continue;	// behind the eye
+		if ( hit && t0 < bestT ) {
+			bestT = t0;
+			best = int( i );
+		}
+	}
+	PvState & s = pv();
+	const int was = s.picked.value( scene->nifModel, -1 );
+	s.picked.insert( scene->nifModel, best );
+	return best >= 0 || was >= 0;	// a miss clears a pick (and is then an ordinary click)
+}
+
+void wwCellProbeViewDraw( Scene * scene, const Transform & viewTrans )
+{
+	if ( !scene || !scene->nifModel || scene->selecting )
+		return;
+	const int pass = wwCellPassFor( scene->nifModel );
+	if ( pass <= 0 )
+		return;
+	const WwCellProbeView * v = wwCellProbeViewFor( scene->nifModel );
+	if ( !v )
+		return;
+	PvState & s = pv();
+	const int picked = s.picked.value( scene->nifModel, -1 );
+	std::vector<Vector3> tp;
+	std::vector<FloatVector4> tc;
+	size_t tiles = 0, boxes = 0;
+	// the surfels, as tiles a hair off their surface
+	if ( pass >= 3 && pass <= 5 ) {	// 6 (Probe coverage) draws no surfels
+		// a splat 0.6 of the surfel cell: the surfels read apart, and a curved surface keeps few cards in the air
+		const float h = v->surfelCell * 0.3f;
+		// WW_CELL_PV_ID=1: each tile carries its surfel's index + 1 as 24-bit color
+		WW_SWITCH_STATIC( bool, idColors, wwEnvInt( "WW_CELL_PV_ID" ) == 1 );
+		for ( size_t i = 0; i + 11 < v->surfels.size(); i += 12 ) {
+			const float * f = &v->surfels[i];
+			const Vector3 n( f[3], f[4], f[5] );
+			const Vector3 up = std::fabs( n[2] ) < 0.9f ? Vector3( 0, 0, 1 ) : Vector3( 1, 0, 0 );
+			Vector3 t = Vector3::crossproduct( n, up );
+			t.normalize();
+			const Vector3 b = Vector3::crossproduct( n, t );
+			const Vector3 c = Vector3( f[0], f[1], f[2] ) + n * 0.5f;
+			const Vector3 q[4] = { c - t * h - b * h, c + t * h - b * h, c + t * h + b * h, c - t * h + b * h };
+			FloatVector4 col;
+			const quint32 id = quint32( i / 12 + 1 );
+			if ( idColors )
+				col = FloatVector4( float( id & 255 ) / 255.0f, float( ( id >> 8 ) & 255 ) / 255.0f, float( ( id >> 16 ) & 255 ) / 255.0f, 1.0f );
+			else if ( pass == 3 )
+				col = FloatVector4( shown( f[6] ), shown( f[7] ), shown( f[8] ), 1.0f );
+			else if ( pass == 5 && ( i / 12 ) * 3 + 2 < v->surfelBrick.size() ) {	// the brick's light, B / pi
+				const float * k = &v->surfelBrick[( i / 12 ) * 3];
+				col = FloatVector4( shown( k[0] * 0.31830989f ), shown( k[1] * 0.31830989f ), shown( k[2] * 0.31830989f ), 1.0f );
+			}
+			else
+				col = FloatVector4( shown( f[9] * 0.31830989f ), shown( f[10] * 0.31830989f ), shown( f[11] * 0.31830989f ), 1.0f );
+			for ( int k : { 0, 1, 2, 0, 2, 3 } ) {
+				tp.push_back( q[k] );
+				tc.push_back( col );
+			}
+			tiles++;
+		}
+	}
+	// the probes, as spheres (the deck's probe view): each point shows the probe's six axis values blended by its
+	// normal, n.x^2 E(+-x) + n.y^2 E(+-y) + n.z^2 E(+-z) -- on an axis the sphere shows that axis's value exactly
+	if ( v->probesShown ) {
+		auto axisValue = [&]( size_t i, const float * p, int a ) {
+			if ( pass == 2 ) {
+				const float k = i * 6 + 5 < v->probeSky.size() ? v->probeSky[i * 6 + size_t( a )] : 0.0f;
+				return FloatVector4( k, k, k, 1.0f );
+			}
+			const float * e = p + 3 + a * 3;
+			return FloatVector4( e[0] * 0.31830989f, e[1] * 0.31830989f, e[2] * 0.31830989f, 1.0f );
+		};
+		std::vector<Vector3> ring( size_t( ( kSphereRings + 1 ) * ( kSphereSegs + 1 ) ) );
+		for ( int r = 0; r <= kSphereRings; r++ ) {
+			const float th = 3.14159265f * float( r ) / float( kSphereRings );
+			for ( int g = 0; g <= kSphereSegs; g++ ) {
+				const float ph = 6.28318531f * float( g ) / float( kSphereSegs );
+				ring[size_t( r * ( kSphereSegs + 1 ) + g )] = Vector3( std::sin( th ) * std::cos( ph ), std::sin( th ) * std::sin( ph ), std::cos( th ) );
+			}
+		}
+		for ( size_t i = 0; i * 21 + 20 < v->probes.size(); i++ ) {
+			const float * p = &v->probes[i * 21];
+			const Vector3 c( p[0], p[1], p[2] );
+			FloatVector4 ax[6];
+			for ( int a = 0; a < 6; a++ )
+				ax[a] = axisValue( i, p, a );
+			auto colorAt = [&]( const Vector3 & n ) {
+				FloatVector4 e = ax[n[0] >= 0.0f ? 0 : 1] * ( n[0] * n[0] ) + ax[n[1] >= 0.0f ? 2 : 3] * ( n[1] * n[1] )
+					+ ax[n[2] >= 0.0f ? 4 : 5] * ( n[2] * n[2] );
+				return FloatVector4( shown( e[0] ), shown( e[1] ), shown( e[2] ), 1.0f );
+			};
+			for ( int r = 0; r < kSphereRings; r++ )
+				for ( int g = 0; g < kSphereSegs; g++ ) {
+					const Vector3 & n00 = ring[size_t( r * ( kSphereSegs + 1 ) + g )];
+					const Vector3 & n01 = ring[size_t( r * ( kSphereSegs + 1 ) + g + 1 )];
+					const Vector3 & n10 = ring[size_t( ( r + 1 ) * ( kSphereSegs + 1 ) + g )];
+					const Vector3 & n11 = ring[size_t( ( r + 1 ) * ( kSphereSegs + 1 ) + g + 1 )];
+					for ( const Vector3 * n : { &n00, &n10, &n11, &n00, &n11, &n01 } ) {
+						tp.push_back( c + *n * kBoxHalf );
+						tc.push_back( colorAt( *n ) );
+					}
+				}
+			boxes++;
+		}
+	}
+	// the picked probe's links
+	std::vector<Vector3> lp;
+	std::vector<FloatVector4> lc;
+	QString linkList;
+	int nLinks = 0;
+	if ( picked >= 0 && size_t( picked ) * 21 + 2 < v->probes.size() && size_t( picked ) + 1 < v->linkStart.size() ) {
+		const float * p = &v->probes[size_t( picked ) * 21];
+		const Vector3 c( p[0], p[1], p[2] );
+		const FloatVector4 green( 0.1f, 1.0f, 0.2f, 1.0f ), yellow( 1.0f, 0.9f, 0.1f, 1.0f );
+		for ( int k = v->linkStart[size_t( picked )]; k < v->linkStart[size_t( picked ) + 1]; k++ ) {
+			const int si = v->links[size_t( k )];
+			if ( si < 0 || size_t( si ) * 12 + 2 >= v->surfels.size() )
+				continue;
+			const float * f = &v->surfels[size_t( si ) * 12];
+			lp.push_back( c );
+			lp.push_back( Vector3( f[0], f[1], f[2] ) );
+			lc.push_back( green );
+			lc.push_back( green );
+			linkList += QStringLiteral( " %1" ).arg( si );
+			nLinks++;
+		}
+		// the picked box's edges
+		const float e = kBoxHalf + 1.0f;
+		for ( int a = 0; a < 3; a++ )
+			for ( int s1 = -1; s1 <= 1; s1 += 2 )
+				for ( int s2 = -1; s2 <= 1; s2 += 2 ) {
+					Vector3 d0, d1;
+					d0[a] = -e;
+					d1[a] = e;
+					d0[( a + 1 ) % 3] = d1[( a + 1 ) % 3] = s1 * e;
+					d0[( a + 2 ) % 3] = d1[( a + 2 ) % 3] = s2 * e;
+					lp.push_back( c + d0 );
+					lp.push_back( c + d1 );
+					lc.push_back( yellow );
+					lc.push_back( yellow );
+				}
+	}
+	scene->loadModelViewMatrix( viewTrans );
+	glEnable( GL_DEPTH_TEST );
+	glDepthFunc( GL_LEQUAL );
+	glDepthMask( GL_TRUE );
+	glDisable( GL_CULL_FACE );
+	glEnable( GL_POLYGON_OFFSET_FILL );
+	glPolygonOffset( -1.0f, -1.0f );
+	if ( !tp.empty() )
+		drawChunked( scene, tp, tc, false );
+	glDisable( GL_POLYGON_OFFSET_FILL );
+	if ( !lp.empty() ) {
+		glDepthFunc( GL_ALWAYS );	// the links show through the walls between the probe and its surfels
+		drawChunked( scene, lp, lc, true );
+	}
+	glDepthFunc( GL_LESS );
+	glDisable( GL_BLEND );
+	WW_SWITCH_STATIC( QString, dump, QString::fromLocal8Bit( wwEnv( "WW_CELL_PV_DUMP" ) ) );
+	if ( !dump.isEmpty() ) {
+		QString o = QStringLiteral( "pass=%1 tiles=%2 boxes=%3 probe=%4 links=%5\n" ).arg( pass ).arg( tiles ).arg( boxes )
+			.arg( picked ).arg( nLinks );
+		if ( picked >= 0 ) {
+			const float * p = &v->probes[size_t( picked ) * 21];
+			o += QStringLiteral( "probepos=%1,%2,%3\nlinked=%4\n" ).arg( double( p[0] ), 0, 'f', 2 ).arg( double( p[1] ), 0, 'f', 2 )
+				.arg( double( p[2] ), 0, 'f', 2 ).arg( linkList.trimmed() );
+		}
+		if ( o != s.lastDump ) {
+			QFile f( dump );
+			if ( f.open( QIODevice::WriteOnly | QIODevice::Truncate ) ) {
+				f.write( o.toUtf8() );
+				s.lastDump = o;
+			}
+		}
+	}
+}

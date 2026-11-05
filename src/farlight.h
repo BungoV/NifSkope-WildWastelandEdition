@@ -8,7 +8,7 @@
  *  each lit surfel's irradiance from the PLACED lights (direct + the bounce the relight settles on; no sun, no sky,
  *  no glow), looked up by the 27 cells around the point on the same side, w = (1 - d^2 / R^2)^2, R = 1.5 cells.
  *
- *  THE BAKE (farLightBake): from the relight's recorded operators (src/proberelight.h). The relight is linear in the
+ *  THE BAKE (farLightBake): from the relight's recorded operators (src/features/gi/proberelight.h). The relight is linear in the
  *  placed lights once the pass count is FIXED, so the light splits into layers, one per switch group (FARVIEW1b 3.2:
  *  ALWAYS 0, PARENT 1 = enable-parent root + parity, SELF 2): E(state) = E_always + sum of the groups that are on.
  *  The pass count = the count the all-on relight settles on. Gate L: sum of the layers against one all-on relight

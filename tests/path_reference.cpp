@@ -1,7 +1,7 @@
 // path_reference -- a per-pixel, multi-bounce path-traced reference picture for the cell view's GI (lane DECK1,
 // 2026-10-23; the Division deck's s67 "GPU path tracer" judge, DECK_MATRIX E5).
 //
-// Shares NO code with src/probebake.cpp, src/probegi.cpp or src/bakert*: its soup reader extends the one in
+// Shares NO code with src/features/gi/probebake.cpp, src/features/gi/probegi.cpp or src/bakert*: its soup reader extends the one in
 // tests/irradiance_reference.cpp, its BVH is its own (binned SAH), its light laws are re-typed from the relight's
 // documented ones (PRTP2 radial curve, spot cone, hemisphere / box volumes) so a disagreement is a finding.
 //
@@ -209,7 +209,7 @@ bool readSoup( const char * path, Soup & s, std::string & tails )
 				s.masked.push_back( mk );
 			}
 			tails += amk2 ? "AMK2 " : "AMK1 ";
-		} else if ( tail[0] == 0x31544D45u ) {   // 'EMT1' (src/probeplace.cpp's writer layout)
+		} else if ( tail[0] == 0x31544D45u ) {   // 'EMT1' (src/features/gi/probeplace.cpp's writer layout)
 			const uint32_t nm = u32();
 			for ( uint32_t m = 0; ok && m < nm; m++ ) {
 				_fseeki64( f, static_cast<long long>( u32() ), SEEK_CUR );   // the name
@@ -551,7 +551,7 @@ bool readSky( const char * path, Sky & s )
 	return got == 6;
 }
 
-// gi_lights.txt (src/probegi.cpp probeGiDumpLights): "clear <fixtureClear>" then one "light ..." line per lamp
+// gi_lights.txt (src/features/gi/probegi.cpp probeGiDumpLights): "clear <fixtureClear>" then one "light ..." line per lamp
 bool readLamps( const char * path, std::vector<Lamp> & L, double & clear )
 {
 	FILE * f = std::fopen( path, "r" );

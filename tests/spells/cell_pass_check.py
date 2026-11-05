@@ -39,7 +39,7 @@ import numpy as np
 from PIL import Image
 from scipy.spatial import cKDTree
 
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'features', 'gi')); sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from cell_gi_check import Soup  # noqa: E402  (a segment test over the soup, no NifSkope code)
 from probe_bake import read_tbk, floordiv  # noqa: E402
 import cell_gi_check  # noqa: E402  (stage C's rooms rule, rebuilt for the sky grid)

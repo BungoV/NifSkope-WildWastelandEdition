@@ -1,6 +1,6 @@
 #!/bin/bash
 #
-# THE SKY VISIBILITY STRENGTH (lane SKYSTR1, 2026-10-13; src/probesky.cpp octantVis, Show > Lighting > Sky visibility).
+# THE SKY VISIBILITY STRENGTH (lane SKYSTR1, 2026-10-13; src/features/gi/probesky.cpp octantVis, Show > Lighting > Sky visibility).
 #
 # The slider blends every probe octant's stored sky visibility toward an unoccluded sky, as FO4CS's
 # [Skylighting] fStrength does (lerp(1, v, s)): 100 % is the bake as it is, 0 % is the sky with no occlusion.
@@ -78,7 +78,7 @@ has() { case " $PHASE " in *" $1 "*) return 0;; esac; return 1; }
 say "skystr1_cell.sh  $(date '+%Y-%m-%d %H:%M:%S')${RED:+   RED CONTROL: $RED}   phase: $PHASE   port $PORT"
 if [ "$RECHECK" != 1 ]; then
 	newer=1
-	for s in src/probesky.cpp src/probegi.cpp src/gl/celllights.cpp src/cellworkspace.cpp src/cellworkspacetest.cpp \
+	for s in src/features/gi/probesky.cpp src/features/gi/probegi.cpp src/gl/celllights.cpp src/cellworkspace.cpp src/cellworkspacetest.cpp \
 		res/shaders/features/lights/cell_lights.glsl; do
 		[ "$REPO/$s" -nt "$EXE" ] && { say "  $s is NEWER than the exe"; newer=0; }
 	done

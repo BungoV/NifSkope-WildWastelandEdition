@@ -1,5 +1,5 @@
 // gisky_test -- FIX1101A LATE ITEM 15d: the ray-traced GI's sky from the physical sky (src/gl/atmomath.h
-// skyIrradianceAxes + giSkyFromPhysical, read by src/rtddgicell.cpp), no Qt, no GPU.
+// skyIrradianceAxes + giSkyFromPhysical, read by src/features/gi/rtddgicell.cpp), no Qt, no GPU.
 //   g++ -O2 -std=c++17 -I src tests/gisky/gisky_test.cpp -o gisky_test -static
 // Checks:
 //   same      skyIrradianceAxes' +Z equals skyIrradiance at the same sun (one model; 2 % per channel)
@@ -22,7 +22,7 @@
 // Red -DGISKY_RED: the GI sky stays the weather's DALC (today's main and still the default: the physical sky ships off,
 // WW_CELL_RTDDGI_SKY=physical): sunside must FAIL (the weather's sides are equal).
 #include "gl/atmomath.h"
-#include "rtddgimath.h"
+#include "features/gi/rtddgimath.h"
 #include "twin_ref.h"
 #include "twin_ref_low.h"
 

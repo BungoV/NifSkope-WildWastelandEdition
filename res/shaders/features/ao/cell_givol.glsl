@@ -1,4 +1,4 @@
-/* lane PERF1: the GI volumes' shapes (src/proberooms.h GiVolumeShape), 3 RGBA32F texels each: (center xyz, type),
+/* lane PERF1: the GI volumes' shapes (src/features/gi/proberooms.h GiVolumeShape), 3 RGBA32F texels each: (center xyz, type),
  * (size xyz, room), (rotation xyz degrees, 0). Types: 0 box (size = edges), 1 cylinder (x, y diameters, height on z),
  * 2 wedge (full height at -y, none at +y), 3 capsule (diameter on x, y; end to end on z), 4 sphere (x, y, z diameters). */
 

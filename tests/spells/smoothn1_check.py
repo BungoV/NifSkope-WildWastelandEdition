@@ -8,7 +8,7 @@
   SMOOTHN1_REPEATS=<n>              independent repeats per bake (default 16)
 
   SMOOTHN1_WORKERS=<n>              worker processes (default min(4, cpus)); 1 = serial
-  SMOOTHN1_DEPTH=auto|gical1|standin  the depth test: GICAL1's own functions (tests/spells/gical1_check.py, lane
+  SMOOTHN1_DEPTH=auto|gical1|standin  the depth test: GICAL1's own functions (tests/features/gi/gical1_check.py, lane
                                     GICAL1, imported) when present, else this file's stand-in (default auto)
 
 The scene: two closed box rooms side by side, split by a 0.1 m wall (one sharing grid column straddles it).
@@ -29,7 +29,7 @@ Reference: EXACT, from Lambert's polygon formula (each room is convex and has no
 fully seen). It has no noise. A very-high-ray-count Monte Carlo of 256 surfels (65536 rays each) checks the
 analytic code against the tracer, with its own measured standard error.
 
-Counts: the twin's floor F = 256 stands for today's 2048 rays (src/probebake.h:39); every twin count x 8 = the
+Counts: the twin's floor F = 256 stands for today's 2048 rays (src/features/gi/probebake.h:39); every twin count x 8 = the
 production count. Cap C = 16 F (production 32768).
 """
 import math
@@ -40,13 +40,13 @@ import time
 import numpy as np
 
 # ---------------------------------------------------------------- the depth test: GICAL1's own, or the stand-in
-# SMOOTHN1_DEPTH=auto (default: GICAL1's functions from tests/spells/gical1_check.py when importable, else the
+# SMOOTHN1_DEPTH=auto (default: GICAL1's functions from tests/features/gi/gical1_check.py when importable, else the
 # stand-in), gical1 (refuse to run without them), standin (this file's own minimal version).
 DEPTH_WANT = os.environ.get('SMOOTHN1_DEPTH', 'auto')
 G1 = None
 if DEPTH_WANT in ('auto', 'gical1'):
     try:
-        sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+        sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'features', 'gi')); sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
         import gical1_check as G1      # noqa: E402  (copied byte for byte)
     except ImportError:
         if DEPTH_WANT == 'gical1':

@@ -13,11 +13,11 @@ BSD License - see nifskope.h
 #include "gl/celllooks.h"	// lane OPENCELLFIX2: the Reflections master
 #include "features/shared/cellpasstime.h"	// lane PERFFIX2 a: the texture cache's upload count (a capture key)
 #include "cellworldanim.h"	// lane PERFFIX2 a: the world clock (a live window's relight tick)
-#include "rtddgicell.h"	// lane PERFFIX2 a: the ray-traced GI volume on (its updates relight the camera probe)
+#include "features/gi/rtddgicell.h"	// lane PERFFIX2 a: the ray-traced GI volume on (its updates relight the camera probe)
 #include "gl/cellreflcam.h"	// lane PERFFIX2 a: the camera probe's schedule
 #include "gl/wwframesched.h"	// lane FRAMESCHED1: one capture a frame, none on a coarse DDGI cascade's frame
-#include "probeplace.h"	// lane REFLPLACE1: the soup the GI keeps (ProbeSoup)
-#include "probesky.h"	// lane REFLPLACE1: probeSkyKeptSoup
+#include "features/gi/probeplace.h"	// lane REFLPLACE1: the soup the GI keeps (ProbeSoup)
+#include "features/gi/probesky.h"	// lane REFLPLACE1: probeSkyKeptSoup
 #include "reflplace.h"	// lane REFLPLACE1: the interior grid probes fitted into the rooms
 
 #include "gl/celllights.h"
@@ -43,7 +43,7 @@ BSD License - see nifskope.h
 #include <vector>
 
 /* ---- lane REFLPROBE1: the placed reflection probes (cellreflprobe.h, res/shaders/cell_refl*.{frag,glsl}) ---- */
-bool rtddgiSkyBelowRedNow();	// lane SKYBELOW2: SKYBELOW1's red (src/rtddgicell.cpp), read every frame (live)
+bool rtddgiSkyBelowRedNow();	// lane SKYBELOW2: SKYBELOW1's red (src/features/gi/rtddgicell.cpp), read every frame (live)
 
 /* lane FRAMESCHED1: WW_FRAMESCHED_RED=1 keeps today's schedule (the camera face and the placed face in one frame, on
  * the coarse cascades' frames too); =0 runs the one-capture-a-frame schedule. Unset = today's schedule until the

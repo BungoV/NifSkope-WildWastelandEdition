@@ -1,7 +1,7 @@
 #!/bin/bash
 # Lane SKYBELOW2: build and run the reflection probes' below-horizon rule test, green and every red
 # (tests/skybelow2/skybelow2_test.cpp compiles res/shaders/cell_skybelow.glsl itself, through
-# tests/rtddgi_math/glsl_shim.h, against SKYBELOW1's src/rtddgimath.h).
+# tests/features/gi/rtddgi_math/glsl_shim.h, against SKYBELOW1's src/features/gi/rtddgimath.h).
 #   tests/skybelow2/run.sh <out dir>        (from the tree root; CXX defaults to g++, UCRT64 first on PATH)
 # Green must print "SKYBELOW2 PASS 6"; each red build must print "FAIL <its check>" and exit 1.
 # Every run is capped by `timeout 30` (lane-hygiene: a new test exe never runs uncapped).

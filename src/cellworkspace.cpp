@@ -23,11 +23,11 @@ BSD License - see nifskope.h
 #include "gl/celllights.h"
 #include "features/air/airzonepanel.h"	// lane AIRZONE1: the Air zones band
 #include "features/air/cellairzone.h"	// lane AIRZONE1: the Air zones row
-#include "rtddgicell.h"	// lane RTXGI1 M2: the Ray-traced GI rows
+#include "features/gi/rtddgicell.h"	// lane RTXGI1 M2: the Ray-traced GI rows
 #include "features/near/cellcull.h"	// lane SUNCELL1: the Culling row
 #include "gl/cellssr.h"	// lane CELLALL1: the SSR rows
 #include "gl/cellreflprobe.h"	// lane REFLPROBE1: the Reflection probes row
-#include "gl/cellssgi.h"
+#include "features/gi/cellssgi.h"
 #include "gl/cellfarground.h"	// the Far ground rows
 #include "features/lights/celllampshadow.h"
 #include "gl/celllooks.h"
@@ -556,7 +556,7 @@ void CellWorkspacePanel::buildUi()
 	section( tr( "Lighting" ), "lighting" );
 	cellLights = tick( showMenu, tr( "Cell lights" ), "CellWorkspaceCellLights", wwCellLightsOn() );
 	cellGi = tick( showMenu, tr( "Precomputed Radiance Transfer" ), "CellWorkspaceCellGi", wwCellGiOn() );	// bungo 10-27 note 12: the label only
-	/* lane RTXGI1 M2 (src/rtddgicell.h): the ray-traced GI volume in place of the baked grid where it reaches; ships Off.
+	/* lane RTXGI1 M2 (src/features/gi/rtddgicell.h): the ray-traced GI volume in place of the baked grid where it reaches; ships Off.
 	 * Live: a tick reloads the shaders (the read is a #define) and the next frame builds or frees the volume. */
 	{
 		QAction * rt = tick( showMenu, tr( "Ray-traced GI" ), "CellWorkspaceRtDdgi", rtddgiCellOn() );
@@ -568,7 +568,7 @@ void CellWorkspacePanel::buildUi()
 		} );
 	}
 	/* FIX1031B (bungo 10-31): no "Ray-traced GI cascades" picker any more: the cascades ARE the ray-traced GI; their count,
-	 * cadence and rays follow the RT quality preset below (src/rtddgicell.h rtddgiCellCascades) */
+	 * cadence and rays follow the RT quality preset below (src/features/gi/rtddgicell.h rtddgiCellCascades) */
 	/* lane RESTIRDI1 (bungo 10-29's ruling): the RT quality preset. Low = the ray-traced GI volume (as the row above), Medium =
 	 * + ReSTIR DI (ray-traced shadows for the shadow-casting lights, the 16 cube shadows off); High / Ultra = Medium for now.
 	 * Live: a pick reloads the shaders (WW_CELL_RESTIR is a loader define); Medium and up also turn the volume on */
@@ -660,7 +660,7 @@ void CellWorkspacePanel::buildUi()
 		}
 	}
 	cellPass->setEnabled( false );
-	{	// lane RTXGI1 M2: the ray-traced GI volume's probes over the frame (src/rtddgicell.h), live; Off by default
+	{	// lane RTXGI1 M2: the ray-traced GI volume's probes over the frame (src/features/gi/rtddgicell.h), live; Off by default
 		QMenu * m = showMenu->addMenu( tr( "Ray-traced GI probes" ) );
 		m->setObjectName( QStringLiteral( "CellWorkspaceRtDdgiView" ) );
 		QActionGroup * grp = new QActionGroup( m );
@@ -1344,7 +1344,7 @@ void CellWorkspacePanel::buildUi()
 	QHBoxLayout * pl = new QHBoxLayout( prtpRow );
 	pl->setContentsMargins( 0, 0, 0, 0 );
 	pl->setSpacing( 4 );
-	// lane VOLVIEW2: the probes, their links, the rooms, groups and thresholds (src/gl/cellvolumeview.h) under one tick
+	// lane VOLVIEW2: the probes, their links, the rooms, groups and thresholds (src/features/gi/cellvolumeview.h) under one tick
 	probesShow = new QCheckBox( tr( "PRTP Debug View" ), prtpRow );
 	probesShow->setObjectName( QStringLiteral( "CellWorkspaceProbesShow" ) );
 	probesShow->setChecked( QSettings().value(

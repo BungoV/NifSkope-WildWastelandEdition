@@ -1,6 +1,6 @@
 #!/bin/bash
 #
-# THE PROBES' SKY FROM THE SKY THE VIEW DRAWS (lane SKYPIC1, 2026-10-11; src/probesky.h, PRTP_PLAN 2as, deck C9).
+# THE PROBES' SKY FROM THE SKY THE VIEW DRAWS (lane SKYPIC1, 2026-10-11; src/features/gi/probesky.h, PRTP_PLAN 2as, deck C9).
 #
 # SKY1 gave each probe the weather's six ambient colours, weighed by what of the sky each octant sees. With
 # WW_CELL_SKYPIC (default ON since 10-15; =0 off) the view captures the sky it draws (the Lookdev dome, the stars, the cloud layers;
@@ -63,7 +63,7 @@ fails=0
 check() { if [ "$2" = "1" ]; then say "  PASS  $1"; else say "  FAIL  $1"; fails=$((fails+1)); fi; }
 say "cell_skypic.sh  $(date '+%Y-%m-%d %H:%M:%S')  exe $(sha1sum "$EXE" | cut -c1-8)  rung $(sha1sum "$RUNG" | cut -c1-8)  phase: $PHASE"
 newer=1
-for s in src/probesky.cpp src/probesky.h src/gl/lookdevstage.cpp src/gl/lookdevstage.h src/glview.cpp src/probegi.cpp src/cellview.cpp; do
+for s in src/features/gi/probesky.cpp src/features/gi/probesky.h src/gl/lookdevstage.cpp src/gl/lookdevstage.h src/glview.cpp src/features/gi/probegi.cpp src/cellview.cpp; do
 	[ "$REPO/$s" -nt "$EXE" ] && { say "  $s is NEWER than the exe"; newer=0; }
 done
 check "the exe is newer than every source this gate covers" "$newer"

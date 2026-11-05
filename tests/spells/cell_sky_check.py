@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""THE SKY AND THE SUN IN THE BOUNCE ROW, REBUILT WITHOUT NIFSKOPE (lane SKY1, 2026-10-02; src/probesky.h).
+"""THE SKY AND THE SUN IN THE BOUNCE ROW, REBUILT WITHOUT NIFSKOPE (lane SKY1, 2026-10-02; src/features/gi/probesky.h).
 
   python tests/spells/cell_sky_check.py <Fallout4.esm> <run dir> [--weather W] [--hour H]
          [--view name=cx,cy,cz ...] [--red NAME] [--fresh]
@@ -29,7 +29,7 @@ Nothing here calls NifSkope. The stages, each from the files on disk:
   O  open against covered: the sky the probes around each view's look-at point see, straight from the .tbk
   R  the replacement in the finished picture: lit.png against lit_keepamb.png (the weather ambient left in)
 
-What is NOT rebuilt here: the placed lights' own light outdoors (tests/spells/cell_gi.sh gates that on
+What is NOT rebuilt here: the placed lights' own light outdoors (tests/features/gi/cell_gi.sh gates that on
 interiors); its share of the total is printed in B. The grid's place and size (origin, voxel, radius) are read
 from the dump's header.
 """
@@ -44,7 +44,7 @@ import zlib
 import numpy as np
 from PIL import Image
 
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'features', 'gi')); sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from cell_gi_check import Soup, read_dump  # noqa: E402   (the checker's own soup and dump readers)
 from probe_bake import read_tbk  # noqa: E402              (the checker's own .tbk reader)
 import cell_gi_check  # noqa: E402   (stage C's rooms rule)

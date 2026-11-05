@@ -1,6 +1,6 @@
 #!/bin/bash
 #
-# THE PRTP BAND'S PASS DROP-DOWN (lane PROBEVIEW1, 2026-10-02; src/gl/celllights.h, src/gl/cellprobeview.h).
+# THE PRTP BAND'S PASS DROP-DOWN (lane PROBEVIEW1, 2026-10-02; src/gl/celllights.h, src/features/gi/cellprobeview.h).
 # The Division deck's probe views: GI (the grid's E / pi on the normal), Sky visibility (the probes'
 # open-sky share on the normal), the surfels (their color, their light) and a picked probe's links.
 #
@@ -73,7 +73,7 @@ check() { if [ "$2" = "1" ]; then say "  PASS  $1"; else say "  FAIL  $1"; fails
 [ -x "$EXE" ] || { echo "no NifSkope.exe at $EXE"; exit 2; }
 say "cell_pass.sh  $(date '+%Y-%m-%d %H:%M:%S')${RED:+   RED CONTROL: $RED}"
 newer=1
-for s in src/probegi.cpp src/gl/celllights.cpp src/gl/cellprobeview.cpp src/cellview.cpp src/glview.cpp \
+for s in src/features/gi/probegi.cpp src/gl/celllights.cpp src/features/gi/cellprobeview.cpp src/cellview.cpp src/glview.cpp \
 	res/shaders/features/lights/cell_lights.glsl res/shaders/fo4_default.frag res/shaders/pbrm_default.frag; do
 	[ "$REPO/$s" -nt "$EXE" ] && { say "  $s is NEWER than the exe"; newer=0; }
 done

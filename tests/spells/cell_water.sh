@@ -1,6 +1,6 @@
 #!/bin/bash
 #
-# THE CELL WATER (lane WATER1, 2026-10-04; src/gl/cellwater.h, res/shaders/fo4_water.frag, src/probebake.cpp).
+# THE CELL WATER (lane WATER1, 2026-10-04; src/gl/cellwater.h, res/shaders/fo4_water.frag, src/features/gi/probebake.cpp).
 #
 # Not judged by eye. At the Sanctuary river (Commonwealth, the 5x5 around CELL; ExtCreekSanctuaryWater, XCLW 7250):
 #   A reader   the renderer describes every WATR of the master (WW_CELL_WATER_DUMP_FORMS); the checker parses the

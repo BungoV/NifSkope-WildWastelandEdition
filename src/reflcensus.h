@@ -4,7 +4,7 @@
  * octahedral tile (res/shaders/cell_reflrelight.frag); a texel whose G-buffer MISSED takes the sky above the horizon
  * and, since SKYBELOW2, the ground below it (res/shaders/cell_skybelow.glsl). How many below-horizon misses a real
  * probe has could only be counted in a window; this header traces the same texel directions through a bake's soup
- * (src/probebvh.h, the bake's own tracer) for the probes the pass would place round a camera.
+ * (src/features/gi/probebvh.h, the bake's own tracer) for the probes the pass would place round a camera.
  * MIRRORS (tests/reflcensus/run.sh greps each literal there; a drift fails the gate):
  *   placement  cellreflprobe.cpp: the 3x3 outdoor grid of kBox 2048 boxes round floor(cam/2048), z = camZ +- 1024,
  *              camZ = round(cam.z/256)*256, the probe at the box centre xy and camZ; the camera probe (slot 0) at the
@@ -22,7 +22,7 @@
 #include <cmath>
 #include <vector>
 
-#include "probebvh.h"
+#include "features/gi/probebvh.h"
 #include "reflplace.h"   // lane REFLPLACE1: the interior grid probes fitted into the geometry (the pass's own rule)
 
 namespace reflcensus

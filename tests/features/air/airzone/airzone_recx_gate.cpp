@@ -17,7 +17,7 @@
  * Red: the whole gate run with WW_CELL_AIRZONE_RED=novol must FAIL (roundtrip, keep, gi-*): tests/features/air/airzone/gate.sh. */
 
 #include "features/air/airzone.h"
-#include "proberooms.h"
+#include "features/gi/proberooms.h"
 #include "recx.h"
 
 #include <QCoreApplication>

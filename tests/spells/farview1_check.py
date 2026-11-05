@@ -10,7 +10,7 @@ What it rebuilds, in numpy only, with no game data (the scene is made here, in c
   * a synthetic street: ground plane + two rows of box buildings with alleys, 50 or 500 point lights
     (street lamps and wall lights), each with the PRTP2 curve of docs/PRTP2_LIGHT_MODEL.md section 1:
         x = saturate(d / r),  atten = pow(1 - saturate(scale * x^exponent + bias), 2.2),  E += c atten max(N.L, 0)
-    behind a shadow segment from P + 2N to the light, stopping 24 units short (src/probegi.h fixtureClear)
+    behind a shadow segment from P + 2N to the light, stopping 24 units short (src/features/gi/probegi.h fixtureClear)
   * THE REFERENCE at sample points: direct from every light + one diffuse bounce, brute force
     (256 cosine rays a point, each hit relit by every light) -- what the renderer would show if it
     could evaluate every light everywhere

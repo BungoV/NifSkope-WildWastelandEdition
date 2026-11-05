@@ -30,7 +30,7 @@ BSD License - see nifskope.h
 #include "gl/cellwater.h"	// water casts no cube shadow
 #include "gl/cellunderwater.h"	// the WATR INAM imagespace under water
 #include "esmwater.h"
-#include "gl/cellwatergi.h"	// water reads no probe GI
+#include "features/gi/cellwatergi.h"	// water reads no probe GI
 #include "celllampshadow.h"	// lane LAMPSHADOW1
 #include "cubefacecull.h"	// lane PERFFIX2 b: a caster draws only into the cube faces it can reach
 #include "features/air/airlampatlas.h"	// lane MODULES1 route (a): the air's lamp atlas draws these casters
@@ -40,10 +40,10 @@ BSD License - see nifskope.h
 #include "cellfxlit.h"	// lane LIGHTS4: a placement's emittance colour
 #include "gamemanager.h"	// lane SUNCELL1: the weather imagespace's LUT
 #include "esmweather.h"	// lane WEATHERBLEND2: wwLutBlendN
-#include "probealbedo.h"	// lane LIGHTS5 (GOBO1): a spot's pattern
+#include "features/gi/probealbedo.h"	// lane LIGHTS5 (GOBO1): a spot's pattern
 #include "recx.h"	// lane LIGHTS5 (FOGSCALE1): fog.scale
 #include "cellnifxlights.h"	// lane NIFXLIGHT1: a fixture mesh's .nifx lights
-#include "rtddgicell.h"	// lane RTXGI1 M2: the ray-traced GI volume's read (rtddgiCellUniforms)
+#include "features/gi/rtddgicell.h"	// lane RTXGI1 M2: the ray-traced GI volume's read (rtddgiCellUniforms)
 #include "gl/celluniprof.h"	// lane PERFFIX1: WW_CELL_UNI_PROF
 #include "gl/cellunirec.h"	// lane PERFFIX1: the cell-uniform class record
 #include "gl/cloudvol.h"	// lane LIGHTNING2: a storm's flash on the exterior ambient (wwLightningGround)
@@ -73,7 +73,7 @@ BSD License - see nifskope.h
 #include <map>
 #include <vector>
 #include <unordered_map>	// lane PERFFIX1: the cell-uniform class records
-#include "gl/celllights_p.h"
+#include "celllights_p.h"
 
 using namespace WwCellLightsP;
 
@@ -510,7 +510,7 @@ void WwCellLightsP::nifxTick( const void * nif )
 	x.key = key;
 	s.docs.insert( nif, L );
 	s.version.insert( nif, s.nextVersion++ );
-	s.nifxStamp.insert( nif, s.nextNifxStamp++ );	// lane NIFXLIGHT2: src/probesky.cpp relights the GI
+	s.nifxStamp.insert( nif, s.nextNifxStamp++ );	// lane NIFXLIGHT2: src/features/gi/probesky.cpp relights the GI
 }
 
 //! WW_CELL_SHADOW_DUMP=<file>: the echo, rewritten whenever the slots change

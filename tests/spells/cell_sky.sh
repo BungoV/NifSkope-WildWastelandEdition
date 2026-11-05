@@ -3,7 +3,7 @@
 # lane BAKEBLOCK1 (block rule): the cells are asked n=1; each bake loads the 5x5 + far LOD by itself (the exe
 #   promotes every exterior bake). The pictures stay one cell.
 #
-# THE SKY AND THE SUN IN THE BOUNCE ROW, OUTDOORS (lane SKY1, 2026-10-02; src/probesky.h).
+# THE SKY AND THE SUN IN THE BOUNCE ROW, OUTDOORS (lane SKY1, 2026-10-02; src/features/gi/probesky.h).
 #
 # Not judged by eye. Per exterior cell (Scene mode Lookdev pinned: weather, hour, the plain sun arc):
 #   bake     one window places + bakes the probes, relights the bake with the weather's sky and sun
@@ -31,7 +31,7 @@
 # N the viewer read the same flags, I (closed) no sky file in the dump, and for Show Sky cells W U S T B as
 # outdoors (U: the sun kept out). tests/prtp_reference.py re-traces a Show Sky cell's sky shares with its own
 # brute-force tracer (worst octant 0.01 of the sphere, the bar set on exteriors); build it once with
-#   g++ -O3 -std=c++17 -static -pthread tests/prtp_reference.cpp -o release/prtp_reference.exe   (or REF=)
+#   g++ -O3 -std=c++17 -static -pthread tests/features/gi/prtp_reference.cpp -o release/prtp_reference.exe   (or REF=)
 # Reds (WW_CELL_SKYINT_RED, a bake of their own; each must FAIL stage V):
 #   --red noflag      V  the flag ignored: the Museum of Freedom bakes no sky
 #   --red all         V  every interior read as Show Sky: Vault111Cryo's misses (mesh cracks) become sky;
@@ -107,7 +107,7 @@ has() { case " $PHASE " in *" $1 "*) return 0;; esac; return 1; }
 say "cell_sky.sh  $(date '+%Y-%m-%d %H:%M:%S')${RED:+   RED CONTROL: $RED}   phase: $PHASE"
 if [ "$RECHECK" != 1 ]; then
 	newer=1
-	for s in src/probesky.cpp src/probegi.cpp src/gl/celllights.cpp src/cellview.cpp src/glview.cpp \
+	for s in src/features/gi/probesky.cpp src/features/gi/probegi.cpp src/gl/celllights.cpp src/cellview.cpp src/glview.cpp \
 		res/shaders/features/lights/cell_lights.glsl res/shaders/fo4_default.frag res/shaders/pbrm_default.frag; do
 		[ "$REPO/$s" -nt "$EXE" ] && { say "  $s is NEWER than the exe"; newer=0; }
 	done

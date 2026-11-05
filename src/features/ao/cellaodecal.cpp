@@ -35,9 +35,9 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include "wwswitch.h"	// lane TESTDRIVER1: the WW_* switch store
 
 #include "nativeemit.h"
-#include "probeplace.h"
-#include "probebvh.h"
-#include "bakert.h"	// lane RTBAKE1: the bake pools' worker count, the GPU ray back end
+#include "features/gi/probeplace.h"
+#include "features/gi/probebvh.h"
+#include "features/gi/bakert.h"	// lane RTBAKE1: the bake pools' worker count, the GPU ray back end
 #include "data/niftypes.h"
 
 #include <QCoreApplication>

@@ -6,7 +6,7 @@
 Reads <cell>.probe2/3/4/7.png, <cell>.probe2.notes (the "cell lighting ... center=" line), <cell>.shadow.txt
 (the shadow echo: the lights in slots 0..2, position, radius, kind, near clip, aim) and <cell>.psp (the cell's
 probe soup, the bake's triangles). Nothing shared with the C++: at sampled clean pixels (position from probes
-2 + 3, normal from 4) it casts its OWN ray (Moller-Trumbore over the soup, tests/spells/probe_place.py's
+2 + 3, normal from 4) it casts its OWN ray (Moller-Trumbore over the soup, tests/features/gi/probe_place.py's
 Tracer) from the point, lifted 2 units along its normal, toward each slot's light, stopping at the light's near
 clip (nearer casters cast nothing). Probe 7 holds the renderer's factor per slot (2/255 + f x 253/255, 0 = out
 of reach or facing away). Only pixels THIS script finds in reach and facing the light are read: a 0 can read
@@ -25,7 +25,7 @@ import sys
 import numpy as np
 from PIL import Image
 
-sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', '..', 'spells'))
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'gi')); sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', '..', 'spells'))
 from probe_place import Tracer, read_soup  # noqa: E402
 
 PER_SLOT = 4000

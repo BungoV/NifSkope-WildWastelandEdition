@@ -34,7 +34,7 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include "wwswitch.h"	// lane TESTDRIVER1: the WW_* switch store
 #include "ui_nifskope.h"
 
-#include "bakegeom.h"
+#include "features/gi/bakegeom.h"
 #include "cellmesh.h"
 #include "cellspeed.h"
 #include "farlightmap.h"	// lane FARLIGHTMAP1

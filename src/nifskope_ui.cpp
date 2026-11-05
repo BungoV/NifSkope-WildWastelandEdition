@@ -35,8 +35,8 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include "gamemanager.h"
 #include "wwswitch.h"	// the WW_* switch store
 #include "celldoorlive.h"	// a path frame poses the live door
-#include "probesky.h"	// the live driver waits for a pending sky relight
-#include "rtddgicell.h"	// and for the ray-traced GI volume (rtddgiCellPending)
+#include "features/gi/probesky.h"	// the live driver waits for a pending sky relight
+#include "features/gi/rtddgicell.h"	// and for the ray-traced GI volume (rtddgiCellPending)
 #include "gl/cloudvol.h"	// and for the clouds' coverage tables (built on workers)
 #include "gl/cloudshadow.h"	// and for the cloud shadow map's sliced rebuild
 #include "features/shadows/shadowset.h"	// ... and for the terrain shadow sweep
@@ -61,7 +61,7 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include "gl/lookdevstage.h"	// the path's hour step
 #include "gl/gametaa.h"
 #include "gl/cellpost.h"
-#include "gl/cellssgi.h"
+#include "features/gi/cellssgi.h"
 #include "features/air/cellvolair.h"	// the air temporal follows the path frame
 #include "gl/cellbloom.h"
 #include "gl/celllensflare.h"	// the lens flare echo per path frame
@@ -69,7 +69,7 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include "features/shadows/sunshadow.h"
 #include "ui_nifskope.h"
 
-#include "bakegeom.h"
+#include "features/gi/bakegeom.h"
 #include "bsamodel.h"
 #include "glview.h"
 #include "impostorchunk.h"

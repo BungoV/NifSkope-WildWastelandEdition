@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Lane LIGHTPHYS2: the light physics rows in the bounce light, checked against an independent rebuild.
 
-Reads <out>/twin from `NifSkope -no-gui gpurelight --out <out>` (src/proberelight.cpp). For every state whose
+Reads <out>/twin from `NifSkope -no-gui gpurelight --out <out>` (src/features/gi/proberelight.cpp). For every state whose
 "phys" entry is not the game's curve (mode 0, curve 1), it re-traces the direct light B1 here in numpy (double):
 the shadow ray through the soup triangles, the falloff and the intensity curve transcribed from the FO4CS
 formulas written out below (NOT from src/features/lights/lightphys.h), and compares with the CPU relight's b1_cpu_<state>.f32.

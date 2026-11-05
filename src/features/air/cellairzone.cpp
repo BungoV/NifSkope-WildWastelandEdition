@@ -6,11 +6,11 @@
 #include "features/air/airzonemath.h"
 #include "cellworldanim.h"	// the world clock (the fog noise's drift)
 #include "harnesswindow.h"	// wwHarnessSettingsSuffix: a harness scope starts the row Off
-#include "probevolumes.h"	// ProbeVolumes: the volume view's geometry builder draws our shapes
+#include "features/gi/probevolumes.h"	// ProbeVolumes: the volume view's geometry builder draws our shapes
 #include "version.h"
 #include "wwswitch.h"
 
-#include "gl/cellvolumeview.h"
+#include "features/gi/cellvolumeview.h"
 #include "gl/glscene.h"
 #include "gl/renderer.h"
 
@@ -93,7 +93,7 @@ void colourOf( const az::Volume & v, float rgb[3] )
 	std::copy( c, c + 3, rgb );
 }
 
-// one shape's wireframe through the volume view's own builder (src/gl/cellvolumeview.cpp drawShape), recoloured
+// one shape's wireframe through the volume view's own builder (src/features/gi/cellvolumeview.cpp drawShape), recoloured
 void appendShape( const az::Shape & s, const float rgba[4], std::vector<Vector3> & lp, std::vector<FloatVector4> & lc )
 {
 	ProbeVolumes pv;

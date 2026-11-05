@@ -70,11 +70,11 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include "model/undocommands.h"
 #include "data/nifitem.h"
 #include "nifsnapshot.h"
-#include "probesky.h"	// one call a frame
+#include "features/gi/probesky.h"	// one call a frame
 #include "features/air/cellairzone.h"	// the hand-placed volumes' overlay
 #include "celledit.h"	// the cell view's place mode
 #include "cellsurface.h"	// the surface pick's planes
-#include "rtddgicell.h"	// the ray-traced GI volume, one call a frame
+#include "features/gi/rtddgicell.h"	// the ray-traced GI volume, one call a frame
 #include "celldoorlive.h"	// one call a frame
 #include "cellworldanim.h"	// the cell's world clock
 #include "shortcutregistry.h"
@@ -158,10 +158,10 @@ private:
 #include <QOpenGLExtraFunctions>	// the GPU timer
 #include "gl/celllights.h"	// the imagespace measure
 #include "gl/atmosphere.h"	// the sky in the exposure's mean
-#include "gl/cellprobeview.h"	// the Pass overlays
-#include "gl/cellvolumeview.h"	// the Space stage's view
+#include "features/gi/cellprobeview.h"	// the Pass overlays
+#include "features/gi/cellvolumeview.h"	// the Space stage's view
 #include "gl/cellssr.h"
-#include "gl/cellssgi.h"
+#include "features/gi/cellssgi.h"
 #include "features/air/cellvolair.h"
 #include "gl/cellreflprobe.h"
 #include "features/shared/cellpasstime.h"

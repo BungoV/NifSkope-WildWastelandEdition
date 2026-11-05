@@ -7,7 +7,7 @@
 #include "gl/glnode.h"
 #include "gl/glscene.h"
 #include "model/nifmodel.h"
-#include "proberelight.h"
+#include "features/gi/proberelight.h"
 
 #include <QElapsedTimer>
 #include <QPointer>

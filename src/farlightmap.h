@@ -4,7 +4,7 @@
 /*! THE WHOLE-MAP FAR LIGHT (lane FARLIGHTMAP1, 2026-10-22; RDR2's distant lights, bungo's ruling option a).
  *
  *  `NifSkope -no-gui farlightmap ...` walks a worldspace's exterior cells and gives each one the cell view's OWN
- *  probe GI bake: the same exe, opened on that cell exactly as tools/ww_bake_world.py opens it (WW_CELL_OPEN, the
+ *  probe GI bake: the same exe, opened on that cell exactly as src/features/gi/ww_bake_world.py opens it (WW_CELL_OPEN, the
  *  5x5 block + far soup, WW_CELL_PROBE_BAKE), with WW_CELL_FARLIGHT set, so the relight records its operators and
  *  FARVIEW1's writer (src/farlight.h) writes the cell's far-light layers. Nothing of the bake is forked: a cell's
  *  files are the cell view's files for that cell, byte for byte.

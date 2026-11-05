@@ -7,7 +7,7 @@
 // (straight down, 4 at 20 degrees below the horizon, 4 at 60), 0.5 when none hit (SKYBELOW1's no-soup albedo).
 // MIRROR rtddgimath.h belowHorizon / missRadiance (the same horizon, d.z < 0; the same ground law).
 // rule 0 = the red WW_SKYBELOW_RED (today's main: the sky ambient in every direction), set live by cellreflprobe.cpp.
-// tests/skybelow2 compiles this same file through tests/rtddgi_math/glsl_shim.h, so it keeps to the subset C++ also
+// tests/skybelow2 compiles this same file through tests/features/gi/rtddgi_math/glsl_shim.h, so it keeps to the subset C++ also
 // reads (no swizzles, no out parameters, no arrays). SKYBELOW2_RED_* exist only in that test.
 
 // a miss direction below the horizon (world z up)

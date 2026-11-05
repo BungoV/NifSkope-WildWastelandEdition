@@ -11,22 +11,22 @@ See the LICENSE.md file for the full license text.
 
 #include "nifcli.h"
 #include "wwswitch.h"	// lane TESTDRIVER1: the WW_* switch store
-#include "probeplace.h"
-#include "probealbedo.h"	// lane REDFIX1: gobocensus
+#include "features/gi/probeplace.h"
+#include "features/gi/probealbedo.h"	// lane REDFIX1: gobocensus
 #include "gl/skyplacerun.h"	// lane INTSKY1: skyplace
 
 int cmdEspWrite( const QStringList & args );	// lane ESPWRITE2: src/io/espwritecli.cpp
 #include "features/ao/cellaodecal.h"	// lane AODECAL1: aobake
-#include "probebake.h"
-#include "pgiwrite.h"
-#include "probefar.h"		// lane PRTPFAR
-#include "probegi.h"		// lane ROOMCLAMP1: probegi
-#include "rtddgi.h"		// lane RTXGI1: rtddgi
+#include "features/gi/probebake.h"
+#include "features/gi/pgiwrite.h"
+#include "features/gi/probefar.h"		// lane PRTPFAR
+#include "features/gi/probegi.h"		// lane ROOMCLAMP1: probegi
+#include "features/gi/rtddgi.h"		// lane RTXGI1: rtddgi
 #include "reflcensuscli.h"	// lane TOOLS1101: reflcensus
 #include "farlightmap.h"	// lane FARLIGHTMAP1: farlightmap
-#include "proberelight.h"	// lane GPURELIGHT1: gpurelight
-#include "probevolumes.h"	// lane VOLFIT1: volumes
-#include "probevolcheck.h"	// lane VOLRAY1: volcheck
+#include "features/gi/proberelight.h"	// lane GPURELIGHT1: gpurelight
+#include "features/gi/probevolumes.h"	// lane VOLFIT1: volumes
+#include "features/gi/probevolcheck.h"	// lane VOLRAY1: volcheck
 
 #include "freezeanim.h"
 #include "gamemanager.h"
@@ -8163,7 +8163,7 @@ int nifskopeCliMain( const QStringList & args )
 	// `weather` reads WTHR/CLMT records from a plugin load list: no NIF, no model
 	// layer (lane PBRR2B, the W1 gates; src/esmweather.cpp)
 	// `probeplace` places PRTP probes over a dumped soup: no NIF, no model layer
-	// (lane PRTPPLACE; src/probeplace.cpp)
+	// (lane PRTPPLACE; src/features/gi/probeplace.cpp)
 	// `aobake` reads or bakes one model's AO decal volume; gate A's lookup vs brute force (lane AODECAL1)
 	if ( cmd == QLatin1String( "aobake" ) ) {
 		if ( !initModelLayer() ) { err().flush(); return 1; }	// it loads the model's NIF
@@ -8179,14 +8179,14 @@ int nifskopeCliMain( const QStringList & args )
 		return rc;
 	}
 	// `probebake` places, then bakes the probes to FO4CS `.tbk` v3 sector files
-	// (lane PRTPBAKE; src/probebake.cpp)
+	// (lane PRTPBAKE; src/features/gi/probebake.cpp)
 	if ( cmd == QLatin1String( "probebake" ) ) {
 		const int rc = probeBakeCli( a );
 		out().flush();
 		err().flush();
 		return rc;
 	}
-	// lane PGI0: `pgiwrite` re-packs a bake's .tbk v5 sector files into .pgi (src/pgiwrite.cpp); `pgicheck` validates
+	// lane PGI0: `pgiwrite` re-packs a bake's .tbk v5 sector files into .pgi (src/features/gi/pgiwrite.cpp); `pgicheck` validates
 	if ( cmd == QLatin1String( "pgiwrite" ) || cmd == QLatin1String( "pgicheck" ) ) {
 		const int rc = cmd == QLatin1String( "pgiwrite" ) ? pgiWriteCli( a ) : pgiCheckCli( a );
 		out().flush();
@@ -8216,14 +8216,14 @@ int nifskopeCliMain( const QStringList & args )
 		err().flush();
 		return rc;
 	}
-	// `probegi` places, bakes and relights a soup by the lights given, then dumps (lane ROOMCLAMP1; src/probegi.cpp)
+	// `probegi` places, bakes and relights a soup by the lights given, then dumps (lane ROOMCLAMP1; src/features/gi/probegi.cpp)
 	if ( cmd == QLatin1String( "probegi" ) ) {
 		const int rc = probeGiCli( a );
 		out().flush();
 		err().flush();
 		return rc;
 	}
-	// `rtddgi` builds a ray-traced DDGI volume over a soup and dumps it (lane RTXGI1 M1; src/rtddgi.cpp)
+	// `rtddgi` builds a ray-traced DDGI volume over a soup and dumps it (lane RTXGI1 M1; src/features/gi/rtddgi.cpp)
 	if ( cmd == QLatin1String( "rtddgi" ) ) {
 		const int rc = rtddgiCli( a );
 		out().flush();
@@ -8238,15 +8238,15 @@ int nifskopeCliMain( const QStringList & args )
 		err().flush();
 		return rc;
 	}
-	// `restir` runs ReSTIR DI on a soup's BVH, the CPU twin against the GPU (lane RESTIRDI1; src/rtddgi.cpp restirCli)
+	// `restir` runs ReSTIR DI on a soup's BVH, the CPU twin against the GPU (lane RESTIRDI1; src/features/gi/rtddgi.cpp restirCli)
 	if ( cmd == QLatin1String( "restir" ) ) {
 		const int rc = restirCli( a );
 		out().flush();
 		err().flush();
 		return rc;
 	}
-	// `volumes` builds the Space stage (rooms, thresholds, shapes) of a soup (lane VOLFIT1; src/probevolumes.cpp)
-	// `volcheck` checks a Space stage's shapes against the soup's real triangles by rays (lane VOLRAY1; src/probevolcheck.cpp)
+	// `volumes` builds the Space stage (rooms, thresholds, shapes) of a soup (lane VOLFIT1; src/features/gi/probevolumes.cpp)
+	// `volcheck` checks a Space stage's shapes against the soup's real triangles by rays (lane VOLRAY1; src/features/gi/probevolcheck.cpp)
 	if ( cmd == QLatin1String( "volcheck" ) ) {
 		const int rc = probeVolCheckCli( a );
 		out().flush();
@@ -8260,7 +8260,7 @@ int nifskopeCliMain( const QStringList & args )
 		return rc;
 	}
 	// `gpurelight` records the relight's operators on a synthetic three-door scene and gates the CPU and GPU relights
-	// (lane GPURELIGHT1; src/proberelight.cpp)
+	// (lane GPURELIGHT1; src/features/gi/proberelight.cpp)
 	if ( cmd == QLatin1String( "gpurelight" ) ) {
 		const int rc = probeRelightCli( a );
 		out().flush();
@@ -8268,7 +8268,7 @@ int nifskopeCliMain( const QStringList & args )
 		return rc;
 	}
 	// `probefar` bakes the far map: one hoisted probe per cell from the world's LOD files
-	// (lane PRTPFAR; src/probefar.cpp)
+	// (lane PRTPFAR; src/features/gi/probefar.cpp)
 	if ( cmd == QLatin1String( "probefar" ) ) {
 		const int rc = probeFarCli( a );
 		out().flush();

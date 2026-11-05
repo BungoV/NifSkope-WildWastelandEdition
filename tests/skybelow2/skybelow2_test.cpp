@@ -1,6 +1,6 @@
 // Lane SKYBELOW2 (2026-10-31): SKYBELOW1's below-horizon rule for the reflection probes' relight, unit-tested on the
-// shader's OWN text: res/shaders/cell_skybelow.glsl is compiled here through tests/rtddgi_math/glsl_shim.h and checked
-// against SKYBELOW1's header rule (src/rtddgimath.h belowHorizon / groundRadiance). One check per rule, one red each
+// shader's OWN text: res/shaders/cell_skybelow.glsl is compiled here through tests/features/gi/rtddgi_math/glsl_shim.h and checked
+// against SKYBELOW1's header rule (src/features/gi/rtddgimath.h belowHorizon / groundRadiance). One check per rule, one red each
 // (-DSKYBELOW2_RED_<NAME> changes the shader file's text as compiled here; each must FAIL its own check):
 //   below      a miss below the horizon returns the ground, exterior = albedo x skyUp ==       RED_MISS      the sky
 //              rtddgimath.h groundRadiance( albedo, pi skyUp ) (the same horizon d.z < 0)                     below too
@@ -14,7 +14,7 @@
 //              sky 0 (the red: all of them), above-horizon misses unchanged (hash equal)
 // Every check is independent of the others' reds (a red build may pass the other five).
 
-#include "rtddgimath.h"
+#include "features/gi/rtddgimath.h"
 
 #include <cmath>
 #include <cstddef>
@@ -23,7 +23,7 @@
 #include <cstring>
 
 namespace glsl {
-#include "../rtddgi_math/glsl_shim.h"
+#include "../features/gi/rtddgi_math/glsl_shim.h"
 #include "../../res/shaders/cell_skybelow.glsl"
 }
 

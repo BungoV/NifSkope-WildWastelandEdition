@@ -5,7 +5,7 @@
  *   R(p) = sum over the shadow lights i of p_hat_i(p) x Vsoft_i(p), Vsoft = the share of 256 stratified points on the
  *   light's sphere (restirmath.h spherePoint) that the segment from p + 0.5 n reaches.
  * Checks:
- *   mirror    src/rtddgi/restir_common.glsl (compiled here as C++) == the header's primitives on random inputs   red HASH
+ *   mirror    src/features/gi/rtddgi/restir_common.glsl (compiled here as C++) == the header's primitives on random inputs   red HASH
  *   viewpos   the pixel's world point from the stored linear depth == the primary ray's hit                     red VIEWPOS
  *   shape     p_hat is 0 behind a hemisphere light's plane and outside a box light's box                         red NOSHAPE
  *   vis       the shadowed estimate's image mean (64 seeds) is R's, not the unshadowed sum's                      red NOVIS
@@ -28,7 +28,7 @@ inline float ddgiRadial( double d, double r, double bias, double scale, double e
 	return rtddgi::lightRadial( float( d ), float( r ), float( bias ), float( scale ), float( expo ) );
 }
 inline float ddgiSpot( double dl, double cosOuter, double cone ) { return rtddgi::spotCone( float( dl ), float( cosOuter ), float( cone ) ); }
-#include "../../src/rtddgi/restir_common.glsl"
+#include "features/gi/rtddgi/restir_common.glsl"
 }
 
 using restir::V3;

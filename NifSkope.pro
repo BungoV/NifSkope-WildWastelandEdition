@@ -249,7 +249,7 @@ HEADERS += \
 	src/gl/taainputs.h \
 	src/gl/campath.h \
 	src/gl/celllights.h \
-	src/gl/celllights_p.h \
+	src/features/lights/celllights_p.h \
 	src/features/lights/lights.h \
 	src/features/lights/cellcluster.h \
 	src/features/lights/cellflickclock.h \
@@ -266,7 +266,7 @@ HEADERS += \
 	src/gl/cellwater.h \
 	src/gl/cellocean.h \
 	src/gl/oceanspectrum.h \
-	src/gl/cellwatergi.h \
+	src/features/gi/cellwatergi.h \
 	src/gl/cellwaterinfo.h \
 	src/gl/cellunderwater.h \
 	src/gl/cellgrass.h \
@@ -288,13 +288,13 @@ HEADERS += \
 	src/gl/cloudflymath.h \
 	src/gl/cloudvolmath.h \
 	src/gl/atmomath.h \
-	src/gl/cellprobeview.h \
-	src/gl/cellvolumeview.h \
+	src/features/gi/cellprobeview.h \
+	src/features/gi/cellvolumeview.h \
 	src/gl/cellssr.h \
 	src/gl/cellreflprobe.h \
 	src/gl/cellreflcam.h \
-	src/gl/cellssgi.h \
-	src/gl/cellssgiplan.h \
+	src/features/gi/cellssgi.h \
+	src/features/gi/cellssgiplan.h \
 	src/features/shadows/contactlines.h \
 	src/features/lights/celllampshadow.h \
 	src/gl/celllooks.h \
@@ -391,7 +391,7 @@ HEADERS += \
 	src/xml/nifexpr.h \
 	src/xml/xmlconfig.h \
 	src/animgraph.h \
-	src/bakegeom.h \
+	src/features/gi/bakegeom.h \
 	src/bsamodel.h \
 	src/freezeanim.h \
 	src/gamemanager.h \
@@ -447,20 +447,20 @@ HEADERS += \
 	src/cellcambounds.h \
 	src/celltexahead.h \
 	src/cellmodelahead.h \
-	src/probealbedo.h \
-	src/probebake.h \
-	src/pgi_format.h \
-	src/pgiwrite.h \
-	src/probefar.h \
-	src/probeincr.h \
-	src/probebvh.h \
-	src/bakert.h \
-	src/rtddgi.h \
+	src/features/gi/probealbedo.h \
+	src/features/gi/probebake.h \
+	src/features/gi/pgi_format.h \
+	src/features/gi/pgiwrite.h \
+	src/features/gi/probefar.h \
+	src/features/gi/probeincr.h \
+	src/features/gi/probebvh.h \
+	src/features/gi/bakert.h \
+	src/features/gi/rtddgi.h \
 	src/reflcensus.h \
 	src/reflcensuscli.h \
-	src/rtddgimath.h \
-	src/rtddgi/rtddgi_gpu.h \
-	src/rtddgicell.h \
+	src/features/gi/rtddgimath.h \
+	src/features/gi/rtddgi/rtddgi_gpu.h \
+	src/features/gi/rtddgicell.h \
 	src/features/air/airzone.h \
 	src/features/air/airzonemath.h \
 	src/features/air/airzonepanel.h \
@@ -469,23 +469,23 @@ HEADERS += \
 	src/celledit.h \
 	src/celleditpanel.h \
 	src/features/air/cellairzone.h \
-	src/probemask.h \
-	src/probeemit.h \
-	src/probegi.h \
-	src/probegifine.h \
-	src/proberelight.h \
+	src/features/gi/probemask.h \
+	src/features/gi/probeemit.h \
+	src/features/gi/probegi.h \
+	src/features/gi/probegifine.h \
+	src/features/gi/proberelight.h \
 	src/farlight.h \
 	src/farlightmap.h \
-	src/proberooms.h \
-	src/probevolcheck.h \
-	src/probevolfine.h \
-	src/roomfitbatch.h \
-	src/probevolumes.h \
-	src/probevolumesgi.h \
-	src/probesky.h \
+	src/features/gi/proberooms.h \
+	src/features/gi/probevolcheck.h \
+	src/features/gi/probevolfine.h \
+	src/features/gi/roomfitbatch.h \
+	src/features/gi/probevolumes.h \
+	src/features/gi/probevolumesgi.h \
+	src/features/gi/probesky.h \
 	src/celldoorlive.h \
 	src/cellworldanim.h \
-	src/probeplace.h \
+	src/features/gi/probeplace.h \
 	src/cellrefs.h \
 	src/cellactor.h \
 	src/cellweapon.h \
@@ -633,11 +633,11 @@ SOURCES += \
 	src/gl/cloudvol.cpp \
 	src/gl/cloudshadow.cpp \
 	src/gl/cloudfly.cpp \
-	src/gl/cellprobeview.cpp \
-	src/gl/cellvolumeview.cpp \
+	src/features/gi/cellprobeview.cpp \
+	src/features/gi/cellvolumeview.cpp \
 	src/gl/cellssr.cpp \
 	src/gl/cellreflprobe.cpp \
-	src/gl/cellssgi.cpp \
+	src/features/gi/cellssgi.cpp \
 	src/features/lights/celllampshadow.cpp \
 	src/gl/celllooks.cpp \
 	src/features/lights/cellnifxlights.cpp \
@@ -752,7 +752,7 @@ SOURCES += \
 	src/xml/nifexpr.cpp \
 	src/xml/nifxml.cpp \
 	src/animgraph.cpp \
-	src/bakegeom.cpp \
+	src/features/gi/bakegeom.cpp \
 	src/bsamodel.cpp \
 	src/freezeanim.cpp \
 	src/gamemanager.cpp \
@@ -812,13 +812,13 @@ SOURCES += \
 	src/wwsharedread.cpp \
 	src/celltexahead.cpp \
 	src/cellmodelahead.cpp \
-	src/probealbedo.cpp \
-	src/probebake.cpp \
-	src/pgiwrite.cpp \
-	src/bakert.cpp \
-	src/rtddgi.cpp \
+	src/features/gi/probealbedo.cpp \
+	src/features/gi/probebake.cpp \
+	src/features/gi/pgiwrite.cpp \
+	src/features/gi/bakert.cpp \
+	src/features/gi/rtddgi.cpp \
 	src/reflcensuscli.cpp \
-	src/rtddgicell.cpp \
+	src/features/gi/rtddgicell.cpp \
 	src/features/air/airzone.cpp \
 	src/features/air/airzonepanel.cpp \
 	src/io/espwrite.cpp \
@@ -829,22 +829,22 @@ SOURCES += \
 	src/io/espwritegates.cpp \
 	src/io/espwriteroundtrip.cpp \
 	src/features/air/cellairzone.cpp \
-	src/probegi.cpp \
-	src/probegifine.cpp \
-	src/proberelight.cpp \
+	src/features/gi/probegi.cpp \
+	src/features/gi/probegifine.cpp \
+	src/features/gi/proberelight.cpp \
 	src/farlight.cpp \
 	src/farlightmap.cpp \
-	src/proberooms.cpp \
-	src/probevolcheck.cpp \
-	src/probevolfine.cpp \
-	src/probevolumes.cpp \
-	src/probevolumesgi.cpp \
-	src/probesky.cpp \
+	src/features/gi/proberooms.cpp \
+	src/features/gi/probevolcheck.cpp \
+	src/features/gi/probevolfine.cpp \
+	src/features/gi/probevolumes.cpp \
+	src/features/gi/probevolumesgi.cpp \
+	src/features/gi/probesky.cpp \
 	src/celldoorlive.cpp \
 	src/cellworldanim.cpp \
-	src/probefar.cpp \
-	src/probeincr.cpp \
-	src/probeplace.cpp \
+	src/features/gi/probefar.cpp \
+	src/features/gi/probeincr.cpp \
+	src/features/gi/probeplace.cpp \
 	src/cellrefs.cpp \
 	src/cellactor.cpp \
 	src/cellweapon.cpp \

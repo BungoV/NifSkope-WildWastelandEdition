@@ -49,9 +49,9 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 // lane PERFFIX3: the CPU mirror of what a location holds (celluniform.h Mirror), kept only on programs that asked for it
 #define WWMI( k, l, v, n ) if ( wwMirror.on ) wwMirror.put( l, WwCellUni::k, v, n )
 #define WWMF( l, n ) if ( wwMirror.on ) wwMirror.forget( l, n )
-bool rtddgiCellShaderDefine();	// lane RTXGI1 M2: src/rtddgicell.cpp (the Ray-traced GI row / WW_CELL_RTDDGI)
-int rtddgiCellCascades();	// lane RTXCASCADE1: src/rtddgicell.h (WW_CELL_RTDDGI_CASCADES)
-bool rtddgiRestirShaderDefine();	// lane RESTIRDI1: src/rtddgicell.cpp (the RT quality row Medium+ / WW_CELL_RT_PRESET)
+bool rtddgiCellShaderDefine();	// lane RTXGI1 M2: src/features/gi/rtddgicell.cpp (the Ray-traced GI row / WW_CELL_RTDDGI)
+int rtddgiCellCascades();	// lane RTXCASCADE1: src/features/gi/rtddgicell.h (WW_CELL_RTDDGI_CASCADES)
+bool rtddgiRestirShaderDefine();	// lane RESTIRDI1: src/features/gi/rtddgicell.cpp (the RT quality row Medium+ / WW_CELL_RT_PRESET)
 bool wwAirZoneShaderDefine();	// lane AIRZONE1: src/features/air/cellairzone.cpp (the Air zones row / WW_CELL_AIRZONE)
 bool wwCellViewsShaderDefine();	// lane FO4CELLGI1: src/gl/celllights.cpp (WW_CELL_VIEWS, the probe and pass views)
 bool wwFogLeakShaderDefine();	// lane FOGLEAK1: src/features/air/cellvolair.cpp (WW_CELL_FOGLEAK, the fog leak fix; off by default)

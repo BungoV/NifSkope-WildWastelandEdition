@@ -233,7 +233,7 @@ const WwCellLighting * wwCellLightsFor( const void * nif );
 //! lane NIFXLIGHT2: moves on each Mesh lights (.nifx) publish for the document (0: the lights as built)
 int wwCellLightsNifxStamp( const void * nif );
 
-/*! The bounce (src/probegi.h): a voxel grid of probe ambient cubes, six slabs (+X -X +Y -Y +Z -Z) of
+/*! The bounce (src/features/gi/probegi.h): a voxel grid of probe ambient cubes, six slabs (+X -X +Y -Y +Z -Z) of
  *  dims[2] each, x fastest, rgba per voxel; the shader adds albedo x E(N) / pi. */
 struct WwCellGi
 {
@@ -245,22 +245,22 @@ struct WwCellGi
 	std::vector<float> sky;	// the same layout, rgb = the probes' open-sky share, a = valid
 	QString summary;
 	bool skyLit = false;   //!< the grid holds the weather's sky; it stands in for the weather's ambient
-	/*! With rooms (src/proberooms.h), rgba and sky hold 12 slabs (slot 0's six, then slot 1's);
+	/*! With rooms (src/features/gi/proberooms.h), rgba and sky hold 12 slabs (slot 0's six, then slot 1's);
 	 *  slotRooms = per voxel the packed rooms of its two slots, rooms = per fine cell its packed rooms */
 	std::vector<float> slotRooms, rooms;	// (Qt reserves "slots")
 	float roomsOrigin[3] = { 0, 0, 0 };
 	float roomsCell = 16.0f;
 	int roomsDims[3] = { 0, 0, 0 };
-	/*! lane PERF1 (src/proberooms.h GiVolumeSet): the interior volumes' shapes, 12 floats each (center, type; size,
+	/*! lane PERF1 (src/features/gi/proberooms.h GiVolumeSet): the interior volumes' shapes, 12 floats each (center, type; size,
 	 *  room; rotation degrees, 0), and per voxel its slots' thresholds (the packed rooms across, slot 0's weight,
 	 *  slot 1's; the slot texture's g, b, a) */
 	std::vector<float> volShapes, slotThresh;
 	QString volCensus;
-	/*! lane EMISSIVEGRID1 (src/probegifine.h): the fine boxes round bright glow, 8 floats a box, and their atlas (dims[0] x
+	/*! lane EMISSIVEGRID1 (src/features/gi/probegifine.h): the fine boxes round bright glow, 8 floats a box, and their atlas (dims[0] x
 	 *  dims[1] a layer, fineLayers layers, rgba), uploaded after the grid's own layers; empty: none (the row off) */
 	std::vector<float> fineBox, fine;
 	int fineLayers = 0;
-	/*! SKY2 FOGSLICE1 (src/probegi.h ProbeGiResult::air): the air's own volume, six slabs of airDims[2] each, x fastest,
+	/*! SKY2 FOGSLICE1 (src/features/gi/probegi.h ProbeGiResult::air): the air's own volume, six slabs of airDims[2] each, x fastest,
 	 *  rgba (a = 1), every voxel filled; empty: none (the air reads the grid) */
 	std::vector<float> air;
 	float airOrigin[3] = { 0, 0, 0 };

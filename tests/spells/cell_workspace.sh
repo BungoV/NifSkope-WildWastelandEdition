@@ -96,7 +96,7 @@ newer=1
 for s in src/cellworkspace.cpp src/cellworkspace.h src/cellworkspacetest.cpp \
          src/cellrefs.cpp src/cellrefs.h src/cellview.cpp src/cellclick.cpp \
          src/esmdata.cpp src/nifskope.cpp src/nifskope_ui.cpp src/nifskope.h \
-         src/probebake.cpp src/probealbedo.cpp src/probeplace.cpp; do
+         src/features/gi/probebake.cpp src/features/gi/probealbedo.cpp src/features/gi/probeplace.cpp; do
 	if [ ! -f "$REPO/$s" ] || [ "$REPO/$s" -nt "$EXE" ]; then
 		say "  $s is missing or NEWER than the exe"
 		newer=0

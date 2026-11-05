@@ -1,5 +1,5 @@
 // Lane AIRZONE1 (2026-10-29): just enough GLSL for C++ to compile res/shaders/features/air/cell_airzone.glsl as written, so the unit
-// test runs the shader's own text against src/features/air/airzonemath.h (the form of tests/rtddgi_math/glsl_shim.h). Include inside
+// test runs the shader's own text against src/features/air/airzonemath.h (the form of tests/features/gi/rtddgi_math/glsl_shim.h). Include inside
 // namespace glsl, after <cmath> (this file includes nothing). Scalar functions take double and return float (GLSL's
 // float maths, rounded once more), so a literal like 0.5 never makes a call ambiguous.
 

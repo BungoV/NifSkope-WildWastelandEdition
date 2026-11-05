@@ -299,7 +299,7 @@ vec3 tonemap(vec3 x)
 
 
 #ifdef WW_CELLLIGHTS
-#ifndef WW_CELL_GI_MARCH_COPIES	// red (tests/spells/cell_giblack_link.sh): a march copy per call site, over the link limit
+#ifndef WW_CELL_GI_MARCH_COPIES	// red (tests/features/gi/cell_giblack_link.sh): a march copy per call site, over the link limit
 #define WW_CELL_GI_MARCH_ONCE 1	// lane GIBLACKLINK1: the march red runs once (cellGiMarchPrime in main)
 #endif
 #define CELL_GI_ONEREAD 1	// DDGIREADPERF1: one volume read site (cellGiFirst in main, cell_lights.glsl)

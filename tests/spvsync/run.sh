@@ -23,7 +23,7 @@ red() {	# red <name> <header file standing in for restir.spv.h>
 	if [ $r -eq 1 ] && grep -q 'restir.spv.h: STALE' "$OUT/red_$1.txt"; then echo "red $1 FAILS as it must (rc $r)"
 	else echo "RED $1 DID NOT FAIL (rc $r)"; tail -n 4 "$OUT/red_$1.txt"; bad=1; fi
 }
-"$PY" -I tests/spvsync/flip_word.py src/rtddgi/restir.spv.h "$OUT/flip_restir.spv.h" && red flip "$O/flip_restir.spv.h"
+"$PY" -I tests/spvsync/flip_word.py src/features/gi/rtddgi/restir.spv.h "$OUT/flip_restir.spv.h" && red flip "$O/flip_restir.spv.h"
 if git show 563dcf97:src/rtddgi/restir.spv.h > "$OUT/stale_restir.spv.h" 2> /dev/null; then red stale "$O/stale_restir.spv.h"
 else echo "red stale: commit 563dcf97 not in this clone, not run"; fi
 [ $bad -eq 0 ] && echo "SPVSYNC TEST OK" || echo "SPVSYNC TEST FAILED"

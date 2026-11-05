@@ -1,7 +1,7 @@
 // lane FRAMESCHED1: src/gl/wwframesched.h. g++ -std=c++17 -I<tree>/src tests/framesched/framesched.cpp
 // Red: -DFRAMESCHED_RED runs today's schedule (both captures every frame, on the cascade frames too) and must FAIL.
 #include "gl/wwframesched.h"
-#include "rtddgimath.h"
+#include "features/gi/rtddgimath.h"
 
 #include <cstdio>
 

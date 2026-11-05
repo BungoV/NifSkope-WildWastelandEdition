@@ -1,4 +1,4 @@
-# lane PGI0 fixtures: synthetic (tests/spells/pgi_read.py fixtures), no game data.
+# lane PGI0 fixtures: synthetic (tests/features/gi/pgi_read.py fixtures), no game data.
 # file  expected (ok | the refusal both readers must give)
 2_-3.pgi ok
 SynthInterior.pgi ok

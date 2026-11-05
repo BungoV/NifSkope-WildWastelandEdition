@@ -23,7 +23,7 @@
 #include "gl/cellwater.h"	// water casts no cube shadow
 #include "gl/cellunderwater.h"	// the WATR INAM imagespace under water
 #include "esmwater.h"
-#include "gl/cellwatergi.h"	// water reads no probe GI
+#include "features/gi/cellwatergi.h"	// water reads no probe GI
 #include "features/lights/celllampshadow.h"	// lane LAMPSHADOW1
 #include "features/lights/cubefacecull.h"	// lane PERFFIX2 b: a caster draws only into the cube faces it can reach
 #include "features/lights/lampslice.h"	// lane PERFFIX2 b: the lamp store's first stores spread over frames
@@ -32,10 +32,10 @@
 #include "features/lights/cellfxlit.h"	// lane LIGHTS4: a placement's emittance colour
 #include "gamemanager.h"	// lane SUNCELL1: the weather imagespace's LUT
 #include "esmweather.h"	// lane WEATHERBLEND2: wwLutBlendN
-#include "probealbedo.h"	// lane LIGHTS5 (GOBO1): a spot's pattern
+#include "features/gi/probealbedo.h"	// lane LIGHTS5 (GOBO1): a spot's pattern
 #include "recx.h"	// lane LIGHTS5 (FOGSCALE1): fog.scale
 #include "features/lights/cellnifxlights.h"	// lane NIFXLIGHT1: a fixture mesh's .nifx lights
-#include "rtddgicell.h"	// lane RTXGI1 M2: the ray-traced GI volume's read (rtddgiCellUniforms)
+#include "features/gi/rtddgicell.h"	// lane RTXGI1 M2: the ray-traced GI volume's read (rtddgiCellUniforms)
 #include "gl/celluniprof.h"	// lane PERFFIX1: WW_CELL_UNI_PROF
 #include "gl/cellunirec.h"	// lane PERFFIX1: the cell-uniform class record
 #include "gl/cloudvol.h"	// lane LIGHTNING2: a storm's flash on the exterior ambient (wwLightningGround)

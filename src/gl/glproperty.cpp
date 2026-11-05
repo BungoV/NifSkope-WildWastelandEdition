@@ -58,7 +58,7 @@ int wwLodMaskByTree = 0;
 #include "gamemanager.h"
 #include "celltexahead.h"
 #include "cellstreamtex.h"	// lane STREAMTEX1
-#include "cellssgi.h"	// lane SSGI1
+#include "features/gi/cellssgi.h"	// lane SSGI1
 #include "libfo76utils/src/ddstxt16.hpp"
 #include "glview.h"
 #include "renderer.h"

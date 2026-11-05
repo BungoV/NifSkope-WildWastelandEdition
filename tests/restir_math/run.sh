@@ -3,7 +3,7 @@
 # (tests/restir_math/restir_math_test.cpp).
 #   tests/restir_math/run.sh <out dir>        (from the tree root; CXX defaults to g++; put /c/msys64/ucrt64/bin first on PATH)
 # Green must print "RESTIR_MATH PASS 7"; each red build must print "FAIL <its check>:" and exit 1.
-# The "mirror" check compiles src/rtddgi/restir_common.glsl itself (through tests/restir_math/restir_shim.h).
+# The "mirror" check compiles src/features/gi/rtddgi/restir_common.glsl itself (through tests/restir_math/restir_shim.h).
 # Every run is capped by `timeout 120` (lane-hygiene: a new test exe never runs uncapped).
 set -u
 OUT="${1:?usage: run.sh <out dir>}"

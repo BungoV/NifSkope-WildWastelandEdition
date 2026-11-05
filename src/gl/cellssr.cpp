@@ -7,7 +7,7 @@ BSD License - see nifskope.h
 #include "cellssr.h"
 #include "cellssrwater.h"	// lane FIX1101A: the water's own reflections part
 #include "wwswitch.h"	// lane TESTDRIVER1: the WW_* switch store
-#include "cellssgi.h"
+#include "features/gi/cellssgi.h"
 #include "features/shared/cellpasstime.h"	// lane PERF2: the draws' CPU setup time
 #include "features/near/celldrawstate.h"	// lane PERF3
 #include "cellunits.h"

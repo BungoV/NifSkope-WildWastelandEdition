@@ -20,7 +20,7 @@ import sys
 import numpy as np
 from PIL import Image
 
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'features', 'gi')); sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from probe_bake import read_tbk  # noqa: E402
 import cell_pass_check as CP  # noqa: E402
 import cell_rooms_check  # noqa: E402

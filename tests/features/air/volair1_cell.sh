@@ -223,7 +223,7 @@ if [ "$RECHECK" != 1 ]; then
 			fi
 		fi
 		if [ $ext = 0 ]; then
-			# the probes as tests/spells/cell_gi.sh places and bakes them (the first run bakes, the rest relight it)
+			# the probes as tests/features/gi/cell_gi.sh places and bakes them (the first run bakes, the rest relight it)
 			pr=( WW_CELL_PROBES="$(winpath "$OUT/$p/probes.tsv")" WW_CELL_PROBES_HIDE=1 WW_CELL_BAKE_REFRACT_RED=keep )
 			from=( "${pr[@]}" WW_CELL_GI_FROM="$(winpath "$OUT/$p/bake")" )
 			bake=( "${pr[@]}" WW_CELL_PROBE_SOUP="$(winpath "$OUT/$p/soup.psp")" WW_CELL_PROBE_BAKE="$(winpath "$OUT/$p/bake")" )

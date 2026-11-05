@@ -2,8 +2,8 @@
 
 #include "farlight.h"
 
-#include "probeplace.h"
-#include "proberelight.h"
+#include "features/gi/probeplace.h"
+#include "features/gi/proberelight.h"
 
 #include <QDir>
 #include <QElapsedTimer>

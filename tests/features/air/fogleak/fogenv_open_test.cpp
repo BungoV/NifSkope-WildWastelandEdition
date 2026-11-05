@@ -9,7 +9,7 @@
 //            the halves (|rel err| <= 0.5 %)
 // Red -DFOGENV_RED_NOPI (the open field without the cosine weight: the solid-angle mean) must fail amb.
 // g++ -O2 -std=c++17 -I src tests/features/air/fogleak/fogenv_open_test.cpp -o <out>/fogenv_open.exe; run under timeout 30.
-#include "rtddgimath.h"
+#include "features/gi/rtddgimath.h"
 
 #include <cmath>
 #include <cstdio>

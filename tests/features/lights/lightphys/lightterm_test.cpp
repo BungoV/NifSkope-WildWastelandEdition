@@ -1,4 +1,4 @@
-// lane LIGHTPHYS2: wwlp::lightTerm (the GPU relight's per-light term, src/proberelight.cpp kGlslDirect) evaluated
+// lane LIGHTPHYS2: wwlp::lightTerm (the GPU relight's per-light term, src/features/gi/proberelight.cpp kGlslDirect) evaluated
 // the way the kernel does must equal wwlp::falloff() over many authored curves, radii, modes and reds; keepsGame()
 // must say exactly when falloff() is the game's curve; sameBounce() must see every field the bounce reads.
 // Red (-DLIGHTTERM_RED): the kernel's advanced branch with its window left on (the nowindow red ignored) must fail.

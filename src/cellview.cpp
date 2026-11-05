@@ -6,7 +6,7 @@ BSD License - see nifskope.h
 
 #include "cellview.h"
 #include "wwswitch.h"	// lane TESTDRIVER1: the WW_* switch store
-#include "probeincr.h"
+#include "features/gi/probeincr.h"
 #include <QCryptographicHash>
 
 #include "cellpick.h"
@@ -33,14 +33,14 @@ BSD License - see nifskope.h
 #include "esmweather.h"		// the fog packing
 #include "lodgen.h"
 #include "nativeemit.h"
-#include "probeplace.h"		// lane PRTPPLACE
-#include "probebake.h"		// lane PRTPBAKE
-#include "pgiwrite.h"
-#include "probegi.h"
-#include "probealbedo.h"
-#include "probefar.h"		// the far soup beyond the loaded block
+#include "features/gi/probeplace.h"		// lane PRTPPLACE
+#include "features/gi/probebake.h"		// lane PRTPBAKE
+#include "features/gi/pgiwrite.h"
+#include "features/gi/probegi.h"
+#include "features/gi/probealbedo.h"
+#include "features/gi/probefar.h"		// the far soup beyond the loaded block
 #include "features/shared/cellpasstime.h"	// private bytes at each stage
-#include "proberelight.h"	// the relight from recorded operators (CPU + GPU)
+#include "features/gi/proberelight.h"	// the relight from recorded operators (CPU + GPU)
 #include "celldoorlive.h"	// one live door
 #include "farlight.h"		// distant light from the surfels
 #include "cellmodelahead.h"	// models parsed on worker threads
@@ -63,14 +63,14 @@ BSD License - see nifskope.h
 #include "features/lights/cellnifxlights.h"	// lane NIFXLIGHT3: the .nifx path rule, kept live by src/gl/celllights.cpp
 #include "features/lights/lightphys.h"	// lane MUSGI1 round 4: the vanilla curve's flux for the lamp scale
 #include "features/shadows/sunshadow.h"	// lane LIVESET1: wwSunShadowForget
-#include "gl/cellprobeview.h"
+#include "features/gi/cellprobeview.h"
 #include "gl/lookdevstage.h"	// lane SKYTOP1: the cell's load order feeds the weather
-#include "gl/cellvolumeview.h"	// lane VOLFIT1
-#include "probevolumes.h"	// lane VOLFIT1: the Space stage
+#include "features/gi/cellvolumeview.h"	// lane VOLFIT1
+#include "features/gi/probevolumes.h"	// lane VOLFIT1: the Space stage
 #include "features/air/airzone.h"	// lane AIRZONE1: the hand-placed volumes' files (the cells, the GI merge, the converter)
 #include "gl/skyplacerun.h"	// lane INTSKY1: the sun's place for the open cell
 #include "features/air/cellairzone.h"	// lane AIRZONE1: the Air zones row
-#include "probevolumesgi.h"	// lane VOLFIT1: its rooms as the GI's volumes
+#include "features/gi/probevolumesgi.h"	// lane VOLFIT1: its rooms as the GI's volumes
 #include "features/lights/cellfxlit.h"
 #include "gl/celllensflare.h"
 #include "features/ao/cellaodecalgl.h"
@@ -2811,8 +2811,8 @@ static bool cellGiFromWanted()
 {
 	return wwCellPrtOn() && !wwEnvIsEmpty( "WW_CELL_GI_FROM" );
 }
-bool rtddgiCellShaderDefine();	// src/rtddgicell.h
-/* lane PRTOFF1: the ray-traced GI (src/rtddgicell.cpp) traces the probe soup the PRT's relight used to keep. Without the PRT
+bool rtddgiCellShaderDefine();	// src/features/gi/rtddgicell.h
+/* lane PRTOFF1: the ray-traced GI (src/features/gi/rtddgicell.cpp) traces the probe soup the PRT's relight used to keep. Without the PRT
  * an open with the Ray-traced GI row on gathers that soup itself (a welded block, as the bake load opened) and keeps it. */
 static bool cellRtSoupWanted()
 {
@@ -4123,7 +4123,7 @@ static bool cellBuild( NifModel * nif, const CellSceneSpec & specAsked, CellChun
 	const bool nmapOn = smoothOn && wwEnvStr( "WW_CELL_BAKE_NMAP" ) != QLatin1String( "0" );
 	int soupSmoothTris = 0, soupLandVnml = 0, soupLandDerived = 0, soupNmapModelSpace = 0;
 	const QString landDump = wwEnvStr( "WW_CELL_BAKE_LAND_DUMP" );
-	/* Water surfaces in the placer and the bake (src/probebake.cpp). WW_CELL_BAKE_WATER=0 leaves them out;
+	/* Water surfaces in the placer and the bake (src/features/gi/probebake.cpp). WW_CELL_BAKE_WATER=0 leaves them out;
 	 * WW_CELL_WATER_BAKEDUMP=<file> (+ _PROBES=x,y,z;...) dumps each ray's split. */
 	const bool bakeWater = wwEnvStr( "WW_CELL_BAKE_WATER" ) != QLatin1String( "0" );
 	int soupWaterCells = 0;
@@ -6837,7 +6837,7 @@ static bool cellBuild( NifModel * nif, const CellSceneSpec & specAsked, CellChun
 						t << "  " << line << "\n";
 					t << "  bake folder " << QDir::toNativeSeparators( QDir::cleanPath( dir ) ) << "\n";
 					giBakeDir = QDir::cleanPath( dir );
-					/* lane PGI0: the .pgi ("Precomputed GI", src/pgi_format.h) beside the .tbk, from the files this bake
+					/* lane PGI0: the .pgi ("Precomputed GI", src/features/gi/pgi_format.h) beside the .tbk, from the files this bake
 					 * just wrote (no new tracing): exterior <X>_<Y>.pgi a cell, interior <Cell EditorID>.pgi */
 					if ( bs.tbkVersion == 5 && bs.red.isEmpty() ) {
 						PgiWriteSpec ps;
@@ -6852,7 +6852,7 @@ static bool cellBuild( NifModel * nif, const CellSceneSpec & specAsked, CellChun
 						pgiWriteFromTbk( bres.files, ps, QDir::cleanPath( dir ), &pres );
 						t << "  " << pgiWriteCensusText( pres ) << "\n";
 					}
-					/* lane BAKEINCR1: what this bake read, beside what it wrote (src/probeincr.h). The
+					/* lane BAKEINCR1: what this bake read, beside what it wrote (src/features/gi/probeincr.h). The
 					 * far line is its own ring read again into an empty soup -- warm, about a second. */
 					if ( incrRecord ) {
 						ProbeIncr::stopRecording();
@@ -7430,7 +7430,7 @@ static bool cellBuild( NifModel * nif, const CellSceneSpec & specAsked, CellChun
 		cellStreamStart( nif, seedPtr );
 	}
 
-	/* the bake just written, relit by those lights (src/probegi.h), for the GI row.
+	/* the bake just written, relit by those lights (src/features/gi/probegi.h), for the GI row.
 	 * WW_CELL_GI_DUMP=<folder> writes the gate's copies; WW_CELL_GI_RED=<red> its refuters.
 	 * only under the PRT's red; a bake written here (the tool) is not relit without it. */
 	if ( !giBakeDir.isEmpty() && wwCellPrtOn() ) {
@@ -7458,7 +7458,7 @@ static bool cellBuild( NifModel * nif, const CellSceneSpec & specAsked, CellChun
 			gs.sharePasses = wwLookOn( WwLook::ProbeShareWide ) ? 3 : 1;
 			gs.depthVis = wwLookOn( WwLook::ProbeDepthVis );
 			gs.depthVisRed = wwEnvStr( "WW_CELL_GI_DEPTHVIS_RED" ).trimmed();
-			// outdoors, the weather's sky and sun (src/probesky.h); WW_CELL_SKY_RED its refuters
+			// outdoors, the weather's sky and sun (src/features/gi/probesky.h); WW_CELL_SKY_RED its refuters
 			// and an interior whose cell shows the sky (the sun where Use Sky Lighting + Sunlight Shadows)
 			const quint16 cf = spec.interior ? cellInteriorFlags( world.interior() ) : quint16( 0 );
 			gs.interiorSky = ( cf & 0x0080u ) != 0;

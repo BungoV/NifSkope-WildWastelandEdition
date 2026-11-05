@@ -64,7 +64,7 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include "features/shadows/shadowset.h"	// lane WATERWETBAKE1: wwCellIsTerrainShape
 #include "gl/cellssr.h"
 #include "gl/cellreflprobe.h"	// lane REFLPROBE1
-#include "gl/cellssgi.h"
+#include "features/gi/cellssgi.h"
 #include "gl/gametaa.h"	// lane PERFFIX4: the material maps' mip bias under the TAA2 jitter
 #include "esmweather.h"
 #include "io/material.h"
