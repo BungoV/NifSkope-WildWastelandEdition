@@ -1,3 +1,16 @@
+## MODULES1 step 1 (2026-11-05): one shared telemetry file (src/features/shared/wwtelemetry.*)
+
+- `WW_TELEMETRY=<file>` (read once at launch) writes JSON lines: `t, frame, row, gen, module, event` plus fields.
+  `start` lists every WW_* switch the process launched with (`read: launch`); the live driver writes `row` and
+  `switch set/unset/reset` (name, value, stage, the driver's answer, `read: live`); PassTime writes one `cost` row every
+  `WW_TELEMETRY_RATE` frames (default 1) with frame GPU/CPU ms, every zone `[cpu, gpu, draws]`, GPU sub-stages, CPU
+  sub-timers and per-module sums (zone -> module map in wwtelemetry.cpp; shape-setup and the cull timers hold other
+  zones' work and stay out of the sums). A cost row whose `gen` is at or past a set's `gen` was drawn with that set in
+  effect. Cost rows need PassTime on (`WW_CELL_PASSTIME=1`); `WW_CELL_PASSTIME_LOG` now only decides the stderr line.
+- Reader: `python tools/telemetry.py <file> [--zones] [--switches] [--json] [--last N] [--after-gen]`.
+- Off (unset) = nothing is opened or built; pictures unchanged either way. The old `pass time:` lines stay until every
+  harness reads the file.
+
 ## MERGEFIX1102 item 5 (2026-11-05): a driven launch without its document refuses at once
 
 - SHAFTS1's "a refused rtddgi cell at launch stalls the frame loop" (11-03, c3 + Museum, DARKAIR1's hold too) was not

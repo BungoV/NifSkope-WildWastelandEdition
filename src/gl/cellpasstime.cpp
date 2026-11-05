@@ -1,7 +1,9 @@
 #include "cellpasstime.h"
+#include "features/shared/wwtelemetry.h"	// lane MODULES1: the shared telemetry module
 #include "wwswitch.h"	// lane TESTDRIVER1: the WW_* switch store
 
 #include <QByteArray>
+#include <QMap>
 #include <QElapsedTimer>
 #include <QOpenGLContext>
 #include <QOpenGLFunctions>
@@ -286,6 +288,38 @@ double gpuMs( GLuint a, GLuint b )
 }
 
 //! Reads a finished slot back, logs its frame and adds it to the window; its queries go back to the pool.
+//! lane MODULES1: the telemetry cost row, one per WW_TELEMETRY_RATE frames: frame, zones, sub-stages, per-module sums
+static void costRow( const Slot & sl, const double * gpu, double gpuFrame, const double * sub, const bool * subSeen,
+	const char * const * subName, const char * const * cpuSubName )
+{
+	using namespace WwTelemetry;
+	WwTelemetry::setFrame( sl.frame );
+	QMap<QByteArray, QPair<double, double>> mod;
+	QByteArray zones, subs, cpus, mods;
+	for ( int p = 0; p < Count; p++ ) {
+		if ( sl.cpu[p] <= 0.0 && gpu[p] <= 0.0 && sl.calls[p] == 0 )
+			continue;
+		zones += ( zones.isEmpty() ? "" : "," ) + str( name( p ) ) + ":[" + num( sl.cpu[p] ) + "," + num( gpu[p] ) + ","
+			+ QByteArray::number( sl.calls[p] ) + "]";
+		const QByteArray m = zoneModule( name( p ) );
+		if ( !m.isEmpty() ) {
+			mod[m].first += sl.cpu[p];
+			mod[m].second += gpu[p];
+		}
+	}
+	for ( int k = 0; k < SubCount; k++ )
+		if ( subSeen[k] )
+			subs += ( subs.isEmpty() ? "" : "," ) + str( subName[k] ) + ":" + num( sub[k] );
+	for ( int k = 0; k < CpuSubCount; k++ )
+		if ( sl.cpuSubN[k] > 0 )
+			cpus += ( cpus.isEmpty() ? "" : "," ) + str( cpuSubName[k] ) + ":[" + num( sl.cpuSub[k] ) + ","
+				+ QByteArray::number( sl.cpuSubN[k] ) + "]";
+	for ( auto it = mod.cbegin(); it != mod.cend(); ++it )
+		mods += ( mods.isEmpty() ? "" : "," ) + str( it.key() ) + ":[" + num( it.value().first ) + "," + num( it.value().second ) + "]";
+	record( "frame", "cost", "\"cpu\":" + num( sl.cpuFrame ) + ",\"gpu\":" + num( gpuFrame ) + ",\"zones\":{" + zones
+		+ "},\"sub\":{" + subs + "},\"cpusub\":{" + cpus + "},\"modules\":{" + mods + "}" );
+}
+
 void collect( Slot & sl )
 {
 	State & s = st();
@@ -346,7 +380,7 @@ void collect( Slot & sl )
 			}
 		}
 	}
-	if ( s.log ) {
+	if ( s.log || WwTelemetry::costDue( sl.frame ) ) {	// lane MODULES1: the cost row reads the same names
 		QByteArray line = QByteArray( "pass time: t=" ) + QByteArray::number( processSeconds(), 'f', 1 ) + " frame="
 			+ QByteArray::number( sl.frame ) + " cpu="
 			+ QByteArray::number( sl.cpuFrame, 'f', 2 ) + " gpu=" + QByteArray::number( gpuFrame, 'f', 2 );
@@ -390,7 +424,10 @@ void collect( Slot & sl )
 					+ QByteArray::number( sl.cpuSubN[k] );
 		if ( s.lightLoop )
 			line += ( sl.frame & 1 ) ? " | lights 0" : " | lights 1";
-		std::fprintf( stderr, "%s\n", line.constData() );
+		if ( s.log )
+			std::fprintf( stderr, "%s\n", line.constData() );
+		if ( WwTelemetry::costDue( sl.frame ) )
+			costRow( sl, gpu, gpuFrame, sub, subSeen, subName, cpuSubName );
 	}
 	s.winGpuFrames++;
 	s.winGpuFrame += gpuFrame;

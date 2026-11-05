@@ -238,6 +238,7 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include "ui/opencelldialog.h"	// the WW_OPENCELL_SHOT harness
 #include "gl/cellpasstime.h"
 #include "celltexahead.h"
+#include "features/shared/wwtelemetry.h"	// lane MODULES1
 #include <vector>
 
 namespace {
@@ -2292,6 +2293,7 @@ QString wwLiveCommand( NifSkope * skope, const QString & line )
 	if ( verb == QLatin1StringView( "row" ) ) {
 		L.rowRefused = false;
 		L.reopenRefused.clear();
+		WwTelemetry::setRow( rest.toUtf8() );
 		return QStringLiteral( "row %1" ).arg( rest );
 	}
 	if ( verb == QLatin1StringView( "set" ) || verb == QLatin1StringView( "env" ) || verb == QLatin1StringView( "unset" ) ) {
@@ -2303,6 +2305,10 @@ QString wwLiveCommand( NifSkope * skope, const QString & line )
 		const QByteArray value = unset ? QByteArray() : rest.mid( eq + 1 ).toLocal8Bit();
 		WwSwitchStage stage = WwSwitchStage::Live;
 		const QString r = wwSwitchSet( name, value, unset, &stage );
+		if ( WwTelemetry::on() )	// lane MODULES1: a live set and the generation it made (cost rows carry gen)
+			WwTelemetry::record( "switch", unset ? "unset" : "set", "\"name\":" + WwTelemetry::str( name ) + ",\"value\":"
+				+ WwTelemetry::str( value ) + ",\"read\":\"live\",\"stage\":" + WwTelemetry::str( wwSwitchStageName( stage ) )
+				+ ",\"result\":" + WwTelemetry::str( r.toUtf8() ) );
 		if ( r.startsWith( QLatin1StringView( "refused" ) ) ) {
 			L.rowRefused = true;
 			return r;
@@ -2316,6 +2322,9 @@ QString wwLiveCommand( NifSkope * skope, const QString & line )
 	if ( verb == QLatin1StringView( "reset" ) ) {
 		QList<std::pair<QByteArray, WwSwitchStage>> moved;
 		const QString r = wwSwitchReset( rest.toLatin1(), &moved );
+		if ( WwTelemetry::on() )
+			WwTelemetry::record( "switch", "reset", "\"what\":" + WwTelemetry::str( rest.toUtf8() ) + ",\"read\":\"live\",\"result\":"
+				+ WwTelemetry::str( r.toUtf8() ) );
 		for ( const auto & m : moved )
 			if ( m.second == WwSwitchStage::Shaders || m.second == WwSwitchStage::Reopen ) {
 				L.owed |= m.second == WwSwitchStage::Shaders ? 1 : 2;
