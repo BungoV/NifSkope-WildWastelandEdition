@@ -1,3 +1,14 @@
+## MODULES1 step 10 (2026-11-06): the lamp atlas redraws what moves; the viewport's editor overlays in their own file
+
+- Atlas (Lamp shadows > Atlas): a door, actor or prop that moves after its lamps' tiles were drawn no longer keeps its
+  old shadow in the air. Each frame a caster's world transform and two of its vertices are compared with the last
+  frame's; a change redraws every lamp whose sphere holds the caster's old or new bound, into new tiles while the held
+  ones stay on screen (with no room, the lamp takes the walk for the frames of its redraw). Red
+  `WW_CELL_AIR_LAMPATLAS_RED=frozen` (live): movers frozen at the draw, as before. The census line adds movers and
+  redraws.
+- Code layout only: the viewport's editor overlays (grid, gizmos, marks) moved from src/glview.cpp to
+  src/features/overlays/overlays.cpp, byte for byte.
+
 ## MODULES1 step 9 (2026-11-05): Lamp shadows default Atlas; the atlas draws all six faces of a lamp in one go
 
 - Volumetric Air > Lamp shadows now starts on Atlas (the Museum's air 38.7 -> 14.0 ms at the same picture). Probe walk

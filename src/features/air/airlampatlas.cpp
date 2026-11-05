@@ -5,7 +5,11 @@
  *    cubes' program and caster rules), six s x s tiles a lamp, s = nextPow2(0.5 x screen px) on 32 .. 256;
  *  - tiles from a buddy allocator over 32 px cells; over budget the smallest lamps step down first;
  *  - the static world drawn once a cell, kFacesPerFrame faces a frame, nearest lamps first; a resize draws the new tiles
- *    before the old are freed (hysteresis 0.35 down); movers are frozen at the draw (notes/modules1/AUDIT.md);
+ *    before the old are freed (hysteresis 0.35 down);
+ *  - AUDIT 11 movers: a caster whose world transform or two vertices changed since the last frame (LAMPSHADOW1's
+ *    lsSigOf rule) redraws every lamp whose sphere holds its old or new bound; the held tiles stay until the new are
+ *    whole (or, with no room, the lamp takes the walk for the frames of its redraw). Red WW_CELL_AIR_LAMPATLAS_RED=frozen:
+ *    movers frozen at the draw, as before;
  *  - the table (RGBA32F buffer, 4 texels a light): faces 0-1, 2-3, 4-5 tile origins in px, then (s, ready, 0, 0).
  * The shader: cell_volair.frag airLeakLightK (face by the major axis, 2x2 compare one texel inside the tile). */
 
@@ -27,6 +31,7 @@
 #include <cstdio>
 #include <cstring>
 #include <set>
+#include <unordered_map>
 
 namespace {
 int g_lampVisRow = -1;	// the menu row's mode (QSettings WW/AirLampVis), read once
@@ -71,7 +76,7 @@ int wwAirLampAtlasRed()
 	const QByteArray v = wwEnv( "WW_CELL_AIR_LAMPATLAS_RED" ).trimmed();	// read live; "twice,faces,perface"
 	const bool perface = v.contains( "perface" );
 	const bool faces = QByteArray( v ).replace( "perface", "" ).contains( "faces" );
-	return ( v.contains( "twice" ) ? 1 : 0 ) | ( faces ? 2 : 0 ) | ( perface ? 4 : 0 );
+	return ( v.contains( "twice" ) ? 1 : 0 ) | ( faces ? 2 : 0 ) | ( perface ? 4 : 0 ) | ( v.contains( "frozen" ) ? 8 : 0 );
 }
 
 namespace {
@@ -152,6 +157,15 @@ struct Tiles
 struct Lamp
 {
 	Tiles cur, next;
+	bool redraw = false;	// AUDIT 11: a caster in its sphere moved; next is drawn at cur's size
+};
+
+//! AUDIT 11: a caster's world rotation, translation, scale and two vertices (a CPU-skinned shape moves its vertices)
+struct Sig
+{
+	float v[19];
+	float c[3];
+	float rad = 0.0f;
 };
 
 struct State
@@ -166,6 +180,8 @@ struct State
 	qint64 frames = 0, facesTotal = 0;
 	int lastReady = -1, lastPending = -1;
 	double drawMs = 0.0, maxMs = 0.0;	// since the cell's key last changed
+	std::unordered_map<const Shape *, Sig> hist;	// AUDIT 11: last frame's signature a caster
+	qint64 moves = 0, redraws = 0;	// AUDIT 11: since the cell's key last changed
 };
 
 State & st()
@@ -251,6 +267,33 @@ std::uint64_t cellKey( const WwCellLighting * L )
 	return h;
 }
 
+Sig sigOf( const WwCubeCaster & c )
+{
+	Sig g;
+	const Transform & w = c.sh->worldTrans();
+	int n = 0;
+	for ( int i = 0; i < 3; i++ )
+		for ( int j = 0; j < 3; j++ )
+			g.v[n++] = w.rotation( i, j );
+	for ( int i = 0; i < 3; i++ )
+		g.v[n++] = w.translation[i];
+	g.v[n++] = w.scale;
+	const bool any = !c.sh->verts.isEmpty();
+	for ( int i = 0; i < 3; i++ ) {
+		g.v[n + i] = any ? c.sh->verts.constFirst()[i] : 0.0f;
+		g.v[n + 3 + i] = any ? c.sh->verts.at( c.sh->verts.size() / 2 )[i] : 0.0f;
+		g.c[i] = c.c[i];
+	}
+	g.rad = c.rad;
+	return g;
+}
+
+bool touches( const WwCellLight & l, const float c[3], float rad )
+{
+	const float dx = c[0] - l.pos[0], dy = c[1] - l.pos[1], dz = c[2] - l.pos[2], reach = rad + l.radius;
+	return dx * dx + dy * dy + dz * dz < reach * reach;
+}
+
 }	// namespace
 
 int wwAirLampAtlasFrame( Scene * scene, const WwCellLighting * L, const float cam[3], float p11, int viewH, float farD )
@@ -313,6 +356,35 @@ int wwAirLampAtlasFrame( Scene * scene, const WwCellLighting * L, const float ca
 		s.lastReady = s.lastPending = -1;
 		s.frames = s.facesTotal = 0;
 		s.drawMs = s.maxMs = 0.0;
+		s.hist.clear();
+		s.moves = s.redraws = 0;
+	}
+
+	// AUDIT 11: what moved since the last frame redraws the lamps it touches (red "frozen": movers frozen at the draw)
+	std::vector<WwCubeCaster> casters;
+	bool haveCasters = false;
+	if ( !( wwAirLampAtlasRed() & 8 ) ) {
+		wwCellCubeCasters( scene, casters );
+		haveCasters = true;
+		for ( const WwCubeCaster & c : casters ) {
+			const Sig g = sigOf( c );
+			auto it = s.hist.find( c.sh );
+			if ( it != s.hist.end() && std::memcmp( it->second.v, g.v, sizeof g.v ) != 0 ) {
+				s.moves++;
+				for ( int i = 0; i < n; i++ ) {
+					Lamp & m = s.lamps[i];
+					if ( !m.cur.s && !m.next.s )
+						continue;
+					const WwCellLight & l = L->lights.at( i );
+					if ( touches( l, it->second.c, it->second.rad ) || touches( l, g.c, g.rad ) ) {
+						s.redraws += m.redraw ? 0 : 1;
+						m.redraw = true;
+						m.next.drawn = 0;
+					}
+				}
+			}
+			s.hist[c.sh] = g;
+		}
 	}
 
 	// the sizes: half the lamp's screen extent, on the ladder; away from the air the tiles go back to the pool
@@ -373,16 +445,23 @@ int wwAirLampAtlasFrame( Scene * scene, const WwCellLighting * L, const float ca
 				s.tableDirty = true;
 			freeTiles( s, m.next );
 			freeTiles( s, m.cur );
+			m.redraw = false;
 			continue;
 		}
-		if ( m.cur.s == want[i] ) {
+		if ( m.cur.s == want[i] && !m.redraw ) {
 			freeTiles( s, m.next );
 			continue;
 		}
 		if ( m.next.s != want[i] ) {
 			freeTiles( s, m.next );
-			if ( !takeTiles( s, m.next, want[i] ) )
-				continue;	// no room this frame: the held tiles (or the walk) stay
+			if ( !takeTiles( s, m.next, want[i] ) ) {
+				if ( !( m.redraw && m.cur.s == want[i] ) )
+					continue;	// no room this frame: the held tiles (or the walk) stay
+				m.next = m.cur;	// AUDIT 11, no room: redraw in place, the walk until it is whole
+				m.next.drawn = 0;
+				m.cur = Tiles();
+				s.tableDirty = true;
+			}
 		}
 		pending.push_back( i );
 	}
@@ -390,8 +469,8 @@ int wwAirLampAtlasFrame( Scene * scene, const WwCellLighting * L, const float ca
 
 	int faces = 0;
 	if ( !pending.empty() ) {
-		std::vector<WwCubeCaster> casters;
-		wwCellCubeCasters( scene, casters );
+		if ( !haveCasters )
+			wwCellCubeCasters( scene, casters );
 		// one instanced draw a caster for all the faces it touches (the vertex stage picks the face's viewport,
 		// GL_ARB_shader_viewport_layer_array; notes/modules1/ATLASFACES_RESEARCH.md); else one draw a face
 		const bool layered = !( wwAirLampAtlasRed() & 4 ) && layeredSupported();
@@ -531,6 +610,7 @@ int wwAirLampAtlasFrame( Scene * scene, const WwCellLighting * L, const float ca
 					freeTiles( s, m.cur );
 					m.cur = m.next;
 					m.next = Tiles();
+					m.redraw = false;
 					s.tableDirty = true;
 				}
 			}
@@ -601,9 +681,9 @@ int wwAirLampAtlasFrame( Scene * scene, const WwCellLighting * L, const float ca
 		tiled += w ? 1 : 0;
 	const int pend = int( pending.size() );
 	if ( ready != s.lastReady || ( pend == 0 ) != ( s.lastPending == 0 ) || ( pend && s.frames % 120 == 0 ) ) {
-		std::fprintf( stderr, "air lamp atlas: lamps %d in air %d ready %d pending %d faces %lld used %.1f%% cpu %.2f ms (%lld frames, max %.2f) tiles 32/64/128/256 %d/%d/%d/%d\n",
+		std::fprintf( stderr, "air lamp atlas: lamps %d in air %d ready %d pending %d faces %lld used %.1f%% cpu %.2f ms (%lld frames, max %.2f) tiles 32/64/128/256 %d/%d/%d/%d movers %lld redraws %lld%s\n",
 			n, tiled, ready, pend, (long long)s.facesTotal, 100.0 * used / ( double( kAtlas ) * kAtlas ), s.drawMs, (long long)s.frames,
-			s.maxMs, bySize[0], bySize[1], bySize[2], bySize[3] );
+			s.maxMs, bySize[0], bySize[1], bySize[2], bySize[3], (long long)s.moves, (long long)s.redraws, haveCasters ? "" : " (frozen)" );
 		s.lastReady = ready;
 		s.lastPending = pend;
 	}
