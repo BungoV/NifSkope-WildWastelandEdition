@@ -1,3 +1,18 @@
+## PERFHUNT2 (2026-11-05): three speed switches ship on, from the 11-03 show
+
+- bungo 11-03 "we need to see it work": one hold (exe cfb14780 snap2, Concord Foggy noon 5x5 + Memory Den, each
+  switch off/on x3 in one launch; notes/perfhunt2/show/SUMMARY.md). Stills compared on vs off against the repeat
+  noise; a pan for the temporal reuse.
+- ON now: air temporal reuse (`WW_CELL_VOLAIR_TEMPORAL`, Concord -0.4 / Memory Den -1.0 ms GPU; pan frames 6-8 twice
+  the still noise, 30 levels at most), variable rate shading (`WW/CellVrs` row, Concord -1.9 ms GPU) and camera
+  culling (`WW/CellCull`, Concord -1.7 ms GPU, Memory Den -2.4 ms CPU). Reds: `WW_CELL_VOLAIR_TEMPORAL_RED=1`,
+  `WW_CELL_VRS_RED=1x1`, `WW_CELL_CULL_RED=off` (new value: the old default); the pins `=0` still turn each off.
+- Stay OFF, with the numbers: half-resolution effects (`WW_CELL_FXRES`: Memory Den -4.0 ms but the still moves, 32k px
+  over 2 levels against a 12k bar; owed a fix of the interior upsample) and previs (`WW_CELL_PREVIS`: Concord +5 ms
+  GPU and CPU with 63k runs occluded; Memory Den within noise).
+- Code: src/gl/cellvolair.cpp, celllooks.cpp (VRS row defOn), cellcull.cpp, src/ui/cellpresettable.h (VRS ship '1',
+  cols 1111), header comments, src/wwswitchstages.inc regenerated.
+
 ## LEANCOMMENTS3R (2026-11-02): lean comments, re-cut on LAND6
 
 - Comment-only (tests/spells/comments_only_check.py: 0 FAIL). LEANCOMMENTS3's trim (LEANCOMMENTS2's 72 files, the

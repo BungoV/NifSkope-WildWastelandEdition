@@ -18,7 +18,8 @@ class Scene;
  *  Never to shadows, the obscurance (full resolution), the sky, effects, far cards, the tone map, post or overlays.
  *  Alpha-tested draws shade 1x1 (a coarse discard drops whole blocks).
  *
- *  WW_CELL_VRS=1 turns it on (OFF by default until bungo sees the pair). WW_CELL_VRS_THRESH / _THRESH_SORTED (the
+ *  ON by default since PERFHUNT2's 11-03 show (Concord -1.9 ms GPU, Memory Den -0.3, stills within the repeat noise);
+ *  WW_CELL_VRS=0 pins it off. WW_CELL_VRS_THRESH / _THRESH_SORTED (the
  *  step allowance, display units 0..1), WW_CELL_VRS_MAX=2x2|4x4, WW_CELL_VRS_MOTION (the motion weight).
  *  Reds: WW_CELL_VRS_RED=1x1 (the whole machinery, every rate 1x1: must equal off), =4x4 (every tile 4x4: must
  *  break the bar), =noalpha (alpha-tested draws keep the coarse rate). Gates: WW_CELL_VRS_CENSUS=1 (a line of rate

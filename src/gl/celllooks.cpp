@@ -83,7 +83,7 @@ const LookRow kRows[] = {
 	// FIX1101A lodch (LATE ITEMs 11 + 16 + 20): the LOD bake's channels drawn by default
 	{ "Far LOD baked AO", "WW/FarLodBakedAo", true },
 	{ "Far LOD baked sky light", "WW/FarLodBakedSky", true },
-	{ "Variable rate shading", "WW/CellVrs" },	// lane PERFFIX4: a menu row at last; ships off until its pair is judged
+	{ "Variable rate shading", "WW/CellVrs", true },	// lane PERFFIX4 row; PERFHUNT2 show 11-03: ships on (Concord -1.9 ms GPU, stills within noise); red WW_CELL_VRS_RED=1x1
 	{ "Object distance fade", "WW/CellObjectFade" },	// lane OBJFADE1: ships off until bungo sees it
 	{ "Rain wetness", "WW/CellRainWet" },	// lane FO76WEATHER1: ships off until bungo sees it
 	{ "Hair specular", "WW/CellHairSpecular" },	// lane MATLOOK3: ships off until a hold proves it

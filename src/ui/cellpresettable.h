@@ -58,6 +58,7 @@ inline const WwPresetRow * wwPresetTable( int * count )
 		{ "CellWorkspaceLook_WW_CELL_CORNEA", '0', "0000", "0000", 'M', false, WW_PR_NONE, WW_PR_NONE, "MATLOOK3: off until a hold proves it; no ms" },
 		{ "CellWorkspaceLook_WW_CELL_SKINSSS", '0', "0000", "0000", 'M', false, WW_PR_NONE, WW_PR_NONE, "SKINSSS1: off until a hold proves it; ms owed" },
 		{ "CellWorkspaceLook_WW_CELL_IRIS", '0', "0000", "0000", 'M', false, WW_PR_NONE, WW_PR_NONE, "SKINSSS2: off until a hold proves it; no ms" },
+		{ "CellWorkspaceLook_WW_CELL_RAINWET", '0', "0000", "0000", 'M', false, WW_PR_NONE, WW_PR_NONE, "FO76WEATHER1: off until bungo sees it; ms owed (row added by PERFHUNT2 for coverage)" },
 		{ "CellWorkspaceGroup_IMPROVED_LIGHTS", '1', "1111", "1111", 'G', false, WW_PR_NONE, WW_PR_NONE, "a master" },
 		{ "CellWorkspaceLook_WW_CELL_LIGHT_PHYS", '0', "1111", "0000", 'M', false, { 0.06f, 0.10f, 0.15f, 0.19f }, WW_PR_NONE,
 			"light extras target (PERFRES-A light_extras); no ms of its own" },
@@ -133,8 +134,8 @@ inline const WwPresetRow * wwPresetTable( int * count )
 		{ "CellWorkspaceLook_WW_CELL_BLOOM_PERPIX", '0', "1111", "0000", 'M', false, WW_PR_NONE, WW_PR_NONE, "under the bloom; no ms" },
 		{ "CellWorkspaceGroup_CAMERA", '1', "1111", "1111", 'G', false, WW_PR_NONE, WW_PR_NONE, "a master" },
 		{ "CellWorkspaceLook_WW_CELL_EXPOSURE_WIDE", '0', "1111", "0000", 'M', false, WW_PR_NONE, WW_PR_NONE, "an exposure range rule; no ms" },
-		{ "CellWorkspaceLook_WW_CELL_VRS", '0', "0000", "0000", 'M', false, WW_PR_NONE, WW_PR_NONE,
-			"PERFFIX4 coarse shading: changes the picture, off until bungo has seen it (BUGS1102)" },
+		{ "CellWorkspaceLook_WW_CELL_VRS", '1', "0000", "1111", 'M', false, WW_PR_NONE, WW_PR_NONE,
+			"PERFFIX4 coarse shading; PERFHUNT2 show 11-03: on at every preset (Concord 56.7 -> 54.8 ms GPU, Memory Den 30.8 -> 30.5; stills within the repeat noise)" },
 	};
 	if ( count )
 		*count = int( sizeof( t ) / sizeof( t[0] ) );
