@@ -1,6 +1,6 @@
 #!/bin/bash
 # Lane AIRZONE1: the files gate (tests/features/air/airzone/airzone_recx_gate.cpp) -- the real src/features/air/airzone.cpp + src/recx.cpp +
-# src/wwswitch.cpp with Qt6Core only (UCRT64 g++, as tests/weatherrecx), no window, no game data.
+# src/wwswitch.cpp with Qt6Core only (UCRT64 g++, as tests/features/weather/weatherrecx), no window, no game data.
 #   tests/features/air/airzone/gate.sh <out dir>          (from the tree root; fixtures go under <out dir>, never a game Data folder)
 # Green must print "AIRZONE_RECX PASS 6" and exit 0; the red run (WW_CELL_AIRZONE_RED=novol: the files ignored) must
 # exit 1 with roundtrip, keep and gi-* failing. Every run is capped by `timeout 60`.

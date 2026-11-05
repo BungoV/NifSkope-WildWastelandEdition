@@ -3,7 +3,7 @@
 #include "features/gi/probesky.h"
 #include "wwswitch.h"	// the WW_* switch store
 
-#include "esmweather.h"
+#include "features/weather/esmweather.h"
 #include "gl/celllights.h"
 #include "features/lights/cellnifxlights.h"	// Mesh lights relight the GI; the bulbs light the bounce
 #include "gl/celllooks.h"	// Probe sharing; the light physics rows, compared live

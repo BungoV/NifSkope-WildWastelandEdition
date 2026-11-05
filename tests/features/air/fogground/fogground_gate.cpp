@@ -4,7 +4,7 @@
 // env: GATE_ROW (the Show row, 0/1), GATE_BURN (burn-off row), WW_RECX_ROOT (the .recx root), WW_CELL_AIR_GROUND_DERIVED_RED.
 #include "recx.h"
 #include "wwswitch.h"
-#include "esmweather.h"
+#include "features/weather/esmweather.h"
 #include "gl/celllooks.h"
 
 #include <QJsonObject>

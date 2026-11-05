@@ -240,8 +240,8 @@ HEADERS += \
 	src/features/sky/skyplace.h \
 	src/features/sky/skyplacerun.h \
 	src/features/sky/cellsunlit.h \
-	src/gl/preciproof.h \
-	src/gl/rainwetlaw.h \
+	src/features/weather/preciproof.h \
+	src/features/weather/rainwetlaw.h \
 	src/features/sky/skydisc.h \
 	src/gl/fxparity.h \
 	src/gl/fxparityrules.h \
@@ -257,9 +257,9 @@ HEADERS += \
 	src/features/lights/cellfxlit.h \
 	src/gl/fxroomrule.h \
 	src/gl/celllensflare.h \
-	src/gl/cellprecip.h \
-	src/gl/precipmath.h \
-	src/gl/precipspec.h \
+	src/features/weather/cellprecip.h \
+	src/features/weather/precipmath.h \
+	src/features/weather/precipspec.h \
 	src/gl/progcachekeep.h \
 	src/features/near/cellcull.h \
 	src/features/near/cellumbra.h \
@@ -279,8 +279,8 @@ HEADERS += \
 	src/gl/cellfogbloom.h \
 	src/features/sky/atmosphere.h \
 	src/features/clouds/cloudmap.h \
-	src/gl/weatherrecx.h \
-	src/gl/weatherrecxmath.h \
+	src/features/weather/weatherrecx.h \
+	src/features/weather/weatherrecxmath.h \
 	src/features/clouds/cloudnoise.h \
 	src/features/clouds/cloudvol.h \
 	src/features/clouds/cloudshadow.h \
@@ -409,7 +409,7 @@ HEADERS += \
 	src/features/far-ground/btdterrain.h \
 	src/esmdata.h \
 	src/features/water/esmwater.h \
-	src/esmweather.h \
+	src/features/weather/esmweather.h \
 	src/recx.h \
 	src/features/far-lod/lodgen.h \
 	src/features/far-lod/lodgenao.h \
@@ -610,7 +610,7 @@ SOURCES += \
 	src/features/lights/cellclustergl.cpp \
 	src/features/lights/cellfxlit.cpp \
 	src/gl/celllensflare.cpp \
-	src/gl/cellprecip.cpp \
+	src/features/weather/cellprecip.cpp \
 	src/features/near/cellcull.cpp \
 	src/features/far-lod/cellfarinst.cpp \
 	src/features/far-ground/cellfarground.cpp \
@@ -631,7 +631,7 @@ SOURCES += \
 	src/gl/cellfogbloom.cpp \
 	src/features/sky/atmosphere.cpp \
 	src/features/clouds/cloudmap.cpp \
-	src/gl/weatherrecx.cpp \
+	src/features/weather/weatherrecx.cpp \
 	src/features/sky/skyplacerun.cpp \
 	src/features/clouds/cloudvol.cpp \
 	src/features/clouds/cloudshadow.cpp \
@@ -775,7 +775,7 @@ SOURCES += \
 	src/starterscene.cpp \
 	src/features/far-ground/btdterrain.cpp \
 	src/esmdata.cpp \
-	src/esmweather.cpp \
+	src/features/weather/esmweather.cpp \
 	src/recx.cpp \
 	src/features/far-lod/lodgen.cpp 	src/features/far-lod/lodgenmanager.cpp 	src/features/far-lod/lodtfile.cpp \
 	src/features/far-lod/lodgenchunkpass.cpp \

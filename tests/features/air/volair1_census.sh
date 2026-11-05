@@ -2,7 +2,7 @@
 # lane VOLAIR1: the .recx census over the whole base game + official add-ons. One shot with every master loaded and
 # the files NifSkope ships (no WW_RECX_ROOT pin); the census lines say, per weather record, which file and rung
 # matched. Verdict: every weather the masters define is matched by its own Plugins/FO4CS/Weathers file at the form
-# rung (expected 107: tools/recx_weathers.py --table).
+# rung (expected 107: src/features/weather/recx_weathers.py --table).
 set -u
 . "$(dirname "$0")/../../spells/_harness.sh"
 REPO="$(cd "$(dirname "$0")/../../.." && pwd)"

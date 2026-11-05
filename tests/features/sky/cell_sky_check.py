@@ -132,7 +132,7 @@ def lin(byte):
 
 def sun_to(hour, tn):
     """The tent arc: x from +400 at sunrise to -400 at sunset, y 25, height 400 - |x|; then the light is
-    lowered 15 degrees and never stands under 30 (the numbers in src/esmweather.cpp's header)."""
+    lowered 15 degrees and never stands under 30 (the numbers in src/features/weather/esmweather.cpp's header)."""
     rise0, set1 = tn[0] / 6.0, tn[3] / 6.0
     ramp = 1.0 - 2.0 * (hour - rise0) / max(1e-6, set1 - rise0)
     p = np.array([ramp * 400.0, 25.0, 400.0 - abs(ramp * 400.0)])

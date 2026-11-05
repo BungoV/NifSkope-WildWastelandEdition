@@ -39,7 +39,7 @@ int cmdEspWrite( const QStringList & args );	// lane ESPWRITE2: src/io/espwritec
 #include "starterscene.h"
 #include "features/far-ground/btdterrain.h"
 #include "esmdata.h"
-#include "esmweather.h"
+#include "features/weather/esmweather.h"
 #include "features/far-lod/lodgen.h"
 #include "features/far-lod/lodgenchunkpass.h"
 #include "features/far-lod/lodgengpu.h"
@@ -8161,7 +8161,7 @@ int nifskopeCliMain( const QStringList & args )
 		return rc;
 	}
 	// `weather` reads WTHR/CLMT records from a plugin load list: no NIF, no model
-	// layer (lane PBRR2B, the W1 gates; src/esmweather.cpp)
+	// layer (lane PBRR2B, the W1 gates; src/features/weather/esmweather.cpp)
 	// `probeplace` places PRTP probes over a dumped soup: no NIF, no model layer
 	// (lane PRTPPLACE; src/features/gi/probeplace.cpp)
 	// `aobake` reads or bakes one model's AO decal volume; gate A's lookup vs brute force (lane AODECAL1)

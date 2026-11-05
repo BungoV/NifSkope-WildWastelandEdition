@@ -15,7 +15,7 @@ BSD License - see nifskope.h
 #include "features/sky/atmosphere.h"	// SHAFTS1b: the aerial perspective's haze, for the no-double-count fit
 #include "features/air/cellairzone.h"	// lane AIRZONE1: the hand-placed volumes' fog and particle blocks
 #include "features/clouds/cloudmap.h"	// lane CLOUD6e: the rain fog follows the Low band's coverage
-#include "gl/rainfogmath.h"	// lane CLOUD6e: the rain fog's law
+#include "features/weather/rainfogmath.h"	// lane CLOUD6e: the rain fog's law
 #include "gl/cellgrass.h"	// lane FOGWIND1: the game's wind angle, shared with the grass
 #include "features/exposure/cellhdr.h"
 #include "gl/celllights.h"
@@ -31,7 +31,7 @@ BSD License - see nifskope.h
 #include "gl/renderer.h"
 #include "features/shadows/shadowset.h"	// lane FARGRID1: the terrain map
 #include "features/shadows/sunshadow.h"
-#include "esmweather.h"
+#include "features/weather/esmweather.h"
 #include "harnesswindow.h"
 #include "recx.h"
 

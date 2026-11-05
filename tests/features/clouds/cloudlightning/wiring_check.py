@@ -22,7 +22,7 @@ def text(path):
 
 cv = text('src/features/clouds/cloudvol.cpp')
 fr = text('res/shaders/features/clouds/cloud_composite.frag')
-ew = text('src/esmweather.cpp')
+ew = text('src/features/weather/esmweather.cpp')
 ld = text('src/gl/lookdevstage.cpp')
 st = text('src/wwswitchstages.inc')
 checks = [

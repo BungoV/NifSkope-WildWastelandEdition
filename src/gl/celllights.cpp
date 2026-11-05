@@ -38,7 +38,7 @@ BSD License - see nifskope.h
 #include "gl/celllensflare.h"	// lane LIGHTS3 (LENSFLARE1): its echo
 #include "features/lights/cellfxlit.h"	// lane LIGHTS4: a placement's emittance colour
 #include "gamemanager.h"	// lane SUNCELL1: the weather imagespace's LUT
-#include "esmweather.h"	// lane WEATHERBLEND2: wwLutBlendN
+#include "features/weather/esmweather.h"	// lane WEATHERBLEND2: wwLutBlendN
 #include "features/gi/probealbedo.h"	// lane LIGHTS5 (GOBO1): a spot's pattern
 #include "recx.h"	// lane LIGHTS5 (FOGSCALE1): fog.scale
 #include "features/lights/cellnifxlights.h"	// lane NIFXLIGHT1: a fixture mesh's .nifx lights

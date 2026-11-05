@@ -7,8 +7,8 @@
 #include "gl/glscene.h"
 #include "gl/lookdevstage.h"
 #include "gl/renderer.h"
-#include "gl/weatherrecx.h"	// lane WX1
-#include "gl/weatherrecxmath.h"
+#include "features/weather/weatherrecx.h"	// lane WX1
+#include "features/weather/weatherrecxmath.h"
 #include "harnesswindow.h"
 
 #include <QElapsedTimer>

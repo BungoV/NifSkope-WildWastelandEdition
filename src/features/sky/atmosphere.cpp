@@ -1,7 +1,7 @@
 #include "features/sky/atmosphere.h"
 #include "features/sky/atmomath.h"
-#include "gl/weatherrecx.h"	// lane WX1: the weather .recx atmosphere block
-#include "gl/weatherrecxmath.h"	// SHAFTS1b: hazeFromVisibility for the clear-day aerosol
+#include "features/weather/weatherrecx.h"	// lane WX1: the weather .recx atmosphere block
+#include "features/weather/weatherrecxmath.h"	// SHAFTS1b: hazeFromVisibility for the clear-day aerosol
 #include "features/clouds/cloudmath.h"	// SHAFTS1b: the WTHR class flags
 #include "gl/lookdevstage.h"	// SHAFTS1b: the Lookdev weather's class
 #include "features/sky/skydisc.h"

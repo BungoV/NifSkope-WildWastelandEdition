@@ -23,7 +23,7 @@ BSD License - see nifskope.h
 #include "gl/cellbloom.h"	// lane GAPTOOL1: the Bloom row
 #include "gl/fxparity.h"	// lane FXPARITY1
 #include "ui/cellshowpanel.h"	// lane OPENCELLFIX2: the Display tab's fog and shadow rows share these settings
-#include "esmweather.h"
+#include "features/weather/esmweather.h"
 #include "harnesswindow.h"
 #include "ui/widgets/wwnumberfield.h"
 #include "wwskin.h"

@@ -1,0 +1,613 @@
+#ifndef WW_PRECIPMATH_H
+#define WW_PRECIPMATH_H
+
+/* lane WEATHERLOOK1 phase B (2026-10-30): the precipitation field, the CPU code the cell view draws AND its unit test
+ * (tests/features/weather/precip). Plain C++, no Qt, no GL.
+ *
+ * Numbers and laws (notes/weatherlook1/airpart_data.md, sources there):
+ *   fall speed (m/s, D in mm)  rain          v = 9.65 - 10.3 exp(-0.6 D), capped 9.17 (ATLAS73 / GK49)
+ *                              hail          v = sqrt(4 g rho_ice D / (3 Cd rho_air)), Cd 0.6 (KK01, an upper bound)
+ *                              dry snow      v = 0.8 D^0.16 (LH74 unrimed dendrite aggregates; extrapolated past 10 mm)
+ *                              wet clumps    v = 0.79 D^0.27 (LH74 densely rimed; the pick over YUTER06's 2.0 m/s: it
+ *                                             keeps the size dependence the atlas needs)
+ *   mass (mg)                  rain 0.5236 D^3 (water), hail 0.9 x that (ice), dry snow 0.073 D^1.4,
+ *                              wet clumps 0.037 D^1.9 (LH74)
+ *   number density (per m^3)   N = rate x 277.78 / (m v): a rate of 1 mm/h of water carries 277.78 mg per m^2 per
+ *                              second; every particle carries m and falls at v (one size per layer: ours)
+ *   units                      1 game unit = 14.28 mm (airpart_data.md), so m/s x 70.03 = units/s
+ *   wind                       the fog drift's law (cellvolair.cpp kDriftSpeed): 400 units/s x the weather's speed
+ *                              byte / 255 at the game's wind bearing (gl/cellgrass.h wwGameWindAngle); every layer
+ *                              rides it fully (its response time v/g is under a second: airpart_data.md "wind catch")
+ *
+ * The field: a box of side L centred on the camera, holding N = density x L^3 particles. Particle i of a layer has a
+ * fixed start point in the box (a hash of i and the layer's seed) and moves at its own velocity (wind - fall, plus a
+ * slow flutter for snow); its place at time t wraps into the box round the camera (world-anchored: walking moves the
+ * camera through the field, never the field with it). N never changes with t: what leaves one face enters the
+ * opposite one. Two tiers per layer:
+ *   near  the true density, textured quads flat-on to the camera; L = cbrt(cap / density), kNearMin..kNearMax
+ *   far   from the near box out to the far box, thinned to at most the far cap; each dot stands for `thin` particles,
+ *         so its opacity is multiplied by thin (coverage kept), drawn from the texture's small mips
+ * A weather change: the new weather's layers at weight pct, the weather left behind at 1 - pct; a layer at weight w
+ * draws its first floor(w x N) particles (the rest wait), so its density moves with w and never jumps.
+ * Reds (redBits, one per rule; WW_CELL_PRECIP_RED=constdensity,nowrap,onespeed,nowind; tests/features/weather/precip): the rule removed.
+ * Lane PRECIPLOOK1 (2026-11-02): sleet removed (its type, atlas and rows; a .recx naming it is refused, precipspec.h);
+ * the shipped atlases moved to Textures/FO4CS/Precip (the reader still finds the old WW/Precip, cellprecip.cpp). */
+
+#include <algorithm>
+#include <cmath>
+#include <cstddef>
+#include <cstdint>
+#include <cstring>
+
+namespace WwPrecip
+{
+
+constexpr double kMmPerUnit = 14.28;
+constexpr double kUnitsPerMetre = 1000.0 / kMmPerUnit;
+constexpr double kM3PerU3 = ( kMmPerUnit / 1000.0 ) * ( kMmPerUnit / 1000.0 ) * ( kMmPerUnit / 1000.0 );
+constexpr double kFluxPerMmH = 1.0e6 / 3600.0;	// mg of water per m^2 per s at 1 mm/h
+constexpr double kWindUnitsPerSec = 400.0;	// the fog drift's (cellvolair.cpp kDriftSpeed)
+constexpr double kShutter = 1.0 / 120.0;	// airpart_data.md draw stretch: 180 degrees at 60 fps
+constexpr double kG = 9.81, kRhoIce = 900.0, kRhoAir = 1.2, kCdHail = 0.6;
+constexpr double kNearMin = 128.0, kNearMax = 2048.0;	// game units
+constexpr double kFarMax = 6144.0;
+constexpr int kNearCap = 32768, kFarCap = 24576;
+constexpr double kRedDensity = 100.0;	// per m^3: the red's constant
+
+enum Type : int { Rain = 0, Hail, SnowFine, SnowFarDot, SnowWetClump, SnowBigClump, TypeCount };
+
+/* the reds, one per rule (WW_CELL_PRECIP_RED, tests/features/weather/precip): 1 constdensity (a constant density, the weight ignored),
+ * 2 nowrap (positions never wrap into the box), 4 onespeed (every particle falls at 1 m/s), 8 nowind (no wind) */
+enum Red : int { RedConstDensity = 1, RedNoWrap = 2, RedOneSpeed = 4, RedNoWind = 8 };
+inline int & redBits()
+{
+	static int bits = 0;
+	return bits;
+}
+
+struct Variant
+{
+	double sizeMm;	// the particle's size (airpart_textures/<type>/<type>_meta.json size_mm)
+	double cellMm;	// the atlas cell's width in mm (the quad's true size)
+};
+
+struct TypeInfo
+{
+	const char * name;
+	const char * texture;	// under Textures\ (the default shipped in res/Data)
+	int cols, rows;
+	int nVariants;
+	Variant v[16];
+	double sizeMm;	// the layer's size when the .recx gives none
+	double rateMmH;	// the layer's rate (water equivalent) when the .recx gives neither rate nor density
+	double drawScale;	// the quad x this (bungo's Division reference: snow drawn above true size, airpart crowd mock 3x)
+	double translucency;	// the share lit as thin medium (airpart_data.md: dry 0.6, wet 0.3; rain/hail ours)
+	double spin;	// the largest spin about the view axis, rad/s (bungo 10-28: every crystal flat-on; slow spin)
+	double swayU;	// the flutter's amplitude, game units (0: none)
+	/* the deepest mip a near quad samples: below it the shapes touch their cell's border and bilinear reads bleed into
+	 * the next cell (measured, notes/code1030/weatherlook1b/texgate.txt: 16 px a cell; hail 64 px). The far dots read
+	 * the 1-texel-a-cell mip's centre (the cell's mean) instead, where no neighbour mixes in */
+	int maxMip;
+	int seedTag;	// the type's index before sleet went (PRECIPLOOK1): every layer's field seed stays as it was
+};
+
+/* the atlases as phase A made them (meta.json, notes/weatherlook1/airpart_textures). snow_fine is the 1k 4 x 4 atlas
+ * (A6: the round after the rejected A5; PERFFIX3 D measured the shipped DDS = the A6 build); its cells are scaled per shape */
+inline const TypeInfo & typeInfo( int t )
+{
+	static const TypeInfo kTypes[TypeCount] = {
+		{ "rain", "FO4CS/Precip/rain_d.dds", 4, 2, 8,
+			{ { 0.5, 8 }, { 1, 8 }, { 1.5, 8 }, { 2, 8 }, { 3, 8 }, { 4, 8 }, { 5, 8 }, { 6, 8 } },
+			2.0, 4.0, 1.0, 0.9, 0.0, 0.0, 4, 0 },
+		{ "hail", "FO4CS/Precip/hail_d.dds", 4, 2, 8,
+			{ { 5, 50 }, { 8, 50 }, { 12, 50 }, { 16, 50 }, { 20, 50 }, { 26, 50 }, { 34, 50 }, { 44, 50 } },
+			10.0, 10.0, 1.0, 0.5, 2.0, 0.0, 2, 2 },
+		{ "snow_fine", "FO4CS/Precip/snow_fine_d.dds", 4, 4, 16,
+			{ { 3.0, 3.5572 }, { 3.0, 3.5698 }, { 3.0, 3.5572 }, { 3.0, 3.6575 }, { 3.93, 4.5971 }, { 4.1, 4.7982 },
+				{ 4.59, 5.3648 }, { 4.55, 5.3144 }, { 5.5, 3.9031 }, { 5.5, 4.4517 }, { 5.5, 4.7008 }, { 5.5, 4.2866 },
+				{ 10.0, 6.1308 }, { 10.0, 5.6934 }, { 10.0, 5.8648 }, { 10.0, 5.7326 } },
+			5.5, 1.0, 3.0, 0.6, 0.5, 6.0, 4, 3 },
+		{ "snow_far_dot", "FO4CS/Precip/snow_far_dot_d.dds", 4, 2, 8,
+			{ { 4, 14 }, { 5, 14 }, { 6, 14 }, { 7, 14 }, { 8, 14 }, { 9, 14 }, { 10, 14 }, { 11, 14 } },
+			6.0, 1.0, 3.0, 0.6, 0.0, 6.0, 4, 4 },
+		{ "snow_wet_clump", "FO4CS/Precip/snow_wet_clump_d.dds", 4, 2, 8,
+			{ { 5, 27 }, { 7, 27 }, { 9, 27 }, { 11, 27 }, { 14, 27 }, { 17, 27 }, { 21, 27 }, { 25, 27 } },
+			10.0, 2.0, 2.0, 0.3, 0.3, 3.0, 4, 5 },
+		{ "snow_big_clump", "FO4CS/Precip/snow_big_clump_d.dds", 4, 2, 8,
+			{ { 15, 54 }, { 20, 54 }, { 25, 54 }, { 30, 54 }, { 35, 54 }, { 40, 54 }, { 45, 54 }, { 50, 54 } },
+			20.0, 1.0, 1.5, 0.6, 0.4, 8.0, 4, 6 },
+	};
+	return kTypes[std::clamp( t, 0, int( TypeCount ) - 1 )];
+}
+
+//! the type by its .recx word; -1 when none
+inline int typeOf( const char * word )
+{
+	for ( int t = 0; t < TypeCount; t++ )
+		if ( word && std::strcmp( word, typeInfo( t ).name ) == 0 )
+			return t;
+	return -1;
+}
+
+//! terminal fall speed in m/s of a particle of size D mm
+inline double fallSpeedMps( int type, double D )
+{
+	if ( redBits() & RedOneSpeed )
+		return 1.0;
+	D = std::max( D, 0.05 );
+	switch ( type ) {
+	case Rain:
+		return std::clamp( 9.65 - 10.3 * std::exp( -0.6 * D ), 0.1, 9.17 );
+	case Hail:
+		return std::sqrt( 4.0 * kG * kRhoIce * ( D / 1000.0 ) / ( 3.0 * kCdHail * kRhoAir ) );
+	case SnowWetClump:
+		return 0.79 * std::pow( D, 0.27 );
+	default:
+		return 0.8 * std::pow( D, 0.16 );
+	}
+}
+
+//! mass in mg of a particle of size D mm
+inline double massMg( int type, double D )
+{
+	switch ( type ) {
+	case Rain:
+		return 0.5236 * D * D * D;
+	case Hail:
+		return 0.9 * 0.5236 * D * D * D;
+	case SnowWetClump:
+		return 0.037 * std::pow( D, 1.9 );
+	default:
+		return 0.073 * std::pow( D, 1.4 );
+	}
+}
+
+//! particles per m^3 that carry `rateMmH` of water at size D (red: the constant)
+inline double densityFromRate( int type, double D, double rateMmH )
+{
+	if ( redBits() & RedConstDensity )
+		return kRedDensity;
+	const double mv = massMg( type, D ) * fallSpeedMps( type, D );
+	return mv > 0.0 && rateMmH > 0.0 ? rateMmH * kFluxPerMmH / mv : 0.0;
+}
+
+/* lane RAINFOG2: what a weather record says about its precipitation (no .recx block). The game's precipitation is the
+ * shader a WTHR links (MNAM, an SPGD: Shader Particle Geometry); its DATA holds the particles' Type (0 Rain, 1 Snow) and
+ * Particle Density (xEdit wbDefinitionsFO4). Census of the 107 vanilla weathers (notes/fix1031a/rainfog2/census): 10
+ * link one (ActualRain 8, RealRain 2; both Type 0, density 7, box 1200); the 4 Rainy-flag weathers with no MNAM and the
+ * 10 Snow-flag ones (radstorms, foggy, dust) link none, so they draw no particles in the game. The kind: -2 no MNAM, -1
+ * MNAM whose SPGD was not read (taken as rain, as CLOUD6e did), else the SPGD's type. */
+enum SpgdKind : int { SpgdNone = 0, SpgdRain = 1, SpgdSnow = 2 };
+constexpr double kVanillaSpgdDensity = 7.0;	// every vanilla rain SPGD's Particle Density: the default layer stands for it
+
+inline int spgdKind( int spgdType )
+{
+	if ( spgdType < -1 )
+		return SpgdNone;
+	return spgdType == 1 ? SpgdSnow : SpgdRain;
+}
+
+//! the layer's rate over the type default: the SPGD's density over vanilla's 7 (unread / not positive: 1)
+inline double spgdRateScale( double density )
+{
+	return density > 0.0 ? density / kVanillaSpgdDensity : 1.0;
+}
+
+/* the switch WW_PRECIP_SPGD (on unless 0 / off / false / no) and its red WW_PRECIP_SPGD_RED (comma words: flags = the
+ * particles from the class flags again, rate = the type default rate again; 1 / on / old = both). Bits of the OLD rules
+ * in force: 1 flags, 2 rate (the switch off = both). Lower-case, trimmed input. */
+enum SpgdRed : int { SpgdRedFlags = 1, SpgdRedRate = 2 };
+inline int spgdRedBits( const char * sw, const char * red )
+{
+	int bits = 0;
+	if ( sw )
+		for ( const char * off : { "0", "off", "false", "no" } )
+			if ( std::strcmp( sw, off ) == 0 )
+				bits = SpgdRedFlags | SpgdRedRate;
+	const char * p = red;
+	while ( p && *p ) {
+		const char * e = std::strchr( p, ',' );
+		const std::size_t n = e ? std::size_t( e - p ) : std::strlen( p );
+		auto is = [&]( const char * w ) { return std::strlen( w ) == n && std::strncmp( p, w, n ) == 0; };
+		if ( is( "flags" ) )
+			bits |= SpgdRedFlags;
+		else if ( is( "rate" ) )
+			bits |= SpgdRedRate;
+		else if ( is( "1" ) || is( "on" ) || is( "old" ) )
+			bits |= SpgdRedFlags | SpgdRedRate;
+		p = e ? e + 1 : nullptr;
+	}
+	return bits;
+}
+
+//! the old record rule (WEATHERLOOK1 B, red WW_PRECIP_SPGD_RED=flags): DATA class flag 4 Rainy -> rain, 8 Snow -> snow
+inline int flagKinds( unsigned classFlags )
+{
+	return ( ( classFlags & 4u ) ? 1 : 0 ) | ( ( classFlags & 8u ) ? 2 : 0 );
+}
+
+//! a layer's weight in a weather change: the new weather's layers pct, the leaving weather's 1 - pct
+inline double blendWeight( bool leaving, double pct )
+{
+	pct = std::clamp( pct, 0.0, 1.0 );
+	return leaving ? 1.0 - pct : pct;
+}
+
+inline std::uint32_t hash32( std::uint32_t x )
+{
+	x ^= x >> 16;
+	x *= 0x7feb352dU;
+	x ^= x >> 15;
+	x *= 0x846ca68bU;
+	x ^= x >> 16;
+	return x;
+}
+
+inline double u01( std::uint32_t h )
+{
+	return double( h >> 8 ) * ( 1.0 / 16777216.0 );
+}
+
+//! the variant particle i takes: among the cells within a factor 1.6 of the layer's size, else the nearest
+inline int variantFor( const TypeInfo & ti, double sizeMm, std::uint32_t h )
+{
+	int cand[16], n = 0, best = 0;
+	double bestD = 1e30;
+	for ( int k = 0; k < ti.nVariants; k++ ) {
+		const double r = ti.v[k].sizeMm / std::max( sizeMm, 1e-3 );
+		if ( r >= 1.0 / 1.6 && r <= 1.6 )
+			cand[n++] = k;
+		const double d = std::fabs( std::log( std::max( r, 1e-6 ) ) );
+		if ( d < bestD ) {
+			bestD = d;
+			best = k;
+		}
+	}
+	return n > 0 ? cand[h % std::uint32_t( n )] : best;
+}
+
+//! one tier's box: side (game units), particles allocated, and how many real particles one stands for
+struct Box
+{
+	double side = 0.0;
+	long count = 0;
+	double thin = 1.0;
+	double inner = 0.0;	// far tier: the near box it skips
+};
+
+//! the near box for `densityM3` particles per m^3 (cap: the most particles)
+inline Box nearBox( double densityM3, int cap = kNearCap )
+{
+	Box b;
+	const double dU = densityM3 * kM3PerU3;
+	if ( !( dU > 0.0 ) )
+		return b;
+	b.side = std::clamp( std::cbrt( double( cap ) / dU ), kNearMin, kNearMax );
+	const double n = dU * b.side * b.side * b.side;
+	b.count = std::lround( std::min( n, double( cap ) ) );
+	b.thin = b.count > 0 ? n / double( b.count ) : 1.0;
+	return b;
+}
+
+//! the far box round the near one: 6 x its side (at least 2048 units, at most kFarMax), thinned to the far cap
+inline Box farBox( double densityM3, const Box & nearB, int cap = kFarCap )
+{
+	Box b;
+	const double dU = densityM3 * kM3PerU3;
+	if ( !( dU > 0.0 ) || !( nearB.side > 0.0 ) || nearB.side >= kFarMax )
+		return b;
+	b.side = std::clamp( 6.0 * nearB.side, 2048.0, kFarMax );
+	b.inner = nearB.side;
+	if ( b.side <= b.inner )
+		return Box();
+	const double n = dU * b.side * b.side * b.side;	// allocated over the whole far cube; the inner ones are skipped
+	b.count = std::lround( std::min( n, double( cap ) ) );
+	b.thin = b.count > 0 ? n / double( b.count ) : 1.0;
+	return b;
+}
+
+//! how many of a tier's allocated particles a layer at weight w draws (the first ones: monotonic in w)
+inline long drawCount( long count, double w )
+{
+	if ( redBits() & RedConstDensity )
+		return count;
+	return long( std::floor( double( count ) * std::clamp( w, 0.0, 1.0 ) ) );
+}
+
+//! the wind's velocity (game units/s) from the speed byte (0..255, a float during a change) and the bearing (radians)
+inline void windVelocity( double speedByte, double angle, double out[2] )
+{
+	const double v = ( redBits() & RedNoWind ) ? 0.0 : kWindUnitsPerSec * std::clamp( speedByte, 0.0, 255.0 ) / 255.0;
+	out[0] = v * std::cos( angle );
+	out[1] = v * std::sin( angle );
+}
+
+//! x wrapped into [0, L)
+inline double wrap( double x, double L )
+{
+	double r = x - L * std::floor( x / L );
+	if ( r >= L )
+		r -= L;
+	return r < 0.0 ? 0.0 : r;
+}
+
+struct Layer
+{
+	int type = Rain;
+	double sizeMm = 2.0;
+	double densityM3 = 0.0;	// full density (weight 1)
+	double weight = 1.0;	// its weather's share
+	double drawScale = 1.0;
+	double windShare = 1.0;
+	double spin = 0.0;
+	double swayU = 0.0;
+	std::uint32_t seed = 1;
+	// prepare(): the per-variant numbers once a frame instead of once a particle (the same values, bit for bit)
+	bool ready = false;
+	int redAt = -1;
+	int nCand = 0, best = 0, cand[16] = {};
+	double fallU[16] = {}, halfU[16] = {};
+};
+
+//! fill the layer's per-variant table (call after any field change; particleAt falls back to the slow path without it)
+inline void prepare( Layer & la )
+{
+	const TypeInfo & ti = typeInfo( la.type );
+	la.nCand = 0;
+	double bestD = 1e30;
+	for ( int k = 0; k < ti.nVariants; k++ ) {
+		const double r = ti.v[k].sizeMm / std::max( la.sizeMm, 1e-3 );
+		if ( r >= 1.0 / 1.6 && r <= 1.6 )
+			la.cand[la.nCand++] = k;
+		const double d = std::fabs( std::log( std::max( r, 1e-6 ) ) );
+		if ( d < bestD ) {
+			bestD = d;
+			la.best = k;
+		}
+		la.fallU[k] = fallSpeedMps( la.type, ti.v[k].sizeMm ) * kUnitsPerMetre;
+		la.halfU[k] = 0.5 * ti.v[k].cellMm / kMmPerUnit * la.drawScale;
+	}
+	la.redAt = redBits();
+	la.ready = true;
+}
+
+//! one particle's state at time t
+struct Particle
+{
+	double pos[3];	// world
+	double vel[3];	// world units/s
+	double half;	// the quad's half size, world units (the cell's true size x drawScale / 2)
+	double angle;	// about the view axis, radians
+	int variant;
+	bool inside;	// far tier: true when it sits inside the near box (skipped)
+};
+
+/* particle i of a tier (box b) of layer `la` at time t, the camera at cam (world), the wind wv (units/s) */
+inline Particle particleAt( const Layer & la, const Box & b, long i, bool farTier, double t, const double cam[3],
+	const double wv[2] )
+{
+	const TypeInfo & ti = typeInfo( la.type );
+	const std::uint32_t s = hash32( la.seed * 0x9E3779B9U + ( farTier ? 0x68E31DA4U : 0U ) );
+	std::uint32_t h = hash32( std::uint32_t( i ) ^ s );
+	const double u0 = u01( h );
+	h = hash32( h + 0x1B873593U );
+	const double u1 = u01( h );
+	h = hash32( h + 0x1B873593U );
+	const double u2 = u01( h );
+	h = hash32( h + 0x1B873593U );
+	const bool fast = la.ready && la.redAt == redBits();
+	const int var = fast ? ( la.nCand > 0 ? la.cand[h % std::uint32_t( la.nCand )] : la.best ) : variantFor( ti, la.sizeMm, h );
+	h = hash32( h + 0x1B873593U );
+	const double a0 = u01( h ) * 6.283185307179586;
+	h = hash32( h + 0x1B873593U );
+	const double spin = la.spin * ( 2.0 * u01( h ) - 1.0 );
+	h = hash32( h + 0x1B873593U );
+	const double ph = u01( h ) * 6.283185307179586, om = 0.8 + 0.8 * u01( hash32( h ^ 0x85EBCA6BU ) );
+
+	Particle p;
+	const double D = ti.v[var].sizeMm;
+	const double fall = fast ? la.fallU[var] : fallSpeedMps( la.type, D ) * kUnitsPerMetre;
+	p.vel[0] = wv[0] * la.windShare;
+	p.vel[1] = wv[1] * la.windShare;
+	p.vel[2] = -fall;
+	const double sx = la.swayU * std::sin( om * t + ph ), sy = la.swayU * std::cos( 0.7 * om * t + 1.3 * ph );
+	// the flutter's own speed joins the stretch (its derivative)
+	p.vel[0] += la.swayU * om * std::cos( om * t + ph );
+	p.vel[1] -= la.swayU * 0.7 * om * std::sin( 0.7 * om * t + 1.3 * ph );
+	const double L = b.side;
+	const double base[3] = { u0 * L, u1 * L, u2 * L };
+	const double drift[3] = { wv[0] * la.windShare * t + sx, wv[1] * la.windShare * t + sy, -fall * t };
+	p.inside = false;
+	for ( int k = 0; k < 3; k++ ) {
+		const double lo = cam[k] - 0.5 * L;
+		p.pos[k] = ( redBits() & RedNoWrap ) ? base[k] + drift[k] : lo + wrap( base[k] + drift[k] - lo, L );
+		if ( farTier )
+			p.inside = k == 0 ? std::fabs( p.pos[k] - cam[k] ) < 0.5 * b.inner
+				: ( p.inside && std::fabs( p.pos[k] - cam[k] ) < 0.5 * b.inner );
+	}
+	p.half = fast ? la.halfU[var] : 0.5 * ti.v[var].cellMm / kMmPerUnit * la.drawScale;
+	p.angle = a0 + spin * t;
+	p.variant = var;
+	return p;
+}
+
+/* lane PERFFIX3 D (2026-11-01): the GPU field (res/shaders/features/weather/cell_precip_field.glsl) evaluates particleAt per particle from
+ * gl_VertexID. What it cannot do in float the CPU hands it here, in double, once a (layer, tier) a frame: the seed's
+ * hash, the per-variant tables (prepare), and the wrap offsets
+ *   offXY = ( wind x share x t - lo ) mod L,  offZ[v] = ( -fall[v] t - lo ) mod L,  lo = cam - L / 2
+ * so that the shader's  -L/2 + wrap( u L + off + flutter, L )  is particleAt's  pos - cam  (modulo L, in float). The
+ * layer must be prepared (prepare) with today's reds; the nowrap red has no GPU form (the caller takes the CPU field). */
+struct GpuRun
+{
+	std::uint32_t seedS = 0;
+	double L = 0.0, inner = 0.0, thin = 1.0;
+	double offXY[2] = { 0.0, 0.0 };
+	double offZ[16] = {};
+	int nCand = 0, best = 0, cand[16] = {};
+	double fallU[16] = {}, halfU[16] = {};
+	double wind[2] = { 0.0, 0.0 };
+	double sway = 0.0, spin = 0.0;
+	long count = 0;	// the first `count` particles of the tier
+};
+
+inline GpuRun gpuRun( const Layer & la, const Box & b, bool farTier, double t, const double cam[3], const double wv[2], long n )
+{
+	GpuRun g;
+	g.seedS = hash32( la.seed * 0x9E3779B9U + ( farTier ? 0x68E31DA4U : 0U ) );
+	g.L = b.side;
+	g.inner = farTier ? b.inner : 0.0;
+	g.thin = b.thin;
+	g.count = n;
+	g.nCand = la.nCand;
+	g.best = la.best;
+	for ( int k = 0; k < 16; k++ ) {
+		g.cand[k] = la.cand[k];
+		g.fallU[k] = la.fallU[k];
+		g.halfU[k] = la.halfU[k];
+	}
+	g.wind[0] = wv[0] * la.windShare;
+	g.wind[1] = wv[1] * la.windShare;
+	g.sway = la.swayU;
+	g.spin = la.spin;
+	if ( !( b.side > 0.0 ) )
+		return g;
+	const double L = b.side;
+	for ( int k = 0; k < 2; k++ )
+		g.offXY[k] = wrap( g.wind[k] * t - ( cam[k] - 0.5 * L ), L );
+	for ( int v = 0; v < 16; v++ )
+		g.offZ[v] = wrap( -la.fallU[v] * t - ( cam[2] - 0.5 * L ), L );
+	return g;
+}
+
+/* the draw's motion stretch (airpart_data.md "draw-time stretch"): a quad of half size s moving `travel` (same units)
+ * over the shutter is drawn s + travel / 2 long, its opacity x 2s / (2s + travel) (the box average keeps coverage) */
+inline double stretchCoverage( double half, double travel )
+{
+	return half > 0.0 ? 2.0 * half / ( 2.0 * half + std::max( travel, 0.0 ) ) : 0.0;
+}
+
+// ---- the shipped textures: a DDS header read (the loader's and the unit's)
+struct DdsInfo
+{
+	int width = 0, height = 0, mips = 0;
+	int blockBytes = 0;	// 8 BC1, 16 BC3 / BC7
+	bool srgb = false;
+	unsigned dxgi = 0;	// 71/72 BC1, 77/78 BC3, 98/99 BC7 (a legacy DXT1/DXT5 header maps to 71/77)
+	std::size_t dataOffset = 0;
+	std::size_t dataBytes = 0;	// every mip's bytes
+};
+
+inline unsigned rd32( const unsigned char * p )
+{
+	return unsigned( p[0] ) | ( unsigned( p[1] ) << 8 ) | ( unsigned( p[2] ) << 16 ) | ( unsigned( p[3] ) << 24 );
+}
+
+//! the bytes of mip level m of a block-compressed w x h texture
+inline std::size_t ddsMipBytes( int w, int h, int m, int blockBytes )
+{
+	const int mw = std::max( 1, w >> m ), mh = std::max( 1, h >> m );
+	return std::size_t( ( mw + 3 ) / 4 ) * std::size_t( ( mh + 3 ) / 4 ) * std::size_t( blockBytes );
+}
+
+//! false when the file is not a block-compressed DDS this loader takes, or is cut short
+inline bool ddsParse( const unsigned char * b, std::size_t n, DdsInfo & o )
+{
+	o = DdsInfo();
+	if ( n < 128 || std::memcmp( b, "DDS ", 4 ) != 0 || rd32( b + 4 ) != 124 )
+		return false;
+	o.height = int( rd32( b + 12 ) );
+	o.width = int( rd32( b + 16 ) );
+	o.mips = std::max( 1, int( rd32( b + 28 ) ) );
+	const unsigned four = rd32( b + 84 );
+	auto cc = []( const char * s ) { return unsigned( s[0] ) | ( unsigned( s[1] ) << 8 ) | ( unsigned( s[2] ) << 16 ) | ( unsigned( s[3] ) << 24 ); };
+	o.dataOffset = 128;
+	if ( four == cc( "DX10" ) ) {
+		if ( n < 148 )
+			return false;
+		o.dxgi = rd32( b + 128 );
+		o.dataOffset = 148;
+	} else if ( four == cc( "DXT1" ) ) {
+		o.dxgi = 71;
+	} else if ( four == cc( "DXT5" ) ) {
+		o.dxgi = 77;
+	} else {
+		return false;
+	}
+	switch ( o.dxgi ) {
+	case 71: case 72: o.blockBytes = 8; break;
+	case 77: case 78: case 98: case 99: o.blockBytes = 16; break;
+	default: return false;
+	}
+	o.srgb = o.dxgi == 72 || o.dxgi == 78 || o.dxgi == 99;
+	if ( o.width <= 0 || o.height <= 0 || o.width > 16384 || o.height > 16384 || o.mips > 15 )
+		return false;
+	for ( int m = 0; m < o.mips; m++ )
+		o.dataBytes += ddsMipBytes( o.width, o.height, m, o.blockBytes );
+	return o.dataOffset + o.dataBytes <= n;
+}
+
+/* lane PRECIPLOOK1 (2026-11-02): the look's numbers (WW_CELL_PRECIP_LOOK; the shaders' twins, tests/features/weather/precip).
+ * Drop: a 2 mm drop at about 6.5 m/s (GK49) moves 5.4 cm in the 1/120 s shutter, a 9 m/s one 7.5 cm, so on screen it is
+ * a streak, the drop's disc swept along its path (Garg & Nayar 2006, "Photorealistic rendering of rain streaks"; Tariq
+ * 2007 "Rain", NVIDIA SDK; Tatarchuk 2006 "Artist-directable real-time rain rendering"). A pixel at (s, u) from the
+ * streak's middle (s along it, u across) is covered for the share of the shutter the disc of radius r sits on it:
+ * cov = overlap( [s - c, s + c], [-l/2, l/2] ) / l, c = sqrt( r^2 - u^2 ); the integral over the streak is pi r^2
+ * (coverage x time kept). The drop's shape oscillates (Garg & Nayar 2006, n = 2 mode, w2^2 = 8 sigma / (rho r0^3)), so
+ * its brightness flickers along the streak: depth from the offline streak render (notes/preciplook1/tools/
+ * droprender.py: 2 mm 0.36, 4 mm 0.19, under 0.5 mm none). */
+inline double dropCoverage( double s, double u, double r, double l )
+{
+	const double c2 = r * r - u * u;
+	if ( c2 <= 0.0 )
+		return 0.0;
+	const double c = std::sqrt( c2 );
+	if ( l <= 1e-4 * r )
+		return std::fabs( s ) < c ? 1.0 : 0.0;
+	return std::clamp( ( std::min( s + c, 0.5 * l ) - std::max( s - c, -0.5 * l ) ) / l, 0.0, 1.0 );
+}
+
+inline double dropFlickerDepth( double D )
+{
+	return 0.51 * std::clamp( ( D - 0.5 ) / 1.5, 0.0, 1.0 ) * ( 1.0 + ( 0.53 - 1.0 ) * std::clamp( ( D - 2.0 ) / 2.0, 0.0, 1.0 ) );
+}
+
+//! the n = 2 oscillation's angular frequency, rad/s, of a drop of D mm (Rayleigh / Garg & Nayar 2006)
+inline double dropOscW2( double D )
+{
+	const double r0 = 0.0005 * std::max( D, 0.05 );
+	return std::sqrt( 8.0 * 0.0728 / ( 1000.0 * r0 * r0 * r0 ) );
+}
+
+/* Clump: one density atlas for both clump types (notes/preciplook1/tools/clumpmerge.py, fitted to the two old atlases'
+ * area, rim, coverage and holes): alpha = clamp( (d - t) / k ). Dry big clump (t 0.1, k 1.0), wet clump (t 0.05, k 0.5);
+ * the colour is the material's (dry 0.95, wet 0.82; airpart_data.md), the translucency the type's (dry 0.6, wet 0.3). */
+struct ClumpLook
+{
+	double t, k, albedo;
+};
+constexpr ClumpLook kClumpDry = { 0.1, 1.0, 0.95 }, kClumpWet = { 0.05, 0.5, 0.82 };
+constexpr const char * kClumpAtlas = "FO4CS/Precip/snow_clump_d.dds";
+constexpr const char * kHailAtlas = "FO4CS/Precip/hail3d_d.dds";
+constexpr int kClumpMaxMip = 4, kHailMaxMip = 3;
+
+/* the quad's half size under the look, as a multiple of the type's own (prepare: 0.5 cellMm / kMmPerUnit x drawScale):
+ * rain 1 the drop's own size (no atlas cell: the disc is the drop); the wet clump drawn from the merged atlas, whose
+ * cells hold the big clump's shapes (big size b_k in a 54 mm cell), at its own size w_k: (w_k x 54 / b_k) / 27 */
+inline double lookHalfScale( int type, int k, bool rain, bool clump )
+{
+	const TypeInfo & ti = typeInfo( type );
+	if ( k < 0 || k >= ti.nVariants )
+		return 1.0;
+	if ( rain && type == Rain )
+		return ti.v[k].sizeMm / ti.v[k].cellMm;
+	if ( clump && type == SnowWetClump ) {
+		const TypeInfo & big = typeInfo( SnowBigClump );
+		const int kb = std::min( k, big.nVariants - 1 );
+		return ti.v[k].sizeMm * big.v[kb].cellMm / big.v[kb].sizeMm / ti.v[k].cellMm;
+	}
+	return 1.0;
+}
+
+}	// namespace WwPrecip
+
+#endif	// WW_PRECIPMATH_H

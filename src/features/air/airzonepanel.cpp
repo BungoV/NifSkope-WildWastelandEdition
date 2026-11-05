@@ -3,7 +3,7 @@
 #include "features/air/airzonepanel.h"
 
 #include "features/air/airzone.h"
-#include "esmweather.h"	// the game's Data folder: the default save root
+#include "features/weather/esmweather.h"	// the game's Data folder: the default save root
 #include "glview.h"
 #include "wwskin.h"
 

@@ -4,7 +4,7 @@
   cell_fog_check.py <Fallout4.esm> <interior EDID> <shot dir>      the verdict
   cell_fog_check.py <Fallout4.esm> --dump [EDID ...]                the fog fields of interiors (all when none named)
 
-The fog from its OWN walk of the plugin (nothing shared with src/cellview.cpp or src/esmweather.cpp):
+The fog from its OWN walk of the plugin (nothing shared with src/cellview.cpp or src/features/weather/esmweather.cpp):
 the cell's XCLL and its lighting template (LTMP -> LGTM DATA, the same layout), each field from the template
 when the cell has no XCLL or its Inherits flag (XCLL 88) names it -- 0x4 the four colours, their scales, the
 two height bands and the high density scale; 0x8 near; 0x10 far; 0x100 power; 0x200 max. The game's clamps

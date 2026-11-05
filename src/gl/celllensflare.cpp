@@ -4,7 +4,7 @@
 #include "celllensflare.h"
 #include "wwswitch.h"
 
-#include "esmweather.h"
+#include "features/weather/esmweather.h"
 #include "gl/celllights.h"
 #include "gl/celllooks.h"
 #include "gl/glscene.h"

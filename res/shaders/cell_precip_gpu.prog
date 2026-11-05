@@ -1,5 +1,0 @@
-# lane PERFFIX3 D (2026-11-01): precipitation computed on the GPU (src/gl/cellprecip.cpp; the field's CPU twin is
-# src/gl/precipmath.h): each particle from gl_VertexID, the frustum cull, lit once a particle in the geometry shader.
-# No conditions: never picked for a shape; cellprecip.cpp selects it by name. Red WW_CELL_PRECIP_RED=cpufield = cell_precip.prog.
-
-shaders cell_precip_gpu.vert cell_precip_gpu.geom cell_precip_gpu.frag

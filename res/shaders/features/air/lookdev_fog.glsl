@@ -218,7 +218,7 @@ float wwAirCol( float lo, float hi, vec4 ground )
 	return wwAirColLaw( lo, hi, volAirMed, volAirLayer, ground );
 }
 
-/* lane RAINFOG2 (CLOUD6e's leftover): the rain fog (cell_rainfog.glsl, src/gl/rainfogmath.h) in the closed-form tails
+/* lane RAINFOG2 (CLOUD6e's leftover): the rain fog (cell_rainfog.glsl, src/features/weather/rainfogmath.h) in the closed-form tails
  * past the froxel grids (wwVolAirAtUv, wwVolAirAtFar) and in the sky's tail (wwVolAirSky). Its optical depth along a
  * view segment: the segment cut to the heights the fog reaches (above base + the fade nothing), then n sub-segments,
  * each the cloud map's coverage at its middle (faded to the band's scalar past the map) x the profile's EXACT mean over

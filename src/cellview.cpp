@@ -30,7 +30,7 @@ BSD License - see nifskope.h
 #include "celldecalangle.h"	// lane DECALANGLE2
 #include "esmdata.h"
 #include "esmfile.hpp"		// lane LEFTOVERS1: light-plugin form IDs back to their file
-#include "esmweather.h"		// the fog packing
+#include "features/weather/esmweather.h"		// the fog packing
 #include "features/far-lod/lodgen.h"
 #include "nativeemit.h"
 #include "features/gi/probeplace.h"		// lane PRTPPLACE

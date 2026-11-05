@@ -1,7 +1,7 @@
 #include "features/sky/skyplacerun.h"
 
 #include "esmfile.hpp"
-#include "esmweather.h"
+#include "features/weather/esmweather.h"
 #include "recx.h"
 #include "wwswitch.h"
 

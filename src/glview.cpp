@@ -53,7 +53,7 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include "gl/renderer.h"
 #include "features/exposure/cellhdr.h"
 #include "gl/celllensflare.h"	// lane LIGHTS3 (LENSFLARE1)
-#include "gl/cellprecip.h"	// lane WEATHERLOOK1 B
+#include "features/weather/cellprecip.h"	// lane WEATHERLOOK1 B
 #include "gl/gametaa.h"	// lane MOTION1: the game's temporal AA
 #include "gl/taainputs.h"	// lane TAAINPUTS1: velocity + reactive mask for a temporal resolve
 #include "gl/cellpost.h"	// lane GRASSMB1: the game's depth of field + motion blur

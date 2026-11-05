@@ -9,7 +9,7 @@ BSD License - see nifskope.h
 #include "gl/celluniprof.h"	// lane PERFFIX1: WW_CELL_UNI_PROF
 #include "wwswitch.h"	// lane TESTDRIVER1: the WW_* switch store
 
-#include "esmweather.h"
+#include "features/weather/esmweather.h"
 #include "features/air/cellvolair.h"	// lane VOLAIR1
 #include "gl/celllights.h"
 #include "features/exposure/cellhdr.h"	// lane LIGHTBOOTH1
@@ -20,7 +20,7 @@ BSD License - see nifskope.h
 #include "gl/scenelighting.h"
 #include "features/shadows/shadowset.h"	// lane TERRSHADOW1: the Sun Path row
 #include "features/sky/atmosphere.h"	// lane ATMO1: the physical sky
-#include "gl/weatherrecx.h"	// lane WX1: the weather .recx night block
+#include "features/weather/weatherrecx.h"	// lane WX1: the weather .recx night block
 #include "features/clouds/cloudmap.h"	// lane CLOUD1: the cloud map
 #include "features/clouds/cloudvol.h"	// lane CLOUD2: the volume clouds
 #include "features/clouds/cloudlightning.h"	// lane CLOUD6f: the storm share of the lightning
