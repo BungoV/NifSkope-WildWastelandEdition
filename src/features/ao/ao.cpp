@@ -725,13 +725,19 @@ void wwCellAoPass( Scene * scene, bool run )
 		 * pass); opaque: the sorted draws that write nothing here are skipped (PERF2FIX1). =0 or *_RED=1: old */
 		WW_SWITCH_STATIC( bool, memo, qgetenv( "WW_CELL_AO_MEMO" ) != "0" && !qEnvironmentVariableIntValue( "WW_CELL_AO_MEMO_RED" ) );
 		WW_SWITCH_STATIC( bool, opaqueOnly, qgetenv( "WW_CELL_AO_OPAQUE" ) != "0" && !qEnvironmentVariableIntValue( "WW_CELL_AO_OPAQUE_RED" ) );
+		// lane MODULES1: the scene walk's draws that wrote nothing here last frame skip their setup too (=0: old)
+		WW_SWITCH_STATIC( bool, collectCut, opaqueOnly && qgetenv( "WW_CELL_AO_COLLECT_CUT" ) != "0" );
 		NodeList second;
 		wwOpaqueCutNewFrame();
 		if ( memo )
 			wwSetupMemoArm( true, "cellProbe" );	// wwCellAoDraw sets it (20) after every setup
 		{
 			PassTime::DrawCpuScope cpuT( PassTime::CpuAoCollect );	// lane MODULES1
+			if ( collectCut )
+				wwOpaqueCutArm( true, "ao-collect" );
 			scene->collectShapes( second );
+			if ( collectCut )
+				wwOpaqueCutArm( false, "ao-collect" );
 		}
 		if ( memo )
 			wwSetupMemoArm( false );

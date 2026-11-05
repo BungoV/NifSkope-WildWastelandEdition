@@ -146,6 +146,7 @@
 { "WW_CELL_AODECAL_GATE", 1, "src/probegi.cpp:1130 probeGiRelight | read while the cell document is built" },
 { "WW_CELL_AODECAL_RED", 1, "src/cellaodecal.cpp:67 redOf | read while the cell document is built" },
 { "WW_CELL_AODECAL_RTX_RED", 1, "src/cellaodecal.cpp:90 aoDecalWorks | read while the cell document is built" },
+{ "WW_CELL_AO_COLLECT_CUT", 0, "src/features/ao/ao.cpp:729 wwCellAoPass | re-read per frame or per call (a)" },
 { "WW_CELL_AO_DUMP", 0, "src/gl/celllights.cpp:4517 ao | init-once state, re-read when a live set moves its prefix (b)" },
 { "WW_CELL_AO_LEAN", 1, "- | name passed through a variable: conservative" },
 { "WW_CELL_AO_LEAN_RED", 1, "- | name passed through a variable: conservative" },

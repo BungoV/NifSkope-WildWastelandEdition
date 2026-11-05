@@ -242,7 +242,7 @@ void wwOpaqueCutArm( bool on, const char * pass )
 {
 	OpaqueCut & c = opaqueCut();
 	if ( !on && c.armed && wwOpaqueCutChecking() )
-		std::fprintf( stderr, "opaque cut check (%s): sorted draws=%lld predicted skips=%lld wrong=%lld (must be 0)\n",
+		std::fprintf( stderr, "opaque cut check (%s): draws=%lld predicted skips=%lld wrong=%lld (must be 0)\n",
 			c.pass, c.drawn, c.skips, c.wrong );
 	c.armed = on;
 	c.pass = pass;

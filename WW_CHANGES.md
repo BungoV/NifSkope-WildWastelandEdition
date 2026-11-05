@@ -1,3 +1,11 @@
+## MODULES1 step 4 (2026-11-05): the AO walk skips draws that write nothing there
+
+- The obscurance pass's scene walk (`ao-collect`) now arms the PERF2FIX1 opaque cut too: a shape whose last draw in an
+  opaque-only pass wrote nothing (not cell-lit, or blended) skips its program setup, as the sorted draws already did.
+  Pixel-identical by construction (the skipped draw had colour and depth writes shut). `WW_CELL_AO_COLLECT_CUT=0` (live)
+  is the old walk; `WW_CELL_OPAQUE_CUT_CHECK=1` draws all and prints `opaque cut check (ao-collect): draws= predicted
+  skips= wrong=` (wrong must be 0).
+
 ## MODULES1 step 3 (2026-11-05): the AO walk's CPU split
 
 - PassTime CPU sub-timers `ao-collect` (scene walk + the opaque draws), `ao-sorted` (the sorted draws) and `ao-effects`
