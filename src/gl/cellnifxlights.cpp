@@ -174,7 +174,7 @@ void wwNifxLightsApply( WwCellLighting & L, const QHash<QString, nifxl::Lights> 
 			l.radius = ( red & WwNifxRedNoScale ) ? float( cv.radius ) : std::clamp( float( cv.radius ) * f.scale, 16.0f, 16384.0f );
 			for ( int k = 0; k < 3; k++ ) {
 				l.byteColor[k] = float( cv.color[k] ) / 255.0f;
-				l.color[k] = std::pow( float( cv.color[k] ) / 255.0f, 2.2f ) * float( cv.fade ) * dim;
+				l.color[k] = std::pow( float( cv.color[k] ) / 255.0f, 2.2f ) * float( cv.fade ) * dim * L.nifxScale;	// MUSGI1 r5
 			}
 			l.spot = x.type == nifxl::Spot;
 			if ( l.spot )
@@ -298,6 +298,9 @@ void wwNifxLightsApply( WwCellLighting & L, const QHash<QString, nifxl::Lights> 
 		.arg( red ? QStringLiteral( " red %1" ).arg( red ) : QString() ) );
 	if ( bulbDark )	// lane NIFXLIGHT2
 		census->append( QStringLiteral( "nifx lights: %1 bulb-tier lights dark (took a start-off light)" ).arg( bulbDark ) );
+	if ( L.nifxScale != 1.0f )	// lane MUSGI1 r5: the sunlit interior's lamp scale (red WW_CELL_NIFX_SCALE_RED=1)
+		census->append( QStringLiteral( "nifx lights: x %1 (the sunlit interior's lamp scale) on %2 lights made" )
+			.arg( double( L.nifxScale ), 0, 'g', 6 ).arg( made.size() ) );
 }
 
 bool wwNifxGiLights( const WwCellLighting & L, int red, WwCellLighting & out )

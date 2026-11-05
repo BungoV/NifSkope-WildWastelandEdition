@@ -21,6 +21,7 @@ BSD License - see nifskope.h
 #include "gl/celllooks.h"	// lane GAPLOOK1
 #include "gl/cellpasstime.h"
 #include "gl/cellpost.h"
+#include "gl/cellprecip.h"	// lane MUSGI1 r5: the cell's box (wwCellRoofBox) for the sky's air in a sunlit interior
 #include "gl/cellssr.h"
 #include "gl/fogterrain.h"	// lane FOGTERRAIN1: the ground layer on the low-pass terrain
 #include "gl/glscene.h"
@@ -2718,6 +2719,34 @@ void wwVolAirSkyDraw( Scene * scene, bool probes )
 	wwLookdevFogUniforms( scene );	// fogOn, the view and the sun; wwVolAirUniforms: the volume, the medium, the flags
 	prog->uni1i( "volSkyMode", probes ? 1 : 0 );
 	prog->uni1b( "volSkyOn", !( s.red & 65536 ) );
+	/* lane MUSGI1 r5 (bungo 11-05: "we don't display the correct sky I guess, and sun and moon"): in a sunlit interior a
+	 * sky ray's air ends where the ray leaves the cell's box (cellprecip.cpp wwCellRoofBox): past the roof the air is the
+	 * sky's own, not the froxels to 7.5 km and a tail to the air's top laid over the opening. Red WW_CELL_ROOFSKY_RED=1:
+	 * the open-air ray. */
+	float rlo[3] = { 0, 0, 0 }, rhi[3] = { 0, 0, 0 };
+	const bool roofRed = wwEnv( "WW_CELL_ROOFSKY_RED" ).trimmed() == "1";
+	const bool sunlitInt = wwCellSunlitNow( wwCellLightsFor( scene->nifModel ) );
+	const bool roofSky = !probes && !roofRed && sunlitInt && wwCellRoofBox( scene, rlo, rhi );
+	prog->uni1b( "volSkyRoof", roofSky );
+	QString roofNote;
+	if ( roofSky ) {
+		// the eye: posView = R (sc p) + t, so p = -R^T t / sc
+		const Transform & vt = scene->view;
+		const float sc = vt.scale != 0.0f ? vt.scale : 1.0f;
+		float eye[3] = { 0, 0, 0 };
+		for ( int k = 0; k < 3; k++ ) {
+			for ( int j = 0; j < 3; j++ )
+				eye[k] -= vt.rotation( j, k ) * vt.translation[j];
+			eye[k] /= sc;
+		}
+		prog->uni3f( "volSkyBoxLo", rlo[0], rlo[1], rlo[2] );
+		prog->uni3f( "volSkyBoxHi", rhi[0], rhi[1], rhi[2] );
+		prog->uni3f( "volSkyEye", eye[0], eye[1], eye[2] );
+		roofNote = QStringLiteral( "; sunlit interior: the air ends where the ray leaves the cell's box (%1 x %2 u, top z %3)" )
+			.arg( double( rhi[0] - rlo[0] ), 0, 'f', 0 ).arg( double( rhi[1] - rlo[1] ), 0, 'f', 0 ).arg( double( rhi[2] ), 0, 'f', 0 );
+	} else if ( sunlitInt && roofRed && !probes ) {
+		roofNote = QStringLiteral( "; sunlit interior: RED WW_CELL_ROOFSKY_RED=1 (the open-air ray)" );
+	}
 	auto fn = r->fn;
 	GLboolean colorMask[4], depthMask = GL_TRUE;
 	fn->glGetBooleanv( GL_COLOR_WRITEMASK, colorMask );
@@ -2773,9 +2802,9 @@ void wwVolAirSkyDraw( Scene * scene, bool probes )
 	if ( wasStencil ) fn->glEnable( GL_STENCIL_TEST ); else fn->glDisable( GL_STENCIL_TEST );
 	fn->glColorMask( colorMask[0], colorMask[1], colorMask[2], colorMask[3] );
 	fn->glDepthMask( depthMask );
-	note( probes ? QStringLiteral( "probes (red nosky %1)" ).arg( ( s.red & 65536 ) ? 1 : 0 )
+	note( ( probes ? QStringLiteral( "probes (red nosky %1)" ).arg( ( s.red & 65536 ) ? 1 : 0 )
 		: overSky ? QStringLiteral( "through the air (linear frame, over the sky in the frame: sky x T + L)" )
-		: QStringLiteral( "through the air (linear frame, composited by 1 - T over the backdrop)" ) );
+		: QStringLiteral( "through the air (linear frame, composited by 1 - T over the backdrop)" ) ) + roofNote );
 }
 
 /* ---- lane VOLPART1: volumetric particles (cellvolair.h, res/shaders/particles.frag) ---- */

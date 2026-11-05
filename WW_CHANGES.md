@@ -1,3 +1,21 @@
+## MUSGI1 round 5 (2026-11-05): the sky through a sunlit interior's roof; the lamp scale on .nifx lights and glow
+
+- **The sky, sun and moon through the roof (bungo 11-05: "we don't display the correct sky I guess, and sun and moon"):**
+  the sky pass already draws the physical sky, the moon and the discs in a sunlit interior; the air's sky pass
+  (cell_volsky, lookdev_fog.glsl wwVolAirSky) then laid the whole exterior air over them: the froxels to their far end
+  (7.5 km) and a tail to the air's top, lit by the sun. Over the Museum's roof openings that was a white veil by day and
+  night. In a sunlit interior a sky ray's air now ends where the ray leaves the cell's box (cellprecip.cpp
+  `wwCellRoofBox`: the roof map's extent, up to its highest roof), read from the froxels at that distance with no tail
+  (the sky's own aerial perspective holds the air past it). An eye outside the box keeps the open-air ray. Red
+  `WW_CELL_ROOFSKY_RED=1`; census `cell air sky: ...; sunlit interior: the air ends where the ray leaves the cell's box
+  (W x D u, top z Z)`.
+- **The lamp scale on the .nifx lights and the emissive surfaces:** round 4's sunlit-interior lamp scale (the census
+  `cell lamp scale:`, pin `WW_CELL_LAMP_SCALE`) now also scales the .nifx lights (cellnifxlights.cpp; census `nifx
+  lights: x S (the sunlit interior's lamp scale) on N lights made`; red `WW_CELL_NIFX_SCALE_RED=1`) and the emissive
+  surfaces of the lit shaders (glview.cpp glowScale, so their screen-space GI share follows) and their RT GI glow
+  (rtddgi.cpp packVolume; red `WW_CELL_GLOW_SCALE_RED=1`). Census `cell lamp scale: <EDID> the .nifx lights x ..., the
+  emissive surfaces and their RT GI glow x ...`. Not scaled: effect-shader glow (glowMult) and PBRM emissive.
+
 ## MUSGI1 round 3 (2026-11-03): sunlit interiors take the exterior's GI sky level and an eye limit; the game's fake air hidden under ours
 
 - **Night as bright as noon (bungo 11-03):** a sunlit interior's RT GI volume skipped the exterior's sky level (GITRUTH1

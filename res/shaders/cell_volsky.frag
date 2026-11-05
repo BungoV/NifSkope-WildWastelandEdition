@@ -21,6 +21,11 @@ uniform int atApSkyRule;	// lane HORIZONBAND1: 1 the horizon band (atmo_skyband.
 uniform sampler2D atSkyTransTex;
 uniform float atSkyCamR;
 uniform bool volSkyOn;
+// lane MUSGI1 r5: a sunlit interior's sky ray (cellvolair.cpp): the air to where it leaves the cell's box, world game units
+uniform bool volSkyRoof;
+uniform vec3 volSkyBoxLo;
+uniform vec3 volSkyBoxHi;
+uniform vec3 volSkyEye;
 
 out vec4 fragColor;
 
@@ -34,6 +39,36 @@ vec3 wwSkyRay()
 		( ndc.y + projectionMatrix[2][1] ) / projectionMatrix[1][1], -1.0 ) );
 }
 
+// (L, T) of the air from the eye to where the ray leaves the cell's box: the froxels to that distance, no tail past it
+vec4 wwVolAirSkyRoof( vec3 dirView )
+{
+	if ( any( lessThan( volSkyEye, volSkyBoxLo ) ) || any( greaterThan( volSkyEye, volSkyBoxHi ) ) )
+		return wwVolAirSky( dirView );	// the eye outside the box: the open-air ray
+	vec3 w = transpose( viewMatrix ) * dirView;	// the world direction
+	vec3 t = vec3( 1e9 );
+	for ( int k = 0; k < 3; k++ )
+		if ( abs( w[k] ) > 1e-6 )
+			t[k] = ( ( w[k] > 0.0 ? volSkyBoxHi[k] : volSkyBoxLo[k] ) - volSkyEye[k] ) / w[k];
+	float d = max( min( t.x, min( t.y, t.z ) ), 0.0 );
+	vec2 uv = ( gl_FragCoord.xy - volRect.xy ) * volRect.zw;
+	vec3 posView = dirView * ( d / max( fogDistScale, 1e-12 ) );
+	if ( volFar.w > 0.5 )
+		return wwVolAirAtFar( d, uv, posView );
+	if ( d > volSlices.x * exp( volSlices.y ) )
+		return wwVolAirAtUv( posView, uv );
+	if ( d <= volSlices.x )
+		return vec4( 0.0, 0.0, 0.0, 1.0 );
+	float f = log( d / volSlices.x ) / volSlices.y * volSlices.z;
+	vec4 v;
+	if ( f < 1.0 ) {
+		v = wwVolTex( vec3( uv, 0.5 / volSlices.z ), true );
+		v = vec4( v.rgb * f, 1.0 - ( 1.0 - v.a ) * f );
+	} else {
+		v = wwVolTex( vec3( uv, ( f - 0.5 ) / volSlices.z ), false );
+	}
+	return vec4( max( v.rgb, vec3( 0.0 ) ), clamp( v.a, 0.0, 1.0 ) );
+}
+
 void main()
 {
 	gl_FragDepth = 1.0;	// the probes' pass tests GL_LEQUAL against the frame: only the pixels at the far plane
@@ -45,7 +80,7 @@ void main()
 		fragColor = vec4( 1.0 );
 		return;
 	}
-	vec4 a = volSkyOn ? wwVolAirSky( wwSkyRay() ) : vec4( 0.0, 0.0, 0.0, 1.0 );
+	vec4 a = volSkyOn ? ( volSkyRoof ? wwVolAirSkyRoof( wwSkyRay() ) : wwVolAirSky( wwSkyRay() ) ) : vec4( 0.0, 0.0, 0.0, 1.0 );
 	if ( volSkyMode == 0 && wwApOn() && atSkyCamR > 0.0 ) {
 		vec3 vr = wwSkyRay();
 		float mu = dot( vr, viewMatrix[2] );	// world up: viewMatrix's columns are the world axes in view space

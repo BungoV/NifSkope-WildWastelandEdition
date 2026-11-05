@@ -1523,6 +1523,15 @@ static void cellPublishLighting( const NifModel * nif, const EsmWorld & world, c
 			double( derived ), qint64( per.size() ), q( 0.1 ), q( 0.9 ), double( kLumenPerFade ), double( wwlp::vanillaFlux() ),
 			double( kSunLux ), double( kSkyLevelNoon ), double( wwlp::kUnitsPerMetre ),
 			red ? " RED WW_CELL_LAMP_SCALE_RED=1" : "", pinOk ? " PINNED WW_CELL_LAMP_SCALE" : "" );
+		// lane MUSGI1 r5 (bungo 11-05): the .nifx lights (cellnifxlights.cpp) and the emissive surfaces (glview.cpp glowScale,
+		// rtddgi.cpp's glow) take the same factor, so a sunlit hall's lit signs and bulbs stand against the sun as its lamps do
+		const bool nifxRed = wwEnv( "WW_CELL_NIFX_SCALE_RED" ).trimmed() == "1";
+		const bool glowRed = wwEnv( "WW_CELL_GLOW_SCALE_RED" ).trimmed() == "1";
+		L.nifxScale = nifxRed ? 1.0f : s;
+		L.glowScale = glowRed ? 1.0f : s;
+		std::fprintf( stderr, "cell lamp scale: %s the .nifx lights x %.6f%s, the emissive surfaces and their RT GI glow x %.6f%s\n",
+			qPrintable( world.interior().edid ), double( L.nifxScale ), nifxRed ? " RED WW_CELL_NIFX_SCALE_RED=1" : "",
+			double( L.glowScale ), glowRed ? " RED WW_CELL_GLOW_SCALE_RED=1" : "" );
 	}
 	if ( nifx && !nifx->isEmpty() ) {	// the fixtures, with their reference's .recx key
 		L.nifxFixtures = *nifx;
