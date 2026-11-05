@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """Lane RAINFOG2 (CLOUD6e's leftovers), gated offline: the rain fog in the closed-form tails past the froxel grids and
-in the sky's tail (the REAL res/shaders/lookdev_fog.glsl through this machine's GL driver in a hidden 4.1 core context,
+in the sky's tail (the REAL res/shaders/features/air/lookdev_fog.glsl through this machine's GL driver in a hidden 4.1 core context,
 tests/spells/shader_link_check.py's loader expansion), the rain rate from the weather's precipitation shader (SPGD
 density), PRECIPFLAG1 (the particles from the shader, not the class flags) and SNOWFOG1 (a snow shader's own law), the
 CPU rules through tests/rainfog2/rainfog2_dump.cpp (g++ + Qt6Core). No NifSkope, no game data (the census fixtures
@@ -253,7 +253,7 @@ if 'W' in only:
         p = os.path.join(TREE, rel)
         return open(p, 'rb').read().decode('latin-1') if os.path.exists(p) else ''
     es, ld, cp, cv, lf = (src(x) for x in ('src/esmweather.cpp', 'src/gl/lookdevstage.cpp', 'src/gl/cellprecip.cpp',
-                                           'src/gl/cellvolair.cpp', 'res/shaders/lookdev_fog.glsl'))
+                                           'src/features/air/cellvolair.cpp', 'res/shaders/features/air/lookdev_fog.glsl'))
     w1 = '"SPGD" };' in es and 'wwSpgdRead( *esm, esm->mapFormID( *r, out.precipForm )' in es
     w2 = 'bool wwLookdevWeatherPrecip(' in ld and 't = w.precipForm ? w.precipType : -2;' in ld
     w3 = 'specs = wwPrecipFromSpgd( spgdType, spgdDensity, classFlags, spgdRed );' in cp

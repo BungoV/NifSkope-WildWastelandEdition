@@ -9,7 +9,7 @@ BSD License - see nifskope.h
 #include "gl/glproperty.h"
 #include "gl/scenelighting.h"
 #include "gl/lookdevstage.h"
-#include "gl/cellvolair.h"	// lane VOLAIR1
+#include "features/air/cellvolair.h"	// lane VOLAIR1
 #include "features/shared/cellpasstime.h"	// lane PERF1
 #include "gl/gametaa.h"
 #include "gl/shadowset.h"	// lane TERRSHADOW1

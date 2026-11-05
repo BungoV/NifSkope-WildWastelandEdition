@@ -54,7 +54,7 @@ BSD License - see nifskope.h
  * The weather fog (lane FOG1): one Fog row, ships OFF, live. The engine fog of
  * the picked WTHR at the hour (esmweather.h WwFog: FNAM day/night on
  * the engine's fog day weight, the NAM0 fog colours in CIELab x NAM4, pow 2.2),
- * the composite formula in res/shaders/lookdev_fog.glsl, applied to scene
+ * the composite formula in res/shaders/features/air/lookdev_fog.glsl, applied to scene
  * geometry (ground, PBR, legacy fo4_default) in LINEAR light before the
  * exposure and the view transform; the dome, moon, sun and clouds are never
  * fogged. Height is measured from the ground plane (groundZ = world z 0).

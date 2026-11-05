@@ -71,7 +71,7 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include "data/nifitem.h"
 #include "nifsnapshot.h"
 #include "probesky.h"	// one call a frame
-#include "gl/cellairzone.h"	// the hand-placed volumes' overlay
+#include "features/air/cellairzone.h"	// the hand-placed volumes' overlay
 #include "celledit.h"	// the cell view's place mode
 #include "cellsurface.h"	// the surface pick's planes
 #include "rtddgicell.h"	// the ray-traced GI volume, one call a frame
@@ -162,7 +162,7 @@ private:
 #include "gl/cellvolumeview.h"	// the Space stage's view
 #include "gl/cellssr.h"
 #include "gl/cellssgi.h"
-#include "gl/cellvolair.h"
+#include "features/air/cellvolair.h"
 #include "gl/cellreflprobe.h"
 #include "features/shared/cellpasstime.h"
 #include "gl/geokeepclock.h"

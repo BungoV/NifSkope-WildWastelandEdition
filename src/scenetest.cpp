@@ -72,7 +72,7 @@ BSD License - see nifskope.h
 #include "gl/gltex.h"
 #include "gl/scenelighting.h"
 #include "gl/lookdevstage.h"
-#include "gl/cellvolair.h"	// lane VOLAIR1
+#include "features/air/cellvolair.h"	// lane VOLAIR1
 #include "model/nifmodel.h"
 #include "ui/scenewindow.h"
 #include "gl/celllights.h"	// lane GAPTOOL1: the SSAO row

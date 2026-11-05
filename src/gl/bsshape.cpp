@@ -8,7 +8,7 @@
 #include "gl/cellwater.h"	// lane WATER1
 #include "gl/cellcull.h"	// lane SUNCELL1
 #include "gl/celllooks.h"	// lane DECALS1: the Decal distance fade row
-#include "gl/cellvolair.h"	// lane VOLPART1: volumetric lit effect cards
+#include "features/air/cellvolair.h"	// lane VOLPART1: volumetric lit effect cards
 #include "gl/cellhdr.h"	// finalfix: blended draws single-sample outside the linear frame
 #include "gl/celluniform.h"	// lane CELLUNI6: the draw's blend note
 #include "features/shared/cellpasstime.h"	// lane PERF1

@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """Lane CLOUD6e (CLOUDBAND1 leftover, RDR2 gap e): the rain fog under the rain clouds, gated offline. Runs the REAL
-res/shaders/cell_volair.prog (the air's froxel pass, inject stage) through this machine's GL driver in a hidden 4.1 core
+res/shaders/features/air/cell_volair.prog (the air's froxel pass, inject stage) through this machine's GL driver in a hidden 4.1 core
 context (shader_link_check.py / atmo_lut_check.py), and the CPU law through tests/rainfog/rainfog_dump.cpp (g++). No
 NifSkope, no game data (the weather census is the derived fixture tests/rainfog/census_rain.tsv).
 
@@ -486,8 +486,8 @@ if 'W' in only:
         return open(p, 'rb').read().decode('latin-1') if os.path.exists(p) else ''
     es = src('src/esmweather.cpp')
     ld = src('src/gl/lookdevstage.cpp')
-    cv = src('src/gl/cellvolair.cpp')
-    va = src('res/shaders/cell_volair.frag')
+    cv = src('src/features/air/cellvolair.cpp')
+    va = src('res/shaders/features/air/cell_volair.frag')
     w1 = bool(re.search(r'f == "MNAM"[^\n]*\n\s*std::memcpy\( &out\.precipForm', es))
     w2 = bool(re.search(r'bool wwLookdevWeatherRains\(.*?cur = s\.w\.precipForm != 0;.*?old = s\.w\.last->precipForm != 0;', ld, re.S))
     i_rf = cv.find('g.rfNote = vaRainFog( scene, prog')
@@ -538,7 +538,7 @@ if 'C' in only:
         return program(d)
 
     def cut_volair(name, new):
-        src = open(os.path.join(SDIR, 'cell_volair.frag'), 'rb').read().decode('latin-1')
+        src = open(os.path.join(SDIR, 'features', 'air', 'cell_volair.frag'), 'rb').read().decode('latin-1')
         hits = re.findall(RF_ADD, src)
         if len(hits) != 1:
             raise SystemExit('C: the rain fog add matched %d times in cell_volair.frag (want 1)' % len(hits))

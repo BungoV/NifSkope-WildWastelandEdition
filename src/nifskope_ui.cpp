@@ -62,7 +62,7 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include "gl/gametaa.h"
 #include "gl/cellpost.h"
 #include "gl/cellssgi.h"
-#include "gl/cellvolair.h"	// the air temporal follows the path frame
+#include "features/air/cellvolair.h"	// the air temporal follows the path frame
 #include "gl/cellbloom.h"
 #include "gl/celllensflare.h"	// the lens flare echo per path frame
 #include "gl/celllooks.h"

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# fargrid1_gates.sh -- the gates of lane FARGRID1, the far air grid (src/gl/cellvolair.cpp, WW_CELL_AIR_FAR / "Far Air").
+# fargrid1_gates.sh -- the gates of lane FARGRID1, the far air grid (src/features/air/cellvolair.cpp, WW_CELL_AIR_FAR / "Far Air").
 # Judged by fargrid1_gates.py (pictures + the "cell air:" echo), never by the code under test.
 #
 #   off     Far Air Off (unset, and pinned 0) == the rung release/NifSkope.before_fargrid1.exe byte for byte

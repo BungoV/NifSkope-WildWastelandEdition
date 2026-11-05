@@ -21,8 +21,8 @@ BSD License - see nifskope.h
 #include "cellfarlod.h"
 #include "cellmodpickbox.h"	// the Mods band
 #include "gl/celllights.h"
-#include "airzonepanel.h"	// lane AIRZONE1: the Air zones band
-#include "gl/cellairzone.h"	// lane AIRZONE1: the Air zones row
+#include "features/air/airzonepanel.h"	// lane AIRZONE1: the Air zones band
+#include "features/air/cellairzone.h"	// lane AIRZONE1: the Air zones row
 #include "rtddgicell.h"	// lane RTXGI1 M2: the Ray-traced GI rows
 #include "gl/cellcull.h"	// lane SUNCELL1: the Culling row
 #include "gl/cellssr.h"	// lane CELLALL1: the SSR rows
@@ -42,7 +42,7 @@ BSD License - see nifskope.h
 #include "ui/opencelldialog.h"	// the Load order and Cells tabs
 #include "ui/cellshowpanel.h"	// lane OPENCELLFIX1: the Show tab, the Show menu stays open
 #include "ui/widgets/wwdropdown.h"	// lane OPENCELLFIX2: the dock's one dropdown
-#include "gl/cellvolair.h"	// lane OPENCELLFIX2: the fog group's rows (notes 22)
+#include "features/air/cellvolair.h"	// lane OPENCELLFIX2: the fog group's rows (notes 22)
 #include "gl/lookdevstage.h"
 #include "gl/shadowset.h"	// lane OPENCELLFIX2: the shadow group's Scene window rows (note 26)
 #include "wwswitch.h"
@@ -1070,7 +1070,7 @@ void CellWorkspacePanel::buildUi()
 	liveTier( "CellWorkspaceFarAir", tr( "Far air" ), "farAir", &wwVolAirFarTier, &wwVolAirSetFarTier );
 	liveTick( "CellWorkspaceVolPart", tr( "Particles" ), "volPart", &wwVolPartOn, &wwVolPartSetOn );
 	liveTick( "CellWorkspaceFogDrift", tr( "Drift" ), "fogDrift", &wwVolAirDriftOn, &wwVolAirSetDriftOn );
-	{	// lane AIRZONE1 (src/gl/cellairzone.h): the hand-placed volumes; ships Off. The read is a #define: a tick reloads the shaders
+	{	// lane AIRZONE1 (src/features/air/cellairzone.h): the hand-placed volumes; ships Off. The read is a #define: a tick reloads the shaders
 		QAction * az = tick( groupsMenu, tr( "Air zones" ), "CellWorkspaceAirZones", wwAirZonesOn() );
 		az->setEnabled( !wwAirZonesPinned() );
 		connect( az, &QAction::toggled, this, [this]( bool on ) {
@@ -1606,7 +1606,7 @@ void CellWorkspacePanel::buildUi()
 		emit reopenRequested( g_path );
 	} );
 
-	// ---- lane AIRZONE1: the hand-placed volumes (src/airzonepanel.h), under PRTP on the Display tab
+	// ---- lane AIRZONE1: the hand-placed volumes (src/features/air/airzonepanel.h), under PRTP on the Display tab
 	page = box( showL, "CellWorkspaceAirZones", 0 );
 	page->addWidget( new AirZonePanel( this ) );
 

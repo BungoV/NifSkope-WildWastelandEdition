@@ -2,7 +2,7 @@
 #define WW_RAINFOGMATH_H
 
 /* lane CLOUD6e (CLOUDBAND1 leftover, RDR2 gap e): the rain fog under the rain clouds, the law the air pass draws
- * (res/shaders/cell_rainfog.glsl, src/gl/cellvolair.cpp) and its unit test (tests/rainfog). Plain C++, no Qt, no GL.
+ * (res/shaders/cell_rainfog.glsl, src/features/air/cellvolair.cpp) and its unit test (tests/rainfog). Plain C++, no Qt, no GL.
  *
  * RDR2 (Bauer 2019, SIGGRAPH Advances, slide 19 + its note): "rain fog beneath clouds, where placement is derived off
  * the density in the cloud map. A height-based falloff is applied to connect the fog to the cloud." The talk gives no

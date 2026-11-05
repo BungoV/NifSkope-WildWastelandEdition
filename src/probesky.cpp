@@ -12,8 +12,8 @@
 #include "gl/atmosphere.h"	// the physical sky's capture height
 #include "gl/cloudshadow.h"	// the clouds over the eye dim the bounce's sun
 #include "gl/scenelighting.h"
-#include "airzone.h"	// the hand-placed volumes' gi blocks on a relight
-#include "gl/cellairzone.h"	// the Air zones row
+#include "features/air/airzone.h"	// the hand-placed volumes' gi blocks on a relight
+#include "features/air/cellairzone.h"	// the Air zones row
 #include "probegi.h"
 #include "gl/celllooks.h"	// the emittance row's live flip
 

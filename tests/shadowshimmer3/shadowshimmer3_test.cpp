@@ -334,7 +334,7 @@ static void gateG2( const std::string & tree )
 		&& countOf( g, "J *= wwAirTailShadow" ) == 0;	// the caller lives in lookdev_fog.glsl
 	check( mirror, "G2 mirror: ww_sunshadow.glsl's air hash is the twin's (world end point, 2048, 37 / 61, wrap 4096)",
 		mirror ? "found" : "not found" );
-	const std::string fog = readFile( tree + "/res/shaders/lookdev_fog.glsl" );
+	const std::string fog = readFile( tree + "/res/shaders/features/air/lookdev_fog.glsl" );
 	const bool caller = countOf( fog, "J *= wwAirTailShadow( posView / max( length( posView ), 1e-12 ), far, d, tau );" ) >= 1;	// FOGLEAK1's wwVolAirAtUv is a second caller
 	check( caller, "G2 lookdev_fog.glsl: t1 is the shaded point's distance (d), the direction its posView's", caller ? "found" : "not found" );
 	const bool up = countOf( sun, "( ( sr & 16 ) ? 1.0f : 0.0f ) - ( ( sr & 80 ) == 64 ? 1.0f : 0.0f )" ) == 1

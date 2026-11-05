@@ -43,7 +43,7 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include "gl/celllights.h"
 #include "gl/cellwater.h"	// lane WATER1
 #include "gl/cellfxlit.h"	// lane FXRES1: wwCellFxRoomLit
-#include "gl/cellvolair.h"	// lane TREELEAF4: wwVolPartOn
+#include "features/air/cellvolair.h"	// lane TREELEAF4: wwVolPartOn
 #include "gl/glmesh.h"
 #include "gl/gltex.h"	// lane TREELEAF2: TexCache::wwCovArmed
 #include "gl/wwleafcov.h"	// lane TREELEAF2

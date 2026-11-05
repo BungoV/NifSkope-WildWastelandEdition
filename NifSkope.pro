@@ -298,7 +298,7 @@ HEADERS += \
 	src/gl/celllooks.h \
 	src/gl/cellnifxlights.h \
 	src/features/ao/cellaodecalgl.h \
-	src/gl/cellvolair.h \
+	src/features/air/cellvolair.h \
 	src/gl/fogterrain.h \
 	src/features/shared/cellpasstime.h \
 	src/features/shared/wwtelemetry.h \
@@ -458,14 +458,14 @@ HEADERS += \
 	src/rtddgimath.h \
 	src/rtddgi/rtddgi_gpu.h \
 	src/rtddgicell.h \
-	src/airzone.h \
-	src/airzonemath.h \
-	src/airzonepanel.h \
+	src/features/air/airzone.h \
+	src/features/air/airzonemath.h \
+	src/features/air/airzonepanel.h \
 	src/io/espwrite.h \
 	src/cellsurface.h \
 	src/celledit.h \
 	src/celleditpanel.h \
-	src/gl/cellairzone.h \
+	src/features/air/cellairzone.h \
 	src/probemask.h \
 	src/probeemit.h \
 	src/probegi.h \
@@ -637,7 +637,8 @@ SOURCES += \
 	src/gl/celllooks.cpp \
 	src/gl/cellnifxlights.cpp \
 	src/features/ao/cellaodecalgl.cpp \
-	src/gl/cellvolair.cpp \
+	src/features/air/cellvolair.cpp \
+	src/features/air/volpartdump.cpp \
 	src/gl/fogterrain.cpp \
 	src/features/shared/cellpasstime.cpp \
 	src/features/shared/wwtelemetry.cpp \
@@ -812,8 +813,8 @@ SOURCES += \
 	src/rtddgi.cpp \
 	src/reflcensuscli.cpp \
 	src/rtddgicell.cpp \
-	src/airzone.cpp \
-	src/airzonepanel.cpp \
+	src/features/air/airzone.cpp \
+	src/features/air/airzonepanel.cpp \
 	src/io/espwrite.cpp \
 	src/cellsurface.cpp \
 	src/celledit.cpp \
@@ -821,7 +822,7 @@ SOURCES += \
 	src/io/espwritecli.cpp \
 	src/io/espwritegates.cpp \
 	src/io/espwriteroundtrip.cpp \
-	src/gl/cellairzone.cpp \
+	src/features/air/cellairzone.cpp \
 	src/probegi.cpp \
 	src/probegifine.cpp \
 	src/proberelight.cpp \

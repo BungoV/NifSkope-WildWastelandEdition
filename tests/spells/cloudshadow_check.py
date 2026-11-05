@@ -289,7 +289,7 @@ if 'O' in only:
 
 # ---- W: source wiring ------------------------------------------------------------------------------------------------
 if 'W' in only:
-    va = open(os.path.join(SDIR, 'cell_volair.frag'), encoding='latin-1').read()
+    va = open(os.path.join(SDIR, 'features', 'air', 'cell_volair.frag'), encoding='latin-1').read()
     cs = open(os.path.join(TREE, 'src', 'gl', 'cloudshadow.cpp'), encoding='latin-1').read()
     ss = open(os.path.join(TREE, 'src', 'gl', 'shadowset.cpp'), encoding='latin-1').read()
     fn = re.search(r'float airCloudShadow\( vec3 posView \)\s*\{\s*return ussCloudT\( posView \);', va)

@@ -21,7 +21,7 @@ BSD License - see nifskope.h
 #include "cellidentity.h"	// lane CELLVIEW2
 #include "cellactor.h"		// lane PLACED1
 #include "gl/celllooks.h"	// lane GAPLOOK2: Actors outdoors, Weapon mod parts
-#include "gl/fakeair.h"	// lane MUSGI1: the game's fake fog / shaft cards
+#include "features/air/fakeair.h"	// lane MUSGI1: the game's fake fog / shaft cards
 #include "cellworldanim.h"		// lane FXPARITY2: Animated objects
 #include "cellweapon.h"		// lane MISS1 (GAPLOOK2)
 #include "cellvertexalpha.h"	// lane TERRAINBLOCK1
@@ -67,9 +67,9 @@ BSD License - see nifskope.h
 #include "gl/lookdevstage.h"	// lane SKYTOP1: the cell's load order feeds the weather
 #include "gl/cellvolumeview.h"	// lane VOLFIT1
 #include "probevolumes.h"	// lane VOLFIT1: the Space stage
-#include "airzone.h"	// lane AIRZONE1: the hand-placed volumes' files (the cells, the GI merge, the converter)
+#include "features/air/airzone.h"	// lane AIRZONE1: the hand-placed volumes' files (the cells, the GI merge, the converter)
 #include "gl/skyplacerun.h"	// lane INTSKY1: the sun's place for the open cell
-#include "gl/cellairzone.h"	// lane AIRZONE1: the Air zones row
+#include "features/air/cellairzone.h"	// lane AIRZONE1: the Air zones row
 #include "probevolumesgi.h"	// lane VOLFIT1: its rooms as the GI's volumes
 #include "gl/cellfxlit.h"
 #include "gl/celllensflare.h"
@@ -132,7 +132,7 @@ static bool wwVolumesIntoGi( R &, const ProbeVolumesGi &, long )
 	return false;
 }
 
-/* lane AIRZONE1: the cells this document shows, for the hand-placed volumes' files (src/airzone.h): an interior its one
+/* lane AIRZONE1: the cells this document shows, for the hand-placed volumes' files (src/features/air/airzone.h): an interior its one
  * cell, an exterior the loaded block; each by its CELL record's defining plugin and local id (the .recx "cell" key, as
  * LIGHTS5's recxKey names a light), the worldspace and grid beside it. A streamed chunk (no document) publishes nothing. */
 static void cellAirZonePublish( const NifModel * nif, const EsmWorld & world, const CellSceneSpec & spec )
@@ -7654,7 +7654,7 @@ static bool cellBuild( NifModel * nif, const CellSceneSpec & specAsked, CellChun
 					else if ( vg.shapes.empty() )
 						probeNotes += QStringLiteral( "  space to GI: no room mapped; the GI keeps its stand-in\n" );
 				}
-				// lane AIRZONE1: the hand-placed volumes' gi blocks (src/airzone.h): today's set kept for the converter, then the
+				// lane AIRZONE1: the hand-placed volumes' gi blocks (src/features/air/airzone.h): today's set kept for the converter, then the
 				// cells' volumes merged in; WW_CELL_AIRZONE_EXPORT=<Data root> writes today's set into each cell's file
 				const QByteArray azExport = wwEnv( "WW_CELL_AIRZONE_EXPORT" );
 				if ( gr.roomsOn && ( wwAirZonesOn() || !azExport.isEmpty() ) ) {

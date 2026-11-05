@@ -5,7 +5,7 @@
 #include "gl/cellclustergl.h"
 #include "gl/alphabgsm.h"	// the side passes' alpha-test census
 #include "gl/cellssr.h"
-#include "gl/cellvolair.h"
+#include "features/air/cellvolair.h"
 #include "gl/shadowset.h"
 #include "gl/glnode.h"
 #include "gl/glscene.h"

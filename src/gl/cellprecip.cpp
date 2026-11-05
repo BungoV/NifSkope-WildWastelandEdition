@@ -7,7 +7,7 @@
 #include "gl/cellgrass.h"
 #include "gl/cellhdr.h"
 #include "features/shared/cellpasstime.h"
-#include "gl/cellvolair.h"
+#include "features/air/cellvolair.h"
 #include "gl/glscene.h"
 #include "gl/lookdevstage.h"
 #include "gl/precipmath.h"

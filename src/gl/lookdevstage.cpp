@@ -10,7 +10,7 @@ BSD License - see nifskope.h
 #include "wwswitch.h"	// lane TESTDRIVER1: the WW_* switch store
 
 #include "esmweather.h"
-#include "gl/cellvolair.h"	// lane VOLAIR1
+#include "features/air/cellvolair.h"	// lane VOLAIR1
 #include "gl/celllights.h"
 #include "gl/cellhdr.h"	// lane LIGHTBOOTH1
 #include "gl/glnode.h"

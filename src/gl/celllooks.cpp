@@ -61,7 +61,7 @@ const LookRow kRows[] = {
 	{ "Mesh lights (.nifx)", "WW/CellNifxLights" },
 	{ "Bindless draws", "WW/CellBindlessDraws", true },	// BINDLESSPERF1: faster on c3 + Memory Den; new key so an old OFF does not stick
 	{ "Weather .recx (sky, clouds, night)", "WW/WeatherRecx" },
-	{ "Ground fog from weather", "WW/CellAirGroundDerived2", true },	// FOGHEIGHT2: on by default (gate tests/fogheight2); new key so the old shipped OFF does not stick
+	{ "Ground fog from weather", "WW/CellAirGroundDerived2", true },	// FOGHEIGHT2: on by default (gate tests/features/air/fogheight2); new key so the old shipped OFF does not stick
 	{ "Water depth colour", "WW/CellWaterDepth" },
 	{ "Water caustics", "WW/CellWaterCaustics" },
 	// lane FIX1031B (WATERLOOK1 overhaul, LATE ITEM 7): the gated water looks ship ON; new keys so an old OFF does not

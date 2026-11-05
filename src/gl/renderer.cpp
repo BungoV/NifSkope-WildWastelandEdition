@@ -74,7 +74,7 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include "gl/cellhdr.h"
 #include "gl/cellfogbloom.h"
 #include "gl/cellunits.h"	// lane PERF1: the first dedicated unit
-#include "gl/cellvolair.h"	// lane VOLPART1: volumetric lit effect cards
+#include "features/air/cellvolair.h"	// lane VOLPART1: volumetric lit effect cards
 #include "gl/cellfarground.h"	// lane FARDRAW1: the far ring 0's live ground
 #include "gl/cellfarinst.h"	// lane SKYSHARDS3: the far ring keeps its own program
 #include "landlodspec.h"	// lane LANDSPEC1

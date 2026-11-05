@@ -330,7 +330,7 @@ int main()
 	// Carlo ray trace of a water sphere (dropphase_mc.tsv): normalised, g = 0.767, and bin by bin where the MC has weight
 	{
 		std::vector<double> sh, mc;
-		if ( FILE * f = std::fopen( PRECIP_ROOT "/res/shaders/cell_volpart.glsl", "r" ) ) {
+		if ( FILE * f = std::fopen( PRECIP_ROOT "/res/shaders/features/air/cell_volpart.glsl", "r" ) ) {
 			std::string all;
 			char buf[4096];
 			size_t got;

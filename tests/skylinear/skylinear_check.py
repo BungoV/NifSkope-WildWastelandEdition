@@ -282,7 +282,7 @@ def main():
             return subprocess.run([os.environ.get('GIT', 'git'), '-C', TREE, 'show', red.split('=', 1)[1] + ':' + path],
                                   capture_output=True, text=True, encoding='latin-1').stdout
         return open(os.path.join(TREE, path), encoding='latin-1').read()
-    ld, hd, va, gv = (src('src/gl/lookdevstage.cpp'), src('src/gl/cellhdr.cpp'), src('src/gl/cellvolair.cpp'),
+    ld, hd, va, gv = (src('src/gl/lookdevstage.cpp'), src('src/gl/cellhdr.cpp'), src('src/features/air/cellvolair.cpp'),
                       src('src/glview.cpp'))
     checks = {
         'lookdev stencil 1 REPLACE': 'glStencilFunc( GL_ALWAYS, 1, 0xFF );' in ld.split('void wwLookdevSkyLinearDraw')[-1]

@@ -121,7 +121,7 @@ E = series(18.5, 19.5, lambda h: engine_light(h, hand))
 ratio = max(max(a[1], b[1]) / max(min(a[1], b[1]), 1e-9) for a, b in zip(E, E[1:]))
 gate('engine', ratio <= 1.6, 'engine-clock path 18:30-19:30: largest per-minute ratio x%.3f (bar x1.6)' % ratio)
 
-# 24b: the moon through the fog medium (tests/fogsun1101a's twin, the moon's mu at 00:00 day 0)
+# 24b: the moon through the fog medium (tests/features/air/fogsun1101a's twin, the moon's mu at 00:00 day 0)
 U_KM = 0.0142875e-3
 FOG = dict(s0=3.88757e-05, zb=-9936.0, invH=1 / 789958.6, top=29811.8, s=5.667, Hg=4195.8, zg=64.0)
 CLR = dict(s0=0.531 * U_KM, zb=-9936.0, invH=1 / 789958.6, top=29811.8, s=0.25, Hg=300.0, zg=64.0)

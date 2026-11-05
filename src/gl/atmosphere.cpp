@@ -6,7 +6,7 @@
 #include "gl/lookdevstage.h"	// SHAFTS1b: the Lookdev weather's class
 #include "skydisc.h"
 #include "moonlight.h"	// lane FIX1101A (moon): the disc's gain through the air
-#include "gl/cellvolair.h"	// lane FIX1101A (moon): the air's medium for that gain
+#include "features/air/cellvolair.h"	// lane FIX1101A (moon): the air's medium for that gain
 #include "wwswitch.h"
 #include "gl/cellunits.h"
 #include "gl/celluniform.h"	// lane CELLUNI3: the units bound without a unit ask

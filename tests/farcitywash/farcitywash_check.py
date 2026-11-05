@@ -141,7 +141,7 @@ def combine(Tap, Lap, Tair, Lair):
 
 
 def g1():
-    fr = open(os.path.join(TREE, 'res', 'shaders', 'cell_volair.frag'), 'rb').read().decode('utf-8')
+    fr = open(os.path.join(TREE, 'res', 'shaders', 'features', 'air', 'cell_volair.frag'), 'rb').read().decode('utf-8')
     cpp = open(os.path.join(TREE, 'src', 'gl', 'cellvolair.cpp'), 'rb').read().decode('utf-8')
     m = re.search(r'float airVeilK\( vec3 Jenv, float t, float z \)\r?\n\{(.*?)\r?\n\}', fr, re.S)
     body = m.group(1) if m else ''

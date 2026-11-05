@@ -3,7 +3,7 @@ The Volumetric Air's sky pass (cell_volsky.frag, wwVolAirSky) lays the air seen 
 backdrop, where the volume clouds already sit: sky x T + L. Its top was the scene sphere's top (a union of every
 shape's sphere, src/gl/gltools.cpp BoundSphere::operator|=), about 1 km over the ground on a cell set, so the
 Overcast air (optical depth ~2.7 straight up) left T < 1 % at 30 degrees: a uniform veil, no cloud shapes.
-The fix (src/gl/cellvolair.cpp vaShapesTop) takes the highest top of a visible shape's own sphere.
+The fix (src/features/air/cellvolair.cpp vaShapesTop) takes the highest top of a visible shape's own sphere.
 
 python -I cloudveil_check.py <tree> [--red spheretop] [--rev <git rev>]
   --red spheretop : the air's top at the union sphere's (the old law): must FAIL
@@ -76,7 +76,7 @@ gate('U', 40000.0 < union_top < 120000.0 and union_top > 5.0 * shape_top,
 gate('K', shape_top <= union_top and abs(shape_top - max(c[2] + r for c, r in shapes)) < 1e-3,
      'shape law top %.1f = max of shape tops' % shape_top)
 
-# ---- the column law (res/shaders/lookdev_fog.glsl wwAirColOne / wwAirColLaw), per unit sigma0
+# ---- the column law (res/shaders/features/air/lookdev_fog.glsl wwAirColOne / wwAirColLaw), per unit sigma0
 SIG0, ZB, H = 3.72732e-05, -9936.0, 789958.6
 GS, GTHICK, GZ = 1.623, 490.2, 64.0
 

@@ -3,7 +3,7 @@
 
 /* lane FOGTERRAIN1 (10-27): the ground fog layer stands on the terrain. The terrain-only heights the terrain shadow
  * already rasters (cell LAND + the far terrain LOD, src/gl/shadowset.cpp) are low-passed here into a coarse height
- * grid; the air pass (res/shaders/cell_airmed.glsl airGroundAt) raises the layer's anchor by the local ground's rise
+ * grid; the air pass (res/shaders/features/air/cell_airmed.glsl airGroundAt) raises the layer's anchor by the local ground's rise
  * over the fog frame's ground, so thickness and strength stay measured above the local ground.
  * Lane FOGTERRAIN2: the grid has its own job (shadowset.cpp fogTerrainFrame: no sun, no terrain-shadow tier), and the
  * surfaces' far tail, sky and sun (lookdev_fog.glsl wwAirGroundAt) and the particles (cell_volpart.glsl) stand on it too.
