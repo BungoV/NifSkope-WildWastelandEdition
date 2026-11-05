@@ -772,7 +772,8 @@ struct LodgenBakeCaches;
 //! textureBudgetBytes bounds the texture LRU; 512 MiB is ~24 landscape
 //! diffuses at 2048^2 with mips, and the pyramid's 9,216 tiles would
 //! otherwise hold every one of ~60 distinct diffuses at once (1.25 GiB).
-LodgenBakeCaches * lodgenCreateBakeCaches( qint64 textureBudgetBytes = qint64( 512 ) << 20 );
+//! the budget is in the LRU's units (texels, 8 bytes each); 0 = the default, WW_LODGEN_TEXBUDGET_MB real MB (2048)
+LodgenBakeCaches * lodgenCreateBakeCaches( qint64 textureBudgetBytes = 0 );
 void lodgenDestroyBakeCaches( LodgenBakeCaches * caches );
 //! Census counters the caches accumulate, for the bake's self-accusing line.
 void lodgenBakeCacheCounts( const LodgenBakeCaches * caches, int * nifReads, int * texLoads );
