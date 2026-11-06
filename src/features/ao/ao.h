@@ -14,6 +14,7 @@ class Scene;
 class NodeList;
 class QMenu;
 class QObject;
+class QString;
 
 #include <functional>
 
@@ -39,7 +40,16 @@ void wwCellAoPass( Scene * scene, bool run );
  *  for that scene. Taken once; the next obscurance pass forgets it. */
 bool wwCellAoSortedTake( Scene * scene, NodeList & out );
 //! called with every program setupProgram binds: the opaque pass's masks, and the obscurance a cell-lit draw reads
-void wwCellAoDraw( Scene * scene, bool cellProgram );
+//! MODULES1: `shape` (the drawn Shape) names the draws the depth pre-pass holds, which the main pass draws EQUAL
+void wwCellAoDraw( Scene * scene, bool cellProgram, const void * shape = nullptr );
+/*! MODULES1: the main pass takes this paint's depth pre-pass (a depth blit into the bound linear frame, same samples
+ *  and format) and draws its draws with depth func EQUAL, writes off, until wwCellAoPrepassEnd. No pre-pass this paint
+ *  (red WW_CELL_AO_PREPASS_RED=geom, no linear frame of its size): nothing happens and the main pass draws LEQUAL. */
+void wwCellAoPrepassShare( Scene * scene );
+//! MODULES1: the main pass is drawn: depth func back to LEQUAL, and the census line ("cell ao prepass: ...")
+void wwCellAoPrepassEnd( Scene * scene );
+//! MODULES1: the pre-pass's note (msaa, draws, or why it fell back to the geometry pass)
+QString wwCellAoPrepassEcho();
 //! lane PERF3: the opaque pass is drawing
 bool wwCellAoInPass();
 //! lane PERF3: the AO opaque pass skips the SSR/SSGI per-draw hooks (the main pass sets them again per draw);

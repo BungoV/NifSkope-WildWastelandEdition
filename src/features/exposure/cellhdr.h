@@ -25,6 +25,9 @@ bool wwCellHdrSkyIn();
 //! lane GATEFIX3: the linear frame's depth / stencil format (a GLenum) when `fbo` is its framebuffer, else 0. Its
 //! texture samples stencil (TONEMAP1), so a framebuffer query reads its depth as 0 bits.
 unsigned int wwCellHdrDepthFormat( unsigned int fbo );
+//! MODULES1: the linear frame's last depth target for this scene's renderer (size, samples, GLenum format), as the
+//! obscurance's depth pre-pass must match it for the blit; false before the first complete frame
+bool wwCellHdrDepthSpec( Scene * scene, int & w, int & h, int & samples, unsigned int & format );
 //! lane FRAMEFMT1: the linear frame's colour format (a GLenum; RGBA16F by default, RGBA32F under WW_FRAMEFMT1_RED=1).
 //! A copy resolved from the multisampled frame takes this format (a resolve needs equal formats).
 unsigned int wwCellHdrColorFormat();

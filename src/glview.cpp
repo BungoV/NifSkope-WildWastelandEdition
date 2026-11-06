@@ -3841,6 +3841,8 @@ void GLView::paintGL()
 			// the cell's draw into one linear frame, tone-mapped once (gl/cellhdr.h)
 			PassTime::begin( PassTime::Background );	// the sky through the air counts as the sky
 			const bool hdr = ( workspaceDrawScenes.isEmpty() || cellFirst ) && wwCellHdrBegin( scene );
+			if ( hdr )
+				wwCellAoPrepassShare( scene );	// MODULES1: the obscurance's depth pre-pass under the main pass (EQUAL)
 			wwLookdevSkyLinearDraw( scene, hdr );	// the sky inside the linear frame (WW_SKY_LINEAR; off: no call does anything)
 			wwCellFarLodFrame( scene );	// the far sway's uniforms; no GL call while off
 			if ( hdr ) {
@@ -3849,6 +3851,7 @@ void GLView::paintGL()
 			}
 			PassTime::end( PassTime::Background );
 			scene->draw();	// opaque / sorted / effects timed inside (Scene::drawShapes)
+			wwCellAoPrepassEnd( scene );	// MODULES1: depth func back to LEQUAL, the pre-pass census line
 			wwVolAirSkyDraw( scene, true );	// the sky's air probes (gates only; no GL call otherwise)
 			if ( hdr )
 				rtddgiCellViewDrawLinear( scene, viewTrans );	// the Ray-traced GI probes inside the linear frame (fog, exposure)

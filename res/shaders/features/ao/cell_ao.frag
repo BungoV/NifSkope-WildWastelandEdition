@@ -2,6 +2,7 @@
 
 /* The game's screen-space ambient obscurance for the cell view (src/gl/celllights.h). Buffers are half size, top
  * row first, except gbuf (full size, bottom row first: view normal and linear depth in game units).
+ * Stage 5 (MODULES1) writes gbuf from the depth pre-pass's resolve (src/features/ao/ao.cpp wwCellAoPass).
  * Stages: 1 depth mip (min of 2x2), 2 raw obscurance (5 taps over 2 turns, averaged over aoAngles angles),
  * 3 and 4 the bilateral blur across and down (7 taps 2 pixels apart, cut by the depth key). */
 
@@ -21,6 +22,9 @@ uniform vec3 aoParams;		// radius, bias, intensity (game units)
 uniform int aoAngles;
 uniform bool aoNoBlur;		// WW_CELL_AO_RED=noblur: stages 3 and 4 copy
 uniform bool aoNoReset;		// WW_CELL_AO_RED=noreset: the plain mean over the angles
+uniform sampler2D zres;		// MODULES1: stage 5, the depth pre-pass's resolve (window depth, bottom row first)
+uniform mat4 aoInvProj;		// MODULES1: stage 5, clip -> view
+uniform float aoUnit;		// MODULES1: stage 5, view units -> game units (cell_ao.glsl cellAoPassOut)
 
 out vec4 fragColor;
 
@@ -52,9 +56,41 @@ ivec2 texelOf( int m, ivec2 q )
 	return ivec2( n.x < 0 ? -1 : t.x, n.y < 0 ? -1 : t.y );
 }
 
+// MODULES1: the view position at full-size pixel t from the pre-pass's depth; w = 0 where nothing was drawn (the sky)
+vec4 zPos( ivec2 t )
+{
+	t = clamp( t, ivec2( 0 ), fullSize - 1 );
+	float d = texelFetch( zres, t, 0 ).r;
+	vec4 v = aoInvProj * vec4( ( vec2( t ) + 0.5 ) / vec2( fullSize ) * 2.0 - 1.0, d * 2.0 - 1.0, 1.0 );
+	return vec4( v.xyz / v.w, d < 1.0 ? 1.0 : 0.0 );
+}
+
 void main()
 {
 	ivec2 P = ivec2( gl_FragCoord.xy );
+	if ( aoStage == 5 ) {
+		/* MODULES1: the opaque pass's view normal and linear depth, rebuilt from the depth pre-pass. Each axis takes
+		 * the side of its 3-tap cross with the smaller depth step (McGuire et al. 2012, SAO), so a silhouette's far
+		 * side never bends the normal; a side on the sky is never taken. Sky: the clear (0, 0, 0, 1e6). */
+		vec4 c = zPos( P );
+		if ( c.w < 0.5 ) {
+			fragColor = vec4( 0.0, 0.0, 0.0, 1.0e6 );
+			return;
+		}
+		vec4 l = zPos( P - ivec2( 1, 0 ) ), r = zPos( P + ivec2( 1, 0 ) );
+		vec4 b = zPos( P - ivec2( 0, 1 ) ), u = zPos( P + ivec2( 0, 1 ) );
+		vec3 dl = c.xyz - l.xyz, dr = r.xyz - c.xyz, db = c.xyz - b.xyz, du = u.xyz - c.xyz;
+		float el = l.w > 0.5 ? abs( dl.z ) : 1.0e30, er = r.w > 0.5 ? abs( dr.z ) : 1.0e30;
+		float eb = b.w > 0.5 ? abs( db.z ) : 1.0e30, eu = u.w > 0.5 ? abs( du.z ) : 1.0e30;
+		vec3 dx = min( el, er ) >= 1.0e30 ? vec3( 1.0, 0.0, 0.0 ) : el < er ? dl : dr;
+		vec3 dy = min( eb, eu ) >= 1.0e30 ? vec3( 0.0, 1.0, 0.0 ) : eb < eu ? db : du;
+		vec3 n = cross( dx, dy );
+		n = dot( n, n ) > 0.0 ? normalize( n ) : vec3( 0.0, 0.0, 1.0 );
+		if ( dot( n, c.xyz ) > 0.0 )
+			n = -n;	// toward the eye, as the geometry pass flips a back face
+		fragColor = vec4( n, -c.z * aoUnit );
+		return;
+	}
 	if ( aoStage == 1 ) {
 		ivec2 p = P * 2;
 		float z;

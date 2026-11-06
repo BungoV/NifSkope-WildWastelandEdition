@@ -741,6 +741,22 @@ unsigned int wwCellHdrDepthFormat( unsigned int fbo )
 	return 0;
 }
 
+bool wwCellHdrDepthSpec( Scene * scene, int & w, int & h, int & samples, unsigned int & format )
+{
+	w = h = samples = 0;
+	format = 0;
+	if ( !scene || !scene->renderer )
+		return false;
+	const auto it = hdrGpus().constFind( scene->renderer );
+	if ( it == hdrGpus().constEnd() || !it->fbo || !it->complete )
+		return false;
+	w = it->w;
+	h = it->h;
+	samples = it->samples;
+	format = it->dsFormat;
+	return format != 0 && samples > 0;
+}
+
 QString wwCellHdrEcho()
 {
 	return hst().last;

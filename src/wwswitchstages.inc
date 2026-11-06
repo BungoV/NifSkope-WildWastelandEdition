@@ -159,6 +159,7 @@
 { "WW_CELL_AO_METHOD_RED", 0, "src/features/ao/ao.cpp:114 ao | re-read per frame or per call (a)" },
 { "WW_CELL_AO_OPAQUE", 0, "src/features/ao/ao.cpp:727 wwCellAoPass | re-read per frame or per call (a)" },
 { "WW_CELL_AO_OPAQUE_RED", 0, "src/features/ao/ao.cpp:727 wwCellAoPass | re-read per frame or per call (a)" },
+{ "WW_CELL_AO_PREPASS_RED", 0, "src/features/ao/ao.cpp:133 ao | re-read per frame or per call (a)" },
 { "WW_CELL_AO_QUALITY", 0, "src/features/ao/ao.cpp:117 ao | re-read per frame or per call (a)" },
 { "WW_CELL_AO_QUALITY_RED", 0, "src/features/ao/ao.cpp:122 ao | re-read per frame or per call (a)" },
 { "WW_CELL_AO_RED", 0, "src/features/ao/ao.cpp:106 ao | re-read per frame or per call (a)" },
