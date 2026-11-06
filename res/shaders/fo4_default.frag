@@ -439,7 +439,14 @@ void main()
 	/* lane SUNCELL1: the cascades on the SUN only (CSM1 spec 2.8). Every D.rgb below is the sun: D = sqrt(the
 	 * linear sun), so D x sqrt(f) is the sun x f in the linear light the tonemap squares back. The macro takes
 	 * every later D; tonemap() above still reads the varying (D.a only, unchanged). */
+#ifdef WW_CELLLIGHTS
+	/* MODULES1 p18: the obscurance pass (probe 20, early 1) returns at the normal and reads no sun: it skips the
+	 * cascades and the air here (cellAoEarly 4 = its red, the sun read as before) */
+	float csmF = cellOn && cellProbe == 20 && cellAoEarly == 1 ? 1.0
+		: wwSunShadow( -ViewDir ) * WW_AIR_SUN_T( -ViewDir );	// FOGSUN1: and the air's transmittance
+#else
 	float csmF = wwSunShadow( -ViewDir ) * WW_AIR_SUN_T( -ViewDir );	// FOGSUN1: and the air's transmittance
+#endif
 	vec4 Dcsm = vec4( D.rgb * sqrt( csmF ), D.a );
 #define D Dcsm
 #ifdef WW_CELLLIGHTS
@@ -677,7 +684,7 @@ void main()
 	if ( !gl_FrontFacing )
 		normal *= -1.0;
 #ifdef WW_CELLLIGHTS
-	if ( cellOn && cellProbe == 20 && cellAoEarly == 1 ) {	// lane PERF1: the obscurance pass reads the normal and depth only
+	if ( cellOn && cellProbe == 20 && ( cellAoEarly == 1 || cellAoEarly == 4 ) ) {	// lane PERF1: the obscurance pass reads the normal and depth only
 		fragColor = cellAoPassOut( normal, -ViewDir );
 		return;
 	}

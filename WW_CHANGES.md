@@ -1,3 +1,14 @@
+## MODULES1 part 18 (2026-11-06): the AO geometry pass skips the sun; pass times count fragments
+
+- The AO geometry pre-pass (`cellAoEarly` 3) read the sun's shadow per fragment and threw it away. It now takes its
+  own early stage 4 in `fo4_default.frag` / `pbrm_default.frag`, with no sun read. Red `WW_CELL_AO_SUNSKIP_RED=1`.
+  Memory Den fog 22:00: ao-geometry 23.9 / 25.7 ms vs red 30.4 ms; picture moved 0.24 / 0.21 % vs run to run 0.10 / 0.39 %.
+- `WW_CELL_PASSTIME_CENSUS=2` adds the fragment shader invocations per pass (`f=..M`, ARB_pipeline_statistics_query)
+  to the pass-time line: fragments / pixels is the pass's overdraw (Memory Den fog: opaque x3.7, sorted x8.8).
+- The RAM owners line adds the heap's busy blocks by size (`heap blocks <256B .. >=16M`, count and MB).
+- Tried and not kept: drawing the main queue front to back by shape depth made opaque slower (45.1 -> 53.7 ms, 7.3 -> 9.5 M
+  fragments); the tree walk stays.
+
 ## MODULES1 part 17 (2026-11-06): the street lamp's cone in the fog is a real spot light
 
 - The manager: the ref shows a lit cone under the Memory Den street lamp; ours showed a dim glow. The fixture

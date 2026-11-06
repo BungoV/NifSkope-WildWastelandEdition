@@ -1297,7 +1297,9 @@ void wwCellAoDraw( Scene * scene, bool cellProgram, const void * shape )
 				prog->uni1b( "cellAoZOnly", a.prepass && a.zlin );	// RESUME 15: the linear view depth only
 			// lane PERF1: the fragment returns once it has the normal (WW_AO_EARLY=0 shades it all, =red marks the early ones)
 			WW_SWITCH_STATIC( int, early, [] { const QByteArray v = wwEnv( "WW_AO_EARLY" ).trimmed(); return v == "0" ? 0 : v == "red" ? 2 : 1; }() );
-			prog->uni1i( "cellAoEarly", early );
+			// MODULES1 p18: early 1 also skips the sun's cascades and air read; red WW_CELL_AO_SUNSKIP_RED=1 (4) reads them
+			WW_SWITCH_STATIC( bool, sunRead, wwEnvInt( "WW_CELL_AO_SUNSKIP_RED" ) == 1 );
+			prog->uni1i( "cellAoEarly", early == 1 && sunRead ? 4 : early );
 			prog->uni1b( "cellAoOn", false );
 			prog->uni1b( "cellAoDecalOn", false );
 			if ( prog->uniLocation( "cellCtOn" ) >= 0 )

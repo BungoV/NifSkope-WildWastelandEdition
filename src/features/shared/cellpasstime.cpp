@@ -168,6 +168,7 @@ struct Mark
 	int pass;
 	GLuint q0, q1;
 	GLuint qs = 0, qp = 0;	// WW_CELL_PASSTIME_CENSUS: samples passed, primitives generated
+	GLuint qf = 0;	// MODULES1 p18: WW_CELL_PASSTIME_CENSUS=2 also counts fragment shader invocations (overdraw)
 };
 
 struct Slot
@@ -192,6 +193,7 @@ struct State
 	quint64 liveGen = 0;	// lane TESTDRIVER1: the switch generation last read
 	bool sync = false;	// WW_CELL_PASSTIME_SYNC=1: a glFinish at each pass edge, so the timestamps hold that pass's work only
 	bool census = false;	// WW_CELL_PASSTIME_CENSUS=1: each pass's samples passed (overdraw) and primitives, in the log line
+	bool frags = false;	// MODULES1 p18: WW_CELL_PASSTIME_CENSUS=2: + fragment shader invocations (a pipeline statistics query)
 	bool lightLoop = false;	// lane TIMING1: WW_CELL_PASSTIME_LIGHTLOOP=1, odd frames unlit (cellpasstime.h lightLoopOff)
 	double llSum[2][5] = {};	// [unlit, lit] x opaque, sorted, water, ssr-donor, frame GPU ms
 	int llN[2] = {};
@@ -199,6 +201,7 @@ struct State
 	QOpenGLFunctions_3_3_Core * gl = nullptr;
 	std::vector<GLuint> pool;
 	std::vector<GLuint> cpool;	// lane PERF2: the census's own (a query keeps the target it was first used with)
+	std::vector<GLuint> fpool;	// MODULES1 p18: the fragment invocation queries' own
 	Slot ring[kSlots];
 	qint64 frame = 0;
 	bool inFrame = false;
@@ -240,7 +243,8 @@ State & st()
 		}
 		s.log = wwEnvInt( "WW_CELL_PASSTIME_LOG" ) == 1;
 		s.sync = wwEnvInt( "WW_CELL_PASSTIME_SYNC" ) == 1;
-		s.census = wwEnvInt( "WW_CELL_PASSTIME_CENSUS" ) == 1;
+		s.census = wwEnvInt( "WW_CELL_PASSTIME_CENSUS" ) >= 1;
+		s.frags = wwEnvInt( "WW_CELL_PASSTIME_CENSUS" ) == 2;
 		s.lightLoop = wwEnvInt( "WW_CELL_PASSTIME_LIGHTLOOP" ) == 1;
 		for ( int k = 0; k < 2; k++ ) {
 			s.llN[k] = 0;
@@ -278,6 +282,21 @@ GLuint cquery()
 	}
 	const GLuint q = s.cpool.back();
 	s.cpool.pop_back();
+	return q;
+}
+
+constexpr GLenum kFragInv = 0x82F4;	// GL_FRAGMENT_SHADER_INVOCATIONS_ARB (ARB_pipeline_statistics_query, core in 4.6)
+
+GLuint fquery()
+{
+	State & s = st();
+	if ( s.fpool.empty() ) {
+		GLuint q[64];
+		s.gl->glGenQueries( 64, q );
+		s.fpool.insert( s.fpool.end(), q, q + 64 );
+	}
+	const GLuint q = s.fpool.back();
+	s.fpool.pop_back();
 	return q;
 }
 
@@ -328,7 +347,7 @@ void collect( Slot & sl )
 	if ( sl.frame < 0 )
 		return;
 	double gpu[Count] = {};
-	GLuint64 samples[Count] = {}, prims[Count] = {};
+	GLuint64 samples[Count] = {}, prims[Count] = {}, frags[Count] = {};
 	for ( const Mark & m : sl.marks ) {
 		gpu[m.pass] += gpuMs( m.q0, m.q1 );
 		s.pool.push_back( m.q0 );
@@ -341,6 +360,12 @@ void collect( Slot & sl )
 			prims[m.pass] += v;
 			s.cpool.push_back( m.qs );
 			s.cpool.push_back( m.qp );
+		}
+		if ( m.qf ) {
+			GLuint64 v = 0;
+			s.gl->glGetQueryObjectui64v( m.qf, GL_QUERY_RESULT, &v );
+			frags[m.pass] += v;
+			s.fpool.push_back( m.qf );
 		}
 	}
 	double sub[SubCount] = {};
@@ -397,7 +422,8 @@ void collect( Slot & sl )
 				line += " d=" + QByteArray::number( sl.calls[p] ) + "/" + QByteArray::number( sl.ranges[p] );
 			if ( s.census && p < CullCamera )	// millions of samples that passed the depth test, millions of triangles
 				line += " s=" + QByteArray::number( double( samples[p] ) * 1e-6, 'f', 2 ) + "M p="
-					+ QByteArray::number( double( prims[p] ) * 1e-6, 'f', 2 ) + "M";
+					+ QByteArray::number( double( prims[p] ) * 1e-6, 'f', 2 ) + "M"
+					+ ( s.frags ? QByteArray( QByteArray( " f=" ) + QByteArray::number( double( frags[p] ) * 1e-6, 'f', 2 ) + "M" ) : QByteArray() );
 		}
 		line += QByteArray( " | cache made " ) + QByteArray::number( sl.cache.made ) + " ("
 			+ QByteArray::number( double( sl.cache.madeBytes ) / 1048576.0, 'f', 1 ) + " MB) evicted "
@@ -564,6 +590,10 @@ void begin( int pass )
 			m.qp = cquery();
 			s.gl->glBeginQuery( GL_SAMPLES_PASSED, m.qs );
 			s.gl->glBeginQuery( GL_PRIMITIVES_GENERATED, m.qp );
+			if ( s.frags ) {
+				m.qf = fquery();
+				s.gl->glBeginQuery( kFragInv, m.qf );
+			}
 		}
 		sl.marks.push_back( m );
 		s.openMark[pass] = int( sl.marks.size() ) - 1;
@@ -591,6 +621,8 @@ void end( int pass )
 		if ( sl.marks[s.openMark[pass]].qs ) {
 			s.gl->glEndQuery( GL_SAMPLES_PASSED );
 			s.gl->glEndQuery( GL_PRIMITIVES_GENERATED );
+			if ( sl.marks[s.openMark[pass]].qf )
+				s.gl->glEndQuery( kFragInv );
 		}
 		for ( size_t k = s.stack.size(); k-- > 0; )
 			if ( s.stack[k] == pass ) {
@@ -841,6 +873,9 @@ static QString ramOwnersLine()
 		s += QString::asprintf( " %s commit=%.0f ws~%.0f MB", kName[b], commit[b] / 1048576.0, res[b] / 1048576.0 );
 	PROCESS_HEAP_ENTRY e;
 	double busy = 0;
+	// MODULES1 p18: busy heap bytes by block size (who owns the heaps: many small = document items, big = arrays)
+	static const double kEdge[5] = { 256.0, 4096.0, 65536.0, 1048576.0, 16777216.0 };
+	double sz[6] = {}, cnt[6] = {};
 	HANDLE heaps[64];
 	const DWORD nh = std::min<DWORD>( GetProcessHeaps( 64, heaps ), 64 );
 	for ( DWORD i = 0; i < nh; i++ ) {
@@ -848,8 +883,14 @@ static QString ramOwnersLine()
 			continue;
 		e.lpData = nullptr;
 		while ( HeapWalk( heaps[i], &e ) )
-			if ( e.wFlags & PROCESS_HEAP_ENTRY_BUSY )
+			if ( e.wFlags & PROCESS_HEAP_ENTRY_BUSY ) {
 				busy += double( e.cbData );
+				int k = 0;
+				while ( k < 5 && double( e.cbData ) >= kEdge[k] )
+					k++;
+				sz[k] += double( e.cbData );
+				cnt[k] += 1.0;
+			}
 		HeapUnlock( heaps[i] );
 	}
 	double trimMs = 0.0;
@@ -857,6 +898,10 @@ static QString ramOwnersLine()
 	s += QString::asprintf( " | heaps %lu busy=%.0f MB | staged=%.0f MB direct=%.0f MB | archive trims=%llu (max %.1f ms)",
 		(unsigned long)nh, busy / 1048576.0, double( gpuStageCounts().stagedBytes.load() ) / 1048576.0,
 		double( gpuStageCounts().directBytes.load() ) / 1048576.0, trims, trimMs );
+	static const char * kSz[6] = { "<256B", "<4K", "<64K", "<1M", "<16M", ">=16M" };
+	s += QStringLiteral( " | heap blocks" );
+	for ( int k = 0; k < 6; k++ )
+		s += QString::asprintf( " %s %.0fk=%.0f MB", kSz[k], cnt[k] / 1000.0, sz[k] / 1048576.0 );
 	return s;
 }
 #endif

@@ -476,7 +476,7 @@ void main()
 	s.base = base;
 	s.N = normalize( tbn * normal );
 #ifdef WW_CELLLIGHTS
-	if ( cellOn && cellProbe == 20 && cellAoEarly == 1 ) {	// lane PERF1: the obscurance pass reads the normal and depth only
+	if ( cellOn && cellProbe == 20 && ( cellAoEarly == 1 || cellAoEarly == 4 ) ) {	// lane PERF1: the obscurance pass reads the normal and depth only
 		fragColor = cellAoPassOut( s.N, -ViewDir );
 		return;
 	}
