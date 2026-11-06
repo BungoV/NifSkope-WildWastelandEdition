@@ -463,13 +463,13 @@ float airLampAtlasVis( int i, vec3 P, vec3 Lp )
 	 * 31-32 filter the air's shadow; notes/modules1/research/fog_temporal.md). Red WW_CELL_AIR_LAMPPCF_RED=1: one tap */
 	float ang = 6.2831853 * ( volJitXY.x + 0.5 );
 	mat2 rot = mat2( cos( ang ), sin( ang ), -sin( ang ), cos( ang ) );
-	float v = 0.0;
+	float sv = 0.0;
 	for ( int k = 0; k < 8; k++ ) {
 		float th = float( k ) * 2.39996323;
 		vec2 pk = clamp( px + rot * vec2( cos( th ), sin( th ) ) * ( sqrt( ( float( k ) + 0.5 ) * 0.125 ) * 2.5 ), o + 1.0, o + s - 1.0 );
-		v += texture( volLampAtlas, vec3( pk / tsz, ref ) );
+		sv += texture( volLampAtlas, vec3( pk / tsz, ref ) );
 	}
-	return v * 0.125;
+	return sv * 0.125;
 }
 
 float airLeakLightK( int i, vec3 P, vec3 Lp )
