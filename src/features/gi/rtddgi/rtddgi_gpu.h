@@ -230,6 +230,46 @@ struct RestirGpuShare
 };
 bool restirGpuShare( DdgiGpuSession * s, int W, int H, RestirGpuShare * out );
 
+/* MODULES1 RESUME 15 (2026-11-06): the placed lamps' shadow in the air by rays (src/features/gi/rtddgi/airrays.comp, route b
+ * of notes RESEARCH_AIR.md). One step = one ray pass over an X x Y x Z froxel grid (slices exponential as cell_volair.frag's
+ * volSlices) on the volume's BVH and packed lights, then the copy that makes this frame's running means the next one's
+ * history. Out: 2 floats a froxel (the shadowed share of the sampled lamps' light, its frames; frames 0 = no lamp). */
+struct AirRaysGpuIn
+{
+	int X = 0, Y = 0, Z = 0;
+	uint32_t frame = 0;
+	int samples = 2, frames = 16;         // lamps a froxel a frame; the running means' frames clamp
+	int red = 0;                          // airrays.comp AIR_BIT_* (nohole 1, nohist 2, noshadow 4)
+	float nearZ = 1.0f, logRange = 1.0f;  // volSlices.x and ln(far / near)
+	float bias = 2.0f;                    // shadow-ray start and end off the froxel and the lamp, units
+	float rows[12] = { 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0 };   // view -> the soup's local frame
+	float proj[4] = { 1, 1, 0, 0 };                            // P00, P11, P20, P21
+	float prows[12] = { 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0 };  // the previous frame's
+	float pproj[4] = { 1, 1, 0, 0 };
+	bool history = false;                 // the previous frame's running means are valid
+	bool readBack = false;                // copy the ratio and the running means to the host
+	std::function<bool()> beforeSubmit;   // interop (airraysGpuShare): GL signalled glDone; the submit waits on it
+};
+struct AirRaysGpuOut
+{
+	bool ok = false, busy = false;
+	std::string why;
+	double msWall = 0;
+	std::vector<float> ratio;             // readBack: 2 a froxel (ratio, frames)
+	std::vector<float> acc;               // 4 a froxel (num, den, frames, 0)
+};
+bool airraysGpuStep( DdgiGpuSession * s, const AirRaysGpuIn & in, AirRaysGpuOut * out );
+//! interop: the ratio (X x Y x Z x 8 bytes) exported to GL with two semaphores; remade when the grid changes
+struct AirRaysGpuShare
+{
+	bool ok = false;
+	std::string why;
+	void * outMemory = nullptr;
+	uint64_t outSize = 0;
+	void * vkDone = nullptr, * glDone = nullptr;
+};
+bool airraysGpuShare( DdgiGpuSession * s, int X, int Y, int Z, AirRaysGpuShare * out );
+
 } // namespace bakert
 
 #endif // RTDDGI_GPU_H
