@@ -15,6 +15,7 @@
 #include "gl/cellunits.h"	// lane BUGS1102B: the roof map's unit
 #include "features/weather/rainfogmath.h"	// lane FO76WEATHER1: the rain's share of a weather change
 #include "features/weather/rainwetlaw.h"
+#include "features/weather/weatherrecx.h"	// lane WEATHERRECX1: precipitation.wetting / drying
 #include "features/shadows/shadowset.h"	// lane FO76WEATHER2: the cover map leaves the terrain out
 #include "gl/glshape.h"
 #include "features/weather/precipspec.h"
@@ -484,8 +485,11 @@ float wwCellRainWetAmount( Scene * scene )
 		s.doc = scene->nifModel;
 		s.wet = s.target;
 	} else {	// lane WETSNAP1: the game's snap to dry (red nosnap = the FO76WEATHER1 slow dry in every case)
+		// lane WEATHERRECX1: the .recx's wetting / drying minutes (red WW_WEATHER_RECORD_RED=precip: the game's speeds)
+		const WwWeatherRecx & wx = wwWeatherRecx();
+		const bool fromFile = !wwWeatherRecordRed( WwRecPrecip );
 		s.wet = WwRainWet::update( s.wet, s.target, float( now - s.lastMs ) * 0.001f, rainNow, rainPrev, !interior,
-			red != "nosnap" );
+			red != "nosnap", fromFile ? wx.wetting : -1.0f, fromFile ? wx.drying : -1.0f );
 	}
 	s.lastMs = now;
 	s.moving = s.wet != s.target;

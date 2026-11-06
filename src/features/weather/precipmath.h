@@ -74,7 +74,7 @@ struct Variant
 struct TypeInfo
 {
 	const char * name;
-	const char * texture;	// under Textures\ (the default shipped in res/Data)
+	const char * texture;	// under Textures\ (the default shipped in the mod "Fusion Shaders - Assets")
 	int cols, rows;
 	int nVariants;
 	Variant v[16];

@@ -75,6 +75,24 @@ inline float update( float wet, float target, float dt, bool rainNow, bool rainP
 	return snapOn && snaps( rainNow, rainPrev, exterior ) ? 0.0f : wet;
 }
 
+/* lane WEATHERRECX1: the weather .recx's precipitation.wetting / drying (game minutes from dry to soaked and back,
+ * SPEC.md 1.3) as the clock's per-second speeds: the game clock runs at timescale 20, so a minute is 3 real seconds.
+ * wetting 15 = 0.022 / s (the game's fWetSpeed 0.03 is 11 minutes); <= 0 keeps the game's speed */
+constexpr float kTimescale = 20.0f;
+inline float perSecond( float minutes, float gameSpeed )
+{
+	return minutes > 0.0f ? kTimescale / ( 60.0f * minutes ) : gameSpeed;
+}
+
+inline float update( float wet, float target, float dt, bool rainNow, bool rainPrev, bool exterior, bool snapOn,
+	float wettingMin, float dryingMin )
+{
+	target = sat( target );
+	const float up = perSecond( wettingMin, kWetSpeed ), down = perSecond( dryingMin, kDrySpeed );
+	wet = wet < target ? std::min( wet + up * dt, target ) : std::max( wet - down * dt, target );
+	return snapOn && snaps( rainNow, rainPrev, exterior ) ? 0.0f : wet;
+}
+
 /* lane FO76WEATHER2: the sky exposure. Fallout 76's wet pixel shaders test a top-down precipitation depth map
  * (comparison sampler, so a 2 x 2 filtered test): a pixel with something above it stays dry. Here the map is
  * INTSKY1's roof map (preciproof.h WwRoofMap: each texel the highest z over it), built over the loaded cell's

@@ -21,6 +21,7 @@ BSD License - see nifskope.h
 #include "features/shadows/shadowset.h"	// lane TERRSHADOW1: the Sun Path row
 #include "features/sky/atmosphere.h"	// lane ATMO1: the physical sky
 #include "features/weather/weatherrecx.h"	// lane WX1: the weather .recx night block
+#include "features/weather/weathergen.h"	// lane WEATHERRECX1: the generated rung's inputs
 #include "features/clouds/cloudmap.h"	// lane CLOUD1: the cloud map
 #include "features/clouds/cloudvol.h"	// lane CLOUD2: the volume clouds
 #include "features/clouds/cloudlightning.h"	// lane CLOUD6f: the storm share of the lightning
@@ -1353,6 +1354,17 @@ bool wwLookdevLightning( float & share, float rgb[3], quint32 & seed, unsigned *
 	seed = src.formID;
 	if ( freq )	// lane LIGHTNING2 (LIGHTNINGFREQ1): the storm side's Thunder/Lightning - Frequency (cloudlightning.h)
 		*freq = src.thunderFreq;
+	/* lane WEATHERRECX1: the .recx owns the lightning (SPEC.md 1.3): lightning.frequency in flashes / min onto the byte
+	 * law (cloudlightning.h freqChance: a strike per 2 s slot at (255 - byte) / 255, so 30 / min = byte 0), already
+	 * blended over a change; the colour is a ~30 000 K plasma channel, never the record's DATA 12..14. Red
+	 * WW_WEATHER_RECORD_RED=lightning: the record's byte and colour (as before) */
+	if ( !wwWeatherRecordRed( WwRecLightning ) && wwWeatherRecx().lightningFreq >= 0.0f ) {
+		if ( freq )
+			*freq = unsigned( std::lround( 255.0f - 255.0f * std::min( 1.0f, wwWeatherRecx().lightningFreq / 30.0f ) ) );
+		static const float kPlasma[3] = { 0.63f, 0.73f, 1.0f };
+		for ( int c = 0; c < 3; c++ )
+			rgb[c] = kPlasma[c];
+	}
 	return true;
 }
 
@@ -1372,6 +1384,46 @@ bool wwLookdevWeatherLeaving( quint32 & formID, QString & edid, QString & owner,
 	classFlags = L.hasClass ? L.classFlags : 0u;
 	pct = s.w.transPct;
 	return true;
+}
+
+// lane WEATHERRECX1: one record -> the generated rung's inputs (weathergen.h; colours and fog distances never read)
+static WwWeatherGen::In weatherGenIn( const LdState & s, const WwWeatherData & w )
+{
+	WwWeatherGen::In in;
+	in.edid = w.edid.toStdString();
+	for ( const WwWeatherEntry & e : s.list )
+		if ( e.formID == w.formID )
+			in.owner = e.ownerFile.toStdString();
+	in.flags = w.hasClass ? int( w.classFlags ) : 0;
+	in.precipType = w.precipForm != 0 ? w.precipType : -1;
+	in.precipDensity = w.precipDensity >= 0.0f ? double( w.precipDensity ) : 7.0;
+	in.thunder = w.thunderSounds > 0;
+	in.windSpeed = w.windSpeed;
+	in.windDir = w.windDir;
+	in.windTurb = w.windTurb;
+	in.transDelta = w.transDelta;
+	in.precipIn = w.precipFadeIn;
+	in.precipOut = w.precipFadeOut;
+	in.thunderIn = w.thunderFadeIn;
+	in.thunderOut = w.thunderFadeOut;
+	return in;
+}
+
+int wwLookdevWeatherGen( WwWeatherGen::In in[2], quint32 formID[2], float & pct )
+{
+	resolve();
+	const LdState & s = st();
+	pct = 1.0f;
+	if ( !s.haveWeather )
+		return 0;
+	in[0] = weatherGenIn( s, s.w );
+	formID[0] = s.w.formID;
+	if ( !s.w.blending() )
+		return 1;
+	in[1] = weatherGenIn( s, *s.w.last );
+	formID[1] = s.w.last->formID;
+	pct = s.w.transPct;
+	return 2;
 }
 
 bool wwLookdevWeatherRains( bool & cur, bool & blending, bool & old, float & pct )
@@ -3430,6 +3482,11 @@ bool wwLookdevWind( float out[5] )
 	out[3] = float( s.w.windTurb );
 	// lane WEATHERBLEND3: the game's random range offset, seeded per weather (red nowindoffset: 0)
 	out[4] = weatherBlendRed( "nowindoffset" ) ? 0.0f : wwWindRangeOffset( s.w.windDir, s.w.windDirRange, s.w.formID );
+	/* lane WEATHERRECX1: the .recx owns the wind (m/s, degrees FROM; blended over a change by weatherrecx.cpp) on the
+	 * byte scale the consumers take; the record keeps only its direction range (the gusts' art). Red
+	 * WW_WEATHER_RECORD_RED=wind: the record's bytes (as before) */
+	if ( !wwWeatherRecordRed( WwRecWind ) && wwWeatherRecxWindBytes( out[0], out[1], out[3] ) )
+		return true;
 	if ( s.w.blending() && s.w.last->hasWind ) {	// lane WEATHERBLEND1: speed and turbulence blend on pct (the game's)
 		const float p = s.w.transPct;
 		out[0] = wwWeatherWindBlend( s.w.windSpeed, s.w.last->windSpeed, p );	// WEATHERBLEND3: unrounded

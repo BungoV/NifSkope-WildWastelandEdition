@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Writes the shipped default ground-fog .recx files (docs/RECX.md) for every weather in the official masters.
 
-  python src/features/weather/recx_weathers.py <game Data folder> [--out res/Data/Plugins/FO4CS/Weathers] [--table]
+  python src/features/weather/recx_weathers.py <game Data folder> [--out "<MO2>/mods/Fusion Shaders - Assets/Plugins/Fusion Shaders - Assets/Weathers"] [--table]
 
 One file per weather RECORD (a DLC entry that only overrides a base-game weather is not a new record: its values
 come from the winning entry in the load order below, its file names the defining plugin). The files hold only the
@@ -104,7 +104,7 @@ def values(fnam):
 
 def main():
     data = sys.argv[1]
-    out = 'res/Data/Plugins/FO4CS/Weathers'
+    out = 'E:/Projects/Fallout 4 Mods/mods/Fusion Shaders - Assets/Plugins/Fusion Shaders - Assets/Weathers'
     if '--out' in sys.argv:
         out = sys.argv[sys.argv.index('--out') + 1]
     win = {}    # (defining plugin, local id) -> (edid, fnam, from plugin)

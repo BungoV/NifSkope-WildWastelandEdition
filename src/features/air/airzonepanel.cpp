@@ -4,6 +4,7 @@
 
 #include "features/air/airzone.h"
 #include "features/weather/esmweather.h"	// the game's Data folder: the default save root
+#include "recx.h"	// lane WEATHERRECX1: the provider's name
 #include "glview.h"
 #include "wwskin.h"
 
@@ -255,7 +256,11 @@ void AirZonePanel::buildUi()
 	where->addWidget( new QLabel( tr( "Provider" ), this ), 2, 0 );
 	provider = new QLineEdit( this );
 	provider->setObjectName( QStringLiteral( "AirZoneProvider" ) );
-	provider->setText( QSettings().value( QStringLiteral( "CellEditor/AirZoneProvider" ), QStringLiteral( "FO4CS" ) ).toString() );
+	// lane WEATHERRECX1: the provider is "Fusion Shaders - Assets" (recx.h); a stored old "FO4CS" moves to it
+	QString prov = QSettings().value( QStringLiteral( "CellEditor/AirZoneProvider" ), wwRecxProvider() ).toString();
+	if ( prov.trimmed().compare( wwRecxOldProvider(), Qt::CaseInsensitive ) == 0 )
+		prov = wwRecxProvider();
+	provider->setText( prov );
 	provider->setToolTip( tr( "The mod that ships the data, by its plain name (the .recx standard)" ) );
 	where->addWidget( provider, 2, 1 );
 	outer->addLayout( where );

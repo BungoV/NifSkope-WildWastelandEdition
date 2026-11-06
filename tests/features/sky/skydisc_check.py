@@ -312,7 +312,7 @@ def rim_gate(sky, moon, P, gate, png=None):
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument('--tex', default='E:/Projects/Fallout 4 Mods/mods/FO4CS/Textures/Sky/Moon')
+    ap.add_argument('--tex', default='E:/Projects/Fallout 4 Mods/mods/Fusion Shaders - Assets/Textures/Sky/Moon')
     ap.add_argument('--png', default=None)
     ap.add_argument('--dump', default=None)
     ap.add_argument('--red', default='', choices=['', 'vanilla', 'nophase'])

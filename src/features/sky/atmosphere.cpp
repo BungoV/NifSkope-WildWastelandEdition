@@ -29,13 +29,18 @@ namespace
 
 using namespace WwAtmoMath;	// lane SKYA: the constants and the CPU math, shared with the offline unit test
 
-constexpr const char * kKey = "Settings/Render/Scene/Physical Sky";
-constexpr const char * kApKey = "Settings/Render/Scene/Aerial Perspective";
-constexpr const char * kSunKey = "Settings/Render/Scene/Sunlight From Sky";	// lane SKYA (ATMOSUN1)
-constexpr const char * kNightKey = "Settings/Render/Scene/Moon Phase and Stars";	// lane SKYA (NIGHT1)
+/* lane WEATHERRECX1 (bungo 11-06: light comes only from the physical sky and its scattering): the Physical Sky (Ultra),
+ * Aerial Perspective, Sunlight From Sky (Full), Moon Phase and Stars and GI Sky rows ship ON, under new keys so an old
+ * stored OFF does not stick. Red WW_WEATHER_RECORD_RED: sky = the Weather Tint sky colour, sun = Sunlight From Sky
+ * off, ambient = GI Sky off (the record's painted light, as before) */
+constexpr const char * kKey = "Settings/Render/Scene/Physical Sky 2";
+constexpr const char * kApKey = "Settings/Render/Scene/Aerial Perspective 2";
+constexpr const char * kSunKey = "Settings/Render/Scene/Sunlight From Sky 2";	// lane SKYA (ATMOSUN1)
+constexpr const char * kNightKey = "Settings/Render/Scene/Moon Phase and Stars 2";	// lane SKYA (NIGHT1)
+constexpr int kTierDef = 4, kApDef = 1, kSunDef = 2, kNightDef = 1, kGiDef = 1;	// lane WEATHERRECX1
 constexpr const char * kExpoKey = "Settings/Render/Scene/Exposure From Sky";	// lane SKYA (EXPO1)
 constexpr const char * kTintKey = "Settings/Render/Scene/Sky Color";	// lane SKYA (ATMOCHECK1)
-constexpr const char * kGiKey = "Settings/Render/Scene/GI Sky From Physical Sky";	// lane SKYA (SKYGI1)
+constexpr const char * kGiKey = "Settings/Render/Scene/GI Sky From Physical Sky 2";	// lane SKYA (SKYGI1)
 static_assert( kTintN == 17, "WwAtmoInputs::tint and atmo_sky.frag atTint[17]" );
 constexpr GLenum kTimestamp = 0x8E28;	// GL_TIMESTAMP
 constexpr int kTransW = 256, kTransH = 64;
@@ -75,7 +80,7 @@ struct AtState
 
 //! lane SKYA: one row's value from its pin (already read by the caller: the survey needs literal names), a harness
 //! run (0, pinned) or its QSettings key
-int rowValue( const QString & pin, const char * key, const QStringList & names, bool & pinned )
+int rowValue( const QString & pin, const char * key, const QStringList & names, bool & pinned, int def = 0 )
 {
 	const QString e = pin.trimmed().toLower();
 	pinned = true;
@@ -90,7 +95,7 @@ int rowValue( const QString & pin, const char * key, const QStringList & names, 
 	if ( wwHarnessRun() )
 		return 0;
 	pinned = false;
-	return std::clamp( QSettings().value( QLatin1StringView( key ), 0 ).toInt(), 0, int( names.size() ) - 1 );
+	return std::clamp( QSettings().value( QLatin1StringView( key ), def ).toInt(), 0, int( names.size() ) - 1 );
 }
 
 AtState & as()
@@ -112,7 +117,7 @@ AtState & as()
 			s.tier = 0;	// a harness measures what it pins
 			s.pinned = true;
 		} else {
-			s.tier = std::clamp( QSettings().value( QLatin1StringView( kKey ), 0 ).toInt(), 0, 4 );
+			s.tier = std::clamp( QSettings().value( QLatin1StringView( kKey ), kTierDef ).toInt(), 0, 4 );
 		}
 		// lane SKYA (ATMO2): the Aerial Perspective row (the prefix above re-reads it live)
 		const QString a = wwEnvStr( "WW_ATMO_AP" ).trimmed().toLower();
@@ -123,14 +128,22 @@ AtState & as()
 			s.ap = 0;
 		else {
 			s.apPinned = false;
-			s.ap = QSettings().value( QLatin1StringView( kApKey ), 0 ).toInt() ? 1 : 0;
+			s.ap = QSettings().value( QLatin1StringView( kApKey ), kApDef ).toInt() ? 1 : 0;
 		}
 		// lane SKYA: the rows after ATMO2 (the same prefix re-reads them live)
-		s.sun = rowValue( wwEnvStr( "WW_ATMO_SUN" ), kSunKey, { "off", "tint", "full" }, s.sunPinned );
-		s.night = rowValue( wwEnvStr( "WW_ATMO_NIGHT" ), kNightKey, { "off", "on" }, s.nightPinned );
+		s.sun = rowValue( wwEnvStr( "WW_ATMO_SUN" ), kSunKey, { "off", "tint", "full" }, s.sunPinned, kSunDef );
+		s.night = rowValue( wwEnvStr( "WW_ATMO_NIGHT" ), kNightKey, { "off", "on" }, s.nightPinned, kNightDef );
 		s.expo = rowValue( wwEnvStr( "WW_ATMO_EXPO" ), kExpoKey, { "off", "on" }, s.expoPinned );
 		s.tint = rowValue( wwEnvStr( "WW_ATMO_TINT" ), kTintKey, { "physical", "weather" }, s.tintPinned );
-		s.gi = rowValue( wwEnvStr( "WW_ATMO_GI" ), kGiKey, { "off", "on" }, s.giPinned );
+		s.gi = rowValue( wwEnvStr( "WW_ATMO_GI" ), kGiKey, { "off", "on" }, s.giPinned, kGiDef );
+		// lane WEATHERRECX1: the record reds hand a light channel back to the WTHR record (an unpinned row only)
+		const unsigned rr = wwWeatherRecordChannels( wwEnvStr( "WW_WEATHER_RECORD_RED" ) );
+		if ( ( rr & WwRecSky ) && !s.tintPinned )
+			s.tint = 1;
+		if ( ( rr & WwRecSun ) && !s.sunPinned )
+			s.sun = 0;
+		if ( ( rr & WwRecAmbient ) && !s.giPinned )
+			s.gi = 0;
 	}
 	return s;
 }
@@ -154,6 +167,7 @@ bool apRed( const char * word )
  * WW_CELL_AIR_RED=recordhaze: the record for every weather (today's rule). */
 constexpr float kClearDayVisM = 30000.0f;
 const char * g_hazeSrc = "record";
+float g_airglow = 1.0f;	// lane WEATHERRECX1: atmosphere.airglow (the hazeType's; 1 = the night floor as before)
 
 void clearDayHaze( float haze[3], bool recordHasFog )
 {
@@ -170,6 +184,22 @@ void clearDayHaze( float haze[3], bool recordHasFog )
 	const WwWeatherRecx & r = wwWeatherRecx();
 	if ( r.on && r.visibilityM >= 0.0f && !( r.recordFirst && recordHasFog ) )
 		g_hazeSrc = "recx";
+	/* lane WEATHERRECX1: the haze's make-up from the .recx (hazeType at its humidity; SPEC.md 1.3): albedo per channel,
+	 * the Angstrom slope on the extinction (550 nm unchanged: visibility stays the only thickness), g, airglow. None
+	 * (row off, red fog): the grey haze before 1.3 */
+	HazeOptics & ho = hazeOptics();
+	ho = HazeOptics();
+	g_airglow = 1.0f;
+	float alb[3], ang = 0.0f, g = kMieG, glow = 1.0f;
+	if ( wwWeatherRecxHazeOptics( alb, ang, g, glow ) ) {
+		static const float kLambda[3] = { 680.0f, 550.0f, 440.0f };
+		for ( int c = 0; c < 3; c++ ) {
+			ho.albedo[c] = std::clamp( alb[c], 0.0f, 1.0f );
+			ho.spec[c] = std::pow( kLambda[c] / 550.0f, -ang );
+		}
+		ho.g = std::clamp( g, 0.0f, 0.95f );
+		g_airglow = std::clamp( glow, 0.0f, 10.0f );
+	}
 }
 
 //! lane SKYA (NIGHT1): nophase (the moon's light at every phase = the full moon's), noext (the stars and the moon disc
@@ -277,7 +307,10 @@ void medium( NifSkopeOpenGLContext::Program * p, const float haze[3], bool noOzo
 	p->uni3f( "atRay", kRay[0], kRay[1], kRay[2] );
 	p->uni1f( "atMieS", kMieS );
 	p->uni1f( "atMieE", kMieE );
-	p->uni1f( "atG", kMieG );
+	const HazeOptics & ho = hazeOptics();	// lane WEATHERRECX1: the weather .recx haze (clearDayHaze sets it)
+	p->uni1f( "atG", ho.g );
+	p->uni3f( "atHazeAlbedo", ho.albedo[0], ho.albedo[1], ho.albedo[2] );
+	p->uni3f( "atHazeSpec", ho.spec[0], ho.spec[1], ho.spec[2] );
 	if ( noOzone )
 		p->uni3f( "atOzone", 0.0f, 0.0f, 0.0f );
 	else
@@ -289,7 +322,7 @@ void medium( NifSkopeOpenGLContext::Program * p, const float haze[3], bool noOzo
 	if ( red( "nofloor" ) )
 		p->uni3f( "atFloor", 0.0f, 0.0f, 0.0f );
 	else
-		p->uni3f( "atFloor", kNightFloor[0], kNightFloor[1], kNightFloor[2] );
+		p->uni3f( "atFloor", kNightFloor[0] * g_airglow, kNightFloor[1] * g_airglow, kNightFloor[2] * g_airglow );	// WEATHERRECX1: x airglow
 }
 
 void bindTex( NifSkopeOpenGLContext::GLFunctions * fn, NifSkopeOpenGLContext::Program * p, int unit, const char * name, GLuint tex )
