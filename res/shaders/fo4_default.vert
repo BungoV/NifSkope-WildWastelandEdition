@@ -16,6 +16,10 @@ out float rawVertexAlpha;
 
 flat out mat3 reflMatrix;
 
+// RESUME 15: the depth pre-pass and the main pass draw a shape through different programs (and passes) over one depth
+// at EQUAL: the same inputs must give the same bits whichever program computes them
+invariant gl_Position;
+
 #include "uniforms.glsl"
 
 #ifdef WW_BINDLESS

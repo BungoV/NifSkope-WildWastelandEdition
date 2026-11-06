@@ -1774,10 +1774,26 @@ void NifSkopeOpenGLContext::setDefaultVertexAttribs( std::uint64_t attrMask, con
 	}
 }
 
+// RESUME 15: the last skinning upload's contents (FNV-1a), part of a skinned draw's vertex key (ao.cpp aoVertexKey)
+static quint64 wwBoneHash = 0;
+quint64 wwBoneUploadHash()
+{
+	return wwBoneHash;
+}
+
 void NifSkopeOpenGLContext::updateBoneTransforms( const FloatVector4 * boneTransforms, size_t numBones )
 {
 	FloatVector4	tmp[768];
 	size_t	n = std::min< size_t >( numBones, 256 ) * 3;
+	{
+		quint64 h = 1469598103934665603ull;
+		const unsigned char * b = reinterpret_cast<const unsigned char *>( boneTransforms );
+		for ( size_t i = 0; boneTransforms && i < n * sizeof( FloatVector4 ); i++ ) {
+			h ^= b[i];
+			h *= 1099511628211ull;
+		}
+		wwBoneHash = h ^ quint64( n );
+	}
 	if ( n > 0 )
 		std::memcpy( &( tmp[0][0] ), &( boneTransforms[0][0] ), n * sizeof( FloatVector4 ) );
 	for ( ; n < 768; n = n + 3 ) {

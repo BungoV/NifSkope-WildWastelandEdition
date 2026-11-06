@@ -1,3 +1,12 @@
+## MODULES1 step 11 (2026-11-06): no holes in swaying, skinned or splatted shapes; AO normals hold at any distance
+
+- The AO depth pre-pass and the main pass now agree on every moving shape. A shape's vertex inputs (wind, far sway,
+  bones, the far splat) are keyed in the pre-pass; a main-pass draw with the same key draws only where its own depth
+  is, any other draws normally, and the pre-pass leaves that shape out for the next two seconds so its old depth
+  cannot hide it. The census line adds `lequal` and `skipped`.
+- The pre-pass writes linear view depth (32-bit float), and the AO normals are rebuilt from it: far ground keeps its
+  normals (99.6 % within 8 degrees at 43k-125k units, was 44 %). Red `WW_CELL_AO_PREPASS_RED=zwin`: the window depth.
+
 ## MODULES1 step 10 (2026-11-06): the lamp atlas redraws what moves; the viewport's editor overlays in their own file
 
 - Atlas (Lamp shadows > Atlas): a door, actor or prop that moves after its lamps' tiles were drawn no longer keeps its

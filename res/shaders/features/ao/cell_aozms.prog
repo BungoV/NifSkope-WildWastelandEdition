@@ -1,0 +1,4 @@
+# Cell view obscurance, stage 6 (RESUME 15): the depth pre-pass's linear view depth, sample 0 of each pixel.
+# No conditions: src/features/ao/ao.cpp selects it by name.
+
+shaders cell_ao.vert cell_aozms.frag

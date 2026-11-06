@@ -63,10 +63,27 @@
 #include <map>
 #include <vector>
 #include <unordered_map>	// lane PERFFIX1: the cell-uniform class records
-#include <unordered_set>	// MODULES1: the depth pre-pass's draws
+#include "gl/cellgrass.h"	// RESUME 15: a grass or tree-wind shape's vertex key (wwCellGrassIs)
 #include "features/far-lod/cellfarlod.h"	// MODULES1: the far sway's clock before the depth pre-pass
 
 quint64 wwGlPaintCount();	// glview.cpp
+quint64 wwBoneUploadHash();	// glcontext.cpp: RESUME 15, the last skinning upload's contents
+
+// RESUME 15: a projection's bytes, hashed (FNV-1a)
+static quint64 aoBytesHash( quint64 h, const void * p, size_t n )
+{
+	const unsigned char * b = static_cast<const unsigned char *>( p );
+	for ( size_t i = 0; i < n; i++ ) {
+		h ^= b[i];
+		h *= 1099511628211ull;
+	}
+	return h;
+}
+
+static quint64 aoMatHash( const FloatVector4 * m )
+{
+	return aoBytesHash( 1469598103934665603ull, &m[0][0], sizeof( FloatVector4 ) * 4 );
+}
 bool wwCellLitProbePicture();	// celllights.cpp: a probe picture (WW_CELL_LIT_PROBE) is drawn
 
 namespace
@@ -97,8 +114,17 @@ struct AoState
 	bool equal = false;			// MODULES1: the main pass draws the pre-pass's draws with depth func EQUAL, writes off
 	bool eqSet = false;			// the last main-pass draw was set EQUAL
 	quint64 preFrame = ~quint64( 0 );	// the paint the pre-pass ran in
-	std::unordered_set<const void *> preSet;	// the shapes whose depth it wrote
+	std::unordered_map<const void *, quint64> preKey;	// the shapes whose depth it wrote, each with its vertex key
 	int eqDraws = 0, eqMiss = 0;	// the main pass's EQUAL draws; its opaque cell-lit draws the pre-pass did not hold
+	int eqLequal = 0;		// RESUME 15: held draws whose vertex key changed (aoVertexKey): LEQUAL, depth writes on
+	// RESUME 15: a shape whose key changed -> the paint it changed in. Its stale pre-pass depth can still hide its LEQUAL
+	// draw (tools/sway_offline.py: the fallback alone leaves holes), so the pre-pass leaves it out for kAoSkipPaints paints
+	std::unordered_map<const void *, quint64> preSkip;
+	int preSkipped = 0;		// the pre-pass draws left out this paint
+	bool zwin = false;		// RESUME 15: WW_CELL_AO_PREPASS_RED=zwin: stage 5 from the window depth (part 14)
+	bool zlin = false;		// RESUME 15: this pre-pass writes linear view depth (R32F) for stage 5
+	quint64 preProj = 0;	// RESUME 15: the pre-pass's projection; under another the main pass draws LEQUAL
+	int projSame = -1;		// the main pass's projection is the pre-pass's (-1: not read yet this pass)
 	QString preNote = QStringLiteral( "none yet" );
 	QString last = QStringLiteral( "none yet" );
 };
@@ -131,6 +157,7 @@ AoState & ao()
 			0, WwAoTierCount - 1 );
 		a.qualityRedOld = wwEnv( "WW_CELL_AO_QUALITY_RED" ).trimmed() == "old";
 		a.prepassGeom = wwEnv( "WW_CELL_AO_PREPASS_RED" ).trimmed() == "geom";	// MODULES1
+		a.zwin = wwEnv( "WW_CELL_AO_PREPASS_RED" ).trimmed() == "zwin";	// RESUME 15
 	}
 	return a;
 }
@@ -151,6 +178,10 @@ struct AoGpu
 	GLenum preFmt = 0;
 	AoTarget zres;			// MODULES1: its single-sample resolve (a depth-stencil texture, sample 0)
 	GLenum zresFmt = 0;
+	GLuint preZ = 0;		// RESUME 15: the pre-pass's linear view depth, multisampled as its depth (none: zlin itself)
+	int preZW = 0, preZH = 0, preZS = -1;
+	GLenum preZFmt = 0;
+	AoTarget zlin;			// its sample 0 (R32F, game units, 0 = nothing drawn): stage 5's input
 	AoTarget mip[5];		// 1..4: the min-of-2x2 depth (R32F)
 	AoTarget raw, across, fin;	// half size: (A, key) RG32F, then the blurs; fin R32F, bilinear
 	AoTarget xz[5], xa, xb, xe;	// lane SSAO2, full size: the working depth mips (R32F), the term ping-pong (R8), XeGTAO's (term, edges)
@@ -692,7 +723,10 @@ void wwCellAoPass( Scene * scene, bool run )
 	unsigned int hdrFmt = 0;
 	bool usePre = !a.prepassGeom && wwCellHdrDepthSpec( scene, hdrW, hdrH, hdrS, hdrFmt ) && hdrW == W && hdrH == H;
 	a.preFrame = ~quint64( 0 );
-	a.preSet.clear();
+	a.preKey.clear();
+	a.preSkipped = 0;
+	a.zlin = false;
+	a.projSame = -1;
 	a.preNote = a.prepassGeom ? QStringLiteral( "off (red geom)" ) : !usePre ? QStringLiteral( "geom (no linear frame of this size yet)" )
 		: QString();
 	if ( usePre ) {
@@ -733,6 +767,39 @@ void wwCellAoPass( Scene * scene, bool run )
 			g.zres.w = W;
 			g.zres.h = H;
 			g.zresFmt = GLenum( hdrFmt );
+		}
+		/* RESUME 15 (McGuire et al. 2012, SAO: camera-space z in R32F): the pre-pass also writes each fragment's linear
+		 * view depth (cell_ao.glsl cellAoZOnly) into an R32F target sampled as its depth; stage 6 takes sample 0 (the depth
+		 * resolve's) into zlin and stage 5 rebuilds the normal from it, as precise far as near (window depth loses it with
+		 * distance). A perspective view only: an orthographic one, or red zwin, rebuilds from the window depth (part 14) */
+		const FloatVector4 * pm = r->globalUniforms->projectionMatrix;
+		a.zlin = !a.zwin && pm[3][3] == 0.0f;
+		if ( a.zlin ) {
+			aoAlloc( fn, g.zlin, W, H, GL_R32F, GL_RED, false );
+			if ( g.preZW != W || g.preZH != H || g.preZS != hdrS || g.preZFmt != g.preFmt ) {
+				fn->glBindFramebuffer( GL_FRAMEBUFFER, g.preFbo );
+				if ( hdrS > 0 ) {	// a multisampled depth (even 1 sample) takes a multisampled colour target
+					if ( !g.preZ )
+						fn->glGenTextures( 1, &g.preZ );
+					fn->glBindTexture( GL_TEXTURE_2D_MULTISAMPLE, g.preZ );
+					fn->glTexImage2DMultisample( GL_TEXTURE_2D_MULTISAMPLE, hdrS, GL_R32F, W, H, GL_TRUE );
+					fn->glBindTexture( GL_TEXTURE_2D_MULTISAMPLE, 0 );
+					fn->glFramebufferTexture2D( GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D_MULTISAMPLE, g.preZ, 0 );
+				} else {
+					fn->glFramebufferTexture2D( GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, g.zlin.tex, 0 );
+				}
+				fn->glDrawBuffer( GL_COLOR_ATTACHMENT0 );
+				g.preZW = W;
+				g.preZH = H;
+				g.preZS = hdrS;
+				g.preZFmt = g.preFmt;
+			}
+		} else if ( g.preZS != -1 ) {	// depth only again
+			fn->glBindFramebuffer( GL_FRAMEBUFFER, g.preFbo );
+			fn->glFramebufferTexture2D( GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, 0, 0 );
+			fn->glDrawBuffer( GL_NONE );
+			g.preZS = -1;
+			g.preZW = 0;
 		}
 		fn->glBindFramebuffer( GL_FRAMEBUFFER, g.zres.fbo );
 		usePre = fn->glCheckFramebufferStatus( GL_FRAMEBUFFER ) == GL_FRAMEBUFFER_COMPLETE;
@@ -795,6 +862,11 @@ void wwCellAoPass( Scene * scene, bool run )
 	else {	// MODULES1: the draws below write the pre-pass's depth (and the reflection flag) only
 		wwCellFarLodFrame( scene );	// the far sway's clock of this paint (the main pass's, memoised per paint)
 		fn->glBindFramebuffer( GL_FRAMEBUFFER, g.preFbo );
+		if ( a.zlin ) {	// RESUME 15: linear depth 0 where nothing is drawn (the sky)
+			const GLfloat zero4[4] = { 0.0f, 0.0f, 0.0f, 0.0f };
+			fn->glClearBufferfv( GL_COLOR, 0, zero4 );
+		}
+		a.preProj = aoMatHash( r->globalUniforms->projectionMatrix );
 	}
 	if ( wwCellSsrPrevStencil() )
 		fn->glStencilMask( 0xFF );	// lane PERF3: the clear zeroes the flag bit too
@@ -866,6 +938,29 @@ void wwCellAoPass( Scene * scene, bool run )
 		fn->glBindFramebuffer( GL_READ_FRAMEBUFFER, g.zres.fbo );
 		fn->glBindFramebuffer( GL_DRAW_FRAMEBUFFER, g.gbuf.fbo );
 		fn->glBlitFramebuffer( 0, 0, W, H, 0, 0, W, H, GL_DEPTH_BUFFER_BIT | GL_STENCIL_BUFFER_BIT, GL_NEAREST );
+		if ( a.zlin && g.preZS > 0 ) {	// RESUME 15: stage 6, the linear depth's sample 0 into zlin
+			if ( NifSkopeOpenGLContext::Program * zm = r->useProgram( "cell_aozms.prog" ) ) {
+				fn->glDisable( GL_DEPTH_TEST );
+				fn->glDisable( GL_CULL_FACE );
+				fn->glDisable( GL_BLEND );
+				fn->glDisable( GL_STENCIL_TEST );
+				fn->glDepthMask( GL_FALSE );
+				fn->glPolygonMode( GL_FRONT_AND_BACK, GL_FILL );
+				fn->glActiveTexture( GL_TEXTURE6 );
+				fn->glBindTexture( GL_TEXTURE_2D_MULTISAMPLE, g.preZ );
+				zm->uni1i( "zms", 6 );
+				static const float mq[12] = { -1, -1, 0, 1, -1, 0, -1, 1, 0, 1, 1, 0 };
+				static const std::uint16_t mi[6] = { 0, 1, 2, 2, 1, 3 };
+				const float * ma = mq;
+				fn->glBindFramebuffer( GL_FRAMEBUFFER, g.zlin.fbo );
+				fn->glViewport( 0, 0, W, H );
+				r->drawShape( 4, 3, 6, GL_TRIANGLES, GL_UNSIGNED_SHORT, &ma, mi );
+				fn->glBindTexture( GL_TEXTURE_2D_MULTISAMPLE, 0 );
+				r->stopProgram();
+			} else {
+				a.zlin = false;	// no resolve program: the window depth, as part 14
+			}
+		}
 		fn->glBindFramebuffer( GL_FRAMEBUFFER, g.gbuf.fbo );
 		// the view normal from depth (the smaller-gradient side of each 3-tap cross) and the linear depth: stage 5
 		if ( NifSkopeOpenGLContext::Program * zp = r->useProgram( "cell_ao.prog" ) ) {
@@ -878,6 +973,11 @@ void wwCellAoPass( Scene * scene, bool run )
 			fn->glActiveTexture( GL_TEXTURE5 );	// the stages' own unit (src)
 			fn->glBindTexture( GL_TEXTURE_2D, g.zres.tex );
 			zp->uni1i( "zres", 5 );
+			fn->glActiveTexture( GL_TEXTURE6 );	// RESUME 15: the linear depth (stage 6's, or the pre-pass's own target)
+			fn->glBindTexture( GL_TEXTURE_2D, a.zlin ? g.zlin.tex : 0 );
+			zp->uni1i( "zlin", 6 );
+			zp->uni1b( "aoZLin", a.zlin );
+			fn->glActiveTexture( GL_TEXTURE5 );
 			zp->uni1i( "aoStage", 5 );
 			fn->glUniform2i( zp->uniLocation( "fullSize" ), W, H );
 			const auto & zpm = r->globalUniforms->projectionMatrix;
@@ -891,11 +991,15 @@ void wwCellAoPass( Scene * scene, bool run )
 			fn->glViewport( 0, 0, W, H );
 			r->drawShape( 4, 3, 6, GL_TRIANGLES, GL_UNSIGNED_SHORT, &za, zi );
 			fn->glBindTexture( GL_TEXTURE_2D, 0 );
+			fn->glActiveTexture( GL_TEXTURE6 );
+			fn->glBindTexture( GL_TEXTURE_2D, 0 );
+			fn->glActiveTexture( GL_TEXTURE5 );
 			r->stopProgram();
 			fn->glEnable( GL_DEPTH_TEST );
 			fn->glDepthMask( GL_TRUE );
 			a.preFrame = wwGlPaintCount();
-			a.preNote = QStringLiteral( "msaa %1 draws %2" ).arg( g.preS ).arg( qint64( a.preSet.size() ) );
+			a.preNote = QStringLiteral( "msaa %1 draws %2 z %3 skipped %4" ).arg( g.preS ).arg( qint64( a.preKey.size() ) )
+				.arg( a.zlin ? QStringLiteral( "linear" ) : QStringLiteral( "window" ) ).arg( a.preSkipped );
 		} else {
 			a.preNote = QStringLiteral( "refused (no cell_ao.prog for the rebuild)" );
 		}
@@ -1104,6 +1208,50 @@ static bool aoDepthWrites()
 	return m && glIsEnabled( GL_DEPTH_TEST ) && ( f == GL_LEQUAL || f == GL_LESS );
 }
 
+/* RESUME 15: what moves this draw's vertices in fo4_default.vert (gl_Position invariant there): the variant (the far
+ * splat twin moves rows), and for a displaced shape its inputs as the program holds them (far sway, grass and tree
+ * wind, the skinning upload). The pre-pass and the main pass with equal keys give the same gl_Position; a draw whose
+ * key changed between them draws its main pass LEQUAL with depth writes on (census "lequal"). */
+static constexpr quint64 kAoSkipPaints = 120;	// about two seconds at 60 paints a second, then the pre-pass tries again
+
+static quint64 aoVertexKey( Scene * scene, NifSkopeOpenGLContext::Program * prog, const void * shape )
+{
+	const std::string_view nm = prog->name;
+	const bool fs = nm.size() >= 7 && nm.substr( nm.size() - 7 ) == "fs.prog";
+	quint64 h = aoBytesHash( 1469598103934665603ull, &fs, sizeof( fs ) );
+	const Shape * s = static_cast<const Shape *>( shape );
+	auto uni = [&]( const char * n ) {
+		const int l = prog->uniLocation( n );
+		if ( l < 0 )
+			return;
+		float v[16] = {};
+		scene->renderer->fn->glGetUniformfv( prog->id, l, v );
+		h = aoBytesHash( h, v, sizeof( v ) );
+	};
+	if ( fs )
+		uni( "farSplat" );	// the splat pass a far row belongs to, and its size: both move gl_Position
+	if ( s->wwTreeAnim() ) {
+		uni( "lodTreeAnim" );
+		uni( "farSwayAmp" );
+		uni( "farSwayTime" );
+		uni( "farSwayBlock" );
+	}
+	if ( wwCellGrassIs( scene, s->id() ) ) {
+		uni( "wwGrassWind" );
+		uni( "wwGrassWind2" );
+		uni( "wwTreeWind" );
+		uni( "wwTreeWind2" );
+		uni( "wwTreeWind3" );
+		uni( "wwTreeWind4" );
+		uni( "wwTreeWind5" );
+	}
+	if ( s->wwGpuSkinned() ) {
+		const quint64 b = wwBoneUploadHash();
+		h = aoBytesHash( h, &b, sizeof( b ) );
+	}
+	return h;
+}
+
 void wwCellAoDraw( Scene * scene, bool cellProgram, const void * shape )
 {
 	PassTime::DrawCpuScope cpuT( PassTime::CpuAoDraw );	// lane PERF2
@@ -1127,10 +1275,22 @@ void wwCellAoDraw( Scene * scene, bool cellProgram, const void * shape )
 			glStencilFunc( GL_ALWAYS, opaque && wwCellSsrFlagged() ? 1 : 0, 0xFF );
 		}
 		wwOpaqueCutSaw( opaque );	// lane PERF2FIX1 (the cut's check)
+		const auto sk = a.prepass && opaque && shape ? a.preSkip.find( shape ) : a.preSkip.end();
+		if ( sk != a.preSkip.end() && wwGlPaintCount() - sk->second > kAoSkipPaints )
+			a.preSkip.erase( sk );
+		else if ( sk != a.preSkip.end() ) {	// RESUME 15: no depth from it this paint; the main pass draws it LEQUAL alone
+			glColorMask( GL_FALSE, GL_FALSE, GL_FALSE, GL_FALSE );
+			glDepthMask( GL_FALSE );
+			if ( wwCellSsrPrevStencil() )
+				glStencilMask( 0x00u );
+			a.preSkipped++;
+		}
 		if ( a.prepass && opaque && shape && aoDepthWrites() )
-			a.preSet.insert( shape );	// MODULES1: the main pass draws this one over its own depth (EQUAL)
+			a.preKey[shape] = aoVertexKey( scene, prog, shape );	// MODULES1: the main pass draws it EQUAL (same key)
 		if ( cellProgram ) {
 			prog->uni1i( "cellProbe", 20 );
+			if ( prog->uniLocation( "cellAoZOnly" ) >= 0 )
+				prog->uni1b( "cellAoZOnly", a.prepass && a.zlin );	// RESUME 15: the linear view depth only
 			// lane PERF1: the fragment returns once it has the normal (WW_AO_EARLY=0 shades it all, =red marks the early ones)
 			WW_SWITCH_STATIC( int, early, [] { const QByteArray v = wwEnv( "WW_AO_EARLY" ).trimmed(); return v == "0" ? 0 : v == "red" ? 2 : 1; }() );
 			prog->uni1i( "cellAoEarly", early );
@@ -1145,7 +1305,19 @@ void wwCellAoDraw( Scene * scene, bool cellProgram, const void * shape )
 	}
 	if ( a.equal ) {	// MODULES1: a draw the depth pre-pass holds passes only where its own depth already is
 		const bool opaque = cellProgram && !wwDrawBlend();
-		if ( opaque && shape && a.preSet.count( shape ) && aoDepthWrites() ) {
+		const auto held = opaque && shape ? a.preKey.find( shape ) : a.preKey.end();
+		bool eq = held != a.preKey.end() && aoDepthWrites();
+		if ( eq ) {	// RESUME 15: the same projection and the same vertex inputs as in the pre-pass, or LEQUAL
+			if ( a.projSame < 0 )
+				a.projSame = aoMatHash( r->globalUniforms->projectionMatrix ) == a.preProj ? 1 : 0;
+			if ( a.projSame == 0 || held->second != aoVertexKey( scene, prog, shape ) ) {
+				eq = false;
+				a.eqLequal++;
+				if ( a.projSame != 0 )
+					a.preSkip[shape] = wwGlPaintCount();
+			}
+		}
+		if ( eq ) {
 			glDepthFunc( GL_EQUAL );
 			glDepthMask( GL_FALSE );
 			a.eqSet = true;
@@ -1158,7 +1330,7 @@ void wwCellAoDraw( Scene * scene, bool cellProgram, const void * shape )
 					glDepthFunc( GL_LEQUAL );
 				a.eqSet = false;
 			}
-			if ( opaque )
+			if ( opaque && held == a.preKey.end() )
 				a.eqMiss++;
 		}
 	}
@@ -1260,7 +1432,8 @@ void wwCellAoPrepassShare( Scene * scene )
 	AoState & a = ao();
 	a.equal = false;
 	a.eqSet = false;
-	a.eqDraws = a.eqMiss = 0;
+	a.eqDraws = a.eqMiss = a.eqLequal = 0;
+	a.projSame = -1;
 	if ( !scene || !scene->renderer || a.preFrame != wwGlPaintCount() )
 		return;
 	Renderer * r = scene->renderer;
@@ -1294,8 +1467,8 @@ void wwCellAoPrepassEnd( Scene * scene )
 	AoState & a = ao();
 	if ( a.equal && a.eqSet )
 		glDepthFunc( GL_LEQUAL );
-	const QString line = a.equal ? QStringLiteral( "%1 equal %2 miss %3" ).arg( a.preNote ).arg( a.eqDraws ).arg( a.eqMiss )
-		: a.preNote;
+	const QString line = a.equal ? QStringLiteral( "%1 equal %2 lequal %3 miss %4" ).arg( a.preNote ).arg( a.eqDraws )
+		.arg( a.eqLequal ).arg( a.eqMiss ) : a.preNote;
 	a.equal = false;
 	a.eqSet = false;
 	static QString last;	// the census line, printed when it changes

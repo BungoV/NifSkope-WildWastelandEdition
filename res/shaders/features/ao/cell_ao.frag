@@ -25,6 +25,8 @@ uniform bool aoNoReset;		// WW_CELL_AO_RED=noreset: the plain mean over the angl
 uniform sampler2D zres;		// MODULES1: stage 5, the depth pre-pass's resolve (window depth, bottom row first)
 uniform mat4 aoInvProj;		// MODULES1: stage 5, clip -> view
 uniform float aoUnit;		// MODULES1: stage 5, view units -> game units (cell_ao.glsl cellAoPassOut)
+uniform sampler2D zlin;		// RESUME 15: stage 5, the pre-pass's linear view depth (game units, 0 = nothing drawn)
+uniform bool aoZLin;		// RESUME 15: stage 5 reads zlin (else the window depth zres, part 14 / red zwin)
 
 out vec4 fragColor;
 
@@ -60,8 +62,15 @@ ivec2 texelOf( int m, ivec2 q )
 vec4 zPos( ivec2 t )
 {
 	t = clamp( t, ivec2( 0 ), fullSize - 1 );
+	vec2 ndc = ( vec2( t ) + 0.5 ) / vec2( fullSize ) * 2.0 - 1.0;
+	if ( aoZLin ) {	// RESUME 15: the pixel's eye ray scaled to the stored view depth (McGuire et al. 2012, camera-space z)
+		float zl = texelFetch( zlin, t, 0 ).r;
+		vec4 r = aoInvProj * vec4( ndc, 0.0, 1.0 );
+		vec3 q = r.xyz / r.w;
+		return vec4( q * ( -zl / ( aoUnit * q.z ) ), zl > 0.0 ? 1.0 : 0.0 );
+	}
 	float d = texelFetch( zres, t, 0 ).r;
-	vec4 v = aoInvProj * vec4( ( vec2( t ) + 0.5 ) / vec2( fullSize ) * 2.0 - 1.0, d * 2.0 - 1.0, 1.0 );
+	vec4 v = aoInvProj * vec4( ndc, d * 2.0 - 1.0, 1.0 );
 	return vec4( v.xyz / v.w, d < 1.0 ? 1.0 : 0.0 );
 }
 
