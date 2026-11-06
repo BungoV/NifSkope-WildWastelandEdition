@@ -8,6 +8,7 @@
 #include "gl/celllooks.h"
 #include "cellmodsource.h"	// lane OBJFADE1: the fade multipliers from the game's inis
 #include "features/near/cellprevisrule.h"	// lane PERFFIX4: previs per document, the tome's staleness
+#include "features/near/cellshadowocc.h"	// lane PCMB1 part B: the casters' receiver cull
 #include "gl/glscene.h"
 #include "gl/glshape.h"
 #include "gl/renderer.h"
@@ -40,10 +41,11 @@ struct Counts
 	// lane OBJFADE1: the camera passes' fade (runs with a class; of them hidden), all / items / actors
 	std::int64_t fadeRuns = 0, faded = 0, itemRuns = 0, itemFaded = 0, actorRuns = 0, actorFaded = 0;
 	std::int64_t rampPartial = 0, casterFaded = 0;	// the late items: runs part way through the ramp, casters dropped
+	std::int64_t shadowOcc[3] = { 0, 0, 0 };	// lane PCMB1 part B: casters whose shadow reaches no receiver of the cascade
 	bool operator==( const Counts & o ) const
 	{
 		for ( int i = 0; i < 3; i++ )
-			if ( cDrawn[i] != o.cDrawn[i] || cCulled[i] != o.cCulled[i] )
+			if ( cDrawn[i] != o.cDrawn[i] || cCulled[i] != o.cCulled[i] || shadowOcc[i] != o.shadowOcc[i] )
 				return false;
 		if ( fadeRuns != o.fadeRuns || faded != o.faded || itemRuns != o.itemRuns || itemFaded != o.itemFaded
 			|| actorRuns != o.actorRuns || actorFaded != o.actorFaded || rampPartial != o.rampPartial
@@ -154,6 +156,10 @@ struct CullState
 	quint64 liveGen = 0;	// lane TESTDRIVER1: the switch generation last read
 	bool loaded = false, on = false, pinned = false;
 	int red = 0;
+	/* lane PCMB1 part B: each cascade's receiver slab (view depth, view units) from the shadow pass, this frame; red
+	 * WW_CELL_CULL_RED=noshadowocc turns the receiver cull off */
+	bool noShadowOcc = false, slabOk[3] = { false, false, false };
+	float slabNear[3] = { 0, 0, 0 }, slabFar[3] = { 0, 0, 0 };
 	QHash<const void *, QHash<int, std::vector<WwCullRun>>> docs;
 	Counts cur, last;
 	bool any = false, printed = false;
@@ -229,6 +235,7 @@ CullState & st()
 			s.on = QSettings().value( QStringLiteral( "WW/CellCull" ), true ).toBool();
 		}
 		s.red = wwEnv( "WW_CELL_CULL_RED" ).trimmed() == "casters" ? 1 : 0;
+		s.noShadowOcc = wwEnv( "WW_CELL_CULL_RED" ).trimmed() == "noshadowocc";	// lane PCMB1 part B
 		if ( wwEnv( "WW_CELL_CULL_RED" ).trimmed() == "off" )	// PERFHUNT2: the old default (no camera cull), whatever the row or pin says
 			s.on = false;
 		const QByteArray pv = wwEnv( "WW_CELL_PREVIS" ).trimmed();
@@ -462,6 +469,7 @@ void countsAdd( Counts & a, const Counts & b, std::int64_t sg )
 	for ( int i = 0; i < 3; i++ ) {
 		a.cDrawn[i] += sg * b.cDrawn[i];
 		a.cCulled[i] += sg * b.cCulled[i];
+		a.shadowOcc[i] += sg * b.shadowOcc[i];
 	}
 }
 
@@ -1548,8 +1556,18 @@ bool wwCellCullCamera( Scene * scene, const Shape * sh, int block, std::int64_t 
 	return true;
 }
 
+void wwCellCullCasterSlab( int cascade, bool ok, float nearDepth, float farDepth )
+{
+	CullState & s = st();
+	if ( cascade < 0 || cascade >= 3 )
+		return;
+	s.slabOk[cascade] = ok;
+	s.slabNear[cascade] = nearDepth;
+	s.slabFar[cascade] = farDepth;
+}
+
 bool wwCellCullCaster( Scene * scene, const Shape * sh, int block, int cascade, const float * m,
-	std::vector<std::uint32_t> & out )
+	std::vector<std::uint32_t> & out, bool cachedLayer )
 {
 	PassTime::CpuScope pt( PassTime::CullCascades );	// lane PERF1
 	CullState & s = st();
@@ -1649,6 +1667,12 @@ bool wwCellCullCaster( Scene * scene, const Shape * sh, int block, int cascade, 
 		}
 		lx = std::sqrt( lx );
 		ly = std::sqrt( ly );
+		/* lane PCMB1 part B (features/near/cellshadowocc.h): the receiver cull. Not on a cached static layer (a Scroll
+		 * reuses its texels after the camera moved), not in a probe pass, not under the red `noshadowocc`. */
+		const bool occ = !cachedLayer && !s.noShadowOcc && !s.probing && cascade >= 0 && cascade < 3 && s.slabOk[cascade];
+		float sd[3] = { 0, 0, 0 };
+		if ( occ )
+			WwShadowOcc::shadowDir( m, sd );
 		culled = collect( *runs, std::int64_t( sh->triangles.size() ), [&]( const WwCullRun & r ) {
 			if ( fadeDrops( r ) )
 				return false;
@@ -1658,6 +1682,13 @@ bool wwCellCullCaster( Scene * scene, const Shape * sh, int block, int cascade, 
 			const float y = m[1] * v[0] + m[5] * v[1] + m[9] * v[2] + m[13];
 			if ( !( std::fabs( x ) <= 1.0f + rv * lx && std::fabs( y ) <= 1.0f + rv * ly ) )
 				return false;
+			if ( occ ) {
+				const float c[3] = { v[0], v[1], v[2] };
+				if ( !WwShadowOcc::reachesSlab( c, rv, sd, s.slabNear[cascade], s.slabFar[cascade] ) ) {
+					s.cur.shadowOcc[cascade]++;
+					return false;
+				}
+			}
 			if ( previsRed ) {	// RED only
 				const Transform cam = scene->view * sh->worldTrans();
 				if ( previsHidden( s.pc, cam * r.center, r.radius * std::fabs( cam.scale ) ) != 0 ) {
@@ -1684,7 +1715,10 @@ QString wwCellCullSummary()
 		" | casters c0 %8/%9 c1 %10/%11 c2 %12/%13 (drawn/culled)%14" )
 		.arg( c.shapes ).arg( c.runs ).arg( c.drawn ).arg( c.culled ).arg( c.calls ).arg( c.tris ).arg( c.trisAll )
 		.arg( c.cDrawn[0] ).arg( c.cCulled[0] ).arg( c.cDrawn[1] ).arg( c.cCulled[1] ).arg( c.cDrawn[2] )
-		.arg( c.cCulled[2] ).arg( st().red == 1 ? QStringLiteral( " RED=casters" ) : QString() );
+		.arg( c.cCulled[2] ).arg( st().red == 1 ? QStringLiteral( " RED=casters" ) : QString() )
+		// lane PCMB1 part B: of the culled, the receiver cull's share
+		+ QStringLiteral( " | shadow occ c0 %1 c1 %2 c2 %3%4" ).arg( c.shadowOcc[0] ).arg( c.shadowOcc[1] ).arg( c.shadowOcc[2] )
+			.arg( st().noShadowOcc ? QStringLiteral( " RED=noshadowocc" ) : QString() );
 }
 
 /* lane FLYFIX1: WW_FRAME_LOG=0 keeps the lines that change with the camera (cull, previs, umbra, far LOD cards) out of

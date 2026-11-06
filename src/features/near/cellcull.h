@@ -136,7 +136,12 @@ bool wwCellCullCamera( Scene * scene, const Shape * sh, int block, std::int64_t 
  *  column-major view -> clip matrix (x, y in [-1, 1] inside). With the red control `casters` the CAMERA's
  *  frustum is used instead. False = draw whole. */
 bool wwCellCullCaster( Scene * scene, const Shape * sh, int block, int cascade, const float * clipFromView,
-	std::vector<std::uint32_t> & out );
+	std::vector<std::uint32_t> & out, bool cachedLayer = false );
+/*! lane PCMB1 part B: cascade `cascade`'s receiver slab this frame -- the main camera's planar view depth (view units)
+ *  that reads it, padded by the filter's reach; nearDepth very negative = no near side (cascade 0). ok false = no slab
+ *  (the receiver cull off for it). A caster whose shadow, swept along the sun, never enters the slab is dropped, except
+ *  on a cached static layer (`cachedLayer`) and under the red WW_CELL_CULL_RED=noshadowocc. */
+void wwCellCullCasterSlab( int cascade, bool ok, float nearDepth, float farDepth );
 
 //! Once per frame, before the passes: prints the last frame's counts when they changed.
 void wwCellCullFrame();

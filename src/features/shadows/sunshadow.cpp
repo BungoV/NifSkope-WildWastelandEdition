@@ -999,6 +999,17 @@ static void sunShadowPassImpl( Scene * scene )
 		cst.frame++;
 	ShadowCache::chooseLights( s, false );
 	fitCascades( s, vt );
+	/* lane PCMB1 part B: each cascade's receiver slab for the casters' receiver cull (features/near/cellshadowocc.h): the
+	 * view depths whose receivers read it (ww_sunshadow.glsl csmSelect picks by planar depth with the blend band; cascade
+	 * 0 also behind the camera, nothing past D + band), joined with the fit's own slice and widened by 32 of its texels
+	 * for the filter's and the normal offset's reach. Not with the red onecascade (every cascade spans the whole view). */
+	for ( int i = 0; i < kCascades; i++ ) {
+		const Cascade & c = s.c[i];
+		const double lo = i == 0 ? -1.0e30 : std::min( c.zn, s.split[i - 1] );
+		const double hi = std::max( c.zf, ( i < 2 ? s.split[i] : s.D ) + s.blend );
+		const double pad = 32.0 * c.texel;
+		wwCellCullCasterSlab( i, !red( "onecascade" ) && c.texel > 0.0, float( ( lo - pad ) * s.sc ), float( ( hi + pad ) * s.sc ) );
+	}
 
 	// the casters
 	std::vector<Caster> casters;
@@ -1504,7 +1515,7 @@ static void sunShadowPassImpl( Scene * scene )
 					const GpuDriven::PoolEntry & e = entry[n];
 					const Shape * sh = casters[n].sh;
 					if ( !inSet( casters[n], J.set, J.i ) ) {
-					} else if ( wwCellCullCaster( scene, sh, sh->id(), J.i, J.m, cullRanges ) ) {
+					} else if ( wwCellCullCaster( scene, sh, sh->id(), J.i, J.m, cullRanges, J.set == 1 ) ) {
 						for ( std::size_t r2 = 0; r2 + 1 < cullRanges.size(); r2 += 2 ) {
 							if ( cullRanges[r2 + 1] )
 								cmds.push_back( { cullRanges[r2 + 1] * 3, 1, e.firstIndex + cullRanges[r2] * 3, e.baseVertex,
@@ -1597,7 +1608,7 @@ static void sunShadowPassImpl( Scene * scene )
 			if ( ( progAt && k.alphaTested != bool( pass ) ) || queued[kn] || !inSet( k, J.set, J.i ) )
 				continue;
 			// lane SUNCELL1: a welded cell shape gives this cascade only the placements inside its own window
-			const bool runs = wwCellCullCaster( scene, k.sh, k.sh->id(), J.i, J.m, cullRanges );
+			const bool runs = wwCellCullCaster( scene, k.sh, k.sh->id(), J.i, J.m, cullRanges, J.set == 1 );	// PCMB1: set 1 is cached
 			if ( !runs && J.scissor && !ShadowCache::boundsInside( scene, k.sh, J.m ) )
 				continue;
 			perDraw++;

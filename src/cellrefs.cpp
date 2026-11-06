@@ -99,6 +99,7 @@ QString CellRefTable::fateName( CellRefFate fate )
 	case CellRefFate::Marker:   return QStringLiteral( "marker" );
 	case CellRefFate::Projected: return QStringLiteral( "projected decal, no shape of its own" );
 	case CellRefFate::Refused:  return QStringLiteral( "refused, see the census" );
+	case CellRefFate::Precombined: return QStringLiteral( "drawn by its cell's precombined mesh" );
 	}
 	return QStringLiteral( "?" );
 }

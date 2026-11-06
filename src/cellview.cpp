@@ -79,6 +79,7 @@ BSD License - see nifskope.h
 #include "features/near/cellcull.h"	// the per-placement culling runs
 #include "features/near/cellobjfade.h"	// the runs' fade class
 #include "features/near/cellprevisrule.h"	// lane PERFFIX4: the tome's staleness
+#include "features/near/cellpcmbload.h"	// lane PCMB1: the precombined meshes
 #include "gl/glproperty.h"	// lane FIXPACK1: the renderer's .pbrm resolve (pbrmResolveForMaterial)
 #include "gl/cellgrass.h"
 #include "features/post/cellpost.h"
@@ -3093,6 +3094,9 @@ static bool cellBuild( NifModel * nif, const CellSceneSpec & specAsked, CellChun
 		bool cable = false;   //!< a placed cable (BNDS base); its tube is built (src/cellcable.h)
 		WwCableSpec cableSpec;
 		bool loadDoor = false;   //!< a door with a teleport (XTEL)
+		//! lane PCMB1: a precombined mesh (its geometry is in world space: identity placement); `ref` is one of its refs
+		QString pcmbModel;
+		int pcmbMesh = -1;   //!< lane PCMB1: this ref went into precombined mesh #n, and is drawn by it once that loads
 	};
 	QVector<Placement> placements;
 	QHash<QString, int> skippedByType;
@@ -3588,6 +3592,104 @@ static bool cellBuild( NifModel * nif, const CellSceneSpec & specAsked, CellChun
 
 	if ( chunk )
 		origin = chunk->seed->origin;   // lane CELLSTREAM1: every streamed cell shares the open's origin
+
+	/* lane PCMB1: THE PRECOMBINED MESHES (src/features/near/cellpcmb.h), drawn merged as the game draws them. Each
+	 * loaded CELL's XCRI lists its meshes (meshes\precombined\<cell & 0xFFFFFF>_<key>_oc.nif) and the refs each one
+	 * replaced. A mesh is one static placement (its vertices are in world space) when none of its refs is stale -- the
+	 * previs rule's `moved` against the plugin of the winning CELL record: a later plugin moved, scaled, deleted or
+	 * disabled it. A mesh with one stale ref is not drawn at all (it still holds that ref's old geometry) and its
+	 * refs stay. The refs of a drawn mesh are left out once it has loaded; a missing or unreadable mesh leaves them
+	 * drawn. Red WW_CELL_PCMB_RED=refs: no mesh, every ref drawn (the code before the lane). */
+	struct PcmbMesh
+	{
+		QString model;
+		bool drawn = false;
+	};
+	std::vector<PcmbMesh> pcmbMeshes;
+	EsmLodBase pcmbBase;	// what a precombined placement stands on: a static with no base form
+	std::memcpy( &pcmbBase.type, "STAT", 4 );
+	pcmbBase.edid = QStringLiteral( "(precombined)" );
+	const bool pcmbRed = WwPcmb::redRefs();
+	int pcmbCells = 0, pcmbKeys = 0, pcmbStale = 0, pcmbOrphans = 0, pcmbTagged = 0;
+	{
+		QHash<quint32, int> pcmbOfRef;	// a ref -> the mesh that replaced it
+		auto pcmbCell = [&]( quint32 form, int cx, int cy ) {
+			const EsmCellPrevis c = world.cellPrevis( form );
+			if ( !c.exists || c.combinedMeshKeys.isEmpty() || c.combinedRefKeys.size() != c.combinedRefIds.size() )
+				return;
+			pcmbCells++;
+			pcmbKeys += int( c.combinedMeshKeys.size() );
+			QHash<quint32, EsmRefSource> srcOf;
+			const QVector<quint32> groups = spec.interior ? world.interiorChildGroups() : world.cellChildGroups( cx, cy );
+			for ( const EsmRefSource & r : world.refSources( groups ) )
+				srcOf.insert( r.form, r );
+			const std::vector<std::uint32_t> keys( c.combinedMeshKeys.begin(), c.combinedMeshKeys.end() );
+			const std::vector<std::uint32_t> pairKey( c.combinedRefKeys.begin(), c.combinedRefKeys.end() );
+			std::vector<bool> pairStale( pairKey.size(), false );
+			const std::vector<bool> fileOk( keys.size(), true );	// a file is judged by its load, below
+			for ( int k = 0; k < c.combinedRefIds.size(); k++ ) {
+				const auto it = srcOf.constFind( c.combinedRefIds[k] );
+				if ( it == srcOf.constEnd() )
+					continue;
+				const quint32 settled = it->settled == WwPrevisRule::RefSrc::kUnknown ? it->src : it->settled;
+				pairStale[size_t( k )] = it->owner <= c.srcFile && settled > c.srcFile;
+			}
+			const WwPcmb::Plan pl = WwPcmb::plan( keys, pairKey, pairStale, fileOk, pcmbRed );
+			pcmbStale += pl.staleMeshes;
+			pcmbOrphans += pl.orphanPairs;
+			std::vector<int> meshAt( keys.size(), -1 );
+			for ( size_t m = 0; m < keys.size(); m++ ) {
+				if ( !pl.meshDrawn[m] )
+					continue;
+				meshAt[m] = int( pcmbMeshes.size() );
+				PcmbMesh pm;
+				pm.model = QStringLiteral( "meshes\\precombined\\%1_%2_oc.nif" ).arg( form & 0xFFFFFFu, 8, 16, QLatin1Char( '0' ) )
+					.arg( keys[m], 8, 16, QLatin1Char( '0' ) );
+				Placement out;
+				out.pcmbModel = pm.model;
+				out.cellX = cx;
+				out.cellY = cy;
+				for ( size_t k = 0; k < pairKey.size(); k++ ) {	// the run's ref is one of its refs: the tome governs it
+					if ( pairKey[k] == keys[m] ) {
+						out.ref = c.combinedRefIds[int( k )];
+						break;
+					}
+				}
+				pcmbMeshes.push_back( pm );
+				placements.append( out );
+			}
+			for ( size_t k = 0; k < pairKey.size(); k++ ) {
+				if ( !pl.skipRef[k] )
+					continue;
+				for ( size_t m = 0; m < keys.size(); m++ ) {
+					if ( keys[m] == pairKey[k] ) {
+						pcmbOfRef.insert( c.combinedRefIds[int( k )], meshAt[m] );
+						break;
+					}
+				}
+			}
+		};
+		if ( !pcmbRed ) {
+			if ( spec.interior ) {
+				pcmbCell( world.interior().cellForm, 0, 0 );
+			} else {
+				for ( int y = y0; y <= y1; y++ )
+					for ( int x = x0; x <= x1; x++ )
+						if ( world.hasCell( x, y ) )
+							pcmbCell( world.cellForm( x, y ), x, y );
+			}
+		}
+		for ( Placement & p : placements ) {
+			if ( !p.pcmbModel.isEmpty() || !p.actorKey.isEmpty() )
+				continue;
+			const auto it = pcmbOfRef.constFind( p.ref );
+			if ( it != pcmbOfRef.constEnd() ) {
+				p.pcmbMesh = it.value();
+				pcmbTagged++;
+			}
+		}
+	}
+
 	CellPickTable & picks = chunk ? chunk->picks : cellPickTableMutable();
 	picks.clear();
 
@@ -4352,10 +4454,60 @@ static bool cellBuild( NifModel * nif, const CellSceneSpec & specAsked, CellChun
 	CellExportSink * const exportSink = chunk ? nullptr : g_cellExportSink;
 	if ( exportSink )
 		exportSink->begin( world, dataRoot );
+	/* lane PCMB1: the precombined meshes load first, on worker threads. One that loads with shapes is drawn and its
+	 * refs are left out of everything below; one that does not leaves its refs drawn. */
+	int pcmbDrawn = 0, pcmbFailed = 0, pcmbSkipped = 0, pcmbRefsFated = 0;
+	if ( !pcmbMeshes.empty() ) {
+		CellSpeed::Acc speedPcmb( "precombined meshes loaded" );
+		CellModelAhead pcmbAhead( dataRoot, true );
+		for ( const PcmbMesh & m : pcmbMeshes )
+			pcmbAhead.wantModel( m.model );
+		pcmbAhead.load();
+		for ( PcmbMesh & m : pcmbMeshes ) {
+			if ( !modelCache.contains( m.model ) && !modelsFailed.contains( m.model ) ) {
+				std::vector<NativeSrcShape> shapes;
+				bool ok = false;
+				if ( !pcmbAhead.take( m.model, nullptr, &shapes, &ok ) )
+					ok = lodgenNativeLoadModelPlaced( const_cast<QString *>( &dataRoot ), m.model, nullptr, &shapes );
+				if ( ok && !shapes.empty() ) {
+					modelCache.insert( m.model, shapes );
+					modelLoads++;
+				} else {
+					modelsFailed.insert( m.model );
+				}
+			}
+			m.drawn = modelCache.contains( m.model );
+			( m.drawn ? pcmbDrawn : pcmbFailed )++;
+		}
+		QSet<quint32> fated;
+		for ( const Placement & p : placements ) {
+			if ( p.pcmbMesh < 0 || !pcmbMeshes[size_t( p.pcmbMesh )].drawn )
+				continue;
+			pcmbSkipped++;
+			if ( fated.contains( p.ref ) )
+				continue;
+			fated.insert( p.ref );
+			const int row = refTable.indexOfForm( p.ref );
+			if ( row >= 0 ) {
+				refTable.setFate( row, CellRefFate::Precombined );
+				pcmbRefsFated++;
+			}
+		}
+	}
+	{
+		const WwPcmb::LoadStats ls = WwPcmb::loadStats();
+		fprintf( stderr, "cell pcmb: %d cells with XCRI, %d mesh keys; %d meshes placed, %d left out stale (a ref moved, "
+			"deleted or disabled after the writer); %d drawn, %d failed to load (their refs stay); %d placements of %d refs "
+			"left to their mesh (%d tagged); %d pairs name no listed mesh; loader: %lld shapes filled, %lld refused, %lld "
+			"chunks read, %lld cache hits%s\n", pcmbCells, pcmbKeys, int( pcmbMeshes.size() ), pcmbStale, pcmbDrawn,
+			pcmbFailed, pcmbSkipped, pcmbRefsFated, pcmbTagged, pcmbOrphans, (long long)ls.shapes, (long long)ls.refused,
+			(long long)ls.chunksRead, (long long)ls.chunkHits, pcmbRed ? "; RED=refs: every ref drawn" : "" );
+	}
 	// every model the loop below will ask for, read and parsed on worker threads first
 	CellModelAhead modelsAhead( dataRoot, refsRed != "root" );
 	for ( const Placement & p : placements )
-		if ( p.actorKey.isEmpty() && !p.cable && ( !bakeLean || !soupLeavesOut( p, false ) ) )   // an actor or cable is built, not read
+		if ( p.actorKey.isEmpty() && !p.cable && ( !bakeLean || !soupLeavesOut( p, false ) )   // an actor or cable is built, not read
+			&& ( p.pcmbMesh < 0 || !pcmbMeshes[size_t( p.pcmbMesh )].drawn ) )   // lane PCMB1: drawn by its mesh
 			modelsAhead.want( world, p.base, p.swap );
 	modelsAhead.load();
 	CellSpeed::mark( "models read ahead" );
@@ -4412,11 +4564,13 @@ static bool cellBuild( NifModel * nif, const CellSceneSpec & specAsked, CellChun
 		return true;
 	};
 	for ( const Placement & p : placements ) {
-		const EsmLodBase & lb = world.lodBase( p.base );
+		if ( p.pcmbMesh >= 0 && pcmbMeshes[size_t( p.pcmbMesh )].drawn )
+			continue;   // lane PCMB1: drawn by its precombined mesh
+		const EsmLodBase & lb = p.pcmbModel.isEmpty() ? world.lodBase( p.base ) : pcmbBase;
 		const bool isActor = !p.actorKey.isEmpty();
 		const bool isWeap = !isActor && !p.cable && !lb.model.isEmpty() && weapons.wants( p.base );   // lane MISS1 (GAPLOOK2)
 		// lane CABLES1: each cable's tube is its own (the key names the reference)
-		const QString model = isActor ? p.actorKey
+		const QString model = !p.pcmbModel.isEmpty() ? p.pcmbModel : isActor ? p.actorKey
 			: p.cable ? QStringLiteral( "cable|%1" ).arg( p.ref, 8, 16, QLatin1Char( '0' ) )
 			: isWeap ? QStringLiteral( "weap|%1" ).arg( p.base, 8, 16, QLatin1Char( '0' ) ) : lb.model;
 		if ( model.isEmpty() ) {

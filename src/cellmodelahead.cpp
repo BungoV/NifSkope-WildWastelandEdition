@@ -100,6 +100,19 @@ void CellModelAhead::want( const EsmWorld & world, quint32 base, quint32 swap )
 	jobs_.push_back( std::move( j ) );
 }
 
+void CellModelAhead::wantModel( const QString & model )
+{
+	if ( !on_ || model.isEmpty() )
+		return;
+	const QString key = keyOf( model, nullptr );
+	if ( byKey_.contains( key ) )
+		return;
+	byKey_.insert( key, int( jobs_.size() ) );
+	Job j;
+	j.model = model;
+	jobs_.push_back( std::move( j ) );
+}
+
 void CellModelAhead::load()
 {
 	if ( !on_ || jobs_.empty() )

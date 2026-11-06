@@ -262,6 +262,9 @@ HEADERS += \
 	src/features/weather/precipspec.h \
 	src/gl/progcachekeep.h \
 	src/features/near/cellcull.h \
+	src/features/near/cellpcmb.h \
+	src/features/near/cellpcmbload.h \
+	src/features/near/cellshadowocc.h \
 	src/features/near/cellumbra.h \
 	src/features/water/cellwater.h \
 	src/features/water/cellocean.h \
@@ -613,6 +616,7 @@ SOURCES += \
 	src/features/overlays/overlays.cpp \
 	src/features/weather/cellprecip.cpp \
 	src/features/near/cellcull.cpp \
+	src/features/near/cellpcmbload.cpp \
 	src/features/far-lod/cellfarinst.cpp \
 	src/features/far-ground/cellfarground.cpp \
 	src/features/near/cellumbra.cpp \

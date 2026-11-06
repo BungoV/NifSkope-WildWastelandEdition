@@ -12,6 +12,7 @@ BSD License - see nifskope.h
 #include "lodgengpu.h"
 #include "lodgenao.h"
 #include "cellspeed.h"
+#include "features/near/cellpcmbload.h"	// lane PCMB1: precombined shapes' geometry from the plugin's CSG
 
 #include <QMutex>
 #include <QWaitCondition>
@@ -2253,6 +2254,43 @@ QString lodgenLoadModelKey( const QString & meshPath, const LodgenMaterialSubst 
 	return key;
 }
 
+/* lane PCMB1: one precombined shape (no vertex data in the NIF) filled from the CSG its packed block names, in
+ * WORLD space, LOD0 only (src/features/near/cellpcmb.h). A refusal is said on stderr and the shape stays empty, as
+ * before. */
+static bool lodgenPcmbFill( const QString & dataRoot, const QByteArray & nif, const QVector<qint32> & extra,
+	const QString & meshPath, LodSrcShape & s )
+{
+	WwPcmb::Geometry g;
+	QString why;
+	if ( !WwPcmb::loadShape( dataRoot, nif, extra, g, &why ) ) {
+		fprintf( stderr, "cell pcmb: %s: %s\n", meshPath.toLocal8Bit().constData(), why.toLocal8Bit().constData() );
+		return false;
+	}
+	const int nv = int( g.vertexCount() );
+	if ( nv > 65536 ) {   // Triangle holds 16-bit indices; the shape's own Num Vertices is 16-bit too
+		fprintf( stderr, "cell pcmb: %s: %d vertices do not fit 16-bit indices\n", meshPath.toLocal8Bit().constData(), nv );
+		return false;
+	}
+	s.pos.reserve( nv );
+	s.nrm.reserve( nv );
+	s.tan.reserve( nv );
+	s.uv.reserve( nv );
+	s.col.reserve( nv );
+	for ( int v = 0; v < nv; v++ ) {
+		s.pos.append( Vector3( g.pos[3 * v], g.pos[3 * v + 1], g.pos[3 * v + 2] ) );
+		s.nrm.append( Vector3( g.nrm[3 * v], g.nrm[3 * v + 1], g.nrm[3 * v + 2] ) );
+		s.tan.append( Vector3( g.tan[3 * v], g.tan[3 * v + 1], g.tan[3 * v + 2] ) );
+		s.uv.append( Vector2( g.uv[2 * v], g.uv[2 * v + 1] ) );
+		s.col.append( Color4( g.rgba[4 * v] / 255.0f, g.rgba[4 * v + 1] / 255.0f, g.rgba[4 * v + 2] / 255.0f,
+			g.rgba[4 * v + 3] / 255.0f ) );
+	}
+	s.tris.reserve( int( g.tris.size() / 3 ) );
+	for ( std::size_t t = 0; t + 2 < g.tris.size(); t += 3 )
+		s.tris.append( Triangle( quint16( g.tris[t] ), quint16( g.tris[t + 1] ), quint16( g.tris[t + 2] ) ) );
+	s.colStream = g.colors;
+	return true;
+}
+
 //! Load every shape of a per-object LOD model, transforms applied, textures resolved from its shader property.
 //! Results cached per path.
 const QVector<LodSrcShape> & lodgenLoadModel( const QString & dataRoot,
@@ -2277,6 +2315,7 @@ const QVector<LodSrcShape> & lodgenLoadModel( const QString & dataRoot,
 	// fix.
 
 	QVector<LodSrcShape> shapes;
+	bool pcmbBroken = false;	// lane PCMB1: a precombined shape that could not be filled fails the whole mesh
 	QString path = meshPath;
 	path.replace( QChar( '\\' ), QChar( '/' ) );
 	if ( !path.startsWith( QStringLiteral( "meshes/" ), Qt::CaseInsensitive ) )
@@ -2373,9 +2412,15 @@ const QVector<LodSrcShape> & lodgenLoadModel( const QString & dataRoot,
 				}
 			}
 			QModelIndex iVD = src.getIndex( iShape, "Vertex Data" );
-			if ( !iVD.isValid() )
+			// lane PCMB1: a precombined shape stores no vertices; they come from the CSG, already in world space
+			const bool pcmbShape = !iVD.isValid() && !WwPcmb::redRefs()
+				&& meshPath.contains( QStringLiteral( "precombined" ), Qt::CaseInsensitive );
+			const bool pcmbFilled = pcmbShape
+				&& lodgenPcmbFill( dataRoot, bytes, src.getLinkArray( iShape, "Extra Data List" ), meshPath, s );
+			pcmbBroken |= pcmbShape && !pcmbFilled;
+			if ( !iVD.isValid() && !pcmbFilled )
 				continue;
-			for ( quint32 v = 0; v < numVerts; v++ ) {
+			for ( quint32 v = 0; !pcmbFilled && v < numVerts; v++ ) {
 				QModelIndex row = src.index( int( v ), 0, iVD );
 				const Vector3 p = fullPrec ? src.get<Vector3>( row, "Vertex" )
 					: Vector3( src.get<HalfVector3>( row, "Vertex" ) );
@@ -2388,13 +2433,13 @@ const QVector<LodSrcShape> & lodgenLoadModel( const QString & dataRoot,
 					: Color4( 1, 1, 1, 1 ) );
 			}
 			QModelIndex iTris = src.getIndex( iShape, "Triangles" );
-			if ( iTris.isValid() )
+			if ( !pcmbFilled && iTris.isValid() )
 				s.tris = src.getArray<Triangle>( iTris );
 			NearShapeFacts & nf = s.nearFacts;
 			nf.block = b;
 			nf.name = src.get<QString>( iShape, "Name" );
 			nf.sourceTris = quint32( s.tris.size() );
-			if ( src.blockInherits( iShape, "BSMeshLODTriShape" ) )
+			if ( !pcmbFilled && src.blockInherits( iShape, "BSMeshLODTriShape" ) )   // a filled shape holds LOD0 only
 				nf.lod0Tris = src.get<quint32>( iShape, "LOD0 Size" );
 			nf.modelControllers = modelControllers;
 			nf.modelAnimated = modelControllers > 0;
@@ -2661,6 +2706,13 @@ const QVector<LodSrcShape> & lodgenLoadModel( const QString & dataRoot,
 			if ( !s.tris.isEmpty() )
 				shapes.append( s );
 		}
+	}
+	if ( pcmbBroken && !shapes.isEmpty() ) {
+		/* lane PCMB1: drawing part of a precombined mesh would hide refs whose geometry is missing; with no shapes the
+		 * cell view counts the mesh failed and keeps every one of its refs */
+		fprintf( stderr, "lodgen: model %s: a precombined shape could not be filled, the mesh is dropped\n",
+			path.toLocal8Bit().constData() );
+		shapes.clear();
 	}
 	if ( loaded && shapes.isEmpty() )
 		fprintf( stderr, "lodgen: model %s: loaded, %d blocks, no BSTriShape with vertex data and triangles\n",
