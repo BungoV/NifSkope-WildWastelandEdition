@@ -104,6 +104,9 @@ struct EsmCellPrevis
 	quint32 combinedMeshes = 0, combinedRefs = 0, previsRefs = 0;
 	//! XCRI's refs (each pair's first word, mapped to the load order): the refs a precombined mesh replaced
 	QVector<quint32> combinedRefIds;
+	/*! lane PCMB1: XCRI's mesh keys (meshes\precombined\<cell form & 0xFFFFFF, 8 hex>_<key, 8 hex>_oc.nif) and, parallel
+	 *  to combinedRefIds, the key of the mesh each ref went into (each pair's second word) */
+	QVector<quint32> combinedMeshKeys, combinedRefKeys;
 	//! the winning CELL record's plugin (load-order index) and whether it carries XPRI / VISI
 	quint32 srcFile = 0;
 	bool hasPrevisFields = false;
@@ -115,6 +118,7 @@ struct EsmRefSource
 {
 	quint32 owner = 0, src = 0;
 	bool deleted = false, disabled = false;
+	quint32 form = 0;	//!< lane PCMB1: the REFR's form id (load order), to match XCRI's refs
 	//! the plugin of the first version in the trailing run of versions whose placement
 	//! (DATA, XSCL, deleted/disabled, XESP) equals the winner's (WwPrevisRule::RefSrc::settled)
 	quint32 settled = 0xFFFFFFFFu;

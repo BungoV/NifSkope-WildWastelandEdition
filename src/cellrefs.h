@@ -26,7 +26,8 @@ enum class CellRefFate
 	NoModel,        //!< the base carries no MODL: lights, sounds, primitives
 	Marker,         //!< an editor marker model, and the Markers row is off
 	Projected,      //!< a decal, drawn on the surfaces under it (no shape of its own to pick)
-	Refused         //!< placed content this view names and does not draw (the census says why)
+	Refused,        //!< placed content this view names and does not draw (the census says why)
+	Precombined     //!< lane PCMB1: drawn by its cell's precombined mesh (XCRI), not as itself
 };
 
 /*! One loaded cell of the block (CellSceneSpec::n, odd): one entry per grid position the worldspace

@@ -770,10 +770,10 @@ EsmCellPrevis EsmWorld::cellPrevis( quint32 cellForm ) const
 			 * read from Todd's treat) */
 			if ( quint64( f.size() ) >= 8ULL + 4ULL * ( quint64( out.combinedMeshes ) + quint64( words ) ) ) {
 				for ( quint32 k = 0; k < out.combinedMeshes; k++ )
-					(void)f.readUInt32();
+					out.combinedMeshKeys.append( f.readUInt32() );
 				for ( quint32 k = 0; k + 1 < words; k += 2 ) {
 					out.combinedRefIds.append( esm->mapFormID( *cr, f.readUInt32() ) );
-					(void)f.readUInt32();
+					out.combinedRefKeys.append( f.readUInt32() );	// the mesh key: a hash, not a form id
 				}
 			}
 		} else if ( f == "XPRI" ) {
@@ -841,6 +841,7 @@ QVector<EsmRefSource> EsmWorld::refSources( const QVector<quint32> & groups ) co
 			if ( r->type != GRUP && *r == "REFR" && !seen.contains( r->formID ) ) {
 				seen.insert( r->formID );
 				EsmRefSource s;
+				s.form = r->formID;
 				s.owner = esm->getFormIDFile( r->formID );
 				s.src = r->srcFile;
 				s.disabled = ( r->flags & 0x00000800 ) != 0;

@@ -26,6 +26,8 @@ public:
 	~CellModelAhead();
 	//! One placement: its base's model with its material swap, as the cell builder will ask for it.
 	void want( const EsmWorld & world, quint32 base, quint32 swap );
+	//! lane PCMB1: one model by path with no swap (a precombined mesh has no base).
+	void wantModel( const QString & model );
 	//! Load everything wanted; returns when all of it is in.
 	void load();
 	//! The loader's answer for (model, swap rows) if it was read ahead: `out` and `ok` as the loader gives them.
