@@ -582,6 +582,7 @@
 { "WW_CELL_RTDDGI_CASCADES", 4, "src/features/gi/rtddgicell.cpp:2078 rtddgiCellCascades | hand: the cascades read is a #define Shader::load adds beside WW_CELL_RTDDGI (rtddgiCellCascades); rtddgiCellFrame builds or frees the coarse volumes on its per-frame read (RTXCASCADE1)" },
 { "WW_CELL_RTDDGI_CASCADES_RED", 4, "src/features/gi/rtddgicell.cpp:2076 rtddgiCellCascades | hand: FIX1031B: =one is the one-volume red of the always-on cascades (the Show-menu picker is gone; the count follows the RT quality preset); read by rtddgiCellCascades like WW_CELL_RTDDGI_CASCADES" },
 { "WW_CELL_RTDDGI_DUMP", 0, "src/features/gi/rtddgicell.cpp:941 dumpLive | hand: read by rtddgiCellFrame at the dump point (RTXGI1 M2)" },
+{ "WW_CELL_RTDDGI_GROUND_RED", 0, "src/features/gi/rtddgicell.cpp:394 rtddgiGroundRed | re-read per frame or per call (a)" },
 { "WW_CELL_RTDDGI_INTLEVEL_RED", 0, "src/features/gi/rtddgicell.cpp:393 rtddgiIntLevelRed | re-read per frame or per call (a)" },
 { "WW_CELL_RTDDGI_INTSKY_RED", 0, "src/features/gi/rtddgicell.cpp:400 rtddgiIntSkyRed | re-read per frame or per call (a)" },
 { "WW_CELL_RTDDGI_ONEHALF", 4, "src/gl/glcontext.cpp:564 NifSkopeOpenGLContext::Shader::load | read when the shader programs load (in place: reload shaders)" },

@@ -1,3 +1,12 @@
+## MODULES1 part 20 (2026-11-06): the GI sky ships absolute with a physical ground term, every ray card draws
+- The GI volume's sky ships as the drawn sky's own colour and level (`WW_CELL_RTDDGI_SKY` unset or empty = absolute).
+  Reds: `WW_CELL_RTDDGI_SKY=level` (the old default), `=dalc` (the weather's DALC as it is), `=physical`.
+- In absolute mode the ground's light (-Z) is a Lambertian ground under the same sun and sky: albedo (the .recx
+  `groundAlbedo`, else 0.15) x (direct sun x mu + the sky's +Z), not the weather's DALC. Log line `GI sky -Z:`.
+  Red `WW_CELL_RTDDGI_GROUND_RED=1` = -Z keeps the weather's DALC.
+- Every vanilla ray card draws as in the game (BeamSimple*, BeamSmoky* join *LightBeam*); mist and glow veils stay
+  hidden under our air. Red `WW_CELL_FAKEAIR_BEAM_RED=1` hides them all again.
+
 ## MODULES1 part 19 (2026-11-06): previs ships on, the AO walk culls, the fog lumps read a .dds, the harness window fits
 - Previs (the cell's own rooms, portals and occlusion planes) ships ON outdoors too. Red `WW_CELL_PREVIS_RED=off` = the
   old default (off outdoors, interiors still take it).

@@ -576,6 +576,13 @@ inline float giSkyAbsolute( const float phys[6][3], const float T[3], const floa
 			out[a][c] = ( a == 5 || k <= 0.0f ) ? weather[a][c] : phys[a][c] * k;
 	return k;
 }
+/* MODULES1: the ground's light on -Z, physically: a Lambertian ground of albedo rho under the horizontal irradiance
+ * (direct sun x mu + the sky's +Z) reflects L = rho E / pi, and a down-facing axis gathers pi L = rho E. */
+inline void giSkyGround( const float sun[3], float sunZ, float rho, float out[6][3] )
+{
+	for ( int c = 0; c < 3; c++ )
+		out[5][c] = rho * ( sun[c] * std::max( sunZ, 0.0f ) + out[4][c] );
+}
 /* GITRUTH1: only the LEVEL from the physical sky: the weather's own sky (its colour and its axis shares) times one factor
  * f so +Z takes the physical sky's absolute luminance (giSkyAbsolute's +Z). The level is the input both sky models agree
  * is wrong (direct / diffuse 7.5 against 3.8); the colour is not settled (the CPU single-scatter twin reads +Z R/B 0.87 at

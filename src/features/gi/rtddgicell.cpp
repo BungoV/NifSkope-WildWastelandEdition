@@ -14,6 +14,7 @@
 #include "version.h"
 #include "wwswitch.h"
 #include "features/sky/atmomath.h"    // FIX1101A: giSkyFromPhysical
+#include "features/weather/weatherrecx.h"   // MODULES1: the ground albedo for the GI sky's -Z
 #include "gl/celllights.h"
 #include "gl/cellunits.h"
 #include "gl/celluniform.h"	// lane PERFFIX1: the volume's unit bound without asking the driver
@@ -378,13 +379,20 @@ bool rtddgiGiSkyPhysical()
 
 /* GITRUTH1: WW_CELL_RTDDGI_SKY=level (live): the weather's sky at the physical sky's absolute level against the frame's
  * sun (atmomath giSkyLevel); =absolute: the physical sky's own colour and shares at that level (giSkyAbsolute).
- * LAND5 (GISKYTWIN-FLIP, HOLDS1101's hold): level SHIPS ON (unset or empty = level). Reds: "dalc" (the old default, the
- * weather's DALC as it is), "physical" (the physical colour anchored to the weather's +Z luminance).
+ * MODULES1 (bungo 11-06 "stick to what physically based engines do"): absolute SHIPS ON (unset or empty = absolute), the
+ * drawn sky's own colour and level. Reds: "level" (the old default), "dalc" (the weather's DALC as it is), "physical".
  * 0 none, 1 level, 2 absolute */
 int rtddgiGiSkyAbsolute()
 {
 	const QByteArray v = wwEnvIsSet( "WW_CELL_RTDDGI_SKY" ) ? wwEnv( "WW_CELL_RTDDGI_SKY" ).trimmed().toLower() : QByteArray();
-	return v.isEmpty() || v == "level" ? 1 : v == "absolute" ? 2 : 0;
+	return v.isEmpty() || v == "absolute" ? 2 : v == "level" ? 1 : 0;
+}
+
+//! MODULES1: WW_CELL_RTDDGI_GROUND_RED=dalc = in absolute mode -Z keeps the weather's DALC (the old ground term)
+bool rtddgiGroundRed()
+{
+	const QByteArray v = wwEnvIsSet( "WW_CELL_RTDDGI_GROUND_RED" ) ? wwEnv( "WW_CELL_RTDDGI_GROUND_RED" ).trimmed() : QByteArray();
+	return !v.isEmpty() && v != "0";
 }
 
 //! lane MUSGI1 (11-03): WW_CELL_RTDDGI_INTLEVEL_RED=1 = a sunlit interior's volume takes the weather's DALC as it is
@@ -1864,9 +1872,19 @@ static void volumeFrame( Scene * scene, Cell & c, const CellSpec * spIn, bool du
 			if ( absMode ) {
 				const float k = absMode == 1 ? WwAtmoMath::giSkyLevel( phys, T, sky.sun, sky.amb, mixed )
 				                             : WwAtmoMath::giSkyAbsolute( phys, T, sky.sun, sky.amb, mixed );
-				static float saidK = -1.0f;
-				if ( std::fabs( k - saidK ) > 1e-5f ) {
+				// MODULES1: absolute -Z = a Lambertian ground under the same sun and sky, not the weather's DALC
+				const float rho = wwWeatherRecx().groundAlbedo >= 0.0f ? wwWeatherRecx().groundAlbedo : 0.15f;
+				const bool ground = absMode == 2 && k > 0.0f && !rtddgiGroundRed();
+				if ( ground )
+					WwAtmoMath::giSkyGround( sky.sun, sky.sunTo[2], rho, mixed );
+				static float saidK = -1.0f, saidG = -1.0f;
+				if ( std::fabs( k - saidK ) > 1e-5f || std::fabs( mixed[5][1] - saidG ) > 1e-6f ) {
 					saidK = k;
+					saidG = mixed[5][1];
+					say( c.tag + ( ground ? QStringLiteral( "GI sky -Z: the ground, albedo %1 x (sun + sky on +Z) = %2 %3 %4 (MODULES1)" )
+						.arg( double( rho ), 0, 'f', 3 ).arg( double( mixed[5][0] ), 0, 'f', 4 ).arg( double( mixed[5][1] ), 0, 'f', 4 )
+						.arg( double( mixed[5][2] ), 0, 'f', 4 ) : QStringLiteral( "GI sky -Z: the weather's DALC%1" )
+						.arg( absMode == 2 && rtddgiGroundRed() ? QStringLiteral( " (the red WW_CELL_RTDDGI_GROUND_RED)" ) : QString() ) ) );
 					const float lz = WwAtmoMath::lum( mixed[4] );
 					say( c.tag + QStringLiteral( "sky at the absolute level (GITRUTH1, %4): %1 %5; direct / diffuse "
 						"horizontal %2 (the weather's +Z: %3; IES clear sky ~3.9 at 33.5 deg)" )
