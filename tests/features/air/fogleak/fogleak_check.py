@@ -60,7 +60,7 @@ sys.path.insert(0, os.path.join(TREE, 'tests', 'spells'))
 args = sys.argv[1:]
 red = args[args.index('--red') + 1] if '--red' in args else ''
 only = set(args[args.index('--only') + 1]) if '--only' in args else set('AEBILRSNC')
-REDBIT = {'': 0, 'dalcenv': 1, 'nosungate': 2, 'lightleak': 4, 'nointsungate': 16, 'envscale': 32, 'sun8': 64}[red]
+REDBIT = {'': 0, 'dalcenv': 1, 'nosungate': 2, 'lightleak': 4, 'nointsungate': 16, 'envscale': 32, 'sun8': 64, 'sunheavy': 256}[red]
 SDIR = os.path.join(TREE, 'res', 'shaders')
 
 import shader_link_check as S   # noqa: E402
@@ -102,7 +102,7 @@ SAMPLERS = set(range(0x8B5D, 0x8B65)) | set(range(0x8DC0, 0x8DDA)) | set(range(0
 def build(defines):
     prog = 'cell_volair.prog'
     files = [os.path.join(SDIR, f) for f in
-             [l.split()[1:] for l in open(os.path.join(SDIR, prog)) if l.startswith('shaders')][0]]
+             [l.split()[1:] for l in open(S.shader_path(os.path.join(SDIR, prog))) if l.startswith('shaders')][0]]
     p = S.fn('glCreateProgram', GLuint)()
     for f in files:
         src = S.inject(S.expand(f), defines)   # the loader's define paste (glcontext.cpp Shader::load)

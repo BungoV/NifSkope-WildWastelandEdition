@@ -114,7 +114,8 @@ struct VaState
 	 * (the far grid's tail without the sun's shadow), 16 nointsungate (lane INTGI1: an unlit interior's directional in
 	 * the air without the volume's gate, as before), 32 envscale (lane FOGENV1: the env at the read's own E / pi scale,
 	 * not the flat ambient x the read over the volume's open field), 64 sun8 (FOGLEAK1-COST: the sun's sky visibility
-	 * from all 8 probes of the walk, not the heaviest one's tile) */
+	 * from all 8 probes of the walk, not the heaviest one's tile), 256 sunheavy (MODULES1 AUDIT 3: the heaviest probe's
+	 * tile everywhere, not the sun's shadow map inside the cascades and all 8 probes in their fade band) */
 	int leakRed = 0;
 	// lane DARKAIR1 red WW_CELL_AIR_RED=openenv: outdoors the air's ambient share unoccluded (the flat weather ambient),
 	// as before; shipped: x the sky the ray-traced volume sees up from the froxel (cell_volair.frag airSkyView)
@@ -197,7 +198,7 @@ VaState & vs()
 			s.farOffRed = s.farOffRed || r == "faroff";	// SHAFTS1b
 			s.apStackRed = s.apStackRed || r == "apstack";	// SHAFTS1b
 			s.leakRed |= r == "dalcenv" ? 1 : r == "nosungate" ? 2 : r == "lightleak" ? 4 : r == "nofartailshadow" ? 8
-				: r == "nointsungate" ? 16 : r == "envscale" ? 32 : r == "sun8" ? 64 : r == "intratio" ? 128 : 0;	// lane FOGLEAK1, INTGI1, FOGENV1
+				: r == "nointsungate" ? 16 : r == "envscale" ? 32 : r == "sun8" ? 64 : r == "intratio" ? 128 : r == "sunheavy" ? 256 : 0;	// lane FOGLEAK1, INTGI1, FOGENV1
 			s.askRed = s.askRed || r == "ask";
 			s.sunPcf = s.sunPcf || r == "sunpcf";
 			s.f32 = s.f32 || r == "f32";

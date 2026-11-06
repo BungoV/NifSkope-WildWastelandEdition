@@ -21,7 +21,7 @@
  * keeps the old path as a red bit of volLeakRed (cellvolair.cpp WW_CELL_AIR_RED= dalcenv / nosungate / lightleak) */
 #if defined( WW_CELL_FOGLEAK ) && defined( WW_CELL_RTDDGI )
 #define WW_AIR_LEAK 1
-uniform int volLeakRed;		// 1 dalcenv, 2 nosungate, 4 lightleak, 8 nofartailshadow (lookdev_fog.glsl: volAirFlags 256), 16 nointsungate (INTGI1), 32 envscale (FOGENV1), 64 sun8 (FOGLEAK1-COST)
+uniform int volLeakRed;		// 1 dalcenv, 2 nosungate, 4 lightleak, 8 nofartailshadow (lookdev_fog.glsl: volAirFlags 256), 16 nointsungate (INTGI1), 32 envscale (FOGENV1), 64 sun8 (FOGLEAK1-COST), 256 sunheavy (AUDIT 3)
 uniform vec3 cellDdgiOpenE[6];	// lane FOGENV1: an open probe's irradiance per axis from the volume's own sky (rtddgicell.cpp; 0 = none)
 // lane MODULES1 route (a): the lamps' depth atlas (features/air/airlampatlas.cpp); volLampVis 0 = the probe walk
 uniform int volLampVis;
@@ -203,7 +203,17 @@ float airLeakR = -1.0;
  * cellDdgiRead calls cost 2.3 ms more on the offline 160 x 90 x 64 inject (tests/features/air/fogleak/fogleak_check.py C), this
  * walk 16 fetches a probe instead of 26. Returns fade x the scatter in the ambient's unit (E / pi, as cellLit's
  * gi = cellGiE / pi); fade = the volume's cover (the flat ambient takes 1 - fade, as on the surfaces) */
-vec3 airLeakEnv( vec3 P, vec3 dW, out float fade )
+/* MODULES1 (AUDIT 3): how far the sun's cascades cover posView (their fade, as airLeakSunGate weighs it) */
+float airCsmCover( vec3 posView )
+{
+	if ( !volCsm || -posView.z * csmParams.x > csmParams.y + csmParams.w )
+		return 0.0;
+	float s = clamp( dot( posView, posView ) * csmParams.x * csmParams.x / ( csmParams.y * csmParams.y ), 0.0, 1.0 );
+	float s2 = s * s;
+	return 1.0 - s2 * s2;
+}
+
+vec3 airLeakEnv( vec3 P, vec3 dW, out float fade, float csmCover )
 {
 	fade = 0.0;
 	airLeakSun = 1.0;
@@ -212,6 +222,12 @@ vec3 airLeakEnv( vec3 P, vec3 dW, out float fade )
 	bool needEnv = ( volTerms & 8 ) != 0 && ( volLeakRed & 1 ) == 0;
 	// lane INTGI1 (FOGLEAK1-INT): indoors too (an unlit interior's directional; a sunlit one already shades as outdoors)
 	bool needSun = ( volTerms & 1 ) != 0 && cellHasDir && ( volLeakRed & ( cellInterior ? 18 : 2 ) ) == 0;
+	/* MODULES1 (AUDIT 3): outdoors the sun's own shadow map is the verdict where its cascades fully reach (airLeakSunGate
+	 * returns it there), so no sky read; in their fade band all 8 probes' tiles; past them the heaviest probe's. Red
+	 * sunheavy: the heaviest probe's tile everywhere, as before; red sun8: all 8 everywhere */
+	bool sunHeavy = ( volLeakRed & 256 ) != 0;
+	if ( !cellInterior && ( volLeakRed & 320 ) == 0 && csmCover >= 1.0 )
+		needSun = false;
 	if ( !cellDdgiOn || !( needEnv || needSun ) )
 		return vec3( 0.0 );
 	vec3 sd = needSun ? normalize( cellDirTo ) : vec3( 0.0, 0.0, 1.0 );
@@ -245,7 +261,7 @@ vec3 airLeakEnv( vec3 P, vec3 dW, out float fade )
 		 * the sun's tile at all 8 probes, as before */
 		int pn = -1;
 		float wn = 0.0, svd = 0.0, vdn = 0.0;
-		bool sun8 = ( volLeakRed & 64 ) != 0;
+		bool sun8 = ( volLeakRed & 64 ) != 0 || ( !cellInterior && !sunHeavy && csmCover > 0.0 );
 		for ( int k = 0; k < cellGiLoop8; k++ ) {
 			ivec3 o = ivec3( k % 2, ( k / 2 ) % 2, k / 4 );
 			ivec3 q = min( b + o, Dm.xyz - 1 );
@@ -327,13 +343,7 @@ float airLeakSunGate( vec3 posView, float vis )
 {
 	if ( ( volLeakRed & 2 ) != 0 || airLeakSun >= 1.0 )
 		return vis;
-	float cover = 0.0;
-	if ( volCsm && -posView.z * csmParams.x <= csmParams.y + csmParams.w ) {
-		float s = clamp( dot( posView, posView ) * csmParams.x * csmParams.x / ( csmParams.y * csmParams.y ), 0.0, 1.0 );
-		float s2 = s * s;
-		cover = 1.0 - s2 * s2;
-	}
-	return mix( min( vis, airLeakSun ), vis, cover );
+	return mix( min( vis, airLeakSun ), vis, airCsmCover( posView ) );
 }
 
 /* fix 3: does light position Lp reach P, by the volume's depth: the 8 probes round P weighted as the read weighs them
@@ -882,7 +892,7 @@ vec3 airRest( vec3 posView, vec3 dirView, float z, float sA, float sB, out vec3 
 	// env cover (airLightsQ too, after this call)
 #ifdef WW_AIR_LEAK
 	float leakFade;
-	vec3 Jddgi = airLeakEnv( P, dW, leakFade );	// lane FOGLEAK1 fixes 1 + 2 (also sets airLeakSun)
+	vec3 Jddgi = airLeakEnv( P, dW, leakFade, airCsmCover( posView ) );	// lane FOGLEAK1 fixes 1 + 2 (also sets airLeakSun)
 #endif
 	bool wantGi = ( volTerms & 4 ) != 0 && cellGiOn && ( volRed & 2 ) == 0;
 	bool ambDalc = cellInterior ? cellHasDalc : cellExtDalc;
@@ -974,7 +984,7 @@ vec3 airRest( vec3 posView, vec3 dirView, float z, float sA, float sB, out vec3 
 #ifndef WW_CELL_AIR_BOUNCE
 #ifdef WW_AIR_LEAK
 	float leakFade;
-	vec3 Jddgi = airLeakEnv( P, dW, leakFade );	// lane FOGLEAK1 fixes 1 + 2 (also sets airLeakSun)
+	vec3 Jddgi = airLeakEnv( P, dW, leakFade, airCsmCover( posView ) );	// lane FOGLEAK1 fixes 1 + 2 (also sets airLeakSun)
 #endif
 	bool wantGi = ( volTerms & 4 ) != 0 && cellGiOn && ( volRed & 2 ) == 0;
 	bool ambDalc = cellInterior ? cellHasDalc : cellExtDalc;
