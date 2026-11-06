@@ -280,8 +280,8 @@ class Scene:
         return ms
 
 
-REFL = (open(os.path.join(SD, 'water_refl.glsl'), encoding='latin-1').read() + chr(10)
-        + open(os.path.join(SD, 'water_ssrbend.glsl'), encoding='latin-1').read())
+REFL = (open(slc.shader_path(os.path.join(SD, 'water_refl.glsl')), encoding='latin-1').read() + chr(10)   # MODULES1: features/water
+        + open(slc.shader_path(os.path.join(SD, 'water_ssrbend.glsl')), encoding='latin-1').read())
 COMPOSE = '''#version 410 core
 uniform mat4 projectionMatrix;
 uniform mat3 v2w;

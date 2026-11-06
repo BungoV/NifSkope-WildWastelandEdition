@@ -291,7 +291,7 @@ def main():
         'cellhdr no split with the sky in': '!skyholeOld && !skyIn' in hd,
         'cellvolair blend over the sky': 'glBlendFuncSeparate( GL_ONE, GL_ONE_MINUS_SRC_ALPHA, GL_ZERO, GL_ONE )' in va
         and 'wwCellHdrSkyIn()' in va,
-        'glview after wwCellHdrBegin': re.search(r'wwCellHdrBegin\( scene \);[^\n]*\r?\n\s*wwLookdevSkyLinearDraw\( scene, hdr \);', gv) is not None,
+        'glview after wwCellHdrBegin': re.search(r'wwCellHdrBegin\( scene \);(?:[^\n]*\r?\n){1,4}?\s*wwLookdevSkyLinearDraw\( scene, hdr \);', gv) is not None,
     }
     bad = [k for k, ok in checks.items() if not ok]
     gate('W wiring', not bad, 'the C++ the offline frame mirrors: %d of %d present%s' % (

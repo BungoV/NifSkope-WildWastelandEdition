@@ -44,7 +44,9 @@ class Sky:
         self.P = A.params(haze=haze)
         P = self.P
         self.base = dict(atRay=tuple(P['ray']), atMieS=(P['mieS'],), atMieE=(P['mieE'],), atOzone=tuple(P['oz']),
-                         atG=(P['g'],), atHaze=(P['hazeE'], P['hazeH'], P['hazeMid']))
+                         atG=(P['g'],), atHaze=(P['hazeE'], P['hazeH'], P['hazeMid']),
+                         # WEATHERRECX1 haze optics at their grey defaults (atmomath.h HazeOptics); unset = 0 = no haze
+                         atHazeAlbedo=(3.996 / 4.40,) * 3, atHazeSpec=(1.0, 1.0, 1.0))
         self.pt = C.build(sdir, 'atmo_transmittance.prog')
         self.pm = C.build(sdir, 'atmo_ms.prog')
         self.pv = C.build(sdir, 'atmo_skyview.prog')
