@@ -17,6 +17,7 @@
 #include "features/ao/cellaodecalgl.h"	// lane AODECAL1
 #include "features/ao/cellaomethod.h"
 #include "features/near/cellcull.h"	// wwCellDecalMappedHas
+#include "features/near/cellgpucull.h"	// MODULES1 part 19: GpuDrivenB::cameraWalk
 #include "features/shared/cellpasstime.h"	// sub-stage timers
 #include "features/near/celldrawstate.h"
 #include "gl/lookdevstage.h"
@@ -895,7 +896,10 @@ void wwCellAoPass( Scene * scene, bool run )
 			PassTime::DrawCpuScope cpuT( PassTime::CpuAoCollect );	// lane MODULES1
 			if ( collectCut )
 				wwOpaqueCutArm( true, "ao-collect" );
+			// MODULES1 part 19: step B's frustum / cone / Hi-Z cull in this walk too (red WW_GPUDRIVEN_B_RED=aopass)
+			GpuDrivenB::cameraWalk( true );
 			scene->collectShapes( second );
+			GpuDrivenB::cameraWalk( false );
 			if ( collectCut )
 				wwOpaqueCutArm( false, "ao-collect" );
 		}

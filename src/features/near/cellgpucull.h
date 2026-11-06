@@ -23,7 +23,9 @@
  * WW_GPUDRIVEN_B_FRUSTUM=0. Reds (WW_GPUDRIVEN_B_RED): hard = the occlusion test reads the sphere's centre depth
  * instead of its nearest (culls what peeks out: the pixel gate must FAIL); nocull = all of the work, nothing culled
  * (the exact pixels at the new cost); atocc = an alpha-testing draw stands in the prepass again (lane SIGNDROP1:
- * what is seen through its cut-outs is culled; the Concord c3 SALE sign). WW_GPUDRIVEN_CENSUS=1 adds "gpudriven b:"
+ * what is seen through its cut-outs is culled; the Concord c3 SALE sign); aopass = the obscurance pass's walk (the
+ * frame's depth / g-buffer pre-pass) sits out, the rule before MODULES1 part 19 (it now culls with the occluders the
+ * main walk learned, in a prepass target of its own). WW_GPUDRIVEN_CENSUS=1 adds "gpudriven b:"
  * lines: shapes, occluders, clusters, culled by frustum / cone / occlusion, triangles, draws, occluders refused for
  * their alpha test (alphatest-refused), and the prepass / Hi-Z / cull GPU ms. */
 
@@ -39,7 +41,7 @@ namespace GpuDrivenB
 
 bool on();
 
-//! Scene::drawShapes: the walk that draws the camera's frame (AO, reflections and probes have their own walks).
+//! Scene::drawShapes and the obscurance pass's walk: the camera's walks (reflections and probes have their own).
 void cameraWalk( bool on );
 
 //! BSShape::drawShapes, queuing into Opaque / TwoSided / AlphaTest: what the culling needs that is not public.

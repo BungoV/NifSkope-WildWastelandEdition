@@ -236,10 +236,13 @@ CullState & st()
 			s.previsPinned = true;
 			s.previsOn = pv != "0";
 		} else {
-			s.previsOn = QSettings().value( QStringLiteral( "WW/CellPrevis" ), false ).toBool();
+			// MODULES1 part 19 (RESUME 19 item 5): ships ON
+			s.previsOn = QSettings().value( QStringLiteral( "WW/CellPrevis" ), true ).toBool();
 		}
 		s.previsRed = wwEnv( "WW_CELL_PREVIS_RED" ).trimmed() == "casters" ? 1 : 0;
 		s.previsAnyView = wwEnv( "WW_CELL_PREVIS_RED" ).trimmed() == "anyview";	// lane PERFFIX4
+		if ( wwEnv( "WW_CELL_PREVIS_RED" ).trimmed() == "off" )	// the old default (row off, interiors still take it), whatever the row or pin
+			s.previsOn = false, s.previsPinned = false;
 		s.umbraOn = wwEnv( "WW_CELL_UMBRA" ).trimmed() != "0";
 		s.umbraRed = wwEnv( "WW_CELL_UMBRA_RED" ).trimmed() == "casters" ? 1 : 0;
 		s.umbraStaleRed = wwEnv( "WW_CELL_UMBRA_RED" ).trimmed() == "stale";	// lane PERFFIX4: use stale tomes too

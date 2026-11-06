@@ -1,3 +1,18 @@
+## MODULES1 part 19 (2026-11-06): previs ships on, the AO walk culls, the fog lumps read a .dds, the harness window fits
+- Previs (the cell's own rooms, portals and occlusion planes) ships ON outdoors too. Red `WW_CELL_PREVIS_RED=off` = the
+  old default (off outdoors, interiors still take it).
+- The obscurance pass's walk (the frame's depth / g-buffer pre-pass) culls with step B's frustum, cone and Hi-Z test,
+  using the occluders the main walk learned, in a prepass target of its own; it never learns, times or counts. Census
+  line `b ao`. Red `WW_GPUDRIVEN_B_RED=aopass` = the walk sits out, as before.
+- The near air's drifting lumps read `Textures\FO4CS\Fog\GroundFogNoise.dds` (64^3 R8, tileable), or the file the
+  weather's `.recx` groundFog `noiseTexture` links (spec 1.2). The default was written by `tools/fognoise/fognoise_dds.cpp`
+  from the generator the viewer used (`src/features/air/fognoise.h`); its texels equal it byte for byte. Speed and
+  direction stay the weather's wind. A groundFog block with only `noiseTexture` keeps the derived layer. Log
+  `cell fog noise: <source> (...)` on change. Red `WW_CELL_FOGDRIFT_RED=codenoise` = the texture built in code.
+- A harness window asked taller than its screen is clamped to the screen less its frame (Windows refused 1920x1080, so
+  the first frame after every open was 1920x1045 and the rest 1920x1026). Log `harness-window clamp:`. Red
+  `WW_HARNESS_WINDOW_RED=noclamp`.
+
 ## MODULES1 part 18c (2026-11-06): the air's lamp PCF compiles in the leak program
 - The 8-tap lamp-atlas sum reused the name `v` of the function's cube-face axis: the all-on air program (FOGLEAK + RTDDGI)
   was refused by the driver. Renamed. Measured after the fix (Memory Den fog 22:00, 1080p, all on, 30-frame medians):

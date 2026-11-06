@@ -34,6 +34,7 @@ BSD License - see nifskope.h
 #include <cstdio>
 #include <cstring>
 #include <string>
+#include <utility>
 #include <vector>
 
 namespace GpuDrivenB
@@ -48,6 +49,8 @@ struct Switches
 	bool on = true, cone = true, occ = true, frustum = true, hard = false, nocull = false, atocc = false;
 	// lane PERFFIX4: timer = the census read back BEFORE the closing timestamp, in the same frame (the old order)
 	bool timer = false;
+	// MODULES1 part 19: aopass = the obscurance pass's walk sits out (the old rule: no frustum / cone / Hi-Z cull there)
+	bool aoRed = false;
 	Switches()
 	{
 		on = qEnvironmentVariable( "WW_GPUDRIVEN_B", QStringLiteral( "1" ) ).trimmed() != QLatin1String( "0" );
@@ -60,6 +63,7 @@ struct Switches
 			nocull = nocull || r.trimmed() == QLatin1String( "nocull" );
 			atocc = atocc || r.trimmed() == QLatin1String( "atocc" );
 			timer = timer || r.trimmed() == QLatin1String( "timer" );
+			aoRed = aoRed || r.trimmed() == QLatin1String( "aopass" );
 		}
 	}
 };
@@ -185,6 +189,10 @@ struct Gpu
 	GLuint fbo = 0, depthTex = 0;
 	int w = 0, h = 0, samples = -1;
 	GLenum depthFmt = 0;
+	// MODULES1 part 19: the obscurance walk's own prepass target (its size / samples / format), swapped in for that walk
+	GLuint aoFbo = 0, aoDepthTex = 0;
+	int aoW = 0, aoH = 0, aoSamples = -1;
+	GLenum aoDepthFmt = 0;
 	GLuint hiz = 0, meshlets = 0, jobs = 0, items = 0, cmds = 0, census = 0;
 	std::size_t hizBytes = 0, jobsBytes = 0, itemsBytes = 0, cmdsBytes = 0;
 	std::size_t mCap = 0, mUsed = 0, mGarbage = 0;
@@ -613,7 +621,7 @@ const Cluster * clusters( Gpu & G, Scene * scene, const Shape * sh, std::uint32_
 bool cameraPass( Scene * scene )
 {
 	return sw().on && GpuDriven::mainPass() && scene && scene->renderer && !scene->selecting && wwCellHdrActive()
-		&& !wwCellAoInPass() && !wwCellSsrInPass() && !wwCellImageSpaceIsMeasuring() && !wwCellProbePass( scene )
+		&& ( !wwCellAoInPass() || !sw().aoRed ) && !wwCellSsrInPass() && !wwCellImageSpaceIsMeasuring() && !wwCellProbePass( scene )
 		&& !wwCellAlbedoProbePass( scene );
 }
 
@@ -774,11 +782,26 @@ void prepare( Scene * scene )
 	}
 	Gpu & G = *gp;
 	G43 * g = G.g;
+	/* MODULES1 part 19: the obscurance pass (the frame's depth / g-buffer pre-pass, the same camera) culls with the
+	 * occluders the main walk learned; it never learns, never times and never counts (the census stays the main walk's) */
+	const bool aoWalk = wwCellAoInPass();
+	const auto swapTarget = [&G]() {
+		std::swap( G.fbo, G.aoFbo );
+		std::swap( G.depthTex, G.aoDepthTex );
+		std::swap( G.w, G.aoW );
+		std::swap( G.h, G.aoH );
+		std::swap( G.samples, G.aoSamples );
+		std::swap( G.depthFmt, G.aoDepthFmt );
+	};
+	if ( aoWalk )
+		swapTarget();
 	QElapsedTimer cpu;
 	if ( GpuDriven::census() )
 		cpu.start();
-	f.frame++;
-	G.frame++;
+	if ( !aoWalk ) {
+		f.frame++;
+		G.frame++;
+	}
 	f.flushing = true;
 	// lane STREAMMEM1: shapes unseen for 600 frames (cells that left) leave the learned table; a lookup needs one
 	// seen within 2 frames, so nothing drawn changes, and a new shape at a freed address inherits nothing
@@ -825,7 +848,7 @@ void prepare( Scene * scene )
 			G.qPending = false;
 		}
 	}
-	const bool timed = GpuDriven::census() && !G.qPending;
+	const bool timed = GpuDriven::census() && !G.qPending && !aoWalk;
 	if ( timed )
 		g->glQueryCounter( G.q[0], GL_TIMESTAMP );
 
@@ -1044,12 +1067,13 @@ void prepare( Scene * scene )
 
 	/* lane PERFFIX4: the census of the LAST frame's cull, read now (a frame late) so that no readback waits on this
 	 * frame's dispatch, and the closing timestamp brackets only the GPU work. */
-	if ( G.censusPending && G.census ) {
+	if ( G.censusPending && G.census && !aoWalk ) {
 		g->glBindBuffer( GL_SHADER_STORAGE_BUFFER, G.census );
 		g->glGetBufferSubData( GL_SHADER_STORAGE_BUFFER, 0, 32, f.counts );
 		g->glBindBuffer( GL_SHADER_STORAGE_BUFFER, 0 );
 	}
-	G.censusPending = false;
+	if ( !aoWalk )
+		G.censusPending = false;
 	// 3. the cull: one command per cluster, in the shapes' order
 	if ( !items.empty() ) {
 		stream( g, G.jobs, G.jobsBytes, jobs.size() * sizeof( JobGpu ), jobs.data() );
@@ -1057,7 +1081,8 @@ void prepare( Scene * scene )
 		stream( g, G.cmds, G.cmdsBytes, ( items.size() / 2 ) * sizeof( GpuDriven::DrawCmd ), nullptr );
 		const std::uint32_t zero[8] = {};
 		std::size_t censusBytes = G.census ? 32 : 0;
-		stream( g, G.census, censusBytes, 32, zero );
+		if ( !aoWalk || !G.census )	// the main walk's pending counts are not zeroed under it
+			stream( g, G.census, censusBytes, 32, zero );
 		if ( !G.hiz ) {	// bound even when occlusion sits out (never read then)
 			g->glGenBuffers( 1, &G.hiz );
 			g->glBindBuffer( GL_SHADER_STORAGE_BUFFER, G.hiz );
@@ -1098,7 +1123,7 @@ void prepare( Scene * scene )
 		g->glUniform1iv( g->glGetUniformLocation( p, "lvlOff" ), 16, lvlOff );
 		g->glUniform2iv( g->glGetUniformLocation( p, "lvlDim" ), 16, lvlDim );
 		const int mode = ( occ ? 1 : 0 ) | ( sw().cone ? 2 : 0 ) | ( sw().frustum ? 4 : 0 ) | ( sw().hard ? 8 : 0 )
-			| ( sw().nocull ? 16 : 0 ) | ( GpuDriven::census() ? 32 : 0 );
+			| ( sw().nocull ? 16 : 0 ) | ( GpuDriven::census() && !aoWalk ? 32 : 0 );
 		g->glUniform1i( g->glGetUniformLocation( p, "mode" ), mode );
 		// a few float steps at depth 1 plus the 24-bit step: the prepass and the frame may round apart
 		g->glUniform1f( g->glGetUniformLocation( p, "depthEps" ), 4e-6f );
@@ -1107,14 +1132,15 @@ void prepare( Scene * scene )
 		for ( GLuint b = 0; b < 6; b++ )
 			g->glBindBufferBase( GL_SHADER_STORAGE_BUFFER, b, 0 );
 		g->glUseProgram( 0 );
-		if ( GpuDriven::census() && sw().timer ) {	// the red: read now, before the closing stamp (a CPU round trip)
+		if ( aoWalk ) {
+		} else if ( GpuDriven::census() && sw().timer ) {	// the red: read now, before the closing stamp (a CPU round trip)
 			g->glBindBuffer( GL_SHADER_STORAGE_BUFFER, G.census );
 			g->glGetBufferSubData( GL_SHADER_STORAGE_BUFFER, 0, 32, f.counts );
 			g->glBindBuffer( GL_SHADER_STORAGE_BUFFER, 0 );
 		} else if ( GpuDriven::census() ) {
 			G.censusPending = true;	// read at the next frame's cull, before the buffer is zeroed
 		}
-	} else {
+	} else if ( !aoWalk ) {
 		std::fill( std::begin( f.counts ), std::end( f.counts ), 0u );
 	}
 	if ( timed ) {
@@ -1123,9 +1149,11 @@ void prepare( Scene * scene )
 	}
 	r->stopProgram();
 	restore( g, S );
+	if ( aoWalk )
+		swapTarget();
 
 	// clusters of shapes gone for 600 frames leave the arena; it is rebuilt once they are most of it
-	if ( ( G.frame % 600 ) == 0 ) {
+	if ( !aoWalk && ( G.frame % 600 ) == 0 ) {
 		for ( auto it = G.clusters.begin(); it != G.clusters.end(); ) {
 			if ( G.frame - it->lastFrame > 600 ) {
 				G.mGarbage += it->ok ? it->data.size() : 0;
@@ -1204,13 +1232,13 @@ void learn( Shape * sh, const void * program )
 bool takes( const Shape * sh )
 {
 	const Frame & f = fr();
-	return f.flushing && !wwCellAoInPass() && !wwCellSsrInPass() && f.recs.contains( const_cast<Shape *>( sh ) );
+	return f.flushing && ( !wwCellAoInPass() || !sw().aoRed ) && !wwCellSsrInPass() && f.recs.contains( const_cast<Shape *>( sh ) );
 }
 
 bool draw( Scene * scene, Shape * sh, qsizetype numTriangles )
 {
 	Frame & f = fr();
-	if ( !f.flushing || wwCellAoInPass() || wwCellSsrInPass() )
+	if ( !f.flushing || ( wwCellAoInPass() && sw().aoRed ) || wwCellSsrInPass() )
 		return false;
 	auto it = f.recs.find( sh );
 	if ( it == f.recs.end() )
@@ -1256,7 +1284,11 @@ bool draw( Scene * scene, Shape * sh, qsizetype numTriangles )
 void finish()
 {
 	Frame & f = fr();
-	if ( f.flushing && GpuDriven::census() ) {
+	if ( f.flushing && GpuDriven::census() && wwCellAoInPass() ) {	// MODULES1 part 19: the obscurance walk's own line
+		GpuDriven::censusLine( "b ao", QStringLiteral( "%1 shapes %2 candidates %3 occluders %4 fallback %5 tris %6 multidraws %7 "
+			"rangedraws %8" ).arg( f.why ).arg( f.shapes ).arg( f.candidates ).arg( f.occluders ).arg( f.fallback )
+			.arg( f.trisKept ).arg( f.mdi ).arg( f.rangeDraws ) );
+	} else if ( f.flushing && GpuDriven::census() ) {
 		const Gpu * gp = gpus().contains( QOpenGLContext::currentContext() ) ? &gpus()[QOpenGLContext::currentContext()] : nullptr;
 		GpuDriven::censusLine( "b", QStringLiteral( "%1 shapes %2 candidates %3 occluders %4 fallback %5 clusters %6 visible %7 "
 			"frustum %8 cone %9 occluded %10 tris %11/%12 multidraws %13 commands %14 rangedraws %15 alphatest-refused %16" )

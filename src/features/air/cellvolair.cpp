@@ -35,6 +35,7 @@ BSD License - see nifskope.h
 #include "features/weather/esmweather.h"
 #include "harnesswindow.h"
 #include "recx.h"
+#include "features/air/fognoise.h"	// MODULES1 part 19: the lumps' texture file
 
 #include <QDebug>
 #include <QElapsedTimer>
@@ -275,7 +276,7 @@ struct VaDrift
 {
 	bool loaded = false, on = false, pinned = false;
 	quint64 liveGen = 0;		// fix TDFIX2: a live set of WW_CELL_FOGDRIFT* re-reads them
-	int red = 0;				// 2 smooth (no noise), 3 wobble (the pre-FOGWIND1 wind law), 4 nosun, 5 onesun, 6 puffonly
+	int red = 0;				// 2 smooth (no noise), 3 wobble (the pre-FOGWIND1 wind law), 4 nosun, 5 onesun, 6 puffonly, 7 codenoise
 	float amp = 0.0f;			// lane WEATHERBLEND4: the last air pass's amplitude (0: smooth), for the surfaces and the puffs
 	bool timePinned = false;
 	double tPin = 0.0;
@@ -286,6 +287,8 @@ struct VaDrift
 	bool moving = false;		// the last pass drew moving lumps (the view keeps repainting)
 	std::vector<quint8> tex;
 	float mean = 0.5f, span = 0.5f;
+	int texN = 0;				// MODULES1 part 19: tex's edge (texels a side)
+	QString texWant, texFrom;	// the source key last resolved, and what tex holds ("code" or the file's path)
 	QString note = QStringLiteral( "off" );
 };
 
@@ -311,7 +314,7 @@ VaDrift & vd()
 			d.on = QSettings().value( QStringLiteral( "WW/VolAirDrift" ), false ).toBool();
 		}
 		const QByteArray red = qgetenv( "WW_CELL_FOGDRIFT_RED" ).trimmed();
-		d.red = red == "smooth" ? 2 : red == "wobble" ? 3 : red == "nosun" ? 4 : red == "onesun" ? 5 : red == "puffonly" ? 6 : 0;	// 5, 6: WEATHERBLEND5
+		d.red = red == "smooth" ? 2 : red == "wobble" ? 3 : red == "nosun" ? 4 : red == "onesun" ? 5 : red == "puffonly" ? 6 : red == "codenoise" ? 7 : 0;	// 5, 6: WEATHERBLEND5; 7: MODULES1 part 19
 		bool ok = false;
 		const double t = qEnvironmentVariable( "WW_CELL_FOGDRIFT_T" ).toDouble( &ok );
 		if ( ok ) {	// a fixed clock (the shots' frames): the drift integrated from 0 to t in fixed steps
@@ -330,58 +333,56 @@ int vaDriftRedBits( const VaDrift & d )
 	return d.red == 5 ? 1 : d.red == 6 ? 2 : 0;
 }
 
-// tileable gradient noise at (x, y, z) in lattice cells, period P cells
-float vaGrad( float x, float y, float z, int P )
-{
-	auto hash = []( int i, int j, int k ) {
-		std::uint32_t h = std::uint32_t( i ) * 73856093u ^ std::uint32_t( j ) * 19349663u ^ std::uint32_t( k ) * 83492791u;
-		h ^= h >> 13;
-		h *= 0x5bd1e995u;
-		return h ^ ( h >> 15 );
-	};
-	static const float g[12][3] = { { 1, 1, 0 }, { -1, 1, 0 }, { 1, -1, 0 }, { -1, -1, 0 }, { 1, 0, 1 }, { -1, 0, 1 },
-		{ 1, 0, -1 }, { -1, 0, -1 }, { 0, 1, 1 }, { 0, -1, 1 }, { 0, 1, -1 }, { 0, -1, -1 } };
-	const int x0 = int( std::floor( x ) ), y0 = int( std::floor( y ) ), z0 = int( std::floor( z ) );
-	const float fx = x - float( x0 ), fy = y - float( y0 ), fz = z - float( z0 );
-	auto fade = []( float t ) { return t * t * t * ( t * ( t * 6.0f - 15.0f ) + 10.0f ); };
-	float r = 0.0f;
-	for ( int c = 0; c < 8; c++ ) {
-		const int dx = c & 1, dy = ( c >> 1 ) & 1, dz = ( c >> 2 ) & 1;
-		const float * v = g[hash( ( x0 + dx ) % P, ( y0 + dy ) % P, ( z0 + dz ) % P ) % 12];
-		const float d = v[0] * ( fx - float( dx ) ) + v[1] * ( fy - float( dy ) ) + v[2] * ( fz - float( dz ) );
-		r += d * ( dx ? fade( fx ) : 1.0f - fade( fx ) ) * ( dy ? fade( fy ) : 1.0f - fade( fy ) ) * ( dz ? fade( fz ) : 1.0f - fade( fz ) );
-	}
-	return r;
-}
-
-// the 64^3 texture: two octaves (4 and 8 lattice cells across), bytes over their own range; mean and span measured
+// MODULES1 part 19 red codenoise: the texture generated in code, as before the file (fognoise.h wrote the file from it)
 void vaNoiseBuild( VaDrift & d )
 {
-	const int n = kNoiseN;
-	std::vector<float> v( size_t( n ) * n * n );
-	float lo = 1e30f, hi = -1e30f;
-	for ( int k = 0; k < n; k++ )
-		for ( int j = 0; j < n; j++ )
-			for ( int i = 0; i < n; i++ ) {
-				const float x = ( float( i ) + 0.5f ) / float( n ), y = ( float( j ) + 0.5f ) / float( n ), z = ( float( k ) + 0.5f ) / float( n );
-				const float f = vaGrad( x * 4.0f, y * 4.0f, z * 4.0f, 4 ) + 0.5f * vaGrad( x * 8.0f + 0.31f, y * 8.0f + 0.17f, z * 8.0f + 0.53f, 8 );
-				v[( size_t( k ) * n + j ) * n + i] = f;
-				lo = std::min( lo, f );
-				hi = std::max( hi, f );
+	WwFogNoise::build( d.tex );
+	WwFogNoise::stats( d.tex, d.mean, d.span );
+	d.texN = WwFogNoise::kN;
+}
+
+/* MODULES1 part 19: the lumps' texture. The weather's groundFog "noiseTexture" (a path under Data\Textures), else the
+ * shipped default; the first .recx root holding the file wins. False: neither found or neither a cubic R8 volume .dds
+ * (the caller builds the code noise). `why` names the source or the miss. */
+bool vaNoiseLoad( const QStringList & roots, const QString & link, VaDrift & d, QString & why )
+{
+	static const QString kDefault = QStringLiteral( "FO4CS/Fog/GroundFogNoise.dds" );
+	why.clear();
+	for ( int pick = 0; pick < 2; pick++ ) {
+		QString rel = pick == 0 ? link : kDefault;
+		if ( rel.isEmpty() )
+			continue;
+		rel.replace( QLatin1Char( '\\' ), QLatin1Char( '/' ) );
+		while ( rel.startsWith( QLatin1Char( '/' ) ) )
+			rel.remove( 0, 1 );
+		if ( rel.startsWith( QLatin1String( "textures/" ), Qt::CaseInsensitive ) )
+			rel.remove( 0, 9 );
+		bool refused = false;
+		for ( const QString & r : roots ) {
+			const QString p = r + QStringLiteral( "/Textures/" ) + rel;
+			QFile f( p );
+			if ( !f.open( QIODevice::ReadOnly ) )
+				continue;
+			refused = true;
+			const QByteArray b = f.readAll();
+			int n = 0;
+			std::vector<std::uint8_t> tex;
+			if ( !WwFogNoise::ddsRead( reinterpret_cast<const std::uint8_t *>( b.constData() ), std::size_t( b.size() ), n, tex ) ) {
+				why += QStringLiteral( "%1 refused(not a cubic R8 volume .dds) " ).arg( p );
+				break;
 			}
-	d.tex.resize( v.size() );
-	double sum = 0.0;
-	int bmin = 255, bmax = 0;
-	for ( size_t i = 0; i < v.size(); i++ ) {
-		const int b = int( std::lround( ( v[i] - lo ) / std::max( hi - lo, 1e-6f ) * 255.0f ) );
-		d.tex[i] = quint8( b );
-		sum += b;
-		bmin = std::min( bmin, b );
-		bmax = std::max( bmax, b );
+			d.tex.assign( tex.begin(), tex.end() );
+			WwFogNoise::stats( d.tex, d.mean, d.span );
+			d.texN = n;
+			d.texFrom = p;
+			why += pick == 0 ? QStringLiteral( "linked " ) : QStringLiteral( "default " );
+			why += p;
+			return true;
+		}
+		if ( !refused )
+			why += QStringLiteral( "%1 not found " ).arg( rel );
 	}
-	const double mean = sum / double( v.size() );
-	d.mean = float( mean / 255.0 );
-	d.span = float( std::max( mean - bmin, bmax - mean ) / 255.0 );
+	return false;
 }
 
 /* the wind's offsets at time t (fixed steps of at most 1/30 s; a pinned clock restarts from 0, run to run identical).
@@ -870,6 +871,8 @@ struct VaLayer
 	QString recx = QStringLiteral( "none" );	// the census: rung:file of the entry applied, or why none
 	QString conflict;	// "conflict: <losers>" (one provider claimed it twice) or "overrides: <losers>", "" when alone
 	bool derived = false;	// FOGHEIGHT1: the layer came from the record (vaDerived): the caller keeps the street density
+	QString noiseLink;		// MODULES1 part 19: the entry's groundFog "noiseTexture" ("": the shipped default)
+	QStringList noiseRoots;	// the .recx roots it resolves under ("": the shipped files' only)
 };
 
 double vaB( double z, double z0, double invH )
@@ -1064,7 +1067,8 @@ void vaGround( const float K[6][4], const VaMedium & M, bool interior, bool igno
 	}
 	const quint32 localId = ( formID >> 24 ) == 0xFEu ? ( formID & 0xFFFu ) : ( formID & 0xFFFFFFu );
 	vaRecxCensus( files, dataDir );
-	const WwRecxHit hit = wwRecxFind( wwRecxRoots( files, dataDir ), files, QStringLiteral( "Weathers" ), QStringLiteral( "weather" ),
+	L.noiseRoots = wwRecxRoots( files, dataDir );
+	const WwRecxHit hit = wwRecxFind( L.noiseRoots, files, QStringLiteral( "Weathers" ), QStringLiteral( "weather" ),
 		owner, localId, edid, QStringLiteral( "groundFog" ) );
 	if ( !hit.ok ) {
 		vaDerived( M, QStringLiteral( "none(no entry for %1|0x%2 %3)" ).arg( owner ).arg( localId, 8, 16, QLatin1Char( '0' ) ).arg( edid ), L );
@@ -1075,6 +1079,19 @@ void vaGround( const float K[6][4], const VaMedium & M, bool interior, bool igno
 		L.conflict = QStringLiteral( "%1 %2" ).arg( hit.conflict ? QStringLiteral( "conflict:" ) : QStringLiteral( "overrides:" ),
 			hit.overridden.join( QStringLiteral( ", " ) ) );
 	const QJsonObject g = hit.block;
+	// MODULES1 part 19: "noiseTexture" (any case) links the lumps' texture; a block with only that keeps the derived layer
+	bool layerKeys = false;
+	for ( auto it = g.begin(); it != g.end(); ++it ) {
+		if ( it.key().compare( QStringLiteral( "noiseTexture" ), Qt::CaseInsensitive ) == 0 )
+			L.noiseLink = it.value().toString().trimmed();
+		else if ( it.key() == QStringLiteral( "thickness" ) || it.key() == QStringLiteral( "strength" ) || it.key() == QStringLiteral( "hours" ) )
+			layerKeys = true;
+	}
+	if ( !layerKeys ) {
+		const QString rung = L.recx;
+		vaDerived( M, rung + QStringLiteral( "(noiseTexture only)" ), L );
+		return;
+	}
 	const double hour = wwLookdevHour();
 	const double thick = vaRecxValue( g, QStringLiteral( "thickness" ), hour, 0.0 );
 	const double str = vaRecxValue( g, QStringLiteral( "strength" ), hour, 0.0 );
@@ -2105,14 +2122,32 @@ static void vaPassInner( Scene * scene, bool run )
 		} else if ( sealed ) {
 			dr.note = QStringLiteral( "still(sealed interior)" );
 		} else {
-			if ( dr.tex.empty() )
-				vaNoiseBuild( dr );
-			if ( !g.noise ) {
-				fn->glGenTextures( 1, &g.noise );
+			// MODULES1 part 19: the texture is the weather's linked .dds, else the shipped default (red codenoise: the code's)
+			static const QStringList shippedRoots = wwRecxRoots( QStringList(), QString() );
+			const QStringList & noiseRoots = G.noiseRoots.isEmpty() ? shippedRoots : G.noiseRoots;
+			const QString want = dr.red == 7 ? QStringLiteral( "code" ) : G.noiseLink + QLatin1Char( '|' ) + noiseRoots.join( QLatin1Char( '|' ) );
+			bool upload = !g.noise;
+			if ( dr.tex.empty() || want != dr.texWant ) {
+				dr.texWant = want;
+				const QString was = dr.texFrom;
+				QString why = QStringLiteral( "red codenoise" );
+				if ( dr.red == 7 || !vaNoiseLoad( noiseRoots, G.noiseLink, dr, why ) ) {
+					vaNoiseBuild( dr );
+					dr.texFrom = QStringLiteral( "code" );
+				}
+				if ( dr.texFrom != was ) {
+					upload = true;
+					std::fprintf( stderr, "cell fog noise: %s (%s; %d^3 mean %.6f span %.6f)\n", qPrintable( dr.texFrom ),
+						qPrintable( why.trimmed() ), dr.texN, double( dr.mean ), double( dr.span ) );
+				}
+			}
+			if ( upload ) {
+				if ( !g.noise )
+					fn->glGenTextures( 1, &g.noise );
 				fn->glActiveTexture( GLenum( GL_TEXTURE0 + kNoiseUnit ) );
 				fn->glBindTexture( GL_TEXTURE_3D, g.noise );
 				fn->glPixelStorei( GL_UNPACK_ALIGNMENT, 1 );
-				fn->glTexImage3D( GL_TEXTURE_3D, 0, GL_R8, kNoiseN, kNoiseN, kNoiseN, 0, GL_RED, GL_UNSIGNED_BYTE, dr.tex.data() );
+				fn->glTexImage3D( GL_TEXTURE_3D, 0, GL_R8, dr.texN, dr.texN, dr.texN, 0, GL_RED, GL_UNSIGNED_BYTE, dr.tex.data() );
 				fn->glPixelStorei( GL_UNPACK_ALIGNMENT, 4 );
 				fn->glTexParameteri( GL_TEXTURE_3D, GL_TEXTURE_MIN_FILTER, GL_LINEAR );
 				fn->glTexParameteri( GL_TEXTURE_3D, GL_TEXTURE_MAG_FILTER, GL_LINEAR );

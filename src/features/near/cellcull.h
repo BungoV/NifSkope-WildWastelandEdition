@@ -17,7 +17,8 @@ class Shape;
  *  the camera pass draws only runs in the frustum, then applies previs (occluders, rooms / portals, the Umbra tome).
  *  Shadow casters are never culled by the camera. WW_CELL_CULL=0|1 and WW_CELL_PREVIS=0|1 pin the rows. Culling ships
  *  ON (PERFHUNT2 show 11-03: Concord -1.7 ms GPU, Memory Den -2.4 ms CPU, stills within noise; WW_CELL_CULL_RED=off is
- *  the old default); previs ships OFF (the same show: Concord +5 ms with 63k runs occluded, Memory Den within noise).
+ *  the old default); previs ships ON from MODULES1 part 19 (it was OFF after the same show: Concord +5 ms with 63k runs
+ *  occluded, Memory Den within noise; WW_CELL_PREVIS_RED=off is that old default).
  *  WW_CELL_CULL_RED=casters and WW_CELL_PREVIS_RED=casters wrongly cull casters (debug control). */
 struct WwCullRun
 {

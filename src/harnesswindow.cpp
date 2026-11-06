@@ -25,6 +25,8 @@ See the accompanying LICENSE file for the full text.
 #include <QWidget>
 #include <QWindow>
 
+#include <cstdio>
+
 /* ---------------------------------------------------------------------------
  * A HARNESS RUN'S WINDOW IS FORCED, NEVER INHERITED.  Lane HARNESSWIN1,
  * 2026-09-19.  This is a REPAIR: no INI key, no menu row, no master switch.
@@ -393,6 +395,34 @@ void wwApplyHarnessWindow( QWidget * w )
 		if ( measured.isValid() ) {
 			want = measured;
 			askedSizeCache() = measured;
+		}
+	}
+	/* MODULES1 part 19: NEVER ASK MORE THAN THE SCREEN HOLDS.  Windows refuses a frame taller than its screen
+	 * ("setGeometry: Unable to set geometry 1920x1080 ... Resulting geometry: 1920x1061") and shrinks the window
+	 * again after the first frame, so run51's first frame after every open was 1920x1045 and the rest 1920x1026.
+	 * Asked within the screen (less the real frame, else the allowance above), the first frame is the last's size.
+	 * Red WW_HARNESS_WINDOW_RED=noclamp: the size as asked, as before. */
+	if ( wwEnvStr( "WW_HARNESS_WINDOW_RED" ).trimmed() != QLatin1String( "noclamp" ) ) {
+		const QScreen * screen = screenForPoint( w->pos() );
+		if ( screen ) {
+			int frameW = 16, frameH = 39;
+			const QRect fg = w->frameGeometry(), g = w->geometry();
+			if ( fg.isValid() && g.isValid() && fg != g ) {
+				frameW = qMax( 0, fg.width() - g.width() );
+				frameH = qMax( 0, fg.height() - g.height() );
+			}
+			const QSize fit( qMax( 320, screen->geometry().width() - frameW ), qMax( 240, screen->geometry().height() - frameH ) );
+			const QSize clamped = want.boundedTo( fit );
+			if ( clamped != want ) {
+				static QSize told;
+				if ( told != clamped ) {
+					told = clamped;
+					std::fprintf( stderr, "harness-window clamp: asked %dx%d, the screen holds %dx%d (frame %d+%d): %dx%d\n",
+						want.width(), want.height(), screen->geometry().width(), screen->geometry().height(), frameW, frameH,
+						clamped.width(), clamped.height() );
+				}
+				want = clamped;
+			}
 		}
 	}
 	w->resize( want );
