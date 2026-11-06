@@ -109,7 +109,7 @@ struct AoState
 	bool qualityPinned = false;
 	bool qualityRedOld = false;	// WW_CELL_AO_QUALITY_RED=old: every tier draws as before the tiers (8 angles, 9 x 3)
 	bool pass = false;		// the opaque pass is drawing
-	bool prepassGeom = false;	// MODULES1: WW_CELL_AO_PREPASS_RED=geom: the RGBA32F geometry pass, the main pass LEQUAL
+	bool prepassGeom = true;	// MODULES1 (RESUME 16): the RGBA32F geometry pass, the main pass LEQUAL (the default); red prepass / zwin: the depth pre-pass
 	bool prepass = false;		// MODULES1: this pass is the multisampled depth pre-pass (no colour target)
 	bool equal = false;			// MODULES1: the main pass draws the pre-pass's draws with depth func EQUAL, writes off
 	bool eqSet = false;			// the last main-pass draw was set EQUAL
@@ -121,7 +121,7 @@ struct AoState
 	// draw (tools/sway_offline.py: the fallback alone leaves holes), so the pre-pass leaves it out for kAoSkipPaints paints
 	std::unordered_map<const void *, quint64> preSkip;
 	int preSkipped = 0;		// the pre-pass draws left out this paint
-	bool zwin = false;		// RESUME 15: WW_CELL_AO_PREPASS_RED=zwin: stage 5 from the window depth (part 14)
+	bool zwin = false;		// RESUME 15: WW_CELL_AO_PREPASS_RED=zwin: the pre-pass, stage 5 from the window depth (part 14)
 	bool zlin = false;		// RESUME 15: this pre-pass writes linear view depth (R32F) for stage 5
 	quint64 preProj = 0;	// RESUME 15: the pre-pass's projection; under another the main pass draws LEQUAL
 	int projSame = -1;		// the main pass's projection is the pre-pass's (-1: not read yet this pass)
@@ -156,8 +156,11 @@ AoState & ao()
 		a.quality = qp >= 0 ? qp : std::clamp( QSettings().value( QStringLiteral( "WW/CellAoQuality" ), int( WwAoTierUltra ) ).toInt(),
 			0, WwAoTierCount - 1 );
 		a.qualityRedOld = wwEnv( "WW_CELL_AO_QUALITY_RED" ).trimmed() == "old";
-		a.prepassGeom = wwEnv( "WW_CELL_AO_PREPASS_RED" ).trimmed() == "geom";	// MODULES1
-		a.zwin = wwEnv( "WW_CELL_AO_PREPASS_RED" ).trimmed() == "zwin";	// RESUME 15
+		/* RESUME 16 (run28: the main pass over the pre-pass's depth cost 2x the geometry pass's whole frame, Museum
+		 * 140.9 vs 86.5 ms, Memory Den 63.6 vs 26.9): the geometry pass is the default again */
+		const QByteArray pre = wwEnv( "WW_CELL_AO_PREPASS_RED" ).trimmed();
+		a.zwin = pre == "zwin";	// RESUME 15
+		a.prepassGeom = pre != "prepass" && !a.zwin;	// MODULES1
 	}
 	return a;
 }
@@ -718,7 +721,8 @@ void wwCellAoPass( Scene * scene, bool run )
 	/* MODULES1: the depth pre-pass. The opaque cell-lit draws go once into a multisampled depth target with the linear
 	 * frame's sample count and format; the main pass takes that depth (wwCellAoPrepassShare) and draws them again with
 	 * depth func EQUAL, writes off. The obscurance reads its resolve, the normal rebuilt from depth (cell_ao.frag
-	 * stage 5). Red WW_CELL_AO_PREPASS_RED=geom: the RGBA32F geometry pass. No linear frame yet (or another size): geom */
+	 * stage 5). The red WW_CELL_AO_PREPASS_RED=prepass (or zwin); the default is the RGBA32F geometry pass (RESUME 16).
+	 * No linear frame yet (or another size): geom */
 	int hdrW = 0, hdrH = 0, hdrS = 0;
 	unsigned int hdrFmt = 0;
 	bool usePre = !a.prepassGeom && wwCellHdrDepthSpec( scene, hdrW, hdrH, hdrS, hdrFmt ) && hdrW == W && hdrH == H;
@@ -727,7 +731,7 @@ void wwCellAoPass( Scene * scene, bool run )
 	a.preSkipped = 0;
 	a.zlin = false;
 	a.projSame = -1;
-	a.preNote = a.prepassGeom ? QStringLiteral( "off (red geom)" ) : !usePre ? QStringLiteral( "geom (no linear frame of this size yet)" )
+	a.preNote = a.prepassGeom ? QStringLiteral( "off (geom, the default)" ) : !usePre ? QStringLiteral( "geom (no linear frame of this size yet)" )
 		: QString();
 	if ( usePre ) {
 		if ( !g.preFbo )

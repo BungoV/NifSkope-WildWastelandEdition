@@ -44,7 +44,8 @@ bool wwCellAoSortedTake( Scene * scene, NodeList & out );
 void wwCellAoDraw( Scene * scene, bool cellProgram, const void * shape = nullptr );
 /*! MODULES1: the main pass takes this paint's depth pre-pass (a depth blit into the bound linear frame, same samples
  *  and format) and draws its draws with depth func EQUAL, writes off, until wwCellAoPrepassEnd. No pre-pass this paint
- *  (red WW_CELL_AO_PREPASS_RED=geom, no linear frame of its size): nothing happens and the main pass draws LEQUAL. */
+ *  (the default geometry pass; the pre-pass is the red WW_CELL_AO_PREPASS_RED=prepass; no linear frame of its size):
+ *  nothing happens and the main pass draws LEQUAL. */
 void wwCellAoPrepassShare( Scene * scene );
 //! MODULES1: the main pass is drawn: depth func back to LEQUAL, and the census line ("cell ao prepass: ...")
 void wwCellAoPrepassEnd( Scene * scene );

@@ -1,3 +1,10 @@
+## MODULES1 step 13 (2026-11-06): the obscurance's geometry pass is the default again
+
+- The AO depth pre-pass (step 8) made the main pass about twice as slow as the geometry pass it replaced (Museum
+  141 vs 87 ms a frame, Memory Den 64 vs 27 ms). The geometry pass is the default again; the pre-pass stays as the red
+  `WW_CELL_AO_PREPASS_RED=prepass` (`zwin`: the pre-pass with window depth). The census line reads
+  `cell ao prepass: off (geom, the default)`.
+
 ## MODULES1 step 12 (2026-11-06): lamp shadows in the air, traced on the ray-traced GI's scene (opt-in)
 
 - `WW_CELL_AIR_LAMPVIS=rays` (Atlas stays the default): with the ray-traced GI on, each froxel of the near air grid
