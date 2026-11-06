@@ -152,16 +152,16 @@ BloomState & bs()
 			s.pinned[i] = d.pinned[i];
 	}
 	QSettings q;
-	// the mode: a pin wins; a harness without the pin runs Vanilla (it measures what it pins); else the saved row
+	// the mode: a pin wins (WW_CELL_BLOOM=vanilla: the red); else the saved row; the default is FO4CS (MODULES1, bungo 11-06)
 	const QString modePin = wwEnvStr( "WW_CELL_BLOOM" ).trimmed();
 	if ( !modePin.isEmpty() ) {
 		s.modePinned = true;
 		s.set.fo4cs = modePin.compare( QLatin1StringView( "fo4cs" ), Qt::CaseInsensitive ) == 0;
 	} else if ( wwHarnessRun() ) {
 		s.modePinned = true;
-		s.set.fo4cs = false;
+		s.set.fo4cs = true;
 	} else {
-		s.set.fo4cs = q.value( QLatin1StringView( kModeKey ), QStringLiteral( "vanilla" ) ).toString()
+		s.set.fo4cs = q.value( QLatin1StringView( kModeKey ), QStringLiteral( "fo4cs" ) ).toString()
 			.compare( QLatin1StringView( "fo4cs" ), Qt::CaseInsensitive ) == 0;
 	}
 	for ( int i = 0; i < kFieldCount; i++ ) {
@@ -184,6 +184,8 @@ BloomState & bs()
 				s.set.glare = truthy( pin );
 			else if ( useSaved )
 				s.set.glare = q.value( QLatin1StringView( kFields[i].key ) ).toBool();
+			else
+				s.set.glare = true;	// MODULES1: the physical glare is on by default (WW_CELL_GLARE=0: the red)
 		}
 	}
 	s.set = clamped( s.set );

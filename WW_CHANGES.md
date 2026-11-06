@@ -1,3 +1,12 @@
+## MODULES1 step 14 (2026-11-06): the FO4CS bloom and the physical glare are on by default; WW_ALL_ON is all on
+
+- bungo: "we always need these two on". The bloom mode defaults to FO4CS (a harness without the pin too, and a
+  window with no saved row), and the physical glare defaults to on. The reds are the pins `WW_CELL_BLOOM=vanilla` and
+  `WW_CELL_GLARE=0`; the menu rows still save a choice.
+- `WW_ALL_ON=1` sets every feature at its top shipped tier (shadows, atmosphere, RT preset, SSGI, TAA, water, lamp
+  shadows, air far, the AO xegtao ultra), the bloom and glare, lens flares, flicker, the fog leak, the far LOD's AO and
+  sky. It no longer sets the retired probe GI (`WW_CELL_GI`), depth of field or motion blur. A set pin still wins.
+
 ## MODULES1 step 13 (2026-11-06): the obscurance's geometry pass is the default again
 
 - The AO depth pre-pass (step 8) made the main pass about twice as slow as the geometry pass it replaced (Museum

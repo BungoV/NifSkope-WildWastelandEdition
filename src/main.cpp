@@ -188,20 +188,35 @@ int main( int argc, char * argv[] )
 	/* lane CELLALL1: WW_ALL_ON=1, the "all on" preset for his sheets: every cell-view feature's pin set to on before
 	 * anything reads one (each feature reads its pin once, lazily). A pin already set wins (WW_CELL_SSR_EXT=0 beside
 	 * WW_ALL_ON=1 keeps that one off). Not in it: the GPU relight (a measurement run: it relights twice and times
-	 * it) and Scene mode Lookdev itself (WW_LOOKDEV, the weather that lights an exterior). */
+	 * it) and Scene mode Lookdev itself (WW_LOOKDEV, the weather that lights an exterior).
+	 * MODULES1 (bungo 11-06, "you turn on all our graphical features"): every tier at its top shipped tier, the FO4CS
+	 * bloom with the physical glare, the far LOD's AO and sky. Not in it: the old probe GI (WW_CELL_GI, retired: RTXGI
+	 * only), depth of field and motion blur (never in his shots). */
 	if ( wwEnvInt( "WW_ALL_ON" ) == 1 ) {
-		static const char * const kAllOn[] = { "WW_CELL_LIT", "WW_CELL_GI", "WW_CELL_FAR", "WW_CELL_IS", "WW_TAA",
-			"WW_CELL_CULL", "WW_CELL_AO", "WW_CELL_SHADOW", "WW_CELL_WATER", "WW_CELL_SSR", "WW_CELL_SSR_EXT",
-			"WW_CELL_AODECAL", "WW_LOOKDEV_SHADOWS", "WW_LOOKDEV_FOG", "WW_CELL_AIR", "WW_CELL_VOLPART", "WW_CELL_PARTICLES", "WW_CELL_PREVIS",
-			"WW_CELL_FARLOD", "WW_CELL_GRASS", "WW_CELL_DOF", "WW_CELL_MBLUR" };	// final merge: FARLOD1 + GRASSMB1
+		static const char * const kAllOn[][2] = { { "WW_CELL_LIT", "1" }, { "WW_CELL_FAR", "1" }, { "WW_CELL_IS", "1" },
+			{ "WW_TAA", "1" }, { "WW_CELL_CULL", "1" }, { "WW_CELL_AO", "1" }, { "WW_CELL_SHADOW", "1" },
+			{ "WW_CELL_WATER", "1" }, { "WW_CELL_SSR", "1" }, { "WW_CELL_SSR_EXT", "1" }, { "WW_CELL_AODECAL", "1" },
+			{ "WW_LOOKDEV_SHADOWS", "1" }, { "WW_LOOKDEV_FOG", "1" }, { "WW_CELL_AIR", "1" }, { "WW_CELL_VOLPART", "1" },
+			{ "WW_CELL_PARTICLES", "1" }, { "WW_CELL_PREVIS", "1" }, { "WW_CELL_FARLOD", "1" }, { "WW_CELL_GRASS", "1" },	// final merge: FARLOD1 + GRASSMB1
+			{ "WW_CELL_RTDDGI", "1" }, { "WW_CELL_BLOOM", "fo4cs" }, { "WW_CELL_GLARE", "1" }, { "WW_CELL_LENSFLARE", "1" },
+			{ "WW_CELL_FLICKER", "1" }, { "WW_CELL_FOGLEAK", "1" }, { "WW_CELL_SPECOCC", "1" }, { "WW_CELL_XEMI", "1" },
+			{ "WW_CELL_XEMI_GI", "1" }, { "WW_CELL_LIGHT_PHYS", "1" }, { "WW_CELL_AIR_CLUSTERS", "1" }, { "WW_CELL_AIR_MS", "1" },
+			{ "WW_RENDER_SSGI", "1" }, { "WW_CELL_REFLPROBE", "1" }, { "WW_CELL_WATER_SKYVIS", "1" },
+			{ "WW_LOOKDEV_GROUND", "1" }, { "WW_LOOKDEV_CLOUDTIME", "1" }, { "WW_CELL_FARLOD_SWAYTIME", "1" },
+			{ "WW_LODL_AO", "1" }, { "WW_LODL_SKY", "1" },
+			{ "WW_SHADOW_CASCADE", "ultra" }, { "WW_SHADOW_CONTACT", "ultra" }, { "WW_SHADOW_TERRAIN", "ultra" },
+			{ "WW_SUNPATH", "1" }, { "WW_ATMO", "ultra" }, { "WW_CELL_RT_PRESET", "ultra" }, { "WW_CELL_SSGI_QUALITY", "ultra" },
+			{ "WW_TAA2", "ultra" }, { "WW_CELL_WATER_PRESET", "ultra" }, { "WW_CELL_LAMPSHADOW", "ultra" },
+			{ "WW_CELL_AIR_FAR", "4" }, { "WW_CELL_AO_METHOD", "xegtao" }, { "WW_CELL_AO_QUALITY", "ultra" } };
 		QByteArray set, kept;
-		for ( const char * k : kAllOn ) {
+		for ( const auto & kv : kAllOn ) {
+			const char * k = kv[0];
 			if ( wwEnvIsSet( k ) ) {
 				kept += QByteArray( " " ) + k + "=" + wwEnv( k );
 				continue;
 			}
-			qputenv( k, "1" );
-			set += QByteArray( " " ) + k;
+			qputenv( k, kv[1] );
+			set += QByteArray( " " ) + k + "=" + kv[1];
 		}
 		fprintf( stderr, "all on: set%s | kept%s\n", set.constData(), kept.isEmpty() ? " none" : kept.constData() );
 	}

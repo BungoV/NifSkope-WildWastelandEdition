@@ -9,7 +9,8 @@ class Renderer;
 class Scene;
 
 /*! FO4CS's bloom and physical glare (src/Post/Bloom.cpp, BloomDownCS/UpCS.hlsl) on the cell view's linear frame,
- *  ported to fragment passes; a selectable mode beside the game's imagespace bloom (Vanilla, the default).
+ *  ported to fragment passes; a selectable mode beside the game's imagespace bloom (FO4CS with the glare is the default since MODULES1;
+ *  WW_CELL_BLOOM=vanilla / WW_CELL_GLARE=0 are the reds).
  *  Only cell-lit pixels feed it; glow over non-imagespace pixels is added in display space.
  *  Switches: WW_CELL_BLOOM=vanilla|fo4cs, WW_CELL_GLARE=0|1, WW_CELL_BLOOM_<setting> / WW_CELL_GLARE_<setting> pin
  *  a row; WW_CELL_BLOOM_RED=nokaris, WW_CELL_BLOOM_IMPULSE=<value>, WW_CELL_BLOOM_DUMP=<dir> are debug aids. */
