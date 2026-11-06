@@ -570,13 +570,15 @@ void CellWorkspacePanel::buildUi()
 	/* FIX1031B (bungo 10-31): no "Ray-traced GI cascades" picker any more: the cascades ARE the ray-traced GI; their count,
 	 * cadence and rays follow the RT quality preset below (src/features/gi/rtddgicell.h rtddgiCellCascades) */
 	/* lane RESTIRDI1 (bungo 10-29's ruling): the RT quality preset. Low = the ray-traced GI volume (as the row above), Medium =
-	 * + ReSTIR DI (ray-traced shadows for the shadow-casting lights, the 16 cube shadows off); High / Ultra = Medium for now.
+	 * + ReSTIR DI (ray-traced shadows for the shadow-casting lights, the 16 cube shadows off); High = + ReSTIR GI (RTEMIS1
+	 * part 2: a bounce ray a pixel, reused, in place of the volume's irradiance on the surfaces); Ultra = High for now.
 	 * Live: a pick reloads the shaders (WW_CELL_RESTIR is a loader define); Medium and up also turn the volume on */
 	{
 		QMenu * m = showMenu->addMenu( tr( "Ray-traced quality" ) );
 		m->setObjectName( QStringLiteral( "CellWorkspaceRtPreset" ) );
 		m->setToolTip( tr( "Low: ray-traced GI only. Medium: + ReSTIR DI ray-traced shadows for the lights that cast shadows "
-			"(in place of the 16 shadow cubes). High (+ ReSTIR GI) and Ultra (+ ReSTIR PT) are Medium for now." ) );
+			"(in place of the 16 shadow cubes). High: + ReSTIR GI, a traced bounce a pixel for the indirect light on the surfaces. "
+			"Ultra (+ ReSTIR PT) is High for now." ) );
 		m->setToolTipsVisible( true );
 		QActionGroup * grp = new QActionGroup( m );
 		grp->setExclusive( true );
@@ -586,8 +588,10 @@ void CellWorkspacePanel::buildUi()
 			a->setCheckable( true );
 			a->setData( k );
 			a->setChecked( k == rtddgiRtPreset() );
-			if ( k >= 2 )
-				a->setToolTip( tr( "Medium for now (ReSTIR GI / PT are planned)" ) );
+			if ( k == 2 )
+				a->setToolTip( tr( "Medium + ReSTIR GI (a traced bounce a pixel)" ) );
+			else if ( k == 3 )
+				a->setToolTip( tr( "High for now (ReSTIR PT is planned)" ) );
 			grp->addAction( a );
 		}
 		m->setEnabled( !rtddgiRtPresetPinned() );

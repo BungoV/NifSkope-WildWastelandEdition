@@ -1120,12 +1120,19 @@ RestirGl & restirGl()
 	return *g;
 }
 
+//! RTEMIS1 part 2: ReSTIR GI's GL side, the same shape (its output: E rgb + linear depth, RGBA32F, on unit RestirGi)
+RestirGl & restirGiGl()
+{
+	static RestirGl * g = new RestirGl;
+	return *g;
+}
+
 void restirSay( RestirGl & G, const QString & line )
 {
 	if ( line == G.last )
 		return;
 	G.last = line;
-	std::fprintf( stderr, "restir cell: %s\n", qPrintable( line ) );
+	std::fprintf( stderr, "%s: %s\n", &G == &restirGiGl() ? "restirgi cell" : "restir cell", qPrintable( line ) );
 	std::fflush( stderr );
 }
 
@@ -1153,7 +1160,7 @@ void restirDropGl( RestirGl & G, Renderer * r )
 	G.last = last;
 }
 
-bool restirImport( RestirGl & G, Renderer * r, bakert::DdgiGpuSession * s, int W, int H, QString * why )
+bool restirImport( RestirGl & G, Renderer * r, bakert::DdgiGpuSession * s, int W, int H, QString * why, bool gi = false )
 {
 	GlShare & g = glShare();
 	if ( !g.ok ) {
@@ -1161,7 +1168,7 @@ bool restirImport( RestirGl & G, Renderer * r, bakert::DdgiGpuSession * s, int W
 		return false;
 	}
 	bakert::RestirGpuShare sh;
-	if ( !bakert::restirGpuShare( s, W, H, &sh ) ) {
+	if ( !( gi ? bakert::restirGiGpuShare( s, W, H, &sh ) : bakert::restirGpuShare( s, W, H, &sh ) ) ) {
 		*why = QString::fromStdString( sh.why );
 		return false;
 	}
@@ -1171,7 +1178,7 @@ bool restirImport( RestirGl & G, Renderer * r, bakert::DdgiGpuSession * s, int W
 	const GLint dedicated = 1;
 	void * mems[2] = { sh.gbufMemory, sh.outMemory };
 	const quint64 sizes[2] = { sh.gbufSize, sh.outSize };
-	const GLsizeiptr bytes[2] = { GLsizeiptr( W ) * H * 16, GLsizeiptr( W ) * H * 8 };
+	const GLsizeiptr bytes[2] = { GLsizeiptr( W ) * H * 16, GLsizeiptr( W ) * H * ( gi ? 16 : 8 ) };
 	const GLenum targets[2] = { GL_PIXEL_PACK_BUFFER, GL_TEXTURE_BUFFER };
 	for ( int k = 0; k < 2; k++ ) {
 		g.createMem( 1, &G.mem[k] );
@@ -1188,10 +1195,10 @@ bool restirImport( RestirGl & G, Renderer * r, bakert::DdgiGpuSession * s, int W
 	g.importSem( G.semGl, kGlHandleOpaqueWin32, sh.glDone );
 	GLint prevActive = 0;
 	fn->glGetIntegerv( GL_ACTIVE_TEXTURE, &prevActive );
-	fn->glActiveTexture( GLenum( GL_TEXTURE0 + WwCellUnit::Restir ) );
+	fn->glActiveTexture( GLenum( GL_TEXTURE0 + ( gi ? WwCellUnit::RestirGi : WwCellUnit::Restir ) ) );
 	fn->glGenTextures( 1, &G.tex );
 	fn->glBindTexture( GL_TEXTURE_BUFFER, G.tex );
-	fn->glTexBuffer( GL_TEXTURE_BUFFER, GL_RG32F, G.buf[1] );
+	fn->glTexBuffer( GL_TEXTURE_BUFFER, gi ? GL_RGBA32F : GL_RG32F, G.buf[1] );
 	fn->glBindTexture( GL_TEXTURE_BUFFER, 0 );
 	fn->glActiveTexture( GLenum( prevActive ) );
 	const GLenum err = fn->glGetError();
@@ -1227,6 +1234,46 @@ void restirUniforms( Renderer * r, NifSkopeOpenGLContext::Program * prog )
 	prog->uni4f( "cellRestirSize", FloatVector4( float( G.W ), float( G.H ), 0.0f, 0.0f ) );
 }
 
+//! WW_CELL_RESTIRGI_RED (live): off (the pass and the shader read gone), nojacobian, novis, nopdf, notemporal (RESTIRGI_BIT_*)
+int restirGiRedBits()
+{
+	int b = 0;
+	for ( const QString & r : wwEnvStr( "WW_CELL_RESTIRGI_RED" ).split( QLatin1Char( ',' ), Qt::SkipEmptyParts ) ) {
+		const QString t = r.trimmed();
+		b |= t == QLatin1String( "nojacobian" ) ? 1 : t == QLatin1String( "novis" ) ? 2 : t == QLatin1String( "nopdf" ) ? 4
+			: t == QLatin1String( "notemporal" ) ? 8 : 0;
+	}
+	return b;
+}
+
+bool restirGiRedOff()
+{
+	for ( const QString & r : wwEnvStr( "WW_CELL_RESTIRGI_RED" ).split( QLatin1Char( ',' ), Qt::SkipEmptyParts ) )
+		if ( r.trimmed() == QLatin1String( "off" ) )
+			return true;
+	return false;
+}
+
+//! the GI estimate's texture buffer on a program compiled under WW_CELL_RESTIRGI (cell_lights.glsl cellGiSample)
+void restirGiUniforms( Renderer * r, NifSkopeOpenGLContext::Program * prog )
+{
+	const int loc = prog->uniLocation( "cellRestirGiOn" );
+	if ( loc < 0 )
+		return;
+	RestirGl & G = restirGiGl();
+	const bool on = G.ready && G.owner == r && G.tex;
+	auto fn = r->fn;
+	{
+		WwCellUni::Units<std::remove_pointer_t<decltype( fn )>> u( fn, wwCellUniDsa() );
+		u.section();
+		u.bind( WwCellUnit::RestirGi, GL_TEXTURE_BUFFER, on ? G.tex : 0 );
+		u.done();
+	}
+	prog->uni1i( "cellRestirGi", WwCellUnit::RestirGi );
+	prog->uni1b_l( loc, on );
+	prog->uni4f( "cellRestirGiSize", FloatVector4( float( G.W ), float( G.H ), 0.0f, 0.0f ) );
+}
+
 } // namespace
 
 bool rtddgiRtPresetPinned()
@@ -1251,6 +1298,33 @@ void rtddgiRtPresetSet( int preset )
 bool rtddgiRestirShaderDefine()
 {
 	return rtddgiRtPreset() >= 1 && rtddgiCellShaderDefine();
+}
+
+bool rtddgiRestirGiShaderDefine()
+{
+	return rtddgiRtPreset() >= 2 && rtddgiCellShaderDefine() && !restirGiRedOff();
+}
+
+//! the camera: view -> world rows (celllights.cpp cellRow), moved into the soup's local frame; the frame's projection
+static void restirCamera( Scene * scene, Cell & c, float rows[12], float proj[4] )
+{
+	const Transform & vt = scene->view;
+	const float sc = vt.scale != 0.0f ? vt.scale : 1.0f;
+	for ( int k = 0; k < 3; k++ ) {
+		float w = 0.0f;
+		for ( int j = 0; j < 3; j++ )
+			w -= vt.rotation( j, k ) * vt.translation[j];
+		for ( int j = 0; j < 3; j++ )
+			rows[k * 4 + j] = vt.rotation( j, k ) / sc;
+		rows[k * 4 + 3] = w / sc;
+	}
+	rows[3] = float( double( rows[3] ) - c.live->live.localX() );
+	rows[7] = float( double( rows[7] ) - c.live->live.localY() );
+	const auto & pm = scene->renderer->globalUniforms->projectionMatrix;
+	proj[0] = pm[0][0];
+	proj[1] = pm[1][1];
+	proj[2] = pm[2][0];
+	proj[3] = pm[2][1];
 }
 
 void rtddgiRestirPass( Scene * scene )
@@ -1305,25 +1379,8 @@ void rtddgiRestirPass( Scene * scene )
 	fn->glBindBuffer( GL_PIXEL_PACK_BUFFER, GLuint( prevPack ) );
 	fn->glBindTexture( GL_TEXTURE_2D, 0 );
 	fn->glActiveTexture( GLenum( prevActive ) );
-	// the camera: view -> world rows (celllights.cpp cellRow), moved into the soup's local frame; the frame's projection
 	bakert::RestirGpuIn in;
-	const Transform & vt = scene->view;
-	const float sc = vt.scale != 0.0f ? vt.scale : 1.0f;
-	for ( int k = 0; k < 3; k++ ) {
-		float w = 0.0f;
-		for ( int j = 0; j < 3; j++ )
-			w -= vt.rotation( j, k ) * vt.translation[j];
-		for ( int j = 0; j < 3; j++ )
-			in.rows[k * 4 + j] = vt.rotation( j, k ) / sc;
-		in.rows[k * 4 + 3] = w / sc;
-	}
-	in.rows[3] = float( double( in.rows[3] ) - c.live->live.localX() );
-	in.rows[7] = float( double( in.rows[7] ) - c.live->live.localY() );
-	const auto & pm = r->globalUniforms->projectionMatrix;
-	in.proj[0] = pm[0][0];
-	in.proj[1] = pm[1][1];
-	in.proj[2] = pm[2][0];
-	in.proj[3] = pm[2][1];
+	restirCamera( scene, c, in.rows, in.proj );
 	std::copy( G.prows, G.prows + 12, in.prows );
 	std::copy( G.pproj, G.pproj + 4, in.pproj );
 	in.history = G.history;
@@ -1357,6 +1414,91 @@ void rtddgiRestirPass( Scene * scene )
 		restirSay( G, QStringLiteral( "on %1 x %2, %3 shadow lights of %4 (candidates %5, neighbours %6), frame %7, device wall %8 ms, red %9" )
 			.arg( t.w ).arg( t.h ).arg( in.cand.size() ).arg( pl.size() / 32 ).arg( in.candidates ).arg( in.spatial ).arg( in.frame )
 			.arg( out.msWall, 0, 'f', 3 ).arg( in.red ) );
+}
+
+void rtddgiRestirGiPass( Scene * scene )
+{
+	RestirGl & G = restirGiGl();
+	G.ready = false;
+	Renderer * r = scene ? scene->renderer : nullptr;
+	if ( !r || scene->selecting || !scene->nifModel )
+		return;
+	if ( !rtddgiRestirGiShaderDefine() ) {
+		if ( G.owner ) {
+			restirDropGl( G, r );
+			restirSay( G, QStringLiteral( "freed (the RT quality is below High, or WW_CELL_RESTIRGI_RED=off)" ) );
+		}
+		return;
+	}
+	Cell & c = cell();
+	if ( !c.live || !c.live->live.isOpen() || c.nif != scene->nifModel || c.glOwner != r ) {
+		restirSay( G, QStringLiteral( "waiting for the ray-traced GI volume; the volume's irradiance meanwhile" ) );
+		return;
+	}
+	if ( !c.interop ) {
+		restirSay( G, QStringLiteral( "refused(the volume has no GL interop: %1)" ).arg( c.interopWhy ) );
+		return;
+	}
+	WwCellAoTargets t;
+	if ( !wwCellAoTargets( scene, t ) || !t.gbuf || t.w <= 0 || t.h <= 0 ) {
+		restirSay( G, QStringLiteral( "refused(no shared opaque pass this frame)" ) );
+		return;
+	}
+	bakert::DdgiGpuSession * s = c.live->live.session();
+	if ( G.owner != r || G.session != s || G.W != t.w || G.H != t.h ) {
+		restirDropGl( G, r );
+		QString why;
+		if ( !restirImport( G, r, s, t.w, t.h, &why, true ) ) {
+			restirDropGl( G, r );
+			restirSay( G, QStringLiteral( "refused(%1)" ).arg( why ) );
+			return;
+		}
+	}
+	auto fn = r->fn;
+	GlShare & sh = glShare();
+	GLint prevActive = 0, prevPack = 0;
+	fn->glGetIntegerv( GL_ACTIVE_TEXTURE, &prevActive );
+	fn->glGetIntegerv( GL_PIXEL_PACK_BUFFER_BINDING, &prevPack );
+	fn->glActiveTexture( GLenum( GL_TEXTURE0 + WwCellUnit::RestirGi ) );
+	fn->glBindTexture( GL_TEXTURE_2D, t.gbuf );
+	fn->glBindBuffer( GL_PIXEL_PACK_BUFFER, G.buf[0] );
+	fn->glPixelStorei( GL_PACK_ALIGNMENT, 4 );
+	fn->glGetTexImage( GL_TEXTURE_2D, 0, GL_RGBA, GL_FLOAT, nullptr );
+	fn->glBindBuffer( GL_PIXEL_PACK_BUFFER, GLuint( prevPack ) );
+	fn->glBindTexture( GL_TEXTURE_2D, 0 );
+	fn->glActiveTexture( GLenum( prevActive ) );
+	bakert::RestirGiGpuIn in;
+	restirCamera( scene, c, in.rows, in.proj );
+	std::copy( G.prows, G.prows + 12, in.prows );
+	std::copy( G.pproj, G.pproj + 4, in.pproj );
+	in.history = G.history;
+	in.W = t.w;
+	in.H = t.h;
+	in.frame = G.frame++;
+	in.seed = 0x9e3779b9u;
+	in.red = restirGiRedBits();
+	in.beforeSubmit = [&G, &sh, fn]() {
+		sh.signalSem( G.semGl, 2, G.buf, 0, nullptr, nullptr );
+		fn->glFlush();
+		return true;
+	};
+	bakert::RestirGiGpuOut out;
+	if ( !bakert::restirGiGpuStep( s, in, &out ) ) {
+		G.history = false;
+		G.busy += out.busy ? 1 : 0;
+		restirSay( G, out.busy ? QStringLiteral( "busy (a bake holds the device): this frame the volume's irradiance" )
+			: QStringLiteral( "refused(%1)" ).arg( QString::fromStdString( out.why ) ) );
+		return;
+	}
+	sh.waitSem( G.semVk, 2, G.buf, 0, nullptr, nullptr );
+	G.ready = true;
+	G.history = true;
+	std::copy( in.rows, in.rows + 12, G.prows );
+	std::copy( in.proj, in.proj + 4, G.pproj );
+	if ( ( G.runs++ % 64 ) == 0 )
+		restirSay( G, QStringLiteral( "on %1 x %2 (neighbours %3, radius %4, running mean %5 frames), frame %6, device wall %7 ms, red %8" )
+			.arg( t.w ).arg( t.h ).arg( in.spatial ).arg( in.radius ).arg( in.accFrames ).arg( in.frame ).arg( out.msWall, 0, 'f', 3 )
+			.arg( in.red ) );
 }
 
 namespace {
@@ -2380,6 +2522,7 @@ void rtddgiCellUniforms( Scene * scene )
 	if ( !prog )
 		return;
 	restirUniforms( r, prog );   // lane RESTIRDI1: a program compiled under WW_CELL_RESTIR (else no location: nothing)
+	restirGiUniforms( r, prog );   // RTEMIS1 part 2: WW_CELL_RESTIRGI programs only
 	const int locOn = prog->uniLocation( "cellDdgiOn" );
 	if ( locOn < 0 )
 		return;   // a program without the read: with the switch off, every program

@@ -48,6 +48,7 @@ OVERRIDES = {
     'WW_SKYBELOW_RED': ('live', 'read every frame by rtddgiCellFrame (rtddgiSkyBelowRed): in every cascade volume build key, a set rebuilds the volumes, which re-converge (SKYBELOW1); and every frame by the reflection probes relight (cellreflprobe.cpp): in its light hash, a set relights every probe (SKYBELOW2)'),
     'WW_CELL_RT_PRESET': ('shaders', 'the RT quality preset: Medium+ is the loader define WW_CELL_RESTIR (Shader::load via rtddgiRestirShaderDefine) and turns the volume on; rtddgiRestirPass and the cube pass read it every frame (RESTIRDI1)'),
     'WW_CELL_RESTIR_RED': ('live', 'restirRedBits read every frame by rtddgiRestirPass: the kernel red bits (RESTIRDI1)'),
+    'WW_CELL_RESTIRGI_RED': ('shaders', 'restirGiRedBits read every frame by rtddgiRestirGiPass (the kernel red bits); off is in rtddgiRestirGiShaderDefine, the loader define WW_CELL_RESTIRGI: the pass stops that frame, a set reloads the shaders (RTEMIS1)'),
     'WW_CELL_LIT_PROBE': ('shaders', 'st() re-reads it on a live set (a uniform); a probe also adds the loader define WW_CELL_VIEWS (Shader::load via wwCellViewsShaderDefine), so a set reloads the shaders (FO4CELLGI1)'),
     'WW_CELL_PASS': ('shaders', 'st() re-reads the pin on a live set (a uniform); a Pass also adds the loader define WW_CELL_VIEWS (Shader::load via wwCellViewsShaderDefine), so a set reloads the shaders (FO4CELLGI1)'),
     'WW_CELL_VIEWS_RED': ('shaders', 'read at every shader load by wwCellViewsShaderDefine: =1 keeps the probe and pass views in every cell program (FO4CELLGI1)'),

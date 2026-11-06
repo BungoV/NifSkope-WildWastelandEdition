@@ -69,7 +69,8 @@ constexpr int WaterOceanB = 68;	// lane WATERLOOK1: the wave spectrum's slopes +
 constexpr int WaterOceanC = 69;	// lane WATERLOOK1: its slope moments (sampler2DArray RGBA32F)
 constexpr int WaterSkyIndex = 70;	// lane WATERSKYVISFAR1: the .lodl sky plane's tile index (usampler2D R32UI)
 constexpr int WaterSkyAtlas = 71;	// its sparse tiles (usampler2D R8UI)
-constexpr int LandLodDiff = 72;	// lane LANDSPEC2/3: the near ground's band, the 4 x 4 level-4 LOD diffuse chunks (sampler2DArray; 74-75 free)
+constexpr int LandLodDiff = 72;	// lane LANDSPEC2/3: the near ground's band, the 4 x 4 level-4 LOD diffuse chunks (sampler2DArray; 75 free)
+constexpr int RestirGi = 74;	// RTEMIS1 part 2: ReSTIR GI's irradiance a pixel (samplerBuffer RGBA32F, E rgb + depth; rtddgicell.cpp), WW_CELL_RESTIRGI programs only
 constexpr int LandLodOuter = 73;	// lane LANDSPEC6: the band's outer window past the page (sampler2DArray, the chunks' mip 1)
 constexpr int LandLodNoise = 76;	// Textures\Terrain\Noise.dds
 constexpr int LandLodDetail = 77;	// Textures\Terrain\DetailNormals.dds
@@ -96,7 +97,7 @@ constexpr int kAll[] = { Shadow, Bloom, Lut, Gi, Lights, Csm, Ao, Ssr, GiSlot, R
 	LandShoreIndex, LandShoreAtlas, WaterFlowIndex, WaterFlowAtlas, WaterOceanB, WaterOceanC, WaterSkyIndex, WaterSkyAtlas, AirTerrain,
 	LandLodDiff, LandLodOuter, LandLodNoise, LandLodDetail, WaterOceanD,
 	LandWaterInfo, LandWaterInfo + 1, LandWaterInfo + 2, UnderDepthMs, FxDepth, DdgiAtlas, Restir, FarStream, PrecipRoof, RainCover,
-	AirLampAtlas, AirLampTable, AirLampRays };
+	AirLampAtlas, AirLampTable, AirLampRays, RestirGi };
 
 constexpr bool distinct()
 {

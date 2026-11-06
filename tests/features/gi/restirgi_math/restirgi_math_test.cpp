@@ -7,12 +7,31 @@
 //   jacobian  full ReSTIR (temporal + spatial) is unbiased over every pixel            red RESTIRGI_RED_NOJACOBIAN
 //   vis       full ReSTIR is unbiased over the pixels the panel shades                 red RESTIRGI_RED_NOVIS
 //   temporal  the history lowers the relative variance (temporal on / off < 0.85)      red RESTIRGI_RED_NOTEMPORAL
+//   mirror    src/features/gi/rtddgi/restirgi_common.glsl (compiled here as C++) == the header on random inputs
+//             red RESTIRGI_RED_MIRROR (the shader's cross() swapped: its cosine frame turned)
 #include "features/gi/restirgimath.h"
 
 #include <cmath>
 #include <cstdio>
 #include <cstdlib>
 #include <vector>
+
+namespace glsl {
+#include "../../../restir_math/restir_shim.h"
+#include "restirgi_shim.h"
+// ddgi_common.glsl's two curves, which restir_common.glsl calls (as tests/restir_math)
+inline float ddgiRadial( double d, double r, double bias, double scale, double expo )
+{
+	return rtddgi::lightRadial( float( d ), float( r ), float( bias ), float( scale ), float( expo ) );
+}
+inline float ddgiSpot( double dl, double cosOuter, double cone ) { return rtddgi::spotCone( float( dl ), float( cosOuter ), float( cone ) ); }
+#include "features/gi/rtddgi/restir_common.glsl"
+#ifdef RESTIRGI_RED_MIRROR
+#define cross( a, b ) cross( b, a )
+#endif
+#include "features/gi/rtddgi/restirgi_common.glsl"
+#undef cross
+}
 
 using rtddgi::V3;
 
@@ -174,9 +193,59 @@ static double relVar( const Stats & s )
 	return a / double( s.sum.size() );
 }
 
+// the shader's text against the header: every primitive on random inputs (hits and misses, each red bit)
+static glsl::vec3 gv( V3 v ) { return glsl::vec3( v.x, v.y, v.z ); }
+static double gap( double a, double b ) { return std::fabs( a - b ) / ( 1.0 + std::fabs( a ) ); }
+static double gap3( V3 a, glsl::vec3 b ) { return std::max( { gap( a.x, b.x ), gap( a.y, b.y ), gap( a.z, b.z ) } ); }
+static void mirror()
+{
+	double worst = 0;
+	int choice = 0;
+	const int n = 20000;
+	for ( int k = 0; k < n; k++ ) {
+		const uint32_t s = restir::hash( uint32_t( k ) * 7919u + 17u );
+		auto u = [s]( uint32_t j ) { return restir::rand01( s, j ); };
+		auto rv = [&u]( uint32_t j, float a ) { return V3( a * ( 2 * u( j ) - 1 ), a * ( 2 * u( j + 1 ) - 1 ), a * ( 2 * u( j + 2 ) - 1 ) ); };
+		const V3 nn = rtddgi::normalize( rv( 0, 1 ) );
+		const V3 d = restirgi::cosineDir( nn, u( 3 ), u( 4 ) );
+		worst = std::max( worst, gap3( d, glsl::rgCosineDir( gv( nn ), u( 3 ), u( 4 ) ) ) );
+		const int red = k & ( restirgi::kRedNoJacobian | restirgi::kRedNoPdf );
+		restirgi::Sample y, y2;
+		y.hit = ( k & 8 ) == 0;
+		y.xs = y.hit ? rv( 5, 4 ) : d;
+		y.ns = rtddgi::normalize( rv( 8, 1 ) );
+		y.Lo = V3( 3 * u( 11 ), 3 * u( 12 ), 3 * u( 13 ) );
+		y2.hit = true;
+		y2.xs = rv( 14, 4 );
+		y2.ns = rtddgi::normalize( rv( 17, 1 ) );
+		y2.Lo = V3( 3 * u( 20 ), 3 * u( 21 ), 3 * u( 22 ) );
+		const glsl::RgRes gy = glsl::rgSample( gv( y.xs ), gv( y.ns ), gv( y.Lo ), y.hit );
+		const glsl::RgRes gy2 = glsl::rgSample( gv( y2.xs ), gv( y2.ns ), gv( y2.Lo ), y2.hit );
+		const V3 x = rv( 23, 4 ), xq = rv( 26, 4 );
+		worst = std::max( worst, gap( restirgi::target( x, nn, y ), glsl::rgTarget( gv( x ), gv( nn ), gy ) ) );
+		worst = std::max( worst, gap( restirgi::jacobian( x, xq, y, red ), glsl::rgJacobian( gv( x ), gv( xq ), gy, red ) ) );
+		restirgi::Res r = restirgi::candidate( x, nn, y, red );
+		glsl::RgRes g = glsl::rgCandidate( gv( x ), gv( nn ), gy, red );
+		worst = std::max( { worst, gap( r.W, g.W ), gap( r.wsum, g.wsum ), gap( r.M, g.M ), r.any == ( g.any > 0.5 ) ? 0.0 : 1.0 } );
+		const float w = restirgi::target( x, nn, y2 ) * 2 * u( 29 ), uu = u( 30 );
+		restirgi::update( r, y2, w, 3.0f, uu );
+		g = glsl::rgUpdate( g, gy2, w, 3.0, uu );
+		const float ph = restirgi::target( x, nn, r.y );
+		restirgi::finalize( r, ph, r.M );
+		g = glsl::rgFinalize( g, glsl::rgTarget( gv( x ), gv( nn ), g ), g.M );
+		choice += r.any && r.y.hit && r.y.xs.x == y2.xs.x ? 1 : 0;
+		worst = std::max( { worst, gap( r.W, g.W ), gap( r.wsum, g.wsum ), gap( r.M, g.M ), gap3( r.y.Lo, g.Lo ) } );
+		worst = std::max( worst, gap3( restirgi::estimate( x, nn, r ), glsl::rgEstimate( gv( x ), gv( nn ), g ) ) );
+	}
+	char line[200];
+	std::snprintf( line, sizeof line, "%d random cases (the second sample kept in %d): worst relative gap %.2e (bar 1e-4)", n, choice, worst );
+	check( worst < 1e-4 && choice > n / 10, "mirror", line );
+}
+
 int main()
 {
 	std::setvbuf( stdout, nullptr, _IONBF, 0 );
+	mirror();
 	const Room R = room();
 	const std::vector<restirgi::Pixel> px = pixels();
 	// the reference: pi x mean Lo over stratified cosine directions

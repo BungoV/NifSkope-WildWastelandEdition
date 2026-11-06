@@ -1258,6 +1258,9 @@ vec2 cellGiSpecV = vec2( 1.0, 0.0 );	// cellGiFirst's sky visibility on cellSpec
 #define CELL_GI_HALF1 1
 #endif
 #endif
+#if defined( WW_CELL_RESTIRGI ) && defined( WW_CELL_RTDDGI )
+#define cellGiSample cellGiSampleVol	// RTEMIS1 part 2: the volume's read under its own name; the wrapper below takes cellGiSample
+#endif
 vec4 cellGiSample( vec3 P, vec3 N )
 {
 #ifdef WW_CELL_RTDDGI
@@ -1298,6 +1301,32 @@ vec4 cellGiSample( vec3 P, vec3 N )
 	return vec4( 0.0 );
 #endif
 }
+#if defined( WW_CELL_RESTIRGI ) && defined( WW_CELL_RTDDGI )
+#undef cellGiSample
+/* RTEMIS1 part 2 (src/features/gi/rtddgicell.cpp rtddgiRestirGiPass, src/features/gi/rtddgi/restirgi.comp): the RT quality
+ * preset High+. ReSTIR GI's irradiance a pixel (Ouyang 2021: one bounce ray a pixel on the volume's BVH, shaded by the
+ * volume, reused in time and space, then a running mean and a depth/normal filter) in place of the volume's E where the
+ * fragment is the surface the opaque pass saw; the volume's fade and sky visibility stay. Elsewhere (blended, a probe
+ * picture, the Sky visibility pass, a depth miss) the volume's read, as below High. */
+uniform bool cellRestirGiOn;
+uniform samplerBuffer cellRestirGi;	// RGBA32F, bottom row first: E rgb, linear depth
+uniform vec4 cellRestirGiSize;		// W, H
+vec4 cellGiSample( vec3 P, vec3 N )
+{
+	vec4 s = cellGiSampleVol( P, N );
+	if ( !cellRestirGiOn || cellPass != 0 || cellProbe != 0 || !( s.a > 0.0 ) )
+		return s;
+	ivec2 q = ivec2( gl_FragCoord.xy );
+	int W = int( cellRestirGiSize.x + 0.5 ), H = int( cellRestirGiSize.y + 0.5 );
+	if ( q.x < 0 || q.y < 0 || q.x >= W || q.y >= H )
+		return s;
+	vec4 e = texelFetch( cellRestirGi, q.y * W + q.x );
+	vec3 w = P - vec3( cellRow[0].w, cellRow[1].w, cellRow[2].w );
+	float s2 = 1.0 / max( dot( cellRow[0].xyz, cellRow[0].xyz ), 1e-12 );
+	float D = -s2 * ( cellRow[0].z * w.x + cellRow[1].z * w.y + cellRow[2].z * w.z );
+	return e.w > 0.0 && abs( D - e.w ) <= 0.02 * e.w + 2.0 ? vec4( e.rgb * s.a, s.a ) : s;
+}
+#endif
 #endif
 
 // the baked AO decals of the big movable statics (src/gl/cellaodecalgl.h), one texel per pixel,

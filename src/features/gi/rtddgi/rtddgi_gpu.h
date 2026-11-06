@@ -230,6 +230,39 @@ struct RestirGpuShare
 };
 bool restirGpuShare( DdgiGpuSession * s, int W, int H, RestirGpuShare * out );
 
+/* Lane RTEMIS1 part 2 (2026-11-06): ReSTIR GI on the same session (src/features/gi/rtddgi/restirgi.comp, the twin
+ * src/features/gi/restirgimath.h): one bounce a pixel shaded by the volume, temporal + spatial reuse, a running mean and
+ * a depth / normal aware filter. The g-buffer as RestirGpuIn's; the output is the irradiance a pixel (RGBA32F: E rgb,
+ * the linear depth it is for). Its own command buffer, fence and (shared) semaphores. */
+struct RestirGiGpuIn
+{
+	int W = 0, H = 0;
+	uint32_t frame = 0, seed = 0;
+	int red = 0;                          // restirgi_common.glsl RESTIRGI_BIT_* (nojacobian, novis, nopdf, notemporal)
+	int spatial = 4, radius = 3, filter = 2;
+	float accFrames = 16.0f;              // the running mean keeps at most this many frames
+	float rows[12] = { 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0 };   // view -> the soup's local frame
+	float proj[4] = { 1, 1, 0, 0 };
+	float prows[12] = { 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0 };
+	float pproj[4] = { 1, 1, 0, 0 };
+	bool history = false;
+	const float * gbuf = nullptr;         // host g-buffer W x H x 4 (the CLI); nullptr: GL wrote the shared one
+	bool readBack = false;                // copy the estimate, the bounce's Lo and the filtered output to the host
+	std::function<bool()> beforeSubmit;
+};
+struct RestirGiGpuOut
+{
+	bool ok = false, busy = false;
+	std::string why;
+	double msWall = 0;
+	std::vector<float> est;               // readBack: 4 a pixel (the frame's estimate E rgb, 1 valid)
+	std::vector<float> cand;              // 4 a pixel (the bounce's Lo rgb, hit 1 / miss 0; -1 no pixel)
+	std::vector<float> out;               // 4 a pixel (the filtered E rgb, linear depth)
+};
+bool restirGiGpuStep( DdgiGpuSession * s, const RestirGiGpuIn & in, RestirGiGpuOut * out );
+//! interop: the g-buffer (W x H x 16 bytes) and the output (W x H x 16 bytes) exported to GL, with two semaphores
+bool restirGiGpuShare( DdgiGpuSession * s, int W, int H, RestirGpuShare * out );
+
 /* MODULES1 RESUME 15 (2026-11-06): the placed lamps' shadow in the air by rays (src/features/gi/rtddgi/airrays.comp, route b
  * of notes RESEARCH_AIR.md). One step = one ray pass over an X x Y x Z froxel grid (slices exponential as cell_volair.frag's
  * volSlices) on the volume's BVH and packed lights, then the copy that makes this frame's running means the next one's

@@ -10,7 +10,8 @@ G="${GLSLANG:-/e/Tools/RenderDoc/RenderDoc_1.45_64/plugins/spirv/glslangValidato
 cd "$ROOT/src/features/gi/rtddgi"
 # lane RESTIRDI1: restir (ReSTIR DI on the volume's BVH, src/features/gi/rtddgi/restir_vk.inc; it includes restir_common.glsl)
 # MODULES1 RESUME 15: airrays (the lamps' shadow in the air, route b of RESEARCH_AIR.md; src/features/gi/rtddgi/airrays_vk.inc)
-for k in trace blend border reloc restir airrays; do
+# RTEMIS1 part 2: restirgi (ReSTIR GI, src/features/gi/rtddgi/restirgi_vk.inc; it includes trace_body.glsl, trace.comp's helpers)
+for k in trace blend border reloc restir airrays restirgi; do
 	"$G" --target-env vulkan1.2 -V --vn "rtddgi_${k}_spv" -o "${k}.spv.h" "${k}.comp"
 done
-ls -la trace.spv.h blend.spv.h border.spv.h reloc.spv.h restir.spv.h airrays.spv.h
+ls -la trace.spv.h blend.spv.h border.spv.h reloc.spv.h restir.spv.h airrays.spv.h restirgi.spv.h

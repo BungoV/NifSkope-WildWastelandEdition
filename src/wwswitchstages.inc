@@ -572,6 +572,7 @@
 { "WW_CELL_REFL_PREV_RED", 0, "src/features/reflections/cellssr.cpp:142 wwCellReflPrevRed | re-read per frame or per call (a)" },
 { "WW_CELL_REFS_RED", 1, "src/cellview.cpp:3133 cellBuild | read while the cell document is built" },
 { "WW_CELL_REGION_RED", 0, "src/gl/lookdevstage.cpp:604 regionWalk | re-read per frame or per call (a)" },
+{ "WW_CELL_RESTIRGI_RED", 4, "src/features/gi/rtddgicell.cpp:1241 restirGiRedBits | hand: restirGiRedBits read every frame by rtddgiRestirGiPass (the kernel red bits); off is in rtddgiRestirGiShaderDefine, the loader define WW_CELL_RESTIRGI: the pass stops that frame, a set reloads the shaders (RTEMIS1)" },
 { "WW_CELL_RESTIR_RED", 0, "src/features/gi/rtddgicell.cpp:1073 restirRedBits | hand: restirRedBits read every frame by rtddgiRestirPass: the kernel red bits (RESTIRDI1)" },
 { "WW_CELL_ROOMCLAMP_PIN", 1, "src/cellview.cpp:4153 cellBuild | read while the cell document is built" },
 { "WW_CELL_ROOMFIT_RED", 2, "src/features/gi/probevolfine.cpp:1535 probeVolumesFineFit | cell build, function static: read once for the process (a reopen keeps it)" },

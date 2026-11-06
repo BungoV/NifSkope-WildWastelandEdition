@@ -104,6 +104,10 @@ bool rtddgiRestirShaderDefine();
 //! one call a frame after the shared opaque pass (glview.cpp, after wwCellAoPass): the g-buffer to the device, the four
 //! ReSTIR passes on the volume's BVH, the ratio back in place for the opaque pass (no-op while the preset is Low)
 void rtddgiRestirPass( Scene * scene );
+//! RTEMIS1 part 2: ReSTIR GI (High+; WW_CELL_RESTIRGI_RED=off: no), the loader's question and the pass after rtddgiRestirPass:
+//! one bounce a pixel on the volume's BVH, shaded by the volume, reused in time and space; the irradiance back for cellGiSample
+bool rtddgiRestirGiShaderDefine();
+void rtddgiRestirGiPass( Scene * scene );
 
 /* MODULES1 RESUME 15 (route b of notes RESEARCH_AIR.md): the lamps' shadowed share a froxel of cell_volair's grid, traced on
  * the volume's BVH (src/features/gi/rtddgi/airrays.comp). One call a frame from the air pass before its integrate: the
