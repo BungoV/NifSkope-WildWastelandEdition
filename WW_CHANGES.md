@@ -1,3 +1,15 @@
+## MODULES1 part 17 (2026-11-06): the street lamp's cone in the fog is a real spot light
+
+- The manager: the ref shows a lit cone under the Memory Den street lamp; ours showed a dim glow. The fixture
+  (CeilingLamp01ShortOn) carries only unshadowed omni lights; the game's cone is two LightBeamThinDusty01 effect cards,
+  which the air hides as fake air, so nothing physical made a cone.
+- `res/Data/Meshes/SetDressing/LightFixtures/CeilingLampShortOn.nifx`: a hero spot (900 lm, 4000 K, cone 40, down from
+  the shade). Under Mesh lights it takes over the bulb light inside the fixture.
+- `wwNifxSidecarFind` reads NifSkope's own `Data/` (copied from res/Data at link) after every other root, as the
+  archive rule does, so a game or mod `.nifx` of the same name still wins. Red `WW_OWNDATA_RED=1`.
+- Memory Den fog 22:00, cone vs the fog beside it (linear luminance): ref 2.66, before 1.46, now 2.85; the fog off the
+  beam's axis is unchanged (1.38 vs 1.36 before). Mesh lights keeps its shipped plan (off); the spot costs <= 0.3 ms there (121.3 -> 121.6).
+
 ## MODULES1 step 15 (2026-11-06): static GL buffers carry no RAM copy; the first full frame names its RAM owners
 
 - bungo: "fix the wild ram usage". Measured offline (no window, the real NVIDIA driver): a GL buffer filled from the

@@ -1,0 +1,22 @@
+{
+  "version": 1,
+  "lights": {
+    "Shade": {
+      "type": "spot",
+      "lumens": 900,
+      "kelvin": 4000,
+      "tier": "hero",
+      "position": [
+        0,
+        0,
+        -13.4
+      ],
+      "direction": [
+        0,
+        0,
+        -1
+      ],
+      "cone": 40
+    }
+  }
+}
