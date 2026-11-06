@@ -1,3 +1,9 @@
+## MODULES1 part 18c (2026-11-06): the air's lamp PCF compiles in the leak program
+- The 8-tap lamp-atlas sum reused the name `v` of the function's cube-face axis: the all-on air program (FOGLEAK + RTDDGI)
+  was refused by the driver. Renamed. Measured after the fix (Memory Den fog 22:00, 1080p, all on, 30-frame medians):
+  frame GPU 152.6 ms (repeat 152.2); FO4 culls off 172.3; VRS off: opaque 54.5 vs 45.7 ms; air grid Low: air 17.5 vs 37.2 ms;
+  contact shadows run the compute march (path=line, 0.18 ms) instead of the fragment pass (0.81 ms).
+
 ## MODULES1 part 18b (2026-11-06): the lamp cone undone, the beam cards drawn, softer air; contact march found again
 
 - Undone: part 17's hero spot `.nifx` for CeilingLampShortOn and the `wwNifxSidecarFind` own-Data root (bungo: the
