@@ -1337,6 +1337,229 @@ void rtddgiRestirPass( Scene * scene )
 			.arg( out.msWall, 0, 'f', 3 ).arg( in.red ) );
 }
 
+namespace {
+
+//! MODULES1 route (b): the air's ratio from the device (a texture buffer, RG32F, 2 a froxel), as RestirGl's out half
+struct AirRaysGl
+{
+	const void * owner = nullptr;
+	const bakert::DdgiGpuSession * session = nullptr;
+	int X = 0, Y = 0, Z = 0;
+	GLuint mem = 0, buf = 0, tex = 0, semVk = 0, semGl = 0;
+	bool history = false;
+	quint32 frame = 0;
+	qint64 runs = 0, busy = 0;
+	double msWall = 0;
+	float prows[12] = { 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0 }, pproj[4] = { 1, 1, 0, 0 };
+	QString last;
+};
+
+AirRaysGl & airRaysGl()
+{
+	static AirRaysGl * g = new AirRaysGl;   // never destroyed (as cell())
+	return *g;
+}
+
+void airRaysSay( AirRaysGl & G, const QString & line )
+{
+	if ( line == G.last )
+		return;
+	G.last = line;
+	std::fprintf( stderr, "air rays: %s\n", qPrintable( line ) );
+	std::fflush( stderr );
+}
+
+//! WW_CELL_AIR_RAYS_RED (live): nohole 1, nohist 2, noshadow 4 (airrays.comp AIR_BIT_*)
+int airRaysRedBits()
+{
+	int b = 0;
+	for ( const QString & r : wwEnvStr( "WW_CELL_AIR_RAYS_RED" ).split( QLatin1Char( ',' ), Qt::SkipEmptyParts ) ) {
+		const QString t = r.trimmed();
+		b |= t == QLatin1String( "nohole" ) ? 1 : t == QLatin1String( "nohist" ) ? 2 : t == QLatin1String( "noshadow" ) ? 4 : 0;
+	}
+	return b;
+}
+
+void airRaysDropGl( AirRaysGl & G, Renderer * r )
+{
+	if ( r && G.owner == r ) {
+		auto fn = r->fn;
+		GlShare & sh = glShare();
+		if ( G.tex )
+			fn->glDeleteTextures( 1, &G.tex );
+		if ( G.buf )
+			fn->glDeleteBuffers( 1, &G.buf );
+		if ( sh.ok ) {
+			if ( G.mem )
+				sh.deleteMem( 1, &G.mem );
+			for ( GLuint * s : { &G.semVk, &G.semGl } )
+				if ( *s )
+					sh.deleteSem( 1, s );
+		}
+	}
+	const QString last = G.last;
+	G = AirRaysGl();
+	G.last = last;
+}
+
+bool airRaysImport( AirRaysGl & G, Renderer * r, bakert::DdgiGpuSession * s, int X, int Y, int Z, QString * why )
+{
+	GlShare & g = glShare();
+	if ( !g.ok ) {
+		*why = g.why;
+		return false;
+	}
+	bakert::AirRaysGpuShare sh;
+	if ( !bakert::airraysGpuShare( s, X, Y, Z, &sh ) ) {
+		*why = QString::fromStdString( sh.why );
+		return false;
+	}
+	auto fn = r->fn;
+	for ( int i = 0; i < 16 && fn->glGetError() != GL_NO_ERROR; i++ ) {}
+	G.owner = r;
+	const GLint dedicated = 1;
+	g.createMem( 1, &G.mem );
+	g.memParam( G.mem, kGlDedicatedMemoryObject, &dedicated );
+	g.importMem( G.mem, sh.outSize, kGlHandleOpaqueWin32, sh.outMemory );
+	fn->glGenBuffers( 1, &G.buf );
+	fn->glBindBuffer( GL_TEXTURE_BUFFER, G.buf );
+	g.bufferStorageMem( GL_TEXTURE_BUFFER, GLsizeiptr( X ) * Y * Z * 8, G.mem, 0 );
+	fn->glBindBuffer( GL_TEXTURE_BUFFER, 0 );
+	g.genSem( 1, &G.semVk );
+	g.importSem( G.semVk, kGlHandleOpaqueWin32, sh.vkDone );
+	g.genSem( 1, &G.semGl );
+	g.importSem( G.semGl, kGlHandleOpaqueWin32, sh.glDone );
+	GLint prevActive = 0;
+	fn->glGetIntegerv( GL_ACTIVE_TEXTURE, &prevActive );
+	fn->glActiveTexture( GLenum( GL_TEXTURE0 + WwCellUnit::AirLampRays ) );
+	fn->glGenTextures( 1, &G.tex );
+	fn->glBindTexture( GL_TEXTURE_BUFFER, G.tex );
+	fn->glTexBuffer( GL_TEXTURE_BUFFER, GL_RG32F, G.buf );
+	fn->glBindTexture( GL_TEXTURE_BUFFER, 0 );
+	fn->glActiveTexture( GLenum( prevActive ) );
+	const GLenum err = fn->glGetError();
+	for ( void * h : { sh.outMemory, sh.vkDone, sh.glDone } )
+		bakert::ddgiGpuCloseHandle( h );
+	if ( err != GL_NO_ERROR ) {
+		*why = QStringLiteral( "the GL import failed (GL error 0x%1)" ).arg( qulonglong( err ), 0, 16 );
+		return false;
+	}
+	G.session = s;
+	G.X = X;
+	G.Y = Y;
+	G.Z = Z;
+	return true;
+}
+
+void airRaysBind( Renderer * r, GLuint tex )
+{
+	GLint prevActive = 0;
+	r->fn->glGetIntegerv( GL_ACTIVE_TEXTURE, &prevActive );
+	r->fn->glActiveTexture( GLenum( GL_TEXTURE0 + WwCellUnit::AirLampRays ) );
+	r->fn->glBindTexture( GL_TEXTURE_BUFFER, tex );
+	r->fn->glActiveTexture( GLenum( prevActive ) );
+}
+
+} // namespace
+
+bool rtddgiAirRaysFrame( Scene * scene, int cols, int rows, int slices, float nearT, float logRatio, float viewUnit )
+{
+	AirRaysGl & G = airRaysGl();
+	Renderer * r = scene ? scene->renderer : nullptr;
+	if ( !r || scene->selecting || !scene->nifModel || cols <= 0 || rows <= 0 || slices <= 0 )
+		return false;
+	Cell & c = cell();
+	if ( !c.live || !c.live->live.isOpen() || c.nif != scene->nifModel || c.glOwner != r ) {
+		airRaysBind( r, 0 );
+		airRaysSay( G, QStringLiteral( "waiting for the ray-traced GI volume (the rays trace its BVH); the air reads its walk meanwhile" ) );
+		return false;
+	}
+	if ( !c.interop ) {
+		airRaysBind( r, 0 );
+		airRaysSay( G, QStringLiteral( "refused(the volume has no GL interop: %1)" ).arg( c.interopWhy ) );
+		return false;
+	}
+	bakert::DdgiGpuSession * s = c.live->live.session();
+	if ( G.owner != r || G.session != s || G.X != cols || G.Y != rows || G.Z != slices ) {
+		airRaysDropGl( G, r );
+		QString why;
+		if ( !airRaysImport( G, r, s, cols, rows, slices, &why ) ) {
+			airRaysDropGl( G, r );
+			airRaysBind( r, 0 );
+			airRaysSay( G, QStringLiteral( "refused(%1)" ).arg( why ) );
+			return false;
+		}
+	}
+	GlShare & sh = glShare();
+	auto fn = r->fn;
+	// the camera, as rtddgiRestirPass: view -> world rows moved into the soup's local frame; the frame's projection
+	bakert::AirRaysGpuIn in;
+	const Transform & vt = scene->view;
+	const float sc = vt.scale != 0.0f ? vt.scale : 1.0f;
+	for ( int k = 0; k < 3; k++ ) {
+		float w = 0.0f;
+		for ( int j = 0; j < 3; j++ )
+			w -= vt.rotation( j, k ) * vt.translation[j];
+		for ( int j = 0; j < 3; j++ )
+			in.rows[k * 4 + j] = vt.rotation( j, k ) / sc;
+		in.rows[k * 4 + 3] = w / sc;
+	}
+	in.rows[3] = float( double( in.rows[3] ) - c.live->live.localX() );
+	in.rows[7] = float( double( in.rows[7] ) - c.live->live.localY() );
+	const auto & pm = r->globalUniforms->projectionMatrix;
+	in.proj[0] = pm[0][0];
+	in.proj[1] = pm[1][1];
+	in.proj[2] = 0.0f;   // cell_volair's eye rays take no off-centre terms (main: ndc / volProj)
+	in.proj[3] = 0.0f;
+	std::copy( G.prows, G.prows + 12, in.prows );
+	std::copy( G.pproj, G.pproj + 4, in.pproj );
+	in.history = G.history;
+	in.X = cols;
+	in.Y = rows;
+	in.Z = slices;
+	in.nearT = nearT;
+	in.logRange = logRatio;
+	in.viewUnit = viewUnit > 0.0f ? viewUnit : 1.0f;
+	in.frame = G.frame++;
+	in.red = airRaysRedBits();
+	in.beforeSubmit = [&G, &sh, fn]() {
+		sh.signalSem( G.semGl, 1, &G.buf, 0, nullptr, nullptr );
+		fn->glFlush();
+		return true;
+	};
+	bakert::AirRaysGpuOut out;
+	if ( !bakert::airraysGpuStep( s, in, &out ) ) {
+		G.history = false;
+		G.busy += out.busy ? 1 : 0;
+		airRaysBind( r, 0 );
+		airRaysSay( G, out.busy ? QStringLiteral( "busy (a bake holds the device): this frame reads the walk" )
+			: QStringLiteral( "refused(%1)" ).arg( QString::fromStdString( out.why ) ) );
+		return false;
+	}
+	sh.waitSem( G.semVk, 1, &G.buf, 0, nullptr, nullptr );
+	G.history = true;
+	G.msWall = out.msWall;
+	std::copy( in.rows, in.rows + 12, G.prows );
+	std::copy( in.proj, in.proj + 4, G.pproj );
+	airRaysBind( r, G.tex );
+	const std::vector<float> & pl = c.live->live.packedLights();
+	int shadowLamps = 0;
+	for ( size_t i = 0; i + 31 < pl.size(); i += 32 )
+		shadowLamps += pl[i + 30] > 0.5f ? 1 : 0;
+	if ( ( G.runs++ % 64 ) == 0 )
+		airRaysSay( G, QStringLiteral( "on %1 x %2 x %3 froxels, %4 shadow lamps of %5, 2 rays a froxel, frame %6, device wall %7 ms, red %8" )
+			.arg( cols ).arg( rows ).arg( slices ).arg( shadowLamps ).arg( pl.size() / 32 ).arg( in.frame ).arg( out.msWall, 0, 'f', 3 )
+			.arg( in.red ) );
+	return true;
+}
+
+QString rtddgiAirRaysEcho()
+{
+	const AirRaysGl & G = airRaysGl();
+	return QStringLiteral( "air rays %1 x %2 x %3 runs %4 busy %5 wall %6 ms" ).arg( G.X ).arg( G.Y ).arg( G.Z ).arg( G.runs ).arg( G.busy )
+		.arg( G.msWall, 0, 'f', 3 );
+}
+
 bool rtddgiCellPinned()
 {
 	return wwEnvIsSet( "WW_CELL_RTDDGI" );

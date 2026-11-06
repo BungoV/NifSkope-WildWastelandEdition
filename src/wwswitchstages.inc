@@ -126,6 +126,7 @@
 { "WW_CELL_AIR_PHASE_G", 0, "src/features/air/cellvolair.cpp:727 vaPhaseMieG | re-read per frame or per call (a)" },
 { "WW_CELL_AIR_PROBE", 0, "src/features/air/cellvolair.cpp:232 vs | init-once state, re-read when a live set moves its prefix (b)" },
 { "WW_CELL_AIR_PROF", 0, "src/features/air/cellvolair.cpp:1315 wwVolAirPass | re-read per frame or per call (a)" },
+{ "WW_CELL_AIR_RAYS_RED", 0, "src/features/gi/rtddgicell.cpp:1376 airRaysRedBits | re-read per frame or per call (a)" },
 { "WW_CELL_AIR_RED", 0, "src/features/air/cellvolair.cpp:188 vs | init-once state, re-read when a live set moves its prefix (b)" },
 { "WW_CELL_AIR_SHADOW", 0, "src/features/air/cellvolair.cpp:187 vs | init-once state, re-read when a live set moves its prefix (b)" },
 { "WW_CELL_AIR_SHADOW_RED", 0, "src/features/air/cellvolair.cpp:186 vs | init-once state, re-read when a live set moves its prefix (b)" },

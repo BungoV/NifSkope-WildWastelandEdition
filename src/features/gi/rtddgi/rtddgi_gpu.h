@@ -240,8 +240,9 @@ struct AirRaysGpuIn
 	uint32_t frame = 0;
 	int samples = 2, frames = 16;         // lamps a froxel a frame; the running means' frames clamp
 	int red = 0;                          // airrays.comp AIR_BIT_* (nohole 1, nohist 2, noshadow 4)
-	float nearZ = 1.0f, logRange = 1.0f;  // volSlices.x and ln(far / near)
+	float nearT = 1.0f, logRange = 1.0f;  // volSlices.x and ln(far / near): ray distances t in game units
 	float bias = 2.0f;                    // shadow-ray start and end off the froxel and the lamp, units
+	float viewUnit = 1.0f;                // t per view unit (cell_volair's fogDistScale)
 	float rows[12] = { 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0 };   // view -> the soup's local frame
 	float proj[4] = { 1, 1, 0, 0 };                            // P00, P11, P20, P21
 	float prows[12] = { 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0 };  // the previous frame's

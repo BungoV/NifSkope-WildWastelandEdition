@@ -1,7 +1,7 @@
 #version 460
 // MODULES1 RESUME 15 item 2, route (b) of notes RESEARCH_AIR.md (MegaLights-style rays, Narkowicz & Costa 2025 pp. 14-20,
-// 57-63): the placed lamps' shadow in the air from ray queries on the DDGI volume's BVH, one invocation a froxel of a
-// half-resolution grid. Per froxel: 2 lamps by weighted reservoir sampling over every lamp whose sphere holds the
+// 57-63): the placed lamps' shadow in the air from ray queries on the DDGI volume's BVH, one invocation a froxel of
+// cell_volair's own grid. Per froxel: 2 lamps by weighted reservoir sampling over every lamp whose sphere holds the
 // froxel centre (weight = luminance x falloff x spot; the air has no normal), one shadow ray each, the ratio estimator
 // (shadowed / unshadowed of the sampled lamps, Heitz et al. 2018, as restir.comp mode 3) as running means of num and den
 // reprojected from the previous frame's froxel. cell_volair.frag mode 2 multiplies the exact unshadowed lamp sum by it.
@@ -18,8 +18,8 @@ layout( local_size_x = 64 ) in;
 
 struct AirParams {
 	ivec4 size;       // froxel columns, rows, slices, frame
-	ivec4 opts;       // samples a froxel, the frames clamp, red bits, 0
-	vec4 slice;       // near, ln(far / near) (cell_volair.frag volSlices.xy), shadow-ray bias, history valid (1)
+	ivec4 opts;       // samples a froxel, the frames clamp, red bits, history valid (1)
+	vec4 slice;       // near, ln(far / near) (cell_volair.frag volSlices.xy, ray distances t), shadow-ray bias, t per view unit (fogDistScale)
 	vec4 rows[3];     // view -> world (the soup's local frame)
 	vec4 proj;        // P00, P11, P20, P21
 	vec4 prows[3];    // the previous frame's
@@ -117,12 +117,12 @@ float arRand( inout uint s )
 // MIRROR restir.comp rsToWorld (rows = view -> world; their inverse below is the transpose about .w)
 vec3 arToWorld( vec4 r0, vec4 r1, vec4 r2, vec3 v ) { return vec3( dot( r0.xyz, v ) + r0.w, dot( r1.xyz, v ) + r1.w, dot( r2.xyz, v ) + r2.w ); }
 
-// froxel (x, y, k centre) -> view point; the slices exponential as cell_volair.frag's volSlices
+// froxel (x, y, k centre) -> view point, as cell_volair.frag main: t along the normalized eye ray, exponential slices
 vec3 arView( float x, float y, float k, vec4 pr )
 {
-	const float z = A.slice.x * exp( k / float( A.size.z ) * A.slice.y );
+	const float t = A.slice.x * exp( k / float( A.size.z ) * A.slice.y );
 	const vec2 ndc = vec2( x / float( A.size.x ), y / float( A.size.y ) ) * 2.0 - 1.0;
-	return vec3( ( ndc.x + pr.z ) / pr.x * z, ( ndc.y + pr.w ) / pr.y * z, -z );
+	return normalize( vec3( ( ndc.x + pr.z ) / pr.x, ( ndc.y + pr.w ) / pr.y, -1.0 ) ) * ( t / A.slice.w );
 }
 
 void main()
@@ -169,14 +169,15 @@ void main()
 
 	// history: the previous frame's froxel holding this world point, running means clamped to opts.y frames
 	vec4 a = vec4( num, den, 1.0, 0.0 );
-	if ( A.slice.w > 0.5 && ( A.opts.z & AIR_BIT_NOHIST ) == 0 ) {
+	if ( A.opts.w == 1 && ( A.opts.z & AIR_BIT_NOHIST ) == 0 ) {
 		const vec3 t = Pw - vec3( A.prows[0].w, A.prows[1].w, A.prows[2].w );
 		const vec3 v = vec3( dot( vec3( A.prows[0].x, A.prows[1].x, A.prows[2].x ), t ), dot( vec3( A.prows[0].y, A.prows[1].y, A.prows[2].y ), t ),
 			dot( vec3( A.prows[0].z, A.prows[1].z, A.prows[2].z ), t ) );
-		if ( v.z < -A.slice.x ) {
+		const float tv = length( v ) * A.slice.w;
+		if ( v.z < 0.0 && tv > A.slice.x ) {
 			const float z = -v.z;
 			const vec2 ndc = vec2( v.x / z * A.pproj.x - A.pproj.z, v.y / z * A.pproj.y - A.pproj.w );
-			const vec3 f = vec3( ( ndc * 0.5 + 0.5 ) * vec2( A.size.xy ), log( z / A.slice.x ) / A.slice.y * float( A.size.z ) );
+			const vec3 f = vec3( ( ndc * 0.5 + 0.5 ) * vec2( A.size.xy ), log( tv / A.slice.x ) / A.slice.y * float( A.size.z ) );
 			const ivec3 c = ivec3( floor( f ) );
 			if ( all( greaterThanEqual( c, ivec3( 0 ) ) ) && all( lessThan( c, A.size.xyz ) ) ) {
 				const vec4 h = accPrev[uint( c.x + ( c.y + c.z * A.size.y ) * A.size.x )];

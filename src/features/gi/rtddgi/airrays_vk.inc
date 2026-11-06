@@ -326,10 +326,11 @@ bool airraysGpuStep( DdgiGpuSession * s, const AirRaysGpuIn & in, AirRaysGpuOut 
 		pi[4] = in.samples;
 		pi[5] = in.frames;
 		pi[6] = in.red;
-		p[8] = in.nearZ;
+		pi[7] = in.history ? 1 : 0;
+		p[8] = in.nearT;
 		p[9] = in.logRange;
 		p[10] = in.bias;
-		p[11] = in.history ? 1.0f : 0.0f;
+		p[11] = in.viewUnit;
 		std::memcpy( p + 12, in.rows, sizeof in.rows );
 		std::memcpy( p + 24, in.proj, sizeof in.proj );
 		std::memcpy( p + 28, in.prows, sizeof in.prows );
