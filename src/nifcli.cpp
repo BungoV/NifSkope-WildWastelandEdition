@@ -8245,6 +8245,13 @@ int nifskopeCliMain( const QStringList & args )
 		err().flush();
 		return rc;
 	}
+	// `airrays` gates the air's lamp-shadow rays (lane MODULES1 route b; src/features/gi/rtddgi.cpp airraysCli)
+	if ( cmd == QLatin1String( "airrays" ) ) {
+		const int rc = airraysCli( a );
+		out().flush();
+		err().flush();
+		return rc;
+	}
 	// `volumes` builds the Space stage (rooms, thresholds, shapes) of a soup (lane VOLFIT1; src/features/gi/probevolumes.cpp)
 	// `volcheck` checks a Space stage's shapes against the soup's real triangles by rays (lane VOLRAY1; src/features/gi/probevolcheck.cpp)
 	if ( cmd == QLatin1String( "volcheck" ) ) {

@@ -250,5 +250,7 @@ int rtddgiCli( const QStringList & args );
  *  CLI light casts shadows) on a g-buffer the CPU traces from the camera; the CPU twin (src/restirmath.h) and, with
  *  --gpu 1, the GPU (src/features/gi/rtddgi/restir.comp) run the same frames; prints their differences, writes restir_frame.tsv */
 int restirCli( const QStringList & args );
+//! MODULES1 RESUME 15: `-no-gui airrays`, the air rays' GPU share against the exact share by the CPU walk, and their cost
+int airraysCli( const QStringList & args );
 
 #endif // RTDDGI_H

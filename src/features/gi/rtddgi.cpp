@@ -1874,3 +1874,230 @@ int restirCli( const QStringList & args )
 	}
 	return 0;
 }
+
+/* MODULES1 RESUME 15: the air rays' gate (airrays.comp). A still camera: after F frames the GPU's running share must
+ * approach the exact share sum_i w_i vis_i / sum_i w_i over every lamp reaching the froxel (w = arTarget, vis = the
+ * CPU walk of the soup's BVH from the froxel to the lamp), which is what the estimator's means converge to. */
+int airraysCli( const QStringList & args )
+{
+	QString soupPath, outDir, rect, redText;
+	RtDdgiSpec spec;
+	spec.gpu = 1;
+	spec.place = false;
+	spec.fitProbes = true;
+	spec.maxProbes = 4096;
+	spec.rays = 64;
+	WwCellLighting L;
+	L.interior = true;
+	ProbeSkyLight sky;
+	float cam[6] = { 0, 0, 0, 0, 1, 0 };
+	bool haveCam = false;
+	int X = 40, Y = 24, Z = 32, frames = 64, samples = 2, timeX = 0;
+	float fov = 55.0f, nearT = 8.0f, farT = 4000.0f;
+	for ( int i = 0; i < args.size(); i++ ) {
+		const QString & a = args[i];
+		const QString nx = i + 1 < args.size() ? args[i + 1] : QString();
+		if ( a == QLatin1String( "--soup" ) ) { soupPath = nx; i++; }
+		else if ( a == QLatin1String( "--out" ) ) { outDir = nx; i++; }
+		else if ( a == QLatin1String( "--rect" ) ) { rect = nx; i++; }
+		else if ( a == QLatin1String( "--red" ) ) { redText = nx; i++; }
+		else if ( a == QLatin1String( "--frames" ) ) { frames = std::max( 1, nx.toInt() ); i++; }
+		else if ( a == QLatin1String( "--samples" ) ) { samples = std::clamp( nx.toInt(), 1, 4 ); i++; }
+		else if ( a == QLatin1String( "--fov" ) ) { fov = nx.toFloat(); i++; }
+		else if ( a == QLatin1String( "--near" ) ) { nearT = nx.toFloat(); i++; }
+		else if ( a == QLatin1String( "--far" ) ) { farT = nx.toFloat(); i++; }
+		else if ( a == QLatin1String( "--time-grid" ) ) { timeX = nx.toInt(); i++; }
+		else if ( a == QLatin1String( "--grid" ) ) {
+			const QStringList v = nx.split( ',' );
+			if ( v.size() == 3 ) {
+				X = std::max( 1, v[0].toInt() );
+				Y = std::max( 1, v[1].toInt() );
+				Z = std::max( 1, v[2].toInt() );
+			}
+			i++;
+		} else if ( a == QLatin1String( "--cam" ) ) {
+			const QStringList v = nx.split( ',' );
+			if ( v.size() == 6 ) {
+				for ( int k = 0; k < 6; k++ )
+					cam[k] = v[k].toFloat();
+				haveCam = true;
+			}
+			i++;
+		} else if ( a == QLatin1String( "--light" ) ) {
+			const QStringList v = nx.split( ',' );
+			if ( v.size() == 7 ) {
+				WwCellLight l;
+				for ( int c = 0; c < 3; c++ ) {
+					l.pos[c] = v[c].toFloat();
+					l.color[c] = v[4 + c].toFloat();
+				}
+				l.radius = v[3].toFloat();
+				l.shadow = 3;
+				L.lights.push_back( l );
+			}
+			i++;
+		}
+	}
+	const QStringList rc = rect.split( ',' );
+	if ( soupPath.isEmpty() || outDir.isEmpty() || rc.size() != 4 || L.lights.isEmpty() || !haveCam || !( farT > nearT && nearT > 0.0f ) ) {
+		std::fprintf( stderr, "usage: airrays --soup <file> --rect minX,minY,maxX,maxY --out <dir> --cam ex,ey,ez,tx,ty,tz "
+			"--light x,y,z,radius,r,g,b [...] [--grid X,Y,Z] [--near t] [--far t] [--fov deg] [--frames n] [--samples S] "
+			"[--time-grid X (cost at X x X*9/16 x 64)] [--red nohole,nohist,noshadow]\n" );
+		return 2;
+	}
+	for ( int k = 0; k < 4; k++ )
+		spec.rect[k] = rc[k].toFloat();
+	int red = 0;
+	for ( const QString & r : redText.split( ',', Qt::SkipEmptyParts ) ) {
+		const QString t = r.trimmed();
+		red |= t == QLatin1String( "nohole" ) ? 1 : t == QLatin1String( "nohist" ) ? 2 : t == QLatin1String( "noshadow" ) ? 4 : 0;
+	}
+	ProbeSoup soup;
+	QString err;
+	if ( !probeSoupRead( soupPath, &soup, &err ) ) {
+		std::fprintf( stderr, "airrays: %s\n", qPrintable( err ) );
+		return 1;
+	}
+	RtDdgiVolume vol;
+	Packed S;
+	if ( !packVolume( soup, L, sky, spec, &vol, S ) ) {
+		std::fprintf( stderr, "airrays: %s\n", qPrintable( vol.error ) );
+		return 1;
+	}
+	const V3 eye( float( cam[0] - S.O[0] ), float( cam[1] - S.O[1] ), cam[2] );
+	const V3 at( float( cam[3] - S.O[0] ), float( cam[4] - S.O[1] ), cam[5] );
+	const V3 f = normalize( at - eye );
+	const V3 rt = normalize( cross( f, std::fabs( f.z ) > 0.99f ? V3( 0, 1, 0 ) : V3( 0, 0, 1 ) ) );
+	const V3 up = cross( rt, f );
+	const float rows[12] = { rt.x, up.x, -f.x, eye.x, rt.y, up.y, -f.y, eye.y, rt.z, up.z, -f.z, eye.z };
+	const float fy = 1.0f / std::tan( 0.5f * fov * kPi / 180.0f );
+	const float proj[4] = { fy * float( Y ) / float( X ), fy, 0.0f, 0.0f };
+	const float logR = std::log( farT / nearT ), bias = 2.0f;
+	RtDdgiLive live;
+	RtDdgiSpec gs = spec;
+	gs.relocate = false;
+	gs.classify = false;
+	if ( !live.open( soup, L, sky, gs, false ) ) {
+		std::printf( "airrays: no gpu (%s)\n", qPrintable( live.why() ) );
+		return 1;
+	}
+	auto inFor = [&]( int gx, int gy, int gz ) {
+		bakert::AirRaysGpuIn in;
+		in.X = gx;
+		in.Y = gy;
+		in.Z = gz;
+		in.samples = samples;
+		in.frames = frames;
+		in.red = red;
+		in.nearT = nearT;
+		in.logRange = logR;
+		in.bias = bias;
+		in.viewUnit = 1.0f;
+		std::copy( rows, rows + 12, in.rows );
+		std::copy( rows, rows + 12, in.prows );
+		const float pr[4] = { fy * float( gy ) / float( gx ), fy, 0.0f, 0.0f };
+		std::copy( pr, pr + 4, in.proj );
+		std::copy( pr, pr + 4, in.pproj );
+		return in;
+	};
+	bakert::AirRaysGpuOut go;
+	for ( int fr = 0; fr < frames; fr++ ) {
+		bakert::AirRaysGpuIn in = inFor( X, Y, Z );
+		in.frame = uint32_t( fr );
+		in.history = fr > 0;
+		in.readBack = fr + 1 == frames;
+		if ( !bakert::airraysGpuStep( live.session(), in, &go ) ) {
+			std::printf( "airrays: frame %d, the GPU refused (%s)\n", fr, go.why.c_str() );
+			return 1;
+		}
+	}
+	// the exact share per froxel (the kernel's froxel point and lamp weight, the CPU walk for the shadow)
+	const int nL = S.nLights;
+	const size_t n = size_t( X ) * size_t( Y ) * size_t( Z );
+	std::vector<float> exact( n, -1.0f );
+	int lit = 0, within05 = 0, within10 = 0, missing = 0;
+	double sumAbs = 0, maxAbs = 0, meanG = 0, meanE = 0;
+	for ( size_t id = 0; id < n; id++ ) {
+		const int x = int( id % size_t( X ) ), y = int( id / size_t( X ) % size_t( Y ) ), k = int( id / ( size_t( X ) * size_t( Y ) ) );
+		const float t = nearT * std::exp( ( float( k ) + 0.5f ) / float( Z ) * logR );
+		const V3 dv = normalize( V3( ( ( float( x ) + 0.5f ) / float( X ) * 2.0f - 1.0f ) / proj[0], ( ( float( y ) + 0.5f ) / float( Y ) * 2.0f - 1.0f ) / proj[1], -1.0f ) ) * t;
+		const V3 P( rows[0] * dv.x + rows[1] * dv.y + rows[2] * dv.z + rows[3], rows[4] * dv.x + rows[5] * dv.y + rows[6] * dv.z + rows[7],
+			rows[8] * dv.x + rows[9] * dv.y + rows[10] * dv.z + rows[11] );
+		double ws = 0, wv = 0;
+		for ( int i = 0; i < nL; i++ ) {
+			const float * l = &S.lights[size_t( i ) * kLight];
+			const V3 Lv( l[0] - P.x, l[1] - P.y, l[2] - P.z );
+			const float d = length( Lv );
+			if ( d >= l[3] )
+				continue;
+			const int shape = int( l[28] + 0.5f );
+			if ( shape == 1 && -( Lv.x * l[8] + Lv.y * l[9] + Lv.z * l[10] ) < 0.0f )
+				continue;
+			if ( shape == 2 && ( std::fabs( l[16] * P.x + l[17] * P.y + l[18] * P.z + l[19] ) > 1.0f
+				|| std::fabs( l[20] * P.x + l[21] * P.y + l[22] * P.z + l[23] ) > 1.0f || std::fabs( l[24] * P.x + l[25] * P.y + l[26] * P.z + l[27] ) > 1.0f ) )
+				continue;
+			float att = lightRadial( d, l[3], l[12], l[13], l[14] );
+			if ( l[7] > 0.5f )
+				att *= spotCone( -( Lv.x * l[8] + Lv.y * l[9] + Lv.z * l[10] ) / std::max( d, 0.001f ), l[11], l[15] );
+			const float w = std::max( restir::luminance( l[4], l[5], l[6] ) * att, 0.0f );
+			if ( !( w > 0.0f ) )
+				continue;
+			bool v = true;
+			if ( l[30] > 0.5f && d - 2.0f * bias > 1e-3f ) {   // the reds bend the GPU only: the exact share keeps every shadow
+				const V3 dir = Lv * ( 1.0f / std::max( d, 1e-4f ) );
+				const V3 o = P + dir * bias;
+				const double od[3] = { o.x, o.y, o.z }, dd[3] = { dir.x, dir.y, dir.z };
+				v = !S.bvh.anyHitIn( od, dd, 1e-4, double( d - 2.0f * bias ), []( int ) { return true; } );
+			}
+			ws += w;
+			wv += v ? w : 0.0;
+		}
+		if ( !( ws > 0.0 ) || go.ratio.size() != n * 2 )
+			continue;
+		if ( !( go.ratio[id * 2 + 1] > 0.0f ) ) {
+			missing++;   // a lamp reaches the froxel and the GPU found none
+			continue;
+		}
+		exact[id] = float( wv / ws );
+		const double dlt = std::fabs( double( go.ratio[id * 2] ) - wv / ws );
+		lit++;
+		sumAbs += dlt;
+		maxAbs = std::max( maxAbs, dlt );
+		within05 += dlt <= 0.05 ? 1 : 0;
+		within10 += dlt <= 0.10 ? 1 : 0;
+		meanG += go.ratio[id * 2];
+		meanE += wv / ws;
+	}
+	const double lv = std::max( lit, 1 );
+	std::printf( "airrays: grid %d x %d x %d, %d lamps, %d frames, %d samples, red %d; %d froxels lit, %d with no gpu lamp; |gpu - exact| mean %.4f max %.4f, "
+		"within 0.05 %.2f %%, within 0.10 %.2f %%; mean share gpu %.4f exact %.4f\n", X, Y, Z, nL, frames, samples, red, lit, missing, sumAbs / lv,
+		maxAbs, 100.0 * within05 / lv, 100.0 * within10 / lv, meanG / lv, meanE / lv );
+	std::fflush( stdout );
+	QDir().mkpath( outDir );
+	QFile o( outDir + QStringLiteral( "/airrays.tsv" ) );
+	if ( o.open( QIODevice::WriteOnly | QIODevice::Text ) ) {
+		o.write( "x\ty\tk\tgpu\tframes\texact\n" );
+		for ( size_t id = 0; id < n && go.ratio.size() == n * 2; id++ )
+			o.write( QStringLiteral( "%1\t%2\t%3\t%4\t%5\t%6\n" ).arg( id % size_t( X ) ).arg( id / size_t( X ) % size_t( Y ) )
+				.arg( id / ( size_t( X ) * size_t( Y ) ) ).arg( go.ratio[id * 2] ).arg( go.ratio[id * 2 + 1] ).arg( exact[id] ).toLatin1() );
+		o.close();
+	}
+	if ( timeX > 0 ) {
+		// the cost at the size of a real grid: wall ms a step (submit + wait), median of 32 after 4 warm-ups
+		const int ty = std::max( 1, timeX * 9 / 16 );
+		std::vector<double> ms;
+		for ( int fr = 0; fr < 36; fr++ ) {
+			bakert::AirRaysGpuIn in = inFor( timeX, ty, 64 );
+			in.frame = uint32_t( fr );
+			in.history = fr > 0;
+			if ( !bakert::airraysGpuStep( live.session(), in, &go ) )
+				break;
+			if ( fr >= 4 )
+				ms.push_back( go.msWall );
+		}
+		std::sort( ms.begin(), ms.end() );
+		std::printf( "airrays cost: grid %d x %d x 64 (%d froxels), %d lamps, %d samples: wall ms a step median %.3f min %.3f max %.3f\n", timeX, ty,
+			timeX * ty * 64, nL, samples, ms.empty() ? -1.0 : ms[ms.size() / 2], ms.empty() ? -1.0 : ms.front(), ms.empty() ? -1.0 : ms.back() );
+	}
+	return 0;
+}
