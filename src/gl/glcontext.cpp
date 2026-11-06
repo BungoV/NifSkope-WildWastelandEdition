@@ -43,6 +43,7 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include "features/near/celldrawpacket.h"	// lane GAPPERF-BINDLESS: the setters record while a draw packet records
 #include "features/near/cellbindless.h"	// lane BINDLESS2
 #include "progcachekeep.h"	// lane BUGS1102C
+#include "gpustage.h"	// MODULES1: static buffers filled by a GPU copy (no driver RAM copy)
 
 // lane CELLUNI1: inside the cell-uniform scope an unchanged value is not uploaded again (celluniform.h)
 #define WWCU( k, l, v, n ) WwCellUni::want( wwUni, l, WwCellUni::k, v, n, WwDp::rec != nullptr )
@@ -2114,7 +2115,7 @@ NifSkopeOpenGLContext::ShapeData::ShapeData(
 			continue;
 		if ( i < 16 && !halves[i].empty() ) {
 			size_t	nBytes = halves[i].size() * sizeof( std::uint16_t );
-			f.glBufferSubData( GL_ARRAY_BUFFER, GLintptr( attrOffset ), GLsizeiptr( nBytes ), halves[i].data() );
+			wwStageUpload( GL_ARRAY_BUFFER, GLintptr( attrOffset ), GLsizeiptr( nBytes ), halves[i].data() );
 			f.glVertexAttribPointer( GLuint( i ), GLint( n ), GL_HALF_FLOAT, GL_FALSE,
 										GLsizei( ( n == 3 ? 4 : n ) * sizeof( std::uint16_t ) ), (void *) attrOffset );
 			f.glEnableVertexAttribArray( GLuint( i ) );
@@ -2122,7 +2123,7 @@ NifSkopeOpenGLContext::ShapeData::ShapeData(
 			continue;
 		}
 		size_t	nBytes = n * sizeof( float ) * vertCnt;
-		f.glBufferSubData( GL_ARRAY_BUFFER, GLintptr( attrOffset ), GLsizeiptr( nBytes ), attrData[i] );
+		wwStageUpload( GL_ARRAY_BUFFER, GLintptr( attrOffset ), GLsizeiptr( nBytes ), attrData[i] );
 		f.glVertexAttribPointer( GLuint( i ), GLint( n ), GL_FLOAT, GL_FALSE, 0, (void *) attrOffset );
 		f.glEnableVertexAttribArray( GLuint( i ) );
 		attrOffset = attrOffset + nBytes;
@@ -2131,7 +2132,7 @@ NifSkopeOpenGLContext::ShapeData::ShapeData(
 	if ( elementDataSize ) [[likely]] {
 		f.glGenBuffers( 1, &ebo );
 		f.glBindBuffer( GL_ELEMENT_ARRAY_BUFFER, ebo );
-		f.glBufferData( GL_ELEMENT_ARRAY_BUFFER, GLsizeiptr( elementDataSize ), elementData, GL_STATIC_DRAW );
+		wwStageBufferData( GL_ELEMENT_ARRAY_BUFFER, GLsizeiptr( elementDataSize ), elementData, GL_STATIC_DRAW );
 	}
 
 	// TEMP DIAGNOSTIC (WW_GRID_TRACE): trace small streaming uploads (grid/axes).

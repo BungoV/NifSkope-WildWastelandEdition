@@ -6,6 +6,7 @@
 #include "features/shared/cellpasstime.h"
 #include "gl/cellunits.h"	// lane FIX1101A lodch: the far stream's unit
 #include "gl/glscene.h"
+#include "gl/gpustage.h"	// MODULES1: static buffers filled by a GPU copy (no driver RAM copy)
 #include "gl/renderer.h"
 
 #include <QElapsedTimer>
@@ -129,7 +130,7 @@ Copy * copyOf( GLFunctions * fn, Ctx & c, const CellMeshInst & d )
 	fn->glBindVertexArray( k.vao );
 	fn->glGenBuffers( 1, &k.vbo );
 	fn->glBindBuffer( GL_ARRAY_BUFFER, k.vbo );
-	fn->glBufferData( GL_ARRAY_BUFFER, GLsizeiptr( d.vbo.size() ), d.vbo.constData(), GL_STATIC_DRAW );
+	wwStageBufferData( GL_ARRAY_BUFFER, GLsizeiptr( d.vbo.size() ), d.vbo.constData(), GL_STATIC_DRAW );
 	const GLsizei vs = 36;
 	fn->glEnableVertexAttribArray( 0 );
 	fn->glVertexAttribPointer( 0, 3, GL_FLOAT, GL_FALSE, vs, (const void *) 0 );
@@ -143,7 +144,7 @@ Copy * copyOf( GLFunctions * fn, Ctx & c, const CellMeshInst & d )
 	fn->glVertexAttribPointer( 7, 2, GL_FLOAT, GL_FALSE, vs, (const void *) 28 );
 	fn->glGenBuffers( 1, &k.rows );
 	fn->glBindBuffer( GL_ARRAY_BUFFER, k.rows );
-	fn->glBufferData( GL_ARRAY_BUFFER, GLsizeiptr( d.inst.size() ) * 4, d.inst.constData(), GL_STATIC_DRAW );
+	wwStageBufferData( GL_ARRAY_BUFFER, GLsizeiptr( d.inst.size() ) * 4, d.inst.constData(), GL_STATIC_DRAW );
 	for ( int a = 0; a < 4; a++ ) {
 		fn->glEnableVertexAttribArray( GLuint( 10 + a ) );
 		fn->glVertexAttribPointer( GLuint( 10 + a ), 4, GL_FLOAT, GL_FALSE, 64, (const void *) std::size_t( 16 * a ) );
@@ -151,14 +152,14 @@ Copy * copyOf( GLFunctions * fn, Ctx & c, const CellMeshInst & d )
 	}
 	fn->glGenBuffers( 1, &k.ebo );
 	fn->glBindBuffer( GL_ELEMENT_ARRAY_BUFFER, k.ebo );
-	fn->glBufferData( GL_ELEMENT_ARRAY_BUFFER, GLsizeiptr( d.ebo.size() ) * 2, d.ebo.constData(), GL_STATIC_DRAW );
+	wwStageBufferData( GL_ELEMENT_ARRAY_BUFFER, GLsizeiptr( d.ebo.size() ) * 2, d.ebo.constData(), GL_STATIC_DRAW );
 	fn->glBindVertexArray( 0 );
 	fn->glBindBuffer( GL_ARRAY_BUFFER, 0 );
 	fn->glGenBuffers( 1, &k.ind );
 	if ( !d.vstream.isEmpty() ) {	// lane FIX1101A lodch: read by fo4_default.vert at the row's texel + gl_VertexID
 		fn->glGenBuffers( 1, &k.stream );
 		fn->glBindBuffer( GL_TEXTURE_BUFFER, k.stream );
-		fn->glBufferData( GL_TEXTURE_BUFFER, GLsizeiptr( d.vstream.size() ), d.vstream.constData(), GL_STATIC_DRAW );
+		wwStageBufferData( GL_TEXTURE_BUFFER, GLsizeiptr( d.vstream.size() ), d.vstream.constData(), GL_STATIC_DRAW );
 		fn->glBindBuffer( GL_TEXTURE_BUFFER, 0 );
 		GLint was = 0;
 		fn->glGetIntegerv( GL_ACTIVE_TEXTURE, &was );

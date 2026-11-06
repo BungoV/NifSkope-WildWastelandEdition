@@ -1,6 +1,8 @@
 #include "cellpasstime.h"
 #include "features/shared/wwtelemetry.h"	// lane MODULES1: the shared telemetry module
 #include "wwswitch.h"	// lane TESTDRIVER1: the WW_* switch store
+#include "gl/gpustage.h"	// MODULES1: the staged-upload counts in the stream1 mem line
+#include "libfo76utils/src/filebuf.hpp"	// MODULES1: the archive trims in the ram owners line
 
 #include <QByteArray>
 #include <QMap>
@@ -798,6 +800,67 @@ qint64 videoMemoryMb( qint64 * usedMb )
 	return 0;
 }
 
+/* MODULES1 (11-06): where the working set lives, once at the first full frame. Committed regions by type (private
+ * <1 MB / 1-64 MB / >=64 MB, mapped files, images) with the resident share sampled through QueryWorkingSetEx (up to 64
+ * pages a region, scaled), plus the process heaps' busy bytes. Private >=64 MB with little resident is driver commit. */
+#ifdef Q_OS_WIN
+static QString ramOwnersLine()
+{
+	static const char * kName[5] = { "private<1MB", "private1-64MB", "private>=64MB", "mapped", "image" };
+	double commit[5] = {}, res[5] = {};
+	MEMORY_BASIC_INFORMATION m;
+	const char * p = nullptr;
+	SYSTEM_INFO si;
+	GetSystemInfo( &si );
+	const qint64 page = si.dwPageSize ? si.dwPageSize : 4096;
+	std::vector<PSAPI_WORKING_SET_EX_INFORMATION> q;
+	while ( VirtualQuery( p, &m, sizeof( m ) ) == sizeof( m ) ) {
+		if ( m.State == MEM_COMMIT ) {
+			const qint64 n = qint64( m.RegionSize );
+			const int b = m.Type == MEM_MAPPED ? 3 : m.Type == MEM_IMAGE ? 4
+				: n < ( 1 << 20 ) ? 0 : n < ( qint64( 64 ) << 20 ) ? 1 : 2;
+			const qint64 pages = n / page;
+			const qint64 k = std::min<qint64>( pages, 64 );
+			q.assign( size_t( k ), PSAPI_WORKING_SET_EX_INFORMATION {} );
+			for ( qint64 i = 0; i < k; i++ )
+				q[size_t( i )].VirtualAddress = const_cast<char *>( static_cast<const char *>( m.BaseAddress ) + ( i * pages / k ) * page );
+			qint64 valid = 0;
+			if ( k && QueryWorkingSetEx( GetCurrentProcess(), q.data(), DWORD( k * sizeof( q[0] ) ) ) )
+				for ( const auto & e : q )
+					valid += e.VirtualAttributes.Valid ? 1 : 0;
+			commit[b] += double( n );
+			res[b] += k ? double( n ) * double( valid ) / double( k ) : 0.0;
+		}
+		const char * next = static_cast<const char *>( m.BaseAddress ) + m.RegionSize;
+		if ( next <= p )
+			break;
+		p = next;
+	}
+	QString s = QStringLiteral( "ram owners:" );
+	for ( int b = 0; b < 5; b++ )
+		s += QString::asprintf( " %s commit=%.0f ws~%.0f MB", kName[b], commit[b] / 1048576.0, res[b] / 1048576.0 );
+	PROCESS_HEAP_ENTRY e;
+	double busy = 0;
+	HANDLE heaps[64];
+	const DWORD nh = std::min<DWORD>( GetProcessHeaps( 64, heaps ), 64 );
+	for ( DWORD i = 0; i < nh; i++ ) {
+		if ( !HeapLock( heaps[i] ) )
+			continue;
+		e.lpData = nullptr;
+		while ( HeapWalk( heaps[i], &e ) )
+			if ( e.wFlags & PROCESS_HEAP_ENTRY_BUSY )
+				busy += double( e.cbData );
+		HeapUnlock( heaps[i] );
+	}
+	double trimMs = 0.0;
+	const unsigned long long trims = (unsigned long long)FileBuffer::mappedViewTrims( &trimMs );
+	s += QString::asprintf( " | heaps %lu busy=%.0f MB | staged=%.0f MB direct=%.0f MB | archive trims=%llu (max %.1f ms)",
+		(unsigned long)nh, busy / 1048576.0, double( gpuStageCounts().stagedBytes.load() ) / 1048576.0,
+		double( gpuStageCounts().directBytes.load() ) / 1048576.0, trims, trimMs );
+	return s;
+}
+#endif
+
 QString stream1MemLine( const char * stage )
 {
 	const CacheCounts & cc = cacheCounts();
@@ -805,11 +868,12 @@ QString stream1MemLine( const char * stage )
 	memory( pm, wm );
 	const qint64 total = videoMemoryMb( &used );
 	return QString::asprintf( "stream1 mem: %s geo=%.1f MB (fp32 %.1f MB) shapes=%lld budget=%.0f MB tex=%.1f MB (%lld)"
-		" pumped=%lld (%.1f MB) vram=%lld/%lld MB private=%lld MB ws=%lld MB t=%.1f s", stage,
+		" pumped=%lld (%.1f MB) vram=%lld/%lld MB private=%lld MB ws=%lld MB t=%.1f s staged=%.1f MB direct=%.1f MB", stage,
 		double( cc.geoGpuBytes ) / 1048576.0, double( cc.geoFp32Bytes ) / 1048576.0, (long long)cc.geoShapes,
 		double( cc.maxBytes ) / 1048576.0, double( cc.texResidentBytes ) / 1048576.0, (long long)cc.texResident,
 		(long long)cc.texPumped, double( cc.texPumpedBytes ) / 1048576.0, (long long)used, (long long)total,
-		(long long)pm, (long long)wm, processSeconds() );
+		(long long)pm, (long long)wm, processSeconds(), double( gpuStageCounts().stagedBytes.load() ) / 1048576.0,
+		double( gpuStageCounts().directBytes.load() ) / 1048576.0 );
 }
 
 namespace
@@ -870,6 +934,9 @@ void stream1PaintEnd( bool ready, double paintMs )
 				" shapes=%lld this paint: %lld shapes %lld bytes\n", t, t - l.t0, (long long)( cc.texMade - l.tex0 ),
 				(long long)( cc.made - l.made0 ), (long long)made, (long long)madeBytes );
 			std::fprintf( stderr, "%s\n", qPrintable( stream1MemLine( "first full frame" ) ) );
+#ifdef Q_OS_WIN
+			std::fprintf( stderr, "%s\n", qPrintable( ramOwnersLine() ) );
+#endif
 		}
 		return;
 	}

@@ -5,6 +5,7 @@
 #include "gl/celllooks.h"
 #include "gl/glshape.h"
 #include "wwswitch.h"
+#include "gl/gpustage.h"	// MODULES1: the pool is filled by a GPU copy (no driver RAM copy)
 
 #include <QObject>
 #include <QOpenGLContext>
@@ -931,9 +932,9 @@ bool poolBind( const Shape * sh, NifSkopeOpenGLContext::GLFunctions * f, unsigne
 			if ( !n || !attrs[i] )
 				continue;
 			f->glBindBuffer( GL_ARRAY_BUFFER, k.vbo[i] );
-			f->glBufferSubData( GL_ARRAY_BUFFER, GLintptr( sp.firstVert ) * n * 4, GLsizeiptr( verts ) * n * 4, attrs[i] );
+			wwStageUpload( GL_ARRAY_BUFFER, GLintptr( sp.firstVert ) * n * 4, GLsizeiptr( verts ) * n * 4, attrs[i] );
 		}
-		f->glBufferSubData( GL_ELEMENT_ARRAY_BUFFER, GLintptr( sp.firstIndex ) * 2, GLsizeiptr( idx ) * 2,
+		wwStageUpload( GL_ELEMENT_ARRAY_BUFFER, GLintptr( sp.firstIndex ) * 2, GLsizeiptr( idx ) * 2,
 			sh->triangles.constData() );
 		c.uploads++;
 	} else if ( red() != 5 ) {

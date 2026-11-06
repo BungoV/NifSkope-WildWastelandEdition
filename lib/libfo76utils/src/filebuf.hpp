@@ -17,6 +17,9 @@ class FileBuffer
   std::uintptr_t  fileStream;   // HANDLE on Windows, int on other systems
   inline void closeFileStream();
  public:
+  // MODULES1 (NifSkope WW): drop every mapped view's touched pages from the working set; returns the views trimmed
+  static size_t trimMappedViews();
+  static std::uint64_t mappedViewTrims(double *maxMs = nullptr);
   static inline std::uint32_t swapUInt32(unsigned int n);
   // the fast versions of the functions are inline
   // and do not check if the read position is valid

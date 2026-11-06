@@ -1,3 +1,18 @@
+## MODULES1 step 15 (2026-11-06): static GL buffers carry no RAM copy; the first full frame names its RAM owners
+
+- bungo: "fix the wild ram usage". Measured offline (no window, the real NVIDIA driver): a GL buffer filled from the
+  CPU (`glBufferData` with data, `glBufferSubData`, `glBufferStorage`) keeps a copy resident in the process working
+  set, as big as the buffer; one filled by a GPU copy from a small re-specified staging buffer does not. Textures do
+  not (their private bytes are the driver's commit, not RAM).
+- `src/gl/gpustage.h` (`wwStageUpload`, `wwStageBufferData`): the mesh cache, the bindless pool and the far instances
+  are filled through it. Red `WW_GPUSTAGE_RED=1` (live): the CPU path as before.
+- The `stream1 mem:` line adds `staged=` / `direct=` MB; a one-shot `ram owners:` line after it splits the committed
+  memory by type (private by region size, mapped files, images) with the resident share and the heaps' busy bytes.
+- The archives stay mapped, but their pages leave the working set: every 2 s the stream pass (on a worker) unlocks the
+  mapped archive views (`FileBuffer::trimMappedViews`), so pages read once go to the standby list instead of staying
+  resident (they were ~3 GB at the 3x3 all-on). The game reads its archives on demand and keeps only the index; this
+  is the same rule. Red `WW_ARCHIVE_TRIM_RED=1`. The `ram owners:` line adds `archive trims=N (max ms)`.
+
 ## MODULES1 step 14 (2026-11-06): the FO4CS bloom and the physical glare are on by default; WW_ALL_ON is all on
 
 - bungo: "we always need these two on". The bloom mode defaults to FO4CS (a harness without the pin too, and a

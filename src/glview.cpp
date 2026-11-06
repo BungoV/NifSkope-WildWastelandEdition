@@ -32,6 +32,7 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 #include "glview.h"
 #include "wwswitch.h"	// the WW_* switch store
+#include "libfo76utils/src/filebuf.hpp"	// MODULES1: FileBuffer::trimMappedViews
 #include "wwflyfix.h"	// FLYFIX1's free-camera rules (their old way is a test twin now)
 #include "cellspeed.h"
 #include "cellcambounds.h"	// the camera never shows an out-of-bounds or under-terrain view
@@ -90,7 +91,9 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include "spells/blocks.h"	// blockLink for Separate / Duplicate
 #include "spells/simplify.h"	// tlSimplifyShapeToRatio for the Decimate operator
 
+#include <atomic>
 #include <memory>
+#include <thread>
 
 #include <QApplication>
 #include <QFontMetrics>
@@ -5463,6 +5466,17 @@ void GLView::wwCellStreamEvict()
 	// lane STREAMTEX4 (STREAMTEX2's fence): the frees whose fence the GPU passed go now (handles, then names)
 	if ( textures )
 		textures->wwGraveSweep();
+	// MODULES1: the archive pages that reads touched leave the working set every 2 s; the game keeps only the
+	// archives' index and reads what it needs (red WW_ARCHIVE_TRIM_RED=1: they stay until Windows trims them)
+	{
+		static QElapsedTimer trimClock;
+		WW_SWITCH_STATIC( bool, trimRed, wwEnvIsSet( "WW_ARCHIVE_TRIM_RED" ) && wwEnv( "WW_ARCHIVE_TRIM_RED" ) != "0" );
+		static std::atomic<bool> trimBusy { false };	// on a worker: the walk over the views must not hold a paint
+		if ( !trimRed && model && ( !trimClock.isValid() || trimClock.elapsed() >= 2000 ) && !trimBusy.exchange( true ) ) {
+			trimClock.start();
+			std::thread( [] { FileBuffer::trimMappedViews(); trimBusy = false; } ).detach();
+		}
+	}
 	if ( !textures || !model || !cellStreamOn( model ) )
 		return;
 	static QElapsedTimer clock;

@@ -17,10 +17,70 @@ extern "C"
 #  include <sys/mman.h>
 #endif
 
+#include <chrono>
+#include <mutex>
+#include <vector>
+
+// MODULES1 (NifSkope WW, 11-06): every live mapped view, so trimMappedViews() can drop the pages that reads touched
+// from the working set (the archive stays mapped; a later read faults its page back from the file cache)
+static std::mutex mappedViewsLock;
+static std::vector< std::pair< const void *, size_t > > mappedViews;
+static std::uint64_t mappedTrims = 0;
+static double mappedTrimMsMax = 0.0;
+
+static void mappedViewAdd(const void *p, size_t n)
+{
+  std::lock_guard< std::mutex > g(mappedViewsLock);
+  mappedViews.emplace_back(p, n);
+}
+
+static void mappedViewRemove(const void *p)
+{
+  std::lock_guard< std::mutex > g(mappedViewsLock);
+  for (size_t i = 0; i < mappedViews.size(); i++)
+  {
+    if (mappedViews[i].first == p)
+    {
+      mappedViews[i] = mappedViews.back();
+      mappedViews.pop_back();
+      break;
+    }
+  }
+}
+
+size_t FileBuffer::trimMappedViews()
+{
+  std::lock_guard< std::mutex > g(mappedViewsLock);
+  const auto  t0 = std::chrono::steady_clock::now();
+#if defined(_WIN32) || defined(_WIN64)
+  // VirtualUnlock on pages that are not locked removes them from the working set (they stay on the standby list)
+  for (const auto& v : mappedViews)
+    (void) VirtualUnlock(const_cast< void * >(v.first), v.second);
+#else
+  for (const auto& v : mappedViews)
+    (void) madvise(const_cast< void * >(v.first), v.second, MADV_DONTNEED);
+#endif
+  mappedTrims++;
+  const double  ms = std::chrono::duration< double, std::milli >(
+                         std::chrono::steady_clock::now() - t0).count();
+  if (ms > mappedTrimMsMax)
+    mappedTrimMsMax = ms;
+  return mappedViews.size();
+}
+
+std::uint64_t FileBuffer::mappedViewTrims(double *maxMs)
+{
+  std::lock_guard< std::mutex > g(mappedViewsLock);
+  if (maxMs)
+    *maxMs = mappedTrimMsMax;
+  return mappedTrims;
+}
+
 inline void FileBuffer::closeFileStream()
 {
   if (std::intptr_t(fileStream) >= 0L) [[unlikely]]
   {
+    mappedViewRemove(fileBuf);
     munmap((void *) fileBuf, fileBufSize);
 #if defined(_WIN32) || defined(_WIN64)
     CloseHandle(HANDLE(fileStream));
@@ -302,6 +362,7 @@ FileBuffer::FileBuffer(const char *fileName)
 #endif
     if ((void *) fileBuf == MAP_FAILED)
       throw NifSkopeError("error mapping input file \"%s\"", fileName);
+    mappedViewAdd(fileBuf, fileBufSize);
   }
   catch (...)
   {
