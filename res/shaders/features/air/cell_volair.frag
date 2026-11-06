@@ -29,6 +29,10 @@ uniform int volLampN;
 uniform int volLampAtlasRed;	// 1 = the first atlas: lamps in a cube slot read the atlas too (shadowed twice)
 uniform sampler2DShadow volLampAtlas;
 uniform samplerBuffer volLampTable;
+// lane MODULES1 route (b): volLampVis 2 = the lamps' shadowed share a froxel traced on the volume's BVH (RG32F: share,
+// frames; rtddgicell.cpp rtddgiAirRaysFrame), for the lamps no cube shadows
+uniform samplerBuffer volLampRays;
+int airRayFroxel;
 #endif
 /* lane DARKAIR1 (SHAFTS-DARKAIR): outdoors the weather's ambient in the air takes the sky the ray-traced volume sees
  * above the froxel (FOGLEAK1's read replaces the whole env share instead, so not under WW_AIR_LEAK). Opt-in:
@@ -460,6 +464,11 @@ float airLeakLightK( int i, vec3 P, vec3 Lp )
 #ifdef WW_CELL_RESTIR
 	cubed = cubed && !cellRestirOn;
 #endif
+	if ( volLampVis == 2 && !cubed ) {
+		vec2 rr = texelFetch( volLampRays, airRayFroxel ).xy;
+		if ( rr.y > 0.0 )
+			return rr.x;
+	}
 	if ( volLampVis == 1 && ( !cubed || volLampAtlasRed == 1 ) ) {	// a lamp in a cube slot is shadowed by its cube already
 		float av = airLampAtlasVis( i, P, Lp );	// every cell: the atlas is no probe guess (AUDIT row 5)
 		if ( av >= 0.0 )
@@ -1222,6 +1231,9 @@ void main()
 			return;
 		}
 	}
+#ifdef WW_AIR_LEAK
+	airRayFroxel = col.x + ( col.y + volLayer * volDims.y ) * volDims.x;
+#endif
 	vec2 ndc = ( vec2( col ) + 0.5 ) / vec2( volDims.xy ) * 2.0 - 1.0;
 	vec3 dirView = normalize( vec3( ndc.x / volProj.x, ndc.y / volProj.y, -1.0 ) );
 	float t0 = volSlices.x * exp( volSlices.y * ( float( volLayer ) + volJitter ) / volSlices.z );

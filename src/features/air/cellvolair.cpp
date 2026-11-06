@@ -11,6 +11,7 @@ BSD License - see nifskope.h
 #include "features/air/airbouncelamp.h"	// lane AIRBOUNCE1: the lamps' floor-bounce law
 #include "features/air/airmslamp.h"	// lane AIRMS1: the lamps' multiple-scattering law
 #include "features/air/airlampatlas.h"	// lane MODULES1 route (a): the lamps' shadows in the air
+#include "features/gi/rtddgicell.h"	// lane MODULES1 route (b): the lamps' shadows traced on the volume's BVH
 #include "features/sky/atmomath.h"	// lane CLOUD6e: kUnitKm, the cloud map's units
 #include "features/sky/atmosphere.h"	// SHAFTS1b: the aerial perspective's haze, for the no-double-count fit
 #include "features/air/cellairzone.h"	// lane AIRZONE1: the hand-placed volumes' fog and particle blocks
@@ -1874,7 +1875,7 @@ static void vaPassInner( Scene * scene, bool run )
 	// lane MODULES1 route (a): the lamps' shadows in the air from the atlas (features/air/airlampatlas.h); its draw takes
 	// its own program, so this one is bound again. The samplers always get their own units (a shadow and a plain
 	// sampler on one unit refuse the draw)
-	int lampN = 0;
+	int lampN = 0, lampVis = 0;
 	{
 		float camW[3];
 		for ( int k = 0; k < 3; k++ ) {
@@ -1883,13 +1884,17 @@ static void vaPassInner( Scene * scene, bool run )
 				camW[k] -= vt.rotation( j, k ) * vt.translation[j] / sc;
 		}
 		lampN = wwAirLampAtlasFrame( scene, L, camW, p11, H, farD );
+		// route (b): the shadowed share a froxel traced on the DDGI volume's BVH; its cubeless lamps read it (mode 2)
+		if ( wwAirLampVisMode() == 2 && rtddgiAirRaysFrame( scene, cols, rows, kSlices, nearD, logRatio, distScale ) )
+			lampVis = 2;
 		prog = r->useProgram( "cell_volair.prog" );
 		if ( !prog ) {
 			s.last = QStringLiteral( "refused(cell_volair.prog did not link)" );
 			restore();
 			return;
 		}
-		prog->uni1i( "volLampVis", lampN > 0 ? 1 : 0 );
+		prog->uni1i( "volLampVis", lampVis == 2 ? 2 : ( lampN > 0 ? 1 : 0 ) );
+		prog->uni1i( "volLampRays", WwCellUnit::AirLampRays );
 		prog->uni1i( "volLampN", lampN );
 		prog->uni1i( "volLampAtlasRed", wwAirLampAtlasRed() & 1 );
 		prog->uni1i( "volLampAtlas", WwCellUnit::AirLampAtlas );
@@ -2445,6 +2450,8 @@ static void vaPassInner( Scene * scene, bool run )
 			prog->uni4f( "volSlices", FloatVector4( farStart, farLog, float( fp.slices ), 1.0f ) );
 			prog->uni1i( "volFarMode", 3 | ( ( s.red & 16777216 ) ? 4 : 0 ) );
 			prog->uni1i( "volLayerBase", kSlices );
+			if ( lampVis == 2 )
+				prog->uni1i( "volLampVis", lampN > 0 ? 1 : 0 );	// route (b) traces the near grid only
 			prog->uni1i( "volTemporal", 0 );	// BATCH1: PERF2's history is the near grid's only
 			prog->uni1b( "volHistOk", false );
 			prog->uni1i( "volTerms", s.terms & 9 );

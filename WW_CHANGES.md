@@ -1,3 +1,11 @@
+## MODULES1 step 12 (2026-11-06): lamp shadows in the air, traced on the ray-traced GI's scene (opt-in)
+
+- `WW_CELL_AIR_LAMPVIS=rays` (Atlas stays the default): with the ray-traced GI on, each froxel of the near air grid
+  picks two lamps by weight, traces a shadow ray to each on the volume's BVH (alpha cards read their holes) and keeps
+  a running share over 16 frames, reprojected as the camera moves. Lamps without a depth cube take that share; cubed
+  lamps keep their cube, the far grid keeps the atlas or the walk. Census line `air rays: ...`.
+- Reds `WW_CELL_AIR_RAYS_RED=nohole|nohist|noshadow`. The share is shared by the froxel's lamps, not per lamp.
+
 ## MODULES1 step 11 (2026-11-06): no holes in swaying, skinned or splatted shapes; AO normals hold at any distance
 
 - The AO depth pre-pass and the main pass now agree on every moving shape. A shape's vertex inputs (wind, far sway,
