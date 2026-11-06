@@ -104,6 +104,11 @@ bool wwLookdevWeatherClass( unsigned & flags, unsigned & thunder, int * thunderS
 /*! lane WEATHERLOOK1 B: while a change blends, the weather left behind: its load-order FormID, EditorID, the plugin
  *  that defines it, its class flags (DATA byte 11) and the NEW weather's share pct; false when no change runs */
 bool wwLookdevWeatherLeaving( quint32 & formID, QString & edid, QString & owner, unsigned & classFlags, float & pct );
+namespace WwWeatherGen { struct In; }
+/*! lane WEATHERRECX1: the generated rung's inputs (features/weather/weathergen.h) of the loaded weather [0] and, while
+ *  a change blends, the one left behind [1] (EditorID, defining plugin, DATA bytes, MNAM type / density, thunder SNAM),
+ *  their load-order FormIDs; returns how many (0 = no weather) and pct = the NEW weather's share */
+int wwLookdevWeatherGen( WwWeatherGen::In in[2], quint32 formID[2], float & pct );
 /*! lane CLOUD6f: the storm's lightning for the volume clouds (gl/cloudlightning.h): share = how much of a storm the sky is
  *  (1 in a storm weather, 0 otherwise, the fade bytes' ramps during a change), rgb = its Lightning Color (DATA 12..14,
  *  0..1; the storm side's while a change blends), seed = the storm weather's FormID (the strikes' draws); false when

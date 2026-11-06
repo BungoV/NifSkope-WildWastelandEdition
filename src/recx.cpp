@@ -57,9 +57,19 @@ QStringList listFiles( const QStringList & roots, const QString & category, QStr
 			const QDir d( plugins.filePath( p ) + QLatin1Char( '/' ) + category );
 			if ( !d.exists() )
 				continue;
-			const QFileInfoList fl = d.entryInfoList( { QStringLiteral( "*.recx" ) }, QDir::Files, QDir::Name | QDir::IgnoreCase );
+			if ( p.compare( QStringLiteral( "FO4CS" ), Qt::CaseInsensitive ) == 0 ) {
+				static bool warned = false;	// lane WEATHERRECX1: the old provider name, read for one release
+				if ( !warned )
+					std::fprintf( stderr, "recx: WARNING provider \"FO4CS\" (%s) is the old name of \"Fusion Shaders - Assets\": "
+						"still read for one release\n", qPrintable( plugins.filePath( p ) ) );
+				warned = true;
+			}
+			// lane WEATHERRECX1: the category's files, then one folder deeper (Weathers/<source plugin>/<EDID>.recx)
+			QFileInfoList fl = d.entryInfoList( { QStringLiteral( "*.recx" ) }, QDir::Files, QDir::Name | QDir::IgnoreCase );
+			for ( const QString & sub : d.entryList( QDir::Dirs | QDir::NoDotAndDotDot, QDir::Name | QDir::IgnoreCase ) )
+				fl += QDir( d.filePath( sub ) ).entryInfoList( { QStringLiteral( "*.recx" ) }, QDir::Files, QDir::Name | QDir::IgnoreCase );
 			for ( const QFileInfo & f : fl ) {
-				const QString rel = ( p + QLatin1Char( '/' ) + f.fileName() ).toLower();
+				const QString rel = ( p + QLatin1Char( '/' ) + d.relativeFilePath( f.absoluteFilePath() ) ).toLower();
 				if ( seen.contains( rel ) )
 					continue;
 				seen.insert( rel );
@@ -157,7 +167,18 @@ int rankOf( const QJsonObject & e, const QString & key, const QString & plugin, 
 	return best;
 }
 
+WwRecxModRootsFn & modRootsFn()
+{
+	static WwRecxModRootsFn f = nullptr;
+	return f;
+}
+
 }	// namespace
+
+void wwRecxSetModRoots( WwRecxModRootsFn fn )
+{
+	modRootsFn() = fn;
+}
 
 QStringList wwRecxRoots( const QStringList & pluginFiles, const QString & gameData )
 {
@@ -176,6 +197,16 @@ QStringList wwRecxRoots( const QStringList & pluginFiles, const QString & gameDa
 	};
 	for ( int i = pluginFiles.size() - 1; i >= 0; i-- )
 		add( QFileInfo( pluginFiles.at( i ) ).absolutePath() );
+	/* lane WEATHERRECX1: mods with no plugin (Fusion Shaders - Assets) hold Plugins/<Provider>/ too: WW_RECX_MODS
+	 * (folders, ';'), then the mod folders of the MO2 profile (wwRecxSetModRoots), last-installed first */
+	for ( const QString & m : QString::fromLocal8Bit( wwEnv( "WW_RECX_MODS" ) ).split( QLatin1Char( ';' ), Qt::SkipEmptyParts ) )
+		add( QDir::fromNativeSeparators( m.trimmed() ) );
+	if ( WwRecxModRootsFn fn = modRootsFn() ) {
+		const QStringList mods = fn();
+		for ( int i = mods.size() - 1; i >= 0; i-- )
+			if ( QFileInfo( mods.at( i ) + QStringLiteral( "/Plugins" ) ).isDir() )
+				add( mods.at( i ) );
+	}
 	add( gameData );
 	const QString app = QCoreApplication::applicationDirPath();
 	// the shipped files: beside the exe once installed, else the source tree's (one of the two: the same files twice

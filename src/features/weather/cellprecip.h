@@ -7,7 +7,7 @@
  * DATA class flags: Rainy -> a rain layer, Snow -> a snow_fine layer). Each layer: a type (rain, hail, snow_fine,
  * snow_far_dot, snow_wet_clump, snow_big_clump), its rate or density, size, draw scale and texture (under Textures\,
  * looked up loose in the .recx roots: the loaded plugins' folders, the game's Data, the shipped Data; each type ships a
- * default, res/Data/Textures/FO4CS/Precip, the phase A atlases of notes/weatherlook1; a texture under the old
+ * default, Textures/FO4CS/Precip in the MO2 mod "Fusion Shaders - Assets" (lane WEATHERRECX1), the phase A atlases of notes/weatherlook1; a texture under the old
  * WW/Precip is still found there and the other way round).
  * The field (gl/precipmath.h, unit tests/features/weather/precip): a camera-centred box of world-anchored particles that fall at their
  * type's speed and ride the weather's wind (the fog drift's law and bearing); near ones are textured quads flat-on to

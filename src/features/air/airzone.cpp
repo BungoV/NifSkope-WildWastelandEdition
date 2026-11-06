@@ -743,7 +743,7 @@ bool wwAirZoneSave( const void * nif, int index, const QString & dataRoot, const
 	const auto e = it->edits.find( index );
 	const AirZoneCellVolumes & cv = e != it->edits.end() ? e->second : it->loaded[size_t( index )];
 	// its own file when it came from one (the provider that won keeps it), else a new one under the save root
-	const QString p = !cv.file.isEmpty() ? cv.file : airZoneFilePath( dataRoot, provider.isEmpty() ? QStringLiteral( "FO4CS" ) : provider, cv.cell );
+	const QString p = !cv.file.isEmpty() ? cv.file : airZoneFilePath( dataRoot, provider.isEmpty() ? wwRecxProvider() : provider, cv.cell );
 	if ( !airZoneWriteEntry( p, cv.cell, cv.volumes, cv.giMode, err ) )
 		return false;
 	if ( path )
@@ -796,7 +796,7 @@ QStringList wwAirZoneGiExport( const void * nif, const QString & dataRoot, const
 		if ( g.empty() && v.size() == cv.volumes.size() )
 			continue;	// nothing of today's GI in this cell, nothing to replace
 		v.insert( v.end(), g.begin(), g.end() );
-		const QString p = airZoneFilePath( dataRoot, provider.isEmpty() ? QStringLiteral( "FO4CS" ) : provider, cv.cell );
+		const QString p = airZoneFilePath( dataRoot, provider.isEmpty() ? wwRecxProvider() : provider, cv.cell );
 		QString e;
 		if ( !airZoneWriteEntry( p, cv.cell, v, QStringLiteral( "all" ), &e ) ) {
 			if ( err )

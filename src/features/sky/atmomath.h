@@ -18,6 +18,21 @@ constexpr float kUnitKm = 0.0142875f / 1000.0f;	// one game unit (70 = 1 m)
 constexpr float kRay[3] = { 5.802e-3f, 13.558e-3f, 33.1e-3f };
 constexpr float kMieS = 3.996e-3f, kMieE = 4.40e-3f, kMieG = 0.8f;
 constexpr float kOzone[3] = { 0.650e-3f, 1.881e-3f, 0.085e-3f };
+/* lane WEATHERRECX1: the haze layer's optics (the weather .recx hazeType at its humidity, SPEC.md 1.3), set by
+ * atmosphere.cpp before each frame's sky: albedo at 680 / 550 / 440 nm, spec = the extinction's spectral factor
+ * (lambda / 550)^-angstrom (green 1: visibility is defined at 550 nm), g = the Mie phase. The defaults are the grey
+ * haze before 1.3 exactly (albedo kMieS / kMieE, no slope, kMieG) */
+struct HazeOptics
+{
+	float albedo[3] = { kMieS / kMieE, kMieS / kMieE, kMieS / kMieE };
+	float spec[3] = { 1.0f, 1.0f, 1.0f };
+	float g = kMieG;
+};
+inline HazeOptics & hazeOptics()
+{
+	static HazeOptics h;
+	return h;
+}
 constexpr float kPi = 3.14159265f;
 /* lane FIX1101A (atmo): the moonless night sky's own radiance (airglow, zodiacal light, unresolved stars) at the zenith
  * above the air, per unit sun irradiance at the top (the LUTs' unit): 4e-4 cd/m2 / 128 klx / T(zenith, clear) 0.88,
@@ -55,7 +70,7 @@ inline void odAt( float h, const float haze[3], bool noOzone, float e[3], float 
 	const float dz = std::max( 0.0f, 1.0f - std::fabs( h - 25.0f ) / 15.0f );
 	const float dh = haze[0] * std::exp( -std::max( h - haze[2], 0.0f ) / std::max( haze[1], 0.02f ) );
 	for ( int c = 0; c < 3; c++ )
-		e[c] = kRay[c] * dr + kMieE * dm + dh + ( noOzone ? 0.0f : kOzone[c] * ozone ) * dz;	// WX1: ozone x 1 = exact
+		e[c] = kRay[c] * dr + kMieE * dm + dh * hazeOptics().spec[c] + ( noOzone ? 0.0f : kOzone[c] * ozone ) * dz;	// WX1: ozone x 1 = exact
 }
 
 //! the transmittance LUT's math: from height hKm along cos zenith mu to the top; 0 when the ray hits the ground
@@ -156,7 +171,7 @@ inline void skyIrradiance( float mus, const float haze[3], float out[3] )
 			const float w = ce * se;	// cos(theta) dOmega on the elevation grid
 			const float nu = vx * sx + vz * sz;
 			const float pr = 3.0f / ( 16.0f * kPi ) * ( 1.0f + nu * nu );
-			const float g = kMieG, pm = ( 1.0f - g * g ) / ( 4.0f * kPi * std::pow( std::max( 1e-4f, 1.0f + g * g - 2.0f * g * nu ), 1.5f ) );
+			const float g = hazeOptics().g, pm = ( 1.0f - g * g ) / ( 4.0f * kPi * std::pow( std::max( 1e-4f, 1.0f + g * g - 2.0f * g * nu ), 1.5f ) );
 			// the view ray to the top of the air, steps packed toward the ground (the haze sits there)
 			const float r0 = kRb;
 			const float d = -r0 * vz + std::sqrt( r0 * r0 * ( vz * vz - 1.0f ) + kRt * kRt );
@@ -194,7 +209,7 @@ inline void skyIrradiance( float mus, const float haze[3], float out[3] )
 				const float dh = haze[0] * std::exp( -std::max( h - haze[2], 0.0f ) / std::max( haze[1], 0.02f ) );
 				for ( int c = 0; c < 3; c++ ) {
 					const double tv = std::exp( -( od[c] + 0.5 * double( e[c] ) * dt ) );
-					const double sc = double( kRay[c] ) * dr * pr + double( kMieS * dm + dh * ( kMieS / kMieE ) ) * pm;
+					const double sc = double( kRay[c] ) * dr * pr + double( kMieS * dm + dh * hazeOptics().spec[c] * hazeOptics().albedo[c] ) * pm;
 					L[c] += tv * sc * Ts[c] * dt;
 					od[c] += double( e[c] ) * dt;
 				}
@@ -216,7 +231,7 @@ inline void skyRadianceSingle( const float v[3], const float s[3], const float h
 	constexpr int NS = 16;
 	const float nu = v[0] * s[0] + v[1] * s[1] + v[2] * s[2];
 	const float pr = 3.0f / ( 16.0f * kPi ) * ( 1.0f + nu * nu );
-	const float g = kMieG, pm = ( 1.0f - g * g ) / ( 4.0f * kPi * std::pow( std::max( 1e-4f, 1.0f + g * g - 2.0f * g * nu ), 1.5f ) );
+	const float g = hazeOptics().g, pm = ( 1.0f - g * g ) / ( 4.0f * kPi * std::pow( std::max( 1e-4f, 1.0f + g * g - 2.0f * g * nu ), 1.5f ) );
 	const float r0 = kRb, vz = v[2];
 	const float d = -r0 * vz + std::sqrt( r0 * r0 * ( vz * vz - 1.0f ) + kRt * kRt );
 	double od[3] = { 0, 0, 0 }, acc[3] = { 0, 0, 0 };
@@ -252,7 +267,7 @@ inline void skyRadianceSingle( const float v[3], const float s[3], const float h
 		const float dh = haze[0] * std::exp( -std::max( h - haze[2], 0.0f ) / std::max( haze[1], 0.02f ) );
 		for ( int c = 0; c < 3; c++ ) {
 			const double tv = std::exp( -( od[c] + 0.5 * double( e[c] ) * dt ) );
-			const double sc = double( kRay[c] ) * dr * pr + double( kMieS * dm + dh * ( kMieS / kMieE ) ) * pm;
+			const double sc = double( kRay[c] ) * dr * pr + double( kMieS * dm + dh * hazeOptics().spec[c] * hazeOptics().albedo[c] ) * pm;
 			acc[c] += tv * sc * Ts[c] * dt;
 			od[c] += double( e[c] ) * dt;
 		}
@@ -304,10 +319,10 @@ inline void skyMedium( float h, const float haze[3], float ozone, float rs[3], f
 	const float dr = std::exp( -h / 8.0f ), dm = std::exp( -h / 1.2f );
 	const float dz = std::max( 0.0f, 1.0f - std::fabs( h - 25.0f ) / 15.0f );
 	const float dh = haze[0] * std::exp( -std::max( h - haze[2], 0.0f ) / std::max( haze[1], 0.02f ) );
-	ms = kMieS * dm + dh * ( 3.996f / 4.40f );
+	ms = kMieS * dm + dh * hazeOptics().spec[1] * hazeOptics().albedo[1];
 	for ( int c = 0; c < 3; c++ ) {
 		rs[c] = kRay[c] * dr;
-		e[c] = rs[c] + ( kMieE * dm + dh ) + kOzone[c] * ozone * dz;
+		e[c] = rs[c] + ( kMieE * dm + dh * hazeOptics().spec[c] ) + kOzone[c] * ozone * dz;
 	}
 }
 inline float skyDistTop( float r, float mu )
@@ -482,7 +497,7 @@ inline void skyMarch( const SkyTables & T, const float haze[3], float ozone, flo
 	const float d = gnd ? skyDistGround( r, v[2] ) : skyDistTop( r, v[2] );
 	const float cvs = v[0] * s[0] + v[1] * s[1] + v[2] * s[2];
 	const float pr = 3.0f / ( 16.0f * kPi ) * ( 1.0f + cvs * cvs );
-	const float g = kMieG, pm = ( 1.0f - g * g ) / ( 4.0f * kPi * std::pow( std::max( 1e-4f, 1.0f + g * g - 2.0f * g * cvs ), 1.5f ) );
+	const float g = hazeOptics().g, pm = ( 1.0f - g * g ) / ( 4.0f * kPi * std::pow( std::max( 1e-4f, 1.0f + g * g - 2.0f * g * cvs ), 1.5f ) );
 	constexpr int N = 30;
 	double thr[3] = { 1, 1, 1 };
 	L[0] = L[1] = L[2] = 0.0;

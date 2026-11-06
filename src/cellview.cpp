@@ -18,6 +18,7 @@ BSD License - see nifskope.h
 #include "cellsplat.h"		// lane CELLVIEW4
 #include "features/far-ground/landlodspec.h"	// lane LANDSPEC6: fixedWorld
 #include "cellmodsource.h"	// lane LANDSPEC8: uGridsToLoad
+#include "recx.h"	// lane WEATHERRECX1: the provider's name and the .recx roots (the Volumes hand fixes)
 #include "cellidentity.h"	// lane CELLVIEW2
 #include "cellactor.h"		// lane PLACED1
 #include "gl/celllooks.h"	// lane GAPLOOK2: Actors outdoors, Weapon mod parts
@@ -6713,10 +6714,29 @@ static bool cellBuild( NifModel * nif, const CellSceneSpec & specAsked, CellChun
 						vs.keys << QStringLiteral( "%1_%2" ).arg( x ).arg( y );
 				recxName = spec.world;
 			}
-			// hand fixes: WW_CELL_VOLUMES_RECX=<dir>, else Data/Plugins/FO4CS/Volumes/<World or EDID>.recx when present
+			/* hand fixes: WW_CELL_VOLUMES_RECX=<dir>, else Plugins/Fusion Shaders - Assets/Volumes/<World or EDID>.recx
+			 * in the first .recx root that has it (lane WEATHERRECX1: the Assets mod, then Data); the old provider
+			 * folder Plugins/FO4CS is still read for one release, with a warning */
 			const QByteArray rxDir = wwEnv( "WW_CELL_VOLUMES_RECX" );
-			const QString rx = QDir( rxDir.isEmpty() ? dataRoot + QStringLiteral( "/Plugins/FO4CS/Volumes" ) : QString::fromLocal8Bit( rxDir ) )
-				.filePath( recxName + QStringLiteral( ".recx" ) );
+			QString rx = rxDir.isEmpty() ? QString()
+				: QDir( QString::fromLocal8Bit( rxDir ) ).filePath( recxName + QStringLiteral( ".recx" ) );
+			if ( rxDir.isEmpty() ) {
+				for ( const QString & prov : { wwRecxProvider(), wwRecxOldProvider() } ) {
+					for ( const QString & root : wwRecxRoots( QStringList(), dataRoot ) ) {
+						const QString c = root + QStringLiteral( "/Plugins/" ) + prov + QStringLiteral( "/Volumes/" ) + recxName
+							+ QStringLiteral( ".recx" );
+						if ( QFileInfo::exists( c ) ) {
+							rx = c;
+							if ( prov == wwRecxOldProvider() )
+								std::fprintf( stderr, "recx: WARNING volumes %s under the old provider \"FO4CS\": still read for one "
+									"release; move it to Plugins/%s/Volumes\n", qPrintable( c ), qPrintable( wwRecxProvider() ) );
+							break;
+						}
+					}
+					if ( !rx.isEmpty() )
+						break;
+				}
+			}
 			if ( QFileInfo::exists( rx ) ) {
 				vs.recxFile = rx;
 				vs.recxName = recxName;

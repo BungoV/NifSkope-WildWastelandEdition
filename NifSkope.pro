@@ -284,6 +284,7 @@ HEADERS += \
 	src/features/clouds/cloudmap.h \
 	src/features/weather/weatherrecx.h \
 	src/features/weather/weatherrecxmath.h \
+	src/features/weather/weathergen.h \
 	src/features/clouds/cloudnoise.h \
 	src/features/clouds/cloudvol.h \
 	src/features/clouds/cloudshadow.h \
@@ -783,6 +784,7 @@ SOURCES += \
 	src/esmdata.cpp \
 	src/features/weather/esmweather.cpp \
 	src/recx.cpp \
+	src/recxmodroots.cpp \
 	src/features/far-lod/lodgen.cpp 	src/features/far-lod/lodgenmanager.cpp 	src/features/far-lod/lodtfile.cpp \
 	src/features/far-lod/lodgenchunkpass.cpp \
 	src/features/far-lod/lodgengpu.cpp \
@@ -1123,8 +1125,8 @@ build_pass|!debug_and_release {
 		docs/CLI.md
 
 	copyDirs( $$SHADERS, shaders )
-	# the record extension files this program ships (docs/RECX.md): the vanilla weathers' ground fog
-	copyDirs( res/Data, Data )
+	# lane WEATHERRECX1: the data this program used to ship in res/Data (the weathers' .recx, the fog, precipitation and
+	# moon textures) lives in the MO2 mod "Fusion Shaders - Assets" (src/recx.h wwAssetsModRoot); nothing is copied
 	#copyDirs( $$LANG, lang )
 	copyFiles( $$XML $$QSS res/qt.conf )
 
