@@ -331,6 +331,19 @@ bool rtddgiBounceRed()
 	return !v.isEmpty() && v != "0";
 }
 
+/* RTEMIS1 (bungo 11-06): a probe ray's hit adds the surface's emission, the glow's area mean (placed lights kept).
+ * Ships ON; WW_CELL_RTDDGI_EMISSIVE_RED=off drops it (spec.red "noemissive"), =centre keeps M1's centre texel ("emicentre").
+ * Read every frame: it is in the build key, a set rebuilds the volume. Returns 0 on, 1 off, 2 centre */
+int rtddgiEmissiveRed()
+{
+	if ( !wwEnvIsSet( "WW_CELL_RTDDGI_EMISSIVE_RED" ) )
+		return 0;
+	const QByteArray v = wwEnv( "WW_CELL_RTDDGI_EMISSIVE_RED" ).trimmed().toLower();
+	if ( v == "off" || v == "1" )
+		return 1;
+	return v == "centre" || v == "center" ? 2 : 0;
+}
+
 /* GIFIX1101 1B (the brown under RTXGI): WW_CELL_RTDDGI_BOUNCE_SAT=<0..1> scales the chroma of the albedo a probe ray's
  * hit bounces (luminance kept; src/features/gi/rtddgimath.h bounceAlbedo). Ships 1 = the albedo as read (today's), since the look
  * waits on bungo's eye; 0.5 is the measured opt-in (notes/gifix1101/RESULTS.md). Read every frame: it is in the build key */
@@ -847,6 +860,9 @@ void startBuild( Cell & c, const ProbeSoup & soup, const WwCellLighting & lights
 		spec.red = QStringLiteral( "skybelow" );   // lane SKYBELOW1: the red, today's main miss and visibility
 	if ( rtddgiBounceRed() )   // FIX1101A: the red, today's main bounce read (renormalised, black past the usable probes)
 		spec.red += spec.red.isEmpty() ? QStringLiteral( "bouncenocover" ) : QStringLiteral( ",bouncenocover" );
+	if ( const int er = rtddgiEmissiveRed() )   // RTEMIS1: the reds, no emission at the hits / M1's centre texel
+		spec.red += ( spec.red.isEmpty() ? QString() : QStringLiteral( "," ) )
+			+ ( er == 1 ? QStringLiteral( "noemissive" ) : QStringLiteral( "emicentre" ) );
 	spec.bounceSat = rtddgiBounceSat();   // GIFIX1101 1B
 	if ( spec.bounceSat != 1.0f )
 		b->skyLabel += QStringLiteral( "; bounce albedo saturation %1" ).arg( double( spec.bounceSat ), 0, 'f', 2 );
@@ -915,7 +931,13 @@ void censusBuilt( const Cell & c, const Build & b )
 			: QStringLiteral( "; below the horizon: sky (the red WW_SKYBELOW_RED)" ) )
 		+ ( s.red.contains( QLatin1String( "bouncenocover" ) )   // FIX1101A: the rule this volume was built with
 			? QStringLiteral( "; bounce read renormalised, black past the usable probes (the red WW_CELL_RTDDGI_BOUNCE_RED)" )
-			: QStringLiteral( "; bounce read: fade x cover, the flat ambient for the rest" ) ) );
+			: QStringLiteral( "; bounce read: fade x cover, the flat ambient for the rest" ) )
+		+ ( s.red.contains( QLatin1String( "noemissive" ) )   // RTEMIS1: the emission at the hits this volume was built with
+			? QStringLiteral( "; emissive at the hits: off (the red WW_CELL_RTDDGI_EMISSIVE_RED=off)" )
+			: QStringLiteral( "; emissive at the hits: %1 triangles, area %2 u2, power %3 (%4)" ).arg( v.emisTris )
+				.arg( v.emisArea, 0, 'f', 0 ).arg( v.emisPower, 0, 'g', 5 )
+				.arg( s.red.contains( QLatin1String( "emicentre" ) ) ? QStringLiteral( "centre texel, the red" )
+					: QStringLiteral( "glow area mean" ) ) ) );
 }
 
 void censusSet( const Cell & c, const RtDdgiLive & L, int k, const QString & tail )
@@ -1937,6 +1959,8 @@ static void volumeFrame( Scene * scene, Cell & c, const CellSpec * spIn, bool du
 	key = fnv( key, &skyBelowRed, sizeof skyBelowRed );
 	const int bounceRed = rtddgiBounceRed() ? 1 : 0;   // FIX1101A: a set rebuilds (the volume re-converges)
 	key = fnv( key, &bounceRed, sizeof bounceRed );
+	const int emisRed = rtddgiEmissiveRed();   // RTEMIS1: a set rebuilds (the volume re-converges)
+	key = fnv( key, &emisRed, sizeof emisRed );
 	const float bounceSat = rtddgiBounceSat();   // GIFIX1101 1B: a set rebuilds (the volume re-converges)
 	key = fnv( key, &bounceSat, sizeof bounceSat );
 	if ( G ) {
@@ -2428,6 +2452,11 @@ bool rtddgiCellReadUp( Scene * scene )
 	if ( K.count > 0 && cascCell( 0 ).live && K.owner == r && K.tex )
 		return true;
 	return c.live && c.uploaded && c.tex && c.glOwner == r;
+}
+
+bool rtddgiCellEmissiveTraced( Scene * scene )
+{
+	return rtddgiEmissiveRed() != 1 && rtddgiCellReadUp( scene );
 }
 
 // lane INTGI1 (SSGIHO-INT): the densest read volume's smallest spacing (cascade 0 under the cascades), 0 when none is up

@@ -281,6 +281,9 @@ vec3 ddgiDirect( vec3 Pw, vec3 n )
 	return E;
 }
 
+// MIRROR rtddgimath.h hitRadiance (RTEMIS1): albedo x irradiance / pi + the surface's own emission Le (placed lights kept)
+vec3 ddgiHitRadiance( vec3 alb, vec3 E, vec3 Le ) { return alb * E / DDGI_PI + Le; }
+
 void main()
 {
 	const uint id = ddgiLinearId();
@@ -321,7 +324,7 @@ void main()
 			vec3 E = ddgiDirect( Pw, n );
 			if ( P.flags.x == 0 )
 				E += ddgiIrradianceAt( Pw, n, -d );
-			rec = vec4( a0.rgb * E / DDGI_PI + triAttr[uint( tri ) * 2u + 1u].rgb, t );
+			rec = vec4( ddgiHitRadiance( a0.rgb, E, triAttr[uint( tri ) * 2u + 1u].rgb ), t );   // RTEMIS1
 		}
 	}
 	rays[p * uint( N ) + uint( i )] = rec;

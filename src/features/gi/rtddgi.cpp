@@ -118,6 +118,9 @@ struct Twin
 	unsigned red = 0;
 	std::vector<float> rays, probes, irr, dist;
 	std::vector<quint32> age;
+	// RTEMIS1 telemetry, a probe's blended rays (one thread a probe): emissive hits, their Le and every ray's radiance (luminance)
+	std::vector<qint64> emHits;
+	std::vector<double> emLum, allLum;
 
 	explicit Twin( const Packed & s ) : S( s )
 	{
@@ -134,6 +137,9 @@ struct Twin
 		irr.assign( size_t( nP ) * 64 * 4, 0.0f );
 		dist.assign( size_t( nP ) * 256 * 2, 0.0f );
 		age.assign( size_t( nP ), 0 );
+		emHits.assign( size_t( nP ), 0 );
+		emLum.assign( size_t( nP ), 0.0 );
+		allLum.assign( size_t( nP ), 0.0 );
 		for ( int p = 0; p < nP; p++ )
 			probes[size_t( p ) * 4 + 3] = float( kVigilant );
 	}
@@ -317,9 +323,15 @@ struct Twin
 		V3 E = direct( Pw, n );
 		if ( !P.flags[0] )
 			E = E + sampleVolume( Pw, n, -d );
-		for ( int c = 0; c < 3; c++ )
-			rec[c] = a0[c] * E[c] / kPi + a0[4 + c];
+		const float Ec[3] = { E[0], E[1], E[2] };
+		hitRadiance( a0, Ec, a0 + 4, rec );   // RTEMIS1: MIRROR trace.comp ddgiHitRadiance
 		rec[3] = tf;
+		const double le = 0.2126 * a0[4] + 0.7152 * a0[5] + 0.0722 * a0[6];
+		if ( le > 0.0 ) {
+			emHits[size_t( p )]++;
+			emLum[size_t( p )] += le;
+		}
+		allLum[size_t( p )] += 0.2126 * rec[0] + 0.7152 * rec[1] + 0.0722 * rec[2];
 	}
 	// MIRROR blend.comp
 	void blendProbe( int p, const M3 & rot )
@@ -456,8 +468,16 @@ void runTwin( const Packed & S, const RtDdgiSpec & spec, RtDdgiVolume * out, std
 			T.borderProbe( int( p ) );
 		} );
 		out->rays += traced.load();
+		out->emisRays += traced.load() / std::max( T.N, 1 ) * ( T.N - kFixedRays );   // RTEMIS1: the shaded (blended) rays
 	}
 	out->msFrames = double( tm.nsecsElapsed() ) / 1e6;
+	out->emisHits = 0;   // RTEMIS1: the blended rays' emissive census (fixed rays are never shaded, so never counted)
+	out->emisLum = out->allLum = 0.0;
+	for ( int p = 0; p < T.nP; p++ ) {
+		out->emisHits += T.emHits[size_t( p )];
+		out->emisLum += T.emLum[size_t( p )];
+		out->allLum += T.allLum[size_t( p )];
+	}
 	out->offset.resize( size_t( T.nP ) * 3 );
 	out->state.resize( size_t( T.nP ) );
 	for ( int p = 0; p < T.nP; p++ ) {
@@ -598,17 +618,34 @@ static bool packVolume( const ProbeSoup & soup, const WwCellLighting & lighting,
 	const size_t nTri = soup.tris.size() / 9;
 	S.triAttr.assign( nTri * kAttr, 0.0f );
 	const bool hasAlb = soup.alb.size() >= nTri * 3;
+	const bool noEmis = hasRed( spec.red, "noemissive" ), emiCentre = hasRed( spec.red, "emicentre" );
+	out->emisTris = 0;
+	out->emisArea = out->emisPower = 0.0;
 	for ( size_t t = 0; t < nTri; t++ ) {
 		float * a = &S.triAttr[t * kAttr];
 		for ( int c = 0; c < 3; c++ )
 			a[c] = hasAlb ? soup.alb[t * 3 + size_t( c )] / 255.0f : 0.5f;   // ours: mid grey without ALB1
 		bounceAlbedo( a, spec.bounceSat );   // GIFIX1101 1B (1 = as read)
 		a[3] = soup.isTwoSided( t ) ? 1.0f : 0.0f;
-		if ( soup.glow.emits( int( t ) ) ) {   // the glow at the triangle's centre (ours: one texel a triangle)
+		if ( !noEmis && soup.glow.emits( int( t ) ) ) {   // RTEMIS1: the glow's area mean (red emicentre: M1's centre texel)
 			double le[3];
-			soup.glow.le( int( t ), 1.0 / 3.0, 1.0 / 3.0, le );
+			const int ti = int( t );
+			if ( emiCentre )
+				soup.glow.le( ti, 1.0 / 3.0, 1.0 / 3.0, le );
+			else
+				emitAreaMean( [&]( double b1, double b2, double v[3] ) { soup.glow.le( ti, b1, b2, v ); }, le );
 			for ( int c = 0; c < 3; c++ )
 				a[4 + c] = float( le[c] ) * lighting.glowScale;	// lane MUSGI1 r5: a sunlit interior's lamp scale
+			const double lum = 0.2126 * a[4] + 0.7152 * a[5] + 0.0722 * a[6];
+			if ( lum > 0.0 ) {
+				const float * v = &soup.tris[t * 9];
+				const double e1[3] = { v[3] - v[0], v[4] - v[1], v[5] - v[2] }, e2[3] = { v[6] - v[0], v[7] - v[1], v[8] - v[2] };
+				const double cx = e1[1] * e2[2] - e1[2] * e2[1], cy = e1[2] * e2[0] - e1[0] * e2[2], cz = e1[0] * e2[1] - e1[1] * e2[0];
+				const double area = 0.5 * std::sqrt( cx * cx + cy * cy + cz * cz );
+				out->emisTris++;
+				out->emisArea += area;
+				out->emisPower += kPi * lum * area * ( a[3] > 0.5f ? 2.0 : 1.0 );
+			}
 		}
 	}
 	for ( const WwCellLight & l : lighting.lights ) {
@@ -1373,6 +1410,22 @@ static QByteArray skyBelowLine( const RtDdgiVolume & vol )
 	return QByteArray( b );
 }
 
+/* lane RTEMIS1: the emission at the hits in one line (CLI stdout): the pack census (both paths), then the twin's hit census
+ * (hits per update, the share of the shaded hits' radiance that is Le); the GPU keeps no per-hit count */
+static QByteArray emissiveLine( const RtDdgiVolume & vol, const RtDdgiSpec & spec )
+{
+	char b[512];
+	const int n = std::snprintf( b, sizeof b, "emissive: %d triangles, area %.1f u2, power %.6g (pi x lum Le x area); ", vol.emisTris,
+		vol.emisArea, vol.emisPower );
+	if ( vol.emisHits < 0 )
+		std::snprintf( b + n, sizeof b - size_t( n ), "hits not counted on this path" );
+	else
+		std::snprintf( b + n, sizeof b - size_t( n ), "hits %lld of %lld shaded rays (%.1f an update), Le %.6g of hit radiance %.6g (%.3f %%)",
+			(long long)vol.emisHits, (long long)vol.emisRays, double( vol.emisHits ) / double( std::max( spec.frames, 1 ) ),
+			vol.emisLum, vol.allLum, vol.allLum > 0.0 ? 100.0 * vol.emisLum / vol.allLum : 0.0 );
+	return QByteArray( b );
+}
+
 bool rtddgiDump( const RtDdgiVolume & vol, const RtDdgiSpec & spec, const QString & dir, QString * err )
 {
 	if ( !QDir().mkpath( dir ) ) {
@@ -1560,7 +1613,7 @@ int rtddgiCli( const QStringList & args )
 		std::fprintf( stderr, "usage: rtddgi --soup <file> --rect minX,minY,maxX,maxY --out <dir> [--light x,y,z,radius,r,g,b ...] "
 			"[--lights <file>] [--sun tx,ty,tz,r,g,b] [--sky r,g,b | 18 values] [--spacing s] [--zscale k] [--rays n] [--frames n] "
 			"[--hyst h] [--bias b] [--seed n] [--max-probes n] [--one-bounce] [--no-sky] [--gpu 0|1] [--no-place] [--no-reloc] "
-			"[--no-classify] [--trace-asleep] [--dump-fixed] [--red noback,nocheb,nobias,norot,hwhit,notie,skybelow,bouncenocover]\n" );
+			"[--no-classify] [--trace-asleep] [--dump-fixed] [--red noback,nocheb,nobias,norot,hwhit,notie,skybelow,bouncenocover,noemissive,emicentre]\n" );
 		return 2;
 	}
 	for ( int k = 0; k < 4; k++ )
@@ -1621,6 +1674,7 @@ int rtddgiCli( const QStringList & args )
 		qPrintable( vol.path ), vol.dims[0], vol.dims[1], vol.dims[2], vol.probes, vol.off, vol.asleep, vol.vigilant, vol.moved,
 		(long long)vol.rays, vol.msBuild, vol.msReloc, spec.frames, vol.msFrames, vol.blasGrow );
 	std::printf( "%s\n", skyBelowLine( vol ).constData() );   // lane SKYBELOW1
+	std::printf( "%s\n", emissiveLine( vol, spec ).constData() );   // lane RTEMIS1
 	return 0;
 }
 

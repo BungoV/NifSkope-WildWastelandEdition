@@ -58,7 +58,8 @@ struct RtDdgiSpec
 	int gpu = 0;                //!< 0 the CPU twin, 1 the GPU when it can (else the twin, and the path says why)
 	/*! refuters for the gates (comma list): "noback" backface hits shaded as front faces, "nocheb" the bounce sampler
 	 *  without Chebyshev, "nobias" without the self-shadow bias, "norot" no per-update rotation; M1FIX: "hwhit" (GPU
-	 *  only) M1's trace that trusts the hardware's hit on bakert's grown BLAS, "notie" no tie pass (both runs) */
+	 *  only) M1's trace that trusts the hardware's hit on bakert's grown BLAS, "notie" no tie pass (both runs);
+	 *  RTEMIS1: "noemissive" no Le at the hits (packed 0), "emicentre" M1's Le from the triangle's centre texel */
 	QString red;
 	bool dumpFixed = false;     //!< keep each probe's 32 fixed-ray distances for rtddgi_fixed.tsv (the CLI's --dump-fixed)
 	float rect[4] = { 0, 0, 0, 0 };   //!< minX minY maxX maxY (world), the placement's and the grid's xy box
@@ -102,6 +103,13 @@ struct RtDdgiVolume
 	bool skyOn = false;             //!< the misses took a sky (an exterior with the weather's sky)
 	qint64 missBelow = -1, missBelowSky = 0, missBelowGround = 0, missAbove = 0, missAboveSky = 0;
 	quint64 aboveHash = 0;
+	/* lane RTEMIS1 (bungo 11-06): a probe ray's hit adds the surface's own emission Le (placed lights kept). Pack census
+	 * (both paths): emissive triangles, their area (units^2) and power pi x lum(Le) x area; twin only (the GPU keeps no
+	 * per-hit count): emissive hits and the share of the blended rays' radiance that is Le, over all updates */
+	int emisTris = 0;
+	double emisArea = 0.0, emisPower = 0.0;
+	qint64 emisHits = -1, emisRays = 0;
+	double emisLum = 0.0, allLum = 0.0;
 	int probeCount() const { return dims[0] * dims[1] * dims[2]; }
 	//! probe p's position (world): grid + offset
 	void position( int p, float out[3] ) const;
