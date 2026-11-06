@@ -1,3 +1,21 @@
+## MODULES1 part 18b (2026-11-06): the lamp cone undone, the beam cards drawn, softer air; contact march found again
+
+- Undone: part 17's hero spot `.nifx` for CeilingLampShortOn and the `wwNifxSidecarFind` own-Data root (bungo: the
+  lamp must look like his game). The 99fb4996 cone numbers are void.
+- The game's cone under that lamp is two LightBeamThinDusty01 effect cards. The air no longer hides beam cards as fake
+  air (`fakeair.h`); red `WW_CELL_FAKEAIR_BEAM_RED=1` hides them as before.
+- The air's fresh sun and lamp samples move inside their column each refresh (Halton 2,3, the same offset for every
+  froxel; Hillaire 2015 slide 22) into the running mean. Red `WW_CELL_AIR_JITTER_RED=1`.
+- Surfaces read the air volume with one dithered tap (up to half a froxel in x, y and slice, turned each frame) that
+  TAA averages (Bauer 2019, RDR2, slides 48 and 57). Red `WW_CELL_AIR_DITHER_RED=1`.
+- The air's lamp-atlas shadow reads 8 Vogel taps over 2.5 texels, turned each frame, instead of one hard tap (the
+  wedge under the string lights). Red `WW_CELL_AIR_LAMPPCF_RED=1`.
+- Contact shadows: `shadowset.cpp` opened `shaders/ww_contact.comp`, which the module move put in
+  `shaders/features/shadows/`. The compute march silently fell back to the fragment pass. It now opens the file through
+  the shader loader's lookup (`wwShaderPath`, now shared from glcontext.cpp).
+- `WW_ALL_ON` also pins `WW_CLOUDVOL=ultra` and `WW_CELL_AIR_GRID=ultra` (a harness otherwise ran clouds at tier 0 and
+  the air grid at Low).
+
 ## MODULES1 part 18 (2026-11-06): the AO geometry pass skips the sun; pass times count fragments
 
 - The AO geometry pre-pass (`cellAoEarly` 3) read the sun's shadow per fragment and threw it away. It now takes its

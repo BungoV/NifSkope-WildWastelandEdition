@@ -523,10 +523,20 @@ vec4 wwVolAirAtUv( vec3 posView, vec2 uv )	// lane VOLPART1: uv = the column (a 
 }
 #endif
 
-// (L, T) of the air between the eye and posView, at this fragment's column
+/* (L, T) of the air between the eye and posView, at this fragment's column. Part 18 (volAirFlags 512): RDR2's single
+ * dithered tap (Bauer 2019 slides 48, 57; notes/modules1/research/fog_temporal.md): the read moves up to half a froxel in
+ * x, y and slice by a per-pixel gradient noise that turns each frame (bits 10-13), and TAA averages the blocks away */
 vec4 wwVolAirAt( vec3 posView )
 {
-	return wwVolAirAtUv( posView, ( gl_FragCoord.xy - volRect.xy ) * volRect.zw );
+	vec2 uv = ( gl_FragCoord.xy - volRect.xy ) * volRect.zw;
+	if ( ( volAirFlags & 512 ) != 0 ) {
+		vec2 q = gl_FragCoord.xy + 5.588238 * float( ( volAirFlags >> 10 ) & 15 );
+		vec3 n = fract( 52.9829189 * fract( vec3( dot( q, vec2( 0.06711056, 0.00583715 ) ), dot( q + vec2( 47.0, 17.0 ), vec2( 0.06711056, 0.00583715 ) ),
+			dot( q + vec2( 13.0, 71.0 ), vec2( 0.06711056, 0.00583715 ) ) ) ) ) - 0.5;
+		uv += n.xy / ( volPackDims.xy * volPack.xy );
+		posView *= exp( n.z * volSlices.y / volPackDims.w );
+	}
+	return wwVolAirAtUv( posView, uv );
 }
 
 /* (L, T) of the whole air along a sky ray (bungo 10-14: the far tower stood out against an unfogged sky). The sky is a

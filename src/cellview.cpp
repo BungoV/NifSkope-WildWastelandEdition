@@ -5470,7 +5470,8 @@ static bool cellBuild( NifModel * nif, const CellSceneSpec & specAsked, CellChun
 			}
 			/* lane MUSGI1: a fake fog / light-shaft card (gl/fakeair.h) takes its own bucket named "FakeAir ...";
 			 * BSShape hides it while our Volumetric Air is on (wwFakeAirHidden) */
-			const bool fakeAir = s.nearFacts.effectShader && !isActor && wwFakeAirModel( model );
+			WW_SWITCH_STATIC( bool, beamRed, wwEnvInt( "WW_CELL_FAKEAIR_BEAM_RED" ) == 1 );	// part 18: light beams draw
+			const bool fakeAir = s.nearFacts.effectShader && !isActor && wwFakeAirModel( model ) && ( beamRed || !wwFakeAirLightBeam( model ) );
 			if ( fakeAir ) {
 				bbOwn += QLatin1String( "|FA" );
 				fakeAirShapes++;

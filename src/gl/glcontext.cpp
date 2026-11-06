@@ -438,7 +438,7 @@ void NifSkopeOpenGLContext::Shader::printCompileError( const QString & err )
 /* MODULES1: a module's shaders sit in shaders/features/<module>/ under their own names (a .prog lists names, an
  * #include names a file). A name missing beside the file that asks for it is looked up in the shaders folder and its
  * modules' folders, from the asking file's folder up two levels (tests/spells/shader_link_check.py shader_path). */
-static QString wwShaderPath( const QString & filepath )
+QString wwShaderPath( const QString & filepath )
 {
 	if ( QFileInfo::exists( filepath ) )
 		return filepath;

@@ -207,7 +207,8 @@ int main( int argc, char * argv[] )
 			{ "WW_SHADOW_CASCADE", "ultra" }, { "WW_SHADOW_CONTACT", "ultra" }, { "WW_SHADOW_TERRAIN", "ultra" },
 			{ "WW_SUNPATH", "1" }, { "WW_ATMO", "ultra" }, { "WW_CELL_RT_PRESET", "ultra" }, { "WW_CELL_SSGI_QUALITY", "ultra" },
 			{ "WW_TAA2", "ultra" }, { "WW_CELL_WATER_PRESET", "ultra" }, { "WW_CELL_LAMPSHADOW", "ultra" },
-			{ "WW_CELL_AIR_FAR", "4" }, { "WW_CELL_AO_METHOD", "xegtao" }, { "WW_CELL_AO_QUALITY", "ultra" } };
+			{ "WW_CELL_AIR_FAR", "4" }, { "WW_CELL_AO_METHOD", "xegtao" }, { "WW_CELL_AO_QUALITY", "ultra" },
+			{ "WW_CLOUDVOL", "ultra" }, { "WW_CELL_AIR_GRID", "ultra" } };	// part 18 audit: a harness pins clouds 0 and the grid Low otherwise
 		QByteArray set, kept;
 		for ( const auto & kv : kAllOn ) {
 			const char * k = kv[0];

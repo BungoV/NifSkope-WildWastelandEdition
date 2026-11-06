@@ -442,6 +442,9 @@ protected:
 	AllocBuffers	shaderDataBuf;
 };
 
+// MODULES1: a shader file's real path (beside the asker, else shaders/ and shaders/features/<module>/ up two levels)
+QString wwShaderPath( const QString & filepath );
+
 inline bool NifSkopeOpenGLContext::ShapeDataHash::operator==( const ShapeDataHash & r ) const
 {
 #if ENABLE_X86_64_SIMD >= 2

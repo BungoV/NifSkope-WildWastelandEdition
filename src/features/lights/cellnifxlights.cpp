@@ -1,6 +1,5 @@
 #include "cellnifxlights.h"
 
-#include <QCoreApplication>
 #include <QDateTime>
 #include <QDir>
 #include <QElapsedTimer>
@@ -373,13 +372,6 @@ QString wwNifxSidecarFind( const QStringList & roots, const QString & model )
 	for ( const QString & root : roots )
 		if ( !side.isEmpty() && !root.isEmpty() && QFileInfo::exists( root + QLatin1Char( '/' ) + side ) )
 			return QDir::cleanPath( root + QLatin1Char( '/' ) + side );
-	/* lane MODULES1: NifSkope's own shipped data (release/Data, from res/Data) last, as FIX1101A's archive rule: a game
-	 * or mod .nifx of the same name still wins. Red WW_OWNDATA_RED=1: not read */
-	if ( !side.isEmpty() && QCoreApplication::instance() && qEnvironmentVariableIntValue( "WW_OWNDATA_RED" ) != 1 ) {
-		const QString own = QCoreApplication::applicationDirPath() + QStringLiteral( "/Data/" ) + side;
-		if ( QFileInfo::exists( own ) )
-			return QDir::cleanPath( own );
-	}
 	return QString();
 }
 

@@ -3,6 +3,8 @@
 
 #include <QString>
 
+#include <algorithm>
+
 /* lane MUSGI1 (11-03): the game's fake air -- placed effect cards that paint fog, mist, haze or a light shaft (vanilla
  * Effects\Ambient\Mist*, GlowFill*, *LightBeam*, BeamSimple*, BeamSmoky*; Far Harbor GlowingSeaMist*). bungo: with our
  * Volumetric Air on, ALL fog is ours, so these hide while it is on. Steam, smoke, fire, sparks, debris, weapon beams,
@@ -28,6 +30,14 @@ inline bool wwFakeAirModel( const QString & model )
 		if ( stem.contains( QLatin1String( k ) ) )
 			return false;
 	return true;
+}
+
+/* lane MODULES1 part 18 (bungo 11-06): a light-beam card (*LightBeam*, e.g. the street lamp's LightBeamThinDusty01) is the
+ * game's own lit cone and draws as in the game; red WW_CELL_FAKEAIR_BEAM_RED=1 hides it with the fake air again */
+inline bool wwFakeAirLightBeam( const QString & model )
+{
+	const QString m = model.toLower();
+	return m.mid( std::max( m.lastIndexOf( QLatin1Char( '/' ) ), m.lastIndexOf( QLatin1Char( '\\' ) ) ) + 1 ).contains( QLatin1String( "lightbeam" ) );
 }
 
 //! WW_CELL_FAKEAIR_RED=keep draws the cards (gl/cellvolair.cpp)

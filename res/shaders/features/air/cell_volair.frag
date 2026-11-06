@@ -26,7 +26,7 @@ uniform vec3 cellDdgiOpenE[6];	// lane FOGENV1: an open probe's irradiance per a
 // lane MODULES1 route (a): the lamps' depth atlas (features/air/airlampatlas.cpp); volLampVis 0 = the probe walk
 uniform int volLampVis;
 uniform int volLampN;
-uniform int volLampAtlasRed;	// 1 = the first atlas: lamps in a cube slot read the atlas too (shadowed twice)
+uniform int volLampAtlasRed;	// 1 = the first atlas: lamps in a cube slot read the atlas too (shadowed twice); 2 = one tap (part 18 red)
 uniform sampler2DShadow volLampAtlas;
 uniform samplerBuffer volLampTable;
 // lane MODULES1 route (b): volLampVis 2 = the lamps' shadowed share a froxel traced on the volume's BVH (RG32F: share,
@@ -74,6 +74,7 @@ uniform int volQ;				// this frame's fresh stratum (0..3)
 // sub-step) and is blended into its history (volSunBlend, the fresh weight). Red WW_CELL_AIR_SUNJIT_RED: 0 and 1, the middle
 uniform float volSunJit;
 uniform float volSunBlend;
+uniform vec2 volJitXY;			// part 18: the fresh stratum's light samples' offset in the column (columns; 0 red)
 uniform sampler3D volHist;		// last frame's strata: layer p x slices + k = stratum p's light / (1 - a), a = 1 where valid
 uniform vec4 volReproj[3];		// this frame's view -> last frame's view (rows, view units)
 uniform vec4 volPrevGrid;		// last frame's [0][0], [1][1], near, ln(far / near)
@@ -454,7 +455,21 @@ float airLampAtlasVis( int i, vec3 P, vec3 Lp )
 	float d = length( r );
 	float radius = max( texelFetch( cellLights, i * CELL_TPL ).w, 0.001 );
 	float ref = ( d - 1.0 - 3.0 * d / s ) / radius;
-	return texture( volLampAtlas, vec3( px / vec2( textureSize( volLampAtlas, 0 ) ), ref ) );
+	vec2 tsz = vec2( textureSize( volLampAtlas, 0 ) );
+	if ( ( volLampAtlasRed & 2 ) != 0 )
+		return texture( volLampAtlas, vec3( px / tsz, ref ) );
+	/* part 18 (bungo 11-06, the hard wedge under the string lights): 8 Vogel taps over 2.5 texels, turned each frame by the
+	 * Halton offset, so a thin caster's edge in the air is a soft ramp the running mean and TAA settle (Wronski 2014 slides
+	 * 31-32 filter the air's shadow; notes/modules1/research/fog_temporal.md). Red WW_CELL_AIR_LAMPPCF_RED=1: one tap */
+	float ang = 6.2831853 * ( volJitXY.x + 0.5 );
+	mat2 rot = mat2( cos( ang ), sin( ang ), -sin( ang ), cos( ang ) );
+	float v = 0.0;
+	for ( int k = 0; k < 8; k++ ) {
+		float th = float( k ) * 2.39996323;
+		vec2 pk = clamp( px + rot * vec2( cos( th ), sin( th ) ) * ( sqrt( ( float( k ) + 0.5 ) * 0.125 ) * 2.5 ), o + 1.0, o + s - 1.0 );
+		v += texture( volLampAtlas, vec3( pk / tsz, ref ) );
+	}
+	return v * 0.125;
 }
 
 float airLeakLightK( int i, vec3 P, vec3 Lp )
@@ -469,7 +484,7 @@ float airLeakLightK( int i, vec3 P, vec3 Lp )
 		if ( rr.y > 0.0 )
 			return rr.x;
 	}
-	if ( volLampVis == 1 && ( !cubed || volLampAtlasRed == 1 ) ) {	// a lamp in a cube slot is shadowed by its cube already
+	if ( volLampVis == 1 && ( !cubed || ( volLampAtlasRed & 1 ) != 0 ) ) {	// a lamp in a cube slot is shadowed by its cube already
 		float av = airLampAtlasVis( i, P, Lp );	// every cell: the atlas is no probe guess (AUDIT row 5)
 		if ( av >= 0.0 )
 			return av;
@@ -1322,7 +1337,9 @@ void main()
 		airRest( posM, dirView, zc + dzdt * tm, t0 - tm, t1 - tm, Jenv, false );
 		float vk = airVeilK( Jenv, tm, zc + dzdt * tm );	// lane FARCITYWASH1
 		vec3 Jq[4];
-		airLightsQ( posM, dirView, zc + dzdt * tm, t0 - tm, t1 - tm, need, Jq );
+		vec2 ndcJ = ndc + volJitXY * 2.0 / vec2( volDims.xy );
+		vec3 dirJ = normalize( vec3( ndcJ.x / volProj.x, ndcJ.y / volProj.y, -1.0 ) );
+		airLightsQ( dirJ * ( tm / fogDistScale ), dirView, zc + dzdt * tm, t0 - tm, t1 - tm, need, Jq );
 		vec3 acc = vec3( 0.0 );
 		vec4 so[4];
 		airSunDs = dirView * ( 0.0625 * ( t1 - t0 ) / fogDistScale );	// lane AIRBEAD1: a quarter of a sub-step
@@ -1334,7 +1351,7 @@ void main()
 				Cq = 0.25 * W * Jq[q] AZ_TINT( q );
 				if ( wq[q] > 0.0 ) {
 					float ts = t + volSunJit * ( tb - ta );
-					Cq += Tq[q] * wq[q] * vk * airEnvColour( airSun( dirView * ( ts / fogDistScale ), dirView, zt ), t, zt, dirView ) AZ_TINT( q );
+					Cq += Tq[q] * wq[q] * vk * airEnvColour( airSun( dirJ * ( ts / fogDistScale ), dirView, zt ), t, zt, dirView ) AZ_TINT( q );
 				}
 				so[q] = vec4( Cq / W, 1.0 );
 				if ( volSunBlend < 1.0 && need == ( 1 << q ) && h[q].a > 0.9999 ) {	// a valid history: the running mean

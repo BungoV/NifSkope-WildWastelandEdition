@@ -1896,7 +1896,8 @@ static void vaPassInner( Scene * scene, bool run )
 		prog->uni1i( "volLampVis", lampVis == 2 ? 2 : ( lampN > 0 ? 1 : 0 ) );
 		prog->uni1i( "volLampRays", WwCellUnit::AirLampRays );
 		prog->uni1i( "volLampN", lampN );
-		prog->uni1i( "volLampAtlasRed", wwAirLampAtlasRed() & 1 );
+		WW_SWITCH_STATIC( bool, lampPcfRed, wwEnv( "WW_CELL_AIR_LAMPPCF_RED" ).trimmed() == "1" );	// part 18: one atlas tap
+		prog->uni1i( "volLampAtlasRed", ( wwAirLampAtlasRed() & 1 ) | ( lampPcfRed ? 2 : 0 ) );
 		prog->uni1i( "volLampAtlas", WwCellUnit::AirLampAtlas );
 		prog->uni1i( "volLampTable", WwCellUnit::AirLampTable );
 	}
@@ -2062,6 +2063,19 @@ static void vaPassInner( Scene * scene, bool run )
 		const double k = double( g.frame >> 2 ) * 0.6180339887498949;
 		prog->uni1f( "volSunJit", red ? 0.0f : float( k - std::floor( k ) ) - 0.5f );
 		prog->uni1f( "volSunBlend", red ? 1.0f : g.tmode == 2 ? 0.25f : 0.5f );
+		// part 18: the fresh stratum's sun and lamp samples move inside the column each refresh, Halton (2, 3), into the
+		// same running mean (notes/modules1/research/fog_temporal.md); red WW_CELL_AIR_JITTER_RED=1: the centre
+		WW_SWITCH_STATIC( bool, jitRed, wwEnv( "WW_CELL_AIR_JITTER_RED" ).trimmed() == "1" );
+		auto halton = []( unsigned i, unsigned b ) {
+			float f = 1.0f, r = 0.0f;
+			for ( ; i > 0; i /= b ) {
+				f /= float( b );
+				r += f * float( i % b );
+			}
+			return r;
+		};
+		const unsigned hi = ( ( g.frame >> 2 ) & 15u ) + 1u;
+		prog->uni2f( "volJitXY", jitRed || g.tmode == 0 ? 0.0f : halton( hi, 2 ) - 0.5f, jitRed || g.tmode == 0 ? 0.0f : halton( hi, 3 ) - 0.5f );
 	}
 	prog->uni1b( "volHistOk", temporal && g.histOk );
 	prog->uni1i( "volHist", kInjectUnit );
@@ -2817,11 +2831,15 @@ void wwVolAirUniforms( Scene * scene )
 	if ( gloc >= 0 )
 		prog->uni4f_l( gloc, FloatVector4( g.ground[0], g.ground[1], g.ground[2], g.ground[3] ) );
 	const int fl = prog->uniLocation( "volAirFlags" );
+	// part 18 (bungo 11-06, the blocks in his crop): RDR2's single dithered froxel tap, TAA resolves it (Bauer 2019 slides 48,
+	// 57; notes/modules1/research/fog_temporal.md); red WW_CELL_AIR_DITHER_RED=1: the plain read at the pixel's own column
+	WW_SWITCH_STATIC( bool, ditherRed, wwEnv( "WW_CELL_AIR_DITHER_RED" ).trimmed() == "1" );
 	if ( fl >= 0 )
 		prog->uni1i_l( fl, ( ( s.red & 512 ) ? 0 : 1 ) | ( ( s.red & 1024 ) ? 0 : 2 ) | ( ( s.red & 256 ) ? 0 : 4 )
 			| ( ( s.red & 65536 ) ? 0 : 8 ) | ( ( s.red & 131072 ) ? 0 : 16 ) | ( s.tricubic ? 32 : 0 ) | ( terr ? 64 : 0 )
 			| ( s.sunColumn ? 0 : 128 )	// lane FIX1101A: 128 = the surfaces' sun dimmed by the ground layer only
-			| ( ( vaLeakBits( scene && wwCellLightsWanted( scene ) ? wwCellLightsFor( scene->nifModel ) : nullptr, s.leakRed ) & 8 ) ? 0 : 256 ) );	// lane FOGLEAK1: 256 = the far grid's tail takes the sun's shadow (WW_CELL_FOGLEAK only)
+			| ( ( vaLeakBits( scene && wwCellLightsWanted( scene ) ? wwCellLightsFor( scene->nifModel ) : nullptr, s.leakRed ) & 8 ) ? 0 : 256 )	// lane FOGLEAK1: 256 = the far grid's tail takes the sun's shadow (WW_CELL_FOGLEAK only)
+			| ( ditherRed ? 0 : 512 | int( ( g.frame & 15u ) << 10 ) ) );	// part 18: 512 = the dithered froxel read, bits 10-13 its frame
 }
 
 /* lane VOLAIR1 (bungo 10-14, cellvolair.h): the sky through the air. The far tower stood out against a sky the air never

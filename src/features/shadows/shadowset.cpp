@@ -2001,9 +2001,10 @@ bool contactLineReady()
 		L.why = QStringLiteral( "no GL 4.3 functions" );
 		return false;
 	}
-	QFile file( QCoreApplication::applicationDirPath() + QStringLiteral( "/shaders/ww_contact.comp" ) );
+	// part 18 (module-move audit): through the loader's lookup, the file sits in shaders/features/shadows/ since 4f5fb625
+	QFile file( wwShaderPath( QCoreApplication::applicationDirPath() + QStringLiteral( "/shaders/ww_contact.comp" ) ) );
 	if ( !file.open( QIODevice::ReadOnly ) ) {
-		L.why = QStringLiteral( "no shaders/ww_contact.comp" );
+		L.why = QStringLiteral( "no ww_contact.comp in shaders/ or its modules" );
 		return false;
 	}
 	const QByteArray src = file.readAll();
