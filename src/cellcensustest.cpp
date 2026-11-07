@@ -35,6 +35,7 @@ BSD License - see nifskope.h
 
 #include "cellrefs.h"
 #include "wwswitch.h"	// lane TESTDRIVER1: the WW_* switch store
+#include "wwenvput.h"	// lane PERFFIX6: wwEnvPut (the accessors cache)
 #include "cellview.h"
 #include "cellworkspace.h"
 #include "esmdata.h"
@@ -489,12 +490,12 @@ void stepBakeBefore( const CensusLoad & ld )
 		return;     // RED `nobake`: the row says bake, the builder was never told
 	const QString dir = bakeFolder( ld );
 	QDir().mkpath( dir );
-	qputenv( "WW_CELL_PROBES", QDir::toNativeSeparators( dir + QStringLiteral( "/probes_%1.tsv" ).arg( loadFileBase( ld ) ) ).toLocal8Bit() );
-	qputenv( "WW_CELL_PROBE_BAKE", QDir::toNativeSeparators( dir ).toLocal8Bit() );
-	qputenv( "WW_CELL_PROBES_N", QByteArray::number( ld.own ) );     // the load's own cells, never the ring
-	qputenv( "WW_CELL_PROBES_HIDE", "1" );      // the markers are not part of the cell's frame
+	wwEnvPut( "WW_CELL_PROBES", QDir::toNativeSeparators( dir + QStringLiteral( "/probes_%1.tsv" ).arg( loadFileBase( ld ) ) ).toLocal8Bit() );
+	wwEnvPut( "WW_CELL_PROBE_BAKE", QDir::toNativeSeparators( dir ).toLocal8Bit() );
+	wwEnvPut( "WW_CELL_PROBES_N", QByteArray::number( ld.own ) );     // the load's own cells, never the ring
+	wwEnvPut( "WW_CELL_PROBES_HIDE", "1" );      // the markers are not part of the cell's frame
 	// the builder is told the version here; stepBakeAfter reads the files back so a run never says one and writes another
-	qputenv( "WW_CELL_PROBE_BAKE_TBK", QByteArray::number( g.tbk ) );
+	wwEnvPut( "WW_CELL_PROBE_BAKE_TBK", QByteArray::number( g.tbk ) );
 }
 
 //! The version a `.tbk` sector file says it is (its second 32-bit word), or -1.
@@ -511,11 +512,11 @@ int tbkVersionOf( const QString & path )
 
 void stepBakeAfter( const CensusLoad & ld, CensusRow & r )
 {
-	qunsetenv( "WW_CELL_PROBES" );
-	qunsetenv( "WW_CELL_PROBE_BAKE" );
-	qunsetenv( "WW_CELL_PROBES_N" );
-	qunsetenv( "WW_CELL_PROBES_HIDE" );
-	qunsetenv( "WW_CELL_PROBE_BAKE_TBK" );
+	wwEnvUnset( "WW_CELL_PROBES" );
+	wwEnvUnset( "WW_CELL_PROBE_BAKE" );
+	wwEnvUnset( "WW_CELL_PROBES_N" );
+	wwEnvUnset( "WW_CELL_PROBES_HIDE" );
+	wwEnvUnset( "WW_CELL_PROBE_BAKE_TBK" );
 	const QString leadKey = g.plan.at( ld.cells.first() ).key;
 	r.bakeProbes = noteNumber( "bake: (\\d+) probes" );
 	// what the bake cost inside the build: placing the probes, the rays, the files
@@ -564,21 +565,21 @@ void stepBakeAfter( const CensusLoad & ld, CensusRow & r )
 void stepSpaceBefore( const CensusLoad & ld )
 {
 	QDir().mkpath( g.spaceDir );
-	qputenv( "WW_CELL_VOLUMES", QDir::toNativeSeparators( g.spaceDir ).toLocal8Bit() );
+	wwEnvPut( "WW_CELL_VOLUMES", QDir::toNativeSeparators( g.spaceDir ).toLocal8Bit() );
 	if ( wwEnv( "WW_CELL_PROBES" ).isEmpty() ) {   // the bake step did not ask already: the placing only
 		QDir().mkpath( g.spaceDir + QStringLiteral( "/_probes" ) );
-		qputenv( "WW_CELL_PROBES", QDir::toNativeSeparators( g.spaceDir + QStringLiteral( "/_probes/%1.tsv" ).arg( loadFileBase( ld ) ) ).toLocal8Bit() );
-		qputenv( "WW_CELL_PROBES_N", QByteArray::number( ld.own ) );
-		qputenv( "WW_CELL_PROBES_HIDE", "1" );
+		wwEnvPut( "WW_CELL_PROBES", QDir::toNativeSeparators( g.spaceDir + QStringLiteral( "/_probes/%1.tsv" ).arg( loadFileBase( ld ) ) ).toLocal8Bit() );
+		wwEnvPut( "WW_CELL_PROBES_N", QByteArray::number( ld.own ) );
+		wwEnvPut( "WW_CELL_PROBES_HIDE", "1" );
 	}
 }
 
 void stepSpaceAfter( const CensusLoad & ld, CensusRow & )
 {
-	qunsetenv( "WW_CELL_VOLUMES" );
-	qunsetenv( "WW_CELL_PROBES" );
-	qunsetenv( "WW_CELL_PROBES_N" );
-	qunsetenv( "WW_CELL_PROBES_HIDE" );
+	wwEnvUnset( "WW_CELL_VOLUMES" );
+	wwEnvUnset( "WW_CELL_PROBES" );
+	wwEnvUnset( "WW_CELL_PROBES_N" );
+	wwEnvUnset( "WW_CELL_PROBES_HIDE" );
 	const CensusUnit & unit = g.units.at( ld.unit );
 	const QString leadKey = g.plan.at( ld.cells.first() ).key;
 	const qint64 ms = noteNumber( "space stage (\\d+) ms \\(ok\\)" );
@@ -821,7 +822,7 @@ void refuseLoad( const QString & why )
 	r.steps = g.stepNames;
 	// a refused load built nothing: what the steps asked of the builder must not follow into the next
 	for ( const char * v : { "WW_CELL_PROBES", "WW_CELL_PROBE_BAKE", "WW_CELL_PROBES_N", "WW_CELL_PROBES_HIDE", "WW_CELL_PROBE_BAKE_TBK" } )
-		qunsetenv( v );
+		wwEnvUnset( v );
 	r.buildMs = g.buildMs;
 	r.note = why.isEmpty() ? QStringLiteral( "refused, and the builder gave no reason" ) : why;
 	closeMessageBoxes();

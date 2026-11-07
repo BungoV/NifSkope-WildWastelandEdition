@@ -63,9 +63,11 @@ int wwLodMaskByTree = 0;
 #include "glview.h"
 #include "renderer.h"
 
+#include <QCoreApplication>
 #include <QDir>
 #include <QFile>
 #include <QProcessEnvironment>
+#include <QThread>
 #include <QSet>
 #include <QTextStream>
 
@@ -873,6 +875,7 @@ BSShaderLightingProperty::~BSShaderLightingProperty()
 void BSShaderLightingProperty::updateImpl( const NifModel * nif, const QModelIndex & index )
 {
 	Property::updateImpl( nif, index );
+	wwNameHave = 0;	// lane PERFFIX6 (F4): any edit the scene passes on drops fileName's NIF reads
 
 	if ( index == iBlock ) {
 		bsVersion = (unsigned short) nif->getBSVersion();
@@ -936,6 +939,7 @@ void BSShaderLightingProperty::resetParams()
 void BSShaderLightingProperty::clear()
 {
 	Property::clear();
+	wwNameHave = 0;	// lane PERFFIX6 (F4)
 
 	if ( material ) {
 		delete material;
@@ -1827,6 +1831,27 @@ QString BSShaderLightingProperty::fileName( int id ) const
 		return QString();
 	}
 
+	/* lane PERFFIX6 (F4): the NIF reads below (texture set / effect slots, BaseModel::getItemInternal by name) ran per
+	 * slot on every draw: 9 % of the setup CPU (PERFCPU1). They depend on the model's data only, so each slot's answer
+	 * is kept until the next update of this property (Scene::update passes every edit's block to every property) or
+	 * clear(). The GUI thread only; red WW_SETUP_FIELDCACHE=0 (live): read every time. */
+	static quint64 cacheGen = ~quint64( 0 );	// both GUI thread only (touched inside the test below)
+	static bool cacheOn = true;
+	if ( id >= 0 && id < 16 && QCoreApplication::instance()
+		&& QThread::currentThread() == QCoreApplication::instance()->thread()
+		&& ( !wwSwitchMoved( cacheGen ) || ( cacheOn = wwEnv( "WW_SETUP_FIELDCACHE" ).trimmed() != "0", true ) )
+		&& cacheOn ) {
+		if ( !( wwNameHave & ( 1u << id ) ) ) {
+			wwNameCache[id] = fileNameNif( id );
+			wwNameHave |= 1u << id;
+		}
+		return wwNameCache[id];
+	}
+	return fileNameNif( id );
+}
+
+QString BSShaderLightingProperty::fileNameNif( int id ) const
+{
 	// From iTextureSet
 	const NifModel * nif = NifModel::fromValidIndex(iTextureSet);
 	if ( nif ) {

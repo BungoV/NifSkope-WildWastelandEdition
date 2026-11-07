@@ -32,6 +32,7 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 #include "features/far-lod/lodgen.h"
 #include "wwswitch.h"	// lane TESTDRIVER1: the WW_* switch store
+#include "wwenvput.h"	// lane PERFFIX6: wwEnvPut (the accessors cache)
 #include "features/far-lod/lodgengpu.h"
 #include "features/gi/proberelight.h"
 #include "celldoorlive.h"	// lane DOORLIVE1: the port's NifSkope::door
@@ -216,7 +217,7 @@ int main( int argc, char * argv[] )
 				kept += QByteArray( " " ) + k + "=" + wwEnv( k );
 				continue;
 			}
-			qputenv( k, kv[1] );
+			wwEnvPut( k, kv[1] );
 			set += QByteArray( " " ) + k + "=" + kv[1];
 		}
 		fprintf( stderr, "all on: set%s | kept%s\n", set.constData(), kept.isEmpty() ? " none" : kept.constData() );
@@ -376,10 +377,10 @@ int main( int argc, char * argv[] )
 			port = parser.value( portOption ).toInt();
 		if ( parser.isSet( pathOption ) ) {
 			const QString pf = QFileInfo( parser.value( pathOption ) ).absoluteFilePath();
-			qputenv( "WW_RENDER_PATH", pf.toLocal8Bit() );
+			wwEnvPut( "WW_RENDER_PATH", pf.toLocal8Bit() );
 			if ( !wwEnvIsSet( "WW_RENDER_SHOT" ) ) {
 				const QFileInfo fi( pf );
-				qputenv( "WW_RENDER_SHOT", ( fi.path() + QLatin1Char( '/' ) + fi.completeBaseName() + QStringLiteral( ".png" ) ).toLocal8Bit() );
+				wwEnvPut( "WW_RENDER_SHOT", ( fi.path() + QLatin1Char( '/' ) + fi.completeBaseName() + QStringLiteral( ".png" ) ).toLocal8Bit() );
 			}
 		}
 

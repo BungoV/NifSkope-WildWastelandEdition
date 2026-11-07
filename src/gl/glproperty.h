@@ -813,6 +813,11 @@ public:
 	 * LOD material names, not the vanilla set's; empty in every other use. */
 	QHash<int, QString> wwTextureOverride;
 
+	//! lane PERFFIX6 (F4): fileName's NIF reads per slot (0..15), kept until updateImpl / clear (GUI thread only)
+	mutable QString wwNameCache[16];
+	mutable quint32 wwNameHave = 0;
+	QString fileNameNif( int id ) const;
+
 	//! The resolved-state fields of one WW_PBRM_CENSUS row (lane PBRR0): the
 	//! route that served the shape, its file, the .pbrm envelope, the refusal.
 	QString wwPbrmCensusFields( const QString & servedProgram ) const;

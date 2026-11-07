@@ -426,6 +426,7 @@ HEADERS += \
 	src/nifmerge.h \
 	src/nifskope.h \
 	src/wwswitch.h \
+	src/wwenvput.h \
 	src/shortcutregistry.h \
 	src/skeletontools.h \
 	src/starterscene.h \

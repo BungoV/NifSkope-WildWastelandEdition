@@ -349,6 +349,8 @@ public:
 	void releaseShaders();
 	//! Select shader program to use
 	Program * useProgram( const std::string_view & name );
+	//! lane PERFFIX6 (F5): the linked program of that name, or nullptr; binds nothing and leaves currentProgram alone
+	Program * findProgram( const std::string_view & name );
 	//! Stop shader program
 	void stopProgram();
 	//! Get the currently used shader program (nullptr if none)

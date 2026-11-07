@@ -34,6 +34,7 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include "ui/widgets/wwdropdown.h"
 #include "gamemanager.h"
 #include "wwswitch.h"	// the WW_* switch store
+#include "wwenvput.h"	// lane PERFFIX6: wwEnvPut (the accessors cache)
 #include "rdccapture.h"	// PERFCPU1: WW_RDC_ARM / WW_RDC_HOLD after a live picture
 #include "celldoorlive.h"	// a path frame poses the live door
 #include "features/gi/probesky.h"	// the live driver waits for a pending sky relight
@@ -2518,7 +2519,7 @@ static void wwCardBatchNext()
 		const QString bakeDir = b.work + QStringLiteral( "/bake" );
 		QDir( bakeDir ).removeRecursively();
 		QDir().mkpath( bakeDir );
-		qputenv( "WW_IMPOSTOR_BAKE", QDir::toNativeSeparators( bakeDir ).toLocal8Bit() );
+		wwEnvPut( "WW_IMPOSTOR_BAKE", QDir::toNativeSeparators( bakeDir ).toLocal8Bit() );
 		// every window starts from the process-start look, as each per-base launch's one window did
 		QCoreApplication::sendPostedEvents( nullptr, QEvent::DeferredDelete );
 		QApplication::setStyle( QStyleFactory::create( b.style ) );

@@ -1,5 +1,6 @@
 #include "cellspeed.h"
 #include "wwswitch.h"	// lane TESTDRIVER1: the WW_* switch store
+#include "wwenvput.h"	// lane PERFFIX6: wwEnvPut (the accessors cache)
 #include "features/shared/cellpasstime.h"	// lane PERF1
 
 #include <QByteArray>
@@ -217,7 +218,7 @@ int reopenStep( const QString & fname )
 		return -1;
 	if ( next.isEmpty() )
 		return 0;
-	qputenv( "WW_CELL_OPEN", next.takeFirst() );
+	wwEnvPut( "WW_CELL_OPEN", next.takeFirst() );
 	return 1;
 }
 

@@ -1,3 +1,18 @@
+## PERFFIX6 (2026-11-07): the per-draw setup stops re-reading the environment, the NIF and the program table
+- Environment reads (`wwEnv*`) are kept per name until any switch set or environment write moves a generation;
+  every direct `qputenv` / `qunsetenv` in src/ goes through `wwEnvPut` / `wwEnvUnset` (src/wwenvput.h). Red
+  `WW_ENV_CACHE=0` (live).
+- The weather's .recx check keeps its answer for 2 s while the hour, weather, blend and switch generation stand still
+  (a .recx edit still lands within 2 s). Red `WW_WEATHER_RECX_TTL=100` (live) = the old 100 ms check.
+- A lit shader property keeps its texture-slot names (the NIF's texture set / effect slots) until its next update or
+  clear (GUI thread). Red `WW_SETUP_FIELDCACHE=0` (live) reads them every draw.
+- The fog / cell / bindless program choice looks programs up without binding each candidate; the draw binds once.
+  Red `WW_SETUP_PICK=0` (live; `WW_SETUP_MEMO=0` too) binds every candidate as before.
+- Timing rows run `WW_CELL_AIR_TIME=0` (the air's per-frame timer off); `=1` keeps it.
+- `WW_SHADOW_ECHO`'s summary file is written by its own thread (the newest line wins, so the file still ends on the
+  latest summary); one open of it during the mem scene's load blocked the paint thread 26-37 s in the kernel. Red
+  `WW_SHADOW_ECHO_RED=reopen` (live) writes on the paint thread on every change.
+
 ## MODULES1 part 20 (2026-11-06): the GI sky ships absolute with a physical ground term, every ray card draws
 - The GI volume's sky ships as the drawn sky's own colour and level (`WW_CELL_RTDDGI_SKY` unset or empty = absolute).
   Reds: `WW_CELL_RTDDGI_SKY=level` (the old default), `=dalc` (the weather's DALC as it is), `=physical`.

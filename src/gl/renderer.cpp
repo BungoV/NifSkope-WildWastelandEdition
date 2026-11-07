@@ -104,6 +104,7 @@ struct SetupMemo
 {
 	int mode = 1;
 	bool check = false;
+	bool pick = true;	// lane PERFFIX6 (F5): fogVariant looks programs up without binding; red WW_SETUP_PICK=0
 	bool armed = false;
 	const char * passOwned = nullptr;	// lane FRAMESPEED2 (D5): the uniform the pass's draw hook writes after every setup
 	quint64 epoch = 1;
@@ -114,6 +115,7 @@ struct SetupMemo
 		const QByteArray v = wwEnv( "WW_SETUP_MEMO" );
 		mode = v.isEmpty() ? 1 : v.toInt();
 		check = wwEnvInt( "WW_SETUP_MEMO_CHECK" ) != 0;
+		pick = wwEnv( "WW_SETUP_PICK" ).trimmed() != "0";
 	}
 };
 
@@ -125,6 +127,7 @@ SetupMemo & setupMemo()
 		const QByteArray v = wwEnv( "WW_SETUP_MEMO" );
 		m.mode = v.isEmpty() ? 1 : v.toInt();
 		m.check = wwEnvInt( "WW_SETUP_MEMO_CHECK" ) != 0;
+		m.pick = wwEnv( "WW_SETUP_PICK" ).trimmed() != "0";
 		m.epoch++;
 		m.stamps.clear();
 	}
@@ -1253,6 +1256,11 @@ NifSkopeOpenGLContext::Program * Renderer::setupProgram( Shape * mesh, Program *
 			&& !GpuDriven::census();
 	};
 	auto fogVariant = [&]( Program * p ) -> Program * {
+		/* lane PERFFIX6 (F5): the choice only looks programs up; the one bind is the caller's glUseProgram below (each lookup
+		 * here used to bind too). Red WW_SETUP_PICK=0 (live; also WW_SETUP_MEMO=0) binds every candidate as before. */
+		const SetupMemo & pm = setupMemo();
+		const bool pickFind = pm.mode != 0 && pm.pick;
+		auto pick = [&]( const char * n ) -> Program * { return pickFind ? findProgram( n ) : useProgram( n ); };
 		/* lane EFX2: a cell-lit effect draw takes fo4_effectcell.prog (the effect shader the game's way: unlit,
 		 * linear, soft and near fades, fog, the cell's imagespace); red legacy keeps the viewer's effect shader */
 		/* lane DECALLIT1: an effect decal takes fo4_effectdecal.prog (the game draws it into the surface under it, lit as that
@@ -1269,7 +1277,7 @@ NifSkopeOpenGLContext::Program * Renderer::setupProgram( Shape * mesh, Program *
 				: wwCellFxResDrawing() ? "fo4_effectcellfx.prog" : "fo4_effectcell.prog";	// lane FXRES1: the layer's outputs
 			if ( p->name == std::string_view( want ) )
 				return p;
-			Program * q = useProgram( want );
+			Program * q = pick( want );
 			return q ? q : p;
 		}
 		if ( p->name != std::string_view( "fo4_fog.prog" ) && p->name != std::string_view( "fo4_default.prog" )
@@ -1311,15 +1319,15 @@ NifSkopeOpenGLContext::Program * Renderer::setupProgram( Shape * mesh, Program *
 		if ( !fgTwin && ( want[4] == 'c' && want[5] == 'e' ) && wwBlWants() ) {	// lane BINDLESS2: fo4_cell / fo4_cellcsm
 			const char * bl = want[8] == 'c' ? "fo4_cellcsmbl.prog" : "fo4_cellbl.prog";
 			if ( WwBl::red() != 5 ) {	// lane BINDLESSPERF1: the twin first; its base is looked up once
-				Program * q = useProgram( bl );
-				Program * base = !q ? nullptr : ( q->wwTwin && q->wwTwin->status ) ? q->wwTwin : useProgram( want );
+				Program * q = pick( bl );
+				Program * base = !q ? nullptr : ( q->wwTwin && q->wwTwin->status ) ? q->wwTwin : pick( want );
 				if ( q && base ) {
 					q->wwTwin = base;
 					return q;
 				}
 			} else {
-				Program * base = useProgram( want );
-				Program * q = base ? useProgram( bl ) : nullptr;
+				Program * base = pick( want );
+				Program * q = base ? pick( bl ) : nullptr;
 				if ( q ) {
 					q->wwTwin = base;
 					return q;
@@ -1328,7 +1336,7 @@ NifSkopeOpenGLContext::Program * Renderer::setupProgram( Shape * mesh, Program *
 		}
 		if ( p->name == std::string_view( want ) )
 			return p;
-		Program * q = useProgram( want );
+		Program * q = pick( want );
 		return q ? q : p;
 	};
 	if ( hint && hint->status && !stalePbrmHint ) [[likely]] {

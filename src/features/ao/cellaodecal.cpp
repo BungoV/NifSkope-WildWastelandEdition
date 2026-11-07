@@ -33,6 +33,7 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include "features/ao/cellaodecal.h"
 #include "features/ao/cellaodecalrule.h"	// PERFFIX2: built only when something reads the decals
 #include "wwswitch.h"	// lane TESTDRIVER1: the WW_* switch store
+#include "wwenvput.h"	// lane PERFFIX6: wwEnvPut (the accessors cache)
 
 #include "nativeemit.h"
 #include "features/gi/probeplace.h"
@@ -549,10 +550,10 @@ int aoDecalCli( const QStringList & args )
 		so.flush();
 		return 2;
 	}
-	qputenv( "WW_CELL_AODECAL", "1" );
-	qputenv( "WW_CELL_AODECAL_DIR", dir.toLocal8Bit() );
+	wwEnvPut( "WW_CELL_AODECAL", "1" );
+	wwEnvPut( "WW_CELL_AODECAL_DIR", dir.toLocal8Bit() );
 	if ( red == QLatin1String( "stale" ) || red == QLatin1String( "clutter" ) )
-		qputenv( "WW_CELL_AODECAL_RED", red.toLatin1() );
+		wwEnvPut( "WW_CELL_AODECAL_RED", red.toLatin1() );
 	std::vector<NativeSrcShape> shapes;
 	QString root = data;
 	if ( !lodgenNativeLoadModel( &root, model, &shapes ) || shapes.empty() ) {

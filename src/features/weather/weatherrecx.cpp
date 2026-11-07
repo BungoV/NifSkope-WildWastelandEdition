@@ -719,13 +719,30 @@ const WwWeatherRecx & wwWeatherRecx()
 	const double hour = wwLookdevHour();
 	const QString wk = wwLookdevWeatherKey();
 	const QString redKey = rw + QLatin1Char( '|' ) + wwEnvStr( "WW_WEATHER_RECORD_RED" );
-	if ( wasOn && since.isValid() && since.elapsed() < 100 && hour == lastHour && wk == lastWeather && redKey == lastRed )
+	/* lane PERFFIX6 (F2): the resolve (data folder, .recx directory listing, JSON) ran on every call once a frame took
+	 * longer than the 100 ms it was kept (5-7 ms a frame, PERFCPU1). It is kept while its inputs hold: the hour, the
+	 * weather, the reds, the switch generation and a change's blend share; the files are read again every 2 s, so an
+	 * edited .recx lands within 2 s. Red WW_WEATHER_RECX_TTL=100 (live, ms): the old 100 ms re-resolve. */
+	const int ttl = wwEnvIsSet( "WW_WEATHER_RECX_TTL" ) ? std::max( 0, wwEnvInt( "WW_WEATHER_RECX_TTL" ) ) : 2000;
+	static quint64 lastGen = 0;
+	static float lastPct = 1.0f;
+	const quint64 gen = wwSwitchGen();
+	float blendPct = 1.0f;
+	if ( ttl > 100 ) {
+		bool rains = false, blending = false, rainsOld = false;
+		if ( !wwLookdevWeatherRains( rains, blending, rainsOld, blendPct ) || !blending )
+			blendPct = 1.0f;
+	}
+	if ( wasOn && since.isValid() && since.elapsed() < ttl && hour == lastHour && wk == lastWeather && redKey == lastRed
+		&& ( ttl <= 100 || ( gen == lastGen && blendPct == lastPct ) ) )
 		return cur;
 	wasOn = true;
 	since.start();
 	lastHour = hour;
 	lastWeather = wk;
 	lastRed = redKey;
+	lastGen = gen;
+	lastPct = blendPct;
 
 	WwWeatherRecx next;
 	quint32 formID = 0;

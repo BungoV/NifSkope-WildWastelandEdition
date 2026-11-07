@@ -5,6 +5,7 @@
 #include "esmdata.h"
 #include "features/gi/probeincr.h"
 #include "version.h"
+#include "wwenvput.h"	// lane PERFFIX6: wwEnvPut (the accessors cache)
 
 #include <QCoreApplication>
 #include <QCryptographicHash>
@@ -811,6 +812,6 @@ int farLightWalkStep( const QString & fname, bool loaded )
 	}
 	const QStringList & n = queue[pos];
 	prepCell( qEnvironmentVariable( "WW_CELL_FARLIGHTWALK_SPEC" ), n[2], n[3], n[0].toInt(), n[1].toInt(),
-		[]( const QString & k, const QString & v ) { qputenv( k.toLocal8Bit().constData(), v.toLocal8Bit() ); } );
+		[]( const QString & k, const QString & v ) { wwEnvPut( k.toLocal8Bit().constData(), v.toLocal8Bit() ); } );
 	return FarLightWalkNext;
 }

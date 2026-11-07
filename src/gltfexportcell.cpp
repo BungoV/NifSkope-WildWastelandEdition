@@ -11,6 +11,7 @@
 #include "features/far-lod/lodgen.h"
 #include "nativeemit.h"
 #include "wwswitch.h"
+#include "wwenvput.h"	// lane PERFFIX6: wwEnvPut (the accessors cache)
 #include "io/material.h"
 #include "model/nifmodel.h"
 
@@ -602,7 +603,7 @@ int gltfCellCli( const QStringList & args )
 	const QString res = wwEnvStr( "WW_LODGEN_RESOURCES" );
 	if ( !res.isEmpty() )
 		lodgenSetResources( res.split( QLatin1Char( ';' ), Qt::SkipEmptyParts ) );
-	qputenv( "WW_CELL_STREAM", "0" );   // the whole block in one build, no streamer
+	wwEnvPut( "WW_CELL_STREAM", "0" );   // the whole block in one build, no streamer
 	spec.water = false;
 	spec.grid = false;   // spec.terrain stays: the LAND is read with it; the build's ground mesh is never reached
 	cellExportSetSink( &sink );

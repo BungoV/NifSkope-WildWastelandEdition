@@ -1,5 +1,6 @@
 #include "features/gi/probefar.h"
 #include "wwswitch.h"	// the WW_* switch store
+#include "wwenvput.h"	// lane PERFFIX6: wwEnvPut (the accessors cache)
 
 #include "features/far-lod/lodifile.h"
 #include "features/far-lod/lodofile.h"
@@ -470,13 +471,13 @@ bool probeFarBuild( const ProbeFarSpec & spec, ProbeSoup & soup, std::vector<Pro
 	bool haveSheet = false;
 	if ( spec.sheetDim > 0 ) {
 		const QByteArray old = wwEnv( "WW_LODL_SHEET_DIM" );
-		qputenv( "WW_LODL_SHEET_DIM", QByteArray::number( spec.sheetDim ) );
+		wwEnvPut( "WW_LODL_SHEET_DIM", QByteArray::number( spec.sheetDim ) );
 		QString why;
 		haveSheet = sheets.open( spec.lodl, &why ) && sheets.hasRole( LODV_ROLE_COLOR );
 		if ( old.isEmpty() )
-			qunsetenv( "WW_LODL_SHEET_DIM" );
+			wwEnvUnset( "WW_LODL_SHEET_DIM" );
 		else
-			qputenv( "WW_LODL_SHEET_DIM", old );
+			wwEnvPut( "WW_LODL_SHEET_DIM", old );
 		R.sheet = haveSheet ? sheets.containerPath() : QStringLiteral( "none (%1)" ).arg( why.isEmpty()
 			? QStringLiteral( "no colour sheet" ) : why );
 	} else {

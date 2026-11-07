@@ -1642,6 +1642,18 @@ NifSkopeOpenGLContext::Program * NifSkopeOpenGLContext::useProgram( const std::s
 	return nullptr;
 }
 
+NifSkopeOpenGLContext::Program * NifSkopeOpenGLContext::findProgram( const std::string_view & name )
+{
+	std::uint32_t	m = shaderHashMask;
+	std::uint32_t	h = hashFunctionUInt32( name.data(), name.length() ) & m;
+	Shader *	s;
+	for ( ; ( s = shadersAndPrograms[h] ) != nullptr; h = ( h + 1 ) & m ) {
+		if ( s->isProgram && s->name == name )
+			break;
+	}
+	return ( s && s->status ) ? static_cast< Program * >( s ) : nullptr;
+}
+
 void NifSkopeOpenGLContext::stopProgram()
 {
 	currentProgram = nullptr;

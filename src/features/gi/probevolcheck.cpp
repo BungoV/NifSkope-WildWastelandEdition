@@ -2,6 +2,7 @@
  *  It shares no code with the fitter (src/features/gi/probevolumes.cpp): its own .space reader, its own shape containment, its
  *  own lattice; the only common inputs are the soup's triangles and the .space files. */
 #include "features/gi/probevolcheck.h"
+#include "wwenvput.h"	// lane PERFFIX6: wwEnvPut (the accessors cache)
 
 #include "features/gi/bakert.h"
 #include "features/gi/probebvh.h"
@@ -678,7 +679,7 @@ int probeVolCheckCli( const QStringList & args )
 		upper += d[2] > 0 ? 1 : 0;
 	const bool wantGpu = raysWay == QLatin1String( "gpu" ) || raysWay == QLatin1String( "both" );
 	if ( wantGpu )
-		qputenv( "WW_BAKE_RT", "1" );
+		wwEnvPut( "WW_BAKE_RT", "1" );
 	std::string why;
 	const bool tryGpu = wantGpu || ( raysWay == QLatin1String( "auto" ) && bakert::pickPath( &why ) != bakert::Path::Cpu );
 	QString pathLine = QStringLiteral( "cpu (%1 threads)" ).arg( bakert::threads() );

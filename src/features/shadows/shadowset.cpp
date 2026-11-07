@@ -46,9 +46,12 @@ BSD License - see nifskope.h
 #include <cmath>
 #include <cstdint>
 #include <cstdio>
+#include <condition_variable>
 #include <cstring>
 #include <future>
 #include <limits>
+#include <mutex>
+#include <thread>
 #include <vector>
 
 /* See shadowset.h. Design sources (ported, written fresh for OpenGL): FO4CS docs/plans/unified-shadows-plan.md
@@ -1615,6 +1618,60 @@ ContactPreset contactPreset( int tier )
 	}
 }
 
+bool writeEchoFile( const QString & path, const QString & line )
+{
+	QFile f( path );
+	if ( !f.open( QIODevice::WriteOnly | QIODevice::Truncate ) )
+		return false;
+	f.write( line.toUtf8() );
+	return true;
+}
+
+/* lane PERFFIX6 (S1): during the mem scene's load ONE open of the summary file (create + truncate) blocked the paint
+ * thread 26-37 s in the kernel (sampler group sun-terrstep: 99.7 % of its samples on one wait, whether the file was
+ * reopened per change, kept open and resized, or written at most every 250 ms) -- the file system, not the rate. The
+ * paint thread now only posts the newest line; one writer thread writes it (a line posted while a write blocks
+ * replaces the older one, so the file still ends on the latest summary). Red WW_SHADOW_ECHO_RED=reopen (live): write on
+ * the paint thread on every change, as before. */
+struct EchoWriter
+{
+	std::mutex m;
+	std::condition_variable cv;
+	QString path, line;
+	bool have = false;
+
+	void post( const QString & p, const QString & l )
+	{
+		{
+			std::lock_guard<std::mutex> g( m );
+			path = p;
+			line = l;
+			if ( !std::exchange( started, true ) )
+				std::thread( [this] { run(); } ).detach();	// static, lives to the exit: never joined
+			have = true;
+		}
+		cv.notify_one();
+	}
+
+private:
+	bool started = false;
+
+	void run()
+	{
+		for ( ;; ) {
+			QString p, l;
+			{
+				std::unique_lock<std::mutex> g( m );
+				cv.wait( g, [this] { return have; } );
+				p = path;
+				l = line;
+				have = false;
+			}
+			writeEchoFile( p, l );
+		}
+	}
+};
+
 void echoSummary()
 {
 	SetState & s = ss();
@@ -1624,11 +1681,14 @@ void echoSummary()
 	const QString line = wwShadowSetSummary() + QStringLiteral( "\n" );
 	if ( line == lastWritten )
 		return;
-	QFile f( s.echo );
-	if ( f.open( QIODevice::WriteOnly | QIODevice::Truncate ) ) {
-		f.write( line.toUtf8() );
-		lastWritten = line;
+	if ( wwEnv( "WW_SHADOW_ECHO_RED" ).trimmed() == "reopen" ) {
+		if ( writeEchoFile( s.echo, line ) )
+			lastWritten = line;
+		return;
 	}
+	static EchoWriter writer;
+	writer.post( s.echo, line );
+	lastWritten = line;
 }
 
 } // namespace
