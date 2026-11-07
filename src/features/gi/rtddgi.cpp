@@ -2101,7 +2101,8 @@ int restirgiCli( const QStringList & args )
 		return 1;
 	}
 	Twin T( S );
-	const RtDdgiVolume & lv = live.volume();
+	RtDdgiVolume lv;
+	live.snapshot( &lv );   // volume() holds no atlas (it stays on the device): the host copies the last step made
 	const size_t nP = size_t( T.nP );
 	if ( lv.irr.size() != T.irr.size() || lv.dist.size() != T.dist.size() || lv.offset.size() < nP * 3 || lv.state.size() < nP ) {
 		std::printf( "restirgi: the GPU volume (%d probes) is not the twin's (%d)\n", int( lv.state.size() ), T.nP );
