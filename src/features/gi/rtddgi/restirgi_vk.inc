@@ -434,6 +434,10 @@ bool restirGiGpuStep( DdgiGpuSession * s, const RestirGiGpuIn & in, RestirGiGpuO
 	}
 	const bool gl = g->shared && bool( in.beforeSubmit ) && !in.gbuf;
 	const uint64_t groups = uint64_t( ( in.W + 7 ) / 8 ) * uint64_t( ( in.H + 7 ) / 8 );   // 8 x 8 tiles (>= n / 64: the linear red fits too)
+	// the half / quarter trace's modes 0 and 1: 8 x 8 tiles of 2 x 1 / 2 x 2 blocks (restirgi.comp main; not with red linear)
+	const int tb = in.red & ( 512 | 1024 );
+	const int bw = ( in.W + 1 ) / 2, bh = ( tb & 1024 ) ? ( in.H + 1 ) / 2 : in.H;
+	const uint64_t groupsTrace = tb && !( in.red & 256 ) ? uint64_t( ( bw + 7 ) / 8 ) * uint64_t( ( bh + 7 ) / 8 ) : groups;
 	bool ok = true;
 	{
 		DdgiCbSwap sw( D, g->cb );
@@ -450,7 +454,7 @@ bool restirGiGpuStep( DdgiGpuSession * s, const RestirGiGpuIn & in, RestirGiGpuO
 			for ( uint32_t mode = 0; mode < modes; mode++ ) {
 				if ( g->qp )
 					T.write( D.cb, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, g->qp, mode );
-				rgDispatch( D, R, s, g, mode, groups );
+				rgDispatch( D, R, s, g, mode, mode <= 1 ? groupsTrace : groups );
 				ddgiBarrier( D );
 			}
 			if ( g->qp )

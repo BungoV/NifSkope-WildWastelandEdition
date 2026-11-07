@@ -45,6 +45,8 @@ constexpr int kRedWhite = 16;          // not a red: the white-noise bounce (the
 constexpr int kRedR2 = 32;             // the integer R2 lattice bounce in place of the STBN mask (the mask's before)
 constexpr int kRedNoJClamp = 64;       // every Jacobian merged as it is (jacobianKept's drop's before)
 constexpr int kRedLinear = 256;        // GPU only: one invocation a pixel in row order (the 8 x 8 tiles' before); same result
+constexpr int kTraceHalf = 512;        // the bounce + spatial pass on half the pixels a frame, a checkerboard turning each frame
+constexpr int kTraceQuarter = 1024;    // on a quarter (one pixel of each 2 x 2, turning); neither: every pixel (red fullres)
 constexpr float kHistoryCap = 20.0f;   // [Ouyang 2021 sec. 4.3 / Bitterli 2020 sec. 6]
 constexpr int kStbnSide = 128, kStbnSlices = 64;   // res/air/stbn_scalar_128x128x64.r8 (FOGGRID22A, ours)
 constexpr float kEps = 1e-3f;          // ray offsets, in the scene's units
@@ -182,6 +184,20 @@ inline void finalize( Res & r, float pHat, float Z )
 	r.W = r.any && pHat > 0.0f && Z > 0.0f ? r.wsum / ( Z * pHat ) : 0.0f;
 }
 
+/*! does pixel (x, y) trace its bounce and run the spatial pass at frame f (RTXDI's checkerboard sampling; the GPU's mode 2
+ *  fills the others from their 3 x 3 like pixels). A skipped pixel's own candidate is empty with M = 0 (it drew nothing),
+ *  its history still merges, so its reservoir stays a neighbour for the traced ones. MIRROR restirgi_common.glsl rgTraced */
+inline bool traced( int x, int y, uint32_t f, int red )
+{
+	if ( red & kTraceQuarter ) {
+		const int k = int( f & 3u ), o = k == 0 ? 0 : k == 1 ? 3 : k == 2 ? 1 : 2;   // (0,0), (1,1), (1,0), (0,1)
+		return ( ( x & 1 ) | ( ( y & 1 ) << 1 ) ) == o;
+	}
+	if ( red & kTraceHalf )
+		return ( ( x + y + int( f & 1u ) ) & 1 ) == 0;
+	return true;
+}
+
 //! the first candidate: the pixel's own bounce, drawn with pdf cos / pi
 inline Res candidate( V3 x, V3 n, const Sample & y, int red )
 {
@@ -250,9 +266,16 @@ inline void frame( const Scene & scene, const std::vector<Pixel> & px, int W, in
 			continue;
 		}
 		const uint32_t s1 = restir::pixelSeed( seed ^ uint32_t( i ), f, 1 );
-		const V3 d = bounceDir( p.n, i % W, i / W, W, seed, f, red, S.mask );
-		const Sample y = scene.trace( p.x + p.n * kEps, d );
-		Res r = candidate( p.x, p.n, y, red );
+		Res r;
+		if ( traced( i % W, i / W, f, red ) ) {
+			const V3 d = bounceDir( p.n, i % W, i / W, W, seed, f, red, S.mask );
+			const Sample y = scene.trace( p.x + p.n * kEps, d );
+			r = candidate( p.x, p.n, y, red );
+		}
+#ifdef RESTIRGI_RED_SKIPM
+		else
+			r.M = 1.0f;   // the red: a skipped pixel counted as if it had drawn
+#endif
 		const Res & h = hist[static_cast<size_t>( i )];
 		if ( S.temporal && !( red & kRedNoTemporal ) && h.any ) {
 			const float Mh = std::min( h.M, kHistoryCap );
@@ -268,7 +291,7 @@ inline void frame( const Scene & scene, const std::vector<Pixel> & px, int W, in
 	// pass 1: K neighbours' temporal reservoirs at this pixel's p_hat, seen, with the Jacobian; Z over the merged pixels
 	for ( int i = 0; i < n; i++ ) {
 		const Pixel & p = px[static_cast<size_t>( i )];
-		if ( !p.valid )
+		if ( !p.valid || !traced( i % W, i / W, f, red ) )
 			continue;
 		const uint32_t s2 = restir::pixelSeed( seed ^ uint32_t( i ), f, 2 );
 		const Res & own = tmp[static_cast<size_t>( i )];

@@ -12,6 +12,8 @@
 #define RESTIRGI_BIT_R2 32          // kRedR2 (the R2 lattice in place of the STBN mask)
 #define RESTIRGI_BIT_NOJCLAMP 64    // kRedNoJClamp
 #define RESTIRGI_BIT_LINEAR 256     // kRedLinear (GPU only: row-order invocations, the 8 x 8 tiles' before)
+#define RESTIRGI_BIT_HALF 512       // kTraceHalf (the checkerboard trace)
+#define RESTIRGI_BIT_QUARTER 1024   // kTraceQuarter (one of each 2 x 2)
 #define RESTIRGI_HISTORY_CAP 20.0   // kHistoryCap
 #define RESTIRGI_EPS 0.001          // kEps
 #define RESTIRGI_PI 3.14159265358979
@@ -92,6 +94,19 @@ uint rgStbnIndex( int x, int y, uint f, uint seed, int dim )
 
 // MIRROR restirgimath.h stbnValue
 float rgStbnValue( uint v ) { return ( float( v ) + 0.5 ) * ( 1.0 / 256.0 ); }
+
+// MIRROR restirgimath.h traced: the bounce + spatial pass on this pixel at frame f (the half / quarter trace)
+bool rgTraced( int x, int y, uint f, int red )
+{
+	if ( ( red & RESTIRGI_BIT_QUARTER ) != 0 ) {
+		const int k = int( f & 3u );
+		const int o = k == 0 ? 0 : k == 1 ? 3 : k == 2 ? 1 : 2;
+		return ( ( x & 1 ) | ( ( y & 1 ) << 1 ) ) == o;
+	}
+	if ( ( red & RESTIRGI_BIT_HALF ) != 0 )
+		return ( ( x + y + int( f & 1u ) ) & 1 ) == 0;
+	return true;
+}
 
 // MIRROR restirgimath.h bounceDir (the caller reads the mask's two bytes at rgStbnIndex dim 0 and 1; mask: it has one)
 vec3 rgBounceDir( vec3 n, int x, int y, int W, uint seed, uint f, int red, bool mask, uint m0, uint m1 )

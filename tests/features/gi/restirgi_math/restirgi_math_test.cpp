@@ -9,6 +9,7 @@
 //   temporal  the history lowers the relative variance (temporal on / off < 0.85)      red RESTIRGI_RED_NOTEMPORAL
 //   mirror    src/features/gi/rtddgi/restirgi_common.glsl (compiled here as C++) == the header on random inputs
 //             red RESTIRGI_RED_MIRROR (the shader's cross() swapped: its cosine frame turned)
+//   skip      the half / quarter trace is unbiased on the pixels it traced               red RESTIRGI_RED_SKIPM
 #include "features/gi/restirgimath.h"
 
 #include <cmath>
@@ -140,7 +141,8 @@ struct Stats
 	int S = 0;
 };
 
-static Stats run( const Room & R, const std::vector<restirgi::Pixel> & px, const restirgi::Settings & st, int frames, int seeds )
+static Stats run( const Room & R, const std::vector<restirgi::Pixel> & px, const restirgi::Settings & st, int frames, int seeds,
+	int red = 0 )
 {
 	Stats s;
 	s.sum.assign( px.size(), 0.0 );
@@ -151,7 +153,7 @@ static Stats run( const Room & R, const std::vector<restirgi::Pixel> & px, const
 		std::vector<V3> out;
 		const uint32_t seed = restir::hash( uint32_t( k ) * 7919u + 17u );
 		for ( int f = 0; f < frames; f++ )
-			restirgi::frame( R, px, G, G, seed, uint32_t( f ), st, 0, hist, out );
+			restirgi::frame( R, px, G, G, seed, uint32_t( f ), st, red, hist, out );
 		for ( size_t i = 0; i < px.size(); i++ ) {
 			const double e = restirgi::lum( out[i] );
 			s.sum[i] += e;
@@ -236,6 +238,10 @@ static void mirror()
 			const int jr = ( k & 16 ) ? restirgi::kRedNoJClamp : 0;
 			if ( restirgi::jacobianKept( jj, jr ) != glsl::rgJacobianKept( jj, jr ) )
 				worst = std::max( worst, gap( restirgi::jacobianKept( jj, jr ), glsl::rgJacobianKept( jj, jr ) ) );
+			// the half / quarter trace's pattern: the same pixels every frame
+			const int tr = ( k & 32 ) ? restirgi::kTraceQuarter : ( k & 64 ) ? restirgi::kTraceHalf : 0;
+			if ( restirgi::traced( px, py, fr, tr ) != glsl::rgTraced( px, py, fr, tr ) )
+				worst = 1.0;
 		}
 		const int red = k & ( restirgi::kRedNoJacobian | restirgi::kRedNoPdf );
 		restirgi::Sample y, y2;
@@ -328,6 +334,24 @@ int main()
 		const double a = relVar( sf ), b = relVar( s0 );
 		std::snprintf( line, sizeof line, "relative variance temporal on %.4f / off %.4f = %.3f (bar 0.85)", a, b, a / b );
 		check( a / b < 0.85, "temporal", line );
+	}
+	// skip: the half and the quarter trace stay unbiased on the pixels traced at the last frame (the others are mode 2's fill).
+	// The Jacobian's [1/10, 10] cut is off here: it is the one bias the full trace already carries (+0.017 on these
+	// pixels), and fewer fresh draws lean on reuse more (+0.022 half, +0.040 quarter with it; -0.001 / +0.004 without)
+	{
+		double worstRel = 0, worstChi = 0;
+		for ( int tr : { restirgi::kTraceHalf, restirgi::kTraceQuarter } ) {
+			const Stats s = run( R, px, full, F, S, tr | restirgi::kRedNoJClamp );
+			auto on = [&px, tr]( const restirgi::Pixel & p ) {
+				const int i = int( &p - px.data() );
+				return restirgi::traced( i % G, i / G, uint32_t( F - 1 ), tr );
+			};
+			bias( s, ref, px, on, rel, chi );
+			worstRel = std::max( worstRel, std::fabs( rel ) );
+			worstChi = std::max( worstChi, chi );
+		}
+		std::snprintf( line, sizeof line, "half + quarter trace (no J cut), the traced pixels: worst |bias| %.4f, chi %.3f (bars 0.02, 1.5)", worstRel, worstChi );
+		check( worstRel < 0.02 && worstChi < 1.5, "skip", line );
 	}
 	std::printf( "RESTIRGI_MATH %s %d failed\n", fails ? "FAIL" : "PASS", fails );
 	return fails ? 1 : 0;

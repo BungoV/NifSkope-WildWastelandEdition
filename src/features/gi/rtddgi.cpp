@@ -2085,14 +2085,21 @@ int restirgiCli( const QStringList & args )
 		std::fprintf( stderr, "usage: restirgi --soup <file> --rect minX,minY,maxX,maxY --out <dir> --cam ex,ey,ez,tx,ty,tz "
 			"--light x,y,z,radius,r,g,b [...] [--lights <file>] [--size W,H] [--fov deg] [--frames n] [--updates n] [--seed n] "
 			"[--spatial K] [--radius R] [--filter f] [--acc n] [--atrous n] [--ref n] [--no-twin] [--jump frame] [--relight frame] "
-			"[--red nojacobian,novis,nopdf,notemporal,white,r2,nojclamp,linear]\n" );
+			"[--red nojacobian,novis,nopdf,notemporal,white,r2,nojclamp,linear,half,quarter,fullres]\n" );
 		return 2;
 	}
 	for ( int k = 0; k < 4; k++ )
 		spec.rect[k] = rc[k].toFloat();
+	// every pixel traced is the default (half: one-frame cut 2.61x, under the 3x bar); half: the checkerboard, quarter: one
+	// of each 2 x 2 (cost arms); fullres: the default named
 	int red = 0;
 	for ( const QString & r : redText.split( ',', Qt::SkipEmptyParts ) ) {
 		const QString t = r.trimmed();
+		if ( t == QLatin1String( "fullres" ) || t == QLatin1String( "half" ) || t == QLatin1String( "quarter" ) ) {
+			red &= ~( restirgi::kTraceHalf | restirgi::kTraceQuarter );
+			red |= t == QLatin1String( "quarter" ) ? restirgi::kTraceQuarter : t == QLatin1String( "half" ) ? restirgi::kTraceHalf : 0;
+			continue;
+		}
 		red |= t == QLatin1String( "nojacobian" ) ? restirgi::kRedNoJacobian : t == QLatin1String( "novis" ) ? restirgi::kRedNoVis
 			: t == QLatin1String( "nopdf" ) ? restirgi::kRedNoPdf : t == QLatin1String( "notemporal" ) ? restirgi::kRedNoTemporal
 			: t == QLatin1String( "white" ) ? restirgi::kRedWhite : t == QLatin1String( "r2" ) ? restirgi::kRedR2
@@ -2201,11 +2208,12 @@ int restirgiCli( const QStringList & args )
 	const char * noise = ( red & restirgi::kRedWhite ) ? "white" : ( mask && !( red & restirgi::kRedR2 ) ) ? "stbn" : "r2";
 	std::printf( "restirgi: %d x %d, %d of %d pixels hit, %d probes after %d updates, %d frames, K %d R %d, red %d, noise %s, "
 		"a-trous %d, twin %d\n", W, H, hits, int( n ), T.nP, updates, frames, set.spatialK, set.radius, red, noise, base.atrous, int( twin ) );
-	// frame 0's bounce on the twin (the kernel's ray: the same seed, the same direction)
+	// frame 0's bounce on the twin (the kernel's ray: the same seed, the same direction); the gates count the traced pixels
+	auto tracedAt = [&]( size_t i, int fr ) { return restirgi::traced( int( i % size_t( W ) ), int( i / size_t( W ) ), uint32_t( fr ), red ); };
 	std::vector<restirgi::Sample> cand0( n );
 	if ( twin )
 		for ( size_t i = 0; i < n; i++ )
-			if ( px[i].valid ) {
+			if ( px[i].valid && tracedAt( i, 0 ) ) {
 				const V3 d = restirgi::bounceDir( px[i].n, int( i % size_t( W ) ), int( i / size_t( W ) ), W, seed, 0u, red, mask );
 				cand0[i] = scene.trace( px[i].x + px[i].n * restirgi::kEps, d );
 			}
@@ -2274,7 +2282,7 @@ int restirgiCli( const QStringList & args )
 			int valid = 0, hitDiff = 0, loMatch = 0;
 			double loMax = 0;
 			for ( size_t i = 0; i < n; i++ ) {
-				if ( !px[i].valid )
+				if ( !px[i].valid || !tracedAt( i, 0 ) )
 					continue;
 				valid++;
 				const bool hg = go.cand[i * 4 + 3] > 0.5f;
@@ -2292,7 +2300,7 @@ int restirgiCli( const QStringList & args )
 		double sumC = 0, sumG = 0, sumAbs = 0;
 		std::vector<std::pair<double, size_t>> worst;
 		for ( size_t i = 0; i < n; i++ ) {
-			if ( !px[i].valid )
+			if ( !px[i].valid || !tracedAt( i, fr ) )
 				continue;
 			valid++;
 			const double ec = restirgi::lum( est[i] ), eg = restir::luminance( go.est[i * 4], go.est[i * 4 + 1], go.est[i * 4 + 2] );
@@ -2359,12 +2367,14 @@ int restirgiCli( const QStringList & args )
 		// bar (1), one frame stands alone: frame 0 (no history) against the last frame's filtered mean (the old reference)
 		if ( frames > 1 && go.out.size() == n * 4 && out0.size() == n * 4 )
 			oneFrame( go.out, QStringLiteral( "one frame vs frame %1" ).arg( frames - 1 ).toLatin1().constData() );
-		// and against the unfiltered truth: the mean of refFrames independent frames' estimates (no history, no filter)
+		// and against the unfiltered truth: the mean of refFrames independent frames' estimates (no history, no filter; every
+		// pixel traced: a half / quarter trace's raw estimate is 0 on the pixels it skipped)
 		if ( refFrames > 0 && out0.size() == n * 4 ) {
 			std::vector<double> acc( n * 4, 0.0 );
 			bool ok = true;
+			const int refRed = ( red | restirgi::kRedNoTemporal ) & ~( restirgi::kTraceHalf | restirgi::kTraceQuarter );
 			for ( int k = 0; k < refFrames && ok; k++ ) {
-				bakert::RestirGiGpuIn in = gpuIn( 1000 + k, red | restirgi::kRedNoTemporal, false );
+				bakert::RestirGiGpuIn in = gpuIn( 1000 + k, refRed, false );
 				in.sceneKey = go.relights > 0 ? 1u : 0u;
 				bakert::RestirGiGpuOut ro;
 				ok = bakert::restirGiGpuStep( live.session(), in, &ro ) && ro.est.size() == n * 4;

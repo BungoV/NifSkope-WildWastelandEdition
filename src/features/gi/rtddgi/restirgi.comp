@@ -124,10 +124,14 @@ void modeCandidate( int x, int y, uint id )
 	const bool mask = G.knobs.z > 0.5;
 	const uint m0 = mask ? rgStbnByte( rgStbnIndex( x, y, uint( G.size.z ), uint( G.size.w ), 0 ) ) : 0u;
 	const uint m1 = mask ? rgStbnByte( rgStbnIndex( x, y, uint( G.size.z ), uint( G.size.w ), 1 ) ) : 0u;
-	const vec3 d = rgBounceDir( p.N, x, y, G.size.x, uint( G.size.w ), uint( G.size.z ), red, mask, m0, m1 );
-	const RgRes yv = rgTrace( p.P + p.N * RESTIRGI_EPS, d );
-	candLo[id] = vec4( yv.Lo, yv.hit );
-	const RgRes r = rgCandidate( p.P, p.N, yv, red );
+	// the half / quarter trace: a skipped pixel draws nothing (M 0) and keeps its history; mode 2 fills its estimate
+	RgRes r = rgEmpty();
+	if ( rgTraced( x, y, uint( G.size.z ), red ) ) {
+		const vec3 d = rgBounceDir( p.N, x, y, G.size.x, uint( G.size.w ), uint( G.size.z ), red, mask, m0, m1 );
+		const RgRes yv = rgTrace( p.P + p.N * RESTIRGI_EPS, d );
+		candLo[id] = vec4( yv.Lo, yv.hit );
+		r = rgCandidate( p.P, p.N, yv, red );
+	}
 	resCur[id] = r;
 	if ( ( red & RESTIRGI_BIT_NOTEMPORAL ) != 0 || G.knobs.x < 0.5 )
 		return;
@@ -160,9 +164,9 @@ void modeSpatial( int x, int y, uint id )
 {
 	est[id] = vec4( 0.0 );
 	const RgPixel p = rgPixel( false, x, y );
-	if ( !p.ok )
-		return;
 	const int red = G.opts.w;
+	if ( !p.ok || !rgTraced( x, y, uint( G.size.z ), red ) )
+		return;
 	const int W = G.size.x, H = G.size.y;
 	const uint s2 = restirSeed( uint( G.size.w ) ^ id, uint( G.size.z ), 2u );
 	const RgRes own = resCur[id];
@@ -214,13 +218,40 @@ void modeSpatial( int x, int y, uint id )
 // (a young mean: one frame's spread, so the guide is wide exactly when the history is short) [Schied 2017, SVGF 4.2].
 void modeAccumulate( int x, int y, uint id )
 {
-	const vec4 e = est[id];
+	vec4 e = est[id];
 	atrB[id] = vec4( 0.0 );
+	const vec4 g = gbuf[id];
+	// a pixel the half / quarter trace skipped (valid depth, no estimate): the mean of its traced like 3 x 3 neighbours;
+	// none like it: its own history's mean, then any traced neighbour, then black (the filters read acc.w > 0 exactly
+	// where the depth is valid, so a valid pixel always gets one)
+	if ( e.w < 0.5 && g.w > 0.0 && g.w < 1e5 && !rgTraced( x, y, uint( G.size.z ), G.opts.w ) ) {
+		vec3 sum = vec3( 0.0 ), sumAny = vec3( 0.0 );
+		float nf = 0.0, nAny = 0.0;
+		for ( int dy = -1; dy <= 1; dy++ )
+			for ( int dx = -1; dx <= 1; dx++ ) {
+				const int qx = x + dx, qy = y + dy;
+				if ( ( dx == 0 && dy == 0 ) || qx < 0 || qy < 0 || qx >= G.size.x || qy >= G.size.y )
+					continue;
+				const int q = qy * G.size.x + qx;
+				const vec4 h = gbuf[q];
+				const vec4 eq = est[q];
+				if ( eq.w < 0.5 )
+					continue;
+				sumAny += eq.xyz;
+				nAny += 1.0;
+				if ( restirSimilar( g.w, g.xyz, h.w, h.xyz ) ) {
+					sum += eq.xyz;
+					nf += 1.0;
+				}
+			}
+		const int hq = histPix[id];
+		e = nf > 0.0 ? vec4( sum / nf, 1.0 ) : hq >= 0 && accPrev[hq].w > 0.0 ? vec4( accPrev[hq].xyz, 1.0 )
+			: vec4( nAny > 0.0 ? sumAny / nAny : vec3( 0.0 ), 1.0 );
+	}
 	if ( e.w < 0.5 ) {
 		acc[id] = vec4( 0.0 );
 		return;
 	}
-	const vec4 g = gbuf[id];
 	vec3 lo = e.xyz, hi = e.xyz;
 	const float le = rgLum( e.xyz );
 	float s1 = le, s2 = le * le, ns = 1.0;
@@ -342,10 +373,33 @@ void main()
 		x = int( ( t % tw ) * 8u + ( gl_LocalInvocationIndex & 7u ) );
 		y = int( ( t / tw ) * 8u + ( gl_LocalInvocationIndex >> 3u ) );
 	}
+	const uint mode = pc.job.x;
+	// the half / quarter trace, modes 0 and 1: an invocation a 2 x 1 (half) or 2 x 2 (quarter) block, so every invocation
+	// holds exactly one traced pixel (a checkerboard over invocations leaves half of each subgroup idle in the ray loops)
+	const int tb = G.opts.w & ( RESTIRGI_BIT_HALF | RESTIRGI_BIT_QUARTER );
+	if ( mode <= 1u && tb != 0 && ( G.opts.w & RESTIRGI_BIT_LINEAR ) == 0 ) {
+		const int bh = ( tb & RESTIRGI_BIT_QUARTER ) != 0 ? 2 : 1;
+		const uint t = ddgiGroupId(), tw = ( uint( ( G.size.x + 1 ) / 2 ) + 7u ) / 8u;   // tiles over the block grid
+		const int bx = int( ( t % tw ) * 8u + ( gl_LocalInvocationIndex & 7u ) ), by = int( ( t / tw ) * 8u + ( gl_LocalInvocationIndex >> 3u ) );
+		// the traced pixel first (k = 0 in every invocation: the rays run together), then the skipped ones (history only)
+		const uint f = uint( G.size.z );
+		const int k3 = int( f & 3u );
+		const int o0 = bh == 2 ? ( k3 == 0 ? 0 : k3 == 1 ? 3 : k3 == 2 ? 1 : 2 ) : ( by + int( f & 1u ) ) & 1;
+		for ( int k = 0; k < 2 * bh; k++ ) {
+			const int s = ( k + o0 ) % ( 2 * bh );
+			const int px = 2 * bx + ( s & 1 ), py = bh * by + ( s >> 1 );
+			if ( px >= G.size.x || py >= G.size.y )
+				continue;
+			if ( mode == 0u )
+				modeCandidate( px, py, uint( py * G.size.x + px ) );
+			else
+				modeSpatial( px, py, uint( py * G.size.x + px ) );
+		}
+		return;
+	}
 	if ( x >= G.size.x || y >= G.size.y )
 		return;
 	const uint id = uint( y * G.size.x + x );
-	const uint mode = pc.job.x;
 	if ( mode == 0u )
 		modeCandidate( x, y, id );
 	else if ( mode == 1u )

@@ -14,7 +14,7 @@ bad=0
 timeout 120 "$OUT/green.exe" > "$OUT/green.txt"; rc=$?
 cat "$OUT/green.txt"
 if [ $rc -ne 0 ] || ! grep -q '^RESTIRGI_MATH PASS 0 failed$' "$OUT/green.txt"; then echo "GREEN FAILED (rc $rc)"; bad=1; fi
-for pair in NOPDF:pdf NOJACOBIAN:jacobian NOVIS:vis NOTEMPORAL:temporal MIRROR:mirror; do
+for pair in NOPDF:pdf NOJACOBIAN:jacobian NOVIS:vis NOTEMPORAL:temporal MIRROR:mirror SKIPM:skip; do
 	red="${pair%%:*}"; check="${pair##*:}"
 	"$CXX" -O2 -std=c++17 -I src -DRESTIRGI_RED_$red "$SRC" -o "$OUT/red_$check.exe" -static || { echo "BUILD FAIL red $red"; bad=1; continue; }
 	timeout 120 "$OUT/red_$check.exe" > "$OUT/red_$check.txt"; rc=$?
@@ -24,5 +24,5 @@ for pair in NOPDF:pdf NOJACOBIAN:jacobian NOVIS:vis NOTEMPORAL:temporal MIRROR:m
 		echo "RED $red DID NOT FAIL $check (rc $rc)"; bad=1
 	fi
 done
-[ $bad -eq 0 ] && echo "RESTIRGI_MATH GATE OK (green 5 + 5 reds)" || echo "RESTIRGI_MATH GATE FAILED"
+[ $bad -eq 0 ] && echo "RESTIRGI_MATH GATE OK (green 6 + 6 reds)" || echo "RESTIRGI_MATH GATE FAILED"
 exit $bad

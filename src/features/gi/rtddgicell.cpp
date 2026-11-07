@@ -1235,13 +1235,18 @@ void restirUniforms( Renderer * r, NifSkopeOpenGLContext::Program * prog )
 }
 
 //! WW_CELL_RESTIRGI_RED (live): off (the pass and the shader read gone), nojacobian, novis, nopdf, notemporal, white, r2,
-//! nojclamp, linear (RESTIRGI_BIT_*), noatrous (kRestirGiNoAtrous: host only, the a-trous passes' before)
+//! nojclamp, linear (RESTIRGI_BIT_*), noatrous (kRestirGiNoAtrous: host only, the a-trous passes' before); every pixel
+//! traced unless half (512, the checkerboard) or quarter (1024, one of each 2 x 2): cost arms, under the one-frame bar
 constexpr int kRestirGiNoAtrous = 128;
 int restirGiRedBits()
 {
 	int b = 0;
 	for ( const QString & r : wwEnvStr( "WW_CELL_RESTIRGI_RED" ).split( QLatin1Char( ',' ), Qt::SkipEmptyParts ) ) {
 		const QString t = r.trimmed();
+		if ( t == QLatin1String( "fullres" ) || t == QLatin1String( "half" ) || t == QLatin1String( "quarter" ) ) {
+			b = ( b & ~( 512 | 1024 ) ) | ( t == QLatin1String( "quarter" ) ? 1024 : t == QLatin1String( "half" ) ? 512 : 0 );
+			continue;
+		}
 		b |= t == QLatin1String( "nojacobian" ) ? 1 : t == QLatin1String( "novis" ) ? 2 : t == QLatin1String( "nopdf" ) ? 4
 			: t == QLatin1String( "notemporal" ) ? 8 : t == QLatin1String( "white" ) ? 16 : t == QLatin1String( "r2" ) ? 32
 			: t == QLatin1String( "nojclamp" ) ? 64 : t == QLatin1String( "noatrous" ) ? kRestirGiNoAtrous
