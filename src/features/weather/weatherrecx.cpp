@@ -606,6 +606,22 @@ struct Who
 	bool haveGen = false;
 };
 
+/* lane MODULES1 part 24 (SPEC.md 1.5): the red drops the keys a block lists in `_translated` (the WTHR translation of
+ * weathertranslate.py), so the generated rung draws them: the files as they were before 1.5 */
+static bool weatherTranslateRed()
+{
+	WW_SWITCH_STATIC( bool, red, wwEnv( "WW_WEATHER_TRANSLATE_RED" ).trimmed() == QLatin1String( "1" ) );
+	return red;
+}
+
+static QJsonObject untranslated( QJsonObject o )
+{
+	const QJsonArray keys = o.value( QStringLiteral( "_translated" ) ).toArray();
+	for ( const QJsonValue & k : keys )
+		o.remove( k.toString() );
+	return o;
+}
+
 /* one weather at the hour: the files' blocks (per key: the file), then the generated rung for every key no file set,
  * then the record reds (which unset their channel's keys); src = "<key>=<source>" per input */
 WwWeatherRecx resolveOne( const Who & w, const QStringList & roots, const QStringList & files, double hour, unsigned red,
@@ -625,7 +641,10 @@ WwWeatherRecx resolveOne( const Who & w, const QStringList & roots, const QStrin
 			continue;
 		const QString rel = h.file.section( QLatin1Char( '/' ), -3 );
 		fileLine += QStringLiteral( " %1 %2:%3" ).arg( bn, h.rung, rel );
-		const Obj b{ h.block, rel + QStringLiteral( " /" ) + bn };
+		const bool trRed = weatherTranslateRed() && h.block.contains( QStringLiteral( "_translated" ) );
+		if ( trRed )
+			fileLine += QStringLiteral( " (translate red: %1 dropped)" ).arg( bn );
+		const Obj b{ trRed ? untranslated( h.block ) : h.block, rel + QStringLiteral( " /" ) + bn };
 		WwWeatherRecx before = r;
 		if ( bn == QLatin1String( "atmosphere" ) ) {
 			b.unknownKeys( { QStringLiteral( "visibility" ), QStringLiteral( "hazeHeight" ), QStringLiteral( "ozone" ),

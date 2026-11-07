@@ -1423,6 +1423,7 @@
 { "WW_WEATHER_PICK", 0, "src/gl/lookdevstage.cpp:368 weatherPickForce | hand: WW_SWITCH_STATIC read at each weather pick (WEATHERBLEND2)" },
 { "WW_WEATHER_RECX", 0, "src/gl/celllooks.cpp:263 pinOf | re-read per frame or per call (a)" },
 { "WW_WEATHER_RECX_RED", 0, "src/features/weather/weatherrecx.cpp:24 redWord | re-read per frame or per call (a)" },
+{ "WW_WEATHER_TRANSLATE_RED", 0, "src/features/weather/weatherrecx.cpp:613 weatherTranslateRed | re-read per frame or per call (a)" },
 { "WW_WINDOW_AT", 2, "src/nifskope_ui.cpp:2698 NifSkope::createWindow | createWindow: picks which harness the window runs" },
 { "WW_WINDOW_SIZE", 1, "- | name passed through a variable: conservative" },
 { "WW_WINDOW_VISIBLE", 2, "src/nifskope.cpp:7630 NifSkope::wwHeadlessWindowBehind | hand: window placement (opacity, z-order) when each window is first shown (FLYFIX1)" },
