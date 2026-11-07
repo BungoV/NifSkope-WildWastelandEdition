@@ -9,6 +9,7 @@
 #include "gl/renderer.h"
 #include "features/weather/weatherrecx.h"	// lane WX1
 #include "features/weather/weatherrecxmath.h"
+#include "cloudrecx14math.h"	// lane CLOUDRECX1
 #include "harnesswindow.h"
 
 #include <QElapsedTimer>
@@ -577,6 +578,42 @@ const WwCloudMap & wwCloudMapUpdate( Scene * scene )
 		lowTypeOf( flags, thunder, wx.on ? wx.type : -1.0f, now[0].type, now[0].typeSpread, wwCloudVolProfileSet(),
 			wwCloudVolTypeRule() ? sounds : -1, wwCloudVolPrecipRule() ? precip : -1 );	// lane CLOUDTYPE3: MNAM
 	}
+	/* lane CLOUDRECX1 (SPEC.md 1.4): the layers' liquidWater / dropletRadius (each band's sigma ratio against its default),
+	 * iceFraction, anvil; the weather's evolution, precipitationBase and droplet radius. Nothing set: ratio 1, ice 0, the
+	 * draw's defaults (today). Red WW_CLOUD_RECX14_RED: the reader read none of them. */
+	WwCloudRecx14Draw r14;
+	float bandIce[3] = { 0.0f, 0.0f, 0.0f };
+	if ( wx.on ) {
+		namespace C = WwCloudRecx14;
+		std::vector<C::LayerIn> li;
+		for ( const Draw & d : cur ) {
+			C::LayerIn x;
+			x.band = roleInfo( d.role ).band;
+			x.cover = d.cover;
+			if ( d.in.layer >= 0 && d.in.layer < 32 ) {
+				x.lwc = wx.layerLwc[d.in.layer];
+				x.rUm = wx.layerRadius[d.in.layer];
+				x.ice = wx.layerIce[d.in.layer];
+				x.anvil = wx.layerAnvil[d.in.layer];
+				x.type = wx.layerType[d.in.layer];
+			}
+			li.push_back( x );
+		}
+		const C::BandsOut bo = C::layersOntoBands( li.data(), int( li.size() ), wx.iceFraction, now[0].type );
+		for ( int b = 0; b < 3; b++ ) {
+			if ( bo.ratio[b] != 1.0f )
+				now[b].density *= bo.ratio[b];
+			bandIce[b] = bo.ice[b];
+		}
+		r14.anvil = bo.anvil;
+		r14.evolutionMin = std::max( wx.evolution, 0.0f );
+		r14.dropletUm = wx.dropletRadius >= 0.0f ? C::phaseDiameterUm( wx.dropletRadius, WwCloudVolMath::kDropletUm ) : -1.0f;
+		if ( wx.precipitationBase >= 0.0f ) {
+			r14.shaftSigma = C::shaftSigmaPerKm( std::max( wx.rainRate, 0.0f ), std::max( wx.snowRate, 0.0f ) );
+			r14.shaftZ = wx.precipitationBase * kUnitsPerM;	// metres above sea level = world z / kUnitsPerM (the layers' frame)
+			r14.virga = r14.shaftZ > eye[2];	// ends above the eye's height: thins out before the ground (the viewer's proxy)
+		}
+	}
 
 	// the transition: a new weather starts from the parameters shown at the change
 	if ( wkey != s.weather ) {
@@ -699,7 +736,9 @@ const WwCloudMap & wwCloudMapUpdate( Scene * scene )
 			bi.layers = counts[b];
 			bi.type = shown[b].type;	// lane CLOUD5
 			bi.typeSpread = shown[b].typeSpread;
+			bi.ice = bandIce[b];	// lane CLOUDRECX1
 		}
+		m.recx14 = r14;
 		m.transition = t;
 		m.generation++;
 		s.key = key;

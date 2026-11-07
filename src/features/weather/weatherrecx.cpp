@@ -4,6 +4,7 @@
 #include "gl/lookdevstage.h"
 #include "features/weather/weathergen.h"
 #include "features/weather/weatherrecxmath.h"
+#include "features/clouds/cloudrecx14math.h"
 #include "recx.h"
 
 #include <QElapsedTimer>
@@ -134,6 +135,14 @@ const Key kAtmo[] = { { "visibility", kVisMin, kVisMax, &WwWeatherRecx::visibili
 	{ "airglow", 0.0f, 10.0f, &WwWeatherRecx::airglow } };
 const Key kClouds[] = { { "coverage", 0.0f, 1.0f, &WwWeatherRecx::coverage },
 	{ "density", 0.0f, kDensityMax, &WwWeatherRecx::density }, { "type", 0.0f, 1.0f, &WwWeatherRecx::type } };
+// lane CLOUDRECX1: the 1.4 clouds keys (SPEC.md 1.4; src/features/clouds/cloudrecx14math.h ranges): kClouds and five more
+const Key kClouds14[] = { { "coverage", 0.0f, 1.0f, &WwWeatherRecx::coverage },
+	{ "density", 0.0f, kDensityMax, &WwWeatherRecx::density }, { "type", 0.0f, 1.0f, &WwWeatherRecx::type },
+	{ "liquidWater", 0.0f, WwCloudRecx14::kLwcMax, &WwWeatherRecx::liquidWater },
+	{ "dropletRadius", WwCloudRecx14::kRadiusMin, WwCloudRecx14::kRadiusMax, &WwWeatherRecx::dropletRadius },
+	{ "iceFraction", 0.0f, 1.0f, &WwWeatherRecx::iceFraction },
+	{ "evolution", WwCloudRecx14::kEvolutionMin, WwCloudRecx14::kEvolutionMax, &WwWeatherRecx::evolution },
+	{ "precipitationBase", 0.0f, WwCloudRecx14::kPrecipBaseMax, &WwWeatherRecx::precipitationBase } };
 // lane WEATHERRECX1: the 1.3 blocks (SPEC.md ranges)
 const Key kWind[] = { { "speed", 0.0f, 60.0f, &WwWeatherRecx::windSpeed },
 	{ "direction", 0.0f, 360.0f, &WwWeatherRecx::windDirection }, { "gusts", 0.0f, 80.0f, &WwWeatherRecx::gusts },
@@ -252,8 +261,25 @@ void readLayers( const Obj & b, WwWeatherRecx & r )
 		}
 		const Obj L = b.child( it.value(), QStringLiteral( "layers/" ) + n );
 		// lane WEATHERRECX1 (1.3): a layer may give its type / coverage / density / texture without heights
-		L.unknownKeys( { QStringLiteral( "base" ), QStringLiteral( "top" ), QStringLiteral( "type" ), QStringLiteral( "coverage" ),
-			QStringLiteral( "density" ), QStringLiteral( "texture" ) } );
+		QStringList known = { QStringLiteral( "base" ), QStringLiteral( "top" ), QStringLiteral( "type" ), QStringLiteral( "coverage" ),
+			QStringLiteral( "density" ), QStringLiteral( "texture" ) };
+		if ( !wwCloudRecx14Red() ) {	// lane CLOUDRECX1 (1.4): the layer's water, drops, ice, anvil (and its type for them)
+			known << QStringLiteral( "liquidWater" ) << QStringLiteral( "dropletRadius" ) << QStringLiteral( "iceFraction" )
+				  << QStringLiteral( "anvil" );
+			const Obj Lt{ typeWords( L.o, L.where ), L.where };
+			double v = 0.0;
+			if ( Lt.num( "liquidWater", 0.0f, WwCloudRecx14::kLwcMax, v ) )
+				r.layerLwc[i] = float( v );
+			if ( Lt.num( "dropletRadius", WwCloudRecx14::kRadiusMin, WwCloudRecx14::kRadiusMax, v ) )
+				r.layerRadius[i] = float( v );
+			if ( Lt.num( "iceFraction", 0.0f, 1.0f, v ) )
+				r.layerIce[i] = float( v );
+			if ( Lt.num( "anvil", 0.0f, WwCloudRecx14::kAnvilMax, v ) )
+				r.layerAnvil[i] = float( v );
+			if ( ( r.layerLwc[i] >= 0.0f || r.layerRadius[i] >= 0.0f ) && Lt.num( "type", 0.0f, 1.0f, v ) )
+				r.layerType[i] = float( v );
+		}
+		L.unknownKeys( known );
 		double base = 0.0, top = 0.0;
 		const bool hb = L.num( "base", kLayerMin, kLayerMax, base ), ht = L.num( "top", kLayerMin, kLayerMax, top );
 		if ( !hb && !ht )
@@ -413,6 +439,16 @@ QString keyOf( const WwWeatherRecx & r )
 		x += QStringLiteral( " air=%1C" ).arg( double( r.airTemp ), 0, 'g', 4 );
 	if ( r.recordRed )
 		x += QStringLiteral( " recordRed=0x%1" ).arg( r.recordRed, 0, 16 );
+	// lane CLOUDRECX1: the 1.4 clouds values (only when one is set: the text above is as before otherwise)
+	const struct { const char * n; float v; } c14[] = { { "liquidWater", r.liquidWater }, { "dropletRadius", r.dropletRadius },
+		{ "iceFraction", r.iceFraction }, { "evolution", r.evolution }, { "precipitationBase", r.precipitationBase } };
+	for ( const auto & m : c14 )
+		if ( m.v >= 0.0f )
+			x += QStringLiteral( " %1=%2" ).arg( QLatin1String( m.n ), f4( m.v ) );
+	for ( int i = 0; i < 32; i++ )
+		if ( r.layerLwc[i] >= 0.0f || r.layerRadius[i] >= 0.0f || r.layerIce[i] >= 0.0f || r.layerAnvil[i] >= 0.0f )
+			x += QStringLiteral( " L%1:lwc=%2,r=%3,ice=%4,anvil=%5,type=%6" ).arg( i ).arg( f4( r.layerLwc[i] ), f4( r.layerRadius[i] ),
+				f4( r.layerIce[i] ), f4( r.layerAnvil[i] ), f4( r.layerType[i] ) );
 	return k + x;
 }
 
@@ -451,6 +487,12 @@ const Input kInputs[] = {
 	{ "density", &WwWeatherRecx::density, WwRecClouds, []( const WwWeatherGen::Out & o, double ) { return o.density; } },
 	{ "type", &WwWeatherRecx::type, WwRecClouds,
 		[]( const WwWeatherGen::Out & o, double ) { return WwWeatherGen::cloudTypeNumber( o.cloudType ); } },
+	// lane CLOUDRECX1 (1.4): no generated rung (the type's defaults, cloudrecx14math.h, stand in: today's picture)
+	{ "liquidWater", &WwWeatherRecx::liquidWater, WwRecClouds, nullptr },
+	{ "dropletRadius", &WwWeatherRecx::dropletRadius, WwRecClouds, nullptr },
+	{ "iceFraction", &WwWeatherRecx::iceFraction, WwRecClouds, nullptr },
+	{ "evolution", &WwWeatherRecx::evolution, WwRecClouds, nullptr },
+	{ "precipitationBase", &WwWeatherRecx::precipitationBase, WwRecClouds, nullptr },
 	{ "stars", &WwWeatherRecx::stars, WwRecSky, []( const WwWeatherGen::Out & o, double ) { return o.stars; } },
 	{ "moonlight", &WwWeatherRecx::moonlight, WwRecSky, []( const WwWeatherGen::Out & o, double ) { return o.moonlight; } },
 	{ "wind.speed", &WwWeatherRecx::windSpeed, WwRecWind, []( const WwWeatherGen::Out & o, double ) { return o.windSpeed; } },
@@ -496,6 +538,64 @@ unsigned envRecordRed()
 	return wwWeatherRecordChannels( wwEnvStr( "WW_WEATHER_RECORD_RED" ) );
 }
 
+/* lane CLOUDRECX1 (SPEC.md 1.4): the drawn density = the generated rung's (or the legacy key's; none = 1) x sigma(file's
+ * liquidWater / dropletRadius) / sigma(the type's default). Neither key set: the ratio is 1 exactly and density is left
+ * as it was (today's picture, the same key text). */
+void cloud14Density( WwWeatherRecx & r )
+{
+	r.densityGen = r.density;
+	r.densityRatio = 1.0f;
+	if ( r.liquidWater < 0.0f && r.dropletRadius < 0.0f )
+		return;
+	const float type = r.type >= 0.0f ? r.type : 2.0f / 3.0f;	// no type: CLOUD5's Variety default (cumulus)
+	r.densityRatio = WwCloudRecx14::densityRatio( r.liquidWater, r.dropletRadius, WwCloudRecx14::lowDefault( type ) );
+	// the drawn density stays in the 1.3 range (0..kDensityMax: the march's coverage tables are built for it)
+	r.density = std::min( ( r.density >= 0.0f ? r.density : 1.0f ) * r.densityRatio, kDensityMax );
+}
+
+bool cloud14Any( const WwWeatherRecx & r )
+{
+	if ( r.liquidWater >= 0.0f || r.dropletRadius >= 0.0f || r.iceFraction >= 0.0f || r.evolution >= 0.0f
+		|| r.precipitationBase >= 0.0f )
+		return true;
+	for ( int i = 0; i < 32; i++ )
+		if ( r.layerLwc[i] >= 0.0f || r.layerRadius[i] >= 0.0f || r.layerIce[i] >= 0.0f || r.layerAnvil[i] >= 0.0f )
+			return true;
+	return false;
+}
+
+/* lane CLOUDRECX1: the telemetry line at each weather open: every 1.4 input, its value and source, the derived sigma
+ * (SPEC.md 1.4: sigma = 3 LWC / (2 rho_w r)) against the type default's, the ratio the march takes, the legacy alias */
+QString cloud14Line( const WwWeatherRecx & r )
+{
+	namespace C = WwCloudRecx14;
+	if ( wwCloudRecx14Red() )
+		return QStringLiteral( "cloud recx 1.4: red (WW_CLOUD_RECX14_RED): the 1.3 clouds block, density=%1" ).arg( f4( r.density ) );
+	const float type = r.type >= 0.0f ? r.type : 2.0f / 3.0f;
+	const C::Micro d = C::lowDefault( type );
+	const float w = r.liquidWater >= 0.0f ? r.liquidWater : d.lwc, rad = r.dropletRadius >= 0.0f ? r.dropletRadius : d.rUm;
+	auto src = []( float v ) { return v >= 0.0f ? "file" : "default"; };
+	QString s = QStringLiteral( "cloud recx 1.4: type=%1 liquidWater=%2(%3) dropletRadius=%4(%5) sigma=%6/km default=%7/km "
+								"(%8 g/m3, %9 um) ratio=%10 density=%11 legacy=%12" )
+		.arg( double( type ), 0, 'f', 3 ).arg( double( w ), 0, 'g', 4 ).arg( QLatin1String( src( r.liquidWater ) ) )
+		.arg( double( rad ), 0, 'g', 4 ).arg( QLatin1String( src( r.dropletRadius ) ) )
+		.arg( double( C::sigmaPerKm( w, rad ) ), 0, 'f', 1 ).arg( double( C::sigmaPerKm( d.lwc, d.rUm ) ), 0, 'f', 1 )
+		.arg( double( d.lwc ), 0, 'g', 3 ).arg( double( d.rUm ), 0, 'g', 3 ).arg( double( r.densityRatio ), 0, 'f', 4 )
+		.arg( f4( r.density ) ).arg( r.densityLegacy ? QStringLiteral( "yes" ) : QStringLiteral( "no" ) );
+	s += QStringLiteral( " iceFraction=%1 evolution=%2 precipitationBase=%3" )
+		.arg( r.iceFraction >= 0.0f ? f4( r.iceFraction ) : QStringLiteral( "0(default)" ) )
+		.arg( r.evolution >= 0.0f ? f4( r.evolution ) + QStringLiteral( "min" ) : QStringLiteral( "-(default: still)" ) )
+		.arg( r.precipitationBase >= 0.0f
+				  ? f4( r.precipitationBase ) + QStringLiteral( "m shaft=%1/km" ).arg( double( C::shaftSigmaPerKm(
+						std::max( r.rainRate, 0.0f ), std::max( r.snowRate, 0.0f ) ) ), 0, 'f', 3 )
+				  : QStringLiteral( "-(default: no shafts)" ) );
+	for ( int i = 0; i < 32; i++ )
+		if ( r.layerLwc[i] >= 0.0f || r.layerRadius[i] >= 0.0f || r.layerIce[i] >= 0.0f || r.layerAnvil[i] >= 0.0f )
+			s += QStringLiteral( " layer%1=lwc:%2,r:%3,ice:%4,anvil:%5" ).arg( i ).arg( f4( r.layerLwc[i] ), f4( r.layerRadius[i] ),
+				f4( r.layerIce[i] ), f4( r.layerAnvil[i] ) );
+	return s;
+}
+
 struct Who
 {
 	quint32 formID = 0;
@@ -537,10 +637,31 @@ WwWeatherRecx resolveOne( const Who & w, const QStringList & roots, const QStrin
 			if ( r.hazeAlbedo[0] >= 0.0f )
 				src[QStringLiteral( "hazeAlbedo" )] = QStringLiteral( "file:" ) + rel;
 		} else if ( bn == QLatin1String( "clouds" ) ) {
-			b.unknownKeys( { QStringLiteral( "coverage" ), QStringLiteral( "density" ), QStringLiteral( "layers" ),
-				QStringLiteral( "type" ), QStringLiteral( "hours" ) } );
+			QStringList known = { QStringLiteral( "coverage" ), QStringLiteral( "density" ), QStringLiteral( "layers" ),
+				QStringLiteral( "type" ), QStringLiteral( "hours" ) };
+			const bool v14 = !wwCloudRecx14Red();	// lane CLOUDRECX1: the 1.4 keys (the red: the 1.3 block, they are unknown)
+			if ( v14 )
+				known << QStringLiteral( "liquidWater" ) << QStringLiteral( "dropletRadius" ) << QStringLiteral( "iceFraction" )
+					  << QStringLiteral( "evolution" ) << QStringLiteral( "precipitationBase" );
+			b.unknownKeys( known );
 			const Obj bc{ typeWords( b.o, b.where ), b.where };	// lane CLOUD5: clouds.type words -> numbers
-			readKeys( bc, kClouds, hour, r );
+			if ( v14 ) {
+				readKeys( bc, kClouds14, hour, r );
+				if ( r.density >= 0.0f ) {	// SPEC.md 1.4: density stays one release as the legacy alias
+					r.densityLegacy = true;
+					if ( r.liquidWater >= 0.0f || r.dropletRadius >= 0.0f ) {
+						sayOnce( QStringLiteral( "weather recx: %1: density ignored (liquidWater / dropletRadius set; density is "
+												 "the 1.4 legacy alias)" ).arg( b.where ) );
+						r.density = -1.0f;	// the generated rung's (or none) below, times the file's sigma ratio
+						r.densityLegacy = false;
+					} else {
+						sayOnce( QStringLiteral( "weather recx: %1: density is the 1.4 legacy alias (kept this release; use "
+												 "liquidWater g/m^3 and dropletRadius um)" ).arg( b.where ) );
+					}
+				}
+			} else {
+				readKeys( bc, kClouds, hour, r );
+			}
 			readLayers( b, r );
 			if ( r.layers )
 				src[QStringLiteral( "layers" )] = QStringLiteral( "file:" ) + rel;
@@ -608,10 +729,13 @@ WwWeatherRecx resolveOne( const Who & w, const QStringList & roots, const QStrin
 		}
 	if ( r.recordRed & WwRecClouds ) {
 		for ( int i = 0; i < 32; i++ )
-			r.layerBase[i] = r.layerTop[i] = -1.0f;
+			r.layerBase[i] = r.layerTop[i] = r.layerLwc[i] = r.layerRadius[i] = r.layerIce[i] = r.layerAnvil[i] = r.layerType[i]
+				= -1.0f;
 		r.layers = 0;
+		r.densityLegacy = false;
 		src.remove( QStringLiteral( "layers" ) );
 	}
+	cloud14Density( r );
 	if ( r.recordRed & WwRecFog ) {
 		r.hazeType.clear();
 		src[QStringLiteral( "hazeType" )] = QStringLiteral( "record" );
@@ -671,6 +795,12 @@ unsigned wwWeatherRecordChannels( const QString & words )
 									 "lightning, precip, wind, transitions, all)" ).arg( raw ) );
 	}
 	return bits;
+}
+
+bool wwCloudRecx14Red()
+{
+	const QString v = wwEnvStr( "WW_CLOUD_RECX14_RED" ).trimmed().toLower();
+	return v == QLatin1String( "1" ) || v == QLatin1String( "on" ) || v == QLatin1String( "true" ) || v == QLatin1String( "yes" );
 }
 
 bool wwWeatherRecordRed( unsigned channel )
@@ -771,7 +901,7 @@ const WwWeatherRecx & wwWeatherRecx()
 	next.on = next.visibilityM >= 0.0f || next.hazeHeightM >= 0.0f || next.ozone >= 0.0f || next.coverage >= 0.0f
 		|| next.density >= 0.0f || next.layers > 0 || next.stars >= 0.0f || next.moonlight >= 0.0f || next.type >= 0.0f
 		|| !next.hazeType.isEmpty() || next.windSpeed >= 0.0f || next.lightningFreq >= 0.0f || next.transHours >= 0.0f
-		|| next.recordRed != 0;
+		|| next.recordRed != 0 || cloud14Any( next );
 	next.key = next.on ? keyOf( next ) : QString();
 	next.stamp = cur.stamp;
 	// lane WEATHERRECX1: one line per weather open, every input's source (file:<path> | generated | record | default)
@@ -783,6 +913,7 @@ const WwWeatherRecx & wwWeatherRecx()
 			qPrintable( next.genRegion.isEmpty() ? QStringLiteral( "-" ) : next.genRegion ),
 			qPrintable( wwEnvStr( "WW_WEATHER_RECORD_RED" ).isEmpty() ? QStringLiteral( "none" ) : wwEnvStr( "WW_WEATHER_RECORD_RED" ) ),
 			qPrintable( next.sources.join( QLatin1Char( ' ' ) ) ) );
+		std::fprintf( stderr, "%s\n", qPrintable( cloud14Line( next ) ) );	// lane CLOUDRECX1: the 1.4 clouds line
 	}
 	if ( next.key != cur.key ) {
 		next.stamp = cur.stamp + 1;

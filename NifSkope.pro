@@ -292,6 +292,7 @@ HEADERS += \
 	src/features/clouds/cloudfly.h \
 	src/features/clouds/cloudflymath.h \
 	src/features/clouds/cloudvolmath.h \
+	src/features/clouds/cloudrecx14math.h \
 	src/features/sky/atmomath.h \
 	src/features/gi/cellprobeview.h \
 	src/features/gi/cellvolumeview.h \

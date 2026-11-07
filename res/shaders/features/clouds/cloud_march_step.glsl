@@ -6,8 +6,11 @@
 	p.z = cvHeight( o, d, t, up );
 	cvFootKm = t * pixKm;
 	float dens = cvDens( p );
+	if ( cvShaft.x > 0.0 && p.z < cvBands.baseKm.x )
+		dens += cvShaftDens( p );	// lane CLOUDRECX1: the precipitation shafts (0 = none, today)
 	if ( dens <= 0.0 )
 		continue;
+	cvIceNow = p.z < cvBands.topKm.x ? cvIce.x : cvIce.y;	// lane CLOUDRECX1: the band's ice share
 	float tauL = 0.0;
 	for ( int k = 0; k < cvTaps; k++ ) {
 		float a = float( k ) / float( cvTaps ), b = float( k + 1 ) / float( cvTaps );

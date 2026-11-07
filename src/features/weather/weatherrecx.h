@@ -42,6 +42,13 @@ struct WwWeatherRecx
 	float wetting = -1.0f, drying = -1.0f;	//!< minutes
 	float rainRate = -1.0f, snowRate = -1.0f;	//!< mm/h, the layers summed per family (rain + hail, snow_*)
 	QString precipLayer;	//!< the first layer's type word
+	/* lane CLOUDRECX1 (SPEC.md 1.4 clouds; red WW_CLOUD_RECX14_RED=1 = the 1.3 reader: none of these read). < 0 = not set */
+	float liquidWater = -1.0f, dropletRadius = -1.0f;	//!< g/m^3, um (the weather's main cloud)
+	float iceFraction = -1.0f, evolution = -1.0f, precipitationBase = -1.0f;	//!< 0..1, minutes, metres above sea level
+	float layerLwc[32], layerRadius[32], layerIce[32], layerAnvil[32], layerType[32];	//!< per layer; < 0 = not set
+	bool densityLegacy = false;	//!< clouds.density came from a file (1.4: the legacy alias, warned)
+	float densityGen = -1.0f;	//!< the density the generated rung (or the file's legacy key) gave, before the 1.4 factor
+	float densityRatio = 1.0f;	//!< sigma(file) / sigma(type default): density = densityGen x this
 	QString textures[9];	//!< SPEC.md textures slots (wwWeatherRecxTextureSlot); empty = the shared default
 	QString genClass, genRegion;	//!< the generated rung's class and region for this weather
 	unsigned recordRed = 0;	//!< WwRecordChannel bits whose record path is used (env red or useRecordColors)
@@ -51,9 +58,12 @@ struct WwWeatherRecx
 	WwWeatherRecx()
 	{
 		for ( int i = 0; i < 32; i++ )
-			layerBase[i] = layerTop[i] = -1.0f;
+			layerBase[i] = layerTop[i] = layerLwc[i] = layerRadius[i] = layerIce[i] = layerAnvil[i] = layerType[i] = -1.0f;
 	}
 };
+
+//! lane CLOUDRECX1: WW_CLOUD_RECX14_RED=1 (on / true / yes): the 1.3 clouds block (the 1.4 keys unknown, density not legacy)
+bool wwCloudRecx14Red();
 
 //! lane WEATHERRECX1: the record channels a red (or useRecordColors) can hand back to the WTHR record
 enum WwRecordChannel : unsigned
