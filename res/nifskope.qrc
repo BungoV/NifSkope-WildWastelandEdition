@@ -84,4 +84,7 @@
     <qresource prefix="/ssgi">
         <file alias="fast_2uges.rg8">ssgi/fast_2uges.rg8</file>
     </qresource>
+    <qresource prefix="/air">
+        <file alias="stbn_scalar_128x128x64.r8">air/stbn_scalar_128x128x64.r8</file>
+    </qresource>
 </RCC>

@@ -216,8 +216,26 @@ static void mirror()
 			for ( int dim = 0; dim < 2; dim++ )
 				if ( restirgi::blue( px, py, fr, sd, dim ) != glsl::rgBlue( px, py, fr, sd, dim ) )
 					worst = 1.0;
-			const int wr = ( k & 1 ) ? restirgi::kRedWhite : 0;
-			worst = std::max( worst, gap3( restirgi::bounceDir( nn, px, py, 4096, sd, fr, wr ), glsl::rgBounceDir( gv( nn ), px, py, 4096, sd, fr, wr ) ) );
+			// the STBN pair: the same index, the same value; any mask (a hashed stand-in: the shipped one is the qrc's), the
+			// r2 and white red bits, and no mask at all
+			static std::vector<uint8_t> mask;
+			if ( mask.empty() )
+				for ( uint32_t j = 0; j < 128u * 128u * 64u; j++ )
+					mask.push_back( uint8_t( restir::hash( j ) & 255u ) );
+			for ( int dim = 0; dim < 2; dim++ )
+				if ( restirgi::stbnIndex( px, py, fr, sd, dim ) != glsl::rgStbnIndex( px, py, fr, sd, dim )
+					|| restirgi::stbnValue( uint32_t( k & 255 ) ) != glsl::rgStbnValue( uint32_t( k & 255 ) ) )
+					worst = 1.0;
+			const int wr = ( k & 1 ) ? restirgi::kRedWhite : ( k & 2 ) ? restirgi::kRedR2 : 0;
+			const bool hm = ( k & 4 ) == 0;
+			const uint32_t m0 = mask[restirgi::stbnIndex( px, py, fr, sd, 0 )], m1 = mask[restirgi::stbnIndex( px, py, fr, sd, 1 )];
+			worst = std::max( worst, gap3( restirgi::bounceDir( nn, px, py, 4096, sd, fr, wr, hm ? mask.data() : nullptr ),
+				glsl::rgBounceDir( gv( nn ), px, py, 4096, sd, fr, wr, hm, m0, m1 ) ) );
+			// the Jacobian as merged: dropped / clamped alike, and the red bit keeps it as it is
+			const float jj = float( std::exp( 6.0 * u( 31 ) - 3.0 ) );
+			const int jr = ( k & 16 ) ? restirgi::kRedNoJClamp : 0;
+			if ( restirgi::jacobianKept( jj, jr ) != glsl::rgJacobianKept( jj, jr ) )
+				worst = std::max( worst, gap( restirgi::jacobianKept( jj, jr ), glsl::rgJacobianKept( jj, jr ) ) );
 		}
 		const int red = k & ( restirgi::kRedNoJacobian | restirgi::kRedNoPdf );
 		restirgi::Sample y, y2;

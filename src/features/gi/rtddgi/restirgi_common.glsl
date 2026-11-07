@@ -9,6 +9,8 @@
 #define RESTIRGI_BIT_NOPDF 4        // kRedNoPdf
 #define RESTIRGI_BIT_NOTEMPORAL 8   // kRedNoTemporal
 #define RESTIRGI_BIT_WHITE 16       // kRedWhite (not a red: the white-noise bounce)
+#define RESTIRGI_BIT_R2 32          // kRedR2 (the R2 lattice in place of the STBN mask)
+#define RESTIRGI_BIT_NOJCLAMP 64    // kRedNoJClamp
 #define RESTIRGI_HISTORY_CAP 20.0   // kHistoryCap
 #define RESTIRGI_EPS 0.001          // kEps
 #define RESTIRGI_PI 3.14159265358979
@@ -79,13 +81,26 @@ float rgBlue( int x, int y, uint f, uint seed, int dim )
 	return float( v >> 8u ) * ( 1.0 / 16777216.0 );
 }
 
-// MIRROR restirgimath.h bounceDir
-vec3 rgBounceDir( vec3 n, int x, int y, int W, uint seed, uint f, int red )
+// MIRROR restirgimath.h stbnIndex
+uint rgStbnIndex( int x, int y, uint f, uint seed, int dim )
+{
+	const uint ox = ( seed & 127u ) + ( dim == 0 ? 0u : 37u );
+	const uint oy = ( ( seed >> 7u ) & 127u ) + ( dim == 0 ? 0u : 71u );
+	return ( ( uint( x ) + ox ) & 127u ) + ( ( uint( y ) + oy ) & 127u ) * 128u + ( f & 63u ) * 16384u;
+}
+
+// MIRROR restirgimath.h stbnValue
+float rgStbnValue( uint v ) { return ( float( v ) + 0.5 ) * ( 1.0 / 256.0 ); }
+
+// MIRROR restirgimath.h bounceDir (the caller reads the mask's two bytes at rgStbnIndex dim 0 and 1; mask: it has one)
+vec3 rgBounceDir( vec3 n, int x, int y, int W, uint seed, uint f, int red, bool mask, uint m0, uint m1 )
 {
 	if ( ( red & RESTIRGI_BIT_WHITE ) != 0 ) {
 		const uint s0 = restirSeed( seed ^ uint( y * W + x ), f, 0u );
 		return rgCosineDir( n, restirRand( s0, 0u ), restirRand( s0, 1u ) );
 	}
+	if ( mask && ( red & RESTIRGI_BIT_R2 ) == 0 )
+		return rgCosineDir( n, rgStbnValue( m0 ), rgStbnValue( m1 ) );
 	return rgCosineDir( n, rgBlue( x, y, f, seed, 0 ), rgBlue( x, y, f, seed, 1 ) );
 }
 
@@ -113,6 +128,14 @@ float rgJacobian( vec3 xv, vec3 xq, RgRes y, int red )
 	const float cv = abs( dot( y.ns, dv ) ) / sqrt( lv );
 	const float cq = abs( dot( y.ns, dq ) ) / sqrt( lq );
 	return cq > 1e-6 ? ( cv / cq ) * ( lq / lv ) : 0.0;
+}
+
+// MIRROR restirgimath.h jacobianKept: -1 drops the neighbour (J outside [1/10, 10])
+float rgJacobianKept( float j, int red )
+{
+	if ( ( red & RESTIRGI_BIT_NOJCLAMP ) != 0 )
+		return j;
+	return j >= 0.1 && j <= 10.0 ? j : -1.0;
 }
 
 // MIRROR restirgimath.h update

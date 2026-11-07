@@ -1234,14 +1234,17 @@ void restirUniforms( Renderer * r, NifSkopeOpenGLContext::Program * prog )
 	prog->uni4f( "cellRestirSize", FloatVector4( float( G.W ), float( G.H ), 0.0f, 0.0f ) );
 }
 
-//! WW_CELL_RESTIRGI_RED (live): off (the pass and the shader read gone), nojacobian, novis, nopdf, notemporal (RESTIRGI_BIT_*)
+//! WW_CELL_RESTIRGI_RED (live): off (the pass and the shader read gone), nojacobian, novis, nopdf, notemporal, white, r2,
+//! nojclamp (RESTIRGI_BIT_*), noatrous (kRestirGiNoAtrous: host only, the a-trous passes' before)
+constexpr int kRestirGiNoAtrous = 128;
 int restirGiRedBits()
 {
 	int b = 0;
 	for ( const QString & r : wwEnvStr( "WW_CELL_RESTIRGI_RED" ).split( QLatin1Char( ',' ), Qt::SkipEmptyParts ) ) {
 		const QString t = r.trimmed();
 		b |= t == QLatin1String( "nojacobian" ) ? 1 : t == QLatin1String( "novis" ) ? 2 : t == QLatin1String( "nopdf" ) ? 4
-			: t == QLatin1String( "notemporal" ) ? 8 : t == QLatin1String( "white" ) ? 16 : 0;
+			: t == QLatin1String( "notemporal" ) ? 8 : t == QLatin1String( "white" ) ? 16 : t == QLatin1String( "r2" ) ? 32
+			: t == QLatin1String( "nojclamp" ) ? 64 : t == QLatin1String( "noatrous" ) ? kRestirGiNoAtrous : 0;
 	}
 	return b;
 }
@@ -1477,6 +1480,9 @@ void rtddgiRestirGiPass( Scene * scene )
 	in.frame = G.frame++;
 	in.seed = 0x9e3779b9u;
 	in.red = restirGiRedBits();
+	in.atrous = ( in.red & kRestirGiNoAtrous ) ? 0 : in.atrous;
+	in.red &= ~kRestirGiNoAtrous;
+	in.stbn = restirGiStbnMask();
 	{
 		// the lights as the volume packs them (on / off, moved, recoloured): any change drops the history
 		const std::vector<float> & pl = c.live->live.packedLights();
@@ -1506,9 +1512,10 @@ void rtddgiRestirGiPass( Scene * scene )
 	std::copy( in.proj, in.proj + 4, G.pproj );
 	if ( ( G.runs++ % 64 ) == 0 )
 		restirSay( G, QStringLiteral( "on %1 x %2 (neighbours %3, radius %4, running mean %5 frames), frame %6, device wall %7 ms, red %8, "
-			"history dropped: cuts %9, light changes %10" )
+			"history dropped: cuts %9, light changes %10; gpu %11 ms, filter + a-trous (%12 passes) %13 ms, noise %14" )
 			.arg( t.w ).arg( t.h ).arg( in.spatial ).arg( in.radius ).arg( in.accFrames ).arg( in.frame ).arg( out.msWall, 0, 'f', 3 )
-			.arg( in.red ).arg( out.cuts ).arg( out.relights ) );
+			.arg( in.red ).arg( out.cuts ).arg( out.relights ).arg( out.msGpu, 0, 'f', 3 ).arg( in.atrous ).arg( out.msDenoise, 0, 'f', 3 )
+			.arg( ( in.red & 16 ) ? QStringLiteral( "white" ) : ( in.stbn && !( in.red & 32 ) ) ? QStringLiteral( "stbn" ) : QStringLiteral( "r2" ) ) );
 }
 
 namespace {

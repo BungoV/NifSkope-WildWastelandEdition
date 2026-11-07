@@ -32,7 +32,9 @@ bool restirGiGpuShare( DdgiGpuSession *, int, int, RestirGpuShare * out )
 namespace {
 #include "features/gi/rtddgi/restirgi.spv.h"
 
-constexpr int kRgBindings = 11;   // restirgi.comp set 1
+constexpr int kRgBindings = 14;   // restirgi.comp set 1
+constexpr VkDeviceSize kRgStbnBytes = 128 * 128 * 64;   // res/air/stbn_scalar_128x128x64.r8
+constexpr uint32_t kRgStamps = 3;   // the pass's start, before the filter (mode 3), the end
 constexpr VkDeviceSize kRgParamBytes = 11 * 16;   // RestirGiParams, std430: size, opts, knobs, rows[3], proj, prows[3], pproj
 constexpr VkDeviceSize kRgResBytes = 64;          // restirgi_common.glsl RgRes
 
@@ -91,8 +93,10 @@ struct RgGpu
 	int W = 0, H = 0;
 	bool shared = false, released = false;
 	VkDeviceSize gbufAlloc = 0, outAlloc = 0;
-	Buf params, gbuf, prevGbuf, cur, hist, histPix, est, acc, accPrev, out, cand;
+	Buf params, gbuf, prevGbuf, cur, hist, histPix, est, acc, accPrev, out, cand, stbn, atrA, atrB;
 	Buf estRb, candRb, outRb;
+	bool stbnUp = false;                  // the mask is in stbn (uploaded once a working set)
+	VkQueryPool qp = VK_NULL_HANDLE;
 	VkDescriptorSet set = VK_NULL_HANDLE;
 	VkCommandBuffer cb = VK_NULL_HANDLE;
 	VkFence fence = VK_NULL_HANDLE;
@@ -137,8 +141,13 @@ void rgFreeBuffers( Dev & D, RgGpu * g )
 		*sem = VK_NULL_HANDLE;
 	}
 	for ( Buf * b : { &g->params, &g->gbuf, &g->prevGbuf, &g->cur, &g->hist, &g->histPix, &g->est, &g->acc, &g->accPrev, &g->out,
-			&g->cand, &g->estRb, &g->candRb, &g->outRb } )
+			&g->cand, &g->stbn, &g->atrA, &g->atrB, &g->estRb, &g->candRb, &g->outRb } )
 		freeBuf( D, *b );
+	DdgiTimer & T = ddgiTimer( D );
+	if ( g->qp && T.destroy )
+		T.destroy( D.dev, g->qp, nullptr );
+	g->qp = VK_NULL_HANDLE;
+	g->stbnUp = false;
 	g->W = g->H = 0;
 	g->shared = g->released = false;
 }
@@ -217,7 +226,16 @@ bool rgMake( Dev & D, RgGpu * g, RgPipe & R, int W, int H, bool share, std::stri
 		&& makeBuf( D, n * kRgResBytes, u, { kDevLocal, kHost }, g->hist ) && makeBuf( D, n * 4, u, { kDevLocal, kHost }, g->histPix )
 		&& makeBuf( D, n * 16, u, { kDevLocal, kHost }, g->est ) && makeBuf( D, n * 16, u, { kDevLocal, kHost }, g->acc )
 		&& makeBuf( D, n * 16, u, { kDevLocal, kHost }, g->accPrev ) && makeBuf( D, n * 16, u, { kDevLocal, kHost }, g->cand )
-		&& g->params.map;
+		&& makeBuf( D, kRgStbnBytes, u, { kDevLocal, kHost }, g->stbn ) && makeBuf( D, n * 16, u, { kDevLocal, kHost }, g->atrA )
+		&& makeBuf( D, n * 16, u, { kDevLocal, kHost }, g->atrB ) && g->params.map;
+	DdgiTimer & T = ddgiTimer( D );
+	if ( ok && T.ok ) {
+		VkQueryPoolCreateInfo qi { VK_STRUCTURE_TYPE_QUERY_POOL_CREATE_INFO };
+		qi.queryType = VK_QUERY_TYPE_TIMESTAMP;
+		qi.queryCount = kRgStamps;
+		if ( T.create( D.dev, &qi, nullptr, &g->qp ) != VK_SUCCESS )
+			g->qp = VK_NULL_HANDLE;   // no timer: msGpu stays -1
+	}
 	if ( ok ) {
 		VkDescriptorSetAllocateInfo ai { VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO };
 		ai.descriptorPool = D.dpool;
@@ -227,7 +245,7 @@ bool rgMake( Dev & D, RgGpu * g, RgPipe & R, int W, int H, bool share, std::stri
 	}
 	if ( ok ) {
 		const Buf * bs[kRgBindings] = { &g->params, &g->gbuf, &g->prevGbuf, &g->cur, &g->hist, &g->histPix, &g->est, &g->acc,
-			&g->accPrev, &g->out, &g->cand };
+			&g->accPrev, &g->out, &g->cand, &g->stbn, &g->atrA, &g->atrB };
 		VkDescriptorBufferInfo bi[kRgBindings] {};
 		VkWriteDescriptorSet w[kRgBindings] {};
 		for ( int i = 0; i < kRgBindings; i++ ) {
@@ -385,6 +403,8 @@ bool restirGiGpuStep( DdgiGpuSession * s, const RestirGiGpuIn & in, RestirGiGpuO
 		pi[7] = in.red;
 		p[8] = history ? 1.0f : 0.0f;
 		p[9] = in.accFrames;
+		p[10] = in.stbn ? 1.0f : 0.0f;
+		p[11] = float( std::clamp( in.atrous, 0, 5 ) );
 		std::memcpy( p + 12, in.rows, sizeof in.rows );
 		std::memcpy( p + 24, in.proj, sizeof in.proj );
 		std::memcpy( p + 28, in.prows, sizeof in.prows );
@@ -395,6 +415,13 @@ bool restirGiGpuStep( DdgiGpuSession * s, const RestirGiGpuIn & in, RestirGiGpuO
 	if ( in.gbuf && !ddgiPut( D, in.gbuf, size_t( n ) * 16, g->gbuf ) ) {
 		out->why = "the g-buffer upload failed";
 		return false;
+	}
+	if ( in.stbn && !g->stbnUp ) {
+		if ( !ddgiPut( D, in.stbn, size_t( kRgStbnBytes ), g->stbn ) ) {
+			out->why = "the STBN mask upload failed";
+			return false;
+		}
+		g->stbnUp = true;
 	}
 	if ( in.readBack && !g->estRb.b ) {
 		const VkMemoryPropertyFlags cached = kHost | VK_MEMORY_PROPERTY_HOST_CACHED_BIT;
@@ -416,10 +443,18 @@ bool restirGiGpuStep( DdgiGpuSession * s, const RestirGiGpuIn & in, RestirGiGpuO
 				ddgiOwner( D, g->gbuf.b, true );
 				ddgiOwner( D, g->out.b, true );
 			}
-			for ( uint32_t mode = 0; mode < 4; mode++ ) {
+			DdgiTimer & T = ddgiTimer( D );
+			if ( g->qp )
+				T.reset( D.cb, g->qp, 0, kRgStamps );
+			const uint32_t modes = 4 + uint32_t( std::clamp( in.atrous, 0, 5 ) );
+			for ( uint32_t mode = 0; mode < modes; mode++ ) {
+				if ( g->qp && ( mode == 0 || mode == 3 ) )
+					T.write( D.cb, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, g->qp, mode == 0 ? 0 : 1 );
 				rgDispatch( D, R, s, g, mode, groups );
 				ddgiBarrier( D );
 			}
+			if ( g->qp )
+				T.write( D.cb, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, g->qp, 2 );
 			ddgiCopyBarrier( D );
 			ddgiCopy( D, g->cur, g->hist, n * kRgResBytes );   // the temporal reservoirs: the next frame's history
 			ddgiCopy( D, g->acc, g->accPrev, n * 16 );          // the running means
@@ -458,6 +493,14 @@ bool restirGiGpuStep( DdgiGpuSession * s, const RestirGiGpuIn & in, RestirGiGpuO
 		return false;
 	}
 	g->released = gl;
+	if ( g->qp ) {
+		DdgiTimer & T = ddgiTimer( D );
+		uint64_t ts[kRgStamps] = {};
+		if ( T.get( D.dev, g->qp, 0, kRgStamps, sizeof ts, ts, 8, VK_QUERY_RESULT_64_BIT | VK_QUERY_RESULT_WAIT_BIT ) == VK_SUCCESS ) {
+			out->msGpu = double( ts[2] - ts[0] ) * T.nsPerTick * 1e-6;
+			out->msDenoise = double( ts[2] - ts[1] ) * T.nsPerTick * 1e-6;
+		}
+	}
 	if ( in.readBack ) {
 		const float * e = static_cast<const float *>( g->estRb.map );
 		const float * c = static_cast<const float *>( g->candRb.map );

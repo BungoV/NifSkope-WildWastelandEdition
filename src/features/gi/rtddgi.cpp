@@ -1980,9 +1980,28 @@ struct RgTwinScene
 };
 } // namespace
 
+const unsigned char * restirGiStbnMask()
+{
+	static std::vector<unsigned char> m;
+	static bool tried = false;
+	if ( !tried ) {
+		tried = true;
+		QFile f( QStringLiteral( ":/air/stbn_scalar_128x128x64.r8" ) );
+		const size_t want = size_t( restirgi::kStbnSide ) * size_t( restirgi::kStbnSide ) * size_t( restirgi::kStbnSlices );
+		if ( f.open( QIODevice::ReadOnly ) ) {
+			const QByteArray b = f.readAll();
+			if ( size_t( b.size() ) == want )
+				m.assign( b.constData(), b.constData() + b.size() );
+		}
+	}
+	return m.empty() ? nullptr : m.data();
+}
+
 int restirgiCli( const QStringList & args )
 {
 	QString soupPath, outDir, rect, lightsFile, redText;
+	bool twin = true;   // --no-twin: the GPU alone (the cost at a real size, 1080p: the twin takes minutes a frame there)
+	int refFrames = 64;   // the one-frame bar's reference: the mean of this many independent (no history) GPU frames
 	RtDdgiSpec spec;
 	spec.gpu = 1;
 	spec.place = false;
@@ -2027,6 +2046,9 @@ int restirgiCli( const QStringList & args )
 		else if ( a == QLatin1String( "--acc" ) ) { base.accFrames = std::max( 1.0f, nx.toFloat() ); i++; }
 		else if ( a == QLatin1String( "--jump" ) ) { jumpAt = nx.toInt(); i++; }
 		else if ( a == QLatin1String( "--relight" ) ) { relightAt = nx.toInt(); i++; }
+		else if ( a == QLatin1String( "--atrous" ) ) { base.atrous = std::clamp( nx.toInt(), 0, 5 ); i++; }
+		else if ( a == QLatin1String( "--ref" ) ) { refFrames = std::max( 0, nx.toInt() ); i++; }
+		else if ( a == QLatin1String( "--no-twin" ) ) twin = false;
 		else if ( a == QLatin1String( "--size" ) ) {
 			const QStringList v = nx.split( ',' );
 			if ( v.size() == 2 ) {
@@ -2062,8 +2084,8 @@ int restirgiCli( const QStringList & args )
 	if ( soupPath.isEmpty() || outDir.isEmpty() || rc.size() != 4 || L.lights.isEmpty() || !haveCam ) {
 		std::fprintf( stderr, "usage: restirgi --soup <file> --rect minX,minY,maxX,maxY --out <dir> --cam ex,ey,ez,tx,ty,tz "
 			"--light x,y,z,radius,r,g,b [...] [--lights <file>] [--size W,H] [--fov deg] [--frames n] [--updates n] [--seed n] "
-			"[--spatial K] [--radius R] [--filter f] [--acc n] [--jump frame] [--relight frame] "
-			"[--red nojacobian,novis,nopdf,notemporal,white]\n" );
+			"[--spatial K] [--radius R] [--filter f] [--acc n] [--atrous n] [--ref n] [--no-twin] [--jump frame] [--relight frame] "
+			"[--red nojacobian,novis,nopdf,notemporal,white,r2,nojclamp]\n" );
 		return 2;
 	}
 	for ( int k = 0; k < 4; k++ )
@@ -2073,8 +2095,10 @@ int restirgiCli( const QStringList & args )
 		const QString t = r.trimmed();
 		red |= t == QLatin1String( "nojacobian" ) ? restirgi::kRedNoJacobian : t == QLatin1String( "novis" ) ? restirgi::kRedNoVis
 			: t == QLatin1String( "nopdf" ) ? restirgi::kRedNoPdf : t == QLatin1String( "notemporal" ) ? restirgi::kRedNoTemporal
-			: t == QLatin1String( "white" ) ? restirgi::kRedWhite : 0;
+			: t == QLatin1String( "white" ) ? restirgi::kRedWhite : t == QLatin1String( "r2" ) ? restirgi::kRedR2
+			: t == QLatin1String( "nojclamp" ) ? restirgi::kRedNoJClamp : 0;
 	}
+	const unsigned char * mask = restirGiStbnMask();
 	ProbeSoup soup;
 	QString err;
 	if ( !probeSoupRead( soupPath, &soup, &err ) ) {
@@ -2168,52 +2192,79 @@ int restirgiCli( const QStringList & args )
 	restirgi::Settings set;
 	set.spatialK = base.spatial;
 	set.radius = base.radius;
+	set.mask = mask;
+	std::vector<float> jmax;
+	set.jmax = &jmax;
 	std::vector<restirgi::Res> hist;
 	std::vector<V3> est;
 	QDir().mkpath( outDir );
-	std::printf( "restirgi: %d x %d, %d of %d pixels hit, %d probes after %d updates, %d frames, K %d R %d, red %d\n", W, H, hits, int( n ),
-		T.nP, updates, frames, set.spatialK, set.radius, red );
+	const char * noise = ( red & restirgi::kRedWhite ) ? "white" : ( mask && !( red & restirgi::kRedR2 ) ) ? "stbn" : "r2";
+	std::printf( "restirgi: %d x %d, %d of %d pixels hit, %d probes after %d updates, %d frames, K %d R %d, red %d, noise %s, "
+		"a-trous %d, twin %d\n", W, H, hits, int( n ), T.nP, updates, frames, set.spatialK, set.radius, red, noise, base.atrous, int( twin ) );
 	// frame 0's bounce on the twin (the kernel's ray: the same seed, the same direction)
 	std::vector<restirgi::Sample> cand0( n );
-	for ( size_t i = 0; i < n; i++ )
-		if ( px[i].valid ) {
-			const V3 d = restirgi::bounceDir( px[i].n, int( i % size_t( W ) ), int( i / size_t( W ) ), W, seed, 0u, red );
-			cand0[i] = scene.trace( px[i].x + px[i].n * restirgi::kEps, d );
-		}
+	if ( twin )
+		for ( size_t i = 0; i < n; i++ )
+			if ( px[i].valid ) {
+				const V3 d = restirgi::bounceDir( px[i].n, int( i % size_t( W ) ), int( i / size_t( W ) ), W, seed, 0u, red, mask );
+				cand0[i] = scene.trace( px[i].x + px[i].n * restirgi::kEps, d );
+			}
 	bakert::RestirGiGpuOut go;
 	std::vector<float> est0, out0;
-	double wallSum = 0;
+	double wallSum = 0, gpuSum = 0, denSum = 0;
+	int gpuN = 0;
 	bool gpuOk = true;
 	int worstFrame = -1;
 	double worstMatch = 1.0;
+	auto gpuIn = [&]( int fr, int r, bool history ) {
+		bakert::RestirGiGpuIn in = base;
+		in.W = W;
+		in.H = H;
+		in.frame = uint32_t( fr );
+		in.seed = seed;
+		in.red = r;
+		in.stbn = mask;
+		std::copy( C.rows, C.rows + 12, in.rows );
+		std::copy( C.proj, C.proj + 4, in.proj );
+		std::copy( C.rows, C.rows + 12, in.prows );
+		std::copy( C.proj, C.proj + 4, in.pproj );
+		in.history = history;
+		in.gbuf = gbuf.data();
+		in.readBack = true;
+		return in;
+	};
 	for ( int fr = 0; fr < frames && gpuOk; fr++ ) {
 		QElapsedTimer tm;
 		// a cut or a light change: the twin starts over by hand, the kernel must find it on its own (else the match fails)
 		if ( fr == jumpAt || fr == relightAt )
 			hist.clear();
 		tm.start();
-		restirgi::frame( scene, px, W, H, seed, uint32_t( fr ), set, red, hist, est );
+		if ( twin )
+			restirgi::frame( scene, px, W, H, seed, uint32_t( fr ), set, red, hist, est );
 		const double cpuMs = double( tm.nsecsElapsed() ) / 1e6;
-		bakert::RestirGiGpuIn in = base;
-		in.W = W;
-		in.H = H;
-		in.frame = uint32_t( fr );
-		in.seed = seed;
-		in.red = red;
-		std::copy( C.rows, C.rows + 12, in.rows );
-		std::copy( C.proj, C.proj + 4, in.proj );
-		std::copy( C.rows, C.rows + 12, in.prows );
-		std::copy( C.proj, C.proj + 4, in.pproj );
+		bakert::RestirGiGpuIn in = gpuIn( fr, red, fr > 0 );
 		if ( fr == jumpAt )
 			in.prows[3] += 1000.0f;
 		in.sceneKey = relightAt >= 0 && fr >= relightAt ? 1u : 0u;
-		in.history = fr > 0;
-		in.gbuf = gbuf.data();
-		in.readBack = true;
 		if ( !bakert::restirGiGpuStep( live.session(), in, &go ) || go.est.size() != n * 4 || go.cand.size() != n * 4 ) {
 			std::printf( "frame %d: the GPU refused (%s)\n", fr, go.why.c_str() );
 			gpuOk = false;
 			break;
+		}
+		if ( fr > 0 && go.msGpu >= 0.0 ) {
+			gpuSum += go.msGpu;
+			denSum += go.msDenoise;
+			gpuN++;
+		}
+		if ( fr == 0 ) {
+			est0 = go.est;
+			out0 = go.out;
+		}
+		wallSum += fr > 0 ? go.msWall : 0.0;
+		if ( !twin ) {
+			std::printf( "frame %d: gpu wall %.2f ms, gpu %.3f ms, filter + a-trous %.3f ms\n", fr, go.msWall, go.msGpu, go.msDenoise );
+			std::fflush( stdout );
+			continue;
 		}
 		if ( fr == 0 ) {
 			int valid = 0, hitDiff = 0, loMatch = 0;
@@ -2235,6 +2286,7 @@ int restirgiCli( const QStringList & args )
 		}
 		int valid = 0, match = 0;
 		double sumC = 0, sumG = 0, sumAbs = 0;
+		std::vector<std::pair<double, size_t>> worst;
 		for ( size_t i = 0; i < n; i++ ) {
 			if ( !px[i].valid )
 				continue;
@@ -2244,6 +2296,7 @@ int restirgiCli( const QStringList & args )
 			sumG += eg;
 			sumAbs += std::fabs( ec - eg );
 			match += std::fabs( ec - eg ) <= 1e-2 * std::max( 1e-4, std::max( ec, eg ) ) ? 1 : 0;
+			worst.push_back( { std::fabs( ec - eg ), i } );
 		}
 		const double vd = std::max( valid, 1 );
 		const double frac = match / vd;
@@ -2253,33 +2306,75 @@ int restirgiCli( const QStringList & args )
 		}
 		std::printf( "frame %d: estimate within 1 %% %.3f %% of pixels; mean twin %.5f gpu %.5f; mean |twin - gpu| / mean %.5f; twin %.1f ms, "
 			"gpu wall %.1f ms\n", fr, 100.0 * frac, sumC / vd, sumG / vd, sumAbs / std::max( 1e-9, sumC ), cpuMs, go.msWall );
-		std::fflush( stdout );
-		if ( fr == 0 ) {
-			est0 = go.est;
-			out0 = go.out;
+		// the diagnosis: the pixels that carry the difference (a firefly is a few pixels), what the twin held there
+		const size_t top = std::min<size_t>( 4, worst.size() );
+		std::partial_sort( worst.begin(), worst.begin() + std::ptrdiff_t( top ), worst.end(), []( const auto & a, const auto & b ) { return a.first > b.first; } );
+		double topSum = 0;
+		for ( size_t k = 0; k < top; k++ )
+			topSum += worst[k].first;
+		std::printf( "  frame %d: the %d worst pixels carry %.1f %% of the |difference|; brightest twin pixel %.3g\n", fr, int( top ),
+			100.0 * topSum / std::max( 1e-9, sumAbs ), [&]() { double m = 0; for ( size_t i = 0; i < n; i++ ) m = std::max( m, double( restirgi::lum( est[i] ) ) ); return m; }() );
+		for ( size_t k = 0; k < top && fr > 0; k++ ) {
+			const size_t i = worst[k].second;
+			const int x = int( i % size_t( W ) ), y = int( i / size_t( W ) );
+			const restirgi::Res & h = hist[i];
+			const restirgi::Sample yc = scene.trace( px[i].x + px[i].n * restirgi::kEps, restirgi::bounceDir( px[i].n, x, y, W, seed, uint32_t( fr ), red, mask ) );
+			std::printf( "    (%d,%d): twin %.4g gpu %.4g; twin temporal M %.0f W %.4g Lo %.4g hit %d; largest J merged %.4g; bounce twin Lo %.4g hit %d, "
+				"gpu Lo %.4g hit %d\n", x, y, double( restirgi::lum( est[i] ) ), restir::luminance( go.est[i * 4], go.est[i * 4 + 1], go.est[i * 4 + 2] ),
+				double( h.M ), double( h.W ), double( restirgi::lum( h.y.Lo ) ), int( h.y.hit ), double( jmax[i] ), double( restirgi::lum( yc.Lo ) ), int( yc.hit ),
+				restir::luminance( go.cand[i * 4], go.cand[i * 4 + 1], go.cand[i * 4 + 2] ), int( go.cand[i * 4 + 3] > 0.5f ) );
 		}
-		wallSum += fr > 0 ? go.msWall : 0.0;
+		std::fflush( stdout );
 	}
 	if ( gpuOk ) {
-		std::printf( "restirgi: worst frame %d, %.3f %% of pixels within 1 %%\n", worstFrame, 100.0 * worstMatch );
+		if ( twin )
+			std::printf( "restirgi: worst frame %d, %.3f %% of pixels within 1 %%\n", worstFrame, 100.0 * worstMatch );
 		std::printf( "history dropped: cuts %u, light changes %u\n", go.cuts, go.relights );
 		std::printf( "gpu wall mean (frames 1..) %.3f ms, filter half %d\n", wallSum / std::max( 1, frames - 1 ), base.filter );
-		// bar (1), one frame stands alone: frame 0 (no history) against the last frame's filtered mean, the reference
-		if ( frames > 1 && go.out.size() == n * 4 && out0.size() == n * 4 ) {
-			double ref = 0, dOut = 0, dEst = 0;
+		if ( gpuN > 0 )
+			std::printf( "gpu timestamps mean (frames 1..) %.3f ms; filter + a-trous %.3f ms (%d x %d, a-trous %d)\n", gpuSum / gpuN, denSum / gpuN,
+				W, H, base.atrous );
+		else
+			std::printf( "gpu timestamps: none (the device has no timer)\n" );
+		auto oneFrame = [&]( const std::vector<float> & ref, const char * what ) {
+			double rs = 0, dOut = 0, dEst = 0;
 			int v = 0;
 			for ( size_t i = 0; i < n; i++ ) {
 				if ( !px[i].valid )
 					continue;
 				v++;
-				const double r = restir::luminance( go.out[i * 4], go.out[i * 4 + 1], go.out[i * 4 + 2] );
-				ref += r;
+				const double r = restir::luminance( ref[i * 4], ref[i * 4 + 1], ref[i * 4 + 2] );
+				rs += r;
 				dOut += std::fabs( restir::luminance( out0[i * 4], out0[i * 4 + 1], out0[i * 4 + 2] ) - r );
 				dEst += std::fabs( restir::luminance( est0[i * 4], est0[i * 4 + 1], est0[i * 4 + 2] ) - r );
 			}
-			ref = std::max( ref, 1e-9 );
-			std::printf( "one frame: filtered frame 0 vs frame %d mean |diff| / mean %.4f; raw estimate %.4f; the filter cuts it %.2fx (%d pixels)\n",
-				frames - 1, dOut / ref, dEst / ref, dEst / std::max( dOut, 1e-9 ), v );
+			rs = std::max( rs, 1e-9 );
+			std::printf( "%s: filtered frame 0 mean |diff| / mean %.4f; raw estimate %.4f; the filter cuts it %.2fx (%d pixels)\n", what, dOut / rs,
+				dEst / rs, dEst / std::max( dOut, 1e-9 ), v );
+		};
+		// bar (1), one frame stands alone: frame 0 (no history) against the last frame's filtered mean (the old reference)
+		if ( frames > 1 && go.out.size() == n * 4 && out0.size() == n * 4 )
+			oneFrame( go.out, QStringLiteral( "one frame vs frame %1" ).arg( frames - 1 ).toLatin1().constData() );
+		// and against the unfiltered truth: the mean of refFrames independent frames' estimates (no history, no filter)
+		if ( refFrames > 0 && out0.size() == n * 4 ) {
+			std::vector<double> acc( n * 4, 0.0 );
+			bool ok = true;
+			for ( int k = 0; k < refFrames && ok; k++ ) {
+				bakert::RestirGiGpuIn in = gpuIn( 1000 + k, red | restirgi::kRedNoTemporal, false );
+				in.sceneKey = go.relights > 0 ? 1u : 0u;
+				bakert::RestirGiGpuOut ro;
+				ok = bakert::restirGiGpuStep( live.session(), in, &ro ) && ro.est.size() == n * 4;
+				for ( size_t j = 0; ok && j < n * 4; j++ )
+					acc[j] += ro.est[j];
+			}
+			if ( ok ) {
+				std::vector<float> ref( n * 4 );
+				for ( size_t j = 0; j < n * 4; j++ )
+					ref[j] = float( acc[j] / refFrames );
+				oneFrame( ref, QStringLiteral( "one frame vs the reference (%1 independent frames)" ).arg( refFrames ).toLatin1().constData() );
+			} else {
+				std::printf( "one frame vs the reference: the GPU refused a reference frame\n" );
+			}
 		}
 	}
 	QFile o( outDir + QStringLiteral( "/restirgi_frame.tsv" ) );

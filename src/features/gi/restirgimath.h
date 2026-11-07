@@ -18,6 +18,7 @@
  *             neighbour's sample can be hidden from here) and the reconnection Jacobian
  *             J = (cos phi_v / cos phi_q) x (|x_q - x_s|^2 / |x_v - x_s|^2) (the change of solid angle at x_s);
  *             Z counts the M of every merged reservoir whose pixel sees the chosen x_s with p_hat > 0 (unbiased).
+ *             A neighbour whose J is outside [1/10, 10] is not merged (jacobianKept).
  * The pixel's irradiance is Lo(y) cos(theta_v) W; the cell shader reads it in place of the volume's irradiance.
  *
  * Reds (compiled with -D, each must fail its own check in tests/features/gi/restirgi_math):
@@ -41,7 +42,10 @@ using rtddgi::V3;
 
 constexpr int kRedNoJacobian = 1, kRedNoVis = 2, kRedNoPdf = 4, kRedNoTemporal = 8;
 constexpr int kRedWhite = 16;          // not a red: the white-noise bounce (the one-frame noise pair's before)
+constexpr int kRedR2 = 32;             // the integer R2 lattice bounce in place of the STBN mask (the mask's before)
+constexpr int kRedNoJClamp = 64;       // every Jacobian merged as it is (jacobianKept's drop's before)
 constexpr float kHistoryCap = 20.0f;   // [Ouyang 2021 sec. 4.3 / Bitterli 2020 sec. 6]
+constexpr int kStbnSide = 128, kStbnSlices = 64;   // res/air/stbn_scalar_128x128x64.r8 (FOGGRID22A, ours)
 constexpr float kEps = 1e-3f;          // ray offsets, in the scene's units
 
 //! the runtime red bits with the compile-time reds of this build folded in (the unit test's red builds)
@@ -98,13 +102,26 @@ inline float blue( int x, int y, uint32_t f, uint32_t seed, int dim )
 	return float( v >> 8u ) * ( 1.0f / 16777216.0f );
 }
 
-//! the bounce direction of pixel (x, y) at frame f (kRedWhite: the white-noise pair, the noise pair's before)
-inline V3 bounceDir( V3 n, int x, int y, int W, uint32_t seed, uint32_t f, int red )
+/*! the STBN mask's byte for pixel (x, y) at frame f: tiled, one slice a frame, the seed shifts the tile, the second value
+ *  from a fixed spatial offset at the SAME slice (skill ww-blue-noise-mask: never offset the time index) */
+inline uint32_t stbnIndex( int x, int y, uint32_t f, uint32_t seed, int dim )
+{
+	const uint32_t ox = ( seed & 127u ) + ( dim == 0 ? 0u : 37u ), oy = ( ( seed >> 7u ) & 127u ) + ( dim == 0 ? 0u : 71u );
+	return ( ( uint32_t( x ) + ox ) & 127u ) + ( ( uint32_t( y ) + oy ) & 127u ) * 128u + ( f & 63u ) * 16384u;
+}
+
+inline float stbnValue( uint32_t v ) { return ( float( v ) + 0.5f ) * ( 1.0f / 256.0f ); }
+
+/*! the bounce direction of pixel (x, y) at frame f: the STBN mask's pair (mask: kStbnSide^2 x kStbnSlices bytes; null or
+ *  kRedR2: the integer R2 lattice, the mask's before; kRedWhite: the white-noise pair, both's before) */
+inline V3 bounceDir( V3 n, int x, int y, int W, uint32_t seed, uint32_t f, int red, const uint8_t * mask = nullptr )
 {
 	if ( red & kRedWhite ) {
 		const uint32_t s0 = restir::pixelSeed( seed ^ uint32_t( y * W + x ), f, 0 );
 		return cosineDir( n, restir::rand01( s0, 0 ), restir::rand01( s0, 1 ) );
 	}
+	if ( mask && !( red & kRedR2 ) )
+		return cosineDir( n, stbnValue( mask[stbnIndex( x, y, f, seed, 0 )] ), stbnValue( mask[stbnIndex( x, y, f, seed, 1 )] ) );
 	return cosineDir( n, blue( x, y, f, seed, 0 ), blue( x, y, f, seed, 1 ) );
 }
 
@@ -132,6 +149,17 @@ inline float jacobian( V3 xv, V3 xq, const Sample & y, int red )
 		return 0.0f;
 	const float cv = std::fabs( rtddgi::dot( y.ns, dv ) ) / std::sqrt( lv ), cq = std::fabs( rtddgi::dot( y.ns, dq ) ) / std::sqrt( lq );
 	return cq > 1e-6f ? ( cv / cq ) * ( lq / lv ) : 0.0f;
+}
+
+/*! a neighbour's Jacobian as the merge uses it: outside [1/10, 10] the neighbour is dropped (-1: not merged, not in Z)
+ *  [NVIDIA RTXDI, ReSTIR GI spatial resampling, RTXDI_ValidateGISampleWithJacobian's rejection]. A grazing reconnection
+ *  (cos phi_q near 0: J up to 1e6) is otherwise a firefly the young history cannot average out. RTXDI also clamps J to
+ *  [1/3, 3]; that clamp failed the unit's unbiased bars (vis chi 2.33, jacobian bias -0.028), the drop alone passes. */
+inline float jacobianKept( float j, int red )
+{
+	if ( red & kRedNoJClamp )
+		return j;
+	return j >= 0.1f && j <= 10.0f ? j : -1.0f;
 }
 
 //! stream a candidate of weight w standing for m candidates (u in [0, 1))
@@ -185,6 +213,8 @@ struct Settings
 	int spatialK = 4;      // neighbours a frame
 	int radius = 3;        // the neighbour square's half side, in pixels
 	bool temporal = true;
+	const uint8_t * mask = nullptr;   // the STBN mask (bounceDir); null: the R2 lattice
+	std::vector<float> * jmax = nullptr;   // the CLI's diagnosis: each pixel's largest raw Jacobian over merged hits
 };
 
 /*! one frame of the per-pixel pass on a W x H grid of visible points. Scene: Sample trace(V3 o, V3 d) (the bounce ray,
@@ -199,6 +229,8 @@ inline void frame( const Scene & scene, const std::vector<Pixel> & px, int W, in
 	std::vector<Res> tmp( static_cast<size_t>( n ) );
 	hist.resize( static_cast<size_t>( n ) );
 	out.assign( static_cast<size_t>( n ), V3( 0, 0, 0 ) );
+	if ( S.jmax )
+		S.jmax->assign( static_cast<size_t>( n ), 0.0f );
 	auto sees = [&]( V3 x, V3 nn, const Sample & y ) -> bool {
 		if ( red & kRedNoVis )
 			return true;
@@ -217,7 +249,7 @@ inline void frame( const Scene & scene, const std::vector<Pixel> & px, int W, in
 			continue;
 		}
 		const uint32_t s1 = restir::pixelSeed( seed ^ uint32_t( i ), f, 1 );
-		const V3 d = bounceDir( p.n, i % W, i / W, W, seed, f, red );
+		const V3 d = bounceDir( p.n, i % W, i / W, W, seed, f, red, S.mask );
 		const Sample y = scene.trace( p.x + p.n * kEps, d );
 		Res r = candidate( p.x, p.n, y, red );
 		const Res & h = hist[static_cast<size_t>( i )];
@@ -256,10 +288,16 @@ inline void frame( const Scene & scene, const std::vector<Pixel> & px, int W, in
 			const Res & rq = tmp[static_cast<size_t>( q )];
 			if ( !pq.valid )
 				continue;
+			const float jr = rq.any ? jacobian( p.x, pq.x, rq.y, red ) : 1.0f;
+			const float jk = jacobianKept( jr, red );
+			if ( S.jmax && rq.any && rq.y.hit )
+				( *S.jmax )[static_cast<size_t>( i )] = std::max( ( *S.jmax )[static_cast<size_t>( i )], jr );
+			if ( jk < 0.0f )
+				continue;
 			from[nf++] = q;
 			float w = 0.0f;
 			if ( rq.any && sees( p.x, p.n, rq.y ) )
-				w = target( p.x, p.n, rq.y ) * rq.W * rq.M * jacobian( p.x, pq.x, rq.y, red );
+				w = target( p.x, p.n, rq.y ) * rq.W * rq.M * jk;
 			update( r, rq.y, w, rq.M, restir::rand01( s2, uint32_t( 2 + 3 * k ) ) );
 		}
 		float Z = 0.0f;

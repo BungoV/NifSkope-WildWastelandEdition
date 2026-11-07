@@ -238,9 +238,11 @@ struct RestirGiGpuIn
 {
 	int W = 0, H = 0;
 	uint32_t frame = 0, seed = 0;
-	int red = 0;                          // restirgi_common.glsl RESTIRGI_BIT_* (nojacobian, novis, nopdf, notemporal, white)
+	int red = 0;                          // restirgi_common.glsl RESTIRGI_BIT_* (nojacobian, novis, nopdf, notemporal, white, r2, nojclamp)
 	int spatial = 4, radius = 3, filter = 2;
+	int atrous = 3;                       // the variance-guided a-trous passes after the filter (0: none)
 	float accFrames = 8.0f;               // the running mean keeps at most this many frames (history only polishes)
+	const uint8_t * stbn = nullptr;       // the STBN mask, 128 x 128 x 64 bytes (uploaded once a session); null: R2
 	float rows[12] = { 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0 };   // view -> the soup's local frame
 	float proj[4] = { 1, 1, 0, 0 };
 	float prows[12] = { 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0 };
@@ -256,6 +258,7 @@ struct RestirGiGpuOut
 	bool ok = false, busy = false;
 	std::string why;
 	double msWall = 0;
+	double msGpu = -1, msDenoise = -1;    // GPU timestamps: the whole pass, the filter + a-trous part (-1: no timer)
 	uint32_t cuts = 0, relights = 0;      // the history drops so far on this session's buffers (a cut, a sceneKey change)
 	std::vector<float> est;               // readBack: 4 a pixel (the frame's estimate E rgb, 1 valid)
 	std::vector<float> cand;              // 4 a pixel (the bounce's Lo rgb, hit 1 / miss 0; -1 no pixel)

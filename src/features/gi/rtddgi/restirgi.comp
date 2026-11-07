@@ -5,7 +5,8 @@
 // (trace_body.glsl: direct + the volume's irradiance, x albedo / pi, + Le), a miss returns the volume's miss radiance.
 // mode 2 keeps a running mean a pixel (reprojected, at most knobs.y frames, clamped to the like neighbours' estimates),
 // mode 3 filters it in a depth / normal aware window (twice as wide while the mean is young: one frame must stand on its
-// own, history only polishes) and writes the irradiance the cell shader reads. Set 0 = the volume's own set, set 1 = the buffers below.
+// own, history only polishes), modes 4.. run the variance-guided a-trous passes on it and the last one writes the
+// irradiance the cell shader reads (no a-trous passes: mode 3 writes it). Set 0 = the volume's own set, set 1 = the buffers below.
 #extension GL_EXT_ray_query : require
 #extension GL_GOOGLE_include_directive : require
 layout( local_size_x = 64 ) in;
@@ -17,7 +18,8 @@ layout( local_size_x = 64 ) in;
 struct RestirGiParams {
 	ivec4 size;       // W, H, frame, seed
 	ivec4 opts;       // neighbours (K), the neighbour square's half side, the filter's half size, red bits (RESTIRGI_BIT_*)
-	vec4 knobs;       // history (1: the previous frame's buffers are valid), the running mean's frames cap, 0, 0
+	vec4 knobs;       // history (1: the previous frame's buffers are valid), the running mean's frames cap, 1: the STBN
+	                  // mask is bound, the a-trous passes
 	vec4 rows[3];     // view -> world (the soup's local frame)
 	vec4 proj;        // P00, P11, P20, P21
 	vec4 prows[3];    // the previous frame's
@@ -34,6 +36,11 @@ layout( std430, set = 1, binding = 7 ) buffer GAcc { vec4 acc[]; };          // 
 layout( std430, set = 1, binding = 8 ) readonly buffer GAccPrev { vec4 accPrev[]; };
 layout( std430, set = 1, binding = 9 ) buffer GOut { vec4 outE[]; };         // the filtered E rgb, the linear depth it is for
 layout( std430, set = 1, binding = 10 ) buffer GCand { vec4 candLo[]; };     // the bounce's Lo rgb, hit (-1 no pixel): the CLI gate
+layout( std430, set = 1, binding = 11 ) readonly buffer GStbn { uint stbn[]; };   // res/air/stbn_scalar_128x128x64.r8, 4 bytes a uint
+layout( std430, set = 1, binding = 12 ) buffer GAtrA { vec4 atrA[]; };       // the a-trous ping-pong: E rgb, its variance
+layout( std430, set = 1, binding = 13 ) buffer GAtrB { vec4 atrB[]; };
+
+uint rgStbnByte( uint i ) { return ( stbn[i >> 2u] >> ( ( i & 3u ) * 8u ) ) & 255u; }
 
 vec3 rgToWorld( vec4 r0, vec4 r1, vec4 r2, vec3 v )
 {
@@ -114,7 +121,10 @@ void modeCandidate( int x, int y, uint id )
 	const int red = G.opts.w;
 	const uint pix = uint( G.size.w ) ^ id;
 	const uint s1 = restirSeed( pix, uint( G.size.z ), 1u );
-	const vec3 d = rgBounceDir( p.N, x, y, G.size.x, uint( G.size.w ), uint( G.size.z ), red );
+	const bool mask = G.knobs.z > 0.5;
+	const uint m0 = mask ? rgStbnByte( rgStbnIndex( x, y, uint( G.size.z ), uint( G.size.w ), 0 ) ) : 0u;
+	const uint m1 = mask ? rgStbnByte( rgStbnIndex( x, y, uint( G.size.z ), uint( G.size.w ), 1 ) ) : 0u;
+	const vec3 d = rgBounceDir( p.N, x, y, G.size.x, uint( G.size.w ), uint( G.size.z ), red, mask, m0, m1 );
 	const RgRes yv = rgTrace( p.P + p.N * RESTIRGI_EPS, d );
 	candLo[id] = vec4( yv.Lo, yv.hit );
 	const RgRes r = rgCandidate( p.P, p.N, yv, red );
@@ -173,11 +183,14 @@ void modeSpatial( int x, int y, uint id )
 		if ( !pq.ok )
 			continue;
 		const RgRes rq = resCur[q];
+		const float jk = rgJacobianKept( rq.any > 0.5 ? rgJacobian( p.P, pq.P, rq, red ) : 1.0, red );
+		if ( jk < 0.0 )
+			continue;
 		from[nf] = q;
 		nf++;
 		float w = 0.0;
 		if ( rq.any > 0.5 && rgSees( p.P, p.N, rq, red ) )
-			w = rgTarget( p.P, p.N, rq ) * rq.W * rq.M * rgJacobian( p.P, pq.P, rq, red );
+			w = rgTarget( p.P, p.N, rq ) * rq.W * rq.M * jk;
 		r = rgUpdate( r, rq, w, rq.M, restirRand( s2, uint( 2 + 3 * k ) ) );
 	}
 	float Z = 0.0;
@@ -193,21 +206,21 @@ void modeSpatial( int x, int y, uint id )
 
 // mode 2: the running mean, through the reprojected pixel (none: starts over; mode 0 found none on a cut, a light change
 // or a disocclusion). The history is clamped to the 3 x 3 like pixels' estimates first [Karis 2014, TAA's clamp], so a
-// stale mean (a light gone, a thing moved) cannot outlive the frame that shows it.
+// stale mean (a light gone, a thing moved) cannot outlive the frame that shows it. The same 3 x 3 gives the frame's
+// spatial variance of the estimate's luminance; over the mean's frames it is the mean's variance, the a-trous guide
+// (a young mean: one frame's spread, so the guide is wide exactly when the history is short) [Schied 2017, SVGF 4.2].
 void modeAccumulate( int x, int y, uint id )
 {
 	const vec4 e = est[id];
+	atrB[id] = vec4( 0.0 );
 	if ( e.w < 0.5 ) {
 		acc[id] = vec4( 0.0 );
 		return;
 	}
-	const int hp = histPix[id];
-	if ( hp < 0 ) {
-		acc[id] = vec4( e.xyz, 1.0 );
-		return;
-	}
 	const vec4 g = gbuf[id];
 	vec3 lo = e.xyz, hi = e.xyz;
+	const float le = rgLum( e.xyz );
+	float s1 = le, s2 = le * le, ns = 1.0;
 	for ( int dy = -1; dy <= 1; dy++ )
 		for ( int dx = -1; dx <= 1; dx++ ) {
 			const int qx = x + dx, qy = y + dy;
@@ -220,11 +233,23 @@ void modeAccumulate( int x, int y, uint id )
 				continue;
 			lo = min( lo, eq.xyz );
 			hi = max( hi, eq.xyz );
+			const float l = rgLum( eq.xyz );
+			s1 += l;
+			s2 += l * l;
+			ns += 1.0;
 		}
-	const vec4 a = accPrev[hp];
-	const vec3 ah = clamp( a.xyz, lo, hi );
-	const float n = min( a.w + 1.0, max( G.knobs.y, 1.0 ) );
-	acc[id] = vec4( ah + ( e.xyz - ah ) / n, n );
+	const float vs = max( s2 / ns - ( s1 / ns ) * ( s1 / ns ), 0.0 );
+	const int hp = histPix[id];
+	float n = 1.0;
+	if ( hp < 0 ) {
+		acc[id] = vec4( e.xyz, 1.0 );
+	} else {
+		const vec4 a = accPrev[hp];
+		const vec3 ah = clamp( a.xyz, lo, hi );
+		n = min( a.w + 1.0, max( G.knobs.y, 1.0 ) );
+		acc[id] = vec4( ah + ( e.xyz - ah ) / n, n );
+	}
+	atrB[id] = vec4( 0.0, 0.0, 0.0, vs / n );
 }
 
 // mode 3: the running means of the window's like pixels (depth within 10 %, normal within 25 degrees: restirSimilar)
@@ -250,7 +275,54 @@ void modeFilter( int x, int y, uint id )
 					n += 1.0;
 				}
 			}
-	outE[id] = vec4( n > 0.0 ? s / n : vec3( 0.0 ), g.w );
+	const vec3 m = n > 0.0 ? s / n : vec3( 0.0 );
+	atrA[id] = vec4( m, atrB[id].w / max( n, 1.0 ) );
+	outE[id] = vec4( m, g.w );
+}
+
+/* mode 4 + it: one a-trous pass of the edge-avoiding wavelet filter [Dammertz 2010; Schied 2017, SVGF 4.3]: the 5 x 5
+ * B3 spline kernel (3/8, 1/4, 1/16) with holes, step 2^it; edge stops on depth and normal (restirSimilar, then
+ * cos^128 of the normals) and on luminance against the variance guide (sigma_l 4: SVGF's); the variance is filtered
+ * with the squared weights. Ping-pong atrA -> atrB -> atrA ...; the last pass (knobs.w of them) writes outE. */
+void modeAtrous( int x, int y, uint id, int it )
+{
+	const bool fromA = ( it & 1 ) == 0;
+	const vec4 g = gbuf[id];
+	const vec4 c = fromA ? atrA[id] : atrB[id];
+	vec4 o = c;
+	if ( g.w > 0.0 && g.w < 1e5 && acc[id].w > 0.0 ) {
+		const int st = 1 << it;
+		const float lc = rgLum( c.xyz );
+		const float sl = 4.0 * sqrt( max( c.w, 0.0 ) ) + 1e-4;
+		const float hk[3] = float[3]( 0.375, 0.25, 0.0625 );
+		vec3 s = vec3( 0.0 );
+		float v = 0.0, ws = 0.0;
+		for ( int dy = -2; dy <= 2; dy++ )
+			for ( int dx = -2; dx <= 2; dx++ ) {
+				const int qx = x + dx * st, qy = y + dy * st;
+				if ( qx < 0 || qy < 0 || qx >= G.size.x || qy >= G.size.y )
+					continue;
+				const int q = qy * G.size.x + qx;
+				const vec4 h = gbuf[q];
+				if ( ( dx != 0 || dy != 0 ) && ( !restirSimilar( g.w, g.xyz, h.w, h.xyz ) || acc[q].w <= 0.0 ) )
+					continue;
+				const vec4 cq = fromA ? atrA[q] : atrB[q];
+				const float wn = pow( max( dot( g.xyz, h.xyz ), 0.0 ), 128.0 );
+				const float wl = exp( -abs( lc - rgLum( cq.xyz ) ) / sl );
+				const float w = hk[abs( dx )] * hk[abs( dy )] * wn * wl;
+				s += cq.xyz * w;
+				v += cq.w * w * w;
+				ws += w;
+			}
+		if ( ws > 0.0 )
+			o = vec4( s / ws, v / ( ws * ws ) );
+	}
+	if ( fromA )
+		atrB[id] = o;
+	else
+		atrA[id] = o;
+	if ( it + 1 == int( G.knobs.w ) )
+		outE[id] = vec4( o.xyz, g.w );
 }
 
 void main()
@@ -266,6 +338,8 @@ void main()
 		modeSpatial( x, y, id );
 	else if ( mode == 2u )
 		modeAccumulate( x, y, id );
-	else
+	else if ( mode == 3u )
 		modeFilter( x, y, id );
+	else
+		modeAtrous( x, y, id, int( mode ) - 4 );
 }

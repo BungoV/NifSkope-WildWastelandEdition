@@ -260,6 +260,8 @@ int rtddgiCli( const QStringList & args );
 int restirCli( const QStringList & args );
 //! RTEMIS1 part 2: `-no-gui restirgi`, ReSTIR GI's CPU twin (src/features/gi/restirgimath.h) against the GPU (restirgi.comp)
 int restirgiCli( const QStringList & args );
+//! RTEMIS1: the STBN mask the GI bounce samples (res/air/stbn_scalar_128x128x64.r8 through the qrc), read once; null if absent
+const unsigned char * restirGiStbnMask();
 //! MODULES1 RESUME 15: `-no-gui airrays`, the air rays' GPU share against the exact share by the CPU walk, and their cost
 int airraysCli( const QStringList & args );
 
