@@ -87,6 +87,9 @@ def law(a):
     return round(min(max(300.0 + 800.0 * a, 300.0), 1000.0)), round(min(max(6.0 * tau, 0.25), 8.0), 2)
 
 
+NOISE = 'FO4CS/Fog/GroundFogNoise.dds'
+
+
 def values(fnam):
     """(groundFog block, day haze, night haze)"""
     n = len(fnam) // 4
@@ -96,7 +99,8 @@ def values(fnam):
     an = haze(F[2], F[3], F[5], F[7])
     td, sd = law(ad)
     tn, sn = law(an)
-    g = {'thickness': td, 'strength': sd}
+    # MODULES1 part 22: our files name the shipped lumps texture; a weather .recx without the key has none
+    g = {'thickness': td, 'strength': sd, 'noiseTexture': NOISE}
     if (tn, sn) != (td, sd):
         g['hours'] = {'2': {'thickness': tn, 'strength': sn}, '14': {'thickness': td, 'strength': sd}}
     return g, ad, an
