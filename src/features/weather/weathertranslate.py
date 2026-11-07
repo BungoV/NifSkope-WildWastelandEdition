@@ -15,7 +15,9 @@ The models (each one is the whole conversion; nothing else is read from the reco
                single-scatter albedo of the haze type at the file's humidity (weathergen.h humidityGrowth): the sun of
                the physical sky is white, so the record's tint lives in what the haze gives back. No drawn colour.
   precipitation, wind, lightning, transitions: the generated rung already reads these from the record's MNAM/SPGD and
-               DATA bytes (weathergen.py generate); they are noted per key in `_derivedFrom`.
+               DATA bytes (weathergen.py generate); they are noted per key in `_derivedFrom`. A dry radstorm
+               (lightning cumulonimbus, MNAM NULL) gains rain by our file (radstorm_rain; `_added`, red
+               WW_RADSTORM_RAIN_RED=1).
 Each block names the keys the translation set in `_translated` (the reader's red WW_WEATHER_TRANSLATE_RED=1 drops
 them, so the generated rung draws: the files as they were before 1.5).
 
@@ -34,6 +36,7 @@ import weathergen as G  # noqa: E402
 UNIT = 0.0142875	# m per game unit
 VIS_MIN, VIS_MAX = 100.0, 400000.0	# weatherrecx.cpp kVisMin / kVisMax
 HH_MIN, HH_MAX = 20.0, 20000.0
+RAIN_SHARE = 0.35	# radstorm_rain: heavy convective rain, 3.75 g/m3 -> ~25 mm/h
 HAZE_ALBEDO = {'clean': (0.97, 0.97, 0.97), 'maritime': (0.99, 0.99, 0.99), 'urban': (0.82, 0.82, 0.82),
                'dust': (0.97, 0.92, 0.80), 'smoke': (0.86, 0.84, 0.80), 'glowing': (0.88, 0.97, 0.82)}	# weathergen.h
 
@@ -117,6 +120,18 @@ def record_block(f):
     return rec
 
 
+def radstorm_rain(w, pf, e):
+    """MODULES1 part 24 (bungo 11-07 "radstorms would work better with rain"): a radstorm's record is dry (MNAM NULL)
+    while its cloud is a lightning-bearing cumulonimbus: our .recx adds plain rain (the record stays as stored).
+    Rate: the rain water content M = liquidWater x RAIN_SHARE (the share of a convective cloud's condensate falling
+    as rain), R = (M / 0.0889) ^ (1 / 0.84) mm/h (Marshall-Palmer M = 0.0889 R^0.84 g/m3). Red WW_RADSTORM_RAIN_RED=1."""
+    c = e.get('clouds', {})
+    if pf or 'radstorm' not in str(w.get('edid', '')).lower() or c.get('type') != 'cumulonimbus' \
+            or not e.get('lightning') or not c.get('liquidWater'):
+        return 0.0
+    return round((c['liquidWater'] * RAIN_SHARE / 0.0889) ** (1.0 / 0.84), 1)
+
+
 def translate(w, f):
     """w: the wthr_list row (rung input), f: the wthr_full row -> (entry, diag)"""
     v = G.generate(w)
@@ -167,6 +182,16 @@ def translate(w, f):
     der['precipitation'] = ('record MNAM %s %s density %s (generated rung rate)' % (
         pf.get('edid'), pf.get('typeName'), pf.get('particleDensity')) if pf else
         'record MNAM NULL: the record has no precipitation form, so none is drawn')
+    rate = radstorm_rain(w, pf, e)
+    if rate:
+        p = e.setdefault('precipitation', {})
+        p['layers'] = [{'type': 'rain', 'rate': rate}]
+        p['_added'] = ['layers']
+        der['precipitation'] = ('rain added: cumulonimbus + lightning, vanilla record dry (MNAM NULL); rate %.1f mm/h = '
+                                'Marshall-Palmer from rain water %.2f g/m3 = liquidWater %.2f x %.2f' % (
+                                    rate, e['clouds']['liquidWater'] * RAIN_SHARE, e['clouds']['liquidWater'],
+                                    RAIN_SHARE))
+        diag['rainAdded'] = rate
     d = f.get('data', {})
     der['wind'] = 'record DATA wind speed %s dir %s turbulence %s (generated rung speeds)' % (
         d.get('windSpeed'), d.get('windDir'), d.get('windTurb'))

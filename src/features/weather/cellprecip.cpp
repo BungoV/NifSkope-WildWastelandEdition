@@ -23,6 +23,8 @@
 #include "features/shadows/sunshadow.h"
 
 #include <QElapsedTimer>
+#include <QJsonArray>
+#include <QJsonObject>
 #include <QFile>
 #include <QFileInfo>
 #include <QHash>
@@ -266,8 +268,17 @@ QVector<PcLayer> layersOf( const QStringList & roots, const QStringList & files,
 	QString source;
 	if ( h.ok ) {
 		QStringList n;
-		specs = wwPrecipParse( h.block, n );
-		source = QStringLiteral( "recx:" ) + h.file.section( QLatin1Char( '/' ), -3 );
+		/* MODULES1 part 24: a key our file added to a dry record (radstorm rain, weathertranslate.py radstorm_rain) is
+		 * listed in `_added`; red ^WW_RADSTORM_RAIN_RED=1 drops them (dry, as vanilla) */
+		WW_SWITCH_STATIC( bool, rainRed, wwEnv( "WW_RADSTORM_RAIN_RED" ).trimmed() == QLatin1String( "1" ) );
+		QJsonObject b = h.block;
+		const bool dropAdded = rainRed && b.contains( QStringLiteral( "_added" ) );
+		if ( dropAdded )
+			for ( const QJsonValue & k : b.value( QStringLiteral( "_added" ) ).toArray() )
+				b.remove( k.toString() );
+		specs = wwPrecipParse( b, n );
+		source = QStringLiteral( "recx:" ) + h.file.section( QLatin1Char( '/' ), -3 ) + ( dropAdded
+			? QStringLiteral( " (rain red: added keys dropped)" ) : QString() );
 		for ( const QString & l : n )
 			notes << QStringLiteral( "%1 /precipitation/%2" ).arg( h.file.section( QLatin1Char( '/' ), -3 ), l );
 	} else {

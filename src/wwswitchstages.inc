@@ -1177,6 +1177,7 @@
 { "WW_R3_RED", 0, "src/gl/scenelighting.cpp:115 st | init-once state, re-read when a live set moves its prefix (b)" },
 { "WW_R3_TERM", 0, "src/gl/scenelighting.cpp:112 st | init-once state, re-read when a live set moves its prefix (b)" },
 { "WW_R4_RED", 0, "src/gl/scenelighting.cpp:116 st | init-once state, re-read when a live set moves its prefix (b)" },
+{ "WW_RADSTORM_RAIN_RED", 0, "src/features/weather/cellprecip.cpp:273 layersOf | re-read per frame or per call (a)" },
 { "WW_RDC_DLL", 0, "src/rdccapture.cpp:32 rdcDefaultDll | re-read per frame or per call (a)" },
 { "WW_RDC_FRAMES", 0, "src/rdccapture.cpp:44 rdcInit | re-read per frame or per call (a)" },
 { "WW_RDC_OUT", 0, "src/rdccapture.cpp:75 rdcInit | re-read per frame or per call (a)" },
