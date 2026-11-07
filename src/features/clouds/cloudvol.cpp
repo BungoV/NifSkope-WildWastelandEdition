@@ -2,6 +2,7 @@
 #include "cloudmap.h"
 #include "cloudnoise.h"
 #include "cloudvolmath.h"
+#include "cloudrecx14math.h"	// lane CLOUDRECX1
 #include "cloudcaljobs.h"	// lane PERFFIX3: the coverage tables off the GL thread
 #include "cloudfly.h"
 #include "cloudlightning.h"	// lane CLOUD6f: the storm's lightning inside the clouds
@@ -331,6 +332,8 @@ Bands bandsOf( const WwCloudMap & m )
 		b.var.depthKm = std::max( m.band[0].depthZ * kUnitKm, 0.05f );
 		b.var.curlKm = red( "nocurl" ) ? 0.0f : V::kVarCurlKm;
 		b.typeMax = std::min( 1.0f, b.var.type + b.var.spread );
+		if ( m.recx14.anvil >= 0.0f )	// lane CLOUDRECX1: clouds.layers.<n>.anvil over the Low band (SPEC.md 1.4)
+			b.var.anvil = m.recx14.anvil;
 	}
 	for ( int i = 0; i < 3; i++ ) {
 		b.baseKm[i] = m.band[i].baseZ * kUnitKm;
@@ -461,7 +464,7 @@ float varAmbKm( const Bands & b )
 
 //! cloud_common.glsl's uniforms and samplers on the current program
 void densityUniforms( Renderer * r, NifSkopeOpenGLContext::Program * p, CvGpu & g, const Bands & b, const WwCloudMap & m,
-	float windKm, int unit )
+	float windKm, int unit, float evolveKm = 0.0f )
 {
 	auto fn = r->fn;
 	p->uni3f( "cvBands.baseKm", b.baseKm[0], b.baseKm[1], b.baseKm[2] );
@@ -470,7 +473,7 @@ void densityUniforms( Renderer * r, NifSkopeOpenGLContext::Program * p, CvGpu & 
 	p->uni3f( "cvBands.coverage", b.coverage[0], b.coverage[1], b.coverage[2] );
 	p->uni1f( "cvBands.sheet", b.sheet );
 	p->uni4f( "cvBands.mapRect", FloatVector4( b.rect[0], b.rect[1], b.rect[2], b.rect[3] ) );
-	p->uni3f( "cvBands.windKm", windKm, 0.0f, 0.0f );
+	p->uni3f( "cvBands.windKm", windKm, 0.0f, evolveKm );	// lane CLOUDRECX1: z = clouds.evolution (0 = still, today)
 	float cal[2 * V::kCalN];
 	calibrated( g, b, cal );
 	if ( b.variety ) {	// lane CLOUD5: the twins' uniforms (an old program has no cvVarA: never set there)
@@ -636,10 +639,11 @@ bool marchPass( Renderer * r, CvGpu & g, const CvRedo & d, const WwAtmoFrame & f
 		return false;
 	const Preset & pr = preset( d.tier );
 	const bool noOct = red( "nooctaves" ), noMs = noOct || red( "noms" );
-	const V::Droplet drop = V::dropletParams( V::kDropletUm );
+	// lane CLOUDRECX1: clouds.dropletRadius sets the phase's diameter (unset: today's 20 um)
+	const V::Droplet drop = V::dropletParams( m.recx14.dropletUm > 0.0f ? m.recx14.dropletUm : V::kDropletUm );
 	fn->glBindFramebuffer( GL_FRAMEBUFFER, g.march.fbo );
 	fn->glViewport( 0, 0, d.mw, d.mh );
-	densityUniforms( r, p, g, d.b, m, V::windKm( d.secs ), 0 );
+	densityUniforms( r, p, g, d.b, m, V::windKm( d.secs ), 0, WwCloudRecx14::evolveKm( d.secs, m.recx14.evolutionMin ) );
 	fn->glActiveTexture( GL_TEXTURE3 );
 	fn->glBindTexture( GL_TEXTURE_2D, f.trans );
 	p->uni1i( "cvTrans", 3 );
@@ -677,6 +681,10 @@ bool marchPass( Renderer * r, CvGpu & g, const CvRedo & d, const WwAtmoFrame & f
 		p->uni1i( "cvBlueSlice", g.blue && !red( "ign" ) ? d.blueSlice : -1 );
 	}
 	p->uni4f( "cvPhasePrm", FloatVector4( drop.gHg, drop.gD, drop.alpha, drop.wD ) );
+	/* lane CLOUDRECX1 (SPEC.md 1.4): the ice phase's share per band (0 = the droplet phase, today) and the shafts under the
+	 * Low band: x their density (extinction / kSigma), y where they end (km), z 1 = virga (they thin out), 0 = none */
+	p->uni3f( "cvIce", m.band[0].ice, m.band[1].ice, m.band[2].ice );
+	p->uni4f( "cvShaft", FloatVector4( m.recx14.shaftSigma / V::kSigma, m.recx14.shaftZ * kUnitKm, m.recx14.virga ? 1.0f : 0.0f, 0.0f ) );
 	p->uni3f( "cvAmb", d.amb[0], d.amb[1], d.amb[2] );
 	p->uni1f( "cvAmbOn", 1.0f );
 	p->uni1f( "cvApOn", 1.0f );
@@ -1289,7 +1297,8 @@ bool wwCloudVolBindDensity( Scene * scene, int firstUnit )
 	if ( !ensureNoise( r, g ) )
 		return false;
 	// lane CLOUD2C: the wind the last draw used, so a reader's clouds (CLOUD3's shadows) move with the drawn ones
-	densityUniforms( r, p, g, bandsOf( m ), m, V::readerWindKm( cs().drawnSecs, red( "wind0" ) ), firstUnit );
+	densityUniforms( r, p, g, bandsOf( m ), m, V::readerWindKm( cs().drawnSecs, red( "wind0" ) ), firstUnit,
+		red( "wind0" ) ? 0.0f : WwCloudRecx14::evolveKm( cs().drawnSecs, m.recx14.evolutionMin ) );
 	r->fn->glActiveTexture( GL_TEXTURE0 );
 	return true;
 }
@@ -1306,7 +1315,7 @@ bool wwCloudVolBindDensityAt( Scene * scene, int firstUnit, double secs )
 	CvGpu & g = gpus()[r];
 	if ( !ensureNoise( r, g ) )
 		return false;
-	densityUniforms( r, p, g, bandsOf( m ), m, V::windKm( secs ), firstUnit );
+	densityUniforms( r, p, g, bandsOf( m ), m, V::windKm( secs ), firstUnit, WwCloudRecx14::evolveKm( secs, m.recx14.evolutionMin ) );
 	r->fn->glActiveTexture( GL_TEXTURE0 );
 	return true;
 }

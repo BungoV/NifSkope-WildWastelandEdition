@@ -48,6 +48,8 @@ uniform sampler2D cvScene;	// lane CLOUD2B: the scene's window depth (the last f
 uniform vec4 cvSceneZ;	// the projection's [2][2], [3][2]; km per view unit; 1 = clip the march at the scene
 uniform float cvTopOn;	// lane CLOUD2C: the light the cloud below reflects back up (0 = the red notop)
 uniform float cvAmbDark;	// lane CLOUDBAND1 (b): 1 = the sky's ambient through the cloud above (0 = Off: the height ramp)
+uniform vec3 cvIce;	// lane CLOUDRECX1: clouds.iceFraction per band (Low, Mid, High); 0 = the droplet phase (today)
+uniform vec4 cvShaft;	// lane CLOUDRECX1: precipitation shafts: x density (/ kCvSigma), y end km, z 1 = virga; x 0 = none
 #ifdef WW_CLOUD_VARIETY
 uniform float cvAmbKm;	// lane CLOUD5: the span of the ambient's height ramp (the bands without the towers), km
 #endif
@@ -123,12 +125,38 @@ vec3 cvSky( vec3 d )
 }
 
 vec4 cvPrm;	// the droplet phase, its forward peak widened to the march's footprint (main)
+float cvIceNow = 0.0;	// lane CLOUDRECX1: the sample's band's ice share (set before cvOctaveSum)
+
+/* lane CLOUDRECX1 (clouds.precipitationBase, SPEC.md 1.4): the shafts under the Low band, from its base down to cvShaft.y,
+ * where the band's cells are (its calibrated coverage against a coarse shape read 200 m into it); a virga thins out over
+ * its last 40 %. Twin: src/features/clouds/cloudrecx14math.h shaftProfile, shaftCell. */
+float cvShaftDens( vec3 p )
+{
+	float base = cvBands.baseKm.x;
+	float hb = ( base - p.z ) / max( base - cvShaft.y, 1e-3 );
+	if ( hb <= 0.0 || hb >= 1.0 )
+		return 0.0;
+	float f = 1.0;
+	if ( cvShaft.z > 0.5 ) {
+		float t = clamp( ( hb - 0.6 ) / 0.4, 0.0, 1.0 );
+		f = 1.0 - t * t * ( 3.0 - 2.0 * t );
+	}
+	float c = cvCalAt( 0, cvMapAt( p.xy ).r );
+	if ( c <= 0.0 )
+		return 0.0;
+	vec3 q = vec3( p.xy, base + 0.2 ) + cvBands.windKm;
+	float s = textureLod( cvShape, q / kCvShapeKm, 2.0 ).r;
+	return cvShaft.x * f * clamp( ( s - ( 1.0 - c ) ) / max( c, 1e-3 ), 0.0, 1.0 );
+}
 
 float cvOctaveSum( float cosT, float tauL )
 {
 	float s = 0.0, a = 1.0, b = 1.0, k = 1.0;
 	for ( int i = 0; i < cvOctaves; i++ ) {
-		s += a * exp( -b * tauL ) * wwDropletPhase( cvPrm, cosT, k );
+		float ph = wwDropletPhase( cvPrm, cosT, k );
+		if ( cvIceNow > 0.0 )
+			ph = mix( ph, wwIcePhase( cosT, k ), cvIceNow );
+		s += a * exp( -b * tauL ) * ph;
 		a *= 0.5;
 		b *= 0.5;
 		k *= 0.5;
@@ -236,6 +264,8 @@ void main()
 	float lo = min( cvBands.baseKm.x, cvBands.baseKm.y ), hi = max( cvBands.topKm.x, cvBands.topKm.y );
 	if ( cvBands.density.x <= 0.0 ) lo = cvBands.baseKm.y;
 	if ( cvBands.density.y <= 0.0 ) hi = cvBands.topKm.x;
+	if ( cvShaft.x > 0.0 && cvBands.density.x > 0.0 )
+		lo = min( lo, max( cvShaft.y, 0.0 ) );	// lane CLOUDRECX1: the shafts under the Low band are marched too
 	vec2 gnd = cvSphere( o.z, d, kRb );
 	float tGround = ( gnd.y > 0.0 && gnd.x > 0.0 ) ? gnd.x : 1e9;
 	vec2 sb = cvSphere( o.z, d, kRb + lo ), st = cvSphere( o.z, d, kRb + hi );
@@ -322,6 +352,7 @@ void main()
 		float tau = 2.0 * cvBands.density.z * a;
 		float al = 1.0 - exp( -tau );
 		vec3 key = cvKeyK * atTrans( cvTrans, kRb + p.z, dot( up, cvKeyW ) );
+		cvIceNow = cvIce.z;	// lane CLOUDRECX1
 		vec3 S = kCvAlbedo * cvTint[2] * ( key * cvOctaveSum( cosT, 0.5 * tau ) + cvAmbOn * cvAmb );
 		L += T * al * S;
 		dsum += T * al * th;

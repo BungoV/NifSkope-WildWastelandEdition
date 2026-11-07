@@ -37,6 +37,19 @@ struct WwCloudBandInfo
 	float type = 0.0f;
 	float typeSpread = 0.0f;
 	float depthZ = 0.0f;
+	float ice = 0.0f;	//!< lane CLOUDRECX1: clouds.iceFraction (weather or the band's layers), 0 = the droplet phase (today)
+};
+
+/*! lane CLOUDRECX1 (SPEC.md 1.4 clouds): what the march takes from the weather .recx besides the bands; every field's
+ *  default is today's picture (no anvil override, no evolution, no shafts, the 20 um droplet phase) */
+struct WwCloudRecx14Draw
+{
+	float anvil = -1.0f;	//!< layers.<n>.anvil over the Low band (< 0 = CLOUD5's kVarAnvil)
+	float evolutionMin = 0.0f;	//!< clouds.evolution, minutes (0 = still)
+	float shaftSigma = 0.0f;	//!< the shafts' extinction /km under the Low band (0 = none)
+	float shaftZ = 0.0f;	//!< world z where the shafts end (clouds.precipitationBase), game units
+	bool virga = false;	//!< the shafts end above the ground under the eye: they thin out (virga)
+	float dropletUm = -1.0f;	//!< the droplet phase's diameter (2 x dropletRadius), < 0 = today's
 };
 
 /*! The map: GL_TEXTURE_2D, RGBA8, linear filtered, clamp to edge, of the context current at the build.
@@ -56,6 +69,7 @@ struct WwCloudMap
 	float transition = 1.0f;	//!< 0..1 from the previous weather's parameters to the current (1 = settled)
 	quint64 generation = 0;	//!< bumps on every rebuild (a reader's cache key)
 	bool variety = false;	//!< lane CLOUD5: built for Cloud Variety (the Low top raised for towers)
+	WwCloudRecx14Draw recx14;	//!< lane CLOUDRECX1
 };
 
 //! the latest map; call after wwCloudMapUpdate in the same frame. Never null.
