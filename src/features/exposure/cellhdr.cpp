@@ -14,6 +14,7 @@
 #include "features/shared/cellpasstime.h"
 #include "features/near/cellvrs.h"
 #include "features/post/gametaa.h"	// lane TAA3: the Modern resolve before the tone map
+#include "features/exposure/physunits.h"	// lane PHYSUNITS1: the physical camera; the frame in RGBA32F
 
 #include <QDebug>
 #include <QFile>
@@ -58,7 +59,8 @@ const HdrFormat & hdrFormat()
 		const QByteArray v = qgetenv( "WW_CELL_HDR_FORMAT" ).trimmed().toLower();
 		const bool red = qEnvironmentVariableIntValue( "WW_FRAMEFMT1_RED" ) != 0
 			|| qEnvironmentVariableIntValue( "WW_CELL_HDR_FORMAT_RED" ) != 0 || qEnvironmentVariableIntValue( "WW_AAFORMAT1_RED" ) != 0;
-		return wwHdrFormatOf( v.isEmpty() ? nullptr : v.constData(), red );
+		// lane PHYSUNITS1: real units default the frame to RGBA32F (a sun highlight runs past RGBA16F's 65504)
+		return wwHdrFormatOf( v.isEmpty() ? ( wwPhysOn() ? "rgba32f" : nullptr ) : v.constData(), red );
 	}() );
 	return f;
 }
@@ -1262,7 +1264,8 @@ void wwCellHdrEnd( Scene * scene )
 	if ( wwGameTaaLinearOn() ) {	// lane POSTFX3: the Modern temporal AA on this linear frame (no GL call when off)
 		const float adapted = wwCellImageSpaceAdapted( scene );
 		wwGameTaaResolveLinear( scene, g.fbo, g.colorFormat, g.color, g.samples,
-			adapted >= 0.0f ? std::clamp( 0.18f / ( adapted + 0.001f ), 1.0f / 64.0f, 64.0f ) : 1.0f );
+			wwPhysSkyOn() ? 1.0f / ( 1.2f * std::exp2( wwPhysLastEvApplied() ) )	// lane PHYSUNITS1: the frame's camera
+			: adapted >= 0.0f ? std::clamp( 0.18f / ( adapted + 0.001f ), 1.0f / 64.0f, 64.0f ) : 1.0f );
 	}
 	// lane VOLAIR1 (gates only): WW_CELL_HDR_DUMP=<file> writes the linear frame before the bloom and the tone map,
 	// samples resolved: int32 W H, then W x H x RGBA float32, bottom row first. Every frame (a still path: the last).

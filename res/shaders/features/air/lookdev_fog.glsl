@@ -16,6 +16,7 @@ uniform vec4 fogView;		// world z above the ground = dot( fogView.xyz, posView )
 uniform float fogDistScale;	// view units -> game units (1 / the view scale)
 uniform vec4 fogSun;		// view space, unit, TO the sun; .w = intensity
 uniform vec4 fogSunColour;	// linear; .w = fDirectionalFogPower
+uniform float fogUnit;	// lane PHYSUNITS1: the light's scale over the weather's (0 = unset = 1)
 uniform vec4 fogProbe;		// gates only: .z = 0 off, 1 alpha, 2 colour / 2, 3 hb (at d = .x, z = .y); 5 geometry echo (d / 4096, 0.5 + z / 2000);
 				// 6 / 7 per fragment (lane FOG2): (alpha, hb, 0) / colour ^ 1/2.2; 8 the geometry, wide (d / 16384, 0.5 + z / 32768)
 uniform int fogRed;		// gates only: 1 maxclamp, 2 noescape, 4 height0
@@ -711,7 +712,8 @@ vec3 wwFogBase( vec3 preFog, vec3 posView, float tAp, bool apOn )
 	float sunW = pow( max( dot( viewDir, fogSun.xyz ), 0.0 ), fogSunColour.w ) * fogSun.w;
 	vec3 sunlit = mix( fogCol, fogSunColour.rgb, sunW );
 	float gray = dot( preFog, vec3( 1.0 / 3.0 ) );
-	vec3 resolved = alpha < fogK[2].w ? mix( sunlit, vec3( gray ), gray ) : sunlit;
+	float grayW = fogUnit > 0.0 ? gray / fogUnit : gray;	// lane PHYSUNITS1: the weight on the weather's scale
+	vec3 resolved = alpha < fogK[2].w ? mix( sunlit, vec3( gray ), grayW ) : sunlit;
 	return mix( preFog, resolved, alpha );
 }
 

@@ -24,6 +24,7 @@ BSD License - see nifskope.h
 #include "features/particles/fxparity.h"	// lane FXPARITY1
 #include "ui/cellshowpanel.h"	// lane OPENCELLFIX2: the Display tab's fog and shadow rows share these settings
 #include "features/weather/esmweather.h"
+#include "features/exposure/physunits.h"	// lane PHYSUNITS1: Game Light Brightness
 #include "harnesswindow.h"
 #include "ui/widgets/wwnumberfield.h"
 #include "wwskin.h"
@@ -117,6 +118,16 @@ SceneWindow::SceneWindow( QWidget * mainWindow, std::function<void()> repaint, s
 	exposureBox->setValue( double( wwSceneExposureEV() ) );
 	wwMakeScrubField( exposureBox );
 	row( tr( "Exposure" ), exposureBox, true );
+
+	gameLightsBox = new QDoubleSpinBox( tree );	// lane PHYSUNITS1: one scale for the game's lamps and emissives
+	gameLightsBox->setObjectName( QStringLiteral( "gameLightBrightness" ) );
+	gameLightsBox->setRange( 0.25, 4.0 );
+	gameLightsBox->setSingleStep( 0.05 );
+	gameLightsBox->setDecimals( 2 );
+	gameLightsBox->setSuffix( QStringLiteral( " x" ) );
+	gameLightsBox->setValue( double( wwPhysGameLights() ) );
+	wwMakeScrubField( gameLightsBox );
+	row( tr( "Game Light Brightness" ), gameLightsBox, true );
 
 	viewBox = new QComboBox( tree );
 	viewBox->setObjectName( QStringLiteral( "sceneViewTransform" ) );
@@ -334,6 +345,12 @@ SceneWindow::SceneWindow( QWidget * mainWindow, std::function<void()> repaint, s
 		syncEnabled();
 		if ( i == 2 )
 			refreshLookdev();
+		if ( m_repaint )
+			m_repaint();
+	} );
+	connect( gameLightsBox, qOverload<double>( &QDoubleSpinBox::valueChanged ), this, [this, live]( double v ) {
+		if ( live )
+			wwPhysSetGameLights( v );	// lane PHYSUNITS1: live, the lamps rescale on the next frame
 		if ( m_repaint )
 			m_repaint();
 	} );
@@ -573,6 +590,7 @@ void SceneWindow::syncEnabled()
 	// The weather and ground rows act in Lookdev only.
 	const int m = modeBox ? modeBox->currentIndex() : 0;
 	exposureBox->setEnabled( m >= 1 );
+	gameLightsBox->setEnabled( wwPhysOn() && !wwPhysGameLightsPinned() );	// lane PHYSUNITS1: greyed on the red or a pin
 	viewBox->setEnabled( m >= 1 );
 	const bool ld = m == 2;
 	for ( QWidget * w : { static_cast<QWidget *>( pluginBox ), static_cast<QWidget *>( weatherBox ),

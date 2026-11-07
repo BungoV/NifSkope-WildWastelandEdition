@@ -31,12 +31,16 @@ struct Warning { std::string at, key, warning, problem, suggest; };
 
 enum LightType { Omni = 0, Spot = 1, Hemisphere = 2 };
 enum LightTier { Hero = 0, Normal = 1, Bulb = 2 };
+//! lane PHYSUNITS1: the `fixture` presets (a real lamp's colour and lumens; nifx/SPEC.md, "fixture")
+enum LightFixture { Incandescent = 0, Halogen, Hps, Lps, Mercury, Fluorescent, Neon, Argon, FixtureCount };
 
 struct Light
 {
 	std::string name;	// as authored
 	bool hasType = false, hasKelvin = false, hasTint = false, hasTier = false, hasNode = false, hasFollows = false;
 	bool hasPosition = false, hasDirection = false, hasCone = false, hasFog = false, hasRadius = false;
+	bool hasFixture = false;
+	int fixture = Incandescent;
 	int type = Omni;
 	int tier = Normal;
 	double lumens = 0, kelvin = 6500, cone = 90, fogScale = 1, radius = 0;
@@ -76,6 +80,15 @@ constexpr double kLumensPerFadeOld = 800.0, kRadiusPerSqrtCandelaOld = 69.99;
 Converted convert( const Light & l, bool redTintDims = false, double lumensPerFade = kLumensPerFade,
 	double radiusPerSqrtCandela = kRadiusPerSqrtCandela );
 void kelvinRgb( double kelvin, double rgb[3] );
+//! lane PHYSUNITS1: a black body's CIE 1931 xy (Planck over the CIE 1931 2-degree observer table); the red
+//! (setKelvinRed, ^WW_NIFX_KELVIN_RED) the old Kang et al. 2002 cubic, with the tint multiplied into the white as a gel
+void kelvinXy( double kelvin, double & x, double & y );
+void setKelvinRed( bool red );
+bool kelvinRed();
+//! a fixture preset's xy, lumens and word
+void fixtureXy( int fixture, double & x, double & y );
+double fixtureLumens( int fixture );
+const char * fixtureWord( int fixture );
 
 //! A vanilla light (colour bytes, fade, radius, type, cone, shadow flag) in .nifx terms, so convert() gives it back:
 //! kelvin = the nearest black body (CIE 1960 uv), tint = the rest as the gel colour, lumens by the same anchor,

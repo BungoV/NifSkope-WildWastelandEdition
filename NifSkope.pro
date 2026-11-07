@@ -276,6 +276,7 @@ HEADERS += \
 	src/features/post/cellpost.h \
 	src/features/exposure/cellhdr.h \
 	src/features/exposure/exposure.h \
+	src/features/exposure/physunits.h \
 	src/features/near/cellvrs.h \
 	src/features/particles/cellfxres.h \
 	src/features/post/cellbloom.h \
@@ -632,6 +633,7 @@ SOURCES += \
 	src/features/post/cellpost.cpp \
 	src/features/exposure/cellhdr.cpp \
 	src/features/exposure/exposure.cpp \
+	src/features/exposure/physunits.cpp \
 	src/features/near/cellvrs.cpp \
 	src/features/particles/cellfxres.cpp \
 	src/features/particles/particlepreroll.cpp \

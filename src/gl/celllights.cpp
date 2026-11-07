@@ -73,6 +73,13 @@ BSD License - see nifskope.h
 #include <vector>
 #include <unordered_map>	// lane PERFFIX1: the cell-uniform class records
 #include "features/lights/celllights_p.h"	// lane MODULES1 (lights): the state the lamps share
+#include "features/exposure/physunits.h"	// lane PHYSUNITS1: real units
+
+//! lane PHYSUNITS1: an interior's ambient, directional and fog factor (its lamps' median x Game Light Brightness); 1 else
+static float physInteriorK( const WwCellLighting * L )
+{
+	return ( L && L->interior && L->physAmbK > 0.0f && wwPhysSkyOn() ) ? L->physAmbK * wwPhysGameLights() : 1.0f;
+}
 
 using namespace WwCellLightsP;
 
@@ -1053,6 +1060,8 @@ void wwCellLightsUniforms( Scene * scene )
 	Gpu & g = gpus()[r];
 	if ( on && !s.nifx.isEmpty() )
 		nifxTick( scene->nifModel );	// lane NIFXLIGHT1
+	if ( on )
+		physTick( scene->nifModel );	// lane PHYSUNITS1: Game Light Brightness, live
 	const WwCellLighting * L = on ? wwCellLightsFor( scene->nifModel ) : nullptr;
 	const bool flick = L && s.flickerOn && !s.flickerRed;	// lane LIGHTFLICKER1
 	// lane NIFXLIGHT3: the .nifx dimmer tracks play on the world clock (the buffer keeps a copy to patch, as for flicker)
@@ -1715,10 +1724,20 @@ void wwCellLightsUniforms( Scene * scene )
 	rec.b( prog, "cellIsOn", isDraw );
 	rec.b( prog, "cellIsLinear", isDraw && wwCellHdrActive() );	// write linear light, tone-mapped once
 	rec.b( prog, "cellIsLutOn", lutDraw );
+	/* lane PHYSUNITS1: unlit effects: additive ones in cd/m2 (the emissive ratio x G), the others on the light's scale
+	 * (0 = x 1: the red, or no cell HDR camera) */
+	{
+		const bool ps = wwPhysSkyOn();
+		rec.f( prog, "cellFxEmitK", ps ? wwPhysEmitScale() : 0.0f );
+		rec.f( prog, "cellFxUnlitK", !ps ? 0.0f : ( L && L->interior && !wwCellAsOutdoor( L ) ) ? physInteriorK( L ) : wwLookdevPhysLight() );
+	}
 	if ( isDraw ) {
 		const float * h = LI->isHdr;
+		if ( wwCellHdrActive() )
+			wwPhysNoteCellFrame();	// lane PHYSUNITS1: real units while the cell's HDR camera draws
 		// the tonemap PS: max( mid / (lum + 0.001), cb.y ) then min( .., cb.x ); cb (x, y) = HNAM (max, min)
-		const float e = wwCellExposure( h, adapted );
+		// lane PHYSUNITS1: the physical camera (EV100) on real units; the red the old law
+		const float e = wwPhysSkyOn() ? wwPhysExposure( h, adapted ) : wwCellExposure( h, adapted );
 		rec.f( prog, "cellIsExposure", e );
 		rec.f( prog, "cellIsE", h[1] );
 		rec.f( prog, "cellIsAdapted", adapted );
@@ -1789,13 +1808,15 @@ void wwCellLightsUniforms( Scene * scene )
 	}
 	const bool dalc = ( L->hasDalc || skyLitAmb ) && !( s.red & 4 );
 	rec.b( prog, "cellHasDalc", dalc );
+	// lane PHYSUNITS1: an interior's own DALC on its lamps' scale (stored gamma: the shader's 2.2 power takes k^(1/2.2))
+	const float dk = skyLitAmb ? 1.0f : std::pow( physInteriorK( L ), 1.0f / 2.2f );
 	for ( int c = 0; c < 3 && dalc; c++ ) {
 		float mean = 0.0f;
 		for ( int a = 0; a < 6; a++ )
 			mean += D[a][c] / 6.0f;
 		rec.f4l( prog, "cellDalc[%d]", c, FloatVector4(
-			( D[0][c] - D[1][c] ) * 0.5f, ( D[2][c] - D[3][c] ) * 0.5f,
-			( D[4][c] - D[5][c] ) * 0.5f, mean ) );
+			( D[0][c] - D[1][c] ) * 0.5f * dk, ( D[2][c] - D[3][c] ) * 0.5f * dk,
+			( D[4][c] - D[5][c] ) * 0.5f * dk, mean * dk ) );
 	}
 	if ( L->interior && L->skyLighting ) {	// telemetry, once per change
 		static QString skyLitLast;
@@ -1831,6 +1852,8 @@ void wwCellLightsUniforms( Scene * scene )
 	const bool outdoor = wwCellAsOutdoor( L );
 	bool hasDir = L->hasDirectional;
 	float dirTo[3] = { L->dirTo[0], L->dirTo[1], L->dirTo[2] }, dirColor[3] = { L->dirColor[0], L->dirColor[1], L->dirColor[2] };
+	for ( int c = 0; c < 3 && !outdoor; c++ )
+		dirColor[c] *= physInteriorK( L );	// lane PHYSUNITS1: an interior's directional on its lamps' scale
 	/* The game's lit surfaces take the sun x the imagespace Sunlight Scale, so the sun-to-ambient ratio (and the
 	 * bounce the probes carry) matches the game. 1 indoors. */
 	const float sunScale = ( outdoor && wwLookdevActive() ) ? wwLookdevSunlightScale() : 1.0f;
@@ -2049,10 +2072,17 @@ void wwCellLightsUniforms( Scene * scene )
 		float fK[6][4];
 		std::memcpy( fK, L->fogK, sizeof fK );
 		WwFog wf;
-		if ( wwCellSkyLitNow( L ) && wwLookdevFogNow( wf ) )
+		const bool skyFog = wwCellSkyLitNow( L ) && wwLookdevFogNow( wf );
+		if ( skyFog )
 			for ( int k = 1; k <= 4; k++ )
 				for ( int c = 0; c < 3; c++ )
 					fK[k][c] = wf.K[k][c];
+		// lane PHYSUNITS1: the fog's colours in the light's units; fogUnit lets the gray weight read the old scale
+		const float fu = !wwPhysSkyOn() ? 1.0f : skyFog ? wwLookdevPhysLight() : physInteriorK( L );
+		for ( int k = 1; k <= 4; k++ )
+			for ( int c = 0; c < 3; c++ )
+				fK[k][c] *= fu;
+		rec.f( prog, "fogUnit", fu );
 		for ( int k = 0; k < 6; k++ )
 			rec.f4l( prog, "fogK[%d]", k,
 				FloatVector4( fK[k][0], fK[k][1], fK[k][2], fK[k][3] ) );

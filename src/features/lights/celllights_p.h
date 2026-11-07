@@ -238,5 +238,6 @@ struct GoboPat
 const GoboPat & goboPattern( const QString & dataRoot, const QString & path );
 void fogScaleTick( Gpu & g, const void * doc, int version, const WwCellLighting & L );
 void nifxTick( const void * nif );
+void physTick( const void * nif );	// lane PHYSUNITS1: Game Light Brightness live on the placed lamps
 
 }	// namespace WwCellLightsP

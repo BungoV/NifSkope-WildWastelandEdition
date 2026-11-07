@@ -99,6 +99,8 @@ uniform bool fxDecalProbe;
 // stands in (fxRoomLitMul); cellFxBase = the game's lit-effect base (the weather's Effect Lighting x the sun scale)
 uniform bool fxRoomLit;
 uniform vec3 cellFxBase;
+uniform float cellFxEmitK;	// lane PHYSUNITS1: an unlit additive effect's cd/m2 per unit (0 = unset = 1)
+uniform float cellFxUnlitK;	// lane PHYSUNITS1: an unlit blended effect on the light's scale (0 = 1)
 vec3 fxRoomShare = vec3( 1.0 );	// probe 75
 // lane FXLIT1: this shape's model's placed lights (src/features/lights/cellfxlit.h)
 uniform int fxLitMode;			// 0 an unlit effect; 1 lit; red controls: 2 every light, 4 no 2.2 on the falloff, 8 self-lit
@@ -530,6 +532,11 @@ void main()
 			}
 			if ( fxLitMode != 0 )
 				lin *= fxAdditive ? cellFxLit( cellWorldPos( posView ) ) : vpLit( posView, dot( normal, V ) < 0.0 ? -normal : normal, aThick );
+		}
+		if ( fxLitMode == 0 ) {	// lane PHYSUNITS1: unlit effects in real units
+			float uk = fxAdditive ? cellFxEmitK : cellFxUnlitK;
+			if ( uk > 0.0 )
+				lin *= uk;
 		}
 		// the landed air (wwFogFx, as the surfaces take it); VOLPART1 red nofog: the game's fog alone
 		if ( volPart != 0 && ( volPartRed & 32 ) != 0 ) {
