@@ -538,9 +538,11 @@ unsigned envRecordRed()
 	return wwWeatherRecordChannels( wwEnvStr( "WW_WEATHER_RECORD_RED" ) );
 }
 
-/* lane CLOUDRECX1 (SPEC.md 1.4): the drawn density = the generated rung's (or the legacy key's; none = 1) x sigma(file's
- * liquidWater / dropletRadius) / sigma(the type's default). Neither key set: the ratio is 1 exactly and density is left
- * as it was (today's picture, the same key text). */
+/* lane CLOUDRECX1 (SPEC.md 1.4): a file's liquidWater / dropletRadius ARE the extinction: the drawn density =
+ * sigma(file's liquidWater / dropletRadius) / sigma(the type's default), the generated rung's density no longer
+ * multiplied in (the generator writes its rung as liquidWater = the type's default x its density, so a regenerated
+ * file draws exactly what the 1.3 file did). Neither key set: the ratio is 1 and density is left as it was (the
+ * legacy key's or the rung's: today's picture, the same key text). */
 void cloud14Density( WwWeatherRecx & r )
 {
 	r.densityGen = r.density;
@@ -550,7 +552,7 @@ void cloud14Density( WwWeatherRecx & r )
 	const float type = r.type >= 0.0f ? r.type : 2.0f / 3.0f;	// no type: CLOUD5's Variety default (cumulus)
 	r.densityRatio = WwCloudRecx14::densityRatio( r.liquidWater, r.dropletRadius, WwCloudRecx14::lowDefault( type ) );
 	// the drawn density stays in the 1.3 range (0..kDensityMax: the march's coverage tables are built for it)
-	r.density = std::min( ( r.density >= 0.0f ? r.density : 1.0f ) * r.densityRatio, kDensityMax );
+	r.density = std::min( r.densityRatio, kDensityMax );
 }
 
 bool cloud14Any( const WwWeatherRecx & r )
@@ -652,7 +654,7 @@ WwWeatherRecx resolveOne( const Who & w, const QStringList & roots, const QStrin
 					if ( r.liquidWater >= 0.0f || r.dropletRadius >= 0.0f ) {
 						sayOnce( QStringLiteral( "weather recx: %1: density ignored (liquidWater / dropletRadius set; density is "
 												 "the 1.4 legacy alias)" ).arg( b.where ) );
-						r.density = -1.0f;	// the generated rung's (or none) below, times the file's sigma ratio
+						r.density = -1.0f;	// cloud14Density: the file's sigma ratio alone
 						r.densityLegacy = false;
 					} else {
 						sayOnce( QStringLiteral( "weather recx: %1: density is the 1.4 legacy alias (kept this release; use "

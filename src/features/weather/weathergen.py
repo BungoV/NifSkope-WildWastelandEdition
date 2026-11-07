@@ -46,6 +46,10 @@ WETTING = {'storm': 15, 'rain': 15, 'drizzle': 30, 'snow': 30}
 DIM_NIGHT = {'overcast': (0.3, 0.5), 'rain': (0.3, 0.5), 'storm': (0.3, 0.5), 'snow': (0.3, 0.5),
              'radstorm': (0.3, 0.5), 'drizzle': (0.3, 0.5), 'fog': (0.1, 0.3)}
 CLEAR_NIGHTS = ('clear', 'clearest', 'dust')
+# lane CLOUDRECX1 (SPEC.md 1.4): the cloud type's default liquid water g/m^3 (src/features/clouds/cloudrecx14math.h
+# kLowAnchor, RESEARCH table T). A file states the rung's density as liquidWater = this x density: the same extinction
+# (sigma ratio = density), so the 1.4 file draws what the 1.3 file's density did, with no legacy key.
+LOW_LWC = {'stratus': 0.28, 'stratocumulus': 0.45, 'cumulus': 0.6, 'cumulonimbus': 1.5}
 TRANS_MIN, TRANS_MAX = 0.01, 3.0	# fWeatherTransMin (exe), fWeatherTransMax (Fallout4.esm GMST)
 
 
@@ -154,7 +158,8 @@ def entry_of(w, v):
     e = {'weather': '%s|%s' % (w['owner'], w['lid']), '_editorId': w.get('edid', ''),	# one match key per entry
          '_derivedFrom': derived_note(w, v),
          'atmosphere': atmo,
-         'clouds': {'coverage': v['coverage'], 'type': v['cloudType'], 'density': v['density']},
+         'clouds': {'coverage': v['coverage'], 'type': v['cloudType'],
+                    'liquidWater': float('%.4f' % (LOW_LWC[v['cloudType']] * v['density']))},
          'night': {'stars': v['stars'], 'moonlight': v['moonlight']},
          'wind': {'speed': v['windSpeed'], 'direction': v['windDirection'], 'gusts': v['gusts'],
                   'turbulence': v['turbulence']},
@@ -215,7 +220,7 @@ def main():
         folder = os.path.join(out_root, stem)
         os.makedirs(folder, exist_ok=True)
         path = os.path.join(folder, w.get('edid', w['lid']) + '.recx')
-        doc = {'_': 'Fusion Shaders weather file (SPEC.md 1.3): every condition in physical units. Edit freely; '
+        doc = {'_': 'Fusion Shaders weather file (SPEC.md 1.4): every condition in physical units. Edit freely; '
                     'the values below are the generated rung written out (lane WEATHERRECX1).',
                'entries': [entry_of(w, v)]}
         text = json.dumps(doc, indent=1) + '\n'

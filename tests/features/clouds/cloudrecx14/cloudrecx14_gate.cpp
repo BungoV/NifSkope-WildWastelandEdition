@@ -230,14 +230,14 @@ int main( int argc, char ** argv )
 		check( a0r.density == a0.density && a0r.coverage == a0.coverage && a0r.type == a0.type, "R2 no 1.4 key: 1.4 = 1.3 (red) exactly" );
 
 	const WwWeatherRecx a1 = arm( "lwc", "{ \"liquidWater\": 3.0 }" );
-	check( near( a1.liquidWater, 3.0 ) && near( a1.densityRatio, 2.0 ) && near( a1.density, go.density * 2.0 ),
-		"R3 liquidWater 3 g/m3 on a cumulonimbus (1.5): density x2" );
+	check( near( a1.liquidWater, 3.0 ) && near( a1.densityRatio, 2.0 ) && near( a1.density, 2.0 ),
+		"R3 liquidWater 3 g/m3 on a cumulonimbus (1.5): density 2 (the file's keys alone, not x the rung's)" );
 	const WwWeatherRecx a2 = arm( "radius", "{ \"dropletRadius\": 7, \"type\": \"cumulonimbus\" }" );
-	check( near( a2.dropletRadius, 7.0 ) && near( a2.density, go.density * 2.0 ), "R4 dropletRadius 7 um on a cumulonimbus (14): density x2" );
+	check( near( a2.dropletRadius, 7.0 ) && near( a2.density, 2.0 ), "R4 dropletRadius 7 um on a cumulonimbus (14): density 2" );
 	const WwWeatherRecx a3 = arm( "legacy", "{ \"density\": 1.4 }" );
 	check( near( a3.density, 1.4 ) && a3.densityLegacy, "R5 density alone: kept (the legacy alias, warned)" );
 	const WwWeatherRecx a4 = arm( "both", "{ \"density\": 1.4, \"liquidWater\": 0.75 }" );
-	check( near( a4.density, go.density * 0.5 ) && !a4.densityLegacy, "R6 density + liquidWater: density ignored (the rung's x 0.75 / 1.5)" );
+	check( near( a4.density, 0.5 ) && !a4.densityLegacy, "R6 density + liquidWater: density ignored (0.75 / 1.5)" );
 	const WwWeatherRecx a5 = arm( "hours", "{ \"liquidWater\": 1.0, \"hours\": { \"2\": { \"liquidWater\": 1.0 }, \"14\": { \"liquidWater\": 2.0 } } }" );
 	check( near( a5.liquidWater, 1.5 ), "R7 liquidWater by the hour: 1 (02:00) .. 2 (14:00) -> 1.5 at 08:00" );
 	const WwWeatherRecx a6 = arm( "keys",
@@ -258,7 +258,33 @@ int main( int argc, char ** argv )
 	const WwWeatherRecx a8 = arm( "bad", "{ \"liquidWater\": \"wet\", \"dropletRadius\": 0.5, \"evolution\": 0 }" );
 	check( a8.liquidWater < 0.0f && near( a8.dropletRadius, C::kRadiusMin ) && near( a8.evolution, C::kEvolutionMin ),
 		"R12 bad values: not-number dropped, radius 0.5 clamped to 2, evolution 0 clamped to 1" );
-	check( near( a8.density, 10.0 ), "R13 the drawn density stays in the 1.3 range (2.5 x 7 -> 10)" );
+	check( near( a8.density, 7.0 ), "R13 radius 2 on a cumulonimbus (14): density 7" );
+	const WwWeatherRecx a9 = arm( "cap", "{ \"liquidWater\": 5, \"dropletRadius\": 2 }" );
+	check( near( a9.density, 10.0 ), "R14 the drawn density stays in the 1.3 range (5 g/m3 at 2 um: 26.8 -> 10)" );
+
+	// ---- G. the generator's files (weathergen.py writes liquidWater = the type's default x the rung's density): each
+	// draws the 1.3 file's density (a density-only file of the same type and value), within 1e-4
+	struct Gen { const char * type; double lwc, dens; };
+	const Gen gens[] = { { "stratus", 0.28, 0.8 }, { "stratus", 0.28, 2.0 }, { "stratocumulus", 0.45, 1.5 },
+		{ "cumulus", 0.6, 1.0 }, { "cumulonimbus", 1.5, 2.5 } };
+	bool genOk = true;
+	for ( const Gen & g : gens ) {
+		const QByteArray js = QStringLiteral( "{ \"type\": \"%1\", \"liquidWater\": %2 }" ).arg( QLatin1String( g.type ) )
+			.arg( g.lwc * g.dens, 0, 'g', 6 ).toUtf8();
+		const QByteArray js13 = QStringLiteral( "{ \"type\": \"%1\", \"density\": %2 }" ).arg( QLatin1String( g.type ) )
+			.arg( g.dens, 0, 'g', 6 ).toUtf8();
+		const float d14 = arm( "gen14", js.constData() ).density;
+		const float d13 = arm( "gen13", js13.constData() ).density;
+		std::printf( "gen %s lwc %g: density %g, the 1.3 file's %g\n", g.type, g.lwc * g.dens, double( d14 ), double( d13 ) );
+		genOk = genOk && near( d14, g.dens ) && near( d13, g.dens );
+	}
+	check( genOk, "G1 the regenerated files (liquidWater = default x density) draw the 1.3 density, every type" );
+	const WwWeatherRecx a10 = arm( "regen", "{ \"type\": \"cumulonimbus\", \"coverage\": 1, \"liquidWater\": 3.75 }" );
+	qputenv( "WW_CLOUD_RECX14_RED", "1" );
+	const WwWeatherRecx a10r = arm( "regen-red", "{ \"type\": \"cumulonimbus\", \"coverage\": 1, \"liquidWater\": 3.75 }" );
+	qputenv( "WW_CLOUD_RECX14_RED", redWas );
+	check( near( a10.density, go.density ) && a10r.density == float( go.density ),
+		"G2 the storm's regenerated file: 1.4 and the red (1.4 keys unknown: the rung's) both draw the rung's 2.5" );
 
 	std::printf( "%s (%d failed)\n", fails ? "FAIL" : "PASS", fails );
 	return fails ? 1 : 0;
