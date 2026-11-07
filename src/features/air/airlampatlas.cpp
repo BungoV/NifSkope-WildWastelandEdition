@@ -79,6 +79,11 @@ int wwAirLampAtlasRed()
 	return ( v.contains( "twice" ) ? 1 : 0 ) | ( faces ? 2 : 0 ) | ( perface ? 4 : 0 ) | ( v.contains( "frozen" ) ? 8 : 0 );
 }
 
+bool wwAirAtlasAllRed()
+{
+	return wwEnv( "WW_AIR_ATLAS_ALL_RED" ).trimmed() == "1";	// read live
+}
+
 namespace {
 
 constexpr int kAtlas = 8192;
@@ -390,12 +395,15 @@ int wwAirLampAtlasFrame( Scene * scene, const WwCellLighting * L, const float ca
 	// the sizes: half the lamp's screen extent, on the ladder; away from the air the tiles go back to the pool
 	std::vector<int> want( size_t( n ), 0 );
 	std::vector<float> px( size_t( n ), 0.0f ), dist( size_t( n ), 0.0f );
+	const bool allRed = wwAirAtlasAllRed();	// part 22: only shadow-flagged lamps take a tile
 	for ( int i = 0; i < n; i++ ) {
 		const WwCellLight & l = L->lights.at( i );
 		const float dx = l.pos[0] - cam[0], dy = l.pos[1] - cam[1], dz = l.pos[2] - cam[2];
 		dist[i] = std::sqrt( dx * dx + dy * dy + dz * dz );
 		Lamp & m = s.lamps[i];
 		const int have = m.cur.s;
+		if ( l.shadow == 0 && !allRed )
+			continue;
 		if ( l.radius <= 0.0f || dist[i] - l.radius >= farD * ( have ? 1.25f : 1.0f ) )
 			continue;
 		px[i] = 0.5f * float( viewH ) * p11 * l.radius / std::max( dist[i], l.radius );

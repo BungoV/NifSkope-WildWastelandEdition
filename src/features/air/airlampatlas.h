@@ -39,6 +39,8 @@ void wwAirLampVisSetChoice( int item );
 //! 2 "faces" = the first fill capped at 192 faces a frame, not 4 ms, 4 "perface" = one draw a face (the old fill), not
 //! one instanced draw a caster for its six faces
 int wwAirLampAtlasRed();
+//! part 22 red WW_AIR_ATLAS_ALL_RED=1: lamps without the shadow flag get atlas tiles and air shadows too (before part 22)
+bool wwAirAtlasAllRed();
 
 /* one frame of the atlas: tiles for the lamps whose sphere reaches the air (camera distance - radius < farD), drawn
  * nearest first, binds the atlas on unit AirLampAtlas and the table on AirLampTable. Returns the lamps in the table

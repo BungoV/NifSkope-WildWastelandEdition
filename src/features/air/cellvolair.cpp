@@ -1914,7 +1914,7 @@ static void vaPassInner( Scene * scene, bool run )
 		prog->uni1i( "volLampRays", WwCellUnit::AirLampRays );
 		prog->uni1i( "volLampN", lampN );
 		WW_SWITCH_STATIC( bool, lampPcfRed, wwEnv( "WW_CELL_AIR_LAMPPCF_RED" ).trimmed() == "1" );	// part 18: one atlas tap
-		prog->uni1i( "volLampAtlasRed", ( wwAirLampAtlasRed() & 1 ) | ( lampPcfRed ? 2 : 0 ) );
+		prog->uni1i( "volLampAtlasRed", ( wwAirLampAtlasRed() & 1 ) | ( lampPcfRed ? 2 : 0 ) | ( wwAirAtlasAllRed() ? 4 : 0 ) );
 		prog->uni1i( "volLampAtlas", WwCellUnit::AirLampAtlas );
 		prog->uni1i( "volLampTable", WwCellUnit::AirLampTable );
 	}
@@ -2121,6 +2121,11 @@ static void vaPassInner( Scene * scene, bool run )
 			dr.note = QStringLiteral( "none(no cell lights or texture units)" );
 		} else if ( sealed ) {
 			dr.note = QStringLiteral( "still(sealed interior)" );
+		} else if ( G.noiseLink.isEmpty() && dr.red != 7 && wwEnv( "WW_FOG_NOISE_DEFAULT_RED" ).trimmed() != "1" ) {
+			// part 22: a weather without groundFog noiseTexture has no lumps (red WW_FOG_NOISE_DEFAULT_RED=1: the shipped default)
+			if ( dr.note != QLatin1String( "none(unset)" ) )
+				std::fprintf( stderr, "cell fog noise: none (unset)\n" );
+			dr.note = QStringLiteral( "none(unset)" );
 		} else {
 			// MODULES1 part 19: the texture is the weather's linked .dds, else the shipped default (red codenoise: the code's)
 			static const QStringList shippedRoots = wwRecxRoots( QStringList(), QString() );

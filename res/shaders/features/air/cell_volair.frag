@@ -26,7 +26,7 @@ uniform vec3 cellDdgiOpenE[6];	// lane FOGENV1: an open probe's irradiance per a
 // lane MODULES1 route (a): the lamps' depth atlas (features/air/airlampatlas.cpp); volLampVis 0 = the probe walk
 uniform int volLampVis;
 uniform int volLampN;
-uniform int volLampAtlasRed;	// 1 = the first atlas: lamps in a cube slot read the atlas too (shadowed twice); 2 = one tap (part 18 red)
+uniform int volLampAtlasRed;	// 1 = the first atlas: lamps in a cube slot read the atlas too (shadowed twice); 2 = one tap (part 18 red); 4 = red WW_AIR_ATLAS_ALL_RED (lamps without the shadow flag shadowed too)
 uniform sampler2DShadow volLampAtlas;
 uniform samplerBuffer volLampTable;
 // lane MODULES1 route (b): volLampVis 2 = the lamps' shadowed share a froxel traced on the volume's BVH (RG32F: share,
@@ -475,6 +475,8 @@ float airLampAtlasVis( int i, vec3 P, vec3 Lp )
 float airLeakLightK( int i, vec3 P, vec3 Lp )
 {
 	vec4 t4 = texelFetch( cellLights, i * CELL_TPL + 4 );
+	if ( t4.y < 0.5 && ( volLampAtlasRed & 4 ) == 0 )
+		return 1.0;	// part 22: a LIGH without the shadow flag casts no shadow, in the air too
 	bool cubed = cellShadowOn && t4.y > 0.5 && t4.x > -0.5;
 #ifdef WW_CELL_RESTIR
 	cubed = cubed && !cellRestirOn;
