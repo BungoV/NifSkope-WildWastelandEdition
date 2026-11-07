@@ -2,6 +2,7 @@
 // name, stage (0 live, 1 reopen, 2 relaunch, 3 tool, 4 shaders), where (the read that decided it)
 { "WW_AAFORMAT1_RED", 0, "src/features/exposure/cellhdr.cpp:60 hdrFormat | re-read per frame or per call (a)" },
 { "WW_AIR_ATLAS_ALL_RED", 0, "src/features/air/airlampatlas.cpp:84 wwAirAtlasAllRed | re-read per frame or per call (a)" },
+{ "WW_AIR_NSLAMP_OFF", 0, "src/features/air/cellvolair.cpp:1917 vaPassInner | re-read per frame or per call (a)" },
 { "WW_ALL_ON", 2, "src/main.cpp:195 main | startup (main)" },
 { "WW_ALPHABGSM_RED", 0, "src/gl/glshape.cpp:271 Shape::wwDrawAlphaGen | re-read per frame or per call (a)" },
 { "WW_ANIMPLAY_TEST", 2, "src/nifskope_ui.cpp:8108 NifSkope::createWindow | createWindow: picks which harness the window runs" },

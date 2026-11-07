@@ -1914,7 +1914,8 @@ static void vaPassInner( Scene * scene, bool run )
 		prog->uni1i( "volLampRays", WwCellUnit::AirLampRays );
 		prog->uni1i( "volLampN", lampN );
 		WW_SWITCH_STATIC( bool, lampPcfRed, wwEnv( "WW_CELL_AIR_LAMPPCF_RED" ).trimmed() == "1" );	// part 18: one atlas tap
-		prog->uni1i( "volLampAtlasRed", ( wwAirLampAtlasRed() & 1 ) | ( lampPcfRed ? 2 : 0 ) | ( wwAirAtlasAllRed() ? 4 : 0 ) );
+		WW_SWITCH_STATIC( bool, nsLampOff, wwEnv( "WW_AIR_NSLAMP_OFF" ).trimmed() == "1" );	// part 24 probe: no air from lamps without the shadow flag
+		prog->uni1i( "volLampAtlasRed", ( wwAirLampAtlasRed() & 1 ) | ( lampPcfRed ? 2 : 0 ) | ( wwAirAtlasAllRed() ? 4 : 0 ) | ( nsLampOff ? 8 : 0 ) );
 		prog->uni1i( "volLampAtlas", WwCellUnit::AirLampAtlas );
 		prog->uni1i( "volLampTable", WwCellUnit::AirLampTable );
 	}
