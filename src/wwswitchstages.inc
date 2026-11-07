@@ -1074,6 +1074,7 @@
 { "WW_LOOKDEV_CUBE", 0, "src/gl/lookdevstage.cpp:243 st | init-once state, re-read when a live set moves its prefix (b)" },
 { "WW_LOOKDEV_DATA", 1, "src/features/weather/esmweather.cpp:530 EsmWeather::gameDataDir | read while the cell document is built" },
 { "WW_LOOKDEV_DAY", 0, "src/gl/lookdevstage.cpp:264 st | init-once state, re-read when a live set moves its prefix (b)" },
+{ "WW_LOOKDEV_FINDRED", 0, "src/gl/lookdevstage.cpp:652 lookdevFindRed | re-read per frame or per call (a)" },
 { "WW_LOOKDEV_FOG", 1, "- | name passed through a variable: conservative" },
 { "WW_LOOKDEV_FOGPROBE", 0, "src/features/air/cellvolair.cpp:2857 wwVolAirSkyDraw | re-read per frame or per call (a)" },
 { "WW_LOOKDEV_GROUND", 0, "src/gl/lookdevstage.cpp:238 st | init-once state, re-read when a live set moves its prefix (b)" },

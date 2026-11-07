@@ -119,6 +119,7 @@ struct LdState
 	WwWeatherData w;
 	bool haveWeather = false;
 	QString weatherRefusal;
+	QString orderFor;	// lane MODULES1 part 24: the weather that pulled the load order past the pinned plugins
 	unsigned char tnam[4] = { 30, 54, 102, 126 };
 	QString climateEdid;
 
@@ -281,8 +282,10 @@ LdState & st()
 			s.cloudClock.start();
 		else {
 			s.dirtyWeather = true;
-			if ( s.plugin != oldPlugin || s.pinPlugins != oldPins )
+			if ( s.plugin != oldPlugin || s.pinPlugins != oldPins ) {
 				s.dirtyLoad = true;
+				s.orderFor.clear();
+			}
 		}
 	}
 	return s;
@@ -307,11 +310,11 @@ QStringList resolveList( const LdState & s, bool & groups, QString & source )
 		}
 		return files;
 	};
-	if ( !s.pinPlugins.isEmpty() ) {
+	if ( !s.pinPlugins.isEmpty() && s.orderFor.isEmpty() ) {
 		source = QStringLiteral( "pinned" );
 		return inData( s.pinPlugins );
 	}
-	QString plugin = s.plugin;
+	QString plugin = s.orderFor.isEmpty() ? s.plugin : QString();
 	/* lane SKYTOP1 (bungo 10-26: "the weather should be read from just any plugin"): no override = the load order,
 	 * the last plugin's record wins. Red WW_LOOKDEV_RED=oldresolve: Fallout4.esm and its masters, as before. */
 	if ( plugin.isEmpty() && !wwLookdevRed( "oldresolve" ) ) {
@@ -642,13 +645,25 @@ void regionWalk( LdState & s, const NifModel * doc )
 		changed ? qPrintable( QStringLiteral( " -> " ) + key ) : "", qPrintable( why ) );
 }
 
+/* lane MODULES1 part 24 (bungo's coast black sky): a weather missing from the pinned plugins or the chosen plugin is read
+ * from the load order, as SKYTOP1's "just any plugin" rule. Red ^WW_LOOKDEV_FINDRED=1: refused, the grey dome. */
+bool lookdevFindRed()
+{
+	WW_SWITCH_STATIC( bool, red, wwEnvStr( "WW_LOOKDEV_FINDRED" ).trimmed() == QLatin1StringView( "1" ) );
+	return red;
+}
+
 void resolve()
 {
 	LdState & s = st();
+	if ( !s.orderFor.isEmpty() && s.orderFor.compare( s.weatherKey, Qt::CaseInsensitive ) != 0 ) {
+		s.orderFor.clear();	// another weather: back to the pinned plugins
+		s.dirtyLoad = true;
+	}
 	// lane SKYTOP1: a cell opened with another load order reloads the weather (only while the row is "Load order")
 	if ( cellOrderGen.load() != s.cellSeen ) {
 		s.cellSeen = cellOrderGen.load();
-		if ( s.pinPlugins.isEmpty() && s.plugin.isEmpty() )
+		if ( ( s.pinPlugins.isEmpty() && s.plugin.isEmpty() ) || !s.orderFor.isEmpty() )
 			s.dirtyLoad = true;
 	}
 	const bool newLoad = s.dirtyLoad;	// lane WEATHERBLEND1: another load snaps (its records are others)
@@ -706,6 +721,15 @@ void resolve()
 		} else {
 			const quint32 id = s.esm.find( s.weatherKey );
 			QString why;
+			if ( !id && s.orderFor.isEmpty() && !lookdevFindRed() && !s.loadSource.startsWith( QLatin1StringView( "load order" ) ) ) {
+				const QString was = s.loadSource;
+				s.orderFor = s.weatherKey;
+				s.dirtyLoad = true;
+				resolve();
+				std::fprintf( stderr, "lookdev find: weather %s not in the %s plugins -> %s from %s\n", qPrintable( s.orderFor ),
+					qPrintable( was ), s.haveWeather ? "read" : "refused", qPrintable( s.loadSource ) );
+				return;
+			}
 			if ( !id )
 				s.weatherRefusal = QString( "weather %1 not in the loaded plugins" ).arg( s.weatherKey );
 			else if ( !s.esm.read( id, s.w, &why ) )
