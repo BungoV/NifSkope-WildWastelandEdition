@@ -44,6 +44,7 @@ constexpr int kRedNoJacobian = 1, kRedNoVis = 2, kRedNoPdf = 4, kRedNoTemporal =
 constexpr int kRedWhite = 16;          // not a red: the white-noise bounce (the one-frame noise pair's before)
 constexpr int kRedR2 = 32;             // the integer R2 lattice bounce in place of the STBN mask (the mask's before)
 constexpr int kRedNoJClamp = 64;       // every Jacobian merged as it is (jacobianKept's drop's before)
+constexpr int kRedLinear = 256;        // GPU only: one invocation a pixel in row order (the 8 x 8 tiles' before); same result
 constexpr float kHistoryCap = 20.0f;   // [Ouyang 2021 sec. 4.3 / Bitterli 2020 sec. 6]
 constexpr int kStbnSide = 128, kStbnSlices = 64;   // res/air/stbn_scalar_128x128x64.r8 (FOGGRID22A, ours)
 constexpr float kEps = 1e-3f;          // ray offsets, in the scene's units

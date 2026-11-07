@@ -1235,7 +1235,7 @@ void restirUniforms( Renderer * r, NifSkopeOpenGLContext::Program * prog )
 }
 
 //! WW_CELL_RESTIRGI_RED (live): off (the pass and the shader read gone), nojacobian, novis, nopdf, notemporal, white, r2,
-//! nojclamp (RESTIRGI_BIT_*), noatrous (kRestirGiNoAtrous: host only, the a-trous passes' before)
+//! nojclamp, linear (RESTIRGI_BIT_*), noatrous (kRestirGiNoAtrous: host only, the a-trous passes' before)
 constexpr int kRestirGiNoAtrous = 128;
 int restirGiRedBits()
 {
@@ -1244,7 +1244,8 @@ int restirGiRedBits()
 		const QString t = r.trimmed();
 		b |= t == QLatin1String( "nojacobian" ) ? 1 : t == QLatin1String( "novis" ) ? 2 : t == QLatin1String( "nopdf" ) ? 4
 			: t == QLatin1String( "notemporal" ) ? 8 : t == QLatin1String( "white" ) ? 16 : t == QLatin1String( "r2" ) ? 32
-			: t == QLatin1String( "nojclamp" ) ? 64 : t == QLatin1String( "noatrous" ) ? kRestirGiNoAtrous : 0;
+			: t == QLatin1String( "nojclamp" ) ? 64 : t == QLatin1String( "noatrous" ) ? kRestirGiNoAtrous
+			: t == QLatin1String( "linear" ) ? 256 : 0;
 	}
 	return b;
 }

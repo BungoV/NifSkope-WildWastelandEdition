@@ -2085,7 +2085,7 @@ int restirgiCli( const QStringList & args )
 		std::fprintf( stderr, "usage: restirgi --soup <file> --rect minX,minY,maxX,maxY --out <dir> --cam ex,ey,ez,tx,ty,tz "
 			"--light x,y,z,radius,r,g,b [...] [--lights <file>] [--size W,H] [--fov deg] [--frames n] [--updates n] [--seed n] "
 			"[--spatial K] [--radius R] [--filter f] [--acc n] [--atrous n] [--ref n] [--no-twin] [--jump frame] [--relight frame] "
-			"[--red nojacobian,novis,nopdf,notemporal,white,r2,nojclamp]\n" );
+			"[--red nojacobian,novis,nopdf,notemporal,white,r2,nojclamp,linear]\n" );
 		return 2;
 	}
 	for ( int k = 0; k < 4; k++ )
@@ -2096,7 +2096,7 @@ int restirgiCli( const QStringList & args )
 		red |= t == QLatin1String( "nojacobian" ) ? restirgi::kRedNoJacobian : t == QLatin1String( "novis" ) ? restirgi::kRedNoVis
 			: t == QLatin1String( "nopdf" ) ? restirgi::kRedNoPdf : t == QLatin1String( "notemporal" ) ? restirgi::kRedNoTemporal
 			: t == QLatin1String( "white" ) ? restirgi::kRedWhite : t == QLatin1String( "r2" ) ? restirgi::kRedR2
-			: t == QLatin1String( "nojclamp" ) ? restirgi::kRedNoJClamp : 0;
+			: t == QLatin1String( "nojclamp" ) ? restirgi::kRedNoJClamp : t == QLatin1String( "linear" ) ? restirgi::kRedLinear : 0;
 	}
 	const unsigned char * mask = restirGiStbnMask();
 	ProbeSoup soup;
@@ -2262,7 +2262,11 @@ int restirgiCli( const QStringList & args )
 		}
 		wallSum += fr > 0 ? go.msWall : 0.0;
 		if ( !twin ) {
-			std::printf( "frame %d: gpu wall %.2f ms, gpu %.3f ms, filter + a-trous %.3f ms\n", fr, go.msWall, go.msGpu, go.msDenoise );
+			std::printf( "frame %d: gpu wall %.2f ms, gpu %.3f ms, filter + a-trous %.3f ms, stages", fr, go.msWall, go.msGpu, go.msDenoise );
+			for ( double ms : go.msStage )
+				if ( ms >= 0.0 )
+					std::printf( " %.3f", ms );
+			std::printf( "\n" );
 			std::fflush( stdout );
 			continue;
 		}

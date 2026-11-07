@@ -34,7 +34,7 @@ namespace {
 
 constexpr int kRgBindings = 14;   // restirgi.comp set 1
 constexpr VkDeviceSize kRgStbnBytes = 128 * 128 * 64;   // res/air/stbn_scalar_128x128x64.r8
-constexpr uint32_t kRgStamps = 3;   // the pass's start, before the filter (mode 3), the end
+constexpr uint32_t kRgStamps = 10;   // one before each mode (4 + up to 5 a-trous passes), the end
 constexpr VkDeviceSize kRgParamBytes = 11 * 16;   // RestirGiParams, std430: size, opts, knobs, rows[3], proj, prows[3], pproj
 constexpr VkDeviceSize kRgResBytes = 64;          // restirgi_common.glsl RgRes
 
@@ -433,7 +433,7 @@ bool restirGiGpuStep( DdgiGpuSession * s, const RestirGiGpuIn & in, RestirGiGpuO
 		}
 	}
 	const bool gl = g->shared && bool( in.beforeSubmit ) && !in.gbuf;
-	const uint64_t groups = ( uint64_t( n ) + 63 ) / 64;
+	const uint64_t groups = uint64_t( ( in.W + 7 ) / 8 ) * uint64_t( ( in.H + 7 ) / 8 );   // 8 x 8 tiles (>= n / 64: the linear red fits too)
 	bool ok = true;
 	{
 		DdgiCbSwap sw( D, g->cb );
@@ -448,13 +448,13 @@ bool restirGiGpuStep( DdgiGpuSession * s, const RestirGiGpuIn & in, RestirGiGpuO
 				T.reset( D.cb, g->qp, 0, kRgStamps );
 			const uint32_t modes = 4 + uint32_t( std::clamp( in.atrous, 0, 5 ) );
 			for ( uint32_t mode = 0; mode < modes; mode++ ) {
-				if ( g->qp && ( mode == 0 || mode == 3 ) )
-					T.write( D.cb, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, g->qp, mode == 0 ? 0 : 1 );
+				if ( g->qp )
+					T.write( D.cb, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, g->qp, mode );
 				rgDispatch( D, R, s, g, mode, groups );
 				ddgiBarrier( D );
 			}
 			if ( g->qp )
-				T.write( D.cb, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, g->qp, 2 );
+				T.write( D.cb, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, g->qp, modes );
 			ddgiCopyBarrier( D );
 			ddgiCopy( D, g->cur, g->hist, n * kRgResBytes );   // the temporal reservoirs: the next frame's history
 			ddgiCopy( D, g->acc, g->accPrev, n * 16 );          // the running means
@@ -495,10 +495,14 @@ bool restirGiGpuStep( DdgiGpuSession * s, const RestirGiGpuIn & in, RestirGiGpuO
 	g->released = gl;
 	if ( g->qp ) {
 		DdgiTimer & T = ddgiTimer( D );
+		const uint32_t used = 5 + uint32_t( std::clamp( in.atrous, 0, 5 ) );   // the stamps written: modes + the end
 		uint64_t ts[kRgStamps] = {};
-		if ( T.get( D.dev, g->qp, 0, kRgStamps, sizeof ts, ts, 8, VK_QUERY_RESULT_64_BIT | VK_QUERY_RESULT_WAIT_BIT ) == VK_SUCCESS ) {
-			out->msGpu = double( ts[2] - ts[0] ) * T.nsPerTick * 1e-6;
-			out->msDenoise = double( ts[2] - ts[1] ) * T.nsPerTick * 1e-6;
+		if ( T.get( D.dev, g->qp, 0, used, sizeof ts, ts, 8, VK_QUERY_RESULT_64_BIT | VK_QUERY_RESULT_WAIT_BIT ) == VK_SUCCESS ) {
+			const double k = T.nsPerTick * 1e-6;
+			out->msGpu = double( ts[used - 1] - ts[0] ) * k;
+			out->msDenoise = double( ts[used - 1] - ts[3] ) * k;
+			for ( uint32_t m = 0; m + 1 < used; m++ )
+				out->msStage[m] = double( ts[m + 1] - ts[m] ) * k;
 		}
 	}
 	if ( in.readBack ) {

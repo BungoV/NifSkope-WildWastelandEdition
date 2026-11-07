@@ -259,6 +259,7 @@ struct RestirGiGpuOut
 	std::string why;
 	double msWall = 0;
 	double msGpu = -1, msDenoise = -1;    // GPU timestamps: the whole pass, the filter + a-trous part (-1: no timer)
+	double msStage[9] = { -1, -1, -1, -1, -1, -1, -1, -1, -1 };   // per mode: trace + temporal, spatial, mean, box, a-trous 1..5
 	uint32_t cuts = 0, relights = 0;      // the history drops so far on this session's buffers (a cut, a sceneKey change)
 	std::vector<float> est;               // readBack: 4 a pixel (the frame's estimate E rgb, 1 valid)
 	std::vector<float> cand;              // 4 a pixel (the bounce's Lo rgb, hit 1 / miss 0; -1 no pixel)

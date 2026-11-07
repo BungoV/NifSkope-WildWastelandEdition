@@ -193,13 +193,16 @@ void modeSpatial( int x, int y, uint id )
 			w = rgTarget( p.P, p.N, rq ) * rq.W * rq.M * jk;
 		r = rgUpdate( r, rq, w, rq.M, restirRand( s2, uint( 2 + 3 * k ) ) );
 	}
-	float Z = 0.0;
-	for ( int k = 0; k < nf; k++ ) {
+	// the own pixel's shadow ray is traced once: Z's k = 0 term and pHat ask the same question
+	const bool seesOwn = r.any > 0.5 && rgSees( p.P, p.N, r, red );
+	const float tOwn = r.any > 0.5 ? rgTarget( p.P, p.N, r ) : 0.0;
+	float Z = tOwn > 0.0 && seesOwn ? own.M : 0.0;
+	for ( int k = 1; k < nf; k++ ) {
 		const RgPixel ps = rgPixel( false, from[k] % W, from[k] / W );
 		if ( r.any > 0.5 && rgTarget( ps.P, ps.N, r ) > 0.0 && rgSees( ps.P, ps.N, r, red ) )
 			Z += resCur[from[k]].M;
 	}
-	const float pHat = r.any > 0.5 && rgSees( p.P, p.N, r, red ) ? rgTarget( p.P, p.N, r ) : 0.0;
+	const float pHat = seesOwn ? tOwn : 0.0;
 	r = rgFinalize( r, pHat, Z );
 	est[id] = vec4( rgEstimate( p.P, p.N, r ), 1.0 );
 }
@@ -290,7 +293,7 @@ void modeAtrous( int x, int y, uint id, int it )
 	const vec4 g = gbuf[id];
 	const vec4 c = fromA ? atrA[id] : atrB[id];
 	vec4 o = c;
-	if ( g.w > 0.0 && g.w < 1e5 && acc[id].w > 0.0 ) {
+	if ( g.w > 0.0 && g.w < 1e5 ) {
 		const int st = 1 << it;
 		const float lc = rgLum( c.xyz );
 		const float sl = 4.0 * sqrt( max( c.w, 0.0 ) ) + 1e-4;
@@ -304,7 +307,8 @@ void modeAtrous( int x, int y, uint id, int it )
 					continue;
 				const int q = qy * G.size.x + qx;
 				const vec4 h = gbuf[q];
-				if ( ( dx != 0 || dy != 0 ) && ( !restirSimilar( g.w, g.xyz, h.w, h.xyz ) || acc[q].w <= 0.0 ) )
+				// acc[q].w > 0 exactly where the depth is valid (modes 1-2): the g-buffer read answers it, one read fewer a tap
+				if ( ( dx != 0 || dy != 0 ) && ( !restirSimilar( g.w, g.xyz, h.w, h.xyz ) || !( h.w > 0.0 && h.w < 1e5 ) ) )
 					continue;
 				const vec4 cq = fromA ? atrA[q] : atrB[q];
 				const float wn = pow( max( dot( g.xyz, h.xyz ), 0.0 ), 128.0 );
@@ -327,10 +331,20 @@ void modeAtrous( int x, int y, uint id, int it )
 
 void main()
 {
-	const uint id = ddgiLinearId();
-	if ( id >= uint( G.size.x * G.size.y ) )
+	// a group is an 8 x 8 tile, so its rays and taps stay close (a pixel's result does not depend on which invocation runs it)
+	int x, y;
+	if ( ( G.opts.w & RESTIRGI_BIT_LINEAR ) != 0 ) {
+		const uint l = ddgiLinearId();
+		x = int( l % uint( G.size.x ) );
+		y = int( l / uint( G.size.x ) );
+	} else {
+		const uint t = ddgiGroupId(), tw = ( uint( G.size.x ) + 7u ) / 8u;
+		x = int( ( t % tw ) * 8u + ( gl_LocalInvocationIndex & 7u ) );
+		y = int( ( t / tw ) * 8u + ( gl_LocalInvocationIndex >> 3u ) );
+	}
+	if ( x >= G.size.x || y >= G.size.y )
 		return;
-	const int x = int( id % uint( G.size.x ) ), y = int( id / uint( G.size.x ) );
+	const uint id = uint( y * G.size.x + x );
 	const uint mode = pc.job.x;
 	if ( mode == 0u )
 		modeCandidate( x, y, id );

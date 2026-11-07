@@ -11,6 +11,7 @@
 #define RESTIRGI_BIT_WHITE 16       // kRedWhite (not a red: the white-noise bounce)
 #define RESTIRGI_BIT_R2 32          // kRedR2 (the R2 lattice in place of the STBN mask)
 #define RESTIRGI_BIT_NOJCLAMP 64    // kRedNoJClamp
+#define RESTIRGI_BIT_LINEAR 256     // kRedLinear (GPU only: row-order invocations, the 8 x 8 tiles' before)
 #define RESTIRGI_HISTORY_CAP 20.0   // kHistoryCap
 #define RESTIRGI_EPS 0.001          // kEps
 #define RESTIRGI_PI 3.14159265358979
