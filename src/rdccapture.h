@@ -9,6 +9,8 @@ BSD License - see nifskope.h
 
 #include <QString>
 
+#include <functional>
+
 /*! \file rdccapture.h
  * \brief RenderDoc capture driven from inside the app.
  *
@@ -58,5 +60,17 @@ void rdcEndFrame();
 
 //! How many armed frames are left.
 int rdcFramesRemaining();
+
+/*! Lane PERFCPU1 (11-07): captures armed live, after a row's picture (the live "path"/"shot"/"gpums" step), so
+ * the camera and the scene have settled.
+ *
+ * WW_RDC_LOAD=1          (launch) load renderdoc.dll disarmed, for WW_RDC_ARM
+ * WW_RDC_ARM=<n>[:<tag>] (live) after the next picture, capture n paints, files <WW_RDC_OUT>_<tag>_paintNNN
+ * WW_RDC_HOLD=<frames>   (live) before that, paint this many settled frames, "rdc hold: <tag> <frames> frames
+ *                        begin" / "... end after <ms> ms" on stderr (an outside profiler's window)
+ *
+ * Both unset: returns an empty string at once and paints nothing. Otherwise the reply's tail.
+ */
+QString rdcAfterPicture( const std::function<void( int )> & pump );
 
 #endif // RDCCAPTURE_H

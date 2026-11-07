@@ -78,11 +78,23 @@ enum CpuSub { CpuSetup, CpuCellUni, CpuSunUni, CpuFogUni, CpuAoDraw, CpuSsrDraw,
 	CpuSubCount };
 qint64 nowNs();
 void cpuSubAdd( int sub, qint64 ns );
+#ifdef WW_TRACY
+/* lane PERFCPU1 (11-07): the Tracy profile build only (qmake CONFIG+=tracy -> release/NifSkope.tracy.exe). Each CPU sub
+ * is a Tracy zone named like its "cpu <name>" field; the default build has none of this (no WW_TRACY). */
+void tracySubBegin( int sub );
+void tracySubEnd();
+void tracyMessage( const char * text );
+#endif
 class DrawCpuScope
 {
 public:
+#ifdef WW_TRACY
+	explicit DrawCpuScope( int sub ) : k_( on() ? sub : -1 ), t0_( k_ >= 0 ? nowNs() : 0 ) { if ( k_ >= 0 ) tracySubBegin( k_ ); }
+	~DrawCpuScope() { if ( k_ >= 0 ) { cpuSubAdd( k_, nowNs() - t0_ ); tracySubEnd(); } }
+#else
 	explicit DrawCpuScope( int sub ) : k_( on() ? sub : -1 ), t0_( k_ >= 0 ? nowNs() : 0 ) {}
 	~DrawCpuScope() { if ( k_ >= 0 ) cpuSubAdd( k_, nowNs() - t0_ ); }
+#endif
 private:
 	int k_;
 	qint64 t0_;

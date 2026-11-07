@@ -142,6 +142,7 @@ struct Frame
 	qint64 trisKept = 0;
 	qint64 atRefused = 0;	// lane SIGNDROP1: occluders refused for their alpha test
 	std::uint32_t counts[8] = {};
+	bool countsRead = false;	// lane PERFCPU1: counts hold a read census (the first culling frame has none: printed -)
 	double cpuMs = 0.0, gpuMs[3] = { -1.0, -1.0, -1.0 };
 	QString why;
 };
@@ -1067,9 +1068,12 @@ void prepare( Scene * scene )
 
 	/* lane PERFFIX4: the census of the LAST frame's cull, read now (a frame late) so that no readback waits on this
 	 * frame's dispatch, and the closing timestamp brackets only the GPU work. */
+	if ( !aoWalk )
+		f.countsRead = false;
 	if ( G.censusPending && G.census && !aoWalk ) {
 		g->glBindBuffer( GL_SHADER_STORAGE_BUFFER, G.census );
 		g->glGetBufferSubData( GL_SHADER_STORAGE_BUFFER, 0, 32, f.counts );
+		f.countsRead = true;
 		g->glBindBuffer( GL_SHADER_STORAGE_BUFFER, 0 );
 	}
 	if ( !aoWalk )
@@ -1136,12 +1140,14 @@ void prepare( Scene * scene )
 		} else if ( GpuDriven::census() && sw().timer ) {	// the red: read now, before the closing stamp (a CPU round trip)
 			g->glBindBuffer( GL_SHADER_STORAGE_BUFFER, G.census );
 			g->glGetBufferSubData( GL_SHADER_STORAGE_BUFFER, 0, 32, f.counts );
+			f.countsRead = true;
 			g->glBindBuffer( GL_SHADER_STORAGE_BUFFER, 0 );
 		} else if ( GpuDriven::census() ) {
 			G.censusPending = true;	// read at the next frame's cull, before the buffer is zeroed
 		}
 	} else if ( !aoWalk ) {
 		std::fill( std::begin( f.counts ), std::end( f.counts ), 0u );
+		f.countsRead = true;	// nothing to cull: the zeros are the census
 	}
 	if ( timed ) {
 		g->glQueryCounter( G.q[3], GL_TIMESTAMP );
@@ -1290,10 +1296,11 @@ void finish()
 			.arg( f.trisKept ).arg( f.mdi ).arg( f.rangeDraws ) );
 	} else if ( f.flushing && GpuDriven::census() ) {
 		const Gpu * gp = gpus().contains( QOpenGLContext::currentContext() ) ? &gpus()[QOpenGLContext::currentContext()] : nullptr;
+		const auto cn = [&f]( int k ) { return f.countsRead ? QString::number( f.counts[k] ) : QStringLiteral( "-" ); };
 		GpuDriven::censusLine( "b", QStringLiteral( "%1 shapes %2 candidates %3 occluders %4 fallback %5 clusters %6 visible %7 "
 			"frustum %8 cone %9 occluded %10 tris %11/%12 multidraws %13 commands %14 rangedraws %15 alphatest-refused %16" )
 			.arg( f.why ).arg( f.shapes ).arg( f.candidates ).arg( f.occluders ).arg( f.fallback ).arg( f.items )
-			.arg( f.counts[0] ).arg( f.counts[1] ).arg( f.counts[2] ).arg( f.counts[3] ).arg( f.counts[4] ).arg( f.trisKept )
+			.arg( cn( 0 ) ).arg( cn( 1 ) ).arg( cn( 2 ) ).arg( cn( 3 ) ).arg( cn( 4 ) ).arg( f.trisKept )
 			.arg( f.mdi ).arg( f.mdiCmds ).arg( f.rangeDraws ).arg( f.atRefused ) );
 		if ( gp )
 			GpuDriven::censusLine( "b arena", QStringLiteral( "shapes %1 clusters %2/%3 garbage %4 builds %5 rebuilds %6%7" )

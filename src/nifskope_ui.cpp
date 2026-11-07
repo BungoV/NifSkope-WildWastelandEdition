@@ -34,6 +34,7 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include "ui/widgets/wwdropdown.h"
 #include "gamemanager.h"
 #include "wwswitch.h"	// the WW_* switch store
+#include "rdccapture.h"	// PERFCPU1: WW_RDC_ARM / WW_RDC_HOLD after a live picture
 #include "celldoorlive.h"	// a path frame poses the live door
 #include "features/gi/probesky.h"	// the live driver waits for a pending sky relight
 #include "features/gi/rtddgicell.h"	// and for the ray-traced GI volume (rtddgiCellPending)
@@ -2371,7 +2372,7 @@ QString wwLiveCommand( NifSkope * skope, const QString & line )
 	if ( !L.reopenRefused.isEmpty() )
 		return QStringLiteral( "refused %1 (%2; the row's pictures are skipped)" ).arg( L.reopenRefused, applied );
 	const quint64 before = wwLiveShaderRefusals();
-	const QString r = takePicture();
+	const QString r = takePicture() + rdcAfterPicture( [ogl]( int n ) { wwLivePump( ogl, n ); } );
 	QString why;
 	if ( wwLiveShaderRefusals( &why ) == before )
 		return r;

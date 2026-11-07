@@ -169,6 +169,25 @@ build_pass|!debug_and_release {
 	OBJECTS_DIR = $${INTERMEDIATE}/.obj
 }
 
+# lane PERFCPU1 (11-07): qmake CONFIG+=tracy nopch=1 -> release/NifSkope.tracy.exe, the Tracy profile build. Never
+# shipped, never the default exe. TRACY_DIR = a Tracy source release (never committed to this repo).
+tracy {
+	isEmpty(TRACY_DIR): TRACY_DIR = E:/Tools/tracy/0.14.1/src/tracy-0.14.1
+	TARGET = NifSkope.tracy
+	DEFINES += WW_TRACY TRACY_ENABLE TRACY_ON_DEMAND
+	INCLUDEPATH += $$TRACY_DIR/public
+	SOURCES += $$TRACY_DIR/public/TracyClient.cpp
+	win32:LIBS += -lws2_32 -ldbghelp -lsecur32	# secur32: GetUserNameExA (TracyClient)
+	QMAKE_LFLAGS_RELEASE -= -Wl,-s	# symbols kept: the sampled addresses resolve (nm / addr2line)
+	build_pass|!debug_and_release {
+		INTERMEDIATE = $${DESTDIR}/../GeneratedFiles_tracy/
+		UI_DIR = $${INTERMEDIATE}/.ui
+		MOC_DIR = $${INTERMEDIATE}/.moc
+		RCC_DIR = $${INTERMEDIATE}/.qrc
+		OBJECTS_DIR = $${INTERMEDIATE}/.obj
+	}
+}
+
 ###############################
 ## TARGETS
 ###############################

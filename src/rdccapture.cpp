@@ -7,10 +7,18 @@ BSD License - see nifskope.h
 #include "rdccapture.h"
 #include "wwswitch.h"	// lane TESTDRIVER1: the WW_* switch store
 
+#ifdef WW_TRACY
+#include "features/shared/cellpasstime.h"	// PERFCPU1: the hold's begin/end as Tracy messages
+#endif
+
 #include <QCoreApplication>
 #include <QDir>
+#include <QElapsedTimer>
 #include <QFileInfo>
 #include <QtGlobal>
+
+#include <algorithm>
+#include <cstdio>
 
 #ifdef Q_OS_WIN
 
@@ -25,6 +33,7 @@ RENDERDOC_API_1_4_1 * rdcApi = nullptr;
 int rdcRemaining = 0;
 bool rdcCapturing = false;
 QString rdcOutBase;
+QString rdcTag;	// PERFCPU1: WW_RDC_ARM's tag, in the armed captures' file names
 
 //! Where renderdoc.dll lives when it was not injected into this process.
 QString rdcDefaultDll()
@@ -42,8 +51,10 @@ QString rdcDefaultDll()
 bool rdcInit()
 {
 	rdcRemaining = wwEnvInt( "WW_RDC_FRAMES" );
-	if ( rdcRemaining < 1 )
+	if ( rdcRemaining < 1 && wwEnvInt( "WW_RDC_LOAD" ) != 1 )	// PERFCPU1: WW_RDC_LOAD=1 loads it disarmed (WW_RDC_ARM)
 		return false;
+	if ( rdcRemaining < 0 )
+		rdcRemaining = 0;
 
 	// Already injected (launched from the RenderDoc UI) - reuse that instance
 	// rather than loading a second copy.
@@ -103,7 +114,8 @@ void rdcBeginFrame( const QString & label )
 	// the path template rather than SetCaptureTitle, which only exists from API
 	// 1.6 and would be a null pointer in the struct this asks for.
 	if ( !label.isEmpty() ) {
-		const QString path = QStringLiteral( "%1_%2" ).arg( rdcOutBase, label );
+		const QString path = rdcTag.isEmpty() ? QStringLiteral( "%1_%2" ).arg( rdcOutBase, label )
+			: QStringLiteral( "%1_%2_%3" ).arg( rdcOutBase, rdcTag, label );
 		rdcApi->SetCaptureFilePathTemplate( path.toLocal8Bit().constData() );
 	}
 	// Null device and window: capture the context that is current right now,
@@ -131,3 +143,49 @@ void rdcBeginFrame( const QString & ) {}
 void rdcEndFrame() {}
 
 #endif
+
+QString rdcAfterPicture( const std::function<void( int )> & pump )
+{
+	const int hold = std::max( 0, wwEnvInt( "WW_RDC_HOLD" ) );
+	const QString arm = wwEnvStr( "WW_RDC_ARM" ).trimmed();
+	if ( hold == 0 && arm.isEmpty() )
+		return QString();	// unset: the picture's reply and its frames are exactly as before
+	const int n = arm.section( QLatin1Char( ':' ), 0, 0 ).toInt();
+	const QString tag = arm.section( QLatin1Char( ':' ), 1 ).trimmed();
+	QString r;
+	if ( hold > 0 ) {
+		// a window of settled frames for an outside profiler (tracy-capture); the hold script waits for "begin"
+		QElapsedTimer t;
+		t.start();
+		const QByteArray b = QStringLiteral( "rdc hold: %1 %2 frames begin" ).arg( tag ).arg( hold ).toUtf8();
+		std::fprintf( stderr, "%s\n", b.constData() );
+		std::fflush( stderr );
+#ifdef WW_TRACY
+		PassTime::tracyMessage( b.constData() );
+#endif
+		pump( hold );
+		const QByteArray e = QStringLiteral( "rdc hold: %1 end after %2 ms" ).arg( tag ).arg( t.elapsed() ).toUtf8();
+		std::fprintf( stderr, "%s\n", e.constData() );
+		std::fflush( stderr );
+#ifdef WW_TRACY
+		PassTime::tracyMessage( e.constData() );
+#endif
+		r += QStringLiteral( "; held %1 frames in %2 ms" ).arg( hold ).arg( t.elapsed() );
+	}
+	if ( n > 0 ) {
+#ifdef Q_OS_WIN
+		if ( !rdcApi )
+			return r + QStringLiteral( "; rdc arm %1 refused: renderdoc not loaded (launch with WW_RDC_LOAD=1)" ).arg( n );
+		rdcTag = tag;
+		rdcRemaining = n;
+		pump( n + 1 );	// the paint that begins each capture ends it; one more so the last one is closed
+		rdcTag.clear();
+		const int left = rdcRemaining;
+		rdcRemaining = 0;
+		r += QStringLiteral( "; rdc armed %1 (%2) captured %3" ).arg( n ).arg( tag ).arg( n - left );
+#else
+		r += QStringLiteral( "; rdc arm refused: not Windows" );
+#endif
+	}
+	return r;
+}

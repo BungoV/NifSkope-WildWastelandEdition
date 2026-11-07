@@ -28,6 +28,9 @@
 #include <psapi.h>
 #include <mmsystem.h>	// timeBeginPeriod: the sampler's 1 ms sleep
 #endif
+#ifdef WW_TRACY
+#include <tracy/TracyC.h>	// PERFCPU1: the profile build only (TRACY_DIR/public)
+#endif
 
 // lane PERF1: see cellpasstime.h
 
@@ -169,6 +172,10 @@ struct Mark
 	GLuint q0, q1;
 	GLuint qs = 0, qp = 0;	// WW_CELL_PASSTIME_CENSUS: samples passed, primitives generated
 	GLuint qf = 0;	// MODULES1 p18: WW_CELL_PASSTIME_CENSUS=2 also counts fragment shader invocations (overdraw)
+#ifdef WW_TRACY
+	quint16 tq0 = 0, tq1 = 0;	// PERFCPU1: the Tracy GPU zone's query ids (tq: its begin was sent, a profiler was connected)
+	bool tq = false;
+#endif
 };
 
 struct Slot
@@ -308,6 +315,94 @@ double gpuMs( GLuint a, GLuint b )
 	return t1 > t0 ? double( t1 - t0 ) * 1e-6 : 0.0;
 }
 
+#ifdef WW_TRACY
+/* lane PERFCPU1: the Tracy profile build. CPU zones: each top-level pass (its name()), each cull pass, each CPU sub
+ * ("cpu <name>", the cost row's cpusub names); one LIFO list, so a pass that ends while a sub it opened in is still
+ * open closes when that sub does (Tracy zones must nest). GPU zones: the top-level passes, timed by the same
+ * GL_TIMESTAMP queries the cost row reads (sent at collect). FrameMark per paint. Inert unless a profiler is
+ * connected (TRACY_ON_DEMAND). */
+namespace Tz
+{
+const char * const kCpuSubName[CpuSubCount] = { "cpu setup", "cpu cell-uni", "cpu sun-uni", "cpu fog-uni", "cpu ao-draw",
+	"cpu ssr-draw", "cpu air-state", "cpu air-setup", "cpu air-clusters", "cpu air-tile", "cpu air-inject",
+	"cpu air-integrate", "cpu air-far", "cpu air-tail", "cpu air-echo", "cpu bl-geo", "cpu bl-row", "cpu sun-casters",
+	"cpu sun-terrstep", "cpu cloud-shadow", "cpu far-ground-pass", "cpu water", "cpu underwater", "cpu sun-walk",
+	"cpu ce1-tail", "cpu ao-collect", "cpu ao-sorted", "cpu ao-effects" };
+___tracy_source_location_data passLoc[Count], gpuLoc[Count], subLoc[CpuSubCount];
+bool locMade = false;
+struct Open { TracyCZoneCtx c; int kind, id; bool closed; };	// kind 0 = pass, 1 = CPU sub
+std::vector<Open> open;
+std::vector<int> subStack;	// the open DrawCpuScopes' subs, innermost last (-1: opened outside a frame)
+std::vector<int> samplerSaved;	// the Sampler's pass under each of them (the sub is the innermost sample label)
+QOpenGLContext * gpuCtx = nullptr;
+quint16 nextQuery = 0;
+QByteArray gpuName[Count];
+
+void makeLocs()
+{
+	if ( locMade )
+		return;
+	locMade = true;
+	for ( int p = 0; p < Count; p++ ) {
+		passLoc[p] = { name( p ), "PassTime::begin", __FILE__, uint32_t( __LINE__ ), 0 };
+		gpuName[p] = QByteArray( "gpu " ) + name( p );
+		gpuLoc[p] = { gpuName[p].constData(), "PassTime::begin", __FILE__, uint32_t( __LINE__ ), 0 };
+	}
+	for ( int k = 0; k < CpuSubCount; k++ )
+		subLoc[k] = { kCpuSubName[k], "DrawCpuScope", __FILE__, uint32_t( __LINE__ ), 0 };
+}
+
+void zoneOpen( const ___tracy_source_location_data * loc, int kind, int id )
+{
+	open.push_back( { ___tracy_emit_zone_begin( loc, 1 ), kind, id, false } );
+}
+
+void zoneClose( int kind, int id )
+{
+	for ( size_t k = open.size(); k-- > 0; )
+		if ( !open[k].closed && open[k].kind == kind && open[k].id == id ) {
+			open[k].closed = true;
+			break;
+		}
+	while ( !open.empty() && open.back().closed ) {
+		___tracy_emit_zone_end( open.back().c );
+		open.pop_back();
+	}
+}
+
+void closeAll()
+{
+	while ( !open.empty() ) {
+		___tracy_emit_zone_end( open.back().c );
+		open.pop_back();
+	}
+}
+
+// the GPU context (id 0): made once a profiler is connected, on the GL context the passes are timed on
+bool gpuReady( State & s )
+{
+	if ( !___tracy_connected() || !s.gl )
+		return false;
+	if ( gpuCtx != s.ctx ) {
+		gpuCtx = s.ctx;
+		GLint64 t = 0;
+		s.gl->glGetInteger64v( GL_TIMESTAMP, &t );
+		___tracy_emit_gpu_new_context( { int64_t( t ), 1.0f, 0, 0, 1 /* GpuContextType::OpenGl */ } );
+		static const char kName[] = "NifSkope GL";
+		___tracy_emit_gpu_context_name( { 0, kName, uint16_t( sizeof( kName ) - 1 ) } );
+	}
+	return true;
+}
+
+void gpuTime( GLuint q, quint16 id )
+{
+	GLuint64 t = 0;
+	st().gl->glGetQueryObjectui64v( q, GL_QUERY_RESULT, &t );
+	___tracy_emit_gpu_time( { int64_t( t ), id, 0 } );
+}
+} // namespace Tz
+#endif
+
 //! Reads a finished slot back, logs its frame and adds it to the window; its queries go back to the pool.
 //! lane MODULES1: the telemetry cost row, one per WW_TELEMETRY_RATE frames: frame, zones, sub-stages, per-module sums
 static void costRow( const Slot & sl, const double * gpu, double gpuFrame, const double * sub, const bool * subSeen,
@@ -350,6 +445,12 @@ void collect( Slot & sl )
 	GLuint64 samples[Count] = {}, prims[Count] = {}, frags[Count] = {};
 	for ( const Mark & m : sl.marks ) {
 		gpu[m.pass] += gpuMs( m.q0, m.q1 );
+#ifdef WW_TRACY
+		if ( m.tq && ___tracy_connected() ) {
+			Tz::gpuTime( m.q0, m.tq0 );
+			Tz::gpuTime( m.q1, m.tq1 );
+		}
+#endif
 		s.pool.push_back( m.q0 );
 		s.pool.push_back( m.q1 );
 		if ( m.qs ) {
@@ -582,9 +683,21 @@ void begin( int pass )
 	if ( s.sync && pass < CullCamera )
 		s.gl->glFinish();
 	s.open[pass] = nowNs();
+#ifdef WW_TRACY
+	Tz::makeLocs();
+	Tz::zoneOpen( &Tz::passLoc[pass], 0, pass );
+#endif
 	if ( pass < CullCamera ) {
 		Mark m{ pass, query(), query() };
 		s.gl->glQueryCounter( m.q0, GL_TIMESTAMP );
+#ifdef WW_TRACY
+		if ( Tz::gpuReady( s ) ) {
+			m.tq = true;
+			m.tq0 = Tz::nextQuery++;
+			m.tq1 = Tz::nextQuery++;
+			___tracy_emit_gpu_zone_begin( { uint64_t( &Tz::gpuLoc[pass] ), m.tq0, 0 } );
+		}
+#endif
 		if ( s.census ) {	// top-level passes never nest (above), so one query of each target is open at a time
 			m.qs = cquery();
 			m.qp = cquery();
@@ -616,8 +729,15 @@ void end( int pass )
 		sl.wait[pass] += double( nowNs() - w0 ) * 1e-6;
 	}
 	sl.cpu[pass] += double( nowNs() - s.open[pass] ) * 1e-6;
+#ifdef WW_TRACY
+	Tz::zoneClose( 0, pass );
+#endif
 	if ( pass < CullCamera ) {
 		s.gl->glQueryCounter( sl.marks[s.openMark[pass]].q1, GL_TIMESTAMP );
+#ifdef WW_TRACY
+		if ( sl.marks[s.openMark[pass]].tq )
+			___tracy_emit_gpu_zone_end( { sl.marks[s.openMark[pass]].tq1, 0 } );
+#endif
 		if ( sl.marks[s.openMark[pass]].qs ) {
 			s.gl->glEndQuery( GL_SAMPLES_PASSED );
 			s.gl->glEndQuery( GL_PRIMITIVES_GENERATED );
@@ -643,6 +763,42 @@ void cpuSubAdd( int sub, qint64 ns )
 	sl.cpuSub[sub] += double( ns ) * 1e-6;
 	sl.cpuSubN[sub]++;
 }
+
+#ifdef WW_TRACY
+void tracySubBegin( int sub )
+{
+	if ( !st().inFrame || sub < 0 || sub >= CpuSubCount ) {
+		Tz::subStack.push_back( -1 );	// not opened: tracySubEnd pops this and does nothing
+		Tz::samplerSaved.push_back( 0 );
+		return;
+	}
+	Tz::makeLocs();
+	Tz::zoneOpen( &Tz::subLoc[sub], 1, sub );
+	Tz::subStack.push_back( sub );
+	Tz::samplerSaved.push_back( Sampler::pass.load() );
+	Sampler::pass = 1000 + sub;	// PERFCPU1: a WW_PROF_SAMPLE sample inside a CPU sub reads 1000 + the sub
+}
+
+void tracySubEnd()
+{
+	if ( Tz::subStack.empty() )
+		return;
+	const int sub = Tz::subStack.back();
+	const int saved = Tz::samplerSaved.back();
+	Tz::subStack.pop_back();
+	Tz::samplerSaved.pop_back();
+	if ( sub < 0 )
+		return;
+	Tz::zoneClose( 1, sub );
+	if ( st().inFrame )
+		Sampler::pass = saved;
+}
+
+void tracyMessage( const char * text )
+{
+	___tracy_emit_logStringL( TracyMessageSeverityInfo, 0, 0, text );
+}
+#endif
 
 void addCpu( int pass, qint64 ns )
 {
@@ -688,6 +844,9 @@ void frameEnd()
 	State & s = st();
 	if ( s.memArmed > 0 && --s.memArmed == 0 )
 		memLog( "first frames drawn" );
+#ifdef WW_TRACY
+	___tracy_emit_frame_mark( nullptr );
+#endif
 	if ( !s.inFrame )
 		return;
 	Slot & sl = s.ring[s.frame % kSlots];
@@ -697,6 +856,9 @@ void frameEnd()
 	}
 	for ( int k = 0; k < SubCount; k++ )
 		subEnd( k );
+#ifdef WW_TRACY
+	Tz::closeAll();
+#endif
 	s.inFrame = false;
 	Sampler::pass = -2;
 	s.gl->glQueryCounter( sl.f1, GL_TIMESTAMP );
