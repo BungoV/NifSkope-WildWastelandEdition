@@ -144,7 +144,7 @@ inline const ClassRow & classRow( const char * cls )
 		{ "dust", 8000, "dust", 30, 0.2, "cumulus", 1.0, 8, 4, 0, 1200 },
 		{ "duststorm", 800, "dust", 20, 0.4, "cumulus", 1.0, 15, 5, 0, 2500 },
 		{ "smoke", 2000, "smoke", 40, 0.6, "stratocumulus", 1.5, 10, 6, 0, 2500 },
-		{ "radstorm", 2500, "glowing", 60, 1.0, "cumulonimbus", 2.5, 14, 3, 6, 2500 },
+		{ "radstorm", 2500, "glowing", 60, 1.0, "cumulonimbus", 2.5, 14, 3, 6, 1200 },	// haze in the mixed layer: CALIOP Za 1.2 km, eastern US (Koffi 2012); 2500 m went white at noon
 	};
 	for ( const ClassRow & r : rows )
 		if ( std::string( r.name ) == cls )

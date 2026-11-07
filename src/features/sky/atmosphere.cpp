@@ -552,7 +552,16 @@ bool wwAtmoDrawSky( Scene * scene, const WwAtmoInputs & in, QString * line )
 	// scene units: displayed = pi k L, k = the Day sunlight luminance / the 45-degree sun's transmittance
 	float t45[3];
 	cpuTrans( 0.0f, 0.70710678f, s.haze, noOzone, t45, g_ozone );
-	const float tl = std::max( 1e-4f, lum( t45 ) );
+	float tl = std::max( 1e-4f, lum( t45 ) );
+	/* MODULES1 part 23: the scale comes from a clear day's air at most. Dividing by the weather's own hazy T45 lifted a
+	 * radstorm's sky and aerial perspective ~230x (white at noon) and the coast rad fog's ~4x (blown). Red
+	 * WW_ATMO_RED=hazek: the weather's own T45 again. Weathers as clear as the clear day keep their scale. */
+	if ( !red( "hazek" ) ) {
+		const float ref[3] = { WwWeatherRecxMath::hazeFromVisibility( kClearDayVisM, kRay[1] + kMieE ), 1.2f, 0.0f };
+		float tRef[3];
+		cpuTrans( 0.0f, 0.70710678f, ref, noOzone, tRef, g_ozone );
+		tl = std::max( tl, lum( tRef ) );
+	}
 	const float sunK = kPi * in.sunLum / tl;
 	const float moonK = in.moonUp ? kPi * in.moonLum / tl : 0.0f;
 

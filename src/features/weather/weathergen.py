@@ -39,7 +39,7 @@ REGIONS = {
     'glowingsea':   (16, 'glowing',  0.25),
 }
 HAZE_HEIGHT = {'clear': 1200, 'clearest': 1200, 'polluted': 1200, 'overcast': 1200, 'dust': 1200,
-               'duststorm': 2500, 'smoke': 2500, 'radstorm': 2500,
+               'duststorm': 2500, 'smoke': 2500, 'radstorm': 1200,	# radstorm: CALIOP Za 1.2 km, eastern US (Koffi 2012)
                'rain': 600, 'drizzle': 600, 'storm': 600, 'snow': 600, 'mist': 200, 'fog': 120}
 PRECIP_RATE = {'drizzle': 1.0, 'rain': 4.0, 'storm': 8.0, 'snow': 1.0}	# mm/h at the vanilla density 7
 WETTING = {'storm': 15, 'rain': 15, 'drizzle': 30, 'snow': 30}
