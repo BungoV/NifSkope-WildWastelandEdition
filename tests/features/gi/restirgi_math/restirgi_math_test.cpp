@@ -209,6 +209,16 @@ static void mirror()
 		const V3 nn = rtddgi::normalize( rv( 0, 1 ) );
 		const V3 d = restirgi::cosineDir( nn, u( 3 ), u( 4 ) );
 		worst = std::max( worst, gap3( d, glsl::rgCosineDir( gv( nn ), u( 3 ), u( 4 ) ) ) );
+		{
+			// the blue pair is integer math: bit for bit, both dimensions, any pixel / frame / seed; and the white red bit
+			const int px = int( s % 4096u ), py = int( ( s >> 12 ) % 4096u );
+			const uint32_t fr = s >> 20, sd = restir::hash( s );
+			for ( int dim = 0; dim < 2; dim++ )
+				if ( restirgi::blue( px, py, fr, sd, dim ) != glsl::rgBlue( px, py, fr, sd, dim ) )
+					worst = 1.0;
+			const int wr = ( k & 1 ) ? restirgi::kRedWhite : 0;
+			worst = std::max( worst, gap3( restirgi::bounceDir( nn, px, py, 4096, sd, fr, wr ), glsl::rgBounceDir( gv( nn ), px, py, 4096, sd, fr, wr ) ) );
+		}
 		const int red = k & ( restirgi::kRedNoJacobian | restirgi::kRedNoPdf );
 		restirgi::Sample y, y2;
 		y.hit = ( k & 8 ) == 0;

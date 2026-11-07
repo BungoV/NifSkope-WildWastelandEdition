@@ -8,6 +8,7 @@
 #define RESTIRGI_BIT_NOVIS 2        // kRedNoVis
 #define RESTIRGI_BIT_NOPDF 4        // kRedNoPdf
 #define RESTIRGI_BIT_NOTEMPORAL 8   // kRedNoTemporal
+#define RESTIRGI_BIT_WHITE 16       // kRedWhite (not a red: the white-noise bounce)
 #define RESTIRGI_HISTORY_CAP 20.0   // kHistoryCap
 #define RESTIRGI_EPS 0.001          // kEps
 #define RESTIRGI_PI 3.14159265358979
@@ -67,6 +68,25 @@ vec3 rgCosineDir( vec3 n, float u1, float u2 )
 	const float ph = 2.0 * RESTIRGI_PI * u2;
 	const float z = sqrt( max( 0.0, 1.0 - u1 ) );
 	return normalize( t * ( r * cos( ph ) ) + b * ( r * sin( ph ) ) + n * z );
+}
+
+// MIRROR restirgimath.h blue: an R2 lattice dither a pixel walked by the 2D R2 sequence a frame (integer math)
+float rgBlue( int x, int y, uint f, uint seed, int dim )
+{
+	const uint a = dim == 0 ? 3242174889u : 2447445414u;
+	const uint b = dim == 0 ? 2447445414u : 3242174889u;
+	const uint v = uint( x ) * a + uint( y ) * b + f * a + restirSeed( seed, 0u, uint( 7 + dim ) );
+	return float( v >> 8u ) * ( 1.0 / 16777216.0 );
+}
+
+// MIRROR restirgimath.h bounceDir
+vec3 rgBounceDir( vec3 n, int x, int y, int W, uint seed, uint f, int red )
+{
+	if ( ( red & RESTIRGI_BIT_WHITE ) != 0 ) {
+		const uint s0 = restirSeed( seed ^ uint( y * W + x ), f, 0u );
+		return rgCosineDir( n, restirRand( s0, 0u ), restirRand( s0, 1u ) );
+	}
+	return rgCosineDir( n, rgBlue( x, y, f, seed, 0 ), rgBlue( x, y, f, seed, 1 ) );
 }
 
 // MIRROR restirgimath.h dirTo

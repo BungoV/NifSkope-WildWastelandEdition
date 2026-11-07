@@ -3,8 +3,9 @@
 // High). The CPU twin is src/features/gi/restirgimath.h restirgi::frame() (its pass 0 = mode 0, pass 1 = mode 1); the
 // per-pixel rules are restirgi_common.glsl (MIRROR restirgimath.h). A bounce ray's hit is shaded as a probe ray's
 // (trace_body.glsl: direct + the volume's irradiance, x albedo / pi, + Le), a miss returns the volume's miss radiance.
-// mode 2 keeps a running mean a pixel (reprojected, at most knobs.y frames), mode 3 filters it in a depth / normal
-// aware window and writes the irradiance the cell shader reads. Set 0 = the volume's own set, set 1 = the buffers below.
+// mode 2 keeps a running mean a pixel (reprojected, at most knobs.y frames, clamped to the like neighbours' estimates),
+// mode 3 filters it in a depth / normal aware window (twice as wide while the mean is young: one frame must stand on its
+// own, history only polishes) and writes the irradiance the cell shader reads. Set 0 = the volume's own set, set 1 = the buffers below.
 #extension GL_EXT_ray_query : require
 #extension GL_GOOGLE_include_directive : require
 layout( local_size_x = 64 ) in;
@@ -112,9 +113,8 @@ void modeCandidate( int x, int y, uint id )
 		return;
 	const int red = G.opts.w;
 	const uint pix = uint( G.size.w ) ^ id;
-	const uint s0 = restirSeed( pix, uint( G.size.z ), 0u );
 	const uint s1 = restirSeed( pix, uint( G.size.z ), 1u );
-	const vec3 d = rgCosineDir( p.N, restirRand( s0, 0u ), restirRand( s0, 1u ) );
+	const vec3 d = rgBounceDir( p.N, x, y, G.size.x, uint( G.size.w ), uint( G.size.z ), red );
 	const RgRes yv = rgTrace( p.P + p.N * RESTIRGI_EPS, d );
 	candLo[id] = vec4( yv.Lo, yv.hit );
 	const RgRes r = rgCandidate( p.P, p.N, yv, red );
@@ -191,8 +191,10 @@ void modeSpatial( int x, int y, uint id )
 	est[id] = vec4( rgEstimate( p.P, p.N, r ), 1.0 );
 }
 
-// mode 2: the running mean, through the reprojected pixel (none: starts over)
-void modeAccumulate( uint id )
+// mode 2: the running mean, through the reprojected pixel (none: starts over; mode 0 found none on a cut, a light change
+// or a disocclusion). The history is clamped to the 3 x 3 like pixels' estimates first [Karis 2014, TAA's clamp], so a
+// stale mean (a light gone, a thing moved) cannot outlive the frame that shows it.
+void modeAccumulate( int x, int y, uint id )
 {
 	const vec4 e = est[id];
 	if ( e.w < 0.5 ) {
@@ -200,9 +202,29 @@ void modeAccumulate( uint id )
 		return;
 	}
 	const int hp = histPix[id];
-	const vec4 a = hp >= 0 ? accPrev[hp] : vec4( 0.0 );
+	if ( hp < 0 ) {
+		acc[id] = vec4( e.xyz, 1.0 );
+		return;
+	}
+	const vec4 g = gbuf[id];
+	vec3 lo = e.xyz, hi = e.xyz;
+	for ( int dy = -1; dy <= 1; dy++ )
+		for ( int dx = -1; dx <= 1; dx++ ) {
+			const int qx = x + dx, qy = y + dy;
+			if ( ( dx == 0 && dy == 0 ) || qx < 0 || qy < 0 || qx >= G.size.x || qy >= G.size.y )
+				continue;
+			const int q = qy * G.size.x + qx;
+			const vec4 h = gbuf[q];
+			const vec4 eq = est[q];
+			if ( eq.w < 0.5 || !restirSimilar( g.w, g.xyz, h.w, h.xyz ) )
+				continue;
+			lo = min( lo, eq.xyz );
+			hi = max( hi, eq.xyz );
+		}
+	const vec4 a = accPrev[hp];
+	const vec3 ah = clamp( a.xyz, lo, hi );
 	const float n = min( a.w + 1.0, max( G.knobs.y, 1.0 ) );
-	acc[id] = vec4( a.xyz + ( e.xyz - a.xyz ) / n, n );
+	acc[id] = vec4( ah + ( e.xyz - ah ) / n, n );
 }
 
 // mode 3: the running means of the window's like pixels (depth within 10 %, normal within 25 degrees: restirSimilar)
@@ -212,10 +234,11 @@ void modeFilter( int x, int y, uint id )
 	vec3 s = vec3( 0.0 );
 	float n = 0.0;
 	const int f = G.opts.z;
+	const int st = acc[id].w < 4.0 ? 2 : 1;   // a young mean (TAA off, a cut, a disocclusion): the same taps, twice as wide
 	if ( g.w > 0.0 && g.w < 1e5 )
 		for ( int dy = -f; dy <= f; dy++ )
 			for ( int dx = -f; dx <= f; dx++ ) {
-				const int qx = x + dx, qy = y + dy;
+				const int qx = x + dx * st, qy = y + dy * st;
 				if ( qx < 0 || qy < 0 || qx >= G.size.x || qy >= G.size.y )
 					continue;
 				const vec4 h = gbuf[qy * G.size.x + qx];
@@ -242,7 +265,7 @@ void main()
 	else if ( mode == 1u )
 		modeSpatial( x, y, id );
 	else if ( mode == 2u )
-		modeAccumulate( id );
+		modeAccumulate( x, y, id );
 	else
 		modeFilter( x, y, id );
 }

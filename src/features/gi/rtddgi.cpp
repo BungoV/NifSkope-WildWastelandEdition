@@ -1997,6 +1997,7 @@ int restirgiCli( const QStringList & args )
 	int W = 160, H = 96, frames = 4, updates = 8;
 	float fov = 55.0f;
 	uint32_t seed = 0x9e3779b9u;
+	int jumpAt = -1, relightAt = -1;   // a frame whose previous camera is far away / whose sceneKey changes
 	bakert::RestirGiGpuIn base;
 	auto addLight = [&L]( const QStringList & v ) {
 		WwCellLight l;
@@ -2022,6 +2023,10 @@ int restirgiCli( const QStringList & args )
 		else if ( a == QLatin1String( "--seed" ) ) { seed = nx.toUInt(); i++; }
 		else if ( a == QLatin1String( "--spatial" ) ) { base.spatial = std::clamp( nx.toInt(), 0, 15 ); i++; }
 		else if ( a == QLatin1String( "--radius" ) ) { base.radius = std::clamp( nx.toInt(), 1, 16 ); i++; }
+		else if ( a == QLatin1String( "--filter" ) ) { base.filter = std::clamp( nx.toInt(), 0, 8 ); i++; }
+		else if ( a == QLatin1String( "--acc" ) ) { base.accFrames = std::max( 1.0f, nx.toFloat() ); i++; }
+		else if ( a == QLatin1String( "--jump" ) ) { jumpAt = nx.toInt(); i++; }
+		else if ( a == QLatin1String( "--relight" ) ) { relightAt = nx.toInt(); i++; }
 		else if ( a == QLatin1String( "--size" ) ) {
 			const QStringList v = nx.split( ',' );
 			if ( v.size() == 2 ) {
@@ -2057,7 +2062,8 @@ int restirgiCli( const QStringList & args )
 	if ( soupPath.isEmpty() || outDir.isEmpty() || rc.size() != 4 || L.lights.isEmpty() || !haveCam ) {
 		std::fprintf( stderr, "usage: restirgi --soup <file> --rect minX,minY,maxX,maxY --out <dir> --cam ex,ey,ez,tx,ty,tz "
 			"--light x,y,z,radius,r,g,b [...] [--lights <file>] [--size W,H] [--fov deg] [--frames n] [--updates n] [--seed n] "
-			"[--spatial K] [--radius R] [--red nojacobian,novis,nopdf,notemporal]\n" );
+			"[--spatial K] [--radius R] [--filter f] [--acc n] [--jump frame] [--relight frame] "
+			"[--red nojacobian,novis,nopdf,notemporal,white]\n" );
 		return 2;
 	}
 	for ( int k = 0; k < 4; k++ )
@@ -2066,7 +2072,8 @@ int restirgiCli( const QStringList & args )
 	for ( const QString & r : redText.split( ',', Qt::SkipEmptyParts ) ) {
 		const QString t = r.trimmed();
 		red |= t == QLatin1String( "nojacobian" ) ? restirgi::kRedNoJacobian : t == QLatin1String( "novis" ) ? restirgi::kRedNoVis
-			: t == QLatin1String( "nopdf" ) ? restirgi::kRedNoPdf : t == QLatin1String( "notemporal" ) ? restirgi::kRedNoTemporal : 0;
+			: t == QLatin1String( "nopdf" ) ? restirgi::kRedNoPdf : t == QLatin1String( "notemporal" ) ? restirgi::kRedNoTemporal
+			: t == QLatin1String( "white" ) ? restirgi::kRedWhite : 0;
 	}
 	ProbeSoup soup;
 	QString err;
@@ -2169,16 +2176,20 @@ int restirgiCli( const QStringList & args )
 	std::vector<restirgi::Sample> cand0( n );
 	for ( size_t i = 0; i < n; i++ )
 		if ( px[i].valid ) {
-			const uint32_t s0 = restir::pixelSeed( seed ^ uint32_t( i ), 0u, 0 );
-			const V3 d = restirgi::cosineDir( px[i].n, restir::rand01( s0, 0 ), restir::rand01( s0, 1 ) );
+			const V3 d = restirgi::bounceDir( px[i].n, int( i % size_t( W ) ), int( i / size_t( W ) ), W, seed, 0u, red );
 			cand0[i] = scene.trace( px[i].x + px[i].n * restirgi::kEps, d );
 		}
 	bakert::RestirGiGpuOut go;
+	std::vector<float> est0, out0;
+	double wallSum = 0;
 	bool gpuOk = true;
 	int worstFrame = -1;
 	double worstMatch = 1.0;
 	for ( int fr = 0; fr < frames && gpuOk; fr++ ) {
 		QElapsedTimer tm;
+		// a cut or a light change: the twin starts over by hand, the kernel must find it on its own (else the match fails)
+		if ( fr == jumpAt || fr == relightAt )
+			hist.clear();
 		tm.start();
 		restirgi::frame( scene, px, W, H, seed, uint32_t( fr ), set, red, hist, est );
 		const double cpuMs = double( tm.nsecsElapsed() ) / 1e6;
@@ -2192,6 +2203,9 @@ int restirgiCli( const QStringList & args )
 		std::copy( C.proj, C.proj + 4, in.proj );
 		std::copy( C.rows, C.rows + 12, in.prows );
 		std::copy( C.proj, C.proj + 4, in.pproj );
+		if ( fr == jumpAt )
+			in.prows[3] += 1000.0f;
+		in.sceneKey = relightAt >= 0 && fr >= relightAt ? 1u : 0u;
 		in.history = fr > 0;
 		in.gbuf = gbuf.data();
 		in.readBack = true;
@@ -2239,9 +2253,34 @@ int restirgiCli( const QStringList & args )
 		std::printf( "frame %d: estimate within 1 %% %.3f %% of pixels; mean twin %.5f gpu %.5f; mean |twin - gpu| / mean %.5f; twin %.1f ms, "
 			"gpu wall %.1f ms\n", fr, 100.0 * frac, sumC / vd, sumG / vd, sumAbs / std::max( 1e-9, sumC ), cpuMs, go.msWall );
 		std::fflush( stdout );
+		if ( fr == 0 ) {
+			est0 = go.est;
+			out0 = go.out;
+		}
+		wallSum += fr > 0 ? go.msWall : 0.0;
 	}
-	if ( gpuOk )
+	if ( gpuOk ) {
 		std::printf( "restirgi: worst frame %d, %.3f %% of pixels within 1 %%\n", worstFrame, 100.0 * worstMatch );
+		std::printf( "history dropped: cuts %u, light changes %u\n", go.cuts, go.relights );
+		std::printf( "gpu wall mean (frames 1..) %.3f ms, filter half %d\n", wallSum / std::max( 1, frames - 1 ), base.filter );
+		// bar (1), one frame stands alone: frame 0 (no history) against the last frame's filtered mean, the reference
+		if ( frames > 1 && go.out.size() == n * 4 && out0.size() == n * 4 ) {
+			double ref = 0, dOut = 0, dEst = 0;
+			int v = 0;
+			for ( size_t i = 0; i < n; i++ ) {
+				if ( !px[i].valid )
+					continue;
+				v++;
+				const double r = restir::luminance( go.out[i * 4], go.out[i * 4 + 1], go.out[i * 4 + 2] );
+				ref += r;
+				dOut += std::fabs( restir::luminance( out0[i * 4], out0[i * 4 + 1], out0[i * 4 + 2] ) - r );
+				dEst += std::fabs( restir::luminance( est0[i * 4], est0[i * 4 + 1], est0[i * 4 + 2] ) - r );
+			}
+			ref = std::max( ref, 1e-9 );
+			std::printf( "one frame: filtered frame 0 vs frame %d mean |diff| / mean %.4f; raw estimate %.4f; the filter cuts it %.2fx (%d pixels)\n",
+				frames - 1, dOut / ref, dEst / ref, dEst / std::max( dOut, 1e-9 ), v );
+		}
+	}
 	QFile o( outDir + QStringLiteral( "/restirgi_frame.tsv" ) );
 	if ( o.open( QIODevice::WriteOnly | QIODevice::Text ) ) {
 		o.write( "x\ty\tvalid\tE_twin\tE_gpu\tLo0_twin\thit0_twin\n" );

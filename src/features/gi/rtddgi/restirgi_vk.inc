@@ -97,7 +97,27 @@ struct RgGpu
 	VkCommandBuffer cb = VK_NULL_HANDLE;
 	VkFence fence = VK_NULL_HANDLE;
 	VkSemaphore vkDone = VK_NULL_HANDLE, glDone = VK_NULL_HANDLE;
+	uint64_t sceneKey = 0;
+	bool keyed = false;
+	uint32_t cuts = 0, relights = 0;
 };
+
+/*! a cut: between the previous view and this one the camera jumped more than 256 units (3.6 m in a frame: no walk or
+ *  vehicle, a teleport or a shot change), turned more than 30 degrees, or the lens changed by more than 5 %. The
+ *  reprojection would still find "like" pixels by chance on a cut; this drops the whole history instead. */
+static bool rgCut( const RestirGiGpuIn & in )
+{
+	const float dx = in.rows[3] - in.prows[3], dy = in.rows[7] - in.prows[7], dz = in.rows[11] - in.prows[11];
+	if ( dx * dx + dy * dy + dz * dz > 256.0f * 256.0f )
+		return true;
+	const float fw = in.rows[2] * in.prows[2] + in.rows[6] * in.prows[6] + in.rows[10] * in.prows[10];   // the view axes' cosine
+	if ( !( fw > 0.866f ) )
+		return true;
+	for ( int k = 0; k < 2; k++ )
+		if ( !( std::fabs( in.proj[k] - in.pproj[k] ) <= 0.05f * std::fabs( in.pproj[k] ) ) )
+			return true;
+	return false;
+}
 
 std::map<const DdgiGpuSession *, RgGpu *> & rgStates()
 {
@@ -328,7 +348,22 @@ bool restirGiGpuStep( DdgiGpuSession * s, const RestirGiGpuIn & in, RestirGiGpuO
 		return false;
 	}
 	vk.vkWaitForFences( D.dev, 1, &g->fence, VK_TRUE, UINT64_MAX );
+	// strict history: a cut, a light change or new buffers start every pixel over (disocclusion is mode 0's, a pixel each)
+	bool history = in.history;
+	if ( history && rgCut( in ) ) {
+		history = false;
+		g->cuts++;
+	}
+	if ( history && g->keyed && g->sceneKey != in.sceneKey ) {
+		history = false;
+		g->relights++;
+	}
+	g->sceneKey = in.sceneKey;
+	g->keyed = true;
+	out->cuts = g->cuts;
+	out->relights = g->relights;
 	if ( g->W != in.W || g->H != in.H || ( g->shared && in.gbuf ) ) {
+		history = false;
 		if ( !in.gbuf && g->shared ) {
 			out->why = "the shared g-buffer is for another size (restirGiGpuShare first)";
 			return false;
@@ -348,7 +383,7 @@ bool restirGiGpuStep( DdgiGpuSession * s, const RestirGiGpuIn & in, RestirGiGpuO
 		pi[5] = in.radius;
 		pi[6] = in.filter;
 		pi[7] = in.red;
-		p[8] = in.history ? 1.0f : 0.0f;
+		p[8] = history ? 1.0f : 0.0f;
 		p[9] = in.accFrames;
 		std::memcpy( p + 12, in.rows, sizeof in.rows );
 		std::memcpy( p + 24, in.proj, sizeof in.proj );

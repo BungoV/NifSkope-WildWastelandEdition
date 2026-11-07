@@ -1241,7 +1241,7 @@ int restirGiRedBits()
 	for ( const QString & r : wwEnvStr( "WW_CELL_RESTIRGI_RED" ).split( QLatin1Char( ',' ), Qt::SkipEmptyParts ) ) {
 		const QString t = r.trimmed();
 		b |= t == QLatin1String( "nojacobian" ) ? 1 : t == QLatin1String( "novis" ) ? 2 : t == QLatin1String( "nopdf" ) ? 4
-			: t == QLatin1String( "notemporal" ) ? 8 : 0;
+			: t == QLatin1String( "notemporal" ) ? 8 : t == QLatin1String( "white" ) ? 16 : 0;
 	}
 	return b;
 }
@@ -1477,6 +1477,15 @@ void rtddgiRestirGiPass( Scene * scene )
 	in.frame = G.frame++;
 	in.seed = 0x9e3779b9u;
 	in.red = restirGiRedBits();
+	{
+		// the lights as the volume packs them (on / off, moved, recoloured): any change drops the history
+		const std::vector<float> & pl = c.live->live.packedLights();
+		uint64_t h = 1469598103934665603ull;
+		const unsigned char * b = reinterpret_cast<const unsigned char *>( pl.data() );
+		for ( size_t i = 0; i < pl.size() * sizeof( float ); i++ )
+			h = ( h ^ b[i] ) * 1099511628211ull;
+		in.sceneKey = h;
+	}
 	in.beforeSubmit = [&G, &sh, fn]() {
 		sh.signalSem( G.semGl, 2, G.buf, 0, nullptr, nullptr );
 		fn->glFlush();
@@ -1496,9 +1505,10 @@ void rtddgiRestirGiPass( Scene * scene )
 	std::copy( in.rows, in.rows + 12, G.prows );
 	std::copy( in.proj, in.proj + 4, G.pproj );
 	if ( ( G.runs++ % 64 ) == 0 )
-		restirSay( G, QStringLiteral( "on %1 x %2 (neighbours %3, radius %4, running mean %5 frames), frame %6, device wall %7 ms, red %8" )
+		restirSay( G, QStringLiteral( "on %1 x %2 (neighbours %3, radius %4, running mean %5 frames), frame %6, device wall %7 ms, red %8, "
+			"history dropped: cuts %9, light changes %10" )
 			.arg( t.w ).arg( t.h ).arg( in.spatial ).arg( in.radius ).arg( in.accFrames ).arg( in.frame ).arg( out.msWall, 0, 'f', 3 )
-			.arg( in.red ) );
+			.arg( in.red ).arg( out.cuts ).arg( out.relights ) );
 }
 
 namespace {

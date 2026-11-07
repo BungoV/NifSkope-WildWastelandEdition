@@ -40,6 +40,7 @@ namespace restirgi {
 using rtddgi::V3;
 
 constexpr int kRedNoJacobian = 1, kRedNoVis = 2, kRedNoPdf = 4, kRedNoTemporal = 8;
+constexpr int kRedWhite = 16;          // not a red: the white-noise bounce (the one-frame noise pair's before)
 constexpr float kHistoryCap = 20.0f;   // [Ouyang 2021 sec. 4.3 / Bitterli 2020 sec. 6]
 constexpr float kEps = 1e-3f;          // ray offsets, in the scene's units
 
@@ -85,6 +86,26 @@ inline V3 cosineDir( V3 n, float u1, float u2 )
 	const float r = std::sqrt( u1 ), ph = 2.0f * rtddgi::kPi * u2;
 	const float z = std::sqrt( std::max( 0.0f, 1.0f - u1 ) );
 	return rtddgi::normalize( t * ( r * std::cos( ph ) ) + b * ( r * std::sin( ph ) ) + n * z );
+}
+
+/*! one of the bounce's random pair: an R2 lattice dither a pixel (blue-noise-like in space) walked by the 2D R2 sequence a
+ *  frame (low discrepancy in time) [Roberts 2018, "The unreasonable effectiveness of quasirandom sequences"]. Integer
+ *  math, so the kernel's rgBlue matches bit for bit. Every pixel's own sequence is equidistributed: unbiased over frames. */
+inline float blue( int x, int y, uint32_t f, uint32_t seed, int dim )
+{
+	const uint32_t a = dim == 0 ? 3242174889u : 2447445414u, b = dim == 0 ? 2447445414u : 3242174889u;
+	const uint32_t v = uint32_t( x ) * a + uint32_t( y ) * b + f * a + restir::pixelSeed( seed, 0u, uint32_t( 7 + dim ) );
+	return float( v >> 8u ) * ( 1.0f / 16777216.0f );
+}
+
+//! the bounce direction of pixel (x, y) at frame f (kRedWhite: the white-noise pair, the noise pair's before)
+inline V3 bounceDir( V3 n, int x, int y, int W, uint32_t seed, uint32_t f, int red )
+{
+	if ( red & kRedWhite ) {
+		const uint32_t s0 = restir::pixelSeed( seed ^ uint32_t( y * W + x ), f, 0 );
+		return cosineDir( n, restir::rand01( s0, 0 ), restir::rand01( s0, 1 ) );
+	}
+	return cosineDir( n, blue( x, y, f, seed, 0 ), blue( x, y, f, seed, 1 ) );
 }
 
 //! the direction from receiver x to the sample (a hit's point or a miss's direction)
@@ -195,8 +216,8 @@ inline void frame( const Scene & scene, const std::vector<Pixel> & px, int W, in
 			tmp[static_cast<size_t>( i )] = Res();
 			continue;
 		}
-		const uint32_t s0 = restir::pixelSeed( seed ^ uint32_t( i ), f, 0 ), s1 = restir::pixelSeed( seed ^ uint32_t( i ), f, 1 );
-		const V3 d = cosineDir( p.n, restir::rand01( s0, 0 ), restir::rand01( s0, 1 ) );
+		const uint32_t s1 = restir::pixelSeed( seed ^ uint32_t( i ), f, 1 );
+		const V3 d = bounceDir( p.n, i % W, i / W, W, seed, f, red );
 		const Sample y = scene.trace( p.x + p.n * kEps, d );
 		Res r = candidate( p.x, p.n, y, red );
 		const Res & h = hist[static_cast<size_t>( i )];

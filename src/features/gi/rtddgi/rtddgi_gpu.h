@@ -238,14 +238,15 @@ struct RestirGiGpuIn
 {
 	int W = 0, H = 0;
 	uint32_t frame = 0, seed = 0;
-	int red = 0;                          // restirgi_common.glsl RESTIRGI_BIT_* (nojacobian, novis, nopdf, notemporal)
+	int red = 0;                          // restirgi_common.glsl RESTIRGI_BIT_* (nojacobian, novis, nopdf, notemporal, white)
 	int spatial = 4, radius = 3, filter = 2;
-	float accFrames = 16.0f;              // the running mean keeps at most this many frames
+	float accFrames = 8.0f;               // the running mean keeps at most this many frames (history only polishes)
 	float rows[12] = { 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0 };   // view -> the soup's local frame
 	float proj[4] = { 1, 1, 0, 0 };
 	float prows[12] = { 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0 };
 	float pproj[4] = { 1, 1, 0, 0 };
-	bool history = false;
+	bool history = false;                 // dropped anyway on a cut (rows vs prows) or a sceneKey change
+	uint64_t sceneKey = 0;                // the lights (and whatever else lights the bounce): a change drops the history
 	const float * gbuf = nullptr;         // host g-buffer W x H x 4 (the CLI); nullptr: GL wrote the shared one
 	bool readBack = false;                // copy the estimate, the bounce's Lo and the filtered output to the host
 	std::function<bool()> beforeSubmit;
@@ -255,6 +256,7 @@ struct RestirGiGpuOut
 	bool ok = false, busy = false;
 	std::string why;
 	double msWall = 0;
+	uint32_t cuts = 0, relights = 0;      // the history drops so far on this session's buffers (a cut, a sceneKey change)
 	std::vector<float> est;               // readBack: 4 a pixel (the frame's estimate E rgb, 1 valid)
 	std::vector<float> cand;              // 4 a pixel (the bounce's Lo rgb, hit 1 / miss 0; -1 no pixel)
 	std::vector<float> out;               // 4 a pixel (the filtered E rgb, linear depth)
