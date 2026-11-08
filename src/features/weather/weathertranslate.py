@@ -14,8 +14,8 @@ The models (each one is the whole conversion; nothing else is read from the reco
   hazeAlbedo   the record's day fogFar colour (sRGB -> linear), normalised to its largest channel, times the largest
                single-scatter albedo of the haze type at the file's humidity (weathergen.h humidityGrowth): the sun of
                the physical sky is white, so the record's tint lives in what the haze gives back. No drawn colour.
-               A glowing haze (radstorm, Glowing Sea, Far Harbor fog) takes its preset's albedo PER CHANNEL x the tint,
-               G kept on top (part 26, bungo 11-08: radstorms are green).
+               A glowing haze (radstorm, Glowing Sea, Far Harbor fog) whose tint does not leave G on top takes its
+               preset's albedo per channel (part 26, bungo 11-08: radstorms are green).
   precipitation, wind, lightning, transitions: the generated rung already reads these from the record's MNAM/SPGD and
                DATA bytes (weathergen.py generate); they are noted per key in `_derivedFrom`. A dry radstorm
                (lightning cumulonimbus, MNAM NULL) gains rain by our file (radstorm_rain; `_added`, red
@@ -99,15 +99,15 @@ def haze_albedo(rgb, haze, humidity):
     if m <= 0.0:
         return None
     ga = grown_albedo(haze, humidity)
-    if haze == 'glowing':
-        # MODULES1 part 26 (bungo 11-08 "why is radstorm orange still and not green"): the glowing dust's own spectral
-        # albedo per channel x the record tint. The largest channel alone (below) kept the record's yellow
-        # ([44, 47, 29] -> 0.86 / 0.97 / 0.42, R ~ G) and lost the preset's green. A tint that would not leave G on top
-        # by GLOW_MARGIN keeps the preset as it is.
-        a = [r3(min(1.0, max(0.0, g * c / m))) for g, c in zip(ga, lin)]
-        return a if a[1] - max(a[0], a[2]) >= GLOW_MARGIN else [r3(g) for g in ga]
     top = max(ga)
-    return [r3(min(1.0, max(0.0, top * c / m))) for c in lin]
+    a = [r3(min(1.0, max(0.0, top * c / m))) for c in lin]
+    # MODULES1 part 26 (bungo 11-08 "why is radstorm orange still and not green"): a glowing haze keeps G on top by
+    # GLOW_MARGIN, else it takes its preset's own albedo per channel (Far Harbor's blue rad fog, GS overcast's red tint).
+    # A per-channel product for every glowing weather was tried and refused: the radstorm sky offline went to hue 84 deg
+    # against 65-68 in bungo's two vanilla radstorm pictures (77 with the record tint, which stays).
+    if haze == 'glowing' and a[1] - max(a[0], a[2]) < GLOW_MARGIN:
+        return [r3(g) for g in ga]
+    return a
 
 
 def metres(fog):
@@ -179,9 +179,11 @@ def translate(w, f):
         if ha:
             atmo['hazeAlbedo'] = ha
             tr_atmo.append('hazeAlbedo')
-            der['atmosphere.hazeAlbedo'] = ('NAM0 fogFar day sRGB %s -> linear tint x the %s haze albedo%s at %g %%'
-                                            % (ff, atmo['hazeType'], ' per channel (G on top)' if
-                                               atmo['hazeType'] == 'glowing' else '', atmo['humidity']))
+            pre = atmo['hazeType'] == 'glowing' and ha == [r3(g) for g in grown_albedo('glowing', atmo['humidity'])]
+            der['atmosphere.hazeAlbedo'] = (('NAM0 fogFar day sRGB %s leaves G under R or B: the glowing preset per '
+                                             'channel at %g %%' % (ff, atmo['humidity'])) if pre else
+                                            ('NAM0 fogFar day sRGB %s -> linear tint x the %s haze albedo at %g %%'
+                                             % (ff, atmo['hazeType'], atmo['humidity'])))
             diag['hazeAlbedo'] = ha
     if tr_atmo:
         atmo['_translated'] = tr_atmo
