@@ -100,6 +100,7 @@ static Json lightJson( const nifxl::Light & l )
 	j.kind = Json::Object;
 	auto put = [&]( const char * k, Json v ) { j.obj.emplace_back( k, std::move( v ) ); };
 	if ( l.hasType ) put( "type", str( nifxl::typeWord( l.type ) ) );
+	if ( l.hasFixture ) put( "fixture", str( nifxl::fixtureWord( l.fixture ) ) );
 	put( "lumens", num( l.lumens ) );
 	if ( l.hasKelvin ) put( "kelvin", num( l.kelvin ) );
 	if ( l.hasTint ) put( "tint", vec3( l.tint ) );
@@ -321,7 +322,9 @@ static int conversionTests()
 	bulb.hasKelvin = true;
 	bulb.kelvin = 2700;
 	auto bu = conv( bulb );
-	check( "800 lm 2700 K = 255,171,90", bu.color[0] == 255 && bu.color[1] == 171 && bu.color[2] == 90 );
+	// lane PHYSUNITS1: kelvin from the CIE 1931 table (was 255,171,90 from the Kang 2002 fit)
+	std::snprintf( b, sizeof b, "800 lm 2700 K = 255,171,89 (got %d,%d,%d)", bu.color[0], bu.color[1], bu.color[2] );
+	check( b, bu.color[0] == 255 && bu.color[1] == 171 && bu.color[2] == 89 );
 	nifxl::Light big = white;
 	big.lumens = 1e9;
 	nifxl::Light dark = white;
