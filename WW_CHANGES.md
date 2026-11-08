@@ -8,6 +8,9 @@
   (the water asks for both with no draw between). Red `WW_GRAB_SHARE=0`: two blits. Census line `grab share:`.
 - The AO opaque pass skips the reflection probes' per-draw setup (its fragment returns with the normal; the main pass
   sets it again per draw). Red `WW_AO_SLIM=0`.
+- The sun cascades cull their casters and build their draw commands on a worker pool (hardware threads - 2), in
+  pieces of 64 casters joined in the old order: the same commands. Draw calls stay on the render thread. Red
+  `WW_MT_RED=1`: one thread, as before. stderr `frame pool: N workers` once.
 
 ## PERFFIX6 (2026-11-07): the per-draw setup stops re-reading the environment, the NIF and the program table
 - Environment reads (`wwEnv*`) are kept per name until any switch set or environment write moves a generation;

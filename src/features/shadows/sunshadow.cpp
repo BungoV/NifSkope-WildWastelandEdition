@@ -41,6 +41,7 @@ static bool shadowCacheCheck()
 	return on;
 }
 #include "features/far-lod/cellfarlod.h"	// lane SHADOWSHIMMER2: the far sway sample the colour pass takes
+#include "wwframepool.h"	// lane PERFFIX6 PHASE 2 (MT): the caster cull on the worker pool
 
 #include <QDir>
 #include <QFile>
@@ -1506,28 +1507,93 @@ static void sunShadowPassImpl( Scene * scene )
 		}
 		std::vector<GpuDriven::DrawCmd> cmds;
 		atSpan.resize( jobs.size() * queue[QAlpha].size() );
-		for ( std::size_t jb = 0; jb < jobs.size(); jb++ ) {
+		// queue q of job jb, its casters [j0, j1), into `out` (an alpha span's first is relative to `out`)
+		auto build = [&]( std::size_t jb, int q, std::size_t j0, std::size_t j1, std::vector<GpuDriven::DrawCmd> & out,
+			std::vector<std::uint32_t> & ranges ) {
 			const Job & J = jobs[jb];
-			for ( int q = 0; q < QCount; q++ ) {
-				span[jb][q].first = cmds.size();
-				for ( std::size_t j = 0; j < queue[q].size(); j++ ) {
-					const std::size_t n = std::size_t( queue[q][j] ), f = cmds.size();
-					const GpuDriven::PoolEntry & e = entry[n];
-					const Shape * sh = casters[n].sh;
-					if ( !inSet( casters[n], J.set, J.i ) ) {
-					} else if ( wwCellCullCaster( scene, sh, sh->id(), J.i, J.m, cullRanges, J.set == 1 ) ) {
-						for ( std::size_t r2 = 0; r2 + 1 < cullRanges.size(); r2 += 2 ) {
-							if ( cullRanges[r2 + 1] )
-								cmds.push_back( { cullRanges[r2 + 1] * 3, 1, e.firstIndex + cullRanges[r2] * 3, e.baseVertex,
-									matOf[n] } );
-						}
-					} else if ( !J.scissor || ShadowCache::boundsInside( scene, sh, J.m ) ) {
-						cmds.push_back( { e.numIndices, 1, e.firstIndex, e.baseVertex, matOf[n] } );
+			for ( std::size_t j = j0; j < j1; j++ ) {
+				const std::size_t n = std::size_t( queue[q][j] ), f = out.size();
+				const GpuDriven::PoolEntry & e = entry[n];
+				const Shape * sh = casters[n].sh;
+				if ( !inSet( casters[n], J.set, J.i ) ) {
+				} else if ( wwCellCullCaster( scene, sh, sh->id(), J.i, J.m, ranges, J.set == 1 ) ) {
+					for ( std::size_t r2 = 0; r2 + 1 < ranges.size(); r2 += 2 ) {
+						if ( ranges[r2 + 1] )
+							out.push_back( { ranges[r2 + 1] * 3, 1, e.firstIndex + ranges[r2] * 3, e.baseVertex,
+								matOf[n] } );
 					}
-					if ( q == QAlpha )
-						atSpan[jb * queue[QAlpha].size() + j] = { f, cmds.size() - f };
+				} else if ( !J.scissor || ShadowCache::boundsInside( scene, sh, J.m ) ) {
+					out.push_back( { e.numIndices, 1, e.firstIndex, e.baseVertex, matOf[n] } );
 				}
-				span[jb][q].n = cmds.size() - span[jb][q].first;
+				if ( q == QAlpha )
+					atSpan[jb * queue[QAlpha].size() + j] = { f, out.size() - f };
+			}
+		};
+		/* lane PERFFIX6 PHASE 2 (MT, wwframepool.h): the caster cull and the command build touch no GL, so pieces of 64
+		 * casters of one queue of one job run on the worker pool, each into its own list, and the lists are joined in
+		 * the serial order (job, queue, caster): the same commands, the same bytes. The transform and bounds caches the
+		 * cull reads are filled here first, so a worker only finds them. Red ^WW_MT_RED=1: the serial loop. */
+		const std::size_t nQueued = queue[QSolid].size() + queue[QTwoSided].size() + queue[QAlpha].size();
+		if ( jobs.size() * nQueued >= 256 && WwFramePool::workers() > 0 && !WwFramePool::red()
+			&& wwCellCullCasterParallelOk() ) {
+			PassTime::CpuScope ptPool( PassTime::CullCascades );
+			for ( const auto & qv : queue ) {
+				for ( int n : qv ) {
+					const Shape * sh = casters[std::size_t( n )].sh;
+					sh->viewTrans();
+					sh->bounds();	// worldTrans too
+				}
+			}
+			struct Piece
+			{
+				std::size_t jb = 0, j0 = 0, j1 = 0;
+				int q = 0;
+				std::vector<GpuDriven::DrawCmd> out;
+				WwCellCullTally tally;
+			};
+			std::vector<Piece> pieces;
+			for ( std::size_t jb = 0; jb < jobs.size(); jb++ ) {
+				for ( int q = 0; q < QCount; q++ ) {
+					for ( std::size_t j0 = 0; j0 < queue[q].size(); j0 += 64 ) {
+						Piece pc;
+						pc.jb = jb;
+						pc.q = q;
+						pc.j0 = j0;
+						pc.j1 = std::min( j0 + 64, queue[q].size() );
+						pieces.push_back( std::move( pc ) );
+					}
+				}
+			}
+			WwFramePool::run( int( pieces.size() ), [&]( int i ) {
+				Piece & pc = pieces[std::size_t( i )];
+				std::vector<std::uint32_t> ranges;
+				wwCellCullTallyBind( &pc.tally );
+				build( pc.jb, pc.q, pc.j0, pc.j1, pc.out, ranges );
+				wwCellCullTallyBind( nullptr );
+			} );
+			std::size_t k = 0;
+			for ( std::size_t jb = 0; jb < jobs.size(); jb++ ) {
+				for ( int q = 0; q < QCount; q++ ) {
+					span[jb][q].first = cmds.size();
+					for ( ; k < pieces.size() && pieces[k].jb == jb && pieces[k].q == q; k++ ) {
+						const Piece & pc = pieces[k];
+						if ( q == QAlpha ) {
+							for ( std::size_t j = pc.j0; j < pc.j1; j++ )
+								atSpan[jb * queue[QAlpha].size() + j].first += cmds.size();
+						}
+						cmds.insert( cmds.end(), pc.out.begin(), pc.out.end() );
+						wwCellCullTallyMerge( pc.tally );
+					}
+					span[jb][q].n = cmds.size() - span[jb][q].first;
+				}
+			}
+		} else {
+			for ( std::size_t jb = 0; jb < jobs.size(); jb++ ) {
+				for ( int q = 0; q < QCount; q++ ) {
+					span[jb][q].first = cmds.size();
+					build( jb, q, 0, queue[q].size(), cmds, cullRanges );
+					span[jb][q].n = cmds.size() - span[jb][q].first;
+				}
 			}
 		}
 		GpuDriven::poolBind( r, mats, cmds );

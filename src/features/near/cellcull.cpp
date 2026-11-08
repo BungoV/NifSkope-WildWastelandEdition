@@ -1566,10 +1566,41 @@ void wwCellCullCasterSlab( int cascade, bool ok, float nearDepth, float farDepth
 	s.slabFar[cascade] = farDepth;
 }
 
+// lane PERFFIX6 PHASE 2 (MT): a worker's caster counts (null on the main thread: the shared counts)
+static thread_local WwCellCullTally * tlTally = nullptr;
+
+bool wwCellCullCasterParallelOk()
+{
+	const CullState & s = st();
+	if ( !s.on || s.red == 1 || ( s.previsOn && s.previsRed == 1 ) || ( s.previsOn && s.umbraOn && s.umbraRed == 1 ) )
+		return false;
+	wwCellObjFadeOn();	// the switch caches the default branch reads, settled on this thread before the workers read them
+	wwCellObjFadeConfig();
+	PassTime::on();
+	return true;
+}
+
+void wwCellCullTallyBind( WwCellCullTally * tally )
+{
+	tlTally = tally;
+}
+
+void wwCellCullTallyMerge( const WwCellCullTally & t )
+{
+	CullState & s = st();
+	s.any = s.any || t.any;
+	s.cur.casterFaded += t.casterFaded;
+	for ( int i = 0; i < 3; i++ ) {
+		s.cur.shadowOcc[i] += t.shadowOcc[i];
+		s.cur.cDrawn[i] += t.cDrawn[i];
+		s.cur.cCulled[i] += t.cCulled[i];
+	}
+}
+
 bool wwCellCullCaster( Scene * scene, const Shape * sh, int block, int cascade, const float * m,
 	std::vector<std::uint32_t> & out, bool cachedLayer )
 {
-	PassTime::CpuScope pt( PassTime::CullCascades );	// lane PERF1
+	PassTime::CpuScope pt( tlTally ? -1 : int( PassTime::CullCascades ) );	// lane PERF1 (a worker: the caller times the pool)
 	CullState & s = st();
 	/* Casters always cast: the Previs row never reaches this pass. The red control `casters` builds this frame's
 	 * previs scene itself (a load clears it and the shadow pass runs before the camera pass). */
@@ -1615,7 +1646,7 @@ bool wwCellCullCaster( Scene * scene, const Shape * sh, int block, int cascade, 
 		}
 		if ( WwObjFade::casterCasts( rs, hid ) )
 			return false;
-		s.cur.casterFaded++;
+		( tlTally ? tlTally->casterFaded : s.cur.casterFaded )++;
 		return true;
 	};
 	if ( ( !s.on && !previsRed && !umbraRed && !casterFade ) || !scene || !sh || !scene->renderer || !m )
@@ -1685,7 +1716,7 @@ bool wwCellCullCaster( Scene * scene, const Shape * sh, int block, int cascade, 
 			if ( occ ) {
 				const float c[3] = { v[0], v[1], v[2] };
 				if ( !WwShadowOcc::reachesSlab( c, rv, sd, s.slabNear[cascade], s.slabFar[cascade] ) ) {
-					s.cur.shadowOcc[cascade]++;
+					( tlTally ? tlTally->shadowOcc[cascade] : s.cur.shadowOcc[cascade] )++;
 					return false;
 				}
 			}
@@ -1699,7 +1730,11 @@ bool wwCellCullCaster( Scene * scene, const Shape * sh, int block, int cascade, 
 			return !tomeHides( r );	// RED only
 		}, out, drawnTris );
 	}
-	if ( cascade >= 0 && cascade < 3 ) {
+	if ( cascade >= 0 && cascade < 3 && tlTally ) {
+		tlTally->any = true;
+		tlTally->cDrawn[cascade] += std::int64_t( runs->size() ) - culled;
+		tlTally->cCulled[cascade] += culled;
+	} else if ( cascade >= 0 && cascade < 3 ) {
 		s.any = true;
 		s.cur.cDrawn[cascade] += std::int64_t( runs->size() ) - culled;
 		s.cur.cCulled[cascade] += culled;

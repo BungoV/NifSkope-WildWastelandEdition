@@ -1121,6 +1121,7 @@
 { "WW_MSAA", 2, "src/glview.cpp:361 GLView::GLView | hand: the GL surface format is chosen when the window is made" },
 { "WW_MSAABLACK1_RED", 0, "src/features/lights/celllamps.cpp:1559 wwCellShadowPass | re-read per frame or per call (a)" },
 { "WW_MSAA_RED", 2, "src/glview.cpp:361 GLView::GLView | hand: the GL surface format is chosen when the window is made" },
+{ "WW_MT_RED", 0, "src/wwframepool.h:27 red | re-read per frame or per call (a) (PERFFIX6 PHASE 2)" },
 { "WW_MULTISEL_TEST", 2, "src/nifskope_ui.cpp:9101 NifSkope::createWindow | createWindow: picks which harness the window runs" },
 { "WW_NAVKEYS_TEST", 2, "src/nifskope_ui.cpp:10203 NifSkope::createWindow | createWindow: picks which harness the window runs" },
 { "WW_NIFX_LIGHTS_DUMP", 0, "src/features/lights/celllamps.cpp:503 WwCellLightsP::nifxTick | re-read per frame or per call (a)" },

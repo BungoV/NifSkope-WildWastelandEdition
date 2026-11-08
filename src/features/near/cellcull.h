@@ -137,6 +137,18 @@ bool wwCellCullCamera( Scene * scene, const Shape * sh, int block, std::int64_t 
  *  frustum is used instead. False = draw whole. */
 bool wwCellCullCaster( Scene * scene, const Shape * sh, int block, int cascade, const float * clipFromView,
 	std::vector<std::uint32_t> & out, bool cachedLayer = false );
+/*! lane PERFFIX6 PHASE 2 (MT): the caster cull on worker threads. True when this frame's caster cull takes the default
+ *  branch (on, no red control, no Previs / tome red), which reads only data the main thread wrote; the call also settles
+ *  the switch caches it reads, so call it on the main thread right before the fan-out. A worker binds its own tally
+ *  (null = the shared counts, the main thread); the main thread adds every tally after the join, in any order (sums). */
+struct WwCellCullTally
+{
+	std::int64_t casterFaded = 0, shadowOcc[3] = { 0, 0, 0 }, cDrawn[3] = { 0, 0, 0 }, cCulled[3] = { 0, 0, 0 };
+	bool any = false;
+};
+bool wwCellCullCasterParallelOk();
+void wwCellCullTallyBind( WwCellCullTally * tally );
+void wwCellCullTallyMerge( const WwCellCullTally & tally );
 /*! lane PCMB1 part B: cascade `cascade`'s receiver slab this frame -- the main camera's planar view depth (view units)
  *  that reads it, padded by the filter's reach; nearDepth very negative = no near side (cascade 0). ok false = no slab
  *  (the receiver cull off for it). A caster whose shadow, swept along the sun, never enters the slab is dropped, except
