@@ -122,10 +122,10 @@
 		float depthP = 0.05 + pow( dl, mix( 0.5, 2.0, clamp( ( hfB - 0.3 ) / 0.55, 0.0, 1.0 ) ) );
 		// the base's floor 0.35, not Nubis' 0.1: our bases get no ground bounce (completeness row 15), and at 0.1 the sky's
 		// blue ambient alone painted them blue (diag/up50_sp_lit_d2.png)
-		float vertP = pow( mix( 0.35, 1.0, clamp( ( hfB - 0.07 ) / 0.07, 0.0, 1.0 ) ), 0.8 );
+		float vertP = pow( mix( kShpBaseP, 1.0, clamp( ( hfB - 0.07 ) / 0.07, 0.0, 1.0 ) ), 0.8 );
 		// the in-scatter probability darkens the edges seen with the sun BEHIND the eye; looking into the sun the thin edges
 		// glow (the droplet phase's forward peak: the silver lining, Schneider 2017 p. 93 keeps it for the forward lobe)
-		ph *= mix( min( depthP, 1.0 ) * vertP, 1.0, cvSmooth( cvShpK( 1, 0.3 ), 0.95, cosT ) );
+		ph *= mix( mix( 1.0, min( depthP, 1.0 ), kShpPowder ) * vertP, 1.0, cvSmooth( cvShpK( 1, 0.3 ), 0.95, cosT ) );
 	}
 #endif
 	vec3 tint = p.z < cvBands.topKm.x ? cvTint[0] : cvTint[1];
@@ -153,11 +153,18 @@
 	}
 #ifdef WW_CLOUD_SHAPE
 	/* lane CLOUDSHAPE1: the ambient's split (Hillaire 2016 p. 30; Nubis 2017: the sky from above at the tops, the ground's
-	 * bounce from below at the bases): the base takes a grey, darker light (the ground's albedo x the sky + sun on it) */
+	 * bounce from below at the bases): the base takes a grey, darker light (the ground's albedo x the sky + sun on it).
+	 * v3 (bungo 11-08: bases a little lighter and bluer, RDR2's): the base's light keeps kShpBaseBlue of the sky's colour,
+	 * and the ground's bounce reaches the base through the slab under the sample (ambD; the band's own interior density,
+	 * not the sample's: the sample's lit every thin wisp, a speckle on the towers) */
 	vec3 ambG = vec3( dot( cvAmb, vec3( 0.2126, 0.7152, 0.0722 ) ) );
-	vec3 ambC = mix( ambG * cvShpK( 2, kShpGround ), mix( ambG, cvAmb, kShpAmbSat ),
-		cvSmooth( 0.0, 0.6, clamp( ( p.z - cvBands.baseKm.x ) / max( cvBands.topKm.x - cvBands.baseKm.x, 1e-3 ), 0.0, 1.0 ) ) );
-	vec3 S = kCvAlbedo * tint * ( key * ph + cvAmbOn * ambC * ambF * cvShpK( 3, kShpSkyOcc ) );
+	float tauD = kShpScale * cvBands.density.x * kCvSigma * clamp( p.z - ( p.z < cvBands.topKm.x ? cvBands.baseKm.x : cvBands.baseKm.y ), 0.0, cvLightKm );
+	float ambD = exp( -( 1.0 - cvMsG * cvMsG * kCvAlbedo ) * tauD / 0.6 ) + cvTdif( tauD, 0.6, cvMsG, kCvAlbedo );
+	vec3 ambB = mix( ambG, cvAmb, kShpBaseBlue );
+	vec3 ambC = mix( ambB * cvShpK( 2, kShpGround ), mix( ambG, cvAmb, kShpAmbSat ),
+		cvSmooth( 0.0, 0.6, clamp( ( p.z - cvBands.baseKm.x ) / max( cvBands.topKm.x - cvBands.baseKm.x, 1e-3 ), 0.0, 1.0 ) ) ) * ambF
+		+ ambB * ( kShpBounce * ambD );
+	vec3 S = kCvAlbedo * tint * ( key * ph + cvAmbOn * ambC * cvShpK( 3, kShpSkyOcc ) );
 #else
 	vec3 S = kCvAlbedo * tint * ( key * ph + cvAmbOn * cvAmb * ambF );
 #endif
