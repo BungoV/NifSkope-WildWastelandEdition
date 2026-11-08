@@ -198,6 +198,17 @@ inline bool traced( int x, int y, uint32_t f, int red )
 	return true;
 }
 
+/*! a spatial neighbour the half trace skipped moves to its traced row neighbour (x ^ 1): with no history a skipped
+ *  pixel's reservoir is empty, so half of K merged nothing and the one-frame error of the traced pixels rose 0.60 -> 0.75
+ *  (RTEMIS1 11-08). The quarter trace keeps its draw: snapped to the one traced pixel of each 2 x 2 block its unit bias
+ *  went +0.004 -> +0.021 (bar 0.02; every pick lands on 1 of ~12 pixels). MIRROR restirgi_common.glsl rgSnapTraced */
+inline void snapTraced( int & x, int & y, uint32_t f, int red )
+{
+	( void )y;
+	if ( !( red & kTraceQuarter ) && ( red & kTraceHalf ) && ( ( x + y + int( f & 1u ) ) & 1 ) != 0 )
+		x ^= 1;
+}
+
 //! the first candidate: the pixel's own bounce, drawn with pdf cos / pi
 inline Res candidate( V3 x, V3 n, const Sample & y, int red )
 {
@@ -304,7 +315,8 @@ inline void frame( const Scene & scene, const std::vector<Pixel> & px, int W, in
 		for ( int k = 0; k < std::min( S.spatialK, 15 ); k++ ) {
 			const int side = 2 * S.radius + 1;
 			const int o = int( restir::rand01( s2, uint32_t( 1 + 3 * k ) ) * float( side * side ) );
-			const int qx = x0 + o % side - S.radius, qy = y0 + o / side - S.radius;
+			int qx = x0 + o % side - S.radius, qy = y0 + o / side - S.radius;
+			snapTraced( qx, qy, f, red );
 			if ( qx < 0 || qy < 0 || qx >= W || qy >= H || ( qx == x0 && qy == y0 ) )
 				continue;
 			const int q = qy * W + qx;

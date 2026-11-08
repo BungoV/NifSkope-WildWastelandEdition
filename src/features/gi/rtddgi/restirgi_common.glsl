@@ -108,6 +108,15 @@ bool rgTraced( int x, int y, uint f, int red )
 	return true;
 }
 
+// MIRROR restirgimath.h snapTraced: a spatial neighbour the half trace skipped moves to its traced row neighbour (with no
+// history a skipped pixel's reservoir is empty: half of K would merge nothing). The quarter trace keeps its draw
+ivec2 rgSnapTraced( int x, int y, uint f, int red )
+{
+	if ( ( red & RESTIRGI_BIT_QUARTER ) == 0 && ( red & RESTIRGI_BIT_HALF ) != 0 && ( ( x + y + int( f & 1u ) ) & 1 ) != 0 )
+		return ivec2( x ^ 1, y );
+	return ivec2( x, y );
+}
+
 // MIRROR restirgimath.h bounceDir (the caller reads the mask's two bytes at rgStbnIndex dim 0 and 1; mask: it has one)
 vec3 rgBounceDir( vec3 n, int x, int y, int W, uint seed, uint f, int red, bool mask, uint m0, uint m1 )
 {

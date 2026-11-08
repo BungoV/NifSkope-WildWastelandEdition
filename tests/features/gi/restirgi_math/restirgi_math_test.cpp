@@ -242,6 +242,12 @@ static void mirror()
 			const int tr = ( k & 32 ) ? restirgi::kTraceQuarter : ( k & 64 ) ? restirgi::kTraceHalf : 0;
 			if ( restirgi::traced( px, py, fr, tr ) != glsl::rgTraced( px, py, fr, tr ) )
 				worst = 1.0;
+			// the spatial pass's neighbour snap: the same pixel; the half trace's always a traced one, the others unmoved
+			int sx = px - 3, sy = py - 2;
+			restirgi::snapTraced( sx, sy, fr, tr );
+			const glsl::ivec2 gs = glsl::rgSnapTraced( px - 3, py - 2, fr, tr );
+			if ( sx != gs.x || sy != gs.y || ( tr == restirgi::kTraceHalf ? !restirgi::traced( sx, sy, fr, tr ) : sx != px - 3 || sy != py - 2 ) )
+				worst = 1.0;
 		}
 		const int red = k & ( restirgi::kRedNoJacobian | restirgi::kRedNoPdf );
 		restirgi::Sample y, y2;
@@ -347,6 +353,7 @@ int main()
 				return restirgi::traced( i % G, i / G, uint32_t( F - 1 ), tr );
 			};
 			bias( s, ref, px, on, rel, chi );
+			std::printf( "     skip %s: bias %+.4f, chi %.3f\n", tr == restirgi::kTraceQuarter ? "quarter" : "half", rel, chi );
 			worstRel = std::max( worstRel, std::fabs( rel ) );
 			worstChi = std::max( worstChi, chi );
 		}
