@@ -121,6 +121,7 @@
 { "WW_CELL_AIR_JITTER_RED", 0, "src/features/air/cellvolair.cpp:2068 vaPassInner | re-read per frame or per call (a)" },
 { "WW_CELL_AIR_LAMPATLAS_RED", 0, "src/features/air/airlampatlas.cpp:76 wwAirLampAtlasRed | re-read per frame or per call (a)" },
 { "WW_CELL_AIR_LAMPPCF_RED", 0, "src/features/air/cellvolair.cpp:1899 vaPassInner | re-read per frame or per call (a)" },
+{ "WW_CELL_AIR_LAMPS_RED", 0, "src/features/air/cellvolair.cpp:1846 vaPassInner | re-read per frame or per call (a)" },
 { "WW_CELL_AIR_LAMPVIS", 0, "src/features/air/airlampatlas.cpp:42 wwAirLampVisPinned | re-read per frame or per call (a)" },
 { "WW_CELL_AIR_LIGHTSHIFT", 0, "src/features/air/cellvolair.cpp:222 vs | init-once state, re-read when a live set moves its prefix (b)" },
 { "WW_CELL_AIR_MS", 0, "src/gl/celllooks.cpp:119 pinOf | re-read per frame or per call (a)" },

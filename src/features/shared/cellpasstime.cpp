@@ -438,7 +438,8 @@ void collect( Slot & sl )
 			"ssgi-hiz", "ssgi-mips", "ssgi-ecast", "ssgi-echain", "ssgi-cast", "ssgi-temporal",
 			"ssgi-denoise", "contact",	// lane PERFFIX2 c
 			"water", "water-copy", "underwater",
-			"post-dof", "post-mblur", "post-objblur", "post-flare" };	// lane POSTFX1
+			"post-dof", "post-mblur", "post-objblur", "post-flare",
+			"air-lampvol" };	// lane MODULES1 part 25	// lane POSTFX1
 		for ( int k = 0; k < SubCount; k++ )
 			if ( subSeen[k] )
 				line += QByteArray( " | sub " ) + subName[k] + " " + QByteArray::number( sub[k], 'f', 2 );

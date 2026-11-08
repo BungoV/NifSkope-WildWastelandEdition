@@ -1103,7 +1103,7 @@ void wwCellLightsUniforms( Scene * scene )
 				col[0], col[1], col[2], shape,
 				dir[0], dir[1], dir[2], l.cone,
 				l.bias, l.scale, l.exponent,
-				float( ( l.noSpecular ? 1 : 0 ) | ( l.noRim ? 2 : 0 ) | ( l.ignoreRoughness ? 4 : 0 ) ),
+				float( ( l.noSpecular ? 1 : 0 ) | ( l.noRim ? 2 : 0 ) | ( l.ignoreRoughness ? 4 : 0 ) | ( flick && l.flicker ? 8 : 0 ) ),
 				slotOf[size_t( i )], float( l.shadow ), l.nearClip, l.shadowBias,
 				l.box[0][0], l.box[0][1], l.box[0][2], l.box[0][3],
 				l.box[1][0], l.box[1][1], l.box[1][2], l.box[1][3],

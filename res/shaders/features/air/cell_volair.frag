@@ -904,6 +904,22 @@ bool volSurfBegin( vec3 P, vec3 Dw, float sA, float sB, out ivec4 p, out ivec4 e
 
 // the rest of the light at posView (height z), once a froxel: the placed lights (returned) and the sky's share, the
 // GI and the ambient (Jenv)
+/* lane MODULES1 part 25 (LampVol; notes/foggrid22a/HANDBACK.md, the CPU twin src/features/air/airlampinjmath.h): stage 4
+ * writes the placed lights' in-scatter a froxel before the inject. One sample a frame at a blue-noise point of the froxel
+ * (four on a history miss); the steady lamps blended with the reprojected history (a = max(volLampA, 1 / (N + 1)), N in
+ * the history's alpha, at most 64); the flickering lamps (light texel 3.w bit 8) fresh every frame, never blended. Out:
+ * fragColor = the new history (steady rgb, N; N 0 = none), volMrt[0] = this frame's total (rgb) and the froxel's
+ * light-set hash (a, 24 bits). Stage 1 reads volLampNow instead of its lamp loop (airRest, airLightsQ). Red
+ * WW_CELL_AIR_LAMPS_RED=pixel: no stage 4, volLampVol 0, the loops as before. */
+uniform int volLampVol;			// 1: stage 1 reads volLampNow (stage 4 ran this frame)
+uniform sampler3D volLampNow;	// stage 1: this frame's lamp in-scatter (rgb); stage 4: last frame's (a = its light-set hash)
+uniform sampler3D volLampHist;	// stage 4: last frame's steady term (rgb) and its sample count N (a; 0 = no history)
+uniform sampler2DArray volStbn;	// stage 4: the blue-noise mask (res/air/stbn_scalar_128x128x64.r8, R8, NEAREST, REPEAT)
+uniform bool volLampHistOk;		// stage 4: a history at these dims (no cut, no new document)
+uniform float volLampA;			// stage 4: the blend floor, 0.1 still / 0.2 moving
+uniform int volFrame;			// stage 4: the mask's time axis
+uniform int volLampRed;			// stage 4 gates (WW_CELL_AIR_LAMPS_RED): 1 white, 2 noramp, 4 onemiss, 8 blendflicker, 16 nohash
+
 vec3 airRest( vec3 posView, vec3 dirView, float z, float sA, float sB, out vec3 Jenv, bool lights )
 {
 	Jenv = vec3( 0.0 );
@@ -929,7 +945,9 @@ vec3 airRest( vec3 posView, vec3 dirView, float z, float sA, float sB, out vec3 
 	airGndK = wantAmb && ( volLeakRed & 1 ) == 0 ? 1.0 - leakFade : 1.0;
 #endif
 #endif
-	if ( ( volTerms & 2 ) != 0 && lights && ( volRed & 16 ) == 0 ) {
+	if ( volLampVol != 0 && ( volTerms & 2 ) != 0 && lights && ( volRed & 16 ) == 0 ) {
+		J = texelFetch( volLampNow, ivec3( ivec2( gl_FragCoord.xy ), volLayer ), 0 ).rgb;	// lane MODULES1 part 25: stage 4's LampVol
+	} else if ( ( volTerms & 2 ) != 0 && lights && ( volRed & 16 ) == 0 ) {
 		// clustered: only the lights whose sphere can reach this cluster, in the same ascending order (a light left out
 		// would add exactly nothing below: d >= radius)
 		int n = cellLightCount, base = -1;
@@ -1093,6 +1111,13 @@ void airLightsQ( vec3 posView, vec3 dirView, float z, float sA, float sB, int ne
 		Jq[k] = vec3( 0.0 );
 	if ( !cellOn || ( volTerms & 2 ) == 0 || ( volRed & 16 ) != 0 )
 		return;
+	if ( volLampVol != 0 ) {	// lane MODULES1 part 25: stage 4's LampVol, the slice's mean for every stratum (sum 0.25 W J = W J)
+		vec3 J = texelFetch( volLampNow, ivec3( ivec2( gl_FragCoord.xy ), volLayer ), 0 ).rgb;
+		for ( int k = 0; k < 4; k++ )
+			if ( ( need & ( 1 << k ) ) != 0 )
+				Jq[k] = J;
+		return;
+	}
 	vec3 P = cellWorldPos( posView );
 	vec3 dW = cellWorldDir( dirView );
 	float zOff = z - P.z;
@@ -1158,9 +1183,256 @@ void airLightsQ( vec3 posView, vec3 dirView, float z, float sA, float sB, int ne
 	}
 }
 
+uint airMix32( uint h )	// MIRROR airlampinjmath.h mix32
+{
+	h ^= h >> 16;
+	h *= 0x7feb352du;
+	h ^= h >> 15;
+	h *= 0x846ca68bu;
+	h ^= h >> 16;
+	return h;
+}
+
+/* MIRROR airlampinjmath.h maskPoint: the jitter of froxel (col, layer), sample s: the mask at (x + 5 layer + 37 c + 17 s,
+ * y + 7 layer + 71 c + 43 s, frame & 63), (v + 0.5) / 256; red white: the twin's seeded hash */
+vec3 airLampJitter( ivec2 col, int layer, int s )
+{
+	vec3 u;
+	for ( int c = 0; c < 3; c++ ) {
+		if ( ( volLampRed & 1 ) != 0 ) {
+			uint h = airMix32( airMix32( airMix32( uint( col.x ) * 73856093u ^ uint( col.y ) * 19349663u ^ uint( layer ) * 83492791u )
+				^ uint( volFrame ) * 2654435761u ) ^ uint( s * 3 + c + 1 ) * 2246822519u );
+			u[c] = ( float( h >> 8 ) + 0.5 ) / 16777216.0;
+		} else {
+			ivec3 m = ivec3( ( col.x + 5 * layer + 37 * c + 17 * s ) & 127, ( col.y + 7 * layer + 71 * c + 43 * s ) & 127, volFrame & 63 );
+			u[c] = ( floor( texelFetch( volStbn, m, 0 ).r * 255.0 + 0.5 ) + 0.5 ) / 256.0;
+		}
+	}
+	return u;
+}
+
+vec3 airLampSan( vec3 x )	// MIRROR airlampinjmath.h sanitize: NaN / Inf -> 0, then [0, 65504]
+{
+	vec3 r;
+	for ( int c = 0; c < 3; c++ )
+		r[c] = isnan( x[c] ) || isinf( x[c] ) ? 0.0 : clamp( x[c], 0.0, 65504.0 );
+	return r;
+}
+
+// MIRROR airlampinjmath.h LampVolume::step, one froxel (the light list, the hash, history, fresh, blend, sanitize)
+void airLampVolStage( ivec2 col )
+{
+	if ( volDepthSkip != 0 && volLayer > 0 ) {	// the inject's own skip (main): no history here (N 0)
+		float lim = 0.0, edge;
+		if ( volDepthSkip == 2 ) {
+			lim = texelFetch( volTile, col, 0 ).g;
+			edge = volSlices.x * exp( volSlices.y * float( volLayer ) / volSlices.z );
+		} else {
+			for ( int dy = -1; dy <= 1; dy++ )
+				for ( int dx = -1; dx <= 1; dx++ )
+					lim = max( lim, texelFetch( volTile, clamp( col + ivec2( dx, dy ), ivec2( 0 ), volDims.xy - 1 ), 0 ).r );
+			edge = volSlices.x * exp( volSlices.y * float( volLayer - 1 ) / volSlices.z );
+			lim = lim * 1.001 + 1.0;
+		}
+		if ( edge > lim ) {
+			fragColor = vec4( 0.0 );
+			volMrt[0] = vec4( 0.0 );
+			return;
+		}
+	}
+#ifdef WW_AIR_LEAK
+	airRayFroxel = col.x + ( col.y + volLayer * volDims.y ) * volDims.x;
+#endif
+	vec2 ndc = ( vec2( col ) + 0.5 ) / vec2( volDims.xy ) * 2.0 - 1.0;
+	vec3 dirView = normalize( vec3( ndc.x / volProj.x, ndc.y / volProj.y, -1.0 ) );
+	float t0 = volSlices.x * exp( volSlices.y * float( volLayer ) / volSlices.z );
+	float t1 = volSlices.x * exp( volSlices.y * float( volLayer + 1 ) / volSlices.z );
+	float tm = 0.5 * ( t0 + t1 );
+	vec3 posM = dirView * ( tm / fogDistScale );
+	vec3 P = cellWorldPos( posM );
+	vec3 Dw = cellWorldPos( dirView * ( 1.0 / fogDistScale ) ) - cellWorldPos( vec3( 0.0 ) );
+	bool lightsOn = cellOn && ( volTerms & 2 ) != 0 && ( volRed & 16 ) == 0;
+	// pass 1: the light-set hash over the inject's list (the column's middle ray through the slice, then the bulbs).
+	// MIRROR airlampinjmath.h clusterHash: the index + a steady lamp's intensity bits (here its colour and radius) + its
+	// position at 1/64 (every steady lamp: a still one adds a constant); a flickering lamp by its index only
+	uint hsh = 0u;
+	int n = cellLightCount, base = -1, jb = 0;
+	ivec4 sp, se;
+	bool surf = false;
+	if ( lightsOn ) {
+		surf = volSurfBegin( P, Dw, t0 - tm, t1 - tm, sp, se );
+		if ( !surf && volClusterDims.x > 0 ) {
+			ivec2 c = col / volClusterDims.z;
+			int ci = ( ( volLayer / volClusterDims.w ) * volClusterDims.y + c.y ) * volClusterDims.x + c.x;
+			base = texelFetch( volClusters, 2 * ci ).r;
+			n = texelFetch( volClusters, 2 * ci + 1 ).r;
+		}
+		for ( int j = 0; surf || j < n || jb < cellBulbCount; j++ ) {
+			int i = surf ? volSurfNext( sp, se ) : j < n ? ( base < 0 ? j : texelFetch( volClusters, base + j ).r ) : -1;
+			if ( i < 0 ) {
+				if ( jb >= cellBulbCount )
+					break;
+				i = cellBulbBase + jb++;
+				surf = false;
+				j = n;
+			}
+			vec4 a0 = texelFetch( cellLights, i * CELL_TPL ), a1 = texelFetch( cellLights, i * CELL_TPL + 1 );
+			bool fl = ( int( texelFetch( cellLights, i * CELL_TPL + 3 ).w + 0.5 ) & 8 ) != 0;
+			uint ib = fl ? 0u : floatBitsToUint( a1.r ) ^ ( floatBitsToUint( a1.g ) * 3u ) ^ ( floatBitsToUint( a1.b ) * 5u ) ^ ( floatBitsToUint( a0.w ) * 7u );
+			hsh += airMix32( uint( i + 1 ) * 0x9E3779B9u ^ ib );
+			if ( !fl ) {
+				ivec3 q = ivec3( floor( a0.xyz * 64.0 ) );
+				hsh += airMix32( airMix32( airMix32( uint( q.x ) ^ uint( i + 1 ) ) ^ uint( q.y ) ) ^ uint( q.z ) );
+			}
+		}
+	}
+	hsh &= 0xFFFFFFu;
+	// the history: this froxel's centre in last frame's grid (the inject's temporal map), trilinear by hand. MIRROR
+	// airlampinjmath.h history: rejected on a cut (volLampHistOk), outside the last frustum, a tap with no history
+	// (skipped or never written: N 0), NaN, or a changed light-set hash at the froxel the history comes from
+	vec3 h = vec3( 0.0 );
+	float hn = 0.0;
+	bool keep = volLampHistOk;
+	if ( keep ) {
+		vec4 pm4 = vec4( posM, 1.0 );
+		vec3 pp = vec3( dot( volReproj[0], pm4 ), dot( volReproj[1], pm4 ), dot( volReproj[2], pm4 ) );
+		vec2 uv = vec2( pp.x * volPrevGrid.x, pp.y * volPrevGrid.y ) / max( -pp.z, 1e-30 ) * 0.5 + 0.5;
+		float kc = log( tm / volSlices.x ) / volSlices.y * volSlices.z;
+		float kp = log( max( length( pp ) * volPrevScale, 1e-6 ) / volPrevGrid.z ) / volPrevGrid.w * volSlices.z
+			+ ( float( volLayer ) + 0.5 - kc );
+		keep = pp.z < 0.0 && kp >= 0.0 && kp <= volSlices.z;
+		vec3 f = vec3( uv * vec2( volDims.xy ), kp ) - 0.5;
+		ivec3 b = ivec3( floor( f ) );
+		vec3 w = f - vec3( b );
+		vec4 acc = vec4( 0.0 );
+		float ws = 0.0;
+		for ( int q = 0; q < 8 && keep; q++ ) {
+			ivec3 o = ivec3( q & 1, ( q >> 1 ) & 1, q >> 2 );
+			float wq = ( o.x == 1 ? w.x : 1.0 - w.x ) * ( o.y == 1 ? w.y : 1.0 - w.y ) * ( o.z == 1 ? w.z : 1.0 - w.z );
+			if ( wq < 1e-6 )
+				continue;
+			ivec3 x = b + o;
+			if ( any( lessThan( x, ivec3( 0 ) ) ) || any( greaterThanEqual( x, volDims ) ) ) {
+				keep = false;
+				break;
+			}
+			vec4 hv = texelFetch( volLampHist, x, 0 );
+			if ( !( hv.a > 0.5 ) ) {
+				keep = false;
+				break;
+			}
+			acc += hv * wq;
+			ws += wq;
+		}
+		keep = keep && ws > 0.0;
+		if ( keep ) {
+			h = acc.rgb / ws;
+			hn = acc.a / ws;
+			keep = !any( isnan( h ) ) && !any( isinf( h ) );
+		}
+		if ( keep && ( volLampRed & 16 ) == 0 ) {	// rule 3: the hash now vs the hash then, at the froxel the history comes from
+			ivec3 xn = clamp( ivec3( floor( f + 0.5 ) ), ivec3( 0 ), volDims - 1 );
+			keep = uint( texelFetch( volLampNow, xn, 0 ).a + 0.5 ) == hsh;
+		}
+	}
+	// the fresh estimate: one sample, or four on a miss (red onemiss: one). MIRROR airlampinjmath.h froxelPoint: across
+	// the column at the mask's x, y; depth LINEAR inside the slice
+	int ns = keep || ( volLampRed & 4 ) != 0 ? 1 : 4;
+	vec3 Ps[4], dWs[4];
+	float zs[4];
+	for ( int s = 0; s < ns; s++ ) {
+		vec3 u = airLampJitter( col, volLayer, s );
+		vec2 ndcJ = ( vec2( col ) + u.xy ) / vec2( volDims.xy ) * 2.0 - 1.0;
+		vec3 dJ = normalize( vec3( ndcJ.x / volProj.x, ndcJ.y / volProj.y, -1.0 ) );
+		float t = mix( t0, t1, u.z );
+		Ps[s] = cellWorldPos( dJ * ( t / fogDistScale ) );
+		dWs[s] = cellWorldDir( dJ );
+		zs[s] = fogView.w + dot( fogView.xyz, dJ ) / fogDistScale * t;
+	}
+	// pass 2: the lamps at the samples. MIRROR airlampinjmath.h injectPoint / lampTerm: the inject's own light sample
+	// (cellLightE x cellFogK x the medium's transmittance x the phase, + the lamps' orders >= 2 and floor bounce when on);
+	// the visibility at the sample point (airLeakLightK: part 22, a lamp without the shadow flag V = 1)
+	vec3 St = vec3( 0.0 ), Fl = vec3( 0.0 );
+	if ( lightsOn ) {
+		n = cellLightCount;
+		base = -1;
+		jb = 0;
+		surf = volSurfBegin( P, Dw, t0 - tm, t1 - tm, sp, se );
+		if ( !surf && volClusterDims.x > 0 ) {
+			ivec2 c = col / volClusterDims.z;
+			int ci = ( ( volLayer / volClusterDims.w ) * volClusterDims.y + c.y ) * volClusterDims.x + c.x;
+			base = texelFetch( volClusters, 2 * ci ).r;
+			n = texelFetch( volClusters, 2 * ci + 1 ).r;
+		}
+		for ( int j = 0; surf || j < n || jb < cellBulbCount; j++ ) {
+			int i = surf ? volSurfNext( sp, se ) : j < n ? ( base < 0 ? j : texelFetch( volClusters, base + j ).r ) : -1;
+			if ( i < 0 ) {
+				if ( jb >= cellBulbCount )
+					break;
+				i = cellBulbBase + jb++;
+				surf = false;
+				j = n;
+			}
+			vec4 a0 = texelFetch( cellLights, i * CELL_TPL );
+			bool fl = ( volLampRed & 8 ) == 0 && ( int( texelFetch( cellLights, i * CELL_TPL + 3 ).w + 0.5 ) & 8 ) != 0;
+#ifdef WW_CELL_AIR_BOUNCE
+			float hf = volGndLamp.x > 0.0 ? airGndZ( a0.xyz ) : 0.0;
+#endif
+			vec3 Ji = vec3( 0.0 );
+			for ( int s = 0; s < ns; s++ ) {
+				vec3 Pk = Ps[s] - volLightShift;
+				float d = length( a0.xyz - Pk );
+				if ( d >= a0.w || d < 0.001 )
+					continue;
+				vec3 L = ( a0.xyz - Pk ) / d, Lo;
+				bool noSpec;
+				vec3 e = cellLightE( i, Pk, L, Lo, noSpec ) * cellFogK( i );
+				if ( all( equal( e, vec3( 0.0 ) ) ) )
+					continue;
+				float zOff = zs[s] - Ps[s].z;
+				float od = airOd( Pk.z + zOff, a0.z + zOff, d ), c = dot( L, dWs[s] );
+				vec3 jv = e * exp( -od ) * volPhasePi( c );
+				if ( volMsLamp.x > 0.0 )
+					jv += e * airLampMs( c, od );
+#ifdef WW_CELL_AIR_BOUNCE
+				if ( volGndLamp.x > 0.0 )
+					jv += e * airLampGnd( a0.xyz, hf, Pk, dWs[s], d, od ) * airGndK;
+#endif
+#ifdef WW_AIR_LEAK
+				jv *= airLeakLightK( i, Ps[s], a0.xyz + volLightShift );
+#endif
+				Ji += jv;
+			}
+			if ( fl )
+				Fl += Ji;
+			else
+				St += Ji;
+		}
+		St /= float( ns );
+		Fl /= float( ns );
+	}
+	vec3 s3;
+	float nOut;
+	if ( keep ) {
+		float ak = ( volLampRed & 2 ) != 0 ? volLampA : max( volLampA, 1.0 / ( hn + 1.0 ) );
+		s3 = h + ak * ( St - h );
+		nOut = min( hn + 1.0, 64.0 );
+	} else {
+		s3 = St;
+		nOut = float( ns );
+	}
+	s3 = airLampSan( s3 );
+	fragColor = vec4( s3, nOut );
+	volMrt[0] = vec4( min( s3 + airLampSan( Fl ), vec3( 65504.0 ) ), float( hsh ) );
+}
+
 void main()
 {
 	ivec2 col = ivec2( gl_FragCoord.xy );
+	if ( volStage == 4 ) {	// lane MODULES1 part 25: LampVol
+		airLampVolStage( col );
+		return;
+	}
 	if ( volStage == 2 ) {
 		vec3 L = vec3( 0.0 );
 		float T = 1.0;

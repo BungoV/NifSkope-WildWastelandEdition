@@ -500,6 +500,11 @@ struct VaGpu
 	float prevGrid[4] = { 0, 0, 0, 0 }, prevScale = 0.0f;
 	unsigned frame = 0;
 	int tmode = 0;
+	// lane MODULES1 part 25 (LampVol): the lamps' history (RGBA16F: steady rgb, N) and this frame's lamp term (RGBA32F:
+	// rgb, the light-set hash), cols x rows x kSlices, ping-pong on histCur; the blue-noise mask (R8 2D array, once)
+	GLuint lvHist[2] = { 0, 0 }, lvNow[2] = { 0, 0 }, stbn = 0;
+	int lvCols = 0, lvRows = 0;
+	bool lvOk = false, stbnTried = false;
 	// lane VOLAIRPATH1: the path frame this history last drew (-1 none), the path run it belongs to, and the state
 	// that frame started from (a repaint of the same frame redoes it from the same history)
 	int pathDone = -1;
@@ -1833,6 +1838,52 @@ static void vaPassInner( Scene * scene, bool run )
 	}
 	if ( !temporal || g.doc != scene->nifModel )
 		g.histOk = false;	// another document: its history is not this one's
+	/* lane MODULES1 part 25 (LampVol, notes/foggrid22a/HANDBACK.md): the placed lights' in-scatter is its own stage (4),
+	 * one blue-noise sample a froxel a frame into a history, before the inject reads it. Temporal only (it rides the
+	 * strata's ping-pong and reprojection). Red WW_CELL_AIR_LAMPS_RED (live): pixel = the inject's own lamp loop, as
+	 * before; else a comma list of gates: white (the twin's hash, not the mask), noramp (a = the floor only), onemiss (one
+	 * sample on a miss), blendflicker (the flickering lamps into the history too), nohash (no light-set rejection) */
+	const QByteArray lampRedS = wwEnv( "WW_CELL_AIR_LAMPS_RED" ).trimmed().toLower();
+	const bool lampPixel = lampRedS == "pixel";
+	const int lampRed = ( lampRedS.contains( "white" ) ? 1 : 0 ) | ( lampRedS.contains( "noramp" ) ? 2 : 0 )
+		| ( lampRedS.contains( "onemiss" ) ? 4 : 0 ) | ( lampRedS.contains( "blendflicker" ) ? 8 : 0 ) | ( lampRedS.contains( "nohash" ) ? 16 : 0 );
+	if ( temporal && !lampPixel && !g.stbnTried ) {
+		g.stbnTried = true;
+		QFile mf( QStringLiteral( ":/air/stbn_scalar_128x128x64.r8" ) );
+		const QByteArray mask = mf.open( QIODevice::ReadOnly ) ? mf.readAll() : QByteArray();
+		if ( mask.size() == 128 * 128 * 64 ) {	// 64 slices of 128 rows of 128 bytes, x fastest (res/air/README.md)
+			fn->glGenTextures( 1, &g.stbn );
+			fn->glBindTexture( GL_TEXTURE_2D_ARRAY, g.stbn );
+			fn->glTexImage3D( GL_TEXTURE_2D_ARRAY, 0, GL_R8, 128, 128, 64, 0, GL_RED, GL_UNSIGNED_BYTE, mask.constData() );
+			fn->glTexParameteri( GL_TEXTURE_2D_ARRAY, GL_TEXTURE_MIN_FILTER, GL_NEAREST );
+			fn->glTexParameteri( GL_TEXTURE_2D_ARRAY, GL_TEXTURE_MAG_FILTER, GL_NEAREST );
+			fn->glTexParameteri( GL_TEXTURE_2D_ARRAY, GL_TEXTURE_WRAP_S, GL_REPEAT );
+			fn->glTexParameteri( GL_TEXTURE_2D_ARRAY, GL_TEXTURE_WRAP_T, GL_REPEAT );
+			fn->glTexParameteri( GL_TEXTURE_2D_ARRAY, GL_TEXTURE_MAX_LEVEL, 0 );
+			fn->glBindTexture( GL_TEXTURE_2D_ARRAY, 0 );
+		}
+	}
+	const bool lampVol = temporal && !lampPixel && g.stbn != 0;
+	if ( lampVol && ( !g.lvHist[0] || g.lvCols != cols || g.lvRows != rows ) ) {
+		for ( int i = 0; i < 2; i++ ) {
+			vaAlloc3D( fn, g.lvHist[i], cols, rows, kSlices, false, true );
+			vaAlloc3D( fn, g.lvNow[i], cols, rows, kSlices, false, false );	// 32-bit: the hash's 24 bits exact
+		}
+		g.lvCols = cols;
+		g.lvRows = rows;
+		g.lvOk = false;
+	}
+	if ( !lampVol )
+		g.lvOk = false;
+	{
+		static QByteArray lampSaid;
+		const QByteArray say = lampVol ? QByteArray( "froxel" )
+			: QByteArray( "pixel (" ) + ( lampPixel ? "red" : !temporal ? "not temporal" : "no mask" ) + ")";
+		if ( say != lampSaid ) {
+			lampSaid = say;
+			std::fprintf( stderr, "cell air lamps: %s\n", say.constData() );
+		}
+	}
 	/* lane VOLAIRPATH1: a camera path keys the history on its frame, so every repeat of a path draws the same strata
 	 * from the same history: a run's first frame (or a step back) starts a fresh history, a repaint of the same frame
 	 * redoes it from the state that frame started from, and the stratum is the frame's (volQ = frame & 3). No path
@@ -1918,6 +1969,11 @@ static void vaPassInner( Scene * scene, bool run )
 		prog->uni1i( "volLampAtlasRed", ( wwAirLampAtlasRed() & 1 ) | ( lampPcfRed ? 2 : 0 ) | ( wwAirAtlasAllRed() ? 4 : 0 ) | ( nsLampOff ? 8 : 0 ) );
 		prog->uni1i( "volLampAtlas", WwCellUnit::AirLampAtlas );
 		prog->uni1i( "volLampTable", WwCellUnit::AirLampTable );
+		prog->uni1i( "volLampNow", WwCellUnit::AirLampNow );	// part 25 (LampVol): own units, never shared
+		prog->uni1i( "volLampHist", WwCellUnit::AirLampHist );
+		prog->uni1i( "volStbn", WwCellUnit::AirStbn );
+		prog->uni1i( "volLampRed", lampRed );
+		prog->uni1i( "volLampVol", 0 );
 	}
 	const bool csm = wwSunShadowWanted( scene );
 	fn->glDisable( GL_DEPTH_TEST );
@@ -2351,7 +2407,8 @@ static void vaPassInner( Scene * scene, bool run )
 		for ( std::uint64_t v : { std::uint64_t( g.texW ), std::uint64_t( g.texH ), std::uint64_t( g.texD ), std::uint64_t( g.half ),
 				std::uint64_t( g.tileCols ), std::uint64_t( g.tileRows ), std::uint64_t( g.histCols ), std::uint64_t( g.histRows ),
 				std::uint64_t( g.histSlices ), std::uint64_t( temporal ), std::uint64_t( g.mrtOk ), std::uint64_t( g.inject ),
-				std::uint64_t( g.integ ), std::uint64_t( g.tile ), std::uint64_t( g.hist[0] ), std::uint64_t( g.hist[1] ) } )
+				std::uint64_t( g.integ ), std::uint64_t( g.tile ), std::uint64_t( g.hist[0] ), std::uint64_t( g.hist[1] ),
+				std::uint64_t( g.lvHist[0] ), std::uint64_t( g.lvHist[1] ), std::uint64_t( g.lvNow[0] ), std::uint64_t( g.lvNow[1] ) } )
 			lay = ( lay ^ v ) * 1099511628211ull;
 		if ( lay != g.fbLayout ) {
 			g.fbLayout = lay;
@@ -2387,6 +2444,43 @@ static void vaPassInner( Scene * scene, bool run )
 		fn->glBindTexture( GL_TEXTURE_2D, g.tile );
 	}
 	vaCpu.mark( PassTime::CpuAirTile );
+	/* lane MODULES1 part 25 (LampVol): stage 4, the lamps' in-scatter a froxel: last frame's pair (the term + its hash,
+	 * the history) on AirLampNow / AirLampHist, this frame's pair the targets; then the inject reads this frame's term on
+	 * AirLampNow. A framebuffer refusal falls back to the inject's own lamp loop (volLampVol 0), not to no air */
+	bool lampRan = false;
+	if ( lampVol && complete ) {
+		fn->glActiveTexture( GLenum( GL_TEXTURE0 + WwCellUnit::AirLampNow ) );
+		fn->glBindTexture( GL_TEXTURE_3D, g.lvNow[g.histCur] );
+		fn->glActiveTexture( GLenum( GL_TEXTURE0 + WwCellUnit::AirLampHist ) );
+		fn->glBindTexture( GL_TEXTURE_3D, g.lvHist[g.histCur] );
+		fn->glActiveTexture( GLenum( GL_TEXTURE0 + WwCellUnit::AirStbn ) );
+		fn->glBindTexture( GL_TEXTURE_2D_ARRAY, g.stbn );
+		prog->uni1i( "volStage", 4 );
+		prog->uni1b( "volLampHistOk", g.histOk && g.lvOk );
+		prog->uni1f( "volLampA", g.tmode == 1 ? 0.2f : 0.1f );
+		prog->uni1i( "volFrame", int( g.frame ) );
+		const GLenum bufs[2] = { GL_COLOR_ATTACHMENT0, GL_COLOR_ATTACHMENT1 };
+		fn->glDrawBuffers( 2, bufs );
+		PassTime::subBegin( PassTime::AirLampVol );
+		lampRan = true;
+		for ( int k = 0; k < kSlices; k++ ) {
+			fn->glFramebufferTextureLayer( GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, g.lvHist[g.histCur ^ 1], 0, k );
+			fn->glFramebufferTextureLayer( GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT1, g.lvNow[g.histCur ^ 1], 0, k );
+			if ( k == 0 && !fbComplete( 5 ) ) {
+				lampRan = false;
+				break;
+			}
+			prog->uni1i( "volLayer", k );
+			r->drawShape( 4, 3, 6, GL_TRIANGLES, GL_UNSIGNED_SHORT, &attrs, idx );
+		}
+		PassTime::subEnd( PassTime::AirLampVol );
+		fn->glFramebufferTexture2D( GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT1, GL_TEXTURE_2D, 0, 0 );
+		const GLenum first = GL_COLOR_ATTACHMENT0;
+		fn->glDrawBuffers( 1, &first );
+		fn->glActiveTexture( GLenum( GL_TEXTURE0 + WwCellUnit::AirLampNow ) );
+		fn->glBindTexture( GL_TEXTURE_3D, lampRan ? g.lvNow[g.histCur ^ 1] : 0 );
+	}
+	prog->uni1i( "volLampVol", lampRan ? 1 : 0 );
 	// lane PERF2: the O(S) integrate (stage 3, 7 layers a draw); red oldint: stage 2, every layer re-summed from 0
 	const bool oneSum = g.mrtOk == 1 && !( s.red & 268435456 );
 	for ( int stage = 1; stage <= 2 && complete; stage++ ) {
@@ -2455,6 +2549,7 @@ static void vaPassInner( Scene * scene, bool run )
 		PassTime::subEnd( stage == 1 ? PassTime::AirInject : PassTime::AirIntegrate );
 		vaCpu.mark( stage == 1 ? PassTime::CpuAirInject : PassTime::CpuAirInteg );
 	}
+	prog->uni1i( "volLampVol", 0 );	// part 25: the far grid has no placed lights
 	/* lane FARGRID1: THE FAR GRID. The same program and medium on a fixed grid from the handoff to farEnd: the sun
 	 * (shadowed by airFarVis: the cascades where they reach, the terrain's shadow-height map, the clouds' input) and
 	 * the sky's ambient; no placed lights, no GI grid (neither reaches 250 m), no depth skip. Rebuilt when what it is
@@ -2577,6 +2672,12 @@ static void vaPassInner( Scene * scene, bool run )
 	fn->glBindTexture( GL_TEXTURE_2D, 0 );
 	fn->glActiveTexture( GLenum( GL_TEXTURE0 + WwCellUnit::AirTerrain ) );
 	fn->glBindTexture( GL_TEXTURE_2D_ARRAY, 0 );
+	fn->glActiveTexture( GLenum( GL_TEXTURE0 + WwCellUnit::AirLampNow ) );	// part 25
+	fn->glBindTexture( GL_TEXTURE_3D, 0 );
+	fn->glActiveTexture( GLenum( GL_TEXTURE0 + WwCellUnit::AirLampHist ) );
+	fn->glBindTexture( GL_TEXTURE_3D, 0 );
+	fn->glActiveTexture( GLenum( GL_TEXTURE0 + WwCellUnit::AirStbn ) );
+	fn->glBindTexture( GL_TEXTURE_2D_ARRAY, 0 );
 	if ( !complete ) {
 		s.last = QStringLiteral( "refused(froxel framebuffer incomplete)" );
 		restore();
@@ -2587,6 +2688,7 @@ static void vaPassInner( Scene * scene, bool run )
 	if ( temporal ) {
 		g.histCur ^= 1;
 		g.histOk = true;
+		g.lvOk = lampRan;	// part 25: the lamps' history is this frame's only if stage 4 drew it
 		g.frame++;
 		if ( pathFrame >= 0 ) {
 			g.pathDone = pathFrame;
@@ -2599,7 +2701,7 @@ static void vaPassInner( Scene * scene, bool run )
 		if ( s.settlePending )
 			s.settlePending = false;
 		else
-			s.settleLeft = 3;
+			s.settleLeft = lampRan ? 8 : 3;	// part 25: the lamps' history ramp (N 4 -> 12) needs more frames than the strata
 	}
 	g.near = nearD;
 	g.logRatio = logRatio;

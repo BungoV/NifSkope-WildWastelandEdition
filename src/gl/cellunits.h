@@ -83,6 +83,9 @@ constexpr int PrecipRoof = 87;	// lane BUGS1102B: the GPU precipitation field's 
 constexpr int RainCover = 88;	// lane FO76WEATHER2: the rain wetness's cover map, the same roof map for the surfaces (sampler2D R32F; cellprecip.cpp)
 constexpr int AirLampAtlas = 89;	// lane MODULES1 route (a): the air's lamp depth atlas (sampler2DShadow; features/air/airlampatlas.cpp)
 constexpr int AirLampTable = 90;	// lane MODULES1 route (a): its tile table (samplerBuffer RGBA32F, 4 texels a light)
+constexpr int AirLampNow = 92;	// lane MODULES1 part 25 (LampVol): the lamps' in-scatter a froxel (sampler3D RGBA32F; cellvolair.cpp stage 4)
+constexpr int AirLampHist = 93;	// lane MODULES1 part 25: its history (sampler3D RGBA16F, stage 4 only)
+constexpr int AirStbn = 94;	// lane MODULES1 part 25: the blue-noise mask (sampler2DArray R8; res/air/stbn_scalar_128x128x64.r8)
 constexpr int AirLampRays = 91;	// lane MODULES1 route (b): the lamps' shadowed share a froxel (samplerBuffer RG32F; rtddgicell.cpp rtddgiAirRaysFrame)
 constexpr int FxDepth = 83;	// lane WATERFIX7: a particle's soft-depth read of the opaque pass (sampler2D; was 9, a TexCache unit)
 constexpr int WaterFlowAtlas = 67;	// lane WATERFLOWBAKE1: its sparse tiles (usampler2D R32UI; was 11, under Bloom)	// lane WATERWETBAKE1: its sparse tiles (usampler2D R8UI; 47 in the lane)
@@ -96,7 +99,7 @@ constexpr int kAll[] = { Shadow, Bloom, Lut, Gi, Lights, Csm, Ao, Ssr, GiSlot, R
 	LandShoreIndex, LandShoreAtlas, WaterFlowIndex, WaterFlowAtlas, WaterOceanB, WaterOceanC, WaterSkyIndex, WaterSkyAtlas, AirTerrain,
 	LandLodDiff, LandLodOuter, LandLodNoise, LandLodDetail, WaterOceanD,
 	LandWaterInfo, LandWaterInfo + 1, LandWaterInfo + 2, UnderDepthMs, FxDepth, DdgiAtlas, Restir, FarStream, PrecipRoof, RainCover,
-	AirLampAtlas, AirLampTable, AirLampRays };
+	AirLampAtlas, AirLampTable, AirLampRays, AirLampNow, AirLampHist, AirStbn };
 
 constexpr bool distinct()
 {
