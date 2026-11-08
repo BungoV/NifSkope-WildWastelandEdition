@@ -1,8 +1,8 @@
 """Lane CLOUDSHAPE1: Cloud Shapes' offline gates in the tree (the look gate against RDR2 / reference frames lives in
 notes/cloudshape1/tools/gate.py: those frames never go in the repo). Runs the REAL shaders in the hidden GL context
-(CLOUD2's cloudvol_check helpers), the C++ side through tests/cloudshape/cloudshape_dump.cpp. No NifSkope.
+(CLOUD2's cloudvol_check helpers), the C++ side through tests/features/clouds/cloudshape/cloudshape_dump.cpp. No NifSkope.
 
-    python -I tests/spells/cloudshape_check.py <scratch dir> [--red nocal|off]
+    python -I tests/features/clouds/cloudshape_check.py <scratch dir> [--red nocal|off]
 
 Gates (bars written before the first run):
   L link      cloud_march_s, cloud_fly_s, cloud_shadowmap_s, cloud_flybake_s link (every reader of the density has its twin).
@@ -20,7 +20,7 @@ Exit 0 only when every gate run passes.
 import os, subprocess, sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-TREE = os.path.dirname(os.path.dirname(HERE))
+TREE = os.path.dirname(os.path.dirname(os.path.dirname(HERE)))
 args = sys.argv[1:]
 scratch = args[0] if args and not args[0].startswith('--') else os.path.join(TREE, '..', 'cloudshape_scratch')
 red = args[args.index('--red') + 1] if '--red' in args else ''
@@ -43,7 +43,7 @@ def gate(name, ok, msg):
 
 DUMP = os.path.join(scratch, 'cloudshape_dump.exe')
 r = subprocess.run(['C:/msys64/ucrt64/bin/g++.exe', '-O2', '-std=c++17', '-I', os.path.join(TREE, 'src'),
-                    os.path.join(TREE, 'tests', 'cloudshape', 'cloudshape_dump.cpp'), '-o', DUMP], env=ENV,
+                    os.path.join(TREE, 'tests', 'features', 'clouds', 'cloudshape', 'cloudshape_dump.cpp'), '-o', DUMP], env=ENV,
                    capture_output=True, text=True)
 if r.returncode:
     raise SystemExit('BUILD FAIL ' + r.stderr[-2000:])
@@ -97,7 +97,7 @@ def sky(T, low=(1.5, 3.5, 1.0), nocal=False):
 
 def probe_prog(shape):
     f = os.path.join(scratch, 'probe_%s.frag' % ('s' if shape else 'old'))
-    inc = os.path.join(TREE, 'tests', 'cloudvar', 'cloudvar_probe.glsl').replace('\\', '/')
+    inc = os.path.join(TREE, 'tests', 'features', 'clouds', 'cloudvar', 'cloudvar_probe.glsl').replace('\\', '/')
     open(f, 'w').write('#version 410 core\n%s#include "%s"\n' % ('#define WW_CLOUD_SHAPE 1\n' if shape else '', inc))
     return V['linked'](C.build(SDIR, None, [os.path.join(SDIR, 'cell_ao.vert'), f]), 'probe')
 

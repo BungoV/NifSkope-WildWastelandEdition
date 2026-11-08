@@ -1,5 +1,5 @@
 // lane CLOUDSHAPE1: the Cloud Shapes density's CPU side for the offline gate (tests/spells/cloudshape_check.py builds this
-// with g++). No GL, no Qt: src/gl/cloudnoise.h (the exe's noise and body field) + src/gl/cloudvolmath.h (the twin).
+// with g++). No GL, no Qt: src/features/clouds/cloudnoise.h (the exe's noise and body field) + src/features/clouds/cloudvolmath.h (the twin).
 //
 //   cloudshape_dump stats
 //       "shape <mean> <sd>" of the shape volume's bytes (kShpMean, kShpSd are these), "cell <mean> <sd> <min> <max>"
@@ -9,8 +9,8 @@
 //       "type <b> topFrac domeK sheet", "cal <b> v0..v16" for the Low (type T) and Mid bands, as cloudvol.cpp builds them
 //   cloudshape_dump grid <cal args...> <mapR> <mapG> <mapB> <Ox> <Oy> <Oz> <Ux> <Uy> <Uz> <Vx> <Vy> <Vz> <nx> <ny>
 //       the cal lines, then per row j "g <j> d.." (shapeDensity at O + i U + j V, wind 0, footprint 0)
-#include "gl/cloudnoise.h"
-#include "gl/cloudvolmath.h"
+#include "features/clouds/cloudnoise.h"
+#include "features/clouds/cloudvolmath.h"
 
 #include <cmath>
 #include <cstdio>

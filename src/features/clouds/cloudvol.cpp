@@ -185,6 +185,12 @@ CvState & cs()
 			s.shape = V::defaultOnSwitch( sh.constData() ) ? 1 : 0;
 		else	// the row Render > Scene > Cloud Shapes, On unless the user turned it Off
 			s.shape = QSettings().value( QLatin1StringView( kShpKey ), 1 ).toInt() != 0 ? 1 : 0;
+		// lane CLOUDSHAPE1 11-08 (the landing): WW_CLOUDVOL_SHAPE_RED=1 = today's clouds (the old density), over the row and the pin
+		const QByteArray shRed = wwEnvStr( "WW_CLOUDVOL_SHAPE_RED" ).trimmed().toLower().toLatin1();
+		if ( !shRed.isEmpty() && V::defaultOnSwitch( shRed.constData() ) ) {
+			s.shape = 0;
+			s.shapePinned = true;
+		}
 	}
 	return s;
 }
