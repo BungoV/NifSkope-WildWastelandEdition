@@ -1,5 +1,6 @@
 #include "features/water/cellocean.h"
 #include "wwswitch.h"
+#include "wwsyncred.h"	// lane PERFFIX6: ^WW_SYNC_RED
 
 #include "gl/cellunits.h"
 #include "gl/celllooks.h"
@@ -159,7 +160,7 @@ void timeRead( NifSkopeOpenGLContext::GLFunctions * fn, OceanGpu & g, OceanState
 {
 	if ( !g.pending[slot] )
 		return;
-	if ( !wait ) {
+	if ( !wait || !wwSyncRed() ) {	// lane PERFFIX6: an unfinished query is read next frame
 		GLuint avail = 0;
 		fn->glGetQueryObjectuiv( g.qry[slot * 2 + 1], GL_QUERY_RESULT_AVAILABLE, &avail );
 		if ( !avail )

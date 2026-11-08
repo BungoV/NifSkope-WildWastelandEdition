@@ -1,3 +1,14 @@
+## PERFFIX6 PHASE 2 (2026-11-08): no per-frame CPU wait on the GPU; one grab for the water; a slimmer AO pass
+- The exposure / bloom measure and the sky's mean read their last-frame buffers only once the GPU is past them (a
+  zero-timeout fence poll). Not yet: that frame keeps the last value and queues no new read (the buffers are in
+  flight); the read is tried the next frame. They used to wait up to 1 s. The GPU timers of the shadows, clouds,
+  sky, ocean, Modern TAA and fog bloom read only a finished query (an unfinished one is read next frame).
+  Red `WW_SYNC_RED=1` (src/wwsyncred.h): every wait as before.
+- The water's refraction copy takes the second pass's effect depth in the same blit while that depth is not taken yet
+  (the water asks for both with no draw between). Red `WW_GRAB_SHARE=0`: two blits. Census line `grab share:`.
+- The AO opaque pass skips the reflection probes' per-draw setup (its fragment returns with the normal; the main pass
+  sets it again per draw). Red `WW_AO_SLIM=0`.
+
 ## PERFFIX6 (2026-11-07): the per-draw setup stops re-reading the environment, the NIF and the program table
 - Environment reads (`wwEnv*`) are kept per name until any switch set or environment write moves a generation;
   every direct `qputenv` / `qunsetenv` in src/ goes through `wwEnvPut` / `wwEnvUnset` (src/wwenvput.h). Red

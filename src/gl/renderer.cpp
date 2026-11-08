@@ -943,7 +943,10 @@ static NifSkopeOpenGLContext::Program * wwProgramCensus( const NifModel * nif, S
 	if ( mesh && wwAoScene && !aoLean )
 		wwCellSsrDraw( wwAoScene, program && ( wwIsCellProgramName( program->name ) ) );
 	// lane REFLPROBE1: the placed probes a cell-lit env-mapped draw reads (cellreflprobe.h)
-	if ( mesh && wwAoScene )
+	/* lane PERFFIX6 (F3): nor in the AO opaque pass: its fragment returns with the normal before any reflection, and the
+	 * main pass sets cellReflOn and the atlas unit again per draw (the arrays by their per-program stamp). Red ^WW_AO_SLIM=0 */
+	WW_SWITCH_STATIC( bool, aoSlim, wwEnvStr( "WW_AO_SLIM" ).trimmed() != QLatin1String( "0" ) );
+	if ( mesh && wwAoScene && !( aoLean && aoSlim ) )
 		wwCellReflProbeDraw( wwAoScene, program && ( wwIsCellProgramName( program->name ) ) );
 	// lane SSGI1: the screen-space bounce a cell-lit opaque draw reads (cellssgi.h)
 	if ( mesh && wwAoScene && !aoLean )

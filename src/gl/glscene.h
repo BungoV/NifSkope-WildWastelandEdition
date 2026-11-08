@@ -432,6 +432,13 @@ public:
 	int refrCopyPass = -1;	//!< lane PERFFIX3: the second pass (fxDepthPassNow) the copy belongs to
 	int refrCopyFbo = -1;	//!< and the framebuffer and viewport it was taken from
 	int refrCopyVp[4] = { 0, 0, 0, 0 };
+	//! lane PERFFIX6 (G2): grabRefractionSource for a caller that grabs the effect depth next with no draw between (the
+	//! water): a fresh copy then takes this pass's depth in the same blit. Red ^WW_GRAB_SHARE=0: two blits.
+	bool grabRefractionWithDepth();
+	bool refrWithDepth = false;	//!< G2: set around grabRefractionSource by grabRefractionWithDepth
+	unsigned int fxDepthShareColor = 0;	//!< G2: grabEffectDepth's blit takes this colour texture too
+	bool fxDepthShared = false;	//!< G2: that blit took both
+	static inline qint64 grabShares = 0;	//!< G2: the census (with the water refraction line)
 	static inline qint64 refrCopies = 0, refrReuses = 0;	//!< lane PERFFIX3: the census (stderr every 600 water draws)
 
 	// --- lane EFX2: the opaque pass's depth, read by a cell-lit Soft effect ---

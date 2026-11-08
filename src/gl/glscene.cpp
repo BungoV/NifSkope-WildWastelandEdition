@@ -534,6 +534,8 @@ bool Scene::grabRefractionSource()
 		if ( ( refrCopies + refrReuses ) % 600 == 0 )
 			std::fprintf( stderr, "water refraction: %lld copies, %lld reused (one copy a pass%s)\n", refrCopies,
 				refrReuses, refrPerDraw ? "; RED perdraw" : "" );
+		if ( ( refrCopies + refrReuses ) % 600 == 0 && grabShares )	// lane PERFFIX6 (G2)
+			std::fprintf( stderr, "grab share: %lld copies took the effect depth in the same blit\n", grabShares );
 	};
 	if ( !refrPerDraw && refractionTexId && refrCopyPass == fxDepthPassNow && refrCopyFbo == prevDraw
 		&& refractionTexW == w && refractionTexH == h && refractionTexFormat == fmt && refrCopyVp[0] == vp[0]
@@ -563,12 +565,31 @@ bool Scene::grabRefractionSource()
 		fn->glBindFramebuffer( GL_DRAW_FRAMEBUFFER, refractionFbo );
 	}
 
+	/* lane PERFFIX6 (G2): the water grabs the frame's depth right after this copy with nothing drawn between, so while this
+	 * second pass's depth is not taken yet ONE blit takes colour and depth (grabEffectDepth with fxDepthShareColor; it
+	 * puts the bindings back to the frame's). Red ^WW_GRAB_SHARE=0: the copy, then its own depth blit. */
+	bool shared = false;
+	if ( refrWithDepth && ( fxDepthPass != fxDepthPassNow || fxDepthState == 0 ) ) {
+		fn->glBindFramebuffer( GL_DRAW_FRAMEBUFFER, GLuint( prevDraw ) );
+		fxDepthShareColor = refractionTexId;
+		PassTime::subBegin( PassTime::WaterCopy );
+		shared = grabEffectDepth() && fxDepthShared;
+		PassTime::subEnd( PassTime::WaterCopy );
+		fxDepthShareColor = 0;
+		fxDepthShared = false;
+		if ( shared )
+			grabShares++;
+		else
+			fn->glBindFramebuffer( GL_DRAW_FRAMEBUFFER, refractionFbo );
+	}
 	// resolve-blit works from both multisampled and plain framebuffers
 	fn->glBindFramebuffer( GL_READ_FRAMEBUFFER, GLuint( prevDraw ) );
-	PassTime::subBegin( PassTime::WaterCopy );	// lane PERFFIX3
-	fn->glBlitFramebuffer( vp[0], vp[1], vp[0] + w, vp[1] + h, 0, 0, w, h,
-	                       GL_COLOR_BUFFER_BIT, GL_NEAREST );
-	PassTime::subEnd( PassTime::WaterCopy );
+	if ( !shared ) {
+		PassTime::subBegin( PassTime::WaterCopy );	// lane PERFFIX3
+		fn->glBlitFramebuffer( vp[0], vp[1], vp[0] + w, vp[1] + h, 0, 0, w, h,
+		                       GL_COLOR_BUFFER_BIT, GL_NEAREST );
+		PassTime::subEnd( PassTime::WaterCopy );
+	}
 	refrCopyPass = fxDepthPassNow;
 	refrCopyFbo = prevDraw;
 	std::copy( vp, vp + 4, refrCopyVp );
@@ -578,6 +599,16 @@ bool Scene::grabRefractionSource()
 	fn->glBindFramebuffer( GL_DRAW_FRAMEBUFFER, GLuint( prevDraw ) );
 	fn->glActiveTexture( GLenum( prevActive ) );
 	return true;
+}
+
+bool Scene::grabRefractionWithDepth()
+{
+	WW_SWITCH_STATIC( bool, shareRed, wwSwitchEcho( "refraction + effect depth grab share red (G2)",
+		wwEnv( "WW_GRAB_SHARE" ).trimmed() == "0" ) );
+	refrWithDepth = !shareRed;
+	const bool ok = grabRefractionSource();
+	refrWithDepth = false;
+	return ok;
 }
 
 void Scene::drawShapes()
@@ -723,8 +754,18 @@ bool Scene::grabEffectDepth()
 		fn->glBindFramebuffer( GL_DRAW_FRAMEBUFFER, fxDepthFbo );
 	}
 	fn->glBindFramebuffer( GL_READ_FRAMEBUFFER, GLuint( prevDraw ) );
-	fn->glBlitFramebuffer( vp[0], vp[1], vp[0] + w, vp[1] + h, 0, 0, w, h, GL_DEPTH_BUFFER_BIT, GL_NEAREST );
+	if ( fxDepthShareColor ) {	// lane PERFFIX6 (G2): the refraction copy's colour in the same blit
+		fn->glFramebufferTexture2D( GL_DRAW_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, fxDepthShareColor, 0 );
+		fn->glDrawBuffer( GL_COLOR_ATTACHMENT0 );
+	}
+	fn->glBlitFramebuffer( vp[0], vp[1], vp[0] + w, vp[1] + h, 0, 0, w, h,
+		fxDepthShareColor ? GLbitfield( GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT ) : GLbitfield( GL_DEPTH_BUFFER_BIT ), GL_NEAREST );
+	if ( fxDepthShareColor ) {
+		fn->glFramebufferTexture2D( GL_DRAW_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, 0, 0 );
+		fn->glDrawBuffer( GL_NONE );
+	}
 	const GLenum err = glGetError();
+	fxDepthShared = fxDepthShareColor && err == GL_NO_ERROR;
 	fn->glBindFramebuffer( GL_READ_FRAMEBUFFER, GLuint( prevRead ) );
 	fn->glBindFramebuffer( GL_DRAW_FRAMEBUFFER, GLuint( prevDraw ) );
 	if ( err != GL_NO_ERROR ) {

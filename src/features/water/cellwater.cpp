@@ -516,7 +516,7 @@ bool wwCellWaterUniforms( Scene * scene, int block, int unit )
 	unsigned int gbuf = 0;
 	const bool rayPass = wwCellSsrWaterRayPass( &gbuf );
 	const bool inSsr = wwCellSsrInPass();
-	const bool haveScene = !inSsr && scene->grabRefractionSource();
+	const bool haveScene = !inSsr && scene->grabRefractionWithDepth();	// lane PERFFIX6 (G2): one blit with the depth below
 	fn->glActiveTexture( GLenum( GL_TEXTURE0 + unit ) );
 	fn->glBindTexture( GL_TEXTURE_2D, haveScene ? scene->refractionTexId : 0 );
 	prog->uni1i_l( prog->uniLocation( "waterScene" ), unit++ );

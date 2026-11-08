@@ -1,5 +1,6 @@
 #include "features/post/gametaa.h"
 #include "wwswitch.h"	// lane TESTDRIVER1: the WW_* switch store
+#include "wwsyncred.h"	// lane PERFFIX6: ^WW_SYNC_RED
 
 #include "gl/celluniform.h"	// lane CELLUNI4: the tone map's known state
 #include "gl/cellunits.h"	// lane WATERFIX7: the passes' named units
@@ -296,7 +297,7 @@ void taa2TimeRead( NifSkopeOpenGLContext::GLFunctions * fn, TaaGpu & g, TaaState
 {
 	if ( !g.qPending[slot] )
 		return;
-	if ( !wait ) {
+	if ( !wait || !wwSyncRed() ) {	// lane PERFFIX6: an unfinished query is read next frame
 		GLuint avail = 0;
 		fn->glGetQueryObjectuiv( g.q[slot * 2 + 1], GL_QUERY_RESULT_AVAILABLE, &avail );
 		if ( !avail )

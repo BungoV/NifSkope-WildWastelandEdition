@@ -1,5 +1,6 @@
 #include "features/exposure/cellhdr.h"
 #include "wwswitch.h"	// lane TESTDRIVER1: the WW_* switch store
+#include "wwsyncred.h"	// lane PERFFIX6: ^WW_SYNC_RED
 #include "gl/cellunits.h"
 
 #include "features/sky/atmosphere.h"	// lane SKYA (EXPO1): the sky in the exposure's mean
@@ -457,6 +458,13 @@ void isMeasureFrame( Scene * scene, HdrGpu & g, int W, int H, int S, GLint prevD
 	const void * doc = scene->nifModel;
 	IsMeasureGpu & m = isGpus()[r];
 	const int qw = std::max( 1, W >> 2 ), qh = std::max( 1, H >> 2 );
+	/* lane PERFFIX6 (PHASE 2): the fence polled with a zero timeout; the GPU not past it yet: this frame applies nothing and
+	 * measures nothing (its read buffer is still in flight; the last value stays), and the read is tried again next frame.
+	 * Red ^WW_SYNC_RED=1: the wait (up to 1 s) */
+	if ( m.fence && !wwSyncRed() && fn->glClientWaitSync( m.fence, GL_SYNC_FLUSH_COMMANDS_BIT, 0 ) == GL_TIMEOUT_EXPIRED ) {
+		isServed().insert( doc, true );	// glview's own pass stays off: the measure is late, not missing
+		return;
+	}
 	if ( m.fence ) {	// the last frame's readback (a frame old: the GPU is past it in a GPU-bound frame)
 		fn->glClientWaitSync( m.fence, GL_SYNC_FLUSH_COMMANDS_BIT, GLuint64( 1000000000 ) );
 		fn->glDeleteSync( m.fence );

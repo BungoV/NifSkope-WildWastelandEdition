@@ -4,6 +4,7 @@
 #include "cloudvol.h"	// lane CLOUD5: Cloud Variety raises the Low top for towers
 #include "cloudvolmath.h"
 #include "wwswitch.h"
+#include "wwsyncred.h"	// lane PERFFIX6: ^WW_SYNC_RED
 #include "gl/glscene.h"
 #include "gl/lookdevstage.h"
 #include "gl/renderer.h"
@@ -281,7 +282,7 @@ void timeRead( NifSkopeOpenGLContext::GLFunctions * fn, CmState & s, int slot, b
 {
 	if ( !s.pending[slot] )
 		return;
-	if ( !wait ) {
+	if ( !wait || !wwSyncRed() ) {	// lane PERFFIX6: an unfinished query is read next frame
 		GLuint avail = 0;
 		fn->glGetQueryObjectuiv( s.q[slot * 2 + 1], GL_QUERY_RESULT_AVAILABLE, &avail );
 		if ( !avail )
