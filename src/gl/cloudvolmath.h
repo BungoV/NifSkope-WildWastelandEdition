@@ -645,7 +645,7 @@ inline void varCalibrate( const VarVolumes & vol, const Variety & v, int band, f
  * inverted at the base. Here: a body field (cloudnoise.h cellField) over the coverage threshold, a dome on ONE flat base
  * per body (taller in stronger cells), lumps that grow with height, the eroded edge, then clamp(f / window): dense
  * inside, not multiplied by the coverage. Constants: notes/cloudshape1 (gate.py, the u2 set; RESEARCH.md). */
-constexpr float kShpSoft = 0.1f;	// the rescale window (f units): RDR2's LUT z (0.2 drew smooth plastic: sheet review 10-31 11:52)
+constexpr float kShpSoft = 0.14f;	// the rescale window (f units): RDR2's LUT z (0.2 drew smooth plastic: sheet review 10-31 11:52; v3 0.14)
 constexpr float kShpErode = 1.0f;	// the detail erosion's depth (f units)
 constexpr float kShpScale = 0.7f;	// the density inside a cloud (x kSigma: 28 /km; 1.0 put the shaded undersides past RDR2's contrast at 4 bearings)
 constexpr float kShpShearKm = 0.3f;	// the tops lean downwind, km per km of height (HZD: wind varies over altitude)
@@ -656,7 +656,7 @@ constexpr float kShpLump = 0.45f;	// the Perlin-Worley lumps' amplitude (f units
 constexpr float kShpCellKm = 32.0f;	// the body field's period
 constexpr float kShpGrowth = 0.8f;	// the lumps grow from 1 - this at the base to 1 at the top
 constexpr float kShpTapFoot = 0.2f;	// a light tap reads the density at this share of its segment (HZD's cone smooths)
-constexpr float kShpSoftPerKm = 0.5f;	// the window widens with the reader's footprint, per km (no aliasing)
+constexpr float kShpSoftPerKm = 0.8f;	// the window widens with the reader's footprint, per km (no aliasing)
 constexpr float kShpMean = 0.884f, kShpSd = 0.053f;	// the shape volume's mean and sd (MEASURED; cloudshape_dump prints them)
 constexpr float kShpDir[2] = { 1.0f, 0.0f };	// the shear's direction: the wind's (windKm is along +x)
 // sheet review 10-31 11:52 (notes/cloudshape1/v2): the cauliflower's middle scale (HZD's base FBM: the Perlin-Worley again at
@@ -665,7 +665,14 @@ constexpr float kShpDir[2] = { 1.0f, 0.0f };	// the shear's direction: the wind'
 // cumulus core, so the erosion carves their surface only)
 constexpr float kShpBillow = 4.0f, kShpBillowW = 0.5f, kShpWxScale = 4.7f, kShpWx = 0.6f, kShpDetailK = 0.6f;
 constexpr float kShpTowerGain = 2.5f;
-constexpr float kShpInner = 0.8f, kShpInnerLo = 1.0f;	// LATE ITEM 14: the interior's density ramp (no uniform fill)
+constexpr float kShpInner = 0.8f, kShpInnerLo = 0.9f;	// LATE ITEM 14: the interior's density ramp (no uniform fill)
+/* v3 (bungo 11-08 "cauliflower", "solid objects floating in the air"): a storm sky's lumps at kShpBigK x the period, their
+ * share varied per tower by the body field at kShpVarScale x its period; billows only on a tower's upper part (hf
+ * kShpBillowLo..kShpBillowHi), fewer where the big lumps lead; the tower's erosion billowy above, wispy below; a tower's
+ * edge window kShpTowerSoft x wider (its f is kShpTowerGain x steeper); the billows fade with the reader's footprint (far
+ * rows of popcorn). Cumulus (anvil 0) keep v2's shape. notes/cloudshape1/v3 */
+constexpr float kShpVarScale = 1.9f, kShpBigK = 1.7f, kShpBillowLo = 0.45f, kShpBillowHi = 0.85f, kShpBillowBig = 0.8f, kShpBillowy = 0.7f;
+constexpr float kShpFar0 = 0.03f, kShpFar1 = 0.10f, kShpTowerErodeLo = 0.85f, kShpTowerSoft = 3.0f;
 
 /*! the per-type rule (the map's Low type T: 0 stratus, 1/3 stratocumulus, 2/3 cumulus, 1 cumulonimbus): the domes'
  *  height in the band, their shape exponent (2 = round domes; 1.2 for towers: the height follows the cell's strength, so
@@ -717,8 +724,8 @@ inline float sample2( const float * v, int n, float u, float w )
 /*! the shape density's core given its reads: the body cell (0..1), the shape s, the detail det, the height fraction hf,
  *  the calibrated coverage c, the sheet share, the type rule, the reader's footprint km. Relative (x kSigma x the band's
  *  density). */
-inline float shapeCore( float cell, float cellBig, float s, float s2, float det, float hf, float c, float sheet,
-	const ShapeType & st, float footKm )
+inline float shapeCore( float cell, float cellBig, float cellVar, float s, float sB, float s2, float det, float hf, float c,
+	float sheet, const ShapeType & st, float footKm )
 {
 	if ( hf <= 0.0f || hf >= 1.0f || c <= 0.0f )
 		return 0.0f;
@@ -729,12 +736,16 @@ inline float shapeCore( float cell, float cellBig, float s, float s2, float det,
 	if ( st.anvil > 0.0f )
 		f = mixf( f, std::max( f, kShpTowerGain * shapeTowerF( cellBig, c, hf ) ), st.anvil * 2.0f );
 	f += shapeAnvil( st.anvil, hf ) - ( 1.0f - smooth( 0.0f, kShpRise, hf ) );
-	f += ( s - kShpMean ) / kShpSd * kShpLump * mixf( 1.0f - kShpGrowth, 1.0f, hf );
-	if ( f < 1.0f )
-		f += ( s2 - kShpMean ) / kShpSd * kShpBillowW * kShpLump * mixf( 0.5f, 1.0f, hf );
-	const float er = kShpErode * mixf( kShpBaseErode, 1.0f, smooth( 0.0f, 0.3f, hf ) );
-	f -= mixf( det, 1.0f - det, sat( hf * 4.0f ) ) * er;
-	return sat( f / std::max( kShpSoft + footKm * kShpSoftPerKm, 1e-3f ) ) * mixf( kShpInnerLo, 1.0f, sat( f / kShpInner ) ) * kShpScale;
+	const float tw = sat( st.anvil * 2.0f ), wB = tw * mixf( 0.45f, 1.0f, cellVar ), up = smooth( kShpBillowLo, kShpBillowHi, hf );
+	f += ( ( s - kShpMean ) * ( 1.0f - wB ) + ( sB - kShpMean ) * wB ) / ( kShpSd * std::sqrt( ( 1.0f - wB ) * ( 1.0f - wB ) + wB * wB ) )
+		* kShpLump * mixf( 1.0f - kShpGrowth, 1.0f, hf );
+	const float bw = kShpBillowW * mixf( 1.0f, up, tw ) * ( 1.0f - kShpBillowBig * wB ) * ( 1.0f - smooth( kShpFar0, kShpFar1, footKm ) );
+	if ( bw > 0.0f && f < 1.0f )
+		f += ( s2 - kShpMean ) / kShpSd * bw * kShpLump * mixf( 0.5f, 1.0f, hf );
+	const float er = kShpErode * mixf( 1.0f, mixf( kShpTowerErodeLo, 1.0f, up ), tw ) * mixf( kShpBaseErode, 1.0f, smooth( 0.0f, 0.3f, hf ) );
+	f -= mixf( det, 1.0f - det, mixf( sat( hf * 4.0f ), kShpBillowy * up, tw ) ) * er;
+	const float x = sat( f / std::max( ( kShpSoft + footKm * kShpSoftPerKm ) * mixf( 1.0f, kShpTowerSoft, tw ), 1e-3f ) );
+	return x * x * ( 3.0f - 2.0f * x ) * mixf( kShpInnerLo, 1.0f, sat( f / kShpInner ) ) * kShpScale;
 }
 
 struct ShapeVolumes
@@ -749,12 +760,15 @@ struct ShapeVolumes
 
 //! the three reads at (x, y, z) km for a band whose base is baseKm (wind 0, mip 0), as cloud_common.glsl takes them
 inline void shapeReads( const ShapeVolumes & vol, int band, float baseKm, float hf, float x, float y, float z, float & cell,
-	float & cellBig, float & s, float & s2, float & det )
+	float & cellBig, float & cellVar, float & s, float & sB, float & s2, float & det )
 {
 	const float qx = x + kShpDir[0] * kShpShearKm * ( z - baseKm ), qy = y + kShpDir[1] * kShpShearKm * ( z - baseKm );
 	cell = sample2( vol.cell, vol.nc, qx / kShpCellKm + 0.37f * float( band ), qy / kShpCellKm + 0.37f * float( band ) );
 	cellBig = sample2( vol.cell, vol.nc, qx / ( kShpCellKm * kShpTowerScale ) + 0.21f, qy / ( kShpCellKm * kShpTowerScale ) + 0.21f );
+	cellVar = sample2( vol.cell, vol.nc, qx / ( kShpCellKm * kShpVarScale ) + 0.83f, qy / ( kShpCellKm * kShpVarScale ) + 0.29f );
 	s = sample3( vol.shape, vol.ns, qx / kShapeKm, qy / kShapeKm, z / kShapeKm );
+	const float bB = kShapeKm * kShpBigK;	// GLSL: mat2( 0.8, 0.6, -0.6, 0.8 ) * q.xy + ( 0.47, 0.11 )
+	sB = sample3( vol.shape, vol.ns, ( 0.8f * qx - 0.6f * qy + 0.47f ) / bB, ( 0.6f * qx + 0.8f * qy + 0.11f ) / bB, z / bB );
 	const float bk = kShapeKm / kShpBillow;	// GLSL: mat2( 0.6, -0.8, 0.8, 0.6 ) * q.xy + ( 0.31, 0.77 )
 	s2 = sample3( vol.shape, vol.ns, ( 0.6f * qx + 0.8f * qy + 0.31f ) / bk, ( -0.8f * qx + 0.6f * qy + 0.77f ) / bk, z / bk );
 	float cu[3];
@@ -786,9 +800,9 @@ inline float shapeDensity( const ShapeVolumes & vol, const ShapeType st[2], cons
 			continue;
 		const float sheet = b == 0 ? std::max( sat( map[2] / std::max( map[0], 1e-3f ) ), st[0].sheet ) : st[1].sheet;
 		const float c = calAt( cal[b], shapeWxCov( vol, b == 0 ? map[0] : map[1], x, y ) );
-		float cell, cellBig, s, s2, det;
-		shapeReads( vol, b, baseKm[b], hf, x, y, z, cell, cellBig, s, s2, det );
-		d += shapeCore( cell, cellBig, s, s2, det, hf, c, sheet, st[b], 0.0f ) * density[b];
+		float cell, cellBig, cellVar, s, sB, s2, det;
+		shapeReads( vol, b, baseKm[b], hf, x, y, z, cell, cellBig, cellVar, s, sB, s2, det );
+		d += shapeCore( cell, cellBig, cellVar, s, sB, s2, det, hf, c, sheet, st[b], 0.0f ) * density[b];
 	}
 	return d;
 }
@@ -807,14 +821,15 @@ inline void shapeCalibrate( const ShapeVolumes & vol, const ShapeType & st, int 
 	// 64 x 64 columns (0.5 km apart over the 32 km field: its smallest bodies are ~0.7 km; 32 x 32 missed the 0.7 stripe by
 	// 0.06, tests/spells/cloudshape_check.py gate A)
 	constexpr int NC = 64, NZ = 40, NG = 33;
-	std::vector<float> rc( NC * NC * NZ ), rb( NC * NC * NZ ), rs( NC * NC * NZ ), rs2( NC * NC * NZ ), rd( NC * NC * NZ );
+	std::vector<float> rc( NC * NC * NZ ), rb( NC * NC * NZ ), rv( NC * NC * NZ ), rs( NC * NC * NZ ), rsB( NC * NC * NZ ),
+		rs2( NC * NC * NZ ), rd( NC * NC * NZ );
 	const float span = kShpCellKm * ( st.anvil > 0.0f ? kShpTowerScale : 1.0f );
 	for ( int j = 0, n = 0; j < NC; j++ )
 		for ( int i = 0; i < NC; i++ ) {
 			const float x = ( float( i ) + 0.5f ) / NC * span, y = ( float( j ) + 0.37f ) / NC * span;
 			for ( int k = 0; k < NZ; k++, n++ ) {
 				const float hf = ( float( k ) + 0.5f ) / NZ;
-				shapeReads( vol, band, baseKm, hf, x, y, baseKm + hf * th, rc[n], rb[n], rs[n], rs2[n], rd[n] );
+				shapeReads( vol, band, baseKm, hf, x, y, baseKm + hf * th, rc[n], rb[n], rv[n], rs[n], rsB[n], rs2[n], rd[n] );
 			}
 		}
 	auto opacity = [&]( float cp ) {
@@ -822,7 +837,7 @@ inline void shapeCalibrate( const ShapeVolumes & vol, const ShapeType & st, int 
 		for ( int col = 0, n = 0; col < NC * NC; col++ ) {
 			float tau = 0.0f;
 			for ( int k = 0; k < NZ; k++, n++ )
-				tau += shapeCore( rc[n], rb[n], rs[n], rs2[n], rd[n], ( float( k ) + 0.5f ) / NZ, cp, sheet, st, 0.0f ) * kSigma * density * th / NZ;
+				tau += shapeCore( rc[n], rb[n], rv[n], rs[n], rsB[n], rs2[n], rd[n], ( float( k ) + 0.5f ) / NZ, cp, sheet, st, 0.0f ) * kSigma * density * th / NZ;
 			acc += 1.0 - std::exp( -double( tau ) );
 		}
 		return float( acc / ( NC * NC ) );

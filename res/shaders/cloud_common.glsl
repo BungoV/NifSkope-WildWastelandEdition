@@ -69,20 +69,25 @@ float cvShpAnvil( float anvil, float hf )	// cloudvolmath.h shapeAnvil
 	return anvil * cvSmooth( 0.8, 0.9, hf ) * ( 1.0 - cvSmooth( 0.96, 1.0, hf ) );
 }
 
-const float kShpSoft = 0.1, kShpErode = 1.0, kShpScale = 0.7, kShpShearKm = 0.3, kShpRise = 0.04, kShpCurlKm = 0.25;
+const float kShpSoft = 0.14, kShpErode = 1.0, kShpScale = 0.7, kShpShearKm = 0.3, kShpRise = 0.04, kShpCurlKm = 0.25;
 const float kShpBaseErode = 0.3, kShpLump = 0.45, kShpCellKm = 32.0, kShpGrowth = 0.8, kShpTapFoot = 0.2;
-const float kShpSoftPerKm = 0.5, kShpMean = 0.884, kShpSd = 0.053, kShpTowerScale = 3.0;
+const float kShpSoftPerKm = 0.8, kShpMean = 0.884, kShpSd = 0.053, kShpTowerScale = 3.0;
 // sheet review 11:52 (v2): the billows' octave, the weather swing, the detail's period share, the sky's share a cloud's own
 // body leaves its sides (MEASURED against bungo_refs: notes/cloudshape1/v2)
 const float kShpBillow = 4.0, kShpBillowW = 0.5, kShpWxScale = 4.7, kShpWx = 0.6, kShpDetailK = 0.6, kShpSkyOcc = 0.7;
 const float kShpTowerGain = 2.5;
-const float kShpInner = 0.8, kShpInnerLo = 1.0;	// the interior's density ramp (LATE ITEM 14): 1 = off (0.45 and 0.7 took up50's
+const float kShpVarScale = 1.9, kShpBigK = 1.7, kShpBillowLo = 0.45, kShpBillowHi = 0.85, kShpBillowBig = 0.8, kShpBillowy = 0.7;
+const float kShpFar0 = 0.03, kShpFar1 = 0.10;
+const vec2 kShpBillowFar = vec2( kShpFar0, kShpFar1 );
+const float kShpTowerErodeLo = 0.85, kShpTowerSoft = 3.0;
+const float kShpBaseBlue = 0.4, kShpPowder = 0.7, kShpBaseP = 0.4, kShpBounce = 0.05;
+const float kShpInner = 0.8, kShpInnerLo = 0.9;	// the interior's density ramp (LATE ITEM 14): 1 = off (0.45 and 0.7 took up50's
 // contrast range to 1.85 / 1.97, under the references' 2.00: notes/cloudshape1/v2/gate_v2c.txt)
 const float kShpAmbSat = 0.5;	// the sky ambient's saturation kept (Godot demo v2: half toward its grey)
 const int kShpSub = 2;	// the march's sub-steps inside cloud (cloud_march.frag), each at most kShpSubKm (4 and 8 cost 1.5-2x
 // and drew no better once the taps' jitter was its own: notes/cloudshape1/v2/zs2_m.png)
 const float kShpSubKm = 0.06;
-const float kShpMs = 0.2, kShpGround = 0.4;	// the slab floor's share (3D clouds lose light out of their sides), the base's ambient
+const float kShpMs = 0.22, kShpGround = 0.4;	// the slab floor's share (3D clouds lose light out of their sides), the base's ambient
 // the v2 knobs' constant (the offline sweep read a uniform here: notes/cloudshape1/v2/tools; the shipped code reads none)
 #define cvShpK( i, k ) ( k )
 const vec2 kShpDir = vec2( 1.0, 0.0 );	// the wind's direction (cvBands.windKm is along +x): the tops lean downwind
@@ -142,14 +147,24 @@ float cloudDensity( vec3 p )
 		}
 		f += cvShpAnvil( st.w, hf ) - ( 1.0 - cvSmooth( 0.0, kShpRise, hf ) );
 		float grow = mix( 1.0 - kShpGrowth, 1.0, hf );
-		if ( f + kShpLump * ( grow + max( cvShpK( 9, kShpBillowW ), 0.0 ) * mix( 0.5, 1.0, hf ) ) * 3.0 <= 0.0 )
+		if ( f + kShpLump * ( grow + max( cvShpK( 9, kShpBillowW ), 0.0 ) * mix( 0.5, 1.0, hf ) ) * 4.5 <= 0.0 )
 			continue;	// no lump (nor billow) reaches this far out ((1 - kShpMean) / kShpSd < 3): the density is 0 either way
 		float s = textureLod( cvShape, q / kCvShapeKm, log2( max( cvFootKm * 128.0 / kCvShapeKm, 1.0 ) ) ).r;
-		f += ( s - kShpMean ) / kShpSd * kShpLump * grow;
+		/* v3 (bungo 11-08 "cauliflower"): a storm sky's lumps at kShpBigK x the period, the share varied per tower by a
+		 * slow field (no two towers share the bump size); cumulus keep v2's lumps (wB 0: the same clouds) */
+		float wB = clamp( st.w * 2.0, 0.0, 1.0 ) * mix( 0.45, 1.0,
+			textureLod( cvCell, q.xy / ( kShpCellKm * kShpVarScale ) + vec2( 0.83, 0.29 ), 0.0 ).r );
+		float bigK = kCvShapeKm * kShpBigK;
+		vec3 qB = vec3( mat2( 0.8, 0.6, -0.6, 0.8 ) * q.xy, q.z ) + vec3( 0.47, 0.11, 0.0 );
+		float sB = textureLod( cvShape, qB / bigK, log2( max( cvFootKm * 128.0 / bigK, 1.0 ) ) ).r;
+		f += ( ( s - kShpMean ) * ( 1.0 - wB ) + ( sB - kShpMean ) * wB ) / ( kShpSd * sqrt( ( 1.0 - wB ) * ( 1.0 - wB ) + wB * wB ) )
+			* kShpLump * grow;
 		/* sheet review item 1 (smooth plastic): the cauliflower's middle scale (HZD's base shape is an FBM: Perlin-Worley +
 		 * Worley octaves 2-4x finer, Schneider 2015 p. 37): the same Perlin-Worley again at 1 / kShpBillow its period, turned,
 		 * as rounded heaps on the heaps; only near the surface (the inside stays dense) */
-		float bw = cvShpK( 9, kShpBillowW );
+		float tw = clamp( st.w * 2.0, 0.0, 1.0 );
+		float bw = cvShpK( 9, kShpBillowW ) * mix( 1.0, cvSmooth( kShpBillowLo, kShpBillowHi, hf ), tw ) * ( 1.0 - kShpBillowBig * wB )
+			* ( 1.0 - cvSmooth( kShpBillowFar.x, kShpBillowFar.y, cvFootKm ) );
 		if ( bw > 0.0 && f < 1.0 ) {
 			float bk = kCvShapeKm / cvShpK( 8, kShpBillow );
 			vec3 qb = vec3( mat2( 0.6, -0.8, 0.8, 0.6 ) * q.xy, q.z ) + vec3( 0.31, 0.77, 0.0 );
@@ -161,10 +176,14 @@ float cloudDensity( vec3 p )
 		vec3 qd = q + cvShpCurl( q ) * ( kShpCurlKm * ( 1.0 - 0.5 * hf ) );
 		float dk = kCvDetailKm * cvShpK( 5, kShpDetailK );
 		float det = textureLod( cvDetail, qd / dk, log2( max( cvFootKm * 32.0 / dk, 1.0 ) ) ).r;
-		f -= mix( det, 1.0 - det, clamp( hf * 4.0, 0.0, 1.0 ) ) * cvShpK( 4, kShpErode ) * mix( kShpBaseErode, 1.0, cvSmooth( 0.0, 0.3, hf ) );
+		f -= mix( det, 1.0 - det, mix( clamp( hf * 4.0, 0.0, 1.0 ), kShpBillowy * cvSmooth( kShpBillowLo, kShpBillowHi, hf ), tw ) )
+			* cvShpK( 4, kShpErode ) * mix( 1.0, mix( kShpTowerErodeLo, 1.0, cvSmooth( kShpBillowLo, kShpBillowHi, hf ) ), tw )
+			* mix( kShpBaseErode, 1.0, cvSmooth( 0.0, 0.3, hf ) );
 		/* LATE ITEM 14 (uniform fill = toon; clayjohn's Godot demo v2 clouds.glsl:136, MIT, keeps the remapped density as is):
 		 * the inside rises from kShpInnerLo at the edge to full kShpInner f units in, so the lumps vary the interior too */
-		d += clamp( f / max( cvShpK( 7, kShpSoft ) + cvFootKm * kShpSoftPerKm, 1e-3 ), 0.0, 1.0 )
+		// v3: a tower's f is kShpTowerGain x steeper, so its window widens by the same share (a soft rim, not a loaf)
+		float x = clamp( f / max( ( cvShpK( 7, kShpSoft ) + cvFootKm * kShpSoftPerKm ) * mix( 1.0, kShpTowerSoft, tw ), 1e-3 ), 0.0, 1.0 );
+		d += x * x * ( 3.0 - 2.0 * x )
 			* mix( kShpInnerLo, 1.0, clamp( f / kShpInner, 0.0, 1.0 ) ) * kShpScale * cvBands.density[b];
 	}
 	return d;
