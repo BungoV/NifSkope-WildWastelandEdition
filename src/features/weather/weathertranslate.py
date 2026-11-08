@@ -14,6 +14,8 @@ The models (each one is the whole conversion; nothing else is read from the reco
   hazeAlbedo   the record's day fogFar colour (sRGB -> linear), normalised to its largest channel, times the largest
                single-scatter albedo of the haze type at the file's humidity (weathergen.h humidityGrowth): the sun of
                the physical sky is white, so the record's tint lives in what the haze gives back. No drawn colour.
+               A glowing haze (radstorm, Glowing Sea, Far Harbor fog) takes its preset's albedo PER CHANNEL x the tint,
+               G kept on top (part 26, bungo 11-08: radstorms are green).
   precipitation, wind, lightning, transitions: the generated rung already reads these from the record's MNAM/SPGD and
                DATA bytes (weathergen.py generate); they are noted per key in `_derivedFrom`. A dry radstorm
                (lightning cumulonimbus, MNAM NULL) gains rain by our file (radstorm_rain; `_added`, red
@@ -39,6 +41,7 @@ HH_MIN, HH_MAX = 20.0, 20000.0
 RAIN_SHARE = 0.35	# radstorm_rain: heavy convective rain, 3.75 g/m3 -> ~25 mm/h
 HAZE_ALBEDO = {'clean': (0.97, 0.97, 0.97), 'maritime': (0.99, 0.99, 0.99), 'urban': (0.82, 0.82, 0.82),
                'dust': (0.97, 0.92, 0.80), 'smoke': (0.86, 0.84, 0.80), 'glowing': (0.88, 0.97, 0.82)}	# weathergen.h
+GLOW_MARGIN = 0.05	# haze_albedo: a glowing haze's G above R and B at least this much (bungo 11-08: radstorms are green)
 
 
 def r3(x):
@@ -95,7 +98,15 @@ def haze_albedo(rgb, haze, humidity):
     m = max(lin)
     if m <= 0.0:
         return None
-    top = max(grown_albedo(haze, humidity))
+    ga = grown_albedo(haze, humidity)
+    if haze == 'glowing':
+        # MODULES1 part 26 (bungo 11-08 "why is radstorm orange still and not green"): the glowing dust's own spectral
+        # albedo per channel x the record tint. The largest channel alone (below) kept the record's yellow
+        # ([44, 47, 29] -> 0.86 / 0.97 / 0.42, R ~ G) and lost the preset's green. A tint that would not leave G on top
+        # by GLOW_MARGIN keeps the preset as it is.
+        a = [r3(min(1.0, max(0.0, g * c / m))) for g, c in zip(ga, lin)]
+        return a if a[1] - max(a[0], a[2]) >= GLOW_MARGIN else [r3(g) for g in ga]
+    top = max(ga)
     return [r3(min(1.0, max(0.0, top * c / m))) for c in lin]
 
 
@@ -168,8 +179,9 @@ def translate(w, f):
         if ha:
             atmo['hazeAlbedo'] = ha
             tr_atmo.append('hazeAlbedo')
-            der['atmosphere.hazeAlbedo'] = ('NAM0 fogFar day sRGB %s -> linear tint x the %s haze albedo at %g %%'
-                                            % (ff, atmo['hazeType'], atmo['humidity']))
+            der['atmosphere.hazeAlbedo'] = ('NAM0 fogFar day sRGB %s -> linear tint x the %s haze albedo%s at %g %%'
+                                            % (ff, atmo['hazeType'], ' per channel (G on top)' if
+                                               atmo['hazeType'] == 'glowing' else '', atmo['humidity']))
             diag['hazeAlbedo'] = ha
     if tr_atmo:
         atmo['_translated'] = tr_atmo
