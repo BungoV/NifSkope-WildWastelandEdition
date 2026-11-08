@@ -3853,6 +3853,7 @@ void GLView::paintGL()
 				wwLookdevDrawGroundCellFrame( scene );	// the booth floor (a harness pin; no GL call unset)
 			}
 			PassTime::end( PassTime::Background );
+			wwCellFarLodArmEarly( hdr );	// MODULES1 part 27: the lit far cards draw inside, before the sorted pass
 			scene->draw();	// opaque / sorted / effects timed inside (Scene::drawShapes)
 			wwCellAoPrepassEnd( scene );	// MODULES1: depth func back to LEQUAL, the pre-pass census line
 			wwVolAirSkyDraw( scene, true );	// the sky's air probes (gates only; no GL call otherwise)
@@ -3866,7 +3867,8 @@ void GLView::paintGL()
 				wwCellFarDotsDraw( scene );	// the far bulbs, into the linear frame
 				PassTime::subEnd( PassTime::FarDots );
 				PassTime::subBegin( PassTime::FarCardsLit );
-				wwCellFarLodCards( scene, true, true );	// the far tree cards, lit, into the linear frame
+				if ( !wwCellFarLodDrewEarly() )	// MODULES1 part 27: here only with the red WW_CELL_FARLOD_LATE=1
+					wwCellFarLodCards( scene, true, true );	// the far tree cards, lit, into the linear frame
 				PassTime::subEnd( PassTime::FarCardsLit );
 				PassTime::end( PassTime::FarCards );
 				PassTime::begin( PassTime::Precip );

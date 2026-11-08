@@ -109,6 +109,15 @@ bool wwCellFarLodWantsRepaint();
  *  HDR frame before its resolve, and after); they draw in the first call when the frame is HDR. Returns cards drawn. */
 int wwCellFarLodCards( Scene * scene, bool insideHdr, bool hdrFrame );
 
+/*! MODULES1 part 27 (bungo 11-08, "rendering order"): the lit cards drawn between the cell's opaque and sorted passes,
+ *  so smoke and every blended effect land over them and the soft fade reads their depth (they drew after the
+ *  particles: a far card stood crisp in front of the smoke around it). paintGL arms it before scene->draw();
+ *  Scene::drawShapes draws it once; wwCellFarLodDrewEarly() disarms and says whether the late call must still draw.
+ *  Red WW_CELL_FARLOD_LATE=1: the old place, after the scene. */
+void wwCellFarLodArmEarly( bool hdrFrame );
+void wwCellFarLodEarly( Scene * scene );
+bool wwCellFarLodDrewEarly();
+
 //! The near plane while the far field is on: `nr` raised to 16 (the game's fNearDistance 15, rounded up);
 //! WW_CELL_FARLOD_NEAR forces one.
 double wwCellFarLodNear( double nr );

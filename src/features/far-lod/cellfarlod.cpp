@@ -22,6 +22,7 @@ BSD License - see nifskope.h
 #include "gamemanager.h"
 #include "harnesswindow.h"	// lane GAPFIX1
 #include "features/exposure/cellhdr.h"
+#include "features/shared/cellpasstime.h"	// MODULES1 part 27: the early cards keep their FarCards zone
 #if __has_include( "gl/cellcull.h" )
 #include "features/near/cellcull.h"   // the cell cull table, when merged
 #define FARLOD1_HAVE_CULL 1
@@ -1711,6 +1712,65 @@ int wwCellFarLodCards( Scene * scene, bool insideHdr, bool hdrFrame )
 		qInfo().noquote() << line;
 	}
 	return drawn;
+}
+
+static bool earlyArmed = false, earlyDrew = false;
+
+void wwCellFarLodArmEarly( bool hdrFrame )
+{
+	earlyArmed = hdrFrame && wwEnv( "WW_CELL_FARLOD_LATE" ) != "1";
+	earlyDrew = false;
+}
+
+void wwCellFarLodEarly( Scene * scene )
+{
+	if ( !earlyArmed || !scene || !scene->renderer || !wwCellHdrActive() )
+		return;
+	earlyArmed = false;
+	// the sorted pass after this sets its own blend per draw, but not always its depth and stencil: kept as found
+	auto fn = scene->renderer->fn;
+	GLboolean depthTest = fn->glIsEnabled( GL_DEPTH_TEST ), stencilTest = fn->glIsEnabled( GL_STENCIL_TEST );
+	GLboolean blend = fn->glIsEnabled( GL_BLEND ), cull = fn->glIsEnabled( GL_CULL_FACE ), depthMask = GL_TRUE;
+	GLint depthFunc = GL_LEQUAL, sFunc = GL_ALWAYS, sRef = 0, sMask = 0xFF, sWrite = 0xFF, sFail = GL_KEEP, sZFail = GL_KEEP, sPass = GL_KEEP, prog = 0;
+	fn->glGetBooleanv( GL_DEPTH_WRITEMASK, &depthMask );
+	fn->glGetIntegerv( GL_DEPTH_FUNC, &depthFunc );
+	fn->glGetIntegerv( GL_STENCIL_FUNC, &sFunc );
+	fn->glGetIntegerv( GL_STENCIL_REF, &sRef );
+	fn->glGetIntegerv( GL_STENCIL_VALUE_MASK, &sMask );
+	fn->glGetIntegerv( GL_STENCIL_WRITEMASK, &sWrite );
+	fn->glGetIntegerv( GL_STENCIL_FAIL, &sFail );
+	fn->glGetIntegerv( GL_STENCIL_PASS_DEPTH_FAIL, &sZFail );
+	fn->glGetIntegerv( GL_STENCIL_PASS_DEPTH_PASS, &sPass );
+	fn->glGetIntegerv( GL_CURRENT_PROGRAM, &prog );
+	PassTime::begin( PassTime::FarCards );
+	PassTime::subBegin( PassTime::FarCardsLit );
+	const int drawn = wwCellFarLodCards( scene, true, true );
+	PassTime::subEnd( PassTime::FarCardsLit );
+	PassTime::end( PassTime::FarCards );
+	earlyDrew = true;
+	auto set = [fn]( GLenum cap, GLboolean on ) { on ? fn->glEnable( cap ) : fn->glDisable( cap ); };
+	set( GL_DEPTH_TEST, depthTest );
+	set( GL_STENCIL_TEST, stencilTest );
+	set( GL_BLEND, blend );
+	set( GL_CULL_FACE, cull );
+	fn->glDepthMask( depthMask );
+	fn->glDepthFunc( GLenum( depthFunc ) );
+	fn->glStencilFunc( GLenum( sFunc ), sRef, GLuint( sMask ) );
+	fn->glStencilMask( GLuint( sWrite ) );
+	fn->glStencilOp( GLenum( sFail ), GLenum( sZFail ), GLenum( sPass ) );
+	fn->glUseProgram( GLuint( prog ) );
+	static bool said = false;
+	if ( !said && drawn > 0 ) {
+		said = true;
+		qInfo().noquote() << QStringLiteral( "far lod: cards drawn between the opaque and the sorted pass (%1 cards; "
+			"smoke and effects land over them; red WW_CELL_FARLOD_LATE=1: after the scene)" ).arg( drawn );
+	}
+}
+
+bool wwCellFarLodDrewEarly()
+{
+	earlyArmed = false;
+	return earlyDrew;
 }
 
 double wwCellFarLodNear( double nr )
