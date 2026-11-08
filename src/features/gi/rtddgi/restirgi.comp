@@ -39,8 +39,31 @@ layout( std430, set = 1, binding = 10 ) buffer GCand { vec4 candLo[]; };     // 
 layout( std430, set = 1, binding = 11 ) readonly buffer GStbn { uint stbn[]; };   // res/air/stbn_scalar_128x128x64.r8, 4 bytes a uint
 layout( std430, set = 1, binding = 12 ) buffer GAtrA { vec4 atrA[]; };       // the a-trous ping-pong: E rgb, its variance
 layout( std430, set = 1, binding = 13 ) buffer GAtrB { vec4 atrB[]; };
+layout( std430, set = 1, binding = 14 ) buffer GPk { uvec2 gpk[]; };          // mode 2 -> the filters: depth bits, octahedral normal
 
 uint rgStbnByte( uint i ) { return ( stbn[i >> 2u] >> ( ( i & 3u ) * 8u ) ) & 255u; }
+
+/* the g-buffer texel packed for the filter and a-trous taps (8 bytes, not 16): the depth's own float bits and the normal
+ * octahedral in two snorm16 [Cigolle 2014, "A Survey of Efficient Representations for Independent Unit Vectors"];
+ * a zero normal packs to (0, 0) and comes back +z (only where the depth is invalid) */
+uvec2 rgPack( vec4 g )
+{
+	const float s = abs( g.x ) + abs( g.y ) + abs( g.z );
+	vec2 p = s > 0.0 ? g.xy / s : vec2( 0.0 );
+	if ( s > 0.0 && g.z < 0.0 )
+		p = ( 1.0 - abs( p.yx ) ) * vec2( p.x >= 0.0 ? 1.0 : -1.0, p.y >= 0.0 ? 1.0 : -1.0 );
+	return uvec2( floatBitsToUint( g.w ), packSnorm2x16( p ) );
+}
+
+vec4 rgUnpack( uvec2 k )
+{
+	const vec2 p = unpackSnorm2x16( k.y );
+	vec3 n = vec3( p, 1.0 - abs( p.x ) - abs( p.y ) );
+	const float t = max( -n.z, 0.0 );
+	n.x += n.x >= 0.0 ? -t : t;
+	n.y += n.y >= 0.0 ? -t : t;
+	return vec4( normalize( n ), uintBitsToFloat( k.x ) );
+}
 
 vec3 rgToWorld( vec4 r0, vec4 r1, vec4 r2, vec3 v )
 {
@@ -222,6 +245,7 @@ void modeAccumulate( int x, int y, uint id )
 	vec4 e = est[id];
 	atrB[id] = vec4( 0.0 );
 	const vec4 g = gbuf[id];
+	gpk[id] = rgPack( g );
 	// a pixel the half / quarter trace skipped (valid depth, no estimate): the mean of its traced like 3 x 3 neighbours;
 	// none like it: its own history's mean, then any traced neighbour, then black (the filters read acc.w > 0 exactly
 	// where the depth is valid, so a valid pixel always gets one)
@@ -290,7 +314,7 @@ void modeAccumulate( int x, int y, uint id )
 // mode 3: the running means of the window's like pixels (depth within 10 %, normal within 25 degrees: restirSimilar)
 void modeFilter( int x, int y, uint id )
 {
-	const vec4 g = gbuf[id];
+	const vec4 g = rgUnpack( gpk[id] );
 	vec3 s = vec3( 0.0 );
 	float n = 0.0;
 	const int f = G.opts.z;
@@ -301,7 +325,7 @@ void modeFilter( int x, int y, uint id )
 				const int qx = x + dx * st, qy = y + dy * st;
 				if ( qx < 0 || qy < 0 || qx >= G.size.x || qy >= G.size.y )
 					continue;
-				const vec4 h = gbuf[qy * G.size.x + qx];
+				const vec4 h = rgUnpack( gpk[qy * G.size.x + qx] );
 				if ( ( dx != 0 || dy != 0 ) && !restirSimilar( g.w, g.xyz, h.w, h.xyz ) )
 					continue;
 				const vec4 a = acc[qy * G.size.x + qx];
@@ -322,7 +346,7 @@ void modeFilter( int x, int y, uint id )
 void modeAtrous( int x, int y, uint id, int it )
 {
 	const bool fromA = ( it & 1 ) == 0;
-	const vec4 g = gbuf[id];
+	const vec4 g = rgUnpack( gpk[id] );
 	const vec4 c = fromA ? atrA[id] : atrB[id];
 	vec4 o = c;
 	if ( g.w > 0.0 && g.w < 1e5 ) {
@@ -338,7 +362,7 @@ void modeAtrous( int x, int y, uint id, int it )
 				if ( qx < 0 || qy < 0 || qx >= G.size.x || qy >= G.size.y )
 					continue;
 				const int q = qy * G.size.x + qx;
-				const vec4 h = gbuf[q];
+				const vec4 h = rgUnpack( gpk[q] );
 				// acc[q].w > 0 exactly where the depth is valid (modes 1-2): the g-buffer read answers it, one read fewer a tap
 				if ( ( dx != 0 || dy != 0 ) && ( !restirSimilar( g.w, g.xyz, h.w, h.xyz ) || !( h.w > 0.0 && h.w < 1e5 ) ) )
 					continue;

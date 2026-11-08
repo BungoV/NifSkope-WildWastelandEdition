@@ -36,7 +36,7 @@ namespace {
 #define RESTIRGI_HAVE_FILT 1
 #endif
 
-constexpr int kRgBindings = 14;   // restirgi.comp set 1
+constexpr int kRgBindings = 15;   // restirgi.comp set 1
 constexpr VkDeviceSize kRgStbnBytes = 128 * 128 * 64;   // res/air/stbn_scalar_128x128x64.r8
 constexpr uint32_t kRgStamps = 10;   // one before each mode (4 + up to 5 a-trous passes), the end
 constexpr VkDeviceSize kRgParamBytes = 11 * 16;   // RestirGiParams, std430: size, opts, knobs, rows[3], proj, prows[3], pproj
@@ -102,7 +102,7 @@ struct RgGpu
 	int W = 0, H = 0;
 	bool shared = false, released = false;
 	VkDeviceSize gbufAlloc = 0, outAlloc = 0;
-	Buf params, gbuf, prevGbuf, cur, hist, histPix, est, acc, accPrev, out, cand, stbn, atrA, atrB;
+	Buf params, gbuf, prevGbuf, cur, hist, histPix, est, acc, accPrev, out, cand, stbn, atrA, atrB, gpk;
 	Buf estRb, candRb, outRb;
 	bool stbnUp = false;                  // the mask is in stbn (uploaded once a working set)
 	VkQueryPool qp = VK_NULL_HANDLE;
@@ -150,7 +150,7 @@ void rgFreeBuffers( Dev & D, RgGpu * g )
 		*sem = VK_NULL_HANDLE;
 	}
 	for ( Buf * b : { &g->params, &g->gbuf, &g->prevGbuf, &g->cur, &g->hist, &g->histPix, &g->est, &g->acc, &g->accPrev, &g->out,
-			&g->cand, &g->stbn, &g->atrA, &g->atrB, &g->estRb, &g->candRb, &g->outRb } )
+			&g->cand, &g->stbn, &g->atrA, &g->atrB, &g->gpk, &g->estRb, &g->candRb, &g->outRb } )
 		freeBuf( D, *b );
 	DdgiTimer & T = ddgiTimer( D );
 	if ( g->qp && T.destroy )
@@ -236,7 +236,8 @@ bool rgMake( Dev & D, RgGpu * g, RgPipe & R, int W, int H, bool share, std::stri
 		&& makeBuf( D, n * 16, u, { kDevLocal, kHost }, g->est ) && makeBuf( D, n * 16, u, { kDevLocal, kHost }, g->acc )
 		&& makeBuf( D, n * 16, u, { kDevLocal, kHost }, g->accPrev ) && makeBuf( D, n * 16, u, { kDevLocal, kHost }, g->cand )
 		&& makeBuf( D, kRgStbnBytes, u, { kDevLocal, kHost }, g->stbn ) && makeBuf( D, n * 16, u, { kDevLocal, kHost }, g->atrA )
-		&& makeBuf( D, n * 16, u, { kDevLocal, kHost }, g->atrB ) && g->params.map;
+		&& makeBuf( D, n * 16, u, { kDevLocal, kHost }, g->atrB ) && makeBuf( D, n * 8, u, { kDevLocal, kHost }, g->gpk )
+		&& g->params.map;
 	DdgiTimer & T = ddgiTimer( D );
 	if ( ok && T.ok ) {
 		VkQueryPoolCreateInfo qi { VK_STRUCTURE_TYPE_QUERY_POOL_CREATE_INFO };
@@ -254,7 +255,7 @@ bool rgMake( Dev & D, RgGpu * g, RgPipe & R, int W, int H, bool share, std::stri
 	}
 	if ( ok ) {
 		const Buf * bs[kRgBindings] = { &g->params, &g->gbuf, &g->prevGbuf, &g->cur, &g->hist, &g->histPix, &g->est, &g->acc,
-			&g->accPrev, &g->out, &g->cand, &g->stbn, &g->atrA, &g->atrB };
+			&g->accPrev, &g->out, &g->cand, &g->stbn, &g->atrA, &g->atrB, &g->gpk };
 		VkDescriptorBufferInfo bi[kRgBindings] {};
 		VkWriteDescriptorSet w[kRgBindings] {};
 		for ( int i = 0; i < kRgBindings; i++ ) {
