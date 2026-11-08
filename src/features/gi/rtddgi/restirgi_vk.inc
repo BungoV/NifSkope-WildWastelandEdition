@@ -31,6 +31,10 @@ bool restirGiGpuShare( DdgiGpuSession *, int, int, RestirGpuShare * out )
 
 namespace {
 #include "features/gi/rtddgi/restirgi.spv.h"
+#if __has_include( "restirgi_filt.spv.h" )
+#include "features/gi/rtddgi/restirgi_filt.spv.h"
+#define RESTIRGI_HAVE_FILT 1
+#endif
 
 constexpr int kRgBindings = 14;   // restirgi.comp set 1
 constexpr VkDeviceSize kRgStbnBytes = 128 * 128 * 64;   // res/air/stbn_scalar_128x128x64.r8
@@ -45,6 +49,7 @@ struct RgPipe
 	VkDescriptorSetLayout dsl = VK_NULL_HANDLE;
 	VkPipelineLayout pl = VK_NULL_HANDLE;
 	VkPipeline pipe = VK_NULL_HANDLE;
+	VkPipeline pipeF = VK_NULL_HANDLE;   // modes 2.. (restirgi.comp -DRESTIRGI_FILTER); none: pipe runs them
 };
 
 RgPipe & rgPipe( Dev & D, DdgiPipes & S )
@@ -84,6 +89,10 @@ RgPipe & rgPipe( Dev & D, DdgiPipes & S )
 	R.ok = R.pipe != VK_NULL_HANDLE;
 	if ( !R.ok )
 		R.why = "the ReSTIR GI kernel did not build";
+#ifdef RESTIRGI_HAVE_FILT
+	if ( R.ok && !std::getenv( "WW_CELL_RESTIRGI_ONEKERNEL" ) )
+		R.pipeF = pipeline( D, rtddgi_restirgi_filt_spv, sizeof rtddgi_restirgi_filt_spv, R.pl );
+#endif
 	return R;
 }
 
@@ -271,7 +280,7 @@ bool rgMake( Dev & D, RgGpu * g, RgPipe & R, int W, int H, bool share, std::stri
 
 void rgDispatch( Dev & D, RgPipe & R, DdgiGpuSession * s, RgGpu * g, uint32_t mode, uint64_t groups )
 {
-	vk.vkCmdBindPipeline( D.cb, VK_PIPELINE_BIND_POINT_COMPUTE, R.pipe );
+	vk.vkCmdBindPipeline( D.cb, VK_PIPELINE_BIND_POINT_COMPUTE, mode >= 2 && R.pipeF ? R.pipeF : R.pipe );
 	const VkDescriptorSet sets[2] = { s->set, g->set };
 	vk.vkCmdBindDescriptorSets( D.cb, VK_PIPELINE_BIND_POINT_COMPUTE, R.pl, 0, 2, sets, 0, nullptr );
 	const DdgiPc pc = ddgiPc( nullptr, mode, 0, 0, 0 );

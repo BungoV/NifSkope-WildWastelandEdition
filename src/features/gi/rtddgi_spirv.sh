@@ -14,4 +14,6 @@ cd "$ROOT/src/features/gi/rtddgi"
 for k in trace blend border reloc restir airrays restirgi; do
 	"$G" --target-env vulkan1.2 -V --vn "rtddgi_${k}_spv" -o "${k}.spv.h" "${k}.comp"
 done
-ls -la trace.spv.h blend.spv.h border.spv.h reloc.spv.h restir.spv.h airrays.spv.h restirgi.spv.h
+# RTEMIS1 11-08: restirgi's modes 2.. as their own kernel (no ray code: the filter and a-trous passes' registers)
+"$G" --target-env vulkan1.2 -V -DRESTIRGI_FILTER --vn rtddgi_restirgi_filt_spv -o restirgi_filt.spv.h restirgi.comp
+ls -la trace.spv.h blend.spv.h border.spv.h reloc.spv.h restir.spv.h airrays.spv.h restirgi.spv.h restirgi_filt.spv.h

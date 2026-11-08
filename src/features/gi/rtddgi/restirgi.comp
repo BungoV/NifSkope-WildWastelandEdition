@@ -375,6 +375,7 @@ void main()
 		y = int( ( t / tw ) * 8u + ( gl_LocalInvocationIndex >> 3u ) );
 	}
 	const uint mode = pc.job.x;
+#ifndef RESTIRGI_FILTER
 	// the half / quarter trace, modes 0 and 1: an invocation a 2 x 1 (half) or 2 x 2 (quarter) block, so every invocation
 	// holds exactly one traced pixel (a checkerboard over invocations leaves half of each subgroup idle in the ray loops)
 	const int tb = G.opts.w & ( RESTIRGI_BIT_HALF | RESTIRGI_BIT_QUARTER );
@@ -398,14 +399,21 @@ void main()
 		}
 		return;
 	}
+#endif
 	if ( x >= G.size.x || y >= G.size.y )
 		return;
 	const uint id = uint( y * G.size.x + x );
+#ifdef RESTIRGI_FILTER
+	// the filter kernel (rtddgi_spirv.sh -DRESTIRGI_FILTER -> restirgi_filt.spv.h): modes 2.. only, so no ray code and
+	// its registers stays in it (one module for every mode sized the a-trous passes' occupancy by the bounce's)
+	if ( mode == 2u )
+#else
 	if ( mode == 0u )
 		modeCandidate( x, y, id );
 	else if ( mode == 1u )
 		modeSpatial( x, y, id );
 	else if ( mode == 2u )
+#endif
 		modeAccumulate( x, y, id );
 	else if ( mode == 3u )
 		modeFilter( x, y, id );
