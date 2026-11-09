@@ -1159,6 +1159,7 @@
 { "WW_PHYSUNITS_BLOOM_K", 1, "- | name passed through a variable: conservative" },
 { "WW_PHYSUNITS_BLOOM_RED", 1, "src/features/exposure/physunits.cpp wwPhysBloomK | static" },
 { "WW_PHYSUNITS_EMIT", 1, "- | name passed through a variable: conservative" },
+{ "WW_PHYSUNITS_EMIT_RED", 1, "src/features/exposure/physunits.cpp wwPhysEmitScale | static" },
 { "WW_PHYSUNITS_EV", 1, "- | name passed through a variable: conservative" },
 { "WW_PHYSUNITS_LAMP_LUX", 1, "- | name passed through a variable: conservative" },
 { "WW_PHYSUNITS_LAMP_RED", 1, "src/features/exposure/physunits.cpp wwPhysLighK | static, read at cell build" },

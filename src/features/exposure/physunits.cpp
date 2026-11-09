@@ -97,7 +97,11 @@ float wwPhysEmitScale()
 {
 	if ( !wwPhysOn() )
 		return 1.0f;
-	float e = wwphys::kEmitCdm2;
+	/* lane PHYSUNITS1 (bungo 11-08 15:15, 11-09 15:26): an emissive unit is the frame's own luminance unit, the one the
+	 * placed lamps light surfaces in, so emissives take the lamps' factor (5 lux edge law: 22.9 cd/m2 per unit) and keep
+	 * vanilla's authored sign-to-street ratio; the 500 cd/m2 sign anchor put them 22x over the lamps and blew the bloom */
+	WW_SWITCH_STATIC( bool, red, wwSwitchEcho( "physunits emit red (500 cd/m2 per unit)", wwEnvInt( "WW_PHYSUNITS_EMIT_RED" ) == 1 ) );
+	float e = red ? wwphys::kEmitCdm2 : wwphys::kLampEdgeLux / ( wwphys::kPi * wwlp::vanillaFlux() );
 	pinnedFloat( "WW_PHYSUNITS_EMIT", e );
 	return std::max( e, 0.0f ) * wwPhysGameLights();
 }

@@ -33,7 +33,8 @@ bool wwPhysSkyOn();
 float wwPhysGameLights();
 void wwPhysSetGameLights( double g );
 bool wwPhysGameLightsPinned();
-//! the emissive scale: kEmitCdm2 (pin WW_PHYSUNITS_EMIT) x Game Light Brightness (1 under the red)
+//! the emissive scale: the placed lamps' factor (kLampEdgeLux / pi vanillaFlux, cd/m2 per unit; red
+//! ^WW_PHYSUNITS_EMIT_RED=1 = kEmitCdm2; pin WW_PHYSUNITS_EMIT) x Game Light Brightness (1 under the physical red)
 float wwPhysEmitScale();
 /*! A lamp's colour factor (lumens law): the light draws a colour C with the vanilla falloff to radius r (game units),
  *  so its intensity is lum(C) x (r / 69.99)^2 x vanillaFlux x pi cd; the record's is 637 lm per fade / 4 pi. The factor is
