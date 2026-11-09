@@ -426,8 +426,10 @@ void isApply( Scene * scene, const float * px, int qw, int qh )
 			if ( std::isfinite( px[i * 4 + c] ) )
 				sum += wgt[c] * px[i * 4 + c];
 	}
+	// lane PHYSUNITS1 (LATE ITEM 11-08): the physical camera meters the log average, so a bulb cannot set the street's EV
+	const float meter = wwPhysMeter( px, qw * qh );
 	// SKY2B (EXPO2): the sky pixels in view, each along its own ray
-	wwCellImageSpaceSetAdapted( scene, wwAtmoAdaptedInView( scene, cover > 0.0 ? float( sum / cover ) : 0.0f, px, qw, qh ),
+	wwCellImageSpaceSetAdapted( scene, wwAtmoAdaptedInView( scene, meter >= 0.0f ? meter : cover > 0.0 ? float( sum / cover ) : 0.0f, px, qw, qh ),
 		int( std::lround( cover ) ) );
 	WW_SWITCH_STATIC( bool, echo, wwEnvInt( "WW_IS_MEASURE_ECHO" ) == 1 );
 	if ( !bloomGpuOn() || echo )	// lane PERFFIX1: with the GPU blur the CPU one runs only for the echo's lit/peak

@@ -12,6 +12,8 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdio>
+#include <utility>
+#include <vector>
 
 namespace {
 
@@ -104,6 +106,48 @@ float wwPhysLampK( float radius )
 	const float rm = radius / wwlp::kUnitsPerMetre;
 	const float drawn = 4.0f * wwphys::kPi * wwphys::kPi * wwlp::vanillaFlux() * rm * rm;
 	return drawn > 1e-9f ? wwphys::kLumenPerFade / drawn : 1.0f;
+}
+
+float wwPhysLighK( float radius )
+{
+	WW_SWITCH_STATIC( bool, red, wwSwitchEcho( "physunits lamp red (637 lm per fade)", wwEnvInt( "WW_PHYSUNITS_LAMP_RED" ) == 1 ) );
+	if ( red )
+		return wwPhysLampK( radius );
+	float lux = wwphys::kLampEdgeLux;
+	pinnedFloat( "WW_PHYSUNITS_LAMP_LUX", lux );
+	return std::max( lux, 0.0f ) / ( wwphys::kPi * wwlp::vanillaFlux() );
+}
+
+float wwPhysMeter( const float * px, int n )
+{
+	WW_SWITCH_STATIC( bool, red, wwSwitchEcho( "physunits meter red (arithmetic mean)", wwEnvInt( "WW_PHYSUNITS_METER_RED" ) == 1 ) );
+	if ( red || !wwPhysSkyOn() || !px || n <= 0 )
+		return -1.0f;
+	std::vector<std::pair<float, float>> t;	// (log2 luminance, cover)
+	t.reserve( size_t( n ) );
+	double cover = 0.0;
+	for ( int i = 0; i < n; i++ ) {
+		const float a = px[size_t( i ) * 4 + 3];
+		if ( !( a > 0.0f ) )
+			continue;
+		const float l = 0.2125f * px[size_t( i ) * 4] + 0.7154f * px[size_t( i ) * 4 + 1] + 0.0721f * px[size_t( i ) * 4 + 2];
+		if ( !std::isfinite( l ) )
+			continue;
+		t.emplace_back( std::log2( std::max( l, 1e-6f ) ), a );
+		cover += a;
+	}
+	if ( t.empty() || !( cover > 0.0 ) )
+		return -1.0f;
+	std::sort( t.begin(), t.end() );
+	const double lo = 0.02 * cover, hi = 0.98 * cover;
+	double run = 0.0, sum = 0.0, wsum = 0.0;
+	for ( const auto & [lg, a] : t ) {
+		const double w = std::max( 0.0, std::min( run + a, hi ) - std::max( run, lo ) );	// the cover inside [lo, hi]
+		run += a;
+		sum += w * lg;
+		wsum += w;
+	}
+	return wsum > 0.0 ? float( std::exp2( sum / wsum ) ) : -1.0f;
 }
 
 float wwPhysExposure( const float * h, float adapted )

@@ -1466,7 +1466,7 @@ static void cellPublishLighting( const NifModel * nif, const EsmWorld & world, c
 		}
 		if ( wwPhysOn() ) {	// lane PHYSUNITS1: lumens (637 per fade, the .nifx SPEC's law) x Game Light Brightness
 			const float g = wwPhysGameLights();
-			const float k = wwPhysLampK( l.radius ) * g;
+			const float k = wwPhysLighK( l.radius ) * g;	// LATE ITEM 11-08: the radius law (red WW_PHYSUNITS_LAMP_RED=1)
 			for ( int c = 0; c < 3; c++ )
 				l.color[c] *= k;
 			l.physG = g;
@@ -1498,8 +1498,8 @@ static void cellPublishLighting( const NifModel * nif, const EsmWorld & world, c
 			for ( const WwCellLight & l : *v ) {
 				if ( !( l.physG > 0.0f ) || !( l.radius > 0.0f ) )
 					continue;
-				const float k = wwPhysLampK( l.radius );
-				lm.append( wwphys::kLumenPerFade * y709( l.color ) / ( k * l.physG ) );
+				const float k = wwPhysLighK( l.radius );	// the drawn lumens: colour / (k G) x 637 / wwPhysLampK
+				lm.append( wwphys::kLumenPerFade * y709( l.color ) / ( k * l.physG * wwPhysLampK( l.radius ) ) );
 				ks.append( k );
 				rs.append( l.radius );
 			}
@@ -1510,7 +1510,7 @@ static void cellPublishLighting( const NifModel * nif, const EsmWorld & world, c
 			return a.isEmpty() ? 0.0 : double( a.at( std::min( qsizetype( f * a.size() ), a.size() - 1 ) ) );
 		};
 		if ( spec.interior )
-			L.physAmbK = ks.isEmpty() ? wwPhysLampK( 400.0f ) : ks.at( ks.size() / 2 );
+			L.physAmbK = ks.isEmpty() ? wwPhysLighK( 400.0f ) : ks.at( ks.size() / 2 );
 		std::fprintf( stderr, "phys lamps: %s%s %lld lamps lumens (law, before x%.3f) p10 %.0f median %.0f p90 %.0f max %.0f; "
 			"radius p10 %.0f median %.0f p90 %.0f; factor median %.4f%s\n",
 			spec.interior ? qPrintable( world.interior().edid ) : "exterior", chunkOut ? " (chunk)" : "", qint64( lm.size() ),
