@@ -694,6 +694,12 @@ bool marchPass( Renderer * r, CvGpu & g, const CvRedo & d, const WwAtmoFrame & f
 	p->uni1i( "cvProbe", 0 );
 	p->uni1f( "cvMsOn", noMs ? 0.0f : 1.0f );
 	p->uni1f( "cvMsG", V::msMeanCosine( drop ) );
+	{	// lane MODULES1: the droplets' red absorption (cloudvolmath.h waterAbsorbK); red nowater: none (before)
+		float wk[3] = { 0.0f, 0.0f, 0.0f };
+		if ( !red( "nowater" ) )
+			V::waterAbsorbK( m.recx14.dropletUm > 0.0f ? m.recx14.dropletUm : V::kDropletUm, V::msMeanCosine( drop ), wk );
+		p->uni3f( "cvWaterK", wk[0], wk[1], wk[2] );
+	}
 	// lane CLOUD2C: the light the cloud below reflects up; lane CLOUDLIGHT1: 2 = its slab as the column under the sample
 	// (no read, the default), 1 = CLOUD2C's taps down (WW_CLOUDVOL_TOPCOLUMN=0 / RED=toptaps)
 	p->uni1f( "cvTopOn", red( "notop" ) ? 0.0f : d.topColumn ? 2.0f : 1.0f );

@@ -44,6 +44,7 @@ uniform int cvProbeBand;
 uniform float cvMsOn;	// lane CLOUD2B: the multiple-scattering floor (0 = the reds noms and nooctaves)
 uniform float cvMsG;	// the droplet phase's mean cosine (uncapped), for the delta-Eddington scaling
 uniform vec3 cvTint[3];	// CLOUD1's band tints (Low, Mid, High): a linear albedo factor, white by default
+uniform vec3 cvWaterK;	// lane MODULES1: the droplets' absorption per unit optical depth (680 / 550 / 440 nm); 0 = red nowater
 uniform sampler2D cvScene;	// lane CLOUD2B: the scene's window depth (the last frame's), r = farthest sample
 uniform vec4 cvSceneZ;	// the projection's [2][2], [3][2]; km per view unit; 1 = clip the march at the scene
 uniform float cvTopOn;	// lane CLOUD2C: the light the cloud below reflects back up (0 = the red notop)

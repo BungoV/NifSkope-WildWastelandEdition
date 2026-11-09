@@ -40,6 +40,11 @@ constexpr float kPi = 3.14159265f;
  * dark sky reads 21-22 V mag / arcsec2 = 1.7e-4 .. 4.3e-4 cd/m2 at the zenith. atmo_sky.frag atFloor; red nofloor = 0. */
 constexpr float kNightFloorLum = 4.0e-4f / 128000.0f / 0.88f;
 constexpr float kNightFloor[3] = { kNightFloorLum * 1.0964f, kNightFloorLum * 0.9967f, kNightFloorLum * 0.7475f };
+/* lane MODULES1 (radstorm green, 11-09): the airglow a glowing haze adds above the natural floor (airglow > 1) is the
+ * oxygen 557.7 nm line of excited air. CIE 1931 CMF at 557.7 nm (555/560 interpolated): X 0.5566, Y 0.9973, Z 0.0048
+ * -> linear sRGB 0.2687, 1.3354, -0.1678; B clipped to 0 (outside the gamut), luminance 1. Red WW_ATMO_RED=glowgrey:
+ * the excess keeps the floor's colour (before). */
+constexpr float kGreenLine5577[3] = { 0.2655f, 1.3193f, 0.0f };
 
 inline float lum( const float c[3] )
 {

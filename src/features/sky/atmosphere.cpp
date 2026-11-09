@@ -321,8 +321,13 @@ void medium( NifSkopeOpenGLContext::Program * p, const float haze[3], bool noOzo
 	p->uni1f( "atMsOld", red( "msold" ) ? 1.0f : 0.0f );
 	if ( red( "nofloor" ) )
 		p->uni3f( "atFloor", 0.0f, 0.0f, 0.0f );
-	else
+	else if ( g_airglow <= 1.0f || red( "glowgrey" ) )
 		p->uni3f( "atFloor", kNightFloor[0] * g_airglow, kNightFloor[1] * g_airglow, kNightFloor[2] * g_airglow );	// WEATHERRECX1: x airglow
+	else {	// MODULES1: the natural floor + the excess as the 557.7 nm green line (atmomath.h kGreenLine5577)
+		const float ex = kNightFloorLum * ( g_airglow - 1.0f );
+		p->uni3f( "atFloor", kNightFloor[0] + ex * kGreenLine5577[0], kNightFloor[1] + ex * kGreenLine5577[1],
+			kNightFloor[2] + ex * kGreenLine5577[2] );
+	}
 }
 
 void bindTex( NifSkopeOpenGLContext::GLFunctions * fn, NifSkopeOpenGLContext::Program * p, int unit, const char * name, GLuint tex )
