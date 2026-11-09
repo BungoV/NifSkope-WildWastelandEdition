@@ -217,6 +217,7 @@ int main( int argc, char * argv[] )
 				continue;
 			}
 			qputenv( k, kv[1] );
+			wwEnvChanged();	// MODULES1 item 8: the env accessors' cache
 			set += QByteArray( " " ) + k + "=" + kv[1];
 		}
 		fprintf( stderr, "all on: set%s | kept%s\n", set.constData(), kept.isEmpty() ? " none" : kept.constData() );
@@ -377,9 +378,11 @@ int main( int argc, char * argv[] )
 		if ( parser.isSet( pathOption ) ) {
 			const QString pf = QFileInfo( parser.value( pathOption ) ).absoluteFilePath();
 			qputenv( "WW_RENDER_PATH", pf.toLocal8Bit() );
+			wwEnvChanged();	// MODULES1 item 8: the env accessors' cache
 			if ( !wwEnvIsSet( "WW_RENDER_SHOT" ) ) {
 				const QFileInfo fi( pf );
 				qputenv( "WW_RENDER_SHOT", ( fi.path() + QLatin1Char( '/' ) + fi.completeBaseName() + QStringLiteral( ".png" ) ).toLocal8Bit() );
+				wwEnvChanged();	// MODULES1 item 8: the env accessors' cache
 			}
 		}
 

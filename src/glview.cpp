@@ -3495,6 +3495,7 @@ void GLView::paintGL()
 		QElapsedTimer & clock;
 		~WwPaintTime() { wwPaintNanos += clock.nsecsElapsed(); }
 	} wwPaintTime{ wwPaintClock };
+	wwEnvChanged();	// MODULES1 item 8: the env accessors' cache lives one frame at most (a backstop for any writer)
 	// the frame's per-pass timers (one bool test while the Frame Timers row is off)
 	PassTime::frameBegin();
 	if ( scene && scene->textures )

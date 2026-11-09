@@ -218,6 +218,7 @@ int reopenStep( const QString & fname )
 	if ( next.isEmpty() )
 		return 0;
 	qputenv( "WW_CELL_OPEN", next.takeFirst() );
+	wwEnvChanged();	// MODULES1 item 8: the env accessors' cache
 	return 1;
 }
 

@@ -32,6 +32,10 @@ int wwEnvInt( const char * name, bool * ok = nullptr );
 bool wwEnvIsSet( const char * name );
 bool wwEnvIsEmpty( const char * name );
 inline QByteArray wwEnv( const QByteArray & name ) { return wwEnv( name.constData() ); }
+//! MODULES1 item 8: the accessors keep each answer; call after any qputenv / qunsetenv (each frame's start calls it too)
+void wwEnvChanged();
+//! moves at each wwEnvChanged (every frame's start, every env write): equal = the same frame and the same switches
+quint64 wwEnvEpoch();
 
 // ---- the generation
 extern std::atomic<quint64> g_wwSwitchGen;

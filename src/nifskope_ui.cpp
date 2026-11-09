@@ -2545,6 +2545,7 @@ static void wwCardBatchNext()
 		QDir( bakeDir ).removeRecursively();
 		QDir().mkpath( bakeDir );
 		qputenv( "WW_IMPOSTOR_BAKE", QDir::toNativeSeparators( bakeDir ).toLocal8Bit() );
+		wwEnvChanged();	// MODULES1 item 8: the env accessors' cache
 		// every window starts from the process-start look, as each per-base launch's one window did
 		QCoreApplication::sendPostedEvents( nullptr, QEvent::DeferredDelete );
 		QApplication::setStyle( QStyleFactory::create( b.style ) );

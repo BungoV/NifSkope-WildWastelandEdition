@@ -40,6 +40,8 @@
 #include <psapi.h>
 #endif
 
+#include "wwswitch.h"	// MODULES1 item 8: wwEnvChanged
+
 namespace
 {
 const int kHalf = 2;   // BAKEBLOCK1: an exterior bake loads the 5x5 block round the asked cell
@@ -811,6 +813,6 @@ int farLightWalkStep( const QString & fname, bool loaded )
 	}
 	const QStringList & n = queue[pos];
 	prepCell( qEnvironmentVariable( "WW_CELL_FARLIGHTWALK_SPEC" ), n[2], n[3], n[0].toInt(), n[1].toInt(),
-		[]( const QString & k, const QString & v ) { qputenv( k.toLocal8Bit().constData(), v.toLocal8Bit() ); } );
+		[]( const QString & k, const QString & v ) { qputenv( k.toLocal8Bit().constData(), v.toLocal8Bit() ); wwEnvChanged(); } );	// MODULES1 item 8
 	return FarLightWalkNext;
 }

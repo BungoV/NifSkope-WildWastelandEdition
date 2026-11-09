@@ -872,8 +872,16 @@ const WwWeatherRecx & wwWeatherRecx()
 	const QString wk = wwLookdevWeatherKey();
 	const QString redKey = rw + QLatin1Char( '|' ) + wwEnvStr( "WW_WEATHER_RECORD_RED" ) + QLatin1Char( '|' )
 		+ QString::number( wwWxOvStamp() );	// lane MODULES1 item 12: a live haze / cloud override
-	if ( wasOn && since.isValid() && since.elapsed() < 100 && hour == lastHour && wk == lastWeather && redKey == lastRed )
+	/* MODULES1 item 8 (PERFCPU1: ~10 calls a frame, each a full resolve once frames pass 100 ms: 6 % of the frame's
+	 * CPU): within one frame and one switch state the answer is kept too. Red WW_RECX_FRAMECACHE_RED=1: the 100 ms only */
+	static quint64 lastEpoch = ~quint64( 0 );
+	WW_SWITCH_STATIC( bool, frameRed, wwEnv( "WW_RECX_FRAMECACHE_RED" ).trimmed() == "1" );
+	const quint64 epoch = wwEnvEpoch();
+	const bool sameFrame = !frameRed && epoch == lastEpoch;
+	if ( wasOn && ( sameFrame || ( since.isValid() && since.elapsed() < 100 ) ) && hour == lastHour && wk == lastWeather
+		&& redKey == lastRed )
 		return cur;
+	lastEpoch = epoch;
 	wasOn = true;
 	since.start();
 	lastHour = hour;

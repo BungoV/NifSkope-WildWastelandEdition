@@ -30,6 +30,8 @@
 #include <thread>
 #include <vector>
 
+#include "wwswitch.h"	// MODULES1 item 8: wwEnvChanged
+
 namespace {
 
 constexpr double kPi = 3.14159265358979323846;
@@ -679,6 +681,7 @@ int probeVolCheckCli( const QStringList & args )
 	const bool wantGpu = raysWay == QLatin1String( "gpu" ) || raysWay == QLatin1String( "both" );
 	if ( wantGpu )
 		qputenv( "WW_BAKE_RT", "1" );
+	wwEnvChanged();	// MODULES1 item 8: the env accessors' cache
 	std::string why;
 	const bool tryGpu = wantGpu || ( raysWay == QLatin1String( "auto" ) && bakert::pickPath( &why ) != bakert::Path::Cpu );
 	QString pathLine = QStringLiteral( "cpu (%1 threads)" ).arg( bakert::threads() );

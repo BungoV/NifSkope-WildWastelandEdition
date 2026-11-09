@@ -603,6 +603,7 @@ int gltfCellCli( const QStringList & args )
 	if ( !res.isEmpty() )
 		lodgenSetResources( res.split( QLatin1Char( ';' ), Qt::SkipEmptyParts ) );
 	qputenv( "WW_CELL_STREAM", "0" );   // the whole block in one build, no streamer
+	wwEnvChanged();	// MODULES1 item 8: the env accessors' cache
 	spec.water = false;
 	spec.grid = false;   // spec.terrain stays: the LAND is read with it; the build's ground mesh is never reached
 	cellExportSetSink( &sink );

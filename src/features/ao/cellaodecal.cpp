@@ -553,6 +553,7 @@ int aoDecalCli( const QStringList & args )
 	qputenv( "WW_CELL_AODECAL_DIR", dir.toLocal8Bit() );
 	if ( red == QLatin1String( "stale" ) || red == QLatin1String( "clutter" ) )
 		qputenv( "WW_CELL_AODECAL_RED", red.toLatin1() );
+	wwEnvChanged();	// MODULES1 item 8: the env accessors' cache
 	std::vector<NativeSrcShape> shapes;
 	QString root = data;
 	if ( !lodgenNativeLoadModel( &root, model, &shapes ) || shapes.empty() ) {
