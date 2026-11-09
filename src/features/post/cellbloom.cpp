@@ -885,6 +885,9 @@ void wwCellBloomFinal( Renderer * r, int unit, int knownActive )
 	fn->glActiveTexture( GLenum( prevActive ) );
 	prog->uni4f( "cellIsFoBloomParams", FloatVector4( s.radius, s.finalWeight, s.dispersion, s.perPixel ) );
 	prog->uni1f( "cellIsFoBloomEc", s.replacing && s.ecK > 0.0f ? s.ecK : 0.0f );
+	// LATE 7: fog may at most double the energy-conserving glare's share (it raised k up to 5x, glare strong again)
+	prog->uni1f( "cellIsFoBloomFogCap",
+		wwEnvStr( "WW_CELL_FOGBLOOM_RED" ).trimmed() == QLatin1StringView( "glare" ) ? 1.0e9f : 2.0f );
 	prog->uni2f( "cellIsFoBloomFrame", float( s.w ), float( s.h ) );
 }
 

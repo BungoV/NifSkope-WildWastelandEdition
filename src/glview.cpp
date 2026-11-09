@@ -3353,6 +3353,44 @@ static void wwCellImageSpaceMeasurePass( Scene * scene )
 	}
 }
 
+namespace
+{
+constexpr const char * kFpsKey = "Settings/Render/View/Show Framerate";
+struct WwFpsMeter
+{
+	bool init = false, on = false;
+	QElapsedTimer win;
+	int frames = 0;
+	double cpuMs = 0.0;
+	QString line;
+};
+WwFpsMeter & wwFps()
+{
+	static WwFpsMeter m;
+	if ( !m.init ) {
+		m.init = true;
+		m.on = QSettings().value( QLatin1StringView( kFpsKey ), false ).toBool();
+	}
+	return m;
+}
+}	// namespace
+
+bool wwFramerateOverlayOn()
+{
+	return wwFps().on;
+}
+
+void wwSetFramerateOverlay( bool on )
+{
+	WwFpsMeter & m = wwFps();
+	m.on = on;
+	m.frames = 0;
+	m.cpuMs = 0.0;
+	m.line.clear();
+	m.win.invalidate();
+	QSettings().setValue( QLatin1StringView( kFpsKey ), on );
+}
+
 void GLView::paintGL()
 {
 	CellSpeed::Acc speedAcc( "frames painted (paintGL, with first-use uploads)" );
@@ -3977,10 +4015,28 @@ void GLView::paintGL()
 	 * SHOTFIX1: not in a harness grab either (the log still says it): it was OPENREDS g10's 468 px "blob" */
 	const QString modPickNote = ( model && !passTimeClean ) ? cellModPickViewNote( model ) : QString();
 	const QStringList passTimeLines = ( passTimeClean || scene->selecting ) ? QStringList() : PassTime::overlay();
+	// F3: the framerate overlay, this paint's CPU time so far (the whole frame but the 2D overlays)
+	QString fpsLine;
+	if ( !passTimeClean && !scene->selecting && wwFps().on ) {
+		WwFpsMeter & fm = wwFps();
+		if ( !fm.win.isValid() )
+			fm.win.start();
+		fm.frames++;
+		fm.cpuMs += double( wwStream1Clock.nsecsElapsed() ) * 1.0e-6;
+		const qint64 ms = fm.win.elapsed();
+		if ( ms >= 500 ) {
+			fm.line = QStringLiteral( "%1 fps   %2 ms CPU" ).arg( double( fm.frames ) * 1000.0 / double( ms ), 0, 'f', 1 )
+				.arg( fm.cpuMs / double( fm.frames ), 0, 'f', 2 );
+			fm.frames = 0;
+			fm.cpuMs = 0.0;
+			fm.win.restart();
+		}
+		fpsLine = fm.line.isEmpty() ? QStringLiteral( "-- fps" ) : fm.line;
+	}
 	// the PRTP Debug View's room and threshold labels (empty when the view is off)
 	const std::vector<WwCellVolumeLabel> volLabels = scene->selecting ? std::vector<WwCellVolumeLabel>()
 		: wwCellVolumeViewLabels( scene->nifModel );
-	if ( !cleanView && ( scene->hasOption( Scene::ShowAxes ) || ( model && showCursor ) || freeCamera || drawSnapMarker || boxSelectDrag || circleSelecting || knifeActive || loopCutActive || riggingWeightPaintMode || vertexPaintMode || segmentPaintMode || !modPickNote.isEmpty() || !passTimeLines.isEmpty() || !volLabels.empty() ) ) {
+	if ( !cleanView && ( scene->hasOption( Scene::ShowAxes ) || ( model && showCursor ) || freeCamera || drawSnapMarker || boxSelectDrag || circleSelecting || knifeActive || loopCutActive || riggingWeightPaintMode || vertexPaintMode || segmentPaintMode || !modPickNote.isEmpty() || !passTimeLines.isEmpty() || !volLabels.empty() || !fpsLine.isEmpty() ) ) {
 		// The scene passes (esp.
 		if ( QOpenGLContext * glCtx = QOpenGLContext::currentContext() ) {
 			QOpenGLFunctions * f = glCtx->functions();
@@ -4050,6 +4106,18 @@ void GLView::paintGL()
 			}
 			f.setBold( false );
 			f.setPointSizeF( base );
+			painter.setFont( f );
+		}
+		if ( !fpsLine.isEmpty() ) {	// F3: top left
+			QFont f = painter.font();
+			f.setPointSizeF( 9.5 );
+			f.setBold( true );
+			painter.setFont( f );
+			painter.setPen( QColor( 0, 0, 0, 210 ) );
+			painter.drawText( QPointF( 11, 21 ), fpsLine );
+			painter.setPen( QColor( 235, 240, 200 ) );
+			painter.drawText( QPointF( 10, 20 ), fpsLine );
+			f.setBold( false );
 			painter.setFont( f );
 		}
 		if ( !passTimeLines.isEmpty() ) {	// top right, one pass a line (CPU / GPU ms)

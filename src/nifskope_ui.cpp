@@ -25803,6 +25803,22 @@ void NifSkope::initDockWidgets()
 			fullButton->setAutoRaise( true );
 			ui->tRender->addWidget( fullButton );
 		}
+		// F3 (bungo 11-09): the live framerate in the viewport's corner (glview.h wwFramerateOverlayOn)
+		{
+			QAction * aFps = new QAction( tr( "Show Framerate" ), this );
+			aFps->setObjectName( QStringLiteral( "aViewportFramerate" ) );
+			aFps->setShortcut( QKeySequence( Qt::Key_F3 ) );
+			aFps->setCheckable( true );
+			aFps->setChecked( wwFramerateOverlayOn() );
+			connect( aFps, &QAction::toggled, this, [this]( bool on ) {
+				wwSetFramerateOverlay( on );
+				if ( ogl )
+					ogl->update();
+			} );
+			addAction( aFps );	// the key works while every bar is hidden
+			if ( ui->mView )
+				ui->mView->addAction( aFps );
+		}
 
 		auto currentShadeMode = std::make_shared<int>( 2 );
 		auto soloContribution = std::make_shared<int>( -1 );

@@ -140,6 +140,8 @@ uniform vec4 cellIsFoBloomParams;	// radius (pixels), bloom weight, dispersion, 
 uniform vec2 cellIsFoBloomFrame;	// the frame's size: the combine's uv
 // lane PHYSUNITS1: the energy-conserving glare's k (0: the additive FO4CS bloom); cellFoBloomHere is then blur x k
 uniform float cellIsFoBloomEc;
+// LATE 7 (PHYSUNITS1 note): the most the fog's gain may raise that k (x 2); red WW_CELL_FOGBLOOM_RED=glare: 1e9
+uniform float cellIsFoBloomFogCap;
 vec3 cellFoBloomHere = vec3( 0.0 );
 // lane FOGBLOOM1 (src/features/post/cellfogbloom.h): the bloom-intensity target, (gain - 1) / 4 per sample; cell_hdr.frag sets
 // cellBloomGain from it, which scales both blooms (1.0 exactly in clear air: the same bits)
@@ -171,7 +173,7 @@ vec3 cellImageSpace( vec3 sqrtColor )
 #if defined( WW_CELL_HDR )
 	if ( cellIsFoBloomOn && cellIsFoBloomEc > 0.0 ) {
 		// lane PHYSUNITS1: the frame lerped toward its blur (moves light, adds none); the fog's gain raises k, at most 1
-		float kg = min( cellIsFoBloomEc * cellBloomGain, 1.0 );
+		float kg = min( cellIsFoBloomEc * ( cellIsFoBloomFogCap > 0.0 ? min( cellBloomGain, cellIsFoBloomFogCap ) : cellBloomGain ), 1.0 );
 		x = x * ( 1.0 - kg ) + 2.0 * ( kg / cellIsFoBloomEc ) * cellFoBloomHere;
 	} else if ( cellIsFoBloomOn )	// FO4CS adds its bloom to the exposed light, before the curve (x 2: the curve's input)
 		x += 2.0 * cellBloomGain * cellFoBloomHere;

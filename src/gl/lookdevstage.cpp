@@ -3175,7 +3175,12 @@ bool drawAtmo( Scene * scene, QStringList & drew, bool capture = false )
 	in.viewTransform = skyViewTransform();
 	// lane SKYA (ATMOCHECK1): the weather dome's colors by elevation for the Sky Color row's Weather Tint; the rings come
 	// from the dome mesh's vertex weights once per mesh, the colors from this hour's weather each frame
-	if ( wwAtmoTint() > 0 ) {
+	{	// LATE 7: a glowing record sky (the radstorms) draws Weather Tint (atmosphere.h wwAtmoSetGlowSky)
+		const SkyFrame gf = skyFrame();
+		const float * u = gf.up;
+		wwAtmoSetGlowSky( u[1] > 0.0f && u[1] >= u[0] && u[1] >= u[2] && u[2] < 0.75f * u[1] && u[2] < u[0] );
+	}
+	if ( wwAtmoTintDrawn() > 0 ) {
 		QString why;
 		const SkyMesh * m = domeMesh( scene, &why );
 		const int cs = m && m->nv > 0 ? int( m->col.size() ) / int( m->nv ) : 0;

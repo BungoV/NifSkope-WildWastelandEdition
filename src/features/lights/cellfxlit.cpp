@@ -37,7 +37,7 @@ struct FxDoc
 struct FxState
 {
 	QHash<const void *, FxDoc> docs;
-	bool strongest = false;
+	int pick = WwFxLitPickOwn;	// LATE 7: own light first; red WW_CELL_FXLIT_PICK=game (the inferred order), =strong
 	int red = 0;        // 1 white, 2 all, 4 nopower, 8 nofade
 	int probe = 0;
 	QString dump;
@@ -52,7 +52,8 @@ FxState & st()
 		if ( !s )
 			s = new FxState;
 		liveGen = wwSwitchGen();
-		s->strongest = wwEnv( "WW_CELL_FXLIT_PICK" ) == "strong";
+		const QByteArray pk = wwEnv( "WW_CELL_FXLIT_PICK" );
+		s->pick = pk == "strong" ? WwFxLitPickStrong : pk == "game" ? WwFxLitPickGame : WwFxLitPickOwn;
 		const QByteArray r = wwEnv( "WW_CELL_FXLIT_RED" );
 		s->red = r == "white" ? 1 : r == "all" ? 2 : r == "nopower" ? 4 : r == "nofade" ? 8 : 0;
 		s->probe = wwEnvInt( "WW_CELL_LIT_PROBE" );
@@ -77,11 +78,13 @@ float falloff( float d, float r )
 }
 
 void wwCellFxLitPickLights( const QVector<WwCellLight> & lights, const float center[3], float radius,
-	bool strongest, int out[4] )
+	int pick, quint32 ownRef, int out[4] )
 {
+	const bool strongest = pick == WwFxLitPickStrong;
 	struct Cand
 	{
 		int index;
+		int tier;	// LATE 7: 2 the placement's own light, 1 a light inside the bound, 0 the rest
 		float key;
 	};
 	std::vector<Cand> cand;
@@ -95,10 +98,23 @@ void wwCellFxLitPickLights( const QVector<WwCellLight> & lights, const float cen
 			key = std::max( { l.color[0], l.color[1], l.color[2] } ) * falloff( d, l.radius );
 		else if ( radius < 150.0f )
 			key = ( d - radius ) / l.radius;
-		cand.push_back( { i, key } );
+		int tier = 0;
+		if ( pick == WwFxLitPickOwn ) {
+			if ( ownRef != 0 && l.ref == ownRef )
+				tier = 2;
+			else if ( d <= radius ) {
+				tier = 1;
+				key = -d;	// nearest first among the lights inside the bound
+			}
+		}
+		cand.push_back( { i, tier, key } );
 	}
-	// largest key first; a large model's list (every key 0) keeps the lights' own order
-	std::stable_sort( cand.begin(), cand.end(), []( const Cand & a, const Cand & b ) { return a.key > b.key; } );
+	/* LATE 7 (bungo: the lamp cone "is still not connected"): the inferred order sorts the largest relative distance
+	 * first, so a lamp's own light (d ~ 0) came LAST and dropped out under 4+ string bulbs. Own: the placement's own
+	 * light, then lights inside its bound, then that order. Largest key first; every key 0 keeps the lights' order */
+	std::stable_sort( cand.begin(), cand.end(), []( const Cand & a, const Cand & b ) {
+		return a.tier != b.tier ? a.tier > b.tier : a.key > b.key;
+	} );
 	for ( int k = 0; k < 4; k++ )
 		out[k] = size_t( k ) < cand.size() ? cand[size_t( k )].index : -1;
 }
@@ -157,7 +173,7 @@ void wwCellFxLitPick( const void * nif )
 		return;
 	}
 	for ( WwFxLitModel & m : it->models ) {
-		wwCellFxLitPickLights( L->lights, m.center, m.radius, s.strongest, m.light );
+		wwCellFxLitPickLights( L->lights, m.center, m.radius, s.pick, m.ref, m.light );
 		for ( int k = 0; k < 4; k++ )
 			m.scale[k] = it->noOffset.value( m.light[k], 1.0f );
 	}
@@ -167,7 +183,7 @@ void wwCellFxLitPick( const void * nif )
 	if ( !f.open( QIODevice::WriteOnly | QIODevice::Text ) )
 		return;
 	QTextStream o( &f );
-	o << "fxlit pick=" << ( s.strongest ? "strong" : "game" ) << " red=" << s.red << " models=" << it->models.size()
+	o << "fxlit pick=" << ( s.pick == WwFxLitPickStrong ? "strong" : s.pick == WwFxLitPickGame ? "game" : "own" ) << " red=" << s.red << " models=" << it->models.size()
 	  << " shapes=" << it->shapeModel.size() << " lights=" << L->lights.size() << "\n";
 	for ( int i = 0; i < it->models.size(); i++ ) {
 		const WwFxLitModel & m = it->models[i];

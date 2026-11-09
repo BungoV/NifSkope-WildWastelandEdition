@@ -75,6 +75,8 @@ struct AtState
 	int tint = 0;	// lane SKYA (ATMOCHECK1): the Sky Color row, 0 Physical / 1 Weather Tint (pin WW_ATMO_TINT)
 	bool tintPinned = false;
 	bool tintDrawn = false;	// SKY2B (SKYTINT2): the last sky drew Weather Tint (the dome resolved): the ambient keeps the weather's color
+	bool tintEnv = false;	// LATE 7: WW_ATMO_TINT is set (a pin keeps its value even under a glowing sky)
+	bool glowSky = false;	// LATE 7: this hour's weather sky is one the physical model cannot make (wwAtmoSetGlowSky)
 	int gi = 0;	// lane SKYA (SKYGI1): the GI Sky From Physical Sky row, 0 Off / 1 On (pin WW_ATMO_GI)
 	bool giPinned = false;
 };
@@ -136,6 +138,7 @@ AtState & as()
 		s.night = rowValue( wwEnvStr( "WW_ATMO_NIGHT" ), kNightKey, { "off", "on" }, s.nightPinned, kNightDef );
 		s.expo = rowValue( wwEnvStr( "WW_ATMO_EXPO" ), kExpoKey, { "off", "on" }, s.expoPinned );
 		s.tint = rowValue( wwEnvStr( "WW_ATMO_TINT" ), kTintKey, { "physical", "weather" }, s.tintPinned );
+		s.tintEnv = !wwEnvStr( "WW_ATMO_TINT" ).trimmed().isEmpty();
 		s.gi = rowValue( wwEnvStr( "WW_ATMO_GI" ), kGiKey, { "off", "on" }, s.giPinned, kGiDef );
 		// lane WEATHERRECX1: the record reds hand a light channel back to the WTHR record (an unpinned row only)
 		const unsigned rr = wwWeatherRecordChannels( wwEnvStr( "WW_WEATHER_RECORD_RED" ) );
@@ -152,6 +155,18 @@ AtState & as()
 bool red( const char * word )
 {
 	return wwEnvStr( "WW_ATMO_RED" ).trimmed().toLower() == QLatin1StringView( word );
+}
+
+/* LATE 7 (bungo: the radstorm is not green): the Sky Color the frame draws. A glowing sky (the radstorms, the
+ * Glowing Sea: wwAtmoSetGlowSky) takes Weather Tint whatever the row says, so the record's sky, air and ambient
+ * colors are drawn, not the physical blue; a WW_ATMO_TINT pin keeps its value. Red WW_ATMO_TINT_RED=noglow. */
+int tintNow( const AtState & s )
+{
+	if ( s.tint > 0 )
+		return s.tint;
+	const bool glow = s.glowSky && !s.tintEnv
+		&& wwEnvStr( "WW_ATMO_TINT_RED" ).trimmed().toLower() != QLatin1StringView( "noglow" );
+	return glow ? 1 : 0;
 }
 
 //! lane SKYA (ATMO2): the aerial perspective's reds: nosunt (the in-scatter ignores the sun's transmittance), double
@@ -721,7 +736,7 @@ bool wwAtmoDrawSky( Scene * scene, const WwAtmoInputs & in, QString * line )
 	if ( !in.capture )	// SKYGI1: a capture face keeps the frame's volume
 		g.ap.valid = false;
 	if ( ok && s.ap > 0 && !in.capture ) {
-		const bool tintAp = s.tint > 0 && in.tintOk && !wwAtmoTintRedPhysical();
+		const bool tintAp = tintNow( s ) > 0 && in.tintOk && !wwAtmoTintRedPhysical();
 		const bool built = buildAp( scene, g, msN, camR, sunW, moonW, sunK, moonK, noOzone, noMs, tintAp ? in.tint : nullptr );
 		apLine = built ? QString( "ap=%1x%2x%3@%4km" ).arg( g.ap.w ).arg( g.ap.h ).arg( g.ap.n ).arg( double( kApMaxKm ), 0, 'f', 0 )
 				+ ( g.ap.layered ? QStringLiteral( "/layered" ) : QStringLiteral( "/slices" ) )	// lane PERFFIX3
@@ -777,7 +792,7 @@ bool wwAtmoDrawSky( Scene * scene, const WwAtmoInputs & in, QString * line )
 			p->uni1f( "sceneExposure", in.exposure );
 			p->uni1i( "viewTransform", in.viewTransform );
 			// lane SKYA (ATMOCHECK1): the Sky Color row's Weather Tint (atWeatherTint); 0 = the physical color, as before
-			const bool tintOn = s.tint > 0 && in.tintOk;
+			const bool tintOn = tintNow( s ) > 0 && in.tintOk;
 			s.tintDrawn = tintOn;
 			p->uni1f( "atTintOn", tintOn ? 1.0f : 0.0f );
 			const GLint tintLoc = p->uniLocation( "atTint" );
@@ -846,7 +861,7 @@ bool wwAtmoDrawSky( Scene * scene, const WwAtmoInputs & in, QString * line )
 	// lane FIX1101A (moon): the sun disc's / our globe's gain through the air (1 = none: no air, or the red airband)
 	reds += QStringLiteral( ",disc_air=%1/%2%3" ).arg( double( discAir[0] ), 0, 'f', 3 ).arg( double( discAir[1] ), 0, 'f', 3 )
 		.arg( wwAtmoDiscRed( "airband" ) ? QStringLiteral( ",DISC_RED=airband" ) : QString() );
-	if ( s.tint > 0 )	// lane SKYA (ATMOCHECK1)
+	if ( tintNow( s ) > 0 )	// lane SKYA (ATMOCHECK1); LATE 7: a glowing sky too
 		reds += in.tintOk ? ( wwAtmoTintRedFlat() ? QStringLiteral( ",tint=weather,TINT_RED=flat" )
 			: wwAtmoTintRedPhysical() ? QStringLiteral( ",tint=weather,TINT_RED=physical" ) : QStringLiteral( ",tint=weather(ap,amb)" ) )
 			: QStringLiteral( ",tint=refused(no dome)" );
@@ -1030,7 +1045,7 @@ bool wwAtmoKeyLight( float muLight, const float fog[4], float keyLum45, float su
 		std::copy( dalc[a], dalc[a] + 3, rows[1 + a] );
 	const float was[3] = { sun[0], sun[1], sun[2] };
 	// SKY2B (SKYTINT2): under Weather Tint the ambient (and the DALC) keeps the weather's own color; the sun is still tinted
-	const bool tintAmb = s.tint > 0 && s.tintDrawn && !wwAtmoTintRedPhysical();
+	const bool tintAmb = tintNow( s ) > 0 && s.tintDrawn && !wwAtmoTintRedPhysical();
 	skyKeyLight( phys ? 2 : s.sun, muLight, haze, keyLum45, flat, sun, rows, tintAmb ? 0 : 7 );
 	std::copy( rows[0], rows[0] + 3, amb );
 	for ( int a = 0; a < 6; a++ )
@@ -1187,6 +1202,16 @@ bool wwAtmoTintPinned()
 bool wwAtmoTintRedFlat()
 {
 	return wwEnvStr( "WW_ATMO_TINT_RED" ).trimmed().toLower() == QLatin1StringView( "flat" );
+}
+
+void wwAtmoSetGlowSky( bool glow )
+{
+	as().glowSky = glow;
+}
+
+int wwAtmoTintDrawn()
+{
+	return tintNow( as() );
 }
 
 bool wwAtmoTintRedPhysical()

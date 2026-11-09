@@ -55,6 +55,11 @@ class NifSkope;
 class QMenu;
 class QTimer;
 
+/* F3 (bungo 11-09: "I need to see my active framerate"): a corner overlay with the fps and the CPU frame ms, averaged
+ * over ~0.5 s of painted frames. Off by default; View > Show Framerate; saved in QSettings. Never in a clean grab. */
+bool wwFramerateOverlayOn();
+void wwSetFramerateOverlay( bool on );
+
 
 //! The main [Viewport](@ref viewport_details) class
 class GLView final : public QOpenGLWindow

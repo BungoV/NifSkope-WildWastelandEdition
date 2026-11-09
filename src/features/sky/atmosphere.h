@@ -133,6 +133,12 @@ bool wwAtmoTintPinned();
 bool wwAtmoTintRedFlat();	//!< the red: the horizon's color at every elevation (the gradient lost)
 //! SKY2B (SKYTINT2) red WW_ATMO_TINT_RED=physical: the aerial perspective and the ambient keep the physical color
 bool wwAtmoTintRedPhysical();
+/* LATE 7: this hour's weather sky (Sky-Upper, linear) is green-dominant and yellow (G >= R, G >= B, B < 0.75 G,
+ * B < R): the 11 radstorm / Glowing Sea weathers of the 107 (notes/modules1/tools/glowsky_census.py). Such a sky
+ * draws Weather Tint unless WW_ATMO_TINT pins the row; red WW_ATMO_TINT_RED=noglow. */
+void wwAtmoSetGlowSky( bool glow );
+//! the Sky Color the frame draws: the row, or Weather Tint under a glowing sky
+int wwAtmoTintDrawn();
 
 /* lane SKYA (SKYGI1): the probes' sky light from the physical sky. The probe bake's sky term (src/features/gi/probesky.h, lane
  * SKYPIC1) integrates a 6-face capture of the drawn sky; with this row on and Physical Sky on, the capture draws the

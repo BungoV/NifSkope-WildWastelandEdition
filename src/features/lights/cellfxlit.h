@@ -15,7 +15,7 @@ struct WwCellLight;
  *  mix(1, directional + up to four placed lights x fade x pow(1 - saturate(d / r)^2, 2.2), lighting influence),
  *  per pixel, no N.L or shadow. The four lights belong to the placed MODEL; the renderer asks this table per draw.
  *  Outdoors the directional is the weather's sun x the imagespace Sunlight Scale; no weather loaded = self-lit.
- *  WW_CELL_FXLIT_PICK=strong, WW_CELL_FXLIT_RED=white|nofade|all|nopower, WW_CELL_FXLIT_DUMP=<file>,
+ *  WW_CELL_FXLIT_PICK=game|strong, WW_CELL_FXLIT_RED=white|nofade|all|nopower, WW_CELL_FXLIT_DUMP=<file>,
  *  WW_CELL_LIT_PROBE 70..74: debug aids. */
 struct WwFxLitModel
 {
@@ -27,11 +27,13 @@ struct WwFxLitModel
 	float scale[4] = { 1, 1, 1, 1 };            //!< 1, or the nofade red control's ratio
 };
 
-/*! The game's light pick: candidates reach the model's bound (distance - bound radius < light radius); under a
- *  150-unit bound they sort by (distance - bound r) / light r, largest first, else record order (inferred); the
- *  first four win. `strongest` instead takes the four largest color x falloff at the bound's center. */
+enum { WwFxLitPickOwn = 0, WwFxLitPickGame = 1, WwFxLitPickStrong = 2 };
+/*! The light pick: candidates reach the model's bound (distance - bound radius < light radius). Game (red
+ *  WW_CELL_FXLIT_PICK=game): under a 150-unit bound they sort by (distance - bound r) / light r, largest first, else
+ *  record order (inferred); the first four win. Own (default, LATE 7): the light placed by `ownRef` first, then
+ *  lights inside the bound (nearest first), then the game order. Strong: the four largest color x falloff. */
 void wwCellFxLitPickLights( const QVector<WwCellLight> & lights, const float center[3], float radius,
-	bool strongest, int out[4] );
+	int pick, quint32 ownRef, int out[4] );
 
 //! A new scene for this document: its table is emptied.
 void wwCellFxLitBegin( const void * nif );
