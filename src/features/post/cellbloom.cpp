@@ -1,6 +1,7 @@
 #include "features/post/cellbloom.h"
 #include "wwswitch.h"	// lane TESTDRIVER1: the WW_* switch store
 
+#include "features/exposure/physunits.h"	// lane PHYSUNITS1: energy-conserving glare (wwPhysBloomK)
 #include "features/post/cellfogbloom.h"	// lane PERFFIX3: the per-pixel combine stands down when the fog's gain picks the lod per sample
 #include "gl/cellunits.h"	// lane PERFFIX3: WwPassUnit::HdrBloomComb
 #include "gl/celllights.h"
@@ -85,6 +86,7 @@ struct BloomState
 	GLuint combTex = 0;	// lane PERFFIX3: this frame's per-pixel tent, 0 = the tone map runs its own taps
 	int w = 0, h = 0;
 	float finalWeight = 0.0f, radius = 1.0f, dispersion = 0.0f;
+	float ecK = -1.0f, ecGain = 1.0f;	// lane PHYSUNITS1: the glare's lerp k (< 0: additive) and the chain's flat-field gain
 	QString last = QStringLiteral( "vanilla" ), said;
 	QString selfTest;
 };
@@ -635,7 +637,10 @@ bool wwCellBloomRun( Scene * scene, unsigned hdrColor, unsigned ds, int W, int H
 	}
 
 	// 2. the down chain (BloomDownCS): level 0 from the source with the threshold and the Karis average
-	const float thr = std::clamp( set.threshold, 0.0f, 64.0f ), knee = std::clamp( set.softKnee, 0.0f, 1.0f );
+	// lane PHYSUNITS1 (RESUME 11-09 b): the energy-conserving glare takes every pixel's light (no threshold, no knee)
+	s.ecK = wwPhysBloomK();
+	const bool ec = s.ecK > 0.0f;
+	const float thr = ec ? 0.0f : std::clamp( set.threshold, 0.0f, 64.0f ), knee = ec ? 0.0f : std::clamp( set.softKnee, 0.0f, 1.0f );
 	for ( int i = 0; ok && i < mipCount; i++ ) {
 		target( g.mip[i], dims[i][0], dims[i][1] );
 		auto prog = r->useProgram( "cell_bloom_down.prog" );
@@ -687,6 +692,19 @@ bool wwCellBloomRun( Scene * scene, unsigned hdrColor, unsigned ds, int W, int H
 		const float glare = set.glare ? std::max( set.glareStrength, 0.0f ) : 0.0f;
 		const float total = std::max( base + glare, kEps );
 		finalWeight *= base / total + ( glare / total ) * wwBloomGlareBand( set, 0, 1 );
+	}
+	/* lane PHYSUNITS1: the top's gain on a flat frame (each up pass: source x srcW + tent(accumulated) x accW, the tent
+	 * and the Karis average keep a flat field); the glare's weight is k over it, so the blur carries the frame's energy */
+	s.ecGain = 1.0f;
+	if ( ec ) {
+		float acc = 1.0f;
+		for ( int offset = mipCount - 1; offset > 0; offset-- ) {
+			float srcW = 1.0f, accW = 1.0f;
+			bandWeights( set, offset - 1, offset, mipCount, srcW, accW );
+			acc = srcW + accW * acc;
+		}
+		s.ecGain = std::max( acc, kEps );
+		finalWeight = s.ecK / s.ecGain;
 	}
 	if ( ok && check ) {
 		const GLenum err = fn->glGetError();
@@ -829,6 +847,10 @@ bool wwCellBloomRun( Scene * scene, unsigned hdrColor, unsigned ds, int W, int H
 		glare = QStringLiteral( "glare=on strength=%1 f=%2 dispersion=%3 bands=[%4]" )
 			.arg( f6( set.glareStrength ), f6( set.glareFNumber ), f6( dispersion ), b.join( QLatin1Char( ',' ) ) );
 	}
+	if ( ec )
+		glare += QStringLiteral( " physglare k=%1 flatgain=%2" ).arg( f6( s.ecK ), f6( s.ecGain ) );
+	else
+		glare += QStringLiteral( " physglare off (additive)" );
 	note( s, QStringLiteral( "fo4cs mips=%1 (%2x%3..%4x%5) threshold=%6 knee=%7 intensity=%8 radius=%9 weight=%10 %11%12 (checks %13)" )
 		.arg( mipCount ).arg( dims[0][0] ).arg( dims[0][1] ).arg( dims[mipCount - 1][0] ).arg( dims[mipCount - 1][1] )
 		.arg( f6( thr ), f6( knee ), f6( set.intensity ), f6( radius ), f6( finalWeight ), glare,
@@ -862,6 +884,7 @@ void wwCellBloomFinal( Renderer * r, int unit, int knownActive )
 	 * mips grow in Run (the per-pixel combine reads them first) */
 	fn->glActiveTexture( GLenum( prevActive ) );
 	prog->uni4f( "cellIsFoBloomParams", FloatVector4( s.radius, s.finalWeight, s.dispersion, s.perPixel ) );
+	prog->uni1f( "cellIsFoBloomEc", s.replacing && s.ecK > 0.0f ? s.ecK : 0.0f );
 	prog->uni2f( "cellIsFoBloomFrame", float( s.w ), float( s.h ) );
 }
 

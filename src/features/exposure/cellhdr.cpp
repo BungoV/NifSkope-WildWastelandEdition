@@ -428,6 +428,8 @@ void isApply( Scene * scene, const float * px, int qw, int qh )
 	}
 	// lane PHYSUNITS1 (LATE ITEM 11-08): the physical camera meters the log average, so a bulb cannot set the street's EV
 	const float meter = wwPhysMeter( px, qw * qh );
+	if ( meter >= 0.0f )
+		wwPhysNoteFrameMeter();	// RESUME 11-09 b: the one camera writer (wwCellImageSpaceMeasureByPass stands down)
 	// SKY2B (EXPO2): the sky pixels in view, each along its own ray
 	wwCellImageSpaceSetAdapted( scene, wwAtmoAdaptedInView( scene, meter >= 0.0f ? meter : cover > 0.0 ? float( sum / cover ) : 0.0f, px, qw, qh ),
 		int( std::lround( cover ) ) );
@@ -603,7 +605,11 @@ bool wwCellImageSpaceMeasureByPass( Scene * scene )
 	if ( isMeasureMode() >= 2 || !scene )
 		return true;
 	// the first frame (no value yet), or the last frame took no linear frame or its measure failed: the old pass
-	return !isServed().take( scene->nifModel ) || wwCellImageSpaceAdapted( scene ) < 0.0f;
+	const bool served = isServed().take( scene->nifModel );
+	// lane PHYSUNITS1 (RESUME 11-09 b): one camera writer: a fresh frame meter keeps the pass off (it only seeds)
+	if ( wwPhysFrameMeterFresh() && wwCellImageSpaceAdapted( scene ) >= 0.0f )
+		return false;
+	return !served || wwCellImageSpaceAdapted( scene ) < 0.0f;
 }
 
 bool wwCellDrawProbeOn()

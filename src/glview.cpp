@@ -3327,7 +3327,9 @@ static void wwCellImageSpaceMeasurePass( Scene * scene )
 			if ( std::isfinite( px[i * 4 + c] ) )
 				sum += wgt[c] * px[i * 4 + c];
 	}
-	wwCellImageSpaceSetAdapted( scene, wwAtmoAdapted( float( sum / double( std::max( counted, 1 ) ) ), counted,
+	// lane PHYSUNITS1 (RESUME 11-09 b): the seed takes the physical camera's meter too (one law, wwPhysMeter)
+	const float physMeter = wwPhysMeter( px.data(), int( cover.size() ), cover.data() );
+	wwCellImageSpaceSetAdapted( scene, wwAtmoAdapted( physMeter >= 0.0f ? physMeter : float( sum / double( std::max( counted, 1 ) ) ), counted,
 		int( cover.size() ) ), counted );
 	// the game blooms a quarter-size copy of the HDR; a full-size (dump) measure is averaged 4x4
 	wwCellImageSpaceSetBloom( scene, px.data(), w, h, div == 1 ? 4 : 1 );

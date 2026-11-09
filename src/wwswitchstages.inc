@@ -1156,6 +1156,8 @@
 { "WW_PERF3_RED", 4, "src/gl/glcontext.cpp:592 NifSkopeOpenGLContext::Shader::load | read when the shader programs load (in place: reload shaders)" },
 { "WW_PERF_TEST", 2, "src/nifskope.cpp:2710 NifSkope::NifSkope | constructor/startup of a window-lifetime object" },
 { "WW_PHYSICS_TEST", 2, "src/nifskope_ui.cpp:19355 NifSkope::createWindow | createWindow: picks which harness the window runs" },
+{ "WW_PHYSUNITS_BLOOM_K", 1, "- | name passed through a variable: conservative" },
+{ "WW_PHYSUNITS_BLOOM_RED", 1, "src/features/exposure/physunits.cpp wwPhysBloomK | static" },
 { "WW_PHYSUNITS_EMIT", 1, "- | name passed through a variable: conservative" },
 { "WW_PHYSUNITS_EV", 1, "- | name passed through a variable: conservative" },
 { "WW_PHYSUNITS_LAMP_LUX", 1, "- | name passed through a variable: conservative" },

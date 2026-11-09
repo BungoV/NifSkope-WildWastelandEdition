@@ -25,6 +25,7 @@ struct PhysState
 	bool loaded = false;
 	double g = 1.0;
 	float evMetered = 0.0f, evApplied = 0.0f;
+	QElapsedTimer frameMeter;	// the frame's measure last applied a meter (one camera writer)
 };
 
 PhysState & ps()
@@ -118,16 +119,44 @@ float wwPhysLighK( float radius )
 	return std::max( lux, 0.0f ) / ( wwphys::kPi * wwlp::vanillaFlux() );
 }
 
-float wwPhysMeter( const float * px, int n )
+namespace {
+bool meterRed()
 {
 	WW_SWITCH_STATIC( bool, red, wwSwitchEcho( "physunits meter red (arithmetic mean)", wwEnvInt( "WW_PHYSUNITS_METER_RED" ) == 1 ) );
-	if ( red || !wwPhysSkyOn() || !px || n <= 0 )
+	return red;
+}
+}	// namespace
+
+void wwPhysNoteFrameMeter()
+{
+	ps().frameMeter.start();
+}
+
+bool wwPhysFrameMeterFresh()
+{
+	const PhysState & s = ps();
+	return !meterRed() && wwPhysSkyOn() && s.frameMeter.isValid() && s.frameMeter.elapsed() < 1000;
+}
+
+float wwPhysBloomK()
+{
+	WW_SWITCH_STATIC( bool, red, wwSwitchEcho( "physunits bloom red (additive FO4CS bloom)", wwEnvInt( "WW_PHYSUNITS_BLOOM_RED" ) == 1 ) );
+	if ( red || !wwPhysOn() )
+		return -1.0f;
+	float k = wwphys::kGlareK;
+	pinnedFloat( "WW_PHYSUNITS_BLOOM_K", k );
+	return k > 0.0f ? std::min( k, 1.0f ) : -1.0f;
+}
+
+float wwPhysMeter( const float * px, int n, const unsigned char * stencil )
+{
+	if ( meterRed() || !wwPhysSkyOn() || !px || n <= 0 )
 		return -1.0f;
 	std::vector<std::pair<float, float>> t;	// (log2 luminance, cover)
 	t.reserve( size_t( n ) );
 	double cover = 0.0;
 	for ( int i = 0; i < n; i++ ) {
-		const float a = px[size_t( i ) * 4 + 3];
+		const float a = stencil ? ( ( stencil[i] & 1 ) != 0 ? 1.0f : 0.0f ) : px[size_t( i ) * 4 + 3];	// the pass: its stencil's cover
 		if ( !( a > 0.0f ) )
 			continue;
 		const float l = 0.2125f * px[size_t( i ) * 4] + 0.7154f * px[size_t( i ) * 4 + 1] + 0.0721f * px[size_t( i ) * 4 + 2];

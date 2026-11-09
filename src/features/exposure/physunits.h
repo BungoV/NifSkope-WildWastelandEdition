@@ -16,6 +16,8 @@ constexpr float kLumenPerFade = 637.0f;	//!< the .nifx SPEC's anchor: a 637 lm w
 //! a placed lamp's authored radius is where its light falls to this illuminance (inverse square): Phi = fade 4 pi r^2 E.
 //! 5 lux puts an 800 lm bulb at 3.6 m (250 units) and a 15 klm sodium street lamp at 15.5 m (1080 units); RESEARCH.md
 constexpr float kLampEdgeLux = 5.0f;
+//! the energy-conserving glare's share (Jimenez 2014, Call of Duty: Advanced Warfare: a ~4 % lerp, no threshold)
+constexpr float kGlareK = 0.04f;
 constexpr float kEmitCdm2 = 500.0f;		//!< one emissive unit in cd/m2: the middle of the lit-sign range (CIE 150, ILP)
 constexpr float kDiscCap = 6.0e4f;			//!< the sun disc's cap in cd/m2: the RGBA16F frame's head room (65504)
 constexpr float kPi = 3.14159265f;
@@ -46,7 +48,17 @@ float wwPhysLighK( float radius );
  *  the 2nd and 98th percentile of luminance, weighted by their cover. A bulb or a sign then cannot stop the camera down
  *  for the street it lights. Red WW_PHYSUNITS_METER_RED=1 (and the red ^WW_PHYSUNITS_RED=1) = the arithmetic mean.
  *  px: rgba texels (a = cover), returns < 0 when the meter is off (the caller keeps its own mean). */
-float wwPhysMeter( const float * px, int n );
+float wwPhysMeter( const float * px, int n, const unsigned char * stencil = nullptr );
+/*! One camera writer (RESUME 11-09 b): the frame's measure (cellhdr.cpp isApply) notes each meter it applied; while one
+ *  is fresh (under 1 s) the old measure pass (glview.cpp) stands down, so one meter sets the camera instead of two
+ *  alternating (hold3's 0.88 / 0.13 cd/m2 swing). Red WW_PHYSUNITS_METER_RED=1: fresh is never true (both write). */
+void wwPhysNoteFrameMeter();
+bool wwPhysFrameMeterFresh();
+/*! Energy-conserving glare (RESUME 11-09 b): the FO4CS bloom under the physical units takes no threshold, its chain's
+ *  flat-field gain is divided out, and the composite lerps the frame toward that blur by k (Jimenez 2014, ~4 %), so the
+ *  glare moves light instead of adding it. Pin WW_PHYSUNITS_BLOOM_K=<0..1>; < 0 = off: red ^WW_PHYSUNITS_BLOOM_RED=1
+ *  (the additive FO4CS bloom, threshold 1) and the red ^WW_PHYSUNITS_RED=1. */
+float wwPhysBloomK();
 /*! The physical camera: EV100 = log2(La 100 / 12.5) metered on the mean luminance, the eye's low-light key
  *  (Krawczyk 2005) and the imagespace's middle grey (h[8]) as exposure compensation; exposure = 1 / (1.2 x 2^EV).
  *  Pin WW_PHYSUNITS_EV=<EV100> (a manual camera). h may be null (no compensation from the imagespace). */
