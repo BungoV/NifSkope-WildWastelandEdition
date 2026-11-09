@@ -4391,6 +4391,8 @@ static bool cellBuild( NifModel * nif, const CellSceneSpec & specAsked, CellChun
 	int animObjShapes = 0;
 	int fakeAirShapes = 0;	// lane MUSGI1: the game's fake fog / shaft cards, by model
 	QMap<QString, int> fakeAirModels;
+	int beamShapes = 0;	// MODULES1 part 30: the game's light-beam cards (part 18 draws them), by model
+	QMap<QString, int> beamModels;
 	auto soupLeavesOut = [&]( const Placement & p, bool counted ) -> bool {
 		const EsmLodBase & lb = world.lodBase( p.base );
 		if ( !p.actorKey.isEmpty() ) {   // a placed actor never enters the soup
@@ -5627,6 +5629,10 @@ static bool cellBuild( NifModel * nif, const CellSceneSpec & specAsked, CellChun
 			 * BSShape hides it while our Volumetric Air is on (wwFakeAirHidden) */
 			WW_SWITCH_STATIC( bool, beamRed, wwEnvInt( "WW_CELL_FAKEAIR_BEAM_RED" ) == 1 );	// part 18: light beams draw
 			const bool fakeAir = s.nearFacts.effectShader && !isActor && wwFakeAirModel( model ) && ( beamRed || !wwFakeAirLightBeam( model ) );
+			if ( s.nearFacts.effectShader && !isActor && wwFakeAirModel( model ) && wwFakeAirLightBeam( model ) ) {	// part 30
+				beamShapes++;
+				beamModels[QString( model ).replace( QLatin1Char( '\\' ), QLatin1Char( '/' ) ).section( QLatin1Char( '/' ), -1 )]++;
+			}
 			if ( fakeAir ) {
 				bbOwn += QLatin1String( "|FA" );
 				fakeAirShapes++;
@@ -7469,6 +7475,14 @@ static bool cellBuild( NifModel * nif, const CellSceneSpec & specAsked, CellChun
 		fprintf( stderr, "cell fake air: %d effect shapes of %d models tagged (hidden while our air is on%s)%s%s\n",
 			fakeAirShapes, int( fakeAirModels.size() ), wwFakeAirRed() ? ", red keep: drawn" : "",
 			names.isEmpty() ? "" : ": ", qPrintable( names.join( QStringLiteral( ", " ) ) ) );
+		/* MODULES1 part 30 (bungo 11-09 "the effect is gone"): the gate line for the light-beam cards. "drawn" unless
+		 * the red hides them; a hold row at a lamp fails when it reads 0 shapes or "hidden" without the red */
+		QStringList beams;
+		for ( auto it = beamModels.constBegin(); it != beamModels.constEnd(); ++it )
+			beams << QStringLiteral( "%1 x%2" ).arg( it.key() ).arg( it.value() );
+		fprintf( stderr, "cell fake air beams: %d light-beam shapes of %d models %s%s%s\n", beamShapes, int( beamModels.size() ),
+			wwEnvInt( "WW_CELL_FAKEAIR_BEAM_RED" ) == 1 ? "hidden (red WW_CELL_FAKEAIR_BEAM_RED=1)" : "drawn",
+			beams.isEmpty() ? "" : ": ", qPrintable( beams.join( QStringLiteral( ", " ) ) ) );
 	}
 
 	/* The pick highlight: created once here and moved on every click (src/cellclick.h), since the welded
