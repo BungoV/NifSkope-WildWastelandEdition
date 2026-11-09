@@ -1177,6 +1177,7 @@
 { "WW_PHYSSKY_WINDOW_RED", 0, "src/features/exposure/physunits.cpp windowRed | hand: WW_SWITCH_STATIC, read per call in wwPhysSkyOn (MODULES1 11-09)" },
 { "WW_PHYSUNITS_BLOOM_K", 1, "- | name passed through a variable: conservative" },
 { "WW_PHYSUNITS_BLOOM_RED", 1, "src/features/exposure/physunits.cpp wwPhysBloomK | static" },
+{ "WW_PHYSUNITS_CAMERA_RED", 0, "src/features/exposure/physunits.cpp wwPhysExposure | hand: read per call (MODULES1 G1)" },
 { "WW_PHYSUNITS_EMIT", 1, "- | name passed through a variable: conservative" },
 { "WW_PHYSUNITS_EMIT_RED", 1, "src/features/exposure/physunits.cpp wwPhysEmitScale | static" },
 { "WW_PHYSUNITS_EV", 1, "- | name passed through a variable: conservative" },

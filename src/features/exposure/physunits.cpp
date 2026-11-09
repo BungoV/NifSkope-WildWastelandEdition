@@ -1,6 +1,8 @@
 // lane PHYSUNITS1: real photometric units (physunits.h)
 #include "features/exposure/physunits.h"
+#include "features/exposure/physcamera.h"
 #include "features/lights/lightphys.h"
+#include "cellworldanim.h"
 #include "wwswitch.h"
 
 #include <QByteArray>
@@ -31,6 +33,11 @@ struct PhysState
 	float incEv = 0.0f, dayW = 0.0f;	// MODULES1 item 14: the incident meter's EV100 and its daylight weight (0..1)
 	float luxNormal = -1.0f, luxLevel = -1.0f;
 	bool outdoor = false;		// the cell drawn is an exterior (or a sunlit interior)
+	// MODULES1 G1: the camera's adaptation (EV) and the meter's emitter cap
+	float adaptEv = 0.0f, adaptIncEv = 0.0f, capShare = 0.0f;
+	float logMetered = 0.0f, logApplied = 0.0f;	// the values the last `phys camera` line printed
+	bool adaptValid = false;
+	QElapsedTimer adaptClock;
 };
 
 PhysState & ps()
@@ -203,25 +210,13 @@ float wwPhysMeter( const float * px, int n, const unsigned char * stencil )
 	}
 	if ( t.empty() || !( cover > 0.0 ) )
 		return -1.0f;
-	std::sort( t.begin(), t.end() );
-	const double lo = 0.02 * cover, hi = 0.98 * cover;
-	double run = 0.0, sum = 0.0, wsum = 0.0;
-	float p97 = t.back().first;
-	bool p97Set = false;
-	for ( const auto & [lg, a] : t ) {
-		const double w = std::max( 0.0, std::min( run + a, hi ) - std::max( run, lo ) );	// the cover inside [lo, hi]
-		run += a;
-		sum += w * lg;
-		wsum += w;
-		if ( !p97Set && run >= 0.97 * cover ) {
-			p97 = lg;
-			p97Set = true;
-		}
-	}
-	if ( !( wsum > 0.0 ) )
+	// MODULES1 G1: the meter's core lives in physcamera.h (the emitter cap; red WW_PHYSUNITS_CAMERA_RED=1 = no cap)
+	const wwphys::MeterOut m = wwphys::cameraMeter( t, wwEnvInt( "WW_PHYSUNITS_CAMERA_RED" ) == 1 );
+	if ( m.mean < 0.0f )
 		return -1.0f;
-	ps().hiSpread = std::max( 0.0f, p97 - float( sum / wsum ) );
-	return float( std::exp2( sum / wsum ) );
+	ps().hiSpread = m.hiSpread;
+	ps().capShare = m.capShare;
+	return m.mean;
 }
 
 void wwPhysNoteDaylight( const float sun[3], float mu, const float skyUp[3] )
@@ -252,13 +247,10 @@ void wwPhysNoteOutdoor( bool outdoor )
 float wwPhysExposure( const float * h, float adapted )
 {
 	PhysState & s = ps();
-	const float la = std::max( adapted, 1e-6f );
-	const float ev = std::log2( la * 100.0f / 12.5f );
-	// the eye's key falls in low light (Krawczyk, Myszkowski & Seidel 2005), against daylight (La 4000 cd/m2)
-	auto key = []( float l ) { return 1.03f - 2.0f / ( 2.0f + std::log10( l + 1.0f ) ); };
-	const float ecEye = std::clamp( std::log2( std::max( key( la ), 1e-3f ) / key( 4000.0f ) ), -3.0f, 0.5f );
-	// the imagespace's middle grey: the camera maps the mean to 1 / (1.2 x 8); HNAM's key h[8] as compensation
-	const float ecKey = h ? std::clamp( std::log2( std::max( h[8], 1e-3f ) * 1.2f * 8.0f ), -4.0f, 4.0f ) : 0.0f;
+	/* MODULES1 G1 (bungo 11-09: turning on the spot swung the exposure 6.6 EV; a pinned EV 2.2 "worked, looks much
+	 * better"): the law is physcamera.h's (adaptation floor 1 cd/m2, the guard by day only and bounded, eye-like
+	 * adaptation in time). Red WW_PHYSUNITS_CAMERA_RED=1 (live): the law before, in full. */
+	const bool camRed = wwEnvInt( "WW_PHYSUNITS_CAMERA_RED" ) == 1;
 	float manual = 0.0f;
 	const bool pinned = pinnedFloat( "WW_PHYSUNITS_EV", manual );
 	/* MODULES1 item 14 (bungo 11-09: sunlit walls clip to flat white, the shade reads fine): the mean meter exposes a
@@ -271,24 +263,42 @@ float wwPhysExposure( const float * h, float adapted )
 	 * sun) on the sun + sky illuminance on level ground, and the reflected meter moves it at most 1.5 EV either way;
 	 * the weight rises from 1 to 10 klux (dusk, night and interiors: the reflected meter alone). Red
 	 * WW_PHYSUNITS_INCIDENT_RED=1 (live): the reflected meter alone. */
-	float base = ev - ecEye - ecKey;
-	const float reflected = base;
-	const bool incident = !pinned && s.outdoor && s.dayW > 0.0f && wwEnvInt( "WW_PHYSUNITS_INCIDENT_RED" ) != 1;
-	if ( incident )
-		base += ( std::clamp( base, s.incEv - 1.5f, s.incEv + 1.5f ) - base ) * s.dayW;
-	float guard = 0.0f;
-	if ( wwEnvInt( "WW_PHYSUNITS_HILITE_RED" ) != 1 && s.hiSpread > 0.0f )
-		guard = std::clamp( std::log2( la * std::exp2( s.hiSpread ) / 1.2f ) - base, 0.0f, 2.5f );
-	const float applied = pinned ? manual : std::clamp( base + guard, -6.0f, 18.0f );
-	const float e = 1.0f / ( 1.2f * std::exp2( applied ) );
-	if ( std::fabs( applied - s.evApplied ) > 0.03f || std::fabs( ev - s.evMetered ) > 0.03f ) {	// telemetry on a move
-		std::fprintf( stderr, "phys camera: La %.5g cd/m2 EV100 metered %.2f eye %.2f key %.2f reflected %.2f incident %s%.2f (day %.2f, sun %.0f lux normal, %.0f lux level) hilite %.2f (p97 +%.2f EV) applied %.2f%s exposure %.5g\n",
-			double( adapted ), double( ev ), double( ecEye ), double( ecKey ), double( reflected ), incident ? "" : "OFF ",
-			double( s.incEv ), double( s.dayW ), double( s.luxNormal ), double( s.luxLevel ), double( guard ), double( s.hiSpread ), double( applied ),
-			pinned ? " (PINNED WW_PHYSUNITS_EV)" : "", double( e ) );
+	wwphys::CameraIn in;
+	in.la = adapted;
+	in.hasKey = h != nullptr;
+	in.key = h ? h[8] : 0.18f;
+	in.day = s.outdoor && s.dayW > 0.0f;
+	in.incident = !pinned && in.day && wwEnvInt( "WW_PHYSUNITS_INCIDENT_RED" ) != 1;
+	in.incEv = s.incEv;
+	in.dayW = s.dayW;
+	in.hiSpread = wwEnvInt( "WW_PHYSUNITS_HILITE_RED" ) != 1 ? s.hiSpread : 0.0f;
+	in.red = camRed;
+	const wwphys::CameraOut c = wwphys::cameraTarget( in );
+	const float target = pinned ? manual : c.target;
+	// the adaptation: the camera follows its target like the eye, and steps where a fade would show a load or a set
+	const float dt = s.adaptClock.isValid() ? float( s.adaptClock.nsecsElapsed() ) * 1e-9f : -1.0f;
+	const bool metered = adapted > 0.0f;
+	const bool snap = camRed || pinned || !metered
+		|| wwphys::cameraSnap( s.adaptValid, dt, s.incEv, s.adaptIncEv, wwCellWorldClockMoves() );
+	const float applied = snap ? target : wwphys::cameraAdapt( s.adaptEv, target, dt );
+	if ( metered || pinned ) {
+		s.adaptEv = applied;
+		s.adaptIncEv = s.incEv;
+		s.adaptValid = true;
+		s.adaptClock.start();
 	}
-	s.evMetered = ev;
+	const float e = 1.0f / ( 1.2f * std::exp2( applied ) );
+	s.evMetered = c.ev;
 	s.evApplied = applied;
+	if ( std::fabs( applied - s.logApplied ) > 0.03f || std::fabs( c.ev - s.logMetered ) > 0.03f ) {	// telemetry on a move
+		std::fprintf( stderr, "phys camera: La %.5g cd/m2 EV100 metered %.2f eye %.2f key %.2f reflected %.2f incident %s%.2f (day %.2f, sun %.0f lux normal, %.0f lux level) hilite %.2f (p97 +%.2f EV) applied %.2f%s exposure %.5g target %.2f adapt %s dt %.3f s emitter cap %.1f %% of cover%s\n",
+			double( adapted ), double( c.ev ), double( c.ecEye ), double( c.ecKey ), double( c.reflected ), in.incident ? "" : "OFF ",
+			double( s.incEv ), double( s.dayW ), double( s.luxNormal ), double( s.luxLevel ), double( c.guard ), double( s.hiSpread ), double( applied ),
+			pinned ? " (PINNED WW_PHYSUNITS_EV)" : "", double( e ), double( target ), snap ? "snap" : target > applied ? "closing" : "opening",
+			double( dt ), double( s.capShare * 100.0f ), camRed ? " (RED WW_PHYSUNITS_CAMERA_RED)" : "" );
+		s.logMetered = c.ev;
+		s.logApplied = applied;
+	}
 	return e;
 }
 

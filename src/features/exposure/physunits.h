@@ -51,6 +51,7 @@ float wwPhysLighK( float radius );
 /*! The physical camera's meter (LATE ITEM 11-08): the log average (Reinhard 2002's key) of the measure's texels between
  *  the 2nd and 98th percentile of luminance, weighted by their cover. A bulb or a sign then cannot stop the camera down
  *  for the street it lights. Red WW_PHYSUNITS_METER_RED=1 (and the red ^WW_PHYSUNITS_RED=1) = the arithmetic mean.
+ *  MODULES1 G1: each texel counts at most 3 EV over the cover's median (physcamera.h; red WW_PHYSUNITS_CAMERA_RED=1).
  *  px: rgba texels (a = cover), returns < 0 when the meter is off (the caller keeps its own mean). */
 float wwPhysMeter( const float * px, int n, const unsigned char * stencil = nullptr );
 /*! One camera writer (RESUME 11-09 b): the frame's measure (cellhdr.cpp isApply) notes each meter it applied; while one
@@ -63,9 +64,10 @@ bool wwPhysFrameMeterFresh();
  *  glare moves light instead of adding it. Pin WW_PHYSUNITS_BLOOM_K=<0..1>; < 0 = off: red ^WW_PHYSUNITS_BLOOM_RED=1
  *  (the additive FO4CS bloom, threshold 1) and the red ^WW_PHYSUNITS_RED=1. */
 float wwPhysBloomK();
-/*! The physical camera: EV100 = log2(La 100 / 12.5) metered on the mean luminance, the eye's low-light key
- *  (Krawczyk 2005) and the imagespace's middle grey (h[8]) as exposure compensation; exposure = 1 / (1.2 x 2^EV).
- *  Pin WW_PHYSUNITS_EV=<EV100> (a manual camera). h may be null (no compensation from the imagespace). */
+/*! The physical camera: EV100 = log2(La 100 / 12.5) metered on the mean luminance, an adaptation floor of 1 cd/m2
+ *  and the imagespace's middle grey (h[8]) as exposure compensation, adapted in time like the eye (the law and its
+ *  sources: physcamera.h, MODULES1 G1); exposure = 1 / (1.2 x 2^EV). Red WW_PHYSUNITS_CAMERA_RED=1 (live): the law
+ *  before (Krawczyk 2005 key, instant). Pin WW_PHYSUNITS_EV=<EV100> (a manual camera). h may be null. */
 float wwPhysExposure( const float * h, float adapted );
 /*! MODULES1 item 14: the incident meter's input, the key light (C, cd/m2 = lux / pi), its cos zenith and the sky's
  *  light on an up-facing surface (the DALC's Z+, C); prints the sun's lux on a change */
