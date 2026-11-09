@@ -1319,6 +1319,7 @@ void CellWorkspacePanel::buildUi()
 		look( WwLook::WaterRefl, tr( "Reflections" ) );
 		look( WwLook::WaterGlint, tr( "Sun glare" ) );
 		look( WwLook::WaterOcean, tr( "Ocean waves" ) );
+		look( WwLook::EndlessSea, tr( "Endless sea" ) );	// lane FARSEA1: the sea past the bake, live
 		head( F, "CellWorkspaceFarLod", "", -1, false, QStringList(), tr( "LOD" ) );	// note 21 + 26b: one LOD group
 		kid( "", tr( "Source" ), "CellWorkspaceFarLodType" );
 		kid( "", tr( "Terrain" ), "CellWorkspaceFarGround" );

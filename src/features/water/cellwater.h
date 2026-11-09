@@ -23,6 +23,11 @@ void wwCellWaterShape( const void * nif, int block, const WwWaterRecord & rec, b
 void wwCellWaterForget( const void * nif, int block );
 //! lane LIVESET3: the document's blocks were renumbered (a live set removed or moved some)
 void wwCellWaterRemap( const void * nif, const WwBlockMap & m );
+//! Lane FARSEA1 (endlesssea.h): the registered shape `block` is the endless sea sheet: the bake's box (x0, y0, x1, y1),
+//! the sea level, the rim's distance and the sea body's id in the water lookup
+void wwCellWaterEndless( const void * nif, int block, const float box[4], float seaZ, float reach, quint32 seaId );
+//! Lane FARSEA1: the document's endless sea sheet (-1 none) and what wwCellWaterEndless gave it
+int wwCellWaterEndlessBlock( const void * nif, float box[4], float & seaZ, float & reach, quint32 & seaId );
 //! True when `block` draws as water this frame (the row on, not pinned off, a registered water shape).
 bool wwCellWaterWanted( Scene * scene, int block );
 /*! Lane FARWATER1: `block` is far water whose dry mask cannot apply yet -- the .lodl lookup is still building

@@ -121,6 +121,8 @@ inline const WwPresetRow * wwPresetTable( int * count )
 			"water; live water SSR +96-136 ms (PERFRES-B water)" },
 		{ "CellWorkspaceLook_WW_CELL_WATER_GLINT", '0', "0111", "0000", 'M', false, { 0.40f, 0.75f, 1.00f, 1.30f }, WW_PR_NONE, "water; no ms" },
 		{ "CellWorkspaceLook_WW_CELL_WATER_OCEAN", '0', "0111", "0000", 'M', false, { 0.40f, 0.75f, 1.00f, 1.30f }, WW_PR_NONE, "water; no ms" },
+		{ "CellWorkspaceLook_WW_ENDLESS_SEA", '1', "1111", "1111", 'R', false, WW_PR_NONE, WW_PR_NONE,
+			"FARSEA1: the endless sea past the bake, one draw; ruled on at every preset (bungo 11-09)" },
 		{ "CellWorkspaceFarLod", '0', "1111", "1111", 'R', false, { 0.20f, 0.33f, 0.50f, 0.65f }, WW_PR_NONE,
 			"ruled on at every preset (bungo 11-01); far field cards 0.39 + ring-0 ground 0.82 GPU (PERFRES-C farfield)" },
 		{ "CellWorkspaceFarLodType", '-', "----", "----", '-', false, WW_PR_NONE, WW_PR_NONE, "a source, not a cost step" },

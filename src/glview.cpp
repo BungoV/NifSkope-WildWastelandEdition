@@ -62,6 +62,7 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include "features/far-lod/impostorchunk.h"
 #include "features/far-lod/cellfarlod.h"		// the far field's planes, sway and cards
 #include "features/water/cellwater.h"	// far water held until its dry mask's lookup lands
+#include "features/water/endlesssea.h"	// lane FARSEA1: the endless sea follows the camera; the far plane reaches its rim
 #include "features/far-ground/landlodspec.h"		// the land-LOD blend centre's glide
 #include "cellmodpick.h"	// "Mods differ from the far LOD bake" over the view
 #include "features/far-lod/impostorpreviewtest.h"
@@ -3238,6 +3239,7 @@ void GLView::glProjection( [[maybe_unused]] int x, [[maybe_unused]] int y )
 		if ( const float farReach = wwCellFarLodReach( scene ); farReach > 0.0f ) {
 			const Vector3 o = scene->view * wwCellFarLodOrigin( scene );	// the reach is measured from the far centre
 			fr = std::max< GLdouble >( fr, GLdouble( o.length() ) + GLdouble( farReach ) * 1.05 );
+			fr = std::max< GLdouble >( fr, GLdouble( wwEndlessSeaReach( scene ) ) * 1.05 );	// lane FARSEA1: the sea's rim
 			nr = wwCellFarLodNear( nr );
 			fr = std::max< GLdouble >( fr, nr + scale() );
 			wwCellFarLodPlanes( nr, fr );	// the near gate reads these
@@ -3669,6 +3671,7 @@ void GLView::paintGL()
 	applyWorkspaceSkeleton( viewTrans );
 	wwDoorLiveTick( scene, this );	// the live door's pose (a no-op unless WW_CELL_DOOR_ANIM)
 	wwCellWorldAnimFrame( scene, time );	// a cell's world clock (a no-op unless World animation)
+	wwEndlessSeaFollow( scene, viewTrans );	// lane FARSEA1: the endless sea to the camera's step (a no-op without one)
 	scene->transform( viewTrans, time );
 	wwCellCamDump( scene );	// the eye, with or without the Cell lights row (a no-op when unset)
 

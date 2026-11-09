@@ -29,6 +29,7 @@ BSD License - see nifskope.h
 #define FARLOD1_HAVE_CULL 1
 #endif
 #include "features/water/cellwater.h"
+#include "features/water/endlesssea.h"	// lane FARSEA1: the endless sea past the bake
 #include "features/near/cellbindless.h"	// lane BINDLESS2FIX: the sway reaches the bindless twins
 #include "features/far-lod/cellfarinst.h"	// lane FARLOOK1101: and the far splat twins
 #include "features/far-ground/cellfarground.h"	// lane FARDRAW1: the far ring 0's live ground
@@ -893,6 +894,10 @@ QString cellFarLodAppend( NifModel * nif, const QModelIndex & iRoot, const EsmWo
 				"%5 WATR forms: %6 their own record, %7 the worldspace default, %8 none" )
 				.arg( wQuads ).arg( wShapes ).arg( wRegistered ).arg( wBodies.size() )
 				.arg( recOk.size() ).arg( own ).arg( viaDef ).arg( none ) );
+			if ( haveDef )	// lane FARSEA1: the endless sea past the bake, at the worldspace's sea level
+				say( wwEndlessSeaAppend( nif, iFar, def, world.defaultWaterHeight(), lodlPath ) );
+			else
+				say( QStringLiteral( "endless sea: NONE (the worldspace has no default water)" ) );
 		}
 	}
 
