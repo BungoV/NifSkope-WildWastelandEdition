@@ -8,6 +8,7 @@ BSD License - see nifskope.h
 #include "features/shared/cellpasstime.h"	// lane PERF2: the draws' CPU setup time
 #include "gl/celluniprof.h"	// lane PERFFIX1: WW_CELL_UNI_PROF
 #include "wwswitch.h"	// lane TESTDRIVER1: the WW_* switch store
+#include "cellworldanim.h"	// MODULES1: the cell world clock (nothing acts paused; red WW_CELL_CLOCK_RED=harness)
 
 #include "features/weather/esmweather.h"
 #include "features/air/cellvolair.h"	// lane VOLAIR1
@@ -436,7 +437,7 @@ double transSeconds( LdState & s )
 		: std::max( 0.0, wwEnvStr( "WW_WEATHER_BLEND_TIME" ).toDouble() ) );
 	if ( pin >= 0.0 )
 		return pin;
-	if ( !wwWorldClockLive() )
+	if ( !wwCellClockLive() )
 		return -1.0;
 	const qint64 ms = s.transClock.elapsed();
 	if ( s.transMs >= 0 && ms - s.transMs < 15 )	// about one step a frame: every memo keyed on gen rebuilds per step
@@ -1876,7 +1877,7 @@ double wwLookdevCloudSeconds()
 	LdState & s = st();
 	if ( s.pinCloudTime >= 0.0 )
 		return s.pinCloudTime;
-	if ( !wwWorldClockLive() )
+	if ( !wwCellClockLive() )
 		return 0.0;
 	return double( s.cloudClock.elapsed() ) / 1000.0;
 }

@@ -9,6 +9,7 @@ BSD License - see nifskope.h
 #include "gl/glproperty.h"
 #include "gl/scenelighting.h"
 #include "gl/lookdevstage.h"
+#include "cellworldanim.h"	// MODULES1: the cell world clock (nothing acts paused; red WW_CELL_CLOCK_RED=harness)
 #include "features/air/cellvolair.h"	// lane VOLAIR1
 #include "features/shared/cellpasstime.h"	// lane PERF1
 #include "features/post/gametaa.h"
@@ -623,8 +624,8 @@ void SceneWindow::syncCloudTimer()
 {
 	if ( !m_cloudTimer )
 		return;
-	// a harness run pins the cloud clock (WW_LOOKDEV_CLOUDTIME, else 0 s): nothing to animate
-	const bool run = modeBox && modeBox->currentIndex() == 2 && wwLookdevClouds() && wwWorldClockLive();
+	// red WW_CELL_CLOCK_RED=harness: a harness pins the cloud clock (WW_LOOKDEV_CLOUDTIME, else 0 s), nothing animates
+	const bool run = modeBox && modeBox->currentIndex() == 2 && wwLookdevClouds() && wwCellClockLive();
 	if ( run && !m_cloudTimer->isActive() )
 		m_cloudTimer->start();
 	else if ( !run && m_cloudTimer->isActive() )
@@ -753,5 +754,5 @@ QWidget * wwSceneWindowEnsure( QObject * owner )
 
 bool wwSceneCloudsAnimate()
 {
-	return wwSceneMode() == WwSceneLookdev && wwLookdevClouds() && wwWorldClockLive();
+	return wwSceneMode() == WwSceneLookdev && wwLookdevClouds() && wwCellClockLive();
 }
