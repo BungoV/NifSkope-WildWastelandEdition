@@ -1339,6 +1339,33 @@ void wwCellHdrEnd( Scene * scene )
 			df.write( reinterpret_cast<const char *>( proj ), sizeof( proj ) );
 			df.write( reinterpret_cast<const char *>( dz.data() ), qint64( dz.size() * sizeof( float ) ) );
 		}
+		/* MODULES1 part 28 (bungo 11-08: "looks like a depth buffer issue"): and <file>.fxdepth, the depth the Soft
+		 * effects and the volumetric cards read (Scene::fxDepthTexId, this frame's last grab), in the .depth layout, to
+		 * set against it: a mesh missing from it is a place the smoke cuts through with no fade */
+		if ( scene->fxDepthTexId && scene->fxDepthFbo && scene->fxDepthTexW > 0 && scene->fxDepthTexH > 0 ) {
+			const int32_t fwh[2] = { scene->fxDepthTexW, scene->fxDepthTexH };
+			std::vector<float> fz( size_t( fwh[0] ) * size_t( fwh[1] ) );
+			fn->glBindFramebuffer( GL_READ_FRAMEBUFFER, scene->fxDepthFbo );
+			fn->glReadPixels( 0, 0, fwh[0], fwh[1], GL_DEPTH_COMPONENT, GL_FLOAT, fz.data() );
+			fn->glBindFramebuffer( GL_READ_FRAMEBUFFER, GLuint( s.prevRead ) );
+			QFile ff( QString::fromLocal8Bit( hdrDump ) + QStringLiteral( ".fxdepth" ) );
+			if ( ff.open( QIODevice::WriteOnly ) ) {
+				const auto & pm = r->globalUniforms->projectionMatrix;
+				float proj[16];
+				for ( int c = 0; c < 4; c++ )
+					for ( int k = 0; k < 4; k++ )
+						proj[c * 4 + k] = pm[c][k];
+				ff.write( reinterpret_cast<const char *>( fwh ), sizeof( fwh ) );
+				ff.write( reinterpret_cast<const char *>( proj ), sizeof( proj ) );
+				ff.write( reinterpret_cast<const char *>( fz.data() ), qint64( fz.size() * sizeof( float ) ) );
+			}
+			static int saidState = -9;
+			if ( saidState != scene->fxDepthState ) {
+				saidState = scene->fxDepthState;
+				qInfo().noquote() << QStringLiteral( "cell hdr: fx depth dump %1x%2 state %3 pass %4/%5" ).arg( fwh[0] )
+					.arg( fwh[1] ).arg( scene->fxDepthState ).arg( scene->fxDepthPass ).arg( Scene::fxDepthPassNow );
+			}
+		}
 		while ( fn->glGetError() != GL_NO_ERROR ) {
 		}
 	}
