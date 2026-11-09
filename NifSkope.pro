@@ -267,6 +267,7 @@ HEADERS += \
 	src/features/near/cellshadowocc.h \
 	src/features/near/cellumbra.h \
 	src/features/water/cellwater.h \
+	src/features/water/endlesssea.h \
 	src/features/water/cellocean.h \
 	src/features/water/oceanspectrum.h \
 	src/features/gi/cellwatergi.h \
@@ -628,6 +629,7 @@ SOURCES += \
 	src/features/near/cellumbra.cpp \
 	src/features/near/cellumbradepth.cpp \
 	src/features/water/cellwater.cpp \
+	src/features/water/endlesssea.cpp \
 	src/features/water/esmwater.cpp \
 	src/features/water/cellocean.cpp \
 	src/features/water/cellwaterinfo.cpp \

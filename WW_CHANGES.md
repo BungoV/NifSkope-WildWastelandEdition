@@ -1,3 +1,19 @@
+## FARSEA1 (2026-11-09): the endless sea to the horizon
+- Past the baked map the far water used to stop and the void showed. One more water shape now hangs under the far LOD
+  node (src/features/water/endlesssea.cpp): a camera-centred disc of 128-segment rings, 256 u near and coarser by a
+  constant ratio out to the far rim (`WW_ENDLESS_SEA_FAR`, 4194304 u = 59.9 km), at the worldspace's sea level (the
+  .lodl's largest sea body, else the WRLD default water height). It follows the camera in 2048 u steps; the waves are
+  world-anchored, so nothing swims. No T-junctions: crack-free flat, curved or tessellated.
+- Same water programs and inputs as the baked ocean. The baked water stays in charge: the sheet discards inside the
+  bake's box; outside it the water lookup answers the open sea (sea body, no shore, deep, no flow). Seam band at the box
+  edge (`WW_ENDLESS_SEA_SEAM`, 98304 u = 1.4 km): the baked sea's shore distance and depth fade to open-sea values and
+  its flow to 0.
+- Ships ON: Settings, Water, "Endless sea" (`WW_ENDLESS_SEA`, live). Red `WW_ENDLESS_SEA_RED=off` = the old picture
+  (live). `WW_ENDLESS_SEA_CURVE=1` drops the rim by the earth's curvature (read at cell build). The far plane reaches the
+  rim while the sheet draws; the underwater fallback covers the camera below sea level past the box.
+- Telemetry: one `endless sea:` line at far-LOD build (rings, vertices, far sheet distance, seam band, coverage-mask
+  cells inside the bake's box, sea body and level, build ms).
+
 ## MODULES1 part 20 (2026-11-06): the GI sky ships absolute with a physical ground term, every ray card draws
 - The GI volume's sky ships as the drawn sky's own colour and level (`WW_CELL_RTDDGI_SKY` unset or empty = absolute).
   Reds: `WW_CELL_RTDDGI_SKY=level` (the old default), `=dalc` (the weather's DALC as it is), `=physical`.

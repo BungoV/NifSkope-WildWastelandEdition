@@ -212,6 +212,9 @@ void main()
 	vec3 P = cellWorldPos( posView );
 	if ( waterFarMask && wwFarWaterDry( P.xy ) )
 		discard;
+	// lane FARSEA1: the endless sheet leaves the bake's box to the baked water and the terrain (water_info.glsl)
+	if ( waterSeam.z > 0.0 && all( greaterThan( P.xy, waterSeamBox.xy ) ) && all( lessThan( P.xy, waterSeamBox.zw ) ) )
+		discard;
 	vec3 eye = cellWorldPos( vec3( 0.0 ) );
 	vec3 ray = P - eye;
 	float dist = length( ray );
