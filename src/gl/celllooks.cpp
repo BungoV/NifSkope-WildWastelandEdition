@@ -35,7 +35,7 @@ const LookRow kRows[] = {
 	{ "Actors outdoors", "WW/CellActorsOutdoors2", true, "WW/CellActorsOutdoors" },
 	{ "Weapon mod parts", "WW/CellWeaponParts2", true, "WW/CellWeaponParts" },
 	{ "World animation", "WW/CellWorldAnim2", true, "WW/CellWorldAnim" },
-	{ "Animated objects", "WW/CellAnimObjects" },
+	{ "Animated objects", "WW/CellAnimObjects2", true, "WW/CellAnimObjects" },	// PARTFX1: the game animates them
 	{ "Wide exposure range", "WW/CellExposureWide" },
 	{ "Probe sharing", "WW/CellGiShare" },
 	{ "Decal distance fade", "WW/CellDecalFade2", true, "WW/CellDecalFade" },	// DEFAULTS1

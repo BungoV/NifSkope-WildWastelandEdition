@@ -50,6 +50,7 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include "features/particles/fxparity.h"	// lane FXPARITY1: Particle Game Rules
 #include "gl/controllers.h"
 #include "gl/lookdevstage.h"	// lane SUNCELL1: the weather fog
+#include "cellworldanim.h"	// lane PARTFX1: the per-cell particle census
 #include "gl/glproperty.h"
 #include "gl/glscene.h"
 #include "gl/renderer.h"
@@ -340,6 +341,8 @@ void Particles::drawShapes( NodeList * secondPass )
 		: cellPfx ? "particles_cell.prog" : "particles.prog" );
 	if ( !prog )
 		return;
+	if ( !scene->selecting )
+		wwCellAnimObjNoteDraw( static_cast<const Node *>( this ) );	// lane PARTFX1 (a no-op unless the census listens)
 
 	prog->uni4m( "modelViewMatrix", viewTrans().toMatrix4() );
 
