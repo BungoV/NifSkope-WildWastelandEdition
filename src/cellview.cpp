@@ -1880,19 +1880,26 @@ static QString cellBakeFarSoup( const CellSceneSpec & spec, const QString & data
 		.arg( t.elapsed() ).arg( r.normalQuads ? QStringLiteral( ", ground vertex normals %1 quads" ).arg( r.normalQuads ) : QString() );
 }
 
-/* the Particles row (WW/CellParticles, env pin WW_CELL_PARTICLES, ships OFF). Read when a cell
- * opens: the row reopens the cell. */
+/* the Particles row (WW/CellParticles2, env pin WW_CELL_PARTICLES). Read when a cell opens: the row reopens the cell.
+ * lane PARTFX1: ships ON (the game always runs its placed particle systems; a new key so an old OFF does not stick);
+ * WW_DEFAULTS1_RED=1 = the old row (WW/CellParticles, default off). */
+static bool wwCellParticlesOldRow()
+{
+	return wwEnv( "WW_DEFAULTS1_RED" ).trimmed() == "1";
+}
+
 bool wwCellParticlesOn()
 {
 	const QByteArray pin = wwEnv( "WW_CELL_PARTICLES" ).trimmed();
 	if ( !pin.isEmpty() )
 		return pin != "0";
-	return QSettings().value( QStringLiteral( "WW/CellParticles" ), false ).toBool();
+	return wwCellParticlesOldRow() ? QSettings().value( QStringLiteral( "WW/CellParticles" ), false ).toBool()
+		: QSettings().value( QStringLiteral( "WW/CellParticles2" ), true ).toBool();
 }
 
 void wwCellParticlesSetOn( bool on )
 {
-	QSettings().setValue( QStringLiteral( "WW/CellParticles" ), on );
+	QSettings().setValue( wwCellParticlesOldRow() ? QStringLiteral( "WW/CellParticles" ) : QStringLiteral( "WW/CellParticles2" ), on );
 }
 
 // Copy / Paste Branch's per-block strings (src/spells/blocks.cpp)
@@ -4452,6 +4459,9 @@ static bool cellBuild( NifModel * nif, const CellSceneSpec & specAsked, CellChun
 	 * keys): WW_CELL_ANIMOBJ_RED=origin (the animated objects and the door), WW_CELL_PFX_RED=origin (the particles). */
 	WW_SWITCH_STATIC( bool, copyRedOrigin, wwEnvStr( "WW_CELL_ANIMOBJ_RED" ).trimmed() == QLatin1String( "origin" ) );
 	WW_SWITCH_STATIC( bool, pfxRedOrigin, wwEnvStr( "WW_CELL_PFX_RED" ).trimmed() == QLatin1String( "origin" ) );
+	/* lane PARTFX1: a placed model's particle systems are found from the model itself (read once when no parse saw it:
+	 * a precombined ref's model never loads). Red WW_CELL_PFX_FIND_RED=noted: only the models parsed this process. */
+	WW_SWITCH_STATIC( bool, pfxFindRed, wwEnvStr( "WW_CELL_PFX_FIND_RED" ).trimmed() == QLatin1String( "noted" ) );
 	const Vector3 copyShift = copyRedOrigin ? origin : Vector3( 0.0f, 0.0f, 0.0f );
 	const Vector3 pfxShift = pfxRedOrigin ? origin : Vector3( 0.0f, 0.0f, 0.0f );
 	QSet<quint32> animObjRefs, animObjCapped;
@@ -7210,7 +7220,7 @@ static bool cellBuild( NifModel * nif, const CellSceneSpec & specAsked, CellChun
 			if ( !p.actorKey.isEmpty() || p.disabled )
 				continue;
 			const QString model = world.lodBase( p.base ).model;
-			if ( !model.isEmpty() && lodgenModelHasParticles( model ) )
+			if ( !model.isEmpty() && ( pfxFindRed ? lodgenModelHasParticles( model ) : lodgenModelHasParticlesRead( dataRoot, model ) ) )
 				chunk->pfx.push_back( { model, p.pos - pfxShift, p.rot, p.scale } );	// lane FIREFX1: the world's frame
 		}
 		chunk->ok = true;
@@ -7306,6 +7316,7 @@ static bool cellBuild( NifModel * nif, const CellSceneSpec & specAsked, CellChun
 			QHash<QString, std::shared_ptr<NifModel>> pfxSrc;	// one parse a model; null = unusable
 			QPersistentModelIndex iPfx;
 			int pfxCopies = 0, pfxSystems = 0, pfxModels = 0, pfxRefused = 0, pfxCapped = 0;
+			int pfxRead = 0, pfxRefs = 0, pfxPcmbRefs = 0;	// lane PARTFX1: models read for the question; refs with systems
 			int pfxLitSystems = 0, pfxLitModels = 0, pfxLitCapped = 0;
 			int pfxXemiSystems = 0, pfxXemiNoFlag = 0, pfxXemiLit = 0;	// lane LIGHTS3 (XEMI-PARTICLES)
 			QHash<QString, bool> pfxBgemLit;	// a BGEM path (lower case) -> lit
@@ -7314,8 +7325,15 @@ static bool cellBuild( NifModel * nif, const CellSceneSpec & specAsked, CellChun
 				if ( !p.actorKey.isEmpty() || p.disabled )
 					continue;
 				const QString model = world.lodBase( p.base ).model;
-				if ( model.isEmpty() || !lodgenModelHasParticles( model ) )
+				bool readNow = false;
+				if ( model.isEmpty() || !( pfxFindRed ? lodgenModelHasParticles( model )
+						: lodgenModelHasParticlesRead( dataRoot, model, &readNow ) ) ) {
+					pfxRead += readNow ? 1 : 0;
 					continue;
+				}
+				pfxRead += readNow ? 1 : 0;
+				pfxRefs++;
+				pfxPcmbRefs += p.pcmbMesh >= 0 ? 1 : 0;
 				if ( pfxCopies >= cap ) {
 					pfxCapped++;
 					continue;
@@ -7437,6 +7455,11 @@ static bool cellBuild( NifModel * nif, const CellSceneSpec & specAsked, CellChun
 			fprintf( stderr, "cell particles: %d systems in %d copies of %d models (%d refused%s%s, %d past the cap of %d)\n",
 				pfxSystems, pfxCopies, pfxModels, pfxRefused, pfxWhy.isEmpty() ? "" : ": last ",
 				qPrintable( pfxWhy ), pfxCapped, cap );
+			// lane PARTFX1: which question found them (red WW_CELL_PFX_FIND_RED=noted: only models parsed this process)
+			fprintf( stderr, "cell particles found: %d placed refs carry systems (%d of them drawn by a precombined mesh), "
+				"%d models read for the question (%s)\n", pfxRefs, pfxPcmbRefs, pfxRead,
+				pfxFindRed ? "red: parsed models only" : "every placed model" );
+			wwCellPfxFoundSet( nif, pfxSystems, pfxCopies, pfxModels );
 			fprintf( stderr, "cell particles lit: %d systems of %d placed models registered with their placed lights%s (%d past the lit cap)\n",
 				pfxLitSystems, pfxLitModels, fxLitOn ? ( spec.interior ? " (interior)" : " (exterior: the sun is the base)" )
 					: " (off: overlay)", pfxLitCapped );

@@ -464,6 +464,14 @@ class PSysSimController final : public Controller
 	};
 	QVector<BombMod> bombs;
 
+	//! lane PARTFX1: BSWindModifier, the weather's wind x Strength on every live particle (ORDER_FORCE, as gravity)
+	struct WindMod
+	{
+		QString name;
+		float strength = 0.25f;
+	};
+	QVector<WindMod> winds;
+
 	/*! BSPSysInheritVelocityModifier — new particles are thrown by whatever is
 	 *  carrying the emitter.
 	 *

@@ -6,6 +6,7 @@ BSD License - see nifskope.h
 
 #include "cellfarlod.h"
 #include "wwswitch.h"	// lane TESTDRIVER1: the WW_* switch store
+#include "cellworldanim.h"	// MODULES1: the cell world clock (live in test windows too)
 
 #include "features/far-ground/btdterrain.h"
 #include "cellfarstackrule.h"	// lane CELLUNI5: the bake stack's refusals
@@ -1657,7 +1658,7 @@ void wwCellFarLodFrame( Scene * scene )
 	swayMoving = amp > 0.0f && !pinned && !stillRed;
 	static QString said;
 	const QString line = QStringLiteral( "far lod: sway amp %1 on %2 programs: %3; repaints itself %4" ).arg( double( amp ), 0, 'f', 1 )
-		.arg( set.size() ).arg( set.join( QLatin1Char( ' ' ) ) ).arg( swayMoving ? ( !wwWorldClockLive() ? "1 (held: harness)" : "1" ) : "0" );
+		.arg( set.size() ).arg( set.join( QLatin1Char( ' ' ) ) ).arg( swayMoving ? ( !wwCellClockLive() ? "1 (held: harness)" : "1" ) : "0" );
 	if ( line != said ) {
 		said = line;
 		qInfo().noquote() << line;
@@ -1666,7 +1667,7 @@ void wwCellFarLodFrame( Scene * scene )
 
 bool wwCellFarLodWantsRepaint()
 {
-	const bool want = swayMoving && wwWorldClockLive();
+	const bool want = swayMoving && wwCellClockLive();
 	swayMoving = false;
 	return want;
 }

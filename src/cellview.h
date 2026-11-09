@@ -145,7 +145,7 @@ int cellLiveProbesShow( NifModel * nif, bool show, QString * why );
  *  against the build's); 0 nothing moved, 1 rebuilt, 2 a reopen is needed (`why` says why) */
 int cellLiveRebuild( NifModel * nif, QString * why );
 
-/*! The Particles row (WW/CellParticles, env WW_CELL_PARTICLES, default off): copy a placed
+/*! The Particles row (WW/CellParticles2, env WW_CELL_PARTICLES, default on since PARTFX1): copy a placed
  *  model's particle systems into the cell when it opens. */
 bool wwCellParticlesOn();
 void wwCellParticlesSetOn( bool on );

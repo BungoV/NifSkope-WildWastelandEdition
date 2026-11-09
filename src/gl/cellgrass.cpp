@@ -7,6 +7,7 @@
 #include "gl/lookdevstage.h"
 #include "gl/renderer.h"
 #include "harnesswindow.h"
+#include "cellworldanim.h"	// MODULES1: the cell world clock (live in test windows too)
 #include "cellmodsource.h"	// lane PERFFIX4: the grass fade from the game's inis
 
 #include <QDebug>
@@ -102,7 +103,7 @@ GrassState & gs()
 			s.timePinned = true;
 			s.tCur = t;
 			s.tPrev = t - 1.0 / 60.0;
-		} else if ( !wwWorldClockLive() ) {	// a harness never reads the wall clock: t = 0, run to run identical
+		} else if ( !wwCellClockLive() ) {	// red WW_CELL_CLOCK_RED=harness: t = 0, run to run identical
 			s.timePinned = true;
 			s.tCur = 0.0;
 			s.tPrev = -1.0 / 60.0;
@@ -855,7 +856,7 @@ void wwCellGrassFrameEnd()
 bool wwCellGrassWantsRepaint()
 {
 	GrassState & s = gs();
-	const bool want = s.windDrawn && !s.timePinned && wwWorldClockLive();
+	const bool want = s.windDrawn && !s.timePinned && wwCellClockLive();
 	s.windDrawn = false;
 	return want;
 }

@@ -34,6 +34,7 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include "wwswitch.h"	// lane TESTDRIVER1: the WW_* switch store
 #include "features/particles/fxparity.h"	// lane FXPARITY1
 #include "features/particles/psyslive.h"	// lane GLARESB2
+#include "cellworldanim.h"	// lane PARTFX1: the weather's wind
 
 #include "gl/glshape.h"
 #include "features/particles/glparticles.h"
@@ -938,6 +939,7 @@ bool PSysSimController::update( const NifModel * nif, const QModelIndex & index 
 	gravities.clear();
 	drags.clear();
 	bombs.clear();
+	winds.clear();
 	inherits.clear();
 	hasColorMod = false;
 	hasColorGradient = false;
@@ -1211,6 +1213,8 @@ bool PSysSimController::update( const NifModel * nif, const QModelIndex & index 
 			b.axisSetup = b.axis;
 			b.originSetup = b.origin;
 			bombs.append( b );
+		} else if ( mtype == QLatin1String( "BSWindModifier" ) ) {	// lane PARTFX1: had no effect before
+			winds.append( { modActive.last().name, nif->get<float>( iMod, "Strength" ) } );
 		} else if ( mtype == QLatin1String( "BSPSysSimpleColorModifier" ) ) {
 			hasColorMod = true;
 			colorName = modActive.last().name;
@@ -1880,6 +1884,20 @@ void PSysSimController::updateTime( float time )
 		}
 	}
 	const bool gravityOn = gPlanar.length() > 0.0f || !gSpherical.isEmpty() || !gGame.isEmpty() || !bGame.isEmpty();
+	/* lane PARTFX1: the game's wind modifier adds the weather's wind (world, cellworldanim wwCellParticleWind) x Strength
+	 * x the step to every live particle's velocity; brought into the system's frame here. In a cell document only. */
+	Vector3 windLocal;
+	if ( !winds.isEmpty() && target->scene ) {
+		float w[3];
+		if ( wwCellParticleWind( target->scene->nifModel, w ) ) {
+			float k = 0.0f;
+			for ( const WindMod & m : winds )
+				if ( modIsActive( m.name ) )
+					k += m.strength;
+			windLocal = ( psysFromWorld * Vector3( w[0], w[1], w[2] ) ) * ( k / psysScale );
+		}
+	}
+	const bool windOn = windLocal.length() > 0.0f;
 
 	/* Drag, per axis.
 	 *
@@ -1979,6 +1997,8 @@ void PSysSimController::updateTime( float time )
 				p.vel += Vector3( o[0], o[1], o[2] );
 			}
 		}
+		if ( windOn )
+			p.vel += windLocal * dt;
 		for ( const auto & d : dragAxes )
 			p.vel -= d.first * ( Vector3::dotproduct( p.vel, d.first ) * d.second );
 		for ( const RangedDrag & d : dragRanged ) {	// lane FXPARITY2

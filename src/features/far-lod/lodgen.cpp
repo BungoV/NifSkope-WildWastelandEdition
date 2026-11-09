@@ -2195,6 +2195,34 @@ static void lodgenNoteParticleModel( const QString & model )
 	QMutexLocker lock( &particleModelMutex );
 	particleModels.insert( lodgenParticleKey( model ) );
 }
+/* lane PARTFX1: every model's answer, parsed or read. A precombined reference's model is never parsed (its mesh draws
+ * it) and the game still runs its particle systems, so a model no parse saw is read once and its bytes asked. */
+static QHash<QString, bool> particleAnswers;
+static void lodgenNoteParticleAnswer( const QString & model, bool has )
+{
+	QMutexLocker lock( &particleModelMutex );
+	particleAnswers.insert( lodgenParticleKey( model ), has );
+}
+bool lodgenModelHasParticlesRead( const QString & dataRoot, const QString & model, bool * read )
+{
+	const QString k = lodgenParticleKey( model );
+	{
+		QMutexLocker lock( &particleModelMutex );
+		if ( particleModels.contains( k ) )
+			return true;
+		auto it = particleAnswers.constFind( k );
+		if ( it != particleAnswers.constEnd() )
+			return it.value();
+	}
+	// a block type name in the header (NiParticleSystem, BSStripParticleSystem); a node named so only costs a parse
+	QByteArray bytes;
+	const bool has = lodgenReadModelBytes( dataRoot, model, bytes ) && bytes.contains( "ParticleSystem" );
+	if ( read )
+		*read = true;
+	QMutexLocker lock( &particleModelMutex );
+	particleAnswers.insert( k, has );
+	return has;
+}
 // the models that move on their own (a looping sequence, or a controller no sequence drives)
 static QSet<QString> movingModels;
 bool lodgenModelMoves( const QString & model )
@@ -2368,6 +2396,8 @@ const QVector<LodSrcShape> & lodgenLoadModel( const QString & dataRoot,
 		}
 	if ( modelParticles )
 		lodgenNoteParticleModel( meshPath );
+	if ( loaded )
+		lodgenNoteParticleAnswer( meshPath, modelParticles );
 	if ( modelMoves )
 		lodgenNoteMovingModel( meshPath );
 	if ( loaded ) {

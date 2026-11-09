@@ -19,6 +19,7 @@ BSD License - see nifskope.h
 #include "features/clouds/cloudmap.h"	// lane CLOUD6e: the rain fog follows the Low band's coverage
 #include "features/weather/rainfogmath.h"	// lane CLOUD6e: the rain fog's law
 #include "gl/cellgrass.h"	// lane FOGWIND1: the game's wind angle, shared with the grass
+#include "cellworldanim.h"	// MODULES1: the cell world clock (live in test windows too)
 #include "features/exposure/cellhdr.h"
 #include "gl/celllights.h"
 #include "gl/celluniform.h"	// lane CELLUNI3: the units bound without a unit ask
@@ -321,7 +322,7 @@ VaDrift & vd()
 		if ( ok ) {	// a fixed clock (the shots' frames): the drift integrated from 0 to t in fixed steps
 			d.timePinned = true;
 			d.tPin = std::max( t, 0.0 );
-		} else if ( !wwWorldClockLive() ) {	// a harness never reads the wall clock
+		} else if ( !wwCellClockLive() ) {	// red WW_CELL_CLOCK_RED=harness: the drift holds
 			d.timePinned = true;
 		}
 	}
@@ -1252,7 +1253,7 @@ void wwVolAirSetDriftOn( bool on )
 bool wwVolAirWantsRepaint()
 {
 	VaDrift & d = vd();
-	const bool want = d.moving && vs().on && d.on && !d.timePinned && wwWorldClockLive();
+	const bool want = d.moving && vs().on && d.on && !d.timePinned && wwCellClockLive();
 	d.moving = false;
 	return want;
 }
