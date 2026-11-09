@@ -14,6 +14,8 @@
 #define RESTIRGI_BIT_LINEAR 256     // kRedLinear (GPU only: row-order invocations, the 8 x 8 tiles' before)
 #define RESTIRGI_BIT_HALF 512       // kTraceHalf (the checkerboard trace)
 #define RESTIRGI_BIT_QUARTER 1024   // kTraceQuarter (one of each 2 x 2)
+#define RESTIRGI_BIT_MERGEVIS 2048  // kRedMergeVis (the spatial merge weight shadowed: the cost cut's before)
+#define RESTIRGI_BIT_ALLLIGHTS 4096 // kRedAllLights (the bounce hit lit by every light, a ray each: the light pick's before)
 #define RESTIRGI_HISTORY_CAP 20.0   // kHistoryCap
 #define RESTIRGI_EPS 0.001          // kEps
 #define RESTIRGI_PI 3.14159265358979

@@ -14,8 +14,9 @@
  * p_hat / (cos / pi) = pi lum(Lo).
  *   temporal: the pixel's history reservoir (M clamped to kHistoryCap) is merged at its own p_hat; the result is the
  *             next frame's history.
- *   spatial:  K neighbours' temporal reservoirs are merged at THIS pixel's p_hat, with a shadow ray to their x_s (a
- *             neighbour's sample can be hidden from here) and the reconnection Jacobian
+ *   spatial:  K neighbours' temporal reservoirs are merged at THIS pixel's p_hat (unshadowed: a hidden sample is
+ *             dropped by the chosen one's shadow ray in p_hat, so the weight needs no ray; kRedMergeVis = a ray each,
+ *             the before) and the reconnection Jacobian
  *             J = (cos phi_v / cos phi_q) x (|x_q - x_s|^2 / |x_v - x_s|^2) (the change of solid angle at x_s);
  *             Z counts the M of every merged reservoir whose pixel sees the chosen x_s with p_hat > 0 (unbiased).
  *             A neighbour whose J is outside [1/10, 10] is not merged (jacobianKept).
@@ -47,6 +48,8 @@ constexpr int kRedNoJClamp = 64;       // every Jacobian merged as it is (jacobi
 constexpr int kRedLinear = 256;        // GPU only: one invocation a pixel in row order (the 8 x 8 tiles' before); same result
 constexpr int kTraceHalf = 512;        // the bounce + spatial pass on half the pixels a frame, a checkerboard turning each frame
 constexpr int kTraceQuarter = 1024;    // on a quarter (one pixel of each 2 x 2, turning); neither: every pixel (red fullres)
+constexpr int kRedMergeVis = 2048;     // the spatial merge weight shadowed, a ray a neighbour (the RTEMIS1 11-09 cost cut's before)
+constexpr int kRedAllLights = 4096;    // the bounce hit lit by every light, a shadow ray each (the one-light pick's before)
 constexpr float kHistoryCap = 20.0f;   // [Ouyang 2021 sec. 4.3 / Bitterli 2020 sec. 6]
 constexpr int kStbnSide = 128, kStbnSlices = 64;   // res/air/stbn_scalar_128x128x64.r8 (FOGGRID22A, ours)
 constexpr float kEps = 1e-3f;          // ray offsets, in the scene's units
@@ -245,8 +248,8 @@ struct Settings
 	std::vector<float> * jmax = nullptr;   // the CLI's diagnosis: each pixel's largest raw Jacobian over merged hits
 };
 
-/*! one frame of the per-pixel pass on a W x H grid of visible points. Scene: Sample trace(V3 o, V3 d) (the bounce ray,
- *  shaded) and bool blocked(V3 o, V3 d, float tmax) (a shadow ray; tmax < 0 = to infinity). hist holds the history
+/*! one frame of the per-pixel pass on a W x H grid of visible points. Scene: Sample trace(V3 o, V3 d, float u, int red)
+ *  (the bounce ray, shaded; u: the pixel's uniform for the hit's light pick) and bool blocked(V3 o, V3 d, float tmax) (a shadow ray; tmax < 0 = to infinity). hist holds the history
  *  reservoirs (any = false: none) and becomes this frame's temporal ones; out the irradiance a pixel. */
 template<class Scene>
 inline void frame( const Scene & scene, const std::vector<Pixel> & px, int W, int H, uint32_t seed, uint32_t f,
@@ -280,7 +283,7 @@ inline void frame( const Scene & scene, const std::vector<Pixel> & px, int W, in
 		Res r;
 		if ( traced( i % W, i / W, f, red ) ) {
 			const V3 d = bounceDir( p.n, i % W, i / W, W, seed, f, red, S.mask );
-			const Sample y = scene.trace( p.x + p.n * kEps, d );
+			const Sample y = scene.trace( p.x + p.n * kEps, d, restir::rand01( s1, 1 ), red );
 			r = candidate( p.x, p.n, y, red );
 		}
 #ifdef RESTIRGI_RED_SKIPM
@@ -332,7 +335,7 @@ inline void frame( const Scene & scene, const std::vector<Pixel> & px, int W, in
 				continue;
 			from[nf++] = q;
 			float w = 0.0f;
-			if ( rq.any && sees( p.x, p.n, rq.y ) )
+			if ( rq.any && ( !( red & kRedMergeVis ) || sees( p.x, p.n, rq.y ) ) )
 				w = target( p.x, p.n, rq.y ) * rq.W * rq.M * jk;
 			update( r, rq.y, w, rq.M, restir::rand01( s2, uint32_t( 2 + 3 * k ) ) );
 		}

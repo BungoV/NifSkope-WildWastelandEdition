@@ -71,7 +71,7 @@ struct Room
 		const float u = comp( p, a0 ), v = comp( p, a1 );
 		return u >= r.lo0 && u <= r.hi0 && v >= r.lo1 && v <= r.hi1;
 	}
-	restirgi::Sample trace( V3 o, V3 d ) const
+	restirgi::Sample trace( V3 o, V3 d, float = 0.0f, int = 0 ) const
 	{
 		restirgi::Sample s;
 		float best = 1e30f;

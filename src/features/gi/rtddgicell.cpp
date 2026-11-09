@@ -1235,7 +1235,7 @@ void restirUniforms( Renderer * r, NifSkopeOpenGLContext::Program * prog )
 }
 
 //! WW_CELL_RESTIRGI_RED (live): off (the pass and the shader read gone), nojacobian, novis, nopdf, notemporal, white, r2,
-//! nojclamp, linear (RESTIRGI_BIT_*), noatrous (kRestirGiNoAtrous: host only, the a-trous passes' before); every pixel
+//! nojclamp, linear, mergevis, alllights (RESTIRGI_BIT_*), noatrous (kRestirGiNoAtrous: host only, the a-trous passes' before); every pixel
 //! traced unless half (512, the checkerboard) or quarter (1024, one of each 2 x 2): cost arms, under the one-frame bar
 constexpr int kRestirGiNoAtrous = 128;
 int restirGiRedBits()
@@ -1250,7 +1250,7 @@ int restirGiRedBits()
 		b |= t == QLatin1String( "nojacobian" ) ? 1 : t == QLatin1String( "novis" ) ? 2 : t == QLatin1String( "nopdf" ) ? 4
 			: t == QLatin1String( "notemporal" ) ? 8 : t == QLatin1String( "white" ) ? 16 : t == QLatin1String( "r2" ) ? 32
 			: t == QLatin1String( "nojclamp" ) ? 64 : t == QLatin1String( "noatrous" ) ? kRestirGiNoAtrous
-			: t == QLatin1String( "linear" ) ? 256 : 0;
+			: t == QLatin1String( "linear" ) ? 256 : t == QLatin1String( "mergevis" ) ? 2048 : t == QLatin1String( "alllights" ) ? 4096 : 0;
 	}
 	return b;
 }

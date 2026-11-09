@@ -96,7 +96,81 @@ RgPixel rgPixel( bool prev, int x, int y )
 }
 
 // the bounce ray, shaded as trace.comp main shades a probe ray (the twin: src/features/gi/rtddgi.cpp restirgiCli's scene)
-RgRes rgTrace( vec3 o, vec3 d )
+/* the bounce hit's direct light (RTEMIS1 11-09, the cost cut; MIRROR rtddgi.cpp RgTwinScene directOne): the sun and the
+ * directional term as ddgiDirect, the placed lights by ONE pick in proportion to its unshadowed luminance (a running
+ * pick on the one uniform u, rescaled each step) with one shadow ray, over its probability: the mean of every light with
+ * a ray each [Talbot 2005, RIS]; red alllights = ddgiDirect */
+vec3 rgDirectOne( vec3 Pw, vec3 n, float u )
+{
+	vec3 E = vec3( 0.0 );
+	const vec3 o = Pw + n * 0.5;
+	if ( P.sunTo.w > 0.5 ) {
+		const float nl = dot( n, P.sunTo.xyz );
+		if ( nl > 0.0 && !ddgiShadow( o, P.sunTo.xyz, P.sun.w ) )
+			E += P.sun.rgb * nl;
+	}
+	if ( P.dirTo.w > 0.5 ) {
+		const float nl = dot( n, P.dirTo.xyz );
+		if ( nl > 0.0 )
+			E += P.dirColor.rgb * nl;
+	}
+	float wsum = 0.0, wp = 0.0;
+	vec3 cp = vec3( 0.0 ), lp = vec3( 0.0 );
+	for ( int li = 0; li < P.counts.y; li++ ) {
+		const uint b = uint( li ) * 8u;
+		const vec4 l0 = lights[b], l1 = lights[b + 1u], l2 = lights[b + 2u], l3 = lights[b + 3u];
+		const vec4 l7 = lights[b + 7u];
+		const vec3 Lv = l0.xyz - Pw;
+		const float d = length( Lv );
+		if ( d >= l0.w )
+			continue;
+		const int shape = int( l7.x + 0.5 );
+		if ( shape == 1 && dot( Pw - l0.xyz, l2.xyz ) < 0.0 )
+			continue;
+		if ( shape == 2 ) {
+			bool inside = true;
+			for ( int k = 0; k < 3; k++ ) {
+				const vec4 bx = lights[b + 4u + uint( k )];
+				if ( abs( dot( bx.xyz, Pw ) + bx.w ) > 1.0 )
+					inside = false;
+			}
+			if ( !inside )
+				continue;
+		}
+		const vec3 L = Lv / max( d, 0.001 );
+		const float nl = dot( n, L );
+		if ( nl <= 0.0 )
+			continue;
+		float att = ddgiRadial( d, l0.w, l3.x, l3.y, l3.z );
+		if ( l1.w > 0.5 )
+			att *= ddgiSpot( -dot( L, l2.xyz ), l2.w, l3.w );
+		if ( att * nl <= 0.0 )
+			continue;
+		const vec3 c = l1.rgb * ( att * nl );
+		const float w = rgLum( c );
+		if ( !( w > 0.0 ) )
+			continue;
+		wsum += w;
+		const float pr = w / wsum;
+		if ( u < pr ) {
+			u = u / pr;
+			wp = w;
+			cp = c;
+			lp = l0.xyz;
+		} else {
+			u = ( u - pr ) / max( 1.0 - pr, 1e-30 );
+		}
+	}
+	if ( wp > 0.0 ) {
+		const vec3 dl = lp - o;
+		const float len = length( dl );
+		if ( !ddgiShadow( o, dl / max( len, 1e-6 ), len - P.dirColor.w ) )
+			E += cp * ( wsum / wp );
+	}
+	return E;
+}
+
+RgRes rgTrace( vec3 o, vec3 d, float u, int red )
 {
 	uint pr;
 	float t;
@@ -113,7 +187,7 @@ RgRes rgTrace( vec3 o, vec3 d )
 	const vec3 Pw = o + d * t;
 	if ( a0.w < 0.5 && dot( nf, d ) > 0.0 && ( uint( P.flags.w ) & DDGI_RED_NOBACK ) == 0u )
 		return rgSample( Pw, n, vec3( 0.0 ), true );   // a one-sided face from behind sends nothing
-	vec3 E = ddgiDirect( Pw, n );
+	vec3 E = ( red & RESTIRGI_BIT_ALLLIGHTS ) != 0 ? ddgiDirect( Pw, n ) : rgDirectOne( Pw, n, u );
 	if ( P.flags.x == 0 )
 		E += ddgiIrradianceAt( Pw, n, -d );
 	return rgSample( Pw, n, ddgiHitRadiance( a0.rgb, E, triAttr[uint( tri ) * 2u + 1u].rgb ), true );
@@ -151,7 +225,7 @@ void modeCandidate( int x, int y, uint id )
 	RgRes r = rgEmpty();
 	if ( rgTraced( x, y, uint( G.size.z ), red ) ) {
 		const vec3 d = rgBounceDir( p.N, x, y, G.size.x, uint( G.size.w ), uint( G.size.z ), red, mask, m0, m1 );
-		const RgRes yv = rgTrace( p.P + p.N * RESTIRGI_EPS, d );
+		const RgRes yv = rgTrace( p.P + p.N * RESTIRGI_EPS, d, restirRand( s1, 1u ), red );
 		candLo[id] = vec4( yv.Lo, yv.hit );
 		r = rgCandidate( p.P, p.N, yv, red );
 	}
@@ -182,7 +256,8 @@ void modeCandidate( int x, int y, uint id )
 	resCur[id] = rgFinalize( s, rgTarget( p.P, p.N, s ), s.M );
 }
 
-// mode 1, MIRROR restirgimath.h frame pass 1: K neighbours, seen, with the Jacobian; Z over the merged pixels
+// mode 1, MIRROR restirgimath.h frame pass 1: K neighbours with the Jacobian (unshadowed weights; red mergevis: seen);
+// Z over the merged pixels
 void modeSpatial( int x, int y, uint id )
 {
 	est[id] = vec4( 0.0 );
@@ -217,7 +292,7 @@ void modeSpatial( int x, int y, uint id )
 		from[nf] = q;
 		nf++;
 		float w = 0.0;
-		if ( rq.any > 0.5 && rgSees( p.P, p.N, rq, red ) )
+		if ( rq.any > 0.5 && ( ( red & RESTIRGI_BIT_MERGEVIS ) == 0 || rgSees( p.P, p.N, rq, red ) ) )
 			w = rgTarget( p.P, p.N, rq ) * rq.W * rq.M * jk;
 		r = rgUpdate( r, rq, w, rq.M, restirRand( s2, uint( 2 + 3 * k ) ) );
 	}

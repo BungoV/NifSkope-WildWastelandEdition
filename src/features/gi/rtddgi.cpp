@@ -1937,7 +1937,78 @@ namespace {
 struct RgTwinScene
 {
 	const Twin & T;
-	restirgi::Sample trace( V3 o, V3 d ) const   // MIRROR restirgi.comp rgTrace
+	// MIRROR restirgi.comp rgDirectOne (RTEMIS1 11-09): the placed lights by one pick on u, one shadow ray
+	V3 directOne( V3 Pw, V3 n, float u ) const
+	{
+		V3 E( 0, 0, 0 );
+		const V3 o = Pw + n * 0.5f;
+		const auto & P = T.S.prm;
+		if ( P.sunTo[3] > 0.5f ) {
+			const V3 to( P.sunTo[0], P.sunTo[1], P.sunTo[2] );
+			const float nl = dot( n, to );
+			if ( nl > 0.0f && !T.shadow( o, to, P.sun[3] ) )
+				E = E + V3( P.sun[0], P.sun[1], P.sun[2] ) * nl;
+		}
+		if ( P.dirTo[3] > 0.5f ) {
+			const float nl = dot( n, V3( P.dirTo[0], P.dirTo[1], P.dirTo[2] ) );
+			if ( nl > 0.0f )
+				E = E + V3( P.dirColor[0], P.dirColor[1], P.dirColor[2] ) * nl;
+		}
+		float wsum = 0.0f, wp = 0.0f;
+		V3 cp( 0, 0, 0 ), lpk( 0, 0, 0 );
+		for ( int li = 0; li < T.S.nLights; li++ ) {
+			const float * l = &T.S.lights[size_t( li ) * kLight];
+			const V3 lp( l[0], l[1], l[2] );
+			const V3 Lv = lp - Pw;
+			const float d = length( Lv );
+			if ( d >= l[3] )
+				continue;
+			const int shape = int( l[28] + 0.5f );
+			if ( shape == 1 && dot( Pw - lp, V3( l[8], l[9], l[10] ) ) < 0.0f )
+				continue;
+			if ( shape == 2 ) {
+				bool inside = true;
+				for ( int k = 0; k < 3; k++ ) {
+					const float * bx = &l[16 + k * 4];
+					if ( std::fabs( bx[0] * Pw.x + bx[1] * Pw.y + bx[2] * Pw.z + bx[3] ) > 1.0f )
+						inside = false;
+				}
+				if ( !inside )
+					continue;
+			}
+			const V3 L = Lv * ( 1.0f / std::max( d, 0.001f ) );
+			const float nl = dot( n, L );
+			if ( nl <= 0.0f )
+				continue;
+			float att = lightRadial( d, l[3], l[12], l[13], l[14] );
+			if ( l[7] > 0.5f )
+				att *= spotCone( -dot( L, V3( l[8], l[9], l[10] ) ), l[11], l[15] );
+			if ( att * nl <= 0.0f )
+				continue;
+			const V3 c = V3( l[4], l[5], l[6] ) * ( att * nl );
+			const float w = restirgi::lum( c );
+			if ( !( w > 0.0f ) )
+				continue;
+			wsum += w;
+			const float pr = w / wsum;
+			if ( u < pr ) {
+				u = u / pr;
+				wp = w;
+				cp = c;
+				lpk = lp;
+			} else {
+				u = ( u - pr ) / std::max( 1.0f - pr, 1e-30f );
+			}
+		}
+		if ( wp > 0.0f ) {
+			const V3 dl = lpk - o;
+			const float len = length( dl );
+			if ( !T.shadow( o, dl * ( 1.0f / std::max( len, 1e-6f ) ), len - P.dirColor[3] ) )
+				E = E + cp * ( wsum / wp );
+		}
+		return E;
+	}
+	restirgi::Sample trace( V3 o, V3 d, float u, int red ) const   // MIRROR restirgi.comp rgTrace
 	{
 		const auto & P = T.S.prm;
 		restirgi::Sample y;
@@ -1967,7 +2038,7 @@ struct RgTwinScene
 		y.Lo = V3( 0, 0, 0 );
 		if ( a0[3] < 0.5f && dot( nf, d ) > 0.0f && !( T.red & kRedNoBack ) )
 			return y;
-		V3 E = T.direct( y.xs, y.ns );
+		V3 E = ( red & restirgi::kRedAllLights ) ? T.direct( y.xs, y.ns ) : directOne( y.xs, y.ns, u );
 		if ( !P.flags[0] )
 			E = E + T.sampleVolume( y.xs, y.ns, -d );
 		const float Ec[3] = { E[0], E[1], E[2] };
@@ -2085,7 +2156,7 @@ int restirgiCli( const QStringList & args )
 		std::fprintf( stderr, "usage: restirgi --soup <file> --rect minX,minY,maxX,maxY --out <dir> --cam ex,ey,ez,tx,ty,tz "
 			"--light x,y,z,radius,r,g,b [...] [--lights <file>] [--size W,H] [--fov deg] [--frames n] [--updates n] [--seed n] "
 			"[--spatial K] [--radius R] [--filter f] [--acc n] [--atrous n] [--ref n] [--no-twin] [--jump frame] [--relight frame] "
-			"[--red nojacobian,novis,nopdf,notemporal,white,r2,nojclamp,linear,half,quarter,fullres]\n" );
+			"[--red nojacobian,novis,nopdf,notemporal,white,r2,nojclamp,linear,half,quarter,fullres,mergevis,alllights]\n" );
 		return 2;
 	}
 	for ( int k = 0; k < 4; k++ )
@@ -2103,7 +2174,8 @@ int restirgiCli( const QStringList & args )
 		red |= t == QLatin1String( "nojacobian" ) ? restirgi::kRedNoJacobian : t == QLatin1String( "novis" ) ? restirgi::kRedNoVis
 			: t == QLatin1String( "nopdf" ) ? restirgi::kRedNoPdf : t == QLatin1String( "notemporal" ) ? restirgi::kRedNoTemporal
 			: t == QLatin1String( "white" ) ? restirgi::kRedWhite : t == QLatin1String( "r2" ) ? restirgi::kRedR2
-			: t == QLatin1String( "nojclamp" ) ? restirgi::kRedNoJClamp : t == QLatin1String( "linear" ) ? restirgi::kRedLinear : 0;
+			: t == QLatin1String( "nojclamp" ) ? restirgi::kRedNoJClamp : t == QLatin1String( "linear" ) ? restirgi::kRedLinear
+			: t == QLatin1String( "mergevis" ) ? restirgi::kRedMergeVis : t == QLatin1String( "alllights" ) ? restirgi::kRedAllLights : 0;
 	}
 	const unsigned char * mask = restirGiStbnMask();
 	ProbeSoup soup;
@@ -2215,7 +2287,7 @@ int restirgiCli( const QStringList & args )
 		for ( size_t i = 0; i < n; i++ )
 			if ( px[i].valid && tracedAt( i, 0 ) ) {
 				const V3 d = restirgi::bounceDir( px[i].n, int( i % size_t( W ) ), int( i / size_t( W ) ), W, seed, 0u, red, mask );
-				cand0[i] = scene.trace( px[i].x + px[i].n * restirgi::kEps, d );
+				cand0[i] = scene.trace( px[i].x + px[i].n * restirgi::kEps, d, restir::rand01( restir::pixelSeed( seed ^ uint32_t( i ), 0u, 1 ), 1 ), red );
 			}
 	bakert::RestirGiGpuOut go;
 	std::vector<float> est0, out0;
@@ -2330,7 +2402,8 @@ int restirgiCli( const QStringList & args )
 			const size_t i = worst[k].second;
 			const int x = int( i % size_t( W ) ), y = int( i / size_t( W ) );
 			const restirgi::Res & h = hist[i];
-			const restirgi::Sample yc = scene.trace( px[i].x + px[i].n * restirgi::kEps, restirgi::bounceDir( px[i].n, x, y, W, seed, uint32_t( fr ), red, mask ) );
+			const restirgi::Sample yc = scene.trace( px[i].x + px[i].n * restirgi::kEps, restirgi::bounceDir( px[i].n, x, y, W, seed, uint32_t( fr ), red, mask ),
+				restir::rand01( restir::pixelSeed( seed ^ uint32_t( i ), uint32_t( fr ), 1 ), 1 ), red );
 			std::printf( "    (%d,%d): twin %.4g gpu %.4g; twin temporal M %.0f W %.4g Lo %.4g hit %d; largest J merged %.4g; bounce twin Lo %.4g hit %d, "
 				"gpu Lo %.4g hit %d\n", x, y, double( restirgi::lum( est[i] ) ), restir::luminance( go.est[i * 4], go.est[i * 4 + 1], go.est[i * 4 + 2] ),
 				double( h.M ), double( h.W ), double( restirgi::lum( h.y.Lo ) ), int( h.y.hit ), double( jmax[i] ), double( restirgi::lum( yc.Lo ) ), int( yc.hit ),
