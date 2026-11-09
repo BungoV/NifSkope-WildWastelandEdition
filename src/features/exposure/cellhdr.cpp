@@ -14,6 +14,7 @@
 #include "features/shared/cellpasstime.h"
 #include "features/near/cellvrs.h"
 #include "features/post/gametaa.h"	// lane TAA3: the Modern resolve before the tone map
+#include "features/exposure/physunits.h"	// lane PHYSUNITS1: the physical camera; the frame in RGBA32F
 
 #include <QDebug>
 #include <QFile>
@@ -58,7 +59,8 @@ const HdrFormat & hdrFormat()
 		const QByteArray v = qgetenv( "WW_CELL_HDR_FORMAT" ).trimmed().toLower();
 		const bool red = qEnvironmentVariableIntValue( "WW_FRAMEFMT1_RED" ) != 0
 			|| qEnvironmentVariableIntValue( "WW_CELL_HDR_FORMAT_RED" ) != 0 || qEnvironmentVariableIntValue( "WW_AAFORMAT1_RED" ) != 0;
-		return wwHdrFormatOf( v.isEmpty() ? nullptr : v.constData(), red );
+		// lane PHYSUNITS1: real units default the frame to RGBA32F (a sun highlight runs past RGBA16F's 65504)
+		return wwHdrFormatOf( v.isEmpty() ? ( wwPhysOn() ? "rgba32f" : nullptr ) : v.constData(), red );
 	}() );
 	return f;
 }
@@ -424,8 +426,12 @@ void isApply( Scene * scene, const float * px, int qw, int qh )
 			if ( std::isfinite( px[i * 4 + c] ) )
 				sum += wgt[c] * px[i * 4 + c];
 	}
+	// lane PHYSUNITS1 (LATE ITEM 11-08): the physical camera meters the log average, so a bulb cannot set the street's EV
+	const float meter = wwPhysMeter( px, qw * qh );
+	if ( meter >= 0.0f )
+		wwPhysNoteFrameMeter();	// RESUME 11-09 b: the one camera writer (wwCellImageSpaceMeasureByPass stands down)
 	// SKY2B (EXPO2): the sky pixels in view, each along its own ray
-	wwCellImageSpaceSetAdapted( scene, wwAtmoAdaptedInView( scene, cover > 0.0 ? float( sum / cover ) : 0.0f, px, qw, qh ),
+	wwCellImageSpaceSetAdapted( scene, wwAtmoAdaptedInView( scene, meter >= 0.0f ? meter : cover > 0.0 ? float( sum / cover ) : 0.0f, px, qw, qh ),
 		int( std::lround( cover ) ) );
 	WW_SWITCH_STATIC( bool, echo, wwEnvInt( "WW_IS_MEASURE_ECHO" ) == 1 );
 	if ( !bloomGpuOn() || echo )	// lane PERFFIX1: with the GPU blur the CPU one runs only for the echo's lit/peak
@@ -599,7 +605,11 @@ bool wwCellImageSpaceMeasureByPass( Scene * scene )
 	if ( isMeasureMode() >= 2 || !scene )
 		return true;
 	// the first frame (no value yet), or the last frame took no linear frame or its measure failed: the old pass
-	return !isServed().take( scene->nifModel ) || wwCellImageSpaceAdapted( scene ) < 0.0f;
+	const bool served = isServed().take( scene->nifModel );
+	// lane PHYSUNITS1 (RESUME 11-09 b): one camera writer: a fresh frame meter keeps the pass off (it only seeds)
+	if ( wwPhysFrameMeterFresh() && wwCellImageSpaceAdapted( scene ) >= 0.0f )
+		return false;
+	return !served || wwCellImageSpaceAdapted( scene ) < 0.0f;
 }
 
 bool wwCellDrawProbeOn()
@@ -1262,7 +1272,8 @@ void wwCellHdrEnd( Scene * scene )
 	if ( wwGameTaaLinearOn() ) {	// lane POSTFX3: the Modern temporal AA on this linear frame (no GL call when off)
 		const float adapted = wwCellImageSpaceAdapted( scene );
 		wwGameTaaResolveLinear( scene, g.fbo, g.colorFormat, g.color, g.samples,
-			adapted >= 0.0f ? std::clamp( 0.18f / ( adapted + 0.001f ), 1.0f / 64.0f, 64.0f ) : 1.0f );
+			wwPhysSkyOn() ? 1.0f / ( 1.2f * std::exp2( wwPhysLastEvApplied() ) )	// lane PHYSUNITS1: the frame's camera
+			: adapted >= 0.0f ? std::clamp( 0.18f / ( adapted + 0.001f ), 1.0f / 64.0f, 64.0f ) : 1.0f );
 	}
 	// lane VOLAIR1 (gates only): WW_CELL_HDR_DUMP=<file> writes the linear frame before the bloom and the tone map,
 	// samples resolved: int32 W H, then W x H x RGBA float32, bottom row first. Every frame (a still path: the last).

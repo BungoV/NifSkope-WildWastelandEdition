@@ -25,6 +25,7 @@
 #include <cstring>
 #include <chrono>
 #include <functional>
+#include "features/exposure/physunits.h"	// lane PHYSUNITS1: emissives in cd/m2
 #include <memory>
 #include <thread>
 
@@ -608,7 +609,7 @@ static bool packVolume( const ProbeSoup & soup, const WwCellLighting & lighting,
 			double le[3];
 			soup.glow.le( int( t ), 1.0 / 3.0, 1.0 / 3.0, le );
 			for ( int c = 0; c < 3; c++ )
-				a[4 + c] = float( le[c] ) * lighting.glowScale;	// lane MUSGI1 r5: a sunlit interior's lamp scale
+				a[4 + c] = float( le[c] ) * ( wwPhysOn() ? wwPhysEmitScale() : lighting.glowScale );	// PHYSUNITS1; MUSGI1 r5
 		}
 	}
 	for ( const WwCellLight & l : lighting.lights ) {

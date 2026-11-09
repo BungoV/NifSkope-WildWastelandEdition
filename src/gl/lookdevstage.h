@@ -223,6 +223,8 @@ bool wwLookdevImageSpace( WwLookdevIs & out );
  *  exterior surfaces and the probe GI's sun take it too. 1 without a weather or an imagespace. Red
  *  WW_CELL_SUNSCALE_RED=one keeps the sun unscaled (the viewer before lane BOUNCE1). */
 float wwLookdevSunlightScale();
+//! lane PHYSUNITS1: the weather's light in real units over the weather's own (sun + ambient; 1 off the physical scale)
+float wwLookdevPhysLight();
 //! lane WATER1: the water's sky (linear): the weather's Horizon, Sky-Lower and Sky-Upper rows at the dome's hour;
 //! false (the outputs untouched) when no weather is loaded
 bool wwLookdevWaterSky( float horizon[3], float lower[3], float upper[3] );

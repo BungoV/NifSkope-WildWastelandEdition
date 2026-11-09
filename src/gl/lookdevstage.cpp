@@ -39,6 +39,7 @@ BSD License - see nifskope.h
 #include "features/far-lod/lodgen.h"
 #include "cellmodsource.h"	// lane SKYTOP1: the active load order
 #include "cellstream.h"	// lane WEATHERBLEND6: the streamed camera's cell, for the region walk
+#include "features/exposure/physunits.h"	// lane PHYSUNITS1: real units
 
 #include <QBuffer>
 #include <QDir>
@@ -57,6 +58,8 @@ BSD License - see nifskope.h
 #include <cmath>
 #include <cstdio>
 #include <limits>
+
+bool wwAtmoGiSkyAxes( const float sunTo[3], float out[6][3], float * trans = nullptr, float hKm = 0.002f );	// atmosphere.cpp
 
 namespace
 {
@@ -808,6 +811,8 @@ struct LdLight
 	float amb[3];		// linear (NAM0 Ambient)
 	float dalc[6][3];	// linear
 	bool fromWeather = false;
+	float physKey = 1.0f;	// lane PHYSUNITS1: the real key over the weather's (1 = the old scale)
+	float physFog = 1.0f;	// lane PHYSUNITS1: the real light over the weather's, sun + ambient (the fog's colours take it)
 };
 
 LdLight computeLight();
@@ -914,6 +919,7 @@ LdLight currentLight()
 	static WwSunPathKey sunPath;	// lane GAPTOOL2: a live WW_SUNPATH set (or the Sun Path row) moves the light
 	static unsigned long long wxStamp = 0;	// lane WX1: a weather .recx value (visibility, moonlight) moves the light
 	static QString moonRed;	// lane FIX1101A (moon): WW_MOON_RED, live
+	static bool physSky = false;	// lane PHYSUNITS1: real units while the cell's HDR camera draws
 	static LdLight memo;
 	// lane SKYA (NIGHT1): the Moon Phase and Stars row with the moon's phase (the game day moves it)
 	int atmoKey = wwAtmoSunKey() + 3 * 16 * wwAtmoNightKey( wwMoonPhase( s.gameDay, s.clim.tnam[5] ) );
@@ -923,7 +929,8 @@ LdLight currentLight()
 	const unsigned long long wx = wwWeatherRecx().stamp;
 	const QString mr = wwEnvStr( "WW_MOON_RED" ).trimmed().toLower();
 	if ( gen != s.gen || hour != s.hour || sun != s.sun || atmoSun != atmoKey || !( sunPath == sunKey ) || wxStamp != wx
-		|| mr != moonRed ) {
+		|| mr != moonRed || physSky != wwPhysSkyOn() ) {
+		physSky = wwPhysSkyOn();
 		memo = computeLight();
 		moonRed = mr;
 		wxStamp = wx;
@@ -934,6 +941,78 @@ LdLight currentLight()
 		sunPath = sunKey;
 	}
 	return memo;
+}
+
+/* lane PHYSUNITS1: the light in real units. The key came through the air from the top of the atmosphere (airKey), else
+ * the weather's key x rKey (the real 45-degree key over the weather's). The ambient is the physical sky's irradiance on
+ * the six axes at its absolute level (GITRUTH1 giSkyAbsolute: k = the key over its transmittance), the sun's sky added
+ * while the key is the moon, the ground's light on -Z from albedo 0.15, and the dark night sky's floor on every axis;
+ * without the physical sky the weather's ambient x rKey. Effect Lighting and the fog's colours take the ratio of the
+ * whole light (sun + ambient) to the weather's. */
+void physFinish( LdLight & L, float rKey, bool airKey )
+{
+	auto lumOf = []( const float v[3] ) { return 0.2126f * v[0] + 0.7152f * v[1] + 0.0722f * v[2]; };
+	if ( !airKey )
+		for ( int c = 0; c < 3; c++ )
+			L.sun[c] *= rKey;
+	const float ambOld = lumOf( L.amb );
+	float n[3] = { L.sunDir[0], L.sunDir[1], L.sunDir[2] };
+	const float len = std::sqrt( n[0] * n[0] + n[1] * n[1] + n[2] * n[2] );
+	float axes[6][3], T[3], out[6][3];
+	bool sky = false;
+	if ( len > 0.0f ) {
+		for ( float & x : n )
+			x /= len;
+		sky = wwAtmoGiSkyAxes( n, axes, T ) && WwAtmoMath::giSkyAbsolute( axes, T, L.sun, L.dalc, out ) > 0.0f;
+	}
+	float d[3] = { L.discPos[0], L.discPos[1], L.discPos[2] };
+	const float dl = std::sqrt( d[0] * d[0] + d[1] * d[1] + d[2] * d[2] );
+	if ( dl > 0.0f ) {
+		for ( float & x : d )
+			x /= dl;
+		float sAxes[6][3];
+		if ( ( !sky || n[0] * d[0] + n[1] * d[1] + n[2] * d[2] < 0.995f ) && wwAtmoGiSkyAxes( d, sAxes ) ) {
+			if ( !sky ) {	// the key is down (or the moon's sky refused): the sun's sky alone
+				for ( int a = 0; a < 6; a++ )
+					for ( int c = 0; c < 3; c++ )
+						out[a][c] = 0.0f;
+				sky = true;
+			}
+			for ( int a = 0; a < 5; a++ )
+				for ( int c = 0; c < 3; c++ )
+					out[a][c] += sAxes[a][c] * wwphys::kSunToaLux / wwphys::kPi;
+		}
+	}
+	if ( sky ) {
+		WwAtmoMath::giSkyGround( L.sun, n[2], wwWeatherRecx().groundAlbedo >= 0.0f ? wwWeatherRecx().groundAlbedo : 0.15f, out );
+		std::copy( &out[0][0], &out[0][0] + 18, &L.dalc[0][0] );
+	} else {
+		for ( int a = 0; a < 6; a++ )
+			for ( int c = 0; c < 3; c++ )
+				L.dalc[a][c] *= rKey;
+	}
+	for ( int c = 0; c < 3; c++ ) {
+		float m = 0.0f;
+		for ( int a = 0; a < 6; a++ )
+			m += ( L.dalc[a][c] += wwphys::kNightFloor );
+		L.amb[c] = m / 6.0f;
+	}
+	const float oldTot = lumOf( L.sun ) / std::max( rKey, 1e-9f ) + ambOld;
+	const float rEff = oldTot > 1e-12f ? ( lumOf( L.sun ) + lumOf( L.amb ) ) / oldTot : rKey;
+	for ( int c = 0; c < 3; c++ )
+		L.effect[c] *= rEff;
+	L.physKey = rKey;
+	L.physFog = rEff;
+	static QString said;
+	const QString line = QStringLiteral( "phys light: key %1 cd/m2 (x%2 %3) sky +Z %4 -Z %5 ambient %6 effect x%7 sky=%8" )
+		.arg( double( lumOf( L.sun ) ), 0, 'g', 5 ).arg( double( rKey ), 0, 'g', 5 )
+		.arg( airKey ? QStringLiteral( "air" ) : QStringLiteral( "weather" ) ).arg( double( lumOf( L.dalc[4] ) ), 0, 'g', 5 )
+		.arg( double( lumOf( L.dalc[5] ) ), 0, 'g', 5 ).arg( double( lumOf( L.amb ) ), 0, 'g', 5 ).arg( double( rEff ), 0, 'g', 5 )
+		.arg( sky ? QStringLiteral( "physical" ) : QStringLiteral( "weather" ) );
+	if ( line != said ) {
+		said = line;
+		fprintf( stderr, "%s\n", qPrintable( line ) );
+	}
 }
 
 LdLight computeLight()
@@ -1003,7 +1082,7 @@ LdLight computeLight()
 	const WwWeatherRecx & wx = wwWeatherRecx();
 	if ( wx.on && wx.moonlight >= 0.0f )	// lane WX1: night.moonlight of the weather's .recx (Weather .recx row)
 		moonK *= wx.moonlight;
-	auto keyLumOf = [&s]( int tod ) {
+	auto weatherKeyOf = [&s]( int tod ) {
 		WwTodKeys k;
 		k.a = k.b = tod;
 		k.t = 0.0f;
@@ -1011,6 +1090,21 @@ LdLight computeLight()
 		EsmWeather::blendRowLab( s.w, WwRowSunlight, k, c3 );
 		return 0.2126f * lin( c3[0] ) + 0.7152f * lin( c3[1] ) + 0.0722f * lin( c3[2] );
 	};
+	/* lane PHYSUNITS1: real units: the key is the top-of-atmosphere sun (moon) over pi, the air's transmittance on it
+	 * (atmosphere.cpp); rKey = that at 45 degrees (T ~ 0.8) over the weather's key, the two crossfaded as the keys are */
+	const bool phys = wwPhysSkyOn();
+	auto keyLumOf = [&]( int tod ) {
+		if ( !phys )
+			return weatherKeyOf( tod );
+		return ( tod == WwTodNight ? wwphys::kMoonToaLux : wwphys::kSunToaLux ) / wwphys::kPi;
+	};
+	float rKey = 1.0f;
+	if ( phys ) {
+		const float vd = weatherKeyOf( WwTodDay ), vn = weatherKeyOf( WwTodNight );
+		const float rd = vd > 1e-9f ? keyLumOf( WwTodDay ) * 0.8f / vd : 1.0f;
+		const float rn = vn > 1e-9f ? keyLumOf( WwTodNight ) * 0.8f / vn : rd;
+		rKey = rd * std::pow( rn / rd, std::clamp( wE, 0.0f, 1.0f ) );
+	}
 	const WwFog fog = currentFog();
 	const float fogIn[4] = { fog.effOff ? 0.0f : fog.fogFar, fog.effOff ? 0.0f : fog.maxv, fog.fMid, fog.fRange };
 	if ( wwAtmoSunKey() > 0 && wwAtmoSun() == 2 && wwAtmoNightOn() && wwSunPathMode() == 1 && !oldNight ) {
@@ -1052,24 +1146,29 @@ LdLight computeLight()
 			said = line;
 			fprintf( stderr, "%s\n", qPrintable( line ) );
 		}
+		if ( phys )
+			physFinish( L, rKey, true );
 		return L;
 	}
-	if ( wwAtmoSunKey() > 0 ) {
+	bool airKey = false;
+	if ( wwAtmoSunKey() > 0 || phys ) {
 		/* lane SKYA (ATMOSUN1): the key and the ambient through the physical sky's air toward the light (the moon by
 		 * night, as the engine's light is), the brightness anchored on the weather's Day (Night) key at 45 degrees;
 		 * lane FIX1101A: the two keys crossfaded by the engine's night share, geometrically (x1.34 a minute over the
 		 * 9-minute fade, not one x14 step; Full: the moon's factor in the Night key) */
-		const float dayL = keyLumOf( WwTodDay ), nightL = keyLumOf( WwTodNight ) * ( wwAtmoSun() == 2 ? moonK : 1.0f );
+		const float dayL = keyLumOf( WwTodDay ), nightL = keyLumOf( WwTodNight ) * ( ( wwAtmoSun() == 2 || phys ) ? moonK : 1.0f );
 		const float keyLum = oldNight ? ( engNight ? keyLumOf( WwTodNight ) : dayL )
 			: dayL > 1e-9f ? dayL * std::pow( std::max( nightL, 0.0f ) / dayL, wE ) : nightL * wE;
 		const float len = std::sqrt( L.sunDir[0] * L.sunDir[0] + L.sunDir[1] * L.sunDir[1] + L.sunDir[2] * L.sunDir[2] );
-		wwAtmoKeyLight( len > 0.0f ? L.sunDir[2] / len : 1.0f, fogIn, keyLum, L.sun, L.amb, L.dalc );
+		airKey = wwAtmoKeyLight( len > 0.0f ? L.sunDir[2] / len : 1.0f, fogIn, keyLum, L.sun, L.amb, L.dalc );
 	}
 	// the moon's factor on the night share (already in the Full key above, unless the red)
 	const float f = oldNight ? ( engNight ? moonK : 1.0f )
-		: ( wwAtmoSunKey() > 0 && wwAtmoSun() == 2 ) ? 1.0f : std::pow( std::max( moonK, 0.0f ), wE );
+		: ( ( wwAtmoSunKey() > 0 && wwAtmoSun() == 2 ) || airKey ) ? 1.0f : std::pow( std::max( moonK, 0.0f ), wE );
 	for ( int c = 0; c < 3; c++ )
 		L.sun[c] *= f;
+	if ( phys )
+		physFinish( L, rKey, airKey );
 	return L;
 }
 
@@ -1208,8 +1307,13 @@ void wwLookdevFogUniforms( Scene * scene )
 	prof.at( 4, "ground" );
 	const WwFog f = currentFog();
 	prof.at( 5, "currentfog" );
-	for ( int k = 0; k < 6; k++ )
-		prog->uni4f_l( prog->uniLocation( "fogK[%d]", k ), FloatVector4( f.K[k][0], f.K[k][1], f.K[k][2], f.K[k][3] ) );
+	/* lane PHYSUNITS1: the fog's colours (fogK[1..4]) in the light's units; fogUnit lets the gray weight read the old scale */
+	const float fu = wwPhysSkyOn() ? currentLight().physFog : 1.0f;
+	for ( int k = 0; k < 6; k++ ) {
+		const float m = ( k >= 1 && k <= 4 ) ? fu : 1.0f;
+		prog->uni4f_l( prog->uniLocation( "fogK[%d]", k ), FloatVector4( f.K[k][0] * m, f.K[k][1] * m, f.K[k][2] * m, f.K[k][3] ) );
+	}
+	prog->uni1f( "fogUnit", fu );
 	prof.at( 6, "fogk" );
 	// the view: posView = R (sc p) + t, so p = R^T (posView - t) / sc; the z row, measured from the ground
 	const Transform & vt = scene->view;
@@ -2003,9 +2107,14 @@ float wwLookdevSunlightScale()
 {
 	WW_SWITCH_STATIC( bool, red, wwEnv( "WW_CELL_SUNSCALE_RED" ).trimmed() == "one" );
 	WwLookdevIs is;
-	if ( red || !wwLookdevImageSpace( is ) || !( is.hdr[6] > 0.0f ) )
+	if ( red || wwPhysSkyOn() || !wwLookdevImageSpace( is ) || !( is.hdr[6] > 0.0f ) )	// lane PHYSUNITS1: real units
 		return 1.0f;
 	return is.hdr[6];
+}
+
+float wwLookdevPhysLight()
+{
+	return wwPhysSkyOn() ? currentLight().physFog : 1.0f;
 }
 
 /* ------------------------------------------------------------------------
@@ -2074,6 +2183,14 @@ SkyFrame skyFrame()
 	if ( wwLookdevRed( "skyswap" ) )
 		for ( int c = 0; c < 3; c++ )
 			std::swap( f.up[c], f.hz[c] );
+	if ( wwPhysSkyOn() ) {	// lane PHYSUNITS1: the weather's sky in the light's units (the drawn sky without Physical Sky)
+		const float k = currentLight().physKey;
+		f.skyScale *= k;
+		for ( int c = 0; c < 3; c++ ) {
+			f.glare[c] *= k;
+			f.moonGlare[c] *= k;
+		}
+	}
 	f.glareAlpha = f.c.sunAlpha * float( s.w.sunGlare ) / 255.0f;
 	if ( s.w.blending() )	// lane WEATHERBLEND1: DATA byte 4 on pct (read in Todd's treat by WEATHERBLEND2)
 		f.glareAlpha = f.c.sunAlpha * ( float( s.w.sunGlare ) * s.w.transPct + float( s.w.last->sunGlare ) * ( 1.0f - s.w.transPct ) ) / 255.0f;
@@ -3032,8 +3149,9 @@ bool drawAtmo( Scene * scene, QStringList & drew, bool capture = false )
 		return 0.2126f * lin( rgb[0] ) + 0.7152f * lin( rgb[1] ) + 0.0722f * lin( rgb[2] );
 	};
 	const float scale = wwLookdevSunlightScale();
-	in.sunLum = keyLum( WwTodDay ) * scale;
-	in.moonLum = keyLum( WwTodNight ) * scale * moonLightFactor( s );
+	const bool phys = wwPhysSkyOn();	// lane PHYSUNITS1: the top-of-atmosphere sun and moon over pi (atmosphere.cpp)
+	in.sunLum = phys ? wwphys::kSunToaLux / wwphys::kPi : keyLum( WwTodDay ) * scale;
+	in.moonLum = ( phys ? wwphys::kMoonToaLux / wwphys::kPi : keyLum( WwTodNight ) * scale ) * moonLightFactor( s );
 	if ( wwWeatherRecx().on && wwWeatherRecx().moonlight >= 0.0f )
 		in.moonLum *= wwWeatherRecx().moonlight;	// lane WX1: night.moonlight, the glow round the moon
 	const WwFog fog = currentFog();

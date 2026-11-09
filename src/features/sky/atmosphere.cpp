@@ -6,6 +6,7 @@
 #include "gl/lookdevstage.h"	// SHAFTS1b: the Lookdev weather's class
 #include "features/sky/skydisc.h"
 #include "features/sky/moonlight.h"	// lane FIX1101A (moon): the disc's gain through the air
+#include "features/exposure/physunits.h"	// lane PHYSUNITS1: real units
 #include "features/air/cellvolair.h"	// lane FIX1101A (moon): the air's medium for that gain
 #include "wwswitch.h"
 #include "gl/cellunits.h"
@@ -567,6 +568,11 @@ bool wwAtmoDrawSky( Scene * scene, const WwAtmoInputs & in, QString * line )
 		cpuTrans( 0.0f, 0.70710678f, ref, noOzone, tRef, g_ozone );
 		tl = std::max( tl, lum( tRef ) );
 	}
+	/* lane PHYSUNITS1: real units. in.sunLum is the top-of-atmosphere sun over pi (lookdevstage.cpp), the sky's LUTs are per
+	 * unit sun irradiance, so sunK = E0 and nothing divides by the 45-degree transmittance; the ground's sun is E0 x T(mu). */
+	const bool phys = wwPhysSkyOn();
+	if ( phys )
+		tl = 1.0f;
 	const float sunK = kPi * in.sunLum / tl;
 	const float moonK = in.moonUp ? kPi * in.moonLum / tl : 0.0f;
 
@@ -765,7 +771,7 @@ bool wwAtmoDrawSky( Scene * scene, const WwAtmoInputs & in, QString * line )
 			p->uni1f( "atSunK", sunK );
 			p->uni1f( "atMoonK", moonK );
 			p->uni1f( "atLimb", ( s.tier >= 3 || in.discs ) ? 1.0f : 0.0f );
-			p->uni1f( "atDiscCap", in.disc ? kDiscCap : 0.0f );
+			p->uni1f( "atDiscCap", in.disc ? ( phys ? wwphys::kDiscCap : kDiscCap ) : 0.0f );
 			p->uni1f( "atDiscHue", in.discs ? 1.0f : 0.0f );	// SKYDISC1: 0 = the per-channel min() as before
 			p->uni1f( "atDiscAir", discAir[0] );	// lane FIX1101A (moon): the disc's gain through the air
 			p->uni1f( "sceneExposure", in.exposure );
@@ -1003,13 +1009,21 @@ void wwAtmoStarExtinction( float mu, float out[3] )
 bool wwAtmoKeyLight( float muLight, const float fog[4], float keyLum45, float sun[3], float amb[3], float dalc[6][3] )
 {
 	const AtState & s = as();
-	if ( s.tier <= 0 || s.sun <= 0 )
+	if ( s.tier <= 0 || ( s.sun <= 0 && !wwPhysSkyOn() ) )	// lane PHYSUNITS1: real units take the air's key always
 		return false;
 	const bool flat = wwEnvStr( "WW_ATMO_SUN_RED" ).trimmed().toLower() == QLatin1StringView( "flat" );
 	float haze[3];
 	hazeFromFog( fog[0], fog[1], fog[2], fog[3], red( "nohaze" ), haze );
 	if ( !red( "nohaze" ) )
 		clearDayHaze( haze, fog[0] > 0.0f && fog[1] > 0.0f );	// lane WX1; SHAFTS1b: clear day, then the .recx
+	/* lane PHYSUNITS1: keyLum45 is the top-of-atmosphere light over pi; the key is that x T(mu) (Full), so sunLight's
+	 * division by the 45-degree transmittance is undone here */
+	const bool phys = wwPhysSkyOn();
+	if ( phys ) {
+		float t45[3];
+		cpuTrans( 0.0f, 0.70710678f, haze, false, t45 );
+		keyLum45 *= std::max( 1e-4f, lum( t45 ) );
+	}
 	float rows[7][3];
 	std::copy( amb, amb + 3, rows[0] );
 	for ( int a = 0; a < 6; a++ )
@@ -1017,7 +1031,7 @@ bool wwAtmoKeyLight( float muLight, const float fog[4], float keyLum45, float su
 	const float was[3] = { sun[0], sun[1], sun[2] };
 	// SKY2B (SKYTINT2): under Weather Tint the ambient (and the DALC) keeps the weather's own color; the sun is still tinted
 	const bool tintAmb = s.tint > 0 && s.tintDrawn && !wwAtmoTintRedPhysical();
-	skyKeyLight( s.sun, muLight, haze, keyLum45, flat, sun, rows, tintAmb ? 0 : 7 );
+	skyKeyLight( phys ? 2 : s.sun, muLight, haze, keyLum45, flat, sun, rows, tintAmb ? 0 : 7 );
 	std::copy( rows[0], rows[0] + 3, amb );
 	for ( int a = 0; a < 6; a++ )
 		std::copy( rows[1 + a], rows[1 + a] + 3, dalc[a] );

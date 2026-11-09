@@ -87,6 +87,7 @@ struct WwCellLight
 	quint32 lens = 0;               //!< lane LIGHTS3 (LENSFLARE1): the base's LENS (0 none)
 	float byteColor[3] = { 0, 0, 0 };   //!< lane LIGHTS3: DATA colour bytes / 255 (the lens flare's colour influence)
 	quint32 xemi = 0;                   //!< lane LIGHTS4: the placement's XEMI code (cellfxlit.h wwCellXemiCode), 0 none
+	float physG = 0.0f;                 //!< lane PHYSUNITS1: the Game Light Brightness in its colour (0: none, a .nifx light)
 	//! lane LIGHTFLICKER1: 0 steady, 1 flicker (LIGH flag 0x8), 2 pulse (0x80 | 0x100), with DATA's Flicker Effect
 	int flicker = 0;
 	float flickerPeriod = 0.0f, flickerIntensity = 0.0f, flickerMovement = 0.0f;
@@ -224,6 +225,9 @@ struct WwCellLighting
 	 *  lights take it (red WW_CELL_NIFX_SCALE_RED=1: 1) and as the emissive surfaces and their RT GI glow take it (red
 	 *  WW_CELL_GLOW_SCALE_RED=1: 1) */
 	float nifxScale = 1.0f, glowScale = 1.0f;
+	/*! lane PHYSUNITS1: an interior's ambient, directional and fog on its lamps' real scale (the median lamp factor
+	 *  wwPhysLampK over its lamps; x Game Light Brightness at upload); 0 = none (the red, an exterior) */
+	float physAmbK = 0.0f;
 	QString summary;                    //!< one census line
 };
 

@@ -239,6 +239,7 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include "features/shared/cellpasstime.h"
 #include "celltexahead.h"
 #include "features/shared/wwtelemetry.h"	// lane MODULES1
+#include "features/exposure/physunits.h"	// lane PHYSUNITS1: wwPhysEcho on the path's side file
 #include <vector>
 
 namespace {
@@ -2009,8 +2010,10 @@ static void wwRenderPathRun( GLView * ogl, const QString & pathFile, const QStri
 	// the stepped hour went on into every later row of the launch; put the pinned hour back
 	if ( stepHour )
 		wwLookdevSetHour( hour0 );
-	if ( sideOk )
+	if ( sideOk ) {
 		log << "paints " << ( preroll + frames - unpainted ) << " of " << ( preroll + frames ) << " frames painted\n";
+		log << wwPhysEcho() << "\n";	// lane PHYSUNITS1: the row's camera (EV100 metered / applied) and scale
+	}
 	wwGameTaaSetFrame( -1 );
 	wwCellPostSetPath( -1, 0.0f );
 	wwCellSsgiSetPath( -1 );

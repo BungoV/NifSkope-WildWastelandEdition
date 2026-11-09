@@ -63,6 +63,7 @@ BSD License - see nifskope.h
 #include "io/nifxfile.h"	// lane NIFXLIGHT1: a model's .nifx path
 #include "features/lights/cellnifxlights.h"	// lane NIFXLIGHT3: the .nifx path rule, kept live by src/gl/celllights.cpp
 #include "features/lights/lightphys.h"	// lane MUSGI1 round 4: the vanilla curve's flux for the lamp scale
+#include "features/exposure/physunits.h"	// lane PHYSUNITS1: lamps in lumens
 #include "features/shadows/sunshadow.h"	// lane LIVESET1: wwSunShadowForget
 #include "features/gi/cellprobeview.h"
 #include "gl/lookdevstage.h"	// lane SKYTOP1: the cell's load order feeds the weather
@@ -1463,6 +1464,13 @@ static void cellPublishLighting( const NifModel * nif, const EsmWorld & world, c
 			l.xemi = xl.exists ? 0x01000000U | ( quint32( xl.color[0] ) << 16 ) | ( quint32( xl.color[1] ) << 8 ) | quint32( xl.color[2] )
 				: xr && *xr == "REGN" ? wwCellXemiRegionCode( r.emittance ) : 0U;
 		}
+		if ( wwPhysOn() ) {	// lane PHYSUNITS1: lumens (637 per fade, the .nifx SPEC's law) x Game Light Brightness
+			const float g = wwPhysGameLights();
+			const float k = wwPhysLighK( l.radius ) * g;	// LATE ITEM 11-08: the radius law (red WW_PHYSUNITS_LAMP_RED=1)
+			for ( int c = 0; c < 3; c++ )
+				l.color[c] *= k;
+			l.physG = g;
+		}
 		if ( startOff ) {   // recorded, lights nothing at the start
 			L.offLights.append( l );
 			continue;
@@ -1481,7 +1489,36 @@ static void cellPublishLighting( const NifModel * nif, const EsmWorld & world, c
 	 * packs these colours), the air and the flares take the same factor. Other interiors keep theirs: no sun to stand
 	 * against, and the eye's cap (7) would black them out. Pin WW_CELL_LAMP_SCALE=<x> (0 = lamps off, a measurement);
 	 * red WW_CELL_LAMP_SCALE_RED=1 = the lamps as authored. Census `cell lamp scale:`. */
-	if ( spec.interior && !chunkOut ) {
+	/* lane PHYSUNITS1: the lamps' census in lumens (the law 637 x fade x Y before Game Light Brightness: the anchors) and
+	 * an interior's ambient factor, the median lamp factor (the cell's ambient keeps its authored ratio to its lamps) */
+	if ( wwPhysOn() ) {
+		auto y709 = []( const float c[3] ) { return 0.2126f * c[0] + 0.7152f * c[1] + 0.0722f * c[2]; };
+		QVector<float> lm, ks, rs;
+		for ( const QVector<WwCellLight> * v : { &L.lights, &L.offLights } )
+			for ( const WwCellLight & l : *v ) {
+				if ( !( l.physG > 0.0f ) || !( l.radius > 0.0f ) )
+					continue;
+				const float k = wwPhysLighK( l.radius );	// the drawn lumens: colour / (k G) x 637 / wwPhysLampK
+				lm.append( wwphys::kLumenPerFade * y709( l.color ) / ( k * l.physG * wwPhysLampK( l.radius ) ) );
+				ks.append( k );
+				rs.append( l.radius );
+			}
+		std::sort( lm.begin(), lm.end() );
+		std::sort( ks.begin(), ks.end() );
+		std::sort( rs.begin(), rs.end() );
+		auto q = []( const QVector<float> & a, double f ) {
+			return a.isEmpty() ? 0.0 : double( a.at( std::min( qsizetype( f * a.size() ), a.size() - 1 ) ) );
+		};
+		if ( spec.interior )
+			L.physAmbK = ks.isEmpty() ? wwPhysLighK( 400.0f ) : ks.at( ks.size() / 2 );
+		std::fprintf( stderr, "phys lamps: %s%s %lld lamps lumens (law, before x%.3f) p10 %.0f median %.0f p90 %.0f max %.0f; "
+			"radius p10 %.0f median %.0f p90 %.0f; factor median %.4f%s\n",
+			spec.interior ? qPrintable( world.interior().edid ) : "exterior", chunkOut ? " (chunk)" : "", qint64( lm.size() ),
+			double( wwPhysGameLights() ), q( lm, 0.1 ), q( lm, 0.5 ), q( lm, 0.9 ), q( lm, 1.0 ), q( rs, 0.1 ), q( rs, 0.5 ),
+			q( rs, 0.9 ), q( ks, 0.5 ),
+			spec.interior ? qPrintable( QStringLiteral( "; ambient factor %1" ).arg( double( L.physAmbK ), 0, 'f', 4 ) ) : "" );
+	}
+	if ( spec.interior && !chunkOut && !wwPhysOn() ) {	// lane PHYSUNITS1: MUSGI1's scale is the red's
 		constexpr float kLumenPerFade = 637.0f, kSunLux = 128000.0f, kSkyLevelNoon = 4.816f;
 		auto y709 = []( const float c[3] ) { return 0.2126f * c[0] + 0.7152f * c[1] + 0.0722f * c[2]; };
 		QVector<float> per;

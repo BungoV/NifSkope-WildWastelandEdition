@@ -43,6 +43,7 @@ public:
 	QTreeWidget * tree = nullptr;
 	QComboBox * modeBox = nullptr;
 	QDoubleSpinBox * exposureBox = nullptr;
+	QDoubleSpinBox * gameLightsBox = nullptr;	// lane PHYSUNITS1: Game Light Brightness (vanilla lamps + emissives)
 	QComboBox * viewBox = nullptr;
 	QCheckBox * routeViewBox = nullptr;
 	// Weather (W1) and Ground rows (lane PBRR2B)

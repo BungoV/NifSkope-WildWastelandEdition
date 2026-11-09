@@ -1,4 +1,6 @@
 #include "cellnifxlights.h"
+#include "features/exposure/physunits.h"	// lane PHYSUNITS1: lumens absolute
+#include "wwswitch.h"
 
 #include <QDateTime>
 #include <QDir>
@@ -167,6 +169,7 @@ void wwNifxLightsApply( WwCellLighting & L, const QHash<QString, nifxl::Lights> 
 			dn = std::sqrt( dn );
 			for ( int r = 0; r < 3 && dn > 0; r++ )
 				l.dir[r] = float( l.dir[r] / dn );
+			nifxl::setKelvinRed( wwEnvIsSet( "WW_NIFX_KELVIN_RED" ) );	// lane PHYSUNITS1: ^ the Kang kelvin + gel tint
 			const nifxl::Converted cv = nifxl::convert( x, ( red & WwNifxRedTintDims ) != 0,
 				( red & WwNifxRedAnchor800 ) ? nifxl::kLumensPerFadeOld : nifxl::kLumensPerFade,
 				( red & WwNifxRedRadius1Lux ) ? nifxl::kRadiusPerSqrtCandelaOld : nifxl::kRadiusPerSqrtCandela );
@@ -174,7 +177,8 @@ void wwNifxLightsApply( WwCellLighting & L, const QHash<QString, nifxl::Lights> 
 			l.radius = ( red & WwNifxRedNoScale ) ? float( cv.radius ) : std::clamp( float( cv.radius ) * f.scale, 16.0f, 16384.0f );
 			for ( int k = 0; k < 3; k++ ) {
 				l.byteColor[k] = float( cv.color[k] ) / 255.0f;
-				l.color[k] = std::pow( float( cv.color[k] ) / 255.0f, 2.2f ) * float( cv.fade ) * dim * L.nifxScale;	// MUSGI1 r5
+				l.color[k] = std::pow( float( cv.color[k] ) / 255.0f, 2.2f ) * float( cv.fade ) * dim
+					* ( wwPhysOn() ? wwPhysLampK( l.radius ) : L.nifxScale );	// PHYSUNITS1: absolute lumens, no G; MUSGI1 r5
 			}
 			l.spot = x.type == nifxl::Spot;
 			if ( l.spot )

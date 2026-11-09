@@ -173,6 +173,7 @@ private:
 #include "features/water/cellocean.h"
 #include "features/water/cellunderwater.h"
 #include "features/clouds/cloudvol.h"	// the volume clouds' depth test
+#include "features/exposure/physunits.h"	// lane PHYSUNITS1: emissives in cd/m2
 
 // NOTE: The FPS define is a frame limiter,
 //	NOT the guaranteed FPS in the viewport.
@@ -3326,7 +3327,9 @@ static void wwCellImageSpaceMeasurePass( Scene * scene )
 			if ( std::isfinite( px[i * 4 + c] ) )
 				sum += wgt[c] * px[i * 4 + c];
 	}
-	wwCellImageSpaceSetAdapted( scene, wwAtmoAdapted( float( sum / double( std::max( counted, 1 ) ) ), counted,
+	// lane PHYSUNITS1 (RESUME 11-09 b): the seed takes the physical camera's meter too (one law, wwPhysMeter)
+	const float physMeter = wwPhysMeter( px.data(), int( cover.size() ), cover.data() );
+	wwCellImageSpaceSetAdapted( scene, wwAtmoAdapted( physMeter >= 0.0f ? physMeter : float( sum / double( std::max( counted, 1 ) ) ), counted,
 		int( cover.size() ) ), counted );
 	// the game blooms a quarter-size copy of the HDR; a full-size (dump) measure is averaged 4x4
 	wwCellImageSpaceSetBloom( scene, px.data(), w, h, div == 1 ? 4 : 1 );
@@ -3581,7 +3584,8 @@ void GLView::paintGL()
 	globalUniforms.brightnessScale = brightnessScale;
 	globalUniforms.glowScale = ( scene->hasOption(Scene::DoGlow) ? glowScale : 0.0f );
 	if ( const WwCellLighting * cl = wwCellLightsFor( scene->nifModel ) )
-		globalUniforms.glowScale *= cl->glowScale;	// lane MUSGI1 r5: a sunlit interior's lamp scale on the emissive surfaces
+		globalUniforms.glowScale *= wwPhysSkyOn() ? wwPhysEmitScale()	// lane PHYSUNITS1: cd/m2 per emissive unit x G
+			: cl->glowScale;	// lane MUSGI1 r5: a sunlit interior's lamp scale on the emissive surfaces
 	FloatVector4	mat_amb( 0.0f );
 	FloatVector4	mat_diff( 0.0f );
 	FloatVector4	lightDir( 0.0f, 0.0f, 1.0f, 0.0f );
