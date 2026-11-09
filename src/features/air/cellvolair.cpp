@@ -493,6 +493,7 @@ struct VaGpu
 	// last pass's view (posView = sc R world + t: rows sc R | t) and grid
 	GLuint hist[2] = { 0, 0 };
 	int histCur = 0, histCols = 0, histRows = 0, histSlices = 0;
+	int histStrata = 0;	// MODULES1 item 8: 6 = the four strata + the env walk's two (envspread), 4 = red
 	bool half = false;	// lane PERFFIX3: the volumes are RGBA16F (WW_CELL_AIR_RED=f32: RGBA32F, as before)
 	// lane PERFFIX3: the stages whose framebuffer was found complete for this layout of targets (bit per site; asked once)
 	int fbOk = 0;
@@ -1844,12 +1845,20 @@ static void vaPassInner( Scene * scene, bool run )
 	}
 	// lane PERF2, temporal: not with red lightmid (its single light sample has no strata)
 	const bool temporal = s.temporal && g.mrtOk == 1 && !( s.red & 262144 );
-	if ( temporal && ( !g.hist[0] || g.histCols != cols || g.histRows != rows || g.histSlices != kSlices ) ) {
+	/* MODULES1 item 8: the leak walk's env read (airLeakEnv, the 8 probes round each froxel: 9.0 ms of a 13.8 ms
+	 * inject, Goodneighbor night, all on) rides the temporal history as two more strata: a froxel walks one frame in
+	 * four (2 x 2 columns, offset by layer and frame) and reuses the reprojected walk otherwise, as the sun's strata do.
+	 * Red WW_CELL_AIR_ENVSPREAD_RED=1: the walk every froxel every frame, four strata, as before */
+	WW_SWITCH_STATIC( bool, envSpreadRed, wwEnv( "WW_CELL_AIR_ENVSPREAD_RED" ).trimmed() == "1" );
+	const int strata = envSpreadRed ? 4 : 6;
+	if ( temporal && ( !g.hist[0] || g.histCols != cols || g.histRows != rows || g.histSlices != kSlices
+		|| g.histStrata != strata ) ) {
 		for ( GLuint & h : g.hist )
-			vaAlloc3D( fn, h, cols, rows, 4 * kSlices, true, false );
+			vaAlloc3D( fn, h, cols, rows, strata * kSlices, true, false );
 		g.histCols = cols;
 		g.histRows = rows;
 		g.histSlices = kSlices;
+		g.histStrata = strata;
 		g.histOk = false;
 	}
 	if ( !temporal || g.doc != scene->nifModel )
@@ -2169,6 +2178,8 @@ static void vaPassInner( Scene * scene, bool run )
 	}
 	prog->uni1b( "volHistOk", temporal && g.histOk );
 	prog->uni1i( "volHist", kInjectUnit );
+	prog->uni1i( "volHistStrata", temporal ? g.histStrata : 4 );	// MODULES1 item 8: the env walk's strata 4, 5
+	prog->uni1i( "volEnvSpread", temporal && g.histStrata == 6 ? 1 : 0 );
 	{
 		const int pf = wwCellPostPathFrame();
 		const bool shifted = s.shiftFrame >= 0 && pf >= s.shiftFrame;
@@ -2507,11 +2518,13 @@ static void vaPassInner( Scene * scene, bool run )
 		if ( stage == 1 && temporal ) {
 			// lane PERF2, temporal: the inject at attachment 0, the four strata of this layer into the other history
 			const GLuint out = g.hist[g.histCur ^ 1];
-			const GLenum bufs[5] = { GL_COLOR_ATTACHMENT0, GL_COLOR_ATTACHMENT1, GL_COLOR_ATTACHMENT2, GL_COLOR_ATTACHMENT3, GL_COLOR_ATTACHMENT4 };
-			fn->glDrawBuffers( 5, bufs );
+			const GLenum bufs[7] = { GL_COLOR_ATTACHMENT0, GL_COLOR_ATTACHMENT1, GL_COLOR_ATTACHMENT2, GL_COLOR_ATTACHMENT3,
+				GL_COLOR_ATTACHMENT4, GL_COLOR_ATTACHMENT5, GL_COLOR_ATTACHMENT6 };
+			const int ns = g.histStrata;	// MODULES1 item 8: 6 with the env walk's strata, 4 = red envspread
+			fn->glDrawBuffers( 1 + ns, bufs );
 			for ( int k = 0; k < kSlices; k++ ) {
 				fn->glFramebufferTextureLayer( GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, g.inject, 0, k );
-				for ( int p = 0; p < 4; p++ )
+				for ( int p = 0; p < ns; p++ )
 					fn->glFramebufferTextureLayer( GL_FRAMEBUFFER, GLenum( GL_COLOR_ATTACHMENT1 + p ), out, 0, p * kSlices + k );
 				if ( k == 0 && !fbComplete( 1 ) ) {
 					complete = false;
@@ -2520,7 +2533,7 @@ static void vaPassInner( Scene * scene, bool run )
 				prog->uni1i( "volLayer", k );
 				r->drawShape( 4, 3, 6, GL_TRIANGLES, GL_UNSIGNED_SHORT, &attrs, idx );
 			}
-			for ( int p = 1; p <= 4; p++ )
+			for ( int p = 1; p <= ns; p++ )
 				fn->glFramebufferTexture2D( GL_FRAMEBUFFER, GLenum( GL_COLOR_ATTACHMENT0 + p ), GL_TEXTURE_2D, 0, 0 );
 			const GLenum first = GL_COLOR_ATTACHMENT0;
 			fn->glDrawBuffers( 1, &first );

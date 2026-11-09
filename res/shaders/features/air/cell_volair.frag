@@ -80,6 +80,8 @@ uniform vec4 volReproj[3];		// this frame's view -> last frame's view (rows, vie
 uniform vec4 volPrevGrid;		// last frame's [0][0], [1][1], near, ln(far / near)
 uniform float volPrevScale;		// last frame's fogDistScale
 uniform bool volHistOk;			// a history at these dims
+uniform int volHistStrata;		// MODULES1 item 8: volHist's strata (4; 6 = + the env walk's two, volEnvSpread)
+uniform int volEnvSpread;		// MODULES1 item 8: 1 = the leak walk one frame in four, else its history (red 0)
 uniform vec3 volLightShift;		// gates only (WW_CELL_AIR_LIGHTSHIFT): the air sees every placed light moved by this (world)
 uniform bool volSurfClusters;	// lane GAPLOOK1 (LIGHTSYS-4): the lights from the surfaces' lists (cell_cluster.glsl)
 uniform vec2 volSurfPx;			// the main viewport's pixels a froxel column (x, y)
@@ -218,7 +220,7 @@ float airCsmCover( vec3 posView )
 	return 1.0 - s2 * s2;
 }
 
-vec3 airLeakEnv( vec3 P, vec3 dW, out float fade, float csmCover )
+vec3 airLeakEnvWalk( vec3 P, vec3 dW, out float fade, float csmCover )
 {
 	fade = 0.0;
 	airLeakSun = 1.0;
@@ -340,6 +342,28 @@ vec3 airLeakEnv( vec3 P, vec3 dW, out float fade, float csmCover )
 			airLeakR = clamp( dot( max( 2.0 * ( Ep + Em ) + 3.0 * volGi.w * ( Ep - Em ), vec3( 0.0 ) ), Y ) / so, 0.0, 2.0 );
 	}
 	return f * 0.25 * max( 2.0 * ( Ep + Em ) + 3.0 * volGi.w * ( Ep - Em ), vec3( 0.0 ) ) * volGi.rgb;
+}
+
+/* MODULES1 item 8: the walk's answer as stage 1's two env strata: airEnvMode 1 = a valid history this froxel and not
+ * its frame (airEnvH0/H1, reprojected); 0 = walk now. airEnvO0/O1 = what this froxel used, the next frame's history:
+ * O0 (env rgb, fade), O1 (airLeakSun, airLeakR, 1 = valid, 0) */
+int airEnvMode = 0;
+vec4 airEnvH0 = vec4( 0.0 ), airEnvH1 = vec4( 0.0 );
+vec4 airEnvO0 = vec4( 0.0 ), airEnvO1 = vec4( 0.0 );
+vec3 airLeakEnv( vec3 P, vec3 dW, out float fade, float csmCover )
+{
+	if ( airEnvMode == 1 ) {
+		fade = airEnvH0.a;
+		airLeakSun = airEnvH1.x;
+		airLeakR = airEnvH1.y;
+		airEnvO0 = airEnvH0;
+		airEnvO1 = airEnvH1;
+		return airEnvH0.rgb;
+	}
+	vec3 j = airLeakEnvWalk( P, dW, fade, csmCover );
+	airEnvO0 = vec4( j, fade );
+	airEnvO1 = vec4( airLeakSun, airLeakR, 1.0, 0.0 );
+	return j;
 }
 
 /* fix 2: past the cascades' reach (their fade, as airSunMapVis weighs it) the sun takes the volume's gate; inside it
@@ -1519,6 +1543,7 @@ void main()
 		if ( edge > lim ) {
 			fragColor = vec4( 0.0, 0.0, 0.0, 1.0 );
 			volMrt[0] = volMrt[1] = volMrt[2] = volMrt[3] = vec4( 0.0 );	// temporal: no history here
+			volMrt[4] = volMrt[5] = vec4( 0.0 );	// MODULES1 item 8: nor an env walk
 			return;
 		}
 	}
@@ -1577,14 +1602,17 @@ void main()
 		}
 		if ( !scatters || !( W > 0.0 ) ) {
 			volMrt[0] = volMrt[1] = volMrt[2] = volMrt[3] = vec4( 0.0, 0.0, 0.0, 1.0 );
+			volMrt[4] = volMrt[5] = vec4( 0.0 );	// MODULES1 item 8: no env walk kept (the next scattering frame walks)
 			fragColor = vec4( 0.0, 0.0, 0.0, T );
 			return;
 		}
 		vec3 posM = dirView * ( tm / fogDistScale );
-		vec4 h[4];
+		vec4 h[6];
+		h[4] = h[5] = vec4( 0.0 );
 		bool have = volHistOk;
+		int hn = volEnvSpread != 0 ? 6 : 4;	// MODULES1 item 8: strata 4, 5 = the env walk's
 		if ( have && volTemporal == 2 ) {
-			for ( int p = 0; p < 4; p++ )
+			for ( int p = 0; p < hn; p++ )
 				h[p] = texelFetch( volHist, ivec3( col, p * volDims.z + volLayer ), 0 );
 		} else if ( have ) {
 			vec4 pm4 = vec4( posM, 1.0 );
@@ -1598,7 +1626,13 @@ void main()
 				&& kp >= 0.0 && kp <= volSlices.z;
 			kp = clamp( kp, 0.5, volSlices.z - 0.5 );	// the filter stays inside its stratum's layers
 			for ( int p = 0; p < 4; p++ )
-				h[p] = have ? texture( volHist, vec3( uv, ( float( p ) * volSlices.z + kp ) / ( 4.0 * volSlices.z ) ) ) : vec4( 0.0 );
+				h[p] = have ? texture( volHist, vec3( uv, ( float( p ) * volSlices.z + kp ) / ( float( volHistStrata ) * volSlices.z ) ) ) : vec4( 0.0 );
+			if ( have && hn == 6 ) {	// MODULES1 item 8: the env walk's strata nearest (a filter would blend airLeakR's -1 in)
+				ivec2 xc = clamp( ivec2( uv * vec2( volDims.xy ) ), ivec2( 0 ), volDims.xy - 1 );
+				int xk = clamp( int( kp ), 0, volDims.z - 1 );
+				h[4] = texelFetch( volHist, ivec3( xc, 4 * volDims.z + xk ), 0 );
+				h[5] = texelFetch( volHist, ivec3( xc, 5 * volDims.z + xk ), 0 );
+			}
 		}
 		int need = 15;
 		if ( have ) {
@@ -1610,6 +1644,14 @@ void main()
 				need = stale ? 0 : 1 << volQ;
 		}
 		vec3 Jenv = vec3( 0.0 );
+#ifdef WW_AIR_LEAK
+		/* MODULES1 item 8: this froxel walks the probes one frame in four (its 2 x 2 column phase, offset by layer and
+		 * frame), else takes the walk's history; a history with an invalid tap walks */
+		bool envDue = ( ( ( col.x & 1 ) + 2 * ( col.y & 1 ) + volLayer + volQ ) & 3 ) == 0;
+		airEnvMode = volEnvSpread != 0 && have && !envDue && h[5].z > 0.9999 ? 1 : 0;
+		airEnvH0 = h[4];
+		airEnvH1 = h[5];
+#endif
 		airRest( posM, dirView, zc + dzdt * tm, t0 - tm, t1 - tm, Jenv, false );
 		float vk = airVeilK( Jenv, tm, zc + dzdt * tm );	// lane FARCITYWASH1
 		vec3 Jq[4];
@@ -1646,6 +1688,12 @@ void main()
 		volMrt[1] = so[1];
 		volMrt[2] = so[2];
 		volMrt[3] = so[3];
+#ifdef WW_AIR_LEAK
+		volMrt[4] = airEnvO0;
+		volMrt[5] = airEnvO1;
+#else
+		volMrt[4] = volMrt[5] = vec4( 0.0 );
+#endif
 		if ( !fogOn || keep < -1e30 )
 			acc = vec3( 0.0 );
 		fragColor = vec4( acc, T );
