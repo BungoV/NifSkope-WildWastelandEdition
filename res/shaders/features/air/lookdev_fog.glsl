@@ -581,7 +581,10 @@ vec4 wwVolAirSky( vec3 dirView )
 		Tt = exp( -volAirMed.x * wwAirCol( z0, top, wwAirGroundRay( dirView * ( far / max( fogDistScale, 1e-12 ) ), dirView, dEnd - far, s ) ) / s
 			- wwAirRainTau( dirView * ( far / max( fogDistScale, 1e-12 ) ), dirView * ( ( far + 1e7 ) / max( fogDistScale, 1e-12 ) ) ) );	// lane RAINFOG2: + the rain fog, to where the ray leaves it
 	} else {
-		Tt = ( s >= 0.0 && z0 >= top ) ? 1.0 : 0.0;
+		/* MODULES1 item 18: a ray still above the air's top where the grid ends (a camera above the air looking down)
+		 * has met no air yet: its tail is not opaque black; the sky behind it (the planet's ground through the haze
+		 * layer) shows. Bit 16384; red WW_CELL_AIR_ABOVE_RED=1: every downward tail opaque, as before */
+		Tt = ( s >= 0.0 && z0 >= top ) || ( ( volAirFlags & 16384 ) != 0 && z0 >= top ) ? 1.0 : 0.0;
 		dEnd = far + 1e7;
 	}
 	if ( ( volAirFlags & 4 ) != 0 ) {

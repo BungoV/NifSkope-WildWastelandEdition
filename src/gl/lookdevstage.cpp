@@ -3263,7 +3263,10 @@ bool drawAtmo( Scene * scene, QStringList & drew, bool capture = false )
 
 bool wwLookdevSkyLinearOn()
 {
-	WW_SWITCH_STATIC( bool, on, wwEnv( "WW_SKY_LINEAR" ).trimmed() == QLatin1StringView( "1" ) );
+	/* MODULES1 item 18: on by default. The sky under the frame took the menu's exposure, not the camera's, so wherever
+	 * the air no longer covered it (a camera above ~200 m) it showed blown white; in the frame it takes the one exposure
+	 * and tone map. Red WW_SKY_LINEAR=0: the sky in the view under the frame, as before. */
+	WW_SWITCH_STATIC( bool, on, wwEnv( "WW_SKY_LINEAR" ).trimmed() != QLatin1StringView( "0" ) );
 	return on;
 }
 

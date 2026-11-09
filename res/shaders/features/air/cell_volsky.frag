@@ -51,6 +51,13 @@ void main()
 		float mu = dot( vr, viewMatrix[2] );	// world up: viewMatrix's columns are the world axes in view space
 		float muH = -sqrt( max( 0.0, 1.0 - kRb * kRb / ( atSkyCamR * atSkyCamR ) ) );
 		vec3 ts = atTrans( atSkyTransTex, atSkyCamR, max( mu, muH + 1e-4 ) );	// below the horizon: the horizon's
+		if ( atApSkyRule == 3 && mu < muH ) {
+			// MODULES1 item 18 (rule 3): a ray that meets the planet keeps the air's transmittance to the ground
+			// (T(ground, up) / T(camera, up) along the reversed ray), not the horizon's ~0 that banded a high view black
+			float dg = atDistGround( atSkyCamR, mu );
+			float mg = clamp( ( atSkyCamR * mu + dg ) / kRb, -1.0, 0.0 );
+			ts = min( atTrans( atSkyTransTex, kRb, -mg ) / max( atTrans( atSkyTransTex, atSkyCamR, -mu ), vec3( 1e-30 ) ), vec3( 1.0 ) );
+		}
 		float tSky = dot( ts, vec3( 1.0 / 3.0 ) );
 		if ( atApSkyRule >= 1 && atApDouble <= 0.5 && volSkyOn ) {
 			// lane HORIZONBAND1: the horizon band, coloured by the aerial perspective's far end along this ray (rule 1, now
@@ -60,10 +67,14 @@ void main()
 			// night ambient and the aerial perspective does not: rule 1 drew a dark flat stripe (spot 3 22:00, 18,19,21
 			// between a 25,40,60 sky and a 36,59,90 far land, hard edges).
 			vec4 ap = vec4( 0.0 );	// unused where the band's weight is 0 (wwSkyBandL mixes it by w)
-			if ( atApSkyRule == 2 ) {
+			if ( atApSkyRule >= 2 ) {
 				if ( wwSkyBandW( tSky ) > 0.0 ) {	// the fog path only in the band (~2 deg above the horizon and under it)
 					float farV = projectionMatrix[3][2] / min( projectionMatrix[2][2] + 1.0, -1e-6 );	// the far plane (view units)
-					ap = vec4( wwFog( vec3( 0.0 ), vr * abs( farV ) ), 0.0 );
+					float dV = abs( farV );
+					// MODULES1 item 18 (rule 3): a ray that meets the planet ends there (km to units: / 1.42875e-5)
+					if ( atApSkyRule == 3 && mu < muH )
+						dV = min( dV, atDistGround( atSkyCamR, mu ) / 1.42875e-5 );
+					ap = vec4( wwFog( vec3( 0.0 ), vr * dV ), 0.0 );
 				}
 			} else {
 				ap = wwAtmoApAt( vr * ( atAp.y / max( atAp.z, 1e-12 ) ) );

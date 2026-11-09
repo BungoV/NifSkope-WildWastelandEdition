@@ -89,8 +89,12 @@ GrassState & gs()
 			s.on = QSettings().value( QLatin1StringView( kGrassKey ), false ).toBool();
 		}
 		s.redSeed = wwEnvStr( "WW_CELL_GRASS_RED" ).contains( QLatin1StringView( "seed" ) );
-		s.treeBuild = wwEnvStr( "WW_CELL_TREEWIND" ).trimmed() == QLatin1StringView( "1" );
+		/* MODULES1 item 19: trees sway by default (the cell view never acts paused); red WW_CELL_TREEWIND=0 or
+		 * WW_CELL_TREEWIND_RED=off: no tree-wind buckets, still trees, as before */
+		s.treeBuild = wwEnvStr( "WW_CELL_TREEWIND" ).trimmed() != QLatin1StringView( "0" )
+			&& wwEnvStr( "WW_CELL_TREEWIND_RED" ).trimmed() != QLatin1StringView( "off" );
 		s.treeRed = wwEnvStr( "WW_CELL_TREEWIND_RED" ).trimmed() == QLatin1StringView( "1" );
+		qInfo().noquote() << "cell tree wind build:" << ( s.treeBuild ? "on" : "off (red WW_CELL_TREEWIND=0 / _RED=off)" );
 		s.dump = wwEnvStr( "WW_CELL_GRASS_DUMP" ).trimmed();
 		bool ok = false;
 		const double t = wwEnvStr( "WW_CELL_GRASS_WIND_T" ).toDouble( &ok );
@@ -834,6 +838,18 @@ void wwCellGrassFrameEnd()
 		s.clock.start();
 	s.tPrev = s.tCur;
 	s.tCur = double( s.clock.nsecsElapsed() ) * 1e-9;
+	/* MODULES1 item 19: the wind's proof every ~5 s: the weather's speed and direction as the sway reads them, and
+	 * the sway clock advancing (never 0, never frozen) */
+	static double saidAt = -10.0;
+	if ( s.tCur - saidAt >= 5.0 ) {
+		saidAt = s.tCur;
+		float w[5] = { 0, 0, 0, 0, 0 };
+		const bool live = wwLookdevWind( w );
+		qInfo().noquote() << QStringLiteral( "cell wind: %1 speed %2/255 dir %3 deg range %4 turb %5/255, sway clock %6 s (prev %7)%8" )
+			.arg( live ? QStringLiteral( "live" ) : QStringLiteral( "none (no weather wind)" ) ).arg( double( w[0] ), 0, 'f', 2 )
+			.arg( double( w[1] ), 0, 'f', 1 ).arg( double( w[2] ), 0, 'f', 1 ).arg( double( w[3] ), 0, 'f', 2 )
+			.arg( s.tCur, 0, 'f', 3 ).arg( s.tPrev, 0, 'f', 3 ).arg( s.treeBuild ? QString() : QStringLiteral( ", trees still (red)" ) );
+	}
 }
 
 bool wwCellGrassWantsRepaint()

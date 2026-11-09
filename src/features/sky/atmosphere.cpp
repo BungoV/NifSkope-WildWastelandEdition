@@ -1356,7 +1356,9 @@ void wwAtmoApUniforms( Scene * scene )
 		// lane HORIZONBAND1: the sky's horizon band (atmo_skyband.glsl); the red skyclamp = the clamp before it (live)
 		// lane FIX1101A (atmo, the night horizon stripe): rule 2 (shipped) colours the band with what a black surface at
 		// the far plane gets through the surfaces' own fog path; red apband = rule 1 (the aerial perspective's colour alone)
-		prog->uni1i( "atApSkyRule", apRed( "skyclamp" ) ? 0 : apRed( "apband" ) ? 1 : 2 );
+		/* MODULES1 item 18: rule 3 (shipped) ends the band's fog path where a ray under the horizon meets the ground,
+		 * not at the far plane under it (a high camera saw black under the horizon); red WW_ATMO_AP_RED=bandfar = rule 2 */
+		prog->uni1i( "atApSkyRule", apRed( "skyclamp" ) ? 0 : apRed( "apband" ) ? 1 : apRed( "bandfar" ) ? 2 : 3 );
 	}
 	if ( !on )
 		return;
