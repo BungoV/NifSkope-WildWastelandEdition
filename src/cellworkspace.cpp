@@ -1348,7 +1348,7 @@ void CellWorkspacePanel::buildUi()
 	probesShow = new QCheckBox( tr( "PRTP Debug View" ), prtpRow );
 	probesShow->setObjectName( QStringLiteral( "CellWorkspaceProbesShow" ) );
 	probesShow->setChecked( QSettings().value(
-		QString( "%1/probes" ).arg( QLatin1String( CELL_SHOW_GROUP ) ), true ).toBool() );
+		QString( "%1/probes" ).arg( QLatin1String( CELL_SHOW_GROUP ) ), false ).toBool() );	// MODULES1 item 6: off by default
 	probesPlace = new QPushButton( tr( "Place" ), prtpRow );
 	probesPlace->setObjectName( QStringLiteral( "CellWorkspaceProbesPlace" ) );
 	probesPlace->setStyleSheet( wwBoxedButtonQss( QStringLiteral( "3px 10px" ) ) );

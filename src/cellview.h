@@ -60,7 +60,7 @@ struct CellSceneSpec
 	QString interiorCell;
 	/* `probes` places the bake's probes over the whole loaded block; `probesShow` draws them. */
 	bool probes = false;
-	bool probesShow = true;
+	bool probesShow = false;	//!< lane MODULES1 item 6: hidden by default (red WW_CELL_PROBES_SHOW_RED=1: shown)
 	bool probesHiddenByEnv = false;	//!< lane LIVESET1: WW_CELL_PROBES_HIDE turned probesShow off
 	/* Place the probes, then bake them into `.tbk` sector files in `bakeDir` (empty =
 	 * `<app>/prtp_bake/<world or cell>`). One-shot: the workspace clears it once noted. */

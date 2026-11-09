@@ -91,7 +91,7 @@ uniform sampler2D fxDepth;		// the opaque pass's depth, the viewport's corner at
 uniform float fxSoftDepth;		// game units
 uniform float fxDistScale;		// view units -> game units
 uniform bool fxAdditive;
-uniform int fxRed;				// 2 nosoft, 4 nolin, 8 hide
+uniform int fxRed;				// 2 nosoft, 4 nolin, 8 hide, 32 unbound (MODULES1 item 2)
 // lane DECALLIT1 (WW_CELL_DECALLIT_PROBE, gates only): an effect decal in a probe pass draws a white colour, opaque
 // where it shows, so probe 6 holds the light it takes (lit as the wall, or self-lit under the red)
 uniform bool fxDecalProbe;
@@ -548,6 +548,16 @@ void main()
 			}
 		} else
 		lin = wwFogFx( lin, -ViewDir, fxAdditive );	// lane VOLAIR1: the air, as the surfaces take it (red fxfog: the game's fog alone)
+		/* lane MODULES1 item 2 (bungo 11-09, black shards on the ground in daylight): in real units the lit base is
+		 * ~25000, so a card brighter than ~2.6 overflows the RGBA16F frame to inf and TAA/bloom turn it into NaN = black.
+		 * The light is kept under half the half-float range and a non-finite value draws nothing. Red WW_CELL_FX_RED=unbound. */
+		if ( ( fxRed & 32 ) == 0 ) {
+			if ( any( isnan( lin ) ) || any( isinf( lin ) ) || isnan( color.a ) ) {
+				lin = vec3( 0.0 );
+				color.a = 0.0;
+			}
+			lin = min( lin, vec3( 32768.0 ) );
+		}
 		// probe 6 (the imagespace's measure): the linear value, blended as drawn
 		if ( cellProbe == 6 )
 			fragColor = vec4( lin * cellProbeGain, color.a );

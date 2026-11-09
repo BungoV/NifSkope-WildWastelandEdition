@@ -284,6 +284,7 @@ HEADERS += \
 	src/features/sky/atmosphere.h \
 	src/features/clouds/cloudmap.h \
 	src/features/weather/weatherrecx.h \
+	src/features/weather/wxoverride.h \
 	src/features/weather/weatherrecxmath.h \
 	src/features/weather/weathergen.h \
 	src/features/clouds/cloudnoise.h \
@@ -327,6 +328,8 @@ HEADERS += \
 	src/features/far-ground/cellfgsched.h \
 	src/gl/cellunits.h \
 	src/ui/scenewindow.h \
+	src/ui/scenewxrows.h \
+	src/ui/livepanel.h \
 	src/features/far-lod/impostordraw.h \
 	src/features/far-lod/impostoroct.h \
 	src/features/far-lod/impostorcard.h \
@@ -642,6 +645,7 @@ SOURCES += \
 	src/features/sky/atmosphere.cpp \
 	src/features/clouds/cloudmap.cpp \
 	src/features/weather/weatherrecx.cpp \
+	src/features/weather/wxoverride.cpp \
 	src/features/sky/skyplacerun.cpp \
 	src/features/clouds/cloudvol.cpp \
 	src/features/clouds/cloudshadow.cpp \
@@ -668,6 +672,8 @@ SOURCES += \
 	src/features/near/cellbindless.cpp \
 	src/features/near/cellgpucull.cpp \
 	src/ui/scenewindow.cpp \
+	src/ui/scenewxrows.cpp \
+	src/ui/livepanel.cpp \
 	src/io/materialfile.cpp \
 	src/io/pbrmfile.cpp \
 	src/io/pbrmresolve.cpp \

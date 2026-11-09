@@ -250,6 +250,30 @@ struct CellActors::Impl
 	};
 	QHash<QString, Pose> idleCache;                // skeleton -> its idle pose
 	QHash<QString, int> headPartType;                        // head part editor id (lower) -> its type
+	/* MODULES1 item 16: the hair colour. NPC_ HCLF names a CLFM whose FNAM is the row of the hair's palette
+	 * (HairColor_Lgrad, a Greyscale_To_PaletteColor material); hair, facial hair and eyebrows take it. Red
+	 * WW_CELL_ACTOR_RED=hairwhite: the material's own row (every head white-haired, as before). */
+	QHash<QString, float> hairRow;                           // actor key -> its palette row
+	QHash<QString, QSet<QString>> hairShapes;                // actor key -> its hair shapes' names (lower)
+	float hairRowOf( quint32 npcForm ) const
+	{
+		const ESMFile::ESMRecord * r = record( npcForm, "NPC_" );
+		if ( !r )
+			return -1.0f;
+		quint32 clfm = 0;
+		ESMFile::ESMField f( *esm, *r );
+		while ( f.next() )
+			if ( f == "HCLF" && f.size() >= 4 )
+				clfm = esm->mapFormID( *r, u32At( f.data() ) );
+		const ESMFile::ESMRecord * c = record( clfm, "CLFM" );
+		if ( !c )
+			return -1.0f;
+		ESMFile::ESMField g( *esm, *c );
+		while ( g.next() )
+			if ( g == "FNAM" && g.size() >= 4 )
+				return f32At( g.data() );
+		return -1.0f;
+	}
 	bool headPartsRead = false;
 
 	Impl( const EsmWorld & w, const QString & root ) : world( w ), dataRoot( root )
@@ -1151,6 +1175,8 @@ bool CellActors::place( const EsmRefr & r, bool hidden, QString & key, float & s
 					const int type = d->headPartType.value( s.nearFacts.name.toLower(), -1 );
 					if ( type == 7 || ( type == 3 && ( worn & 0x3U ) ) || ( type == 4 && ( worn & ( 1U << 18 ) ) ) )
 						continue;
+					if ( type == 3 || type == 4 || type == 6 )
+						d->hairShapes[key].insert( s.nearFacts.name.toLower() );
 				}
 				b.shapes.push_back( s );
 			}
@@ -1173,6 +1199,11 @@ bool CellActors::place( const EsmRefr & r, bool hidden, QString & key, float & s
 				first = false;
 			}
 		}
+		if ( d->red != QLatin1String( "hairwhite" ) ) {
+			const float row = d->hairRowOf( looks );
+			if ( row >= 0.0f )
+				d->hairRow.insert( key, row );
+		}
 		if ( b.shapes.empty() || !b.triangles ) {
 			d->builtEmpty.insert( key );
 			return refuse( CellActorFate::NoGeometry );
@@ -1191,6 +1222,15 @@ bool CellActors::shapes( const QString & key, std::vector<NativeSrcShape> * out 
 	if ( it == d->built.constEnd() || !out )
 		return false;
 	*out = it->shapes;
+	return true;
+}
+
+bool CellActors::hairPaint( const QString & key, const QString & shapeName, float * row ) const
+{
+	auto it = d->hairRow.constFind( key );
+	if ( it == d->hairRow.constEnd() || !d->hairShapes.value( key ).contains( shapeName.toLower() ) )
+		return false;
+	*row = it.value();
 	return true;
 }
 

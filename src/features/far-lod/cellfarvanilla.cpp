@@ -988,9 +988,13 @@ qint64 wwFarVanObjectCensus( const QString & ws, int level, int x0, int y0, int 
 					cache.insert( line.left( t ), line.mid( t + 1 ).toLongLong() );
 	}
 	QByteArray added;
-	int hits = 0;
+	int hits = 0, skipped = 0;
 	QElapsedTimer clock;
 	clock.start();
+	/* lane MODULES1 item 9 (bungo 11-09: Goodneighbor |5 took 7.5 min to its first frame): a fresh exe folder has no
+	 * census.tsv, and parsing every .bto chunk for this count cost 93 s of the open (99 + 39 chunks) for a log line.
+	 * The open now counts only what census.tsv holds; WW_FARCENSUS=1 parses the rest. Red WW_FARCENSUS_RED=1: always parse. */
+	const bool parseMisses = wwEnvInt( "WW_FARCENSUS_RED" ) == 1 || wwEnvInt( "WW_FARCENSUS" ) == 1;
 	for ( int y = fvFloorDiv( y0, L ) * L; y <= y1; y += L )
 		for ( int x = fvFloorDiv( x0, L ) * L; x <= x1; x += L ) {
 			if ( x >= hx0 && x + L - 1 <= hx1 && y >= hy0 && y + L - 1 <= hy1 )
@@ -1011,6 +1015,10 @@ qint64 wwFarVanObjectCensus( const QString & ws, int level, int x0, int y0, int 
 					hits++;
 					continue;
 				}
+			}
+			if ( !parseMisses ) {
+				skipped++;
+				continue;
 			}
 			if ( !fvParse( path, bytes, src, &why ) )
 				continue;
@@ -1051,8 +1059,8 @@ qint64 wwFarVanObjectCensus( const QString & ws, int level, int x0, int y0, int 
 		if ( cf.open( QIODevice::Append ) )
 			cf.write( added );
 	}
-	std::fprintf( stderr, "far census: level %d chunks %d (%d from census.tsv) %lld ms\n", L, read, hits,
-		(long long) clock.elapsed() );
+	std::fprintf( stderr, "far census: level %d chunks %d (%d from census.tsv, %d not counted: WW_FARCENSUS=1 counts them) %lld ms\n",
+		L, read, hits, skipped, (long long) clock.elapsed() );
 	if ( chunksRead )
 		*chunksRead = read;
 	return tris;

@@ -19,6 +19,9 @@ constexpr float kLampEdgeLux = 5.0f;
 //! the energy-conserving glare's share (Jimenez 2014, Call of Duty: Advanced Warfare: a ~4 % lerp, no threshold)
 constexpr float kGlareK = 0.04f;
 constexpr float kEmitCdm2 = 500.0f;		//!< one emissive unit in cd/m2: the middle of the lit-sign range (CIE 150, ILP)
+//! lane MODULES1 item 5: one emissive unit = the geometric middle of the lamp law (22.9, no glow) and 500 (blown out),
+//! 107 cd/m2, inside CIE 150's illuminated-sign limits for dark surroundings (50 E1 .. 400 E2)
+constexpr float kEmitMidCdm2 = 107.0f;
 constexpr float kDiscCap = 6.0e4f;			//!< the sun disc's cap in cd/m2: the RGBA16F frame's head room (65504)
 constexpr float kPi = 3.14159265f;
 }
@@ -33,8 +36,8 @@ bool wwPhysSkyOn();
 float wwPhysGameLights();
 void wwPhysSetGameLights( double g );
 bool wwPhysGameLightsPinned();
-//! the emissive scale: the placed lamps' factor (kLampEdgeLux / pi vanillaFlux, cd/m2 per unit; red
-//! ^WW_PHYSUNITS_EMIT_RED=1 = kEmitCdm2; pin WW_PHYSUNITS_EMIT) x Game Light Brightness (1 under the physical red)
+//! the emissive scale: kEmitMidCdm2 cd/m2 per unit (reds ^WW_PHYSUNITS_EMIT_RED=1 = kEmitCdm2, =lamp = the placed
+//! lamps' factor kLampEdgeLux / pi vanillaFlux; pin WW_PHYSUNITS_EMIT) x Game Light Brightness (1 under the physical red)
 float wwPhysEmitScale();
 /*! A lamp's colour factor (lumens law): the light draws a colour C with the vanilla falloff to radius r (game units),
  *  so its intensity is lum(C) x (r / 69.99)^2 x vanillaFlux x pi cd; the record's is 637 lm per fade / 4 pi. The factor is
@@ -64,6 +67,11 @@ float wwPhysBloomK();
  *  (Krawczyk 2005) and the imagespace's middle grey (h[8]) as exposure compensation; exposure = 1 / (1.2 x 2^EV).
  *  Pin WW_PHYSUNITS_EV=<EV100> (a manual camera). h may be null (no compensation from the imagespace). */
 float wwPhysExposure( const float * h, float adapted );
+/*! MODULES1 item 14: the incident meter's input, the key light (C, cd/m2 = lux / pi), its cos zenith and the sky's
+ *  light on an up-facing surface (the DALC's Z+, C); prints the sun's lux on a change */
+void wwPhysNoteDaylight( const float sun[3], float mu, const float skyUp[3] );
+//! the cell drawn is outdoors (an exterior or a sunlit interior): the incident meter may anchor the camera
+void wwPhysNoteOutdoor( bool outdoor );
 //! the last metered and applied EV100 (telemetry)
 float wwPhysLastEvMetered();
 float wwPhysLastEvApplied();

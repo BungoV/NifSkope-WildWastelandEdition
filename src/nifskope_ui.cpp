@@ -116,6 +116,8 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include "gl/glproperty.h"
 #include "gl/scenelighting.h"
 #include "ui/scenewindow.h"
+#include "ui/livepanel.h"	// lane MODULES1 item 13
+#include "features/weather/wxoverride.h"	// lane MODULES1 item 12: wxsave
 #include "features/far-lod/lodmfile.h"
 #include "io/pbrmfile.h"
 #include "io/pbrmresolve.h"
@@ -2114,6 +2116,8 @@ QString wwLiveSettleBackground( GLView * ogl )
 }
 
 //! Runs the stages the sets since the last picture owe; the reply says what was redone
+static bool g_wwLiveForceApply = false;	// lane MODULES1 item 10: an explicit `apply` retries a timed-out reopen
+
 QString wwLiveApply( NifSkope * skope )
 {
 	WwLiveState & L = wwLive();
@@ -2146,13 +2150,26 @@ QString wwLiveApply( NifSkope * skope )
 	const quint64 refusedBefore = wwLiveShaderRefusals();
 	const QSize viewBefore( ogl->width(), ogl->height() );
 	const QStringList chromeBefore = wwLiveChrome( skope );
+	bool owedSkip = false;
 	if ( liveSec == 1 )
 		did << liveWhy;
 	if ( owed & 1 ) {
 		ogl->updateShaders();
 		did << QStringLiteral( "shaders" );
 	}
-	if ( owed & 2 ) {
+	/* lane MODULES1 item 10: a reopen that timed out is not retried by every later step (a shot froze the window
+	 * 3 min each time); it waits for a new set or an explicit `apply`, and the reply says so. Red
+	 * WW_LIVE_REOPEN_RETRY_RED=1: every step retries, as before. */
+	static quint64 timedOutGen = ~0ull;
+	if ( ( owed & 2 ) && !g_wwLiveForceApply && timedOutGen == wwSwitchGen()
+		&& wwEnvStr( "WW_LIVE_REOPEN_RETRY_RED" ).trimmed() != QLatin1String( "1" ) ) {
+		std::fprintf( stderr, "live: reopen not retried (the last one timed out at gen %llu; set a switch or send apply)\n",
+			(unsigned long long)timedOutGen );
+		std::fflush( stderr );
+		did << QStringLiteral( "reopen NOT retried: the last one timed out with nothing set since (send apply to retry)" );
+		owedSkip = true;
+	}
+	if ( ( owed & 2 ) && !owedSkip ) {
 		// the handler's next run ends at the hook (wwLiveReopenHook) once the cells are in
 		L.reopening = true;
 		L.reopenDone = false;
@@ -2190,8 +2207,9 @@ QString wwLiveApply( NifSkope * skope )
 		L.reopening = false;
 		std::fprintf( stderr, "live: reopen %s in %lld ms\n", L.reopenDone ? "done" : "TIMED OUT", (long long)reopenMs );
 		std::fflush( stderr );
+		timedOutGen = L.reopenDone ? ~0ull : wwSwitchGen();
 		if ( !L.reopenDone || reopenMs > 180000 )
-			L.reopenRefused = QStringLiteral( "reopen %1 in %2 ms (limit 180000)" )
+			L.reopenRefused =QStringLiteral( "reopen %1 in %2 ms (limit 180000)" )
 				.arg( L.reopenDone ? QStringLiteral( "too slow" ) : QStringLiteral( "TIMED OUT" ) ).arg( reopenMs );
 		did << ( L.reopenDone ? QStringLiteral( "reopen %1 ms" ).arg( reopenMs ) : QStringLiteral( "reopen TIMED OUT" ) );
 		/* the reopen must hand back the viewport the rows before it drew in (port run: 1920x1026 became
@@ -2301,6 +2319,10 @@ QString wwLiveCommand( NifSkope * skope, const QString & line )
 			}
 		return r;
 	}
+	if ( verb == QLatin1StringView( "panel" ) )	// lane MODULES1 item 13: `panel <path>` builds the Live Panel dock
+		return wwLivePanelOpen( skope, rest );
+	if ( verb == QLatin1StringView( "wxsave" ) )	// lane MODULES1 item 12: the overrides as a new .recx
+		return wwWxSaveRecx();
 	if ( verb == QLatin1StringView( "status" ) )
 		return QStringLiteral( "gen %1 owed %2 %3" ).arg( wwSwitchGen() ).arg( L.owed ).arg( L.owedNames.join( QLatin1Char( ',' ) ) );
 	if ( verb == QLatin1StringView( "quit" ) ) {
@@ -2309,7 +2331,9 @@ QString wwLiveCommand( NifSkope * skope, const QString & line )
 	}
 	if ( L.rowRefused && verb != QLatin1StringView( "apply" ) )
 		return QStringLiteral( "skipped (a set of this row was refused: relaunch)" );
+	g_wwLiveForceApply = verb == QLatin1StringView( "apply" );
 	const QString applied = wwLiveApply( skope );
+	g_wwLiveForceApply = false;
 	if ( verb == QLatin1StringView( "apply" ) )
 		return applied;
 	QElapsedTimer t;
@@ -23415,6 +23439,13 @@ void NifSkope::initDockWidgets()
 	hostLayout->addWidget( leftColumnStack, 1 );
 	dLeft->setWidget( host );
 	addDockWidget( Qt::LeftDockWidgetArea, dLeft );
+	// lane MODULES1 item 13: the Live Panel (WW_LIVEPANEL opens it at start; the live port's `panel <path>` any time)
+	wwLivePanelSetHooks( [this]( const QString & step ) { return wwLiveCommand( this, step ); }, [this]() {
+		if ( GLView * v = getGLView() )
+			v->update();
+	} );
+	if ( !wwEnvStr( "WW_LIVEPANEL" ).trimmed().isEmpty() )
+		QTimer::singleShot( 0, this, [this]() { std::fprintf( stderr, "%s\n", qPrintable( wwLivePanelOpen( this, QString() ) ) ); } );
 	setLeftColumnMode( LeftBlocks );
 	connect( leftColumnSelector, &QTabBar::currentChanged, this, [this]( int tab ) {
 		if ( tab >= 0 )

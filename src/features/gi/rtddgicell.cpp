@@ -137,6 +137,9 @@ constexpr int kPathPerCascade = 8;
 /* FIX1101A: WW_CELL_RTDDGI_RED=noalbkey, today's main: the build key leaves the soup's albedo out, so a reopen that changes
  * only the albedo (WW_SOUPALB_RED) keeps the old volume. Live (a set moves the key: the volume rebuilds). */
 constexpr int kPathNoAlbKey = 16;
+/* MODULES1 11-09 item 3: WW_CELL_RTDDGI_RED=skyrebuild, the old way: a sun, sky or hour change is in the build key and
+ * rebuilds the whole volume (soup copy, BLAS, relocation: ~1 s a cascade). Ours re-lights the open volume. Live. */
+constexpr int kPathSkyRebuild = 32;
 
 /*! WW_CELL_RTDDGI_RED, live: [0] the read's red bits (rtddgimath.h kSample*, the shader's cellDdgiRed), [1] the path
  *  reds (kPath*). One list, both parts: "trilinear,readback" sets one of each */
@@ -161,6 +164,7 @@ const int * cellRedParts()
 			if ( t == QLatin1String( "nowait" ) ) b.v[1] |= kPathNoWait;   // lane RTXFIX1
 			if ( t == QLatin1String( "perblas" ) ) b.v[1] |= kPathPerCascade;   // lane RTXCASCADE2
 			if ( t == QLatin1String( "noalbkey" ) ) b.v[1] |= kPathNoAlbKey;   // FIX1101A
+			if ( t == QLatin1String( "skyrebuild" ) ) b.v[1] |= kPathSkyRebuild;   // MODULES1 11-09 item 3
 		}
 		return b;
 	}() );
@@ -182,6 +186,7 @@ struct Build
 	QString box;              // the census's words for the box
 	int lights = 0;
 	QString skyLabel;
+	quint64 lightKey = 0;     // MODULES1 11-09 item 3: the sun, sky and directional it is lit by (relight moves it)
 	// M3: the window the scroll keeps the camera in (world): the grid it stays inside, its size on each axis
 	double gridLo[3] = { 0, 0, 0 }, gridHi[3] = { 0, 0, 0 }, window[3] = { 0, 0, 0 };
 };
@@ -1941,12 +1946,20 @@ static void volumeFrame( Scene * scene, Cell & c, const CellSpec * spIn, bool du
 		for ( size_t i = 0; i + 3 <= nAlb; i += stride )
 			key = fnv( key, &soup->alb[i], 3 );
 	}
+	/* MODULES1 11-09 item 3: the sun, sky and interior directional are the light key, not the build key: a new hour or
+	 * weather re-lights the open volume (relight) instead of rebuilding it; red WW_CELL_RTDDGI_RED=skyrebuild */
+	const bool skyRebuild = ( paths & kPathSkyRebuild ) != 0;
+	quint64 lightKey = 0xCBF29CE484222325ULL;
 	const int skyOn = sky.on ? 1 : 0;
-	key = fnv( key, &skyOn, sizeof skyOn );
-	key = fnv( key, sky.amb, sizeof sky.amb );
-	key = fnv( key, sky.sun, sizeof sky.sun );
-	key = fnv( key, sky.sunTo, sizeof sky.sunTo );
-	const quint64 lk = rtddgiLightsKey( lights );
+	lightKey = fnv( lightKey, &skyOn, sizeof skyOn );
+	lightKey = fnv( lightKey, sky.amb, sizeof sky.amb );
+	lightKey = fnv( lightKey, sky.sun, sizeof sky.sun );
+	lightKey = fnv( lightKey, sky.sunTo, sizeof sky.sunTo );
+	lightKey = fnv( lightKey, lights.dirTo, sizeof lights.dirTo );
+	lightKey = fnv( lightKey, lights.dirColor, sizeof lights.dirColor );
+	if ( skyRebuild )
+		key = fnv( key, &lightKey, sizeof lightKey );
+	const quint64 lk = rtddgiLightsKey( lights, skyRebuild );
 	key = fnv( key, &lk, sizeof lk );
 	const QByteArray st = sp.text.toUtf8();
 	key = fnv( key, st.constData(), size_t( st.size() ) );
@@ -1963,7 +1976,8 @@ static void volumeFrame( Scene * scene, Cell & c, const CellSpec * spIn, bool du
 		key = fnv( key, &G->voxel, sizeof G->voxel );
 		key = fnv( key, &G->pad, sizeof G->pad );
 	}
-	QString rebuildWhy = QStringLiteral( "the soup, lights, sky, spec, reds or GI grid moved" );
+	QString rebuildWhy = skyRebuild ? QStringLiteral( "the soup, lights, sky, spec, reds or GI grid moved" )
+		: QStringLiteral( "the soup, local lights, spec, reds or GI grid moved" );
 	int cells[3] = { 0, 0, 0 };
 	bool moved = false;
 	if ( due && key == c.key && c.nif == nif && c.live )
@@ -1984,6 +1998,8 @@ static void volumeFrame( Scene * scene, Cell & c, const CellSpec * spIn, bool du
 		c.refused.clear();
 		startBuild( c, *soup, lights, sky, G, eye, sp, paths,
 			c.level > 0 && !( paths & kPathPerCascade ) ? cell().live : nullptr );   // RTXCASCADE2: one BLAS
+		if ( c.pending )
+			c.pending->lightKey = lightKey;
 		say( c.tag + QStringLiteral( "%1 (%2 triangles)" ).arg( had ? QStringLiteral( "rebuilding: " ) + rebuildWhy : QStringLiteral( "building" ) )
 			.arg( qint64( nTris / 9 ) ) );
 	}
@@ -2009,6 +2025,18 @@ static void volumeFrame( Scene * scene, Cell & c, const CellSpec * spIn, bool du
 				refuse( c, b->why );
 			}
 		}
+	}
+	// MODULES1 11-09 item 3: the volume (built, or finished building with an older sky) takes the new sun and sky in place
+	if ( c.live && c.live->lightKey != lightKey && c.live->live.isOpen() ) {
+		c.live->live.relight( lights, sky );
+		c.live->lightKey = lightKey;
+		c.stopped = false;
+		static int relits = 0;
+		if ( ++relits <= 40 || relits % 100 == 0 )
+			say( c.tag + QStringLiteral( "relit: the sun or sky moved, no rebuild (%1; sun %2 %3 %4 to %5 %6 %7; relight %8)" )
+				.arg( c.live->skyLabel ).arg( double( sky.sun[0] ), 0, 'g', 5 ).arg( double( sky.sun[1] ), 0, 'g', 5 )
+				.arg( double( sky.sun[2] ), 0, 'g', 5 ).arg( double( sky.sunTo[0] ), 0, 'f', 3 ).arg( double( sky.sunTo[1] ), 0, 'f', 3 )
+				.arg( double( sky.sunTo[2] ), 0, 'f', 3 ).arg( relits ) );
 	}
 	if ( c.level == 0 && moved && c.live )   // RTXCASCADE2: every plane of cascade 0 reset = the camera jumped
 		s_jump = rtddgi::cascadeJump( cells, c.live->live.volume().dims );

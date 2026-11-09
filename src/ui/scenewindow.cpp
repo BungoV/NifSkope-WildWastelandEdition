@@ -25,6 +25,7 @@ BSD License - see nifskope.h
 #include "ui/cellshowpanel.h"	// lane OPENCELLFIX2: the Display tab's fog and shadow rows share these settings
 #include "features/weather/esmweather.h"
 #include "features/exposure/physunits.h"	// lane PHYSUNITS1: Game Light Brightness
+#include "ui/scenewxrows.h"	// lane MODULES1 items 4 + 12: weather overrides, row layout
 #include "harnesswindow.h"
 #include "ui/widgets/wwnumberfield.h"
 #include "wwskin.h"
@@ -533,6 +534,10 @@ SceneWindow::SceneWindow( QWidget * mainWindow, std::function<void()> repaint, s
 		if ( m_repaint )
 			m_repaint();
 	} );
+	// lane MODULES1 item 12: live weather and fog overrides (WW_WX_*), each starting at the weather's own value
+	wwSceneAddWeatherOverrides( [&]( const QString & t ) { heading( t ); },
+		[&]( const QString & n, QWidget * w ) { row( n, w, true ); }, tree );
+	wwSceneTidyRows( tree );	// lane MODULES1 item 4: rows line up, whole values
 	m_cloudTimer = new QTimer( this );
 	m_cloudTimer->setInterval( 100 );
 	connect( m_cloudTimer, &QTimer::timeout, this, [this]() {
@@ -686,6 +691,9 @@ void SceneWindow::saveGeometryNow()
 
 void SceneWindow::showEvent( QShowEvent * e )
 {
+	const QSize want = wwSceneWantedSize( tree, this );	// lane MODULES1 item 4: never too small for its rows
+	if ( want.isValid() && ( width() < want.width() || height() < want.height() ) )
+		resize( std::max( width(), want.width() ), std::max( height(), want.height() ) );
 	if ( !m_placed ) {
 		m_placed = true;
 		// first ever open: beside the main window's right edge, on its screen

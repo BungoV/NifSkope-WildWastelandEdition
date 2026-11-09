@@ -326,6 +326,14 @@ void main()
 			lin *= cellFxLit( cellWorldPos( -ViewDir ) );	// a lit particle, before the fog
 		lin = wwFogFx( lin, -ViewDir, fxAdditive );	// lane VOLAIR1: the air, as the surfaces take it (red fxfog: the game's fog alone)
 		}
+		// lane MODULES1 item 2: kept finite and inside the RGBA16F frame, as fo4_effectshader (pfxGame 4: red unbound)
+		if ( ( pfxGame & 4 ) == 0 ) {
+			if ( any( isnan( lin ) ) || any( isinf( lin ) ) || isnan( color.a ) ) {
+				lin = vec3( 0.0 );
+				color.a = 0.0;
+			}
+			lin = min( lin, vec3( 32768.0 ) );
+		}
 		if ( cellProbe == 6 )
 			fragColor = vec4( lin, color.a );	// the imagespace's measure: the linear value, blended as drawn
 		else

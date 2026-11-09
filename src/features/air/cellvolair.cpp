@@ -6,6 +6,7 @@ BSD License - see nifskope.h
 
 #include "features/air/cellvolair.h"
 #include "wwswitch.h"	// lane TESTDRIVER1: the WW_* switch store
+#include "features/weather/wxoverride.h"	// lane MODULES1 item 12: live air overrides
 #include "gl/cellunits.h"
 
 #include "features/air/airbouncelamp.h"	// lane AIRBOUNCE1: the lamps' floor-bounce law
@@ -1711,6 +1712,12 @@ static void vaPassInner( Scene * scene, bool run )
 	const float apHazeKm = wwAtmoApActive() && wwAtmoFrame().valid ? wwAtmoFrame().haze[0] : 0.0f;	// SHAFTS1b
 	VaMedium M = vaFit( K, ( s.red & 32 ) != 0, ( s.red & 128 ) != 0,
 		s.apStackRed ? 0.0f : apHazeKm / kUnitsPerKm );
+	{	// lane MODULES1 item 12: the live air overrides (per km and metres, as the Scene window shows them)
+		const float unitsPerM = kUnitsPerKm / 1000.0f;
+		M.sigma0 = wwWxOv( WwWx::AirDensity, M.sigma0 * kUnitsPerKm ) / kUnitsPerKm;
+		const float hM = wwWxOv( WwWx::AirHeightScale, M.invH > 0.0f ? 1.0f / ( M.invH * unitsPerM ) : 0.0f );
+		M.invH = hM > 0.0f ? 1.0f / ( hM * unitsPerM ) : 0.0f;
+	}
 	/* lane LIGHTBOOTH1 (the light test booth; a harness pin, never a user toggle): WW_CELL_BOOTH_AIR = <sigma0 per
 	 * unit> replaces the fitted medium with EVEN air of that density at every height (no band, no ground layer), so a
 	 * fixture's glow is measured in the same air wherever it stands. The slices end where the air reaches 99%
@@ -1765,7 +1772,15 @@ static void vaPassInner( Scene * scene, bool run )
 	}
 	if ( vaPhaseMieOn() )	// lane FOGMATCH1: the droplet phase replaces the record's lobes (its hue is unchanged)
 		medNote += QStringLiteral( " mie(g %1 w 0.9, back -0.4 w 0.1)" ).arg( double( vaPhaseMieG() ), 0, 'f', 2 );
-	const VaPhase ph = vaPhase( med, ( s.red & 524288 ) != 0 );
+	VaPhase ph = vaPhase( med, ( s.red & 524288 ) != 0 );
+	ph.gi[3] = wwWxOv( WwWx::AirPhaseG, ph.gi[3] );	// lane MODULES1 item 12: live phase g and tint
+	{
+		const float was[3] = { ph.gi[0], ph.gi[1], ph.gi[2] };
+		wwWxOv3( WwWx::AirTint, ph.gi );
+		for ( int c = 0; c < 3; c++ )	// the lobes' weights follow the tint
+			for ( int k = 0; k < 3; k++ )
+				ph.w[k][c] *= was[c] > 1e-6f ? ph.gi[c] / was[c] : 0.0f;
+	}
 	// the ground layer (vaNearShare, vaGround); red noground: the far band alone, as before it
 	VaLayer G;
 	if ( boothAir > 0.0f ) {

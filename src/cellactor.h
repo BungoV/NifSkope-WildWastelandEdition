@@ -82,6 +82,9 @@ public:
 	//! The built actor, actor space, posed (lane ACTORPOSE1).
 	bool shapes( const QString & key, std::vector<NativeSrcShape> * out ) const;
 
+	//! MODULES1 item 16: the palette row of this actor's hair shape `shapeName` (its NPC_ HCLF), false when none.
+	bool hairPaint( const QString & key, const QString & shapeName, float * row ) const;
+
 	/*! `  placed actors: R read, drawn D (...), not shown H, refused F: <reason> <count>, ...`.
 	 *  Every placed actor is in exactly one of drawn, not shown or a named refusal. */
 	QString censusLine() const;

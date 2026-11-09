@@ -40,6 +40,7 @@ BSD License - see nifskope.h
 #include "cellmodsource.h"	// lane SKYTOP1: the active load order
 #include "cellstream.h"	// lane WEATHERBLEND6: the streamed camera's cell, for the region walk
 #include "features/exposure/physunits.h"	// lane PHYSUNITS1: real units
+#include "features/weather/wxoverride.h"	// lane MODULES1 item 12: live weather overrides
 
 #include <QBuffer>
 #include <QDir>
@@ -920,6 +921,7 @@ LdLight currentLight()
 	static unsigned long long wxStamp = 0;	// lane WX1: a weather .recx value (visibility, moonlight) moves the light
 	static QString moonRed;	// lane FIX1101A (moon): WW_MOON_RED, live
 	static bool physSky = false;	// lane PHYSUNITS1: real units while the cell's HDR camera draws
+	static unsigned long long wxOv = 0;	// lane MODULES1 item 12: a live sun / ambient override
 	static LdLight memo;
 	// lane SKYA (NIGHT1): the Moon Phase and Stars row with the moon's phase (the game day moves it)
 	int atmoKey = wwAtmoSunKey() + 3 * 16 * wwAtmoNightKey( wwMoonPhase( s.gameDay, s.clim.tnam[5] ) );
@@ -929,9 +931,19 @@ LdLight currentLight()
 	const unsigned long long wx = wwWeatherRecx().stamp;
 	const QString mr = wwEnvStr( "WW_MOON_RED" ).trimmed().toLower();
 	if ( gen != s.gen || hour != s.hour || sun != s.sun || atmoSun != atmoKey || !( sunPath == sunKey ) || wxStamp != wx
-		|| mr != moonRed || physSky != wwPhysSkyOn() ) {
+		|| mr != moonRed || physSky != wwPhysSkyOn() || wxOv != wwWxOvStamp() ) {
 		physSky = wwPhysSkyOn();
 		memo = computeLight();
+		wxOv = wwWxOvStamp();
+		wwWxOv3( WwWx::SunColor, memo.sun );
+		float amb[3] = { memo.amb[0], memo.amb[1], memo.amb[2] };
+		wwWxOv3( WwWx::AmbientColor, amb );
+		for ( int c = 0; c < 3; c++ ) {	// the six axes keep their shape, scaled to the pinned mean
+			const float k = memo.amb[c] > 1e-9f ? amb[c] / memo.amb[c] : 1.0f;
+			for ( int a = 0; a < 6; a++ )
+				memo.dalc[a][c] = memo.amb[c] > 1e-9f ? memo.dalc[a][c] * k : amb[c];
+			memo.amb[c] = amb[c];
+		}
 		moonRed = mr;
 		wxStamp = wx;
 		gen = s.gen;
@@ -1003,6 +1015,7 @@ void physFinish( LdLight & L, float rKey, bool airKey )
 		L.effect[c] *= rEff;
 	L.physKey = rKey;
 	L.physFog = rEff;
+	wwPhysNoteDaylight( L.sun, len > 0.0f ? n[2] : 0.0f, L.dalc[4] );	// MODULES1 item 14: the incident meter
 	static QString said;
 	const QString line = QStringLiteral( "phys light: key %1 cd/m2 (x%2 %3) sky +Z %4 -Z %5 ambient %6 effect x%7 sky=%8" )
 		.arg( double( lumOf( L.sun ) ), 0, 'g', 5 ).arg( double( rKey ), 0, 'g', 5 )
@@ -1219,8 +1232,43 @@ WwFog currentFog()
 	static quint64 gen = 0;
 	static double hour = -1.0;
 	static WwFog memo;
-	if ( gen != s.gen || hour != s.hour ) {
-		memo = wwFogAt( s.w, s.hour, s.tnam, s.gmst );
+	static unsigned long long wxOv = 0;	// lane MODULES1 item 12: a live fog override moves the fog next frame
+	if ( gen != s.gen || hour != s.hour || wxOv != wwWxOvStamp() ) {
+		wxOv = wwWxOvStamp();
+		// the record's per-time-of-day fog colours (sRGB bytes), each pinnable
+		static const WwWx tod[2][4] = { { WwWx::FogNearSunrise, WwWx::FogNearDay, WwWx::FogNearSunset, WwWx::FogNearNight },
+			{ WwWx::FogFarSunrise, WwWx::FogFarDay, WwWx::FogFarSunset, WwWx::FogFarNight } };
+		const int rows[2] = { WwRowFogNear, WwRowFogFar };
+		const bool patch = wwWxAnyTodColor();
+		WwWeatherData w;
+		if ( patch )
+			w = s.w;
+		for ( int r = 0; r < 2; r++ )
+			for ( int t = 0; t < 4; t++ ) {
+				float v[3];
+				for ( int c = 0; c < 3; c++ )
+					v[c] = float( s.w.color[t][rows[r]][c] );
+				wwWxOv3( tod[r][t], v );
+				if ( patch )
+					for ( int c = 0; c < 3; c++ )
+						w.color[t][rows[r]][c] = (unsigned char)std::lround( std::min( std::max( v[c], 0.0f ), 255.0f ) );
+			}
+		memo = wwFogAt( patch ? w : s.w, s.hour, s.tnam, s.gmst );
+		memo.fogNear = wwWxOv( WwWx::FogNear, memo.fogNear );
+		memo.fogFar = wwWxOv( WwWx::FogFar, memo.fogFar );
+		memo.power = wwWxOv( WwWx::FogPower, memo.power );
+		memo.maxv = wwWxOv( WwWx::FogMax, memo.maxv );
+		memo.nMid = wwWxOv( WwWx::FogNearHeightMid, memo.nMid );
+		memo.nRange = wwWxOv( WwWx::FogNearHeightRange, memo.nRange );
+		memo.fMid = wwWxOv( WwWx::FogFarHeightMid, memo.fMid );
+		memo.fRange = wwWxOv( WwWx::FogFarHeightRange, memo.fRange );
+		memo.hds = wwWxOv( WwWx::FogHighDensity, memo.hds );
+		wwWxOv3( WwWx::FogNearColor, memo.nearLow );
+		wwWxOv3( WwWx::FogFarColor, memo.farLow );
+		wwWxOv3( WwWx::FogNearHighColor, memo.nearHigh );
+		wwWxOv3( WwWx::FogFarHighColor, memo.farHigh );
+		memo.effOff = false;
+		wwFogPackK( memo );
 		gen = s.gen;
 		hour = s.hour;
 	}

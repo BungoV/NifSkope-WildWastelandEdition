@@ -144,6 +144,11 @@ struct DdgiGpuStepIn
 	bool skipSet = false;
 	int32_t skipLo[4] = { 0, 0, 0, 0 };
 	int32_t skipHi[4] = { -1, -1, -1, 0 };
+	/* MODULES1 11-09 item 3: lightSet = the session's sunTo, sun, dirTo, dirColor and sky (DdgiGpuParams) become these,
+	 * written before the scroll and the updates (a new hour or weather: the probes re-light, nothing is rebuilt) */
+	bool lightSet = false;
+	float sunTo[4] = { 0, 0, 1, 0 }, sun[4] = { 0, 0, 0, 0 }, dirTo[4] = { 0, 0, 1, 0 }, dirColor[4] = { 0, 0, 0, 0 };
+	float sky[6][4] = {};
 };
 //! false + busy: the lock is taken or the last submit still runs (nothing recorded, beforeSubmit not called)
 bool ddgiGpuStepEx( DdgiGpuSession * s, const DdgiGpuStepIn & in, DdgiGpuStepOut * out );

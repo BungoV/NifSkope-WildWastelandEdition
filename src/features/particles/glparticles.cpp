@@ -373,7 +373,8 @@ void Particles::drawShapes( NodeList * secondPass )
 
 		// lane FXPARITY1: Particle Game Rules (fxparity.h), the shader's part: 1 the effect law, 2 the soft fade
 		const int fxRules = wwFxParityRules();
-		prog->uni1i( "pfxGame", ( ( fxRules & WwFxLaw ) ? 1 : 0 ) | ( ( fxRules & WwFxSoft ) ? 2 : 0 ) );
+		prog->uni1i( "pfxGame", ( ( fxRules & WwFxLaw ) ? 1 : 0 ) | ( ( fxRules & WwFxSoft ) ? 2 : 0 )
+			| ( ( wwCellFxRed() & 32 ) ? 4 : 0 ) );	// MODULES1 item 2: red WW_CELL_FX_RED=unbound
 
 		// setup blending: honour the linked NiAlphaProperty (FO4 electricity is
 		// additive: SRC_ALPHA, ONE), else fall back to additive

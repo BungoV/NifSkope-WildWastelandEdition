@@ -917,6 +917,8 @@ void cellApplyEnvModifiers( CellSceneSpec & spec )
 		spec.showDisabled = true;
 	if ( !wwEnv( "WW_CELL_MARKERS" ).isEmpty() )
 		spec.showMarkers = true;
+	if ( wwEnvInt( "WW_CELL_PROBES_SHOW_RED" ) == 1 )	// lane MODULES1 item 6: the old default, markers drawn
+		spec.probesShow = true;
 	if ( !wwEnv( "WW_CELL_PROBES_HIDE" ).isEmpty() ) {
 		spec.probesHiddenByEnv = spec.probesHiddenByEnv || spec.probesShow;	// lane LIVESET1: a live unset shows them
 		spec.probesShow = false;    // placed and baked, the markers not drawn (clean pictures)
@@ -2426,6 +2428,35 @@ int liveMarkers( NifModel * nif, LiveDoc & d, QString * why )
 {
 	const bool want = d.probesBand && wwEnvIsEmpty( "WW_CELL_PROBES_HIDE" ) && !d.probes.empty();
 	wwCellProbeViewSetShown( nif, d.probesBand && wwEnvIsEmpty( "WW_CELL_PROBES_HIDE" ) );
+	/* lane MODULES1 item 6 (bungo 11-09: the set replied ok, the cubes stayed): the marker shapes already in the
+	 * document (a streamed cell's too) take the hidden flag in place, so the switch works with no reopen. Red
+	 * WW_CELL_PROBES_LIVE_RED=1: blocks cut / appended, a reopen under streamed cells, as before. */
+	if ( wwEnvInt( "WW_CELL_PROBES_LIVE_RED" ) != 1 ) {
+		const bool hide = !( wwEnvIsEmpty( "WW_CELL_PROBES_HIDE" ) && d.probesBand );
+		int found = 0, moved = 0;
+		nif->holdUpdates( true );
+		for ( int b = 0; b < nif->getBlockCount(); b++ ) {
+			const QModelIndex iB = nif->getBlockIndex( b );
+			if ( !nif->blockInherits( iB, "BSTriShape" ) )
+				continue;
+			const QString name = nif->get<QString>( iB, "Name" );
+			if ( name != QLatin1String( "probes" ) && !name.startsWith( QLatin1String( "probes #" ) ) )
+				continue;
+			found++;
+			const quint32 f = nif->get<quint32>( iB, "Flags" );
+			const quint32 nf = hide ? ( f | 1u ) : ( f & ~1u );
+			if ( nf != f ) {
+				nif->set<quint32>( iB, "Flags", nf );
+				moved++;
+			}
+		}
+		nif->holdUpdates( false );
+		if ( found > 0 && ( hide || d.markersCount > 0 || d.streamed || d.markersAt < 0 ) ) {
+			*why = QStringLiteral( "probe markers %1 in place (%2 of %3 shapes flagged)" )
+				.arg( hide ? QStringLiteral( "hidden" ) : QStringLiteral( "shown" ) ).arg( moved ).arg( found );
+			return moved > 0 ? 1 : 0;
+		}
+	}
 	if ( want == ( d.markersCount > 0 ) )
 		return 0;
 	if ( d.markersAt < 0 || d.streamed || nif->getBlockCount() != d.tailEnd ) {
@@ -2646,7 +2677,7 @@ int liveTerrRed( NifModel * nif, LiveDoc & d, QString * why )
 	const QByteArray now = wwEnv( "WW_TERRBLEND_RED" );
 	if ( now == d.terrRed )
 		return 0;
-	auto inVerts = []( const QByteArray & v ) { return v == "nearest" || v == "facenormal"; };
+	auto inVerts = []( const QByteArray & v ) { return v == "nearest" || v == "facenormal" || v == "five"; };	// five: MODULES1 item 2
 	if ( inVerts( now ) || inVerts( d.terrRed ) ) {
 		*why = QStringLiteral( "WW_TERRBLEND_RED=%1 is written into the ground's vertices at build" )
 			.arg( QString::fromLatin1( inVerts( now ) ? now : d.terrRed ) );
@@ -4917,6 +4948,8 @@ static bool cellBuild( NifModel * nif, const CellSceneSpec & specAsked, CellChun
 					paintIndex = cit.value();
 				}
 			}
+			if ( !havePaint && isActor && actors.hairPaint( model, s.nearFacts.name, &paintIndex ) )
+				havePaint = true;   // MODULES1 item 16: the actor's hair colour (NPC_ HCLF)
 			if ( !havePaint && lb.hasColorRemap ) {
 				havePaint = true;
 				paintIndex = lb.colorRemap;
@@ -7095,7 +7128,7 @@ static bool cellBuild( NifModel * nif, const CellSceneSpec & specAsked, CellChun
 			}
 		}
 		// the markers (placed and counted always; drawn with the PRTP band's Show probes on)
-		if ( spec.probesShow )
+		if ( spec.probesShow && wwEnvIsEmpty( "WW_CELL_PROBES_HIDE" ) )	// MODULES1 item 6: a streamed chunk follows a live hide
 			cellProbeMarkerBuckets( pr.probes, origin, buckets );
 		if ( !chunk )
 			liveProbes = pr.probes;	// lane LIVESET1

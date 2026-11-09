@@ -3363,6 +3363,13 @@ struct WwFpsMeter
 	int frames = 0;
 	double cpuMs = 0.0;
 	QString line;
+	// lane MODULES1 item 7: the GPU's own frame time, GL_TIMESTAMP pairs read 4 frames late (no stall)
+	double gpuMs = 0.0;
+	int gpuN = 0;
+	GLuint q[4][2] = {};
+	bool pending[4] = {};
+	bool qMade = false, qOk = false;
+	int slot = 0;
 };
 WwFpsMeter & wwFps()
 {
@@ -3378,6 +3385,58 @@ WwFpsMeter & wwFps()
 bool wwFramerateOverlayOn()
 {
 	return wwFps().on;
+}
+
+/* lane MODULES1 item 7 (bungo 11-09: the CPU ms of ~200 included the GPU wait): mark 0 at the paint's start, mark 1
+ * before the 2D overlays; the pair from 4 paints ago is read only when its result is there. Red
+ * WW_FPS_GPU_RED=1: no GPU figure, as before. */
+static void wwFpsGpuMark( int which )
+{
+	WwFpsMeter & m = wwFps();
+	WW_SWITCH_STATIC( bool, gpuRed, wwEnvInt( "WW_FPS_GPU_RED" ) == 1 );
+	QOpenGLContext * c = QOpenGLContext::currentContext();
+	if ( !m.on || gpuRed || !c )
+		return;
+	using QueryCounterFn = void ( QOPENGLF_APIENTRYP )( GLuint, GLenum );
+	using QueryU64Fn = void ( QOPENGLF_APIENTRYP )( GLuint, GLenum, GLuint64 * );
+	static QueryCounterFn qc = nullptr;
+	static QueryU64Fn qu = nullptr;
+	QOpenGLExtraFunctions * xf = c->extraFunctions();
+	if ( !m.qMade ) {
+		m.qMade = true;
+		qc = reinterpret_cast<QueryCounterFn>( c->getProcAddress( "glQueryCounter" ) );
+		qu = reinterpret_cast<QueryU64Fn>( c->getProcAddress( "glGetQueryObjectui64v" ) );
+		m.qOk = qc && qu && xf;
+		if ( m.qOk )
+			xf->glGenQueries( 8, &m.q[0][0] );
+	}
+	if ( !m.qOk )
+		return;
+	constexpr GLenum kTimestamp = 0x8E28;	// GL_TIMESTAMP
+	constexpr GLenum kAvailable = 0x8867;	// GL_QUERY_RESULT_AVAILABLE
+	const int s = m.slot;
+	if ( which == 0 ) {
+		if ( m.pending[s] ) {
+			GLuint avail = 0;
+			xf->glGetQueryObjectuiv( m.q[s][1], kAvailable, &avail );
+			if ( avail ) {
+				GLuint64 t0 = 0, t1 = 0;
+				qu( m.q[s][0], GL_QUERY_RESULT, &t0 );
+				qu( m.q[s][1], GL_QUERY_RESULT, &t1 );
+				if ( t1 > t0 ) {
+					m.gpuMs += double( t1 - t0 ) * 1.0e-6;
+					m.gpuN++;
+				}
+			}
+			m.pending[s] = false;
+		}
+		qc( m.q[s][0], kTimestamp );
+		m.pending[s] = false;
+	} else {
+		qc( m.q[s][1], kTimestamp );
+		m.pending[s] = true;
+		m.slot = ( s + 1 ) % 4;
+	}
 }
 
 void wwSetFramerateOverlay( bool on )
@@ -3402,6 +3461,7 @@ void GLView::paintGL()
 	} wwFirstFrame{ wwPaintCounter == 1 };
 	QElapsedTimer wwStream1Clock;	// lane STREAM1: the whole paint, for the hitch figures
 	wwStream1Clock.start();
+	wwFpsGpuMark( 0 );	// lane MODULES1 item 7: F3's GPU ms
 	wwCellStreamEvict();
 	// the streaming read-ahead's ready files go up before anything draws, a few MB a
 	// paint (WW_TEX_PUMP_MB, default 24), so a cell that comes into view finds them loaded. Red: texpump.
@@ -4023,12 +4083,16 @@ void GLView::paintGL()
 			fm.win.start();
 		fm.frames++;
 		fm.cpuMs += double( wwStream1Clock.nsecsElapsed() ) * 1.0e-6;
+		wwFpsGpuMark( 1 );
 		const qint64 ms = fm.win.elapsed();
 		if ( ms >= 500 ) {
-			fm.line = QStringLiteral( "%1 fps   %2 ms CPU" ).arg( double( fm.frames ) * 1000.0 / double( ms ), 0, 'f', 1 )
-				.arg( fm.cpuMs / double( fm.frames ), 0, 'f', 2 );
+			fm.line = QStringLiteral( "%1 fps   %2 ms CPU   %3 ms GPU" ).arg( double( fm.frames ) * 1000.0 / double( ms ), 0, 'f', 1 )
+				.arg( fm.cpuMs / double( fm.frames ), 0, 'f', 2 )
+				.arg( fm.gpuN > 0 ? QString::number( fm.gpuMs / double( fm.gpuN ), 'f', 2 ) : QStringLiteral( "--" ) );
 			fm.frames = 0;
 			fm.cpuMs = 0.0;
+			fm.gpuMs = 0.0;
+			fm.gpuN = 0;
 			fm.win.restart();
 		}
 		fpsLine = fm.line.isEmpty() ? QStringLiteral( "-- fps" ) : fm.line;

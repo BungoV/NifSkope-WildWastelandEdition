@@ -3,6 +3,7 @@
 #include "gl/celllooks.h"
 #include "gl/lookdevstage.h"
 #include "features/weather/weathergen.h"
+#include "features/weather/wxoverride.h"
 #include "features/weather/weatherrecxmath.h"
 #include "features/clouds/cloudrecx14math.h"
 #include "recx.h"
@@ -869,7 +870,8 @@ const WwWeatherRecx & wwWeatherRecx()
 	}
 	const double hour = wwLookdevHour();
 	const QString wk = wwLookdevWeatherKey();
-	const QString redKey = rw + QLatin1Char( '|' ) + wwEnvStr( "WW_WEATHER_RECORD_RED" );
+	const QString redKey = rw + QLatin1Char( '|' ) + wwEnvStr( "WW_WEATHER_RECORD_RED" ) + QLatin1Char( '|' )
+		+ QString::number( wwWxOvStamp() );	// lane MODULES1 item 12: a live haze / cloud override
 	if ( wasOn && since.isValid() && since.elapsed() < 100 && hour == lastHour && wk == lastWeather && redKey == lastRed )
 		return cur;
 	wasOn = true;
@@ -918,8 +920,13 @@ const WwWeatherRecx & wwWeatherRecx()
 	} else {
 		src = QStringLiteral( "none(no weather)" );
 	}
+	// lane MODULES1 item 12: the live overrides (unset: the file's value, shown in the Scene window)
+	next.visibilityM = wwWxOv( WwWx::HazeVisibility, next.visibilityM );
+	next.hazeHeightM = wwWxOv( WwWx::HazeHeight, next.hazeHeightM );
+	next.coverage = wwWxOv( WwWx::CloudCoverage, next.coverage );
+	next.density = wwWxOv( WwWx::CloudDensity, next.density );
 	next.recordFirst = rw == QLatin1String( "recordfirst" );
-	next.on = next.visibilityM >= 0.0f || next.hazeHeightM >= 0.0f || next.ozone >= 0.0f || next.coverage >= 0.0f
+	next.on =next.visibilityM >= 0.0f || next.hazeHeightM >= 0.0f || next.ozone >= 0.0f || next.coverage >= 0.0f
 		|| next.density >= 0.0f || next.layers > 0 || next.stars >= 0.0f || next.moonlight >= 0.0f || next.type >= 0.0f
 		|| !next.hazeType.isEmpty() || next.windSpeed >= 0.0f || next.lightningFreq >= 0.0f || next.transHours >= 0.0f
 		|| next.recordRed != 0 || cloud14Any( next );

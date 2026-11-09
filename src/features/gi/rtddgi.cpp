@@ -497,6 +497,59 @@ void RtDdgiVolume::position( int p, float out[3] ) const
 }
 
 //! the volume's grid and every packed input both runs read (rtddgiRun and RtDdgiLive::open)
+/* MODULES1 11-09 item 3: the sun, the interior directional, the sky cube and the ground into P and out (groundAlbedo and
+ * skyBelowRule already set): packVolume's, and RtDdgiLive::relight's when a new hour or weather moves only these */
+static void packSky( const WwCellLighting & lighting, const ProbeSkyLight & sky, const RtDdgiSpec & spec, RtDdgiVolume * out,
+	bakert::DdgiGpuParams & P )
+{
+	const bool sunOn = sky.on && ( sky.sun[0] > 0.0f || sky.sun[1] > 0.0f || sky.sun[2] > 0.0f );
+	const V3 sunTo = normalize( V3( sky.sunTo[0], sky.sunTo[1], sky.sunTo[2] ) );
+	for ( int k = 0; k < 3; k++ ) {
+		P.sunTo[k] = sunTo[k];
+		P.sun[k] = sky.sun[k];
+	}
+	P.sunTo[3] = sunOn ? 1.0f : 0.0f;
+	P.sun[3] = spec.traceMax;
+	for ( int k = 0; k < 4; k++ ) {
+		P.dirTo[k] = k == 2 ? 1.0f : 0.0f;
+		P.dirColor[k] = 0.0f;
+	}
+	if ( lighting.interior && lighting.hasDirectional ) {   // probegi's interior directional: no shadow ray
+		const V3 to = normalize( V3( lighting.dirTo[0], lighting.dirTo[1], lighting.dirTo[2] ) );
+		for ( int k = 0; k < 3; k++ ) {
+			P.dirTo[k] = to[k];
+			P.dirColor[k] = lighting.dirColor[k];
+		}
+		P.dirTo[3] = 1.0f;
+	}
+	P.dirColor[3] = spec.fixtureClear;
+	for ( int f = 0; f < 6; f++ )
+		for ( int c = 0; c < 4; c++ ) {
+			P.sky[f][c] = 0.0f;
+			if ( c < 3 )
+				out->skyR[f][c] = 0.0f;
+		}
+	out->skyOn = false;
+	out->skyClamped = 0;
+	for ( int c = 0; c < 3; c++ )
+		out->ground[c] = 0.0f;
+	if ( sky.on && !spec.noSky ) {
+		float R[6][3];
+		out->skyClamped = skyRadianceCube( sky.amb, R );
+		for ( int f = 0; f < 6; f++ )
+			for ( int c = 0; c < 3; c++ )
+				P.sky[f][c] = out->skyR[f][c] = R[f][c];
+		out->skyOn = true;
+		P.sky[0][3] = 1.0f;
+	}
+	P.sky[4][3] = out->skyBelowRule ? 1.0f : 0.0f;   // lane SKYBELOW1 (packVolume's note)
+	if ( sky.on && !spec.noSky ) {
+		groundRadiance( out->groundAlbedo, sky.amb[4], lighting.interior, out->ground );
+		for ( int c = 0; c < 3; c++ )
+			P.sky[1 + c][3] = out->ground[c];
+	}
+}
+
 static bool packVolume( const ProbeSoup & soup, const WwCellLighting & lighting, const ProbeSkyLight & sky, const RtDdgiSpec & spec,
 	RtDdgiVolume * out, Packed & S, bool buildBvh = true )   // RTXCASCADE2: buildBvh false = S.bvh.t filled, its tree not built
 {
@@ -634,39 +687,12 @@ static bool packVolume( const ProbeSoup & soup, const WwCellLighting & lighting,
 	P.dims[3] = int( nP );
 	P.origin[3] = out->distClamp;
 	P.stepv[3] = std::min( st[0], std::min( st[1], st[2] ) );
-	const bool sunOn = sky.on && ( sky.sun[0] > 0.0f || sky.sun[1] > 0.0f || sky.sun[2] > 0.0f );
-	const V3 sunTo = normalize( V3( sky.sunTo[0], sky.sunTo[1], sky.sunTo[2] ) );
-	for ( int k = 0; k < 3; k++ ) {
-		P.sunTo[k] = sunTo[k];
-		P.sun[k] = sky.sun[k];
-	}
-	P.sunTo[3] = sunOn ? 1.0f : 0.0f;
-	P.sun[3] = spec.traceMax;
-	if ( lighting.interior && lighting.hasDirectional ) {   // probegi's interior directional: no shadow ray
-		const V3 to = normalize( V3( lighting.dirTo[0], lighting.dirTo[1], lighting.dirTo[2] ) );
-		for ( int k = 0; k < 3; k++ ) {
-			P.dirTo[k] = to[k];
-			P.dirColor[k] = lighting.dirColor[k];
-		}
-		P.dirTo[3] = 1.0f;
-	}
-	P.dirColor[3] = spec.fixtureClear;
-	if ( sky.on && !spec.noSky ) {
-		float R[6][3];
-		out->skyClamped = skyRadianceCube( sky.amb, R );
-		for ( int f = 0; f < 6; f++ )
-			for ( int c = 0; c < 3; c++ )
-				P.sky[f][c] = out->skyR[f][c] = R[f][c];
-		out->skyOn = true;
-		P.sky[0][3] = 1.0f;
-	}
 	/* lane SKYBELOW1 (bungo 10-30, "Shouldn't that be a rule for every probe"): a miss below the horizon returns the
 	 * GROUND, never sky, and no below-horizon direction is sky visibility (the rule is P.sky[4].w, on unless red; the
 	 * visibility half holds with no sky too). An exterior's ground = the soup's up-facing albedo (area-weighted, the
 	 * triangles' ALB1, 0.5 grey without it as at a hit) x the weather's +Z irradiance (an open up-facing surface's) / pi;
 	 * an interior's = 0, which replaces SKYINT1's zeroed ground-facing sky (rtddgicell.cpp skyLitSky) */
 	out->skyBelowRule = !hasRed( spec.red, "skybelow" );
-	P.sky[4][3] = out->skyBelowRule ? 1.0f : 0.0f;
 	{
 		double a[3] = { 0, 0, 0 }, w = 0;
 		for ( size_t t = 0; t < nTri; t++ ) {
@@ -683,11 +709,7 @@ static bool packVolume( const ProbeSoup & soup, const WwCellLighting & lighting,
 		for ( int c = 0; c < 3; c++ )
 			out->groundAlbedo[c] = w > 0.0 ? float( a[c] / w ) : 0.5f;
 	}
-	if ( sky.on && !spec.noSky ) {
-		groundRadiance( out->groundAlbedo, sky.amb[4], lighting.interior, out->ground );
-		for ( int c = 0; c < 3; c++ )
-			P.sky[1 + c][3] = out->ground[c];
-	}
+	packSky( lighting, sky, spec, out, P );
 	P.counts[0] = spec.rays;
 	P.counts[1] = S.nLights;
 	P.counts[2] = int( nTri );
@@ -843,6 +865,9 @@ struct RtDdgiLive::Impl
 	bool builtBlas = false;
 	QString sceneWhy;
 	int skipped = 0;
+	// MODULES1 11-09 item 3: the params the session holds (open's), and a relight the next step still owes the device
+	bakert::DdgiGpuParams prm;
+	bool lightOwed = false;
 
 	//! RTXCASCADE2: one step's device order, made from an RtDdgiStep before the submit (step and stepGroup)
 	struct Prep
@@ -872,6 +897,17 @@ struct RtDdgiLive::Impl
 		in.host = order.host;
 		in.wait = order.wait;
 		in.beforeSubmit = order.beforeSubmit;
+		in.lightSet = lightOwed;
+		if ( lightOwed ) {
+			for ( int c = 0; c < 4; c++ ) {
+				in.sunTo[c] = prm.sunTo[c];
+				in.sun[c] = prm.sun[c];
+				in.dirTo[c] = prm.dirTo[c];
+				in.dirColor[c] = prm.dirColor[c];
+				for ( int f = 0; f < 6; f++ )
+					in.sky[f][c] = prm.sky[f][c];
+			}
+		}
 		for ( int c = 0; c < 3; c++ ) {
 			P.cells[c] = order.scroll[c];
 			P.origin[c] = v.origin[c];
@@ -947,6 +983,8 @@ struct RtDdgiLive::Impl
 		}
 		if ( order.wait )
 			take( so );   // this step's own report (a scroll's states replace the CPU's guess)
+		if ( P.in.lightSet )
+			lightOwed = false;
 		updates += P.k;
 		sinceScroll += P.k;
 		wall = so.msWall;
@@ -1057,6 +1095,8 @@ bool RtDdgiLive::open( const ProbeSoup & soup, const WwCellLighting & lighting, 
 	job.sceneFrom = take ? sceneFrom->d->s : nullptr;
 	job.bvh = &S.bvh;
 	job.params = S.prm;
+	d->prm = S.prm;   // MODULES1 11-09 item 3: relight's base
+	d->lightOwed = false;
 	job.triAttr = std::move( S.triAttr );
 	d->lights = S.lights;   // lane RESTIRDI1
 	job.lights = std::move( S.lights );
@@ -1097,6 +1137,15 @@ bool RtDdgiLive::open( const ProbeSoup & soup, const WwCellLighting & lighting, 
 }
 
 bool RtDdgiLive::isOpen() const { return d->s != nullptr; }
+
+void RtDdgiLive::relight( const WwCellLighting & lighting, const ProbeSkyLight & sky )
+{
+	if ( !d->s )
+		return;
+	packSky( lighting, sky, d->spec, &d->vol, d->prm );
+	d->lightOwed = true;
+	d->sinceScroll = 0;   // the spec's max counts again: the re-lit probes converge as a scroll's new planes do
+}
 
 bool RtDdgiLive::step( int k )
 {
@@ -1317,7 +1366,7 @@ bool rtddgiRunCascades( const ProbeSoup & soup, const WwCellLighting & lighting,
 	return true;
 }
 
-quint64 rtddgiLightsKey( const WwCellLighting & lighting )
+quint64 rtddgiLightsKey( const WwCellLighting & lighting, bool withDir )
 {
 	quint64 h = 0xCBF29CE484222325ULL;
 	auto eat = [&h]( const void * p, size_t n ) {
@@ -1335,8 +1384,10 @@ quint64 rtddgiLightsKey( const WwCellLighting & lighting )
 	}
 	const int flags[2] = { lighting.interior ? 1 : 0, lighting.hasDirectional ? 1 : 0 };
 	eat( flags, sizeof flags );
-	eat( lighting.dirTo, sizeof lighting.dirTo );
-	eat( lighting.dirColor, sizeof lighting.dirColor );
+	if ( withDir ) {
+		eat( lighting.dirTo, sizeof lighting.dirTo );
+		eat( lighting.dirColor, sizeof lighting.dirColor );
+	}
 	return h;
 }
 

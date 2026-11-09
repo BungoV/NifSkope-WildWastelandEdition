@@ -1737,6 +1737,7 @@ void wwCellLightsUniforms( Scene * scene )
 			wwPhysNoteCellFrame();	// lane PHYSUNITS1: real units while the cell's HDR camera draws
 		// the tonemap PS: max( mid / (lum + 0.001), cb.y ) then min( .., cb.x ); cb (x, y) = HNAM (max, min)
 		// lane PHYSUNITS1: the physical camera (EV100) on real units; the red the old law
+		wwPhysNoteOutdoor( L && ( !L->interior || wwCellAsOutdoor( L ) ) );	// MODULES1 item 14: the incident meter's daylight
 		const float e = wwPhysSkyOn() ? wwPhysExposure( h, adapted ) : wwCellExposure( h, adapted );
 		rec.f( prog, "cellIsExposure", e );
 		rec.f( prog, "cellIsE", h[1] );
@@ -2359,7 +2360,8 @@ int wwCellFxRed()
 	WW_SWITCH_STATIC( int, red, [] {
 		int r = 0;
 		for ( const QByteArray & t : wwEnv( "WW_CELL_FX_RED" ).split( ',' ) )
-			r |= t == "legacy" ? 1 : t == "nosoft" ? 2 : t == "nolin" ? 4 : t == "hide" ? 8 : t == "prewater" ? 16 : 0;
+			r |= t == "legacy" ? 1 : t == "nosoft" ? 2 : t == "nolin" ? 4 : t == "hide" ? 8 : t == "prewater" ? 16
+				: t == "unbound" ? 32 : 0;	// MODULES1 item 2: 32 = no finite guard on a lit effect's light (the black shards)
 		return r;
 	}() );
 	return red;

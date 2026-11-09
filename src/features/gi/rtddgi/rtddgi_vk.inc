@@ -901,6 +901,10 @@ bool ddgiStepReady( Dev & D, DdgiExtra & X, DdgiGpuSession * s, const DdgiGpuSte
 			return false;
 		}
 	}
+	if ( in.lightSet && !X.update ) {
+		out->why = "a relight needs vkCmdUpdateBuffer";
+		return false;
+	}
 	return true;
 }
 
@@ -923,6 +927,19 @@ uint32_t ddgiStepRecord( Dev & D, DdgiPipes & S, DdgiExtra & X, DdgiTimer & T, D
 	if ( s->released )
 		ddgiOwner( D, s->atlas.b, true );
 	stamp();
+	if ( in.lightSet ) {   // MODULES1 11-09 item 3: a new hour or weather, the params only
+		for ( int c = 0; c < 4; c++ ) {
+			s->prm.sunTo[c] = in.sunTo[c];
+			s->prm.sun[c] = in.sun[c];
+			s->prm.dirTo[c] = in.dirTo[c];
+			s->prm.dirColor[c] = in.dirColor[c];
+			for ( int f = 0; f < 6; f++ )
+				s->prm.sky[f][c] = in.sky[f][c];
+		}
+		ddgiXferBarrier( D );
+		X.update( D.cb, s->params.b, 0, sizeof s->prm, &s->prm );
+		ddgiXferBarrier( D );
+	}
 	if ( in.skipSet ) {   // RTXCASCADE2: the covered coarse probes the updates skip, written only when the range moved
 		bool same = true;
 		for ( int c = 0; c < 4; c++ )
