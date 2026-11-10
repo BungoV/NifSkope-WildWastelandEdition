@@ -217,6 +217,7 @@ struct State
 	double winCpu[Count] = {}, winGpu[Count] = {}, winCpuFrame = 0.0, winGpuFrame = 0.0;
 	QStringList lines;
 	int memArmed = 0;
+	bool text = true;	// lane PERFLOAD1 (P5): the table is drawn on screen (WW_CELL_PASSTIME_TEXT)
 };
 
 State & st()
@@ -242,6 +243,11 @@ State & st()
 			s.on = QSettings().value( QStringLiteral( "WW/PassTimers" ), false ).toBool();
 		}
 		s.log = wwEnvInt( "WW_CELL_PASSTIME_LOG" ) == 1;
+		// lane PERFLOAD1 (P5): switched on by WW_CELL_PASSTIME (the measuring route) the table is not drawn over the
+		// view unless asked; the Frame Timers menu row draws it as before. WW_CELL_PASSTIME_TEXT=1 is the old way.
+		s.text = wwEnvIsSet( "WW_CELL_PASSTIME_TEXT" ) ? wwEnvInt( "WW_CELL_PASSTIME_TEXT" ) == 1 : pin.isEmpty();
+		if ( s.on && s.log )
+			std::fprintf( stderr, "pass time text: table on screen %s (WW_CELL_PASSTIME_TEXT=1 draws it)\n", s.text ? "drawn" : "not drawn" );
 		s.sync = wwEnvInt( "WW_CELL_PASSTIME_SYNC" ) == 1;
 		s.census = wwEnvInt( "WW_CELL_PASSTIME_CENSUS" ) >= 1;
 		s.frags = wwEnvInt( "WW_CELL_PASSTIME_CENSUS" ) == 2;
@@ -751,7 +757,7 @@ void frameEnd()
 
 QStringList overlay()
 {
-	return st().on ? st().lines : QStringList();
+	return st().on && st().text ? st().lines : QStringList();
 }
 
 void memory( qint64 & privateMb, qint64 & workingMb )

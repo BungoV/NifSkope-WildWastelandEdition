@@ -1,4 +1,5 @@
 #include "cellspeed.h"
+#include "wwloadwatch.h"	// lane PERFLOAD1: the load's step marks and its `load speed:` line
 #include "wwswitch.h"	// lane TESTDRIVER1: the WW_* switch store
 #include "features/shared/cellpasstime.h"	// lane PERF1
 
@@ -108,6 +109,7 @@ qint64 nowNs()
 
 void begin()
 {
+	::wwMainStep( "the load's start" );
 	PassTime::memLog( "before the build" );	// lane PERF1: private bytes at each stage, dump or not
 	if ( !on() )
 		return;
@@ -138,6 +140,11 @@ void begin()
 
 void mark( const char * stage )
 {
+	::wwMainStep( stage );	// lane PERFLOAD1 (P2): a load step over 1 s prints its own line
+	if ( !std::strcmp( stage, "far LOD appended" ) )
+		std::fprintf( stderr, "load speed: asset source walks skipped %d, search path list built %d reused %d"
+			" (WW_LOADSPEED_RED=probewalk or pathlist is the old way)\n",
+			wwLoadWalkSkipped.exchange( 0 ), wwLoadPathBuilt.exchange( 0 ), wwLoadPathReused.exchange( 0 ) );
 	PassTime::memLog( stage );	// lane PERF1
 	if ( !on() )
 		return;
