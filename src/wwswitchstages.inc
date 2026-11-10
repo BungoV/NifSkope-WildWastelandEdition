@@ -142,6 +142,7 @@
 { "WW_CELL_AIR_SHADOW", 0, "src/features/air/cellvolair.cpp:190 vs | init-once state, re-read when a live set moves its prefix (b)" },
 { "WW_CELL_AIR_SHADOW_RED", 0, "src/features/air/cellvolair.cpp:189 vs | init-once state, re-read when a live set moves its prefix (b)" },
 { "WW_CELL_AIR_SKYVIEW", 0, "src/features/air/cellvolair.cpp:1170 wwAirSkyViewShaderDefine | re-read per frame or per call (a)" },
+{ "WW_CELL_AIR_STREET_RED", 0, "src/features/air/cellvolair.cpp:1078 vaKeepStreet | re-read per frame or per call (a)" },
 { "WW_CELL_AIR_SUNDIF_RED", 0, "src/features/air/cellvolair.cpp:1315 vaSunDifRed | re-read per frame or per call (a)" },
 { "WW_CELL_AIR_SUNJIT_RED", 0, "src/features/air/cellvolair.cpp:2080 vaPassInner | re-read per frame or per call (a)" },
 { "WW_CELL_AIR_TERMS", 0, "src/features/air/cellvolair.cpp:232 vs | init-once state, re-read when a live set moves its prefix (b)" },

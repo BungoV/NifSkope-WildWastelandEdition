@@ -1063,13 +1063,22 @@ void vaDerived( const VaMedium & M, const QString & why, VaLayer & L )
 		.arg( burnt, 0, 'f', 2 ).arg( why );
 }
 
-// a derived layer keeps the game's density at its anchor: sigma0 x rho(zg) is what it was without the layer
-void vaKeepStreet( VaMedium & M, const VaLayer & G )
+// a ground layer keeps the game's density at its anchor: sigma0 x rho(zg) is what it was without the layer.
+// MODULES1 R5A-2 (bungo b60 11-10, Memory Den street fog much thicker than 10-31): a FILE layer (Fusion Shaders'
+// CommonwealthFoggy.recx, 61 m x3) stacked on the game's fitted density, so the street took 1 + s = 4x the game's
+// Foggy night fog; on 10-31 the older 11 m file gave way to the derived layer, which kept it (1.00x). The file now
+// shapes the layer (thickness, strength = ground over aloft) and the game's fog sets the street. Red
+// WW_CELL_AIR_STREET_RED=stack: a file layer adds on top. Census: recx=... street=kept|stack.
+void vaKeepStreet( VaMedium & M, VaLayer & G )
 {
 	auto b = []( float z, float z0, float ih ) { return ih > 0.0f ? std::min( 1.0f, std::exp( -( z - z0 ) * ih ) ) : 1.0f; };
 	const float rb = ( 1.0f - G.w ) * b( G.zg, M.zb, M.invH ) + G.w * b( G.zg, G.zn, G.invHn );
-	if ( G.derived && rb > 0.0f )
+	if ( !( G.s > 0.0f ) || !( G.invHg > 0.0f ) )
+		return;
+	const bool stack = !G.derived && wwEnvStr( "WW_CELL_AIR_STREET_RED" ) == QLatin1String( "stack" );
+	if ( !stack && rb > 0.0f )
 		M.sigma0 *= rb / ( rb + G.s );
+	G.recx += stack ? QStringLiteral( " street=stack" ) : QStringLiteral( " street=kept" );
 }
 
 // the ground layer of the Lookdev weather from its .recx entry (recx.h); red nosidecar: the files ignored
