@@ -1862,7 +1862,13 @@ void wwCellLightsUniforms( Scene * scene )
 	/* lane VOLAIR1 (LAMPAIR1): the air takes the surfaces' exterior sun and sky (the weather's light x Sunlight Scale,
 	 * its DALC) so it is lit by the light the records give, not the fog-sun glare colour; red WW_CELL_AIR_RED=oldsun */
 	WW_SWITCH_STATIC( bool, airOldSun, wwEnvStr( "WW_CELL_AIR_RED" ).split( ',' ).contains( QStringLiteral( "oldsun" ) ) );
-	const bool extProg = wwIsCellProgramName( prog->name ) || wwIsCellDecalProgramName( prog->name ) || ( prog->name == "cell_volair.prog" && !airOldSun );
+	/* MODULES1 B9: the far cards (impostor_cell*) take the weather's sun and DALC too. An exterior has no XCLL
+	 * directional, so without this their cellHasDir was 0 and impostor_oct.frag lit them by the viewport light, which
+	 * follows no hour: white at noon, glowing at night. Red WW_CELL_FARLOD_RED=cardsun: the viewport light again */
+	WW_SWITCH_STATIC( bool, cardSunRed, wwEnv( "WW_CELL_FARLOD_RED" ) == "cardsun" );
+	const bool cardProg = !cardSunRed && std::string_view( prog->name ).substr( 0, 13 ) == "impostor_cell";
+	const bool extProg = wwIsCellProgramName( prog->name ) || wwIsCellDecalProgramName( prog->name ) || ( prog->name == "cell_volair.prog" && !airOldSun )
+		|| cardProg;
 	if ( outdoor && wwLookdevActive() && extProg ) {
 		float dalc[6][3], dif[4] = {}, amb[4] = {};
 		if ( wwLookdevDalc( dalc ) ) {
@@ -1876,7 +1882,7 @@ void wwCellLightsUniforms( Scene * scene )
 		static InputsLast sunIn;
 		const float sunKey[9] = { hasDir ? 1.0f : 0.0f, dirTo[0], dirTo[1], dirTo[2], dirColor[0], dirColor[1], dirColor[2],
 			prog->uniLocation( "csmMap" ) >= 0 ? 1.0f : 0.0f, sunScale };
-		const QString line = !sunIn.changed( sunKey, sizeof( sunKey ) ) ? sunLast : hasDir
+		const QString line = cardProg || !sunIn.changed( sunKey, sizeof( sunKey ) ) ? sunLast : hasDir
 			? QStringLiteral( "cell sun: %9 directional=weather to=%1,%2,%3 color=%4,%5,%6 (linear) shadows=%7 sunlight scale=%8" )
 				.arg( double( dirTo[0] ), 0, 'f', 5 ).arg( double( dirTo[1] ), 0, 'f', 5 ).arg( double( dirTo[2] ), 0, 'f', 5 )
 				.arg( double( dirColor[0] ), 0, 'f', 5 ).arg( double( dirColor[1] ), 0, 'f', 5 ).arg( double( dirColor[2] ), 0, 'f', 5 )
@@ -2044,6 +2050,15 @@ void wwCellLightsUniforms( Scene * scene )
 	prof.at( 19, "extamb" );
 	rec.b( prog, "cellExtDalc", extDalc );
 	rec.b( prog, "cellHasDir", hasDir );
+	if ( std::string_view( prog->name ).substr( 0, 13 ) == "impostor_cell" && outdoor ) {	// MODULES1 B9's line, once per change
+		static int cardLast = -1;
+		const int key = ( hasDir ? 1 : 0 ) | ( extDalc ? 2 : 0 ) | ( cardSunRed ? 4 : 0 );
+		if ( key != cardLast ) {
+			fprintf( stderr, "far cards light: sun %s, ambient %s%s\n", hasDir ? "weather" : "none (the viewport light)",
+				extDalc ? "weather DALC" : "flat NAM0", cardSunRed ? " RED=cardsun" : "" );
+			cardLast = key;
+		}
+	}
 	rec.f3( prog, "cellDirColor", dirColor[0], dirColor[1], dirColor[2] );
 	rec.f3( prog, "cellDirTo", dirTo[0], dirTo[1], dirTo[2] );
 	if ( ambLum >= 0.0f ) {

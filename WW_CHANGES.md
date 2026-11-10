@@ -1,3 +1,12 @@
+## MODULES1 round 5 B9 (2026-11-10): far tree cards take the hour's sun (white at noon, glowing at night)
+- **Cause:** an exterior has no XCLL directional, and the card programs (impostor_cell*) were not on the list that
+  takes the weather's sun and DALC (src/gl/celllights.cpp `extProg`). Their cellHasDir stayed 0, so PERFLOAD1 P2's
+  hour-light block in impostor_oct.frag never ran outdoors and the cards were lit by the viewport light x Sunlight
+  Scale, which follows no hour.
+- **Now:** the card programs take the weather sun (x Sunlight Scale) and the weather DALC like the near trees.
+  Telemetry `far cards light: sun weather|none (the viewport light), ambient weather DALC|flat NAM0`.
+  Red WW_CELL_FARLOD_RED=cardsun.
+
 ## MODULES1 round 5 B10 (2026-11-10): NPC hair no longer draws cyan
 - **Before:** the hair colour (item 16) goes into the vertex R as the palette row; a draw that skips the palette (the
   PBR route, or material tint off) multiplied the diffuse by (row, 1, 1), so the hair drew cyan.
