@@ -32,7 +32,7 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 #include "glview.h"
 #include "wwswitch.h"	// the WW_* switch store
-#include "libfo76utils/src/filebuf.hpp"	// MODULES1: FileBuffer::trimMappedViews
+#include "filebuf.hpp"	// MODULES1: FileBuffer::trimMappedViews
 #include "wwflyfix.h"	// FLYFIX1's free-camera rules (their old way is a test twin now)
 #include "cellspeed.h"
 #include "cellcambounds.h"	// the camera never shows an out-of-bounds or under-terrain view

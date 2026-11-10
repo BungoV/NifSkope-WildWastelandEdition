@@ -1,4 +1,4 @@
-/* lane FO76WEATHER1: unit test of src/features/weather/rainwetlaw.h (Fallout 76's rain wetness law, Fallout 4's clock).
+/* lane WETWEATHER1: unit test of src/features/weather/rainwetlaw.h ([the reference game's] rain wetness law, Fallout 4's clock).
  * Build: g++ -std=c++17 -I<tree>/src tests/features/weather/rainwet/rainwet.cpp. Red: -DRAINWET_RED = the base (shore wetness only:
  * the rain wets nothing), which must fail. Hand values from the law in the header's comment, worked by hand. */
 #include "features/weather/rainwetlaw.h"

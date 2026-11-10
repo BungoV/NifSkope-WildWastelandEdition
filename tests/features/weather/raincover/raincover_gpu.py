@@ -1,4 +1,4 @@
-"""lane FO76WEATHER2: the shader's cover test (res/shaders/features/weather/rain_wet.glsl wwRainWetExposed) against its CPU twin
+"""lane WETWEATHER2: the shader's cover test (res/shaders/features/weather/rain_wet.glsl wwRainWetExposed) against its CPU twin
 (src/features/weather/rainwetlaw.h exposed), on the real driver, no NifSkope.
 
     python -I tests/features/weather/raincover/raincover_gpu.py <raincover exe> [--red cover|off]

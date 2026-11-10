@@ -2,7 +2,7 @@
 #include "features/shared/wwtelemetry.h"	// lane MODULES1: the shared telemetry module
 #include "wwswitch.h"	// lane TESTDRIVER1: the WW_* switch store
 #include "gl/gpustage.h"	// MODULES1: the staged-upload counts in the stream1 mem line
-#include "libfo76utils/src/filebuf.hpp"	// MODULES1: the archive trims in the ram owners line
+#include "filebuf.hpp"	// MODULES1: the archive trims in the ram owners line
 
 #include <QByteArray>
 #include <QMap>

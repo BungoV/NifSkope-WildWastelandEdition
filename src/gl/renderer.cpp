@@ -60,7 +60,7 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include "features/near/cellcull.h"	// lane DECALS1: the placed decals' parallax
 #include "gl/celllooks.h"
 #include "features/water/cellwaterinfo.h"	// lane WATERWETBAKE1: the land side of the shore plane
-#include "features/weather/cellprecip.h"	// lane FO76WEATHER1: rain wetness
+#include "features/weather/cellprecip.h"	// lane WETWEATHER1: rain wetness
 #include "features/shadows/shadowset.h"	// lane WATERWETBAKE1: wwCellIsTerrainShape
 #include "features/reflections/cellssr.h"
 #include "features/reflections/cellreflprobe.h"	// lane REFLPROBE1

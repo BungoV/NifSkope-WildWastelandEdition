@@ -1,4 +1,4 @@
-/* lane FO76WEATHER2: unit test of src/features/weather/rainwetlaw.h exposed (the rain wetness's cover test over preciproof.h's
+/* lane WETWEATHER2: unit test of src/features/weather/rainwetlaw.h exposed (the rain wetness's cover test over preciproof.h's
  * roof map). Build: g++ -std=c++17 -I<tree>/src tests/features/weather/raincover/raincover.cpp. Red: -DRAINCOVER_RED = the base
  * (FO76WEATHER1: no cover test, every pixel open), which must fail. The fixture is built here (no game files):
  * a flat roof, a bridge deck, a sloped roof, a wall under an eave and a wall in the open, at 16 u texels. */

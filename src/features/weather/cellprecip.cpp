@@ -13,10 +13,10 @@
 #include "features/weather/precipmath.h"
 #include "features/weather/preciproof.h"	// lane INTSKY1: rain only under open sky in a sunlit interior
 #include "gl/cellunits.h"	// lane BUGS1102B: the roof map's unit
-#include "features/weather/rainfogmath.h"	// lane FO76WEATHER1: the rain's share of a weather change
+#include "features/weather/rainfogmath.h"	// lane WETWEATHER1: the rain's share of a weather change
 #include "features/weather/rainwetlaw.h"
 #include "features/weather/weatherrecx.h"	// lane WEATHERRECX1: precipitation.wetting / drying
-#include "features/shadows/shadowset.h"	// lane FO76WEATHER2: the cover map leaves the terrain out
+#include "features/shadows/shadowset.h"	// lane WETWEATHER2: the cover map leaves the terrain out
 #include "gl/glshape.h"
 #include "features/weather/precipspec.h"
 #include "gl/renderer.h"

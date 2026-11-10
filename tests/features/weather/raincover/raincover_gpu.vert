@@ -1,5 +1,5 @@
 #version 410 core
-// lane FO76WEATHER2: res/shaders/features/weather/rain_wet.glsl wwRainWetExposed on the real driver (tests/features/weather/raincover/raincover_gpu.py)
+// lane WETWEATHER2: res/shaders/features/weather/rain_wet.glsl wwRainWetExposed on the real driver (tests/features/weather/raincover/raincover_gpu.py)
 #include "../../../../res/shaders/features/weather/rain_wet.glsl"
 
 in vec3 inP;
