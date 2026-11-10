@@ -20872,6 +20872,28 @@ QString GLView::wwCameraGoTo( const float eye[3], const float rot[3], float fovD
 		.arg( double( fovDeg ), 0, 'f', 2 ).arg( double( back.length() ), 0, 'f', 3 );
 }
 
+/* MODULES1 M11: the camera as the live port's `goto` takes it: the eye (world units), yaw in degrees from +Y (north)
+ * toward +X (east), pitch in degrees above the horizon */
+QString GLView::wwCameraWhere()
+{
+	const Transform vt = viewTransform();
+	const double sc = vt.scale != 0.0f ? double( vt.scale ) : 1.0;
+	double eye[3], fwd[3];
+	for ( int a = 0; a < 3; a++ ) {
+		double c = 0.0;
+		for ( int k = 0; k < 3; k++ )
+			c -= double( vt.rotation( k, a ) ) * double( vt.translation[k] );
+		eye[a] = c / sc;
+		fwd[a] = -double( vt.rotation( 2, a ) );
+	}
+	const double yaw = std::atan2( fwd[0], fwd[1] ) * 57.29577951308232;
+	const double pitch = std::asin( std::clamp( fwd[2], -1.0, 1.0 ) ) * 57.29577951308232;
+	const QString g = QStringLiteral( "goto %1 %2 %3 %4 %5" ).arg( eye[0], 0, 'f', 1 ).arg( eye[1], 0, 'f', 1 ).arg( eye[2], 0, 'f', 1 )
+		.arg( yaw, 0, 'f', 2 ).arg( pitch, 0, 'f', 2 );
+	return QStringLiteral( "camera where: eye %1,%2,%3 yaw %4 pitch %5 | %6" ).arg( eye[0], 0, 'f', 1 ).arg( eye[1], 0, 'f', 1 )
+		.arg( eye[2], 0, 'f', 1 ).arg( yaw, 0, 'f', 2 ).arg( pitch, 0, 'f', 2 ).arg( g );
+}
+
 QString GLView::wwPlaceCamera( const Vector3 & eye, const Vector3 & at )
 {
 	Vector3 f = at - eye;

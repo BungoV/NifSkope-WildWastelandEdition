@@ -651,6 +651,8 @@ public:
 	QString wwFlyRefocusCheck();
 	//! lane FLYFIX1: the view at eye looking at at, kept after (the live verb "camera PATHFILE"); residuals returned
 	QString wwPlaceCamera( const Vector3 & eye, const Vector3 & at );
+	//! MODULES1 M11: the live port's `where` (the eye, yaw and pitch, and the `goto` line that comes back here)
+	QString wwCameraWhere();
 	//! lane CELLSPAWN1: a level view standing at eye, looking along yawDeg (0 north, 90 east); a cell's first open
 	QString wwSpawnAt( const Vector3 & eye, float yawDeg );
 	/*! lane FAVCAM1: the camera now, for a favorite: the eye (world), Rot (pitch x, roll y, yaw z, degrees), the vertical

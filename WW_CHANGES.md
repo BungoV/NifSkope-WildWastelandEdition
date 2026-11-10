@@ -1,3 +1,10 @@
+## MODULES1 M11 (2026-11-10): the live port's `goto` and `where`
+
+- `goto X Y Z [YAW [PITCH]]` puts the camera's eye there (yaw degrees from +Y, north, toward +X, east; pitch degrees
+  above the horizon, clamped to 89) through `GLView::wwPlaceCamera`, and answers with the eye residual and `where`.
+- `where` prints `camera where: eye x,y,z yaw Y pitch P | goto ...`: the line that brings the camera back. Both also
+  go to stderr (`camera goto:`, `camera where:`), so a flight log keeps every jump.
+
 ## MODULES1 M9 (2026-11-10): the shadow reach is a circle around the eye
 
 - **Cause:** past the cascades the terrain shadow map is the last tier. It faded only over 2 % of its square's edges,

@@ -2363,6 +2363,28 @@ QString wwLiveCommand( NifSkope * skope, const QString & line )
 		cp.sample( 0, eye, at, fov );
 		return ogl->wwPlaceCamera( eye, at ) + QStringLiteral( " (path fov %1 not applied)" ).arg( double( fov ), 0, 'f', 1 );
 	}
+	/* MODULES1 M11: `goto X Y Z YAW PITCH` puts the eye there (yaw degrees from +Y toward +X, pitch degrees up; both 0 when
+	 * left out), `where` prints the camera and its `goto` line (notes/modules1/bungo_refs/SPOTS_1110_goto.txt: one per spot) */
+	if ( verb == QLatin1StringView( "where" ) ) {
+		const QString r = ogl->wwCameraWhere();
+		std::fprintf( stderr, "%s\n", qPrintable( r ) );
+		return r;
+	}
+	if ( verb == QLatin1StringView( "goto" ) ) {
+		const QStringList a = rest.split( QRegularExpression( QStringLiteral( "[\\s,]+" ) ), Qt::SkipEmptyParts );
+		double v[5] = { 0, 0, 0, 0, 0 };
+		bool ok = a.size() >= 3 && a.size() <= 5;
+		for ( int i = 0; ok && i < a.size(); i++ )
+			v[i] = a[i].toDouble( &ok );
+		if ( !ok )
+			return QStringLiteral( "goto refused: X Y Z [YAW [PITCH]] (got \"%1\")" ).arg( rest );
+		const double y = v[3] / 57.29577951308232, p = std::clamp( v[4], -89.0, 89.0 ) / 57.29577951308232;
+		const Vector3 eye = Vector3( static_cast<float>( v[0] ), static_cast<float>( v[1] ), static_cast<float>( v[2] ) );
+		const Vector3 at = eye + Vector3( float( std::sin( y ) * std::cos( p ) ), float( std::cos( y ) * std::cos( p ) ), float( std::sin( p ) ) ) * 100.0f;
+		const QString r = ogl->wwPlaceCamera( eye, at ) + QStringLiteral( " | " ) + ogl->wwCameraWhere();
+		std::fprintf( stderr, "camera goto: %s\n", qPrintable( r ) );
+		return r;
+	}
 	if ( verb != QLatin1StringView( "shot" ) && verb != QLatin1StringView( "path" ) && verb != QLatin1StringView( "gpums" ) )
 		return QStringLiteral( "refused unknown verb: %1" ).arg( verb );
 	const QString bg = wwLiveSettleBackground( ogl );
