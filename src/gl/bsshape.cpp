@@ -32,6 +32,7 @@
 #include "io/material.h"
 #include "model/nifmodel.h"
 #include "glview.h"
+#include "features/far-lod/lodpreview.h"	// lane PERFLOAD1 P8: one far ring alone
 
 void BSShape::updateImpl( const NifModel * nif, const QModelIndex & index )
 {
@@ -311,6 +312,10 @@ void BSShape::drawShapes( NodeList * secondPass )
 
 	// lane MUSGI1: the game's fake fog / shaft cards while our Volumetric Air is on (gl/fakeair.h)
 	if ( name.contains( QLatin1StringView( "FakeAir " ) ) && wwFakeAirHidden() )
+		return;
+
+	// lane PERFLOAD1 P8: the LOD preview's one ring alone (terrain, water and objects of the other rings left out)
+	if ( name.startsWith( QLatin1StringView( "FarLOD " ) ) && LodPreview::ringHides( name ) )
 		return;
 
 	// flat shading: GLView fills the geometry with uniform grey instead

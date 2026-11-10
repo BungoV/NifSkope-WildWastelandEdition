@@ -173,6 +173,7 @@ uniform float alphaThreshold;      // default 128/255, vanilla's LOD alpha test 
 // TAA resolves it (docs/FO4CS_IMPROVED_LOD_PLAN.md R3 item 5); 0 on every other path
 uniform float cardFadeOut;
 uniform float cardFadeFrame;
+uniform vec3 cardLodTint;	// lane PERFLOAD1 P8: the LOD preview's tint (0 = off)
 /* WHICH COVERAGE THE CUT READS (lane IMPOSTORTEAR1, 2026-09-23). 0 -- GL's
  * default, so also what an exe that never sets it gets -- is the STIPPLED
  * cut of section 1b; 1 is the way back, the 3-frame weighted mean the cut
@@ -817,5 +818,7 @@ void main()
 		z = ( z * ( a * z + b * c ) + d * e ) / ( z * ( a * z + b ) + d * f ) - e / f;
 		lc = sqrt( z / max( toneMapScale * 0.93333333, 1e-6 ) );
 	}
+	if ( cardLodTint.r + cardLodTint.g + cardLodTint.b > 0.0 )	// lane PERFLOAD1 P8: the level's colour, shaded by its luminance
+		lc = cardLodTint * ( 0.25 + 0.75 * clamp( dot( lc, vec3( 0.2126, 0.7152, 0.0722 ) ), 0.0, 1.0 ) );
 	fragColor = vec4( lc, 1.0 );
 }

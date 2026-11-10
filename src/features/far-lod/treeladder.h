@@ -68,6 +68,19 @@ inline int select( float f, uint8_t avail, const Thresholds & t, int current )
 	return finer < current ? finer : current;
 }
 
+/*! lane PERFLOAD1 P8: the LOD preview's forced level (src/features/far-lod/lodpreview.h): `want` when available, else
+ *  the nearest available step (the finer on a tie); -1 = none available */
+inline int forced( int want, uint8_t avail )
+{
+	for ( int d = 0; d < Steps; d++ ) {
+		if ( want - d >= 0 && want - d < Steps && ( avail & ( 1u << ( want - d ) ) ) )
+			return want - d;
+		if ( want + d < Steps && want + d >= 0 && ( avail & ( 1u << ( want + d ) ) ) )
+			return want + d;
+	}
+	return -1;
+}
+
 //! one tree's step and its cross-fade (from -> step, t 0..1; t 1 = no fade in flight)
 struct State
 {

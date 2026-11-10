@@ -797,6 +797,7 @@ bool ImpostorDraw::drawCard( Scene * scene, const ImpostorCardSet & set,
 	prog->uni1f( "swayPhase", opt.swayPhase );
 	prog->uni1f( "cardFadeOut", opt.fadeOut );	// lane PERFLOAD1 P7
 	prog->uni1f( "cardFadeFrame", opt.fadeFrame );
+	prog->uni3f( "cardLodTint", opt.lodTint[0], opt.lodTint[1], opt.lodTint[2] );	// lane PERFLOAD1 P8
 
 	wwImpostorTrace( "H card uniforms" );
 	if ( fresh ) {
@@ -1234,6 +1235,7 @@ bool ImpostorDraw::drawCardsInstanced( Scene * scene, const QVector< InstCard > 
 	prog->uni1b( "useBakedAo", opt.bakedAo );
 	prog->uni1i( "debugChannel", opt.debugChannel );
 	prog->uni1f( "swayAmplitude", opt.swayAmplitude );
+	prog->uni3f( "cardLodTint", opt.lodTint[0], opt.lodTint[1], opt.lodTint[2] );	// lane PERFLOAD1 P8
 	if ( gpuPick ) {
 		prog->uni1i( "cardIndexBase", int( g.slotData.size() / 4 ) );
 		prog->uni1f( "cardSwayBase", opt.swayPhase );

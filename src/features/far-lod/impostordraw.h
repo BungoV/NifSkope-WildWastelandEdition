@@ -168,6 +168,8 @@ struct Options
 	//! pattern that moves every frame (fadeFrame) so the TAA resolves it. The one-by-one path (drawCard) reads it.
 	float fadeOut = 0.0f;
 	float fadeFrame = 0.0f;
+	//! lane PERFLOAD1 P8: the LOD preview's tint (lodpreview.h), 0 0 0 = off; both paths read it
+	float lodTint[3] = { 0.0f, 0.0f, 0.0f };
 
 	//! Sway. A card is four vertices, so there is nothing to displace: this is
 	//! a UV shear weighted by the baked sway weight, which is an APPROXIMATION

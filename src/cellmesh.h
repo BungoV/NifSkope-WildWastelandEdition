@@ -41,6 +41,8 @@ struct CellMeshInst
 	//! lane PERFLOAD1 P7 round 2: per row its tree-ladder steps (bit 1 + MNAM slot; 0x80 = the ring's own row, the one
 	//! drawn before the ladder runs); empty = no ladder row in this bucket
 	QVector<quint8> rowStep;
+	//! lane PERFLOAD1 P8: per row the LOD level its mesh is (TreeLadder step + 1: rep0 = 2 .. rep3 = 5), for the preview's tint
+	QVector<quint8> rowLevel;
 	const void * doc = nullptr;
 	mutable quint64 visFor = ~quint64( 0 ), visKey = 0;
 	mutable qint64 visHidden = 0;

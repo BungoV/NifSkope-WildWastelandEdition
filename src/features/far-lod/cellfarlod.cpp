@@ -32,6 +32,7 @@ BSD License - see nifskope.h
 #include "features/water/endlesssea.h"	// lane FARSEA1: the endless sea past the bake
 #include "features/near/cellbindless.h"	// lane BINDLESS2FIX: the sway reaches the bindless twins
 #include "features/far-lod/cellfarinst.h"	// lane FARLOOK1101: and the far splat twins
+#include "features/far-lod/lodpreview.h"	// lane PERFLOAD1 P8: the LOD preview's forced slot
 #include "features/far-ground/cellfarground.h"	// lane FARDRAW1: the far ring 0's live ground
 #include "gl/glscene.h"
 #include "gl/glshape.h"
@@ -1295,7 +1296,9 @@ QString cellFarLodAppend( NifModel * nif, const QModelIndex & iRoot, const EsmWo
 			os.hy0 = hy0;
 			os.hx1 = hx1;
 			os.hy1 = hy1;
-			os.slot = defs[i].slot;
+			// lane PERFLOAD1 P8: the LOD preview's forced level pins every ring to its slot (nearest when empty)
+			os.slot = LodPreview::objectSlot() >= 0 ? LodPreview::objectSlot() : defs[i].slot;
+			os.slotNearest = LodPreview::objectSlot() >= 0;
 			os.namePrefix = QStringLiteral( "FarLOD r%1 " ).arg( int( i ) );
 			os.shift[0] = shift[0];
 			os.shift[1] = shift[1];
@@ -1349,6 +1352,11 @@ QString cellFarLodAppend( NifModel * nif, const QModelIndex & iRoot, const EsmWo
 					.arg( oc.instancesDrawn ).arg( oc.tris ).arg( oc.uniqueVerts ).arg( oc.uniqueTris )
 					.arg( double( oc.geoBytes ) / ( 1024.0 * 1024.0 ), 0, 'f', 2 )
 					.arg( double( oc.instBytes ) / ( 1024.0 * 1024.0 ), 0, 'f', 2 ) );
+			// lane PERFLOAD1 P8: the LOD preview's per-level census of this ring's placements
+			say( QStringLiteral( "lod preview: objects ring %1 level %2 (slot %3): rep0 %4, rep1 %5, rep2 %6, rep3 %7; "
+				"%8 drawn at their nearest level" ).arg( int( i ) ).arg( LodPreview::levelName( LodPreview::force() ) )
+				.arg( os.slot ).arg( oc.slotRows[0] ).arg( oc.slotRows[1] ).arg( oc.slotRows[2] ).arg( oc.slotRows[3] )
+				.arg( oc.slotNearest ) );
 			// lane FIX1101A lodch: which of the bake's channels this ring USED (the census line the unit and the rows read)
 			say( QStringLiteral( "far lod: objects ring %1 channels: AO %2 (%3 placements from the per-vertex stream, %4 from "
 				"self x placement AO, stream mean %5), sky %6 (%7 placements, %8 vertices, factor mean %9, raw byte mean %10); "

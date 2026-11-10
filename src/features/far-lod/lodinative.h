@@ -103,6 +103,9 @@ struct LodiSceneSpec
 	/*! lane PERFLOAD1 P7: a handed tree with a REFR keeps its mesh row too, and the ladder (treeladder.h) picks mesh
 	 *  or impostor per frame by its size on screen. False = P1's cut (red WW_CELL_FARLOD_RED=edgecut). */
 	bool treeLadder = false;
+	/*! lane PERFLOAD1 P8: the LOD preview forced `slot` (lodpreview.h): a base with that slot empty draws its nearest
+	 *  authored slot (the finer on a tie) instead of nothing, counted in slotNearest */
+	bool slotNearest = false;
 	//! > 0: when the placements come to more triangles than this, nothing is written to the document
 	//! (LodiAppendCounts::overBudget; tris = what it would have been) -- the far field's memory budget
 	qint64 maxTris = 0;
@@ -149,6 +152,9 @@ struct LodiAppendCounts
 	//! lane PERFLOAD1 P7: handed trees that kept their mesh row for the ladder; round 2: the rows added for their
 	//! other MNAM slots (one a distinct mesh)
 	qint64 treeLadder = 0, treeLadderRows = 0;
+	//! lane PERFLOAD1 P8: placements drawn per MNAM slot, and those drawn at their nearest slot (slotNearest)
+	qint64 slotRows[4] = { 0, 0, 0, 0 };
+	qint64 slotNearest = 0;
 };
 
 /*! lane FIX1101A lodch (LATE ITEMs 11 + 16 + 20, "LOD channels on by default"): the far LOD draws the bake's AO

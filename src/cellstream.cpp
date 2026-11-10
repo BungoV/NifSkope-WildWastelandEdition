@@ -12,6 +12,7 @@
 #include "features/far-lod/largeref.h"		// lane LARGEREF2: who draws each large ref
 #include "cellmodsource.h"	// lane LANDSPEC8: uGridsToLoad
 #include "features/far-lod/impostorchunk.h"
+#include "features/far-lod/lodpreview.h"	// lane PERFLOAD1 P8: the near grid follow / freeze / off
 #include "gl/bsshape.h"
 #include "features/near/cellcull.h"
 #include "gl/cellgrass.h"
@@ -27,6 +28,7 @@
 #include "model/nifmodel.h"
 #include "spells/blocks.h"
 
+#include <QDebug>
 #include <QElapsedTimer>
 #include <QHash>
 #include <QPointer>
@@ -123,6 +125,7 @@ struct StreamCell
 	double writeMs = 0.0;
 	int pfx = 0;                                    //!< lane LIVESET3: particle copies it holds (the stream's cap)
 	quint32 lref = 0;                               //!< lane LARGEREF2: a large-ref unit (x, y: the cell it stands in)
+	bool nearOff = false;                           //!< lane PERFLOAD1 P8: attached, but hidden by the near grid's OFF
 };
 
 /* lane LARGEREF2 (LARGEREF-STREAM): a large ref a loaded cell lists but whose own cell is not loaded is drawn by a unit
@@ -216,6 +219,12 @@ public:
 	//! game never loads those cells (red WW_LANDSPEC_RED=fixedopen: the prefetch row is built)
 	bool noPrefetch = false;
 	int gridHalf = LandLodSpec::kFixedGridHalf;	//!< lane LANDSPEC8: uGridsToLoad / 2 from the game's inis (was 2)
+	//! lane PERFLOAD1 P8: the near grid mode last applied, its line's gen, the once-a-second distance line
+	int gridMode = LodPreview::Follow;
+	quint64 gridSaid = 0;
+	QElapsedTimer gridSayT;
+	void nearOffCell( StreamCell & c, bool off );
+	void nearGrid( const Vector3 & eye );
 	CellStreamCamera cam;         //!< lane WEATHERBLEND6: the eye's cell and its regions, for the region walk
 	//! lane STREAMTEX1: the file textures each written cell's properties name (cellstreamtex.h); lane STREAMTEX3: the
 	//! counts give the PERFFIX4 pool its tiers, the budget shown in the census is the pool's (read at the open)
@@ -723,12 +732,68 @@ void Stream::lrPublish()
 		return;
 	QVector<quint32> refs;
 	for ( const auto & kv : cells )
-		if ( kv.second.lref && kv.second.st == CellState::Attached && kv.second.chunk )
+		if ( kv.second.lref && kv.second.st == CellState::Attached && kv.second.chunk && !kv.second.nearOff )
 			for ( int i = 0; i < kv.second.chunk->refs.size(); i++ )
 				refs << kv.second.chunk->refs.at( i ).refForm;
 	CellFarHide::setExtraRefs( nif, refs );
 	if ( scene && root )
 		scene->transformDirty = true;
+}
+
+//! lane PERFLOAD1 P8: one attached cell (or large-ref unit) out of the draw for the near grid's OFF, or back in
+void Stream::nearOffCell( StreamCell & c, bool off )
+{
+	if ( c.st != CellState::Attached || c.nearOff == off )
+		return;
+	c.nearOff = off;
+	if ( c.cellNode )
+		c.cellNode->makeParent( off ? nullptr : root.data() );
+	if ( !c.lref ) {
+		showFar( c.x, c.y, off );   // the far tile and its rows fill the hole
+		farHide( c, !off );
+	}
+	dirty = true;
+}
+
+/*! lane PERFLOAD1 P8: the LOD preview's near grid (lodpreview.h). FREEZE keeps the block where it was (tick's frozen
+ *  eye), OFF also takes every attached cell out of the draw; FOLLOW puts them back, no reopen. Telemetry: a line on each
+ *  change, then once a second while not following: the frozen cells and the eye's distance to the block's edge
+ *  (negative = outside it). */
+void Stream::nearGrid( const Vector3 & eye )
+{
+	const int mode = LodPreview::grid();
+	if ( mode != gridMode ) {
+		const bool off = mode == LodPreview::Off;
+		bool anyLr = false;
+		for ( auto & kv : cells ) {
+			nearOffCell( kv.second, off );
+			anyLr = anyLr || kv.second.lref;
+		}
+		if ( anyLr )
+			lrPublish();
+		gridMode = mode;
+	}
+	const bool say = LodPreview::gen() != gridSaid || ( mode != LodPreview::Follow
+		&& ( !gridSayT.isValid() || gridSayT.elapsed() >= 1000 ) );
+	if ( !say )
+		return;
+	gridSaid = LodPreview::gen();
+	gridSayT.start();
+	const float x0 = float( ccx - gridHalf ) * kCell, x1 = float( ccx + gridHalf + 1 ) * kCell;
+	const float y0 = float( ccy - gridHalf ) * kCell, y1 = float( ccy + gridHalf + 1 ) * kCell;
+	const float edge = std::min( std::min( eye[0] - x0, x1 - eye[0] ), std::min( eye[1] - y0, y1 - eye[1] ) );
+	int attached = 0, hidden = 0;
+	for ( const auto & kv : cells )
+		if ( kv.second.st == CellState::Attached ) {
+			attached++;
+			hidden += kv.second.nearOff ? 1 : 0;
+		}
+	qInfo().noquote() << QStringLiteral( "lod preview: near grid %1: cells %2..%3, %4..%5 %6; %7 attached, %8 hidden; "
+		"eye %9 units from the grid edge%10" ).arg( LodPreview::gridName( mode ) ).arg( ccx - gridHalf )
+		.arg( ccx + gridHalf ).arg( ccy - gridHalf ).arg( ccy + gridHalf )
+		.arg( mode == LodPreview::Follow ? QStringLiteral( "(following)" ) : QStringLiteral( "(frozen)" ) )
+		.arg( attached ).arg( hidden ).arg( double( edge ), 0, 'f', 0 )
+		.arg( edge < 0.0f ? QStringLiteral( " (outside it)" ) : QString() );
 }
 
 void Stream::showFar( int x, int y, bool show )
@@ -876,6 +941,10 @@ bool Stream::attach( StreamCell & c, const QElapsedTimer & t, double budget )
 		farHide( c, true );   // lane FARHOLE2: and the far objects, cards and rings past 0 it holds
 	}
 	c.st = CellState::Attached;
+	if ( gridMode == LodPreview::Off ) {	// lane PERFLOAD1 P8: a cell attached under the near grid's OFF stays hidden
+		c.nearOff = false;
+		nearOffCell( c, true );
+	}
 	if ( c.lref )
 		lrPublish();
 	else
@@ -897,10 +966,11 @@ void Stream::unload( StreamCell & c )
 		setRootSlot( c.cellBlock, -1 );
 	const double msRoot = msOf( t );
 	const bool wasAttached = c.st == CellState::Attached;	// lane LARGEREF2
-	if ( !c.lref ) {
+	if ( !c.lref && !c.nearOff ) {	// lane PERFLOAD1 P8: a cell the near grid's OFF hid has its far tile out already
 		showFar( c.x, c.y, true );
 		farHide( c, false );   // lane FARHOLE2
 	}
+	c.nearOff = false;
 	const double msFar = msOf( t );
 	QSet<int> nodeBlocks, propBlocks;
 	for ( const auto & tk : c.takes ) {
@@ -1172,8 +1242,17 @@ bool Stream::tick( Scene * sc, const Vector3 & eye )
 		changed = true;
 	}
 
+	// lane PERFLOAD1 P8: the near grid's FREEZE / OFF hold the block at the eye they began at (the camera flies free)
+	Vector3 gridEye = eye;
+	if ( LodPreview::grid() != LodPreview::Follow ) {
+		float fe[3] = { eye[0], eye[1], eye[2] };
+		if ( !LodPreview::frozenEye( fe ) )
+			LodPreview::setFrozenEye( fe );
+		gridEye = Vector3( fe[0], fe[1], fe[2] );
+	}
+	nearGrid( eye );
 	if ( !fixedCentre )	// lane LANDSPEC6: the game skips every grid shift in a fixed world
-		shiftCentre( eye );
+		shiftCentre( gridEye );
 	if ( texCentre != Key( ccx, ccy ) )	// lane STREAMTEX1: a crossing (the first tick: the open's census)
 		texCensus();
 	wanted.clear();
@@ -1183,6 +1262,7 @@ bool Stream::tick( Scene * sc, const Vector3 & eye )
 	// the row the next move needs, as soon as the eye is in the neighbour cell
 	prefetch.clear();
 	const int ex = cellOf( eye[0] ), ey = cellOf( eye[1] );
+	const int gx = cellOf( gridEye[0] ), gy = cellOf( gridEye[1] );	// lane PERFLOAD1 P8: the prefetch row of the held block
 	if ( !cam.valid || ex != cam.cx || ey != cam.cy ) {	// lane WEATHERBLEND6: the regions read on entering a cell only
 		cam.valid = true;
 		cam.cx = ex;
@@ -1196,8 +1276,8 @@ bool Stream::tick( Scene * sc, const Vector3 & eye )
 	cam.eye[1] = eye[1];
 	for ( int dy = -gridHalf; dy <= gridHalf; dy++ )
 		for ( int dx = -gridHalf; dx <= gridHalf; dx++ )
-			if ( !noPrefetch && !wanted.count( Key( ex + dx, ey + dy ) ) )
-				prefetch.insert( Key( ex + dx, ey + dy ) );
+			if ( !noPrefetch && !wanted.count( Key( gx + dx, gy + dy ) ) )
+				prefetch.insert( Key( gx + dx, gy + dy ) );
 
 	// lane LARGEREF2: the units the layer draws (a ref listed by an attached cell whose own cell is not attached)
 	lrWanted.clear();

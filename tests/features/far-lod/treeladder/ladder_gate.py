@@ -298,6 +298,53 @@ for st in range(1, 6):
     ok &= rows_cast + card_cast == 1
 gate(ok, 'shadow casters: exactly one per tree on every step (the step\'s row, the card on the impostor)')
 
+# --- P8: the LOD preview (src/features/far-lod/lodpreview.cpp): forced level, tint colours, ring of a shape ---
+RED3 = '--red3' in sys.argv	# the coarser side wins a tie: the tie gate must FAIL
+gate('inline int forced( int want, uint8_t avail )' in src, 'treeladder.h holds TreeLadder::forced')
+
+
+def forced(want, avail):
+    for d in range(STEPS):
+        order = (want + d, want - d) if RED3 else (want - d, want + d)
+        for s in order:
+            if 0 <= s < STEPS and avail & (1 << s):
+                return s
+    return -1
+
+
+ok = True
+for avail in range(1, 64):
+    for want in range(STEPS):
+        got = forced(want, avail)
+        best = min(abs(s - want) for s in range(STEPS) if avail & (1 << s))
+        ok &= bool(avail & (1 << got)) and abs(got - want) == best
+gate(ok, 'forced level: every wanted step on every MNAM mask draws an available step at the least distance')
+gate(forced(2, (1 << 1) | (1 << 3)) == 1 and forced(5, 1 << 5) == 5 and forced(0, 0) == -1,
+     'forced level: a tie goes to the finer step (rep1 wanted, rep0 + rep2 present: rep0); none available: -1')
+
+PREV = open(os.path.join(HERE, '..', '..', '..', '..', 'src', 'features', 'far-lod', 'lodpreview.cpp'), encoding='utf-8').read()
+tab = re.search(r'static const float c\[7\]\[3\] = \{(.*?)\};', PREV, re.S).group(1)
+cols = [[float(v.strip().rstrip('f')) for v in t.split(',')] for t in re.findall(r'\{([^{}]*)\}', tab)]
+fr = [[float(v) for v in t.split(',')] for t in re.findall(r'vec3\( ([0-9.]+, [0-9.]+, [0-9.]+) \)',
+                                                         FRAG[FRAG.index('farLadder.y > 0.5'):][:900])]
+gate(len(cols) == 7 and fr[:5] == [[1.0, 0.2, 1.0], cols[1], cols[2], cols[3], cols[4]] and cols[6] == [1.0, 0.2, 1.0],
+     'tint: fo4_default.frag\'s rep0..rep3 and band colours equal lodpreview.cpp\'s table')
+gate('cardLodTint' in OCT, 'tint: impostor_oct.frag reads cardLodTint')
+
+
+def ring_of(name):
+    if not name.startswith('FarLOD '):
+        return -1
+    for t in name[7:].split(' '):
+        if len(t) >= 2 and t[0] == 'r' and t[1:].isdigit():
+            return int(t[1:])
+    return -1
+
+
+gate([ring_of(n) for n in ('FarLOD terrain r2', 'FarLOD r3 BlockA', 'FarLOD v r1 trees', 'FarLOD water v r4 x',
+                           'FarLOD terrain v r0 a', 'Cell 3,4', 'FarLOD cards')] == [2, 3, 1, 4, 0, -1, -1],
+     'ring alone: the ring index read from every far shape name form, -1 for the rest')
+
 print('%s: %d of %d checks pass%s' % ('LADDER GATE PASS' if not fails else 'LADDER GATE FAIL', checks - len(fails), checks,
-                                      ' (RED)' if RED else (' (RED2)' if RED2 else '')))
+                                      ' (RED)' if RED else (' (RED2)' if RED2 else (' (RED3)' if RED3 else ''))))
 sys.exit(1 if fails else 0)

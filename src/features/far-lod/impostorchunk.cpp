@@ -530,6 +530,7 @@ int ImpostorChunk::armCellFar( NifModel * nif, const QStringList & chunkPaths, c
 }
 
 quint64 wwGlPaintCount();	// glview.cpp
+#include "features/far-lod/lodpreview.h"	// lane PERFLOAD1 P8
 
 int ImpostorChunk::drawCellFar( Scene * scene, const ImpostorDraw::Options & opt )
 {
@@ -562,6 +563,8 @@ int ImpostorChunk::drawCellFar( Scene * scene, const ImpostorDraw::Options & opt
 	int atStep[TreeLadder::Steps] = {};
 	int ladderTrees = 0, ladderRows = 0, ladderFades = 0, ladderCards = 0, ladderCardsFading = 0;
 	int ladderHeld = 0, ladderGoing = 0, ladderMeshCast = 0;	// round 2: fades held for a commit, rows dithering out
+	const int forcedStep = LodPreview::force();	// lane PERFLOAD1 P8: the preview's level (-1 = the ladder)
+	int ladderNearest = 0;
 	if ( p11 > 0.0f ) {
 		for ( int i = 0; i < s.placed.size(); i++ ) {
 			const Placed & p = s.placed.at( i );
@@ -577,7 +580,13 @@ int ImpostorChunk::drawCellFar( Scene * scene, const ImpostorDraw::Options & opt
 				p.world[2] - F.shift[2] + p.c.center[2] * sc );
 			const float f = TreeLadder::screenFraction( p.ladderRadius * sc, v.length(), p11 );
 			TreeLadder::State & st = F.ladder[i];
-			TreeLadder::advance( st, TreeLadder::select( f, avail, ladderThr, st.step ), dt );
+			int want = TreeLadder::select( f, avail, ladderThr, st.step );
+			if ( forcedStep >= 0 ) {	// P8: the forced level, else the nearest step the tree has (counted)
+				want = TreeLadder::forced( forcedStep, avail );
+				if ( want != forcedStep )
+					ladderNearest++;
+			}
+			TreeLadder::advance( st, want, dt );
 			ladderTrees++;
 			if ( st.step >= 0 && st.step < TreeLadder::Steps )
 				atStep[st.step]++;
@@ -611,6 +620,19 @@ int ImpostorChunk::drawCellFar( Scene * scene, const ImpostorDraw::Options & opt
 		CellFarHide::castCommit();
 		sinceCast.start();
 	}
+	// lane PERFLOAD1 P8: the LOD preview's line on each change (the far trees by the step they go to)
+	static quint64 saidPreview = 0;
+	if ( ladderTrees > 0 && LodPreview::gen() != saidPreview ) {
+		saidPreview = LodPreview::gen();
+		qInfo().noquote() << QStringLiteral( "lod preview: level %1 (far trees per frame, far objects at the far rebuild), "
+			"tint %2, ring %3, near grid %4; far trees per level full %5, rep0 %6, rep1 %7, rep2 %8, rep3 %9, impostor %10; "
+			"%11 drawn at their nearest level (no %1 step)" )
+			.arg( LodPreview::levelName( forcedStep ) ).arg( LodPreview::tint() ? "on" : "off" )
+			.arg( LodPreview::ringName( LodPreview::ring() ) ).arg( LodPreview::gridName( LodPreview::grid() ) )
+			.arg( atStep[0] ).arg( atStep[1] ).arg( atStep[2] ).arg( atStep[3] ).arg( atStep[4] ).arg( atStep[5] )
+			.arg( ladderNearest );
+	}
+	const bool lodTint = LodPreview::tint();
 	if ( !s.sheetsRegistered ) {
 		s.sheetsRegistered = true;
 		for ( const ImpostorCardSet & set : std::as_const( s.sets ) )
@@ -688,6 +710,8 @@ int ImpostorChunk::drawCellFar( Scene * scene, const ImpostorDraw::Options & opt
 		}
 		o.fadeOut = fadeOut;
 		o.fadeFrame = float( fadeFrame );
+		if ( lodTint )	// P8: the impostor's colour, a card mid-fade the band's
+			LodPreview::tintColour( fadeOut > 0.0f ? 6 : int( TreeLadder::Impostor ), o.lodTint );
 		if ( inst && s.sets.at( p.setIndex ).ok && fadeOut <= 0.0f ) {	// a fading card goes one by one (its own fade)
 			ImpostorDraw::InstCard c;
 			c.set = &s.sets.at( p.setIndex );
@@ -711,7 +735,10 @@ int ImpostorChunk::drawCellFar( Scene * scene, const ImpostorDraw::Options & opt
 	ImpostorDraw::batchEnd( scene );
 	ImpostorDraw::InstStats ist;
 	if ( !instCards.isEmpty() ) {
-		if ( ImpostorDraw::drawCardsInstanced( scene, instCards, opt, farGen(), &ist ) ) {
+		ImpostorDraw::Options io = opt;
+		if ( lodTint )	// P8
+			LodPreview::tintColour( TreeLadder::Impostor, io.lodTint );
+		if ( ImpostorDraw::drawCardsInstanced( scene, instCards, io, farGen(), &ist ) ) {
 			drawn += ist.drawn;
 			if ( ist.refused && !refused )
 				firstWhy = ist.firstWhy;

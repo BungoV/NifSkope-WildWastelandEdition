@@ -2,6 +2,7 @@
 
 #include "cellfarhide.h"
 #include "cellmesh.h"
+#include "features/far-lod/lodpreview.h"	// lane PERFLOAD1 P8: the LOD preview's tint (attribute 9, y)
 #include "wwswitch.h"
 #include "features/shared/cellpasstime.h"
 #include "gl/cellunits.h"	// lane FIX1101A lodch: the far stream's unit
@@ -42,6 +43,7 @@ struct Copy
 	QHash<quint32, QVector<int>> refRows;
 	std::vector<int> fadeSet;
 	quint64 fadeFor = ~quint64( 0 ), fadePaint = ~quint64( 0 );
+	quint64 tintFor = 0;	// lane PERFLOAD1 P8: LodPreview::gen() the rows' tint codes (attribute 9, y) were written for
 };
 
 struct Ctx
@@ -246,13 +248,10 @@ void ensureBox( GLFunctions * fn, Ctx & c, Copy & k, const CellMeshInst & d )
  * (CellFarHide::ladderFades) take TreeLadder::rowFade and last frame's go back to 0, one sub-upload of the span. */
 void ladderFadeRows( GLFunctions * fn, Ctx & c, Copy & k, const CellMeshInst & d )
 {
-	if ( d.rowStep.isEmpty() )
+	// lane PERFLOAD1 P8: y = the LOD preview's tint code (CellMeshInst::rowLevel, 0 = untinted), written on each change
+	const bool tint = LodPreview::tint() && !d.rowLevel.isEmpty();
+	if ( d.rowStep.isEmpty() && !tint && !k.fade )
 		return;
-	const quint64 g = CellFarHide::ladderFadeGen(), paint = wwGlPaintCount();
-	if ( k.fade && ( k.fadeFor == g || k.fadePaint == paint ) )
-		return;
-	k.fadeFor = g;
-	k.fadePaint = paint;
 	const qsizetype nRows = d.inst.size() / 16;
 	if ( !k.fade ) {
 		k.fadeCpu.assign( std::size_t( nRows ) * 2, 0.0f );
@@ -271,6 +270,21 @@ void ladderFadeRows( GLFunctions * fn, Ctx & c, Copy & k, const CellMeshInst & d
 		k.indBytes += k.fadeCpu.size() * sizeof( float );
 		c.gpuBytes += qint64( k.fadeCpu.size() * sizeof( float ) );
 	}
+	if ( k.tintFor != LodPreview::gen() ) {
+		k.tintFor = LodPreview::gen();
+		for ( qsizetype i = 0; i < nRows; i++ )
+			k.fadeCpu[std::size_t( i ) * 2 + 1] = tint && i < d.rowLevel.size() ? float( d.rowLevel[i] ) : 0.0f;
+		fn->glBindBuffer( GL_ARRAY_BUFFER, k.fade );
+		fn->glBufferSubData( GL_ARRAY_BUFFER, 0, GLsizeiptr( k.fadeCpu.size() * sizeof( float ) ), k.fadeCpu.data() );
+		fn->glBindBuffer( GL_ARRAY_BUFFER, 0 );
+	}
+	if ( d.rowStep.isEmpty() )
+		return;
+	const quint64 g = CellFarHide::ladderFadeGen(), paint = wwGlPaintCount();
+	if ( k.fadeFor == g || k.fadePaint == paint )
+		return;
+	k.fadeFor = g;
+	k.fadePaint = paint;
 	int lo = int( nRows ), hi = -1;
 	for ( int i : k.fadeSet ) {
 		k.fadeCpu[std::size_t( i ) * 2] = 0.0f;
@@ -435,7 +449,7 @@ bool draw( NifSkopeOpenGLContext * r, Scene * scene, const CellMeshInst & d, Nif
 	} else if ( prog->uniLocation( "farSplat" ) >= 0 ) {
 		prog->uni2f( "farSplat", 0.0f, 0.0f );	// a twin drawn without a second pass (no blending): every row, as before
 	}
-	if ( !d.rowStep.isEmpty() ) {	// lane PERFLOAD1 P7 round 2: the ladder rows' dither, the cards' noise frame
+	if ( !d.rowStep.isEmpty() || !d.rowLevel.isEmpty() ) {	// lane PERFLOAD1 P7 round 2: the ladder rows' dither, the cards' noise frame; P8 the tint
 		ladderFadeRows( r->fn, *cp, *k, d );
 		prog->uni1f( "farFadeFrame", float( wwGlPaintCount() & 1023u ) );	// the cards' frame (impostorchunk.cpp)
 	}

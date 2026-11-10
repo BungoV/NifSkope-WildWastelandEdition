@@ -48,6 +48,7 @@ BSD License - see nifskope.h
 #include "cellmesh.h"		// the welded geometry beside the document
 #include "features/far-lod/cellfarlod.h"		// the far field around the block
 #include "features/far-lod/lodinative.h"		// lane FIX1101A lodch: the far LOD's baked AO / sky switches (liveFarKey)
+#include "features/far-lod/lodpreview.h"	// lane PERFLOAD1 P8: the forced level is part of liveFarKey
 #include "cellmodpick.h"
 #include "cellspeed.h"		// stage timers (WW_CELL_SPEED_DUMP)
 #include "wwloadwatch.h"	// lane PERFLOAD1 P6: the views parked around the live far rebuild
@@ -2284,6 +2285,8 @@ QByteArray liveFarKey()
 	// lane FIX1101A lodch: the bake's AO and sky are written into the far rows and the far ground while it is built
 	k += QByteArray( lodlAoOn() ? "1" : "0" ) + QByteArray::number( lodlSkyMode() ) + wwEnv( "WW_LODL_AO_RED" )
 		+ wwEnv( "WW_LODL_SKY_RED" ) + '\x1f';
+	// lane PERFLOAD1 P8: the LOD preview's forced level picks the far object rows' MNAM slot at build
+	k += QByteArray::number( LodPreview::objectSlot() ) + '\x1f';
 	return k;
 }
 

@@ -1017,6 +1017,7 @@ bool nifAppendLodiObjects( NifModel * nif, const QModelIndex & iRoot,
 		qint64 cell = 0;     // lane FARHOLE2: the placement's cell and REFR
 		quint32 ref = 0;
 		quint8 step = 0;     // lane PERFLOAD1 P7 round 2: the row's ladder steps (CellMeshInst::rowStep)
+		quint8 level = 0;    // lane PERFLOAD1 P8: its mesh's level (CellMeshInst::rowLevel)
 	};
 	struct InstBucket
 	{
@@ -1042,6 +1043,10 @@ bool nifAppendLodiObjects( NifModel * nif, const QModelIndex & iRoot,
 		quint32 ref, const PlaceStream & ps ) {
 		const LodoMesh & meshRow = lib.meshes[meshId];
 		const quint32 tile = WwFarTile::key( cellX, cellY, farTileShift );
+		quint8 meshLevel = 0;	// lane PERFLOAD1 P8: the first MNAM slot naming this mesh, as a ladder step + 1
+		for ( int q = 0; q < 4 && !meshLevel; q++ )
+			if ( base.rep[q] == meshId )
+				meshLevel = quint8( 2 + q );
 		for ( int pi = 0; pi < int( parts.size() ); pi++ ) {
 			const MeshPart & p = parts[size_t( pi )];
 			if ( p.verts.empty() || p.tris.empty() )
@@ -1185,6 +1190,7 @@ bool nifAppendLodiObjects( NifModel * nif, const QModelIndex & iRoot,
 			r.cell = CellFarHide::cellKey( cellX, cellY );
 			r.ref = ref;
 			r.step = instStep;
+			r.level = meshLevel;
 			ib.recs.push_back( r );
 			cnt.tris += qint64( sub.indexCount / 3 );
 			if ( ib.meta.sway )
@@ -1253,6 +1259,14 @@ bool nifAppendLodiObjects( NifModel * nif, const QModelIndex & iRoot,
 			if ( wantSlot >= 0 ) {
 				if ( base.rep[wantSlot] != LODO_NO_MESH && base.rep[wantSlot] < lib.meshes.size() )
 					meshId = base.rep[wantSlot];
+				// lane PERFLOAD1 P8: the preview's forced slot empty: the nearest authored one, the finer on a tie
+				for ( int dd = 1; dd < 4 && meshId == LODO_NO_MESH && spec.slotNearest; dd++ )
+					for ( const int q : { wantSlot - dd, wantSlot + dd } )
+						if ( meshId == LODO_NO_MESH && q >= 0 && q < 4 && base.rep[q] != LODO_NO_MESH
+							&& base.rep[q] < lib.meshes.size() ) {
+							meshId = base.rep[q];
+							cnt.slotNearest++;
+						}
 			} else {
 				for ( int r = 0; r < 4 && meshId == LODO_NO_MESH; r++ )
 					if ( base.rep[r] != LODO_NO_MESH && base.rep[r] < lib.meshes.size() )
@@ -1262,6 +1276,11 @@ bool nifAppendLodiObjects( NifModel * nif, const QModelIndex & iRoot,
 				noMesh++;
 				continue;
 			}
+			for ( int q = 0; q < 4; q++ )	// lane PERFLOAD1 P8: the preview's per-level census
+				if ( base.rep[q] == meshId ) {
+					cnt.slotRows[q]++;
+					break;
+				}
 
 			const std::vector<MeshPart> & parts = decodeMesh( meshId, spec.level );
 			if ( parts.empty() ) {
@@ -1577,7 +1596,7 @@ bool nifAppendLodiObjects( NifModel * nif, const QModelIndex & iRoot,
 				/* lane PERFLOAD1 P7 round 2: a ladder tree gets one more row for each OTHER mesh its MNAM slots name,
 				 * tagged with the steps it serves; CellFarHide draws the rows of the tree's step(s) only. The placement's
 				 * baked AO / sky bytes follow the first mesh's vertices, so these rows take the self-AO fallback. */
-				if ( ladderTree && wantSlot < 0 ) {
+				if ( ladderTree ) {	// every ring pins its slot (spec.slot), so this never waits on wantSlot
 					quint16 done[4] = { meshId, LODO_NO_MESH, LODO_NO_MESH, LODO_NO_MESH };
 					int nDone = 1;
 					for ( int r = 0; r < 4; r++ ) {
@@ -1763,6 +1782,11 @@ bool nifAppendLodiObjects( NifModel * nif, const QModelIndex & iRoot,
 					if ( d.rowStep.isEmpty() )
 						d.rowStep.resize( qsizetype( ib.recs.size() ) );
 					d.rowStep[qsizetype( i )] = r.step;
+				}
+				if ( r.level ) {	// lane PERFLOAD1 P8
+					if ( d.rowLevel.isEmpty() )
+						d.rowLevel.resize( qsizetype( ib.recs.size() ) );
+					d.rowLevel[qsizetype( i )] = r.level;
 				}
 				const bool newTile = i == 0 || r.tile != ib.recs[i - 1].tile;
 				const bool newCmd = newTile || r.sub != ib.recs[i - 1].sub;
