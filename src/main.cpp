@@ -815,6 +815,7 @@ void wwLiveDrain( QUdpSocket * socket )
 				win = doc;
 				break;
 			}
+		wwMainStep( "a live port step" );	// lane PERFLOAD1 P5
 		const QString reply = c.step + QStringLiteral( " -> " ) + ( win ? wwLiveCommand( win, c.step ) : QStringLiteral( "refused no window" ) );
 		fprintf( stderr, "live(port): %s\n", qPrintable( reply ) );
 		socket->writeDatagram( (const char *)reply.constData(), reply.size() * qsizetype( sizeof( QChar ) ), c.host, c.port );
