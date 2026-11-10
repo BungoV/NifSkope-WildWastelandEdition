@@ -45,6 +45,19 @@ quint64 nextGen()
 	return ++gens;
 }
 
+//! lane PERFLOAD1 P7: the tree ladder's hidden REFRs; gen bumps on each commit
+struct Ladder
+{
+	QSet<quint32> refs;
+	quint64 gen = 0;
+	bool dirty = false;
+};
+Ladder & ladder()
+{
+	static Ladder l;
+	return l;
+}
+
 std::map<const void *, Doc> & docs()
 {
 	static std::map<const void *, Doc> m;
@@ -152,6 +165,9 @@ bool largeRefsWanted()
 
 bool rowHidden( const CellMeshInst & d, int row, const Hidden & h, int mode )
 {
+	const Ladder & l = ladder();
+	if ( !l.refs.isEmpty() && row < d.rowRef.size() && d.rowRef[row] && l.refs.contains( d.rowRef[row] ) )
+		return true;
 	if ( mode == Off )
 		return false;
 	if ( mode == ByRef && row < d.rowRef.size() && d.rowRef[row] )
@@ -202,12 +218,14 @@ View view( const CellMeshInst & d )
 	v.tiles = &d.tiles;
 	const int m = mode();
 	const Hidden * h = hiddenFor( d.doc );
-	if ( m == Off || !h || ( h->cells.isEmpty() && h->refs.isEmpty() ) )
+	const Ladder & l = ladder();
+	if ( l.refs.isEmpty() && ( m == Off || !h || ( h->cells.isEmpty() && h->refs.isEmpty() ) ) )
 		return v;
-	const quint64 want = ( h->gen << 2 ) | quint64( m );
+	static const Hidden none;
+	const quint64 want = ( ( ( h ? h->gen : 0u ) * 1000003ull ) ^ ( ( l.refs.isEmpty() ? 0u : l.gen ) << 40 ) ) << 2 | quint64( m );
 	if ( d.visFor != want ) {
 		d.visFor = want;
-		d.visHidden = filter( d, *h, m, d.visCmds, d.visTiles );
+		d.visHidden = filter( d, h ? *h : none, m, d.visCmds, d.visTiles );
 		// the key changes only when the rows drawn change (a far-away attach leaves the shadow cache alone)
 		quint64 k = 1469598103934665603ull;
 		auto mix = [&k]( quint64 x ) {
@@ -231,6 +249,45 @@ View view( const CellMeshInst & d )
 	v.key = d.visKey;
 	v.hiddenRows = d.visHidden;
 	return v;
+}
+
+void setLadderHidden( quint32 ref, bool hide )
+{
+	Ladder & l = ladder();
+	if ( !ref || hide == l.refs.contains( ref ) )
+		return;
+	if ( hide )
+		l.refs.insert( ref );
+	else
+		l.refs.remove( ref );
+	l.dirty = true;
+}
+
+bool ladderDirty()
+{
+	return ladder().dirty;
+}
+
+void ladderCommit()
+{
+	Ladder & l = ladder();
+	l.gen = nextGen();
+	l.dirty = false;
+}
+
+void ladderClear()
+{
+	Ladder & l = ladder();
+	if ( l.refs.isEmpty() )
+		return;
+	l.refs.clear();
+	l.gen = nextGen();
+	l.dirty = false;
+}
+
+int ladderHiddenCount()
+{
+	return int( ladder().refs.size() );
 }
 
 void registerMask( const void * doc, int block, int cx0, int cy0, int cx1, int cy1, bool objects )

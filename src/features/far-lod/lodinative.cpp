@@ -1284,6 +1284,7 @@ bool nifAppendLodiObjects( NifModel * nif, const QModelIndex & iRoot,
 			for ( const MeshPart & tp : parts )
 				if ( tp.materialId >= lib.materials.size() || !( lib.materials[tp.materialId].flags & LODO_MAT_TREE ) )
 					treeAll = false;
+			bool ladderTree = false;	// lane PERFLOAD1 P7
 			if ( treeAll && spec.treeCardLayer && spec.treeCardsOut && base.cardLayer != LODO_NO_CARD ) {
 				const auto lit = spec.treeCardLayer->constFind( base.formId );
 				if ( lit != spec.treeCardLayer->constEnd() ) {
@@ -1295,11 +1296,22 @@ bool nifAppendLodiObjects( NifModel * nif, const QModelIndex & iRoot,
 						tc.scale = lodiScaleValue( inst.scale, inst.flags );
 						tc.form = base.formId;
 						tc.ref = ( ii < table.cold.size() ) ? table.cold[ii].refFormId : 0u;
+						/* lane PERFLOAD1 P7: the ladder keeps the ring's mesh row (step 1 + its MNAM slot) and hides it
+						 * by REFR whenever the tree is small enough on screen for its impostor; no REFR = P1's cut */
+						tc.radius = base.boundRadius;
+						if ( spec.treeLadder && tc.ref )
+							for ( int r = 0; r < 4 && tc.meshStep < 0; r++ )
+								if ( base.rep[r] == meshId )
+									tc.meshStep = 1 + r;
 						spec.treeCardsOut->push_back( tc );
 						cnt.treeCards++;
-						continue;
+						if ( tc.meshStep < 0 )
+							continue;
+						cnt.treeLadder++;
+						ladderTree = true;
+					} else {
+						cnt.treeLayerMismatch++;
 					}
-					cnt.treeLayerMismatch++;
 				}
 			}
 
@@ -1659,7 +1671,7 @@ bool nifAppendLodiObjects( NifModel * nif, const QModelIndex & iRoot,
 			basesSeen.insert( inst.baseId );
 			placed++;
 			cnt.placed++;
-			if ( treeAll ) {
+			if ( treeAll && !ladderTree ) {
 				cnt.treeMesh++;
 				if ( spec.treeMeshForms )
 					( *spec.treeMeshForms )[base.formId]++;

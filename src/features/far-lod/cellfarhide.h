@@ -72,6 +72,15 @@ struct View
 //! What an instanced bucket draws now (cached per change)
 View view( const CellMeshInst & d );
 
+/* lane PERFLOAD1 P7, the tree ladder (treeladder.h): REFRs whose far tree draws as its impostor now, in any document;
+ * their mesh rows hide as a loaded cell's do. setLadderHidden changes the set, ladderCommit makes the instanced
+ * buckets see it (the caller throttles it; one filter pass a bucket per commit). */
+void setLadderHidden( quint32 ref, bool hide );
+bool ladderDirty();
+void ladderCommit();
+void ladderClear();
+int ladderHiddenCount();
+
 //! A non-instanced far shape the stream may mask; cx0..cy1 = the cells its bound touches.
 //! lane LARGEREF6: `objects` = a far objects shape (ours or the game's .bto): the keep boxes apply; terrain and water never keep
 void registerMask( const void * doc, int block, int cx0, int cy0, int cx1, int cy1, bool objects = true );

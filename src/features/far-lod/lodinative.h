@@ -52,6 +52,10 @@ struct LodiTreeCard
 	float xyz[3];
 	float scale;
 	quint32 form, ref;
+	//! lane PERFLOAD1 P7, the tree ladder: the base's bound radius, and the ring step its mesh row still draws
+	//! (1 + MNAM slot; -1 = no mesh row kept: the impostor always, P1's cut)
+	float radius = 0.0f;
+	int meshStep = -1;
 };
 
 //! One `.lodi` view: an inclusive cell rectangle, a cluster-ladder level and
@@ -94,6 +98,9 @@ struct LodiSceneSpec
 	QVector<LodiTreeCard> * treeCardsOut = nullptr;
 	//! tree placements still drawn as mesh, per base form (what the next card bake must photograph)
 	QHash<quint32, qint64> * treeMeshForms = nullptr;
+	/*! lane PERFLOAD1 P7: a handed tree with a REFR keeps its mesh row too, and the ladder (treeladder.h) picks mesh
+	 *  or impostor per frame by its size on screen. False = P1's cut (red WW_CELL_FARLOD_RED=edgecut). */
+	bool treeLadder = false;
 	//! > 0: when the placements come to more triangles than this, nothing is written to the document
 	//! (LodiAppendCounts::overBudget; tris = what it would have been) -- the far field's memory budget
 	qint64 maxTris = 0;
@@ -137,6 +144,8 @@ struct LodiAppendCounts
 	qint64 groundPlacements = 0, groundBytes = 0;
 	//! lane PERFLOAD1 P1: trees handed to the impostors, trees drawn as mesh, impostor layers that disagreed with the .lodo
 	qint64 treeCards = 0, treeMesh = 0, treeLayerMismatch = 0;
+	//! lane PERFLOAD1 P7: handed trees that kept their mesh row for the ladder
+	qint64 treeLadder = 0;
 };
 
 /*! lane FIX1101A lodch (LATE ITEMs 11 + 16 + 20, "LOD channels on by default"): the far LOD draws the bake's AO

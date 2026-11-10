@@ -795,6 +795,8 @@ bool ImpostorDraw::drawCard( Scene * scene, const ImpostorCardSet & set,
 	prog->uni1i( "debugChannel", opt.debugChannel );
 	prog->uni1f( "swayAmplitude", opt.swayAmplitude );
 	prog->uni1f( "swayPhase", opt.swayPhase );
+	prog->uni1f( "cardFadeOut", opt.fadeOut );	// lane PERFLOAD1 P7
+	prog->uni1f( "cardFadeFrame", opt.fadeFrame );
 
 	wwImpostorTrace( "H card uniforms" );
 	if ( fresh ) {

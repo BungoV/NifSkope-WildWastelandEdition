@@ -1236,7 +1236,7 @@ QString cellFarLodAppend( NifModel * nif, const QModelIndex & iRoot, const EsmWo
 
 	// ---- objects, ring by ring: the authored slot of each, the ring inside cut out
 	const QString lodi = li.absoluteDir().filePath( li.completeBaseName() + QStringLiteral( ".lodi" ) );
-	qint64 oPlaced = 0, oTris = 0, oSway = 0, oDropped = 0, oRefs = 0, oTreeCards = 0, oTreeMismatch = 0;
+	qint64 oPlaced = 0, oTris = 0, oSway = 0, oDropped = 0, oRefs = 0, oTreeCards = 0, oTreeMismatch = 0, oTreeLadder = 0;
 	// lane LIVESET1: the budget charges the far field's own estimate, never the process working set (a live
 	// rebuild reuses freed pages, so a measured delta built ring 1 there and not at the open)
 	double usedMB = double( tVerts ) * kBytesPerVert / ( 1024.0 * 1024.0 );
@@ -1311,6 +1311,7 @@ QString cellFarLodAppend( NifModel * nif, const QModelIndex & iRoot, const EsmWo
 			os.treeCardLayer = treeLayer.isEmpty() ? nullptr : &treeLayer;
 			os.treeCardsOut = &treeCardsOut;
 			os.treeMeshForms = &treeMeshForms;
+			os.treeLadder = red != "edgecut";	// lane PERFLOAD1 P7: red = P1's cut at the loaded-cell edge
 			/* The ring's triangles are counted before the document grows; a ring that would exceed the
 			 * budget is not written. */
 			const bool sideMesh = cellMeshOn();
@@ -1377,6 +1378,7 @@ QString cellFarLodAppend( NifModel * nif, const QModelIndex & iRoot, const EsmWo
 			oRefs += oc.refsSkipped;
 			oTreeCards += oc.treeCards;
 			oTreeMismatch += oc.treeLayerMismatch;
+			oTreeLadder += oc.treeLadder;
 			hx0 = foot[i][0];
 			hy0 = foot[i][1];
 			hx1 = foot[i][2];
@@ -1416,6 +1418,10 @@ QString cellFarLodAppend( NifModel * nif, const QModelIndex & iRoot, const EsmWo
 			.arg( topW.isEmpty() ? QStringLiteral( "none" ) : topW.join( QStringLiteral( ", " ) ) )
 			.arg( meshWithImp ).arg( formsWithImp ).arg( oTreeMismatch )
 			.arg( treeMeshRed ? QStringLiteral( " (RED treemesh)" ) : QString() ) );
+		say( QStringLiteral( "far lod: tree ladder (docs/FO4CS_IMPROVED_LOD_PLAN.md R3 4-5): %1 of the %2 handed trees keep "
+			"their MNAM mesh row and switch to the impostor by screen size%3" ).arg( oTreeLadder ).arg( oTreeCards )
+			.arg( red == "edgecut" ? QStringLiteral( " (RED edgecut: every handed tree an impostor from the loaded-cell edge)" )
+				: QString() ) );
 	}
 
 	/* Census: every object ring against the game's own object LOD (.bto) over the same region, naming

@@ -37,6 +37,11 @@ struct Placed
 	QString formId;					//!< for the log, so a card names its tree
 	int setIndex = -1;				//!< into `sets()`; -1 = its set did not load
 	QString ref;					//!< the row's REFR (manifest column `ref`), hex
+	/* lane PERFLOAD1 P7, the tree ladder (treeladder.h): bound radius (0 = not a handed tree), the ring step its mesh
+	 * row draws (1 + MNAM slot; -1 = none: always the impostor), the REFR that row hides by */
+	float ladderRadius = 0.0f;
+	qint8 ladderMeshStep = -1;
+	quint32 ladderRef = 0;
 };
 
 //! THE MASTER. False unless the person turned it on, or `WW_IMPOSTOR_CHUNK` is

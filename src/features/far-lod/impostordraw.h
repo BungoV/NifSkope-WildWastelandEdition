@@ -164,6 +164,11 @@ struct Options
 	 *  is what the `.lodm` preview and every gate row uses. */
 	float worldScale = 1.0f;
 
+	//! lane PERFLOAD1 P7: the tree ladder's cross-fade, 0 = the whole card, 1 = gone, dithered per pixel with a
+	//! pattern that moves every frame (fadeFrame) so the TAA resolves it. The one-by-one path (drawCard) reads it.
+	float fadeOut = 0.0f;
+	float fadeFrame = 0.0f;
+
 	//! Sway. A card is four vertices, so there is nothing to displace: this is
 	//! a UV shear weighted by the baked sway weight, which is an APPROXIMATION
 	//! and is named one. Every gate runs at 0 and no picture taken with it on

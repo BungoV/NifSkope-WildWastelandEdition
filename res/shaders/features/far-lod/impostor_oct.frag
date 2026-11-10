@@ -169,6 +169,10 @@ float covAt( vec2 uv )
 
 // --- what the viewer is asking for ------------------------------------------
 uniform float alphaThreshold;      // default 128/255, vanilla's LOD alpha test (IMPOSTORFIN1)
+// lane PERFLOAD1 P7: the tree ladder's cross-fade (0 = whole card), dithered with a pattern moved every frame so the
+// TAA resolves it (docs/FO4CS_IMPROVED_LOD_PLAN.md R3 item 5); 0 on every other path
+uniform float cardFadeOut;
+uniform float cardFadeFrame;
 /* WHICH COVERAGE THE CUT READS (lane IMPOSTORTEAR1, 2026-09-23). 0 -- GL's
  * default, so also what an exe that never sets it gets -- is the STIPPLED
  * cut of section 1b; 1 is the way back, the 3-frame weighted mean the cut
@@ -615,6 +619,11 @@ void main()
 		cutCov = colour.a;
 	if ( cutCov < alphaThreshold )
 		discard;
+	if ( cardFadeOut > 0.0 ) {	// interleaved gradient noise (Jimenez 2014), shifted per frame
+		vec2 fp = gl_FragCoord.xy + 5.588238 * cardFadeFrame;
+		if ( fract( 52.9829189 * fract( dot( fp, vec2( 0.06711056, 0.00583715 ) ) ) ) < cardFadeOut )
+			discard;
+	}
 
 	/* ------------------------------------------------------------------
 	 * 2. THE PIXEL DEPTH OFFSET (spec 286, SPEC GAP #4 on its sign).
