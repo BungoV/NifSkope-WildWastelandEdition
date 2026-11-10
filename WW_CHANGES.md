@@ -1,3 +1,15 @@
+## MODULES1 M3 round 3 (2026-11-10): the steam cards' hard top band (flight 11-10, steam_mist_wide_1110)
+- **Cause.** A lit effect card with Volumetric Particles on takes the puff law (cell_volpart.glsl `vpPuffAlpha`):
+  its opacity thickens toward the middle of a ball spanning the card's UV 0..1, read from the CLAMPED UV. The vanilla
+  steam cards are no single sprite: MistGroundWaterSteam01Long's wall tiles (u 0.41..5.95, v -1.01..-0.38: the clamp
+  put every pixel on the ball's rim, opacity 0) and its Puff015 shape sits in an atlas cell (0..0.26: the ball's rim
+  crossed the cell as an arc near the top, where the square-root rim turns the opacity on in a few pixels = the band).
+- **Now.** The CPU reads each lit card's UV box; a card that is not one sprite (outside 0..1, or under 3/4 of it) is
+  a slab: its own alpha, thickened only by the soft slab, as drawn. Particles and one-sprite cards keep the ball.
+- **Telemetry:** `cell effects puff: shape N uv u A..B v C..D -> ball (one sprite) | slab (tiled or atlas cell)`,
+  once per shape.
+- **Red:** WW_FX_PUFF_SLAB_RED=1 (the ball for every card, as before).
+
 ## MODULES1 G4 (2026-11-10): the sky and clouds through the fog, by its optical depth (night items 5, 10b, 12)
 - **Found.** Nothing covers the sky or the 12 vanilla layers but the air itself: the layers draw into the backdrop at
   the deck, and the sky pass lays the air over it as sky x T + the air's light, T from the column between the camera

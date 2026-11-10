@@ -52,6 +52,7 @@ uniform int volPart;			// 0 off: the law above, as before; 1 on
 uniform int volPartRed;			// gates only: 1 flat, 2 nothick, 4 nosoft, 8 nolights, 16 white, 32 nofog, 64 noshadow,
 								// 128 noedge, 256 nophase, 512 nonear, 1024 flatloop
 uniform int volPartDump;		// gates only: the probe row's width in pixels (particles.geom), 0 off
+uniform int vpTiled;			// MODULES1 M3: 1 the lit card's UVs tile or sit in an atlas cell (no one sprite): a slab, a0 as drawn
 uniform bool volCsm;			// the sun's cascades are drawn this frame
 uniform int volTerms;			// the air's mask (WW_CELL_AIR_TERMS): 1 directional, 2 placed, 4 GI, 8 ambient
 /* FARCITYWASH1-PART: the air's veil (cell_volair.frag airVeilK, the same law and guards) on the puff's sky-lit share,
@@ -140,7 +141,7 @@ float vpNearFade( float depth )
 // the card's opacity at q (-1..1 over it) from its own a0; red nothick: a0 as drawn
 float vpPuffAlpha( float a0, vec2 q )
 {
-	if ( ( volPartRed & 2 ) != 0 )
+	if ( ( volPartRed & 2 ) != 0 || vpTiled != 0 )
 		return a0;
 	float l = sqrt( max( 1.0 - dot( q, q ), 0.0 ) );
 	return 1.0 - pow( 1.0 - clamp( a0, 0.0, 0.999 ), 1.5 * l );

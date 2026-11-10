@@ -2814,6 +2814,29 @@ bool Renderer::setupProgramCE1( const NifModel * nif, Program * prog, Shape * me
 			constexpr float kVpCardDepth = 64.0f;
 			const bool fxLit = wwCellFxLitFor( scene->nifModel, mesh->id() ) != nullptr;
 			const bool vp = wwVolPartUniforms( scene ) && fxLit;
+			/* MODULES1 M3 (steam top band): the puff's ball spans the card's UV 0..1 (one sprite). The vanilla steam
+			 * cards tile (MistGroundWaterSteam01Long:3 u 0.41..5.95, v -1.01..-0.38) or sit in an atlas cell (Puff015
+			 * 0..0.26): the clamped UV put the whole tiled card on the ball's rim (opacity 0) and drew the rim's arc
+			 * across the atlas cell as a hard band. Such a card is a slab: its own alpha, thickened by the soft slab */
+			if ( vp && prog->uniLocation( "vpTiled" ) >= 0 ) {
+				float u0 = 1e30f, v0 = 1e30f, u1 = -1e30f, v1 = -1e30f;
+				if ( !mesh->coords.isEmpty() )
+					for ( const Vector2 & t : mesh->coords.at( 0 ) ) {
+						u0 = std::min( u0, t[0] ); u1 = std::max( u1, t[0] );
+						v0 = std::min( v0, t[1] ); v1 = std::max( v1, t[1] );
+					}
+				const bool sprite = u0 > -0.05f && v0 > -0.05f && u1 < 1.05f && v1 < 1.05f && u1 - u0 > 0.75f && v1 - v0 > 0.75f;
+				const bool red = wwEnv( "WW_FX_PUFF_SLAB_RED" ).trimmed() == "1";
+				prog->uni1i( "vpTiled", sprite || red || u0 > u1 ? 0 : 1 );
+				static QSet<qint64> saidPuff;
+				const qint64 key = ( qint64( quintptr( mesh ) ) << 1 ) | ( red ? 1 : 0 );
+				if ( !saidPuff.contains( key ) && saidPuff.size() < 4096 ) {
+					saidPuff.insert( key );
+					fprintf( stderr, "cell effects puff: shape %d uv u %.2f..%.2f v %.2f..%.2f -> %s%s\n", mesh->id(),
+						double( u0 ), double( u1 ), double( v0 ), double( v1 ), sprite || u0 > u1 ? "ball (one sprite)" : "slab (tiled or atlas cell)",
+						red ? " | red WW_FX_PUFF_SLAB_RED: ball for every card" : "" );
+				}
+			}
 			if ( wwEnv( "WW_CELL_PARTICLES_AIR_RED" ).trimmed() == "1" && prog->uniLocation( "cellGiAirOn" ) >= 0 )
 				prog->uni1b( "cellGiAirOn", false );	// SKY3 red: a lit card's puff reads the grid's shell, as before
 			if ( !vp && prog->uniLocation( "volPart" ) >= 0 )
