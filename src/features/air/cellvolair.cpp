@@ -3046,6 +3046,17 @@ void wwVolAirUniforms( Scene * scene )
 	// 57; notes/modules1/research/fog_temporal.md); red WW_CELL_AIR_DITHER_RED=1: the plain read at the pixel's own column
 	WW_SWITCH_STATIC( bool, ditherRed, wwEnv( "WW_CELL_AIR_DITHER_RED" ).trimmed() == "1" );
 	WW_SWITCH_STATIC( bool, aboveRed, wwEnv( "WW_CELL_AIR_ABOVE_RED" ).trimmed() == "1" );	// MODULES1 item 18
+	// MODULES1 M5: 65536 = a downward sky ray's air ends at the ground (lookdev_fog.glsl wwVolAirSky); red: never ends
+	WW_SWITCH_STATIC( bool, groundEndRed, wwEnv( "WW_CELL_AIR_GROUNDEND_RED" ).trimmed() == "1" );
+	{
+		static int said = -1;
+		if ( fl >= 0 && said != int( groundEndRed ) ) {
+			said = int( groundEndRed );
+			fprintf( stderr, "air sky ground end: %s (ground anchor %.1f, top %.1f)\n", groundEndRed
+				? "off, a downward sky ray never leaves the air (red WW_CELL_AIR_GROUNDEND_RED=1)"
+				: "on, a downward sky ray ends at the ground", double( g.ground[0] ), double( g.med[3] ) );
+		}
+	}
 	if ( fl >= 0 )
 		prog->uni1i_l( fl, ( ( s.red & 512 ) ? 0 : 1 ) | ( ( s.red & 1024 ) ? 0 : 2 ) | ( ( s.red & 256 ) ? 0 : 4 )
 			| ( ( s.red & 65536 ) ? 0 : 8 ) | ( ( s.red & 131072 ) ? 0 : 16 ) | ( s.tricubic ? 32 : 0 ) | ( terr ? 64 : 0 )
@@ -3053,7 +3064,8 @@ void wwVolAirUniforms( Scene * scene )
 			| ( ( vaLeakBits( scene && wwCellLightsWanted( scene ) ? wwCellLightsFor( scene->nifModel ) : nullptr, s.leakRed ) & 8 ) ? 0 : 256 )	// lane FOGLEAK1: 256 = the far grid's tail takes the sun's shadow (WW_CELL_FOGLEAK only)
 			| ( ditherRed ? 0 : 512 | int( ( g.frame & 15u ) << 10 ) )	// part 18: 512 = the dithered froxel read, bits 10-13 its frame
 			| ( aboveRed ? 0 : 16384 )	// MODULES1 item 18: 16384 = a downward tail still above the air's top is clear
-			| ( vaThinSrcRed() ? 0 : 32768 ) );	// MODULES1 10c: 32768 = a too-thin column's tail takes the grid's light over the law's depth
+			| ( vaThinSrcRed() ? 0 : 32768 )	// MODULES1 10c: 32768 = a too-thin column's tail takes the grid's light over the law's depth
+			| ( groundEndRed ? 0 : 65536 ) );	// MODULES1 M5: 65536 = a downward sky ray ends at the ground
 }
 
 /* lane VOLAIR1 (bungo 10-14, cellvolair.h): the sky through the air. The far tower stood out against a sky the air never

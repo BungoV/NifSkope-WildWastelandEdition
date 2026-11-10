@@ -1,3 +1,13 @@
+## MODULES1 M5 (2026-11-10): the air's horizon band comes down onto the land
+
+- **Before:** from above the air's top (the bay view at 24306 units, top 22801) a sky ray pointing down was clear while
+  its height at the grid's end was over the top, and fully the fog's colour once under it (the air "never ends"). Over
+  the far hills that drew a flat light-blue stripe, with the drawn land under it far clearer (bungo 11-10, horizon_band).
+- **Now:** a downward sky ray ends at the ground along it, as the land under it does in the surfaces' tail, so the
+  rows over the hills carry the same air as the hills (res/shaders/features/air/lookdev_fog.glsl wwVolAirSky,
+  volAirFlags 65536). Telemetry: `air sky ground end: on`. Red WW_CELL_AIR_GROUNDEND_RED=1. Still owed: the dark
+  shapes in the sky with the air off (draw probe) and the air's ~27 ms at this view (capture first).
+
 ## MODULES1 M4 (2026-11-10): swaying cables are lit like the still ones
 
 - **Before:** a `_Wind` cable took the grass vertex law whole, and that law bends the normal frame by the wind's lean in

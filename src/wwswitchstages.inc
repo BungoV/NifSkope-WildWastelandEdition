@@ -105,6 +105,7 @@
 { "WW_CELL_AIRZONE_RED", 0, "src/features/air/airzone.cpp:682 wwAirZoneRed | hand: wwAirZoneRed() re-read by every wwAirZoneFor (novol reloads the cells) and every program setup (hardedge, a uniform) (AIRZONE1)" },
 { "WW_CELL_AIRZONE_VIEW", 0, "src/features/air/cellairzone.cpp:234 wwAirZoneViewDraw | hand: read every frame by wwAirZoneViewDraw (AIRZONE1)" },
 { "WW_CELL_AIR_ABOVE_RED", 0, "src/features/air/cellvolair.cpp:2996 wwVolAirUniforms | re-read per frame or per call (a)" },
+{ "WW_CELL_AIR_GROUNDEND_RED", 0, "src/features/air/cellvolair.cpp:3050 wwVolAirUniforms | re-read per frame or per call (a)" },
 { "WW_CELL_AIR_BOUNCE_LAMPS", 0, "src/features/air/cellvolair.cpp:1162 wwAirBounceShaderDefine | re-read per frame or per call (a)" },
 { "WW_CELL_AIR_BOUNCE_LAMPS_RED", 0, "src/features/air/cellvolair.cpp:2241 vaPassInner | re-read per frame or per call (a)" },
 { "WW_CELL_AIR_BURNOFF", 0, "src/gl/celllooks.cpp:123 pinOf | re-read per frame or per call (a)" },

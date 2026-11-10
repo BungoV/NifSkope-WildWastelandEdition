@@ -619,7 +619,22 @@ vec4 wwVolAirSky( vec3 dirView )
 	J = wwAirThinJ( J, v, z0, far );	// MODULES1 10c
 	float top = volAirMed.w;
 	float Tt, dEnd;
-	if ( s > 1e-4 ) {
+	/* MODULES1 M5 (bungo 11-10, horizon_band: a light-blue stripe over the far hills from high up): a downward ray ends
+	 * where it meets the ground (the ground layer's anchor along it), as the drawn land under it does in the surfaces'
+	 * tail: the column from the ground to the ray's height at the grid's end over the sine. It was T 0 (the air never
+	 * ends) under the top and T 1 above it: rows over the hills switched from clear to the fog's colour. Bit 65536;
+	 * red WW_CELL_AIR_GROUNDEND_RED=1. */
+	vec4 gD = volAirGround;
+	bool groundEnd = ( volAirFlags & 65536 ) != 0 && s < -1e-4;
+	if ( groundEnd ) {
+		gD = wwAirGroundRay( dirView * ( far / max( fogDistScale, 1e-12 ) ), dirView, 1e7, s );
+		groundEnd = z0 > gD.x;
+	}
+	if ( groundEnd ) {
+		dEnd = far + min( ( z0 - gD.x ) / -s, 1e7 );
+		Tt = exp( -volAirMed.x * wwAirCol( gD.x, z0, gD ) / -s
+			- wwAirRainTau( dirView * ( far / max( fogDistScale, 1e-12 ) ), dirView * ( dEnd / max( fogDistScale, 1e-12 ) ) ) );
+	} else if ( s > 1e-4 ) {
 		float end = wwAirEnd( volAirMed, volAirGround );	// G2: the climb runs through the top's falloff
 		dEnd = far + min( max( end - z0, 0.0 ) / s, 1e7 );
 		// FOGTERRAIN3: the ground along the climb, inside the grid's window (wwAirGroundRay)
