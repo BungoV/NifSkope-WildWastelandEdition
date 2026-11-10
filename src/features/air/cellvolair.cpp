@@ -757,6 +757,12 @@ static void vaPhaseMie( VaPhase & p )
 	p.gi[3] = wf * g + wb * gb;
 }
 
+bool vaPhaseRecordHue()
+{
+	WW_SWITCH_STATIC( bool, rec, wwEnvStr( "WW_CELL_AIR_PHASE_RED" ) == QLatin1String( "recordhue" ) );
+	return rec;
+}
+
 VaPhase vaPhase( const float m[12], bool coloured )
 {
 	VaPhase p;
@@ -1963,7 +1969,12 @@ static void vaPassInner( Scene * scene, bool run )
 	}
 	if ( vaPhaseMieOn() )	// lane FOGMATCH1: the droplet phase replaces the record's lobes (its hue is unchanged)
 		medNote += QStringLiteral( " mie(g %1 w 0.9, back -0.4 w 0.1)" ).arg( double( vaPhaseMieG() ), 0, 'f', 2 );
-	VaPhase ph = vaPhase( med, ( s.red & 524288 ) != 0 );
+	/* MODULES1 round 4 F2 (bungo 11-10, brown haze on a clear day): the haze takes its colour from the light falling on
+	 * it, never from the god-ray record: the lobes keep the record's shape (g, weights) at a neutral hue. Red
+	 * WW_CELL_AIR_PHASE_RED=recordhue (or the bluescatter red): the record's hue on the lobes. */
+	const bool recordHue = ( s.red & 524288 ) != 0 || vaPhaseRecordHue();
+	medNote += recordHue ? QStringLiteral( " hue=record" ) : QStringLiteral( " hue=neutral" );
+	VaPhase ph = vaPhase( med, recordHue );
 	ph.gi[3] = wwWxOv( WwWx::AirPhaseG, ph.gi[3] );	// lane MODULES1 item 12: live phase g and tint
 	{
 		const float was[3] = { ph.gi[0], ph.gi[1], ph.gi[2] };
@@ -3503,7 +3514,7 @@ void wwVolPartMediumUniforms( Scene * scene )
 			std::copy( L->godRay, L->godRay + 12, med );
 		else
 			wwLookdevGodRays( med, nullptr );
-		fb = vaPhase( med, ( vs().red & 524288 ) != 0 );
+		fb = vaPhase( med, ( vs().red & 524288 ) != 0 || vaPhaseRecordHue() );	// F2: neutral hue unless the red
 	}
 	prog->uni4f( "airMed", air ? FloatVector4( g.med[0], g.med[1], g.med[2], g.med[3] ) : FloatVector4( 0.0f, 0.0f, 0.0f, 1e30f ) );
 	// the landed air's layered law (its near band, its ground layer) and its GPU reds (roomstep, physcol), as the pass
