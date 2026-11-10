@@ -1,3 +1,15 @@
+## MODULES1 M6 (2026-11-10): one direction each for the sun and the moon
+
+- **Before:** the sun's lens flare sat on the KEY LIGHT, not the sun. Under Sun Path Real at 6:30 (real sun -4 degrees)
+  that light is the twilight slerp toward the engine's night point (about 21 degrees up), so a sun-sized starburst
+  hung in the sky away from the sun, and by night it sat on the moon. The game moon (globe and vanilla billboards) was
+  placed on the clock's sun point after Sun Path Real had moved it onto the real sun, so between the real sunrise and
+  the engine's the moon was drawn on the sun (bungo 11-10, sun_glare_offset_0630, moon_above_flare_0630).
+- **Now:** one sun direction (`sunBodyDir`, src/gl/lookdevstage.cpp) for the sky's disc and the lens; the game moon on
+  the engine's own night point, as the sky's moonlight and the key light already were. The moon's lens would be the
+  sun's x 2.4e-6 x its phase: none is drawn. Telemetry `sky bodies (az/elev deg):` names every user of both bodies.
+  Red WW_SKY_BODYDIR_RED=1.
+
 ## MODULES1 M5 (2026-11-10): the air's horizon band comes down onto the land
 
 - **Before:** from above the air's top (the bay view at 24306 units, top 22801) a sky ray pointing down was clear while

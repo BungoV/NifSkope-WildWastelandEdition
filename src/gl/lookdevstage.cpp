@@ -869,6 +869,37 @@ MoonGeo moonGeo( const LdState & s, const float gamePos[3] )
 	return g;
 }
 
+/* MODULES1 M6 (bungo 11-10, sun_glare_offset_0630 / moon_above_flare_0630): one direction per body. The sun = the
+ * physical sky's disc (Sun Path Real: the ephemeris sun; else the engine's arc, mirrored under the horizon at the
+ * engine's night); its lens takes it, never the key light (the moon's, or the 0..-6 degree twilight slerp to the
+ * engine's night point). The game moon = the engine's own night point (the raw clock), never the disc Sun Path Real
+ * moved onto the sun. Red WW_SKY_BODYDIR_RED=1: the lens on the key light and the moon on the moved disc, as before. */
+bool wwSkyBodyDirRed()
+{
+	WW_SWITCH_STATIC( bool, red, wwEnvStr( "WW_SKY_BODYDIR_RED" ).trimmed() == QLatin1StringView( "1" ) );
+	return red;
+}
+
+void sunBodyDir( const LdState & s, float out[3] )
+{
+	const WwSkyClock raw = wwSkyClock( s.hour, s.tnam, s.gmst );
+	if ( wwSunPathMode() == 1 ) {
+		double r[3];
+		wwSunPathReal( s.hour, s.gameDay, r );
+		for ( int c = 0; c < 3; c++ )
+			out[c] = float( r[c] );
+	} else {
+		// the engine's arc; at night its point is the moon's, so the sun is that point mirrored under the horizon
+		for ( int c = 0; c < 3; c++ )
+			out[c] = raw.sunPos[c];
+		if ( s.hour < raw.A || s.hour > raw.D )
+			out[2] = -raw.sunPos[2];
+	}
+	const float l = std::sqrt( out[0] * out[0] + out[1] * out[1] + out[2] * out[2] );
+	for ( int c = 0; c < 3; c++ )
+		out[c] = l > 1e-9f ? out[c] / l : ( c == 2 ? 1.0f : 0.0f );
+}
+
 //! the phase angle the moonlight follows (the drawn globe's), memoised: the light asks once per shape
 float moonAlphaNow( const LdState & s )
 {
@@ -1795,8 +1826,11 @@ bool wwLookdevSunLens( const WwLens *& lens, float sunDir[3], float sunColor[3] 
 	if ( !s.haveWeather || !s.sun || s.w.sunLens.sprites.isEmpty() )
 		return false;
 	const LdLight L = currentLight();
+	float body[3];
+	sunBodyDir( s, body );	// MODULES1 M6: the sun's own disc (the moon gets no sun-sized starburst)
+	const bool red = wwSkyBodyDirRed();
 	for ( int c = 0; c < 3; c++ ) {
-		sunDir[c] = L.sunDir[c];
+		sunDir[c] = red ? L.sunDir[c] : body[c];
 		sunColor[c] = L.sun[c];
 	}
 	lens = &s.w.sunLens;
@@ -2624,7 +2658,8 @@ void drawMoon( Scene * scene, const SkyFrame & f, float mul, QStringList & drew 
 		for ( int k = 0; k < 3; k++ )
 			realPos[k] = float( md[k] ) * ( len > 1e-3f ? len : std::fabs( s.gmst.sunX ) );
 	}
-	const float * moonPos = real ? realPos : f.c.sunPos;
+	const WwSkyClock rawClock = wwSkyClock( s.hour, s.tnam, s.gmst );	// MODULES1 M6: the engine's night point
+	const float * moonPos = real ? realPos : wwSkyBodyDirRed() ? f.c.sunPos : rawClock.sunPos;
 	const bool full = mul >= 1.0f;
 	struct M { unsigned char bit; const char * name; float size, fs, fe; };
 	const M list[2] = { { 0x80, "masser", s.gmst.masserSize, s.gmst.masserFadeStart, s.gmst.masserFadeEnd },
@@ -2686,7 +2721,8 @@ bool drawMoonGlobe( Scene * scene, const SkyFrame & f, float mul, QStringList & 
 		drew << QStringLiteral( "moon:globe:refused(no physical sky this frame)" );
 		return true;
 	}
-	const MoonGeo g = moonGeo( s, f.c.sunPos );
+	const WwSkyClock rawClock = wwSkyClock( s.hour, s.tnam, s.gmst );	// MODULES1 M6: the engine's night point
+	const MoonGeo g = moonGeo( s, wwSkyBodyDirRed() ? f.c.sunPos : rawClock.sunPos );
 	const bool masser = moons & 0x80;
 	// the real moon is up whenever it is above the horizon (faint by day); the game's fades with the engine's clock
 	float alpha = g.real ? 1.0f : wwMoonAlpha( f.c, s.gmst, masser ? s.gmst.masserFadeStart : s.gmst.secundaFadeStart,
@@ -3157,6 +3193,41 @@ void drawStars( Scene * scene, const SkyFrame & f, QStringList & drew )
 	drew << QString( "stars:%1(alpha=%2,turn=%3deg)" ).arg( path, f3( a ) ).arg( double( ang ) * 360.0 / kTau, 0, 'f', 1 );
 }
 
+/* MODULES1 M6: every user of the sun's and the moon's direction this frame, azimuth/elevation in degrees, printed when
+ * one moves 0.1 degree: the sky's disc, the body, the lens, the key light, the engine's point; the globe, the sky's
+ * moonlight. The moon's own lens would be the sun's x its light over the sun's (under 1/255: none is drawn). */
+void skyBodiesLine( const SkyFrame & f )
+{
+	LdState & s = st();
+	auto ae = []( const float * v ) {
+		const double l = std::sqrt( double( v[0] ) * v[0] + double( v[1] ) * v[1] + double( v[2] ) * v[2] );
+		if ( !( l > 1e-9 ) )
+			return QStringLiteral( "none" );
+		return QStringLiteral( "%1/%2" ).arg( std::atan2( double( v[0] ), double( v[1] ) ) / wwskydisc::kRad, 0, 'f', 1 )
+			.arg( std::asin( std::clamp( double( v[2] ) / l, -1.0, 1.0 ) ) / wwskydisc::kRad, 0, 'f', 1 );
+	};
+	const WwSkyClock raw = wwSkyClock( s.hour, s.tnam, s.gmst );
+	float body[3], lens[3], tint[3];
+	sunBodyDir( s, body );
+	const WwLens * lensRec = nullptr;
+	const bool lensOn = wwLookdevSunLens( lensRec, lens, tint );
+	const LdLight L = currentLight();
+	const WwAtmoFrame & af = wwAtmoFrame();
+	const MoonGeo g = moonGeo( s, wwSkyBodyDirRed() ? f.c.sunPos : raw.sunPos );
+	const float gd[3] = { float( g.D[0] ), float( g.D[1] ), float( g.D[2] ) };
+	const double moonOverSun = double( wwphys::kMoonToaLux ) / double( wwphys::kSunToaLux ) * double( moonLightFactor( s ) );
+	const QString line = QStringLiteral( "sky bodies (az/elev deg): sun disc %1 body %2 lens %3 light %4 engine %5 | moon globe %6 (%7) sky %8 | moon lens x%9 of the sun's, none drawn | red %10" )
+		.arg( af.valid ? ae( af.sunW ) : QStringLiteral( "none" ), ae( body ), lensOn ? ae( lens ) : QStringLiteral( "off" ),
+			ae( L.sunDir ), ae( raw.sunPos ), ae( gd ), g.real ? QStringLiteral( "real" ) : QStringLiteral( "engine night point" ),
+			af.valid ? ae( af.moonW ) : QStringLiteral( "none" ) )
+		.arg( moonOverSun, 0, 'g', 3 ).arg( wwSkyBodyDirRed() ? 1 : 0 );
+	static QString said;
+	if ( line != said ) {
+		said = line;
+		fprintf( stderr, "%s\n", qPrintable( line ) );
+	}
+}
+
 //! lane ATMO1: the physical sky in place of the dome (gl/atmosphere.h); the vanilla sun quad and glare then stay off
 bool drawAtmo( Scene * scene, QStringList & drew, bool capture = false )
 {
@@ -3166,18 +3237,7 @@ bool drawAtmo( Scene * scene, QStringList & drew, bool capture = false )
 	WwAtmoInputs in;
 	const WwSkyClock raw = wwSkyClock( s.hour, s.tnam, s.gmst );
 	const bool night = s.hour < raw.A || s.hour > raw.D;
-	if ( wwSunPathMode() == 1 ) {
-		double r[3];
-		wwSunPathReal( s.hour, s.gameDay, r );
-		for ( int c = 0; c < 3; c++ )
-			in.sunW[c] = float( r[c] );
-	} else {
-		// the engine's arc; at night its point is the moon's, so the sun is that point mirrored under the horizon
-		for ( int c = 0; c < 3; c++ )
-			in.sunW[c] = raw.sunPos[c];
-		if ( night )
-			in.sunW[2] = -raw.sunPos[2];
-	}
+	sunBodyDir( s, in.sunW );	// MODULES1 M6: the one sun direction (its lens takes the same)
 	if ( night ) {
 		for ( int c = 0; c < 3; c++ )
 			in.moonW[c] = raw.sunPos[c];
@@ -3382,6 +3442,7 @@ bool wwLookdevDrawBackground( Scene * scene )
 			drawClouds( scene, f, cloudMul, drew );
 		if ( sunMul > 0.0f )
 			drawSunQuad( scene, f, true, sunMul, drew );
+		skyBodiesLine( f );	// MODULES1 M6: one direction per body, every user named
 		if ( wwCloudMapTier() > 0 )
 			wwCloudMapUpdate( scene );	// lane CLOUD1: Off builds nothing
 		if ( g_skyLinear )
