@@ -367,8 +367,12 @@ float ussTerrain( vec3 posView, out float inMap, float grad, bool pen )
 				vis = mix( vis, ussTerrVis( texture( ussTerrMap, ussTerrExtraUv( uv, ussTerrExtra.y ) ).rg, z ), m );
 		}
 	}
+	// MODULES1 M9: w < 0 = a circle around the eye, radius -w (world units), faded over its outer fifth; w > 0 the square's edge
 	vec2 e = min( uv, 1.0 - uv ) / max( ussTerrRange.w, 1e-6 );
-	vis = mix( 1.0, vis, clamp( min( e.x, e.y ), 0.0, 1.0 ) );
+	float edgeW = ussTerrRange.w < 0.0
+		? 1.0 - smoothstep( 0.8, 1.0, length( wp.xy - ussWorldFromView[3].xy ) / -ussTerrRange.w )
+		: clamp( min( e.x, e.y ), 0.0, 1.0 );
+	vis = mix( 1.0, vis, edgeW );
 	return mix( 1.0, vis, ussTerrBias.z );	// the low sun's fade and the moon's strength (1 when off)
 }
 

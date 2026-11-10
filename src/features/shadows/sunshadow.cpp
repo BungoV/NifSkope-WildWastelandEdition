@@ -1002,6 +1002,25 @@ static void sunShadowPassImpl( Scene * scene )
 		cst.frame++;
 	ShadowCache::chooseLights( s, false );
 	fitCascades( s, vt );
+	{	// MODULES1 M9: each cascade's sphere (centre, radius) against the eye; said when the eye moves 2048 units or the reach changes
+		static double saidEye[3] = { 1e300, 1e300, 1e300 }, saidD = -1.0;
+		const double moved = std::max( { std::fabs( s.C[0] - saidEye[0] ), std::fabs( s.C[1] - saidEye[1] ), std::fabs( s.C[2] - saidEye[2] ) } );
+		if ( moved > 2048.0 || std::fabs( s.D - saidD ) > 1.0 ) {
+			std::copy( s.C, s.C + 3, saidEye );
+			saidD = s.D;
+			QString line = QStringLiteral( "shadow cascades: eye %1,%2,%3" ).arg( s.C[0], 0, 'f', 0 ).arg( s.C[1], 0, 'f', 0 ).arg( s.C[2], 0, 'f', 0 );
+			for ( int i = 0; i < s.nCasc && i < kCascades; i++ ) {
+				const Cascade & c = s.c[i];
+				double m[3];
+				for ( int a = 0; a < 3; a++ )
+					m[a] = s.C[a] + s.fwd[a] * c.sphereZ;
+				line += QStringLiteral( " | c%1 centre %2,%3,%4 r %5 (eye %6 from it)" ).arg( i ).arg( m[0], 0, 'f', 0 ).arg( m[1], 0, 'f', 0 )
+					.arg( m[2], 0, 'f', 0 ).arg( c.sphereR, 0, 'f', 0 ).arg( std::fabs( c.sphereZ ), 0, 'f', 0 );
+			}
+			line += QStringLiteral( " | fade to 0 at %1 around the eye" ).arg( s.D, 0, 'f', 0 );
+			std::fprintf( stderr, "%s\n", qPrintable( line ) );
+		}
+	}
 	/* lane PCMB1 part B: each cascade's receiver slab for the casters' receiver cull (features/near/cellshadowocc.h): the
 	 * view depths whose receivers read it (ww_sunshadow.glsl csmSelect picks by planar depth with the blend band; cascade
 	 * 0 also behind the camera, nothing past D + band), joined with the fit's own slice and widened by 32 of its texels

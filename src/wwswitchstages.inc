@@ -1329,6 +1329,7 @@
 { "WW_SHADOW_SLOPEMAP", 0, "src/gl/celllooks.cpp:183 pinOf | re-read per frame or per call (a)" },
 { "WW_SHADOW_SLOPEMAP_RED", 0, "src/features/shadows/shadowset.cpp:2570 wwShadowSetUniforms | re-read per frame or per call (a)" },
 { "WW_SHADOW_TERRAIN", 1, "- | name passed through a variable: conservative" },
+{ "WW_SHADOW_TERR_SQUARE_RED", 0, "src/features/shadows/shadowset.cpp:1280 wwShadowTerrSquareRed | re-read per frame or per call (a)" },
 { "WW_SHADOW_TERRAIN_ALL", 0, "src/features/shadows/shadowset.cpp:359 ss | init-once state, re-read when a live set moves its prefix (b)" },
 { "WW_SHADOW_TERRAIN_SYNC", 0, "src/features/shadows/shadowset.cpp:358 ss | init-once state, re-read when a live set moves its prefix (b)" },
 { "WW_SHADOW_VIEW", 0, "src/features/shadows/shadowset.cpp:357 ss | init-once state, re-read when a live set moves its prefix (b)" },

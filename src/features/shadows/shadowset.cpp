@@ -1272,6 +1272,17 @@ float terrStrength( const double toSun[3], const float disc[3], double gameDay, 
 	return float( x * x * ( 3.0 - 2.0 * x ) );
 }
 
+/* MODULES1 M9 (bungo 11-10, 3 AM at eye -3046,65527,6437: a giant square). The terrain shadow map is the last tier past
+ * the cascades; it faded only over 2 % of its square's edges, and its window re-centred when the eye was a quarter of
+ * the map off, so from a high eye its lit square border stood in view, off to one side. Now the window re-centres at an
+ * eighth (its edge always 3/8 of the map from the eye) and the map fades out on a circle around the eye (80 to 100 % of
+ * the reach: 3/8 of the map, or the published map's nearest edge if nearer). Red WW_SHADOW_TERR_SQUARE_RED=1. */
+bool wwShadowTerrSquareRed()
+{
+	WW_SWITCH_STATIC( bool, red, wwEnvStr( "WW_SHADOW_TERR_SQUARE_RED" ).trimmed() == QLatin1StringView( "1" ) );
+	return red;
+}
+
 void terrainFrame( Scene * scene, const double toSun[3], const float disc[3] )
 {
 	SetState & s = ss();
@@ -1328,10 +1339,14 @@ void terrainFrame( Scene * scene, const double toSun[3], const float disc[3] )
 		cam[a] = c / sc;
 	}
 	const double snap = t.N * t.T / 8.0;
-	if ( std::fabs( cam[0] - t.cx ) > t.N * t.T / 4.0 || std::fabs( cam[1] - t.cy ) > t.N * t.T / 4.0 || regrid ) {
+	const double off = t.N * t.T / ( wwShadowTerrSquareRed() ? 4.0 : 8.0 );	// MODULES1 M9: re-centred at an eighth
+	if ( std::fabs( cam[0] - t.cx ) > off || std::fabs( cam[1] - t.cy ) > off || regrid ) {
 		t.cx = std::round( cam[0] / snap ) * snap;
 		t.cy = std::round( cam[1] / snap ) * snap;
 		regrid = true;
+		fprintf( stderr, "shadow terrain map: centre %.0f,%.0f half %.0f, eye %.0f,%.0f,%.0f (off %.0f,%.0f), fade circle %.0f "
+			"around the eye (red WW_SHADOW_TERR_SQUARE_RED=1: the square's edge)\n", t.cx, t.cy, t.N * t.T * 0.5, cam[0], cam[1],
+			cam[2], cam[0] - t.cx, cam[1] - t.cy, wwShadowTerrSquareRed() ? 0.0 : t.N * t.T * 0.375 );
 	}
 	t.x0 = t.cx - t.N * t.T * 0.5;
 	t.y0 = t.cy - t.N * t.T * 0.5;
@@ -2531,7 +2546,22 @@ void wwShadowSetUniforms( Scene * scene, NifSkopeOpenGLContext::Program * prog, 
 		const double span = t.pubN * t.pubT;
 		prog->uni4f( "ussTerrXform", FloatVector4( float( 1.0 / span ), float( -t.pubX0 / span ), float( 1.0 / span ), float( -t.pubY0 / span ) ) );
 		// zmin, span, the receiver's bias (world units up), the edge fade (uv)
-		prog->uni4f( "ussTerrRange", FloatVector4( t.pubZmin, t.pubSpan, float( 0.05 * t.pubT + 4.0 ), 0.02f ) );
+		/* MODULES1 M9: a negative w = the fade circle's radius around the eye (world units): 3/8 of the map, or the
+		 * published map's nearest edge from the eye if nearer (a map still being re-rastered behind a fast eye) */
+		float edgeFade = 0.02f;
+		if ( !wwShadowTerrSquareRed() ) {
+			const Transform & vt = scene->view;
+			const double sc = vt.scale != 0.0f ? double( vt.scale ) : 1.0;
+			double e[2] = { 0, 0 };
+			for ( int a = 0; a < 2; a++ ) {
+				for ( int k = 0; k < 3; k++ )
+					e[a] -= vt.rotation( k, a ) * vt.translation[k];
+				e[a] /= sc;
+			}
+			const double edge = std::min( { e[0] - t.pubX0, t.pubX0 + span - e[0], e[1] - t.pubY0, t.pubY0 + span - e[1] } );
+			edgeFade = -float( std::max( 1.0, std::min( span * 0.375, edge ) ) );
+		}
+		prog->uni4f( "ussTerrRange", FloatVector4( t.pubZmin, t.pubSpan, float( 0.05 * t.pubT + 4.0 ), edgeFade ) );
 		// lane SHADOWPAR1: the near tier's atlas rows and window (off: the far map alone, as before)
 		const float rowsAll = float( t.pubN + t.pubNn + t.pubExtra * t.pubN );
 		if ( t.pubNn > 0 ) {

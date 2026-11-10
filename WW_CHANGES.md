@@ -1,3 +1,13 @@
+## MODULES1 M9 (2026-11-10): the shadow reach is a circle around the eye
+
+- **Cause:** past the cascades the terrain shadow map is the last tier. It faded only over 2 % of its square's edges,
+  and its window re-centred only once the eye was a quarter of the map off its centre, so from a high eye (3 AM,
+  -3046,65527,6437) its lit square border stood in view, to one side. The cascades already fade on a circle (D).
+- **Now:** the window re-centres at an eighth (its edge always 3/8 of the map from the eye), and the map fades out on a
+  circle around the eye over the outer fifth of the reach (3/8 of the map, or the published map's nearest edge if a
+  fast eye outruns the re-raster). Telemetry `shadow cascades:` (each cascade's centre and radius against the eye, the
+  fade) and `shadow terrain map:` (centre, eye offset, fade circle). Red WW_SHADOW_TERR_SQUARE_RED=1.
+
 ## MODULES1 M8 (2026-11-10): night no longer lit like day; fog and sky meet in one colour
 
 - **Cause, from the flight's 3 AM lines** (Goodneighbor, Sun Path Real): `level 21076 lux (sun 0 + sky 21075) ...
