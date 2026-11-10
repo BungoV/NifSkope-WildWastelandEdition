@@ -50,6 +50,7 @@ BSD License - see nifskope.h
 #include "features/far-lod/lodinative.h"		// lane FIX1101A lodch: the far LOD's baked AO / sky switches (liveFarKey)
 #include "cellmodpick.h"
 #include "cellspeed.h"		// stage timers (WW_CELL_SPEED_DUMP)
+#include "wwloadwatch.h"	// lane PERFLOAD1 P6: the views parked around the live far rebuild
 #include "features/ao/cellaodecal.h"		// baked AO decals under big movable statics
 #include "cellstream.h"		// the cells round the camera
 #include "cellspawn.h"		// where the camera starts
@@ -2578,6 +2579,7 @@ int liveFar( NifModel * nif, LiveDoc & d, QString * why )
 	CellFarStream fs;
 	if ( seed )
 		fs.roam = seed->roam;
+	const bool parked = wwParkViews( nif, true );	// lane PERFLOAD1 P6: thousands of blocks cut and appended
 	nif->holdUpdates( true );
 	liveCut( nif, d, d.farFirst );
 	cellFarLodForget( nif );
@@ -2589,6 +2591,8 @@ int liveFar( NifModel * nif, LiveDoc & d, QString * why )
 	}
 	nif->holdUpdates( false );
 	nif->updateModel();
+	if ( parked )
+		wwParkViews( nif, false );
 	if ( seed ) {
 		auto next = std::make_shared<CellStreamSeed>( *seed );
 		/* lane LARGEREF4 (LARGEREF-MAP-LIVE): the restarted stream reads the rebuilt far map (cellStreamStart); a far LOD
@@ -2616,7 +2620,8 @@ int liveFar( NifModel * nif, LiveDoc & d, QString * why )
 		.arg( onOff ? ( wanted ? QStringLiteral( "far LOD added" ) : QStringLiteral( "far LOD removed" ) )
 			: farMoved ? QStringLiteral( "far LOD rebuilt" ) : QStringLiteral( "cells rebuilt (actors outdoors / weapon parts)" ) )
 		.arg( t.elapsed() )
-		.arg( seed ? QStringLiteral( " (streamed cells dropped and streamed again)" ) : QString() );
+		.arg( QString( seed ? QStringLiteral( " (streamed cells dropped and streamed again)" ) : QString() )
+			+ ( parked ? QStringLiteral( " (views parked)" ) : QString() ) );
 	return 1;
 }
 

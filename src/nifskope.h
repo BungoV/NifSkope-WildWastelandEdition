@@ -170,6 +170,8 @@ public:
 	//! Open NIF documents in this application session. Each document keeps its
 	//! own model, selection, Undo stack and dirty state; the active one is primary.
 	static QList<NifSkope *> openDocuments();
+	//! lane PERFLOAD1 P6: park (true) / attach (false) this window's views around a bulk edit; true when it did
+	bool wwParkViews( bool park );
 	//! Documents explicitly added to the Loaded NIFs workspace and currently selected.
 	static QList<NifSkope *> selectedWorkspaceDocuments();
 	//! Which window a generated document belongs in: the one that owns the model

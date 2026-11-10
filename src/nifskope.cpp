@@ -7593,6 +7593,36 @@ void NifSkope::swapModels( bool park )
 	QTimer::singleShot( 0, this, [this]() { applyBlockListFilter(); } );
 }
 
+/* lane PERFLOAD1 P6: the live far LOD rebuild (cellview.cpp liveFar) cuts and appends thousands of blocks in the shown
+ * document while its views are attached: the 11-10 flight's "far LOD rebuilt in place in 32945 ms". Parked like a
+ * load; only views that showed this document are parked, and only those are attached again. Red WW_LOAD_PARK_RED=1. */
+bool NifSkope::wwParkViews( bool park )
+{
+	static QSet<NifSkope *> parked;
+	if ( wwLoadParkRed() )
+		return false;
+	if ( park ) {
+		if ( parked.contains( this ) || !( list->model() == nif || list->model() == proxy ) )
+			return false;
+		parked.insert( this );
+		swapModels( true );
+		return true;
+	}
+	if ( !parked.remove( this ) )
+		return false;
+	swapModels( false );
+	return true;
+}
+
+static bool wwParkViewsOf( NifModel * m, bool park )
+{
+	for ( NifSkope * w : NifSkope::openDocuments() )
+		if ( w && w->getNifModel() == m )
+			return w->wwParkViews( park );
+	return false;
+}
+static const bool wwParkViewsSet = ( wwParkViewsFn = wwParkViewsOf, true );
+
 void NifSkope::updateSettings()
 {
 	QSettings settings;
