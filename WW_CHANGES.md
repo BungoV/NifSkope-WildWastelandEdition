@@ -22,6 +22,29 @@
 - Sources: Bruneton & Neyret 2008 and Hillaire 2020 (aerosol density exp( -h / H ), H 1.2 km for the clear
   atmosphere's Mie layer); H 0.120 km here is this lane's ground-haze scale from its haze census.
 
+## PERFLOAD1 batch 2 (2026-11-10): far land clipped from high up, the land band window's rebuild
+- **Far land clipped by the near plane (old behaviour, found 11-10).** The cell view's near plane came from the
+  loaded block's bounds alone (its centre's depth less 1.5 radii, 16 at the least). With the camera away from the
+  block (high up, or flown off to the side) that plane rose to 73288 / 113722 units at the two high test cameras,
+  and far land nearer than it was cut away (sky in its place). The plane is now also held under the camera's height
+  over the far field's top (measured once from the drawn far shapes: their vertices, the instanced rings' tile
+  spheres, one tree card's height on top) times the cosine of the frustum's corner angle, so no far point can lie
+  in front of it. Goodneighbor 5x5: far land top z 45048; near 73288.10 -> 30890.92 (camera z 85387) and
+  113722.00 -> 46196.63 (camera z 105374); inside the block it stays 16.00. Lines `far lod: far land top z ...`
+  and `far lod: near plane held under the far land (...)`. Red `WW_CELL_FARLOD_NEAR_RED=bounds` (the old plane;
+  re-read per frame). `WW_CELL_FARLOD_NEAR` (a forced plane) still wins.
+- **Land band window rebuild (P4, first cut).** Every move of the land LOD band window deletes and refills its
+  whole texture array on the main thread; a chunk seen for the first time is read from the archive there (the
+  sampler put a 4.4 s stop at the high camera move on that read; 17.6 s with a cold file cache). A rebuild now
+  prints `landspec: band window rebuild took N ms on the main thread: N chunk files read now, N chunk sizes asked
+  from the driver, N known`, and a chunk's size is asked from the driver once, not at every rebuild (third window
+  of the test walk: 121 questions -> 40; 4.0-7.0 ms over three runs against 6.4 ms, inside the run-to-run spread with a
+  warm file cache). Red `WW_LANDSPEC_RED=askdims`. Reading the chunk files off the main thread is still open.
+- **Found, not changed:** the far shapes' cull runs have not been registered since the 11-05 header move
+  (`far lod: cull not registered`): `cellfarlod.cpp` still tests for `gl/cellcull.h`, the header lives in
+  `features/near/`. Far shapes are drawn whole. Turning it back on changes which far geometry enters the camera,
+  obscurance and shadow walks, so it waits for a pass-time gate and a pixel check.
+
 ## PERFLOAD1 batch 1 (2026-11-10): cell load time, the 23:05 lockup, the pass-time table
 - **Load time (P1).** Goodneighbor 5x5 spent 79-87 % of its "models loaded and placements welded" stage inside
   `lodgenProbeAsset`: after reading an asset it opened every archive of the stack again, only to say which one supplied

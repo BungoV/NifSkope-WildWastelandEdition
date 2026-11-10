@@ -423,6 +423,7 @@ static int wwLandLodMode( Scene * scene, const Shape * mesh )
  *  LANDSPEC4: camwin (the camera's 4 x 4 window only) | perlayer (each splat layer its own detail frame);
  *  LANDSPEC6: fixedfollow (a fixed world's centre follows the camera) | page28 (no outer window past the page);
  *  LANDSPEC8: firstload (a chunk's loading bind is not repeated) | outer45 (no packed outer window).
+ *  PERFLOAD1: askdims (a window rebuild asks the driver for every chunk's size again).
  *  LANDSPEC8 retired off and notex with their paths (SHOTPASS1 confirmed them live). */
 static const QByteArray & wwLandSpecRed()
 {
@@ -531,6 +532,15 @@ static WwLandLodBits wwLandLodWindow( Scene * scene, const QString & ws, int fx,
 		if ( win.tex )
 			fn->glDeleteTextures( 1, &win.tex );
 		win.tex = 0;
+		/* lane PERFLOAD1 (P4, the drop at height): a rebuild asked the driver 13 questions a chunk
+		 * (glGetTexLevelParameteriv; each one waits for the driver's thread), 256 chunks at the highest point, on
+		 * every window move. A chunk's size is now asked once and remembered with its texture id. The rebuild
+		 * prints its own time. Red WW_LANDSPEC_RED=askdims: every size asked again. */
+		struct ChunkDim { GLuint id = 0; GLint w = 0, h = 0, f = 0, l = 0; };
+		static QHash<QString, ChunkDim> dimMemo;
+		const bool askDims = wwLandSpecRed() == "askdims";
+		int readNow = 0, asked = 0, known = 0;
+		const auto t0 = std::chrono::steady_clock::now();
 		const auto storage = q ? reinterpret_cast<PfnStorage3D>( q->getProcAddress( "glTexStorage3D" ) ) : nullptr;
 		const auto copy = q ? reinterpret_cast<PfnCopyImage>( q->getProcAddress( "glCopyImageSubData" ) ) : nullptr;	// GL 4.3
 		GLint w0 = 0, h0 = 0, f0 = 0, levels = 0;
@@ -541,17 +551,26 @@ static WwLandLodBits wwLandLodWindow( Scene * scene, const QString & ws, int fx,
 			const GLuint src = LandLodSpec::chunkTex( [&]( unsigned & id ) {	// LANDSPEC8: SHOTPASS1 D6
 				const int m = scene->textures->bind( QStringView( path ), scene->nifModel );
 				id = scene->textures->wwBound;
+				readNow += m > 0 && !id ? 1 : 0;	// lane PERFLOAD1: the bind that read the file
 				return m;
 			}, wwLandSpecRed() == "firstload" );
 			if ( !src )
 				continue;
 			GLint cw = 0, ch = 0, cf = 0, cl = 0;
-			fn->glGetTexLevelParameteriv( GL_TEXTURE_2D, 0, GL_TEXTURE_WIDTH, &cw );
-			fn->glGetTexLevelParameteriv( GL_TEXTURE_2D, 0, GL_TEXTURE_HEIGHT, &ch );
-			fn->glGetTexLevelParameteriv( GL_TEXTURE_2D, 0, GL_TEXTURE_INTERNAL_FORMAT, &cf );
-			for ( GLint lw = 1; cl < 16 && lw > 0; ) {	// the chunk's filled mip levels
-				fn->glGetTexLevelParameteriv( GL_TEXTURE_2D, cl, GL_TEXTURE_WIDTH, &lw );
-				cl += lw > 0 ? 1 : 0;
+			ChunkDim & dim = dimMemo[path];
+			if ( dim.id == src && !askDims ) {	// lane PERFLOAD1: known from an earlier window
+				cw = dim.w, ch = dim.h, cf = dim.f, cl = dim.l;
+				known++;
+			} else {
+				fn->glGetTexLevelParameteriv( GL_TEXTURE_2D, 0, GL_TEXTURE_WIDTH, &cw );
+				fn->glGetTexLevelParameteriv( GL_TEXTURE_2D, 0, GL_TEXTURE_HEIGHT, &ch );
+				fn->glGetTexLevelParameteriv( GL_TEXTURE_2D, 0, GL_TEXTURE_INTERNAL_FORMAT, &cf );
+				for ( GLint lw = 1; cl < 16 && lw > 0; ) {	// the chunk's filled mip levels
+					fn->glGetTexLevelParameteriv( GL_TEXTURE_2D, cl, GL_TEXTURE_WIDTH, &lw );
+					cl += lw > 0 ? 1 : 0;
+				}
+				dim.id = src, dim.w = cw, dim.h = ch, dim.f = cf, dim.l = cl;
+				asked++;
 			}
 			if ( cw <= 0 || ch <= 0 || cl <= mip )
 				continue;
@@ -588,6 +607,10 @@ static WwLandLodBits wwLandLodWindow( Scene * scene, const QString & ws, int fx,
 			outer ? "outer window" : "window", qPrintable( w ), fx, fy, win.bits.count(), n * n, w0, h0, levels, mip,
 			packed ? "packed 2x2, " : "", side * side,
 			double( LandLodSpec::arrayBytes( w0 * pk, h0 * pk, levels, side * side ) ) / 1048576.0 );
+		std::fprintf( stderr, "landspec: band %s rebuild took %.1f ms on the main thread: %d chunk files read now, "
+			"%d chunk sizes asked from the driver, %d known%s\n", outer ? "outer window" : "window",
+			std::chrono::duration<double, std::milli>( std::chrono::steady_clock::now() - t0 ).count(), readNow, asked,
+			known, askDims ? " (WW_LANDSPEC_RED=askdims: every size asked again)" : "" );
 	}
 	fn->glBindTexture( GL_TEXTURE_2D_ARRAY, win.bits.any() ? win.tex : 0 );
 	return win.bits;

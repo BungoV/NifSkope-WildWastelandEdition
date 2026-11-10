@@ -122,6 +122,11 @@ bool wwCellFarLodDrewEarly();
 //! WW_CELL_FARLOD_NEAR forces one.
 double wwCellFarLodNear( double nr );
 
+//! lane PERFLOAD1: the near plane never passes the far land. `nr` is the loaded block's own near plane (through
+//! wwCellFarLodNear); it comes back capped to the camera's height over the far field's top times the cosine of the
+//! frustum's corner angle, 16 at the least. Red WW_CELL_FARLOD_NEAR_RED=bounds (the loaded block's plane alone).
+double wwCellFarLodNearCap( const Scene * scene, double nr, double tanHalfFovY, double aspect );
+
 //! The planes the projection took with the far field on, logged on change with their depth step.
 void wwCellFarLodPlanes( double nearPlane, double farPlane );
 
