@@ -24,7 +24,7 @@ BSD License - see nifskope.h
 #include "harnesswindow.h"	// lane GAPFIX1
 #include "features/exposure/cellhdr.h"
 #include "features/shared/cellpasstime.h"	// MODULES1 part 27: the early cards keep their FarCards zone
-#if __has_include( "gl/cellcull.h" )
+#if __has_include( "features/near/cellcull.h" )	// lane PERFLOAD1 11-10: the old path "gl/cellcull.h" left the runs unregistered since 11-05
 #include "features/near/cellcull.h"   // the cell cull table, when merged
 #define FARLOD1_HAVE_CULL 1
 #endif
@@ -271,6 +271,9 @@ int farlod1TypeFor( bool oursFound, QString * why )
 QString farlod1CullRegister( NifModel * nif, int firstBlock )
 {
 #ifdef FARLOD1_HAVE_CULL
+	if ( wwEnv( "WW_CELL_FARLOD_RED" ) == "nocullruns" )	// lane PERFLOAD1: far shapes drawn whole, as 11-05 to 11-10
+		return QStringLiteral( "far lod: cull runs not registered (WW_CELL_FARLOD_RED=nocullruns: far shapes are drawn whole)" );
+	const auto cullT0 = std::chrono::steady_clock::now();
 	int shapes = 0, runsAll = 0;
 	for ( int b = firstBlock + 1; b < nif->getBlockCount(); b++ ) {
 		const QModelIndex iB = nif->getBlockIndex( b );
@@ -354,8 +357,9 @@ QString farlod1CullRegister( NifModel * nif, int firstBlock )
 		runsAll += int( runs.size() );
 		wwCellCullShape( nif, b, std::move( runs ) );
 	}
-	return QStringLiteral( "far lod: cull runs %1 over %2 shapes (camera cull + cascade casters, SUNCELL1)" )
-		.arg( runsAll ).arg( shapes );
+	return QStringLiteral( "far lod: cull runs %1 over %2 shapes (camera cull + cascade casters, SUNCELL1), registered in "
+		"%3 ms; WW_CELL_FARLOD_RED=nocullruns draws the far shapes whole" ).arg( runsAll ).arg( shapes )
+		.arg( std::chrono::duration<double, std::milli>( std::chrono::steady_clock::now() - cullT0 ).count(), 0, 'f', 1 );
 #else
 	Q_UNUSED( nif );
 	Q_UNUSED( firstBlock );
