@@ -5,6 +5,7 @@ BSD License - see nifskope.h
 ***** END LICENCE BLOCK *****/
 
 #include "lodgen.h"
+#include "wwloadwatch.h"	// lane PERFLOAD1: what a cell load saved
 #include "wwswitch.h"	// the WW_* switch store
 #include "features/gi/probeincr.h"
 #include "lodgenparallel.h"
@@ -54,6 +55,7 @@ BSD License - see nifskope.h
 #include <QTextStream>
 #include <QtEndian>
 #include <QFileInfo>
+#include <QDateTime>
 #include <QMap>
 #include <QVector>
 
@@ -1450,7 +1452,7 @@ QStringList lodgenFolderArchives( const QString & folder )
 }
 
 //! Pass one then pass two, both walking the stack backwards: the index is first-wins.
-QStringList lodgenStackSearchPaths()
+QStringList lodgenStackSearchPathsBuild()
 {
 	QStringList out;
 	const QStringList & stack = lodgenStack();
@@ -1475,6 +1477,47 @@ QStringList lodgenStackSearchPaths()
 			out.append( e );
 		}
 	}
+	return out;
+}
+
+//! lane PERFLOAD1 (P1): the list above, kept while the stack, the plugin order and every stack entry's change time
+//! stay the same (it was rebuilt per call: per .lodm of a far-LOD arm, ~25 % of that stage). A folder's change time
+//! moves when an archive or a data folder is added or removed. WW_LOADSPEED_RED=pathlist builds it per call again.
+QStringList lodgenStackSearchPaths()
+{
+	WW_SWITCH_STATIC( bool, redList, wwEnv( "WW_LOADSPEED_RED" ) == "pathlist" );
+	if ( redList ) {
+		wwLoadPathBuilt++;
+		return lodgenStackSearchPathsBuild();
+	}
+	const QStringList stack = lodgenStack();
+	const QHash<QString, int> rank = lodgenPluginRank();
+	QList<qint64> stamps;
+	stamps.reserve( stack.size() );
+	for ( const QString & e : stack ) {
+		const QFileInfo fi( QDir::cleanPath( e ) );
+		stamps.append( fi.exists() ? fi.lastModified().toMSecsSinceEpoch() * 2 + ( fi.isDir() ? 1 : 0 ) : -1 );
+	}
+	static QMutex mu;
+	static bool have = false;
+	static QStringList memoStack, memoOut;
+	static QHash<QString, int> memoRank;
+	static QList<qint64> memoStamps;
+	{
+		QMutexLocker lock( &mu );
+		if ( have && memoStack == stack && memoRank == rank && memoStamps == stamps ) {
+			wwLoadPathReused++;
+			return memoOut;
+		}
+	}
+	const QStringList out = lodgenStackSearchPathsBuild();
+	QMutexLocker lock( &mu );
+	have = true;
+	memoStack = stack;
+	memoRank = rank;
+	memoStamps = stamps;
+	memoOut = out;
+	wwLoadPathBuilt++;
 	return out;
 }
 
@@ -1832,6 +1875,16 @@ bool lodgenProbeAsset( const QString & dataRoot, const QString & relPath,
 		return false;
 	if ( bytes )
 		*bytes = out;
+
+	// lane PERFLOAD1 (P1): a caller that asks only for the bytes does not need the source walk below, which opened
+	// every archive of the stack again per asset (79-87 % of the cell weld stage). WW_LOADSPEED_RED=probewalk walks.
+	if ( !entry && !kind && !path ) {
+		WW_SWITCH_STATIC( bool, redWalk, wwEnv( "WW_LOADSPEED_RED" ) == "probewalk" );
+		if ( !redWalk ) {
+			wwLoadWalkSkipped++;
+			return true;
+		}
+	}
 
 	// Which entry supplied it.
 	const std::string full = Game::GameManager::get_full_path( relPath, folder, ext );

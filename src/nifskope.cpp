@@ -31,6 +31,7 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 ***** END LICENCE BLOCK *****/
 
 #include "nifskope.h"
+#include "wwloadwatch.h"	// lane PERFLOAD1: the log drain before a hard exit
 #include "wwswitch.h"	// lane TESTDRIVER1: the WW_* switch store
 #include "ui_nifskope.h"
 
@@ -10553,7 +10554,7 @@ void NifSkope::load()
 			const QByteArray line = ( QStringLiteral( "CELL OPEN REFUSED: " ) + cverr ).toUtf8();
 			std::fprintf( stderr, "%s\n", line.constData() );
 			std::fflush( stderr );
-			std::_Exit( 88 );
+			( wwStderrPumpDrain(), std::_Exit( 88 ) );
 		}
 		if ( !fromEnv ) {
 			cverr.clear();
@@ -10766,7 +10767,7 @@ void NifSkope::MessageOutput( QtMsgType type, const QMessageLogContext & context
 		Message::message( qApp->activeWindow(), str, &context, QMessageBox::Critical );
 		break;
 	case QtFatalMsg:
-		fprintf( stderr, "[Fatal] %s\n", qPrintable( str ) );
+		fprintf( stderr, "[Fatal] %s\n", qPrintable( str ) ), wwStderrPumpDrain();
 		fflush( stderr );
 		break;
 	case QtInfoMsg:

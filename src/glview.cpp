@@ -4053,7 +4053,11 @@ void GLView::paintGL()
 	}
 
 	PassTime::begin( PassTime::Overlays );	// everything after the frame (closed by frameEnd)
-	paintEditorOverlays( viewTrans );	// features/overlays: the editor overlays after the frame
+	static QElapsedTimer wwOvlClock;	// lane PERFLOAD1 (P5): the overlays zone's cost split, printed for slow frames only
+	wwOvlClock.start();
+	paintEditorOverlays( viewTrans );
+	const qint64 wwOvlEditorNs = wwOvlClock.nsecsElapsed();
+	//	// features/overlays: the editor overlays after the frame
 
 	// The old GL corner axes indicator is replaced by the Blender-style
 	// navigation gizmo drawn with QPainter at the end of paintGL().
@@ -4590,7 +4594,23 @@ void GLView::paintGL()
 	else if ( wwCellWaterWantsRepaint() )
 		QTimer::singleShot( 16, this, [this]() { update(); } );
 
+	const qint64 wwOvlBodyNs = wwOvlClock.nsecsElapsed();
 	emit paintUpdate();
+	const qint64 wwOvlAllNs = wwOvlClock.nsecsElapsed();
+	if ( wwOvlAllNs >= 8000000 ) {	// 8 ms; at most one line a second
+		static double wwOvlSaid = -10.0;
+		static int wwOvlSlow = 0;
+		wwOvlSlow++;
+		const double now = PassTime::processSeconds();
+		if ( now - wwOvlSaid >= 1.0 ) {
+			std::fprintf( stderr, "overlays slow: t=%.1f %.1f ms = editor overlays %.1f (place mode %s) + text, meters and readbacks %.1f"
+				" + inspect refresh %.1f; slow frames since the last line %d\n", now, wwOvlAllNs / 1e6, wwOvlEditorNs / 1e6,
+				cellEditSession().placing ? "on" : "off", ( wwOvlBodyNs - wwOvlEditorNs ) / 1e6,
+				( wwOvlAllNs - wwOvlBodyNs ) / 1e6, wwOvlSlow );
+			wwOvlSaid = now;
+			wwOvlSlow = 0;
+		}
+	}
 }
 
 void GLView::update()

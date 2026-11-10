@@ -5,6 +5,7 @@ BSD License - see nifskope.h
 ***** END LICENCE BLOCK *****/
 
 #include "impostorpreviewtest.h"
+#include "wwloadwatch.h"	// lane PERFLOAD1: the log drain before a hard exit
 #include "wwswitch.h"	// the WW_* switch store
 
 #include "gl/glscene.h"
@@ -150,7 +151,7 @@ void endRun( int code )
 {
 	writeLog();
 	fflush( nullptr );      // the redirected stdout/stderr a caller reads
-	std::_Exit( code );
+	( wwStderrPumpDrain(), std::_Exit( code ) );
 }
 
 //! Force the window and the viewport, then REPORT what was obtained.

@@ -31,6 +31,7 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 ***** END LICENCE BLOCK *****/
 
 #include "features/far-lod/lodgen.h"
+#include "wwloadwatch.h"	// lane PERFLOAD1: the main-thread step mark and the log drain
 #include "wwswitch.h"	// lane TESTDRIVER1: the WW_* switch store
 #include "features/far-lod/lodgengpu.h"
 #include "features/gi/proberelight.h"
@@ -163,6 +164,311 @@ QCoreApplication * createApplication( int &argc, char *argv[] )
 void wwCardTimesMainEntry();	// CARDBAKE2, nifskope_ui.cpp
 bool wwCardBatchOn();
 bool wwCardBatchStart();
+// lane PERFLOAD1 (P2, 11-10): the stderr pump and the main-thread watch.
+// Measured 11-09: the frame-end flush of the redirected stderr log sat in ONE WriteFile for 12.2 s and for 29.5 s
+// (a stalled disk); live replies are printed to stderr first, so the live port was silent too. With the pump stderr
+// is a pipe: the main thread's writes end in memory and a writer thread puts them into the log (same bytes, same
+// order). WW_STDERR_PUMP=0 is the old direct write. The watch thread prints a line when the main thread has not come
+// back to its event loop (or to a load step mark) for 1 s, and then how long that step took; WW_MAIN_WATCH=0 is the
+// old silence. Design: a producer/consumer log queue with one writer thread (as spdlog's async logger).
+#ifdef Q_OS_WIN
+#include <io.h>
+#include <fcntl.h>
+#include <atomic>
+#include <mutex>
+#include <string>
+#include <thread>
+
+namespace WwPump
+{
+struct State
+{
+	std::atomic<bool> on{ false }, stop{ false }, readerDone{ false }, writerDone{ false }, holding{ false };
+	int savedFd = -1;
+	HANDLE readH = nullptr, outH = nullptr;
+	bool text = false;	// fd 2 was in text mode: a note's line ends CR LF
+	std::mutex mu;	// guards queue, notes, writerBusy
+	std::string queue, notes;
+	bool writerBusy = false;
+	std::atomic<long long> bytes{ 0 }, writes{ 0 }, slow{ 0 }, longestMs{ 0 }, backlogPeak{ 0 };
+};
+// never freed: the detached threads may outlive the statics' destructors
+State & st()
+{
+	static State * p = new State;
+	return *p;
+}
+
+//! One line from any thread (no newline in it): placed at a line start of the log.
+void note( const char * line )
+{
+	State & s = st();
+	if ( !s.on ) {
+		std::fprintf( stderr, "%s\n", line );
+		std::fflush( stderr );
+		return;
+	}
+	std::lock_guard<std::mutex> lock( s.mu );
+	s.notes += line;
+	s.notes += s.text ? "\r\n" : "\n";
+}
+
+//! Pipe -> memory. Polls: a blocking ReadFile would also block the drain's PeekNamedPipe on this handle.
+void reader()
+{
+	State & s = st();
+	static char buf[1 << 16];
+	for ( ;; ) {
+		const bool stopping = s.stop;	// read BEFORE the peek: text written before the stop is still taken
+		DWORD avail = 0;
+		if ( !PeekNamedPipe( s.readH, nullptr, 0, nullptr, &avail, nullptr ) )
+			break;
+		if ( !avail ) {
+			if ( stopping )
+				break;
+			Sleep( 2 );
+			continue;
+		}
+		s.holding = true;
+		DWORD got = 0;
+		if ( !ReadFile( s.readH, buf, sizeof buf, &got, nullptr ) ) {
+			s.holding = false;
+			break;
+		}
+		for ( ;; ) {	// 64 MB waiting = the log's disk is far behind: only then the program waits again
+			{
+				std::lock_guard<std::mutex> lock( s.mu );
+				if ( s.queue.size() < ( size_t( 64 ) << 20 ) || s.stop ) {
+					s.queue.append( buf, got );
+					if ( (long long) s.queue.size() > s.backlogPeak )
+						s.backlogPeak = (long long) s.queue.size();
+					break;
+				}
+			}
+			Sleep( 2 );
+		}
+		s.holding = false;
+	}
+	s.readerDone = true;
+}
+
+void writeAll( const char * p, size_t n )
+{
+	State & s = st();
+	while ( n ) {
+		const DWORD part = DWORD( n < ( size_t( 1 ) << 20 ) ? n : ( size_t( 1 ) << 20 ) );
+		DWORD done = 0;
+		const ULONGLONG t0 = GetTickCount64();
+		const BOOL ok = WriteFile( s.outH, p, part, &done, nullptr );
+		const long long ms = (long long) ( GetTickCount64() - t0 );
+		if ( !ok || !done )
+			return;	// the log is gone (closed pipe, full disk): the text is dropped, the program never waits for it
+		s.bytes += done;
+		s.writes++;
+		if ( ms >= 250 ) {
+			s.slow++;
+			if ( ms > s.longestMs )
+				s.longestMs = ms;
+			char line[160];
+			std::snprintf( line, sizeof line, "stderr pump: one log write took %lld ms; the main thread did not wait", ms );
+			std::lock_guard<std::mutex> lock( s.mu );
+			s.notes += line;
+			s.notes += s.text ? "\r\n" : "\n";
+		}
+		p += done;
+		n -= done;
+	}
+}
+
+//! Memory -> the log. Notes go in at a line start, or after 1 s without one.
+void writer()
+{
+	State & s = st();
+	bool lineStart = true;
+	int idle = 0;
+	std::string out;
+	for ( ;; ) {
+		out.clear();
+		{
+			std::lock_guard<std::mutex> lock( s.mu );
+			const bool last = s.stop && s.readerDone;
+			if ( s.queue.empty() && s.notes.empty() && last )
+				break;
+			out.swap( s.queue );
+			if ( !s.notes.empty() ) {
+				const size_t nl = out.find( '\n' );
+				bool used = true;
+				if ( lineStart )
+					out.insert( 0, s.notes );
+				else if ( nl != std::string::npos )
+					out.insert( nl + 1, s.notes );
+				else if ( out.empty() && ( ++idle > 500 || last ) )
+					out = ( s.text ? "\r\n" : "\n" ) + s.notes;
+				else
+					used = false;
+				if ( used )
+					s.notes.clear();
+			}
+			s.writerBusy = !out.empty();
+		}
+		if ( out.empty() ) {
+			Sleep( 2 );
+			continue;
+		}
+		idle = 0;
+		writeAll( out.data(), out.size() );
+		lineStart = out.back() == '\n';
+		std::lock_guard<std::mutex> lock( s.mu );
+		s.writerBusy = false;
+	}
+	s.writerDone = true;
+}
+
+//! All text written so far is in the log file (up to 5 s).
+void drain()
+{
+	std::fflush( stderr );
+	State & s = st();
+	if ( !s.on )
+		return;
+	const ULONGLONG t0 = GetTickCount64();
+	while ( GetTickCount64() - t0 < 5000 ) {
+		DWORD avail = 0;
+		const bool pipeEmpty = !PeekNamedPipe( s.readH, nullptr, 0, nullptr, &avail, nullptr ) || !avail;
+		if ( pipeEmpty && !s.holding ) {
+			std::lock_guard<std::mutex> lock( s.mu );
+			if ( s.queue.empty() && s.notes.empty() && !s.writerBusy )
+				return;
+		}
+		Sleep( 1 );
+	}
+}
+
+//! At exit: stderr is the log again, the threads empty the queue, one line sums the run up.
+void shutdown()
+{
+	State & s = st();
+	if ( !s.on )
+		return;
+	std::fflush( stderr );
+	_dup2( s.savedFd, 2 );
+	s.stop = true;
+	const ULONGLONG t0 = GetTickCount64();
+	while ( !( s.readerDone && s.writerDone ) && GetTickCount64() - t0 < 5000 )
+		Sleep( 1 );
+	s.on = false;
+	std::fprintf( stderr, "stderr pump: %lld bytes in %lld writes, slow writes (250 ms or more) %lld, longest %lld ms, most text waiting %lld KB\n",
+		(long long) s.bytes, (long long) s.writes, (long long) s.slow, (long long) s.longestMs, (long long) s.backlogPeak / 1024 );
+	std::fflush( stderr );
+}
+}	// namespace WwPump
+
+static void wwStderrPumpStart()
+{
+	WwPump::State & s = WwPump::st();
+	if ( s.on )
+		return;
+	std::fflush( stderr );
+	if ( wwEnv( "WW_STDERR_PUMP" ) == "0" ) {
+		std::fprintf( stderr, "stderr pump: off (WW_STDERR_PUMP=0, the main thread writes the log itself)\n" );
+		return;
+	}
+	const intptr_t h = _get_osfhandle( 2 );
+	if ( h == -1 || h == -2 )
+		return;	// no stderr at all
+	const DWORD type = GetFileType( (HANDLE) h );
+	if ( type != FILE_TYPE_DISK && type != FILE_TYPE_PIPE )
+		return;	// a console is left alone
+	const int oldMode = _setmode( 2, _O_BINARY );
+	if ( oldMode == -1 )
+		return;
+	_setmode( 2, oldMode );
+	s.text = ( oldMode & _O_TEXT ) != 0;
+	int fds[2] = { -1, -1 };
+	s.savedFd = _dup( 2 );
+	if ( s.savedFd < 0 )
+		return;
+	if ( _pipe( fds, 1 << 20, ( s.text ? _O_TEXT : _O_BINARY ) | _O_NOINHERIT ) != 0 ) {
+		_close( s.savedFd );
+		return;
+	}
+	s.readH = (HANDLE) _get_osfhandle( fds[0] );
+	s.outH = (HANDLE) _get_osfhandle( s.savedFd );
+	if ( _dup2( fds[1], 2 ) != 0 ) {
+		_close( fds[0] );
+		_close( fds[1] );
+		_close( s.savedFd );
+		return;
+	}
+	_close( fds[1] );
+	s.on = true;
+	wwStderrDrainFn = WwPump::drain;
+	std::thread( WwPump::reader ).detach();
+	std::thread( WwPump::writer ).detach();
+	std::atexit( WwPump::shutdown );
+	std::fprintf( stderr, "stderr pump: on (log writes leave the main thread; WW_STDERR_PUMP=0 writes them directly)\n" );
+}
+
+namespace WwWatch
+{
+std::atomic<long long> beat{ 0 };
+std::atomic<const char *> stage{ "program start" };
+std::atomic<bool> off{ false };
+
+void step( const char * what )
+{
+	stage = what;
+	beat = (long long) GetTickCount64();
+}
+
+void run()
+{
+	bool late = false;
+	long long since = 0;
+	char line[320];
+	while ( !off ) {
+		Sleep( 100 );
+		const long long b = beat;
+		const long long n = (long long) GetTickCount64();
+		if ( !late && n - b >= 1000 ) {
+			late = true;
+			since = b;
+			const char * what = stage;
+			if ( what )
+				std::snprintf( line, sizeof line, "main thread: over 1 s without handling events, in the step after \"%s\" (the window and the live port wait)", what );
+			else
+				std::snprintf( line, sizeof line, "main thread: over 1 s without handling events, inside one event (a frame, a live step or the UI)" );
+			WwPump::note( line );
+		} else if ( late && b != since ) {
+			std::snprintf( line, sizeof line, "main thread: that step took %lld ms", b - since );
+			WwPump::note( line );
+			late = false;
+		}
+	}
+}
+}	// namespace WwWatch
+
+static void wwMainWatchStart( QObject * app )
+{
+	if ( wwEnv( "WW_MAIN_WATCH" ) == "0" ) {
+		std::fprintf( stderr, "main watch: off (WW_MAIN_WATCH=0)\n" );
+		return;
+	}
+	WwWatch::step( "program start" );
+	wwMainStepFn = WwWatch::step;
+	QTimer * t = new QTimer( app );
+	t->setInterval( 100 );
+	QObject::connect( t, &QTimer::timeout, app, []() { WwWatch::step( nullptr ); } );
+	t->start();
+	std::atexit( []() { WwWatch::off = true; } );
+	std::thread( WwWatch::run ).detach();
+	std::fprintf( stderr, "main watch: on (a main-thread step over 1 s prints its own line; WW_MAIN_WATCH=0 is the old silence)\n" );
+}
+#else
+static void wwStderrPumpStart() {}
+static void wwMainWatchStart( QObject * ) {}
+#endif
+
 bool wwStderrFrameFlush = false;	// lane FLYFIX1: GLView::paintGL flushes stderr once a frame when set
 int main( int argc, char * argv[] )
 {
@@ -426,6 +732,8 @@ int main( int argc, char * argv[] )
 		if ( IPCsocket * ipc = IPCsocket::create( port ) ) {
 			//qDebug() << "IPCSocket exec";
 			wwStartupMark( "ipc socket" );
+			wwStderrPumpStart();	// lane PERFLOAD1 (P2): log writes leave the main thread
+			wwMainWatchStart( a );	// and a main-thread step over 1 s prints its own line
 			ipc->execCommand( QString( "NifSkope::open %1" ).arg( fnames.pop() ) );
 			wwStartupMark( "window open command" );
 

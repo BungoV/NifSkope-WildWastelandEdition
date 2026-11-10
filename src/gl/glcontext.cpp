@@ -31,6 +31,7 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 ***** END LICENCE BLOCK *****/
 
 #include "glcontext.hpp"
+#include "wwloadwatch.h"	// lane PERFLOAD1: the log drain before a hard exit
 #include "wwswitch.h"	// lane TESTDRIVER1: the WW_* switch store
 #include "cellunits.h"	// lane FIX1101A lodch: the far stream's unit
 #include "ddstxt16.hpp"
@@ -430,7 +431,7 @@ void NifSkopeOpenGLContext::Shader::printCompileError( const QString & err )
 		const QByteArray line = ( QStringLiteral( "SHADER REFUSED: " ) + QString( tmp ).simplified() ).toUtf8();
 		std::fprintf( stderr, "%s\n", line.constData() );
 		std::fflush( stderr );
-		std::_Exit( 87 );
+		( wwStderrPumpDrain(), std::_Exit( 87 ) );
 	}
 	Message::append( QObject::tr( "There were errors during shader compilation" ), tmp );
 }

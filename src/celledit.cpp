@@ -29,6 +29,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstdio>
 #include <cstring>
 #include <functional>
 #include <memory>
@@ -1190,6 +1191,7 @@ bool cellEditStartPlace( GLView * view )
 		return false;
 	defaultTarget( s, spec );
 	s.placing = true;
+	std::fprintf( stderr, "place mode: on (Shift+A; every mouse move reads the depth under the cursor; Esc leaves)\n" );
 	s.facing = s.locked = s.turning = false;
 	s.ghostValid = false;
 	x.queue.clear();
@@ -1206,6 +1208,8 @@ bool cellEditStartPlace( GLView * view )
 void cellEditStopPlace()
 {
 	CellEditSession & s = cellEditSession();
+	if ( s.placing )
+		std::fprintf( stderr, "place mode: off\n" );
 	s.placing = s.facing = s.locked = s.turning = false;
 	s.ghostValid = false;
 	extra().queue.clear();

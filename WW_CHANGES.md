@@ -1,3 +1,40 @@
+## PERFLOAD1 batch 1 (2026-11-10): cell load time, the 23:05 lockup, the pass-time table
+- **Load time (P1).** Goodneighbor 5x5 spent 79-87 % of its "models loaded and placements welded" stage inside
+  `lodgenProbeAsset`: after reading an asset it opened every archive of the stack again, only to say which one supplied
+  it, and 9 of its 11 callers never ask. A caller that wants only the bytes now returns right after the read
+  (src/features/far-lod/lodgen.cpp). The far-LOD stage rebuilt the stack's search path list per .lodm
+  (`lodgenStackSearchPaths`, ~25 % of that stage): the list is now kept while the stack, the plugin order and every
+  stack entry's change time stay the same. Same bytes read, same document. Reds (read at cell load):
+  `WW_LOADSPEED_RED=probewalk` and `WW_LOADSPEED_RED=pathlist`. Telemetry per load:
+  `load speed: asset source walks skipped N, search path list built N reused N`.
+  Measured 11-10, same build, same scene, files in the OS cache: load until the window can paint 78.7 s with the
+  old walk (`probewalk`) -> 14.5 s; first frames at 87.5 s -> 22.5 s; weld stage 32.3 s -> 2.8 s; far-LOD stage
+  35.9 s -> 4.2 s; 863 walks skipped; the same 7091 placements, 793 shapes, 2284655 vertices, 9755 blocks.
+  With a cold file cache the same build needed 30.9 s and its first frame waited 36 s more on texture files.
+- **Load gate.** `tests/spells/cell_load_gate.py` compares stage tables (WW_CELL_SPEED_DUMP files): the fastest
+  reference against the MEDIAN new run; it fails when the load (the stages until the window can paint) got more than
+  10 % slower, or when the document counts differ. Reference tables of 11-10: tests/spells/cell_load_ref/ (measured
+  with the files in the OS cache; a first run after a build or a reboot is slower and does not count).
+- **The lockup (P2).** Measured on the 11-09 flight's scene: the main thread sat in ONE WriteFile of the frame-end
+  stderr flush for 12.2 s and for 29.5 s (the log's disk stalled); live replies are printed to stderr first, so the
+  live port was silent for the same time. stderr is now a pipe and a writer thread puts the text into the log
+  (src/main.cpp, `stderr pump: on`; same bytes, same order; hard exits drain it first, src/wwloadwatch.h). Exit line:
+  `stderr pump: N bytes in N writes, slow writes N, longest N ms, most text waiting N KB`. Red `WW_STDERR_PUMP=0`.
+  A watch thread prints `main thread: over 1 s without handling events, in the step after "<stage>"` and then
+  `main thread: that step took N ms` (cell load stage marks name the step). Red `WW_MAIN_WATCH=0`.
+  Measured 11-10: one log write stalled for 37.1 s in a test run and the frames went on
+  (`stderr pump: one log write took 37109 ms; the main thread did not wait`).
+  Not done: the cell load itself still runs on the main thread without yielding; the watch names its long steps.
+- **Pass-time table (P5).** Switched on by `WW_CELL_PASSTIME` (env or live set) the table is no longer drawn over the
+  view; the Frame Timers menu row draws it as before. `WW_CELL_PASSTIME_TEXT=1` draws it (the old way), `=0` never.
+  A frame whose overlays zone passes 8 ms prints `overlays slow:` with its split (editor overlays, text and
+  readbacks, inspect refresh; at most one line a second), and place mode (Shift+A, a depth read under the cursor per
+  mouse move) prints `place mode: on` / `off`.
+- Sources: memoisation of an invariant directory scan and skipping redundant archive opens (ordinary call-site
+  cuts, found with the built-in sampler); asynchronous logging = a producer/consumer queue with one writer thread
+  (spdlog's async logger, github.com/gabime/spdlog, MIT); the watchdog = the heartbeat pattern of Chromium's
+  hang watcher / Android's ANR watchdog.
+
 ## FARSEA1 (2026-11-09): the endless sea to the horizon
 - Past the baked map the far water used to stop and the void showed. One more water shape now hangs under the far LOD
   node (src/features/water/endlesssea.cpp): a camera-centred disc of 128-segment rings, 256 u near and coarser by a
