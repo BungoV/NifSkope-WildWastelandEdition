@@ -1305,6 +1305,26 @@ static bool vaThinSrcRed()
 	return red;
 }
 
+/* MODULES1 G3 (bungo 11-09 items 6, 10e: the lit fog far brighter than the sunlit land beside it): the ground layer
+ * took the sun out of the surfaces' direct beam (flag 128) and nothing gave it back, so under its column the land kept
+ * a few percent of the sun while the air over it stayed fully lit. What the column scatters forward now reaches the
+ * surfaces as soft light (lookdev_fog.glsl wwVolAirSunTD). The air's phase g rides in volAirGround.w as 1 + g.
+ * Red WW_CELL_AIR_SUNDIF_RED=1: 0 there, the direct beam alone, as before */
+static bool vaSunDifRed()
+{
+	WW_SWITCH_STATIC( bool, red, wwEnv( "WW_CELL_AIR_SUNDIF_RED" ).trimmed() == "1" );
+	return red;
+}
+
+// wwVolAirSunTD's soft share on the CPU (delta-Eddington + the low-sun divisor; notes/modules1/tools/g3_sundif_mc.py)
+static double vaSunDif( double tau, double mu, double g )
+{
+	const double gp = g / ( 1.0 + g ), tp = ( 1.0 - g * g ) * tau, g1 = 0.75 * ( 1.0 - gp ), td = std::exp( -tau / mu );
+	double tt = 1.0 - ( g1 * tp + ( 0.25 * ( 2.0 - 3.0 * gp * mu ) - g1 * mu ) * ( 1.0 - std::exp( -tp / mu ) ) ) / ( 1.0 + g1 * tp );
+	tt /= 1.0 + 0.035 * std::max( g, 0.0 ) * ( 1.0 / mu - 1.0 ) * ( 1.0 - td );
+	return std::max( tt - td, 0.0 );
+}
+
 // MODULES1 M12 (G4b, G5): lookdev_fog.glsl wwAirColOne on the CPU, for the column line (vaColumnEcho)
 static double vaColOne( double lo, double hi, double z0, double invH )
 {
@@ -1351,6 +1371,19 @@ static void vaColumnEcho( const float med[4], const float layer[4], const float 
 		double( layer[3] ), double( layer[0] ), terr ? "follows the terrain grid" : "one height", tauSun,
 		sunColumn ? "the whole column, red suncolumn" : "the ground layer", tauBand, std::exp( -tauSun ),
 		std::exp( -tauSun / 0.5 ), std::exp( -tauSun / 0.2 ), std::exp( -tauSun / 0.05 ), s0 * rhoG * 70028.0 );
+	/* MODULES1 G3: the soft share of the sun under that column, and the land vs the lit air for the same sun (sun 30
+	 * degrees up, per unit of the sun's light): a level land of albedo 0.18 with and without the soft share, the air
+	 * clear of the layer scattering once (pi x HG(g), single lobe) to the side and toward the sun */
+	const bool difOn = ground[3] > 0.0f;
+	const double gPh = difOn ? double( ground[3] ) - 1.0 : 0.0, mu = 0.5, td = std::exp( -tauSun / mu );
+	auto dif = [&]( double m ) { return difOn ? vaSunDif( tauSun, m, gPh ) : 0.0; };
+	auto hgPi = [&]( double c ) { return ( 1.0 - gPh * gPh ) / ( 4.0 * std::pow( 1.0 + gPh * gPh - 2.0 * gPh * c, 1.5 ) ); };
+	const double landNow = 0.18 * mu * ( td + dif( mu ) ), landWas = 0.18 * mu * td;
+	const double side = hgPi( 0.0 ), toSun = hgPi( std::sqrt( 1.0 - mu * mu ) );
+	std::fprintf( stderr, "air sun soft: %s, phase g %.2f | soft share at mu 1 %.3f, 0.5 %.3f, 0.2 %.3f | sun 30 deg up, per "
+		"unit sun: land %.4f (direct only %.4f) | air single scattering side %.3f, toward the sun %.3f | air:land side %.1f "
+		"(direct only %.1f)\n", difOn ? "on" : "red WW_CELL_AIR_SUNDIF_RED=1 (the direct beam alone)", gPh, dif( 1.0 ),
+		dif( 0.5 ), dif( 0.2 ), landNow, landWas, side, toSun, side / std::max( landNow, 1e-9 ), side / std::max( landWas, 1e-9 ) );
 }
 
 bool wwVolAirMediumNow( float med[4], float layer[4], float ground[2] )
@@ -2825,7 +2858,8 @@ static void vaPassInner( Scene * scene, bool run )
 	g.med[1] = M.zb;
 	g.med[2] = M.invH;
 	g.med[3] = zTop;
-	const float layerV[4] = { G.w, G.zn, G.invHn, G.s }, groundV[4] = { G.zg, G.invHg, invTopH, 0.0f };
+	const float layerV[4] = { G.w, G.zn, G.invHn, G.s }, groundV[4] = { G.zg, G.invHg, invTopH,
+		vaSunDifRed() ? 0.0f : 1.0f + std::clamp( ph.gi[3], -0.9f, 0.9f ) };	// MODULES1 G3: w = 1 + the phase g
 	std::copy( layerV, layerV + 4, g.layer );
 	std::copy( groundV, groundV + 4, g.ground );
 	std::copy( &ph.w[0][0], &ph.w[0][0] + 12, &g.phase[0][0] );	// lane VOLPART1

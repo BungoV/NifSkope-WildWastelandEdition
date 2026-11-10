@@ -1,3 +1,17 @@
+## MODULES1 G3 (2026-11-10): the land under fog gets the sun the fog scatters down (night items 6, 10e)
+- **Before.** The derived ground layer took the sun out of the surfaces' direct beam (flag 128) and gave none of it
+  back: under 3.4 optical depths (CommonwealthFoggy, ground layer x3, 61 m) the land kept 3 % of its sun at noon, while
+  the air over the layer stayed fully lit. The lit fog read many times brighter than the land beside it.
+- **Now.** What the column takes out of the beam reaches the surfaces as soft light from the sky's half, without the
+  cascade shadow: the conservative delta-Eddington total transmission minus the direct beam (lookdev_fog.glsl
+  `wwVolAirSunTD`, cell_lights.glsl `cellLit`). Offline: notes/modules1/tools/g3_sundif_mc.py against a Monte Carlo
+  slab, 80 cases (tau 0.5-3.4, sun height 0.1-1, g 0-0.85), worst error 0.030 of the sun. At tau 3.4, g 0.76, noon:
+  the land takes 0.74 of the sun instead of 0.03.
+- **Not covered:** the PBR surface program and the effects keep the direct beam alone.
+- **Telemetry:** `air sun soft: on, phase g G | soft share at mu 1 A, 0.5 B, 0.2 C | ... land L (direct only D) |
+  air single scattering side S, toward the sun T | air:land side R (direct only R0)`, said with the `air column:` line.
+- **Red:** `WW_CELL_AIR_SUNDIF_RED=1` = the direct beam alone, as before.
+
 ## MODULES1 M3 round 2 (2026-11-10): the street steam no longer a white curtain in the shade
 
 - Cause: a lit effect outdoors takes no shadow and no sky occlusion (the game's base, HAZECARD1), and its level was

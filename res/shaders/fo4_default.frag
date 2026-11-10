@@ -7,9 +7,9 @@
 // FOGSUN1: the sun through the air; a variant without the fog compiled in (fo4_default, fo4_csm) has no air between
 // the surface and the sun (lane VOLAIR1 10-15: calling wwVolAirSunT there broke both programs; the shader guard found it)
 #ifdef WW_FOG
-#define WW_AIR_SUN_T( p ) wwVolAirSunT( p )
+#define WW_AIR_SUN_TD( p ) wwVolAirSunTD( p )
 #else
-#define WW_AIR_SUN_T( p ) 1.0
+#define WW_AIR_SUN_TD( p ) vec2( 1.0, 0.0 )
 #endif
 #ifdef WW_SUNSHADOW
 // lane SUNCELL1: the cascades (fo4_cellcsm, fo4_csm, fo4_fogcsm); the loader takes nothing after an include's quote
@@ -443,23 +443,27 @@ void main()
 #ifdef WW_CELLLIGHTS
 	/* MODULES1 p18: the obscurance pass (probe 20, early 1) returns at the normal and reads no sun: it skips the
 	 * cascades and the air here (cellAoEarly 4 = its red, the sun read as before) */
-	float csmF = cellOn && cellProbe == 20 && cellAoEarly == 1 ? 1.0
-		: wwSunShadow( -ViewDir ) * WW_AIR_SUN_T( -ViewDir );	// FOGSUN1: and the air's transmittance
+	bool airAoEarly = cellOn && cellProbe == 20 && cellAoEarly == 1;
+	vec2 airTD = airAoEarly ? vec2( 1.0, 0.0 ) : WW_AIR_SUN_TD( -ViewDir );	// MODULES1 G3: (direct T, the soft share)
+	float csmF = airAoEarly ? 1.0 : wwSunShadow( -ViewDir ) * airTD.x;	// FOGSUN1: and the air's transmittance
 #else
-	float csmF = wwSunShadow( -ViewDir ) * WW_AIR_SUN_T( -ViewDir );	// FOGSUN1: and the air's transmittance
+	float csmF = wwSunShadow( -ViewDir ) * WW_AIR_SUN_TD( -ViewDir ).x;	// FOGSUN1: and the air's transmittance
 #endif
 	vec4 Dcsm = vec4( D.rgb * sqrt( csmF ), D.a );
 #define D Dcsm
 #ifdef WW_CELLLIGHTS
 	cellDirVis = csmF;	// the exterior cell sun (cellLit) takes the same cascades
+	cellAirDif = airTD.y;	// MODULES1 G3: the sun the air scattered down, no cascades
 #endif
 #else
 	// FOGSUN1: no cascades compiled in; the sun still crosses the air
-	float airSunT = WW_AIR_SUN_T( -ViewDir );
+	vec2 airTD = WW_AIR_SUN_TD( -ViewDir );	// MODULES1 G3: (direct T, the soft share)
+	float airSunT = airTD.x;
 	vec4 Dair = vec4( D.rgb * sqrt( airSunT ), D.a );
 #define D Dair
 #ifdef WW_CELLLIGHTS
 	cellDirVis = airSunT;
+	cellAirDif = airTD.y;
 #endif
 #endif
 

@@ -696,14 +696,14 @@ float wwAirDriftSunK( vec3 p, float lo, float mu, float top )
  * direct sun is dimmed by the medium; the sky's share the air scatters is its in-scattering. 1 where the air is off.
  * Red nosunt: the sun not dimmed. The grazing guard mu >= 0.02 is the air's own (a flat medium has no finite column at
  * the horizon). */
-float wwVolAirSunT( vec3 posView )
+vec2 wwVolAirSunTD( vec3 posView )
 {
 	if ( !fogOn || !volOn || volSlices.w < 0.5 || fogSun.w <= 0.0 || volAirMed.x <= 0.0 || ( volAirFlags & 1 ) == 0 )
-		return 1.0;
+		return vec2( 1.0, 0.0 );
 	float lo = dot( fogView.xyz, posView ) + fogView.w;
 	float end = wwAirEnd( volAirMed, volAirGround );	// G2
 	if ( lo >= end )
-		return 1.0;
+		return vec2( 1.0, 0.0 );
 	float mu = max( dot( fogView.xyz, fogSun.xyz ) / max( length( fogView.xyz ), 1e-12 ), 0.02 );
 	vec4 g = wwAirGroundAt( posView );
 	/* lane FIX1101A (atmo, the fog-sun fault): flag 128 (shipped) = only the derived ground layer dims the sun. The far and
@@ -713,7 +713,24 @@ float wwVolAirSunT( vec3 posView )
 	float c = ( volAirFlags & 128 ) != 0
 		? ( volAirLayer.w > 0.0 ? volAirLayer.w * wwAirColOne( lo, volAirMed.w, g.x, g.y ) : 0.0 )
 		: wwAirCol( lo, end, g );
-	return exp( -volAirMed.x * c * wwAirDriftSunK( posView, lo, mu, volAirMed.w ) / mu );
+	float tau = volAirMed.x * c * wwAirDriftSunK( posView, lo, mu, volAirMed.w ), Td = exp( -tau / mu );
+	/* MODULES1 G3 (bungo 11-09 items 6, 10e: the lit fog far brighter than the sunlit land beside it): what the column
+	 * takes out of the direct beam is mostly scattered forward and reaches the surface as soft light. The conservative
+	 * delta-Eddington total transmission (Meador & Weaver 1980 eq. 24) with a low-sun divisor fitted to a Monte Carlo
+	 * slab (notes/modules1/tools/g3_sundif_mc.py: 80 cases, worst 0.030), minus the direct beam; y = that share x mu,
+	 * the irradiance on a level surface per unit of the sun. volAirGround.w = 1 + the air's phase g (0: the red
+	 * WW_CELL_AIR_SUNDIF_RED=1, the direct beam alone) */
+	if ( volAirGround.w <= 0.0 )
+		return vec2( Td, 0.0 );
+	float pg = volAirGround.w - 1.0, gp = pg / ( 1.0 + pg ), tp = ( 1.0 - pg * pg ) * tau, g1 = 0.75 * ( 1.0 - gp );
+	float Tt = 1.0 - ( g1 * tp + ( 0.25 * ( 2.0 - 3.0 * gp * mu ) - g1 * mu ) * ( 1.0 - exp( -tp / mu ) ) ) / ( 1.0 + g1 * tp );
+	Tt /= 1.0 + 0.035 * max( pg, 0.0 ) * ( 1.0 / mu - 1.0 ) * ( 1.0 - Td );
+	return vec2( Td, max( Tt - Td, 0.0 ) * mu );
+}
+
+float wwVolAirSunT( vec3 posView )
+{
+	return wwVolAirSunTD( posView ).x;
 }
 
 vec3 wwFogBase( vec3 preFog, vec3 posView, float tAp, bool apOn );
