@@ -245,6 +245,7 @@ struct LodlFarRing
 	int ox0 = 0, oy0 = 0, ox1 = -1, oy1 = -1;
 	int n = 0;
 	qint64 estVerts = 0, shapes = 0, verts = 0, tris = 0, cutTris = 0;
+	qint64 skirtTris = 0, skirtCapped = 0;    //!< lane PERFLOAD1 P9: the ring's skirt walls, edges left open at the 16-bit cap
 	int sheetTiles = 0;
 	QString sheetFile;
 	qint64 seamSamples = 0;

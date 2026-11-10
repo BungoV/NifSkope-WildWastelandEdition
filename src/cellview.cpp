@@ -2278,7 +2278,8 @@ QByteArray liveFarKey()
 	for ( const char * n : { "WW_CELL_FARLOD_RED", "WW_CELL_FARLOD_NEARONLY", "WW_CELL_FARLOD_MAX", "WW_CELL_FARLOD_L0",
 			"WW_CELL_FARLOD_L1", "WW_CELL_FARLOD_L2", "WW_CELL_FARLOD_TREE_DIST", "WW_CELL_FARLOD_RINGS",
 			"WW_CELL_FARLOD_BUDGET_MB", "WW_CELL_FARLOD_OURS", "WW_CELL_FARLOD_SWAY", "WW_CELL_FARLOD_SHORE",
-			"WW_CELL_FARLOD_PRESET", "WW_CELL_FARLOD_PRESET_RED" } )	// lane FARPRESET1: the preset's ring distances
+			"WW_CELL_FARLOD_PRESET", "WW_CELL_FARLOD_PRESET_RED",	// lane FARPRESET1: the preset's ring distances
+			"WW_CELL_FARLOD_SKIRT_RED" } )	// lane PERFLOAD1 P9: the skirts are written while the rings are built
 		k += wwEnv( n ) + '\x1f';
 	// lane FAR6: Game LOD trees sway is written into the .bto shapes at build; its menu tick lives in the settings
 	k += QByteArray( wwLookOn( WwLook::BtoSway ) ? "1" : "0" ) + wwEnv( "WW_CELL_FARLOD_BTOSWAY_RED" ) + '\x1f';

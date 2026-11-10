@@ -832,6 +832,10 @@ QString cellFarLodAppend( NifModel * nif, const QModelIndex & iRoot, const EsmWo
 					.arg( v.shapes ).arg( v.terrainTris ).arg( v.clipTris ).arg( v.objectTris ).arg( v.droppedTris )
 					.arg( v.snapped ).arg( v.snapMax, 0, 'f', 1 ).arg( int( v.waterBlocks.size() ) ).arg( wReg )
 					+ QStringLiteral( ", %1 land shaders LOD landscape -> default, %2 skirt tris on the clip lines" ).arg( v.landRetyped ).arg( v.skirtTris )
+					// lane PERFLOAD1 P9: the water skirt and the gaps the 16-bit cap leaves
+					+ QStringLiteral( ", %1 water skirt tris%2, %3 skirt edges and %4 clip pieces over the 16-bit cap" )
+						.arg( v.waterSkirtTris ).arg( wwEnvInt( "WW_CELL_FARLOD_SKIRT_RED" ) == 1 ? QStringLiteral( " (RED: unskirted)" ) : QString() )
+						.arg( v.skirtCapped ).arg( v.clipCapped )
 					+ QStringLiteral( ", arrays beside the document: %1 terrain + %2 object tris%3" ).arg( v.sideTerrainTris )
 						.arg( v.sideObjectTris ).arg( wwEnv( "WW_CELL_FARLOD_RED" ) == "vanrows"
 							? QStringLiteral( " (RED vanrows: document rows)" ) : QString() )
@@ -863,7 +867,9 @@ QString cellFarLodAppend( NifModel * nif, const QModelIndex & iRoot, const EsmWo
 			.arg( QStringLiteral( "%1 shapes, %2 verts (est %3), %4 tris, %5 cut tris, sheet %6 x%7 tiles%8" )
 				.arg( r.shapes ).arg( r.verts ).arg( r.estVerts ).arg( r.tris ).arg( r.cutTris )
 				.arg( r.sheetFile.isEmpty() ? QStringLiteral( "none" ) : r.sheetFile ).arg( r.sheetTiles )
-				.arg( r.notes.isEmpty() ? QString() : QStringLiteral( " -- " ) + r.notes.join( QLatin1String( "; " ) ) ) ) );
+				.arg( QStringLiteral( ", %1 skirt tris (%2 edges over the 16-bit cap)%3" ).arg( r.skirtTris ).arg( r.skirtCapped )
+					.arg( wwEnvInt( "WW_CELL_FARLOD_SKIRT_RED" ) == 1 ? QStringLiteral( " (RED: unskirted)" ) : QString() )
+					+ ( r.notes.isEmpty() ? QString() : QStringLiteral( " -- " ) + r.notes.join( QLatin1String( "; " ) ) ) ) ) );
 		if ( r.built ) {
 			tVerts += r.verts;
 			tTris += r.tris;

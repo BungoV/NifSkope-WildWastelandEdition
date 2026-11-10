@@ -340,6 +340,7 @@
 { "WW_CELL_FARLOD_RED", 0, "src/features/far-lod/cellfarlod.cpp:1653 wwCellFarLodFrame | hand: rebuilt in place (live section); a stack red that changes the near stack owes a reopen" },
 { "WW_CELL_FARLOD_RINGS", 0, "- | hand: rebuilt in place (live section)" },
 { "WW_CELL_FARLOD_SHORE", 0, "src/features/far-ground/btdterrain.cpp:3652 lodlFarWaterGridEnv | hand: rebuilt in place (live section)" },
+{ "WW_CELL_FARLOD_SKIRT_RED", 0, "- | hand: cellfarvanilla.cpp + btdterrain.cpp at the ring build, rebuilt in place (liveFarKey)" },
 { "WW_CELL_FARLOD_SKYCENSUS", 0, "src/features/far-lod/cellfarlod.cpp:1740 wwCellFarLodSkyCensus | hand: wwCellFarLodSkyCensus: re-read per frame" },
 { "WW_CELL_FARLOD_SKYMASK", 0, "src/features/far-lod/cellfarlod.cpp:1824 wwCellFarLodSkyCensus | hand: wwCellFarLodSkyCensus: re-read per frame" },
 { "WW_CELL_FARLOD_SWAY", 0, "- | hand: rebuilt in place (live section); the draw re-reads it per frame" },

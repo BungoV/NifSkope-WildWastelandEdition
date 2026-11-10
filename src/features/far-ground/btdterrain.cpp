@@ -179,6 +179,10 @@ struct TerrainSurface
 	 * sheet tile's own); the grid and the sheets stay on whole sheet tiles. None when keepX1 < keepX0. */
 	int keepX0 = 0, keepY0 = 0, keepX1 = -1, keepY1 = -1;
 	qint64 cutTris = 0, shapesOut = 0, vertsOut = 0, trisOut = 0;
+	/* lane PERFLOAD1 P9: > 0 hangs a two-sided wall this deep under every drawn edge that borders a cut cell or leaves
+	 * the written rectangle (the ring seams: the next ring or the LAND bends between our samples) */
+	float skirtDepth = 0.0f;
+	qint64 skirtTris = 0, skirtCapped = 0;
 	// lane CELLSTREAM1: mesh tiles of at most this many cells a side (0 = the rate's cap); each written tile's
 	// block and south-west cell, so a streamed cell hides the far tile under it
 	int maxK = 0;
@@ -277,6 +281,7 @@ bool buildTerrainSurface( NifModel * nif, TerrainSurface & s, QString * error )
 	const int tilesY = ( s.cellsY + k - 1 ) / k;
 	QVector<TerrainVert> verts;
 	QVector<Triangle> tris;
+	std::vector<int> footSrc;   // lane PERFLOAD1 P9: the grid vertex each skirt foot hangs under
 
 	const bool haveKeep = s.keepX1 >= s.keepX0 && s.keepY1 >= s.keepY0;
 	for ( int ty = 0; ty < tilesY; ty++ ) {
@@ -374,6 +379,64 @@ bool buildTerrainSurface( NifModel * nif, TerrainSurface & s, QString * error )
 				}
 			}
 
+			/* lane PERFLOAD1 P9: the skirt. The wall's top is the surface's own edge vertex, one foot vertex per
+			 * lattice point under it, so the seam row is the same line; a foot past the 16-bit cap leaves that edge
+			 * open and counts it */
+			footSrc.clear();
+			if ( s.skirtDepth > 0.0f && !tris.isEmpty() ) {
+				const int wx0 = haveKeep ? s.keepX0 : s.cellX0, wx1 = haveKeep ? s.keepX1 : s.cellX0 + s.cellsX - 1;
+				const int wy0 = haveKeep ? s.keepY0 : s.cellY0, wy1 = haveKeep ? s.keepY1 : s.cellY0 + s.cellsY - 1;
+				auto open = [&]( int cx, int cy ) {
+					return cx < wx0 || cx > wx1 || cy < wy0 || cy > wy1 || inCut( cx, cy );
+				};
+				const int grid = wV * hV;
+				QHash<int, int> foot;
+				auto footOf = [&]( int a ) -> int {
+					const auto hit = foot.constFind( a );
+					if ( hit != foot.constEnd() )
+						return hit.value();
+					if ( verts.size() >= 65535 )
+						return -1;
+					TerrainVert v = verts.at( a );
+					v.pos[2] -= s.skirtDepth;
+					verts.append( v );
+					footSrc.push_back( a );
+					foot.insert( a, int( verts.size() - 1 ) );
+					return int( verts.size() - 1 );
+				};
+				auto wall = [&]( int a, int b ) {
+					const int fa = footOf( a ), fb = footOf( b );
+					if ( fa < 0 || fb < 0 ) {
+						s.skirtCapped++;
+						return;
+					}
+					tris.append( Triangle( quint16( a ), quint16( b ), quint16( fb ) ) );
+					tris.append( Triangle( quint16( a ), quint16( fb ), quint16( fa ) ) );
+					tris.append( Triangle( quint16( a ), quint16( fb ), quint16( b ) ) );
+					tris.append( Triangle( quint16( a ), quint16( fa ), quint16( fb ) ) );
+					s.skirtTris += 4;
+				};
+				const int baseCx = s.cellX0 + tileX, baseCy = s.cellY0 + tileY;
+				for ( int j = 0; j < hV - 1; j++ ) {
+					for ( int i = 0; i < wV - 1; i++ ) {
+						const int cx = baseCx + i / n, cy = baseCy + j / n;
+						if ( inCut( cx, cy ) )
+							continue;
+						const int a = j * wV + i;
+						if ( i % n == 0 && open( cx - 1, cy ) )
+							wall( a, a + wV );
+						if ( ( i + 1 ) % n == 0 && open( cx + 1, cy ) )
+							wall( a + 1, a + wV + 1 );
+						if ( j % n == 0 && open( cx, cy - 1 ) )
+							wall( a, a + 1 );
+						if ( ( j + 1 ) % n == 0 && open( cx, cy + 1 ) )
+							wall( a + wV, a + wV + 1 );
+					}
+				}
+				if ( verts.size() > grid )
+					zMin -= s.skirtDepth;
+			}
+
 			if ( tris.isEmpty() )
 				continue;   // lane FARLOD1: every quad was cut (never true without a cut)
 			s.shapesOut++;
@@ -418,7 +481,8 @@ bool buildTerrainSurface( NifModel * nif, TerrainSurface & s, QString * error )
 				nif->set<float>( row, "Bitangent Y", b[1] );
 				nif->set<float>( row, "Bitangent Z", b[2] );
 				if ( haveColour ) {
-					const int gi = ( gy0 + i / wV ) * gridW + ( gx0 + i % wV );
+					const int gv = i < wV * hV ? i : footSrc[size_t( i - wV * hV )];   // lane PERFLOAD1 P9: a foot takes its top's
+					const int gi = ( gy0 + gv / wV ) * gridW + ( gx0 + gv % wV );
 					const quint32 c = s.rgba[size_t( gi )];
 					nif->set<ByteColor4>( row, "Vertex Colors", ByteColor4( FloatVector4(
 						float( c & 0xFF ) / 255.0f, float( ( c >> 8 ) & 0xFF ) / 255.0f,
@@ -3235,6 +3299,8 @@ bool nifAppendLodlFarRings( NifModel * nif, const QModelIndex & parent, const QS
 		const int nextLod = ri + 1 < rings.size() ? rings[ri + 1].lod : r.nextLod;
 		if ( nextLod > 0 ) {
 			const int nNext = lodtRate( info, nextLod );
+			if ( nNext > 0 && n != nNext && ( n < nNext || n % nNext != 0 ) )	// lane PERFLOAD1 P9: only the skirt closes it
+				r.notes << QStringLiteral( "ring seam not lerped (%1 a cell against the next ring's %2)" ).arg( n ).arg( nNext );
 			if ( nNext > 0 && n > nNext && n % nNext == 0 ) {
 				const int rr = n / nNext;
 				// the WRITTEN rectangle's edges (the keep rectangle of an exact ring), whole cells from x0, y0
@@ -3346,6 +3412,8 @@ bool nifAppendLodlFarRings( NifModel * nif, const QModelIndex & parent, const QS
 		s.appendRoot = parent;
 		s.shift = shiftV;
 		s.haveCut = !r.noCut;
+		// lane PERFLOAD1 P9: the ring's skirt, as deep as the game rings' (512 + 128 a level); red: none, the old rule
+		s.skirtDepth = wwEnvInt( "WW_CELL_FARLOD_SKIRT_RED" ) == 1 ? 0.0f : 512.0f + 128.0f * float( qMax( 1, r.lod ) );
 		s.cutX0 = cx0;
 		s.cutY0 = cy0;
 		s.cutX1 = cx1;
@@ -3462,6 +3530,8 @@ bool nifAppendLodlFarRings( NifModel * nif, const QModelIndex & parent, const QS
 		r.verts = s.vertsOut;
 		r.tris = s.trisOut;
 		r.cutTris = s.cutTris;
+		r.skirtTris = s.skirtTris;
+		r.skirtCapped = s.skirtCapped;
 		r.cellBlocks = std::move( s.tileBlocks );
 		runningVerts += s.vertsOut;
 		havePrev = true;

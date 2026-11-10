@@ -206,7 +206,8 @@ enum FvKind { FvTerrain, FvObjects };
 //! One shape's triangles against the ring's region. Terrain: exact clip + seam snap; objects: by centre.
 void fvShape( NifModel & src, const QModelIndex & iS, FvKind kind, const FvRect & outer, const FvRect & cut,
 	const FvRect & ours, const std::function<bool( float, float, float * )> & landZ, WwFarVanRing & ring,
-	int skirt )   // 0 none (water, objects), 1 the cut and ours lines, 2 also the ring's own rim
+	int skirt,    // 0 none (objects; water under the red), 1 the cut and ours lines, 2 also the ring's own rim
+	bool isWater = false )   // lane PERFLOAD1 P9: its walls count as the ring's waterSkirtTris
 {
 	const quint32 nv = src.get<quint32>( iS, "Num Vertices" );
 	const QModelIndex iVD = src.getIndex( iS, "Vertex Data" );
@@ -369,8 +370,10 @@ void fvShape( NifModel & src, const QModelIndex & iS, FvKind kind, const FvRect 
 					ids.push_back( hit.value() );
 					continue;
 				}
-				if ( V.size() >= 65535 )
+				if ( V.size() >= 65535 ) {
+					ring.clipCapped++;   // lane PERFLOAD1 P9: this piece loses its last corners (a hole)
 					break;
+				}
 				V.push_back( o );
 				w.push_back( wo );
 				ids.push_back( quint16( V.size() - 1 ) );
@@ -470,8 +473,10 @@ void fvShape( NifModel & src, const QModelIndex & iS, FvKind kind, const FvRect 
 				float z0 = 0.0f;
 				const bool land = landZ && landZ( 0.5f * ( wa[0] + wb[0] ), 0.5f * ( wa[1] + wb[1] ), &z0 );
 				const int steps = land ? std::max( 1, int( std::ceil( len / sLand - 0.01f ) ) ) : 1;
-				if ( V.size() + size_t( 2 * ( steps + 1 ) ) >= 65535 )
-					break;
+				if ( V.size() + size_t( 2 * ( steps + 1 ) ) >= 65535 ) {
+					ring.skirtCapped++;   // lane PERFLOAD1 P9: counted, every edge past the cap (was a silent break)
+					continue;
+				}
 				std::vector<quint16> top, foot;
 				for ( int s = 0; s <= steps; s++ ) {
 					const float f = float( s ) / float( steps );
@@ -504,7 +509,7 @@ void fvShape( NifModel & src, const QModelIndex & iS, FvKind kind, const FvRect 
 					walls << Triangle( t0, t1, f1 ) << Triangle( t0, f1, f0 )
 						<< Triangle( t0, f1, t1 ) << Triangle( t0, f0, f1 );
 				}
-				ring.skirtTris += 4 * steps;
+				( isWater ? ring.waterSkirtTris : ring.skirtTris ) += 4 * steps;
 			}
 		}
 		if ( !walls.isEmpty() ) {
@@ -834,13 +839,16 @@ bool wwFarVanAppend( NifModel * nif, const QModelIndex & parent, const QString &
 							|| ( kind == 0 && src.isNiBlock( iSh, "BSEffectShaderProperty" ) ) );
 					}
 					const std::function<bool( float, float, float * )> noLand;
+					// lane PERFLOAD1 P9: the water shapes are skirted on the clip lines too (10c); red: unskirted
+					const bool skirtRed = wwEnvInt( "WW_CELL_FARLOD_SKIRT_RED" ) == 1;
 					std::vector<Transform> world;
 					for ( int k = 0; k < shapes.size(); k++ ) {
 						const QModelIndex i = src.getBlockIndex( shapes[k] );
 						world.push_back( fvWorldOf( src, i ) );
 						fvShape( src, i, kind == 0 ? FvTerrain : FvObjects, outer, cut, ours,
 							water[size_t( k )] ? noLand : landZ, r,
-							kind != 0 || water[size_t( k )] ? 0 : ( &r == &rings.back() ? 1 : 2 ) );
+							kind != 0 || ( water[size_t( k )] && skirtRed ) ? 0 : ( &r == &rings.back() ? 1 : 2 ),
+							water[size_t( k )] );
 					}
 					// lane FAR5: Game LOD trees sway -- only shapes whose lighting shader no other shape shares
 					if ( kind != 0 && wwLookOn( WwLook::BtoSway ) ) {
