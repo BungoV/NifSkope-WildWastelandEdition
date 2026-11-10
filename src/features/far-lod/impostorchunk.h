@@ -42,6 +42,7 @@ struct Placed
 	float ladderRadius = 0.0f;
 	qint8 ladderMeshStep = -1;
 	quint32 ladderRef = 0;
+	quint8 ladderSteps = 0;	//!< round 2: every mesh step its rows draw (bit = step; LodiTreeCard::stepMask)
 };
 
 //! THE MASTER. False unless the person turned it on, or `WW_IMPOSTOR_CHUNK` is

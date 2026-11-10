@@ -38,11 +38,19 @@ struct CellMeshInst
 	// can leave its own objects out; the document that holds the bucket; the rows drawn now, cached per change
 	QVector<qint64> rowCell;
 	QVector<quint32> rowRef;
+	//! lane PERFLOAD1 P7 round 2: per row its tree-ladder steps (bit 1 + MNAM slot; 0x80 = the ring's own row, the one
+	//! drawn before the ladder runs); empty = no ladder row in this bucket
+	QVector<quint8> rowStep;
 	const void * doc = nullptr;
 	mutable quint64 visFor = ~quint64( 0 ), visKey = 0;
 	mutable qint64 visHidden = 0;
 	mutable QVector<Cmd> visCmds;
 	mutable QVector<Tile> visTiles;
+	// the shadow casters' rows (the ladder's target step: CellFarHide::view( d, true ))
+	mutable quint64 castFor = ~quint64( 0 ), castKey = 0;
+	mutable qint64 castHidden = 0;
+	mutable QVector<Cmd> castCmds;
+	mutable QVector<Tile> castTiles;
 };
 
 struct CellMesh

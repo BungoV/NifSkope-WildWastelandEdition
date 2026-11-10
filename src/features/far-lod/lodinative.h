@@ -56,6 +56,8 @@ struct LodiTreeCard
 	//! (1 + MNAM slot; -1 = no mesh row kept: the impostor always, P1's cut)
 	float radius = 0.0f;
 	int meshStep = -1;
+	//! round 2: every ring step the tree has a mesh row for (bit 1 + MNAM slot); 0 = none
+	quint8 stepMask = 0;
 };
 
 //! One `.lodi` view: an inclusive cell rectangle, a cluster-ladder level and
@@ -144,8 +146,9 @@ struct LodiAppendCounts
 	qint64 groundPlacements = 0, groundBytes = 0;
 	//! lane PERFLOAD1 P1: trees handed to the impostors, trees drawn as mesh, impostor layers that disagreed with the .lodo
 	qint64 treeCards = 0, treeMesh = 0, treeLayerMismatch = 0;
-	//! lane PERFLOAD1 P7: handed trees that kept their mesh row for the ladder
-	qint64 treeLadder = 0;
+	//! lane PERFLOAD1 P7: handed trees that kept their mesh row for the ladder; round 2: the rows added for their
+	//! other MNAM slots (one a distinct mesh)
+	qint64 treeLadder = 0, treeLadderRows = 0;
 };
 
 /*! lane FIX1101A lodch (LATE ITEMs 11 + 16 + 20, "LOD channels on by default"): the far LOD draws the bake's AO

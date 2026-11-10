@@ -6,7 +6,10 @@ far walks every available step in order, each switch at its own threshold; a tre
 once, not every frame (20 % hysteresis); the way back needs threshold x 1.2; missing MNAM slots fall through to the next
 step present; the cross-fade's two weights sum to 1 and a turn back mid-fade runs the same fade backwards.
 Red: --red drops the hysteresis; the hover gate must then FAIL.
-Run: python -I tests/features/far-lod/treeladder/ladder_gate.py [--red]
+Round 2: the rows' dither (TreeLadder::rowFade + fo4_default.frag's rule) and the card's tile every pixel once through
+each fade; a fade ending before the row commit pops nothing; four MNAM slots walk in order; one caster per tree.
+Red: --red2 gives the coarser row the finer side's pixels; the coverage gate must then FAIL.
+Run: python -I tests/features/far-lod/treeladder/ladder_gate.py [--red | --red2]
 """
 import math
 import os
@@ -173,6 +176,128 @@ s2 = State()
 advance(s2, IMPOSTOR, 0.016)
 gate(not fading(s2), 'first sight: no fade')
 
+# --- round 2 (P7 r2): the mesh rows dither too, every MNAM step is a row, the casters take the target step ---
+FRAG = open(os.path.join(HERE, '..', '..', '..', '..', 'res', 'shaders', 'fo4_default.frag'), encoding='utf-8').read()
+OCT = open(os.path.join(HERE, '..', '..', '..', '..', 'res', 'shaders', 'features', 'far-lod', 'impostor_oct.frag'),
+           encoding='utf-8').read()
+RED2 = '--red2' in sys.argv	# the coarser row keeps the finer side's pixels: the coverage gate must FAIL
+gate('n >= farLadder.x - 1.0 : n < 2.0 + farLadder.x' in FRAG and '< cardFadeOut' in OCT
+     and '5.588238 * farFadeFrame' in FRAG and '5.588238 * cardFadeFrame' in OCT,
+     'fo4_default.frag dithers the rows with the cards\' noise and rule (impostor_oct.frag)')
+
+
+def drawmask(s):
+    m = 0
+    if 0 <= s.step < STEPS:
+        m |= 1 << s.step
+    if fading(s):
+        m |= 1 << s.frm
+    return m
+
+
+def rowfade(s, draw, mask):
+    if not mask & draw:
+        return 1.0
+    if not fading(s):
+        return 0.0
+    has_to, has_from = bool(mask >> s.step & 1), bool(mask >> s.frm & 1)
+    if has_to == has_from:
+        return 0.0
+    w = s.t if has_to else 1.0 - s.t
+    finer = s.step < s.frm if has_to else s.frm < s.step
+    if RED2:
+        finer = True
+    return 1.0 + w if finer else -(1.0 + w)
+
+
+def ign(x, y, frame):
+    fx, fy = x + 0.5 + 5.588238 * frame, y + 0.5 + 5.588238 * frame
+    v = (fx * 0.06711056 + fy * 0.00583715) % 1.0
+    return (52.9829189 * v) % 1.0
+
+
+def row_keeps(f, n):	# the shader's rule
+    if f == 0.0:
+        return True
+    return not (n >= f - 1.0 if f > 0.0 else n < 2.0 + f)
+
+
+def card_keeps(w, n):	# impostor_oct.frag: discard when n < cardFadeOut = 1 - w
+    return not (1.0 - w > 0.0 and n < 1.0 - w)
+
+
+def coverage(s, masks, card, frame):
+	# every pixel of a 48 x 48 tile drawn by exactly one side; returns (worst count error, kept fraction per side)
+    draw = drawmask(s)
+    bad, kept = 0, [0] * (len(masks) + 1)
+    for y in range(48):
+        for x in range(48):
+            n = ign(x, y, frame)
+            c = 0
+            for k, m in enumerate(masks):
+                if m & draw and row_keeps(rowfade(s, draw, m), n):
+                    c += 1
+                    kept[k] += 1
+            if card and weight(s, IMPOSTOR) > 0.0 and card_keeps(weight(s, IMPOSTOR), n):
+                c += 1
+                kept[-1] += 1
+            bad += c != 1
+    return bad, [k / 2304.0 for k in kept]
+
+
+R = [1 << (1 + r) for r in range(4)]	# one row a distinct MNAM mesh: rep0..rep3
+worst = 0
+for a, b, card in ((1, 3, False), (3, 1, False), (2, IMPOSTOR, True), (IMPOSTOR, 4, True), (1, 2, False)):
+    s = State()
+    advance(s, a, 0.0)
+    advance(s, b, 0.0)
+    for i in range(1, 22):
+        advance(s, b, 0.016)
+        bad, kept = coverage(s, R, card, i)
+        worst = max(worst, bad)
+gate(worst == 0, 'mesh row vs mesh row and mesh row vs card: every pixel drawn once in every frame of each fade '
+     '(worst %d of 2304)' % worst)
+s = State()
+advance(s, 2, 0.0)
+advance(s, 4, 0.0)
+advance(s, 4, FADE * 0.25)
+bad, kept = coverage(s, R, False, 3)
+gate(abs(kept[3] - 0.25) < 0.04 and abs(kept[1] - 0.75) < 0.04,
+     'the dither keeps the fade weights: incoming %.3f (0.25), outgoing %.3f (0.75)' % (kept[3], kept[1]))
+
+# a fade that ends before the row filter's commit: the old row keeps no pixel (1), the new one all (0): no pop
+s = State()
+advance(s, 1, 0.0)
+advance(s, 3, 0.0)
+advance(s, 3, FADE * 2.0)
+gate(not fading(s) and rowfade(s, drawmask(s), R[0]) == 1.0 and rowfade(s, drawmask(s), R[2]) == 0.0,
+     'fade over before the commit: the old row dithers to nothing, the new one whole')
+# one mesh for two slots (rep0 == rep1): its row draws whole through that switch
+s = State()
+advance(s, 1, 0.0)
+advance(s, 2, 0.0)
+advance(s, 2, 0.1)
+gate(rowfade(s, drawmask(s), R[0] | R[1]) == 0.0, 'one mesh serving both steps: no dither between them')
+
+# every step a tree has: rep0..rep3 rows + the impostor, walked in order (the far rings hold no full mesh)
+av = (1 << IMPOSTOR) | R[0] | R[1] | R[2] | R[3]
+cur, seen = -1, []
+for i in range(4000):
+    n = select(frac(600.0, 1000.0 * 1.002 ** i, p75), av, cur)
+    if n != cur:
+        seen.append(n)
+    cur = n
+gate(seen == [1, 2, 3, 4, 5], 'a tree with four MNAM slots walks rep0, rep1, rep2, rep3, impostor: %s' % seen)
+
+# the casters: one per tree at every step (its target step's row, else the card)
+ok = True
+for st in range(1, 6):
+    cast = (1 << st) & (av & 0x1E)
+    rows_cast = sum(1 for m in R if m & cast)
+    card_cast = 0 if cast else 1
+    ok &= rows_cast + card_cast == 1
+gate(ok, 'shadow casters: exactly one per tree on every step (the step\'s row, the card on the impostor)')
+
 print('%s: %d of %d checks pass%s' % ('LADDER GATE PASS' if not fails else 'LADDER GATE FAIL', checks - len(fails), checks,
-                                      ' (RED)' if RED else ''))
+                                      ' (RED)' if RED else (' (RED2)' if RED2 else '')))
 sys.exit(1 if fails else 0)

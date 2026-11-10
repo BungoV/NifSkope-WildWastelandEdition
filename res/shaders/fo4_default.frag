@@ -421,9 +421,21 @@ vec2 wwDecalPomUv( vec2 uv0, vec3 P, vec3 N, vec3 E )
 	return uv0 + ofs * ( 1.0 - t );
 }
 
+#ifdef WW_CELLLIGHTS	// lane PERFLOAD1 P7 round 2: the far row's tree-ladder dither (fo4_default.vert), the cards' noise
+flat in vec2 farLadder;
+uniform float farFadeFrame;
+#endif
+
 void main()
 {
 #ifdef WW_CELLLIGHTS
+	// finer side keeps noise < w (x = 1 + w), coarser keeps noise >= 1 - w (x = -(1 + w)): impostor_oct.frag's noise
+	if ( farLadder.x != 0.0 ) {
+		vec2 fp = gl_FragCoord.xy + 5.588238 * farFadeFrame;
+		float n = fract( 52.9829189 * fract( dot( fp, vec2( 0.06711056, 0.00583715 ) ) ) );
+		if ( farLadder.x > 0.0 ? n >= farLadder.x - 1.0 : n < 2.0 + farLadder.x )
+			discard;
+	}
 	cellEmitOut = vec4( 0.0 );
 	float wwGrassK = wwGrassFadeK( ViewDir );	// lane GRASSMB1: exactly 1.0 on every non-grass shape
 	if ( wwGrassK <= 0.0 )

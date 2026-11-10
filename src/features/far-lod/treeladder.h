@@ -116,6 +116,35 @@ inline float weight( const State & s, int which )
 		return 1.0f - s.t;
 	return 0.0f;
 }
+
+//! round 2: the steps a tree draws now (its step, and the old one mid-fade), one bit a step
+inline uint8_t drawMask( const State & s )
+{
+	uint8_t m = 0;
+	if ( s.step >= 0 && s.step < Steps )
+		m |= uint8_t( 1u << s.step );
+	if ( fading( s ) && s.from < Steps )
+		m |= uint8_t( 1u << s.from );
+	return m;
+}
+
+/*! round 2: a mesh row's dither for fo4_default.frag (0 = drawn whole). The row serves the steps in `mask` (one mesh
+ *  can stand for several MNAM slots); `draw` is what the tree draws now. Mid-fade the finer side keeps noise < w
+ *  (1 + w) and the coarser keeps noise >= 1 - w (-(1 + w), the card's rule), so the two sides cover every pixel once.
+ *  A row whose steps the tree no longer draws keeps none (1) until the row filter drops it: nothing pops. */
+inline float rowFade( const State & s, uint8_t draw, uint8_t mask )
+{
+	if ( !( mask & draw ) )
+		return 1.0f;
+	if ( !fading( s ) )
+		return 0.0f;
+	const bool hasTo = ( mask >> s.step ) & 1u, hasFrom = ( mask >> s.from ) & 1u;
+	if ( hasTo == hasFrom )
+		return 0.0f;	// one mesh for both steps: no fade
+	const float w = hasTo ? s.t : 1.0f - s.t;
+	const bool finer = hasTo ? s.step < s.from : s.from < s.step;
+	return finer ? 1.0f + w : -( 1.0f + w );
+}
 }	// namespace TreeLadder
 
 #endif

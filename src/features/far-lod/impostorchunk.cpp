@@ -529,6 +529,8 @@ int ImpostorChunk::armCellFar( NifModel * nif, const QStringList & chunkPaths, c
 	return kept;
 }
 
+quint64 wwGlPaintCount();	// glview.cpp
+
 int ImpostorChunk::drawCellFar( Scene * scene, const ImpostorDraw::Options & opt )
 {
 	CellFarState & F = farSt();
@@ -539,31 +541,37 @@ int ImpostorChunk::drawCellFar( Scene * scene, const ImpostorDraw::Options & opt
 	 * takes its step from its size on screen (bound radius x scale / distance x P11 / 2 of the live projection); a
 	 * tree on its mesh step leaves its card out, a tree on the impostor hides its mesh row (CellFarHide), and every
 	 * switch cross-fades (the card dithered per frame). Red WW_CELL_FARLOD_RED=edgecut keeps no mesh row: P1's cut. */
-	static QElapsedTimer ladderClock, sinceCommit;
+	static QElapsedTimer ladderClock, sinceCommit, sinceCast;
 	const float dt = ladderClock.isValid() ? std::fmin( 0.25f, float( ladderClock.restart() ) / 1000.0f ) : 0.0f;
 	if ( !ladderClock.isValid() )
 		ladderClock.start();
-	static int fadeFrame = 0;
-	fadeFrame = ( fadeFrame + 1 ) & 1023;
+	// the paint's number: the mesh rows' dither (CellFarInst) shifts its noise by the same frame
+	const int fadeFrame = int( wwGlPaintCount() & 1023u );
 	if ( F.ladderFor != farGen() || F.ladder.size() != s.placed.size() ) {
 		F.ladderFor = farGen();
 		F.ladder.fill( TreeLadder::State(), s.placed.size() );
 		F.ladderHid.fill( 0, s.placed.size() );
 		CellFarHide::ladderClear();
 		sinceCommit.invalidate();
+		sinceCast.invalidate();
 	}
+	CellFarHide::ladderFadesBegin( fadeFrame );
 	const bool ladderPersp = scene->renderer && scene->renderer->globalUniforms->projectionMatrix[3][3] != 1.0f;
 	const float p11 = ladderPersp ? scene->renderer->globalUniforms->projectionMatrix[1][1] : 0.0f;	// pm[column][row]
 	static const TreeLadder::Thresholds ladderThr;
 	int atStep[TreeLadder::Steps] = {};
 	int ladderTrees = 0, ladderRows = 0, ladderFades = 0, ladderCards = 0, ladderCardsFading = 0;
+	int ladderHeld = 0, ladderGoing = 0, ladderMeshCast = 0;	// round 2: fades held for a commit, rows dithering out
 	if ( p11 > 0.0f ) {
 		for ( int i = 0; i < s.placed.size(); i++ ) {
 			const Placed & p = s.placed.at( i );
 			if ( p.ladderRadius <= 0.0f )
 				continue;
-			const bool row = p.ladderMeshStep >= 0 && p.ladderMeshStep < TreeLadder::Impostor && p.ladderRef;
-			const uint8_t avail = uint8_t( ( 1u << TreeLadder::Impostor ) | ( row ? 1u << p.ladderMeshStep : 0u ) );
+			/* round 2: every step the tree has rows for (one a distinct MNAM mesh), then the impostor; both sides of a
+			 * switch dither (the rows by attribute 9, TreeLadder::rowFade), the casters take the target step */
+			const uint8_t meshSteps = p.ladderRef ? uint8_t( p.ladderSteps & 0x1Eu ) : uint8_t( 0 );
+			const bool row = meshSteps != 0;
+			const uint8_t avail = uint8_t( ( 1u << TreeLadder::Impostor ) | meshSteps );
 			const float sc = std::fabs( p.scale );
 			const Vector3 v = scene->view * Vector3( p.world[0] - F.shift[0], p.world[1] - F.shift[1],
 				p.world[2] - F.shift[2] + p.c.center[2] * sc );
@@ -577,11 +585,19 @@ int ImpostorChunk::drawCellFar( Scene * scene, const ImpostorDraw::Options & opt
 				ladderFades++;
 			if ( row ) {
 				ladderRows++;
-				const char hid = TreeLadder::weight( st, p.ladderMeshStep ) <= 0.0f ? 1 : 0;
-				if ( hid != F.ladderHid[i] ) {
-					F.ladderHid[i] = hid;
-					CellFarHide::setLadderHidden( p.ladderRef, hid != 0 );
+				const uint8_t draw = uint8_t( TreeLadder::drawMask( st ) & meshSteps );
+				const uint8_t cast = uint8_t( ( 1u << st.step ) & meshSteps );
+				if ( cast )
+					ladderMeshCast++;
+				const int how = CellFarHide::setLadder( p.ladderRef, draw, cast );
+				if ( how == 1 && TreeLadder::fading( st ) ) {
+					st.t = 0.0f;	// a row not live yet: the fade waits for the commit, so no side opens a hole
+					ladderHeld++;
 				}
+				if ( how == 2 )
+					ladderGoing++;
+				if ( how == 2 || TreeLadder::fading( st ) )
+					CellFarHide::ladderFade( p.ladderRef, st, draw );
 			}
 		}
 	}
@@ -589,6 +605,11 @@ int ImpostorChunk::drawCellFar( Scene * scene, const ImpostorDraw::Options & opt
 	if ( CellFarHide::ladderDirty() && ( !sinceCommit.isValid() || sinceCommit.elapsed() >= 100 ) ) {
 		CellFarHide::ladderCommit();
 		sinceCommit.start();
+	}
+	// the casters (cascade rows + card pyramids) take the target step at most once a second: each commit rebuilds them
+	if ( CellFarHide::castDirty() && ( !sinceCast.isValid() || sinceCast.elapsed() >= 1000 ) ) {
+		CellFarHide::castCommit();
+		sinceCast.start();
 	}
 	if ( !s.sheetsRegistered ) {
 		s.sheetsRegistered = true;
@@ -740,7 +761,12 @@ int ImpostorChunk::drawCellFar( Scene * scene, const ImpostorDraw::Options & opt
 				.arg( ladderThr.thr[3] ).arg( ladderThr.thr[4] ) )
 			.arg( TreeLadder::kHysteresis ).arg( TreeLadder::kFadeSeconds ).arg( p11, 0, 'f', 3 )
 			.arg( p11 > 0.0f ? 2.0 * std::atan( 1.0 / p11 ) * 57.29577951 : 0.0, 0, 'f', 1 )
-			.arg( wwEnv( "WW_CELL_FARLOD_RED" ) == "edgecut" ? QStringLiteral( " (RED edgecut)" ) : QString() );
+			.arg( wwEnv( "WW_CELL_FARLOD_RED" ) == "edgecut" ? QStringLiteral( " (RED edgecut)" ) : QString() )
+			+ QStringLiteral( "; round 2: rows dithered %1 (since the last census), fades held for a commit %2, rows "
+				"dithering out %3, mesh casters %4 of %5 (card casters the rest, commits <= 1/s)" )
+				.arg( CellFarHide::ladderDitherRows() ).arg( ladderHeld ).arg( ladderGoing ).arg( ladderMeshCast )
+				.arg( ladderRows );
+		CellFarHide::ladderDitherRows() = 0;
 		if ( line != saidLadder ) {
 			saidLadder = line;
 			sinceLadderSaid.start();
@@ -849,6 +875,7 @@ int ImpostorChunk::addCellFarTrees( const QVector<LodiTreeCard> & trees )
 		p.ladderRadius = t.radius > 0.0f ? t.radius : std::sqrt( set.halfW * set.halfW + set.halfH * set.halfH );
 		p.ladderMeshStep = qint8( t.meshStep );
 		p.ladderRef = t.meshStep >= 0 ? t.ref : 0u;
+		p.ladderSteps = t.meshStep >= 0 ? quint8( t.stepMask | ( 1u << t.meshStep ) ) : quint8( 0 );
 		F.cards.placed << p;
 		added++;
 	}
@@ -894,7 +921,8 @@ int ImpostorChunk::cellFarCount()
 
 quint64 ImpostorChunk::cellFarGen()
 {
-	return farGen() + ( cardHide().gen << 32 );
+	// lane PERFLOAD1 P7 round 2: a ladder cast commit moves the card casters too
+	return farGen() + ( ( cardHide().gen + CellFarHide::ladderCastGen() ) << 32 );
 }
 
 void ImpostorChunk::cellFarHideSet( const QSet<qint64> & cells )
@@ -927,6 +955,10 @@ int ImpostorChunk::cellFarCasters( QVector<FarCasterPiece> & out, float apexScal
 		if ( p.setIndex < 0 || p.setIndex >= s.sets.size() || !s.sets.at( p.setIndex ).ok )
 			continue;
 		if ( cardHidden( p ) )
+			continue;
+		// lane PERFLOAD1 P7 round 2: a ladder tree on a mesh step casts with its mesh row (CellFarHide view( d, true ))
+		if ( p.ladderRef && p.ladderSteps && ( CellFarHide::ladderCast( p.ladderRef ) & p.ladderSteps )
+			&& CellFarHide::ladderCast( p.ladderRef ) != 0xFF )
 			continue;
 		const float sc = std::fabs( p.scale );
 		const float cx = p.world[0] - F.shift[0] + p.c.center[0] * sc, cy = p.world[1] - F.shift[1] + p.c.center[1] * sc;

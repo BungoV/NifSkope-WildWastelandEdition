@@ -1236,7 +1236,7 @@ QString cellFarLodAppend( NifModel * nif, const QModelIndex & iRoot, const EsmWo
 
 	// ---- objects, ring by ring: the authored slot of each, the ring inside cut out
 	const QString lodi = li.absoluteDir().filePath( li.completeBaseName() + QStringLiteral( ".lodi" ) );
-	qint64 oPlaced = 0, oTris = 0, oSway = 0, oDropped = 0, oRefs = 0, oTreeCards = 0, oTreeMismatch = 0, oTreeLadder = 0;
+	qint64 oPlaced = 0, oTris = 0, oSway = 0, oDropped = 0, oRefs = 0, oTreeCards = 0, oTreeMismatch = 0, oTreeLadder = 0, oTreeLadderRows = 0;
 	// lane LIVESET1: the budget charges the far field's own estimate, never the process working set (a live
 	// rebuild reuses freed pages, so a measured delta built ring 1 there and not at the open)
 	double usedMB = double( tVerts ) * kBytesPerVert / ( 1024.0 * 1024.0 );
@@ -1379,6 +1379,7 @@ QString cellFarLodAppend( NifModel * nif, const QModelIndex & iRoot, const EsmWo
 			oTreeCards += oc.treeCards;
 			oTreeMismatch += oc.treeLayerMismatch;
 			oTreeLadder += oc.treeLadder;
+			oTreeLadderRows += oc.treeLadderRows;
 			hx0 = foot[i][0];
 			hy0 = foot[i][1];
 			hx1 = foot[i][2];
@@ -1419,9 +1420,10 @@ QString cellFarLodAppend( NifModel * nif, const QModelIndex & iRoot, const EsmWo
 			.arg( meshWithImp ).arg( formsWithImp ).arg( oTreeMismatch )
 			.arg( treeMeshRed ? QStringLiteral( " (RED treemesh)" ) : QString() ) );
 		say( QStringLiteral( "far lod: tree ladder (docs/FO4CS_IMPROVED_LOD_PLAN.md R3 4-5): %1 of the %2 handed trees keep "
-			"their MNAM mesh row and switch to the impostor by screen size%3" ).arg( oTreeLadder ).arg( oTreeCards )
+			"their MNAM mesh row and switch to the impostor by screen size; %4 more rows for their other MNAM slots (one a "
+			"distinct mesh, every step a row)%3" ).arg( oTreeLadder ).arg( oTreeCards )
 			.arg( red == "edgecut" ? QStringLiteral( " (RED edgecut: every handed tree an impostor from the loaded-cell edge)" )
-				: QString() ) );
+				: QString() ).arg( oTreeLadderRows ) );
 	}
 
 	/* Census: every object ring against the game's own object LOD (.bto) over the same region, naming
