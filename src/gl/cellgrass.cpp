@@ -959,6 +959,20 @@ void wwCellGrassUniforms( Scene * scene, int block )
 		wind[3] = wwCellGrassPhase( ws.tCur, wave );
 		ws.windDrawn = ws.windDrawn || wind2[1] > 0.0f;
 	}
+	/* lane MODULES1 M4: a swaying cable moves as a whole tube (w 2): fo4_default.vert keeps its radial normal frame.
+	 * The grass bend (n + d x lean, lean in units) turned every side's normal to the wind's direction, so the sun lit
+	 * the whole tube flat white. Red WW_CELL_CABLES_RED=bent bends the frame as grass (as before). */
+	WW_SWITCH_STATIC( bool, bentRed, wwEnv( "WW_CELL_CABLES_RED" ).trimmed() == "bent" );
+	if ( nf != s.noFade.constEnd() && nf->contains( block ) ) {
+		if ( !bentRed )
+			wind2[3] = 2.0f;
+		static int saidCable = -1;
+		if ( saidCable != int( bentRed ) ) {
+			saidCable = int( bentRed );
+			qInfo().noquote() << ( bentRed ? QStringLiteral( "cable wind normals: bent as grass (red WW_CELL_CABLES_RED=bent)" )
+				: QStringLiteral( "cable wind normals: radial, the tube moves whole (red WW_CELL_CABLES_RED=bent)" ) );
+		}
+	}
 	const QString said = haveWind
 		? QStringLiteral( "cell grass wind: angle %1 min %2 max %3 freq %4%5" ).arg( double( wind[0] ) ).arg( double( wind2[0] ) )
 			.arg( double( wind2[1] ) ).arg( double( wind2[2] ) ).arg( ws.timePinned ? QStringLiteral( " (clock pinned)" ) : QString() )

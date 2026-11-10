@@ -1,3 +1,12 @@
+## MODULES1 M4 (2026-11-10): swaying cables are lit like the still ones
+
+- **Before:** a `_Wind` cable took the grass vertex law whole, and that law bends the normal frame by the wind's lean in
+  units (`n + d x lean`, lean up to ~37 units). Every side of the tube then faced the wind's direction, so in sun the
+  wire drew flat white (bungo 11-10).
+- **Now:** a swaying cable moves as one tube and keeps its radial normals (res/shaders/fo4_default.vert, marker
+  wwGrassWind2.w = 2 from src/gl/cellgrass.cpp). Grass keeps the game's bend. Telemetry: `cable wind normals: radial`.
+  Red WW_CELL_CABLES_RED=bent.
+
 ## MODULES1 M3 (2026-11-10): the Effect Lighting law; a partly lit smoke keeps its unlit share
 
 - **Before:** a lit effect mixed `mix( 1, E, lighting influence )`: E (the placed lights) is in physical units, the

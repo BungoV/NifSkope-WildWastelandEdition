@@ -131,12 +131,14 @@ void main()
 		w = w * half_range + wwGrassWind2.x;
 		w = w * ( vertexColor.a * vertexColor.a * 0.5 );
 		vec3 d = vec3( cos( wwGrassWind.x ), sin( wwGrassWind.x ), 0.0 );	// sincos cb2[11].x
-		n = n + d * w;
-		n = n * inversesqrt( dot( n, n ) );
-		t = t + d * w;
-		t = t * inversesqrt( dot( t, t ) );
-		b = b + d * w;
-		b = b * inversesqrt( dot( b, b ) );
+		if ( wwGrassWind2.w < 1.5 ) {	// MODULES1 M4: a swaying cable (w 2) keeps its radial frame
+			n = n + d * w;
+			n = n * inversesqrt( dot( n, n ) );
+			t = t + d * w;
+			t = t * inversesqrt( dot( t, t ) );
+			b = b + d * w;
+			b = b * inversesqrt( dot( b, b ) );
+		}
 		v.xyz = d * w + v.xyz;
 		vc.rgb = exp2( log2( vertexColor.rgb ) * 2.2 );		// log, mul 2.2, exp: o6.rgb = (v4.rgb * v5.w)^2.2
 	}
