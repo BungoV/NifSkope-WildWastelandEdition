@@ -1,5 +1,7 @@
 // lane VOLPART1: the volumetric law shared by particles.frag (a sprite) and fo4_effectshader.frag (a lit effect
 // card, as the street steam): included once, after cell_lights.glsl, lookdev_fog.glsl, lightingInfluence and fxLitMode.
+// lane MODULES1 M3 (G7): the lit mix of vpLit (guarded: the effect and particle shaders include it too)
+#include "cell_fxlaw.glsl"
 /* lane VOLPART1: VOLUMETRIC PARTICLES (src/features/particles/glparticles.cpp; the row "Volumetric Particles" ships off). A puff of
  * steam or fog is a little piece of the air: lit by the light that is really there, from the very list the air
  * (Volumetric Air, cell_volair.frag) reads -- the directional light x its cascade shadow, every placed light (colour x
@@ -308,9 +310,9 @@ vec3 vpLit( vec3 posView, vec3 Nview, float a )
 		cellWorldDir( Nview ), m, thin, thick );
 #if defined( WW_CELL_AIRZONE ) && !defined( WW_FX_DECALLIT )
 	if ( azCount > 0 )	// lane AIRZONE1: a volume's particles block at the puff, one read (the alpha takes its density after)
-		return mix( vec3( 1.0 ), azPartLit( cellWorldPos( posView ), m * thin + ( 1.0 - m ) * thick ), lightingInfluence );
+		return fxLawMix( azPartLit( cellWorldPos( posView ), m * thin + ( 1.0 - m ) * thick ), lightingInfluence, false );
 #endif
-	return mix( vec3( 1.0 ), m * thin + ( 1.0 - m ) * thick, lightingInfluence );
+	return fxLawMix( m * thin + ( 1.0 - m ) * thick, lightingInfluence, false );	// MODULES1 M3: was mix( 1, ., influence )
 }
 
 /* gates only: the lit share (no influence) of ONE white light from direction `to` (world, toward the light) on a puff

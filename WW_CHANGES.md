@@ -1,3 +1,15 @@
+## MODULES1 M3 (2026-11-10): the Effect Lighting law; a partly lit smoke keeps its unlit share
+
+- **Before:** a lit effect mixed `mix( 1, E, lighting influence )`: E (the placed lights) is in physical units, the
+  unlit share "1" was not, so a smoke of influence 0.25 kept only a quarter of its light and drew black (the fire
+  barrels' SuperSpraySmoke003, bungo 11-10). Unlit particle systems never took the unlit effects' unit at all. Every
+  lit effect took its lights, the bright fire cards too.
+- **Now:** the Fusion Shaders Effect Lighting law (res/shaders/features/lights/cell_fxlaw.glsl,
+  src/features/lights/cellfxlit.cpp wwCellFxLawUniforms): a lit effect's max( base colour ) x base colour scale at or
+  under 1.0 is lit, at or over 2.0 emissive (never lit, never darkened), graded between (influence x ( 1 - smoothstep )).
+  The unlit share is on the unlit effects' unit (cards, particles, volumetric puffs). Telemetry: `fx law: lit N graded
+  N emissive N (last <shape> overbright X band Y)`, once per shape. Red WW_CELL_FXLAW_RED=1 (today), =band, =units.
+
 ## MODULES1 M2 (2026-11-10): multiply decals darken the albedo only, not the lit frame
 
 - **Before:** a wall grime decal (GrimeSubtle01.BGSM: blend DestColor x Zero) was drawn lit, fogged and exposed, and

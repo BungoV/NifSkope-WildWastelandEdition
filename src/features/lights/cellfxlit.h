@@ -53,6 +53,14 @@ void wwCellFxLitPick( const void * nif );
 const WwFxLitModel * wwCellFxLitFor( const void * nif, int block, int * serial = nullptr );
 //! Called with the effect program bound for `block`: the shape's lights (fxLit, fxLitScale, fxLitMode, fxLitId).
 void wwCellFxLitUniforms( Scene * scene, int block );
+/*! Lane MODULES1 M3 (G7, the Fusion Shaders Effect Lighting law): the band weight of a lit effect's material by its
+ *  brightness, max( base colour ) x base colour scale: 1 at or under 1.0 (lit), 0 at or over 2.0 (emissive), a
+ *  smoothstep fall between (graded). A non-finite brightness is 1 (as before the law). */
+float wwCellFxLawBand( float overbright );
+/*! Called with an effect or particle program bound: uploads fxLaw (cell_fxlaw.glsl), the emissive share 1 - band and
+ *  the unlit share's unit; (0, 0) outside the cell view. Counts lit / graded / emissive lit effects once per shape
+ *  ("fx law:" line). Red WW_CELL_FXLAW_RED=1 today, =band no bands, =units the unlit share at 1. */
+void wwCellFxLawUniforms( Scene * scene, int block, float overbright, const QString & name );
 //! True when this shape draws in the running probe pass (a lit effect, probe 70..74).
 bool wwCellFxLitProbeShape( Scene * scene, int block );
 /*! True when this exterior lit effect draws with fxRoomLit: its base scales by the open-air light reaching it, so a

@@ -16,6 +16,7 @@ BSD License - see nifskope.h
 
 #include <QFile>
 #include <QHash>
+#include <QSet>
 #include <QTextStream>
 #include <QVector>
 
@@ -233,6 +234,47 @@ void wwCellFxLitUniforms( Scene * scene, int block )
 	prog->uni4f( "fxLitScale", FloatVector4( m->scale[0], m->scale[1], m->scale[2], m->scale[3] ) );
 	const int id = serial + 1;
 	prog->uni3f( "fxLitId", float( id & 255 ) / 255.0f, float( ( id >> 8 ) & 255 ) / 255.0f, float( ( id >> 16 ) & 255 ) / 255.0f );
+}
+
+float wwCellFxLawBand( float overbright )
+{
+	if ( !std::isfinite( overbright ) || overbright <= 1.0f )
+		return 1.0f;
+	if ( overbright >= 2.0f )
+		return 0.0f;
+	const float t = overbright - 1.0f;
+	return 1.0f - t * t * ( 3.0f - 2.0f * t );
+}
+
+void wwCellFxLawUniforms( Scene * scene, int block, float overbright, const QString & name )
+{
+	if ( !scene || !scene->renderer )
+		return;
+	NifSkopeOpenGLContext::Program * prog = scene->renderer->getCurrentProgram();
+	if ( !prog || prog->uniLocation( "fxLaw" ) < 0 )
+		return;
+	// red: 1 both off (today), band = no bands, units = the unlit share at 1
+	WW_SWITCH_STATIC( int, red, [] { const QByteArray r = wwEnv( "WW_CELL_FXLAW_RED" ).trimmed(); return r == "1" ? 3 : r == "band" ? 1 : r == "units" ? 2 : 0; }() );
+	if ( !wwCellLightsWanted( scene ) ) {
+		prog->uni2f( "fxLaw", 0.0f, 0.0f );
+		return;
+	}
+	const float band = wwCellFxLawBand( overbright );
+	prog->uni2f( "fxLaw", ( red & 1 ) ? 0.0f : 1.0f - band, ( red & 2 ) ? 0.0f : 1.0f );
+	if ( !wwCellFxLitFor( scene->nifModel, block ) )
+		return;
+	static QHash<const void *, QSet<int>> seen;
+	QSet<int> & s = seen[scene->nifModel];
+	if ( s.contains( block ) )
+		return;
+	s.insert( block );
+	static int n[3] = { 0, 0, 0 };
+	const int k = band >= 1.0f ? 0 : band <= 0.0f ? 2 : 1;
+	++n[k];
+	const int total = n[0] + n[1] + n[2];
+	if ( ( total & ( total - 1 ) ) == 0 || ( k > 0 && n[k] == 1 ) )
+		fprintf( stderr, "fx law: lit %d graded %d emissive %d (last %s overbright %.3f band %.3f) red %d\n",
+			n[0], n[1], n[2], qPrintable( name ), double( overbright ), double( band ), red );
 }
 
 bool wwCellFxLitProbeShape( Scene * scene, int block )

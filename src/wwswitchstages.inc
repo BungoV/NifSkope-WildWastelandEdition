@@ -389,6 +389,7 @@
 { "WW_CELL_FXRES_RED", 0, "src/features/particles/cellfxres.cpp:44 cfg | re-read per frame or per call (a)" },
 { "WW_CELL_FXRES_SCALE", 0, "src/features/particles/cellfxres.cpp:47 cfg | re-read per frame or per call (a)" },
 { "WW_CELL_FXROOM_RED", 0, "src/features/lights/cellfxlit.cpp:230 wwCellFxRoomLit | re-read per frame or per call (a)" },
+{ "WW_CELL_FXLAW_RED", 0, "src/features/lights/cellfxlit.cpp:257 wwCellFxLawUniforms | re-read per frame or per call (a)" },
 { "WW_CELL_FX_RED", 0, "src/gl/celllights.cpp:2361 wwCellFxRed | re-read per frame or per call (a)" },
 { "WW_CELL_GI", 0, "src/gl/celllights.cpp:122 st | init-once state, re-read when a live set moves its prefix (b)" },
 { "WW_CELL_GISHADE_RED", 0, "src/gl/celllights.cpp:201 st | init-once state, re-read when a live set moves its prefix (b)" },

@@ -99,8 +99,8 @@ uniform bool fxDecalProbe;
 // stands in (fxRoomLitMul); cellFxBase = the game's lit-effect base (the weather's Effect Lighting x the sun scale)
 uniform bool fxRoomLit;
 uniform vec3 cellFxBase;
-uniform float cellFxEmitK;	// lane PHYSUNITS1: an unlit additive effect's cd/m2 per unit (0 = unset = 1)
-uniform float cellFxUnlitK;	// lane PHYSUNITS1: an unlit blended effect on the light's scale (0 = 1)
+// lane MODULES1 M3 (G7): the Effect Lighting law; cellFxEmitK / cellFxUnlitK live there
+#include "cell_fxlaw.glsl"
 vec3 fxRoomShare = vec3( 1.0 );	// probe 75
 // lane FXLIT1: this shape's model's placed lights (src/features/lights/cellfxlit.h)
 uniform int fxLitMode;			// 0 an unlit effect; 1 lit; red controls: 2 every light, 4 no 2.2 on the falloff, 8 self-lit
@@ -152,7 +152,7 @@ vec3 cellFxLit( vec3 P )
 			if ( fxLit[k] > -0.5 )
 				E += cellFxLight( int( fxLit[k] + 0.5 ), P ) * fxLitScale[k];
 	}
-	return mix( vec3( 1.0 ), E, lightingInfluence );
+	return fxLawMix( E, lightingInfluence, fxAdditive );	// MODULES1 M3: was mix( 1, E, lightingInfluence )
 }
 
 float cellFxFade()
@@ -247,7 +247,7 @@ vec3 fxRoomLitMul( vec3 Pv, vec3 normal )
 			if ( fxLit[j] > -0.5 )
 				E += cellFxLight( int( fxLit[j] + 0.5 ), Pw ) * fxLitScale[j];
 	}
-	return mix( vec3( 1.0 ), E, lightingInfluence );
+	return fxLawMix( E, lightingInfluence, fxAdditive );	// MODULES1 M3: was mix( 1, E, lightingInfluence )
 }
 #endif
 

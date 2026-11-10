@@ -42,6 +42,8 @@ uniform bool fxAdditive;
  * mix( 1, directional + the model's four lights, lighting influence ), in linear light, before the fog.
  * glparticles.cpp sets these from src/features/lights/cellfxlit.h; fxLitMode 0 = unlit, as before. */
 uniform float lightingInfluence;
+// lane MODULES1 M3 (G7): the Effect Lighting law and the unlit unit
+#include "cell_fxlaw.glsl"
 uniform vec4 fxEmit;			// lane LIGHTS3 (XEMI-PARTICLES): the placement's emittance colour ^2.2 on an unlit system; w 0 = none
 uniform int fxLitMode;			// 0 unlit; 1 lit; red controls: 2 every light, 4 no 2.2 on the falloff, 8 self-lit
 uniform vec4 fxLit;				// indices into cellLights, -1 = none
@@ -91,7 +93,7 @@ vec3 cellFxLit( vec3 P )
 			if ( fxLit[k] > -0.5 )
 				E += cellFxLight( int( fxLit[k] + 0.5 ), P ) * fxLitScale[k];
 	}
-	return mix( vec3( 1.0 ), E, lightingInfluence );
+	return fxLawMix( E, lightingInfluence, fxAdditive );	// MODULES1 M3: was mix( 1, E, lightingInfluence )
 }
 #endif
 
@@ -300,6 +302,8 @@ void main()
 		if ( fxEmit.a > 0.0 && fxLitMode == 0 )	// lane LIGHTS3 (XEMI-PARTICLES): the unlit effect's emittance, as fo4_effectshader
 			color.rgb = mix( color.rgb, color.rgb * fxEmit.rgb, lightingInfluence );
 		vec3 lin = pow( max( color.rgb, vec3( 0.0 ) ), vec3( 2.2 ) );
+		if ( fxLitMode == 0 )	// MODULES1 M3: an unlit system on the unlit effects' unit, as an unlit card (fo4_effectshader)
+			lin *= fxLawUnit( fxAdditive );
 		if ( volPart != 0 ) {
 			// lane VOLPART1: lit at its own point, seen through the integrated air, soft against the scene
 			if ( volPartDump > 0 ) {

@@ -413,6 +413,9 @@ void Particles::drawShapes( NodeList * secondPass )
 			const int litBlock = scene->nifModel->getBlockNumber( iBlock );
 			const auto * espLit = dynamic_cast<const BSEffectShaderProperty *>( shaderProp );
 			wwCellFxLitUniforms( scene, litBlock );
+			// lane MODULES1 M3 (G7): the Effect Lighting law's band, and an unlit system on the unlit effects' unit
+			wwCellFxLawUniforms( scene, litBlock, espLit ? std::max( { espLit->emissiveColor.red(), espLit->emissiveColor.green(),
+				espLit->emissiveColor.blue() } ) * espLit->emissiveMult : 1.0f, getName() );
 			prog->uni1f( "lightingInfluence", espLit ? espLit->lightingInfluence : 0.0f );
 			{	// lane LIGHTS3 (XEMI-PARTICLES): the placement's emittance colour ^2.2 (w 0 = none), as an unlit effect card
 				float xe[3];

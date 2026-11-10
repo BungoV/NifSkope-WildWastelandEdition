@@ -2794,6 +2794,9 @@ bool Renderer::setupProgramCE1( const NifModel * nif, Program * prog, Shape * me
 				: FloatVector4( 0.0f, 0.0f, 0.0f, 0.0f ) );
 		}
 		prog->uni1f( "glowMult", scene->hasOption(Scene::DoGlow) ? esp->emissiveMult : 0.0f );
+		// lane MODULES1 M3 (G7): the Effect Lighting law's band from max( base colour ) x base colour scale
+		wwCellFxLawUniforms( scene, mesh->id(), std::max( { esp->emissiveColor.red(), esp->emissiveColor.green(),
+			esp->emissiveColor.blue() } ) * esp->emissiveMult, mesh->getName() );
 
 		// Falloff params
 
