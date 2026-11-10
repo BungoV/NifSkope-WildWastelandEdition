@@ -185,6 +185,9 @@ uniform bool  useHeightBlend;      // the ghost-free blend, spec 286
 uniform int   depthSearchSteps;
 uniform bool  useDepthOffset;      // gl_FragDepth, spec 286
 uniform bool  useBakedAo;          // spec 293..295
+#ifdef WW_CELLLIGHTS
+uniform bool  cardLightRed;        // PERFLOAD1 P2 red (WW_CELL_FARLOD_RED=cardlight): the viewport's sun + NAM0 ambient again
+#endif
 uniform int   debugChannel;        // 0 = lit; otherwise one sheet channel raw
 
 /* SWAY, AND WHAT A CARD CAN HONESTLY SHOW OF IT (spec 288..290).
@@ -763,6 +766,23 @@ void main()
 	 * Verbatim `fo4_default.frag`'s curve, with `A.a` = toneMapScale and
 	 * `D.a` = brightnessScale, which is what its vertex stage packs there. */
 	vec3 lc = colour.rgb * ( lit + ambient );
+#ifdef WW_CELLLIGHTS
+	/* lane PERFLOAD1 P2: outdoors with the weather's sun the card takes the near trees' inputs (fo4_default.frag,
+	 * SUNCELL1): cellLit gets the weather's directional ambient (DALC, the hour's keys) x the baked AO alone, and adds
+	 * the hour's sun itself (cellDirColor, Sunlight Scale in). The viewport sun and the flat NAM0 ambient above follow
+	 * the viewport, not the hour: with them the card was lit twice and glowed at 3 AM outside the near square. */
+	if ( cellOn && !cellInterior && cellHasDir && !cardLightRed ) {
+		vec3 cardPosV = ( modelViewMatrix * vec4( cardPosModel, 1.0 ) ).xyz;
+		vec3 Nw = cellWorldDir( nView );
+		vec3 Ax = cellExtDalc ? sqrt( max( cellAmbient( Nw, cellWorldPos( cardPosV ) ), vec3( 0.0 ) ) )
+		                      : sqrt( max( lightSourceAmbient.rgb, vec3( 0.0 ) ) ) * 0.375;
+		Ax *= ao;
+		if ( cellGiSky && ( cellRed & 131072 ) == 0 )
+			Ax *= sqrt( 1.0 - cellGiSkyK( cellWorldPos( cardPosV ), Nw ) );
+		cellExtAmb = Ax * Ax;
+		lc = colour.rgb * Ax;
+	}
+#endif
 	/* lane FARLOD1: the cell path, in fo4_default.frag's order -- the cell's lights on the sqrt-of-linear
 	 * colour, the fog on its square, then the cell's imagespace (linear into the HDR frame) in place of
 	 * the viewer's curve. Roughness 1, no specular and no cube: the card carries no gloss it shades. */
