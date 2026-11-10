@@ -1912,6 +1912,23 @@ bool wwLegacyRouteRed()
 	return v;
 }
 
+/* MODULES1 round 5 B10: on a Greyscale_To_PaletteColor material the vertex R is the palette ROW (the cell view writes
+ * the hair colour's row there), never a colour. A draw that skips the palette (the PBR route, or material tint off)
+ * multiplied the diffuse by (row, 1, 1) and NPC hair drew cyan; such a draw now holds R at 1 (the vertex colour's
+ * override per channel). Telemetry: "palette draw: <shape> route=..." once per shape. Red WW_CELL_PALETTE_ROW_RED=1. */
+static bool wwPaletteRowHeld( const Shape * mesh, bool palette, const char * route )
+{
+	WW_SWITCH_STATIC( bool, red, wwEnv( "WW_CELL_PALETTE_ROW_RED" ).trimmed() == "1" );
+	static QSet<QString> said;
+	if ( mesh && said.size() < 64 && !said.contains( mesh->getName() ) ) {
+		said.insert( mesh->getName() );
+		qInfo().noquote() << QStringLiteral( "palette draw: %1 route=%2%3" ).arg( mesh->getName(), QLatin1String( route ) )
+			.arg( palette ? QString() : red ? QStringLiteral( " (row reaches the colour: red WW_CELL_PALETTE_ROW_RED=1)" )
+			                                : QStringLiteral( " (row held at 1)" ) );
+	}
+	return !palette && !red;
+}
+
 bool Renderer::setupProgramPBRM( const NifModel * nif, Program * prog, Shape * mesh )
 {
 	auto scene = mesh->scene;
@@ -2324,10 +2341,14 @@ bool Renderer::setupProgramPBRM( const NifModel * nif, Program * prog, Shape * m
 	mesh->setUniforms( prog );
 	/* Q14 (lane PBRR3): vertex colour reaches the PBR base colour only when the shader
 	 * property's SLSF2_Vertex_Colors flag is set, the flag the game applies them under. */
-	prog->uni4f( "vertexColorOverride",
-		( mesh->hasVertexColors && mesh->colors.size() >= mesh->verts.size()
+	{
+		FloatVector4 pc = ( mesh->hasVertexColors && mesh->colors.size() >= mesh->verts.size()
 			&& scene->hasOption( Scene::DoVertexColors ) && lsp->hasSF2( ShaderFlags::SLSF2_Vertex_Colors ) )
-			? FloatVector4( 0.0f ) : FloatVector4( 1.0f ) );
+			? FloatVector4( 0.0f ) : FloatVector4( 1.0f );
+		if ( lsp->greyscaleColor && wwPaletteRowHeld( mesh, false, "pbr" ) )	// B10: this route has no palette
+			pc[0] = 1.0f;
+		prog->uni4f( "vertexColorOverride", pc );
+	}
 
 	return true;
 }
@@ -2967,6 +2988,11 @@ bool Renderer::setupProgramCE1( const NifModel * nif, Program * prog, Shape * me
 		// alpha) regardless of the vertex-colour display toggle or shader flags.
 		if ( scene->hasVisMode(Scene::VisVertexColors) )
 			c = ( mesh->hasVertexColors && !mesh->colors.isEmpty() ) ? FloatVector4( 0.0f ) : FloatVector4( 1.0f );
+		else if ( lsp && lsp->greyscaleColor ) {	// MODULES1 round 5 B10: the row only where the palette reads it
+			const bool tint = scene->hasOption( Scene::DoMaterialTint );
+			if ( wwPaletteRowHeld( mesh, tint, tint ? "legacy palette" : "material tint off" ) )
+				c[0] = 1.0f;
+		}
 
 		prog->uni4f( "vertexColorOverride", c );
 	}

@@ -1,3 +1,10 @@
+## MODULES1 round 5 B10 (2026-11-10): NPC hair no longer draws cyan
+- **Before:** the hair colour (item 16) goes into the vertex R as the palette row; a draw that skips the palette (the
+  PBR route, or material tint off) multiplied the diffuse by (row, 1, 1), so the hair drew cyan.
+- **Now:** on a Greyscale_To_PaletteColor material such a draw holds R at 1 (src/gl/renderer.cpp `wwPaletteRowHeld`);
+  the palette draw is unchanged. Telemetry `palette draw: <shape> route=legacy palette|pbr|material tint off`.
+  Red WW_CELL_PALETTE_ROW_RED=1.
+
 ## MODULES1 M3 round 3 (2026-11-10): the steam cards' hard top band (flight 11-10, steam_mist_wide_1110)
 - **Cause.** A lit effect card with Volumetric Particles on takes the puff law (cell_volpart.glsl `vpPuffAlpha`):
   its opacity thickens toward the middle of a ball spanning the card's UV 0..1, read from the CLAMPED UV. The vanilla
