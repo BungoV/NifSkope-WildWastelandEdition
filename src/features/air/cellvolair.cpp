@@ -1297,6 +1297,14 @@ static VaPub & vaPub()
 	return p;
 }
 
+/* MODULES1 10c: red WW_CELL_AIR_THINSRC_RED=1: a column too thin for the volume's T gives its tail no light, as before
+ * (lookdev_fog.glsl wwAirThinJ, volAirFlags 32768) */
+static bool vaThinSrcRed()
+{
+	WW_SWITCH_STATIC( bool, red, wwEnv( "WW_CELL_AIR_THINSRC_RED" ).trimmed() == "1" );
+	return red;
+}
+
 bool wwVolAirMediumNow( float med[4], float layer[4], float ground[2] )
 {
 	const VaPub & p = vaPub();
@@ -1810,6 +1818,13 @@ static void vaPassInner( Scene * scene, bool run )
 		const float odUp = M.sigma0 * rTop / invTopH;
 		medNote += QStringLiteral( " topfall=on(H=%1 rho_top=%2 od_up=%3 T_up=%4)" ).arg( double( 1.0f / invTopH ), 0, 'f', 1 )
 			.arg( double( rTop ), 0, 'f', 4 ).arg( double( odUp ), 0, 'f', 4 ).arg( double( std::exp( -odUp ) ), 0, 'f', 4 );
+		// MODULES1 10c: the heights above the top between which a level column over the near grid is too thin for the
+		// volume's T (an optical depth under 0.02) and its tail takes the grid's light over the law's depth
+		const float odLevel = M.sigma0 * rTop * farD;
+		medNote += vaThinSrcRed() ? QStringLiteral( " thinsrc=red(no source)" )
+			: QStringLiteral( " thinsrc=on(level od at top %1, thin from +%2 to +%3)" ).arg( double( odLevel ), 0, 'g', 4 )
+				.arg( double( std::max( 0.0f, std::log( odLevel / 0.02f ) ) / invTopH ), 0, 'f', 0 )
+				.arg( double( std::min( 16.0f, std::max( 0.0f, std::log( odLevel / 1.0e-7f ) ) ) / invTopH ), 0, 'f', 0 );
 	} else {
 		medNote += topFallRed ? QStringLiteral( " topfall=red(hard top)" ) : QStringLiteral( " topfall=off(indoors)" );
 	}
@@ -3032,7 +3047,8 @@ void wwVolAirUniforms( Scene * scene )
 			| ( s.sunColumn ? 0 : 128 )	// lane FIX1101A: 128 = the surfaces' sun dimmed by the ground layer only
 			| ( ( vaLeakBits( scene && wwCellLightsWanted( scene ) ? wwCellLightsFor( scene->nifModel ) : nullptr, s.leakRed ) & 8 ) ? 0 : 256 )	// lane FOGLEAK1: 256 = the far grid's tail takes the sun's shadow (WW_CELL_FOGLEAK only)
 			| ( ditherRed ? 0 : 512 | int( ( g.frame & 15u ) << 10 ) )	// part 18: 512 = the dithered froxel read, bits 10-13 its frame
-			| ( aboveRed ? 0 : 16384 ) );	// MODULES1 item 18: 16384 = a downward tail still above the air's top is clear
+			| ( aboveRed ? 0 : 16384 )	// MODULES1 item 18: 16384 = a downward tail still above the air's top is clear
+			| ( vaThinSrcRed() ? 0 : 32768 ) );	// MODULES1 10c: 32768 = a too-thin column's tail takes the grid's light over the law's depth
 }
 
 /* lane VOLAIR1 (bungo 10-14, cellvolair.h): the sky through the air. The far tower stood out against a sky the air never

@@ -334,6 +334,22 @@ vec3 wwAirTailJ( vec4 last, vec4 prev )
 	return volAirGround.z > 0.0 && last.a < 0.9999 ? max( last.rgb, vec3( 0.0 ) ) / ( 1.0 - last.a ) : vec3( 0.0 );
 }
 
+/* MODULES1 10c (a camera far above the fog): a column whose whole grid span lies in the top's falloff is too thin for
+ * the volume's T (16F steps by 4.9e-4 under 1.0: it read 1.0 or 0.9995 for an optical depth of 2e-6), so wwAirTailJ had
+ * no source, or one 2000 times too small, and the tail dimmed the land far below with no light of its own. There the
+ * grid's light over the optical depth of the same span by the medium's law (the one the froxels march, wwAirCol) is
+ * the source: v = the grid's (L, T) at its end `far`, z0 the ray's height there. Under an optical depth of 0.02 only
+ * (40 steps of T: above it the volume's own T is exact enough). volAirFlags 32768; red WW_CELL_AIR_THINSRC_RED=1 */
+vec3 wwAirThinJ( vec3 J, vec4 v, float z0, float far )
+{
+	float zc = fogView.w;
+	if ( ( volAirFlags & 32768 ) == 0 || volAirGround.z <= 0.0 || min( zc, z0 ) < volAirMed.w )
+		return J;
+	float od = volAirMed.x * far * ( abs( z0 - zc ) < 0.5 ? wwAirCol( zc, zc + 1.0, volAirGround )
+		: wwAirCol( min( zc, z0 ), max( zc, z0 ), volAirGround ) / abs( z0 - zc ) );
+	return od > 1e-7 && od < 0.02 ? max( v.rgb, vec3( 0.0 ) ) / ( od * ( 1.0 - 0.5 * od ) ) : J;
+}
+
 // the far grid's: `last` its (L, T) at the end
 vec3 wwGridTailJ( vec2 uv, vec2 share, float base, float n, vec4 last )
 {
@@ -360,6 +376,7 @@ vec4 wwVolAirAtFar( float d, vec2 uv, vec3 posView )
 	float z1 = dot( fogView.xyz, posView ) + fogView.w;
 	float zc = fogView.w;
 	float z0 = zc + ( z1 - zc ) * ( far / d );
+	J = wwAirThinJ( J, o, z0, far );	// MODULES1 10c
 	float len = d - far;
 	float dz = z1 - z0;
 	vec4 gT = wwAirGroundRay( posView * ( far / d ), posView / max( length( posView ), 1e-12 ), len, dz / max( len, 1e-6 ) );	// FOGTERRAIN3: along the tail
@@ -479,6 +496,7 @@ vec4 wwVolAirAtUv( vec3 posView, vec2 uv )	// lane VOLPART1: uv = the column (a 
 	float z1 = dot( fogView.xyz, posView ) + fogView.w;
 	float zc = fogView.w;
 	float z0 = zc + ( z1 - zc ) * ( far / d );
+	J = wwAirThinJ( J, v, z0, far );	// MODULES1 10c
 	float len = d - far;
 	float dz = z1 - z0;
 	vec4 gT = wwAirGroundRay( posView * ( far / d ), posView / max( length( posView ), 1e-12 ), len, dz / max( len, 1e-6 ) );	// FOGTERRAIN3: along the tail
@@ -529,6 +547,7 @@ vec4 wwVolAirAtUv( vec3 posView, vec2 uv )	// lane VOLPART1: uv = the column (a 
 	float z1 = dot( fogView.xyz, posView ) + fogView.w;
 	float zc = fogView.w;
 	float z0 = zc + ( z1 - zc ) * ( far / d );
+	J = wwAirThinJ( J, v, z0, far );	// MODULES1 10c
 	float len = d - far;
 	float dz = z1 - z0;
 	vec4 gT = wwAirGroundRay( posView * ( far / d ), posView / max( length( posView ), 1e-12 ), len, dz / max( len, 1e-6 ) );	// FOGTERRAIN3: along the tail
@@ -597,6 +616,7 @@ vec4 wwVolAirSky( vec3 dirView )
 	}
 	float s = dot( fogView.xyz, dirView ) / max( fogDistScale, 1e-12 );	// the sine of the elevation
 	float z0 = fogView.w + s * far;
+	J = wwAirThinJ( J, v, z0, far );	// MODULES1 10c
 	float top = volAirMed.w;
 	float Tt, dEnd;
 	if ( s > 1e-4 ) {

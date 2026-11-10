@@ -1,3 +1,19 @@
+## MODULES1 10c (2026-11-10): a camera far above the fog: the thin air's tail has its light
+
+- **Before:** from a camera high in the top's falloff the froxel volume's transmittance cannot hold the air it marched:
+  16F steps by 4.9e-4 under 1.0, and the whole grid span had an optical depth near 2e-6. The tail's source (the grid's
+  light over its lost transmittance) was 0 in 11219 of 14756 columns and 7.6 in the other 3537 (the fog's own source
+  is near 10000), so the tail down to the land dimmed it and added nothing: dark far land under the camera.
+- **Now:** where the grid's whole span lies above the air's top and its optical depth by the medium's own law
+  (`wwAirCol`, the law the froxels march) is under 0.02, the tail's source is the grid's light over that optical depth
+  (`wwAirThinJ`, lookdev_fog.glsl, all four tails). Offline on the probe's dump at his 10c camera (z 126239): source
+  14370 median (13800 to 15710) in all 14756 columns, in line with the 10050 median at the 10b spot.
+- **Not covered:** a camera above the air's end (16 scale heights over the top) has no optical depth to divide by and
+  keeps the old source; the sky tail's downward branch still starts at the hard top.
+- **Telemetry:** `cell air: ... thinsrc=on(level od at top N, thin from +A to +B)` (heights over the top) or
+  `thinsrc=red(no source)`.
+- **Red:** `WW_CELL_AIR_THINSRC_RED=1` = no source for those columns, as before.
+
 ## MODULES1 G2 (2026-11-10): the air has no hard top (flight items 10b, 10c)
 - **Before.** The cell air (fog and haze) ended at its top (22801 units in the fog frame at noon CommonwealthMisty)
   at 99 % of its density: from above it read as a flat slab with a hard edge, and above the top there was no haze.
