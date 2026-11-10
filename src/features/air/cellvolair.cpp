@@ -1762,6 +1762,12 @@ static void vaPassInner( Scene * scene, bool run )
 	const float topW = s.sphereTop ? bs.center[2] + bs.radius : vaShapesTop( scene, bs );
 	// the booth's even air has no top: a lone fixture would otherwise end the air at its own crown (lane LIGHTBOOTH1)
 	const float zTop = boothAir > 0.0f ? 1.0e6f : topW + fogView[3] - camZw;
+	/* MODULES1 G2 (bungo 11-09, flight items 10b, 10c: the fog a flat slab with a hard, stair-stepped top, no haze above
+	 * it): outdoors the air does not end at its top, its density there falls off with height Ht (lookdev_fog.glsl
+	 * wwAirColLaw, ground.z = 1 / Ht). 120 m: the height the haze band's own census falls off with (0.120 km); item G4b
+	 * sets it per weather. Red WW_CELL_AIR_TOPFALL_RED=1: empty above the top, as before. */
+	WW_SWITCH_STATIC( bool, topFallRed, wwEnv( "WW_CELL_AIR_TOPFALL_RED" ).trimmed() == "1" );
+	const float invTopH = topFallRed || boothAir > 0.0f || ( L && L->interior ) ? 0.0f : 1.0f / ( 0.120f * kUnitsPerKm );
 
 	// the phase: indoors the cell's god-ray record, outdoors the weather's, else the fallback
 	float med[12] = { 0.60f, 1.52f, 3.31f, 2, 2, 2, 1, 1, 1, 0.75f, 0, 1 };
@@ -1793,6 +1799,19 @@ static void vaPassInner( Scene * scene, bool run )
 		vaKeepStreet( M, G );	// FOGHEIGHT1: the street keeps the game's density, the air above thins
 	} else {
 		G.recx = QStringLiteral( "none(red noground)" );
+	}
+	if ( invTopH > 0.0f ) {	// MODULES1 G2: the fix's telemetry, in the census line: the top's density, the column above it
+		const auto band = []( float z, float z0, float invH ) { return invH > 0.0f ? std::min( 1.0f, std::exp( -( z - z0 ) * invH ) ) : 1.0f; };
+		float rTop = band( zTop, M.zb, M.invH );
+		if ( G.w > 0.0f )
+			rTop = ( 1.0f - G.w ) * rTop + G.w * band( zTop, G.zn, G.invHn );
+		if ( G.s > 0.0f )
+			rTop += G.s * band( zTop, G.zg, G.invHg );
+		const float odUp = M.sigma0 * rTop / invTopH;
+		medNote += QStringLiteral( " topfall=on(H=%1 rho_top=%2 od_up=%3 T_up=%4)" ).arg( double( 1.0f / invTopH ), 0, 'f', 1 )
+			.arg( double( rTop ), 0, 'f', 4 ).arg( double( odUp ), 0, 'f', 4 ).arg( double( std::exp( -odUp ) ), 0, 'f', 4 );
+	} else {
+		medNote += topFallRed ? QStringLiteral( " topfall=red(hard top)" ) : QStringLiteral( " topfall=off(indoors)" );
 	}
 	{
 		static QString saidRecx;
@@ -2019,7 +2038,7 @@ static void vaPassInner( Scene * scene, bool run )
 	prog->uni4f( "volSlices", FloatVector4( nearD, logRatio, float( kSlices ), 1.0f ) );
 	prog->uni4f( "airMed", FloatVector4( M.sigma0, M.zb, M.invH, zTop ) );
 	prog->uni4f( "airLayer", FloatVector4( G.w, G.zn, G.invHn, G.s ) );
-	prog->uni4f( "airGround", FloatVector4( G.zg, G.invHg, 0.0f, 0.0f ) );
+	prog->uni4f( "airGround", FloatVector4( G.zg, G.invHg, invTopH, 0.0f ) );	// MODULES1 G2: z = 1 / the top's falloff height
 	prog->uni1b( "airSunLayer", !s.sunColumn );	// lane FIX1101A: the sun dimmed by the ground layer only (cell_airmed.glsl airTupSun)
 	prog->uni1b( "airEnvFogHue", !s.envHue );	// lane FIX1101A: the env share without the sun glare hue (airEnvColourEnv)
 	prog->uni1b( "volVeil", !s.veilPhys );	// lane FARCITYWASH1: the sky-lit share at most the records' fog (airVeilK)
@@ -2738,7 +2757,7 @@ static void vaPassInner( Scene * scene, bool run )
 	g.med[1] = M.zb;
 	g.med[2] = M.invH;
 	g.med[3] = zTop;
-	const float layerV[4] = { G.w, G.zn, G.invHn, G.s }, groundV[4] = { G.zg, G.invHg, 0.0f, 0.0f };
+	const float layerV[4] = { G.w, G.zn, G.invHn, G.s }, groundV[4] = { G.zg, G.invHg, invTopH, 0.0f };
 	std::copy( layerV, layerV + 4, g.layer );
 	std::copy( groundV, groundV + 4, g.ground );
 	std::copy( &ph.w[0][0], &ph.w[0][0] + 12, &g.phase[0][0] );	// lane VOLPART1

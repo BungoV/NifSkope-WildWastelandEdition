@@ -682,7 +682,7 @@ float airMsA( float z )
 {
 	if ( !volMsMedium )
 		return volMs.x;
-	float eu = airMsEsc( z < airMed.w ? airMed.x * airCol( z, airMed.w ) : 0.0 );
+	float eu = airMsEsc( z < wwAirEnd( airMed, airGround ) ? airMed.x * airCol( z, wwAirEnd( airMed, airGround ) ) : 0.0 );	// MODULES1 G2: through the top's falloff
 	float ed = airMsEsc( airMed.x * airCol( min( airGz, z ), z ) );
 	return min( volMs.x, 0.5 * ( 1.0 - eu ) + 0.5 * ( 1.0 - ed ) + 0.5 * ed * 0.2 );
 }

@@ -5,7 +5,7 @@
 
 uniform vec4 airMed;			// sigma0 (per game unit), zb, 1 / H (0: uniform), the top (the fog's height frame)
 uniform vec4 airLayer;			// the near band's share w, zn, 1 / Hn, the ground layer's strength s (cellvolair.cpp VaLayer)
-uniform vec4 airGround;			// the ground layer's anchor zg, 1 / its thickness
+uniform vec4 airGround;			// the ground layer's anchor zg, 1 / its thickness, G2: 1 / the top's falloff height (0: a hard top)
 uniform int airTerrOn;			// FOGTERRAIN1: the ground layer follows the low-pass terrain (red absolute: 0)
 uniform sampler2DArray airTerr;	// the low-pass terrain height, world z (R32F, clamped at its edge); FOGTERRAIN3: layer 1 the fine level
 uniform vec4 airTerrXf;			// u = x X.x + X.y, v = y X.z + X.w (world)
@@ -97,10 +97,10 @@ float air1mE( float tau )
 // the transmittance from height z toward a direction whose height grows mu per unit, to the top
 float airTup( float z, float mu )
 {
-	if ( z >= airMed.w )
+	if ( z >= wwAirEnd( airMed, airGround ) )	// MODULES1 G2: the column runs through the top's falloff (lookdev_fog.glsl wwAirColLaw)
 		return 1.0;
 	mu = max( mu, 0.02 );
-	return exp( -airMed.x * airCol( z, airMed.w ) / mu );
+	return exp( -airMed.x * airCol( z, wwAirEnd( airMed, airGround ) ) / mu );
 }
 
 /* lane FIX1101A (atmo, the fog-sun fault): the SUN's transmittance to height z. airSunLayer (shipped; set by

@@ -96,7 +96,7 @@ uniform vec4 volPackDims;	// the packed volume's texels: width, height, depth; t
 
 uniform vec4 volAirMed;		// the pass's medium (cell_volair.frag airMed): sigma0, zb, 1 / H, the top (the fog's height frame)
 uniform vec4 volAirLayer;	// its near band and ground layer (airLayer): the near share w, zn, 1 / Hn, the ground strength s
-uniform vec4 volAirGround;	// (airGround): the ground layer's anchor zg, 1 / its thickness
+uniform vec4 volAirGround;	// (airGround): the ground layer's anchor zg, 1 / its thickness, G2: 1 / the top's falloff height (0: a hard top)
 uniform int volAirFlags;	// 1 the surfaces' sun through the air (FOGSUN1; red nosunt clears it), 2 the far tail (red
 				// froxonly clears it), 4 the records' colour on the tail (red physcol clears it), 8 the sky
 				// through the air (cell_volsky.frag; red nosky clears it), 16 the effects and particles through the
@@ -127,34 +127,52 @@ float wwAirColOne( float lo, float hi, float z0, float invH )
 	return below + exp( -( a - z0 ) * invH ) * w * e1;
 }
 
-/* the column of the whole density (cellvolair.cpp VaLayer): (1 - w) far band + w near band + s ground layer, empty
- * above the top; exactly the far band's column when w = s = 0 */
-float wwAirColLaw( float lo, float hi, vec4 med, vec4 layer, vec4 ground )
+/* MODULES1 G2 (bungo 11-09, flight items 10b, 10c: "a flat pale-blue slab with a hard, stair-stepped edge", "above the
+ * top there is no haze at all"): the air does not end at its top. Above it the top's own density falls off with height,
+ * exp(-(z - top) / Ht), Ht = 1 / ground.z (cellvolair.cpp vaTopFall: 120 m), in every site of the law at once: the
+ * froxels, the surfaces' tail, the sky's tail, the sun's and the sky light's columns. ground.z 0 (the red
+ * WW_CELL_AIR_TOPFALL_RED=1): empty above the top, as before, to the bit.
+ * wwAirEnd: the height where the air counts as ended (16 falloff heights, 1e-7 of the top's density); the red: the top */
+float wwAirEnd( vec4 med, vec4 ground )
 {
-	hi = min( hi, med.w );
-	float c = wwAirColOne( lo, hi, med.y, med.z );
-	if ( layer.x <= 0.0 && layer.w <= 0.0 )
-		return c;
-	if ( layer.x > 0.0 )
-		c = ( 1.0 - layer.x ) * c + layer.x * wwAirColOne( lo, hi, layer.y, layer.z );
-	if ( layer.w > 0.0 )
-		c += layer.w * wwAirColOne( lo, hi, ground.x, ground.y );
-	return c;
+	return ground.z > 0.0 ? med.w + 16.0 / ground.z : med.w;
 }
 
 // the density per unit sigma0 at height z (cell_volair.frag airRho)
 float wwAirRhoLaw( float z, vec4 med, vec4 layer, vec4 ground )
 {
-	if ( z > med.w )
-		return 0.0;
+	float k = 1.0;
+	if ( z > med.w ) {
+		if ( ground.z <= 0.0 )
+			return 0.0;
+		k = exp( -( z - med.w ) * ground.z );	// G2: the top's density, falling off
+		z = med.w;
+	}
 	float r = med.z > 0.0 ? min( 1.0, exp( -( z - med.y ) * med.z ) ) : 1.0;
 	if ( layer.x <= 0.0 && layer.w <= 0.0 )
-		return r;
+		return k * r;
 	if ( layer.x > 0.0 )
 		r = ( 1.0 - layer.x ) * r + layer.x * ( layer.z > 0.0 ? min( 1.0, exp( -( z - layer.y ) * layer.z ) ) : 1.0 );
 	if ( layer.w > 0.0 )
 		r += layer.w * ( ground.y > 0.0 ? min( 1.0, exp( -( z - ground.x ) * ground.y ) ) : 1.0 );
-	return r;
+	return k * r;
+}
+
+/* the column of the whole density (cellvolair.cpp VaLayer): (1 - w) far band + w near band + s ground layer, above the
+ * top its falloff (G2; the red: empty); exactly the far band's column when w = s = 0 */
+float wwAirColLaw( float lo, float hi, vec4 med, vec4 layer, vec4 ground )
+{
+	float up = ground.z > 0.0 && hi > med.w
+		? wwAirRhoLaw( med.w, med, layer, ground ) * wwAirColOne( max( lo, med.w ), hi, med.w, ground.z ) : 0.0;
+	hi = min( hi, med.w );
+	float c = wwAirColOne( lo, hi, med.y, med.z );
+	if ( layer.x <= 0.0 && layer.w <= 0.0 )
+		return c + up;
+	if ( layer.x > 0.0 )
+		c = ( 1.0 - layer.x ) * c + layer.x * wwAirColOne( lo, hi, layer.y, layer.z );
+	if ( layer.w > 0.0 )
+		c += layer.w * wwAirColOne( lo, hi, ground.x, ground.y );
+	return c + up;
 }
 
 // FOGTERRAIN3: the ground at view point p (cell_airmed.glsl airTerrH): the fine level over the coarse one, faded at its edge
@@ -305,12 +323,21 @@ vec4 wwGridAt( vec2 uv, vec2 share, float base, float n, float f )
 	return vec4( max( v.rgb, vec3( 0.0 ) ), clamp( v.a, 0.0, 1.0 ) );
 }
 
-// the light per unit (1 - T) of a grid's last slice (the closed-form tail's J), `last` its (L, T) at the end
+/* the closed-form tail's J: the light per unit (1 - T) of the grid's last slice, `last` its (L, T) at the end, `prev` one
+ * slice nearer. MODULES1 G2: in thin air (the top's falloff) the last slice's dT falls under the volume's precision and
+ * the tail went black; there the whole column's light per unit (1 - T) stands in (the red, ground.z 0: none, as before) */
+vec3 wwAirTailJ( vec4 last, vec4 prev )
+{
+	float dT = prev.a - last.a;
+	if ( dT > 1e-7 )
+		return max( ( last.rgb - prev.rgb ) / dT, vec3( 0.0 ) );
+	return volAirGround.z > 0.0 && last.a < 0.9999 ? max( last.rgb, vec3( 0.0 ) ) / ( 1.0 - last.a ) : vec3( 0.0 );
+}
+
+// the far grid's: `last` its (L, T) at the end
 vec3 wwGridTailJ( vec2 uv, vec2 share, float base, float n, vec4 last )
 {
-	vec4 p = wwGridAt( uv, share, base, n, n - 1.0 );
-	float dT = p.a - last.a;
-	return dT > 1e-7 ? max( ( last.rgb - p.rgb ) / dT, vec3( 0.0 ) ) : vec3( 0.0 );
+	return wwAirTailJ( last, wwGridAt( uv, share, base, n, n - 1.0 ) );
 }
 
 // near grid -> far grid -> closed-form tail: (L, T) at distance d (game units) along posView
@@ -433,8 +460,7 @@ bool wwVolAirNearHead( float d, vec2 uv, out vec4 v, out vec3 J, out float far )
 		return false;
 	far = volSlices.x * exp( volSlices.y );
 	vec4 p = wwVolTex( vec3( uv, ( volSlices.z - 1.5 ) / volSlices.z ), true );
-	float dT = p.a - v.a;
-	J = dT > 1e-7 ? max( ( v.rgb - p.rgb ) / dT, vec3( 0.0 ) ) : vec3( 0.0 );
+	J = wwAirTailJ( v, p );
 	return true;
 }
 
@@ -499,8 +525,7 @@ vec4 wwVolAirAtUv( vec3 posView, vec2 uv )	// lane VOLPART1: uv = the column (a 
 	// the far tail
 	float far = volSlices.x * exp( volSlices.y );
 	vec4 p = wwVolTex( vec3( uv, ( volSlices.z - 1.5 ) / volSlices.z ), true );
-	float dT = p.a - v.a;
-	vec3 J = dT > 1e-7 ? max( ( v.rgb - p.rgb ) / dT, vec3( 0.0 ) ) : vec3( 0.0 );
+	vec3 J = wwAirTailJ( v, p );
 	float z1 = dot( fogView.xyz, posView ) + fogView.w;
 	float zc = fogView.w;
 	float z0 = zc + ( z1 - zc ) * ( far / d );
@@ -568,17 +593,17 @@ vec4 wwVolAirSky( vec3 dirView )
 		return v;
 	far = volSlices.x * exp( volSlices.y );
 	vec4 p = wwVolTex( vec3( uv, ( n - 1.5 ) / n ), true );
-	float dT = p.a - v.a;
-	J = dT > 1e-7 ? max( ( v.rgb - p.rgb ) / dT, vec3( 0.0 ) ) : vec3( 0.0 );
+	J = wwAirTailJ( v, p );
 	}
 	float s = dot( fogView.xyz, dirView ) / max( fogDistScale, 1e-12 );	// the sine of the elevation
 	float z0 = fogView.w + s * far;
 	float top = volAirMed.w;
 	float Tt, dEnd;
 	if ( s > 1e-4 ) {
-		dEnd = far + min( max( top - z0, 0.0 ) / s, 1e7 );
+		float end = wwAirEnd( volAirMed, volAirGround );	// G2: the climb runs through the top's falloff
+		dEnd = far + min( max( end - z0, 0.0 ) / s, 1e7 );
 		// FOGTERRAIN3: the ground along the climb, inside the grid's window (wwAirGroundRay)
-		Tt = exp( -volAirMed.x * wwAirCol( z0, top, wwAirGroundRay( dirView * ( far / max( fogDistScale, 1e-12 ) ), dirView, dEnd - far, s ) ) / s
+		Tt = exp( -volAirMed.x * wwAirCol( z0, end, wwAirGroundRay( dirView * ( far / max( fogDistScale, 1e-12 ) ), dirView, dEnd - far, s ) ) / s
 			- wwAirRainTau( dirView * ( far / max( fogDistScale, 1e-12 ) ), dirView * ( ( far + 1e7 ) / max( fogDistScale, 1e-12 ) ) ) );	// lane RAINFOG2: + the rain fog, to where the ray leaves it
 	} else {
 		/* MODULES1 item 18: a ray still above the air's top where the grid ends (a camera above the air looking down)
@@ -641,7 +666,8 @@ float wwVolAirSunT( vec3 posView )
 	if ( !fogOn || !volOn || volSlices.w < 0.5 || fogSun.w <= 0.0 || volAirMed.x <= 0.0 || ( volAirFlags & 1 ) == 0 )
 		return 1.0;
 	float lo = dot( fogView.xyz, posView ) + fogView.w;
-	if ( lo >= volAirMed.w )
+	float end = wwAirEnd( volAirMed, volAirGround );	// G2
+	if ( lo >= end )
 		return 1.0;
 	float mu = max( dot( fogView.xyz, fogSun.xyz ) / max( length( fogView.xyz ), 1e-12 ), 0.02 );
 	vec4 g = wwAirGroundAt( posView );
@@ -651,7 +677,7 @@ float wwVolAirSunT( vec3 posView )
 	 * Red WW_CELL_AIR_RED=suncolumn clears the flag: the whole column, as before. cell_airmed.glsl airTupSun is the twin. */
 	float c = ( volAirFlags & 128 ) != 0
 		? ( volAirLayer.w > 0.0 ? volAirLayer.w * wwAirColOne( lo, volAirMed.w, g.x, g.y ) : 0.0 )
-		: wwAirCol( lo, volAirMed.w, g );
+		: wwAirCol( lo, end, g );
 	return exp( -volAirMed.x * c * wwAirDriftSunK( posView, lo, mu, volAirMed.w ) / mu );
 }
 

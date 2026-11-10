@@ -1,3 +1,27 @@
+## MODULES1 G2 (2026-11-10): the air has no hard top (flight items 10b, 10c)
+- **Before.** The cell air (fog and haze) ended at its top (22801 units in the fog frame at noon CommonwealthMisty)
+  at 99 % of its density: from above it read as a flat slab with a hard edge, and above the top there was no haze.
+- **Now.** One law, in every site that reads the air (the froxels, the surfaces' tail past the grid's far plane, the
+  sky's tail, the sun and sky columns, the particles): above the top the density falls off as exp( -dz / H ),
+  H = 0.120 km (8391.6 units), outdoors only. The parameter rides in the free component `airGround.z` /
+  `volAirGround.z` (1 / H; 0 = a hard top), so the red is the old result to the bit. `wwAirEnd` (top + 16 H) is
+  where the air counts as ended.
+- **Thin air's tail.** `wwAirTailJ` (one function for the four sites that had the expression): where the last
+  slice's step is under the volume's precision the tail takes the column's mean source instead of black.
+- **Telemetry.** The `cell air: volair=on(...)` line adds `topfall=on(H=... rho_top=... od_up=... T_up=...)`,
+  `topfall=red(hard top)` or `topfall=off(indoors)`.
+- **Red:** `WW_CELL_AIR_TOPFALL_RED=1` (live).
+- **Offline gate** (the shader's own law functions cut as text and compiled, notes f1109/g2/g2gate.sh): density
+  1 unit under / over the top 0.9938 / 0.0000 before, 0.9938 / 0.9936 now; straight up from 818 units above the
+  top T 1.000 before, 0.818 now; from the ground T 0.652 before, 0.523 now (the sun and the zenith pass 0.80 x
+  through the added air); extinction both sides of the grid's far plane equal to 1e-4 at three slopes and six
+  heights; the red equals the law before on all 13 lines. 160 of 160 programs link in the all-on define set.
+- **Not in this change.** A camera far above the air (item 10c's height) has froxels with no air in them, so the
+  land's tail still has no in-scatter there: needs the froxel pass's source as a uniform. Item 10e's disc is not
+  reproduced and not claimed. H per weather belongs to G4b.
+- Sources: Bruneton & Neyret 2008 and Hillaire 2020 (aerosol density exp( -h / H ), H 1.2 km for the clear
+  atmosphere's Mie layer); H 0.120 km here is this lane's ground-haze scale from its haze census.
+
 ## PERFLOAD1 batch 1 (2026-11-10): cell load time, the 23:05 lockup, the pass-time table
 - **Load time (P1).** Goodneighbor 5x5 spent 79-87 % of its "models loaded and placements welded" stage inside
   `lodgenProbeAsset`: after reading an asset it opened every archive of the stack again, only to say which one supplied
