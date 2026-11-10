@@ -57,6 +57,7 @@ struct Red
 	bool nonan = false;        // no NaN / Inf guard, no clamp
 	bool onemiss = false;      // a history miss takes 1 sample instead of 4
 	bool noramp = false;       // fixed a, no history-length ramp
+	bool nochord = false;      // every lamp at the froxel's one sample point (before MODULES1 R5A-4; WW_CELL_AIR_LAMPS_RED=nochord)
 };
 
 // ------------------------------------------------------------------ geometry
@@ -222,6 +223,46 @@ inline Fresh injectPoint( const std::vector<Lamp> & lamps, const std::vector<int
 		if ( j == 0.0f )
 			continue;
 		j *= visibility( l, P, s, r );
+		if ( l.flicker && !r.blendflicker )
+			f.flicker += j;
+		else
+			f.steady += j;
+	}
+	return f;
+}
+
+/*! MODULES1 R5A-4 (bungo b60 11-10, Memory Den: "overpowered light rays striking the ground every once a while"): a lamp
+ *  much smaller than a deep froxel was met by the froxel's one sample point only now and then, and a hit carried its
+ *  whole in-scatter, 1 / (its share of the slice) x the mean, which the history's EMA (a = 0.1) held for ~10 frames: a
+ *  flash. Each lamp now takes the same jitter u.z on its own chord: the stretch of the sample's ray C + D t inside its
+ *  sphere and the slice [tA, tB], weighted by the stretch's share of the slice. Unbiased (E = 1 / (tB - tA) x the
+ *  integral over the stretch), and a lamp the ray crosses is never missed in depth. Red nochord: the shared point
+ *  (injectPoint at C + D (tA + (tB - tA) u.z)). MIRROR cell_volair.frag airLampVolStage */
+inline Fresh injectRay( const std::vector<Lamp> & lamps, const std::vector<int> & list, V3 C, V3 D, float tA, float tB, float uz,
+                        const Scene & s, const Medium & m, const Red & r )
+{
+	const V3 Pp = C + D * ( tA + ( tB - tA ) * uz );
+	const V3 dW = rtddgi::normalize( Pp - C );
+	if ( r.nochord )
+		return injectPoint( lamps, list, Pp, dW, s, m, r );
+	Fresh f;
+	const float qa = rtddgi::dot( D, D );
+	for ( int i : list ) {
+		const Lamp & l = lamps[i];
+		const V3 mm = C - l.pos;
+		const float qb = rtddgi::dot( D, mm ), qc = rtddgi::dot( mm, mm ) - l.radius * l.radius;
+		const float disc = qb * qb - qa * qc;
+		if ( disc <= 0.0f || qa <= 0.0f )
+			continue;
+		const float sq = std::sqrt( disc );
+		const float c0 = std::max( ( -qb - sq ) / qa, tA ), c1 = std::min( ( -qb + sq ) / qa, tB );
+		if ( c1 <= c0 )
+			continue;
+		const V3 P = C + D * ( c0 + ( c1 - c0 ) * uz );
+		float j = lampTerm( l, P, dW, m );
+		if ( j == 0.0f )
+			continue;
+		j *= ( c1 - c0 ) / std::max( tB - tA, 1e-6f ) * visibility( l, P, s, r );
 		if ( l.flicker && !r.blendflicker )
 			f.flicker += j;
 		else
@@ -485,9 +526,9 @@ public:
 		Fresh f;
 		for ( int s = 0; s < n; s++ ) {
 			const V3 u = maskPoint( *mask, x, y, k, in.frame, s, red );
-			const V3 P = froxelPoint( in.cam, g, x, y, k, u );
-			const V3 dW = rtddgi::normalize( P - in.cam.pos );
-			const Fresh a = injectPoint( in.lamps, lists[ci], P, dW, in.scene, in.medium, red );
+			const V3 D = columnDir( in.cam, g, float( x ) + u.x, float( y ) + u.y );
+			const Fresh a = injectRay( in.lamps, lists[ci], in.cam.pos, D, sliceDepth( g, float( k ) ), sliceDepth( g, float( k + 1 ) ), u.z,
+			                           in.scene, in.medium, red );
 			f.steady += a.steady;
 			f.flicker += a.flicker;
 		}

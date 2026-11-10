@@ -13,6 +13,7 @@
 //   G6 energy: converged grid sum within 1 % of the old 4-sample stretch law
 //   G7 one frame, no history: normalised rms vs reference <= 0.05
 //   G8 moving lamp: no trail froxel at any frame
+//   G9 small lamp (MODULES1 R5A-4): rel rms over frames 16..79 on the chord <= 0.6 x the shared point's (red nochord)
 #include "features/air/airlampinjmath.h"
 
 #include <algorithm>
@@ -253,8 +254,44 @@ static float oracleOld( const Camera & c, const Grid & g, int x, int y, int k, c
 struct Refs
 {
 	Ref ns, sh;   // NS lamp no plate (G1, G3, G6, G7); shadow lamp with plate (G2: bf)
+	Ref sm;       // MODULES1 R5A-4: the small lamp of G9
 };
 static Refs g_refs;
+//! MODULES1 R5A-4: a lamp half a deep froxel across (diameter 0.18 in a 0.40 x 0.40 x 0.36 froxel at depth 6.4)
+static Lamp smallLamp()
+{
+	Lamp l;
+	l.pos = V3( 0.31f, -0.27f, 6.4f );
+	l.radius = 0.09f;
+	l.intensity = 10.0f;
+	return l;
+}
+//! G9: the relative rms over frames 16..79 (still camera) of out vs the reference, on froxels holding >= 5 % of its peak
+static double smallFlash( const Red & red, double & peak )
+{
+	LampVolume v;
+	v.g = grid();
+	v.red = red;
+	v.mask = &g_mask;
+	const std::vector<int> set = litSet( g_refs.sm, 0.05f );
+	FrameIn in = baseFrame( smallLamp(), Scene() );
+	double n = 0.0;
+	long cnt = 0;
+	peak = 0.0;
+	for ( int f = 0; f < 80; f++ ) {
+		in.frame = f;
+		v.step( in );
+		if ( f < 16 )
+			continue;
+		for ( int j : set ) {
+			const double e = ( double( v.out[j] ) - g_refs.sm.J[j] ) / g_refs.sm.J[j];
+			n += e * e;
+			cnt++;
+			peak = std::max( peak, double( v.out[j] ) / g_refs.sm.J[j] );
+		}
+	}
+	return cnt ? std::sqrt( n / double( cnt ) ) : 1e9;
+}
 
 // ------------------------------------------------------------------ the suite
 static std::vector<Row> suite( const Red & red )
@@ -671,6 +708,18 @@ static std::vector<Row> suite( const Red & red )
 		rows.push_back( { "G8", worst == 0, fmt( "mover 0.1 a frame for 24 frames: frames with a trail froxel %d of 32, worst %d froxels at frame %d (bar 0); info, the pre-registered rule's count over all frames %d",
 		                                               framesWithTrail, worst, worstF, preReg ) } );
 	}
+	// ---- G9 small lamp, no flash (MODULES1 R5A-4; bar written before the first run: chord rms <= 0.6 x the point's).
+	// The sampler is G3's: G9 runs on the mask in both routes (on white noise the ratio was 0.759, both noisier)
+	{
+		Red cr = red;
+		cr.white = false;
+		Red pt = cr;
+		pt.nochord = true;
+		double pkC = 0.0, pkP = 0.0;
+		const double eC = smallFlash( cr, pkC ), eP = smallFlash( pt, pkP );
+		rows.push_back( { "G9", eC <= 0.6 * eP, fmt( "small lamp (r 0.09, %d froxels >= 5%% of its peak), frames 16..79: rel rms %.4f vs the shared point's %.4f, ratio %.3f (bar <= 0.6); peak out / ref %.2f vs %.2f",
+		                                     int( litSet( g_refs.sm, 0.05f ).size() ), eC, eP, eC / std::max( eP, 1e-30 ), pkC, pkP ) } );
+	}
 	return rows;
 }
 
@@ -689,12 +738,13 @@ static std::map<std::string, Red> reds()
 	r = Red(); r.onemiss = true; m["onemiss"] = r;
 	r = Red(); r.nomovehash = true; m["nomovehash"] = r;
 	r = Red(); r.noramp = true; m["noramp"] = r;
+	r = Red(); r.nochord = true; m["nochord"] = r;
 	return m;
 }
 static const std::map<std::string, std::string> kTarget = {
 	{ "nsatlas", "G1" }, { "noshadow", "G2" }, { "white", "G3" }, { "nofrustum", "G4a" }, { "nosethash", "G4b" },
 	{ "blendflicker", "G4c" }, { "noskip", "G4d" }, { "nonan", "G4e" }, { "onemiss", "G7" }, { "nomovehash", "G8" },
-	{ "noramp", "G3" },
+	{ "noramp", "G3" }, { "nochord", "G9" },
 };
 
 int main( int argc, char ** argv )
@@ -713,6 +763,7 @@ int main( int argc, char ** argv )
 		sh.shadow = true;
 		g_refs.sh = reference( baseFrame( sh, plate() ), 16 );
 	}
+	g_refs.sm = reference( baseFrame( smallLamp(), Scene() ), 16 );
 	std::printf( "references (16^3 a froxel) %.1f s\n", std::chrono::duration<double>( std::chrono::steady_clock::now() - t0 ).count() );
 	int fails = 0;
 	if ( only.empty() || only == "default" ) {

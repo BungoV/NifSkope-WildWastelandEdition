@@ -184,6 +184,8 @@ struct State
 	bool tableDirty = true;
 	qint64 frames = 0, facesTotal = 0;
 	int lastReady = -1, lastPending = -1;
+	int lastTop = -2, lastTopRoute = -1;	// MODULES1 R5A-4: the "air lamp top:" line
+	float lastTopPow = 0.0f;
 	double drawMs = 0.0, maxMs = 0.0;	// since the cell's key last changed
 	std::unordered_map<const Shape *, Sig> hist;	// AUDIT 11: last frame's signature a caster
 	qint64 moves = 0, redraws = 0;	// AUDIT 11: since the cell's key last changed
@@ -694,6 +696,53 @@ int wwAirLampAtlasFrame( Scene * scene, const WwCellLighting * L, const float ca
 			s.maxMs, bySize[0], bySize[1], bySize[2], bySize[3], (long long)s.moves, (long long)s.redraws, haveCasters ? "" : " (frozen)" );
 		s.lastReady = ready;
 		s.lastPending = pend;
+	}
+
+	/* MODULES1 R5A-4 (bungo b60 11-10, Memory Den street flashes): the lamp that puts the most light into the air, its
+	 * power and its shadow route, on a change of lamp, route or power (25 %), and every 600 frames. Score = lum(colour)
+	 * x radius / max(distance, radius) (a lamp's in-scatter down a ray past it); reach = within the air's far.
+	 * Route: tiles <size> (shadowed through the atlas), untiled (flagged, no tile ready: unshadowed), none (unflagged). */
+	{
+		int top = -1, inReach = 0, flagged = 0, flaggedReady = 0;
+		float best = 0.0f, topPow = 0.0f;
+		for ( int i = 0; i < n; i++ ) {
+			const WwCellLight & l = L->lights.at( i );
+			if ( l.radius <= 0.0f || dist[i] - l.radius >= farD )
+				continue;
+			inReach++;
+			flagged += l.shadow ? 1 : 0;
+			flaggedReady += ( l.shadow && s.lamps[i].cur.s ) ? 1 : 0;
+			const float pw = 0.2126f * l.color[0] + 0.7152f * l.color[1] + 0.0722f * l.color[2];
+			const float sc = pw * l.radius / std::max( dist[i], l.radius );
+			if ( sc > best ) {
+				best = sc;
+				top = i;
+				topPow = pw;
+			}
+		}
+		const int route = top < 0 ? -1 : !L->lights.at( top ).shadow ? 0 : s.lamps[top].cur.s ? s.lamps[top].cur.s : 1;
+		const bool powJump = top >= 0 && std::fabs( topPow - s.lastTopPow ) > 0.25f * std::max( s.lastTopPow, 1e-6f );
+		if ( top != s.lastTop || route != s.lastTopRoute || powJump || s.frames % 600 == 0 ) {
+			if ( top < 0 ) {
+				std::fprintf( stderr, "air lamp top: none in reach (frame %lld)\n", (long long)s.frames );
+			} else {
+				const WwCellLight & l = L->lights.at( top );
+				char rt[32];
+				if ( route == 0 )
+					std::snprintf( rt, sizeof rt, "none" );
+				else if ( route == 1 )
+					std::snprintf( rt, sizeof rt, "untiled" );
+				else
+					std::snprintf( rt, sizeof rt, "tiles %d", route );
+				std::fprintf( stderr, "air lamp top: id %d ref %08X power %.3f radius %.0f dist %.0f score %.3f shadow %d (%s) flicker %d"
+					" | in reach %d flagged %d ready %d unflagged %d (frame %lld)\n",
+					top, unsigned( l.ref ), topPow, l.radius, dist[top], best, l.shadow, rt, l.flicker,
+					inReach, flagged, flaggedReady, inReach - flagged, (long long)s.frames );
+			}
+			s.lastTop = top;
+			s.lastTopRoute = route;
+			s.lastTopPow = topPow;
+		}
 	}
 	return n;
 }

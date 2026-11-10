@@ -2105,11 +2105,13 @@ static void vaPassInner( Scene * scene, bool run )
 	 * one blue-noise sample a froxel a frame into a history, before the inject reads it. Temporal only (it rides the
 	 * strata's ping-pong and reprojection). Red WW_CELL_AIR_LAMPS_RED (live): pixel = the inject's own lamp loop, as
 	 * before; else a comma list of gates: white (the twin's hash, not the mask), noramp (a = the floor only), onemiss (one
-	 * sample on a miss), blendflicker (the flickering lamps into the history too), nohash (no light-set rejection) */
+	 * sample on a miss), blendflicker (the flickering lamps into the history too), nohash (no light-set rejection), nochord (MODULES1 R5A-4: every lamp at the froxel's one sample
+	 * point, not on its own chord) */
 	const QByteArray lampRedS = wwEnv( "WW_CELL_AIR_LAMPS_RED" ).trimmed().toLower();
 	const bool lampPixel = lampRedS == "pixel";
 	const int lampRed = ( lampRedS.contains( "white" ) ? 1 : 0 ) | ( lampRedS.contains( "noramp" ) ? 2 : 0 )
-		| ( lampRedS.contains( "onemiss" ) ? 4 : 0 ) | ( lampRedS.contains( "blendflicker" ) ? 8 : 0 ) | ( lampRedS.contains( "nohash" ) ? 16 : 0 );
+		| ( lampRedS.contains( "onemiss" ) ? 4 : 0 ) | ( lampRedS.contains( "blendflicker" ) ? 8 : 0 ) | ( lampRedS.contains( "nohash" ) ? 16 : 0 )
+		| ( lampRedS.contains( "nochord" ) ? 32 : 0 );
 	if ( temporal && !lampPixel && !g.stbnTried ) {
 		g.stbnTried = true;
 		QFile mf( QStringLiteral( ":/air/stbn_scalar_128x128x64.r8" ) );

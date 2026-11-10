@@ -969,7 +969,7 @@ uniform sampler2DArray volStbn;	// stage 4: the blue-noise mask (res/air/stbn_sc
 uniform bool volLampHistOk;		// stage 4: a history at these dims (no cut, no new document)
 uniform float volLampA;			// stage 4: the blend floor, 0.1 still / 0.2 moving
 uniform int volFrame;			// stage 4: the mask's time axis
-uniform int volLampRed;			// stage 4 gates (WW_CELL_AIR_LAMPS_RED): 1 white, 2 noramp, 4 onemiss, 8 blendflicker, 16 nohash
+uniform int volLampRed;			// stage 4 gates (WW_CELL_AIR_LAMPS_RED): 1 white, 2 noramp, 4 onemiss, 8 blendflicker, 16 nohash, 32 nochord
 
 vec3 airRest( vec3 posView, vec3 dirView, float z, float sA, float sB, out vec3 Jenv, bool lights )
 {
@@ -1389,8 +1389,9 @@ void airLampVolStage( ivec2 col )
 	// the fresh estimate: one sample, or four on a miss (red onemiss: one). MIRROR airlampinjmath.h froxelPoint: across
 	// the column at the mask's x, y; depth LINEAR inside the slice
 	int ns = keep || ( volLampRed & 4 ) != 0 ? 1 : 4;
-	vec3 Ps[4], dWs[4];
-	float zs[4];
+	vec3 Ps[4], dWs[4], Dws[4];
+	float zs[4], uzs[4], zks[4];
+	vec3 Ow = cellWorldPos( vec3( 0.0 ) );
 	for ( int s = 0; s < ns; s++ ) {
 		vec3 u = airLampJitter( col, volLayer, s );
 		vec2 ndcJ = ( vec2( col ) + u.xy ) / vec2( volDims.xy ) * 2.0 - 1.0;
@@ -1399,6 +1400,9 @@ void airLampVolStage( ivec2 col )
 		Ps[s] = cellWorldPos( dJ * ( t / fogDistScale ) );
 		dWs[s] = cellWorldDir( dJ );
 		zs[s] = fogView.w + dot( fogView.xyz, dJ ) / fogDistScale * t;
+		Dws[s] = cellWorldPos( dJ * ( 1.0 / fogDistScale ) ) - Ow;	// R5A-4: world per unit t along the sample's ray
+		uzs[s] = u.z;
+		zks[s] = dot( fogView.xyz, dJ ) / fogDistScale;
 	}
 	// pass 2: the lamps at the samples. MIRROR airlampinjmath.h injectPoint / lampTerm: the inject's own light sample
 	// (cellLightE x cellFogK x the medium's transmittance x the phase, + the lamps' orders >= 2 and floor bounce when on);
@@ -1431,7 +1435,28 @@ void airLampVolStage( ivec2 col )
 #endif
 			vec3 Ji = vec3( 0.0 );
 			for ( int s = 0; s < ns; s++ ) {
-				vec3 Pk = Ps[s] - volLightShift;
+				/* MODULES1 R5A-4 (bungo b60 11-10, Memory Den street flashes): each lamp takes the sample's jitter on its own
+				 * chord, the stretch of the sample's ray inside its sphere and the slice, weighted by the stretch's share of
+				 * the slice; a lamp half a froxel across was met by the shared point now and then, at 1 / its share x the
+				 * mean, held ~10 frames by the history. MIRROR airlampinjmath.h injectRay. Red WW_CELL_AIR_LAMPS_RED=nochord */
+				vec3 Pw = Ps[s];
+				float zw = zs[s], wc = 1.0;
+				if ( ( volLampRed & 32 ) == 0 ) {
+					vec3 mm = Ow - volLightShift - a0.xyz;
+					float qa = dot( Dws[s], Dws[s] ), qb = dot( Dws[s], mm ), qc = dot( mm, mm ) - a0.w * a0.w;
+					float disc = qb * qb - qa * qc;
+					if ( disc <= 0.0 || qa <= 0.0 )
+						continue;
+					float sq = sqrt( disc );
+					float c0 = max( ( -qb - sq ) / qa, t0 ), c1 = min( ( -qb + sq ) / qa, t1 );
+					if ( c1 <= c0 )
+						continue;
+					float tc = mix( c0, c1, uzs[s] );
+					wc = ( c1 - c0 ) / max( t1 - t0, 1e-6 );
+					Pw = Ow + Dws[s] * tc;
+					zw = fogView.w + zks[s] * tc;
+				}
+				vec3 Pk = Pw - volLightShift;
 				float d = length( a0.xyz - Pk );
 				if ( d >= a0.w || d < 0.001 )
 					continue;
@@ -1440,7 +1465,7 @@ void airLampVolStage( ivec2 col )
 				vec3 e = cellLightE( i, Pk, L, Lo, noSpec ) * cellFogK( i );
 				if ( all( equal( e, vec3( 0.0 ) ) ) )
 					continue;
-				float zOff = zs[s] - Ps[s].z;
+				float zOff = zw - Pw.z;
 				float od = airOd( Pk.z + zOff, a0.z + zOff, d ), c = dot( L, dWs[s] );
 				vec3 jv = e * exp( -od ) * volPhasePi( c );
 				if ( volMsLamp.x > 0.0 )
@@ -1450,9 +1475,9 @@ void airLampVolStage( ivec2 col )
 					jv += e * airLampGnd( a0.xyz, hf, Pk, dWs[s], d, od ) * airGndK;
 #endif
 #ifdef WW_AIR_LEAK
-				jv *= airLeakLightK( i, Ps[s], a0.xyz + volLightShift );
+				jv *= airLeakLightK( i, Pw, a0.xyz + volLightShift );
 #endif
-				Ji += jv;
+				Ji += jv * wc;
 			}
 			if ( fl )
 				Fl += Ji;
