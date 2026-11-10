@@ -87,6 +87,7 @@ uniform bool volSurfClusters;	// lane GAPLOOK1 (LIGHTSYS-4): the lights from the
 uniform vec2 volSurfPx;			// the main viewport's pixels a froxel column (x, y)
 uniform bool volSurfRed;		// red drop: each walk leaves out its first light
 uniform vec4 volMs;				// lane GAPLOOK1 (FOGEXTRAS): the sun's scattering octaves a, b, c, w 1 = shadows lift (x 0: off)
+uniform bool volMsDiff;			// MODULES1 R5A-3: the sun's diffusion term in thick air (red WW_CELL_AIR_MS_RED=single)
 uniform vec4 volMsLamp;		// lane AIRMS1 (AIR-MS-LAMPS): the lamps' orders >= 2: K0, K1, a, s (x 0: off; src/features/air/airmslamp.h)
 #ifdef WW_CELL_AIR_BOUNCE
 uniform vec4 volGndLamp;		// lane AIRBOUNCE1 (AIR-LAMPS-BOUNCE): the lamps' floor bounce: K a, m, sb, floor depth (x 0: red; src/features/air/airbouncelamp.h)
@@ -707,6 +708,30 @@ vec3 airMsSum( float vis, float T, float c, float hard, float a0 )
 	return r;
 }
 
+/* MODULES1 R5A-3 (bungo b60 11-10: thick fog turns blue at density x100): in thick air the sun's octaves die with
+ * pow(T, b^i) and only the sky's env share is left. Hillaire 2020 (isotropic multiple scattering) in a closed form:
+ * the sun's light that reaches z as a diffuse field through the column above (Eddington two-stream, conservative:
+ * R = ((1-g) tau + (2/3 - mu)(1 - e^(-tau/mu))) / (4/3 + (1-g) tau), diffuse = 1 - R - e^(-tau/mu)), back up off the
+ * air and the ground below (rho), scattered isotropically: pi J = (E_down + E_up) / 2 per unit of the sun's light.
+ * Grey (the aerosol's colour, the light's own hue). It stands in for the octaves where it is larger, never below them. */
+vec3 airMsDiffuse( vec3 rSum, float vis, float T, float c, float hard, float z, float mu )
+{
+	if ( !volMsDiff || mu <= 0.0 )
+		return rSum;
+	float g1 = 1.0 - clamp( volGi.w, 0.0, 0.95 );
+	float tu = z < wwAirEnd( airMed, airGround ) ? airMed.x * airCol( z, wwAirEnd( airMed, airGround ) ) : 0.0;
+	float td = airMed.x * airCol( min( airGz, z ), z );
+	float m = max( mu, 0.02 );
+	float eb = exp( -tu / m );
+	float R = ( g1 * tu + ( 2.0 / 3.0 - m ) * ( 1.0 - eb ) ) / ( 4.0 / 3.0 + g1 * tu );
+	float dn = m * max( 1.0 - R - eb, 0.0 );
+	float Rb = ( g1 * td + ( 2.0 / 3.0 - 0.5 ) * ( 1.0 - exp( -2.0 * td ) ) ) / ( 4.0 / 3.0 + g1 * td );
+	float rho = Rb + ( 1.0 - Rb ) * 0.2;
+	float v = volMs.w > 0.5 ? mix( 1.0, vis, hard ) : vis;
+	vec3 r1 = vis * T * volPhasePi( c );
+	return r1 + max( rSum - r1, vec3( v * 0.5 * ( 1.0 + rho ) * dn ) );
+}
+
 /* lane AIRMS1 (AIR-MS-LAMPS): a placed light's orders >= 2 over its e (the single scattering is e exp(-od) pi p(c)):
  * pi M = (K0 + K1 gbar) od exp(-a od) pi P2(c), P2 the phase with each HG lobe's g x s, fitted to a Monte Carlo of a
  * point lamp in the same medium (notes/airms1). CPU twin: src/features/air/airmslamp.h (tests/features/air/airmslamp). */
@@ -865,7 +890,8 @@ vec3 airSun( vec3 posView, vec3 dirView, float z )
 		if ( volDriftSun && volDrift.x > 0.0 )	// lane WEATHERBLEND4: the sun's light through the drifting air
 			Ts = pow( Ts, airDriftSunK( posView, z, to.z ) );
 		if ( volMs.x > 0.0 )
-			return cellDirColor * airMsSum( vis, Ts, dot( to, cellWorldDir( dirView ) ), hard, airMsA( z ) );
+			return cellDirColor * airMsDiffuse( airMsSum( vis, Ts, dot( to, cellWorldDir( dirView ) ), hard, airMsA( z ) ),
+				vis, Ts, dot( to, cellWorldDir( dirView ) ), hard, z, to.z );
 		return cellDirColor * vis * Ts * volPhasePi( dot( to, cellWorldDir( dirView ) ) );
 	}
 	if ( fogSun.w > 0.0 ) {
@@ -874,7 +900,8 @@ vec3 airSun( vec3 posView, vec3 dirView, float z )
 			: volCsm ? airSunVis( posView ) : airCloudShadow( posView );
 		float mu = dot( fogView.xyz, fogSun.xyz ) / length( fogView.xyz );
 		if ( volMs.x > 0.0 )
-			return fogSunColour.rgb * fogSun.w * airMsSum( vis, airTupSun( z, mu ), dot( dirView, fogSun.xyz ), 0.0, airMsA( z ) );
+			return fogSunColour.rgb * fogSun.w * airMsDiffuse( airMsSum( vis, airTupSun( z, mu ), dot( dirView, fogSun.xyz ), 0.0,
+				airMsA( z ) ), vis, airTupSun( z, mu ), dot( dirView, fogSun.xyz ), 0.0, z, mu );
 		return fogSunColour.rgb * fogSun.w * vis * airTupSun( z, mu ) * volPhasePi( dot( dirView, fogSun.xyz ) );
 	}
 	return vec3( 0.0 );

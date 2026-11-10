@@ -2554,6 +2554,9 @@ static void vaPassInner( Scene * scene, bool run )
 	// lane GLAREBLOW1: the octaves' a capped by the air's own re-scatter chance (src/features/air/airmsweight.h); red off: a = 1/2
 	const bool msMedium = wwEnvStr( "WW_CELL_GLAREBLOW_RED" ) != QLatin1String( "off" );
 	prog->uni1b( "volMsMedium", msMedium );
+	// MODULES1 R5A-3: the sun's diffusion term in thick air (cell_volair.frag airMsDiffuse); red WW_CELL_AIR_MS_RED=single
+	const bool msDiff = wwLookOn( WwLook::AirMultiScatter ) && wwEnvStr( "WW_CELL_AIR_MS_RED" ) != QLatin1String( "single" );
+	prog->uni1b( "volMsDiff", msDiff );
 	// lane AIRMS1 (AIR-MS-LAMPS): the placed lights' orders >= 2 (WW_CELL_AIR_MS_LAMPS=1, off by default); red off: the term 0
 	const bool msLampOn = wwEnvStr( "WW_CELL_AIR_MS_LAMPS" ) == QLatin1String( "1" );
 	const bool msLampRed = msLampOn && wwEnvStr( "WW_CELL_AIR_MS_LAMPS_RED" ) == QLatin1String( "off" );
@@ -3000,7 +3003,9 @@ static void vaPassInner( Scene * scene, bool run )
 		.arg( double( zTop ), 0, 'f', 1 ).arg( medNote )
 		.arg( double( ph.gi[0] ), 0, 'f', 4 ).arg( double( ph.gi[1] ), 0, 'f', 4 ).arg( double( ph.gi[2] ), 0, 'f', 4 )
 		.arg( cellLightCountV ).arg( cellGiOnV ).arg( csm ? 1 : 0 ).arg( s.terms ).arg( s.red ).arg( ms, 0, 'f', 3 )
-		.arg( !wwLookOn( WwLook::AirMultiScatter ) ? QStringLiteral( "off" ) : msMedium ? QStringLiteral( "medium" ) : QStringLiteral( "half(red)" ) )
+		.arg( !wwLookOn( WwLook::AirMultiScatter ) ? QStringLiteral( "off" )
+			: ( msMedium ? QStringLiteral( "medium" ) : QStringLiteral( "half(red)" ) )
+				+ ( msDiff ? QStringLiteral( " msdiff=on" ) : QStringLiteral( " msdiff=single(red)" ) ) )
 		.arg( !msLampOn ? QStringLiteral( "off" ) : msLampRed ? QStringLiteral( "off(red)" ) : QStringLiteral( "on" ) )
 		.arg( !gndLampOn ? QStringLiteral( "off" ) : gndLampRed ? QStringLiteral( "off(red)" ) : QStringLiteral( "on" ) );
 	// the optimisation's echo: the mode, the clusters (all / non-empty / mean list over the non-empty), the CPU build,
