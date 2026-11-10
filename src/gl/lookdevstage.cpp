@@ -1424,6 +1424,16 @@ bool wwFogHorizonRed()
 	return red;
 }
 
+/* MODULES1 R5A-1 (bungo b60 11-10, brown haze on a clear day): the horizon's hue is the sky's at the end of a path of
+ * hundreds of km (CommonwealthClear day: 1.38e4 9821 6908, 1 : 0.71 : 0.50), not the haze's over a few km, and the far
+ * colours took it whole. They keep the step (mean far luminance = the horizon's) and their own records' hue.
+ * Red WW_FOG_HORIZON_RED=skyhue: the far colours = the horizon's colour. */
+static bool wwFogHorizonSkyHue()
+{
+	WW_SWITCH_STATIC( bool, red, wwEnvStr( "WW_FOG_HORIZON_RED" ).trimmed() == QLatin1StringView( "skyhue" ) );
+	return red;
+}
+
 void wwLookdevFogUniforms( Scene * scene )
 {
 	PassTime::DrawCpuScope cpuT( PassTime::CpuFogUni );	// lane PERF2
@@ -1454,6 +1464,7 @@ void wwLookdevFogUniforms( Scene * scene )
 	const float fu = wwPhysSkyOn() ? currentLight().physFog : 1.0f;
 	float hz[3];
 	const bool horizon = wwPhysSkyOn() && !wwFogHorizonRed() && wwAtmoHorizon( hz );
+	const bool skyHue = wwFogHorizonSkyHue();
 	float gNear = 1.0f;
 	if ( horizon ) {	// MODULES1 M8: the far colours = the sky's horizon; the near ones scale by the same step
 		auto lum = []( const float * c ) { return 0.2126f * c[0] + 0.7152f * c[1] + 0.0722f * c[2]; };
@@ -1464,13 +1475,14 @@ void wwLookdevFogUniforms( Scene * scene )
 		static float said = -1.0f;
 		if ( std::abs( gNear - said ) > 0.02f * std::max( said, 1e-6f ) ) {
 			said = gNear;
-			fprintf( stderr, "fog horizon: sky %.4g %.4g %.4g (L %.4g), weather far L %.4g, fog x%.4g (red WW_FOG_HORIZON_RED=1)\n",
-				double( hz[0] ), double( hz[1] ), double( hz[2] ), double( lh ), double( lf ), double( gNear ) );
+			fprintf( stderr, "fog horizon: sky %.4g %.4g %.4g (L %.4g), weather far L %.4g, fog x%.4g hue=%s (red WW_FOG_HORIZON_RED=1|skyhue)\n",
+				double( hz[0] ), double( hz[1] ), double( hz[2] ), double( lh ), double( lf ), double( gNear ),
+				skyHue ? "sky" : "record" );
 		}
 	}
 	for ( int k = 0; k < 6; k++ ) {
 		const float m = ( k >= 1 && k <= 4 ) ? fu * ( horizon ? gNear : 1.0f ) : 1.0f;
-		if ( horizon && ( k == 3 || k == 4 ) )
+		if ( horizon && skyHue && ( k == 3 || k == 4 ) )
 			prog->uni4f_l( prog->uniLocation( "fogK[%d]", k ), FloatVector4( hz[0], hz[1], hz[2], f.K[k][3] ) );
 		else
 			prog->uni4f_l( prog->uniLocation( "fogK[%d]", k ), FloatVector4( f.K[k][0] * m, f.K[k][1] * m, f.K[k][2] * m, f.K[k][3] ) );
