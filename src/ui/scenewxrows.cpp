@@ -13,6 +13,7 @@
 #include <QPushButton>
 #include <QScreen>
 #include <QScrollBar>
+#include <QTimer>
 #include <QTreeWidget>
 
 #include <algorithm>
@@ -88,10 +89,70 @@ void wwSceneTidyRows( QTreeWidget * tree )
 		}
 	}
 	h += 2;
-	for ( int i = 0; i < tree->topLevelItemCount(); i++ )
-		tree->topLevelItem( i )->setSizeHint( 0, QSize( -1, h ) );
+	/* MODULES1 round 4 F3 (bungo b60 11-10, values half a row below their names): QSize( -1, h ) is an INVALID size,
+	 * which the view ignores, so the rows stayed at the text's 16 px and every taller field hung below its row (offline
+	 * probe notes/modules1/probe_f3: rows 16 -> 27, value y = row y). The hint goes on the value column with a valid
+	 * width, and every selector takes one width (the widest one's); number fields keep the whole column. Red
+	 * WW_SCENE_ROWS_RED=old: the invalid hint, each combo its own width. */
+	const bool oldRows = wwEnvStr( "WW_SCENE_ROWS_RED" ).trimmed() == QLatin1String( "old" );
+	int comboW = 0, combos = 0;
+	if ( !oldRows ) {
+		const QList<QComboBox *> all = tree->findChildren<QComboBox *>();
+		for ( QComboBox * c : all )
+			comboW = std::max( comboW, c->sizeHint().width() );
+		for ( QComboBox * c : all ) {
+			c->setFixedWidth( comboW );
+			combos++;
+		}
+	}
+	for ( int i = 0; i < tree->topLevelItemCount(); i++ ) {
+		if ( oldRows )
+			tree->topLevelItem( i )->setSizeHint( 0, QSize( -1, h ) );
+		else
+			tree->topLevelItem( i )->setSizeHint( 1, QSize( 1, h ) );
+	}
 	tree->doItemsLayout();
-	std::fprintf( stderr, "scene window: rows %d px high (%d rows)\n", h, tree->topLevelItemCount() );
+	std::fprintf( stderr, "scene window: rows %d px high (%d rows) combos %d at %d px%s\n", h, tree->topLevelItemCount(),
+		combos, comboW, oldRows ? " (red old)" : "" );
+	// the proof: once shown, each row's value top against its name row's top (must be equal), and the row heights
+	struct Echo : QObject {
+		QTreeWidget * t;
+		explicit Echo( QTreeWidget * tr ) : QObject( tr ), t( tr ) {}
+		bool eventFilter( QObject * o, QEvent * e ) override
+		{
+			if ( o == t && e->type() == QEvent::Show )
+				QTimer::singleShot( 0, t, [tr = t]() { wwSceneRowsEcho( tr ); } );
+			return false;
+		}
+	};
+	tree->installEventFilter( new Echo( tree ) );
+}
+
+void wwSceneRowsEcho( QTreeWidget * tree )
+{
+	if ( !tree )
+		return;
+	int rows = 0, off = 0, worst = 0, hMin = 1 << 20, hMax = 0;
+	QString first;
+	for ( int i = 0; i < tree->topLevelItemCount(); i++ ) {
+		QTreeWidgetItem * it = tree->topLevelItem( i );
+		const QRect r = tree->visualItemRect( it );
+		hMin = std::min( hMin, r.height() );
+		hMax = std::max( hMax, r.height() );
+		QWidget * w = tree->itemWidget( it, 1 );
+		if ( !w )
+			continue;
+		rows++;
+		const int dy = w->geometry().y() - r.y(), dh = w->geometry().bottom() - r.bottom();
+		if ( dy != 0 || dh > 0 ) {
+			off++;
+			if ( first.isEmpty() )
+				first = it->text( 0 );
+			worst = std::max( { worst, std::abs( dy ), dh } );
+		}
+	}
+	std::fprintf( stderr, "scene window rows: %d value rows, row h %d..%d, value off its row %d (worst %d px%s%s)\n", rows,
+		hMin, hMax, off, worst, first.isEmpty() ? "" : ", first ", qPrintable( first ) );
 }
 
 QSize wwSceneWantedSize( QTreeWidget * tree, const QWidget * window )

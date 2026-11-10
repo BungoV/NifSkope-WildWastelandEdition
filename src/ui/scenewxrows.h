@@ -19,6 +19,8 @@ void wwSceneAddWeatherOverrides( const std::function<void( const QString & )> & 
  * every row gets the height of a styled field (uniform rows took the first item's text height, so taller widgets
  * slid over the next row), combos size to their contents. Red WW_SCENE_LAYOUT_RED=1: as before. */
 void wwSceneTidyRows( QTreeWidget * tree );
+//! MODULES1 round 4 F3: the stderr line "scene window rows:" (each value's top against its row's)
+void wwSceneRowsEcho( QTreeWidget * tree );
 //! The window size that shows every row's name and whole value (an invalid size with the red)
 QSize wwSceneWantedSize( QTreeWidget * tree, const QWidget * window );
 
