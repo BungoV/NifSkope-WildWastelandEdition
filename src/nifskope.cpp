@@ -7537,7 +7537,18 @@ bool NifSkope::blockListDragEvent( QEvent * event )
 	return true;
 }
 
-void NifSkope::swapModels()
+/* lane PERFLOAD1 P4: swapModels was a toggle keyed on the details tree. With no block selected the tree sits on the
+ * empty model (the blank-panel rule below), so the toggle read "already parked" at the next load and ATTACHED the block
+ * list proxy and the tree to the document being built: every inserted block signalled the views. 11-10 flight: the
+ * reopen's weld write took 218 s against 1.2 s at launch (301 s vs 58 s in all). Now loading parks, completing
+ * attaches. Red WW_LOAD_PARK_RED=1: the old toggle. */
+static bool wwLoadParkRed()
+{
+	WW_SWITCH_STATIC( bool, red, !wwSwitchEcho( "views parked while a file loads", wwEnv( "WW_LOAD_PARK_RED" ) != "1" ) );
+	return red;
+}
+
+void NifSkope::swapModels( bool park )
 {
 	// Swap out the models with empty versions while loading the file
 	// This is so that the views do not update while loading the file
@@ -7556,8 +7567,14 @@ void NifSkope::swapModels()
 	 * doing.
 	 */
 	const bool listMode = ( list->model() == nif || list->model() == nifEmpty );
+	const bool toggle = ( tree->model() == nif );
+	if ( park && !toggle ) {
+		std::fprintf( stderr, "load: views parked%s (the details panel was on the empty model: the old toggle %s them)\n",
+			wwLoadParkRed() ? " NOT" : "", wwLoadParkRed() ? "ATTACHES" : "would have attached" );
+		std::fflush( stderr );
+	}
 	wwReleaseBlockListColumns();
-	if ( tree->model() == nif ) {
+	if ( wwLoadParkRed() ? toggle : park ) {
 		list->setModel( listMode ? static_cast<QAbstractItemModel *>( nifEmpty )
 			: static_cast<QAbstractItemModel *>( proxyEmpty ) );
 		tree->setModel( nifEmpty );

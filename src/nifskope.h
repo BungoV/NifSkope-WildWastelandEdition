@@ -683,7 +683,7 @@ private:
 	void updateRecentArchiveFileActions();
 
 	//! Disconnect and reconnect the models to the views
-	void swapModels();
+	void swapModels( bool park );
 
 	//! (Re)connect the block-list multi-selection handler. Must be re-run
 	//! whenever list->setModel() replaces the view's selection model.
