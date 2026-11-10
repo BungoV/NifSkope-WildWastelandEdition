@@ -14,6 +14,7 @@ BSD License - see nifskope.h
 #include "cellmesh.h"	// lane FARDRAW1: CellMeshInst
 #include "features/far-lod/cellfarinst.h"	// lane FARDRAW1: the instanced far rings cast
 #include "features/far-lod/cellfarhide.h"	// lane FARHOLE2: the rows a loaded near cell leaves out
+#include "features/far-lod/lodpreview.h"	// lane PERFLOAD1 P10: the casters the LOD preview leaves out
 #include "features/near/cellcull.h"	// lane SUNCELL1: each cascade culls its casters against its own window
 #include "gl/cellgrass.h"	// lane FAR5: a wind cable's shadow sways with it
 #include "gl/celltreewind.h"	// lane WINDTREE1: a tree-wind shape's caster sways with it
@@ -1109,6 +1110,7 @@ static void sunShadowPassImpl( Scene * scene )
 		long long oneTris = 0;
 		std::vector<std::pair<long long, QString>> top;
 	} ic;
+	int previewDropped = 0;	// lane PERFLOAD1 P10
 	const qint64 walkT0 = PassTime::on() ? PassTime::nowNs() : 0;	// lane PERFHUNT2: `cpu sun-walk`, the walk inside sun-casters
 	for ( Node * node : scene->nodes.list() ) {
 		const Shape * sh = dynamic_cast<const Shape *>( node );
@@ -1116,6 +1118,11 @@ static void sunShadowPassImpl( Scene * scene )
 			continue;
 		if ( !sh->wwCastsSunShadow() ) {
 			ic.noCast++;	// lane MODULES1 M1: the census counts in every cell (one cast per node, not two)
+			continue;
+		}
+		// lane PERFLOAD1 P10: the LOD preview's ring alone / near grid OFF: the shadows match what is drawn
+		if ( wwShadowPreviewDrops( scene, sh ) ) {
+			previewDropped++;
 			continue;
 		}
 		// lane SUNCELL1: a cell's water surface is no caster (the game's water casts no sun shadow; a creek's plane
@@ -1186,6 +1193,12 @@ static void sunShadowPassImpl( Scene * scene )
 		PassTime::cpuSubAdd( PassTime::CpuSunWalk, PassTime::nowNs() - walkT0 );
 	s.casters = int( casters.size() );
 	s.decalsSkipped = decalsSkipped;
+	static int saidPreviewDropped = 0;	// lane PERFLOAD1 P10: once per change
+	if ( previewDropped != saidPreviewDropped ) {
+		std::fprintf( stderr, "sun cascades: lod preview leaves out %d casters (ring %s, near grid %s)\n", previewDropped,
+			qPrintable( LodPreview::ringName( LodPreview::ring() ) ), qPrintable( LodPreview::gridName( LodPreview::grid() ) ) );
+		saidPreviewDropped = previewDropped;
+	}
 	{	// lane MODULES1 M1: the census in every cell (INTSKY1 printed it for a sunlit interior only), once per change
 		std::sort( ic.top.begin(), ic.top.end(), []( const auto & a, const auto & b ) { return a.first > b.first; } );
 		QStringList t;

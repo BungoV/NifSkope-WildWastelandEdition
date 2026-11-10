@@ -147,5 +147,8 @@ bool wwShadowRed( const char * name );
 //! lane WATERWETBAKE1: the shadow set's terrain test (the cells' LAND under "ground", the far LOD's terrain)
 class Shape;
 bool wwCellIsTerrainShape( const Shape * sh );
+//! lane PERFLOAD1 P10: a shape the LOD preview leaves out of the draw casts no sun shadow either (a far ring the
+//! "ring alone" hides; under the near grid's OFF, a loaded cell or large-ref unit taken out of the scene)
+bool wwShadowPreviewDrops( const Scene * scene, const Shape * sh );
 
 #endif

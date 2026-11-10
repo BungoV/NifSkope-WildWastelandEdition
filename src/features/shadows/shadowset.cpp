@@ -24,6 +24,7 @@ BSD License - see nifskope.h
 #include "gl/renderer.h"
 #include "harnesswindow.h"
 #include "features/far-lod/impostorchunk.h"	// lane FAR5: the far cards as terrain-shadow casters
+#include "features/far-lod/lodpreview.h"	// lane PERFLOAD1 P10: the preview's ring alone and near grid
 #include "features/water/cellwater.h"	// lane FOGTERRAIN3: the water shapes the ground fog stands on
 #include "gl/fogterrain.h"	// lane FOGTERRAIN1: the ground fog's low-pass terrain (FOGTERRAIN2: its own job here)
 #include "features/shared/cellpasstime.h"	// lane PERFFIX2: the contact sub-timer
@@ -546,7 +547,7 @@ void objLodCut( Scene * scene, float cut[4], double & reach )
 	float hi[2] = { -std::numeric_limits<float>::max(), -std::numeric_limits<float>::max() };
 	for ( Node * node : scene->nodes.list() ) {
 		const Shape * sh = dynamic_cast<const Shape *>( node );
-		if ( !sh || !sh->isVisible() || sh->verts.isEmpty() || !isLoadedLand( sh ) )
+		if ( !sh || !sh->isVisible() || sh->verts.isEmpty() || !isLoadedLand( sh ) || wwShadowPreviewDrops( scene, sh ) )
 			continue;
 		const Transform w = sh->worldTrans();
 		for ( const Vector3 & v : sh->verts ) {
@@ -580,7 +581,7 @@ void collectTerrain( Scene * scene, std::vector<const Shape *> & out, std::vecto
 	const bool cutOn = cut[0] <= cut[2];
 	for ( Node * node : scene->nodes.list() ) {
 		const Shape * sh = dynamic_cast<const Shape *>( node );
-		if ( !sh || !sh->isVisible() || sh->verts.isEmpty() || sh->triangles.isEmpty() )
+		if ( !sh || !sh->isVisible() || sh->verts.isEmpty() || sh->triangles.isEmpty() || wwShadowPreviewDrops( scene, sh ) )
 			continue;
 		const bool terr = isTerrainShape( sh );
 		if ( !terr ) {
@@ -1651,6 +1652,19 @@ void echoSummary()
 bool wwCellIsTerrainShape( const Shape * sh )
 {
 	return sh && isTerrainShape( sh );
+}
+
+bool wwShadowPreviewDrops( const Scene * scene, const Shape * sh )
+{
+	if ( LodPreview::ringHides( sh->getName() ) )
+		return true;
+	if ( LodPreview::grid() != LodPreview::Off )
+		return false;
+	// Stream::nearOffCell takes the cell's node off its parent: the draw walks the roots, the casters every node
+	const Node * top = sh;
+	while ( top->parentNode() )
+		top = top->parentNode();
+	return !scene->roots.list().contains( const_cast<Node *>( top ) );
 }
 
 bool wwShadowRed( const char * name )
