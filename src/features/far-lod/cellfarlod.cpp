@@ -449,6 +449,10 @@ QString cellFarLodAppend( NifModel * nif, const QModelIndex & iRoot, const EsmWo
 	const bool noTerrainRed = red == "noterrain";   // terrain built (the rings' cuts stand), every terrain shape hidden
 	const bool noObjectsRed = red == "noobjects";   // ours not built, the game's .bto objects hidden
 	const bool noCardsRed = red == "nocards";   // the tree cards not armed
+	// lane PERFLOAD1 P3 reds: cardstay = the last build's cards stay when ours is off; cardslim = cards ignore WW_CELL_FARLOD_OURS
+	const bool cardsStayRed = red == "cardstay";
+	const bool cardsLimRed = red == "cardslim";
+	const bool vanWaterRed = red == "vanwaterdef";	// the game's water shapes take the worldspace default only
 	const int h = std::max( 0, ( n - 1 ) / 2 );
 	const int bx0 = cx - h, by0 = cy - h, bx1 = cx + h, by1 = cy + h;
 	// lane CELLSTREAM1: objects and cards leave out every cell a 5x5 round any roam position can load
@@ -747,13 +751,71 @@ QString cellFarLodAppend( NifModel * nif, const QModelIndex & iRoot, const EsmWo
 			say( QStringLiteral( "far lod: vanilla REFUSED -- %1" ).arg( verr ) );
 		WwWaterRecord vdef;
 		const bool haveVdef = world.defaultWaterType() != 0 && world.waterRecord( world.defaultWaterType(), vdef );
+		/* lane PERFLOAD1 P3: the game's .btr water shapes carry no WATR form, and the Commonwealth has no default
+		 * water ("endless sea: NONE"), so none was drawn as the cell's water: they kept the flat stand-in shader.
+		 * Each takes the water its chunk's cells use (the most cells with a readable record), the worldspace's
+		 * default only where no cell of the chunk names one. Red vanwaterdef: the default only. */
+		QHash<QString, int> vanStemRec;	// chunk stem -> index in vanRecs, -1 none
+		QVector<WwWaterRecord> vanRecs;
+		qint64 vwOwn = 0, vwDef = 0, vwNone = 0;
+		auto vanWaterRec = [&]( int b ) -> const WwWaterRecord * {
+			if ( !vanWaterRed ) {
+				const QStringList nm = nif->get<QString>( nif->getBlockIndex( b ), "Name" ).split( QLatin1Char( ' ' ) );
+				const QString stem = nm.size() > 4 ? nm.at( 4 ) : QString();
+				auto it = vanStemRec.find( stem );
+				if ( it == vanStemRec.end() ) {
+					int at = -1;
+					const QStringList p = stem.split( QLatin1Char( '.' ) );
+					bool ok1 = false, ok2 = false, ok3 = false;
+					const int lv = p.size() >= 4 ? p.at( p.size() - 3 ).toInt( &ok1 ) : 0;
+					const int x0 = p.size() >= 4 ? p.at( p.size() - 2 ).toInt( &ok2 ) : 0;
+					const int y0 = p.size() >= 4 ? p.at( p.size() - 1 ).toInt( &ok3 ) : 0;
+					if ( ok1 && ok2 && ok3 && lv > 0 && lv <= 64 ) {
+						QHash<quint32, int> n;
+						for ( int y = y0; y < y0 + lv; y++ )
+							for ( int x = x0; x < x0 + lv; x++ ) {
+								float h = 0.0f;
+								quint32 form = 0;
+								if ( world.cellWater( x, y, h, &form ) && form != 0 )
+									n[form]++;
+							}
+						quint32 best = 0;
+						int bestN = 0;
+						for ( auto f = n.cbegin(); f != n.cend(); ++f )
+							if ( f.value() > bestN || ( f.value() == bestN && f.key() < best ) ) {
+								WwWaterRecord r;
+								if ( world.waterRecord( f.key(), r ) ) {
+									best = f.key();
+									bestN = f.value();
+								}
+							}
+						WwWaterRecord r;
+						if ( best != 0 && world.waterRecord( best, r ) ) {
+							vanRecs << r;
+							at = vanRecs.size() - 1;
+						}
+					}
+					it = vanStemRec.insert( stem, at );
+				}
+				if ( it.value() >= 0 ) {
+					vwOwn++;
+					return &vanRecs.at( it.value() );
+				}
+			}
+			if ( haveVdef ) {
+				vwDef++;
+				return &vdef;
+			}
+			vwNone++;
+			return nullptr;
+		};
 		qint64 sOurs = 0, sVan = 0, sNone = 0, sBoth = 0;
 		for ( size_t i = 0; i < van.size(); i++ ) {
 			const WwFarVanRing & v = van[i];
 			int wReg = 0;
-			if ( haveVdef )
-				for ( int b : v.waterBlocks ) {
-					wwCellWaterShape( nif, b, vdef );
+			for ( int b : v.waterBlocks )
+				if ( const WwWaterRecord * rec = vanWaterRec( b ) ) {
+					wwCellWaterShape( nif, b, *rec );
 					wReg++;
 				}
 			say( QStringLiteral( "far lod: source ring %1 level %2 type %3 cells %4: chunks ours %5, vanilla %6, none %7, both %8" )
@@ -776,6 +838,10 @@ QString cellFarLodAppend( NifModel * nif, const QModelIndex & iRoot, const EsmWo
 			sNone += v.chunksNone;
 			sBoth += v.chunksBoth;
 		}
+		if ( vwOwn + vwDef + vwNone > 0 )
+			say( QStringLiteral( "far lod: the game's water shapes: %1 take their chunk's own WATR, %2 the worldspace default, "
+				"%3 none (not drawn as water)%4" ).arg( vwOwn ).arg( vwDef ).arg( vwNone )
+				.arg( vanWaterRed ? QStringLiteral( " (RED vanwaterdef)" ) : QString() ) );
 		say( QStringLiteral( "far lod: source total type %1: chunks ours %2, vanilla %3, none %4, both %5%6" )
 			.arg( typeName ).arg( sOurs ).arg( sVan ).arg( sNone ).arg( sBoth )
 			.arg( haveLim ? QStringLiteral( " (ours limited to %1,%2..%3,%4, WW_CELL_FARLOD_OURS)" )
@@ -1140,8 +1206,12 @@ QString cellFarLodAppend( NifModel * nif, const QModelIndex & iRoot, const EsmWo
 					chunks << base;
 			}
 		QStringList cn;
+		QVector<QRect> oursRings;	// lane PERFLOAD1 P3: the rings we built, when our files are limited
+		for ( const LodlFarRing & r : rings )
+			if ( r.built && r.ox1 >= r.ox0 && r.oy1 >= r.oy0 )
+				oursRings << QRect( QPoint( r.ox0, r.oy0 ), QPoint( r.ox1, r.oy1 ) );
 		cards = ImpostorChunk::armCellFar( nif, chunks, shift, ctrX, ctrY, treeDist, ox0, oy0, ox1, oy1,
-			&cardRefs, &cn );
+			&cardRefs, &cn, haveLim && !cardsLimRed ? &oursRings : nullptr );
 		for ( const QString & c : cn )
 			say( c.startsWith( QLatin1String( "far lod:" ) ) ? c : QStringLiteral( "far lod: cards: " ) + c );
 		if ( treeMeshRed ) {
@@ -1152,6 +1222,12 @@ QString cellFarLodAppend( NifModel * nif, const QModelIndex & iRoot, const EsmWo
 			for ( const QString & c : tn )
 				say( c );
 		}
+	} else if ( !cardsStayRed ) {
+		/* lane PERFLOAD1 P3: no cards of ours this build (the game's LOD, or red nocards): the last build's cards
+		 * must not stay drawn over the game's .bto trees (11-10 flight: 8492 of 20030 stayed after "ours off") */
+		ImpostorChunk::armCellFar( nif, QStringList(), shift, ctrX, ctrY, treeDist, ox0, oy0, ox1, oy1, nullptr, nullptr );
+		say( QStringLiteral( "far lod: cards 0 -- %1, the last build's cards cleared" )
+			.arg( ours ? QStringLiteral( "red nocards" ) : QStringLiteral( "the game's LOD (type %1)" ).arg( typeName ) ) );
 	}
 
 	// ---- objects, ring by ring: the authored slot of each, the ring inside cut out

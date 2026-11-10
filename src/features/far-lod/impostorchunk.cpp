@@ -432,7 +432,7 @@ int ImpostorChunk::draw( Scene * scene, const ImpostorDraw::Options & opt )
 /* ---- the cell view's far tree cards (impostorchunk.h) ---- */
 int ImpostorChunk::armCellFar( NifModel * nif, const QStringList & chunkPaths, const float shift[3],
 	float cx, float cy, float rMax, int hx0, int hy0, int hx1, int hy1,
-	QSet<quint32> * refs, QStringList * notes )
+	QSet<quint32> * refs, QStringList * notes, const QVector<QRect> * oursOnly )
 {
 	CellFarState & F = farSt();
 	F = CellFarState();
@@ -443,7 +443,7 @@ int ImpostorChunk::armCellFar( NifModel * nif, const QStringList & chunkPaths, c
 
 	// the chunk state is borrowed per manifest and put back as it was found
 	const ChunkState saved = st();
-	int read = 0, kept = 0, inHole = 0, beyond = 0;
+	int read = 0, kept = 0, inHole = 0, beyond = 0, notOurs = 0;
 	QSet<QString> said;   // a set's note once, not once a chunk
 	for ( const QString & chunk : chunkPaths ) {
 		const int got = arm( nif, chunk );
@@ -462,6 +462,17 @@ int ImpostorChunk::armCellFar( NifModel * nif, const QStringList & chunkPaths, c
 			if ( cellX >= hx0 && cellX <= hx1 && cellY >= hy0 && cellY <= hy1 ) {
 				inHole++;
 				continue;
+			}
+			/* lane PERFLOAD1 P3: with our files limited to a rectangle (WW_CELL_FARLOD_OURS) a card of ours stands only
+			 * on a ring we built; the game's .bto carries its own trees everywhere else */
+			if ( oursOnly ) {
+				bool in = false;
+				for ( const QRect & q : *oursOnly )
+					in = in || q.contains( cellX, cellY );
+				if ( !in ) {
+					notOurs++;
+					continue;
+				}
 			}
 			const float dx = p0.world[0] - cx, dy = p0.world[1] - cy;
 			if ( rMax > 0.0f && dx * dx + dy * dy > rMax * rMax ) {
@@ -506,7 +517,8 @@ int ImpostorChunk::armCellFar( NifModel * nif, const QStringList & chunkPaths, c
 	if ( notes )
 		*notes << QStringLiteral( "far lod: cards %1 read from %2 chunk manifests, %3 kept, %4 in the hole, "
 			"%5 past %6 units, %7 sets" ).arg( read ).arg( chunkPaths.size() ).arg( kept ).arg( inHole )
-			.arg( beyond ).arg( double( rMax ), 0, 'f', 0 ).arg( F.cards.sets.size() );
+			.arg( beyond ).arg( double( rMax ), 0, 'f', 0 ).arg( F.cards.sets.size() )
+			+ ( oursOnly ? QStringLiteral( ", %1 outside our built rings (the game's .bto there)" ).arg( notOurs ) : QString() );
 	return kept;
 }
 

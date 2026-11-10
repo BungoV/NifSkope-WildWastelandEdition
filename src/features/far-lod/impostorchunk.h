@@ -12,6 +12,7 @@ BSD License - see nifskope.h
 #include "data/niftypes.h"	// Triangle (the card casters)
 
 #include <QHash>
+#include <QRect>
 #include <QSet>
 #include <QString>
 #include <QStringList>
@@ -67,7 +68,7 @@ const QVector<Placed> & placements();
 // resets the chunk state, so the cards around a cell block live apart from it.
 int armCellFar( NifModel * nif, const QStringList & chunkPaths, const float shift[3],
 	float cx, float cy, float rMax, int hx0, int hy0, int hx1, int hy1,
-	QSet<quint32> * refs, QStringList * notes );
+	QSet<quint32> * refs, QStringList * notes, const QVector<QRect> * oursOnly = nullptr );
 int drawCellFar( Scene * scene, const ImpostorDraw::Options & opt );
 /*! lane PERFLOAD1 P1: the bake's card arrays (`<objectsDir>/<ws>.LodgenCards.*.lodm`, horizon ring sets left out) read
  *  layer by layer: form -> its layer into `layerOf`, each layer loaded once as a set of the far cards. After armCellFar. */
