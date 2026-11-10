@@ -1,3 +1,18 @@
+## MODULES1 M2 (2026-11-10): multiply decals darken the albedo only, not the lit frame
+
+- **Before:** a wall grime decal (GrimeSubtle01.BGSM: blend DestColor x Zero) was drawn lit, fogged and exposed, and
+  that colour multiplied the frame. In the sun the whole rectangle went dark (the decal took the alley's light a
+  second time); in fog it showed as a lighter, unfogged patch (bungo 11-10, decal_tall_wall, decal_unfogged_wall).
+- **Now:** the game multiplies the g-buffer albedo before lighting. A multiply decal (DestColor x Zero) or a 2x one
+  (DestColor x SrcColor) writes its albedo factor alone, mixed to neutral by its texture alpha (GrimeSubtle01_d: rgb
+  mean 31/255, alpha mean 12/255), unlit, faded to neutral by the fog's transmittance at the pixel, so only the grime
+  darkens and it fades with the wall. M1 already keeps decals out of the sun walk.
+- **Red:** `WW_DECALMUL_RED=1` (lit and fogged, as before). **Telemetry:** `decal blend: <material> src S dst D ->
+  multiply ... | lit and fogged (alpha blend); vertex alpha yes|none min..max`, once per blended surface-decal material,
+  so the flight names the material at decal_tall_wall (101 of 128 Materials\Decals are plain alpha blend: if the
+  rectangle is one of those, its vertex alpha range says whether its edges lost their fade).
+- **Cost:** two fog reads on multiply-decal pixels only; the pass-time before/after is owed at the build.
+
 ## MODULES1 M1 (2026-11-10): the sun's casters draw both faces in every cell; decals cast nothing of their own
 
 - **Before:** INTSKY1 drew a caster's both faces and let decals pass the sun in a SUNLIT INTERIOR only; outdoors the

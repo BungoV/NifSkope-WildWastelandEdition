@@ -834,6 +834,7 @@
 { "WW_CSM_PROBE", 0, "src/features/shadows/sunshadow.cpp:159 cs | init-once state, re-read when a live set moves its prefix (b)" },
 { "WW_CSM_RED", 0, "src/features/shadows/sunshadow.cpp:165 cs | init-once state, re-read when a live set moves its prefix (b)" },
 { "WW_CYCLETYPE_TEST", 2, "src/nifskope_ui.cpp:8752 NifSkope::createWindow | createWindow: picks which harness the window runs" },
+{ "WW_DECALMUL_RED", 0, "src/gl/renderer.cpp:2405 Renderer::setupProgramCE1 | re-read per frame or per call (a)" },
 { "WW_DEFAULTS1_RED", 2, "src/features/air/cellairzone.cpp:133 wwAirZonesOn | read once for the process (a loaded/init flag or static const struct, no generation check)" },
 { "WW_DELETE_TEST", 2, "src/nifskope_ui.cpp:3777 NifSkope::createWindow | createWindow: picks which harness the window runs" },
 { "WW_DESTRUCTIVE_TEST", 2, "src/nifskope_ui.cpp:17566 NifSkope::createWindow | createWindow: picks which harness the window runs" },

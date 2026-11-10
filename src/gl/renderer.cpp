@@ -2399,6 +2399,31 @@ bool Renderer::setupProgramCE1( const NifModel * nif, Program * prog, Shape * me
 			WW_SWITCH_STATIC( bool, deep, wwEnv( "WW_CELL_DECAL_POM_RED" ).trimmed() == "deep" );
 			prog->uni2f( "wwDecalPom", on ? sc * ( deep ? 4.0f : 1.0f ) : 0.0f, steps );
 		}
+		if ( prog->uniLocation( "wwMulDecal" ) >= 0 ) {
+			/* MODULES1 M2: a multiply decal (material blend DestColor x Zero, or DestColor x SrcColor = 2x) writes its
+			 * albedo factor, unlit, fogged to neutral (fo4_default.frag). Red WW_DECALMUL_RED=1: lit and fogged, as before. */
+			WW_SWITCH_STATIC( bool, mulRed, wwEnv( "WW_DECALMUL_RED" ).trimmed() == "1" );
+			const Material * mm = mesh->bslsp ? mesh->bslsp->getMaterial() : nullptr;
+			int mul = 0;
+			if ( !mulRed && mm && mm->hasAlphaBlend() && scene->hasOption( Scene::DoBlending ) && mm->alphaSourceBlend() == 4 )
+				mul = mm->alphaDestinationBlend() == 1 ? 1 : mm->alphaDestinationBlend() == 2 ? 2 : 0;
+			prog->uni1i( "wwMulDecal", mul );
+			// the census: every blended surface decal's material once (its blend, and the vertex alpha that edges it)
+			static QSet<QString> mulTold;
+			if ( mm && mm->hasAlphaBlend() && mesh->wwSurfaceDecal() && !mulTold.contains( mesh->bslsp->materialFileName() ) ) {
+				mulTold.insert( mesh->bslsp->materialFileName() );
+				float vaMin = 1.0f, vaMax = 0.0f;
+				for ( const Color4 & vc : mesh->colors ) {
+					vaMin = std::min( vaMin, vc[3] );
+					vaMax = std::max( vaMax, vc[3] );
+				}
+				fprintf( stderr, "decal blend: %s src %u dst %u -> %s; vertex alpha %s %.2f..%.2f (red WW_DECALMUL_RED=1)\n",
+					qPrintable( mesh->bslsp->materialFileName() ), mm->alphaSourceBlend(), mm->alphaDestinationBlend(),
+					mul ? "multiply: albedo factor x coverage, unlit, fogged to neutral" : mulRed ? "lit and fogged (red)"
+					: "lit and fogged (alpha blend)", mesh->hasVertexColors && !mesh->colors.isEmpty() ? "yes" : "none",
+					double( vaMin ), double( vaMax ) );
+			}
+		}
 		if ( prog->uniLocation( "wwDecalAngle" ) >= 0 ) {	// lane DECALANGLE: the vertex alpha is dot(N, D) on this shape
 			const bool angle = wwCellDecalAngleFor( scene->nifModel, mesh->id() );
 			const bool mapped = angle && wwCellDecalMappedFor( scene->nifModel, mesh->id() );

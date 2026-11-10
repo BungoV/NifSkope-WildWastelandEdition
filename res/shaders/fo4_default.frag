@@ -51,6 +51,7 @@ uniform float alpha;
 uniform vec2 wwDecalPom;	// lane DECALS1: placed decal parallax (DODT scale x 0.1, step cap); x = 0 off
 uniform bool wwDecalAngle;	// lane DECALANGLE: a placed decal whose vertex alpha is dot(N, D) (src/celldecalangle.h)
 uniform bool wwDecalMapped;	// lane DECALANGLE2: and its vertex rgb is D as a signed byte (not a colour)
+uniform int wwMulDecal;	// MODULES1 M2: 1 a multiply decal (DestColor, Zero), 2 a 2x one (DestColor, SrcColor); 0 none
 uniform int alphaFlags;			// bits 0 to 2: alpha test mode, bit 3: alpha blending enabled
 uniform bool landSplat;		// lane TERRBLEND1: vertex alpha = this blended-ground pass's share
 uniform int landSplatDbg;	// lane ALLON2: 0 edge guard, 1 red WW_TERRBLEND_RED=edgepass (no guard), 2 probe WW_TERRBLEND_PROBE=edge
@@ -1025,6 +1026,30 @@ void main()
 		color.a = 1.0;
 	}
 
+#ifdef WW_CELLLIGHTS
+	/* MODULES1 M2 (bungo 11-10, decal_tall_wall / decal_unfogged_wall: the whole grime rectangle showed, dark in the
+	 * sun, light in the fog). A multiply decal's material (GrimeSubtle01.BGSM: blend DestColor x Zero) multiplies the
+	 * ALBEDO under it in the game's g-buffer, before any light. Drawn lit and fogged here, its output multiplied the lit
+	 * frame by the decal's own light: the rectangle took the alley's darkness twice, and the fog's colour once. Now it
+	 * writes the albedo factor alone, its texture alpha as the coverage (GrimeSubtle01_d: rgb mean 31/255, alpha mean
+	 * 12/255: the dark rgb counts only where the alpha says grime), gamma-2 albedo -> linear: squared, pushed to neutral
+	 * by the fog's transmittance at the pixel (the fog's own affine split: wwFog(1) - wwFog(0)), so the decal fades
+	 * with the wall under it. */
+	if ( cellOn && wwMulDecal != 0 ) {
+		float m = wwMulDecal == 2 ? 2.0 : 1.0;	// the blend doubles a 2x decal: neutral grey is 0.5
+		float cov = clamp( wwDecalVertexA( C.a ) * baseMap.a * alpha, 0.0, 1.0 );
+		vec3 k = clamp( mix( vec3( 1.0 / m ), albedo, cov ) * m, vec3( 0.0 ), vec3( m ) );
+		vec3 F = k * k;
+#ifdef WW_FOG
+		if ( fogOn || wwApOn() ) {
+			vec3 f0 = wwFog( vec3( 0.0 ), -ViewDir );
+			vec3 T = clamp( wwFog( vec3( 1.0 ), -ViewDir ) - f0, vec3( 0.0 ), vec3( 1.0 ) );
+			F = mix( vec3( 1.0 ), F, T );
+		}
+#endif
+		color.rgb = ( cellIsOn && cellIsLinear ? F : sqrt( F ) ) / m;
+	}
+#endif
 	fragColor = color;
 #ifdef WW_CELLLIGHTS
 	/* lane FO4CELLGI1: the probe and pass views (cellProbeOut, cellPassOut) compile only under the loader's WW_CELL_VIEWS,
