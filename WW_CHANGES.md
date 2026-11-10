@@ -1,3 +1,12 @@
+## MODULES1 M3 round 2 (2026-11-10): the street steam no longer a white curtain in the shade
+
+- Cause: a lit effect outdoors takes no shadow and no sky occlusion (the game's base, HAZECARD1), and its level was
+  scaled with the sun + ambient (rEff). The physical sky's ambient is a far smaller share of the light than the
+  weather's (Clear noon: 4418 of 63550 lux), so the steam stood ~2x a wall in open shade and more in an alley.
+- Now the Effect Lighting scales with the ambient alone (src/gl/lookdevstage.cpp physFinish): it stands to the shaded
+  light as the game's does. `phys light:` prints the effect's scale and the fog's beside it (`fog x`).
+- Red `WW_FX_EFFECT_SCALE_RED=1`: the sun + ambient scale, as before.
+
 ## MODULES1 M12 (2026-11-10): the air's column line (night items G4b, G5)
 
 - `air column:` is said when the medium changes (a weather change): the band's base, scale height, top and top falloff;

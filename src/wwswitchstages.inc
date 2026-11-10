@@ -906,6 +906,7 @@
 { "WW_FXCOVRESID_RED", 0, "src/gl/glshape.cpp:444 Shape::wwFxSideAlpha | re-read per frame or per call (a)" },
 { "WW_FXPALETTE_RED", 2, "src/nifskope_ui.cpp:25940 NifSkope::initDockWidgets | constructor/startup of a window-lifetime object" },
 { "WW_FX_BOLTPALETTE_RED", 0, "src/gl/controllers.cpp:1477 wwFxBoltPaletteRed | re-read per frame or per call (a)" },
+{ "WW_FX_EFFECT_SCALE_RED", 0, "src/gl/lookdevstage.cpp:1083 physFinish | re-read per frame or per call (a)" },
 { "WW_FX_ENVMASK_RED", 0, "src/gl/renderer.cpp:373 wwFxEnvMaskMode | re-read per frame or per call (a)" },
 { "WW_FX_LIGHTNING_RED", 0, "src/gl/controllers.cpp:1485 wwFxLightningRed | re-read per frame or per call (a)" },
 { "WW_FX_MASKRESET_RED", 2, "src/nifskope_ui.cpp:25940 NifSkope::initDockWidgets | constructor/startup of a window-lifetime object" },

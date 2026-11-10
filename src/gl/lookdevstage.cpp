@@ -1074,17 +1074,26 @@ void physFinish( LdLight & L, float rKey, bool airKey )
 	}
 	const float oldTot = lumOf( L.sun ) / std::max( rKey, 1e-9f ) + ambOld;
 	const float rEff = oldTot > 1e-12f ? ( lumOf( L.sun ) + lumOf( L.amb ) ) / oldTot : rKey;
+	/* MODULES1 M3 round 2 (bungo 11-10, steam_white_wall / steam_mist_wide: the street steam a bright white curtain in the
+	 * shaded alley). A lit effect takes no shadow and no sky occlusion (the game's base, HAZECARD1), so its level must stand
+	 * to the SHADED light as the game's does: the Effect Lighting row sits beside the weather's ambient, not beside the full
+	 * sun. rEff kept its share of sun + ambient, but the physical sky's ambient share is far below the weather's (Clear noon:
+	 * ambient 4418 of 63550 lux), so the steam came out ~2x a wall in the open shade and more in an alley. Now the effect
+	 * scales with the ambient alone (rAmb). Red WW_FX_EFFECT_SCALE_RED=1: the sun + ambient scale, as before. */
+	WW_SWITCH_STATIC( bool, fxScaleRed, wwEnvStr( "WW_FX_EFFECT_SCALE_RED" ).trimmed() == QLatin1StringView( "1" ) );
+	const float rAmb = ambOld > 1e-12f ? lumOf( L.amb ) / ambOld : rEff;
+	const float rFx = fxScaleRed ? rEff : rAmb;
 	for ( int c = 0; c < 3; c++ )
-		L.effect[c] *= rEff;
+		L.effect[c] *= rFx;
 	L.physKey = rKey;
 	L.physFog = rEff;
 	wwPhysNoteDaylight( L.sun, len > 0.0f ? n[2] : 0.0f, L.dalc[4] );	// MODULES1 item 14: the incident meter
 	static QString said;
-	const QString line = QStringLiteral( "phys light: key %1 cd/m2 (x%2 %3) sky +Z %4 -Z %5 ambient %6 effect x%7 sky=%8" )
+	const QString line = QStringLiteral( "phys light: key %1 cd/m2 (x%2 %3) sky +Z %4 -Z %5 ambient %6 effect x%7 sky=%8 (fog x%9)" )
 		.arg( double( lumOf( L.sun ) ), 0, 'g', 5 ).arg( double( rKey ), 0, 'g', 5 )
 		.arg( airKey ? QStringLiteral( "air" ) : QStringLiteral( "weather" ) ).arg( double( lumOf( L.dalc[4] ) ), 0, 'g', 5 )
-		.arg( double( lumOf( L.dalc[5] ) ), 0, 'g', 5 ).arg( double( lumOf( L.amb ) ), 0, 'g', 5 ).arg( double( rEff ), 0, 'g', 5 )
-		.arg( sky ? QStringLiteral( "physical" ) : QStringLiteral( "weather" ) );
+		.arg( double( lumOf( L.dalc[5] ) ), 0, 'g', 5 ).arg( double( lumOf( L.amb ) ), 0, 'g', 5 ).arg( double( rFx ), 0, 'g', 5 )
+		.arg( sky ? QStringLiteral( "physical" ) : QStringLiteral( "weather" ) ).arg( double( rEff ), 0, 'g', 5 );
 	if ( line != said ) {
 		said = line;
 		fprintf( stderr, "%s\n", qPrintable( line ) );
