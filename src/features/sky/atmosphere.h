@@ -59,6 +59,8 @@ struct WwAtmoFrame
 	float tint[17][3] = {};
 };
 const WwAtmoFrame & wwAtmoFrame();
+//! MODULES1 M8: the drawn sky's colour just above the horizon, scene units (false with no sky drawn)
+bool wwAtmoHorizon( float out[3] );
 //! SHAFTS1b: where the last sky's haze rung came from: "recx", "clearday" (a clear weather's aerosol) or "record"
 const char * wwAtmoHazeSource();
 

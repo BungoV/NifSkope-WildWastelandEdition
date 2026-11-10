@@ -1357,7 +1357,7 @@ void wwVolAirPass( Scene * scene, bool run )
 	for ( int k : { PassTime::AirPre, PassTime::AirFar, PassTime::AirPost } )
 		PassTime::subEnd( k );	// no-ops unless an early return left one open
 	const qint64 tInner = pt.nsecsElapsed();
-	if ( vs().on && run )
+	if ( run || !vs().on )	// MODULES1 M8: the air off is said too (the log kept noon's "Day,Day" phase at 3 AM)
 		vaEcho();
 	vaCpu.mark( PassTime::CpuAirEcho );
 	if ( prof )

@@ -1,3 +1,14 @@
+## MODULES1 M8 (2026-11-10): night no longer lit like day; fog and sky meet in one colour
+
+- **Cause, from the flight's 3 AM lines** (Goodneighbor, Sun Path Real): `level 21076 lux (sun 0 + sky 21075) ...
+  day weight 1.00` and the fog's colours x89828 were M7's root cause: the sun's sky was taken at the disc, which sat on
+  the engine's night point 37 degrees up, at the sun's level. With M7 (9a5b3887) it comes from the sun body (-42
+  degrees, x ~1e-17): a few lux, the fog's scale ~1. The "Day,Day" phase was a stale air line from noon: the air
+  (WW_CELL_AIR=0) was never said while off; it is said now.
+- **Horizon:** the fog's far colours are now the drawn sky's colour 0.57 degrees above the horizon (atmosphere.cpp
+  `wwAtmoHorizon`: the sun's and the moon's scatter, the night floor, the Weather Tint, the drawn sky's own CPU twin),
+  the near colours keep the weather's hue at the same luminance step. Telemetry `fog horizon:`. Red WW_FOG_HORIZON_RED=1.
+
 ## MODULES1 M7 (2026-11-10): sunrise light from the real sun
 
 - **Cause, from the flight's light lines** (CommonwealthClear, Sun Path Real): at 7:00 the real sun stood at +1.2

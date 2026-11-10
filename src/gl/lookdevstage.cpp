@@ -1405,6 +1405,16 @@ bool wwLookdevFogWanted( Scene * scene )
 	return on;
 }
 
+/* MODULES1 M8 (bungo 11-10, 3 AM: the vanilla distance fog glowed blue against a black sky, a hard line where they
+ * met). The fog's far colours are the drawn sky's just above the horizon (wwAtmoHorizon: the sun's and the moon's
+ * scatter, the night floor, the tint), its near colours keep the weather's hue at the same luminance step. One colour
+ * where sky and fog meet, by day and by night. Red WW_FOG_HORIZON_RED=1: the weather's colours x the light's scale. */
+bool wwFogHorizonRed()
+{
+	WW_SWITCH_STATIC( bool, red, wwEnvStr( "WW_FOG_HORIZON_RED" ).trimmed() == QLatin1StringView( "1" ) );
+	return red;
+}
+
 void wwLookdevFogUniforms( Scene * scene )
 {
 	PassTime::DrawCpuScope cpuT( PassTime::CpuFogUni );	// lane PERF2
@@ -1433,9 +1443,28 @@ void wwLookdevFogUniforms( Scene * scene )
 	prof.at( 5, "currentfog" );
 	/* lane PHYSUNITS1: the fog's colours (fogK[1..4]) in the light's units; fogUnit lets the gray weight read the old scale */
 	const float fu = wwPhysSkyOn() ? currentLight().physFog : 1.0f;
+	float hz[3];
+	const bool horizon = wwPhysSkyOn() && !wwFogHorizonRed() && wwAtmoHorizon( hz );
+	float gNear = 1.0f;
+	if ( horizon ) {	// MODULES1 M8: the far colours = the sky's horizon; the near ones scale by the same step
+		auto lum = []( const float * c ) { return 0.2126f * c[0] + 0.7152f * c[1] + 0.0722f * c[2]; };
+		const float far[3] = { 0.5f * ( f.K[3][0] + f.K[4][0] ) * fu, 0.5f * ( f.K[3][1] + f.K[4][1] ) * fu,
+			0.5f * ( f.K[3][2] + f.K[4][2] ) * fu };
+		const float lf = lum( far ), lh = lum( hz );
+		gNear = lf > 1e-12f ? lh / lf : 1.0f;
+		static float said = -1.0f;
+		if ( std::abs( gNear - said ) > 0.02f * std::max( said, 1e-6f ) ) {
+			said = gNear;
+			fprintf( stderr, "fog horizon: sky %.4g %.4g %.4g (L %.4g), weather far L %.4g, fog x%.4g (red WW_FOG_HORIZON_RED=1)\n",
+				double( hz[0] ), double( hz[1] ), double( hz[2] ), double( lh ), double( lf ), double( gNear ) );
+		}
+	}
 	for ( int k = 0; k < 6; k++ ) {
-		const float m = ( k >= 1 && k <= 4 ) ? fu : 1.0f;
-		prog->uni4f_l( prog->uniLocation( "fogK[%d]", k ), FloatVector4( f.K[k][0] * m, f.K[k][1] * m, f.K[k][2] * m, f.K[k][3] ) );
+		const float m = ( k >= 1 && k <= 4 ) ? fu * ( horizon ? gNear : 1.0f ) : 1.0f;
+		if ( horizon && ( k == 3 || k == 4 ) )
+			prog->uni4f_l( prog->uniLocation( "fogK[%d]", k ), FloatVector4( hz[0], hz[1], hz[2], f.K[k][3] ) );
+		else
+			prog->uni4f_l( prog->uniLocation( "fogK[%d]", k ), FloatVector4( f.K[k][0] * m, f.K[k][1] * m, f.K[k][2] * m, f.K[k][3] ) );
 	}
 	prog->uni1f( "fogUnit", fu );
 	prof.at( 6, "fogk" );

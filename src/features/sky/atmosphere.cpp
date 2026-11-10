@@ -1133,6 +1133,14 @@ bool wwAtmoGiActive()
  * keeps it (skyIrradianceAxes, from the ground, the exact haze). The twin takes the haze in 2 % steps, so its tables
  * (~70-300 ms on 8 threads) rebuild only on a step; a new sun or height alone is ~3 ms.
  * False while Physical Sky is off or the sun is under the horizon (the weather's ambient stays the GI's sky then). */
+/* the drawn sky's CPU tables (atmomath skyTablesBuild), one set for the GI's sky and the fog's horizon (MODULES1 M8):
+ * both key them on the same 2 % haze steps and tier, so they rebuild once per step, not once per caller */
+static SkyTables & drawnTables()
+{
+	static SkyTables t;
+	return t;
+}
+
 bool wwAtmoGiSkyTwinRed()
 {
 	static const bool red = wwEnvStr( "WW_CELL_RTDDGI_SKYTWIN_RED" ).trimmed() == QLatin1StringView( "1" );
@@ -1152,7 +1160,7 @@ bool wwAtmoGiSkyAxes( const float sunTo[3], float out[6][3], float * trans, floa
 	const float h = twinRed ? 0.0f : std::round( std::clamp( hKm, 0.002f, 80.0f ) * 1000.0f ) / 1000.0f;
 	static float key[10] = { -9.0f, -9.0f, -9.0f, -9.0f, -9.0f, -9.0f, -9.0f, -9.0f, -9.0f, -9.0f };
 	static float memo[6][3], memoT[3];
-	static SkyTables tables;
+	SkyTables & tables = drawnTables();
 	const float now[10] = { sunTo[0], sunTo[1], sunTo[2], hq[0], hq[1], hq[2], h, g_ozone, float( msN ), twinRed ? 1.0f : 0.0f };
 	if ( !std::equal( now, now + 10, key ) ) {
 		std::copy( now, now + 10, key );
@@ -1167,6 +1175,77 @@ bool wwAtmoGiSkyAxes( const float sunTo[3], float out[6][3], float * trans, floa
 	for ( int a = 0; a < 6; a++ )
 		for ( int c = 0; c < 3; c++ )
 			out[a][c] = memo[a][c];
+	return true;
+}
+
+/* MODULES1 M8 (bungo 11-10, 3 AM: a hard bright-blue horizon line against a black sky): the drawn sky's colour just
+ * above the horizon (elevation 0.57 deg, the mean of 16 azimuths) in scene units, as atmo_sky.frag draws it: the sun's
+ * and the moon's scatter (sunK, moonK of the last drawn frame), the night floor seen slant, the Weather Tint. The fog's
+ * far colours take it (lookdevstage.cpp wwLookdevFogUniforms). False before a sky is drawn or with the sky off. */
+bool wwAtmoHorizon( float out[3] )
+{
+	const WwAtmoFrame & f = g_frame;
+	const AtState & s = as();
+	if ( !f.valid || s.tier <= 0 || f.camR <= 0.0f )
+		return false;
+	const int msN = s.tier == 1 ? 16 : 32;
+	auto q2 = []( float x ) { return x > 1e-4f ? std::exp( std::round( std::log( x ) * 50.0f ) / 50.0f ) : x; };
+	const float hq[3] = { q2( f.haze[0] ), q2( f.haze[1] ), std::round( f.haze[2] * 100.0f ) / 100.0f };
+	static float key[13] = { -9.0f };
+	static float memo[3];
+	const float now[13] = { f.sunW[0], f.sunW[1], f.sunW[2], f.moonW[0], f.moonW[1], f.moonW[2], f.sunK, f.moonK, f.camR,
+		hq[0], hq[1], hq[2], g_ozone * 64.0f + float( msN ) };
+	if ( !std::equal( now, now + 13, key ) ) {
+		std::copy( now, now + 13, key );
+		SkyTables & T = drawnTables();
+		skyTablesBuild( hq, g_ozone, msN, T );
+		constexpr float vz = 0.01f;
+		const float ch = std::sqrt( 1.0f - vz * vz );
+		double acc[3] = { 0, 0, 0 };
+		constexpr int NA = 16;
+		for ( int a = 0; a < NA; a++ ) {
+			const float az = ( float( a ) + 0.5f ) * 2.0f * float( kPi ) / float( NA );
+			const float v[3] = { ch * std::cos( az ), ch * std::sin( az ), vz };
+			double L[3];
+			skyMarch( T, hq, g_ozone, f.camR, v, f.sunW, L );
+			for ( int c = 0; c < 3; c++ )
+				acc[c] += double( f.sunK ) * L[c];
+			if ( f.moonK > 0.0f ) {
+				skyMarch( T, hq, g_ozone, f.camR, v, f.moonW, L );
+				for ( int c = 0; c < 3; c++ )
+					acc[c] += double( f.moonK ) * L[c];
+			}
+		}
+		float fl[3] = { 0.0f, 0.0f, 0.0f };
+		if ( !red( "nofloor" ) ) {	// atmosphere.cpp medium()'s atFloor, atmo_sky.frag's slant shell
+			if ( g_airglow <= 1.0f || red( "glowgrey" ) ) {
+				for ( int c = 0; c < 3; c++ )
+					fl[c] = kNightFloor[c] * g_airglow;
+			} else {
+				const float ex = kNightFloorLum * ( g_airglow - 1.0f );
+				for ( int c = 0; c < 3; c++ )
+					fl[c] = kNightFloor[c] + ex * kGreenLine5577[c];
+			}
+		}
+		float tr[3];
+		cpuTrans( f.camR - kRb, vz, hq, red( "noozone" ), tr, g_ozone );
+		const float vr = 1.0f / std::sqrt( std::max( 1.0f - 0.97226f * ( 1.0f - vz * vz ), 0.02f ) );
+		for ( int c = 0; c < 3; c++ )
+			memo[c] = float( acc[c] / NA ) + f.sunK * fl[c] * vr * tr[c];
+	}
+	std::copy( memo, memo + 3, out );
+	if ( f.tintOn ) {	// atmo_sky.frag atWeatherTint at the same elevation
+		const float t = std::sqrt( std::asin( 0.01f ) * 57.29578f / 90.0f ) * 16.0f;
+		const int i = std::min( int( t ), 15 );
+		float w[3];
+		for ( int c = 0; c < 3; c++ )
+			w[c] = f.tint[i][c] + ( f.tint[i + 1][c] - f.tint[i][c] ) * ( t - float( i ) );
+		const float lw = 0.2126f * w[0] + 0.7152f * w[1] + 0.0722f * w[2];
+		const float lc = 0.2126f * out[0] + 0.7152f * out[1] + 0.0722f * out[2];
+		if ( lw > 1e-8f )
+			for ( int c = 0; c < 3; c++ )
+				out[c] = w[c] * lc / lw;
+	}
 	return true;
 }
 
