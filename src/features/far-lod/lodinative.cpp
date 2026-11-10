@@ -1279,6 +1279,30 @@ bool nifAppendLodiObjects( NifModel * nif, const QModelIndex & iRoot,
 				}
 			}
 
+			// lane PERFLOAD1 P1: a far tree the bake photographed draws as its octahedral impostor, not its mesh
+			bool treeAll = true;
+			for ( const MeshPart & tp : parts )
+				if ( tp.materialId >= lib.materials.size() || !( lib.materials[tp.materialId].flags & LODO_MAT_TREE ) )
+					treeAll = false;
+			if ( treeAll && spec.treeCardLayer && spec.treeCardsOut && base.cardLayer != LODO_NO_CARD ) {
+				const auto lit = spec.treeCardLayer->constFind( base.formId );
+				if ( lit != spec.treeCardLayer->constEnd() ) {
+					if ( int( base.cardLayer & 0x7FF ) == lit.value() ) {
+						LodiTreeCard tc;
+						tc.xyz[0] = xyz[0];
+						tc.xyz[1] = xyz[1];
+						tc.xyz[2] = xyz[2];
+						tc.scale = lodiScaleValue( inst.scale, inst.flags );
+						tc.form = base.formId;
+						tc.ref = ( ii < table.cold.size() ) ? table.cold[ii].refFormId : 0u;
+						spec.treeCardsOut->push_back( tc );
+						cnt.treeCards++;
+						continue;
+					}
+					cnt.treeLayerMismatch++;
+				}
+			}
+
 			float quat[4], m[9];
 			lodiUnpackRotation( inst.rot, quat, m );
 			const float scale = lodiScaleValue( inst.scale, inst.flags );
@@ -1635,6 +1659,11 @@ bool nifAppendLodiObjects( NifModel * nif, const QModelIndex & iRoot,
 			basesSeen.insert( inst.baseId );
 			placed++;
 			cnt.placed++;
+			if ( treeAll ) {
+				cnt.treeMesh++;
+				if ( spec.treeMeshForms )
+					( *spec.treeMeshForms )[base.formId]++;
+			}
 			if ( dump.device() ) {
 				const LodiCold cold = ( ii < table.cold.size() ) ? table.cold[ii] : LodiCold();
 				dump << QString::number( cold.refFormId, 16 ).rightJustified( 8, QChar( '0' ) )

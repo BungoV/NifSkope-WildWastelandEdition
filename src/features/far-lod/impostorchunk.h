@@ -11,10 +11,13 @@ BSD License - see nifskope.h
 #include "features/far-lod/impostordraw.h"
 #include "data/niftypes.h"	// Triangle (the card casters)
 
+#include <QHash>
 #include <QSet>
 #include <QString>
 #include <QStringList>
 #include <QVector>
+
+struct LodiTreeCard;	// lodinative.h
 
 class Scene;
 class NifModel;
@@ -66,6 +69,13 @@ int armCellFar( NifModel * nif, const QStringList & chunkPaths, const float shif
 	float cx, float cy, float rMax, int hx0, int hy0, int hx1, int hy1,
 	QSet<quint32> * refs, QStringList * notes );
 int drawCellFar( Scene * scene, const ImpostorDraw::Options & opt );
+/*! lane PERFLOAD1 P1: the bake's card arrays (`<objectsDir>/<ws>.LodgenCards.*.lodm`, horizon ring sets left out) read
+ *  layer by layer: form -> its layer into `layerOf`, each layer loaded once as a set of the far cards. After armCellFar. */
+int cellFarTreeForms( const QString & objectsDir, const QString & ws, QHash<quint32, int> * layerOf, QStringList * notes );
+//! the trees the object rings handed over (LodiTreeCard), placed as cards of their form's set; returns how many
+int addCellFarTrees( const QVector<::LodiTreeCard> & trees );
+//! the armed far cards by kind: octahedral (N x N views), horizon ring, flat (one view)
+void cellFarCensus( int * octahedral, int * ring, int * flat );
 void forgetCellFar();
 int cellFarCount();
 

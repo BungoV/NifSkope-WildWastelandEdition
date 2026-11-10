@@ -1121,6 +1121,11 @@ QString cellFarLodAppend( NifModel * nif, const QModelIndex & iRoot, const EsmWo
 	const float ctrX = origin[0], ctrY = origin[1];
 	QSet<quint32> cardRefs;
 	int cards = 0;
+	// lane PERFLOAD1 P1: every far tree whose form the bake photographed draws as its octahedral impostor
+	const bool treeMeshRed = red == "treemesh";	// red: the rings draw every tree as its mesh (before 11-10)
+	QHash<quint32, int> treeLayer;
+	QVector<LodiTreeCard> treeCardsOut;
+	QHash<quint32, qint64> treeMeshForms;
 	if ( ours && noCardsRed )
 		say( QStringLiteral( "far lod: cards OFF (red nocards)" ) );
 	if ( ours && !noCardsRed ) {
@@ -1139,11 +1144,19 @@ QString cellFarLodAppend( NifModel * nif, const QModelIndex & iRoot, const EsmWo
 			&cardRefs, &cn );
 		for ( const QString & c : cn )
 			say( c.startsWith( QLatin1String( "far lod:" ) ) ? c : QStringLiteral( "far lod: cards: " ) + c );
+		if ( treeMeshRed ) {
+			say( QStringLiteral( "far lod: tree impostors OFF for the rings' meshes (WW_CELL_FARLOD_RED=treemesh)" ) );
+		} else {
+			QStringList tn;
+			ImpostorChunk::cellFarTreeForms( li.absoluteDir().filePath( QStringLiteral( "Objects" ) ), ws, &treeLayer, &tn );
+			for ( const QString & c : tn )
+				say( c );
+		}
 	}
 
 	// ---- objects, ring by ring: the authored slot of each, the ring inside cut out
 	const QString lodi = li.absoluteDir().filePath( li.completeBaseName() + QStringLiteral( ".lodi" ) );
-	qint64 oPlaced = 0, oTris = 0, oSway = 0, oDropped = 0, oRefs = 0;
+	qint64 oPlaced = 0, oTris = 0, oSway = 0, oDropped = 0, oRefs = 0, oTreeCards = 0, oTreeMismatch = 0;
 	// lane LIVESET1: the budget charges the far field's own estimate, never the process working set (a live
 	// rebuild reuses freed pages, so a measured delta built ring 1 there and not at the open)
 	double usedMB = double( tVerts ) * kBytesPerVert / ( 1024.0 * 1024.0 );
@@ -1215,6 +1228,9 @@ QString cellFarLodAppend( NifModel * nif, const QModelIndex & iRoot, const EsmWo
 			os.dropY = ctrY;
 			os.sway = swayAmp() > 0.0f;
 			os.skipRefs = &cardRefs;
+			os.treeCardLayer = treeLayer.isEmpty() ? nullptr : &treeLayer;
+			os.treeCardsOut = &treeCardsOut;
+			os.treeMeshForms = &treeMeshForms;
 			/* The ring's triangles are counted before the document grows; a ring that would exceed the
 			 * budget is not written. */
 			const bool sideMesh = cellMeshOn();
@@ -1279,11 +1295,47 @@ QString cellFarLodAppend( NifModel * nif, const QModelIndex & iRoot, const EsmWo
 			oSway += oc.swayVerts;
 			oDropped += oc.treesDropped;
 			oRefs += oc.refsSkipped;
+			oTreeCards += oc.treeCards;
+			oTreeMismatch += oc.treeLayerMismatch;
 			hx0 = foot[i][0];
 			hy0 = foot[i][1];
 			hx1 = foot[i][2];
 			hy1 = foot[i][3];
 		}
+	}
+
+	/* lane PERFLOAD1 P1: the trees the rings handed to the impostors join the far cards, then the honest count of how
+	 * every far tree draws. Gate: "forms with an impostor drawn as mesh: 0 placements". */
+	if ( !treeCardsOut.isEmpty() )
+		cards += ImpostorChunk::addCellFarTrees( treeCardsOut );
+	if ( ours && ( cards > 0 || !treeMeshForms.isEmpty() ) ) {
+		int octN = 0, ringN = 0, flatN = 0;
+		ImpostorChunk::cellFarCensus( &octN, &ringN, &flatN );
+		qint64 meshTrees = 0, meshWithImp = 0;
+		int formsWithImp = 0;
+		QVector<QPair<qint64, quint32>> top;
+		for ( auto it = treeMeshForms.cbegin(); it != treeMeshForms.cend(); ++it ) {
+			meshTrees += it.value();
+			if ( treeLayer.contains( it.key() ) ) {
+				meshWithImp += it.value();
+				formsWithImp++;
+			}
+			top << qMakePair( it.value(), it.key() );
+		}
+		std::sort( top.begin(), top.end(), []( const QPair<qint64, quint32> & a, const QPair<qint64, quint32> & b ) {
+			return a.first > b.first;
+		} );
+		QStringList topW;
+		for ( int k = 0; k < std::min<int>( 8, top.size() ); k++ )
+			topW << QStringLiteral( "%1 x%2" ).arg( QString::number( top[k].second, 16 ).rightJustified( 8, QLatin1Char( '0' ) ) )
+				.arg( top[k].first );
+		say( QStringLiteral( "far lod: trees %1 drawn as octahedral impostors (%2 handed over by the object rings, the rest "
+			"from the chunks' C lines), %3 as flat cards, %4 as horizon ring cards, %5 as authored mesh in %6 forms "
+			"(most: %7); forms with an impostor drawn as mesh: %8 placements in %9 forms, %10 layer mismatches%11" )
+			.arg( octN ).arg( oTreeCards ).arg( flatN ).arg( ringN ).arg( meshTrees ).arg( treeMeshForms.size() )
+			.arg( topW.isEmpty() ? QStringLiteral( "none" ) : topW.join( QStringLiteral( ", " ) ) )
+			.arg( meshWithImp ).arg( formsWithImp ).arg( oTreeMismatch )
+			.arg( treeMeshRed ? QStringLiteral( " (RED treemesh)" ) : QString() ) );
 	}
 
 	/* Census: every object ring against the game's own object LOD (.bto) over the same region, naming

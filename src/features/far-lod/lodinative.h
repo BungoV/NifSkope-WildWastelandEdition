@@ -7,8 +7,10 @@ BSD License - see nifskope.h
 #ifndef LODINATIVE_H
 #define LODINATIVE_H
 
+#include <QHash>
 #include <QModelIndex>
 #include <QSet>
+#include <QVector>
 #include <QString>
 #include <QStringList>
 
@@ -44,6 +46,14 @@ class NifModel;
  * `.lodi` reader and the chunk manifest.
  * ------------------------------------------------------------------------- */
 
+//! lane PERFLOAD1 P1: one far tree handed to the impostors instead of its mesh (world position, scale, base, REFR)
+struct LodiTreeCard
+{
+	float xyz[3];
+	float scale;
+	quint32 form, ref;
+};
+
 //! One `.lodi` view: an inclusive cell rectangle, a cluster-ladder level and
 //! whether the occluder boxes are drawn.
 struct LodiSceneSpec
@@ -77,6 +87,13 @@ struct LodiSceneSpec
 	bool sway = false;
 	//! REFR form ids drawn by somebody else (the impostor cards); skipped here
 	const QSet<quint32> * skipRefs = nullptr;
+	/*! lane PERFLOAD1 P1: a TREE placement (every part a tree material) whose base form has an octahedral impostor in
+	 *  the bake's card arrays (form -> its layer there, checked against the .lodo base's cardLayer) goes to
+	 *  treeCardsOut instead of being drawn as its mesh. Null = every tree draws its mesh (red WW_CELL_FARLOD_RED=treemesh). */
+	const QHash<quint32, int> * treeCardLayer = nullptr;
+	QVector<LodiTreeCard> * treeCardsOut = nullptr;
+	//! tree placements still drawn as mesh, per base form (what the next card bake must photograph)
+	QHash<quint32, qint64> * treeMeshForms = nullptr;
 	//! > 0: when the placements come to more triangles than this, nothing is written to the document
 	//! (LodiAppendCounts::overBudget; tris = what it would have been) -- the far field's memory budget
 	qint64 maxTris = 0;
@@ -118,6 +135,8 @@ struct LodiAppendCounts
 	//! lane FIX1101A lodch r2 (LATE ITEM 25): placements whose AO took the v12 ground-contact ramp, vertices darkened
 	//! through it on the instanced stream (src/features/far-lod/lodchsky.h contactAo; no extra byte)
 	qint64 groundPlacements = 0, groundBytes = 0;
+	//! lane PERFLOAD1 P1: trees handed to the impostors, trees drawn as mesh, impostor layers that disagreed with the .lodo
+	qint64 treeCards = 0, treeMesh = 0, treeLayerMismatch = 0;
 };
 
 /*! lane FIX1101A lodch (LATE ITEMs 11 + 16 + 20, "LOD channels on by default"): the far LOD draws the bake's AO

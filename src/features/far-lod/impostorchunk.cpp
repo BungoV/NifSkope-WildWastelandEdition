@@ -6,6 +6,9 @@ BSD License - see nifskope.h
 
 #include "impostorchunk.h"
 #include "wwswitch.h"	// the WW_* switch store
+#include "lodinative.h"	// lane PERFLOAD1 P1: LodiTreeCard
+#include "lodmfile.h"
+#include "recx.h"	// lane PERFLOAD1 P1: wwAssetsModRoot, where the shipped impostor sets live
 
 #include "gl/glscene.h"
 #include "gl/renderer.h"
@@ -16,6 +19,8 @@ BSD License - see nifskope.h
 #include <QDir>
 #include <QFile>
 #include <QFileInfo>
+#include <QJsonArray>
+#include <QJsonObject>
 #include <QSettings>
 #include <QTextStream>
 
@@ -54,6 +59,7 @@ struct CellFarState
 {
 	ChunkState cards;
 	float shift[3] = { 0.0f, 0.0f, 0.0f };
+	QHash<quint32, int> treeSet;	//!< lane PERFLOAD1 P1: base form -> its set in cards.sets (cellFarTreeForms)
 };
 // cells a streamed near cell holds; their cards do not draw. Kept apart from CellFarState so a far
 // rebuild (forgetCellFar + arm) keeps the stream's cells. hideGen bumps on each change (the shadow casters rebuild).
@@ -139,6 +145,11 @@ QString resolveLodm( NifModel * nif, const QString & chunkDir, const QString & g
 			roots << QDir::cleanPath( stack.at( i ) );
 		for ( const QString & p : lodgenResourceSearchPaths() )
 			roots << QDir::cleanPath( p + QStringLiteral( "/.." ) );
+		// lane PERFLOAD1 P1: the MO2 mod "Fusion Shaders - Assets" (no plugin, so no stack names it) is a Data root
+		// too: the impostor sets ship there, Data\FO4CSLOD\Cards\<id>_oct.lodm
+		const QString assets = wwAssetsModRoot();
+		if ( !assets.isEmpty() )
+			roots << QDir::cleanPath( assets );
 		for ( const QString & root : roots ) {
 			if ( !QFileInfo( root ).isDir() )
 				continue;
@@ -275,11 +286,10 @@ int ImpostorChunk::arm( NifModel * nif, const QString & chunkPath )
 			// the C line names the model's own octahedral set AND the array atlas the same bake wrote with the
 			// model's layer in it.
 			WW_SWITCH_STATIC( bool, noAtlas, wwEnv( "WW_CELL_FARLOD_RED" ) == "noatlas" );
+			bool viaAtlas = false;
 			if ( path.isEmpty() && !p.c.arrayLodm.isEmpty() && !noAtlas ) {
 				path = resolveLodm( nif, s.chunkDir, p.c.arrayLodm );
-				if ( !path.isEmpty() )
-					s.notes << QStringLiteral( "impostor chunk: %1 not installed -- served by the bake's array atlas %2 layer %3" )
-						.arg( p.c.lodm, QFileInfo( path ).fileName() ).arg( p.c.layer );
+				viaAtlas = !path.isEmpty();
 			}
 			ImpostorCardSet set;
 			if ( path.isEmpty() ) {
@@ -287,9 +297,15 @@ int ImpostorChunk::arm( NifModel * nif, const QString & chunkPath )
 				set.error = QStringLiteral( "not found beside the chunk or on the resource stack" );
 				s.notes << QStringLiteral( "impostor chunk: %1 -- %2" ).arg( p.c.lodm, set.error );
 			} else {
-				set = impostorCardLoad( path, p.c.arrayLodm.isEmpty() ? -1 : p.c.layer );
+				set = impostorCardLoad( path, ( viaAtlas || !p.c.arrayLodm.isEmpty() ) ? p.c.layer : -1 );
 				if ( !set.ok )
 					s.notes << QStringLiteral( "impostor chunk: %1 -- %2" ).arg( path, set.error );
+				else if ( viaAtlas )	// lane PERFLOAD1 P1: the atlas layer IS the octahedral set, say which kind it is
+					s.notes << QStringLiteral( "impostor chunk: %1 not installed -- served by the bake's array atlas %2 "
+						"layer %3, %4" ).arg( p.c.lodm, QFileInfo( path ).fileName() ).arg( p.c.layer )
+						.arg( set.ring() ? QStringLiteral( "a horizon ring of %1 views" ).arg( set.views )
+							: set.oct > 1 ? QStringLiteral( "the same octahedral impostor (%1 x %1 views)" ).arg( set.oct )
+							: QStringLiteral( "a FLAT card (one view)" ) );
 			}
 			s.lodmKeys << key;
 			s.sets << set;
@@ -631,6 +647,123 @@ int ImpostorChunk::drawCellFar( Scene * scene, const ImpostorDraw::Options & opt
 			.arg( refused ? QStringLiteral( ", %1 refused by the drawer (first: %2)" ).arg( refused ).arg( firstWhy ) : QString() );
 	}
 	return drawn;
+}
+
+int ImpostorChunk::cellFarTreeForms( const QString & objectsDir, const QString & ws, QHash<quint32, int> * layerOf,
+	QStringList * notes )
+{
+	CellFarState & F = farSt();
+	F.treeSet.clear();
+	if ( layerOf )
+		layerOf->clear();
+	const QStringList files = QDir( objectsDir ).entryList( { ws + QStringLiteral( ".LodgenCards.*.lodm" ) },
+		QDir::Files, QDir::Name | QDir::IgnoreCase );
+	int arrays = 0, ringFiles = 0, dup = 0, refused = 0, flat = 0, oct = 0;
+	QString firstRefusal;
+	for ( const QString & fn : files ) {
+		if ( fn.endsWith( QLatin1String( ".ring.lodm" ), Qt::CaseInsensitive ) ) {
+			ringFiles++;	// horizon ring sets: not the octahedral impostor of a form
+			continue;
+		}
+		const QString path = QDir( objectsDir ).filePath( fn );
+		QFile f( path );
+		if ( !f.open( QIODevice::ReadOnly ) )
+			continue;
+		const LodmMaterial m = lodmParse( f.readAll() );
+		if ( !m.ok || m.kind != QLatin1String( "cardArray" ) )
+			continue;
+		arrays++;
+		const QJsonArray layers = m.root.value( QLatin1String( "array" ) ).toObject().value( QLatin1String( "layers" ) ).toArray();
+		for ( int i = 0; i < layers.size(); i++ ) {
+			bool ok = false;
+			const quint32 form = layers.at( i ).toObject().value( QLatin1String( "id" ) ).toString().toUInt( &ok, 16 );
+			if ( !ok )
+				continue;
+			if ( F.treeSet.contains( form ) ) {
+				dup++;	// an older array naming the same form: the first file by name wins
+				continue;
+			}
+			const ImpostorCardSet set = impostorCardLoad( path, i );
+			if ( !set.ok || set.ring() ) {
+				if ( refused++ == 0 )
+					firstRefusal = set.ok ? QStringLiteral( "%1 layer %2: a horizon ring" ).arg( fn ).arg( i ) : set.error;
+				continue;
+			}
+			( set.oct > 1 ? oct : flat )++;
+			F.cards.sets << set;
+			F.cards.lodmKeys << path.toLower() + QStringLiteral( "#" ) + QString::number( i );
+			F.treeSet.insert( form, F.cards.sets.size() - 1 );
+			if ( layerOf )
+				layerOf->insert( form, i );
+		}
+	}
+	if ( notes )
+		*notes << QStringLiteral( "far lod: tree impostors: %1 forms from %2 card arrays in %3 (%4 octahedral, %5 flat; "
+			"%6 ring files left out, %7 duplicate forms, %8 refused%9)" ).arg( F.treeSet.size() ).arg( arrays )
+			.arg( QDir::toNativeSeparators( objectsDir ) ).arg( oct ).arg( flat ).arg( ringFiles ).arg( dup ).arg( refused )
+			.arg( refused ? QStringLiteral( ", first: " ) + firstRefusal : QString() );
+	return F.treeSet.size();
+}
+
+int ImpostorChunk::addCellFarTrees( const QVector<LodiTreeCard> & trees )
+{
+	CellFarState & F = farSt();
+	int added = 0;
+	for ( const LodiTreeCard & t : trees ) {
+		const auto it = F.treeSet.constFind( t.form );
+		if ( it == F.treeSet.constEnd() )
+			continue;
+		const ImpostorCardSet & set = F.cards.sets.at( it.value() );
+		Placed p;
+		p.c.ok = true;
+		p.c.index = -1;
+		p.c.center[0] = set.center[0];
+		p.c.center[1] = set.center[1];
+		p.c.center[2] = set.center[2];
+		p.c.halfW = set.halfW;
+		p.c.halfH = set.halfH;
+		p.c.oct = set.oct;
+		p.c.depthSpan = set.depthSpan;
+		p.c.lodm = set.lodmPath;
+		p.c.arrayLodm = set.lodmPath;
+		p.c.layer = set.layer;
+		p.world[0] = t.xyz[0];
+		p.world[1] = t.xyz[1];
+		p.world[2] = t.xyz[2];
+		p.scale = t.scale > 0.0f ? t.scale : 1.0f;
+		p.formId = QString::number( t.form, 16 ).rightJustified( 8, QLatin1Char( '0' ) );
+		if ( t.ref )
+			p.ref = QString::number( t.ref, 16 ).rightJustified( 8, QLatin1Char( '0' ) );
+		p.setIndex = it.value();
+		F.cards.placed << p;
+		added++;
+	}
+	if ( added )
+		farGenRef()++;
+	return added;
+}
+
+void ImpostorChunk::cellFarCensus( int * octahedral, int * ring, int * flat )
+{
+	const ChunkState & s = farSt().cards;
+	int o = 0, r = 0, f = 0;
+	for ( const Placed & p : s.placed ) {
+		if ( p.setIndex < 0 || p.setIndex >= s.sets.size() )
+			continue;
+		const ImpostorCardSet & set = s.sets.at( p.setIndex );
+		if ( set.ring() )
+			r++;
+		else if ( set.oct > 1 )
+			o++;
+		else
+			f++;
+	}
+	if ( octahedral )
+		*octahedral = o;
+	if ( ring )
+		*ring = r;
+	if ( flat )
+		*flat = f;
 }
 
 void ImpostorChunk::forgetCellFar()
