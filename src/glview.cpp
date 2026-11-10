@@ -3241,6 +3241,8 @@ void GLView::glProjection( [[maybe_unused]] int x, [[maybe_unused]] int y )
 			fr = std::max< GLdouble >( fr, GLdouble( o.length() ) + GLdouble( farReach ) * 1.05 );
 			fr = std::max< GLdouble >( fr, GLdouble( wwEndlessSeaReach( scene ) ) * 1.05 );	// lane FARSEA1: the sea's rim
 			nr = wwCellFarLodNear( nr );
+			nr = wwCellFarLodNearCap( scene, nr, std::tan( ( wwPathActive ? GLdouble( wwPathFov ) : GLdouble( cfg.fov / Zoom ) )
+				/ 360 * M_PI ), aspect );	// lane PERFLOAD1: never past the far land
 			fr = std::max< GLdouble >( fr, nr + scale() );
 			wwCellFarLodPlanes( nr, fr );	// the near gate reads these
 		}

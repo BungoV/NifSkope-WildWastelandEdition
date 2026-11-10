@@ -331,6 +331,7 @@
 { "WW_CELL_FARLOD_MAX", 0, "- | hand: rebuilt in place (live section)" },
 { "WW_CELL_FARLOD_NEAR", 0, "- | hand: wwCellFarLodNear: re-read per frame" },
 { "WW_CELL_FARLOD_NEARONLY", 0, "src/features/far-lod/cellfarlod.cpp:389 cellFarLodObjectsFar | hand: rebuilt in place (live section); it refuses the bake stack (CELLUNI5), so a changed near stack owes a reopen" },
+{ "WW_CELL_FARLOD_NEAR_RED", 0, "src/features/far-lod/cellfarlod.cpp:1844 wwCellFarLodNearCap | hand: re-read per frame" },
 { "WW_CELL_FARLOD_OURS", 0, "src/features/far-lod/cellfarlod.cpp:595 cellFarLodAppend | hand: rebuilt in place (live section)" },
 { "WW_CELL_FARLOD_PRESET", 0, "src/features/far-lod/cellfarlod.cpp:145 __has_include | hand: in liveFarKey, rebuilt in place (live section, FARPRESET1)" },
 { "WW_CELL_FARLOD_PRESET_RED", 0, "src/features/far-lod/cellfarlod.cpp:147 __has_include | hand: in liveFarKey, rebuilt in place (live section, FARPRESET1)" },

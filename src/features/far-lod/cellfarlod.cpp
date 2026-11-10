@@ -34,6 +34,7 @@ BSD License - see nifskope.h
 #include "features/far-lod/cellfarinst.h"	// lane FARLOOK1101: and the far splat twins
 #include "features/far-ground/cellfarground.h"	// lane FARDRAW1: the far ring 0's live ground
 #include "gl/glscene.h"
+#include "gl/glshape.h"
 #include "gl/renderer.h"
 #include "model/nifmodel.h"
 #include "spells/blocks.h"
@@ -83,6 +84,8 @@ struct FarDoc
 	int bx0 = 0, by0 = 0, bx1 = -1, by1 = -1;
 	int cards = 0;
 	int fx0 = 0, fy0 = 0, fx1 = -1, fy1 = -1;   //!< the outermost built ring's footprint, cells (the far field's edge)
+	mutable float topZ = 3.4e38f; //!< lane PERFLOAD1: the drawn far field's highest point, scene units (wwCellFarLodNearCap)
+	mutable bool topAsked = false; //!< topZ measured from the scene's far shapes (once a far document)
 };
 
 QHash<const void *, FarDoc> & docs()
@@ -471,6 +474,7 @@ QString cellFarLodAppend( NifModel * nif, const QModelIndex & iRoot, const EsmWo
 		fd.bx1 = bx1;
 		fd.by1 = by1;
 		fd.reach = farRingCfg().d.max;	// lane FARPRESET1: the preset's fBlockMaximumDistance
+		fd.topZ = -3.4e38f, fd.topAsked = true;	// lane PERFLOAD1: nothing far is drawn, nothing to clip
 		docs().insert( nif, fd );
 		say( QStringLiteral( "far lod: NEARONLY -- the planes alone, reach %1 units, near %2" )
 			.arg( double( fd.reach ), 0, 'f', 0 ).arg( wwCellFarLodNear( 0.0 ), 0, 'f', 2 ) );
@@ -1783,6 +1787,96 @@ double wwCellFarLodNear( double nr )
 {
 	const float forced = envFloat( "WW_CELL_FARLOD_NEAR", 0.0f );
 	return forced > 0.0f ? double( forced ) : std::max( nr, 16.0 );
+}
+
+/* lane PERFLOAD1: the drawn far field's highest point in scene units (its shapes' own vertices through their world
+ * transform; an instanced ring by its tiles' spheres), one tree card's height on top. -3.4e38: no far shape drawn yet. */
+static float farLandTop( const Scene * scene, int n[4], float by[3] )
+{
+	float top = -3.4e38f;
+	const NifModel * nif = scene->nifModel;
+	if ( !nif )
+		return top;
+	for ( Node * node : scene->nodes.list() ) {
+		if ( !node->getName().startsWith( QLatin1String( "FarLOD" ) ) || !node->index().isValid()
+			|| !nif->blockInherits( node->index(), "BSTriShape" ) )
+			continue;
+		const Transform & wt = node->worldTrans();
+		const QSharedPointer<CellMesh> cm = cellMeshFor( nif, node->index() );
+		if ( cm && cm->inst ) {
+			for ( const CellMeshInst::Tile & tl : cm->inst->tiles )
+				by[1] = std::max( by[1], ( wt * tl.centre )[2] + tl.radius * wt.scale );
+			n[1]++;
+		} else if ( cm && !cm->verts.isEmpty() ) {
+			for ( const Vector3 & q : cm->verts )
+				by[0] = std::max( by[0], ( wt * q )[2] );
+			n[0]++;
+		} else if ( !cm && nif->get<int>( node->index(), "Num Vertices" ) > 0 ) {
+			const Shape * sh = dynamic_cast<const Shape *>( node );
+			if ( sh && !sh->verts.isEmpty() ) {	// its arrays are in the document: the drawn copy's vertices
+				for ( const Vector3 & q : sh->verts )
+					by[0] = std::max( by[0], ( wt * q )[2] );
+				n[0]++;
+			} else {
+				const BoundSphere b = node->bounds();	// not read for drawing yet: its whole sphere (never too low)
+				if ( b.radius > 0.0f )
+					by[2] = std::max( by[2], b.center[2] + b.radius );
+				n[2]++;
+			}
+		} else {
+			n[3]++;	// an empty ring's shape draws nothing: nothing to clip (its declared sphere is the whole ring)
+		}
+	}
+	top = std::max( by[0], std::max( by[1], by[2] ) );
+	return top > -3.0e38f ? top + 2048.0f : top;
+}
+
+/* lane PERFLOAD1 (11-10): the loaded block's own near plane (its centre's depth less 1.5 radii) rises past 16 as soon
+ * as the camera stands away from the block, and far land nearer than that plane was clipped (sky in its place).
+ * Nothing of the far field is higher than topZ, so every far point is at least (eye z - topZ) away and, inside the
+ * frustum, at least that times the cosine of the frustum's corner angle deep: the plane may rise to there, no further.
+ * Red WW_CELL_FARLOD_NEAR_RED=bounds: the loaded block's plane alone. */
+double wwCellFarLodNearCap( const Scene * scene, double nr, double tanHalfFovY, double aspect )
+{
+	const FarDoc * f = farFor( scene );
+	if ( !f || nr <= 16.0 || envFloat( "WW_CELL_FARLOD_NEAR", 0.0f ) > 0.0f )
+		return nr;
+	const bool red = wwEnv( "WW_CELL_FARLOD_NEAR_RED" ) == "bounds";
+	if ( !f->topAsked ) {
+		int n[4] = { 0, 0, 0, 0 };
+		float by[3] = { -3.4e38f, -3.4e38f, -3.4e38f };
+		static int tries = 0;
+		const float top = farLandTop( scene, n, by );
+		// the far shapes are in the scene: measured once (a shape not read for drawing yet is asked again, 8 frames at most)
+		if ( top > -3.0e38f && ( n[2] == 0 || ++tries >= 8 ) ) {
+			f->topZ = top;
+			f->topAsked = true;
+			tries = 0;
+			qInfo().noquote() << QStringLiteral( "far lod: far land top z %1 (one tree card's height counted; %2 shapes by "
+				"their vertices: top %3, %4 by their tiles' spheres: top %5, %6 by their own sphere: top %7, %8 empty); the "
+				"near plane stays under the camera's height over it" ).arg( double( top ), 0, 'f', 0 )
+				.arg( n[0] ).arg( double( by[0] ), 0, 'g', 6 ).arg( n[1] ).arg( double( by[1] ), 0, 'g', 6 )
+				.arg( n[2] ).arg( double( by[2] ), 0, 'g', 6 ).arg( n[3] );
+		}
+	}
+	const Vector3 eye = scene->view.rotation.inverted() * ( Vector3() - scene->view.translation ) / scene->view.scale;
+	const double gap = double( eye[2] ) - double( f->topZ );	// not measured yet: topZ 3.4e38, the plane stays 16
+	const double tx = tanHalfFovY * aspect;
+	const double room = gap > 0.0 ? 0.98 * gap / std::sqrt( 1.0 + tx * tx + tanHalfFovY * tanHalfFovY ) : 0.0;
+	const double cap = std::max( room, 16.0 );
+	const int state = red ? 2 : ( cap < nr ? 1 : 0 );
+	static int said = -1;
+	static double saidCap = -1.0;
+	if ( state != said || ( state == 1 && std::abs( cap - saidCap ) > 0.25 * std::max( saidCap, 16.0 ) ) ) {
+		said = state;
+		saidCap = cap;
+		qInfo().noquote() << QStringLiteral( "far lod: near plane %1 (the loaded block asked %2, the far land allows %3: "
+			"camera z %4, far land top %5; WW_CELL_FARLOD_NEAR_RED=bounds is the old plane)" )
+			.arg( state == 2 ? QStringLiteral( "by the loaded block alone, RED" )
+				: state == 1 ? QStringLiteral( "held under the far land" ) : QStringLiteral( "by the loaded block" ) )
+			.arg( nr, 0, 'f', 2 ).arg( cap, 0, 'f', 2 ).arg( double( eye[2] ), 0, 'f', 0 ).arg( double( f->topZ ), 0, 'g', 6 );
+	}
+	return red ? nr : std::min( nr, cap );
 }
 
 void wwCellFarLodPlanes( double nearPlane, double farPlane )
