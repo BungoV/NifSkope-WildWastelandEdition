@@ -1305,6 +1305,54 @@ static bool vaThinSrcRed()
 	return red;
 }
 
+// MODULES1 M12 (G4b, G5): lookdev_fog.glsl wwAirColOne on the CPU, for the column line (vaColumnEcho)
+static double vaColOne( double lo, double hi, double z0, double invH )
+{
+	if ( hi <= lo )
+		return 0.0;
+	if ( invH <= 0.0 )
+		return hi - lo;
+	const double below = std::max( std::min( hi, z0 ) - lo, 0.0 );
+	const double a = std::max( lo, z0 );
+	if ( hi <= a )
+		return below;
+	const double w = hi - a, u = w * invH;
+	const double e1 = u < 1e-3 ? 1.0 - u * ( 0.5 - u / 6.0 ) : ( 1.0 - std::exp( -u ) ) / u;
+	return below + std::exp( -( a - z0 ) * invH ) * w * e1;
+}
+
+/* MODULES1 M12 (G4b, G5; bungo 11-09 items 6, 23:22): the air's height profile and the sun through it, said when the
+ * medium changes (a weather change): the band's base and scale height, the top and its falloff, the ground layer's anchor,
+ * thickness and strength, whether the layer follows the terrain grid (FOGTERRAIN2) or one height; the optical depth
+ * straight up from the ground anchor (the shipped sun's: the ground layer alone, flag 128; the whole band beside it) and
+ * the direct sun's transmittance exp(-tau / mu) at sun heights mu 1, 0.5, 0.2, 0.05 (lookdev_fog.glsl wwVolAirSunT);
+ * the band's optical depth along the horizon over 1 km at the anchor (70028 units). Telemetry only. */
+static void vaColumnEcho( const float med[4], const float layer[4], const float ground[4], bool terr, bool sunColumn )
+{
+	static float said[13] = { -1.0f };
+	const float key[13] = { med[0], med[1], med[2], med[3], layer[0], layer[1], layer[2], layer[3], ground[0], ground[1],
+		ground[2], terr ? 1.0f : 0.0f, sunColumn ? 1.0f : 0.0f };
+	bool same = true;
+	for ( int i = 0; i < 13; i++ )
+		same = same && std::fabs( key[i] - said[i] ) <= 1e-4f * std::max( 1.0f, std::fabs( key[i] ) );
+	if ( same || !( med[0] > 0.0f ) )
+		return;
+	std::copy( key, key + 13, said );
+	const double s0 = med[0], zb = med[1], invH = med[2], top = med[3], zg = ground[0];
+	const double end = ground[2] > 0.0f ? top + 16.0 / double( ground[2] ) : top;
+	const double tauLayer = layer[3] > 0.0f ? s0 * double( layer[3] ) * vaColOne( zg, top, zg, double( ground[1] ) ) : 0.0;
+	const double tauBand = s0 * vaColOne( zg, end, zb, invH );
+	const double tauSun = sunColumn ? tauBand : tauLayer;
+	const double rhoG = std::min( 1.0, std::exp( -( zg - zb ) * invH ) );
+	std::fprintf( stderr, "air column: base %.0f scale height %.0f top %.0f (falloff %.0f), ground layer at %.0f thick %.0f "
+		"strength %.3f near share %.3f (%s) | tau up: sun's %.4f (%s), whole band %.4f | sun T at mu 1 %.3f, 0.5 %.3f, "
+		"0.2 %.3f, 0.05 %.3f | band tau along the horizon per km at the anchor %.3f\n", zb, invH > 0.0 ? 1.0 / invH : 0.0, top,
+		ground[2] > 0.0f ? 1.0 / double( ground[2] ) : 0.0, zg, ground[1] > 0.0f ? 1.0 / double( ground[1] ) : 0.0,
+		double( layer[3] ), double( layer[0] ), terr ? "follows the terrain grid" : "one height", tauSun,
+		sunColumn ? "the whole column, red suncolumn" : "the ground layer", tauBand, std::exp( -tauSun ),
+		std::exp( -tauSun / 0.5 ), std::exp( -tauSun / 0.2 ), std::exp( -tauSun / 0.05 ), s0 * rhoG * 70028.0 );
+}
+
 bool wwVolAirMediumNow( float med[4], float layer[4], float ground[2] )
 {
 	const VaPub & p = vaPub();
@@ -3057,6 +3105,8 @@ void wwVolAirUniforms( Scene * scene )
 				: "on, a downward sky ray ends at the ground", double( g.ground[0] ), double( g.med[3] ) );
 		}
 	}
+	if ( fl >= 0 )
+		vaColumnEcho( g.med, g.layer, g.ground, terr, s.sunColumn );	// MODULES1 M12 (G4b, G5)
 	if ( fl >= 0 )
 		prog->uni1i_l( fl, ( ( s.red & 512 ) ? 0 : 1 ) | ( ( s.red & 1024 ) ? 0 : 2 ) | ( ( s.red & 256 ) ? 0 : 4 )
 			| ( ( s.red & 65536 ) ? 0 : 8 ) | ( ( s.red & 131072 ) ? 0 : 16 ) | ( s.tricubic ? 32 : 0 ) | ( terr ? 64 : 0 )

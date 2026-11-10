@@ -1,3 +1,10 @@
+## MODULES1 M12 (2026-11-10): the air's column line (night items G4b, G5)
+
+- `air column:` is said when the medium changes (a weather change): the band's base, scale height, top and top falloff;
+  the ground layer's anchor, thickness, strength and whether it follows the terrain grid; the optical depth straight up
+  (the shipped sun's, the ground layer alone, and the whole band); the direct sun's transmittance at sun heights
+  mu 1 / 0.5 / 0.2 / 0.05; the band's optical depth along the horizon per km at the anchor. Telemetry only.
+
 ## MODULES1 M11 (2026-11-10): the live port's `goto` and `where`
 
 - `goto X Y Z [YAW [PITCH]]` puts the camera's eye there (yaw degrees from +Y, north, toward +X, east; pitch degrees
