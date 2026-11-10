@@ -175,6 +175,7 @@ private:
 #include "features/water/cellunderwater.h"
 #include "features/clouds/cloudvol.h"	// the volume clouds' depth test
 #include "features/exposure/physunits.h"	// lane PHYSUNITS1: emissives in cd/m2
+#include "wwloadwatch.h"	// lane PERFLOAD1 P5: the frame's unbracketed steps name themselves to the main-thread watch
 
 // NOTE: The FPS define is a frame limiter,
 //	NOT the guaranteed FPS in the viewport.
@@ -3782,7 +3783,9 @@ void GLView::paintGL()
 	PassTime::begin( PassTime::CellShadows );
 	wwCellShadowPass( scene );
 	PassTime::end( PassTime::CellShadows );
+	wwMainStep( "probe sky tick (the bounce follows the hour)" );	// lane PERFLOAD1 P5
 	probeSkyTick( scene, scene->nifModel, this );	// an exterior's bounce follows the weather
+	wwMainStep( "rtddgi cell frame (GI relight, builds, uploads)" );
 	rtddgiCellFrame( scene );	// the ray-traced GI volume builds, updates and uploads (off: nothing)
 
 	PassTime::begin( PassTime::Background );	// the sky (or background) and the ground plane

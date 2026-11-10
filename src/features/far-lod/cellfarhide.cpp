@@ -45,6 +45,26 @@ quint64 nextGen()
 	return ++gens;
 }
 
+//! lane PERFLOAD1 P7 round 2: per ladder REFR the steps drawn and cast (pending, and live since the last commit)
+struct LadderRow
+{
+	quint8 draw = 0, drawLive = 0, cast = 0, castLive = 0;
+};
+struct Ladder
+{
+	QHash<quint32, LadderRow> rows;
+	quint64 gen = 0, castGen = 0, fadeGen = 0;
+	bool dirty = false, castDirty = false;
+	int hidden = 0;	// REFRs whose live draw has no mesh step
+	QHash<quint32, CellFarHide::LadderFade> fades;
+	int frame = 0;
+};
+Ladder & ladder()
+{
+	static Ladder l;
+	return l;
+}
+
 std::map<const void *, Doc> & docs()
 {
 	static std::map<const void *, Doc> m;
@@ -150,8 +170,15 @@ bool largeRefsWanted()
 	return on;
 }
 
-bool rowHidden( const CellMeshInst & d, int row, const Hidden & h, int mode )
+bool rowHidden( const CellMeshInst & d, int row, const Hidden & h, int mode, bool caster )
 {
+	if ( row < d.rowStep.size() && d.rowStep[row] && row < d.rowRef.size() ) {
+		const quint8 st = d.rowStep[row];
+		const Ladder & l = ladder();
+		const auto it = l.rows.constFind( d.rowRef[row] );
+		if ( it == l.rows.constEnd() ? !( st & 0x80u ) : !( st & 0x7Fu & ( caster ? it->castLive : it->drawLive ) ) )
+			return true;
+	}
 	if ( mode == Off )
 		return false;
 	if ( mode == ByRef && row < d.rowRef.size() && d.rowRef[row] )
@@ -160,7 +187,7 @@ bool rowHidden( const CellMeshInst & d, int row, const Hidden & h, int mode )
 }
 
 qint64 filter( const CellMeshInst & d, const Hidden & h, int mode, QVector<CellMeshInst::Cmd> & cmds,
-	QVector<CellMeshInst::Tile> & tiles )
+	QVector<CellMeshInst::Tile> & tiles, bool caster )
 {
 	cmds.clear();
 	tiles.clear();
@@ -174,7 +201,7 @@ qint64 filter( const CellMeshInst & d, const Hidden & h, int mode, QVector<CellM
 			const int b = int( m.baseInstance ), e = b + int( m.instanceCount );
 			int run = -1;
 			for ( int i = b; i <= e; i++ ) {
-				const bool vis = i < e && !rowHidden( d, i, h, mode );
+				const bool vis = i < e && !rowHidden( d, i, h, mode, caster );
 				if ( i < e && !vis )
 					hidden++;
 				if ( vis && run < 0 ) {
@@ -195,42 +222,180 @@ qint64 filter( const CellMeshInst & d, const Hidden & h, int mode, QVector<CellM
 	return hidden;
 }
 
-View view( const CellMeshInst & d )
+View view( const CellMeshInst & d, bool caster )
 {
 	View v;
 	v.cmds = &d.cmds;
 	v.tiles = &d.tiles;
 	const int m = mode();
 	const Hidden * h = hiddenFor( d.doc );
-	if ( m == Off || !h || ( h->cells.isEmpty() && h->refs.isEmpty() ) )
+	const Ladder & l = ladder();
+	const bool lad = !d.rowStep.isEmpty();	// lane PERFLOAD1 P7 round 2: only a bucket with ladder rows sees the ladder
+	if ( !lad && ( m == Off || !h || ( h->cells.isEmpty() && h->refs.isEmpty() ) ) )
 		return v;
-	const quint64 want = ( h->gen << 2 ) | quint64( m );
-	if ( d.visFor != want ) {
-		d.visFor = want;
-		d.visHidden = filter( d, *h, m, d.visCmds, d.visTiles );
+	static const Hidden none;
+	const quint64 lg = lad ? ( caster ? l.castGen : l.gen ) : 0u;
+	const quint64 want = ( ( ( h ? h->gen : 0u ) * 1000003ull ) ^ ( lg << 40 ) ) << 2 | quint64( m );
+	quint64 & visFor = caster ? d.castFor : d.visFor;
+	quint64 & visKey = caster ? d.castKey : d.visKey;
+	qint64 & visHidden = caster ? d.castHidden : d.visHidden;
+	QVector<CellMeshInst::Cmd> & visCmds = caster ? d.castCmds : d.visCmds;
+	QVector<CellMeshInst::Tile> & visTiles = caster ? d.castTiles : d.visTiles;
+	if ( visFor != want ) {
+		visFor = want;
+		visHidden = filter( d, h ? *h : none, m, visCmds, visTiles, caster );
 		// the key changes only when the rows drawn change (a far-away attach leaves the shadow cache alone)
 		quint64 k = 1469598103934665603ull;
 		auto mix = [&k]( quint64 x ) {
 			k ^= x;
 			k *= 1099511628211ull;
 		};
-		if ( d.visHidden ) {
-			for ( const CellMeshInst::Cmd & c : d.visCmds ) {
+		if ( visHidden ) {
+			for ( const CellMeshInst::Cmd & c : visCmds ) {
 				mix( c.baseInstance );
 				mix( c.instanceCount );
 			}
-			d.visKey = k | 1u;
+			visKey = k | 1u;
 		} else {
-			d.visKey = 0;
+			visKey = 0;
 		}
 	}
-	if ( d.visHidden ) {
-		v.cmds = &d.visCmds;
-		v.tiles = &d.visTiles;
+	if ( visHidden ) {
+		v.cmds = &visCmds;
+		v.tiles = &visTiles;
 	}
-	v.key = d.visKey;
-	v.hiddenRows = d.visHidden;
+	v.key = visKey;
+	v.hiddenRows = visHidden;
 	return v;
+}
+
+int setLadder( quint32 ref, quint8 draw, quint8 cast )
+{
+	if ( !ref )
+		return 0;
+	Ladder & l = ladder();
+	LadderRow & r = l.rows[ref];
+	if ( r.draw != draw ) {
+		r.draw = draw;
+		l.dirty = true;
+	}
+	if ( r.cast != cast ) {
+		r.cast = cast;
+		l.castDirty = true;
+	}
+	if ( draw & ~r.drawLive )
+		return 1;
+	return ( r.drawLive & ~draw ) ? 2 : 0;
+}
+
+bool ladderDirty()
+{
+	return ladder().dirty;
+}
+
+void ladderCommit()
+{
+	Ladder & l = ladder();
+	l.hidden = 0;
+	for ( LadderRow & r : l.rows ) {
+		r.drawLive = r.draw;
+		if ( !( r.drawLive & 0x7Fu ) )
+			l.hidden++;
+	}
+	l.gen = nextGen();
+	l.dirty = false;
+}
+
+bool castDirty()
+{
+	return ladder().castDirty;
+}
+
+void castCommit()
+{
+	Ladder & l = ladder();
+	for ( LadderRow & r : l.rows )
+		r.castLive = r.cast;
+	l.castGen = nextGen();
+	l.castDirty = false;
+}
+
+quint64 ladderCastGen()
+{
+	return ladder().castGen;
+}
+
+quint8 ladderCast( quint32 ref )
+{
+	const Ladder & l = ladder();
+	const auto it = l.rows.constFind( ref );
+	return it == l.rows.constEnd() ? quint8( 0xFF ) : it->castLive;
+}
+
+void ladderClear()
+{
+	Ladder & l = ladder();
+	if ( l.rows.isEmpty() && l.fades.isEmpty() )
+		return;
+	l.rows.clear();
+	l.fades.clear();
+	l.hidden = 0;
+	l.gen = nextGen();
+	l.castGen = nextGen();
+	l.fadeGen++;
+	l.dirty = false;
+	l.castDirty = false;
+}
+
+int ladderHiddenCount()
+{
+	return ladder().hidden;
+}
+
+int ladderCount()
+{
+	return int( ladder().rows.size() );
+}
+
+void ladderFadesBegin( int frame )
+{
+	Ladder & l = ladder();
+	l.frame = frame;
+	if ( !l.fades.isEmpty() ) {
+		l.fades.clear();
+		l.fadeGen++;
+	}
+}
+
+void ladderFade( quint32 ref, const TreeLadder::State & st, quint8 draw )
+{
+	Ladder & l = ladder();
+	if ( l.fades.isEmpty() )
+		l.fadeGen++;
+	LadderFade & f = l.fades[ref];
+	f.st = st;
+	f.draw = draw;
+}
+
+const QHash<quint32, LadderFade> & ladderFades()
+{
+	return ladder().fades;
+}
+
+quint64 ladderFadeGen()
+{
+	return ladder().fadeGen;
+}
+
+int ladderFrame()
+{
+	return ladder().frame;
+}
+
+qint64 & ladderDitherRows()
+{
+	static qint64 n = 0;
+	return n;
 }
 
 void registerMask( const void * doc, int block, int cx0, int cy0, int cx1, int cy1, bool objects )

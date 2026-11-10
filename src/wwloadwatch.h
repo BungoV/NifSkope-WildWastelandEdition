@@ -12,6 +12,17 @@ inline std::atomic<int> wwLoadWalkSkipped{ 0 }, wwLoadPathBuilt{ 0 }, wwLoadPath
 inline void ( *wwMainStepFn )( const char * ) = nullptr;
 inline void ( *wwStderrDrainFn )() = nullptr;
 
+// P6: set by nifskope.cpp; parks (true) or attaches (false) the block list and tree of the window showing `nif`
+class NifModel;
+inline bool ( *wwParkViewsFn )( NifModel *, bool ) = nullptr;
+
+//! A bulk edit of a shown document (the live far LOD rebuild) with its views parked: true when this call parked or
+//! attached them. Every inserted block otherwise signals the block list proxy and the tree.
+inline bool wwParkViews( NifModel * nif, bool park )
+{
+	return wwParkViewsFn && wwParkViewsFn( nif, park );
+}
+
 //! The main thread reached a named step (a string literal: the pointer is kept); a step over 1 s prints its own line.
 inline void wwMainStep( const char * stage )
 {

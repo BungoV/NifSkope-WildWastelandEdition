@@ -450,6 +450,8 @@ HEADERS += \
 	src/cellmodsource.h \
 	src/features/far-lod/cellfarvanilla.h \
 	src/features/far-lod/cellfarhide.h \
+	src/features/far-lod/treeladder.h \
+	src/features/far-lod/lodpreview.h \
 	src/cellmesh.h \
 	src/cellspeed.h \
 	src/cellstream.h \
@@ -825,6 +827,7 @@ SOURCES += \
 	src/cellmodsource.cpp \
 	src/features/far-lod/cellfarvanilla.cpp \
 	src/features/far-lod/cellfarhide.cpp \
+	src/features/far-lod/lodpreview.cpp \
 	src/cellmesh.cpp \
 	src/cellspeed.cpp \
 	src/cellstream.cpp \

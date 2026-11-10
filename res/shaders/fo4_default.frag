@@ -422,9 +422,21 @@ vec2 wwDecalPomUv( vec2 uv0, vec3 P, vec3 N, vec3 E )
 	return uv0 + ofs * ( 1.0 - t );
 }
 
+#ifdef WW_CELLLIGHTS	// lane PERFLOAD1 P7 round 2: the far row's tree-ladder dither (fo4_default.vert), the cards' noise
+flat in vec2 farLadder;
+uniform float farFadeFrame;
+#endif
+
 void main()
 {
 #ifdef WW_CELLLIGHTS
+	// finer side keeps noise < w (x = 1 + w), coarser keeps noise >= 1 - w (x = -(1 + w)): impostor_oct.frag's noise
+	if ( farLadder.x != 0.0 ) {
+		vec2 fp = gl_FragCoord.xy + 5.588238 * farFadeFrame;
+		float n = fract( 52.9829189 * fract( dot( fp, vec2( 0.06711056, 0.00583715 ) ) ) );
+		if ( farLadder.x > 0.0 ? n >= farLadder.x - 1.0 : n < 2.0 + farLadder.x )
+			discard;
+	}
 	cellEmitOut = vec4( 0.0 );
 	float wwGrassK = wwGrassFadeK( ViewDir );	// lane GRASSMB1: exactly 1.0 on every non-grass shape
 	if ( wwGrassK <= 0.0 )
@@ -1128,6 +1140,15 @@ void main()
 		else
 			fragColor = vec4( fragColor.rgb * clamp( rawVertexAlpha, 0.0, 1.0 ), 1.0 );
 	}
+#ifdef WW_CELLLIGHTS
+	/* lane PERFLOAD1 P8: the LOD preview's tint (lodpreview.cpp's colours): the row's level code y (2 rep0 .. 5 rep3), its
+	 * luminance kept; a row mid ladder fade (x != 0) the band's magenta */
+	if ( farLadder.y > 0.5 ) {
+		vec3 lt = farLadder.x != 0.0 ? vec3( 1.0, 0.2, 1.0 ) : farLadder.y < 2.5 ? vec3( 0.2, 0.85, 0.25 )
+			: farLadder.y < 3.5 ? vec3( 0.95, 0.9, 0.15 ) : farLadder.y < 4.5 ? vec3( 1.0, 0.55, 0.1 ) : vec3( 0.95, 0.15, 0.15 );
+		fragColor.rgb = lt * ( 0.25 + 0.75 * clamp( dot( fragColor.rgb, vec3( 0.2126, 0.7152, 0.0722 ) ), 0.0, 1.0 ) );
+	}
+#endif
 #ifdef WW_FAR_SPLAT	// lane FARLOOK1101: the splat pass blends at the row's true coverage (glBlendFuncSeparate keeps dst alpha)
 	fragColor.a = farSplatA;
 	cellEmitOut.a *= farSplatA;

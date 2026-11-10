@@ -24,7 +24,7 @@ BSD License - see nifskope.h
 #include "harnesswindow.h"	// lane GAPFIX1
 #include "features/exposure/cellhdr.h"
 #include "features/shared/cellpasstime.h"	// MODULES1 part 27: the early cards keep their FarCards zone
-#if __has_include( "gl/cellcull.h" )
+#if __has_include( "features/near/cellcull.h" )	// lane PERFLOAD1 11-10: the old path "gl/cellcull.h" left the runs unregistered since 11-05
 #include "features/near/cellcull.h"   // the cell cull table, when merged
 #define FARLOD1_HAVE_CULL 1
 #endif
@@ -32,6 +32,7 @@ BSD License - see nifskope.h
 #include "features/water/endlesssea.h"	// lane FARSEA1: the endless sea past the bake
 #include "features/near/cellbindless.h"	// lane BINDLESS2FIX: the sway reaches the bindless twins
 #include "features/far-lod/cellfarinst.h"	// lane FARLOOK1101: and the far splat twins
+#include "features/far-lod/lodpreview.h"	// lane PERFLOAD1 P8: the LOD preview's forced slot
 #include "features/far-ground/cellfarground.h"	// lane FARDRAW1: the far ring 0's live ground
 #include "gl/glscene.h"
 #include "gl/glshape.h"
@@ -271,6 +272,9 @@ int farlod1TypeFor( bool oursFound, QString * why )
 QString farlod1CullRegister( NifModel * nif, int firstBlock )
 {
 #ifdef FARLOD1_HAVE_CULL
+	if ( wwEnv( "WW_CELL_FARLOD_RED" ) == "nocullruns" )	// lane PERFLOAD1: far shapes drawn whole, as 11-05 to 11-10
+		return QStringLiteral( "far lod: cull runs not registered (WW_CELL_FARLOD_RED=nocullruns: far shapes are drawn whole)" );
+	const auto cullT0 = std::chrono::steady_clock::now();
 	int shapes = 0, runsAll = 0;
 	for ( int b = firstBlock + 1; b < nif->getBlockCount(); b++ ) {
 		const QModelIndex iB = nif->getBlockIndex( b );
@@ -354,8 +358,9 @@ QString farlod1CullRegister( NifModel * nif, int firstBlock )
 		runsAll += int( runs.size() );
 		wwCellCullShape( nif, b, std::move( runs ) );
 	}
-	return QStringLiteral( "far lod: cull runs %1 over %2 shapes (camera cull + cascade casters, SUNCELL1)" )
-		.arg( runsAll ).arg( shapes );
+	return QStringLiteral( "far lod: cull runs %1 over %2 shapes (camera cull + cascade casters, SUNCELL1), registered in "
+		"%3 ms; WW_CELL_FARLOD_RED=nocullruns draws the far shapes whole" ).arg( runsAll ).arg( shapes )
+		.arg( std::chrono::duration<double, std::milli>( std::chrono::steady_clock::now() - cullT0 ).count(), 0, 'f', 1 );
 #else
 	Q_UNUSED( nif );
 	Q_UNUSED( firstBlock );
@@ -449,6 +454,10 @@ QString cellFarLodAppend( NifModel * nif, const QModelIndex & iRoot, const EsmWo
 	const bool noTerrainRed = red == "noterrain";   // terrain built (the rings' cuts stand), every terrain shape hidden
 	const bool noObjectsRed = red == "noobjects";   // ours not built, the game's .bto objects hidden
 	const bool noCardsRed = red == "nocards";   // the tree cards not armed
+	// lane PERFLOAD1 P3 reds: cardstay = the last build's cards stay when ours is off; cardslim = cards ignore WW_CELL_FARLOD_OURS
+	const bool cardsStayRed = red == "cardstay";
+	const bool cardsLimRed = red == "cardslim";
+	const bool vanWaterRed = red == "vanwaterdef";	// the game's water shapes take the worldspace default only
 	const int h = std::max( 0, ( n - 1 ) / 2 );
 	const int bx0 = cx - h, by0 = cy - h, bx1 = cx + h, by1 = cy + h;
 	// lane CELLSTREAM1: objects and cards leave out every cell a 5x5 round any roam position can load
@@ -747,13 +756,71 @@ QString cellFarLodAppend( NifModel * nif, const QModelIndex & iRoot, const EsmWo
 			say( QStringLiteral( "far lod: vanilla REFUSED -- %1" ).arg( verr ) );
 		WwWaterRecord vdef;
 		const bool haveVdef = world.defaultWaterType() != 0 && world.waterRecord( world.defaultWaterType(), vdef );
+		/* lane PERFLOAD1 P3: the game's .btr water shapes carry no WATR form, and the Commonwealth has no default
+		 * water ("endless sea: NONE"), so none was drawn as the cell's water: they kept the flat stand-in shader.
+		 * Each takes the water its chunk's cells use (the most cells with a readable record), the worldspace's
+		 * default only where no cell of the chunk names one. Red vanwaterdef: the default only. */
+		QHash<QString, int> vanStemRec;	// chunk stem -> index in vanRecs, -1 none
+		QVector<WwWaterRecord> vanRecs;
+		qint64 vwOwn = 0, vwDef = 0, vwNone = 0;
+		auto vanWaterRec = [&]( int b ) -> const WwWaterRecord * {
+			if ( !vanWaterRed ) {
+				const QStringList nm = nif->get<QString>( nif->getBlockIndex( b ), "Name" ).split( QLatin1Char( ' ' ) );
+				const QString stem = nm.size() > 4 ? nm.at( 4 ) : QString();
+				auto it = vanStemRec.find( stem );
+				if ( it == vanStemRec.end() ) {
+					int at = -1;
+					const QStringList p = stem.split( QLatin1Char( '.' ) );
+					bool ok1 = false, ok2 = false, ok3 = false;
+					const int lv = p.size() >= 4 ? p.at( p.size() - 3 ).toInt( &ok1 ) : 0;
+					const int x0 = p.size() >= 4 ? p.at( p.size() - 2 ).toInt( &ok2 ) : 0;
+					const int y0 = p.size() >= 4 ? p.at( p.size() - 1 ).toInt( &ok3 ) : 0;
+					if ( ok1 && ok2 && ok3 && lv > 0 && lv <= 64 ) {
+						QHash<quint32, int> n;
+						for ( int y = y0; y < y0 + lv; y++ )
+							for ( int x = x0; x < x0 + lv; x++ ) {
+								float h = 0.0f;
+								quint32 form = 0;
+								if ( world.cellWater( x, y, h, &form ) && form != 0 )
+									n[form]++;
+							}
+						quint32 best = 0;
+						int bestN = 0;
+						for ( auto f = n.cbegin(); f != n.cend(); ++f )
+							if ( f.value() > bestN || ( f.value() == bestN && f.key() < best ) ) {
+								WwWaterRecord r;
+								if ( world.waterRecord( f.key(), r ) ) {
+									best = f.key();
+									bestN = f.value();
+								}
+							}
+						WwWaterRecord r;
+						if ( best != 0 && world.waterRecord( best, r ) ) {
+							vanRecs << r;
+							at = vanRecs.size() - 1;
+						}
+					}
+					it = vanStemRec.insert( stem, at );
+				}
+				if ( it.value() >= 0 ) {
+					vwOwn++;
+					return &vanRecs.at( it.value() );
+				}
+			}
+			if ( haveVdef ) {
+				vwDef++;
+				return &vdef;
+			}
+			vwNone++;
+			return nullptr;
+		};
 		qint64 sOurs = 0, sVan = 0, sNone = 0, sBoth = 0;
 		for ( size_t i = 0; i < van.size(); i++ ) {
 			const WwFarVanRing & v = van[i];
 			int wReg = 0;
-			if ( haveVdef )
-				for ( int b : v.waterBlocks ) {
-					wwCellWaterShape( nif, b, vdef );
+			for ( int b : v.waterBlocks )
+				if ( const WwWaterRecord * rec = vanWaterRec( b ) ) {
+					wwCellWaterShape( nif, b, *rec );
 					wReg++;
 				}
 			say( QStringLiteral( "far lod: source ring %1 level %2 type %3 cells %4: chunks ours %5, vanilla %6, none %7, both %8" )
@@ -765,6 +832,10 @@ QString cellFarLodAppend( NifModel * nif, const QModelIndex & iRoot, const EsmWo
 					.arg( v.shapes ).arg( v.terrainTris ).arg( v.clipTris ).arg( v.objectTris ).arg( v.droppedTris )
 					.arg( v.snapped ).arg( v.snapMax, 0, 'f', 1 ).arg( int( v.waterBlocks.size() ) ).arg( wReg )
 					+ QStringLiteral( ", %1 land shaders LOD landscape -> default, %2 skirt tris on the clip lines" ).arg( v.landRetyped ).arg( v.skirtTris )
+					// lane PERFLOAD1 P9: the water skirt and the gaps the 16-bit cap leaves
+					+ QStringLiteral( ", %1 water skirt tris%2, %3 skirt edges and %4 clip pieces over the 16-bit cap" )
+						.arg( v.waterSkirtTris ).arg( wwEnvInt( "WW_CELL_FARLOD_SKIRT_RED" ) == 1 ? QStringLiteral( " (RED: unskirted)" ) : QString() )
+						.arg( v.skirtCapped ).arg( v.clipCapped )
 					+ QStringLiteral( ", arrays beside the document: %1 terrain + %2 object tris%3" ).arg( v.sideTerrainTris )
 						.arg( v.sideObjectTris ).arg( wwEnv( "WW_CELL_FARLOD_RED" ) == "vanrows"
 							? QStringLiteral( " (RED vanrows: document rows)" ) : QString() )
@@ -776,6 +847,10 @@ QString cellFarLodAppend( NifModel * nif, const QModelIndex & iRoot, const EsmWo
 			sNone += v.chunksNone;
 			sBoth += v.chunksBoth;
 		}
+		if ( vwOwn + vwDef + vwNone > 0 )
+			say( QStringLiteral( "far lod: the game's water shapes: %1 take their chunk's own WATR, %2 the worldspace default, "
+				"%3 none (not drawn as water)%4" ).arg( vwOwn ).arg( vwDef ).arg( vwNone )
+				.arg( vanWaterRed ? QStringLiteral( " (RED vanwaterdef)" ) : QString() ) );
 		say( QStringLiteral( "far lod: source total type %1: chunks ours %2, vanilla %3, none %4, both %5%6" )
 			.arg( typeName ).arg( sOurs ).arg( sVan ).arg( sNone ).arg( sBoth )
 			.arg( haveLim ? QStringLiteral( " (ours limited to %1,%2..%3,%4, WW_CELL_FARLOD_OURS)" )
@@ -792,7 +867,9 @@ QString cellFarLodAppend( NifModel * nif, const QModelIndex & iRoot, const EsmWo
 			.arg( QStringLiteral( "%1 shapes, %2 verts (est %3), %4 tris, %5 cut tris, sheet %6 x%7 tiles%8" )
 				.arg( r.shapes ).arg( r.verts ).arg( r.estVerts ).arg( r.tris ).arg( r.cutTris )
 				.arg( r.sheetFile.isEmpty() ? QStringLiteral( "none" ) : r.sheetFile ).arg( r.sheetTiles )
-				.arg( r.notes.isEmpty() ? QString() : QStringLiteral( " -- " ) + r.notes.join( QLatin1String( "; " ) ) ) ) );
+				.arg( QStringLiteral( ", %1 skirt tris (%2 edges over the 16-bit cap)%3" ).arg( r.skirtTris ).arg( r.skirtCapped )
+					.arg( wwEnvInt( "WW_CELL_FARLOD_SKIRT_RED" ) == 1 ? QStringLiteral( " (RED: unskirted)" ) : QString() )
+					+ ( r.notes.isEmpty() ? QString() : QStringLiteral( " -- " ) + r.notes.join( QLatin1String( "; " ) ) ) ) ) );
 		if ( r.built ) {
 			tVerts += r.verts;
 			tTris += r.tris;
@@ -1121,6 +1198,11 @@ QString cellFarLodAppend( NifModel * nif, const QModelIndex & iRoot, const EsmWo
 	const float ctrX = origin[0], ctrY = origin[1];
 	QSet<quint32> cardRefs;
 	int cards = 0;
+	// lane PERFLOAD1 P1: every far tree whose form the bake photographed draws as its octahedral impostor
+	const bool treeMeshRed = red == "treemesh";	// red: the rings draw every tree as its mesh (before 11-10)
+	QHash<quint32, int> treeLayer;
+	QVector<LodiTreeCard> treeCardsOut;
+	QHash<quint32, qint64> treeMeshForms;
 	if ( ours && noCardsRed )
 		say( QStringLiteral( "far lod: cards OFF (red nocards)" ) );
 	if ( ours && !noCardsRed ) {
@@ -1135,15 +1217,33 @@ QString cellFarLodAppend( NifModel * nif, const QModelIndex & iRoot, const EsmWo
 					chunks << base;
 			}
 		QStringList cn;
+		QVector<QRect> oursRings;	// lane PERFLOAD1 P3: the rings we built, when our files are limited
+		for ( const LodlFarRing & r : rings )
+			if ( r.built && r.ox1 >= r.ox0 && r.oy1 >= r.oy0 )
+				oursRings << QRect( QPoint( r.ox0, r.oy0 ), QPoint( r.ox1, r.oy1 ) );
 		cards = ImpostorChunk::armCellFar( nif, chunks, shift, ctrX, ctrY, treeDist, ox0, oy0, ox1, oy1,
-			&cardRefs, &cn );
+			&cardRefs, &cn, haveLim && !cardsLimRed ? &oursRings : nullptr );
 		for ( const QString & c : cn )
 			say( c.startsWith( QLatin1String( "far lod:" ) ) ? c : QStringLiteral( "far lod: cards: " ) + c );
+		if ( treeMeshRed ) {
+			say( QStringLiteral( "far lod: tree impostors OFF for the rings' meshes (WW_CELL_FARLOD_RED=treemesh)" ) );
+		} else {
+			QStringList tn;
+			ImpostorChunk::cellFarTreeForms( li.absoluteDir().filePath( QStringLiteral( "Objects" ) ), ws, &treeLayer, &tn );
+			for ( const QString & c : tn )
+				say( c );
+		}
+	} else if ( !cardsStayRed ) {
+		/* lane PERFLOAD1 P3: no cards of ours this build (the game's LOD, or red nocards): the last build's cards
+		 * must not stay drawn over the game's .bto trees (11-10 flight: 8492 of 20030 stayed after "ours off") */
+		ImpostorChunk::armCellFar( nif, QStringList(), shift, ctrX, ctrY, treeDist, ox0, oy0, ox1, oy1, nullptr, nullptr );
+		say( QStringLiteral( "far lod: cards 0 -- %1, the last build's cards cleared" )
+			.arg( ours ? QStringLiteral( "red nocards" ) : QStringLiteral( "the game's LOD (type %1)" ).arg( typeName ) ) );
 	}
 
 	// ---- objects, ring by ring: the authored slot of each, the ring inside cut out
 	const QString lodi = li.absoluteDir().filePath( li.completeBaseName() + QStringLiteral( ".lodi" ) );
-	qint64 oPlaced = 0, oTris = 0, oSway = 0, oDropped = 0, oRefs = 0;
+	qint64 oPlaced = 0, oTris = 0, oSway = 0, oDropped = 0, oRefs = 0, oTreeCards = 0, oTreeMismatch = 0, oTreeLadder = 0, oTreeLadderRows = 0;
 	// lane LIVESET1: the budget charges the far field's own estimate, never the process working set (a live
 	// rebuild reuses freed pages, so a measured delta built ring 1 there and not at the open)
 	double usedMB = double( tVerts ) * kBytesPerVert / ( 1024.0 * 1024.0 );
@@ -1202,7 +1302,9 @@ QString cellFarLodAppend( NifModel * nif, const QModelIndex & iRoot, const EsmWo
 			os.hy0 = hy0;
 			os.hx1 = hx1;
 			os.hy1 = hy1;
-			os.slot = defs[i].slot;
+			// lane PERFLOAD1 P8: the LOD preview's forced level pins every ring to its slot (nearest when empty)
+			os.slot = LodPreview::objectSlot() >= 0 ? LodPreview::objectSlot() : defs[i].slot;
+			os.slotNearest = LodPreview::objectSlot() >= 0;
 			os.namePrefix = QStringLiteral( "FarLOD r%1 " ).arg( int( i ) );
 			os.shift[0] = shift[0];
 			os.shift[1] = shift[1];
@@ -1215,6 +1317,10 @@ QString cellFarLodAppend( NifModel * nif, const QModelIndex & iRoot, const EsmWo
 			os.dropY = ctrY;
 			os.sway = swayAmp() > 0.0f;
 			os.skipRefs = &cardRefs;
+			os.treeCardLayer = treeLayer.isEmpty() ? nullptr : &treeLayer;
+			os.treeCardsOut = &treeCardsOut;
+			os.treeMeshForms = &treeMeshForms;
+			os.treeLadder = red != "edgecut";	// lane PERFLOAD1 P7: red = P1's cut at the loaded-cell edge
 			/* The ring's triangles are counted before the document grows; a ring that would exceed the
 			 * budget is not written. */
 			const bool sideMesh = cellMeshOn();
@@ -1252,6 +1358,11 @@ QString cellFarLodAppend( NifModel * nif, const QModelIndex & iRoot, const EsmWo
 					.arg( oc.instancesDrawn ).arg( oc.tris ).arg( oc.uniqueVerts ).arg( oc.uniqueTris )
 					.arg( double( oc.geoBytes ) / ( 1024.0 * 1024.0 ), 0, 'f', 2 )
 					.arg( double( oc.instBytes ) / ( 1024.0 * 1024.0 ), 0, 'f', 2 ) );
+			// lane PERFLOAD1 P8: the LOD preview's per-level census of this ring's placements
+			say( QStringLiteral( "lod preview: objects ring %1 level %2 (slot %3): rep0 %4, rep1 %5, rep2 %6, rep3 %7; "
+				"%8 drawn at their nearest level" ).arg( int( i ) ).arg( LodPreview::levelName( LodPreview::force() ) )
+				.arg( os.slot ).arg( oc.slotRows[0] ).arg( oc.slotRows[1] ).arg( oc.slotRows[2] ).arg( oc.slotRows[3] )
+				.arg( oc.slotNearest ) );
 			// lane FIX1101A lodch: which of the bake's channels this ring USED (the census line the unit and the rows read)
 			say( QStringLiteral( "far lod: objects ring %1 channels: AO %2 (%3 placements from the per-vertex stream, %4 from "
 				"self x placement AO, stream mean %5), sky %6 (%7 placements, %8 vertices, factor mean %9, raw byte mean %10); "
@@ -1279,11 +1390,54 @@ QString cellFarLodAppend( NifModel * nif, const QModelIndex & iRoot, const EsmWo
 			oSway += oc.swayVerts;
 			oDropped += oc.treesDropped;
 			oRefs += oc.refsSkipped;
+			oTreeCards += oc.treeCards;
+			oTreeMismatch += oc.treeLayerMismatch;
+			oTreeLadder += oc.treeLadder;
+			oTreeLadderRows += oc.treeLadderRows;
 			hx0 = foot[i][0];
 			hy0 = foot[i][1];
 			hx1 = foot[i][2];
 			hy1 = foot[i][3];
 		}
+	}
+
+	/* lane PERFLOAD1 P1: the trees the rings handed to the impostors join the far cards, then the honest count of how
+	 * every far tree draws. Gate: "forms with an impostor drawn as mesh: 0 placements". */
+	if ( !treeCardsOut.isEmpty() )
+		cards += ImpostorChunk::addCellFarTrees( treeCardsOut );
+	if ( ours && ( cards > 0 || !treeMeshForms.isEmpty() ) ) {
+		int octN = 0, ringN = 0, flatN = 0;
+		ImpostorChunk::cellFarCensus( &octN, &ringN, &flatN );
+		qint64 meshTrees = 0, meshWithImp = 0;
+		int formsWithImp = 0;
+		QVector<QPair<qint64, quint32>> top;
+		for ( auto it = treeMeshForms.cbegin(); it != treeMeshForms.cend(); ++it ) {
+			meshTrees += it.value();
+			if ( treeLayer.contains( it.key() ) ) {
+				meshWithImp += it.value();
+				formsWithImp++;
+			}
+			top << qMakePair( it.value(), it.key() );
+		}
+		std::sort( top.begin(), top.end(), []( const QPair<qint64, quint32> & a, const QPair<qint64, quint32> & b ) {
+			return a.first > b.first;
+		} );
+		QStringList topW;
+		for ( int k = 0; k < std::min<int>( 8, top.size() ); k++ )
+			topW << QStringLiteral( "%1 x%2" ).arg( QString::number( top[k].second, 16 ).rightJustified( 8, QLatin1Char( '0' ) ) )
+				.arg( top[k].first );
+		say( QStringLiteral( "far lod: trees %1 drawn as octahedral impostors (%2 handed over by the object rings, the rest "
+			"from the chunks' C lines), %3 as flat cards, %4 as horizon ring cards, %5 as authored mesh in %6 forms "
+			"(most: %7); forms with an impostor drawn as mesh: %8 placements in %9 forms, %10 layer mismatches%11" )
+			.arg( octN ).arg( oTreeCards ).arg( flatN ).arg( ringN ).arg( meshTrees ).arg( treeMeshForms.size() )
+			.arg( topW.isEmpty() ? QStringLiteral( "none" ) : topW.join( QStringLiteral( ", " ) ) )
+			.arg( meshWithImp ).arg( formsWithImp ).arg( oTreeMismatch )
+			.arg( treeMeshRed ? QStringLiteral( " (RED treemesh)" ) : QString() ) );
+		say( QStringLiteral( "far lod: tree ladder (docs/FO4CS_IMPROVED_LOD_PLAN.md R3 4-5): %1 of the %2 handed trees keep "
+			"their MNAM mesh row and switch to the impostor by screen size; %4 more rows for their other MNAM slots (one a "
+			"distinct mesh, every step a row)%3" ).arg( oTreeLadder ).arg( oTreeCards )
+			.arg( red == "edgecut" ? QStringLiteral( " (RED edgecut: every handed tree an impostor from the loaded-cell edge)" )
+				: QString() ).arg( oTreeLadderRows ) );
 	}
 
 	/* Census: every object ring against the game's own object LOD (.bto) over the same region, naming

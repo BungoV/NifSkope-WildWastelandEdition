@@ -1,6 +1,7 @@
 #include "cellpasstime.h"
 #include "features/shared/wwtelemetry.h"	// lane MODULES1: the shared telemetry module
 #include "wwswitch.h"	// lane TESTDRIVER1: the WW_* switch store
+#include "wwloadwatch.h"	// lane PERFLOAD1 P5: every pass names itself to the main-thread watch
 #include "gl/gpustage.h"	// MODULES1: the staged-upload counts in the stream1 mem line
 #include "filebuf.hpp"	// MODULES1: the archive trims in the ram owners line
 
@@ -528,6 +529,7 @@ qint64 nowNs()
 
 void frameBegin()
 {
+	::wwMainStep( "a frame's start" );	// lane PERFLOAD1 P5: a stall inside a frame names its pass, timers on or off
 	State & s = st();
 	if ( !s.on ) {
 		s.inFrame = false;
@@ -580,6 +582,7 @@ void frameBegin()
 
 void begin( int pass )
 {
+	::wwMainStep( name( pass ) );	// lane PERFLOAD1 P5
 	State & s = st();
 	if ( !s.inFrame || pass < 0 || pass >= Count || s.openMark[pass] >= 0 )
 		return;

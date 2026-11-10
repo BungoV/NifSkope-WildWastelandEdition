@@ -36,6 +36,9 @@ struct WwFarVanRing
 	int chunksOurs = 0, chunksVanilla = 0, chunksBoth = 0, chunksNone = 0;
 	qint64 terrainTris = 0, objectTris = 0, clipTris = 0, droppedTris = 0, shapes = 0;
 	qint64 snapped = 0, landRetyped = 0, skirtTris = 0;          //!< landRetyped: .btr LOD-landscape shaders drawn as the default type
+	/* lane PERFLOAD1 P9: the water shapes' skirt (red WW_CELL_FARLOD_SKIRT_RED=1: none, the old rule), skirt edges left
+	 * open at the 16-bit index cap, and clip pieces cut short at it (both were silent gaps) */
+	qint64 waterSkirtTris = 0, skirtCapped = 0, clipCapped = 0;
 	qint64 btoSwayShapes = -1, btoSwayTrees = 0, btoSwayShared = 0;  //!< lane FAR5: Game LOD trees sway (-1: off)
 	//! lane FIX1101A lodch r2 (LATE ITEM 23): triangles whose arrays wait beside the document (src/cellmesh.h), charged
 	//! at the arrays' rate, not the rows' (red WW_CELL_FARLOD_RED=vanrows: 0, all rows)

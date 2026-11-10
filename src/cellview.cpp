@@ -48,8 +48,10 @@ BSD License - see nifskope.h
 #include "cellmesh.h"		// the welded geometry beside the document
 #include "features/far-lod/cellfarlod.h"		// the far field around the block
 #include "features/far-lod/lodinative.h"		// lane FIX1101A lodch: the far LOD's baked AO / sky switches (liveFarKey)
+#include "features/far-lod/lodpreview.h"	// lane PERFLOAD1 P8: the forced level is part of liveFarKey
 #include "cellmodpick.h"
 #include "cellspeed.h"		// stage timers (WW_CELL_SPEED_DUMP)
+#include "wwloadwatch.h"	// lane PERFLOAD1 P6: the views parked around the live far rebuild
 #include "features/ao/cellaodecal.h"		// baked AO decals under big movable statics
 #include "cellstream.h"		// the cells round the camera
 #include "cellspawn.h"		// where the camera starts
@@ -2276,13 +2278,16 @@ QByteArray liveFarKey()
 	for ( const char * n : { "WW_CELL_FARLOD_RED", "WW_CELL_FARLOD_NEARONLY", "WW_CELL_FARLOD_MAX", "WW_CELL_FARLOD_L0",
 			"WW_CELL_FARLOD_L1", "WW_CELL_FARLOD_L2", "WW_CELL_FARLOD_TREE_DIST", "WW_CELL_FARLOD_RINGS",
 			"WW_CELL_FARLOD_BUDGET_MB", "WW_CELL_FARLOD_OURS", "WW_CELL_FARLOD_SWAY", "WW_CELL_FARLOD_SHORE",
-			"WW_CELL_FARLOD_PRESET", "WW_CELL_FARLOD_PRESET_RED" } )	// lane FARPRESET1: the preset's ring distances
+			"WW_CELL_FARLOD_PRESET", "WW_CELL_FARLOD_PRESET_RED",	// lane FARPRESET1: the preset's ring distances
+			"WW_CELL_FARLOD_SKIRT_RED" } )	// lane PERFLOAD1 P9: the skirts are written while the rings are built
 		k += wwEnv( n ) + '\x1f';
 	// lane FAR6: Game LOD trees sway is written into the .bto shapes at build; its menu tick lives in the settings
 	k += QByteArray( wwLookOn( WwLook::BtoSway ) ? "1" : "0" ) + wwEnv( "WW_CELL_FARLOD_BTOSWAY_RED" ) + '\x1f';
 	// lane FIX1101A lodch: the bake's AO and sky are written into the far rows and the far ground while it is built
 	k += QByteArray( lodlAoOn() ? "1" : "0" ) + QByteArray::number( lodlSkyMode() ) + wwEnv( "WW_LODL_AO_RED" )
 		+ wwEnv( "WW_LODL_SKY_RED" ) + '\x1f';
+	// lane PERFLOAD1 P8: the LOD preview's forced level picks the far object rows' MNAM slot at build
+	k += QByteArray::number( LodPreview::objectSlot() ) + '\x1f';
 	return k;
 }
 
@@ -2578,6 +2583,7 @@ int liveFar( NifModel * nif, LiveDoc & d, QString * why )
 	CellFarStream fs;
 	if ( seed )
 		fs.roam = seed->roam;
+	const bool parked = wwParkViews( nif, true );	// lane PERFLOAD1 P6: thousands of blocks cut and appended
 	nif->holdUpdates( true );
 	liveCut( nif, d, d.farFirst );
 	cellFarLodForget( nif );
@@ -2589,6 +2595,8 @@ int liveFar( NifModel * nif, LiveDoc & d, QString * why )
 	}
 	nif->holdUpdates( false );
 	nif->updateModel();
+	if ( parked )
+		wwParkViews( nif, false );
 	if ( seed ) {
 		auto next = std::make_shared<CellStreamSeed>( *seed );
 		/* lane LARGEREF4 (LARGEREF-MAP-LIVE): the restarted stream reads the rebuilt far map (cellStreamStart); a far LOD
@@ -2616,7 +2624,8 @@ int liveFar( NifModel * nif, LiveDoc & d, QString * why )
 		.arg( onOff ? ( wanted ? QStringLiteral( "far LOD added" ) : QStringLiteral( "far LOD removed" ) )
 			: farMoved ? QStringLiteral( "far LOD rebuilt" ) : QStringLiteral( "cells rebuilt (actors outdoors / weapon parts)" ) )
 		.arg( t.elapsed() )
-		.arg( seed ? QStringLiteral( " (streamed cells dropped and streamed again)" ) : QString() );
+		.arg( QString( seed ? QStringLiteral( " (streamed cells dropped and streamed again)" ) : QString() )
+			+ ( parked ? QStringLiteral( " (views parked)" ) : QString() ) );
 	return 1;
 }
 

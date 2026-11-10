@@ -197,6 +197,14 @@ GLuint layerSheetId( Scene * scene, const ImpostorSheet & sheet, int layer )
 bool bindSheet( Scene * scene, NifSkopeOpenGLContext::Program * prog,
 				const char * uniform, const ImpostorSheet & sheet, int unit, int layer = -1 );
 
+/* lane PERFLOAD1 P2: outdoors the far cards take the hour's DALC ambient and the hour's sun through cellLit, like the
+ * near trees (impostor_oct.frag). Red WW_CELL_FARLOD_RED=cardlight: the viewport's sun + NAM0 ambient, as before. */
+static bool wwCardLightRed()
+{
+	WW_SWITCH_STATIC( bool, red, !wwSwitchEcho( "far cards take the hour's light", wwEnv( "WW_CELL_FARLOD_RED" ) != "cardlight" ) );
+	return red;
+}
+
 /* lane PERF1: the card pass's state, bound once (ImpostorDraw::batchBegin). A street frame drew ~5,000
  * cards at ~40 us each, mostly re-binding the same program, uniforms and sheets (four file checks and a
  * key string per card for an array-layer sheet). */
@@ -666,6 +674,7 @@ bool ImpostorDraw::drawCard( Scene * scene, const ImpostorCardSet & set,
 		// both act on the bound program and do nothing where it lacks their uniforms
 		wwLookdevFogUniforms( scene );
 		wwCellLightsUniforms( scene );
+		prog->uni1b( "cardLightRed", wwCardLightRed() );
 	}
 	if ( batch.on && fresh ) {
 		batch.prog = prog;
@@ -786,6 +795,9 @@ bool ImpostorDraw::drawCard( Scene * scene, const ImpostorCardSet & set,
 	prog->uni1i( "debugChannel", opt.debugChannel );
 	prog->uni1f( "swayAmplitude", opt.swayAmplitude );
 	prog->uni1f( "swayPhase", opt.swayPhase );
+	prog->uni1f( "cardFadeOut", opt.fadeOut );	// lane PERFLOAD1 P7
+	prog->uni1f( "cardFadeFrame", opt.fadeFrame );
+	prog->uni3f( "cardLodTint", opt.lodTint[0], opt.lodTint[1], opt.lodTint[2] );	// lane PERFLOAD1 P8
 
 	wwImpostorTrace( "H card uniforms" );
 	if ( fresh ) {
@@ -1201,6 +1213,7 @@ bool ImpostorDraw::drawCardsInstanced( Scene * scene, const QVector< InstCard > 
 	if ( opt.cellLit ) {
 		wwLookdevFogUniforms( scene );
 		wwCellLightsUniforms( scene );
+		prog->uni1b( "cardLightRed", wwCardLightRed() );
 	}
 	prog->uni1i( "cardData", WwCellUnit::CardData );
 	prog->uni1i( "cardFrames", WwCellUnit::CardFrames );
@@ -1222,6 +1235,7 @@ bool ImpostorDraw::drawCardsInstanced( Scene * scene, const QVector< InstCard > 
 	prog->uni1b( "useBakedAo", opt.bakedAo );
 	prog->uni1i( "debugChannel", opt.debugChannel );
 	prog->uni1f( "swayAmplitude", opt.swayAmplitude );
+	prog->uni3f( "cardLodTint", opt.lodTint[0], opt.lodTint[1], opt.lodTint[2] );	// lane PERFLOAD1 P8
 	if ( gpuPick ) {
 		prog->uni1i( "cardIndexBase", int( g.slotData.size() / 4 ) );
 		prog->uni1f( "cardSwayBase", opt.swayPhase );

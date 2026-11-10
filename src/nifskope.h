@@ -170,6 +170,8 @@ public:
 	//! Open NIF documents in this application session. Each document keeps its
 	//! own model, selection, Undo stack and dirty state; the active one is primary.
 	static QList<NifSkope *> openDocuments();
+	//! lane PERFLOAD1 P6: park (true) / attach (false) this window's views around a bulk edit; true when it did
+	bool wwParkViews( bool park );
 	//! Documents explicitly added to the Loaded NIFs workspace and currently selected.
 	static QList<NifSkope *> selectedWorkspaceDocuments();
 	//! Which window a generated document belongs in: the one that owns the model
@@ -683,7 +685,7 @@ private:
 	void updateRecentArchiveFileActions();
 
 	//! Disconnect and reconnect the models to the views
-	void swapModels();
+	void swapModels( bool park );
 
 	//! (Re)connect the block-list multi-selection handler. Must be re-run
 	//! whenever list->setModel() replaces the view's selection model.

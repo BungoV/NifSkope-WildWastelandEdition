@@ -29,6 +29,7 @@ BSD License - see nifskope.h
 #include "features/reflections/cellreflprobe.h"	// lane REFLPROBE1: the Reflection probes row
 #include "features/gi/cellssgi.h"
 #include "features/far-ground/cellfarground.h"	// the Far ground rows
+#include "features/far-lod/lodpreview.h"	// lane PERFLOAD1 P8: the LOD preview rows
 #include "features/lights/celllampshadow.h"
 #include "gl/celllooks.h"
 #include "features/water/cellwater.h"	// the Water row
@@ -522,6 +523,47 @@ void CellWorkspacePanel::buildUi()
 			cellFarLodTypeGroup->addAction( a );
 		}
 	}
+	// lane PERFLOAD1 P8: the LOD preview (src/features/far-lod/lodpreview.h), live, not saved; greyed when its WW_ pin is set
+	auto lodChoice = [&]( const char * name, const QString & label, const QStringList & names, int first, int cur,
+		bool pinned ) {
+		QMenu * m = showMenu->addMenu( label );
+		m->setObjectName( QLatin1String( name ) );
+		m->setEnabled( !pinned );
+		auto * grp = new QActionGroup( m );
+		grp->setExclusive( true );
+		for ( int k = 0; k < names.size(); k++ ) {
+			QAction * a = m->addAction( names.at( k ) );
+			a->setCheckable( true );
+			a->setData( first + k );
+			a->setChecked( first + k == cur );
+			grp->addAction( a );
+		}
+		return grp;
+	};
+	QActionGroup * lodLevelGroup = lodChoice( "CellWorkspaceLodLevel", tr( "LOD level" ), { tr( "Auto" ), tr( "Full" ),
+		tr( "Rep 0" ), tr( "Rep 1" ), tr( "Rep 2" ), tr( "Rep 3" ), tr( "Impostor" ) }, -1, LodPreview::force(),
+		LodPreview::pinned( "force" ) );
+	QActionGroup * lodTintGroup = lodChoice( "CellWorkspaceLodTint", tr( "LOD tint" ), { tr( "Off" ), tr( "On" ) }, 0,
+		LodPreview::tint() ? 1 : 0, LodPreview::pinned( "tint" ) );
+	QActionGroup * lodRingGroup = lodChoice( "CellWorkspaceLodRing", tr( "LOD ring" ), { tr( "All" ), tr( "Band" ),
+		tr( "LOD4" ), tr( "LOD8" ), tr( "LOD16" ), tr( "LOD32" ) }, -1, LodPreview::ring(), LodPreview::pinned( "ring" ) );
+	QActionGroup * nearGridGroup = lodChoice( "CellWorkspaceNearGrid", tr( "Near grid" ), { tr( "Follow" ), tr( "Freeze" ),
+		tr( "Off" ) }, 0, LodPreview::grid(), LodPreview::pinned( "grid" ) );
+	connect( lodTintGroup, &QActionGroup::triggered, this, [this]( QAction * a ) {
+		LodPreview::setTint( a->data().toInt() != 0 );
+		if ( glView )
+			glView->update();
+	} );
+	connect( lodRingGroup, &QActionGroup::triggered, this, [this]( QAction * a ) {
+		LodPreview::setRing( a->data().toInt() );
+		if ( glView )
+			glView->update();
+	} );
+	connect( nearGridGroup, &QActionGroup::triggered, this, [this]( QAction * a ) {
+		LodPreview::setGrid( a->data().toInt() );
+		if ( glView )
+			glView->update();
+	} );
 	// lane FARDRAW1: ring 0's ground -- the baked sheet (today), live layers + shader decals, or live layers + cached pages
 	cellFarGround = showMenu->addMenu( tr( "Far ground" ) );
 	cellFarGround->setObjectName( QStringLiteral( "CellWorkspaceFarGround" ) );
@@ -1324,6 +1366,10 @@ void CellWorkspacePanel::buildUi()
 		kid( "", tr( "Source" ), "CellWorkspaceFarLodType" );
 		kid( "", tr( "Terrain" ), "CellWorkspaceFarGround" );
 		kid( "", tr( "Terrain pages" ), "CellWorkspaceFarGroundPages" );
+		kid( "", tr( "LOD level" ), "CellWorkspaceLodLevel" );	// lane PERFLOAD1 P8: the LOD preview
+		kid( "", tr( "LOD tint" ), "CellWorkspaceLodTint" );
+		kid( "", tr( "LOD ring" ), "CellWorkspaceLodRing" );
+		kid( "", tr( "Near grid" ), "CellWorkspaceNearGrid" );
 		look( WwLook::BtoSway, tr( "Game trees sway" ) );
 		// LATE ITEM 25 (bungo 11-01): no menu row for the bake's channels: our LOD rendering always draws them
 		// (WwLook::FarLodAo / FarLodSky stay in the table only for the debug pins WW_LODL_AO=0 / WW_LODL_SKY=0)
@@ -1604,6 +1650,17 @@ void CellWorkspacePanel::buildUi()
 		g_haveOverrides = true;
 		say( tr( "rebuilding %1 ..." ).arg( QFileInfo( g_path ).fileName() ), false );
 		emit reopenRequested( g_path );
+	} );
+	// lane PERFLOAD1 P8: the far trees take the forced level per frame; the far object rows at a far rebuild in place
+	connect( lodLevelGroup, &QActionGroup::triggered, this, [this, liveFirst]( QAction * a ) {
+		const int slot = LodPreview::objectSlot();
+		LodPreview::setForce( a->data().toInt() );
+		if ( glView )
+			glView->update();
+		if ( LodPreview::objectSlot() == slot || syncing || g_path.isEmpty() || !cellFarLodWanted() )
+			return;
+		if ( !liveFirst() )
+			say( tr( "LOD level: the far objects take it at the next far build (no reopen)" ), false );
 	} );
 	connect( cellFarLod, &QAction::toggled, this, [this, liveFirst]( bool on ) {
 		cellFarLodSetWanted( on );

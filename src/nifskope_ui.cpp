@@ -29524,7 +29524,7 @@ void NifSkope::openDlg()
 void NifSkope::onLoadBegin()
 {
 	// Disconnect the models from the views
-	swapModels();
+	swapModels( true );
 	if ( header ) header->setEmptyMessage( tr( "Loading header…" ) );
 
 	ogl->setDisabled( true );
@@ -29546,7 +29546,7 @@ void NifSkope::onLoadComplete( bool success, QString & fname )
 	updateImportExportMenu(mImport);
 
 	// Reconnect the models to the views
-	swapModels();
+	swapModels( false );
 	// Set List vs Tree
 	setListMode();
 

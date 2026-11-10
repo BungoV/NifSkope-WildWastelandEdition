@@ -16,6 +16,7 @@
  * rule), =noshadow (the sun's cached shadow is not told). Read live. */
 
 #include "cellmesh.h"
+#include "features/far-lod/treeladder.h"
 #include "largeref.h"	// lane LARGEREF6: the keep boxes (LargeRef::Box)
 
 #include <QHash>
@@ -56,11 +57,11 @@ void setExtraRefs( const void * doc, const QVector<quint32> & refs );
 //! bDisableLargeRefs decides (lane LARGEREF2; default 1 = off; red WW_CELL_LARGEREFS_RED=noini skips the inis)
 bool largeRefsWanted();
 
-//! Pure: is row i of an instanced bucket hidden by `h` in `mode`
-bool rowHidden( const CellMeshInst & d, int row, const Hidden & h, int mode );
+//! Pure: is row i of an instanced bucket hidden by `h` in `mode` (caster: the ladder's shadow step, not its draw)
+bool rowHidden( const CellMeshInst & d, int row, const Hidden & h, int mode, bool caster = false );
 //! Pure: the commands and tiles drawing only the rows `h` leaves; returns the rows hidden
 qint64 filter( const CellMeshInst & d, const Hidden & h, int mode, QVector<CellMeshInst::Cmd> & cmds,
-	QVector<CellMeshInst::Tile> & tiles );
+	QVector<CellMeshInst::Tile> & tiles, bool caster = false );
 
 struct View
 {
@@ -69,8 +70,39 @@ struct View
 	quint64 key = 0;             //!< 0 = every row draws; changes whenever the rows drawn change
 	qint64 hiddenRows = 0;
 };
-//! What an instanced bucket draws now (cached per change)
-View view( const CellMeshInst & d );
+//! What an instanced bucket draws now (cached per change); caster = what it casts into the cascades
+View view( const CellMeshInst & d, bool caster = false );
+
+/* lane PERFLOAD1 P7 round 2, the tree ladder (treeladder.h), in any document: per REFR the steps its mesh rows draw
+ * now (`draw`, one bit a step; CellMeshInst::rowStep says which steps a row serves) and the step it casts (`cast`). A
+ * REFR never set draws its ring's own row only. ladderCommit makes the buckets see the draws (the caller throttles it:
+ * one filter pass a ladder bucket per commit), castCommit the casts (the cascades and the card casters rebuild).
+ * setLadder returns 1 when a step it now draws is not live yet (hold the fade), 2 when a live row is going (dither it
+ * out until the commit: ladderFade). */
+int setLadder( quint32 ref, quint8 draw, quint8 cast );
+bool ladderDirty();
+void ladderCommit();
+bool castDirty();
+void castCommit();
+quint64 ladderCastGen();
+//! the committed cast steps of a REFR; 0xFF = not on the ladder
+quint8 ladderCast( quint32 ref );
+void ladderClear();
+int ladderHiddenCount();	//!< REFRs whose mesh rows all hide (the impostor draws them)
+int ladderCount();
+//! per frame: the trees whose rows dither (TreeLadder::rowFade), and the frame the noise shifts by (as the cards')
+struct LadderFade
+{
+	TreeLadder::State st;
+	quint8 draw = 0;
+};
+void ladderFadesBegin( int frame );
+void ladderFade( quint32 ref, const TreeLadder::State & st, quint8 draw );
+const QHash<quint32, LadderFade> & ladderFades();
+quint64 ladderFadeGen();
+int ladderFrame();
+//! rows given a dither value since the census last read it (CellFarInst adds, the ladder line reads and zeroes)
+qint64 & ladderDitherRows();
 
 //! A non-instanced far shape the stream may mask; cx0..cy1 = the cells its bound touches.
 //! lane LARGEREF6: `objects` = a far objects shape (ours or the game's .bto): the keep boxes apply; terrain and water never keep

@@ -7,8 +7,10 @@ BSD License - see nifskope.h
 #ifndef LODINATIVE_H
 #define LODINATIVE_H
 
+#include <QHash>
 #include <QModelIndex>
 #include <QSet>
+#include <QVector>
 #include <QString>
 #include <QStringList>
 
@@ -44,6 +46,20 @@ class NifModel;
  * `.lodi` reader and the chunk manifest.
  * ------------------------------------------------------------------------- */
 
+//! lane PERFLOAD1 P1: one far tree handed to the impostors instead of its mesh (world position, scale, base, REFR)
+struct LodiTreeCard
+{
+	float xyz[3];
+	float scale;
+	quint32 form, ref;
+	//! lane PERFLOAD1 P7, the tree ladder: the base's bound radius, and the ring step its mesh row still draws
+	//! (1 + MNAM slot; -1 = no mesh row kept: the impostor always, P1's cut)
+	float radius = 0.0f;
+	int meshStep = -1;
+	//! round 2: every ring step the tree has a mesh row for (bit 1 + MNAM slot); 0 = none
+	quint8 stepMask = 0;
+};
+
 //! One `.lodi` view: an inclusive cell rectangle, a cluster-ladder level and
 //! whether the occluder boxes are drawn.
 struct LodiSceneSpec
@@ -77,6 +93,19 @@ struct LodiSceneSpec
 	bool sway = false;
 	//! REFR form ids drawn by somebody else (the impostor cards); skipped here
 	const QSet<quint32> * skipRefs = nullptr;
+	/*! lane PERFLOAD1 P1: a TREE placement (every part a tree material) whose base form has an octahedral impostor in
+	 *  the bake's card arrays (form -> its layer there, checked against the .lodo base's cardLayer) goes to
+	 *  treeCardsOut instead of being drawn as its mesh. Null = every tree draws its mesh (red WW_CELL_FARLOD_RED=treemesh). */
+	const QHash<quint32, int> * treeCardLayer = nullptr;
+	QVector<LodiTreeCard> * treeCardsOut = nullptr;
+	//! tree placements still drawn as mesh, per base form (what the next card bake must photograph)
+	QHash<quint32, qint64> * treeMeshForms = nullptr;
+	/*! lane PERFLOAD1 P7: a handed tree with a REFR keeps its mesh row too, and the ladder (treeladder.h) picks mesh
+	 *  or impostor per frame by its size on screen. False = P1's cut (red WW_CELL_FARLOD_RED=edgecut). */
+	bool treeLadder = false;
+	/*! lane PERFLOAD1 P8: the LOD preview forced `slot` (lodpreview.h): a base with that slot empty draws its nearest
+	 *  authored slot (the finer on a tie) instead of nothing, counted in slotNearest */
+	bool slotNearest = false;
 	//! > 0: when the placements come to more triangles than this, nothing is written to the document
 	//! (LodiAppendCounts::overBudget; tris = what it would have been) -- the far field's memory budget
 	qint64 maxTris = 0;
@@ -118,6 +147,14 @@ struct LodiAppendCounts
 	//! lane FIX1101A lodch r2 (LATE ITEM 25): placements whose AO took the v12 ground-contact ramp, vertices darkened
 	//! through it on the instanced stream (src/features/far-lod/lodchsky.h contactAo; no extra byte)
 	qint64 groundPlacements = 0, groundBytes = 0;
+	//! lane PERFLOAD1 P1: trees handed to the impostors, trees drawn as mesh, impostor layers that disagreed with the .lodo
+	qint64 treeCards = 0, treeMesh = 0, treeLayerMismatch = 0;
+	//! lane PERFLOAD1 P7: handed trees that kept their mesh row for the ladder; round 2: the rows added for their
+	//! other MNAM slots (one a distinct mesh)
+	qint64 treeLadder = 0, treeLadderRows = 0;
+	//! lane PERFLOAD1 P8: placements drawn per MNAM slot, and those drawn at their nearest slot (slotNearest)
+	qint64 slotRows[4] = { 0, 0, 0, 0 };
+	qint64 slotNearest = 0;
 };
 
 /*! lane FIX1101A lodch (LATE ITEMs 11 + 16 + 20, "LOD channels on by default"): the far LOD draws the bake's AO
