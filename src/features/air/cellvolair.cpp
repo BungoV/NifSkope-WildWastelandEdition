@@ -1754,6 +1754,7 @@ static void vaPassInner( Scene * scene, bool run )
 	 * before past it. Red farseam: the far grid starts 30 % past the near grid's end (a gap of air: the seam gate's red). */
 	const VaFarPreset & fp = kFarPresets[std::clamp( s.farTier, 0, 4 )];
 	const float farEnd = std::min( fp.endKm * kUnitsPerKm, M.farD );
+	// MODULES1 M1 (11-10 audit, physical reason): the far grid is the land past the cells; an interior has no land past its walls
 	const bool farOn = s.farTier > 0 && !( L && L->interior ) && farEnd > kFarHandoff * 2.0f;
 	const float farStart = kFarHandoff * ( ( s.red & 33554432 ) ? 1.3f : 1.0f );
 	// the slices: exponential from 16 units to where the air reaches the records' max opacity (vaFit)
@@ -1775,6 +1776,7 @@ static void vaPassInner( Scene * scene, bool run )
 	 * wwAirColLaw, ground.z = 1 / Ht). 120 m: the height the haze band's own census falls off with (0.120 km); item G4b
 	 * sets it per weather. Red WW_CELL_AIR_TOPFALL_RED=1: empty above the top, as before. */
 	WW_SWITCH_STATIC( bool, topFallRed, wwEnv( "WW_CELL_AIR_TOPFALL_RED" ).trimmed() == "1" );
+	// MODULES1 M1 (11-10 audit, physical reason): above an interior is its ceiling, not the open atmosphere's thinning column
 	const float invTopH = topFallRed || boothAir > 0.0f || ( L && L->interior ) ? 0.0f : 1.0f / ( 0.120f * kUnitsPerKm );
 
 	// the phase: indoors the cell's god-ray record, outdoors the weather's, else the fallback
@@ -2229,6 +2231,7 @@ static void vaPassInner( Scene * scene, bool run )
 		static GLint combined = -1;
 		if ( combined < 0 )
 			fn->glGetIntegerv( GL_MAX_COMBINED_TEXTURE_IMAGE_UNITS, &combined );
+		// MODULES1 M1 (11-10 audit, physical reason): only a sealed room has no wind; every exterior and open interior drifts
 		const bool sealed = L && L->interior && !L->showSky;
 		dr.moving = false;
 		if ( !dr.on ) {
@@ -2340,6 +2343,8 @@ static void vaPassInner( Scene * scene, bool run )
 	{
 		float skyBase = 0.0f;
 		uniF( "cellSpecSkyBase", -1, &skyBase, 1 );
+		// MODULES1 M1 (11-10 audit, physical reason): cellInterior is an UNSUNLIT interior (a sunlit one reads 0 and gates as an
+		// exterior); its directional is the lighting template's, not a sun, so it has no sun to gate
 		sunGateNote = !sunGate ? QStringLiteral( "off(red sun)" ) : uniI( "cellInterior" ) ? QStringLiteral( "off(interior)" )
 			: QStringLiteral( "on(rooms=%1 sky=%2)" ).arg( uniI( "cellGiOn" ) && uniI( "cellGiRooms" ) ? 1 : 0 )
 				.arg( uniI( "cellGiOn" ) && uniI( "cellGiSky" ) && skyBase >= 1.0f ? 1 : 0 );

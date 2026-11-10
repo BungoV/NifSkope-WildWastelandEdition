@@ -1823,6 +1823,9 @@ static void volumeFrame( Scene * scene, Cell & c, const CellSpec * spIn, bool du
 	 * back faces stay hits (radiance 0) and the below-horizon void stays 0 (SKYBELOW1), so sky and sun come in only
 	 * through the openings. Every other interior keeps FIX1101A's rule. */
 	const bool sunlit = lights.interior && wwCellSunlitNow( wwCellLightsFor( nif ) );
+	/* MODULES1 M1 (11-10 audit, interior-only gate kept, physical reason): a SEALED interior sees no sky, so its
+	 * volume takes none; an exterior always sees the sky and always takes the weather's (below), so there is no
+	 * exterior case to extend. */
 	if ( lights.interior && !sunlit && !rtddgiIntSkyRed() ) {
 		sky.on = false;
 	} else if ( lights.interior && ( sunlit || lights.skyLighting ) ) {

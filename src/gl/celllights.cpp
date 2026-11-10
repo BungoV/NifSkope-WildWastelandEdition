@@ -2117,6 +2117,7 @@ int wwCellSkyLitRed()
 bool wwCellSkyLitNow( const WwCellLighting * L )
 {
 	// lane INTSKY1: the interior takes the live weather (its sun or not); SKYINT1's rule (bits 7 + 8) without a file
+	// MODULES1 M1 (11-10 audit, physical reason): interior-only by nature, an exterior always takes the live weather
 	return L && L->interior && wwCellSunlit( L ).weather && wwLookdevActive() && !( wwCellSkyLitRed() & 1 );
 }
 

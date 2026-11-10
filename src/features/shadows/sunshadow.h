@@ -36,7 +36,9 @@ BSD License - see nifskope.h
  *
  * Divergences, stated: legacy (non-PBR) shapes cast but do not receive; alpha-test
  * cutouts cast what their base map's alpha test keeps (lane VOLAIR1, 10-15; they cast solid before,
- * red WW_CSM_RED=atsolid); GPU-skinned casters are skinned on the CPU for the map; an
+ * red WW_CSM_RED=atsolid); every caster draws both faces and surface decals cast nothing of their own,
+ * in every cell (lane MODULES1 M1, 11-10, after INTSKY1's sunlit interiors; reds WW_CSM_RED=onesided,
+ * decalscast outdoors, WW_INTSKY_RED=onesided, decals indoors); GPU-skinned casters are skinned on the CPU for the map; an
  * orthographic view draws no shadows; the right/top edge of the light window is
  * l' + viewport x texel (INFERRED; the spec floors it separately, <= 1 quantum).
  *

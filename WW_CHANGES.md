@@ -1,3 +1,19 @@
+## MODULES1 M1 (2026-11-10): the sun's casters draw both faces in every cell; decals cast nothing of their own
+
+- **Before:** INTSKY1 drew a caster's both faces and let decals pass the sun in a SUNLIT INTERIOR only; outdoors the
+  casters kept back-face culling and decals cast. A thin one-sided wall cast nothing from behind, so the sun went
+  through it (bungo 11-10, sun_through_thin_wall: "the sun gets through a very thin surface"; the lit wall of
+  gi_weak_bounce was that leak), and a wall decal shadowed its own wall.
+- **Now:** both rules hold in every cell (`src/features/shadows/sunshadow.cpp`, the caster walk): a wall is opaque to the
+  sun from both sides (culling back faces is a closed-mesh trick; the game's walls are open shells; Unity "Cast
+  Shadows: Two Sided", UE "Shadow Two Sided"), a decal is paint without thickness. Reds `WW_CSM_RED=onesided` (back
+  faces culled outdoors, as before) and `WW_CSM_RED=decalscast` (decals cast outdoors); the interior reds stay.
+- **Telemetry:** the sun summary prints `bothfaces=N decalspass=N` in every cell; the once-per-change census
+  `sun cascades: exterior <cell>: casters N, one-sided N (T tris) made solid from behind (both faces), two-sided N,
+  alpha-tested N, decals N passed, never cast N` now runs outdoors too (the top-20 list stays indoors). Cost: the
+  `cpu sun-walk` sub-time and the sun pass's GPU time, default vs `WW_CSM_RED=onesided`, at his spot (no build yet
+  in this round: measured when the manager builds).
+
 ## MODULES1 10c (2026-11-10): a camera far above the fog: the thin air's tail has its light
 
 - **Before:** from a camera high in the top's falloff the froxel volume's transmittance cannot hold the air it marched:
