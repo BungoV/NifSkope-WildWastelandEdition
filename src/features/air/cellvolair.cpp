@@ -1386,6 +1386,56 @@ static void vaColumnEcho( const float med[4], const float layer[4], const float 
 		dif( 0.5 ), dif( 0.2 ), landNow, landWas, side, toSun, side / std::max( landNow, 1e-9 ), side / std::max( landWas, 1e-9 ) );
 }
 
+// MODULES1 G4: lookdev_fog.glsl wwAirColLaw on the CPU (the ground layer at its one height, not the terrain grid)
+static double vaColLaw( double lo, double hi, const float med[4], const float layer[4], const float ground[4] )
+{
+	const double top = med[3];
+	double up = 0.0;
+	if ( ground[2] > 0.0f && hi > top ) {	// wwAirRhoLaw at the top x the falloff's column
+		double r = med[2] > 0.0f ? std::min( 1.0, std::exp( -( top - med[1] ) * med[2] ) ) : 1.0;
+		if ( layer[0] > 0.0f )
+			r = ( 1.0 - layer[0] ) * r + layer[0] * ( layer[2] > 0.0f ? std::min( 1.0, std::exp( -( top - layer[1] ) * layer[2] ) ) : 1.0 );
+		if ( layer[3] > 0.0f )
+			r += layer[3] * ( ground[1] > 0.0f ? std::min( 1.0, std::exp( -( top - ground[0] ) * ground[1] ) ) : 1.0 );
+		up = r * vaColOne( std::max( lo, top ), hi, top, ground[2] );
+	}
+	hi = std::min( hi, top );
+	double c = vaColOne( lo, hi, med[1], med[2] );
+	if ( layer[0] > 0.0f )
+		c = ( 1.0 - layer[0] ) * c + layer[0] * vaColOne( lo, hi, layer[1], layer[2] );
+	if ( layer[3] > 0.0f )
+		c += layer[3] * vaColOne( lo, hi, ground[0], ground[1] );
+	return c + up;
+}
+
+/* MODULES1 G4 (bungo 11-09 items 5, 10b, 12: "sky and clouds visible, fog thickness permitting"): what shows of the sky
+ * and of the 12 vanilla layers from the camera. The layers draw into the backdrop at the deck, past the air's end; the
+ * sky pass (cell_volsky.frag) lays the air over the backdrop as sky x T + the air's light, T = exp(-sigma0 x the
+ * column from the camera to the air's end / sin(elevation)) -- the same T for every layer at that elevation, no cover
+ * of its own. Said when the medium changes or the camera moves 5 % of the air's height. Telemetry only. */
+static void vaSkyEcho( const float med[4], const float layer[4], const float ground[4], float zc )
+{
+	static float said[6] = { -1.0f };
+	static float saidZ = 1e30f;
+	const float key[6] = { med[0], med[1], med[2], med[3], layer[3], ground[0] };
+	bool same = true;
+	for ( int i = 0; i < 6; i++ )
+		same = same && std::fabs( key[i] - said[i] ) <= 1e-4f * std::max( 1.0f, std::fabs( key[i] ) );
+	const double end = ground[2] > 0.0f ? double( med[3] ) + 16.0 / double( ground[2] ) : double( med[3] );
+	const double span = std::max( end - std::min( double( ground[0] ), double( med[1] ) ), 1.0 );
+	if ( !( med[0] > 0.0f ) || ( same && std::fabs( double( zc ) - double( saidZ ) ) < 0.05 * span ) )
+		return;
+	std::copy( key, key + 6, said );
+	saidZ = zc;
+	const double tau = zc < end ? double( med[0] ) * vaColLaw( zc, end, med, layer, ground ) : 0.0;
+	auto T = [&]( double deg ) { return std::exp( -tau / std::sin( deg * 0.017453292519943295 ) ); };
+	std::fprintf( stderr, "air sky: camera %+.0f over the ground layer's anchor (%s the top %.0f, end %.0f) | optical depth "
+		"straight up %.3f | the sky's and every vanilla cloud layer's T through the air at 90 deg %.3f, 30 %.3f, 10 %.3f, "
+		"3 %.4f | sky x T + the air's light (cell_volsky.frag), no cover of its own\n", double( zc ) - double( ground[0] ),
+		zc < med[3] ? "under" : zc < end ? "in the falloff over" : "above the end of", double( med[3] ), end, tau, T( 90.0 ),
+		T( 30.0 ), T( 10.0 ), T( 3.0 ) );
+}
+
 bool wwVolAirMediumNow( float med[4], float layer[4], float ground[2] )
 {
 	const VaPub & p = vaPub();
@@ -2862,6 +2912,7 @@ static void vaPassInner( Scene * scene, bool run )
 		vaSunDifRed() ? 0.0f : 1.0f + std::clamp( ph.gi[3], -0.9f, 0.9f ) };	// MODULES1 G3: w = 1 + the phase g
 	std::copy( layerV, layerV + 4, g.layer );
 	std::copy( groundV, groundV + 4, g.ground );
+	vaSkyEcho( g.med, g.layer, g.ground, fogView[3] );	// MODULES1 G4: the camera's sky through the air
 	std::copy( &ph.w[0][0], &ph.w[0][0] + 12, &g.phase[0][0] );	// lane VOLPART1
 	std::copy( ph.gi, ph.gi + 4, g.gi );
 	g.csm = csm;

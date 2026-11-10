@@ -1,3 +1,17 @@
+## MODULES1 G4 (2026-11-10): the sky and clouds through the fog, by its optical depth (night items 5, 10b, 12)
+- **Found.** Nothing covers the sky or the 12 vanilla layers but the air itself: the layers draw into the backdrop at
+  the deck, and the sky pass lays the air over it as sky x T + the air's light, T from the column between the camera
+  and the air's end along the ray (lookdev_fog.glsl `wwVolAirSky`). Under CommonwealthFoggy (18.3/km, its top 470 m
+  over the base, the ground layer x3) the flight's own line gives optical depth 2.14 straight up: T 0.12 overhead,
+  0.014 at 30 degrees, under 0.001 at 10 degrees, so the layers near the horizon are gone and the ones overhead show
+  at a tenth. Above the top T is 1, which is why the layers appear once the camera climbs out (flight item 10b).
+- **Lever left:** the band's height. The medium's top is the scene's tallest shape (`vaShapesTop`), not a fog depth
+  from the records; a thinner real fog depth (night item 13, G4b) would let more sky through.
+- **Telemetry:** `air sky: camera +Z over the ground layer's anchor (under the top ..., end ...) | optical depth
+  straight up X | the sky's and every vanilla cloud layer's T through the air at 90 deg A, 30 B, 10 C, 3 D`, said when
+  the medium changes or the camera moves 5 % of the air's height.
+- **Red:** none (telemetry only; the sky's air keeps its own red WW_CELL_AIR_RED=nosky).
+
 ## MODULES1 G3 (2026-11-10): the land under fog gets the sun the fog scatters down (night items 6, 10e)
 - **Before.** The derived ground layer took the sun out of the surfaces' direct beam (flag 128) and gave none of it
   back: under 3.4 optical depths (CommonwealthFoggy, ground layer x3, 61 m) the land kept 3 % of its sun at noon, while
