@@ -1,3 +1,14 @@
+## MODULES1 M7 (2026-11-10): sunrise light from the real sun
+
+- **Cause, from the flight's light lines** (CommonwealthClear, Sun Path Real): at 7:00 the real sun stood at +1.2
+  degrees, yet the land took the moon's key (`phys sun: 0 lux normal ... level 2 lux`, the engine clock's night share
+  still 1) under a sky drawn at the sun's level; the meter opened from EV 10.6 to 7.6 on the dark land and the whole
+  sky went up with it. At 6:30 (real sun -4 degrees) the sun's sky was taken at the disc, still the engine's night
+  point 21 degrees up: a day sky, `level 3395 lux`, on land that should be in twilight.
+- **Now:** the night share follows the real sun (`wwmoon::nightWeight`, as the physical night does) and the sun's sky
+  comes from the sun body (`sunBodyDir`); under the horizon the sky of a sun on it x 10^(0.4 x elevation), about
+  750 lux at sunset to 3 lux at -6 degrees. Telemetry `light night share:` and `sun sky:`. Red WW_SKY_TWILIGHT_RED=1.
+
 ## MODULES1 M6 (2026-11-10): one direction each for the sun and the moon
 
 - **Before:** the sun's lens flare sat on the KEY LIGHT, not the sun. Under Sun Path Real at 6:30 (real sun -4 degrees)

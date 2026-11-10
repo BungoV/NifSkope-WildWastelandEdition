@@ -1362,6 +1362,7 @@
 { "WW_SKYBELOW_RED", 0, "src/features/gi/rtddgicell.cpp:317 rtddgiSkyBelowRed | hand: read every frame by rtddgiCellFrame (rtddgiSkyBelowRed): in every cascade volume build key, a set rebuilds the volumes, which re-converge (SKYBELOW1); and every frame by the reflection probes relight (cellreflprobe.cpp): in its light hash, a set relights every probe (SKYBELOW2)" },
 { "WW_SKY_BODYDIR_RED", 0, "src/gl/lookdevstage.cpp:879 wwSkyBodyDirRed | re-read per frame or per call (a)" },
 { "WW_SKY_EPHEM", 0, "src/gl/celllooks.cpp:147 pinOf | re-read per frame or per call (a)" },
+{ "WW_SKY_TWILIGHT_RED", 0, "src/gl/lookdevstage.cpp:890 wwSkyTwilightRed | re-read per frame or per call (a)" },
 { "WW_SKY_EPHEM_RED", 0, "src/features/shadows/shadowset.cpp:1719 wwSunPathKey | re-read per frame or per call (a)" },
 { "WW_SKY_LINEAR", 0, "src/gl/lookdevstage.cpp:3213 wwLookdevSkyLinearOn | re-read per frame or per call (a)" },
 { "WW_SKY_REACH", 1, "src/nativeemit.cpp:3640 lodgenNativeWrite | read while the cell document is built" },

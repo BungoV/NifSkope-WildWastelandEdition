@@ -880,6 +880,17 @@ bool wwSkyBodyDirRed()
 	return red;
 }
 
+/* MODULES1 M7 (bungo 11-10: 7:00 the whole sky lights up, 6:30 the ground below the horizon blown white). Under Sun
+ * Path Real the light kept two engine-clock inputs: the night share (1 until the engine's sunrise, so at 7:00 with the
+ * real sun at +1.2 degrees the land took the moon's key, 2 lux level, under a drawn sunrise sky and the meter opened
+ * ~3 EV) and the sun's sky from the disc (still the engine's night point while the real sun is down: at 6:30 a 21-degree
+ * day sky, 3395 lux level, at real -4 degrees). Both now follow the real sun. Red WW_SKY_TWILIGHT_RED=1. */
+bool wwSkyTwilightRed()
+{
+	WW_SWITCH_STATIC( bool, red, wwEnvStr( "WW_SKY_TWILIGHT_RED" ).trimmed() == QLatin1StringView( "1" ) );
+	return red;
+}
+
 void sunBodyDir( const LdState & s, float out[3] )
 {
 	const WwSkyClock raw = wwSkyClock( s.hour, s.tnam, s.gmst );
@@ -1010,6 +1021,26 @@ void physFinish( LdLight & L, float rKey, bool airKey )
 		sky = wwAtmoGiSkyAxes( n, axes, T ) && WwAtmoMath::giSkyAbsolute( axes, T, L.sun, L.dalc, out ) > 0.0f;
 	}
 	float d[3] = { L.discPos[0], L.discPos[1], L.discPos[2] };
+	/* MODULES1 M7: the sun's sky from the sun itself (sunBodyDir). Under the horizon: the sky of a sun just on it
+	 * (elevation 0.57 degrees) x 10^(0.4 x elevation), ~750 lux at sunset to ~3 lux at -6 (civil twilight's end) */
+	float twi = 1.0f;
+	if ( !wwSkyTwilightRed() ) {
+		sunBodyDir( st(), d );
+		const float e = std::asin( std::clamp( d[2], -1.0f, 1.0f ) ) * 57.29578f;
+		if ( d[2] < 0.01f ) {
+			twi = std::pow( 10.0f, 0.4f * std::min( e, 0.0f ) );
+			const float h = std::sqrt( d[0] * d[0] + d[1] * d[1] );
+			d[0] = h > 1e-6f ? d[0] / h * 0.99995f : 0.99995f;
+			d[1] = h > 1e-6f ? d[1] / h * 0.99995f : 0.0f;
+			d[2] = 0.01f;
+		}
+		static int saidE = 9999;
+		if ( int( std::lround( e * 10.0f ) ) != saidE ) {
+			saidE = int( std::lround( e * 10.0f ) );
+			fprintf( stderr, "sun sky: from the sun body, elevation %.1f deg, sky x%.4g (red WW_SKY_TWILIGHT_RED=1: the disc)\n",
+				double( e ), double( twi ) );
+		}
+	}
 	const float dl = std::sqrt( d[0] * d[0] + d[1] * d[1] + d[2] * d[2] );
 	if ( dl > 0.0f ) {
 		for ( float & x : d )
@@ -1024,7 +1055,7 @@ void physFinish( LdLight & L, float rKey, bool airKey )
 			}
 			for ( int a = 0; a < 5; a++ )
 				for ( int c = 0; c < 3; c++ )
-					out[a][c] += sAxes[a][c] * wwphys::kSunToaLux / wwphys::kPi;
+					out[a][c] += sAxes[a][c] * wwphys::kSunToaLux / wwphys::kPi * twi;
 		}
 	}
 	if ( sky ) {
@@ -1120,7 +1151,20 @@ LdLight computeLight()
 	const WwSkyClock raw = wwSkyClock( s.hour, s.tnam, s.gmst );
 	const bool engNight = s.hour < raw.A || s.hour > raw.D;
 	const bool oldNight = wwMoonRed( "handover" );
-	const float wE = oldNight ? ( engNight ? 1.0f : 0.0f ) : 1.0f - raw.sunAlpha;
+	// MODULES1 M7: under Sun Path Real the night share follows the real sun (the physical night's law), not the clock
+	double rsNow[3];
+	const bool realShare = !oldNight && wwSunPathMode() == 1 && !wwSkyTwilightRed();
+	const float wE = oldNight ? ( engNight ? 1.0f : 0.0f )
+		: realShare ? wwmoon::nightWeight( float( wwSunPathReal( s.hour, s.gameDay, rsNow ) ) ) : 1.0f - raw.sunAlpha;
+	{
+		static QString said;
+		const QString line = QStringLiteral( "light night share: %1 (%2)" ).arg( double( wE ), 0, 'f', 3 )
+			.arg( realShare ? QStringLiteral( "the real sun" ) : QStringLiteral( "the engine clock" ) );
+		if ( line != said ) {
+			said = line;
+			fprintf( stderr, "%s\n", qPrintable( line ) );
+		}
+	}
 	float moonK = 1.0f;
 	if ( wwAtmoNightOn() )	// lane SKYA (NIGHT1): by night the engine's key light is the moon's: its phase dims it
 		moonK *= moonLightFactor( s );
