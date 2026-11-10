@@ -816,6 +816,20 @@ double vaGameAlpha( const float K[6][4], double d, double z )
  * thinner than the far-end fit (1 - exp(-sigma0 dFull) = min(max, 0.99)) unless the record's curve ends inside the
  * street range (an interior's short steep curve; there the street fit alone). The slices end where the air reaches that
  * opacity (tau_max / sigma0, at most dFull), so what lies beyond keeps the game's 1 - max showing through. */
+// measurement pin (bungo 10-16): WW_CELL_AIR_DENSITY=<x> scales the air's density (bungo's live fog slider).
+// MODULES1 round 4 F1b: it multiplies the FINAL medium, once, after the ground layer is derived (vaKeepStreet
+// renormalised an early pin back to the game's anchor density, so the slider barely moved the street).
+float vaDensPin()
+{
+	WW_SWITCH_STATIC( float, densPin, wwEnvIsSet( "WW_CELL_AIR_DENSITY" ) ? wwEnv( "WW_CELL_AIR_DENSITY" ).toFloat() : 1.0f );
+	return densPin;
+}
+bool vaDensPinEarly()
+{
+	WW_SWITCH_STATIC( bool, early, wwEnvStr( "WW_CELL_AIR_DENSITY_RED" ) == QLatin1String( "early" ) );
+	return early;
+}
+
 VaMedium vaFit( const float K[6][4], bool wrong, bool farFit, float apPerUnit = 0.0f )
 {
 	VaMedium m;
@@ -859,10 +873,9 @@ VaMedium vaFit( const float K[6][4], bool wrong, bool farFit, float apPerUnit = 
 		m.invH = 0.0f;
 		m.band = false;
 	}
-	// measurement pin (bungo 10-16): WW_CELL_AIR_DENSITY=<x> scales the fitted density, to show a lamp's haze alone
-	WW_SWITCH_STATIC( float, densPin, wwEnvIsSet( "WW_CELL_AIR_DENSITY" ) ? wwEnv( "WW_CELL_AIR_DENSITY" ).toFloat() : 1.0f );
-	if ( densPin > 0.0f )
-		m.sigma0 *= densPin;
+	// red WW_CELL_AIR_DENSITY_RED=early: the pin scales the fit here, so the derived layer's visibility reads it
+	if ( vaDensPinEarly() && vaDensPin() > 0.0f )
+		m.sigma0 *= vaDensPin();
 	return m;
 }
 
@@ -1101,10 +1114,34 @@ void vaGround( const float K[6][4], const VaMedium & M, bool interior, bool igno
 		return;
 	}
 	const double hour = wwLookdevHour();
-	const double thick = vaRecxValue( g, QStringLiteral( "thickness" ), hour, 0.0 );
-	const double str = vaRecxValue( g, QStringLiteral( "strength" ), hour, 0.0 );
+	// lane MODULES1 round 4 (bungo ".recx owns weather"): an authored groundFog field always wins; the weather's derived
+	// layer only fills a field the file leaves out. Red WW_CELL_AIR_RECX_RED=derivedwins: FOGHEIGHT2's law (a file
+	// thinner than the derived layer gives way to it whole; a missing field reads 0).
+	const bool derivedWins = wwEnvStr( "WW_CELL_AIR_RECX_RED" ) == QLatin1String( "derivedwins" );
+	double thick = vaRecxValue( g, QStringLiteral( "thickness" ), hour, -1.0 );
+	double str = vaRecxValue( g, QStringLiteral( "strength" ), hour, -1.0 );
+	const bool fileThick = thick >= 0.0, fileStr = str >= 0.0;
+	QString srcThick = QLatin1String( fileThick ? "file" : "none" ), srcStr = QLatin1String( fileStr ? "file" : "none" );
+	if ( !derivedWins && ( !fileThick || !fileStr ) ) {
+		VaLayer D;
+		D.zg = L.zg;
+		vaDerived( M, QString(), D );
+		if ( D.derived && D.invHg > 0.0f ) {
+			if ( !fileThick ) {
+				thick = 1.0 / double( D.invHg );
+				srcThick = QStringLiteral( "derived" );
+			}
+			if ( !fileStr ) {
+				str = double( D.s );
+				srcStr = QStringLiteral( "derived" );
+			}
+		}
+	}
+	thick = std::max( thick, 0.0 );
+	str = std::max( str, 0.0 );
+	const QString srcNote = QStringLiteral( "(thickness=%1 strength=%2)" ).arg( srcThick, srcStr );
 	if ( !( thick > 0.0 ) || !( str > 0.0 ) || !( M.sigma0 > 0.0f ) ) {
-		L.recx += QStringLiteral( "(thickness %1 strength %2: no layer)" ).arg( thick ).arg( str );
+		L.recx += QStringLiteral( "(thickness %1 strength %2: no layer)" ).arg( thick ).arg( str ) + srcNote;
 		return;
 	}
 	L.s = float( str );
@@ -1113,16 +1150,21 @@ void vaGround( const float K[6][4], const VaMedium & M, bool interior, bool igno
 	// section 0: gone 2-5 h after sunrise, the top coming down; pooling again from about 1 h after sunset)
 	if ( wwLookOn( WwLook::GroundBurnOff ) && g.value( QStringLiteral( "hours" ) ).toObject().isEmpty() ) {
 		const double burnt = vaBurnt( hour );
-		L.s = float( str * ( 1.0 - burnt ) );
-		L.invHg = float( 1.0 / ( thick * ( 1.0 - 0.75 * burnt ) ) );
+		// a derived field already carries the derived law's own burn-off
+		if ( fileStr || derivedWins )
+			L.s = float( str * ( 1.0 - burnt ) );
+		if ( fileThick || derivedWins )
+			L.invHg = float( 1.0 / ( thick * ( 1.0 - 0.75 * burnt ) ) );
 		L.recx += QStringLiteral( "(burn-off %1)" ).arg( burnt, 0, 'f', 2 );
 	}
+	L.recx += srcNote;
 	// lane FOGHEIGHT2 (bungo 10-27 "the fog is uniform everywhere"): the FO4CS groundFog files shipped for every vanilla
 	// weather are a 4-12 m skin, so with them the air above the street stayed flat. A file layer THINNER than the
 	// weather's derived layer now gives way to it (the derived law keeps the game's street density); a file that asks
 	// for a layer at least as thick (a weather mod's own fog) still wins. Red WW_CELL_AIR_GROUND_DERIVED_RED=filewins:
 	// any file wins (FOGHEIGHT1's precedence).
-	if ( wwEnvStr( "WW_CELL_AIR_GROUND_DERIVED_RED" ) != QLatin1String( "filewins" ) && L.invHg > 0.0f ) {
+	// Round 4: only under the derivedwins red.
+	if ( derivedWins && wwEnvStr( "WW_CELL_AIR_GROUND_DERIVED_RED" ) != QLatin1String( "filewins" ) && L.invHg > 0.0f ) {
 		VaLayer D;
 		D.zg = L.zg;
 		vaDerived( M, QString(), D );
@@ -1940,6 +1982,15 @@ static void vaPassInner( Scene * scene, bool run )
 		vaKeepStreet( M, G );	// FOGHEIGHT1: the street keeps the game's density, the air above thins
 	} else {
 		G.recx = QStringLiteral( "none(red noground)" );
+	}
+	{	// F1b: the density pin on the final medium (band, derived and authored layer alike: rho scales with sigma0)
+		const float before = M.sigma0;
+		const bool late = !vaDensPinEarly() && boothAir <= 0.0f && vaDensPin() > 0.0f;
+		if ( late )
+			M.sigma0 *= vaDensPin();
+		medNote += QStringLiteral( " dens=%1%2 sigma0 %3->%4" ).arg( double( vaDensPin() ), 0, 'g', 4 )
+			.arg( vaDensPinEarly() ? QStringLiteral( "(red early)" ) : late ? QString() : QStringLiteral( "(off)" ) )
+			.arg( double( before ), 0, 'g', 6 ).arg( double( M.sigma0 ), 0, 'g', 6 );
 	}
 	if ( invTopH > 0.0f ) {	// MODULES1 G2: the fix's telemetry, in the census line: the top's density, the column above it
 		const auto band = []( float z, float z0, float invH ) { return invH > 0.0f ? std::min( 1.0f, std::exp( -( z - z0 ) * invH ) ) : 1.0f; };
