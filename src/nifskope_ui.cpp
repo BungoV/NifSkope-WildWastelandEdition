@@ -73,6 +73,7 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include "features/gi/bakegeom.h"
 #include "bsamodel.h"
 #include "glview.h"
+#include "framepacer.h"	// lane EMPTY240: View > Vertical Sync and View > Frame Cap
 #include "features/far-lod/impostorchunk.h"
 #include "features/far-lod/impostorpreviewtest.h"
 #include "ui/wwglyphs.h"
@@ -25873,6 +25874,38 @@ void NifSkope::initDockWidgets()
 			addAction( aFps );	// the key works while every bar is hidden
 			if ( ui->mView )
 				ui->mView->addAction( aFps );
+		}
+		// lane EMPTY240 ITEM 0 (bungo 11-11: "Vsync should never be on by default"): vsync, and the frame cap
+		if ( ui->mView ) {
+			QAction * aVsync = new QAction( tr( "Vertical Sync" ), this );
+			aVsync->setObjectName( QStringLiteral( "aViewportVsync" ) );
+			aVsync->setCheckable( true );
+			aVsync->setChecked( wwVsyncOn() );
+			connect( aVsync, &QAction::toggled, this, [this]( bool on ) {
+				wwSetVsync( on );
+				if ( ogl )
+					ogl->update();
+			} );
+			ui->mView->addAction( aVsync );
+			QMenu * capMenu = ui->mView->addMenu( tr( "Frame Cap" ) );
+			capMenu->setObjectName( QStringLiteral( "mViewportFrameCap" ) );
+			QActionGroup * capGroup = new QActionGroup( capMenu );
+			const int capNow = wwFrameCapRow();
+			const std::pair<int, QString> caps[] = { { 0, tr( "Off" ) }, { -1, tr( "Monitor Refresh" ) }, { 30, QStringLiteral( "30" ) },
+				{ 60, QStringLiteral( "60" ) }, { 120, QStringLiteral( "120" ) }, { 144, QStringLiteral( "144" ) },
+				{ 240, QStringLiteral( "240" ) }, { 360, QStringLiteral( "360" ) }, { 500, QStringLiteral( "500" ) } };
+			for ( const auto & [hz, name] : caps ) {
+				QAction * a = capMenu->addAction( name );
+				a->setCheckable( true );
+				a->setChecked( hz == capNow );
+				capGroup->addAction( a );
+				const int capHz = hz;
+				connect( a, &QAction::triggered, this, [this, capHz]() {
+					wwSetFrameCap( capHz );
+					if ( ogl )
+						ogl->update();
+				} );
+			}
 		}
 
 		auto currentShadeMode = std::make_shared<int>( 2 );

@@ -177,6 +177,8 @@ private:
 #include "features/clouds/cloudvol.h"	// the volume clouds' depth test
 #include "features/exposure/physunits.h"	// lane PHYSUNITS1: emissives in cd/m2
 #include "wwloadwatch.h"	// lane PERFLOAD1 P5: the frame's unbracketed steps name themselves to the main-thread watch
+#include "framepacer.h"	// lane EMPTY240 ITEM 0: the next frame starts when the last one is done
+#include "harnesswindow.h"	// wwWorldClockLive: a harness keeps the old pacing
 
 // NOTE: The FPS define is a frame limiter,
 //	NOT the guaranteed FPS in the viewport.
@@ -354,8 +356,8 @@ GLView::GLView( QWindow * p )
 	fmt.setProfile( QSurfaceFormat::CoreProfile );
 	fmt.setOption( QSurfaceFormat::DeprecatedFunctions, false );
 
-	// V-Sync
-	fmt.setSwapInterval( DEBUG_FRAME_TIME ? 0 : 1 );
+	// V-Sync: off unless the View > Vertical Sync row (or WW_VSYNC=1, or the red WW_FRAMETIMER_RED=1) asks (EMPTY240)
+	fmt.setSwapInterval( ( DEBUG_FRAME_TIME || !wwVsyncOn() ) ? 0 : 1 );
 	fmt.setSwapBehavior( QSurfaceFormat::DoubleBuffer );
 
 	fmt.setDepthBufferSize( 24 );
@@ -3456,8 +3458,156 @@ void wwSetFramerateOverlay( bool on )
 	QSettings().setValue( QLatin1StringView( kFpsKey ), on );
 }
 
+/* lane EMPTY240 ITEM 0: the frame pacer (framepacer.h). The rows are read from QSettings once, then held here. */
+namespace
+{
+struct WwPacingRows
+{
+	bool init = false;
+	bool vsync = false;
+	int cap = 0;
+};
+WwPacingRows & wwPacingRows()
+{
+	static WwPacingRows r;
+	if ( !r.init ) {
+		r.init = true;
+		QSettings s;
+		r.vsync = s.value( QStringLiteral( "GLView/Display/VSync" ), false ).toBool();
+		r.cap = s.value( QStringLiteral( "GLView/Display/FrameCap" ), 0 ).toInt();
+	}
+	return r;
+}
+
+bool wwFrameTimerRed()
+{
+	return wwEnvInt( "WW_FRAMETIMER_RED" ) == 1;
+}
+
+struct WwPacer
+{
+	bool queued = false;
+	int cap = 0;	// Hz, 0 = off
+	int interval = -1;	// the swap interval set on the view's context (-1 = not yet)
+	bool swapOk = true;
+	WwFramePacer::Clock clock;
+	QString said;	// the last pacing line's facts
+	double saidAt = -10.0;
+};
+WwPacer & wwPacer()
+{
+	static WwPacer p;
+	return p;
+}
+}	// namespace
+
+bool wwVsyncOn()
+{
+	if ( wwEnvIsSet( "WW_VSYNC" ) )
+		return wwEnvInt( "WW_VSYNC" ) != 0;
+	if ( wwFrameTimerRed() )
+		return true;	// build 71
+	return wwPacingRows().vsync;
+}
+
+void wwSetVsync( bool on )
+{
+	wwPacingRows().vsync = on;
+	QSettings().setValue( QStringLiteral( "GLView/Display/VSync" ), on );
+}
+
+int wwFrameCapRow()
+{
+	if ( wwEnvIsSet( "WW_FRAME_CAP" ) ) {
+		const QString v = wwEnvStr( "WW_FRAME_CAP" ).trimmed();
+		return v.compare( QLatin1String( "refresh" ), Qt::CaseInsensitive ) == 0 ? -1 : v.toInt();
+	}
+	return wwPacingRows().cap;
+}
+
+void wwSetFrameCap( int row )
+{
+	wwPacingRows().cap = row;
+	QSettings().setValue( QStringLiteral( "GLView/Display/FrameCap" ), row );
+}
+
+/* At the paint's start: the cap's clock, the swap interval when the row changed, and the pacing line on a change.
+ * `wants` = this view wants the next frame (a cell view with a live clock, a playing animation, a held key). */
+static void wwPacerFrameStart( GLView * v, bool wants )
+{
+	WwPacer & p = wwPacer();
+	const bool red = wwFrameTimerRed();
+	const double refresh = v->screen() ? v->screen()->refreshRate() : 0.0;
+	const int row = wwFrameCapRow();
+	p.cap = red ? 0 : WwFramePacer::capHz( row, refresh );
+	const double now = PassTime::processSeconds();
+	WwFramePacer::started( p.clock, p.cap, now );
+	const int interval = ( DEBUG_FRAME_TIME || !wwVsyncOn() ) ? 0 : 1;
+	if ( interval != p.interval ) {
+		using SwapFn = int ( QOPENGLF_APIENTRYP )( int );	// wglSwapIntervalEXT
+		QOpenGLContext * c = QOpenGLContext::currentContext();
+		const auto swap = c ? reinterpret_cast<SwapFn>( c->getProcAddress( "wglSwapIntervalEXT" ) ) : nullptr;
+		p.swapOk = swap && swap( interval ) != 0;
+		p.interval = interval;
+	}
+	const QString driver = red ? QStringLiteral( "the 6 ms timer (WW_FRAMETIMER_RED=1)" )
+		: wants ? QStringLiteral( "frames (each starts when the last is done)" )
+		: QStringLiteral( "the 6 ms timer (nothing moves)" );
+	const QString cap = p.cap <= 0 ? QStringLiteral( "off" )
+		: row < 0 ? QStringLiteral( "%1 fps (monitor refresh)" ).arg( p.cap ) : QStringLiteral( "%1 fps" ).arg( p.cap );
+	const QString facts = driver + cap + QString::number( interval ) + QString::number( int( p.swapOk ) );
+	if ( facts != p.said && now - p.saidAt >= 1.0 ) {
+		p.said = facts;
+		p.saidAt = now;
+		const double res = wwTimerResolutionMs();
+		std::fprintf( stderr, "frame pacing: driven by %s, cap %s, vsync %s%s, timer resolution %s\n", qPrintable( driver ),
+			qPrintable( cap ), interval ? "on" : "off", p.swapOk ? "" : " (wglSwapIntervalEXT refused: the driver's own setting)",
+			res > 0.0 ? qPrintable( QStringLiteral( "%1 ms" ).arg( res, 0, 'f', 2 ) ) : "unknown" );
+	}
+}
+
+static void wwPacerTick( GLView * v );
+
+//! at the paint's end (every return): queue the next frame when the view wants one
+static void wwPacerAfterPaint( GLView * v, bool wants )
+{
+	WwPacer & p = wwPacer();
+	if ( !wants || p.queued || wwFrameTimerRed() )
+		return;
+	p.queued = true;
+	QTimer::singleShot( 0, v, [v]() { wwPacerTick( v ); } );
+}
+
+//! the queued frame: wait out the cap (short sleeps, then re-posts so input still runs), then a tick and a paint
+static void wwPacerTick( GLView * v )
+{
+	WwPacer & p = wwPacer();
+	p.queued = false;
+	const double wait = WwFramePacer::waitSeconds( p.clock, p.cap, PassTime::processSeconds() );
+	if ( wait > 0.0 ) {
+		wwPreciseSleep( WwFramePacer::sleepSeconds( wait ) );
+		p.queued = true;
+		QTimer::singleShot( 0, v, [v]() { wwPacerTick( v ); } );
+		return;
+	}
+	QMetaObject::invokeMethod( v, "advanceGears", Qt::DirectConnection );
+	v->update();
+}
+
 void GLView::paintGL()
 {
+	/* lane EMPTY240 ITEM 0: the next frame is queued when this one is done (build 71 waited for the 6 ms coarse timer:
+	 * ~64 frames a second). A harness keeps the old pacing (its clock stands still). */
+	const bool wwPacerWants = wwWorldClockLive() && ( ( scene && scene->nifModel && wwCellLightsFor( scene->nifModel ) )
+		|| ( ( animState & AnimEnabled ) && ( animState & AnimPlay ) && scene && scene->timeMin() != scene->timeMax() )
+		|| kbdState != 0 );
+	wwPacerFrameStart( this, wwPacerWants );
+	struct WwPacerEnd
+	{
+		GLView * v;
+		bool wants;
+		~WwPacerEnd() { wwPacerAfterPaint( v, wants ); }
+	} wwPacerEnd{ this, wwPacerWants };
 	CellSpeed::Acc speedAcc( "frames painted (paintGL, with first-use uploads)" );
 	CellTexAhead::Frame texAheadFrame;   // a frame that loads no texture ends the read-ahead
 	wwPaintCounter++;
