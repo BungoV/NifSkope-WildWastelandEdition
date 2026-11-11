@@ -2911,15 +2911,22 @@ bool Renderer::setupProgramCE1( const NifModel * nif, Program * prog, Shape * me
 			prog->uni1b( "fxSoft", soft );
 			prog->uni1f( "fxSoftDepth", espSoft ? std::max( esp->falloff.softDepth, 1.0f ) : vp ? kVpCardDepth : 1.0f );
 			wwVolPartFxSet( vp ? 1 | ( soft && !( wwVolPartRed() & 4 ) ? 2 : 0 ) : 0 );
-			// MODULES1 R8-1: a card with no normal map takes its normal from the opacity as a height (red word `face`)
-			const bool lumpRed = wwEnvStr( "WW_CELL_FXLOCAL_RED" ).split( ',' ).contains( QStringLiteral( "face" ) );
+			/* MODULES1 R8-1: the opacity is a card's depth, always: its slope tilts the normal (added to the normal
+			 * map's when there is one), and the UV ball no longer stands in for it. Red words on WW_CELL_FXLOCAL_RED:
+			 * `face` (no opacity slope), `mapalone` (a normal map alone), `ball` (the ball again) */
+			const QStringList lumpWords = wwEnvStr( "WW_CELL_FXLOCAL_RED" ).split( ',' );
+			const bool lumpRed = lumpWords.contains( QStringLiteral( "face" ) );
+			const bool lumpMapRed = lumpWords.contains( QStringLiteral( "mapalone" ) ), lumpBallRed = lumpWords.contains( QStringLiteral( "ball" ) );
 			if ( prog->uniLocation( "fxLumpRed" ) >= 0 )
-				prog->uni1i( "fxLumpRed", lumpRed ? 1 : 0 );
+				prog->uni1i( "fxLumpRed", ( lumpRed ? 1 : 0 ) | ( lumpMapRed ? 2 : 0 ) | ( lumpBallRed ? 4 : 0 ) );
 			if ( vp ) {
 				static QString said;
-				const QString now = wwVolPartSummary() + QStringLiteral( " soft=%1 | normal: the normal map, else %2; density: opacity" )
-					.arg( soft ? 1 : 0 ).arg( lumpRed ? QStringLiteral( "the card's face, RED WW_CELL_FXLOCAL_RED=face" )
-						: QStringLiteral( "the opacity as a height (its slope tilts the face normal)" ) );
+				const QString now = wwVolPartSummary() + QStringLiteral( " soft=%1 | normal: %2; depth: %3; density: opacity" )
+					.arg( soft ? 1 : 0 ).arg( lumpRed ? QStringLiteral( "the normal map, else the card's face, RED WW_CELL_FXLOCAL_RED=face" )
+						: lumpMapRed ? QStringLiteral( "the normal map alone, else the opacity-depth's slope, RED WW_CELL_FXLOCAL_RED=mapalone" )
+						: QStringLiteral( "the normal map's slope + the opacity-depth's slope at 1 : 1 (no map: the opacity-depth's alone)" ),
+						lumpBallRed ? QStringLiteral( "a ball over the card's UV, RED WW_CELL_FXLOCAL_RED=ball" )
+						: QStringLiteral( "the opacity (the UV ball does nothing)" ) );
 				if ( now != said ) {
 					said = now;
 					fprintf( stderr, "cell effects volumetric: %s\n", qPrintable( now ) );

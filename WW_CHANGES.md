@@ -98,6 +98,9 @@
   Red `WW_CELL_FXLOCAL_RED=ambient` (the whole ambient), `influence` (the unlit share), `face` (the face normal);
   `base` as before. Telemetry `cell fx local:` (three cards' lamp terms), `cell effects puff: ... law:` (base colour,
   scale, brightness, band, influence per card), `cell effects volumetric: ... normal:`.
+  Follow-up (bungo: "Opacity gives the height, or rather 'depth' always"): with a normal map the map's slope and the
+  opacity-depth's slope add at 1 : 1 (surface gradients), and the UV ball no longer stands in for the depth: the
+  thickness a card's light reads is its opacity. Red words `mapalone` (a normal map alone) and `ball` (the ball again).
 - **Night sky:** Physical Light Units Off: the drawn sky crossfades to the weather record's night dome colours by
   the night share. On: the record's sky level is added to the physical night sky and to the ambient, so the night
   stays readable. Stars in both. Red `WW_NIGHTSKY_RED=physical`. Telemetry `night sky: ...`, `nightsky=` in the sky echo.

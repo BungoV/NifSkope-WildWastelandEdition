@@ -86,16 +86,33 @@ out vec4 fragColor;
 #endif
 #include "cell_lights.glsl"
 #ifndef WW_FX_DECALLIT
-/* MODULES1 R8-1 (bungo's fake volumetric rule: "the normal + opacity for height (if height unavailable) + opacity for
- * density"): a volumetric card with no normal map is a lump whose height is its opacity, alpha 1 = half a UV unit of
- * the card. Its normal is the face normal tilted down the opacity's slope (Mikkelsen 2010, "Bump Mapping
- * Unparametrized Surfaces on the GPU": the surface gradient from screen derivatives), so a flat card shades toward a
- * lamp like a mound. No texture tap: three derivative pairs. fxLumpRed 1 (WW_CELL_FXLOCAL_RED=face) = the face normal. */
+/* MODULES1 R8-1 (bungo's fake volumetric rule: "Opacity gives the height, or rather 'depth' always"): a volumetric
+ * card is a lump whose depth is its opacity, alpha 1 = half a UV unit of the card. Its normal is tilted down the
+ * opacity's slope (Mikkelsen 2010, "Bump Mapping Unparametrized Surfaces on the GPU": the surface gradient from
+ * screen derivatives), so a flat card shades toward a lamp like a mound. No texture tap: three derivative pairs.
+ * With a normal map the two slopes ADD at weight 1 : 1 (Mikkelsen 2020, "Surface Gradient Based Bump Mapping
+ * Framework": heights add, so their gradients add; both are slopes in the same view units): the map's gradient
+ * against the card's face, N - n / ( n . N ), plus the opacity's, then one normalize.
+ * fxLumpRed (WW_CELL_FXLOCAL_RED): 1 `face` = no opacity slope at all, 2 `mapalone` = a card with a normal map takes
+ * the map alone (the first R8-1 commit), 4 `ball` = the UV ball stands in for the depth again (FX_PUFF_A). */
 uniform int fxLumpRed;
-vec3 fxLumpNormal( vec3 N, vec3 pv, float a )
+vec3 fxLumpNormal( vec3 N, vec3 Nf, vec3 pv, float a )
 {
-	if ( hasNormalMap || fxLumpRed != 0 )
+	if ( ( fxLumpRed & 1 ) != 0 || ( hasNormalMap && ( fxLumpRed & 2 ) != 0 ) )
 		return N;
+	if ( hasNormalMap ) {	// the map's normal as a slope on the face, then the opacity's slope on the same face
+		vec3 n = N / max( dot( N, Nf ), 0.25 );
+		N = Nf;
+		vec3 dpx = dFdx( pv ), dpy = dFdy( pv );
+		vec3 r1 = cross( dpy, N ), r2 = cross( N, dpx );
+		float det = dot( dpx, r1 );
+		vec2 dux = dFdx( texCoord.st ), duy = dFdy( texCoord.st );
+		float duv = abs( dux.x * duy.y - dux.y * duy.x );
+		if ( abs( det ) < 1e-20 || duv < 1e-20 )
+			return normalize( n );
+		float L = 0.5 * sqrt( abs( det ) / duv );
+		return normalize( n - sign( det ) * L * ( dFdx( a ) * r1 + dFdy( a ) * r2 ) / abs( det ) );
+	}
 	vec3 dpx = dFdx( pv ), dpy = dFdy( pv );
 	vec3 r1 = cross( dpy, N ), r2 = cross( N, dpx );
 	float det = dot( dpx, r1 );
@@ -106,9 +123,12 @@ vec3 fxLumpNormal( vec3 N, vec3 pv, float a )
 	float L = 0.5 * sqrt( abs( det ) / duv );	// half a UV unit in view units: the lump's height at alpha 1
 	return normalize( abs( det ) * N - sign( det ) * L * ( dFdx( a ) * r1 + dFdy( a ) * r2 ) );
 }
-#define FX_LUMP_N( n, pv, a ) fxLumpNormal( n, pv, a )
+#define FX_LUMP_N( n, nf, pv, a ) fxLumpNormal( n, nf, pv, a )
+// the opacity is the card's depth: the thickness its light reads is the opacity itself, not a ball over its UV
+#define FX_PUFF_A( a, q ) ( ( fxLumpRed & 4 ) != 0 ? vpPuffAlpha( a, q ) : ( a ) )
 #else
-#define FX_LUMP_N( n, pv, a ) ( n )
+#define FX_LUMP_N( n, nf, pv, a ) ( n )
+#define FX_PUFF_A( a, q ) vpPuffAlpha( a, q )
 #endif
 #ifdef WW_FX_DECALLIT
 #include "cell_ao.glsl"
@@ -387,7 +407,7 @@ void main()
 			vpFaceN = -vpFaceN;
 		vpVol.x = vpEdgeFade( abs( dot( vpFaceN, ViewDir_norm ) ) );
 		vpVol.y = vpNearFade( -pv.z * fxDistScale );
-		vpVol.z = vpPuffAlpha( color.a, clamp( texCoord.st, 0.0, 1.0 ) * 2.0 - 1.0 );
+		vpVol.z = FX_PUFF_A( color.a, clamp( texCoord.st, 0.0, 1.0 ) * 2.0 - 1.0 );
 		if ( !greyscaleAlpha )
 			color.a = vpVol.z * vpVol.x * vpVol.y;
 	}
@@ -568,7 +588,7 @@ void main()
 			}
 			if ( fxLitMode != 0 )
 				lin *= fxAdditive ? cellFxLit( cellWorldPos( posView ) )
-					: vpLit( posView, FX_LUMP_N( dot( normal, V ) < 0.0 ? -normal : normal, posView, clamp( vpVol.w, 0.0, 1.0 ) ), aThick )
+					: vpLit( posView, FX_LUMP_N( dot( normal, V ) < 0.0 ? -normal : normal, vpFaceN, posView, clamp( vpVol.w, 0.0, 1.0 ) ), aThick )
 						FX_LOCAL_GI_LAW( lightingInfluence );
 		}
 		if ( fxLitMode == 0 ) {	// lane PHYSUNITS1: unlit effects in real units
