@@ -1132,7 +1132,9 @@ void main()
 		float dvSh = 1.0, dvCl = 1.0;
 #ifdef WW_SUNSHADOW
 		dvSh = wwSunShadowGeo( -ViewDir );
-		dvCl = ussCloudT( -ViewDir );
+		vec3 dvCi = ussCloudDvInfo( -ViewDir );	// SEAMCLOUD1: T, the height share, the far share
+		dvCl = dvCi.x;
+		wwDvCloud = dvCi.yz;
 #endif
 		vec3 dvT = vec3( 1.0 ), dvIn = vec3( 0.0 );
 #ifdef WW_FOG

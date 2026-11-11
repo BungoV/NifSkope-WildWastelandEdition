@@ -22,6 +22,7 @@
 #include <algorithm>
 #include <atomic>
 #include <cmath>
+#include <cstdint>
 #include <cstdio>
 #include <cstring>
 
@@ -332,6 +333,11 @@ struct CsGpu
 	int fenceN = 0;
 	double fenceZKm = 0.0;
 	quint64 frame = 0;
+	// lane SEAMCLOUD1: the far value's readback (25 texels spread over the map's inner square), -1 = none yet
+	GLuint pboFar = 0;
+	GLsync fenceFar = nullptr;
+	quint64 fenceFarBuild = 0;
+	float farMean = -1.0f;
 };
 
 QHash<Renderer *, CsGpu> & gpus()
@@ -496,6 +502,63 @@ void giIssue( NifSkopeOpenGLContext::GLFunctions * fn, CsGpu & g, const double e
 	g.fenceBuild = g.builds;
 	g.fenceN = 25;
 	g.fenceZKm = eyeW[2] * double( WwAtmoMath::kUnitKm );
+}
+
+/* lane SEAMCLOUD1: the far value from the map itself. Past the map the receivers took the bands' statistical law
+ * (bandFarT, or the sheets law on the bands' mean cover), not the law the map was built with, so the same sky read one
+ * value inside the map and another past it. Now: the mean of receiverT over a 5 x 5 grid spread over the map's inner
+ * 80 %, at the ground (0 km), read back like the GI's. Red WW_CLOUDSHADOW_RED=farbands: the old far value. */
+constexpr int kFarGrid = 5;
+
+void farRead( NifSkopeOpenGLContext::GLFunctions * fn, CsGpu & g )
+{
+	if ( !g.fenceFar )
+		return;
+	const GLenum w = fn->glClientWaitSync( g.fenceFar, 0, 0 );
+	if ( w != GL_ALREADY_SIGNALED && w != GL_CONDITION_SATISFIED )
+		return;
+	fn->glDeleteSync( g.fenceFar );
+	g.fenceFar = nullptr;
+	if ( g.fenceFarBuild != g.builds || !g.valid )
+		return;
+	fn->glBindBuffer( GL_PIXEL_PACK_BUFFER, g.pboFar );
+	const int nT = kFarGrid * kFarGrid;
+	const auto * px = static_cast<const float *>( fn->glMapBufferRange( GL_PIXEL_PACK_BUFFER, 0,
+		GLsizeiptr( nT * 4 * sizeof( float ) ), GL_MAP_READ_BIT ) );
+	if ( px ) {
+		double sum = 0.0;
+		for ( int i = 0; i < nT; i++ )
+			sum += M::receiverT( px + i * 4, 0.0 );
+		fn->glUnmapBuffer( GL_PIXEL_PACK_BUFFER );
+		g.farMean = float( sum / nT );
+	}
+	fn->glBindBuffer( GL_PIXEL_PACK_BUFFER, 0 );
+}
+
+void farIssue( NifSkopeOpenGLContext::GLFunctions * fn, CsGpu & g )
+{
+	const int n = g.size;
+	if ( n < kFarGrid )
+		return;
+	if ( !g.pboFar ) {
+		fn->glGenBuffers( 1, &g.pboFar );
+		fn->glBindBuffer( GL_PIXEL_PACK_BUFFER, g.pboFar );
+		fn->glBufferData( GL_PIXEL_PACK_BUFFER, GLsizeiptr( kFarGrid * kFarGrid * 4 * sizeof( float ) ), nullptr, GL_STREAM_READ );
+	}
+	fn->glBindBuffer( GL_PIXEL_PACK_BUFFER, g.pboFar );
+	fn->glBindFramebuffer( GL_READ_FRAMEBUFFER, g.fbo );
+	fn->glReadBuffer( GL_COLOR_ATTACHMENT0 );
+	fn->glPixelStorei( GL_PACK_ALIGNMENT, 4 );
+	for ( int j = 0; j < kFarGrid; j++ )
+		for ( int i = 0; i < kFarGrid; i++ ) {
+			const int x = std::clamp( int( ( 0.1 + 0.8 * ( i + 0.5 ) / kFarGrid ) * n ), 0, n - 1 );
+			const int y = std::clamp( int( ( 0.1 + 0.8 * ( j + 0.5 ) / kFarGrid ) * n ), 0, n - 1 );
+			fn->glReadPixels( x, y, 1, 1, GL_RGBA, GL_FLOAT,
+				reinterpret_cast<void *>( std::uintptr_t( ( j * kFarGrid + i ) * 4 * sizeof( float ) ) ) );
+		}
+	fn->glBindBuffer( GL_PIXEL_PACK_BUFFER, 0 );
+	g.fenceFar = fn->glFenceSync( GL_SYNC_GPU_COMMANDS_COMPLETE, 0 );
+	g.fenceFarBuild = g.builds;
 }
 
 void status( CsState & s, const QString & line )
@@ -663,6 +726,7 @@ void wwCloudShadowPass( Scene * scene )
 	timeRead( fn, g, 0 );
 	timeRead( fn, g, 1 );
 	giRead( fn, g, s );
+	farRead( fn, g );
 
 	// lane CLOUD5: Cloud Variety on, the twin over the variety density (wwCloudVolBindDensity sets its uniforms)
 	const bool variety = wwCloudVolVarietyOn() && m.variety;
@@ -758,7 +822,10 @@ void wwCloudShadowPass( Scene * scene )
 		p->uni4fv( "csSheetB", sbv, SH::kMaxSheets );
 		p->uni4fv( "csSheetC", sc, SH::kMaxSheets );
 		p->uni1i( "csSheetN", mode == 3 ? sheets.n : 0 );
-		p->uni4f( "csSheetP", FloatVector4( float( sheets.taps ), sheets.hex ? 1.0f : 0.0f, SH::kTanSunRadius, float( eyeKm[2] ) ) );
+		/* lane SEAMCLOUD1: the penumbra's receiver height is the world's datum (0 km, the bands' heights' zero), not the
+		 * eye's: the sun disc's blur on the ground no longer changes as the eye climbs. Red eyepenumbra: the eye's. */
+		p->uni4f( "csSheetP", FloatVector4( float( sheets.taps ), sheets.hex ? 1.0f : 0.0f, SH::kTanSunRadius,
+			red( "eyepenumbra" ) ? float( eyeKm[2] ) : 0.0f ) );
 		p->uni1f( "csUnitKm", float( unitKm ) );
 	}
 	p->uni1i( "csSteps", std::max( pr.steps, 1 ) );
@@ -789,6 +856,8 @@ void wwCloudShadowPass( Scene * scene )
 	const M::Basis & cb = g.basis;
 	if ( !red( "nogi" ) && !g.fence && g.frame % kGiEvery == 0 )
 		giIssue( fn, g, eyeW );
+	if ( !g.fenceFar && ( g.frame % kGiEvery == kGiEvery / 2 || g.farMean < 0.0f ) )
+		farIssue( fn, g );	// lane SEAMCLOUD1
 	restore();
 
 	// the far value: the bands' statistical transmittance at this sun; the edge fade; Ultra's air taps
@@ -804,8 +873,24 @@ void wwCloudShadowPass( Scene * scene )
 				kept *= 1.0f - std::clamp( cov[i], 0.0f, 1.0f );
 		g.far[0] = WwCloudFusionLaw::mask( kept, law.opacity, law.strength );
 	}
+	const float farBands = g.far[0];
+	const bool farOld = red( "farbands" ) || g.farMean < 0.0f;
+	if ( !farOld )
+		g.far[0] = g.farMean;	// lane SEAMCLOUD1: the map's own law past the map
 	g.far[1] = 0.1f;
 	g.far[2] = pr.tail ? 1.0f : 0.0f;
+	{	// lane SEAMCLOUD1: one line on change (0.01 steps)
+		const QString l = QStringLiteral( "law: penumbra_ref=%1 far=%2 far_t=%3 bands_far_t=%4 [WW_CLOUDSHADOW_RED=eyepenumbra,farbands]" )
+			.arg( red( "eyepenumbra" ) ? QStringLiteral( "eye(red,%1km)" ).arg( eyeKm[2], 0, 'f', 2 ) : QStringLiteral( "world(0km)" ) )
+			.arg( farOld ? ( red( "farbands" ) ? QStringLiteral( "bands(red)" ) : QStringLiteral( "bands(no_readback_yet)" ) )
+				: QStringLiteral( "map_mean(%1x%1 texels,inner_80pct,ground)" ).arg( kFarGrid ) )
+			.arg( double( g.far[0] ), 0, 'f', 2 ).arg( double( farBands ), 0, 'f', 2 );
+		static QString saidL;
+		if ( l != saidL ) {
+			saidL = l;
+			std::fprintf( stderr, "cloudshadow %s\n", qPrintable( l ) );
+		}
+	}
 	status( s, QStringLiteral( "on tier=%1 mode=%2 size=%3 side_km=%4 texel_m=%5 sun=%6,%7,%8 far_t=%9 gi=%10 mem_mb=%11%12%13 field=%14 choice=%15 law=%16 light=key(sun_by_day,moon_by_night) receivers=terrain,objects,far_lod,water,effects,air" )
 		.arg( QLatin1StringView( tierName( s.tier ) ) ).arg( mode == 1 ? QStringLiteral( "volume" ) : QStringLiteral( "map" ) )
 		.arg( n ).arg( g.fit.extentKm, 0, 'f', 1 ).arg( g.fit.texelKm() * 1000.0, 0, 'f', 1 )
