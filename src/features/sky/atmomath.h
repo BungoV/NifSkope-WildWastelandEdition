@@ -37,6 +37,7 @@ struct HazeOptics
 	float cloudAlbedo[3] = { 0.99f, 0.99f, 0.99f };
 	float inscatter[3] = { 0.0f, 0.0f, 0.0f }, dir[3] = { 0.0f, 0.0f, 0.0f };
 	float dirExp = 4.0f, dirStart = 0.0f;
+	bool rgb680 = false;	//!< SKYLIGHT1 red WW_ATMO_RED=rgb680: the medium at the three wavelengths 680 / 550 / 440 nm
 };
 inline HazeOptics & hazeOptics()
 {
@@ -59,7 +60,32 @@ inline float hazeOpticsStamp()
 {
 	const HazeOptics & o = hazeOptics();
 	return o.spec[0] + 3.0f * o.spec[2] + 7.0f * o.albedo[0] + 11.0f * o.albedo[1] + 13.0f * o.albedo[2] + 17.0f * o.g
-		+ ( o.greyMs ? 19.0f : 0.0f ) + 23.0f * o.glow[0] + 29.0f * o.glow[1] + 31.0f * o.glow[2] + ( o.glowSet ? 37.0f : 0.0f );
+		+ ( o.greyMs ? 19.0f : 0.0f ) + 23.0f * o.glow[0] + 29.0f * o.glow[1] + 31.0f * o.glow[2] + ( o.glowSet ? 37.0f : 0.0f )
+		+ ( o.rgb680 ? 41.0f : 0.0f );
+}
+/* SKYLIGHT1 (night air brown): the medium per sRGB channel, not at one wavelength each. A channel is a band; its
+ * extinction is the one that gives the band-integrated transmittance -ln T / airmass, fitted over airmass 1..4 for a
+ * 5778 K sun through the linear sRGB matrix (IEC 61966-2-1) of the CIE 1931 CMF (Wyman, Sloan & Shirley 2013).
+ * Rayleigh: Hansen & Travis 1974 eq. 2.29 over an 8 km scale height; ozone: the Chappuis band cross-sections of
+ * Bruneton 2017's demo (Serdyuchenko et al. 2014; its 680 / 550 / 440 nm entries are exactly kOzone) over the
+ * 15 km tent, the blue fit (-4e-5) clamped to 0. The single wavelengths made a 33-degree sun R/B 1.63 where the
+ * spectrum gives 1.45 (aerosol optical depth 0.1); the band values give 1.450. Tool: notes/skylight1/tools/spectral_rgb.py.
+ * The haze's Angstrom slope reads the band's aerosol wavelength 640 / 550 / 440 nm (the fit at alpha 1.3; green stays
+ * 550: visibility is defined there). Red WW_ATMO_RED=rgb680: kRay, kOzone and 680 nm again. */
+constexpr float kRayBand[3] = { 6.3605e-3f, 12.530e-3f, 29.964e-3f };
+constexpr float kOzoneBand[3] = { 2.4655e-3f, 1.7854e-3f, 0.0f };
+constexpr float kHazeLambdaBand[3] = { 640.0f, 550.0f, 440.0f }, kHazeLambdaRgb[3] = { 680.0f, 550.0f, 440.0f };
+inline const float * rayK()
+{
+	return hazeOptics().rgb680 ? kRay : kRayBand;
+}
+inline const float * ozoneK()
+{
+	return hazeOptics().rgb680 ? kOzone : kOzoneBand;
+}
+inline const float * hazeLambda()
+{
+	return hazeOptics().rgb680 ? kHazeLambdaRgb : kHazeLambdaBand;
 }
 constexpr float kPi = 3.14159265f;
 /* lane FIX1101A (atmo): the moonless night sky's own radiance (airglow, zodiacal light, unresolved stars) at the zenith
@@ -102,8 +128,9 @@ inline void odAt( float h, const float haze[3], bool noOzone, float e[3], float 
 	const float dr = std::exp( -h / 8.0f ), dm = std::exp( -h / 1.2f );
 	const float dz = std::max( 0.0f, 1.0f - std::fabs( h - 25.0f ) / 15.0f );
 	const float dh = haze[0] * std::exp( -std::max( h - haze[2], 0.0f ) / std::max( haze[1], 0.02f ) );
+	const float * ray = rayK(), * oz = ozoneK();
 	for ( int c = 0; c < 3; c++ )
-		e[c] = kRay[c] * dr + kMieE * dm + dh * hazeOptics().spec[c] + ( noOzone ? 0.0f : kOzone[c] * ozone ) * dz;	// WX1: ozone x 1 = exact
+		e[c] = ray[c] * dr + kMieE * dm + dh * hazeOptics().spec[c] + ( noOzone ? 0.0f : oz[c] * ozone ) * dz;	// WX1: ozone x 1 = exact
 }
 
 //! the transmittance LUT's math: from height hKm along cos zenith mu to the top; 0 when the ray hits the ground
@@ -242,7 +269,7 @@ inline void skyIrradiance( float mus, const float haze[3], float out[3] )
 				const float dh = haze[0] * std::exp( -std::max( h - haze[2], 0.0f ) / std::max( haze[1], 0.02f ) );
 				for ( int c = 0; c < 3; c++ ) {
 					const double tv = std::exp( -( od[c] + 0.5 * double( e[c] ) * dt ) );
-					const double sc = double( kRay[c] ) * dr * pr + double( kMieS * dm + dh * hazeOptics().spec[c] * hazeOptics().albedo[c] ) * pm;
+					const double sc = double( rayK()[c] ) * dr * pr + double( kMieS * dm + dh * hazeOptics().spec[c] * hazeOptics().albedo[c] ) * pm;
 					L[c] += tv * sc * Ts[c] * dt;
 					od[c] += double( e[c] ) * dt;
 				}
@@ -300,7 +327,7 @@ inline void skyRadianceSingle( const float v[3], const float s[3], const float h
 		const float dh = haze[0] * std::exp( -std::max( h - haze[2], 0.0f ) / std::max( haze[1], 0.02f ) );
 		for ( int c = 0; c < 3; c++ ) {
 			const double tv = std::exp( -( od[c] + 0.5 * double( e[c] ) * dt ) );
-			const double sc = double( kRay[c] ) * dr * pr + double( kMieS * dm + dh * hazeOptics().spec[c] * hazeOptics().albedo[c] ) * pm;
+			const double sc = double( rayK()[c] ) * dr * pr + double( kMieS * dm + dh * hazeOptics().spec[c] * hazeOptics().albedo[c] ) * pm;
 			acc[c] += tv * sc * Ts[c] * dt;
 			od[c] += double( e[c] ) * dt;
 		}
@@ -359,8 +386,8 @@ inline void skyMedium( float h, const float haze[3], float ozone, float rs[3], f
 	for ( int c = 0; c < 3; c++ ) {
 		const int k = ho.greyMs ? 1 : c;
 		ms[c] = kMieS * dm + dh * ho.spec[k] * ho.albedo[k];
-		rs[c] = kRay[c] * dr;
-		e[c] = rs[c] + ( kMieE * dm + dh * hazeOptics().spec[c] ) + kOzone[c] * ozone * dz;
+		rs[c] = rayK()[c] * dr;
+		e[c] = rs[c] + ( kMieE * dm + dh * hazeOptics().spec[c] ) + ozoneK()[c] * ozone * dz;
 	}
 }
 inline float skyDistTop( float r, float mu )

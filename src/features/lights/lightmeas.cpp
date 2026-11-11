@@ -1,5 +1,7 @@
 #include "features/lights/lightmeas.h"
 #include "features/clouds/cloudshadow.h"
+#include "features/clouds/cloudvol.h"	// lane SKYLIGHT1: the deck
+#include "gl/dalcfit.h"	// lane SKYLIGHT1: the ambient's upload fit
 #include "features/exposure/physunits.h"
 #include "features/sky/atmomath.h"
 #include "features/sky/atmosphere.h"
@@ -172,10 +174,11 @@ void wwLightMeasFrame( Scene * scene, const float * px, int qw, int qh )
 	std::snprintf( b, sizeof( b ),
 		"key %s elev %.1f deg | TOA %.6g lux, air T %.3f,%.3f,%.3f (lum %.3f) -> %.6g lux normal | surfaces get %.6g lux normal"
 		" (key C %s x pi x SunlightScale %.3g) | clouds: far_t %.3f, over the eye %.4f -> %.6g lux normal | direct horizontal"
-		" %.6g lux (clear air) %.6g lux (x cloud over the eye)",
+		" %.6g lux (clear air) %.6g lux (x cloud over the eye) | air R/B %.3f, medium %s",
 		night ? "moon" : "sun", double( elev ), double( toa ), double( T[0] ), double( T[1] ), double( T[2] ), double( lumOf( T ) ),
 		double( toa * lumOf( T ) ), double( keyN ), col( key ).c_str(), double( sunScale ), farT, double( cloudEye ),
-		double( keyN * cloudEye ), double( keyN * mu ), double( keyN * mu * cloudEye ) );
+		double( keyN * cloudEye ), double( keyN * mu ), double( keyN * mu * cloudEye ), double( T[0] / std::max( T[2], 1e-6f ) ),
+		WwAtmoMath::hazeOptics().rgb680 ? "680/550/440 nm (red WW_ATMO_RED=rgb680)" : "sRGB bands (SKYLIGHT1)" );
 	say( 0, b );
 
 	// ---- the drawn clear sky at five directions, and its horizontal irradiance by quadrature
@@ -224,6 +227,7 @@ void wwLightMeasFrame( Scene * scene, const float * px, int qw, int qh )
 	const bool axRed = wwEnvStr( "WW_PHYSUNITS_AXES_RED" ).trimmed() == QLatin1StringView( "1" );
 	const int up = axRed ? 4 : 5;
 	float ambUp[3] = { 0, 0, 0 }, ambShader[3] = { 0, 0, 0 }, env[3] = { 0, 0, 0 };
+	const bool fitRed = wwEnvStr( "WW_CELL_DALC_FIT_RED" ).trimmed() == QLatin1StringView( "1" );
 	if ( haveDalc )
 		for ( int c = 0; c < 3; c++ ) {
 			// celllights.cpp: g = DALC^(1/2.2) per axis, cellDalc = (half differences, mean); cell_lights.glsl cellAmbient:
@@ -235,7 +239,10 @@ void wwLightMeasFrame( Scene * scene, const float * px, int qw, int qh )
 				env[c] += w[a][c] / 6.0f;
 			}
 			ambUp[c] = w[up][c];
-			ambShader[c] = std::pow( std::max( mean + 0.5f * ( g[5] - g[4] ), 0.0f ), 2.2f );
+			// lane SKYLIGHT1: the upload's fit (gl/dalcfit.h; red WW_CELL_DALC_FIT_RED=1 = the mean of the six)
+			float e[4];
+			WwDalcFit::encode( g, -0.5f, fitRed, e );
+			ambShader[c] = std::pow( std::max( e[3] + e[2], 0.0f ), 2.2f );
 		}
 	const float Eh_dalc = kPi * lumOf( ambUp ), Eh_shader = kPi * lumOf( ambShader );
 
@@ -332,6 +339,14 @@ void wwLightMeasFrame( Scene * scene, const float * px, int qw, int qh )
 			up, double( Eh_dalc ), double( Eh_shader ), col( ambShader ).c_str(), double( Eh_drawn ), double( Eh_axes ),
 			double( ratioAll ), double( EhFrame ), EhFrame > 0.0f ? double( Eh_shader / EhFrame ) : -1.0, double( elev ),
 			double( LzCie ), double( EhCie ) );
+		// lane SKYLIGHT1: the deck the ambient now comes through (lookdevstage.cpp physFinish, clouddeckmath.h)
+		float dk[4] = { 0, 0, 0, 0 };
+		const bool deckRed = wwEnvStr( "WW_SKY_CLOUDDECK_RED" ).trimmed() == QLatin1StringView( "1" );
+		const bool deck = mu > 0.0f && wwCloudDeckThrough( mu, dk );
+		const size_t nb = std::strlen( b );
+		std::snprintf( b + nb, sizeof( b ) - nb, " | deck: %s cover %.3f tau %.2f sun through %.3f sky through %.3f | fit %s",
+			deckRed ? "RED (clear sky, WW_SKY_CLOUDDECK_RED=1)" : deck ? "on" : "none", double( dk[0] ), double( dk[3] ),
+			double( dk[1] ), double( dk[2] ), fitRed ? "RED mean of six (WW_CELL_DALC_FIT_RED=1)" : "up/down poles exact" );
 		say( 3, b );
 
 		// ---- the ground: a 0.12 Lambert as the shader lights it (no AO, no cascade shadow; the cloud T over the eye)
@@ -345,6 +360,10 @@ void wwLightMeasFrame( Scene * scene, const float * px, int qw, int qh )
 			double( Lsun ), double( Lamb ), double( Lg ), double( frameGround ), double( frameCB ), double( LgCie ),
 			double( LzCie / std::max( LgCie, 1e-9f ) ), double( LzCie * ( 1.0f + 2.0f * std::sin( 45.0f * kDeg ) ) / 3.0f / std::max( LgCie, 1e-9f ) ),
 			double( LzCie / 3.0f / std::max( LgCie, 1e-9f ) ) );
+		if ( EhFrame > 0.0f ) {	// lane SKYLIGHT1: the drawn sky with clouds (Eh / pi) over this ground; bungo's look ~7-10
+			const size_t nb = std::strlen( b );
+			std::snprintf( b + nb, sizeof( b ) - nb, " | drawn sky (Eh/pi) / ground %.3g", double( EhFrame / kPi / std::max( Lg, 1e-9f ) ) );
+		}
 		say( 4, b );
 	}
 

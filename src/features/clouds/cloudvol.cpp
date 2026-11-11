@@ -2,6 +2,7 @@
 #include "cloudmap.h"
 #include "cloudnoise.h"
 #include "cloudvolmath.h"
+#include "clouddeckmath.h"	// lane SKYLIGHT1: the deck's light on the ground
 #include "cloudrecx14math.h"	// lane CLOUDRECX1
 #include "cloudcaljobs.h"	// lane PERFFIX3: the coverage tables off the GL thread
 #include "cloudfly.h"
@@ -1298,6 +1299,58 @@ bool wwCloudVolLowColour( float out[3] )
 	if ( s.lowOk )
 		std::copy( s.low, s.low + 3, out );
 	return s.lowOk;
+}
+
+bool wwCloudDeckThrough( float mu0, float out[4] )
+{
+	const WwCloudMap & m = wwCloudMap();
+	if ( !m.valid )
+		return false;
+	const Bands b = bandsOf( m );
+	WwCloudDeck::Band d[2];
+	for ( int k = 0; k < 2; k++ ) {
+		// the tables' key quantised (0.1 km, density 0.1, sheet 1/32): a weather fade rebuilds them a few times, not per frame
+		d[k].baseKm = std::round( b.baseKm[k] * 10.0f ) / 10.0f;
+		d[k].topKm = std::max( std::round( b.topKm[k] * 10.0f ) / 10.0f, d[k].baseKm + 0.1f );
+		d[k].density = std::round( b.density[k] * 10.0f ) / 10.0f;
+		d[k].sheet = k == 0 ? std::round( b.sheet * 32.0f ) / 32.0f : 0.0f;
+		d[k].cov = std::round( std::clamp( b.coverage[k], 0.0f, 1.0f ) * 100.0f ) / 100.0f;
+	}
+	if ( !WwCloudDeck::bandOn( d[0] ) && !WwCloudDeck::bandOn( d[1] ) )
+		return false;
+	struct Memo
+	{
+		float shapeKey[2][4] = { { -1, -1, -1, -1 }, { -1, -1, -1, -1 } };
+		float cal[2][V::kCalN] = {};
+		float covKey[2] = { -1, -1 }, muKey = -1;
+		WwCloudDeck::Through t;
+	};
+	static Memo memo;
+	const std::vector<std::uint8_t> & sh = noise( false ), & de = noise( true );
+	bool redo = false;
+	for ( int k = 0; k < 2; k++ ) {
+		const float key[4] = { d[k].baseKm, d[k].topKm, d[k].density, d[k].sheet };
+		if ( WwCloudDeck::bandOn( d[k] ) && !std::equal( key, key + 4, memo.shapeKey[k] ) ) {
+			WwCloudDeck::bandCal( sh.data(), WwCloudNoise::kShapeN, de.data(), WwCloudNoise::kDetailN, k, d[k], memo.cal[k] );
+			std::copy( key, key + 4, memo.shapeKey[k] );
+			redo = true;
+		}
+		if ( !WwCloudDeck::bandOn( d[k] ) )
+			d[k].cov = 0.0f;
+		redo = redo || d[k].cov != memo.covKey[k];
+		memo.covKey[k] = d[k].cov;
+	}
+	const float mu = std::round( std::clamp( mu0, 0.02f, 1.0f ) * 100.0f ) / 100.0f;
+	if ( redo || mu != memo.muKey ) {
+		const float * const cal[2] = { memo.cal[0], memo.cal[1] };
+		memo.t = WwCloudDeck::through( sh.data(), WwCloudNoise::kShapeN, de.data(), WwCloudNoise::kDetailN, d, cal, mu );
+		memo.muKey = mu;
+	}
+	out[0] = memo.t.cover;
+	out[1] = memo.t.tKey;
+	out[2] = memo.t.tSky;
+	out[3] = memo.t.tauMean;
+	return true;
 }
 
 bool wwCloudVolBindDensity( Scene * scene, int firstUnit )

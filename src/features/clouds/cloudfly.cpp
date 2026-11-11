@@ -30,7 +30,11 @@ namespace
 
 namespace F = WwCloudFlyMath;
 using WwAtmoMath::kUnitKm;
-constexpr const char * kKey = "Settings/Render/Scene/Fly-through Clouds";
+/* SKYLIGHT1 (bungo: the clouds "don't have a defined height"): the row ships Low, so the bands sit at world heights
+ * (wwCloudFlyWorldHeights) and the camera can fly up to and through them; a new key, so a saved Off from before does not
+ * keep the eye-relative bands. Red: WW_CLOUDFLY=0 (the row Off), WW_CLOUDFLY_RED=eyeheights (the bands above the eye). */
+constexpr const char * kKey = "Settings/Render/Scene/Fly-through Clouds 2";
+constexpr int kTierDef = 1;
 constexpr GLenum kTimestamp = 0x8E28;	// GL_TIMESTAMP
 constexpr double kMaxAgeS = 2.0;	// an older grid is rebuilt at once (the map's scroll is bounded by kSlackKm, not by time)
 
@@ -74,7 +78,7 @@ FlState & cs()
 			s.tier = 0;	// a harness measures what it pins
 			s.pinned = true;
 		} else {
-			s.tier = std::clamp( QSettings().value( QLatin1StringView( kKey ), 0 ).toInt(), 0, 4 );
+			s.tier = std::clamp( QSettings().value( QLatin1StringView( kKey ), kTierDef ).toInt(), 0, 4 );
 		}
 		s.hKey.clear();
 	}

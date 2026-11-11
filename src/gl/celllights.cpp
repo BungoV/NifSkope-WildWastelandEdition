@@ -74,6 +74,7 @@ BSD License - see nifskope.h
 #include <unordered_map>	// lane PERFFIX1: the cell-uniform class records
 #include "features/lights/celllights_p.h"	// lane MODULES1 (lights): the state the lamps share
 #include "features/exposure/physunits.h"	// lane PHYSUNITS1: real units
+#include "gl/dalcfit.h"	// lane SKYLIGHT1: the up / down poles read exactly
 
 //! lane PHYSUNITS1: an interior's ambient, directional and fog factor (its lamps' median x Game Light Brightness); 1 else
 static float physInteriorK( const WwCellLighting * L )
@@ -2069,6 +2070,7 @@ void wwCellLightsUniforms( Scene * scene )
 					for ( int c = 0; c < 3; c++ )
 						w[a][c] += flash[a][c];
 			const bool flip = extRed == "flip";
+			WW_SWITCH_STATIC( bool, fitRed, wwEnvStr( "WW_CELL_DALC_FIT_RED" ).trimmed() == QLatin1StringView( "1" ) );
 			float g[6][3];
 			for ( int a = 0; a < 6; a++ )
 				for ( int c = 0; c < 3; c++ )
@@ -2079,8 +2081,10 @@ void wwCellLightsUniforms( Scene * scene )
 					mean += g[a][c] / 6.0f;
 				ambLum = std::max( ambLum, 0.0f ) + mean * mean * ( c == 0 ? 0.2126f : c == 1 ? 0.7152f : 0.0722f );
 				const float sgn = flip ? 0.5f : -0.5f;	// travel: n.z = +1 takes Z- (index 5)
-				rec.f4l( prog, "cellDalc[%d]", c, FloatVector4(
-					( g[0][c] - g[1][c] ) * sgn, ( g[2][c] - g[3][c] ) * sgn, ( g[4][c] - g[5][c] ) * sgn, mean ) );
+				const float gc[6] = { g[0][c], g[1][c], g[2][c], g[3][c], g[4][c], g[5][c] };
+				float e[4];
+				WwDalcFit::encode( gc, sgn, fitRed, e );
+				rec.f4l( prog, "cellDalc[%d]", c, FloatVector4( e[0], e[1], e[2], e[3] ) );
 			}
 			extDalc = true;
 			static QString ambLast;
@@ -2092,7 +2096,9 @@ void wwCellLightsUniforms( Scene * scene )
 				.arg( double( flip ? g[4][0] : g[5][0] ), 0, 'f', 4 ).arg( double( flip ? g[4][1] : g[5][1] ), 0, 'f', 4 )
 				.arg( double( flip ? g[4][2] : g[5][2] ), 0, 'f', 4 ).arg( double( flip ? g[5][0] : g[4][0] ), 0, 'f', 4 )
 				.arg( double( flip ? g[5][1] : g[4][1] ), 0, 'f', 4 ).arg( double( flip ? g[5][2] : g[4][2] ), 0, 'f', 4 )
-				.arg( flip ? QStringLiteral( " RED=flip" ) : QString() );
+				.arg( flip ? QStringLiteral( " RED=flip" ) : QString() )
+				+ ( fitRed ? QStringLiteral( " fit=RED mean of six (WW_CELL_DALC_FIT_RED=1)" )
+				           : QStringLiteral( " fit=up/down poles exact (red WW_CELL_DALC_FIT_RED=1)" ) );
 			if ( line != ambLast ) {
 				fprintf( stderr, "%s\n", qPrintable( line ) );
 				ambLast = line;
