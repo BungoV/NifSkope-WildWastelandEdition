@@ -853,6 +853,20 @@ bool wwNightSkyRed()
  * probesky, lookdev_ground). The physical sky's axes are named by the face (index 4 = a face looking up), and went in
  * unturned: every face took the sky of the opposite side (a wall facing away from a low sun took the sun side's sky,
  * the ground 15 % of its sky, a ceiling all of it). Red WW_PHYSUNITS_AXES_RED=1 (live): unturned, as before. */
+/* MODULES1 R7-4 (level strips in the fog): the air tail's source from a window of the grid, not its last slice alone
+ * (lookdev_fog.glsl wwAirTailJ). Red WW_CELL_AIR_TAILJ_RED=1 (live, fogRed 8): the last slice, as before. */
+bool wwAirTailJRed()
+{
+	return wwEnvStr( "WW_CELL_AIR_TAILJ_RED" ).trimmed() == QLatin1StringView( "1" );
+}
+
+/* MODULES1 R7 night sky d: the saturated air's night colour (lookdev_fog.glsl fogNight) and the record dome's own cover
+ * (cell_volsky.frag volSkyDome). Red WW_NIGHTAIR_RED=1 (live): neither, the air's own light alone, as before. */
+bool wwNightAirRed()
+{
+	return wwEnvStr( "WW_NIGHTAIR_RED" ).trimmed() == QLatin1StringView( "1" );
+}
+
 bool wwPhysAxesRed()
 {
 	return wwEnvStr( "WW_PHYSUNITS_AXES_RED" ).trimmed() == QLatin1StringView( "1" );
@@ -1618,14 +1632,44 @@ void wwLookdevFogUniforms( Scene * scene )
 	prog->uni4f( "fogSun", FloatVector4( v[0], v[1], v[2], 1.0f ) );
 	prog->uni4f( "fogSunColour", FloatVector4( L.sun[0], L.sun[1], L.sun[2], s.gmst.dirFogPower ) );
 	prog->uni4f( "fogProbe", FloatVector4( s.fogProbe[0], s.fogProbe[1], s.fogProbe[2], 0.0f ) );
+	{	// MODULES1 R7 night sky d
+		const bool phys = wwPhysSkyOn(), nRed = wwNightAirRed();
+		const float n = nRed ? 0.0f : L.nightW;
+		const WwAtmoFrame & af = wwAtmoFrame();
+		const float dome = ( nRed || !af.valid ) ? 0.0f : af.recNight[0];	// the dome's share as drawn
+		const float mF = fu * ( horizon ? gNear : 1.0f );
+		float c[3];
+		for ( int k = 0; k < 3; k++ )
+			c[k] = phys ? L.amb[k] : 0.5f * ( f.K[3][k] + f.K[4][k] ) * mF;
+		prog->uni4f( "fogNight", FloatVector4( c[0] * n, c[1] * n, c[2] * n, n ) );
+		if ( prog->uniLocation( "volSkyDome" ) >= 0 )
+			prog->uni1f( "volSkyDome", dome );
+		static int saidKey = -1;	// the line is built only when the state moves (this runs per fogged program)
+		const int key = nRed ? 1 : n <= 0.0f ? 2 : ( phys ? 3 : 5 ) + ( n >= 0.999f ? 1 : 0 ) + ( dome > 0.0f ? 4 : 0 );
+		const QString line = key == saidKey ? QString() : nRed ? QStringLiteral( "night air: RED WW_NIGHTAIR_RED=1: the air's own light alone, the record's dome under the sky's residual and band" )
+			: n <= 0.0f ? QStringLiteral( "night air: off (night share 0)" )
+			: QStringLiteral( "night air: master %1: saturated air = %2 %3 %4 %5 x night share %6; a ray's air holds at least that x (1 - T) (sky cover and surfaces); the record's dome takes the air's own T over share %7 of the drawn sky (red WW_NIGHTAIR_RED=1)" )
+				.arg( phys ? QStringLiteral( "On" ) : QStringLiteral( "Off" ) )
+				.arg( phys ? QStringLiteral( "the sky's mean with the record's level (ambient axes, albedo 1)" ) : QStringLiteral( "the record's far fog colour" ) )
+				.arg( double( c[0] ), 0, 'g', 3 ).arg( double( c[1] ), 0, 'g', 3 ).arg( double( c[2] ), 0, 'g', 3 )
+				.arg( double( n ), 0, 'f', 2 ).arg( double( dome ), 0, 'f', 2 );
+		if ( key != saidKey ) {
+			saidKey = key;
+			fprintf( stderr, "%s\n", qPrintable( line ) );
+		}
+	}
+	const bool tailRed = wwAirTailJRed();	// MODULES1 R7-4
 	prog->uni1i( "fogRed", ( wwLookdevRed( "fogmaxclamp" ) ? 1 : 0 ) | ( wwLookdevRed( "fognoescape" ) ? 2 : 0 )
-		| ( wwLookdevRed( "fogheight0" ) ? 4 : 0 ) );
+		| ( wwLookdevRed( "fogheight0" ) ? 4 : 0 ) | ( tailRed ? 8 : 0 ) );
 	prof.at( 8, "sun+reds" );
 	static float lastZ = 0.0f, lastSc = 0.0f;	// lane PERF1: the echo string rebuilt only when it changes
-	static bool lastLeak = false, lastOn = false;
-	if ( !lastOn || lastZ != s.groundZ || lastSc != sc || lastLeak != !s.fog || !s.fogLast.startsWith( QLatin1StringView( "on(" ) ) ) {
-		s.fogLast = QString( "on(groundz=%1 scale=%2%3)" ).arg( double( s.groundZ ), 0, 'f', 2 ).arg( double( sc ), 0, 'g', 6 )
-			.arg( !s.fog ? QStringLiteral( " leak" ) : QString() );	// on with the row off = the fogleak red
+	static bool lastLeak = false, lastOn = false, lastTail = false;
+	if ( !lastOn || lastZ != s.groundZ || lastSc != sc || lastLeak != !s.fog || lastTail != tailRed
+		|| !s.fogLast.startsWith( QLatin1StringView( "on(" ) ) ) {
+		s.fogLast = QString( "on(groundz=%1 scale=%2%3 tailJ=%4)" ).arg( double( s.groundZ ), 0, 'f', 2 ).arg( double( sc ), 0, 'g', 6 )
+			.arg( !s.fog ? QStringLiteral( " leak" ) : QString() )	// on with the row off = the fogleak red
+			.arg( tailRed ? QStringLiteral( "RED last slice dL/dT" ) : QStringLiteral( "window 1/16 depth, thin by the law" ) );
+		lastTail = tailRed;
 		lastOn = true;
 		lastZ = s.groundZ;
 		lastSc = sc;
@@ -2998,6 +3042,7 @@ bool drawMoonGlobe( Scene * scene, const SkyFrame & f, float mul, QStringList & 
 	prog->uni1f( "atMoonK", af.moonK );
 	prog->uni1f( "atTintOn", af.tintOn ? 1.0f : 0.0f );
 	prog->uni2f( "atRecNight", af.recNight[0], af.recNight[1] );	// MODULES1 R7: the sky behind the globe takes the same
+	prog->uni1f( "atDomeAir", wwNightAirRed() ? 0.0f : af.recNight[0] );	// R7 night sky d: the globe over the record's dome
 	const GLint tintLoc = prog->uniLocation( "atTint" );
 	if ( ( af.tintOn || af.recNight[1] > 0.0f ) && tintLoc >= 0 )
 		r->fn->glUniform3fv( tintLoc, 17, &af.tint[0][0] );

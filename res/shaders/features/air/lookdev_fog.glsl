@@ -19,7 +19,13 @@ uniform vec4 fogSunColour;	// linear; .w = fDirectionalFogPower
 uniform float fogUnit;	// lane PHYSUNITS1: the light's scale over the weather's (0 = unset = 1)
 uniform vec4 fogProbe;		// gates only: .z = 0 off, 1 alpha, 2 colour / 2, 3 hb (at d = .x, z = .y); 5 geometry echo (d / 4096, 0.5 + z / 2000);
 				// 6 / 7 per fragment (lane FOG2): (alpha, hb, 0) / colour ^ 1/2.2; 8 the geometry, wide (d / 16384, 0.5 + z / 32768)
-uniform int fogRed;		// gates only: 1 maxclamp, 2 noescape, 4 height0
+uniform int fogRed;		// gates only: 1 maxclamp, 2 noescape, 4 height0; 8 the air tail's source from the last slice alone (MODULES1 R7-4)
+/* MODULES1 R7 night sky d: the saturated air's night colour x the night share (a: the share, 0 = day, the red
+ * WW_NIGHTAIR_RED=1, no weather). Master Off: the weather record's far fog colour, what the game's fog ends at; On: the
+ * sky's mean with the record's night level (the ambient axes' mean; the air's albedo is 1). The whole air of a ray
+ * (L, T) holds at least that x (1 - T): the sky's cover (cell_volsky.frag) and the surfaces (wwFog) alike, so the far
+ * land and the sky behind it end at one colour. */
+uniform vec4 fogNight;
 
 /* lane SKYA (ATMO2): the physical sky's aerial perspective (src/features/sky/atmosphere.h, Hillaire 2020 sec. 5.4). atApTex
  * holds per froxel the light the air sends toward the eye from the camera to slice k (rgb, the sky's scene units)
@@ -326,12 +332,42 @@ vec4 wwGridAt( vec2 uv, vec2 share, float base, float n, float f )
 /* the closed-form tail's J: the light per unit (1 - T) of the grid's last slice, `last` its (L, T) at the end, `prev` one
  * slice nearer. MODULES1 G2: in thin air (the top's falloff) the last slice's dT falls under the volume's precision and
  * the tail went black; there the whole column's light per unit (1 - T) stands in (the red, ground.z 0: none, as before) */
+/* MODULES1 R7-4 (bungo 11-10, level strips in the fog from above): the volume keeps T in 16F, steps of 4.9e-4 under 1.0,
+ * and one slice's dT is 2 to 30 steps wide: dL / dT of the last slice alone stepped by 10 to 50 % from one row of rays
+ * to the next (notes/modules1/r7/t/strips_model.py). The source now comes from a WINDOW of the grid's end, `prev` read
+ * where the column's depth is 1/16 less (wwAirTailF), `last` the whole column:
+ *   the window's dL / dT; where it holds under 64 steps of T (air thinning toward the grid's end), the whole column's;
+ *   a thin column (depth <= 1/8: the window is the grid's far half) returns the window's dL alone and wwAirThinJ
+ *   divides it by the LAW's depth of that half, no 16F step in it.
+ * fogRed 8 (red WW_CELL_AIR_TAILJ_RED=1): the last slice's dL / dT, as before */
 vec3 wwAirTailJ( vec4 last, vec4 prev )
 {
 	float dT = prev.a - last.a;
-	if ( dT > 1e-7 )
-		return max( ( last.rgb - prev.rgb ) / dT, vec3( 0.0 ) );
-	return volAirGround.z > 0.0 && last.a < 0.9999 ? max( last.rgb, vec3( 0.0 ) ) / ( 1.0 - last.a ) : vec3( 0.0 );
+	if ( ( fogRed & 8 ) != 0 ) {
+		if ( dT > 1e-7 )
+			return max( ( last.rgb - prev.rgb ) / dT, vec3( 0.0 ) );
+		return volAirGround.z > 0.0 && last.a < 0.9999 ? max( last.rgb, vec3( 0.0 ) ) / ( 1.0 - last.a ) : vec3( 0.0 );
+	}
+	vec3 dL = max( last.rgb - prev.rgb, vec3( 0.0 ) );
+	if ( -log( max( last.a, 1e-6 ) ) <= 0.125 )
+		return dL / max( prev.a, 1e-6 );
+	float m = 1.0 - last.a;
+	vec3 Jc = m > 1e-7 ? max( last.rgb, vec3( 0.0 ) ) / m : vec3( 0.0 );
+	return mix( Jc, dT > 1e-7 ? dL / dT : vec3( 0.0 ), clamp( dT * 64.0 / max( last.a, 1e-6 ) - 1.0, 0.0, 1.0 ) );
+}
+
+// R7-4: the share of the grid's reach the window covers, for a column of transmittance T: 1/16 of its depth, at most half
+float wwAirTailW( float T )
+{
+	return min( 0.0625 / max( -log( max( T, 1e-6 ) ), 1e-9 ), 0.5 );
+}
+
+// R7-4: the slice coordinate of the window's start in a grid of n slices over ln(far / near) = lnSpan; the red: n - 1
+float wwAirTailF( float T, float lnSpan, float n )
+{
+	if ( ( fogRed & 8 ) != 0 )
+		return n - 1.0;
+	return clamp( n * ( 1.0 + log( 1.0 - wwAirTailW( T ) ) / lnSpan ), 1.0, n - 1.0 );
 }
 
 /* MODULES1 10c (a camera far above the fog): a column whose whole grid span lies in the top's falloff is too thin for
@@ -343,17 +379,41 @@ vec3 wwAirTailJ( vec4 last, vec4 prev )
 vec3 wwAirThinJ( vec3 J, vec4 v, float z0, float far )
 {
 	float zc = fogView.w;
-	if ( ( volAirFlags & 32768 ) == 0 || volAirGround.z <= 0.0 || min( zc, z0 ) < volAirMed.w )
+	bool thin = ( fogRed & 8 ) == 0 && -log( max( v.a, 1e-6 ) ) <= 0.125;
+	if ( !thin && ( ( volAirFlags & 32768 ) == 0 || volAirGround.z <= 0.0 || min( zc, z0 ) < volAirMed.w ) )
 		return J;
-	float od = volAirMed.x * far * ( abs( z0 - zc ) < 0.5 ? wwAirCol( zc, zc + 1.0, volAirGround )
-		: wwAirCol( min( zc, z0 ), max( zc, z0 ), volAirGround ) / abs( z0 - zc ) );
+	// the law's depth of the whole reach (a level ray: the density at the camera's height), one call for both rules
+	float z1 = abs( z0 - zc ) < 0.5 ? zc + 1.0 : z0;
+	float k = volAirMed.x * far / abs( z1 - zc );
+	float od = k * wwAirCol( min( zc, z1 ), max( zc, z1 ), volAirGround );
+	if ( thin ) {
+		/* MODULES1 R7-4: a thin column (the same test as wwAirTailJ's; J = its far half's dL over the T at the half's
+		 * start). od, b = the law's depth of the whole reach and of its far half; the law is scaled so its whole-reach
+		 * 1 - T lies within one 16F step of the stored one (zones, rain: the stored depth rules where they differ by
+		 * more) */
+		float zh = 0.5 * ( zc + z1 );
+		float b = k * wwAirCol( min( zh, z1 ), max( zh, z1 ), volAirGround );
+		float xa = 1.0 - exp( -od ), m = 1.0 - v.a;
+		b *= clamp( xa, m - 4.8828125e-4, m + 4.8828125e-4 ) / max( xa, 1e-9 );
+		return b > 1e-7 ? J / ( b * ( 1.0 - 0.5 * b ) ) : vec3( 0.0 );
+	}
 	return od > 1e-7 && od < 0.02 ? max( v.rgb, vec3( 0.0 ) ) / ( od * ( 1.0 - 0.5 * od ) ) : J;
 }
 
-// the far grid's: `last` its (L, T) at the end
-vec3 wwGridTailJ( vec2 uv, vec2 share, float base, float n, vec4 last )
+// with the far grid: `b` its (L, T) at the end, `a` the near grid's, `whole` the two together. R7-4: the window runs over the
+// two grids as one column (its start in either); the red: the far grid's last slice
+vec3 wwGridTailJ( vec2 uv, vec4 a, vec4 b, vec4 whole )
 {
-	return wwAirTailJ( last, wwGridAt( uv, share, base, n, n - 1.0 ) );
+	float nN = volPackDims.w;
+	bool red = ( fogRed & 8 ) != 0;
+	float db = volFar.x * exp( volFar.y ) * ( 1.0 - wwAirTailW( whole.a ) );
+	bool inFar = red || db > volFar.x;
+	float f = red ? volFar.z - 1.0 : inFar ? min( log( db / volFar.x ) / volFar.y * volFar.z, volFar.z - 1.0 )
+		: log( db / volSlices.x ) / volSlices.y * nN;
+	vec4 p = wwGridAt( uv, inFar ? volPack.zw : volPack.xy, inFar ? nN : 0.0, inFar ? volFar.z : nN, f );
+	if ( red )
+		return wwAirTailJ( b, p );
+	return wwAirTailJ( whole, inFar ? vec4( a.rgb + a.a * p.rgb, a.a * p.a ) : p );
 }
 
 // near grid -> far grid -> closed-form tail: (L, T) at distance d (game units) along posView
@@ -372,7 +432,7 @@ vec4 wwVolAirAtFar( float d, vec2 uv, vec3 posView )
 		return o;
 	// the closed-form tail past the far grid (wwVolAirAt's, from the far grid's last slice)
 	float far = volFar.x * exp( volFar.y );
-	vec3 J = wwGridTailJ( uv, volPack.zw, nN, volFar.z, w );
+	vec3 J = wwGridTailJ( uv, v, w, o );
 	float z1 = dot( fogView.xyz, posView ) + fogView.w;
 	float zc = fogView.w;
 	float z0 = zc + ( z1 - zc ) * ( far / d );
@@ -428,6 +488,12 @@ vec4 wwVolTex( vec3 p, bool xyOnly )
 	return g0.z * a + g1.z * b;
 }
 
+// R7-4: the near grid's tail source (no far grid): `v` its (L, T) at the end, the window's start read at wwAirTailF
+vec3 wwAirTailNearJ( vec2 uv, vec4 v )
+{
+	return wwAirTailJ( v, wwVolTex( vec3( uv, ( wwAirTailF( v.a, volSlices.y, volSlices.z ) - 0.5 ) / volSlices.z ), true ) );
+}
+
 #ifdef WW_CELL_FOGLEAK
 /* lane FOGLEAK1 (fix 4, the loader's WW_CELL_FOGLEAK only): the far grid's closed-form tail took no sun shadow
  * (wwVolAirAtFar), the near grid's did. Both grids' heads below end where their tail starts, and ONE tail takes the
@@ -453,7 +519,7 @@ bool wwVolAirFarHead( float d, vec2 uv, vec3 posView, out vec4 o, out vec3 J, ou
 	if ( fF <= volFar.z || ( volAirFlags & 2 ) == 0 || volAirMed.x <= 0.0 )
 		return false;
 	far = volFar.x * exp( volFar.y );
-	J = wwGridTailJ( uv, volPack.zw, nN, volFar.z, w );
+	J = wwGridTailJ( uv, v, w, o );
 	return true;
 }
 
@@ -476,8 +542,7 @@ bool wwVolAirNearHead( float d, vec2 uv, out vec4 v, out vec3 J, out float far )
 	if ( f <= volSlices.z || ( volAirFlags & 2 ) == 0 || volAirMed.x <= 0.0 )
 		return false;
 	far = volSlices.x * exp( volSlices.y );
-	vec4 p = wwVolTex( vec3( uv, ( volSlices.z - 1.5 ) / volSlices.z ), true );
-	J = wwAirTailJ( v, p );
+	J = wwAirTailNearJ( uv, v );
 	return true;
 }
 
@@ -542,8 +607,7 @@ vec4 wwVolAirAtUv( vec3 posView, vec2 uv )	// lane VOLPART1: uv = the column (a 
 		return v;
 	// the far tail
 	float far = volSlices.x * exp( volSlices.y );
-	vec4 p = wwVolTex( vec3( uv, ( volSlices.z - 1.5 ) / volSlices.z ), true );
-	vec3 J = wwAirTailJ( v, p );
+	vec3 J = wwAirTailNearJ( uv, v );
 	float z1 = dot( fogView.xyz, posView ) + fogView.w;
 	float zc = fogView.w;
 	float z0 = zc + ( z1 - zc ) * ( far / d );
@@ -604,15 +668,14 @@ vec4 wwVolAirSky( vec3 dirView )
 		if ( ( volAirFlags & 2 ) == 0 || volAirMed.x <= 0.0 )
 			return v;
 		far = volFar.x * exp( volFar.y );
-		J = wwGridTailJ( uv, volPack.zw, volPackDims.w, volFar.z, b );
+		J = wwGridTailJ( uv, a, b, v );
 	} else {
 	v = wwVolTex( vec3( uv, ( n - 0.5 ) / n ), true );
 	v = vec4( max( v.rgb, vec3( 0.0 ) ), clamp( v.a, 0.0, 1.0 ) );
 	if ( ( volAirFlags & 2 ) == 0 || volAirMed.x <= 0.0 )
 		return v;
 	far = volSlices.x * exp( volSlices.y );
-	vec4 p = wwVolTex( vec3( uv, ( n - 1.5 ) / n ), true );
-	J = wwAirTailJ( v, p );
+	J = wwAirTailNearJ( uv, v );
 	}
 	float s = dot( fogView.xyz, dirView ) / max( fogDistScale, 1e-12 );	// the sine of the elevation
 	float z0 = fogView.w + s * far;
@@ -751,8 +814,13 @@ vec3 wwFog( vec3 preFog, vec3 posView )
 		if ( apOn ) {
 			bool dbl = atApDouble > 0.5;
 			float tr = wwApFogResidualT( ap.a, a.a, dbl );
-			return preFog * tr + ( dbl ? a.rgb : wwApFogResidualL( a.rgb, a.a, tr ) );
+			vec3 lr = dbl ? a.rgb : wwApFogResidualL( a.rgb, a.a, tr );
+			if ( fogNight.a > 0.0 )	// R7 night sky d: the two airs' light together (ap.rgb x tr + lr), their T ap.a x tr
+				lr = max( lr, fogNight.rgb * ( 1.0 - ap.a * tr ) - ap.rgb * tr );
+			return preFog * tr + lr;
 		}
+		if ( fogNight.a > 0.0 )
+			a.rgb = max( a.rgb, fogNight.rgb * ( 1.0 - a.a ) );
 		vec3 lit = preFog * a.a + a.rgb;
 		if ( volFogBlend == 1 )
 			return wwFogBase( lit, posView, 1.0, false );

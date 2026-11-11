@@ -21,6 +21,13 @@ uniform int atApSkyRule;	// lane HORIZONBAND1: 1 the horizon band (atmo_skyband.
 uniform sampler2D atSkyTransTex;
 uniform float atSkyCamR;
 uniform bool volSkyOn;
+/* MODULES1 R7 night sky d (bungo 11-11, Foggy h22: "the sky is pitch black, why"): the share of the drawn sky that is the
+ * weather record's night dome (atmo_sky.frag atRecNight.x: the master Off's night share; 0 with the master On, by day and
+ * under the reds). The dome holds none of the physical sky's air, so over that share the backdrop takes the air's own
+ * (L, T) once: not the residual T / tSky (a credit for air the dome does not hold) and not the horizon band's cap (the
+ * physical sky's opaque air hiding a backdrop it is not in front of). fogNight (lookdev_fog.glsl): the saturated air's
+ * night colour, the cover's light is at least that x its coverage. Red WW_NIGHTAIR_RED=1 (live): both 0, as before. */
+uniform float volSkyDome;
 
 out vec4 fragColor;
 
@@ -46,6 +53,7 @@ void main()
 		return;
 	}
 	vec4 a = volSkyOn ? wwVolAirSky( wwSkyRay() ) : vec4( 0.0, 0.0, 0.0, 1.0 );
+	vec4 air = a;	// the air alone
 	if ( volSkyMode == 0 && wwApOn() && atSkyCamR > 0.0 ) {
 		vec3 vr = wwSkyRay();
 		float mu = dot( vr, viewMatrix[2] );	// world up: viewMatrix's columns are the world axes in view space
@@ -85,6 +93,10 @@ void main()
 			float tr = wwApFogResidualT( tSky, a.a, atApDouble > 0.5 );
 			a = vec4( atApDouble > 0.5 ? a.rgb : wwApFogResidualL( a.rgb, a.a, tr ), tr );
 		}
+	}
+	if ( volSkyMode == 0 && volSkyOn && fogNight.a > 0.0 ) {	// MODULES1 R7 night sky d
+		a = mix( a, air, volSkyDome );
+		a.rgb = max( a.rgb, fogNight.rgb * ( 1.0 - a.a ) );
 	}
 	if ( volSkyMode == 1 ) {
 		fragColor = vec4( volProbe == 1 ? a.rgb : vec3( a.a ), 1.0 );
