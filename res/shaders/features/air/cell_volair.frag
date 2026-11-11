@@ -85,6 +85,9 @@ uniform int volEnvSpread;		// MODULES1 item 8: 1 = the leak walk one frame in fo
 // lane AIRPERF1 A1: x > 0 = the walk's frame is the LAYER's (every froxel of a layer walks on the same frame, one
 // frame in x; y = this frame's phase), so a draw either walks or reads; 0 = red dither (item 8's 2 x 2 column phase)
 uniform ivec2 volEnvRate;
+// lane AIRPERF1 A3: x > 1 = a LAYER refreshes its sun / light strata one 4-frame cycle in x (y = this cycle's phase)
+// and reads its history in the others (whole draws rest, as A1's walk); 1 or 0 = every cycle, the rule before
+uniform ivec2 volSunRate;
 uniform vec3 volLightShift;		// gates only (WW_CELL_AIR_LIGHTSHIFT): the air sees every placed light moved by this (world)
 uniform bool volSurfClusters;	// lane GAPLOOK1 (LIGHTSYS-4): the lights from the surfaces' lists (cell_cluster.glsl)
 uniform vec2 volSurfPx;			// the main viewport's pixels a froxel column (x, y)
@@ -972,7 +975,7 @@ uniform sampler2DArray volStbn;	// stage 4: the blue-noise mask (res/air/stbn_sc
 uniform bool volLampHistOk;		// stage 4: a history at these dims (no cut, no new document)
 uniform float volLampA;			// stage 4: the blend floor, 0.1 still / 0.2 moving
 uniform int volFrame;			// stage 4: the mask's time axis
-uniform int volLampRed;			// stage 4 gates (WW_CELL_AIR_LAMPS_RED): 1 white, 2 noramp, 4 onemiss, 8 blendflicker, 16 nohash, 32 nochord
+uniform int volLampRed;			// stage 4 gates (WW_CELL_AIR_LAMPS_RED): 1 white, 2 noramp, 4 onemiss, 8 blendflicker, 16 nohash, 32 nochord, 64 walkempty (AIRPERF1 A3: a froxel with no lamp in its list runs the whole stage, as before)
 
 vec3 airRest( vec3 posView, vec3 dirView, float z, float sA, float sB, out vec3 Jenv, bool lights )
 {
@@ -1310,7 +1313,7 @@ void airLampVolStage( ivec2 col )
 	// MIRROR airlampinjmath.h clusterHash: the index + a steady lamp's intensity bits (here its colour and radius) + its
 	// position at 1/64 (every steady lamp: a still one adds a constant); a flickering lamp by its index only
 	uint hsh = 0u;
-	int n = cellLightCount, base = -1, jb = 0;
+	int n = cellLightCount, base = -1, jb = 0, nl = 0;
 	ivec4 sp, se;
 	bool surf = false;
 	if ( lightsOn ) {
@@ -1330,6 +1333,7 @@ void airLampVolStage( ivec2 col )
 				surf = false;
 				j = n;
 			}
+			nl++;
 			vec4 a0 = texelFetch( cellLights, i * CELL_TPL ), a1 = texelFetch( cellLights, i * CELL_TPL + 1 );
 			bool fl = ( int( texelFetch( cellLights, i * CELL_TPL + 3 ).w + 0.5 ) & 8 ) != 0;
 			uint ib = fl ? 0u : floatBitsToUint( a1.r ) ^ ( floatBitsToUint( a1.g ) * 3u ) ^ ( floatBitsToUint( a1.b ) * 5u ) ^ ( floatBitsToUint( a0.w ) * 7u );
@@ -1341,6 +1345,14 @@ void airLampVolStage( ivec2 col )
 		}
 	}
 	hsh &= 0xFFFFFFu;
+	/* AIRPERF1 A3: no lamp in this froxel's list = no lamp light here: nothing to sample and no history to keep (a
+	 * list that gains a lamp changes the hash, which drops the history anyway). The stage ends before its 8 history
+	 * taps and its sample. Not under the gates nohash (16, the history is kept across a list change) / walkempty (64) */
+	if ( nl == 0 && ( volLampRed & 80 ) == 0 ) {
+		fragColor = vec4( 0.0 );
+		volMrt[0] = vec4( 0.0 );
+		return;
+	}
 	// the history: this froxel's centre in last frame's grid (the inject's temporal map), trilinear by hand. MIRROR
 	// airlampinjmath.h history: rejected on a cut (volLampHistOk), outside the last frustum, a tap with no history
 	// (skipped or never written: N 0), NaN, or a changed light-set hash at the froxel the history comes from
@@ -1693,10 +1705,12 @@ void main()
 		if ( have ) {
 			// every filter tap valid (a = 1); red histstale (134217728, gates): the history never refreshed
 			bool stale = ( volRed & 134217728 ) != 0, ok = true;
+			// AIRPERF1 A3: a resting layer takes all four strata from its history (a missing tap still computes)
+			bool rest = stale || ( volSunRate.x > 1 && ( volLayer + volSunRate.y ) % volSunRate.x != 0 );
 			for ( int p = 0; p < 4; p++ )
-				ok = ok && ( ( p == volQ && !stale ) || h[p].a > 0.9999 );
+				ok = ok && ( ( p == volQ && !rest ) || h[p].a > 0.9999 );
 			if ( ok )
-				need = stale ? 0 : 1 << volQ;
+				need = rest ? 0 : 1 << volQ;
 		}
 		vec3 Jenv = vec3( 0.0 );
 #ifdef WW_AIR_LEAK

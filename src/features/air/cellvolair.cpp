@@ -2120,7 +2120,9 @@ static void vaPassInner( Scene * scene, bool run )
 	const bool lampPixel = lampRedS == "pixel";
 	const int lampRed = ( lampRedS.contains( "white" ) ? 1 : 0 ) | ( lampRedS.contains( "noramp" ) ? 2 : 0 )
 		| ( lampRedS.contains( "onemiss" ) ? 4 : 0 ) | ( lampRedS.contains( "blendflicker" ) ? 8 : 0 ) | ( lampRedS.contains( "nohash" ) ? 16 : 0 )
-		| ( lampRedS.contains( "nochord" ) ? 32 : 0 );
+		| ( lampRedS.contains( "nochord" ) ? 32 : 0 )
+		| ( lampRedS.contains( "walkempty" ) ? 64 : 0 );	// AIRPERF1 A3: the stage on froxels with an empty lamp list too
+	apNote += QStringLiteral( " lampempty=%1" ).arg( lampPixel ? "n/a(pixel)" : ( lampRed & 80 ) ? "walk(red)" : "skip" );
 	if ( temporal && !lampPixel && !g.stbnTried ) {
 		g.stbnTried = true;
 		QFile mf( QStringLiteral( ":/air/stbn_scalar_128x128x64.r8" ) );
@@ -2408,7 +2410,17 @@ static void vaPassInner( Scene * scene, bool run )
 		// MODULES1 step 5: the sun read of the fresh stratum steps by the golden ratio each refresh, into a running mean
 		// (1/4 with a still camera, 1/2 while it moves); red WW_CELL_AIR_SUNJIT_RED=1: the middle, no mean (live)
 		const bool red = wwEnv( "WW_CELL_AIR_SUNJIT_RED" ).trimmed() == "1";
-		const double k = double( g.frame >> 2 ) * 0.6180339887498949;
+		/* lane AIRPERF1 A3: with the camera standing, a layer refreshes its sun / light strata every second 4-frame cycle
+		 * (even layers one cycle, odd layers the next) and reads its history in the other: whole draws rest. The jitter
+		 * series step once per refresh of a layer (cyc), so each layer still walks the whole series. The running mean
+		 * keeps its weight, so a light that changes under a still camera settles in twice the frames. A moving camera
+		 * refreshes every cycle, as before. WW_CELL_AIR_SUNRATE=1: the red, every cycle; =2: always every second */
+		WW_SWITCH_STATIC( QString, sunRateKey, wwEnv( "WW_CELL_AIR_SUNRATE" ).trimmed() );
+		const int sunRate = !temporal || sunRateKey == QLatin1String( "1" ) ? 1 : sunRateKey == QLatin1String( "2" ) || g.tmode == 2 ? 2 : 1;
+		const unsigned cyc = ( g.frame >> 2 ) / unsigned( sunRate );
+		fn->glUniform2i( prog->uniLocation( "volSunRate" ), sunRate, int( ( g.frame >> 2 ) % unsigned( sunRate ) ) );
+		apNote += QStringLiteral( " sunrate=%1%2" ).arg( sunRate ).arg( sunRateKey == QLatin1String( "1" ) ? "(red)" : "" );
+		const double k = double( cyc ) * 0.6180339887498949;
 		prog->uni1f( "volSunJit", red ? 0.0f : float( k - std::floor( k ) ) - 0.5f );
 		prog->uni1f( "volSunBlend", red ? 1.0f : g.tmode == 2 ? 0.25f : 0.5f );
 		// part 18: the fresh stratum's sun and lamp samples move inside the column each refresh, Halton (2, 3), into the
@@ -2422,7 +2434,7 @@ static void vaPassInner( Scene * scene, bool run )
 			}
 			return r;
 		};
-		const unsigned hi = ( ( g.frame >> 2 ) & 15u ) + 1u;
+		const unsigned hi = ( cyc & 15u ) + 1u;
 		prog->uni2f( "volJitXY", jitRed || g.tmode == 0 ? 0.0f : halton( hi, 2 ) - 0.5f, jitRed || g.tmode == 0 ? 0.0f : halton( hi, 3 ) - 0.5f );
 	}
 	prog->uni1b( "volHistOk", temporal && g.histOk );
