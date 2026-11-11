@@ -307,6 +307,7 @@ HEADERS += \
 	src/features/gi/cellssgiplan.h \
 	src/features/shadows/contactlines.h \
 	src/features/lights/celllampshadow.h \
+	src/features/lights/lightmeas.h \
 	src/gl/celllooks.h \
 	src/features/lights/cellnifxlights.h \
 	src/features/ao/cellaodecalgl.h \
@@ -665,6 +666,7 @@ SOURCES += \
 	src/features/reflections/cellreflprobe.cpp \
 	src/features/gi/cellssgi.cpp \
 	src/features/lights/celllampshadow.cpp \
+	src/features/lights/lightmeas.cpp \
 	src/gl/celllooks.cpp \
 	src/features/lights/cellnifxlights.cpp \
 	src/features/ao/cellaodecalgl.cpp \

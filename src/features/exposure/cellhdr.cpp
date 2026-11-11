@@ -15,6 +15,7 @@
 #include "features/near/cellvrs.h"
 #include "features/post/gametaa.h"	// lane TAA3: the Modern resolve before the tone map
 #include "features/exposure/physunits.h"	// lane PHYSUNITS1: the physical camera; the frame in RGBA32F
+#include "features/lights/lightmeas.h"	// lane LIGHTMEAS1: the light at the camera in real units (measure only)
 
 #include <QDebug>
 #include <QFile>
@@ -430,6 +431,7 @@ void isApply( Scene * scene, const float * px, int qw, int qh )
 	const float meter = wwPhysMeter( px, qw * qh );
 	if ( meter >= 0.0f )
 		wwPhysNoteFrameMeter();	// RESUME 11-09 b: the one camera writer (wwCellImageSpaceMeasureByPass stands down)
+	wwLightMeasFrame( scene, px, qw, qh );	// lane LIGHTMEAS1: `light meas:` lines (WW_LIGHT_MEAS=0 off)
 	// SKY2B (EXPO2): the sky pixels in view, each along its own ray
 	wwCellImageSpaceSetAdapted( scene, wwAtmoAdaptedInView( scene, meter >= 0.0f ? meter : cover > 0.0 ? float( sum / cover ) : 0.0f, px, qw, qh ),
 		int( std::lround( cover ) ) );
