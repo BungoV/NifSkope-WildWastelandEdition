@@ -1915,6 +1915,12 @@ void wwCellLightsUniforms( Scene * scene )
 	 * against a moon of 0.002, a white bank in a dark street. Additive cards keep the base (cellDirColor).
 	 * Red WW_CELL_FXLOCAL_RED=base (live): the game's base for every lit effect again. */
 	WW_SWITCH_STATIC( bool, fxLocalRed, wwEnvStr( "WW_CELL_FXLOCAL_RED" ).split( ',' ).contains( QStringLiteral( "base" ) ) );
+	/* MODULES1 R8-1 (bungo: "the fog here should be dark and match the environment lighting"): the card keeps only the
+	 * share of the weather's ambient a surface there keeps (1 - the GI volume's sky share) and takes the volume's
+	 * light for the rest (cell_fxlaw.glsl fxLocalSky). Red word `ambient` (live): round 7's whole ambient again. */
+	WW_SWITCH_STATIC( bool, fxLocalAmbRed, wwEnvStr( "WW_CELL_FXLOCAL_RED" ).split( ',' ).contains( QStringLiteral( "ambient" ) ) );
+	// the law's lit band is a receiver: weight = the band, not band x lighting influence. Red word `influence` (live)
+	WW_SWITCH_STATIC( bool, fxLocalInfRed, wwEnvStr( "WW_CELL_FXLOCAL_RED" ).split( ',' ).contains( QStringLiteral( "influence" ) ) );
 	bool fxLocalHere = false;
 	float fxSunLocal[4] = { 0.0f, 0.0f, 0.0f, 0.0f };
 	/* lane SUNCELL1 final: a lit effect or lit particle outdoors (fo4_effectcell / particles_cell) takes the game's
@@ -1993,7 +1999,12 @@ void wwCellLightsUniforms( Scene * scene )
 			static QString fxLocLast;
 			const QString loc = QStringLiteral( "cell fx local: blended lit effect cards and particles take %1 (surfaces' sun %2,%3,%4 linear, "
 					"shadowed; the game's Effect Lighting base %5,%6,%7 stays on additive cards)" )
-				.arg( fxLocalHere ? QStringLiteral( "the surfaces' sun + the weather ambient at the card + its lamps" )
+				.arg( fxLocalHere ? ( fxLocalAmbRed
+						? QStringLiteral( "the surfaces' sun + the WHOLE weather ambient at the card + its lamps, RED WW_CELL_FXLOCAL_RED=ambient" )
+						: QStringLiteral( "the surfaces' sun + the weather ambient x (1 - the GI volume's sky share) + the volume's light + "
+							"its lamps, as a surface there (share and lamp shadows per pixel on the GPU)" ) )
+						+ ( fxLocalInfRed ? QStringLiteral( "; weight = band x lighting influence, RED WW_CELL_FXLOCAL_RED=influence" )
+							: QStringLiteral( "; a lit-band material is a receiver: weight = the band, the lighting influence reads 1" ) )
 					: QStringLiteral( "the game's base + lamps, no ambient, RED WW_CELL_FXLOCAL_RED=base" ) )
 				.arg( double( fxSunLocal[0] ), 0, 'f', 5 ).arg( double( fxSunLocal[1] ), 0, 'f', 5 ).arg( double( fxSunLocal[2] ), 0, 'f', 5 )
 				.arg( double( dirColor[0] ), 0, 'f', 5 ).arg( double( dirColor[1] ), 0, 'f', 5 ).arg( double( dirColor[2] ), 0, 'f', 5 );
@@ -2031,6 +2042,8 @@ void wwCellLightsUniforms( Scene * scene )
 	}
 	if ( prog->uniLocation( "vpSun" ) >= 0 )
 		rec.f4( prog, "vpSun", FloatVector4( fxSunLocal[0], fxSunLocal[1], fxSunLocal[2], fxSunLocal[3] ) );
+	if ( prog->uniLocation( "fxLocalRed" ) >= 0 )
+		rec.i( prog, "fxLocalRed", ( fxLocalAmbRed ? 1 : 0 ) | ( fxLocalInfRed ? 2 : 0 ) );	// R8-1
 	prof.at( 18, "fxsun" );
 	/* An exterior's ambient is the weather's DALC, uploaded in the interior's form so cellAmbient is one law
 	 * indoors and out. The axis is the light's TRAVEL direction (Z- lights an up-facing normal). */

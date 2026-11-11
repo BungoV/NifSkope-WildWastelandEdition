@@ -2058,10 +2058,20 @@ vec3 cellAmbientSum( vec3 N, vec3 P )
 }
 
 // PRTP2 section 4: ambient(n) = pow(max(dot(row, (n, 1)), 0), 2.2) per channel
+#ifdef WW_FX_AMBSHARE
+/* MODULES1 R8-1 (the effect and particle programs only, cell_fxlaw.glsl fxLocalSky): the share of the weather's ambient
+ * a lit card keeps, 1 - k of the GI volume's sky (cellGiSkyK), as a surface at the same place; 1 until it is set */
+float fxAmbShare = 1.0;
+vec3 cellAmbient( vec3 N, vec3 P )
+{
+	return pow( max( cellAmbientSum( N, P ), vec3( 0.0 ) ), vec3( 2.2 ) ) * fxAmbShare;
+}
+#else
 vec3 cellAmbient( vec3 N, vec3 P )
 {
 	return pow( max( cellAmbientSum( N, P ), vec3( 0.0 ) ), vec3( 2.2 ) );
 }
+#endif
 
 /* the interior ambient beside our GI, as WW_CELL_GI_AMB asks (gi = the GI's irradiance / pi): keep (0), replace (1,
  * default: ambient x (1 - the grid's valid share)), off (2), max (3), asgi (4, debug: ambient := GI).

@@ -89,6 +89,15 @@
   carry Reset (...)`, `scene window: reset '<row>': ...`, `scene window: elided text copied whole on a click ...`.
 - **R7-1 lit effect cards and particles dark beside a lamp:** outdoors they take the surfaces' sun, the weather's
   ambient and the lamps at their own spot. Red `WW_CELL_FXLOCAL_RED=base`. Telemetry `cell fx local: ...`.
+- **R8-1 lit effect cards as dark as the street they stand in:** a lit card or particle keeps only the share of the
+  weather's ambient a surface at the same place keeps (1 - the GI volume's sky share) and takes the volume's light for
+  the rest, so at night it holds the street's level and the lamps' colour instead of a grey veil. Material in the NIF
+  or a .bgem: the same rule. A lit-band material (base colour x scale at or under 1) is a pure receiver outdoors: the
+  lighting influence no longer keeps an unlit share, so a fire barrel's smoke is orange at the fire and fades with
+  distance from it. A volumetric card with no normal map takes its normal from the opacity as a height.
+  Red `WW_CELL_FXLOCAL_RED=ambient` (the whole ambient), `influence` (the unlit share), `face` (the face normal);
+  `base` as before. Telemetry `cell fx local:` (three cards' lamp terms), `cell effects puff: ... law:` (base colour,
+  scale, brightness, band, influence per card), `cell effects volumetric: ... normal:`.
 - **Night sky:** Physical Light Units Off: the drawn sky crossfades to the weather record's night dome colours by
   the night share. On: the record's sky level is added to the physical night sky and to the ambient, so the night
   stays readable. Stars in both. Red `WW_NIGHTSKY_RED=physical`. Telemetry `night sky: ...`, `nightsky=` in the sky echo.

@@ -2886,11 +2886,20 @@ bool Renderer::setupProgramCE1( const NifModel * nif, Program * prog, Shape * me
 					static double alphaSum = 0.0;
 					( esp->hasNormalMap ? nmYes : nmNo )++;
 					alphaSum += double( esp->getAlpha() );
-					fprintf( stderr, "cell effects puff: shape %d uv u %.2f..%.2f v %.2f..%.2f -> %s%s | normal map %s, material alpha %.2f "
-						"(so far %d cards with a normal map, %d without: facing; mean material alpha %.2f)\n", mesh->id(),
+					// R8-1: the Effect Lighting law's numbers for this card (band 1 = lit: a pure receiver of the scene's light)
+					const float lawB = std::max( { esp->emissiveColor.red(), esp->emissiveColor.green(), esp->emissiveColor.blue() } ) * esp->emissiveMult;
+					const float lawBand = wwCellFxLawBand( lawB );
+					fprintf( stderr, "cell effects puff: shape %d '%s' uv u %.2f..%.2f v %.2f..%.2f -> %s%s | normal map %s, material alpha %.2f "
+						"(so far %d cards with a normal map, %d without: facing; mean material alpha %.2f) | law: base colour %.3f,%.3f,%.3f x "
+						"scale %.3f = brightness %.3f, band %.3f (%s), lighting influence %.3f (reads 1 outdoors), receiver weight %.3f, own light %.3f\n", mesh->id(),
+						qPrintable( mesh->getName() ),
 						double( u0 ), double( u1 ), double( v0 ), double( v1 ), sprite || u0 > u1 ? "ball (one sprite)" : "slab (tiled or atlas cell)",
 						red ? " | red WW_FX_PUFF_SLAB_RED: ball for every card" : "", esp->hasNormalMap ? "yes" : "no", double( esp->getAlpha() ),
-						nmYes, nmNo, alphaSum / double( nmYes + nmNo ) );
+						nmYes, nmNo, alphaSum / double( nmYes + nmNo ),
+						double( esp->emissiveColor.red() ), double( esp->emissiveColor.green() ), double( esp->emissiveColor.blue() ),
+						double( esp->emissiveMult ), double( lawB ), double( lawBand ),
+						lawBand >= 1.0f ? "lit" : lawBand <= 0.0f ? "emissive" : "graded", double( esp->lightingInfluence ),
+						double( lawBand ), double( 1.0f - lawBand ) );
 				}
 			}
 			if ( wwEnv( "WW_CELL_PARTICLES_AIR_RED" ).trimmed() == "1" && prog->uniLocation( "cellGiAirOn" ) >= 0 )
@@ -2902,9 +2911,15 @@ bool Renderer::setupProgramCE1( const NifModel * nif, Program * prog, Shape * me
 			prog->uni1b( "fxSoft", soft );
 			prog->uni1f( "fxSoftDepth", espSoft ? std::max( esp->falloff.softDepth, 1.0f ) : vp ? kVpCardDepth : 1.0f );
 			wwVolPartFxSet( vp ? 1 | ( soft && !( wwVolPartRed() & 4 ) ? 2 : 0 ) : 0 );
+			// MODULES1 R8-1: a card with no normal map takes its normal from the opacity as a height (red word `face`)
+			const bool lumpRed = wwEnvStr( "WW_CELL_FXLOCAL_RED" ).split( ',' ).contains( QStringLiteral( "face" ) );
+			if ( prog->uniLocation( "fxLumpRed" ) >= 0 )
+				prog->uni1i( "fxLumpRed", lumpRed ? 1 : 0 );
 			if ( vp ) {
 				static QString said;
-				const QString now = wwVolPartSummary() + QStringLiteral( " soft=%1" ).arg( soft ? 1 : 0 );
+				const QString now = wwVolPartSummary() + QStringLiteral( " soft=%1 | normal: the normal map, else %2; density: opacity" )
+					.arg( soft ? 1 : 0 ).arg( lumpRed ? QStringLiteral( "the card's face, RED WW_CELL_FXLOCAL_RED=face" )
+						: QStringLiteral( "the opacity as a height (its slope tilts the face normal)" ) );
 				if ( now != said ) {
 					said = now;
 					fprintf( stderr, "cell effects volumetric: %s\n", qPrintable( now ) );

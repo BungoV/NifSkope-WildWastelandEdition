@@ -81,7 +81,35 @@ out vec4 fragColor;
 #ifdef WW_SUNSHADOW
 #include "ww_sunshadow.glsl"
 #endif
+#ifndef WW_FX_DECALLIT
+#define WW_FX_AMBSHARE 1	// MODULES1 R8-1: a lit card's ambient keeps the share the GI volume leaves (cell_fxlaw.glsl)
+#endif
 #include "cell_lights.glsl"
+#ifndef WW_FX_DECALLIT
+/* MODULES1 R8-1 (bungo's fake volumetric rule: "the normal + opacity for height (if height unavailable) + opacity for
+ * density"): a volumetric card with no normal map is a lump whose height is its opacity, alpha 1 = half a UV unit of
+ * the card. Its normal is the face normal tilted down the opacity's slope (Mikkelsen 2010, "Bump Mapping
+ * Unparametrized Surfaces on the GPU": the surface gradient from screen derivatives), so a flat card shades toward a
+ * lamp like a mound. No texture tap: three derivative pairs. fxLumpRed 1 (WW_CELL_FXLOCAL_RED=face) = the face normal. */
+uniform int fxLumpRed;
+vec3 fxLumpNormal( vec3 N, vec3 pv, float a )
+{
+	if ( hasNormalMap || fxLumpRed != 0 )
+		return N;
+	vec3 dpx = dFdx( pv ), dpy = dFdy( pv );
+	vec3 r1 = cross( dpy, N ), r2 = cross( N, dpx );
+	float det = dot( dpx, r1 );
+	vec2 dux = dFdx( texCoord.st ), duy = dFdy( texCoord.st );
+	float duv = abs( dux.x * duy.y - dux.y * duy.x );
+	if ( abs( det ) < 1e-20 || duv < 1e-20 )
+		return N;
+	float L = 0.5 * sqrt( abs( det ) / duv );	// half a UV unit in view units: the lump's height at alpha 1
+	return normalize( abs( det ) * N - sign( det ) * L * ( dFdx( a ) * r1 + dFdy( a ) * r2 ) );
+}
+#define FX_LUMP_N( n, pv, a ) fxLumpNormal( n, pv, a )
+#else
+#define FX_LUMP_N( n, pv, a ) ( n )
+#endif
 #ifdef WW_FX_DECALLIT
 #include "cell_ao.glsl"
 #endif
@@ -144,7 +172,8 @@ vec3 cellFxLit( vec3 P )
 	bool loc = fxLocalOn() && !cellInterior && !fxAdditive;
 	if ( ( fxLitMode & 8 ) != 0 || ( !cellInterior && !cellHasDir && !loc ) )
 		return vec3( 1.0 );
-	vec3 E = loc ? vpSun.rgb * fxLocalVis + cellAmbient( vec3( 0.0, 0.0, 1.0 ), P ) : cellHasDir ? cellDirColor : vec3( 0.0 );
+	// R8-1: the ambient's share and the GI as a surface there (fxLocalSky, set by the caller; 1 and 0 before it)
+	vec3 E = loc ? vpSun.rgb * fxLocalVis + cellAmbient( vec3( 0.0, 0.0, 1.0 ), P ) FX_LOCAL_GI : cellHasDir ? cellDirColor : vec3( 0.0 );
 	if ( ( fxLitMode & 2 ) != 0 ) {
 		// flat on purpose: an effect's light has no hemisphere clip, which the cluster lists cull by
 		for ( int i = 0; i < cellLightCount; i++ )
@@ -502,6 +531,7 @@ void main()
 #ifndef WW_FX_DECALLIT
 			if ( volPart == 0 && volCsm && fxLocalOn() && !cellInterior && !fxAdditive )
 				fxLocalVis = wwSunShadow( -ViewDir );	// R7-1: the plain lit card's sun, shadowed as the puff's
+			fxLocalSky( P, fxAdditive );	// R8-1: the sky light a surface takes here
 #endif
 			vec3 m = cellFxLit( P );
 			if ( cellProbe >= 70 && cellProbe <= 74 ) {
@@ -537,7 +567,9 @@ void main()
 				return;
 			}
 			if ( fxLitMode != 0 )
-				lin *= fxAdditive ? cellFxLit( cellWorldPos( posView ) ) : vpLit( posView, dot( normal, V ) < 0.0 ? -normal : normal, aThick );
+				lin *= fxAdditive ? cellFxLit( cellWorldPos( posView ) )
+					: vpLit( posView, FX_LUMP_N( dot( normal, V ) < 0.0 ? -normal : normal, posView, clamp( vpVol.w, 0.0, 1.0 ) ), aThick )
+						FX_LOCAL_GI_LAW( lightingInfluence );
 		}
 		if ( fxLitMode == 0 ) {	// lane PHYSUNITS1: unlit effects in real units
 			float uk = fxAdditive ? cellFxEmitK : cellFxUnlitK;
