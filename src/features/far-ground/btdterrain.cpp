@@ -187,6 +187,10 @@ struct TerrainSurface
 	// block and south-west cell, so a streamed cell hides the far tile under it
 	int maxK = 0;
 	std::vector<std::array<int, 3>> tileBlocks;
+	/* lane SEAMCLOUD1: walls on the cell lines inside the grid. Per grid vertex the foot height of the segment north
+	 * of it (V, on lines i % n == 0) or east of it (H, j % n == 0); 3.4e38 = no wall. Empty = none. */
+	std::vector<float> seamFootV, seamFootH;
+	qint64 seamSegs = 0, seamTris = 0, seamCapped = 0;
 };
 
 bool buildTerrainSurface( NifModel * nif, TerrainSurface & s, QString * error )
@@ -435,6 +439,60 @@ bool buildTerrainSurface( NifModel * nif, TerrainSurface & s, QString * error )
 				}
 				if ( verts.size() > grid )
 					zMin -= s.skirtDepth;
+			}
+
+			/* lane SEAMCLOUD1: the cell-line walls (heights from the ring builder). Two feet a segment, 3 units into
+			 * the quad's own cell, so the far mask's centroid test hides the wall with that cell and keeps it while
+			 * only the neighbour is loaded; one winding, facing the neighbour (where the eye stands). A line the P9
+			 * skirt already walls is skipped. */
+			if ( !s.seamFootV.empty() && !tris.isEmpty() ) {
+				const int gW = s.cellsX * n + 1;
+				const float none = 3.4e38f, lean = 3.0f;
+				const int wx0 = haveKeep ? s.keepX0 : s.cellX0, wx1 = haveKeep ? s.keepX1 : s.cellX0 + s.cellsX - 1;
+				const int wy0 = haveKeep ? s.keepY0 : s.cellY0, wy1 = haveKeep ? s.keepY1 : s.cellY0 + s.cellsY - 1;
+				auto walled = [&]( int cx, int cy ) {
+					return s.skirtDepth > 0.0f && ( cx < wx0 || cx > wx1 || cy < wy0 || cy > wy1 || inCut( cx, cy ) );
+				};
+				// a, b: the segment's top vertices with the neighbour on the RIGHT of a -> b seen from above
+				auto seam = [&]( int a, int b, float zf, float dx, float dy ) {
+					if ( !( zf < none ) )
+						return;
+					if ( verts.size() + 2 > 65535 ) {
+						s.seamCapped++;
+						return;
+					}
+					TerrainVert va = verts.at( a ), vb = verts.at( b );
+					va.pos = Vector3( va.pos[0] + dx, va.pos[1] + dy, zf );
+					vb.pos = Vector3( vb.pos[0] + dx, vb.pos[1] + dy, zf );
+					verts.append( va );
+					footSrc.push_back( a );
+					verts.append( vb );
+					footSrc.push_back( b );
+					const int fa = int( verts.size() - 2 ), fb = int( verts.size() - 1 );
+					tris.append( Triangle( quint16( a ), quint16( b ), quint16( fb ) ) );
+					tris.append( Triangle( quint16( a ), quint16( fb ), quint16( fa ) ) );
+					s.seamTris += 2;
+					s.seamSegs++;
+					zMin = qMin( zMin, zf );
+				};
+				const int baseCx = s.cellX0 + tileX, baseCy = s.cellY0 + tileY;
+				for ( int j = 0; j < hV - 1; j++ ) {
+					for ( int i = 0; i < wV - 1; i++ ) {
+						const int cx = baseCx + i / n, cy = baseCy + j / n;
+						if ( inCut( cx, cy ) )
+							continue;
+						const int a = j * wV + i;
+						const size_t g = size_t( gy0 + j ) * size_t( gW ) + size_t( gx0 + i );
+						if ( i % n == 0 && !walled( cx - 1, cy ) )	// west line, neighbour at -x
+							seam( a, a + wV, s.seamFootV[g], lean, 0.0f );
+						if ( ( i + 1 ) % n == 0 && !walled( cx + 1, cy ) )	// east line, neighbour at +x
+							seam( a + wV + 1, a + 1, s.seamFootV[g + 1], -lean, 0.0f );
+						if ( j % n == 0 && !walled( cx, cy - 1 ) )	// south line, neighbour at -y
+							seam( a + 1, a, s.seamFootH[g], 0.0f, lean );
+						if ( ( j + 1 ) % n == 0 && !walled( cx, cy + 1 ) )	// north line, neighbour at +y
+							seam( a + wV, a + wV + 1, s.seamFootH[g + size_t( gW )], 0.0f, -lean );
+					}
+				}
 			}
 
 			if ( tris.isEmpty() )
@@ -3398,7 +3456,35 @@ bool nifAppendLodlFarRings( NifModel * nif, const QModelIndex & parent, const QS
 				}
 		}
 
+		/* lane SEAMCLOUD1: the cell-line walls. A streamed cell loaded over this ring meets its edge on a cell line;
+		 * between two ring vertices that edge is straight while the LAND bends every 128 units, so where it stands
+		 * above the LAND a slit opens onto the far water and sky. Every segment gets a wall to kSeamFoot (1 m) under
+		 * its lowest fine sample: the lerp equals the fine height at both ends, so a "stands above" test passes every
+		 * segment anyway (seam_twin.py). A ring on the fine lattice (step 1) needs none. Red WW_CELL_FARLOD_RED=noseam. */
+		std::vector<float> seamV, seamH;
+		if ( r.seamSkirt && step > 1 ) {
+			constexpr float kSeamFoot = 70.0f, none = 3.4e38f;
+			seamV.assign( size_t( gridW ) * size_t( gridH ), none );
+			seamH.assign( size_t( gridW ) * size_t( gridH ), none );
+			const int lastFX = f.cellsX() * spc - 1, lastFY = f.cellsY() * spc - 1;
+			auto footOf = [&]( int i, int j, int di, int dj ) -> float {
+				float lo = qMin( zAt( i, j ), zAt( i + di, j + dj ) );
+				for ( int q = 0; q <= step; q++ )
+					lo = qMin( lo, f.height( qMin( baseX + i * step + di * q, lastFX ), qMin( baseY + j * step + dj * q, lastFY ) ) );
+				return lo - kSeamFoot;
+			};
+			for ( int j = 0; j < gridH; j++ )
+				for ( int i = 0; i < gridW; i++ ) {
+					if ( i % n == 0 && j + 1 < gridH )
+						seamV[size_t( j ) * size_t( gridW ) + size_t( i )] = footOf( i, j, 0, 1 );
+					if ( j % n == 0 && i + 1 < gridW )
+						seamH[size_t( j ) * size_t( gridW ) + size_t( i )] = footOf( i, j, 1, 0 );
+				}
+		}
+
 		TerrainSurface s;
+		s.seamFootV.swap( seamV );
+		s.seamFootH.swap( seamH );
 		s.rootName = r.prefix;
 		s.shapePrefix = r.prefix;
 		s.maxK = r.perCell ? 1 : 0;
@@ -3534,6 +3620,15 @@ bool nifAppendLodlFarRings( NifModel * nif, const QModelIndex & parent, const QS
 		r.cutTris = s.cutTris;
 		r.skirtTris = s.skirtTris;
 		r.skirtCapped = s.skirtCapped;
+		r.seamSegs = s.seamSegs;
+		r.seamTris = s.seamTris;
+		r.seamCapped = s.seamCapped;
+		if ( r.seamSkirt )	// lane SEAMCLOUD1
+			r.notes << ( step > 1
+				? QStringLiteral( "far seam: %L1 cell-line segments walled, %L2 tris, foot 70 units (1 m) under the lowest fine sample, "
+					"%3 over the 16-bit cap, mask by attach state, morph none (CDLOD not built) [WW_CELL_FARLOD_RED=noseam]" )
+					.arg( s.seamSegs ).arg( s.seamTris ).arg( s.seamCapped )
+				: QStringLiteral( "far seam: none needed (on the fine lattice)" ) );
 		r.cellBlocks = std::move( s.tileBlocks );
 		runningVerts += s.vertsOut;
 		havePrev = true;

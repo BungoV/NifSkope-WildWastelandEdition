@@ -693,6 +693,10 @@ QString cellFarLodAppend( NifModel * nif, const QModelIndex & iRoot, const EsmWo
 			r.snapAll = true;
 			r.innerZ = landZ;
 		}
+		// lane SEAMCLOUD1: cell-line walls on every ring a streamed cell can load over (ring 0 is on the LAND lattice)
+		r.seamSkirt = stream && wwEnv( "WW_CELL_FARLOD_RED" ) != "noseam";
+		if ( stream && !r.seamSkirt )
+			r.notes << QStringLiteral( "far seam: RED noseam (no cell-line walls)" );
 		if ( ours && terrOk ) {
 			std::vector<LodlFarRing> one( 1, r );
 			const qint64 left = maxVerts > 0 ? std::max<qint64>( 1, maxVerts - runVerts ) : 0;

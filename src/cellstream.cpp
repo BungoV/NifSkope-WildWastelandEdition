@@ -710,6 +710,13 @@ void Stream::farHide( StreamCell & c, bool hide )
 			refs << c.chunk->refs.at( i ).refForm;
 	CellFarHide::setCell( nif, c.x, c.y, hide, refs );
 	farHideRefresh( c.x, c.y );
+	{	// lane SEAMCLOUD1: the far rings' cell-line walls show where a masked cell meets an unmasked one
+		const CellFarHide::Hidden * h = CellFarHide::hiddenFor( nif );
+		trace( QStringLiteral( "far seam: cells masked %1 (%2 %3,%4), walls %5 [WW_CELL_FARLOD_RED=noseam]" )
+			.arg( h ? h->cells.size() : 0 ).arg( hide ? QStringLiteral( "attach" ) : QStringLiteral( "unload" ) )
+			.arg( c.x ).arg( c.y )
+			.arg( wwEnv( "WW_CELL_FARLOD_RED" ) == "noseam" ? QStringLiteral( "OFF (red)" ) : QStringLiteral( "on (built with the rings)" ) ) );
+	}
 }
 
 //! the masked shapes reaching (x, y) (every one for INT_MIN) take their arrays again; the cards follow the cells
