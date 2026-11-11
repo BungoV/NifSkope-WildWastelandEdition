@@ -2919,6 +2919,8 @@ bool Renderer::setupProgramCE1( const NifModel * nif, Program * prog, Shape * me
 			const bool lumpMapRed = lumpWords.contains( QStringLiteral( "mapalone" ) ), lumpBallRed = lumpWords.contains( QStringLiteral( "ball" ) );
 			if ( prog->uniLocation( "fxLumpRed" ) >= 0 )
 				prog->uni1i( "fxLumpRed", ( lumpRed ? 1 : 0 ) | ( lumpMapRed ? 2 : 0 ) | ( lumpBallRed ? 4 : 0 ) );
+			if ( prog->uniLocation( "fxAirCard" ) >= 0 )	// MODULES1 round 9: a volumetric mesh card is a slab of air
+				prog->uni1i( "fxAirCard", vp ? 1 : 0 );
 			if ( vp ) {
 				static QString said;
 				const QString now = wwVolPartSummary() + QStringLiteral( " soft=%1 | normal: %2; depth: %3; density: opacity" )

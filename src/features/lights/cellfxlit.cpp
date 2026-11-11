@@ -229,6 +229,10 @@ void wwCellFxLitPick( const void * nif )
 					.arg( double( m.center[0] ), 0, 'f', 0 ).arg( double( m.center[1] ), 0, 'f', 0 ).arg( double( m.center[2] ), 0, 'f', 0 )
 					.arg( double( c.rgb[0] ), 0, 'g', 3 ).arg( double( c.rgb[1] ), 0, 'g', 3 ).arg( double( c.rgb[2] ), 0, 'g', 3 )
 					.arg( double( c.d ), 0, 'f', 0 ).arg( double( c.r ), 0, 'f', 0 );
+				// MODULES1 round 9: the same lamps as the air scatters them (an even phase: 1 / 4), a mesh mist card's light
+				three += QStringLiteral( ", as a slab of air %1,%2,%3 (a lump's surface share took up to %4,%5,%6)" )
+					.arg( double( 0.25f * c.rgb[0] ), 0, 'g', 3 ).arg( double( 0.25f * c.rgb[1] ), 0, 'g', 3 ).arg( double( 0.25f * c.rgb[2] ), 0, 'g', 3 )
+					.arg( double( c.rgb[0] ), 0, 'g', 3 ).arg( double( c.rgb[1] ), 0, 'g', 3 ).arg( double( c.rgb[2] ), 0, 'g', 3 );
 			}
 			three += QStringLiteral( " (lamp shadow, the ambient's share 1 - GI sky share and the final colour are per pixel on the GPU)" );
 		}

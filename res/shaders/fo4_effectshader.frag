@@ -96,6 +96,14 @@ out vec4 fragColor;
  * fxLumpRed (WW_CELL_FXLOCAL_RED): 1 `face` = no opacity slope at all, 2 `mapalone` = a card with a normal map takes
  * the map alone (the first R8-1 commit), 4 `ball` = the UV ball stands in for the depth again (FX_PUFF_A). */
 uniform int fxLumpRed;
+/* MODULES1 round 9 (bungo: a mist card "is a slab of denser air"): a blended lit MESH card on the volumetric law takes
+ * the light the air at its pixel scatters toward the eye and nothing else: the lamps x the air's phase, each in its own
+ * colour with its own falloff (red by a red lamp, orange by a fire), + the sky's share under the record's cap, x its
+ * opacity as density. No surface share (the wrapped diffuse of a lump: up to 4 x the air's scatter per lamp) and no GI
+ * surface term (the volume's irradiance on an up face, uncapped: a bluish-white sum over warm lamps = a grey-white
+ * bank). So a card is never brighter, nor of another hue, than thick air under the same lights. fxAirCard: 1 = a mesh
+ * card (renderer.cpp), 0 = a particle system (still a lump). Red WW_CELL_FXLOCAL_RED=lump (fxLocalRed bit 4): the lump. */
+uniform int fxAirCard;
 vec3 fxLumpNormal( vec3 N, vec3 Nf, vec3 pv, float a )
 {
 	if ( ( fxLumpRed & 1 ) != 0 || ( hasNormalMap && ( fxLumpRed & 2 ) != 0 ) )
@@ -586,6 +594,12 @@ void main()
 					fragColor = vpProbe( k, posView, aThick );
 				return;
 			}
+#ifdef WW_FX_AMBSHARE
+			if ( fxAirCard != 0 && !fxAdditive && ( fxLocalRed & 4 ) == 0 ) {	// round 9: a slab of air (vpLit's thin share alone)
+				aThick = 0.0;
+				fxLocalGi = vec3( 0.0 );
+			}
+#endif
 			if ( fxLitMode != 0 )
 				lin *= fxAdditive ? cellFxLit( cellWorldPos( posView ) )
 					: vpLit( posView, FX_LUMP_N( dot( normal, V ) < 0.0 ? -normal : normal, vpFaceN, posView, clamp( vpVol.w, 0.0, 1.0 ) ), aThick )

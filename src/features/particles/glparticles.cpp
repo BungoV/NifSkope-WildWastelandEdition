@@ -431,6 +431,8 @@ void Particles::drawShapes( NodeList * secondPass )
 			 * program, the opaque pass's depth for the soft ball; off: volPart 0 and nothing else read */
 			wwSunShadowUniforms( scene );
 			volPart = wwVolPartUniforms( scene );
+			if ( prog->uniLocation( "fxAirCard" ) >= 0 )
+				prog->uni1i( "fxAirCard", 0 );	// MODULES1 round 9: a particle system stays a lump (the air law is the mesh cards')
 			if ( wwEnv( "WW_CELL_PARTICLES_AIR_RED" ).trimmed() == "1" )
 				prog->uni1b( "cellGiAirOn", false );	// SKY3 red: the puff reads the grid's shell, as before
 			{

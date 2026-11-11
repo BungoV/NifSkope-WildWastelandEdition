@@ -1921,6 +1921,10 @@ void wwCellLightsUniforms( Scene * scene )
 	WW_SWITCH_STATIC( bool, fxLocalAmbRed, wwEnvStr( "WW_CELL_FXLOCAL_RED" ).split( ',' ).contains( QStringLiteral( "ambient" ) ) );
 	// the law's lit band is a receiver: weight = the band, not band x lighting influence. Red word `influence` (live)
 	WW_SWITCH_STATIC( bool, fxLocalInfRed, wwEnvStr( "WW_CELL_FXLOCAL_RED" ).split( ',' ).contains( QStringLiteral( "influence" ) ) );
+	/* MODULES1 round 9 (bungo: a mist card "is a slab of denser air"): a blended lit mesh card on the volumetric law
+	 * takes the air's own scatter at its pixel (fo4_effectshader.frag fxAirCard). Red word `lump` (live): the lump's
+	 * surface share + the GI surface term again. */
+	WW_SWITCH_STATIC( bool, fxLocalLumpRed, wwEnvStr( "WW_CELL_FXLOCAL_RED" ).split( ',' ).contains( QStringLiteral( "lump" ) ) );
 	bool fxLocalHere = false;
 	float fxSunLocal[4] = { 0.0f, 0.0f, 0.0f, 0.0f };
 	/* lane SUNCELL1 final: a lit effect or lit particle outdoors (fo4_effectcell / particles_cell) takes the game's
@@ -2005,6 +2009,9 @@ void wwCellLightsUniforms( Scene * scene )
 							"its lamps, as a surface there (share and lamp shadows per pixel on the GPU)" ) )
 						+ ( fxLocalInfRed ? QStringLiteral( "; weight = band x lighting influence, RED WW_CELL_FXLOCAL_RED=influence" )
 							: QStringLiteral( "; a lit-band material is a receiver: weight = the band, the lighting influence reads 1" ) )
+						+ ( fxLocalLumpRed ? QStringLiteral( "; volumetric mesh cards are lumps: the surface share + the GI surface term, RED WW_CELL_FXLOCAL_RED=lump" )
+							: QStringLiteral( "; a volumetric mesh card is a slab of air: the air's scatter at its pixel (lamps x phase in their "
+								"own colours + the sky share under the record's cap) x its opacity, no surface share, no GI surface term" ) )
 					: QStringLiteral( "the game's base + lamps, no ambient, RED WW_CELL_FXLOCAL_RED=base" ) )
 				.arg( double( fxSunLocal[0] ), 0, 'f', 5 ).arg( double( fxSunLocal[1] ), 0, 'f', 5 ).arg( double( fxSunLocal[2] ), 0, 'f', 5 )
 				.arg( double( dirColor[0] ), 0, 'f', 5 ).arg( double( dirColor[1] ), 0, 'f', 5 ).arg( double( dirColor[2] ), 0, 'f', 5 );
@@ -2043,7 +2050,7 @@ void wwCellLightsUniforms( Scene * scene )
 	if ( prog->uniLocation( "vpSun" ) >= 0 )
 		rec.f4( prog, "vpSun", FloatVector4( fxSunLocal[0], fxSunLocal[1], fxSunLocal[2], fxSunLocal[3] ) );
 	if ( prog->uniLocation( "fxLocalRed" ) >= 0 )
-		rec.i( prog, "fxLocalRed", ( fxLocalAmbRed ? 1 : 0 ) | ( fxLocalInfRed ? 2 : 0 ) );	// R8-1
+		rec.i( prog, "fxLocalRed", ( fxLocalAmbRed ? 1 : 0 ) | ( fxLocalInfRed ? 2 : 0 ) | ( fxLocalLumpRed ? 4 : 0 ) );	// R8-1, round 9
 	prof.at( 18, "fxsun" );
 	/* An exterior's ambient is the weather's DALC, uploaded in the interior's form so cellAmbient is one law
 	 * indoors and out. The axis is the light's TRAVEL direction (Z- lights an up-facing normal). */

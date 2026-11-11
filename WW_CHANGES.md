@@ -149,6 +149,14 @@
   Follow-up (bungo: "Opacity gives the height, or rather 'depth' always"): with a normal map the map's slope and the
   opacity-depth's slope add at 1 : 1 (surface gradients), and the UV ball no longer stands in for the depth: the
   thickness a card's light reads is its opacity. Red words `mapalone` (a normal map alone) and `ball` (the ball again).
+- **Round 9 mist cards are slabs of air** (bungo: a mist card "is a slab of denser air"; "the fake fog cards on the
+  left should be tinted red, and on the right side tinted warm orange"): a blended lit mesh card on the volumetric law
+  takes the light the air at its pixel scatters toward the eye, x its opacity as density: the lamps x the air's phase,
+  each in its own colour with its own falloff, + the sky's share under the record's cap. The lump's surface share and
+  the GI surface term are gone from it, so a card is never brighter nor of another hue than thick air under the same
+  lights. Particle systems (smoke, steam jets) stay lumps; additive and light-beam cards are untouched.
+  Red `WW_CELL_FXLOCAL_RED=lump` (live). Telemetry `cell fx local:` (the law's sentence; three cards' lamps as a slab
+  of air beside the lump's).
 - **MODULES1 R8-2: the bloom holds still under the temporal jitter** (bungo: "our bloom is not stable ... it shimmers").
   The bloom chain reads the frame before the temporal resolve, so a bright thing under a pixel wide was hit by one
   jitter and missed by the next and its halo blinked. On a jittered frame the chain's first level is now the mean of
