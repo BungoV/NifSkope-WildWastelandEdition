@@ -3499,6 +3499,37 @@ WwPacer & wwPacer()
 	static WwPacer p;
 	return p;
 }
+
+//! the pacing and frame-wall clock (QueryPerformanceCounter; processSeconds() steps with the system tick)
+double wwPaceNowS()
+{
+	static QElapsedTimer t;
+	if ( !t.isValid() )
+		t.start();
+	return double( t.nsecsElapsed() ) * 1e-9;
+}
+
+//! lane EMPTY240 item 1: this paint's marks and the second's sums (framepacer.h WwFrameWall)
+struct WwWall
+{
+	WwFrameWall::Marks cur;
+	WwFrameWall::Window win;
+	bool connected = false;
+};
+WwWall & wwWall()
+{
+	static WwWall w;
+	return w;
+}
+
+//! adds the scope's seconds to one named part of this paint
+struct WwWallPart
+{
+	double & part;
+	const double t0;
+	explicit WwWallPart( double & p ) : part( p ), t0( wwPaceNowS() ) {}
+	~WwWallPart() { part += wwPaceNowS() - t0; }
+};
 }	// namespace
 
 bool wwVsyncOn()
@@ -3540,7 +3571,7 @@ static void wwPacerFrameStart( GLView * v, bool wants )
 	const double refresh = v->screen() ? v->screen()->refreshRate() : 0.0;
 	const int row = wwFrameCapRow();
 	p.cap = red ? 0 : WwFramePacer::capHz( row, refresh );
-	const double now = PassTime::processSeconds();
+	const double now = wwPaceNowS();
 	WwFramePacer::started( p.clock, p.cap, now );
 	const int interval = ( DEBUG_FRAME_TIME || !wwVsyncOn() ) ? 0 : 1;
 	if ( interval != p.interval ) {
@@ -3583,9 +3614,12 @@ static void wwPacerTick( GLView * v )
 {
 	WwPacer & p = wwPacer();
 	p.queued = false;
-	const double wait = WwFramePacer::waitSeconds( p.clock, p.cap, PassTime::processSeconds() );
+	const double wait = WwFramePacer::waitSeconds( p.clock, p.cap, wwPaceNowS() );
 	if ( wait > 0.0 ) {
-		wwPreciseSleep( WwFramePacer::sleepSeconds( wait ) );
+		{
+			WwWallPart wallPart( wwWall().cur.capWait );
+			wwPreciseSleep( WwFramePacer::sleepSeconds( wait ) );
+		}
 		p.queued = true;
 		QTimer::singleShot( 0, v, [v]() { wwPacerTick( v ); } );
 		return;
@@ -3594,8 +3628,42 @@ static void wwPacerTick( GLView * v )
 	v->update();
 }
 
+/* lane EMPTY240 item 1: at a paint's start the last paint is closed (its wall = start to start); with the pass timers
+ * on, the second's line: every part named, and how much of the wall the pass timers hold. */
+static void wwWallStart( GLView * v )
+{
+	WwWall & w = wwWall();
+	if ( !w.connected ) {
+		w.connected = true;
+		QObject::connect( v, &QOpenGLWindow::frameSwapped, v, []() { wwWall().cur.swapAt = wwPaceNowS(); } );
+	}
+	const double now = wwPaceNowS();
+	WwFrameWall::add( w.win, w.cur, now );
+	w.cur = WwFrameWall::Marks();
+	w.cur.start = now;
+	if ( w.win.frames > 0 && now - w.win.t0 >= 1.0 ) {
+		if ( PassTime::on() && w.win.wall > 0.0 ) {
+			const double n = double( w.win.frames ), ms = 1e3 / n;
+			QByteArray line = QByteArray( "frame wall: " ) + QByteArray::number( w.win.wall * ms, 'f', 2 ) + " ms a frame ("
+				+ QByteArray::number( n / w.win.wall, 'f', 1 ) + " fps, " + QByteArray::number( w.win.frames ) + " frames) =";
+			for ( int p = 0; p < WwFrameWall::PartCount; p++ )
+				line += QByteArray( p ? " + " : " " ) + WwFrameWall::partName( p ) + " "
+					+ QByteArray::number( w.win.part[p] * ms, 'f', 2 );
+			line += QByteArray( " | the pass timers hold " )
+				+ QByteArray::number( 100.0 * w.win.part[WwFrameWall::Passes] / w.win.wall, 'f', 0 ) + " %";
+			std::fprintf( stderr, "%s\n", line.constData() );
+		}
+		w.win = WwFrameWall::Window();
+	}
+}
+
 void GLView::paintGL()
 {
+	wwWallStart( this );	// lane EMPTY240 item 1: the last paint's wall, start to start
+	struct WwWallEnd
+	{
+		~WwWallEnd() { wwWall().cur.finish = wwPaceNowS(); }
+	} wwWallEnd;
 	/* lane EMPTY240 ITEM 0: the next frame is queued when this one is done (build 71 waited for the 6 ms coarse timer:
 	 * ~64 frames a second). A harness keeps the old pacing (its clock stands still). */
 	const bool wwPacerWants = wwWorldClockLive() && ( ( scene && scene->nifModel && wwCellLightsFor( scene->nifModel ) )
@@ -3653,6 +3721,7 @@ void GLView::paintGL()
 	} wwPaintTime{ wwPaintClock };
 	wwEnvChanged();	// MODULES1 item 8: the env accessors' cache lives one frame at most (a backstop for any writer)
 	// the frame's per-pass timers (one bool test while the Frame Timers row is off)
+	wwWall().cur.begin = wwPaceNowS();
 	PassTime::frameBegin();
 	if ( scene && scene->textures )
 		scene->textures->wwParamFrame();	// the texture parameter shadow trusts nothing from an older frame
@@ -3661,6 +3730,8 @@ void GLView::paintGL()
 		~WwPassFrame()
 		{
 			PassTime::frameEnd();
+			wwWall().cur.end = wwPaceNowS();
+			wwWall().cur.passes = PassTime::lastFrameCpuSumMs() * 1e-3;
 			extern bool wwStderrFrameFlush;	// the frame's log lines in one write
 			if ( wwStderrFrameFlush )
 				std::fflush( stderr );
@@ -3938,9 +4009,15 @@ void GLView::paintGL()
 	wwCellShadowPass( scene );
 	PassTime::end( PassTime::CellShadows );
 	wwMainStep( "probe sky tick (the bounce follows the hour)" );	// lane PERFLOAD1 P5
-	probeSkyTick( scene, scene->nifModel, this );	// an exterior's bounce follows the weather
+	{
+		WwWallPart wallPart( wwWall().cur.probe );
+		probeSkyTick( scene, scene->nifModel, this );	// an exterior's bounce follows the weather
+	}
 	wwMainStep( "rtddgi cell frame (GI relight, builds, uploads)" );
-	rtddgiCellFrame( scene );	// the ray-traced GI volume builds, updates and uploads (off: nothing)
+	{
+		WwWallPart wallPart( wwWall().cur.gi );
+		rtddgiCellFrame( scene );	// the ray-traced GI volume builds, updates and uploads (off: nothing)
+	}
 
 	PassTime::begin( PassTime::Background );	// the sky (or background) and the ground plane
 	if ( perspectiveMode ) {
@@ -4075,7 +4152,10 @@ void GLView::paintGL()
 	PassTime::begin( PassTime::Obscurance );	// one bracket per pass
 	wwCellAoPass( scene, cellPasses );
 	PassTime::end( PassTime::Obscurance );
-	rtddgiRestirPass( scene );	// lane RESTIRDI1: the RT quality preset's ReSTIR DI on that pass's g-buffer (Low: nothing)
+	{
+		WwWallPart wallPart( wwWall().cur.restir );
+		rtddgiRestirPass( scene );	// lane RESTIRDI1: the RT quality preset's ReSTIR DI on that pass's g-buffer (Low: nothing)
+	}
 	PassTime::begin( PassTime::Water );	// lane TIMING1: the water zone (its draws in the sorted pass join it)
 	wwCellOceanPass( scene, cellPasses );	// lane WATERLOOK1: the wind's waves, before any pass that draws water
 	PassTime::end( PassTime::Water );

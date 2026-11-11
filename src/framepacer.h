@@ -58,6 +58,78 @@ inline double sleepSeconds( double wait )
 
 }	// namespace WwFramePacer
 
+/* lane EMPTY240 item 1: the whole frame, start to start, in parts that add up to it exactly (the overlay's fps is
+ * 1000 / this wall). The pass timers cover only `passes`; every other part is named. glview.cpp marks the times. */
+namespace WwFrameWall
+{
+
+enum Part
+{
+	Before,	// paintGL's start to the pass timers' frame start (stream evict, texture pump)
+	Passes,	// the pass timers' CPU sum (WW_CELL_PASSTIME)
+	GiFrame,	// rtddgiCellFrame (the traced GI volume: builds, Vulkan submits and waits, uploads)
+	Restir,	// rtddgiRestirPass (ReSTIR DI)
+	ProbeSky,	// probeSkyTick
+	OtherInFrame,	// inside the timed frame, in no pass zone and no part above
+	After,	// the timed frame's end to paintGL's return (log flush)
+	Swap,	// paintGL's return to Qt's frameSwapped (the swap; vsync or a GPU-bound queue waits here)
+	CapWait,	// the frame cap's sleeps
+	Between,	// the rest until the next paintGL (Qt's event loop, the redraw timer or the posted chain)
+	PartCount
+};
+
+inline const char * partName( int p )
+{
+	static const char * const n[PartCount] = { "before-frame", "passes", "gi-frame", "restir", "probe-sky",
+		"other-in-frame", "after-frame", "swap", "cap-wait", "between-paints" };
+	return p >= 0 && p < PartCount ? n[p] : "?";
+}
+
+//! one paint's marks (seconds on one clock; < 0 = not reached) and its measured parts (seconds)
+struct Marks
+{
+	double start = -1.0, begin = -1.0, end = -1.0, finish = -1.0, swapAt = -1.0;
+	double passes = 0.0, gi = 0.0, restir = 0.0, probe = 0.0, capWait = 0.0;
+};
+
+struct Window
+{
+	double t0 = -1.0;
+	int frames = 0;
+	double wall = 0.0;
+	double part[PartCount] = {};
+};
+
+/* the paint `m` ends when the next one starts at `next`: its wall and parts go into `w`. The parts sum to the wall by
+ * construction (other-in-frame and between-paints take the remainders). False = `m` was not a whole paint. */
+inline bool add( Window & w, const Marks & m, double next )
+{
+	if ( m.start < 0.0 || m.finish < m.start || next < m.finish )
+		return false;
+	const bool timed = m.begin >= m.start && m.end >= m.begin && m.finish >= m.end;
+	const double begin = timed ? m.begin : m.finish, end = timed ? m.end : m.finish;
+	double p[PartCount] = {};
+	p[Before] = begin - m.start;
+	p[Passes] = timed ? m.passes : 0.0;
+	p[GiFrame] = m.gi;
+	p[Restir] = m.restir;
+	p[ProbeSky] = m.probe;
+	p[OtherInFrame] = ( end - begin ) - p[Passes] - p[GiFrame] - p[Restir] - p[ProbeSky];
+	p[After] = m.finish - end;
+	p[Swap] = m.swapAt >= m.finish && m.swapAt <= next ? m.swapAt - m.finish : 0.0;
+	p[CapWait] = m.capWait;
+	p[Between] = ( next - m.finish ) - p[Swap] - p[CapWait];
+	if ( w.t0 < 0.0 )
+		w.t0 = m.start;
+	w.frames++;
+	w.wall += next - m.start;
+	for ( int i = 0; i < PartCount; i++ )
+		w.part[i] += p[i];
+	return true;
+}
+
+}	// namespace WwFrameWall
+
 /* The rows (glview.cpp; View menu, nifskope_ui.cpp). Saved in QSettings under GLView/Display/; env pins first:
  * WW_VSYNC=0|1, WW_FRAME_CAP=0|-1|n. WW_FRAMETIMER_RED=1: build 71's pacing (the 6 ms coarse timer, vsync on). */
 bool wwVsyncOn();

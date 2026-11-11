@@ -151,6 +151,42 @@ int main()
 	check( redOld < 70.0, "build 71 route stays at the tick (the 68 fps reading)", redOld, 0, 70 );
 	check( WwFramePacer::capHz( -1, 0.0 ) == 60 && WwFramePacer::capHz( 5, 0.0 ) == 10 && WwFramePacer::capHz( 5000, 0.0 ) == 1000
 		&& WwFramePacer::capHz( 0, 144.0 ) == 0, "capHz rows (refresh unknown -> 60, clamps 10..1000)", 0, 0, 0 );
+	{	// item 1: the frame wall's parts add up to the wall (timed paints, an untimed one, a swap mark out of range)
+		WwFrameWall::Window w;
+		double t = 10.0;
+		for ( int i = 0; i < 100; i++ ) {
+			WwFrameWall::Marks m;
+			m.start = t;
+			if ( i % 10 != 3 ) {
+				m.begin = t + 0.1e-3;
+				m.end = t + 5.0e-3;
+				m.passes = 2.0e-3;
+				m.gi = 1.5e-3;
+				m.restir = 0.3e-3;
+				m.probe = 0.05e-3;
+			}
+			m.finish = t + 5.1e-3;
+			m.swapAt = i % 7 == 0 ? t - 1.0 : t + 6.0e-3;
+			m.capWait = i % 2 ? 1.0e-3 : 0.0;
+			const double next = t + 8.0e-3 + 1e-4 * ( i % 5 );
+			WwFrameWall::add( w, m, next );
+			t = next;
+		}
+		double sum = 0.0;
+		for ( double p : w.part )
+			sum += p;
+		const double err = std::fabs( sum - w.wall ) / w.wall * 100.0;
+#ifdef FRAMEPACER_RED
+		const double redErr = std::fabs( ( sum - w.part[WwFrameWall::Between] ) - w.wall ) / w.wall * 100.0;	// a part left out
+		check( redErr < 0.001, "frame wall: parts sum to the wall (red: between-paints left out)", redErr, 0, 0 );
+#else
+		check( err < 0.001 && w.frames == 100, "frame wall: parts sum to the wall (% off)", err, 0, 0 );
+#endif
+		std::printf( "info frame wall model: %.3f ms a frame, passes %.3f, gi %.3f, other-in-frame %.3f, swap %.3f, cap %.3f, between %.3f\n",
+			w.wall * 10.0, w.part[WwFrameWall::Passes] * 10.0, w.part[WwFrameWall::GiFrame] * 10.0,
+			w.part[WwFrameWall::OtherInFrame] * 10.0, w.part[WwFrameWall::Swap] * 10.0, w.part[WwFrameWall::CapWait] * 10.0,
+			w.part[WwFrameWall::Between] * 10.0 );
+	}
 #ifdef _WIN32
 	if ( !std::getenv( "FRAMEPACER_NO_PC" ) ) {
 		std::printf( "part B: this PC (Windows timers)\n" );

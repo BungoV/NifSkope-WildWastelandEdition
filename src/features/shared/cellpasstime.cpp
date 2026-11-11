@@ -694,11 +694,19 @@ void subEnd( int sub )
 	s.openSub[sub] = -1;
 }
 
+static double s_lastCpuSum = 0.0;	// lane EMPTY240 item 1
+
+double lastFrameCpuSumMs()
+{
+	return s_lastCpuSum;
+}
+
 void frameEnd()
 {
 	State & s = st();
 	if ( s.memArmed > 0 && --s.memArmed == 0 )
 		memLog( "first frames drawn" );
+	s_lastCpuSum = 0.0;
 	if ( !s.inFrame )
 		return;
 	Slot & sl = s.ring[s.frame % kSlots];
@@ -712,6 +720,8 @@ void frameEnd()
 	Sampler::pass = -2;
 	s.gl->glQueryCounter( sl.f1, GL_TIMESTAMP );
 	sl.cpuFrame = double( nowNs() - s.frameT0 ) * 1e-6;
+	for ( int p = 0; p < CullCamera; p++ )	// the CPU-only rows after it sit inside the passes
+		s_lastCpuSum += sl.cpu[p];
 	const CacheCounts & cc = cacheCounts();
 	sl.cache.made = cc.made - sl.cache0.made;
 	sl.cache.madeBytes = cc.madeBytes - sl.cache0.madeBytes;

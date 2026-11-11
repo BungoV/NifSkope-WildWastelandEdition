@@ -43,6 +43,8 @@ bool pinned();
 //! paintGL's first and last lines. GL calls only while on.
 void frameBegin();
 void frameEnd();
+//! lane EMPTY240 item 1: the last timed frame's pass CPU ms, summed over the zones (0 while the timers are off)
+double lastFrameCpuSumMs();
 
 void begin( int pass );
 void end( int pass );
