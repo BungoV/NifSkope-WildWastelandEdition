@@ -122,7 +122,8 @@ QString wwEndlessSeaAppend( NifModel * nif, const QModelIndex & parent, const Ww
 
 	// the rings: radii grow by 1 + 2 pi / segments (cells about square), the last one clamped to the rim
 	const float farU = std::clamp( envFloat( wwEnv( "WW_ENDLESS_SEA_FAR" ), 4194304.0f ), 65536.0f, 33554432.0f );
-	const bool curve = wwEnv( "WW_ENDLESS_SEA_CURVE" ).trimmed() == "1";
+	// DEBUGVIEW1 item 5: the sheet bends with the earth by default, so its rim meets the curved horizon (red WW_ENDLESS_SEA_CURVE=0: flat)
+	const bool curve = wwEnv( "WW_ENDLESS_SEA_CURVE" ).trimmed() != "0";
 	const double grow = 1.0 + 2.0 * M_PI / kSegments;
 	std::vector<double> radii;
 	for ( double r = kFirstRing; ; r *= grow ) {
@@ -234,8 +235,8 @@ QString wwEndlessSeaAppend( NifModel * nif, const QModelIndex & parent, const Ww
 		"snap %22 u, built in %23 ms" )
 		.arg( R ).arg( kFirstRing, 0, 'f', 0 ).arg( double( farU ), 0, 'f', 0 ).arg( grow, 0, 'f', 4 ).arg( kSegments )
 		.arg( nv ).arg( tris.size() ).arg( double( farU ) * toKm, 0, 'f', 1 )
-		.arg( curve ? QStringLiteral( ", curved (rim %1 u down)" ).arg( double( farU ) * farU / ( 2.0 * kEarthU ), 0, 'f', 0 )
-			: QStringLiteral( ", flat" ) )
+		.arg( curve ? QStringLiteral( ", curved (rim %1 u down; red WW_ENDLESS_SEA_CURVE=0: flat)" ).arg( double( farU ) * farU / ( 2.0 * kEarthU ), 0, 'f', 0 )
+			: QStringLiteral( ", flat (red WW_ENDLESS_SEA_CURVE=0)" ) )
 		.arg( double( wwEndlessSeaSeam() ), 0, 'f', 0 ).arg( double( wwEndlessSeaSeam() ) * toKm, 0, 'f', 2 )
 		.arg( minX ).arg( minY ).arg( maxX ).arg( maxY ).arg( ( maxX - minX + 1 ) * ( maxY - minY + 1 ) )
 		.arg( wet ).arg( dry ).arg( seaId ).arg( double( seaZ ), 0, 'f', 1 ).arg( double( defaultZ ), 0, 'f', 1 )
@@ -355,6 +356,7 @@ void wwEndlessSeaDrawEnd()
 
 void wwEndlessSeaFollow( Scene * scene, const Transform & view )
 {
+	wwCellWaterTierFrame();	// DEBUGVIEW1 item 5: last frame's water draws per tier, on change
 	if ( !scene || !scene->nifModel || !wwEndlessSeaOn() ) {
 		seaDrawStep( seaDraw(), nullptr, -1 );
 		return;

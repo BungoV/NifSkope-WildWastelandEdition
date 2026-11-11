@@ -1024,6 +1024,9 @@ static void sunShadowPassImpl( Scene * scene )
 					.arg( m[2], 0, 'f', 0 ).arg( c.sphereR, 0, 'f', 0 ).arg( std::fabs( c.sphereZ ), 0, 'f', 0 );
 			}
 			line += QStringLiteral( " | fade to 0 at %1 around the eye" ).arg( s.D, 0, 'f', 0 );
+			// DEBUGVIEW1 item 4: the Shadow Distance and its source (the reach follows it under the parity row's distance bit)
+			line += QStringLiteral( " | shadow distance %1 from %2%3" ).arg( wwShadowDistance(), 0, 'f', 0 ).arg( QLatin1StringView( wwShadowDistanceSource() ) )
+				.arg( wwShadowPar( WwParDistance ) ? QString() : QStringLiteral( " (not applied: the parity distance bit is off, the tier's reach is used)" ) );
 			std::fprintf( stderr, "%s\n", qPrintable( line ) );
 		}
 	}

@@ -993,6 +993,9 @@ void main()
 		color.rgb *= sqrt( cellAoShared( wwFarAo ) );	// MODULES1 round 10: near (screen) and far (baked) through one rule
 #endif
 
+#ifdef WW_DV
+	vec3 wwDvLit = color.rgb * color.rgb;	// lane DEBUGVIEW1: the lit colour before the fog
+#endif
 	// lane FOG1 (Lookdev weather fog): this colour is sqrt of linear light (tonemap squares it),
 	// so the fog runs on its square, before the exposure and the curve
 #ifdef WW_FOG
@@ -1123,6 +1126,25 @@ void main()
 	}
 	if ( cellOn && ( cellProbe == 60 || cellProbe == 61 ) )
 		fragColor = cellSsrProbeOut( cellSsrScene );	// lane SSR1
+#endif
+#ifdef WW_DV
+	if ( cellOn && wwDebugView != 0 ) {	// lane DEBUGVIEW1: one pass or term in place of the pixel (debug_view.glsl)
+		float dvSh = 1.0, dvCl = 1.0;
+#ifdef WW_SUNSHADOW
+		dvSh = wwSunShadowGeo( -ViewDir );
+		dvCl = ussCloudT( -ViewDir );
+#endif
+		vec3 dvT = vec3( 1.0 ), dvIn = vec3( 0.0 );
+#ifdef WW_FOG
+		if ( fogOn || wwApOn() ) {
+			dvIn = max( wwFog( vec3( 0.0 ), -ViewDir ), vec3( 0.0 ) );
+			dvT = clamp( wwFog( vec3( 1.0 ), -ViewDir ) - dvIn, 0.0, 1.0 );
+		}
+#endif
+		vec3 dvE = emissive * glowScaleSRGB;
+		fragColor = vec4( wwDvSurface( albedo * albedo, cellWorldDir( normal ), smoothness, specMask, wwFarAo, cellAoFactor(),
+			dvSh, dvCl, dvE * dvE, dvT, dvIn, wwDvLit, cellHdr, length( ViewDir ) * length( cellRow[0].xyz ), wwDvOwner ), fragColor.a );
+	}
 #endif
 	/* lane TERRBLEND1: a blended-ground pass (src/cellsplat.h). The vertex alpha
 	 * is this pass's SHARE of the engine's weighted sum: an opaque base is scaled

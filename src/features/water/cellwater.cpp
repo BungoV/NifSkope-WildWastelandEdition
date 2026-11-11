@@ -23,6 +23,7 @@
 #include "gl/gltex.h"
 #include "gl/renderer.h"
 #include "gl/celluniform.h"	// lane CELLUNI3: the blend note
+#include "features/overlays/debugview.h"	// lane DEBUGVIEW1: the water draws under a debug view
 
 #include <QFile>
 #include <QHash>
@@ -310,7 +311,8 @@ void wwCellWaterSetOn( bool on )
 bool wwCellWaterWanted( Scene * scene, int block )
 {
 	const WaterState & s = st();
-	if ( s.pinOff || !scene || scene->selecting || !wwCellLightsWanted( scene ) || wwCellProbePass( scene ) )
+	// DEBUGVIEW1: a debug view is a probe pass, but its water views need the water drawn
+	if ( s.pinOff || !scene || scene->selecting || !wwCellLightsWanted( scene ) || ( wwCellProbePass( scene ) && wwDebugViewId() == 0 ) )
 		return false;
 	const auto it = s.docs.constFind( scene->nifModel );
 	return it != s.docs.constEnd() && it->shapeBody.contains( block );
@@ -395,6 +397,39 @@ void wwCellWaterSurfConsts( float surfK[4], float shoreK2[4], float shoreK3[4] )
 	}
 }
 
+namespace {
+// DEBUGVIEW1 item 5: the water draws of one frame per tier (0 near, 1 far map, 2 endless sea) and the widest far fade
+struct WaterTierTally {
+	int n[3] = { 0, 0, 0 };
+	float fade[3] = { 0.0f, 0.0f, 0.0f };
+};
+WaterTierTally g_waterTierNow;
+QString g_waterTierSaid;
+}
+
+void wwCellWaterTierFrame()
+{
+	const WaterTierTally t = g_waterTierNow;
+	g_waterTierNow = WaterTierTally();
+	if ( t.n[0] + t.n[1] + t.n[2] == 0 && g_waterTierSaid.isEmpty() )
+		return;
+	WW_SWITCH_STATIC( QByteArray, rr, wwEnv( "WW_CELL_WATER_REFL_RED" ).trimmed() );
+	const bool nearLaw = wwCellWaterLookOn() && ( wwLookOn( WwLook::WaterRefl ) || wwLookOn( WwLook::WaterClear ) )
+		&& rr != "farcolour";
+	const QString line = QStringLiteral( "water tiers: near %1 draws, far map %2, endless sea %3 (far water draws %4); "
+		"far fade 8192 -> %5 / %6 / %7 u from the eye per tier (the WATR's own distance, eye-relative: the band moves "
+		"with the camera); far colour: %8; program %9" )
+		.arg( t.n[0] ).arg( t.n[1] ).arg( t.n[2] ).arg( t.n[1] + t.n[2] )
+		.arg( double( t.fade[0] ), 0, 'f', 0 ).arg( double( t.fade[1] ), 0, 'f', 0 ).arg( double( t.fade[2] ), 0, 'f', 0 )
+		.arg( nearLaw ? QStringLiteral( "the near law to the horizon (one shading for every tier)" )
+			: QStringLiteral( "the game's far swap past the fade (red farcolour or the looks off)" ) )
+		.arg( QLatin1StringView( wwCellWaterProgram() ) );
+	if ( line == g_waterTierSaid )
+		return;
+	g_waterTierSaid = line;
+	std::fprintf( stderr, "%s\n", qPrintable( line ) );
+}
+
 bool wwCellWaterUniforms( Scene * scene, int block, int unit )
 {
 	WaterState & s = st();
@@ -412,6 +447,11 @@ bool wwCellWaterUniforms( Scene * scene, int block, int unit )
 		return false;
 	const WaterBody & b = dit->bodies[sit.value()];
 	auto fn = r->fn;
+	{	// DEBUGVIEW1 item 5: this draw's tier for the "water tiers:" line
+		const int tier = dit->endless.contains( block ) ? 2 : dit->farMask.contains( block ) ? 1 : 0;
+		g_waterTierNow.n[tier]++;
+		g_waterTierNow.fade[tier] = std::max( g_waterTierNow.fade[tier], b.mat.params1[0] );
+	}
 
 	// the record's constant block, in the order the game's shader reads it (src/features/water/esmwater.h)
 	const float * rows[13] = { b.mat.shallow, b.mat.deep, b.mat.reflection, b.mat.underwater, b.mat.lightSilt,

@@ -1,3 +1,40 @@
+## DEBUGVIEW1 (2026-11-11): live debug views, the far cards' sun under the clouds, shadow distance, sea curve
+
+Changed, not checked live (no build, no window). Offline: syntax check of every edited .cpp and every includer of the
+changed headers (31 sources, rc=0); shader link sweeps all link (161 programs: base 483, WW_DEBUG_VIEWS 483, WW_DEBUG_VIEWS + RTDDGI + fog leak 322,
+  RTDDGI 322, leak 322, PRT 483); off identity against HEAD: 468 of 483 binaries equal but the source hash, the 15 that
+  differ are the five impostor_cell* card programs (item 2 changes them on purpose).
+
+- **1. One live debug-view set.** `WW_DEBUG_VIEW=<name|id>` (stage 4: a set reloads the shaders, no reopen) and
+  Show > Debug view (Off first; greyed while the env pins it; the PRT bake's menu is now "PRT debug view"). Views:
+  albedo, normals, gloss, ao, sun, shadow, ambient, gi, emissive, fog, air, clouds, cloudshadow, water, waterrefl,
+  waterheight, farowner, exposure, depth, overdraw, specular, reflection. Near objects + land (fo4_default,
+  pbrm_default), far terrain + objects (same programs), tree cards (impostor_oct) and water (fo4_water); a term a
+  program lacks reads black. Owed (black, said in the log): air, clouds, overdraw. The views live in
+  `res/shaders/features/overlays/debug_view.glsl`, included only under the loader's `WW_DEBUG_VIEWS` (added while a
+  view is on), so off compiles the shipping source; one uniform `wwDebugView` (+ `wwDvOwner` for farowner), no extra
+  programs. A view runs as a probe pass (no linear frame, no post, no TAA jitter, black clear; the water and far cards
+  still draw). Log `debug view: <name> (<owner passes>) [WW_DEBUG_VIEW|Show > Debug view]` on change.
+- **2. Glowing far trees under overcast.** Cause: `impostor_oct.frag` lit the far cards through cellLit with
+  `cellDirVis` at its default 1.0 (`cell_lights.glsl:20`) and no air transmittance: the cards took the full sun under a
+  closed deck, the near trees (fo4_default.frag 462-470) the cloud-shadowed and air-cut one. Now the cards' sun is cut by
+  the cloud shadow (`cardCloudT`, the same ussCloud map) and the air's sun transmittance; `impostordraw.cpp` uploads
+  the cloud-shadow uniforms to the card program. Red `WW_CELL_FARLOD_RED=cardsun`. Log `switch: far cards' sun through
+  the clouds' shadow and the air ...`. Views: sun, cloudshadow, farowner (yellow = card).
+- **3. Dark stripe / near-far seam holes (goto 49675.5 95897.1 7004.9): OWED, not fixed.** His picture is build
+  9f77ff53, which has SKYSEA1's sky stencil mark (`WW_SKY_LINEAR_RED=nomark` is the red), so the blue slivers are real
+  holes in the geometry (the sky through them), not unmarked clear colour. From the code: the far rings and the
+  vanilla clip lines carry skirts (btdterrain.cpp 382-440, 512 + 128 a level deep), but a foot past the 16-bit vertex
+  cap leaves its edge open (`skirtCapped`, in the `far lod:` census line), and the near LAND block has no skirt, so a
+  ray from outside the block that passes over the far edge and under the LAND edge sees the sky. Which of the two
+  needs his log (`skirt edges ... over the 16-bit cap`) or the farowner view at the spot: green / orange either side of
+  a black line = a hole between near land and far terrain. The dark stripe: the cloudshadow, fog and farowner views
+  each show one candidate (cloud map edge, fog far edge, far ring seam).
+- **4. Shadow distance defaults to 24000** (bungo 11-11: his own FO4CS fCascadeShadowDistanceUnits, ~24k;
+  FO4CS's code default is 14000), a saved setting still wins. Red `WW_SHADOW_DIST_RED=1` (14000, the old default). The `shadow cascades:` line says `shadow distance N from <source>`.
+- **5. The endless sea bends with the earth by default** (red `WW_ENDLESS_SEA_CURVE=0`: flat), and one `water tiers:`
+  line on change: draws per tier, each tier's far fade and the far colour law.
+
 ## SKYLIGHT1 (2026-11-11): overcast ambient through the cloud deck, clear air colour, world-anchored clouds
 
 Changed, not checked live (no build, no window). Offline: CPU twins (notes/skylight1/tools), syntax check of every

@@ -20,6 +20,7 @@ BSD License - see nifskope.h
 #include "cellsplat.h"
 #include "cellgroundlegend.h"	// lane DUNESAND3
 #include "features/far-lod/cellfarlod.h"
+#include "features/overlays/debugview.h"	// lane DEBUGVIEW1: Show > Debug view
 #include "cellmodpickbox.h"	// the Mods band
 #include "gl/celllights.h"
 #include "features/air/airzonepanel.h"	// lane AIRZONE1: the Air zones band
@@ -700,7 +701,7 @@ void CellWorkspacePanel::buildUi()
 	}
 	cellFar = tick( showMenu, tr( "Far light" ), "CellWorkspaceCellFar", wwCellFarOn() );
 	// the Pass, live once a bake is relit
-	cellPass = showMenu->addMenu( tr( "Debug view" ) );	// bungo 10-27 note 13: under Precomputed Radiance Transfer
+	cellPass = showMenu->addMenu( tr( "PRT debug view" ) );	// bungo 10-27 note 13: under Precomputed Radiance Transfer (DEBUGVIEW1: renamed)
 	cellPass->setObjectName( QStringLiteral( "CellWorkspaceCellPass" ) );
 	cellPassGroup = new QActionGroup( cellPass );
 	cellPassGroup->setExclusive( true );
@@ -715,6 +716,29 @@ void CellWorkspacePanel::buildUi()
 		}
 	}
 	cellPass->setEnabled( false );
+	{	// lane DEBUGVIEW1: the live debug views (src/features/overlays/debugview.h), Off first; WW_DEBUG_VIEW pins it
+		QMenu * m = showMenu->addMenu( tr( "Debug view" ) );
+		m->setObjectName( QStringLiteral( "CellWorkspaceDebugView" ) );
+		QActionGroup * grp = new QActionGroup( m );
+		grp->setExclusive( true );
+		const QStringList names = wwDebugViewNames();
+		for ( int k = 0; k < names.size(); k++ ) {
+			QAction * a = m->addAction( names.at( k ) );
+			a->setCheckable( true );
+			a->setData( k );
+			a->setChecked( k == wwDebugViewId() );
+			grp->addAction( a );
+		}
+		m->setEnabled( !wwDebugViewPinned() );
+		connect( grp, &QActionGroup::triggered, this, [this]( QAction * a ) {
+			const bool was = wwDebugViewShaderDefine();
+			wwDebugViewSet( a->data().toInt() );
+			if ( glView && was != wwDebugViewShaderDefine() )
+				glView->updateShaders();	// the views are the loader's WW_DEBUG_VIEWS
+			if ( glView )
+				glView->update();
+		} );
+	}
 	{	// lane RTXGI1 M2: the ray-traced GI volume's probes over the frame (src/features/gi/rtddgicell.h), live; Off by default
 		QMenu * m = showMenu->addMenu( tr( "Ray-traced GI probes" ) );
 		m->setObjectName( QStringLiteral( "CellWorkspaceRtDdgiView" ) );

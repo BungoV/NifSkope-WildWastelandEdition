@@ -23,6 +23,10 @@ float cellAirDif = 0.0;	// MODULES1 G3: the sun the air scattered down onto a le
 vec3 cellExtAmb = vec3( 0.0 );
 vec3 cellExtSpec = vec3( 0.0 );
 vec3 cellReflAdd = vec3( 0.0 );	// lane REFLPROBE1: the probes' reflection, light already (cell_reflprobe.glsl)
+// lane DEBUGVIEW1: the live debug views (src/features/overlays/debugview.h), compiled only while one is on
+#ifdef WW_DEBUG_VIEWS
+#include "debug_view.glsl"
+#endif
 vec3 cellSpecTint = vec3( 1.0 );	// lane GAPFIX1: the colour cellLit puts on the lights' specular (probe 31)
 uniform vec3 cellDirColor;			// linear
 uniform vec3 cellDirTo;				// world, TO the light
@@ -2185,6 +2189,11 @@ vec3 cellLit( vec3 color, vec3 albedo, vec3 normalView, vec3 posView, vec3 Vview
 		diffOn += farW * farF;
 	}
 	vec3 add = alb * ( diffOn + gi ) + spec * specMask * specCol;	// albedo x the game's diffuse; the GI stays Lambert
+#ifdef WW_DV
+	wwDvGi = alb * gi;
+	wwDvAmb = color * color;
+	wwDvSpec = spec * specMask * specCol;
+#endif
 	/* an exterior with the weather's sun takes the game's terms: the sun through Oren-Nayar + rim, shadowed by the
 	 * cascades (cellDirVis), and the cube at the game's strength; color is then the viewport's ambient alone.
 	 * Without the sun: the viewport light plus the cell's lights. */
@@ -2206,6 +2215,12 @@ vec3 cellLit( vec3 color, vec3 albedo, vec3 normalView, vec3 posView, vec3 Vview
 #endif
 		vec3 linx = color * color * ambDim + alb * Edx + spec * specMask * specCol + cellExtSpec
 		          + cubeK * specDim * ( ( cellRed & 512 ) != 0 ? Ex : Edx + cellExtAmb ) + cellReflAdd;
+#ifdef WW_DV
+		wwDvSun = alb * ( Edx - diffOn - gi - airDif );
+		wwDvAmb = color * color * ambDim + alb * airDif;
+		wwDvSpec = spec * specMask * specCol + cellExtSpec;
+		wwDvRefl = cubeK * specDim * ( ( cellRed & 512 ) != 0 ? Ex : Edx + cellExtAmb ) + cellReflAdd;
+#endif
 		return sqrt( max( linx, vec3( 0.0 ) ) ) + emissive;
 	}
 	// the light reaching this point (a white surface would show it): the cubemap reflection is lit by it,
@@ -2218,6 +2233,9 @@ vec3 cellLit( vec3 color, vec3 albedo, vec3 normalView, vec3 posView, vec3 Vview
 			amb = cellAmbGi( amb, gi, P, N );
 		E += amb;
 		Ed += amb;
+#ifdef WW_DV
+		wwDvAmb = alb * amb;
+#endif
 	}
 	if ( cellHasDir ) {
 		vec3 Ld = normalize( cellDirTo );
@@ -2227,6 +2245,10 @@ vec3 cellLit( vec3 color, vec3 albedo, vec3 normalView, vec3 posView, vec3 Vview
 		Ed += dir * ( cellOren( N, Ld, Vw, nl, gloss ) + cellRim( N, Ld, Vw, gloss ) ) + cellDirColor * cellBackK;
 	}
 	// the game multiplies its cube term by the diffuse light (Ed); debug cubeold takes the Lambert sum
+#ifdef WW_DV
+	wwDvRefl = cubeK * ( ( cellRed & 512 ) != 0 ? E : Ed ) + cellReflAdd;
+	wwDvSun = alb * ( Ed - diffOn - gi ) - ( cellHasDalc ? wwDvAmb : vec3( 0.0 ) );
+#endif
 	vec3 lin = alb * Ed + spec * specMask * specCol + cubeK * ( ( cellRed & 512 ) != 0 ? E : Ed ) + cellReflAdd;
 	return sqrt( max( lin, vec3( 0.0 ) ) ) + emissive;
 }
