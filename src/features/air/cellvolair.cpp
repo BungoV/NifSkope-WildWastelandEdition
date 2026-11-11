@@ -12,6 +12,7 @@ BSD License - see nifskope.h
 #include "features/air/airbouncelamp.h"	// lane AIRBOUNCE1: the lamps' floor-bounce law
 #include "features/air/airmslamp.h"	// lane AIRMS1: the lamps' multiple-scattering law
 #include "features/air/airlampatlas.h"	// lane MODULES1 route (a): the lamps' shadows in the air
+#include "features/air/airfarspread.h"	// lane AIRPERF1 A4: the far grid's refresh over its frames
 #include "features/gi/rtddgicell.h"	// lane MODULES1 route (b): the lamps' shadows traced on the volume's BVH
 #include "features/sky/atmomath.h"	// lane CLOUD6e: kUnitKm, the cloud map's units
 #include "features/sky/atmosphere.h"	// SHAFTS1b: the aerial perspective's haze, for the no-double-count fit
@@ -2901,7 +2902,18 @@ static void vaPassInner( Scene * scene, bool run )
 		if ( wwTerrainShadowMap( tm ) )
 			key.insert( key.end(), { float( tm.tex ), float( tm.elevDeg ), float( tm.azDeg ), float( tm.x0 ), float( tm.y0 ) } );
 		const bool jitter = ( s.red & 67108864 ) != 0;
-		const bool rebuild = jitter || key != g.farKey || ++g.farAge >= fp.refresh;
+		/* lane AIRPERF1 A4: the refresh of an UNCHANGED view (every `refresh` frames, 8 ms in one frame) is spread over
+		 * those frames: each injects a run of layers, the last one sums them all (airfarspread.h; the surfaces read only
+		 * the sum, so they keep the last whole grid until then). A changed view (camera, sun, medium) rebuilds whole
+		 * in its own frame, as before. Red WW_CELL_AIR_FARSPREAD_RED=1 (live): the whole refresh in one frame */
+		WW_SWITCH_STATIC( bool, farSpreadRed, wwEnv( "WW_CELL_AIR_FARSPREAD_RED" ).trimmed() == "1" );
+		const bool farMoved = jitter || key != g.farKey;
+		const bool farSpread = !farSpreadRed && !farMoved && fp.refresh >= 2;
+		const airfar::Share farShare = farSpread ? airfar::spreadShare( g.farAge++, fp.refresh, fp.slices )
+			: airfar::Share { 0, fp.slices, true };
+		apNote += farSpreadRed ? QStringLiteral( " farspread=off(red)" ) : fp.refresh < 2 ? QStringLiteral( " farspread=off(refresh 1)" )
+			: QStringLiteral( " farspread=on(%1 frames, %2)" ).arg( fp.refresh ).arg( farMoved ? "view moved: whole" : "still: in runs" );
+		const bool rebuild = farMoved || farSpread || ++g.farAge >= fp.refresh;
 		bool farOk = true;
 		if ( rebuild ) {
 			const float farLog = std::log( farEnd / farStart );
@@ -2926,9 +2938,10 @@ static void vaPassInner( Scene * scene, bool run )
 				prog->uni1i( "volStage", stage );
 				fn->glActiveTexture( GLenum( GL_TEXTURE0 + kInjectUnit ) );
 				fn->glBindTexture( GL_TEXTURE_3D, stage == 2 ? g.inject : 0 );
-				for ( int k = 0; k < fp.slices; k++ ) {
+				const int k0 = stage == 1 ? farShare.inj0 : farShare.sum ? 0 : fp.slices, k1 = stage == 1 ? farShare.inj1 : fp.slices;	// AIRPERF1 A4
+				for ( int k = k0; k < k1; k++ ) {
 					fn->glFramebufferTextureLayer( GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, stage == 1 ? g.inject : g.integ, 0, kSlices + k );
-					if ( k == 0 && !fbComplete( stage == 1 ? 5 : 6 ) ) {
+					if ( k == k0 && !fbComplete( stage == 1 ? 5 : 6 ) ) {
 						farOk = false;
 						break;
 					}
@@ -2948,8 +2961,10 @@ static void vaPassInner( Scene * scene, bool run )
 				g.farQPending = false;
 			}
 			g.farKey = farOk ? key : std::vector<float>();
-			g.farAge = 0;
-			g.farBuilds++;
+			if ( farShare.sum || !farOk ) {	// AIRPERF1 A4: a run of layers is not a build yet
+				g.farAge = 0;
+				g.farBuilds++;
+			}
 		}
 		g.farOn = farOk;
 		g.farCols = fp.cols;
