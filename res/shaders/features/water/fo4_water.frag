@@ -213,7 +213,9 @@ void main()
 	if ( waterFarMask && wwFarWaterDry( P.xy ) )
 		discard;
 	// lane FARSEA1: the endless sheet leaves the bake's box to the baked water and the terrain (water_info.glsl)
-	if ( waterSeam.z > 0.0 && all( greaterThan( P.xy, waterSeamBox.xy ) ) && all( lessThan( P.xy, waterSeamBox.zw ) ) )
+	// lane SKYSEA1: waterSeam.w = the sheet's reach under the baked water (no crack where its last texels end)
+	if ( waterSeam.z > 0.0 && all( greaterThan( P.xy, waterSeamBox.xy + waterSeam.w ) )
+		&& all( lessThan( P.xy, waterSeamBox.zw - waterSeam.w ) ) )
 		discard;
 	vec3 eye = cellWorldPos( vec3( 0.0 ) );
 	vec3 ray = P - eye;

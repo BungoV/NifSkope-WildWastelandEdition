@@ -3984,6 +3984,35 @@ void wwLookdevSkyLinearDraw( Scene * scene, bool hdr )
 	g_skyLinear = true;
 	const bool drew = wwLookdevDrawBackground( scene );
 	g_skyLinear = false;
+	/* lane SKYSEA1 (item 1): the physical sky's quad draws with the stencil test off (atmosphere.cpp wwAtmoDrawSky), so
+	 * only the passes after it (the air over the sky, the cloud layers, the sun) marked their pixels. With the air off or
+	 * refused (an empty cell, no fog records, the fog row off) the rest kept stencil 0, the tone map took them in no mode
+	 * and the view's clear colour showed through as flat grey polygons. Nothing but the backdrop has drawn into the frame
+	 * yet, so every pixel is a sky pixel: mark them all 1. Red WW_SKY_LINEAR_RED=nomark: only what the passes marked. */
+	WW_SWITCH_STATIC( bool, noMark, wwEnv( "WW_SKY_LINEAR_RED" ).trimmed() == QLatin1StringView( "nomark" ) );
+	const bool mark = drew && !noMark;
+	if ( mark ) {
+		GLint clearS = 0;
+		GLint maskS = 0xFF;
+		fn->glGetIntegerv( GL_STENCIL_CLEAR_VALUE, &clearS );
+		fn->glGetIntegerv( GL_STENCIL_WRITEMASK, &maskS );
+		const bool wasScissor = fn->glIsEnabled( GL_SCISSOR_TEST );
+		fn->glDisable( GL_SCISSOR_TEST );
+		fn->glStencilMask( 0x03 );
+		fn->glClearStencil( 1 );
+		fn->glClear( GL_STENCIL_BUFFER_BIT );
+		fn->glClearStencil( clearS );
+		fn->glStencilMask( GLuint( maskS ) );
+		if ( wasScissor )
+			fn->glEnable( GL_SCISSOR_TEST );
+	}
+	static int markSaid = -1;
+	if ( drew && markSaid != int( mark ) ) {
+		markSaid = int( mark );
+		fprintf( stderr, "lookdev sky: %s\n", mark
+			? "every sky pixel marked cell light (stencil 1 under the whole backdrop: no clear-colour holes; lane SKYSEA1)"
+			: "sky pixels marked only where a later pass drew (red WW_SKY_LINEAR_RED=nomark: holes where the air is off)" );
+	}
 	fn->glStencilFunc( GLenum( sFunc ), sRef, GLuint( sMask ) );
 	fn->glStencilMask( GLuint( sWrite ) );
 	fn->glStencilOp( GLenum( sFail ), GLenum( sZFail ), GLenum( sPass ) );

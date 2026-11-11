@@ -660,6 +660,40 @@ vec4 wwVolAirAt( vec3 posView )
 	return wwVolAirAtUv( posView, uv );
 }
 
+/* lane SKYSEA1 (the horizon band): the air's column along a sky ray over the CURVED ground, as the physical sky's planet
+ * has it (radius 6371 km x 70 u a metre). On flat ground a ray within a few degrees of level crossed the low air for
+ * hundreds of km (column / sine), so from high up every row between the far land and eye level read the air's own colour
+ * (T 0) while the row above read none: a bright band at the horizon. Over a curved ground the ray's height is
+ * z0 + s x + x^2 / 2R; its lowest height a = z0 - s^2 R / 2, and with u = sqrt(z - a) the path is sqrt(R / 2) 2 du, so
+ * each leg is an integral of the same density law (Unreal's height fog: opacity 1 - exp(-sigma0 x the column)) over u.
+ * A downward ray that clears the ground (a above it) dips and climbs out again. volAirFlags 131072; red
+ * WW_CELL_AIR_CURVE_RED=1: the flat ground. */
+const float kAirEarthU = 6371000.0 * 70.0;
+
+float wwAirCurvedLeg( float a, float u0, float u1, vec4 g )
+{
+	if ( u1 <= u0 )
+		return 0.0;
+	float h = ( u1 - u0 ) / 24.0, c = 0.0;
+	for ( int i = 0; i < 24; i++ ) {
+		float u = u0 + ( float( i ) + 0.5 ) * h;
+		c += wwAirRhoLaw( a + u * u, volAirMed, volAirLayer, g );
+	}
+	return c * h;
+}
+
+// sigma0 x the column from height z0 at elevation sine s to the air's end `end` or the ground gz (hit)
+float wwAirCurvedTau( float z0, float s, float gz, float end, vec4 g, out bool hit )
+{
+	float k = sqrt( 0.5 * kAirEarthU ), a = z0 - 0.5 * s * s * kAirEarthU;
+	float uz = sqrt( max( min( z0, end ) - a, 0.0 ) ), ue = sqrt( max( end - a, 0.0 ) );
+	hit = s < 0.0 && a <= gz;
+	float c = s >= 0.0 ? wwAirCurvedLeg( a, s * k, ue, g )
+		: hit ? wwAirCurvedLeg( a, sqrt( max( gz - a, 0.0 ) ), uz, g )
+		: wwAirCurvedLeg( a, 0.0, uz, g ) + wwAirCurvedLeg( a, 0.0, ue, g );
+	return volAirMed.x * 2.0 * k * c;
+}
+
 /* (L, T) of the whole air along a sky ray (bungo 10-14: the far tower stood out against an unfogged sky). The sky is a
  * surface at infinite distance: the froxels to their far edge, then the far tail of wwVolAirAt run to the end of the
  * air -- climbing, to the air's top (the column over the sine of the elevation: finite); level or down, the air never
@@ -712,15 +746,30 @@ vec4 wwVolAirSky( vec3 dirView )
 		gD = wwAirGroundRay( dirView * ( far / max( fogDistScale, 1e-12 ) ), dirView, 1e7, s );
 		groundEnd = z0 > gD.x;
 	}
+	bool curve = ( volAirFlags & 131072 ) != 0 && abs( s ) < 0.3;	// lane SKYSEA1: the curved ground (flat past 0.2..0.3)
 	if ( groundEnd ) {
 		dEnd = far + min( ( z0 - gD.x ) / -s, 1e7 );
-		Tt = exp( -volAirMed.x * wwAirCol( gD.x, z0, gD ) / -s
+		float tau = volAirMed.x * wwAirCol( gD.x, z0, gD ) / -s;
+		if ( curve ) {
+			bool hit;
+			float tc = wwAirCurvedTau( z0, s, gD.x, wwAirEnd( volAirMed, gD ), gD, hit );
+			tau = mix( tc, tau, smoothstep( 0.2, 0.3, -s ) );
+			if ( !hit )
+				dEnd = far + min( -2.0 * s * kAirEarthU, 1e7 );
+		}
+		Tt = exp( -tau
 			- wwAirRainTau( dirView * ( far / max( fogDistScale, 1e-12 ) ), dirView * ( dEnd / max( fogDistScale, 1e-12 ) ) ) );
 	} else if ( s > 1e-4 ) {
 		float end = wwAirEnd( volAirMed, volAirGround );	// G2: the climb runs through the top's falloff
 		dEnd = far + min( max( end - z0, 0.0 ) / s, 1e7 );
 		// FOGTERRAIN3: the ground along the climb, inside the grid's window (wwAirGroundRay)
-		Tt = exp( -volAirMed.x * wwAirCol( z0, end, wwAirGroundRay( dirView * ( far / max( fogDistScale, 1e-12 ) ), dirView, dEnd - far, s ) ) / s
+		vec4 gU = wwAirGroundRay( dirView * ( far / max( fogDistScale, 1e-12 ) ), dirView, dEnd - far, s );
+		float tau = volAirMed.x * wwAirCol( z0, end, gU ) / s;
+		if ( curve ) {
+			bool hit;
+			tau = mix( wwAirCurvedTau( z0, s, -1e30, end, gU, hit ), tau, smoothstep( 0.2, 0.3, s ) );
+		}
+		Tt = exp( -tau
 			- wwAirRainTau( dirView * ( far / max( fogDistScale, 1e-12 ) ), dirView * ( ( far + 1e7 ) / max( fogDistScale, 1e-12 ) ) ) );	// lane RAINFOG2: + the rain fog, to where the ray leaves it
 	} else {
 		/* MODULES1 item 18: a ray still above the air's top where the grid ends (a camera above the air looking down)

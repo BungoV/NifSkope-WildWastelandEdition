@@ -7,7 +7,8 @@
 uniform bool waterReflOn;		// the Water reflections row
 uniform bool waterGlintOn;		// the Water sun glare row
 uniform int waterReflRed;		// 1 record (the WATR's F0 and reflectivity cap), 2 farcolour (the 8192 u colour swap),
-								// 4 sharp (no roughness in the reflection), 8 noclouds (the plain sky gradient)
+								// 4 sharp (no roughness in the reflection), 8 noclouds (the plain sky gradient),
+								// 16 cloudedge (the cloud map's hard square edge; lane SKYSEA1)
 uniform int waterGlintRed;		// 1 game (today's sun + fixed-direction sparkle), 2 nolean (no slope variance), 4 noshoulder
 uniform vec4 waterGlintK;		// the glare's highlight shoulder (x the sun colour), F0, footprint clamp, sharp-SSR alpha
 uniform sampler2D waterMoment0;	// per noise layer: (E[t.x^2], E[t.y^2]) of the decoded slope t = 2 texel - 1
@@ -93,7 +94,11 @@ float wwWaterCloudBand( vec3 P, vec3 R, float z, float outside, int ch )
 	vec2 uv = ( P.xy + t * R.xy - waterCloudGeo.xy ) / ( 2.0 * waterCloudGeo.z ) + 0.5;
 	if ( any( lessThan( uv, vec2( 0.0 ) ) ) || any( greaterThan( uv, vec2( 1.0 ) ) ) )
 		return outside;
-	return texture( waterCloudMap, uv )[ch];
+	if ( ( waterReflRed & 16 ) != 0 )
+		return texture( waterCloudMap, uv )[ch];
+	// lane SKYSEA1: fade to the band's mean cover over the map's outer 15% (the hard square drew a line on the sea)
+	vec2 e2 = min( uv, 1.0 - uv );
+	return mix( outside, texture( waterCloudMap, uv )[ch], smoothstep( 0.0, 0.15, min( e2.x, e2.y ) ) );
 }
 
 /* the reflected sky with the weather's clouds: the reflected ray meets each band's base over CLOUD1's map, as the

@@ -41,12 +41,46 @@ struct Peek : Node
 	static Transform Node::* loc() { return &Peek::local; }
 };
 
+// the sea: the largest sea body that is not tiny; its height is the sea level (lane SKYSEA1: also its WATR form)
+quint32 seaBody( const LodtFile & f, float & seaZ, quint32 * form = nullptr )
+{
+	quint32 seaId = 0, seaArea = 0;
+	for ( int id = 1; id <= f.bodyCount(); id++ ) {
+		LodtWaterBody B;
+		if ( f.waterBody( id, B ) && B.cls == 0 && !( B.flags & 16 ) && B.area > seaArea ) {
+			seaArea = B.area;
+			seaId = quint32( id );
+			seaZ = B.waterHeight;
+			if ( form )
+				*form = B.watrForm;
+		}
+	}
+	return seaId;
+}
+
 }	// namespace
 
 bool wwEndlessSeaOn()
 {
 	WW_SWITCH_STATIC( QByteArray, red, wwEnv( "WW_ENDLESS_SEA_RED" ).trimmed() );
 	return red != "off" && wwLookOn( WwLook::EndlessSea );
+}
+
+quint32 wwEndlessSeaBodyForm( const QString & lodlPath )
+{
+	WW_SWITCH_STATIC( QByteArray, red, wwEnv( "WW_ENDLESS_SEA_RED" ).trimmed() );
+	LodtFile f;
+	if ( red == "worldrec" || !f.open( lodlPath, nullptr ) )
+		return 0;
+	float z = 0.0f;
+	quint32 form = 0;
+	return seaBody( f, z, &form ) ? form : 0;
+}
+
+float wwEndlessSeaOverlap()
+{
+	WW_SWITCH_STATIC( QByteArray, red, wwEnv( "WW_ENDLESS_SEA_RED" ).trimmed() );
+	return red == "seamcut" ? 0.0f : 4096.0f;
 }
 
 float wwEndlessSeaSeam()
@@ -70,17 +104,8 @@ QString wwEndlessSeaAppend( NifModel * nif, const QModelIndex & parent, const Ww
 	const int minX = f.cellMinX(), minY = f.cellMinY(), maxX = f.cellMaxX(), maxY = f.cellMaxY();
 	const float box[4] = { float( minX ) * 4096.0f, float( minY ) * 4096.0f, float( maxX + 1 ) * 4096.0f,
 		float( maxY + 1 ) * 4096.0f };
-	// the sea: the largest sea body that is not tiny; its height is the sea level
-	quint32 seaId = 0, seaArea = 0;
 	float seaZ = defaultZ;
-	for ( int id = 1; id <= f.bodyCount(); id++ ) {
-		LodtWaterBody B;
-		if ( f.waterBody( id, B ) && B.cls == 0 && !( B.flags & 16 ) && B.area > seaArea ) {
-			seaArea = B.area;
-			seaId = quint32( id );
-			seaZ = B.waterHeight;
-		}
-	}
+	const quint32 seaId = seaBody( f, seaZ );
 	// the coverage census: cells of the box with baked water (any of 4 x 4 body samples wet) and without
 	int wet = 0, dry = 0;
 	const int bs = f.bodyIdSamples();
