@@ -1323,7 +1323,7 @@ int Stream::traceFarRead( int ring, double budgetMs )
 	}
 	QElapsedTimer t;
 	t.start();
-	const bool flatRed = rtTraceSetRed( "fardirt" ), noObj = rtTraceSetRed( "nofarobj" );
+	const bool flatRed = rtTraceSetRed( "fardirt" ), noObj = rtTraceSetRed( "nofarobj" ), noWater = rtTraceSetRed( "nofarwater" );
 	QSet<int> seen;
 	int pending = 0;
 	bool built = false;
@@ -1331,9 +1331,10 @@ int Stream::traceFarRead( int ring, double budgetMs )
 		if ( !sh )
 			continue;
 		const QString bn = sh->getName();
-		if ( !bn.startsWith( QLatin1String( "FarLOD" ) ) || bn.startsWith( QLatin1String( "FarLOD water" ) )
-			|| bn.startsWith( QLatin1String( "FarLOD_water" ) ) || bn.startsWith( QLatin1String( "FarLOD sea" ) ) )
-			continue;   // the trace has no water
+		// round 6: far water is a source of its own (2); the endless sea's one plane stays out (rttracesetrule.h farSrcOf)
+		const int src = rttracesetrule::farSrcOf( bn.toLatin1().constData() );
+		if ( src < 0 )
+			continue;
 		const int b = nif->getBlockNumber( sh->index() );
 		const quint64 sig = b < 0 ? 0 : rtFarShapeSig( nif, sh );
 		if ( !sig )
@@ -1343,7 +1344,7 @@ int Stream::traceFarRead( int ring, double budgetMs )
 		if ( tf.sig != sig ) {   // new, or the far field was rebuilt: the cells it reaches
 			tf = TraceFar();
 			tf.sig = sig;
-			tf.src = ( bn.startsWith( QLatin1String( "FarLOD terrain" ) ) || bn.startsWith( QLatin1String( "FarLOD_terrain" ) ) ) ? 0 : 1;
+			tf.src = src;
 			const QSharedPointer<CellMesh> cm = cellMeshFor( nif, sh->index() );
 			if ( cm && cm->inst ) {
 				bool first = true;
@@ -1376,7 +1377,7 @@ int Stream::traceFarRead( int ring, double budgetMs )
 				tf.shape.reset();
 			continue;
 		}
-		if ( ( tf.src == 1 && noObj ) || ( tf.shape && tf.flat == flatRed ) )
+		if ( ( tf.src == 1 && noObj ) || ( tf.src == 2 && noWater ) || ( tf.shape && tf.flat == flatRed ) )
 			continue;
 		if ( built && msOf( t ) >= budgetMs ) {
 			pending++;
@@ -1434,10 +1435,11 @@ void Stream::traceSync( int ring, int ex, int ey )
 	std::set<Key> farCells;
 	info.pending = traceFarRead( ring, kFarReadMs );
 	traceMore = info.pending > 0;
-	int terrainShapes = 0, objShapes = 0;
+	int terrainShapes = 0, objShapes = 0, waterShapes = 0;
+	std::set<quint32> cardRefs;   // round 6: the carded trees traced as their authored far mesh
 	if ( !traceFar.isEmpty() ) {
 		const CellFarHide::Hidden * hidden = CellFarHide::hiddenFor( nif );
-		const bool noObj = rtTraceSetRed( "nofarobj" );
+		const bool noObj = rtTraceSetRed( "nofarobj" ), noWater = rtTraceSetRed( "nofarwater" ), noCards = rtTraceSetRed( "nofarcards" );
 		const auto cellXY = []( qint64 k, int & x, int & y ) {
 			x = int( k >> 32 );
 			y = int( qint32( quint32( k & 0xFFFFFFFFll ) ) );
@@ -1452,7 +1454,7 @@ void Stream::traceSync( int ring, int ex, int ey )
 				continue;
 			info.cacheShapes++;
 			info.cacheMb += tf.shape->bytes() / 1048576.0;
-			if ( ( tf.src == 1 && noObj ) || !spanInRing( tf.span, ccx, ccy, ring ) )
+			if ( ( tf.src == 1 && noObj ) || ( tf.src == 2 && noWater ) || !spanInRing( tf.span, ccx, ccy, ring ) )
 				continue;
 			const RtFarShape & f = *tf.shape;
 			RtFarPick p;
@@ -1460,7 +1462,7 @@ void Stream::traceSync( int ring, int ex, int ey )
 				const RtFarShape::Run & r = f.runs[size_t( i )];
 				int x = 0, y = 0;
 				cellXY( r.cell, x, y );
-				if ( r.count <= 0 || !rttracesetrule::inRing( x, y, ccx, ccy, ring ) )
+				if ( r.count <= 0 || !rttracesetrule::inRing( x, y, ccx, ccy, ring ) || ( r.kind == 3 && noCards ) )
 					continue;
 				if ( rttracesetrule::farSkip( r.ref, r.ref && hidden && hidden->refs.contains( r.ref ), loaded.count( Key( x, y ) ) > 0 ) )
 					continue;
@@ -1510,23 +1512,38 @@ void Stream::traceSync( int ring, int ex, int ey )
 			mix( quint64( pickBlock[n] ) );
 			mix( f.sig );
 			mix( f.flat > 0 ? 2 : 1 );
-			qint64 tris = 0;
+			qint64 tris = 0, byKind[4] = { 0, 0, 0, 0 };
 			for ( const int i : p.runs ) {
 				const RtFarShape::Run & r = f.runs[size_t( i )];
 				int x = 0, y = 0;
 				cellXY( r.cell, x, y );
 				farCells.insert( Key( x, y ) );
 				tris += r.count;
+				byKind[r.kind & 3] += r.count;
+				if ( r.kind == 3 && r.ref )
+					cardRefs.insert( r.ref );
 				mix( quint64( i ) );
 			}
-			( f.src == 1 ? info.objTris : info.terrainTris ) += tris;
-			( f.src == 1 ? objShapes : terrainShapes )++;
+			// round 6: a triangle counts under what it is (water and a carded tree's authored mesh have their own counts)
+			info.terrainTris += byKind[0];
+			info.objTris += byKind[1];
+			info.waterTris += byKind[2];
+			info.cardTris += byKind[3];
+			( f.src == 2 ? waterShapes : ( f.src == 1 ? objShapes : terrainShapes ) )++;
 			if ( f.flat > 0 )
 				info.flat += tris;
 			out.push_back( std::move( p ) );
 		}
 		picks.swap( out );
 		info.key = key;
+		info.cardTrees = int( cardRefs.size() );
+		// the carded trees of the ring's far cells, and those with no authored mesh row (never traced: no mesh is made up)
+		QSet<qint64> ringCells;
+		for ( int y = ccy - ring; y <= ccy + ring; y++ )
+			for ( int x = ccx - ring; x <= ccx + ring; x++ )
+				if ( !loaded.count( Key( x, y ) ) )
+					ringCells.insert( ImpostorChunk::cellFarCellKey( x, y ) );
+		ImpostorChunk::cellFarCardsMeshIn( ringCells, &info.cardsInRing, &info.cardsNoMesh );
 	}
 	info.cells = int( farCells.size() );
 	info.shapes = int( picks.size() );
@@ -1544,6 +1561,13 @@ void Stream::traceSync( int ring, int ex, int ey )
 		static_cast<long long>( said.objTris ), objShapes, said.objCells, static_cast<long long>( rttracesetrule::kFarObjTriCap ),
 		static_cast<long long>( said.objDropped ), said.objCellsDropped, said.cells, static_cast<long long>( said.flat ), said.pending,
 		ring, ccx, ccy, ex, ey, msOf( t ), traceReads, traceReadMs, traceReadMaxMs, said.cacheShapes, said.cacheMb );
+	// round 6: far water and far tree cards
+	std::fprintf( stderr, "cell stream: traced set handed over: far water %lld triangles from %d shapes%s | far tree cards %lld "
+		"triangles = the authored far mesh of %d carded trees%s; the ring's far cells draw %d cards, %d of them have no authored "
+		"mesh row and are not traced\n",
+		static_cast<long long>( said.waterTris ), waterShapes, rtTraceSetRed( "nofarwater" ) ? " (RED nofarwater)" : "",
+		static_cast<long long>( said.cardTris ), said.cardTrees, rtTraceSetRed( "nofarcards" ) ? " (RED nofarcards)" : "",
+		said.cardsInRing, said.cardsNoMesh );
 	std::fflush( stderr );
 }
 
@@ -1787,7 +1811,9 @@ bool Stream::tick( Scene * sc, const Vector3 & eye )
 		// lane AIRPERF1 r5: a changed far red hands over again; far shapes still to read are read a few ms a tick, then
 		// one more hand-over brings them
 		const int reds = ( rtTraceSetRed( "nofar" ) ? 1 : 0 ) | ( rtTraceSetRed( "nofarobj" ) ? 2 : 0 )
-			| ( rtTraceSetRed( "fardirt" ) ? 4 : 0 ) | ( rtTraceSetRed( "nofarcap" ) ? 8 : 0 );
+			| ( rtTraceSetRed( "fardirt" ) ? 4 : 0 ) | ( rtTraceSetRed( "nofarcap" ) ? 8 : 0 )
+			| ( rtTraceSetRed( "nofarwater" ) ? 16 : 0 ) | ( rtTraceSetRed( "nofarcards" ) ? 32 : 0 )
+			| ( rtTraceSetRed( "oneblas" ) ? 64 : 0 );   // round 6
 		if ( reds != traceReds ) {
 			traceReds = reds;
 			traceDirty = true;

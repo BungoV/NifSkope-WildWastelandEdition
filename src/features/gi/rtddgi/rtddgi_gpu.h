@@ -47,6 +47,10 @@ struct DdgiGpuJob
 	 * the device (no BLAS is built) */
 	DdgiGpuSession * sceneFrom = nullptr;
 	const probebvh::Bvh * bvh = nullptr;   // the soup in its local frame, alpha masks set (bakert builds the BLAS from it)
+	/* lane AIRPERF1 r6: the soup's parts (each one's first triangle, ascending from 0): a BLAS a part, the unchanged ones
+	 * of the last scenes kept. Empty or one = the single BLAS. partsRed: the same frame and grown amount, one BLAS */
+	std::vector<uint32_t> parts;
+	bool partsRed = false;
 	DdgiGpuParams params;
 	std::vector<float> triAttr;            // 8 floats a soup triangle: albedo rgb, two-sided, Le rgb, 0
 	std::vector<float> lights;             // 32 floats a light (src/features/gi/rtddgi.cpp packLights)
@@ -77,6 +81,10 @@ struct DdgiGpuOut
 	long long blasGrowTris = 0;
 	std::string device;
 	bool blasBuilt = false, blasShared = false;   // RTXCASCADE2: this open built a BLAS / took job.sceneFrom's
+	// AIRPERF1 r6: the scene's BLAS parts (0: the single BLAS), the BLASes built by this open and those found again
+	int blasParts = 0, blasNew = 0, blasKept = 0;
+	long long blasTrisNew = 0, blasTrisKept = 0;
+	double blasMs = 0.0;                   // the masks' upload and the BLAS + TLAS build
 };
 
 //! the whole run (build, relocation, classification, frames, read back) on the bake device; false + why when it cannot

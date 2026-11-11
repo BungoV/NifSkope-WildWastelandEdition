@@ -953,6 +953,13 @@ void censusBuilt( const Cell & c, const Build & b )
 	const QString blas = c.level == 0 ? QString() : b.live.builtBlas()
 		? QStringLiteral( "; BLAS: its own%1" ).arg( b.live.sceneWhy().isEmpty() ? QString() : QStringLiteral( " (%1)" ).arg( b.live.sceneWhy() ) )
 		: QStringLiteral( "; BLAS: cascade 0's (one BLAS)" );
+	// lane AIRPERF1 r6: the traced set's parts, a BLAS each: what this build made and what it found again on the device
+	if ( b.live.builtBlas() )
+		say( c.tag + ( v.blasParts > 0
+			? QStringLiteral( "BLAS parts %1: %2 BLASes built (%3 triangles), %4 found again (%5 triangles), masks + BLAS + TLAS %6 ms" )
+				.arg( v.blasParts ).arg( v.blasNew ).arg( v.blasTrisNew ).arg( v.blasKept ).arg( v.blasTrisKept ).arg( v.blasMs, 0, 'f', 1 )
+			: QStringLiteral( "BLAS parts 0: the single soup, one BLAS built whole, masks + BLAS + TLAS %1 ms%2" ).arg( v.blasMs, 0, 'f', 1 )
+				.arg( rtTraceSetRed( "oneblas" ) ? QStringLiteral( " (RED WW_CELL_RTSET_RED=oneblas)" ) : QString() ) ) );
 	say( c.tag + QStringLiteral( "built %1 in %2 ms (soup copy %3 ms); grid %4 x %5 x %6, spacing %7 x %8 x %9%10; box %11; first probe %12 %13 "
 		"%14; %15; relocate+classify %16 ms; BLAS grown %17 u; rays %18 a probe, %19 updates a frame%20; atlas bytes %21 (irr %22, "
 		"dist %23, probes %24); lights %25; sky %26; %27; %28" )

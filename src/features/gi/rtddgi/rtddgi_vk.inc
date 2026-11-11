@@ -704,15 +704,23 @@ DdgiGpuSession * ddgiGpuOpen( const DdgiGpuJob & job, DdgiGpuOut * out )
 	} else {
 		s->sc = new DdgiScene;
 		s->sc->refs = 1;
-		if ( !buildMasks( D, *job.bvh, s->sc->I ) || !buildRt( D, *job.bvh, s->sc->I ) ) {
+		const auto tb = std::chrono::steady_clock::now();
+		if ( !buildMasks( D, *job.bvh, s->sc->I ) || !buildRt( D, *job.bvh, s->sc->I, &job.parts, job.partsRed ) ) {
 			ddgiFree( D, s );
 			out->why = "the soup's BLAS did not build (out of GPU memory?)";
 			return nullptr;
 		}
 		g_ddgiBlasBuilds++;
 		out->blasBuilt = true;
+		// lane AIRPERF1 r6: what this open built of the scene's BLAS parts and what it found again
+		out->blasMs = std::chrono::duration<double, std::milli>( std::chrono::steady_clock::now() - tb ).count();
+		out->blasNew = s->sc->I.partNew;
+		out->blasKept = s->sc->I.partReused;
+		out->blasTrisNew = s->sc->I.partTrisNew;
+		out->blasTrisKept = s->sc->I.partTrisReused;
 	}
 	Scene::Impl & I = s->sc->I;
+	out->blasParts = I.partCount;
 	out->blasGrow = I.inflate;   // M1FIX: the BLAS holds grown triangles when > 0; trace.comp re-tests the true ones
 	out->blasGrowTris = I.inflateTris;
 	s->prm = job.params;

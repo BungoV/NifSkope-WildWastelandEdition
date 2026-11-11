@@ -16,7 +16,12 @@
  *  Round 5: the far OBJECTS within the ring are in the set too, and every far triangle takes its diffuse map's colour
  *  (rtfartrace.h; reds nofarobj, fardirt, nofarcap). The new volume runs rttracesetrule.h warmUpdates before it is
  *  drawn in place of the old one (rtddgicell.cpp; red nowarm). A cell loaded before the row went on has its soup
- *  gathered by the stream's worker (cellstream.cpp; red nolatesoup). */
+ *  gathered by the stream's worker (cellstream.cpp; red nolatesoup).
+ *
+ *  Round 6: far water and the carded far trees' authored far meshes are in the set (reds nofarwater, nofarcards). The
+ *  merged soup names its parts (ProbeSoup::parts: a loaded cell, a large reference, a block of far cells), and the
+ *  volume's device builds one BLAS a part and keeps those a new set did not change (bakert.cpp buildRtParts; red
+ *  oneblas = the single soup of round 5, one BLAS rebuilt whole at every publish). */
 
 #include <QString>
 #include <QtGlobal>
@@ -51,6 +56,8 @@ struct RtFarInfo
 {
 	int cells = 0, shapes = 0, pending = 0;   //!< pending: far shapes in the ring not read yet (the next hand-overs bring them)
 	qint64 terrainTris = 0, objTris = 0, objDropped = 0, flat = 0;
+	qint64 waterTris = 0, cardTris = 0;       //!< round 6: far water; carded far trees, traced as their authored far mesh
+	int cardTrees = 0, cardsInRing = 0, cardsNoMesh = 0;   //!< trees behind cardTris; cards drawn in the ring; those with no mesh row
 	int objCells = 0, objCellsDropped = 0;
 	quint64 key = 0;
 	double cacheMb = 0.0;

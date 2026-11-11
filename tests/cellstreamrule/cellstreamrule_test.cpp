@@ -200,6 +200,143 @@ int main()
 		}
 		check( same, "u8 frame", "a cell's land starts at cell x 4096 under any origin, and an origin-relative far vertex meets it" );
 	}
+	// u9 (round 6): far water is a source, the endless sea is not; a ladder ring row stands in for a tree card
+	{
+		using namespace rttracesetrule;
+		check( farSrcOf( "FarLOD water v 4 x #2" ) == 2 && farSrcOf( "FarLOD_water 3" ) == 2 && farSrcOf( "FarLOD water" ) == 2
+			&& farSrcOf( "FarLOD sea" ) == -1 && farSrcOf( "FarLOD terrain v 4 x #0" ) == 0 && farSrcOf( "FarLOD_terrain" ) == 0
+			&& farSrcOf( "FarLOD v 4 obj x #1" ) == 1 && farSrcOf( "Land -3 4" ) == -1 && farSrcOf( nullptr ) == -1, "u9 src",
+			"water 2, terrain 0, objects 1, the sea and anything else not traced" );
+		check( rowCard( 0x80 ) && rowCard( 0x86 ) && !rowCard( 0 ) && !rowCard( 2 ) && !rowCard( 0x7F ), "u9 card",
+			"the ladder's ring row (0x80) is the card's stand-in; plain rows and the other steps are not" );
+	}
+	// u10 (round 6): a BLAS a part gives the hits of the single soup
+	{
+		using namespace rttracesetrule;
+		// the parts' plan: ascending, first 0, no empty part, capped
+		const std::vector<std::uint32_t> raw = { 0, 0, 100, 250, 250, 251, 480, 900 };
+		const std::vector<std::uint32_t> pp = blasParts( raw, 600, kBlasPartCap );
+		bool planOk = pp.size() == 5 && pp[0] == 0 && pp[1] == 100 && pp[2] == 250 && pp[3] == 251 && pp[4] == 480;
+		std::vector<std::uint32_t> many;
+		for ( std::uint32_t i = 0; i < 1000; i++ )
+			many.push_back( i * 3 );
+		const std::vector<std::uint32_t> capd = blasParts( many, 3000, 256 );
+		planOk = planOk && !capd.empty() && capd.size() <= 256 && capd[0] == 0 && blasParts( { 0 }, 600, 256 ).empty()
+			&& blasParts( {}, 600, 256 ).empty() && !blasParts( { 7 }, 600, 256 ).empty() && blasParts( { 7 }, 600, 256 )[0] == 0;
+		for ( size_t i = 1; i < capd.size(); i++ )
+			planOk = planOk && capd[i] > capd[i - 1];
+		check( planOk, "u10 parts", "the parts cover the soup from triangle 0, ascending, none empty, at most the cap" );
+
+		// a fixed soup: 600 triangles, about a fifth alpha-tested
+		std::uint32_t seed = 12345u;
+		const auto rnd = [&seed]() {
+			seed = seed * 1664525u + 1013904223u;
+			return float( seed >> 8 ) / 16777216.0f;
+		};
+		const std::uint32_t nTri = 600;
+		std::vector<float> soup( nTri * 9 );
+		std::vector<char> isMasked( nTri );
+		for ( std::uint32_t t = 0; t < nTri; t++ ) {
+			const float c[3] = { rnd() * 100.0f, rnd() * 100.0f, rnd() * 100.0f };
+			for ( int k = 0; k < 9; k++ )
+				soup[t * 9 + std::uint32_t( k )] = c[k % 3] + ( rnd() - 0.5f ) * 24.0f;
+			isMasked[t] = rnd() < 0.2f;
+		}
+		// the tables as bakert builds them: opaque soup triangles, then the alpha-tested ones
+		std::vector<std::uint32_t> remap;
+		for ( std::uint32_t t = 0; t < nTri; t++ )
+			if ( !isMasked[t] )
+				remap.push_back( t );
+		const std::uint32_t nOpaque = std::uint32_t( remap.size() );
+		for ( std::uint32_t t = 0; t < nTri; t++ )
+			if ( isMasked[t] )
+				remap.push_back( t );
+		const auto masked = [&isMasked]( std::uint32_t t ) { return isMasked[t] != 0; };
+		const std::vector<BlasPart> plan = blasPlan( pp, nTri, masked );
+		// every (BLAS, primitive) names a row of its own, and every row is named
+		std::vector<int> seen( nTri, 0 );
+		bool rowsOk = true;
+		for ( const BlasPart & b : plan )
+			for ( std::uint32_t i = 0; i < b.count; i++ ) {
+				const std::uint32_t r = blasRow( b.row, 0, i, nOpaque );
+				rowsOk = rowsOk && r < nTri && ( r >= nOpaque ) == b.alpha;
+				if ( r < nTri )
+					seen[r]++;
+			}
+		for ( std::uint32_t r = 0; r < nTri; r++ )
+			rowsOk = rowsOk && seen[r] == 1;
+		// the single soup under the same rule (custom index 0) is the old formula
+		for ( std::uint32_t i = 0; i < 50; i++ )
+			rowsOk = rowsOk && blasRow( 0, 0, i, nOpaque ) == i && blasRow( 0, 1, i, nOpaque ) == i + nOpaque;
+		// the nearest hit (ties: the lower soup triangle), through the parts and through the single soup
+		const auto hitRow = [&]( std::uint32_t row, const double o[3], const double d[3], double & t ) {
+			const float * v = &soup[size_t( remap[row] ) * 9];
+			double e1[3], e2[3], p[3], s[3], q[3];
+			for ( int k = 0; k < 3; k++ ) {
+				e1[k] = double( v[3 + k] ) - double( v[k] );
+				e2[k] = double( v[6 + k] ) - double( v[k] );
+				s[k] = o[k] - double( v[k] );
+			}
+			p[0] = d[1] * e2[2] - d[2] * e2[1];
+			p[1] = d[2] * e2[0] - d[0] * e2[2];
+			p[2] = d[0] * e2[1] - d[1] * e2[0];
+			const double det = e1[0] * p[0] + e1[1] * p[1] + e1[2] * p[2];
+			if ( std::fabs( det ) < 1e-12 )
+				return false;
+			const double u = ( s[0] * p[0] + s[1] * p[1] + s[2] * p[2] ) / det;
+			q[0] = s[1] * e1[2] - s[2] * e1[1];
+			q[1] = s[2] * e1[0] - s[0] * e1[2];
+			q[2] = s[0] * e1[1] - s[1] * e1[0];
+			const double w = ( d[0] * q[0] + d[1] * q[1] + d[2] * q[2] ) / det;
+			t = ( e2[0] * q[0] + e2[1] * q[1] + e2[2] * q[2] ) / det;
+			return u >= 0.0 && w >= 0.0 && u + w <= 1.0 && t > 1e-6;
+		};
+		int hits = 0, differ = 0;
+		for ( int r = 0; r < 4096; r++ ) {
+			const double o[3] = { double( rnd() ) * 100.0, double( rnd() ) * 100.0, double( rnd() ) * 100.0 };
+			double d[3] = { double( rnd() ) - 0.5, double( rnd() ) - 0.5, double( rnd() ) - 0.5 };
+			const double len = std::sqrt( d[0] * d[0] + d[1] * d[1] + d[2] * d[2] ) + 1e-9;
+			for ( int k = 0; k < 3; k++ )
+				d[k] /= len;
+			double bestA = 1e300, bestB = 1e300;
+			long long triA = -1, triB = -1;
+			const auto take = [&]( std::uint32_t row, double & best, long long & tri ) {
+				double t = 0.0;
+				if ( row >= nTri || !hitRow( row, o, d, t ) )
+					return;
+				if ( t < best || ( t == best && ( long long )( remap[row] ) < tri ) ) {
+					best = t;
+					tri = ( long long )( remap[row] );
+				}
+			};
+			for ( const BlasPart & b : plan )   // the TLAS of parts: one instance a BLAS, one geometry each
+				for ( std::uint32_t i = 0; i < b.count; i++ )
+					take( blasRow( b.row, 0, i, nOpaque ), bestA, triA );
+			for ( std::uint32_t i = 0; i < nOpaque; i++ )   // the single soup: geometry 0, then geometry 1
+				take( blasRow( 0, 0, i, nOpaque ), bestB, triB );
+			for ( std::uint32_t i = 0; i < nTri - nOpaque; i++ )
+				take( blasRow( 0, 1, i, nOpaque ), bestB, triB );
+			hits += triB >= 0 ? 1 : 0;
+			differ += ( triA != triB || bestA != bestB ) ? 1 : 0;
+		}
+		std::printf( "blas parts %d, BLASes %d (opaque rows %u of %u), rays 4096: hits %d, differ %d\n", int( pp.size() ), int( plan.size() ),
+			nOpaque, nTri, hits, differ );
+		check( rowsOk && hits > 400 && differ == 0, "u10 rows",
+			"each (BLAS, primitive) is one table row, all rows named once, and 4096 rays hit the same triangle at the same t" );
+
+		// the local origin holds still while the box's middle stays in one grid square; the single soup keeps the old rule
+		const bool org = stableOrigin( -1000.0, 9000.0, true ) == stableOrigin( 3000.0, 21000.0, true )
+			&& stableOrigin( -1000.0, 9000.0, true ) == 0.0 && stableOrigin( 30000.0, 40000.0, true ) == 32768.0
+			&& stableOrigin( -1000.5, 9000.0, false ) == 3999.0;
+		check( org, "u10 origin", "with parts the origin snaps to 32768; without, the floor of the middle" );
+		bool grow = growQuant( 0.0 ) == 0.0;
+		for ( double del = 0.07; del < 0.12; del += 0.01 )
+			grow = grow && growQuant( del ) == 0.125 && growQuant( del ) >= del;
+		const std::uint64_t ka = bytesKey( soup.data(), 3600, 1 );
+		soup[10] += 0.25f;
+		grow = grow && growQuant( 0.13 ) == 0.25 && ka != bytesKey( soup.data(), 3600, 1 ) && ka != bytesKey( soup.data(), 3600, 2 );
+		check( grow, "u10 grow", "the grow bound is the next power of two (one key an octave), and a part's key follows its bytes" );
+	}
 	std::printf( fails ? "CELLSTREAMRULE FAIL %d\n" : "CELLSTREAMRULE PASS %d failed\n", fails );
 	return fails ? 1 : 0;
 }

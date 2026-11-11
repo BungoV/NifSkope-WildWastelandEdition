@@ -282,6 +282,8 @@ struct Merge
 	qint64 nearTris = 0, farTris = 0;
 	std::uint64_t key = 0;
 	int farCells = 0, ring = 0, cx = 0, cy = 0, noSoup = 0;
+	bool oneBlas = false;                     //!< red oneblas (round 6): no parts
+	int parts = 0;                            //!< the merged soup's parts (0: the single soup)
 };
 
 void mergeAll( Merge & m )
@@ -306,13 +308,73 @@ void mergeAll( Merge & m )
 	if ( withAlb )
 		m.out.alb.reserve( total * 3 );
 	Index maskIdx, glowIdx, modelIdx;
-	for ( const RtTraceUnit & u : m.units )
-		if ( u.soup )
+	size_t nearGot = 0;
+	if ( m.oneBlas ) {   // red oneblas: round 5's soup, in round 5's order, no parts
+		for ( const RtTraceUnit & u : m.units )
+			if ( u.soup )
+				append( m.out, u.soup->soup, &u.soup->maskBytes, &u.soup->glowBytes, withAlb, maskIdx, glowIdx, modelIdx );
+		nearGot = m.out.tris.size() / 9;
+		for ( const RtFarPick & p : m.farPicks )
+			if ( p.shape )
+				appendFar( m.out, p, withAlb, maskIdx );
+	} else {
+		/* round 6: the soup in parts, each one BLAS the device keeps while its triangles stay the same: a loaded cell,
+		 * the large references standing in one block of cells, the far runs of one block */
+		std::vector<std::uint32_t> starts;
+		const auto mark = [&]() { starts.push_back( std::uint32_t( m.out.tris.size() / 9 ) ); };
+		std::vector<const RtTraceUnit *> lrefs;
+		for ( const RtTraceUnit & u : m.units ) {
+			if ( !u.soup )
+				continue;
+			if ( u.lref ) {
+				lrefs.push_back( &u );
+				continue;
+			}
+			mark();
 			append( m.out, u.soup->soup, &u.soup->maskBytes, &u.soup->glowBytes, withAlb, maskIdx, glowIdx, modelIdx );
-	const size_t nearGot = m.out.tris.size() / 9;
-	for ( const RtFarPick & p : m.farPicks )
-		if ( p.shape )
-			appendFar( m.out, p, withAlb, maskIdx );
+		}
+		std::stable_sort( lrefs.begin(), lrefs.end(), []( const RtTraceUnit * a, const RtTraceUnit * b ) {
+			return rttracesetrule::farBlock( a->x, a->y ) < rttracesetrule::farBlock( b->x, b->y );
+		} );
+		for ( size_t i = 0; i < lrefs.size(); i++ ) {
+			const RtTraceUnit & u = *lrefs[i];
+			if ( !i || rttracesetrule::farBlock( u.x, u.y ) != rttracesetrule::farBlock( lrefs[i - 1]->x, lrefs[i - 1]->y ) )
+				mark();
+			append( m.out, u.soup->soup, &u.soup->maskBytes, &u.soup->glowBytes, withAlb, maskIdx, glowIdx, modelIdx );
+		}
+		nearGot = m.out.tris.size() / 9;
+		struct FarRun
+		{
+			std::int64_t block;
+			int pick, run;
+		};
+		std::vector<FarRun> fr;
+		for ( size_t pi = 0; pi < m.farPicks.size(); pi++ ) {
+			const RtFarPick & p = m.farPicks[pi];
+			if ( !p.shape )
+				continue;
+			for ( const int ri : p.runs ) {
+				if ( ri < 0 || size_t( ri ) >= p.shape->runs.size() )
+					continue;
+				const qint64 c = p.shape->runs[size_t( ri )].cell;   // CellFarHide::cellKey: x high, y low
+				fr.push_back( { rttracesetrule::farBlock( int( c >> 32 ), int( quint32( c & 0xFFFFFFFFll ) ) ), int( pi ), ri } );
+			}
+		}
+		std::stable_sort( fr.begin(), fr.end(), []( const FarRun & a, const FarRun & b ) { return a.block < b.block; } );
+		for ( size_t i = 0; i < fr.size(); ) {
+			if ( !i || fr[i].block != fr[i - 1].block )
+				mark();
+			RtFarPick one;
+			one.shape = m.farPicks[size_t( fr[i].pick )].shape;
+			size_t j = i;
+			for ( ; j < fr.size() && fr[j].block == fr[i].block && fr[j].pick == fr[i].pick; j++ )
+				one.runs.push_back( fr[j].run );
+			appendFar( m.out, one, withAlb, maskIdx );
+			i = j;
+		}
+		m.out.parts = rttracesetrule::blasParts( starts, std::uint32_t( m.out.tris.size() / 9 ), rttracesetrule::kBlasPartCap );
+	}
+	m.parts = int( m.out.parts.size() );
 	const size_t got = m.out.tris.size() / 9;
 	m.farTris = qint64( got - nearGot );
 	if ( withAlb )
@@ -456,8 +518,10 @@ void rtTraceSetSync( const void * nif, std::vector<RtTraceUnit> units, int cx, i
 		rule.push_back( r );
 	}
 	const int farCells = farInfo.cells;
-	const std::uint64_t farTris = std::uint64_t( farInfo.terrainTris + farInfo.objTris );
-	const std::uint64_t key = rttracesetrule::setKey( rule, ring, std::uint64_t( farCells ), farTris, farInfo.key );
+	const std::uint64_t farTris = std::uint64_t( farInfo.terrainTris + farInfo.objTris + farInfo.waterTris + farInfo.cardTris );
+	// round 6: the red oneblas is in the key, so a live flip publishes the set again (with or without parts)
+	const std::uint64_t key = rttracesetrule::setKey( rule, ring, std::uint64_t( farCells ), farTris, farInfo.key )
+		^ ( rtTraceSetRed( "oneblas" ) ? 0x6F6E65626C617321ull : 0ull );
 	s.cx = cx;
 	s.cy = cy;
 	s.noSoup = unitsNoSoup;
@@ -508,6 +572,8 @@ void rtTraceSetTick( const void * nif, int ex, int ey )
 			}
 			const bool in = rttracesetrule::cameraIn( m->rule, ex, ey );
 			const double bytes = double( m->out.tris.size() ) * 4.0 + double( m->out.alb.size() ) + double( m->out.twoSided.size() );
+			const int parts = m->parts;
+			const bool oneBlas = m->oneBlas;
 			ProbeGiSpec ks;   // an exterior: lit by the sky as it is now (probesky.cpp)
 			probeSkyKeepMove( nif, std::move( m->out ), ks, true );
 			s.build = m->build;
@@ -532,6 +598,18 @@ void rtTraceSetTick( const void * nif, int ex, int ey )
 				.arg( fi.terrainTris ).arg( mb39( fi.terrainTris ), 0, 'f', 1 ).arg( fi.objTris ).arg( mb39( fi.objTris ), 0, 'f', 1 )
 				.arg( fi.objCells ).arg( qint64( rttracesetrule::kFarObjTriCap ) ).arg( fi.objDropped ).arg( fi.objCellsDropped )
 				.arg( fi.flat ).arg( fi.cacheShapes ).arg( fi.cacheMb, 0, 'f', 1 ).arg( fi.pending ) );
+			// round 6: far water, the carded far trees, the soup's parts
+			say( QStringLiteral( "gen %1 by source, more: far water %2 triangles %3 MB%4 | far tree cards %5 triangles %6 MB = the "
+				"authored far mesh of %7 carded trees%8 (the ring's far cells draw %9 cards, %10 with no authored mesh row: not "
+				"traced) | BLAS parts %11%12" )
+				.arg( s.gen ).arg( fi.waterTris ).arg( mb39( fi.waterTris ), 0, 'f', 1 )
+				.arg( rtTraceSetRed( "nofarwater" ) ? QStringLiteral( " (RED nofarwater)" ) : QString() )
+				.arg( fi.cardTris ).arg( mb39( fi.cardTris ), 0, 'f', 1 ).arg( fi.cardTrees )
+				.arg( rtTraceSetRed( "nofarcards" ) ? QStringLiteral( " (RED nofarcards)" ) : QString() )
+				.arg( fi.cardsInRing ).arg( fi.cardsNoMesh ).arg( parts )
+				.arg( oneBlas ? QStringLiteral( " (RED oneblas: the single soup, one BLAS rebuilt whole)" )
+					: QStringLiteral( " (a loaded cell, a block's large references, a block of %1 x %1 far cells: one BLAS each, kept "
+						"while unchanged)" ).arg( rttracesetrule::kFarBlockCells ) ) );
 		}
 	}
 	const bool parked = rtTraceSetRed( "parked" );
@@ -555,6 +633,7 @@ void rtTraceSetTick( const void * nif, int ex, int ey )
 	m->cx = s.cx;
 	m->cy = s.cy;
 	m->noSoup = s.noSoup;
+	m->oneBlas = rtTraceSetRed( "oneblas" );
 	s.merge = m;
 	std::thread( [m]() {
 		QElapsedTimer t;

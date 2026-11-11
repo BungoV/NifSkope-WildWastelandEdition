@@ -970,6 +970,21 @@ int ImpostorChunk::cellFarCardsShownIn( const QSet<qint64> & cells )
 	return n;
 }
 
+void ImpostorChunk::cellFarCardsMeshIn( const QSet<qint64> & cells, int * all, int * noMesh )
+{
+	int n = 0, bare = 0;
+	for ( const Placed & p : farSt().cards.placed )
+		if ( cells.contains( cardCell( p ) ) && !cardHidden( p ) ) {
+			n++;
+			if ( p.ladderMeshStep < 0 )
+				bare++;
+		}
+	if ( all )
+		*all = n;
+	if ( noMesh )
+		*noMesh = bare;
+}
+
 int ImpostorChunk::cellFarCasters( QVector<FarCasterPiece> & out, float apexScale, const float * keep, int * cut )
 {
 	out.clear();

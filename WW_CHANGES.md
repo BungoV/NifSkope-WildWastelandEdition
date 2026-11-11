@@ -1,3 +1,34 @@
+## AIRPERF1 round 6 (2026-11-11): far water and far tree cards in the traced set, a BLAS per part
+
+Changed, not checked (no build in this round; offline: tests/cellstreamrule/run.sh 26 checks, 20 reds; the kernels
+recompiled, tests/spvsync green; syntax check).
+
+- **Far water is traced** (`src/features/gi/rtfartrace.*`, `Stream::traceSync`): the far water shapes of the ring are
+  read like far objects and follow the stream the same way; two-sided, one stated tone (0.06), no map. The endless
+  sea plane stays out, and the loaded cells' own water is still not traced.
+  Lines: `cell stream: traced set handed over: far water T triangles from S shapes | ...` and
+  `rtddgi traced set: gen G by source, more: far water ... | far tree cards ... | BLAS parts ...`.
+  Red (WW_CELL_RTSET_RED, live, one word): `nofarwater`.
+- **Far tree cards are traced by their authored far mesh** (`impostorchunk.* cellFarCardsMeshIn`): a card is a photo
+  that turns to the eye and has no place in the world, so the rays take the tree's authored far mesh row of the
+  instanced far rows instead (alpha-tested with its own map; the kernels do test alpha). A carded tree with no
+  authored mesh row is counted in the line (`N of them have no authored mesh row and are not traced`), never given
+  an invented mesh. Red: `nofarcards`.
+- **A BLAS per part** (`rttraceset.cpp mergeAll`, `bakert.cpp buildRtParts`, kernels `rtddgi/trace.comp`,
+  `restir.comp`, `airrays.comp` + their `.spv.h`): the merged soup names its parts (each loaded cell, the large refs
+  of one 4 x 4 cell block, the far runs of one 4 x 4 cell block; at most 256, neighbours joined above that). Each
+  part is its own BLAS (opaque + alpha-tested), kept on the device by the bytes of its triangles while any volume
+  holds it, so a cell crossing builds only the parts that are new and one small TLAS. The tables keep the single
+  soup's order; a hit's row is the instance's custom index + the primitive (+ the opaque count for the alpha-tested
+  geometry), `rttracesetrule.h blasRow` == the kernels' `ddgiPrim` / `rsPrim` / `arPrim`. The set's local origin
+  snaps to a 32768-unit grid and the BLAS grow amount to a power of two so a part's bytes repeat from set to set.
+  Lines: `rtddgi cell: cascade L ...: BLAS parts N: B BLASes built (T triangles), K found again (T triangles),
+  masks + BLAS + TLAS M ms`; CLI `rtddgi BLAS parts N: ...` (`--blas-parts N`, `--blas-red`).
+  Red: `oneblas` (the single soup in round 5's order, one BLAS, a new set generation).
+  Limits: every part rebuilds when the snapped origin or the grow bucket changes; a soup of 2^24 triangles or more
+  stays one BLAS; no BLAS compaction. Unit `u10` (rows over 9 BLASes of a 600-triangle soup: 4096 rays, same hits).
+  The GPU identity gate needs the build: `--blas-parts 8` against `--blas-parts 8 --blas-red`, dumps byte-identical.
+
 ## MODULES1 round 10b (2026-11-11): cloud shadows follow the clouds, the Fusion Shaders shadow law, far baked AO in the vertex colour by the AO rule, a mist card's leak fade, the moon-down ambient, the endless sea's draw line
 
 Changed, not checked (no build, no window in this round; every touched shader program linked offline through the

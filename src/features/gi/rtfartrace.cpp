@@ -25,6 +25,8 @@ namespace
 // terrain, the soup's mid grey for an object
 const unsigned char kDirt[3] = { 40, 32, 23 };
 const unsigned char kGrey[3] = { 128, 128, 128 };
+// round 6: far water, open water's diffuse albedo 0.06 (linear x 255); its maps are normals and flow, not a colour
+const unsigned char kWater[3] = { 15, 15, 15 };
 
 struct Colour
 {
@@ -89,7 +91,8 @@ std::shared_ptr<const RtFarShape> rtFarShapeBuild( const NifModel * nif, Shape *
 	RtFarShape & f = *out;
 	f.src = src;
 	f.sig = rtFarShapeSig( nif, sh );
-	f.twoSided = src == 1;   // a far object is a shell without an inside: no ray may read its back as "inside a wall"
+	// a far object is a shell without an inside: no ray may read its back as "inside a wall"; a water sheet the same
+	f.twoSided = src != 0;
 	if ( !f.sig )
 		return out;
 	const QSharedPointer<CellMesh> cm = cellMeshFor( nif, sh->index() );
@@ -97,8 +100,8 @@ std::shared_ptr<const RtFarShape> rtFarShapeBuild( const NifModel * nif, Shape *
 	BSShaderLightingProperty * bs = sh->wwShaderLighting();
 	const QString texName = bs ? bs->fileName( 0 ) : QString();
 	Colour col;
-	col.tone = src == 0 ? kDirt : kGrey;
-	if ( !flatRed && !texName.isEmpty() )
+	col.tone = src == 0 ? kDirt : ( src == 2 ? kWater : kGrey );
+	if ( !flatRed && src != 2 && !texName.isEmpty() )
 		col.tex = alb.loadFine( texName );
 	const bool tested = sh->wwAlphaTested() || ( cm && cm->inst && cm->inst->alphaTested );
 	if ( src == 1 && tested && !texName.isEmpty() ) {
@@ -160,7 +163,8 @@ std::shared_ptr<const RtFarShape> rtFarShapeBuild( const NifModel * nif, Shape *
 				const qint64 r = qint64( c.baseInstance ) + n;
 				if ( ( r + 1 ) * 16 > I.inst.size() )
 					break;
-				if ( !rttracesetrule::rowTraced( r < I.rowStep.size() ? unsigned( I.rowStep[int( r )] ) : 0u ) )
+				const unsigned rowStep = r < I.rowStep.size() ? unsigned( I.rowStep[int( r )] ) : 0u;
+				if ( !rttracesetrule::rowTraced( rowStep ) )
 					continue;
 				const float * R = I.inst.constData() + r * 16;
 				// world = the shape's own transform x the row
@@ -188,6 +192,8 @@ std::shared_ptr<const RtFarShape> rtFarShapeBuild( const NifModel * nif, Shape *
 				run.first = it->second.first;
 				run.count = it->second.second;
 				run.xf = int( f.xf.size() );
+				// round 6: the ladder's ring row is a carded tree's authored far mesh
+				run.kind = src == 1 && rttracesetrule::rowCard( rowStep ) ? quint8( 3 ) : quint8( src );
 				f.xf.push_back( x );
 				f.runs.push_back( run );
 			}
@@ -245,6 +251,7 @@ std::shared_ptr<const RtFarShape> rtFarShapeBuild( const NifModel * nif, Shape *
 				RtFarShape::Run run;
 				run.cell = o.first;
 				run.first = at;
+				run.kind = quint8( src );
 				f.runs.push_back( run );
 			}
 			f.runs.back().count++;

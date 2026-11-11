@@ -17,6 +17,9 @@
 struct ProbeSoup
 {
 	std::vector<float> tris;    //!< 9 floats per triangle, world units
+	/*! lane AIRPERF1 r6: the first triangle of each part, ascending from 0 (rttracesetrule.h blasParts); the ray-traced
+	 *  GI's device builds one BLAS a part. Empty = one part. Only the stream's traced set fills it */
+	std::vector<quint32> parts;
 	struct Door
 	{
 		quint32 ref = 0;

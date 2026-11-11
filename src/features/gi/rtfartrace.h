@@ -12,7 +12,10 @@
  *  An instanced bucket keeps its meshes once, in the mesh's own frame, and a 3 x 4 placement a run: the worker places
  *  them, so the main thread never expands a row.
  *
- *  Not in it: far water and the sea (the trace has no water), and far trees drawn as cards (they have no mesh). */
+ *  Round 6: far water is in it (source 2: a sheet in open water's stated tone, two-sided), and a far tree drawn as a
+ *  card is traced as its AUTHORED far mesh, the tree ladder's ring row of the instanced buckets (Run::kind 3). Not in
+ *  it: the endless sea (one plane under the whole map, no cells to cut it by), and a carded tree that has no authored
+ *  mesh row (counted in the hand-over line; the trace never makes a mesh up). */
 
 #include <QtGlobal>
 
@@ -40,8 +43,9 @@ struct RtFarShape
 		quint32 ref = 0;         //!< the placed object (0: none)
 		int first = 0, count = 0;   //!< triangles of `tris`
 		int xf = -1;             //!< -1: the triangles are in the world's frame already
+		quint8 kind = 0;         //!< round 6: 0 terrain, 1 object, 2 water, 3 a far tree card's authored mesh
 	};
-	int src = 0;                 //!< 0 the far terrain, 1 far objects
+	int src = 0;                 //!< 0 the far terrain, 1 far objects, 2 far water (rttracesetrule.h farSrcOf)
 	quint64 sig = 0;             //!< what it was read from (rtFarShapeSig): a rebuilt far field gives another
 	int span[4] = { 0, 0, -1, -1 };   //!< the cells its runs stand in (x0, y0, x1, y1)
 	std::vector<float> tris;     //!< 9 floats a triangle
@@ -65,7 +69,7 @@ struct RtFarShape
 
 //! what the shape is made of now (0: nothing to trace)
 quint64 rtFarShapeSig( const NifModel * nif, Shape * sh );
-/*! the shape read (main thread). `src` 0 the terrain, 1 objects. `flatRed` = the stated tone on every triangle (round
+/*! the shape read (main thread). `src` 0 the terrain, 1 objects, 2 water. `flatRed` = the stated tone on every triangle (round
  *  4's far colour, red WW_CELL_RTSET_RED=fardirt). Vertex colours are not read: on the far buckets they are bake
  *  channels (the far AO, the wind weight), not paint */
 std::shared_ptr<const RtFarShape> rtFarShapeBuild( const NifModel * nif, Shape * sh, int src, ProbeAlbedo & alb, bool flatRed );

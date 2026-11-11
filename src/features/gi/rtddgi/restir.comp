@@ -32,7 +32,8 @@ layout( std430, set = 1, binding = 9 ) readonly buffer RCand { int cand[]; };
 layout( std430, set = 1, binding = 10 ) buffer ROut { vec2 outRatio[]; };     // the ratio, the linear depth it is for
 
 // BLAS (geometry g, primitive i) -> its row in remap[] / verts[] (trace.comp ddgiPrim)
-uint rsPrim( uint g, uint i ) { return i + ( g == 1u ? uint( P.counts.w ) : 0u ); }
+// AIRPERF1 r6: c = the instance's custom index, a BLAS part's first row (MIRROR rttracesetrule.h blasRow)
+uint rsPrim( uint c, uint g, uint i ) { return c + i + ( g == 1u ? uint( P.counts.w ) : 0u ); }
 
 // MIRROR trace.comp ddgiTriTest (the TRUE triangle; the BLAS is grown)
 bool rsTriTest( uint pr, vec3 o, vec3 d, out float t, out float u, out float v )
@@ -72,7 +73,7 @@ bool rsBlocked( vec3 o, vec3 d, float tmax )
 	while ( rayQueryProceedEXT( q ) ) {
 		if ( rayQueryGetIntersectionTypeEXT( q, false ) != gl_RayQueryCandidateIntersectionTriangleEXT )
 			continue;
-		const uint pr = rsPrim( rayQueryGetIntersectionGeometryIndexEXT( q, false ), rayQueryGetIntersectionPrimitiveIndexEXT( q, false ) );
+		const uint pr = rsPrim( uint( rayQueryGetIntersectionInstanceCustomIndexEXT( q, false ) ), rayQueryGetIntersectionGeometryIndexEXT( q, false ), rayQueryGetIntersectionPrimitiveIndexEXT( q, false ) );
 		float t, u, v;
 		if ( rsTriTest( pr, o, d, t, u, v ) && t > DDGI_TMIN && t <= tmax && ( noHole || !ddgiHole( remap[pr], u, v ) ) )
 			rayQueryConfirmIntersectionEXT( q );

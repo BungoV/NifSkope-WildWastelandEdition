@@ -214,6 +214,178 @@ inline double docWorld( double rel, double docOrigin )
 	return rel + docOrigin;
 }
 
+// ---- round 6: far water, far tree cards, a BLAS a part
+
+/*! which source a far shape is, by its name: 0 the far terrain, 1 far objects, 2 far water; -1 = not traced (no far
+ *  shape, or the endless sea: one plane under the whole map with no cells to cut it by) */
+inline int farSrcOf( const char * name )
+{
+	const auto starts = []( const char * s, const char * p ) {
+		for ( ; *p; s++, p++ )
+			if ( *s != *p )
+				return false;
+		return true;
+	};
+	if ( !name || !starts( name, "FarLOD" ) || starts( name, "FarLOD sea" ) )
+		return -1;
+	if ( starts( name, "FarLOD water" ) || starts( name, "FarLOD_water" ) ) {
+#ifdef RTTRACESETRULE_RED_NOWATERSRC
+		return -1;   // red: round 5, the trace has no water
+#else
+		return 2;
+#endif
+	}
+	if ( starts( name, "FarLOD terrain" ) || starts( name, "FarLOD_terrain" ) )
+		return 0;
+	return 1;
+}
+
+/*! an instanced far row stands in for a far tree's card: the tree ladder's ring row (0x80), the tree's AUTHORED far
+ *  mesh. A card itself is a view-facing photo with no place in the world's frame, so the trace takes the mesh the game
+ *  ships for that tree at that distance, never a made-up one */
+inline bool rowCard( unsigned step )
+{
+#ifdef RTTRACESETRULE_RED_NOCARDROW
+	(void)step;
+	return false;
+#else
+	return ( step & 0x80u ) != 0;
+#endif
+}
+
+constexpr int kFarBlockCells = 4;    //!< far runs are grouped in blocks this many cells wide: one BLAS part a block
+constexpr int kBlasPartCap = 256;    //!< at most this many parts in one soup (neighbours are joined above it)
+constexpr double kOriginGrid = 32768.0;   //!< the soup's local origin snaps to this (a part's floats then repeat)
+
+//! the block a far cell lies in (floor division: negative cells too)
+inline std::int64_t farBlock( int x, int y )
+{
+	const auto fl = []( int v ) { return v >= 0 ? v / kFarBlockCells : -( ( -v + kFarBlockCells - 1 ) / kFarBlockCells ); };
+	return ( std::int64_t( fl( x ) ) << 32 ) ^ std::int64_t( std::uint32_t( fl( y ) ) );
+}
+
+/*! the soup's parts: `starts` = each part's first soup triangle, in soup order. Out: ascending, first 0, no empty part,
+ *  at most `cap` (every k-th start kept above it). Empty out = one part (the single soup) */
+inline std::vector<std::uint32_t> blasParts( const std::vector<std::uint32_t> & starts, std::uint32_t nTri, int cap )
+{
+	std::vector<std::uint32_t> s;
+	if ( !nTri )
+		return s;
+#ifndef RTTRACESETRULE_RED_PARTGAP
+	s.push_back( 0 );
+#endif
+	for ( const std::uint32_t a : starts ) {
+		if ( a >= nTri || ( !s.empty() && a <= s.back() ) )
+			continue;
+		s.push_back( a );
+	}
+	const size_t lim = size_t( std::max( cap, 1 ) );
+	if ( s.size() > lim ) {
+		const size_t k = ( s.size() + lim - 1 ) / lim;
+		std::vector<std::uint32_t> j;
+		for ( size_t i = 0; i < s.size(); i += k )
+			j.push_back( s[i] );
+		s.swap( j );
+	}
+	if ( s.size() < 2 )
+		s.clear();
+	return s;
+}
+
+//! one BLAS of a soup in parts: `count` rows of the tables from `row` (opaque rows first, then the alpha-tested ones)
+struct BlasPart
+{
+	std::uint32_t row = 0, count = 0;
+	bool alpha = false;
+};
+
+/*! the BLASes of a soup in parts (blasParts' out). The tables keep their order: every opaque soup triangle in soup
+ *  order, then every alpha-tested one; a part's opaque rows are one run of the first, its alpha rows one run of the
+ *  second. `row` is the instance's custom index */
+template <class Masked> std::vector<BlasPart> blasPlan( const std::vector<std::uint32_t> & parts, std::uint32_t nTri, Masked masked )
+{
+	std::vector<BlasPart> out;
+	std::uint32_t nOpaque = 0;
+	for ( std::uint32_t t = 0; t < nTri; t++ )
+		nOpaque += masked( t ) ? 0u : 1u;
+	std::uint32_t o = 0, a = 0;
+	for ( size_t p = 0; p < parts.size(); p++ ) {
+		const std::uint32_t t0 = parts[p], t1 = p + 1 < parts.size() ? parts[p + 1] : nTri;
+		std::uint32_t no = 0, na = 0;
+		for ( std::uint32_t t = t0; t < t1 && t < nTri; t++ )
+			( masked( t ) ? na : no )++;
+		if ( no ) {
+			BlasPart b;
+			b.row = o;
+			b.count = no;
+			out.push_back( b );
+		}
+		if ( na ) {
+			BlasPart b;
+			b.row = nOpaque + a;
+			b.count = na;
+			b.alpha = true;
+			out.push_back( b );
+		}
+		o += no;
+		a += na;
+	}
+	return out;
+}
+
+/*! a hit's row in the tables (remap[], verts[]): the instance's custom index (a part's first row; 0 for the single
+ *  soup), the primitive, and for the single soup's second geometry the opaque count.
+ *  MIRROR trace.comp ddgiPrim, restir.comp rsPrim, airrays.comp arPrim */
+inline std::uint32_t blasRow( std::uint32_t custom, std::uint32_t g, std::uint32_t i, std::uint32_t nOpaque )
+{
+#ifdef RTTRACESETRULE_RED_ROWNOBASE
+	custom = 0;   // red: round 5's kernels (no instance id)
+#endif
+	return custom + i + ( g == 1u ? nOpaque : 0u );
+}
+
+/*! the soup's local origin on one axis: with parts it snaps to kOriginGrid, so a part's vertices are the same floats
+ *  in the next set too (its BLAS is found again); without parts the floor of the box's middle, as before */
+inline double stableOrigin( double lo, double hi, bool parts )
+{
+	const double mid = ( lo + hi ) * 0.5;
+#ifdef RTTRACESETRULE_RED_ORIGINMID
+	(void)parts;
+	return std::floor( mid );
+#else
+	return parts ? std::floor( mid / kOriginGrid + 0.5 ) * kOriginGrid : std::floor( mid );
+#endif
+}
+
+/*! how far the BLAS's triangles grow, for parts: the whole soup's bound rounded up to a power of two, so a part built
+ *  under one set's bound is still wide enough (and the same key) under the next */
+inline double growQuant( double del )
+{
+#ifdef RTTRACESETRULE_RED_GROWEXACT
+	return del;
+#else
+	return del > 0.0 ? std::exp2( std::ceil( std::log2( del ) ) ) : 0.0;
+#endif
+}
+
+//! a part's key: its bytes, 8 at a time
+inline std::uint64_t bytesKey( const void * p, size_t n, std::uint64_t seed )
+{
+	const unsigned char * b = static_cast<const unsigned char *>( p );
+	std::uint64_t h = seed ^ ( std::uint64_t( n ) * 0x9E3779B97F4A7C15ull );
+	size_t i = 0;
+	for ( ; i + 8 <= n; i += 8 ) {
+		std::uint64_t v = 0;
+		for ( int k = 0; k < 8; k++ )
+			v |= std::uint64_t( b[i + size_t( k )] ) << ( 8 * k );
+		h = ( h ^ v ) * 0x100000001B3ull;
+		h ^= h >> 29;
+	}
+	for ( ; i < n; i++ )
+		h = ( h ^ b[i] ) * 0x100000001B3ull;
+	return h ^ ( h >> 32 );
+}
+
 } // namespace rttracesetrule
 
 #endif

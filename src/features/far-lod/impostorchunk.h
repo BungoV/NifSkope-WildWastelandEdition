@@ -103,6 +103,9 @@ inline qint64 cellFarCellKey( int x, int y ) { return ( qint64( x ) << 32 ) ^ qi
 void cellFarHideSet( const QSet<qint64> & cells );
 //! The armed cards placed in `cells` that still draw
 int cellFarCardsShownIn( const QSet<qint64> & cells );
+/*! lane AIRPERF1 r6: of the armed cards placed in `cells` that still draw, how many there are and how many have no
+ *  authored mesh row beside the card (ladderMeshStep < 0): those the ray-traced GI cannot trace */
+void cellFarCardsMeshIn( const QSet<qint64> & cells, int * all, int * noMesh );
 
 } // namespace ImpostorChunk
 

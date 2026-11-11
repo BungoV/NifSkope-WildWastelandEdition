@@ -66,6 +66,10 @@ struct RtDdgiSpec
 	 *  placement; unused while hi <= lo on any axis */
 	float box[6] = { 0, 0, 0, 0, 0, 0 };
 	bool fitProbes = false;     //!< M2: over maxProbes the spacing grows until the grid fits (else the run refuses)
+	/*! lane AIRPERF1 r6, the CLI's gate (--blas-parts N, --blas-red): a soup without parts is cut in N equal ones (a
+	 *  BLAS each); blasPartsRed keeps the parts' frame and grown amount and builds the one BLAS: the dumps must match */
+	int blasParts = 0;
+	bool blasPartsRed = false;
 };
 
 struct RtDdgiVolume
@@ -83,6 +87,10 @@ struct RtDdgiVolume
 	std::vector<float> dist;        //!< 16 x 16 x 2 a probe: mean, mean^2
 	std::vector<float> fixedDist;   //!< 32 a probe: its fixed rays' stored distances (spec.dumpFixed only)
 	double blasGrow = 0.0;          //!< GPU: how far bakert grew the BLAS's edges (the trace re-tests the true triangles)
+	//! lane AIRPERF1 r6: the scene's BLAS parts (0: the single BLAS), the BLASes this open built / found again, the ms
+	int blasParts = 0, blasNew = 0, blasKept = 0;
+	qint64 blasTrisNew = 0, blasTrisKept = 0;
+	double blasMs = 0.0;
 	// census
 	QString path;                   //!< "gpu (<device>)" or "cpu" + why
 	int probes = 0, off = 0, asleep = 0, vigilant = 0, moved = 0;

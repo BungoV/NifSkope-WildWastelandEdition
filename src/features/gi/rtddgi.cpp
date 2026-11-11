@@ -10,7 +10,8 @@
 #include "features/gi/probeplace.h"
 #include "features/gi/probesky.h"
 #include "features/gi/rtddgimath.h"
-#include "restirmath.h"   // lane RESTIRDI1: the twin of restir.comp (restirCli)
+#include "features/gi/rttracesetrule.h"   // lane AIRPERF1 r6: the BLAS parts' origin
+#include "restirmath.h"  // lane RESTIRDI1: the twin of restir.comp (restirCli)
 #include "features/gi/rtddgi/rtddgi_gpu.h"
 #include "gl/celllights.h"
 
@@ -104,6 +105,7 @@ struct Packed
 {
 	probebvh::Bvh bvh;
 	double O[2] = { 0, 0 };
+	std::vector<uint32_t> parts;   // lane AIRPERF1 r6: the soup's parts (a BLAS each on the device); empty = one
 	std::vector<float> triAttr, lights, rotations;
 	bakert::DdgiGpuParams prm;
 	int nLights = 0;
@@ -631,6 +633,17 @@ static bool packVolume( const ProbeSoup & soup, const WwCellLighting & lighting,
 
 	// ---- the packed inputs (the soup's local frame, probegi's: x, y moved by the floor of the box centre)
 	{
+		/* lane AIRPERF1 r6: the soup's parts (the stream's traced set names them; the CLI's --blas-parts cuts N equal
+		 * ones). With parts the origin snaps to a coarse grid, so a part that did not change has the same local floats in
+		 * the next set and the device finds its BLAS again (rttracesetrule.h stableOrigin) */
+		S.parts.assign( soup.parts.begin(), soup.parts.end() );
+		const uint32_t nSoupTri = uint32_t( soup.tris.size() / 9 );
+		if ( S.parts.empty() && spec.blasParts > 1 ) {
+			std::vector<uint32_t> cut;
+			for ( int k = 0; k < spec.blasParts; k++ )
+				cut.push_back( uint32_t( std::uint64_t( nSoupTri ) * std::uint64_t( k ) / std::uint64_t( spec.blasParts ) ) );
+			S.parts = rttracesetrule::blasParts( cut, nSoupTri, rttracesetrule::kBlasPartCap );
+		}
 		double mn[2] = { 1e300, 1e300 }, mx[2] = { -1e300, -1e300 };
 		for ( size_t i = 0; i < soup.tris.size(); i += 3 )
 			for ( int k = 0; k < 2; k++ ) {
@@ -638,7 +651,7 @@ static bool packVolume( const ProbeSoup & soup, const WwCellLighting & lighting,
 				mx[k] = std::max( mx[k], double( soup.tris[i + size_t( k )] ) );
 			}
 		for ( int k = 0; k < 2; k++ )
-			S.O[k] = std::floor( ( mn[k] + mx[k] ) * 0.5 );
+			S.O[k] = rttracesetrule::stableOrigin( mn[k], mx[k], S.parts.size() > 1 );
 	}
 	S.bvh.t.resize( soup.tris.size() );
 	for ( size_t i = 0; i < soup.tris.size(); i += 3 ) {
@@ -793,6 +806,8 @@ bool rtddgiRun( const ProbeSoup & soup, const WwCellLighting & lighting, const P
 	if ( spec.gpu > 0 ) {
 		bakert::DdgiGpuJob job;
 		job.bvh = &S.bvh;
+		job.parts = S.parts;   // lane AIRPERF1 r6
+		job.partsRed = spec.blasPartsRed;
 		job.params = S.prm;
 		job.triAttr = S.triAttr;
 		job.lights = S.lights;
@@ -818,6 +833,12 @@ bool rtddgiRun( const ProbeSoup & soup, const WwCellLighting & lighting, const P
 			out->fixedDist = std::move( g.fixedDist );
 			lastRays = std::move( g.raysAll );
 			out->blasGrow = g.blasGrow;
+			out->blasParts = g.blasParts;   // lane AIRPERF1 r6
+			out->blasNew = g.blasNew;
+			out->blasKept = g.blasKept;
+			out->blasTrisNew = g.blasTrisNew;
+			out->blasTrisKept = g.blasTrisKept;
+			out->blasMs = g.blasMs;
 			out->rays = g.rays;
 			out->msBuild += g.msBuild;
 			out->msReloc = g.msReloc;
@@ -1072,6 +1093,8 @@ bool RtDdgiLive::open( const ProbeSoup & soup, const WwCellLighting & lighting, 
 				h = ( h ^ b[i] ) * 0x100000001B3ULL;
 		};
 		eat( S.O, sizeof S.O );
+		if ( !S.parts.empty() )   // lane AIRPERF1 r6
+			eat( S.parts.data(), S.parts.size() * sizeof( uint32_t ) );
 		const size_t nt = S.bvh.t.size(), na = S.triAttr.size(), nl = S.lights.size();
 		eat( &nt, sizeof nt );
 		eat( &na, sizeof na );
@@ -1094,6 +1117,8 @@ bool RtDdgiLive::open( const ProbeSoup & soup, const WwCellLighting & lighting, 
 	bakert::DdgiGpuJob job;
 	job.sceneFrom = take ? sceneFrom->d->s : nullptr;
 	job.bvh = &S.bvh;
+	job.parts = S.parts;   // lane AIRPERF1 r6: a BLAS a part
+	job.partsRed = d->spec.blasPartsRed;
 	job.params = S.prm;
 	d->prm = S.prm;   // MODULES1 11-09 item 3: relight's base
 	d->lightOwed = false;
@@ -1126,6 +1151,12 @@ bool RtDdgiLive::open( const ProbeSoup & soup, const WwCellLighting & lighting, 
 	}
 	d->count();
 	v.blasGrow = g.blasGrow;
+	v.blasParts = g.blasParts;   // lane AIRPERF1 r6
+	v.blasNew = g.blasNew;
+	v.blasKept = g.blasKept;
+	v.blasTrisNew = g.blasTrisNew;
+	v.blasTrisKept = g.blasTrisKept;
+	v.blasMs = g.blasMs;
 	v.rays = g.rays;
 	v.msBuild += g.msBuild;
 	v.msReloc = g.msReloc;
@@ -1551,6 +1582,8 @@ int rtddgiCli( const QStringList & args )
 		else if ( a == QLatin1String( "--no-classify" ) ) spec.classify = false;
 		else if ( a == QLatin1String( "--trace-asleep" ) ) spec.skipAsleep = false;
 		else if ( a == QLatin1String( "--dump-fixed" ) ) spec.dumpFixed = true;
+		else if ( a == QLatin1String( "--blas-parts" ) ) { spec.blasParts = nx.toInt(); i++; }   // lane AIRPERF1 r6
+		else if ( a == QLatin1String( "--blas-red" ) ) spec.blasPartsRed = true;
 		else if ( a == QLatin1String( "--interior" ) ) forceInterior = true;   // SKYBELOW1: a sky-lit interior (SKYINT1's kind)
 		else if ( a == QLatin1String( "--sun" ) || a == QLatin1String( "--sky" ) ) {   // probegi's arguments
 			const QStringList v = nx.split( ',' );
@@ -1673,6 +1706,10 @@ int rtddgiCli( const QStringList & args )
 		qPrintable( vol.path ), vol.dims[0], vol.dims[1], vol.dims[2], vol.probes, vol.off, vol.asleep, vol.vigilant, vol.moved,
 		(long long)vol.rays, vol.msBuild, vol.msReloc, spec.frames, vol.msFrames, vol.blasGrow );
 	std::printf( "%s\n", skyBelowLine( vol ).constData() );   // lane SKYBELOW1
+	// lane AIRPERF1 r6: the gate reads this line (--blas-parts N against --blas-parts N --blas-red: the same dumps)
+	std::printf( "rtddgi BLAS parts %d: %d BLASes built (%lld triangles), %d found again (%lld triangles), %.1f ms%s\n", vol.blasParts,
+		vol.blasNew, (long long)vol.blasTrisNew, vol.blasKept, (long long)vol.blasTrisKept, vol.blasMs,
+		spec.blasPartsRed ? " (RED --blas-red: the parts' frame, one BLAS)" : ( vol.blasParts ? "" : " (one BLAS)" ) );
 	return 0;
 }
 
