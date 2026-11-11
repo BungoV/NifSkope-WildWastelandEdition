@@ -241,13 +241,15 @@ void paramsOf( const QVector<Draw> & ds, BandParams out[3], bool redMax,
 	}
 	bandsOf( role.data(), cover.data(), reinterpret_cast<const float( * )[3]>( tint.data() ), int( role.size() ), out,
 		redMax, heights ? reinterpret_cast<const float( * )[2]>( heights->data() )
-				: own ? reinterpret_cast<const float( * )[2]>( height.data() ) : nullptr );
+				: own ? reinterpret_cast<const float( * )[2]>( height.data() ) : nullptr,
+		wx && wx->on && wx->heightsAlone );	// lane AIRPERF1 A9: file heights alone under physicalWeather
 	if ( !wx || !wx->on )
 		return;
 	// lane WX1: clouds.coverage (each band keeps its share) and clouds.density
 	float c[3] = { out[0].coverage, out[1].coverage, out[2].coverage };
 	float d[3] = { out[0].density, out[1].density, out[2].density };
-	WwWeatherRecxMath::cloudsFromFile( c, d, wx->coverage, wx->density, wx->recordFirst );
+	// lane AIRPERF1 A9: under physicalWeather a written cover / water content decides alone (weatherrecxmath.h)
+	WwWeatherRecxMath::cloudsFromFile( c, d, wx->coverage, wx->density, wx->recordFirst, wx->coverAlone, wx->densityAlone );
 	for ( int b = 0; b < 3; b++ ) {
 		out[b].coverage = c[b];
 		out[b].density = d[b];

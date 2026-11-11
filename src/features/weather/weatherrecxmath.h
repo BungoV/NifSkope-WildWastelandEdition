@@ -72,19 +72,29 @@ inline void coverTo( const float c[3], float target, float out[3] )
 }
 
 /* clouds.coverage / clouds.density on the three bands (cloudmap.cpp paramsOf); < 0 = not set. recordFirst (the red):
- * the record's cover wins when it has one (the wrong order) */
-inline void cloudsFromFile( float cover[3], float density[3], float coverage, float densityK, bool recordFirst )
+ * the record's cover wins when it has one (the wrong order).
+ * lane AIRPERF1 A9 (physicalWeather on, WwWeatherRecx): coverAlone = the cover was written in the file: a record with
+ * no cloud layer no longer keeps the sky clear, the Low band (the type's band) takes the cover at a plain cumulus'
+ * density 1. densityAlone = liquidWater / dropletRadius were written: the Low band's density IS densityK (sigma(file) /
+ * sigma(type), SPEC.md 1.4), no longer multiplied by the record layers' role mean; Mid and High keep theirs x K. */
+inline void cloudsFromFile( float cover[3], float density[3], float coverage, float densityK, bool recordFirst,
+	bool coverAlone = false, bool densityAlone = false )
 {
 	const bool recordHas = cover[0] > 0.0f || cover[1] > 0.0f || cover[2] > 0.0f;
 	if ( coverage >= 0.0f && !( recordFirst && recordHas ) ) {
 		float o[3];
 		coverTo( cover, coverage, o );
+		if ( coverAlone && !recordHas ) {
+			o[0] = std::clamp( coverage, 0.0f, 1.0f );
+			if ( !( density[0] > 0.0f ) )
+				density[0] = 1.0f;
+		}
 		for ( int b = 0; b < 3; b++ )
 			cover[b] = o[b];	// the sheet share is a share of the band's cover: it stays
 	}
 	if ( densityK >= 0.0f )
 		for ( int b = 0; b < 3; b++ )
-			density[b] *= densityK;
+			density[b] = ( densityAlone && b == 0 ) ? densityK : density[b] * densityK;
 }
 
 /* a layer's base/top (metres above sea level) as the bands' heights above the eye (cloudmath.h roleInfo's frame);

@@ -20,6 +20,7 @@
 #include <QVector>
 
 #include <cstdio>
+#include <cstring>
 
 using namespace WwWeatherRecxMath;
 
@@ -29,6 +30,21 @@ namespace
 QString redWord()
 {
 	return wwEnvStr( "WW_WEATHER_RECX_RED" ).trimmed().toLower();
+}
+
+//! lane AIRPERF1 A9: the family's red word (noswitch = every family, noswitch-<family>; a comma list), read live
+bool switchRed( const char * family )
+{
+	const QString w = redWord();
+	if ( !w.contains( QLatin1String( "noswitch" ) ) )
+		return false;
+	const QString one = QStringLiteral( "noswitch-" ) + QLatin1String( family );
+	for ( const QString & p : w.split( QLatin1Char( ',' ) ) ) {
+		const QString t = p.trimmed();
+		if ( t == QLatin1String( "noswitch" ) || t == one )
+			return true;
+	}
+	return false;
 }
 
 void sayOnce( const QString & msg )
@@ -451,6 +467,10 @@ QString keyOf( const WwWeatherRecx & r )
 		if ( r.layerLwc[i] >= 0.0f || r.layerRadius[i] >= 0.0f || r.layerIce[i] >= 0.0f || r.layerAnvil[i] >= 0.0f )
 			x += QStringLiteral( " L%1:lwc=%2,r=%3,ice=%4,anvil=%5,type=%6" ).arg( i ).arg( f4( r.layerLwc[i] ), f4( r.layerRadius[i] ),
 				f4( r.layerIce[i] ), f4( r.layerAnvil[i] ), f4( r.layerType[i] ) );
+	if ( r.phys )	// lane AIRPERF1 A9 (absent: the key text is as before)
+		x += QStringLiteral( " phys=0x%1%2%3%4%5" ).arg( r.phys, 0, 16 ).arg( r.coverAlone ? QStringLiteral( " coverAlone" ) : QString(),
+			r.densityAlone ? QStringLiteral( " densityAlone" ) : QString(), r.heightsAlone ? QStringLiteral( " heightsAlone" ) : QString(),
+			r.stormAlone ? QStringLiteral( " stormAlone" ) : QString() );
 	return k + x;
 }
 
@@ -624,6 +644,31 @@ static QJsonObject untranslated( QJsonObject o )
 	return o;
 }
 
+/* lane AIRPERF1 A9: the block families of the physicalWeather switch, and the keys that are a RECORD PART (the WTHR
+ * stores the same quantity, SPEC.md "The generated rung" 4: wind.direction = DATA[17] as a bearing, wind.turbulence =
+ * DATA[19] / 255): written in a file they replace that part with or without the switch (SPEC.md 1.6 rule 2). Every
+ * other key of these blocks is a physical addition. */
+struct PhysFam
+{
+	const char * block;
+	unsigned bit;
+};
+const PhysFam kPhysFam[5] = { { "clouds", WwPhysClouds }, { "night", WwPhysNight }, { "wind", WwPhysWind },
+	{ "lightning", WwPhysLightning }, { "precipitation", WwPhysPrecip } };
+
+int physFamOf( const QString & block )
+{
+	for ( int i = 0; i < 5; i++ )
+		if ( block == QLatin1String( kPhysFam[i].block ) )
+			return i;
+	return -1;
+}
+
+bool recordPart( const char * key )
+{
+	return !std::strcmp( key, "wind.direction" ) || !std::strcmp( key, "wind.turbulence" );
+}
+
 /* one weather at the hour: the files' blocks (per key: the file), then the generated rung for every key no file set,
  * then the record reds (which unset their channel's keys); src = "<key>=<source>" per input */
 WwWeatherRecx resolveOne( const Who & w, const QStringList & roots, const QStringList & files, double hour, unsigned red,
@@ -634,6 +679,7 @@ WwWeatherRecx resolveOne( const Who & w, const QStringList & roots, const QStrin
 	fileLine = QStringLiteral( "%1 %2|0x%3" ).arg( w.edid, w.owner ).arg( lid, 8, 16, QLatin1Char( '0' ) );
 	QMap<QString, QString> src;
 	unsigned useRecord = 0;
+	QString famState[5], famIgnored[5];	// lane AIRPERF1 A9: per family "<switch>:<who decides>", the keys not read
 	for ( const char * block : { "atmosphere", "clouds", "night", "precipitation", "wind", "temperature", "lightning",
 			  "transitions", "textures" } ) {
 		const QString bn = QLatin1String( block );
@@ -721,6 +767,46 @@ WwWeatherRecx resolveOne( const Who & w, const QStringList & roots, const QStrin
 				if ( !r.textures[i].isEmpty() )
 					src[QStringLiteral( "textures.%1" ).arg( QLatin1String( kSlots[i] ) )] = QStringLiteral( "file:" ) + rel;
 		}
+		/* lane AIRPERF1 A9 (bungo 11-11): the block follows its OWN entry's physicalWeather switch. On: its values
+		 * stand (the file decides alone). Off or absent: its physical additions are not read, so the generated rung
+		 * below gives what a weather with no file gets; the record parts it writes stay. The family's red: build 62. */
+		const int fi = physFamOf( bn );
+		if ( fi >= 0 ) {
+			const bool sw = wwRecxPhysicalWeather( h.entry ), redF = switchRed( block );
+			QStringList ign;
+			if ( sw && !redF ) {
+				r.phys |= kPhysFam[fi].bit;
+			} else if ( !redF ) {
+				for ( const Input & in : kInputs )
+					if ( r.*( in.field ) != before.*( in.field ) && !recordPart( in.name ) ) {
+						r.*( in.field ) = before.*( in.field );
+						ign << QLatin1String( in.name );
+					}
+				if ( kPhysFam[fi].bit == WwPhysClouds ) {
+					if ( r.layers != before.layers )
+						ign << QStringLiteral( "layers" );
+					for ( int i = 0; i < 32; i++ ) {
+						r.layerBase[i] = before.layerBase[i];
+						r.layerTop[i] = before.layerTop[i];
+						r.layerLwc[i] = before.layerLwc[i];
+						r.layerRadius[i] = before.layerRadius[i];
+						r.layerIce[i] = before.layerIce[i];
+						r.layerAnvil[i] = before.layerAnvil[i];
+						r.layerType[i] = before.layerType[i];
+					}
+					r.layers = before.layers;
+					r.densityLegacy = before.densityLegacy;
+					if ( !r.layers )
+						src.remove( QStringLiteral( "layers" ) );
+				}
+				if ( kPhysFam[fi].bit == WwPhysPrecip )
+					r.precipLayer = before.precipLayer;
+			}
+			famState[fi] = QStringLiteral( "%1:%2%3" ).arg( sw ? QStringLiteral( "on" ) : QStringLiteral( "off" ),
+				( sw || redF ) ? QStringLiteral( "recx" ) : QStringLiteral( "record" ),
+				redF ? QStringLiteral( " RED=noswitch" ) : QString() );
+			famIgnored[fi] = ign.join( QLatin1Char( ',' ) );
+		}
 		for ( const Input & in : kInputs )
 			if ( !isSet( before, in ) && isSet( r, in ) )
 				src[QLatin1String( in.name )] = QStringLiteral( "file:" ) + rel;
@@ -764,6 +850,38 @@ WwWeatherRecx resolveOne( const Who & w, const QStringList & roots, const QStrin
 	if ( r.recordRed & WwRecFog ) {
 		r.hazeType.clear();
 		src[QStringLiteral( "hazeType" )] = QStringLiteral( "record" );
+	}
+	// lane AIRPERF1 A9: which written values decide alone (a record red or a dropped key is no file value)
+	auto fileKey = [&src]( const char * k ) { return src.value( QLatin1String( k ) ).startsWith( QLatin1String( "file:" ) ); };
+	if ( r.phys & WwPhysClouds ) {
+		r.coverAlone = fileKey( "coverage" );
+		r.densityAlone = fileKey( "liquidWater" ) || fileKey( "dropletRadius" );	// the legacy density is a multiple by its own definition
+		r.heightsAlone = r.layers > 0;
+	}
+	r.stormAlone = ( r.phys & WwPhysLightning ) && fileKey( "lightning.frequency" );
+	r.lightningFreqOwn = r.lightningFreq;
+	{	// the echo: per family the switch, who decides, the numbers in use, the file keys not read
+		const QString nums[5] = {
+			QStringLiteral( "coverage=%1 density=%2 type=%3 liquidWater=%4 dropletRadius=%5 layers=%6%7%8%9" )
+				.arg( f4( r.coverage ), f4( r.density ), f4( r.type ), f4( r.liquidWater ), f4( r.dropletRadius ) ).arg( r.layers )
+				.arg( r.coverAlone ? QStringLiteral( " coverAlone" ) : QString(), r.densityAlone ? QStringLiteral( " densityAlone" ) : QString(),
+					r.heightsAlone ? QStringLiteral( " heightsAlone" ) : QString() ),
+			QStringLiteral( "stars=%1 moonlight=%2" ).arg( f4( r.stars ), f4( r.moonlight ) ),
+			QStringLiteral( "speed=%1 direction=%2 turbulence=%3 gusts=%4" ).arg( f4( r.windSpeed ), f4( r.windDirection ),
+				f4( r.turbulence ), f4( r.gusts ) ),
+			QStringLiteral( "frequency=%1%2" ).arg( f4( r.lightningFreq ), r.stormAlone ? QStringLiteral( " stormAlone" ) : QString() ),
+			QStringLiteral( "rain=%1 snow=%2 wetting=%3 drying=%4" ).arg( f4( r.rainRate ), f4( r.snowRate ), f4( r.wetting ),
+				f4( r.drying ) ) };
+		QString st, ln;
+		for ( int i = 0; i < 5; i++ ) {
+			const QString s = QStringLiteral( " %1=%2" ).arg( QLatin1String( kPhysFam[i].block ),
+				famState[i].isEmpty() ? QStringLiteral( "nofile:record" ) : famState[i] );
+			const QString ig = famIgnored[i].isEmpty() ? QString() : QStringLiteral( "; file keys not read: " ) + famIgnored[i];
+			st += s + ig;
+			ln += s + QLatin1Char( '(' ) + nums[i] + ig + QLatin1Char( ')' );
+		}
+		r.blocksState = w.edid + st;
+		r.blocksLine = QStringLiteral( "weather recx blocks: " ) + w.edid + ln;
 	}
 	for ( auto it = src.constBegin(); it != src.constEnd(); ++it )
 		r.sources << it.key() + QLatin1Char( '=' ) + it.value();
@@ -820,6 +938,11 @@ unsigned wwWeatherRecordChannels( const QString & words )
 									 "lightning, precip, wind, transitions, all)" ).arg( raw ) );
 	}
 	return bits;
+}
+
+bool wwWeatherRecxSwitchRed( const char * family )
+{
+	return switchRed( family );
 }
 
 bool wwCloudRecx14Red()
@@ -927,6 +1050,8 @@ const WwWeatherRecx & wwWeatherRecx()
 			was.haveGen = true;
 			const WwWeatherRecx left = resolveOne( was, roots, files, hour, red, srcLast );
 			blendInto( next, left, pct );
+			next.stormAloneLast = left.stormAlone;	// lane AIRPERF1 A9: the leaving weather's own storm answer
+			next.lightningFreqLast = left.lightningFreqOwn;
 		}
 	} else {
 		src = QStringLiteral( "none(no weather)" );
@@ -936,6 +1061,11 @@ const WwWeatherRecx & wwWeatherRecx()
 	next.hazeHeightM = wwWxOv( WwWx::HazeHeight, next.hazeHeightM );
 	next.coverage = wwWxOv( WwWx::CloudCoverage, next.coverage );
 	next.density = wwWxOv( WwWx::CloudDensity, next.density );
+	// lane AIRPERF1 A9: a live cover / density is the user's own multiple-style value: today's law, no "alone"
+	if ( wwWxOv( WwWx::CloudCoverage, -2.0f ) != -2.0f )
+		next.coverAlone = false;
+	if ( wwWxOv( WwWx::CloudDensity, -2.0f ) != -2.0f )
+		next.densityAlone = false;
 	next.recordFirst = rw == QLatin1String( "recordfirst" );
 	next.on =next.visibilityM >= 0.0f || next.hazeHeightM >= 0.0f || next.ozone >= 0.0f || next.coverage >= 0.0f
 		|| next.density >= 0.0f || next.layers > 0 || next.stars >= 0.0f || next.moonlight >= 0.0f || next.type >= 0.0f
@@ -953,6 +1083,12 @@ const WwWeatherRecx & wwWeatherRecx()
 			qPrintable( wwEnvStr( "WW_WEATHER_RECORD_RED" ).isEmpty() ? QStringLiteral( "none" ) : wwEnvStr( "WW_WEATHER_RECORD_RED" ) ),
 			qPrintable( next.sources.join( QLatin1Char( ' ' ) ) ) );
 		std::fprintf( stderr, "%s\n", qPrintable( cloud14Line( next ) ) );	// lane CLOUDRECX1: the 1.4 clouds line
+	}
+	// lane AIRPERF1 A9: per block family the switch and who decides, when that (not a clock-driven number) changes
+	static QString lastBlocks;
+	if ( !next.blocksState.isEmpty() && next.blocksState != lastBlocks ) {
+		lastBlocks = next.blocksState;
+		std::fprintf( stderr, "%s\n", qPrintable( next.blocksLine ) );
 	}
 	if ( next.key != cur.key ) {
 		next.stamp = cur.stamp + 1;

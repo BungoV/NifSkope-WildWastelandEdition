@@ -1,3 +1,24 @@
+## AIRPERF1 A9 (2026-11-11): clouds, night, wind, lightning and precipitation follow the physical weather switch
+- **The rule (bungo), per block family:** with `"physicalWeather": true` in the block's own entry every physical
+  value written there decides alone; the record is no blend, fit target, clamp or floor. A value not written stays the
+  record's. With the switch off or absent the record decides, and only a record part written in the file is read.
+- **Record parts (read with the switch off):** `wind.direction`, `wind.turbulence`, `transitions.*`, a cloud layer's
+  `texture`, a precipitation layer's `texture` / `atlas`. **Physical additions (dropped with the switch off):** clouds
+  `coverage`, `density`, `type`, `liquidWater`, `dropletRadius`, the layer heights; night `stars`, `moonlight`; wind
+  `speed`, `gusts`; lightning `frequency`; precipitation layers' type / rate, `wetting`, `drying`.
+- **Record terms removed under the switch:** the Low band's cover is the file's `coverage` even when the record has
+  no counted cloud layer (before: 0); its density is the file's ratio alone, not the record's role mean times it
+  (CommonwealthOvercast, invented layers: 1.02 -> 1.2); the band heights come from the file's layers alone
+  (882 / 1673 m -> 850 / 1450 m); a storm is the file's `lightning.frequency` > 0, not the record's thunder sound.
+- Reds, live: `WW_WEATHER_RECX_RED=noswitch` (all five families read as before) or `noswitch-clouds`,
+  `noswitch-night`, `noswitch-wind`, `noswitch-lightning`, `noswitch-precipitation` (comma list).
+- Telemetry: `weather recx blocks: <weather> clouds=on:recx(...) night=off:record(...; file keys not read: ...) ...`
+  on stderr at every change of state; `phys=0x..` and the alone flags in the weather's key; the precipitation source
+  note says `(switch=off: recx:<file> layers not read)`.
+- Files: `src/features/weather/weatherrecx.cpp` / `.h`, `weatherrecxmath.h`, `cellprecip.cpp`,
+  `src/features/clouds/cloudmath.h`, `cloudmap.cpp`, `src/gl/lookdevstage.cpp` (the storm). Offline proof:
+  `notes/modules1/airperf1/unit/a9_gate.cpp` (105 checks, 0 failed).
+
 ## AIRPERF1 A8 (2026-11-11): a weather .recx augments the record; one switch for the physical weather
 - **The rule (bungo):** the record is the base. A record's look part is replaced only by a switch or when that part
   is written in the .recx. The one switch of a weather entry is `"physicalWeather": true` (beside the match keys,

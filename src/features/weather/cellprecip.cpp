@@ -16,6 +16,7 @@
 #include "features/weather/rainfogmath.h"	// lane WETWEATHER1: the rain's share of a weather change
 #include "features/weather/rainwetlaw.h"
 #include "features/weather/weatherrecx.h"	// lane WEATHERRECX1: precipitation.wetting / drying
+#include "features/weather/recxphysical.h"	// lane AIRPERF1 A9: the entry's physicalWeather switch
 #include "features/shadows/shadowset.h"	// lane WETWEATHER2: the cover map leaves the terrain out
 #include "gl/glshape.h"
 #include "features/weather/precipspec.h"
@@ -266,7 +267,11 @@ QVector<PcLayer> layersOf( const QStringList & roots, const QStringList & files,
 		QStringLiteral( "precipitation" ), true );
 	QVector<WwPrecipLayerSpec> specs;
 	QString source;
-	if ( h.ok ) {
+	/* lane AIRPERF1 A9 (bungo 11-11): the layers are a physical addition: they replace the record's precipitation only
+	 * under their own entry's physicalWeather switch; off or absent, the record's shader decides as for a weather with
+	 * no file. Red WW_WEATHER_RECX_RED=noswitch-precipitation (or noswitch), live: a file replaces without the switch */
+	const bool physOff = h.ok && !wwRecxPhysicalWeather( h.entry ) && !wwWeatherRecxSwitchRed( "precipitation" );
+	if ( h.ok && !physOff ) {
 		QStringList n;
 		/* MODULES1 part 24: a key our file added to a dry record (radstorm rain, weathertranslate.py radstorm_rain) is
 		 * listed in `_added`; red ^WW_RADSTORM_RAIN_RED=1 drops them (dry, as vanilla) */
@@ -287,6 +292,8 @@ QVector<PcLayer> layersOf( const QStringList & roots, const QStringList & files,
 		specs = wwPrecipFromSpgd( spgdType, spgdDensity, classFlags, spgdRed );
 		source = ( spgdRed & WwPrecip::SpgdRedFlags ) ? QStringLiteral( "record(flags 0x%1)" ).arg( classFlags, 2, 16, QLatin1Char( '0' ) )
 			: QStringLiteral( "record(spgd %1 density %2)" ).arg( spgdType ).arg( spgdDensity );
+		if ( physOff )
+			source += QStringLiteral( " (switch=off: recx:%1 layers not read)" ).arg( h.file.section( QLatin1Char( '/' ), -3 ) );
 	}
 	for ( int i = 0; i < specs.size(); i++ ) {
 		PcLayer L;

@@ -1821,7 +1821,17 @@ bool wwLookdevLightning( float & share, float rgb[3], quint32 & seed, unsigned *
 	const WwWeatherData & w = s.w;
 	const bool changing = w.blending();
 	const WwWeatherData * L = changing ? w.last.get() : nullptr;
-	const bool stormNow = w.thunderSounds > 0, stormLast = L && L->thunderSounds > 0;
+	bool stormNow = w.thunderSounds > 0, stormLast = L && L->thunderSounds > 0;
+	/* lane AIRPERF1 A9 (bungo 11-11): under the entry's physicalWeather switch a lightning.frequency written in the
+	 * file says alone whether the weather flashes (> 0), no longer the record's thunder sound. Reds
+	 * WW_WEATHER_RECX_RED=noswitch-lightning (the reader clears stormAlone) and WW_WEATHER_RECORD_RED=lightning */
+	if ( !wwWeatherRecordRed( WwRecLightning ) ) {
+		const WwWeatherRecx & wxl = wwWeatherRecx();
+		if ( wxl.on && wxl.stormAlone )
+			stormNow = wxl.lightningFreqOwn > 0.0f;
+		if ( wxl.on && L && wxl.stormAloneLast )
+			stormLast = wxl.lightningFreqLast > 0.0f;
+	}
 	share = WwCloudLightning::stormShare( stormNow, float( w.thunderFadeIn ) / 255.0f, changing, stormLast,
 		L ? float( L->thunderFadeOut ) / 255.0f : 1.0f, w.transPct );
 	const WwWeatherData & src = ( stormNow || !stormLast ) ? w : *L;
