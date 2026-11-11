@@ -82,6 +82,9 @@ uniform float volPrevScale;		// last frame's fogDistScale
 uniform bool volHistOk;			// a history at these dims
 uniform int volHistStrata;		// MODULES1 item 8: volHist's strata (4; 6 = + the env walk's two, volEnvSpread)
 uniform int volEnvSpread;		// MODULES1 item 8: 1 = the leak walk one frame in four, else its history (red 0)
+// lane AIRPERF1 A1: x > 0 = the walk's frame is the LAYER's (every froxel of a layer walks on the same frame, one
+// frame in x; y = this frame's phase), so a draw either walks or reads; 0 = red dither (item 8's 2 x 2 column phase)
+uniform ivec2 volEnvRate;
 uniform vec3 volLightShift;		// gates only (WW_CELL_AIR_LIGHTSHIFT): the air sees every placed light moved by this (world)
 uniform bool volSurfClusters;	// lane GAPLOOK1 (LIGHTSYS-4): the lights from the surfaces' lists (cell_cluster.glsl)
 uniform vec2 volSurfPx;			// the main viewport's pixels a froxel column (x, y)
@@ -1699,7 +1702,9 @@ void main()
 #ifdef WW_AIR_LEAK
 		/* MODULES1 item 8: this froxel walks the probes one frame in four (its 2 x 2 column phase, offset by layer and
 		 * frame), else takes the walk's history; a history with an invalid tap walks */
-		bool envDue = ( ( ( col.x & 1 ) + 2 * ( col.y & 1 ) + volLayer + volQ ) & 3 ) == 0;
+		// AIRPERF1 A1: a 2 x 2 phase puts a walker in every pixel quad, so the GPU ran the walk's code for all of them
+		bool envDue = volEnvRate.x > 0 ? ( volLayer + volEnvRate.y ) % volEnvRate.x == 0
+			: ( ( ( col.x & 1 ) + 2 * ( col.y & 1 ) + volLayer + volQ ) & 3 ) == 0;
 		airEnvMode = volEnvSpread != 0 && have && !envDue && h[5].z > 0.9999 ? 1 : 0;
 		airEnvH0 = h[4];
 		airEnvH1 = h[5];

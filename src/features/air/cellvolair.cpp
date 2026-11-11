@@ -2083,6 +2083,7 @@ static void vaPassInner( Scene * scene, bool run )
 	}
 	// lane PERF2, temporal: not with red lightmid (its single light sample has no strata)
 	const bool temporal = s.temporal && g.mrtOk == 1 && !( s.red & 262144 );
+	QString apNote;	// lane AIRPERF1: the frame-cost rules' echo (appended to the `cell air:` line)
 	/* MODULES1 item 8: the leak walk's env read (airLeakEnv, the 8 probes round each froxel: 9.0 ms of a 13.8 ms
 	 * inject, Goodneighbor night, all on) rides the temporal history as two more strata: a froxel walks one frame in
 	 * four (2 x 2 columns, offset by layer and frame) and reuses the reprojected walk otherwise, as the sun's strata do.
@@ -2420,6 +2421,21 @@ static void vaPassInner( Scene * scene, bool run )
 	prog->uni1i( "volHist", kInjectUnit );
 	prog->uni1i( "volHistStrata", temporal ? g.histStrata : 4 );	// MODULES1 item 8: the env walk's strata 4, 5
 	prog->uni1i( "volEnvSpread", temporal && g.histStrata == 6 ? 1 : 0 );
+	/* lane AIRPERF1 A1: item 8's 2 x 2 column phase put a walking froxel in every pixel quad, and the GPU then runs the
+	 * walk's code for the whole quad group: offline (notes/modules1/airperf1/tools/envrate_bench.py) it saved 7 % of the
+	 * walk, not 75 %. The walk's frame is now the LAYER's: every froxel of a layer walks on the same frame (one draw
+	 * either walks or reads its history), one frame in 8 while the camera stands (nothing can drift), one in 4 while it
+	 * moves (the reprojected walk is at most 3 frames old, as item 8's). Same froxels, same history, same answer on a
+	 * still camera. WW_CELL_AIR_ENVRATE=dither: the red, item 8's phase; =4 / =8: that rate always */
+	{
+		WW_SWITCH_STATIC( QString, envRateKey, wwEnv( "WW_CELL_AIR_ENVRATE" ).trimmed() );
+		const bool spread = temporal && g.histStrata == 6;
+		const int rate = envRateKey == QLatin1String( "dither" ) ? 0 : envRateKey == QLatin1String( "4" ) ? 4
+			: envRateKey == QLatin1String( "8" ) ? 8 : g.tmode == 2 ? 8 : 4;
+		fn->glUniform2i( prog->uniLocation( "volEnvRate" ), rate, rate ? int( g.frame % unsigned( rate ) ) : 0 );
+		apNote += !spread ? QStringLiteral( " envwalk=every-froxel(%1)" ).arg( temporal ? "red envspread" : "no history" )
+			: rate ? QStringLiteral( " envwalk=layer/%1" ).arg( rate ) : QStringLiteral( " envwalk=dither/4(red)" );
+	}
 	{
 		const int pf = wwCellPostPathFrame();
 		const bool shifted = s.shiftFrame >= 0 && pf >= s.shiftFrame;
@@ -3054,6 +3070,7 @@ static void vaPassInner( Scene * scene, bool run )
 		+ QStringLiteral( " grid=%1 vol=%2 sunread=%3 reads=%4/%5/%6 state=%7%8" ).arg( s.grid ).arg( g.half ? "16f" : "32f" )
 			.arg( s.sunPcf ? "pcf(red)" : s.airSoft ? "air(soft red)" : s.bead ? "air(tap x2)" : "air(tap)" ).arg( s.mirrorKept ).arg( s.mirrorAsked ).arg( s.mirrorStale )
 			.arg( s.stateNoted ? "noted" : "asked" ).arg( s.stateStale ? QStringLiteral( "(stale)" ) : QString() )
+		+ apNote	// lane AIRPERF1
 		+ QStringLiteral( ")" );
 
 	/* WW_CELL_AIR_DUMP=<file>: int32 cols rows slices; the injected and the integrated volumes (cols x rows RGBA float
