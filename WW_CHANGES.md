@@ -1,3 +1,21 @@
+## AIRPERF1 A8 (2026-11-11): a weather .recx augments the record; one switch for the physical weather
+- **The rule (bungo):** the record is the base. A record's look part is replaced only by a switch or when that part
+  is written in the .recx. The one switch of a weather entry is `"physicalWeather": true` (beside the match keys,
+  default off; .recx spec 1.5 on the formats branch).
+- **Air, switch on:** the base density is the file's visibility (Koschmieder less clear air, the sky's own number),
+  even over height; a file's `groundFog` layer is added on top (`strength` x base at its floor, falling by e per
+  `thickness`). The record's fog distances, power, max and height bands are no fit target, clamp or floor.
+  CommonwealthFoggy hour 22: 400 m -> 9.762 /km aloft, x (1 + 3.0) = 39.05 /km at the street.
+- **Air, switch off or absent:** the record's street fit as in A7, a file's layer only reshapes the height.
+- **Sky haze:** a file's `visibility` / `hazeHeight` replace the record's haze only under the switch (or the Scene
+  window's live value); under it the haze height's flat part is 0, not the record's fog height. The generated rung's
+  values stand as before.
+- Reds `WW_CELL_AIR_FIT_RED=wthr` (the air before), `WW_WEATHER_RECX_RED=noswitch` (the sky haze before). Telemetry
+  `phys=(switch=atmosphere:..,groundFog:.. base=.. layer=.. heights=.. colours=.. street=../km T ..)` in the
+  `cell air:` echo, `weather recx haze:` on stderr, `physicalWeather=file:<path>` in the weather's sources.
+- Files: `src/features/air/airrecxfit.h` (the law, unit `notes/modules1/airperf1/unit/recxfit.cpp`),
+  `src/features/weather/recxphysical.h`, `cellvolair.cpp`, `weatherrecx.cpp`.
+
 ## AIRPERF1 (2026-11-11): the cell air's cost, and Foggy too thin
 - **A1 the sky share walks the probes once a layer, not once a froxel:** the layer's turn replaces the per-froxel
   dither. Key `WW_CELL_AIR_ENVRATE=dither` (red) / `4` / `8`. Telemetry `envwalk=` in the `cell air:` echo.

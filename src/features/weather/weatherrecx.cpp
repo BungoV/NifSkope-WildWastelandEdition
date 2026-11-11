@@ -5,6 +5,7 @@
 #include "features/weather/weathergen.h"
 #include "features/weather/wxoverride.h"
 #include "features/weather/weatherrecxmath.h"
+#include "features/weather/recxphysical.h"	// lane AIRPERF1 A8: the entry's physicalWeather switch
 #include "features/clouds/cloudrecx14math.h"
 #include "recx.h"
 
@@ -654,6 +655,8 @@ WwWeatherRecx resolveOne( const Who & w, const QStringList & roots, const QStrin
 				QStringLiteral( "airglow" ), QStringLiteral( "hazeAlbedo" ), QStringLiteral( "useRecordColors" ) } );
 			readKeys( b, kAtmo, hour, r );
 			readAtmoWords( b, r, useRecord );
+			if ( wwRecxPhysicalWeather( h.entry ) )	// lane AIRPERF1 A8: the entry's switch, read where its values are
+				src[QStringLiteral( "physicalWeather" )] = QStringLiteral( "file:" ) + rel;
 			if ( !r.hazeType.isEmpty() )
 				src[QStringLiteral( "hazeType" )] = QStringLiteral( "file:" ) + rel;
 			if ( r.hazeAlbedo[0] >= 0.0f )
@@ -979,10 +982,31 @@ void wwWeatherRecxHaze( float haze[3], bool recordHasFog, float clearAirPerKm )
 	const WwWeatherRecx & r = wwWeatherRecx();
 	if ( !r.on || ( r.recordFirst && recordHasFog ) )
 		return;	// red recordfirst: the record's fog wins over the file (the wrong order)
-	if ( r.visibilityM >= 0.0f )
+	/* lane AIRPERF1 A8 (bungo 11-11, the augmentation rule): a value a FILE gave replaces the record's haze only under
+	 * the entry's physicalWeather switch (or the Scene window's live value); without it the record's fog decides. The
+	 * generated rung's values are NifSkope's own and stand as before. Under the switch the record is no floor either:
+	 * the haze height's flat part (the record's fog height) is 0. Red WW_WEATHER_RECX_RED=noswitch: files replace
+	 * without the switch and the flat part stays the record's (before). */
+	const bool before = redWord() == QLatin1String( "noswitch" );
+	const bool phys = wwRecxSourceIsFile( r.sources, "physicalWeather" );
+	const bool visFile = wwRecxSourceIsFile( r.sources, "visibility" ), hhFile = wwRecxSourceIsFile( r.sources, "hazeHeight" );
+	const bool visLive = wwWxOv( WwWx::HazeVisibility, -2.0f ) != -2.0f, hhLive = wwWxOv( WwWx::HazeHeight, -2.0f ) != -2.0f;
+	if ( r.visibilityM >= 0.0f && ( before || phys || visLive || !visFile ) )
 		haze[0] = hazeFromVisibility( r.visibilityM, clearAirPerKm );
-	if ( r.hazeHeightM >= 0.0f )
+	if ( r.hazeHeightM >= 0.0f && ( before || phys || hhLive || !hhFile ) ) {
 		haze[1] = std::max( 0.02f, r.hazeHeightM / 1000.0f );
+		if ( phys && hhFile && !before )
+			haze[2] = 0.0f;
+	}
+	static int said = -1;
+	const int state = ( before ? 1 : 0 ) | ( phys ? 2 : 0 ) | ( visFile ? 4 : 0 ) | ( hhFile ? 8 : 0 );
+	if ( state != said ) {
+		said = state;
+		std::fprintf( stderr, "weather recx haze: switch=%s visibility=%s hazeHeight=%s flat=%s%s\n", phys ? "on" : "off",
+			!visFile ? "generated" : ( before || phys || visLive ) ? "recx" : "record",
+			!hhFile ? "generated" : ( before || phys || hhLive ) ? "recx" : "record",
+			phys && hhFile && !before ? "0(recx)" : "record", before ? " RED=noswitch" : "" );
+	}
 }
 
 float wwWeatherRecxOzone()

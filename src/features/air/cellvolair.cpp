@@ -14,6 +14,9 @@ BSD License - see nifskope.h
 #include "features/air/airlampatlas.h"	// lane MODULES1 route (a): the lamps' shadows in the air
 #include "features/lights/cellclustergl.h"	// lane AIRPERF1 A6: the surfaces' light lists' echo (what the air walks)
 #include "features/air/airfarspread.h"	// lane AIRPERF1 A4: the far grid's refresh over its frames
+#include "features/air/airrecxfit.h"	// lane AIRPERF1 A8: the air under the entry's physicalWeather switch
+#include "features/weather/recxphysical.h"	// lane AIRPERF1 A8: the switch
+#include "features/weather/weatherrecx.h"	// lane AIRPERF1 A8: the file's visibility, the sky's own number
 #include "features/gi/rtddgicell.h"	// lane MODULES1 route (b): the lamps' shadows traced on the volume's BVH
 #include "features/sky/atmomath.h"	// lane CLOUD6e: kUnitKm, the cloud map's units
 #include "features/sky/atmosphere.h"	// SHAFTS1b: the aerial perspective's haze, for the no-double-count fit
@@ -811,6 +814,16 @@ bool vaFitCutRed()
 	return cut;
 }
 
+/* lane AIRPERF1 A8 red (live): WW_CELL_AIR_FIT_RED=wthr = the rule before the physicalWeather switch (the record's
+ * fit is the air's density whatever the .recx says, a file's ground layer divided back out of the street); apcut,
+ * the older fit, implies it */
+bool vaFitWthrRed()
+{
+	WW_SWITCH_STATIC( bool, old, wwEnvStr( "WW_CELL_AIR_FIT_RED" ) == QLatin1String( "wthr" )
+		|| wwEnvStr( "WW_CELL_AIR_FIT_RED" ) == QLatin1String( "apcut" ) );
+	return old;
+}
+
 // the game's fog alpha at distance d and fog-frame height z (lookdev_fog.glsl wwFogEval, the same formula)
 double vaGameAlpha( const float K[6][4], double d, double z )
 {
@@ -919,6 +932,7 @@ struct VaLayer
 	QString recx = QStringLiteral( "none" );	// the census: rung:file of the entry applied, or why none
 	QString conflict;	// "conflict: <losers>" (one provider claimed it twice) or "overrides: <losers>", "" when alone
 	bool derived = false;	// FOGHEIGHT1: the layer came from the record (vaDerived): the caller keeps the street density
+	bool physKey = false, phys = false;	// AIRPERF1 A8: the entry's physicalWeather switch as written; as applied (red wthr: off)
 	QString noiseLink;		// MODULES1 part 19: the entry's groundFog "noiseTexture" ("": the shipped default)
 	QStringList noiseRoots;	// the .recx roots it resolves under ("": the shipped files' only)
 };
@@ -1097,10 +1111,12 @@ void vaKeepStreet( VaMedium & M, VaLayer & G )
 	const float rb = ( 1.0f - G.w ) * b( G.zg, M.zb, M.invH ) + G.w * b( G.zg, G.zn, G.invHn );
 	if ( !( G.s > 0.0f ) || !( G.invHg > 0.0f ) )
 		return;
+	// lane AIRPERF1 A8: under the entry's physicalWeather switch the file's layer is ADDED (the spec's "added on top":
+	// strength is no longer divided back out of the street); airrecxfit.h layerBaseFactor
+	const bool onTop = !G.derived && G.phys;
 	const bool stack = !G.derived && wwEnvStr( "WW_CELL_AIR_STREET_RED" ) == QLatin1String( "stack" );
-	if ( !stack && rb > 0.0f )
-		M.sigma0 *= rb / ( rb + G.s );
-	G.recx += stack ? QStringLiteral( " street=stack" ) : QStringLiteral( " street=kept" );
+	M.sigma0 *= airrecx::layerBaseFactor( rb, G.s, onTop || stack );
+	G.recx += onTop ? QStringLiteral( " street=ontop" ) : stack ? QStringLiteral( " street=stack" ) : QStringLiteral( " street=kept" );
 }
 
 // the ground layer of the Lookdev weather from its .recx entry (recx.h); red nosidecar: the files ignored
@@ -1133,6 +1149,8 @@ void vaGround( const float K[6][4], const VaMedium & M, bool interior, bool igno
 		return;
 	}
 	L.recx = hit.rung + QLatin1Char( ':' ) + hit.file.section( QLatin1Char( '/' ), -3 );
+	L.physKey = wwRecxPhysicalWeather( hit.entry );	// AIRPERF1 A8: the switch of the entry the layer came from
+	L.phys = L.physKey && !vaFitWthrRed();
 	if ( !hit.overridden.isEmpty() )
 		L.conflict = QStringLiteral( "%1 %2" ).arg( hit.conflict ? QStringLiteral( "conflict:" ) : QStringLiteral( "overrides:" ),
 			hit.overridden.join( QStringLiteral( ", " ) ) );
@@ -1932,6 +1950,29 @@ static void vaPassInner( Scene * scene, bool run )
 	const float apHazeKm = wwAtmoApActive() && wwAtmoFrame().valid ? wwAtmoFrame().haze[0] : 0.0f;	// SHAFTS1b
 	VaMedium M = vaFit( K, ( s.red & 32 ) != 0, ( s.red & 128 ) != 0,
 		s.apStackRed ? 0.0f : apHazeKm / kUnitsPerKm );
+	/* lane AIRPERF1 A8 (bungo 11-11: "our recx needs to override these things", one switch for the physically based
+	 * weather): with the atmosphere entry's physicalWeather switch on and its visibility from the file, the air's base
+	 * density is that visibility's (Koschmieder less clear air, the sky's own number), even over height, and the
+	 * record's fog distances, power, max and height bands are no fit target, clamp or floor for it. Outdoors only.
+	 * Switch off or absent: the record's fit above, unchanged. Red WW_CELL_AIR_FIT_RED=wthr. */
+	bool physAtmoKey = false, physBase = false;
+	float physVisM = -1.0f;
+	{
+		const WwWeatherRecx & wr = wwWeatherRecx();
+		const WwCellLighting * Lp = wwCellLightsWanted( scene ) ? wwCellLightsFor( scene->nifModel ) : nullptr;
+		physAtmoKey = wr.on && wwRecxSourceIsFile( wr.sources, "physicalWeather" );
+		physVisM = wr.on && wwRecxSourceIsFile( wr.sources, "visibility" ) ? wr.visibilityM : -1.0f;
+		physBase = physAtmoKey && physVisM > 0.0f && !vaFitWthrRed() && !( Lp && Lp->interior ) && !( s.red & ( 32 | 128 ) );
+		if ( physBase ) {
+			M.sigma0 = airrecx::baseSigmaPerUnit( physVisM, WwAtmoMath::kRay[1] + WwAtmoMath::kMieE, kUnitsPerKm );
+			M.apCut = false;
+			M.band = false;
+			M.invH = 0.0f;
+			M.farD = airrecx::reach( M.sigma0 );
+			if ( vaDensPinEarly() && vaDensPin() > 0.0f )
+				M.sigma0 *= vaDensPin();
+		}
+	}
 	{	// lane MODULES1 item 12: the live air overrides (per km and metres, as the Scene window shows them)
 		const float unitsPerM = kUnitsPerKm / 1000.0f;
 		M.sigma0 = wwWxOv( WwWx::AirDensity, M.sigma0 * kUnitsPerKm ) / kUnitsPerKm;
@@ -3150,6 +3191,17 @@ static void vaPassInner( Scene * scene, bool run )
 				.arg( 1.0 - vaGameAlpha( K, d, zLow ), 0, 'f', 3 );
 		const double tA = std::exp( -stU * 2000.0 ), tS = std::exp( -apKm / kUnitsPerKm * 2000.0 );
 		fitNote += QStringLiteral( " light=%1)" ).arg( tA < 1.0 ? ( 1.0 - std::min( 1.0, tA / tS ) ) / ( 1.0 - tA ) : 0.0, 0, 'f', 2 );
+		/* lane AIRPERF1 A8 telemetry: the physicalWeather switch of the two entries, who decides each part (record |
+		 * recx), the file's numbers as read and the density they give: base aloft, at the layer's floor, and T there */
+		fitNote += QStringLiteral( " phys=(switch=atmosphere:%1,groundFog:%2%3 base=%4 vis=%5m base=%6/km layer=%7 strength=%8 thickness=%9" )
+			.arg( physAtmoKey ? "on" : "off" ).arg( G.physKey ? "on" : "off" ).arg( vaFitWthrRed() ? QStringLiteral( ",RED=wthr" ) : QString() )
+			.arg( physBase ? "recx" : "record" ).arg( double( physVisM ), 0, 'f', 0 ).arg( double( M.sigma0 ) * kUnitsPerKm, 0, 'f', 3 )
+			.arg( G.derived || !( G.s > 0.0f ) ? "record" : G.phys ? "recx(ontop)" : "recx(street kept)" )
+			.arg( double( G.s ), 0, 'g', 4 ).arg( G.invHg > 0.0f ? double( 1.0f / G.invHg ) : 0.0, 0, 'f', 0 )
+			+ QStringLiteral( " heights=%1 colours=record street=%2/km T" ).arg( physBase ? "recx(even)" : "record" ).arg( stU * kUnitsPerKm, 0, 'f', 3 );
+		for ( const double d : { 500.0, 1000.0, 2000.0, 4000.0 } )
+			fitNote += QStringLiteral( " %1:%2" ).arg( d, 0, 'f', 0 ).arg( std::exp( -stU * d ), 0, 'f', 4 );
+		fitNote += QStringLiteral( ")" );
 	}
 	s.last.chop( 1 );
 	s.last += QStringLiteral( " " ) + optNote + QStringLiteral( " " ) + groundNote + QStringLiteral( " " ) + farNote + QStringLiteral( " " ) + hazeNote + fitNote
