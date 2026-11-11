@@ -867,6 +867,13 @@ bool wwNightAirRed()
 	return wwEnvStr( "WW_NIGHTAIR_RED" ).trimmed() == QLatin1StringView( "1" );
 }
 
+/* MODULES1 R7 item 6 (the 1 px bright row at eye level, bungo b61): the sky's level ray through the air ends like the
+ * rows beside it (lookdev_fog.glsl wwVolAirSky). Red WW_CELL_AIR_LEVELRAY_RED=1 (live, fogRed 16): the old branch. */
+bool wwAirLevelRayRed()
+{
+	return wwEnvStr( "WW_CELL_AIR_LEVELRAY_RED" ).trimmed() == QLatin1StringView( "1" );
+}
+
 bool wwPhysAxesRed()
 {
 	return wwEnvStr( "WW_PHYSUNITS_AXES_RED" ).trimmed() == QLatin1StringView( "1" );
@@ -1659,8 +1666,25 @@ void wwLookdevFogUniforms( Scene * scene )
 		}
 	}
 	const bool tailRed = wwAirTailJRed();	// MODULES1 R7-4
+	const bool levelRed = wwAirLevelRayRed();	// MODULES1 R7 item 6
 	prog->uni1i( "fogRed", ( wwLookdevRed( "fogmaxclamp" ) ? 1 : 0 ) | ( wwLookdevRed( "fognoescape" ) ? 2 : 0 )
-		| ( wwLookdevRed( "fogheight0" ) ? 4 : 0 ) | ( tailRed ? 8 : 0 ) );
+		| ( wwLookdevRed( "fogheight0" ) ? 4 : 0 ) | ( tailRed ? 8 : 0 ) | ( levelRed ? 16 : 0 ) );
+	{	// the line is said when the eye crosses the air's top or the red moves (this runs per fogged program)
+		float med[4], layer[4], gnd[2];
+		static int saidLevel = -1;
+		const bool have = wwVolAirMediumNow( med, layer, gnd );
+		const int key = !have ? 0 : ( zr[3] >= med[3] ? 2 : 1 ) + ( levelRed ? 2 : 0 );
+		if ( key != saidLevel ) {
+			saidLevel = key;
+			if ( have )
+				fprintf( stderr, "sky air level ray: eye %.0f u in the air's frame, the air's top %.0f u: %s (red WW_CELL_AIR_LEVELRAY_RED=1)\n",
+					double( zr[3] ), double( med[3] ),
+					levelRed ? ( zr[3] >= med[3] ? "RED: the level row (sine within 1e-4) is clear above the top: the sky shows through the grids' T in one pixel row"
+							: "RED: the old branch, opaque under the top (no row)" )
+						: ( zr[3] >= med[3] ? "above the top: the level row ends like the rows beside it (the top's falloff holds air there)"
+							: "under the top: the level row ends like the rows beside it" ) );
+		}
+	}
 	prof.at( 8, "sun+reds" );
 	static float lastZ = 0.0f, lastSc = 0.0f;	// lane PERF1: the echo string rebuilt only when it changes
 	static bool lastLeak = false, lastOn = false, lastTail = false;

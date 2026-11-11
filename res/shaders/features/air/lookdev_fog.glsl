@@ -20,6 +20,7 @@ uniform float fogUnit;	// lane PHYSUNITS1: the light's scale over the weather's 
 uniform vec4 fogProbe;		// gates only: .z = 0 off, 1 alpha, 2 colour / 2, 3 hb (at d = .x, z = .y); 5 geometry echo (d / 4096, 0.5 + z / 2000);
 				// 6 / 7 per fragment (lane FOG2): (alpha, hb, 0) / colour ^ 1/2.2; 8 the geometry, wide (d / 16384, 0.5 + z / 32768)
 uniform int fogRed;		// gates only: 1 maxclamp, 2 noescape, 4 height0; 8 the air tail's source from the last slice alone (MODULES1 R7-4)
+				// 16 the sky's level ray on the old branch (MODULES1 R7 item 6)
 /* MODULES1 R7 night sky d: the saturated air's night colour x the night share (a: the share, 0 = day, the red
  * WW_NIGHTAIR_RED=1, no weather). Master Off: the weather record's far fog colour, what the game's fog ends at; On: the
  * sky's mean with the record's night level (the ambient axes' mean; the air's albedo is 1). The whole air of a ray
@@ -678,6 +679,13 @@ vec4 wwVolAirSky( vec3 dirView )
 	J = wwAirTailNearJ( uv, v );
 	}
 	float s = dot( fogView.xyz, dirView ) / max( fogDistScale, 1e-12 );	// the sine of the elevation
+	/* MODULES1 R7 item 6 (bungo b61: "white horizontal line", 1 px at eye level from high up): a level ray (|sine| <=
+	 * 1e-4, a sixth of a pixel row) took the branch below that knows only "above the top = no air" (T 1), while the
+	 * top's falloff (G2) holds air there: with the eye above the top that one row let the sky through the grids' T
+	 * (0.44 in the flight) between two opaque rows. The level ray ends like its neighbours: the sine held at +-1e-4.
+	 * fogRed 16 = the red WW_CELL_AIR_LEVELRAY_RED=1. */
+	if ( ( fogRed & 16 ) == 0 && abs( s ) <= 1e-4 )
+		s = s >= 0.0 ? 1.0001e-4 : -1.0001e-4;
 	float z0 = fogView.w + s * far;
 	J = wwAirThinJ( J, v, z0, far );	// MODULES1 10c
 	float top = volAirMed.w;
